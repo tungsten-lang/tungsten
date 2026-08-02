@@ -811,7 +811,14 @@ enum {
     BENCH_BOXED_LCM,
     BENCH_BOXED_ISQRT,
     BENCH_BOXED_TOSTR,
-    BENCH_BOXED_FROMSTR
+    BENCH_BOXED_FROMSTR,
+    /* Asymmetric cells: second operand is ONE limb. The equal-size matrix
+     * cannot see the dominant real-loop shape (big op small — the E3
+     * accumulate/mulchain workloads); these rows measure it per-op, with
+     * the GMP lane using its strongest idiom (mpz_*_ui). */
+    BENCH_BOXED_ADD1,
+    BENCH_BOXED_MUL1,
+    BENCH_BOXED_DIV1
 };
 
 /* Benchmark-only copies of the retired runtime C handlers. They remain an
@@ -938,6 +945,9 @@ static void fuzz_tag_sign_case(size_t oi, int32_t limbs) {
 
 static int bench_boxed_op_parse(const char *name) {
     if (strcmp(name, "add") == 0) return BENCH_BOXED_ADD;
+    if (strcmp(name, "add1") == 0) return BENCH_BOXED_ADD1;
+    if (strcmp(name, "mul1") == 0) return BENCH_BOXED_MUL1;
+    if (strcmp(name, "div1") == 0) return BENCH_BOXED_DIV1;
     if (strcmp(name, "sub") == 0) return BENCH_BOXED_SUB;
     if (strcmp(name, "mul") == 0) return BENCH_BOXED_MUL;
     if (strcmp(name, "sqr") == 0) return BENCH_BOXED_SQR;
@@ -992,7 +1002,12 @@ static void bench_boxed_operands(int op, int32_t limbs,
         b = bench_clone_integer(a);
         w_as_bigint(b)->limbs[0] ^= 1ULL;
     } else {
-        b = bench_bigint(limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
+        int32_t b_limbs =
+            (op == BENCH_BOXED_ADD1 || op == BENCH_BOXED_MUL1 ||
+             op == BENCH_BOXED_DIV1)
+                ? 1
+                : limbs;
+        b = bench_bigint(b_limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
     }
     if (op == BENCH_BOXED_ABS || op == BENCH_BOXED_ABS_BANG)
         w_as_bigint(a)->size = -w_as_bigint(a)->size;
@@ -1100,6 +1115,9 @@ static WValue bench_boxed_op_apply(int op, WValue a, WValue b) {
     case BENCH_BOXED_NEG_BANG: return bench_bigint_neg_bang_c_ref(a, NULL, 0);
     case BENCH_BOXED_ABS_BANG: return bench_bigint_abs_bang_c_ref(a, NULL, 0);
     case BENCH_BOXED_GCD: return bigint_gcd_any(a, b);
+    case BENCH_BOXED_ADD1: return bigint_add_any(a, b);
+    case BENCH_BOXED_MUL1: return bigint_mul_any(a, b);
+    case BENCH_BOXED_DIV1: return bigint_div_any(a, b);
     default: die("unknown boxed-result benchmark operation");
     }
     return W_NIL;
@@ -1220,6 +1238,9 @@ DEFINE_BENCH_LANE(gcd, bigint_gcd_any(a, b))
  * lane (fuzz_copy_negate). */
 DEFINE_BENCH_LANE(neg, w_neg(a))
 DEFINE_BENCH_LANE(abs, w_ic_bigint_abs(a, NULL, 0))
+DEFINE_BENCH_LANE(add1, bigint_add_any(a, b))
+DEFINE_BENCH_LANE(mul1, bigint_mul_any(a, b))
+DEFINE_BENCH_LANE(div1, bigint_div_any(a, b))
 /* In-place sign mutation: O(1) field write, nothing allocated.  These
  * return the RECEIVER, so they must not go through the result-churn macro
  * (which would release the operand).  Compared against GMP's equivalent
@@ -1339,6 +1360,9 @@ static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
     case BENCH_BOXED_CMP:    elapsed = bench_lane_cmp(&cx); break;
     case BENCH_BOXED_NEG:    elapsed = bench_lane_neg(&cx); break;
     case BENCH_BOXED_ABS:    elapsed = bench_lane_abs(&cx); break;
+    case BENCH_BOXED_ADD1:   elapsed = bench_lane_add1(&cx); break;
+    case BENCH_BOXED_MUL1:   elapsed = bench_lane_mul1(&cx); break;
+    case BENCH_BOXED_DIV1:   elapsed = bench_lane_div1(&cx); break;
     case BENCH_BOXED_NEG_BANG: elapsed = bench_lane_negbang(&cx); break;
     case BENCH_BOXED_ABS_BANG: elapsed = bench_lane_absbang(&cx); break;
     case BENCH_BOXED_POW:    elapsed = bench_lane_pow(&cx); break;
@@ -3460,6 +3484,10 @@ static void bench_gmp_boxed_apply(
     case BENCH_BOXED_SHL: mpz_mul_2exp(out, a, 13); break;
     case BENCH_BOXED_SHR: mpz_fdiv_q_2exp(out, a, 13); break;
     case BENCH_BOXED_GCD: mpz_gcd(out, a, b); break;
+    /* one-limb rows: idiomatic GMP reaches for the _ui entry */
+    case BENCH_BOXED_ADD1: mpz_add_ui(out, a, mpz_get_ui(b)); break;
+    case BENCH_BOXED_MUL1: mpz_mul_ui(out, a, mpz_get_ui(b)); break;
+    case BENCH_BOXED_DIV1: mpz_tdiv_q_ui(out, a, mpz_get_ui(b)); break;
     default: die("unknown GMP boxed benchmark operation");
     }
 }
@@ -3657,6 +3685,19 @@ static double bench_gmp_boxed_result_churn(
         BENCH_BOXED_GMP_RUN(mpz_fdiv_q_2exp(r, a, 13)); break;
     case BENCH_BOXED_GCD:
         BENCH_BOXED_GMP_RUN(mpz_gcd(r, a, b)); break;
+    /* one-limb rows: idiomatic GMP uses the _ui entries; hoist the word. */
+    case BENCH_BOXED_ADD1: {
+        unsigned long w = mpz_get_ui(b);
+        BENCH_BOXED_GMP_RUN(mpz_add_ui(r, a, w)); break;
+    }
+    case BENCH_BOXED_MUL1: {
+        unsigned long w = mpz_get_ui(b);
+        BENCH_BOXED_GMP_RUN(mpz_mul_ui(r, a, w)); break;
+    }
+    case BENCH_BOXED_DIV1: {
+        unsigned long w = mpz_get_ui(b);
+        BENCH_BOXED_GMP_RUN(mpz_tdiv_q_ui(r, a, w)); break;
+    }
     case BENCH_BOXED_CMP: {
         double warm_start = bench_now();
         do {

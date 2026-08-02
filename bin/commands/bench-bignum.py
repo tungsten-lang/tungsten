@@ -39,6 +39,11 @@ OPERATIONS = (
     "isqrt",
     "tostr",
     "fromstr",
+    # Asymmetric rows: second operand is ONE limb ("big op small", the
+    # dominant real-loop shape E3 exposed). The GMP lane uses mpz_*_ui.
+    "add1",
+    "mul1",
+    "div1",
 )
 # Per-operation limb-count ceilings: pow results grow to 5N limbs, and the
 # powmod lane mirrors Tungsten's naive square-and-multiply (O(bits)
@@ -150,6 +155,8 @@ def operands(operation: str, limbs: int) -> tuple[int, int]:
     a = operand(a_limbs, 0x243F6A8885A308D3 ^ limbs)
     if operation == "cmp":
         b = a ^ 1
+    elif operation in ("add1", "mul1", "div1"):
+        b = operand(1, 0x13198A2E03707344 ^ limbs)
     else:
         b = operand(limbs, 0x13198A2E03707344 ^ limbs)
     if operation == "abs":
@@ -171,7 +178,7 @@ def time_python(operation: str, a: int, b: int, iterations: int) -> float:
     elif operation == "fromstr":
         text = str(a)
     start = time.perf_counter_ns()
-    if operation == "add":
+    if operation in ("add", "add1"):
         for _ in range(iterations):
             result = a + b
             previous = result
@@ -179,7 +186,7 @@ def time_python(operation: str, a: int, b: int, iterations: int) -> float:
         for _ in range(iterations):
             result = a - b
             previous = result
-    elif operation == "mul":
+    elif operation in ("mul", "mul1"):
         for _ in range(iterations):
             result = a * b
             previous = result
@@ -187,7 +194,7 @@ def time_python(operation: str, a: int, b: int, iterations: int) -> float:
         for _ in range(iterations):
             result = a * a
             previous = result
-    elif operation == "div":
+    elif operation in ("div", "div1"):
         for _ in range(iterations):
             result = a // b
             previous = result

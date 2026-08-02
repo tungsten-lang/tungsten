@@ -121,3 +121,23 @@ checked `__w_shl_fast` (`ops.w`), and (3) infers nil (boxed) for a bare
 literal base instead of `:i64` (`lowering.w`), mirroring the `**` rule.
 Declared `## i64`/`## u64` bases keep the raw machine `shl` and its wrap
 contract.
+
+## NEW red rows: the asymmetric (big op small) cells — 2026-08-02
+
+The equal-size matrix never measured the dominant real-loop shape. New
+add1/mul1/div1 rows (second operand ONE limb; GMP lane uses its strongest
+mpz_*_ui idiom) immediately found:
+
+- **mul1: 3.0-4.8x LOSS at every size >= 16 limbs** — no dedicated N x 1
+  scalar-multiply entry (GMP does one addmul_1-shaped pass into a retained
+  dest). bn_addmul_1 machinery exists; mul_any needs an N x 1 fast path.
+- **div1: 1.29-2.29x LOSS** — same shape vs mpz_tdiv_q_ui's single-pass
+  divrem-by-word. bn division-by-limb kernels exist for to_s; div_any
+  needs the wiring.
+- add1: wins 0.27-0.60 at >= 64 limbs; add1@16 = 1.22 (alloc overhead vs
+  in-place add_ui at the size where the copy is cheap but the alloc is
+  not).
+
+Together with E3, this decomposes mulchain's 7.8x whole-loop gap: ~4x is
+per-op kernel, the remainder allocation-per-pass (E4's half). These rows
+are the acceptance meter for the N x 1 kernel work.

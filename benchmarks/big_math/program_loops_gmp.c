@@ -1,0 +1,77 @@
+/* Program-level bignum loops — the destination-reusing GMP half of E3.
+ * Same workloads and checksums as program_loops.w; every loop reuses its
+ * mpz destinations the way idiomatic GMP code does.
+ * Output: <workload>\t<n>\t<ns_per_iter>\t<checksum> */
+#include <gmp.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static double now_sec(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
+static unsigned long checksum(const mpz_t v) {
+    mpz_t m;
+    mpz_init(m);
+    mpz_mod_ui(m, v, 1000000007UL);
+    unsigned long c = mpz_get_ui(m);
+    mpz_clear(m);
+    return c;
+}
+
+static void bench_accumulate(long n) {
+    mpz_t r;
+    mpz_init(r);
+    mpz_set_ui(r, 1);
+    mpz_mul_2exp(r, r, 4096);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) mpz_add_ui(r, r, (unsigned long)i);
+    double t1 = now_sec();
+    printf("accumulate\t%ld\t%.1f\t%lu\n", n, (t1 - t0) * 1e9 / (double)n,
+           checksum(r));
+    mpz_clear(r);
+}
+
+static void bench_mulchain(long n) {
+    mpz_t r;
+    mpz_init_set_ui(r, 1);
+    double t0 = now_sec();
+    for (long i = 2; i <= n; i++) mpz_mul_ui(r, r, (unsigned long)i);
+    double t1 = now_sec();
+    printf("mulchain\t%ld\t%.1f\t%lu\n", n, (t1 - t0) * 1e9 / (double)n,
+           checksum(r));
+    mpz_clear(r);
+}
+
+static void bench_addchain(long n) {
+    mpz_t a, b;
+    mpz_init_set_ui(a, 0);
+    mpz_init_set_ui(b, 1);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) {
+        mpz_add(a, a, b);
+        mpz_swap(a, b);
+    }
+    double t1 = now_sec();
+    printf("addchain\t%ld\t%.1f\t%lu\n", n, (t1 - t0) * 1e9 / (double)n,
+           checksum(b));
+    mpz_clear(a);
+    mpz_clear(b);
+}
+
+int main(int argc, char **argv) {
+    const char *workload = argc > 1 ? argv[1] : "all";
+    long n = argc > 2 ? atol(argv[2]) : 0;
+    if (!strcmp(workload, "accumulate") || !strcmp(workload, "all"))
+        bench_accumulate(n > 0 ? n : 2000000);
+    if (!strcmp(workload, "mulchain") || !strcmp(workload, "all"))
+        bench_mulchain(n > 0 ? n : 50000);
+    if (!strcmp(workload, "addchain") || !strcmp(workload, "all"))
+        bench_addchain(n > 0 ? n : 300000);
+    return 0;
+}

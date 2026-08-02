@@ -39,6 +39,12 @@ CHECKS = [
     fact: /target_ms = 110\.0/,
     stale: /accurate.*20ms|target_ms = 20\.0/,
     message: "--accurate means >=110ms regions; a 20ms default resurrects the phantom-loss trap"
+  },
+  {
+    file: "compiler/lib/emitter.w",
+    fact: /w_bigint_add_mut/,
+    stale: /declare_fn_attrs\("w_bigint_(?:add|sub|mul)_mut"[^\n]*memory\((?:read|none)\)/,
+    message: "the mutate-if-unique entries WRITE their receiver's limbs; a readonly-family attribute licenses LLVM to CSE across mutations"
   }
 ].freeze
 

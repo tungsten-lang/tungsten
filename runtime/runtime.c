@@ -944,6 +944,27 @@ WValue bigint_add_two_limb_magnitudes(
 #ifndef BN_ADDSUB_WORD_FAST
 #define BN_ADDSUB_WORD_FAST 1
 #endif
+/* Dynamic-length small tail copy. The platform memmove's dispatch
+ * prologue was 20% of the whole add1@16 profile; below ~48 limbs the
+ * repo's plain single-q vector loop (the bigint_copy_signed shape) beats
+ * it, above that memcpy's wide path wins. */
+static inline void bn_copy_tail(uint64_t *restrict dst,
+                                const uint64_t *restrict src, int32_t n) {
+    if (n <= 48) {
+        /* plain pair copies fuse to ldp/stp; arm_neon.h is not in scope
+         * this early in the file and isn't needed for this width */
+        int32_t i = 0;
+        for (; i + 2 <= n; i += 2) {
+            uint64_t lo = src[i], hi = src[i + 1];
+            dst[i] = lo;
+            dst[i + 1] = hi;
+        }
+        if (i < n) dst[i] = src[i];
+        return;
+    }
+    memcpy(dst, src, (size_t)n * sizeof(uint64_t));
+}
+
 static WValue bigint_addsub_word(
     const uint64_t *al, int32_t alen, int a_neg,
     uint64_t w, int w_neg) {
@@ -968,8 +989,7 @@ static WValue bigint_addsub_word(
             i++;
         }
         if (i < alen)
-            memcpy(r->limbs + i, al + i,
-                   (size_t)(alen - i) * sizeof(uint64_t));
+            bn_copy_tail(r->limbs + i, al + i, alen - i);
         if (__builtin_expect(carry != 0, 0)) {
             /* Carry ran off the top: every rippled limb wrapped to zero, so
              * the result is [sum, 0, ..., 0, 1] over alen + 1 limbs. */
@@ -1005,7 +1025,7 @@ static WValue bigint_addsub_word(
         i++;
     }
     if (i < alen)
-        memcpy(r->limbs + i, al + i, (size_t)(alen - i) * sizeof(uint64_t));
+        bn_copy_tail(r->limbs + i, al + i, alen - i);
     int32_t rlen = alen - (r->limbs[alen - 1] == 0);
     r->size = a_neg ? -rlen : rlen;
     if (__builtin_expect(rlen < alen, 0)) {

@@ -1357,10 +1357,6 @@ use target
       return ccall("w_int_to_str_base_boxed", args[1], args[2])
     when "bigint_powmod_any"
       return ccall("bigint_powmod_any", args[1], args[2], args[3])
-    when "w_bigint_neg_bang"
-      return ccall("w_bigint_neg_bang", args[1])
-    when "w_bigint_abs_bang"
-      return ccall("w_bigint_abs_bang", args[1])
     when "w_str_to_sym"
       return ccall("w_str_to_sym", args[1])
     when "w_algebra_rewrite_source"
@@ -1743,6 +1739,17 @@ use target
       return value
 
     if ast_kind(target) == :gvar
+      # A matching `$field` inside a runtime-backed class method is a native
+      # data-view store, just as compiled lowering writes the declared field
+      # at its static offset. Keep the tree-walker bridge deliberately narrow.
+      name = ast_get(target, :name)
+      current_method = @method_stack.last()
+      if name.starts_with?("$") && current_method != nil && current_method[:w_class] != nil
+        field = name.slice(1, name.size() - 1)
+        if native_data_field_declared?(current_method[:w_class], field)
+          if native_data_field_writable?(current_method[:w_class], field)
+            return ccall("w_native_data_field_set", current_self(), field, value)
+          raise "native data field '[field]' is not writable in the interpreter"
       @globals[ast_get(target, :name)] = value
       return value
 
@@ -2977,6 +2984,16 @@ use target
       return name in ("len" "prefix" "_pad")
     false
 
+  # Runtime-backed view writes are an unsafe core boundary, not general
+  # reflection. Add entries only with a matching checked runtime setter.
+  -> native_data_field_writable?(w_class, name)
+    if w_class == nil
+      return false
+    w_class[:name] == "BigInt" && name == "length"
+
+  -> native_data_field_declared?(w_class, name)
+    w_class != nil && w_class[:data_fields] != nil && w_class[:data_fields].has_key?(name)
+
   # Resolve only source-defined methods for a receiver-less call inside a
   # method body. Runtime-backed values (Date/IPv4/IPv6/MAC/...) are not the
   # Hash-backed :object shape used by ordinary user instances, but their core
@@ -3765,11 +3782,15 @@ use target
     layout = ast_get(view_decl, :count)
     if layout == nil || type(layout) != "Hash" || layout[:fields] == nil
       return nil
+    if w_class[:data_fields] == nil
+      w_class[:data_fields] = {}
     layout[:fields].each -> (f)
       fname = f[:name]
-      if fname != nil && !w_class[:methods].has_key?(fname)
-        accessor = {rt: :method, name: fname, params: [], body: [Tungsten:AST:Ivar.new("@" + fname)], w_class: w_class, data_field: true}
-        register_instance_method(w_class, accessor)
+      if fname != nil
+        w_class[:data_fields][fname] = f[:type]
+        if !w_class[:methods].has_key?(fname)
+          accessor = {rt: :method, name: fname, params: [], body: [Tungsten:AST:Ivar.new("@" + fname)], w_class: w_class, data_field: true}
+          register_instance_method(w_class, accessor)
 
   -> eval_method_def(node, env)
     s = current_self()

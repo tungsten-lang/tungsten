@@ -432,6 +432,15 @@ Inside a class body, a typed memory layout may be introduced with `- data` or `-
 
 These declarations describe instance storage for the class. Field names, types, and accessor generation interact with `ro` / `rw` and constructor `@`-parameters (see _Object Model_). The precise set of type tokens accepted in a layout block is implementation-defined but **must** be documented by the implementation.
 
+Inside an instance method, a bare `$field` whose name matches a supported
+scalar entry in the class's `- data` layout reads that native field. The
+symmetric `$field = expression` form writes fields up to 64 bits and evaluates
+to the value converted to the declared field width. Aggregate fields such as
+fixed or flexible inline arrays, and wider scalar fields, are not assignable as
+a whole; their element-access rules are separate. An engine that cannot access
+a declared native field must reject the store rather than reinterpret it as a
+global assignment.
+
 ## 3.11 Grammar notes
 
 1. The grammar is indentation-sensitive. Implementations **must** use the `INDENT` / `DEDENT` stream from the lexer rather than re-deriving layout in the parser.

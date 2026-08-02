@@ -204,6 +204,13 @@ A class may declare a structured memory layout:
 
 Layout declarations guide representation, foreign-function interop, and accessor generation. The set of field type codes (`i32`, `u64[]`, `w64`, `ast`, …) is defined by the implementation and core library.
 
+Within an instance method, `$field` reads a matching supported scalar layout
+field on `self`, and `$field = value` stores fields up to 64 bits using the
+field's declared width and signedness. This is a low-level native-layout
+operation: it does not invoke a user setter, and assigning an aggregate inline
+array or wider scalar field is invalid. Engines without access to the backing
+native field reject the store rather than treating it as a global assignment.
+
 ### 5.6.3 Visibility
 
 Instance fields are accessible inside the class's instance methods. Encapsulation beyond that (private fields, module-private methods) follows the core library and implementation conventions; keywords such as `private` may appear in core sources as organizational markers where supported.

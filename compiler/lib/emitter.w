@@ -1534,7 +1534,7 @@ ewscope_md_state = {ids: {}, order: []}
   when :view_load_byte, :view_load_bit
     # Dynamic byte/bit views still produce language Integers directly.
     ["w_int"]
-  when :view_load_field, :view_load_inline_byte
+  when :view_load_field, :view_store_field, :view_load_inline_byte
     # Named fields stay in their declared machine representation; lowering
     # inserts boxing only when the value crosses a WValue boundary.
     []
@@ -3594,6 +3594,34 @@ ewscope_md_state = {ids: {}, order: []}
     else
       # 8 bytes (i64)
       ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load i64, ptr " + inst[:temp] + ".gep"
+
+  # View field: store a scalar at a known native-data offset and return the
+  # value converted to the field's declared width. Native layouts can be
+  # packed, so every field store deliberately uses align 1 like field loads.
+  when :view_store_field
+    ptr_raw = inst[:temp] + ".ptr"
+    byte_ptr = inst[:temp] + ".bp"
+    ftype = inst[:field_type]
+    offset = inst[:offset].to_s()
+    size = inst[:size]
+    if size > 8
+      raise "view_store_field cannot store fields wider than 64 bits"
+    extension = ftype.starts_with?("i") ? "sext" : "zext"
+    prefix = ptr_raw + " = and i64 " + inst[:ptr] + ", -16\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  "
+    if ftype.starts_with?("*")
+      prefix + inst[:temp] + ".p = inttoptr i64 " + inst[:value] + " to ptr\n  store ptr " + inst[:temp] + ".p, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = or i64 " + inst[:value] + ", 0"
+    elsif ftype == "f32"
+      prefix + "store float " + inst[:value] + ", ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = select i1 true, float " + inst[:value] + ", float " + inst[:value]
+    elsif ftype == "f64"
+      prefix + "store double " + inst[:value] + ", ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = select i1 true, double " + inst[:value] + ", double " + inst[:value]
+    elsif size == 1
+      prefix + inst[:temp] + ".b = trunc i64 " + inst[:value] + " to i8\n  store i8 " + inst[:temp] + ".b, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i8 " + inst[:temp] + ".b to i64"
+    elsif size == 2
+      prefix + inst[:temp] + ".h = trunc i64 " + inst[:value] + " to i16\n  store i16 " + inst[:temp] + ".h, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i16 " + inst[:temp] + ".h to i64"
+    elsif size == 4
+      prefix + inst[:temp] + ".w = trunc i64 " + inst[:value] + " to i32\n  store i32 " + inst[:temp] + ".w, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i32 " + inst[:temp] + ".w to i64"
+    else
+      prefix + "store i64 " + inst[:value] + ", ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = or i64 " + inst[:value] + ", 0"
 
   # View base: extract raw pointer from object
   when :view_base_ptr

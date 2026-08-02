@@ -796,6 +796,22 @@ enum {
     BENCH_BOXED_FROMSTR
 };
 
+/* Benchmark-only copies of the retired runtime C handlers. They remain an
+ * explicit historical/control lane after production neg!/abs! move to native
+ * Tungsten source; no runtime dispatch reaches these functions. */
+static WValue bench_bigint_neg_bang_c_ref(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    w_as_bigint(r)->size = -w_as_bigint(r)->size;
+    return r;
+}
+
+static WValue bench_bigint_abs_bang_c_ref(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    WBigint *b = w_as_bigint(r);
+    if (b->size < 0) b->size = -b->size;
+    return r;
+}
+
 /* a^BENCH_BOXED_POW_EXP for the pow lane (mpz_pow_ui / a**5 elsewhere). */
 #define BENCH_BOXED_POW_EXP 5
 /* Third-operand seed for the powmod modulus; the Python driver mirrors it. */
@@ -962,8 +978,8 @@ static WValue bench_boxed_op_apply(int op, WValue a, WValue b) {
     case BENCH_BOXED_XOR: return bignum_bitwise('^', a, b);
     case BENCH_BOXED_SHL: return bignum_shl(a, 13);
     case BENCH_BOXED_SHR: return bignum_shr(a, 13);
-    case BENCH_BOXED_NEG_BANG: return w_ic_bigint_neg_bang(a, NULL, 0);
-    case BENCH_BOXED_ABS_BANG: return w_ic_bigint_abs_bang(a, NULL, 0);
+    case BENCH_BOXED_NEG_BANG: return bench_bigint_neg_bang_c_ref(a, NULL, 0);
+    case BENCH_BOXED_ABS_BANG: return bench_bigint_abs_bang_c_ref(a, NULL, 0);
     case BENCH_BOXED_GCD: return bigint_gcd_any(a, b);
     default: die("unknown boxed-result benchmark operation");
     }
@@ -1096,8 +1112,8 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
         bench_sink ^= (uint64_t)integer_low_i64(APPLY) ^ (uint64_t)timed_i;\
     return bench_now() - timed_start;                                      \
 }
-DEFINE_BENCH_INPLACE_LANE(negbang, w_ic_bigint_neg_bang(a, NULL, 0))
-DEFINE_BENCH_INPLACE_LANE(absbang, w_ic_bigint_abs_bang(a, NULL, 0))
+DEFINE_BENCH_INPLACE_LANE(negbang, bench_bigint_neg_bang_c_ref(a, NULL, 0))
+DEFINE_BENCH_INPLACE_LANE(absbang, bench_bigint_abs_bang_c_ref(a, NULL, 0))
 DEFINE_BENCH_LANE(pow, w_pow(a, w_box_int(BENCH_BOXED_POW_EXP)))
 DEFINE_BENCH_LANE(powmod, bigint_powmod_any(a, b, m))
 DEFINE_BENCH_LANE(lcm, w_ic_integer_lcm(a, &b, 1))
@@ -2566,7 +2582,7 @@ static void check_boxed_op_against_gmp(int op, int32_t limbs) {
     /* In-place forms mutate the receiver: verify against GMP's in-place
      * result, then restore the operand so the timed run starts clean. */
     case BENCH_BOXED_NEG_BANG: {
-        WValue got = w_ic_bigint_neg_bang(a, NULL, 0);
+        WValue got = bench_bigint_neg_bang_c_ref(a, NULL, 0);
         mpz_neg(zg, za);
         if (got != a) die("neg! must return its receiver");
         if (!value_matches_mpz(got, zg)) die("boxed neg! mismatch vs GMP");
@@ -2574,7 +2590,7 @@ static void check_boxed_op_against_gmp(int op, int32_t limbs) {
         break;
     }
     case BENCH_BOXED_ABS_BANG: {
-        WValue got = w_ic_bigint_abs_bang(a, NULL, 0);
+        WValue got = bench_bigint_abs_bang_c_ref(a, NULL, 0);
         mpz_abs(zg, za);
         if (got != a) die("abs! must return its receiver");
         if (!value_matches_mpz(got, zg)) die("boxed abs! mismatch vs GMP");

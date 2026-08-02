@@ -27631,6 +27631,22 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
     return W_NIL;
 }
 
+/* Tree-walker mirror for the intentionally tiny writable subset of native
+ * `- data` fields. Compiled source stores these fields inline; the interpreter
+ * cannot dereference runtime-backed values and reaches this checked bridge. */
+WValue w_native_data_field_set(WValue recv, WValue name_v, WValue value) {
+    const char *name = as_str(name_v);
+    if (w_is_bigint(recv) && strcmp(name, "length") == 0) {
+        int64_t n = w_as_int(value);
+        if (n < INT32_MIN || n > INT32_MAX)
+            w_raise(w_string("BigInt length is outside i32"));
+        w_as_bigint(recv)->size = (int32_t)n;
+        return value;
+    }
+    w_raise(w_string("native data field is not writable"));
+    return W_NIL;
+}
+
 static void w_hash_allocate_storage(WHash *hash, int64_t cap) {
     hash->cap = cap;
     hash->count = 0;
@@ -30382,7 +30398,6 @@ static WValue WN_prime_q = 0;
 static WValue WN_prime_12k_q = 0;
 static WValue WN_prime_30k_q = 0;
 static WValue WN_isqrt = 0;
-static WValue WN_neg_bang = 0, WN_abs_bang = 0;
 static WValue WN_downcase = 0, WN_upcase = 0, WN_swapcase = 0, WN_capitalize = 0;
 static WValue WN_ascii_q = 0, WN_valid_utf8_q = 0;
 static WValue WN_prepend = 0, WN_append = 0, WN_to_sym = 0, WN_infinite_q = 0;
@@ -30564,8 +30579,6 @@ static void w_init_method_names(void) {
     WN_prime_12k_q   = w_string("prime_12k?");
     WN_prime_30k_q   = w_string("prime_30k?");
     WN_isqrt         = w_string("isqrt");
-    WN_neg_bang      = w_string("neg!");
-    WN_abs_bang      = w_string("abs!");
     WN_ends_with_q  = w_string("ends_with?");
     WN_replace      = w_string("replace");
     WN_rindex       = w_string("rindex");
@@ -34835,42 +34848,6 @@ static WValue w_ic_bigint_abs(WValue r, WValue *a, int c) {
     return bigint_copy_signed(b, 0);
 }
 
-/*
- * In-place sign mutation (the `!` convention: Array#sort!, Hash#merge!).
- * A heap BigInt's magnitude lives in its limb array and its sign in the
- * `size` field, so negation and absolute value are a single field write —
- * O(1) regardless of width, with no allocation, no copy, and no pool
- * traffic.  The copying forms (`-x`, `abs`) remain the default; these are
- * for the cases where the caller owns the value and wants the mutation,
- * exactly like sorting an array in place.
- *
- * Only heap BigInts can be mutated: an inline i48 integer is a value, not
- * a reference, so there is nothing to mutate.  The bang methods therefore
- * live on BigInt and return the receiver.
- */
-static WValue w_ic_bigint_neg_bang(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WBigint *b = w_as_bigint(r);
-    b->size = -b->size;
-    return r;
-}
-static WValue w_ic_bigint_abs_bang(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    WBigint *b = w_as_bigint(r);
-    if (b->size < 0) b->size = -b->size;
-    return r;
-}
-
-/* ccall-able wrappers so the interpreter reaches the same mutation the
- * compiled IC path uses (bodyless BigInt#neg!/#abs! delegate here). */
-WValue w_bigint_neg_bang(WValue v) {
-    if (!w_is_bigint(v)) die("neg! requires a BigInt receiver");
-    return w_ic_bigint_neg_bang(v, NULL, 0);
-}
-WValue w_bigint_abs_bang(WValue v) {
-    if (!w_is_bigint(v)) die("abs! requires a BigInt receiver");
-    return w_ic_bigint_abs_bang(v, NULL, 0);
-}
 static WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {
     if (c < 1) die("lcm requires 1 argument");
     WValue arg = a[0];
@@ -35457,8 +35434,6 @@ static WICEntry w_ic_bigint_table[] = {    /* Phase 7+m */
     {0, w_ic_bigint_succ},      /* next */
     {0, w_ic_integer_lcm},
     {0, w_ic_bigint_isqrt},
-    {0, w_ic_bigint_neg_bang},
-    {0, w_ic_bigint_abs_bang},
     {0, NULL}
 };
 
@@ -35970,8 +35945,6 @@ static void w_init_ic_tables(void) {
     w_ic_bigint_table[7].name  = WN_next;
     w_ic_bigint_table[8].name  = WN_lcm;
     w_ic_bigint_table[9].name  = WN_isqrt;
-    w_ic_bigint_table[10].name = WN_neg_bang;
-    w_ic_bigint_table[11].name = WN_abs_bang;
     /* Channel (Phase 7+m) */
     w_ic_channel_table[0].name = WN_send;
     w_ic_channel_table[1].name = WN_close;

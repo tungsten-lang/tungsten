@@ -501,8 +501,6 @@ WValue w_pow(WValue base, WValue exp);
 WValue w_div(WValue a, WValue b);
 WValue w_mod(WValue a, WValue b);
 WValue w_neg(WValue v);
-WValue w_bigint_neg_bang(WValue v);
-WValue w_bigint_abs_bang(WValue v);
 
 /* ---- Comparison ---- */
 WValue w_eq(WValue a, WValue b);
@@ -582,6 +580,7 @@ WValue w_array_shift(WValue arr);
 WValue w_array_unshift(WValue arr, WValue val);
 WValue w_array_cap(WValue arr);
 WValue w_native_data_field(WValue recv, WValue name);
+WValue w_native_data_field_set(WValue recv, WValue name, WValue value);
 
 /* ---- Hash ---- */
 WValue w_hash_new(void);

@@ -2312,10 +2312,16 @@ use lowering/definitions
   typed_value(:i64, temp)
 
 # Shared write-back for $name = value and $name += value alike (mirrors
-# lower_ivar_set_expr's role for @ivar). Always the generic boxed
-# path — see lower_gvar's doc comment for why a global never gets the
-# raw-int/float storage optimizations a plain top-level :var can.
+# lower_ivar_set_expr's role for @ivar). A matching `$field` in a class with a
+# native `- data` layout writes that field on implicit `self`, symmetric with
+# lower_gvar's read path. Every other `$name` remains a generic boxed global.
 -> lower_gvar_set(ctx, name, val_tv)
+  if ctx[:class_name] != nil && name.starts_with?("$")
+    field = name.slice(1, name.size() - 1)
+    info = view_field_info(ctx, field)
+    if info != nil
+      return lower_view_field_set(ctx, field, val_tv)
+
   wfn = ctx[:func]
   val_reg = ensure_i64_value(wfn, val_tv)
   ctx[:mod][:top_level_vars][name] = true
@@ -2834,6 +2840,57 @@ use lowering/definitions
     offset: effective_offset, size: info[:size], field_type: info[:type]
   })
   typed_value(view_field_value_type(info[:type]), temp)
+
+# `$field = value` inside a class method — write a scalar field in that
+# class's native `- data` layout. The store returns the value after conversion
+# to the declared field width, and keeps it raw until a real WValue boundary.
+# This makes mutation-only native methods (for example a signed i32 header
+# update) compile to a mask/gep/store with no runtime bridge or allocation.
+-> lower_view_field_set(ctx, field_name, val_tv)
+  wfn = ctx[:func]
+  info = view_field_info(ctx, field_name)
+  field_type = info[:type]
+
+  # Flexible and fixed inline arrays are aggregate storage, not scalar
+  # assignable fields. Their element write paths remain the only supported
+  # mutation boundary.
+  if field_type.index("\[") != nil && !field_type.starts_with?("*")
+    raise "Cannot assign aggregate native-data field '$" + field_name + "' of type " + field_type
+  # The view emitter currently carries scalar values in at most one machine
+  # word. Reject i128/u128 explicitly instead of silently storing their low
+  # 64 bits through the generic WValue branch.
+  if type_size(field_type) > 8
+    raise "Cannot assign native-data field '$" + field_name + "' wider than 64 bits"
+
+  self_tv = lower_var(ctx, Tungsten:AST:Var.new("__self"))
+  self_reg = ensure_i64_value(wfn, self_tv)
+
+  effective_offset = info[:offset]
+  if class_uses_implicit_type_byte?(ctx[:class_name])
+    effective_offset = info[:offset] + 1
+
+  result_type = view_field_value_type(field_type)
+  value_reg = nil
+  if field_type == "f32"
+    value_reg = ensure_raw_f32(wfn, val_tv)
+  elsif field_type == "f64"
+    value_reg = ensure_raw_f64(wfn, val_tv)
+  elsif field_type.starts_with?("*")
+    value_reg = ensure_raw_i64(wfn, val_tv)
+  elsif field_type == "u64"
+    value_reg = ensure_raw_u64(wfn, val_tv)
+  elsif field_type in ("i8" "i16" "i32" "i64" "u8" "u16" "u32" "bool")
+    value_reg = ensure_raw_i64(wfn, val_tv)
+  else
+    # w64 and named scalar object slots contain an already-boxed WValue.
+    value_reg = ensure_i64_value(wfn, val_tv)
+
+  temp = next_temp(wfn)
+  emit_instruction(wfn, {
+    op: :view_store_field, temp: temp, ptr: self_reg, value: value_reg,
+    offset: effective_offset, size: info[:size], field_type: field_type
+  })
+  typed_value(result_type, temp)
 
 # `receiver$field` — the explicit-receiver twin of lower_view_field. The
 # receiver expression's inferred type names a class with a `- data` view

@@ -266,8 +266,9 @@ use parser
     @bigint_to_i_unresolved = defined["BigInt"] != true && registry["BigInt"] != nil && @autoload_loaded["BigInt"] != true
     # BigInts also cross literal, promotion, parameter, and native boundaries
     # without a reliable receiver-class node. Their five representation-only
-    # predicates now live in source, so schedule BigInt on the first matching
-    # spelling and collapse the guard for the remainder of this walk/pass.
+    # predicates and in-place sign operations now live in source, so schedule
+    # BigInt on the first matching spelling and collapse the guard for the
+    # remainder of this walk/pass.
     @bigint_predicates_unresolved = defined["BigInt"] != true && registry["BigInt"] != nil && @autoload_loaded["BigInt"] != true
     # String and Symbol share runtime dispatch key 0xF9 and may arrive through
     # parameters, native calls, or rope-producing expressions. Once both
@@ -618,7 +619,7 @@ use parser
         # incremental cost of also loading it for the integer methods is small,
         # and it makes a standalone bigint-method program (e.g. `n.modpow(...)`
         # with no predicate) resolve instead of dispatching to Object.
-        if @bigint_predicates_unresolved && call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length")
+        if @bigint_predicates_unresolved && call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length")
           consider_autoload_name("BigInt", defined, registry, seen, pending)
           @bigint_predicates_unresolved = false
 

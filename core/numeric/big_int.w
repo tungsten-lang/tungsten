@@ -47,19 +47,20 @@
   # width, allocating nothing, versus the copy that `-x` / `abs` must make
   # to leave the receiver untouched. Use them when the receiver is yours;
   # like any bang method they are visible through every reference to it.
-  # Compiled code dispatches these through the BigInt inline-cache table
-  # (w_ic_bigint_neg_bang / w_ic_bigint_abs_bang); the ccall bodies give the
-  # interpreter the same mutation.
-  #
   # CAVEAT worth knowing: the runtime returns an operand unchanged for
   # identity-shaped arithmetic (`x + 0`), so a value obtained that way can
   # SHARE storage with its source and a bang method will be visible through
   # both. Mutate values you constructed, exactly as with Array#sort!.
   -> neg!
-    ccall("w_bigint_neg_bang", self)
+    n = $length ## i64
+    $length = 0 - n
+    self
 
   -> abs!
-    ccall("w_bigint_abs_bang", self)
+    n = $length ## i64
+    if n < 0
+      $length = 0 - n
+    self
 
   # Conversion to the already-integral representation is receiver identity.
   # Do not normalize: callers can observe exact heap identity.

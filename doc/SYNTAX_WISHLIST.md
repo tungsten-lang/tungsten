@@ -179,13 +179,13 @@ reach packed runtime layouts. A declared low-level view/access form would make
 the unsafe boundary visible and allow the compiler to validate offsets and
 boxing expectations more aggressively.
 
-The same form should work symmetrically for an explicitly named receiver and
-for stores. Today a view field can be read from another object, but assignment
-targets only admit the implicit-self `$field` spelling. That forced an
-otherwise source-level `Array#join` buffer reset through a tiny C storage
-helper. A checked spelling such as an explicit unsafe/view block would let core
-code say “store this raw `i64` field on this `StringBuffer`” without making
-ordinary object fields or assignments less safe.
+Scalar fields can now be read and written on implicit `self` with `$field` and
+`$field = value`. The missing symmetric piece is an explicitly named receiver
+store: view fields can be read from another object, but there is not yet a
+checked `receiver$field = value` target. That still forces operations such as
+resetting another `StringBuffer` through a tiny C storage helper. A checked
+spelling, ideally inside an explicit unsafe/view block, would expose that raw
+write without making ordinary object fields or assignments less safe.
 
 Native layouts should also be able to declare their C offsets and hidden
 headers explicitly. Generic runtime objects currently rely on compiler-owned

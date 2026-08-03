@@ -107,8 +107,10 @@ in Tungsten:AST
     ast_set(self, :expressions, value)
   -> type_hint=(value)
     ast_set(self, :type_hint, value)
+  -> lowering_analysis
+    ccall_nobox("w_ast_analysis_get", self)
   -> lowering_analysis=(value)
-    ast_set(self, :lowering_analysis, value)
+    ccall_nobox("w_ast_analysis_set", self, value)
   -> calls_impure_ccall=(value)
     ast_set(self, :calls_impure_ccall, value)
 
@@ -456,6 +458,24 @@ in Tungsten:AST
     node[sym] = value
     return value
   value
+
+# Field-specific sparse metadata. Keeping these routes explicit at their few
+# pass call sites avoids adding symbol classification to every generic
+# schema-miss in ast_get/ast_set.
+-> ast_analysis_get(node)
+  ccall_nobox("w_ast_analysis_get", node)
+
+-> ast_ivar_offsets_get(node)
+  ccall_nobox("w_ast_ivar_offsets_get", node)
+
+-> ast_ivar_offsets_set(node, value)
+  ccall_nobox("w_ast_ivar_offsets_set", node, value)
+
+-> ast_ivar_count_get(node)
+  ccall_nobox("w_ast_ivar_count_get", node)
+
+-> ast_ivar_count_set(node, value)
+  ccall_nobox("w_ast_ivar_count_set", node, value)
 
 -> ast_kind(node)
   if node == nil

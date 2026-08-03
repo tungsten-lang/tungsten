@@ -19,6 +19,12 @@ void   w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
 WValue w_ast_sparse_set(WValue node, int64_t sym, WValue value);
 WValue w_ast_sparse_get(WValue node, int64_t sym);
 WValue w_ast_sparse_copy(WValue src_node, WValue dst_node);
+WValue w_ast_analysis_set(WValue node, WValue value);
+WValue w_ast_analysis_get(WValue node);
+WValue w_ast_ivar_offsets_set(WValue node, WValue value);
+WValue w_ast_ivar_offsets_get(WValue node);
+WValue w_ast_ivar_count_set(WValue node, WValue value);
+WValue w_ast_ivar_count_get(WValue node);
 
 /* AST string-intern table (inline interned leaf kinds) — node_arena.c.
  * Bytes-based twins of runtime.c's w_ast_intern_node/w_ast_intern_str_of;

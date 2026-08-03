@@ -1690,7 +1690,7 @@ use lowering/definitions
         offset = 0
         if super_name != nil && mod[:known_classes][super_name] != nil
           super_node = mod[:known_classes][super_name]
-          super_offsets = ast_get(super_node, :ivar_offsets)
+          super_offsets = ast_ivar_offsets_get(super_node)
           if super_offsets != nil
             super_keys = super_offsets.keys()
             ski = 0
@@ -1745,8 +1745,8 @@ use lowering/definitions
       # the same picture regardless of which class_def is canonical.
       canonical = mod[:known_classes][cname]
       if canonical != nil
-        ast_set(canonical, :ivar_offsets, ivar_offsets)
-        ast_set(canonical, :ivar_count, offset)
+        ast_ivar_offsets_set(canonical, ivar_offsets)
+        ast_ivar_count_set(canonical, offset)
 
       # Register methods and accessors from THIS body.
       if class_body != nil

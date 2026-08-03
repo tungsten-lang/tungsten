@@ -125,7 +125,7 @@
   "%" + llvm_safe_name(pname)
 
 -> method_lowering_analysis(node)
-  cached = ast_get(node, :lowering_analysis)
+  cached = ast_analysis_get(node)
   if cached != nil
     return cached
 
@@ -2063,8 +2063,8 @@
   offset = nil
   if ctx[:class_name]
     class_node = ctx[:mod][:known_classes][ctx[:class_name]]
-    if class_node && ast_get(class_node, :ivar_offsets)
-      offset = ast_get(class_node, :ivar_offsets)[ivar_name]
+    if class_node && ast_ivar_offsets_get(class_node)
+      offset = ast_ivar_offsets_get(class_node)[ivar_name]
 
   if offset != nil
     temp = next_temp(wfn)
@@ -2127,8 +2127,8 @@
   offset = nil
   if ctx[:class_name]
     class_node = ctx[:mod][:known_classes][ctx[:class_name]]
-    if class_node && ast_get(class_node, :ivar_offsets)
-      offset = ast_get(class_node, :ivar_offsets)[ivar_name]
+    if class_node && ast_ivar_offsets_get(class_node)
+      offset = ast_ivar_offsets_get(class_node)[ivar_name]
 
   if offset != nil
     temp = next_temp(wfn)

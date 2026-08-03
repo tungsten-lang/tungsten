@@ -51,6 +51,27 @@ typedef struct {
 } WSparseNodeMap;
 
 typedef struct {
+    uint64_t *keys;
+    WValue   *values;
+    uint32_t  cap;
+    uint32_t  count;
+} WValueSidecarMap;
+
+typedef struct {
+    WValue  ivar_offsets;
+    WValue  ivar_count;
+    uint8_t present;
+    uint8_t _pad[7];
+} WClassLayoutValue;
+
+typedef struct {
+    uint64_t          *keys;
+    WClassLayoutValue *values;
+    uint32_t           cap;
+    uint32_t           count;
+} WClassLayoutMap;
+
+typedef struct {
     uint64_t *hashes;
     uint32_t *ids;
     uint32_t  cap;
@@ -70,6 +91,8 @@ typedef struct {
     WSparseRecord *sparse_records;
     uint32_t       sparse_rec_cap;
     uint32_t       sparse_rec_cursor;
+    WValueSidecarMap analysis_sidecar;
+    WClassLayoutMap  class_layout_sidecar;
     WInternMap     intern_map;
     WInternEntry  *intern_entries;
     uint32_t       intern_entries_cap;
@@ -88,6 +111,8 @@ WAstStore g_ast_store = {
 #define g_sparse_records    (g_ast_store.sparse_records)
 #define g_sparse_rec_cap    (g_ast_store.sparse_rec_cap)
 #define g_sparse_rec_cur    (g_ast_store.sparse_rec_cursor)
+#define g_analysis_sidecar  (g_ast_store.analysis_sidecar)
+#define g_class_layout_sidecar (g_ast_store.class_layout_sidecar)
 #define g_intern_map        (g_ast_store.intern_map)
 #define g_intern_entries    (g_ast_store.intern_entries)
 #define g_intern_entries_cap (g_ast_store.intern_entries_cap)
@@ -193,6 +218,94 @@ static uint64_t w_sparse_hash(uint64_t node) {
     return x;
 }
 
+static uint32_t w_sidecar_find(const uint64_t *keys, uint32_t cap,
+                               uint64_t node) {
+    if (cap == 0) return W_SPARSE_END;
+    uint32_t mask = cap - 1;
+    uint32_t slot = (uint32_t)(w_sparse_hash(node) & mask);
+    while (keys[slot] != 0) {
+        if (keys[slot] == node) return slot;
+        slot = (slot + 1) & mask;
+    }
+    return W_SPARSE_END;
+}
+
+static void w_analysis_grow(uint32_t new_cap) {
+    uint64_t *keys = (uint64_t *)calloc(new_cap, sizeof(uint64_t));
+    WValue *values = (WValue *)calloc(new_cap, sizeof(WValue));
+    if (!keys || !values) node_arena_fatal("w_analysis_grow: alloc failed");
+    uint32_t mask = new_cap - 1;
+    for (uint32_t i = 0; i < g_analysis_sidecar.cap; i++) {
+        uint64_t key = g_analysis_sidecar.keys[i];
+        if (!key) continue;
+        uint32_t slot = (uint32_t)(w_sparse_hash(key) & mask);
+        while (keys[slot]) slot = (slot + 1) & mask;
+        keys[slot] = key;
+        values[slot] = g_analysis_sidecar.values[i];
+    }
+    free(g_analysis_sidecar.keys);
+    free(g_analysis_sidecar.values);
+    g_analysis_sidecar.keys = keys;
+    g_analysis_sidecar.values = values;
+    g_analysis_sidecar.cap = new_cap;
+}
+
+static uint32_t w_analysis_find_or_insert(uint64_t node) {
+    if (g_analysis_sidecar.cap == 0) w_analysis_grow(1024);
+    if ((g_analysis_sidecar.count + 1) * 10 >= g_analysis_sidecar.cap * 7) {
+        w_analysis_grow(g_analysis_sidecar.cap * 2);
+    }
+    uint32_t mask = g_analysis_sidecar.cap - 1;
+    uint32_t slot = (uint32_t)(w_sparse_hash(node) & mask);
+    while (g_analysis_sidecar.keys[slot] && g_analysis_sidecar.keys[slot] != node) {
+        slot = (slot + 1) & mask;
+    }
+    if (!g_analysis_sidecar.keys[slot]) {
+        g_analysis_sidecar.keys[slot] = node;
+        g_analysis_sidecar.count++;
+    }
+    return slot;
+}
+
+static void w_class_layout_grow(uint32_t new_cap) {
+    uint64_t *keys = (uint64_t *)calloc(new_cap, sizeof(uint64_t));
+    WClassLayoutValue *values = (WClassLayoutValue *)calloc(
+        new_cap, sizeof(WClassLayoutValue));
+    if (!keys || !values) node_arena_fatal("w_class_layout_grow: alloc failed");
+    uint32_t mask = new_cap - 1;
+    for (uint32_t i = 0; i < g_class_layout_sidecar.cap; i++) {
+        uint64_t key = g_class_layout_sidecar.keys[i];
+        if (!key) continue;
+        uint32_t slot = (uint32_t)(w_sparse_hash(key) & mask);
+        while (keys[slot]) slot = (slot + 1) & mask;
+        keys[slot] = key;
+        values[slot] = g_class_layout_sidecar.values[i];
+    }
+    free(g_class_layout_sidecar.keys);
+    free(g_class_layout_sidecar.values);
+    g_class_layout_sidecar.keys = keys;
+    g_class_layout_sidecar.values = values;
+    g_class_layout_sidecar.cap = new_cap;
+}
+
+static uint32_t w_class_layout_find_or_insert(uint64_t node) {
+    if (g_class_layout_sidecar.cap == 0) w_class_layout_grow(256);
+    if ((g_class_layout_sidecar.count + 1) * 10 >= g_class_layout_sidecar.cap * 7) {
+        w_class_layout_grow(g_class_layout_sidecar.cap * 2);
+    }
+    uint32_t mask = g_class_layout_sidecar.cap - 1;
+    uint32_t slot = (uint32_t)(w_sparse_hash(node) & mask);
+    while (g_class_layout_sidecar.keys[slot] &&
+           g_class_layout_sidecar.keys[slot] != node) {
+        slot = (slot + 1) & mask;
+    }
+    if (!g_class_layout_sidecar.keys[slot]) {
+        g_class_layout_sidecar.keys[slot] = node;
+        g_class_layout_sidecar.count++;
+    }
+    return slot;
+}
+
 static void w_sparse_grow_map(uint32_t new_cap) {
     uint64_t *new_keys  = (uint64_t *)calloc(new_cap, sizeof(uint64_t));
     uint32_t *new_heads = (uint32_t *)malloc(new_cap * sizeof(uint32_t));
@@ -215,12 +328,12 @@ static void w_sparse_grow_map(uint32_t new_cap) {
 
 void w_ast_sparse_init(void) {
     if (g_sparse_map.cap != 0) return;
-    g_sparse_map.cap = 1024;
+    g_sparse_map.cap = 128;
     g_sparse_map.keys = (uint64_t *)calloc(g_sparse_map.cap, sizeof(uint64_t));
     g_sparse_map.heads = (uint32_t *)malloc(g_sparse_map.cap * sizeof(uint32_t));
     if (!g_sparse_map.keys || !g_sparse_map.heads) node_arena_fatal("w_ast_sparse_init: alloc failed");
     g_sparse_map.count = 0;
-    g_sparse_rec_cap = 4096;
+    g_sparse_rec_cap = 128;
     g_sparse_records = (WSparseRecord *)malloc(g_sparse_rec_cap * sizeof(WSparseRecord));
     if (!g_sparse_records) node_arena_fatal("w_ast_sparse_init: record arena alloc failed");
     g_sparse_rec_cur = 0;
@@ -232,6 +345,64 @@ void w_ast_sparse_reset(void) {
     }
     g_sparse_map.count = 0;
     g_sparse_rec_cur = 0;
+    if (g_analysis_sidecar.keys) {
+        memset(g_analysis_sidecar.keys, 0,
+               (size_t)g_analysis_sidecar.cap * sizeof(uint64_t));
+        memset(g_analysis_sidecar.values, 0,
+               (size_t)g_analysis_sidecar.cap * sizeof(WValue));
+    }
+    g_analysis_sidecar.count = 0;
+    if (g_class_layout_sidecar.keys) {
+        memset(g_class_layout_sidecar.keys, 0,
+               (size_t)g_class_layout_sidecar.cap * sizeof(uint64_t));
+        memset(g_class_layout_sidecar.values, 0,
+               (size_t)g_class_layout_sidecar.cap * sizeof(WClassLayoutValue));
+    }
+    g_class_layout_sidecar.count = 0;
+}
+
+WValue w_ast_analysis_set(WValue node, WValue value) {
+    uint32_t slot = w_analysis_find_or_insert((uint64_t)node);
+    g_analysis_sidecar.values[slot] = value;
+    return value;
+}
+
+WValue w_ast_analysis_get(WValue node) {
+    uint32_t slot = w_sidecar_find(g_analysis_sidecar.keys,
+                                   g_analysis_sidecar.cap, (uint64_t)node);
+    return slot == W_SPARSE_END ? W_NIL : g_analysis_sidecar.values[slot];
+}
+
+WValue w_ast_ivar_offsets_set(WValue node, WValue value) {
+    uint32_t slot = w_class_layout_find_or_insert((uint64_t)node);
+    g_class_layout_sidecar.values[slot].ivar_offsets = value;
+    g_class_layout_sidecar.values[slot].present |= 1u;
+    return value;
+}
+
+WValue w_ast_ivar_offsets_get(WValue node) {
+    uint32_t slot = w_sidecar_find(g_class_layout_sidecar.keys,
+                                   g_class_layout_sidecar.cap, (uint64_t)node);
+    if (slot == W_SPARSE_END || !(g_class_layout_sidecar.values[slot].present & 1u)) {
+        return W_NIL;
+    }
+    return g_class_layout_sidecar.values[slot].ivar_offsets;
+}
+
+WValue w_ast_ivar_count_set(WValue node, WValue value) {
+    uint32_t slot = w_class_layout_find_or_insert((uint64_t)node);
+    g_class_layout_sidecar.values[slot].ivar_count = value;
+    g_class_layout_sidecar.values[slot].present |= 2u;
+    return value;
+}
+
+WValue w_ast_ivar_count_get(WValue node) {
+    uint32_t slot = w_sidecar_find(g_class_layout_sidecar.keys,
+                                   g_class_layout_sidecar.cap, (uint64_t)node);
+    if (slot == W_SPARSE_END || !(g_class_layout_sidecar.values[slot].present & 2u)) {
+        return W_NIL;
+    }
+    return g_class_layout_sidecar.values[slot].ivar_count;
 }
 
 static uint32_t w_sparse_find(uint64_t node) {
@@ -307,6 +478,12 @@ WValue w_ast_sparse_get(WValue node, int64_t sym) {
 }
 
 WValue w_ast_sparse_copy(WValue src_node, WValue dst_node) {
+    WValue value = w_ast_analysis_get(src_node);
+    if (value != W_NIL) w_ast_analysis_set(dst_node, value);
+    value = w_ast_ivar_offsets_get(src_node);
+    if (value != W_NIL) w_ast_ivar_offsets_set(dst_node, value);
+    value = w_ast_ivar_count_get(src_node);
+    if (value != W_NIL) w_ast_ivar_count_set(dst_node, value);
     uint32_t src_slot = w_sparse_find((uint64_t)src_node);
     if (src_slot == W_SPARSE_END) return dst_node;
     uint32_t rec_idx = g_sparse_map.heads[src_slot];

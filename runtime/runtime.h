@@ -130,6 +130,27 @@ typedef struct WAstSparseNodeMap {
     uint32_t  count;
 } WAstSparseNodeMap;
 
+typedef struct WAstValueSidecarMap {
+    uint64_t *keys;
+    WValue   *values;
+    uint32_t  cap;
+    uint32_t  count;
+} WAstValueSidecarMap;
+
+typedef struct WAstClassLayoutValue {
+    WValue  ivar_offsets;
+    WValue  ivar_count;
+    uint8_t present;
+    uint8_t _pad[7];
+} WAstClassLayoutValue;
+
+typedef struct WAstClassLayoutMap {
+    uint64_t             *keys;
+    WAstClassLayoutValue *values;
+    uint32_t              cap;
+    uint32_t              count;
+} WAstClassLayoutMap;
+
 typedef struct WAstInternMap {
     uint64_t *hashes;
     uint32_t *ids;
@@ -156,6 +177,8 @@ typedef struct WAstStore {
     WAstSparseRecord *sparse_records;
     uint32_t          sparse_rec_cap;
     uint32_t          sparse_rec_cursor;
+    WAstValueSidecarMap analysis_sidecar;
+    WAstClassLayoutMap  class_layout_sidecar;
     WAstInternMap     intern_map;
     WValue           *intern_values;
     uint32_t          intern_values_cap;
@@ -197,6 +220,12 @@ void     w_ast_sparse_reset(void);
 WValue   w_ast_sparse_set(WValue node, int64_t sym, WValue value);
 WValue   w_ast_sparse_get(WValue node, int64_t sym);
 WValue   w_ast_sparse_copy(WValue src_node, WValue dst_node);
+WValue   w_ast_analysis_set(WValue node, WValue value);
+WValue   w_ast_analysis_get(WValue node);
+WValue   w_ast_ivar_offsets_set(WValue node, WValue value);
+WValue   w_ast_ivar_offsets_get(WValue node);
+WValue   w_ast_ivar_count_set(WValue node, WValue value);
+WValue   w_ast_ivar_count_get(WValue node);
 
 /* ---- AST string-intern table (inline interned leaf kinds) ----
  * Content-addressed: string bytes → dense 32-bit id. The id is embedded

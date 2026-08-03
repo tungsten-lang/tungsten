@@ -90,11 +90,45 @@
             } else if (fn_len == 16 && memcmp(fn, "w_ast_sparse_set", 16) == 0 && argc == 4) {
               /* PR #3 sparse store: node and sym are opaque WValue-bit
                * keys (symbols are interned, so stable per process). */
-              result = w_ast_sparse_set(args[1], (int64_t)args[2], args[3]);
+              const char *field = (tc_kind(args[2]) == TC_VAL_SYMBOL ||
+                                   tc_kind(args[2]) == TC_VAL_STRING)
+                                      ? tc_str_bytes_only(args[2]) : "";
+              size_t field_len = field[0] ? tc_str_len(args[2]) : 0;
+              if (field_len == 17 && memcmp(field, "lowering_analysis", 17) == 0)
+                result = w_ast_analysis_set(args[1], args[3]);
+              else if (field_len == 12 && memcmp(field, "ivar_offsets", 12) == 0)
+                result = w_ast_ivar_offsets_set(args[1], args[3]);
+              else if (field_len == 10 && memcmp(field, "ivar_count", 10) == 0)
+                result = w_ast_ivar_count_set(args[1], args[3]);
+              else
+                result = w_ast_sparse_set(args[1], (int64_t)args[2], args[3]);
             } else if (fn_len == 16 && memcmp(fn, "w_ast_sparse_get", 16) == 0 && argc == 3) {
-              result = w_ast_sparse_get(args[1], (int64_t)args[2]);
+              const char *field = (tc_kind(args[2]) == TC_VAL_SYMBOL ||
+                                   tc_kind(args[2]) == TC_VAL_STRING)
+                                      ? tc_str_bytes_only(args[2]) : "";
+              size_t field_len = field[0] ? tc_str_len(args[2]) : 0;
+              if (field_len == 17 && memcmp(field, "lowering_analysis", 17) == 0)
+                result = w_ast_analysis_get(args[1]);
+              else if (field_len == 12 && memcmp(field, "ivar_offsets", 12) == 0)
+                result = w_ast_ivar_offsets_get(args[1]);
+              else if (field_len == 10 && memcmp(field, "ivar_count", 10) == 0)
+                result = w_ast_ivar_count_get(args[1]);
+              else
+                result = w_ast_sparse_get(args[1], (int64_t)args[2]);
             } else if (fn_len == 17 && memcmp(fn, "w_ast_sparse_copy", 17) == 0 && argc == 3) {
               result = w_ast_sparse_copy(args[1], args[2]);
+            } else if (fn_len == 18 && memcmp(fn, "w_ast_analysis_set", 18) == 0 && argc == 3) {
+              result = w_ast_analysis_set(args[1], args[2]);
+            } else if (fn_len == 18 && memcmp(fn, "w_ast_analysis_get", 18) == 0 && argc == 2) {
+              result = w_ast_analysis_get(args[1]);
+            } else if (fn_len == 22 && memcmp(fn, "w_ast_ivar_offsets_set", 22) == 0 && argc == 3) {
+              result = w_ast_ivar_offsets_set(args[1], args[2]);
+            } else if (fn_len == 22 && memcmp(fn, "w_ast_ivar_offsets_get", 22) == 0 && argc == 2) {
+              result = w_ast_ivar_offsets_get(args[1]);
+            } else if (fn_len == 20 && memcmp(fn, "w_ast_ivar_count_set", 20) == 0 && argc == 3) {
+              result = w_ast_ivar_count_set(args[1], args[2]);
+            } else if (fn_len == 20 && memcmp(fn, "w_ast_ivar_count_get", 20) == 0 && argc == 2) {
+              result = w_ast_ivar_count_get(args[1]);
             } else if (fn_len == 17 && memcmp(fn, "w_ast_intern_node", 17) == 0 && argc == 3) {
               /* Inline interned leaf kinds (schema sentinel 257):
                * intern the string content, embed the dense id in the
@@ -116,8 +150,8 @@
               if (sv != 0) result = (TcValue)sv;
             } else if (fn_len == 22 && memcmp(fn, "w_ast_body_builder_new", 22) == 0 && argc == 2) {
               /* Stage 0 keeps child lists as ordinary runtime Arrays. Native
-               * stages use the direct packed-arena builder with the same
-               * Tungsten interface. */
+               * stages seal a Store-owned transient buffer into the packed
+               * arena with the same Tungsten interface. */
               int64_t requested = value_is_int(args[1]) ? value_as_int(args[1]) : 0;
               if (requested < 0) requested = 0;
               TcRuntimeArray *array = runtime_array_new(0, err);

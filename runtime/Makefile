@@ -60,7 +60,7 @@ endif
 
 # Common runtime sources (core + terminal input + event/TLS + optional companions)
 RUNTIME_SRCS = runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC)
-RUNTIME_DEPS = runtime.c terminal_input.c ssmr_witness.c runtime.h wvalue.h event_loop.h $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC)
+RUNTIME_DEPS = runtime.c terminal_input.c ssmr_witness.c runtime.h wvalue.h ast_schema_generated.h event_loop.h $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC)
 RUNTIME_CFLAGS = $(WARN_FLAGS) $(GC_CFLAGS) $(TLS_CFLAGS) $(ONIG_CFLAGS)
 RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(ONIG_LDFLAGS) $(PLATFORM_LDFLAGS)
 

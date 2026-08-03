@@ -4,6 +4,7 @@
 #endif
 
 #include "runtime.h"
+#include "ast_schema_generated.h"
 #include "ssmr_witness.h"
 
 #include <arpa/inet.h>
@@ -13729,7 +13730,7 @@ const uint32_t g_node_stride[4] = {16, 32, 64, 128};
  * post-SC_2 reassignment). */
 const uint32_t g_node_initial_cap[4] = {70000, 30000, 26000, 1000};
 
-uint64_t g_ast_schema_hash = 0;
+uint64_t g_ast_schema_hash = W_AST_SCHEMA_HASH;
 
 void w_node_arena_init(void) {
     /* No-op since the arena went lazy (see w_node_alloc's grow branch, which
@@ -14320,13 +14321,8 @@ WValue w_ast_freeze_if_array(WValue v) {
     return w_box_body(offset, (uint32_t)n);
 }
 
-/* Placeholder: Phase 3 (ast_schema.w) will compute a real hash over
- * the KIND_*, F_*, STRIDE_* constants so cache files invalidate on
- * any schema-relevant change. Until ast_schema.w lands, returning
- * a constant means cache lookups never reuse pre-Phase-3 caches —
- * which is correct since the schema isn't defined yet. */
 uint64_t w_ast_schema_hash_compute(void) {
-    return 0;
+    return W_AST_SCHEMA_HASH;
 }
 
 WValue w_node_field_load(WValue wnode, int64_t ivar_offset) {

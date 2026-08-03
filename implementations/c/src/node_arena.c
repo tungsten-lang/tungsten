@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "wvalue.h"
+#include "ast_schema_generated.h"
 
 /* Inline copy of runtime.h's WNodeArena. Avoids pulling in the full
  * runtime.h, which redeclares w_truthy with a return type that
@@ -47,7 +48,7 @@ const uint32_t g_node_stride[4] = {16, 32, 64, 128};
 
 const uint32_t g_node_initial_cap[4] = {70000, 30000, 26000, 1000};
 
-uint64_t g_ast_schema_hash = 0;
+uint64_t g_ast_schema_hash = W_AST_SCHEMA_HASH;
 
 static void node_arena_fatal(const char *msg) {
     fprintf(stderr, "fatal: %s\n", msg);
@@ -105,7 +106,7 @@ void w_node_arena_reset(void) {
 }
 
 uint64_t w_ast_schema_hash_compute(void) {
-    return 0;
+    return W_AST_SCHEMA_HASH;
 }
 
 WValue w_node_field_load(WValue wnode, int64_t ivar_offset) {

@@ -98,6 +98,20 @@
             txtime: 0, p2pkh_ver: 0x00,
             gecko_id: "freicoin", paprika_id: "frc-freicoin",
             block_secs: 600, maturity: 100},
+    # Auroracoin — the standout for solo mining. A 5-algo (Myriad-lineage)
+    # chain; getblocktemplate takes the algorithm as a SECOND positional
+    # param, so we request sha256d explicitly. That branch's difficulty is
+    # ~2000 (each algo retargets independently), which is ~20 blocks/day at
+    # 2.6 GH/s — the only live, priced sha256d chain where solo mining
+    # actually finds blocks at a meaningful rate. Reward ~0.625 AUR/block,
+    # ~$0.40/day gross at current price. The template's `version` already
+    # carries the sha256d algo bits, and the miner uses it verbatim, so the
+    # double-SHA256 proof-of-work is exactly what the network expects.
+    "AUR": {name: "Auroracoin (sha256d)", rpc_port: 12341,
+            gbt_params: "\[{\"rules\":\[\"segwit\"\]}, \"sha256d\"\]",
+            txtime: 0, p2pkh_ver: 23,
+            gecko_id: "auroracoin", paprika_id: "aur-auroracoin",
+            block_secs: 300, maturity: 100},
   }
 
 # One coin's entry, or nil.

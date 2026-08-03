@@ -627,21 +627,21 @@ use ../../core/token
 
   -> parse_program
     skip_newlines()
-    exprs = []
+    exprs = Tungsten:AST:BodyBuilder.new()
     while !at_type?(T_EOF) && !at_type?(T_DEDENT)
       expr = parse_expression()
       exprs.push(finish_statement_expression(expr))
-    exprs
+    exprs.finish()
 
   -> parse_body
     expect_type(T_INDENT)
-    exprs = []
+    exprs = Tungsten:AST:BodyBuilder.new()
     while !at_type?(T_DEDENT) && !at_type?(T_EOF)
       expr = parse_expression()
       exprs.push(finish_statement_expression(expr))
     if !at_type?(T_EOF)
       expect_type(T_DEDENT)
-    exprs
+    exprs.finish()
 
   -> finish_statement_expression(expr)
     skip_statement_end()
@@ -2943,7 +2943,13 @@ use ../../core/token
     if at_type?(T_COLON)
       advance()
       fallthrough = parse_expression()
-      body.push(fallthrough)
+      body_with_fallthrough = Tungsten:AST:BodyBuilder.new(body.size() + 1)
+      bfi = 0
+      while bfi < body.size()
+        body_with_fallthrough.push(body[bfi])
+        bfi += 1
+      body_with_fallthrough.push(fallthrough)
+      body = body_with_fallthrough.finish()
 
     result = Tungsten:AST:MethodDef.new(base_name, params, body, type_hints, is_class_method)
     result.loc = make_loc_offset(method_off)

@@ -8,6 +8,31 @@
 
 in Tungsten:AST
 
+# Single-owner append builder for packed AST child lists. Native builds append
+# into a Store-owned transient buffer and finish seals it into the body arena
+# once at exact width; the C bootstrap VM mirrors the interface with its
+# ordinary Array representation. finish is the ownership boundary: callers
+# receive an immutable Array-compatible Body in native code.
++ BodyBuilder
+  -> new(initial_capacity = 0)
+    @storage = ccall_nobox("w_ast_body_builder_new", initial_capacity)
+    @size = 0
+
+  -> push(value)
+    @storage = ccall_nobox("w_ast_body_builder_push", @storage, @size, value)
+    @size += 1
+    self
+
+  -> size
+    @size
+
+  -> finish
+    result = ccall_nobox("w_ast_body_builder_finish", @storage, @size)
+    # A finished builder cannot accidentally target a Store slot later reused
+    # by another builder.
+    @storage = nil
+    result
+
 + Body
   is Enumerable
 

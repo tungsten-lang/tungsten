@@ -114,6 +114,38 @@
                * stored VM string value (first one seen per content). */
               uint64_t sv = w_ast_intern_value_of((uint64_t)args[1]);
               if (sv != 0) result = (TcValue)sv;
+            } else if (fn_len == 22 && memcmp(fn, "w_ast_body_builder_new", 22) == 0 && argc == 2) {
+              /* Stage 0 keeps child lists as ordinary runtime Arrays. Native
+               * stages use the direct packed-arena builder with the same
+               * Tungsten interface. */
+              int64_t requested = value_is_int(args[1]) ? value_as_int(args[1]) : 0;
+              if (requested < 0) requested = 0;
+              TcRuntimeArray *array = runtime_array_new(0, err);
+              if (!array) {
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              if (requested > 0 && !runtime_array_ensure_cap(array, (size_t)requested, err)) {
+                free(array);
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              result = tc_box_array(array);
+            } else if (fn_len == 23 && memcmp(fn, "w_ast_body_builder_push", 23) == 0 && argc == 4) {
+              if (tc_kind(args[1]) != TC_VAL_ARRAY || !tc_as_array(args[1])) {
+                FREE_ARGS();
+                tc_error_set(err, "AST BodyBuilder storage is not an array");
+                goto cleanup_fail;
+              }
+              TcRuntimeArray *array = tc_as_array(args[1]);
+              if (!runtime_array_ensure_cap(array, (size_t)array->size + 1, err)) {
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              array->slots[array->size++] = args[3];
+              result = args[1];
+            } else if (fn_len == 25 && memcmp(fn, "w_ast_body_builder_finish", 25) == 0 && argc == 3) {
+              result = args[1];
             } else if (fn_len == 18 && memcmp(fn, "w_node_kind_extern", 18) == 0 && argc == 2) {
               // Extract the 11-bit kind field from a W_PACKED_NODE
               // WValue. Used by ast_kind on bare W_PACKED_NODE input

@@ -137,6 +137,15 @@ typedef struct WAstInternMap {
     uint32_t  count;
 } WAstInternMap;
 
+typedef struct WAstBodyBuilderSlot {
+    WValue   *items;
+    uint32_t  size;
+    uint32_t  cap;
+    uint32_t  next_free;
+    uint8_t   active;
+    uint8_t   _pad[3];
+} WAstBodyBuilderSlot;
+
 /* One explicit owner for every handle-relative AST allocation. The default
  * process store is currently active for all handles; keeping ownership in a
  * value makes reset/reuse and future store selection one coherent operation. */
@@ -155,6 +164,10 @@ typedef struct WAstStore {
     uint32_t          body_cursor;
     uint32_t          body_cap;
     uint32_t          body_count;
+    WAstBodyBuilderSlot *body_builders;
+    uint32_t          body_builders_cap;
+    uint32_t          body_builders_used;
+    uint32_t          body_builder_free;
     uint32_t          generation;
 } WAstStore;
 
@@ -212,6 +225,9 @@ WValue   w_ast_intern_str_of(WValue node);
  * exists or is needed (see the "no aligned header" note in wvalue.h).
  * w_node_arena_reset reclaims the whole arena. */
 WValue   w_ast_freeze_if_array(WValue v);
+WValue   w_ast_body_builder_new(int64_t initial_capacity);
+WValue   w_ast_body_builder_push(WValue storage, int64_t size, WValue value);
+WValue   w_ast_body_builder_finish(WValue storage, int64_t size);
 void     w_ast_extra_reset(void);
 WValue   w_body_arena_get(uint32_t offset, uint32_t i);
 

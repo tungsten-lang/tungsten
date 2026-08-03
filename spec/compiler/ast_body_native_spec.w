@@ -21,6 +21,25 @@ use ../../core/ast_body
 empty = body([])
 values = body([nil, false, true, -2, 0, 3, 8])
 
+# BodyBuilder writes directly into the native body arena and must preserve
+# order across capacity growth. The bootstrap VM exercises the same API with
+# an Array-backed construction window.
+builder = Tungsten:AST:BodyBuilder.new(2)
+i = 0
+while i < 12
+  builder.push(i * 3)
+  i += 1
+built = builder.finish()
+check("builder public type", type(built), "Array")
+check("builder size", built.size, 12)
+i = 0
+while i < 12
+  check("builder item " + i.to_s, built[i], i * 3)
+  i += 1
+
+empty_builder = Tungsten:AST:BodyBuilder.new(0).finish()
+check("empty builder size", empty_builder.size, 0)
+
 # Body's private dispatch identity must not leak through public
 # introspection. Compiler passes intentionally accept packed child lists
 # anywhere they accept Arrays; only method dispatch distinguishes Body.

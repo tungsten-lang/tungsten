@@ -13736,6 +13736,10 @@ _Static_assert(offsetof(WAstStore, node_arena) == 0,
 #define g_body_arena_cursor (g_ast_store.body_cursor)
 #define g_body_arena_cap   (g_ast_store.body_cap)
 #define g_ast_extra_arrays (g_ast_store.body_count)
+#define g_body_builders    (g_ast_store.body_builders)
+#define g_body_builders_cap (g_ast_store.body_builders_cap)
+#define g_body_builders_used (g_ast_store.body_builders_used)
+#define g_body_builder_free (g_ast_store.body_builder_free)
 
 /* A release self-compile needs about 403K declared field words. This leaves a
  * small no-realloc margin while allocating less than the old padded slabs. */
@@ -14251,6 +14255,14 @@ static uint32_t w_body_arena_alloc(uint32_t n) {
 }
 
 void w_ast_extra_reset(void) {
+    for (uint32_t i = 1; i < g_body_builders_used; i++) {
+        free(g_body_builders[i].items);
+    }
+    free(g_body_builders);
+    g_body_builders = NULL;
+    g_body_builders_cap = 0;
+    g_body_builders_used = 0;
+    g_body_builder_free = 0;
     free(g_body_arena_base);
     g_body_arena_base = NULL;
     g_body_arena_cursor = 0;
@@ -14262,6 +14274,130 @@ void w_ast_extra_reset(void) {
  * the caller's responsibility — mirrors w_node_field_load's contract. */
 WValue w_body_arena_get(uint32_t offset, uint32_t i) {
     return g_body_arena_base[offset + i];
+}
+
+/* Mutable construction window for Tungsten:AST:BodyBuilder. Builders use a
+ * Store-owned transient buffer and seal it into the packed body arena once at
+ * exact width. Reserving directly in the monotonic body arena looked simpler,
+ * but nested parser bodies buried outer reservations and inflated a
+ * self-compile's body occupancy by 31-82% through unreclaimable growth slack. */
+static WAstBodyBuilderSlot *w_ast_body_builder_slot(WValue handle,
+                                                    const char *operation) {
+    if (!w_is_int(handle)) {
+        w_raise(w_string(operation));
+        return NULL;
+    }
+    int64_t raw = w_as_int(handle);
+    if (raw <= 0 || (uint64_t)raw >= g_body_builders_used ||
+        !g_body_builders[raw].active) {
+        w_raise(w_string(operation));
+        return NULL;
+    }
+    return &g_body_builders[raw];
+}
+
+WValue w_ast_body_builder_new(int64_t initial_capacity) {
+    if (w_is_int((WValue)initial_capacity)) {
+        initial_capacity = w_as_int((WValue)initial_capacity);
+    }
+    if (initial_capacity < 0 || (uint64_t)initial_capacity > W_BODY_LENGTH_MASK) {
+        w_raise(w_string("AST body builder capacity exceeds packed representation"));
+        return W_NIL;
+    }
+    if (g_body_builders_used == 0) {
+        g_body_builders_cap = 64;
+        g_body_builders = (WAstBodyBuilderSlot *)calloc(
+            g_body_builders_cap, sizeof(WAstBodyBuilderSlot));
+        if (!g_body_builders) die("w_ast_body_builder_new: calloc failed");
+        g_body_builders_used = 1; /* handle 0 is the free-list sentinel */
+    }
+    uint32_t id;
+    if (g_body_builder_free) {
+        id = g_body_builder_free;
+        g_body_builder_free = g_body_builders[id].next_free;
+    } else {
+        if (g_body_builders_used == g_body_builders_cap) {
+            uint32_t new_cap = g_body_builders_cap * 2u;
+            WAstBodyBuilderSlot *nb = (WAstBodyBuilderSlot *)realloc(
+                g_body_builders, (size_t)new_cap * sizeof(WAstBodyBuilderSlot));
+            if (!nb) die("w_ast_body_builder_new: realloc failed");
+            memset(nb + g_body_builders_cap, 0,
+                   (size_t)(new_cap - g_body_builders_cap) * sizeof(WAstBodyBuilderSlot));
+            g_body_builders = nb;
+            g_body_builders_cap = new_cap;
+        }
+        id = g_body_builders_used++;
+    }
+    WAstBodyBuilderSlot *slot = &g_body_builders[id];
+    memset(slot, 0, sizeof(*slot));
+    slot->active = 1;
+    if (initial_capacity > 0) {
+        slot->cap = (uint32_t)initial_capacity;
+        slot->items = (WValue *)malloc((size_t)slot->cap * sizeof(WValue));
+        if (!slot->items) die("w_ast_body_builder_new: malloc failed");
+    }
+    return w_int((int64_t)id);
+}
+
+WValue w_ast_body_builder_push(WValue storage, int64_t size, WValue value) {
+    if (w_is_int((WValue)size)) size = w_as_int((WValue)size);
+    if (size < 0 || (uint64_t)size >= W_BODY_LENGTH_MASK) {
+        w_raise(w_string("AST body builder length exceeds packed representation"));
+        return W_NIL;
+    }
+    WAstBodyBuilderSlot *slot = w_ast_body_builder_slot(
+        storage, "AST body builder handle is invalid");
+    if (!slot) return W_NIL;
+    if ((uint64_t)size != slot->size) {
+        w_raise(w_string("AST body builder size is corrupt"));
+        return W_NIL;
+    }
+    value = w_ast_freeze_if_array(value);
+    if (slot->size == slot->cap) {
+        uint32_t new_cap = slot->cap ? slot->cap * 2u : 8u;
+        if (new_cap < slot->cap || (uint64_t)new_cap > W_BODY_LENGTH_MASK) {
+            new_cap = (uint32_t)W_BODY_LENGTH_MASK;
+        }
+        WValue *nb = (WValue *)realloc(slot->items,
+                                       (size_t)new_cap * sizeof(WValue));
+        if (!nb) die("w_ast_body_builder_push: realloc failed");
+        slot->items = nb;
+        slot->cap = new_cap;
+    }
+    slot->items[slot->size++] = value;
+    return storage;
+}
+
+WValue w_ast_body_builder_finish(WValue storage, int64_t size) {
+    if (w_is_int((WValue)size)) size = w_as_int((WValue)size);
+    if (size < 0 || (uint64_t)size > W_BODY_LENGTH_MASK) {
+        w_raise(w_string("AST body builder length exceeds packed representation"));
+        return W_NIL;
+    }
+    WAstBodyBuilderSlot *slot = w_ast_body_builder_slot(
+        storage, "AST body builder handle is invalid");
+    if (!slot) return W_NIL;
+    if ((uint64_t)size != slot->size) {
+        w_raise(w_string("AST body builder size is corrupt"));
+        return W_NIL;
+    }
+    WValue result = w_box_body(0, 0);
+    if (slot->size > 0) {
+        uint32_t off = w_body_arena_alloc(slot->size);
+        memcpy(g_body_arena_base + off, slot->items,
+               (size_t)slot->size * sizeof(WValue));
+        result = w_box_body(off, slot->size);
+        g_ast_extra_arrays++;
+    }
+    free(slot->items);
+    slot->items = NULL;
+    slot->size = 0;
+    slot->cap = 0;
+    slot->active = 0;
+    uint32_t id = (uint32_t)w_as_int(storage);
+    slot->next_free = g_body_builder_free;
+    g_body_builder_free = id;
+    return result;
 }
 
 WValue w_ast_freeze_if_array(WValue v) {

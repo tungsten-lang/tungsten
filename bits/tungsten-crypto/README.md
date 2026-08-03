@@ -65,25 +65,32 @@ that the node accepted, and the coinbase rewards matured into a spendable
 wallet balance. That exercises the exact solve-and-submit path a real chain
 uses.
 
-On real networks the honest finding (survey at 2.6 GH/s, Aug 2026) is that
-**no SHA-256d coin pays meaningfully** at this hashrate. The niche floor is
-set by stray and rented ASICs, which pin every ordinary priced chain at
-10⁶–10¹⁴ difficulty.
+On real networks the honest finding (survey at 2.6 GH/s, Aug 2026, verified
+against synced nodes) is that **no SHA-256d coin is solo-mineable at a
+meaningful rate** at this hashrate. Every priced chain is either merged-mined
+(Namecoin, Unobtanium, Ixcoin, Syscoin, Elastos, …) or ASIC-pinned
+(DigiByte's sha256 branch ~1 G, Bitmark ~1.2 G).
 
-The one genuinely solo-mineable coin the survey found is **Auroracoin
-(AUR)**, and it is in the registry. It is a five-algorithm chain whose
-`getblocktemplate` takes the algorithm as a second positional argument; each
-algorithm retargets independently, and the **sha256d branch sits at
-difficulty ~2,000** — about **20 blocks/day at 2.6 GH/s**. At ~0.625 AUR per
-block and ~$0.03/AUR that is roughly **$0.40/day gross**: tiny, but real,
-live, and priced — the only place on the SHA-256d map where a 2.6 GH/s miner
-both finds blocks *and* mines something that trades. Everything else with a
-real market is either merged-mined (Namecoin, Unobtanium, Ixcoin, Syscoin,
-Elastos, …) or ASIC-pinned (DigiByte's sha256 branch ~1 G, Bitmark ~1.2 G).
-The next-best after AUR is Rebelcoin (~7 blocks/day, ~$0.004/day). Solo
-mining here is for finding blocks with your own node, not for a living; the
-code is correct and the economics are a silicon fact, exactly as the main
-miner's notes below explain.
+**Auroracoin (AUR) is the cautionary tale, and the reason the switcher
+computes difficulty the way it does.** It is a five-algorithm chain whose
+`getblocktemplate` takes the algorithm as a second positional argument.
+Explorers and its own `getblock` report a sha256d "difficulty" of ~2,135 —
+which looks like ~20 blocks/day and is what a survey pass will happily
+believe. That number is a *per-algo normalized* difficulty (each algorithm
+measured against its own `powLimit`); it is the same ~2,135 for blocks of
+every algorithm. The **absolute** work in the header — `2²⁵⁶ / target` from
+the template's `bits` — is `~9×10¹⁶` hashes, i.e. **~500 days per block** at
+2.1 GH/s, or 0.002 blocks/day. The switcher was never fooled: it computes
+absolute hashes-per-block from the template `nBits`, so `autominer status`
+against a live AUR node reports difficulty ~22 M and `<$0.01/day`, not the
+mirage. This is exactly why difficulty is taken from the template and not
+from any node or explorer "difficulty" field — those carry per-chain,
+per-algo conventions that do not measure the work you must actually do.
+
+So the corrected bottom line is uniform: solo mining here is for finding
+blocks on a chain you control (regtest, or a coin with a genuinely tiny
+absolute target), not for revenue. The code is correct and the wall is a
+silicon fact, exactly as the main miner's notes below explain.
 
 The registry in `lib/coins.w` carries the per-coin facts the node cannot be
 asked for: RPC port, `getblocktemplate` params (modern forks require

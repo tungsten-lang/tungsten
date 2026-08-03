@@ -98,15 +98,18 @@
             txtime: 0, p2pkh_ver: 0x00,
             gecko_id: "freicoin", paprika_id: "frc-freicoin",
             block_secs: 600, maturity: 100},
-    # Auroracoin — the standout for solo mining. A 5-algo (Myriad-lineage)
-    # chain; getblocktemplate takes the algorithm as a SECOND positional
-    # param, so we request sha256d explicitly. That branch's difficulty is
-    # ~2000 (each algo retargets independently), which is ~20 blocks/day at
-    # 2.6 GH/s — the only live, priced sha256d chain where solo mining
-    # actually finds blocks at a meaningful rate. Reward ~0.625 AUR/block,
-    # ~$0.40/day gross at current price. The template's `version` already
-    # carries the sha256d algo bits, and the miner uses it verbatim, so the
-    # double-SHA256 proof-of-work is exactly what the network expects.
+    # Auroracoin — a 5-algo (Myriad-lineage) chain; getblocktemplate takes
+    # the algorithm as a SECOND positional param, so we request sha256d
+    # explicitly, and the template's `version` carries the sha256d algo bits
+    # (the miner uses it verbatim, so the double-SHA256 PoW is exactly what
+    # the network expects). It is the reason this switcher takes difficulty
+    # from the template nBits: AUR's explorers and its own `getblock` report
+    # a sha256d "difficulty" of ~2,135, but that is a PER-ALGO NORMALIZED
+    # figure (same value across all five algorithms). The real absolute work
+    # — 2**256/target from the template bits — is ~9e16 hashes, i.e. ~500
+    # days/block at 2.1 GH/s. So the miner correctly ranks AUR at ~$0/day
+    # rather than being fooled into mining it. Kept as the worked example of
+    # a multi-algo coin the switcher handles and correctly declines.
     "AUR": {name: "Auroracoin (sha256d)", rpc_port: 12341,
             gbt_params: "\[{\"rules\":\[\"segwit\"\]}, \"sha256d\"\]",
             txtime: 0, p2pkh_ver: 23,

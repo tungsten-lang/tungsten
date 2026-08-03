@@ -11536,6 +11536,29 @@ static uint64_t gcd_profile_pair_limbs;
 static uint64_t gcd_profile_matrix_products;
 static uint64_t gcd_profile_matrix_product_work;
 static uint64_t gcd_profile_matrix_product_bins[12];
+/* hgcd diagnosis counters (probe builds only) */
+static uint64_t gcd_profile_hgcd_top_calls, gcd_profile_hgcd_top_ok;
+static uint64_t gcd_profile_hgcd_top_xlen;
+static uint64_t gcd_profile_child_calls, gcd_profile_child_ok;
+static uint64_t gcd_profile_child_removed;
+static uint64_t gcd_profile_block_calls[2];
+static uint64_t gcd_profile_block_ok[2];
+static uint64_t gcd_profile_block_removed[2];
+static uint64_t gcd_profile_block_batches[2];
+static uint64_t gcd_profile_block_batch_limbs[2];
+static int gcd_profile_ctx; /* 0 = tree, 1 = apply, 2 = acc-multiply */
+static uint64_t gcd_profile_ctx_work[3];
+/* failure reasons: 0 entry-geometry, 1 slice-degenerate, 2 matrix-overflow,
+ * 3 reduction-stall, 4 apply-invalid, 5 no-shrink */
+static uint64_t gcd_profile_block_fail[2][6];
+static uint64_t gcd_profile_block_fail_xlen[2][6];
+#define GCD_PROF_FAIL(reason) do { \
+        int ar_ = allow_recursive ? 1 : 0; \
+        gcd_profile_block_fail[ar_][reason]++; \
+        gcd_profile_block_fail_xlen[ar_][reason] += (uint64_t)xlen; \
+    } while (0)
+#else
+#define GCD_PROF_FAIL(reason) ((void)0)
 #endif
 /* Cofactor magnitude limit (2^61 - 1) / q, indexed by quotient.  A wider
  * 2^62 limit was tried and lifts the quadratic loop ~2% (longer batches),
@@ -12134,7 +12157,7 @@ static int mag_linear_comb_pair(uint64_t *rx, uint64_t *ry, int32_t n,
 #define BN_GCD_HGCD_THRESHOLD 1024
 #endif
 #ifndef BN_GCD_HGCD_RECURSIVE_THRESHOLD
-#define BN_GCD_HGCD_RECURSIVE_THRESHOLD 4096
+#define BN_GCD_HGCD_RECURSIVE_THRESHOLD 512
 #endif
 /* Workspace is sized for the largest slice, one quarter of the operand.
  * With the low-split row application (products against only the low p limbs
@@ -12198,7 +12221,7 @@ static size_t gcd_hgcd_ws_need(int32_t cap) {
     int32_t hcap = (cap + BN_GCD_HGCD_TOP_DEN - 1)
                  / BN_GCD_HGCD_TOP_DEN;
     if (hcap >= BN_GCD_HGCD_RECURSIVE_THRESHOLD)
-        total += gcd_hgcd_level_ws_need(hcap);
+        total += gcd_hgcd_ws_need(hcap);
     return total;
 }
 
@@ -12225,6 +12248,7 @@ static int32_t gcd_matrix_product(uint64_t *out,
     gcd_profile_matrix_products++;
     gcd_profile_matrix_product_work += (uint64_t)an * (uint64_t)bn;
     gcd_profile_matrix_product_bins[bin]++;
+    gcd_profile_ctx_work[gcd_profile_ctx] += (uint64_t)an * (uint64_t)bn;
 #endif
     bigint_mul_dispatch(out, a, an, b, bn);
     return mag_norm_len(out, an + bn);
@@ -12313,6 +12337,9 @@ static int gcd_hgcd_apply_row_low(uint64_t *out, int32_t out_cap,
                                   const uint64_t *hi, int32_t hin,
                                   uint64_t *p0, uint64_t *p1,
                                   int32_t prod_cap, int32_t *out_len) {
+#ifdef BN_GCD_PROFILE_COUNTS
+    gcd_profile_ctx = 1;
+#endif
     int32_t n0 = gcd_matrix_product(p0, pc, pcn, pv, mag_norm_len(pv, p));
     int32_t n1 = gcd_matrix_product(p1, nc, ncn, nv, mag_norm_len(nv, p));
     if (n0 > prod_cap || n1 > prod_cap) return 0;
@@ -12353,21 +12380,39 @@ static int gcd_hgcd_apply_row_low(uint64_t *out, int32_t out_cap,
 
 static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
                           const uint64_t *y, int32_t ylen,
-                          uint64_t *rx, uint64_t *ry, int32_t cap,
+                          uint64_t *rx, int32_t min_result,
+                          uint64_t *ry, int32_t cap,
                           uint64_t *mem, int32_t *rxlen, int32_t *rylen,
                           uint64_t *out_matrix[4], int32_t out_ml[4],
                           int *out_det, int allow_recursive) {
+    /* allow_recursive is a remaining recursion depth: children run with
+     * allow_recursive - 1, and 0 forces a pure scalar block (also used by
+     * the failure-retry paths).  Depth in practice is bounded by geometry:
+     * each level's slice is at least 4x smaller, and levels below
+     * BN_GCD_HGCD_RECURSIVE_THRESHOLD never engage children -- the
+     * recursive gcd_hgcd_ws_need provisions exactly that chain. */
     /* Geometry follows the current operand, not the workspace cap: cap never
      * shrinks across reductions, xlen does.  Safe because every top_den >= 4
      * keeps h = xlen - p <= ceil(xlen/4) <= hcap. */
-    int top_den = gcd_hgcd_top_den(xlen);
+    /* The eighth/fifth/sixth ladder is tuned for the scalar-reduction
+     * regime.  Once the slice is large enough for child blocks to carry
+     * the reduction, the deepest slice the workspace allows wins: the
+     * full-width application then runs with the largest matrix entries
+     * (best multiply-ladder discount) and the fewest blocks per halving. */
+    int top_den = (allow_recursive > 0 &&
+                   xlen / 4 >= BN_GCD_HGCD_RECURSIVE_THRESHOLD)
+                      ? 4
+                      : gcd_hgcd_top_den(xlen);
     int32_t p = (int32_t)(((int64_t)(top_den - 1) * xlen) / top_den);
     int32_t h = xlen - p;
     int32_t hcap = (cap + BN_GCD_HGCD_TOP_DEN - 1)
                  / BN_GCD_HGCD_TOP_DEN;
     int32_t mcap = (hcap + 1) / 2 + 12;
     int32_t prod_cap = cap + mcap + 2;
-    if (h < 8 || ylen <= p) return 0;
+#ifdef BN_GCD_PROFILE_COUNTS
+    gcd_profile_block_calls[allow_recursive ? 1 : 0]++;
+#endif
+    if (h < 8 || ylen <= p) { GCD_PROF_FAIL(0); return 0; }
 
     uint64_t *hx = mem;
     uint64_t *hy = hx + hcap;
@@ -12402,7 +12447,7 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
     memcpy(hy, y + p, (size_t)(ylen - p) * sizeof(uint64_t));
     int32_t hxl = mag_norm_len(hx, h);
     int32_t hyl = mag_norm_len(hy, ylen - p);
-    if (!hyl || mag_cmp(hx, hxl, hy, hyl) < 0) return 0;
+    if (!hyl || mag_cmp(hx, hxl, hy, hyl) < 0) { GCD_PROF_FAIL(1); return 0; }
 
     int det = 1;
     int success = 0;
@@ -12411,23 +12456,85 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
     int32_t al[4] = {0, 0, 0, 0};
     int32_t matrix_count = 0;
     int32_t target = h / 2 + 1;
-    /* One child block removes only the first quarter of a large leading
-     * slice.  The scalar product tree finishes the lower quarter: this keeps
-     * the approximation stable and avoids a cascade of tiny matrix products. */
-    int32_t recursive_stop = h - h / 4;
+    /* A caller with a tight remaining budget floors the result: reducing
+     * past min_result would overshoot the caller's own validity margin. */
+    if (min_result > p && min_result - p > target) target = min_result - p;
 
-    while (hxl > target && hyl > 0) {
+    /* Continue only while BOTH residues stay clear of the accumulated
+     * matrix entries (~h - hxl limbs).  The full-width application computes
+     * each row as products against the low limbs plus residue << 64*p; a
+     * row is guaranteed nonnegative only while its residue outweighs its
+     * negative coefficient, and the smaller residue hy is the one that gets
+     * undershot when a batch lands a run of large quotients.  Stopping on
+     * hxl alone left a ~2-limb margin that lumpy quotients overran in
+     * 15-20% of blocks, and every overrun discarded the block's entire
+     * slice reduction at the application step. */
+    while (hxl > target && hyl > h - hxl + 4) {
+        /* Delegate to a child block whenever one fits: a child reduces the
+         * slice at slice-of-slice width, so every limb it removes costs a
+         * fraction of a full-slice scalar batch.  The child's result floor
+         * (target + 2) keeps it from overshooting the h/2 validity margin
+         * that the final full-width application depends on; the +24 guard
+         * leaves it enough budget to clear its own minimum progress. */
         if (allow_recursive && h >= BN_GCD_HGCD_RECURSIVE_THRESHOLD &&
-            hxl > recursive_stop) {
+            hxl > target + 24) {
             int32_t sl[4], hnxl, hnyl;
             int step_det;
             step[0] = step_matrix;
             step[1] = step_matrix + mcap;
             step[2] = step_matrix + 2 * mcap;
             step[3] = step_matrix + 3 * mcap;
-            if (gcd_hgcd_block(hx, hxl, hy, hyl, hnx, hny, hcap,
+            /* The total transform is an ordered product.  Any scalar leaves
+             * accumulated since the last merge must fold into acc BEFORE a
+             * child contributes its matrix; leaves left pending here would
+             * be folded after the child at block end, corrupting the order
+             * (and with it the slice-residue identity the final full-width
+             * application depends on). */
+            if (matrix_count) {
+                if (!have_acc) {
+                    if (!gcd_matrix_product_tree(leaves, matrix_count,
+                                                 acc, al, mcap,
+                                                 tree_scratch)) {
+                        GCD_PROF_FAIL(2);
+                        return 0;
+                    }
+                    have_acc = 1;
+                } else {
+                    int32_t fl[4], tl[4];
+                    if (!gcd_matrix_product_tree(leaves, matrix_count,
+                                                 step, fl, mcap,
+                                                 tree_scratch)) {
+                        GCD_PROF_FAIL(2);
+                        return 0;
+                    }
+                    if (!gcd_matrix_multiply(tmp, tl, acc, al, step, fl,
+                                             mcap, prod0, prod1)) {
+                        GCD_PROF_FAIL(2);
+                        return 0;
+                    }
+                    for (int i = 0; i < 4; i++) {
+                        uint64_t *ht = acc[i];
+                        acc[i] = tmp[i];
+                        tmp[i] = ht;
+                        al[i] = tl[i];
+                    }
+                }
+                matrix_count = 0;
+            }
+#ifdef BN_GCD_PROFILE_COUNTS
+            gcd_profile_child_calls++;
+            uint64_t prof_child_prev = (uint64_t)hxl;
+#endif
+            if (gcd_hgcd_block(hx, hxl, hy, hyl, hnx, target + 2,
+                               hny, hcap,
                                child_mem, &hnxl, &hnyl,
-                               step, sl, &step_det, 0)) {
+                               step, sl, &step_det,
+                               allow_recursive - 1)) {
+#ifdef BN_GCD_PROFILE_COUNTS
+                gcd_profile_child_ok++;
+                gcd_profile_child_removed +=
+                    prof_child_prev - (uint64_t)(hnxl > hnyl ? hnxl : hnyl);
+#endif
                 uint64_t *ht = hx; hx = hnx; hnx = ht;
                 ht = hy; hy = hny; hny = ht;
                 hxl = hnxl;
@@ -12451,9 +12558,14 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
                     have_acc = 1;
                 } else {
                     int32_t tl[4];
+#ifdef BN_GCD_PROFILE_COUNTS
+                    gcd_profile_ctx = 2;
+#endif
                     if (!gcd_matrix_multiply(tmp, tl, acc, al, step, sl,
-                                             mcap, prod0, prod1))
+                                             mcap, prod0, prod1)) {
+                        GCD_PROF_FAIL(2);
                         return 0;
+                    }
                     for (int i = 0; i < 4; i++) {
                         ht = acc[i]; acc[i] = tmp[i]; tmp[i] = ht;
                         al[i] = tl[i];
@@ -12470,6 +12582,11 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
         int steps = lehmer_simulate_magnitudes(
             hx, hxl, hy, hyl, &A, &B, &C, &D);
         if (!steps) break;
+#ifdef BN_GCD_PROFILE_COUNTS
+        gcd_profile_block_batches[allow_recursive ? 1 : 0]++;
+        gcd_profile_block_batch_limbs[allow_recursive ? 1 : 0] +=
+            (uint64_t)hxl;
+#endif
         int32_t hnxl, hnyl;
         int valid;
         if (!(steps & 1)) {
@@ -12493,7 +12610,7 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
             e00 = (uint64_t)(-D); e01 = (uint64_t)B;
             e10 = (uint64_t)C;    e11 = (uint64_t)(-A);
         }
-        if (matrix_count >= max_matrices) return 0;
+        if (matrix_count >= max_matrices) { GCD_PROF_FAIL(2); return 0; }
         uint64_t *leaf = leaves + (size_t)4 * matrix_count++;
         leaf[0] = e00; leaf[1] = e01; leaf[2] = e10; leaf[3] = e11;
         det = (steps & 1) ? -det : det;
@@ -12504,7 +12621,7 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
         if (mag_cmp(hx, hxl, hy, hyl) < 0) {
             ht = hx; hx = hy; hy = ht;
             int32_t lt = hxl; hxl = hyl; hyl = lt;
-            if (matrix_count >= max_matrices) return 0;
+            if (matrix_count >= max_matrices) { GCD_PROF_FAIL(2); return 0; }
             leaf = leaves + (size_t)4 * matrix_count++;
             leaf[0] = 0; leaf[1] = 1; leaf[2] = 1; leaf[3] = 0;
             det = -det;
@@ -12514,9 +12631,14 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
     /* Accept partial reductions.  A batch invalidated by the omitted low
      * limbs near the slice's precision limit merely shortens the block; the
      * full-width application below still validates whatever prefix was
-     * accumulated.  Insist on enough progress to amortize that application. */
-    int32_t min_remove = h / 8 < 8 ? 8 : h / 8;
-    if (!success || hxl > h - min_remove) return 0;
+     * accumulated.  The bar is deliberately low: the slice work is already
+     * spent, and applying a short matrix (4 products of ~removed/2 x p) is
+     * far cheaper per removed limb than the caller's full-width scalar
+     * fallback.  A proportional bar (h/8) discarded ~1000-batch reductions
+     * over one late invalid batch, and each discard cost a quadratic
+     * full-width cooldown -- the 8k->16k scaling cliff. */
+    int32_t min_remove = 8;
+    if (!success || hxl > h - min_remove) { GCD_PROF_FAIL(3); return 0; }
     uint64_t *cur[4];
     int32_t cl[4];
     if (matrix_count) {
@@ -12530,13 +12652,23 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
             for (int i = 0; i < 4; i++) tail[i] = acc[i];
         }
         int32_t tl[4];
+#ifdef BN_GCD_PROFILE_COUNTS
+        gcd_profile_ctx = 0;
+#endif
         if (!gcd_matrix_product_tree(leaves, matrix_count, tail, tl,
-                                     mcap, tree_scratch))
+                                     mcap, tree_scratch)) {
+            GCD_PROF_FAIL(2);
             return 0;
+        }
         if (have_acc) {
+#ifdef BN_GCD_PROFILE_COUNTS
+            gcd_profile_ctx = 2;
+#endif
             if (!gcd_matrix_multiply(tmp, cl, acc, al, tail, tl,
-                                     mcap, prod0, prod1))
+                                     mcap, prod0, prod1)) {
+                GCD_PROF_FAIL(2);
                 return 0;
+            }
             for (int i = 0; i < 4; i++) cur[i] = tmp[i];
         } else {
             for (int i = 0; i < 4; i++) {
@@ -12545,7 +12677,7 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
             }
         }
     } else {
-        if (!have_acc) return 0;
+        if (!have_acc) { GCD_PROF_FAIL(3); return 0; }
         for (int i = 0; i < 4; i++) {
             cur[i] = acc[i];
             cl[i] = al[i];
@@ -12567,14 +12699,16 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
                                     cur[0], cl[0], y, p, hy, hyl,
                                     prod0, prod1, prod_cap, rylen);
     }
+    if (!ok) GCD_PROF_FAIL(4);
     if (!ok && used_recursive)
-        return gcd_hgcd_block(x, xlen, y, ylen, rx, ry, cap,
+        return gcd_hgcd_block(x, xlen, y, ylen, rx, min_result, ry, cap,
                               mem, rxlen, rylen,
                               out_matrix, out_ml, out_det, 0);
     if (!ok) return 0;
     int32_t out_max = *rxlen > *rylen ? *rxlen : *rylen;
+    if (out_max >= xlen) GCD_PROF_FAIL(5);
     if (out_max >= xlen && used_recursive)
-        return gcd_hgcd_block(x, xlen, y, ylen, rx, ry, cap,
+        return gcd_hgcd_block(x, xlen, y, ylen, rx, min_result, ry, cap,
                               mem, rxlen, rylen,
                               out_matrix, out_ml, out_det, 0);
     if (out_max >= xlen) return 0;
@@ -12587,6 +12721,11 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
         }
         *out_det = det;
     }
+#ifdef BN_GCD_PROFILE_COUNTS
+    gcd_profile_block_ok[allow_recursive ? 1 : 0]++;
+    gcd_profile_block_removed[allow_recursive ? 1 : 0] +=
+        (uint64_t)(xlen - out_max);
+#endif
     return 1;
 }
 
@@ -12711,9 +12850,16 @@ WValue bigint_gcd_any_generic(WValue a, WValue b) {
     while (ylen > 1) {
         if (xlen >= BN_GCD_HGCD_THRESHOLD && xlen <= hgcd_retry_at) {
             int32_t nxl, nyl;
-            if (gcd_hgcd_block(x, xlen, y, ylen, nx, ny, cap,
+#ifdef BN_GCD_PROFILE_COUNTS
+            gcd_profile_hgcd_top_calls++;
+            gcd_profile_hgcd_top_xlen += (uint64_t)xlen;
+#endif
+            if (gcd_hgcd_block(x, xlen, y, ylen, nx, 0, ny, cap,
                                buf + (size_t)4 * cap, &nxl, &nyl,
-                               NULL, NULL, NULL, 1)) {
+                               NULL, NULL, NULL, 8)) {
+#ifdef BN_GCD_PROFILE_COUNTS
+                gcd_profile_hgcd_top_ok++;
+#endif
                 uint64_t *t;
                 int32_t tl;
                 t = x; x = nx; nx = t;
@@ -12727,9 +12873,12 @@ WValue bigint_gcd_any_generic(WValue a, WValue b) {
                 hgcd_retry_at = INT32_MAX;
                 continue;
             }
-            int32_t cooldown = xlen / 8;
-            if (cooldown < 1) cooldown = 1;
-            hgcd_retry_at = xlen - cooldown;
+            /* One scalar batch rewrites the leading slice entirely, so a
+             * retry is statistically independent after a couple of limbs of
+             * progress.  A constant cooldown keeps the failure penalty O(n)
+             * (a proportional xlen/8 cooldown made every failure cost
+             * O(n^2/8) of full-width scalar work). */
+            hgcd_retry_at = xlen - 8;
         }
         int64_t A, B, C, D;
         int steps;

@@ -3313,6 +3313,57 @@ static void fuzz_boxed_mul_sqr_against_gmp(
            cases, cases, max_limbs);
 }
 
+static void fuzz_boxed_mul1_against_gmp(int cases) {
+    static const int32_t widths[] = {
+        2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 64, 128
+    };
+    uint64_t state = 0xbb67ae8584caa73bULL;
+    mpz_t za, zb, zg;
+    mpz_inits(za, zb, zg, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t width = widths[(size_t)t %
+            (sizeof widths / sizeof widths[0])];
+        WValue big_base = bench_bigint(width, bench_rng(&state));
+        WValue word_base = bench_bigint(1, bench_rng(&state));
+        WValue big = big_base;
+        WValue word = word_base;
+        int big_negative = (t & 1) != 0;
+        int word_negative = (t & 2) != 0;
+        int overlay = (t & 4) != 0;
+        if (big_negative) {
+            if (overlay) big = w_neg(big_base);
+            else w_as_bigint(big)->size = -w_as_bigint(big)->size;
+        }
+        if (word_negative) {
+            if (overlay) word = w_neg(word_base);
+            else w_as_bigint(word)->size = -w_as_bigint(word)->size;
+        }
+        gmp_import_value(za, big);
+        gmp_import_value(zb, word);
+        mpz_mul(zg, za, zb);
+
+        WValue forward = bigint_mul_any(big, word);
+        if (!value_matches_mpz(forward, zg))
+            dief("boxed mul1 fuzz mismatch case=%d width=%d order=forward",
+                 t, width);
+        WValue reverse = bigint_mul_any(word, big);
+        if (!value_matches_mpz(reverse, zg))
+            dief("boxed mul1 fuzz mismatch case=%d width=%d order=reverse",
+                 t, width);
+        bench_free_value(forward);
+        bench_free_value(reverse);
+        if (big != big_base) bench_free_value(big);
+        if (word != word_base) bench_free_value(word);
+        bench_free_value(big_base);
+        bench_free_value(word_base);
+    }
+    mpz_clears(za, zb, zg, NULL);
+    bigint_pool_release_thread();
+    printf("boxed mul1 fuzz vs GMP: %d/%d match"
+           " (2..128 limbs, both orders/sign encodings)\n",
+           cases, cases);
+}
+
 static void gmp_import_value(mpz_t z, WValue v) {
     uint64_t scratch;
     int32_t len;
@@ -4996,6 +5047,17 @@ int main(int argc, char **argv) {
         die("boxed multiply/square fuzz requires GMP");
 #endif
     }
+    if (argc == 3 && strcmp(argv[1], "--fuzz-boxed-mul1") == 0) {
+        int cases = atoi(argv[2]);
+        if (cases <= 0)
+            die("boxed mul1 fuzz expects positive cases");
+#ifdef HAVE_GMP
+        fuzz_boxed_mul1_against_gmp(cases);
+        return 0;
+#else
+        die("boxed mul1 fuzz requires GMP");
+#endif
+    }
     if (argc == 4 && strcmp(argv[1], "--bench-linear-iters") == 0) {
         int32_t limbs = (int32_t)atoi(argv[2]);
         int iters = atoi(argv[3]);
@@ -5359,10 +5421,46 @@ int main(int argc, char **argv) {
         printf("multiply profile sink=%llu\n", (unsigned long long)bench_sink);
         return 0;
     }
-    if (argc == 3 && strcmp(argv[1], "--bench-mul1") == 0) {
+    if (argc == 4 && strcmp(argv[1], "--bench-mul1-offsets") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        int iters = atoi(argv[3]);
+        if (limbs <= 0 || limbs > 128 || iters <= 0)
+            die("mul_1 offset benchmark expects 1..128 limbs and positive iterations");
+        enum { OFFSET_ARENA = 65536, SOURCE_BASE = 4096 + 1024,
+               RESULT_BASE = 32768 + 1024 };
+        void *arena_raw = NULL;
+        if (posix_memalign(&arena_raw, 4096, OFFSET_ARENA) != 0)
+            die("out of memory in mul_1 offset benchmark");
+        uint8_t *arena = (uint8_t *)arena_raw;
+        uint64_t *up = (uint64_t *)(arena + SOURCE_BASE);
+        uint64_t state = 0x13198a2e03707344ULL ^ (uint64_t)limbs;
+        for (int32_t i = 0; i < limbs; i++) up[i] = bench_rng(&state);
+        up[0] |= 1ULL;
+        up[limbs - 1] |= 1ULL << 63;
+        uint64_t v = 0x9e3779b97f4a7c15ULL;
+        for (int offset = 0; offset < 4096; offset += 64) {
+            uint64_t *rp = (uint64_t *)(arena + RESULT_BASE + offset);
+            uint64_t sink = 0;
+            for (int i = 0; i < 10000; i++) sink ^= bn_mul_1(rp, up, limbs, v);
+            double best = 0.0;
+            for (int rep = 0; rep < 7; rep++) {
+                double start = bench_now();
+                for (int i = 0; i < iters; i++)
+                    sink ^= bn_mul_1(rp, up, limbs, v) + (uint64_t)i;
+                double ns = (bench_now() - start) * 1e9 / (double)iters;
+                if (rep == 0 || ns < best) best = ns;
+            }
+            bench_sink ^= sink ^ rp[0];
+            printf("mul1-offset\t%d\t%d\t%.3f\n", limbs, offset, best);
+        }
+        free(arena_raw);
+        return 0;
+    }
+    if ((argc == 3 || argc == 4) && strcmp(argv[1], "--bench-mul1") == 0) {
         int32_t limbs = (int32_t)atoi(argv[2]);
         if (limbs <= 0) die("mul_1 benchmark limbs must be positive");
-        int iters = bench_iters_for_linear(limbs);
+        int iters = argc == 4 ? atoi(argv[3]) : bench_iters_for_linear(limbs);
+        if (iters <= 0) die("mul_1 benchmark iterations must be positive");
         uint64_t *up = bench_limbs(
             limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
         uint64_t *tw = (uint64_t *)malloc((size_t)limbs * sizeof(uint64_t));

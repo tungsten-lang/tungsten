@@ -3260,12 +3260,95 @@ static uint64_t bn_mul_1_f17(uint64_t *rp, const uint64_t *up, uint64_t v) {
 
 #if BN_MUL_POWER2_FIXED
 __attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_mul_1_f8(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_TAIL
+    );
+}
+
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
 static uint64_t bn_mul_1_f16(uint64_t *rp, const uint64_t *up, uint64_t v) {
     __asm__(
         BN_M1F_BLOCK0
         BN_M1F_BLOCK(32)
         BN_M1F_BLOCK(64)
         BN_M1F_BLOCK(96)
+        BN_M1F_TAIL
+    );
+}
+
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static uint64_t bn_mul_1_f32(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_BLOCK(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_BLOCK(192)
+        BN_M1F_BLOCK(224)
+        BN_M1F_TAIL
+    );
+}
+
+__attribute__((naked, noinline, aligned(64)))
+static uint64_t bn_mul_1_f40(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_BLOCK(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_BLOCK(192)
+        BN_M1F_BLOCK(224)
+        BN_M1F_BLOCK(256)
+        BN_M1F_BLOCK(288)
+        BN_M1F_TAIL
+    );
+}
+
+__attribute__((naked, noinline, aligned(64)))
+static uint64_t bn_mul_1_f48(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_BLOCK(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_BLOCK(192)
+        BN_M1F_BLOCK(224)
+        BN_M1F_BLOCK(256)
+        BN_M1F_BLOCK(288)
+        BN_M1F_BLOCK(320)
+        BN_M1F_BLOCK(352)
+        BN_M1F_TAIL
+    );
+}
+
+__attribute__((naked, noinline, aligned(64)))
+static uint64_t bn_mul_1_f64(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_BLOCK(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_BLOCK(192)
+        BN_M1F_BLOCK(224)
+        BN_M1F_BLOCK(256)
+        BN_M1F_BLOCK(288)
+        BN_M1F_BLOCK(320)
+        BN_M1F_BLOCK(352)
+        BN_M1F_BLOCK(384)
+        BN_M1F_BLOCK(416)
+        BN_M1F_BLOCK(448)
+        BN_M1F_BLOCK(480)
         BN_M1F_TAIL
     );
 }
@@ -3293,7 +3376,7 @@ static uint64_t bn_mul_1_f20(uint64_t *rp, const uint64_t *up, uint64_t v) {
     );
 }
 
-__attribute__((naked, noinline, aligned(64)))
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
 static uint64_t bn_mul_1_f24(uint64_t *rp, const uint64_t *up, uint64_t v) {
     __asm__(
         BN_M1F_BLOCK0
@@ -3328,8 +3411,23 @@ static inline uint64_t bn_mul_1_f17(uint64_t *rp, const uint64_t *up, uint64_t v
 }
 #endif
 #if BN_MUL_POWER2_FIXED
+static inline uint64_t bn_mul_1_f8(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_mul_1_ref(rp, up, 8, v);
+}
 static inline uint64_t bn_mul_1_f16(uint64_t *rp, const uint64_t *up, uint64_t v) {
     return bn_mul_1_ref(rp, up, 16, v);
+}
+static inline uint64_t bn_mul_1_f32(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_mul_1_ref(rp, up, 32, v);
+}
+static inline uint64_t bn_mul_1_f40(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_mul_1_ref(rp, up, 40, v);
+}
+static inline uint64_t bn_mul_1_f48(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_mul_1_ref(rp, up, 48, v);
+}
+static inline uint64_t bn_mul_1_f64(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    return bn_mul_1_ref(rp, up, 64, v);
 }
 #endif
 #endif
@@ -7910,20 +8008,23 @@ static uint64_t *bn_eq_redirect_slot(const uint64_t *a, const uint64_t *b) {
 static WValue bigint_sqr_positive_16(WBigint *a);
 #endif
 
+static inline __attribute__((always_inline))
+WValue bigint_mul_positive_11(WBigint *a, WBigint *b) {
+    __uint128_t product =
+        (__uint128_t)a->limbs[0] * b->limbs[0];
+    uint64_t low = (uint64_t)product;
+    uint64_t high = (uint64_t)(product >> 64);
+    if (high == 0) return bigint_finish_one_limb(low, 0);
+    WBigint *r = bigint_alloc_raw_hot_exact(2U);
+    r->limbs[0] = low;
+    r->limbs[1] = high;
+    r->size = 2;
+    return bigint_box(r);
+}
+
 static WValue bigint_mul_positive_equal(
     WBigint *a, WBigint *b, int32_t n) {
-    if (n == 1) {
-        __uint128_t product =
-            (__uint128_t)a->limbs[0] * b->limbs[0];
-        uint64_t low = (uint64_t)product;
-        uint64_t high = (uint64_t)(product >> 64);
-        if (high == 0) return bigint_finish_one_limb(low, 0);
-        WBigint *r = bigint_alloc_raw_hot(2);
-        r->limbs[0] = low;
-        r->limbs[1] = high;
-        r->size = 2;
-        return bigint_box(r);
-    }
+    if (n == 1) return bigint_mul_positive_11(a, b);
 
 #if BN_BOXED_SQR16_FAST
     if (a == b && n == 16)
@@ -8023,22 +8124,94 @@ WValue bigint_sqr_positive_16(WBigint *a) {
 #ifndef BN_MUL_N1_FAST
 #define BN_MUL_N1_FAST 1
 #endif
+#ifndef BN_MUL_N1_SMALL_STRAIGHT
+#if defined(__aarch64__)
+#define BN_MUL_N1_SMALL_STRAIGHT 1
+#else
+#define BN_MUL_N1_SMALL_STRAIGHT 0
+#endif
+#endif
 #if BN_MUL_N1_FAST
+#if BN_MUL_N1_SMALL_STRAIGHT
+/* Tiny N x 1 products are shorter than the generic mul_1 entry and its
+ * width dispatch.  Keep allocation and the complete carry chain in
+ * the boxed caller; capacities match the recycler's power-of-two classes. */
+static inline __attribute__((always_inline))
+WValue bigint_mul_n1_small(const uint64_t *al, int32_t n, uint64_t w,
+                           int negative) {
+    WBigint *r = bigint_alloc_raw_hot_exact(n <= 3 ? 4U : 8U);
+    __uint128_t product = (__uint128_t)al[0] * w;
+    r->limbs[0] = (uint64_t)product;
+    uint64_t carry = (uint64_t)(product >> 64);
+    product = (__uint128_t)al[1] * w + carry;
+    r->limbs[1] = (uint64_t)product;
+    carry = (uint64_t)(product >> 64);
+    if (n >= 3) {
+        product = (__uint128_t)al[2] * w + carry;
+        r->limbs[2] = (uint64_t)product;
+        carry = (uint64_t)(product >> 64);
+    }
+    if (n == 4) {
+        product = (__uint128_t)al[3] * w + carry;
+        r->limbs[3] = (uint64_t)product;
+        carry = (uint64_t)(product >> 64);
+    }
+    r->limbs[n] = carry;
+    int32_t size = n + (carry != 0);
+    r->size = negative ? -size : size;
+    return bigint_box(r);
+}
+#endif
+
+#if BN_MUL_POWER2_FIXED
+#define BN_DEFINE_BOXED_MUL_N1_FIXED(N, CAP, KERNEL)                       \
+static inline __attribute__((always_inline))                              \
+WValue bigint_mul_n1_fixed##N(const uint64_t *al, uint64_t w,             \
+                              int negative) {                             \
+    WBigint *r = bigint_alloc_raw_hot_exact(CAP);                         \
+    uint64_t carry = KERNEL(r->limbs, al, w);                             \
+    r->limbs[N] = carry;                                                  \
+    int32_t size = N + (carry != 0);                                      \
+    r->size = negative ? -size : size;                                    \
+    return bigint_box(r);                                                 \
+}
+BN_DEFINE_BOXED_MUL_N1_FIXED(8, 16U, bn_mul_1_f8)
+BN_DEFINE_BOXED_MUL_N1_FIXED(16, 32U, bn_mul_1_f16)
+BN_DEFINE_BOXED_MUL_N1_FIXED(24, 32U, bn_mul_1_f24)
+BN_DEFINE_BOXED_MUL_N1_FIXED(32, 64U, bn_mul_1_f32)
+BN_DEFINE_BOXED_MUL_N1_FIXED(40, 64U, bn_mul_1_f40)
+BN_DEFINE_BOXED_MUL_N1_FIXED(48, 64U, bn_mul_1_f48)
+BN_DEFINE_BOXED_MUL_N1_FIXED(64, 128U, bn_mul_1_f64)
+#undef BN_DEFINE_BOXED_MUL_N1_FIXED
+#endif
+
 static WValue bigint_mul_n1(const uint64_t *al, int32_t n, uint64_t w,
                             int negative) {
     WBigint *r = bigint_alloc_raw_hot(n + 1);
-    /* mul_1 is a two-stream kernel: a destination whose 4 KiB offset
-     * aliases the operand stalls every load.  Rehome the destination once
-     * (the churn then recycles the good buffer) instead of paying a
-     * redirect copy on every call. */
+    /* Fixed boxed 32..64-limb shapes bypass this generic frame after their
+     * complete 4 KiB offset sweep found no placement cliff.  Preserve the
+     * established rehome policy for the remaining dynamic-width shapes. */
 #if BN_EQ_PAGE_HAZARD_GUARD
-    if (bn_addsub_page_hazard(r->limbs, al) &&
+    if (n >= 32 &&
+        bn_addsub_page_hazard(r->limbs, al) &&
         !bn_addsub_placement_is_settled(r, al, al))
         r = bigint_rehome_binary_result(r, al, al);
 #endif
 #if BN_MUL_POWER2_FIXED
-    if (n == 16)
+    if (n == 8)
+        r->limbs[8] = bn_mul_1_f8(r->limbs, al, w);
+    else if (n == 16)
         r->limbs[16] = bn_mul_1_f16(r->limbs, al, w);
+    else if (n == 24)
+        r->limbs[24] = bn_mul_1_f24(r->limbs, al, w);
+    else if (n == 32)
+        r->limbs[32] = bn_mul_1_f32(r->limbs, al, w);
+    else if (n == 40)
+        r->limbs[40] = bn_mul_1_f40(r->limbs, al, w);
+    else if (n == 48)
+        r->limbs[48] = bn_mul_1_f48(r->limbs, al, w);
+    else if (n == 64)
+        r->limbs[64] = bn_mul_1_f64(r->limbs, al, w);
     else
 #endif
         r->limbs[n] = bn_mul_1(r->limbs, al, n, w);
@@ -8137,6 +8310,34 @@ static inline WValue bigint_mul_bigint_word(WValue big, int64_t word) {
     int32_t n = bs < 0 ? -bs : bs;
     if (n < 2) return bigint_mul_any_generic(big, w_box_int(word));
     uint64_t w = word < 0 ? (uint64_t)(-word) : (uint64_t)word;
+#if BN_MUL_N1_SMALL_STRAIGHT
+    if (n <= 4)
+        return bigint_mul_n1_small(
+            b->limbs, n, w, (bs < 0) != (word < 0));
+#endif
+#if BN_MUL_POWER2_FIXED
+    if (n == 8)
+        return bigint_mul_n1_fixed8(
+            b->limbs, w, (bs < 0) != (word < 0));
+    if (n == 16)
+        return bigint_mul_n1_fixed16(
+            b->limbs, w, (bs < 0) != (word < 0));
+    if (n == 24)
+        return bigint_mul_n1_fixed24(
+            b->limbs, w, (bs < 0) != (word < 0));
+    if (n == 32)
+        return bigint_mul_n1_fixed32(
+            b->limbs, w, (bs < 0) != (word < 0));
+    if (n == 40)
+        return bigint_mul_n1_fixed40(
+            b->limbs, w, (bs < 0) != (word < 0));
+    if (n == 48)
+        return bigint_mul_n1_fixed48(
+            b->limbs, w, (bs < 0) != (word < 0));
+    if (n == 64)
+        return bigint_mul_n1_fixed64(
+            b->limbs, w, (bs < 0) != (word < 0));
+#endif
     return bigint_mul_n1(b->limbs, n, w, (bs < 0) != (word < 0));
 }
 #endif
@@ -8168,19 +8369,7 @@ WValue bigint_mul_any(WValue a, WValue b) {
          * so only the magnitude gate matters (overlay-flagged negatives with
          * a positive header still square correctly on this path). */
         int32_t n = ba->size;
-        if (n == 1) {
-            __uint128_t product =
-                (__uint128_t)ba->limbs[0] * ba->limbs[0];
-            uint64_t low = (uint64_t)product;
-            uint64_t high = (uint64_t)(product >> 64);
-            if (high == 0)
-                return bigint_finish_one_limb(low, 0);
-            WBigint *r = bigint_alloc_raw_hot(2);
-            r->limbs[0] = low;
-            r->limbs[1] = high;
-            r->size = 2;
-            return bigint_box(r);
-        }
+        if (n == 1) return bigint_mul_positive_11(ba, ba);
 #if BN_BOXED_SQR16_FAST
         /* Bypass bigint_mul_positive_equal's generic-kernel frame entirely:
          * this pointer-identical, positive shape is already fully known. */
@@ -8191,44 +8380,116 @@ WValue bigint_mul_any(WValue a, WValue b) {
             return bigint_mul_positive_equal(ba, ba, n);
     }
 #endif
+#ifndef BN_MUL_N1_POSITIVE_EARLY
+#define BN_MUL_N1_POSITIVE_EARLY 1
+#endif
+#if BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                       \
+    BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED
+    /* Positive boxed N x 1 is common enough that reaching it through the
+     * equal-width dispatch tests is measurable.  The ordinary boxed-pair
+     * path pays only the unlikely one-limb shape gate; all width-specific
+     * work stays behind it. */
+    if (a != b && w_is_bigint(a) && w_is_bigint(b) &&
+        ((a | b) & W_BIGINT_SIGN_BIT) == 0) {
+        WBigint *ba = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+        int32_t na = ba->size;
+        int32_t nb = bb->size;
+#define BN_MUL_N1_POSITIVE_RETURN(WIDE, WORD, NW) do {                    \
+    if ((NW) <= 4)                                                        \
+        return bigint_mul_n1_small(                                       \
+            (WIDE)->limbs, (NW), (WORD)->limbs[0], 0);                    \
+    if ((NW) == 8)                                                        \
+        return bigint_mul_n1_fixed8(                                      \
+            (WIDE)->limbs, (WORD)->limbs[0], 0);                          \
+    if ((NW) == 16)                                                       \
+        return bigint_mul_n1_fixed16(                                     \
+            (WIDE)->limbs, (WORD)->limbs[0], 0);                          \
+    if ((NW) == 24)                                                       \
+        return bigint_mul_n1_fixed24(                                     \
+            (WIDE)->limbs, (WORD)->limbs[0], 0);                          \
+    if ((NW) == 32)                                                       \
+        return bigint_mul_n1_fixed32(                                     \
+            (WIDE)->limbs, (WORD)->limbs[0], 0);                          \
+    if ((NW) == 40)                                                       \
+        return bigint_mul_n1_fixed40(                                     \
+            (WIDE)->limbs, (WORD)->limbs[0], 0);                          \
+    if ((NW) == 48)                                                       \
+        return bigint_mul_n1_fixed48(                                     \
+            (WIDE)->limbs, (WORD)->limbs[0], 0);                          \
+    if ((NW) == 64)                                                       \
+        return bigint_mul_n1_fixed64(                                     \
+            (WIDE)->limbs, (WORD)->limbs[0], 0);                          \
+    return bigint_mul_n1(                                                 \
+        (WIDE)->limbs, (NW), (WORD)->limbs[0], 0);                        \
+} while (0)
+        if (na == 1 || nb == 1) {
+            if (na == 1 && nb == 1)
+                return bigint_mul_positive_11(ba, bb);
+            if (nb == 1 && na >= 2)
+                BN_MUL_N1_POSITIVE_RETURN(ba, bb, na);
+            if (na == 1 && nb >= 2)
+                BN_MUL_N1_POSITIVE_RETURN(bb, ba, nb);
+        }
+#undef BN_MUL_N1_POSITIVE_RETURN
+    }
+#endif
 #if BN_MUL_POSITIVE_PAIR_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
         int32_t n, bn;
         WBigint *ba = w_bigint_view(a, &n);
         WBigint *bb = w_bigint_view(b, &bn);
-        if (n == 1 && bn == 1) {
-            __uint128_t product =
-                (__uint128_t)ba->limbs[0] * bb->limbs[0];
-            uint64_t low = (uint64_t)product;
-            uint64_t high = (uint64_t)(product >> 64);
-            if (high == 0)
-                return bigint_finish_one_limb(low, 0);
-            WBigint *r = bigint_alloc_raw_hot(2);
-            r->limbs[0] = low;
-            r->limbs[1] = high;
-            r->size = 2;
-            return bigint_box(r);
+        if (n == 1 && bn == 1)
+            return bigint_mul_positive_11(ba, bb);
+#if BN_MUL_N1_FAST
+        /* Resolve an asymmetric one-limb shape before the equal-width
+         * dispatch tests, and orient it once so both operand orders share
+         * one compact fixed-width ladder. */
+        int32_t na = n < 0 ? -n : n;
+        int32_t nb = bn < 0 ? -bn : bn;
+        if ((nb == 1 && na >= 2) || (na == 1 && nb >= 2)) {
+            WBigint *wide = nb == 1 ? ba : bb;
+            WBigint *word = nb == 1 ? bb : ba;
+            int32_t nw = nb == 1 ? na : nb;
+            int negative = (n < 0) != (bn < 0);
+#if BN_MUL_N1_SMALL_STRAIGHT
+            if (nw <= 4)
+                return bigint_mul_n1_small(
+                    wide->limbs, nw, word->limbs[0], negative);
+#endif
+#if BN_MUL_POWER2_FIXED
+            if (nw == 8)
+                return bigint_mul_n1_fixed8(
+                    wide->limbs, word->limbs[0], negative);
+            if (nw == 16)
+                return bigint_mul_n1_fixed16(
+                    wide->limbs, word->limbs[0], negative);
+            if (nw == 24)
+                return bigint_mul_n1_fixed24(
+                    wide->limbs, word->limbs[0], negative);
+            if (nw == 32)
+                return bigint_mul_n1_fixed32(
+                    wide->limbs, word->limbs[0], negative);
+            if (nw == 40)
+                return bigint_mul_n1_fixed40(
+                    wide->limbs, word->limbs[0], negative);
+            if (nw == 48)
+                return bigint_mul_n1_fixed48(
+                    wide->limbs, word->limbs[0], negative);
+            if (nw == 64)
+                return bigint_mul_n1_fixed64(
+                    wide->limbs, word->limbs[0], negative);
+#endif
+            return bigint_mul_n1(
+                wide->limbs, nw, word->limbs[0], negative);
         }
+#endif
         if (n > 1 &&
             (n <= BN_MUL_POSITIVE_PAIR_FAST_MAX ||
              (BN_MUL_POSITIVE_PAIR_24 && n == 24) ||
              (BN_MUL_POSITIVE_PAIR_40 && n == 40)) &&
             bn == n)
             return bigint_mul_positive_equal(ba, bb, n);
-#if BN_MUL_N1_FAST
-        /* N x 1 (boxed x boxed): a one-limb boxed magnitude is a plain
-         * word (>= 2^47, so never 0/±1 — no identity handling needed). */
-        {
-            int32_t na = n < 0 ? -n : n;
-            int32_t nb = bn < 0 ? -bn : bn;
-            int negative = (n < 0) != (bn < 0);
-            if (nb == 1 && na >= 2)
-                return bigint_mul_n1(ba->limbs, na, bb->limbs[0], negative);
-            if (na == 1 && nb >= 2)
-                return bigint_mul_n1(bb->limbs, nb, ba->limbs[0], negative);
-        }
-#endif
-
         /* Neither operand can be an inline +/-1 here.  Keep the ordinary
          * boxed/boxed path out of the mixed-representation identity checks
          * below: four extra WValue comparisons were measurable at large

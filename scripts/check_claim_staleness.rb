@@ -41,6 +41,12 @@ CHECKS = [
     message: "--accurate means >=110ms regions; a 20ms default resurrects the phantom-loss trap"
   },
   {
+    file: "runtime/runtime.c",
+    fact: /ntt_cost_est/,
+    stale: /BN_DIV_RECIP_Q_MAX BN_BIGINT_POOL_MAX_CAP\b/,
+    message: "BN_DIV_RECIP_Q_MAX must not borrow the recycler's pool cap — that coupling gated the reciprocal division path at 16384 and caused a 1.8x cliff (d800862)"
+  },
+  {
     file: "compiler/lib/emitter.w",
     fact: /w_bigint_add_mut/,
     stale: /declare_fn_attrs\("w_bigint_(?:add|sub|mul)_mut"[^\n]*memory\((?:read|none)\)/,

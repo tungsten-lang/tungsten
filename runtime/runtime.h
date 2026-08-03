@@ -106,9 +106,10 @@ WValue w_zstd_compress_llvm_escaped(WValue escaped_val);
  * realloc-growing arena. The legacy size-class bits remain descriptive handle
  * metadata during the transition; they no longer choose storage or stride.
  *
- * Lifetime: single compile per process. `w_node_arena_init()` at
- * compile start, `w_node_arena_reset()` between compiles (frees all
- * arenas; references are invalid after reset).
+ * Lifetime: compile-generation scoped. `w_node_arena_init()` at compile
+ * start and `w_node_arena_reset()` between compiles; reset invalidates every
+ * handle and rewinds cursors while retaining Store-owned high-water buffers
+ * for reuse by the next generation.
  */
 typedef struct WNodeArena {
     WValue   *base;
@@ -252,7 +253,7 @@ WValue   w_ast_intern_str_of(WValue node);
  * the packed reference; already-frozen and non-array values pass
  * through untouched. Frozen bodies are immutable — no push/mutate path
  * exists or is needed (see the "no aligned header" note in wvalue.h).
- * w_node_arena_reset reclaims the whole arena. */
+ * w_node_arena_reset rewinds the arena for the next generation. */
 WValue   w_ast_freeze_if_array(WValue v);
 WValue   w_ast_body_builder_new(int64_t initial_capacity);
 WValue   w_ast_body_builder_push(WValue storage, int64_t size, WValue value);

@@ -13904,11 +13904,13 @@ int64_t w_ast_stats_dump(int64_t reserved) {
     uint64_t words = g_node_arena.cursor > 1 ? g_node_arena.cursor - 1 : 0;
     uint64_t bytes = words * sizeof(WValue);
     fprintf(stderr, "--- AST stats: exact-width word arena ---\n");
-    fprintf(stderr, "  %-5s %12llu words  %10.1f KB\n",
-            "node", (unsigned long long)words, bytes / 1024.0);
-    fprintf(stderr, "  %-5s %12u arrays %10.1f KB  %u w64 slots (child-list body arena, no header)\n",
+    fprintf(stderr, "  %-5s %12llu words  %10.1f KB live  %10.1f KB reserved\n",
+            "node", (unsigned long long)words, bytes / 1024.0,
+            (double)g_node_arena.cap * sizeof(WValue) / 1024.0);
+    fprintf(stderr, "  %-5s %12u arrays %10.1f KB live  %10.1f KB reserved  %u w64 slots\n",
             "body", g_ast_extra_arrays,
             (double)g_body_arena_cursor * sizeof(WValue) / 1024.0,
+            (double)g_body_arena_cap * sizeof(WValue) / 1024.0,
             g_body_arena_cursor);
     size_t sparse_reserved =
         (size_t)g_sparse_map.cap * (sizeof(uint64_t) + sizeof(uint32_t)) +
@@ -13924,10 +13926,11 @@ int64_t w_ast_stats_dump(int64_t reserved) {
 }
 
 void w_node_arena_reset(void) {
-    free(g_node_arena.base);
-    g_node_arena.base = NULL;
+    /* Compile generations reuse the Store's high-water allocations. Every
+     * constructor initializes its exact field width before publishing a
+     * handle, so rewinding is sufficient and avoids malloc/free churn in
+     * REPL, daemon, and incremental compiler processes. */
     g_node_arena.cursor = 1;
-    g_node_arena.cap = 0;
     w_ast_sparse_reset();
     w_ast_extra_reset();
     /* Cached Bool nodes are arena handles. They must not survive the arena
@@ -14465,16 +14468,17 @@ static uint32_t w_body_arena_alloc(uint32_t n) {
 void w_ast_extra_reset(void) {
     for (uint32_t i = 1; i < g_body_builders_used; i++) {
         free(g_body_builders[i].items);
+        g_body_builders[i].items = NULL;
     }
-    free(g_body_builders);
-    g_body_builders = NULL;
-    g_body_builders_cap = 0;
-    g_body_builders_used = 0;
+    if (g_body_builders) {
+        memset(g_body_builders, 0,
+               (size_t)g_body_builders_cap * sizeof(WAstBodyBuilderSlot));
+        g_body_builders_used = 1;
+    } else {
+        g_body_builders_used = 0;
+    }
     g_body_builder_free = 0;
-    free(g_body_arena_base);
-    g_body_arena_base = NULL;
     g_body_arena_cursor = 0;
-    g_body_arena_cap = 0;
     g_ast_extra_arrays = 0;
 }
 

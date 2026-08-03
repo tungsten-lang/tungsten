@@ -50,10 +50,9 @@ static double bench(const char *name, void (*fn)(int64_t), int64_t iters) {
     return ops;
 }
 
-/* Between-compiles cycle. w_node_arena_reset() frees the arenas;
- * w_node_arena_init() re-primes them. The compiler always pairs them
- * (reset, then init, between compiles) — the benchmark must too, or a
- * post-reset w_node_alloc hands back a node pointing at a freed base. */
+/* Between-compiles cycle. w_node_arena_reset() invalidates handles and
+ * rewinds Store cursors while retaining high-water buffers for reuse;
+ * w_node_arena_init() remains the paired compatibility boundary. */
 static void arena_cycle(void) {
     w_node_arena_reset();
     w_node_arena_init();
@@ -144,8 +143,9 @@ static void report_arena_peak(void) {
     uint64_t words = (uint64_t)g_node_arena.cursor - 1;
     uint64_t bytes = words * sizeof(WValue);
     printf("\nPeak exact arena (100k x1 + 50k x3 + 25k x7):\n");
-    printf("  words=%-9llu cap=%-9u                 %9.2f KB\n",
-           (unsigned long long)words, g_node_arena.cap, bytes / 1024.0);
+    printf("  words=%-9llu cap=%-9u live=%9.2f KB reserved=%9.2f KB\n",
+           (unsigned long long)words, g_node_arena.cap, bytes / 1024.0,
+           (double)g_node_arena.cap * sizeof(WValue) / 1024.0);
     arena_cycle();
 }
 

@@ -1372,8 +1372,30 @@ int main() {
         WValue true_before = w_ast_bool_cached(1);
         assert(w_node_field_load(false_before, 0) == W_FALSE);
         assert(w_node_field_load(true_before, 0) == W_TRUE);
+        WValue *node_base_before = g_node_arena.base;
+        uint32_t node_cap_before = g_node_arena.cap;
+
+        WValue body_array = w_array_new_empty();
+        w_array_push(body_array, w_int(17));
+        WValue packed_body = w_ast_freeze_if_array(body_array);
+        assert(w_is_body(packed_body));
+        WValue builder_handle = w_ast_body_builder_new(0);
+        builder_handle = w_ast_body_builder_push(builder_handle, 0, w_int(23));
+        WValue built_body = w_ast_body_builder_finish(builder_handle, 1);
+        assert(w_is_body(built_body));
+        WValue *body_base_before = g_ast_store.body_base;
+        uint32_t body_cap_before = g_ast_store.body_cap;
+        WAstBodyBuilderSlot *builders_before = g_ast_store.body_builders;
+        uint32_t builders_cap_before = g_ast_store.body_builders_cap;
 
         w_node_arena_reset();
+        assert(g_node_arena.base == node_base_before);
+        assert(g_node_arena.cap == node_cap_before);
+        assert(g_ast_store.body_base == body_base_before);
+        assert(g_ast_store.body_cap == body_cap_before);
+        assert(g_ast_store.body_cursor == 0);
+        assert(g_ast_store.body_builders == builders_before);
+        assert(g_ast_store.body_builders_cap == builders_cap_before);
         WValue first = w_node_alloc(/*KIND_PROGRAM=*/92, 0);
         WValue false_after = w_ast_bool_cached(0);
         WValue true_after = w_ast_bool_cached(1);
@@ -1382,6 +1404,17 @@ int main() {
         assert(w_node_offset(true_after) == 3);
         assert(w_node_field_load(false_after, 0) == W_FALSE);
         assert(w_node_field_load(true_after, 0) == W_TRUE);
+
+        WValue next_array = w_array_new_empty();
+        w_array_push(next_array, w_int(31));
+        WValue next_body = w_ast_freeze_if_array(next_array);
+        assert(w_unbox_body_offset(next_body) == 0);
+        assert(w_body_arena_get(0, 0) == w_int(31));
+        WValue next_builder = w_ast_body_builder_new(0);
+        assert(w_as_int(next_builder) == 1);
+        next_builder = w_ast_body_builder_push(next_builder, 0, w_int(37));
+        WValue next_built_body = w_ast_body_builder_finish(next_builder, 1);
+        assert(w_body_arena_get(w_unbox_body_offset(next_built_body), 0) == w_int(37));
         w_node_arena_reset();
 
         printf("  AST cached bool reset: OK\n");

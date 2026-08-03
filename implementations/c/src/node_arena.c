@@ -170,10 +170,9 @@ WValue w_ast_bool_cached(int64_t truthy_01) {
 void w_ast_sparse_reset(void);  /* forward decl; defined below */
 
 void w_node_arena_reset(void) {
-    free(g_node_arena.base);
-    g_node_arena.base = NULL;
+    /* Retain the high-water allocation across compile generations; exact
+     * constructors overwrite every live field before a handle escapes. */
     g_node_arena.cursor = 1;
-    g_node_arena.cap = 0;
     g_ast_bool_node[0] = 0;
     g_ast_bool_node[1] = 0;
     g_ast_store.generation++;

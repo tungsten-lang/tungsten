@@ -481,6 +481,8 @@ use target
       return eval_use(node)
     if t == :begin
       return eval_begin(node, env)
+    if t == :rescue_expr
+      return eval_rescue_expr(node, env)
     if t == :yield
       return eval_yield(node, env)
     if t == :on_guard
@@ -4324,6 +4326,29 @@ use target
       evaluate_body(ast_get(node, :ensure_body), env)
     if pending != nil
       raise pending
+    result
+
+  # Postfix `expr rescue fallback` (:rescue_expr) — the single-expression
+  # form of begin/rescue. Mirrors eval_begin's rescue arm: errors select the
+  # fallback expression; control-flow signals (return/break/next) tunnel
+  # through the host raise and must not be swallowed.
+  -> eval_rescue_expr(node, env)
+    result = nil
+    pending = nil
+    caught = false
+    begin
+      result = evaluate(ast_get(node, :body), env)
+    rescue err
+      if err == "__SIGNAL__"
+        pending = err
+      else
+        caught = true
+        @raised_value = nil
+        @raised_message = nil
+    if pending != nil
+      raise pending
+    if caught
+      result = evaluate(ast_get(node, :fallback), env)
     result
 
   # -- Yield --

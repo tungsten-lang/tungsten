@@ -1911,6 +1911,12 @@
   try_tv = lower_expression(ctx, node.body)
   wfn[:eh_depth] = wfn[:eh_depth] - 1
   try_reg = ensure_i64_value(wfn, try_tv)
+  # An assignment inside the guarded expression (`x = f() rescue nil`) binds
+  # its var to an SSA reg defined in THIS arm; flush bindings to slots before
+  # the join (as lower_begin does) or a post-join read of the var uses a reg
+  # that doesn't dominate it — invalid IR. (try_reg itself is safe: its only
+  # cross-block use is the phi below, which reads it on the edge.)
+  materialize_bindings(ctx)
   emit_instruction(wfn, {op: :call_direct_void, name: "w_exception_pop", args: []})
   try_from = wfn[:blocks][wfn[:blocks].size() - 1][:label]
   emit_instruction(wfn, {op: :br, label: end_label})
@@ -1920,6 +1926,7 @@
   emit_instruction(wfn, {op: :call_direct_void, name: "w_exception_pop", args: []})
   rescue_tv = lower_expression(ctx, node.fallback)
   rescue_reg = ensure_i64_value(wfn, rescue_tv)
+  materialize_bindings(ctx)
   rescue_from = wfn[:blocks][wfn[:blocks].size() - 1][:label]
   emit_instruction(wfn, {op: :br, label: end_label})
 

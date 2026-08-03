@@ -405,6 +405,7 @@ compiled_specs=(
   spec/numeric/bigint_tag_sign_spec.w
   spec/compiler/bigint_shared_bit_spec.w
   spec/compiler/bigint_mutate_unique_spec.w
+  spec/compiler/postfix_rescue_loader_spec.w
   spec/numeric/bigint_view_field_write_spec.w
   spec/compiler/hash_free_escape_spec.w
   spec/numeric/bit_ops_spec.w
@@ -458,6 +459,7 @@ interpreter_specs=(
   spec/numeric/bigint_tag_sign_spec.w
   spec/compiler/bigint_shared_bit_spec.w
   spec/compiler/bigint_mutate_unique_spec.w
+  spec/compiler/postfix_rescue_loader_spec.w
   spec/numeric/bigint_view_field_write_spec.w
   spec/compiler/hash_free_escape_spec.w
   spec/numeric/bit_ops_spec.w

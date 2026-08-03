@@ -344,6 +344,14 @@ use parser
   -> collect_arr_literal_vars_list(nodes, arr_vars, other_assign)
     if nodes == nil
       return nil
+    # A "list" field is not always a list: rescue_expr.body (postfix
+    # `rescue`) holds a single packed node, and .size() on an AST node is
+    # nil — `i < nil` raises in the compiled compiler. Route single nodes
+    # through the node walker (which forwards real arrays back here),
+    # mirroring the puts/value convention in scan_arr_safety_node.
+    if is_ast_node?(nodes)
+      collect_arr_literal_vars_node(nodes, arr_vars, other_assign)
+      return nil
     i = 0
     while i < nodes.size()
       collect_arr_literal_vars_node(nodes[i], arr_vars, other_assign)
@@ -715,38 +723,24 @@ use parser
         collect_autoload_refs(node.args[ai], defined, registry, seen, pending)
         ai += 1
     if node.body != nil && t != :class_def
-      bj = 0
-      while bj < node.body.size()
-        collect_autoload_refs(node.body[bj], defined, registry, seen, pending)
-        bj += 1
+      collect_autoload_refs_seq(node.body, defined, registry, seen, pending)
     if node.then_body != nil
-      bj = 0
-      while bj < node.then_body.size()
-        collect_autoload_refs(node.then_body[bj], defined, registry, seen, pending)
-        bj += 1
+      collect_autoload_refs_seq(node.then_body, defined, registry, seen, pending)
     if node.else_body != nil
-      bj = 0
-      while bj < node.else_body.size()
-        collect_autoload_refs(node.else_body[bj], defined, registry, seen, pending)
-        bj += 1
+      collect_autoload_refs_seq(node.else_body, defined, registry, seen, pending)
     # begin/rescue/ensure — the rescue and ensure clauses live in their own
     # fields, so class refs that appear only inside them (`rescue TypeError`
     # checks, ensure-time cleanup) would otherwise never trigger autoload.
     if node.rescue_body != nil
-      bj = 0
-      while bj < node.rescue_body.size()
-        collect_autoload_refs(node.rescue_body[bj], defined, registry, seen, pending)
-        bj += 1
+      collect_autoload_refs_seq(node.rescue_body, defined, registry, seen, pending)
     if node.ensure_body != nil
-      bj = 0
-      while bj < node.ensure_body.size()
-        collect_autoload_refs(node.ensure_body[bj], defined, registry, seen, pending)
-        bj += 1
+      collect_autoload_refs_seq(node.ensure_body, defined, registry, seen, pending)
+    # Postfix `rescue` (rescue_expr) packs its fallback expression as a single
+    # node in its own field — a class named only there must still autoload.
+    if node.fallback != nil
+      collect_autoload_refs_seq(node.fallback, defined, registry, seen, pending)
     if node.expressions != nil
-      ej = 0
-      while ej < node.expressions.size()
-        collect_autoload_refs(node.expressions[ej], defined, registry, seen, pending)
-        ej += 1
+      collect_autoload_refs_seq(node.expressions, defined, registry, seen, pending)
     if node.value != nil && is_ast_node?(node.value)
       collect_autoload_refs(node.value, defined, registry, seen, pending)
     if node.left != nil && is_ast_node?(node.left)
@@ -781,6 +775,20 @@ use parser
     # its own `body`, which the generic walk above picks up on recursion.
     if node.block != nil && is_ast_node?(node.block)
       collect_autoload_refs(node.block, defined, registry, seen, pending)
+    nil
+
+  # Walk a body-ish field that is usually a node Array but may hold a SINGLE
+  # packed node (rescue_expr's body/fallback from postfix `rescue`). Calling
+  # .size() on an AST node yields nil, and `i < nil` raises in the compiled
+  # compiler, so the two shapes must be told apart before iterating.
+  -> collect_autoload_refs_seq(nodes, defined, registry, seen, pending)
+    if is_ast_node?(nodes)
+      collect_autoload_refs(nodes, defined, registry, seen, pending)
+      return nil
+    i = 0
+    while i < nodes.size()
+      collect_autoload_refs(nodes[i], defined, registry, seen, pending)
+      i += 1
     nil
 
   # Native runtime entry points whose WValue result has source-defined methods.

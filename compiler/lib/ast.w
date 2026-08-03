@@ -1000,6 +1000,10 @@ in Tungsten:AST
     ccall_nobox("w_node_inline_payload", KIND_REGEX_CAPTURE, index)
 
 + Bool < Node [slab]
+  # ast-kind: KIND_BOOL
+  - ivars
+    @value w64
+
   -> .new(value)
     if value
       ccall_nobox("w_ast_bool_cached", 1)
@@ -1633,6 +1637,7 @@ in Tungsten:AST
     slab_alloc_init(KIND_RECASE, SC_2, value)
 
 + ReturnNil < Node [slab]
+  # ast-public-kind: return
   -> .new
     # Compact-tier singleton for bare `return` (no value). Shares the
     # :return symbol via kind_sym_table_data, so lowering treats it

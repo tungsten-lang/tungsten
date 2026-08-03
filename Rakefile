@@ -57,7 +57,12 @@ end
 
 namespace :check do
   desc "Run generated-data and layout consistency checks in parallel"
-  multitask all: %i[units layouts core_doc claims]
+  multitask all: %i[units layouts core_doc claims ast_schema]
+
+  desc "Verify generated slab-AST ABI tables match compiler/lib/ast.w"
+  task :ast_schema do
+    run_command "ruby", File.join(ROOT, "scripts/gen_ast_schema.rb"), "--check"
+  end
 
   desc "Verify capability comments have not gone stale against the code"
   task :claims do

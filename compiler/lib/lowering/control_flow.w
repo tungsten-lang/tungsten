@@ -402,7 +402,81 @@
     ver = loop_version_spec(node, ctx[:var_types])
     if ver != nil
       return lower_while_versioned(ctx, node, ver)
+  # Sum-chunking (E4 stage 1.5): a mut-candidate accumulator touched only
+  # by `r = r ± int-shaped` statements in this loop keeps a raw i64
+  # partial sum and flushes it into r with ONE mut-add per ~2^63 of
+  # accumulated magnitude. Per-iteration cost: a fused add + overflow
+  # flag, branch-weighted unlikely — no tag checks, no calls.
+  sc = sum_chunk_var(node, ctx[:mut_accumulators], ctx[:var_types], ctx[:mod])
+  if sc != nil
+    return lower_while_sum_chunked(ctx, node, sc)
   lower_while_core(ctx, node)
+
+-> lower_while_sum_chunked(ctx, node, name)
+  wfn = ctx[:func]
+  # r must live in its slot: the flush writes memory and every later read
+  # loads it, so a register binding would go stale.
+  binding = ctx[:bindings][name]
+  r_slot = ensure_var_slot(wfn, name)
+  if binding != nil
+    emit_instruction(wfn, {op: :store_i64, value: binding, ptr: r_slot})
+    ctx[:bindings][name] = nil
+  partial_slot = ensure_var_slot(wfn, "__sumchunk_" + name)
+  emit_instruction(wfn, {op: :store_i64, value: "0", ptr: partial_slot})
+  prev_chunk = ctx[:sum_chunk]
+  ctx[:sum_chunk] = {var: name, partial: partial_slot, acc: r_slot}
+  lower_while_core(ctx, node)
+  ctx[:sum_chunk] = prev_chunk
+  # Flush the pending partial once. partial == 0 (zero-trip loop) costs
+  # one add_mut identity return.
+  pcur = next_temp(wfn)
+  emit_instruction(wfn, {op: :load_i64, temp: pcur, ptr: partial_slot})
+  boxed = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: boxed, name: "w_int", args: [pcur]})
+  racc = next_temp(wfn)
+  emit_instruction(wfn, {op: :load_i64, temp: racc, ptr: r_slot})
+  racc2 = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: racc2, name: "w_bigint_add_mut", args: [racc, boxed], call_conv: "preserve_mostcc"})
+  emit_instruction(wfn, {op: :store_i64, value: racc2, ptr: r_slot})
+  range_binding_invalidate(ctx, name)
+  nil
+
+# One accumulation step against the raw partial. Emitted for every
+# `r = r ± e` / `r ±= e` the sum-chunk detection admitted; the flush arm
+# is the cold path (the partial absorbs ~2^63 of magnitude between
+# flushes when addends are small).
+-> lower_sum_chunk_step(ctx, op, addend_node)
+  wfn = ctx[:func]
+  chunk = ctx[:sum_chunk]
+  addend_tv = lower_expression(ctx, addend_node)
+  addend_raw = ensure_raw_i64(wfn, addend_tv)
+  if op == :MINUS
+    neg = next_temp(wfn)
+    emit_instruction(wfn, {op: :sub_i64, temp: neg, lhs: "0", rhs: addend_raw})
+    addend_raw = neg
+  pcur = next_temp(wfn)
+  emit_instruction(wfn, {op: :load_i64, temp: pcur, ptr: chunk[:partial]})
+  sum = next_temp(wfn)
+  emit_instruction(wfn, {op: :sadd_with_overflow, temp: sum, lhs: pcur, rhs: addend_raw})
+  flush_label = next_label(wfn, "sc.flush")
+  ok_label = next_label(wfn, "sc.ok")
+  done_label = next_label(wfn, "sc.done")
+  emit_instruction(wfn, {op: :cond_br, cond: sum + ".ovf", then_label: flush_label, else_label: ok_label, prof: :unlikely})
+  start_block(wfn, flush_label)
+  boxed = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: boxed, name: "w_int", args: [pcur]})
+  racc = next_temp(wfn)
+  emit_instruction(wfn, {op: :load_i64, temp: racc, ptr: chunk[:acc]})
+  racc2 = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: racc2, name: "w_bigint_add_mut", args: [racc, boxed], call_conv: "preserve_mostcc"})
+  emit_instruction(wfn, {op: :store_i64, value: racc2, ptr: chunk[:acc]})
+  emit_instruction(wfn, {op: :store_i64, value: addend_raw, ptr: chunk[:partial]})
+  emit_instruction(wfn, {op: :br, label: done_label})
+  start_block(wfn, ok_label)
+  emit_instruction(wfn, {op: :store_i64, value: sum, ptr: chunk[:partial]})
+  emit_instruction(wfn, {op: :br, label: done_label})
+  start_block(wfn, done_label)
+  typed_value(:i64, w_nil.to_s())
 
 # Copy a bindings map (nil-safe) — the versioned arms must not leak
 # registers defined inside one arm into the other's lowering.

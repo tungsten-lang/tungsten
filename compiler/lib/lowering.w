@@ -2352,6 +2352,13 @@ use lowering/definitions
   stmt_position = ctx[:assign_stmt_position] == true
   ctx[:assign_stmt_position] = nil
 
+  # Sum-chunking: inside a qualifying while, this accumulator statement
+  # feeds the raw partial instead of touching r at all.
+  if ctx[:sum_chunk] != nil && ast_kind(target) == :var && target.name == ctx[:sum_chunk][:var]
+    v = node.value
+    if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS) && v.left != nil && is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == target.name
+      return lower_sum_chunk_step(ctx, v.op, v.right)
+
   # Mutate-if-unique (E4 stage 1): `r = r + e` / `r = r - e` where the
   # accumulator analysis proved r's value dies here routes the guarded
   # arm's runtime fallback through w_bigint_add_mut/w_bigint_sub_mut (see

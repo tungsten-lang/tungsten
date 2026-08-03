@@ -1914,3 +1914,83 @@
     if dead[name] != true
       result[name] = true
   result
+
+# ==== Sum-chunk detection (E4 stage 1.5) ====
+#
+# A while loop qualifies for chunked accumulation when a mut-candidate var
+# r is touched ONLY by direct-body `r = r ± e` / `r ±= e` statements whose
+# addends are int-shaped (evaluable as raw i64) and don't read r. The
+# transform keeps a raw i64 partial sum in a register/slot and flushes it
+# into r with ONE boxed mut-add per ~2^63 of accumulated magnitude — the
+# per-iteration cost degrades to a fused add+overflow-flag check.
+# Everything else about r (reads in the condition, other statements,
+# unknown constructs) rejects, using the same fail-closed collector as
+# the candidate walker.
+
+-> sum_chunk_accum_stmt_var(st)
+  # returns the accumulated var name if st is a qualifying accumulation
+  if st == nil || !is_ast_node?(st)
+    return nil
+  k = ast_kind(st)
+  if k == :compound_assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var && st.op in (:PLUS :MINUS)
+    return st.target.name
+  if k == :assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
+    v = st.value
+    if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS) && v.left != nil && is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == st.target.name
+      return st.target.name
+  nil
+
+-> sum_chunk_addend(st)
+  if ast_kind(st) == :compound_assign
+    return st.value
+  st.value.right
+
+-> sum_chunk_var(node, mut_accumulators, declared_types, mod)
+  if mut_accumulators == nil || node.body == nil
+    return nil
+  # gather accumulation counts per var over direct body statements
+  counts = {}
+  i = 0
+  while i < node.body.size()
+    nm = sum_chunk_accum_stmt_var(node.body[i])
+    if nm != nil
+      if counts[nm] == nil
+        counts[nm] = 0
+      counts[nm] = counts[nm] + 1
+    i += 1
+  candidates = counts.keys()
+  ci = 0
+  while ci < candidates.size()
+    name = candidates[ci]
+    ci += 1
+    if mut_accumulators[name] != true
+      next
+    ok = true
+    refs = {}
+    # the condition must not read r
+    mut_mark_all_dead(node.condition, refs)
+    if refs[name] == true || refs["__scope_poisoned__"] == true
+      next
+    j = 0
+    while j < node.body.size()
+      st = node.body[j]
+      j += 1
+      if sum_chunk_accum_stmt_var(st) == name
+        addend = sum_chunk_addend(st)
+        if !int_shaped_node?(addend, declared_types, mod)
+          ok = false
+          break
+        arefs = {}
+        mut_mark_all_dead(addend, arefs)
+        if arefs[name] == true || arefs["__scope_poisoned__"] == true
+          ok = false
+          break
+      else
+        srefs = {}
+        mut_mark_all_dead(st, srefs)
+        if srefs[name] == true || srefs["__scope_poisoned__"] == true
+          ok = false
+          break
+    if ok
+      return name
+  nil

@@ -564,6 +564,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # (the var itself, and any recorded range whose bounds read it).
   range_binding_invalidate(ctx, name)
 
+  # Sum-chunking: a qualifying accumulator's `r ±= e` feeds the raw
+  # partial (see lower_while_sum_chunked).
+  if ctx[:sum_chunk] != nil && name == ctx[:sum_chunk][:var] && node.op in (:PLUS :MINUS)
+    return lower_sum_chunk_step(ctx, node.op, node.value)
+
   # Ivar compound assignment: @name += val → @name = @name op val
   if ast_kind(target) == :ivar
     cur_tv = lower_ivar(ctx, target)

@@ -719,7 +719,7 @@ use hashing
   out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
   out << "  %eb = load i8, ptr %ebp, align 1" + invariant_load_suffix() + "\n"
   out << "  %is65 = icmp eq i8 %eb, 65\n"
-  out << "  br i1 %is65, label %rng, label %slow\n"
+  out << "  br i1 %is65, label %rng, label %slow, !prof !31411\n"
   out << "rng:\n"
   # start/slots load HERE (before the bounds branch), not in `fast:` — the
   # header fields exist once the kind check passed, so the loads are
@@ -737,7 +737,7 @@ use hashing
   out << "  %iw = add i64 %i, %sz\n"
   out << "  %ix = select i1 %neg, i64 %iw, i64 %i\n"
   out << "  %inb = icmp ult i64 %ix, %sz\n"
-  out << "  br i1 %inb, label %fast, label %slow\n"
+  out << "  br i1 %inb, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %eff = add i64 %st, %ix\n"
   out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
@@ -763,7 +763,7 @@ use hashing
   out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
   out << "  %eb = load i8, ptr %ebp, align 1" + invariant_load_suffix() + "\n"
   out << "  %is65 = icmp eq i8 %eb, 65\n"
-  out << "  br i1 %is65, label %fast, label %slow\n"
+  out << "  br i1 %is65, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
   out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
@@ -805,7 +805,7 @@ use hashing
   out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
   out << "  %eb = load i8, ptr %ebp, align 1" + invariant_load_suffix() + "\n"
   out << "  %is65 = icmp eq i8 %eb, 65\n"
-  out << "  br i1 %is65, label %rng, label %slow\n"
+  out << "  br i1 %is65, label %rng, label %slow, !prof !31411\n"
   out << "rng:\n"
   # start/slots load before the bounds branch — same reorder rationale as
   # __w_array_get_i64_fast above (unconditional once kind-checked; hoistable).
@@ -821,7 +821,7 @@ use hashing
   out << "  %iw = add i64 %i, %sz\n"
   out << "  %ix = select i1 %neg, i64 %iw, i64 %i\n"
   out << "  %inb = icmp ult i64 %ix, %sz\n"
-  out << "  br i1 %inb, label %fast, label %slow\n"
+  out << "  br i1 %inb, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %eff = add i64 %st, %ix\n"
   out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
@@ -850,7 +850,7 @@ use hashing
   out << "  %tb = lshr i64 %b, 48\n"
   out << "  %ib = icmp eq i64 %tb, 65530\n"
   out << "  %both = and i1 %ia, %ib\n"
-  out << "  br i1 %both, label %fast, label %slow\n"
+  out << "  br i1 %both, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   if sext_payload
     out << "  %sa = shl i64 %a, 16\n"
@@ -955,7 +955,7 @@ use hashing
   out << "  %tb = lshr i64 %b, 48\n"
   out << "  %ib = icmp eq i64 %tb, 65530\n"
   out << "  %both = and i1 %ia, %ib\n"
-  out << "  br i1 %both, label %fast, label %slow\n"
+  out << "  br i1 %both, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %sa = shl i64 %a, 16\n"
   out << "  %pa = ashr i64 %sa, 16\n"
@@ -991,7 +991,7 @@ use hashing
   out << "  %tb = lshr i64 %b, 48\n"
   out << "  %ib = icmp eq i64 %tb, 65530\n"
   out << "  %both = and i1 %ia, %ib\n"
-  out << "  br i1 %both, label %fast, label %slow\n"
+  out << "  br i1 %both, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   if llvm_op == "xor"
     out << "  %x = xor i64 %a, %b\n"
@@ -1018,7 +1018,7 @@ use hashing
   out << "  %tb = lshr i64 %b, 48\n"
   out << "  %ib = icmp eq i64 %tb, 65530\n"
   out << "  %both = and i1 %ia, %ib\n"
-  out << "  br i1 %both, label %fast, label %slow\n"
+  out << "  br i1 %both, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %sa = shl i64 %a, 16\n"
   out << "  %pa = ashr i64 %sa, 16\n"
@@ -1032,7 +1032,7 @@ use hashing
   out << "  %fit48 = icmp eq i64 %rb, %r\n"
   out << "  %nov = xor i1 %ov, true\n"
   out << "  %ok = and i1 %fit48, %nov\n"
-  out << "  br i1 %ok, label %box, label %slow\n"
+  out << "  br i1 %ok, label %box, label %slow, !prof !31411\n"
   out << "box:\n"
   out << "  %m = and i64 %r, 281474976710655\n"
   out << "  %v = or i64 %m, -1688849860263936\n"
@@ -1058,7 +1058,7 @@ use hashing
   out << "  %tb = lshr i64 %b, 48\n"
   out << "  %ib = icmp eq i64 %tb, 65530\n"
   out << "  %both = and i1 %ia, %ib\n"
-  out << "  br i1 %both, label %cnt, label %slow\n"
+  out << "  br i1 %both, label %cnt, label %slow, !prof !31411\n"
   out << "cnt:\n"
   out << "  %sb = shl i64 %b, 16\n"
   out << "  %k = ashr i64 %sb, 16\n"
@@ -1078,7 +1078,7 @@ use hashing
     out << "  %rb = ashr i64 %rs, 16\n"
     out << "  %fit48 = icmp eq i64 %rb, %r\n"
     out << "  %ok = and i1 %undo, %fit48\n"
-    out << "  br i1 %ok, label %box, label %slow\n"
+    out << "  br i1 %ok, label %box, label %slow, !prof !31411\n"
     out << "box:\n"
   else
     out << "  %r = ashr i64 %pa, %k\n"
@@ -1139,7 +1139,7 @@ use hashing
   out << "entry:\n"
   out << "  %ub = sub i64 %v, 281474976710656\n"
   out << "  %isd = icmp ule i64 %ub, -4503599627370496\n"
-  out << "  br i1 %isd, label %fast, label %slow\n"
+  out << "  br i1 %isd, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %d = bitcast i64 %ub to double\n"
   out << "  ret double %d\n"
@@ -1155,7 +1155,7 @@ use hashing
   out << "entry:\n"
   out << "  %hi = lshr i64 %v, 48\n"
   out << "  %isi = icmp eq i64 %hi, 65530\n"
-  out << "  br i1 %isi, label %fast, label %slow\n"
+  out << "  br i1 %isi, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %s = shl i64 %v, 16\n"
   out << "  %p = ashr i64 %s, 16\n"
@@ -3022,7 +3022,7 @@ ewscope_md_state = {ids: {}, order: []}
     out << under + " = icmp slt i64 " + raw + ", -140737488355328\n  "
     out << rovf + " = or i1 " + over + ", " + under + "\n  "
     out << ovf + " = or i1 " + i64ovf + ", " + rovf + "\n  "
-    out << "br i1 " + ovf + ", label %ovf.slow." + bid + ", label %ovf.fast." + bid + "\n"
+    out << "br i1 " + ovf + ", label %ovf.slow." + bid + ", label %ovf.fast." + bid + ", !prof !31412\n"
     out << "ovf.fast." + bid + ":\n  "
     out << masked + " = and i64 " + raw + ", 281474976710655\n  "
     out << boxed + " = or i64 " + masked + ", -1688849860263936\n  "
@@ -3731,7 +3731,7 @@ ewscope_md_state = {ids: {}, order: []}
     parts << t + ".cap_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_node_arena, i64 0, i64 " + sc + ", i32 2\n  "
     parts << t + ".cap = load i32, ptr " + t + ".cap_p, align 4\n  "
     parts << t + ".has_room = icmp ult i32 " + t + ".cursor, " + t + ".cap\n  "
-    parts << "br i1 " + t + ".has_room, label %" + label_fast + ", label %" + label_slow + "\n"
+    parts << "br i1 " + t + ".has_room, label %" + label_fast + ", label %" + label_slow + ", !prof !31411\n"
     parts << label_fast + ":\n  "
     parts << t + ".new_cursor = add i32 " + t + ".cursor, 1\n  "
     parts << "store i32 " + t + ".new_cursor, ptr " + t + ".cursor_p, align 4\n  "
@@ -3844,7 +3844,7 @@ ewscope_md_state = {ids: {}, order: []}
       parts << t + ".cap_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_node_arena, i64 0, i64 " + sc + ", i32 2\n  "
       parts << t + ".cap = load i32, ptr " + t + ".cap_p, align 4\n  "
       parts << t + ".has_room = icmp ult i32 " + t + ".cursor, " + t + ".cap\n  "
-      parts << "br i1 " + t + ".has_room, label %" + label_fast + ", label %" + label_slow + "\n"
+      parts << "br i1 " + t + ".has_room, label %" + label_fast + ", label %" + label_slow + ", !prof !31411\n"
       parts << label_fast + ":\n  "
       parts << t + ".new_cursor = add i32 " + t + ".cursor, 1\n  "
       parts << "store i32 " + t + ".new_cursor, ptr " + t + ".cursor_p, align 4\n  "
@@ -4126,7 +4126,19 @@ ewscope_md_state = {ids: {}, order: []}
     else
       "br label %" + inst[:label]
   when :cond_br
-    "br i1 " + inst[:cond] + ", label %" + inst[:then_label] + ", label %" + inst[:else_label]
+    prof = ""
+    if inst[:prof] == :likely
+      prof = ", !prof !31411"
+    elsif inst[:prof] == :unlikely
+      prof = ", !prof !31412"
+    "br i1 " + inst[:cond] + ", label %" + inst[:then_label] + ", label %" + inst[:else_label] + prof
+
+  # i64 add with an overflow flag: temp = sum, temp.ovf = i1. Feeds the
+  # sum-chunk accumulator's flush branch; lhs/rhs ride the substituted
+  # fields so SSA renames reach them.
+  when :sadd_with_overflow
+    t = inst[:temp]
+    t + ".pair = call {i64, i1} @llvm.sadd.with.overflow.i64(i64 " + inst[:lhs] + ", i64 " + inst[:rhs] + ")\n  " + t + " = extractvalue {i64, i1} " + t + ".pair, 0\n  " + t + ".ovf = extractvalue {i64, i1} " + t + ".pair, 1"
   when :switch_i64
     cases = inst[:cases]
     is_symbol = inst[:is_symbol]

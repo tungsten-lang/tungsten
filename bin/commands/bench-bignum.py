@@ -8,10 +8,12 @@ import json
 import math
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +97,35 @@ DEFAULT_SIZES = (
     8192,
 )
 QUICK_SIZES = (1, 4, 16, 64)
+# Reproducible large-math preset.  It follows algorithm boundaries instead of
+# taking the Cartesian product of every inexpensive operation and every huge
+# width.  Multiply/square reach the NTT band; shifts and modulus cover the
+# allocation/linear and division bands; the expensive operations stop at a
+# useful diagnostic width.
+FULL_SIZES_BY_OPERATION = {
+    "mul": (
+        1920, 2047, 2048, 2049,
+        7680, 8191, 8192, 8193,
+        16383, 16384, 16385,
+        65536, 262144, 1048576,
+    ),
+    "sqr": (
+        1920, 2047, 2048, 2049,
+        7680, 8191, 8192, 8193,
+        16383, 16384, 16385,
+        65536, 262144, 1048576,
+    ),
+    "mod": (8192, 8193, 16384, 16385, 65536, 262144, 1048576),
+    "shl": (8192, 8193, 16384, 16385, 65536, 262144, 1048576),
+    "shr": (8192, 8193, 16384, 16385, 65536, 262144, 1048576),
+    "div": (1024, 1536, 2048, 3072, 6144, 8192, 8193, 16384, 16385, 65536),
+    "gcd": (1024, 1536, 2048, 3072, 6144, 8192, 8193, 16384, 16385, 65536),
+    "lcm": (1024, 1536, 2048, 3072, 6144, 8192, 8193, 16384, 16385, 65536),
+    "isqrt": (1024, 1536, 2048, 3072, 6144, 8192, 8193, 16384, 16385, 65536),
+}
+FULL_OPERATIONS = tuple(
+    operation for operation in OPERATIONS if operation in FULL_SIZES_BY_OPERATION
+)
 LANE_LABELS = {
     "tungsten": "Tungsten",
     "gmp": "GMP",
@@ -317,6 +348,43 @@ def run_checked(
             + (f"\n{detail}" if detail else "")
         )
     return completed.stdout if capture else ""
+
+
+def command_output(command: list[str], default: str = "unknown") -> str:
+    """Return one-line command output for metadata without failing a run."""
+    try:
+        output = run_checked(command).strip()
+    except (RuntimeError, FileNotFoundError):
+        return default
+    return output.splitlines()[0] if output else default
+
+
+def machine_metadata() -> dict[str, Any]:
+    cpu = platform.processor() or platform.machine() or "unknown"
+    if platform.system() == "Darwin":
+        cpu = command_output(["sysctl", "-n", "machdep.cpu.brand_string"], cpu)
+    elif platform.system() == "Linux":
+        try:
+            for line in Path("/proc/cpuinfo").read_text().splitlines():
+                if line.startswith("model name"):
+                    cpu = line.split(":", 1)[1].strip()
+                    break
+        except OSError:
+            pass
+
+    profile = command_output([str(BUILD), "--profile"])
+    compiler, separator, flags = profile.partition("|")
+    compiler = compiler if separator else os.environ.get("CC", "clang")
+    flags = flags if separator else os.environ.get("CFLAGS", "unknown")
+    return {
+        "cpu": cpu,
+        "logical_cpus": os.cpu_count(),
+        "machine": platform.machine(),
+        "target_triple": command_output([compiler, "-dumpmachine"]),
+        "compiler": command_output([compiler, "--version"]),
+        "compiler_command": compiler,
+        "compiler_flags": flags,
+    }
 
 
 def time_python_case(
@@ -738,9 +806,21 @@ def print_results_header(metadata: dict[str, Any]) -> None:
     if metadata.get("odin_lane"):
         labels.append(f"Odin core:math/big ({metadata['odin_version']})")
     print(" vs ".join(labels))
+    has_fft_band = any(
+        limbs > FFT_BAND_LIMBS
+        for sizes in metadata["sizes_by_operation"].values()
+        for limbs in sizes
+    )
+    if has_fft_band:
+        statistic = (
+            f"{metadata['runs']} runs: best through {FFT_BAND_LIMBS} limbs, "
+            "median+IQR above it"
+        )
+    else:
+        statistic = f"best of {metadata['runs']}"
     print(
-        "Lower is better. Best-of-"
-        f"{metadata['runs']}; operands are deterministic positive 64-bit limbs."
+        "Lower is better. " + statistic
+        + "; operands are deterministic positive 64-bit limbs."
     )
     mutable = "GMP"
     if metadata.get("odin_lane"):
@@ -897,6 +977,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="use 1,4,16,64-limb sizes and a shorter timing target",
     )
     parser.add_argument(
+        "--full",
+        action="store_true",
+        help=(
+            "run the documented threshold/FFT-band preset through 1048576 "
+            "limbs with accurate timing; implies --accurate --no-capacity"
+        ),
+    )
+    parser.add_argument(
         "--sizes",
         metavar="CSV",
         help="comma-separated limb counts (default: 20 sizes from 1..8192; "
@@ -910,8 +998,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--runs",
         type=int,
-        default=3,
-        help="best-of-N measurements (default: 3)",
+        help="measurement repetitions (default: 3; accurate/full: 9)",
     )
     parser.add_argument(
         "--target-ms",
@@ -959,6 +1046,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit machine-readable JSON",
     )
     parser.add_argument(
+        "--output",
+        metavar="FILE",
+        help="write the complete machine-readable JSON artifact to FILE",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="list operations, sizes, and capacity policies",
@@ -1003,6 +1095,15 @@ EXTERNAL_BINARIES = {"rust": RUST_BINARY, "odin": ODIN_BINARY}
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.quick and args.full:
+        parser.error("--quick and --full cannot be combined")
+    if args.full and args.capacity_only:
+        parser.error("--full and --capacity-only cannot be combined")
+    if args.full:
+        args.accurate = True
+        args.no_capacity = True
+    if args.runs is None:
+        args.runs = 9 if args.accurate else 3
     if args.all:
         args.python = True
         args.rust = True
@@ -1025,17 +1126,41 @@ def main() -> int:
     if args.no_capacity and args.capacity_only:
         parser.error("--no-capacity and --capacity-only cannot be combined")
 
-    sizes = (
-        parse_csv(args.sizes, integers=True)
-        if args.sizes
-        else list(QUICK_SIZES if args.quick else DEFAULT_SIZES)
-    )
-    operations = (
-        parse_csv(args.operations) if args.operations else list(OPERATIONS)
-    )
+    explicit_sizes = parse_csv(args.sizes, integers=True) if args.sizes else None
+    if args.operations:
+        operations = parse_csv(args.operations)
+    elif args.full:
+        operations = list(FULL_OPERATIONS)
+    else:
+        operations = list(OPERATIONS)
     unknown = [operation for operation in operations if operation not in OPERATIONS]
     if unknown:
         parser.error("unknown operation(s): " + ", ".join(unknown))
+    if args.full and explicit_sizes is None:
+        unsupported = [
+            operation for operation in operations
+            if operation not in FULL_SIZES_BY_OPERATION
+        ]
+        if unsupported:
+            parser.error(
+                "--full has no preset sizes for operation(s): "
+                + ", ".join(unsupported)
+                + "; supply --sizes explicitly"
+            )
+    if explicit_sizes is not None:
+        sizes_by_operation = {
+            operation: list(explicit_sizes) for operation in operations
+        }
+    elif args.full:
+        sizes_by_operation = {
+            operation: list(FULL_SIZES_BY_OPERATION[operation])
+            for operation in operations
+        }
+    else:
+        selected_sizes = list(QUICK_SIZES if args.quick else DEFAULT_SIZES)
+        sizes_by_operation = {
+            operation: selected_sizes for operation in operations
+        }
     requests = args.capacity_requests
     if requests is None:
         requests = 200_000 if args.quick else 1_000_000
@@ -1047,8 +1172,10 @@ def main() -> int:
             target_ms = 110.0
         else:
             target_ms = 1.0 if args.quick else 2.0
-    if args.accurate and args.runs == 3:
-        args.runs = 9
+    if args.full and args.runs < 9:
+        parser.error("--full requires --runs >= 9")
+    if args.full and target_ms < 110.0:
+        parser.error("--full requires --target-ms >= 110")
 
     if args.list:
         print("operations: " + ",".join(OPERATIONS))
@@ -1058,6 +1185,12 @@ def main() -> int:
         )
         print("default sizes (limbs): " + ",".join(map(str, DEFAULT_SIZES)))
         print("quick sizes (limbs): " + ",".join(map(str, QUICK_SIZES)))
+        print("full preset (limbs by operation):")
+        for operation in FULL_OPERATIONS:
+            print(
+                "  " + operation + "="
+                + ",".join(map(str, FULL_SIZES_BY_OPERATION[operation]))
+            )
         print(
             "capacity policies: exact/+1,quantum-4,quantum-8,"
             "quantum-16,quantum-32,reserve-1.5x,power-of-two"
@@ -1107,7 +1240,19 @@ def main() -> int:
                 odin_version = odin_version.split(" version ", 1)[1]
         except (RuntimeError, FileNotFoundError):
             odin_version = "unknown"
+    commit = command_output(["git", "rev-parse", "HEAD"])
+    dirty = bool(command_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"], ""
+    ))
     metadata = {
+        "profile": "full" if args.full else ("quick" if args.quick else "default"),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "command": shlex.join(
+            ["bin/tungsten", "bench", "bignum", *sys.argv[1:]]
+        ),
+        "git_commit": commit,
+        "git_dirty_tracked": dirty,
+        "machine": machine_metadata(),
         "runs": args.runs,
         "python_lane": bool(args.python),
         "rust_lane": bool(args.rust),
@@ -1123,6 +1268,8 @@ def main() -> int:
         "odin_digit_bits": 63,
         "platform": platform.platform(),
         "limb_bits": 64,
+        "operations": operations,
+        "sizes_by_operation": sizes_by_operation,
         "methodology": {
             "result_lifecycle": (
                 "immutable APIs compute the next result while the previous "
@@ -1156,7 +1303,12 @@ def main() -> int:
             ),
             "size_caps": SIZE_CAPS,
             "shift_bits": 13,
-            "selection": "best elapsed time from all runs",
+            "selection_through_8192_limbs": (
+                "best elapsed time from all runs"
+            ),
+            "selection_above_8192_limbs": (
+                "median elapsed time with interquartile spread"
+            ),
             "native_lane_order": (
                 "alternate Tungsten-first and GMP-first samples"
             ),
@@ -1182,12 +1334,12 @@ def main() -> int:
         total = sum(
             1
             for operation in operations
-            for limbs in sizes
+            for limbs in sizes_by_operation[operation]
             if SIZE_CAPS.get(operation) is None or limbs <= SIZE_CAPS[operation]
         )
         print(
             f"Benchmarking {total} operation/size cases "
-            f"(best of {args.runs})...",
+            f"({args.runs} runs)...",
             file=sys.stderr,
         )
         streaming = not args.json
@@ -1197,7 +1349,7 @@ def main() -> int:
             for operation in operations:
                 cap = SIZE_CAPS.get(operation)
                 todo = [
-                    limbs for limbs in sizes
+                    limbs for limbs in sizes_by_operation[operation]
                     if cap is None or limbs <= cap
                 ]
                 if not todo:
@@ -1229,7 +1381,7 @@ def main() -> int:
         expected_keys = [
             (operation, limbs)
             for operation in operations
-            for limbs in sizes
+            for limbs in sizes_by_operation[operation]
             if SIZE_CAPS.get(operation) is None
             or limbs <= SIZE_CAPS[operation]
         ]
@@ -1265,19 +1417,20 @@ def main() -> int:
     )
     if results and "gmp" in aggregate.get("overall", {}):
         aggregate["verdict"] = verdict_line(results, aggregate)
+    payload = {
+        "metadata": metadata,
+        "results": results,
+        "summary": aggregate,
+        "capacity_policies": capacities,
+    }
+    serialized = json.dumps(payload, indent=2, sort_keys=True)
+    if args.output:
+        output_path = Path(args.output).expanduser()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(serialized + "\n")
+        print(f"Wrote {output_path}", file=sys.stderr)
     if args.json:
-        print(
-            json.dumps(
-                {
-                    "metadata": metadata,
-                    "results": results,
-                    "summary": aggregate,
-                    "capacity_policies": capacities,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
+        print(serialized)
     else:
         if not args.capacity_only:
             print_results_summary(results, lanes, aggregate)

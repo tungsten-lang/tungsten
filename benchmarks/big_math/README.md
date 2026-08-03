@@ -20,6 +20,7 @@ For the language/runtime-wide bignum matrix, use the public CLI:
 bin/tungsten bench bignum --quick
 bin/tungsten bench bignum --all --quick --no-capacity
 bin/tungsten bench bignum --all --accurate --json --no-capacity
+bin/tungsten bench bignum --full --output results/bignum-full.json
 ```
 
 The default lanes are Tungsten and GMP. `--python`, `--rust`, and `--odin`
@@ -28,6 +29,21 @@ enable CPython `int`, Rust `num-bigint` 0.5.1, and Odin `core:math/big`;
 sources in `rust/` and `odin/`, built with release optimization and the native
 CPU target only when selected. Dependencies and compiler versions are recorded
 in JSON metadata.
+
+The default matrix remains the fast 1..8192-limb development sweep. `--full`
+is the reproducible threshold/FFT-band preset: it implies `--accurate` and
+`--no-capacity`, uses at least nine 110 ms timing repetitions, brackets the
+multiply/square and recycler cutoffs, and takes selected operations through
+1,048,576 limbs. It does not form a wasteful Cartesian product of every cheap
+operation and every huge size. Above 8192 limbs, rows report the median and
+interquartile spread; smaller rows retain the normal best-of-N statistic.
+`--full` cannot be combined with `--quick`. `--operations` selects a subset of
+the preset, and `--sizes` replaces its per-operation sizes (and is required if
+an operation outside the preset is requested). `--output FILE` writes the full
+JSON artifact while leaving the human-readable table on stdout; `--json` still
+prints that same document. Artifacts record the exact command, commit and dirty
+state, CPU and target, compiler flags, dependency versions, selected matrix,
+and timing methodology.
 
 All rows use a common input size of `N * 64` bits. That is a Tungsten/GMP/Rust
 limb count, not an assertion about every implementation's internal layout:

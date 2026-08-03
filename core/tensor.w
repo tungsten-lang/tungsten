@@ -24,7 +24,6 @@
 # finalizer integration is a runtime TODO.
 
 use core/metal
-use core/blas
 
 # ---- GPU linear-layer matmul via Metal 4 cooperative tensors --------------
 #
@@ -138,6 +137,24 @@ TENSOR_EW = {}
   TENSOR_EW[:state]
 
 + Tensor
+  # Tensor is itself a Core storage/backend boundary. Keep these private
+  # typed-array allocation and BLAS calls on the class rather than depending
+  # on a second `use core/blas` import: Tensor can then be reached through
+  # Core's class autoload by a consumer without duplicate transitive loading.
+  # Allocation deliberately uses `->`, matching core/blas.w's memoization
+  # workaround. These are not a second public BLAS API.
+  -> .storage_f32(n)
+    ccall("w_array_new_aligned", -32, n)
+
+  -> .storage_f64(n)
+    ccall("w_array_new_aligned", -64, n)
+
+  -> .storage_sgemm(a, b, c, m, n, k)
+    ccall("w_blas_sgemm_nn", a, b, c, m, n, k)
+
+  -> .storage_dgemm(a, b, c, m, n, k)
+    ccall("w_blas_dgemm_nn", a, b, c, m, n, k)
+
   - data
     rw device
     rw buffer
@@ -178,25 +195,38 @@ TENSOR_EW = {}
   # Two overloads:
   #   Tensor.zeros(device, dtype, shape)  — Metal shared buffer (GPU face)
   #   Tensor.zeros(shape)                 — CPU f32 WArray (no Metal)
-  #   Tensor.zeros(dtype, shape)          — CPU typed path for f32 (dtype=3)
+  #   Tensor.zeros_cpu(dtype, shape)      — CPU f32/f64 typed path
   -> .zeros(device, dtype, shape)
     nbytes = Tensor.byte_size(dtype, shape)
     buffer = metal_buffer(device, nbytes)
     Tensor.new(device, buffer, dtype, shape, Tensor.packed_strides(shape), 0)
 
-  # CPU-only zeros (f32). Prefer this when Metal is unavailable or unwanted.
-  # Storage is a page-aligned f32 WArray — zeros-by-default if the OS gives
-  # zero pages; we still size the array for logical length.
-  -> .zeros(shape)
+  # CPU-only zeros for the numeric dtypes whose WArray access is available to
+  # the language Tensor today. Keep this allocator in Core so consumers do not
+  # have to reimplement f64_array packing just to use a dense Tensor.
+  -> .cpu_zeros(dtype, shape)
     n = Tensor.elem_count(shape)
-    arr = f32_array(n)
-    # expose full length for []
-    # (f32_array may start size=0; bump via write loop of zeros is free if pages zero)
+    arr = Tensor.storage_f32(n)
+    if dtype == Tensor.f64
+      arr = Tensor.storage_f64(n)
+    elsif dtype != Tensor.f32
+      raise "Tensor.cpu_zeros: supported CPU dtypes are f32 and f64"
+    # Expose full logical length for []; a typed array may initially report
+    # size zero even though its pages are allocated.
     i = 0
     while i < n
       arr[i] = ~0.0
       i = i + 1
-    Tensor.new(:cpu, arr, 3, shape, Tensor.packed_strides(shape), 0)
+    Tensor.new(:cpu, arr, dtype, shape, Tensor.packed_strides(shape), 0)
+
+  # CPU-only zeros (f32). Prefer this when Metal is unavailable or unwanted.
+  -> .zeros(shape)
+    Tensor.cpu_zeros(Tensor.f32, shape)
+
+  # Explicit CPU dtype. Kept under a distinct name because class-side overload
+  # selection is not yet reliable between one- and two-argument factories.
+  -> .zeros_cpu(dtype, shape)
+    Tensor.cpu_zeros(dtype, shape)
 
   -> .zeros_f32(shape)
     Tensor.zeros(shape)
@@ -212,15 +242,9 @@ TENSOR_EW = {}
       dtype = Tensor.f64
     elsif dtype_name != "f32"
       raise "Tensor.zeros_unit: supported CPU dtypes are f32 and f64"
-    n = Tensor.elem_count(shape)
-    arr = f32_array(n)
-    if dtype == Tensor.f64
-      arr = f64_array(n)
-    i = 0
-    while i < n
-      arr[i] = ~0.0
-      i = i + 1
-    Tensor.new(:cpu, arr, dtype, shape, Tensor.packed_strides(shape), 0, unit_name)
+    result = Tensor.cpu_zeros(dtype, shape)
+    result.unit = unit_name
+    result
 
   -> .zeros_like(tensor, shape, result_unit)
     if tensor.device == :cpu
@@ -276,6 +300,42 @@ TENSOR_EW = {}
       st = Tensor.packed_strides(shape)
     Tensor.new(nil, buffer, dtype, shape, st, offset)
 
+  # Zero-copy CPU variant of .wrap. This is the public way to give a Tensor
+  # existing f32/f64 WArray storage while retaining explicit strides: a
+  # row-major [rows, cols] buffer uses [cols, 1], while a column-major one
+  # uses [1, rows]. No layout conversion or data copy happens here.
+  -> .wrap_cpu(buffer, dtype, shape, strides, offset)
+    st = strides
+    if st.size() == 0
+      st = Tensor.packed_strides(shape)
+    Tensor.new(:cpu, buffer, dtype, shape, st, offset)
+
+  # Materialize a numeric rectangular row table into a CPU Tensor. The input
+  # is copied once into dense typed storage; views derived from the resulting
+  # Tensor remain zero-copy. Callers that already own typed storage should use
+  # .wrap_cpu instead.
+  -> .from_rows(rows, dtype = Tensor.f32)
+    nr = rows.size()
+    nc = 0
+    nc = rows[0].size() if nr > 0
+    i = 0
+    while i < nr
+      if rows[i].size() != nc
+        raise "Tensor.from_rows: rows must be rectangular"
+      i = i + 1
+    result = Tensor.cpu_zeros(dtype, [nr, nc])
+    i = 0
+    while i < nr
+      j = 0
+      while j < nc
+        # The result was just allocated packed and CPU-backed, so avoid a
+        # coordinate Array plus dynamic .set for every table cell. General
+        # strided writes still go through .set elsewhere.
+        result.buffer[i * nc + j] = rows[i][j].to_f
+        j = j + 1
+      i = i + 1
+    result
+
   # Zero-copy wrap of a page-aligned Tungsten array (metal_array): CPU writes
   # to `arr` and GPU reads share the same bytes.
   -> .from_array(device, arr, dtype, shape)
@@ -328,6 +388,19 @@ TENSOR_EW = {}
       i = i + 1
     s
 
+  # Tightly-packed Fortran/BLAS-style column-major element strides. Storage
+  # order is a property of the view, not a different Tensor type; this helper
+  # makes the alternative explicit when wrapping externally-owned storage.
+  -> .column_major_strides(shape)
+    s = []
+    acc = 1
+    i = 0
+    while i < shape.size()
+      s = s.push(acc)
+      acc = acc * shape[i]
+      i = i + 1
+    s
+
   # ---- metadata ----
 
   -> rank
@@ -352,6 +425,33 @@ TENSOR_EW = {}
         same = false
       i = i + 1
     same
+
+  # Numeric rank-2 Tensor as fresh nested rows. This is deliberately a copy:
+  # Array rows cannot carry Tensor's offset/stride aliasing contract. It is a
+  # small interoperability boundary for tabular consumers, not a second dense
+  # storage system.
+  -> to_rows
+    if self.rank != 2
+      raise "Tensor.to_rows: requires a rank-2 tensor"
+    rows = []
+    i = 0
+    while i < shape[0]
+      row = []
+      j = 0
+      while j < shape[1]
+        # from_rows/matmul outputs are the common packed CPU case. Read their
+        # typed storage directly, but retain the stride-aware route for views
+        # (including transpose and column-major wrapping).
+        value = nil
+        if device == :cpu && self.contiguous?
+          value = buffer[i * shape[1] + j]
+        else
+          value = self.at([i, j])
+        row = row.push(value)
+        j = j + 1
+      rows = rows.push(row)
+      i = i + 1
+    rows
 
   # ---- views (zero-copy; alias the same buffer) ----
 
@@ -481,14 +581,16 @@ TENSOR_EW = {}
   # ---- matmul ----
 
   # 2-D matrix multiply: [M,K] · [K,N] → a fresh contiguous [M,N] Tensor.
-  # v0 routes to Accelerate `sgemm` (f32, links by default) over zero-copy
-  # array views of the operands' shared buffers — no copy, no MLX dependency.
+  # CPU f32/f64 tensors route to Accelerate sgemm/dgemm over their typed-array
+  # buffers. A strided input is made contiguous because this small BLAS bridge
+  # currently exposes only row-major NN; transpose views themselves stay
+  # zero-copy for indexing and non-BLAS operations.
   # GPU (MLX/MTL4) routing is a follow-up (blocked on default-link of those
   # bridges, not on this design).
   -> matmul(other)
-    if dtype != 3
-      raise "Tensor.matmul: v0 supports f32 only (dtype " + dtype.to_s + ")"
-    if other.dtype != 3
+    if dtype != Tensor.f32 && dtype != Tensor.f64
+      raise "Tensor.matmul: supports f32/f64 only (dtype " + dtype.to_s + ")"
+    if other.dtype != dtype
       raise "Tensor.matmul: operand dtype mismatch"
     if self.rank != 2 || other.rank != 2
       raise "Tensor.matmul: both operands must be rank-2"
@@ -502,9 +604,14 @@ TENSOR_EW = {}
       raise "Tensor.matmul: inner dimensions disagree"
     n = other.shape[1]
     if device == :cpu && other.device == :cpu
-      result = Tensor.zeros([m, n])
-      sgemm(buffer, other.buffer, result.buffer, m, n, k)
+      result = Tensor.zeros_cpu(dtype, [m, n])
+      if dtype == Tensor.f64
+        Tensor.storage_dgemm(buffer, other.buffer, result.buffer, m, n, k)
+      else
+        Tensor.storage_sgemm(buffer, other.buffer, result.buffer, m, n, k)
       return result
+    if dtype == Tensor.f64
+      raise "Tensor.matmul: f64 is CPU-only"
     result = Tensor.zeros(device, 3, [m, n])
     av = metal_buffer_view(buffer, -32, m * k)
     bv = metal_buffer_view(other.buffer, -32, k * n)

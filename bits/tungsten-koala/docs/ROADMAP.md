@@ -8,9 +8,9 @@ on Tungsten, reusing **core** primitives instead of reinventing them.
 | Decision | Choice |
 | --- | --- |
 | Arrow | **Drop.** Bitfile claim was aspirational; storage stays ordered columns. |
-| Dense multi-D / GPU | **Wire to `core/tensor`** (+ Metal faces). Delete koala's draft Tensor/GPU. |
+| Dense multi-D / GPU | **Wire to `core/tensor`** (+ Metal faces). The obsolete Koala Tensor draft is removed; GPU/device sketches remain non-loaded attic notes. |
 | Sparse | **Use `core/sparse`** (`SparseMatrix` CSR/COO, SpMV, Accelerate). Thin koala facade only for DataFrame interop. |
-| Dense matmul | Route large `Matrix.matmul` through **`core/blas`** (`dgemm`/`sgemm`) when compiled; pure path stays default for small / interpreter. |
+| Dense matmul | `Matrix#matmul_accel` now delegates through **`core/tensor`** f64 `dgemm`; pure `.matmul` stays default for small / interpreter. |
 | Measurement `core/calibration` | Unrelated (GUM/VIM units). ML calibration is **new** `CalibratedClassifierCV` in koala. |
 
 ## Draft cleanup
@@ -18,7 +18,8 @@ on Tungsten, reusing **core** primitives instead of reinventing them.
 | Draft | Action |
 | --- | --- |
 | `estimator.w` | **Delete.** Superseded by `estimator_base.w`; sketch already shipped (lasso etc.). |
-| `tensor.w`, `gpu.w`, `device.w` | **Delete.** Replaced by `core/tensor` + Metal; parallel Device invents a second world. |
+| `tensor.w` | **Removed.** Replaced by `core/tensor`; no second Tensor world remains. |
+| `gpu.w`, `device.w` | **Do not port.** Non-loaded sketches superseded by `core/tensor` + Metal; parallel Device invents a second world. |
 | `sparse.w` | **Delete** as implementation; replace with thin re-export / DataFrame helpers over `core/sparse`. |
 | `transformer.w` | **Mostly shipped:** `PolynomialFeatures`, `ColumnSelector`, and the more capable parallel `ColumnTransformer` are Tunable, persistent Pipeline steps. `FunctionTransformer` remains. |
 | `index.w` | **Port later** as simple row labels (Range/Array); no multi-index. |
@@ -45,6 +46,9 @@ Moved originals live under `attic/drafts/` for archaeology only — not loaded.
 12. **Benchmarks** — sklearn differential + wall-clock suite.
 13. **Parallel CV / GridSearch** + more examples.
 14. **GPU path** — DataFrame/Matrix → `Tensor` for large ops (compiled-only).
+    Numeric `Matrix#to_tensor` / `.from_tensor` already provide the explicit
+    f64 CPU bridge; preserve Matrix's nil-padding compatibility semantics
+    rather than replacing it with Tensor.
 
 ## Verified progress (2026-07-25)
 

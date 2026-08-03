@@ -56,6 +56,12 @@ m.inv                                # => Matrix (nil when singular)
 m.qr                                 # => { q:, r: } reduced Householder QR
 tall = Matrix.new([[1, 0], [1, 1], [1, 2], [1, 3]])
 tall.lstsq([0, 1, 2, 5])             # => Vector [-0.4, 1.6]  least squares
+# Numeric Matrix <-> core Tensor adapters: f64, explicit strides, no second tensor type
+t = m.to_tensor
+t.transpose.at([1, 0])               # => 1; transpose is a zero-copy Tensor view
+Matrix.from_tensor(t)                # => m (copies only at the nested-row boundary)
+m.matmul_accel(m)                    # => core Tensor f64 / Accelerate dgemm
+# compiled bridge timing: benchmarks/tensor_matrix_bridge.w
 
 # ML preprocessing — fit/transform, sklearn-style
 Scaler.new(:standard).fit_transform(df)   # (v-mean)/std; :min_max for 0..1
@@ -1979,7 +1985,10 @@ median; `Stats.percentile(values, p)` and `Series#quantile(p)` take an
 integer percent 0..100 and interpolate linearly, matching numpy's
 default and pandas),
 dense linear algebra: `Vector`, `Matrix`, `LinAlg` (pure Tungsten,
-CPU-only; ops with a shape requirement return nil when it is not met;
+CPU-only by default; `Matrix#to_tensor` / `.from_tensor` bridge complete
+numeric tables to core's f64 Tensor, and `matmul_accel` delegates through
+that Core API; Matrix deliberately retains its nested-row compatibility and
+nil-on-invalid-shape contract; ops with a shape requirement return nil when it is not met;
 square systems go through Gaussian elimination with partial pivoting —
 `det` / `solve` / `inv` — while least squares goes through Householder
 QR: `qr` returns the reduced factorization `{ q:, r: }` with `q`'s

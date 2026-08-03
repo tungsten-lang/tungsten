@@ -22,6 +22,28 @@ search grids* if we need that domain type later — not for “ndarray.”
 | Only floats? | No — dtype/ebits (f32, f64, i32, bool, bf16, …). |
 | vs Array | Array = 1-D list with cap/push. Tensor = fixed product(shape), multi-index. |
 
+## Dense tables and layout are views, not Tensor subtypes
+
+For shape `[rows, cols]`, Core's explicit element strides express both common
+packed layouts over the same `f32[]`/`f64[]` storage:
+
+```
+Tensor.packed_strides([rows, cols])       # [cols, 1]  row-major / C order
+Tensor.column_major_strides([rows, cols]) # [1, rows]  column-major / Fortran order
+```
+
+`Tensor.wrap_cpu(buffer, dtype, shape, strides, offset)` keeps that storage
+zero-copy. `transpose` and `permute` are also zero-copy views: they reorder
+shape and strides, so a write through either view aliases its parent. A BLAS
+call may materialize a non-contiguous view because the current small bridge
+offers row-major NN only; that compute limitation does not change the storage
+or indexing contract.
+
+`Tensor.from_rows(rows, Tensor.f64)` and `to_rows` are intentional copy
+boundaries for numeric nested tables. Koala's `Matrix#to_tensor` /
+`Matrix.from_tensor` use them, while its ragged-row nil-padding facade remains
+separate: `nil` padding is not a numeric Tensor value.
+
 ### Fixed rank aliases
 
 | Spelling | Meaning |

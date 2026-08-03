@@ -14,11 +14,12 @@
 #
 # NOTE: this Matrix intentionally shadows core's generic Matrix<T>
 # (the column-major Metal/GPU-convention type) inside programs that
-# `use koala`. Large matmuls can route through core/blas `dgemm` via
-# `.matmul_accel` (compiled + Accelerate); the default `.matmul` stays
-# pure Tungsten so the interpreter and small products keep working.
-# Multi-D / GPU faces live on core Tensor — convert with `.to_tensor`
-# when that path is needed (compiled-only factories).
+# `use koala`. Large matmuls delegate through core Tensor's f64 `dgemm`
+# bridge via `.matmul_accel`; the default `.matmul` stays pure Tungsten so
+# the interpreter and small products keep working. This Matrix remains the
+# tabular compatibility facade: it permits nil padding for ragged rows and
+# returns nil on invalid shapes, neither of which belongs in numeric Tensor.
+
 + Matrix
   ro :entries    # nested row arrays, rectangular after construction
 
@@ -78,6 +79,16 @@
           row.push(0)
       rows.push(row)
     Matrix.new(rows)
+
+  # Numeric rank-2 Core Tensor -> this compatibility Matrix. Tensor owns its
+  # dense storage and view semantics; Matrix owns Koala's row/column and
+  # nil-on-shape-error surface. The nested rows are intentionally copied at
+  # this API boundary.
+  -> .from_tensor(tensor)
+    out = nil
+    if tensor != nil && tensor.rank == 2
+      out = Matrix.new(tensor.to_rows)
+    out
 
   # --- Shape ---
 
@@ -143,6 +154,19 @@
 
   -> to_a
     @entries
+
+  # Convert a fully populated Matrix into Core's f64 Tensor. Ragged Matrix
+  # padding is nil by contract and has no numeric Tensor representation, so
+  # leave it as nil rather than coercing it to an arbitrary scalar.
+  -> to_tensor
+    out = nil
+    ok = true
+    @entries.each -> (row)
+      row.each -> (value)
+        ok = false if value == nil
+    if ok
+      out = Tensor.from_rows(@entries, Tensor.f64)
+    out
 
   # --- Elementwise arithmetic ---
 
@@ -214,47 +238,17 @@
       out = Matrix.new(rows)
     out
 
-  # Accelerate dgemm path (core/blas). Returns nil on shape mismatch.
-  # Requires a compiled program linked with the BLAS bridge; the
-  # interpreter has no f64_array / dgemm, so do not call this there —
-  # use matmul instead. Result entries are floats.
+  # Core Tensor f64 / Accelerate dgemm path. Returns nil on a shape mismatch
+  # or when Matrix's legacy nil padding cannot become a numeric Tensor.
+  # The Tensor bridge owns packing, dtype selection and BLAS dispatch; Koala
+  # only preserves its Matrix compatibility contract around that Core API.
   -> matmul_accel(other)
     out = nil
     if self.col_count == other.row_count
-      m = self.row_count
-      k = self.col_count
-      n = other.col_count
-      a_flat = f64_array(m * k)
-      b_flat = f64_array(k * n)
-      c_flat = f64_array(m * n)
-      ents = @entries
-      i = 0
-      ents.each -> (row)
-        j = 0
-        row.each -> (v)
-          a_flat[i * k + j] = v.to_f
-          j += 1
-        i += 1
-      bents = other.to_a
-      i = 0
-      bents.each -> (row)
-        j = 0
-        row.each -> (v)
-          b_flat[i * n + j] = v.to_f
-          j += 1
-        i += 1
-      dgemm(a_flat, b_flat, c_flat, m, n, k)
-      rows = []
-      i = 0
-      while i < m
-        row = []
-        j = 0
-        while j < n
-          row.push(c_flat[i * n + j])
-          j += 1
-        rows.push(row)
-        i += 1
-      out = Matrix.new(rows)
+      left = self.to_tensor
+      right = other.to_tensor
+      if left != nil && right != nil
+        out = Matrix.from_tensor(left.matmul(right))
     out
 
   # Matrix × Vector -> Vector; nil unless col_count == v.size.

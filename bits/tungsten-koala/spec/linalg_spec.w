@@ -98,6 +98,16 @@ describe "Matrix" ->
     expect(m.trace).to eq(5)
     expect(Matrix.new([[3, 0], [0, 4]]).norm.to_s).to eq("5")
 
+  it "bridges numeric rows to Core Tensor and keeps legacy nil padding out" ->
+    m = Matrix.new([[1, 2], [3, 4]])
+    t = m.to_tensor
+    expect(t.dtype).to eq(Tensor.f64)
+    expect(t.shape.to_s).to eq("\[2, 2\]")
+    expect(t.transpose.at([1, 0])).to eq(2)
+    expect(Matrix.from_tensor(t.transpose).to_a.to_s).to eq("\[\[1, 3\], \[2, 4\]]")
+    expect(m.matmul_accel(m).to_a.to_s).to eq("\[\[7, 10\], \[15, 22\]]")
+    expect(Matrix.new([[1, 2], [3]]).to_tensor).to be_nil
+
   it "multiplies matrices (hand-computed)" ->
     a = Matrix.new([[1, 2, 3], [4, 5, 6], [7, 8, 10]])
     b = Matrix.new([[1, 0, 1], [0, 1, 1], [1, 1, 0]])

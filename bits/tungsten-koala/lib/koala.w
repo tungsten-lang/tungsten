@@ -124,9 +124,10 @@ use grid_search
 use persist
 use sparse_frame
 
-# Drafts that once lived next to these files (tensor, gpu, device, sparse,
-# estimator, index, resample, transformer) are in attic/drafts/ — not
-# loaded. Dense multi-D / GPU: core Tensor. Sparse: core SparseMatrix
+# Drafts that once lived next to these files (gpu, device, sparse, estimator,
+# index, resample, transformer) are in attic/drafts/ — not loaded. The stale
+# Tensor draft was removed: dense multi-D / GPU is core Tensor. Sparse: core
+# SparseMatrix
 # (see sparse_frame.w for DataFrame bridges).
 # See docs/ROADMAP.md and docs/compiler-issues.md.
 

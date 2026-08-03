@@ -11,10 +11,9 @@ Forced-kernel sweep (`run_kernel_crossover.sh mul`, GMP-verified operands):
 entire band below BN_SSA_THRESHOLD. There is no crossover to set a
 threshold at; both BN_TOOM6_THRESHOLD and BN_SQR_TOOM6_THRESHOLD stay
 INT32_MAX. The kernel is written but not competitive on this uarch.
-**Condition to take it:** kernel work first (compare against GMP's
-__gmpn_toom6h_mul to see whether the interpolation spine or the eval
-chunking is the gap), then re-run the crossover. Threshold flipping alone
-cannot help.
+**Condition to take it:** profile evaluation, pointwise multiplication, and
+interpolation separately to identify the dominant gap, then re-run the
+crossover. Threshold flipping alone cannot help.
 
 ## Per-host threshold tuner output — REJECTED as built (2026-08-02)
 
@@ -37,11 +36,11 @@ thread-timing measurements on this box (load 12+) cannot adjudicate the
 Neither size is in DEFAULT_SIZES (the 368..512 blind spot strikes again).
 Forced-kernel data says dispatch already picks our best kernel at both
 sizes; at 448 the BEST forced kernel (toom3, 17.4 us) loses to GMP's
-whole mpz op (14.7 us), so no threshold can fix it. At 384 our toom3
-KERNEL beats GMP's forced toom33 (0.88x) yet the cell loses 1.03
-end-to-end — the deficit is entry/dispatch overhead, not the kernel.
-Phase-4 material: toom3 eval/interp shape at 400-500 limbs, and the
-mul entry path at the toom2/toom3 boundary.
+whole mpz op (14.7 us), so no threshold can fix it. At 384 the end-to-end
+cell still loses 1.03 despite selecting the best local kernel, so the
+remaining deficit includes entry/dispatch overhead. Phase-4 material:
+toom3 eval/interp shape at 400-500 limbs, and the mul entry path at the
+toom2/toom3 boundary.
 
 The "empty Toom-3 squaring window" [392, 616) is CORRECT as configured:
 forced `bn_toom3_sq` loses to `bn_kara_sq` throughout it (392: 10.9 vs

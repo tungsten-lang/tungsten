@@ -182,7 +182,7 @@
     emit_instruction(wfn, {op: :arr_data_ptr, temp: t, arr: av[:value]})
     return typed_value(:raw_i64, t)
 
-  # asm_add_n(out, a, b, n): out[0..n) = a[0..n) + b[0..n) via a GMP-shape adc
+  # asm_add_n(out, a, b, n): out[0..n) = a[0..n) + b[0..n) via a flag-threaded adc
   # loop; returns the carry-out. POC for hand-asm bignum basecase.
   if name == "asm_add_n" && receiver == nil && args != nil && args.size() == 4
     ov = lower_expression(ctx, args[0])
@@ -354,7 +354,7 @@
     emit_instruction(wfn, {op: :asm_neon_gadd2, temp: tc, outp: to, ap: ta, bp: tb, n: nraw})
     return typed_value(:raw_i64, tc)
 
-  # asm_add_no(out, oo, a, ao, b, bo, n): offset add_n; GMP adc loop; returns carry.
+  # asm_add_no(out, oo, a, ao, b, bo, n): offset add_n; adc loop; returns carry.
   if name == "asm_add_no" && receiver == nil && args != nil && args.size() == 7
     ov = lower_expression(ctx, args[0])
     oor = lower_machine_int_expression(ctx, args[1], :i64)
@@ -373,7 +373,7 @@
     emit_instruction(wfn, {op: :asm_add_no, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bp: tb, boff: bor, n: nraw})
     return typed_value(:raw_i64, tc)
 
-  # asm_sub_no(out, oo, a, ao, b, bo, n): offset sub_n; GMP sbcs loop; returns borrow.
+  # asm_sub_no(out, oo, a, ao, b, bo, n): offset sub_n; sbcs loop; returns borrow.
   if name == "asm_sub_no" && receiver == nil && args != nil && args.size() == 7
     ov = lower_expression(ctx, args[0])
     oor = lower_machine_int_expression(ctx, args[1], :i64)
@@ -392,7 +392,7 @@
     emit_instruction(wfn, {op: :asm_sub_no, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bp: tb, boff: bor, n: nraw})
     return typed_value(:raw_i64, tc)
 
-  # asm_addmul1(out, oo, a, ao, bsc, n): offset addmul_1 (GMP __gmpn_addmul_1);
+  # asm_addmul1(out, oo, a, ao, bsc, n): offset addmul_1;
   # out[oo..] += a[ao..]*bsc; returns carry-out. The dominant Toom basecase loop.
   if name == "asm_addmul1" && receiver == nil && args != nil && args.size() == 6
     ov = lower_expression(ctx, args[0])
@@ -409,7 +409,7 @@
     emit_instruction(wfn, {op: :asm_addmul1, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bsc: bsc, n: nraw})
     return typed_value(:raw_i64, tc)
 
-  # asm_mulbase(out, oo, a, ao, b, bo, na, nb): GMP mpn_mul_basecase in one asm
+  # asm_mulbase(out, oo, a, ao, b, bo, na, nb): schoolbook multiplication in one asm
   # block; out[oo..oo+na+nb) = a[ao..]*b[bo..]. One call/basecase. Returns 0.
   if name == "asm_mulbase" && receiver == nil && args != nil && args.size() == 8
     ov = lower_expression(ctx, args[0])

@@ -9,26 +9,15 @@
 #error "This benchmark expects 64-bit GMP limbs."
 #endif
 
-/*
- * GMP keeps these Toom kernels internal, but Homebrew's GMP dylib exports them.
- * Signatures and scratch sizing are from GMP 6.3.0 gmp-impl.h.
- */
-extern void __gmpn_toom22_mul(mp_ptr, mp_srcptr, mp_size_t, mp_srcptr, mp_size_t, mp_ptr);
-extern void __gmpn_toom33_mul(mp_ptr, mp_srcptr, mp_size_t, mp_srcptr, mp_size_t, mp_ptr);
-extern void __gmpn_toom44_mul(mp_ptr, mp_srcptr, mp_size_t, mp_srcptr, mp_size_t, mp_ptr);
-
 #include "../../runtime/runtime.c"
 
 static volatile uint64_t compare_sink;
 
 typedef void (*TungstenToomFn)(uint64_t *, const uint64_t *, const uint64_t *, int32_t, uint64_t *);
-typedef void (*GmpToomFn)(mp_ptr, mp_srcptr, mp_size_t, mp_srcptr, mp_size_t, mp_ptr);
 
 typedef struct {
     const char *name;
     TungstenToomFn tungsten;
-    GmpToomFn gmp;
-    size_t (*gmp_scratch)(int32_t);
     const int32_t *sizes;
     size_t size_count;
 } ToomCase;
@@ -73,18 +62,6 @@ static size_t tungsten_scratch_len(int32_t n) {
     return dispatch_need > forced_need ? dispatch_need : forced_need;
 }
 
-static size_t gmp_toom22_scratch(int32_t n) {
-    return 2U * ((size_t)n + (size_t)GMP_LIMB_BITS);
-}
-
-static size_t gmp_toom33_scratch(int32_t n) {
-    return 3U * (size_t)n + (size_t)GMP_LIMB_BITS;
-}
-
-static size_t gmp_toom44_scratch(int32_t n) {
-    return 3U * (size_t)n + (size_t)GMP_LIMB_BITS;
-}
-
 static void compare_check(const char *label, const uint64_t *got, const uint64_t *want, int32_t n) {
     for (int32_t i = 0; i < 2 * n; i++) {
         if (got[i] != want[i]) {
@@ -119,27 +96,24 @@ static double time_tungsten_once(TungstenToomFn fn, const uint64_t *a0, const ui
     return elapsed * 1e9 / (double)iters;
 }
 
-static double time_gmp_once(GmpToomFn fn, size_t (*scratch_len)(int32_t),
-                            const uint64_t *a0, const uint64_t *b,
+static double time_gmp_once(const uint64_t *a0, const uint64_t *b,
                             const uint64_t *ref, int32_t n, int iters, const char *label) {
     uint64_t *a = (uint64_t *)malloc((size_t)n * sizeof(uint64_t));
     uint64_t *out = (uint64_t *)calloc((size_t)2 * n + 4U, sizeof(uint64_t));
-    mp_limb_t *scratch = (mp_limb_t *)calloc(scratch_len(n) + 64U, sizeof(mp_limb_t));
-    if (!a || !out || !scratch) die("out of memory in GMP Toom compare");
+    if (!a || !out) die("out of memory in GMP multiply compare");
 
     memcpy(a, a0, (size_t)n * sizeof(uint64_t));
-    fn((mp_ptr)out, (mp_srcptr)a, (mp_size_t)n, (mp_srcptr)b, (mp_size_t)n, scratch);
+    mpn_mul_n((mp_ptr)out, (mp_srcptr)a, (mp_srcptr)b, (mp_size_t)n);
     compare_check(label, out, ref, n);
 
     uint64_t saved = a[0];
     double start = compare_now();
     for (int i = 0; i < iters; i++) {
         a[0] = saved + (uint64_t)i;
-        fn((mp_ptr)out, (mp_srcptr)a, (mp_size_t)n, (mp_srcptr)b, (mp_size_t)n, scratch);
+        mpn_mul_n((mp_ptr)out, (mp_srcptr)a, (mp_srcptr)b, (mp_size_t)n);
         compare_sink ^= out[(unsigned)i % ((unsigned)n * 2U)];
     }
     double elapsed = compare_now() - start;
-    free(scratch);
     free(out);
     free(a);
     return elapsed * 1e9 / (double)iters;
@@ -155,12 +129,11 @@ static double best_tungsten(TungstenToomFn fn, const uint64_t *a, const uint64_t
     return best;
 }
 
-static double best_gmp(GmpToomFn fn, size_t (*scratch_len)(int32_t),
-                       const uint64_t *a, const uint64_t *b, const uint64_t *ref,
+static double best_gmp(const uint64_t *a, const uint64_t *b, const uint64_t *ref,
                        int32_t n, int iters, const char *label) {
-    double best = time_gmp_once(fn, scratch_len, a, b, ref, n, iters, label);
+    double best = time_gmp_once(a, b, ref, n, iters, label);
     for (int i = 1; i < 3; i++) {
-        double next = time_gmp_once(fn, scratch_len, a, b, ref, n, iters, label);
+        double next = time_gmp_once(a, b, ref, n, iters, label);
         if (next < best) best = next;
     }
     return best;
@@ -179,7 +152,7 @@ static void run_case(const ToomCase *tc) {
         mpn_mul_n((mp_ptr)ref, (mp_srcptr)a, (mp_srcptr)b, (mp_size_t)n);
 
         double ours = best_tungsten(tc->tungsten, a, b, ref, n, iters, tc->name);
-        double gmp = best_gmp(tc->gmp, tc->gmp_scratch, a, b, ref, n, iters, tc->name);
+        double gmp = best_gmp(a, b, ref, n, iters, tc->name);
         printf("%5d %10.1f %10.1f %8.2fx\n", n, ours, gmp, ours / gmp);
 
         free(ref);
@@ -198,15 +171,15 @@ int main(int argc, char **argv) {
     static const int32_t toom3_sizes[] = {128, 144, 160, 192, 224, 256, 320, 384, 512};
     static const int32_t toom4_sizes[] = {384, 448, 512, 640, 768, 1024, 1536, 2048};
     static const ToomCase cases[] = {
-        {"Toom-2 / GMP toom22", bn_toom2, __gmpn_toom22_mul, gmp_toom22_scratch,
+        {"Toom-2", bn_toom2,
          toom2_sizes, sizeof(toom2_sizes) / sizeof(toom2_sizes[0])},
-        {"Toom-3 / GMP toom33", bn_toom3, __gmpn_toom33_mul, gmp_toom33_scratch,
+        {"Toom-3", bn_toom3,
          toom3_sizes, sizeof(toom3_sizes) / sizeof(toom3_sizes[0])},
-        {"Toom-4 / GMP toom44", bn_toom4, __gmpn_toom44_mul, gmp_toom44_scratch,
+        {"Toom-4", bn_toom4,
          toom4_sizes, sizeof(toom4_sizes) / sizeof(toom4_sizes[0])}
     };
 
-    printf("Tungsten forced Toom vs GMP forced Toom kernels\n");
+    printf("Tungsten forced Toom vs GMP mpn_mul_n\n");
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) run_case(&cases[i]);
     printf("\nsink=%llu\n", (unsigned long long)compare_sink);
     return 0;

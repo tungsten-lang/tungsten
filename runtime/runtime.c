@@ -2448,7 +2448,7 @@ WValue bigint_sub_any(WValue a, WValue b) {
  * 2026-08-02, M-series): the difference-split Karatsuba square with its
  * parallel point-set path beats bn_toom4_sq through ~2.5k limbs (768:
  * 13.1 vs 23.4 us; 1024: 20.6 vs 28.5; 2048: 56 vs 68), converging by
- * 3-4k. End-to-end at the old 616 cutoff, sqr@704 LOST to GMP (1.07) and
+ * 3-4k. End-to-end at the old 616 cutoff, sqr@704 regressed (1.07x) and
  * 768 was borderline; at 2560 the whole 704..2048 band wins by 20-45%
  * (sqr geomean over 512..4096: 0.75 -> 0.64). Above 2560 toom4_sq keeps
  * its measured edge. */
@@ -6275,8 +6275,9 @@ static void bn_ntt_sqr(uint64_t *out, const uint64_t *a, int32_t n) {
  * The √2 trick IS implemented (ssa_shl_half below: √2 = 2^(3K/4) − 2^(K/4),
  * a primitive 4K-th root, live in the forward and inverse transforms with a
  * family selector in ssa_choose) — it halves K for a given L. What remains
- * against GMP is TRUE NEGACYCLIC convolution (weighting away the 2× zero
- * pad) and bit-granular M; w_mulmod_bnm1 is the CRT building block for it.
+ * for the next performance step is true negacyclic convolution (weighting
+ * away the 2× zero pad) and bit-granular M; w_mulmod_bnm1 is the CRT building
+ * block for it.
  *
  * Ring element: stride S = m+1 limbs; canonical value = lo + top·2^K with
  * top ∈ {0,1} and top==1 ⇒ lo==0 (value 2^K = p−1 exactly). All element
@@ -8221,8 +8222,7 @@ WValue bigint_mul_any(WValue a, WValue b) {
 /* ---- Bigint division (schoolbook, Knuth Algorithm D simplified) ---- */
 
 /* For normalized d and nh < d, divide nh:B+nl by d using a precomputed
- * reciprocal.  This is GMP's udiv_qrnnd_preinv correction scheme: one
- * multiply-high plus two bounded corrections replace the compiler's
+ * reciprocal. A multiply-high estimate plus two bounded corrections replace the compiler's
  * multi-instruction __udivmodti4 helper for every quotient limb. */
 static inline uint64_t bn_div_qr_preinv(uint64_t nh, uint64_t nl,
                                         uint64_t d, uint64_t dinv,
@@ -8329,8 +8329,8 @@ static uint64_t bn_div_preinv(uint64_t d) {
     return v;
 }
 
-/* floor((B^3-1)/(d1*B+d0)) - B for normalized d1 (GMP's invert_pi1): the
- * 2-limb reciprocal seeding the 3-by-2 division steps below. */
+/* floor((B^3-1)/(d1*B+d0)) - B for normalized d1: the 2-limb reciprocal
+ * seeding the 3-by-2 division steps below. */
 static inline uint64_t bn_invert_pi1(uint64_t d1, uint64_t d0) {
     uint64_t v = bn_invert_limb(d1);
     uint64_t p = d1 * v;
@@ -8354,8 +8354,8 @@ static inline uint64_t bn_invert_pi1(uint64_t d1, uint64_t d0) {
 }
 
 /* Divide (n2,n1,n0) by the normalized 2-limb divisor (d1,d0) with the
- * precomputed 3/2 reciprocal: one umulh + a few adds and one unlikely fixup
- * (GMP's udiv_qr_3by2).  Requires (n2,n1) < (d1,d0); yields the exact digit
+ * precomputed 3/2 reciprocal: one umulh, a few adds, and one unlikely fixup.
+ * Requires (n2,n1) < (d1,d0); yields the exact digit
  * and 2-limb remainder, so no refine loop and no add-back are needed. */
 static inline uint64_t bn_udiv_qr_3by2(uint64_t n2, uint64_t n1, uint64_t n0,
                                        uint64_t d1, uint64_t d0,
@@ -8702,7 +8702,7 @@ uint64_t mag_div_q_triangular_digit(
     int32_t j, int32_t skip, uint64_t d1, uint64_t d0, uint64_t dinv,
     int cheap_zero_or_one, uint64_t *r1p, uint64_t *r0p) {
     /* The remainder's top two limbs travel in registers (*r1p, *r0p) across
-     * digits, GMP sbpi1-style: a digit loads one fresh low limb, runs one
+     * digits: a digit loads one fresh low limb, runs one
      * 3-by-2 step, and multiply-subtracts only the row limbs BELOW the
      * 3-by-2 window.  No per-digit top-limb stores or reloads remain. */
     uint64_t r1 = *r1p;
@@ -9271,8 +9271,8 @@ WDivmod42 mag_divmod_42_core(const uint64_t *u, const uint64_t *v) {
     }
 
     /*
-     * GMP mpn_divrem_2: the whole division is three straight-line 3-by-2
-     * steps with the remainder carried in registers.  The top digit's
+     * The whole division is three straight-line 3-by-2 steps with the
+     * remainder carried in registers.  The top digit's
      * precondition (un[4],un[3]) < (d1,d0) always holds: the 2-limb divisor
      * IS the full divisor here, so a violation would force the quotient to
      * a fourth limb, impossible for a 4-limb dividend over a >= B divisor.
@@ -9285,8 +9285,8 @@ WDivmod42 mag_divmod_42_core(const uint64_t *u, const uint64_t *v) {
     WDivmod42 result;
     if (r1 == 0) {
         /* Unshifted top (always so when the divisor is pre-normalized):
-         * the leading digit is 0 or 1, decided by a 2-limb compare exactly
-         * like GMP divrem_2's qh step -- no 3-by-2 needed. */
+         * the leading digit is 0 or 1, decided by a two-limb compare -- no
+         * 3-by-2 step needed. */
         uint64_t n0 = un[2];
         if (r0 > d1 || (r0 == d1 && n0 >= d0)) {
             result.q2 = 1;
@@ -9460,14 +9460,14 @@ void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
     }
 
     WBigint *q = q_out ? bigint_alloc_raw_hot(m + 1) : NULL;
-    /* Remainder top-2 limbs live in registers across digits (GMP sbpi1). */
+    /* Remainder top-2 limbs live in registers across digits. */
     uint64_t r1 = un[ulen];
     uint64_t r0 = un[ulen - 1];
 
     for (int32_t j = m; j >= 0; j--) {
         uint64_t qhat;
         if (__builtin_expect(r1 >= d1 && (r1 > d1 || r0 >= d0), 0)) {
-            /* Digit saturates at B-1 (GMP sbpi1's special case):
+            /* Digit saturates at B-1:
              * materialize, full-row multiply-subtract with the classic
              * top-borrow add-back, reload. */
             un[j + vlen] = r1;
@@ -9696,7 +9696,7 @@ void bz_base_div_into(const uint64_t *u, int32_t ulen,
 #else
     (void)skip_zero_top;
 #endif
-    /* Remainder top-2 limbs live in registers across digits (GMP sbpi1). */
+    /* Remainder top-2 limbs live in registers across digits. */
     uint64_t r1 = un[m + vlen];
     uint64_t r0 = un[m + vlen - 1];
     for (int32_t j = m; j >= 0; j--) {
@@ -9859,8 +9859,8 @@ static void bz_d3n2n(const uint64_t *a, const uint64_t *b, int32_t n,
     for (int32_t i = 0; i < n; i++) r[i] = rh[i];
 }
 
-/* ---- Approximate quotient-only B-Z spine (divappr, GMP dc_divappr_q
- * shape), for the root-only sqrt division.  Structure mirrors
+/* ---- Approximate quotient-only B-Z spine for root-only sqrt division.
+ * Structure mirrors
  * bz_d2n1n/bz_d3n2n exactly, except the LOW half of every level recurses
  * approximately and the bottom-spine correction products (Q-hat times Blo,
  * one M(k) per level) are skipped along with all remainder work.  The
@@ -10011,7 +10011,7 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
  * cache retains ~7n limbs versus the ~26n-limb B-Z workspace the same
  * division would otherwise grow, so there is no memory reason to stop at the
  * recycler's pool cap.  Coupling it to BN_BIGINT_POOL_MAX_CAP (16384) put a
- * 1.4-1.7x-vs-GMP cliff at 16k..262k limbs: every 2n/n benchmark rep above
+ * 1.4-1.7x division cliff at 16k..262k limbs: every 2n/n benchmark rep above
  * the cap was rejected straight to B-Z (route counters: rej-qmax = 100%). */
 #ifndef BN_DIV_RECIP_Q_MAX
 #define BN_DIV_RECIP_Q_MAX (1 << 24)
@@ -10749,7 +10749,7 @@ static inline uint64_t bn_sqrtrem1(uint64_t hi, uint64_t *rp) {
 
 /* sqrtrem base case: {np, 2} with np[1] >= 2^62. Root (top bit set) in
  * sp[0], remainder low limb in np[0]; returns its B^1 limb (rem <= 2s).
- * GMP sqrtrem2 shape: 32-bit root of the top limb, one 64/64 integer
+ * Uses a 32-bit root of the top limb, one 64/64 integer
  * divide to extend it, exact 128-bit fixup (no fdiv anywhere). */
 static uint64_t bn_sqrtrem2(uint64_t *sp, uint64_t *np) {
     uint64_t hi = np[1], lo = np[0];
@@ -28319,8 +28319,8 @@ WValue bigint_copy_signed(WBigint *b, int negate) {
             const uint64_t *restrict src = b->limbs;
             uint64_t *restrict dst = hot->limbs;
             if (n == 3) {
-                /* Capacity is four limbs, but the fourth word is inert.  GMP
-                 * copies the logical magnitude too, so avoid one needless
+                /* Capacity is four limbs, but the fourth word is inert. Copy
+                 * only the logical magnitude to avoid one needless
                  * load/store pair in this particularly tight cell. */
                 bigint_copy_integer_3(dst, src);
             } else if (n <= 8) {
@@ -28487,9 +28487,8 @@ static __attribute__((noinline)) WValue w_neg_generic(WValue v) {
 }
 
 /* always_inline on an exported entry: callers in this translation unit get
- * the copy-class fast path inlined (matching gmp.h, where mpz_neg is an
- * inline function), while the out-of-line symbol is still emitted for the
- * compiled-Tungsten ABI.  Measured: the call boundary alone, not the TLS
+ * the copy-class fast path inlined, while the out-of-line symbol is still
+ * emitted for the compiled-Tungsten ABI. Measured: the call boundary alone, not the TLS
  * thunk (0.07 ns, negligible), is what separated this from w_ic_bigint_abs,
  * which is a static and already inlines. */
 __attribute__((always_inline))
@@ -30740,7 +30739,7 @@ __attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b) {
  *     t = a + b;  a = b;  b = t
  * where a's OLD value provably dies at the rotation: the sum is written
  * into that dying buffer, so the steady state allocates nothing — the
- * two buffers rotate exactly like GMP's mpz_add + mpz_swap pair. dest is
+ * two buffers rotate without allocation. dest is
  * the dying value and may pointer-alias x (it does, in the emitted
  * shape); bn_add_n is same-index read-then-write so in-place is safe,
  * and the |y| tail is copied before the carry ripple touches it.
@@ -36038,15 +36037,14 @@ static uint64_t bn_powm_addmul_2(uint64_t *rp, const uint64_t *up, int32_t n,
     );
 }
 
-/* Pairs-structure REDC (the shape GMP's redc_2 uses): two plain addmul_1
+/* Pairs-structure REDC: two plain addmul_1
  * rows per pair with the pair's carries PARKED in the just-retired low slots
  * (row 0's carry sits at T[i+k] so row 1's addmul_1 absorbs it in-stream; the
  * combined limb then moves down to retired slot T[i], carry-for-column i+k),
  * and one final add_n folds the parked column T[0..k) into T[k..2k). No
  * per-row carry-propagation walks, and every inner loop is the asm addmul_1
- * kernel. Measures 15-25% faster than the dual-row asm at k = 8..128 and at
- * parity with mpn_redc_2. The dual-row kernel keeps the k < 8 path where its
- * single-call overhead wins. */
+ * kernel. Measures 15-25% faster than the dual-row asm at k = 8..128. The
+ * dual-row kernel keeps the k < 8 path where its single-call overhead wins. */
 static inline __attribute__((always_inline))
 void w_powm_redc2_pair(uint64_t *T, const uint64_t *n, int32_t k,
                        uint64_t np0, uint64_t np1, int32_t i) {
@@ -37608,13 +37606,13 @@ static int w_prime_test_proth(WValue n) {
 }
 
 /* ---- General modular exponentiation (Int#modpow / Integer#pow(e, m)) ----
- * pow(a, e, m) over int48/BigInt WValues, result in [0, |m|) — the same
- * normalization GMP's mpz_powm uses. Reuses the WPrimeModCtx machinery above:
+ * pow(a, e, m) over int48/BigInt WValues, result in [0, |m|). Reuses the
+ * WPrimeModCtx machinery above:
  * Montgomery (CIOS below W_MONT_SOS_MIN limbs, SOS with asm-kernel product +
  * addmul_1 REDC above) for odd moduli up to W_POWM_MONT_MAX_LIMBS limbs, the
  * k==2 register-Barrett path, and subquadratic Barrett beyond the cap and for
  * even moduli (which Montgomery cannot represent). The exponent is walked
- * MSB→LSB straight off its limbs with a sliding window of GMP-powm widths;
+ * MSB→LSB straight off its limbs with an exponent-sized sliding window;
  * squarings ride w_prime_modctx_sqr_bigint_into. Unlike the primality users,
  * powmod must leave the Montgomery domain: entry is MontMul(x, R²), exit is
  * MontMul(x, 1) = x·R⁻¹. */
@@ -37638,7 +37636,7 @@ static inline int w_powm_bits(const uint64_t *l, int32_t len, int lo, int cnt) {
     return v;
 }
 
-/* Sliding-window width for an eb-bit exponent — GMP powm's thresholds. */
+/* Sliding-window width selected from the exponent bit count. */
 static int w_powm_window_bits(int eb) {
     if (eb < 7) return 1;
     if (eb < 25) return 2;
@@ -38540,7 +38538,7 @@ WValue w_ic_integer_lcm_generic(WValue r, WValue *a, int c) {
 }
 
 /* BigInt method callsites know both operands' representation.  Keep the
- * one-limb LCM in their caller, like GMP's header-level front end, and leave
+ * one-limb LCM in their caller and leave
  * mixed/multi-limb coercion in the out-of-line generic implementation. */
 static inline __attribute__((always_inline))
 WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {

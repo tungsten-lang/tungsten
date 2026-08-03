@@ -251,7 +251,7 @@
     i += 1
   carry
 
-# r[ro..ro+n) += a[ao..) * v; returns carry-out limb. GMP mpn_addmul_1 shape.
+# r[ro..ro+n) += a[ao..) * v; returns carry-out limb.
 -> wn_addmul_1(r, roff, a, aoff, n, v) (u64[] i64 u64[] i64 i64 u64) i64
   ra = roff ## i64
   ab = aoff ## i64

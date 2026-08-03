@@ -1339,8 +1339,8 @@ use hashing
 #                  (lowering/analysis.w loop_has_carry_intrinsic?); the
 #                  carry flag spills across the back-edge (llvm.org
 #                  #74493) and LLVM won't unroll these on its own —
-#                  unrolling amortizes the spill (+25% mpn_add_n shape,
-#                  +8% mpn_addmul_1 on Apple M5). Vectorization stays
+#                  unrolling amortizes the spill (+25% for multi-limb add,
+#                  +8% for multiply-accumulate on Apple M5). Vectorization stays
 #                  ENABLED for these: novec measured neutral-to-harmful.
 # Each marked latch gets its OWN distinct self-referential !llvm.loop node:
 # LLVM uses the node as the loop's identity, and sharing one node across loops
@@ -2870,7 +2870,7 @@ ewscope_md_state = {ids: {}, order: []}
     t = inst[:temp]
     t + ".ar = and i64 " + inst[:arr] + ", -16\n  " + t + ".bp = inttoptr i64 " + t + ".ar to ptr\n  " + t + ".gp = getelementptr i8, ptr " + t + ".bp, i64 16\n  " + t + ".pp = load ptr, ptr " + t + ".gp\n  " + t + " = ptrtoint ptr " + t + ".pp to i64"
   when :asm_add_n
-    # GMP-shape flag-threaded adc loop: out[i]=a[i]+b[i] over n limbs, carry kept
+    # Flag-threaded adc loop: out[i]=a[i]+b[i] over n limbs, carry kept
     # in the flag across iterations (sub/cbnz don't clobber C). Returns final carry.
     t = inst[:temp]
     asmt = "mov x13, ${1:x}\\0Amov x14, ${2:x}\\0Amov x15, ${3:x}\\0Amov x9, ${4:x}\\0Acmn xzr, xzr\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Aadcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Acset ${0:x}, cs"
@@ -2945,23 +2945,23 @@ ewscope_md_state = {ids: {}, order: []}
     t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x11},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{memory},~{cc}\"(i64 " + inst[:ap] + ", i64 " + inst[:bp] + ", i64 " + inst[:outp] + ", i64 " + inst[:n] + ")"
   when :asm_add_no
     # offset add_n: out[oo..]=a[ao..]+b[bo..] over n limbs; ptr = base + off<<3 in
-    # asm. GMP-shape flag-threaded adc. Returns carry. (basecase for the Toom ladder)
+    # asm. Flag-threaded adc returns carry. (basecase for the Toom ladder)
     t = inst[:temp]
     asmt = "add x15, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Aadd x14, ${5:x}, ${6:x}, lsl #3\\0Amov x9, ${7:x}\\0Acmn xzr, xzr\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Aadcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Acset ${0:x}, cs"
     t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:n] + ")"
   when :asm_sub_no
-    # offset sub_n: out[oo..]=a[ao..]-b[bo..]; GMP-shape sbcs. Returns borrow.
+    # offset sub_n: out[oo..]=a[ao..]-b[bo..]; flag-threaded sbcs returns borrow.
     t = inst[:temp]
     asmt = "add x15, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Aadd x14, ${5:x}, ${6:x}, lsl #3\\0Amov x9, ${7:x}\\0Asubs xzr, xzr, xzr\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Asbcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Acset ${0:x}, cc"
     t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:n] + ")"
   when :asm_addmul1
-    # offset addmul_1: out[oo..] += a[ao..]*bsc; GMP __gmpn_addmul_1; returns carry.
+    # offset addmul_1: out[oo..] += a[ao..]*bsc; returns carry.
     # x14=out ptr, x13=a ptr, x3=bsc, x9=n, x15=carry.
     t = inst[:temp]
     asmt = "add x14, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Amov x3, ${5:x}\\0Amov x9, ${6:x}\\0Amov x15, #0\\0A1:\\0Aldr x4, \[x13], #8\\0Amul x8, x4, x3\\0Aumulh x12, x4, x3\\0Aadds x8, x8, x15\\0Aadc x12, x12, xzr\\0Aldr x5, \[x14]\\0Aadds x8, x5, x8\\0Aadc x15, x12, xzr\\0Astr x8, \[x14], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Amov ${0:x}, x15"
     t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,~{x3},~{x4},~{x5},~{x8},~{x9},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bsc] + ", i64 " + inst[:n] + ")"
   when :asm_mulbase
-    # GMP mpn_mul_basecase as ONE asm block: out[oo..oo+na+nb) = a[ao..]*b[bo..].
+    # Schoolbook multiplication as ONE asm block: out[oo..oo+na+nb) = a[ao..]*b[bo..].
     # row 0 = mul_1, rows 1..na-1 = addmul_1. One call/basecase (no per-row spill).
     # x16=out base, x17=a ptr, x7=b base; inner: x2=b ptr,x4=out ptr,x5=nb,x15=carry.
     t = inst[:temp]

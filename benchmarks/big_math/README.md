@@ -110,15 +110,16 @@ header only when it exists, otherwise the checked-in defaults in `runtime.c` are
 used. Treat generated thresholds as machine/profile-specific benchmark output
 and review the sweep before committing or using them for release builds.
 
-For direct forced-kernel comparison against GMP's internal Toom functions:
+For direct comparison of Tungsten's forced Toom kernels with GMP's public
+equal-length multiplication dispatcher:
 
 ```sh
 benchmarks/big_math/run_toom_gmp_compare.sh
 ```
 
-That benchmark calls Tungsten's forced Toom-2/3/4 kernels and GMP's exported
-`__gmpn_toom22_mul`, `__gmpn_toom33_mul`, and `__gmpn_toom44_mul` directly,
-checking every result against `mpn_mul_n`.
+That benchmark calls Tungsten's forced Toom-2/3/4 kernels and public
+`mpn_mul_n`, checking every forced-kernel result against `mpn_mul_n` before
+timing.
 
 ## Factorial vs. Stirling (pure-Tungsten)
 

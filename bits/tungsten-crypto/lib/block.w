@@ -47,12 +47,21 @@ use bitcoin
 # did not correspond to the serialized transaction — a consensus bug a node
 # would reject the block for, with nothing in the miner to point at it.
 -> btc_coinbase_serialize(height, value, script_pubkey, extra_nonce, commitment, serialize_witness)
+  btc_coinbase_serialize_ex(height, value, script_pubkey, extra_nonce, commitment, serialize_witness, -1)
+
+# The full serializer. `txtime` covers the peercoin lineage: those chains
+# insert a uint32 timestamp between a transaction's version and its input
+# count, and a coinbase whose nTime disagrees with the block is rejected.
+# Bitcoin-lineage chains have no such field — pass txtime = -1 to omit it.
+-> btc_coinbase_serialize_ex(height, value, script_pubkey, extra_nonce, commitment, serialize_witness, txtime)
   has_witness = commitment.size > 0
   # BIP34: the scriptSig must begin with a push of the block height.
   script_sig = btc_push_hex(btc_script_num_hex(height))
   if extra_nonce.size > 0
     script_sig = script_sig + btc_push_hex(extra_nonce)
   tx = "01000000"
+  if txtime >= 0
+    tx = tx + btc_u32_le_hex(txtime)
   if has_witness && serialize_witness == 1
     # Segwit marker + flag, between version and input count.
     tx = tx + "0001"
@@ -84,6 +93,13 @@ use bitcoin
 # Its txid: double-SHA of the stripped serialization, displayed reversed.
 -> btc_coinbase_txid_hex(height, value, script_pubkey, extra_nonce, commitment, k)
   btc_txid(btc_coinbase_serialize(height, value, script_pubkey, extra_nonce, commitment, 0), k)
+
+# Coin-flavored forms of the same pair; `txtime` as in the serializer.
+-> btc_coinbase_hex_ex(height, value, script_pubkey, extra_nonce, commitment, txtime)
+  btc_coinbase_serialize_ex(height, value, script_pubkey, extra_nonce, commitment, 1, txtime)
+
+-> btc_coinbase_txid_hex_ex(height, value, script_pubkey, extra_nonce, commitment, txtime, k)
+  btc_txid(btc_coinbase_serialize_ex(height, value, script_pubkey, extra_nonce, commitment, 0, txtime), k)
 
 # ---- block ----------------------------------------------------------------
 

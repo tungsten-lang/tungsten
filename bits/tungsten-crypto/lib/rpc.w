@@ -112,6 +112,22 @@ use bitcoin
   -> getblocktemplate
     call("getblocktemplate", "\[{\"rules\":\[\"segwit\"\]}\]")
 
+  # The same call with caller-chosen params, verbatim JSON. Old forks
+  # predate BIP9 and reject a `rules` argument they do not understand —
+  # for those the right params are "\[\]" or "\[{}\]"; the coin registry
+  # carries the correct spelling per daemon.
+  -> getblocktemplate_p(params)
+    call("getblocktemplate", params)
+
+  -> getmininginfo
+    call("getmininginfo", "\[\]")
+
+  -> getdifficulty
+    call("getdifficulty", "\[\]")
+
+  -> validateaddress(address)
+    call("validateaddress", "\[\"" + address + "\"\]")
+
   # Submit a fully serialized block. Returns nil on acceptance — bitcoind's
   # submitblock answers with a null result when the block is good, and with
   # a rejection reason string when it is not.
@@ -136,8 +152,17 @@ use bitcoin
   # The payout scriptPubKey for `address`, or nil if the node cannot supply
   # one. nil must be treated as fatal by the caller — mining to a script you
   # cannot spend burns the entire block reward.
+  #
+  # Tries getaddressinfo first (Core 0.17+), then validateaddress — which is
+  # where daemons forked from pre-0.17 Core (every 2013-era altcoin) report
+  # the scriptPubKey.
   -> payout_script(address)
     info = getaddressinfo(address)
+    if info != nil
+      s = info["scriptPubKey"]
+      if s != nil && s != ""
+        return s
+    info = validateaddress(address)
     if info == nil
       return nil
     info["scriptPubKey"]

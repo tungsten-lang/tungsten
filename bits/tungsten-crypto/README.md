@@ -11,6 +11,79 @@ bin/tungsten -o /tmp/miner bits/tungsten-crypto/bin/miner.w
 /tmp/miner solo 127.0.0.1 8332 user pass bc1q...
 ```
 
+## autominer — one miner, many chains, best coin by live price
+
+`bin/miner.w` mines one chain. `bin/autominer.w` runs a fleet of SHA-256d
+daemons and mines whichever coin is most profitable *right now*, re-ranking
+on a live price feed so it follows the market instead of cementing today's
+numbers.
+
+```
+bin/tungsten -o /tmp/autominer bits/tungsten-crypto/bin/autominer.w
+
+/tmp/autominer status   # evaluate every configured coin, print the table
+/tmp/autominer run      # mine, switching coins as prices and difficulty move
+```
+
+Configuration is `~/.tungsten/autominer.config`, one daemon per line:
+
+```
+coin.PPC = 127.0.0.1:9902:rpcuser:rpcpass
+coin.TIT = 127.0.0.1:8232:rpcuser:rpcpass:optional_payout_address
+coin.RTC = 127.0.0.1:18443:rpcuser:rpcpass:bcrt1q...   # bitcoin regtest
+eval_secs = 120
+```
+
+Each cycle it re-derives, from scratch: the **difficulty** from every
+daemon's current `getblocktemplate` (the exact `nBits` it would mine, not a
+`getmininginfo` field — see below), the **reward** from that template's
+`coinbasevalue`, and the **price** from a live CoinGecko/CoinPaprika fetch.
+Expected revenue is
+
+```
+USD/day = hashrate/hashes_per_block · blocks_per_day · reward · price
+hashes_per_block = 2**256 / (target + 1)
+```
+
+and it mines the argmax, re-checking every `eval_secs` and whenever a
+daemon's chain tip moves under it. Every accepted block is appended to
+`~/.tungsten/autominer-ledger.log` with its value at the moment it was
+found. The switch is driven entirely by fresh data — a coin that pumps 3×
+mid-day pulls the miner over within one `eval_secs`.
+
+Difficulty is taken from the template's `nBits` on purpose. Aggregators —
+and even a coin's own `getdifficulty` — report the **PoS** difficulty for
+hybrid PoW/PoS chains: Peercoin's "13.96" and eMark's "15.7" are the stake
+difficulties, while their proof-of-work difficulties are ~5×10⁹ and ~3.5×10⁶.
+Ranking on those would point the miner at chains it can never solve.
+
+### What is actually mineable
+
+Verified end to end against Bitcoin **regtest**: the switcher pulled
+templates, built coinbases, searched nonces on the GPU, submitted blocks
+that the node accepted, and the coinbase rewards matured into a spendable
+wallet balance. That exercises the exact solve-and-submit path a real chain
+uses.
+
+On real networks the honest finding (survey at 2.6 GH/s, Aug 2026) is that
+**no SHA-256d coin is profitable** at this hashrate. The niche floor is set
+by stray and rented ASICs, which pin every priced chain at 10⁶–10¹⁴
+difficulty. The one chain where 2.6 GH/s still *mechanically finds blocks*
+is Rebelcoin (RBL, difficulty ~7,300 → ~7 blocks/day) — and it pays about
+**$0.004/day**. Everything with a real market is either merged-mined
+(Namecoin, Myriad, Unobtanium, Terracoin, …) or ASIC-pinned. Solo mining
+here is for finding blocks with your own node, not for revenue; the code is
+correct and the economics are a silicon fact, exactly as the main miner's
+notes below explain.
+
+The registry in `lib/coins.w` carries the per-coin facts the node cannot be
+asked for: RPC port, `getblocktemplate` params (modern forks require
+`{"rules":["segwit"]}`; pre-BIP9 forks reject it), whether the lineage
+inserts a transaction `nTime` (peercoin family), the base58 P2PKH version
+byte for local address decoding, and price-feed ids. Entries beyond
+BTC/regtest/Peercoin are researched but unmined; a wrong version byte is
+fail-safe (it makes address decoding *refuse*, never mis-pay).
+
 ## What it does
 
 | module | contents |
@@ -19,6 +92,9 @@ bin/tungsten -o /tmp/miner bits/tungsten-crypto/bin/miner.w
 | `lib/bitcoin.w` | headers, compact targets, merkle roots, and the byte-order rules |
 | `lib/block.w` | coinbase construction (BIP34, BIP141) and block serialization |
 | `lib/address.w` | bech32/bech32m decoding — address to scriptPubKey, checksum-validated |
+| `lib/base58.w` | Base58Check decoding — legacy P2PKH address to scriptPubKey, per-coin version byte |
+| `lib/coins.w` | the SHA-256d coin registry and the profitability math (hashes-per-block, blocks/day, USD/day) |
+| `lib/prices.w` | live USD prices over HTTPS (CoinGecko + CoinPaprika), fetched fresh every cycle |
 | `lib/miner.w` | midstate-reusing proof-of-work search, plus an unoptimized reference |
 | `lib/p2p.w` | Bitcoin wire protocol: framing, handshake, header-chain sync |
 | `lib/accel.w` | the same search on the ARMv8 SHA-256 extension |

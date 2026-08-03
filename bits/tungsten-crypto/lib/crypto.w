@@ -31,6 +31,9 @@ use sha256
 use bitcoin
 use block
 use address
+use base58
+use prices
+use coins
 use miner
 use accel
 use pool

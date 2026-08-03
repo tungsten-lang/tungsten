@@ -353,4 +353,62 @@ describe "JSON-RPC framing" ->
   it "returns nil for an empty response" ->
     expect(btc_rpc_body("") == nil).to eq(true)
 
+describe "Base58Check addresses" ->
+  # Satoshi's genesis-block coinbase address — the most-checked base58
+  # address in existence. Its 25-byte payload is version 0x00, hash160
+  # 62e907b15cbf27d5425399ebf6f0fb50ebb88f18, and its P2PKH script is
+  # OP_DUP OP_HASH160 <20> OP_EQUALVERIFY OP_CHECKSIG.
+  it "decodes the Satoshi address to version and hash160" ->
+    k = sha256_k()
+    info = b58check_decode("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", k)
+    expect(info[:version]).to eq(0)
+    expect(info[:hash160]).to eq("62e907b15cbf27d5425399ebf6f0fb50ebb88f18")
+
+  it "builds the P2PKH scriptPubKey for the Satoshi address" ->
+    k = sha256_k()
+    expect(b58_p2pkh_script("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", 0, k))
+      .to eq("76a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888ac")
+
+  it "rejects a corrupted checksum" ->
+    k = sha256_k()
+    # Final character flipped a -> b; the sha256d checksum no longer matches.
+    expect(b58check_decode("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNb", k) == nil).to eq(true)
+
+  it "refuses an address whose version is not the coin's" ->
+    # Same well-formed Bitcoin address, decoded against eMark's version (53):
+    # a fail-safe that stops mining a BTC address into the wrong chain.
+    k = sha256_k()
+    expect(b58_p2pkh_script("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", 53, k) == nil).to eq(true)
+
+describe "profitability economics" ->
+  # hashes-per-block = 2**256 / (target+1). For the difficulty-1 target
+  # (0x1d00ffff) that is ~2**32; the exact integer is 4295032833.
+  it "computes hashes-per-block for the difficulty-1 target" ->
+    expect(coins_hashes_per_block(0x1d00ffff).to_s).to eq("4295032833")
+
+  it "reports difficulty 1.0 for the difficulty-1 target" ->
+    expect(coins_difficulty_from_bits(0x1d00ffff)).to eq(1.0)
+
+  # Block 100000's nBits, 0x1b04864c, is difficulty 14484.38 (matches
+  # Bitcoin Core's GetDifficulty to two places).
+  it "reports the historical difficulty of block 100000's target" ->
+    d = coins_difficulty_from_bits(0x1b04864c)
+    expect(d > 14484.0).to eq(true)
+    expect(d < 14485.0).to eq(true)
+
+  # A difficulty so high its hashes-per-block exceeds i64 must degrade to
+  # zero blocks/day, never overflow. 0x17030ecd is a real mainnet-scale
+  # target.
+  it "yields zero blocks/day for a mainnet-scale target" ->
+    expect(coins_blocks_per_day_bits(2100000000, 0x17030ecd)).to eq(0.0)
+
+  # 2.1 GH/s against difficulty 1: 2.1e9 * 86400 / 2**32 = 42244 blocks/day.
+  it "computes blocks/day for a low-difficulty chain" ->
+    b = coins_blocks_per_day_bits(2100000000, 0x1d00ffff)
+    expect(b > 42200.0).to eq(true)
+    expect(b < 42300.0).to eq(true)
+
+  it "reports zero revenue when no price is available" ->
+    expect(coins_revenue_per_day(2100000000, 0x1d00ffff, 5000000000, -1.0)).to eq(0.0)
+
 spec_summary

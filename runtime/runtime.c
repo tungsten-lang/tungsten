@@ -3062,16 +3062,22 @@ static uint64_t bn_mul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uint64
     return carry;
 }
 #if defined(__aarch64__)
+/* Rolling-carry scheme: the (C flag, previous high word) pair is the loop-
+ * carried state, so each limb costs exactly one flag op (adcs lo, hi_prev)
+ * and the chain closes ONCE after the loop (adc hi_last + C).  Loop control
+ * is sub/cbnz — subs/b.ne would clobber the live carry and force the
+ * per-block close/reopen that made this kernel 1.25 flag ops per limb.
+ * In-place contract (w_bigint_mul_mut runs rp == up): every block loads all
+ * of its source limbs before its first store. */
 __attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
 static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
     __asm__(
         "mov x17, xzr\n"
+        "cmn xzr, xzr\n"
         "tbz w2, #0, 1f\n"
         "ldr x4, [x1], #8\n"
         "mul x8, x4, x3\n"
-        "umulh x12, x4, x3\n"
-        "adds x8, x8, x17\n"
-        "cinc x17, x12, hs\n"
+        "umulh x17, x4, x3\n"
         "str x8, [x0], #8\n"
         "1:\n"
         "tbz w2, #1, 2f\n"
@@ -3080,14 +3086,12 @@ static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v
         "umulh x12, x4, x3\n"
         "mul x9, x5, x3\n"
         "umulh x13, x5, x3\n"
-        "adds x8, x8, x17\n"
+        "adcs x8, x8, x17\n"
         "adcs x9, x9, x12\n"
-        "adc x17, x13, xzr\n"
+        "mov x17, x13\n"
         "stp x8, x9, [x0], #16\n"
         "2:\n"
-        "lsr x2, x2, #2\n"
-        "cbz x2, 4f\n"
-        "3:\n"
+        "tbz w2, #2, 5f\n"
         "ldp x4, x5, [x1], #32\n"
         "ldp x6, x7, [x1, #-16]\n"
         "mul x8, x4, x3\n"
@@ -3097,24 +3101,66 @@ static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v
         "mul x10, x6, x3\n"
         "umulh x14, x6, x3\n"
         "mul x11, x7, x3\n"
+        "adcs x8, x8, x17\n"
         "umulh x15, x7, x3\n"
-        "adds x8, x8, x17\n"
         "adcs x9, x9, x12\n"
         "adcs x10, x10, x13\n"
         "adcs x11, x11, x14\n"
-        "adc x17, x15, xzr\n"
+        "mov x17, x15\n"
         "stp x8, x9, [x0], #32\n"
         "stp x10, x11, [x0, #-16]\n"
-        "subs x2, x2, #1\n"
-        "b.ne 3b\n"
+        "5:\n"
+        "lsr w2, w2, #3\n"
+        "cbz x2, 4f\n"
+        /* 8 limbs per pass as two 4-limb halves whose hi word alternates
+         * x17 -> x16 -> x17, so the rolling state needs no register move. */
+        "3:\n"
+        "ldp x4, x5, [x1], #64\n"
+        "ldp x6, x7, [x1, #-48]\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "mul x10, x6, x3\n"
+        "umulh x14, x6, x3\n"
+        "mul x11, x7, x3\n"
+        "adcs x8, x8, x17\n"
+        "umulh x16, x7, x3\n"
+        "adcs x9, x9, x12\n"
+        "ldp x4, x5, [x1, #-32]\n"
+        "adcs x10, x10, x13\n"
+        "ldp x6, x7, [x1, #-16]\n"
+        "adcs x11, x11, x14\n"
+        "stp x8, x9, [x0], #64\n"
+        "stp x10, x11, [x0, #-48]\n"
+        "mul x8, x4, x3\n"
+        "umulh x12, x4, x3\n"
+        "mul x9, x5, x3\n"
+        "umulh x13, x5, x3\n"
+        "mul x10, x6, x3\n"
+        "umulh x14, x6, x3\n"
+        "mul x11, x7, x3\n"
+        "adcs x8, x8, x16\n"
+        "umulh x17, x7, x3\n"
+        "adcs x9, x9, x12\n"
+        "adcs x10, x10, x13\n"
+        "adcs x11, x11, x14\n"
+        "stp x8, x9, [x0, #-32]\n"
+        "stp x10, x11, [x0, #-16]\n"
+        "sub x2, x2, #1\n"
+        "cbnz x2, 3b\n"
         "4:\n"
-        "mov x0, x17\n"
+        "adc x0, x17, xzr\n"
         "ret\n"
     );
 }
 
 /* Straight-line fixed-length mul_1 rows, matching the addmul f-kernels:
- * row 0 of each schoolbook leaf.  v arrives in x2. */
+ * row 0 of each schoolbook leaf.  v arrives in x2.
+ * Rolling carry: the C flag stays live BETWEEN blocks (one adcs per limb,
+ * no per-block adc close); BN_M1F_TAIL settles hi_last + C once.  BLOCK0
+ * and BLOCKA open the chain with adds (entry flags are undefined); BLOCK
+ * continues it with adcs and must never follow a flag-clobbering op. */
 #define BN_M1F_BLOCK0                                                     \
     "ldp x4, x5, [x1]\n\t"                                                \
     "ldp x6, x7, [x1, #16]\n\t"                                           \
@@ -3129,11 +3175,10 @@ static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v
     "umulh x15, x7, x2\n\t"                                               \
     "adcs x10, x10, x13\n\t"                                              \
     "adcs x11, x11, x14\n\t"                                              \
-    "adc x15, x15, xzr\n\t"                                               \
     "stp x8, x9, [x0]\n\t"                                                \
     "stp x10, x11, [x0, #16]\n\t"
 
-#define BN_M1F_BLOCK(o)                                                   \
+#define BN_M1F_BLOCK_BODY(o, first_add)                                   \
     "ldp x4, x5, [x1, #" #o "]\n\t"                                       \
     "ldp x6, x7, [x1, #" #o "+16]\n\t"                                    \
     "mul x8, x4, x2\n\t"                                                  \
@@ -3142,18 +3187,20 @@ static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v
     "umulh x13, x5, x2\n\t"                                               \
     "mul x10, x6, x2\n\t"                                                 \
     "umulh x14, x6, x2\n\t"                                               \
-    "adds x8, x8, x15\n\t"                                                \
+    first_add " x8, x8, x15\n\t"                                          \
     "mul x11, x7, x2\n\t"                                                 \
     "umulh x15, x7, x2\n\t"                                               \
     "adcs x9, x9, x12\n\t"                                                \
     "adcs x10, x10, x13\n\t"                                              \
     "adcs x11, x11, x14\n\t"                                              \
-    "adc x15, x15, xzr\n\t"                                               \
     "stp x8, x9, [x0, #" #o "]\n\t"                                       \
     "stp x10, x11, [x0, #" #o "+16]\n\t"
 
+#define BN_M1F_BLOCK(o) BN_M1F_BLOCK_BODY(o, "adcs")
+#define BN_M1F_BLOCKA(o) BN_M1F_BLOCK_BODY(o, "adds")
+
 #define BN_M1F_TAIL                                                       \
-    "mov x0, x15\n\t"                                                     \
+    "adc x0, x15, xzr\n\t"                                                \
     "ret\n\t"
 
 #if BN_MUL_EQ17
@@ -3164,7 +3211,7 @@ static uint64_t bn_mul_1_f17(uint64_t *rp, const uint64_t *up, uint64_t v) {
         "mul x8, x4, x2\n\t"
         "umulh x15, x4, x2\n\t"
         "str x8, [x0]\n\t"
-        BN_M1F_BLOCK(8)
+        BN_M1F_BLOCKA(8)
         BN_M1F_BLOCK(40)
         BN_M1F_BLOCK(72)
         BN_M1F_BLOCK(104)
@@ -3222,7 +3269,9 @@ static uint64_t bn_mul_1_f24(uint64_t *rp, const uint64_t *up, uint64_t v) {
 }
 
 #undef BN_M1F_BLOCK0
+#undef BN_M1F_BLOCK_BODY
 #undef BN_M1F_BLOCK
+#undef BN_M1F_BLOCKA
 #undef BN_M1F_TAIL
 #else
 #define bn_mul_1 bn_mul_1_ref

@@ -739,6 +739,10 @@ in Tungsten:AST
     # original WValue directly — every consumer treats inline node
     # values as immutable.
     sks_first = slab_keys_table[kid]
+    # Tag-only singleton kinds have no arena fields. Their WValue is the
+    # complete immutable node, just like inline/intern payload kinds.
+    if sks_first == nil || sks_first.size() == 0
+      return node
     if sks_first != nil && sks_first.size() > 0
       first_off = slab_offset_for(k, sks_first[0])
       if first_off != nil && first_off >= 256
@@ -1312,7 +1316,7 @@ in Tungsten:AST
     @count w64
 
   -> .new(name, kind, count)
-    slab_alloc_init(KIND_VIEW_DECL, SC_8, name, kind, count)
+    slab_alloc_init(KIND_VIEW_DECL, SC_4, name, kind, count)
 
 + FieldDecl < Node [slab]
   - ivars
@@ -1328,7 +1332,7 @@ in Tungsten:AST
     @index    w64
 
   -> .new(name, index)
-    slab_alloc_init(KIND_VIEW_ACCESS, SC_8, name, index)
+    slab_alloc_init(KIND_VIEW_ACCESS, SC_2, name, index)
 
 + ViewField < Node [slab]
   - ivars
@@ -1778,7 +1782,7 @@ in Tungsten:AST
     @loc_end w64
 
   -> .new(params, body, loc = 0, loc_end = 0)
-    slab_alloc_init(KIND_BLOCK, SC_4, params, body, loc, loc_end)
+    slab_alloc_init(KIND_BLOCK, SC_8, params, body, loc, loc_end)
 
 # -- I/O --
 

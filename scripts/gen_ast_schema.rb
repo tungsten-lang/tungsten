@@ -75,6 +75,18 @@ def parse_ast_declarations(ast, registry)
       fail_schema("#{class_name} #{storage} storage requires exactly one declared field")
     end
     fail_schema("#{class_name} singleton cannot declare fields") if storage == "singleton" && !fields.empty?
+    if storage == "slab"
+      expected_sclass = if fields.size <= 2
+                          "SC_2"
+                        elsif fields.size == 3
+                          "SC_4"
+                        else
+                          "SC_8"
+                        end
+      if sclass != expected_sclass
+        fail_schema("#{class_name} has #{fields.size} fields but constructor uses #{sclass}; expected #{expected_sclass}")
+      end
+    end
 
     internal_name = constant.delete_prefix("KIND_").downcase
     public_name = block[/# ast-public-kind:\s*(\w+)/, 1] || internal_name

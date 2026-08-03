@@ -41,7 +41,7 @@ of every theorem for which that claim might be useful.
 | Arrays, tensors, linear algebra, optimization, ODEs | flat modules under `core/` | [scientific-computing/overview.md](scientific-computing/overview.md) |
 | SAT-backed finite certificates | `tungsten-wassat` producer + `tungsten-wrat` checker | [certified-mathematics.md](certified-mathematics.md) |
 | Hash-bound external proof artifacts | `ProofArtifactBundle` | [certified-mathematics.md](certified-mathematics.md) |
-| Plots | `core/plot.w`, `tungsten-drawille` | [scientific-computing/plot.md](scientific-computing/plot.md) |
+| Plots and animation data | `core/plot`, `core/animation`, `tungsten-drawille` | [scientific-computing/plot.md](scientific-computing/plot.md), [scientific-computing/animation.md](scientific-computing/animation.md) |
 | Colour spaces, transfer functions, Rec.709 video frames | `ColorSpace`, `Transfer`, `YCbCr`, `YuvFrame`, `Rec709` | [color.md](color.md) |
 
 Bare `π`, `τ`, `ϕ`/`φ`, `ℯ`, and `ℇ` are numeric `Float` constants. Exact
@@ -412,23 +412,29 @@ the data, while retaining the independent replay path.
 
 ## Visualization roadmap
 
-Current plotting is terminal-scale: sparklines, heatmaps, coarse lines, and a
-braille canvas. It is not yet a 3Blue1Brown-style mathematical animation
-system.
+Core now has a data-first 2-D foundation: retained plot scenes with explicit
+coordinates, styles, axes, labels, sampled functions/curves, uniformly sampled
+vector fields, transform groups, and portable data/JSON; plus deterministic
+keyframe timelines, easing, point-topology morphs, orthographic 2-D camera
+state, and exact frame stepping. The optional drawille bit remains the bounded
+terminal renderer.
 
-The intended stack is:
+This is not yet a 3Blue1Brown-style rendering system. The open stack is:
 
-1. a retained 2D/3D scene graph with exact world coordinates, cameras,
-   transforms, axes, labels, curves, surfaces, vector fields, and meshes;
-2. a timeline with keyframes, easing, morphs, traces, and mathematical
-   object correspondences;
-3. SVG/HTML Canvas for interactive documentation, plus GPU rendering and
-   deterministic video/image export (native raster frames: `Canvas`, see
-   [canvas.md](canvas.md));
-4. LaTeX-quality formula layout and stable glyph-to-glyph transforms;
-5. notebook/document hooks so examples and diagrams are rebuilt and tested;
-6. accessibility metadata, captions, reduced-motion variants, and static
-   fallbacks.
+1. backend implementations that consume `PlotScene` data, such as static
+   SVG/HTML Canvas, with accessibility metadata and deterministic artifact
+   checks (immediate-mode builders already exist: `Svg`, native raster
+   `Canvas` in [canvas.md](canvas.md), `Motion` easing, and `Scene3D`; they
+   do not read `PlotScene` data yet);
+2. richer geometry: retained 3-D scenes, surfaces, meshes, traces, adaptive
+   sampling, and a 3-D camera;
+3. explicit mathematical object/path correspondence beyond caller-supplied
+   identical point topology;
+4. LaTeX-quality formula layout and stable glyph-to-glyph transforms, without
+   making Core shell out to TeX during ordinary tests;
+5. notebook/document hooks, reduced-motion/static fallbacks, and opt-in
+   deterministic video/image encoding;
+6. optional GPU rendering after the portable backend contract is proven.
 
 Math documentation should eventually pair each concept with the smallest
 useful visual—static diagram for structure, interactive plot for parameters,

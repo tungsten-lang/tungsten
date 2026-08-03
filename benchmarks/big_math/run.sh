@@ -5,8 +5,12 @@ DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$DIR/../.." && pwd)
 RUNTIME="$ROOT/runtime"
 CC=${CC:-clang}
-OUT="$DIR/bench_big_math"
-PROFILE="$OUT.profile"
+# A worker-count sweep builds several otherwise-identical harnesses with
+# different compile-time parallelism caps.  Keep those binaries outside the
+# normal development harness so a measurement cannot silently replace it.
+OUT=${BENCH_OUT:-"$DIR/bench_big_math"}
+PROFILE=${BENCH_PROFILE:-"$OUT.profile"}
+mkdir -p "$(dirname "$OUT")"
 
 # -falign-functions=64: the bignum kernels are layout-sensitive (unaligned
 # hot-loop heads swing small-multiply timings by 10-20% between otherwise

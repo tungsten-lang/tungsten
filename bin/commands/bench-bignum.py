@@ -126,6 +126,12 @@ FULL_SIZES_BY_OPERATION = {
 FULL_OPERATIONS = tuple(
     operation for operation in OPERATIONS if operation in FULL_SIZES_BY_OPERATION
 )
+# The first SSA cutoff and the recycler boundary are included on both sides.
+# The worker sweep intentionally does not include the smaller Toom bands: its
+# question is whether a single *large* transform benefits from more workers.
+WORKER_SWEEP_SIZES = (
+    8192, 8193, 16383, 16384, 16385, 65536, 262144, 1048576,
+)
 LANE_LABELS = {
     "tungsten": "Tungsten",
     "gmp": "GMP",
@@ -789,6 +795,145 @@ def sweep_operation(operation, sizes, runs, target_ms, on_row):
     return rows
 
 
+def worker_sweep_build(worker_count: int) -> Path:
+    """Build an isolated native harness with one explicit parallelism cap.
+
+    The runtime sizes its fixed worker arrays at compile time, so this is a
+    benchmark build parameter rather than a live runtime knob.  The normal
+    harness is never replaced.
+    """
+    sweep_dir = ROOT / "benchmarks" / "big_math" / ".worker-sweep"
+    output = sweep_dir / f"bench_big_math-w{worker_count}"
+    env = os.environ.copy()
+    base_cflags = env.get(
+        "CFLAGS",
+        "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations",
+    )
+    caps = " ".join(
+        f"-D{name}={worker_count}"
+        for name in (
+            "BN_TOOM_PAR_THREADS",
+            "BN_TOOM_PAR_SMALL_THREADS",
+            "BN_SQR_TOOM_PAR_THREADS",
+            "BN_SSA_PAR_THREADS",
+        )
+    )
+    env["CFLAGS"] = f"{base_cflags} {caps}"
+    env["BENCH_OUT"] = str(output)
+    run_checked([str(BUILD), "--build-only"], env=env)
+    return output
+
+
+def worker_sweep_operation(
+    native: Path, operation: str, sizes: list[int], runs: int, target_ms: float
+) -> list[dict[str, Any]]:
+    """Run one worker-count build through the existing calibrated C harness."""
+    command = [
+        str(native), "--bench-boxed-sweep", operation,
+        ",".join(str(size) for size in sizes), str(runs), f"{target_ms:g}",
+    ]
+    output = run_checked(command)
+    rows: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 8 or fields[0] != "boxed" or fields[1] != operation:
+            raise RuntimeError(f"unexpected worker-sweep output: {line}")
+        limbs = int(fields[2])
+        if limbs not in sizes:
+            raise RuntimeError(f"worker-sweep emitted unexpected size: {limbs}")
+        row = {
+            "operation": operation,
+            "limbs": limbs,
+            "bits": limbs * 64,
+            "iterations": int(fields[3]),
+            "tungsten_ns": float(fields[4]),
+            "gmp_ns": float(fields[5]),
+            "tungsten_over_gmp": float(fields[4]) / float(fields[5]),
+            # Above 8192, the C harness reports median + IQR.  Preserve that
+            # variability rather than reducing the comparison to a best run.
+            "selection": "median_iqr" if limbs > FFT_BAND_LIMBS else "best",
+            "tungsten_iqr_ns": float(fields[6]),
+            "gmp_iqr_ns": float(fields[7]),
+        }
+        rows.append(row)
+    actual = [row["limbs"] for row in rows]
+    if actual != sizes:
+        raise RuntimeError(
+            f"worker-sweep row mismatch for {operation}: expected {sizes}, got {actual}"
+        )
+    return rows
+
+
+def run_worker_sweep(
+    operations: list[str], sizes: list[int], runs: int, target_ms: float
+) -> dict[str, Any]:
+    logical_cpus = os.cpu_count() or 1
+    max_workers = logical_cpus - 1
+    if max_workers < 1:
+        raise RuntimeError("worker sweep needs at least two logical CPUs")
+    worker_counts = list(range(1, max_workers + 1))
+    results: list[dict[str, Any]] = []
+    for worker_count in worker_counts:
+        print(
+            f"Building worker-count harness {worker_count}/{max_workers}...",
+            file=sys.stderr,
+        )
+        native = worker_sweep_build(worker_count)
+        for operation in operations:
+            print(
+                f"Measuring {operation} with {worker_count} workers...",
+                file=sys.stderr,
+            )
+            for row in worker_sweep_operation(
+                native, operation, sizes, runs, target_ms
+            ):
+                row["worker_count"] = worker_count
+                results.append(row)
+    winners: list[dict[str, Any]] = []
+    for operation in operations:
+        for limbs in sizes:
+            candidates = [
+                row for row in results
+                if row["operation"] == operation and row["limbs"] == limbs
+            ]
+            if len(candidates) != len(worker_counts):
+                raise RuntimeError(
+                    f"worker-sweep incomplete for {operation}/{limbs}: "
+                    f"{len(candidates)}/{len(worker_counts)} counts"
+                )
+            baseline = next(
+                row for row in candidates if row["worker_count"] == 1
+            )
+            winner = min(candidates, key=lambda row: row["tungsten_ns"])
+            winners.append({
+                "operation": operation,
+                "limbs": limbs,
+                "winner_workers": winner["worker_count"],
+                "winner_tungsten_ns": winner["tungsten_ns"],
+                "winner_iqr_ns": winner["tungsten_iqr_ns"],
+                "speedup_over_one_worker": (
+                    baseline["tungsten_ns"] / winner["tungsten_ns"]
+                ),
+                "winner_tungsten_over_gmp": winner["tungsten_over_gmp"],
+                "selection": winner["selection"],
+            })
+    return {
+        "logical_cpus": logical_cpus,
+        "worker_counts": worker_counts,
+        "compile_time_caps": (
+            "BN_TOOM_PAR_THREADS, BN_TOOM_PAR_SMALL_THREADS, "
+            "BN_SQR_TOOM_PAR_THREADS, and BN_SSA_PAR_THREADS all equal "
+            "worker_count for each isolated harness"
+        ),
+        "operations": operations,
+        "sizes": sizes,
+        "runs": runs,
+        "target_ms": target_ms,
+        "results": results,
+        "winners": winners,
+    }
+
+
 def format_time(value: float) -> str:
     if value < 1_000:
         return f"{value:.1f} ns"
@@ -985,6 +1130,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--worker-sweep",
+        action="store_true",
+        help=(
+            "rebuild and measure mul/sqr at every parallel-worker cap from "
+            "1 through logical CPUs minus 1; uses the large SSA/FFT band, "
+            "records median/IQR variability, and leaves runtime policy unchanged"
+        ),
+    )
+    parser.add_argument(
         "--sizes",
         metavar="CSV",
         help="comma-separated limb counts (default: 20 sizes from 1..8192; "
@@ -1097,9 +1251,21 @@ def main() -> int:
     args = parser.parse_args()
     if args.quick and args.full:
         parser.error("--quick and --full cannot be combined")
+    if args.worker_sweep and args.quick:
+        parser.error("--worker-sweep and --quick cannot be combined")
+    if args.worker_sweep and args.capacity_only:
+        parser.error("--worker-sweep and --capacity-only cannot be combined")
+    if args.worker_sweep and (args.python or args.rust or args.odin or args.all):
+        parser.error("--worker-sweep measures native Tungsten/GMP only; external lanes are unsupported")
     if args.full and args.capacity_only:
         parser.error("--full and --capacity-only cannot be combined")
     if args.full:
+        args.accurate = True
+        args.no_capacity = True
+    if args.worker_sweep:
+        # This is its own, deliberately narrow profile.  It needs stable
+        # multi-second rows, but does not pretend that every cheap operation
+        # informs a single-multiply worker-count decision.
         args.accurate = True
         args.no_capacity = True
     if args.runs is None:
@@ -1129,6 +1295,8 @@ def main() -> int:
     explicit_sizes = parse_csv(args.sizes, integers=True) if args.sizes else None
     if args.operations:
         operations = parse_csv(args.operations)
+    elif args.worker_sweep:
+        operations = ["mul", "sqr"]
     elif args.full:
         operations = list(FULL_OPERATIONS)
     else:
@@ -1136,6 +1304,16 @@ def main() -> int:
     unknown = [operation for operation in operations if operation not in OPERATIONS]
     if unknown:
         parser.error("unknown operation(s): " + ", ".join(unknown))
+    if args.worker_sweep:
+        unsupported = [
+            operation for operation in operations
+            if operation not in ("mul", "sqr")
+        ]
+        if unsupported:
+            parser.error(
+                "--worker-sweep supports only mul,sqr; got: "
+                + ", ".join(unsupported)
+            )
     if args.full and explicit_sizes is None:
         unsupported = [
             operation for operation in operations
@@ -1150,6 +1328,10 @@ def main() -> int:
     if explicit_sizes is not None:
         sizes_by_operation = {
             operation: list(explicit_sizes) for operation in operations
+        }
+    elif args.worker_sweep:
+        sizes_by_operation = {
+            operation: list(WORKER_SWEEP_SIZES) for operation in operations
         }
     elif args.full:
         sizes_by_operation = {
@@ -1176,6 +1358,10 @@ def main() -> int:
         parser.error("--full requires --runs >= 9")
     if args.full and target_ms < 110.0:
         parser.error("--full requires --target-ms >= 110")
+    if args.worker_sweep and args.runs < 9:
+        parser.error("--worker-sweep requires --runs >= 9")
+    if args.worker_sweep and target_ms < 110.0:
+        parser.error("--worker-sweep requires --target-ms >= 110")
 
     if args.list:
         print("operations: " + ",".join(OPERATIONS))
@@ -1191,6 +1377,7 @@ def main() -> int:
                 "  " + operation + "="
                 + ",".join(map(str, FULL_SIZES_BY_OPERATION[operation]))
             )
+        print("worker sweep (mul/sqr limbs): " + ",".join(map(str, WORKER_SWEEP_SIZES)))
         print(
             "capacity policies: exact/+1,quantum-4,quantum-8,"
             "quantum-16,quantum-32,reserve-1.5x,power-of-two"
@@ -1198,7 +1385,7 @@ def main() -> int:
         print("optional lanes: python,rust-num-bigint-0.5.1,odin-core-math-big")
         return 0
 
-    if harness_is_stale():
+    if not args.worker_sweep and harness_is_stale():
         print("Building native BigInt/GMP harness...", file=sys.stderr)
         try:
             run_checked([str(BUILD), "--build-only"])
@@ -1245,7 +1432,10 @@ def main() -> int:
         ["git", "status", "--porcelain", "--untracked-files=no"], ""
     ))
     metadata = {
-        "profile": "full" if args.full else ("quick" if args.quick else "default"),
+        "profile": (
+            "worker-sweep" if args.worker_sweep
+            else ("full" if args.full else ("quick" if args.quick else "default"))
+        ),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "command": shlex.join(
             ["bin/tungsten", "bench", "bignum", *sys.argv[1:]]
@@ -1330,6 +1520,34 @@ def main() -> int:
     }
 
     results: list[dict[str, Any]] = []
+    if args.worker_sweep:
+        # Each build fixes the runtime's compile-time thread-array capacity;
+        # running it is the only honest way to compare worker counts.
+        try:
+            worker = run_worker_sweep(
+                operations, sizes_by_operation[operations[0]], args.runs, target_ms
+            )
+        except RuntimeError as error:
+            print(f"tungsten bench bignum: {error}", file=sys.stderr)
+            return 1
+        payload = {"metadata": metadata, "worker_sweep": worker}
+        text = json.dumps(payload, indent=2, sort_keys=True)
+        if args.output:
+            Path(args.output).write_text(text + "\n")
+        if args.json or not args.output:
+            print(text)
+        else:
+            print(
+                "Worker-count winners (lower is better; IQR applies above 8192 limbs):"
+            )
+            for winner in worker["winners"]:
+                print(
+                    f"{winner['operation']:>3} {winner['limbs']:>7} limbs: "
+                    f"{winner['winner_workers']:>2} workers, "
+                    f"{format_time(winner['winner_tungsten_ns'])}, "
+                    f"{winner['speedup_over_one_worker']:.3f}x vs 1 worker"
+                )
+        return 0
     if not args.capacity_only:
         total = sum(
             1

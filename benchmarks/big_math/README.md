@@ -21,6 +21,7 @@ bin/tungsten bench bignum --quick
 bin/tungsten bench bignum --all --quick --no-capacity
 bin/tungsten bench bignum --all --accurate --json --no-capacity
 bin/tungsten bench bignum --full --output results/bignum-full.json
+bin/tungsten bench bignum --worker-sweep --output results/bignum-workers.json
 ```
 
 The default lanes are Tungsten and GMP. `--python`, `--rust`, and `--odin`
@@ -44,6 +45,16 @@ JSON artifact while leaving the human-readable table on stdout; `--json` still
 prints that same document. Artifacts record the exact command, commit and dirty
 state, CPU and target, compiler flags, dependency versions, selected matrix,
 and timing methodology.
+
+`--worker-sweep` is a separate, deliberately narrow large-multiply experiment.
+It builds isolated native harnesses with each compile-time parallel-worker cap
+from one through the host's logical CPU count minus one, then measures `mul`
+and `sqr` at the SSA/FFT and recycler boundaries through 1,048,576 limbs. It
+records the worker cap, host logical-CPU count, per-row median/IQR variability
+above 8192 limbs, and the winner for every operation/size pair. It does not
+change the checked-in runtime worker policy: use its artifact to decide whether
+such a change is warranted. Pass `--sizes` to narrow a local sweep, or
+`--operations mul` / `--operations sqr` to select one operation.
 
 All rows use a common input size of `N * 64` bits. That is a Tungsten/GMP/Rust
 limb count, not an assertion about every implementation's internal layout:

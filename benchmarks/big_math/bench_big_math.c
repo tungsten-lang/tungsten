@@ -4010,9 +4010,24 @@ static uint32_t *bench_capacity_trace(uint32_t max_limbs, uint32_t requests) {
  * a ring — depth 1 reproduces the old single-live behavior exactly. */
 #define BENCH_CAP_MAX_LIVE 32u
 
+/* p2_override/q_override != 0 bypass the named-policy switch and round
+ * through bench_capacity_hybrid directly — the B4 grid's lever. */
+static BenchCapacityStats bench_capacity_policy_grid(
+    int policy, const uint32_t *trace, uint32_t requests,
+    uint32_t max_limbs, uint32_t live_depth,
+    uint32_t p2_override, uint32_t q_override);
+
 static BenchCapacityStats bench_capacity_policy(
     int policy, const uint32_t *trace, uint32_t requests,
     uint32_t max_limbs, uint32_t live_depth) {
+    return bench_capacity_policy_grid(policy, trace, requests, max_limbs,
+                                      live_depth, 0, 0);
+}
+
+static BenchCapacityStats bench_capacity_policy_grid(
+    int policy, const uint32_t *trace, uint32_t requests,
+    uint32_t max_limbs, uint32_t live_depth,
+    uint32_t p2_override, uint32_t q_override) {
     BenchCapacityPool pool;
     memset(&pool, 0, sizeof(pool));
     BenchCapacityBuffer *live[BENCH_CAP_MAX_LIVE] = {0};
@@ -4033,7 +4048,12 @@ static BenchCapacityStats bench_capacity_policy(
             hits++;
         } else {
             uint32_t cap =
-                bench_capacity_round(policy, requested, max_limbs);
+                p2_override
+                    ? bench_capacity_hybrid(requested, p2_override,
+                                            q_override)
+                    : bench_capacity_round(policy, requested, max_limbs);
+            if (cap > max_limbs) cap = max_limbs;
+            if (cap < requested) cap = requested;
             size_t bytes = sizeof(BenchCapacityBuffer) +
                            (size_t)cap * sizeof(uint64_t);
             next = (BenchCapacityBuffer *)malloc(bytes);
@@ -4104,6 +4124,56 @@ int main(int argc, char **argv) {
 #else
         die("small tostr fuzz requires GMP");
 #endif
+        return 0;
+    }
+    /* B4 grid: sweep hybrid (p2_limit, quantum) pairs over the mixed-size
+     * trace at live depths 1/4/8. p2list/qlist are comma-separated. */
+    if (argc == 7 && strcmp(argv[1], "--bench-capacity-grid") == 0) {
+        uint32_t max_limbs = (uint32_t)strtoul(argv[4], NULL, 10);
+        uint32_t requests = (uint32_t)strtoul(argv[5], NULL, 10);
+        int runs = atoi(argv[6]);
+        if (max_limbs == 0 || max_limbs > BN_BIGINT_POOL_MAX_CAP ||
+            requests < 1000 || runs <= 0)
+            die("capacity grid expects max limbs 1..16384, >=1000 requests,"
+                " positive runs");
+        uint32_t *trace = bench_capacity_trace(max_limbs, requests);
+        char p2buf[256], qbuf[256];
+        snprintf(p2buf, sizeof p2buf, "%s", argv[2]);
+        snprintf(qbuf, sizeof qbuf, "%s", argv[3]);
+        uint32_t p2s[32], qs[32];
+        int np2 = 0, nq = 0;
+        for (char *tok = strtok(p2buf, ","); tok && np2 < 32;
+             tok = strtok(NULL, ","))
+            p2s[np2++] = (uint32_t)strtoul(tok, NULL, 10);
+        for (char *tok = strtok(qbuf, ","); tok && nq < 32;
+             tok = strtok(NULL, ","))
+            qs[nq++] = (uint32_t)strtoul(tok, NULL, 10);
+        static const uint32_t depths[] = {1, 4, 8};
+        for (int pi = 0; pi < np2; pi++) {
+            for (int qi = 0; qi < nq; qi++) {
+                for (size_t di = 0; di < 3; di++) {
+                    BenchCapacityStats best = {0};
+                    best.ns_per_request = 1e300;
+                    for (int run = 0; run < runs; run++) {
+                        BenchCapacityStats cur = bench_capacity_policy_grid(
+                            0, trace, requests, max_limbs, depths[di],
+                            p2s[pi], qs[qi]);
+                        if (cur.ns_per_request < best.ns_per_request)
+                            best = cur;
+                    }
+                    printf("grid\tp2%u+q%u\t%u\t%u\t%u\t%.3f\t%.3f"
+                           "\t%llu\t%.3f\t%.3f\t%.3f\n",
+                           p2s[pi], qs[qi], depths[di], max_limbs, requests,
+                           best.ns_per_request, best.hit_percent,
+                           (unsigned long long)best.allocations,
+                           best.average_slack,
+                           (double)best.peak_limbs * 8.0 / 1024.0,
+                           (double)best.retained_limbs * 8.0 / 1024.0);
+                    fflush(stdout);
+                }
+            }
+        }
+        free(trace);
         return 0;
     }
     if (argc == 5 && strcmp(argv[1], "--bench-capacity-policies") == 0) {

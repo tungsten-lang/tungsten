@@ -149,3 +149,27 @@ div1 0.42-1.09x (by-limb reciprocal arm + preinv branch fix), add1/sub1
 landed: qualifying accumulator loops mutate in place — E3 accumulate
 124 -> 11.8 ns/it, whole-loop gap 104x -> 9.8x. Remaining meters: mul1's
 ~1.24x (kernel work), addchain (needs swap-shape analysis, stage 2).
+
+## B4 capacity grid — RUN AND CLOSED: no hybrid point passes (2026-08-02)
+
+With the live_depth fix giving the recycler real misses (hit% 96-99 at
+depths 4/8 instead of the pinned 99.99), the full 48-point (p2, q) grid
+x depths {1,4,8} x traces {max=1024, max=4096} against the acceptance
+criteria fixed in the plan (>= 20% peak-RSS win, churn within +10%):
+**zero points pass.** Best peak win anywhere: 2.8% (p2<=256+q32 @4096
+depth 8); at depth 4 most hybrid points have WORSE peak than
+power-of-two (the churn working set is dominated by the pool's retained
+classes, and pow2's fewer classes retain less). Artifacts:
+baselines/b4-grid-{1024,4096}.tsv + b4-base-*.tsv.
+
+Reconciliation with the earlier -32% RSS claim: that was measured on
+LIVE-SET workloads (all values held simultaneously — arrays/matrices of
+bignums), where per-allocation slack fully exposes and hybrid genuinely
+wins. On churn-with-recycler traffic the recycler's retained classes,
+not per-value slack, set the peak. Different workload class, both
+measurements stand.
+
+**Condition to reopen:** a whole-program benchmark family (E3-style)
+weighted toward large live sets of bignums, measured against the same
+acceptance discipline. Until then BN_BIGINT_HYBRID_CAP stays opt-in for
+liveset-heavy programs, default off.

@@ -13927,6 +13927,10 @@ void w_node_arena_reset(void) {
     }
     w_ast_sparse_reset();
     w_ast_extra_reset();
+    /* Cached Bool nodes are arena handles. They must not survive the arena
+     * generation that owns their slots. */
+    g_ast_bool_node[0] = 0;
+    g_ast_bool_node[1] = 0;
     /* The string-intern table is deliberately NOT reset — ids are
      * content-stable and re-interning after reset yields the same
      * table, so keeping it amortizes across REPL/JIT compiles. */

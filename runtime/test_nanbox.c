@@ -1365,6 +1365,28 @@ int main() {
         printf("  domain heap decimal comparison: OK\n");
     }
 
+    /* Arena-owned singleton caches must be invalidated with the arena. A
+     * retained handle can otherwise alias the first node in the next compile. */
+    {
+        WValue false_before = w_ast_bool_cached(0);
+        WValue true_before = w_ast_bool_cached(1);
+        assert(w_node_field_load(false_before, 0) == W_FALSE);
+        assert(w_node_field_load(true_before, 0) == W_TRUE);
+
+        w_node_arena_reset();
+        WValue first = w_node_alloc(1, 0);
+        WValue false_after = w_ast_bool_cached(0);
+        WValue true_after = w_ast_bool_cached(1);
+        assert(w_node_offset(first) == 1);
+        assert(w_node_offset(false_after) == 2);
+        assert(w_node_offset(true_after) == 3);
+        assert(w_node_field_load(false_after, 0) == W_FALSE);
+        assert(w_node_field_load(true_after, 0) == W_TRUE);
+        w_node_arena_reset();
+
+        printf("  AST cached bool reset: OK\n");
+    }
+
     printf("\n=== All tests passed! ===\n");
     return 0;
 }

@@ -37,6 +37,7 @@ typedef struct WNodeArena {
 } WNodeArena;
 
 WNodeArena g_node_arena[4] = {{0}};
+static WValue g_ast_bool_node[2] = {0, 0};
 
 /* Indexed by size_class (the 2-bit field in W_PACKED_NODE):
  *   SC_2  = 0:  16 B (2 slots, leaf kinds)
@@ -54,6 +55,8 @@ static void node_arena_fatal(const char *msg) {
     fprintf(stderr, "fatal: %s\n", msg);
     exit(1);
 }
+
+void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
 
 void w_node_arena_init(void) {
     for (int sc = 0; sc < 4; sc++) {
@@ -91,15 +94,27 @@ WValue w_node_alloc(int64_t kind, int64_t sc) {
     return w_box_node((int)kind, (int)sc, (uint64_t)off);
 }
 
+WValue w_ast_bool_cached(int64_t truthy_01) {
+    int idx = truthy_01 ? 1 : 0;
+    if (g_ast_bool_node[idx] == 0) {
+        WValue node = w_node_alloc(/*KIND_BOOL=*/39, /*SC_2=*/0);
+        w_node_field_store(node, 0, truthy_01 ? /*W_TRUE=*/2 : /*W_FALSE=*/1);
+        g_ast_bool_node[idx] = node;
+    }
+    return g_ast_bool_node[idx];
+}
+
 void w_ast_sparse_reset(void);  /* forward decl; defined below */
 
 void w_node_arena_reset(void) {
     for (int sc = 0; sc < 4; sc++) {
         free(g_node_arena[sc].base);
         g_node_arena[sc].base = NULL;
-        g_node_arena[sc].cursor = 0;
+        g_node_arena[sc].cursor = 1;
         g_node_arena[sc].cap = 0;
     }
+    g_ast_bool_node[0] = 0;
+    g_ast_bool_node[1] = 0;
     /* PR #3: sparse meta lifetime is bound to the node arena —
      * both are scoped to a single compile boundary. */
     w_ast_sparse_reset();

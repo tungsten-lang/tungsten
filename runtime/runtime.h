@@ -130,6 +130,7 @@ extern uint64_t       g_ast_schema_hash;       /* hash of (KIND_*, F_*, STRIDE_*
 void     w_node_arena_init(void);
 void     w_node_arena_reset(void);
 WValue   w_node_alloc(int64_t kind, int64_t size_class);
+WValue   w_ast_bool_cached(int64_t truthy_01);
 uint64_t w_ast_schema_hash_compute(void);
 
 /* ---- AST sparse-field side-table (PR #3) ----

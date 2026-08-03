@@ -9,6 +9,7 @@
 /* Forward declarations from node_arena.c — the C VM-side slab-AST
  * helpers that ccall_nobox dispatches to in vm_call_body.inc. */
 WValue w_node_alloc(int64_t kind, int64_t sc);
+WValue w_ast_bool_cached(int64_t truthy_01);
 WValue w_node_field_load(WValue wnode, int64_t ivar_offset);
 void   w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
 

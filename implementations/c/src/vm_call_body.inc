@@ -216,8 +216,6 @@
               } else {
                 result = w_box_node((int)kind, /*sc*/ 0, /*off*/ 0);
               }
-            } else if (fn_len == 18 && memcmp(fn, "w_ast_bool_cached", 17) == 0 && fn[17] == 0) {
-              // unused 18-byte case
             } else if (fn_len == 21 && memcmp(fn, "w_node_inline_payload", 21) == 0 && argc == 3) {
               // Inline-encoded AST node with int payload in offset
               // bits (fix #3: :char/:lambda_arity/:superscript/
@@ -230,17 +228,10 @@
               // for inline-payload decoding.
               result = int_value((int64_t)w_node_offset(args[1]));
             } else if (fn_len == 17 && memcmp(fn, "w_ast_bool_cached", 17) == 0 && argc == 2) {
-              // Cached :bool AST node (fix #7). Mirrors runtime.c —
-              // one slab allocation per truthiness, cached thereafter.
+              // Cached :bool AST node (fix #7). The cache lives beside
+              // the arena so w_node_arena_reset can invalidate its handles.
               int64_t truthy = value_is_int(args[1]) ? value_as_int(args[1]) : 0;
-              int idx = truthy ? 1 : 0;
-              static WValue cached[2] = {0, 0};
-              if (cached[idx] == 0) {
-                WValue n = w_node_alloc(/*KIND_BOOL=*/39, /*SC_2=*/0);
-                w_node_field_store(n, 0, truthy ? /*W_TRUE=*/2 : /*W_FALSE=*/1);
-                cached[idx] = n;
-              }
-              result = cached[idx];
+              result = w_ast_bool_cached(truthy);
             } else if (fn_len == 15 && memcmp(fn, "w_location_file", 15) == 0 && argc == 4) {
               // Build a fully tagged W_PACKED_LOCATION WValue
               // (mode 1 = File). The parser's make_loc dispatches

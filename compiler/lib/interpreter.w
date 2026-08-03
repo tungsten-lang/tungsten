@@ -1307,6 +1307,14 @@ use target
       ebits = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
       length = ccall_nobox("w_numeric_to_i64", args[3]) ## i64
       return ccall_rawargs("w_big_array_view", data, ebits, length)
+    when "w_quantity_unit_name"
+      # Unit symbol of a Quantity, nil for any other value. The safe way to
+      # test "is this a quantity?" without method dispatch (whose inline
+      # caches cannot distinguish the 0xFFFD quantity/decimal box kinds in
+      # compiled code) — core/physics relies on it in both engines.
+      if args.size() != 2
+        raise "w_quantity_unit_name expects one argument"
+      return ccall("w_quantity_unit_name", args[1])
     when "w_executable_path"
       if args.size() != 1
         raise "w_executable_path expects no arguments"
@@ -3698,6 +3706,16 @@ use target
         superclass = @classes[ast_get(node, :superclass)]
       w_class = {rt: :class, name: ast_get(node, :name), superclass: superclass, methods: {}, method_overloads: {}, class_methods: {}}
       @classes[class_name] = w_class
+    elsif ast_get(node, :superclass) != nil && w_class[:superclass] == nil
+      # The entry may be a parentless autoload stub: when a registry entry
+      # maps this class to a file other than the one defining it (e.g. an
+      # orchestrator like core/physics.w for a class defined in a worker),
+      # the try_autoload_class above installs {superclass-less} before the
+      # real definition runs, and the merge below would silently drop the
+      # `< Parent` link. A definition that names a superclass is
+      # authoritative for a stub that has none.
+      try_autoload_class(ast_get(node, :superclass))
+      w_class[:superclass] = @classes[ast_get(node, :superclass)]
     if w_class[:class_methods] == nil
       w_class[:class_methods] = {}
     if w_class[:method_overloads] == nil

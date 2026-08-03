@@ -233,6 +233,77 @@ use hashing
       buf << "Gs"
     else
       buf << "Gu"
+  # Literal-constant payloads (const_decimal / const_currency /
+  # const_quantity / const_duration_* / const_date / const_ipv4 /
+  # const_rational / const_color): without these fields two functions
+  # differing only in such a constant hash identically and get wrongly
+  # merged — e.g. every class method returning a quantity literal
+  # collapsed to the first one (`100 m/s` == `5 Pa` == `3 kg`).
+  if inst[:sig] != nil
+    buf << "q"
+    buf << inst[:sig].to_s()
+  if inst[:scale] != nil
+    buf << "e"
+    buf << inst[:scale].to_s()
+  if inst[:unit_id] != nil
+    buf << "u"
+    buf << inst[:unit_id].to_s()
+  if inst[:symbol_id] != nil
+    buf << "cy"
+    buf << inst[:symbol_id].to_s()
+  if inst[:ns] != nil
+    buf << "ns"
+    buf << inst[:ns].to_s()
+  if inst[:months] != nil
+    buf << "mo"
+    buf << inst[:months].to_s()
+  if inst[:ms] != nil
+    buf << "ms"
+    buf << inst[:ms].to_s()
+  if inst[:year] != nil
+    buf << "dt"
+    buf << inst[:year].to_s()
+    buf << "-"
+    buf << inst[:month].to_s()
+    buf << "-"
+    buf << inst[:day].to_s()
+    buf << "T"
+    buf << inst[:hour].to_s()
+    buf << ":"
+    buf << inst[:min].to_s()
+    buf << ":"
+    buf << inst[:sec].to_s()
+    buf << "z"
+    buf << inst[:tz].to_s()
+  if inst[:cidr] != nil
+    buf << "ip"
+    buf << inst[:a].to_s()
+    buf << "."
+    buf << inst[:b].to_s()
+    buf << "."
+    buf << inst[:c].to_s()
+    buf << "."
+    buf << inst[:d].to_s()
+    buf << "/"
+    buf << inst[:cidr].to_s()
+  if inst[:num] != nil
+    buf << "rn"
+    buf << inst[:num].to_s()
+  if inst[:den] != nil
+    buf << "rd"
+    buf << inst[:den].to_s()
+  if inst[:r] != nil
+    buf << "col"
+    buf << inst[:r].to_s()
+    buf << ","
+    buf << inst[:g].to_s()
+    buf << ","
+    buf << inst[:b].to_s()
+    buf << ","
+    buf << inst[:a].to_s()
+  if inst[:string_id] != nil
+    buf << "sid"
+    buf << inst[:string_id].to_s()
   # Inline typed-array load/store operands (big_array_get_inline / set): the
   # array and index temps distinguish reads of DIFFERENT arrays/positions.
   # Without these, two such functions hash identically and get wrongly merged

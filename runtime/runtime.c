@@ -35506,6 +35506,18 @@ WValue w_closure_call_2(WValue closure_val, WValue arg1, WValue arg2) {
     return ((fn_t)cl->fn_ptr)(cl->captures, arg1, arg2);
 }
 
+WValue w_closure_call_3(WValue closure_val, WValue arg1, WValue arg2, WValue arg3) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, arg1, arg2, arg3);
+}
+
+WValue w_closure_call_4(WValue closure_val, WValue arg1, WValue arg2, WValue arg3, WValue arg4) {
+    WClosure *cl = as_closure(closure_val);
+    typedef WValue (*fn_t)(WValue *, WValue, WValue, WValue, WValue);
+    return ((fn_t)cl->fn_ptr)(cl->captures, arg1, arg2, arg3, arg4);
+}
+
 /* ---- Command-line arguments ---- */
 
 static int g_argc = 0;
@@ -43759,7 +43771,9 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
         if (args->size == 0) return w_closure_call_0(recv);
         if (args->size == 1) return w_closure_call_1(recv, args->slots[0]);
         if (args->size == 2) return w_closure_call_2(recv, args->slots[0], args->slots[1]);
-        die("closure .call supports up to 2 arguments");
+        if (args->size == 3) return w_closure_call_3(recv, args->slots[0], args->slots[1], args->slots[2]);
+        if (args->size == 4) return w_closure_call_4(recv, args->slots[0], args->slots[1], args->slots[2], args->slots[3]);
+        die("closure .call supports up to 4 arguments");
     }
 
     if (w_is_array(recv)) {

@@ -1,5 +1,92 @@
 # TODO
 
+## Compiler bugs found building core/physics + Plot3D (2026-08-03)
+
+Found porting Lanyon's CompressibleEuler to core/physics with the Plot3D
+three.js viewer. One is FIXED in this change set; the rest have minimal
+repros and workarounds noted at the use sites.
+
+1. **[FIXED] Function dedup merged bodies differing only in literal
+   constants.** `compiler/lib/content_hash.w` encode_inst's generic arm
+   skipped the payload fields of `const_quantity` / `const_decimal` /
+   `const_currency` / `const_duration_*` / `const_date` / `const_ipv4` /
+   `const_rational` / `const_color`, so e.g. every class method returning
+   a bare quantity literal collapsed to the first one compiled
+   (`Physics.boltzmann` == `Physics.air_density` == `1.225 kg/m³`).
+   Fixed by hashing sig/scale/unit_id/symbol_id/date/ipv4/etc. Repro that
+   used to fail: three class methods returning `100 m/s`, `5 Pa`, `3 kg`.
+
+2. **[FIXED] Interpreter: autoload stub drops `< Parent` link.** When a
+   registry entry maps a class to a file other than the one defining it
+   (orchestrator-style entries like `auto :CompressibleEuler, "physics"`),
+   the eval of `+ Sub < Parent` first ran try_autoload_class, which
+   installed a parentless stub; the real definition then merged methods
+   into the stub without ever setting `:superclass`, so all inherited
+   methods raised "undefined method". Fixed in
+   `compiler/lib/interpreter.w` (class-def now backfills `:superclass`
+   on a stub when the definition names a parent). Latent victim:
+   `WeilSexticGaloisGroup < GaloisGroup` (works only because it overrides
+   everything it uses).
+
+3. **Compiled StringBuffer#append drops non-literal strings inside any
+   function body.** At top level all appends work; inside a `->` body
+   (top-level fn, instance or class method), `sb.append(x)` where x is a
+   param, a local, or a `+`-concat result appends NOTHING (only literals,
+   interpolated strings, and `.to_s` results survive). Repro:
+   `-> tf(x)\n  sb = StringBuffer(256)\n  sb.append(x)\n  sb.to_s` returns
+   "". Likely a representation mismatch on the w_strbuf_append fast path
+   (compiler/lib/lowering/method_call.w:978). Workaround used in
+   core/plot3d.w: wrap every dynamic append arg in interpolation
+   (`sb.append("[v]")`).
+
+4. **Quantity arg slot clobbered: inline `.class.to_s` guard + early
+   return + `case`.** In a class method
+   `if value.class.to_s != "Quantity"\n  return value.to_f()\n case ...`,
+   the quantity in `value` is corrupted before the case body's unit pipe
+   (dies "| unit conversion expects a quantity"). Landing the class name
+   in a local first avoids it. A related shape: a `case` whose branches
+   contain quantity literals miscompiled branch selection inside
+   core/physics Physics.si until it was rewritten as an if-chain (both
+   guards documented in core/physics/constants.w).
+
+5. **`bin/tungsten -c` rejects array types in typed signatures.** Even
+   the doc example `-> dot(xs, ys, n) (f64[] f64[] i64) f64` fails
+   `-c` with "expected ')'" while running/compiling the same file works.
+   Checker-path lexer/parser divergence.
+
+6. **Stage binaries went stale across the unit-registry expansion
+   (b7269d7): compiled `1 kg/m³` printed `1 mickey`.** The committed
+   tables were consistent, but the cached stage compiler + prebuilt
+   runtime predated the expansion, so compile-time unit ids and the
+   linked runtime's unit_names[] disagreed by 4 slots. `build --force`
+   resyncs; the build should fingerprint the generated unit tables into
+   its staleness check so a registry change invalidates stages
+   automatically. (Also: `gen_units.rb --check` rewrites the generated
+   files — mtime churn — while reporting "up to date"; it should diff
+   without writing.)
+
+7. **Interpreter: `Class.method(["array", "literal"])` binds the array as
+   a block.** `A.enc(["a", "b"])` with `-> .enc(v) JSON.encode(v)` raises
+   "Undefined variable or method 'item'" interpreted (works compiled).
+
+8. **Packed lexer mis-scans heredoc content (`Unexpected token
+   TYPE_HINT(<<~JS…`).** Heredocs whose bodies look token-dense to the
+   fast64 tokenizer (e.g. many `//`-prefixed JavaScript lines) come back
+   as a TYPE_HINT token instead of a STRING. Not a pure size limit:
+   170 lines × 100 chars (17 KB) passes while 200 × 38 (8 KB) and
+   1000 × 8 fail. Repro: `+ T` / `-> .a` / `<<~JS` + 300 lines of
+   `// pad N …` + `JS`. Likely the fast64 pre-tokenizer scanning inside
+   the heredoc span (`//` starts a regex/comment state) and the packed
+   12-bit length or the materializer skip logic losing sync. Workaround:
+   core/plot3d.w ships its viewer JS/CSS as data/viewer3d assets read at
+   runtime instead of heredocs.
+
+9. **[FIXED] `Closure#call` capped at 2 arguments.** `f.call(x, y, z)`
+   died "closure .call supports up to 2 arguments"
+   (runtime w_method_dispatch); 3D simulation init lambdas need 3.
+   Added w_closure_call_3/_4 and dispatch arms.
+
+
 ## BigInt: mutate-if-unique arithmetic (promoted from COW deferral, 2026-08-01)
 
 **What:** add/sub/mul/div mutate the LHS in place when it is provably
@@ -43,6 +130,17 @@ operand stays live. Design the alias model once, shared by both features.
 **Still deferred (original COW):** sharing limb buffers between live
 values. Mutation makes it less attractive, not more — mutating is only
 legal because nobody shares.
+
+## BigInt: FLINT end-to-end exact-math comparison
+
+Keep GMP as the limb-level arithmetic oracle, then add a separate optional
+FLINT workload suite for the work users actually perform above raw `mpz`
+operations: modular polynomial multiplication/GCD, exact matrix operations,
+and representative number-theory kernels. Record end-to-end wall time,
+allocation, operand-size distribution, platform, and exact FLINT/GMP build
+versions. This is a comparison harness, not a production dependency or a
+reason to duplicate FLINT's domain APIs. Start only after the current GMP
+matrix and large-worker sweep have stable artifacts.
 
 ## Unit conversion contexts
 

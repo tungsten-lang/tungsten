@@ -771,6 +771,8 @@ WValue w_closure_new(void *fn, WValue *captures, int count);
 WValue w_closure_call_0(WValue closure_val);
 WValue w_closure_call_1(WValue closure_val, WValue arg);
 WValue w_closure_call_2(WValue closure_val, WValue arg1, WValue arg2);
+WValue w_closure_call_3(WValue closure_val, WValue arg1, WValue arg2, WValue arg3);
+WValue w_closure_call_4(WValue closure_val, WValue arg1, WValue arg2, WValue arg3, WValue arg4);
 
 /* ---- Exceptions ---- */
 #include <setjmp.h>

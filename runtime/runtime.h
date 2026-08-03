@@ -122,13 +122,58 @@ typedef struct WNodeArena {
     uint32_t  cap;        /* allocated capacity, in stride units */
 } WNodeArena;
 
-extern WNodeArena    g_node_arena[4];          /* per size class */
+typedef struct WAstSparseRecord {
+    int64_t  sym;
+    uint32_t next;
+    uint32_t _pad;
+    WValue   value;
+} WAstSparseRecord;
+
+typedef struct WAstSparseNodeMap {
+    uint64_t *keys;
+    uint32_t *heads;
+    uint32_t  cap;
+    uint32_t  count;
+} WAstSparseNodeMap;
+
+typedef struct WAstInternMap {
+    uint64_t *hashes;
+    uint32_t *ids;
+    uint32_t  cap;
+    uint32_t  count;
+} WAstInternMap;
+
+/* One explicit owner for every handle-relative AST allocation. The default
+ * process store is currently active for all handles; keeping ownership in a
+ * value makes reset/reuse and future store selection one coherent operation. */
+typedef struct WAstStore {
+    WNodeArena       node_arena[4];
+    WValue           bool_nodes[2];
+    WAstSparseNodeMap sparse_map;
+    WAstSparseRecord *sparse_records;
+    uint32_t          sparse_rec_cap;
+    uint32_t          sparse_rec_cursor;
+    WAstInternMap     intern_map;
+    WValue           *intern_values;
+    uint32_t          intern_values_cap;
+    uint32_t          intern_next_id;
+    WValue           *body_base;
+    uint32_t          body_cursor;
+    uint32_t          body_cap;
+    uint32_t          body_count;
+    uint32_t          generation;
+} WAstStore;
+
+extern WAstStore     g_ast_store;
+#define g_node_arena (g_ast_store.node_arena)
 extern const uint32_t g_node_stride[4];        /* bytes per node per SC: {32,64,128,0} */
 extern const uint32_t g_node_initial_cap[4];   /* from Phase 1.0 measurement */
 extern uint64_t       g_ast_schema_hash;       /* hash of (KIND_*, F_*, STRIDE_*); embedded in loader cache */
 
 void     w_node_arena_init(void);
 void     w_node_arena_reset(void);
+int64_t  w_ast_store_reset(int64_t reserved);
+int64_t  w_ast_store_generation(int64_t reserved);
 WValue   w_node_alloc(int64_t kind, int64_t size_class);
 WValue   w_ast_bool_cached(int64_t truthy_01);
 uint64_t w_ast_schema_hash_compute(void);
@@ -163,7 +208,7 @@ WValue   w_ast_intern_str_of(WValue node);
 /* ---- AST body arena (child lists) ----
  * Flat, realloc-doubling arena of WValue slots for AST child-list
  * arrays (:expressions/:args/:body/…) — moves on growth exactly like
- * g_node_arena, which is safe because slab slots hold a W_PACKED_BODY
+ * the active AST store, which is safe because slab slots hold a W_PACKED_BODY
  * reference (offset+length, wvalue.h), not a pointer: every access
  * re-derives the address from a freshly-read base. w_ast_freeze_if_array
  * copies a heap polymorphic array's elements (recursively, for nested

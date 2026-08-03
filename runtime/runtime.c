@@ -13715,7 +13715,27 @@ WInternTable g_intern = {0};
 
 /* ---- AST node arenas (PR #2: slab-AST migration) ---- */
 
-WNodeArena g_node_arena[4] = {{0}};
+WAstStore g_ast_store = {
+    .intern_next_id = 1,
+    .generation = 1,
+};
+
+_Static_assert(offsetof(WAstStore, node_arena) == 0,
+               "the emitted AST fast path requires node_arena at offset zero");
+
+#define g_ast_bool_node    (g_ast_store.bool_nodes)
+#define g_sparse_map       (g_ast_store.sparse_map)
+#define g_sparse_records   (g_ast_store.sparse_records)
+#define g_sparse_rec_cap   (g_ast_store.sparse_rec_cap)
+#define g_sparse_rec_cur   (g_ast_store.sparse_rec_cursor)
+#define g_intern_map       (g_ast_store.intern_map)
+#define g_intern_strs      (g_ast_store.intern_values)
+#define g_intern_strs_cap  (g_ast_store.intern_values_cap)
+#define g_intern_next_id   (g_ast_store.intern_next_id)
+#define g_body_arena_base  (g_ast_store.body_base)
+#define g_body_arena_cursor (g_ast_store.body_cursor)
+#define g_body_arena_cap   (g_ast_store.body_cap)
+#define g_ast_extra_arrays (g_ast_store.body_count)
 
 /* Bytes per node per size class. Indexed by the 2-bit size_class
  * field in W_PACKED_NODE; names match slot counts (8 B per slot).
@@ -13795,8 +13815,6 @@ int64_t w_node_size_class_extern(WValue v) {
  * normal slab path — no special-case branch in ast_get needed,
  * so the change is transparent to consumers (sentinel_value_of,
  * lower_bool, etc.). */
-static WValue g_ast_bool_node[2] = {0, 0};
-
 WValue w_ast_bool_cached(int64_t truthy_01) {
     int idx = truthy_01 ? 1 : 0;
     if (g_ast_bool_node[idx] == 0) {
@@ -13890,9 +13908,6 @@ WValue w_node_alloc(int64_t kind, int64_t sc) {
  * Tungsten callsite passes a placeholder 0. */
 /* Tentative declarations — the body-arena statics are defined below
  * (after the sparse/intern blocks); the stats dump reads them. */
-static uint32_t g_ast_extra_arrays;
-static uint32_t g_body_arena_cursor;
-
 int64_t w_ast_stats_dump(int64_t reserved) {
     (void)reserved;
     static const char *names[3] = {"SC_2", "SC_4", "SC_8"};
@@ -13931,9 +13946,22 @@ void w_node_arena_reset(void) {
      * generation that owns their slots. */
     g_ast_bool_node[0] = 0;
     g_ast_bool_node[1] = 0;
+    g_ast_store.generation++;
+    if (g_ast_store.generation == 0) g_ast_store.generation = 1;
     /* The string-intern table is deliberately NOT reset — ids are
      * content-stable and re-interning after reset yields the same
      * table, so keeping it amortizes across REPL/JIT compiles. */
+}
+
+int64_t w_ast_store_reset(int64_t reserved) {
+    (void)reserved;
+    w_node_arena_reset();
+    return (int64_t)g_ast_store.generation;
+}
+
+int64_t w_ast_store_generation(int64_t reserved) {
+    (void)reserved;
+    return (int64_t)g_ast_store.generation;
 }
 
 /* ---- AST sparse-field side-table (PR #3) ----
@@ -13956,25 +13984,6 @@ void w_node_arena_reset(void) {
  * Lifetime matches the node arena: w_node_arena_reset calls
  * w_ast_sparse_reset. w_ast_sparse_get returns W_NIL (= 0) for an
  * absent (node, sym) pair, which round-trips to Tungsten nil. */
-typedef struct {
-    int64_t  sym;
-    uint32_t next;
-    uint32_t _pad;
-    WValue   value;
-} WSparseRecord;
-
-typedef struct {
-    uint64_t *keys;
-    uint32_t *heads;
-    uint32_t  cap;
-    uint32_t  count;
-} WSparseNodeMap;
-
-static WSparseNodeMap g_sparse_map      = {0};
-static WSparseRecord *g_sparse_records  = NULL;
-static uint32_t       g_sparse_rec_cap  = 0;
-static uint32_t       g_sparse_rec_cur  = 0;
-
 #define W_SPARSE_END UINT32_MAX
 
 static uint64_t w_sparse_hash(uint64_t node) {
@@ -14015,7 +14024,8 @@ void w_ast_sparse_init(void) {
     if (!g_sparse_map.keys || !g_sparse_map.heads) die("w_ast_sparse_init: alloc failed");
     g_sparse_map.count = 0;
     g_sparse_rec_cap = 4096;
-    g_sparse_records = (WSparseRecord *)malloc(g_sparse_rec_cap * sizeof(WSparseRecord));
+    g_sparse_records = (WAstSparseRecord *)malloc(
+        g_sparse_rec_cap * sizeof(WAstSparseRecord));
     if (!g_sparse_records) die("w_ast_sparse_init: record arena alloc failed");
     g_sparse_rec_cur = 0;
 }
@@ -14060,8 +14070,8 @@ static uint32_t w_sparse_find_or_insert(uint64_t node) {
 static uint32_t w_sparse_alloc_record(void) {
     if (g_sparse_rec_cur >= g_sparse_rec_cap) {
         uint32_t new_cap = g_sparse_rec_cap * 2;
-        WSparseRecord *new_buf = (WSparseRecord *)realloc(
-            g_sparse_records, new_cap * sizeof(WSparseRecord));
+        WAstSparseRecord *new_buf = (WAstSparseRecord *)realloc(
+            g_sparse_records, new_cap * sizeof(WAstSparseRecord));
         if (!new_buf) die("w_sparse_alloc_record: realloc failed");
         g_sparse_records = new_buf;
         g_sparse_rec_cap = new_cap;
@@ -14106,7 +14116,7 @@ WValue w_ast_sparse_copy(WValue src_node, WValue dst_node) {
     if (src_slot == W_SPARSE_END) return dst_node;
     uint32_t rec_idx = g_sparse_map.heads[src_slot];
     while (rec_idx != W_SPARSE_END) {
-        WSparseRecord rec = g_sparse_records[rec_idx];
+        WAstSparseRecord rec = g_sparse_records[rec_idx];
         w_ast_sparse_set(dst_node, rec.sym, rec.value);
         rec_idx = rec.next;
     }
@@ -14131,18 +14141,6 @@ WValue w_ast_sparse_copy(WValue src_node, WValue dst_node) {
  * as w_ast_intern_node_bytes / w_ast_intern_value_of (the VM extracts
  * string bytes itself — its string layout differs). Change in lockstep;
  * the stage-1==stage-2 byte-identity gate cross-checks the two. */
-typedef struct {
-    uint64_t *hashes;    /* content hash per bucket (never 0 when used) */
-    uint32_t *ids;       /* bucket -> dense id; 0 = empty bucket */
-    uint32_t  cap;       /* power of two */
-    uint32_t  count;
-} WInternMap;
-
-static WInternMap g_intern_map  = {0};
-static WValue    *g_intern_strs = NULL;   /* dense id -> interned string; [0] unused */
-static uint32_t   g_intern_strs_cap = 0;
-static uint32_t   g_intern_next_id  = 1;
-
 static uint64_t w_intern_hash_bytes(const char *p, size_t n) {
     uint64_t h = 1469598103934665603ULL;
     for (size_t i = 0; i < n; i++) {
@@ -14252,11 +14250,6 @@ WValue w_ast_intern_str_of(WValue node) {
  * node_arena.c) — a representation divergence, not a semantic one,
  * and the stage-1 == stage-2 byte-identity gate is precisely the
  * differential test that proves the freeze preserves behavior. */
-static WValue  *g_body_arena_base = NULL;
-static uint32_t g_body_arena_cursor = 0;
-static uint32_t g_body_arena_cap = 0;
-static uint32_t g_ast_extra_arrays = 0;   /* stats: arrays frozen */
-
 /* Bump-allocate `n` slots; grows (realloc-double) on exhaustion. */
 static uint32_t w_body_arena_alloc(uint32_t n) {
     const uint32_t max_slots = (uint32_t)W_BODY_OFFSET_MASK + 1u;

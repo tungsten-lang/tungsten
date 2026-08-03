@@ -36,8 +36,62 @@ typedef struct WNodeArena {
     uint32_t  cap;
 } WNodeArena;
 
-WNodeArena g_node_arena[4] = {{0}};
-static WValue g_ast_bool_node[2] = {0, 0};
+typedef struct {
+    int64_t  sym;
+    uint32_t next;
+    uint32_t _pad;
+    WValue   value;
+} WSparseRecord;
+
+typedef struct {
+    uint64_t *keys;
+    uint32_t *heads;
+    uint32_t  cap;
+    uint32_t  count;
+} WSparseNodeMap;
+
+typedef struct {
+    uint64_t *hashes;
+    uint32_t *ids;
+    uint32_t  cap;
+    uint32_t  count;
+} WInternMap;
+
+typedef struct {
+    char    *bytes;
+    uint32_t len;
+    uint64_t strval;
+} WInternEntry;
+
+typedef struct {
+    WNodeArena     node_arena[4];
+    WValue         bool_nodes[2];
+    WSparseNodeMap sparse_map;
+    WSparseRecord *sparse_records;
+    uint32_t       sparse_rec_cap;
+    uint32_t       sparse_rec_cursor;
+    WInternMap     intern_map;
+    WInternEntry  *intern_entries;
+    uint32_t       intern_entries_cap;
+    uint32_t       intern_next_id;
+    uint32_t       generation;
+} WAstStore;
+
+WAstStore g_ast_store = {
+    .intern_next_id = 1,
+    .generation = 1,
+};
+
+#define g_node_arena        (g_ast_store.node_arena)
+#define g_ast_bool_node     (g_ast_store.bool_nodes)
+#define g_sparse_map        (g_ast_store.sparse_map)
+#define g_sparse_records    (g_ast_store.sparse_records)
+#define g_sparse_rec_cap    (g_ast_store.sparse_rec_cap)
+#define g_sparse_rec_cur    (g_ast_store.sparse_rec_cursor)
+#define g_intern_map        (g_ast_store.intern_map)
+#define g_intern_entries    (g_ast_store.intern_entries)
+#define g_intern_entries_cap (g_ast_store.intern_entries_cap)
+#define g_intern_next_id    (g_ast_store.intern_next_id)
 
 /* Indexed by size_class (the 2-bit field in W_PACKED_NODE):
  *   SC_2  = 0:  16 B (2 slots, leaf kinds)
@@ -115,6 +169,8 @@ void w_node_arena_reset(void) {
     }
     g_ast_bool_node[0] = 0;
     g_ast_bool_node[1] = 0;
+    g_ast_store.generation++;
+    if (g_ast_store.generation == 0) g_ast_store.generation = 1;
     /* PR #3: sparse meta lifetime is bound to the node arena —
      * both are scoped to a single compile boundary. */
     w_ast_sparse_reset();
@@ -149,25 +205,6 @@ void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value) {
  * Replaces the pre-PR-#3 Tungsten Hash-of-Hashes `g_ast_sparse_meta`.
  * See runtime/runtime.c for the canonical design notes.
  */
-typedef struct {
-    int64_t  sym;
-    uint32_t next;
-    uint32_t _pad;
-    WValue   value;
-} WSparseRecord;
-
-typedef struct {
-    uint64_t *keys;
-    uint32_t *heads;
-    uint32_t  cap;
-    uint32_t  count;
-} WSparseNodeMap;
-
-static WSparseNodeMap g_sparse_map      = {0};
-static WSparseRecord *g_sparse_records  = NULL;
-static uint32_t       g_sparse_rec_cap  = 0;
-static uint32_t       g_sparse_rec_cur  = 0;
-
 #define W_SPARSE_END UINT32_MAX
 
 static uint64_t w_sparse_hash(uint64_t node) {
@@ -317,24 +354,6 @@ WValue w_ast_sparse_copy(WValue src_node, WValue dst_node) {
  * never reset (ids are content-stable across compiles). Change in
  * lockstep with runtime.c — stage-1==stage-2 byte-identity
  * cross-checks the two. */
-typedef struct {
-    uint64_t *hashes;
-    uint32_t *ids;       /* bucket -> dense id; 0 = empty bucket */
-    uint32_t  cap;       /* power of two */
-    uint32_t  count;
-} WInternMap;
-
-typedef struct {
-    char    *bytes;      /* private copy, owned by the table */
-    uint32_t len;
-    uint64_t strval;     /* the VM's string value for this content */
-} WInternEntry;
-
-static WInternMap    g_intern_map     = {0};
-static WInternEntry *g_intern_entries = NULL;   /* dense id -> entry; [0] unused */
-static uint32_t      g_intern_entries_cap = 0;
-static uint32_t      g_intern_next_id     = 1;
-
 static uint64_t w_intern_hash_bytes(const char *p, size_t n) {
     uint64_t h = 1469598103934665603ULL;
     for (size_t i = 0; i < n; i++) {

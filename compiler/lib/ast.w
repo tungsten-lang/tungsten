@@ -28,6 +28,19 @@ use ../../core/ast_body
 
 in Tungsten:AST
 
++ Store
+  # The current representation has one process-active store. Naming the owner
+  # in the language API makes its compile lifetime explicit and gives REPL/JIT
+  # callers one reset boundary for nodes, bodies, sparse fields, and caches.
+  -> .reset
+    ccall_nobox("w_ast_store_reset", 0)
+
+  -> .generation
+    ccall_nobox("w_ast_store_generation", 0)
+
+  -> .stats
+    ccall_nobox("w_ast_stats_dump", 0)
+
 + Node
   -> kind
     ast_kind(self)

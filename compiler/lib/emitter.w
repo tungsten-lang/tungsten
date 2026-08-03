@@ -2234,8 +2234,10 @@ ewscope_md_state = {ids: {}, order: []}
   # fast paths / node field access). Plain programs emit neither the externs
   # nor any init call — the runtime arena is lazy (offset 0 reserved on first
   # growth inside w_node_alloc).
-  if fn_out.to_s().index("@g_node_arena") != nil
-    decls_out = "@g_node_arena = external global \[4 x { ptr, i32, i32 }]\n@g_node_stride = external constant \[4 x i32]\n\n" + decls_out
+  if fn_out.to_s().index("@g_ast_store") != nil
+    # WAstStore begins with node_arena[4]; declaring the symbol through that
+    # prefix type keeps the hot GEPs compact while the runtime owns the rest.
+    decls_out = "@g_ast_store = external global \[4 x { ptr, i32, i32 }]\n@g_node_stride = external constant \[4 x i32]\n\n" + decls_out
   if decls_out != ""
     decls_out = decls_out + "\n"
 
@@ -3726,16 +3728,16 @@ ewscope_md_state = {ids: {}, order: []}
     while fi < nf
       parts << t + ".fz" + fi.to_s() + " = call i64 @w_ast_freeze_if_array(i64 " + fields[fi] + ")\n  "
       fi += 1
-    parts << t + ".cursor_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_node_arena, i64 0, i64 " + sc + ", i32 1\n  "
+    parts << t + ".cursor_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 1\n  "
     parts << t + ".cursor = load i32, ptr " + t + ".cursor_p, align 4\n  "
-    parts << t + ".cap_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_node_arena, i64 0, i64 " + sc + ", i32 2\n  "
+    parts << t + ".cap_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 2\n  "
     parts << t + ".cap = load i32, ptr " + t + ".cap_p, align 4\n  "
     parts << t + ".has_room = icmp ult i32 " + t + ".cursor, " + t + ".cap\n  "
     parts << "br i1 " + t + ".has_room, label %" + label_fast + ", label %" + label_slow + ", !prof !31411\n"
     parts << label_fast + ":\n  "
     parts << t + ".new_cursor = add i32 " + t + ".cursor, 1\n  "
     parts << "store i32 " + t + ".new_cursor, ptr " + t + ".cursor_p, align 4\n  "
-    parts << t + ".base_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_node_arena, i64 0, i64 " + sc + ", i32 0\n  "
+    parts << t + ".base_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 0\n  "
     parts << t + ".base = load ptr, ptr " + t + ".base_p, align 8\n  "
     parts << t + ".stride_p = getelementptr inbounds " + lbr + "4 x i32], ptr @g_node_stride, i64 0, i64 " + sc + "\n  "
     parts << t + ".stride32 = load i32, ptr " + t + ".stride_p, align 4\n  "
@@ -3757,7 +3759,7 @@ ewscope_md_state = {ids: {}, order: []}
     parts << label_slow + ":\n  "
     parts << t + ".slow_node = call i64 @w_node_alloc(i64 " + kind + ", i64 " + sc + ")\n  "
     parts << t + ".s.off = and i64 " + t + ".slow_node, 4294967295\n  "
-    parts << t + ".s.base_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_node_arena, i64 0, i64 " + sc + ", i32 0\n  "
+    parts << t + ".s.base_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 0\n  "
     parts << t + ".s.base = load ptr, ptr " + t + ".s.base_p, align 8\n  "
     parts << t + ".s.stride_p = getelementptr inbounds " + lbr + "4 x i32], ptr @g_node_stride, i64 0, i64 " + sc + "\n  "
     parts << t + ".s.stride32 = load i32, ptr " + t + ".s.stride_p, align 4\n  "
@@ -3779,7 +3781,7 @@ ewscope_md_state = {ids: {}, order: []}
   # is addressable for the __w_call_site lookup.
   when :call_direct_i64
     # Slab-AST intrinsic: w_node_alloc(kind, sc) — emit an inline bump
-    # against @g_node_arena with a cmp/branch fallback to the runtime
+    # against @g_ast_store with a cmp/branch fallback to the runtime
     # @w_node_alloc on cap exhaustion (which grows + bumps). With fix #1's
     # constant-folded KIND_*/SC_* globals, LLVM collapses the kind/sc
     # shifts and OR into a single constant + bump in the fast path.
@@ -3790,8 +3792,8 @@ ewscope_md_state = {ids: {}, order: []}
     # Slab-AST intrinsic: w_node_field_load(node, offset) / w_node_field_store(
     # node, offset, value) — when the offset arg is a literal (which it always
     # is in ast.w call sites), emit inline LLVM IR that walks the
-    # @g_node_arena slab directly instead of calling out to the runtime
-    # helper. LLVM can then CSE the @g_node_arena base load across multiple
+    # @g_ast_store slab directly instead of calling out to the runtime
+    # helper. LLVM can then CSE the @g_ast_store base load across multiple
     # field accesses of the same node and fold the offset arithmetic into a
     # GEP. The args list is already lowered by the generic ccall_nobox path
     # in lowering/calls.w; the int-literal offset reaches here as a raw
@@ -3839,9 +3841,9 @@ ewscope_md_state = {ids: {}, order: []}
       sc = t + ".sc_clean"
       parts << kind + " = and i64 " + kind_in + ", 281474976710655\n  "
       parts << sc + " = and i64 " + sc_in + ", 281474976710655\n  "
-      parts << t + ".cursor_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_node_arena, i64 0, i64 " + sc + ", i32 1\n  "
+      parts << t + ".cursor_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 1\n  "
       parts << t + ".cursor = load i32, ptr " + t + ".cursor_p, align 4\n  "
-      parts << t + ".cap_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_node_arena, i64 0, i64 " + sc + ", i32 2\n  "
+      parts << t + ".cap_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 2\n  "
       parts << t + ".cap = load i32, ptr " + t + ".cap_p, align 4\n  "
       parts << t + ".has_room = icmp ult i32 " + t + ".cursor, " + t + ".cap\n  "
       parts << "br i1 " + t + ".has_room, label %" + label_fast + ", label %" + label_slow + ", !prof !31411\n"
@@ -3886,7 +3888,7 @@ ewscope_md_state = {ids: {}, order: []}
       parts << t + ".stride = zext i32 " + t + ".stride32 to i64\n  "
       parts << t + ".scaled = mul i64 " + t + ".off, " + t + ".stride\n  "
       parts << t + ".full = add i64 " + t + ".scaled, " + ivar_byte + "\n  "
-      parts << t + ".base_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_node_arena, i64 0, i64 " + t + ".sc, i32 0\n  "
+      parts << t + ".base_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + t + ".sc, i32 0\n  "
       parts << t + ".base = load ptr, ptr " + t + ".base_p, align 8\n  "
       parts << t + ".gep = getelementptr i8, ptr " + t + ".base, i64 " + t + ".full"
       if inst[:name] == "w_node_field_load"

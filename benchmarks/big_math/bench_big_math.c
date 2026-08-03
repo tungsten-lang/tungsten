@@ -3029,10 +3029,45 @@ static void fuzz_div_single_against_gmp(int cases, int32_t max_limbs) {
         free(q);
         free(a);
     }
+
+    /* Exercise the boxed 2..4-limb normalized-divisor arm directly.  The
+     * raw-kernel loop above cannot cover its allocation, fixed-size quotient
+     * construction, sign composition, or result normalization. */
+    int boxed_cases = cases < 4096 ? cases : 4096;
+    for (int t = 0; t < boxed_cases; t++) {
+        int32_t limbs = 2 + (int32_t)(bench_rng(&state) % 3U);
+        uint64_t *magnitude = bench_limbs(limbs, bench_rng(&state));
+        WBigint *ab = bigint_alloc(limbs);
+        memcpy(ab->limbs, magnitude, (size_t)limbs * sizeof(uint64_t));
+        ab->size = (t & 1) ? -limbs : limbs;
+
+        uint64_t d = bench_rng(&state) | (1ULL << 63);
+        WBigint *db = bigint_alloc(1);
+        db->limbs[0] = d;
+        db->size = (t & 2) ? -1 : 1;
+
+        WValue a = bigint_box(ab);
+        WValue divisor = bigint_box(db);
+        WValue q = bigint_div_any(a, divisor);
+        gmp_import_value(za, a);
+        gmp_import_value(zd, divisor);
+        mpz_tdiv_q(zq, za, zd);
+        if (!value_matches_mpz(q, zq)) {
+            fprintf(stderr,
+                    "boxed single-limb division fuzz mismatch case=%d"
+                    " limbs=%d divisor=%llu\n",
+                    t, limbs, (unsigned long long)d);
+            abort();
+        }
+        bench_free_value(q);
+        bench_free_value(divisor);
+        bench_free_value(a);
+        free(magnitude);
+    }
     mpz_clears(za, zd, zq, zr, NULL);
     printf("single-limb division fuzz vs GMP: %d/%d match"
-           " (max %d dividend limbs)\n",
-           cases, cases, max_limbs);
+           " (max %d dividend limbs); boxed small path: %d/%d match\n",
+           cases, cases, max_limbs, boxed_cases, boxed_cases);
 }
 
 static void fuzz_add_sub_against_gmp(int cases, int32_t max_limbs) {

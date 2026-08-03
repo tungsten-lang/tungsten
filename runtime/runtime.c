@@ -320,6 +320,12 @@ _Static_assert(BN_BIGINT_HYBRID_P2_LIMIT >= 8 &&
                "hybrid p2 limit must be a power of two >= 8");
 #endif
 
+typedef struct {
+    uint64_t d[2];
+    uint64_t v[2];
+    uint8_t next;
+} BnDivPreinvCache;
+
 #if BN_BIGINT_RECYCLE
 typedef struct {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
@@ -334,6 +340,7 @@ typedef struct {
     WBigint *slot[BN_BIGINT_POOL_BUCKETS][BN_BIGINT_POOL_PER_BUCKET];
     uint8_t count[BN_BIGINT_POOL_BUCKETS];
     uint8_t total;
+    BnDivPreinvCache div_preinv;
 } WBigintPool;
 static __thread WBigintPool bigint_pool_state;
 
@@ -602,7 +609,17 @@ static inline void bigint_release_if_live(WBigint *b) {
     free(b);
 }
 static inline void bigint_pool_release_thread(void) {}
+static __thread BnDivPreinvCache bn_div_preinv_cache;
 #endif
+
+static inline __attribute__((always_inline))
+BnDivPreinvCache *bn_div_preinv_thread_cache(void) {
+#if BN_BIGINT_RECYCLE
+    return &bigint_pool_state.div_preinv;
+#else
+    return &bn_div_preinv_cache;
+#endif
+}
 
 static inline uint32_t bigint_alloc_capacity(uint32_t requested) {
 #if BN_BIGINT_HYBRID_CAP
@@ -841,6 +858,27 @@ WValue bigint_finish_one_limb(uint64_t magnitude, int negative) {
     result->limbs[0] = magnitude;
     result->size = negative ? -1 : 1;
     return bigint_box(result);
+}
+
+/* One-word division has already trimmed its quotient.  Keep its common
+ * multi-limb finish in the boxed fast arm instead of calling the shared
+ * magnitude finisher; only zero/one-limb results need demotion work. */
+static inline __attribute__((always_inline))
+WValue bigint_finish_div1(WBigint *b) {
+    int32_t abs_len = b->size < 0 ? -b->size : b->size;
+    if (__builtin_expect(abs_len > 1, 1)) return bigint_box(b);
+    if (abs_len == 0) {
+        bigint_release(b);
+        return w_box_int(0);
+    }
+    uint64_t magnitude = b->limbs[0];
+    if (magnitude <= (uint64_t)W_INT48_MAX) {
+        int64_t value = b->size < 0 ? -(int64_t)magnitude
+                                    : (int64_t)magnitude;
+        bigint_release(b);
+        return w_box_int(value);
+    }
+    return bigint_box(b);
 }
 
 #ifndef BN_ADDSUB_11_FAST
@@ -8348,18 +8386,15 @@ static inline uint64_t bn_invert_limb(uint64_t d) {
  * (radix conversion, modular loops, the common n/1 shapes) skips the
  * ~12-cycle invert_limb chain.  Divisors here are normalized (top bit
  * set), so the zero-initialized entries can never false-hit. */
-static __thread uint64_t bn_div_preinv_d[2];
-static __thread uint64_t bn_div_preinv_v[2];
-static __thread uint8_t bn_div_preinv_next;
-
-static uint64_t bn_div_preinv(uint64_t d) {
-    if (bn_div_preinv_d[0] == d) return bn_div_preinv_v[0];
-    if (bn_div_preinv_d[1] == d) return bn_div_preinv_v[1];
+static inline __attribute__((always_inline))
+uint64_t bn_div_preinv_cached(uint64_t d, BnDivPreinvCache *cache) {
+    if (cache->d[0] == d) return cache->v[0];
+    if (cache->d[1] == d) return cache->v[1];
     uint64_t v = bn_invert_limb(d);
-    int slot = bn_div_preinv_next & 1;
-    bn_div_preinv_next ^= 1;
-    bn_div_preinv_d[slot] = d;
-    bn_div_preinv_v[slot] = v;
+    int slot = cache->next & 1;
+    cache->next ^= 1;
+    cache->d[slot] = d;
+    cache->v[slot] = v;
     return v;
 }
 
@@ -8420,12 +8455,13 @@ static inline uint64_t bn_udiv_qr_3by2(uint64_t n2, uint64_t n1, uint64_t n0,
     return q;
 }
 
-static uint64_t mag_div_wide_preinv(uint64_t *quotient,
-                                    const uint64_t *a, int32_t alen,
-                                    uint64_t d) {
+static uint64_t mag_div_wide_preinv_cached(uint64_t *quotient,
+                                           const uint64_t *a, int32_t alen,
+                                           uint64_t d,
+                                           BnDivPreinvCache *cache) {
     unsigned shift = (unsigned)__builtin_clzll(d);
     uint64_t normalized_d = d << shift;
-    uint64_t dinv = bn_div_preinv(normalized_d);
+    uint64_t dinv = bn_div_preinv_cached(normalized_d, cache);
     uint64_t rem = shift ? a[alen - 1] >> (64 - shift) : 0;
     for (int32_t i = alen - 1; i >= 0; i--) {
         uint64_t low = a[i] << shift;
@@ -8435,6 +8471,13 @@ static uint64_t mag_div_wide_preinv(uint64_t *quotient,
         if (quotient) quotient[i] = q;
     }
     return shift ? rem >> shift : rem;
+}
+
+static uint64_t mag_div_wide_preinv(uint64_t *quotient,
+                                    const uint64_t *a, int32_t alen,
+                                    uint64_t d) {
+    return mag_div_wide_preinv_cached(
+        quotient, a, alen, d, bn_div_preinv_thread_cache());
 }
 
 #ifndef BN_DIV_SINGLE_PREINV
@@ -8453,7 +8496,8 @@ static uint64_t mag_div_wide_preinv(uint64_t *quotient,
  * when q == a; the latter reads a[i + 1] before overwriting a[i]. */
 static inline __attribute__((always_inline))
 int32_t mag_div_single_to(uint64_t *q, const uint64_t *a, int32_t alen,
-                          uint64_t d, uint64_t *rem) {
+                          uint64_t d, uint64_t *rem,
+                          BnDivPreinvCache *cache) {
     if (d == 0) die("division by zero");
 
     if (d == 1) {
@@ -8513,13 +8557,13 @@ int32_t mag_div_single_to(uint64_t *q, const uint64_t *a, int32_t alen,
             uint64_t high = a[1];
             uint64_t high_quotient = high >= d;
             uint64_t r = high - (d & (0 - high_quotient));
-            uint64_t dinv = bn_div_preinv(d);
+            uint64_t dinv = bn_div_preinv_cached(d, cache);
             q[1] = high_quotient;
             q[0] =
                 bn_div_qr_preinv(r, a[0], d, dinv, &r);
             *rem = r;
         } else {
-            *rem = mag_div_wide_preinv(q, a, alen, d);
+            *rem = mag_div_wide_preinv_cached(q, a, alen, d, cache);
         }
 #else
         __uint128_t r = 0;
@@ -8539,8 +8583,33 @@ int32_t mag_div_single_to(uint64_t *q, const uint64_t *a, int32_t alen,
 
 /* Divide bigint magnitude by a single uint64_t divisor. Returns quotient, writes remainder. */
 static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint64_t *rem) {
+    BnDivPreinvCache *cache = bn_div_preinv_thread_cache();
     WBigint *q = bigint_alloc_raw_hot(alen);
-    q->size = mag_div_single_to(q->limbs, a, alen, d, rem);
+    q->size = mag_div_single_to(q->limbs, a, alen, d, rem, cache);
+    return q;
+}
+
+/* Fixed normalized N/1 quotient for the small boxed lane.  The leading
+ * quotient digit is only zero or one; resolving it directly leaves at most
+ * three reciprocal steps and avoids both generic division call frames. */
+static inline __attribute__((always_inline))
+WBigint *mag_div_single_small_normalized(const uint64_t *a, int32_t alen,
+                                         uint64_t d) {
+    BnDivPreinvCache *cache = bn_div_preinv_thread_cache();
+    uint32_t cap = alen <= 2 ? 2U : 4U;
+    WBigint *q = bigint_alloc_raw_hot_exact(cap);
+    uint64_t dinv = bn_div_preinv_cached(d, cache);
+    int32_t top = alen - 1;
+    uint64_t high = a[top];
+    uint64_t high_quotient = high >= d;
+    uint64_t rem = high - (d & (0 - high_quotient));
+    q->limbs[top] = high_quotient;
+    if (alen == 4)
+        q->limbs[2] = bn_div_qr_preinv(rem, a[2], d, dinv, &rem);
+    if (alen >= 3)
+        q->limbs[1] = bn_div_qr_preinv(rem, a[1], d, dinv, &rem);
+    q->limbs[0] = bn_div_qr_preinv(rem, a[0], d, dinv, &rem);
+    q->size = alen - (high_quotient == 0);
     return q;
 }
 
@@ -10595,6 +10664,13 @@ WValue bigint_mod_any_generic(WValue a, WValue b) {
 #ifndef BN_DIV_BY_LIMB_BOXED_FAST
 #define BN_DIV_BY_LIMB_BOXED_FAST 1
 #endif
+#ifndef BN_DIV1_SMALL_NORMALIZED
+#if defined(__aarch64__)
+#define BN_DIV1_SMALL_NORMALIZED 1
+#else
+#define BN_DIV1_SMALL_NORMALIZED 0
+#endif
+#endif
 #ifndef BN_DIV_63_BOXED_FAST
 #define BN_DIV_63_BOXED_FAST 1
 #endif
@@ -10628,9 +10704,15 @@ WValue bigint_div_any(WValue a, WValue b) {
                 return bigint_finish_one_limb(aa->limbs[0] / d, neg);
             }
             uint64_t remainder;
-            WBigint *q = mag_div_single(aa->limbs, alen, d, &remainder);
+            WBigint *q;
+#if BN_DIV1_SMALL_NORMALIZED
+            if (alen <= 4 && (d >> 63) != 0)
+                q = mag_div_single_small_normalized(aa->limbs, alen, d);
+            else
+#endif
+                q = mag_div_single(aa->limbs, alen, d, &remainder);
             if (neg) q->size = -q->size;
-            return bigint_finish_mag_sub(q);
+            return bigint_finish_div1(q);
         }
 #endif
 #if BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST
@@ -34386,7 +34468,8 @@ __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b) {
         return a;
     }
     uint64_t remainder;
-    amag = mag_div_single_to(ba->limbs, ba->limbs, amag, d, &remainder);
+    amag = mag_div_single_to(ba->limbs, ba->limbs, amag, d, &remainder,
+                             bn_div_preinv_thread_cache());
     ba->size = (a_neg != b_neg) ? -amag : amag;
     if (__builtin_expect(amag > 1, 1)) return a;
     return bigint_normalize(ba);

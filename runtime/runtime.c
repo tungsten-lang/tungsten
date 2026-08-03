@@ -13875,6 +13875,10 @@ WValue w_node_alloc(int64_t kind, int64_t sc) {
     }
     uint32_t width = W_AST_KIND_WIDTH[kid];
     if (width == 0) die("w_node_alloc: kind has no arena fields");
+#ifndef NDEBUG
+    int expected_sc = width <= 2 ? 0 : (width == 3 ? 1 : 2);
+    if (sc != expected_sc) die("w_node_alloc: layout class disagrees with generated width");
+#endif
     WNodeArena *a = &g_node_arena;
     if (a->cursor == 0) a->cursor = 1;
     uint64_t required = (uint64_t)a->cursor + width;
@@ -13930,6 +13934,20 @@ void w_node_arena_reset(void) {
      * constructor initializes its exact field width before publishing a
      * handle, so rewinding is sufficient and avoids malloc/free churn in
      * REPL, daemon, and incremental compiler processes. */
+#ifndef NDEBUG
+    /* Make pre-reset reads visibly invalid until their words are overwritten
+     * by the next generation. Release builds pay no poisoning cost. */
+    if (g_node_arena.base && g_node_arena.cursor > 1) {
+        for (uint32_t i = 1; i < g_node_arena.cursor; i++) {
+            g_node_arena.base[i] = W_UNDEF;
+        }
+    }
+    if (g_body_arena_base && g_body_arena_cursor > 0) {
+        for (uint32_t i = 0; i < g_body_arena_cursor; i++) {
+            g_body_arena_base[i] = W_UNDEF;
+        }
+    }
+#endif
     g_node_arena.cursor = 1;
     w_ast_sparse_reset();
     w_ast_extra_reset();
@@ -14259,6 +14277,9 @@ WValue w_ast_sparse_set(WValue node, int64_t sym, WValue value) {
     uint32_t slot = w_sparse_find_or_insert((uint64_t)node);
     uint32_t rec_idx = g_sparse_map.heads[slot];
     while (rec_idx != W_SPARSE_END) {
+#ifndef NDEBUG
+        if (rec_idx >= g_sparse_rec_cur) die("w_ast_sparse_set: corrupt record chain");
+#endif
         if (g_sparse_records[rec_idx].sym == sym) {
             g_sparse_records[rec_idx].value = value;
             return value;
@@ -14284,6 +14305,9 @@ WValue w_ast_sparse_get(WValue node, int64_t sym) {
     if (slot == W_SPARSE_END) return W_NIL;
     uint32_t rec_idx = g_sparse_map.heads[slot];
     while (rec_idx != W_SPARSE_END) {
+#ifndef NDEBUG
+        if (rec_idx >= g_sparse_rec_cur) die("w_ast_sparse_get: corrupt record chain");
+#endif
         if (g_sparse_records[rec_idx].sym == sym) {
             return g_sparse_records[rec_idx].value;
         }
@@ -14303,6 +14327,9 @@ WValue w_ast_sparse_copy(WValue src_node, WValue dst_node) {
     if (src_slot == W_SPARSE_END) return dst_node;
     uint32_t rec_idx = g_sparse_map.heads[src_slot];
     while (rec_idx != W_SPARSE_END) {
+#ifndef NDEBUG
+        if (rec_idx >= g_sparse_rec_cur) die("w_ast_sparse_copy: corrupt record chain");
+#endif
         WAstSparseRecord rec = g_sparse_records[rec_idx];
         w_ast_sparse_set(dst_node, rec.sym, rec.value);
         rec_idx = rec.next;
@@ -14485,6 +14512,11 @@ void w_ast_extra_reset(void) {
 /* Direct slot access for packed Body#read/#each and w_array_get. Bounds are
  * the caller's responsibility — mirrors w_node_field_load's contract. */
 WValue w_body_arena_get(uint32_t offset, uint32_t i) {
+#ifndef NDEBUG
+    if ((uint64_t)offset + i >= g_body_arena_cursor) {
+        die("w_body_arena_get: packed body index is outside the active generation");
+    }
+#endif
     return g_body_arena_base[offset + i];
 }
 
@@ -14652,6 +14684,19 @@ WValue w_node_field_load(WValue wnode, int64_t ivar_offset) {
     if (w_is_int((WValue)ivar_offset)) {
         ivar_offset = w_as_int((WValue)ivar_offset);
     }
+#ifndef NDEBUG
+    if (!w_is_node(wnode)) die("w_node_field_load: value is not an AST node");
+    int kid = w_node_kind(wnode);
+    if (kid < 1 || kid > (int)W_AST_KIND_MAX) {
+        die("w_node_field_load: node kind is outside the generated schema");
+    }
+    uint32_t width = W_AST_KIND_WIDTH[kid];
+    uint64_t checked_off = w_node_offset(wnode);
+    if (width == 0 || ivar_offset < 0 || (uint64_t)ivar_offset >= width ||
+        checked_off == 0 || checked_off + width > g_node_arena.cursor) {
+        die("w_node_field_load: field is outside the active node allocation");
+    }
+#endif
     uint64_t off = w_node_offset(wnode);
     return g_node_arena.base[off + (uint64_t)ivar_offset];
 }
@@ -14661,6 +14706,19 @@ void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value) {
     if (w_is_int((WValue)ivar_offset)) {
         ivar_offset = w_as_int((WValue)ivar_offset);
     }
+#ifndef NDEBUG
+    if (!w_is_node(wnode)) die("w_node_field_store: value is not an AST node");
+    int kid = w_node_kind(wnode);
+    if (kid < 1 || kid > (int)W_AST_KIND_MAX) {
+        die("w_node_field_store: node kind is outside the generated schema");
+    }
+    uint32_t width = W_AST_KIND_WIDTH[kid];
+    uint64_t checked_off = w_node_offset(wnode);
+    if (width == 0 || ivar_offset < 0 || (uint64_t)ivar_offset >= width ||
+        checked_off == 0 || checked_off + width > g_node_arena.cursor) {
+        die("w_node_field_store: field is outside the active node allocation");
+    }
+#endif
     value = w_ast_freeze_if_array(value);   /* child lists live in the extra arena */
     uint64_t off = w_node_offset(wnode);
     g_node_arena.base[off + (uint64_t)ivar_offset] = value;

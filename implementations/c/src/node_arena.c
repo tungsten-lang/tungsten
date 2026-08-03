@@ -140,6 +140,12 @@ WValue w_node_alloc(int64_t kind, int64_t sc) {
     }
     uint32_t width = W_AST_KIND_WIDTH[kid];
     if (width == 0) node_arena_fatal("w_node_alloc: kind has no arena fields");
+#ifndef NDEBUG
+    int expected_sc = width <= 2 ? 0 : (width == 3 ? 1 : 2);
+    if (sc != expected_sc) {
+        node_arena_fatal("w_node_alloc: layout class disagrees with generated width");
+    }
+#endif
     WNodeArena *a = &g_node_arena;
     if (a->cursor == 0) a->cursor = 1;
     uint64_t required = (uint64_t)a->cursor + width;
@@ -172,6 +178,13 @@ void w_ast_sparse_reset(void);  /* forward decl; defined below */
 void w_node_arena_reset(void) {
     /* Retain the high-water allocation across compile generations; exact
      * constructors overwrite every live field before a handle escapes. */
+#ifndef NDEBUG
+    if (g_node_arena.base && g_node_arena.cursor > 1) {
+        for (uint32_t i = 1; i < g_node_arena.cursor; i++) {
+            g_node_arena.base[i] = W_UNDEF;
+        }
+    }
+#endif
     g_node_arena.cursor = 1;
     g_ast_bool_node[0] = 0;
     g_ast_bool_node[1] = 0;
@@ -187,11 +200,33 @@ uint64_t w_ast_schema_hash_compute(void) {
 }
 
 WValue w_node_field_load(WValue wnode, int64_t ivar_offset) {
+#ifndef NDEBUG
+    if (!w_is_node(wnode)) node_arena_fatal("w_node_field_load: value is not an AST node");
+    int kid = w_node_kind(wnode);
+    uint32_t width = (kid >= 1 && kid <= (int)W_AST_KIND_MAX)
+                         ? W_AST_KIND_WIDTH[kid] : 0;
+    uint64_t checked_off = w_node_offset(wnode);
+    if (width == 0 || ivar_offset < 0 || (uint64_t)ivar_offset >= width ||
+        checked_off == 0 || checked_off + width > g_node_arena.cursor) {
+        node_arena_fatal("w_node_field_load: field is outside the active node allocation");
+    }
+#endif
     uint64_t off = w_node_offset(wnode);
     return g_node_arena.base[off + (uint64_t)ivar_offset];
 }
 
 void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value) {
+#ifndef NDEBUG
+    if (!w_is_node(wnode)) node_arena_fatal("w_node_field_store: value is not an AST node");
+    int kid = w_node_kind(wnode);
+    uint32_t width = (kid >= 1 && kid <= (int)W_AST_KIND_MAX)
+                         ? W_AST_KIND_WIDTH[kid] : 0;
+    uint64_t checked_off = w_node_offset(wnode);
+    if (width == 0 || ivar_offset < 0 || (uint64_t)ivar_offset >= width ||
+        checked_off == 0 || checked_off + width > g_node_arena.cursor) {
+        node_arena_fatal("w_node_field_store: field is outside the active node allocation");
+    }
+#endif
     uint64_t off = w_node_offset(wnode);
     g_node_arena.base[off + (uint64_t)ivar_offset] = value;
 }
@@ -449,6 +484,9 @@ WValue w_ast_sparse_set(WValue node, int64_t sym, WValue value) {
     uint32_t slot = w_sparse_find_or_insert((uint64_t)node);
     uint32_t rec_idx = g_sparse_map.heads[slot];
     while (rec_idx != W_SPARSE_END) {
+#ifndef NDEBUG
+        if (rec_idx >= g_sparse_rec_cur) node_arena_fatal("w_ast_sparse_set: corrupt record chain");
+#endif
         if (g_sparse_records[rec_idx].sym == sym) {
             g_sparse_records[rec_idx].value = value;
             return value;
@@ -468,6 +506,9 @@ WValue w_ast_sparse_get(WValue node, int64_t sym) {
     if (slot == W_SPARSE_END) return W_NIL;
     uint32_t rec_idx = g_sparse_map.heads[slot];
     while (rec_idx != W_SPARSE_END) {
+#ifndef NDEBUG
+        if (rec_idx >= g_sparse_rec_cur) node_arena_fatal("w_ast_sparse_get: corrupt record chain");
+#endif
         if (g_sparse_records[rec_idx].sym == sym) {
             return g_sparse_records[rec_idx].value;
         }
@@ -487,6 +528,9 @@ WValue w_ast_sparse_copy(WValue src_node, WValue dst_node) {
     if (src_slot == W_SPARSE_END) return dst_node;
     uint32_t rec_idx = g_sparse_map.heads[src_slot];
     while (rec_idx != W_SPARSE_END) {
+#ifndef NDEBUG
+        if (rec_idx >= g_sparse_rec_cur) node_arena_fatal("w_ast_sparse_copy: corrupt record chain");
+#endif
         WSparseRecord rec = g_sparse_records[rec_idx];
         w_ast_sparse_set(dst_node, rec.sym, rec.value);
         rec_idx = rec.next;

@@ -24,6 +24,17 @@ static int expect_crash(void (*fn)(void)) {
 static void overflow_fn(void) { w_int((1LL << 47)); }
 static void underflow_fn(void) { w_int(-(1LL << 47) - 1); }
 static void add_overflow_fn(void) { w_add(w_box_int((1LL << 47) - 1), w_box_int(1)); }
+#ifndef NDEBUG
+static void ast_bad_field_fn(void) {
+    w_node_arena_reset();
+    WValue node = w_node_alloc(/*KIND_PROGRAM=*/92, 0);
+    (void)w_node_field_load(node, 1); /* Program has exactly one field. */
+}
+static void ast_bad_body_fn(void) {
+    w_node_arena_reset();
+    (void)w_body_arena_get(0, 0);
+}
+#endif
 
 /* Internal constructor exercised here so subtraction cases can span limbs. */
 extern WValue w_bigint_from_dec_str(WValue str);
@@ -1419,6 +1430,12 @@ int main() {
 
         printf("  AST cached bool reset: OK\n");
     }
+
+#ifndef NDEBUG
+    assert(expect_crash(ast_bad_field_fn));
+    assert(expect_crash(ast_bad_body_fn));
+    printf("  AST debug bounds checks: OK\n");
+#endif
 
     printf("\n=== All tests passed! ===\n");
     return 0;

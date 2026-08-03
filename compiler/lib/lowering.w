@@ -2352,6 +2352,41 @@ use lowering/definitions
   stmt_position = ctx[:assign_stmt_position] == true
   ctx[:assign_stmt_position] = nil
 
+  # Rotation shape (E4 stage 2): the triple's FIRST statement computes
+  # the sum into old-a's dying buffer; the two slot-copy statements that
+  # follow lower ordinarily. The vars live in slots (the isolation proof
+  # admits no bindings-only uses), and add_dest's runtime guards degrade
+  # any dynamic surprise to the allocating add.
+  rot = ctx[:rotation_shape]
+  if rot != nil && ast_kind(target) == :var && target.name == rot[:t]
+    # Boxed accumulators only: raw-i64-promoted vars keep their documented
+    # native-wrap semantics (and are faster than any boxed path); firing
+    # here would mix a boxed store into raw slot reads.
+    # Both source operands must be EXPLICITLY ## big — that is the
+    # sanctioned boxed-accumulator opt-in, and precisely the case where
+    # the loop pays an allocation per pass. Untyped rotation vars keep
+    # the documented raw-slot wrap semantics (faster, and mixing a boxed
+    # store into their raw reads corrupted values); t must additionally
+    # not be raw/unboxed anywhere.
+    rot_boxed = is_bigint_type(ctx[:var_types][rot[:a]]) && is_bigint_type(ctx[:var_types][rot[:b]])
+    ttty = ctx[:var_types][rot[:t]]
+    if is_machine_int_type(ttty) || ttty in (:raw_int :raw_i64 :raw_u64) || (ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][rot[:t]] != nil)
+      rot_boxed = false
+    v = node.value
+    if rot_boxed && v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op == :PLUS
+      wfn2 = ctx[:func]
+      a_tv = lower_expression(ctx, Tungsten:AST:Var.new(rot[:a]))
+      b_tv = lower_expression(ctx, Tungsten:AST:Var.new(rot[:b]))
+      a_reg = ensure_i64_value(wfn2, a_tv)
+      b_reg = ensure_i64_value(wfn2, b_tv)
+      dest_temp = next_temp(wfn2)
+      emit_instruction(wfn2, {op: :call_direct_i64, temp: dest_temp, name: "w_bigint_add_dest", args: [a_reg, a_reg, b_reg]})
+      range_binding_invalidate(ctx, rot[:t])
+      ctx[:bindings][rot[:t]] = nil
+      t_slot = ensure_var_slot(wfn2, rot[:t])
+      emit_instruction(wfn2, {op: :store_i64, value: dest_temp, ptr: t_slot})
+      return typed_value(:i64, dest_temp)
+
   # Sum-chunking: inside a qualifying while, this accumulator statement
   # feeds the raw partial instead of touching r at all.
   if ctx[:sum_chunk] != nil && ast_kind(target) == :var && target.name == ctx[:sum_chunk][:var]

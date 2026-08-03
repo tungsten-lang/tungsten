@@ -17,7 +17,11 @@ if [ -z "$GMP_LDFLAGS" ]; then
   exit 1
 fi
 
-"$ROOT/bin/tungsten" -o "$DIR/program_loops" "$DIR/program_loops.w" >/dev/null
+# --release: the default dev link uses the -O0 runtime archive
+# (build.rb profile_cflags), which runs intrinsics-based kernels (the
+# NEON hybrid add) up to 30x slow — asm kernels hide this, the addchain
+# lane exposed it. The GMP twin builds -O3; the lanes must match.
+"$ROOT/bin/tungsten" -o "$DIR/program_loops" --release "$DIR/program_loops.w" >/dev/null
 # shellcheck disable=SC2086
 "$CC" -O3 -mcpu=native $GMP_CFLAGS "$DIR/program_loops_gmp.c" $GMP_LDFLAGS \
   -o "$DIR/program_loops_gmp"

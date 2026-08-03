@@ -1994,3 +1994,83 @@
     if ok
       return name
   nil
+
+# ==== Rotation-shape detection (E4 stage 2) ====
+#
+# The Fibonacci-style triple inside a while body:
+#     t = a + b
+#     a = b
+#     b = t
+# rotates values: old-a provably DIES at the group (nothing reads it
+# after the first statement), so the sum may be computed into its buffer
+# (w_bigint_add_dest) and the steady state allocates nothing.
+#
+# Fail-closed proof obligations, all checked here:
+#   * the three statements are ADJACENT and in this exact data-flow shape
+#     (t = a + b / a = b / b = t, with t, a, b three distinct plain vars);
+#   * a, b, t are referenced NOWHERE else in the loop body or condition
+#     (any other read of a could observe the clobbered buffer; any alias
+#     store escapes it) — checked with the same mut_mark_all_dead
+#     collector, so unknown constructs poison the proof;
+#   * none of the three is a mut/sum-chunk candidate elsewhere (the
+#     transforms must not stack on the same var).
+# Returns {t:, a:, b:, index:} for the first qualifying triple, or nil.
+
+-> rotation_triple_at(body, i)
+  if i + 2 >= body.size()
+    return nil
+  s1 = body[i]
+  s2 = body[i + 1]
+  s3 = body[i + 2]
+  if s1 == nil || s2 == nil || s3 == nil
+    return nil
+  if !(is_ast_node?(s1) && is_ast_node?(s2) && is_ast_node?(s3))
+    return nil
+  if !(ast_kind(s1) == :assign && ast_kind(s2) == :assign && ast_kind(s3) == :assign)
+    return nil
+  if !(ast_kind(s1.target) == :var && ast_kind(s2.target) == :var && ast_kind(s3.target) == :var)
+    return nil
+  t_name = s1.target.name
+  a_name = s2.target.name
+  b_name = s3.target.name
+  if t_name == a_name || t_name == b_name || a_name == b_name
+    return nil
+  # s1: t = a + b (either operand order)
+  v1 = s1.value
+  if v1 == nil || !is_ast_node?(v1) || ast_kind(v1) != :binary_op || v1.op != :PLUS
+    return nil
+  if v1.left == nil || v1.right == nil || !is_ast_node?(v1.left) || !is_ast_node?(v1.right)
+    return nil
+  if ast_kind(v1.left) != :var || ast_kind(v1.right) != :var
+    return nil
+  n1 = v1.left.name
+  n2 = v1.right.name
+  if !((n1 == a_name && n2 == b_name) || (n1 == b_name && n2 == a_name))
+    return nil
+  # s2: a = b
+  if s2.value == nil || !is_ast_node?(s2.value) || ast_kind(s2.value) != :var || s2.value.name != b_name
+    return nil
+  # s3: b = t
+  if s3.value == nil || !is_ast_node?(s3.value) || ast_kind(s3.value) != :var || s3.value.name != t_name
+    return nil
+  {t: t_name, a: a_name, b: b_name, index: i}
+
+-> rotation_shape_spec(node)
+  if node.body == nil
+    return nil
+  i = 0
+  while i < node.body.size()
+    spec = rotation_triple_at(node.body, i)
+    if spec != nil
+      # isolation: t/a/b referenced nowhere else in body or condition
+      refs = {}
+      mut_mark_all_dead(node.condition, refs)
+      j = 0
+      while j < node.body.size()
+        if j < spec[:index] || j > spec[:index] + 2
+          mut_mark_all_dead(node.body[j], refs)
+        j += 1
+      if refs["__scope_poisoned__"] != true && refs[spec[:t]] != true && refs[spec[:a]] != true && refs[spec[:b]] != true
+        return spec
+    i += 1
+  nil

@@ -30686,6 +30686,82 @@ __attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b) {
     return a;
 }
 
+/* Add-into-dying-destination (E4 stage 2, the rotation shape). The
+ * compiler emits this for the Fibonacci-style triple
+ *     t = a + b;  a = b;  b = t
+ * where a's OLD value provably dies at the rotation: the sum is written
+ * into that dying buffer, so the steady state allocates nothing — the
+ * two buffers rotate exactly like GMP's mpz_add + mpz_swap pair. dest is
+ * the dying value and may pointer-alias x (it does, in the emitted
+ * shape); bn_add_n is same-index read-then-write so in-place is safe,
+ * and the |y| tail is copied before the carry ripple touches it.
+ * Guards mirror the mut entries — any refusal falls back to the
+ * allocating add (the dying buffer is then simply released by the
+ * ordinary churn): dest a unique overlay-clear bigint, all three values
+ * effectively same-signed (magnitudes add), capacity for the result.
+ * The capacity refusal is SELF-HEALING in the rotation: the fallback
+ * allocates the next size class, that buffer enters the rotation, and
+ * the fast path resumes — one alloc per limb of growth, not per pass. */
+WValue w_bigint_add_dest(WValue dest, WValue x, WValue y) {
+    if (!w_is_bigint(dest) || (dest & W_BIGINT_SIGN_BIT) != 0)
+        return bigint_add_any(x, y);
+    WBigint *bd = w_as_bigint(dest);
+    if (bd->shared != 0)
+        return bigint_add_any(x, y);
+
+    /* Contract: dest is the DYING value, y survives the rotation. If y
+     * dynamically shares dest's buffer (a and b holding the same value),
+     * mutating it would clobber the survivor — refuse. */
+    if (w_is_bigint(y) && w_as_bigint(y) == bd)
+        return bigint_add_any(x, y);
+    uint64_t xs_scratch, ys_scratch;
+    int32_t xl, yl;
+    const uint64_t *xp = integer_limbs(x, &xs_scratch, &xl);
+    const uint64_t *yp = integer_limbs(y, &ys_scratch, &yl);
+    if (xl <= 0 || yl <= 0)   /* zero or negative: let the entry sort it */
+        return bigint_add_any(x, y);
+    /* Same-effective-sign positive add only (the rotation shape's case);
+     * integer_limbs composed the overlay already, so xl/yl > 0 is the
+     * whole test. */
+    int32_t lo = xl < yl ? xl : yl;
+    int32_t hi = xl < yl ? yl : xl;
+    const uint64_t *lop = xl < yl ? xp : yp;
+    const uint64_t *hip = xl < yl ? yp : xp;
+    if (hi + 1 > (int32_t)bd->cap)
+        return bigint_add_any(x, y);
+#if BN_EQ_PAGE_HAZARD_GUARD
+    /* The in-place stream (read+write dest) against the other operand at
+     * the same 4 KiB offset stalls every load (the documented page-offset
+     * hazard). Refusing here is self-healing exactly like the cap arm:
+     * the fallback allocates a rehomed buffer, it enters the rotation,
+     * and the fast path resumes un-aliased. */
+    if (bd->limbs != hip && bn_addsub_page_hazard(bd->limbs, hip))
+        return bigint_add_any(x, y);
+#endif
+
+    /* dest may alias the SHORTER operand (a in the emitted rotation).
+     * Sum the low window first (same-index safe), then move the longer
+     * operand's tail, then ripple the carry through it. If dest aliases
+     * the LONGER operand the tail move is a no-op copy onto itself. */
+    uint64_t carry = bn_add_n(bd->limbs, lop, hip, lo);
+    if (bd->limbs != hip && lo < hi)
+        memmove(bd->limbs + lo, hip + lo,
+                (size_t)(hi - lo) * sizeof(uint64_t));
+    int32_t i = lo;
+    while (carry && i < hi) {
+        bd->limbs[i]++;
+        carry = bd->limbs[i] == 0;
+        i++;
+    }
+    if (carry) {
+        bd->limbs[hi] = 1;
+        bd->size = hi + 1;
+    } else {
+        bd->size = hi;
+    }
+    return dest;
+}
+
 /* Shared-bit surface for the tag-sign aliasing machinery and its specs.
  * Marking a non-bigint is a no-op; querying one answers false. The bit is
  * sticky for the buffer's live lifetime — see WBigint.shared in wvalue.h

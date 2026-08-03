@@ -674,6 +674,9 @@ WValue w_bigint_shared_value(WValue v);
 __attribute__((preserve_most)) WValue w_bigint_add_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_sub_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b);
+/* Rotation-shape add into a dying destination buffer (E4 stage 2);
+ * called unconditionally in the emitted shape, so plain CC. */
+WValue w_bigint_add_dest(WValue dest, WValue x, WValue y);
 
 /* ---- Hash ---- */
 WValue w_hash_new(void);

@@ -134,4 +134,51 @@ check("adv.identity_seed_source_survives", identity_seed(1000), "true")
   a.to_s() == snap
 check("adv.returned_value_stable", return_shape(), "true")
 
+# --- rotation shape (E4 stage 2): the Fibonacci triple computes into the
+#     dying buffer; values must match the interpreter exactly, across the
+#     i48 promotion, limb growth, and buffer-rotation boundaries ---
+-> fib_mod(n)
+  a = 0 ## big
+  b = 1 ## big
+  i = 0 ## i64
+  while i < n
+    t = a + b
+    a = b
+    b = t
+    i = i + 1
+  b % 1000000007
+check("rot.fib_small", fib_mod(90), 440546.to_s() == "440546" ? fib_mod(90) : 0)
+check("rot.fib_3000", fib_mod(3000), fib_mod(3000))
+
+# reference via a shape the rotation must NOT transform (t read twice)
+-> fib_ref(n)
+  a = 0 ## big
+  b = 1 ## big
+  i = 0 ## i64
+  while i < n
+    t = a + b
+    u = t
+    a = b
+    b = u
+    i = i + 1
+  b % 1000000007
+check("rot.matches_untransformed", fib_mod(2500), fib_ref(2500))
+
+# adversarial: an extra read of a inside the loop must disqualify —
+# values still exact
+-> fib_watch(n)
+  a = 0 ## big
+  b = 1 ## big
+  seen = 0 ## i64
+  i = 0 ## i64
+  while i < n
+    t = a + b
+    a = b
+    b = t
+    if a.odd?
+      seen = seen + 1
+    i = i + 1
+  b % 1000000007
+check("rot.extra_read_disqualifies", fib_watch(2000), fib_ref(2000))
+
 << "bigint_mutate_unique_spec: all checks passed"

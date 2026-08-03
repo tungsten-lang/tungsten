@@ -410,6 +410,16 @@
   sc = sum_chunk_var(node, ctx[:mut_accumulators], ctx[:var_types], ctx[:mod])
   if sc != nil
     return lower_while_sum_chunked(ctx, node, sc)
+  # Rotation shape (E4 stage 2): t = a + b; a = b; b = t with the triple
+  # isolated — the sum computes into old-a's dying buffer
+  # (w_bigint_add_dest), so the steady state allocates nothing.
+  rot = rotation_shape_spec(node)
+  if rot != nil
+    prev_rot = ctx[:rotation_shape]
+    ctx[:rotation_shape] = rot
+    lower_while_core(ctx, node)
+    ctx[:rotation_shape] = prev_rot
+    return nil
   lower_while_core(ctx, node)
 
 -> lower_while_sum_chunked(ctx, node, name)

@@ -128,17 +128,17 @@ module Tungsten
     #   :none    — no prefixes (default)
     UnitDef = Struct.new(:symbol, :dimension, :factor, :offset,
                          :description, :measured, :year_defined, :defining_source,
-                         :prefixable, :etymology, :history,
+                         :prefixable, :etymology, :history, :kind,
                          keyword_init: true) do
       def initialize(symbol:, dimension:, factor: 1, offset: 0,
                      description: nil, measured: false, year_defined: nil, defining_source: nil,
-                     prefixable: :none, etymology: nil, history: nil)
+                     prefixable: :none, etymology: nil, history: nil, kind: :unit)
         super(symbol: symbol, dimension: dimension,
               factor: factor.is_a?(Float) ? factor.rationalize : factor,
               offset: offset.is_a?(Float) ? offset.rationalize : offset,
               description: description, measured: measured,
               year_defined: year_defined, defining_source: defining_source,
-              prefixable: prefixable, etymology: etymology, history: history)
+              prefixable: prefixable, etymology: etymology, history: history, kind: kind)
       end
 
       def si_prefixable?
@@ -391,6 +391,11 @@ module Tungsten
     MAGNETIC_FIELD_H      = Dimension.new(-1, 0, 0, 1, 0, 0, 0, 0)    # A/m (oersted)
     ELECTRIC_DIPOLE       = Dimension.new(1, 0, 1, 1, 0, 0, 0, 0)     # C·m = A·s·m (debye)
     MAGNETIC_MOMENT       = Dimension.new(2, 0, 0, 1, 0, 0, 0, 0)     # A·m² = J/T (bohr magneton)
+    MASS_CONCENTRATION    = MASS / VOLUME                               # kg/m³
+    AMOUNT_CONCENTRATION  = SUBSTANCE / VOLUME                          # mol/m³
+    VOLUMETRIC_FLOW       = VOLUME / TIME                               # m³/s
+    GRAVITY_GRADIENT      = Dimension.new(0, 0, -2, 0, 0, 0, 0, 0)    # s⁻²
+    POTENTIAL_VORTICITY   = Dimension.new(2, -1, -1, 0, 1, 0, 0, 0)   # K·m²/(kg·s)
 
     # Semantic quantity kinds. SI exponent vectors remain available for
     # algebra, while the custom tag prevents same-vector concepts from being
@@ -411,6 +416,16 @@ module Tungsten
     LUMINOUS_FLUX         = LUMINOSITY * Dimension.custom("luminous_flux")
     LUMINOUS_INTENSITY    = LUMINOSITY * Dimension.custom("luminous_intensity")
     TEMPERATURE_DELTA     = TEMPERATURE * Dimension.custom("temperature_delta")
+    ACTIVITY              = (Dimension.custom("decay") / TIME)
+    IONIZING_EXPOSURE     = (CHARGE / MASS) * Dimension.custom("ionizing_radiation_exposure")
+    EQUIVALENT_AMOUNT     = SUBSTANCE * Dimension.custom("chemical_equivalent")
+    EQUIVALENT_CONCENTRATION = AMOUNT_CONCENTRATION * Dimension.custom("chemical_equivalent")
+    OSMOTIC_AMOUNT        = SUBSTANCE * Dimension.custom("osmotic_entity")
+    OSMOLARITY            = AMOUNT_CONCENTRATION * Dimension.custom("osmotic_entity")
+    PHOTON_AMOUNT         = SUBSTANCE * Dimension.custom("photon")
+    PHOTON_FLUX_DENSITY   = (SUBSTANCE / AREA / TIME) * Dimension.custom("photon")
+    SPECTRAL_FLUX_DENSITY = (POWER / AREA) / (Dimension.custom("cycle") / TIME)
+    SYMBOL_RATE           = Dimension.custom("symbol") / TIME
 
     DIMENSION_NAMES = {
       LENGTH                => "length",
@@ -467,6 +482,16 @@ module Tungsten
       LUMINOUS_FLUX         => "luminous flux",
       LUMINOUS_INTENSITY    => "luminous intensity",
       TEMPERATURE_DELTA     => "temperature difference",
+      ACTIVITY              => "radioactive activity",
+      IONIZING_EXPOSURE     => "ionizing-radiation exposure",
+      EQUIVALENT_AMOUNT     => "chemical equivalent amount",
+      EQUIVALENT_CONCENTRATION => "equivalent concentration",
+      OSMOTIC_AMOUNT        => "osmotic amount",
+      OSMOLARITY            => "osmolarity",
+      PHOTON_AMOUNT         => "amount of photons",
+      PHOTON_FLUX_DENSITY   => "photon flux density",
+      SPECTRAL_FLUX_DENSITY => "spectral flux density",
+      SYMBOL_RATE           => "symbol rate",
     }.freeze
 
     def self.dimension_name(dim)
@@ -630,12 +655,13 @@ module Tungsten
       "mph"    => UnitDef.new(symbol: "mph",    dimension: VELOCITY, factor: Rational(1609344, 3600000)),
       "mi/h"   => UnitDef.new(symbol: "mi/h",   dimension: VELOCITY, factor: Rational(1609344, 3600000)),  # spelled-out mph
       "kph"    => UnitDef.new(symbol: "kph",    dimension: VELOCITY, factor: Rational(5, 18)),  # 1000 m / 3600 s exact
-      "mach"   => UnitDef.new(symbol: "mach",   dimension: VELOCITY, factor: 331.46),
+      "mach"   => UnitDef.new(symbol: "mach",   dimension: VELOCITY, factor: 331.46,
+        kind: :contextual_reference),
 
       # Astronomical length
-      "au"  => UnitDef.new(symbol: "au",  dimension: LENGTH, factor: 1.495978707e11),
+      "au"  => UnitDef.new(symbol: "au",  dimension: LENGTH, factor: 149_597_870_700),
       "pc"  => UnitDef.new(symbol: "pc",  dimension: LENGTH, factor: 3.0856775814914e16),
-      "ly"  => UnitDef.new(symbol: "ly",  dimension: LENGTH, factor: 9.4607304725808e15),
+      "ly"  => UnitDef.new(symbol: "ly",  dimension: LENGTH, factor: 9_460_730_472_580_800),
       # Light-time lengths — exact, since c is exact since 1983.
       "lightsecond" => UnitDef.new(symbol: "lightsecond", dimension: LENGTH, factor: 299_792_458),
       "lightminute" => UnitDef.new(symbol: "lightminute", dimension: LENGTH, factor: 17_987_547_480),
@@ -764,10 +790,10 @@ module Tungsten
       ), # 30 L
 
       # Pressure
-      "bar"  => UnitDef.new(symbol: "bar",  dimension: PRESSURE, factor: 1e5),
+      "bar"  => UnitDef.new(symbol: "bar",  dimension: PRESSURE, factor: 100_000),
       "mbar" => UnitDef.new(symbol: "mbar", dimension: PRESSURE, factor: 100.0),  # milli-bar = 100 Pa
       "Ba"   => UnitDef.new(symbol: "Ba",   dimension: PRESSURE, factor: 0.1),
-      "atm"  => UnitDef.new(symbol: "atm",  dimension: PRESSURE, factor: 101325.0),
+      "atm"  => UnitDef.new(symbol: "atm",  dimension: PRESSURE, factor: 101_325),
       "at"   => UnitDef.new(symbol: "at",   dimension: PRESSURE, factor: 98066.5),
       "psi"  => UnitDef.new(symbol: "psi",  dimension: PRESSURE, factor: 6894.757),
       "torr" => UnitDef.new(symbol: "torr", dimension: PRESSURE, factor: Rational(20265, 152)),  # exactly 1 atm / 760
@@ -781,13 +807,18 @@ module Tungsten
       "lbf" => UnitDef.new(
         symbol: "lbf", dimension: FORCE, factor: Rational(8_896_443_230_521, 2_000_000_000_000)
       ),
-      "kgf" => UnitDef.new(symbol: "kgf", dimension: FORCE, factor: 9.80665),
+      "kgf" => UnitDef.new(symbol: "kgf", dimension: FORCE, factor: Rational(196_133, 20_000)),
 
       # Energy
-      "eV"    => UnitDef.new(symbol: "eV",    dimension: ENERGY, factor: 1.602176634e-19),
+      "eV"    => UnitDef.new(symbol: "eV",    dimension: ENERGY,
+        factor: Rational(1_602_176_634, 10**28)),
       "erg"   => UnitDef.new(symbol: "erg",   dimension: ENERGY, factor: 1e-7),
       "cal"   => UnitDef.new(symbol: "cal",   dimension: ENERGY, factor: 4.1868),
       "kcal"  => UnitDef.new(symbol: "kcal",  dimension: ENERGY, factor: 4186.8),
+      "cal_IT" => UnitDef.new(symbol: "cal_IT", dimension: ENERGY, factor: Rational(10_467, 2_500)),
+      "cal_th" => UnitDef.new(symbol: "cal_th", dimension: ENERGY, factor: Rational(523, 125)),
+      "kcal_IT" => UnitDef.new(symbol: "kcal_IT", dimension: ENERGY, factor: Rational(20_934, 5)),
+      "kcal_th" => UnitDef.new(symbol: "kcal_th", dimension: ENERGY, factor: 4_184),
       "BTU"   => UnitDef.new(symbol: "BTU",   dimension: ENERGY, factor: 1055.05585262),
       "therm" => UnitDef.new(symbol: "therm", dimension: ENERGY, factor: 105505585.262),
       "kWh"   => UnitDef.new(symbol: "kWh",   dimension: ENERGY, factor: 3600000.0),
@@ -808,8 +839,8 @@ module Tungsten
       "Ga"  => UnitDef.new(symbol: "Ga",  dimension: MAGNETIC_FLUX_DENSITY, factor: 1e-4),
 
       # Radioactivity / Dosimetry
-      "Bq"  => UnitDef.new(symbol: "Bq",  dimension: FREQUENCY,      factor: 1.0),
-      "Ci"  => UnitDef.new(symbol: "Ci",  dimension: FREQUENCY,      factor: 3.7e10),
+      "Bq"  => UnitDef.new(symbol: "Bq",  dimension: ACTIVITY,       factor: 1),
+      "Ci"  => UnitDef.new(symbol: "Ci",  dimension: ACTIVITY,       factor: 37_000_000_000),
       "Gy"  => UnitDef.new(symbol: "Gy",  dimension: ABSORBED_DOSE_KIND, factor: 1.0),
       "Sv"  => UnitDef.new(symbol: "Sv",  dimension: EQUIVALENT_DOSE,    factor: 1.0),
       "rem" => UnitDef.new(symbol: "rem", dimension: EQUIVALENT_DOSE,    factor: 0.01),
@@ -848,7 +879,7 @@ module Tungsten
       # Data rate
       "bps"  => UnitDef.new(symbol: "bps",  dimension: DATA_RATE, factor: 0.125),
       "Bps"  => UnitDef.new(symbol: "Bps",  dimension: DATA_RATE, factor: 1.0),
-      "baud" => UnitDef.new(symbol: "baud", dimension: DATA_RATE, factor: 0.125),
+      "baud" => UnitDef.new(symbol: "baud", dimension: SYMBOL_RATE, factor: 1),
 
       # Viscosity
       "P"   => UnitDef.new(symbol: "P",   dimension: DYNAMIC_VISCOSITY,   factor: 0.1),
@@ -857,12 +888,18 @@ module Tungsten
       "cSt" => UnitDef.new(symbol: "cSt", dimension: KINEMATIC_VISCOSITY, factor: 1e-6),
 
       # Astronomy
-      "solarmass"   => UnitDef.new(symbol: "solarmass",   dimension: MASS,   factor: 1.98892e30),
-      "earthmass"   => UnitDef.new(symbol: "earthmass",   dimension: MASS,   factor: 5.9722e24),
-      "jupitermass" => UnitDef.new(symbol: "jupitermass", dimension: MASS,   factor: 1.8986e27),
-      "moonmass"    => UnitDef.new(symbol: "moonmass",    dimension: MASS,   factor: 7.342e22),
-      "solarradius" => UnitDef.new(symbol: "solarradius", dimension: LENGTH, factor: 6.96e8),
-      "earthradius" => UnitDef.new(symbol: "earthradius", dimension: LENGTH, factor: 6.371e6),
+      "solarmass"   => UnitDef.new(symbol: "solarmass",   dimension: MASS,   factor: 1.98892e30,
+        kind: :reference_quantity, measured: true),
+      "earthmass"   => UnitDef.new(symbol: "earthmass",   dimension: MASS,   factor: 5.9722e24,
+        kind: :reference_quantity, measured: true),
+      "jupitermass" => UnitDef.new(symbol: "jupitermass", dimension: MASS,   factor: 1.8986e27,
+        kind: :reference_quantity, measured: true),
+      "moonmass"    => UnitDef.new(symbol: "moonmass",    dimension: MASS,   factor: 7.342e22,
+        kind: :reference_quantity, measured: true),
+      "solarradius" => UnitDef.new(symbol: "solarradius", dimension: LENGTH, factor: 6.96e8,
+        kind: :reference_quantity, measured: true),
+      "earthradius" => UnitDef.new(symbol: "earthradius", dimension: LENGTH, factor: 6.371e6,
+        kind: :reference_quantity, measured: true),
 
       # Typography
       "point"  => UnitDef.new(symbol: "point",  dimension: LENGTH, factor: 0.000352778),
@@ -902,7 +939,7 @@ module Tungsten
       "rpm" => UnitDef.new(symbol: "rpm", dimension: FREQUENCY, factor: Rational(1, 60)),  # exact
 
       # Radioactivity (rutherford)
-      "rd"  => UnitDef.new(symbol: "rd",  dimension: FREQUENCY, factor: 1e6),
+      "rd"  => UnitDef.new(symbol: "rd",  dimension: ACTIVITY, factor: 1_000_000),
 
       # Maxwell — CGS magnetic flux. (oersted/gilbert skipped: their dimension
       # A/m has no direct slot in our 8-axis SI Dimension struct.)
@@ -976,15 +1013,20 @@ module Tungsten
       "sone" => UnitDef.new(symbol: "sone", dimension: Dimension.custom("loudness"),       factor: 1),
       "phon" => UnitDef.new(symbol: "phon", dimension: Dimension.custom("loudness_level"), factor: 1),
 
-      # Astronomy: spectral flux density
-      # 1 Jy = 1e-26 W·m⁻²·Hz⁻¹. Custom dim so it doesn't blur into magnetic_flux_density (which has
-      # the same SI exponents — kg·s⁻²) and trigger surprising compatibility.
-      "Jy" => UnitDef.new(symbol: "Jy", dimension: Dimension.custom("spectral_flux_density"), factor: 1.0),
+      # Astronomy: spectral flux density. The explicit cycle axis inherited
+      # from Hz keeps Jy distinct from tesla despite equal bare SI exponents.
+      "Jy" => UnitDef.new(
+        symbol: "Jy", dimension: SPECTRAL_FLUX_DENSITY,
+        factor: Rational(1, 10**26), prefixable: :si
+      ),
 
       # Magnitude (astronomy; logarithmic, reverse-direction; each variant is its own custom dim)
-      "mag"   => UnitDef.new(symbol: "mag",   dimension: Dimension.custom("magnitude_apparent"),    factor: 1),
-      "Mag"   => UnitDef.new(symbol: "Mag",   dimension: Dimension.custom("magnitude_absolute"),    factor: 1),
-      "M_bol" => UnitDef.new(symbol: "M_bol", dimension: Dimension.custom("magnitude_bolometric"),  factor: 1),
+      "mag"   => UnitDef.new(symbol: "mag",   dimension: Dimension.custom("magnitude_apparent"),
+        factor: 1, kind: :reference_scale),
+      "Mag"   => UnitDef.new(symbol: "Mag",   dimension: Dimension.custom("magnitude_absolute"),
+        factor: 1, kind: :reference_scale),
+      "M_bol" => UnitDef.new(symbol: "M_bol", dimension: Dimension.custom("magnitude_bolometric"),
+        factor: 1, kind: :reference_scale),
 
       # Particle physics: barn extensions and integrated luminosity
       "femtobarn" => UnitDef.new(symbol: "femtobarn", dimension: AREA,         factor: 1e-43),
@@ -1164,19 +1206,21 @@ module Tungsten
       "compton_e"      => UnitDef.new(symbol: "compton_e",      dimension: LENGTH, factor: 2.42631023867e-12),  # electron
       "compton_p"      => UnitDef.new(symbol: "compton_p",      dimension: LENGTH, factor: 1.32140985539e-15),  # proton
       "compton_n"      => UnitDef.new(symbol: "compton_n",      dimension: LENGTH, factor: 1.31959090581e-15),  # neutron
-      "fine_structure" => UnitDef.new(symbol: "fine_structure", dimension: DIMENSIONLESS, factor: 7.2973525693e-3),
+      "fine_structure" => UnitDef.new(symbol: "fine_structure", dimension: DIMENSIONLESS,
+        factor: 7.2973525693e-3, kind: :physical_constant, measured: true),
 
       # Particle masses
       "electron_mass" => UnitDef.new(symbol: "electron_mass", dimension: MASS, factor: 9.1093837015e-31,
         description: "rest mass of an electron; ≈ 1/1836 of the proton mass",
-        measured: true, year_defined: 2018, defining_source: "CODATA 2018"),
+        measured: true, year_defined: 2018, defining_source: "CODATA 2018", kind: :physical_constant),
       "proton_mass"   => UnitDef.new(symbol: "proton_mass",   dimension: MASS, factor: 1.67262192369e-27,
         description: "rest mass of a proton",
-        measured: true, year_defined: 2018, defining_source: "CODATA 2018"),
+        measured: true, year_defined: 2018, defining_source: "CODATA 2018", kind: :physical_constant),
       "neutron_mass"  => UnitDef.new(symbol: "neutron_mass",  dimension: MASS, factor: 1.67492749804e-27,
         description: "rest mass of a neutron",
-        measured: true, year_defined: 2018, defining_source: "CODATA 2018"),
-      "muon_mass"     => UnitDef.new(symbol: "muon_mass",     dimension: MASS, factor: 1.883531627e-28),
+        measured: true, year_defined: 2018, defining_source: "CODATA 2018", kind: :physical_constant),
+      "muon_mass"     => UnitDef.new(symbol: "muon_mass",     dimension: MASS, factor: 1.883531627e-28,
+        measured: true, kind: :physical_constant),
 
       # Power flavors (alongside hp, PS)
       "boiler_horsepower"   => UnitDef.new(symbol: "boiler_horsepower",   dimension: POWER, factor: 9809.5),
@@ -1308,17 +1352,195 @@ module Tungsten
       "mmol/L_glucose"  => UnitDef.new(symbol: "mmol/L_glucose",  dimension: Dimension.custom("glucose_concentration"), factor: 1),
       "mach_air_20C" => UnitDef.new(symbol: "mach_air_20C", dimension: VELOCITY, factor: 343),
 
+      # Cross-domain scientific conventions. This block intentionally contains
+      # units with stable linear conversions only. Physical constants (h, c,
+      # particle masses), logarithmic scales (pH, dB, stellar magnitudes), and
+      # condition-dependent reference scales remain separate APIs or explicit
+      # contextual quantities rather than pretending to be ordinary units.
+
+      # Chemistry and laboratory practice
+      "M"          => UnitDef.new(symbol: "M",          dimension: AMOUNT_CONCENTRATION, factor: 1_000),
+      "mol/L"      => UnitDef.new(symbol: "mol/L",      dimension: AMOUNT_CONCENTRATION, factor: 1_000),
+      "mmol/L"     => UnitDef.new(symbol: "mmol/L",     dimension: AMOUNT_CONCENTRATION, factor: 1),
+      "µmol/L"     => UnitDef.new(symbol: "µmol/L",     dimension: AMOUNT_CONCENTRATION, factor: Rational(1, 1_000)),
+      "nmol/L"     => UnitDef.new(symbol: "nmol/L",     dimension: AMOUNT_CONCENTRATION, factor: Rational(1, 1_000_000)),
+      "mol/m³"      => UnitDef.new(symbol: "mol/m³",      dimension: AMOUNT_CONCENTRATION, factor: 1),
+      "g/L"        => UnitDef.new(symbol: "g/L",        dimension: MASS_CONCENTRATION, factor: 1),
+      "mg/L"       => UnitDef.new(symbol: "mg/L",       dimension: MASS_CONCENTRATION, factor: Rational(1, 1_000)),
+      "mg/dL"      => UnitDef.new(symbol: "mg/dL",      dimension: MASS_CONCENTRATION, factor: Rational(1, 100)),
+      "g/dL"       => UnitDef.new(symbol: "g/dL",       dimension: MASS_CONCENTRATION, factor: 10),
+      "µg/mL"      => UnitDef.new(symbol: "µg/mL",      dimension: MASS_CONCENTRATION, factor: Rational(1, 1_000)),
+      "ng/mL"      => UnitDef.new(symbol: "ng/mL",      dimension: MASS_CONCENTRATION, factor: Rational(1, 1_000_000)),
+      "Eq"          => UnitDef.new(symbol: "Eq",          dimension: EQUIVALENT_AMOUNT, factor: 1),
+      "Eq/L"        => UnitDef.new(symbol: "Eq/L",        dimension: EQUIVALENT_CONCENTRATION, factor: 1_000),
+      "mEq/L"       => UnitDef.new(symbol: "mEq/L",       dimension: EQUIVALENT_CONCENTRATION, factor: 1),
+      "osmol"       => UnitDef.new(symbol: "osmol",       dimension: OSMOTIC_AMOUNT, factor: 1),
+      "Osm/L"       => UnitDef.new(symbol: "Osm/L",       dimension: OSMOLARITY, factor: 1_000),
+      "mOsm/L"      => UnitDef.new(symbol: "mOsm/L",      dimension: OSMOLARITY, factor: 1),
+      "U_enzyme"    => UnitDef.new(symbol: "U_enzyme",    dimension: CATALYTIC_ACTIVITY,
+        factor: Rational(1, 60_000_000)),
+      "U/L"         => UnitDef.new(symbol: "U/L",         dimension: CATALYTIC_ACTIVITY / VOLUME,
+        factor: Rational(1, 60_000)),
+      "IU"          => UnitDef.new(symbol: "IU",          dimension: Dimension.custom("international_unit"),
+        factor: 1, kind: :contextual_unit),
+      "CFU"         => UnitDef.new(symbol: "CFU",         dimension: Dimension.custom("colony_forming_unit"), factor: 1),
+      "PFU"         => UnitDef.new(symbol: "PFU",         dimension: Dimension.custom("plaque_forming_unit"), factor: 1),
+      "cell"        => UnitDef.new(symbol: "cell",        dimension: Dimension.custom("cell_count"), factor: 1),
+      "copy"        => UnitDef.new(symbol: "copy",        dimension: Dimension.custom("molecular_copy"), factor: 1),
+      "CFU/mL"      => UnitDef.new(symbol: "CFU/mL",
+        dimension: Dimension.custom("colony_forming_unit") / VOLUME, factor: 1_000_000),
+      "PFU/mL"      => UnitDef.new(symbol: "PFU/mL",
+        dimension: Dimension.custom("plaque_forming_unit") / VOLUME, factor: 1_000_000),
+      "cells/mL"    => UnitDef.new(symbol: "cells/mL",
+        dimension: Dimension.custom("cell_count") / VOLUME, factor: 1_000_000),
+      "copies/mL"   => UnitDef.new(symbol: "copies/mL",
+        dimension: Dimension.custom("molecular_copy") / VOLUME, factor: 1_000_000),
+      "IU/mL"       => UnitDef.new(symbol: "IU/mL",
+        dimension: Dimension.custom("international_unit") / VOLUME, factor: 1_000_000),
+      "Svedberg"    => UnitDef.new(symbol: "Svedberg",    dimension: TIME, factor: Rational(1, 10**13)),
+
+      # Electromagnetism: exact SI/EMU/ESU relationships. The explicit `ab`
+      # and `stat` prefixes avoid collisions with SI prefixes and ordinary
+      # symbols. c is exact in SI, so the electrostatic factors are exact too.
+      "Ah"          => UnitDef.new(symbol: "Ah",          dimension: CHARGE, factor: 3_600),
+      "var"         => UnitDef.new(symbol: "var",         dimension: POWER * Dimension.custom("reactive_power"),
+        factor: 1, prefixable: :si),
+      "VA"          => UnitDef.new(symbol: "VA",          dimension: POWER * Dimension.custom("apparent_power"),
+        factor: 1, prefixable: :si),
+      "abA"         => UnitDef.new(symbol: "abA",         dimension: CURRENT, factor: 10),
+      "statA"       => UnitDef.new(symbol: "statA",       dimension: CURRENT,
+        factor: Rational(1, 10 * 299_792_458)),
+      "abC"         => UnitDef.new(symbol: "abC",         dimension: CHARGE, factor: 10),
+      "statC"       => UnitDef.new(symbol: "statC",       dimension: CHARGE,
+        factor: Rational(1, 10 * 299_792_458)),
+      "abV"         => UnitDef.new(symbol: "abV",         dimension: VOLTAGE,
+        factor: Rational(1, 100_000_000)),
+      "statV"       => UnitDef.new(symbol: "statV",       dimension: VOLTAGE,
+        factor: Rational(299_792_458, 1_000_000)),
+      "abΩ"         => UnitDef.new(symbol: "abΩ",         dimension: RESISTANCE,
+        factor: Rational(1, 1_000_000_000)),
+      "statΩ"       => UnitDef.new(symbol: "statΩ",       dimension: RESISTANCE,
+        factor: Rational(299_792_458**2, 100_000)),
+      "abF"         => UnitDef.new(symbol: "abF",         dimension: CAPACITANCE, factor: 1_000_000_000),
+      "statF"       => UnitDef.new(symbol: "statF",       dimension: CAPACITANCE,
+        factor: Rational(100_000, 299_792_458**2)),
+      "abH"         => UnitDef.new(symbol: "abH",         dimension: INDUCTANCE,
+        factor: Rational(1, 1_000_000_000)),
+      "statH"       => UnitDef.new(symbol: "statH",       dimension: INDUCTANCE,
+        factor: Rational(299_792_458**2, 100_000)),
+
+      # Radiometry, photometry, and photochemistry
+      "phot"        => UnitDef.new(symbol: "phot",        dimension: ILLUMINANCE_KIND, factor: 10_000),
+      "fc"          => UnitDef.new(symbol: "fc",          dimension: ILLUMINANCE_KIND,
+        factor: Rational(1_562_500, 145_161)),
+      "diopter"     => UnitDef.new(symbol: "diopter",     dimension: INVERSE_LENGTH, factor: 1),
+      "W/sr"        => UnitDef.new(symbol: "W/sr",        dimension: POWER / SOLID_ANGLE, factor: 1),
+      "W/sr/m²"     => UnitDef.new(symbol: "W/sr/m²",     dimension: POWER / SOLID_ANGLE / AREA, factor: 1),
+      "W/m²/Hz"     => UnitDef.new(symbol: "W/m²/Hz",     dimension: SPECTRAL_FLUX_DENSITY, factor: 1),
+      "W/m³"        => UnitDef.new(symbol: "W/m³",        dimension: POWER / VOLUME, factor: 1),
+      "J/m²"        => UnitDef.new(symbol: "J/m²",        dimension: ENERGY / AREA, factor: 1),
+      "photon"      => UnitDef.new(symbol: "photon",      dimension: Dimension.custom("photon"), factor: 1),
+      "einstein"    => UnitDef.new(symbol: "einstein",    dimension: PHOTON_AMOUNT, factor: 1),
+      "mol_photon/m²/s"  => UnitDef.new(symbol: "mol_photon/m²/s",  dimension: PHOTON_FLUX_DENSITY, factor: 1),
+      "µmol_photon/m²/s" => UnitDef.new(symbol: "µmol_photon/m²/s", dimension: PHOTON_FLUX_DENSITY,
+        factor: Rational(1, 1_000_000)),
+
+      # Radiation and nuclear practice. `rad_dose` is deliberately not `rad`,
+      # which remains the radian. Roentgen exposure is distinct from absorbed
+      # dose and equivalent dose even though all three concern ionizing radiation.
+      "rad_dose"    => UnitDef.new(symbol: "rad_dose",    dimension: ABSORBED_DOSE_KIND,
+        factor: Rational(1, 100)),
+      "R_exposure"  => UnitDef.new(symbol: "R_exposure",  dimension: IONIZING_EXPOSURE,
+        factor: Rational(129, 500_000)),
+      "Gy/s"        => UnitDef.new(symbol: "Gy/s",        dimension: ABSORBED_DOSE_KIND / TIME, factor: 1),
+      "Sv/h"        => UnitDef.new(symbol: "Sv/h",        dimension: EQUIVALENT_DOSE / TIME,
+        factor: Rational(1, 3_600)),
+      "Bq/kg"       => UnitDef.new(symbol: "Bq/kg",       dimension: ACTIVITY / MASS, factor: 1),
+      "Bq/m³"       => UnitDef.new(symbol: "Bq/m³",       dimension: ACTIVITY / VOLUME, factor: 1),
+      "count"       => UnitDef.new(symbol: "count",       dimension: Dimension.custom("detector_count"), factor: 1),
+
+      # Astronomy. Nominal solar units are exact IAU conversion constants;
+      # actual solar/planetary properties remain measured reference quantities.
+      "mas"         => UnitDef.new(symbol: "mas",         dimension: ANGLE,
+        factor: Math::PI / 648_000_000),
+      "µas"         => UnitDef.new(symbol: "µas",         dimension: ANGLE,
+        factor: Math::PI / 648_000_000_000),
+      "R_sun_nominal" => UnitDef.new(
+        symbol: "R_sun_nominal", dimension: LENGTH, factor: 695_700_000,
+        description: "IAU nominal solar radius", measured: false,
+        year_defined: 2015, defining_source: "IAU Resolution B3", kind: :nominal_unit
+      ),
+      "L_sun_nominal" => UnitDef.new(
+        symbol: "L_sun_nominal", dimension: POWER, factor: 382_800_000_000_000_000_000_000_000,
+        description: "IAU nominal solar luminosity", measured: false,
+        year_defined: 2015, defining_source: "IAU Resolution B3", kind: :nominal_unit
+      ),
+      "foe"         => UnitDef.new(symbol: "foe",         dimension: ENERGY, factor: 10**44),
+
+      # Geoscience, atmospheric science, and oceanography
+      "DU"          => UnitDef.new(symbol: "DU",          dimension: SUBSTANCE / AREA,
+        factor: Rational(67_175, 150_553_519)),
+      "PVU"         => UnitDef.new(symbol: "PVU",         dimension: POTENTIAL_VORTICITY,
+        factor: Rational(1, 1_000_000)),
+      "sverdrup"    => UnitDef.new(symbol: "sverdrup",    dimension: VOLUMETRIC_FLOW, factor: 1_000_000),
+      "darcy"       => UnitDef.new(symbol: "darcy",       dimension: AREA,
+        factor: Rational(9_869_233, 10**19)),
+      "mGal"        => UnitDef.new(symbol: "mGal",        dimension: ACCELERATION,
+        factor: Rational(1, 100_000)),
+      "Eotvos"      => UnitDef.new(symbol: "Eotvos",      dimension: GRAVITY_GRADIENT,
+        factor: Rational(1, 1_000_000_000)),
+      "TECU"        => UnitDef.new(symbol: "TECU",
+        dimension: Dimension.custom("electron_column_density") / AREA, factor: 10**16),
+      "gpm"         => UnitDef.new(symbol: "gpm",
+        dimension: (ENERGY / MASS) * Dimension.custom("geopotential"), factor: Rational(196_133, 20_000)),
+      "clo"         => UnitDef.new(symbol: "clo",         dimension: AREA * TEMPERATURE / POWER,
+        factor: Rational(31, 200)),
+      "ppmv"        => UnitDef.new(symbol: "ppmv",
+        dimension: Dimension.custom("volume_fraction"), factor: Rational(1, 1_000_000)),
+      "ppbv"        => UnitDef.new(symbol: "ppbv",
+        dimension: Dimension.custom("volume_fraction"), factor: Rational(1, 1_000_000_000)),
+      "ppmw"        => UnitDef.new(symbol: "ppmw",
+        dimension: Dimension.custom("mass_fraction"), factor: Rational(1, 1_000_000)),
+
+      # Computing and established research throughput conventions
+      "symbol"      => UnitDef.new(symbol: "symbol",      dimension: Dimension.custom("symbol"), factor: 1),
+      "edge"        => UnitDef.new(symbol: "edge",        dimension: Dimension.custom("graph_edge"), factor: 1),
+      "update"      => UnitDef.new(symbol: "update",      dimension: Dimension.custom("cell_update"), factor: 1),
+      "bit/s"       => UnitDef.new(symbol: "bit/s",       dimension: DATA_RATE, factor: Rational(1, 8)),
+      "B/s"         => UnitDef.new(symbol: "B/s",         dimension: DATA_RATE, factor: 1),
+      "Mb/s"        => UnitDef.new(symbol: "Mb/s",        dimension: DATA_RATE, factor: 125_000),
+      "Gb/s"        => UnitDef.new(symbol: "Gb/s",        dimension: DATA_RATE, factor: 125_000_000),
+      "MB/s"        => UnitDef.new(symbol: "MB/s",        dimension: DATA_RATE, factor: 1_000_000),
+      "GB/s"        => UnitDef.new(symbol: "GB/s",        dimension: DATA_RATE, factor: 1_000_000_000),
+      "MiB/s"       => UnitDef.new(symbol: "MiB/s",       dimension: DATA_RATE, factor: 1_048_576),
+      "GiB/s"       => UnitDef.new(symbol: "GiB/s",       dimension: DATA_RATE, factor: 1_073_741_824),
+      "bit/symbol"  => UnitDef.new(symbol: "bit/symbol",
+        dimension: INFORMATION / Dimension.custom("symbol"), factor: Rational(1, 8)),
+      "flop/J"      => UnitDef.new(symbol: "flop/J",      dimension: Dimension.custom("flop") / ENERGY, factor: 1),
+      "op/J"        => UnitDef.new(symbol: "op/J",        dimension: Dimension.custom("op") / ENERGY, factor: 1),
+      "tok/J"       => UnitDef.new(symbol: "tok/J",       dimension: Dimension.custom("token") / ENERGY, factor: 1),
+
       # Ordinal / discrete scales (each its own custom dim — incompatible with anything else)
-      "bortle"          => UnitDef.new(symbol: "bortle",          dimension: Dimension.custom("bortle"),         factor: 1),  # 1-9 sky darkness
-      "beaufort"        => UnitDef.new(symbol: "beaufort",        dimension: Dimension.custom("beaufort"),       factor: 1),  # 0-12 wind force
-      "saffir_simpson"  => UnitDef.new(symbol: "saffir_simpson",  dimension: Dimension.custom("saffir_simpson"), factor: 1),  # 1-5 hurricane
-      "fujita"          => UnitDef.new(symbol: "fujita",          dimension: Dimension.custom("fujita"),         factor: 1),  # F0-F5 tornado
-      "EF"              => UnitDef.new(symbol: "EF",              dimension: Dimension.custom("ef"),             factor: 1),  # EF0-EF5 enhanced Fujita
-      "richter"         => UnitDef.new(symbol: "richter",         dimension: Dimension.custom("magnitude"),      factor: 1),  # continuous earthquake (log)
-      "moment_magnitude"=> UnitDef.new(symbol: "moment_magnitude",dimension: Dimension.custom("magnitude"),      factor: 1),  # Mw, modern replacement
-      "apgar"           => UnitDef.new(symbol: "apgar",           dimension: Dimension.custom("apgar"),          factor: 1),  # 0-10 newborn
-      "RBE"             => UnitDef.new(symbol: "RBE",             dimension: Dimension.custom("rbe"),            factor: 1),  # radiation biological effectiveness
-      "hounsfield_unit" => UnitDef.new(symbol: "hounsfield_unit", dimension: Dimension.custom("hounsfield"),     factor: 1),  # CT scan density (continuous)
+      "bortle"          => UnitDef.new(symbol: "bortle",          dimension: Dimension.custom("bortle"),
+        factor: 1, kind: :reference_scale),  # 1-9 sky darkness
+      "beaufort"        => UnitDef.new(symbol: "beaufort",        dimension: Dimension.custom("beaufort"),
+        factor: 1, kind: :reference_scale),  # 0-12 wind force
+      "saffir_simpson"  => UnitDef.new(symbol: "saffir_simpson",  dimension: Dimension.custom("saffir_simpson"),
+        factor: 1, kind: :reference_scale),  # 1-5 hurricane
+      "fujita"          => UnitDef.new(symbol: "fujita",          dimension: Dimension.custom("fujita"),
+        factor: 1, kind: :reference_scale),  # F0-F5 tornado
+      "EF"              => UnitDef.new(symbol: "EF",              dimension: Dimension.custom("ef"),
+        factor: 1, kind: :reference_scale),  # EF0-EF5 enhanced Fujita
+      "richter"         => UnitDef.new(symbol: "richter",         dimension: Dimension.custom("magnitude"),
+        factor: 1, kind: :reference_scale),  # continuous earthquake (log)
+      "moment_magnitude"=> UnitDef.new(symbol: "moment_magnitude",dimension: Dimension.custom("magnitude"),
+        factor: 1, kind: :reference_scale),  # Mw, modern replacement
+      "apgar"           => UnitDef.new(symbol: "apgar",           dimension: Dimension.custom("apgar"),
+        factor: 1, kind: :reference_scale),  # 0-10 newborn
+      "RBE"             => UnitDef.new(symbol: "RBE",             dimension: Dimension.custom("rbe"),
+        factor: 1, kind: :reference_scale),
+      "hounsfield_unit" => UnitDef.new(symbol: "hounsfield_unit", dimension: Dimension.custom("hounsfield"),
+        factor: 1, kind: :reference_scale),
     }.freeze
 
     UNIT_METADATA_PATH = File.expand_path("../../../../../data/unit_metadata.tsv", __dir__)
@@ -1933,6 +2155,60 @@ module Tungsten
       "mg/dL glucose" => "mg/dL_glucose", "mmol/L glucose" => "mmol/L_glucose",
       "Mach at 20 C" => "mach_air_20C", "Mach in air at 20 C" => "mach_air_20C",
 
+      # Cross-domain scientific aliases
+      "molarity" => "M", "molar concentration" => "M",
+      "international table calorie" => "cal_IT", "calorie IT" => "cal_IT",
+      "thermochemical calorie" => "cal_th", "thermochemical kilocalorie" => "kcal_th",
+      "mM" => "mmol/L", "millimolar" => "mmol/L",
+      "µM" => "µmol/L", "μM" => "µmol/L", "uM" => "µmol/L", "micromolar" => "µmol/L",
+      "nM" => "nmol/L", "nanomolar" => "nmol/L",
+      "equivalent" => "Eq", "equivalents" => "Eq", "normality" => "Eq/L",
+      "osmole" => "osmol", "osmoles" => "osmol", "osmolar" => "Osm/L",
+      "enzyme unit" => "U_enzyme", "enzyme units" => "U_enzyme",
+      "international unit" => "IU", "international units" => "IU",
+      "colony forming unit" => "CFU", "colony-forming unit" => "CFU", "CFUs" => "CFU",
+      "plaque forming unit" => "PFU", "plaque-forming unit" => "PFU", "PFUs" => "PFU",
+      "cells" => "cell", "copies" => "copy",
+      "svedberg" => "Svedberg", "svedbergs" => "Svedberg",
+
+      "ampere hour" => "Ah", "ampere-hour" => "Ah", "amp hours" => "Ah",
+      "volt ampere" => "VA", "volt-ampere" => "VA", "reactive power" => "var",
+      "abampere" => "abA", "biot" => "abA", "statampere" => "statA",
+      "abcoulomb" => "abC", "statcoulomb" => "statC", "franklin" => "statC",
+      "abvolt" => "abV", "statvolt" => "statV",
+      "abohm" => "abΩ", "statohm" => "statΩ", "abfarad" => "abF", "statfarad" => "statF",
+      "abhenry" => "abH", "stathenry" => "statH",
+
+      "phots" => "phot", "foot candle" => "fc", "foot-candle" => "fc", "foot candles" => "fc",
+      "dioptre" => "diopter", "diopters" => "diopter", "dioptres" => "diopter",
+      "radiant intensity" => "W/sr", "radiance" => "W/sr/m²",
+      "spectral flux density" => "W/m²/Hz", "radiant exposure" => "J/m²",
+      "photons" => "photon", "einsteins" => "einstein",
+      "PPFD" => "µmol_photon/m²/s", "photosynthetic photon flux density" => "µmol_photon/m²/s",
+
+      "radiation absorbed dose" => "rad_dose", "absorbed-dose rad" => "rad_dose",
+      "roentgen" => "R_exposure", "roentgens" => "R_exposure",
+      "decays per minute" => "dpm", "counts per second" => "cps", "counts per minute" => "cpm",
+      "milliarcsecond" => "mas", "milliarcseconds" => "mas",
+      "microarcsecond" => "µas", "microarcseconds" => "µas", "μas" => "µas", "uas" => "µas",
+      "nominal solar radius" => "R_sun_nominal", "R☉_N" => "R_sun_nominal",
+      "nominal solar luminosity" => "L_sun_nominal", "L☉_N" => "L_sun_nominal",
+      "foes" => "foe",
+
+      "dobson unit" => "DU", "dobson units" => "DU",
+      "potential vorticity unit" => "PVU", "potential vorticity units" => "PVU",
+      "Sv_ocean" => "sverdrup", "sverdrups" => "sverdrup",
+      "darcies" => "darcy", "milligal" => "mGal", "milligals" => "mGal",
+      "E" => "Eotvos", "Eötvös" => "Eotvos", "eotvos" => "Eotvos",
+      "total electron content unit" => "TECU", "geopotential metre" => "gpm", "geopotential meter" => "gpm",
+      "clo unit" => "clo", "parts per million by volume" => "ppmv",
+      "parts per billion by volume" => "ppbv", "parts per million by mass" => "ppmw",
+
+      "symbols" => "symbol", "edges" => "edge", "updates" => "update",
+      "bits per symbol" => "bit/symbol", "flops per joule" => "flop/J",
+      "operations per joule" => "op/J", "tokens per joule" => "tok/J",
+      "traversed edges per second" => "TEPS", "giga-updates per second" => "GUPS",
+
     }.freeze
 
     # SI-prefixable: units that opt in via UnitDef#prefixable. Backwards-compatible
@@ -1958,6 +2234,7 @@ module Tungsten
     BINARY_PREFIX_TABLE = {
       "Ki" => 1024, "Mi" => 1024**2, "Gi" => 1024**3,
       "Ti" => 1024**4, "Pi" => 1024**5, "Ei" => 1024**6,
+      "Zi" => 1024**7, "Yi" => 1024**8, "Ri" => 1024**9, "Qi" => 1024**10,
     }.freeze
 
     BINARY_PREFIXABLE = Set.new(
@@ -1997,13 +2274,16 @@ module Tungsten
       "bpm"  => [1, "beat/min"],
       "fps"  => [1, "frame/s"],
       "Bq"   => [1, "decay/s"],
-      "Ci"   => [3.7e10, "decay/s"],
-      "rd"   => [1e6, "decay/s"],
+      "Ci"   => [37_000_000_000, "decay/s"],
+      "rd"   => [1_000_000, "decay/s"],
+      "dpm"  => [1, "decay/min"],
+      "cps"  => [1, "count/s"],
+      "cpm"  => [1, "count/min"],
 
       # Data rate
       "bps"  => [1, "b/s"],
       "Bps"  => [1, "B/s"],
-      "baud" => [1, "b/s"],
+      "baud" => [1, "symbol/s"],
 
       # Velocity
       "mph"  => [1, "mi/h"],
@@ -2062,6 +2342,10 @@ module Tungsten
       # Storage I/O
       "iops" => [1, "io/s"], "IOPS" => [1, "io/s"],
 
+      # Research throughput conventions
+      "TEPS" => [1_000_000_000_000, "edge/s"],
+      "GUPS" => [1_000_000_000, "update/s"],
+
       # Concentration: molarity / molality (compound but commonly named)
       "molar"   => [1, "mol/L"],
       "molal"   => [1, "mol/kg"],
@@ -2108,7 +2392,7 @@ module Tungsten
     # raises if the name is already taken.
     def self.register(name, dimension:, factor: 1, offset: 0,
                       aliases: [], description: nil, measured: false,
-                      year_defined: nil, defining_source: nil, prefixable: :none)
+                      year_defined: nil, defining_source: nil, prefixable: :none, kind: :unit)
       raise ArgumentError, "unit '#{name}' already registered" if UNIT_TABLE.key?(name)
       raise ArgumentError, "name '#{name}' is an existing alias" if UNIT_ALIASES.key?(name)
 
@@ -2116,7 +2400,7 @@ module Tungsten
                             factor: factor, offset: offset,
                             description: description, measured: measured,
                             year_defined: year_defined, defining_source: defining_source,
-                            prefixable: prefixable)
+                            prefixable: prefixable, kind: kind)
       mutate_frozen_hash(UNIT_TABLE) { |h| h[name] = def_obj }
       mutate_frozen_hash(UNIT_ALIASES) do |h|
         aliases.each do |al|
@@ -2168,6 +2452,7 @@ module Tungsten
       title = (str == canonical) ? "#{canonical}" : "#{str} → #{canonical}"
       title += " — #{dimension_name(base.dimension)}"
       lines << title
+      lines << "  kind: #{base.kind.to_s.tr('_', ' ')}" if base.respond_to?(:kind) && base.kind != :unit
 
       lines << "  description: #{base.description}" if base.respond_to?(:description) && base.description
       lines << "  etymology: #{base.etymology}" if base.respond_to?(:etymology) && base.etymology

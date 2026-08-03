@@ -16467,8 +16467,8 @@ WValue w_currency_mul_scalar(WValue currency, WValue scalar) {
 /* ---- Quantity ---- */
 
 /* --- BEGIN GENERATED: unit_names --- */
-#define W_UNIT_CAPACITY 4096
-#define W_UNIT_CUSTOM_BASE 2048
+#define W_UNIT_CAPACITY 8192
+#define W_UNIT_CUSTOM_BASE 4096
 static const char *unit_names[W_UNIT_CAPACITY] = {
     /* 0-: SI base */
     [0] = "m",
@@ -16772,408 +16772,1549 @@ static const char *unit_names[W_UNIT_CAPACITY] = {
     [366] = "lbf",
     [367] = "kgf",
     [368] = "erg",
-    [369] = "BTU",
-    [370] = "therm",
-    [371] = "ftlbf",
-    [372] = "dyn",
-    [373] = "hp",
-    [374] = "PS",
-    [375] = "Ga",
+    [369] = "cal_IT",
+    [370] = "cal_th",
+    [371] = "kcal_IT",
+    [372] = "kcal_th",
+    [373] = "BTU",
+    [374] = "therm",
+    [375] = "ftlbf",
+    [376] = "dyn",
+    [377] = "hp",
+    [378] = "PS",
+    [379] = "Ga",
 
-    /* 376-: Ruby compound */
-    [376] = "Ci",
+    /* 380-: Ruby compound */
+    [380] = "Ci",
 
-    /* 377-: Ruby registry */
-    [377] = "rem",
-    [378] = "deg",
-    [379] = "arcmin",
-    [380] = "arcsec",
-    [381] = "gon",
-    [382] = "turn",
-    [383] = "mil",
-    [384] = "brad",
-    [385] = "Gal",
-    [386] = "b",
-    [387] = "nibble",
-    [388] = "o",
-    [389] = "PiB",
-    [390] = "EiB",
+    /* 381-: Ruby registry */
+    [381] = "rem",
+    [382] = "deg",
+    [383] = "arcmin",
+    [384] = "arcsec",
+    [385] = "gon",
+    [386] = "turn",
+    [387] = "mil",
+    [388] = "brad",
+    [389] = "Gal",
+    [390] = "b",
+    [391] = "nibble",
+    [392] = "o",
+    [393] = "PiB",
+    [394] = "EiB",
 
-    /* 391-: Ruby compound */
-    [391] = "bps",
-    [392] = "Bps",
-    [393] = "baud",
+    /* 395-: Ruby compound */
+    [395] = "bps",
+    [396] = "Bps",
+    [397] = "baud",
 
-    /* 394-: Ruby registry */
-    [394] = "P",
-    [395] = "cP",
-    [396] = "St",
-    [397] = "cSt",
-    [398] = "solarmass",
-    [399] = "earthmass",
-    [400] = "jupitermass",
-    [401] = "moonmass",
-    [402] = "solarradius",
-    [403] = "earthradius",
-    [404] = "point",
-    [405] = "pica",
-    [406] = "texpt",
-    [407] = "didot",
-    [408] = "cicero",
-    [409] = "altuve",
-    [410] = "outhouse",
-    [411] = "shed",
-    [412] = "barrel",
-    [413] = "stere",
-    [414] = "cord",
-    [415] = "beard second",
-    [416] = "barn megaparsec",
-    [417] = "banana",
-    [418] = "warhol",
-    [419] = "kilowarhol",
+    /* 398-: Ruby registry */
+    [398] = "P",
+    [399] = "cP",
+    [400] = "St",
+    [401] = "cSt",
+    [402] = "solarmass",
+    [403] = "earthmass",
+    [404] = "jupitermass",
+    [405] = "moonmass",
+    [406] = "solarradius",
+    [407] = "earthradius",
+    [408] = "point",
+    [409] = "pica",
+    [410] = "texpt",
+    [411] = "didot",
+    [412] = "cicero",
+    [413] = "altuve",
+    [414] = "outhouse",
+    [415] = "shed",
+    [416] = "barrel",
+    [417] = "stere",
+    [418] = "cord",
+    [419] = "beard second",
+    [420] = "barn megaparsec",
+    [421] = "banana",
+    [422] = "warhol",
+    [423] = "kilowarhol",
 
-    /* 420-: Ruby compound */
-    [420] = "rpm",
-    [421] = "rd",
+    /* 424-: Ruby compound */
+    [424] = "rpm",
+    [425] = "rd",
 
-    /* 422-: Ruby registry */
-    [422] = "Mx",
-    [423] = "millihelen",
-    [424] = "nit",
-    [425] = "sb",
-    [426] = "La",
-    [427] = "fL",
-    [428] = "asb",
-    [429] = "sk",
-    [430] = "em",
-    [431] = "en",
-    [432] = "qquad",
-    [433] = "peanutbutter",
-    [434] = "jelly",
-    [435] = "beat",
-    [436] = "cycle",
-    [437] = "frame",
-    [438] = "instant",
-    [439] = "jiffy",
-    [440] = "moment",
-    [441] = "sample",
-    [442] = "tick",
-    [443] = "revolution",
-    [444] = "decay",
-    [445] = "rotation",
-    [446] = "flop",
-    [447] = "op",
-    [448] = "mac",
-    [449] = "instruction",
-    [450] = "tok",
-    [451] = "transfer",
-    [452] = "query",
-    [453] = "request",
-    [454] = "txn",
-    [455] = "packet",
-    [456] = "io",
-    [457] = "nat",
-    [458] = "ban",
-    [459] = "deciban",
-    [460] = "ppm",
-    [461] = "ppb",
-    [462] = "ppt",
-    [463] = "pphm",
-    [464] = "sone",
-    [465] = "phon",
-    [466] = "Jy",
-    [467] = "mag",
-    [468] = "Mag",
-    [469] = "M_bol",
-    [470] = "femtobarn",
-    [471] = "attobarn",
-    [472] = "picobarn",
-    [473] = "nanobarn",
-    [474] = "fb\xe2\x81\xbb\xc2\xb9",
-    [475] = "ab\xe2\x81\xbb\xc2\xb9",
-    [476] = "pb\xe2\x81\xbb\xc2\xb9",
-    [477] = "nb\xe2\x81\xbb\xc2\xb9",
-    [478] = "Oe",
-    [479] = "Gb",
-    [480] = "D",
-    [481] = "\xce\xbc_B",
-    [482] = "micromort",
-    [483] = "microlife",
-    [484] = "kayser",
-    [485] = "mohs",
-    [486] = "vickers",
-    [487] = "rockwell",
-    [488] = "brinell",
-    [489] = "dozen",
-    [490] = "gross",
-    [491] = "great_gross",
-    [492] = "score",
-    [493] = "bakers_dozen",
-    [494] = "googol",
-    [495] = "googolplex",
-    [496] = "cubit",
-    [497] = "span",
-    [498] = "handbreadth",
-    [499] = "fingerbreadth",
-    [500] = "biblical_mil",
-    [501] = "parsa",
-    [502] = "techum",
-    [503] = "omer",
-    [504] = "ephah",
-    [505] = "hin",
-    [506] = "bath",
-    [507] = "seah",
-    [508] = "kor",
-    [509] = "kab",
-    [510] = "shekel",
-    [511] = "biblical_mina",
-    [512] = "biblical_talent",
-    [513] = "gerah",
-    [514] = "beka",
-    [515] = "helek",
-    [516] = "rega",
-    [517] = "onah",
-    [518] = "yovel",
-    [519] = "shmita",
-    [520] = "g\xe2\x82\x80",
-    [521] = "g_n",
-    [522] = "gee",
-    [523] = "mpg",
-    [524] = "mpge",
-    [525] = "L/100km",
-    [526] = "stick",
-    [527] = "kiloton",
-    [528] = "megaton",
-    [529] = "gigaton",
-    [530] = "oil_barrel",
-    [531] = "BOE",
-    [532] = "TCE",
-    [533] = "heap",
-    [534] = "hole",
-    [535] = "shaku",
-    [536] = "sun",
-    [537] = "ri",
-    [538] = "jo",
-    [539] = "tsubo",
-    [540] = "tatami",
-    [541] = "koku",
-    [542] = "g\xc5\x8d",
-    [543] = "momme",
-    [544] = "kanme",
-    [545] = "chi",
-    [546] = "cun",
-    [547] = "fen",
-    [548] = "zhang",
-    [549] = "li_cn",
-    [550] = "mu",
-    [551] = "jin",
-    [552] = "liang",
-    [553] = "dan_cn",
-    [554] = "verst",
-    [555] = "arshin",
-    [556] = "sazhen",
-    [557] = "vershok",
-    [558] = "pud",
-    [559] = "funt_ru",
-    [560] = "chetvert",
-    [561] = "pied",
-    [562] = "pouce",
-    [563] = "toise",
-    [564] = "arpent",
-    [565] = "lieue_de_poste",
-    [566] = "pes",
-    [567] = "passus",
-    [568] = "mille_passuum",
-    [569] = "iugerum",
-    [570] = "libra_roma",
-    [571] = "uncia_roma",
-    [572] = "amphora",
-    [573] = "royal_cubit",
-    [574] = "egypt_palm",
-    [575] = "digit",
-    [576] = "khet",
-    [577] = "aroura",
-    [578] = "hath",
-    [579] = "gaz",
-    [580] = "kos",
-    [581] = "tola",
-    [582] = "seer",
-    [583] = "maund",
-    [584] = "hartree",
-    [585] = "rydberg_unit",
-    [586] = "bohr_radius",
-    [587] = "compton_e",
-    [588] = "compton_p",
-    [589] = "compton_n",
-    [590] = "fine_structure",
-    [591] = "electron_mass",
-    [592] = "proton_mass",
-    [593] = "neutron_mass",
-    [594] = "muon_mass",
-    [595] = "boiler_horsepower",
-    [596] = "electric_horsepower",
-    [597] = "water_horsepower",
-    [598] = "donkeypower",
-    [599] = "metric_cup",
-    [600] = "metric_tbsp",
-    [601] = "australian_tbsp",
-    [602] = "japanese_cup",
-    [603] = "imperial_pint",
-    [604] = "crumb",
-    [605] = "dword",
-    [606] = "qword",
-    [607] = "paragraph",
-    [608] = "sector",
-    [609] = "page",
-    [610] = "block",
-    [611] = "cluster",
-    [612] = "EV",
-    [613] = "f_stop",
-    [614] = "ISO_speed",
-    [615] = "cent_pitch",
-    [616] = "semitone",
-    [617] = "savart",
-    [618] = "octave",
-    [619] = "basis_point",
-    [620] = "tenth_cent",
-    [621] = "pip",
-    [622] = "link_chain",
-    [623] = "rope",
-    [624] = "perch",
-    [625] = "barleycorn",
-    [626] = "shaftment",
-    [627] = "english_cubit",
-    [628] = "nail_cloth",
-    [629] = "cable_length",
-    [630] = "mH2O",
-    [631] = "inH2O",
-    [632] = "ftH2O",
-    [633] = "pieze",
-    [634] = "denier",
-    [635] = "tex",
-    [636] = "decitex",
-    [637] = "french_gauge",
-    [638] = "mickey",
-    [639] = "sagan",
-    [640] = "light_nanosecond",
-    [641] = "banana_for_scale",
-    [642] = "kg/m\xc2\xb3",
-    [643] = "m\xc2\xb3/s",
-    [644] = "L/min",
-    [645] = "kg/s",
-    [646] = "heat_capacity",
-    [647] = "entropy",
-    [648] = "J/kg/K",
-    [649] = "W/m/K",
-    [650] = "W/m\xc2\xb2",
-    [651] = "V/m",
-    [652] = "A/m\xc2\xb2",
-    [653] = "\xce\xa9\xc2\xb7m",
-    [654] = "S/m",
-    [655] = "C/m\xc2\xb3",
-    [656] = "N/m",
-    [657] = "kg/m",
-    [658] = "kg/m\xc2\xb2",
-    [659] = "J/m\xc2\xb3",
-    [660] = "J/kg",
-    [661] = "specific_energy",
-    [662] = "mol/mol",
-    [663] = "kat/m\xc2\xb3",
-    [664] = "cd/m\xc2\xb2",
-    [665] = "lx\xc2\xb7s",
-    [666] = "lm\xc2\xb7s",
-    [667] = "rad/s",
-    [668] = "rad/s\xc2\xb2",
-    [669] = "m/s\xc2\xb3",
-    [670] = "kg\xc2\xb7m/s",
-    [671] = "N\xc2\xb7s",
-    [672] = "N\xc2\xb7m",
-    [673] = "bit/s/Hz",
-    [674] = "J/op",
-    [675] = "J/tok",
-    [676] = "B/flop",
-    [677] = "kgCO\xe2\x82\x82\x65",
-    [678] = "gCO\xe2\x82\x82\x65",
-    [679] = "gCO\xe2\x82\x82\x65/kWh",
-    [680] = "gCO\xe2\x82\x82\x65/pkm",
-    [681] = "px",
-    [682] = "dpi",
-    [683] = "dppx",
-    [684] = "rem_css",
-    [685] = "vw",
-    [686] = "vh",
-    [687] = "person_hour",
-    [688] = "QALY",
-    [689] = "story_point",
-    [690] = "mg/dL_glucose",
-    [691] = "mmol/L_glucose",
-    [692] = "mach_air_20C",
-    [693] = "bortle",
-    [694] = "beaufort",
-    [695] = "saffir_simpson",
-    [696] = "fujita",
-    [697] = "EF",
-    [698] = "richter",
-    [699] = "moment_magnitude",
-    [700] = "apgar",
-    [701] = "RBE",
-    [702] = "hounsfield_unit",
+    /* 426-: Ruby registry */
+    [426] = "Mx",
+    [427] = "millihelen",
+    [428] = "nit",
+    [429] = "sb",
+    [430] = "La",
+    [431] = "fL",
+    [432] = "asb",
+    [433] = "sk",
+    [434] = "em",
+    [435] = "en",
+    [436] = "qquad",
+    [437] = "peanutbutter",
+    [438] = "jelly",
+    [439] = "beat",
+    [440] = "cycle",
+    [441] = "frame",
+    [442] = "instant",
+    [443] = "jiffy",
+    [444] = "moment",
+    [445] = "sample",
+    [446] = "tick",
+    [447] = "revolution",
+    [448] = "decay",
+    [449] = "rotation",
+    [450] = "flop",
+    [451] = "op",
+    [452] = "mac",
+    [453] = "instruction",
+    [454] = "tok",
+    [455] = "transfer",
+    [456] = "query",
+    [457] = "request",
+    [458] = "txn",
+    [459] = "packet",
+    [460] = "io",
+    [461] = "nat",
+    [462] = "ban",
+    [463] = "deciban",
+    [464] = "ppm",
+    [465] = "ppb",
+    [466] = "ppt",
+    [467] = "pphm",
+    [468] = "sone",
+    [469] = "phon",
+    [470] = "Jy",
+    [471] = "mag",
+    [472] = "Mag",
+    [473] = "M_bol",
+    [474] = "femtobarn",
+    [475] = "attobarn",
+    [476] = "picobarn",
+    [477] = "nanobarn",
+    [478] = "fb\xe2\x81\xbb\xc2\xb9",
+    [479] = "ab\xe2\x81\xbb\xc2\xb9",
+    [480] = "pb\xe2\x81\xbb\xc2\xb9",
+    [481] = "nb\xe2\x81\xbb\xc2\xb9",
+    [482] = "Oe",
+    [483] = "Gb",
+    [484] = "D",
+    [485] = "\xce\xbc_B",
+    [486] = "micromort",
+    [487] = "microlife",
+    [488] = "kayser",
+    [489] = "mohs",
+    [490] = "vickers",
+    [491] = "rockwell",
+    [492] = "brinell",
+    [493] = "dozen",
+    [494] = "gross",
+    [495] = "great_gross",
+    [496] = "score",
+    [497] = "bakers_dozen",
+    [498] = "googol",
+    [499] = "googolplex",
+    [500] = "cubit",
+    [501] = "span",
+    [502] = "handbreadth",
+    [503] = "fingerbreadth",
+    [504] = "biblical_mil",
+    [505] = "parsa",
+    [506] = "techum",
+    [507] = "omer",
+    [508] = "ephah",
+    [509] = "hin",
+    [510] = "bath",
+    [511] = "seah",
+    [512] = "kor",
+    [513] = "kab",
+    [514] = "shekel",
+    [515] = "biblical_mina",
+    [516] = "biblical_talent",
+    [517] = "gerah",
+    [518] = "beka",
+    [519] = "helek",
+    [520] = "rega",
+    [521] = "onah",
+    [522] = "yovel",
+    [523] = "shmita",
+    [524] = "g\xe2\x82\x80",
+    [525] = "g_n",
+    [526] = "gee",
+    [527] = "mpg",
+    [528] = "mpge",
+    [529] = "L/100km",
+    [530] = "stick",
+    [531] = "kiloton",
+    [532] = "megaton",
+    [533] = "gigaton",
+    [534] = "oil_barrel",
+    [535] = "BOE",
+    [536] = "TCE",
+    [537] = "heap",
+    [538] = "hole",
+    [539] = "shaku",
+    [540] = "sun",
+    [541] = "ri",
+    [542] = "jo",
+    [543] = "tsubo",
+    [544] = "tatami",
+    [545] = "koku",
+    [546] = "g\xc5\x8d",
+    [547] = "momme",
+    [548] = "kanme",
+    [549] = "chi",
+    [550] = "cun",
+    [551] = "fen",
+    [552] = "zhang",
+    [553] = "li_cn",
+    [554] = "mu",
+    [555] = "jin",
+    [556] = "liang",
+    [557] = "dan_cn",
+    [558] = "verst",
+    [559] = "arshin",
+    [560] = "sazhen",
+    [561] = "vershok",
+    [562] = "pud",
+    [563] = "funt_ru",
+    [564] = "chetvert",
+    [565] = "pied",
+    [566] = "pouce",
+    [567] = "toise",
+    [568] = "arpent",
+    [569] = "lieue_de_poste",
+    [570] = "pes",
+    [571] = "passus",
+    [572] = "mille_passuum",
+    [573] = "iugerum",
+    [574] = "libra_roma",
+    [575] = "uncia_roma",
+    [576] = "amphora",
+    [577] = "royal_cubit",
+    [578] = "egypt_palm",
+    [579] = "digit",
+    [580] = "khet",
+    [581] = "aroura",
+    [582] = "hath",
+    [583] = "gaz",
+    [584] = "kos",
+    [585] = "tola",
+    [586] = "seer",
+    [587] = "maund",
+    [588] = "hartree",
+    [589] = "rydberg_unit",
+    [590] = "bohr_radius",
+    [591] = "compton_e",
+    [592] = "compton_p",
+    [593] = "compton_n",
+    [594] = "fine_structure",
+    [595] = "electron_mass",
+    [596] = "proton_mass",
+    [597] = "neutron_mass",
+    [598] = "muon_mass",
+    [599] = "boiler_horsepower",
+    [600] = "electric_horsepower",
+    [601] = "water_horsepower",
+    [602] = "donkeypower",
+    [603] = "metric_cup",
+    [604] = "metric_tbsp",
+    [605] = "australian_tbsp",
+    [606] = "japanese_cup",
+    [607] = "imperial_pint",
+    [608] = "crumb",
+    [609] = "dword",
+    [610] = "qword",
+    [611] = "paragraph",
+    [612] = "sector",
+    [613] = "page",
+    [614] = "block",
+    [615] = "cluster",
+    [616] = "EV",
+    [617] = "f_stop",
+    [618] = "ISO_speed",
+    [619] = "cent_pitch",
+    [620] = "semitone",
+    [621] = "savart",
+    [622] = "octave",
+    [623] = "basis_point",
+    [624] = "tenth_cent",
+    [625] = "pip",
+    [626] = "link_chain",
+    [627] = "rope",
+    [628] = "perch",
+    [629] = "barleycorn",
+    [630] = "shaftment",
+    [631] = "english_cubit",
+    [632] = "nail_cloth",
+    [633] = "cable_length",
+    [634] = "mH2O",
+    [635] = "inH2O",
+    [636] = "ftH2O",
+    [637] = "pieze",
+    [638] = "denier",
+    [639] = "tex",
+    [640] = "decitex",
+    [641] = "french_gauge",
+    [642] = "mickey",
+    [643] = "sagan",
+    [644] = "light_nanosecond",
+    [645] = "banana_for_scale",
+    [646] = "kg/m\xc2\xb3",
+    [647] = "m\xc2\xb3/s",
+    [648] = "L/min",
+    [649] = "kg/s",
+    [650] = "heat_capacity",
+    [651] = "entropy",
+    [652] = "J/kg/K",
+    [653] = "W/m/K",
+    [654] = "W/m\xc2\xb2",
+    [655] = "V/m",
+    [656] = "A/m\xc2\xb2",
+    [657] = "\xce\xa9\xc2\xb7m",
+    [658] = "S/m",
+    [659] = "C/m\xc2\xb3",
+    [660] = "N/m",
+    [661] = "kg/m",
+    [662] = "kg/m\xc2\xb2",
+    [663] = "J/m\xc2\xb3",
+    [664] = "J/kg",
+    [665] = "specific_energy",
+    [666] = "mol/mol",
+    [667] = "kat/m\xc2\xb3",
+    [668] = "cd/m\xc2\xb2",
+    [669] = "lx\xc2\xb7s",
+    [670] = "lm\xc2\xb7s",
+    [671] = "rad/s",
+    [672] = "rad/s\xc2\xb2",
+    [673] = "m/s\xc2\xb3",
+    [674] = "kg\xc2\xb7m/s",
+    [675] = "N\xc2\xb7s",
+    [676] = "N\xc2\xb7m",
+    [677] = "bit/s/Hz",
+    [678] = "J/op",
+    [679] = "J/tok",
+    [680] = "B/flop",
+    [681] = "kgCO\xe2\x82\x82\x65",
+    [682] = "gCO\xe2\x82\x82\x65",
+    [683] = "gCO\xe2\x82\x82\x65/kWh",
+    [684] = "gCO\xe2\x82\x82\x65/pkm",
+    [685] = "px",
+    [686] = "dpi",
+    [687] = "dppx",
+    [688] = "rem_css",
+    [689] = "vw",
+    [690] = "vh",
+    [691] = "person_hour",
+    [692] = "QALY",
+    [693] = "story_point",
+    [694] = "mg/dL_glucose",
+    [695] = "mmol/L_glucose",
+    [696] = "mach_air_20C",
+    [697] = "M",
+    [698] = "mol/L",
+    [699] = "mmol/L",
+    [700] = "\xc2\xb5mol/L",
+    [701] = "nmol/L",
+    [702] = "mol/m\xc2\xb3",
+    [703] = "g/L",
+    [704] = "mg/L",
+    [705] = "mg/dL",
+    [706] = "g/dL",
+    [707] = "\xc2\xb5g/mL",
+    [708] = "ng/mL",
+    [709] = "Eq",
+    [710] = "Eq/L",
+    [711] = "mEq/L",
+    [712] = "osmol",
+    [713] = "Osm/L",
+    [714] = "mOsm/L",
+    [715] = "U_enzyme",
+    [716] = "U/L",
+    [717] = "IU",
+    [718] = "CFU",
+    [719] = "PFU",
+    [720] = "cell",
+    [721] = "copy",
+    [722] = "CFU/mL",
+    [723] = "PFU/mL",
+    [724] = "cells/mL",
+    [725] = "copies/mL",
+    [726] = "IU/mL",
+    [727] = "Svedberg",
+    [728] = "Ah",
+    [729] = "var",
+    [730] = "VA",
+    [731] = "abA",
+    [732] = "statA",
+    [733] = "abC",
+    [734] = "statC",
+    [735] = "abV",
+    [736] = "statV",
+    [737] = "ab\xce\xa9",
+    [738] = "stat\xce\xa9",
+    [739] = "abF",
+    [740] = "statF",
+    [741] = "abH",
+    [742] = "statH",
+    [743] = "phot",
+    [744] = "fc",
+    [745] = "diopter",
+    [746] = "W/sr",
+    [747] = "W/sr/m\xc2\xb2",
+    [748] = "W/m\xc2\xb2/Hz",
+    [749] = "W/m\xc2\xb3",
+    [750] = "J/m\xc2\xb2",
+    [751] = "photon",
+    [752] = "einstein",
+    [753] = "mol_photon/m\xc2\xb2/s",
+    [754] = "\xc2\xb5mol_photon/m\xc2\xb2/s",
+    [755] = "rad_dose",
+    [756] = "R_exposure",
+    [757] = "Gy/s",
+    [758] = "Sv/h",
+    [759] = "Bq/kg",
+    [760] = "Bq/m\xc2\xb3",
+    [761] = "count",
+    [762] = "mas",
+    [763] = "\xc2\xb5\x61s",
+    [764] = "R_sun_nominal",
+    [765] = "L_sun_nominal",
+    [766] = "foe",
+    [767] = "DU",
+    [768] = "PVU",
+    [769] = "sverdrup",
+    [770] = "darcy",
+    [771] = "mGal",
+    [772] = "Eotvos",
+    [773] = "TECU",
+    [774] = "gpm",
+    [775] = "clo",
+    [776] = "ppmv",
+    [777] = "ppbv",
+    [778] = "ppmw",
+    [779] = "symbol",
+    [780] = "edge",
+    [781] = "update",
+    [782] = "bit/s",
+    [783] = "B/s",
+    [784] = "Mb/s",
+    [785] = "Gb/s",
+    [786] = "MB/s",
+    [787] = "GB/s",
+    [788] = "MiB/s",
+    [789] = "GiB/s",
+    [790] = "bit/symbol",
+    [791] = "flop/J",
+    [792] = "op/J",
+    [793] = "tok/J",
+    [794] = "bortle",
+    [795] = "beaufort",
+    [796] = "saffir_simpson",
+    [797] = "fujita",
+    [798] = "EF",
+    [799] = "richter",
+    [800] = "moment_magnitude",
+    [801] = "apgar",
+    [802] = "RBE",
+    [803] = "hounsfield_unit",
 
-    /* 703-: Ruby compound */
-    [703] = "bpm",
-    [704] = "fps",
-    [705] = "flops",
-    [706] = "FLOPS",
-    [707] = "kflops",
-    [708] = "kFLOPS",
-    [709] = "Mflops",
-    [710] = "MFLOPS",
-    [711] = "Gflops",
-    [712] = "GFLOPS",
-    [713] = "Tflops",
-    [714] = "TFLOPS",
-    [715] = "Pflops",
-    [716] = "PFLOPS",
-    [717] = "Eflops",
-    [718] = "EFLOPS",
-    [719] = "Zflops",
-    [720] = "ZFLOPS",
-    [721] = "Yflops",
-    [722] = "YFLOPS",
-    [723] = "ops_per_s",
-    [724] = "KOPS",
-    [725] = "MOPS",
-    [726] = "GOPS",
-    [727] = "TOPS",
-    [728] = "POPS",
-    [729] = "EOPS",
-    [730] = "MIPS",
-    [731] = "GIPS",
-    [732] = "DMIPS",
-    [733] = "MAC/s",
-    [734] = "MMAC/s",
-    [735] = "GMAC/s",
-    [736] = "TMAC/s",
-    [737] = "tok/s",
-    [738] = "ktok/s",
-    [739] = "Mtok/s",
-    [740] = "Gtok/s",
-    [741] = "T/s",
-    [742] = "MT/s",
-    [743] = "GT/s",
-    [744] = "TT/s",
-    [745] = "qps",
-    [746] = "QPS",
-    [747] = "rps",
-    [748] = "RPS",
-    [749] = "tps",
-    [750] = "TPS",
-    [751] = "pps",
-    [752] = "PPS",
-    [753] = "iops",
-    [754] = "IOPS",
-    [755] = "molar",
-    [756] = "molal",
+    /* 804-: Ruby compound */
+    [804] = "bpm",
+    [805] = "fps",
+    [806] = "dpm",
+    [807] = "cps",
+    [808] = "cpm",
+    [809] = "flops",
+    [810] = "FLOPS",
+    [811] = "kflops",
+    [812] = "kFLOPS",
+    [813] = "Mflops",
+    [814] = "MFLOPS",
+    [815] = "Gflops",
+    [816] = "GFLOPS",
+    [817] = "Tflops",
+    [818] = "TFLOPS",
+    [819] = "Pflops",
+    [820] = "PFLOPS",
+    [821] = "Eflops",
+    [822] = "EFLOPS",
+    [823] = "Zflops",
+    [824] = "ZFLOPS",
+    [825] = "Yflops",
+    [826] = "YFLOPS",
+    [827] = "ops_per_s",
+    [828] = "KOPS",
+    [829] = "MOPS",
+    [830] = "GOPS",
+    [831] = "TOPS",
+    [832] = "POPS",
+    [833] = "EOPS",
+    [834] = "MIPS",
+    [835] = "GIPS",
+    [836] = "DMIPS",
+    [837] = "MAC/s",
+    [838] = "MMAC/s",
+    [839] = "GMAC/s",
+    [840] = "TMAC/s",
+    [841] = "tok/s",
+    [842] = "ktok/s",
+    [843] = "Mtok/s",
+    [844] = "Gtok/s",
+    [845] = "T/s",
+    [846] = "MT/s",
+    [847] = "GT/s",
+    [848] = "TT/s",
+    [849] = "qps",
+    [850] = "QPS",
+    [851] = "rps",
+    [852] = "RPS",
+    [853] = "tps",
+    [854] = "TPS",
+    [855] = "pps",
+    [856] = "PPS",
+    [857] = "iops",
+    [858] = "IOPS",
+    [859] = "TEPS",
+    [860] = "GUPS",
+    [861] = "molar",
+    [862] = "molal",
+
+    /* 863-: generated prefix */
+    [863] = "Qm",
+    [864] = "Qg",
+    [865] = "Qs",
+    [866] = "QA",
+    [867] = "QK",
+    [868] = "Qmol",
+    [869] = "Qcd",
+    [870] = "QJy",
+    [871] = "Qvar",
+    [872] = "QVA",
+    [873] = "QN",
+    [874] = "QJ",
+    [875] = "QW",
+    [876] = "QPa",
+    [877] = "QHz",
+    [878] = "QV",
+    [879] = "QC",
+    [880] = "Q\xce\xa9",
+    [881] = "QF",
+    [882] = "QH",
+    [883] = "QS",
+    [884] = "QWb",
+    [885] = "QT",
+    [886] = "Qlm",
+    [887] = "Qlx",
+    [888] = "QBq",
+    [889] = "QGy",
+    [890] = "QSv",
+    [891] = "Qkat",
+    [892] = "QL",
+    [893] = "Ql",
+    [894] = "QeV",
+    [895] = "QDa",
+    [896] = "Qt",
+    [897] = "Qb",
+    [898] = "QB",
+    [899] = "Qbps",
+    [900] = "QBps",
+    [901] = "Qpc",
+    [902] = "Qfortnight",
+    [903] = "Qcentury",
+    [904] = "Rm",
+    [905] = "Rg",
+    [906] = "Rs",
+    [907] = "RA",
+    [908] = "RK",
+    [909] = "Rmol",
+    [910] = "Rcd",
+    [911] = "RJy",
+    [912] = "Rvar",
+    [913] = "RVA",
+    [914] = "RN",
+    [915] = "RJ",
+    [916] = "RW",
+    [917] = "RPa",
+    [918] = "RHz",
+    [919] = "RV",
+    [920] = "RC",
+    [921] = "R\xce\xa9",
+    [922] = "RF",
+    [923] = "RH",
+    [924] = "RS",
+    [925] = "RWb",
+    [926] = "RT",
+    [927] = "Rlm",
+    [928] = "Rlx",
+    [929] = "RBq",
+    [930] = "RGy",
+    [931] = "RSv",
+    [932] = "Rkat",
+    [933] = "RL",
+    [934] = "Rl",
+    [935] = "ReV",
+    [936] = "RDa",
+    [937] = "Rt",
+    [938] = "Rb",
+    [939] = "RB",
+    [940] = "Rbps",
+    [941] = "RBps",
+    [942] = "Rpc",
+    [943] = "Rfortnight",
+    [944] = "Rcentury",
+    [945] = "Ym",
+    [946] = "Yg",
+    [947] = "Ys",
+    [948] = "YA",
+    [949] = "YK",
+    [950] = "Ymol",
+    [951] = "Ycd",
+    [952] = "YJy",
+    [953] = "Yvar",
+    [954] = "YVA",
+    [955] = "YN",
+    [956] = "YJ",
+    [957] = "YW",
+    [958] = "YPa",
+    [959] = "YHz",
+    [960] = "YV",
+    [961] = "YC",
+    [962] = "Y\xce\xa9",
+    [963] = "YF",
+    [964] = "YH",
+    [965] = "YS",
+    [966] = "YWb",
+    [967] = "YT",
+    [968] = "Ylm",
+    [969] = "Ylx",
+    [970] = "YBq",
+    [971] = "YGy",
+    [972] = "YSv",
+    [973] = "Ykat",
+    [974] = "YL",
+    [975] = "Yl",
+    [976] = "YeV",
+    [977] = "YDa",
+    [978] = "Yt",
+    [979] = "Yb",
+    [980] = "YB",
+    [981] = "Ybps",
+    [982] = "YBps",
+    [983] = "Ypc",
+    [984] = "Yfortnight",
+    [985] = "Ycentury",
+    [986] = "Zm",
+    [987] = "Zg",
+    [988] = "Zs",
+    [989] = "ZA",
+    [990] = "ZK",
+    [991] = "Zmol",
+    [992] = "Zcd",
+    [993] = "ZJy",
+    [994] = "Zvar",
+    [995] = "ZVA",
+    [996] = "ZN",
+    [997] = "ZJ",
+    [998] = "ZW",
+    [999] = "ZPa",
+    [1000] = "ZHz",
+    [1001] = "ZV",
+    [1002] = "ZC",
+    [1003] = "Z\xce\xa9",
+    [1004] = "ZF",
+    [1005] = "ZH",
+    [1006] = "ZS",
+    [1007] = "ZWb",
+    [1008] = "ZT",
+    [1009] = "Zlm",
+    [1010] = "Zlx",
+    [1011] = "ZBq",
+    [1012] = "ZGy",
+    [1013] = "ZSv",
+    [1014] = "Zkat",
+    [1015] = "ZL",
+    [1016] = "Zl",
+    [1017] = "ZeV",
+    [1018] = "ZDa",
+    [1019] = "Zt",
+    [1020] = "Zb",
+    [1021] = "ZB",
+    [1022] = "Zbps",
+    [1023] = "ZBps",
+    [1024] = "Zpc",
+    [1025] = "Zfortnight",
+    [1026] = "Zcentury",
+    [1027] = "Em",
+    [1028] = "Eg",
+    [1029] = "Es",
+    [1030] = "EA",
+    [1031] = "EK",
+    [1032] = "Emol",
+    [1033] = "Ecd",
+    [1034] = "EJy",
+    [1035] = "Evar",
+    [1036] = "EVA",
+    [1037] = "EN",
+    [1038] = "EJ",
+    [1039] = "EW",
+    [1040] = "EPa",
+    [1041] = "EHz",
+    [1042] = "EC",
+    [1043] = "E\xce\xa9",
+    [1044] = "EH",
+    [1045] = "ES",
+    [1046] = "EWb",
+    [1047] = "ET",
+    [1048] = "Elm",
+    [1049] = "Elx",
+    [1050] = "EBq",
+    [1051] = "EGy",
+    [1052] = "ESv",
+    [1053] = "Ekat",
+    [1054] = "EL",
+    [1055] = "El",
+    [1056] = "EeV",
+    [1057] = "EDa",
+    [1058] = "Et",
+    [1059] = "Eb",
+    [1060] = "EB",
+    [1061] = "Ebps",
+    [1062] = "EBps",
+    [1063] = "Epc",
+    [1064] = "Efortnight",
+    [1065] = "Ecentury",
+    [1066] = "Pm",
+    [1067] = "Pg",
+    [1068] = "Ps",
+    [1069] = "PA",
+    [1070] = "PK",
+    [1071] = "Pmol",
+    [1072] = "Pcd",
+    [1073] = "PJy",
+    [1074] = "Pvar",
+    [1075] = "PVA",
+    [1076] = "PN",
+    [1077] = "PJ",
+    [1078] = "PW",
+    [1079] = "PPa",
+    [1080] = "PHz",
+    [1081] = "PV",
+    [1082] = "PC",
+    [1083] = "P\xce\xa9",
+    [1084] = "PF",
+    [1085] = "PH",
+    [1086] = "PWb",
+    [1087] = "PT",
+    [1088] = "Plm",
+    [1089] = "Plx",
+    [1090] = "PBq",
+    [1091] = "PGy",
+    [1092] = "PSv",
+    [1093] = "Pkat",
+    [1094] = "PL",
+    [1095] = "Pl",
+    [1096] = "PeV",
+    [1097] = "PDa",
+    [1098] = "Pt",
+    [1099] = "Pb",
+    [1100] = "Pbps",
+    [1101] = "PBps",
+    [1102] = "Ppc",
+    [1103] = "Pfortnight",
+    [1104] = "Pcentury",
+    [1105] = "Tm",
+    [1106] = "Tg",
+    [1107] = "Ts",
+    [1108] = "TA",
+    [1109] = "TK",
+    [1110] = "Tmol",
+    [1111] = "Tcd",
+    [1112] = "TJy",
+    [1113] = "Tvar",
+    [1114] = "TVA",
+    [1115] = "TN",
+    [1116] = "TJ",
+    [1117] = "TW",
+    [1118] = "TPa",
+    [1119] = "TV",
+    [1120] = "TC",
+    [1121] = "T\xce\xa9",
+    [1122] = "TF",
+    [1123] = "TH",
+    [1124] = "TS",
+    [1125] = "TWb",
+    [1126] = "TT",
+    [1127] = "Tlm",
+    [1128] = "Tlx",
+    [1129] = "TBq",
+    [1130] = "TGy",
+    [1131] = "TSv",
+    [1132] = "Tkat",
+    [1133] = "TL",
+    [1134] = "Tl",
+    [1135] = "TeV",
+    [1136] = "TDa",
+    [1137] = "Tt",
+    [1138] = "Tb",
+    [1139] = "Tbps",
+    [1140] = "TBps",
+    [1141] = "Tpc",
+    [1142] = "Tfortnight",
+    [1143] = "Tcentury",
+    [1144] = "Gm",
+    [1145] = "Gg",
+    [1146] = "Gs",
+    [1147] = "GA",
+    [1148] = "GK",
+    [1149] = "Gmol",
+    [1150] = "Gcd",
+    [1151] = "GJy",
+    [1152] = "Gvar",
+    [1153] = "GVA",
+    [1154] = "GN",
+    [1155] = "GV",
+    [1156] = "GC",
+    [1157] = "G\xce\xa9",
+    [1158] = "GF",
+    [1159] = "GH",
+    [1160] = "GS",
+    [1161] = "GWb",
+    [1162] = "GT",
+    [1163] = "Glm",
+    [1164] = "Glx",
+    [1165] = "GBq",
+    [1166] = "GGy",
+    [1167] = "GSv",
+    [1168] = "Gkat",
+    [1169] = "GL",
+    [1170] = "Gl",
+    [1171] = "GeV",
+    [1172] = "GDa",
+    [1173] = "Gt",
+    [1174] = "Gbps",
+    [1175] = "GBps",
+    [1176] = "Gpc",
+    [1177] = "Gfortnight",
+    [1178] = "Gcentury",
+    [1179] = "Mm",
+    [1180] = "Mg",
+    [1181] = "Ms",
+    [1182] = "MA",
+    [1183] = "MK",
+    [1184] = "Mmol",
+    [1185] = "Mcd",
+    [1186] = "MJy",
+    [1187] = "Mvar",
+    [1188] = "MVA",
+    [1189] = "MN",
+    [1190] = "MC",
+    [1191] = "M\xce\xa9",
+    [1192] = "MF",
+    [1193] = "MH",
+    [1194] = "MS",
+    [1195] = "MWb",
+    [1196] = "MT",
+    [1197] = "Mlm",
+    [1198] = "Mlx",
+    [1199] = "MBq",
+    [1200] = "MGy",
+    [1201] = "MSv",
+    [1202] = "Mkat",
+    [1203] = "ML",
+    [1204] = "Ml",
+    [1205] = "MeV",
+    [1206] = "MDa",
+    [1207] = "Mt",
+    [1208] = "Mb",
+    [1209] = "Mbps",
+    [1210] = "MBps",
+    [1211] = "Mpc",
+    [1212] = "Mfortnight",
+    [1213] = "Mcentury",
+    [1214] = "ks",
+    [1215] = "kA",
+    [1216] = "kK",
+    [1217] = "kmol",
+    [1218] = "kcd",
+    [1219] = "kJy",
+    [1220] = "kvar",
+    [1221] = "kVA",
+    [1222] = "kN",
+    [1223] = "kC",
+    [1224] = "k\xce\xa9",
+    [1225] = "kF",
+    [1226] = "kH",
+    [1227] = "kS",
+    [1228] = "kWb",
+    [1229] = "kT",
+    [1230] = "klm",
+    [1231] = "klx",
+    [1232] = "kBq",
+    [1233] = "kGy",
+    [1234] = "kSv",
+    [1235] = "kkat",
+    [1236] = "kL",
+    [1237] = "kl",
+    [1238] = "keV",
+    [1239] = "kDa",
+    [1240] = "kb",
+    [1241] = "kB",
+    [1242] = "kbps",
+    [1243] = "kBps",
+    [1244] = "kpc",
+    [1245] = "kfortnight",
+    [1246] = "kcentury",
+    [1247] = "hm",
+    [1248] = "hg",
+    [1249] = "hs",
+    [1250] = "hA",
+    [1251] = "hK",
+    [1252] = "hmol",
+    [1253] = "hcd",
+    [1254] = "hJy",
+    [1255] = "hvar",
+    [1256] = "hVA",
+    [1257] = "hN",
+    [1258] = "hJ",
+    [1259] = "hW",
+    [1260] = "hPa",
+    [1261] = "hHz",
+    [1262] = "hV",
+    [1263] = "hC",
+    [1264] = "h\xce\xa9",
+    [1265] = "hF",
+    [1266] = "hH",
+    [1267] = "hS",
+    [1268] = "hWb",
+    [1269] = "hT",
+    [1270] = "hlm",
+    [1271] = "hlx",
+    [1272] = "hBq",
+    [1273] = "hGy",
+    [1274] = "hSv",
+    [1275] = "hkat",
+    [1276] = "hL",
+    [1277] = "hl",
+    [1278] = "heV",
+    [1279] = "hDa",
+    [1280] = "ht",
+    [1281] = "hb",
+    [1282] = "hB",
+    [1283] = "hbps",
+    [1284] = "hBps",
+    [1285] = "hpc",
+    [1286] = "hfortnight",
+    [1287] = "hcentury",
+    [1288] = "dam",
+    [1289] = "dag",
+    [1290] = "das",
+    [1291] = "daA",
+    [1292] = "daK",
+    [1293] = "damol",
+    [1294] = "dacd",
+    [1295] = "daJy",
+    [1296] = "davar",
+    [1297] = "daVA",
+    [1298] = "daN",
+    [1299] = "daJ",
+    [1300] = "daW",
+    [1301] = "daPa",
+    [1302] = "daHz",
+    [1303] = "daV",
+    [1304] = "daC",
+    [1305] = "da\xce\xa9",
+    [1306] = "daF",
+    [1307] = "daH",
+    [1308] = "daS",
+    [1309] = "daWb",
+    [1310] = "daT",
+    [1311] = "dalm",
+    [1312] = "dalx",
+    [1313] = "daBq",
+    [1314] = "daGy",
+    [1315] = "daSv",
+    [1316] = "dakat",
+    [1317] = "daL",
+    [1318] = "dal",
+    [1319] = "daeV",
+    [1320] = "daDa",
+    [1321] = "dat",
+    [1322] = "dab",
+    [1323] = "daB",
+    [1324] = "dabps",
+    [1325] = "daBps",
+    [1326] = "dapc",
+    [1327] = "dafortnight",
+    [1328] = "dacentury",
+    [1329] = "dm",
+    [1330] = "dg",
+    [1331] = "ds",
+    [1332] = "dA",
+    [1333] = "dK",
+    [1334] = "dmol",
+    [1335] = "dcd",
+    [1336] = "dJy",
+    [1337] = "dvar",
+    [1338] = "dVA",
+    [1339] = "dN",
+    [1340] = "dJ",
+    [1341] = "dW",
+    [1342] = "dPa",
+    [1343] = "dHz",
+    [1344] = "dV",
+    [1345] = "dC",
+    [1346] = "d\xce\xa9",
+    [1347] = "dF",
+    [1348] = "dH",
+    [1349] = "dS",
+    [1350] = "dWb",
+    [1351] = "dT",
+    [1352] = "dlm",
+    [1353] = "dlx",
+    [1354] = "dBq",
+    [1355] = "dGy",
+    [1356] = "dSv",
+    [1357] = "dkat",
+    [1358] = "dL",
+    [1359] = "dl",
+    [1360] = "deV",
+    [1361] = "dDa",
+    [1362] = "dt",
+    [1363] = "db",
+    [1364] = "dB",
+    [1365] = "dbps",
+    [1366] = "dBps",
+    [1367] = "dpc",
+    [1368] = "dfortnight",
+    [1369] = "dcentury",
+    [1370] = "cg",
+    [1371] = "cs",
+    [1372] = "cA",
+    [1373] = "cK",
+    [1374] = "cmol",
+    [1375] = "ccd",
+    [1376] = "cJy",
+    [1377] = "cvar",
+    [1378] = "cVA",
+    [1379] = "cN",
+    [1380] = "cJ",
+    [1381] = "cW",
+    [1382] = "cPa",
+    [1383] = "cHz",
+    [1384] = "cV",
+    [1385] = "cC",
+    [1386] = "c\xce\xa9",
+    [1387] = "cF",
+    [1388] = "cH",
+    [1389] = "cS",
+    [1390] = "cWb",
+    [1391] = "cT",
+    [1392] = "clm",
+    [1393] = "clx",
+    [1394] = "cBq",
+    [1395] = "cGy",
+    [1396] = "cSv",
+    [1397] = "ckat",
+    [1398] = "cL",
+    [1399] = "cl",
+    [1400] = "ceV",
+    [1401] = "cDa",
+    [1402] = "cb",
+    [1403] = "cB",
+    [1404] = "cbps",
+    [1405] = "cBps",
+    [1406] = "cpc",
+    [1407] = "cfortnight",
+    [1408] = "ccentury",
+    [1409] = "mK",
+    [1410] = "mmol",
+    [1411] = "mcd",
+    [1412] = "mJy",
+    [1413] = "mvar",
+    [1414] = "mVA",
+    [1415] = "mN",
+    [1416] = "mJ",
+    [1417] = "mW",
+    [1418] = "mPa",
+    [1419] = "mHz",
+    [1420] = "mV",
+    [1421] = "mC",
+    [1422] = "m\xce\xa9",
+    [1423] = "mF",
+    [1424] = "mH",
+    [1425] = "mS",
+    [1426] = "mWb",
+    [1427] = "mT",
+    [1428] = "mlm",
+    [1429] = "mlx",
+    [1430] = "mBq",
+    [1431] = "mGy",
+    [1432] = "mSv",
+    [1433] = "mkat",
+    [1434] = "ml",
+    [1435] = "meV",
+    [1436] = "mDa",
+    [1437] = "mt",
+    [1438] = "mb",
+    [1439] = "mB",
+    [1440] = "mbps",
+    [1441] = "mBps",
+    [1442] = "mpc",
+    [1443] = "mfortnight",
+    [1444] = "mcentury",
+    [1445] = "um",
+    [1446] = "ug",
+    [1447] = "us",
+    [1448] = "uA",
+    [1449] = "uK",
+    [1450] = "umol",
+    [1451] = "ucd",
+    [1452] = "uJy",
+    [1453] = "uvar",
+    [1454] = "uVA",
+    [1455] = "uN",
+    [1456] = "uJ",
+    [1457] = "uW",
+    [1458] = "uPa",
+    [1459] = "uHz",
+    [1460] = "uV",
+    [1461] = "uC",
+    [1462] = "u\xce\xa9",
+    [1463] = "uF",
+    [1464] = "uH",
+    [1465] = "uS",
+    [1466] = "uWb",
+    [1467] = "uT",
+    [1468] = "ulm",
+    [1469] = "ulx",
+    [1470] = "uBq",
+    [1471] = "uGy",
+    [1472] = "uSv",
+    [1473] = "ukat",
+    [1474] = "uL",
+    [1475] = "ul",
+    [1476] = "ueV",
+    [1477] = "uDa",
+    [1478] = "ut",
+    [1479] = "ub",
+    [1480] = "uB",
+    [1481] = "ubps",
+    [1482] = "uBps",
+    [1483] = "upc",
+    [1484] = "ufortnight",
+    [1485] = "ucentury",
+    [1486] = "\xce\xbcm",
+    [1487] = "\xce\xbcg",
+    [1488] = "\xce\xbcs",
+    [1489] = "\xce\xbc\x41",
+    [1490] = "\xce\xbcK",
+    [1491] = "\xce\xbcmol",
+    [1492] = "\xce\xbc\x63\x64",
+    [1493] = "\xce\xbcJy",
+    [1494] = "\xce\xbcvar",
+    [1495] = "\xce\xbcVA",
+    [1496] = "\xce\xbcN",
+    [1497] = "\xce\xbcJ",
+    [1498] = "\xce\xbcW",
+    [1499] = "\xce\xbcPa",
+    [1500] = "\xce\xbcHz",
+    [1501] = "\xce\xbcV",
+    [1502] = "\xce\xbc\x43",
+    [1503] = "\xce\xbc\xce\xa9",
+    [1504] = "\xce\xbc\x46",
+    [1505] = "\xce\xbcH",
+    [1506] = "\xce\xbcS",
+    [1507] = "\xce\xbcWb",
+    [1508] = "\xce\xbcT",
+    [1509] = "\xce\xbclm",
+    [1510] = "\xce\xbclx",
+    [1511] = "\xce\xbc\x42q",
+    [1512] = "\xce\xbcGy",
+    [1513] = "\xce\xbcSv",
+    [1514] = "\xce\xbckat",
+    [1515] = "\xce\xbcL",
+    [1516] = "\xce\xbcl",
+    [1517] = "\xce\xbc\x65V",
+    [1518] = "\xce\xbc\x44\x61",
+    [1519] = "\xce\xbct",
+    [1520] = "\xce\xbc\x62",
+    [1521] = "\xce\xbc\x42",
+    [1522] = "\xce\xbc\x62ps",
+    [1523] = "\xce\xbc\x42ps",
+    [1524] = "\xce\xbcpc",
+    [1525] = "\xce\xbc\x66ortnight",
+    [1526] = "\xce\xbc\x63\x65ntury",
+    [1527] = "\xc2\xb5K",
+    [1528] = "\xc2\xb5mol",
+    [1529] = "\xc2\xb5\x63\x64",
+    [1530] = "\xc2\xb5Jy",
+    [1531] = "\xc2\xb5var",
+    [1532] = "\xc2\xb5VA",
+    [1533] = "\xc2\xb5N",
+    [1534] = "\xc2\xb5J",
+    [1535] = "\xc2\xb5W",
+    [1536] = "\xc2\xb5Pa",
+    [1537] = "\xc2\xb5Hz",
+    [1538] = "\xc2\xb5V",
+    [1539] = "\xc2\xb5\x43",
+    [1540] = "\xc2\xb5\xce\xa9",
+    [1541] = "\xc2\xb5\x46",
+    [1542] = "\xc2\xb5H",
+    [1543] = "\xc2\xb5S",
+    [1544] = "\xc2\xb5Wb",
+    [1545] = "\xc2\xb5T",
+    [1546] = "\xc2\xb5lm",
+    [1547] = "\xc2\xb5lx",
+    [1548] = "\xc2\xb5\x42q",
+    [1549] = "\xc2\xb5Gy",
+    [1550] = "\xc2\xb5Sv",
+    [1551] = "\xc2\xb5kat",
+    [1552] = "\xc2\xb5L",
+    [1553] = "\xc2\xb5l",
+    [1554] = "\xc2\xb5\x65V",
+    [1555] = "\xc2\xb5\x44\x61",
+    [1556] = "\xc2\xb5t",
+    [1557] = "\xc2\xb5\x62",
+    [1558] = "\xc2\xb5\x42",
+    [1559] = "\xc2\xb5\x62ps",
+    [1560] = "\xc2\xb5\x42ps",
+    [1561] = "\xc2\xb5pc",
+    [1562] = "\xc2\xb5\x66ortnight",
+    [1563] = "\xc2\xb5\x63\x65ntury",
+    [1564] = "ng",
+    [1565] = "nA",
+    [1566] = "nK",
+    [1567] = "nmol",
+    [1568] = "ncd",
+    [1569] = "nJy",
+    [1570] = "nvar",
+    [1571] = "nVA",
+    [1572] = "nN",
+    [1573] = "nJ",
+    [1574] = "nW",
+    [1575] = "nPa",
+    [1576] = "nHz",
+    [1577] = "nV",
+    [1578] = "nC",
+    [1579] = "n\xce\xa9",
+    [1580] = "nF",
+    [1581] = "nH",
+    [1582] = "nS",
+    [1583] = "nWb",
+    [1584] = "nT",
+    [1585] = "nlm",
+    [1586] = "nlx",
+    [1587] = "nBq",
+    [1588] = "nGy",
+    [1589] = "nSv",
+    [1590] = "nkat",
+    [1591] = "nL",
+    [1592] = "nl",
+    [1593] = "neV",
+    [1594] = "nDa",
+    [1595] = "nt",
+    [1596] = "nb",
+    [1597] = "nB",
+    [1598] = "nbps",
+    [1599] = "nBps",
+    [1600] = "npc",
+    [1601] = "nfortnight",
+    [1602] = "ncentury",
+    [1603] = "pg",
+    [1604] = "pA",
+    [1605] = "pK",
+    [1606] = "pmol",
+    [1607] = "pcd",
+    [1608] = "pJy",
+    [1609] = "pvar",
+    [1610] = "pVA",
+    [1611] = "pN",
+    [1612] = "pJ",
+    [1613] = "pW",
+    [1614] = "pPa",
+    [1615] = "pHz",
+    [1616] = "pV",
+    [1617] = "pC",
+    [1618] = "p\xce\xa9",
+    [1619] = "pF",
+    [1620] = "pH",
+    [1621] = "pS",
+    [1622] = "pWb",
+    [1623] = "pT",
+    [1624] = "plm",
+    [1625] = "plx",
+    [1626] = "pBq",
+    [1627] = "pGy",
+    [1628] = "pSv",
+    [1629] = "pkat",
+    [1630] = "pL",
+    [1631] = "pl",
+    [1632] = "peV",
+    [1633] = "pDa",
+    [1634] = "pB",
+    [1635] = "pbps",
+    [1636] = "pBps",
+    [1637] = "ppc",
+    [1638] = "pfortnight",
+    [1639] = "pcentury",
+    [1640] = "fm",
+    [1641] = "fg",
+    [1642] = "fs",
+    [1643] = "fA",
+    [1644] = "fK",
+    [1645] = "fmol",
+    [1646] = "fcd",
+    [1647] = "fJy",
+    [1648] = "fvar",
+    [1649] = "fVA",
+    [1650] = "fN",
+    [1651] = "fJ",
+    [1652] = "fW",
+    [1653] = "fPa",
+    [1654] = "fHz",
+    [1655] = "fV",
+    [1656] = "fC",
+    [1657] = "f\xce\xa9",
+    [1658] = "fF",
+    [1659] = "fH",
+    [1660] = "fS",
+    [1661] = "fWb",
+    [1662] = "fT",
+    [1663] = "flm",
+    [1664] = "flx",
+    [1665] = "fBq",
+    [1666] = "fGy",
+    [1667] = "fSv",
+    [1668] = "fkat",
+    [1669] = "fl",
+    [1670] = "feV",
+    [1671] = "fDa",
+    [1672] = "fb",
+    [1673] = "fB",
+    [1674] = "fbps",
+    [1675] = "fBps",
+    [1676] = "fpc",
+    [1677] = "ffortnight",
+    [1678] = "fcentury",
+    [1679] = "am",
+    [1680] = "ag",
+    [1681] = "as",
+    [1682] = "aA",
+    [1683] = "aK",
+    [1684] = "amol",
+    [1685] = "acd",
+    [1686] = "aJy",
+    [1687] = "avar",
+    [1688] = "aVA",
+    [1689] = "aN",
+    [1690] = "aJ",
+    [1691] = "aW",
+    [1692] = "aPa",
+    [1693] = "aHz",
+    [1694] = "aV",
+    [1695] = "aC",
+    [1696] = "a\xce\xa9",
+    [1697] = "aF",
+    [1698] = "aH",
+    [1699] = "aS",
+    [1700] = "aWb",
+    [1701] = "aT",
+    [1702] = "alm",
+    [1703] = "alx",
+    [1704] = "aBq",
+    [1705] = "aGy",
+    [1706] = "aSv",
+    [1707] = "akat",
+    [1708] = "aL",
+    [1709] = "al",
+    [1710] = "aeV",
+    [1711] = "aDa",
+    [1712] = "ab",
+    [1713] = "aB",
+    [1714] = "abps",
+    [1715] = "aBps",
+    [1716] = "apc",
+    [1717] = "afortnight",
+    [1718] = "acentury",
+    [1719] = "zm",
+    [1720] = "zg",
+    [1721] = "zs",
+    [1722] = "zA",
+    [1723] = "zK",
+    [1724] = "zmol",
+    [1725] = "zcd",
+    [1726] = "zJy",
+    [1727] = "zvar",
+    [1728] = "zVA",
+    [1729] = "zN",
+    [1730] = "zJ",
+    [1731] = "zW",
+    [1732] = "zPa",
+    [1733] = "zHz",
+    [1734] = "zV",
+    [1735] = "zC",
+    [1736] = "z\xce\xa9",
+    [1737] = "zF",
+    [1738] = "zH",
+    [1739] = "zS",
+    [1740] = "zWb",
+    [1741] = "zT",
+    [1742] = "zlm",
+    [1743] = "zlx",
+    [1744] = "zBq",
+    [1745] = "zGy",
+    [1746] = "zSv",
+    [1747] = "zkat",
+    [1748] = "zL",
+    [1749] = "zl",
+    [1750] = "zeV",
+    [1751] = "zDa",
+    [1752] = "zt",
+    [1753] = "zb",
+    [1754] = "zB",
+    [1755] = "zbps",
+    [1756] = "zBps",
+    [1757] = "zpc",
+    [1758] = "zfortnight",
+    [1759] = "zcentury",
+    [1760] = "ym",
+    [1761] = "yg",
+    [1762] = "ys",
+    [1763] = "yA",
+    [1764] = "yK",
+    [1765] = "ymol",
+    [1766] = "ycd",
+    [1767] = "yJy",
+    [1768] = "yvar",
+    [1769] = "yVA",
+    [1770] = "yN",
+    [1771] = "yJ",
+    [1772] = "yW",
+    [1773] = "yPa",
+    [1774] = "yHz",
+    [1775] = "yV",
+    [1776] = "yC",
+    [1777] = "y\xce\xa9",
+    [1778] = "yF",
+    [1779] = "yH",
+    [1780] = "yS",
+    [1781] = "yWb",
+    [1782] = "yT",
+    [1783] = "ylm",
+    [1784] = "ylx",
+    [1785] = "yBq",
+    [1786] = "yGy",
+    [1787] = "ySv",
+    [1788] = "ykat",
+    [1789] = "yL",
+    [1790] = "yl",
+    [1791] = "yeV",
+    [1792] = "yDa",
+    [1793] = "yt",
+    [1794] = "yb",
+    [1795] = "yB",
+    [1796] = "ybps",
+    [1797] = "yBps",
+    [1798] = "ypc",
+    [1799] = "yfortnight",
+    [1800] = "ycentury",
+    [1801] = "rm",
+    [1802] = "rg",
+    [1803] = "rs",
+    [1804] = "rA",
+    [1805] = "rK",
+    [1806] = "rmol",
+    [1807] = "rcd",
+    [1808] = "rJy",
+    [1809] = "rvar",
+    [1810] = "rVA",
+    [1811] = "rN",
+    [1812] = "rJ",
+    [1813] = "rW",
+    [1814] = "rPa",
+    [1815] = "rHz",
+    [1816] = "rV",
+    [1817] = "rC",
+    [1818] = "r\xce\xa9",
+    [1819] = "rF",
+    [1820] = "rH",
+    [1821] = "rS",
+    [1822] = "rWb",
+    [1823] = "rT",
+    [1824] = "rlm",
+    [1825] = "rlx",
+    [1826] = "rBq",
+    [1827] = "rGy",
+    [1828] = "rSv",
+    [1829] = "rkat",
+    [1830] = "rL",
+    [1831] = "rl",
+    [1832] = "reV",
+    [1833] = "rDa",
+    [1834] = "rt",
+    [1835] = "rb",
+    [1836] = "rB",
+    [1837] = "rbps",
+    [1838] = "rBps",
+    [1839] = "rpc",
+    [1840] = "rfortnight",
+    [1841] = "rcentury",
+    [1842] = "qm",
+    [1843] = "qg",
+    [1844] = "qs",
+    [1845] = "qA",
+    [1846] = "qK",
+    [1847] = "qmol",
+    [1848] = "qcd",
+    [1849] = "qJy",
+    [1850] = "qvar",
+    [1851] = "qVA",
+    [1852] = "qN",
+    [1853] = "qJ",
+    [1854] = "qW",
+    [1855] = "qPa",
+    [1856] = "qHz",
+    [1857] = "qV",
+    [1858] = "qC",
+    [1859] = "q\xce\xa9",
+    [1860] = "qF",
+    [1861] = "qH",
+    [1862] = "qS",
+    [1863] = "qWb",
+    [1864] = "qT",
+    [1865] = "qlm",
+    [1866] = "qlx",
+    [1867] = "qBq",
+    [1868] = "qGy",
+    [1869] = "qSv",
+    [1870] = "qkat",
+    [1871] = "qL",
+    [1872] = "ql",
+    [1873] = "qeV",
+    [1874] = "qDa",
+    [1875] = "qb",
+    [1876] = "qB",
+    [1877] = "qbps",
+    [1878] = "qBps",
+    [1879] = "qpc",
+    [1880] = "qfortnight",
+    [1881] = "qcentury",
+    [1882] = "Kib",
+    [1883] = "Mib",
+    [1884] = "Gib",
+    [1885] = "Tib",
+    [1886] = "Pib",
+    [1887] = "Eib",
+    [1888] = "Zib",
+    [1889] = "ZiB",
+    [1890] = "Yib",
+    [1891] = "YiB",
+    [1892] = "Rib",
+    [1893] = "RiB",
+    [1894] = "Qib",
+    [1895] = "QiB",
 };
 
 typedef struct { const char *name; int id; } WUnitAlias;
@@ -17181,742 +18322,1497 @@ static const WUnitAlias unit_aliases[] = {
     {"%", 255},
     {"1/mol", 101},
     {"A", 3},
-    {"A/m\xc2\xb2", 652},
-    {"AU tbsp", 601},
-    {"Apgar", 700},
+    {"A/m\xc2\xb2", 656},
+    {"AU tbsp", 605},
+    {"Ah", 728},
+    {"Apgar", 801},
     {"B", 89},
-    {"B/flop", 676},
-    {"BOE", 531},
-    {"BPM", 703},
-    {"BTU", 369},
+    {"B/flop", 680},
+    {"B/s", 783},
+    {"BOE", 535},
+    {"BPM", 804},
+    {"BTU", 373},
     {"Ba", 359},
-    {"Beaufort", 694},
-    {"Bortle", 693},
-    {"Bps", 392},
+    {"Beaufort", 795},
+    {"Bortle", 794},
+    {"Bps", 396},
     {"Bq", 23},
+    {"Bq/kg", 759},
+    {"Bq/m\xc2\xb3", 760},
     {"C", 12},
-    {"C/m\xc2\xb3", 655},
+    {"C/m\xc2\xb3", 659},
+    {"CFU", 718},
+    {"CFU/mL", 722},
+    {"CFUs", 718},
     {"CWT", 293},
-    {"Ci", 376},
-    {"D", 480},
-    {"DMIPS", 732},
-    {"DWORD", 605},
+    {"Ci", 380},
+    {"D", 484},
+    {"DMIPS", 836},
+    {"DU", 767},
+    {"DWORD", 609},
     {"Da", 296},
-    {"EF", 697},
-    {"EF-scale", 697},
-    {"EFLOPS", 718},
-    {"EOPS", 729},
-    {"EV", 612},
-    {"Eflops", 717},
-    {"Eh", 584},
-    {"EiB", 390},
+    {"E", 772},
+    {"EA", 1030},
+    {"EB", 1060},
+    {"EBps", 1062},
+    {"EBq", 1050},
+    {"EC", 1042},
+    {"EDa", 1057},
+    {"EF", 798},
+    {"EF-scale", 798},
+    {"EFLOPS", 822},
+    {"EGy", 1051},
+    {"EH", 1044},
+    {"EHz", 1041},
+    {"EJ", 1038},
+    {"EJy", 1034},
+    {"EK", 1031},
+    {"EL", 1054},
+    {"EN", 1037},
+    {"EOPS", 833},
+    {"EPa", 1040},
+    {"ES", 1045},
+    {"ESv", 1052},
+    {"ET", 1047},
+    {"EV", 616},
+    {"EVA", 1036},
+    {"EW", 1039},
+    {"EWb", 1046},
+    {"Eb", 1059},
+    {"Ebps", 1061},
+    {"Ecd", 1033},
+    {"Ecentury", 1065},
+    {"EeV", 1056},
+    {"Eflops", 821},
+    {"Efortnight", 1064},
+    {"Eg", 1028},
+    {"Eh", 588},
+    {"EiB", 394},
+    {"Eib", 1887},
+    {"Ekat", 1053},
+    {"El", 1055},
+    {"Elm", 1048},
+    {"Elx", 1049},
+    {"Em", 1027},
+    {"Emol", 1032},
+    {"Eotvos", 772},
+    {"Epc", 1063},
+    {"Eq", 709},
+    {"Eq/L", 710},
+    {"Es", 1029},
+    {"Et", 1058},
+    {"Evar", 1035},
+    {"E\xc3\xb6tv\xc3\xb6s", 772},
+    {"E\xce\xa9", 1043},
     {"F", 14},
-    {"F-scale", 696},
+    {"F-scale", 797},
     {"F/m", 104},
-    {"FLOPS", 706},
-    {"FPS", 704},
-    {"Fr_catheter", 637},
+    {"FLOPS", 810},
+    {"FPS", 805},
+    {"Fr_catheter", 641},
+    {"GA", 1147},
     {"GB", 92},
-    {"GFLOPS", 712},
+    {"GB/s", 787},
+    {"GBps", 1175},
+    {"GBq", 1165},
+    {"GC", 1156},
+    {"GDa", 1172},
+    {"GF", 1158},
+    {"GFLOPS", 816},
+    {"GGy", 1166},
+    {"GH", 1159},
     {"GHz", 43},
-    {"GIPS", 731},
+    {"GIPS", 835},
     {"GJ", 47},
-    {"GMAC/s", 735},
-    {"GOPS", 726},
+    {"GJy", 1151},
+    {"GK", 1148},
+    {"GL", 1169},
+    {"GMAC/s", 839},
+    {"GN", 1154},
+    {"GOPS", 830},
     {"GPa", 59},
-    {"GT/s", 743},
+    {"GS", 1160},
+    {"GSv", 1167},
+    {"GT", 1162},
+    {"GT/s", 847},
+    {"GUPS", 860},
+    {"GV", 1155},
+    {"GVA", 1153},
     {"GW", 50},
-    {"Ga", 375},
-    {"Gal", 385},
-    {"Gb", 479},
-    {"Gflops", 711},
+    {"GWb", 1161},
+    {"Ga", 379},
+    {"Gal", 389},
+    {"Gb", 483},
+    {"Gb/s", 785},
+    {"Gbps", 1174},
+    {"Gcd", 1150},
+    {"Gcentury", 1178},
+    {"GeV", 1171},
+    {"Gflops", 815},
+    {"Gfortnight", 1177},
+    {"Gg", 1145},
     {"GiB", 97},
-    {"Gtok/s", 740},
+    {"GiB/s", 789},
+    {"Gib", 1884},
+    {"Gkat", 1168},
+    {"Gl", 1170},
+    {"Glm", 1163},
+    {"Glx", 1164},
+    {"Gm", 1144},
+    {"Gmol", 1149},
+    {"Gpc", 1176},
+    {"Gs", 1146},
+    {"Gt", 1173},
+    {"Gtok/s", 844},
+    {"Gvar", 1152},
     {"Gy", 24},
+    {"Gy/s", 757},
+    {"G\xce\xa9", 1157},
     {"H", 19},
-    {"HB", 488},
-    {"HRC", 487},
-    {"HU", 702},
-    {"HV", 486},
+    {"HB", 492},
+    {"HRC", 491},
+    {"HU", 803},
+    {"HV", 490},
     {"Hz", 7},
-    {"IOPS", 754},
-    {"ISO", 614},
-    {"ISO sensitivity", 614},
-    {"ISO_speed", 614},
+    {"IOPS", 858},
+    {"ISO", 618},
+    {"ISO sensitivity", 618},
+    {"ISO_speed", 618},
+    {"IU", 717},
+    {"IU/mL", 726},
     {"J", 10},
-    {"J/(kg\xc2\xb7K)", 648},
+    {"J/(kg\xc2\xb7K)", 652},
     {"J/(mol\xc2\xb7K)", 103},
     {"J/K", 102},
-    {"J/kg", 660},
-    {"J/kg/K", 648},
-    {"J/m\xc2\xb3", 659},
-    {"J/op", 674},
-    {"J/tok", 675},
-    {"Jy", 466},
+    {"J/kg", 664},
+    {"J/kg/K", 652},
+    {"J/m\xc2\xb2", 750},
+    {"J/m\xc2\xb3", 663},
+    {"J/op", 678},
+    {"J/tok", 679},
+    {"Jy", 470},
     {"J\xc2\xb7s", 99},
     {"K", 4},
     {"KB", 90},
-    {"KOPS", 724},
+    {"KOPS", 828},
     {"KiB", 95},
+    {"Kib", 1882},
     {"L", 78},
-    {"L per 100 km", 525},
-    {"L/100km", 525},
-    {"L/min", 644},
+    {"L per 100 km", 529},
+    {"L/100km", 529},
+    {"L/min", 648},
     {"LT", 295},
-    {"La", 426},
-    {"MAC/s", 733},
+    {"L_sun_nominal", 765},
+    {"La", 430},
+    {"L\xe2\x98\x89_N", 765},
+    {"M", 697},
+    {"MA", 1182},
+    {"MAC/s", 837},
     {"MB", 91},
-    {"MFLOPS", 710},
+    {"MB/s", 786},
+    {"MBps", 1210},
+    {"MBq", 1199},
+    {"MC", 1190},
+    {"MDa", 1206},
+    {"MF", 1192},
+    {"MFLOPS", 814},
+    {"MGy", 1200},
+    {"MH", 1193},
     {"MHz", 42},
-    {"MIPS", 730},
+    {"MIPS", 834},
     {"MJ", 46},
-    {"MMAC/s", 734},
-    {"MOPS", 725},
-    {"MPG", 523},
-    {"MPGe", 524},
+    {"MJy", 1186},
+    {"MK", 1183},
+    {"ML", 1203},
+    {"MMAC/s", 838},
+    {"MN", 1189},
+    {"MOPS", 829},
+    {"MPG", 527},
+    {"MPGe", 528},
     {"MPa", 58},
-    {"MT/s", 742},
+    {"MS", 1194},
+    {"MSv", 1201},
+    {"MT", 1196},
+    {"MT/s", 846},
     {"MV", 56},
+    {"MVA", 1188},
     {"MW", 49},
+    {"MWb", 1195},
     {"MWh", 52},
-    {"M_bol", 469},
-    {"Mach at 20 C", 692},
-    {"Mach in air at 20 C", 692},
-    {"Mag", 468},
-    {"Mbol", 469},
-    {"Mflops", 709},
+    {"M_bol", 473},
+    {"Mach at 20 C", 696},
+    {"Mach in air at 20 C", 696},
+    {"Mag", 472},
+    {"Mb", 1208},
+    {"Mb/s", 784},
+    {"Mbol", 473},
+    {"Mbps", 1209},
+    {"Mcd", 1185},
+    {"Mcentury", 1213},
+    {"MeV", 1205},
+    {"Mflops", 813},
+    {"Mfortnight", 1212},
+    {"Mg", 1180},
     {"MiB", 96},
-    {"Mohs", 485},
-    {"Mtok/s", 739},
-    {"Mw", 699},
-    {"Mx", 422},
-    {"M\xe2\x8a\x95", 399},
-    {"M\xe2\x98\x89", 398},
-    {"M\xe2\x98\xbd", 401},
-    {"M\xe2\x99\x83", 400},
+    {"MiB/s", 788},
+    {"Mib", 1883},
+    {"Mkat", 1202},
+    {"Ml", 1204},
+    {"Mlm", 1197},
+    {"Mlx", 1198},
+    {"Mm", 1179},
+    {"Mmol", 1184},
+    {"Mohs", 489},
+    {"Mpc", 1211},
+    {"Ms", 1181},
+    {"Mt", 1207},
+    {"Mtok/s", 843},
+    {"Mvar", 1187},
+    {"Mw", 800},
+    {"Mx", 426},
+    {"M\xce\xa9", 1191},
+    {"M\xe2\x8a\x95", 403},
+    {"M\xe2\x98\x89", 402},
+    {"M\xe2\x98\xbd", 405},
+    {"M\xe2\x99\x83", 404},
     {"N", 8},
     {"N/A\xc2\xb2", 105},
-    {"N/m", 656},
-    {"N\xc2\xb7m", 672},
-    {"N\xc2\xb7s", 671},
-    {"Oe", 478},
-    {"P", 394},
+    {"N/m", 660},
+    {"N\xc2\xb7m", 676},
+    {"N\xc2\xb7s", 675},
+    {"Oe", 482},
+    {"Osm/L", 713},
+    {"P", 398},
+    {"PA", 1069},
     {"PB", 94},
-    {"PFLOPS", 716},
-    {"POPS", 728},
-    {"PPS", 752},
-    {"PS", 374},
+    {"PBps", 1101},
+    {"PBq", 1090},
+    {"PC", 1082},
+    {"PDa", 1097},
+    {"PF", 1084},
+    {"PFLOPS", 820},
+    {"PFU", 719},
+    {"PFU/mL", 723},
+    {"PFUs", 719},
+    {"PGy", 1091},
+    {"PH", 1085},
+    {"PHz", 1080},
+    {"PJ", 1077},
+    {"PJy", 1073},
+    {"PK", 1070},
+    {"PL", 1094},
+    {"PN", 1076},
+    {"POPS", 832},
+    {"PPFD", 754},
+    {"PPS", 856},
+    {"PPa", 1079},
+    {"PS", 378},
+    {"PSv", 1092},
+    {"PT", 1087},
+    {"PV", 1081},
+    {"PVA", 1075},
+    {"PVU", 768},
+    {"PW", 1078},
+    {"PWb", 1086},
     {"Pa", 9},
-    {"Pflops", 715},
-    {"PiB", 389},
+    {"Pb", 1099},
+    {"Pbps", 1100},
+    {"Pcd", 1072},
+    {"Pcentury", 1104},
+    {"PeV", 1096},
+    {"Pflops", 819},
+    {"Pfortnight", 1103},
+    {"Pg", 1067},
+    {"PiB", 393},
+    {"Pib", 1886},
+    {"Pkat", 1093},
+    {"Pl", 1095},
     {"Planck length", 287},
     {"Planck mass", 299},
     {"Planck time", 326},
-    {"QALY", 688},
-    {"QALYs", 688},
-    {"QPS", 746},
-    {"QWORD", 606},
-    {"RBE", 701},
-    {"RPS", 748},
+    {"Plm", 1088},
+    {"Plx", 1089},
+    {"Pm", 1066},
+    {"Pmol", 1071},
+    {"Ppc", 1102},
+    {"Ps", 1068},
+    {"Pt", 1098},
+    {"Pvar", 1074},
+    {"P\xce\xa9", 1083},
+    {"QA", 866},
+    {"QALY", 692},
+    {"QALYs", 692},
+    {"QB", 898},
+    {"QBps", 900},
+    {"QBq", 888},
+    {"QC", 879},
+    {"QDa", 895},
+    {"QF", 881},
+    {"QGy", 889},
+    {"QH", 882},
+    {"QHz", 877},
+    {"QJ", 874},
+    {"QJy", 870},
+    {"QK", 867},
+    {"QL", 892},
+    {"QN", 873},
+    {"QPS", 850},
+    {"QPa", 876},
+    {"QS", 883},
+    {"QSv", 890},
+    {"QT", 885},
+    {"QV", 878},
+    {"QVA", 872},
+    {"QW", 875},
+    {"QWORD", 610},
+    {"QWb", 884},
+    {"Qb", 897},
+    {"Qbps", 899},
+    {"Qcd", 869},
+    {"Qcentury", 903},
+    {"QeV", 894},
+    {"Qfortnight", 902},
+    {"Qg", 864},
+    {"QiB", 1895},
+    {"Qib", 1894},
+    {"Qkat", 891},
+    {"Ql", 893},
+    {"Qlm", 886},
+    {"Qlx", 887},
+    {"Qm", 863},
+    {"Qmol", 868},
+    {"Qpc", 901},
+    {"Qs", 865},
+    {"Qt", 896},
+    {"Qvar", 871},
+    {"Q\xce\xa9", 880},
+    {"RA", 907},
+    {"RB", 939},
+    {"RBE", 802},
+    {"RBps", 941},
+    {"RBq", 929},
+    {"RC", 920},
+    {"RDa", 936},
+    {"RF", 922},
+    {"RGy", 930},
+    {"RH", 923},
+    {"RHz", 918},
+    {"RJ", 915},
+    {"RJy", 911},
+    {"RK", 908},
+    {"RL", 933},
+    {"RN", 914},
+    {"RPS", 852},
+    {"RPa", 917},
+    {"RS", 924},
+    {"RSv", 931},
+    {"RT", 926},
     {"RU", 277},
-    {"Richter", 698},
-    {"Ry", 585},
-    {"R\xe2\x8a\x95", 403},
-    {"R\xe2\x98\x89", 402},
+    {"RV", 919},
+    {"RVA", 913},
+    {"RW", 916},
+    {"RWb", 925},
+    {"R_exposure", 756},
+    {"R_sun_nominal", 764},
+    {"Rb", 938},
+    {"Rbps", 940},
+    {"Rcd", 910},
+    {"Rcentury", 944},
+    {"ReV", 935},
+    {"Rfortnight", 943},
+    {"Rg", 905},
+    {"RiB", 1893},
+    {"Rib", 1892},
+    {"Richter", 799},
+    {"Rkat", 932},
+    {"Rl", 934},
+    {"Rlm", 927},
+    {"Rlx", 928},
+    {"Rm", 904},
+    {"Rmol", 909},
+    {"Rpc", 942},
+    {"Rs", 906},
+    {"Rt", 937},
+    {"Rvar", 912},
+    {"Ry", 589},
+    {"R\xce\xa9", 921},
+    {"R\xe2\x8a\x95", 407},
+    {"R\xe2\x98\x89", 406},
+    {"R\xe2\x98\x89_N", 764},
     {"S", 16},
-    {"S/m", 654},
-    {"SS_category", 695},
-    {"Saffir-Simpson", 695},
-    {"St", 396},
+    {"S/m", 658},
+    {"SS_category", 796},
+    {"Saffir-Simpson", 796},
+    {"St", 400},
     {"Sv", 25},
+    {"Sv/h", 758},
+    {"Sv_ocean", 769},
+    {"Svedberg", 727},
     {"T", 18},
-    {"T/s", 741},
+    {"T/s", 845},
+    {"TA", 1108},
     {"TB", 93},
-    {"TCE", 532},
-    {"TFLOPS", 714},
+    {"TBps", 1140},
+    {"TBq", 1129},
+    {"TC", 1120},
+    {"TCE", 536},
+    {"TDa", 1136},
+    {"TECU", 773},
+    {"TEPS", 859},
+    {"TF", 1122},
+    {"TFLOPS", 818},
+    {"TGy", 1130},
+    {"TH", 1123},
     {"THz", 44},
-    {"TMAC/s", 736},
-    {"TOPS", 727},
-    {"TPS", 750},
-    {"TT/s", 744},
-    {"Tflops", 713},
+    {"TJ", 1116},
+    {"TJy", 1112},
+    {"TK", 1109},
+    {"TL", 1133},
+    {"TMAC/s", 840},
+    {"TN", 1115},
+    {"TOPS", 831},
+    {"TPS", 854},
+    {"TPa", 1118},
+    {"TS", 1124},
+    {"TSv", 1131},
+    {"TT", 1126},
+    {"TT/s", 848},
+    {"TV", 1119},
+    {"TVA", 1114},
+    {"TW", 1117},
+    {"TWb", 1125},
+    {"Tb", 1138},
+    {"Tbps", 1139},
+    {"Tcd", 1111},
+    {"Tcentury", 1143},
+    {"TeV", 1135},
+    {"Tflops", 817},
+    {"Tfortnight", 1142},
+    {"Tg", 1106},
     {"TiB", 98},
+    {"Tib", 1885},
+    {"Tkat", 1132},
+    {"Tl", 1134},
+    {"Tlm", 1127},
+    {"Tlx", 1128},
+    {"Tm", 1105},
+    {"Tmol", 1110},
     {"Torr", 113},
+    {"Tpc", 1141},
+    {"Ts", 1107},
+    {"Tt", 1137},
+    {"Tvar", 1113},
+    {"T\xce\xa9", 1121},
+    {"U/L", 716},
+    {"U_enzyme", 715},
     {"V", 13},
-    {"V/m", 651},
+    {"V/m", 655},
+    {"VA", 730},
     {"W", 11},
     {"W/(m\xc2\xb2\xc2\xb7K\xe2\x81\xb4)", 106},
-    {"W/(m\xc2\xb7K)", 649},
-    {"W/m/K", 649},
-    {"W/m\xc2\xb2", 650},
+    {"W/(m\xc2\xb7K)", 653},
+    {"W/m/K", 653},
+    {"W/m\xc2\xb2", 654},
+    {"W/m\xc2\xb2/Hz", 748},
+    {"W/m\xc2\xb3", 749},
+    {"W/sr", 746},
+    {"W/sr/m\xc2\xb2", 747},
     {"Wb", 17},
-    {"YFLOPS", 722},
-    {"Yflops", 721},
-    {"ZFLOPS", 720},
-    {"Zflops", 719},
-    {"a0", 586},
-    {"a_0", 586},
-    {"ab-1", 475},
-    {"ab^-1", 475},
-    {"abarn", 471},
-    {"abinv", 475},
-    {"absolute magnitude", 468},
-    {"ab\xe2\x81\xbb\xc2\xb9", 475},
+    {"YA", 948},
+    {"YB", 980},
+    {"YBps", 982},
+    {"YBq", 970},
+    {"YC", 961},
+    {"YDa", 977},
+    {"YF", 963},
+    {"YFLOPS", 826},
+    {"YGy", 971},
+    {"YH", 964},
+    {"YHz", 959},
+    {"YJ", 956},
+    {"YJy", 952},
+    {"YK", 949},
+    {"YL", 974},
+    {"YN", 955},
+    {"YPa", 958},
+    {"YS", 965},
+    {"YSv", 972},
+    {"YT", 967},
+    {"YV", 960},
+    {"YVA", 954},
+    {"YW", 957},
+    {"YWb", 966},
+    {"Yb", 979},
+    {"Ybps", 981},
+    {"Ycd", 951},
+    {"Ycentury", 985},
+    {"YeV", 976},
+    {"Yflops", 825},
+    {"Yfortnight", 984},
+    {"Yg", 946},
+    {"YiB", 1891},
+    {"Yib", 1890},
+    {"Ykat", 973},
+    {"Yl", 975},
+    {"Ylm", 968},
+    {"Ylx", 969},
+    {"Ym", 945},
+    {"Ymol", 950},
+    {"Ypc", 983},
+    {"Ys", 947},
+    {"Yt", 978},
+    {"Yvar", 953},
+    {"Y\xce\xa9", 962},
+    {"ZA", 989},
+    {"ZB", 1021},
+    {"ZBps", 1023},
+    {"ZBq", 1011},
+    {"ZC", 1002},
+    {"ZDa", 1018},
+    {"ZF", 1004},
+    {"ZFLOPS", 824},
+    {"ZGy", 1012},
+    {"ZH", 1005},
+    {"ZHz", 1000},
+    {"ZJ", 997},
+    {"ZJy", 993},
+    {"ZK", 990},
+    {"ZL", 1015},
+    {"ZN", 996},
+    {"ZPa", 999},
+    {"ZS", 1006},
+    {"ZSv", 1013},
+    {"ZT", 1008},
+    {"ZV", 1001},
+    {"ZVA", 995},
+    {"ZW", 998},
+    {"ZWb", 1007},
+    {"Zb", 1020},
+    {"Zbps", 1022},
+    {"Zcd", 992},
+    {"Zcentury", 1026},
+    {"ZeV", 1017},
+    {"Zflops", 823},
+    {"Zfortnight", 1025},
+    {"Zg", 987},
+    {"ZiB", 1889},
+    {"Zib", 1888},
+    {"Zkat", 1014},
+    {"Zl", 1016},
+    {"Zlm", 1009},
+    {"Zlx", 1010},
+    {"Zm", 986},
+    {"Zmol", 991},
+    {"Zpc", 1024},
+    {"Zs", 988},
+    {"Zt", 1019},
+    {"Zvar", 994},
+    {"Z\xce\xa9", 1003},
+    {"a0", 590},
+    {"aA", 1682},
+    {"aB", 1713},
+    {"aBps", 1715},
+    {"aBq", 1704},
+    {"aC", 1695},
+    {"aDa", 1711},
+    {"aF", 1697},
+    {"aGy", 1705},
+    {"aH", 1698},
+    {"aHz", 1693},
+    {"aJ", 1690},
+    {"aJy", 1686},
+    {"aK", 1683},
+    {"aL", 1708},
+    {"aN", 1689},
+    {"aPa", 1692},
+    {"aS", 1699},
+    {"aSv", 1706},
+    {"aT", 1701},
+    {"aV", 1694},
+    {"aVA", 1688},
+    {"aW", 1691},
+    {"aWb", 1700},
+    {"a_0", 590},
+    {"ab", 1712},
+    {"ab-1", 479},
+    {"abA", 731},
+    {"abC", 733},
+    {"abF", 739},
+    {"abH", 741},
+    {"abV", 735},
+    {"ab^-1", 479},
+    {"abampere", 731},
+    {"abarn", 475},
+    {"abcoulomb", 733},
+    {"abfarad", 739},
+    {"abhenry", 741},
+    {"abinv", 479},
+    {"abohm", 737},
+    {"abps", 1714},
+    {"absolute magnitude", 472},
+    {"absorbed-dose rad", 755},
+    {"abvolt", 735},
+    {"ab\xce\xa9", 737},
+    {"ab\xe2\x81\xbb\xc2\xb9", 479},
     {"ac", 327},
+    {"acd", 1685},
+    {"acentury", 1718},
     {"acre", 74},
     {"acres", 327},
-    {"alpha", 590},
-    {"altuve", 409},
-    {"altuves", 409},
-    {"amah", 496},
-    {"amot", 496},
+    {"aeV", 1710},
+    {"afortnight", 1717},
+    {"ag", 1680},
+    {"akat", 1707},
+    {"al", 1709},
+    {"alm", 1702},
+    {"alpha", 594},
+    {"altuve", 413},
+    {"altuves", 413},
+    {"alx", 1703},
+    {"am", 1679},
+    {"amah", 500},
+    {"amol", 1684},
+    {"amot", 500},
+    {"amp hours", 728},
     {"ampere", 3},
+    {"ampere hour", 728},
+    {"ampere-hour", 728},
     {"amperes", 3},
-    {"amperes per square meter", 652},
-    {"amphora", 572},
-    {"amphorae", 572},
-    {"amphoras", 572},
+    {"amperes per square meter", 656},
+    {"amphora", 576},
+    {"amphorae", 576},
+    {"amphoras", 576},
     {"angstrom", 278},
     {"angstroms", 278},
-    {"angular acceleration", 668},
-    {"angular velocity", 667},
-    {"apgar", 700},
-    {"apgar score", 700},
-    {"apostilb", 428},
-    {"apostilbs", 428},
-    {"apparent magnitude", 467},
-    {"arcmin", 379},
-    {"arcsec", 380},
-    {"areal density", 658},
-    {"aroura", 577},
-    {"arourae", 577},
-    {"arouras", 577},
-    {"arpent", 564},
-    {"arpents", 564},
-    {"arshin", 555},
-    {"arshins", 555},
-    {"asb", 428},
+    {"angular acceleration", 672},
+    {"angular velocity", 671},
+    {"apc", 1716},
+    {"apgar", 801},
+    {"apgar score", 801},
+    {"apostilb", 432},
+    {"apostilbs", 432},
+    {"apparent magnitude", 471},
+    {"arcmin", 383},
+    {"arcsec", 384},
+    {"areal density", 662},
+    {"aroura", 581},
+    {"arourae", 581},
+    {"arouras", 581},
+    {"arpent", 568},
+    {"arpents", 568},
+    {"arshin", 559},
+    {"arshins", 559},
+    {"as", 1681},
+    {"asb", 432},
     {"astronomical unit", 116},
     {"astronomical units", 116},
     {"at", 360},
     {"atm", 110},
     {"atmosphere", 110},
     {"atmospheres", 110},
-    {"attobarn", 471},
-    {"attobarns", 471},
+    {"attobarn", 475},
+    {"attobarns", 475},
     {"au", 116},
-    {"australian tablespoon", 601},
-    {"australian tablespoons", 601},
-    {"australian tbsp", 601},
-    {"australian_tbsp", 601},
-    {"b", 386},
-    {"baker's dozen", 493},
-    {"bakers dozen", 493},
-    {"bakers_dozen", 493},
-    {"ban", 458},
-    {"banana", 417},
-    {"banana for scale", 641},
-    {"banana_for_scale", 641},
-    {"bananas", 417},
-    {"bananas for scale", 641},
+    {"australian tablespoon", 605},
+    {"australian tablespoons", 605},
+    {"australian tbsp", 605},
+    {"australian_tbsp", 605},
+    {"avar", 1687},
+    {"a\xce\xa9", 1696},
+    {"b", 390},
+    {"baker's dozen", 497},
+    {"bakers dozen", 497},
+    {"bakers_dozen", 497},
+    {"ban", 462},
+    {"banana", 421},
+    {"banana for scale", 645},
+    {"banana_for_scale", 645},
+    {"bananas", 421},
+    {"bananas for scale", 645},
     {"bar", 111},
-    {"barleycorn", 625},
-    {"barleycorns", 625},
+    {"barleycorn", 629},
+    {"barleycorns", 629},
     {"barn", 328},
-    {"barn megaparsec", 416},
-    {"barn-megaparsec", 416},
-    {"barn-megaparsecs", 416},
+    {"barn megaparsec", 420},
+    {"barn-megaparsec", 420},
+    {"barn-megaparsecs", 420},
     {"barns", 328},
-    {"barrel", 412},
-    {"barrel of oil equivalent", 531},
-    {"barrels", 412},
+    {"barrel", 416},
+    {"barrel of oil equivalent", 535},
+    {"barrels", 416},
     {"barye", 359},
-    {"basis point", 619},
-    {"basis points", 619},
-    {"basis_point", 619},
-    {"basis_points", 619},
-    {"bath", 506},
-    {"baths", 506},
-    {"baud", 393},
-    {"beard second", 415},
-    {"beard seconds", 415},
-    {"beard-second", 415},
-    {"beard-seconds", 415},
-    {"beat", 435},
-    {"beats", 435},
-    {"beats per minute", 703},
-    {"beaufort", 694},
+    {"basis point", 623},
+    {"basis points", 623},
+    {"basis_point", 623},
+    {"basis_points", 623},
+    {"bath", 510},
+    {"baths", 510},
+    {"baud", 397},
+    {"beard second", 419},
+    {"beard seconds", 419},
+    {"beard-second", 419},
+    {"beard-seconds", 419},
+    {"beat", 439},
+    {"beats", 439},
+    {"beats per minute", 804},
+    {"beaufort", 795},
     {"becquerel", 23},
     {"becquerels", 23},
-    {"beka", 514},
-    {"bekah", 514},
-    {"bekas", 514},
-    {"biblical talent", 512},
-    {"biblical_mil", 500},
-    {"biblical_mina", 511},
-    {"biblical_talent", 512},
-    {"billions and billions", 639},
+    {"beka", 518},
+    {"bekah", 518},
+    {"bekas", 518},
+    {"biblical talent", 516},
+    {"biblical_mil", 504},
+    {"biblical_mina", 515},
+    {"biblical_talent", 516},
+    {"billions and billions", 643},
+    {"biot", 731},
     {"bit", 88},
-    {"bit/(s\xc2\xb7Hz)", 673},
-    {"bit/s/Hz", 673},
-    {"bits", 386},
-    {"bits per second per hertz", 673},
-    {"block", 610},
-    {"blocks", 610},
-    {"boe", 531},
-    {"bohr magneton", 481},
-    {"bohr_magneton", 481},
-    {"bohr_radius", 586},
-    {"boiler horsepower", 595},
-    {"boiler_horsepower", 595},
-    {"bolometric magnitude", 469},
-    {"bortle", 693},
+    {"bit/(s\xc2\xb7Hz)", 677},
+    {"bit/s", 782},
+    {"bit/s/Hz", 677},
+    {"bit/symbol", 790},
+    {"bits", 390},
+    {"bits per second per hertz", 677},
+    {"bits per symbol", 790},
+    {"block", 614},
+    {"blocks", 614},
+    {"boe", 535},
+    {"bohr magneton", 485},
+    {"bohr_magneton", 485},
+    {"bohr_radius", 590},
+    {"boiler horsepower", 599},
+    {"boiler_horsepower", 599},
+    {"bolometric magnitude", 473},
+    {"bortle", 794},
     {"bottle", 353},
     {"bottles", 353},
-    {"bp_finance", 619},
-    {"bpm", 703},
-    {"bps", 391},
-    {"brad", 384},
-    {"brads", 384},
-    {"brinell", 488},
+    {"bp_finance", 623},
+    {"bpm", 804},
+    {"bps", 395},
+    {"brad", 388},
+    {"brads", 388},
+    {"brinell", 492},
     {"bu", 335},
     {"bushel", 335},
     {"bushels", 335},
     {"butt", 349},
     {"byte", 89},
     {"bytes", 89},
-    {"bytes per flop", 676},
-    {"cP", 395},
-    {"cSt", 397},
+    {"bytes per flop", 680},
+    {"cA", 1372},
+    {"cB", 1403},
+    {"cBps", 1405},
+    {"cBq", 1394},
+    {"cC", 1385},
+    {"cDa", 1401},
+    {"cF", 1387},
+    {"cGy", 1395},
+    {"cH", 1388},
+    {"cHz", 1383},
+    {"cJ", 1380},
+    {"cJy", 1376},
+    {"cK", 1373},
+    {"cL", 1398},
+    {"cN", 1379},
+    {"cP", 399},
+    {"cPa", 1382},
+    {"cS", 1389},
+    {"cSt", 401},
+    {"cSv", 1396},
+    {"cT", 1391},
+    {"cV", 1384},
+    {"cVA", 1378},
+    {"cW", 1381},
+    {"cWb", 1390},
     {"cable", 280},
-    {"cable length", 629},
-    {"cable lengths", 629},
-    {"cable_length", 629},
+    {"cable length", 633},
+    {"cable lengths", 633},
+    {"cable_length", 633},
     {"cables", 280},
     {"cal", 108},
+    {"cal_IT", 369},
+    {"cal_th", 370},
     {"calorie", 108},
+    {"calorie IT", 369},
     {"calories", 108},
     {"candela", 6},
-    {"candela per square meter", 664},
+    {"candela per square meter", 668},
     {"candelas", 6},
     {"carat", 306},
     {"carats", 306},
-    {"catalytic activity concentration", 663},
+    {"catalytic activity concentration", 667},
+    {"cb", 1402},
+    {"cbps", 1404},
+    {"ccd", 1375},
+    {"ccentury", 1408},
     {"cd", 6},
-    {"cd/m\xc2\xb2", 664},
+    {"cd/m\xc2\xb2", 668},
+    {"ceV", 1400},
+    {"cell", 720},
+    {"cells", 720},
+    {"cells/mL", 724},
     {"celsius", 20},
     {"celsius difference", 263},
-    {"cent", 615},
-    {"cent_pitch", 615},
-    {"centipoise", 395},
-    {"centistokes", 397},
-    {"cents", 615},
+    {"cent", 619},
+    {"cent_pitch", 619},
+    {"centipoise", 399},
+    {"centistokes", 401},
+    {"cents", 619},
     {"centuries", 317},
     {"century", 317},
+    {"cfortnight", 1407},
+    {"cg", 1370},
     {"ch", 273},
     {"chain", 273},
     {"chains", 273},
-    {"charge density", 655},
-    {"chelakim", 515},
-    {"chelek", 515},
-    {"chetvert", 560},
-    {"chetverts", 560},
-    {"chi", 545},
-    {"chinese dan", 553},
-    {"chinese li", 549},
-    {"chinese_dan", 553},
-    {"chinese_li", 549},
-    {"chis", 545},
-    {"cicero", 408},
-    {"cloth nail", 628},
-    {"cluster", 611},
-    {"clusters", 611},
+    {"charge density", 659},
+    {"chelakim", 519},
+    {"chelek", 519},
+    {"chetvert", 564},
+    {"chetverts", 564},
+    {"chi", 549},
+    {"chinese dan", 557},
+    {"chinese li", 553},
+    {"chinese_dan", 557},
+    {"chinese_li", 553},
+    {"chis", 549},
+    {"cicero", 412},
+    {"ckat", 1397},
+    {"cl", 1399},
+    {"clm", 1392},
+    {"clo", 775},
+    {"clo unit", 775},
+    {"cloth nail", 632},
+    {"cluster", 615},
+    {"clusters", 615},
+    {"clx", 1393},
     {"cm", 28},
-    {"cm-1", 484},
+    {"cm-1", 488},
     {"cmH2O", 365},
-    {"cm^-1", 484},
+    {"cm^-1", 488},
+    {"cmol", 1374},
     {"cm\xc2\xb2", 71},
     {"cm\xc2\xb3", 77},
-    {"cm\xe2\x81\xbb\xc2\xb9", 484},
-    {"compton wavelength", 587},
-    {"compton wavelength electron", 587},
-    {"compton wavelength neutron", 589},
-    {"compton wavelength proton", 588},
-    {"compton_e", 587},
-    {"compton_n", 589},
-    {"compton_p", 588},
-    {"compton_wavelength", 587},
-    {"conductivity", 654},
-    {"cord", 414},
-    {"cords", 414},
+    {"cm\xe2\x81\xbb\xc2\xb9", 488},
+    {"colony forming unit", 718},
+    {"colony-forming unit", 718},
+    {"compton wavelength", 591},
+    {"compton wavelength electron", 591},
+    {"compton wavelength neutron", 593},
+    {"compton wavelength proton", 592},
+    {"compton_e", 591},
+    {"compton_n", 593},
+    {"compton_p", 592},
+    {"compton_wavelength", 591},
+    {"conductivity", 658},
+    {"copies", 721},
+    {"copies/mL", 725},
+    {"copy", 721},
+    {"cord", 418},
+    {"cords", 418},
     {"coulomb", 12},
     {"coulombs", 12},
-    {"coulombs per cubic meter", 655},
-    {"crumb", 604},
-    {"crumbs", 604},
-    {"css rem", 684},
+    {"coulombs per cubic meter", 659},
+    {"count", 761},
+    {"counts per minute", 808},
+    {"counts per second", 807},
+    {"cpc", 1406},
+    {"cpm", 808},
+    {"cps", 807},
+    {"crumb", 608},
+    {"crumbs", 608},
+    {"cs", 1371},
+    {"css rem", 688},
     {"ct", 306},
-    {"cubic meters per second", 643},
-    {"cubit", 496},
-    {"cubits", 496},
-    {"cun", 546},
-    {"cuns", 546},
+    {"cubic meters per second", 647},
+    {"cubit", 500},
+    {"cubits", 500},
+    {"cun", 550},
+    {"cuns", 550},
     {"cup", 330},
     {"cups", 330},
-    {"curie", 376},
-    {"curies", 376},
-    {"current density", 652},
+    {"curie", 380},
+    {"curies", 380},
+    {"current density", 656},
+    {"cvar", 1377},
     {"cwt", 292},
-    {"cyc", 436},
-    {"cycle", 436},
-    {"cycles", 436},
+    {"cyc", 440},
+    {"cycle", 440},
+    {"cycles", 440},
+    {"c\xce\xa9", 1386},
     {"d", 310},
+    {"dA", 1332},
+    {"dB", 1364},
+    {"dBps", 1366},
+    {"dBq", 1354},
+    {"dC", 1345},
+    {"dDa", 1361},
+    {"dF", 1347},
+    {"dGy", 1355},
+    {"dH", 1348},
+    {"dHz", 1343},
+    {"dJ", 1340},
+    {"dJy", 1336},
+    {"dK", 1333},
+    {"dL", 1358},
+    {"dN", 1339},
+    {"dPa", 1342},
+    {"dS", 1349},
+    {"dSv", 1356},
+    {"dT", 1351},
+    {"dV", 1344},
+    {"dVA", 1338},
+    {"dW", 1341},
+    {"dWb", 1350},
+    {"daA", 1291},
+    {"daB", 1323},
+    {"daBps", 1325},
+    {"daBq", 1313},
+    {"daC", 1304},
+    {"daDa", 1320},
+    {"daF", 1306},
+    {"daGy", 1314},
+    {"daH", 1307},
+    {"daHz", 1302},
+    {"daJ", 1299},
+    {"daJy", 1295},
+    {"daK", 1292},
+    {"daL", 1317},
+    {"daN", 1298},
+    {"daPa", 1301},
+    {"daS", 1308},
+    {"daSv", 1315},
+    {"daT", 1310},
+    {"daV", 1303},
+    {"daVA", 1297},
+    {"daW", 1300},
+    {"daWb", 1309},
+    {"dab", 1322},
+    {"dabps", 1324},
+    {"dacd", 1294},
+    {"dacentury", 1328},
+    {"daeV", 1319},
+    {"dafortnight", 1327},
+    {"dag", 1289},
+    {"dakat", 1316},
+    {"dal", 1318},
+    {"dalm", 1311},
     {"dalton", 296},
     {"daltons", 296},
-    {"dan_cn", 553},
+    {"dalx", 1312},
+    {"dam", 1288},
+    {"damol", 1293},
+    {"dan_cn", 557},
+    {"dapc", 1326},
+    {"darcies", 770},
+    {"darcy", 770},
+    {"das", 1290},
     {"dash", 340},
     {"dashes", 340},
+    {"dat", 1321},
+    {"davar", 1296},
     {"day", 310},
     {"days", 310},
-    {"debye", 480},
-    {"debyes", 480},
+    {"da\xce\xa9", 1305},
+    {"db", 1363},
+    {"dbps", 1365},
+    {"dcd", 1335},
+    {"dcentury", 1369},
+    {"deV", 1360},
+    {"debye", 484},
+    {"debyes", 484},
     {"decade", 314},
     {"decades", 314},
-    {"decay", 444},
-    {"decays", 444},
-    {"deciban", 459},
-    {"decibans", 459},
-    {"decitex", 636},
-    {"deg", 378},
-    {"degree", 378},
-    {"degrees", 378},
+    {"decay", 448},
+    {"decays", 448},
+    {"decays per minute", 806},
+    {"deciban", 463},
+    {"decibans", 463},
+    {"decitex", 640},
+    {"deg", 382},
+    {"degree", 382},
+    {"degrees", 382},
     {"delisle", 257},
     {"delta celsius", 263},
     {"delta fahrenheit", 264},
     {"delta kelvin", 262},
     {"delta rankine", 265},
-    {"denier", 634},
-    {"deniers", 634},
-    {"didot", 407},
-    {"digit", 575},
-    {"digits", 575},
-    {"dit", 458},
-    {"dits", 458},
+    {"denier", 638},
+    {"deniers", 638},
+    {"dfortnight", 1368},
+    {"dg", 1330},
+    {"didot", 411},
+    {"digit", 579},
+    {"digits", 579},
+    {"diopter", 745},
+    {"diopters", 745},
+    {"dioptre", 745},
+    {"dioptres", 745},
+    {"dit", 462},
+    {"dits", 462},
+    {"dkat", 1357},
+    {"dl", 1359},
+    {"dlm", 1352},
+    {"dlx", 1353},
+    {"dm", 1329},
+    {"dmol", 1334},
+    {"dobson unit", 767},
+    {"dobson units", 767},
     {"dog year", 325},
     {"dog years", 325},
     {"dogyear", 325},
-    {"donkey power", 598},
-    {"donkey-power", 598},
-    {"donkeypower", 598},
-    {"dots per inch", 682},
-    {"dots per pixel", 683},
-    {"dozen", 489},
-    {"dozens", 489},
-    {"dpi", 682},
-    {"dppx", 683},
+    {"donkey power", 602},
+    {"donkey-power", 602},
+    {"donkeypower", 602},
+    {"dots per inch", 686},
+    {"dots per pixel", 687},
+    {"dozen", 493},
+    {"dozens", 493},
+    {"dpc", 1367},
+    {"dpi", 686},
+    {"dpm", 806},
+    {"dppx", 687},
     {"dr", 289},
     {"drachm", 289},
     {"drams", 289},
     {"drop", 339},
     {"drops", 339},
-    {"dword", 605},
-    {"dwords", 605},
+    {"ds", 1331},
+    {"dt", 1362},
+    {"dvar", 1337},
+    {"dword", 609},
+    {"dwords", 609},
     {"dwt", 305},
-    {"dyn", 372},
-    {"dyne", 372},
-    {"dynes", 372},
+    {"dyn", 376},
+    {"dyne", 376},
+    {"dynes", 376},
+    {"d\xce\xa9", 1346},
     {"eV", 107},
-    {"earth mass", 399},
-    {"earth radius", 403},
-    {"earthmass", 399},
-    {"earthradius", 403},
-    {"egypt_palm", 574},
-    {"egyptian palm", 574},
-    {"egyptian palms", 574},
-    {"electric field", 651},
-    {"electric horsepower", 596},
-    {"electric_horsepower", 596},
-    {"electron mass", 591},
-    {"electron_mass", 591},
+    {"earth mass", 403},
+    {"earth radius", 407},
+    {"earthmass", 403},
+    {"earthradius", 407},
+    {"edge", 780},
+    {"edges", 780},
+    {"egypt_palm", 578},
+    {"egyptian palm", 578},
+    {"egyptian palms", 578},
+    {"einstein", 752},
+    {"einsteins", 752},
+    {"electric field", 655},
+    {"electric horsepower", 600},
+    {"electric_horsepower", 600},
+    {"electron mass", 595},
+    {"electron_mass", 595},
     {"electronvolt", 107},
     {"electronvolts", 107},
-    {"em", 430},
-    {"en", 431},
-    {"energy density", 659},
-    {"english cubit", 627},
-    {"english cubits", 627},
-    {"english_cubit", 627},
-    {"enhanced fujita", 697},
-    {"entropy", 647},
-    {"ephah", 504},
-    {"ephahs", 504},
-    {"ephas", 504},
+    {"em", 434},
+    {"en", 435},
+    {"energy density", 663},
+    {"english cubit", 631},
+    {"english cubits", 631},
+    {"english_cubit", 631},
+    {"enhanced fujita", 798},
+    {"entropy", 651},
+    {"enzyme unit", 715},
+    {"enzyme units", 715},
+    {"eotvos", 772},
+    {"ephah", 508},
+    {"ephahs", 508},
+    {"ephas", 508},
+    {"equivalent", 709},
+    {"equivalents", 709},
     {"erg", 368},
-    {"etzba", 499},
-    {"etzbaot", 499},
-    {"ev", 612},
+    {"etzba", 503},
+    {"etzbaot", 503},
+    {"ev", 616},
     {"e\xe2\x82\x80", 118},
-    {"f stop", 613},
-    {"f-stop", 613},
-    {"f-stops", 613},
-    {"fL", 427},
-    {"f_stop", 613},
+    {"f stop", 617},
+    {"f-stop", 617},
+    {"f-stops", 617},
+    {"fA", 1643},
+    {"fB", 1673},
+    {"fBps", 1675},
+    {"fBq", 1665},
+    {"fC", 1656},
+    {"fDa", 1671},
+    {"fF", 1658},
+    {"fGy", 1666},
+    {"fH", 1659},
+    {"fHz", 1654},
+    {"fJ", 1651},
+    {"fJy", 1647},
+    {"fK", 1644},
+    {"fL", 431},
+    {"fN", 1650},
+    {"fPa", 1653},
+    {"fS", 1660},
+    {"fSv", 1667},
+    {"fT", 1662},
+    {"fV", 1655},
+    {"fVA", 1649},
+    {"fW", 1652},
+    {"fWb", 1661},
+    {"f_stop", 617},
     {"fahrenheit", 87},
     {"fahrenheit difference", 264},
     {"farad", 14},
     {"farads", 14},
     {"fathom", 279},
     {"fathoms", 279},
-    {"fb-1", 474},
-    {"fb^-1", 474},
-    {"fbarn", 470},
-    {"fbinv", 474},
-    {"fb\xe2\x81\xbb\xc2\xb9", 474},
+    {"fb", 1672},
+    {"fb-1", 478},
+    {"fb^-1", 478},
+    {"fbarn", 474},
+    {"fbinv", 478},
+    {"fbps", 1674},
+    {"fb\xe2\x81\xbb\xc2\xb9", 478},
+    {"fc", 744},
+    {"fcd", 1646},
+    {"fcentury", 1678},
+    {"feV", 1670},
     {"feet", 61},
-    {"feet of water", 632},
-    {"femtobarn", 470},
-    {"femtobarns", 470},
-    {"fen", 547},
-    {"fens", 547},
-    {"fine structure constant", 590},
-    {"fine_structure", 590},
-    {"fingerbreadth", 499},
+    {"feet of water", 636},
+    {"femtobarn", 474},
+    {"femtobarns", 474},
+    {"fen", 551},
+    {"fens", 551},
+    {"ffortnight", 1677},
+    {"fg", 1641},
+    {"fine structure constant", 594},
+    {"fine_structure", 594},
+    {"fingerbreadth", 503},
     {"firkin", 344},
     {"firkins", 344},
+    {"fkat", 1668},
+    {"fl", 1669},
     {"fl dr", 333},
     {"fl oz", 66},
     {"fldr", 333},
-    {"flop", 446},
-    {"flops", 705},
-    {"flops_count", 446},
+    {"flm", 1663},
+    {"flop", 450},
+    {"flop/J", 791},
+    {"flops", 809},
+    {"flops per joule", 791},
+    {"flops_count", 450},
     {"floz", 332},
     {"fluid dram", 333},
     {"fluid drams", 333},
     {"fluid ounce", 332},
     {"fluid ounces", 332},
+    {"flx", 1664},
+    {"fm", 1640},
+    {"fmol", 1645},
+    {"foe", 766},
+    {"foes", 766},
     {"foot", 61},
-    {"foot of water", 632},
-    {"foot pound", 371},
-    {"foot pounds", 371},
-    {"foot-lambert", 427},
-    {"foot-pound", 371},
-    {"foot-pounds", 371},
+    {"foot candle", 744},
+    {"foot candles", 744},
+    {"foot of water", 636},
+    {"foot pound", 375},
+    {"foot pounds", 375},
+    {"foot-candle", 744},
+    {"foot-lambert", 431},
+    {"foot-pound", 375},
+    {"foot-pounds", 375},
     {"fortnight", 316},
     {"fortnights", 316},
-    {"fps", 704},
-    {"frame", 437},
-    {"frames", 437},
-    {"frames per second", 704},
-    {"french gauge", 637},
-    {"french_gauge", 637},
-    {"fstop", 613},
+    {"fpc", 1676},
+    {"fps", 805},
+    {"frame", 441},
+    {"frames", 441},
+    {"frames per second", 805},
+    {"franklin", 734},
+    {"french gauge", 641},
+    {"french_gauge", 641},
+    {"fs", 1642},
+    {"fstop", 617},
     {"ft", 61},
-    {"ft H2O", 632},
-    {"ft of water", 632},
-    {"ftH2O", 632},
-    {"ftlbf", 371},
+    {"ft H2O", 636},
+    {"ft of water", 636},
+    {"ftH2O", 636},
+    {"ftlbf", 375},
     {"ft\xc2\xb2", 75},
-    {"fujita", 696},
-    {"fujita scale", 696},
-    {"funt", 559},
-    {"funt_ru", 559},
+    {"fujita", 797},
+    {"fujita scale", 797},
+    {"funt", 563},
+    {"funt_ru", 563},
     {"fur", 271},
     {"furlong", 271},
     {"furlongs", 271},
+    {"fvar", 1648},
+    {"f\xce\xa9", 1657},
     {"g", 33},
-    {"g CO2e", 678},
-    {"g0", 520},
-    {"gCO\xe2\x82\x82\x65", 678},
-    {"gCO\xe2\x82\x82\x65/kWh", 679},
-    {"gCO\xe2\x82\x82\x65/pkm", 680},
-    {"g_n", 521},
+    {"g CO2e", 682},
+    {"g/L", 703},
+    {"g/dL", 706},
+    {"g0", 524},
+    {"gCO\xe2\x82\x82\x65", 682},
+    {"gCO\xe2\x82\x82\x65/kWh", 683},
+    {"gCO\xe2\x82\x82\x65/pkm", 684},
+    {"g_n", 525},
     {"gal", 67},
     {"gallon", 67},
     {"gallons", 67},
-    {"gauss", 375},
-    {"gaz", 579},
-    {"gazes", 579},
-    {"gee", 522},
-    {"gerah", 513},
-    {"gerahs", 513},
-    {"gigaton", 529},
-    {"gigatons", 529},
-    {"gilbert", 479},
-    {"gilberts", 479},
+    {"gauss", 379},
+    {"gaz", 583},
+    {"gazes", 583},
+    {"gee", 526},
+    {"geopotential meter", 774},
+    {"geopotential metre", 774},
+    {"gerah", 517},
+    {"gerahs", 517},
+    {"giga-updates per second", 860},
+    {"gigaton", 533},
+    {"gigatons", 533},
+    {"gilbert", 483},
+    {"gilberts", 483},
     {"gill", 331},
     {"gills", 331},
-    {"gon", 381},
-    {"googol", 494},
-    {"googolplex", 495},
-    {"googolplexes", 495},
-    {"googols", 494},
-    {"gos", 542},
+    {"gon", 385},
+    {"googol", 498},
+    {"googolplex", 499},
+    {"googolplexes", 499},
+    {"googols", 498},
+    {"gos", 546},
+    {"gpm", 774},
     {"gr", 288},
-    {"grad", 381},
-    {"gradian", 381},
-    {"gradians", 381},
+    {"grad", 385},
+    {"gradian", 385},
+    {"gradians", 385},
     {"grain", 288},
     {"grains", 288},
     {"gram", 33},
     {"grams", 33},
-    {"grams CO2e", 678},
-    {"grape jelly", 434},
+    {"grams CO2e", 682},
+    {"grape jelly", 438},
     {"grave", 1},
     {"gray", 24},
     {"grays", 24},
-    {"great gross", 491},
-    {"great_gross", 491},
-    {"grid carbon intensity", 679},
-    {"gross", 490},
-    {"g\xc5\x8d", 542},
-    {"g\xe2\x82\x80", 520},
+    {"great gross", 495},
+    {"great_gross", 495},
+    {"grid carbon intensity", 683},
+    {"gross", 494},
+    {"g\xc5\x8d", 546},
+    {"g\xe2\x82\x80", 524},
     {"h", 309},
+    {"hA", 1250},
+    {"hB", 1282},
+    {"hBps", 1284},
+    {"hBq", 1272},
+    {"hC", 1263},
+    {"hDa", 1279},
+    {"hF", 1265},
+    {"hGy", 1273},
+    {"hH", 1266},
+    {"hHz", 1261},
+    {"hJ", 1258},
+    {"hJy", 1254},
+    {"hK", 1251},
+    {"hL", 1276},
+    {"hN", 1257},
+    {"hPa", 1260},
+    {"hS", 1267},
+    {"hSv", 1274},
+    {"hT", 1269},
+    {"hV", 1262},
+    {"hVA", 1256},
+    {"hW", 1259},
+    {"hWb", 1268},
     {"ha", 73},
-    {"halakim", 515},
-    {"half step", 616},
-    {"halfstep", 616},
+    {"halakim", 519},
+    {"half step", 620},
+    {"halfstep", 620},
     {"hand", 275},
-    {"handbreadth", 498},
-    {"handbreadths", 498},
+    {"handbreadth", 502},
+    {"handbreadths", 502},
     {"hands", 275},
-    {"hartley", 458},
-    {"hartleys", 458},
-    {"hartree", 584},
-    {"hartrees", 584},
-    {"hath", 578},
-    {"haths", 578},
-    {"heap", 533},
-    {"heaps", 533},
-    {"heat capacity", 646},
-    {"heat flux", 650},
-    {"heat_capacity", 646},
+    {"hartley", 462},
+    {"hartleys", 462},
+    {"hartree", 588},
+    {"hartrees", 588},
+    {"hath", 582},
+    {"haths", 582},
+    {"hb", 1281},
+    {"hbps", 1283},
+    {"hcd", 1253},
+    {"hcentury", 1287},
+    {"heV", 1278},
+    {"heap", 537},
+    {"heaps", 537},
+    {"heat capacity", 650},
+    {"heat flux", 654},
+    {"heat_capacity", 650},
     {"hectare", 73},
     {"hectares", 73},
-    {"helek", 515},
+    {"helek", 519},
     {"henries", 19},
     {"henry", 19},
     {"henrys", 19},
     {"hertz", 7},
-    {"hin", 505},
-    {"hins", 505},
+    {"hfortnight", 1286},
+    {"hg", 1248},
+    {"hin", 509},
+    {"hins", 509},
+    {"hkat", 1275},
+    {"hl", 1277},
+    {"hlm", 1270},
+    {"hlx", 1271},
+    {"hm", 1247},
+    {"hmol", 1252},
     {"hogshead", 347},
     {"hogsheads", 347},
-    {"hole", 534},
-    {"holes", 534},
-    {"horsepower", 373},
-    {"hounsfield", 702},
-    {"hounsfield_unit", 702},
+    {"hole", 538},
+    {"holes", 538},
+    {"horsepower", 377},
+    {"hounsfield", 803},
+    {"hounsfield_unit", 803},
     {"hour", 309},
     {"hours", 309},
-    {"hp", 373},
+    {"hp", 377},
+    {"hpc", 1285},
+    {"hs", 1249},
+    {"ht", 1280},
+    {"hvar", 1255},
+    {"h\xce\xa9", 1264},
     {"imp gal", 334},
     {"imperial bottle", 356},
     {"imperial gallon", 334},
     {"imperial gallons", 334},
-    {"imperial pint", 603},
-    {"imperial pints", 603},
-    {"imperial_pint", 603},
+    {"imperial pint", 607},
+    {"imperial pints", 607},
+    {"imperial_pint", 607},
     {"impgal", 334},
-    {"impulse", 671},
+    {"impulse", 675},
     {"in", 60},
-    {"in H2O", 631},
-    {"in of water", 631},
-    {"inH2O", 631},
+    {"in H2O", 635},
+    {"in of water", 635},
+    {"inH2O", 635},
     {"inHg", 364},
     {"inch", 60},
-    {"inch of water", 631},
+    {"inch of water", 635},
     {"inches", 60},
-    {"inches of water", 631},
-    {"indian kos", 580},
-    {"instant", 438},
-    {"instants", 438},
-    {"instruction", 449},
-    {"instructions", 449},
-    {"inv_ab", 475},
-    {"inv_fb", 474},
-    {"inv_nb", 477},
-    {"inv_pb", 476},
-    {"inverse attobarn", 475},
-    {"inverse femtobarn", 474},
-    {"inverse nanobarn", 477},
-    {"inverse picobarn", 476},
-    {"io", 456},
-    {"io_op", 456},
-    {"io_ops", 456},
-    {"iops", 753},
-    {"ios", 456},
-    {"isaron", 503},
-    {"iso", 614},
-    {"issaron", 503},
-    {"iugera", 569},
-    {"iugerum", 569},
-    {"j", 434},
-    {"jam", 434},
-    {"janskies", 466},
-    {"jansky", 466},
-    {"janskys", 466},
-    {"japanese cup", 602},
-    {"japanese cups", 602},
-    {"japanese_cup", 602},
-    {"jelly", 434},
-    {"jerk", 669},
+    {"inches of water", 635},
+    {"indian kos", 584},
+    {"instant", 442},
+    {"instants", 442},
+    {"instruction", 453},
+    {"instructions", 453},
+    {"international table calorie", 369},
+    {"international unit", 717},
+    {"international units", 717},
+    {"inv_ab", 479},
+    {"inv_fb", 478},
+    {"inv_nb", 481},
+    {"inv_pb", 480},
+    {"inverse attobarn", 479},
+    {"inverse femtobarn", 478},
+    {"inverse nanobarn", 481},
+    {"inverse picobarn", 480},
+    {"io", 460},
+    {"io_op", 460},
+    {"io_ops", 460},
+    {"iops", 857},
+    {"ios", 460},
+    {"isaron", 507},
+    {"iso", 618},
+    {"issaron", 507},
+    {"iugera", 573},
+    {"iugerum", 573},
+    {"j", 438},
+    {"jam", 438},
+    {"janskies", 470},
+    {"jansky", 470},
+    {"janskys", 470},
+    {"japanese cup", 606},
+    {"japanese cups", 606},
+    {"japanese_cup", 606},
+    {"jelly", 438},
+    {"jerk", 673},
     {"jeroboam", 355},
     {"jeroboams", 355},
-    {"jiffies", 439},
-    {"jiffy", 439},
+    {"jiffies", 443},
+    {"jiffy", 443},
     {"jigger", 343},
     {"jiggers", 343},
-    {"jin", 551},
-    {"jins", 551},
-    {"jo", 538},
-    {"jos", 538},
+    {"jin", 555},
+    {"jins", 555},
+    {"jo", 542},
+    {"jos", 542},
     {"joule", 10},
     {"joules", 10},
     {"joules per kelvin", 102},
-    {"joules per operation", 674},
-    {"joules per token", 675},
-    {"jubilee", 518},
-    {"jubilees", 518},
-    {"jugerum", 569},
+    {"joules per operation", 678},
+    {"joules per token", 679},
+    {"jubilee", 522},
+    {"jubilees", 522},
+    {"jugerum", 573},
     {"julian year", 321},
     {"julian years", 321},
     {"julianyear", 321},
-    {"jupiter mass", 400},
-    {"jupitermass", 400},
-    {"kFLOPS", 708},
+    {"jupiter mass", 404},
+    {"jupitermass", 404},
+    {"kA", 1215},
+    {"kB", 1241},
+    {"kBps", 1243},
+    {"kBq", 1232},
+    {"kC", 1223},
+    {"kDa", 1239},
+    {"kF", 1225},
+    {"kFLOPS", 812},
+    {"kGy", 1233},
+    {"kH", 1226},
     {"kHz", 41},
     {"kJ", 45},
+    {"kJy", 1219},
+    {"kK", 1216},
+    {"kL", 1236},
+    {"kN", 1222},
     {"kPa", 57},
+    {"kS", 1227},
+    {"kSv", 1234},
+    {"kT", 1229},
     {"kV", 55},
+    {"kVA", 1221},
     {"kW", 48},
+    {"kWb", 1228},
     {"kWh", 51},
-    {"kab", 509},
-    {"kabim", 509},
-    {"kabs", 509},
-    {"kanme", 544},
-    {"kanmes", 544},
+    {"kab", 513},
+    {"kabim", 513},
+    {"kabs", 513},
+    {"kanme", 548},
+    {"kanmes", 548},
     {"kat", 26},
-    {"kat/m\xc2\xb3", 663},
+    {"kat/m\xc2\xb3", 667},
     {"katal", 26},
     {"katals", 26},
-    {"kayser", 484},
-    {"kaysers", 484},
+    {"kayser", 488},
+    {"kaysers", 488},
+    {"kb", 1240},
+    {"kbps", 1242},
     {"kcal", 109},
+    {"kcal_IT", 371},
+    {"kcal_th", 372},
+    {"kcd", 1218},
+    {"kcentury", 1246},
+    {"keV", 1238},
     {"kelvin", 4},
     {"kelvin difference", 262},
-    {"kflops", 707},
+    {"kflops", 811},
+    {"kfortnight", 1245},
     {"kg", 1},
-    {"kg CO2e", 677},
-    {"kg/m", 657},
-    {"kg/m\xc2\xb2", 658},
-    {"kg/m\xc2\xb3", 642},
-    {"kg/s", 645},
-    {"kgCO\xe2\x82\x82\x65", 677},
+    {"kg CO2e", 681},
+    {"kg/m", 661},
+    {"kg/m\xc2\xb2", 662},
+    {"kg/m\xc2\xb3", 646},
+    {"kg/s", 649},
+    {"kgCO\xe2\x82\x82\x65", 681},
     {"kgf", 367},
-    {"kg\xc2\xb7m/s", 670},
-    {"khet", 576},
-    {"khets", 576},
-    {"kikar", 512},
+    {"kg\xc2\xb7m/s", 674},
+    {"khet", 580},
+    {"khets", 580},
+    {"kikar", 516},
     {"kilderkin", 351},
     {"kilderkins", 351},
     {"kilocalorie", 109},
@@ -17925,61 +19821,70 @@ static const WUnitAlias unit_aliases[] = {
     {"kilogram force", 367},
     {"kilogram-force", 367},
     {"kilograms", 1},
-    {"kilograms CO2e", 677},
-    {"kilograms per cubic meter", 642},
-    {"kilograms per second", 645},
-    {"kiloton", 527},
-    {"kilotons", 527},
-    {"kilowarhol", 419},
-    {"kilowarhols", 419},
+    {"kilograms CO2e", 681},
+    {"kilograms per cubic meter", 646},
+    {"kilograms per second", 649},
+    {"kiloton", 531},
+    {"kilotons", 531},
+    {"kilowarhol", 423},
+    {"kilowarhols", 423},
     {"kilowatt hour", 51},
     {"kilowatt hours", 51},
     {"kilowatt-hour", 51},
     {"kilowatt-hours", 51},
+    {"kkat", 1235},
+    {"kl", 1237},
+    {"klm", 1230},
+    {"klx", 1231},
     {"km", 27},
     {"km/h", 81},
+    {"kmol", 1217},
     {"km\xc2\xb2", 72},
     {"kn", 281},
     {"knot", 281},
     {"knots", 281},
-    {"koku", 541},
-    {"kokus", 541},
-    {"kor", 508},
-    {"korim", 508},
-    {"kors", 508},
-    {"kos", 580},
-    {"kos_indian", 580},
+    {"koku", 545},
+    {"kokus", 545},
+    {"kor", 512},
+    {"korim", 512},
+    {"kors", 512},
+    {"kos", 584},
+    {"kos_indian", 584},
+    {"kpc", 1244},
     {"kph", 282},
+    {"ks", 1214},
     {"kt", 281},
-    {"ktok/s", 738},
+    {"ktok/s", 842},
+    {"kvar", 1220},
+    {"k\xce\xa9", 1224},
     {"l", 329},
-    {"l/100km", 525},
-    {"lambert", 426},
-    {"lamberts", 426},
+    {"l/100km", 529},
+    {"lambert", 430},
+    {"lamberts", 430},
     {"lb", 65},
     {"lbf", 366},
     {"lbs", 119},
     {"league", 276},
     {"leagues", 276},
-    {"li_cn", 549},
-    {"liang", 552},
-    {"liangs", 552},
-    {"libra romana", 570},
-    {"libra_roma", 570},
-    {"lieue de poste", 565},
-    {"lieue_de_poste", 565},
-    {"lieues de poste", 565},
+    {"li_cn", 553},
+    {"liang", 556},
+    {"liangs", 556},
+    {"libra romana", 574},
+    {"libra_roma", 574},
+    {"lieue de poste", 569},
+    {"lieue_de_poste", 569},
+    {"lieues de poste", 569},
     {"light hour", 286},
     {"light hours", 286},
     {"light minute", 285},
     {"light minutes", 285},
-    {"light nanosecond", 640},
+    {"light nanosecond", 644},
     {"light second", 284},
     {"light seconds", 284},
     {"light year", 115},
     {"light years", 115},
-    {"light-nanosecond", 640},
-    {"light_nanosecond", 640},
+    {"light-nanosecond", 644},
+    {"light_nanosecond", 644},
     {"lighthour", 286},
     {"lighthours", 286},
     {"lightminute", 285},
@@ -17988,25 +19893,25 @@ static const WUnitAlias unit_aliases[] = {
     {"lightseconds", 284},
     {"lightyear", 115},
     {"lightyears", 115},
-    {"linear density", 657},
-    {"link", 622},
-    {"link_chain", 622},
-    {"links", 622},
+    {"linear density", 661},
+    {"link", 626},
+    {"link_chain", 626},
+    {"links", 626},
     {"liter", 78},
     {"liters", 78},
-    {"liters per 100 km", 525},
-    {"liters per minute", 644},
+    {"liters per 100 km", 529},
+    {"liters per minute", 648},
     {"litre", 78},
     {"litres", 78},
-    {"litres per minute", 644},
+    {"litres per minute", 648},
     {"lm", 21},
-    {"lm\xc2\xb7s", 666},
+    {"lm\xc2\xb7s", 670},
     {"long ton", 295},
     {"long tons", 295},
     {"lumen", 21},
     {"lumens", 21},
-    {"luminous energy", 666},
-    {"luminous exposure", 665},
+    {"luminous energy", 670},
+    {"luminous exposure", 669},
     {"lunar month", 323},
     {"lunar months", 323},
     {"lunarmonth", 323},
@@ -18015,390 +19920,640 @@ static const WUnitAlias unit_aliases[] = {
     {"lustrums", 324},
     {"lux", 22},
     {"lx", 22},
-    {"lx\xc2\xb7s", 665},
+    {"lx\xc2\xb7s", 669},
     {"ly", 115},
     {"m", 0},
-    {"m H2O", 630},
-    {"m of water", 630},
+    {"m H2O", 634},
+    {"m of water", 634},
     {"m/s", 80},
     {"m/s\xc2\xb2", 83},
-    {"m/s\xc2\xb3", 669},
+    {"m/s\xc2\xb3", 673},
     {"mA", 53},
-    {"mH2O", 630},
+    {"mB", 1439},
+    {"mBps", 1441},
+    {"mBq", 1430},
+    {"mC", 1421},
+    {"mDa", 1436},
+    {"mEq/L", 711},
+    {"mF", 1423},
+    {"mGal", 771},
+    {"mGy", 1431},
+    {"mH", 1424},
+    {"mH2O", 634},
+    {"mHz", 1419},
+    {"mJ", 1416},
+    {"mJy", 1412},
+    {"mK", 1409},
     {"mL", 79},
-    {"m_e", 591},
-    {"m_n", 593},
-    {"m_p", 592},
-    {"m_\xce\xbc", 594},
-    {"mac", 448},
+    {"mM", 699},
+    {"mN", 1415},
+    {"mOsm/L", 714},
+    {"mPa", 1418},
+    {"mS", 1425},
+    {"mSv", 1432},
+    {"mT", 1427},
+    {"mV", 1420},
+    {"mVA", 1414},
+    {"mW", 1417},
+    {"mWb", 1426},
+    {"m_e", 595},
+    {"m_n", 597},
+    {"m_p", 596},
+    {"m_\xce\xbc", 598},
+    {"mac", 452},
     {"mach", 283},
-    {"mach_air_20C", 692},
-    {"macs", 448},
-    {"mag", 467},
-    {"magnitude", 467},
-    {"magnitudes", 467},
+    {"mach_air_20C", 696},
+    {"macs", 452},
+    {"mag", 471},
+    {"magnitude", 471},
+    {"magnitudes", 471},
     {"magnum", 354},
     {"magnums", 354},
-    {"maneh", 511},
-    {"mass density", 642},
-    {"mass flow", 645},
-    {"maund", 583},
-    {"maunds", 583},
-    {"maxwell", 422},
-    {"maxwells", 422},
+    {"maneh", 515},
+    {"mas", 762},
+    {"mass density", 646},
+    {"mass flow", 649},
+    {"maund", 587},
+    {"maunds", 587},
+    {"maxwell", 426},
+    {"maxwells", 426},
+    {"mb", 1438},
     {"mbar", 112},
-    {"megaton", 528},
-    {"megatons", 528},
+    {"mbps", 1440},
+    {"mcd", 1411},
+    {"mcentury", 1444},
+    {"meV", 1435},
+    {"megaton", 532},
+    {"megatons", 532},
     {"melchizedek", 358},
     {"melchizedeks", 358},
     {"meter", 0},
-    {"meter of water", 630},
+    {"meter of water", 634},
     {"meters", 0},
-    {"meters of water", 630},
+    {"meters of water", 634},
     {"methuselah", 356},
     {"methuselahs", 356},
-    {"metric cup", 599},
-    {"metric cups", 599},
-    {"metric tablespoon", 600},
-    {"metric tablespoons", 600},
-    {"metric tbsp", 600},
+    {"metric cup", 603},
+    {"metric cups", 603},
+    {"metric tablespoon", 604},
+    {"metric tablespoons", 604},
+    {"metric tbsp", 604},
     {"metric ton", 36},
     {"metric tons", 36},
-    {"metric_cup", 599},
-    {"metric_tbsp", 600},
+    {"metric_cup", 603},
+    {"metric_tbsp", 604},
+    {"mfortnight", 1443},
     {"mg", 34},
-    {"mg/dL glucose", 690},
-    {"mg/dL_glucose", 690},
+    {"mg/L", 704},
+    {"mg/dL", 705},
+    {"mg/dL glucose", 694},
+    {"mg/dL_glucose", 694},
     {"mho", 16},
     {"mi", 63},
     {"mi/h", 122},
-    {"mickey", 638},
-    {"mickeys", 638},
-    {"microlife", 483},
-    {"microlives", 483},
-    {"micromort", 482},
-    {"micromorts", 482},
-    {"mil", 383},
+    {"mickey", 642},
+    {"mickeys", 642},
+    {"microarcsecond", 763},
+    {"microarcseconds", 763},
+    {"microlife", 487},
+    {"microlives", 487},
+    {"micromolar", 700},
+    {"micromort", 486},
+    {"micromorts", 486},
+    {"mil", 387},
     {"mile", 63},
     {"mile per hour", 82},
     {"miles", 63},
-    {"miles per gallon", 523},
-    {"miles per gallon equivalent", 524},
+    {"miles per gallon", 527},
+    {"miles per gallon equivalent", 528},
     {"miles per hour", 82},
-    {"mill_finance", 620},
-    {"mille passuum", 568},
-    {"mille_passuum", 568},
+    {"mill_finance", 624},
+    {"mille passuum", 572},
+    {"mille_passuum", 572},
     {"millennia", 315},
     {"millennium", 315},
     {"millenniums", 315},
-    {"millihelen", 423},
-    {"millihelens", 423},
-    {"mils", 383},
+    {"milliarcsecond", 762},
+    {"milliarcseconds", 762},
+    {"milligal", 771},
+    {"milligals", 771},
+    {"millihelen", 427},
+    {"millihelens", 427},
+    {"millimolar", 699},
+    {"mils", 387},
     {"min", 308},
-    {"mina", 511},
-    {"minas", 511},
+    {"mina", 515},
+    {"minas", 515},
     {"minute", 308},
     {"minutes", 308},
+    {"mkat", 1433},
+    {"ml", 1434},
+    {"mlm", 1428},
+    {"mlx", 1429},
     {"mm", 29},
     {"mmHg", 363},
-    {"mmol/L glucose", 691},
-    {"mmol/L_glucose", 691},
+    {"mmol", 1410},
+    {"mmol/L", 699},
+    {"mmol/L glucose", 695},
+    {"mmol/L_glucose", 695},
     {"mo", 312},
-    {"mohs", 485},
+    {"mohs", 489},
     {"mol", 5},
-    {"mol/mol", 662},
-    {"molal", 756},
-    {"molar", 755},
+    {"mol/L", 698},
+    {"mol/mol", 666},
+    {"mol/m\xc2\xb3", 702},
+    {"mol_photon/m\xc2\xb2/s", 753},
+    {"molal", 862},
+    {"molar", 861},
+    {"molar concentration", 697},
+    {"molarity", 697},
     {"mole", 5},
-    {"mole fraction", 662},
+    {"mole fraction", 666},
     {"moles", 5},
-    {"moment", 440},
-    {"moment magnitude", 699},
-    {"moment_magnitude", 699},
-    {"moments", 440},
-    {"momentum", 670},
-    {"momme", 543},
-    {"mommes", 543},
+    {"moment", 444},
+    {"moment magnitude", 800},
+    {"moment_magnitude", 800},
+    {"moments", 444},
+    {"momentum", 674},
+    {"momme", 547},
+    {"mommes", 547},
     {"month", 312},
     {"months", 312},
-    {"moon mass", 401},
-    {"moonmass", 401},
-    {"mpg", 523},
-    {"mpge", 524},
+    {"moon mass", 405},
+    {"moonmass", 405},
+    {"mpc", 1442},
+    {"mpg", 527},
+    {"mpge", 528},
     {"mph", 82},
     {"ms", 37},
-    {"mu", 550},
-    {"muB", 481},
-    {"muon mass", 594},
-    {"muon_mass", 594},
-    {"mus", 550},
+    {"mt", 1437},
+    {"mu", 554},
+    {"muB", 485},
+    {"muon mass", 598},
+    {"muon_mass", 598},
+    {"mus", 554},
+    {"mvar", 1413},
     {"m\xc2\xb2", 70},
     {"m\xc2\xb3", 76},
     {"m\xc2\xb3/(kg\xc2\xb7s\xc2\xb2)", 100},
-    {"m\xc2\xb3/s", 643},
+    {"m\xc2\xb3/s", 647},
+    {"m\xce\xa9", 1422},
     {"m\xe2\x82\x9a\xe2\x82\x97", 299},
-    {"nail_cloth", 628},
-    {"nanobarn", 473},
-    {"nanobarns", 473},
-    {"nat", 457},
-    {"nats", 457},
+    {"nA", 1565},
+    {"nB", 1597},
+    {"nBps", 1599},
+    {"nBq", 1587},
+    {"nC", 1578},
+    {"nDa", 1594},
+    {"nF", 1580},
+    {"nGy", 1588},
+    {"nH", 1581},
+    {"nHz", 1576},
+    {"nJ", 1573},
+    {"nJy", 1569},
+    {"nK", 1566},
+    {"nL", 1591},
+    {"nM", 701},
+    {"nN", 1572},
+    {"nPa", 1575},
+    {"nS", 1582},
+    {"nSv", 1589},
+    {"nT", 1584},
+    {"nV", 1577},
+    {"nVA", 1571},
+    {"nW", 1574},
+    {"nWb", 1583},
+    {"nail_cloth", 632},
+    {"nanobarn", 477},
+    {"nanobarns", 477},
+    {"nanomolar", 701},
+    {"nat", 461},
+    {"nats", 461},
     {"nautical mile", 114},
     {"nautical miles", 114},
-    {"nb-1", 477},
-    {"nb^-1", 477},
-    {"nbarn", 473},
-    {"nb\xe2\x81\xbb\xc2\xb9", 477},
+    {"nb", 1596},
+    {"nb-1", 481},
+    {"nb^-1", 481},
+    {"nbarn", 477},
+    {"nbps", 1598},
+    {"nb\xe2\x81\xbb\xc2\xb9", 481},
+    {"ncd", 1568},
+    {"ncentury", 1602},
+    {"neV", 1593},
     {"nebuchadnezzar", 357},
     {"nebuchadnezzars", 357},
-    {"neutron mass", 593},
-    {"neutron_mass", 593},
+    {"neutron mass", 597},
+    {"neutron_mass", 597},
     {"newton", 8},
     {"newtons", 8},
-    {"newtons per meter", 656},
-    {"nibble", 387},
-    {"nibbles", 387},
-    {"nit", 424},
-    {"nits", 424},
+    {"newtons per meter", 660},
+    {"nfortnight", 1601},
+    {"ng", 1564},
+    {"ng/mL", 708},
+    {"nibble", 391},
+    {"nibbles", 391},
+    {"nit", 428},
+    {"nits", 428},
+    {"nkat", 1590},
+    {"nl", 1592},
+    {"nlm", 1585},
+    {"nlx", 1586},
     {"nm", 31},
     {"nmi", 114},
+    {"nmol", 1567},
+    {"nmol/L", 701},
+    {"nominal solar luminosity", 765},
+    {"nominal solar radius", 764},
+    {"normality", 710},
+    {"npc", 1600},
     {"ns", 39},
-    {"o", 388},
-    {"octave", 618},
-    {"octaves", 618},
-    {"octet", 388},
-    {"octets", 388},
-    {"oersted", 478},
-    {"oersteds", 478},
+    {"nt", 1595},
+    {"nvar", 1570},
+    {"n\xce\xa9", 1579},
+    {"o", 392},
+    {"octave", 622},
+    {"octaves", 622},
+    {"octet", 392},
+    {"octets", 392},
+    {"oersted", 482},
+    {"oersteds", 482},
     {"ohm", 15},
-    {"ohm meter", 653},
+    {"ohm meter", 657},
     {"ohms", 15},
-    {"oil barrel", 530},
-    {"oil barrels", 530},
-    {"oil_barrel", 530},
-    {"omer", 503},
-    {"omers", 503},
-    {"onah", 517},
-    {"onot", 517},
-    {"op", 447},
-    {"ops", 447},
-    {"ops_per_s", 723},
+    {"oil barrel", 534},
+    {"oil barrels", 534},
+    {"oil_barrel", 534},
+    {"omer", 507},
+    {"omers", 507},
+    {"onah", 521},
+    {"onot", 521},
+    {"op", 451},
+    {"op/J", 792},
+    {"operations per joule", 792},
+    {"ops", 451},
+    {"ops_per_s", 827},
+    {"osmol", 712},
+    {"osmolar", 713},
+    {"osmole", 712},
+    {"osmoles", 712},
     {"ounce", 64},
     {"ounces", 64},
-    {"outhouse", 410},
+    {"outhouse", 414},
     {"oz", 64},
     {"ozt", 304},
-    {"packet", 455},
-    {"packets", 455},
-    {"page", 609},
-    {"pages", 609},
-    {"paragraph", 607},
-    {"paragraphs", 607},
-    {"parsa", 501},
+    {"pA", 1604},
+    {"pB", 1634},
+    {"pBps", 1636},
+    {"pBq", 1626},
+    {"pC", 1617},
+    {"pDa", 1633},
+    {"pF", 1619},
+    {"pGy", 1627},
+    {"pH", 1620},
+    {"pHz", 1615},
+    {"pJ", 1612},
+    {"pJy", 1608},
+    {"pK", 1605},
+    {"pL", 1630},
+    {"pN", 1611},
+    {"pPa", 1614},
+    {"pS", 1621},
+    {"pSv", 1628},
+    {"pT", 1623},
+    {"pV", 1616},
+    {"pVA", 1610},
+    {"pW", 1613},
+    {"pWb", 1622},
+    {"packet", 459},
+    {"packets", 459},
+    {"page", 613},
+    {"pages", 613},
+    {"paragraph", 611},
+    {"paragraphs", 611},
+    {"parsa", 505},
     {"parsec", 117},
     {"parsecs", 117},
-    {"parts per billion", 461},
-    {"parts per hundred million", 463},
-    {"parts per million", 460},
-    {"parts per trillion", 462},
-    {"parts-per-billion", 461},
-    {"parts-per-million", 460},
-    {"parts-per-trillion", 462},
+    {"parts per billion", 465},
+    {"parts per billion by volume", 777},
+    {"parts per hundred million", 467},
+    {"parts per million", 464},
+    {"parts per million by mass", 778},
+    {"parts per million by volume", 776},
+    {"parts per trillion", 466},
+    {"parts-per-billion", 465},
+    {"parts-per-million", 464},
+    {"parts-per-trillion", 466},
     {"pascal", 9},
     {"pascals", 9},
-    {"passus", 567},
-    {"passuses", 567},
-    {"pb", 433},
-    {"pb-1", 476},
-    {"pb^-1", 476},
-    {"pbarn", 472},
-    {"pb\xe2\x81\xbb\xc2\xb9", 476},
+    {"passus", 571},
+    {"passuses", 571},
+    {"pb", 437},
+    {"pb-1", 480},
+    {"pb^-1", 480},
+    {"pbarn", 476},
+    {"pbps", 1635},
+    {"pb\xe2\x81\xbb\xc2\xb9", 480},
     {"pc", 117},
-    {"peanut butter", 433},
-    {"peanutbutter", 433},
+    {"pcd", 1607},
+    {"pcentury", 1639},
+    {"peV", 1632},
+    {"peanut butter", 437},
+    {"peanutbutter", 437},
     {"peck", 336},
     {"pecks", 336},
-    {"pedes", 566},
+    {"pedes", 570},
     {"pennyweight", 305},
     {"pennyweights", 305},
-    {"perch", 624},
-    {"perches", 624},
-    {"person hour", 687},
-    {"person hours", 687},
-    {"person_hour", 687},
-    {"pes", 566},
+    {"perch", 628},
+    {"perches", 628},
+    {"person hour", 691},
+    {"person hours", 691},
+    {"person_hour", 691},
+    {"pes", 570},
     {"petabyte", 94},
     {"petabytes", 94},
-    {"petroleum barrel", 530},
-    {"petroleum_barrel", 530},
-    {"phon", 465},
-    {"phons", 465},
-    {"pica", 405},
-    {"picas", 405},
+    {"petroleum barrel", 534},
+    {"petroleum_barrel", 534},
+    {"pfortnight", 1638},
+    {"pg", 1603},
+    {"phon", 469},
+    {"phons", 469},
+    {"phot", 743},
+    {"photon", 751},
+    {"photons", 751},
+    {"photosynthetic photon flux density", 754},
+    {"phots", 743},
+    {"pica", 409},
+    {"picas", 409},
     {"piccolo", 352},
-    {"picobarn", 472},
-    {"picobarns", 472},
-    {"pied", 561},
-    {"pied du roi", 561},
-    {"pieds", 561},
-    {"pieds du roi", 561},
-    {"pieze", 633},
+    {"picobarn", 476},
+    {"picobarns", 476},
+    {"pied", 565},
+    {"pied du roi", 565},
+    {"pieds", 565},
+    {"pieds du roi", 565},
+    {"pieze", 637},
     {"pinch", 341},
     {"pinches", 341},
     {"pint", 69},
     {"pints", 69},
-    {"pip", 621},
+    {"pip", 625},
     {"pipe", 349},
     {"pipes", 349},
-    {"pips", 621},
-    {"pixel", 681},
-    {"pixels", 681},
+    {"pips", 625},
+    {"pixel", 685},
+    {"pixels", 685},
     {"pk", 336},
+    {"pkat", 1629},
+    {"pl", 1631},
     {"planck length", 287},
     {"planck mass", 299},
     {"planck time", 326},
+    {"plaque forming unit", 719},
+    {"plaque-forming unit", 719},
+    {"plm", 1624},
+    {"plx", 1625},
     {"pm", 32},
-    {"point", 404},
-    {"points", 404},
-    {"poise", 394},
-    {"pouce", 562},
-    {"pouces", 562},
+    {"pmol", 1606},
+    {"point", 408},
+    {"points", 408},
+    {"poise", 398},
+    {"potential vorticity unit", 768},
+    {"potential vorticity units", 768},
+    {"pouce", 566},
+    {"pouces", 566},
     {"pound", 65},
     {"pound force", 366},
     {"pound-force", 366},
     {"pounds", 65},
-    {"ppb", 461},
-    {"pphm", 463},
-    {"ppm", 460},
-    {"pps", 751},
-    {"ppt", 462},
-    {"proton mass", 592},
-    {"proton_mass", 592},
+    {"ppb", 465},
+    {"ppbv", 777},
+    {"ppc", 1637},
+    {"pphm", 467},
+    {"ppm", 464},
+    {"ppmv", 776},
+    {"ppmw", 778},
+    {"pps", 855},
+    {"ppt", 466},
+    {"proton mass", 596},
+    {"proton_mass", 596},
     {"ps", 40},
     {"psi", 361},
     {"pt", 69},
-    {"pud", 558},
-    {"puds", 558},
+    {"pud", 562},
+    {"puds", 562},
     {"puncheon", 348},
     {"puncheons", 348},
-    {"px", 681},
-    {"qps", 745},
-    {"qquad", 432},
+    {"pvar", 1609},
+    {"px", 685},
+    {"p\xce\xa9", 1618},
+    {"qA", 1845},
+    {"qB", 1876},
+    {"qBps", 1878},
+    {"qBq", 1867},
+    {"qC", 1858},
+    {"qDa", 1874},
+    {"qF", 1860},
+    {"qGy", 1868},
+    {"qH", 1861},
+    {"qHz", 1856},
+    {"qJ", 1853},
+    {"qJy", 1849},
+    {"qK", 1846},
+    {"qL", 1871},
+    {"qN", 1852},
+    {"qPa", 1855},
+    {"qS", 1862},
+    {"qSv", 1869},
+    {"qT", 1864},
+    {"qV", 1857},
+    {"qVA", 1851},
+    {"qW", 1854},
+    {"qWb", 1863},
+    {"qb", 1875},
+    {"qbps", 1877},
+    {"qcd", 1848},
+    {"qcentury", 1881},
+    {"qeV", 1873},
+    {"qfortnight", 1880},
+    {"qg", 1843},
+    {"qkat", 1870},
+    {"ql", 1872},
+    {"qlm", 1865},
+    {"qlx", 1866},
+    {"qm", 1842},
+    {"qmol", 1847},
+    {"qpc", 1879},
+    {"qps", 849},
+    {"qquad", 436},
     {"qr", 291},
+    {"qs", 1844},
     {"qt", 68},
-    {"quad", 430},
-    {"quality adjusted life year", 688},
-    {"quality-adjusted life year", 688},
+    {"quad", 434},
+    {"quality adjusted life year", 692},
+    {"quality-adjusted life year", 692},
     {"quart", 68},
     {"quarter", 291},
     {"quarters", 291},
     {"quarts", 68},
-    {"queries", 452},
-    {"query", 452},
+    {"queries", 456},
+    {"query", 456},
     {"quintal", 307},
     {"quintals", 307},
-    {"qword", 606},
-    {"qwords", 606},
+    {"qvar", 1850},
+    {"qword", 610},
+    {"qwords", 610},
+    {"q\xce\xa9", 1859},
+    {"rA", 1804},
+    {"rB", 1836},
+    {"rBps", 1838},
+    {"rBq", 1826},
+    {"rC", 1817},
+    {"rDa", 1833},
+    {"rF", 1819},
+    {"rGy", 1827},
+    {"rH", 1820},
+    {"rHz", 1815},
+    {"rJ", 1812},
+    {"rJy", 1808},
+    {"rK", 1805},
+    {"rL", 1830},
+    {"rN", 1811},
+    {"rPa", 1814},
+    {"rS", 1821},
+    {"rSv", 1828},
+    {"rT", 1823},
+    {"rV", 1816},
+    {"rVA", 1810},
+    {"rW", 1813},
+    {"rWb", 1822},
     {"rack unit", 277},
     {"rack units", 277},
     {"rad", 84},
-    {"rad/s", 667},
-    {"rad/s\xc2\xb2", 668},
+    {"rad/s", 671},
+    {"rad/s\xc2\xb2", 672},
+    {"rad_dose", 755},
     {"radian", 84},
+    {"radiance", 747},
     {"radians", 84},
+    {"radiant exposure", 750},
+    {"radiant intensity", 746},
+    {"radiation absorbed dose", 755},
     {"rankine", 256},
     {"rankine difference", 265},
-    {"rbe", 701},
-    {"rd", 421},
+    {"rb", 1835},
+    {"rbe", 802},
+    {"rbps", 1837},
+    {"rcd", 1807},
+    {"rcentury", 1841},
+    {"rd", 425},
+    {"reV", 1832},
+    {"reactive power", 729},
     {"reaumur", 259},
-    {"rega", 516},
-    {"regaim", 516},
+    {"rega", 520},
+    {"regaim", 520},
     {"rehoboam", 355},
-    {"relative biological effectiveness", 701},
-    {"rem", 377},
-    {"rem_css", 684},
-    {"rems", 377},
-    {"request", 453},
-    {"requests", 453},
-    {"resistivity", 653},
-    {"rev", 443},
-    {"revolution", 443},
-    {"revolutions", 443},
-    {"revolutions per minute", 420},
-    {"revs", 443},
-    {"ri", 537},
-    {"richter", 698},
-    {"richter scale", 698},
-    {"rockwell", 487},
+    {"relative biological effectiveness", 802},
+    {"rem", 381},
+    {"rem_css", 688},
+    {"rems", 381},
+    {"request", 457},
+    {"requests", 457},
+    {"resistivity", 657},
+    {"rev", 447},
+    {"revolution", 447},
+    {"revolutions", 447},
+    {"revolutions per minute", 424},
+    {"revs", 447},
+    {"rfortnight", 1840},
+    {"rg", 1802},
+    {"ri", 541},
+    {"richter", 799},
+    {"richter scale", 799},
+    {"rkat", 1829},
+    {"rl", 1831},
+    {"rlm", 1824},
+    {"rlx", 1825},
+    {"rm", 1801},
+    {"rmol", 1806},
+    {"rockwell", 491},
     {"rod", 272},
     {"rods", 272},
-    {"roman libra", 570},
-    {"roman mile", 568},
-    {"roman uncia", 571},
+    {"roentgen", 756},
+    {"roentgens", 756},
+    {"roman libra", 574},
+    {"roman mile", 572},
+    {"roman uncia", 575},
     {"romer", 260},
-    {"rope", 623},
-    {"ropes", 623},
-    {"rot", 445},
-    {"rotation", 445},
-    {"rotations", 445},
-    {"rotations per minute", 420},
-    {"royal cubit", 573},
-    {"royal cubits", 573},
-    {"royal_cubit", 573},
-    {"rpm", 420},
-    {"rps", 747},
+    {"rope", 627},
+    {"ropes", 627},
+    {"rot", 449},
+    {"rotation", 449},
+    {"rotations", 449},
+    {"rotations per minute", 424},
+    {"royal cubit", 577},
+    {"royal cubits", 577},
+    {"royal_cubit", 577},
+    {"rpc", 1839},
+    {"rpm", 424},
+    {"rps", 851},
+    {"rs", 1803},
+    {"rt", 1834},
     {"rundlet", 345},
     {"rundlets", 345},
-    {"russian funt", 559},
-    {"russian_funt", 559},
-    {"rutherford", 421},
-    {"rutherfords", 421},
-    {"rydberg", 585},
-    {"rydberg_unit", 585},
-    {"rydbergs", 585},
+    {"russian funt", 563},
+    {"russian_funt", 563},
+    {"rutherford", 425},
+    {"rutherfords", 425},
+    {"rvar", 1809},
+    {"rydberg", 589},
+    {"rydberg_unit", 589},
+    {"rydbergs", 589},
     {"r\xc3\xa9\x61umur", 259},
     {"r\xc3\xb8mer", 260},
+    {"r\xce\xa9", 1818},
     {"s", 2},
-    {"sabbath day's journey", 502},
-    {"sabbatical", 519},
-    {"saffir simpson", 695},
-    {"saffir_simpson", 695},
-    {"sagan", 639},
-    {"sagans", 639},
-    {"sample", 441},
-    {"samples", 441},
-    {"savart", 617},
-    {"savarts", 617},
-    {"sazhen", 556},
-    {"sazhens", 556},
-    {"sb", 425},
-    {"score", 492},
-    {"scores", 492},
+    {"sabbath day's journey", 506},
+    {"sabbatical", 523},
+    {"saffir simpson", 796},
+    {"saffir_simpson", 796},
+    {"sagan", 643},
+    {"sagans", 643},
+    {"sample", 445},
+    {"samples", 445},
+    {"savart", 621},
+    {"savarts", 621},
+    {"sazhen", 560},
+    {"sazhens", 560},
+    {"sb", 429},
+    {"score", 496},
+    {"scores", 496},
     {"scruple", 300},
     {"scruples", 300},
-    {"seah", 507},
-    {"seahs", 507},
+    {"seah", 511},
+    {"seahs", 511},
     {"second", 2},
     {"seconds", 2},
-    {"sector", 608},
-    {"sectors", 608},
-    {"seer", 582},
-    {"seers", 582},
-    {"seim", 507},
-    {"semitone", 616},
-    {"semitones", 616},
-    {"shaftment", 626},
-    {"shaftments", 626},
+    {"sector", 612},
+    {"sectors", 612},
+    {"seer", 586},
+    {"seers", 586},
+    {"seim", 511},
+    {"semitone", 620},
+    {"semitones", 620},
+    {"shaftment", 630},
+    {"shaftments", 630},
     {"shake", 318},
     {"shakes", 318},
-    {"shaku", 535},
-    {"shakus", 535},
-    {"shed", 411},
-    {"shekalim", 510},
-    {"shekel", 510},
-    {"shekels", 510},
-    {"shmita", 519},
-    {"shmitas", 519},
-    {"shmitta", 519},
+    {"shaku", 539},
+    {"shakus", 539},
+    {"shed", 415},
+    {"shekalim", 514},
+    {"shekel", 514},
+    {"shekels", 514},
+    {"shmita", 523},
+    {"shmitas", 523},
+    {"shmitta", 523},
     {"short ton", 294},
     {"short tons", 294},
     {"sidereal day", 322},
@@ -18408,30 +20563,31 @@ static const WUnitAlias unit_aliases[] = {
     {"siderealday", 322},
     {"siderealyear", 319},
     {"siemens", 16},
-    {"siemens per meter", 654},
+    {"siemens per meter", 658},
     {"sievert", 25},
     {"sieverts", 25},
-    {"sk", 429},
-    {"skot", 429},
-    {"skots", 429},
+    {"sk", 433},
+    {"skot", 433},
+    {"skots", 433},
     {"slug", 298},
     {"slugs", 298},
     {"smidgen", 342},
     {"smidgens", 342},
     {"smoot", 274},
     {"smoots", 274},
-    {"solar mass", 398},
-    {"solar radius", 402},
-    {"solarmass", 398},
-    {"solarradius", 402},
-    {"sone", 464},
-    {"sones", 464},
-    {"span", 497},
-    {"spans", 497},
-    {"specific energy", 661},
-    {"specific heat capacity", 648},
-    {"specific_energy", 661},
-    {"spectral efficiency", 673},
+    {"solar mass", 402},
+    {"solar radius", 406},
+    {"solarmass", 402},
+    {"solarradius", 406},
+    {"sone", 468},
+    {"sones", 468},
+    {"span", 501},
+    {"spans", 501},
+    {"specific energy", 665},
+    {"specific heat capacity", 652},
+    {"specific_energy", 665},
+    {"spectral efficiency", 677},
+    {"spectral flux density", 748},
     {"split", 352},
     {"splits", 352},
     {"sq ft", 120},
@@ -18441,85 +20597,109 @@ static const WUnitAlias unit_aliases[] = {
     {"square foot", 120},
     {"sr", 86},
     {"st", 290},
-    {"standard gravity", 520},
+    {"standard gravity", 524},
+    {"statA", 732},
+    {"statC", 734},
+    {"statF", 740},
+    {"statH", 742},
+    {"statV", 736},
+    {"statampere", 732},
+    {"statcoulomb", 734},
+    {"statfarad", 740},
+    {"stathenry", 742},
+    {"statohm", 738},
+    {"statvolt", 736},
+    {"stat\xce\xa9", 738},
     {"steradian", 86},
     {"steradians", 86},
-    {"stere", 413},
-    {"stick", 526},
-    {"stick of butter", 526},
-    {"sticks", 526},
-    {"sticks of butter", 526},
-    {"stilb", 425},
-    {"stilbs", 425},
-    {"stokes", 396},
+    {"stere", 417},
+    {"stick", 530},
+    {"stick of butter", 530},
+    {"sticks", 530},
+    {"sticks of butter", 530},
+    {"stilb", 429},
+    {"stilbs", 429},
+    {"stokes", 400},
     {"stone", 290},
     {"stones", 290},
-    {"stop", 612},
-    {"stops", 612},
-    {"story point", 689},
-    {"story points", 689},
-    {"story_point", 689},
-    {"st\xc3\xa8re", 413},
-    {"st\xc3\xa8res", 413},
-    {"sun", 536},
-    {"suns", 536},
-    {"surface tension", 656},
+    {"stop", 616},
+    {"stops", 616},
+    {"story point", 693},
+    {"story points", 693},
+    {"story_point", 693},
+    {"st\xc3\xa8re", 417},
+    {"st\xc3\xa8res", 417},
+    {"sun", 540},
+    {"suns", 540},
+    {"surface tension", 660},
+    {"svedberg", 727},
+    {"svedbergs", 727},
+    {"sverdrup", 769},
+    {"sverdrups", 769},
+    {"symbol", 779},
+    {"symbols", 779},
     {"synodic month", 323},
     {"synodic months", 323},
     {"t", 36},
     {"tablespoon", 337},
     {"tablespoons", 337},
-    {"talent", 512},
-    {"talents", 512},
-    {"talmudic mil", 500},
-    {"talmudic_mil", 500},
-    {"tatami", 540},
-    {"tatamis", 540},
+    {"talent", 516},
+    {"talents", 516},
+    {"talmudic mil", 504},
+    {"talmudic_mil", 504},
+    {"tatami", 544},
+    {"tatamis", 544},
     {"tbsp", 337},
-    {"tce", 532},
+    {"tce", 536},
     {"teaspoon", 338},
     {"teaspoons", 338},
-    {"techum", 502},
-    {"techum shabbat", 502},
-    {"tefach", 498},
-    {"tefachim", 498},
-    {"tenth cent", 620},
-    {"tenth_cent", 620},
+    {"techum", 506},
+    {"techum shabbat", 506},
+    {"tefach", 502},
+    {"tefachim", 502},
+    {"tenth cent", 624},
+    {"tenth_cent", 624},
     {"tertian", 348},
     {"tesla", 18},
     {"teslas", 18},
-    {"tex", 635},
-    {"texpt", 406},
-    {"therm", 370},
-    {"thermal conductivity", 649},
-    {"therms", 370},
-    {"tick", 442},
-    {"ticks", 442},
+    {"tex", 639},
+    {"texpt", 410},
+    {"therm", 374},
+    {"thermal conductivity", 653},
+    {"thermochemical calorie", 370},
+    {"thermochemical kilocalorie", 372},
+    {"therms", 374},
+    {"tick", 446},
+    {"ticks", 446},
     {"tierce", 346},
     {"tierces", 346},
     {"tn", 294},
-    {"toise", 563},
-    {"toises", 563},
-    {"tok", 450},
-    {"tok/s", 737},
-    {"token", 450},
-    {"tokens", 450},
-    {"tola", 581},
-    {"tolas", 581},
+    {"toise", 567},
+    {"toises", 567},
+    {"tok", 454},
+    {"tok/J", 793},
+    {"tok/s", 841},
+    {"token", 454},
+    {"tokens", 454},
+    {"tokens per joule", 793},
+    {"tola", 585},
+    {"tolas", 585},
     {"ton", 294},
     {"tonne", 36},
-    {"tonne of coal equivalent", 532},
+    {"tonne of coal equivalent", 536},
     {"tonnes", 36},
     {"tons", 294},
-    {"torque", 672},
+    {"torque", 676},
     {"torr", 362},
     {"torrs", 362},
-    {"tps", 749},
-    {"transaction", 454},
-    {"transactions", 454},
-    {"transfer", 451},
-    {"transfers", 451},
-    {"transport carbon intensity", 680},
+    {"total electron content unit", 773},
+    {"tps", 853},
+    {"transaction", 458},
+    {"transactions", 458},
+    {"transfer", 455},
+    {"transfers", 455},
+    {"transport carbon intensity", 684},
+    {"traversed edges per second", 859},
     {"tropical year", 320},
     {"tropical years", 320},
     {"tropicalyear", 320},
@@ -18527,54 +20707,184 @@ static const WUnitAlias unit_aliases[] = {
     {"troy ounces", 304},
     {"troyounce", 304},
     {"tsp", 338},
-    {"tsubo", 539},
-    {"tsubos", 539},
+    {"tsubo", 543},
+    {"tsubos", 543},
     {"tun", 350},
     {"tuns", 350},
-    {"turn", 382},
-    {"turns", 382},
-    {"txn", 454},
+    {"turn", 386},
+    {"turns", 386},
+    {"txn", 458},
     {"t\xe2\x82\x9a", 326},
     {"u", 297},
-    {"uncia_roma", 571},
-    {"vershok", 557},
-    {"vershoks", 557},
-    {"verst", 554},
-    {"versts", 554},
-    {"vh", 686},
-    {"vickers", 486},
-    {"viewport height", 686},
-    {"viewport width", 685},
+    {"uA", 1448},
+    {"uB", 1480},
+    {"uBps", 1482},
+    {"uBq", 1470},
+    {"uC", 1461},
+    {"uDa", 1477},
+    {"uF", 1463},
+    {"uGy", 1471},
+    {"uH", 1464},
+    {"uHz", 1459},
+    {"uJ", 1456},
+    {"uJy", 1452},
+    {"uK", 1449},
+    {"uL", 1474},
+    {"uM", 700},
+    {"uN", 1455},
+    {"uPa", 1458},
+    {"uS", 1465},
+    {"uSv", 1472},
+    {"uT", 1467},
+    {"uV", 1460},
+    {"uVA", 1454},
+    {"uW", 1457},
+    {"uWb", 1466},
+    {"uas", 763},
+    {"ub", 1479},
+    {"ubps", 1481},
+    {"ucd", 1451},
+    {"ucentury", 1485},
+    {"ueV", 1476},
+    {"ufortnight", 1484},
+    {"ug", 1446},
+    {"ukat", 1473},
+    {"ul", 1475},
+    {"ulm", 1468},
+    {"ulx", 1469},
+    {"um", 1445},
+    {"umol", 1450},
+    {"uncia_roma", 575},
+    {"upc", 1483},
+    {"update", 781},
+    {"updates", 781},
+    {"us", 1447},
+    {"ut", 1478},
+    {"uvar", 1453},
+    {"u\xce\xa9", 1462},
+    {"var", 729},
+    {"vershok", 561},
+    {"vershoks", 561},
+    {"verst", 558},
+    {"versts", 558},
+    {"vh", 690},
+    {"vickers", 490},
+    {"viewport height", 690},
+    {"viewport width", 689},
     {"volt", 13},
+    {"volt ampere", 730},
+    {"volt-ampere", 730},
     {"volts", 13},
-    {"volts per meter", 651},
-    {"volumetric flow", 643},
-    {"vw", 685},
-    {"warhol", 418},
-    {"warhols", 418},
-    {"water horsepower", 597},
-    {"water_horsepower", 597},
+    {"volts per meter", 655},
+    {"volumetric flow", 647},
+    {"vw", 689},
+    {"warhol", 422},
+    {"warhols", 422},
+    {"water horsepower", 601},
+    {"water_horsepower", 601},
     {"watt", 11},
     {"watts", 11},
-    {"watts per square meter", 650},
-    {"wavenumber", 484},
+    {"watts per square meter", 654},
+    {"wavenumber", 488},
     {"weber", 17},
     {"webers", 17},
     {"wedgwood", 261},
     {"week", 311},
     {"weeks", 311},
     {"wk", 311},
+    {"yA", 1763},
+    {"yB", 1795},
+    {"yBps", 1797},
+    {"yBq", 1785},
+    {"yC", 1776},
+    {"yDa", 1792},
+    {"yF", 1778},
+    {"yGy", 1786},
+    {"yH", 1779},
+    {"yHz", 1774},
+    {"yJ", 1771},
+    {"yJy", 1767},
+    {"yK", 1764},
+    {"yL", 1789},
+    {"yN", 1770},
+    {"yPa", 1773},
+    {"yS", 1780},
+    {"ySv", 1787},
+    {"yT", 1782},
+    {"yV", 1775},
+    {"yVA", 1769},
+    {"yW", 1772},
+    {"yWb", 1781},
     {"yard", 62},
     {"yards", 62},
+    {"yb", 1794},
+    {"ybps", 1796},
+    {"ycd", 1766},
+    {"ycentury", 1800},
     {"yd", 62},
+    {"yeV", 1791},
     {"year", 313},
     {"years", 313},
-    {"yovel", 518},
-    {"yovels", 518},
+    {"yfortnight", 1799},
+    {"yg", 1761},
+    {"ykat", 1788},
+    {"yl", 1790},
+    {"ylm", 1783},
+    {"ylx", 1784},
+    {"ym", 1760},
+    {"ymol", 1765},
+    {"yovel", 522},
+    {"yovels", 522},
+    {"ypc", 1798},
     {"yr", 313},
-    {"zeret", 497},
-    {"zhang", 548},
-    {"zhangs", 548},
+    {"ys", 1762},
+    {"yt", 1793},
+    {"yvar", 1768},
+    {"y\xce\xa9", 1777},
+    {"zA", 1722},
+    {"zB", 1754},
+    {"zBps", 1756},
+    {"zBq", 1744},
+    {"zC", 1735},
+    {"zDa", 1751},
+    {"zF", 1737},
+    {"zGy", 1745},
+    {"zH", 1738},
+    {"zHz", 1733},
+    {"zJ", 1730},
+    {"zJy", 1726},
+    {"zK", 1723},
+    {"zL", 1748},
+    {"zN", 1729},
+    {"zPa", 1732},
+    {"zS", 1739},
+    {"zSv", 1746},
+    {"zT", 1741},
+    {"zV", 1734},
+    {"zVA", 1728},
+    {"zW", 1731},
+    {"zWb", 1740},
+    {"zb", 1753},
+    {"zbps", 1755},
+    {"zcd", 1725},
+    {"zcentury", 1759},
+    {"zeV", 1750},
+    {"zeret", 501},
+    {"zfortnight", 1758},
+    {"zg", 1720},
+    {"zhang", 552},
+    {"zhangs", 552},
+    {"zkat", 1747},
+    {"zl", 1749},
+    {"zlm", 1742},
+    {"zlx", 1743},
+    {"zm", 1719},
+    {"zmol", 1724},
+    {"zpc", 1757},
+    {"zs", 1721},
+    {"zt", 1752},
+    {"zvar", 1727},
+    {"z\xce\xa9", 1736},
     {"\xc2\xb0", 85},
     {"\xc2\xb0\x43", 20},
     {"\xc2\xb0\x44\x65", 257},
@@ -18588,12 +20898,54 @@ static const WUnitAlias unit_aliases[] = {
     {"\xc2\xb0W", 261},
     {"\xc2\xb0r", 259},
     {"\xc2\xb5\x41", 54},
+    {"\xc2\xb5\x42", 1558},
+    {"\xc2\xb5\x42ps", 1560},
+    {"\xc2\xb5\x42q", 1548},
+    {"\xc2\xb5\x43", 1539},
+    {"\xc2\xb5\x44\x61", 1555},
+    {"\xc2\xb5\x46", 1541},
+    {"\xc2\xb5Gy", 1549},
+    {"\xc2\xb5H", 1542},
+    {"\xc2\xb5Hz", 1537},
+    {"\xc2\xb5J", 1534},
+    {"\xc2\xb5Jy", 1530},
+    {"\xc2\xb5K", 1527},
+    {"\xc2\xb5L", 1552},
+    {"\xc2\xb5M", 700},
+    {"\xc2\xb5N", 1533},
+    {"\xc2\xb5Pa", 1536},
+    {"\xc2\xb5S", 1543},
+    {"\xc2\xb5Sv", 1550},
+    {"\xc2\xb5T", 1545},
+    {"\xc2\xb5V", 1538},
+    {"\xc2\xb5VA", 1532},
+    {"\xc2\xb5W", 1535},
+    {"\xc2\xb5Wb", 1544},
+    {"\xc2\xb5\x61s", 763},
+    {"\xc2\xb5\x62", 1557},
+    {"\xc2\xb5\x62ps", 1559},
+    {"\xc2\xb5\x63\x64", 1529},
+    {"\xc2\xb5\x63\x65ntury", 1563},
+    {"\xc2\xb5\x65V", 1554},
+    {"\xc2\xb5\x66ortnight", 1562},
     {"\xc2\xb5g", 35},
+    {"\xc2\xb5g/mL", 707},
+    {"\xc2\xb5kat", 1551},
+    {"\xc2\xb5l", 1553},
+    {"\xc2\xb5lm", 1546},
+    {"\xc2\xb5lx", 1547},
     {"\xc2\xb5m", 30},
+    {"\xc2\xb5mol", 1528},
+    {"\xc2\xb5mol/L", 700},
+    {"\xc2\xb5mol_photon/m\xc2\xb2/s", 754},
+    {"\xc2\xb5pc", 1561},
     {"\xc2\xb5s", 38},
+    {"\xc2\xb5t", 1556},
+    {"\xc2\xb5var", 1531},
+    {"\xc2\xb5\xce\xa9", 1540},
     {"\xc3\x85", 278},
     {"\xc3\xa5ngstr\xc3\xb6m", 278},
-    {"\xc9\xa1", 520},
+    {"\xc9\xa1", 524},
     {"\xca\x92", 301},
     {"\xce\x94K", 262},
     {"\xce\x94\xc2\xb0\x43", 263},
@@ -18605,11 +20957,54 @@ static const WUnitAlias unit_aliases[] = {
     {"\xce\x94\xc2\xb0R\xc3\xb8", 269},
     {"\xce\x94\xc2\xb0W", 270},
     {"\xce\xa9", 15},
-    {"\xce\xa9\xc2\xb7m", 653},
-    {"\xce\xb1", 590},
-    {"\xce\xbc_B", 481},
-    {"\xce\xbclife", 483},
-    {"\xce\xbcmort", 482},
+    {"\xce\xa9\xc2\xb7m", 657},
+    {"\xce\xb1", 594},
+    {"\xce\xbc\x41", 1489},
+    {"\xce\xbc\x42", 1521},
+    {"\xce\xbc\x42ps", 1523},
+    {"\xce\xbc\x42q", 1511},
+    {"\xce\xbc\x43", 1502},
+    {"\xce\xbc\x44\x61", 1518},
+    {"\xce\xbc\x46", 1504},
+    {"\xce\xbcGy", 1512},
+    {"\xce\xbcH", 1505},
+    {"\xce\xbcHz", 1500},
+    {"\xce\xbcJ", 1497},
+    {"\xce\xbcJy", 1493},
+    {"\xce\xbcK", 1490},
+    {"\xce\xbcL", 1515},
+    {"\xce\xbcM", 700},
+    {"\xce\xbcN", 1496},
+    {"\xce\xbcPa", 1499},
+    {"\xce\xbcS", 1506},
+    {"\xce\xbcSv", 1513},
+    {"\xce\xbcT", 1508},
+    {"\xce\xbcV", 1501},
+    {"\xce\xbcVA", 1495},
+    {"\xce\xbcW", 1498},
+    {"\xce\xbcWb", 1507},
+    {"\xce\xbc_B", 485},
+    {"\xce\xbc\x61s", 763},
+    {"\xce\xbc\x62", 1520},
+    {"\xce\xbc\x62ps", 1522},
+    {"\xce\xbc\x63\x64", 1492},
+    {"\xce\xbc\x63\x65ntury", 1526},
+    {"\xce\xbc\x65V", 1517},
+    {"\xce\xbc\x66ortnight", 1525},
+    {"\xce\xbcg", 1487},
+    {"\xce\xbckat", 1514},
+    {"\xce\xbcl", 1516},
+    {"\xce\xbclife", 487},
+    {"\xce\xbclm", 1509},
+    {"\xce\xbclx", 1510},
+    {"\xce\xbcm", 1486},
+    {"\xce\xbcmol", 1491},
+    {"\xce\xbcmort", 486},
+    {"\xce\xbcpc", 1524},
+    {"\xce\xbcs", 1488},
+    {"\xce\xbct", 1519},
+    {"\xce\xbcvar", 1494},
+    {"\xce\xbc\xce\xa9", 1503},
     {"\xe2\x84\x83", 20},
     {"\xe2\x84\x88", 300},
     {"\xe2\x84\x89", 87},
@@ -18638,15 +21033,22 @@ static const char *custom_dimension_names[] = {
     "absorbed_dose",
     "angle",
     "apgar",
+    "apparent_power",
     "beat",
     "beaufort",
     "beauty",
     "bortle",
+    "cell_count",
+    "cell_update",
+    "chemical_equivalent",
     "co2e",
+    "colony_forming_unit",
     "css_root_font_size",
     "cycle",
     "decay",
+    "detector_count",
     "ef",
+    "electron_column_density",
     "em",
     "entropy",
     "equivalent_dose",
@@ -18657,7 +21059,9 @@ static const char *custom_dimension_names[] = {
     "flop",
     "frame",
     "fujita",
+    "geopotential",
     "glucose_concentration",
+    "graph_edge",
     "hardness_brinell",
     "hardness_mohs",
     "hardness_rockwell",
@@ -18670,7 +21074,9 @@ static const char *custom_dimension_names[] = {
     "impulse",
     "instant",
     "instruction",
+    "international_unit",
     "io",
+    "ionizing_radiation_exposure",
     "iso_sensitivity",
     "jelly",
     "jiffy",
@@ -18685,17 +21091,23 @@ static const char *custom_dimension_names[] = {
     "magnitude_absolute",
     "magnitude_apparent",
     "magnitude_bolometric",
+    "mass_fraction",
+    "molecular_copy",
     "moment",
     "momentum",
     "op",
+    "osmotic_entity",
     "packet",
     "peanutbutter",
     "person",
+    "photon",
     "pitch",
+    "plaque_forming_unit",
     "quality_adjusted_life",
     "query",
     "ratio",
     "rbe",
+    "reactive_power",
     "request",
     "revolution",
     "rotation",
@@ -18704,8 +21116,8 @@ static const char *custom_dimension_names[] = {
     "solid_angle",
     "specific_energy",
     "spectral_efficiency",
-    "spectral_flux_density",
     "story_point",
+    "symbol",
     "temperature_delta",
     "tick",
     "token",
@@ -18715,6 +21127,7 @@ static const char *custom_dimension_names[] = {
     "transport_co2e",
     "viewport_height_percent",
     "viewport_width_percent",
+    "volume_fraction",
 };
 /* non-const: the custom region takes synthesized compound units at runtime */
 static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
@@ -18724,8 +21137,8 @@ static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
     [3] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* A */
     [4] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* K */
     [5] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* mol */
-    [6] = {{0,0,0,0,0,0,1,0}, 45, 1, 1, 1, 0, 0, 1}, /* cd */
-    [7] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 0, 0, 1}, /* Hz */
+    [6] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 0, 0, 1}, /* cd */
+    [7] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 0, 0, 1}, /* Hz */
     [8] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* N */
     [9] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* Pa */
     [10] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J */
@@ -18739,11 +21152,11 @@ static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
     [18] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* T */
     [19] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* H */
     [20] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 0, 5463, 20}, /* \xc2\xb0\x43 */
-    [21] = {{0,0,0,0,0,0,1,0}, 44, 1, 1, 1, 0, 0, 1}, /* lm */
-    [22] = {{-2,0,0,0,0,0,1,0}, 32, 1, 1, 1, 0, 0, 1}, /* lx */
-    [23] = {{0,0,-1,0,0,0,0,0}, 11, 1, 1, 1, 0, 0, 1}, /* Bq */
+    [21] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 0, 0, 1}, /* lm */
+    [22] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 0, 0, 1}, /* lx */
+    [23] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 0, 0, 1}, /* Bq */
     [24] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 0, 0, 1}, /* Gy */
-    [25] = {{2,0,-2,0,0,0,0,0}, 15, 1, 1, 1, 0, 0, 1}, /* Sv */
+    [25] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 0, 0, 1}, /* Sv */
     [26] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kat */
     [27] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* km */
     [28] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cm */
@@ -18759,10 +21172,10 @@ static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
     [38] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5s */
     [39] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* ns */
     [40] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* ps */
-    [41] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 3, 0, 1}, /* kHz */
-    [42] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 6, 0, 1}, /* MHz */
-    [43] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 9, 0, 1}, /* GHz */
-    [44] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 12, 0, 1}, /* THz */
+    [41] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 3, 0, 1}, /* kHz */
+    [42] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 6, 0, 1}, /* MHz */
+    [43] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 9, 0, 1}, /* GHz */
+    [44] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 12, 0, 1}, /* THz */
     [45] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kJ */
     [46] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MJ */
     [47] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GJ */
@@ -18804,7 +21217,7 @@ static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
     [83] = {{1,0,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m/s\xc2\xb2 */
     [84] = {{0,0,0,0,0,0,0,0}, 2, 1, 1, 1, 0, 0, 1}, /* rad */
     [85] = {{0,0,0,0,0,0,0,0}, 2, 1, 14964008, 857374503, 0, 0, 1}, /* \xc2\xb0 */
-    [86] = {{0,0,0,0,0,0,0,0}, 67, 1, 1, 1, 0, 0, 1}, /* sr */
+    [86] = {{0,0,0,0,0,0,0,0}, 84, 1, 1, 1, 0, 0, 1}, /* sr */
     [87] = {{0,0,0,0,1,0,0,0}, 0, 0, 5, 9, 0, 45967, 180}, /* \xc2\xb0\x46 */
     [88] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* bit */
     [89] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 0, 0, 1}, /* B */
@@ -18825,7 +21238,7 @@ static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
     [104] = {{-3,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* F/m */
     [105] = {{1,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* N/A\xc2\xb2 */
     [106] = {{0,1,-3,0,-4,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W/(m\xc2\xb2\xc2\xb7K\xe2\x81\xb4) */
-    [107] = {{2,1,-2,0,0,0,0,0}, 0, 0, 160217663400000001, 1, -36, 0, 1}, /* eV */
+    [107] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -27, 0, 1}, /* eV */
     [108] = {{2,1,-2,0,0,0,0,0}, 0, 0, 10467, 25, -2, 0, 1}, /* cal */
     [109] = {{2,1,-2,0,0,0,0,0}, 0, 0, 20934, 5, 0, 0, 1}, /* kcal */
     [110] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 101325, 1, 0, 0, 1}, /* atm */
@@ -18836,7 +21249,7 @@ static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
     [115] = {{1,0,0,0,0,0,0,0}, 0, 0, 94607304725808, 1, 2, 0, 1}, /* ly */
     [116] = {{1,0,0,0,0,0,0,0}, 0, 0, 1495978707, 1, 2, 0, 1}, /* au */
     [117] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 3, 0, 1}, /* pc */
-    [118] = {{0,0,0,0,0,0,0,0}, 17, 1, 1, 1, 0, 0, 1}, /* e\xe2\x82\x80 */
+    [118] = {{0,0,0,0,0,0,0,0}, 24, 1, 1, 1, 0, 0, 1}, /* e\xe2\x82\x80 */
     [119] = {{0,1,0,0,0,0,0,0}, 0, 0, 45359237, 1, -8, 0, 1}, /* lbs */
     [120] = {{2,0,0,0,0,0,0,0}, 0, 0, 145161, 15625, -2, 0, 1}, /* sqft */
     [121] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* sqm */
@@ -18848,15 +21261,15 @@ static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
     [259] = {{0,0,0,0,1,0,0,0}, 0, 0, 5, 4, 0, 5463, 20}, /* \xc2\xb0R\xc3\xa9 */
     [260] = {{0,0,0,0,1,0,0,0}, 0, 0, 4, 21, 1, 36241, 140}, /* \xc2\xb0R\xc3\xb8 */
     [261] = {{0,0,0,0,1,0,0,0}, 0, 0, 36111, 5, -2, 17063, 20}, /* \xc2\xb0W */
-    [262] = {{0,0,0,0,1,0,0,0}, 72, 1, 1, 1, 0, 0, 1}, /* \xce\x94K */
-    [263] = {{0,0,0,0,1,0,0,0}, 72, 1, 1, 1, 0, 0, 1}, /* \xce\x94\xc2\xb0\x43 */
-    [264] = {{0,0,0,0,1,0,0,0}, 72, 1, 5, 9, 0, 0, 1}, /* \xce\x94\xc2\xb0\x46 */
-    [265] = {{0,0,0,0,1,0,0,0}, 72, 1, 5, 9, 0, 0, 1}, /* \xce\x94\xc2\xb0R */
-    [266] = {{0,0,0,0,1,0,0,0}, 72, 1, -2, 3, 0, 0, 1}, /* \xce\x94\xc2\xb0\x44\x65 */
-    [267] = {{0,0,0,0,1,0,0,0}, 72, 1, 1, 33, 2, 0, 1}, /* \xce\x94\xc2\xb0N */
-    [268] = {{0,0,0,0,1,0,0,0}, 72, 1, 5, 4, 0, 0, 1}, /* \xce\x94\xc2\xb0R\xc3\xa9 */
-    [269] = {{0,0,0,0,1,0,0,0}, 72, 1, 4, 21, 1, 0, 1}, /* \xce\x94\xc2\xb0R\xc3\xb8 */
-    [270] = {{0,0,0,0,1,0,0,0}, 72, 1, 36111, 5, -2, 0, 1}, /* \xce\x94\xc2\xb0W */
+    [262] = {{0,0,0,0,1,0,0,0}, 89, 1, 1, 1, 0, 0, 1}, /* \xce\x94K */
+    [263] = {{0,0,0,0,1,0,0,0}, 89, 1, 1, 1, 0, 0, 1}, /* \xce\x94\xc2\xb0\x43 */
+    [264] = {{0,0,0,0,1,0,0,0}, 89, 1, 5, 9, 0, 0, 1}, /* \xce\x94\xc2\xb0\x46 */
+    [265] = {{0,0,0,0,1,0,0,0}, 89, 1, 5, 9, 0, 0, 1}, /* \xce\x94\xc2\xb0R */
+    [266] = {{0,0,0,0,1,0,0,0}, 89, 1, -2, 3, 0, 0, 1}, /* \xce\x94\xc2\xb0\x44\x65 */
+    [267] = {{0,0,0,0,1,0,0,0}, 89, 1, 1, 33, 2, 0, 1}, /* \xce\x94\xc2\xb0N */
+    [268] = {{0,0,0,0,1,0,0,0}, 89, 1, 5, 4, 0, 0, 1}, /* \xce\x94\xc2\xb0R\xc3\xa9 */
+    [269] = {{0,0,0,0,1,0,0,0}, 89, 1, 4, 21, 1, 0, 1}, /* \xce\x94\xc2\xb0R\xc3\xb8 */
+    [270] = {{0,0,0,0,1,0,0,0}, 89, 1, 36111, 5, -2, 0, 1}, /* \xce\x94\xc2\xb0W */
     [271] = {{1,0,0,0,0,0,0,0}, 0, 0, 25146, 125, 0, 0, 1}, /* fur */
     [272] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 25, -2, 0, 1}, /* rod */
     [273] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 625, 0, 0, 1}, /* ch */
@@ -18955,394 +21368,1533 @@ static WUnitInfo unit_info[W_UNIT_CAPACITY] = {
     [366] = {{1,1,-2,0,0,0,0,0}, 0, 0, 8896443230521, 2, -12, 0, 1}, /* lbf */
     [367] = {{1,1,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* kgf */
     [368] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -7, 0, 1}, /* erg */
-    [369] = {{2,1,-2,0,0,0,0,0}, 0, 0, 4085925351, 387271, -1, 0, 1}, /* BTU */
-    [370] = {{2,1,-2,0,0,0,0,0}, 0, 0, 52752792631, 5, -2, 0, 1}, /* therm */
-    [371] = {{2,1,-2,0,0,0,0,0}, 0, 0, 416402469, 3071227, -2, 0, 1}, /* ftlbf */
-    [372] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -5, 0, 1}, /* dyn */
-    [373] = {{2,1,-3,0,0,0,0,0}, 0, 0, 2068973376, 2774539, 0, 0, 1}, /* hp */
-    [374] = {{2,1,-3,0,0,0,0,0}, 0, 0, 588399, 8, -2, 0, 1}, /* PS */
-    [375] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* Ga */
-    [376] = {{0,0,-1,0,0,0,0,0}, 11, 1, 37, 1, 9, 0, 1}, /* Ci */
-    [377] = {{2,0,-2,0,0,0,0,0}, 15, 1, 1, 1, -2, 0, 1}, /* rem */
-    [378] = {{0,0,0,0,0,0,0,0}, 2, 1, 14964008, 857374503, 0, 0, 1}, /* deg */
-    [379] = {{0,0,0,0,0,0,0,0}, 2, 1, 1650943, 5675523967, 0, 0, 1}, /* arcmin */
-    [380] = {{0,0,0,0,0,0,0,0}, 2, 1, 286277, 59048869938, 0, 0, 1}, /* arcsec */
-    [381] = {{0,0,0,0,0,0,0,0}, 2, 1, 10906443, 694325726, 0, 0, 1}, /* gon */
-    [382] = {{0,0,0,0,0,0,0,0}, 2, 1, 411557987, 65501488, 0, 0, 1}, /* turn */
-    [383] = {{0,0,0,0,0,0,0,0}, 2, 1, 2752991, 2804173606, 0, 0, 1}, /* mil */
-    [384] = {{0,0,0,0,0,0,0,0}, 2, 1, 18369286, 748432043, 0, 0, 1}, /* brad */
-    [385] = {{1,0,-2,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* Gal */
-    [386] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* b */
-    [387] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 2, 0, 0, 1}, /* nibble */
-    [388] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 0, 0, 1}, /* o */
-    [389] = {{0,0,0,0,0,0,0,1}, 0, 0, 1125899906842624, 1, 0, 0, 1}, /* PiB */
-    [390] = {{0,0,0,0,0,0,0,1}, 0, 0, 1152921504606846976, 1, 0, 0, 1}, /* EiB */
-    [391] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* bps */
-    [392] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 0, 0, 1}, /* Bps */
-    [393] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* baud */
-    [394] = {{-1,1,-1,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* P */
-    [395] = {{-1,1,-1,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* cP */
-    [396] = {{2,0,-1,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* St */
-    [397] = {{2,0,-1,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* cSt */
-    [398] = {{0,1,0,0,0,0,0,0}, 0, 0, 198891999999999991, 1, 13, 0, 1}, /* solarmass */
-    [399] = {{0,1,0,0,0,0,0,0}, 0, 0, 597220000000000022, 1, 7, 0, 1}, /* earthmass */
-    [400] = {{0,1,0,0,0,0,0,0}, 0, 0, 189859999999999994, 1, 10, 0, 1}, /* jupitermass */
-    [401] = {{0,1,0,0,0,0,0,0}, 0, 0, 734199999999999969, 1, 5, 0, 1}, /* moonmass */
-    [402] = {{1,0,0,0,0,0,0,0}, 0, 0, 696, 1, 6, 0, 1}, /* solarradius */
-    [403] = {{1,0,0,0,0,0,0,0}, 0, 0, 6371, 1, 3, 0, 1}, /* earthradius */
-    [404] = {{1,0,0,0,0,0,0,0}, 0, 0, 176389, 5, -8, 0, 1}, /* point */
-    [405] = {{1,0,0,0,0,0,0,0}, 0, 0, 4233333, 1, -9, 0, 1}, /* pica */
-    [406] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 36135, -1, 0, 1}, /* texpt */
-    [407] = {{1,0,0,0,0,0,0,0}, 0, 0, 75213, 2, -8, 0, 1}, /* didot */
-    [408] = {{1,0,0,0,0,0,0,0}, 0, 0, 225639, 5, -7, 0, 1}, /* cicero */
-    [409] = {{1,0,0,0,0,0,0,0}, 0, 0, 33, 2, -1, 0, 1}, /* altuve */
-    [410] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000003, 1, -51, 0, 1}, /* outhouse */
-    [411] = {{2,0,0,0,0,0,0,0}, 0, 0, 10000000000000001, 1, -68, 0, 1}, /* shed */
-    [412] = {{3,0,0,0,0,0,0,0}, 0, 0, 2981, 25, -3, 0, 1}, /* barrel */
-    [413] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* stere */
-    [414] = {{3,0,0,0,0,0,0,0}, 0, 0, 906139, 25, -4, 0, 1}, /* cord */
-    [415] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 2, -8, 0, 1}, /* beard second */
-    [416] = {{3,0,0,0,0,0,0,0}, 0, 0, 180197, 58397870562, 0, 0, 1}, /* barn megaparsec */
-    [417] = {{2,0,-2,0,0,0,0,0}, 15, 1, 1, 1, -7, 0, 1}, /* banana */
-    [418] = {{0,0,0,0,0,0,0,0}, 19, 1, 15, 1, 0, 0, 1}, /* warhol */
-    [419] = {{0,0,0,0,0,0,0,0}, 19, 1, 15, 1, 3, 0, 1}, /* kilowarhol */
-    [420] = {{0,0,-1,0,0,0,0,0}, 63, 1, 1, 6, -1, 0, 1}, /* rpm */
-    [421] = {{0,0,-1,0,0,0,0,0}, 11, 1, 1, 1, 6, 0, 1}, /* rd */
-    [422] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -8, 0, 1}, /* Mx */
-    [423] = {{0,0,0,0,0,0,0,0}, 6, 1, 1, 1, 0, 0, 1}, /* millihelen */
-    [424] = {{-2,0,0,0,0,0,1,0}, 43, 1, 1, 1, 0, 0, 1}, /* nit */
-    [425] = {{-2,0,0,0,0,0,1,0}, 43, 1, 1, 1, 4, 0, 1}, /* sb */
-    [426] = {{-2,0,0,0,0,0,1,0}, 43, 1, 2898221063, 910503, 0, 0, 1}, /* La */
-    [427] = {{-2,0,0,0,0,0,1,0}, 43, 1, 330354972, 96418561, 0, 0, 1}, /* fL */
-    [428] = {{-2,0,0,0,0,0,1,0}, 43, 1, 78256779, 245850922, 0, 0, 1}, /* asb */
-    [429] = {{-2,0,0,0,0,0,1,0}, 43, 1, 2111208, 6632555543, 0, 0, 1}, /* sk */
-    [430] = {{0,0,0,0,0,0,0,0}, 13, 1, 1, 1, 0, 0, 1}, /* em */
-    [431] = {{0,0,0,0,0,0,0,0}, 13, 1, 1, 2, 0, 0, 1}, /* en */
-    [432] = {{0,0,0,0,0,0,0,0}, 13, 1, 2, 1, 0, 0, 1}, /* qquad */
-    [433] = {{0,0,0,0,0,0,0,0}, 55, 1, 1, 1, 0, 0, 1}, /* peanutbutter */
-    [434] = {{0,0,0,0,0,0,0,0}, 38, 1, 1, 1, 0, 0, 1}, /* jelly */
-    [435] = {{0,0,0,0,0,0,0,0}, 4, 1, 1, 1, 0, 0, 1}, /* beat */
-    [436] = {{0,0,0,0,0,0,0,0}, 10, 1, 1, 1, 0, 0, 1}, /* cycle */
-    [437] = {{0,0,0,0,0,0,0,0}, 21, 1, 1, 1, 0, 0, 1}, /* frame */
-    [438] = {{0,0,0,0,0,0,0,0}, 34, 1, 1, 1, 0, 0, 1}, /* instant */
-    [439] = {{0,0,0,0,0,0,0,0}, 39, 1, 1, 1, 0, 0, 1}, /* jiffy */
-    [440] = {{0,0,0,0,0,0,0,0}, 51, 1, 1, 1, 0, 0, 1}, /* moment */
-    [441] = {{0,0,0,0,0,0,0,0}, 66, 1, 1, 1, 0, 0, 1}, /* sample */
-    [442] = {{0,0,0,0,0,0,0,0}, 73, 1, 1, 1, 0, 0, 1}, /* tick */
-    [443] = {{0,0,0,0,0,0,0,0}, 63, 1, 1, 1, 0, 0, 1}, /* revolution */
-    [444] = {{0,0,0,0,0,0,0,0}, 11, 1, 1, 1, 0, 0, 1}, /* decay */
-    [445] = {{0,0,0,0,0,0,0,0}, 64, 1, 1, 1, 0, 0, 1}, /* rotation */
-    [446] = {{0,0,0,0,0,0,0,0}, 20, 1, 1, 1, 0, 0, 1}, /* flop */
-    [447] = {{0,0,0,0,0,0,0,0}, 53, 1, 1, 1, 0, 0, 1}, /* op */
-    [448] = {{0,0,0,0,0,0,0,0}, 46, 1, 1, 1, 0, 0, 1}, /* mac */
-    [449] = {{0,0,0,0,0,0,0,0}, 35, 1, 1, 1, 0, 0, 1}, /* instruction */
-    [450] = {{0,0,0,0,0,0,0,0}, 74, 1, 1, 1, 0, 0, 1}, /* tok */
-    [451] = {{0,0,0,0,0,0,0,0}, 77, 1, 1, 1, 0, 0, 1}, /* transfer */
-    [452] = {{0,0,0,0,0,0,0,0}, 59, 1, 1, 1, 0, 0, 1}, /* query */
-    [453] = {{0,0,0,0,0,0,0,0}, 62, 1, 1, 1, 0, 0, 1}, /* request */
-    [454] = {{0,0,0,0,0,0,0,0}, 76, 1, 1, 1, 0, 0, 1}, /* txn */
-    [455] = {{0,0,0,0,0,0,0,0}, 54, 1, 1, 1, 0, 0, 1}, /* packet */
-    [456] = {{0,0,0,0,0,0,0,0}, 36, 1, 1, 1, 0, 0, 1}, /* io */
-    [457] = {{0,0,0,0,0,0,0,1}, 0, 0, 51711048, 286746937, 0, 0, 1}, /* nat */
-    [458] = {{0,0,0,0,0,0,0,1}, 0, 0, 36741077, 8848133, -1, 0, 1}, /* ban */
-    [459] = {{0,0,0,0,0,0,0,1}, 0, 0, 34582415, 832827539, 0, 0, 1}, /* deciban */
-    [460] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, -6, 0, 1}, /* ppm */
-    [461] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, -9, 0, 1}, /* ppb */
-    [462] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, -12, 0, 1}, /* ppt */
-    [463] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, -8, 0, 1}, /* pphm */
-    [464] = {{0,0,0,0,0,0,0,0}, 41, 1, 1, 1, 0, 0, 1}, /* sone */
-    [465] = {{0,0,0,0,0,0,0,0}, 42, 1, 1, 1, 0, 0, 1}, /* phon */
-    [466] = {{0,0,0,0,0,0,0,0}, 70, 1, 1, 1, 0, 0, 1}, /* Jy */
-    [467] = {{0,0,0,0,0,0,0,0}, 49, 1, 1, 1, 0, 0, 1}, /* mag */
-    [468] = {{0,0,0,0,0,0,0,0}, 48, 1, 1, 1, 0, 0, 1}, /* Mag */
-    [469] = {{0,0,0,0,0,0,0,0}, 50, 1, 1, 1, 0, 0, 1}, /* M_bol */
-    [470] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000018, 1, -60, 0, 1}, /* femtobarn */
-    [471] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000012, 1, -63, 0, 1}, /* attobarn */
-    [472] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000003, 1, -57, 0, 1}, /* picobarn */
-    [473] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000017, 1, -54, 0, 1}, /* nanobarn */
-    [474] = {{-2,0,0,0,0,0,0,0}, 0, 0, 100000000000000001, 1, 26, 0, 1}, /* fb\xe2\x81\xbb\xc2\xb9 */
-    [475] = {{-2,0,0,0,0,0,0,0}, 0, 0, 999999999999999993, 1, 28, 0, 1}, /* ab\xe2\x81\xbb\xc2\xb9 */
-    [476] = {{-2,0,0,0,0,0,0,0}, 0, 0, 100000000000000003, 1, 23, 0, 1}, /* pb\xe2\x81\xbb\xc2\xb9 */
-    [477] = {{-2,0,0,0,0,0,0,0}, 0, 0, 999999999999999954, 1, 19, 0, 1}, /* nb\xe2\x81\xbb\xc2\xb9 */
-    [478] = {{-1,0,0,1,0,0,0,0}, 0, 0, 707761077, 8893988, 0, 0, 1}, /* Oe */
-    [479] = {{0,0,0,1,0,0,0,0}, 0, 0, 116522652, 146426683, 0, 0, 1}, /* Gb */
-    [480] = {{1,0,1,1,0,0,0,0}, 0, 0, 333564000000000034, 1, -47, 0, 1}, /* D */
-    [481] = {{2,0,0,1,0,0,0,0}, 0, 0, 927401007830000118, 1, -41, 0, 1}, /* \xce\xbc_B */
-    [482] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* micromort */
-    [483] = {{0,0,1,0,0,0,0,0}, 0, 0, 18, 1, 2, 0, 1}, /* microlife */
-    [484] = {{-1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* kayser */
-    [485] = {{0,0,0,0,0,0,0,0}, 25, 1, 1, 1, 0, 0, 1}, /* mohs */
-    [486] = {{0,0,0,0,0,0,0,0}, 27, 1, 1, 1, 0, 0, 1}, /* vickers */
-    [487] = {{0,0,0,0,0,0,0,0}, 26, 1, 1, 1, 0, 0, 1}, /* rockwell */
-    [488] = {{0,0,0,0,0,0,0,0}, 24, 1, 1, 1, 0, 0, 1}, /* brinell */
-    [489] = {{0,0,0,0,0,0,0,0}, 0, 0, 12, 1, 0, 0, 1}, /* dozen */
-    [490] = {{0,0,0,0,0,0,0,0}, 0, 0, 144, 1, 0, 0, 1}, /* gross */
-    [491] = {{0,0,0,0,0,0,0,0}, 0, 0, 1728, 1, 0, 0, 1}, /* great_gross */
-    [492] = {{0,0,0,0,0,0,0,0}, 0, 0, 2, 1, 1, 0, 1}, /* score */
-    [493] = {{0,0,0,0,0,0,0,0}, 0, 0, 13, 1, 0, 0, 1}, /* bakers_dozen */
-    [494] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, 100, 0, 1}, /* googol */
-    [495] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, 1000, 0, 1}, /* googolplex */
-    [496] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 25, -2, 0, 1}, /* cubit */
-    [497] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 5, -3, 0, 1}, /* span */
-    [498] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 5, -3, 0, 1}, /* handbreadth */
-    [499] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 2, -4, 0, 1}, /* fingerbreadth */
-    [500] = {{1,0,0,0,0,0,0,0}, 0, 0, 4572, 5, 0, 0, 1}, /* biblical_mil */
-    [501] = {{1,0,0,0,0,0,0,0}, 0, 0, 18288, 5, 0, 0, 1}, /* parsa */
-    [502] = {{1,0,0,0,0,0,0,0}, 0, 0, 4572, 5, 0, 0, 1}, /* techum */
-    [503] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, -2, 0, 1}, /* omer */
-    [504] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, -1, 0, 1}, /* ephah */
-    [505] = {{3,0,0,0,0,0,0,0}, 0, 0, 9, 25, -2, 0, 1}, /* hin */
-    [506] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, -1, 0, 1}, /* bath */
-    [507] = {{3,0,0,0,0,0,0,0}, 0, 0, 9, 125, -1, 0, 1}, /* seah */
-    [508] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, 0, 0, 1}, /* kor */
-    [509] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 25, -2, 0, 1}, /* kab */
-    [510] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 2, -3, 0, 1}, /* shekel */
-    [511] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 4, -1, 0, 1}, /* biblical_mina */
-    [512] = {{0,1,0,0,0,0,0,0}, 0, 0, 69, 2, 0, 0, 1}, /* biblical_talent */
-    [513] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 4, -4, 0, 1}, /* gerah */
-    [514] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 4, -3, 0, 1}, /* beka */
-    [515] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 3, 1, 0, 1}, /* helek */
-    [516] = {{0,0,1,0,0,0,0,0}, 0, 0, 76, 405, 0, 0, 1}, /* rega */
-    [517] = {{0,0,1,0,0,0,0,0}, 0, 0, 432, 1, 2, 0, 1}, /* onah */
-    [518] = {{0,0,1,0,0,0,0,0}, 0, 0, 15778476, 1, 2, 0, 1}, /* yovel */
-    [519] = {{0,0,1,0,0,0,0,0}, 0, 0, 220898664, 1, 0, 0, 1}, /* shmita */
-    [520] = {{1,0,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* g\xe2\x82\x80 */
-    [521] = {{1,0,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* g_n */
-    [522] = {{1,0,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* gee */
-    [523] = {{-2,0,0,0,0,0,0,0}, 0, 0, 48, 112903, 9, 0, 1}, /* mpg */
-    [524] = {{-2,0,0,0,0,0,0,0}, 0, 0, 48, 112903, 9, 0, 1}, /* mpge */
-    [525] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, -8, 0, 1}, /* L/100km */
-    [526] = {{0,1,0,0,0,0,0,0}, 0, 0, 45359237, 4, -8, 0, 1}, /* stick */
-    [527] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* kiloton */
-    [528] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* megaton */
-    [529] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* gigaton */
-    [530] = {{3,0,0,0,0,0,0,0}, 0, 0, 41225904, 259303135, 0, 0, 1}, /* oil_barrel */
-    [531] = {{2,1,-2,0,0,0,0,0}, 0, 0, 6119, 1, 6, 0, 1}, /* BOE */
-    [532] = {{2,1,-2,0,0,0,0,0}, 0, 0, 2931, 1, 7, 0, 1}, /* TCE */
-    [533] = {{0,0,0,0,0,0,0,0}, 28, 1, 1, 1, 0, 0, 1}, /* heap */
-    [534] = {{0,0,0,0,0,0,0,0}, 30, 1, 1, 1, 0, 0, 1}, /* hole */
-    [535] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 33, 1, 0, 1}, /* shaku */
-    [536] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 33, 0, 0, 1}, /* sun */
-    [537] = {{1,0,0,0,0,0,0,0}, 0, 0, 432, 11, 1, 0, 1}, /* ri */
-    [538] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 33, 2, 0, 1}, /* jo */
-    [539] = {{2,0,0,0,0,0,0,0}, 0, 0, 4, 121, 2, 0, 1}, /* tsubo */
-    [540] = {{2,0,0,0,0,0,0,0}, 0, 0, 2, 121, 2, 0, 1}, /* tatami */
-    [541] = {{3,0,0,0,0,0,0,0}, 0, 0, 18039, 1, -5, 0, 1}, /* koku */
-    [542] = {{3,0,0,0,0,0,0,0}, 0, 0, 18039, 1, -8, 0, 1}, /* g\xc5\x8d */
-    [543] = {{0,1,0,0,0,0,0,0}, 0, 0, 3, 8, -2, 0, 1}, /* momme */
-    [544] = {{0,1,0,0,0,0,0,0}, 0, 0, 15, 4, 0, 0, 1}, /* kanme */
-    [545] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, 0, 0, 1}, /* chi */
-    [546] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, -1, 0, 1}, /* cun */
-    [547] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, -2, 0, 1}, /* fen */
-    [548] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, 1, 0, 1}, /* zhang */
-    [549] = {{1,0,0,0,0,0,0,0}, 0, 0, 5, 1, 2, 0, 1}, /* li_cn */
-    [550] = {{2,0,0,0,0,0,0,0}, 0, 0, 2, 3, 3, 0, 1}, /* mu */
-    [551] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 2, 0, 0, 1}, /* jin */
-    [552] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 2, -1, 0, 1}, /* liang */
-    [553] = {{0,1,0,0,0,0,0,0}, 0, 0, 5, 1, 1, 0, 1}, /* dan_cn */
-    [554] = {{1,0,0,0,0,0,0,0}, 0, 0, 5334, 5, 0, 0, 1}, /* verst */
-    [555] = {{1,0,0,0,0,0,0,0}, 0, 0, 889, 125, -1, 0, 1}, /* arshin */
-    [556] = {{1,0,0,0,0,0,0,0}, 0, 0, 2667, 125, -1, 0, 1}, /* sazhen */
-    [557] = {{1,0,0,0,0,0,0,0}, 0, 0, 889, 2, -4, 0, 1}, /* vershok */
-    [558] = {{0,1,0,0,0,0,0,0}, 0, 0, 32761, 2, -3, 0, 1}, /* pud */
-    [559] = {{0,1,0,0,0,0,0,0}, 0, 0, 40951241, 1, -8, 0, 1}, /* funt_ru */
-    [560] = {{3,0,0,0,0,0,0,0}, 0, 0, 20991, 1, -5, 0, 1}, /* chetvert */
-    [561] = {{1,0,0,0,0,0,0,0}, 0, 0, 1624203, 5, -6, 0, 1}, /* pied */
-    [562] = {{1,0,0,0,0,0,0,0}, 0, 0, 2707, 1, -5, 0, 1}, /* pouce */
-    [563] = {{1,0,0,0,0,0,0,0}, 0, 0, 487259, 25, -4, 0, 1}, /* toise */
-    [564] = {{2,0,0,0,0,0,0,0}, 0, 0, 341889, 1, -2, 0, 1}, /* arpent */
-    [565] = {{1,0,0,0,0,0,0,0}, 0, 0, 487259, 125, 0, 0, 1}, /* lieue_de_poste */
-    [566] = {{1,0,0,0,0,0,0,0}, 0, 0, 37, 125, 0, 0, 1}, /* pes */
-    [567] = {{1,0,0,0,0,0,0,0}, 0, 0, 37, 25, 0, 0, 1}, /* passus */
-    [568] = {{1,0,0,0,0,0,0,0}, 0, 0, 148, 1, 1, 0, 1}, /* mille_passuum */
-    [569] = {{2,0,0,0,0,0,0,0}, 0, 0, 251943, 1, -2, 0, 1}, /* iugerum */
-    [570] = {{0,1,0,0,0,0,0,0}, 0, 0, 16447, 5, -4, 0, 1}, /* libra_roma */
-    [571] = {{0,1,0,0,0,0,0,0}, 0, 0, 137, 5, -3, 0, 1}, /* uncia_roma */
-    [572] = {{3,0,0,0,0,0,0,0}, 0, 0, 82, 3125, 0, 0, 1}, /* amphora */
-    [573] = {{1,0,0,0,0,0,0,0}, 0, 0, 21, 4, -1, 0, 1}, /* royal_cubit */
-    [574] = {{1,0,0,0,0,0,0,0}, 0, 0, 3, 4, -1, 0, 1}, /* egypt_palm */
-    [575] = {{1,0,0,0,0,0,0,0}, 0, 0, 3, 16, -1, 0, 1}, /* digit */
-    [576] = {{1,0,0,0,0,0,0,0}, 0, 0, 105, 2, 0, 0, 1}, /* khet */
-    [577] = {{2,0,0,0,0,0,0,0}, 0, 0, 11025, 4, 0, 0, 1}, /* aroura */
-    [578] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 25, -2, 0, 1}, /* hath */
-    [579] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 125, -1, 0, 1}, /* gaz */
-    [580] = {{1,0,0,0,0,0,0,0}, 0, 0, 3219, 1, 0, 0, 1}, /* kos */
-    [581] = {{0,1,0,0,0,0,0,0}, 0, 0, 729, 625, -2, 0, 1}, /* tola */
-    [582] = {{0,1,0,0,0,0,0,0}, 0, 0, 9331, 1, -4, 0, 1}, /* seer */
-    [583] = {{0,1,0,0,0,0,0,0}, 0, 0, 186621, 5, -3, 0, 1}, /* maund */
-    [584] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 229371227839632473, 0, 0, 1}, /* hartree */
-    [585] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 458742455679275483, 0, 0, 1}, /* rydberg_unit */
-    [586] = {{1,0,0,0,0,0,0,0}, 0, 0, 1331, 25152254718769, 0, 0, 1}, /* bohr_radius */
-    [587] = {{1,0,0,0,0,0,0,0}, 0, 0, 244, 100564221388997, 0, 0, 1}, /* compton_e */
-    [588] = {{1,0,0,0,0,0,0,0}, 0, 0, 4, 3027069900897207, 0, 0, 1}, /* compton_p */
-    [589] = {{1,0,0,0,0,0,0,0}, 0, 0, 6, 4546863708731791, 0, 0, 1}, /* compton_n */
-    [590] = {{0,0,0,0,0,0,0,0}, 0, 0, 6648447, 911076577, 0, 0, 1}, /* fine_structure */
-    [591] = {{0,1,0,0,0,0,0,0}, 0, 0, 910938370150000167, 1, -48, 0, 1}, /* electron_mass */
-    [592] = {{0,1,0,0,0,0,0,0}, 0, 0, 167262192369000028, 1, -44, 0, 1}, /* proton_mass */
-    [593] = {{0,1,0,0,0,0,0,0}, 0, 0, 167492749804000019, 1, -44, 0, 1}, /* neutron_mass */
-    [594] = {{0,1,0,0,0,0,0,0}, 0, 0, 188353162700000022, 1, -45, 0, 1}, /* muon_mass */
-    [595] = {{2,1,-3,0,0,0,0,0}, 0, 0, 19619, 2, 0, 0, 1}, /* boiler_horsepower */
-    [596] = {{2,1,-3,0,0,0,0,0}, 0, 0, 746, 1, 0, 0, 1}, /* electric_horsepower */
-    [597] = {{2,1,-3,0,0,0,0,0}, 0, 0, 746043, 1, -3, 0, 1}, /* water_horsepower */
-    [598] = {{2,1,-3,0,0,0,0,0}, 0, 0, 25013, 1, -2, 0, 1}, /* donkeypower */
-    [599] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 4, -3, 0, 1}, /* metric_cup */
-    [600] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 2, -5, 0, 1}, /* metric_tbsp */
-    [601] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 5, -4, 0, 1}, /* australian_tbsp */
-    [602] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 5, -3, 0, 1}, /* japanese_cup */
-    [603] = {{3,0,0,0,0,0,0,0}, 0, 0, 825646, 1452933239, 0, 0, 1}, /* imperial_pint */
-    [604] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 4, 0, 0, 1}, /* crumb */
-    [605] = {{0,0,0,0,0,0,0,1}, 0, 0, 4, 1, 0, 0, 1}, /* dword */
-    [606] = {{0,0,0,0,0,0,0,1}, 0, 0, 8, 1, 0, 0, 1}, /* qword */
-    [607] = {{0,0,0,0,0,0,0,1}, 0, 0, 16, 1, 0, 0, 1}, /* paragraph */
-    [608] = {{0,0,0,0,0,0,0,1}, 0, 0, 512, 1, 0, 0, 1}, /* sector */
-    [609] = {{0,0,0,0,0,0,0,1}, 0, 0, 4096, 1, 0, 0, 1}, /* page */
-    [610] = {{0,0,0,0,0,0,0,1}, 0, 0, 1024, 1, 0, 0, 1}, /* block */
-    [611] = {{0,0,0,0,0,0,0,1}, 0, 0, 4096, 1, 0, 0, 1}, /* cluster */
-    [612] = {{0,0,0,0,0,0,0,0}, 16, 1, 1, 1, 0, 0, 1}, /* EV */
-    [613] = {{0,0,0,0,0,0,0,0}, 18, 1, 1, 1, 0, 0, 1}, /* f_stop */
-    [614] = {{0,0,0,0,0,0,0,0}, 37, 1, 1, 1, 0, 0, 1}, /* ISO_speed */
-    [615] = {{0,0,0,0,0,0,0,0}, 57, 1, 1, 1, 0, 0, 1}, /* cent_pitch */
-    [616] = {{0,0,0,0,0,0,0,0}, 57, 1, 1, 1, 2, 0, 1}, /* semitone */
-    [617] = {{0,0,0,0,0,0,0,0}, 57, 1, 1, 301, 3, 0, 1}, /* savart */
-    [618] = {{0,0,0,0,0,0,0,0}, 57, 1, 12, 1, 2, 0, 1}, /* octave */
-    [619] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* basis_point */
-    [620] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* tenth_cent */
-    [621] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* pip */
-    [622] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 625, -2, 0, 1}, /* link_chain */
-    [623] = {{1,0,0,0,0,0,0,0}, 0, 0, 762, 125, 0, 0, 1}, /* rope */
-    [624] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 25, -2, 0, 1}, /* perch */
-    [625] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 15, -3, 0, 1}, /* barleycorn */
-    [626] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 25, -2, 0, 1}, /* shaftment */
-    [627] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 25, -2, 0, 1}, /* english_cubit */
-    [628] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 2, -4, 0, 1}, /* nail_cloth */
-    [629] = {{1,0,0,0,0,0,0,0}, 0, 0, 926, 5, 0, 0, 1}, /* cable_length */
-    [630] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 196133, 2, -1, 0, 1}, /* mH2O */
-    [631] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 2490889, 1, -4, 0, 1}, /* inH2O */
-    [632] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 29890669, 1, -4, 0, 1}, /* ftH2O */
-    [633] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* pieze */
-    [634] = {{0,0,0,0,0,0,0,0}, 40, 1, 1, 9, -6, 0, 1}, /* denier */
-    [635] = {{0,0,0,0,0,0,0,0}, 40, 1, 1, 1, -6, 0, 1}, /* tex */
-    [636] = {{0,0,0,0,0,0,0,0}, 40, 1, 1, 1, -7, 0, 1}, /* decitex */
-    [637] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, -3, 0, 1}, /* french_gauge */
-    [638] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 1, -6, 0, 1}, /* mickey */
-    [639] = {{0,0,0,0,0,0,0,0}, 0, 0, 4, 1, 9, 0, 1}, /* sagan */
-    [640] = {{1,0,0,0,0,0,0,0}, 0, 0, 34420332, 114813869, 0, 0, 1}, /* light_nanosecond */
-    [641] = {{1,0,0,0,0,0,0,0}, 0, 0, 9, 5, -1, 0, 1}, /* banana_for_scale */
-    [642] = {{-3,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/m\xc2\xb3 */
-    [643] = {{3,0,-1,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m\xc2\xb3/s */
-    [644] = {{3,0,-1,0,0,0,0,0}, 0, 0, 1, 6, -4, 0, 1}, /* L/min */
-    [645] = {{0,1,-1,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/s */
-    [646] = {{2,1,-2,0,-1,0,0,0}, 29, 1, 1, 1, 0, 0, 1}, /* heat_capacity */
-    [647] = {{2,1,-2,0,-1,0,0,0}, 14, 1, 1, 1, 0, 0, 1}, /* entropy */
-    [648] = {{2,0,-2,0,-1,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/kg/K */
-    [649] = {{1,1,-3,0,-1,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W/m/K */
-    [650] = {{0,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W/m\xc2\xb2 */
-    [651] = {{1,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* V/m */
-    [652] = {{-2,0,0,1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* A/m\xc2\xb2 */
-    [653] = {{3,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* \xce\xa9\xc2\xb7m */
-    [654] = {{-3,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* S/m */
-    [655] = {{-3,0,1,1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* C/m\xc2\xb3 */
-    [656] = {{0,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* N/m */
-    [657] = {{-1,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/m */
-    [658] = {{-2,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/m\xc2\xb2 */
-    [659] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/m\xc2\xb3 */
-    [660] = {{2,0,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/kg */
-    [661] = {{2,0,-2,0,0,0,0,0}, 68, 1, 1, 1, 0, 0, 1}, /* specific_energy */
-    [662] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, 0, 0, 1}, /* mol/mol */
-    [663] = {{-3,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kat/m\xc2\xb3 */
-    [664] = {{-2,0,0,0,0,0,1,0}, 43, 1, 1, 1, 0, 0, 1}, /* cd/m\xc2\xb2 */
-    [665] = {{-2,0,1,0,0,0,1,0}, 32, 1, 1, 1, 0, 0, 1}, /* lx\xc2\xb7s */
-    [666] = {{0,0,1,0,0,0,1,0}, 44, 1, 1, 1, 0, 0, 1}, /* lm\xc2\xb7s */
-    [667] = {{0,0,-1,0,0,0,0,0}, 2, 1, 1, 1, 0, 0, 1}, /* rad/s */
-    [668] = {{0,0,-2,0,0,0,0,0}, 2, 1, 1, 1, 0, 0, 1}, /* rad/s\xc2\xb2 */
-    [669] = {{1,0,-3,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m/s\xc2\xb3 */
-    [670] = {{1,1,-1,0,0,0,0,0}, 52, 1, 1, 1, 0, 0, 1}, /* kg\xc2\xb7m/s */
-    [671] = {{1,1,-1,0,0,0,0,0}, 33, 1, 1, 1, 0, 0, 1}, /* N\xc2\xb7s */
-    [672] = {{2,1,-2,0,0,0,0,0}, 75, 1, 1, 1, 0, 0, 1}, /* N\xc2\xb7m */
-    [673] = {{0,0,0,0,0,0,0,1}, 69, 1, 1, 8, 0, 0, 1}, /* bit/s/Hz */
-    [674] = {{2,1,-2,0,0,0,0,0}, 53, -1, 1, 1, 0, 0, 1}, /* J/op */
-    [675] = {{2,1,-2,0,0,0,0,0}, 74, -1, 1, 1, 0, 0, 1}, /* J/tok */
-    [676] = {{0,0,0,0,0,0,0,1}, 20, -1, 1, 1, 0, 0, 1}, /* B/flop */
-    [677] = {{0,1,0,0,0,0,0,0}, 8, 1, 1, 1, 0, 0, 1}, /* kgCO\xe2\x82\x82\x65 */
-    [678] = {{0,1,0,0,0,0,0,0}, 8, 1, 1, 1, -3, 0, 1}, /* gCO\xe2\x82\x82\x65 */
-    [679] = {{-2,0,2,0,0,0,0,0}, 8, 1, 1, 36, -8, 0, 1}, /* gCO\xe2\x82\x82\x65/kWh */
-    [680] = {{-1,1,0,0,0,0,0,0}, 78, 1, 1, 1, -6, 0, 1}, /* gCO\xe2\x82\x82\x65/pkm */
-    [681] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 48, -4, 0, 1}, /* px */
-    [682] = {{-1,0,0,0,0,0,0,0}, 0, 0, 5, 127, 3, 0, 1}, /* dpi */
-    [683] = {{-1,0,0,0,0,0,0,0}, 0, 0, 48, 127, 4, 0, 1}, /* dppx */
-    [684] = {{0,0,0,0,0,0,0,0}, 9, 1, 1, 1, 0, 0, 1}, /* rem_css */
-    [685] = {{0,0,0,0,0,0,0,0}, 80, 1, 1, 1, 0, 0, 1}, /* vw */
-    [686] = {{0,0,0,0,0,0,0,0}, 79, 1, 1, 1, 0, 0, 1}, /* vh */
-    [687] = {{0,0,1,0,0,0,0,0}, 56, 1, 36, 1, 2, 0, 1}, /* person_hour */
-    [688] = {{0,0,1,0,0,0,0,0}, 58, 1, 31556952, 1, 0, 0, 1}, /* QALY */
-    [689] = {{0,0,0,0,0,0,0,0}, 71, 1, 1, 1, 0, 0, 1}, /* story_point */
-    [690] = {{0,0,0,0,0,0,0,0}, 23, 1, 22203, 4, -5, 0, 1}, /* mg/dL_glucose */
-    [691] = {{0,0,0,0,0,0,0,0}, 23, 1, 1, 1, 0, 0, 1}, /* mmol/L_glucose */
-    [692] = {{1,0,-1,0,0,0,0,0}, 0, 0, 343, 1, 0, 0, 1}, /* mach_air_20C */
-    [693] = {{0,0,0,0,0,0,0,0}, 7, 1, 1, 1, 0, 0, 1}, /* bortle */
-    [694] = {{0,0,0,0,0,0,0,0}, 5, 1, 1, 1, 0, 0, 1}, /* beaufort */
-    [695] = {{0,0,0,0,0,0,0,0}, 65, 1, 1, 1, 0, 0, 1}, /* saffir_simpson */
-    [696] = {{0,0,0,0,0,0,0,0}, 22, 1, 1, 1, 0, 0, 1}, /* fujita */
-    [697] = {{0,0,0,0,0,0,0,0}, 12, 1, 1, 1, 0, 0, 1}, /* EF */
-    [698] = {{0,0,0,0,0,0,0,0}, 47, 1, 1, 1, 0, 0, 1}, /* richter */
-    [699] = {{0,0,0,0,0,0,0,0}, 47, 1, 1, 1, 0, 0, 1}, /* moment_magnitude */
-    [700] = {{0,0,0,0,0,0,0,0}, 3, 1, 1, 1, 0, 0, 1}, /* apgar */
-    [701] = {{0,0,0,0,0,0,0,0}, 61, 1, 1, 1, 0, 0, 1}, /* RBE */
-    [702] = {{0,0,0,0,0,0,0,0}, 31, 1, 1, 1, 0, 0, 1}, /* hounsfield_unit */
-    [703] = {{0,0,-1,0,0,0,0,0}, 4, 1, 1, 6, -1, 0, 1}, /* bpm */
-    [704] = {{0,0,-1,0,0,0,0,0}, 21, 1, 1, 1, 0, 0, 1}, /* fps */
-    [705] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 0, 0, 1}, /* flops */
-    [706] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 0, 0, 1}, /* FLOPS */
-    [707] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 3, 0, 1}, /* kflops */
-    [708] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 3, 0, 1}, /* kFLOPS */
-    [709] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 6, 0, 1}, /* Mflops */
-    [710] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 6, 0, 1}, /* MFLOPS */
-    [711] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 9, 0, 1}, /* Gflops */
-    [712] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 9, 0, 1}, /* GFLOPS */
-    [713] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 12, 0, 1}, /* Tflops */
-    [714] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 12, 0, 1}, /* TFLOPS */
-    [715] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 15, 0, 1}, /* Pflops */
-    [716] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 15, 0, 1}, /* PFLOPS */
-    [717] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 18, 0, 1}, /* Eflops */
-    [718] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 18, 0, 1}, /* EFLOPS */
-    [719] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 21, 0, 1}, /* Zflops */
-    [720] = {{0,0,-1,0,0,0,0,0}, 20, 1, 1, 1, 21, 0, 1}, /* ZFLOPS */
-    [721] = {{0,0,-1,0,0,0,0,0}, 20, 1, 999999999999999983, 1, 6, 0, 1}, /* Yflops */
-    [722] = {{0,0,-1,0,0,0,0,0}, 20, 1, 999999999999999983, 1, 6, 0, 1}, /* YFLOPS */
-    [723] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 0, 0, 1}, /* ops_per_s */
-    [724] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 3, 0, 1}, /* KOPS */
-    [725] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 6, 0, 1}, /* MOPS */
-    [726] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 9, 0, 1}, /* GOPS */
-    [727] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 12, 0, 1}, /* TOPS */
-    [728] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 15, 0, 1}, /* POPS */
-    [729] = {{0,0,-1,0,0,0,0,0}, 53, 1, 1, 1, 18, 0, 1}, /* EOPS */
-    [730] = {{0,0,-1,0,0,0,0,0}, 35, 1, 1, 1, 6, 0, 1}, /* MIPS */
-    [731] = {{0,0,-1,0,0,0,0,0}, 35, 1, 1, 1, 9, 0, 1}, /* GIPS */
-    [732] = {{0,0,-1,0,0,0,0,0}, 35, 1, 1, 1, 6, 0, 1}, /* DMIPS */
-    [733] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 0, 0, 1}, /* MAC/s */
-    [734] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 6, 0, 1}, /* MMAC/s */
-    [735] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 9, 0, 1}, /* GMAC/s */
-    [736] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 12, 0, 1}, /* TMAC/s */
-    [737] = {{0,0,-1,0,0,0,0,0}, 74, 1, 1, 1, 0, 0, 1}, /* tok/s */
-    [738] = {{0,0,-1,0,0,0,0,0}, 74, 1, 1, 1, 3, 0, 1}, /* ktok/s */
-    [739] = {{0,0,-1,0,0,0,0,0}, 74, 1, 1, 1, 6, 0, 1}, /* Mtok/s */
-    [740] = {{0,0,-1,0,0,0,0,0}, 74, 1, 1, 1, 9, 0, 1}, /* Gtok/s */
-    [741] = {{0,0,-1,0,0,0,0,0}, 77, 1, 1, 1, 0, 0, 1}, /* T/s */
-    [742] = {{0,0,-1,0,0,0,0,0}, 77, 1, 1, 1, 6, 0, 1}, /* MT/s */
-    [743] = {{0,0,-1,0,0,0,0,0}, 77, 1, 1, 1, 9, 0, 1}, /* GT/s */
-    [744] = {{0,0,-1,0,0,0,0,0}, 77, 1, 1, 1, 12, 0, 1}, /* TT/s */
-    [745] = {{0,0,-1,0,0,0,0,0}, 59, 1, 1, 1, 0, 0, 1}, /* qps */
-    [746] = {{0,0,-1,0,0,0,0,0}, 59, 1, 1, 1, 0, 0, 1}, /* QPS */
-    [747] = {{0,0,-1,0,0,0,0,0}, 62, 1, 1, 1, 0, 0, 1}, /* rps */
-    [748] = {{0,0,-1,0,0,0,0,0}, 62, 1, 1, 1, 0, 0, 1}, /* RPS */
-    [749] = {{0,0,-1,0,0,0,0,0}, 76, 1, 1, 1, 0, 0, 1}, /* tps */
-    [750] = {{0,0,-1,0,0,0,0,0}, 76, 1, 1, 1, 0, 0, 1}, /* TPS */
-    [751] = {{0,0,-1,0,0,0,0,0}, 54, 1, 1, 1, 0, 0, 1}, /* pps */
-    [752] = {{0,0,-1,0,0,0,0,0}, 54, 1, 1, 1, 0, 0, 1}, /* PPS */
-    [753] = {{0,0,-1,0,0,0,0,0}, 36, 1, 1, 1, 0, 0, 1}, /* iops */
-    [754] = {{0,0,-1,0,0,0,0,0}, 36, 1, 1, 1, 0, 0, 1}, /* IOPS */
-    [755] = {{-3,0,0,0,0,1,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* molar */
-    [756] = {{0,-1,0,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* molal */
+    [369] = {{2,1,-2,0,0,0,0,0}, 0, 0, 10467, 25, -2, 0, 1}, /* cal_IT */
+    [370] = {{2,1,-2,0,0,0,0,0}, 0, 0, 523, 125, 0, 0, 1}, /* cal_th */
+    [371] = {{2,1,-2,0,0,0,0,0}, 0, 0, 20934, 5, 0, 0, 1}, /* kcal_IT */
+    [372] = {{2,1,-2,0,0,0,0,0}, 0, 0, 4184, 1, 0, 0, 1}, /* kcal_th */
+    [373] = {{2,1,-2,0,0,0,0,0}, 0, 0, 4085925351, 387271, -1, 0, 1}, /* BTU */
+    [374] = {{2,1,-2,0,0,0,0,0}, 0, 0, 52752792631, 5, -2, 0, 1}, /* therm */
+    [375] = {{2,1,-2,0,0,0,0,0}, 0, 0, 416402469, 3071227, -2, 0, 1}, /* ftlbf */
+    [376] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -5, 0, 1}, /* dyn */
+    [377] = {{2,1,-3,0,0,0,0,0}, 0, 0, 2068973376, 2774539, 0, 0, 1}, /* hp */
+    [378] = {{2,1,-3,0,0,0,0,0}, 0, 0, 588399, 8, -2, 0, 1}, /* PS */
+    [379] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* Ga */
+    [380] = {{0,0,-1,0,0,0,0,0}, 16, 1, 37, 1, 9, 0, 1}, /* Ci */
+    [381] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -2, 0, 1}, /* rem */
+    [382] = {{0,0,0,0,0,0,0,0}, 2, 1, 14964008, 857374503, 0, 0, 1}, /* deg */
+    [383] = {{0,0,0,0,0,0,0,0}, 2, 1, 1650943, 5675523967, 0, 0, 1}, /* arcmin */
+    [384] = {{0,0,0,0,0,0,0,0}, 2, 1, 286277, 59048869938, 0, 0, 1}, /* arcsec */
+    [385] = {{0,0,0,0,0,0,0,0}, 2, 1, 10906443, 694325726, 0, 0, 1}, /* gon */
+    [386] = {{0,0,0,0,0,0,0,0}, 2, 1, 411557987, 65501488, 0, 0, 1}, /* turn */
+    [387] = {{0,0,0,0,0,0,0,0}, 2, 1, 2752991, 2804173606, 0, 0, 1}, /* mil */
+    [388] = {{0,0,0,0,0,0,0,0}, 2, 1, 18369286, 748432043, 0, 0, 1}, /* brad */
+    [389] = {{1,0,-2,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* Gal */
+    [390] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* b */
+    [391] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 2, 0, 0, 1}, /* nibble */
+    [392] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 0, 0, 1}, /* o */
+    [393] = {{0,0,0,0,0,0,0,1}, 0, 0, 1125899906842624, 1, 0, 0, 1}, /* PiB */
+    [394] = {{0,0,0,0,0,0,0,1}, 0, 0, 1152921504606846976, 1, 0, 0, 1}, /* EiB */
+    [395] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* bps */
+    [396] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 0, 0, 1}, /* Bps */
+    [397] = {{0,0,-1,0,0,0,0,0}, 88, 1, 1, 1, 0, 0, 1}, /* baud */
+    [398] = {{-1,1,-1,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* P */
+    [399] = {{-1,1,-1,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* cP */
+    [400] = {{2,0,-1,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* St */
+    [401] = {{2,0,-1,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* cSt */
+    [402] = {{0,1,0,0,0,0,0,0}, 0, 0, 198891999999999991, 1, 13, 0, 1}, /* solarmass */
+    [403] = {{0,1,0,0,0,0,0,0}, 0, 0, 597220000000000022, 1, 7, 0, 1}, /* earthmass */
+    [404] = {{0,1,0,0,0,0,0,0}, 0, 0, 189859999999999994, 1, 10, 0, 1}, /* jupitermass */
+    [405] = {{0,1,0,0,0,0,0,0}, 0, 0, 734199999999999969, 1, 5, 0, 1}, /* moonmass */
+    [406] = {{1,0,0,0,0,0,0,0}, 0, 0, 696, 1, 6, 0, 1}, /* solarradius */
+    [407] = {{1,0,0,0,0,0,0,0}, 0, 0, 6371, 1, 3, 0, 1}, /* earthradius */
+    [408] = {{1,0,0,0,0,0,0,0}, 0, 0, 176389, 5, -8, 0, 1}, /* point */
+    [409] = {{1,0,0,0,0,0,0,0}, 0, 0, 4233333, 1, -9, 0, 1}, /* pica */
+    [410] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 36135, -1, 0, 1}, /* texpt */
+    [411] = {{1,0,0,0,0,0,0,0}, 0, 0, 75213, 2, -8, 0, 1}, /* didot */
+    [412] = {{1,0,0,0,0,0,0,0}, 0, 0, 225639, 5, -7, 0, 1}, /* cicero */
+    [413] = {{1,0,0,0,0,0,0,0}, 0, 0, 33, 2, -1, 0, 1}, /* altuve */
+    [414] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000003, 1, -51, 0, 1}, /* outhouse */
+    [415] = {{2,0,0,0,0,0,0,0}, 0, 0, 10000000000000001, 1, -68, 0, 1}, /* shed */
+    [416] = {{3,0,0,0,0,0,0,0}, 0, 0, 2981, 25, -3, 0, 1}, /* barrel */
+    [417] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* stere */
+    [418] = {{3,0,0,0,0,0,0,0}, 0, 0, 906139, 25, -4, 0, 1}, /* cord */
+    [419] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 2, -8, 0, 1}, /* beard second */
+    [420] = {{3,0,0,0,0,0,0,0}, 0, 0, 180197, 58397870562, 0, 0, 1}, /* barn megaparsec */
+    [421] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -7, 0, 1}, /* banana */
+    [422] = {{0,0,0,0,0,0,0,0}, 26, 1, 15, 1, 0, 0, 1}, /* warhol */
+    [423] = {{0,0,0,0,0,0,0,0}, 26, 1, 15, 1, 3, 0, 1}, /* kilowarhol */
+    [424] = {{0,0,-1,0,0,0,0,0}, 80, 1, 1, 6, -1, 0, 1}, /* rpm */
+    [425] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 6, 0, 1}, /* rd */
+    [426] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -8, 0, 1}, /* Mx */
+    [427] = {{0,0,0,0,0,0,0,0}, 7, 1, 1, 1, 0, 0, 1}, /* millihelen */
+    [428] = {{-2,0,0,0,0,0,1,0}, 54, 1, 1, 1, 0, 0, 1}, /* nit */
+    [429] = {{-2,0,0,0,0,0,1,0}, 54, 1, 1, 1, 4, 0, 1}, /* sb */
+    [430] = {{-2,0,0,0,0,0,1,0}, 54, 1, 2898221063, 910503, 0, 0, 1}, /* La */
+    [431] = {{-2,0,0,0,0,0,1,0}, 54, 1, 330354972, 96418561, 0, 0, 1}, /* fL */
+    [432] = {{-2,0,0,0,0,0,1,0}, 54, 1, 78256779, 245850922, 0, 0, 1}, /* asb */
+    [433] = {{-2,0,0,0,0,0,1,0}, 54, 1, 2111208, 6632555543, 0, 0, 1}, /* sk */
+    [434] = {{0,0,0,0,0,0,0,0}, 20, 1, 1, 1, 0, 0, 1}, /* em */
+    [435] = {{0,0,0,0,0,0,0,0}, 20, 1, 1, 2, 0, 0, 1}, /* en */
+    [436] = {{0,0,0,0,0,0,0,0}, 20, 1, 2, 1, 0, 0, 1}, /* qquad */
+    [437] = {{0,0,0,0,0,0,0,0}, 69, 1, 1, 1, 0, 0, 1}, /* peanutbutter */
+    [438] = {{0,0,0,0,0,0,0,0}, 49, 1, 1, 1, 0, 0, 1}, /* jelly */
+    [439] = {{0,0,0,0,0,0,0,0}, 5, 1, 1, 1, 0, 0, 1}, /* beat */
+    [440] = {{0,0,0,0,0,0,0,0}, 15, 1, 1, 1, 0, 0, 1}, /* cycle */
+    [441] = {{0,0,0,0,0,0,0,0}, 28, 1, 1, 1, 0, 0, 1}, /* frame */
+    [442] = {{0,0,0,0,0,0,0,0}, 43, 1, 1, 1, 0, 0, 1}, /* instant */
+    [443] = {{0,0,0,0,0,0,0,0}, 50, 1, 1, 1, 0, 0, 1}, /* jiffy */
+    [444] = {{0,0,0,0,0,0,0,0}, 64, 1, 1, 1, 0, 0, 1}, /* moment */
+    [445] = {{0,0,0,0,0,0,0,0}, 83, 1, 1, 1, 0, 0, 1}, /* sample */
+    [446] = {{0,0,0,0,0,0,0,0}, 90, 1, 1, 1, 0, 0, 1}, /* tick */
+    [447] = {{0,0,0,0,0,0,0,0}, 80, 1, 1, 1, 0, 0, 1}, /* revolution */
+    [448] = {{0,0,0,0,0,0,0,0}, 16, 1, 1, 1, 0, 0, 1}, /* decay */
+    [449] = {{0,0,0,0,0,0,0,0}, 81, 1, 1, 1, 0, 0, 1}, /* rotation */
+    [450] = {{0,0,0,0,0,0,0,0}, 27, 1, 1, 1, 0, 0, 1}, /* flop */
+    [451] = {{0,0,0,0,0,0,0,0}, 66, 1, 1, 1, 0, 0, 1}, /* op */
+    [452] = {{0,0,0,0,0,0,0,0}, 57, 1, 1, 1, 0, 0, 1}, /* mac */
+    [453] = {{0,0,0,0,0,0,0,0}, 44, 1, 1, 1, 0, 0, 1}, /* instruction */
+    [454] = {{0,0,0,0,0,0,0,0}, 91, 1, 1, 1, 0, 0, 1}, /* tok */
+    [455] = {{0,0,0,0,0,0,0,0}, 94, 1, 1, 1, 0, 0, 1}, /* transfer */
+    [456] = {{0,0,0,0,0,0,0,0}, 75, 1, 1, 1, 0, 0, 1}, /* query */
+    [457] = {{0,0,0,0,0,0,0,0}, 79, 1, 1, 1, 0, 0, 1}, /* request */
+    [458] = {{0,0,0,0,0,0,0,0}, 93, 1, 1, 1, 0, 0, 1}, /* txn */
+    [459] = {{0,0,0,0,0,0,0,0}, 68, 1, 1, 1, 0, 0, 1}, /* packet */
+    [460] = {{0,0,0,0,0,0,0,0}, 46, 1, 1, 1, 0, 0, 1}, /* io */
+    [461] = {{0,0,0,0,0,0,0,1}, 0, 0, 51711048, 286746937, 0, 0, 1}, /* nat */
+    [462] = {{0,0,0,0,0,0,0,1}, 0, 0, 36741077, 8848133, -1, 0, 1}, /* ban */
+    [463] = {{0,0,0,0,0,0,0,1}, 0, 0, 34582415, 832827539, 0, 0, 1}, /* deciban */
+    [464] = {{0,0,0,0,0,0,0,0}, 76, 1, 1, 1, -6, 0, 1}, /* ppm */
+    [465] = {{0,0,0,0,0,0,0,0}, 76, 1, 1, 1, -9, 0, 1}, /* ppb */
+    [466] = {{0,0,0,0,0,0,0,0}, 76, 1, 1, 1, -12, 0, 1}, /* ppt */
+    [467] = {{0,0,0,0,0,0,0,0}, 76, 1, 1, 1, -8, 0, 1}, /* pphm */
+    [468] = {{0,0,0,0,0,0,0,0}, 52, 1, 1, 1, 0, 0, 1}, /* sone */
+    [469] = {{0,0,0,0,0,0,0,0}, 53, 1, 1, 1, 0, 0, 1}, /* phon */
+    [470] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -26, 0, 1}, /* Jy */
+    [471] = {{0,0,0,0,0,0,0,0}, 60, 1, 1, 1, 0, 0, 1}, /* mag */
+    [472] = {{0,0,0,0,0,0,0,0}, 59, 1, 1, 1, 0, 0, 1}, /* Mag */
+    [473] = {{0,0,0,0,0,0,0,0}, 61, 1, 1, 1, 0, 0, 1}, /* M_bol */
+    [474] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000018, 1, -60, 0, 1}, /* femtobarn */
+    [475] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000012, 1, -63, 0, 1}, /* attobarn */
+    [476] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000003, 1, -57, 0, 1}, /* picobarn */
+    [477] = {{2,0,0,0,0,0,0,0}, 0, 0, 100000000000000017, 1, -54, 0, 1}, /* nanobarn */
+    [478] = {{-2,0,0,0,0,0,0,0}, 0, 0, 100000000000000001, 1, 26, 0, 1}, /* fb\xe2\x81\xbb\xc2\xb9 */
+    [479] = {{-2,0,0,0,0,0,0,0}, 0, 0, 999999999999999993, 1, 28, 0, 1}, /* ab\xe2\x81\xbb\xc2\xb9 */
+    [480] = {{-2,0,0,0,0,0,0,0}, 0, 0, 100000000000000003, 1, 23, 0, 1}, /* pb\xe2\x81\xbb\xc2\xb9 */
+    [481] = {{-2,0,0,0,0,0,0,0}, 0, 0, 999999999999999954, 1, 19, 0, 1}, /* nb\xe2\x81\xbb\xc2\xb9 */
+    [482] = {{-1,0,0,1,0,0,0,0}, 0, 0, 707761077, 8893988, 0, 0, 1}, /* Oe */
+    [483] = {{0,0,0,1,0,0,0,0}, 0, 0, 116522652, 146426683, 0, 0, 1}, /* Gb */
+    [484] = {{1,0,1,1,0,0,0,0}, 0, 0, 333564000000000034, 1, -47, 0, 1}, /* D */
+    [485] = {{2,0,0,1,0,0,0,0}, 0, 0, 927401007830000118, 1, -41, 0, 1}, /* \xce\xbc_B */
+    [486] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* micromort */
+    [487] = {{0,0,1,0,0,0,0,0}, 0, 0, 18, 1, 2, 0, 1}, /* microlife */
+    [488] = {{-1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* kayser */
+    [489] = {{0,0,0,0,0,0,0,0}, 34, 1, 1, 1, 0, 0, 1}, /* mohs */
+    [490] = {{0,0,0,0,0,0,0,0}, 36, 1, 1, 1, 0, 0, 1}, /* vickers */
+    [491] = {{0,0,0,0,0,0,0,0}, 35, 1, 1, 1, 0, 0, 1}, /* rockwell */
+    [492] = {{0,0,0,0,0,0,0,0}, 33, 1, 1, 1, 0, 0, 1}, /* brinell */
+    [493] = {{0,0,0,0,0,0,0,0}, 0, 0, 12, 1, 0, 0, 1}, /* dozen */
+    [494] = {{0,0,0,0,0,0,0,0}, 0, 0, 144, 1, 0, 0, 1}, /* gross */
+    [495] = {{0,0,0,0,0,0,0,0}, 0, 0, 1728, 1, 0, 0, 1}, /* great_gross */
+    [496] = {{0,0,0,0,0,0,0,0}, 0, 0, 2, 1, 1, 0, 1}, /* score */
+    [497] = {{0,0,0,0,0,0,0,0}, 0, 0, 13, 1, 0, 0, 1}, /* bakers_dozen */
+    [498] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, 100, 0, 1}, /* googol */
+    [499] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, 1000, 0, 1}, /* googolplex */
+    [500] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 25, -2, 0, 1}, /* cubit */
+    [501] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 5, -3, 0, 1}, /* span */
+    [502] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 5, -3, 0, 1}, /* handbreadth */
+    [503] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 2, -4, 0, 1}, /* fingerbreadth */
+    [504] = {{1,0,0,0,0,0,0,0}, 0, 0, 4572, 5, 0, 0, 1}, /* biblical_mil */
+    [505] = {{1,0,0,0,0,0,0,0}, 0, 0, 18288, 5, 0, 0, 1}, /* parsa */
+    [506] = {{1,0,0,0,0,0,0,0}, 0, 0, 4572, 5, 0, 0, 1}, /* techum */
+    [507] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, -2, 0, 1}, /* omer */
+    [508] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, -1, 0, 1}, /* ephah */
+    [509] = {{3,0,0,0,0,0,0,0}, 0, 0, 9, 25, -2, 0, 1}, /* hin */
+    [510] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, -1, 0, 1}, /* bath */
+    [511] = {{3,0,0,0,0,0,0,0}, 0, 0, 9, 125, -1, 0, 1}, /* seah */
+    [512] = {{3,0,0,0,0,0,0,0}, 0, 0, 27, 125, 0, 0, 1}, /* kor */
+    [513] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 25, -2, 0, 1}, /* kab */
+    [514] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 2, -3, 0, 1}, /* shekel */
+    [515] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 4, -1, 0, 1}, /* biblical_mina */
+    [516] = {{0,1,0,0,0,0,0,0}, 0, 0, 69, 2, 0, 0, 1}, /* biblical_talent */
+    [517] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 4, -4, 0, 1}, /* gerah */
+    [518] = {{0,1,0,0,0,0,0,0}, 0, 0, 23, 4, -3, 0, 1}, /* beka */
+    [519] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 3, 1, 0, 1}, /* helek */
+    [520] = {{0,0,1,0,0,0,0,0}, 0, 0, 76, 405, 0, 0, 1}, /* rega */
+    [521] = {{0,0,1,0,0,0,0,0}, 0, 0, 432, 1, 2, 0, 1}, /* onah */
+    [522] = {{0,0,1,0,0,0,0,0}, 0, 0, 15778476, 1, 2, 0, 1}, /* yovel */
+    [523] = {{0,0,1,0,0,0,0,0}, 0, 0, 220898664, 1, 0, 0, 1}, /* shmita */
+    [524] = {{1,0,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* g\xe2\x82\x80 */
+    [525] = {{1,0,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* g_n */
+    [526] = {{1,0,-2,0,0,0,0,0}, 0, 0, 196133, 2, -4, 0, 1}, /* gee */
+    [527] = {{-2,0,0,0,0,0,0,0}, 0, 0, 48, 112903, 9, 0, 1}, /* mpg */
+    [528] = {{-2,0,0,0,0,0,0,0}, 0, 0, 48, 112903, 9, 0, 1}, /* mpge */
+    [529] = {{2,0,0,0,0,0,0,0}, 0, 0, 1, 1, -8, 0, 1}, /* L/100km */
+    [530] = {{0,1,0,0,0,0,0,0}, 0, 0, 45359237, 4, -8, 0, 1}, /* stick */
+    [531] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* kiloton */
+    [532] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* megaton */
+    [533] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* gigaton */
+    [534] = {{3,0,0,0,0,0,0,0}, 0, 0, 41225904, 259303135, 0, 0, 1}, /* oil_barrel */
+    [535] = {{2,1,-2,0,0,0,0,0}, 0, 0, 6119, 1, 6, 0, 1}, /* BOE */
+    [536] = {{2,1,-2,0,0,0,0,0}, 0, 0, 2931, 1, 7, 0, 1}, /* TCE */
+    [537] = {{0,0,0,0,0,0,0,0}, 37, 1, 1, 1, 0, 0, 1}, /* heap */
+    [538] = {{0,0,0,0,0,0,0,0}, 39, 1, 1, 1, 0, 0, 1}, /* hole */
+    [539] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 33, 1, 0, 1}, /* shaku */
+    [540] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 33, 0, 0, 1}, /* sun */
+    [541] = {{1,0,0,0,0,0,0,0}, 0, 0, 432, 11, 1, 0, 1}, /* ri */
+    [542] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 33, 2, 0, 1}, /* jo */
+    [543] = {{2,0,0,0,0,0,0,0}, 0, 0, 4, 121, 2, 0, 1}, /* tsubo */
+    [544] = {{2,0,0,0,0,0,0,0}, 0, 0, 2, 121, 2, 0, 1}, /* tatami */
+    [545] = {{3,0,0,0,0,0,0,0}, 0, 0, 18039, 1, -5, 0, 1}, /* koku */
+    [546] = {{3,0,0,0,0,0,0,0}, 0, 0, 18039, 1, -8, 0, 1}, /* g\xc5\x8d */
+    [547] = {{0,1,0,0,0,0,0,0}, 0, 0, 3, 8, -2, 0, 1}, /* momme */
+    [548] = {{0,1,0,0,0,0,0,0}, 0, 0, 15, 4, 0, 0, 1}, /* kanme */
+    [549] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, 0, 0, 1}, /* chi */
+    [550] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, -1, 0, 1}, /* cun */
+    [551] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, -2, 0, 1}, /* fen */
+    [552] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, 1, 0, 1}, /* zhang */
+    [553] = {{1,0,0,0,0,0,0,0}, 0, 0, 5, 1, 2, 0, 1}, /* li_cn */
+    [554] = {{2,0,0,0,0,0,0,0}, 0, 0, 2, 3, 3, 0, 1}, /* mu */
+    [555] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 2, 0, 0, 1}, /* jin */
+    [556] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 2, -1, 0, 1}, /* liang */
+    [557] = {{0,1,0,0,0,0,0,0}, 0, 0, 5, 1, 1, 0, 1}, /* dan_cn */
+    [558] = {{1,0,0,0,0,0,0,0}, 0, 0, 5334, 5, 0, 0, 1}, /* verst */
+    [559] = {{1,0,0,0,0,0,0,0}, 0, 0, 889, 125, -1, 0, 1}, /* arshin */
+    [560] = {{1,0,0,0,0,0,0,0}, 0, 0, 2667, 125, -1, 0, 1}, /* sazhen */
+    [561] = {{1,0,0,0,0,0,0,0}, 0, 0, 889, 2, -4, 0, 1}, /* vershok */
+    [562] = {{0,1,0,0,0,0,0,0}, 0, 0, 32761, 2, -3, 0, 1}, /* pud */
+    [563] = {{0,1,0,0,0,0,0,0}, 0, 0, 40951241, 1, -8, 0, 1}, /* funt_ru */
+    [564] = {{3,0,0,0,0,0,0,0}, 0, 0, 20991, 1, -5, 0, 1}, /* chetvert */
+    [565] = {{1,0,0,0,0,0,0,0}, 0, 0, 1624203, 5, -6, 0, 1}, /* pied */
+    [566] = {{1,0,0,0,0,0,0,0}, 0, 0, 2707, 1, -5, 0, 1}, /* pouce */
+    [567] = {{1,0,0,0,0,0,0,0}, 0, 0, 487259, 25, -4, 0, 1}, /* toise */
+    [568] = {{2,0,0,0,0,0,0,0}, 0, 0, 341889, 1, -2, 0, 1}, /* arpent */
+    [569] = {{1,0,0,0,0,0,0,0}, 0, 0, 487259, 125, 0, 0, 1}, /* lieue_de_poste */
+    [570] = {{1,0,0,0,0,0,0,0}, 0, 0, 37, 125, 0, 0, 1}, /* pes */
+    [571] = {{1,0,0,0,0,0,0,0}, 0, 0, 37, 25, 0, 0, 1}, /* passus */
+    [572] = {{1,0,0,0,0,0,0,0}, 0, 0, 148, 1, 1, 0, 1}, /* mille_passuum */
+    [573] = {{2,0,0,0,0,0,0,0}, 0, 0, 251943, 1, -2, 0, 1}, /* iugerum */
+    [574] = {{0,1,0,0,0,0,0,0}, 0, 0, 16447, 5, -4, 0, 1}, /* libra_roma */
+    [575] = {{0,1,0,0,0,0,0,0}, 0, 0, 137, 5, -3, 0, 1}, /* uncia_roma */
+    [576] = {{3,0,0,0,0,0,0,0}, 0, 0, 82, 3125, 0, 0, 1}, /* amphora */
+    [577] = {{1,0,0,0,0,0,0,0}, 0, 0, 21, 4, -1, 0, 1}, /* royal_cubit */
+    [578] = {{1,0,0,0,0,0,0,0}, 0, 0, 3, 4, -1, 0, 1}, /* egypt_palm */
+    [579] = {{1,0,0,0,0,0,0,0}, 0, 0, 3, 16, -1, 0, 1}, /* digit */
+    [580] = {{1,0,0,0,0,0,0,0}, 0, 0, 105, 2, 0, 0, 1}, /* khet */
+    [581] = {{2,0,0,0,0,0,0,0}, 0, 0, 11025, 4, 0, 0, 1}, /* aroura */
+    [582] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 25, -2, 0, 1}, /* hath */
+    [583] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 125, -1, 0, 1}, /* gaz */
+    [584] = {{1,0,0,0,0,0,0,0}, 0, 0, 3219, 1, 0, 0, 1}, /* kos */
+    [585] = {{0,1,0,0,0,0,0,0}, 0, 0, 729, 625, -2, 0, 1}, /* tola */
+    [586] = {{0,1,0,0,0,0,0,0}, 0, 0, 9331, 1, -4, 0, 1}, /* seer */
+    [587] = {{0,1,0,0,0,0,0,0}, 0, 0, 186621, 5, -3, 0, 1}, /* maund */
+    [588] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 229371227839632473, 0, 0, 1}, /* hartree */
+    [589] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 458742455679275483, 0, 0, 1}, /* rydberg_unit */
+    [590] = {{1,0,0,0,0,0,0,0}, 0, 0, 1331, 25152254718769, 0, 0, 1}, /* bohr_radius */
+    [591] = {{1,0,0,0,0,0,0,0}, 0, 0, 244, 100564221388997, 0, 0, 1}, /* compton_e */
+    [592] = {{1,0,0,0,0,0,0,0}, 0, 0, 4, 3027069900897207, 0, 0, 1}, /* compton_p */
+    [593] = {{1,0,0,0,0,0,0,0}, 0, 0, 6, 4546863708731791, 0, 0, 1}, /* compton_n */
+    [594] = {{0,0,0,0,0,0,0,0}, 0, 0, 6648447, 911076577, 0, 0, 1}, /* fine_structure */
+    [595] = {{0,1,0,0,0,0,0,0}, 0, 0, 910938370150000167, 1, -48, 0, 1}, /* electron_mass */
+    [596] = {{0,1,0,0,0,0,0,0}, 0, 0, 167262192369000028, 1, -44, 0, 1}, /* proton_mass */
+    [597] = {{0,1,0,0,0,0,0,0}, 0, 0, 167492749804000019, 1, -44, 0, 1}, /* neutron_mass */
+    [598] = {{0,1,0,0,0,0,0,0}, 0, 0, 188353162700000022, 1, -45, 0, 1}, /* muon_mass */
+    [599] = {{2,1,-3,0,0,0,0,0}, 0, 0, 19619, 2, 0, 0, 1}, /* boiler_horsepower */
+    [600] = {{2,1,-3,0,0,0,0,0}, 0, 0, 746, 1, 0, 0, 1}, /* electric_horsepower */
+    [601] = {{2,1,-3,0,0,0,0,0}, 0, 0, 746043, 1, -3, 0, 1}, /* water_horsepower */
+    [602] = {{2,1,-3,0,0,0,0,0}, 0, 0, 25013, 1, -2, 0, 1}, /* donkeypower */
+    [603] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 4, -3, 0, 1}, /* metric_cup */
+    [604] = {{3,0,0,0,0,0,0,0}, 0, 0, 3, 2, -5, 0, 1}, /* metric_tbsp */
+    [605] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 5, -4, 0, 1}, /* australian_tbsp */
+    [606] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 5, -3, 0, 1}, /* japanese_cup */
+    [607] = {{3,0,0,0,0,0,0,0}, 0, 0, 825646, 1452933239, 0, 0, 1}, /* imperial_pint */
+    [608] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 4, 0, 0, 1}, /* crumb */
+    [609] = {{0,0,0,0,0,0,0,1}, 0, 0, 4, 1, 0, 0, 1}, /* dword */
+    [610] = {{0,0,0,0,0,0,0,1}, 0, 0, 8, 1, 0, 0, 1}, /* qword */
+    [611] = {{0,0,0,0,0,0,0,1}, 0, 0, 16, 1, 0, 0, 1}, /* paragraph */
+    [612] = {{0,0,0,0,0,0,0,1}, 0, 0, 512, 1, 0, 0, 1}, /* sector */
+    [613] = {{0,0,0,0,0,0,0,1}, 0, 0, 4096, 1, 0, 0, 1}, /* page */
+    [614] = {{0,0,0,0,0,0,0,1}, 0, 0, 1024, 1, 0, 0, 1}, /* block */
+    [615] = {{0,0,0,0,0,0,0,1}, 0, 0, 4096, 1, 0, 0, 1}, /* cluster */
+    [616] = {{0,0,0,0,0,0,0,0}, 23, 1, 1, 1, 0, 0, 1}, /* EV */
+    [617] = {{0,0,0,0,0,0,0,0}, 25, 1, 1, 1, 0, 0, 1}, /* f_stop */
+    [618] = {{0,0,0,0,0,0,0,0}, 48, 1, 1, 1, 0, 0, 1}, /* ISO_speed */
+    [619] = {{0,0,0,0,0,0,0,0}, 72, 1, 1, 1, 0, 0, 1}, /* cent_pitch */
+    [620] = {{0,0,0,0,0,0,0,0}, 72, 1, 1, 1, 2, 0, 1}, /* semitone */
+    [621] = {{0,0,0,0,0,0,0,0}, 72, 1, 1, 301, 3, 0, 1}, /* savart */
+    [622] = {{0,0,0,0,0,0,0,0}, 72, 1, 12, 1, 2, 0, 1}, /* octave */
+    [623] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* basis_point */
+    [624] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* tenth_cent */
+    [625] = {{0,0,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* pip */
+    [626] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 625, -2, 0, 1}, /* link_chain */
+    [627] = {{1,0,0,0,0,0,0,0}, 0, 0, 762, 125, 0, 0, 1}, /* rope */
+    [628] = {{1,0,0,0,0,0,0,0}, 0, 0, 12573, 25, -2, 0, 1}, /* perch */
+    [629] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 15, -3, 0, 1}, /* barleycorn */
+    [630] = {{1,0,0,0,0,0,0,0}, 0, 0, 381, 25, -2, 0, 1}, /* shaftment */
+    [631] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 25, -2, 0, 1}, /* english_cubit */
+    [632] = {{1,0,0,0,0,0,0,0}, 0, 0, 1143, 2, -4, 0, 1}, /* nail_cloth */
+    [633] = {{1,0,0,0,0,0,0,0}, 0, 0, 926, 5, 0, 0, 1}, /* cable_length */
+    [634] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 196133, 2, -1, 0, 1}, /* mH2O */
+    [635] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 2490889, 1, -4, 0, 1}, /* inH2O */
+    [636] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 29890669, 1, -4, 0, 1}, /* ftH2O */
+    [637] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* pieze */
+    [638] = {{0,0,0,0,0,0,0,0}, 51, 1, 1, 9, -6, 0, 1}, /* denier */
+    [639] = {{0,0,0,0,0,0,0,0}, 51, 1, 1, 1, -6, 0, 1}, /* tex */
+    [640] = {{0,0,0,0,0,0,0,0}, 51, 1, 1, 1, -7, 0, 1}, /* decitex */
+    [641] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 3, -3, 0, 1}, /* french_gauge */
+    [642] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 1, -6, 0, 1}, /* mickey */
+    [643] = {{0,0,0,0,0,0,0,0}, 0, 0, 4, 1, 9, 0, 1}, /* sagan */
+    [644] = {{1,0,0,0,0,0,0,0}, 0, 0, 34420332, 114813869, 0, 0, 1}, /* light_nanosecond */
+    [645] = {{1,0,0,0,0,0,0,0}, 0, 0, 9, 5, -1, 0, 1}, /* banana_for_scale */
+    [646] = {{-3,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/m\xc2\xb3 */
+    [647] = {{3,0,-1,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m\xc2\xb3/s */
+    [648] = {{3,0,-1,0,0,0,0,0}, 0, 0, 1, 6, -4, 0, 1}, /* L/min */
+    [649] = {{0,1,-1,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/s */
+    [650] = {{2,1,-2,0,-1,0,0,0}, 38, 1, 1, 1, 0, 0, 1}, /* heat_capacity */
+    [651] = {{2,1,-2,0,-1,0,0,0}, 21, 1, 1, 1, 0, 0, 1}, /* entropy */
+    [652] = {{2,0,-2,0,-1,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/kg/K */
+    [653] = {{1,1,-3,0,-1,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W/m/K */
+    [654] = {{0,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W/m\xc2\xb2 */
+    [655] = {{1,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* V/m */
+    [656] = {{-2,0,0,1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* A/m\xc2\xb2 */
+    [657] = {{3,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* \xce\xa9\xc2\xb7m */
+    [658] = {{-3,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* S/m */
+    [659] = {{-3,0,1,1,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* C/m\xc2\xb3 */
+    [660] = {{0,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* N/m */
+    [661] = {{-1,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/m */
+    [662] = {{-2,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kg/m\xc2\xb2 */
+    [663] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/m\xc2\xb3 */
+    [664] = {{2,0,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/kg */
+    [665] = {{2,0,-2,0,0,0,0,0}, 85, 1, 1, 1, 0, 0, 1}, /* specific_energy */
+    [666] = {{0,0,0,0,0,0,0,0}, 76, 1, 1, 1, 0, 0, 1}, /* mol/mol */
+    [667] = {{-3,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kat/m\xc2\xb3 */
+    [668] = {{-2,0,0,0,0,0,1,0}, 54, 1, 1, 1, 0, 0, 1}, /* cd/m\xc2\xb2 */
+    [669] = {{-2,0,1,0,0,0,1,0}, 41, 1, 1, 1, 0, 0, 1}, /* lx\xc2\xb7s */
+    [670] = {{0,0,1,0,0,0,1,0}, 55, 1, 1, 1, 0, 0, 1}, /* lm\xc2\xb7s */
+    [671] = {{0,0,-1,0,0,0,0,0}, 2, 1, 1, 1, 0, 0, 1}, /* rad/s */
+    [672] = {{0,0,-2,0,0,0,0,0}, 2, 1, 1, 1, 0, 0, 1}, /* rad/s\xc2\xb2 */
+    [673] = {{1,0,-3,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* m/s\xc2\xb3 */
+    [674] = {{1,1,-1,0,0,0,0,0}, 65, 1, 1, 1, 0, 0, 1}, /* kg\xc2\xb7m/s */
+    [675] = {{1,1,-1,0,0,0,0,0}, 42, 1, 1, 1, 0, 0, 1}, /* N\xc2\xb7s */
+    [676] = {{2,1,-2,0,0,0,0,0}, 92, 1, 1, 1, 0, 0, 1}, /* N\xc2\xb7m */
+    [677] = {{0,0,0,0,0,0,0,1}, 86, 1, 1, 8, 0, 0, 1}, /* bit/s/Hz */
+    [678] = {{2,1,-2,0,0,0,0,0}, 66, -1, 1, 1, 0, 0, 1}, /* J/op */
+    [679] = {{2,1,-2,0,0,0,0,0}, 91, -1, 1, 1, 0, 0, 1}, /* J/tok */
+    [680] = {{0,0,0,0,0,0,0,1}, 27, -1, 1, 1, 0, 0, 1}, /* B/flop */
+    [681] = {{0,1,0,0,0,0,0,0}, 12, 1, 1, 1, 0, 0, 1}, /* kgCO\xe2\x82\x82\x65 */
+    [682] = {{0,1,0,0,0,0,0,0}, 12, 1, 1, 1, -3, 0, 1}, /* gCO\xe2\x82\x82\x65 */
+    [683] = {{-2,0,2,0,0,0,0,0}, 12, 1, 1, 36, -8, 0, 1}, /* gCO\xe2\x82\x82\x65/kWh */
+    [684] = {{-1,1,0,0,0,0,0,0}, 95, 1, 1, 1, -6, 0, 1}, /* gCO\xe2\x82\x82\x65/pkm */
+    [685] = {{1,0,0,0,0,0,0,0}, 0, 0, 127, 48, -4, 0, 1}, /* px */
+    [686] = {{-1,0,0,0,0,0,0,0}, 0, 0, 5, 127, 3, 0, 1}, /* dpi */
+    [687] = {{-1,0,0,0,0,0,0,0}, 0, 0, 48, 127, 4, 0, 1}, /* dppx */
+    [688] = {{0,0,0,0,0,0,0,0}, 14, 1, 1, 1, 0, 0, 1}, /* rem_css */
+    [689] = {{0,0,0,0,0,0,0,0}, 97, 1, 1, 1, 0, 0, 1}, /* vw */
+    [690] = {{0,0,0,0,0,0,0,0}, 96, 1, 1, 1, 0, 0, 1}, /* vh */
+    [691] = {{0,0,1,0,0,0,0,0}, 70, 1, 36, 1, 2, 0, 1}, /* person_hour */
+    [692] = {{0,0,1,0,0,0,0,0}, 74, 1, 31556952, 1, 0, 0, 1}, /* QALY */
+    [693] = {{0,0,0,0,0,0,0,0}, 87, 1, 1, 1, 0, 0, 1}, /* story_point */
+    [694] = {{0,0,0,0,0,0,0,0}, 31, 1, 22203, 4, -5, 0, 1}, /* mg/dL_glucose */
+    [695] = {{0,0,0,0,0,0,0,0}, 31, 1, 1, 1, 0, 0, 1}, /* mmol/L_glucose */
+    [696] = {{1,0,-1,0,0,0,0,0}, 0, 0, 343, 1, 0, 0, 1}, /* mach_air_20C */
+    [697] = {{-3,0,0,0,0,1,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* M */
+    [698] = {{-3,0,0,0,0,1,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* mol/L */
+    [699] = {{-3,0,0,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* mmol/L */
+    [700] = {{-3,0,0,0,0,1,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* \xc2\xb5mol/L */
+    [701] = {{-3,0,0,0,0,1,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* nmol/L */
+    [702] = {{-3,0,0,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* mol/m\xc2\xb3 */
+    [703] = {{-3,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* g/L */
+    [704] = {{-3,1,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mg/L */
+    [705] = {{-3,1,0,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* mg/dL */
+    [706] = {{-3,1,0,0,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* g/dL */
+    [707] = {{-3,1,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* \xc2\xb5g/mL */
+    [708] = {{-3,1,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* ng/mL */
+    [709] = {{0,0,0,0,0,1,0,0}, 11, 1, 1, 1, 0, 0, 1}, /* Eq */
+    [710] = {{-3,0,0,0,0,1,0,0}, 11, 1, 1, 1, 3, 0, 1}, /* Eq/L */
+    [711] = {{-3,0,0,0,0,1,0,0}, 11, 1, 1, 1, 0, 0, 1}, /* mEq/L */
+    [712] = {{0,0,0,0,0,1,0,0}, 67, 1, 1, 1, 0, 0, 1}, /* osmol */
+    [713] = {{-3,0,0,0,0,1,0,0}, 67, 1, 1, 1, 3, 0, 1}, /* Osm/L */
+    [714] = {{-3,0,0,0,0,1,0,0}, 67, 1, 1, 1, 0, 0, 1}, /* mOsm/L */
+    [715] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 6, -7, 0, 1}, /* U_enzyme */
+    [716] = {{-3,0,-1,0,0,1,0,0}, 0, 0, 1, 6, -4, 0, 1}, /* U/L */
+    [717] = {{0,0,0,0,0,0,0,0}, 45, 1, 1, 1, 0, 0, 1}, /* IU */
+    [718] = {{0,0,0,0,0,0,0,0}, 13, 1, 1, 1, 0, 0, 1}, /* CFU */
+    [719] = {{0,0,0,0,0,0,0,0}, 73, 1, 1, 1, 0, 0, 1}, /* PFU */
+    [720] = {{0,0,0,0,0,0,0,0}, 9, 1, 1, 1, 0, 0, 1}, /* cell */
+    [721] = {{0,0,0,0,0,0,0,0}, 63, 1, 1, 1, 0, 0, 1}, /* copy */
+    [722] = {{-3,0,0,0,0,0,0,0}, 13, 1, 1, 1, 6, 0, 1}, /* CFU/mL */
+    [723] = {{-3,0,0,0,0,0,0,0}, 73, 1, 1, 1, 6, 0, 1}, /* PFU/mL */
+    [724] = {{-3,0,0,0,0,0,0,0}, 9, 1, 1, 1, 6, 0, 1}, /* cells/mL */
+    [725] = {{-3,0,0,0,0,0,0,0}, 63, 1, 1, 1, 6, 0, 1}, /* copies/mL */
+    [726] = {{-3,0,0,0,0,0,0,0}, 45, 1, 1, 1, 6, 0, 1}, /* IU/mL */
+    [727] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -13, 0, 1}, /* Svedberg */
+    [728] = {{0,0,1,1,0,0,0,0}, 0, 0, 36, 1, 2, 0, 1}, /* Ah */
+    [729] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 0, 0, 1}, /* var */
+    [730] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 0, 0, 1}, /* VA */
+    [731] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* abA */
+    [732] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 299792458, -1, 0, 1}, /* statA */
+    [733] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* abC */
+    [734] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 299792458, -1, 0, 1}, /* statC */
+    [735] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -8, 0, 1}, /* abV */
+    [736] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 149896229, 5, -5, 0, 1}, /* statV */
+    [737] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* ab\xce\xa9 */
+    [738] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 22468879468420441, 25, -3, 0, 1}, /* stat\xce\xa9 */
+    [739] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* abF */
+    [740] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 25, 22468879468420441, 3, 0, 1}, /* statF */
+    [741] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* abH */
+    [742] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 22468879468420441, 25, -3, 0, 1}, /* statH */
+    [743] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 4, 0, 1}, /* phot */
+    [744] = {{-2,0,0,0,0,0,1,0}, 41, 1, 15625, 145161, 2, 0, 1}, /* fc */
+    [745] = {{-1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* diopter */
+    [746] = {{2,1,-3,0,0,0,0,0}, 84, -1, 1, 1, 0, 0, 1}, /* W/sr */
+    [747] = {{0,1,-3,0,0,0,0,0}, 84, -1, 1, 1, 0, 0, 1}, /* W/sr/m\xc2\xb2 */
+    [748] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, 0, 0, 1}, /* W/m\xc2\xb2/Hz */
+    [749] = {{-1,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* W/m\xc2\xb3 */
+    [750] = {{0,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* J/m\xc2\xb2 */
+    [751] = {{0,0,0,0,0,0,0,0}, 71, 1, 1, 1, 0, 0, 1}, /* photon */
+    [752] = {{0,0,0,0,0,1,0,0}, 71, 1, 1, 1, 0, 0, 1}, /* einstein */
+    [753] = {{-2,0,-1,0,0,1,0,0}, 71, 1, 1, 1, 0, 0, 1}, /* mol_photon/m\xc2\xb2/s */
+    [754] = {{-2,0,-1,0,0,1,0,0}, 71, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5mol_photon/m\xc2\xb2/s */
+    [755] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -2, 0, 1}, /* rad_dose */
+    [756] = {{0,-1,1,1,0,0,0,0}, 47, 1, 129, 5, -5, 0, 1}, /* R_exposure */
+    [757] = {{2,0,-3,0,0,0,0,0}, 1, 1, 1, 1, 0, 0, 1}, /* Gy/s */
+    [758] = {{2,0,-3,0,0,0,0,0}, 22, 1, 1, 36, -2, 0, 1}, /* Sv/h */
+    [759] = {{0,-1,-1,0,0,0,0,0}, 16, 1, 1, 1, 0, 0, 1}, /* Bq/kg */
+    [760] = {{-3,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 0, 0, 1}, /* Bq/m\xc2\xb3 */
+    [761] = {{0,0,0,0,0,0,0,0}, 17, 1, 1, 1, 0, 0, 1}, /* count */
+    [762] = {{0,0,0,0,0,0,0,0}, 2, 1, 7835, 1616084756946, 0, 0, 1}, /* mas */
+    [763] = {{0,0,0,0,0,0,0,0}, 2, 1, 301, 62085706680376, 0, 0, 1}, /* \xc2\xb5\x61s */
+    [764] = {{1,0,0,0,0,0,0,0}, 0, 0, 6957, 1, 5, 0, 1}, /* R_sun_nominal */
+    [765] = {{2,1,-3,0,0,0,0,0}, 0, 0, 3828, 1, 23, 0, 1}, /* L_sun_nominal */
+    [766] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 44, 0, 1}, /* foe */
+    [767] = {{-2,0,0,0,0,1,0,0}, 0, 0, 67175, 150553519, 0, 0, 1}, /* DU */
+    [768] = {{2,-1,-1,0,1,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* PVU */
+    [769] = {{3,0,-1,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* sverdrup */
+    [770] = {{2,0,0,0,0,0,0,0}, 0, 0, 9869233, 1, -19, 0, 1}, /* darcy */
+    [771] = {{1,0,-2,0,0,0,0,0}, 0, 0, 1, 1, -5, 0, 1}, /* mGal */
+    [772] = {{0,0,-2,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* Eotvos */
+    [773] = {{-2,0,0,0,0,0,0,0}, 19, 1, 1, 1, 16, 0, 1}, /* TECU */
+    [774] = {{2,0,-2,0,0,0,0,0}, 30, 1, 196133, 2, -4, 0, 1}, /* gpm */
+    [775] = {{0,-1,3,0,1,0,0,0}, 0, 0, 31, 2, -2, 0, 1}, /* clo */
+    [776] = {{0,0,0,0,0,0,0,0}, 98, 1, 1, 1, -6, 0, 1}, /* ppmv */
+    [777] = {{0,0,0,0,0,0,0,0}, 98, 1, 1, 1, -9, 0, 1}, /* ppbv */
+    [778] = {{0,0,0,0,0,0,0,0}, 62, 1, 1, 1, -6, 0, 1}, /* ppmw */
+    [779] = {{0,0,0,0,0,0,0,0}, 88, 1, 1, 1, 0, 0, 1}, /* symbol */
+    [780] = {{0,0,0,0,0,0,0,0}, 32, 1, 1, 1, 0, 0, 1}, /* edge */
+    [781] = {{0,0,0,0,0,0,0,0}, 10, 1, 1, 1, 0, 0, 1}, /* update */
+    [782] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, 0, 0, 1}, /* bit/s */
+    [783] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 0, 0, 1}, /* B/s */
+    [784] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 3, 0, 1}, /* Mb/s */
+    [785] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 6, 0, 1}, /* Gb/s */
+    [786] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 6, 0, 1}, /* MB/s */
+    [787] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 9, 0, 1}, /* GB/s */
+    [788] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1048576, 1, 0, 0, 1}, /* MiB/s */
+    [789] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1073741824, 1, 0, 0, 1}, /* GiB/s */
+    [790] = {{0,0,0,0,0,0,0,1}, 88, -1, 1, 8, 0, 0, 1}, /* bit/symbol */
+    [791] = {{-2,-1,2,0,0,0,0,0}, 27, 1, 1, 1, 0, 0, 1}, /* flop/J */
+    [792] = {{-2,-1,2,0,0,0,0,0}, 66, 1, 1, 1, 0, 0, 1}, /* op/J */
+    [793] = {{-2,-1,2,0,0,0,0,0}, 91, 1, 1, 1, 0, 0, 1}, /* tok/J */
+    [794] = {{0,0,0,0,0,0,0,0}, 8, 1, 1, 1, 0, 0, 1}, /* bortle */
+    [795] = {{0,0,0,0,0,0,0,0}, 6, 1, 1, 1, 0, 0, 1}, /* beaufort */
+    [796] = {{0,0,0,0,0,0,0,0}, 82, 1, 1, 1, 0, 0, 1}, /* saffir_simpson */
+    [797] = {{0,0,0,0,0,0,0,0}, 29, 1, 1, 1, 0, 0, 1}, /* fujita */
+    [798] = {{0,0,0,0,0,0,0,0}, 18, 1, 1, 1, 0, 0, 1}, /* EF */
+    [799] = {{0,0,0,0,0,0,0,0}, 58, 1, 1, 1, 0, 0, 1}, /* richter */
+    [800] = {{0,0,0,0,0,0,0,0}, 58, 1, 1, 1, 0, 0, 1}, /* moment_magnitude */
+    [801] = {{0,0,0,0,0,0,0,0}, 3, 1, 1, 1, 0, 0, 1}, /* apgar */
+    [802] = {{0,0,0,0,0,0,0,0}, 77, 1, 1, 1, 0, 0, 1}, /* RBE */
+    [803] = {{0,0,0,0,0,0,0,0}, 40, 1, 1, 1, 0, 0, 1}, /* hounsfield_unit */
+    [804] = {{0,0,-1,0,0,0,0,0}, 5, 1, 1, 6, -1, 0, 1}, /* bpm */
+    [805] = {{0,0,-1,0,0,0,0,0}, 28, 1, 1, 1, 0, 0, 1}, /* fps */
+    [806] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 6, -1, 0, 1}, /* dpm */
+    [807] = {{0,0,-1,0,0,0,0,0}, 17, 1, 1, 1, 0, 0, 1}, /* cps */
+    [808] = {{0,0,-1,0,0,0,0,0}, 17, 1, 1, 6, -1, 0, 1}, /* cpm */
+    [809] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 0, 0, 1}, /* flops */
+    [810] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 0, 0, 1}, /* FLOPS */
+    [811] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 3, 0, 1}, /* kflops */
+    [812] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 3, 0, 1}, /* kFLOPS */
+    [813] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 6, 0, 1}, /* Mflops */
+    [814] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 6, 0, 1}, /* MFLOPS */
+    [815] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 9, 0, 1}, /* Gflops */
+    [816] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 9, 0, 1}, /* GFLOPS */
+    [817] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 12, 0, 1}, /* Tflops */
+    [818] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 12, 0, 1}, /* TFLOPS */
+    [819] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 15, 0, 1}, /* Pflops */
+    [820] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 15, 0, 1}, /* PFLOPS */
+    [821] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 18, 0, 1}, /* Eflops */
+    [822] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 18, 0, 1}, /* EFLOPS */
+    [823] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 21, 0, 1}, /* Zflops */
+    [824] = {{0,0,-1,0,0,0,0,0}, 27, 1, 1, 1, 21, 0, 1}, /* ZFLOPS */
+    [825] = {{0,0,-1,0,0,0,0,0}, 27, 1, 999999999999999983, 1, 6, 0, 1}, /* Yflops */
+    [826] = {{0,0,-1,0,0,0,0,0}, 27, 1, 999999999999999983, 1, 6, 0, 1}, /* YFLOPS */
+    [827] = {{0,0,-1,0,0,0,0,0}, 66, 1, 1, 1, 0, 0, 1}, /* ops_per_s */
+    [828] = {{0,0,-1,0,0,0,0,0}, 66, 1, 1, 1, 3, 0, 1}, /* KOPS */
+    [829] = {{0,0,-1,0,0,0,0,0}, 66, 1, 1, 1, 6, 0, 1}, /* MOPS */
+    [830] = {{0,0,-1,0,0,0,0,0}, 66, 1, 1, 1, 9, 0, 1}, /* GOPS */
+    [831] = {{0,0,-1,0,0,0,0,0}, 66, 1, 1, 1, 12, 0, 1}, /* TOPS */
+    [832] = {{0,0,-1,0,0,0,0,0}, 66, 1, 1, 1, 15, 0, 1}, /* POPS */
+    [833] = {{0,0,-1,0,0,0,0,0}, 66, 1, 1, 1, 18, 0, 1}, /* EOPS */
+    [834] = {{0,0,-1,0,0,0,0,0}, 44, 1, 1, 1, 6, 0, 1}, /* MIPS */
+    [835] = {{0,0,-1,0,0,0,0,0}, 44, 1, 1, 1, 9, 0, 1}, /* GIPS */
+    [836] = {{0,0,-1,0,0,0,0,0}, 44, 1, 1, 1, 6, 0, 1}, /* DMIPS */
+    [837] = {{0,0,-1,0,0,0,0,0}, 57, 1, 1, 1, 0, 0, 1}, /* MAC/s */
+    [838] = {{0,0,-1,0,0,0,0,0}, 57, 1, 1, 1, 6, 0, 1}, /* MMAC/s */
+    [839] = {{0,0,-1,0,0,0,0,0}, 57, 1, 1, 1, 9, 0, 1}, /* GMAC/s */
+    [840] = {{0,0,-1,0,0,0,0,0}, 57, 1, 1, 1, 12, 0, 1}, /* TMAC/s */
+    [841] = {{0,0,-1,0,0,0,0,0}, 91, 1, 1, 1, 0, 0, 1}, /* tok/s */
+    [842] = {{0,0,-1,0,0,0,0,0}, 91, 1, 1, 1, 3, 0, 1}, /* ktok/s */
+    [843] = {{0,0,-1,0,0,0,0,0}, 91, 1, 1, 1, 6, 0, 1}, /* Mtok/s */
+    [844] = {{0,0,-1,0,0,0,0,0}, 91, 1, 1, 1, 9, 0, 1}, /* Gtok/s */
+    [845] = {{0,0,-1,0,0,0,0,0}, 94, 1, 1, 1, 0, 0, 1}, /* T/s */
+    [846] = {{0,0,-1,0,0,0,0,0}, 94, 1, 1, 1, 6, 0, 1}, /* MT/s */
+    [847] = {{0,0,-1,0,0,0,0,0}, 94, 1, 1, 1, 9, 0, 1}, /* GT/s */
+    [848] = {{0,0,-1,0,0,0,0,0}, 94, 1, 1, 1, 12, 0, 1}, /* TT/s */
+    [849] = {{0,0,-1,0,0,0,0,0}, 75, 1, 1, 1, 0, 0, 1}, /* qps */
+    [850] = {{0,0,-1,0,0,0,0,0}, 75, 1, 1, 1, 0, 0, 1}, /* QPS */
+    [851] = {{0,0,-1,0,0,0,0,0}, 79, 1, 1, 1, 0, 0, 1}, /* rps */
+    [852] = {{0,0,-1,0,0,0,0,0}, 79, 1, 1, 1, 0, 0, 1}, /* RPS */
+    [853] = {{0,0,-1,0,0,0,0,0}, 93, 1, 1, 1, 0, 0, 1}, /* tps */
+    [854] = {{0,0,-1,0,0,0,0,0}, 93, 1, 1, 1, 0, 0, 1}, /* TPS */
+    [855] = {{0,0,-1,0,0,0,0,0}, 68, 1, 1, 1, 0, 0, 1}, /* pps */
+    [856] = {{0,0,-1,0,0,0,0,0}, 68, 1, 1, 1, 0, 0, 1}, /* PPS */
+    [857] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 0, 0, 1}, /* iops */
+    [858] = {{0,0,-1,0,0,0,0,0}, 46, 1, 1, 1, 0, 0, 1}, /* IOPS */
+    [859] = {{0,0,-1,0,0,0,0,0}, 32, 1, 1, 1, 12, 0, 1}, /* TEPS */
+    [860] = {{0,0,-1,0,0,0,0,0}, 10, 1, 1, 1, 9, 0, 1}, /* GUPS */
+    [861] = {{-3,0,0,0,0,1,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* molar */
+    [862] = {{0,-1,0,0,0,1,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* molal */
+    [863] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* Qm */
+    [864] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* Qg */
+    [865] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* Qs */
+    [866] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QA */
+    [867] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QK */
+    [868] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* Qmol */
+    [869] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 30, 0, 1}, /* Qcd */
+    [870] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, 4, 0, 1}, /* QJy */
+    [871] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 30, 0, 1}, /* Qvar */
+    [872] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 30, 0, 1}, /* QVA */
+    [873] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QN */
+    [874] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QJ */
+    [875] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QW */
+    [876] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QPa */
+    [877] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 30, 0, 1}, /* QHz */
+    [878] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QV */
+    [879] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QC */
+    [880] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* Q\xce\xa9 */
+    [881] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QF */
+    [882] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QH */
+    [883] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QS */
+    [884] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QWb */
+    [885] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* QT */
+    [886] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 30, 0, 1}, /* Qlm */
+    [887] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 30, 0, 1}, /* Qlx */
+    [888] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 30, 0, 1}, /* QBq */
+    [889] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 30, 0, 1}, /* QGy */
+    [890] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 30, 0, 1}, /* QSv */
+    [891] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* Qkat */
+    [892] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* QL */
+    [893] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* Ql */
+    [894] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1602176634, 1, 2, 0, 1}, /* QeV */
+    [895] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* QDa */
+    [896] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 33, 0, 1}, /* Qt */
+    [897] = {{0,0,0,0,0,0,0,1}, 0, 0, 125, 1, 27, 0, 1}, /* Qb */
+    [898] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 30, 0, 1}, /* QB */
+    [899] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 27, 0, 1}, /* Qbps */
+    [900] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 30, 0, 1}, /* QBps */
+    [901] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 33, 0, 1}, /* Qpc */
+    [902] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 32, 0, 1}, /* Qfortnight */
+    [903] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 32, 0, 1}, /* Qcentury */
+    [904] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* Rm */
+    [905] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* Rg */
+    [906] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* Rs */
+    [907] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RA */
+    [908] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RK */
+    [909] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* Rmol */
+    [910] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 27, 0, 1}, /* Rcd */
+    [911] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, 1, 0, 1}, /* RJy */
+    [912] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 27, 0, 1}, /* Rvar */
+    [913] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 27, 0, 1}, /* RVA */
+    [914] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RN */
+    [915] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RJ */
+    [916] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RW */
+    [917] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RPa */
+    [918] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 27, 0, 1}, /* RHz */
+    [919] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RV */
+    [920] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RC */
+    [921] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* R\xce\xa9 */
+    [922] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RF */
+    [923] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RH */
+    [924] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RS */
+    [925] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RWb */
+    [926] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* RT */
+    [927] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 27, 0, 1}, /* Rlm */
+    [928] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 27, 0, 1}, /* Rlx */
+    [929] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 27, 0, 1}, /* RBq */
+    [930] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 27, 0, 1}, /* RGy */
+    [931] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 27, 0, 1}, /* RSv */
+    [932] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* Rkat */
+    [933] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* RL */
+    [934] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* Rl */
+    [935] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, 0, 0, 1}, /* ReV */
+    [936] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* RDa */
+    [937] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 30, 0, 1}, /* Rt */
+    [938] = {{0,0,0,0,0,0,0,1}, 0, 0, 125, 1, 24, 0, 1}, /* Rb */
+    [939] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 27, 0, 1}, /* RB */
+    [940] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 24, 0, 1}, /* Rbps */
+    [941] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 27, 0, 1}, /* RBps */
+    [942] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 30, 0, 1}, /* Rpc */
+    [943] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 29, 0, 1}, /* Rfortnight */
+    [944] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 29, 0, 1}, /* Rcentury */
+    [945] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* Ym */
+    [946] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* Yg */
+    [947] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* Ys */
+    [948] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YA */
+    [949] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YK */
+    [950] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* Ymol */
+    [951] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 24, 0, 1}, /* Ycd */
+    [952] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -2, 0, 1}, /* YJy */
+    [953] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 24, 0, 1}, /* Yvar */
+    [954] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 24, 0, 1}, /* YVA */
+    [955] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YN */
+    [956] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YJ */
+    [957] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YW */
+    [958] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YPa */
+    [959] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 24, 0, 1}, /* YHz */
+    [960] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YV */
+    [961] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YC */
+    [962] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* Y\xce\xa9 */
+    [963] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YF */
+    [964] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YH */
+    [965] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YS */
+    [966] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YWb */
+    [967] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* YT */
+    [968] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 24, 0, 1}, /* Ylm */
+    [969] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 24, 0, 1}, /* Ylx */
+    [970] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 24, 0, 1}, /* YBq */
+    [971] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 24, 0, 1}, /* YGy */
+    [972] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 24, 0, 1}, /* YSv */
+    [973] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* Ykat */
+    [974] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* YL */
+    [975] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* Yl */
+    [976] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -3, 0, 1}, /* YeV */
+    [977] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* YDa */
+    [978] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 27, 0, 1}, /* Yt */
+    [979] = {{0,0,0,0,0,0,0,1}, 0, 0, 125, 1, 21, 0, 1}, /* Yb */
+    [980] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 24, 0, 1}, /* YB */
+    [981] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 21, 0, 1}, /* Ybps */
+    [982] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 24, 0, 1}, /* YBps */
+    [983] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 27, 0, 1}, /* Ypc */
+    [984] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 26, 0, 1}, /* Yfortnight */
+    [985] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 26, 0, 1}, /* Ycentury */
+    [986] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* Zm */
+    [987] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* Zg */
+    [988] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* Zs */
+    [989] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZA */
+    [990] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZK */
+    [991] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* Zmol */
+    [992] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 21, 0, 1}, /* Zcd */
+    [993] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -5, 0, 1}, /* ZJy */
+    [994] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 21, 0, 1}, /* Zvar */
+    [995] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 21, 0, 1}, /* ZVA */
+    [996] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZN */
+    [997] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZJ */
+    [998] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZW */
+    [999] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZPa */
+    [1000] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 21, 0, 1}, /* ZHz */
+    [1001] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZV */
+    [1002] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZC */
+    [1003] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* Z\xce\xa9 */
+    [1004] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZF */
+    [1005] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZH */
+    [1006] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZS */
+    [1007] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZWb */
+    [1008] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* ZT */
+    [1009] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 21, 0, 1}, /* Zlm */
+    [1010] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 21, 0, 1}, /* Zlx */
+    [1011] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 21, 0, 1}, /* ZBq */
+    [1012] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 21, 0, 1}, /* ZGy */
+    [1013] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 21, 0, 1}, /* ZSv */
+    [1014] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* Zkat */
+    [1015] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* ZL */
+    [1016] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* Zl */
+    [1017] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -6, 0, 1}, /* ZeV */
+    [1018] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* ZDa */
+    [1019] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 24, 0, 1}, /* Zt */
+    [1020] = {{0,0,0,0,0,0,0,1}, 0, 0, 125, 1, 18, 0, 1}, /* Zb */
+    [1021] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 21, 0, 1}, /* ZB */
+    [1022] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 18, 0, 1}, /* Zbps */
+    [1023] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 21, 0, 1}, /* ZBps */
+    [1024] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 24, 0, 1}, /* Zpc */
+    [1025] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 23, 0, 1}, /* Zfortnight */
+    [1026] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 23, 0, 1}, /* Zcentury */
+    [1027] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* Em */
+    [1028] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* Eg */
+    [1029] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* Es */
+    [1030] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* EA */
+    [1031] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* EK */
+    [1032] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* Emol */
+    [1033] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 18, 0, 1}, /* Ecd */
+    [1034] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -8, 0, 1}, /* EJy */
+    [1035] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 18, 0, 1}, /* Evar */
+    [1036] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 18, 0, 1}, /* EVA */
+    [1037] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* EN */
+    [1038] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* EJ */
+    [1039] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* EW */
+    [1040] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* EPa */
+    [1041] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 18, 0, 1}, /* EHz */
+    [1042] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* EC */
+    [1043] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* E\xce\xa9 */
+    [1044] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* EH */
+    [1045] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* ES */
+    [1046] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* EWb */
+    [1047] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* ET */
+    [1048] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 18, 0, 1}, /* Elm */
+    [1049] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 18, 0, 1}, /* Elx */
+    [1050] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 18, 0, 1}, /* EBq */
+    [1051] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 18, 0, 1}, /* EGy */
+    [1052] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 18, 0, 1}, /* ESv */
+    [1053] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* Ekat */
+    [1054] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* EL */
+    [1055] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* El */
+    [1056] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -9, 0, 1}, /* EeV */
+    [1057] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* EDa */
+    [1058] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 21, 0, 1}, /* Et */
+    [1059] = {{0,0,0,0,0,0,0,1}, 0, 0, 125, 1, 15, 0, 1}, /* Eb */
+    [1060] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 18, 0, 1}, /* EB */
+    [1061] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 15, 0, 1}, /* Ebps */
+    [1062] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 18, 0, 1}, /* EBps */
+    [1063] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 21, 0, 1}, /* Epc */
+    [1064] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 20, 0, 1}, /* Efortnight */
+    [1065] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 20, 0, 1}, /* Ecentury */
+    [1066] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* Pm */
+    [1067] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* Pg */
+    [1068] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* Ps */
+    [1069] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PA */
+    [1070] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PK */
+    [1071] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* Pmol */
+    [1072] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 15, 0, 1}, /* Pcd */
+    [1073] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -11, 0, 1}, /* PJy */
+    [1074] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 15, 0, 1}, /* Pvar */
+    [1075] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 15, 0, 1}, /* PVA */
+    [1076] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PN */
+    [1077] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PJ */
+    [1078] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PW */
+    [1079] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PPa */
+    [1080] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 15, 0, 1}, /* PHz */
+    [1081] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PV */
+    [1082] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PC */
+    [1083] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* P\xce\xa9 */
+    [1084] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PF */
+    [1085] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PH */
+    [1086] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PWb */
+    [1087] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* PT */
+    [1088] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 15, 0, 1}, /* Plm */
+    [1089] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 15, 0, 1}, /* Plx */
+    [1090] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 15, 0, 1}, /* PBq */
+    [1091] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 15, 0, 1}, /* PGy */
+    [1092] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 15, 0, 1}, /* PSv */
+    [1093] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* Pkat */
+    [1094] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* PL */
+    [1095] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* Pl */
+    [1096] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -12, 0, 1}, /* PeV */
+    [1097] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* PDa */
+    [1098] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 18, 0, 1}, /* Pt */
+    [1099] = {{0,0,0,0,0,0,0,1}, 0, 0, 125, 1, 12, 0, 1}, /* Pb */
+    [1100] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 12, 0, 1}, /* Pbps */
+    [1101] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 15, 0, 1}, /* PBps */
+    [1102] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 18, 0, 1}, /* Ppc */
+    [1103] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 17, 0, 1}, /* Pfortnight */
+    [1104] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 17, 0, 1}, /* Pcentury */
+    [1105] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* Tm */
+    [1106] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* Tg */
+    [1107] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* Ts */
+    [1108] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TA */
+    [1109] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TK */
+    [1110] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* Tmol */
+    [1111] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 12, 0, 1}, /* Tcd */
+    [1112] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -14, 0, 1}, /* TJy */
+    [1113] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 12, 0, 1}, /* Tvar */
+    [1114] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 12, 0, 1}, /* TVA */
+    [1115] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TN */
+    [1116] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TJ */
+    [1117] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TW */
+    [1118] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TPa */
+    [1119] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TV */
+    [1120] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TC */
+    [1121] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* T\xce\xa9 */
+    [1122] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TF */
+    [1123] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TH */
+    [1124] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TS */
+    [1125] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TWb */
+    [1126] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* TT */
+    [1127] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 12, 0, 1}, /* Tlm */
+    [1128] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 12, 0, 1}, /* Tlx */
+    [1129] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 12, 0, 1}, /* TBq */
+    [1130] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 12, 0, 1}, /* TGy */
+    [1131] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 12, 0, 1}, /* TSv */
+    [1132] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* Tkat */
+    [1133] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* TL */
+    [1134] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* Tl */
+    [1135] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -15, 0, 1}, /* TeV */
+    [1136] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* TDa */
+    [1137] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 15, 0, 1}, /* Tt */
+    [1138] = {{0,0,0,0,0,0,0,1}, 0, 0, 125, 1, 9, 0, 1}, /* Tb */
+    [1139] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 9, 0, 1}, /* Tbps */
+    [1140] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 12, 0, 1}, /* TBps */
+    [1141] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 15, 0, 1}, /* Tpc */
+    [1142] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 14, 0, 1}, /* Tfortnight */
+    [1143] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 14, 0, 1}, /* Tcentury */
+    [1144] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* Gm */
+    [1145] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* Gg */
+    [1146] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* Gs */
+    [1147] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GA */
+    [1148] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GK */
+    [1149] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* Gmol */
+    [1150] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 9, 0, 1}, /* Gcd */
+    [1151] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -17, 0, 1}, /* GJy */
+    [1152] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 9, 0, 1}, /* Gvar */
+    [1153] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 9, 0, 1}, /* GVA */
+    [1154] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GN */
+    [1155] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GV */
+    [1156] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GC */
+    [1157] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* G\xce\xa9 */
+    [1158] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GF */
+    [1159] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GH */
+    [1160] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GS */
+    [1161] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GWb */
+    [1162] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* GT */
+    [1163] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 9, 0, 1}, /* Glm */
+    [1164] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 9, 0, 1}, /* Glx */
+    [1165] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 9, 0, 1}, /* GBq */
+    [1166] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 9, 0, 1}, /* GGy */
+    [1167] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 9, 0, 1}, /* GSv */
+    [1168] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* Gkat */
+    [1169] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* GL */
+    [1170] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* Gl */
+    [1171] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -18, 0, 1}, /* GeV */
+    [1172] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* GDa */
+    [1173] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 12, 0, 1}, /* Gt */
+    [1174] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 6, 0, 1}, /* Gbps */
+    [1175] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 9, 0, 1}, /* GBps */
+    [1176] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 12, 0, 1}, /* Gpc */
+    [1177] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 11, 0, 1}, /* Gfortnight */
+    [1178] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 11, 0, 1}, /* Gcentury */
+    [1179] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* Mm */
+    [1180] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* Mg */
+    [1181] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* Ms */
+    [1182] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MA */
+    [1183] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MK */
+    [1184] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* Mmol */
+    [1185] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 6, 0, 1}, /* Mcd */
+    [1186] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -20, 0, 1}, /* MJy */
+    [1187] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 6, 0, 1}, /* Mvar */
+    [1188] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 6, 0, 1}, /* MVA */
+    [1189] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MN */
+    [1190] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MC */
+    [1191] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* M\xce\xa9 */
+    [1192] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MF */
+    [1193] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MH */
+    [1194] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MS */
+    [1195] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MWb */
+    [1196] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* MT */
+    [1197] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 6, 0, 1}, /* Mlm */
+    [1198] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 6, 0, 1}, /* Mlx */
+    [1199] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 6, 0, 1}, /* MBq */
+    [1200] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 6, 0, 1}, /* MGy */
+    [1201] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 6, 0, 1}, /* MSv */
+    [1202] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 6, 0, 1}, /* Mkat */
+    [1203] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* ML */
+    [1204] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* Ml */
+    [1205] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -21, 0, 1}, /* MeV */
+    [1206] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* MDa */
+    [1207] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 9, 0, 1}, /* Mt */
+    [1208] = {{0,0,0,0,0,0,0,1}, 0, 0, 125, 1, 3, 0, 1}, /* Mb */
+    [1209] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 3, 0, 1}, /* Mbps */
+    [1210] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 6, 0, 1}, /* MBps */
+    [1211] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 9, 0, 1}, /* Mpc */
+    [1212] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 8, 0, 1}, /* Mfortnight */
+    [1213] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 8, 0, 1}, /* Mcentury */
+    [1214] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* ks */
+    [1215] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kA */
+    [1216] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kK */
+    [1217] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kmol */
+    [1218] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 3, 0, 1}, /* kcd */
+    [1219] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -23, 0, 1}, /* kJy */
+    [1220] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 3, 0, 1}, /* kvar */
+    [1221] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 3, 0, 1}, /* kVA */
+    [1222] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kN */
+    [1223] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kC */
+    [1224] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* k\xce\xa9 */
+    [1225] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kF */
+    [1226] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kH */
+    [1227] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kS */
+    [1228] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kWb */
+    [1229] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kT */
+    [1230] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 3, 0, 1}, /* klm */
+    [1231] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 3, 0, 1}, /* klx */
+    [1232] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 3, 0, 1}, /* kBq */
+    [1233] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 3, 0, 1}, /* kGy */
+    [1234] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 3, 0, 1}, /* kSv */
+    [1235] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 3, 0, 1}, /* kkat */
+    [1236] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kL */
+    [1237] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* kl */
+    [1238] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -24, 0, 1}, /* keV */
+    [1239] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* kDa */
+    [1240] = {{0,0,0,0,0,0,0,1}, 0, 0, 125, 1, 0, 0, 1}, /* kb */
+    [1241] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 3, 0, 1}, /* kB */
+    [1242] = {{0,0,-1,0,0,0,0,1}, 0, 0, 125, 1, 0, 0, 1}, /* kbps */
+    [1243] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 3, 0, 1}, /* kBps */
+    [1244] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 6, 0, 1}, /* kpc */
+    [1245] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 5, 0, 1}, /* kfortnight */
+    [1246] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 5, 0, 1}, /* kcentury */
+    [1247] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hm */
+    [1248] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* hg */
+    [1249] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hs */
+    [1250] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hA */
+    [1251] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hK */
+    [1252] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hmol */
+    [1253] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 2, 0, 1}, /* hcd */
+    [1254] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -24, 0, 1}, /* hJy */
+    [1255] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 2, 0, 1}, /* hvar */
+    [1256] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 2, 0, 1}, /* hVA */
+    [1257] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hN */
+    [1258] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hJ */
+    [1259] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hW */
+    [1260] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hPa */
+    [1261] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 2, 0, 1}, /* hHz */
+    [1262] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hV */
+    [1263] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hC */
+    [1264] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* h\xce\xa9 */
+    [1265] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hF */
+    [1266] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hH */
+    [1267] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hS */
+    [1268] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hWb */
+    [1269] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hT */
+    [1270] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 2, 0, 1}, /* hlm */
+    [1271] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 2, 0, 1}, /* hlx */
+    [1272] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 2, 0, 1}, /* hBq */
+    [1273] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 2, 0, 1}, /* hGy */
+    [1274] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 2, 0, 1}, /* hSv */
+    [1275] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* hkat */
+    [1276] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* hL */
+    [1277] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* hl */
+    [1278] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -25, 0, 1}, /* heV */
+    [1279] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* hDa */
+    [1280] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 5, 0, 1}, /* ht */
+    [1281] = {{0,0,0,0,0,0,0,1}, 0, 0, 25, 2, 0, 0, 1}, /* hb */
+    [1282] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 2, 0, 1}, /* hB */
+    [1283] = {{0,0,-1,0,0,0,0,1}, 0, 0, 25, 2, 0, 0, 1}, /* hbps */
+    [1284] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 2, 0, 1}, /* hBps */
+    [1285] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 5, 0, 1}, /* hpc */
+    [1286] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 4, 0, 1}, /* hfortnight */
+    [1287] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 4, 0, 1}, /* hcentury */
+    [1288] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* dam */
+    [1289] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* dag */
+    [1290] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* das */
+    [1291] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daA */
+    [1292] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daK */
+    [1293] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* damol */
+    [1294] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, 1, 0, 1}, /* dacd */
+    [1295] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -25, 0, 1}, /* daJy */
+    [1296] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, 1, 0, 1}, /* davar */
+    [1297] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, 1, 0, 1}, /* daVA */
+    [1298] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daN */
+    [1299] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daJ */
+    [1300] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daW */
+    [1301] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daPa */
+    [1302] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, 1, 0, 1}, /* daHz */
+    [1303] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daV */
+    [1304] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daC */
+    [1305] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* da\xce\xa9 */
+    [1306] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daF */
+    [1307] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daH */
+    [1308] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daS */
+    [1309] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daWb */
+    [1310] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* daT */
+    [1311] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, 1, 0, 1}, /* dalm */
+    [1312] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, 1, 0, 1}, /* dalx */
+    [1313] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, 1, 0, 1}, /* daBq */
+    [1314] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, 1, 0, 1}, /* daGy */
+    [1315] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, 1, 0, 1}, /* daSv */
+    [1316] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, 1, 0, 1}, /* dakat */
+    [1317] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* daL */
+    [1318] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* dal */
+    [1319] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -26, 0, 1}, /* daeV */
+    [1320] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* daDa */
+    [1321] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 4, 0, 1}, /* dat */
+    [1322] = {{0,0,0,0,0,0,0,1}, 0, 0, 5, 4, 0, 0, 1}, /* dab */
+    [1323] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, 1, 0, 1}, /* daB */
+    [1324] = {{0,0,-1,0,0,0,0,1}, 0, 0, 5, 4, 0, 0, 1}, /* dabps */
+    [1325] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, 1, 0, 1}, /* daBps */
+    [1326] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 4, 0, 1}, /* dapc */
+    [1327] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 3, 0, 1}, /* dafortnight */
+    [1328] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 3, 0, 1}, /* dacentury */
+    [1329] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dm */
+    [1330] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* dg */
+    [1331] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* ds */
+    [1332] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dA */
+    [1333] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dK */
+    [1334] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dmol */
+    [1335] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -1, 0, 1}, /* dcd */
+    [1336] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -27, 0, 1}, /* dJy */
+    [1337] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -1, 0, 1}, /* dvar */
+    [1338] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -1, 0, 1}, /* dVA */
+    [1339] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dN */
+    [1340] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dJ */
+    [1341] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dW */
+    [1342] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dPa */
+    [1343] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -1, 0, 1}, /* dHz */
+    [1344] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dV */
+    [1345] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dC */
+    [1346] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* d\xce\xa9 */
+    [1347] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dF */
+    [1348] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dH */
+    [1349] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dS */
+    [1350] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dWb */
+    [1351] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dT */
+    [1352] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -1, 0, 1}, /* dlm */
+    [1353] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -1, 0, 1}, /* dlx */
+    [1354] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -1, 0, 1}, /* dBq */
+    [1355] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -1, 0, 1}, /* dGy */
+    [1356] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -1, 0, 1}, /* dSv */
+    [1357] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -1, 0, 1}, /* dkat */
+    [1358] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* dL */
+    [1359] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -4, 0, 1}, /* dl */
+    [1360] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -28, 0, 1}, /* deV */
+    [1361] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* dDa */
+    [1362] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 2, 0, 1}, /* dt */
+    [1363] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -1, 0, 1}, /* db */
+    [1364] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -1, 0, 1}, /* dB */
+    [1365] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -1, 0, 1}, /* dbps */
+    [1366] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -1, 0, 1}, /* dBps */
+    [1367] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 2, 0, 1}, /* dpc */
+    [1368] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 1, 0, 1}, /* dfortnight */
+    [1369] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 1, 0, 1}, /* dcentury */
+    [1370] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -5, 0, 1}, /* cg */
+    [1371] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cs */
+    [1372] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cA */
+    [1373] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cK */
+    [1374] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cmol */
+    [1375] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -2, 0, 1}, /* ccd */
+    [1376] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -28, 0, 1}, /* cJy */
+    [1377] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -2, 0, 1}, /* cvar */
+    [1378] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -2, 0, 1}, /* cVA */
+    [1379] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cN */
+    [1380] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cJ */
+    [1381] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cW */
+    [1382] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cPa */
+    [1383] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -2, 0, 1}, /* cHz */
+    [1384] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cV */
+    [1385] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cC */
+    [1386] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* c\xce\xa9 */
+    [1387] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cF */
+    [1388] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cH */
+    [1389] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cS */
+    [1390] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cWb */
+    [1391] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* cT */
+    [1392] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -2, 0, 1}, /* clm */
+    [1393] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -2, 0, 1}, /* clx */
+    [1394] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -2, 0, 1}, /* cBq */
+    [1395] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -2, 0, 1}, /* cGy */
+    [1396] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -2, 0, 1}, /* cSv */
+    [1397] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -2, 0, 1}, /* ckat */
+    [1398] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -5, 0, 1}, /* cL */
+    [1399] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -5, 0, 1}, /* cl */
+    [1400] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -29, 0, 1}, /* ceV */
+    [1401] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* cDa */
+    [1402] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -2, 0, 1}, /* cb */
+    [1403] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -2, 0, 1}, /* cB */
+    [1404] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -2, 0, 1}, /* cbps */
+    [1405] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -2, 0, 1}, /* cBps */
+    [1406] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 1, 0, 1}, /* cpc */
+    [1407] = {{0,0,1,0,0,0,0,0}, 0, 0, 12096, 1, 0, 0, 1}, /* cfortnight */
+    [1408] = {{0,0,1,0,0,0,0,0}, 0, 0, 31556952, 1, 0, 0, 1}, /* ccentury */
+    [1409] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mK */
+    [1410] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mmol */
+    [1411] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -3, 0, 1}, /* mcd */
+    [1412] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -29, 0, 1}, /* mJy */
+    [1413] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -3, 0, 1}, /* mvar */
+    [1414] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -3, 0, 1}, /* mVA */
+    [1415] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mN */
+    [1416] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mJ */
+    [1417] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mW */
+    [1418] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mPa */
+    [1419] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -3, 0, 1}, /* mHz */
+    [1420] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mV */
+    [1421] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mC */
+    [1422] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* m\xce\xa9 */
+    [1423] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mF */
+    [1424] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mH */
+    [1425] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mS */
+    [1426] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mWb */
+    [1427] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mT */
+    [1428] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -3, 0, 1}, /* mlm */
+    [1429] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -3, 0, 1}, /* mlx */
+    [1430] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -3, 0, 1}, /* mBq */
+    [1431] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -3, 0, 1}, /* mGy */
+    [1432] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -3, 0, 1}, /* mSv */
+    [1433] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* mkat */
+    [1434] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* ml */
+    [1435] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -30, 0, 1}, /* meV */
+    [1436] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* mDa */
+    [1437] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, 0, 0, 1}, /* mt */
+    [1438] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -3, 0, 1}, /* mb */
+    [1439] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -3, 0, 1}, /* mB */
+    [1440] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -3, 0, 1}, /* mbps */
+    [1441] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -3, 0, 1}, /* mBps */
+    [1442] = {{1,0,0,0,0,0,0,0}, 0, 0, 30856775814914, 1, 0, 0, 1}, /* mpc */
+    [1443] = {{0,0,1,0,0,0,0,0}, 0, 0, 6048, 5, 0, 0, 1}, /* mfortnight */
+    [1444] = {{0,0,1,0,0,0,0,0}, 0, 0, 15778476, 5, 0, 0, 1}, /* mcentury */
+    [1445] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* um */
+    [1446] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* ug */
+    [1447] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* us */
+    [1448] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uA */
+    [1449] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uK */
+    [1450] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* umol */
+    [1451] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -6, 0, 1}, /* ucd */
+    [1452] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -32, 0, 1}, /* uJy */
+    [1453] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -6, 0, 1}, /* uvar */
+    [1454] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -6, 0, 1}, /* uVA */
+    [1455] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uN */
+    [1456] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uJ */
+    [1457] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uW */
+    [1458] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uPa */
+    [1459] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -6, 0, 1}, /* uHz */
+    [1460] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uV */
+    [1461] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uC */
+    [1462] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* u\xce\xa9 */
+    [1463] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uF */
+    [1464] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uH */
+    [1465] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uS */
+    [1466] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uWb */
+    [1467] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* uT */
+    [1468] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -6, 0, 1}, /* ulm */
+    [1469] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -6, 0, 1}, /* ulx */
+    [1470] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -6, 0, 1}, /* uBq */
+    [1471] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -6, 0, 1}, /* uGy */
+    [1472] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -6, 0, 1}, /* uSv */
+    [1473] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* ukat */
+    [1474] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* uL */
+    [1475] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* ul */
+    [1476] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -33, 0, 1}, /* ueV */
+    [1477] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* uDa */
+    [1478] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* ut */
+    [1479] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -6, 0, 1}, /* ub */
+    [1480] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -6, 0, 1}, /* uB */
+    [1481] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -6, 0, 1}, /* ubps */
+    [1482] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -6, 0, 1}, /* uBps */
+    [1483] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -2, 0, 1}, /* upc */
+    [1484] = {{0,0,1,0,0,0,0,0}, 0, 0, 756, 625, 0, 0, 1}, /* ufortnight */
+    [1485] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -1, 0, 1}, /* ucentury */
+    [1486] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcm */
+    [1487] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* \xce\xbcg */
+    [1488] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcs */
+    [1489] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbc\x41 */
+    [1490] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcK */
+    [1491] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcmol */
+    [1492] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -6, 0, 1}, /* \xce\xbc\x63\x64 */
+    [1493] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -32, 0, 1}, /* \xce\xbcJy */
+    [1494] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -6, 0, 1}, /* \xce\xbcvar */
+    [1495] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -6, 0, 1}, /* \xce\xbcVA */
+    [1496] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcN */
+    [1497] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcJ */
+    [1498] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcW */
+    [1499] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcPa */
+    [1500] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -6, 0, 1}, /* \xce\xbcHz */
+    [1501] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcV */
+    [1502] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbc\x43 */
+    [1503] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbc\xce\xa9 */
+    [1504] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbc\x46 */
+    [1505] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcH */
+    [1506] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcS */
+    [1507] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcWb */
+    [1508] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbcT */
+    [1509] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -6, 0, 1}, /* \xce\xbclm */
+    [1510] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -6, 0, 1}, /* \xce\xbclx */
+    [1511] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -6, 0, 1}, /* \xce\xbc\x42q */
+    [1512] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -6, 0, 1}, /* \xce\xbcGy */
+    [1513] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -6, 0, 1}, /* \xce\xbcSv */
+    [1514] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbckat */
+    [1515] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* \xce\xbcL */
+    [1516] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* \xce\xbcl */
+    [1517] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -33, 0, 1}, /* \xce\xbc\x65V */
+    [1518] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* \xce\xbc\x44\x61 */
+    [1519] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* \xce\xbct */
+    [1520] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -6, 0, 1}, /* \xce\xbc\x62 */
+    [1521] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbc\x42 */
+    [1522] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -6, 0, 1}, /* \xce\xbc\x62ps */
+    [1523] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -6, 0, 1}, /* \xce\xbc\x42ps */
+    [1524] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -2, 0, 1}, /* \xce\xbcpc */
+    [1525] = {{0,0,1,0,0,0,0,0}, 0, 0, 756, 625, 0, 0, 1}, /* \xce\xbc\x66ortnight */
+    [1526] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -1, 0, 1}, /* \xce\xbc\x63\x65ntury */
+    [1527] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5K */
+    [1528] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5mol */
+    [1529] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5\x63\x64 */
+    [1530] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -32, 0, 1}, /* \xc2\xb5Jy */
+    [1531] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5var */
+    [1532] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5VA */
+    [1533] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5N */
+    [1534] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5J */
+    [1535] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5W */
+    [1536] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5Pa */
+    [1537] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5Hz */
+    [1538] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5V */
+    [1539] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5\x43 */
+    [1540] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5\xce\xa9 */
+    [1541] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5\x46 */
+    [1542] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5H */
+    [1543] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5S */
+    [1544] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5Wb */
+    [1545] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5T */
+    [1546] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5lm */
+    [1547] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5lx */
+    [1548] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5\x42q */
+    [1549] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5Gy */
+    [1550] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -6, 0, 1}, /* \xc2\xb5Sv */
+    [1551] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5kat */
+    [1552] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* \xc2\xb5L */
+    [1553] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* \xc2\xb5l */
+    [1554] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -33, 0, 1}, /* \xc2\xb5\x65V */
+    [1555] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* \xc2\xb5\x44\x61 */
+    [1556] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -3, 0, 1}, /* \xc2\xb5t */
+    [1557] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -6, 0, 1}, /* \xc2\xb5\x62 */
+    [1558] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5\x42 */
+    [1559] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -6, 0, 1}, /* \xc2\xb5\x62ps */
+    [1560] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -6, 0, 1}, /* \xc2\xb5\x42ps */
+    [1561] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -2, 0, 1}, /* \xc2\xb5pc */
+    [1562] = {{0,0,1,0,0,0,0,0}, 0, 0, 756, 625, 0, 0, 1}, /* \xc2\xb5\x66ortnight */
+    [1563] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -1, 0, 1}, /* \xc2\xb5\x63\x65ntury */
+    [1564] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* ng */
+    [1565] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nA */
+    [1566] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nK */
+    [1567] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nmol */
+    [1568] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -9, 0, 1}, /* ncd */
+    [1569] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -35, 0, 1}, /* nJy */
+    [1570] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -9, 0, 1}, /* nvar */
+    [1571] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -9, 0, 1}, /* nVA */
+    [1572] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nN */
+    [1573] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nJ */
+    [1574] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nW */
+    [1575] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nPa */
+    [1576] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -9, 0, 1}, /* nHz */
+    [1577] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nV */
+    [1578] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nC */
+    [1579] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* n\xce\xa9 */
+    [1580] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nF */
+    [1581] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nH */
+    [1582] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nS */
+    [1583] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nWb */
+    [1584] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nT */
+    [1585] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -9, 0, 1}, /* nlm */
+    [1586] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -9, 0, 1}, /* nlx */
+    [1587] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -9, 0, 1}, /* nBq */
+    [1588] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -9, 0, 1}, /* nGy */
+    [1589] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -9, 0, 1}, /* nSv */
+    [1590] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -9, 0, 1}, /* nkat */
+    [1591] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* nL */
+    [1592] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* nl */
+    [1593] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -36, 0, 1}, /* neV */
+    [1594] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* nDa */
+    [1595] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -6, 0, 1}, /* nt */
+    [1596] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -9, 0, 1}, /* nb */
+    [1597] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -9, 0, 1}, /* nB */
+    [1598] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -9, 0, 1}, /* nbps */
+    [1599] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -9, 0, 1}, /* nBps */
+    [1600] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -5, 0, 1}, /* npc */
+    [1601] = {{0,0,1,0,0,0,0,0}, 0, 0, 189, 15625, -1, 0, 1}, /* nfortnight */
+    [1602] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -4, 0, 1}, /* ncentury */
+    [1603] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* pg */
+    [1604] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pA */
+    [1605] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pK */
+    [1606] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pmol */
+    [1607] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -12, 0, 1}, /* pcd */
+    [1608] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -38, 0, 1}, /* pJy */
+    [1609] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -12, 0, 1}, /* pvar */
+    [1610] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -12, 0, 1}, /* pVA */
+    [1611] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pN */
+    [1612] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pJ */
+    [1613] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pW */
+    [1614] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pPa */
+    [1615] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -12, 0, 1}, /* pHz */
+    [1616] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pV */
+    [1617] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pC */
+    [1618] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* p\xce\xa9 */
+    [1619] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pF */
+    [1620] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pH */
+    [1621] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pS */
+    [1622] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pWb */
+    [1623] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pT */
+    [1624] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -12, 0, 1}, /* plm */
+    [1625] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -12, 0, 1}, /* plx */
+    [1626] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -12, 0, 1}, /* pBq */
+    [1627] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -12, 0, 1}, /* pGy */
+    [1628] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -12, 0, 1}, /* pSv */
+    [1629] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -12, 0, 1}, /* pkat */
+    [1630] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* pL */
+    [1631] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* pl */
+    [1632] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -39, 0, 1}, /* peV */
+    [1633] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* pDa */
+    [1634] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -12, 0, 1}, /* pB */
+    [1635] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -12, 0, 1}, /* pbps */
+    [1636] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -12, 0, 1}, /* pBps */
+    [1637] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -8, 0, 1}, /* ppc */
+    [1638] = {{0,0,1,0,0,0,0,0}, 0, 0, 189, 15625, -4, 0, 1}, /* pfortnight */
+    [1639] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -7, 0, 1}, /* pcentury */
+    [1640] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fm */
+    [1641] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* fg */
+    [1642] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fs */
+    [1643] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fA */
+    [1644] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fK */
+    [1645] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fmol */
+    [1646] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -15, 0, 1}, /* fcd */
+    [1647] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -41, 0, 1}, /* fJy */
+    [1648] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -15, 0, 1}, /* fvar */
+    [1649] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -15, 0, 1}, /* fVA */
+    [1650] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fN */
+    [1651] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fJ */
+    [1652] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fW */
+    [1653] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fPa */
+    [1654] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -15, 0, 1}, /* fHz */
+    [1655] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fV */
+    [1656] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fC */
+    [1657] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* f\xce\xa9 */
+    [1658] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fF */
+    [1659] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fH */
+    [1660] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fS */
+    [1661] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fWb */
+    [1662] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fT */
+    [1663] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -15, 0, 1}, /* flm */
+    [1664] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -15, 0, 1}, /* flx */
+    [1665] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -15, 0, 1}, /* fBq */
+    [1666] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -15, 0, 1}, /* fGy */
+    [1667] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -15, 0, 1}, /* fSv */
+    [1668] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -15, 0, 1}, /* fkat */
+    [1669] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* fl */
+    [1670] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -42, 0, 1}, /* feV */
+    [1671] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* fDa */
+    [1672] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -15, 0, 1}, /* fb */
+    [1673] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -15, 0, 1}, /* fB */
+    [1674] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -15, 0, 1}, /* fbps */
+    [1675] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -15, 0, 1}, /* fBps */
+    [1676] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -11, 0, 1}, /* fpc */
+    [1677] = {{0,0,1,0,0,0,0,0}, 0, 0, 189, 15625, -7, 0, 1}, /* ffortnight */
+    [1678] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -10, 0, 1}, /* fcentury */
+    [1679] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* am */
+    [1680] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* ag */
+    [1681] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* as */
+    [1682] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aA */
+    [1683] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aK */
+    [1684] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* amol */
+    [1685] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -18, 0, 1}, /* acd */
+    [1686] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -44, 0, 1}, /* aJy */
+    [1687] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -18, 0, 1}, /* avar */
+    [1688] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -18, 0, 1}, /* aVA */
+    [1689] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aN */
+    [1690] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aJ */
+    [1691] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aW */
+    [1692] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aPa */
+    [1693] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -18, 0, 1}, /* aHz */
+    [1694] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aV */
+    [1695] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aC */
+    [1696] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* a\xce\xa9 */
+    [1697] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aF */
+    [1698] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aH */
+    [1699] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aS */
+    [1700] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aWb */
+    [1701] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* aT */
+    [1702] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -18, 0, 1}, /* alm */
+    [1703] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -18, 0, 1}, /* alx */
+    [1704] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -18, 0, 1}, /* aBq */
+    [1705] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -18, 0, 1}, /* aGy */
+    [1706] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -18, 0, 1}, /* aSv */
+    [1707] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* akat */
+    [1708] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* aL */
+    [1709] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* al */
+    [1710] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -45, 0, 1}, /* aeV */
+    [1711] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* aDa */
+    [1712] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -18, 0, 1}, /* ab */
+    [1713] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -18, 0, 1}, /* aB */
+    [1714] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -18, 0, 1}, /* abps */
+    [1715] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -18, 0, 1}, /* aBps */
+    [1716] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -14, 0, 1}, /* apc */
+    [1717] = {{0,0,1,0,0,0,0,0}, 0, 0, 189, 15625, -10, 0, 1}, /* afortnight */
+    [1718] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -13, 0, 1}, /* acentury */
+    [1719] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zm */
+    [1720] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* zg */
+    [1721] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zs */
+    [1722] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zA */
+    [1723] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zK */
+    [1724] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zmol */
+    [1725] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -21, 0, 1}, /* zcd */
+    [1726] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -47, 0, 1}, /* zJy */
+    [1727] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -21, 0, 1}, /* zvar */
+    [1728] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -21, 0, 1}, /* zVA */
+    [1729] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zN */
+    [1730] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zJ */
+    [1731] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zW */
+    [1732] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zPa */
+    [1733] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -21, 0, 1}, /* zHz */
+    [1734] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zV */
+    [1735] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zC */
+    [1736] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* z\xce\xa9 */
+    [1737] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zF */
+    [1738] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zH */
+    [1739] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zS */
+    [1740] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zWb */
+    [1741] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zT */
+    [1742] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -21, 0, 1}, /* zlm */
+    [1743] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -21, 0, 1}, /* zlx */
+    [1744] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -21, 0, 1}, /* zBq */
+    [1745] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -21, 0, 1}, /* zGy */
+    [1746] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -21, 0, 1}, /* zSv */
+    [1747] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* zkat */
+    [1748] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* zL */
+    [1749] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* zl */
+    [1750] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -48, 0, 1}, /* zeV */
+    [1751] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* zDa */
+    [1752] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -18, 0, 1}, /* zt */
+    [1753] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -21, 0, 1}, /* zb */
+    [1754] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -21, 0, 1}, /* zB */
+    [1755] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -21, 0, 1}, /* zbps */
+    [1756] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -21, 0, 1}, /* zBps */
+    [1757] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -17, 0, 1}, /* zpc */
+    [1758] = {{0,0,1,0,0,0,0,0}, 0, 0, 189, 15625, -13, 0, 1}, /* zfortnight */
+    [1759] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -16, 0, 1}, /* zcentury */
+    [1760] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* ym */
+    [1761] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* yg */
+    [1762] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* ys */
+    [1763] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yA */
+    [1764] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yK */
+    [1765] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* ymol */
+    [1766] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -24, 0, 1}, /* ycd */
+    [1767] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -50, 0, 1}, /* yJy */
+    [1768] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -24, 0, 1}, /* yvar */
+    [1769] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -24, 0, 1}, /* yVA */
+    [1770] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yN */
+    [1771] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yJ */
+    [1772] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yW */
+    [1773] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yPa */
+    [1774] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -24, 0, 1}, /* yHz */
+    [1775] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yV */
+    [1776] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yC */
+    [1777] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* y\xce\xa9 */
+    [1778] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yF */
+    [1779] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yH */
+    [1780] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yS */
+    [1781] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yWb */
+    [1782] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* yT */
+    [1783] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -24, 0, 1}, /* ylm */
+    [1784] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -24, 0, 1}, /* ylx */
+    [1785] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -24, 0, 1}, /* yBq */
+    [1786] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -24, 0, 1}, /* yGy */
+    [1787] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -24, 0, 1}, /* ySv */
+    [1788] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* ykat */
+    [1789] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* yL */
+    [1790] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* yl */
+    [1791] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -51, 0, 1}, /* yeV */
+    [1792] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* yDa */
+    [1793] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -21, 0, 1}, /* yt */
+    [1794] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -24, 0, 1}, /* yb */
+    [1795] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -24, 0, 1}, /* yB */
+    [1796] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -24, 0, 1}, /* ybps */
+    [1797] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -24, 0, 1}, /* yBps */
+    [1798] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -20, 0, 1}, /* ypc */
+    [1799] = {{0,0,1,0,0,0,0,0}, 0, 0, 189, 15625, -16, 0, 1}, /* yfortnight */
+    [1800] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -19, 0, 1}, /* ycentury */
+    [1801] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rm */
+    [1802] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* rg */
+    [1803] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rs */
+    [1804] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rA */
+    [1805] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rK */
+    [1806] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rmol */
+    [1807] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -27, 0, 1}, /* rcd */
+    [1808] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -53, 0, 1}, /* rJy */
+    [1809] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -27, 0, 1}, /* rvar */
+    [1810] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -27, 0, 1}, /* rVA */
+    [1811] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rN */
+    [1812] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rJ */
+    [1813] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rW */
+    [1814] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rPa */
+    [1815] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -27, 0, 1}, /* rHz */
+    [1816] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rV */
+    [1817] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rC */
+    [1818] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* r\xce\xa9 */
+    [1819] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rF */
+    [1820] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rH */
+    [1821] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rS */
+    [1822] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rWb */
+    [1823] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rT */
+    [1824] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -27, 0, 1}, /* rlm */
+    [1825] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -27, 0, 1}, /* rlx */
+    [1826] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -27, 0, 1}, /* rBq */
+    [1827] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -27, 0, 1}, /* rGy */
+    [1828] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -27, 0, 1}, /* rSv */
+    [1829] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -27, 0, 1}, /* rkat */
+    [1830] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* rL */
+    [1831] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* rl */
+    [1832] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -54, 0, 1}, /* reV */
+    [1833] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* rDa */
+    [1834] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -24, 0, 1}, /* rt */
+    [1835] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -27, 0, 1}, /* rb */
+    [1836] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -27, 0, 1}, /* rB */
+    [1837] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -27, 0, 1}, /* rbps */
+    [1838] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -27, 0, 1}, /* rBps */
+    [1839] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -23, 0, 1}, /* rpc */
+    [1840] = {{0,0,1,0,0,0,0,0}, 0, 0, 189, 15625, -19, 0, 1}, /* rfortnight */
+    [1841] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -22, 0, 1}, /* rcentury */
+    [1842] = {{1,0,0,0,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qm */
+    [1843] = {{0,1,0,0,0,0,0,0}, 0, 0, 1, 1, -33, 0, 1}, /* qg */
+    [1844] = {{0,0,1,0,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qs */
+    [1845] = {{0,0,0,1,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qA */
+    [1846] = {{0,0,0,0,1,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qK */
+    [1847] = {{0,0,0,0,0,1,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qmol */
+    [1848] = {{0,0,0,0,0,0,1,0}, 56, 1, 1, 1, -30, 0, 1}, /* qcd */
+    [1849] = {{0,1,-2,0,0,0,0,0}, 15, -1, 1, 1, -56, 0, 1}, /* qJy */
+    [1850] = {{2,1,-3,0,0,0,0,0}, 78, 1, 1, 1, -30, 0, 1}, /* qvar */
+    [1851] = {{2,1,-3,0,0,0,0,0}, 4, 1, 1, 1, -30, 0, 1}, /* qVA */
+    [1852] = {{1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qN */
+    [1853] = {{2,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qJ */
+    [1854] = {{2,1,-3,0,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qW */
+    [1855] = {{-1,1,-2,0,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qPa */
+    [1856] = {{0,0,-1,0,0,0,0,0}, 15, 1, 1, 1, -30, 0, 1}, /* qHz */
+    [1857] = {{2,1,-3,-1,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qV */
+    [1858] = {{0,0,1,1,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qC */
+    [1859] = {{2,1,-3,-2,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* q\xce\xa9 */
+    [1860] = {{-2,-1,4,2,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qF */
+    [1861] = {{2,1,-2,-2,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qH */
+    [1862] = {{-2,-1,3,2,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qS */
+    [1863] = {{2,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qWb */
+    [1864] = {{0,1,-2,-1,0,0,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qT */
+    [1865] = {{0,0,0,0,0,0,1,0}, 55, 1, 1, 1, -30, 0, 1}, /* qlm */
+    [1866] = {{-2,0,0,0,0,0,1,0}, 41, 1, 1, 1, -30, 0, 1}, /* qlx */
+    [1867] = {{0,0,-1,0,0,0,0,0}, 16, 1, 1, 1, -30, 0, 1}, /* qBq */
+    [1868] = {{2,0,-2,0,0,0,0,0}, 1, 1, 1, 1, -30, 0, 1}, /* qGy */
+    [1869] = {{2,0,-2,0,0,0,0,0}, 22, 1, 1, 1, -30, 0, 1}, /* qSv */
+    [1870] = {{0,0,-1,0,0,1,0,0}, 0, 0, 1, 1, -30, 0, 1}, /* qkat */
+    [1871] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -33, 0, 1}, /* qL */
+    [1872] = {{3,0,0,0,0,0,0,0}, 0, 0, 1, 1, -33, 0, 1}, /* ql */
+    [1873] = {{2,1,-2,0,0,0,0,0}, 0, 0, 801088317, 5, -57, 0, 1}, /* qeV */
+    [1874] = {{0,1,0,0,0,0,0,0}, 0, 0, 166053906660000015, 1, -44, 0, 1}, /* qDa */
+    [1875] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 8, -30, 0, 1}, /* qb */
+    [1876] = {{0,0,0,0,0,0,0,1}, 0, 0, 1, 1, -30, 0, 1}, /* qB */
+    [1877] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 8, -30, 0, 1}, /* qbps */
+    [1878] = {{0,0,-1,0,0,0,0,1}, 0, 0, 1, 1, -30, 0, 1}, /* qBps */
+    [1879] = {{1,0,0,0,0,0,0,0}, 0, 0, 15428387907457, 5, -26, 0, 1}, /* qpc */
+    [1880] = {{0,0,1,0,0,0,0,0}, 0, 0, 189, 15625, -22, 0, 1}, /* qfortnight */
+    [1881] = {{0,0,1,0,0,0,0,0}, 0, 0, 3944619, 125, -25, 0, 1}, /* qcentury */
+    [1882] = {{0,0,0,0,0,0,0,1}, 0, 0, 128, 1, 0, 0, 1}, /* Kib */
+    [1883] = {{0,0,0,0,0,0,0,1}, 0, 0, 131072, 1, 0, 0, 1}, /* Mib */
+    [1884] = {{0,0,0,0,0,0,0,1}, 0, 0, 134217728, 1, 0, 0, 1}, /* Gib */
+    [1885] = {{0,0,0,0,0,0,0,1}, 0, 0, 137438953472, 1, 0, 0, 1}, /* Tib */
+    [1886] = {{0,0,0,0,0,0,0,1}, 0, 0, 140737488355328, 1, 0, 0, 1}, /* Pib */
+    [1887] = {{0,0,0,0,0,0,0,1}, 0, 0, 144115188075855872, 1, 0, 0, 1}, /* Eib */
+    [1888] = {{0,0,0,0,0,0,0,1}, 0, 0, 147573952589676413, 1, 3, 0, 1}, /* Zib */
+    [1889] = {{0,0,0,0,0,0,0,1}, 0, 0, 11805916207174113, 1, 5, 0, 1}, /* ZiB */
+    [1890] = {{0,0,0,0,0,0,0,1}, 0, 0, 151115727451828647, 1, 6, 0, 1}, /* Yib */
+    [1891] = {{0,0,0,0,0,0,0,1}, 0, 0, 120892581961462917, 1, 7, 0, 1}, /* YiB */
+    [1892] = {{0,0,0,0,0,0,0,1}, 0, 0, 154742504910672534, 1, 9, 0, 1}, /* Rib */
+    [1893] = {{0,0,0,0,0,0,0,1}, 0, 0, 123794003928538027, 1, 10, 0, 1}, /* RiB */
+    [1894] = {{0,0,0,0,0,0,0,1}, 0, 0, 158456325028528675, 1, 12, 0, 1}, /* Qib */
+    [1895] = {{0,0,0,0,0,0,0,1}, 0, 0, 12676506002282294, 1, 14, 0, 1}, /* QiB */
 };
 /* --- END GENERATED: unit_info --- */
 

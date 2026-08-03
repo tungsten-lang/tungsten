@@ -29,6 +29,31 @@ operator must continue to reject cross-dimensional conversion.
 unit annotate the aggregate rather than each element. Addition and subtraction
 require matching tensor units.
 
+## Normative registry policy
+
+The interpreted and compiled engines consume the same canonical/alias union.
+Generated tables include the seven SI bases, the 22 special-name SI derived
+units, coherent compounds, every symbolic SI prefix from `Q` through `q`, and
+IEC binary prefixes from `Ki` through `Qi`. Exact spellings and aliases win
+over prefix decomposition. Conversion factors defined by standards are stored
+as integers or rationals; approximate observations are marked measured in the
+external metadata catalog.
+
+The supported scientific domains are SI and engineering, chemistry/lab,
+electromagnetism, optics/photonics, radiation/nuclear, astronomy,
+geoscience/meteorology/oceanography, biology/biomedicine, and
+computing/research throughput. The executable surface and deliberate
+exclusions are maintained in `doc/scientific-computing/units.md`; the long
+catalog below is illustrative and historical rather than an exhaustive
+normative enumeration.
+
+Unit definitions are distinct from other quantitative names. `kind` labels
+physical constants, measured reference quantities, exact nominal units,
+contextual units, and reference scales. A logarithmic or ordinal scale is not
+made linear merely because it has a short symbol. Likewise, conversions whose
+result depends on analyte, reaction, medium, thermodynamic state, biological
+standard, or calibration require that context explicitly.
+
 To do:
 
     Tetration: 2↑↑1000 = 2^2^2^2....1000 times (or hyper-4, repeated exponentiation)

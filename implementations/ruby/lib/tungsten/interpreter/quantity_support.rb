@@ -113,6 +113,8 @@ module Tungsten
       case node
       when AST::Var
         node.name
+      when AST::StringLiteral
+        node.value
       when AST::BinaryOp
         left = ast_to_unit_string(node.left)
         right = ast_to_unit_string(node.right)

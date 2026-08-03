@@ -20,8 +20,11 @@ TSV_PATH = File.join(ROOT, "data/units.tsv")
 Unit = Struct.new(:id, :name, :category, keyword_init: true)
 Registry = Struct.new(:units, :aliases, :custom_dimensions, keyword_init: true)
 
-UNIT_CAPACITY = 4096
-CUSTOM_UNIT_BASE = 2048
+UNIT_CAPACITY = 8192
+# Prefixed and custom quantities are heap-backed, so their unit IDs are not
+# limited by the compact value's legacy 8-bit field. Keep a generous generated
+# partition and preserve (rather than shrink) the custom-unit budget.
+CUSTOM_UNIT_BASE = 4096
 
 def load_legacy_units
   units = []
@@ -46,12 +49,39 @@ def load_registry
   units = legacy.dup
   unit_by_name = units.to_h { |u| [u.name, u] }
   canonical_names = Tungsten::Units::UNIT_TABLE.keys | Tungsten::Units::COMPOUND_DEFS.keys
+  # Ruby resolves every symbolic SI/IEC prefix dynamically. Materialize that
+  # same surface in the generated compiler/runtime registry so `1 Qm`, `1 qHz`,
+  # and `1 Kib` do not become unrelated custom dimensions in native programs.
+  # Exact names and aliases win before prefix decomposition in the Ruby parser;
+  # preserve that precedence for collisions such as `at`, `ct`, and `pt`.
+  reserved_names = canonical_names | Tungsten::Units::UNIT_ALIASES.keys
+  prefixed_names = []
+  Tungsten::Units::PREFIX_TABLE.each_key do |prefix|
+    Tungsten::Units::PREFIXABLE.each do |base|
+      name = "#{prefix}#{base}"
+      prefixed_names << name unless reserved_names.include?(name)
+    end
+  end
+  Tungsten::Units::BINARY_PREFIX_TABLE.each_key do |prefix|
+    Tungsten::Units::BINARY_PREFIXABLE.each do |base|
+      name = "#{prefix}#{base}"
+      prefixed_names << name unless reserved_names.include?(name)
+    end
+  end
+  prefixed_names.uniq!
+
   next_id = 256
-  canonical_names.each do |name|
+  (canonical_names + prefixed_names).each do |name|
     next if unit_by_name.key?(name)
     raise "unit registry exceeds reserved custom-unit base" if next_id >= CUSTOM_UNIT_BASE
 
-    category = Tungsten::Units::COMPOUND_DEFS.key?(name) ? "Ruby compound" : "Ruby registry"
+    category = if prefixed_names.include?(name)
+                 "generated prefix"
+               elsif Tungsten::Units::COMPOUND_DEFS.key?(name)
+                 "Ruby compound"
+               else
+                 "Ruby registry"
+               end
     unit = Unit.new(id: next_id, name: name, category: category)
     units << unit
     unit_by_name[name] = unit
@@ -246,6 +276,10 @@ def generate_c_info(registry)
     begin
       parsed = Tungsten::Units.parse(u.name)
       dim = parsed.dimension.to_a
+      if parsed.dimension.customs.size > 1
+        raise "compiled unit metadata supports one semantic axis per named unit; " \
+              "#{parsed.dimension.customs.inspect} needs a single canonical tag"
+      end
       offset = parsed.respond_to?(:offset) ? (parsed.offset || 0) : 0
       num, den, factor_scale = compact_rational(parsed.factor)
       onum = offset.is_a?(Rational) ? offset.numerator : offset

@@ -43,6 +43,7 @@ SUPPORTED=(
   unit_dim_algebra
   unit_prefixed_convert
   unit_registry_parity
+  scientific_units
   implicit_new
   unit_pipes
   goroutine_channel
@@ -209,7 +210,7 @@ echo "Interpreter: $IPASS pass, $IFAIL fail, $ISKIP known-skip"
 # expected result.
 echo ""
 echo "==> Native quantity rejection cases..."
-for reject in unit_semantic_mismatch unit_temperature_point_add; do
+for reject in unit_semantic_mismatch unit_temperature_point_add scientific_baud_conversion_mismatch scientific_lab_conversion_mismatch scientific_ratio_conversion_mismatch; do
   cp "$FIXTURES/$reject.w" "$TMP/$reject.w"
   if "$TUNGSTEN" compile --no-lto "$TMP/$reject.w" --out "$TMP/$reject" > "$TMP/$reject.build" 2>&1 &&
      ! "$TMP/$reject" > "$TMP/$reject.out" 2>&1 &&
@@ -218,6 +219,20 @@ for reject in unit_semantic_mismatch unit_temperature_point_add; do
   else
     echo "FAIL  $reject"
     ERRORS="${ERRORS}\n--- $reject ---\n$(head -20 "$TMP/$reject.build" "$TMP/$reject.out" 2>/dev/null)"
+    FAIL=$((FAIL + 1))
+  fi
+done
+
+echo ""
+echo "==> Static scientific quantity rejection cases..."
+for reject in scientific_baud_mismatch scientific_lab_mismatch scientific_ratio_mismatch; do
+  cp "$FIXTURES/$reject.w" "$TMP/$reject.w"
+  if ! "$TUNGSTEN" compile --no-lto "$TMP/$reject.w" --out "$TMP/$reject" > "$TMP/$reject.build" 2>&1 &&
+     grep -q 'quantity dimension mismatch' "$TMP/$reject.build"; then
+    echo "PASS  $reject"
+  else
+    echo "FAIL  $reject"
+    ERRORS="${ERRORS}\n--- $reject ---\n$(head -20 "$TMP/$reject.build" 2>/dev/null)"
     FAIL=$((FAIL + 1))
   fi
 done

@@ -108,10 +108,9 @@ end
 ruby = RbConfig.ruby
 capture!(ruby, GENERATOR, "--check")
 manifest_text = capture!(ruby, GENERATOR, "--manifest")
-compiler_registry = manifest_text.lines(chomp: true).to_h do |line|
-  name, _id, canonical = line.split("\t", 3)
-  [name, canonical]
-end
+manifest_rows = manifest_text.lines(chomp: true).map { |line| line.split("\t", 3) }
+compiler_registry = manifest_rows.to_h { |name, _id, canonical| [name, canonical] }
+compiler_ids = manifest_rows.to_h { |name, id, _canonical| [name, Integer(id)] }
 
 legacy_names = File.foreach(LEGACY_UNITS, encoding: "utf-8").filter_map do |line|
   line = line.strip
@@ -122,12 +121,21 @@ end
 
 ruby_canonicals = Tungsten::Units::UNIT_TABLE.keys | Tungsten::Units::COMPOUND_DEFS.keys
 ruby_aliases = Tungsten::Units::UNIT_ALIASES.keys
-superset = (legacy_names | ruby_canonicals | ruby_aliases | compiler_registry.keys).sort
+symbolic_prefix_surface = (
+  Tungsten::Units::PREFIX_TABLE.keys.product(Tungsten::Units::PREFIXABLE.to_a) +
+  Tungsten::Units::BINARY_PREFIX_TABLE.keys.product(Tungsten::Units::BINARY_PREFIXABLE.to_a)
+).map { |prefix, base| "#{prefix}#{base}" }
+superset = (legacy_names | ruby_canonicals | ruby_aliases | symbolic_prefix_surface | compiler_registry.keys).sort
 
 missing_from_compiler = superset.reject { |name| compiler_registry.key?(name) }
 unless missing_from_compiler.empty?
   abort "compiled registry is missing #{missing_from_compiler.length} union entries: " \
         "#{missing_from_compiler.join(', ')}"
+end
+
+generated_id_overflow = compiler_ids.select { |_name, id| id >= 4096 }
+unless generated_id_overflow.empty?
+  abort "compiled registry crossed into the custom-unit partition: #{generated_id_overflow.first(10).inspect}"
 end
 
 ruby_parse_failures = superset.filter_map do |name|
@@ -165,4 +173,5 @@ end
 
 puts "PASS  unit registry superset: #{superset.length} spellings " \
      "(#{literal_rows.length} source-literal spellings, " \
-     "#{ruby_canonicals.length} Ruby canonicals, #{legacy_names.length} legacy canonicals)"
+     "#{ruby_canonicals.length} Ruby canonicals, #{symbolic_prefix_surface.length} symbolic prefixes, " \
+     "#{legacy_names.length} legacy canonicals)"

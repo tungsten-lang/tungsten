@@ -46,6 +46,84 @@ distance + elapsed       # compile error: quantity dimension mismatch
 This analysis is conservative. If a unit is produced by dynamic user code,
 the established runtime dimension check remains the safety boundary.
 
+## Scientific registry coverage
+
+The generated compiler and the Ruby interpreter share one registry. In
+addition to the seven SI base units, all 22 SI units with special names, and
+coherent compound expressions, the registry materializes every supported
+symbolic SI prefix from quetta (`Q`, 10³⁰) through quecto (`q`, 10⁻³⁰). IEC
+binary prefixes run from kibi (`Ki`, 2¹⁰) through quebi (`Qi`, 2¹⁰⁰). Exact
+unit and alias spellings take precedence over prefix decomposition, so `M` is
+molar concentration while `Mm` is a megametre.
+
+The focused cross-domain surface includes:
+
+| Domain | Representative units and conventions |
+|---|---|
+| Chemistry and laboratory | `M`, `mmol/L`, `mg/dL`, `Eq`, `mEq/L`, `osmol`, `mOsm/L`, `U_enzyme`, `U/L`, `Svedberg` |
+| Biology and biomedicine | `IU`, `CFU`, `PFU`, `cells/mL`, `copies/mL`, analyte-scoped glucose units |
+| Electromagnetism | `Ah`, `var`, `VA`, SI electrical units, and explicit CGS-EMU/ESU forms such as `abA`, `statV`, and `statΩ` |
+| Optics and photonics | `phot`, `fc`, `diopter`, `W/sr`, `W/sr/m²`, `Jy`, `photon`, `einstein`, and photon-flux density |
+| Radiation and nuclear | `Bq`, `Ci`, `dpm`, `Gy`, `rad_dose`, `Sv`, `R_exposure`, activity/dose rates, and detector `count` rates |
+| Astronomy | `au`, `ly`, `pc` and prefixes, `mas`, `µas`, `Jy` and prefixes, `foe`, and exact IAU nominal solar conversions |
+| Geoscience and meteorology | `DU`, `PVU`, `sverdrup`, `darcy`, `mGal`, `Eotvos`, `TECU`, `gpm`, `clo`, `ppmv`, and `ppmw` |
+| Computing and research | decimal/binary information units, `baud`, `bit/symbol`, common link and memory rates, `TEPS`, `GUPS`, and energy-efficiency units |
+
+Some examples:
+
+```tungsten
+1 M | "mmol/L"               # 1000 mmol/L
+1 statV | V                  # 299.792458 V
+1 Jy | "W/m²/Hz"             # 1e-26 W/m²/Hz
+1 rad_dose | Gy              # 0.01 Gy
+1 sverdrup | "m³/s"          # 1000000 m³/s
+1 Rm | Qm                    # 0.001 Qm
+1 Kib | b                    # 1024 b
+```
+
+The registry keeps common same-shape distinctions semantic. Baud is symbols
+per second, not bits per second. `M` cannot silently add to `mEq/L`; `CFU`
+cannot add to `PFU`; `ppmv` cannot add to `ppmw`; `rad_dose`, `Gy`, `Sv`, and
+`R_exposure` preserve their radiation quantity kinds. A named bridge or
+domain model is required when chemistry, density, biological response, or
+encoding supplies the missing context.
+
+### Conversion and reference policy
+
+Definitions that are exact are stored as integers or rationals. This includes
+post-2019 SI constants used by conversions, the international foot, the
+electronvolt, CGS electrical relationships derived from exact `c`, the enzyme
+unit, and the separately named `cal_IT` (4.1868 J) and `cal_th` (4.184 J).
+Measured or conventional factors retain that status in external metadata
+instead of being described as exact observations.
+
+The registry also labels entries by role:
+
+- ordinary and nominal units have linear conversions;
+- `R_sun_nominal` and `L_sun_nominal` are exact IAU conversion constants,
+  distinct from uncertain estimates of actual solar radius and luminosity;
+- `electron_mass` and similar compatibility entries are physical constants,
+  while `solarmass` and planetary-property entries are measured reference
+  quantities;
+- `IU` is contextual: its physical conversion depends on the named biological
+  preparation;
+- ordinal and logarithmic entries are reference scales, not linear units.
+
+`? 1 unit` exposes the role plus externally loaded description, etymology,
+history, authority, date, and exact/measured status when available.
+
+Deliberate exclusions are pH and other analyte-dependent logarithmic scales;
+referenced decibel variants, absorbance/optical density, and stellar magnitude
+zero points as linear conversions; standard-volume gas units without a stated
+temperature/pressure convention; Mach without a medium and state; and
+clinical conversions without a named analyte. These belong in `LogQuantity`,
+calibration/equivalency APIs, or explicit contextual names rather than the
+linear unit registry.
+
+The coverage and spelling policy follow the [BIPM SI Brochure](https://www.bipm.org/en/publications/si-brochure),
+with cross-domain spellings informed by [UCUM](https://unitsofmeasure.org/ucum).
+Nominal solar values follow [IAU Resolution B3](https://www.iau.org/common/Uploaded%20files/IAUGA2015-Resolution-B3-recommended-nominal-conversion.pdf).
+
 ## Points and deltas
 
 Ordinary quantities are vectors, preserving familiar arithmetic:

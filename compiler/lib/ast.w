@@ -508,102 +508,72 @@ in Tungsten:AST
     return node[:expressions]
   ccall_nobox("w_node_field_load", node, 0)
 
-# AST task #4 — per-kind children iterators (first pass).
-# Hand-coded fast paths for the two hottest kinds; the generic walker
-# below stays as the fallback for every other kind. Each fast path
-# skips the slab_keys_table[kid] lookup + per-field schema probe +
-# per-field is_ast_node? branch that the generic walker pays.
-#
-# Correctness invariant: for any node N, the fast path must produce
-# the *same* Array (same elements, same order) the generic walker
-# would. Byte-identity catches regressions arm-by-arm.
-#
-# When this expands, the generator should emit one of these per
-# kind (~104 total). For now: prove the dispatch + measure before
-# committing to the full set.
--> ast_children_program(node)
-  out = []
-  exprs = program_body(node)
-  if exprs != nil
-    j = 0
-    while j < exprs.size()
-      elt = exprs[j]
-      if is_ast_node?(elt)
-        out.push(elt)
-      j += 1
-  out
+# Allocation-free, schema-typed child visitor. Generated tables contain only
+# fields declared `ast`, so scalar locations/names/flags are never loaded or
+# dynamically tested. Field order and array element order match the schema.
+-> ast_each_child(node, &block)
+  if node == nil
+    return node
+  packed = ccall_nobox("w_is_node_extern", node) == 1
+  kid = nil
+  if packed
+    kid = ccall_nobox("w_node_kind_extern", node)
+  else
+    k = ast_kind(node)
+    if k != nil
+      kid = kind_id_table[k]
+  if kid == nil || kid < 1 || kid > KIND_MAX
+    return node
+  offsets = slab_child_offsets_table[kid]
+  keys = slab_child_keys_table[kid]
+  if offsets == nil
+    return node
+  i = 0
+  while i < offsets.size()
+    v = nil
+    if packed
+      v = ccall_nobox("w_node_field_load", node, offsets[i])
+    elsif type(node) == "Hash"
+      v = node[keys[i]]
+    if v != nil
+      if is_ast_node?(v)
+        block(v)
+      elsif type(v) == "Array"
+        j = 0
+        while j < v.size()
+          elt = v[j]
+          if is_ast_node?(elt)
+            block(elt)
+          j += 1
+    i += 1
+  node
 
--> ast_children_block(node)
-  out = []
-  # Block schema: {:params => 0, :body => 1, :loc => 2}. :loc is w64
-  # (packed location WValue), never an AST node — skip it. :params
-  # and :body are both Array<AST>.
-  params = ast_get(node, :params)
-  if params != nil && type(params) == "Array"
-    j = 0
-    while j < params.size()
-      elt = params[j]
-      if is_ast_node?(elt)
-        out.push(elt)
-      j += 1
-  body = block_body(node)
-  if body != nil && type(body) == "Array"
-    j = 0
-    while j < body.size()
-      elt = body[j]
-      if is_ast_node?(elt)
-        out.push(elt)
-      j += 1
-  out
-
-# Collect every AST child of `node` into an array.
-# Replaces the `keys = node.keys(); each → recurse(node[k])` pattern
-# used in metal_emitter rewriters and lowering walkers — that pattern
-# can't survive the hash drop because a bare W_PACKED_NODE WValue has
-# no keys() method.
-#
-# For single AST-node-valued fields (target, receiver, condition, …)
-# the child is added once. For Array-valued fields (body, args,
-# elements, …) each AST element of the array is added. Sparse fields
-# carry primitives and aren't traversed.
+# Compatibility collector for callers that need indexing or child count.
 -> ast_children(node)
   out = []
   if node == nil
     return out
-  k = ast_kind(node)
-  if k == nil
+  packed = ccall_nobox("w_is_node_extern", node) == 1
+  kid = nil
+  if packed
+    kid = ccall_nobox("w_node_kind_extern", node)
+  else
+    k = ast_kind(node)
+    if k != nil
+      kid = kind_id_table[k]
+  if kid == nil || kid < 1 || kid > KIND_MAX
     return out
-  # AST task #4: fast paths for the hottest kinds. The generic walker
-  # below is kept as fallback + correctness oracle.
-  # Leaf-kind fast returns: kinds whose only ivar is a w64 payload
-  # (no AST children) short-circuit to [] directly, skipping
-  # kind_id_table + slab_keys_table + per-field ast_get +
-  # per-field is_ast_node?.
-  #   :var    — 32,891 allocations per compiler self-compile (24%)
-  #   :symbol —  7,838 allocations (5.7%)
-  # Together these cover ~30% of nodes. Both are genuine leaves —
-  # @name (for var) and @value (for symbol) hold string WValues,
-  # never AST nodes.
-  if k == :var
-    return []
-  if k == :symbol
-    return []
-  if k == :program
-    return ast_children_program(node)
-  if k == :block
-    return ast_children_block(node)
-  kid = kind_id_table[k]
-  if kid == nil
-    return out
-  # Pre-computed per-kind keys array (fix #6 in ast.w). schema.keys()
-  # used to allocate a fresh Array on every call; now it's a single
-  # array lookup by kind_id.
-  keys = slab_keys_table[kid]
-  if keys == nil
+  offsets = slab_child_offsets_table[kid]
+  keys = slab_child_keys_table[kid]
+  if offsets == nil
     return out
   i = 0
-  while i < keys.size()
-    v = ast_get(node, keys[i])
+  while i < offsets.size()
+    v = nil
+    if packed
+      v = ccall_nobox("w_node_field_load", node, offsets[i])
+    elsif type(node) == "Hash"
+      v = node[keys[i]]
     if v != nil
       if is_ast_node?(v)
         out.push(v)

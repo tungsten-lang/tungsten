@@ -612,6 +612,8 @@ slab_keys_table = build_slab_keys_arr(slab_offset_table_arr)
 
 slab_sclass_table = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, SC_2, SC_2, SC_2, SC_2, SC_2, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, SC_2, SC_2, SC_4, SC_8, SC_4, SC_4, SC_2, SC_2, SC_2, SC_2, SC_8, SC_2, SC_4, SC_4, SC_2, SC_2, SC_8, SC_2, SC_2, SC_4, SC_4, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_4, SC_2, SC_2, SC_2, SC_8, SC_2, SC_8, SC_2, SC_8, SC_2, SC_4, SC_2, SC_2, SC_2, SC_2, SC_8, SC_4, SC_2, SC_8, SC_2, SC_2, SC_2, SC_2, nil, SC_2, SC_4, SC_2, SC_2, SC_8, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_4, SC_4, SC_2, SC_2, SC_2, SC_2, SC_2, SC_8, SC_8, nil, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_8, nil, SC_8, SC_2, nil, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2, SC_4, SC_4, SC_4, SC_2, SC_2, SC_2, SC_2, SC_2, SC_2]
 slab_width_table = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 3, 4, 3, 4, 1, 0, 1, 1, 6, 2, 3, 3, 0, 1, 4, 0, 0, 3, 3, 0, 1, 1, 1, 1, 2, 3, 2, 2, 1, 6, 1, 7, 1, 4, 2, 3, 1, 0, 1, 0, 5, 3, 1, 7, 2, 1, 2, 0, 0, 1, 3, 2, 2, 6, 0, 2, 1, 1, 1, 2, 3, 3, 1, 2, 0, 2, 1, 6, 5, 0, 0, 1, 1, 0, 0, 1, 2, 1, 1, 2, 1, 2, 1, 2, 2, 2, 1, 1, 0, 2, 0, 3, 1, 0, 2, 2, 2, 1, 2, 1, 2, 2, 1, 1, 3, 3, 3, 0, 1, 0, 2, 1, 1]
+slab_child_offsets_table = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, [], [], [], [], [], nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, [0, 1], [0], [0, 1, 2], [0, 1, 2, 3], [0, 2], [0, 1], [], [], [0], [0], [0, 2, 3], [0, 1], [0, 1, 2], [0, 1, 2], [], [], [2], [], [], [0, 2], [], [], [], [], [], [], [], [], [0, 1], [1], [], [1, 2, 3], [0], [1, 2, 3, 4], [0], [0, 1, 2, 3], [0, 1], [], [], [], [], [], [2], [], [], [1, 2, 3], [1], [], [0, 1], [], nil, [0], [0, 1, 2], [0, 1], [0, 1], [1], [], [0, 1], [0], [0], [0], [], [0], [0, 1], [], [], [], [0, 1], [0], [0, 2, 3], [2], nil, [], [0], [0], [], [], [0], [0, 1], [], [0], [0, 1], [], [1], [], [1], [1], [1], [], [], [], [0], nil, [], [], nil, [0, 1], [0, 1], [0, 1], [0], [], [0], [0, 1], [0, 1], [], [0], [2], [0, 1], [1], [], [0], [], [0], [], []]
+slab_child_keys_table = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, [], [], [], [], [], nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, [:left, :right], [:elements], [:target, :value, :type_hint], [:body, :rescue_var, :rescue_body, :ensure_body], [:left, :right], [:params, :body], [], [], [:values], [:parts], [:receiver, :args, :block], [:whens, :else_body], [:pattern, :guard, :body], [:subject, :arms, :else_body], [], [], [:body], [], [], [:target, :value], [], [], [], [], [], [], [], [], [:lib_name, :declarations], [:field_type], [], [:params, :body, :type_hints], [:body], [:params, :body, :attribute, :type_hints], [:entries], [:condition, :then_body, :elsif_clauses, :else_body], [:lhs, :elements], [], [], [], [], [], [:directives], [], [], [:params, :body, :type_hints], [:body], [], [:targets, :value], [], nil, [:operand], [:predicate, :capabilities, :body], [:left, :right], [:bindings, :body], [:default], [], [:expression, :value], [:value], [:expressions], [:value], [], [:value], [:from, :to], [], [], [], [:body, :fallback], [:value], [:receiver, :args, :block], [:directives], nil, [], [:parts], [:args], [], [], [:symbols], [:left, :right], [], [:expression], [:left, :right], [], [:body], [], [:size], [:size], [:operand], [], [], [], [:view_name], nil, [], [], nil, [:conditions, :body], [:condition, :body], [:bindings, :body], [:words], [], [:args], [:subject, :cidr], [:regex, :subject], [], [:entries], [:body], [:source, :func], [:source], [], [:value], [], [:receiver], [], []]
 
 -> sc_for_kind(kind)
   return SC_2 if kind < 1 || kind > KIND_MAX
@@ -622,6 +624,12 @@ slab_width_table = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 -> width_for_kind(kind)
   return 0 if kind < 1 || kind > KIND_MAX
   slab_width_table[kind]
+
+-> slab_field_type_for_id(kind, sym)
+  return nil if kind < 1 || kind > KIND_MAX
+  fields = slab_field_type_table_arr[kind]
+  return nil if fields == nil
+  fields[sym]
 # END GENERATED AST ABI
 
 -> w_ast_schema_hash_tungsten

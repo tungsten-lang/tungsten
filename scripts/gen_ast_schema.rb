@@ -152,10 +152,15 @@ def generate_schema(kinds, fingerprint)
   reverse = Array.new(max_id + 1, "nil")
   sclasses = Array.new(max_id + 1, "nil")
   widths = Array.new(max_id + 1, "0")
+  child_offsets = Array.new(max_id + 1, "nil")
+  child_keys = Array.new(max_id + 1, "nil")
   kinds.each do |kind|
     reverse[kind.id] = symbol_literal(kind.public_name)
     sclasses[kind.id] = kind.sclass
     widths[kind.id] = kind.fields.size.to_s if %w[slab cached].include?(kind.storage)
+    ast_fields = kind.fields.each_with_index.select { |field, _index| field.type == "ast" }
+    child_offsets[kind.id] = "[#{ast_fields.map { |_field, index| index }.join(', ')}]"
+    child_keys[kind.id] = "[#{ast_fields.map { |field, _index| symbol_literal(field.name) }.join(', ')}]"
   end
 
   out = []
@@ -240,6 +245,8 @@ def generate_schema(kinds, fingerprint)
   out << ""
   out << "slab_sclass_table = [#{sclasses.join(', ')}]"
   out << "slab_width_table = [#{widths.join(', ')}]"
+  out << "slab_child_offsets_table = [#{child_offsets.join(', ')}]"
+  out << "slab_child_keys_table = [#{child_keys.join(', ')}]"
   out << ""
   out << "-> sc_for_kind(kind)"
   out << "  return SC_2 if kind < 1 || kind > KIND_MAX"
@@ -250,6 +257,12 @@ def generate_schema(kinds, fingerprint)
   out << "-> width_for_kind(kind)"
   out << "  return 0 if kind < 1 || kind > KIND_MAX"
   out << "  slab_width_table[kind]"
+  out << ""
+  out << "-> slab_field_type_for_id(kind, sym)"
+  out << "  return nil if kind < 1 || kind > KIND_MAX"
+  out << "  fields = slab_field_type_table_arr[kind]"
+  out << "  return nil if fields == nil"
+  out << "  fields[sym]"
   out.join("\n") + "\n"
 end
 

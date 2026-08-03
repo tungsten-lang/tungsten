@@ -268,6 +268,7 @@ run_cache_lifecycle_test() {
 
 compiled_specs=(
   spec/compiler/ast_body_native_spec.w
+  spec/compiler/ast_typed_visitor_spec.w
   spec/compiler/array_compact_autoload_spec.w
   spec/compiler/array_dup_autoload_spec.w
   spec/compiler/array_join_autoload_spec.w

@@ -3791,15 +3791,21 @@ ewscope_md_state = {ids: {}, order: []}
     # in lowering/calls.w; the int-literal offset reaches here as a raw
     # decimal string because lower_int returns typed_value(:raw_int,
     # val.to_s()) without emitting an instruction.
-    # Slab-AST intrinsic: w_node_kind_extern(v) → (v >> 36) & 0xFF.
-    # Extracts the 8-bit kind field from a W_PACKED_NODE WValue (full
-    # tier; compact-tier kinds have prefix=1 and live at >> 39, but no
-    # compact kinds are populated yet so this fast path covers all
-    # current usage). Called by ast_kind on every ast_get hot-path.
+    # Slab-AST intrinsic: decode the full-tier 8-bit kind or compact-tier
+    # 5-bit kind according to prefix bit 44.
     if inst[:name] == "w_node_kind_extern" && inst[:args].size() == 1
       t = inst[:temp]
       v = inst[:args][0]
-      return t + ".k_sh = lshr i64 " + v + ", 36\n  " + t + " = and i64 " + t + ".k_sh, 255"
+      parts = StringBuffer(260)
+      parts << t + ".prefix_sh = lshr i64 " + v + ", 44\n  "
+      parts << t + ".prefix = and i64 " + t + ".prefix_sh, 1\n  "
+      parts << t + ".full_sh = lshr i64 " + v + ", 36\n  "
+      parts << t + ".full = and i64 " + t + ".full_sh, 255\n  "
+      parts << t + ".compact_sh = lshr i64 " + v + ", 39\n  "
+      parts << t + ".compact = and i64 " + t + ".compact_sh, 31\n  "
+      parts << t + ".is_compact = icmp eq i64 " + t + ".prefix, 1\n  "
+      parts << t + " = select i1 " + t + ".is_compact, i64 " + t + ".compact, i64 " + t + ".full"
+      return parts.to_s()
     # Slab-AST intrinsic: w_is_node_extern(v) → 1 if v is a W_PACKED_NODE
     # (W_TAG_PACKED with subtype 3), 0 otherwise. (v >> 45) == 0x7FFF3
     # exploits the contiguous tag+subtype layout: 0xFFFE << 3 | 3.

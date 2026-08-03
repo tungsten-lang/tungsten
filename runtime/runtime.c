@@ -8224,9 +8224,42 @@ WValue bigint_mul_any(WValue a, WValue b) {
 /* For normalized d and nh < d, divide nh:B+nl by d using a precomputed
  * reciprocal. A multiply-high estimate plus two bounded corrections replace the compiler's
  * multi-instruction __udivmodti4 helper for every quotient limb. */
+#ifndef BN_DIV_QR_AARCH64_FLAGS
+#define BN_DIV_QR_AARCH64_FLAGS 1
+#endif
+
 static inline uint64_t bn_div_qr_preinv(uint64_t nh, uint64_t nl,
                                         uint64_t d, uint64_t dinv,
                                         uint64_t *rem) {
+#if defined(__aarch64__) && BN_DIV_QR_AARCH64_FLAGS
+    /* Preserve the borrow flag from the candidate-remainder comparison into
+     * both corrections.  C otherwise makes clang materialize the same bit,
+     * then consume it in two separate data-processing instructions. */
+    uint64_t pl, ph, q, r, adjusted;
+    __asm__ volatile(
+        "add   %[q], %[nh], #1\n\t"
+        "mul   %[pl], %[nh], %[dinv]\n\t"
+        "umulh %[ph], %[nh], %[dinv]\n\t"
+        "adds  %[pl], %[pl], %[nl]\n\t"
+        "adc   %[q], %[q], %[ph]\n\t"
+        "msub  %[r], %[q], %[d], %[nl]\n\t"
+        "cmp   %[pl], %[r]\n\t"
+        "add   %[adjusted], %[r], %[d]\n\t"
+        "csel  %[r], %[adjusted], %[r], lo\n\t"
+        "sbc   %[q], %[q], xzr"
+        : [pl] "=&r" (pl), [ph] "=&r" (ph), [q] "=&r" (q),
+          [r] "=&r" (r), [adjusted] "=&r" (adjusted)
+        : [nh] "r" (nh), [nl] "r" (nl), [d] "r" (d),
+          [dinv] "r" (dinv)
+        : "cc");
+    if (__builtin_expect(r >= d, 0)) {
+        __asm__ volatile("");
+        r -= d;
+        q++;
+    }
+    *rem = r;
+    return q;
+#else
     __uint128_t p = (__uint128_t)nh * dinv;
     uint64_t pl = (uint64_t)p;
     uint64_t ph = (uint64_t)(p >> 64);
@@ -8251,6 +8284,7 @@ static inline uint64_t bn_div_qr_preinv(uint64_t nh, uint64_t nl,
     }
     *rem = r;
     return q;
+#endif
 }
 
 /* floor((2^19 - 3*2^8) / d9) for d9 in [256, 511]: the 11-bit seed of the

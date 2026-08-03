@@ -332,3 +332,9 @@
         damping *= ~10.0
       iteration += 1
     {:x => x, :fun => cost}
+
+  # Explicit-result migration path. The historical least_squares methods above
+  # retain their v0 hash shape ({:x, :fun}) for compatibility.
+  -> .least_squares_result(residual, x0, jacobian = nil, criteria = nil)
+    Optimization.levenberg_marquardt(
+      residual, x0, jacobian, criteria)

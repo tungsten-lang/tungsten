@@ -1,10 +1,14 @@
-# Optimization — bounded scalar root finding and minimization.
+# Optimization — deterministic numerical root finding and minimization.
 #
-# This first layer deliberately implements only bracketed methods with explicit
-# stopping state:
+# The bounded scalar layer remains the compatibility foundation:
 #
 #   Optimization.bisection(f, lower, upper, criteria)
 #   Optimization.golden_section(f, lower, upper, criteria)
+#
+# Additional factored layers provide finite differences and explicit Calculus
+# adapters, safeguarded Brent/Newton/secant roots, small dense nonlinear least
+# squares, BFGS/L-BFGS with Armijo line search and projected box bounds, and a
+# deliberately limited quadratic-penalty constrained wrapper.
 #
 # Inputs and callback values are coerced to Float, so the numerical contract is
 # finite IEEE-754 binary64 arithmetic. Bisection assumes a continuous function
@@ -20,6 +24,12 @@
 # semantics instead of occupying broad global names such as Result or Status.
 
 use core/math
+use core/calculus
+use core/optimization/derivatives
+use core/optimization/dense_qr
+use core/optimization/root_methods
+use core/optimization/least_squares
+use core/optimization/multivariate
 
 + OptimizationStatus
   -> new(@code, @message)

@@ -6586,13 +6586,24 @@ static double ssa_choose(int32_t na, int32_t nb, int32_t *w_out, long *L_out, ui
 }
 
 /* Goldilocks-NTT cost model with the same step structure as its real
- * dispatcher path (transform-length quantization dominates). Calibrated:
- * ~1.2 ns per gold_mul-equivalent (measured 432µs vs 424 at n=2048). */
+ * dispatcher path (transform-length quantization dominates).  The historical
+ * 1.2 ns per gold_mul-equivalent was measured at n=2048 (432µs vs 424) — but
+ * n < BN_PAR_TOOM_LIMIT never reaches a transform, so the model only ever
+ * decides in the n >= 16384 band, where the kernel runs 3.2-5.6x its small-n
+ * calibration (forced-kernel sweep, Apple arm64, 16384..131073 limbs:
+ * NTT/SSA/Toom = 6.8/1.1/1.6ms at 16384, 4.4/1.6/1.9 at 24576, 9.4/3.4/2.9
+ * at 32769, 21.9/7.3/7.4 at 65537, 50/16/20 at 131073 — forced NTT never
+ * wins in-band).  The stale constant let NTT steal exactly the cells where
+ * SSA's transform length doubles (20480-24576, 32769-40960, 65537-81920,
+ * 131073..), turning the cached-reciprocal division's (n+1)-limb Barrett
+ * products 3-6x pessimal just past every power of two.  Calibrate to the
+ * reachable band instead: 4.8 ns per gold_mul-equivalent (~4x, the measured
+ * mid-band drift). */
 static double ntt_cost_est(int32_t n) {
     int B = ntt_choose_B(n);
     long ncoef = ((long)n * 64 + B - 1) / B;
     long L0 = 1L << ssa_ceil_log2(2 * ncoef);
-    return (3.0 * (double)(L0 / 2) * ssa_ceil_log2(L0) + (double)L0) * 1.2;
+    return (3.0 * (double)(L0 / 2) * ssa_ceil_log2(L0) + (double)L0) * 4.8;
 }
 
 enum {
@@ -9501,6 +9512,24 @@ void mag_divmod_knuth(const uint64_t *u, int32_t ulen,
 #define BN_BZ_ZERO_PADDING_ONLY 1
 #endif
 
+#ifdef BN_DIV_ROUTE_COUNTERS
+/* Diagnostic routing counters (probe builds only): which division route each
+ * call takes, and why the cached-reciprocal path declines. */
+uint64_t bn_div_route_knuth;
+uint64_t bn_div_route_bz;
+uint64_t bn_div_route_recip_hit;
+uint64_t bn_div_route_triangular_hit;
+uint64_t bn_div_recip_reject_qmax;
+uint64_t bn_div_recip_reject_shape;
+uint64_t bn_div_recip_reject_min;
+uint64_t bn_div_recip_warmup;
+uint64_t bn_div_recip_cert_fail;
+uint64_t bn_div_bz_ws_fallback;
+#define BN_DIV_ROUTE_COUNT(counter) ((counter)++)
+#else
+#define BN_DIV_ROUTE_COUNT(counter) ((void)0)
+#endif
+
 static __thread uint64_t *bz_ws = NULL;
 static __thread size_t bz_ws_cap = 0;
 #ifdef BN_BZ_PROFILE_COUNTS
@@ -9839,7 +9868,11 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
                  + (size_t)(tmax * n)           /* qf  */
                  + (size_t)(12 * n + 64);       /* recursion scratch */
     uint64_t *mem = bz_ws_get(total);
-    if (!mem) { mag_divmod_knuth(u, ulen, v, vlen, q_out, r_out); return; }
+    if (!mem) {
+        BN_DIV_ROUTE_COUNT(bn_div_bz_ws_fallback);
+        mag_divmod_knuth(u, ulen, v, vlen, q_out, r_out);
+        return;
+    }
     uint64_t *vn_work = mem;
     uint64_t *un = vn_work + n;
     uint64_t *Z  = un + tmax * n;
@@ -9923,8 +9956,16 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
 #ifndef BN_DIV_RECIP_Q_MIN
 #define BN_DIV_RECIP_Q_MIN 256
 #endif
+/* Upper divisor width for the cached-reciprocal division path.  This is an
+ * int32/uint-headroom guard, not a tuning point: wherever the path applies
+ * (>= 3 sightings of one normalized divisor) it beats the B-Z spine, and its
+ * cache retains ~7n limbs versus the ~26n-limb B-Z workspace the same
+ * division would otherwise grow, so there is no memory reason to stop at the
+ * recycler's pool cap.  Coupling it to BN_BIGINT_POOL_MAX_CAP (16384) put a
+ * 1.4-1.7x-vs-GMP cliff at 16k..262k limbs: every 2n/n benchmark rep above
+ * the cap was rejected straight to B-Z (route counters: rej-qmax = 100%). */
 #ifndef BN_DIV_RECIP_Q_MAX
-#define BN_DIV_RECIP_Q_MAX BN_BIGINT_POOL_MAX_CAP
+#define BN_DIV_RECIP_Q_MAX (1 << 24)
 #endif
 #ifndef BN_DIV_RECIP_Q_GUARD_LIMBS
 #define BN_DIV_RECIP_Q_GUARD_LIMBS 1
@@ -10001,6 +10042,16 @@ static int mag_divmod_reciprocal_certified(
     const uint64_t *u, int32_t ulen,
     const uint64_t *v, int32_t vlen,
     WBigint **q_out, WBigint **r_out) {
+#ifdef BN_DIV_ROUTE_COUNTERS
+    if (vlen > BN_DIV_RECIP_Q_MAX)
+        bn_div_recip_reject_qmax++;
+    else if (ulen != 2 * vlen || !(v[vlen - 1] >> 63))
+        bn_div_recip_reject_shape++;
+    else if ((q_out && vlen < BN_DIV_RECIP_Q_MIN) ||
+             (r_out && vlen <
+                 (q_out ? BN_DIV_RECIP_R_MIN : BN_DIV_BARRETT_R_MIN)))
+        bn_div_recip_reject_min++;
+#endif
     if (vlen > BN_DIV_RECIP_Q_MAX ||
         ulen != 2 * vlen || !(v[vlen - 1] >> 63) ||
         (q_out && vlen < BN_DIV_RECIP_Q_MIN) ||
@@ -10022,11 +10073,13 @@ static int mag_divmod_reciprocal_certified(
         memcpy(cache->key, v, n * sizeof(uint64_t));
         cache->n = vlen;
         cache->state = 1;
+        BN_DIV_ROUTE_COUNT(bn_div_recip_warmup);
         return 0;
     }
     if (cache->state < 0) return 0;
     if (cache->state == 1) {
         cache->state = 2;
+        BN_DIV_ROUTE_COUNT(bn_div_recip_warmup);
         return 0;
     }
 
@@ -10177,8 +10230,10 @@ static int mag_divmod_reciprocal_certified(
             reduced[n] -= borrow;
         }
         if (reduced[n] != 0 ||
-            mag_cmp(reduced, vlen, v, vlen) >= 0)
+            mag_cmp(reduced, vlen, v, vlen) >= 0) {
+            BN_DIV_ROUTE_COUNT(bn_div_recip_cert_fail);
             return 0;
+        }
 
         WBigint *r = bigint_alloc_raw_hot(vlen);
         memcpy(r->limbs, reduced, n * sizeof(uint64_t));
@@ -10186,6 +10241,7 @@ static int mag_divmod_reciprocal_certified(
         while (r->size > 0 && r->limbs[r->size - 1] == 0)
             r->size--;
         *r_out = r;
+        BN_DIV_ROUTE_COUNT(bn_div_route_recip_hit);
         return 1;
     }
 
@@ -10227,9 +10283,11 @@ static int mag_divmod_reciprocal_certified(
                 q->size = q_len;
                 *q_out = q;
             }
+            BN_DIV_ROUTE_COUNT(bn_div_route_recip_hit);
             return 1;
         }
     }
+    BN_DIV_ROUTE_COUNT(bn_div_recip_cert_fail);
     return 0;
 }
 
@@ -10269,14 +10327,17 @@ static void mag_divmod(const uint64_t *u, int32_t ulen,
             mag_div_q_triangular_certified(u, ulen, v, vlen);
         if (q) {
             *q_out = q;
+            BN_DIV_ROUTE_COUNT(bn_div_route_triangular_hit);
             return;
         }
 #endif
     }
     if (vlen >= BZ_TOP_THRESHOLD && ulen - vlen >= BZ_THRESHOLD) {
+        BN_DIV_ROUTE_COUNT(bn_div_route_bz);
         mag_divmod_bz(u, ulen, v, vlen, q_out, r_out);
         return;
     }
+    BN_DIV_ROUTE_COUNT(bn_div_route_knuth);
     mag_divmod_knuth(u, ulen, v, vlen, q_out, r_out);
 }
 

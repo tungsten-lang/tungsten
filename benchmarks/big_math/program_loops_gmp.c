@@ -64,6 +64,18 @@ static void bench_addchain(long n) {
     mpz_clear(b);
 }
 
+static void bench_divchain(long n) {
+    mpz_t r;
+    mpz_init_set_ui(r, 0);
+    mpz_setbit(r, 65536);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) mpz_tdiv_q_ui(r, r, 3UL);
+    double t1 = now_sec();
+    printf("divchain\t%ld\t%.1f\t%lu\n", n,
+           (t1 - t0) * 1e9 / (double)n, checksum(r));
+    mpz_clear(r);
+}
+
 int main(int argc, char **argv) {
     const char *workload = argc > 1 ? argv[1] : "all";
     long n = argc > 2 ? atol(argv[2]) : 0;
@@ -73,5 +85,7 @@ int main(int argc, char **argv) {
         bench_mulchain(n > 0 ? n : 50000);
     if (!strcmp(workload, "addchain") || !strcmp(workload, "all"))
         bench_addchain(n > 0 ? n : 300000);
+    if (!strcmp(workload, "divchain") || !strcmp(workload, "all"))
+        bench_divchain(n > 0 ? n : 30000);
     return 0;
 }

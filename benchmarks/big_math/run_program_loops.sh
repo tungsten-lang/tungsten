@@ -21,7 +21,8 @@ fi
 # (build.rb profile_cflags), which runs intrinsics-based kernels (the
 # NEON hybrid add) up to 30x slow — asm kernels hide this, the addchain
 # lane exposed it. The GMP twin builds -O3; the lanes must match.
-"$ROOT/bin/tungsten" -o "$DIR/program_loops" --release "$DIR/program_loops.w" >/dev/null
+"$ROOT/bin/tungsten" -o "$DIR/program_loops" --release --native --fast \
+  "$DIR/program_loops.w" >/dev/null
 # shellcheck disable=SC2086
 "$CC" -O3 -mcpu=native $GMP_CFLAGS "$DIR/program_loops_gmp.c" $GMP_LDFLAGS \
   -o "$DIR/program_loops_gmp"
@@ -46,9 +47,10 @@ run_lane() {
 
 printf '%-12s %14s %14s %8s\n' "workload" "tungsten ns/it" "gmp ns/it" "T/G"
 fail=0
-for workload in accumulate mulchain addchain; do
+order=0
+for workload in accumulate mulchain addchain divchain; do
   # Alternate which lane goes first across workloads.
-  if [ $((fail % 2)) -eq 0 ]; then
+  if [ $((order % 2)) -eq 0 ]; then
     t_out=$(run_lane "$DIR/program_loops" "$workload")
     g_out=$(run_lane "$DIR/program_loops_gmp" "$workload")
   else
@@ -63,8 +65,9 @@ for workload in accumulate mulchain addchain; do
   fi
   ratio=$(printf '%s %s\n' "$t_ns" "$g_ns" | awk '{printf "%.2f", $1 / $2}')
   printf '%-12s %14s %14s %8s\n' "$workload" "$t_ns" "$g_ns" "$ratio"
+  order=$((order + 1))
 done
 echo
-echo "Idiomatic loops: Tungsten allocates a fresh value per pass; GMP reuses"
-echo "its mpz destination. This ratio, not the per-op matrix, is the"
-echo "whole-program story (and the E4 mutate-if-unique payoff meter)."
+echo "Idiomatic loops: GMP reuses its mpz destination; Tungsten may reuse a"
+echo "proven-dead unique accumulator, otherwise it falls back to immutable"
+echo "result churn. These ratios are the mutate-if-unique acceptance meter."

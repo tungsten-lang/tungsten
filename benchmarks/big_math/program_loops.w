@@ -49,6 +49,19 @@
   c = b % 1000000007
   << "addchain\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
 
+-> bench_divchain(n)
+  # The start width keeps the positive accumulator boxed across the timed
+  # interval while `/ 3` steadily exercises division by an inline word.
+  r = 1 << 65536 ## big
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r = r / 3
+    i = i + 1
+  t1 = clock()
+  c = r % 1000000007
+  << "divchain\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
 args = argv()
 workload = args.size() > 0 ? args[0] : "all"
 n = args.size() > 1 ? args[1].to_i() : 0
@@ -59,3 +72,5 @@ if workload == "mulchain" || workload == "all"
   bench_mulchain(n > 0 ? n : 50000)
 if workload == "addchain" || workload == "all"
   bench_addchain(n > 0 ? n : 300000)
+if workload == "divchain" || workload == "all"
+  bench_divchain(n > 0 ? n : 30000)

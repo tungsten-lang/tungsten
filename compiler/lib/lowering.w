@@ -2394,14 +2394,14 @@ use lowering/definitions
     if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS) && v.left != nil && is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == target.name
       return lower_sum_chunk_step(ctx, v.op, v.right)
 
-  # Mutate-if-unique (E4 stage 1): `r = r + e` / `r = r - e` where the
+  # Mutate-if-unique (E4 stage 1): supported `r = r op e` shapes where the
   # accumulator analysis proved r's value dies here routes the guarded
   # arm's runtime fallback through w_bigint_add_mut/w_bigint_sub_mut (see
   # lower_binary_op). Scoped to exactly this assignment's RHS lowering.
   mut_target_set = false
   if ast_kind(target) == :var && ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][target.name] == true
     v = node.value
-    if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS :STAR) && v.left != nil && is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == target.name
+    if v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op in (:PLUS :MINUS :STAR :SLASH) && v.left != nil && is_ast_node?(v.left) && ast_kind(v.left) == :var && v.left.name == target.name
       ctx[:mut_accum_target] = target.name
       mut_target_set = true
 

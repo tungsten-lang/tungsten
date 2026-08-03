@@ -8440,14 +8440,25 @@ static uint64_t mag_div_wide_preinv(uint64_t *quotient,
 #ifndef BN_DIV_SINGLE_PREINV
 #define BN_DIV_SINGLE_PREINV 1
 #endif
+#ifndef BN_DIV_SINGLE_32BIT_RECIP
+#if defined(__aarch64__)
+#define BN_DIV_SINGLE_32BIT_RECIP 0
+#else
+#define BN_DIV_SINGLE_32BIT_RECIP 1
+#endif
+#endif
 
-/* Divide bigint magnitude by a single uint64_t divisor. Returns quotient, writes remainder. */
-static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint64_t *rem) {
-    WBigint *q = bigint_alloc_raw_hot(alen);
+/* Divide a bigint magnitude by one word into caller-provided storage.  The
+ * high-to-low word kernels, and the low-to-high power-of-two shift, are safe
+ * when q == a; the latter reads a[i + 1] before overwriting a[i]. */
+static inline __attribute__((always_inline))
+int32_t mag_div_single_to(uint64_t *q, const uint64_t *a, int32_t alen,
+                          uint64_t d, uint64_t *rem) {
     if (d == 0) die("division by zero");
 
     if (d == 1) {
-        for (int32_t i = 0; i < alen; i++) q->limbs[i] = a[i];
+        if (q != a)
+            for (int32_t i = 0; i < alen; i++) q[i] = a[i];
         *rem = 0;
     } else if ((d & (d - 1)) == 0) {
         /* Dividing a base-2^64 magnitude by 2^k is just a cross-limb shift.
@@ -8457,8 +8468,9 @@ static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint
         *rem = alen > 0 ? a[0] & (d - 1) : 0;
         for (int32_t i = 0; i < alen; i++) {
             uint64_t hi = i + 1 < alen ? a[i + 1] : 0;
-            q->limbs[i] = (a[i] >> shift) | (hi << (64 - shift));
+            q[i] = (a[i] >> shift) | (hi << (64 - shift));
         }
+#if BN_DIV_SINGLE_32BIT_RECIP
     } else if (d <= UINT32_MAX) {
         /* Work in base 2^32 so (remainder << 32) | digit always fits in u64.
          * For reciprocal=floor(2^64/d), multiply-high underestimates the exact
@@ -8484,9 +8496,10 @@ static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint
                 r -= d;
                 qlo++;
             }
-            q->limbs[i] = (qhi << 32) | qlo;
+            q[i] = (qhi << 32) | qlo;
         }
         *rem = r;
+#endif
     } else {
 #if BN_DIV_SINGLE_PREINV
         if (alen == 2 && (d >> 63) != 0) {
@@ -8501,25 +8514,33 @@ static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint
             uint64_t high_quotient = high >= d;
             uint64_t r = high - (d & (0 - high_quotient));
             uint64_t dinv = bn_div_preinv(d);
-            q->limbs[1] = high_quotient;
-            q->limbs[0] =
+            q[1] = high_quotient;
+            q[0] =
                 bn_div_qr_preinv(r, a[0], d, dinv, &r);
             *rem = r;
         } else {
-            *rem = mag_div_wide_preinv(q->limbs, a, alen, d);
+            *rem = mag_div_wide_preinv(q, a, alen, d);
         }
 #else
         __uint128_t r = 0;
         for (int32_t i = alen - 1; i >= 0; i--) {
             r = (r << 64) | a[i];
-            q->limbs[i] = (uint64_t)(r / d);
+            q[i] = (uint64_t)(r / d);
             r %= d;
         }
         *rem = (uint64_t)r;
 #endif
     }
-    q->size = alen;
-    while (q->size > 0 && q->limbs[q->size - 1] == 0) q->size--;
+    /* Division by one nonzero base-B digit can remove at most one leading
+     * digit from a normalized magnitude. */
+    if (alen > 0 && q[alen - 1] == 0) alen--;
+    return alen;
+}
+
+/* Divide bigint magnitude by a single uint64_t divisor. Returns quotient, writes remainder. */
+static WBigint *mag_div_single(const uint64_t *a, int32_t alen, uint64_t d, uint64_t *rem) {
+    WBigint *q = bigint_alloc_raw_hot(alen);
+    q->size = mag_div_single_to(q->limbs, a, alen, d, rem);
     return q;
 }
 
@@ -34318,6 +34339,57 @@ __attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b) {
     }
     ba->size = (a_neg != b_neg) ? -amag : amag;
     return a;
+}
+
+/* Divide a proven-dead unique accumulator by one word in its existing limb
+ * storage.  The magnitude pass is allocation-free and supports q == a.
+ * Wider divisors and every guard refusal retain the ordinary immutable
+ * behavior. */
+static WValue w_bigint_div_mut_fallback(WValue a, WValue b) {
+    WValue r = w_div(a, b);
+    if (r == b && w_is_bigint(r)) w_bigint_mark_shared(w_as_bigint(r));
+    return r;
+}
+
+__attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b) {
+    if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
+        return w_bigint_div_mut_fallback(a, b);
+    WBigint *ba = w_as_bigint(a);
+    if (ba->shared != 0 || ba->size == 0)
+        return w_bigint_div_mut_fallback(a, b);
+
+    int32_t as = ba->size;              /* overlay clear: header IS the sign */
+    int a_neg = as < 0;
+    int32_t amag = a_neg ? -as : as;
+
+    uint64_t d;
+    int b_neg;
+    if (w_is_int(b)) {
+        int64_t ib = w_as_int(b);
+        if (__builtin_expect(ib == 0, 0)) die("division by zero");
+        b_neg = ib < 0;
+        d = b_neg ? (uint64_t)(-(ib + 1)) + 1U : (uint64_t)ib;
+    } else if (w_is_bigint(b)) {
+        int32_t bs;
+        WBigint *bb = w_bigint_view(b, &bs);
+        if (bs != 1 && bs != -1)
+            return w_bigint_div_mut_fallback(a, b);
+        b_neg = bs < 0;
+        d = bb->limbs[0];
+        if (__builtin_expect(d == 0, 0)) die("division by zero");
+    } else {
+        return w_bigint_div_mut_fallback(a, b);
+    }
+
+    if (d == 1) {
+        if (b_neg) ba->size = -ba->size;
+        return a;
+    }
+    uint64_t remainder;
+    amag = mag_div_single_to(ba->limbs, ba->limbs, amag, d, &remainder);
+    ba->size = (a_neg != b_neg) ? -amag : amag;
+    if (__builtin_expect(amag > 1, 1)) return a;
+    return bigint_normalize(ba);
 }
 
 /* Add-into-dying-destination (E4 stage 2, the rotation shape). The

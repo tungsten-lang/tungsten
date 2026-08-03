@@ -1717,9 +1717,9 @@
 # a reference to it. Two assignment shapes are allowed, chosen because the
 # runtime guards close their aliasing holes:
 #   (a) literal-leaf arithmetic (`r = 1 << 4096`): mints fresh;
-#   (b) a SINGLE +/- binary op whose LEFT operand is the var itself
-#       (`r = r + anything`), or a +/- compound assign: lowered through
-#       w_bigint_add_mut/w_bigint_sub_mut, whose every return is either
+#   (b) one supported arithmetic op whose LEFT operand is the var itself
+#       (`r = r + anything`), or its compound assignment: lowered through
+#       the corresponding w_bigint_*_mut entry, whose every return is either
 #       in-place (unique by induction), fresh, the dying receiver, or an
 #       operand alias MARKED SHARED (w_bigint_mut_fallback) — which the
 #       next mut attempt refuses and copies.
@@ -1811,7 +1811,7 @@
     return false
   if ast_kind(node) != :binary_op
     return false
-  if !(node.op in (:PLUS :MINUS :STAR))
+  if !(node.op in (:PLUS :MINUS :STAR :SLASH))
     return false
   node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == name
 
@@ -1864,11 +1864,10 @@
         mut_walk_expr(st.value, assigned, dead)
     elsif k == :compound_assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
       name = st.target.name
-      if st.op in (:PLUS :MINUS :STAR)
-        # STAR joined once every w_mul identity return became
-        # fresh-or-marked (the N x 1 arm's ±1 aliases carry shared marks,
-        # and bigint x inline is intercepted before the unmarked tail
-        # identities) — the same invariant that admits PLUS/MINUS.
+      if st.op in (:PLUS :MINUS :STAR :SLASH)
+        # Multiplication and division join once their mutating entries make
+        # every identity return dying-receiver-owned or shared-marked, the
+        # same invariant that admits PLUS/MINUS.
         assigned[name] = true
         mut_walk_expr(st.value, assigned, dead)
       else

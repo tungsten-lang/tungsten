@@ -1,0 +1,10 @@
+# command=REPS=9 or REPS=15 benchmarks/big_math/run_program_loops.sh; see repetitions column
+# machine=Apple M5 Max; target=arm64-apple-darwin25.6.0; gmp=6.3.0
+# tungsten_build=--release --native --fast; gmp_build=-O3 -mcpu=native
+# statistic=median_ns_per_iteration; lane_order=alternating
+variant	repetitions	tungsten_ns	gmp_ns	tungsten_over_gmp	decision
+immutable_result_churn	9	4198.704000	1763.300000	2.381178	baseline
+unique_reuse_32bit_recip	9	3422.524997	1751.500000	1.954624	replaced
+unique_reuse_64bit_recip	15	1779.706943	1775.800000	1.002200	retained_parity
+constant_3_kernel	15	1907.218058	1768.100000	1.078687	rejected
+forced_recip_inline	15	1774.805555	1756.100000	1.010652	rejected

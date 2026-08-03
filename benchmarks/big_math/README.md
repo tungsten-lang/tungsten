@@ -89,6 +89,19 @@ shifts, bitwise self/zero/negative-one cases, gcd/lcm identities, powers 0/1,
 and modular-power constants. The harness never releases a result that aliases
 one of its live operands.
 
+For idiomatic accumulator loops, including allocation-free add, multiply, and
+one-word divide when the compiler proves the prior value dies, run:
+
+```sh
+REPS=15 benchmarks/big_math/run_program_loops.sh
+```
+
+The script builds Tungsten with `--release --native --fast`, builds its GMP
+twin with `-O3 -mcpu=native`, alternates lane order, checks matching output,
+and reports median nanoseconds per iteration. These are end-to-end language
+loops rather than raw limb-kernel timings; shared or escaped accumulators still
+take the immutable runtime path.
+
 To compare Tungsten's full-width `uint64_t` radix with an Odin-style 63-bit
 "nail" radix on the same ARM64 machine:
 

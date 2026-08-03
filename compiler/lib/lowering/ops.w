@@ -784,10 +784,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   lt = ctx[:var_types][name]
   vt = infer_type(node.value, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
 
-  # For +/-/* compound assignment on ints: use runtime calls (w_add/w_sub/w_mul)
-  # because the accumulator may be a bigint after overflow, and checked/guarded
-  # i48 ops produce garbage when given non-i48 inputs
-  if lt == :int && vt == :int && op in (:PLUS :MINUS :STAR)
+  # For arithmetic compound assignment on ints, use runtime calls because the
+  # accumulator may already be a bigint and raw i48 ops would consume pointer
+  # bits.  Division has the same promoted-accumulator hazard as +/-/*.
+  if lt == :int && vt == :int && op in (:PLUS :MINUS :STAR :SLASH)
     rt_fb = nil
     if op == :PLUS
       rt_fb = "w_add"
@@ -795,11 +795,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rt_fb = "w_sub"
     elsif op == :STAR
       rt_fb = "w_mul"
-    # Mutate-if-unique (E4 stage 1): `r += e` / `r -= e` on a proven-dead
+    elsif op == :SLASH
+      rt_fb = "w_div"
+    # Mutate-if-unique (E4 stage 1): compound arithmetic on a proven-dead
     # accumulator takes the in-place entry; its runtime guards fall back.
     mut_cc = nil
-    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR)
-      rt_fb = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : "w_bigint_mul_mut")
+    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH)
+      rt_fb = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
       # must match the preserve_mostcc declaration or the call is UB
       mut_cc = "preserve_mostcc"
     result_temp = next_temp(wfn)
@@ -857,10 +859,15 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     ctx[:var_types][name] = :string
     return typed_value(:i64, result)
 
-  # Fallback: runtime call
+  # Fallback: runtime call. Unknown-typed compound accumulators reach this
+  # arm, so preserve their mutate-if-unique routing too.
   if rt_op != nil
+    rt_call_conv = nil
+    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH)
+      rt_op = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
+      rt_call_conv = "preserve_mostcc"
     result = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg]})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg], call_conv: rt_call_conv})
     if ptr != nil
       emit_instruction(wfn, {op: :store_i64, value: result, ptr: ptr})
     else
@@ -1599,8 +1606,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # set by lower_assign_expr routes `r = r ± e` through the in-place entry
   # instead of __w_add_fast/__w_sub_fast.
   rt_call_conv = nil
-  if ctx[:mut_accum_target] != nil && op in (:PLUS :MINUS :STAR) && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
-    rt_name = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : "w_bigint_mul_mut")
+  if ctx[:mut_accum_target] != nil && op in (:PLUS :MINUS :STAR :SLASH) && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
+    rt_name = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
     rt_call_conv = "preserve_mostcc"
 
   temp = next_temp(wfn)

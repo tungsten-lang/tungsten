@@ -1,6 +1,6 @@
 # Mutate-if-unique, stage 1 (E4). The compiler proves an accumulator's
-# value dies at its own `r = r ± e` / `r ±= e` and routes the boxed
-# fallback through w_bigint_add_mut/w_bigint_sub_mut (in-place). This spec
+# value dies at its own supported `r = r op e` / compound assignment and
+# routes the boxed fallback through the matching in-place entry. This spec
 # pins BOTH halves of the D5 contract on BOTH engines:
 #   * qualifying loops compute the same values as the immutable engine;
 #   * every escape-adversarial shape is either statically disqualified or
@@ -62,6 +62,37 @@ check("mut.drain", drain(50000), ((1 << 200) - 49999 * 25000) % 1000000007)
   acc % 1000000007
 check("mut.star_factorial", factorial(40), factorial_ref(40))
 
+# One-limb division reuses the dying receiver. Compare against an aliased
+# accumulator, which the uniqueness analysis deliberately leaves immutable.
+-> divide_chain(n, divisor)
+  r = (1 << 4096) + 123456789
+  i = 0 ## i64
+  while i < n
+    r = r / divisor
+    i = i + 1
+  r % 1000000007
+
+-> divide_chain_ref(n, divisor)
+  r = (1 << 4096) + 123456789
+  snapshot = r
+  i = 0 ## i64
+  while i < n
+    r = r / divisor
+    i = i + 1
+  snapshot == (1 << 4096) + 123456789 ? r % 1000000007 : 0
+
+-> divide_compound(n)
+  r = (1 << 4096) + 123456789
+  i = 0 ## i64
+  while i < n
+    r /= 3
+    i = i + 1
+  r % 1000000007
+
+check("mut.div_positive", divide_chain(500, 3), divide_chain_ref(500, 3))
+check("mut.div_negative", divide_chain(500, -3), divide_chain_ref(500, -3))
+check("mut.div_compound", divide_compound(500), divide_chain_ref(500, 3))
+
 # carry growth in place: all-ones magnitude + 1 grows a limb
 -> carry_growth
   r = (1 << 256) - 1
@@ -83,6 +114,13 @@ check("mut.carry_boundary", carry_growth(), "true")
     i = i + 1
   y == 1 << 200
 check("adv.plain_alias_survives", alias_shape(1000), "true")
+
+-> division_alias_shape
+  r = 1 << 200
+  y = r
+  r /= 3
+  y == 1 << 200
+check("adv.division_alias_survives", division_alias_shape(), "true")
 
 # --- adversarial: stored in a hash, then the var keeps accumulating ---
 -> hash_shape(n)

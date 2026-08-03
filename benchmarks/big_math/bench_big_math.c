@@ -4344,6 +4344,59 @@ int main(int argc, char **argv) {
                 if (bigint_compare(shared, a0) != 0)
                     dief("fuzz-mut mul shared receiver corrupted l=%d", l);
             }
+            /* div: in-place N/1 across signs and every one-word kernel band,
+             * checked against both the immutable entry and GMP. */
+            {
+                static const uint64_t divisors[] = {
+                    1, 2, 3, UINT32_MAX,
+                    (uint64_t)UINT32_MAX + 2,
+                    UINT64_C(0x8000000000000029), UINT64_MAX
+                };
+                WValue a0, b0, m0;
+                bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                for (size_t di = 0;
+                     di < sizeof(divisors) / sizeof(divisors[0]); di++) {
+                    for (int sa = 0; sa < 2; sa++) {
+                        for (int sb = 0; sb < 2; sb++) {
+                            WBigint *db = bigint_alloc(1);
+                            db->limbs[0] = divisors[di];
+                            db->size = sb ? -1 : 1;
+                            WValue divisor = bigint_box(db);
+                            WValue a_ref = bench_clone_integer(a0);
+                            if (sa) w_as_bigint(a_ref)->size *= -1;
+                            WValue want = bigint_div_any(a_ref, divisor);
+                            WValue a_mut = bench_clone_integer(a0);
+                            if (sa) w_as_bigint(a_mut)->size *= -1;
+                            WValue got = w_bigint_div_mut(a_mut, divisor);
+                            if (bigint_compare(got, want) != 0)
+                                dief("fuzz-mut div mismatch l=%d sa=%d sb=%d d=%llu",
+                                     l, sa, sb,
+                                     (unsigned long long)divisors[di]);
+                            mpz_t za, zd, zq;
+                            mpz_inits(za, zd, zq, NULL);
+                            gmp_import_value(za, a_ref);
+                            gmp_import_value(zd, divisor);
+                            mpz_tdiv_q(zq, za, zd);
+                            if (!value_matches_mpz(got, zq))
+                                dief("fuzz-mut div GMP mismatch l=%d sa=%d sb=%d d=%llu",
+                                     l, sa, sb,
+                                     (unsigned long long)divisors[di]);
+                            mpz_clears(za, zd, zq, NULL);
+                        }
+                    }
+                }
+                WValue shared = bench_clone_integer(a0);
+                w_bigint_mark_shared(w_as_bigint(shared));
+                WValue got = w_bigint_div_mut(shared, w_box_int(3));
+                if (got == shared || bigint_compare(shared, a0) != 0)
+                    dief("fuzz-mut div shared receiver corrupted l=%d", l);
+                WValue flipped = w_neg(bench_clone_integer(a0));
+                WValue flipped_before = bench_clone_integer(flipped);
+                WValue got2 = w_bigint_div_mut(flipped, w_box_int(3));
+                if (got2 == flipped ||
+                    bigint_compare(flipped, flipped_before) != 0)
+                    dief("fuzz-mut div overlay receiver corrupted l=%d", l);
+            }
             /* self-alias: x += x doubles; x -= x zeroes; x += 0 identity */
             {
                 WValue a0, b0, m0;

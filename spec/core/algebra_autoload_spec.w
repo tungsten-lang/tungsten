@@ -13,6 +13,14 @@ autoload_check("field", field.to_s, "ℚ")
 ring = PolynomialRing.new([:x], field)
 x = ring.generator(0)
 autoload_check("polynomial", (x**3 - x).discriminant, Rational.new(4))
+autoload_check("lattice polytope class",
+               LatticePolytope.class_name, "Class")
+autoload_check("Newton polytope class",
+               NewtonPolytope.class_name, "Class")
+autoload_check("homogenized cone class",
+               HomogenizedCone.class_name, "Class")
+autoload_check("toric period class",
+               ToricHypersurfacePeriod.class_name, "Class")
 order = MonogenicOrder.new(x**2 - x - 1)
 autoload_check("monogenic order", order.maximal?, true)
 autoload_check("product order class",
@@ -73,6 +81,10 @@ autoload_check("projective height defect class",
                ProjectiveHeightDefectBound.class_name, "Class")
 autoload_check("projective canonical height class",
                ProjectiveCanonicalHeightEnclosure.class_name, "Class")
+autoload_check("Mordell-Weil height/index bound class",
+               MordellWeilHeightIndexBound.class_name, "Class")
+autoload_check("Mordell-Weil height/index certificate class",
+               MordellWeilHeightIndexCertificate.class_name, "Class")
 autoload_check("curve class", Curve.class_name, "Class")
 autoload_check("C_ab model class", CAbCurveModel.class_name, "Class")
 autoload_check("C_ab Riemann-Roch class",

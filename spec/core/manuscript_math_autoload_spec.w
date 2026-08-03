@@ -14,6 +14,17 @@ manuscript_check("autoload.lattice_polygon",
                    .interior_lattice_point_count == 3)
 manuscript_check("autoload.laurent_jets",
                  LaurentJetFiltration.new([[0], [1]]).jet_rank(1) == 1)
+manuscript_check("autoload.newton_polytope",
+                 LatticePolytope.new([[0], [1]]).gorenstein_index == 2)
+manuscript_check("autoload.homogenized_cone",
+                 HomogenizedCone.new(LatticePolytope.new([[0], [1]]))
+                   .slice_lattice_point_count(2) == 3)
+period_ring = PolynomialRing.new([:x], RationalField.new)
+period_x = period_ring.generators[0]
+manuscript_check("autoload.toric_period",
+                 ToricHypersurfacePeriod.new(
+                   period_ring.one + period_x + period_x*period_x)
+                   .coefficient(3) == 7)
 manuscript_check("autoload.parity_lift",
                  ParityLiftLattice.new([[1, 1]], [1]).certified?)
 manuscript_check("autoload.divided_square",

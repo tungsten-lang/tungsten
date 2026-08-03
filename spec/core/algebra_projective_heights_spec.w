@@ -64,3 +64,21 @@ begin
 rescue error
   tamper_rejected = true
 height_check("projective_height.tamper_rejected", tamper_rejected)
+
+# A degree-four duplication fixture turns a positive canonical-height
+# enclosure plus a uniform nontorsion lower bound into a finite exact list of
+# possible odd index primes.
+duplication_map = ProjectiveHomogeneousMap.new(line, [x**4, y**4])
+duplication_defect = ProjectiveHeightDefectBound.new(
+  duplication_map, 1, 4, [[one, zero], [zero, one]])
+duplication_height = ProjectiveCanonicalHeightEnclosure.new(
+  duplication_map, duplication_defect, line.point(2, 1), 3, tolerance)
+index_bound = MordellWeilHeightIndexBound.new(
+  duplication_height, Rational.new(1, 100))
+height_check("projective_height.index_bound.certified", index_bound.certified?)
+height_check("projective_height.index_bound.maximum",
+             index_bound.maximum_multiplier == 8)
+index_primes = index_bound.odd_prime_candidates
+height_check("projective_height.index_bound.primes",
+             index_primes.size == 3 && index_primes[0] == 3 &&
+             index_primes[1] == 5 && index_primes[2] == 7)

@@ -32,7 +32,7 @@ of every theorem for which that claim might be useful.
 | Fields, polynomials, ideals, arithmetic geometry | `use algebra`; `Algebra` | [algebra.md](algebra.md) |
 | Differential geometry and spacetime metrics | `use geometry`; `Geometry` | this guide; REPL examples in [CONSOLE.md](CONSOLE.md) |
 | Ideal-apex horns and finite cone controls | `use geometry`; `WarpedConeSurface` | this guide; REPL examples in [CONSOLE.md](CONSOLE.md) |
-| Lattice polytopes, Ehrhart fixtures, Newton polygons | `use algebra`; `LatticeSimplex`, `DiagonalShellPolytope` | [algebra.md](algebra.md) |
+| Lattice polytopes, Ehrhart fixtures, Newton polytopes and toric periods | `use algebra`; `LatticeSimplex`, `DiagonalShellPolytope`, `LatticePolytope`, `ToricHypersurfacePeriod` | [algebra.md](algebra.md) |
 | Characteristic-two divided squares and carry laws | `use algebra`; `DividedSquareSpace`, `BinaryCarryGroup` | [algebra.md](algebra.md) |
 | Radial Mellin/Fourier identities | `use calculus`; `RadialMellinTransform` | [scientific-computing/calculus.md](scientific-computing/calculus.md) |
 | Euclidean ball volume and boundary area | `use geometry`; `EuclideanMeasure` | this guide |

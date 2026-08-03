@@ -129,6 +129,131 @@ use core/algebra/projective
     @certificate_cache.verified?
 
 
+# Turn a certified positive canonical height and a uniform positive lower
+# bound for nontorsion points into a finite Mordell--Weil divisibility bound.
+# For P=mQ, quadraticity gives m^2*lambda <= hhat(P).
++ MordellWeilHeightIndexCertificate
+  -> new(@bound)
+    @verified_cache = nil
+
+  -> theorem
+    "quadratic canonical heights bound the index of a point in a rank-one Mordell-Weil lattice"
+
+  -> theorem_reference
+    "Neron-Tate quadraticity and positivity modulo torsion"
+
+  -> proof_kind
+    :trusted_theorem_import
+
+  -> kernel_checked?
+    false
+
+  -> arithmetic_replay_checked?
+    verified?
+
+  -> verified?
+    return @verified_cache if @verified_cache != nil
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    @verified_cache = answer
+    answer
+
+  -> verify!
+    return false if @bound.class_name != "MordellWeilHeightIndexBound"
+    height = @bound.point_height
+    return false if !height.certificate.verified?
+    return false if height.map.degree != 4
+    return false if height.lower_bound <= Rational.new(0)
+    lower = @bound.nontorsion_height_lower_bound
+    return false if lower <= Rational.new(0)
+    upper = height.upper_bound
+    return false if upper < lower
+    maximum = @bound.maximum_multiplier
+    return false if maximum < 1
+    return false if maximum*maximum*lower > upper
+    return false if (maximum + 1)*(maximum + 1)*lower <= upper
+    expected = []
+    candidate = 3
+    while candidate <= maximum
+      expected.push(candidate) if candidate.prime?
+      candidate += 2
+    actual = @bound.odd_prime_candidates
+    return false if expected.size != actual.size
+    index = 0
+    while index < expected.size
+      return false if expected[index] != actual[index]
+      index += 1
+    true
+
+
++ MordellWeilHeightIndexBound
+  -> .floor_sqrt_ratio(value)
+    rational = Rational.coerce(value)
+    raise "height ratio must be nonnegative" if rational < Rational.new(0)
+    numerator = rational.numerator
+    denominator = rational.denominator
+    low = 0 ## big
+    high = 1 ## big
+    while high*high*denominator <= numerator
+      low = high
+      high *= 2
+    while high - low > 1
+      middle = (low + high) / 2
+      if middle*middle*denominator <= numerator
+        low = middle
+      else
+        high = middle
+    low
+
+  -> new(@point_height, nontorsion_height_lower_bound)
+    @nontorsion_height_lower_bound = Rational.coerce(
+      nontorsion_height_lower_bound)
+    if (@point_height.class_name != "ProjectiveCanonicalHeightEnclosure" ||
+        !@point_height.certificate.verified?)
+      raise "index bound needs a certified canonical-height enclosure"
+    if @point_height.map.degree != 4
+      raise "Mordell-Weil index bound needs a duplication map of degree four"
+    if @point_height.lower_bound <= Rational.new(0)
+      raise "the supplied point is not certified nontorsion by its height"
+    if @nontorsion_height_lower_bound <= Rational.new(0)
+      raise "nontorsion height lower bound must be positive"
+    if @point_height.upper_bound < @nontorsion_height_lower_bound
+      raise "point height lies below the claimed uniform lower bound"
+    @maximum_multiplier = MordellWeilHeightIndexBound.floor_sqrt_ratio(
+      @point_height.upper_bound / @nontorsion_height_lower_bound)
+    @odd_prime_candidates = []
+    candidate = 3
+    while candidate <= @maximum_multiplier
+      @odd_prime_candidates.push(candidate) if candidate.prime?
+      candidate += 2
+    @certificate_cache = MordellWeilHeightIndexCertificate.new(self)
+    if !@certificate_cache.verified?
+      raise "Mordell-Weil height/index bound failed certification"
+
+  -> point_height
+    @point_height
+
+  -> nontorsion_height_lower_bound
+    @nontorsion_height_lower_bound
+
+  -> maximum_multiplier
+    @maximum_multiplier
+
+  -> odd_prime_candidates
+    answer = []
+    @odd_prime_candidates.each -> answer.push(item)
+    answer
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    @certificate_cache.verified?
+
+
 + ProjectiveHeightDefectCertificate
   -> new(@defect)
     @verified_cache = nil

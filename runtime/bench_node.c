@@ -80,7 +80,7 @@ static void bench_alloc(int64_t n) {
         int64_t batch = 2000000;
         if (i + batch > n) batch = n - i;
         for (int64_t j = 0; j < batch; j++) {
-            volatile WValue node = w_node_alloc(1 /* kind */, 0 /* SC_2 */);
+            volatile WValue node = w_node_alloc(92 /* one-word Program */, 0);
             (void)node;
         }
         arena_cycle();
@@ -111,11 +111,11 @@ static void bench_singleton(int64_t n) {
 
 /* ---- 2. Field store + load — the hot AST field-access path ---- */
 static void bench_field(int64_t n) {
-    WValue node = w_node_alloc(1, 2 /* SC_8 — 8 slots */);
+    WValue node = w_node_alloc(66 /* seven-word GPU kernel */, 2);
     volatile WValue acc = 0;
     for (int64_t i = 0; i < n; i++) {
-        w_node_field_store(node, i & 7, w_box_int(i));
-        acc += w_node_field_load(node, i & 7);
+        w_node_field_store(node, i % 7, w_box_int(i));
+        acc += w_node_field_load(node, i % 7);
     }
     arena_cycle();
 }
@@ -124,7 +124,7 @@ static void bench_field(int64_t n) {
 static void bench_reset(int64_t n) {
     for (int64_t i = 0; i < n; i++) {
         for (int64_t j = 0; j < 256; j++) {
-            volatile WValue node = w_node_alloc(1, 1);
+            volatile WValue node = w_node_alloc(92, 0);
             (void)node;
         }
         arena_cycle();
@@ -134,23 +134,18 @@ static void bench_reset(int64_t n) {
 /* ---- Peak arena bytes — the per-size-class memory stat ---- */
 static void report_arena_peak(void) {
     arena_cycle();
-    /* A representative mixed workload: SC_2-heavy, as a real AST is. */
+    /* Same shape as the old report: 100K one-word, 50K three-word, and
+     * 25K seven-word nodes. Exact storage is 425K field words. */
     for (int64_t i = 0; i < 100000; i++) {
-        w_node_alloc(1, 0);
-        if (i % 2 == 0) w_node_alloc(1, 1);
-        if (i % 4 == 0) w_node_alloc(1, 2);
+        w_node_alloc(92, 0);
+        if (i % 2 == 0) w_node_alloc(35, 1);
+        if (i % 4 == 0) w_node_alloc(66, 2);
     }
-    printf("\nPeak arena bytes (100k SC_2 + 50k SC_4 + 25k SC_8):\n");
-    const char *names[3] = {"SC_2", "SC_4", "SC_8"};
-    uint64_t total = 0;
-    for (int sc = 0; sc < 3; sc++) {
-        uint64_t bytes = (uint64_t)g_node_arena[sc].cursor * g_node_stride[sc];
-        total += bytes;
-        printf("  %-6s  cursor=%-9u cap=%-9u stride=%-4u  %9.2f KB\n",
-               names[sc], g_node_arena[sc].cursor, g_node_arena[sc].cap,
-               g_node_stride[sc], bytes / 1024.0);
-    }
-    printf("  %-6s %43s  %9.2f KB\n", "TOTAL", "", total / 1024.0);
+    uint64_t words = (uint64_t)g_node_arena.cursor - 1;
+    uint64_t bytes = words * sizeof(WValue);
+    printf("\nPeak exact arena (100k x1 + 50k x3 + 25k x7):\n");
+    printf("  words=%-9llu cap=%-9u                 %9.2f KB\n",
+           (unsigned long long)words, g_node_arena.cap, bytes / 1024.0);
     arena_cycle();
 }
 

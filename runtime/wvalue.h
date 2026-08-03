@@ -322,16 +322,16 @@ typedef uint64_t WValue;
  *
  * Full tier (prefix 0) — current encoding:
  *   bits 36..43  kind     (8 bits)
- *   bits 34..35  sclass   (2 bits, SC_2/4/8/16)
+ *   bits 34..35  layout class (legacy descriptive width bucket)
  *   bits 32..33  reserved (2 bits — future flags: monomorph, has-sparse, …)
- *   bits  0..31  offset   (32 bits, index into g_node_arena[sclass])
+ *   bits  0..31  offset   (32-bit WValue-word index into AST:Store)
  *
  * Compact tier (prefix 1) — future, no kinds populated yet:
  *   bits 39..43  kind (5 bits, IDs 0..31)
  *   bits  0..38  per-kind 39-bit payload
  *
- * Offsets index into a single per-size-class arena (`g_node_arena[sc]`)
- * that grows by realloc-doubling. Because offsets (not pointers) are
+ * Offsets index into one exact-width word arena that grows by realloc-
+ * doubling. Because offsets (not pointers) are
  * stored, in-process realloc preserves all live references — only the
  * arena's base address moves, and the base is read fresh on every
  * access. See `runtime/runtime.h` for the arena struct + helpers.

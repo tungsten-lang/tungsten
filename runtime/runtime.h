@@ -99,27 +99,21 @@ void w_slab_freeze(void);
 int  w_slab_is_frozen(void);
 WValue w_zstd_compress_llvm_escaped(WValue escaped_val);
 
-/* ---- AST node arenas (PR #2: slab-AST migration) ----
+/* ---- Exact-width AST word arena ----
  *
- * Each AST kind maps to a size class (4/8/16 ivars). One arena per
- * size class; references are 32-bit stride-unit offsets stored in
- * W_PACKED_NODE WValues (see runtime/wvalue.h). On full, realloc-
- * doubles. Sized initially per Phase 1.0 measurement so a self-host
- * compile incurs zero reallocs in the common case.
- *
- * The slab-AST compiler emit reads `g_node_arena[sc].base` on every
- * field access; STRIDE constant-folds when the kind is statically
- * known. See `scratch/phase_2_field_access_analysis.txt` for the
- * kind-known-vs-polymorphic breakdown.
+ * Every allocated node occupies exactly the number of WValue fields declared
+ * by its generated schema. Handles store a 32-bit word offset into this one
+ * realloc-growing arena. The legacy size-class bits remain descriptive handle
+ * metadata during the transition; they no longer choose storage or stride.
  *
  * Lifetime: single compile per process. `w_node_arena_init()` at
  * compile start, `w_node_arena_reset()` between compiles (frees all
  * arenas; references are invalid after reset).
  */
 typedef struct WNodeArena {
-    uint8_t  *base;       /* malloc'd buffer base */
-    uint32_t  cursor;     /* next free slot, in stride units */
-    uint32_t  cap;        /* allocated capacity, in stride units */
+    WValue   *base;
+    uint32_t  cursor;     /* next free WValue word; offset 0 is reserved */
+    uint32_t  cap;        /* allocated WValue words */
 } WNodeArena;
 
 typedef struct WAstSparseRecord {
@@ -147,7 +141,7 @@ typedef struct WAstInternMap {
  * process store is currently active for all handles; keeping ownership in a
  * value makes reset/reuse and future store selection one coherent operation. */
 typedef struct WAstStore {
-    WNodeArena       node_arena[4];
+    WNodeArena       node_arena;
     WValue           bool_nodes[2];
     WAstSparseNodeMap sparse_map;
     WAstSparseRecord *sparse_records;
@@ -166,8 +160,7 @@ typedef struct WAstStore {
 
 extern WAstStore     g_ast_store;
 #define g_node_arena (g_ast_store.node_arena)
-extern const uint32_t g_node_stride[4];        /* bytes per node per SC: {32,64,128,0} */
-extern const uint32_t g_node_initial_cap[4];   /* from Phase 1.0 measurement */
+extern const uint32_t g_node_initial_cap_words;
 extern uint64_t       g_ast_schema_hash;       /* hash of (KIND_*, F_*, STRIDE_*); embedded in loader cache */
 
 void     w_node_arena_init(void);
@@ -222,11 +215,10 @@ WValue   w_ast_freeze_if_array(WValue v);
 void     w_ast_extra_reset(void);
 WValue   w_body_arena_get(uint32_t offset, uint32_t i);
 
-/* Field access: reads/writes one 8-byte WValue slot inside an AST node.
- * `ivar_offset` is the slot index within the node (0-15 max, depending
- * on size class). The size class is decoded from the W_PACKED_NODE
- * encoding in `wnode`. With LTO these inline into the caller; without
- * LTO they're one call + a handful of ops.
+/* Field access: reads/writes one 8-byte WValue word inside an AST node.
+ * `ivar_offset` is the generated field index; handle offset + field index
+ * addresses the exact-width arena directly. With LTO these inline into the
+ * caller; without LTO they're one call + a handful of ops.
  *
  * i64 parameter types match how Tungsten's `ccall_nobox` emits args
  * (all raw i64 on the call boundary). */

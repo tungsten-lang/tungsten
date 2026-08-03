@@ -1374,7 +1374,7 @@ int main() {
         assert(w_node_field_load(true_before, 0) == W_TRUE);
 
         w_node_arena_reset();
-        WValue first = w_node_alloc(1, 0);
+        WValue first = w_node_alloc(/*KIND_PROGRAM=*/92, 0);
         WValue false_after = w_ast_bool_cached(0);
         WValue true_after = w_ast_bool_cached(1);
         assert(w_node_offset(first) == 1);

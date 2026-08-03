@@ -4,8 +4,21 @@
 
 #include <stdint.h>
 
-#define W_AST_SCHEMA_ABI_VERSION UINT32_C(1)
-#define W_AST_SCHEMA_HASH UINT64_C(0xD050CBEA6A2DB0DF)
+#define W_AST_SCHEMA_ABI_VERSION UINT32_C(2)
+#define W_AST_SCHEMA_HASH UINT64_C(0x00004E9B6D2FE776)
 #define W_AST_KIND_MAX UINT32_C(147)
+
+static const uint8_t W_AST_KIND_WIDTH[W_AST_KIND_MAX + 1] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 2, 1, 3, 4, 3, 4, 1, 0, 1, 1, 6, 2, 3, 3, 0,
+    1, 4, 0, 0, 3, 3, 0, 1, 1, 1, 1, 2, 3, 2, 2, 1,
+    6, 1, 7, 1, 4, 2, 3, 1, 0, 1, 0, 5, 3, 1, 7, 2,
+    1, 2, 0, 0, 1, 3, 2, 2, 6, 0, 2, 1, 1, 1, 2, 3,
+    3, 1, 2, 0, 2, 1, 6, 5, 0, 0, 1, 1, 0, 0, 1, 2,
+    1, 1, 2, 1, 2, 1, 2, 2, 2, 1, 1, 0, 2, 0, 3, 1,
+    0, 2, 2, 2, 1, 2, 1, 2, 2, 1, 1, 3, 3, 3, 0, 1,
+    0, 2, 1, 1
+};
 
 #endif

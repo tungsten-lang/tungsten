@@ -2235,9 +2235,9 @@ ewscope_md_state = {ids: {}, order: []}
   # nor any init call — the runtime arena is lazy (offset 0 reserved on first
   # growth inside w_node_alloc).
   if fn_out.to_s().index("@g_ast_store") != nil
-    # WAstStore begins with node_arena[4]; declaring the symbol through that
+    # WAstStore begins with its exact-width node arena; declaring the symbol
     # prefix type keeps the hot GEPs compact while the runtime owns the rest.
-    decls_out = "@g_ast_store = external global \[4 x { ptr, i32, i32 }]\n@g_node_stride = external constant \[4 x i32]\n\n" + decls_out
+    decls_out = "@g_ast_store = external global { ptr, i32, i32 }\n\n" + decls_out
   if decls_out != ""
     decls_out = decls_out + "\n"
 
@@ -3728,26 +3728,22 @@ ewscope_md_state = {ids: {}, order: []}
     while fi < nf
       parts << t + ".fz" + fi.to_s() + " = call i64 @w_ast_freeze_if_array(i64 " + fields[fi] + ")\n  "
       fi += 1
-    parts << t + ".cursor_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 1\n  "
+    parts << t + ".cursor_p = getelementptr inbounds { ptr, i32, i32 }, ptr @g_ast_store, i32 0, i32 1\n  "
     parts << t + ".cursor = load i32, ptr " + t + ".cursor_p, align 4\n  "
-    parts << t + ".cap_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 2\n  "
+    parts << t + ".cap_p = getelementptr inbounds { ptr, i32, i32 }, ptr @g_ast_store, i32 0, i32 2\n  "
     parts << t + ".cap = load i32, ptr " + t + ".cap_p, align 4\n  "
-    parts << t + ".has_room = icmp ult i32 " + t + ".cursor, " + t + ".cap\n  "
+    parts << t + ".new_cursor = add i32 " + t + ".cursor, " + nf.to_s() + "\n  "
+    parts << t + ".has_room = icmp ule i32 " + t + ".new_cursor, " + t + ".cap\n  "
     parts << "br i1 " + t + ".has_room, label %" + label_fast + ", label %" + label_slow + ", !prof !31411\n"
     parts << label_fast + ":\n  "
-    parts << t + ".new_cursor = add i32 " + t + ".cursor, 1\n  "
     parts << "store i32 " + t + ".new_cursor, ptr " + t + ".cursor_p, align 4\n  "
-    parts << t + ".base_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 0\n  "
+    parts << t + ".base_p = getelementptr inbounds { ptr, i32, i32 }, ptr @g_ast_store, i32 0, i32 0\n  "
     parts << t + ".base = load ptr, ptr " + t + ".base_p, align 8\n  "
-    parts << t + ".stride_p = getelementptr inbounds " + lbr + "4 x i32], ptr @g_node_stride, i64 0, i64 " + sc + "\n  "
-    parts << t + ".stride32 = load i32, ptr " + t + ".stride_p, align 4\n  "
-    parts << t + ".stride = zext i32 " + t + ".stride32 to i64\n  "
     parts << t + ".cursor64 = zext i32 " + t + ".cursor to i64\n  "
-    parts << t + ".slot_off = mul i64 " + t + ".cursor64, " + t + ".stride\n  "
-    parts << t + ".slot_addr = getelementptr i8, ptr " + t + ".base, i64 " + t + ".slot_off\n  "
+    parts << t + ".slot_addr = getelementptr i64, ptr " + t + ".base, i64 " + t + ".cursor64\n  "
     fi = 0
     while fi < nf
-      parts << t + ".fp" + fi.to_s() + " = getelementptr i8, ptr " + t + ".slot_addr, i64 " + (fi * 8).to_s() + "\n  "
+      parts << t + ".fp" + fi.to_s() + " = getelementptr i64, ptr " + t + ".slot_addr, i64 " + fi.to_s() + "\n  "
       parts << "store i64 " + t + ".fz" + fi.to_s() + ", ptr " + t + ".fp" + fi.to_s() + ", align 8\n  "
       fi += 1
     parts << t + ".sc_shifted = shl i64 " + sc + ", 34\n  "
@@ -3759,16 +3755,12 @@ ewscope_md_state = {ids: {}, order: []}
     parts << label_slow + ":\n  "
     parts << t + ".slow_node = call i64 @w_node_alloc(i64 " + kind + ", i64 " + sc + ")\n  "
     parts << t + ".s.off = and i64 " + t + ".slow_node, 4294967295\n  "
-    parts << t + ".s.base_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 0\n  "
+    parts << t + ".s.base_p = getelementptr inbounds { ptr, i32, i32 }, ptr @g_ast_store, i32 0, i32 0\n  "
     parts << t + ".s.base = load ptr, ptr " + t + ".s.base_p, align 8\n  "
-    parts << t + ".s.stride_p = getelementptr inbounds " + lbr + "4 x i32], ptr @g_node_stride, i64 0, i64 " + sc + "\n  "
-    parts << t + ".s.stride32 = load i32, ptr " + t + ".s.stride_p, align 4\n  "
-    parts << t + ".s.stride = zext i32 " + t + ".s.stride32 to i64\n  "
-    parts << t + ".s.slot_off = mul i64 " + t + ".s.off, " + t + ".s.stride\n  "
-    parts << t + ".s.slot_addr = getelementptr i8, ptr " + t + ".s.base, i64 " + t + ".s.slot_off\n  "
+    parts << t + ".s.slot_addr = getelementptr i64, ptr " + t + ".s.base, i64 " + t + ".s.off\n  "
     fi = 0
     while fi < nf
-      parts << t + ".s.fp" + fi.to_s() + " = getelementptr i8, ptr " + t + ".s.slot_addr, i64 " + (fi * 8).to_s() + "\n  "
+      parts << t + ".s.fp" + fi.to_s() + " = getelementptr i64, ptr " + t + ".s.slot_addr, i64 " + fi.to_s() + "\n  "
       parts << "store i64 " + t + ".fz" + fi.to_s() + ", ptr " + t + ".s.fp" + fi.to_s() + ", align 8\n  "
       fi += 1
     parts << "br label %" + label_merge + "\n"
@@ -3786,7 +3778,7 @@ ewscope_md_state = {ids: {}, order: []}
     # constant-folded KIND_*/SC_* globals, LLVM collapses the kind/sc
     # shifts and OR into a single constant + bump in the fast path.
     #
-    # Layout: per-arena struct is {ptr base, i32 cursor, i32 cap}.
+    # Layout: the exact-width word arena is {ptr base, i32 cursor, i32 cap}.
     # Indices 1 and 2 reach cursor/cap respectively.
     #
     # Slab-AST intrinsic: w_node_field_load(node, offset) / w_node_field_store(
@@ -3823,45 +3815,18 @@ ewscope_md_state = {ids: {}, order: []}
       t = inst[:temp]
       kind_in = inst[:args][0]
       sc_in = inst[:args][1]
-      lbr = "\["
-      label_fast = "wna_" + t.slice(1, t.size() - 1) + "_fast"
-      label_slow = "wna_" + t.slice(1, t.size() - 1) + "_slow"
-      label_merge = "wna_" + t.slice(1, t.size() - 1) + "_merge"
-      parts = StringBuffer(1040)
+      parts = StringBuffer(240)
       # Defensive unbox: kind/sc here may carry the raw_int nanbox tag
       # (0xFFFA…) when they come from a runtime expression rather than a
       # literal KIND_*/SC_* global — e.g. ast_deep_clone's
       # `sc = sc_for_kind(kid)`, where the result is a `## i64` value
-      # boxed into a general WValue local. The arena index (sc) and the
-      # kind-shift below assume clean machine ints; an un-stripped tag
-      # made sc into a huge GEP index and SEGV'd. Masking the low 48 bits
-      # extracts the value and is idempotent for already-clean small
-      # ints (kind ≤ 142, sc ≤ 3).
+      # boxed into a general WValue local. Masking the low 48 bits extracts
+      # the value and is idempotent for already-clean small ints.
       kind = t + ".kind_clean"
       sc = t + ".sc_clean"
       parts << kind + " = and i64 " + kind_in + ", 281474976710655\n  "
       parts << sc + " = and i64 " + sc_in + ", 281474976710655\n  "
-      parts << t + ".cursor_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 1\n  "
-      parts << t + ".cursor = load i32, ptr " + t + ".cursor_p, align 4\n  "
-      parts << t + ".cap_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + sc + ", i32 2\n  "
-      parts << t + ".cap = load i32, ptr " + t + ".cap_p, align 4\n  "
-      parts << t + ".has_room = icmp ult i32 " + t + ".cursor, " + t + ".cap\n  "
-      parts << "br i1 " + t + ".has_room, label %" + label_fast + ", label %" + label_slow + ", !prof !31411\n"
-      parts << label_fast + ":\n  "
-      parts << t + ".new_cursor = add i32 " + t + ".cursor, 1\n  "
-      parts << "store i32 " + t + ".new_cursor, ptr " + t + ".cursor_p, align 4\n  "
-      parts << t + ".cursor64 = zext i32 " + t + ".cursor to i64\n  "
-      parts << t + ".sc_shifted = shl i64 " + sc + ", 34\n  "
-      parts << t + ".kind_shifted = shl i64 " + kind + ", 36\n  "
-      parts << t + ".p1 = or i64 " + t + ".sc_shifted, " + t + ".cursor64\n  "
-      parts << t + ".p2 = or i64 " + t + ".kind_shifted, " + t + ".p1\n  "
-      parts << t + ".fast_result = or i64 u0xFFFE600000000000, " + t + ".p2\n  "
-      parts << "br label %" + label_merge + "\n"
-      parts << label_slow + ":\n  "
-      parts << t + ".slow_result = call i64 @w_node_alloc(i64 " + kind + ", i64 " + sc + ")\n  "
-      parts << "br label %" + label_merge + "\n"
-      parts << label_merge + ":\n  "
-      parts << t + " = phi i64 " + lbr + " " + t + ".fast_result, %" + label_fast + " ], " + lbr + " " + t + ".slow_result, %" + label_slow + " ]"
+      parts << t + " = call i64 @w_node_alloc(i64 " + kind + ", i64 " + sc + ")"
       return parts.to_s()
     slab_intrinsic = false
     if inst[:name] == "w_node_field_load" || inst[:name] == "w_node_field_store"
@@ -3872,25 +3837,13 @@ ewscope_md_state = {ids: {}, order: []}
     if slab_intrinsic
       t = inst[:temp]
       n = inst[:args][0]
-      ivar_byte = (inst[:args][1].to_i() * 8).to_s()
-      lbr = "\["
+      ivar_word = inst[:args][1].to_i().to_s()
       parts = StringBuffer(460)
       parts << t + ".off = and i64 " + n + ", 4294967295\n  "
-      # Size-class lives at bits 34-35 in W_PACKED_NODE (W_NODE_SCLASS_SHIFT
-      # = W_NODE_OFFSET_BITS + W_NODE_RESERVED_BITS = 32 + 2 = 34). Bits
-      # 32-33 are reserved and always zero, so the prior `lshr ..., 32`
-      # read zero as the sclass and looked up SC_2's stride / arena
-      # regardless of the node's actual class.
-      parts << t + ".sc_sh = lshr i64 " + n + ", 34\n  "
-      parts << t + ".sc = and i64 " + t + ".sc_sh, 3\n  "
-      parts << t + ".stride_p = getelementptr inbounds " + lbr + "4 x i32], ptr @g_node_stride, i64 0, i64 " + t + ".sc\n  "
-      parts << t + ".stride32 = load i32, ptr " + t + ".stride_p, align 4\n  "
-      parts << t + ".stride = zext i32 " + t + ".stride32 to i64\n  "
-      parts << t + ".scaled = mul i64 " + t + ".off, " + t + ".stride\n  "
-      parts << t + ".full = add i64 " + t + ".scaled, " + ivar_byte + "\n  "
-      parts << t + ".base_p = getelementptr inbounds " + lbr + "4 x { ptr, i32, i32 }], ptr @g_ast_store, i64 0, i64 " + t + ".sc, i32 0\n  "
+      parts << t + ".full = add i64 " + t + ".off, " + ivar_word + "\n  "
+      parts << t + ".base_p = getelementptr inbounds { ptr, i32, i32 }, ptr @g_ast_store, i32 0, i32 0\n  "
       parts << t + ".base = load ptr, ptr " + t + ".base_p, align 8\n  "
-      parts << t + ".gep = getelementptr i8, ptr " + t + ".base, i64 " + t + ".full"
+      parts << t + ".gep = getelementptr i64, ptr " + t + ".base, i64 " + t + ".full"
       if inst[:name] == "w_node_field_load"
         parts << "\n  " + t + " = load i64, ptr " + t + ".gep, align 8"
       else

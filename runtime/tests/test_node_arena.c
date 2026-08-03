@@ -3,7 +3,7 @@
  *
  * Verifies:
  *   1. w_node_arena_init() preserves lazy allocation.
- *   2. w_node_alloc(kind, sc) returns sequential offsets within an SC.
+ *   2. w_node_alloc(kind, sc) returns exact-width word offsets.
  *   3. The returned W_PACKED_NODE WValue round-trips: w_is_node /
  *      w_node_kind / w_node_size_class / w_node_offset extract the
  *      same values that were boxed in.
@@ -25,79 +25,74 @@ static int failures = 0;
 
 static void test_init_state(void) {
     w_node_arena_init();
-    CHECK(g_node_arena[0].base == NULL, "SC_0 stays lazy");
-    CHECK(g_node_arena[0].cap == 0, "SC_0 has no eager capacity");
-    CHECK(g_node_arena[0].cursor == 0, "SC_0 cursor starts at zero before first touch");
-    CHECK(g_node_arena[1].base == NULL, "SC_1 stays lazy");
-    CHECK(g_node_arena[2].base == NULL, "SC_2 stays lazy");
+    CHECK(g_node_arena.base == NULL, "word arena stays lazy");
+    CHECK(g_node_arena.cap == 0, "word arena has no eager capacity");
+    CHECK(g_node_arena.cursor == 0, "cursor starts at zero before first touch");
 }
 
 static void test_alloc_roundtrip(void) {
-    /* Alloc one node of kind 7 in SC_0; verify all the boxed bits survive. */
-    WValue n = w_node_alloc(/*kind=*/7, /*sc=*/0);
+    /* Program has one field word. */
+    WValue n = w_node_alloc(/*KIND_PROGRAM=*/92, /*layout class=*/0);
     CHECK(w_is_node(n),                "result is W_PACKED_NODE");
-    CHECK(w_node_kind(n) == 7,         "kind round-trips");
+    CHECK(w_node_kind(n) == 92,        "kind round-trips");
     CHECK(w_node_size_class(n) == 0,   "size_class round-trips");
     CHECK(w_node_offset(n) == 1,       "first alloc follows reserved offset 0");
 
-    /* Three more allocations bump the cursor in order. */
-    WValue a = w_node_alloc(11, 0);
-    WValue b = w_node_alloc(13, 1);   /* different SC */
-    WValue c = w_node_alloc(17, 0);
+    /* Exact widths: And=2, Assign=3, Program=1. */
+    WValue a = w_node_alloc(33, 0);
+    WValue b = w_node_alloc(35, 1);
+    WValue c = w_node_alloc(92, 0);
     CHECK(w_node_offset(a) == 2, "SC_0 second offset is 2");
-    CHECK(w_node_offset(b) == 1, "SC_1 first offset is 1");
-    CHECK(w_node_offset(c) == 3, "SC_0 third offset is 3");
-    CHECK(w_node_kind(a) == 11,  "SC_0 second kind ok");
-    CHECK(w_node_kind(b) == 13,  "SC_1 first kind ok");
-    CHECK(w_node_kind(c) == 17,  "SC_0 third kind ok");
+    CHECK(w_node_offset(b) == 4, "three-word node follows two-word node");
+    CHECK(w_node_offset(c) == 7, "one-word node follows exact three words");
+    CHECK(w_node_kind(a) == 33,  "second kind ok");
+    CHECK(w_node_kind(b) == 35,  "third kind ok");
+    CHECK(w_node_kind(c) == 92,  "fourth kind ok");
 }
 
 static void test_kind_bits_max(void) {
     /* Full-tier kind field is 8 bits. Confirm the boundary round-trips. */
-    WValue n = w_node_alloc(255, 1);
-    CHECK(w_node_kind(n) == 255, "kind 255 (max 8-bit) round-trips");
+    WValue n = w_node_alloc(147, 0);
+    CHECK(w_node_kind(n) == 147, "current maximum kind round-trips");
 }
 
 static void test_realloc_doubling(void) {
-    /* Force an SC_2 realloc by allocating cap+1 nodes there. SC_2's
-     * initial cap is small (1000), so this stays cheap. */
-    WValue first = w_node_alloc(1, 2);
+    /* Fill the exact-width arena with one-word Program nodes. */
+    WValue first = w_node_alloc(92, 0);
     (void)first;
-    uint32_t initial_cap = g_node_arena[2].cap;
-    CHECK(initial_cap > 0, "SC_2 initial cap is positive");
+    uint32_t initial_cap = g_node_arena.cap;
+    CHECK(initial_cap > 0, "initial word capacity is positive");
 
     /* Fill through the final available offset. */
-    while (g_node_arena[2].cursor < initial_cap) {
-        WValue n = w_node_alloc(1, 2);
+    while (g_node_arena.cursor < initial_cap) {
+        WValue n = w_node_alloc(92, 0);
         (void)n;
     }
-    CHECK(g_node_arena[2].cursor == initial_cap, "cursor at cap before realloc");
-    CHECK(g_node_arena[2].cap    == initial_cap, "cap unchanged before realloc");
+    CHECK(g_node_arena.cursor == initial_cap, "cursor at cap before realloc");
+    CHECK(g_node_arena.cap == initial_cap, "cap unchanged before realloc");
 
     /* Next alloc triggers realloc-doubling. */
-    WValue trigger = w_node_alloc(1, 2);
-    CHECK(g_node_arena[2].cap == initial_cap * 2, "cap doubled on overflow");
+    WValue trigger = w_node_alloc(92, 0);
+    CHECK(g_node_arena.cap == initial_cap * 2, "cap doubled on overflow");
     CHECK(w_node_offset(trigger) == initial_cap,  "offset continues past initial cap");
     /* Read back a slot from BEFORE the realloc to ensure data survived
      * the (potentially-moving) realloc. We didn't write any payload, so
      * just check the base is non-null and the offset is still in range. */
-    CHECK(g_node_arena[2].base != NULL, "base still valid post-realloc");
+    CHECK(g_node_arena.base != NULL, "base still valid post-realloc");
 }
 
 static void test_reset(void) {
     w_node_arena_reset();
-    CHECK(g_node_arena[0].base == NULL,   "SC_0 base freed");
-    CHECK(g_node_arena[0].cursor == 1,    "SC_0 cursor preserves offset zero");
-    CHECK(g_node_arena[0].cap == 0,       "SC_0 cap reset");
-    CHECK(g_node_arena[1].base == NULL,   "SC_1 base freed");
-    CHECK(g_node_arena[2].base == NULL,   "SC_2 base freed");
+    CHECK(g_node_arena.base == NULL, "word arena base freed");
+    CHECK(g_node_arena.cursor == 1, "cursor preserves offset zero");
+    CHECK(g_node_arena.cap == 0, "word arena capacity reset");
 }
 
 static void test_reuse_after_reset(void) {
     /* A fresh init+alloc after reset should work like the first time. */
     w_node_arena_init();
-    WValue n = w_node_alloc(42, 0);
-    CHECK(w_node_kind(n) == 42,        "kind ok after reset+reinit");
+    WValue n = w_node_alloc(92, 0);
+    CHECK(w_node_kind(n) == 92,        "kind ok after reset+reinit");
     CHECK(w_node_offset(n) == 1,       "offset resets to 1 on reinit");
     w_node_arena_reset();
 }

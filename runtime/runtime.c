@@ -13737,18 +13737,9 @@ _Static_assert(offsetof(WAstStore, node_arena) == 0,
 #define g_body_arena_cap   (g_ast_store.body_cap)
 #define g_ast_extra_arrays (g_ast_store.body_count)
 
-/* Bytes per node per size class. Indexed by the 2-bit size_class
- * field in W_PACKED_NODE; names match slot counts (8 B per slot).
- *   SC_2  = 0:  2 slots = 16 B  (leaf 1-2-slot kinds: var, symbol, …)
- *   SC_4  = 1:  4 slots = 32 B  (3-slot kinds: int, binary_op, assign, …)
- *   SC_8  = 2:  8 slots = 64 B  (4-6-slot kinds: call, if, method_def, …)
- *   SC_16 = 3: 16 slots = 128 B (reserved; 7+-slot kinds, none currently)
- */
-const uint32_t g_node_stride[4] = {16, 32, 64, 128};
-
-/* Initial caps sized for a self-compile (Phase 1.0 measurement,
- * post-SC_2 reassignment). */
-const uint32_t g_node_initial_cap[4] = {70000, 30000, 26000, 1000};
+/* A release self-compile needs about 403K declared field words. This leaves a
+ * small no-realloc margin while allocating less than the old padded slabs. */
+const uint32_t g_node_initial_cap_words = 500000;
 
 uint64_t g_ast_schema_hash = W_AST_SCHEMA_HASH;
 
@@ -13872,37 +13863,31 @@ WValue w_node_kind_sym(WValue node, WValue table) {
 }
 
 WValue w_node_alloc(int64_t kind, int64_t sc) {
-    if (sc < 0 || sc >= 4 || g_node_stride[sc] == 0) {
-        die("w_node_alloc: invalid size class");
+    int kid = (int)((uint64_t)kind & W_NODE_KIND_MASK);
+    if (kid < 1 || kid > (int)W_AST_KIND_MAX || sc < 0 || sc >= 4) {
+        die("w_node_alloc: invalid kind or layout class");
     }
-    WNodeArena *a = &g_node_arena[sc];
-    if (a->cursor >= a->cap) {
-        int first = (a->cap == 0);
-        uint32_t new_cap = a->cap ? a->cap * 2 : g_node_initial_cap[sc];
-        if (new_cap == 0) new_cap = 4096;
-        size_t bytes = (size_t)new_cap * g_node_stride[sc];
-        uint8_t *new_base = (uint8_t *)realloc(a->base, bytes);
+    uint32_t width = W_AST_KIND_WIDTH[kid];
+    if (width == 0) die("w_node_alloc: kind has no arena fields");
+    WNodeArena *a = &g_node_arena;
+    if (a->cursor == 0) a->cursor = 1;
+    uint64_t required = (uint64_t)a->cursor + width;
+    if (required > a->cap) {
+        uint32_t new_cap = a->cap ? a->cap * 2 : g_node_initial_cap_words;
+        while ((uint64_t)new_cap < required) new_cap *= 2;
+        WValue *new_base = (WValue *)realloc(
+            a->base, (size_t)new_cap * sizeof(WValue));
         if (!new_base) die("w_node_alloc: realloc failed");
         a->base = new_base;
         a->cap = new_cap;
-        /* Lazy first-touch init (replaces the old eager w_node_arena_init):
-         * offset 0 is reserved for the tag-only singleton encoding (sc=0 +
-         * offset=0 = AST_NIL etc.), so the first real allocation starts at 1.
-         * Programs that never build runtime AST nodes now pay nothing — the
-         * old init malloc'd ~3.9MB of arenas in every binary's main. */
-        if (first && a->cursor == 0) a->cursor = 1;
     }
-    uint32_t off = a->cursor++;
-    return w_box_node((int)kind, (int)sc, (uint64_t)off);
+    uint32_t off = a->cursor;
+    a->cursor += width;
+    return w_box_node(kid, (int)sc, (uint64_t)off);
 }
 
-/* --ast-stats: dump per-size-class slab AST node counts + arena bytes
- * after a compile. The node arena is never reset within a single
- * compile, so g_node_arena[sc].cursor is the live node count for the
- * whole program — cursor starts at 1 (slot 0 is the reserved singleton
- * slot), so the live count is cursor-1. Pure read of existing arena
- * state: no per-alloc instrumentation, no hot-path cost. Inline-payload
- * and singleton nodes are not counted here — they allocate nothing.
+/* --ast-stats: dump exact field words and arena bytes after a compile.
+ * Node counts are intentionally not instrumented on the allocation hot path.
  *
  * `reserved` is unused — ccall_nobox has no zero-arg form, so the
  * Tungsten callsite passes a placeholder 0. */
@@ -13910,20 +13895,11 @@ WValue w_node_alloc(int64_t kind, int64_t sc) {
  * (after the sparse/intern blocks); the stats dump reads them. */
 int64_t w_ast_stats_dump(int64_t reserved) {
     (void)reserved;
-    static const char *names[3] = {"SC_2", "SC_4", "SC_8"};
-    uint64_t total_nodes = 0, total_bytes = 0;
-    fprintf(stderr, "--- AST stats: slab arenas ---\n");
-    for (int sc = 0; sc < 3; sc++) {
-        uint32_t cur = g_node_arena[sc].cursor;
-        uint64_t nodes = cur > 1 ? (uint64_t)cur - 1 : 0;
-        uint64_t bytes = nodes * g_node_stride[sc];
-        total_nodes += nodes;
-        total_bytes += bytes;
-        fprintf(stderr, "  %-5s %12llu nodes  %10.1f KB\n",
-                names[sc], (unsigned long long)nodes, bytes / 1024.0);
-    }
-    fprintf(stderr, "  %-5s %12llu nodes  %10.1f KB\n",
-            "total", (unsigned long long)total_nodes, total_bytes / 1024.0);
+    uint64_t words = g_node_arena.cursor > 1 ? g_node_arena.cursor - 1 : 0;
+    uint64_t bytes = words * sizeof(WValue);
+    fprintf(stderr, "--- AST stats: exact-width word arena ---\n");
+    fprintf(stderr, "  %-5s %12llu words  %10.1f KB\n",
+            "node", (unsigned long long)words, bytes / 1024.0);
     fprintf(stderr, "  %-5s %12u arrays %10.1f KB  %u w64 slots (child-list body arena, no header)\n",
             "body", g_ast_extra_arrays,
             (double)g_body_arena_cursor * sizeof(WValue) / 1024.0,
@@ -13932,14 +13908,10 @@ int64_t w_ast_stats_dump(int64_t reserved) {
 }
 
 void w_node_arena_reset(void) {
-    for (int sc = 0; sc < 4; sc++) {
-        free(g_node_arena[sc].base);
-        g_node_arena[sc].base = NULL;
-        /* Matches w_node_arena_init: offset 0 reserved for tag-only
-         * singletons; next init() will re-allocate from there. */
-        g_node_arena[sc].cursor = 1;
-        g_node_arena[sc].cap = 0;
-    }
+    free(g_node_arena.base);
+    g_node_arena.base = NULL;
+    g_node_arena.cursor = 1;
+    g_node_arena.cap = 0;
     w_ast_sparse_reset();
     w_ast_extra_reset();
     /* Cached Bool nodes are arena handles. They must not survive the arena
@@ -14332,11 +14304,8 @@ WValue w_node_field_load(WValue wnode, int64_t ivar_offset) {
     if (w_is_int((WValue)ivar_offset)) {
         ivar_offset = w_as_int((WValue)ivar_offset);
     }
-    int sc = w_node_size_class(wnode);
     uint64_t off = w_node_offset(wnode);
-    uint8_t *base = g_node_arena[sc].base;
-    uint64_t byte_offset = off * (uint64_t)g_node_stride[sc] + (uint64_t)ivar_offset * 8u;
-    return *(WValue *)(base + byte_offset);
+    return g_node_arena.base[off + (uint64_t)ivar_offset];
 }
 
 void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value) {
@@ -14345,11 +14314,8 @@ void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value) {
         ivar_offset = w_as_int((WValue)ivar_offset);
     }
     value = w_ast_freeze_if_array(value);   /* child lists live in the extra arena */
-    int sc = w_node_size_class(wnode);
     uint64_t off = w_node_offset(wnode);
-    uint8_t *base = g_node_arena[sc].base;
-    uint64_t byte_offset = off * (uint64_t)g_node_stride[sc] + (uint64_t)ivar_offset * 8u;
-    *(WValue *)(base + byte_offset) = value;
+    g_node_arena.base[off + (uint64_t)ivar_offset] = value;
 }
 
 /* Exported wrapper around the static-inline w_node_kind in wvalue.h.

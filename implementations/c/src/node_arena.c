@@ -31,7 +31,7 @@
  * runtime.h, which redeclares w_truthy with a return type that
  * conflicts with wvalue.h's static inline definition. */
 typedef struct WNodeArena {
-    uint8_t  *base;
+    WValue   *base;
     uint32_t  cursor;
     uint32_t  cap;
 } WNodeArena;
@@ -64,7 +64,7 @@ typedef struct {
 } WInternEntry;
 
 typedef struct {
-    WNodeArena     node_arena[4];
+    WNodeArena     node_arena;
     WValue         bool_nodes[2];
     WSparseNodeMap sparse_map;
     WSparseRecord *sparse_records;
@@ -93,15 +93,7 @@ WAstStore g_ast_store = {
 #define g_intern_entries_cap (g_ast_store.intern_entries_cap)
 #define g_intern_next_id    (g_ast_store.intern_next_id)
 
-/* Indexed by size_class (the 2-bit field in W_PACKED_NODE):
- *   SC_2  = 0:  16 B (2 slots, leaf kinds)
- *   SC_4  = 1:  32 B (4 slots, 3-slot kinds)
- *   SC_8  = 2:  64 B (8 slots, complex kinds)
- *   SC_16 = 3: 128 B (reserved)
- */
-const uint32_t g_node_stride[4] = {16, 32, 64, 128};
-
-const uint32_t g_node_initial_cap[4] = {70000, 30000, 26000, 1000};
+const uint32_t g_node_initial_cap_words = 500000;
 
 uint64_t g_ast_schema_hash = W_AST_SCHEMA_HASH;
 
@@ -113,39 +105,31 @@ static void node_arena_fatal(const char *msg) {
 void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
 
 void w_node_arena_init(void) {
-    for (int sc = 0; sc < 4; sc++) {
-        g_node_arena[sc].base = NULL;
-        /* Reserve offset=0 for tag-only singletons (AST_NIL etc. in
-         * ast.w). Their W_PACKED_NODE has sc=0 + offset=0 — schema is
-         * `{}` so the slot is never read, but starting cursor at 1
-         * keeps real allocations from colliding. Mirrors the change
-         * in runtime/runtime.c. */
-        g_node_arena[sc].cursor = 1;
-        g_node_arena[sc].cap = 0;
-        if (g_node_stride[sc] == 0 || g_node_initial_cap[sc] == 0) continue;
-        size_t bytes = (size_t)g_node_initial_cap[sc] * g_node_stride[sc];
-        g_node_arena[sc].base = (uint8_t *)malloc(bytes);
-        if (!g_node_arena[sc].base) node_arena_fatal("w_node_arena_init: malloc failed");
-        g_node_arena[sc].cap = g_node_initial_cap[sc];
-    }
+    /* Lazy first touch in w_node_alloc. */
 }
 
 WValue w_node_alloc(int64_t kind, int64_t sc) {
-    if (sc < 0 || sc >= 4 || g_node_stride[sc] == 0) {
-        node_arena_fatal("w_node_alloc: invalid size class");
+    int kid = (int)((uint64_t)kind & W_NODE_KIND_MASK);
+    if (kid < 1 || kid > (int)W_AST_KIND_MAX || sc < 0 || sc >= 4) {
+        node_arena_fatal("w_node_alloc: invalid kind or layout class");
     }
-    WNodeArena *a = &g_node_arena[sc];
-    if (a->cursor == a->cap) {
-        uint32_t new_cap = a->cap ? a->cap * 2 : g_node_initial_cap[sc];
-        if (new_cap == 0) new_cap = 4096;
-        size_t bytes = (size_t)new_cap * g_node_stride[sc];
-        uint8_t *new_base = (uint8_t *)realloc(a->base, bytes);
+    uint32_t width = W_AST_KIND_WIDTH[kid];
+    if (width == 0) node_arena_fatal("w_node_alloc: kind has no arena fields");
+    WNodeArena *a = &g_node_arena;
+    if (a->cursor == 0) a->cursor = 1;
+    uint64_t required = (uint64_t)a->cursor + width;
+    if (required > a->cap) {
+        uint32_t new_cap = a->cap ? a->cap * 2 : g_node_initial_cap_words;
+        while ((uint64_t)new_cap < required) new_cap *= 2;
+        WValue *new_base = (WValue *)realloc(
+            a->base, (size_t)new_cap * sizeof(WValue));
         if (!new_base) node_arena_fatal("w_node_alloc: realloc failed");
         a->base = new_base;
         a->cap = new_cap;
     }
-    uint32_t off = a->cursor++;
-    return w_box_node((int)kind, (int)sc, (uint64_t)off);
+    uint32_t off = a->cursor;
+    a->cursor += width;
+    return w_box_node(kid, (int)sc, (uint64_t)off);
 }
 
 WValue w_ast_bool_cached(int64_t truthy_01) {
@@ -161,12 +145,10 @@ WValue w_ast_bool_cached(int64_t truthy_01) {
 void w_ast_sparse_reset(void);  /* forward decl; defined below */
 
 void w_node_arena_reset(void) {
-    for (int sc = 0; sc < 4; sc++) {
-        free(g_node_arena[sc].base);
-        g_node_arena[sc].base = NULL;
-        g_node_arena[sc].cursor = 1;
-        g_node_arena[sc].cap = 0;
-    }
+    free(g_node_arena.base);
+    g_node_arena.base = NULL;
+    g_node_arena.cursor = 1;
+    g_node_arena.cap = 0;
     g_ast_bool_node[0] = 0;
     g_ast_bool_node[1] = 0;
     g_ast_store.generation++;
@@ -181,19 +163,13 @@ uint64_t w_ast_schema_hash_compute(void) {
 }
 
 WValue w_node_field_load(WValue wnode, int64_t ivar_offset) {
-    int sc = w_node_size_class(wnode);
     uint64_t off = w_node_offset(wnode);
-    uint8_t *base = g_node_arena[sc].base;
-    uint64_t byte_offset = off * (uint64_t)g_node_stride[sc] + (uint64_t)ivar_offset * 8u;
-    return *(WValue *)(base + byte_offset);
+    return g_node_arena.base[off + (uint64_t)ivar_offset];
 }
 
 void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value) {
-    int sc = w_node_size_class(wnode);
     uint64_t off = w_node_offset(wnode);
-    uint8_t *base = g_node_arena[sc].base;
-    uint64_t byte_offset = off * (uint64_t)g_node_stride[sc] + (uint64_t)ivar_offset * 8u;
-    *(WValue *)(base + byte_offset) = value;
+    g_node_arena.base[off + (uint64_t)ivar_offset] = value;
 }
 
 /* ---- AST sparse-field side-table (PR #3) ----

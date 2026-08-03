@@ -1573,7 +1573,7 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
   while i < bks.size()
     << "DELTA_BITS " + bks[i].to_s() + " " + g_ast_stats_delta[bks[i]].to_s()
     i += 1
-  << "--- AST stats: cross-arena |delta| histogram ---"
+  << "--- AST stats: cross-layout-class |delta| histogram ---"
   cbks = g_ast_stats_delta_cross.keys()
   i = 0
   while i < cbks.size()

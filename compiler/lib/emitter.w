@@ -311,9 +311,11 @@ use hashing
   out << declare_fn("w_sub", wv, wv2)
   # Mutate-if-unique (E4 stage 1): guarded-i48 fallbacks for accumulators
   # the mut-candidate analysis proved dead at their compound assignment.
-  out << declare_fn("w_bigint_add_mut", wv, wv2)
-  out << declare_fn("w_bigint_sub_mut", wv, wv2)
-  out << declare_fn("w_bigint_mul_mut", wv, wv2)
+  # preserve_mostcc: matches __attribute__((preserve_most)) on the C
+  # definitions and the guarded-fallback callsites (their only callers).
+  out << declare_fn_attrs("w_bigint_add_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_sub_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_mul_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn("w_mul", wv, wv2)
   out << declare_fn("w_pow", wv, wv2)
   out << declare_fn("w_div", wv, wv2)
@@ -1311,6 +1313,13 @@ use hashing
   o << "!31419 = !{}\n"
   o << "!31420 = !{!\"object_field\", !31414}\n"
   o << "!31421 = !{!31420, !31420, i64 0}\n"
+  # Guarded-i48 branch weights: the runtime/bigint arm is the exception.
+  # LLVM uses these for block layout (cold code sinks out of the loop
+  # body) and register allocation (spills move into the cold block); the
+  # CPU's dynamic predictor is unaffected, so a bigint-phase accumulator
+  # that takes the "unlikely" arm every pass pays nothing extra.
+  o << "!31411 = !{!\"branch_weights\", i32 2000, i32 1}\n"
+  o << "!31412 = !{!\"branch_weights\", i32 1, i32 2000}\n"
   o.to_s()
 
 # Per-loop latch metadata (lowering stamps the latch :br):
@@ -2667,7 +2676,7 @@ ewscope_md_state = {ids: {}, order: []}
   out << rtag + " = and i64 " + inst[:rhs] + ", " + w_tag_mask.to_s() + "\n  "
   out << ris_int + " = icmp eq i64 " + rtag + ", " + w_tag_int.to_s() + "\n  "
   out << both_int + " = and i1 " + lis_int + ", " + ris_int + "\n  "
-  out << "br i1 " + both_int + ", label %g.ok." + bid + ", label %g.rt." + bid + "\n"
+  out << "br i1 " + both_int + ", label %g.ok." + bid + ", label %g.rt." + bid + ", !prof !31411\n"
   out << "g.ok." + bid + ":\n  "
   out << lhs_shl + " = shl i64 " + inst[:lhs] + ", 16\n  "
   out << lhs_raw + " = ashr i64 " + lhs_shl + ", 16\n  "
@@ -2695,7 +2704,9 @@ ewscope_md_state = {ids: {}, order: []}
     out << rovf + " = or i1 " + over + ", " + under + "\n  "
     out << ovf + " = or i1 " + i64ovf + ", " + rovf + "\n  "
 
-  out << "br i1 " + ovf + ", label %g.rt." + bid + ", label %g.box." + bid + "\n"
+  # inverted operand order: the UNLIKELY target is first here, so swap the
+  # weights by listing the likely count second.
+  out << "br i1 " + ovf + ", label %g.rt." + bid + ", label %g.box." + bid + ", !prof !31412\n"
   out << "g.box." + bid + ":\n  "
   out << masked + " = and i64 " + raw + ", " + w_payload_mask.to_s() + "\n  "
   out << boxed + " = or i64 " + masked + ", " + w_tag_int.to_s() + "\n  "
@@ -2711,7 +2722,17 @@ ewscope_md_state = {ids: {}, order: []}
     out << "g.done." + bid + ":\n  "
     out << t + " = phi i64 \[" + boxed + ", %g.box." + bid + "]"
   else
-    out << slow + " = call i64 @" + inst[:rt_fallback] + "(i64 " + inst[:lhs] + ", i64 " + inst[:rhs] + ")\n  "
+    # cold sinks the fallback out of the loop body; preserve_mostcc
+    # additionally keeps caller-saved registers live across the call so
+    # the inline-int phase's loop state never spills. The convention is
+    # applied ONLY to the mut entries — they have no other IR callsites,
+    # while w_add/w_sub/w_mul are called plain-CC all over the module and
+    # a declaration/callsite mismatch is UB. Their C definitions carry
+    # __attribute__((preserve_most)) to match.
+    cc = ""
+    if inst[:rt_fallback] in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut")
+      cc = "preserve_mostcc "
+    out << slow + " = call " + cc + "i64 @" + inst[:rt_fallback] + "(i64 " + inst[:lhs] + ", i64 " + inst[:rhs] + ") cold\n  "
     out << "br label %g.done." + bid + "\n"
     out << "g.done." + bid + ":\n  "
     out << t + " = phi i64 \[" + boxed + ", %g.box." + bid + "], \[" + slow + ", %g.rt." + bid + "]"
@@ -2968,7 +2989,7 @@ ewscope_md_state = {ids: {}, order: []}
     out << under + " = icmp slt i64 " + raw + ", -140737488355328\n  "
     out << rovf + " = or i1 " + over + ", " + under + "\n  "
     out << ovf + " = or i1 " + i64ovf + ", " + rovf + "\n  "
-    out << "br i1 " + ovf + ", label %ovf.slow." + bid + ", label %ovf.fast." + bid + "\n"
+    out << "br i1 " + ovf + ", label %ovf.slow." + bid + ", label %ovf.fast." + bid + ", !prof !31412\n"
     out << "ovf.fast." + bid + ":\n  "
     out << masked + " = and i64 " + raw + ", 281474976710655\n  "
     out << boxed + " = or i64 " + masked + ", -1688849860263936\n  "

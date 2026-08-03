@@ -583,9 +583,13 @@ WValue w_native_data_field(WValue recv, WValue name);
 WValue w_native_data_field_set(WValue recv, WValue name, WValue value);
 WValue w_bigint_mark_shared_value(WValue v);
 WValue w_bigint_shared_value(WValue v);
-WValue w_bigint_add_mut(WValue a, WValue b);
-WValue w_bigint_sub_mut(WValue a, WValue b);
-WValue w_bigint_mul_mut(WValue a, WValue b);
+/* preserve_most: these are cold-path callees of the guarded-i48 inline
+ * arithmetic — the convention keeps the caller's loop state in registers
+ * across the (rarely taken) call. Must stay in sync with the emitter's
+ * preserve_mostcc declarations and callsites. */
+__attribute__((preserve_most)) WValue w_bigint_add_mut(WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_sub_mut(WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b);
 
 /* ---- Hash ---- */
 WValue w_hash_new(void);

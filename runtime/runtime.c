@@ -30048,11 +30048,11 @@ static WValue w_bigint_addsub_mut(WValue a, WValue b, int negate_b) {
     return bigint_normalize(ba);
 }
 
-WValue w_bigint_add_mut(WValue a, WValue b) {
+__attribute__((preserve_most)) WValue w_bigint_add_mut(WValue a, WValue b) {
     return w_bigint_addsub_mut(a, b, 0);
 }
 
-WValue w_bigint_sub_mut(WValue a, WValue b) {
+__attribute__((preserve_most)) WValue w_bigint_sub_mut(WValue a, WValue b) {
     return w_bigint_addsub_mut(a, b, 1);
 }
 
@@ -30070,7 +30070,7 @@ static WValue w_bigint_mul_mut_fallback(WValue a, WValue b) {
     return r;
 }
 
-WValue w_bigint_mul_mut(WValue a, WValue b) {
+__attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b) {
     if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
         return w_bigint_mul_mut_fallback(a, b);
     WBigint *ba = w_as_bigint(a);

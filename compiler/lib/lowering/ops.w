@@ -792,10 +792,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rt_fb = "w_mul"
     # Mutate-if-unique (E4 stage 1): `r += e` / `r -= e` on a proven-dead
     # accumulator takes the in-place entry; its runtime guards fall back.
+    mut_cc = nil
     if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR)
       rt_fb = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : "w_bigint_mul_mut")
+      # must match the preserve_mostcc declaration or the call is UB
+      mut_cc = "preserve_mostcc"
     result_temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rhs_reg]})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rhs_reg], call_conv: mut_cc})
     if ptr != nil
       emit_instruction(wfn, {op: :store_i64, value: result_temp, ptr: ptr})
     else
@@ -1590,11 +1593,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # (an nil-typed `r` skips the machine and guarded arms), so the marker
   # set by lower_assign_expr routes `r = r ± e` through the in-place entry
   # instead of __w_add_fast/__w_sub_fast.
+  rt_call_conv = nil
   if ctx[:mut_accum_target] != nil && op in (:PLUS :MINUS :STAR) && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
     rt_name = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : "w_bigint_mul_mut")
+    rt_call_conv = "preserve_mostcc"
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: rt_name, args: [lhs_reg, rhs_reg]})
+  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: rt_name, args: [lhs_reg, rhs_reg], call_conv: rt_call_conv})
   typed_value(:i64, temp)
 
 # Get raw i64 from a typed_value — skip unbox if already raw

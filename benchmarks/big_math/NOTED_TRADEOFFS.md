@@ -446,6 +446,18 @@ path; production remains unchanged.  Artifacts:
 `baselines/mul1-dest-upper-acceptance-b81d43a-m5max-20260804.json` and
 `baselines/mul1-dest-public-upper-screen-b81d43a-m5max-20260804.json`.
 
+Replacing the four-entry TLS settled-placement table with an unordered
+low-page operand key stored in the existing BigInt header padding was also
+rejected.  The experiment covered every consumer of the shared placement
+predicate, including already-green controls: add, sub, mul1, and/or/xor at
+fourteen widths from 24 through 8192 limbs.  The 7x80 ms screen split 35 wins
+and 49 losses at a 1.0096 candidate/baseline geomean with fourteen regressions
+above 5%.  Mul1 itself lost 9/14 cells at 1.0027 geomean, while the already
+green sub, and, and xor families regressed 3.6%, 2.0%, and 3.1% by geomean.
+The source candidate was removed without escalating it to an acceptance run.
+Artifact:
+`baselines/inline-placement-key-screen-bb153db-m5max-20260804.json`.
+
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 
 **Claimed win (prior session, real workloads):** hybrid (p2<=32 + q32)

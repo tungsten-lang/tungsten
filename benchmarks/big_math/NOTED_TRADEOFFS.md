@@ -98,6 +98,26 @@ remained above GMP: add1@2/3; sub1@2/3/4; mul1@4/24/128/256/448/1024/2048/
 so this is a prioritization snapshot rather than the final full-matrix claim.
 Artifact: `baselines/matrix-6667a9d-residual-accurate-m5max-20260804.json`.
 
+After restoring every rejected mul1 experiment, a new 485-cell default screen
+measured 442 wins.  The accurate follow-up deliberately promoted all 86 cells
+at or above 0.95× GMP, including fast-screen wins; 59 remained wins and 27
+were at or above parity.  The clearest repeatable gaps were add1@2/3/4
+(1.245/1.344/1.303) and sub1@2/3/4 (1.156/1.134/1.213).  Several nonlinear
+and wide residuals have relative IQR above 10%, so they remain replication
+targets rather than cutoff evidence.  Artifacts:
+`baselines/matrix-a5e79a3-screen-m5max-20260804.json` and
+`baselines/matrix-a5e79a3-residual095-accurate-m5max-20260804.json`.
+
+A profile of boxed add1@3 put 56% of sampled branch events in the inlined
+Tungsten lane, but symbol deduplication prevented a reliable sub-function
+split.  Disassembly exposed one remaining general smallest-fitting capacity
+test in the fixed 2--8-limb word route.  Replacing it with an exact
+power-of-two hot-class take failed a 16-cell affected/control screen: 12
+losses, 1.0232 geomean, and six regressions over 5%.  The extra class selector
+cost more than the removed range proof, so the candidate was removed.
+Artifacts: `baselines/add1-boxed-3-a5e79a3-m5max-20260804.svg` and
+`baselines/addsub1-exact-hot-screen-a5e79a3-m5max-20260804.json`.
+
 ## Mul1 wide dispatch and page rehoming — NOT taken (2026-08-04)
 
 Routing widths above 64 ahead of the fixed-width ladder initially measured a

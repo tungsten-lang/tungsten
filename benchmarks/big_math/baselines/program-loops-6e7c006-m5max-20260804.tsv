@@ -1,0 +1,18 @@
+# command=batch external_wrapper used a Ruby Open3 alternating-lane median/IQR wrapper; batch corrected_runner used the first median/IQR runner; batch interleaved_runner used the final REPS=15 runner with lane order alternated every repetition
+# build=benchmarks/big_math/run_program_loops.sh; Tungsten --release --native --fast; GMP -O3 -mcpu=native
+# commit=6e7c006; machine=Apple M5 Max; target=arm64-apple-darwin25.6.0; gmp=6.3.0
+# power=Battery Power; first warning=93%; corrected-run battery=83% load_average_1m=5.74; interleaved-run battery=80% load_average_1m=3.03; statistic=median_ns_per_iteration; spread=interquartile_range_ns; lane_order=alternating; checksums=matched_each_repetition
+# decision=no performance disposition from these batches because unrelated sustained host load and battery operation moved ratios materially
+batch	workload	repetitions	tungsten_median_ns	tungsten_iqr_ns	gmp_median_ns	gmp_iqr_ns	tungsten_over_gmp
+external_wrapper	accumulate	15	0.556000	0.008021	1.700000	0.100000	0.327059
+external_wrapper	mulchain	15	1965.110000	246.163333	1963.000000	270.850000	1.001075
+external_wrapper	addchain	15	394.438611	6.870208	534.500000	30.850000	0.737958
+external_wrapper	divchain	15	2057.270833	205.468056	2035.700000	211.950000	1.010596
+corrected_runner	accumulate	15	1.331292	0.002948	3.100000	0.200000	0.429449
+corrected_runner	mulchain	15	2813.248333	60.235833	2748.800000	322.400000	1.023444
+corrected_runner	addchain	15	631.677778	27.278333	650.100000	84.000000	0.971662
+corrected_runner	divchain	15	2989.273611	357.408333	2827.900000	349.500000	1.057064
+interleaved_runner	accumulate	15	0.484042	0.007906	1.400000	0.150000	0.345744
+interleaved_runner	mulchain	15	1469.651667	123.120833	1486.600000	124.500000	0.988598
+interleaved_runner	addchain	15	430.214722	1.393889	583.200000	0.500000	0.737680
+interleaved_runner	divchain	15	2318.041667	127.010417	2301.000000	133.550000	1.007406

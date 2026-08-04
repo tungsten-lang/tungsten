@@ -2,7 +2,7 @@
 set -eu
 
 # E3: whole-loop benchmark — compiled Tungsten vs destination-reusing GMP.
-# Builds both halves, runs each workload REPS times per lane (min wins,
+# Builds both halves, runs each workload REPS times per lane (median with IQR,
 # alternating lane order), cross-checks the checksums, prints T/G ratios.
 
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -27,44 +27,76 @@ fi
 "$CC" -O3 -mcpu=native $GMP_CFLAGS "$DIR/program_loops_gmp.c" $GMP_LDFLAGS \
   -o "$DIR/program_loops_gmp"
 
-run_lane() {
-  # $1 binary, $2 workload -> "ns checksum" (min ns across REPS)
-  best=""
-  best_check=""
-  r=0
-  while [ "$r" -lt "$REPS" ]; do
-    line=$("$1" "$2")
-    ns=$(printf '%s' "$line" | cut -f3)
-    check=$(printf '%s' "$line" | cut -f4)
-    if [ -z "$best" ] || [ "$(printf '%s %s\n' "$ns" "$best" | awk '{print ($1 < $2) ? 1 : 0}')" = 1 ]; then
-      best=$ns
-      best_check=$check
-    fi
-    r=$((r + 1))
-  done
-  printf '%s %s\n' "$best" "$best_check"
+sample_stats() {
+  # $1 newline-separated timings -> "median_ns iqr_ns"
+  printf '%b' "$1" | sort -n | awk '
+    function quantile(p, pos, lo, hi, frac) {
+      pos = 1 + (n - 1) * p
+      lo = int(pos)
+      hi = lo < n ? lo + 1 : lo
+      frac = pos - lo
+      return v[lo] + (v[hi] - v[lo]) * frac
+    }
+    { v[NR] = $1 }
+    END {
+      n = NR
+      printf "%.9f %.9f", quantile(0.5), quantile(0.75) - quantile(0.25)
+    }'
 }
 
-printf '%-12s %14s %14s %8s\n' "workload" "tungsten ns/it" "gmp ns/it" "T/G"
-fail=0
+run_pair() {
+  # $1 workload, $2 initial lane order ->
+  # "t_median t_iqr t_checksum g_median g_iqr g_checksum"
+  workload=$1
+  first=$2
+  t_samples=""
+  g_samples=""
+  t_expected=""
+  g_expected=""
+  r=0
+  while [ "$r" -lt "$REPS" ]; do
+    if [ $(((r + first) % 2)) -eq 0 ]; then
+      t_line=$("$DIR/program_loops" "$workload")
+      g_line=$("$DIR/program_loops_gmp" "$workload")
+    else
+      g_line=$("$DIR/program_loops_gmp" "$workload")
+      t_line=$("$DIR/program_loops" "$workload")
+    fi
+    t_ns=$(printf '%s' "$t_line" | cut -f3)
+    t_check=$(printf '%s' "$t_line" | cut -f4)
+    g_ns=$(printf '%s' "$g_line" | cut -f3)
+    g_check=$(printf '%s' "$g_line" | cut -f4)
+    if [ -z "$t_expected" ]; then
+      t_expected=$t_check
+      g_expected=$g_check
+    elif [ "$t_check" != "$t_expected" ] || [ "$g_check" != "$g_expected" ]; then
+      echo "NONDETERMINISTIC CHECKSUM on $workload" >&2
+      exit 1
+    fi
+    t_samples="${t_samples}${t_ns}\n"
+    g_samples="${g_samples}${g_ns}\n"
+    r=$((r + 1))
+  done
+  t_stats=$(sample_stats "$t_samples")
+  g_stats=$(sample_stats "$g_samples")
+  printf '%s %s %s %s\n' "$t_stats" "$t_expected" "$g_stats" "$g_expected"
+}
+
+printf '%-12s %14s %12s %14s %12s %8s\n' \
+  "workload" "tungsten med" "tungsten IQR" "gmp med" "gmp IQR" "T/G"
 order=0
 for workload in accumulate mulchain addchain divchain; do
-  # Alternate which lane goes first across workloads.
-  if [ $((order % 2)) -eq 0 ]; then
-    t_out=$(run_lane "$DIR/program_loops" "$workload")
-    g_out=$(run_lane "$DIR/program_loops_gmp" "$workload")
-  else
-    g_out=$(run_lane "$DIR/program_loops_gmp" "$workload")
-    t_out=$(run_lane "$DIR/program_loops" "$workload")
-  fi
-  t_ns=${t_out% *}; t_check=${t_out#* }
-  g_ns=${g_out% *}; g_check=${g_out#* }
+  pair=$(run_pair "$workload" "$order")
+  set -- $pair
+  t_ns=$1; t_iqr=$2; t_check=$3
+  g_ns=$4; g_iqr=$5; g_check=$6
   if [ "$t_check" != "$g_check" ]; then
     echo "CHECKSUM MISMATCH on $workload: tungsten=$t_check gmp=$g_check" >&2
     exit 1
   fi
   ratio=$(printf '%s %s\n' "$t_ns" "$g_ns" | awk '{printf "%.2f", $1 / $2}')
-  printf '%-12s %14s %14s %8s\n' "$workload" "$t_ns" "$g_ns" "$ratio"
+  printf '%-12s %14s %12s %14s %12s %8s\n' \
+    "$workload" "$t_ns" "$t_iqr" "$g_ns" "$g_iqr" "$ratio"
   order=$((order + 1))
 done
 echo

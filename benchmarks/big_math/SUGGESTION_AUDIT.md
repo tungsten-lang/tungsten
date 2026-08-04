@@ -69,7 +69,7 @@ Source fingerprints:
 | KIMI-05 | Extend page-hazard guard to division and large results | pending | |
 | KIMI-06 | Mutate-if-unique entries for word add/sub/mul/div | pending | audit related commit d1715f9 |
 | KIMI-07 | Extend compiler mut-accumulator recognition | pending | |
-| KIMI-08 | Add mulchain1/divchain1 whole-language-loop lanes | pending | |
+| KIMI-08 | Add mulchain1/divchain1 whole-language-loop lanes | kept | run_program_loops.sh builds Tungsten release/native/fast and matched GMP loops, alternates lanes, checks checksums, and now reports median/IQR; program-loops-6e7c006-m5max-20260804.tsv records a noisy loaded-host run without using it for a performance disposition |
 | KIMI-09 | Skip redundant write-before-read workspace clearing | pending | |
 | KIMI-10 | Fixed-size multiply study at 32/40/48 limbs | pending | |
 | KIMI-11 | Optimize Toom-3 evaluation/interpolation at 400–500 limbs | pending | audit related commit dfb94bc |
@@ -156,7 +156,7 @@ Source fingerprints:
 | GROK-17 | Improve div1/multi-limb preinverse cache locality | pending | |
 | GROK-18 | Reduce identity/shared-mark tax | pending | |
 | GROK-19 | Make page-hazard rehoming cheaper/more selective | pending | |
-| GROK-20 | Add end-to-end language loops to acceptance evidence | pending | |
+| GROK-20 | Add end-to-end language loops to acceptance evidence | kept | accumulate, mulchain, addchain, and divchain are release/native/fast whole-language loops with matched GMP checksums and median/IQR timing; program-loops-6e7c006-m5max-20260804.tsv |
 
 ## DeepSeek-v4-pro
 

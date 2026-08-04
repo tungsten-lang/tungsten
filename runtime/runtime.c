@@ -8147,7 +8147,9 @@ static WValue bigint_mul_positive_equal(
     } else {
         switch (n) {
         case 2: bn_mul_eq2_inline(dst, a->limbs, b->limbs); break;
+#if BN_MUL_EQ3_INLINE
         case 3: bn_mul_eq3_inline(dst, a->limbs, b->limbs); break;
+#endif
         case 4: bn_mul_eq4_inline(dst, a->limbs, b->limbs); break;
         case 8: bn_mul_eq8_inline(dst, a->limbs, b->limbs); break;
         default:

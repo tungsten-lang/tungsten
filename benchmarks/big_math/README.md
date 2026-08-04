@@ -59,6 +59,27 @@ change the checked-in runtime worker policy: use its artifact to decide whether
 such a change is warranted. Pass `--sizes` to narrow a local sweep, or
 `--operations mul` / `--operations sqr` to select one operation.
 
+For a compile-time optimization hypothesis, use the isolated boxed-operation
+A/B driver rather than comparing raw kernels or replacing the normal harness:
+
+```sh
+benchmarks/big_math/run_variant_ab.py \
+  --label eq3-inline \
+  --operations mul \
+  --sizes 3 \
+  --baseline-extra-flags=-DBN_MUL_EQ3_INLINE=0 \
+  --rounds 9 --target-ms 110 \
+  --output results/eq3-inline.json
+```
+
+It builds both variants from the same source in a temporary directory,
+alternates their order each round, and records paired median/IQR results,
+within-build GMP ratios, flags, commit, load, power state, and raw samples in
+JSON. A production decision still requires focused differential tests and an
+affected-matrix screen; the driver does not auto-accept a candidate. Runs below
+nine rounds or a 110 ms target are marked non-acceptance in both stderr and
+JSON, so short smoke tests cannot disposition a suggestion.
+
 All rows use a common input size of `N * 64` bits. That is a Tungsten/GMP/Rust
 limb count, not an assertion about every implementation's internal layout:
 Odin currently stores 63 payload bits in each `u64` digit. Immutable lanes keep

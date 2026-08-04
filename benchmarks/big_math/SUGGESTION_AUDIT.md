@@ -178,7 +178,7 @@ Source fingerprints:
 | DEEP-14 | Inline/specialize boxed 2×2 GCD | pending | |
 | DEEP-15 | Add tiny per-size allocation slots | pending | |
 | DEEP-16 | Fuse allocation with result computation | pending | |
-| DEEP-17 | Add a dedicated 3×3 multiply kernel | pending | |
+| DEEP-17 | Add a dedicated 3×3 multiply kernel | kept | the existing bn_mul_eq3_inline was isolated with BN_MUL_EQ3_INLINE=0 as the baseline; nine alternating 110 ms boxed rounds measured candidate/baseline 0.607x (paired IQR 0.038), moving mul3 from 1.162x GMP to 0.731x; mul-eq3-inline-e465fd4-m5max-20260804.json; GMP multiply/square fuzz 10000x64 passed |
 | DEEP-18 | Reschedule AArch64 addmul_1 | pending | |
 | DEEP-19 | Add dedicated 6×6 and 10×10 multiply kernels | pending | |
 | DEEP-20 | Profile-guided threshold tuning for Apple M5 Max | pending | audit related commits ce81fcb, dfb94bc |
@@ -193,6 +193,7 @@ existence does not automatically disposition an item:
 - 74f497c, ec92b25: boxed word add/sub allocation and inlining.
 - 4b823f3, df0c604: isqrt quotient dispatch and division-width tuning.
 - ce81fcb, dfb94bc: AArch64 multiply/square cutoffs and parallel Toom-3 points.
+- e465fd4 follow-up artifact: isolated boxed 3x3 inline-multiply A/B.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

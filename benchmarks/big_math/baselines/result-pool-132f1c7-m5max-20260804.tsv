@@ -1,0 +1,26 @@
+# command=9 repetitions of /tmp/bench-big-math-pool-audit --bench-result-recycle OP LIMBS ITERS; Ruby wrapper reports median and IQR
+# build=BENCH_OUT=/tmp/bench-big-math-pool-audit benchmarks/big_math/run.sh --build-only; -O3 -DNDEBUG -mcpu=native
+# commit=132f1c7; machine=Apple M5 Max; target=arm64-apple-darwin25.6.0; power=Battery Power 76%; load_average_1m=2.78
+# comparison=fresh malloc/free result versus production thread-local give/take pool in the same boxed operation harness
+op	limbs	iterations	repetitions	direct_median_ns	direct_iqr_ns	pool_median_ns	pool_iqr_ns	direct_over_pool
+add	4	100000	9	31.4	3.3	3.7	0.2	8.486486
+add	64	10000	9	36.6	4.1	16.2	0.2	2.259259
+add	1024	100	9	300.0	0.0	270.0	0.0	1.111111
+mul	4	100000	9	37.4	0.7	11.5	0.2	3.252174
+mul	64	10000	9	903.2	8.6	880.2	4.3	1.026130
+mul	1024	100	9	51810.0	850.0	51680.0	3150.0	1.002515
+div	4	100000	9	51.4	0.5	40.0	2.3	1.285000
+div	64	10000	9	1665.4	5.0	1650.1	5.8	1.009272
+div	1024	100	9	95720.0	530.0	95480.0	1660.0	1.002514
+gcd	4	100000	9	608.5	6.7	606.9	4.7	1.002636
+gcd	64	10000	9	13059.0	3105.6	12825.2	3096.0	1.018230
+gcd	1024	100	9	666420.0	16960.0	663050.0	1870.0	1.005083
+add1	4	100000	9	24.8	0.9	3.7	0.4	6.702703
+add1	64	10000	9	31.9	3.9	8.1	0.4	3.938272
+add1	1024	100	9	140.0	40.0	90.0	10.0	1.555556
+mul1	4	100000	9	22.3	1.1	3.0	0.2	7.433333
+mul1	64	10000	9	34.5	6.5	13.8	0.2	2.500000
+mul1	1024	100	9	310.0	10.0	280.0	10.0	1.107143
+div1	4	100000	9	26.0	1.4	5.0	0.1	5.200000
+div1	64	10000	9	187.1	0.9	169.7	2.3	1.102534
+div1	1024	100	9	3020.0	140.0	2950.0	40.0	1.023729

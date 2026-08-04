@@ -49,9 +49,9 @@ Source fingerprints:
 | GLM-10 | Widen NEON hybrid add/sub dispatch | pending | |
 | GLM-11 | General carry-select add/sub | pending | |
 | GLM-12 | Recognize and fuse addmul_1 / submul_1 language shapes | pending | |
-| GLM-13 | BigInt Montgomery reduction for powmod | pending | |
-| GLM-14 | LCM via exact quotient and one multiply | pending | |
-| GLM-15 | Multi-limb exact division | pending | |
+| GLM-13 | BigInt Montgomery reduction for powmod | kept | bigint_powmod_any uses register, CIOS, or SOS Montgomery for supported odd moduli and Barrett otherwise; matrix-7a96d5c-accurate-20260802.json has all 12 powmod cells faster than GMP (0.60-0.998x), with GMP and independent-naive differential checks in the harness |
+| GLM-14 | LCM via exact quotient and one multiply | kept | w_ic_integer_lcm_generic computes gcd, exact r/g, then one multiply, with a unit-gcd shortcut; gcdlcm-par-apply-3ccd13b-m5max-20260804.json has all LCM cells through 16385 faster and the 65536 cell at 1.001x parity |
+| GLM-15 | Multi-limb exact division | kept | mag_divexact is the Jebelean/Hensel multi-limb exact quotient used by LCM; matrix-7a96d5c-accurate-20260802.json and gcdlcm-par-apply-3ccd13b-m5max-20260804.json provide end-to-end LCM evidence and GMP differential checks |
 | GLM-16 | Defer boxing and merge shared-check with pool return | pending | |
 | GLM-17 | Page-offset rehoming at 384–512 limbs | pending | |
 | GLM-18 | Hand-written add/sub basecases for 8–128 limbs | pending | |
@@ -78,7 +78,7 @@ Source fingerprints:
 | KIMI-14 | Probe NEON add crossover at 96–256 limbs | pending | |
 | KIMI-15 | Add mid-band fixed squaring rungs | pending | |
 | KIMI-16 | Mark generic entries and error paths cold | pending | |
-| KIMI-17 | Re-open the live-depth capacity-policy default | pending | |
+| KIMI-17 | Re-open the live-depth capacity-policy default | rejected | 48 hybrid capacity points x live depths 1/4/8 x 1024/4096-limb traces produced zero candidates meeting the fixed RSS/churn criteria; power-of-two remains default; b4-base-*.tsv, b4-grid-*.tsv, NOTED_TRADEOFFS.md |
 | KIMI-18 | Retune parallel cutoffs under quiet/load-monitored conditions | pending | audit related commits ce81fcb, dfb94bc |
 | KIMI-19 | Add instructions-retired measurement | pending | |
 | KIMI-20 | Use per-operation adaptive timing targets | pending | audit related commit 1aa9e10 |
@@ -119,10 +119,10 @@ Source fingerprints:
 | QWEN-05 | Strip common trailing zeros before GCD | pending | |
 | QWEN-06 | Increase Lehmer window and tighten simulation | pending | current HGCD counter audit is prerequisite evidence only |
 | QWEN-07 | Batched Newton–Raphson reciprocal digits for division | pending | |
-| QWEN-08 | Barrett precomputation for repeated reductions | pending | |
+| QWEN-08 | Barrett precomputation for repeated reductions | kept | WPrimeModCtx precomputes the modulus reciprocal and reuses it across the full powmod ladder and decimal D&C levels; matrix-7a96d5c-accurate-20260802.json has all powmod cells faster than GMP, including even-modulus/large-width Barrett coverage in focused fuzz |
 | QWEN-09 | Parallel-prefix carry add/sub | pending | |
 | QWEN-10 | Skip zero spans in sparse add/sub | pending | |
-| QWEN-11 | Per-thread allocation slot cache | pending | |
+| QWEN-11 | Per-thread allocation slot cache | kept | production has one direct TLS handoff plus two buffers per logarithmic class; result-pool-132f1c7-m5max-20260804.tsv measures 21 boxed cells including existing winners: 1.00-1.56x at 1024 limbs and 5.2-8.5x at four-limb word operations versus malloc/free |
 | QWEN-12 | Stack-passed scratch results up to eight limbs | pending | |
 | QWEN-13 | SIMD bitwise operations | pending | |
 | QWEN-14 | Cache/decompose shift offsets | pending | |
@@ -151,7 +151,7 @@ Source fingerprints:
 | GROK-12 | Fit threshold crossovers instead of choosing first-best | pending | |
 | GROK-13 | Improve rectangular/lopsided multiplication | pending | |
 | GROK-14 | Fill useful fixed schoolbook leaf sizes | pending | |
-| GROK-15 | Re-evaluate live-depth-aware capacity policy | pending | |
+| GROK-15 | Re-evaluate live-depth-aware capacity policy | rejected | live-depth-corrected 48-point capacity grid found no hybrid policy meeting >=20% peak-RSS improvement with churn <=+10%; best peak win was 2.8%; b4-base-*.tsv, b4-grid-*.tsv, NOTED_TRADEOFFS.md |
 | GROK-16 | Tune parallel workers only in winning large bands | pending | audit related commits 803a5c4, dfb94bc |
 | GROK-17 | Improve div1/multi-limb preinverse cache locality | pending | |
 | GROK-18 | Reduce identity/shared-mark tax | pending | |

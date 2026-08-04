@@ -47,7 +47,7 @@ Source fingerprints:
 | GLM-08 | Retune Toom-3 / Toom-4 crossover | premise rejected | the proposed diagnosis said 448 limbs was already in Toom-4 and should move back to Toom-3, but BN_TOOM4_THRESHOLD=456 means 448 already selected Toom-3; the GMP-verified forced sweep found Toom-3 was the best available rung there and still lost, so a threshold-only change could not close the cell; NOTED_TRADEOFFS.md; the later ce81fcb/dfb94bc kernel/parallel work is accounted for separately |
 | GLM-09 | Lower NTT threshold and reduce SSA workspace clearing | pending | |
 | GLM-10 | Widen NEON hybrid add/sub dispatch | kept | lowering the boxed hybrid cutoff from 384 to 288 limbs improved the 272..384 add/sub matrix 2.0% geomean with no >5% regression; add304..368 improved 3.1-4.5%, sub336..368 improved 4.1-4.7%, and the apparent sub288..320 losses were smaller than their paired IQRs; addsub-neon-min288-f011cd7-m5max-20260804.json; GMP add/sub fuzz 100000x1024 passed |
-| GLM-11 | General carry-select add/sub | pending | |
+| GLM-11 | General carry-select add/sub | kept | exact hot-shape carry-select paths improve add256 to 0.587x, sub128 to 0.766x, and sub256 to 0.630x their otherwise-identical serial fallbacks; the unchanged add128 control moved 2.0% with paired IQR larger than the effect, and no cell regressed over 5%; arbitrary longer lengths use the separately measured generate/propagate hybrid; addsub-carry-select-673ec76-m5max-20260804.json; GMP fuzz 500000x256 passed |
 | GLM-12 | Recognize and fuse addmul_1 / submul_1 language shapes | pending | |
 | GLM-13 | BigInt Montgomery reduction for powmod | kept | bigint_powmod_any uses register, CIOS, or SOS Montgomery for supported odd moduli and Barrett otherwise; matrix-7a96d5c-accurate-20260802.json has all 12 powmod cells faster than GMP (0.60-0.998x), with GMP and independent-naive differential checks in the harness |
 | GLM-14 | LCM via exact quotient and one multiply | kept | w_ic_integer_lcm_generic computes gcd, exact r/g, then one multiply, with a unit-gcd shortcut; gcdlcm-par-apply-3ccd13b-m5max-20260804.json has all LCM cells through 16385 faster and the 65536 cell at 1.001x parity |
@@ -200,6 +200,7 @@ existence does not automatically disposition an item:
 - 996180d follow-up artifacts: rejected 128-512 add/sub and 256-1024 mul/sqr rehome extensions.
 - fbf77a1 follow-up artifact: rejected branch-free div1 second reciprocal correction across 2-1024 limbs.
 - f011cd7 follow-up artifacts: fixed add/sub basecase disable A/B and 224/288-limb NEON crossover probes.
+- 673ec76 follow-up artifact: exact 128/256-limb add/sub carry-select disable A/B.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

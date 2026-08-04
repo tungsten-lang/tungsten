@@ -177,7 +177,7 @@ Source fingerprints:
 | DEEP-13 | Cache division reciprocals on first use where profitable | pending | |
 | DEEP-14 | Inline/specialize boxed 2×2 GCD | pending | |
 | DEEP-15 | Add tiny per-size allocation slots | pending | |
-| DEEP-16 | Fuse allocation with result computation | pending | |
+| DEEP-16 | Fuse allocation with result computation | pending | existing word add/sub already hoists allocation into the always-inlined operation wrapper; replacing its range-checked hot take with exact 2/4-limb capacity selection lost 8/10 boxed cells, regressed 4.6% geomean, and had five >5% regressions, so the candidate was removed; addsub1-exact-small-c05ae06-m5max-20260804.json; other operation families remain to audit |
 | DEEP-17 | Add a dedicated 3×3 multiply kernel | kept | the existing bn_mul_eq3_inline was isolated with BN_MUL_EQ3_INLINE=0 as the baseline; nine alternating 110 ms boxed rounds measured candidate/baseline 0.607x (paired IQR 0.038), moving mul3 from 1.162x GMP to 0.731x; mul-eq3-inline-e465fd4-m5max-20260804.json; GMP multiply/square fuzz 10000x64 passed |
 | DEEP-18 | Reschedule AArch64 addmul_1 | pending | |
 | DEEP-19 | Add dedicated 6×6 and 10×10 multiply kernels | rejected | nine alternating 110 ms boxed rounds found the C 10x10 candidate 1.562x slower than the generic path; 6x6 alone improved its target to 0.806-0.881x, but two placement-controlled adjacent screens produced unacceptable 7-11% regressions at mul10/mul12, so both candidates were removed and production stayed unchanged; mul-eq6-eq10-candidates-6ad6737-m5max-20260804.json, mul-eq6-adjacent-screen-6ad6737-m5max-20260804.json, mul-eq6-adjacent-layout-6ad6737-m5max-20260804.json |
@@ -204,6 +204,7 @@ existence does not automatically disposition an item:
 - 6f41042 follow-up artifact: direct hot handoff versus thread-local size buckets across 28 small boxed cells.
 - 1ee775a follow-up artifacts: inline release handoff A/B and neutral hot-slot live-header A/B.
 - dd523e6 screen: current 485-cell default matrix, plus accurate 1..16-limb add1/sub1 confirmation and rejected C straight-line 2/3/4-limb candidate.
+- c05ae06 follow-up artifact: rejected exact-capacity hot allocation for 2-4-limb word add/sub results.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

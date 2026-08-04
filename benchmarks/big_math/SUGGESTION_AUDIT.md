@@ -112,7 +112,7 @@ Source fingerprints:
 
 | ID | Hypothesis | Status | Evidence |
 | --- | --- | --- | --- |
-| QWEN-01 | Recalibrate the Karatsuba threshold and basecase | pending | |
+| QWEN-01 | Recalibrate the Karatsuba threshold and basecase | rejected | a screen of 12/16/20/28/32 followed by acceptance-grade A/Bs only on cells whose algorithm actually changes found the current 24-limb cutoff is the best tested boundary; versus 24, thresholds 16/20/28/32 regressed their affected-cell geomeans 10.2%/4.9%/10.9%/26.0%, winning only 1/8, 1/4, 0/4, and 0/8 cells respectively, with 5/2/4/8 regressions over 5%; kara-threshold16-affected-da280b4-m5max-20260804.json, kara-threshold20-affected-da280b4-m5max-20260804.json, kara-threshold28-affected-da280b4-m5max-20260804.json, and kara-threshold32-affected-da280b4-m5max-20260804.json; all boxed results passed the public-GMP check; no threshold changed |
 | QWEN-02 | Fold coefficients in squaring kernels | premise rejected | the proposal's premise that squaring uses the ordinary multiply ladder is false: pointer-identical x*x routes through bigint_sqr_dispatch_cap, whose dedicated school/Karatsuba/Toom square kernels fold diagonal and doubled cross terms; a36ac29's forced square-kernel crossover plus the boxed sqr artifacts measure that dedicated ladder, and current GMP fuzz 2000x2048 passed |
 | QWEN-03 | Redundant/Montgomery representation for multiply chains | pending | |
 | QWEN-04 | Johnson-style fast GCD at large widths | pending | compare against current HGCD work model |

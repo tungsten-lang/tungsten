@@ -989,6 +989,134 @@ WValue bigint_add_two_limb_magnitudes(
 #ifndef BN_ADDSUB_WORD_FAST
 #define BN_ADDSUB_WORD_FAST 1
 #endif
+#ifndef BN_ADDSUB_WORD_A64_FIXED
+#define BN_ADDSUB_WORD_A64_FIXED 1
+#endif
+
+#if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
+#define BN_WORD_LOAD2                                                     \
+    "ldp x4, x5, [%[ap]]\n\t"
+#define BN_WORD_LOAD3                                                     \
+    BN_WORD_LOAD2 "ldr x6, [%[ap], #16]\n\t"
+#define BN_WORD_LOAD4                                                     \
+    BN_WORD_LOAD2 "ldp x6, x7, [%[ap], #16]\n\t"
+#define BN_WORD_LOAD5                                                     \
+    BN_WORD_LOAD4 "ldr x8, [%[ap], #32]\n\t"
+#define BN_WORD_LOAD6                                                     \
+    BN_WORD_LOAD4 "ldp x8, x9, [%[ap], #32]\n\t"
+#define BN_WORD_LOAD7                                                     \
+    BN_WORD_LOAD6 "ldr x10, [%[ap], #48]\n\t"
+#define BN_WORD_LOAD8                                                     \
+    BN_WORD_LOAD6 "ldp x10, x11, [%[ap], #48]\n\t"
+
+#define BN_WORD_OPS2(first, next)                                        \
+    first " x4, x4, %[word]\n\t" next " x5, x5, xzr\n\t"
+#define BN_WORD_OPS3(first, next)                                        \
+    BN_WORD_OPS2(first, next) next " x6, x6, xzr\n\t"
+#define BN_WORD_OPS4(first, next)                                        \
+    BN_WORD_OPS3(first, next) next " x7, x7, xzr\n\t"
+#define BN_WORD_OPS5(first, next)                                        \
+    BN_WORD_OPS4(first, next) next " x8, x8, xzr\n\t"
+#define BN_WORD_OPS6(first, next)                                        \
+    BN_WORD_OPS5(first, next) next " x9, x9, xzr\n\t"
+#define BN_WORD_OPS7(first, next)                                        \
+    BN_WORD_OPS6(first, next) next " x10, x10, xzr\n\t"
+#define BN_WORD_OPS8(first, next)                                        \
+    BN_WORD_OPS7(first, next) next " x11, x11, xzr\n\t"
+
+#define BN_WORD_STORE2                                                   \
+    "stp x4, x5, [%[rp]]\n\t"
+#define BN_WORD_STORE3                                                   \
+    BN_WORD_STORE2 "str x6, [%[rp], #16]\n\t"
+#define BN_WORD_STORE4                                                   \
+    BN_WORD_STORE2 "stp x6, x7, [%[rp], #16]\n\t"
+#define BN_WORD_STORE5                                                   \
+    BN_WORD_STORE4 "str x8, [%[rp], #32]\n\t"
+#define BN_WORD_STORE6                                                   \
+    BN_WORD_STORE4 "stp x8, x9, [%[rp], #32]\n\t"
+#define BN_WORD_STORE7                                                   \
+    BN_WORD_STORE6 "str x10, [%[rp], #48]\n\t"
+#define BN_WORD_STORE8                                                   \
+    BN_WORD_STORE6 "stp x10, x11, [%[rp], #48]\n\t"
+
+#define BN_WORD_FIXED_CASE(n, loads, ops, stores, condition)             \
+    case n:                                                              \
+        __asm__ volatile(                                                \
+            loads ops stores "cset %[flag], " condition                 \
+            : [flag] "=r" (flag)                                        \
+            : [ap] "r" (a), [rp] "r" (r), [word] "r" (word)           \
+            : "cc", "memory", "x4", "x5", "x6", "x7", "x8",       \
+              "x9", "x10", "x11");                                   \
+        return flag
+
+#define BN_WORD_FIXED_FN(name, first, next, condition)                   \
+static inline uint64_t name(                                             \
+    uint64_t *r, const uint64_t *a, int32_t n, uint64_t word) {          \
+    uint64_t flag;                                                       \
+    switch (n) {                                                         \
+        BN_WORD_FIXED_CASE(2, BN_WORD_LOAD2,                             \
+            BN_WORD_OPS2(first, next), BN_WORD_STORE2, condition);       \
+        BN_WORD_FIXED_CASE(3, BN_WORD_LOAD3,                             \
+            BN_WORD_OPS3(first, next), BN_WORD_STORE3, condition);       \
+        BN_WORD_FIXED_CASE(4, BN_WORD_LOAD4,                             \
+            BN_WORD_OPS4(first, next), BN_WORD_STORE4, condition);       \
+        BN_WORD_FIXED_CASE(5, BN_WORD_LOAD5,                             \
+            BN_WORD_OPS5(first, next), BN_WORD_STORE5, condition);       \
+        BN_WORD_FIXED_CASE(6, BN_WORD_LOAD6,                             \
+            BN_WORD_OPS6(first, next), BN_WORD_STORE6, condition);       \
+        BN_WORD_FIXED_CASE(7, BN_WORD_LOAD7,                             \
+            BN_WORD_OPS7(first, next), BN_WORD_STORE7, condition);       \
+        BN_WORD_FIXED_CASE(8, BN_WORD_LOAD8,                             \
+            BN_WORD_OPS8(first, next), BN_WORD_STORE8, condition);       \
+        default: return UINT64_MAX;                                      \
+    }                                                                    \
+}
+
+BN_WORD_FIXED_FN(bn_add_word_a64_fixed, "adds", "adcs", "hs")
+BN_WORD_FIXED_FN(bn_sub_word_a64_fixed, "subs", "sbcs", "lo")
+
+#define BN_WORD_FIXED_TWO_FN(name, first, next, condition)                \
+static inline uint64_t name(                                             \
+    uint64_t *r, const uint64_t *a, uint64_t word) {                     \
+    uint64_t flag;                                                       \
+    __asm__ volatile(                                                    \
+        BN_WORD_LOAD2 BN_WORD_OPS2(first, next) BN_WORD_STORE2           \
+        "cset %[flag], " condition                                      \
+        : [flag] "=r" (flag)                                            \
+        : [ap] "r" (a), [rp] "r" (r), [word] "r" (word)               \
+        : "cc", "memory", "x4", "x5");                               \
+    return flag;                                                         \
+}
+
+BN_WORD_FIXED_TWO_FN(bn_add_word2_a64_fixed, "adds", "adcs", "hs")
+BN_WORD_FIXED_TWO_FN(bn_sub_word2_a64_fixed, "subs", "sbcs", "lo")
+
+#undef BN_WORD_FIXED_TWO_FN
+#undef BN_WORD_FIXED_FN
+#undef BN_WORD_FIXED_CASE
+#undef BN_WORD_STORE8
+#undef BN_WORD_STORE7
+#undef BN_WORD_STORE6
+#undef BN_WORD_STORE5
+#undef BN_WORD_STORE4
+#undef BN_WORD_STORE3
+#undef BN_WORD_STORE2
+#undef BN_WORD_OPS8
+#undef BN_WORD_OPS7
+#undef BN_WORD_OPS6
+#undef BN_WORD_OPS5
+#undef BN_WORD_OPS4
+#undef BN_WORD_OPS3
+#undef BN_WORD_OPS2
+#undef BN_WORD_LOAD8
+#undef BN_WORD_LOAD7
+#undef BN_WORD_LOAD6
+#undef BN_WORD_LOAD5
+#undef BN_WORD_LOAD4
+#undef BN_WORD_LOAD3
+#undef BN_WORD_LOAD2
+#endif
+
 /* Dynamic-length small tail copy. The platform memmove's dispatch
  * prologue was 20% of the whole add1@16 profile; below ~48 limbs the
  * repo's plain single-q vector loop (the bigint_copy_signed shape) beats
@@ -1016,8 +1144,17 @@ WValue bigint_add_word_into(
     uint64_t w, WBigint *r) {
     /* Same effective sign: |a| + w, sign of a.  Exact-length allocation;
      * the full-carry growth below is vanishingly rare. */
+    uint64_t carry;
+#if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
+    if (alen == 2) {
+        carry = bn_add_word2_a64_fixed(r->limbs, al, w);
+    } else if (alen <= 8) {
+        carry = bn_add_word_a64_fixed(r->limbs, al, alen, w);
+    } else
+#endif
+    {
     uint64_t sum = al[0] + w;
-    uint64_t carry = sum < w;
+    carry = sum < w;
     r->limbs[0] = sum;
     /* Fold the (data-dependent, so mispredict-prone) first carry into an
      * unconditional limb-1 step; the loop then only handles the ~2^-64
@@ -1034,6 +1171,7 @@ WValue bigint_add_word_into(
     }
     if (i < alen)
         bn_copy_tail(r->limbs + i, al + i, alen - i);
+    }
     if (__builtin_expect(carry != 0, 0)) {
         /* Carry ran off the top: every rippled limb wrapped to zero, so
          * the result is [sum, 0, ..., 0, 1] over alen + 1 limbs. */
@@ -1057,8 +1195,17 @@ static inline __attribute__((always_inline))
 WValue bigint_sub_word_into(
     WBigint *r, const uint64_t *al, int32_t alen, int a_neg, uint64_t w) {
     /* Opposite effective signs: |a| - w, sign of a (alen >= 2 => |a| > w). */
+    uint64_t borrow;
+#if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
+    if (alen == 2) {
+        borrow = bn_sub_word2_a64_fixed(r->limbs, al, w);
+    } else if (alen <= 8) {
+        borrow = bn_sub_word_a64_fixed(r->limbs, al, alen, w);
+    } else
+#endif
+    {
     uint64_t a0 = al[0];
-    uint64_t borrow = a0 < w;
+    borrow = a0 < w;
     r->limbs[0] = a0 - w;
     /* Unconditional limb-1 step, as in the add branch above. */
     uint64_t v1 = al[1];
@@ -1073,6 +1220,7 @@ WValue bigint_sub_word_into(
     }
     if (i < alen)
         bn_copy_tail(r->limbs + i, al + i, alen - i);
+    }
     int32_t rlen = alen - (r->limbs[alen - 1] == 0);
     r->size = a_neg ? -rlen : rlen;
     if (__builtin_expect(rlen < alen, 0)) {

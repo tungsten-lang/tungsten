@@ -8217,6 +8217,12 @@ WValue bigint_sqr_positive_16(WBigint *a) {
 #define BN_MUL_N1_SMALL_STRAIGHT 0
 #endif
 #endif
+#ifndef BN_MUL_N1_SMALL_MAX
+#define BN_MUL_N1_SMALL_MAX 7
+#endif
+#if BN_MUL_N1_SMALL_MAX < 4 || BN_MUL_N1_SMALL_MAX > 7
+#error "BN_MUL_N1_SMALL_MAX must be in 4..7"
+#endif
 #if BN_MUL_N1_FAST
 #if BN_MUL_N1_SMALL_STRAIGHT
 /* Tiny N x 1 products are shorter than the generic mul_1 entry and its
@@ -8237,11 +8243,34 @@ WValue bigint_mul_n1_small(const uint64_t *al, int32_t n, uint64_t w,
         r->limbs[2] = (uint64_t)product;
         carry = (uint64_t)(product >> 64);
     }
+#if BN_MUL_N1_SMALL_MAX <= 4
     if (n == 4) {
         product = (__uint128_t)al[3] * w + carry;
         r->limbs[3] = (uint64_t)product;
         carry = (uint64_t)(product >> 64);
     }
+#else
+    if (n >= 4) {
+        product = (__uint128_t)al[3] * w + carry;
+        r->limbs[3] = (uint64_t)product;
+        carry = (uint64_t)(product >> 64);
+    }
+    if (n >= 5) {
+        product = (__uint128_t)al[4] * w + carry;
+        r->limbs[4] = (uint64_t)product;
+        carry = (uint64_t)(product >> 64);
+    }
+    if (n >= 6) {
+        product = (__uint128_t)al[5] * w + carry;
+        r->limbs[5] = (uint64_t)product;
+        carry = (uint64_t)(product >> 64);
+    }
+    if (n >= 7) {
+        product = (__uint128_t)al[6] * w + carry;
+        r->limbs[6] = (uint64_t)product;
+        carry = (uint64_t)(product >> 64);
+    }
+#endif
     r->limbs[n] = carry;
     int32_t size = n + (carry != 0);
     r->size = negative ? -size : size;
@@ -8397,7 +8426,7 @@ static inline WValue bigint_mul_bigint_word(WValue big, int64_t word) {
     if (n < 2) return bigint_mul_any_generic(big, w_box_int(word));
     uint64_t w = word < 0 ? (uint64_t)(-word) : (uint64_t)word;
 #if BN_MUL_N1_SMALL_STRAIGHT
-    if (n <= 4)
+    if (n <= BN_MUL_N1_SMALL_MAX)
         return bigint_mul_n1_small(
             b->limbs, n, w, (bs < 0) != (word < 0));
 #endif
@@ -8482,7 +8511,7 @@ WValue bigint_mul_any(WValue a, WValue b) {
         int32_t na = ba->size;
         int32_t nb = bb->size;
 #define BN_MUL_N1_POSITIVE_RETURN(WIDE, WORD, NW) do {                    \
-    if ((NW) <= 4)                                                        \
+    if ((NW) <= BN_MUL_N1_SMALL_MAX)                                      \
         return bigint_mul_n1_small(                                       \
             (WIDE)->limbs, (NW), (WORD)->limbs[0], 0);                    \
     if ((NW) == 8)                                                        \
@@ -8539,7 +8568,7 @@ WValue bigint_mul_any(WValue a, WValue b) {
             int32_t nw = nb == 1 ? na : nb;
             int negative = (n < 0) != (bn < 0);
 #if BN_MUL_N1_SMALL_STRAIGHT
-            if (nw <= 4)
+            if (nw <= BN_MUL_N1_SMALL_MAX)
                 return bigint_mul_n1_small(
                     wide->limbs, nw, word->limbs[0], negative);
 #endif

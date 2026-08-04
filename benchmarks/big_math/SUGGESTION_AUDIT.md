@@ -164,7 +164,7 @@ Source fingerprints:
 | --- | --- | --- | --- |
 | DEEP-01 | Inline tiny add1/sub1 at 1–8 limbs | kept | always-inlining the word add/sub kernels improved accurate 4/8-limb add1 by 14/19% and sub1 by 2/11%; addsub1-dfb94bc-accurate-m5max-20260804.json -> addsub1-inline-dfb94bc-m5max-20260804.json; residual 2-4-limb losses remain explicit |
 | DEEP-02 | Register-only mul1 paths at 1–4 limbs | kept | bigint_mul_positive_11 and bigint_mul_n1_small keep 1-4-limb products in inline scalar carry chains and publish directly; mul1 lifecycle artifact reduced 2/3/4-limb boxed time 45/44/42% |
-| DEEP-03 | Fixed mul1 kernels at 5–7 limbs | pending | |
+| DEEP-03 | Fixed mul1 kernels at 5–7 limbs | kept | extending the boxed straight-line carry chain from 4 through 7 limbs improved mul1 at 5/6/7 limbs by 39.2%/36.6%/35.2%; the 2..16-limb boxed screen improved 19.4% geomean with no >5% regression (the only median loss was +0.8% at 4 with paired IQR 0.205); mul1-small-max7-10ffc4b-m5max-20260804.json; GMP fuzz 100000/100000 passed across both orders, signs, and 2..128 limbs; residual 3..8-limb GMP losses remain |
 | DEEP-04 | Software-pipeline mul1 at 8–48 limbs | kept | rolling-carry asm interleaves next-half loads with the adcs chain and fixed rungs cover 8/16/24/32/40/48; 1ba1be6 kernel and boxed measurements show broad improvement with differential/ASan coverage |
 | DEEP-05 | Tune Karatsuba/Toom transitions at 32–48 limbs | kept | the forced family sweep selected difference-form Toom-2 in this band; the boxed disable-A/B confirms the fixed 32/40/48 routes improve 17.5%/17.4%/18.9% with no measured cell regression and all three cells faster than GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json |
 | DEEP-06 | Add/fix a fixed-shape 32-limb Toom-2 difference path | kept | BN_MUL_POWER2_FIXED selects bn_toom2_diff32 with fixed 16-limb children; disabling that fixed family made boxed mul32 1.175x slower, while the current path measured 0.767x GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
@@ -196,6 +196,7 @@ existence does not automatically disposition an item:
 - e465fd4 follow-up artifact: isolated boxed 3x3 inline-multiply A/B.
 - 1f431bc follow-up artifact: isolated boxed fixed-Toom-2 A/B at 32/40/48.
 - 6ad6737 follow-up artifacts: rejected 6x6/10x10 fixed-leaf candidates and adjacent-size screens.
+- 10ffc4b follow-up artifact: boxed 5-7-limb mul1 straight-line A/B.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

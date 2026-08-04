@@ -406,6 +406,26 @@ Artifacts:
 `baselines/mul1-a64-unroll16-screen-4dbb251-m5max-20260804.json` and
 `baselines/mul1-a64-unroll16-acceptance-4dbb251-m5max-20260804.json`.
 
+A later loaded-host audit first ran the byte-identical current binary through
+both A/B lanes for 15x200 ms.  The nominal B/A result was still 1.0220
+geomean with four false regressions above 5% while unrelated CPU jobs raised
+load average from 4.69 to 6.56.  That artifact is retained as a noise bound,
+not a performance baseline:
+`baselines/mul1-current-replication-78e0403-m5max-20260804.json`.
+
+Two causal screens remained useful under the same load.  Replacing only the
+generic 128+ limb Tungsten kernel with public `mpn_mul_1`, while retaining
+Tungsten allocation, boxing, and publication, improved seven of nine affected
+widths at a 0.9796 affected-band geomean.  Nevertheless every resulting boxed
+128..8192-limb cell measured at or above the complete GMP operation
+(1.0004x--1.0611x), so a kernel port alone cannot close this lane.  A native
+fixed 128-limb entry then bypassed the generic wrapper, inactive fixed-width
+comparisons, and dynamic rehome decision.  It improved the target only 0.6%,
+lost 15/20 complete-band controls, and measured 1.0118 geomean.  Both controls
+were removed.  Artifacts:
+`baselines/mul1-public-kernel-upper-bound-screen-78e0403-m5max-20260804.json`
+and `baselines/mul1-fixed128-entry-screen-78e0403-m5max-20260804.json`.
+
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 
 **Claimed win (prior session, real workloads):** hybrid (p2<=32 + q32)

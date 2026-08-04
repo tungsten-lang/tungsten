@@ -584,7 +584,9 @@ WValue w_mul(WValue a, WValue b);
 WValue w_pow(WValue base, WValue exp);
 WValue w_div(WValue a, WValue b);
 WValue w_mod(WValue a, WValue b);
+WValue w_bigint_mod_pow2(WValue a, WValue bits);
 WValue w_neg(WValue v);
+WValue w_bit_shl(WValue a, WValue b);
 
 /* ---- Comparison ---- */
 WValue w_eq(WValue a, WValue b);
@@ -676,6 +678,8 @@ __attribute__((preserve_most)) WValue w_bigint_sub_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_mod_mut(WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_mod_pow2_mut(
+    WValue a, WValue bits);
 __attribute__((preserve_most)) WValue w_bigint_addmul_mut(
     WValue a, WValue x, WValue word);
 __attribute__((preserve_most)) WValue w_bigint_submul_mut(

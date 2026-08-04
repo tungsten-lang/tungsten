@@ -140,6 +140,21 @@ records the GMP version plus machine/load metadata in JSON.
 Use `--feature sqr` with the same command to isolate a consumed one-limb
 self-square after modulo has retained a larger destination buffer.
 
+To reproduce the compile-time power-of-two modular-context A/B, including
+GMP's public destination-reusing `mpz_tdiv_r_2exp` lane, run:
+
+```sh
+python3 benchmarks/big_math/run_mod_pow2_context_ab.py --rounds 9 \
+  --target-ms 60 --output /tmp/mod-pow2-context.json
+```
+
+The identical Tungsten source is compiled with the specialization disabled
+and enabled under `--release --native --fast`. The JSON retains per-width
+calibrated iteration counts, raw samples, IQRs, exact checksums, emitted-call
+counts, source/binary hashes, GMP version, and machine/load metadata. This is
+a modular-loop experiment outside the default operation matrix; report its GMP
+comparisons separately rather than treating a control win as a matrix win.
+
 To reproduce the constant-argument function experiment (ordinary recomputation,
 current pure-`fn` memoization, and an ideal manually hoisted value), run:
 

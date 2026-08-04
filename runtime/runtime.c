@@ -31309,6 +31309,78 @@ WValue w_mod(WValue a, WValue b) {
     return w_box_int_checked(as_int(a) % bv);
 }
 
+/* Exact truncated remainder by 2^bits. The compiler emits this only for a
+ * literal exponent on a statically BigInt receiver. Keeping a guarded
+ * fallback here makes stale type facts semantics-preserving: non-integers
+ * still see the ordinary `%` dispatch with the same materialized modulus. */
+static WValue bigint_mod_pow2_fallback(WValue a, WValue bits) {
+    WValue modulus = w_bit_shl(w_box_int(1), bits);
+    return w_mod(a, modulus);
+}
+
+static WValue bigint_mod_pow2_impl(WValue a, WValue bits, int consume) {
+    if (!w_is_int(bits) || !w_is_integer_any(a))
+        return bigint_mod_pow2_fallback(a, bits);
+
+    int64_t k = w_as_int(bits);
+    if (__builtin_expect(k < 0, 0))
+        return bigint_mod_pow2_fallback(a, bits);
+
+    if (w_is_int(a)) {
+        if (k == 0) return w_box_int(0);
+        /* Every inline integer has magnitude below 2^47. */
+        if (k >= 47) return a;
+        int64_t modulus = (int64_t)(UINT64_C(1) << (unsigned)k);
+        return w_box_int(w_as_int(a) % modulus);
+    }
+
+    int32_t as;
+    WBigint *ba = w_bigint_view(a, &as);
+    int32_t n = as < 0 ? -as : as;
+    int can_consume = consume && (a & W_BIGINT_SIGN_BIT) == 0 &&
+                      ba->shared == 0 && ba->size != 0;
+
+    if (k == 0) {
+        if (can_consume) bigint_release_if_live(ba);
+        return w_box_int(0);
+    }
+
+    uint64_t full = (uint64_t)k >> 6;
+    unsigned rem = (unsigned)k & 63U;
+
+    /* The dividend already lies in (-2^k, 2^k): `%` returns it unchanged.
+     * An immutable return publishes another alias; a consumed return merely
+     * transfers the dying binding and therefore needs no shared-count bump. */
+    int identity = full >= (uint64_t)n;
+    if (!identity && rem != 0 && full == (uint64_t)(n - 1))
+        identity = ba->limbs[n - 1] < (UINT64_C(1) << rem);
+    if (identity) {
+        if (can_consume) return a;
+        return w_bigint_mark_shared_value(a);
+    }
+
+    uint64_t keep64 = full + (rem != 0);
+    int32_t keep = keep64 < (uint64_t)n ? (int32_t)keep64 : n;
+    WBigint *r = can_consume ? ba : bigint_alloc_raw_hot(keep);
+    if (!can_consume)
+        memcpy(r->limbs, ba->limbs, (size_t)keep * sizeof(uint64_t));
+    if (rem != 0 && full < (uint64_t)keep)
+        r->limbs[full] &= (UINT64_C(1) << rem) - 1U;
+
+    while (keep > 0 && r->limbs[keep - 1] == 0) keep--;
+    r->size = as < 0 ? -keep : keep;
+    return bigint_finish_mag_sub(r);
+}
+
+WValue w_bigint_mod_pow2(WValue a, WValue bits) {
+    return bigint_mod_pow2_impl(a, bits, 0);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_mod_pow2_mut(
+    WValue a, WValue bits) {
+    return bigint_mod_pow2_impl(a, bits, 1);
+}
+
 /* Helper: extract low 64-bit word from any integer (inline or bigint) */
 static int64_t integer_low_i64(WValue v) {
     if (w_is_int(v)) return w_as_int(v);

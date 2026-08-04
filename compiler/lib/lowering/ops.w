@@ -802,6 +802,28 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       return lower_bigint_linear_word_mut(
         ctx, name, cur, ptr, linear_shape, node.op == :MINUS)
 
+  # A literal power-of-two modulus carries its complete arithmetic context in
+  # the syntax. Avoid materializing `1 << k` and route BigInt `%=` directly to
+  # the low-limb truncation entry. Only the liveness-proved form may consume
+  # the receiver; ordinary compound assignment keeps the immutable entry.
+  pow2_bits = node.op == :PERCENT ? bigint_pow2_modulus_bits(node.value) : nil
+  if pow2_bits != nil && env("TUNGSTEN_BIGINT_MOD_POW2") != "0" && ctx[:var_types][name] == :bigint
+    bits_tv = typed_value(:raw_int, pow2_bits.to_s())
+    bits_reg = ensure_i64_value(wfn, bits_tv)
+    can_mutate = ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true
+    rt_name = can_mutate ? "w_bigint_mod_pow2_mut" : "w_bigint_mod_pow2"
+    rt_cc = can_mutate ? "preserve_mostcc" : nil
+    result_temp = next_temp(wfn)
+    emit_instruction(wfn, {
+      op: :call_direct_i64, temp: result_temp, name: rt_name,
+      args: [cur, bits_reg], call_conv: rt_cc
+    })
+    if ptr != nil
+      emit_instruction(wfn, {op: :store_i64, value: result_temp, ptr: ptr})
+    else
+      ctx[:bindings][name] = result_temp
+    return typed_value(:i64, result_temp)
+
   # Evaluate RHS
   rhs = lower_expression(ctx, node.value)
   rhs_reg = ensure_i64_value(wfn, rhs)
@@ -957,6 +979,21 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       return "2"
     return "1"
   nil
+
+# Return k for the exact compile-time modulus shape `1 << k`. Restricting
+# the fold to a literal exponent keeps operator dispatch and evaluation order
+# unchanged for every dynamic expression.
+-> bigint_pow2_modulus_bits(n)
+  if n == nil || !is_ast_node?(n) || ast_kind(n) != :binary_op || n.op != :LSHIFT
+    return nil
+  if n.left == nil || !is_ast_node?(n.left) || ast_kind(n.left) != :int || n.left.value != 1
+    return nil
+  if n.right == nil || !is_ast_node?(n.right) || ast_kind(n.right) != :int
+    return nil
+  bits = n.right.value
+  if bits < 0 || bits > 140737488355327
+    return nil
+  bits
 
 # True when `nm` names a local slot, binding, typed var, or a known
 # fn/call — i.e. the identifier refers to real code, not a unit name.
@@ -1201,6 +1238,25 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # Type-directed: if both sides are int, emit inline LLVM ops
   lt = infer_type(node.left, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   rt = infer_type(node.right, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+
+  # Compile-time modular context: `big % (1 << k)` needs neither construction
+  # of the modulus nor general division. Keep this type-directed so a
+  # user-defined `%` method on an unknown/non-BigInt receiver still dispatches
+  # normally. A proven-dead assignment may consume its receiver buffer.
+  pow2_bits = op == :PERCENT ? bigint_pow2_modulus_bits(node.right) : nil
+  if pow2_bits != nil && env("TUNGSTEN_BIGINT_MOD_POW2") != "0" && is_bigint_type(lt)
+    lhs_tv = lower_expression(ctx, node.left)
+    lhs_reg = ensure_i64_value(wfn, lhs_tv)
+    bits_reg = ensure_i64_value(wfn, typed_value(:raw_int, pow2_bits.to_s()))
+    can_mutate = ctx[:mut_accum_target] != nil && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
+    rt_name = can_mutate ? "w_bigint_mod_pow2_mut" : "w_bigint_mod_pow2"
+    rt_cc = can_mutate ? "preserve_mostcc" : nil
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {
+      op: :call_direct_i64, temp: temp, name: rt_name,
+      args: [lhs_reg, bits_reg], call_conv: rt_cc
+    })
+    return typed_value(:i64, temp)
 
   # Var-var string == / != under a :string type fact on either side: route
   # through __w_streq2_fast — bits equal -> true, BOTH canonical stringy

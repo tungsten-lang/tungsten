@@ -44,7 +44,7 @@ Source fingerprints:
 | GLM-05 | Subquadratic half-GCD above about 1024 limbs | kept | existing recursive HGCD retained; half-slice band added at 6144; gcdlcm-half-slice-7096978-m5max-20260804.json; GMP fuzz 1000x8192 + 10x65536; sanitizer fuzz 250x8192 |
 | GLM-06 | Reuse one scratch remainder across Lehmer steps | pending | |
 | GLM-07 | isqrt reciprocal-sqrt seed, scratch reuse, and fewer divisions | pending | audit related commits 4b823f3, df0c604 |
-| GLM-08 | Retune Toom-3 / Toom-4 crossover | pending | audit related commits ce81fcb, dfb94bc |
+| GLM-08 | Retune Toom-3 / Toom-4 crossover | premise rejected | the proposed diagnosis said 448 limbs was already in Toom-4 and should move back to Toom-3, but BN_TOOM4_THRESHOLD=456 means 448 already selected Toom-3; the GMP-verified forced sweep found Toom-3 was the best available rung there and still lost, so a threshold-only change could not close the cell; NOTED_TRADEOFFS.md; the later ce81fcb/dfb94bc kernel/parallel work is accounted for separately |
 | GLM-09 | Lower NTT threshold and reduce SSA workspace clearing | pending | |
 | GLM-10 | Widen NEON hybrid add/sub dispatch | pending | |
 | GLM-11 | General carry-select add/sub | pending | |
@@ -72,7 +72,7 @@ Source fingerprints:
 | KIMI-08 | Add mulchain1/divchain1 whole-language-loop lanes | kept | run_program_loops.sh builds Tungsten release/native/fast and matched GMP loops, alternates lanes, checks checksums, and now reports median/IQR; program-loops-6e7c006-m5max-20260804.tsv records a noisy loaded-host run without using it for a performance disposition |
 | KIMI-09 | Skip redundant write-before-read workspace clearing | pending | |
 | KIMI-10 | Fixed-size multiply study at 32/40/48 limbs | pending | |
-| KIMI-11 | Optimize Toom-3 evaluation/interpolation at 400–500 limbs | pending | audit related commit dfb94bc |
+| KIMI-11 | Optimize Toom-3 evaluation/interpolation at 400–500 limbs | kept | dfb94bc parallelizes the independent Toom-3 point products while leaving interpolation serial; against the ce81fcb accurate baseline, boxed mul improved 20.5% at 384, 1.7% at 448, and 10.2% at 512 limbs, held at 1024, and remained faster than GMP in all five measured cells; mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json -> mul-a64-par-toom3-ce81fcb-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | KIMI-12 | Rebalance large isqrt division | pending | audit related commits 4b823f3, df0c604 |
 | KIMI-13 | Audit HGCD inner routing and tune its band | kept | counters found 100% block acceptance and row-apply dominance; propagated half slices win 4–7% at 8192–16384; gcdlcm-half-slice-7096978-m5max-20260804.json |
 | KIMI-14 | Probe NEON add crossover at 96–256 limbs | pending | |
@@ -113,7 +113,7 @@ Source fingerprints:
 | ID | Hypothesis | Status | Evidence |
 | --- | --- | --- | --- |
 | QWEN-01 | Recalibrate the Karatsuba threshold and basecase | pending | |
-| QWEN-02 | Fold coefficients in squaring kernels | pending | audit related commit ce81fcb |
+| QWEN-02 | Fold coefficients in squaring kernels | premise rejected | the proposal's premise that squaring uses the ordinary multiply ladder is false: pointer-identical x*x routes through bigint_sqr_dispatch_cap, whose dedicated school/Karatsuba/Toom square kernels fold diagonal and doubled cross terms; a36ac29's forced square-kernel crossover plus the boxed sqr artifacts measure that dedicated ladder, and current GMP fuzz 2000x2048 passed |
 | QWEN-03 | Redundant/Montgomery representation for multiply chains | pending | |
 | QWEN-04 | Johnson-style fast GCD at large widths | pending | compare against current HGCD work model |
 | QWEN-05 | Strip common trailing zeros before GCD | pending | |
@@ -140,9 +140,9 @@ Source fingerprints:
 | GROK-01 | Close residual mul1 kernel throughput gaps | kept | rolling-carry AArch64 bn_mul_1 keeps flags live across the loop and settles carry once; 1ba1be6 probes moved 64/256/1024-limb kernels to 1.01/1.02/1.01x GMP and mulchain to 0.98x; remaining boxed mul1 overhead is recorded separately |
 | GROK-02 | Mutate/recycle the destination for N×1 multiply | kept | w_bigint_mul_mut writes the one-word product into a proven-dead unique receiver and falls back on alias/capacity guards; program-loops-6e7c006-m5max-20260804.tsv measures mulchain at 0.989x GMP with matched checksum |
 | GROK-03 | Fixed-length add1/sub1 kernels at 2–8 limbs | pending | audit related commits 74f497c, ec92b25 |
-| GROK-04 | Optimize Toom-3 evaluation/pointwise/interpolation at 400–500 | pending | audit related commit dfb94bc |
+| GROK-04 | Optimize Toom-3 evaluation/pointwise/interpolation at 400–500 | kept | dfb94bc optimized the pointwise phase by running independent Toom-3 products through the persistent worker pool; boxed mul improved 20.5%/1.7%/10.2% at 384/448/512 versus the matched ce81fcb baseline, held at 1024, and won all five measured GMP cells; mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json -> mul-a64-par-toom3-ce81fcb-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | GROK-05 | Re-fit the 48-limb multiply ladder | pending | |
-| GROK-06 | Fill the 384–512 squaring-ladder gap | pending | audit related commit ce81fcb |
+| GROK-06 | Fill the 384–512 squaring-ladder gap | kept | ce81fcb lowered the AArch64 Karatsuba-square parallel cutoff to 384; boxed sqr improved 49.6% at 384 and 68.3% at 448, flipping both to clear GMP wins; sqr512 regressed 8.6% but stayed at 0.720x GMP, and the five-cell 256..1024 sqr geomean was 0.712x GMP; mulsqr-df0c604-accurate-m5max-20260804.json -> mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | GROK-07 | Polish mid-size equal-length add/sub kernels | pending | |
 | GROK-08 | Reduce large HGCD application and matrix-product cost | kept | half slices amortize row application at 6144+; accurate boxed artifact gcdlcm-half-slice-7096978-m5max-20260804.json; remaining GMP losses recorded |
 | GROK-09 | Reduce large-isqrt iteration/fallback cost | pending | audit related commits 4b823f3, df0c604 |
@@ -168,7 +168,7 @@ Source fingerprints:
 | DEEP-04 | Software-pipeline mul1 at 8–48 limbs | kept | rolling-carry asm interleaves next-half loads with the adcs chain and fixed rungs cover 8/16/24/32/40/48; 1ba1be6 kernel and boxed measurements show broad improvement with differential/ASan coverage |
 | DEEP-05 | Tune Karatsuba/Toom transitions at 32–48 limbs | pending | |
 | DEEP-06 | Add/fix a fixed-shape 32-limb Toom-2 difference path | pending | |
-| DEEP-07 | Optimize the 384–448 multiply/square transition | pending | audit related commits ce81fcb, dfb94bc |
+| DEEP-07 | Optimize the 384–448 multiply/square transition | kept | ce81fcb rerouted 448-limb multiply to its measured fixed difference split and opened square parallelism at 384; dfb94bc then parallelized Toom-3 point products; boxed mul384/448 moved from 1.032x/1.197x GMP to 0.828x/0.802x and boxed sqr384/448 moved from 1.028x/1.102x to 0.691x/0.649x; matched accurate artifacts mulsqr-df0c604-accurate-m5max-20260804.json, mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json, and mul-a64-par-toom3-ce81fcb-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | DEEP-08 | Parallelize large GCD matrix work | kept | four independent row products use the persistent worker pool at 2048+; baseline gcdlcm-half-slice-7096978-m5max-20260804.json; result gcdlcm-par-apply-3ccd13b-m5max-20260804.json; 20/22 through 65536 and every cell through 16385 wins; GMP fuzz 1000x8192 + 20x65536; sanitizer fuzz 500x8192; interpreted and release/native/fast GCD/LCM specs |
 | DEEP-09 | Adapt NEON add/sub to GCD pair replay | pending | current GCD flame/profile evidence is prerequisite evidence only |
 | DEEP-10 | Seed large isqrt more accurately | pending | audit related commits 4b823f3, df0c604 |

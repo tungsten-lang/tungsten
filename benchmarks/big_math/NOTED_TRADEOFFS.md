@@ -48,10 +48,13 @@ forced `bn_toom3_sq` loses to `bn_kara_sq` throughout it (392: 10.9 vs
 opposite mis-tune — kara's ceiling was far too LOW; see commit a36ac29
 (BN_SQR_TOOM4_THRESHOLD 616 -> 2560, sqr@704 1.07 -> 0.73).
 
-The fixed-leaf gaps (8-11, 13-14, 18-19, 22-23, 25-32) stay unfilled: the
-P0.1 matrix has zero red cells at those sizes and the projected gains sit
-under the +-5% measurement floor (finding 7A) — unresolvable on this box
-without instructions-retired plumbing.
+The fixed-leaf gaps (8-11, 13-14, 18-19, 22-23, 25-32) were initially left
+unfilled because the P0.1 matrix had zero red cells there and the projected
+gains sat under the +-5% wall-clock floor.  That scheduling decision is now
+superseded by the exhaustive external-suggestion audit: winning cells do not
+exempt a proposal from measurement.  Those leaf ideas remain pending until a
+controlled A/B (instructions retired where wall time cannot resolve it) gives
+each one a final disposition.
 
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 

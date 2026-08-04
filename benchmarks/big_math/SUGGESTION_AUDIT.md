@@ -52,7 +52,7 @@ Source fingerprints:
 | GLM-13 | BigInt Montgomery reduction for powmod | kept | bigint_powmod_any uses register, CIOS, or SOS Montgomery for supported odd moduli and Barrett otherwise; matrix-7a96d5c-accurate-20260802.json has all 12 powmod cells faster than GMP (0.60-0.998x), with GMP and independent-naive differential checks in the harness |
 | GLM-14 | LCM via exact quotient and one multiply | kept | w_ic_integer_lcm_generic computes gcd, exact r/g, then one multiply, with a unit-gcd shortcut; gcdlcm-par-apply-3ccd13b-m5max-20260804.json has all LCM cells through 16385 faster and the 65536 cell at 1.001x parity |
 | GLM-15 | Multi-limb exact division | kept | mag_divexact is the Jebelean/Hensel multi-limb exact quotient used by LCM; matrix-7a96d5c-accurate-20260802.json and gcdlcm-par-apply-3ccd13b-m5max-20260804.json provide end-to-end LCM evidence and GMP differential checks |
-| GLM-16 | Defer boxing and merge shared-check with pool return | pending | |
+| GLM-16 | Defer boxing and merge shared-check with pool return | kept | escaping values still require their immediate top-level BigInt tag, but the realizable hot path already inlines the shared-count check with the empty-hot-slot return; disabling only BN_BIGINT_RELEASE_INLINE_HANDOFF made the current path improve the 20-cell boxed word-operation geomean 1.5% with no >5% regression; inline-release-handoff-1ee775a-m5max-20260804.json |
 | GLM-17 | Page-offset rehoming at 384–512 limbs | rejected | extending add/sub rehoming through 512 limbs produced 1.003x geomean, five wins/five losses, and a 6.1% sub256 regression; a separate safe fresh-capacity mul/sqr rehome produced an unresolved 0.978x geomean with paired spreads larger than the effect and regressed the named mul448 cell 1.1%; both candidates were removed; addsub-rehome512-996180d-m5max-20260804.json and mulsqr-large-rehome-996180d-m5max-20260804.json |
 | GLM-18 | Hand-written add/sub basecases for 8–128 limbs | kept | the existing straight-line AArch64 8/16/24/32/40/48/64 kernels and sub128 carry-select path were isolated from the generic scalar fallback; across the broader 3..128 boxed matrix current paths won 18/20 cells and improved 9.7% geomean, with the only >5% median loss in add128 where neither variant changes the arithmetic path and the paired IQR was twice the apparent effect; addsub-fixed-basecases-f011cd7-m5max-20260804.json |
 | GLM-19 | Toom-2 equal/difference specializations at 32–48 limbs | kept | the current fixed 32/40/48 difference paths were measured against one otherwise-identical build with BN_MUL_POWER2_FIXED, BN_MUL_SPLIT_40_BLOCKS, and BN_MUL_SPLIT_48 disabled; nine alternating 110 ms boxed rounds measured candidate/baseline 0.851x/0.852x/0.841x, with all current cells faster than GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
@@ -154,7 +154,7 @@ Source fingerprints:
 | GROK-15 | Re-evaluate live-depth-aware capacity policy | rejected | live-depth-corrected 48-point capacity grid found no hybrid policy meeting >=20% peak-RSS improvement with churn <=+10%; best peak win was 2.8%; b4-base-*.tsv, b4-grid-*.tsv, NOTED_TRADEOFFS.md |
 | GROK-16 | Tune parallel workers only in winning large bands | pending | audit related commits 803a5c4, dfb94bc |
 | GROK-17 | Improve div1/multi-limb preinverse cache locality | pending | |
-| GROK-18 | Reduce identity/shared-mark tax | pending | |
+| GROK-18 | Reduce identity/shared-mark tax | pending | keeping the hot-slot header live instead of clear/revive was neutral/slower overall (1.002x geomean, 9 wins/11 losses, one >5% regression) in hot-live-header-1ee775a-m5max-20260804.json; the requested identity-mix and escape/shared experiment remains to run |
 | GROK-19 | Make page-hazard rehoming cheaper/more selective | pending | broadening current rehoming to 384-512 limbs was measured and rejected (GLM-17); the distinct selective/cheaper-policy hypothesis remains to test |
 | GROK-20 | Add end-to-end language loops to acceptance evidence | kept | accumulate, mulchain, addchain, and divchain are release/native/fast whole-language loops with matched GMP checksums and median/IQR timing; program-loops-6e7c006-m5max-20260804.tsv |
 
@@ -202,6 +202,7 @@ existence does not automatically disposition an item:
 - f011cd7 follow-up artifacts: fixed add/sub basecase disable A/B and 224/288-limb NEON crossover probes.
 - 673ec76 follow-up artifact: exact 128/256-limb add/sub carry-select disable A/B.
 - 6f41042 follow-up artifact: direct hot handoff versus thread-local size buckets across 28 small boxed cells.
+- 1ee775a follow-up artifacts: inline release handoff A/B and neutral hot-slot live-header A/B.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

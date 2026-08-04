@@ -1057,6 +1057,9 @@ static int32_t bench_boxed_a_limbs(int op, int32_t limbs) {
 #ifndef BENCH_GCD_COMMON_TZ
 #define BENCH_GCD_COMMON_TZ 0
 #endif
+#ifndef BENCH_ADDSUB_ZERO_PREFIX
+#define BENCH_ADDSUB_ZERO_PREFIX 0
+#endif
 
 /*
  * Operand contract shared by the correctness check, the Tungsten lane, and
@@ -1094,6 +1097,21 @@ static void bench_boxed_operands(int op, int32_t limbs,
                 : limbs;
         b = bench_bigint(b_limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
     }
+#if BENCH_ADDSUB_ZERO_PREFIX > 0
+    if (op == BENCH_BOXED_ADD || op == BENCH_BOXED_SUB) {
+        WBigint *ab = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+        int32_t zero_limbs = BENCH_ADDSUB_ZERO_PREFIX;
+        if (zero_limbs >= limbs) zero_limbs = limbs - 1;
+        memset(bb->limbs, 0, (size_t)zero_limbs * sizeof(uint64_t));
+        /* Make b unambiguously smaller so subtraction exercises the same
+         * sparse operand regardless of the deterministic random top words. */
+        ab->limbs[limbs - 1] |= UINT64_C(1) << 63;
+        bb->limbs[limbs - 1] =
+            (bb->limbs[limbs - 1] & ((UINT64_C(1) << 62) - 1)) |
+            (UINT64_C(1) << 62);
+    }
+#endif
 #if BENCH_GCD_COMMON_TZ > 0
 #if BENCH_GCD_COMMON_TZ >= 64
 #error "BENCH_GCD_COMMON_TZ must be in 0..63"

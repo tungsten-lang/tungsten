@@ -108,6 +108,19 @@ targets rather than cutoff evidence.  Artifacts:
 `baselines/matrix-a5e79a3-screen-m5max-20260804.json` and
 `baselines/matrix-a5e79a3-residual095-accurate-m5max-20260804.json`.
 
+After retaining deferred final stores in the wide AArch64 add/sub hybrid, the
+next complete 485-cell screen measured 446 wins at 0.625 T/GMP geomean.  Its
+acceptance rerun promoted all 71 cells at or above 0.95× GMP rather than only
+screen losses: 49 measured wins and 22 measured at or above parity.  The clear
+small-word gaps remain add1@2/3/4 (1.319/1.265/1.315), sub1@2/3/4
+(1.197/1.136/1.219), and mul1@4/8/24 (1.113/1.062/1.035).  Of ordinary
+add/sub, only sub@40 combined a loss with low spread (1.012, relative IQR
+0.031); add@128's 1.016 result had 0.180 relative IQR.  Other nonlinear and
+wide losses also remain replication targets where their timing spread exceeds
+the observed deficit.  Artifacts:
+`baselines/matrix-8305ff1-screen-m5max-20260804.json` and
+`baselines/matrix-8305ff1-residual095-accurate-m5max-20260804.json`.
+
 A profile of boxed add1@3 put 56% of sampled branch events in the inlined
 Tungsten lane, but symbol deduplication prevented a reliable sub-function
 split.  Disassembly exposed one remaining general smallest-fitting capacity

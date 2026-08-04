@@ -2432,6 +2432,9 @@ WValue bigint_sub_any_generic(WValue a, WValue b) {
 #ifndef BN_ADDSUB_BOXED_EQUAL_FAST
 #define BN_ADDSUB_BOXED_EQUAL_FAST 1
 #endif
+#ifndef BN_SUB_BOXED_WORD_SIGN_SPLIT
+#define BN_SUB_BOXED_WORD_SIGN_SPLIT 1
+#endif
 
 static inline __attribute__((always_inline))
 WValue bigint_add_any(WValue a, WValue b) {
@@ -2493,11 +2496,35 @@ WValue bigint_sub_any(WValue a, WValue b) {
         }
 #if BN_ADDSUB_WORD_FAST
         /* Boxed N ± 1 word shape (any signs); subtraction flips b's sign.
-         * v4: `bn` is the composed sign from w_bigint_view above. */
+         * Split the four effective-sign cases here so the inlined magnitude
+         * helper sees a constant operation and result sign. */
+#if BN_SUB_BOXED_WORD_SIGN_SPLIT
+        if (bn == 1 && n >= 2) {
+            WBigint *r = bigint_alloc_raw_hot(n);
+            return bigint_sub_word_into(
+                r, aa->limbs, n, 0, bb->limbs[0]);
+        }
+        if (bn == -1 && n >= 2) {
+            WBigint *r = bigint_alloc_raw_hot(n);
+            return bigint_add_word_into(
+                aa->limbs, n, 0, bb->limbs[0], r);
+        }
+        if (bn == 1 && n <= -2) {
+            WBigint *r = bigint_alloc_raw_hot(-n);
+            return bigint_add_word_into(
+                aa->limbs, -n, 1, bb->limbs[0], r);
+        }
+        if (bn == -1 && n <= -2) {
+            WBigint *r = bigint_alloc_raw_hot(-n);
+            return bigint_sub_word_into(
+                r, aa->limbs, -n, 1, bb->limbs[0]);
+        }
+#else
         int32_t n_abs = n < 0 ? -n : n;
         if ((bn == 1 || bn == -1) && n_abs >= 2)
             return bigint_addsub_word(
                 aa->limbs, n_abs, n < 0, bb->limbs[0], bn > 0);
+#endif
 #endif
     }
 #endif

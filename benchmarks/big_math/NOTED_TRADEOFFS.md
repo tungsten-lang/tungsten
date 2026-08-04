@@ -264,6 +264,24 @@ Only the add leaf remains in production.  Artifacts:
 `baselines/add1-positive11-after-acceptance-4dbb251-m5max-20260804.json`, and
 `baselines/sub1-positive11-after-isolated-screen-4dbb251-m5max-20260804.json`.
 
+A five-second `tungsten flame` run at boxed `sub1@1` found that Clang had
+inlined the entire arithmetic path into `bench_lane_sub1`; there was no
+remaining helper frame to tune independently.  A compact positive 1x1 leaf
+improved that cell to 0.936x GMP, but lost 13/20 sub1 widths at 1.0048
+geomean with six regressions above 5%.  Outlining the uncommon signed/overlay
+fallback while retaining the direct leaf initially looked better across an
+80-cell sub1/add1/sub/add screen, but binary inspection showed that unrelated
+lane addresses moved by 640 bytes and the nominally inactive controls supplied
+most of the 3.5% aggregate win.  Moving the helper to the compiler's cold
+region kept `sub1@1` at 0.894x its baseline and 0.924x GMP, but the complete
+screen became neutral at 0.9998 geomean, split 43 wins/37 losses, and had ten
+regressions above 5%; sub1 itself lost 11/20 cells at 1.0147 geomean.  All
+source candidates were removed.  Artifacts:
+`baselines/sub1-boxed-1-dc4e7fc-m5max-20260804.svg`,
+`baselines/sub1-positive11-compact-screen-66e409f-m5max-20260804.json`,
+`baselines/sub1-outline-fallback-screen-dc4e7fc-m5max-20260804.json`, and
+`baselines/sub1-cold-fallback-screen-dc4e7fc-m5max-20260804.json`.
+
 ## One-word and terminal GCD schedules — NOT taken (2026-08-04)
 
 A five-second boxed `lcm@1` flame profile put 59% of sampled branch events in

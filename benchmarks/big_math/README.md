@@ -100,6 +100,20 @@ affected-matrix screen; the driver does not auto-accept a candidate. Runs below
 nine rounds or a 110 ms target are marked non-acceptance in both stderr and
 JSON, so short smoke tests cannot disposition a suggestion.
 
+After a fast default-matrix screen, `run_residual_matrix.py` remeasures every
+cell at or above a chosen Tungsten/GMP ratio with the acceptance timing policy:
+
+```sh
+benchmarks/big_math/run_residual_matrix.py \
+  --screen results/matrix-screen.json --threshold 0.95 \
+  --runs 9 --target-ms 110 --output results/residual-accurate.json
+```
+
+The output retains the screen ratio, accurate median and IQR, machine metadata,
+and source-screen hash. This helper is deliberately limited to the default
+matrix through 8192 limbs; use `--full` for the separately selected large/FFT
+bands rather than extrapolating a fast-screen result.
+
 All rows use a common input size of `N * 64` bits. That is a Tungsten/GMP/Rust
 limb count, not an assertion about every implementation's internal layout:
 Odin currently stores 63 payload bits in each `u64` digit. Immutable lanes keep

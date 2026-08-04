@@ -56,11 +56,21 @@ opposite mis-tune — kara's ceiling was far too LOW; see commit a36ac29
 
 The fixed-leaf gaps (8-11, 13-14, 18-19, 22-23, 25-32) were initially left
 unfilled because the P0.1 matrix had zero red cells there and the projected
-gains sat under the +-5% wall-clock floor.  That scheduling decision is now
+gains sat under the +-5% wall-clock floor.  That scheduling decision was
 superseded by the exhaustive external-suggestion audit: winning cells do not
-exempt a proposal from measurement.  Those leaf ideas remain pending until a
-controlled A/B (instructions retired where wall time cannot resolve it) gives
-each one a final disposition.
+exempt a proposal from measurement.  The later controlled A/Bs retained the
+measured 12/17/24 and 32/40/48 shapes and rejected the remaining proposed
+leaves when their target cells or adjacent controls did not reproduce; see
+GROK-14, DEEP-05/06/17/19, and their artifacts in `SUGGESTION_AUDIT.md`.
+
+## Boxed add/sub word-first dispatch — NOT taken (2026-08-04)
+
+Moving the boxed N x 1 test ahead of equal-width add/sub dispatch improved the
+intended 2-8-limb add1/sub1 cells by roughly 4-9%.  The complete alternating
+9 x 110 ms affected/control matrix did not support retaining it: 23 wins and
+21 losses across 44 cells, 1.0023 candidate/baseline geomean, and 11 ordinary
+add/sub regressions over 5%.  Production keeps equal-width dispatch first.
+Artifact: `baselines/addsub-word-first-3aab316-m5max-20260804.json`.
 
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 

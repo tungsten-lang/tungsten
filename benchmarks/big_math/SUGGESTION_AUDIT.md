@@ -55,7 +55,7 @@ Source fingerprints:
 | GLM-16 | Defer boxing and merge shared-check with pool return | pending | |
 | GLM-17 | Page-offset rehoming at 384–512 limbs | pending | |
 | GLM-18 | Hand-written add/sub basecases for 8–128 limbs | pending | |
-| GLM-19 | Toom-2 equal/difference specializations at 32–48 limbs | pending | |
+| GLM-19 | Toom-2 equal/difference specializations at 32–48 limbs | kept | the current fixed 32/40/48 difference paths were measured against one otherwise-identical build with BN_MUL_POWER2_FIXED, BN_MUL_SPLIT_40_BLOCKS, and BN_MUL_SPLIT_48 disabled; nine alternating 110 ms boxed rounds measured candidate/baseline 0.851x/0.852x/0.841x, with all current cells faster than GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
 | GLM-20 | Branch-free carry/correction tails in mul1 and div1 | pending | |
 
 ## Kimi-K3
@@ -71,7 +71,7 @@ Source fingerprints:
 | KIMI-07 | Extend compiler mut-accumulator recognition | kept | fail-closed accumulator and rotation-shape analyses route dead locals to mut/destination entries while preserving value aliases; program-loops-6e7c006-m5max-20260804.tsv records 0.738x GMP addchain and focused bigint_mutate_unique_spec covers aliases and disqualification |
 | KIMI-08 | Add mulchain1/divchain1 whole-language-loop lanes | kept | run_program_loops.sh builds Tungsten release/native/fast and matched GMP loops, alternates lanes, checks checksums, and now reports median/IQR; program-loops-6e7c006-m5max-20260804.tsv records a noisy loaded-host run without using it for a performance disposition |
 | KIMI-09 | Skip redundant write-before-read workspace clearing | pending | |
-| KIMI-10 | Fixed-size multiply study at 32/40/48 limbs | pending | |
+| KIMI-10 | Fixed-size multiply study at 32/40/48 limbs | kept | isolated compile-time A/B of the current fixed shapes versus the generic fallbacks measured 1.175x/1.174x/1.189x speedups at 32/40/48 limbs; paired IQRs 0.034-0.056; all three boxed current paths beat GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
 | KIMI-11 | Optimize Toom-3 evaluation/interpolation at 400–500 limbs | kept | dfb94bc parallelizes the independent Toom-3 point products while leaving interpolation serial; against the ce81fcb accurate baseline, boxed mul improved 20.5% at 384, 1.7% at 448, and 10.2% at 512 limbs, held at 1024, and remained faster than GMP in all five measured cells; mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json -> mul-a64-par-toom3-ce81fcb-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | KIMI-12 | Rebalance large isqrt division | pending | audit related commits 4b823f3, df0c604 |
 | KIMI-13 | Audit HGCD inner routing and tune its band | kept | counters found 100% block acceptance and row-apply dominance; propagated half slices win 4–7% at 8192–16384; gcdlcm-half-slice-7096978-m5max-20260804.json |
@@ -141,7 +141,7 @@ Source fingerprints:
 | GROK-02 | Mutate/recycle the destination for N×1 multiply | kept | w_bigint_mul_mut writes the one-word product into a proven-dead unique receiver and falls back on alias/capacity guards; program-loops-6e7c006-m5max-20260804.tsv measures mulchain at 0.989x GMP with matched checksum |
 | GROK-03 | Fixed-length add1/sub1 kernels at 2–8 limbs | pending | audit related commits 74f497c, ec92b25 |
 | GROK-04 | Optimize Toom-3 evaluation/pointwise/interpolation at 400–500 | kept | dfb94bc optimized the pointwise phase by running independent Toom-3 products through the persistent worker pool; boxed mul improved 20.5%/1.7%/10.2% at 384/448/512 versus the matched ce81fcb baseline, held at 1024, and won all five measured GMP cells; mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json -> mul-a64-par-toom3-ce81fcb-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
-| GROK-05 | Re-fit the 48-limb multiply ladder | pending | |
+| GROK-05 | Re-fit the 48-limb multiply ladder | kept | disabling BN_MUL_SPLIT_48 while holding the source/build constant made boxed mul48 1.189x slower; the current path is 0.841x its generic fallback and 0.848x GMP over nine alternating 110 ms rounds; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
 | GROK-06 | Fill the 384–512 squaring-ladder gap | kept | ce81fcb lowered the AArch64 Karatsuba-square parallel cutoff to 384; boxed sqr improved 49.6% at 384 and 68.3% at 448, flipping both to clear GMP wins; sqr512 regressed 8.6% but stayed at 0.720x GMP, and the five-cell 256..1024 sqr geomean was 0.712x GMP; mulsqr-df0c604-accurate-m5max-20260804.json -> mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | GROK-07 | Polish mid-size equal-length add/sub kernels | pending | |
 | GROK-08 | Reduce large HGCD application and matrix-product cost | kept | half slices amortize row application at 6144+; accurate boxed artifact gcdlcm-half-slice-7096978-m5max-20260804.json; remaining GMP losses recorded |
@@ -166,8 +166,8 @@ Source fingerprints:
 | DEEP-02 | Register-only mul1 paths at 1–4 limbs | kept | bigint_mul_positive_11 and bigint_mul_n1_small keep 1-4-limb products in inline scalar carry chains and publish directly; mul1 lifecycle artifact reduced 2/3/4-limb boxed time 45/44/42% |
 | DEEP-03 | Fixed mul1 kernels at 5–7 limbs | pending | |
 | DEEP-04 | Software-pipeline mul1 at 8–48 limbs | kept | rolling-carry asm interleaves next-half loads with the adcs chain and fixed rungs cover 8/16/24/32/40/48; 1ba1be6 kernel and boxed measurements show broad improvement with differential/ASan coverage |
-| DEEP-05 | Tune Karatsuba/Toom transitions at 32–48 limbs | pending | |
-| DEEP-06 | Add/fix a fixed-shape 32-limb Toom-2 difference path | pending | |
+| DEEP-05 | Tune Karatsuba/Toom transitions at 32–48 limbs | kept | the forced family sweep selected difference-form Toom-2 in this band; the boxed disable-A/B confirms the fixed 32/40/48 routes improve 17.5%/17.4%/18.9% with no measured cell regression and all three cells faster than GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json |
+| DEEP-06 | Add/fix a fixed-shape 32-limb Toom-2 difference path | kept | BN_MUL_POWER2_FIXED selects bn_toom2_diff32 with fixed 16-limb children; disabling that fixed family made boxed mul32 1.175x slower, while the current path measured 0.767x GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
 | DEEP-07 | Optimize the 384–448 multiply/square transition | kept | ce81fcb rerouted 448-limb multiply to its measured fixed difference split and opened square parallelism at 384; dfb94bc then parallelized Toom-3 point products; boxed mul384/448 moved from 1.032x/1.197x GMP to 0.828x/0.802x and boxed sqr384/448 moved from 1.028x/1.102x to 0.691x/0.649x; matched accurate artifacts mulsqr-df0c604-accurate-m5max-20260804.json, mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json, and mul-a64-par-toom3-ce81fcb-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | DEEP-08 | Parallelize large GCD matrix work | kept | four independent row products use the persistent worker pool at 2048+; baseline gcdlcm-half-slice-7096978-m5max-20260804.json; result gcdlcm-par-apply-3ccd13b-m5max-20260804.json; 20/22 through 65536 and every cell through 16385 wins; GMP fuzz 1000x8192 + 20x65536; sanitizer fuzz 500x8192; interpreted and release/native/fast GCD/LCM specs |
 | DEEP-09 | Adapt NEON add/sub to GCD pair replay | pending | current GCD flame/profile evidence is prerequisite evidence only |
@@ -194,6 +194,7 @@ existence does not automatically disposition an item:
 - 4b823f3, df0c604: isqrt quotient dispatch and division-width tuning.
 - ce81fcb, dfb94bc: AArch64 multiply/square cutoffs and parallel Toom-3 points.
 - e465fd4 follow-up artifact: isolated boxed 3x3 inline-multiply A/B.
+- 1f431bc follow-up artifact: isolated boxed fixed-Toom-2 A/B at 32/40/48.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

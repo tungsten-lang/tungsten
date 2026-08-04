@@ -2564,7 +2564,10 @@ static uint64_t bn_addmul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uin
     }
     return carry;
 }
-#if defined(__aarch64__)
+#ifndef BN_ADDMUL_1_ASM
+#define BN_ADDMUL_1_ASM 1
+#endif
+#if defined(__aarch64__) && BN_ADDMUL_1_ASM
 /*
  * Keep the complete leaf routine in caller-saved x0..x17.  Expressing only
  * the flag chains as inline assembly made Clang allocate x19..x24 for the

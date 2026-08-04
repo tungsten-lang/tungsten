@@ -179,6 +179,52 @@ optional dead destination after its single shape decode, or prove/hoist the
 shape in compiler IR.  A second guard tree in the hot loop spends the measured
 reuse win before arithmetic starts.
 
+## Native unsigned-word entries — RETAINED (2026-08-04)
+
+The documented `add1`, `sub1`, `mul1`, and `div1` rows were asymmetric at the
+API boundary: GMP hoisted the one-limb operand and called `mpz_*_ui`, while
+Tungsten passed the same value as a boxed BigInt through its generic
+boxed/boxed dispatcher.  Tungsten now has matching decoded unsigned-word
+entries.  Their positive boxed leaves retain the existing fixed arithmetic
+kernels and recycler; signed/overlay and inline inputs take a complete
+semantics-preserving fallback inside the same entry.
+
+Across the complete 1..8192-limb word matrix, the final candidate won 68/80
+cells at 0.9381 candidate/baseline geomean with no regression above 5%.
+Add1/sub1 each won 18/20 cells, while mul1/div1 each won 16/20.  The former
+add1@2/3/4 losses became 0.840/0.837/0.907× GMP and sub1@2/3/4 became
+0.908/0.946/0.980×.  A focused 15×250 ms follow-up found that the initial
+mul1@1 regression came from missing its direct positive 1×1 leaf; adding that
+leaf made the cell 18.6% faster than the generic Tungsten path and 34.0%
+faster than GMP, with all four controls improved.
+
+This is not a claim that the residual matrix is complete.  In the final run,
+add1@1 and sub1@1 were 1.002/1.042× GMP, and mul1 retained losses at
+32/128/256/384/448/512/1024/2048/4096/8192 limbs (1.004--1.063×).
+Artifacts:
+`baselines/tungsten-word-api-final-52e11bf-m5max-20260804.json` and
+`baselines/tungsten-word-api-regression-check-52e11bf-m5max-20260804.json`
+and
+`baselines/tungsten-word-api-mul11-direct-52e11bf-m5max-20260804.json`.
+
+The result required full boxed evidence rather than assuming that less
+dispatch must win.  An unchecked known-owned result release was neutral
+overall and caused four >5% regressions.  Moving the word test ahead of the
+equal-width dispatcher improved the target but regressed equal add/sub by up
+to 33%.  Inlining the eight-limb multiply kernel closed its target but caused
+eight >5% control regressions; publishing carry/size inside the leaf and
+outlining the wide sub1 copy also lost overall.  All of those candidate source
+paths were removed.  Artifacts:
+`baselines/owned-result-release-52e11bf-m5max-20260804.json`,
+`baselines/addsub1-word-early-52e11bf-m5max-20260804.json`,
+`baselines/mul1-f8-boxed-inline-52e11bf-m5max-20260804.json`,
+`baselines/mul1-f8-publish-size-52e11bf-m5max-20260804.json`, and
+`baselines/word-ui-wide-outline-52e11bf-m5max-20260804.json`.
+
+Optimized public-GMP differential fuzz passed 100,000 signed/overlay cases
+through 1024 limbs, including 0/1, i48, high-bit, and `UINT64_MAX` words for
+all four operations.  ASAN/UBSAN passed 10,000 cases through 128 limbs.
+
 ## One-word and terminal GCD schedules — NOT taken (2026-08-04)
 
 A five-second boxed `lcm@1` flame profile put 59% of sampled branch events in

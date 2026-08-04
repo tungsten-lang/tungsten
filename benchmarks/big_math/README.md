@@ -126,6 +126,12 @@ their idiomatic mutable APIs with two alternating, capacity-retaining result
 destinations. Each lane calibrates its own iteration count to the requested
 timing window.
 
+The `add1`, `sub1`, `mul1`, and `div1` rows are deliberately API-shaped
+unsigned-word operations, not ordinary balanced boxed/boxed calls. Both native
+lanes hoist the positive one-limb operand outside the timed loop: Tungsten uses
+its decoded-word entries and GMP uses `mpz_*_ui`. The ordinary `add`, `sub`,
+`mul`, and `div` rows continue to measure their generic two-BigInt dispatch.
+
 The matrix covers add, subtract, multiply, square, divide, modulo, gcd, bitwise
 operations, shifts, comparison, negate/absolute value, power, modular power,
 lcm, integer square root, and decimal conversion in both directions. The

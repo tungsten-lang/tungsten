@@ -1116,7 +1116,7 @@ enum {
     /* Asymmetric cells: second operand is ONE limb. The equal-size matrix
      * cannot see the dominant real-loop shape (big op small — the E3
      * accumulate/mulchain workloads); these rows measure it per-op, with
-     * the GMP lane using its strongest idiom (mpz_*_ui). */
+     * both native lanes hoisting the word into their unsigned-word entry. */
     BENCH_BOXED_ADD1,
     BENCH_BOXED_SUB1,
     BENCH_BOXED_MUL1,
@@ -1376,6 +1376,10 @@ static void bench_boxed_free_dead(WValue dead, WValue keep1, WValue keep2,
     if (w_is_bigint(dead)) w_value_free(dead);
 }
 
+#ifndef BENCH_TUNGSTEN_WORD_API
+#define BENCH_TUNGSTEN_WORD_API 1
+#endif
+
 /*
  * Mirror of core/numeric/int.w Int#modpow exactly as compiled Tungsten runs
  * it today: LSB-first square-and-multiply where every step goes through the
@@ -1465,10 +1469,21 @@ static WValue bench_boxed_op_apply(int op, WValue a, WValue b) {
     case BENCH_BOXED_NEG_BANG: return bench_bigint_neg_bang_c_ref(a, NULL, 0);
     case BENCH_BOXED_ABS_BANG: return bench_bigint_abs_bang_c_ref(a, NULL, 0);
     case BENCH_BOXED_GCD: return bigint_gcd_any(a, b);
+#if BENCH_TUNGSTEN_WORD_API
+    case BENCH_BOXED_ADD1:
+        return bigint_add_ui_any(a, w_as_bigint(b)->limbs[0]);
+    case BENCH_BOXED_SUB1:
+        return bigint_sub_ui_any(a, w_as_bigint(b)->limbs[0]);
+    case BENCH_BOXED_MUL1:
+        return bigint_mul_ui_any(a, w_as_bigint(b)->limbs[0]);
+    case BENCH_BOXED_DIV1:
+        return bigint_div_ui_any(a, w_as_bigint(b)->limbs[0]);
+#else
     case BENCH_BOXED_ADD1: return bigint_add_any(a, b);
     case BENCH_BOXED_SUB1: return bigint_sub_any(a, b);
     case BENCH_BOXED_MUL1: return bigint_mul_any(a, b);
     case BENCH_BOXED_DIV1: return bigint_div_any(a, b);
+#endif
     default: die("unknown boxed-result benchmark operation");
     }
     return W_NIL;
@@ -1576,10 +1591,11 @@ static void bench_release_arith_workspaces(void) {
 static double __attribute__((noinline, aligned(128)))                      \
 bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
     WValue a = cx->a, b = cx->b, m = cx->m;                                \
+    uint64_t word = w_as_bigint(b)->limbs[0];                              \
     WValue parse_input = cx->parse_input;                                  \
     WValue previous = cx->previous;                                        \
     int recycle = cx->recycle;                                             \
-    (void)a; (void)b; (void)m; (void)parse_input;                          \
+    (void)a; (void)b; (void)m; (void)word; (void)parse_input;              \
     double warm_start = bench_now();                                       \
     do {                                                                   \
         for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {          \
@@ -1657,9 +1673,15 @@ DEFINE_BENCH_LANE(abs, w_ic_bigint_abs(a, NULL, 0))
 DEFINE_BENCH_LANE(neg, bigint_copy_signed(w_as_bigint(a), 1))
 DEFINE_BENCH_LANE(abs, bigint_copy_signed(w_as_bigint(a), 0))
 #endif
+#if BENCH_TUNGSTEN_WORD_API
+DEFINE_BENCH_LANE(add1, bigint_add_ui_any(a, word))
+DEFINE_BENCH_LANE(sub1, bigint_sub_ui_any(a, word))
+DEFINE_BENCH_LANE(mul1, bigint_mul_ui_any(a, word))
+#else
 DEFINE_BENCH_LANE(add1, bigint_add_any(a, b))
 DEFINE_BENCH_LANE(sub1, bigint_sub_any(a, b))
 DEFINE_BENCH_LANE(mul1, bigint_mul_any(a, b))
+#endif
 #ifndef BENCH_DIV1_THRASH
 #define BENCH_DIV1_THRASH 0
 #endif
@@ -1676,7 +1698,11 @@ static inline WValue bench_div1_thrash(WValue a, WValue b) {
 }
 DEFINE_BENCH_LANE(div1, bench_div1_thrash(a, b))
 #else
+#if BENCH_TUNGSTEN_WORD_API
+DEFINE_BENCH_LANE(div1, bigint_div_ui_any(a, word))
+#else
 DEFINE_BENCH_LANE(div1, bigint_div_any(a, b))
+#endif
 #endif
 /* In-place sign mutation: O(1) field write, nothing allocated.  These
  * return the RECEIVER, so they must not go through the result-churn macro
@@ -3888,6 +3914,80 @@ static void fuzz_boxed_mul1_against_gmp(int cases) {
            cases, cases);
 }
 
+static void fuzz_word_ui_against_gmp(int cases, int32_t max_limbs) {
+    static const uint64_t boundary_words[] = {
+        0, 1, 2, (uint64_t)W_INT48_MAX,
+        (uint64_t)W_INT48_MAX + 1U,
+        UINT64_C(1) << 63, UINT64_MAX - 1U, UINT64_MAX
+    };
+    uint64_t state = UINT64_C(0x510e527fade682d1);
+    mpz_t za, zw, expected;
+    mpz_inits(za, zw, expected, NULL);
+    for (int t = 0; t < cases; t++) {
+        WValue base;
+        if ((t % 19) == 0) {
+            static const int64_t inline_values[] = {
+                0, 1, -1, W_INT48_MAX, W_INT48_MIN
+            };
+            base = w_box_int(inline_values[(size_t)t %
+                (sizeof inline_values / sizeof inline_values[0])]);
+        } else {
+            int32_t width = 1 + (int32_t)(
+                bench_rng(&state) % (uint64_t)max_limbs);
+            base = bench_bigint(width, bench_rng(&state));
+        }
+        WValue a = base;
+        if (w_is_bigint(base) && (t & 1)) {
+            if (t & 2) a = w_neg(base);
+            else w_as_bigint(a)->size = -w_as_bigint(a)->size;
+        }
+        uint64_t word = t < (int)(sizeof boundary_words /
+                                      sizeof boundary_words[0])
+            ? boundary_words[t]
+            : bench_rng(&state);
+        gmp_import_value(za, a);
+        mpz_set_ui(zw, (unsigned long)word);
+
+        WValue got = bigint_add_ui_any(a, word);
+        mpz_add(expected, za, zw);
+        if (!value_matches_mpz(got, expected))
+            dief("word-ui add mismatch case=%d word=%llu", t,
+                 (unsigned long long)word);
+        bench_free_value(got);
+
+        got = bigint_sub_ui_any(a, word);
+        mpz_sub(expected, za, zw);
+        if (!value_matches_mpz(got, expected))
+            dief("word-ui sub mismatch case=%d word=%llu", t,
+                 (unsigned long long)word);
+        bench_free_value(got);
+
+        got = bigint_mul_ui_any(a, word);
+        mpz_mul(expected, za, zw);
+        if (!value_matches_mpz(got, expected))
+            dief("word-ui mul mismatch case=%d word=%llu", t,
+                 (unsigned long long)word);
+        bench_free_value(got);
+
+        uint64_t divisor = word == 0 ? 1 : word;
+        mpz_set_ui(zw, (unsigned long)divisor);
+        got = bigint_div_ui_any(a, divisor);
+        mpz_tdiv_q(expected, za, zw);
+        if (!value_matches_mpz(got, expected))
+            dief("word-ui div mismatch case=%d word=%llu", t,
+                 (unsigned long long)divisor);
+        bench_free_value(got);
+
+        if (a != base) bench_free_value(a);
+        bench_free_value(base);
+    }
+    mpz_clears(za, zw, expected, NULL);
+    bigint_pool_release_thread();
+    printf("unsigned-word add/sub/mul/div fuzz vs GMP: %d/%d match"
+           " (max %d limbs, signed/overlay inputs)\n",
+           cases, cases, max_limbs);
+}
+
 static void gmp_import_value(mpz_t z, WValue v) {
     uint64_t scratch;
     int32_t len;
@@ -6052,6 +6152,18 @@ int main(int argc, char **argv) {
         return 0;
 #else
         die("boxed mul1 fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-word-ui") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_limbs <= 0)
+            die("unsigned-word fuzz expects positive cases and max limbs");
+#ifdef HAVE_GMP
+        fuzz_word_ui_against_gmp(cases, max_limbs);
+        return 0;
+#else
+        die("unsigned-word fuzz requires GMP");
 #endif
     }
     if (argc == 4 && strcmp(argv[1], "--bench-linear-iters") == 0) {

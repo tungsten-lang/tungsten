@@ -1310,6 +1310,68 @@ static const uint64_t *integer_limbs(WValue v, uint64_t *stack_limb, int32_t *ou
     return b->limbs;
 }
 
+/* Unsigned-word add/sub entries for callers with an already-decoded rhs.
+ * Callers that already proved or hoisted a one-limb rhs should not rebuild a
+ * boxed operand only for the generic two-value dispatcher to decode it again. */
+#ifndef BN_WORD_UI_POSITIVE_FAST
+#define BN_WORD_UI_POSITIVE_FAST 1
+#endif
+static inline __attribute__((always_inline))
+WValue bigint_add_ui_any(WValue a, uint64_t word) {
+    if (word == 0) {
+        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
+#if BN_WORD_UI_POSITIVE_FAST
+    if (w_is_bigint(a) && (a & W_BIGINT_SIGN_BIT) == 0) {
+        WBigint *ba = w_as_bigint(a);
+        int32_t n = ba->size;
+        if (n >= 2) {
+            WBigint *r = bigint_alloc_raw_hot(n);
+            return bigint_add_word_into(ba->limbs, n, 0, word, r);
+        }
+    }
+#endif
+    uint64_t scratch;
+    int32_t alen;
+    const uint64_t *al = integer_limbs(a, &scratch, &alen);
+    int negative = alen < 0;
+    int32_t n = negative ? -alen : alen;
+    if (n == 0) return bigint_from_u64(word);
+    if (n == 1)
+        return bigint_add_one_limb_magnitudes(
+            al[0], negative, word, 0);
+    return bigint_addsub_word(al, n, negative, word, 0);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_sub_ui_any(WValue a, uint64_t word) {
+    if (word == 0) {
+        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
+#if BN_WORD_UI_POSITIVE_FAST
+    if (w_is_bigint(a) && (a & W_BIGINT_SIGN_BIT) == 0) {
+        WBigint *ba = w_as_bigint(a);
+        int32_t n = ba->size;
+        if (n >= 2) {
+            WBigint *r = bigint_alloc_raw_hot(n);
+            return bigint_sub_word_into(r, ba->limbs, n, 0, word);
+        }
+    }
+#endif
+    uint64_t scratch;
+    int32_t alen;
+    const uint64_t *al = integer_limbs(a, &scratch, &alen);
+    int negative = alen < 0;
+    int32_t n = negative ? -alen : alen;
+    if (n == 0) return bigint_finish_one_limb(word, 1);
+    if (n == 1)
+        return bigint_add_one_limb_magnitudes(
+            al[0], negative, word, 1);
+    return bigint_addsub_word(al, n, negative, word, 1);
+}
+
 /* ---- Magnitude operations (unsigned) ---- */
 
 static uint64_t bn_add_n(uint64_t *r, const uint64_t *a,
@@ -8701,6 +8763,82 @@ static WValue bigint_mul_n1(const uint64_t *al, int32_t n, uint64_t w,
     r->size = negative ? -size : size;
     return bigint_box(r);
 }
+
+/* Unsigned-word multiply entry for callers that already hold the rhs as a
+ * machine word.  This mirrors the fixed N×1 ladder without paying boxed-pair
+ * tag/sign/shape dispatch. */
+static inline __attribute__((always_inline))
+WValue bigint_mul_ui_any(WValue a, uint64_t word) {
+    if (word == 0) return w_box_int(0);
+    if (word == 1) {
+        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
+#if BN_WORD_UI_POSITIVE_FAST
+    if (w_is_bigint(a) && (a & W_BIGINT_SIGN_BIT) == 0) {
+        WBigint *ba = w_as_bigint(a);
+        int32_t n = ba->size;
+        if (n == 1) {
+            __uint128_t product = (__uint128_t)ba->limbs[0] * word;
+            uint64_t low = (uint64_t)product;
+            uint64_t high = (uint64_t)(product >> 64);
+            if (high == 0) return bigint_finish_one_limb(low, 0);
+            WBigint *r = bigint_alloc_raw_hot_exact(2U);
+            r->limbs[0] = low;
+            r->limbs[1] = high;
+            r->size = 2;
+            return bigint_box(r);
+        }
+        if (n >= 2) {
+#if BN_MUL_N1_SMALL_STRAIGHT
+            if (n <= BN_MUL_N1_SMALL_MAX)
+                return bigint_mul_n1_small(ba->limbs, n, word, 0);
+#endif
+#if BN_MUL_POWER2_FIXED
+            if (n == 8) return bigint_mul_n1_fixed8(ba->limbs, word, 0);
+            if (n == 16) return bigint_mul_n1_fixed16(ba->limbs, word, 0);
+            if (n == 24) return bigint_mul_n1_fixed24(ba->limbs, word, 0);
+            if (n == 32) return bigint_mul_n1_fixed32(ba->limbs, word, 0);
+            if (n == 40) return bigint_mul_n1_fixed40(ba->limbs, word, 0);
+            if (n == 48) return bigint_mul_n1_fixed48(ba->limbs, word, 0);
+            if (n == 64) return bigint_mul_n1_fixed64(ba->limbs, word, 0);
+#endif
+            return bigint_mul_n1(ba->limbs, n, word, 0);
+        }
+    }
+#endif
+    uint64_t scratch;
+    int32_t alen;
+    const uint64_t *al = integer_limbs(a, &scratch, &alen);
+    int negative = alen < 0;
+    int32_t n = negative ? -alen : alen;
+    if (n == 0) return w_box_int(0);
+    if (n == 1) {
+        __uint128_t product = (__uint128_t)al[0] * word;
+        uint64_t low = (uint64_t)product;
+        uint64_t high = (uint64_t)(product >> 64);
+        if (high == 0) return bigint_finish_one_limb(low, negative);
+        WBigint *r = bigint_alloc_raw_hot_exact(2U);
+        r->limbs[0] = low;
+        r->limbs[1] = high;
+        r->size = negative ? -2 : 2;
+        return bigint_box(r);
+    }
+#if BN_MUL_N1_SMALL_STRAIGHT
+    if (n <= BN_MUL_N1_SMALL_MAX)
+        return bigint_mul_n1_small(al, n, word, negative);
+#endif
+#if BN_MUL_POWER2_FIXED
+    if (n == 8) return bigint_mul_n1_fixed8(al, word, negative);
+    if (n == 16) return bigint_mul_n1_fixed16(al, word, negative);
+    if (n == 24) return bigint_mul_n1_fixed24(al, word, negative);
+    if (n == 32) return bigint_mul_n1_fixed32(al, word, negative);
+    if (n == 40) return bigint_mul_n1_fixed40(al, word, negative);
+    if (n == 48) return bigint_mul_n1_fixed48(al, word, negative);
+    if (n == 64) return bigint_mul_n1_fixed64(al, word, negative);
+#endif
+    return bigint_mul_n1(al, n, word, negative);
+}
 #endif
 
 static __attribute__((noinline))
@@ -11555,6 +11693,35 @@ WValue bigint_div_any(WValue a, WValue b) {
     if (a == b && w_is_bigint(a)) return w_box_int(1);
 #endif
     return bigint_div_any_generic(a, b);
+}
+
+/* Unsigned-word quotient entry: the divisor is already decoded and hoisted,
+ * so only the dividend's sign/length remains. */
+static inline __attribute__((always_inline))
+WValue bigint_div_ui_any(WValue a, uint64_t divisor) {
+    if (__builtin_expect(divisor == 0, 0)) die("division by zero");
+    if (divisor == 1) {
+        if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
+        return a;
+    }
+    uint64_t scratch;
+    int32_t alen;
+    const uint64_t *al = integer_limbs(a, &scratch, &alen);
+    int negative = alen < 0;
+    int32_t n = negative ? -alen : alen;
+    if (n == 0) return w_box_int(0);
+    if (n == 1)
+        return bigint_finish_one_limb(al[0] / divisor, negative);
+    uint64_t remainder;
+    WBigint *q;
+#if BN_DIV1_SMALL_NORMALIZED
+    if (n <= 4 && (divisor >> 63) != 0)
+        q = mag_div_single_small_normalized(al, n, divisor);
+    else
+#endif
+        q = mag_div_single(al, n, divisor, &remainder);
+    if (negative) q->size = -q->size;
+    return bigint_finish_div1(q);
 }
 
 static inline __attribute__((always_inline))

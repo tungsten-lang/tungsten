@@ -1488,6 +1488,10 @@ def main() -> int:
                 "power-of-two reserve pool"
             ),
             "gmp": "two alternating mpz result destinations retain capacity",
+            "native_word_rows": (
+                "Tungsten and GMP hoist the positive one-limb rhs and call "
+                "their unsigned-word add/sub/mul/div entries"
+            ),
             "python": "ordinary immutable Python integer expressions",
             "rust": (
                 "borrowed operands and ordinary immutable num-bigint results; "

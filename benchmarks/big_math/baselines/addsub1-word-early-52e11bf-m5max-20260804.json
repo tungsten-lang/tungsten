@@ -1,0 +1,3963 @@
+{
+  "metadata": {
+    "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 benchmarks/big_math/run_variant_ab.py --label addsub1-word-early --operations add,sub,add1,sub1 --sizes 2,3,4,8,16,24,32,64 --baseline-name equal-first --candidate-name word-first --baseline-extra-flags=-DBN_ADDSUB_BOXED_WORD_EARLY=0 --rounds 9 --target-ms 110 --output benchmarks/big_math/baselines/addsub1-word-early-52e11bf-m5max-20260804.json",
+    "generated_at": "2026-08-04T15:26:59.546093-04:00",
+    "git_commit": "52e11bf27ebf07194bf6ec5c0fc7a7166ff3c950",
+    "git_dirty_tracked": true,
+    "gmp_version": "6.3.0",
+    "start_machine": {
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "cpu": "Apple M5 Max",
+      "logical_cpus": 18,
+      "load_average": [
+        4.27197265625,
+        4.51123046875,
+        4.53564453125
+      ],
+      "power": {
+        "source": "AC Power",
+        "battery_percent": 100
+      },
+      "compiler_command": "clang",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "compiler_flags": "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations -DBN_ADDSUB_BOXED_WORD_EARLY=0",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "end_machine": {
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "cpu": "Apple M5 Max",
+      "logical_cpus": 18,
+      "load_average": [
+        4.7900390625,
+        4.7763671875,
+        4.64501953125
+      ],
+      "power": {
+        "source": "AC Power",
+        "battery_percent": 100
+      },
+      "compiler_command": "clang",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "compiler_flags": "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations -DBN_ADDSUB_BOXED_WORD_EARLY=0",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "methodology": "isolated same-source builds; variant order alternates each round; each point is a full boxed immutable Tungsten operation with the previous result live; paired median and IQR are computed across outer rounds; GMP remains the public-API within-build reference",
+    "acceptance_eligible": true
+  },
+  "experiment": {
+    "label": "addsub1-word-early",
+    "baseline_name": "equal-first",
+    "candidate_name": "word-first",
+    "baseline_flags": "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations -DBN_ADDSUB_BOXED_WORD_EARLY=0",
+    "candidate_flags": "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations",
+    "baseline_env": {},
+    "candidate_env": {},
+    "binary_sha256": {
+      "equal-first": "c1d62f1c93504cedeb759c5d8e8e5e16ec3846b02c7e20325935e86f99320138",
+      "word-first": "188d8a71b52c73038d7218f6e3823cc782f03f032d3b4ddb6a8f6b20fe00986e"
+    },
+    "operations": [
+      "add",
+      "sub",
+      "add1",
+      "sub1"
+    ],
+    "sizes": [
+      2,
+      3,
+      4,
+      8,
+      16,
+      24,
+      32,
+      64
+    ],
+    "rounds": 9,
+    "target_ms": 110.0,
+    "tungsten_only": false
+  },
+  "results": [
+    {
+      "operation": "add",
+      "limbs": 2,
+      "bits": 128,
+      "baseline_ns_median": 2.561,
+      "baseline_ns_iqr": 0.16300000000000026,
+      "candidate_ns_median": 3.265,
+      "candidate_ns_iqr": 0.31099999999999994,
+      "candidate_over_baseline_paired_median": 1.2608030592734225,
+      "candidate_over_baseline_paired_iqr": 0.06701305944758063,
+      "speedup": 0.7931452835911434,
+      "baseline_over_gmp_median": 0.8112984324164448,
+      "candidate_over_gmp_median": 0.972419675860108,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.353,
+            "gmp_ns": 2.693
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.371,
+            "gmp_ns": 2.977
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.708,
+            "gmp_ns": 3.553
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.743,
+            "gmp_ns": 3.381
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 2.615,
+            "gmp_ns": 3.159
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.555,
+            "gmp_ns": 3.376
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.8,
+            "gmp_ns": 3.244
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.561,
+            "gmp_ns": 3.554
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.545,
+            "gmp_ns": 2.989
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.861,
+            "gmp_ns": 2.867
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.271,
+            "gmp_ns": 3.216
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.42,
+            "gmp_ns": 3.517
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 2.97,
+            "gmp_ns": 3.172
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.297,
+            "gmp_ns": 3.834
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.281,
+            "gmp_ns": 3.539
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.754,
+            "gmp_ns": 3.227
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.142,
+            "gmp_ns": 3.205
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.265,
+            "gmp_ns": 3.314
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.2158946026349342,
+          1.3795866722901728,
+          1.2629246676514032,
+          1.082756106452789,
+          1.2608030592734225,
+          1.2841487279843444,
+          0.9835714285714287,
+          1.2268645060523233,
+          1.2829076620825148
+        ]
+      }
+    },
+    {
+      "operation": "add",
+      "limbs": 3,
+      "bits": 192,
+      "baseline_ns_median": 2.648,
+      "baseline_ns_iqr": 0.2999999999999998,
+      "candidate_ns_median": 3.189,
+      "candidate_ns_iqr": 0.2549999999999999,
+      "candidate_over_baseline_paired_median": 1.2611202635914331,
+      "candidate_over_baseline_paired_iqr": 0.21636985212275417,
+      "speedup": 0.7929457870672764,
+      "baseline_over_gmp_median": 0.8055893074119077,
+      "candidate_over_gmp_median": 0.9098250336473755,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.428,
+            "gmp_ns": 2.884
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.432,
+            "gmp_ns": 3.05
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.852,
+            "gmp_ns": 3.591
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 2.648,
+            "gmp_ns": 3.457
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.553,
+            "gmp_ns": 3.139
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.652,
+            "gmp_ns": 3.292
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.046,
+            "gmp_ns": 3.7
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.003,
+            "gmp_ns": 3.784
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.552,
+            "gmp_ns": 3.126
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.062,
+            "gmp_ns": 3.212
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.152,
+            "gmp_ns": 3.255
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.368,
+            "gmp_ns": 3.767
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 2.859,
+            "gmp_ns": 2.924
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 3.363,
+            "gmp_ns": 3.796
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.401,
+            "gmp_ns": 3.51
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.113,
+            "gmp_ns": 3.493
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.189,
+            "gmp_ns": 3.507
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.38,
+            "gmp_ns": 3.715
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.2611202635914331,
+          1.2960526315789476,
+          1.1809256661991585,
+          1.0796827794561934,
+          1.3172737955346652,
+          1.2824283559577676,
+          1.0219960604070912,
+          1.0619380619380618,
+          1.3244514106583072
+        ]
+      }
+    },
+    {
+      "operation": "add",
+      "limbs": 4,
+      "bits": 256,
+      "baseline_ns_median": 2.685,
+      "baseline_ns_iqr": 0.43199999999999994,
+      "candidate_ns_median": 3.337,
+      "candidate_ns_iqr": 0.2240000000000002,
+      "candidate_over_baseline_paired_median": 1.2628,
+      "candidate_over_baseline_paired_iqr": 0.26465726700363557,
+      "speedup": 0.7918910357934749,
+      "baseline_over_gmp_median": 0.8355614973262032,
+      "candidate_over_gmp_median": 0.9520180637877506,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.481,
+            "gmp_ns": 2.993
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.5,
+            "gmp_ns": 2.992
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.041,
+            "gmp_ns": 3.788
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.032,
+            "gmp_ns": 3.619
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.663,
+            "gmp_ns": 3.007
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.609,
+            "gmp_ns": 3.157
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.15,
+            "gmp_ns": 3.716
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.253,
+            "gmp_ns": 3.888
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.685,
+            "gmp_ns": 3.29
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.301,
+            "gmp_ns": 3.341
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.157,
+            "gmp_ns": 3.329
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.373,
+            "gmp_ns": 3.543
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.91,
+            "gmp_ns": 3.29
+          },
+          {
+            "iterations": 30037323,
+            "tungsten_ns": 3.686,
+            "gmp_ns": 3.868
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 3.415,
+            "gmp_ns": 4.014
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.337,
+            "gmp_ns": 3.474
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.191,
+            "gmp_ns": 3.345
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.555,
+            "gmp_ns": 3.811
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.3305118903667876,
+          1.2628,
+          1.1091746136139429,
+          0.9597625329815304,
+          1.384153210664664,
+          1.3089306247604446,
+          1.0593650793650795,
+          0.9809406701506301,
+          1.324022346368715
+        ]
+      }
+    },
+    {
+      "operation": "add",
+      "limbs": 8,
+      "bits": 512,
+      "baseline_ns_median": 3.18,
+      "baseline_ns_iqr": 0.2789999999999999,
+      "candidate_ns_median": 3.47,
+      "candidate_ns_iqr": 0.3740000000000001,
+      "candidate_over_baseline_paired_median": 1.174551971326165,
+      "candidate_over_baseline_paired_iqr": 0.14089397585934482,
+      "speedup": 0.8513884650595056,
+      "baseline_over_gmp_median": 0.7752315943442223,
+      "candidate_over_gmp_median": 0.9050095811661648,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.843,
+            "gmp_ns": 3.48
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.79,
+            "gmp_ns": 3.69
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 3.481,
+            "gmp_ns": 4.313
+          },
+          {
+            "iterations": 28159990,
+            "tungsten_ns": 3.197,
+            "gmp_ns": 4.142
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.918,
+            "gmp_ns": 3.403
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.18,
+            "gmp_ns": 4.102
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.18,
+            "gmp_ns": 4.134
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.389,
+            "gmp_ns": 4.084
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.081,
+            "gmp_ns": 4.008
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.393,
+            "gmp_ns": 3.834
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.277,
+            "gmp_ns": 3.634
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.634,
+            "gmp_ns": 3.959
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.47,
+            "gmp_ns": 4.192
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 4.312,
+            "gmp_ns": 4.762
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 4.043,
+            "gmp_ns": 4.554
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.44,
+            "gmp_ns": 3.669
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.306,
+            "gmp_ns": 3.653
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.767,
+            "gmp_ns": 4.061
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.1934576151952163,
+          1.174551971326165,
+          1.0439528871014077,
+          1.0853925555208008,
+          1.4777244688142563,
+          1.2713836477987421,
+          1.0817610062893082,
+          0.9755089997049278,
+          1.222654982148653
+        ]
+      }
+    },
+    {
+      "operation": "add",
+      "limbs": 16,
+      "bits": 1024,
+      "baseline_ns_median": 4.101,
+      "baseline_ns_iqr": 0.1730000000000005,
+      "candidate_ns_median": 4.398,
+      "candidate_ns_iqr": 0.6399999999999997,
+      "candidate_over_baseline_paired_median": 1.0716374269005846,
+      "candidate_over_baseline_paired_iqr": 0.15858385122829544,
+      "speedup": 0.9331514324693044,
+      "baseline_over_gmp_median": 0.8116998227299588,
+      "candidate_over_gmp_median": 0.8727608494921514,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.628,
+            "gmp_ns": 4.427
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 3.948,
+            "gmp_ns": 4.867
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 4.564,
+            "gmp_ns": 5.809
+          },
+          {
+            "iterations": 25031102,
+            "tungsten_ns": 4.306,
+            "gmp_ns": 5.18
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.59,
+            "gmp_ns": 4.433
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.101,
+            "gmp_ns": 5.079
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.044,
+            "gmp_ns": 4.927
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.121,
+            "gmp_ns": 5.077
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.104,
+            "gmp_ns": 4.992
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 26503520,
+            "tungsten_ns": 4.614,
+            "gmp_ns": 5.217
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.086,
+            "gmp_ns": 4.585
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.364,
+            "gmp_ns": 4.799
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 4.777,
+            "gmp_ns": 5.38
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.274,
+            "gmp_ns": 6.069
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 4.726,
+            "gmp_ns": 5.415
+          },
+          {
+            "iterations": 26503520,
+            "tungsten_ns": 4.019,
+            "gmp_ns": 4.728
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.036,
+            "gmp_ns": 5.044
+          },
+          {
+            "iterations": 26503520,
+            "tungsten_ns": 4.398,
+            "gmp_ns": 5.121
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.2717750826901875,
+          1.034954407294833,
+          0.9561787905346187,
+          1.109382257315374,
+          1.4690807799442898,
+          1.152401853206535,
+          0.9938180019782396,
+          0.9793739383644744,
+          1.0716374269005846
+        ]
+      }
+    },
+    {
+      "operation": "add",
+      "limbs": 24,
+      "bits": 1536,
+      "baseline_ns_median": 4.942,
+      "baseline_ns_iqr": 0.3149999999999995,
+      "candidate_ns_median": 5.519,
+      "candidate_ns_iqr": 0.4870000000000001,
+      "candidate_over_baseline_paired_median": 1.0832646331409728,
+      "candidate_over_baseline_paired_iqr": 0.10582161677610813,
+      "speedup": 0.9231354642313546,
+      "baseline_over_gmp_median": 0.8302532511978097,
+      "candidate_over_gmp_median": 0.8930420711974111,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 4.615,
+            "gmp_ns": 5.261
+          },
+          {
+            "iterations": 23713685,
+            "tungsten_ns": 4.959,
+            "gmp_ns": 5.979
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.506,
+            "gmp_ns": 6.597
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.167,
+            "gmp_ns": 6.231
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.565,
+            "gmp_ns": 5.506
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 5.208,
+            "gmp_ns": 6.113
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 4.852,
+            "gmp_ns": 5.844
+          },
+          {
+            "iterations": 18773338,
+            "tungsten_ns": 4.942,
+            "gmp_ns": 5.792
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 4.882,
+            "gmp_ns": 5.908
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.519,
+            "gmp_ns": 6.18
+          },
+          {
+            "iterations": 23713685,
+            "tungsten_ns": 4.813,
+            "gmp_ns": 5.717
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.234,
+            "gmp_ns": 5.721
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.743,
+            "gmp_ns": 6.46
+          },
+          {
+            "iterations": 17329234,
+            "tungsten_ns": 6.739,
+            "gmp_ns": 7.596
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.599,
+            "gmp_ns": 6.198
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.256,
+            "gmp_ns": 6.322
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.836,
+            "gmp_ns": 6.279
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.272,
+            "gmp_ns": 5.847
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.1958829902491874,
+          0.9705585803589434,
+          0.9505993461678169,
+          1.1114766789239405,
+          1.4762322015334062,
+          1.0750768049155146,
+          1.0832646331409728,
+          1.1808984216916227,
+          1.0798852929127407
+        ]
+      }
+    },
+    {
+      "operation": "add",
+      "limbs": 32,
+      "bits": 2048,
+      "baseline_ns_median": 6.309,
+      "baseline_ns_iqr": 0.6579999999999995,
+      "candidate_ns_median": 6.683,
+      "candidate_ns_iqr": 0.5069999999999997,
+      "candidate_over_baseline_paired_median": 1.022580159566461,
+      "candidate_over_baseline_paired_iqr": 0.18481680804221934,
+      "speedup": 0.9779184454585602,
+      "baseline_over_gmp_median": 0.8933566433566433,
+      "candidate_over_gmp_median": 0.9225236025775513,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.726,
+            "gmp_ns": 6.218
+          },
+          {
+            "iterations": 18022399,
+            "tungsten_ns": 6.361,
+            "gmp_ns": 7.192
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 7.867,
+            "gmp_ns": 8.811
+          },
+          {
+            "iterations": 17329229,
+            "tungsten_ns": 6.643,
+            "gmp_ns": 7.436
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.851,
+            "gmp_ns": 6.768
+          },
+          {
+            "iterations": 17329229,
+            "tungsten_ns": 6.918,
+            "gmp_ns": 7.938
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.29,
+            "gmp_ns": 6.815
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 5.985,
+            "gmp_ns": 6.455
+          },
+          {
+            "iterations": 18022399,
+            "tungsten_ns": 6.309,
+            "gmp_ns": 6.734
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.683,
+            "gmp_ns": 7.099
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.194,
+            "gmp_ns": 6.725
+          },
+          {
+            "iterations": 18022399,
+            "tungsten_ns": 6.156,
+            "gmp_ns": 6.673
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.793,
+            "gmp_ns": 7.52
+          },
+          {
+            "iterations": 14079998,
+            "tungsten_ns": 8.521,
+            "gmp_ns": 9.563
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 6.676,
+            "gmp_ns": 7.116
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.8,
+            "gmp_ns": 7.42
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.934,
+            "gmp_ns": 7.334
+          },
+          {
+            "iterations": 18022399,
+            "tungsten_ns": 6.293,
+            "gmp_ns": 6.579
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.1671323786238212,
+          0.9737462663103286,
+          0.7825092157111987,
+          1.022580159566461,
+          1.4563322508972827,
+          0.9650187915582539,
+          1.0810810810810811,
+          1.158563074352548,
+          0.9974639404025994
+        ]
+      }
+    },
+    {
+      "operation": "add",
+      "limbs": 64,
+      "bits": 4096,
+      "baseline_ns_median": 12.327,
+      "baseline_ns_iqr": 1.193999999999999,
+      "candidate_ns_median": 12.61,
+      "candidate_ns_iqr": 1.6869999999999994,
+      "candidate_over_baseline_paired_median": 1.0178342990443223,
+      "candidate_over_baseline_paired_iqr": 0.137727988600849,
+      "speedup": 0.9824781901522993,
+      "baseline_over_gmp_median": 0.9787994282991901,
+      "candidate_over_gmp_median": 0.9850702789308863,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 10478139,
+            "tungsten_ns": 11.089,
+            "gmp_ns": 11.738
+          },
+          {
+            "iterations": 9195103,
+            "tungsten_ns": 12.327,
+            "gmp_ns": 12.594
+          },
+          {
+            "iterations": 7509333,
+            "tungsten_ns": 15.584,
+            "gmp_ns": 16.096
+          },
+          {
+            "iterations": 8664614,
+            "tungsten_ns": 13.289,
+            "gmp_ns": 14.125
+          },
+          {
+            "iterations": 9386667,
+            "tungsten_ns": 12.364,
+            "gmp_ns": 12.223
+          },
+          {
+            "iterations": 8664616,
+            "tungsten_ns": 14.274,
+            "gmp_ns": 13.9
+          },
+          {
+            "iterations": 8664614,
+            "tungsten_ns": 12.317,
+            "gmp_ns": 13.656
+          },
+          {
+            "iterations": 10012444,
+            "tungsten_ns": 12.095,
+            "gmp_ns": 12.331
+          },
+          {
+            "iterations": 9386667,
+            "tungsten_ns": 11.592,
+            "gmp_ns": 11.394
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 8834510,
+            "tungsten_ns": 12.675,
+            "gmp_ns": 12.802
+          },
+          {
+            "iterations": 9794782,
+            "tungsten_ns": 11.582,
+            "gmp_ns": 11.323
+          },
+          {
+            "iterations": 9794782,
+            "tungsten_ns": 11.425,
+            "gmp_ns": 11.497
+          },
+          {
+            "iterations": 8343703,
+            "tungsten_ns": 13.526,
+            "gmp_ns": 13.731
+          },
+          {
+            "iterations": 6724776,
+            "tungsten_ns": 15.153,
+            "gmp_ns": 15.459
+          },
+          {
+            "iterations": 9386666,
+            "tungsten_ns": 12.407,
+            "gmp_ns": 11.708
+          },
+          {
+            "iterations": 8501132,
+            "tungsten_ns": 13.269,
+            "gmp_ns": 13.671
+          },
+          {
+            "iterations": 8664614,
+            "tungsten_ns": 12.61,
+            "gmp_ns": 13.019
+          },
+          {
+            "iterations": 9586382,
+            "tungsten_ns": 11.118,
+            "gmp_ns": 11.53
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.1430246189917936,
+          0.9395635596657744,
+          0.7331237166324436,
+          1.0178342990443223,
+          1.2255742478162406,
+          0.8692027462519266,
+          1.0772915482666234,
+          1.0425795783381562,
+          0.9591097308488613
+        ]
+      }
+    },
+    {
+      "operation": "sub",
+      "limbs": 2,
+      "bits": 128,
+      "baseline_ns_median": 2.635,
+      "baseline_ns_iqr": 0.23100000000000032,
+      "candidate_ns_median": 3.415,
+      "candidate_ns_iqr": 0.48099999999999987,
+      "candidate_over_baseline_paired_median": 1.330170777988615,
+      "candidate_over_baseline_paired_iqr": 0.17541697129644485,
+      "speedup": 0.7517831669044222,
+      "baseline_over_gmp_median": 0.7473650590865538,
+      "candidate_over_gmp_median": 0.9721499219156688,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.417,
+            "gmp_ns": 3.228
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 2.511,
+            "gmp_ns": 3.417
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.157,
+            "gmp_ns": 4.422
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 2.915,
+            "gmp_ns": 4.042
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.51,
+            "gmp_ns": 3.182
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.741,
+            "gmp_ns": 3.653
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 2.68,
+            "gmp_ns": 3.464
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.635,
+            "gmp_ns": 3.543
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.34,
+            "gmp_ns": 3.131
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.415,
+            "gmp_ns": 3.669
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.059,
+            "gmp_ns": 3.109
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.054,
+            "gmp_ns": 3.067
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.606,
+            "gmp_ns": 3.742
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.902,
+            "gmp_ns": 3.861
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.164,
+            "gmp_ns": 3.152
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 3.735,
+            "gmp_ns": 3.842
+          },
+          {
+            "iterations": 30037323,
+            "tungsten_ns": 3.505,
+            "gmp_ns": 3.896
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.125,
+            "gmp_ns": 3.497
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.4129085643359538,
+          1.2182397451214655,
+          0.9673740893253088,
+          1.23704974271012,
+          1.554581673306773,
+          1.1543232396935426,
+          1.3936567164179103,
+          1.330170777988615,
+          1.3354700854700856
+        ]
+      }
+    },
+    {
+      "operation": "sub",
+      "limbs": 3,
+      "bits": 192,
+      "baseline_ns_median": 3.086,
+      "baseline_ns_iqr": 0.2240000000000002,
+      "candidate_ns_median": 3.939,
+      "candidate_ns_iqr": 0.32600000000000007,
+      "candidate_over_baseline_paired_median": 1.2824120603015075,
+      "candidate_over_baseline_paired_iqr": 0.14758369638270796,
+      "speedup": 0.779780564263323,
+      "baseline_over_gmp_median": 0.8680010819583446,
+      "candidate_over_gmp_median": 1.0785460091509913,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.852,
+            "gmp_ns": 3.191
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.069,
+            "gmp_ns": 3.417
+          },
+          {
+            "iterations": 30037323,
+            "tungsten_ns": 3.474,
+            "gmp_ns": 4.051
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.456,
+            "gmp_ns": 3.992
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 2.883,
+            "gmp_ns": 3.149
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.197,
+            "gmp_ns": 3.721
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.086,
+            "gmp_ns": 3.68
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.209,
+            "gmp_ns": 3.697
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 2.985,
+            "gmp_ns": 3.403
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 30037323,
+            "tungsten_ns": 3.939,
+            "gmp_ns": 3.72
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.581,
+            "gmp_ns": 3.31
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.501,
+            "gmp_ns": 3.357
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.142,
+            "gmp_ns": 3.752
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 4.225,
+            "gmp_ns": 3.573
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.869,
+            "gmp_ns": 3.612
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 4.154,
+            "gmp_ns": 3.782
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 4.243,
+            "gmp_ns": 3.934
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.828,
+            "gmp_ns": 3.832
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.3811360448807855,
+          1.166829586184425,
+          1.0077720207253884,
+          1.1984953703703705,
+          1.4654873395768295,
+          1.2101970597435097,
+          1.3460790667530784,
+          1.3222187597382362,
+          1.2824120603015075
+        ]
+      }
+    },
+    {
+      "operation": "sub",
+      "limbs": 4,
+      "bits": 256,
+      "baseline_ns_median": 3.289,
+      "baseline_ns_iqr": 0.1679999999999997,
+      "candidate_ns_median": 4.204,
+      "candidate_ns_iqr": 0.3109999999999995,
+      "candidate_over_baseline_paired_median": 1.2958801498127341,
+      "candidate_over_baseline_paired_iqr": 0.018498226733520973,
+      "speedup": 0.7716763005780346,
+      "baseline_over_gmp_median": 0.8843430369787568,
+      "candidate_over_gmp_median": 1.0896830748482804,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.08,
+            "gmp_ns": 3.368
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.186,
+            "gmp_ns": 3.884
+          },
+          {
+            "iterations": 30037323,
+            "tungsten_ns": 3.623,
+            "gmp_ns": 3.961
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.774,
+            "gmp_ns": 4.264
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.25,
+            "gmp_ns": 3.809
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.204,
+            "gmp_ns": 3.528
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.328,
+            "gmp_ns": 3.831
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.372,
+            "gmp_ns": 3.813
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.289,
+            "gmp_ns": 3.812
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.994,
+            "gmp_ns": 3.853
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.204,
+            "gmp_ns": 3.839
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.641,
+            "gmp_ns": 3.499
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.848,
+            "gmp_ns": 4.449
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 4.235,
+            "gmp_ns": 3.751
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 4.152,
+            "gmp_ns": 3.825
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.305,
+            "gmp_ns": 3.799
+          },
+          {
+            "iterations": 28159990,
+            "tungsten_ns": 4.6,
+            "gmp_ns": 4.257
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.836,
+            "gmp_ns": 3.392
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.2967532467532468,
+          1.3195229127432517,
+          1.0049682583494342,
+          1.2845786963434023,
+          1.3030769230769232,
+          1.2958801498127341,
+          1.2935697115384615,
+          1.3641755634638197,
+          1.1663119489206444
+        ]
+      }
+    },
+    {
+      "operation": "sub",
+      "limbs": 8,
+      "bits": 512,
+      "baseline_ns_median": 3.766,
+      "baseline_ns_iqr": 0.31300000000000017,
+      "candidate_ns_median": 4.437,
+      "candidate_ns_iqr": 0.3049999999999997,
+      "candidate_over_baseline_paired_median": 1.2120125504258181,
+      "candidate_over_baseline_paired_iqr": 0.1620885103254155,
+      "speedup": 0.8250739644970414,
+      "baseline_over_gmp_median": 0.8895408163265307,
+      "candidate_over_gmp_median": 1.0573862362698945,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.315,
+            "gmp_ns": 3.778
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.022,
+            "gmp_ns": 4.462
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 3.87,
+            "gmp_ns": 4.465
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.462,
+            "gmp_ns": 5.36
+          },
+          {
+            "iterations": 30037323,
+            "tungsten_ns": 3.766,
+            "gmp_ns": 4.128
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.487,
+            "gmp_ns": 3.92
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 3.794,
+            "gmp_ns": 4.41
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.557,
+            "gmp_ns": 3.956
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.757,
+            "gmp_ns": 4.042
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 23713685,
+            "tungsten_ns": 4.717,
+            "gmp_ns": 4.461
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.437,
+            "gmp_ns": 4.224
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.2,
+            "gmp_ns": 4.004
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 5.408,
+            "gmp_ns": 5.151
+          },
+          {
+            "iterations": 28159990,
+            "tungsten_ns": 4.585,
+            "gmp_ns": 4.266
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.412,
+            "gmp_ns": 4.036
+          },
+          {
+            "iterations": 28159990,
+            "tungsten_ns": 4.428,
+            "gmp_ns": 4.039
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 5.246,
+            "gmp_ns": 4.727
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.995,
+            "gmp_ns": 3.842
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.4229260935143286,
+          1.1031824962705121,
+          1.0852713178294573,
+          1.2120125504258181,
+          1.2174721189591078,
+          1.2652710065959276,
+          1.1671059567738533,
+          1.4748383469215633,
+          1.0633484162895928
+        ]
+      }
+    },
+    {
+      "operation": "sub",
+      "limbs": 16,
+      "bits": 1024,
+      "baseline_ns_median": 4.587,
+      "baseline_ns_iqr": 0.4499999999999993,
+      "candidate_ns_median": 5.41,
+      "candidate_ns_iqr": 0.6280000000000001,
+      "candidate_over_baseline_paired_median": 1.1673138016237203,
+      "candidate_over_baseline_paired_iqr": 0.13905497040630732,
+      "speedup": 0.8566676746295737,
+      "baseline_over_gmp_median": 0.9088216627882377,
+      "candidate_over_gmp_median": 1.0624101827140215,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.296,
+            "gmp_ns": 4.727
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 4.99,
+            "gmp_ns": 5.339
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 4.878,
+            "gmp_ns": 5.15
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.666,
+            "gmp_ns": 6.681
+          },
+          {
+            "iterations": 23713685,
+            "tungsten_ns": 4.448,
+            "gmp_ns": 5.384
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.288,
+            "gmp_ns": 4.934
+          },
+          {
+            "iterations": 22527992,
+            "tungsten_ns": 4.898,
+            "gmp_ns": 5.114
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.547,
+            "gmp_ns": 5.002
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.587,
+            "gmp_ns": 5.077
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.803,
+            "gmp_ns": 5.18
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 5.556,
+            "gmp_ns": 5.004
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 5.17,
+            "gmp_ns": 5.051
+          },
+          {
+            "iterations": 18022399,
+            "tungsten_ns": 6.614,
+            "gmp_ns": 6.146
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.41,
+            "gmp_ns": 5.185
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.304,
+            "gmp_ns": 4.786
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 5.175,
+            "gmp_ns": 4.871
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.873,
+            "gmp_ns": 5.697
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.036,
+            "gmp_ns": 4.77
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.3507914338919924,
+          1.1134268537074148,
+          1.059860598605986,
+          1.1673138016237203,
+          1.216276978417266,
+          1.2369402985074627,
+          1.0565536953858718,
+          1.2916208489113703,
+          1.0978853281011554
+        ]
+      }
+    },
+    {
+      "operation": "sub",
+      "limbs": 24,
+      "bits": 1536,
+      "baseline_ns_median": 6.107,
+      "baseline_ns_iqr": 0.4319999999999995,
+      "candidate_ns_median": 6.449,
+      "candidate_ns_iqr": 0.17999999999999972,
+      "candidate_over_baseline_paired_median": 1.0450320512820512,
+      "candidate_over_baseline_paired_iqr": 0.09961353524022398,
+      "speedup": 0.9569084496242908,
+      "baseline_over_gmp_median": 0.9611829944547136,
+      "candidate_over_gmp_median": 1.0735923608824498,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.407,
+            "gmp_ns": 5.694
+          },
+          {
+            "iterations": 17329229,
+            "tungsten_ns": 6.421,
+            "gmp_ns": 6.316
+          },
+          {
+            "iterations": 18022404,
+            "tungsten_ns": 5.932,
+            "gmp_ns": 6.263
+          },
+          {
+            "iterations": 13653331,
+            "tungsten_ns": 7.933,
+            "gmp_ns": 7.582
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.24,
+            "gmp_ns": 6.492
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.364,
+            "gmp_ns": 6.266
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.107,
+            "gmp_ns": 6.378
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.561,
+            "gmp_ns": 6.343
+          },
+          {
+            "iterations": 18022399,
+            "tungsten_ns": 6.04,
+            "gmp_ns": 6.0
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 18022399,
+            "tungsten_ns": 6.437,
+            "gmp_ns": 5.9
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.341,
+            "gmp_ns": 5.937
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.449,
+            "gmp_ns": 5.894
+          },
+          {
+            "iterations": 15536550,
+            "tungsten_ns": 7.247,
+            "gmp_ns": 6.897
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.521,
+            "gmp_ns": 6.074
+          },
+          {
+            "iterations": 19589570,
+            "tungsten_ns": 6.306,
+            "gmp_ns": 5.694
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.455,
+            "gmp_ns": 6.206
+          },
+          {
+            "iterations": 16091431,
+            "tungsten_ns": 7.1,
+            "gmp_ns": 6.495
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.86,
+            "gmp_ns": 5.866
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.1904938043277233,
+          0.9875408814826351,
+          1.087154416722859,
+          0.9135257783940501,
+          1.0450320512820512,
+          0.9908862350722816,
+          1.0569837890944818,
+          1.2767487861895341,
+          0.9701986754966888
+        ]
+      }
+    },
+    {
+      "operation": "sub",
+      "limbs": 32,
+      "bits": 2048,
+      "baseline_ns_median": 7.837,
+      "baseline_ns_iqr": 0.8090000000000002,
+      "candidate_ns_median": 7.944,
+      "candidate_ns_iqr": 0.480999999999999,
+      "candidate_over_baseline_paired_median": 1.0132503744671044,
+      "candidate_over_baseline_paired_iqr": 0.10736945865725744,
+      "speedup": 0.9869229019786219,
+      "baseline_over_gmp_median": 0.9763665361751486,
+      "candidate_over_gmp_median": 1.0829517910045785,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 17329229,
+            "tungsten_ns": 6.734,
+            "gmp_ns": 6.897
+          },
+          {
+            "iterations": 15018665,
+            "tungsten_ns": 7.217,
+            "gmp_ns": 7.56
+          },
+          {
+            "iterations": 14534195,
+            "tungsten_ns": 7.9,
+            "gmp_ns": 7.794
+          },
+          {
+            "iterations": 12873143,
+            "tungsten_ns": 8.679,
+            "gmp_ns": 9.144
+          },
+          {
+            "iterations": 14534192,
+            "tungsten_ns": 7.837,
+            "gmp_ns": 8.518
+          },
+          {
+            "iterations": 14534195,
+            "tungsten_ns": 7.765,
+            "gmp_ns": 7.489
+          },
+          {
+            "iterations": 15536550,
+            "tungsten_ns": 8.304,
+            "gmp_ns": 8.013
+          },
+          {
+            "iterations": 15018665,
+            "tungsten_ns": 8.026,
+            "gmp_ns": 7.466
+          },
+          {
+            "iterations": 14534192,
+            "tungsten_ns": 6.603,
+            "gmp_ns": 7.476
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 7.45,
+            "gmp_ns": 6.737
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 7.806,
+            "gmp_ns": 7.12
+          },
+          {
+            "iterations": 16091431,
+            "tungsten_ns": 7.349,
+            "gmp_ns": 6.735
+          },
+          {
+            "iterations": 12873143,
+            "tungsten_ns": 8.794,
+            "gmp_ns": 7.906
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 8.042,
+            "gmp_ns": 7.426
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 7.565,
+            "gmp_ns": 7.146
+          },
+          {
+            "iterations": 14534195,
+            "tungsten_ns": 8.046,
+            "gmp_ns": 7.46
+          },
+          {
+            "iterations": 14534192,
+            "tungsten_ns": 7.944,
+            "gmp_ns": 7.87
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 8.129,
+            "gmp_ns": 7.608
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.1063261063261063,
+          1.0816128585284746,
+          0.930253164556962,
+          1.0132503744671044,
+          1.0261579686104376,
+          0.9742433998712171,
+          0.9689306358381502,
+          0.9897832045850985,
+          1.2311070725427835
+        ]
+      }
+    },
+    {
+      "operation": "sub",
+      "limbs": 64,
+      "bits": 4096,
+      "baseline_ns_median": 13.717,
+      "baseline_ns_iqr": 1.899000000000001,
+      "candidate_ns_median": 13.729,
+      "candidate_ns_iqr": 0.6269999999999989,
+      "candidate_over_baseline_paired_median": 0.995465033017742,
+      "candidate_over_baseline_paired_iqr": 0.07822044821116592,
+      "speedup": 1.0045556265984654,
+      "baseline_over_gmp_median": 1.0032825322391559,
+      "candidate_over_gmp_median": 1.0197908044247121,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 9586382,
+            "tungsten_ns": 12.569,
+            "gmp_ns": 12.442
+          },
+          {
+            "iterations": 8343704,
+            "tungsten_ns": 12.837,
+            "gmp_ns": 12.795
+          },
+          {
+            "iterations": 8045714,
+            "tungsten_ns": 12.989,
+            "gmp_ns": 14.923
+          },
+          {
+            "iterations": 7040000,
+            "tungsten_ns": 15.539,
+            "gmp_ns": 16.097
+          },
+          {
+            "iterations": 7636610,
+            "tungsten_ns": 14.736,
+            "gmp_ns": 15.462
+          },
+          {
+            "iterations": 8191999,
+            "tungsten_ns": 13.717,
+            "gmp_ns": 13.076
+          },
+          {
+            "iterations": 8045713,
+            "tungsten_ns": 15.262,
+            "gmp_ns": 14.991
+          },
+          {
+            "iterations": 8191999,
+            "tungsten_ns": 13.742,
+            "gmp_ns": 13.624
+          },
+          {
+            "iterations": 8664614,
+            "tungsten_ns": 12.475,
+            "gmp_ns": 13.866
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 8834510,
+            "tungsten_ns": 12.512,
+            "gmp_ns": 12.478
+          },
+          {
+            "iterations": 8343704,
+            "tungsten_ns": 13.552,
+            "gmp_ns": 13.289
+          },
+          {
+            "iterations": 9386666,
+            "tungsten_ns": 12.738,
+            "gmp_ns": 11.825
+          },
+          {
+            "iterations": 7768276,
+            "tungsten_ns": 15.175,
+            "gmp_ns": 14.838
+          },
+          {
+            "iterations": 8501131,
+            "tungsten_ns": 14.126,
+            "gmp_ns": 12.994
+          },
+          {
+            "iterations": 8664616,
+            "tungsten_ns": 13.882,
+            "gmp_ns": 13.26
+          },
+          {
+            "iterations": 8664616,
+            "tungsten_ns": 13.729,
+            "gmp_ns": 13.818
+          },
+          {
+            "iterations": 7904561,
+            "tungsten_ns": 14.495,
+            "gmp_ns": 14.692
+          },
+          {
+            "iterations": 8501132,
+            "tungsten_ns": 13.499,
+            "gmp_ns": 13.76
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          0.995465033017742,
+          1.0556983718937447,
+          0.9806759565786434,
+          0.9765750691807711,
+          0.9586047774158523,
+          1.012028869286287,
+          0.8995544489581967,
+          1.054795517391937,
+          1.0820841683366733
+        ]
+      }
+    },
+    {
+      "operation": "add1",
+      "limbs": 2,
+      "bits": 128,
+      "baseline_ns_median": 3.095,
+      "baseline_ns_iqr": 0.262,
+      "candidate_ns_median": 2.804,
+      "candidate_ns_iqr": 0.2240000000000002,
+      "candidate_over_baseline_paired_median": 0.8862681744749595,
+      "candidate_over_baseline_paired_iqr": 0.04778272327062594,
+      "speedup": 1.128326649653664,
+      "baseline_over_gmp_median": 1.2773925104022192,
+      "candidate_over_gmp_median": 1.1780715396578536,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.017,
+            "gmp_ns": 2.355
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.763,
+            "gmp_ns": 2.163
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.246,
+            "gmp_ns": 2.552
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.474,
+            "gmp_ns": 2.678
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.279,
+            "gmp_ns": 2.635
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.067,
+            "gmp_ns": 2.503
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.286,
+            "gmp_ns": 2.577
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.012,
+            "gmp_ns": 2.349
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.095,
+            "gmp_ns": 2.4
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.543,
+            "gmp_ns": 2.132
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.883,
+            "gmp_ns": 2.404
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.541,
+            "gmp_ns": 2.226
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.03,
+            "gmp_ns": 2.572
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.804,
+            "gmp_ns": 2.386
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.762,
+            "gmp_ns": 2.387
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.967,
+            "gmp_ns": 2.508
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.0,
+            "gmp_ns": 2.53
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.743,
+            "gmp_ns": 2.333
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          0.8428902883659265,
+          1.0434310532030402,
+          0.7828096118299446,
+          0.8721934369602762,
+          0.8551387618176273,
+          0.9005542875774372,
+          0.9029214850882532,
+          0.9960159362549801,
+          0.8862681744749595
+        ]
+      }
+    },
+    {
+      "operation": "add1",
+      "limbs": 3,
+      "bits": 192,
+      "baseline_ns_median": 3.418,
+      "baseline_ns_iqr": 0.355,
+      "candidate_ns_median": 3.098,
+      "candidate_ns_iqr": 0.18500000000000005,
+      "candidate_over_baseline_paired_median": 0.8985346972629251,
+      "candidate_over_baseline_paired_iqr": 0.04066342052595262,
+      "speedup": 1.112923076923077,
+      "baseline_over_gmp_median": 1.2724679029957204,
+      "candidate_over_gmp_median": 1.1788175553137468,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.155,
+            "gmp_ns": 2.473
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.005,
+            "gmp_ns": 2.424
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.617,
+            "gmp_ns": 2.713
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.568,
+            "gmp_ns": 2.804
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.568,
+            "gmp_ns": 3.07
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.418,
+            "gmp_ns": 2.441
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.594,
+            "gmp_ns": 2.918
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.213,
+            "gmp_ns": 2.406
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.399,
+            "gmp_ns": 2.955
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.778,
+            "gmp_ns": 2.202
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.035,
+            "gmp_ns": 2.71
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.25,
+            "gmp_ns": 2.757
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.289,
+            "gmp_ns": 2.734
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 2.962,
+            "gmp_ns": 2.764
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.098,
+            "gmp_ns": 2.729
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.173,
+            "gmp_ns": 2.82
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.18,
+            "gmp_ns": 2.59
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.995,
+            "gmp_ns": 2.464
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          0.8805071315372426,
+          1.0099833610648918,
+          0.8985346972629251,
+          0.9218049327354261,
+          0.8301569506726458,
+          0.9063779988297249,
+          0.8828603227601559,
+          0.9897292250233427,
+          0.8811415122094735
+        ]
+      }
+    },
+    {
+      "operation": "add1",
+      "limbs": 4,
+      "bits": 256,
+      "baseline_ns_median": 3.666,
+      "baseline_ns_iqr": 0.17600000000000016,
+      "candidate_ns_median": 3.23,
+      "candidate_ns_iqr": 0.1259999999999999,
+      "candidate_over_baseline_paired_median": 0.89571201694018,
+      "candidate_over_baseline_paired_iqr": 0.046427251385235846,
+      "speedup": 1.1164302600472813,
+      "baseline_over_gmp_median": 1.317589002467395,
+      "candidate_over_gmp_median": 1.1957597173144876,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.305,
+            "gmp_ns": 2.551
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.101,
+            "gmp_ns": 2.394
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.737,
+            "gmp_ns": 2.715
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.738,
+            "gmp_ns": 2.837
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.715,
+            "gmp_ns": 2.767
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.561,
+            "gmp_ns": 2.875
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.563,
+            "gmp_ns": 2.721
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.666,
+            "gmp_ns": 2.771
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.778,
+            "gmp_ns": 2.838
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.064,
+            "gmp_ns": 2.679
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.195,
+            "gmp_ns": 2.681
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.291,
+            "gmp_ns": 2.671
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.303,
+            "gmp_ns": 2.719
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.129,
+            "gmp_ns": 2.747
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.23,
+            "gmp_ns": 2.71
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.355,
+            "gmp_ns": 2.677
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.177,
+            "gmp_ns": 2.526
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.384,
+            "gmp_ns": 2.83
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          0.9270801815431164,
+          1.0303128023218315,
+          0.8806529301578806,
+          0.8836276083467095,
+          0.8422611036339166,
+          0.9070485818590284,
+          0.9416222284591635,
+          0.8666121112929623,
+          0.89571201694018
+        ]
+      }
+    },
+    {
+      "operation": "add1",
+      "limbs": 8,
+      "bits": 512,
+      "baseline_ns_median": 3.852,
+      "baseline_ns_iqr": 0.31499999999999995,
+      "candidate_ns_median": 3.675,
+      "candidate_ns_iqr": 0.17100000000000026,
+      "candidate_over_baseline_paired_median": 0.9684076433121019,
+      "candidate_over_baseline_paired_iqr": 0.09451707054211989,
+      "speedup": 1.0326229939489608,
+      "baseline_over_gmp_median": 0.9589394650398874,
+      "candidate_over_gmp_median": 0.8981048486340143,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.462,
+            "gmp_ns": 3.492
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.343,
+            "gmp_ns": 3.582
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.852,
+            "gmp_ns": 4.062
+          },
+          {
+            "iterations": 28159990,
+            "tungsten_ns": 4.037,
+            "gmp_ns": 4.445
+          },
+          {
+            "iterations": 30037323,
+            "tungsten_ns": 3.756,
+            "gmp_ns": 3.86
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.087,
+            "gmp_ns": 4.262
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.722,
+            "gmp_ns": 3.811
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 3.925,
+            "gmp_ns": 3.922
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.114,
+            "gmp_ns": 4.428
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 3.578,
+            "gmp_ns": 3.798
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 3.649,
+            "gmp_ns": 4.063
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.383,
+            "gmp_ns": 3.507
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.598,
+            "gmp_ns": 4.115
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.782,
+            "gmp_ns": 4.431
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.729,
+            "gmp_ns": 4.329
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.675,
+            "gmp_ns": 4.382
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.801,
+            "gmp_ns": 4.113
+          },
+          {
+            "iterations": 30037323,
+            "tungsten_ns": 3.769,
+            "gmp_ns": 4.17
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.0335066435586364,
+          1.091534549805564,
+          0.8782450674974039,
+          0.8912558830814962,
+          1.0069222577209798,
+          0.9124051871788599,
+          0.9873723804406233,
+          0.9684076433121019,
+          0.9161400097228974
+        ]
+      }
+    },
+    {
+      "operation": "add1",
+      "limbs": 16,
+      "bits": 1024,
+      "baseline_ns_median": 4.608,
+      "baseline_ns_iqr": 0.5650000000000004,
+      "candidate_ns_median": 4.606,
+      "candidate_ns_iqr": 0.391,
+      "candidate_over_baseline_paired_median": 1.0306261343012704,
+      "candidate_over_baseline_paired_iqr": 0.22560704971090983,
+      "speedup": 0.9702839533348009,
+      "baseline_over_gmp_median": 0.6847910517321734,
+      "candidate_over_gmp_median": 0.6495430628634726,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.408,
+            "gmp_ns": 6.437
+          },
+          {
+            "iterations": 30037323,
+            "tungsten_ns": 3.978,
+            "gmp_ns": 6.053
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 4.608,
+            "gmp_ns": 6.851
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 4.937,
+            "gmp_ns": 7.198
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.372,
+            "gmp_ns": 6.522
+          },
+          {
+            "iterations": 23713685,
+            "tungsten_ns": 4.993,
+            "gmp_ns": 6.814
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 3.966,
+            "gmp_ns": 6.205
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.814,
+            "gmp_ns": 6.508
+          },
+          {
+            "iterations": 18022399,
+            "tungsten_ns": 5.292,
+            "gmp_ns": 7.549
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.543,
+            "gmp_ns": 6.301
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.569,
+            "gmp_ns": 6.719
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 4.253,
+            "gmp_ns": 6.769
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.484,
+            "gmp_ns": 7.146
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 5.024,
+            "gmp_ns": 7.376
+          },
+          {
+            "iterations": 23713685,
+            "tungsten_ns": 4.691,
+            "gmp_ns": 7.222
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 4.934,
+            "gmp_ns": 7.6
+          },
+          {
+            "iterations": 18773338,
+            "tungsten_ns": 5.061,
+            "gmp_ns": 7.0
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.606,
+            "gmp_ns": 7.122
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.0306261343012704,
+          1.1485671191553544,
+          0.9229600694444445,
+          0.9082438727972453,
+          1.1491308325709058,
+          0.9395153214500299,
+          1.2440746343923348,
+          1.0513086830078937,
+          0.8703703703703703
+        ]
+      }
+    },
+    {
+      "operation": "add1",
+      "limbs": 24,
+      "bits": 1536,
+      "baseline_ns_median": 5.524,
+      "baseline_ns_iqr": 0.28000000000000025,
+      "candidate_ns_median": 5.799,
+      "candidate_ns_iqr": 0.18900000000000006,
+      "candidate_over_baseline_paired_median": 1.030231716147719,
+      "candidate_over_baseline_paired_iqr": 0.12150192643273017,
+      "speedup": 0.9706554208399227,
+      "baseline_over_gmp_median": 0.5951892999676409,
+      "candidate_over_gmp_median": 0.6048088222001266,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.63,
+            "gmp_ns": 9.285
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 4.905,
+            "gmp_ns": 8.882
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.524,
+            "gmp_ns": 9.218
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.751,
+            "gmp_ns": 9.743
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.518,
+            "gmp_ns": 9.271
+          },
+          {
+            "iterations": 17329234,
+            "tungsten_ns": 5.9,
+            "gmp_ns": 9.273
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 5.281,
+            "gmp_ns": 9.456
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.471,
+            "gmp_ns": 9.017
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.123,
+            "gmp_ns": 10.673
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.262,
+            "gmp_ns": 9.165
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.417,
+            "gmp_ns": 9.544
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.691,
+            "gmp_ns": 9.316
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.746,
+            "gmp_ns": 9.978
+          },
+          {
+            "iterations": 17329229,
+            "tungsten_ns": 6.691,
+            "gmp_ns": 11.063
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.799,
+            "gmp_ns": 10.341
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.073,
+            "gmp_ns": 9.811
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.88,
+            "gmp_ns": 9.449
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.857,
+            "gmp_ns": 9.124
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          0.9346358792184725,
+          1.1043832823649335,
+          1.030231716147719,
+          0.9991305859850461,
+          1.2125770206596593,
+          0.9828813559322034,
+          1.149971596288582,
+          1.0747578139279839,
+          0.956557243181447
+        ]
+      }
+    },
+    {
+      "operation": "add1",
+      "limbs": 32,
+      "bits": 2048,
+      "baseline_ns_median": 6.204,
+      "baseline_ns_iqr": 0.532,
+      "candidate_ns_median": 6.377,
+      "candidate_ns_iqr": 0.30099999999999927,
+      "candidate_over_baseline_paired_median": 1.0726310726310726,
+      "candidate_over_baseline_paired_iqr": 0.15994351153847008,
+      "speedup": 0.932286995515695,
+      "baseline_over_gmp_median": 0.5437335670464505,
+      "candidate_over_gmp_median": 0.5457680835197615,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 18022404,
+            "tungsten_ns": 6.059,
+            "gmp_ns": 11.298
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.583,
+            "gmp_ns": 10.479
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.41,
+            "gmp_ns": 11.286
+          },
+          {
+            "iterations": 17329229,
+            "tungsten_ns": 6.438,
+            "gmp_ns": 11.507
+          },
+          {
+            "iterations": 18022399,
+            "tungsten_ns": 6.204,
+            "gmp_ns": 11.41
+          },
+          {
+            "iterations": 15018665,
+            "tungsten_ns": 6.237,
+            "gmp_ns": 10.716
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.624,
+            "gmp_ns": 11.114
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.878,
+            "gmp_ns": 10.163
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.546,
+            "gmp_ns": 12.056
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.855,
+            "gmp_ns": 10.728
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.471,
+            "gmp_ns": 11.885
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 6.243,
+            "gmp_ns": 12.055
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.34,
+            "gmp_ns": 11.986
+          },
+          {
+            "iterations": 15018665,
+            "tungsten_ns": 7.283,
+            "gmp_ns": 13.816
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.69,
+            "gmp_ns": 12.237
+          },
+          {
+            "iterations": 18022404,
+            "tungsten_ns": 6.377,
+            "gmp_ns": 11.103
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.544,
+            "gmp_ns": 11.858
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 5.847,
+            "gmp_ns": 10.154
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          0.9663310777356,
+          1.1590542718968297,
+          0.9739469578783152,
+          0.9847778813296055,
+          1.1739200515796262,
+          1.0726310726310726,
+          1.1338904694167853,
+          1.1133038448451853,
+          0.8932172318973419
+        ]
+      }
+    },
+    {
+      "operation": "add1",
+      "limbs": 64,
+      "bits": 4096,
+      "baseline_ns_median": 7.861,
+      "baseline_ns_iqr": 0.9029999999999996,
+      "candidate_ns_median": 8.144,
+      "candidate_ns_iqr": 0.9899999999999993,
+      "candidate_over_baseline_paired_median": 1.0703356367226062,
+      "candidate_over_baseline_paired_iqr": 0.2095450501860664,
+      "speedup": 0.9342863730689416,
+      "baseline_over_gmp_median": 0.39594024404150985,
+      "candidate_over_gmp_median": 0.40822055137844615,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 13653334,
+            "tungsten_ns": 8.111,
+            "gmp_ns": 19.059
+          },
+          {
+            "iterations": 15018668,
+            "tungsten_ns": 7.201,
+            "gmp_ns": 18.264
+          },
+          {
+            "iterations": 13653334,
+            "tungsten_ns": 8.172,
+            "gmp_ns": 19.889
+          },
+          {
+            "iterations": 12515556,
+            "tungsten_ns": 8.104,
+            "gmp_ns": 19.441
+          },
+          {
+            "iterations": 14534192,
+            "tungsten_ns": 7.694,
+            "gmp_ns": 19.852
+          },
+          {
+            "iterations": 16687410,
+            "tungsten_ns": 6.944,
+            "gmp_ns": 17.538
+          },
+          {
+            "iterations": 12873141,
+            "tungsten_ns": 7.918,
+            "gmp_ns": 18.916
+          },
+          {
+            "iterations": 16687406,
+            "tungsten_ns": 6.871,
+            "gmp_ns": 17.384
+          },
+          {
+            "iterations": 11552820,
+            "tungsten_ns": 7.861,
+            "gmp_ns": 20.193
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 11264000,
+            "tungsten_ns": 7.294,
+            "gmp_ns": 17.954
+          },
+          {
+            "iterations": 13251765,
+            "tungsten_ns": 8.389,
+            "gmp_ns": 19.59
+          },
+          {
+            "iterations": 13653334,
+            "tungsten_ns": 8.616,
+            "gmp_ns": 20.826
+          },
+          {
+            "iterations": 13653334,
+            "tungsten_ns": 8.674,
+            "gmp_ns": 21.763
+          },
+          {
+            "iterations": 10012444,
+            "tungsten_ns": 9.259,
+            "gmp_ns": 22.234
+          },
+          {
+            "iterations": 14080001,
+            "tungsten_ns": 8.143,
+            "gmp_ns": 18.37
+          },
+          {
+            "iterations": 15018665,
+            "tungsten_ns": 7.626,
+            "gmp_ns": 19.04
+          },
+          {
+            "iterations": 14080001,
+            "tungsten_ns": 8.144,
+            "gmp_ns": 19.95
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 7.012,
+            "gmp_ns": 17.475
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          0.8992725927752434,
+          1.1649770865157616,
+          1.054331864904552,
+          1.0703356367226062,
+          1.203405250844814,
+          1.1726670506912444,
+          0.963122000505178,
+          1.1852714306505603,
+          0.8919984734766568
+        ]
+      }
+    },
+    {
+      "operation": "sub1",
+      "limbs": 2,
+      "bits": 128,
+      "baseline_ns_median": 2.62,
+      "baseline_ns_iqr": 0.2759999999999998,
+      "candidate_ns_median": 2.412,
+      "candidate_ns_iqr": 0.15399999999999991,
+      "candidate_over_baseline_paired_median": 0.9337792642140467,
+      "candidate_over_baseline_paired_iqr": 0.06439305552609331,
+      "speedup": 1.0709169054441263,
+      "baseline_over_gmp_median": 1.1251154201292706,
+      "candidate_over_gmp_median": 1.0614186851211074,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.476,
+            "gmp_ns": 2.145
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.437,
+            "gmp_ns": 2.166
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.795,
+            "gmp_ns": 2.44
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.817,
+            "gmp_ns": 2.47
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.99,
+            "gmp_ns": 2.525
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.519,
+            "gmp_ns": 2.247
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.62,
+            "gmp_ns": 2.403
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.536,
+            "gmp_ns": 2.276
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.739,
+            "gmp_ns": 2.455
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.275,
+            "gmp_ns": 2.176
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.325,
+            "gmp_ns": 2.135
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.479,
+            "gmp_ns": 2.326
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.83,
+            "gmp_ns": 2.766
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.792,
+            "gmp_ns": 2.449
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.412,
+            "gmp_ns": 2.331
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.34,
+            "gmp_ns": 2.144
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.454,
+            "gmp_ns": 2.312
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.243,
+            "gmp_ns": 2.162
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          0.9188206785137318,
+          0.9540418547394338,
+          0.8869409660107335,
+          1.0046148384806532,
+          0.9337792642140467,
+          0.9575228265184597,
+          0.8931297709923663,
+          0.9676656151419559,
+          0.818912011683096
+        ]
+      }
+    },
+    {
+      "operation": "sub1",
+      "limbs": 3,
+      "bits": 192,
+      "baseline_ns_median": 3.041,
+      "baseline_ns_iqr": 0.11099999999999977,
+      "candidate_ns_median": 2.692,
+      "candidate_ns_iqr": 0.18100000000000005,
+      "candidate_over_baseline_paired_median": 0.8852351200263072,
+      "candidate_over_baseline_paired_iqr": 0.08459954215520005,
+      "speedup": 1.1296433878157504,
+      "baseline_over_gmp_median": 1.1264990328820117,
+      "candidate_over_gmp_median": 1.0638641875505255,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.679,
+            "gmp_ns": 2.355
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.987,
+            "gmp_ns": 2.771
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.073,
+            "gmp_ns": 2.801
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.99,
+            "gmp_ns": 2.678
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.261,
+            "gmp_ns": 2.846
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.041,
+            "gmp_ns": 2.723
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.098,
+            "gmp_ns": 2.661
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.912,
+            "gmp_ns": 2.585
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.182,
+            "gmp_ns": 2.817
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.564,
+            "gmp_ns": 2.637
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.563,
+            "gmp_ns": 2.362
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.727,
+            "gmp_ns": 2.519
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.266,
+            "gmp_ns": 3.143
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.817,
+            "gmp_ns": 2.585
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.692,
+            "gmp_ns": 2.571
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.477,
+            "gmp_ns": 2.429
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.745,
+            "gmp_ns": 2.464
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.632,
+            "gmp_ns": 2.474
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          0.9570735349010826,
+          0.858051556745899,
+          0.8874064432150992,
+          1.0923076923076922,
+          0.8638454461821528,
+          0.8852351200263072,
+          0.7995480955455132,
+          0.942651098901099,
+          0.8271527341294783
+        ]
+      }
+    },
+    {
+      "operation": "sub1",
+      "limbs": 4,
+      "bits": 256,
+      "baseline_ns_median": 3.359,
+      "baseline_ns_iqr": 0.22999999999999998,
+      "candidate_ns_median": 2.867,
+      "candidate_ns_iqr": 0.24400000000000022,
+      "candidate_over_baseline_paired_median": 0.8535278356653766,
+      "candidate_over_baseline_paired_iqr": 0.152865164536363,
+      "speedup": 1.1716079525636554,
+      "baseline_over_gmp_median": 1.2020415346708904,
+      "candidate_over_gmp_median": 1.1007667031763417,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.886,
+            "gmp_ns": 2.403
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.524,
+            "gmp_ns": 2.89
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.415,
+            "gmp_ns": 2.841
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.402,
+            "gmp_ns": 2.755
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.618,
+            "gmp_ns": 3.134
+          },
+          {
+            "iterations": 10478139,
+            "tungsten_ns": 3.347,
+            "gmp_ns": 2.779
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.185,
+            "gmp_ns": 2.659
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.122,
+            "gmp_ns": 2.521
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.359,
+            "gmp_ns": 2.948
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.015,
+            "gmp_ns": 2.739
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.636,
+            "gmp_ns": 2.409
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.745,
+            "gmp_ns": 2.495
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.736,
+            "gmp_ns": 3.352
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.771,
+            "gmp_ns": 2.422
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.856,
+            "gmp_ns": 2.673
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 3.047,
+            "gmp_ns": 2.814
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.95,
+            "gmp_ns": 2.642
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.867,
+            "gmp_ns": 2.596
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.0446985446985446,
+          0.7480136208853576,
+          0.8038067349926794,
+          1.098177542621987,
+          0.7658927584300719,
+          0.8533014639976098,
+          0.9566718995290424,
+          0.9449071108263934,
+          0.8535278356653766
+        ]
+      }
+    },
+    {
+      "operation": "sub1",
+      "limbs": 8,
+      "bits": 512,
+      "baseline_ns_median": 3.738,
+      "baseline_ns_iqr": 0.26400000000000023,
+      "candidate_ns_median": 3.355,
+      "candidate_ns_iqr": 0.19600000000000017,
+      "candidate_over_baseline_paired_median": 0.9414849572177753,
+      "candidate_over_baseline_paired_iqr": 0.20138621243042099,
+      "speedup": 1.0621518616241572,
+      "baseline_over_gmp_median": 0.9060721062618595,
+      "candidate_over_gmp_median": 0.8411439557798607,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.178,
+            "gmp_ns": 3.35
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 3.82,
+            "gmp_ns": 4.216
+          },
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.738,
+            "gmp_ns": 4.195
+          },
+          {
+            "iterations": 32182846,
+            "tungsten_ns": 3.862,
+            "gmp_ns": 3.994
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.181,
+            "gmp_ns": 4.158
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.623,
+            "gmp_ns": 3.841
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.598,
+            "gmp_ns": 4.125
+          },
+          {
+            "iterations": 34658449,
+            "tungsten_ns": 3.26,
+            "gmp_ns": 3.629
+          },
+          {
+            "iterations": 28159990,
+            "tungsten_ns": 3.884,
+            "gmp_ns": 4.346
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 30037337,
+            "tungsten_ns": 3.361,
+            "gmp_ns": 3.967
+          },
+          {
+            "iterations": 40000000,
+            "tungsten_ns": 2.966,
+            "gmp_ns": 3.562
+          },
+          {
+            "iterations": 37546676,
+            "tungsten_ns": 3.252,
+            "gmp_ns": 3.403
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.116,
+            "gmp_ns": 4.878
+          },
+          {
+            "iterations": 37546653,
+            "tungsten_ns": 3.023,
+            "gmp_ns": 3.847
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.411,
+            "gmp_ns": 4.084
+          },
+          {
+            "iterations": 32182862,
+            "tungsten_ns": 3.5,
+            "gmp_ns": 4.161
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 3.355,
+            "gmp_ns": 4.023
+          },
+          {
+            "iterations": 34658469,
+            "tungsten_ns": 3.215,
+            "gmp_ns": 3.624
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.0575833857772186,
+          0.7764397905759163,
+          0.869983948635634,
+          1.0657690315898498,
+          0.7230327672805549,
+          0.9414849572177753,
+          0.9727626459143969,
+          1.0291411042944787,
+          0.8277548918640577
+        ]
+      }
+    },
+    {
+      "operation": "sub1",
+      "limbs": 16,
+      "bits": 1024,
+      "baseline_ns_median": 4.618,
+      "baseline_ns_iqr": 0.6000000000000005,
+      "candidate_ns_median": 4.403,
+      "candidate_ns_iqr": 0.2160000000000002,
+      "candidate_over_baseline_paired_median": 0.9362766420182688,
+      "candidate_over_baseline_paired_iqr": 0.21475801965435937,
+      "speedup": 1.0680603948896632,
+      "baseline_over_gmp_median": 0.6731207289293849,
+      "candidate_over_gmp_median": 0.6643674787202818,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.035,
+            "gmp_ns": 5.733
+          },
+          {
+            "iterations": 23713685,
+            "tungsten_ns": 4.598,
+            "gmp_ns": 7.009
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.618,
+            "gmp_ns": 7.427
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.737,
+            "gmp_ns": 7.239
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 5.285,
+            "gmp_ns": 7.291
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.137,
+            "gmp_ns": 6.146
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 5.463,
+            "gmp_ns": 7.326
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.127,
+            "gmp_ns": 5.947
+          },
+          {
+            "iterations": 23713685,
+            "tungsten_ns": 4.703,
+            "gmp_ns": 7.317
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.346,
+            "gmp_ns": 6.799
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.305,
+            "gmp_ns": 6.058
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 4.119,
+            "gmp_ns": 5.69
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.154,
+            "gmp_ns": 8.195
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.403,
+            "gmp_ns": 6.735
+          },
+          {
+            "iterations": 26503531,
+            "tungsten_ns": 4.527,
+            "gmp_ns": 6.814
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.49,
+            "gmp_ns": 6.831
+          },
+          {
+            "iterations": 25031112,
+            "tungsten_ns": 4.521,
+            "gmp_ns": 6.558
+          },
+          {
+            "iterations": 28160003,
+            "tungsten_ns": 4.107,
+            "gmp_ns": 6.049
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.077075588599752,
+          0.9362766420182688,
+          0.8919445647466434,
+          1.0880303989867004,
+          0.8331125827814568,
+          1.0942712110224802,
+          0.8218927329306243,
+          1.095468863581294,
+          0.873272379332341
+        ]
+      }
+    },
+    {
+      "operation": "sub1",
+      "limbs": 24,
+      "bits": 1536,
+      "baseline_ns_median": 5.659,
+      "baseline_ns_iqr": 0.5499999999999998,
+      "candidate_ns_median": 5.548,
+      "candidate_ns_iqr": 0.2530000000000001,
+      "candidate_over_baseline_paired_median": 1.0616150019135093,
+      "candidate_over_baseline_paired_iqr": 0.14094102668195163,
+      "speedup": 0.9419610670511896,
+      "baseline_over_gmp_median": 0.604757085020243,
+      "candidate_over_gmp_median": 0.6280508765898934,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 23713676,
+            "tungsten_ns": 4.943,
+            "gmp_ns": 8.447
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.659,
+            "gmp_ns": 9.459
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.776,
+            "gmp_ns": 9.53
+          },
+          {
+            "iterations": 12873141,
+            "tungsten_ns": 5.852,
+            "gmp_ns": 9.58
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.914,
+            "gmp_ns": 9.592
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.226,
+            "gmp_ns": 9.476
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.671,
+            "gmp_ns": 9.282
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 4.78,
+            "gmp_ns": 7.904
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.305,
+            "gmp_ns": 9.427
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.722,
+            "gmp_ns": 9.308
+          },
+          {
+            "iterations": 21455230,
+            "tungsten_ns": 5.46,
+            "gmp_ns": 8.488
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 4.974,
+            "gmp_ns": 7.661
+          },
+          {
+            "iterations": 17329229,
+            "tungsten_ns": 6.471,
+            "gmp_ns": 9.975
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.481,
+            "gmp_ns": 8.727
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.548,
+            "gmp_ns": 8.803
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.713,
+            "gmp_ns": 9.259
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.334,
+            "gmp_ns": 8.536
+          },
+          {
+            "iterations": 22528000,
+            "tungsten_ns": 5.667,
+            "gmp_ns": 9.134
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.157596601254299,
+          0.9648347764622726,
+          0.8611495844875346,
+          1.1057758031442242,
+          0.9267839026039906,
+          1.0616150019135093,
+          1.0074061012167166,
+          1.115899581589958,
+          1.0682375117813383
+        ]
+      }
+    },
+    {
+      "operation": "sub1",
+      "limbs": 32,
+      "bits": 2048,
+      "baseline_ns_median": 6.042,
+      "baseline_ns_iqr": 0.06200000000000028,
+      "candidate_ns_median": 5.912,
+      "candidate_ns_iqr": 0.23000000000000043,
+      "candidate_over_baseline_paired_median": 0.9962027406306752,
+      "candidate_over_baseline_paired_iqr": 0.1107618993681837,
+      "speedup": 1.0038117335101095,
+      "baseline_over_gmp_median": 0.5110685752330226,
+      "candidate_over_gmp_median": 0.5446831558042968,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.539,
+            "gmp_ns": 10.647
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 5.995,
+            "gmp_ns": 11.918
+          },
+          {
+            "iterations": 14534192,
+            "tungsten_ns": 6.089,
+            "gmp_ns": 12.466
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.141,
+            "gmp_ns": 12.016
+          },
+          {
+            "iterations": 16091427,
+            "tungsten_ns": 6.055,
+            "gmp_ns": 11.147
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.042,
+            "gmp_ns": 11.637
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.019,
+            "gmp_ns": 11.653
+          },
+          {
+            "iterations": 21455238,
+            "tungsten_ns": 5.248,
+            "gmp_ns": 10.427
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 6.057,
+            "gmp_ns": 12.428
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 17329229,
+            "tungsten_ns": 6.327,
+            "gmp_ns": 11.7
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.823,
+            "gmp_ns": 10.446
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.498,
+            "gmp_ns": 9.968
+          },
+          {
+            "iterations": 15018665,
+            "tungsten_ns": 6.645,
+            "gmp_ns": 12.009
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 5.89,
+            "gmp_ns": 11.737
+          },
+          {
+            "iterations": 20479999,
+            "tungsten_ns": 5.842,
+            "gmp_ns": 10.379
+          },
+          {
+            "iterations": 18773332,
+            "tungsten_ns": 6.072,
+            "gmp_ns": 11.5
+          },
+          {
+            "iterations": 13251765,
+            "tungsten_ns": 5.912,
+            "gmp_ns": 11.176
+          },
+          {
+            "iterations": 19589564,
+            "tungsten_ns": 6.034,
+            "gmp_ns": 11.078
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.1422639465607511,
+          0.9713094245204338,
+          0.9029397273772376,
+          1.0820713238886175,
+          0.9727497935590421,
+          0.966898378020523,
+          1.008805449410201,
+          1.1265243902439024,
+          0.9962027406306752
+        ]
+      }
+    },
+    {
+      "operation": "sub1",
+      "limbs": 64,
+      "bits": 4096,
+      "baseline_ns_median": 7.869,
+      "baseline_ns_iqr": 0.3260000000000005,
+      "candidate_ns_median": 7.738,
+      "candidate_ns_iqr": 0.4900000000000002,
+      "candidate_over_baseline_paired_median": 1.0111831236497648,
+      "candidate_over_baseline_paired_iqr": 0.11184902552296294,
+      "speedup": 0.9889405554857359,
+      "baseline_over_gmp_median": 0.3887984811499865,
+      "candidate_over_gmp_median": 0.390513048480728,
+      "samples": {
+        "equal-first": [
+          {
+            "iterations": 13653334,
+            "tungsten_ns": 7.607,
+            "gmp_ns": 19.452
+          },
+          {
+            "iterations": 14534195,
+            "tungsten_ns": 8.134,
+            "gmp_ns": 21.312
+          },
+          {
+            "iterations": 9195101,
+            "tungsten_ns": 8.601,
+            "gmp_ns": 22.122
+          },
+          {
+            "iterations": 14080001,
+            "tungsten_ns": 8.049,
+            "gmp_ns": 20.539
+          },
+          {
+            "iterations": 14079998,
+            "tungsten_ns": 7.869,
+            "gmp_ns": 21.363
+          },
+          {
+            "iterations": 14534195,
+            "tungsten_ns": 7.847,
+            "gmp_ns": 21.225
+          },
+          {
+            "iterations": 14534195,
+            "tungsten_ns": 7.731,
+            "gmp_ns": 18.915
+          },
+          {
+            "iterations": 14534195,
+            "tungsten_ns": 7.808,
+            "gmp_ns": 19.55
+          },
+          {
+            "iterations": 12873141,
+            "tungsten_ns": 8.39,
+            "gmp_ns": 22.159
+          }
+        ],
+        "word-first": [
+          {
+            "iterations": 14534192,
+            "tungsten_ns": 7.707,
+            "gmp_ns": 20.128
+          },
+          {
+            "iterations": 15018665,
+            "tungsten_ns": 7.738,
+            "gmp_ns": 18.572
+          },
+          {
+            "iterations": 15536554,
+            "tungsten_ns": 7.377,
+            "gmp_ns": 20.099
+          },
+          {
+            "iterations": 12177297,
+            "tungsten_ns": 8.609,
+            "gmp_ns": 20.959
+          },
+          {
+            "iterations": 15018665,
+            "tungsten_ns": 7.957,
+            "gmp_ns": 20.204
+          },
+          {
+            "iterations": 14534192,
+            "tungsten_ns": 7.106,
+            "gmp_ns": 19.478
+          },
+          {
+            "iterations": 13653331,
+            "tungsten_ns": 8.198,
+            "gmp_ns": 21.251
+          },
+          {
+            "iterations": 13251765,
+            "tungsten_ns": 7.944,
+            "gmp_ns": 19.982
+          },
+          {
+            "iterations": 13653334,
+            "tungsten_ns": 7.467,
+            "gmp_ns": 19.121
+          }
+        ],
+        "candidate_over_baseline_paired": [
+          1.0131457867753384,
+          0.9513154659454143,
+          0.8576909661667247,
+          1.0695738601068456,
+          1.0111831236497648,
+          0.9055690072639224,
+          1.0604061570301384,
+          1.0174180327868854,
+          0.8899880810488676
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "acceptance_eligible": true,
+    "cells": 32,
+    "candidate_wins": 11,
+    "candidate_losses": 21,
+    "candidate_over_baseline_geomean": 1.0532532742346692,
+    "regressions_over_5_percent": 14
+  }
+}

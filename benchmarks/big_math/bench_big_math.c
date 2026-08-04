@@ -1051,12 +1051,17 @@ static int32_t bench_boxed_a_limbs(int op, int32_t limbs) {
     return limbs;
 }
 
+#ifndef BENCH_CMP_SHAPE
+#define BENCH_CMP_SHAPE 0
+#endif
+
 /*
  * Operand contract shared by the correctness check, the Tungsten lane, and
  * the GMP lane (the Python driver mirrors it exactly):
- *   cmp:    b equals a except in the LOWEST limb (bit 0 flipped), so the
- *           comparison must scan the full length — random operands would
- *           short-circuit at the top limb and measure nothing.
+ *   cmp:    by default b equals a except in the LOWEST limb (bit 0 flipped),
+ *           so the comparison must scan the full length. BENCH_CMP_SHAPE
+ *           selects a highest-limb difference or equality for controlled
+ *           comparison-geometry experiments.
  *   abs:    a is negative (sign flipped on the boxed bigint).
  *   powmod: *m_out is a deterministic odd n-limb modulus (bench_bigint
  *           already sets limb 0's low bit); e is the regular b operand.
@@ -1069,7 +1074,15 @@ static void bench_boxed_operands(int op, int32_t limbs,
     WValue b;
     if (op == BENCH_BOXED_CMP) {
         b = bench_clone_integer(a);
+#if BENCH_CMP_SHAPE == 0
         w_as_bigint(b)->limbs[0] ^= 1ULL;
+#elif BENCH_CMP_SHAPE == 1
+        w_as_bigint(b)->limbs[limbs - 1] ^= 1ULL;
+#elif BENCH_CMP_SHAPE == 2
+        /* Equal magnitudes exercise the complete scan. */
+#else
+#error "BENCH_CMP_SHAPE must be 0 (low), 1 (high), or 2 (equal)"
+#endif
     } else {
         int32_t b_limbs =
             (op == BENCH_BOXED_ADD1 || op == BENCH_BOXED_SUB1 ||

@@ -125,8 +125,8 @@ Source fingerprints:
 | QWEN-11 | Per-thread allocation slot cache | kept | production has one direct TLS handoff plus two buffers per logarithmic class; hot-handoff-6f41042-m5max-20260804.json isolates the handoff from those buckets and measures a 12.6% geomean win across 28 small boxed cells, while result-pool-132f1c7-m5max-20260804.tsv measures the complete pool at 1.00-1.56x for 1024-limb operations and 5.2-8.5x for four-limb word operations versus malloc/free |
 | QWEN-12 | Stack-passed scratch results up to eight limbs | pending | |
 | QWEN-13 | SIMD bitwise operations | kept | current positive equal-width AND/OR/XOR loops auto-vectorize to four 128-bit NEON operations per eight-limb iteration; against an otherwise-identical `-fno-vectorize -fno-slp-vectorize` build, the 18 boxed cells from 16 through 512 limbs improved 58.1% by geomean (0.339x-0.606x), and every current cell measured 0.659x-0.843x GMP; 4/8-limb fixed rungs remain scalar because the A/B found no SIMD benefit there; bitwise-auto-simd-684afd9-m5max-20260804.json; GMP bitwise/shift fuzz 100000x1024 passed |
-| QWEN-14 | Cache/decompose shift offsets | pending | |
-| QWEN-15 | SIMD/early-exit magnitude comparison | pending | |
+| QWEN-14 | Cache/decompose shift offsets | premise rejected | the proposed per-call division/modulo bottleneck is absent: bignum_shl_generic and bignum_shr_generic each decompose a dynamic count once with `k >> 6` and `k & 63`, the aligned branch already copies with memcpy, and the always-inlined boxed shift-by-13 lane constant-folds both values before entering its fixed positive kernels; the current default screen has all 40 shl/shr cells faster than GMP at 0.245x-0.872x; matrix-dd523e6-screen-m5max-20260804.json; source and emitted lane assembly inspected |
+| QWEN-15 | SIMD/early-exit magnitude comparison | rejected | an AArch64 candidate preserved the scalar most-significant pair early exit, then tested each eight-limb equal prefix with four 128-bit XORs and an OR reduction; on low-limb-difference full scans it lost all five 64..8192-limb boxed cells, regressed 9.7% by geomean, and every loss exceeded 5%; high-limb-difference and equal shapes were neutral at 0.988x and 1.004x, so the candidate was removed; cmp-neon-prefix-low-4bb7a7d-m5max-20260804.json, cmp-neon-prefix-high-4bb7a7d-m5max-20260804.json, cmp-neon-prefix-equal-4bb7a7d-m5max-20260804.json; each sweep checked its shaped operands against GMP; the retained BENCH_CMP_SHAPE control also exposed current high-difference compares at 1.36x-1.53x GMP |
 | QWEN-16 | Cache reciprocals for recurring divisors/moduli | pending | |
 | QWEN-17 | Divide-and-conquer decimal conversion | pending | |
 | QWEN-18 | Preserve O(1) sign-overlay paths in all lowering modes | pending | |
@@ -206,6 +206,7 @@ existence does not automatically disposition an item:
 - dd523e6 screen: current 485-cell default matrix, plus accurate 1..16-limb add1/sub1 confirmation and rejected C straight-line 2/3/4-limb candidate.
 - c05ae06 follow-up artifact: rejected exact-capacity hot allocation for 2-4-limb word add/sub results.
 - 684afd9 follow-up artifact: isolated the existing auto-vectorized boxed AND/OR/XOR loops from a scalarized build across 4-512 limbs.
+- 4bb7a7d follow-up artifacts: rejected a SIMD equal-prefix compare candidate across low-difference, high-difference, and equal operands; retained the compile-time benchmark shape control.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

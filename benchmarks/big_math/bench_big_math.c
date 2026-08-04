@@ -1319,8 +1319,16 @@ DEFINE_BENCH_LANE(gcd, bigint_gcd_any(a, b))
  * the copy kernel it called historically — the matrix row means "-x". The
  * overlay-free copy path stays covered by the tag-sign fuzzer's reference
  * lane (fuzz_copy_negate). */
+#ifndef BENCH_TAG_SIGN_OVERLAY
+#define BENCH_TAG_SIGN_OVERLAY 1
+#endif
+#if BENCH_TAG_SIGN_OVERLAY
 DEFINE_BENCH_LANE(neg, w_neg(a))
 DEFINE_BENCH_LANE(abs, w_ic_bigint_abs(a, NULL, 0))
+#else
+DEFINE_BENCH_LANE(neg, bigint_copy_signed(w_as_bigint(a), 1))
+DEFINE_BENCH_LANE(abs, bigint_copy_signed(w_as_bigint(a), 0))
+#endif
 DEFINE_BENCH_LANE(add1, bigint_add_any(a, b))
 DEFINE_BENCH_LANE(sub1, bigint_sub_any(a, b))
 DEFINE_BENCH_LANE(mul1, bigint_mul_any(a, b))
@@ -4746,10 +4754,13 @@ int main(int argc, char **argv) {
      * not by the timed region.  Reps run here, the warm-up is paid once per
      * size, and stdout is flushed per row so a driver can stream results.
      */
-    if (argc == 6 && strcmp(argv[1], "--bench-boxed-sweep") == 0) {
+    if (argc == 6 &&
+        (strcmp(argv[1], "--bench-boxed-sweep") == 0 ||
+         strcmp(argv[1], "--bench-tungsten-sweep") == 0)) {
 #ifndef HAVE_GMP
         die("boxed sweep requires GMP");
 #else
+        int tungsten_only = strcmp(argv[1], "--bench-tungsten-sweep") == 0;
         int op = bench_boxed_op_parse(argv[2]);
         if (op < 0) die("unknown boxed sweep operation");
         int runs = atoi(argv[4]);
@@ -4783,8 +4794,14 @@ int main(int argc, char **argv) {
             double pt, pg, fastest;
             for (;;) {
                 pt = bench_boxed_result_churn(op, limbs, pilot, 1);
-                pg = bench_gmp_boxed_result_churn(op, limbs, pilot);
-                fastest = pt < pg ? pt : pg;
+                pg = tungsten_only
+                    ? 0.0
+                    : bench_gmp_boxed_result_churn(op, limbs, pilot);
+                /* Variant A/Bs can intentionally make the Tungsten lanes
+                 * differ by orders of magnitude (for example O(1) sign
+                 * overlay versus a forced limb copy).  The Tungsten-only
+                 * mode calibrates each build from its own measured lane. */
+                fastest = tungsten_only ? pt : (pt < pg ? pt : pg);
                 if (fastest * pilot >= 20000.0 || pilot >= 4096) break;
                 pilot *= 16;                       /* still cheap: <20us so far */
             }
@@ -4805,7 +4822,10 @@ int main(int argc, char **argv) {
             int kept = runs < SWEEP_KEEP ? runs : SWEEP_KEEP;
             for (int r = 0; r < runs; r++) {
                 double tw, gm;
-                if (r & 1) {                       /* alternate lane order */
+                if (tungsten_only) {
+                    tw = bench_boxed_result_churn(op, limbs, iters, 1);
+                    gm = 0.0;
+                } else if (r & 1) {                /* alternate lane order */
                     gm = bench_gmp_boxed_result_churn(op, limbs, iters);
                     tw = bench_boxed_result_churn(op, limbs, iters, 1);
                 } else {

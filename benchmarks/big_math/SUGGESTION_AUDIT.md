@@ -129,7 +129,7 @@ Source fingerprints:
 | QWEN-15 | SIMD/early-exit magnitude comparison | rejected | an AArch64 candidate preserved the scalar most-significant pair early exit, then tested each eight-limb equal prefix with four 128-bit XORs and an OR reduction; on low-limb-difference full scans it lost all five 64..8192-limb boxed cells, regressed 9.7% by geomean, and every loss exceeded 5%; high-limb-difference and equal shapes were neutral at 0.988x and 1.004x, so the candidate was removed; cmp-neon-prefix-low-4bb7a7d-m5max-20260804.json, cmp-neon-prefix-high-4bb7a7d-m5max-20260804.json, cmp-neon-prefix-equal-4bb7a7d-m5max-20260804.json; each sweep checked its shaped operands against GMP; the retained BENCH_CMP_SHAPE control also exposed current high-difference compares at 1.36x-1.53x GMP |
 | QWEN-16 | Cache reciprocals for recurring divisors/moduli | pending | |
 | QWEN-17 | Divide-and-conquer decimal conversion | pending | |
-| QWEN-18 | Preserve O(1) sign-overlay paths in all lowering modes | pending | |
+| QWEN-18 | Preserve O(1) sign-overlay paths in all lowering modes | kept | a forced-copy boxed baseline isolated the current tag-sign path at 1, 64, and 8192 limbs: neg/abs won all six cells, improving 92.8% by geomean and holding 1.41-1.54 ns at every width versus 739-765 ns copies at 8192 limbs; all 40 current neg/abs matrix cells are faster than GMP; tag-sign-overlay-4666161-m5max-20260804.json; bigint_tag_sign_spec passed interpreted and release/native/fast across 1..48-limb arithmetic, predicates, formatting, hashing, and linked-view bang semantics |
 | QWEN-19 | Function attributes and vectorization controls for limb loops | pending | |
 | QWEN-20 | Return one-limb multiply results without a general ladder | kept | bigint_mul_positive_11 and early boxed N×1 entries allocate/publish directly without the general ladder; mul1 lifecycle artifact cuts 2-8-limb boxed time 39-45% and current 1-limb mul1 is faster than GMP |
 
@@ -207,6 +207,7 @@ existence does not automatically disposition an item:
 - c05ae06 follow-up artifact: rejected exact-capacity hot allocation for 2-4-limb word add/sub results.
 - 684afd9 follow-up artifact: isolated the existing auto-vectorized boxed AND/OR/XOR loops from a scalarized build across 4-512 limbs.
 - 4bb7a7d follow-up artifacts: rejected a SIMD equal-prefix compare candidate across low-difference, high-difference, and equal operands; retained the compile-time benchmark shape control.
+- 4666161 follow-up artifact: isolated O(1) boxed tag-sign neg/abs against forced limb copies; added Tungsten-only variant timing while retaining GMP correctness checks.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

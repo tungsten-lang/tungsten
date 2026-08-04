@@ -146,11 +146,13 @@ def run_sweep(
     operation: str,
     sizes: list[int],
     target_ms: float,
+    *,
+    tungsten_only: bool,
 ) -> dict[int, dict[str, float]]:
     output = run_checked(
         [
             str(binary),
-            "--bench-boxed-sweep",
+            "--bench-tungsten-sweep" if tungsten_only else "--bench-boxed-sweep",
             operation,
             ",".join(str(size) for size in sizes),
             "1",
@@ -198,6 +200,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--baseline-name", default="baseline")
     parser.add_argument("--candidate-name", default="candidate")
+    parser.add_argument(
+        "--tungsten-only",
+        action="store_true",
+        help=(
+            "time only the Tungsten variant lanes (GMP correctness checks "
+            "still run; use a separately recorded matrix for GMP timing)"
+        ),
+    )
     parser.add_argument("--rounds", type=int, default=9)
     parser.add_argument("--target-ms", type=float, default=110.0)
     parser.add_argument("--output", type=Path, required=True)
@@ -263,7 +273,8 @@ def main() -> int:
             for variant in order:
                 for operation in operations:
                     rows = run_sweep(
-                        binaries[variant], operation, sizes, args.target_ms
+                        binaries[variant], operation, sizes, args.target_ms,
+                        tungsten_only=args.tungsten_only,
                     )
                     for limbs, row in rows.items():
                         samples[(variant, operation, limbs)].append(row)
@@ -279,10 +290,10 @@ def main() -> int:
                 after / before
                 for before, after in zip(baseline_ns, candidate_ns, strict=True)
             ]
-            baseline_gmp_ratios = [
+            baseline_gmp_ratios = None if args.tungsten_only else [
                 sample["tungsten_ns"] / sample["gmp_ns"] for sample in baseline
             ]
-            candidate_gmp_ratios = [
+            candidate_gmp_ratios = None if args.tungsten_only else [
                 sample["tungsten_ns"] / sample["gmp_ns"] for sample in candidate
             ]
             ratio = statistics.median(paired_ratios)
@@ -298,11 +309,13 @@ def main() -> int:
                     "candidate_over_baseline_paired_median": ratio,
                     "candidate_over_baseline_paired_iqr": iqr(paired_ratios),
                     "speedup": 1.0 / ratio,
-                    "baseline_over_gmp_median": statistics.median(
-                        baseline_gmp_ratios
+                    "baseline_over_gmp_median": (
+                        None if baseline_gmp_ratios is None
+                        else statistics.median(baseline_gmp_ratios)
                     ),
-                    "candidate_over_gmp_median": statistics.median(
-                        candidate_gmp_ratios
+                    "candidate_over_gmp_median": (
+                        None if candidate_gmp_ratios is None
+                        else statistics.median(candidate_gmp_ratios)
                     ),
                     "samples": {
                         args.baseline_name: baseline,
@@ -331,7 +344,13 @@ def main() -> int:
                 "isolated same-source builds; variant order alternates each round; "
                 "each point is a full boxed immutable Tungsten operation with the "
                 "previous result live; paired median and IQR are computed across "
-                "outer rounds; GMP remains the public-API within-build reference"
+                "outer rounds; "
+                + (
+                    "GMP is used as a public-API correctness oracle but is not timed "
+                    "in this variant-isolation run"
+                    if args.tungsten_only
+                    else "GMP remains the public-API within-build reference"
+                )
             ),
             "acceptance_eligible": acceptance_eligible,
         },
@@ -346,6 +365,7 @@ def main() -> int:
             "sizes": sizes,
             "rounds": args.rounds,
             "target_ms": args.target_ms,
+            "tungsten_only": args.tungsten_only,
         },
         "results": results,
         "summary": {
@@ -369,7 +389,10 @@ def main() -> int:
             f"{row['baseline_ns_median']:.3f}\t"
             f"{row['candidate_ns_median']:.3f}\t"
             f"{row['candidate_over_baseline_paired_median']:.4f}\t"
-            f"{row['candidate_over_gmp_median']:.4f}"
+            + (
+                "n/a" if row["candidate_over_gmp_median"] is None
+                else f"{row['candidate_over_gmp_median']:.4f}"
+            )
         )
     print(json.dumps(document["summary"], sort_keys=True))
     print(f"wrote {args.output}")

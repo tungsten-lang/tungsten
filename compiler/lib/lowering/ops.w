@@ -533,6 +533,41 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_store_global_unless_const(wfn, ctx, name, value_reg)
   typed_value(:i64, value_reg)
 
+-> bigint_linear_word_shape(node, op)
+  if env("TUNGSTEN_BIGINT_ADDMUL_FUSION") == "0" || !(op in (:PLUS :MINUS))
+    return nil
+  if node == nil || !is_ast_node?(node) || ast_kind(node) != :binary_op || node.op != :STAR
+    return nil
+  {multiplicand: node.left, word: node.right}
+
+-> emit_bigint_linear_word_mut(ctx, cur, shape, subtract)
+  wfn = ctx[:func]
+  x_tv = lower_expression(ctx, shape[:multiplicand])
+  word_tv = lower_expression(ctx, shape[:word])
+  x_reg = ensure_i64_value(wfn, x_tv)
+  word_reg = ensure_i64_value(wfn, word_tv)
+  result = next_temp(wfn)
+  fn_name = subtract ? "w_bigint_submul_mut" : "w_bigint_addmul_mut"
+  emit_instruction(wfn, {
+    op: :call_direct_i64, temp: result, name: fn_name,
+    args: [cur, x_reg, word_reg], call_conv: "preserve_mostcc"
+  })
+  result
+
+-> lower_bigint_linear_word_mut(ctx, name, cur, ptr, shape, subtract)
+  wfn = ctx[:func]
+  result = emit_bigint_linear_word_mut(ctx, cur, shape, subtract)
+  # Operand lowering may materialize bindings and make the original
+  # binding-only write-back decision stale (same hazard as ordinary compound
+  # assignment below).
+  if ptr == nil && ctx[:bindings][name] == nil
+    ptr = ensure_var_slot(wfn, name)
+  if ptr != nil
+    emit_instruction(wfn, {op: :store_i64, value: result, ptr: ptr})
+  else
+    ctx[:bindings][name] = result
+  typed_value(:i64, result)
+
 -> lower_compound_assign(ctx, node)
   # Desugar: x += val  →  x = x op val
   target = node.target
@@ -756,6 +791,16 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     ptr = ensure_var_slot(wfn, name)
     cur = next_temp(wfn)
     emit_instruction(wfn, {op: :load_i64, temp: cur, ptr: ptr})
+
+  # A proven-dead boxed accumulator does not need to materialize the
+  # intermediate product in `r += x * word` / `r -= x * word`.  The runtime
+  # entry validates the dynamic integer/one-limb/capacity shape and otherwise
+  # performs the original two operators, so this remains fail-closed.
+  if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true
+    linear_shape = bigint_linear_word_shape(node.value, node.op)
+    if linear_shape != nil
+      return lower_bigint_linear_word_mut(
+        ctx, name, cur, ptr, linear_shape, node.op == :MINUS)
 
   # Evaluate RHS
   rhs = lower_expression(ctx, node.value)
@@ -1008,6 +1053,20 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       pbj = one_each && ((lu == "PB" && ru == "J") || (lu == "J" && ru == "PB"))
     if qleft != nil && qright != nil && !static_quantity_add_compatible?(qleft, qright) && !pbj
       raise compile_error_for_node(:E_LOWER_QUANTITY_DIMENSION, "quantity dimension mismatch in " + op.to_s(), ctx[:source_path], node)
+
+  # Assignment spelling of the same fused shape handled by compound
+  # assignment above: `r = r +/- x * word`.  lower_assign_expr scopes the
+  # marker to a fail-closed mutate-if-unique proof for this exact RHS.
+  mut_name = ctx[:mut_accum_target]
+  if mut_name != nil && op in (:PLUS :MINUS)
+    if node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == mut_name
+      linear_shape = bigint_linear_word_shape(node.right, op)
+      if linear_shape != nil
+        acc_tv = lower_expression(ctx, node.left)
+        acc_reg = ensure_i64_value(wfn, acc_tv)
+        result = emit_bigint_linear_word_mut(
+          ctx, acc_reg, linear_shape, op == :MINUS)
+        return typed_value(:i64, result)
 
   if op == :SLASH && ast_kind(node.left) == :range
     return lower_range_step(ctx, node.left, node.right)

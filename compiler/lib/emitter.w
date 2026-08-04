@@ -318,6 +318,8 @@ use hashing
   out << declare_fn_attrs("w_bigint_sub_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_mul_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_div_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_addmul_mut", "preserve_mostcc " + wv, wv3, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_submul_mut", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn("w_bigint_add_dest", wv, wv3)
   out << declare_fn("w_mul", wv, wv2)
   out << declare_fn("w_pow", wv, wv2)

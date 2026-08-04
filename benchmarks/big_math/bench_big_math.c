@@ -4747,6 +4747,63 @@ int main(int argc, char **argv) {
                 if (bigint_compare(shared, a0) != 0)
                     dief("fuzz-mut mul shared receiver corrupted l=%d", l);
             }
+            /* fused addmul/submul: all sign combinations, including a
+             * product larger than the accumulator (result-sign flip), and
+             * runtime refusal for a shared receiver. */
+            {
+                static const int64_t words[] = {1, 3, -7, 140737488355327LL};
+                WValue a0, x0, m0;
+                bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &x0, &m0);
+                for (size_t wi = 0;
+                     wi < sizeof(words) / sizeof(words[0]); wi++) {
+                    WValue word = w_box_int(words[wi]);
+                    for (int sa = 0; sa < 2; sa++) {
+                        for (int sx = 0; sx < 2; sx++) {
+                            for (int sub = 0; sub < 2; sub++) {
+                                WValue a_ref = bench_clone_integer(a0);
+                                WValue x_ref = bench_clone_integer(x0);
+                                if (sa) w_as_bigint(a_ref)->size *= -1;
+                                if (sx) w_as_bigint(x_ref)->size *= -1;
+                                WValue product = bigint_mul_any(x_ref, word);
+                                WValue want = sub
+                                    ? bigint_sub_any(a_ref, product)
+                                    : bigint_add_any(a_ref, product);
+                                WValue a_mut = bench_clone_integer(a0);
+                                WValue x_use = bench_clone_integer(x0);
+                                if (sa) w_as_bigint(a_mut)->size *= -1;
+                                if (sx) w_as_bigint(x_use)->size *= -1;
+                                WValue got = sub
+                                    ? w_bigint_submul_mut(a_mut, x_use, word)
+                                    : w_bigint_addmul_mut(a_mut, x_use, word);
+                                if (bigint_compare(got, want) != 0)
+                                    dief("fuzz-mut %smul mismatch l=%d sa=%d sx=%d w=%lld",
+                                         sub ? "sub" : "add", l, sa, sx,
+                                         (long long)words[wi]);
+                                mpz_t za, zx, zw, zg;
+                                mpz_inits(za, zx, zw, zg, NULL);
+                                gmp_import_value(za, a_ref);
+                                gmp_import_value(zx, x_ref);
+                                mpz_set_si(zw, words[wi]);
+                                if (sub) mpz_submul(za, zx, zw);
+                                else mpz_addmul(za, zx, zw);
+                                gmp_import_value(zg, got);
+                                if (mpz_cmp(zg, za) != 0)
+                                    dief("fuzz-mut %smul GMP mismatch l=%d sa=%d sx=%d w=%lld",
+                                         sub ? "sub" : "add", l, sa, sx,
+                                         (long long)words[wi]);
+                                mpz_clears(za, zx, zw, zg, NULL);
+                            }
+                        }
+                    }
+                }
+                WValue shared = bench_clone_integer(a0);
+                w_bigint_mark_shared(w_as_bigint(shared));
+                WValue before = bench_clone_integer(shared);
+                WValue got = w_bigint_addmul_mut(
+                    shared, x0, w_box_int(3));
+                if (got == shared || bigint_compare(shared, before) != 0)
+                    dief("fuzz-mut addmul shared receiver corrupted l=%d", l);
+            }
             /* div: in-place N/1 across signs and every one-word kernel band,
              * checked against both the immutable entry and GMP. */
             {

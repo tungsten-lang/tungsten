@@ -7560,6 +7560,25 @@ static size_t bn_sqr_scratch_need(int32_t n) {
  * rely on zero padding explicitly request the zeroed form. */
 static __thread uint64_t *bn_ws = NULL;
 static __thread size_t bn_ws_cap = 0;
+/* Product scratch for the compiler's fused `acc +/-= x * word` entry.
+ * The same-sign add arm writes directly into the dying accumulator; the
+ * opposite-sign arm needs one product magnitude for an exact compare before
+ * it may mutate that buffer.  Keep that rare scratch separate from bn_ws:
+ * recursive multiplication/division is free to borrow bn_ws itself. */
+static __thread uint64_t *bn_linear_word_ws = NULL;
+static __thread size_t bn_linear_word_ws_cap = 0;
+
+static uint64_t *bn_linear_word_ws_get(size_t need) {
+    if (need <= bn_linear_word_ws_cap) return bn_linear_word_ws;
+    size_t cap = bn_linear_word_ws_cap ? bn_linear_word_ws_cap : 8;
+    while (cap < need) cap *= 2;
+    uint64_t *grown = (uint64_t *)realloc(
+        bn_linear_word_ws, cap * sizeof(uint64_t));
+    if (!grown) return NULL;
+    bn_linear_word_ws = grown;
+    bn_linear_word_ws_cap = cap;
+    return grown;
+}
 #ifndef BN_BENCH_RUNTIME_WS_ZERO_KNOB
 #define BN_BENCH_RUNTIME_WS_ZERO_KNOB 0
 #endif
@@ -7587,6 +7606,9 @@ static void bn_ws_release_thread(void) {
     free(bn_ws);
     bn_ws = NULL;
     bn_ws_cap = 0;
+    free(bn_linear_word_ws);
+    bn_linear_word_ws = NULL;
+    bn_linear_word_ws_cap = 0;
 #if BN_TOOM_POINT_TLS_MEMORY
     free(bn_toom_point_memory);
     bn_toom_point_memory = NULL;
@@ -35150,6 +35172,152 @@ __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b) {
     ba->size = (a_neg != b_neg) ? -amag : amag;
     if (__builtin_expect(amag > 1, 1)) return a;
     return bigint_normalize(ba);
+}
+
+/* Fallback for a compiler-fused `a +/-= x * word`.  Preserve the language's
+ * ordinary operator dispatch for every non-integer/guard-refused shape, but
+ * retire a product allocation that did not become the result. */
+static WValue w_bigint_linear_word_mut_fallback(
+    WValue a, WValue x, WValue word, int subtract) {
+    WValue product = w_mul(x, word);
+    int product_owned =
+        w_is_bigint(product) && product != x && product != word;
+    WValue result = subtract ? w_sub(a, product) : w_add(a, product);
+    if (product_owned && result == product) {
+        /* The generic identity entry conservatively marked its right operand
+         * because an ordinary caller still owns that operand.  Here the
+         * product is a compiler-created dying temporary, so transfer its sole
+         * reference into the result instead of manufacturing an alias. */
+        WBigint *bp = w_as_bigint(product);
+        if (bp->shared != 0 && bp->shared != 255) bp->shared--;
+    } else if (product_owned && result != product) {
+        bigint_release_if_live(w_as_bigint(product));
+    }
+    return result;
+}
+
+/* One boxed operation for `a +/-= x * word` when the compiler proved that
+ * a's old value dies at the assignment.  The runtime guard is deliberately
+ * fail-closed: only integer x, a one-limb integer word, an overlay-clear
+ * unshared accumulator, and sufficient existing capacity may mutate.
+ *
+ * Equal effective signs use addmul_1 directly in a's storage.  Opposite
+ * signs first form the product in retained TLS scratch so magnitude ordering
+ * is known before the first write; this is still one published box and no
+ * per-iteration product allocation. */
+static WValue w_bigint_linear_word_mut(
+    WValue a, WValue x, WValue word, int subtract) {
+    if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
+        return w_bigint_linear_word_mut_fallback(a, x, word, subtract);
+    WBigint *ba = w_as_bigint(a);
+    if (ba->shared != 0 || ba->size == 0)
+        return w_bigint_linear_word_mut_fallback(a, x, word, subtract);
+
+    uint64_t xscratch;
+    int32_t xsize;
+    const uint64_t *xl;
+    if (w_is_integer_any(x)) {
+        xl = integer_limbs(x, &xscratch, &xsize);
+    } else {
+        return w_bigint_linear_word_mut_fallback(a, x, word, subtract);
+    }
+    int xneg = xsize < 0;
+    int32_t xmag = xneg ? -xsize : xsize;
+    if (xmag == 0) return a;
+
+    uint64_t wmag;
+    int wneg;
+    if (w_is_int(word)) {
+        int64_t iw = w_as_int(word);
+        if (iw == 0) return a;
+        wneg = iw < 0;
+        wmag = wneg ? (uint64_t)(-(iw + 1)) + 1U : (uint64_t)iw;
+    } else if (w_is_bigint(word)) {
+        int32_t wsize;
+        WBigint *bw = w_bigint_view(word, &wsize);
+        if (wsize != 1 && wsize != -1)
+            return w_bigint_linear_word_mut_fallback(a, x, word, subtract);
+        wneg = wsize < 0;
+        wmag = bw->limbs[0];
+        if (wmag == 0) return a;
+    } else {
+        return w_bigint_linear_word_mut_fallback(a, x, word, subtract);
+    }
+
+    int32_t asize = ba->size;
+    int aneg = asize < 0;
+    int32_t amag = aneg ? -asize : asize;
+    int term_neg = xneg != wneg;
+    if (subtract) term_neg = !term_neg;
+
+    if (aneg == term_neg) {
+        int32_t hi = amag > xmag ? amag : xmag;
+        if (hi + 1 > (int32_t)ba->cap)
+            return w_bigint_linear_word_mut_fallback(a, x, word, subtract);
+        if (xmag > amag)
+            memset(ba->limbs + amag, 0,
+                   (size_t)(xmag - amag) * sizeof(uint64_t));
+        uint64_t carry = bn_addmul_1(ba->limbs, xl, xmag, wmag);
+        int32_t i = xmag;
+        while (carry && i < amag) {
+            uint64_t before = ba->limbs[i];
+            ba->limbs[i] = before + carry;
+            carry = ba->limbs[i] < before;
+            i++;
+        }
+        if (carry) ba->limbs[hi++] = carry;
+        ba->size = aneg ? -hi : hi;
+        return a;
+    }
+
+    uint64_t *product = bn_linear_word_ws_get((size_t)xmag + 1);
+    if (!product)
+        return w_bigint_linear_word_mut_fallback(a, x, word, subtract);
+    uint64_t carry = bn_mul_1(product, xl, xmag, wmag);
+    int32_t pmag = xmag;
+    if (carry) product[pmag++] = carry;
+    int compare = mag_cmp(ba->limbs, amag, product, pmag);
+    if (compare == 0) {
+        ba->size = 0;
+        return bigint_normalize(ba);
+    }
+    if (compare > 0) {
+        uint64_t borrow = bn_sub_n(ba->limbs, ba->limbs, product, pmag);
+        int32_t i = pmag;
+        while (borrow && i < amag) {
+            uint64_t before = ba->limbs[i];
+            ba->limbs[i] = before - borrow;
+            borrow = before < borrow;
+            i++;
+        }
+        while (amag > 0 && ba->limbs[amag - 1] == 0) amag--;
+        ba->size = aneg ? -amag : amag;
+        return bigint_normalize(ba);
+    }
+
+    if (pmag > (int32_t)ba->cap)
+        return w_bigint_linear_word_mut_fallback(a, x, word, subtract);
+    uint64_t borrow = bn_sub_n(ba->limbs, product, ba->limbs, amag);
+    int32_t i = amag;
+    while (i < pmag) {
+        uint64_t before = product[i];
+        ba->limbs[i] = before - borrow;
+        borrow = before < borrow;
+        i++;
+    }
+    while (pmag > 0 && ba->limbs[pmag - 1] == 0) pmag--;
+    ba->size = term_neg ? -pmag : pmag;
+    return bigint_normalize(ba);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_addmul_mut(
+    WValue a, WValue x, WValue word) {
+    return w_bigint_linear_word_mut(a, x, word, 0);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_submul_mut(
+    WValue a, WValue x, WValue word) {
+    return w_bigint_linear_word_mut(a, x, word, 1);
 }
 
 /* Add-into-dying-destination (E4 stage 2, the rotation shape). The

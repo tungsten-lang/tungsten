@@ -62,6 +62,80 @@ check("mut.drain", drain(50000), ((1 << 200) - 49999 * 25000) % 1000000007)
   acc % 1000000007
 check("mut.star_factorial", factorial(40), factorial_ref(40))
 
+# Fused linear word shapes: the product is never published when the
+# accumulator is proven dead, but the value must match the ordinary
+# multiply-then-add/subtract spelling exactly.
+-> addmul_chain(n)
+  r = (1 << 1021) + 17
+  x = (1 << 1018) + 12345
+  i = 0 ## i64
+  while i < n
+    r += x * 3
+    i += 1
+  r % 1000000007
+
+-> addmul_chain_ref(n)
+  r = (1 << 1021) + 17
+  x = (1 << 1018) + 12345
+  i = 0 ## i64
+  while i < n
+    product = x * 3
+    r += product
+    i += 1
+  r % 1000000007
+
+-> submul_chain(n)
+  r = (1 << 1021) + 17
+  x = (1 << 1018) + 12345
+  r += x * (3 * n + 1)
+  i = 0 ## i64
+  while i < n
+    r -= x * 3
+    i += 1
+  r % 1000000007
+
+-> submul_chain_ref(n)
+  r = (1 << 1021) + 17
+  x = (1 << 1018) + 12345
+  r += x * (3 * n + 1)
+  i = 0 ## i64
+  while i < n
+    product = x * 3
+    r -= product
+    i += 1
+  r % 1000000007
+
+check("mut.addmul_fused", addmul_chain(1000), addmul_chain_ref(1000))
+check("mut.submul_fused", submul_chain(1000), submul_chain_ref(1000))
+
+-> addmul_assignment_spelling(n)
+  r = (1 << 700) + 23
+  x = (1 << 680) + 11
+  i = 0 ## i64
+  while i < n
+    r = r + x * 5
+    i += 1
+  r % 1000000007
+check("mut.addmul_assignment_spelling", addmul_assignment_spelling(500),
+      (((1 << 700) + 23) + ((1 << 680) + 11) * 2500) % 1000000007)
+
+-> addmul_self
+  r = (1 << 500) + 19
+  original = (1 << 500) + 19
+  r += r * 2
+  r == original * 3
+check("mut.addmul_self_alias", addmul_self(), "true")
+
+# A user-visible alias to the destination disqualifies fusion just like every
+# other mutate-if-unique operation.
+-> addmul_destination_alias
+  r = (1 << 500) + 19
+  snapshot = r
+  x = (1 << 480) + 7
+  r += x * 3
+  snapshot == (1 << 500) + 19
+check("adv.addmul_destination_alias", addmul_destination_alias(), "true")
+
 # One-limb division reuses the dying receiver. Compare against an aliased
 # accumulator, which the uniqueness analysis deliberately leaves immutable.
 -> divide_chain(n, divisor)

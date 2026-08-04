@@ -118,6 +118,35 @@ cost more than the removed range proof, so the candidate was removed.
 Artifacts: `baselines/add1-boxed-3-a5e79a3-m5max-20260804.svg` and
 `baselines/addsub1-exact-hot-screen-a5e79a3-m5max-20260804.json`.
 
+## Tiny add/sub destination passing — NOT taken (2026-08-04)
+
+Two byte-identical decomposition runs separated dispatch from result lifetime.
+Bypassing the dynamic add1/sub1 dispatcher while retaining immutable pool
+handoff improved the ten affected 2--16-limb cells 17.8% by geomean.  Passing
+the known-dead previous result directly into the already-decoded word kernels
+improved all twelve affected 2--32-limb cells 18.1%; its two inactive one-limb
+controls moved -0.6%/+1.0%.  This validates both costs independently rather
+than inferring them from the GMP comparison.  Artifacts:
+`baselines/addsub1-dispatch-decompose-same-binary-f9ae488-m5max-20260804.json`
+and `baselines/addsub1-destination-decompose-f9ae488-m5max-20260804.json`.
+
+The result is an upper bound, not a shippable ABI.  A fail-closed generic
+replace wrapper, still selected by a byte-identical runtime toggle, improved
+the affected band 12.3% but its guarded binary remained materially slower in
+absolute terms and its one-limb fallbacks regressed.  A compact outlined entry
+then brought the targeted 2--4-limb GMP ratios down to roughly 1.04--1.07, but
+lost overall and regressed inactive/wide controls.  Inlining it won add1 at
+three and four limbs, but duplicated the shape test and caused large
+one/16/32-limb regressions.  All production prototypes were removed.
+Artifacts: `baselines/addsub1-word-replace-screen-f9ae488-m5max-20260804.json`,
+`baselines/addsub1-word-dest-outline-screen-f9ae488-m5max-20260804.json`, and
+`baselines/addsub1-word-dest-inline-screen-f9ae488-m5max-20260804.json`.
+
+**Condition to take it:** make the existing add/sub dispatcher accept an
+optional dead destination after its single shape decode, or prove/hoist the
+shape in compiler IR.  A second guard tree in the hot loop spends the measured
+reuse win before arithmetic starts.
+
 ## One-word and terminal GCD schedules — NOT taken (2026-08-04)
 
 A five-second boxed `lcm@1` flame profile put 59% of sampled branch events in

@@ -53,7 +53,7 @@ Source fingerprints:
 | GLM-14 | LCM via exact quotient and one multiply | kept | w_ic_integer_lcm_generic computes gcd, exact r/g, then one multiply, with a unit-gcd shortcut; gcdlcm-par-apply-3ccd13b-m5max-20260804.json has all LCM cells through 16385 faster and the 65536 cell at 1.001x parity |
 | GLM-15 | Multi-limb exact division | kept | mag_divexact is the Jebelean/Hensel multi-limb exact quotient used by LCM; matrix-7a96d5c-accurate-20260802.json and gcdlcm-par-apply-3ccd13b-m5max-20260804.json provide end-to-end LCM evidence and GMP differential checks |
 | GLM-16 | Defer boxing and merge shared-check with pool return | pending | |
-| GLM-17 | Page-offset rehoming at 384–512 limbs | pending | |
+| GLM-17 | Page-offset rehoming at 384–512 limbs | rejected | extending add/sub rehoming through 512 limbs produced 1.003x geomean, five wins/five losses, and a 6.1% sub256 regression; a separate safe fresh-capacity mul/sqr rehome produced an unresolved 0.978x geomean with paired spreads larger than the effect and regressed the named mul448 cell 1.1%; both candidates were removed; addsub-rehome512-996180d-m5max-20260804.json and mulsqr-large-rehome-996180d-m5max-20260804.json |
 | GLM-18 | Hand-written add/sub basecases for 8–128 limbs | pending | |
 | GLM-19 | Toom-2 equal/difference specializations at 32–48 limbs | kept | the current fixed 32/40/48 difference paths were measured against one otherwise-identical build with BN_MUL_POWER2_FIXED, BN_MUL_SPLIT_40_BLOCKS, and BN_MUL_SPLIT_48 disabled; nine alternating 110 ms boxed rounds measured candidate/baseline 0.851x/0.852x/0.841x, with all current cells faster than GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
 | GLM-20 | Branch-free carry/correction tails in mul1 and div1 | pending | |
@@ -155,7 +155,7 @@ Source fingerprints:
 | GROK-16 | Tune parallel workers only in winning large bands | pending | audit related commits 803a5c4, dfb94bc |
 | GROK-17 | Improve div1/multi-limb preinverse cache locality | pending | |
 | GROK-18 | Reduce identity/shared-mark tax | pending | |
-| GROK-19 | Make page-hazard rehoming cheaper/more selective | pending | |
+| GROK-19 | Make page-hazard rehoming cheaper/more selective | pending | broadening current rehoming to 384-512 limbs was measured and rejected (GLM-17); the distinct selective/cheaper-policy hypothesis remains to test |
 | GROK-20 | Add end-to-end language loops to acceptance evidence | kept | accumulate, mulchain, addchain, and divchain are release/native/fast whole-language loops with matched GMP checksums and median/IQR timing; program-loops-6e7c006-m5max-20260804.tsv |
 
 ## DeepSeek-v4-pro
@@ -197,6 +197,7 @@ existence does not automatically disposition an item:
 - 1f431bc follow-up artifact: isolated boxed fixed-Toom-2 A/B at 32/40/48.
 - 6ad6737 follow-up artifacts: rejected 6x6/10x10 fixed-leaf candidates and adjacent-size screens.
 - 10ffc4b follow-up artifact: boxed 5-7-limb mul1 straight-line A/B.
+- 996180d follow-up artifacts: rejected 128-512 add/sub and 256-1024 mul/sqr rehome extensions.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

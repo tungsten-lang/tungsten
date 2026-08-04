@@ -79,6 +79,25 @@ combined and add-only candidates were removed.  Artifacts:
 `baselines/addsub-word-fallthrough-48dffb5-m5max-20260804.json` and
 `baselines/add-word-fallthrough-replication-48dffb5-m5max-20260804.json`.
 
+Three follow-ups tested whether constant-sign specialization could retain the
+tiny-word gain.  They were screened at 7×80 ms because each failed before the
+acceptance-length gate.  Combining early positive-word dispatch with explicit
+sign cases measured 0.9969 geomean over 44 add/sub/add1/sub1 cells but had six
+regressions over 5%.  Keeping the original order and splitting every add1 sign
+case measured 1.0106 over 22 add/add1 cells with five such regressions; limiting
+the split to positive 2--8-limb add1 measured 1.0033 with six.  All production
+code was removed.  Artifacts:
+`baselines/addsub1-positive-word-early-screen-6667a9d-m5max-20260804.json`,
+`baselines/add1-sign-split-screen-6667a9d-m5max-20260804.json`, and
+`baselines/add1-positive-small-screen-6667a9d-m5max-20260804.json`.
+
+The post-sub1 accurate residual refresh selected all 49 cells that were red in
+the last complete fast screen and remeasured them at 9×110 ms.  Seventeen
+remained above GMP: add1@2/3; sub1@2/3/4; mul1@4/24/128/256/448/1024/2048/
+4096/8192; add@128; isqrt@384; and div1@48.  Several are within timing spread,
+so this is a prioritization snapshot rather than the final full-matrix claim.
+Artifact: `baselines/matrix-6667a9d-residual-accurate-m5max-20260804.json`.
+
 ## Mul1 wide dispatch and page rehoming — NOT taken (2026-08-04)
 
 Routing widths above 64 ahead of the fixed-width ladder initially measured a

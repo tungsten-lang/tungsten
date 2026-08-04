@@ -1849,7 +1849,12 @@
     if k == :assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
       name = st.target.name
       if mut_self_compound_rhs?(st.value, name)
-        assigned[name] = true
+        # A self-update does not establish ownership. In particular, a
+        # parameter may still be referenced by its caller; only a prior
+        # literal-only local seed proves this scope owns the buffer it may
+        # later consume.
+        if assigned[name] != true
+          dead[name] = true
         # the right operand is an ordinary read position
         mut_walk_expr(st.value.right, assigned, dead)
       elsif mut_literal_leaves_only?(st.value)
@@ -1864,11 +1869,12 @@
         mut_walk_expr(st.value, assigned, dead)
     elsif k == :compound_assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
       name = st.target.name
-      if st.op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
+      if st.op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
         # Multiplication and division join once their mutating entries make
         # every identity return dying-receiver-owned or shared-marked, the
         # same invariant that admits PLUS/MINUS.
-        assigned[name] = true
+        if assigned[name] != true
+          dead[name] = true
         mut_walk_expr(st.value, assigned, dead)
       else
         # any other compound op keeps failing closed

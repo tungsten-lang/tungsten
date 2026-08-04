@@ -35532,6 +35532,237 @@ __attribute__((preserve_most)) WValue w_bigint_mod_mut(WValue a, WValue b) {
     return bigint_normalize(ba);
 }
 
+/* Bitwise compound assignment may reuse a liveness-proved receiver when both
+ * values are positive equal-width BigInts. This is the same straight limb
+ * kernel as the dominant immutable path, but it publishes into the receiver's
+ * existing allocation. Every sign/coercion/alias shape retains the ordinary
+ * full-width dispatcher. */
+static WValue w_bigint_bitwise_mut_fallback(char op, WValue a, WValue b) {
+    WValue r = bit_binop(op, a, b);
+    if (r == b && w_is_bigint(r)) w_bigint_mark_shared(w_as_bigint(r));
+    return r;
+}
+
+static WValue w_bigint_bitwise_mut(char op, WValue a, WValue b) {
+    if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
+        return w_bigint_bitwise_mut_fallback(op, a, b);
+    WBigint *ba = w_as_bigint(a);
+    if (ba->shared != 0 || ba->size <= 0 || !w_is_bigint(b))
+        return w_bigint_bitwise_mut_fallback(op, a, b);
+
+    int32_t bs;
+    WBigint *bb = w_bigint_view(b, &bs);
+    int32_t n = ba->size;
+    /* b remains live after the assignment. Refuse a dynamic buffer alias even
+     * though the same-index kernel itself would be mechanically in-place. */
+    if (bb == ba || bs != n)
+        return w_bigint_bitwise_mut_fallback(op, a, b);
+#if BN_EQ_PAGE_HAZARD_GUARD
+    if (n >= 32 && bn_addsub_page_hazard(ba->limbs, bb->limbs))
+        return w_bigint_bitwise_mut_fallback(op, a, b);
+#endif
+
+    uint64_t *restrict al = ba->limbs;
+    const uint64_t *restrict bl = bb->limbs;
+    if (n == 2) {
+        switch (op) {
+        case '&':
+            al[0] &= bl[0];
+            al[1] &= bl[1];
+            break;
+        case '|':
+            al[0] |= bl[0];
+            al[1] |= bl[1];
+            return a;
+        default:
+            al[0] ^= bl[0];
+            al[1] ^= bl[1];
+            break;
+        }
+        return al[1] != 0 ? a : bigint_normalize(ba);
+    }
+    if (n == 4) {
+        switch (op) {
+        case '&':
+            al[0] &= bl[0];
+            al[1] &= bl[1];
+            al[2] &= bl[2];
+            al[3] &= bl[3];
+            break;
+        case '|':
+            al[0] |= bl[0];
+            al[1] |= bl[1];
+            al[2] |= bl[2];
+            al[3] |= bl[3];
+            return a;
+        default:
+            al[0] ^= bl[0];
+            al[1] ^= bl[1];
+            al[2] ^= bl[2];
+            al[3] ^= bl[3];
+            break;
+        }
+        return al[3] != 0 ? a : bigint_normalize(ba);
+    }
+    if (n == 8) {
+        switch (op) {
+        case '&':
+            al[0] &= bl[0];
+            al[1] &= bl[1];
+            al[2] &= bl[2];
+            al[3] &= bl[3];
+            al[4] &= bl[4];
+            al[5] &= bl[5];
+            al[6] &= bl[6];
+            al[7] &= bl[7];
+            break;
+        case '|':
+            al[0] |= bl[0];
+            al[1] |= bl[1];
+            al[2] |= bl[2];
+            al[3] |= bl[3];
+            al[4] |= bl[4];
+            al[5] |= bl[5];
+            al[6] |= bl[6];
+            al[7] |= bl[7];
+            return a;
+        default:
+            al[0] ^= bl[0];
+            al[1] ^= bl[1];
+            al[2] ^= bl[2];
+            al[3] ^= bl[3];
+            al[4] ^= bl[4];
+            al[5] ^= bl[5];
+            al[6] ^= bl[6];
+            al[7] ^= bl[7];
+            break;
+        }
+        return al[7] != 0 ? a : bigint_normalize(ba);
+    }
+    switch (op) {
+    case '&':
+        for (int32_t i = 0; i < n; i++) al[i] &= bl[i];
+        break;
+    case '|':
+        for (int32_t i = 0; i < n; i++) al[i] |= bl[i];
+        return a; /* normalized inputs make the top OR nonzero */
+    default:
+        for (int32_t i = 0; i < n; i++) al[i] ^= bl[i];
+        break;
+    }
+    return al[n - 1] != 0 ? a : bigint_normalize(ba);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_and_mut(WValue a, WValue b) {
+    return w_bigint_bitwise_mut('&', a, b);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_or_mut(WValue a, WValue b) {
+    return w_bigint_bitwise_mut('|', a, b);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_xor_mut(WValue a, WValue b) {
+    return w_bigint_bitwise_mut('^', a, b);
+}
+
+static WValue w_bigint_shift_mut_fallback(int left, WValue a, WValue b) {
+    WValue r = left ? w_bit_shl(a, b) : w_bit_shr(a, b);
+    if (r == b && w_is_bigint(r)) w_bigint_mark_shared(w_as_bigint(r));
+    return r;
+}
+
+/* Positive sub-limb shifts are safe in place with opposite traversal
+ * directions: left shift walks high-to-low before lower source limbs are
+ * overwritten, while right shift walks low-to-high before higher limbs are
+ * overwritten. Wider, negative, overloaded, and aliased shapes fail closed. */
+static __attribute__((noinline)) WValue
+w_bigint_shr17_mut_body(WBigint *ba, unsigned shift, WValue a);
+
+static WValue w_bigint_shift_mut(WValue a, WValue b, int left) {
+    if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0 || !w_is_int(b))
+        return w_bigint_shift_mut_fallback(left, a, b);
+    WBigint *ba = w_as_bigint(a);
+    if (ba->shared != 0 || ba->size <= 0)
+        return w_bigint_shift_mut_fallback(left, a, b);
+    int64_t raw_shift = w_as_int(b);
+    if (raw_shift == 0) return a;
+    if (raw_shift < 0 || raw_shift >= 64)
+        return w_bigint_shift_mut_fallback(left, a, b);
+
+    unsigned shift = (unsigned)raw_shift;
+    int32_t n = ba->size;
+    uint64_t *limbs = ba->limbs;
+    if (n >= 16 && n <= 17) {
+        if (n == 16) {
+            if (left) {
+                uint64_t carry = limbs[15] >> (64U - shift);
+                if (carry && ba->cap < 17)
+                    return w_bigint_shift_mut_fallback(left, a, b);
+#pragma clang loop unroll(full)
+                for (int32_t i = 15; i > 0; i--)
+                    limbs[i] =
+                        (limbs[i] << shift) |
+                        (limbs[i - 1] >> (64U - shift));
+                limbs[0] <<= shift;
+                if (carry) {
+                    limbs[16] = carry;
+                    ba->size = 17;
+                }
+                return a;
+            }
+#pragma clang loop unroll(full)
+            for (int32_t i = 0; i < 15; i++)
+                limbs[i] =
+                    (limbs[i] >> shift) | (limbs[i + 1] << (64U - shift));
+            limbs[15] >>= shift;
+            ba->size = limbs[15] == 0 ? 15 : 16;
+            return a;
+        }
+        if (!left)
+            return w_bigint_shr17_mut_body(ba, shift, a);
+    }
+    if (left) {
+        uint64_t carry = limbs[n - 1] >> (64U - shift);
+        if (carry && n + 1 > (int32_t)ba->cap)
+            return w_bigint_shift_mut_fallback(left, a, b);
+        for (int32_t i = n - 1; i > 0; i--)
+            limbs[i] =
+                (limbs[i] << shift) | (limbs[i - 1] >> (64U - shift));
+        limbs[0] <<= shift;
+        if (carry) limbs[n++] = carry;
+        ba->size = n;
+        return a;
+    }
+
+    for (int32_t i = 0; i + 1 < n; i++)
+        limbs[i] =
+            (limbs[i] >> shift) | (limbs[i + 1] << (64U - shift));
+    limbs[n - 1] >>= shift;
+    if (n > 1 && limbs[n - 1] == 0) n--;
+    ba->size = n;
+    return n > 1 ? a : bigint_normalize(ba);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_shl_mut(WValue a, WValue b) {
+    return w_bigint_shift_mut(a, b, 1);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_shr_mut(WValue a, WValue b) {
+    return w_bigint_shift_mut(a, b, 0);
+}
+
+static __attribute__((noinline)) WValue
+w_bigint_shr17_mut_body(WBigint *ba, unsigned shift, WValue a) {
+    uint64_t *limbs = ba->limbs;
+#pragma clang loop unroll(full)
+    for (int32_t i = 0; i < 16; i++)
+        limbs[i] =
+            (limbs[i] >> shift) | (limbs[i + 1] << (64U - shift));
+    limbs[16] >>= shift;
+    ba->size = limbs[16] == 0 ? 16 : 17;
+    return a;
+}
+
 /* Fallback for a compiler-fused `a +/-= x * word`.  Preserve the language's
  * ordinary operator dispatch for every non-integer/guard-refused shape, but
  * retire a product allocation that did not become the result. */

@@ -322,6 +322,12 @@ use ../../core/token
     when 156 then "IP6"
     when 157 then "CIDR6"
     when 159 then "PLUS_MINUS"
+    when 160 then "POW_EQ"
+    when 161 then "AMP_EQ"
+    when 162 then "PIPE_EQ"
+    when 163 then "CARET_EQ"
+    when 164 then "LSHIFT_EQ"
+    when 165 then "RSHIFT_EQ"
     else nil
 
   # Exclusive end-of-span loc for the construct just parsed (AST task
@@ -1145,6 +1151,42 @@ use ../../core/token
       value = parse_assignment()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :PERCENT, value)
+
+    if at_type?(T_POW_EQ)
+      advance()
+      value = parse_assignment()
+      target = to_assign_target(left)
+      return Tungsten:AST:CompoundAssign.new(target, :POW, value)
+
+    if at_type?(T_AMP_EQ)
+      advance()
+      value = parse_assignment()
+      target = to_assign_target(left)
+      return Tungsten:AST:CompoundAssign.new(target, :AMPERSAND, value)
+
+    if at_type?(T_PIPE_EQ)
+      advance()
+      value = parse_assignment()
+      target = to_assign_target(left)
+      return Tungsten:AST:CompoundAssign.new(target, :PIPE, value)
+
+    if at_type?(T_CARET_EQ)
+      advance()
+      value = parse_assignment()
+      target = to_assign_target(left)
+      return Tungsten:AST:CompoundAssign.new(target, :CARET, value)
+
+    if at_type?(T_LSHIFT_EQ)
+      advance()
+      value = parse_assignment()
+      target = to_assign_target(left)
+      return Tungsten:AST:CompoundAssign.new(target, :LSHIFT, value)
+
+    if at_type?(T_RSHIFT_EQ)
+      advance()
+      value = parse_assignment()
+      target = to_assign_target(left)
+      return Tungsten:AST:CompoundAssign.new(target, :RSHIFT, value)
 
     if at_type?(T_PLUS_PLUS)
       advance()

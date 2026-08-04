@@ -5352,6 +5352,110 @@ int main(int argc, char **argv) {
                     bigint_compare(flipped, flipped_before) != 0)
                     dief("fuzz-mut mod overlay receiver corrupted l=%d", l);
             }
+            /* bitwise: destination reuse across the positive equal-width
+             * fast shape, plus GMP triangulation and fail-closed shared /
+             * tag-sign receiver guards. */
+            {
+                static const char ops[] = {'&', '|', '^'};
+                WValue a0, b0, m0;
+                bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                for (size_t oi = 0; oi < sizeof(ops); oi++) {
+                    char op = ops[oi];
+                    WValue a_ref = bench_clone_integer(a0);
+                    WValue b_ref = bench_clone_integer(b0);
+                    WValue want = bit_binop(op, a_ref, b_ref);
+                    WValue a_mut = bench_clone_integer(a0);
+                    WValue b_use = bench_clone_integer(b0);
+                    WValue got = op == '&'
+                        ? w_bigint_and_mut(a_mut, b_use)
+                        : (op == '|' ? w_bigint_or_mut(a_mut, b_use)
+                                     : w_bigint_xor_mut(a_mut, b_use));
+                    if (bigint_compare(got, want) != 0)
+                        dief("fuzz-mut bitwise %c mismatch l=%d", op, l);
+                    mpz_t za, zb, zg;
+                    mpz_inits(za, zb, zg, NULL);
+                    gmp_import_value(za, a_ref);
+                    gmp_import_value(zb, b_ref);
+                    if (op == '&') mpz_and(zg, za, zb);
+                    else if (op == '|') mpz_ior(zg, za, zb);
+                    else mpz_xor(zg, za, zb);
+                    if (!value_matches_mpz(got, zg))
+                        dief("fuzz-mut bitwise %c GMP mismatch l=%d", op, l);
+                    mpz_clears(za, zb, zg, NULL);
+                }
+                WValue shared = bench_clone_integer(a0);
+                WValue before = bench_clone_integer(shared);
+                w_bigint_mark_shared(w_as_bigint(shared));
+                WValue got = w_bigint_or_mut(shared, b0);
+                if (got == shared || bigint_compare(shared, before) != 0)
+                    dief("fuzz-mut bitwise shared receiver corrupted l=%d", l);
+                WValue flipped = w_neg(bench_clone_integer(a0));
+                WValue flipped_before = bench_clone_integer(flipped);
+                WValue flipped_want = bit_binop('&', flipped_before, b0);
+                WValue got2 = w_bigint_and_mut(flipped, b0);
+                if (got2 == flipped || bigint_compare(got2, flipped_want) != 0 ||
+                    bigint_compare(flipped, flipped_before) != 0)
+                    dief("fuzz-mut bitwise overlay receiver corrupted l=%d", l);
+            }
+            /* shift: cover every in-place sub-limb boundary and allocating
+             * wide/negative fallbacks. The n+1-capacity receiver makes the
+             * carry-growing left-shift fast shape reachable at every width. */
+            {
+                static const int64_t shifts[] = {1, 13, 63, 64, 77, -13};
+                WValue seed = bench_bigint_with_capacity(
+                    l, l + 1, UINT64_C(0x8c3c010cb4754c91) + (uint64_t)l);
+                mpz_t zseed, zleft, zright;
+                mpz_inits(zseed, zleft, zright, NULL);
+                gmp_import_value(zseed, seed);
+                for (size_t si = 0;
+                     si < sizeof(shifts) / sizeof(shifts[0]); si++) {
+                    WValue amount = w_box_int(shifts[si]);
+                    WValue left_ref = bench_clone_integer(seed);
+                    WValue left_want = w_bit_shl(left_ref, amount);
+                    WValue left_mut = bench_bigint_with_capacity(
+                        l, l + 1,
+                        UINT64_C(0x8c3c010cb4754c91) + (uint64_t)l);
+                    WValue left_got = w_bigint_shl_mut(left_mut, amount);
+                    if (bigint_compare(left_got, left_want) != 0)
+                        dief("fuzz-mut shl mismatch l=%d k=%lld", l,
+                             (long long)shifts[si]);
+
+                    WValue right_ref = bench_clone_integer(seed);
+                    WValue right_want = w_bit_shr(right_ref, amount);
+                    WValue right_mut = bench_bigint_with_capacity(
+                        l, l + 1,
+                        UINT64_C(0x8c3c010cb4754c91) + (uint64_t)l);
+                    WValue right_got = w_bigint_shr_mut(right_mut, amount);
+                    if (bigint_compare(right_got, right_want) != 0)
+                        dief("fuzz-mut shr mismatch l=%d k=%lld", l,
+                             (long long)shifts[si]);
+                    if (shifts[si] >= 0) {
+                        mpz_mul_2exp(zleft, zseed, (mp_bitcnt_t)shifts[si]);
+                        mpz_fdiv_q_2exp(zright, zseed, (mp_bitcnt_t)shifts[si]);
+                    } else {
+                        mp_bitcnt_t reverse = (mp_bitcnt_t)(-shifts[si]);
+                        mpz_fdiv_q_2exp(zleft, zseed, reverse);
+                        mpz_mul_2exp(zright, zseed, reverse);
+                    }
+                    if (!value_matches_mpz(left_got, zleft) ||
+                        !value_matches_mpz(right_got, zright))
+                        dief("fuzz-mut shift GMP mismatch l=%d k=%lld", l,
+                             (long long)shifts[si]);
+                }
+                mpz_clears(zseed, zleft, zright, NULL);
+                WValue shared = bench_clone_integer(seed);
+                WValue before = bench_clone_integer(shared);
+                w_bigint_mark_shared(w_as_bigint(shared));
+                WValue got = w_bigint_shl_mut(shared, w_box_int(13));
+                if (got == shared || bigint_compare(shared, before) != 0)
+                    dief("fuzz-mut shift shared receiver corrupted l=%d", l);
+                WValue flipped = w_neg(bench_clone_integer(seed));
+                WValue flipped_before = bench_clone_integer(flipped);
+                WValue got2 = w_bigint_shr_mut(flipped, w_box_int(13));
+                if (got2 == flipped ||
+                    bigint_compare(flipped, flipped_before) != 0)
+                    dief("fuzz-mut shift overlay receiver corrupted l=%d", l);
+            }
             /* self-alias: x += x doubles; x -= x zeroes; x += 0 identity */
             {
                 WValue a0, b0, m0;

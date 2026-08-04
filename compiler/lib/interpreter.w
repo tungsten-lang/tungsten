@@ -1903,6 +1903,18 @@ use target
       return left / right
     if op == :PERCENT
       return left % right
+    if op == :POW
+      return left ** right
+    if op == :AMPERSAND
+      return left & right
+    if op == :PIPE
+      return left | right
+    if op == :CARET
+      return left ^ right
+    if op == :LSHIFT
+      return left << right
+    if op == :RSHIFT
+      return left >> right
     raise "Unknown compound operator"
 
   # -- Binary operations --

@@ -969,6 +969,10 @@ use ../../languages/tungsten/lexers/regex_helpers
           pos += 2
         elsif c == :-. && c2 == :-.
           pos++
+        elsif ((c == :-* && c2 == :-*) || (c == :-< && c2 == :-<) || (c == :-> && c2 == :->)) && pos + 1 < count && ((lc[pos + 1] >> 18) & cp_mask) == :-=
+          # Consuming compound operators whose binary prefix is already a
+          # two-character token: **=, <<=, >>=.
+          pos += 2
         elsif c == :-| && c2 == :-| && pos + 1 < count && ((lc[pos + 1] >> 18) & cp_mask) == :-=
           pos += 2
         elsif c == :-. && start > 0 && ((lc[start - 1] >> 18) & cp_mask) == 32 && (c2 == :-+ || c2 == :-- || c2 == :-* || c2 == :-/ || c2 == :-| || c2 == :-& || c2 == :-^)
@@ -1013,10 +1017,13 @@ use ../../languages/tungsten/lexers/regex_helpers
             if c2 == :-> || c2 == :-=
               match = 1
           when :-&
-            if c2 == :-. || c2 == :-& || c2 == :-(
+            if c2 == :-. || c2 == :-& || c2 == :-( || c2 == :-=
               match = 1
           when :-|
-            if c2 == :-| || c2 == :->
+            if c2 == :-| || c2 == :-> || c2 == :-=
+              match = 1
+          when :-^
+            if c2 == :-=
               match = 1
           when :-+
             if c2 == :-+ || c2 == :-= || c2 == :-@
@@ -2897,6 +2904,12 @@ use ../../languages/tungsten/lexers/regex_helpers
     when :CIDR6 then 157
     when :HYPER_ARRAY then 158
     when :PLUS_MINUS then 159
+    when :POW_EQ then 160
+    when :AMP_EQ then 161
+    when :PIPE_EQ then 162
+    when :CARET_EQ then 163
+    when :LSHIFT_EQ then 164
+    when :RSHIFT_EQ then 165
     else 0
 
   -> emit_at(type, value, off)
@@ -3264,6 +3277,8 @@ use ../../languages/tungsten/lexers/regex_helpers
       emit_at(:SPACESHIP, raw, off)
     elsif raw == "<="
       emit_at(:LTE, raw, off)
+    elsif raw == ">>="
+      emit_at(:RSHIFT_EQ, raw, off)
     elsif raw == ">>"
       emit_at(:RSHIFT, raw, off)
     elsif raw == ">="
@@ -3286,6 +3301,8 @@ use ../../languages/tungsten/lexers/regex_helpers
       emit_at(:MINUS_MINUS, raw, off)
     elsif raw == "-="
       emit_at(:MINUS_EQ, raw, off)
+    elsif raw == "**="
+      emit_at(:POW_EQ, raw, off)
     elsif raw == "**"
       emit_at(:POW, raw, off)
     elsif raw == "*="
@@ -3294,6 +3311,14 @@ use ../../languages/tungsten/lexers/regex_helpers
       emit_at(:SLASH_EQ, raw, off)
     elsif raw == "%="
       emit_at(:PERCENT_EQ, raw, off)
+    elsif raw == "<<="
+      emit_at(:LSHIFT_EQ, raw, off)
+    elsif raw == "&="
+      emit_at(:AMP_EQ, raw, off)
+    elsif raw == "|="
+      emit_at(:PIPE_EQ, raw, off)
+    elsif raw == "^="
+      emit_at(:CARET_EQ, raw, off)
     elsif raw == "-"
       emit_at(:MINUS, raw, off)
     elsif raw == "-@"

@@ -214,6 +214,16 @@ T_HYPER_ARRAY     = 158
 # Measurement constructor operator: `value ± standard_uncertainty`.
 T_PLUS_MINUS      = 159
 
+# Consuming compound assignment. These remain distinct tokens so the
+# lowering pass can select a destination-reusing BigInt entry only after its
+# liveness proof succeeds; ordinary binary operators stay immutable.
+T_POW_EQ          = 160
+T_AMP_EQ          = 161
+T_PIPE_EQ         = 162
+T_CARET_EQ        = 163
+T_LSHIFT_EQ       = 164
+T_RSHIFT_EQ       = 165
+
 + Token
   # Force-load helper — referencing this from a caller triggers the
   # autoload pass to load core/token.w, which in turn registers Token

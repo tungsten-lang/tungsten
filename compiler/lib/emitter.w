@@ -319,6 +319,11 @@ use hashing
   out << declare_fn_attrs("w_bigint_mul_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_div_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_mod_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_and_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_or_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_xor_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_shl_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_shr_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_mod_pow2_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_add_mod_pow2_mut", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn_attrs("w_bigint_addmul_mut", "preserve_mostcc " + wv, wv3, "nounwind cold")
@@ -2765,7 +2770,7 @@ ewscope_md_state = {ids: {}, order: []}
     # a declaration/callsite mismatch is UB. Their C definitions carry
     # __attribute__((preserve_most)) to match.
     cc = ""
-    if inst[:rt_fallback] in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut")
+    if inst[:rt_fallback] in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "w_bigint_and_mut" "w_bigint_or_mut" "w_bigint_xor_mut" "w_bigint_shl_mut" "w_bigint_shr_mut")
       cc = "preserve_mostcc "
     out << slow + " = call " + cc + "i64 @" + inst[:rt_fallback] + "(i64 " + inst[:lhs] + ", i64 " + inst[:rhs] + ") cold\n  "
     out << "br label %g.done." + bid + "\n"

@@ -302,6 +302,23 @@ use regex_base
       scan_number()
       return nil
 
+    # Three-character compound operators (check before their two-character
+    # binary prefixes).
+    if @pos + 2 < @char_count && @chars[@pos + 2] == "="
+      three = ch + @chars[@pos + 1] + "="
+      if three == "**="
+        @pos += 3
+        emit(:POW_EQ, "**=")
+        return nil
+      if three == "<<="
+        @pos += 3
+        emit(:LSHIFT_EQ, "<<=")
+        return nil
+      if three == ">>="
+        @pos += 3
+        emit(:RSHIFT_EQ, ">>=")
+        return nil
+
     # Two-character operators (check before single-char)
     if @pos + 1 < @char_count
       next_ch = @chars[@pos + 1]
@@ -455,6 +472,21 @@ use regex_base
       if two == "%="
         @pos += 2
         emit(:PERCENT_EQ, "%=")
+        return nil
+
+      if two == "&="
+        @pos += 2
+        emit(:AMP_EQ, "&=")
+        return nil
+
+      if two == "|="
+        @pos += 2
+        emit(:PIPE_EQ, "|=")
+        return nil
+
+      if two == "^="
+        @pos += 2
+        emit(:CARET_EQ, "^=")
         return nil
 
     # Single-character operators and delimiters

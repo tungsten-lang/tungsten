@@ -678,6 +678,11 @@ __attribute__((preserve_most)) WValue w_bigint_sub_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_mod_mut(WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_and_mut(WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_or_mut(WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_xor_mut(WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_shl_mut(WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_shr_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_mod_pow2_mut(
     WValue a, WValue bits);
 __attribute__((preserve_most)) WValue w_bigint_add_mod_pow2_mut(

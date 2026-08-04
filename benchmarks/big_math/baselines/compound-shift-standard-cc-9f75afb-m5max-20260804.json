@@ -1,0 +1,204 @@
+{
+  "schema": "tungsten.bigint.compound-bitwise-ab/v1",
+  "machine": {
+    "hostname": "Eriks-BigMac-Pro.local",
+    "machine": "arm64",
+    "processor": "arm",
+    "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+    "logical_cpus": 18,
+    "load_average": [
+      3.572265625,
+      3.81201171875,
+      3.8896484375
+    ],
+    "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+    "clang": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+    "target_triple": "arm64-apple-darwin25.6.0",
+    "gmp_version": "6.3.0",
+    "git_head": "9f75afb0cb087af38bcdc7602a66c38b7d8884e3"
+  },
+  "build": {
+    "flags": [
+      "--release",
+      "--native",
+      "--fast"
+    ],
+    "candidate_env": {
+      "TUNGSTEN_BIGINT_MUTATE_UNIQUE": 1,
+      "TUNGSTEN_BIGINT_BITWISE_MUT": 1,
+      "TUNGSTEN_BIGINT_SHIFT_MUT": 1
+    },
+    "control_env": {
+      "prebuilt": "/private/tmp/compound-loop-shift-preserve-current",
+      "TUNGSTEN_BIGINT_MUTATE_UNIQUE": 1,
+      "TUNGSTEN_BIGINT_BITWISE_MUT": 1,
+      "TUNGSTEN_BIGINT_SHIFT_MUT": 1
+    },
+    "sha256": {
+      "compiler": "1094e640d85180e1c0ad2c29395f54fe680a846d7903d6d00ebbfe6306e0c2e2",
+      "candidate": "f7654b5c0c9e543ee6b41d1291b0d4c342dbaebb3913ef88f82d398d1e4c1b29",
+      "control": "aef170f0b449dbb09c4ad007ca4cfc057e0d68e343cb590c01de8df7b76b12e3",
+      "gmp": "2883a79b217d2cbd10d7716236e84450dd5adca951e5464f923babd33f1644ad",
+      "candidate_ll": "9688ad7fcdccfa76e13e064403d5d36121d5740c1cfa7b13c0707da1ac54e361",
+      "control_ll": "131e2f799b83e914a2420d4532cc42166e051e2b33658a9e4d68cd5fb32268d4"
+    }
+  },
+  "records": [
+    {
+      "operation": "shift",
+      "limbs": 4,
+      "iterations": 18048497,
+      "rounds": 9,
+      "target_ms": 110.0,
+      "candidate_ns": 7.055437450621378,
+      "control_ns": 7.160166854921283,
+      "gmp_ns": 7.387263327,
+      "candidate_iqr_ns": 0.7328564993556679,
+      "control_iqr_ns": 0.2989133940638471,
+      "gmp_iqr_ns": 0.23672331249999967,
+      "candidate_over_control": 0.9853733290826983,
+      "candidate_over_gmp": 0.9550813526349036,
+      "control_over_gmp": 0.9692583759335215,
+      "checksum": 737222145,
+      "samples": {
+        "candidate": [
+          6.78577510721344,
+          7.210494221680436,
+          6.688497847698291,
+          7.055437450621378,
+          6.592164802725577,
+          6.569023448487459,
+          7.129134723036637,
+          8.025751396144615,
+          7.535881427454767
+        ],
+        "control": [
+          6.71005319731308,
+          7.165947576289612,
+          7.049742147643015,
+          7.25380115188881,
+          7.068030835440345,
+          6.962562681757635,
+          7.160166854921283,
+          7.419567494966116,
+          7.356330465639535
+        ],
+        "gmp": [
+          7.422390906,
+          7.34809109,
+          7.387263327,
+          7.325097486,
+          6.948445624,
+          7.054105392,
+          7.430258597,
+          7.401114896,
+          8.03778841
+        ]
+      }
+    },
+    {
+      "operation": "shift",
+      "limbs": 16,
+      "iterations": 12271211,
+      "rounds": 9,
+      "target_ms": 110.0,
+      "candidate_ns": 11.344153401293337,
+      "control_ns": 11.239708398758607,
+      "gmp_ns": 9.609483531,
+      "candidate_iqr_ns": 0.5532597124666605,
+      "control_iqr_ns": 0.8000534744106353,
+      "gmp_iqr_ns": 0.5349512775000012,
+      "candidate_over_control": 1.0092925010889309,
+      "candidate_over_gmp": 1.1805164517632323,
+      "control_over_gmp": 1.169647501085728,
+      "checksum": 252139136,
+      "samples": {
+        "candidate": [
+          11.203427681425687,
+          11.064026199242829,
+          10.872439566469403,
+          11.344153401293337,
+          11.375758540347958,
+          11.920271493159866,
+          12.927907712885895,
+          11.453701812441968,
+          11.332099442241944
+        ],
+        "control": [
+          10.816638227511195,
+          10.396345560705095,
+          11.002204672464853,
+          11.026248074549452,
+          11.362044191967566,
+          12.03104227678063,
+          12.219685028625328,
+          11.387907572016687,
+          11.239708398758607
+        ],
+        "gmp": [
+          8.961951677,
+          9.168532755,
+          10.107070932,
+          9.770266358,
+          9.473311151,
+          9.941480103,
+          9.741744315,
+          9.609483531,
+          9.60263824
+        ]
+      }
+    },
+    {
+      "operation": "shift",
+      "limbs": 64,
+      "iterations": 6924565,
+      "rounds": 9,
+      "target_ms": 110.0,
+      "candidate_ns": 24.6424324122761,
+      "control_ns": 24.126040167705565,
+      "gmp_ns": 28.55226285,
+      "candidate_iqr_ns": 3.219398980489558,
+      "control_iqr_ns": 1.7064308977783682,
+      "gmp_iqr_ns": 3.3329891479999993,
+      "candidate_over_control": 1.0214039370315633,
+      "candidate_over_gmp": 0.8630640780289713,
+      "control_over_gmp": 0.8449782174692176,
+      "checksum": 77686432,
+      "samples": {
+        "candidate": [
+          23.02486991273678,
+          24.6424324122761,
+          21.98494297689554,
+          24.3113707020034,
+          28.48045328453678,
+          26.97427564027565,
+          25.041639197187568,
+          22.979337570772145,
+          25.468729804212384
+        ],
+        "control": [
+          24.126040167705565,
+          23.710707219188144,
+          23.854687381920414,
+          22.98376023130941,
+          25.224556826141846,
+          26.75542916131944,
+          23.544764183792513,
+          24.46534547685952,
+          25.443776372395554
+        ],
+        "gmp": [
+          28.55226285,
+          31.536421421,
+          27.3794816,
+          29.576009468,
+          31.929514706,
+          31.291640703,
+          27.844781586,
+          28.401928496,
+          28.317302242
+        ]
+      }
+    }
+  ]
+}

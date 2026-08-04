@@ -83,6 +83,18 @@ tokens = lex("+=")
 assert_eq tokens[0][:type], :PLUS_EQ
 tokens = lex("-=")
 assert_eq tokens[0][:type], :MINUS_EQ
+tokens = lex("**=")
+assert_eq tokens[0][:type], :POW_EQ
+tokens = lex("&=")
+assert_eq tokens[0][:type], :AMP_EQ
+tokens = lex("|=")
+assert_eq tokens[0][:type], :PIPE_EQ
+tokens = lex("^=")
+assert_eq tokens[0][:type], :CARET_EQ
+tokens = lex("x <<= 3")
+assert_eq tokens[1][:type], :LSHIFT_EQ
+tokens = lex("x >>= 3")
+assert_eq tokens[1][:type], :RSHIFT_EQ
 
 test "tokenizes puts and print operators"
 tokens = lex("<<")

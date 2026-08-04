@@ -907,10 +907,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   lt = ctx[:var_types][name]
   vt = infer_type(node.value, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
 
-  # For arithmetic compound assignment on ints, use runtime calls because the
-  # accumulator may already be a bigint and raw i48 ops would consume pointer
-  # bits.  Division has the same promoted-accumulator hazard as +/-/*.
-  if lt == :int && vt == :int && op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
+  # For boxed integer compound assignment, use runtime calls because the
+  # accumulator may already be a bigint and raw i48 operations would consume
+  # pointer bits. Machine-declared i64/u64 variables take the earlier typed
+  # path; this arm preserves arbitrary-precision promotion.
+  if lt == :int && vt == :int && op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
     rt_fb = nil
     if op == :PLUS
       rt_fb = "w_add"
@@ -922,18 +923,41 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rt_fb = "w_div"
     elsif op == :PERCENT
       rt_fb = "w_mod"
+    elsif op == :AMPERSAND
+      rt_fb = "__w_band_fast"
+    elsif op == :PIPE
+      rt_fb = "__w_bor_fast"
+    elsif op == :CARET
+      rt_fb = "__w_bxor_fast"
+    elsif op == :LSHIFT
+      rt_fb = "__w_shl_fast"
+    elsif op == :RSHIFT
+      rt_fb = "__w_shr_fast"
     # Mutate-if-unique (E4 stage 1): compound arithmetic on a proven-dead
     # accumulator takes the in-place entry; its runtime guards fall back.
     mut_cc = nil
-    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
+    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
       if self_square && env("TUNGSTEN_BIGINT_SQR_MUT") == "0"
         rt_fb = "w_mul"
       elsif op == :PERCENT
         rt_fb = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
+      elsif op == :AMPERSAND && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
+        rt_fb = "w_bigint_and_mut"
+      elsif op == :PIPE && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
+        rt_fb = "w_bigint_or_mut"
+      elsif op == :CARET && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
+        rt_fb = "w_bigint_xor_mut"
+      elsif op == :LSHIFT && env("TUNGSTEN_BIGINT_SHIFT_MUT") != "0"
+        rt_fb = "w_bigint_shl_mut"
+      elsif op == :RSHIFT && env("TUNGSTEN_BIGINT_SHIFT_MUT") != "0"
+        rt_fb = "w_bigint_shr_mut"
+      elsif op in (:AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
+        # Benchmark control: retain the immutable fast wrapper.
+        nil
       else
         rt_fb = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
       # must match the preserve_mostcc declaration or the call is UB
-      if rt_fb != "w_mod" && rt_fb != "w_mul"
+      if rt_fb in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "w_bigint_and_mut" "w_bigint_or_mut" "w_bigint_xor_mut" "w_bigint_shl_mut" "w_bigint_shr_mut")
         mut_cc = "preserve_mostcc"
     result_temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rhs_reg], call_conv: mut_cc})
@@ -994,14 +1018,26 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # arm, so preserve their mutate-if-unique routing too.
   if rt_op != nil
     rt_call_conv = nil
-    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
+    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
       if self_square && env("TUNGSTEN_BIGINT_SQR_MUT") == "0"
         rt_op = "w_mul"
       elsif op == :PERCENT
         rt_op = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
+      elsif op == :AMPERSAND && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
+        rt_op = "w_bigint_and_mut"
+      elsif op == :PIPE && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
+        rt_op = "w_bigint_or_mut"
+      elsif op == :CARET && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
+        rt_op = "w_bigint_xor_mut"
+      elsif op == :LSHIFT && env("TUNGSTEN_BIGINT_SHIFT_MUT") != "0"
+        rt_op = "w_bigint_shl_mut"
+      elsif op == :RSHIFT && env("TUNGSTEN_BIGINT_SHIFT_MUT") != "0"
+        rt_op = "w_bigint_shr_mut"
+      elsif op in (:AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
+        nil
       else
         rt_op = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
-      if rt_op != "w_mod" && rt_op != "w_mul"
+      if rt_op in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "w_bigint_and_mut" "w_bigint_or_mut" "w_bigint_xor_mut" "w_bigint_shl_mut" "w_bigint_shr_mut")
         rt_call_conv = "preserve_mostcc"
     result = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg], call_conv: rt_call_conv})

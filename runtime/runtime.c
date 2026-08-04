@@ -9216,6 +9216,9 @@ static uint64_t mag_mod_single(const uint64_t *a, int32_t alen, uint64_t d) {
 #ifndef BN_DIV_TRIANGULAR_Q_CERTIFIED
 #define BN_DIV_TRIANGULAR_Q_CERTIFIED 1
 #endif
+#ifndef BN_DIV_TRIANGULAR_Q_SELECT
+#define BN_DIV_TRIANGULAR_Q_SELECT 1
+#endif
 #ifndef BN_DIV_TRIANGULAR_Q_MIN
 #define BN_DIV_TRIANGULAR_Q_MIN 2
 #endif
@@ -10960,7 +10963,7 @@ static void mag_divmod(const uint64_t *u, int32_t ulen,
         return;
 #endif
     if (q_out && !r_out) {
-#if BN_DIV_TRIANGULAR_Q_CERTIFIED
+#if BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_TRIANGULAR_Q_SELECT
 #if BN_DIV_63_DIRECT
         if (ulen == 6 && vlen == 3) {
             WBigint *q = mag_div_q_63_certified(u, v);
@@ -11194,7 +11197,8 @@ WValue bigint_div_any(WValue a, WValue b) {
             return bigint_finish_mag_sub(
                 mag_div_42(aa->limbs, bb->limbs));
 #endif
-#if BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_63_DIRECT && BN_DIV_63_BOXED_FAST
+#if BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_TRIANGULAR_Q_SELECT && \
+    BN_DIV_63_DIRECT && BN_DIV_63_BOXED_FAST
         if (as == 6 && bs == 3) {
             WBigint *q =
                 mag_div_q_63_certified(aa->limbs, bb->limbs);
@@ -11212,7 +11216,7 @@ WValue bigint_div_any(WValue a, WValue b) {
         if (bs >= 4 && as > 0 &&
             (as & 1) == 0 && bs == as / 2) {
             WBigint *q;
-#if BN_DIV_TRIANGULAR_Q_CERTIFIED
+#if BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_TRIANGULAR_Q_SELECT
             /*
              * Below the cached-reciprocal crossover, quotient-only 2n/n
              * division goes straight to the triangular certificate.  Keeping

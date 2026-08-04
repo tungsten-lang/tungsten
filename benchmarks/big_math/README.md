@@ -59,6 +59,12 @@ change the checked-in runtime worker policy: use its artifact to decide whether
 such a change is warranted. Pass `--sizes` to narrow a local sweep, or
 `--operations mul` / `--operations sqr` to select one operation.
 
+The checked-in SSA/FFT point-worker cap is seven on Apple arm64 and four on
+other targets. The Apple setting is an M5 Max measurement, not a cross-target
+claim: `worker-sweep-03886b6-m5max-20260804.json` explores caps 1..17, while
+the decision-grade `ssa-workers7-03886b6-m5max-20260804.json` holds every
+other compile-time policy constant and records start/end host load.
+
 For a compile-time optimization hypothesis, use the isolated boxed-operation
 A/B driver rather than comparing raw kernels or replacing the normal harness:
 

@@ -2642,7 +2642,11 @@ WValue bigint_sub_any(WValue a, WValue b) {
 #define BN_SSA_PAR_THRESHOLD 8192
 #endif
 #ifndef BN_SSA_PAR_THREADS
+#if defined(__APPLE__) && defined(__aarch64__)
+#define BN_SSA_PAR_THREADS 7
+#else
 #define BN_SSA_PAR_THREADS 4
+#endif
 #endif
 /* Squaring has different crossovers: its diagonal basecase stays profitable
  * longer, and the one-operand Toom evaluation costs shift both upper rungs. */

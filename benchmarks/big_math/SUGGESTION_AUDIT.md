@@ -56,7 +56,7 @@ Source fingerprints:
 | GLM-17 | Page-offset rehoming at 384–512 limbs | rejected | extending add/sub rehoming through 512 limbs produced 1.003x geomean, five wins/five losses, and a 6.1% sub256 regression; a separate safe fresh-capacity mul/sqr rehome produced an unresolved 0.978x geomean with paired spreads larger than the effect and regressed the named mul448 cell 1.1%; both candidates were removed; addsub-rehome512-996180d-m5max-20260804.json and mulsqr-large-rehome-996180d-m5max-20260804.json |
 | GLM-18 | Hand-written add/sub basecases for 8–128 limbs | pending | |
 | GLM-19 | Toom-2 equal/difference specializations at 32–48 limbs | kept | the current fixed 32/40/48 difference paths were measured against one otherwise-identical build with BN_MUL_POWER2_FIXED, BN_MUL_SPLIT_40_BLOCKS, and BN_MUL_SPLIT_48 disabled; nine alternating 110 ms boxed rounds measured candidate/baseline 0.851x/0.852x/0.841x, with all current cells faster than GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
-| GLM-20 | Branch-free carry/correction tails in mul1 and div1 | pending | |
+| GLM-20 | Branch-free carry/correction tails in mul1 and div1 | rejected | current mul1 rolling-carry kernels already return carry without a correction branch, so that half of the proposed transformation has no matching branch to remove; replacing div1's rare second reciprocal-correction branch with AArch64 cmp/sub/csel/cinc lost all nine boxed cells from 2 through 1024 limbs and slowed the geometric mean 1.107x, so the candidate was removed; div1-branchless-second-fbf77a1-m5max-20260804.json |
 
 ## Kimi-K3
 
@@ -198,6 +198,7 @@ existence does not automatically disposition an item:
 - 6ad6737 follow-up artifacts: rejected 6x6/10x10 fixed-leaf candidates and adjacent-size screens.
 - 10ffc4b follow-up artifact: boxed 5-7-limb mul1 straight-line A/B.
 - 996180d follow-up artifacts: rejected 128-512 add/sub and 256-1024 mul/sqr rehome extensions.
+- fbf77a1 follow-up artifact: rejected branch-free div1 second reciprocal correction across 2-1024 limbs.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

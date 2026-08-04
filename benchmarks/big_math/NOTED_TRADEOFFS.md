@@ -426,6 +426,26 @@ were removed.  Artifacts:
 `baselines/mul1-public-kernel-upper-bound-screen-78e0403-m5max-20260804.json`
 and `baselines/mul1-fixed128-entry-screen-78e0403-m5max-20260804.json`.
 
+A direct-destination upper bound then rotated two already-proven-dead result
+buffers for 128+ limbs, preserving the immediately previous immutable result
+while removing recycler return/take and generic publication work.  The first
+screen incorrectly selected the destination path inside the timed lane and
+therefore charged inactive 1..64-limb controls an extra width branch; it is
+retained only as diagnosis:
+`baselines/mul1-dest-upper-screen-b81d43a-m5max-20260804.json`.
+
+The corrected harness kept the ordinary small lane byte-identical and selected
+the separately aligned destination lane once outside timing.  Its acceptance
+run improved six of nine affected 128..8192 widths at a 0.9845 geomean, but
+left six boxed cells above GMP and regressed 8192 limbs 5.8%; this is real
+lifecycle headroom, not a shippable win.  Combining the same direct buffers
+with public `mpn_mul_1` was neutral at 0.9984 over the affected band and still
+left eight of nine cells above the complete GMP operation.  The loaded-host
+screens do not support another kernel clone or a benchmark-only destination
+path; production remains unchanged.  Artifacts:
+`baselines/mul1-dest-upper-acceptance-b81d43a-m5max-20260804.json` and
+`baselines/mul1-dest-public-upper-screen-b81d43a-m5max-20260804.json`.
+
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 
 **Claimed win (prior session, real workloads):** hybrid (p2<=32 + q32)

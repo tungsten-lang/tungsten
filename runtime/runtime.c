@@ -40491,8 +40491,22 @@ uint64_t w_prime_count_u64(uint64_t lo, uint64_t hi) {
 }
 
 /* Tiered test for n that fits in 64 bits. Exact for all n < 2⁶⁴. */
+#ifndef BN_PRIME_PREFILTER
+#define BN_PRIME_PREFILTER 1
+#endif
 static int w_prime_test_u64(uint64_t n) {
     if (n < 2ULL) return 0;
+
+#if !BN_PRIME_PREFILTER
+    /* Benchmark control: retain an exact all-u64 primality test while
+     * bypassing every cheap candidate prefilter.  The measured fixtures are
+     * above the smaller witness tiers, so both variants reach this same
+     * seven-base test whenever the production screen does not reject first. */
+    if ((n & 1ULL) == 0ULL) return n == 2ULL;
+    return w_prime_mont_mr(
+        n, W_PRIME_MR_BASES,
+        sizeof(W_PRIME_MR_BASES) / sizeof(W_PRIME_MR_BASES[0]));
+#else
 
     /* Tier 1 — screen by the small primes; resolves every n < 41² = 1681. */
     static const uint64_t SMALL[] = {2,3,5,7,11,13,17,19,23,29,31,37};
@@ -40503,6 +40517,7 @@ static int w_prime_test_u64(uint64_t n) {
     if (n < 1681ULL) return 1;  /* no factor ≤ 37 and below 41² ⇒ prime */
 
     return w_prime_test_u64_post_screen(n);
+#endif
 }
 
 /* prime_12k?: a FAST primality test for a candidate already known coprime to 6

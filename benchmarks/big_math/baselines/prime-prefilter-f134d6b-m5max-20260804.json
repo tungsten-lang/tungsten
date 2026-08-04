@@ -1,0 +1,196 @@
+{
+  "schema": 1,
+  "suggestion": "GEMMA-06",
+  "experiment": {
+    "label": "u64 primality prefilter",
+    "baseline": "seven-base-no-prefilter",
+    "candidate": "tiered-prefilter",
+    "baseline_flags": "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations -DBN_PRIME_PREFILTER=0",
+    "candidate_flags": "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations",
+    "rounds": 9,
+    "target_ms": 110.0,
+    "binary_sha256": {
+      "seven-base-no-prefilter": "12a97c86640321a9aa6560ab5f62030af239d463bc1f25a40231927ae7b5be5f",
+      "tiered-prefilter": "91e29537c69200c141f83057ae97d8ca15882a4accb15b40805d52247dcf9b19"
+    }
+  },
+  "metadata": {
+    "generated_at": "2026-08-04T12:49:36.636648+00:00",
+    "git_commit": "f134d6b66dfc7ecfd23c2819974cce704951dda0",
+    "git_dirty_tracked": true,
+    "gmp_version": "6.3.0",
+    "machine_start": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        2.8427734375,
+        3.40673828125,
+        3.568359375
+      ],
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "compiler_flags": "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations -DBN_PRIME_PREFILTER=0",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "machine_end": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        4.28955078125,
+        3.71630859375,
+        3.67041015625
+      ],
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "compiler_flags": "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "methodology": "same-source builds differ only in BN_PRIME_PREFILTER; fixtures are deterministic large easy composites, GMP-generated large primes, and a 50/50 mix; every value is checked with public mpz_probab_prime_p before timing; variant order alternates"
+  },
+  "summary": {
+    "cells": 3,
+    "candidate_wins": 3,
+    "candidate_losses": 0,
+    "candidate_over_baseline_geomean": 0.2482114054631111,
+    "regressions_over_5_percent": 0
+  },
+  "results": [
+    {
+      "mode": "easy",
+      "iterations": 22000000,
+      "baseline_ns_median": 170.233,
+      "baseline_ns_iqr": 3.7150000000000034,
+      "candidate_ns_median": 2.927,
+      "candidate_ns_iqr": 0.29800000000000004,
+      "candidate_over_baseline_paired_median": 0.017274853801169592,
+      "candidate_over_baseline_paired_iqr": 0.001915268171410748,
+      "samples": {
+        "seven-base-no-prefilter": [
+          168.098,
+          168.154,
+          169.11,
+          170.233,
+          167.402,
+          173.839,
+          171.0,
+          177.262,
+          171.869
+        ],
+        "tiered-prefilter": [
+          3.157,
+          2.4,
+          2.927,
+          2.448,
+          2.763,
+          2.751,
+          2.954,
+          3.202,
+          3.049
+        ]
+      },
+      "paired_ratios": [
+        0.018780711251769798,
+        0.014272631040593741,
+        0.017308260895275263,
+        0.014380290542961706,
+        0.016505179149592,
+        0.015824987488423196,
+        0.017274853801169592,
+        0.018063657185409168,
+        0.017740255659833944
+      ]
+    },
+    {
+      "mode": "mixed",
+      "iterations": 126582,
+      "baseline_ns_median": 815.25,
+      "baseline_ns_iqr": 44.91100000000006,
+      "candidate_ns_median": 720.252,
+      "candidate_ns_iqr": 70.12099999999998,
+      "candidate_over_baseline_paired_median": 0.8989151417515157,
+      "candidate_over_baseline_paired_iqr": 0.07868685148289267,
+      "samples": {
+        "seven-base-no-prefilter": [
+          793.422,
+          809.91,
+          788.951,
+          846.36,
+          851.187,
+          878.553,
+          1033.472,
+          815.25,
+          806.276
+        ],
+        "tiered-prefilter": [
+          718.894,
+          692.942,
+          709.2,
+          720.252,
+          791.337,
+          709.098,
+          758.631,
+          822.629,
+          779.321
+        ]
+      },
+      "paired_ratios": [
+        0.9060676411795993,
+        0.8555790149522787,
+        0.8989151417515157,
+        0.8509995746490854,
+        0.929686426131978,
+        0.8071203444755182,
+        0.7340605260713401,
+        1.009051211284882,
+        0.9665685199609068
+      ]
+    },
+    {
+      "mode": "prime",
+      "iterations": 48203,
+      "baseline_ns_median": 1612.12,
+      "baseline_ns_iqr": 159.01499999999987,
+      "candidate_ns_median": 1615.231,
+      "candidate_ns_iqr": 124.53599999999983,
+      "candidate_over_baseline_paired_median": 0.9847639113134027,
+      "candidate_over_baseline_paired_iqr": 0.06049532734936336,
+      "samples": {
+        "seven-base-no-prefilter": [
+          1640.105,
+          1597.847,
+          1602.763,
+          1598.573,
+          1800.925,
+          1612.12,
+          1862.042,
+          1757.588,
+          1561.749
+        ],
+        "tiered-prefilter": [
+          1557.185,
+          1615.231,
+          1563.326,
+          1574.217,
+          1598.656,
+          1649.835,
+          1792.959,
+          1931.394,
+          1698.753
+        ]
+      },
+      "paired_ratios": [
+        0.9494422613186351,
+        1.0108796399154611,
+        0.9753943658544652,
+        0.9847639113134027,
+        0.8876860502241903,
+        1.0233946604471131,
+        0.9628993330977498,
+        1.0988889318770951,
+        1.0877247240113488
+      ]
+    }
+  ]
+}

@@ -4570,6 +4570,68 @@ static BenchCapacityStats bench_capacity_policy_grid(
     return stats;
 }
 
+#ifdef HAVE_GMP
+#define BENCH_PRIME_DATASET 256
+static void bench_prime_prefilter_values(const char *mode,
+                                         uint64_t *values) {
+    static const uint64_t factors[] = {3,5,7,11,13,17,19,23,29,31,37};
+    int easy = strcmp(mode, "easy") == 0;
+    int mixed = strcmp(mode, "mixed") == 0;
+    int prime = strcmp(mode, "prime") == 0;
+    if (!easy && !mixed && !prime)
+        die("prime prefilter mode must be easy, mixed, or prime");
+
+    mpz_t cursor, next;
+    mpz_inits(cursor, next, NULL);
+    mpz_set_ui(cursor, UINT64_C(0x7ffffffffff00001));
+    for (int i = 0; i < BENCH_PRIME_DATASET; i++) {
+        int use_easy = easy || (mixed && (i & 1) == 0);
+        if (use_easy) {
+            uint64_t factor = factors[(unsigned)i %
+                (sizeof(factors) / sizeof(factors[0]))];
+            uint64_t cofactor =
+                UINT64_C(1000000000000037) + (uint64_t)(2 * i);
+            values[i] = factor * cofactor;
+        } else {
+            mpz_nextprime(next, cursor);
+            values[i] = (uint64_t)mpz_get_ui(next);
+            mpz_add_ui(cursor, next, 2);
+        }
+    }
+    mpz_clears(cursor, next, NULL);
+
+    mpz_t z;
+    mpz_init(z);
+    for (int i = 0; i < BENCH_PRIME_DATASET; i++) {
+        mpz_set_ui(z, values[i]);
+        int expected = mpz_probab_prime_p(z, 32) != 0;
+        int got = w_prime_test_u64(values[i]);
+        if (got != expected)
+            die("prime prefilter fixture mismatch vs GMP");
+    }
+    mpz_clear(z);
+}
+
+static double bench_prime_prefilter(const char *mode, int iters) {
+    uint64_t values[BENCH_PRIME_DATASET];
+    bench_prime_prefilter_values(mode, values);
+    double warm_start = bench_now();
+    int warm_i = 0;
+    do {
+        for (int chunk = 0; chunk < 256; chunk++, warm_i++)
+            bench_sink ^= (uint64_t)w_prime_test_u64(
+                values[(unsigned)warm_i & (BENCH_PRIME_DATASET - 1)]);
+    } while (bench_now() - warm_start < bench_warm_seconds);
+
+    double start = bench_now();
+    for (int i = 0; i < iters; i++)
+        bench_sink ^= (uint64_t)w_prime_test_u64(
+                          values[(unsigned)i & (BENCH_PRIME_DATASET - 1)]) ^
+                      (uint64_t)i;
+    return (bench_now() - start) * 1e9 / (double)iters;
+}
+#endif
+
 int main(int argc, char **argv) {
 #if BN_BENCH_RUNTIME_WS_ZERO_KNOB
     const char *force_ws_zero = getenv("BENCH_WS_FORCE_ZERO");
@@ -4585,6 +4647,17 @@ int main(int argc, char **argv) {
     const char *release_arith_ws = getenv("BENCH_RELEASE_ARITH_WS");
     bench_release_arith_ws_each_iteration =
         release_arith_ws && strcmp(release_arith_ws, "0") != 0;
+#endif
+#ifdef HAVE_GMP
+    if (argc == 4 && strcmp(argv[1], "--bench-prime-prefilter") == 0) {
+        int iters = atoi(argv[3]);
+        if (iters <= 0)
+            die("prime prefilter benchmark expects positive iterations");
+        double ns = bench_prime_prefilter(argv[2], iters);
+        printf("prime prefilter %s (%d iters): tungsten %.3f ns\n",
+               argv[2], iters, ns);
+        return 0;
+    }
 #endif
     /* Compiled Tungsten initializes its static string slab and freezes it
      * before user code.  This source-including native harness has no emitted

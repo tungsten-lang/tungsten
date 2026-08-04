@@ -3143,6 +3143,46 @@ static void fuzz_add_sub_against_gmp(int cases, int32_t max_limbs) {
         bench_free_value(a);
         bench_free_value(b);
     }
+    /* Random limbs practically never produce either end condition of the
+     * boxed N +/- 1-word path.  Force full carry growth and top-limb shrink
+     * across both signs and every small retained-capacity class. */
+    int word_cases = 0;
+    int32_t word_max = max_limbs < 64 ? max_limbs : 64;
+    for (int32_t limbs = 2; limbs <= word_max; limbs++) {
+        for (int negative = 0; negative < 2; negative++) {
+            WBigint *ab = bigint_alloc(limbs);
+            for (int32_t i = 0; i < limbs; i++)
+                ab->limbs[i] = UINT64_MAX;
+            ab->size = negative ? -limbs : limbs;
+            WValue a = bigint_box(ab);
+            WValue word = w_box_int(negative ? -1 : 1);
+            gmp_import_value(za, a);
+            gmp_import_value(zb, word);
+            WValue sum = bigint_add_any(a, word);
+            mpz_add(zg, za, zb);
+            if (!value_matches_mpz(sum, zg))
+                dief("boxed add1 full-carry mismatch limbs=%d sign=%d",
+                     limbs, negative);
+            bench_free_value(sum);
+            bench_free_value(a);
+            word_cases++;
+
+            ab = bigint_alloc(limbs);
+            memset(ab->limbs, 0, (size_t)limbs * sizeof(uint64_t));
+            ab->limbs[limbs - 1] = 1;
+            ab->size = negative ? -limbs : limbs;
+            a = bigint_box(ab);
+            gmp_import_value(za, a);
+            WValue difference = bigint_sub_any(a, word);
+            mpz_sub(zg, za, zb);
+            if (!value_matches_mpz(difference, zg))
+                dief("boxed sub1 top-shrink mismatch limbs=%d sign=%d",
+                     limbs, negative);
+            bench_free_value(difference);
+            bench_free_value(a);
+            word_cases++;
+        }
+    }
     for (int t = 0; t < cases; t++) {
         int32_t a_limbs =
             1 + (int32_t)(bench_rng(&state) % (uint64_t)max_limbs);
@@ -3181,8 +3221,9 @@ static void fuzz_add_sub_against_gmp(int cases, int32_t max_limbs) {
     mpz_clears(za, zb, zg, NULL);
     int boundary_cases = max_limbs >= 256 ? 3 : (max_limbs >= 128 ? 1 : 0);
     printf("signed add/sub fuzz vs GMP: %d/%d random match"
-           " + %d carry/borrow boundary cases (max %d limbs)\n",
-           cases, cases, boundary_cases, max_limbs);
+           " + %d carry/borrow boundary cases + %d boxed word-edge cases"
+           " (max %d limbs)\n",
+           cases, cases, boundary_cases, word_cases, max_limbs);
 }
 
 static void fuzz_bitwise_shifts_against_gmp(

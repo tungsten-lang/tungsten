@@ -973,10 +973,16 @@ WValue bigint_add_two_limb_magnitudes(
  * per-op overhead, not carry propagation: the generic entry re-derives limb
  * views and walks the size-dispatch arms, then mag_add/mag_sub pay an
  * out-of-line bigint_pool_take plus a full bn_add_n/bn_sub_n call for a
- * single limb.  This kernel is the whole operation in one forward pass:
- * combine the word with limb 0, ripple the carry/borrow while it survives
+ * single limb.  These kernels perform the whole operation in one forward
+ * pass: combine the word with limb 0, ripple the carry/borrow while it survives
  * (usually zero limbs), memcpy the untouched tail, and handle the rare
  * full-carry growth or top-limb shrink afterwards.
+ *
+ * Allocation stays in the always-inline wrapper below.  In boxed producer /
+ * recycler loops this lets the caller share one resolved thread-local pool
+ * address across taking the new buffer and returning the previous result;
+ * resolving the pool again inside this out-of-line kernel costs more than
+ * several limbs of arithmetic.
  *
  * Preconditions: alen >= 2 (so |a| > w and the mixed-sign case cannot flip
  * the result sign or reach zero) and w != 0. */
@@ -1004,51 +1010,51 @@ static inline void bn_copy_tail(uint64_t *restrict dst,
     memcpy(dst, src, (size_t)n * sizeof(uint64_t));
 }
 
-static WValue bigint_addsub_word(
+static WValue bigint_add_word_into(
     const uint64_t *al, int32_t alen, int a_neg,
-    uint64_t w, int w_neg) {
-    if (a_neg == w_neg) {
-        /* Same effective sign: |a| + w, sign of a.  Exact-length allocation;
-         * the full-carry growth below is vanishingly rare. */
-        WBigint *r = bigint_alloc_raw_hot(alen);
-        uint64_t sum = al[0] + w;
-        uint64_t carry = sum < w;
-        r->limbs[0] = sum;
-        /* Fold the (data-dependent, so mispredict-prone) first carry into an
-         * unconditional limb-1 step; the loop then only handles the ~2^-64
-         * deeper ripple. */
-        uint64_t v1 = al[1] + carry;
-        carry = v1 < carry;
-        r->limbs[1] = v1;
-        int32_t i = 2;
-        while (carry && i < alen) {
-            uint64_t v = al[i] + 1;
-            r->limbs[i] = v;
-            carry = v == 0;
-            i++;
+    uint64_t w, WBigint *r) {
+    /* Same effective sign: |a| + w, sign of a.  Exact-length allocation;
+     * the full-carry growth below is vanishingly rare. */
+    uint64_t sum = al[0] + w;
+    uint64_t carry = sum < w;
+    r->limbs[0] = sum;
+    /* Fold the (data-dependent, so mispredict-prone) first carry into an
+     * unconditional limb-1 step; the loop then only handles the ~2^-64
+     * deeper ripple. */
+    uint64_t v1 = al[1] + carry;
+    carry = v1 < carry;
+    r->limbs[1] = v1;
+    int32_t i = 2;
+    while (carry && i < alen) {
+        uint64_t v = al[i] + 1;
+        r->limbs[i] = v;
+        carry = v == 0;
+        i++;
+    }
+    if (i < alen)
+        bn_copy_tail(r->limbs + i, al + i, alen - i);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Carry ran off the top: every rippled limb wrapped to zero, so
+         * the result is [sum, 0, ..., 0, 1] over alen + 1 limbs. */
+        if ((uint32_t)alen >= r->cap) {
+            WBigint *g = bigint_alloc_raw(alen + 1);
+            g->limbs[0] = r->limbs[0];
+            memset(g->limbs + 1, 0,
+                   (size_t)(alen - 1) * sizeof(uint64_t));
+            bigint_release(r);
+            r = g;
         }
-        if (i < alen)
-            bn_copy_tail(r->limbs + i, al + i, alen - i);
-        if (__builtin_expect(carry != 0, 0)) {
-            /* Carry ran off the top: every rippled limb wrapped to zero, so
-             * the result is [sum, 0, ..., 0, 1] over alen + 1 limbs. */
-            if ((uint32_t)alen >= r->cap) {
-                WBigint *g = bigint_alloc_raw(alen + 1);
-                g->limbs[0] = r->limbs[0];
-                memset(g->limbs + 1, 0,
-                       (size_t)(alen - 1) * sizeof(uint64_t));
-                bigint_release(r);
-                r = g;
-            }
-            r->limbs[alen] = 1;
-            r->size = a_neg ? -(alen + 1) : alen + 1;
-            return bigint_box(r);
-        }
-        r->size = a_neg ? -alen : alen;
+        r->limbs[alen] = 1;
+        r->size = a_neg ? -(alen + 1) : alen + 1;
         return bigint_box(r);
     }
+    r->size = a_neg ? -alen : alen;
+    return bigint_box(r);
+}
+
+static WValue bigint_sub_word_into(
+    WBigint *r, const uint64_t *al, int32_t alen, int a_neg, uint64_t w) {
     /* Opposite effective signs: |a| - w, sign of a (alen >= 2 => |a| > w). */
-    WBigint *r = bigint_alloc_raw_hot(alen);
     uint64_t a0 = al[0];
     uint64_t borrow = a0 < w;
     r->limbs[0] = a0 - w;
@@ -1073,6 +1079,16 @@ static WValue bigint_addsub_word(
         return bigint_finish_mag_sub(r);
     }
     return bigint_box(r);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_addsub_word(
+    const uint64_t *al, int32_t alen, int a_neg,
+    uint64_t w, int w_neg) {
+    WBigint *r = bigint_alloc_raw_hot(alen);
+    if (a_neg == w_neg)
+        return bigint_add_word_into(al, alen, a_neg, w, r);
+    return bigint_sub_word_into(r, al, alen, a_neg, w);
 }
 
 static WValue bigint_from_i64(int64_t v) {

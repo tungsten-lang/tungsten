@@ -137,6 +137,16 @@ python3 benchmarks/big_math/run_program_mutation_ab.py --feature mod \
 It tests 2 through 128 limbs, retains exact checksums and LLVM call counts, and
 records the GMP version plus machine/load metadata in JSON.
 
+To reproduce the constant-argument function experiment (ordinary recomputation,
+current pure-`fn` memoization, and an ideal manually hoisted value), run:
+
+```sh
+python3 benchmarks/big_math/run_interprocedural_constant.py \
+  --rounds 9 --output /tmp/interprocedural-constant.json
+```
+
+This is a compiler-opportunity bound rather than a GMP operation lane.
+
 To compare Tungsten's full-width `uint64_t` radix with an Odin-style 63-bit
 "nail" radix on the same ARM64 machine:
 

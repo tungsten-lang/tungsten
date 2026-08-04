@@ -20,7 +20,9 @@ The acceptance rule for a performance candidate is:
 
 "pending" means the item has not yet received a complete disposition.
 "active" means a matched experiment is in progress. Final states are
-"kept", "rejected", "premise rejected", or "deferred", each with evidence.
+"kept", "rejected", "premise rejected", "validated", or "deferred", each
+with evidence. "validated" records a measured opportunity whose production
+implementation has not passed the keep gate; it is not a shipped-speedup claim.
 A final "deferred" disposition requires a concrete unavailable prerequisite
 or an out-of-scope architecture/operation; low priority is not sufficient.
 
@@ -106,7 +108,7 @@ Source fingerprints:
 | GEMMA-17 | Atomic operations for shared BigInt structures | pending | |
 | GEMMA-18 | Algebraic theory tags such as p-adics | pending | |
 | GEMMA-19 | Cost-weighted symbol-value lookup caching | pending | |
-| GEMMA-20 | Whole-program interprocedural constant folding | pending | |
+| GEMMA-20 | Whole-program interprocedural constant folding | validated | The premise that every constant call recomputes is mostly stale: pure `fn` calls already memoize by argument. A release/native/fast three-lane experiment repeatedly evaluated the same 4097-bit constant-argument function with an ordinary method, current `fn` memoization seeded before timing, or an ideal manually hoisted value. Exact low-bit checksums matched and emitted LLVM contained the expected memo calls. Across nine rotating rounds, medians were 423.92/8.78/5.47 ns: memoization was 0.0220x ordinary recomputation (97.8% removed), while ideal hoisting was still 0.608x memoization, a real 39.2% residual lookup opportunity; paired IQRs were 0.0016 and 0.0347. interprocedural-constant-valid-1e41aa2-m5max-20260804.json. This validates specializing all-constant call sites, including a path that is unrelated to a currently red GMP matrix cell, but no general cross-module pass is retained yet; the artifact is an upper bound, not a production win. |
 
 ## Qwen3.6
 

@@ -1,0 +1,213 @@
+{
+  "schema": 1,
+  "suggestion": "GEMMA-17",
+  "experiment": {
+    "label": "shared boxed BigInt mutex versus immutable CAS",
+    "rounds": 9,
+    "target_ms": 110.0,
+    "threads": [
+      2,
+      4,
+      8
+    ],
+    "binary_sha256": "8526328d22b6c6b9805db6195b98179b7b078a1f78b581a67e399c5c7c9217eb"
+  },
+  "metadata": {
+    "generated_at": "2026-08-04T15:03:17.558980+00:00",
+    "git_commit": "631250b8aef521566fd2f339624e22ce91e9f8e3",
+    "git_dirty_tracked": true,
+    "machine_start": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        3.69482421875,
+        4.2802734375,
+        4.9287109375
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "machine_end": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        3.2939453125,
+        4.1484375,
+        4.865234375
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "methodology": "full boxed updates after a start barrier; mutex lane mutates the unique value under lock; CAS lane publishes immutable boxes and safely retains old generations because no BigInt hazard-pointer/epoch reclamation contract exists; process per sample"
+  },
+  "summary": {
+    "cells": 3,
+    "cas_wins": 0,
+    "cas_over_mutex_geomean": 3.4621368431402337,
+    "cas_regressions_over_5_percent": 3
+  },
+  "results": [
+    {
+      "threads": 2,
+      "updates_per_thread": {
+        "mutex": 1000001,
+        "cas": 859805
+      },
+      "median_ns_per_update": {
+        "mutex": 24.144976,
+        "cas": 50.755695
+      },
+      "cas_over_mutex_paired_median": 2.125105878988263,
+      "cas_over_mutex_paired_iqr": 0.062344320895943994,
+      "samples_ns_per_update": {
+        "mutex": [
+          24.524975,
+          24.144976,
+          24.084976,
+          24.531975,
+          23.720476,
+          24.411976,
+          24.910975,
+          23.911976,
+          23.068477
+        ],
+        "cas": [
+          50.755695,
+          48.772105,
+          51.933869,
+          51.662296,
+          50.408523,
+          51.936776,
+          49.417601,
+          50.977838,
+          50.266049
+        ]
+      },
+      "checksums": {
+        "mutex": 6946836117345679265,
+        "cas": 6946836117345398873
+      },
+      "paired_ratios": [
+        2.0695513451084047,
+        2.019969081766741,
+        2.1562765518221814,
+        2.1059167066654845,
+        2.125105878988263,
+        2.1275121686175673,
+        1.9837682386980036,
+        2.1318956660043487,
+        2.1789929608270193
+      ]
+    },
+    {
+      "threads": 4,
+      "updates_per_thread": {
+        "mutex": 500001,
+        "cas": 232921
+      },
+      "median_ns_per_update": {
+        "mutex": 32.061436,
+        "cas": 119.027481
+      },
+      "cas_over_mutex_paired_median": 3.782793433115456,
+      "cas_over_mutex_paired_iqr": 0.2268561823408035,
+      "samples_ns_per_update": {
+        "mutex": [
+          29.718441,
+          30.755438,
+          31.166438,
+          32.498935,
+          35.316929,
+          30.824938,
+          32.061436,
+          32.893934,
+          37.831424
+        ],
+        "cas": [
+          119.027481,
+          119.561997,
+          117.896197,
+          117.129842,
+          116.98387,
+          118.089395,
+          119.626397,
+          124.713959,
+          123.765139
+        ]
+      },
+      "checksums": {
+        "mutex": 6946836117345679267,
+        "cas": 6946836117344610947
+      },
+      "paired_ratios": [
+        4.005172444947567,
+        3.8875075360656544,
+        3.782793433115456,
+        3.6041132424800995,
+        3.312402106083459,
+        3.830969424820903,
+        3.731161542483624,
+        3.791396887949006,
+        3.271490362086291
+      ]
+    },
+    {
+      "threads": 8,
+      "updates_per_thread": {
+        "mutex": 250001,
+        "cas": 75509
+      },
+      "median_ns_per_update": {
+        "mutex": 39.024344,
+        "cas": 199.587135
+      },
+      "cas_over_mutex_paired_median": 5.1622554297474,
+      "cas_over_mutex_paired_iqr": 0.2623938779468631,
+      "samples_ns_per_update": {
+        "mutex": [
+          38.277847,
+          39.370343,
+          38.247347,
+          38.986344,
+          38.420846,
+          40.572338,
+          39.024344,
+          39.419342,
+          40.680337
+        ],
+        "cas": [
+          199.587135,
+          197.983022,
+          205.295064,
+          201.257466,
+          197.87873,
+          190.584897,
+          210.066019,
+          208.572819,
+          198.153531
+        ]
+      },
+      "checksums": {
+        "mutex": 6946836117345679271,
+        "cas": 6946836117344283335
+      },
+      "paired_ratios": [
+        5.214168262911965,
+        5.028735004924901,
+        5.367563507084557,
+        5.1622554297474,
+        5.150296013783767,
+        4.6974097721457415,
+        5.382948115668517,
+        5.291128882871764,
+        4.870990400104109
+      ]
+    }
+  ]
+}

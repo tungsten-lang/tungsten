@@ -1,0 +1,635 @@
+{
+  "schema": 1,
+  "experiment": {
+    "label": "architectural suggestion executable upper bounds",
+    "rounds": 9,
+    "target_ms": 110.0,
+    "build": "--release --native --fast",
+    "binary_sha256": {
+      "compiler": "c82a272964b9809c93e707998a6b7765faa000db1a0ac9d522c908296891a564",
+      "binary": "b351cbd22e8b66851ac99f3388f95487fa1566e6db0865782712b4f74cefb84e"
+    }
+  },
+  "metadata": {
+    "generated_at": "2026-08-04T15:00:16.178261+00:00",
+    "git_commit": "631250b8aef521566fd2f339624e22ce91e9f8e3",
+    "git_dirty_tracked": true,
+    "machine_start": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        3.7978515625,
+        5.2021484375,
+        5.39111328125
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "machine_end": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        4.09521484375,
+        4.95458984375,
+        5.27587890625
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "methodology": "one release/native/fast binary; setup excluded; lanes run in separate processes with alternating order; each lane calibrated to at least 110 ms; exact checksums or closed-form results checked"
+  },
+  "summary": {
+    "GEMMA-05": {
+      "cells": 3,
+      "wins": 1,
+      "candidate_over_control_geomean": 1.1731629200210723,
+      "regressions_over_5_percent": 1
+    },
+    "GEMMA-10": {
+      "cells": 3,
+      "wins": 0,
+      "candidate_over_control_geomean": 1.2850902023627122,
+      "regressions_over_5_percent": 3
+    },
+    "GEMMA-11": {
+      "cells": 1,
+      "wins": 1,
+      "candidate_over_control_geomean": 0.12076323635234613,
+      "regressions_over_5_percent": 0
+    },
+    "GEMMA-18": {
+      "cells": 3,
+      "wins": 2,
+      "candidate_over_control_geomean": 0.6571810708638214,
+      "regressions_over_5_percent": 1
+    }
+  },
+  "results": [
+    {
+      "suggestion": "GEMMA-05",
+      "control": "jit-chain",
+      "candidate": "jit-primitive",
+      "width_limbs": 4,
+      "auxiliary": 8,
+      "iterations": {
+        "jit-chain": 150491,
+        "jit-primitive": 189591
+      },
+      "median_ns": {
+        "jit-chain": 731.3662721528449,
+        "jit-primitive": 576.8441451897722
+      },
+      "candidate_over_control_paired_median": 0.8064088327336056,
+      "candidate_over_control_paired_iqr": 0.0528007211469228,
+      "samples_ns": {
+        "jit-chain": [
+          757.1067372821765,
+          729.2853060672757,
+          749.8540887339799,
+          731.3662721528449,
+          746.6769884726693,
+          708.1857608317055,
+          751.8874329321613,
+          688.8166623716668,
+          664.6264006623419
+        ],
+        "jit-primitive": [
+          622.656578259798,
+          550.587404803266,
+          599.8183809583763,
+          555.2843577535106,
+          574.6539041083031,
+          576.8441451897722,
+          606.3286671378914,
+          595.1240653225783,
+          566.1390836044498
+        ]
+      },
+      "checksums": {
+        "jit-chain": 17404,
+        "jit-primitive": 17404
+      },
+      "paired_ratios": [
+        0.8224158465356934,
+        0.7549684605224654,
+        0.7999134631259834,
+        0.7592425011875092,
+        0.7696151253887706,
+        0.8145379038860039,
+        0.8064088327336056,
+        0.8639803562148233,
+        0.8518155207801806
+      ]
+    },
+    {
+      "suggestion": "GEMMA-05",
+      "control": "jit-chain",
+      "candidate": "jit-primitive",
+      "width_limbs": 16,
+      "auxiliary": 8,
+      "iterations": {
+        "jit-chain": 41215,
+        "jit-primitive": 45245
+      },
+      "median_ns": {
+        "jit-chain": 2503.758744808879,
+        "jit-primitive": 2587.7748923423032
+      },
+      "candidate_over_control_paired_median": 1.0402170275390623,
+      "candidate_over_control_paired_iqr": 0.07618755265141486,
+      "samples_ns": {
+        "jit-chain": [
+          2487.7259493285183,
+          2674.704800169471,
+          2547.704112621622,
+          2290.485866748176,
+          2375.0980629341752,
+          2470.296008631745,
+          2513.7035464491714,
+          2503.758744808879,
+          2520.7883455997003
+        ],
+        "jit-primitive": [
+          2587.7748923423032,
+          2673.0412200126925,
+          2570.828268337556,
+          2486.349320372768,
+          2656.8782921444204,
+          2619.0251224154126,
+          2576.519504854817,
+          2527.1042841564854,
+          2804.3015803054927
+        ]
+      },
+      "checksums": {
+        "jit-chain": 34191,
+        "jit-primitive": 34191
+      },
+      "paired_ratios": [
+        1.0402170275390623,
+        0.9993780322386705,
+        1.0090764683392293,
+        1.0855117494798872,
+        1.1186394084554707,
+        1.0602070008063715,
+        1.02498940596809,
+        1.0093241968284723,
+        1.1124700672314256
+      ]
+    },
+    {
+      "suggestion": "GEMMA-05",
+      "control": "jit-chain",
+      "candidate": "jit-primitive",
+      "width_limbs": 64,
+      "auxiliary": 8,
+      "iterations": {
+        "jit-chain": 6553,
+        "jit-primitive": 3649
+      },
+      "median_ns": {
+        "jit-chain": 16562.426877275917,
+        "jit-primitive": 31826.916048753723
+      },
+      "candidate_over_control_paired_median": 1.9248449365463534,
+      "candidate_over_control_paired_iqr": 0.02945124837386759,
+      "samples_ns": {
+        "jit-chain": [
+          17322.161604946497,
+          15224.909710059133,
+          15006.053207532625,
+          16562.426877275917,
+          16183.624547419739,
+          16580.300370970515,
+          16817.958696330912,
+          16080.662800987859,
+          17247.876290582768
+        ],
+        "jit-primitive": [
+          32723.086232918748,
+          29673.552114975137,
+          29278.52379632925,
+          31995.80935345313,
+          31087.60390790112,
+          31826.916048753723,
+          32371.962639678266,
+          31472.903535445854,
+          33024.53868600603
+        ]
+      },
+      "checksums": {
+        "jit-chain": 30986,
+        "jit-primitive": 30986
+      },
+      "paired_ratios": [
+        1.8890879198110229,
+        1.9490133393283608,
+        1.951114219802462,
+        1.9318309804798122,
+        1.9209296296272285,
+        1.9195620909544933,
+        1.9248449365463534,
+        1.9571894470365008,
+        1.914701736586389
+      ]
+    },
+    {
+      "suggestion": "GEMMA-10",
+      "control": "loop-serial",
+      "candidate": "loop-four",
+      "width_limbs": 4,
+      "auxiliary": 64,
+      "iterations": {
+        "loop-serial": 267859,
+        "loop-four": 212447
+      },
+      "median_ns": {
+        "loop-serial": 382.5568365059394,
+        "loop-four": 497.19694793300516
+      },
+      "candidate_over_control_paired_median": 1.2982056018589507,
+      "candidate_over_control_paired_iqr": 0.1444258992046481,
+      "samples_ns": {
+        "loop-serial": [
+          363.6776562927824,
+          406.5154926004262,
+          412.6376501582236,
+          347.82556620906286,
+          347.191215047441,
+          387.95986570040264,
+          382.5568365059394,
+          437.6182991801227,
+          380.38280713219
+        ],
+        "loop-four": [
+          474.273779637414,
+          498.09109252767996,
+          535.6885089733198,
+          497.19694793300516,
+          507.87392462771237,
+          578.6941370385285,
+          491.5922167214299,
+          491.5849600113841,
+          491.5000368624249
+        ]
+      },
+      "checksums": {
+        "loop-serial": 50976,
+        "loop-four": 50976
+      },
+      "paired_ratios": [
+        1.3041048066356737,
+        1.2252696430865566,
+        1.2982056018589507,
+        1.4294433653970153,
+        1.4628075326108563,
+        1.491634027642999,
+        1.2850174661923672,
+        1.1233190223817604,
+        1.2921194850208348
+      ]
+    },
+    {
+      "suggestion": "GEMMA-10",
+      "control": "loop-serial",
+      "candidate": "loop-four",
+      "width_limbs": 16,
+      "auxiliary": 64,
+      "iterations": {
+        "loop-serial": 205717,
+        "loop-four": 155299
+      },
+      "median_ns": {
+        "loop-serial": 618.7476808986968,
+        "loop-four": 839.8245749884678
+      },
+      "candidate_over_control_paired_median": 1.331776648543594,
+      "candidate_over_control_paired_iqr": 0.04361359863505587,
+      "samples_ns": {
+        "loop-serial": [
+          559.3049755815537,
+          632.5522441125006,
+          560.213383754659,
+          577.0721023027841,
+          649.4445848870397,
+          637.0432438791171,
+          618.7476808986968,
+          625.393542252898,
+          603.3148694500032
+        ],
+        "loop-four": [
+          744.8693058937582,
+          839.8245749884678,
+          709.6316353359703,
+          742.5825879836834,
+          887.2095119973735,
+          842.484229356528,
+          961.51483054492,
+          897.6799056227005,
+          809.0857528186783
+        ]
+      },
+      "checksums": {
+        "loop-serial": 50976,
+        "loop-four": 50976
+      },
+      "paired_ratios": [
+        1.331776648543594,
+        1.3276762240671198,
+        1.2667166760277682,
+        1.2868107555718533,
+        1.3661050267309398,
+        1.322491428095884,
+        1.5539691868394123,
+        1.4353840341697912,
+        1.3410671504852198
+      ]
+    },
+    {
+      "suggestion": "GEMMA-10",
+      "control": "loop-serial",
+      "candidate": "loop-four",
+      "width_limbs": 64,
+      "auxiliary": 64,
+      "iterations": {
+        "loop-serial": 56981,
+        "loop-four": 48739
+      },
+      "median_ns": {
+        "loop-serial": 1862.6874163376388,
+        "loop-four": 2238.4384167869516
+      },
+      "candidate_over_control_paired_median": 1.2275126121954834,
+      "candidate_over_control_paired_iqr": 0.14032963232176887,
+      "samples_ns": {
+        "loop-serial": [
+          1863.4398601180797,
+          1856.9654797160886,
+          1832.199914565919,
+          2012.0588441147718,
+          1862.6874163376388,
+          2107.8232217962573,
+          2150.1246028977366,
+          1739.7882628081961,
+          1702.7627629637054
+        ],
+        "loop-four": [
+          2420.126421697854,
+          2324.356094044466,
+          2249.0485031931526,
+          2568.812962886837,
+          2116.6707702737203,
+          2238.4384167869516,
+          2182.7651709509914,
+          2104.2731010016305,
+          2173.887954191914
+        ]
+      },
+      "checksums": {
+        "loop-serial": 50976,
+        "loop-four": 50976
+      },
+      "paired_ratios": [
+        1.298741361872821,
+        1.251695908962097,
+        1.2275126121954834,
+        1.276708666051472,
+        1.1363531807368175,
+        1.0619668640330218,
+        1.0151807797600496,
+        1.2094995385272451,
+        1.2766828130585863
+      ]
+    },
+    {
+      "suggestion": "GEMMA-11",
+      "control": "fixed-decimal",
+      "candidate": "fixed-scaled",
+      "width_limbs": 2,
+      "auxiliary": 10,
+      "iterations": {
+        "fixed-decimal": 26439177,
+        "fixed-scaled": 218020015
+      },
+      "median_ns": {
+        "fixed-decimal": 4.112517698096711,
+        "fixed-scaled": 0.49419851046356733
+      },
+      "candidate_over_control_paired_median": 0.12076323635234612,
+      "candidate_over_control_paired_iqr": 0.017163462759683737,
+      "samples_ns": {
+        "fixed-decimal": [
+          4.23142741306684,
+          3.9726999319591414,
+          4.088739852496977,
+          4.234111245956151,
+          4.267577996109865,
+          3.8213620141494795,
+          3.422263610418947,
+          4.112517698096711,
+          4.4632708626444355
+        ],
+        "fixed-scaled": [
+          0.504352776941044,
+          0.48842916248186313,
+          0.5811666343597309,
+          0.49419851046356733,
+          0.48974115975132065,
+          0.5116109026534166,
+          0.46892216140395565,
+          0.4966409467784595,
+          0.4732959953284797
+        ]
+      },
+      "checksums": {
+        "fixed-decimal": 27673744,
+        "fixed-scaled": 219254582
+      },
+      "paired_ratios": [
+        0.11919211360771063,
+        0.1229464019048108,
+        0.1421383250892851,
+        0.11671835758580003,
+        0.11475857270745772,
+        0.13388182034548377,
+        0.1370210523749078,
+        0.12076323635234612,
+        0.10604240923170354
+      ]
+    },
+    {
+      "suggestion": "GEMMA-18",
+      "control": "padic-generic",
+      "candidate": "padic-primitive",
+      "width_limbs": 4,
+      "auxiliary": 65537,
+      "iterations": {
+        "padic-generic": 63529,
+        "padic-primitive": 159329
+      },
+      "median_ns": {
+        "padic-generic": 1774.646880371587,
+        "padic-primitive": 719.3867196996965
+      },
+      "candidate_over_control_paired_median": 0.395504245969178,
+      "candidate_over_control_paired_iqr": 0.04792430078674753,
+      "samples_ns": {
+        "padic-generic": [
+          1830.5616333460762,
+          1650.6890553759144,
+          1711.0492845674448,
+          1647.8130721287762,
+          1699.990030795226,
+          1827.289505593711,
+          1783.368619060885,
+          1774.646880371587,
+          1844.4017692507234
+        ],
+        "padic-primitive": [
+          719.5810241959613,
+          732.3870732829224,
+          778.1550544108917,
+          719.3867196996965,
+          672.3532752847855,
+          745.3712130191597,
+          661.7504764821041,
+          689.7099188946589,
+          703.500827427646
+        ]
+      },
+      "checksums": {
+        "padic-generic": 21167,
+        "padic-primitive": 21167
+      },
+      "paired_ratios": [
+        0.393093032809085,
+        0.4436856662359917,
+        0.45478237326612725,
+        0.4365705867173001,
+        0.395504245969178,
+        0.40791084868458133,
+        0.371067691451574,
+        0.38864628593055256,
+        0.38142493634314756
+      ]
+    },
+    {
+      "suggestion": "GEMMA-18",
+      "control": "padic-generic",
+      "candidate": "padic-primitive",
+      "width_limbs": 16,
+      "auxiliary": 65537,
+      "iterations": {
+        "padic-generic": 16691,
+        "padic-primitive": 27781
+      },
+      "median_ns": {
+        "padic-generic": 6182.800611404572,
+        "padic-primitive": 4032.6602113091103
+      },
+      "candidate_over_control_paired_median": 0.6552523438029844,
+      "candidate_over_control_paired_iqr": 0.021868636280203857,
+      "samples_ns": {
+        "padic-generic": [
+          6158.286401915686,
+          6182.800611404572,
+          6154.362131547928,
+          6233.741237571054,
+          6282.030735123591,
+          6567.993229915309,
+          6404.601781260258,
+          5766.595769993169,
+          5688.397439728348
+        ],
+        "padic-primitive": [
+          3712.610837214878,
+          4074.9418067168485,
+          4032.6602113091103,
+          4201.530122571049,
+          4136.562158893543,
+          4182.926280473396,
+          3837.295873761686,
+          3682.48083221141,
+          3747.139831820591
+        ]
+      },
+      "checksums": {
+        "padic-generic": 1099,
+        "padic-primitive": 1099
+      },
+      "paired_ratios": [
+        0.6028642701742452,
+        0.6590770207275255,
+        0.6552523438029844,
+        0.6739981597645132,
+        0.6584753136856726,
+        0.6368651936822007,
+        0.59914667684563,
+        0.6385883420810285,
+        0.6587338299624046
+      ]
+    },
+    {
+      "suggestion": "GEMMA-18",
+      "control": "padic-generic",
+      "candidate": "padic-primitive",
+      "width_limbs": 64,
+      "auxiliary": 65537,
+      "iterations": {
+        "padic-generic": 2479,
+        "padic-primitive": 2201
+      },
+      "median_ns": {
+        "padic-generic": 44474.67056671368,
+        "padic-primitive": 49846.4334382877
+      },
+      "candidate_over_control_paired_median": 1.0952049647237765,
+      "candidate_over_control_paired_iqr": 0.10337899344212675,
+      "samples_ns": {
+        "padic-generic": [
+          47159.82586896395,
+          44704.93814790285,
+          43502.033751712646,
+          44474.67056671368,
+          44132.63076365865,
+          49767.933978031186,
+          46641.50530949705,
+          43963.005914738475,
+          42070.7610604889
+        ],
+        "padic-primitive": [
+          48168.16219878994,
+          46506.00106001678,
+          49260.96092717471,
+          51243.241708643174,
+          50473.02362553501,
+          51149.59109292007,
+          51082.008177151554,
+          47443.32121872491,
+          49846.4334382877
+        ]
+      },
+      "checksums": {
+        "padic-generic": 24530,
+        "padic-primitive": 24530
+      },
+      "paired_ratios": [
+        1.0213812564242224,
+        1.0402877844535932,
+        1.1323829411822692,
+        1.152189348581602,
+        1.14366677789572,
+        1.0277619946108025,
+        1.0952049647237765,
+        1.0791646347098316,
+        1.1848236680724415
+      ]
+    }
+  ]
+}

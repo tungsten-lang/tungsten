@@ -65,6 +65,20 @@ claim: `worker-sweep-03886b6-m5max-20260804.json` explores caps 1..17, while
 the decision-grade `ssa-workers7-03886b6-m5max-20260804.json` holds every
 other compile-time policy constant and records start/end host load.
 
+Architectural suggestions that do not map cleanly to one boxed matrix cell
+still receive executable upper-bound experiments. `run_architectural_ideas.py`
+covers repeated modular traces, independent accumulator scheduling, fixed-scale
+storage, and p-adic modular dispatch. `run_atomic_bigint.py` measures a safe
+immutable-CAS prototype against locked unique mutation, while
+`run_consumed_ops.py` measures caller-owned destinations for the operation
+families not yet exposed through compound assignment. These artifacts are
+hypothesis evidence, not production wins: the audit records omitted semantics
+and requires a separate guarded full-language A/B before retaining a change.
+
+The page-hazard policy can be compared within one byte-identical benchmark
+binary by building with `-DBN_PAGE_HAZARD_RUNTIME_TOGGLE=1` and setting
+`TUNGSTEN_BN_PAGE_HAZARD=0` or `1`. The hook compiles away in normal builds.
+
 For a compile-time optimization hypothesis, use the isolated boxed-operation
 A/B driver rather than comparing raw kernels or replacing the normal harness:
 

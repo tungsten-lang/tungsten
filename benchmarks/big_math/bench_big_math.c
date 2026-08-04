@@ -37,6 +37,98 @@ static uint64_t bench_rng(uint64_t *state) {
     return x * 2685821657736338717ULL;
 }
 
+static WValue bench_bigint(int32_t n, uint64_t seed);
+static void bench_free_value(WValue value);
+
+typedef struct {
+    _Atomic(uint64_t) *slot;
+    pthread_mutex_t *lock;
+    _Atomic(int) *ready;
+    _Atomic(int) *go;
+    int updates;
+    int use_cas;
+} BenchAtomicBigintJob;
+
+static void *bench_atomic_bigint_worker(void *opaque) {
+    BenchAtomicBigintJob *job = (BenchAtomicBigintJob *)opaque;
+    atomic_fetch_add_explicit(job->ready, 1, memory_order_release);
+    while (!atomic_load_explicit(job->go, memory_order_acquire))
+        sched_yield();
+    WValue one = w_box_int(1);
+    for (int i = 0; i < job->updates; i++) {
+        if (!job->use_cas) {
+            pthread_mutex_lock(job->lock);
+            WValue old = (WValue)atomic_load_explicit(
+                job->slot, memory_order_relaxed);
+            WValue next = w_bigint_add_mut(old, one);
+            atomic_store_explicit(
+                job->slot, (uint64_t)next, memory_order_relaxed);
+            if (next != old) bench_free_value(old);
+            pthread_mutex_unlock(job->lock);
+            continue;
+        }
+        for (;;) {
+            uint64_t observed = atomic_load_explicit(
+                job->slot, memory_order_acquire);
+            WValue next = bigint_add_any((WValue)observed, one);
+            uint64_t expected = observed;
+            if (atomic_compare_exchange_weak_explicit(
+                    job->slot, &expected, (uint64_t)next,
+                    memory_order_release, memory_order_acquire)) {
+                /* Published immutable values cannot be reclaimed without a
+                 * hazard-pointer/epoch scheme: another contender may still
+                 * hold `observed`.  Deliberately retain winners so this is a
+                 * safe upper-bound prototype rather than a UAF benchmark. */
+                break;
+            }
+            bench_free_value(next);
+        }
+    }
+    return NULL;
+}
+
+static double bench_atomic_bigint_counter(
+    int threads, int updates, int use_cas, uint64_t *checksum) {
+    WValue initial = bench_bigint(2, UINT64_C(0x4a6f7921cafe1234));
+    uint64_t initial_low = (uint64_t)integer_low_i64(initial);
+    _Atomic(uint64_t) slot;
+    atomic_init(&slot, (uint64_t)initial);
+    pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    _Atomic(int) ready;
+    _Atomic(int) go;
+    atomic_init(&ready, 0);
+    atomic_init(&go, 0);
+    pthread_t workers[16];
+    BenchAtomicBigintJob jobs[16];
+    for (int t = 0; t < threads; t++) {
+        jobs[t] = (BenchAtomicBigintJob){
+            .slot = &slot, .lock = &lock, .ready = &ready, .go = &go,
+            .updates = updates, .use_cas = use_cas,
+        };
+        if (pthread_create(
+                &workers[t], NULL, bench_atomic_bigint_worker, &jobs[t]) != 0)
+            die("atomic bigint benchmark could not create worker");
+    }
+    while (atomic_load_explicit(&ready, memory_order_acquire) < threads)
+        sched_yield();
+    double started = bench_now();
+    atomic_store_explicit(&go, 1, memory_order_release);
+    for (int t = 0; t < threads; t++) pthread_join(workers[t], NULL);
+    double elapsed = bench_now() - started;
+    WValue result = (WValue)atomic_load_explicit(&slot, memory_order_acquire);
+    uint64_t observed = (uint64_t)integer_low_i64(result);
+    uint64_t expected = initial_low + (uint64_t)threads * (uint64_t)updates;
+    if (observed != expected)
+        dief("atomic bigint counter mismatch: got %llu expected %llu",
+             (unsigned long long)observed, (unsigned long long)expected);
+    *checksum = observed;
+    /* Mutex mode owns exactly one live result. CAS mode intentionally retains
+     * all published generations until process exit, as documented above. */
+    if (!use_cas) bench_free_value(result);
+    pthread_mutex_destroy(&lock);
+    return elapsed * 1e9 / ((double)threads * (double)updates);
+}
+
 static uint64_t *bench_limbs(int32_t n, uint64_t seed) {
     uint64_t *limbs = (uint64_t *)calloc((size_t)n, sizeof(uint64_t));
     if (!limbs) die("out of memory allocating benchmark limbs");
@@ -89,6 +181,148 @@ static void bench_free_value(WValue value) {
      * double-freed. Route through the alias-counting release so the buffer
      * dies exactly once, when its last reference is freed. */
     if (w_is_bigint(value)) bigint_release_if_live(w_as_bigint(value));
+}
+
+static WValue bench_bigint_with_capacity(
+    int32_t n, int32_t capacity, uint64_t seed) {
+    WBigint *b = bigint_alloc_raw(capacity);
+    uint64_t state = seed;
+    for (int32_t i = 0; i < n; i++) b->limbs[i] = bench_rng(&state);
+    b->limbs[0] |= 1ULL;
+    b->limbs[n - 1] |= UINT64_C(1) << 63;
+    b->size = n;
+    return bigint_box(b);
+}
+
+static void bench_consumed_bitwise_apply(char op, WBigint *a,
+                                         const WBigint *b) {
+    int32_t n = a->size;
+    for (int32_t i = 0; i < n; i++)
+        a->limbs[i] = apply_bitop(op, a->limbs[i], b->limbs[i]);
+    while (n > 0 && a->limbs[n - 1] == 0) n--;
+    a->size = n;
+}
+
+static void bench_consumed_shift_cycle(WBigint *a, unsigned shift) {
+    int32_t n = a->size;
+    uint64_t carry = a->limbs[n - 1] >> (64U - shift);
+    for (int32_t i = n - 1; i > 0; i--)
+        a->limbs[i] =
+            (a->limbs[i] << shift) |
+            (a->limbs[i - 1] >> (64U - shift));
+    a->limbs[0] <<= shift;
+    if (carry) a->limbs[n++] = carry;
+    for (int32_t i = 0; i + 1 < n; i++)
+        a->limbs[i] =
+            (a->limbs[i] >> shift) |
+            (a->limbs[i + 1] << (64U - shift));
+    a->limbs[n - 1] >>= shift;
+    if (n > 1 && a->limbs[n - 1] == 0) n--;
+    a->size = n;
+}
+
+static void bench_pow3_dest(WBigint *dest, const WBigint *base,
+                            uint64_t *square) {
+    int32_t n = base->size;
+    bigint_sqr_dispatch(square, base->limbs, n);
+    int32_t sn = 2 * n;
+    while (sn > 1 && square[sn - 1] == 0) sn--;
+    bigint_mul_dispatch(dest->limbs, square, sn, base->limbs, n);
+    int32_t outn = sn + n;
+    while (outn > 1 && dest->limbs[outn - 1] == 0) outn--;
+    dest->size = outn;
+}
+
+static double bench_consumed_operation(
+    const char *operation, int32_t limbs, int iterations, int consume,
+    uint64_t *checksum) {
+    WValue seed = bench_bigint_with_capacity(
+        limbs, 4 * limbs,
+        UINT64_C(0x4f7065726174696f) ^ (uint64_t)limbs);
+    WValue operand = bench_bigint(
+        limbs, UINT64_C(0x6e44657374696e61) ^ (uint64_t)limbs);
+    WBigint *ob = w_as_bigint(operand);
+    WValue shift = w_box_int(13);
+    if (strcmp(operation, "and") == 0) {
+        for (int32_t i = 0; i < limbs; i++) ob->limbs[i] = UINT64_MAX;
+    } else if (strcmp(operation, "or") == 0 ||
+               strcmp(operation, "xor") == 0) {
+        ob->limbs[limbs - 1] &= ~(UINT64_C(1) << 63);
+        ob->limbs[limbs - 1] |= UINT64_C(1) << 62;
+    }
+    WValue value = consume
+        ? bench_bigint_with_capacity(
+              limbs, 4 * limbs,
+              UINT64_C(0x4f7065726174696f) ^ (uint64_t)limbs)
+        : bench_clone_integer(seed);
+    uint64_t *square = NULL;
+    if (strcmp(operation, "pow3") == 0) {
+        square = (uint64_t *)malloc((size_t)(2 * limbs) * sizeof(uint64_t));
+        if (!square) die("out of memory preparing consumed power benchmark");
+        bench_free_value(value);
+        value = bench_bigint_with_capacity(
+            1, 4 * limbs, UINT64_C(0x506f773344657374));
+        w_as_bigint(value)->size = 0;
+        bench_pow3_dest(w_as_bigint(value), w_as_bigint(seed), square);
+        WValue expected = w_pow(seed, w_box_int(3));
+        if (bigint_compare(value, expected) != 0)
+            die("consumed pow3 destination mismatch");
+        bench_free_value(expected);
+    }
+
+    double started = bench_now();
+    if (consume) {
+        WBigint *destination = w_as_bigint(value);
+        for (int i = 0; i < iterations; i++) {
+            if (strcmp(operation, "and") == 0)
+                bench_consumed_bitwise_apply('&', destination, ob);
+            else if (strcmp(operation, "or") == 0)
+                bench_consumed_bitwise_apply('|', destination, ob);
+            else if (strcmp(operation, "xor") == 0)
+                bench_consumed_bitwise_apply('^', destination, ob);
+            else if (strcmp(operation, "shift") == 0)
+                bench_consumed_shift_cycle(destination, 13);
+            else
+                bench_pow3_dest(destination, w_as_bigint(seed), square);
+            bench_sink ^= destination->limbs[0] ^ (uint64_t)i;
+        }
+    } else {
+        if (strcmp(operation, "pow3") == 0) {
+            bench_free_value(value);
+            value = w_box_int(0);
+            for (int i = 0; i < iterations; i++) {
+                WValue next = w_pow(seed, w_box_int(3));
+                if (w_is_bigint(value)) bench_free_value(value);
+                value = next;
+                bench_sink ^= (uint64_t)integer_low_i64(value) ^ (uint64_t)i;
+            }
+        } else {
+            for (int i = 0; i < iterations; i++) {
+                WValue next;
+                if (strcmp(operation, "and") == 0)
+                    next = w_bit_and(value, operand);
+                else if (strcmp(operation, "or") == 0)
+                    next = w_bit_or(value, operand);
+                else if (strcmp(operation, "xor") == 0)
+                    next = w_bit_xor(value, operand);
+                else {
+                    WValue left = w_bit_shl(value, shift);
+                    next = w_bit_shr(left, shift);
+                    bench_free_value(left);
+                }
+                bench_free_value(value);
+                value = next;
+                bench_sink ^= (uint64_t)integer_low_i64(value) ^ (uint64_t)i;
+            }
+        }
+    }
+    double ns = (bench_now() - started) * 1e9 / (double)iterations;
+    *checksum = (uint64_t)integer_low_i64(value);
+    bench_free_value(value);
+    bench_free_value(seed);
+    bench_free_value(operand);
+    free(square);
+    return ns;
 }
 
 static int bench_iters_for_limbs(int32_t limbs) {
@@ -4669,6 +4903,49 @@ int main(int argc, char **argv) {
      * same frozen-table miss instead of taking the empty-table shortcut. */
     (void)w_string("bignum-bench");
     w_slab_freeze();
+
+    if (argc == 5 && strcmp(argv[1], "--bench-atomic-bigint") == 0) {
+        const char *mode = argv[2];
+        int threads = atoi(argv[3]);
+        int updates = atoi(argv[4]);
+        int use_cas = strcmp(mode, "cas") == 0;
+        if ((!use_cas && strcmp(mode, "mutex") != 0) ||
+            threads < 1 || threads > 16 || updates <= 0)
+            die("atomic bigint benchmark expects mutex|cas, 1..16 threads,"
+                " and positive updates");
+        uint64_t checksum = 0;
+        double ns = bench_atomic_bigint_counter(
+            threads, updates, use_cas, &checksum);
+        printf("atomic\t%s\t%d\t%d\t%.6f\t%llu\n",
+               mode, threads, updates, ns,
+               (unsigned long long)checksum);
+        return 0;
+    }
+
+    if (argc == 6 && strcmp(argv[1], "--bench-consumed-op") == 0) {
+        const char *operation = argv[2];
+        int32_t limbs = (int32_t)atoi(argv[3]);
+        int iterations = atoi(argv[4]);
+        int consume = strcmp(argv[5], "consume") == 0;
+        int known_operation =
+            strcmp(operation, "and") == 0 ||
+            strcmp(operation, "or") == 0 ||
+            strcmp(operation, "xor") == 0 ||
+            strcmp(operation, "shift") == 0 ||
+            strcmp(operation, "pow3") == 0;
+        if (!known_operation || limbs < 2 || limbs > 64 ||
+            iterations <= 0 ||
+            (!consume && strcmp(argv[5], "immutable") != 0))
+            die("consumed operation benchmark expects and|or|xor|shift|pow3,"
+                " 2..64 limbs, positive iterations, and immutable|consume");
+        uint64_t checksum = 0;
+        double ns = bench_consumed_operation(
+            operation, limbs, iterations, consume, &checksum);
+        printf("consumed\t%s\t%d\t%d\t%s\t%.6f\t%llu\n",
+               operation, limbs, iterations, argv[5], ns,
+               (unsigned long long)checksum);
+        return 0;
+    }
 
     if (argc == 5 && strcmp(argv[1], "--bench-fastpaths") == 0) {
         int32_t limbs = (int32_t)atoi(argv[2]);

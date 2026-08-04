@@ -8309,7 +8309,22 @@ static void bigint_mul_dispatch_cap(uint64_t *out, int32_t out_cap,
 #define BN_EQ_PAGE_HAZARD_MIN 9
 #endif
 #if BN_EQ_PAGE_HAZARD_GUARD
+/* Same-binary benchmark toggle.  It compiles away unless explicitly enabled,
+ * keeping the production predicate to one offset comparison. */
+#if defined(BN_PAGE_HAZARD_RUNTIME_TOGGLE) && BN_PAGE_HAZARD_RUNTIME_TOGGLE
+static inline int bn_page_hazard_runtime_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_PAGE_HAZARD");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_page_hazard_runtime_enabled(void) { return 1; }
+#endif
 static inline int bn_page_hazard(const uint64_t *dst, const uint64_t *src) {
+    if (!bn_page_hazard_runtime_enabled()) return 0;
     uintptr_t delta = ((uintptr_t)dst - (uintptr_t)src) & 4095u;
     return delta < BN_PAGE_HAZARD_WINDOW ||
            delta > 4096u - BN_PAGE_HAZARD_WINDOW;

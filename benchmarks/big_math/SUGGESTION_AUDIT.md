@@ -81,7 +81,7 @@ Source fingerprints:
 | KIMI-17 | Re-open the live-depth capacity-policy default | rejected | 48 hybrid capacity points x live depths 1/4/8 x 1024/4096-limb traces produced zero candidates meeting the fixed RSS/churn criteria; power-of-two remains default; b4-base-*.tsv, b4-grid-*.tsv, NOTED_TRADEOFFS.md |
 | KIMI-18 | Retune parallel cutoffs under quiet/load-monitored conditions | pending | audit related commits ce81fcb, dfb94bc |
 | KIMI-19 | Add instructions-retired measurement | pending | |
-| KIMI-20 | Use per-operation adaptive timing targets | pending | audit related commit 1aa9e10 |
+| KIMI-20 | Use per-operation adaptive timing targets | rejected | two matched 2 ms x3 screens and one 110 ms x9 reference covered 28 boxed cells spanning add/mul plus powmod/lcm/isqrt/tostr/fromstr at 1,4,16,64 limbs; all three classified the same 27 wins and one loss, with no win/loss flips, while screen/reference ratio disagreement was 3.4-3.8% by geometric mean and at worst 9.3%/18.2%; silently promoting composite families would make the fast default much longer without reproducing the claimed phantom-loss benefit; the explicit `--accurate` and `--full` modes already provide at least nine 110 ms repetitions, and the harness publishes IQR at every width, so the fast default remains uniform and conclusions still require the explicit accurate modes; adaptive-timing-screen-a-c125ea0-m5max-20260804.json, adaptive-timing-screen-b-c125ea0-m5max-20260804.json, adaptive-timing-accurate-c125ea0-m5max-20260804.json |
 
 ## Gemma4
 

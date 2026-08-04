@@ -1,0 +1,279 @@
+{
+  "capacity_policies": [],
+  "metadata": {
+    "command": "bin/tungsten bench bignum --operations mul,sqr --sizes 256,384,448,512,1024 --accurate --no-capacity --output benchmarks/big_math/baselines/mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json",
+    "generated_at": "2026-08-04T05:12:51.421640+00:00",
+    "git_commit": "df0c60477e25c5a1845da17149356adf15991b0d",
+    "git_dirty_tracked": true,
+    "gmp_version": "6.3.0",
+    "lanes": [
+      "tungsten",
+      "gmp"
+    ],
+    "limb_bits": 64,
+    "machine": {
+      "battery_percent": 96,
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "compiler_command": "clang",
+      "compiler_flags": "-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations",
+      "cpu": "Apple M5 Max",
+      "logical_cpus": 18,
+      "machine": "arm64",
+      "power_source": "AC Power",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "methodology": {
+      "calibration": "the shared native iteration count is derived from the faster Tungsten/GMP pilot so both lanes reach the requested window; Python, Rust, and Odin are calibrated independently; native harness warms both implementations before timing",
+      "capacity_selection": "smallest sufficient retained capacity; hot handoff wins only within its smallest available size class",
+      "capacity_trace": "ascending/descending sweeps, uniform and logarithmic sizes, local +1 growth, doubled results, and small-value-heavy traffic",
+      "cmp_operands": "equal except the lowest limb, forcing a full-length scan",
+      "division_shape": "2N-limb positive dividend by N-limb positive divisor",
+      "gmp": "two alternating mpz result destinations retain capacity",
+      "isqrt_shape": "2N-limb positive operand, N-limb root",
+      "native_lane_order": "alternate Tungsten-first and GMP-first samples",
+      "odin": "two alternating mutable core:math/big destinations retain capacity, matching the library's idiomatic API",
+      "pow_exponent": 5,
+      "powmod": "Tungsten uses bigint_powmod_any's Montgomery/Barrett window implementation (also validated against an independent naive mirror); Rust uses num-bigint modpow; Odin uses its shipped internal Montgomery/window implementation; odd modulus",
+      "python": "ordinary immutable Python integer expressions",
+      "result_lifecycle": "immutable APIs compute the next result while the previous one remains live; mutable APIs alternate two destinations",
+      "rust": "borrowed operands and ordinary immutable num-bigint results; the previous result stays live until the next is computed",
+      "selection_above_8192_limbs": "median elapsed time with interquartile spread",
+      "selection_through_8192_limbs": "best elapsed time from all runs",
+      "shift_bits": 13,
+      "size_caps": {
+        "pow": 256,
+        "powmod": 128
+      },
+      "tungsten": "dead result capacity returned to a thread-local power-of-two reserve pool"
+    },
+    "odin_digit_bits": 63,
+    "odin_lane": false,
+    "odin_version": "",
+    "operations": [
+      "mul",
+      "sqr"
+    ],
+    "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+    "profile": "default",
+    "python_lane": false,
+    "python_version": "3.14.6",
+    "runs": 9,
+    "rust_bigint_version": "0.5.1",
+    "rust_digit_bits": 64,
+    "rust_lane": false,
+    "rustc_version": "",
+    "sizes_by_operation": {
+      "mul": [
+        256,
+        384,
+        448,
+        512,
+        1024
+      ],
+      "sqr": [
+        256,
+        384,
+        448,
+        512,
+        1024
+      ]
+    },
+    "target_ms": 110.0
+  },
+  "results": [
+    {
+      "bits": 16384,
+      "fastest": "tungsten",
+      "gmp_iqr_ns": 58.053,
+      "gmp_ns": 7065.14,
+      "iterations": 17777,
+      "limbs": 256,
+      "native_iterations": 17777,
+      "operation": "mul",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 102.436,
+      "tungsten_ns": 5945.098,
+      "tungsten_over_gmp": 0.8414692419400039,
+      "tungsten_over_python": 0.0
+    },
+    {
+      "bits": 24576,
+      "fastest": "gmp",
+      "gmp_iqr_ns": 77.395,
+      "gmp_ns": 12440.277,
+      "iterations": 8799,
+      "limbs": 384,
+      "native_iterations": 8799,
+      "operation": "mul",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 26.708,
+      "tungsten_ns": 12928.06,
+      "tungsten_over_gmp": 1.0392099790060945,
+      "tungsten_over_python": 0.0
+    },
+    {
+      "bits": 28672,
+      "fastest": "tungsten",
+      "gmp_iqr_ns": 59.269,
+      "gmp_ns": 14604.204,
+      "iterations": 12941,
+      "limbs": 448,
+      "native_iterations": 12941,
+      "operation": "mul",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 240.012,
+      "tungsten_ns": 11948.613,
+      "tungsten_over_gmp": 0.8181625646971241,
+      "tungsten_over_python": 0.0
+    },
+    {
+      "bits": 32768,
+      "fastest": "tungsten",
+      "gmp_iqr_ns": 63.866,
+      "gmp_ns": 17636.386,
+      "iterations": 12307,
+      "limbs": 512,
+      "native_iterations": 12307,
+      "operation": "mul",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 202.405,
+      "tungsten_ns": 11487.852,
+      "tungsten_over_gmp": 0.6513722255795491,
+      "tungsten_over_python": 0.0
+    },
+    {
+      "bits": 65536,
+      "fastest": "tungsten",
+      "gmp_iqr_ns": 89.409,
+      "gmp_ns": 51570.957,
+      "iterations": 3333,
+      "limbs": 1024,
+      "native_iterations": 3333,
+      "operation": "mul",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 975.097,
+      "tungsten_ns": 32351.935,
+      "tungsten_over_gmp": 0.6273285756554798,
+      "tungsten_over_python": 0.0
+    },
+    {
+      "bits": 16384,
+      "fastest": "tungsten",
+      "gmp_iqr_ns": 23.156,
+      "gmp_ns": 5612.479,
+      "iterations": 21204,
+      "limbs": 256,
+      "native_iterations": 21204,
+      "operation": "sqr",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 25.373,
+      "tungsten_ns": 5215.997,
+      "tungsten_over_gmp": 0.9293570630731981,
+      "tungsten_over_python": 0.0
+    },
+    {
+      "bits": 24576,
+      "fastest": "tungsten",
+      "gmp_iqr_ns": 27.353,
+      "gmp_ns": 9757.25,
+      "iterations": 15172,
+      "limbs": 384,
+      "native_iterations": 15172,
+      "operation": "sqr",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 260.15,
+      "tungsten_ns": 6743.804,
+      "tungsten_over_gmp": 0.6911582669297189,
+      "tungsten_over_python": 0.0
+    },
+    {
+      "bits": 28672,
+      "fastest": "tungsten",
+      "gmp_iqr_ns": 77.561,
+      "gmp_ns": 11968.897,
+      "iterations": 15304,
+      "limbs": 448,
+      "native_iterations": 15304,
+      "operation": "sqr",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 962.624,
+      "tungsten_ns": 7767.577,
+      "tungsten_over_gmp": 0.648980185893487,
+      "tungsten_over_python": 0.0
+    },
+    {
+      "bits": 32768,
+      "fastest": "tungsten",
+      "gmp_iqr_ns": 9.492,
+      "gmp_ns": 14426.031,
+      "iterations": 9166,
+      "limbs": 512,
+      "native_iterations": 9166,
+      "operation": "sqr",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 340.934,
+      "tungsten_ns": 10383.81,
+      "tungsten_over_gmp": 0.719796734112106,
+      "tungsten_over_python": 0.0
+    },
+    {
+      "bits": 65536,
+      "fastest": "tungsten",
+      "gmp_iqr_ns": 316.863,
+      "gmp_ns": 39427.886,
+      "iterations": 4999,
+      "limbs": 1024,
+      "native_iterations": 4999,
+      "operation": "sqr",
+      "python_iterations": 0,
+      "python_ns": 0.0,
+      "selection": "best_iqr",
+      "tungsten_iqr_ns": 415.883,
+      "tungsten_ns": 24077.015,
+      "tungsten_over_gmp": 0.6106595469003842,
+      "tungsten_over_python": 0.0
+    }
+  ],
+  "summary": {
+    "operations": [
+      {
+        "cases": 5,
+        "operation": "mul",
+        "tungsten_over_gmp_geomean": 0.7819537975578524
+      },
+      {
+        "cases": 5,
+        "operation": "sqr",
+        "tungsten_over_gmp_geomean": 0.7121969578756975
+      }
+    ],
+    "overall": {
+      "gmp": {
+        "cases": 10,
+        "tungsten_losses": 1,
+        "tungsten_over_peer_geomean": 0.7462607559158203,
+        "tungsten_ties": 0,
+        "tungsten_wins": 9
+      }
+    },
+    "verdict": "verdict: arm64 (Darwin), 2 ops x 256..1024 limbs, one deterministic fixture per cell, mpz_* public API: 9/10 cells < 1.0, geomean 0.746; 1 cells inside the +-5% unresolved band."
+  }
+}

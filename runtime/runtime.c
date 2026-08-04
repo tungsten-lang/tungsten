@@ -2428,10 +2428,18 @@ WValue bigint_sub_any(WValue a, WValue b) {
 #define BN_TOOM_PAR_THRESHOLD 576
 #endif
 #ifndef BN_TOOM2_PAR_THRESHOLD
+#if defined(__aarch64__)
+#define BN_TOOM2_PAR_THRESHOLD 448
+#else
 #define BN_TOOM2_PAR_THRESHOLD 512
 #endif
+#endif
 #ifndef BN_KARA_SQ_PAR_THRESHOLD
+#if defined(__aarch64__)
+#define BN_KARA_SQ_PAR_THRESHOLD 384
+#else
 #define BN_KARA_SQ_PAR_THRESHOLD 512
+#endif
 #endif
 #ifndef BN_RECT_PAR_THRESHOLD
 #define BN_RECT_PAR_THRESHOLD 256
@@ -6129,7 +6137,7 @@ static void bn_mul_eq(uint64_t *out, const uint64_t *a, const uint64_t *b,
                       int32_t n, uint64_t *scratch) {
     if (n <= BN_KARA_THRESHOLD)      bigint_mul_schoolbook_into(out, a, n, b, n);
     else if ((n >= 400 && n <= 432) ||
-             (n >= 456 && n <= 520) ||
+             (n >= 448 && n <= 520) ||
              (n >= 536 && n <= 544)) bn_toom2_diff(out, a, b, n, scratch);
     else if (n < BN_TOOM3_THRESHOLD) bn_toom2(out, a, b, n, scratch);
     else if (n < BN_TOOM4_THRESHOLD) bn_toom3(out, a, b, n, scratch);

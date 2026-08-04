@@ -174,6 +174,18 @@ Artifacts: `baselines/addsub1-word-replace-screen-f9ae488-m5max-20260804.json`,
 `baselines/addsub1-word-dest-outline-screen-f9ae488-m5max-20260804.json`, and
 `baselines/addsub1-word-dest-inline-screen-f9ae488-m5max-20260804.json`.
 
+A later production-shaped sub1 prototype rotated two caller-owned result
+buffers, preserving the immediately previous immutable result exactly as the
+GMP lane's `result[2]` does.  Its fail-closed destination entry consumed a dead
+buffer on every path and never mutated the live operand.  The complete
+9x110 ms 1..8192-limb band rejected it: seven wins, thirteen losses, 1.0371
+candidate/baseline geomean, and seven regressions above 5%.  Forcing the entry
+inline to model full-LTO call elimination still screened at 1.0375 geomean
+with eleven losses and six regressions above 5%.  The one-limb cell improved
+in the acceptance run, but only to 1.004x GMP, so neither prototype remained.
+Artifacts: `baselines/sub1-dest-rotation-66e409f-m5max-20260804.json` and
+`baselines/sub1-dest-rotation-inline-screen-66e409f-m5max-20260804.json`.
+
 **Condition to take it:** make the existing add/sub dispatcher accept an
 optional dead destination after its single shape decode, or prove/hoist the
 shape in compiler IR.  A second guard tree in the hot loop spends the measured

@@ -93,7 +93,7 @@ Source fingerprints:
 | GEMMA-04 | Add vector constant-load IR operations | pending | |
 | GEMMA-05 | Runtime trace detection and JIT for repeated arithmetic | pending | |
 | GEMMA-06 | Compiler-directed prime-candidate prefiltering | pending | |
-| GEMMA-07 | Explicit SIMD lowering for bitwise operations | pending | |
+| GEMMA-07 | Explicit SIMD lowering for bitwise operations | premise rejected | the measured AArch64 boxed path does not need a new WIRE vector node or hand-written intrinsic to obtain the proposed lowering: Clang already emits an eight-limb unrolled NEON loop with four q-register AND/OR/XOR operations from the operation-selected C loop; disabling loop and SLP vectorization made the current 16..512-limb path 2.39x slower by geomean, while the auto-vectorized build won every measured GMP cell; bitwise-auto-simd-684afd9-m5max-20260804.json; emitted bench-lane assembly inspected with otool; GMP bitwise/shift fuzz 100000x1024 passed |
 | GEMMA-08 | Algebraic-normal-form modular lowering | pending | |
 | GEMMA-09 | Scratchpad allocation for temporary BigInts | pending | |
 | GEMMA-10 | Arithmetic-loop vectorization directives | pending | |
@@ -124,7 +124,7 @@ Source fingerprints:
 | QWEN-10 | Skip zero spans in sparse add/sub | pending | |
 | QWEN-11 | Per-thread allocation slot cache | kept | production has one direct TLS handoff plus two buffers per logarithmic class; hot-handoff-6f41042-m5max-20260804.json isolates the handoff from those buckets and measures a 12.6% geomean win across 28 small boxed cells, while result-pool-132f1c7-m5max-20260804.tsv measures the complete pool at 1.00-1.56x for 1024-limb operations and 5.2-8.5x for four-limb word operations versus malloc/free |
 | QWEN-12 | Stack-passed scratch results up to eight limbs | pending | |
-| QWEN-13 | SIMD bitwise operations | pending | |
+| QWEN-13 | SIMD bitwise operations | kept | current positive equal-width AND/OR/XOR loops auto-vectorize to four 128-bit NEON operations per eight-limb iteration; against an otherwise-identical `-fno-vectorize -fno-slp-vectorize` build, the 18 boxed cells from 16 through 512 limbs improved 58.1% by geomean (0.339x-0.606x), and every current cell measured 0.659x-0.843x GMP; 4/8-limb fixed rungs remain scalar because the A/B found no SIMD benefit there; bitwise-auto-simd-684afd9-m5max-20260804.json; GMP bitwise/shift fuzz 100000x1024 passed |
 | QWEN-14 | Cache/decompose shift offsets | pending | |
 | QWEN-15 | SIMD/early-exit magnitude comparison | pending | |
 | QWEN-16 | Cache reciprocals for recurring divisors/moduli | pending | |
@@ -205,6 +205,7 @@ existence does not automatically disposition an item:
 - 1ee775a follow-up artifacts: inline release handoff A/B and neutral hot-slot live-header A/B.
 - dd523e6 screen: current 485-cell default matrix, plus accurate 1..16-limb add1/sub1 confirmation and rejected C straight-line 2/3/4-limb candidate.
 - c05ae06 follow-up artifact: rejected exact-capacity hot allocation for 2-4-limb word add/sub results.
+- 684afd9 follow-up artifact: isolated the existing auto-vectorized boxed AND/OR/XOR loops from a scalarized build across 4-512 limbs.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

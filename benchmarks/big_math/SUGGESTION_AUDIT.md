@@ -150,7 +150,7 @@ Source fingerprints:
 | GROK-11 | Pool TLS scratch for Toom/isqrt/NTT | pending | |
 | GROK-12 | Fit threshold crossovers instead of choosing first-best | pending | |
 | GROK-13 | Improve rectangular/lopsided multiplication | pending | |
-| GROK-14 | Fill useful fixed schoolbook leaf sizes | pending | |
+| GROK-14 | Fill useful fixed schoolbook leaf sizes | pending | the proposed 6x6/10x10 candidates have been measured and rejected (see DEEP-19); other recurrence-derived leaf sizes still require their own isolated A/B |
 | GROK-15 | Re-evaluate live-depth-aware capacity policy | rejected | live-depth-corrected 48-point capacity grid found no hybrid policy meeting >=20% peak-RSS improvement with churn <=+10%; best peak win was 2.8%; b4-base-*.tsv, b4-grid-*.tsv, NOTED_TRADEOFFS.md |
 | GROK-16 | Tune parallel workers only in winning large bands | pending | audit related commits 803a5c4, dfb94bc |
 | GROK-17 | Improve div1/multi-limb preinverse cache locality | pending | |
@@ -180,7 +180,7 @@ Source fingerprints:
 | DEEP-16 | Fuse allocation with result computation | pending | |
 | DEEP-17 | Add a dedicated 3×3 multiply kernel | kept | the existing bn_mul_eq3_inline was isolated with BN_MUL_EQ3_INLINE=0 as the baseline; nine alternating 110 ms boxed rounds measured candidate/baseline 0.607x (paired IQR 0.038), moving mul3 from 1.162x GMP to 0.731x; mul-eq3-inline-e465fd4-m5max-20260804.json; GMP multiply/square fuzz 10000x64 passed |
 | DEEP-18 | Reschedule AArch64 addmul_1 | pending | |
-| DEEP-19 | Add dedicated 6×6 and 10×10 multiply kernels | pending | |
+| DEEP-19 | Add dedicated 6×6 and 10×10 multiply kernels | rejected | nine alternating 110 ms boxed rounds found the C 10x10 candidate 1.562x slower than the generic path; 6x6 alone improved its target to 0.806-0.881x, but two placement-controlled adjacent screens produced unacceptable 7-11% regressions at mul10/mul12, so both candidates were removed and production stayed unchanged; mul-eq6-eq10-candidates-6ad6737-m5max-20260804.json, mul-eq6-adjacent-screen-6ad6737-m5max-20260804.json, mul-eq6-adjacent-layout-6ad6737-m5max-20260804.json |
 | DEEP-20 | Profile-guided threshold tuning for Apple M5 Max | pending | audit related commits ce81fcb, dfb94bc |
 
 ## Campaign evidence already available for audit
@@ -195,6 +195,7 @@ existence does not automatically disposition an item:
 - ce81fcb, dfb94bc: AArch64 multiply/square cutoffs and parallel Toom-3 points.
 - e465fd4 follow-up artifact: isolated boxed 3x3 inline-multiply A/B.
 - 1f431bc follow-up artifact: isolated boxed fixed-Toom-2 A/B at 32/40/48.
+- 6ad6737 follow-up artifacts: rejected 6x6/10x10 fixed-leaf candidates and adjacent-size screens.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

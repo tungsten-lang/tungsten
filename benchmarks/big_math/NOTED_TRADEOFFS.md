@@ -118,6 +118,31 @@ cost more than the removed range proof, so the candidate was removed.
 Artifacts: `baselines/add1-boxed-3-a5e79a3-m5max-20260804.svg` and
 `baselines/addsub1-exact-hot-screen-a5e79a3-m5max-20260804.json`.
 
+## One-word and terminal GCD schedules — NOT taken (2026-08-04)
+
+A five-second boxed `lcm@1` flame profile put 59% of sampled branch events in
+the Tungsten LCM lane.  Disassembly localized its arithmetic work to the
+inlined one-word binary-GCD loop before result allocation.  Artifact:
+`baselines/lcm-boxed-1-eaafe25-m5max-20260804.svg`.
+
+Replacing that loop with straight Euclid lost 7.6% by geomean across ten
+`gcd`/`lcm` cells at 1--16 limbs and produced three regressions above 5%.
+Changing only the multi-limb terminal-word GCD to Euclid lost 2.5% across
+twelve cells at 128--4096 limbs, with ten losses and an 11.3% regression at
+`gcd@4096`.  A branchy Stein loop was effectively neutral at 1.005x overall,
+but made the targeted `gcd@1` cell 2.8% slower and `lcm@2` 5.6% slower.
+
+Two hybrid binary/Euclid schedules used a magnitude-ratio gate before paying
+for hardware division.  Shift gates of two and three lost 21.9% and 21.2% by
+geomean respectively; both made `gcd@1` about 42--45% slower and `lcm@1`
+about 53--57% slower.  These short screens are rejection evidence, not
+acceptance-length measurements.  All candidates were removed.  Artifacts:
+`baselines/gcd-u64-euclid-screen-eaafe25-m5max-20260804.json`,
+`baselines/gcd-terminal-euclid-screen-eaafe25-m5max-20260804.json`,
+`baselines/gcd-u64-branchy-screen-eaafe25-m5max-20260804.json`,
+`baselines/gcd-u64-hybrid2-screen-eaafe25-m5max-20260804.json`, and
+`baselines/gcd-u64-hybrid3-screen-eaafe25-m5max-20260804.json`.
+
 ## Mul1 wide dispatch and page rehoming — NOT taken (2026-08-04)
 
 Routing widths above 64 ahead of the fixed-width ladder initially measured a

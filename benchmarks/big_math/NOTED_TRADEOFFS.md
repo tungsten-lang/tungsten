@@ -121,6 +121,19 @@ the observed deficit.  Artifacts:
 `baselines/matrix-8305ff1-screen-m5max-20260804.json` and
 `baselines/matrix-8305ff1-residual095-accurate-m5max-20260804.json`.
 
+After the unsigned-word entries and retained one-limb addition leaf, a fresh
+485-cell default screen measured 457 wins, 27 losses, and one tie at a 0.628
+Tungsten/GMP geomean.  The acceptance follow-up promoted all 69 cells at or
+above 0.95x GMP, including screen wins, and measured 57 wins with twelve
+remaining losses: add@128 (1.008), div@4 (1.027), mod@448 (1.003), gcd@2
+(1.004), and mul1@24/32/128/256/384/2048/4096/8192
+(1.003--1.086).  Add1, sub1, and div1 were all green in the promoted set.
+Only add@128 combined a loss with very low relative IQR (0.006); several of
+the other rows remain replication targets under the recorded 3.9--4.7 host
+load.  Artifacts:
+`baselines/matrix-d0ecda6-screen-m5max-20260804.json` and
+`baselines/matrix-d0ecda6-residual095-accurate-m5max-20260804.json`.
+
 ## 40-limb subtraction follow-ups — NOT taken (2026-08-04)
 
 The accurate `sub@40` result was only 1.2% behind GMP but had the lowest

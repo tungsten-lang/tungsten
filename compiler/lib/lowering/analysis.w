@@ -1811,7 +1811,7 @@
     return false
   if ast_kind(node) != :binary_op
     return false
-  if !(node.op in (:PLUS :MINUS :STAR :SLASH))
+  if !(node.op in (:PLUS :MINUS :STAR :SLASH :PERCENT))
     return false
   node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == name
 
@@ -1864,7 +1864,7 @@
         mut_walk_expr(st.value, assigned, dead)
     elsif k == :compound_assign && st.target != nil && is_ast_node?(st.target) && ast_kind(st.target) == :var
       name = st.target.name
-      if st.op in (:PLUS :MINUS :STAR :SLASH)
+      if st.op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
         # Multiplication and division join once their mutating entries make
         # every identity return dying-receiver-owned or shared-marked, the
         # same invariant that admits PLUS/MINUS.

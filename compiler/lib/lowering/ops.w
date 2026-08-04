@@ -832,7 +832,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # For arithmetic compound assignment on ints, use runtime calls because the
   # accumulator may already be a bigint and raw i48 ops would consume pointer
   # bits.  Division has the same promoted-accumulator hazard as +/-/*.
-  if lt == :int && vt == :int && op in (:PLUS :MINUS :STAR :SLASH)
+  if lt == :int && vt == :int && op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
     rt_fb = nil
     if op == :PLUS
       rt_fb = "w_add"
@@ -842,13 +842,19 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rt_fb = "w_mul"
     elsif op == :SLASH
       rt_fb = "w_div"
+    elsif op == :PERCENT
+      rt_fb = "w_mod"
     # Mutate-if-unique (E4 stage 1): compound arithmetic on a proven-dead
     # accumulator takes the in-place entry; its runtime guards fall back.
     mut_cc = nil
-    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH)
-      rt_fb = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
+    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
+      if op == :PERCENT
+        rt_fb = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
+      else
+        rt_fb = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
       # must match the preserve_mostcc declaration or the call is UB
-      mut_cc = "preserve_mostcc"
+      if rt_fb != "w_mod"
+        mut_cc = "preserve_mostcc"
     result_temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rhs_reg], call_conv: mut_cc})
     if ptr != nil
@@ -908,9 +914,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # arm, so preserve their mutate-if-unique routing too.
   if rt_op != nil
     rt_call_conv = nil
-    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH)
-      rt_op = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
-      rt_call_conv = "preserve_mostcc"
+    if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
+      if op == :PERCENT
+        rt_op = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
+      else
+        rt_op = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
+      if rt_op != "w_mod"
+        rt_call_conv = "preserve_mostcc"
     result = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg], call_conv: rt_call_conv})
     if ptr != nil
@@ -1665,9 +1675,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # set by lower_assign_expr routes `r = r ± e` through the in-place entry
   # instead of __w_add_fast/__w_sub_fast.
   rt_call_conv = nil
-  if ctx[:mut_accum_target] != nil && op in (:PLUS :MINUS :STAR :SLASH) && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
-    rt_name = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
-    rt_call_conv = "preserve_mostcc"
+  if ctx[:mut_accum_target] != nil && op in (:PLUS :MINUS :STAR :SLASH :PERCENT) && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
+    if op == :PERCENT
+      rt_name = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
+    else
+      rt_name = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
+    if rt_name != "w_mod"
+      rt_call_conv = "preserve_mostcc"
 
   temp = next_temp(wfn)
   emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: rt_name, args: [lhs_reg, rhs_reg], call_conv: rt_call_conv})

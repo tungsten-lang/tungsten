@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "benchmarks/big_math/program_loops.w"
 GMP_SOURCE = ROOT / "benchmarks/big_math/program_loops_gmp.c"
 WORKLOADS = ("accumulate", "mulchain", "addchain", "subchain", "divchain")
+MOD_WORKLOADS = tuple(f"modchain{limbs}" for limbs in (2, 4, 8, 16, 32, 65, 128))
 LINE = re.compile(r"(\w+)\t(\d+)\t([0-9.]+)\t(-?\d+)")
 
 
@@ -76,10 +77,13 @@ def machine() -> dict:
     }
 
 
-def build_tungsten(compiler: Path, path: Path, *, mutate: bool) -> Path:
+def build_tungsten(
+    compiler: Path, path: Path, *, mutate: bool, mod_mut: bool = True
+) -> Path:
     env = os.environ.copy()
     env["TUNGSTEN_ROOT"] = str(ROOT)
     env["TUNGSTEN_BIGINT_MUTATE_UNIQUE"] = "1" if mutate else "0"
+    env["TUNGSTEN_BIGINT_MOD_MUT"] = "1" if mod_mut else "0"
     ll_path = path.with_suffix(".ll")
     env["TUNGSTEN_LL_PATH"] = str(ll_path)
     run([
@@ -103,7 +107,11 @@ def build_gmp(path: Path) -> None:
 
 
 def sample(path: Path, workload: str) -> tuple[int, float, int]:
-    text = run([str(path), workload]).stdout.strip()
+    if workload.startswith("modchain"):
+        limbs = workload.removeprefix("modchain")
+        text = run([str(path), "modchain", "2000000", limbs]).stdout.strip()
+    else:
+        text = run([str(path), workload]).stdout.strip()
     match = LINE.fullmatch(text)
     if not match or match.group(1) != workload:
         raise RuntimeError(f"unexpected {workload} output: {text!r}")
@@ -114,13 +122,21 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds", type=int, default=9)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--feature", choices=("all", "mod"), default="all")
     args = parser.parse_args()
     if args.rounds < 9:
         parser.error("acceptance runs require --rounds >= 9")
 
-    lanes = ("immutable-churn", "mutate-if-unique", "gmp-destination")
+    if args.feature == "mod":
+        workloads = MOD_WORKLOADS
+        lanes = ("immutable-mod", "mutating-mod", "gmp-destination")
+        build_modes = ((True, False), (True, True))
+    else:
+        workloads = WORKLOADS
+        lanes = ("immutable-churn", "mutate-if-unique", "gmp-destination")
+        build_modes = ((False, True), (True, True))
     samples = {
-        (lane, workload): [] for lane in lanes for workload in WORKLOADS
+        (lane, workload): [] for lane in lanes for workload in workloads
     }
     iterations: dict[str, int] = {}
     checksums: dict[str, int] = {}
@@ -136,18 +152,20 @@ def main() -> None:
             str(ROOT / "compiler/tungsten.w"),
         ])
         binaries = {
-            "immutable-churn": directory / "immutable",
-            "mutate-if-unique": directory / "mutating",
+            lanes[0]: directory / "immutable",
+            lanes[1]: directory / "mutating",
             "gmp-destination": directory / "gmp",
         }
-        print("Building immutable-churn release/native/fast...", flush=True)
+        print(f"Building {lanes[0]} release/native/fast...", flush=True)
         ir_paths = {}
-        ir_paths["immutable-churn"] = build_tungsten(
-            compiler, binaries["immutable-churn"], mutate=False
+        ir_paths[lanes[0]] = build_tungsten(
+            compiler, binaries[lanes[0]],
+            mutate=build_modes[0][0], mod_mut=build_modes[0][1],
         )
-        print("Building mutate-if-unique release/native/fast...", flush=True)
-        ir_paths["mutate-if-unique"] = build_tungsten(
-            compiler, binaries["mutate-if-unique"], mutate=True
+        print(f"Building {lanes[1]} release/native/fast...", flush=True)
+        ir_paths[lanes[1]] = build_tungsten(
+            compiler, binaries[lanes[1]],
+            mutate=build_modes[1][0], mod_mut=build_modes[1][1],
         )
         print("Building GMP destination-reuse twin...", flush=True)
         build_gmp(binaries["gmp-destination"])
@@ -166,7 +184,7 @@ def main() -> None:
                 flush=True,
             )
             for lane in order:
-                for workload in WORKLOADS:
+                for workload in workloads:
                     count, ns, checksum = sample(binaries[lane], workload)
                     previous_count = iterations.setdefault(workload, count)
                     if previous_count != count:
@@ -177,7 +195,7 @@ def main() -> None:
                     samples[(lane, workload)].append(ns)
 
     results = []
-    for workload in WORKLOADS:
+    for workload in workloads:
         before = samples[(lanes[0], workload)]
         after = samples[(lanes[1], workload)]
         gmp = samples[(lanes[2], workload)]
@@ -208,10 +226,20 @@ def main() -> None:
         "schema": 1,
         "suggestion": "GLM-01",
         "experiment": {
-            "label": "whole-language mutate-if-unique",
+            "label": "whole-language mutate-if-unique " + args.feature,
             "rounds": args.rounds,
             "build": "--release --native --fast",
-            "control_env": "TUNGSTEN_BIGINT_MUTATE_UNIQUE=0",
+            "feature": args.feature,
+            "build_modes": {
+                lanes[0]: {
+                    "TUNGSTEN_BIGINT_MUTATE_UNIQUE": int(build_modes[0][0]),
+                    "TUNGSTEN_BIGINT_MOD_MUT": int(build_modes[0][1]),
+                },
+                lanes[1]: {
+                    "TUNGSTEN_BIGINT_MUTATE_UNIQUE": int(build_modes[1][0]),
+                    "TUNGSTEN_BIGINT_MOD_MUT": int(build_modes[1][1]),
+                },
+            },
             "compiler_sha256": compiler_hash,
             "binary_sha256": hashes,
             "mutating_call_counts": {
@@ -222,6 +250,7 @@ def main() -> None:
                     for symbol in (
                         "w_bigint_add_mut", "w_bigint_sub_mut",
                         "w_bigint_mul_mut", "w_bigint_div_mut",
+                        "w_bigint_mod_mut",
                         "w_bigint_add_dest",
                     )
                 }
@@ -238,10 +267,10 @@ def main() -> None:
             "machine_start": start_machine,
             "machine_end": machine(),
             "methodology": (
-                "same Tungsten source compiled release/native/fast with the "
-                "fail-closed mutate-if-unique analysis disabled/enabled; GMP "
-                "uses idiomatic retained destinations; all lanes share exact "
-                "iteration counts and checksums; six lane orders rotate"
+                "same Tungsten source compiled release/native/fast with only "
+                "the selected consumed-destination feature disabled/enabled; "
+                "GMP uses idiomatic retained destinations; all lanes share "
+                "exact iteration counts and checksums; six lane orders rotate"
             ),
         },
         "summary": {

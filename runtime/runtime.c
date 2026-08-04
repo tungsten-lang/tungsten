@@ -35322,6 +35322,47 @@ __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b) {
     return bigint_normalize(ba);
 }
 
+/* Reduce a proven-dead unique accumulator by one word in its existing
+ * storage. The remainder pass finishes before limb zero is overwritten;
+ * wider divisors retain the ordinary immutable path. */
+static WValue w_bigint_mod_mut_fallback(WValue a, WValue b) {
+    WValue r = w_mod(a, b);
+    if (r == b && w_is_bigint(r)) w_bigint_mark_shared(w_as_bigint(r));
+    return r;
+}
+
+__attribute__((preserve_most)) WValue w_bigint_mod_mut(WValue a, WValue b) {
+    if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
+        return w_bigint_mod_mut_fallback(a, b);
+    WBigint *ba = w_as_bigint(a);
+    if (ba->shared != 0 || ba->size == 0)
+        return w_bigint_mod_mut_fallback(a, b);
+
+    int32_t as = ba->size;
+    int a_neg = as < 0;
+    int32_t amag = a_neg ? -as : as;
+    uint64_t d;
+    if (w_is_int(b)) {
+        int64_t ib = w_as_int(b);
+        if (__builtin_expect(ib == 0, 0)) die("modulo by zero");
+        d = ib < 0 ? (uint64_t)(-(ib + 1)) + 1U : (uint64_t)ib;
+    } else if (w_is_bigint(b)) {
+        int32_t bs;
+        WBigint *bb = w_bigint_view(b, &bs);
+        if (bs != 1 && bs != -1)
+            return w_bigint_mod_mut_fallback(a, b);
+        d = bb->limbs[0];
+        if (__builtin_expect(d == 0, 0)) die("modulo by zero");
+    } else {
+        return w_bigint_mod_mut_fallback(a, b);
+    }
+
+    uint64_t remainder = mag_mod_single(ba->limbs, amag, d);
+    ba->limbs[0] = remainder;
+    ba->size = a_neg && remainder != 0 ? -1 : 1;
+    return bigint_normalize(ba);
+}
+
 /* Fallback for a compiler-fused `a +/-= x * word`.  Preserve the language's
  * ordinary operator dispatch for every non-integer/guard-refused shape, but
  * retire a product allocation that did not become the result. */

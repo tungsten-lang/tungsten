@@ -167,6 +167,36 @@ check("mut.div_positive", divide_chain(500, 3), divide_chain_ref(500, 3))
 check("mut.div_negative", divide_chain(500, -3), divide_chain_ref(500, -3))
 check("mut.div_compound", divide_compound(500), divide_chain_ref(500, 3))
 
+# One-word modulo publishes the remainder into the dying receiver. Cover
+# boxed and inline remainders, signs, assignment spelling, and wider fallback.
+-> modulo_compound
+  r = (1 << 4096) + 123456789
+  d = (1 << 63) + 29
+  r %= d
+  r == (((1 << 4096) + 123456789) % d)
+
+-> modulo_assignment
+  r = -((1 << 4096) + 987654321)
+  d = -((1 << 63) + 29)
+  r = r % d
+  r == (-((1 << 4096) + 987654321) % d)
+
+-> modulo_inline
+  r = (1 << 4096) + 17
+  r %= 97
+  r == (((1 << 4096) + 17) % 97)
+
+-> modulo_wide_fallback
+  r = (1 << 4096) + 998877665544332211
+  d = (1 << 190) + 51
+  r %= d
+  r == (((1 << 4096) + 998877665544332211) % d)
+
+check("mut.mod_compound", modulo_compound(), "true")
+check("mut.mod_assignment", modulo_assignment(), "true")
+check("mut.mod_inline", modulo_inline(), "true")
+check("mut.mod_wide_fallback", modulo_wide_fallback(), "true")
+
 # carry growth in place: all-ones magnitude + 1 grows a limb
 -> carry_growth
   r = (1 << 256) - 1
@@ -195,6 +225,13 @@ check("adv.plain_alias_survives", alias_shape(1000), "true")
   r /= 3
   y == 1 << 200
 check("adv.division_alias_survives", division_alias_shape(), "true")
+
+-> modulo_alias_shape
+  r = (1 << 200) + 123
+  snapshot = r
+  r %= (1 << 63) + 29
+  snapshot == (1 << 200) + 123
+check("adv.modulo_alias_survives", modulo_alias_shape(), "true")
 
 # --- adversarial: stored in a hash, then the var keeps accumulating ---
 -> hash_shape(n)

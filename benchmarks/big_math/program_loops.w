@@ -78,9 +78,27 @@
   c = r % 1000000007
   << "divchain\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
 
+-> bench_modchain(n, limbs)
+  # A literal receiver seed keeps the fail-closed uniqueness proof valid;
+  # after the first negligible pass, bump determines the measured width.
+  r = (1 << 8191) + 123456789 ## big
+  bits = limbs * 64 - 1
+  bump = (1 << bits) + 987654321
+  divisor = (1 << 63) + 29
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r += bump
+    r %= divisor
+    i += 1
+  t1 = clock()
+  c = r % 1000000007
+  << "modchain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
 args = argv()
 workload = args.size() > 0 ? args[0] : "all"
 n = args.size() > 1 ? args[1].to_i() : 0
+limbs = args.size() > 2 ? args[2].to_i() : 65
 
 if workload == "accumulate" || workload == "all"
   bench_accumulate(n > 0 ? n : 2000000)
@@ -92,3 +110,5 @@ if workload == "subchain" || workload == "all"
   bench_subchain(n > 0 ? n : 100000)
 if workload == "divchain" || workload == "all"
   bench_divchain(n > 0 ? n : 30000)
+if workload == "modchain" || workload == "all"
+  bench_modchain(n > 0 ? n : 2000000, limbs)

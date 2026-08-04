@@ -3415,6 +3415,35 @@ static void gmp_import_value(mpz_t z, WValue v) {
     if (neg) mpz_neg(z, z);
 }
 
+static void fuzz_isqrt_against_gmp(int cases) {
+    static const int32_t edges[] = {
+        1534, 1535, 1536, 2047, 2048, 2049,
+        3071, 3072, 3073, 4093, 4094, 4095
+    };
+    uint64_t state = 0xd1b54a32d192ed03ULL;
+    mpz_t za, zg;
+    mpz_inits(za, zg, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t root_limbs = (t & 1)
+            ? edges[(unsigned)t % (sizeof(edges) / sizeof(edges[0]))]
+            : 1534 + (int32_t)(gcd_fuzz_next(&state) % (4095 - 1534 + 1));
+        WValue a = bench_bigint(
+            2 * root_limbs, gcd_fuzz_next(&state));
+        WValue got = bigint_isqrt_any(a);
+        gmp_import_value(za, a);
+        mpz_sqrt(zg, za);
+        if (!value_matches_mpz(got, zg))
+            dief("isqrt fuzz mismatch case=%d root-width=%d",
+                 t, root_limbs);
+        if (got != a) bench_free_value(got);
+        bench_free_value(a);
+    }
+    mpz_clears(za, zg, NULL);
+    bigint_pool_release_thread();
+    printf("isqrt fuzz vs GMP: %d/%d match (root widths 1534..4095 limbs)\n",
+           cases, cases);
+}
+
 static void fuzz_gcd_against_gmp(int cases, int32_t max_limbs) {
     static const int32_t edges[] = {
         2, 3, 63, 64, 65, 95, 96, 97, 127, 128, 129,
@@ -4883,6 +4912,16 @@ int main(int argc, char **argv) {
         fuzz_gcd_against_gmp(cases, max_limbs);
 #else
         die("gcd fuzz requires GMP");
+#endif
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--fuzz-isqrt") == 0) {
+        int cases = atoi(argv[2]);
+        if (cases <= 0) die("isqrt fuzz expects a positive case count");
+#ifdef HAVE_GMP
+        fuzz_isqrt_against_gmp(cases);
+#else
+        die("isqrt fuzz requires GMP");
 #endif
         return 0;
     }

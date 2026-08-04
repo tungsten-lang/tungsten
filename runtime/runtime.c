@@ -11452,6 +11452,26 @@ static uint64_t bn_sqrt_divq_guard(const uint64_t *up, int32_t l1, int32_t h,
 #define BN_SQRT_DIVAPPR_EXPECT 0
 #endif
 
+/* The exact quotient spine wins in one middle AArch64 band: below it the
+ * serial-product guard makes the full correction work more expensive than
+ * divappr, while just above it unfavorable B-Z leaf widths produce a sharp
+ * basecase cliff.  Keep the island target-specific until equivalent sweeps
+ * exist elsewhere. */
+#ifndef BN_SQRT_DIVQ_EXACT_MIN
+#  if defined(__aarch64__)
+#    define BN_SQRT_DIVQ_EXACT_MIN 1535
+#  else
+#    define BN_SQRT_DIVQ_EXACT_MIN INT32_MAX
+#  endif
+#endif
+#ifndef BN_SQRT_DIVQ_EXACT_MAX
+#  if defined(__aarch64__)
+#    define BN_SQRT_DIVQ_EXACT_MAX 4094
+#  else
+#    define BN_SQRT_DIVQ_EXACT_MAX 0
+#  endif
+#endif
+
 /* Top-level root-only variant: the same balanced split as the sqrtrem
  * recursion (keeping every engine call on the power-of-two-friendly
  * sizes), but quotient-only, remainder-free, and square-free.
@@ -11504,7 +11524,9 @@ static int bn_dc_sqrt_only(uint64_t *np, uint64_t *sp, uint64_t *qp,
     int32_t t = h == l;                         /* min divisor pad limbs */
     int32_t e = 0;                              /* guard limbs below root */
     int divided = 0;
-    if (__builtin_expect(h + t >= BN_SQRT_DIVAPPR_MIN,
+    int exact_q = n >= BN_SQRT_DIVQ_EXACT_MIN &&
+                  n <= BN_SQRT_DIVQ_EXACT_MAX;
+    if (__builtin_expect(!exact_q && h + t >= BN_SQRT_DIVAPPR_MIN,
                          BN_SQRT_DIVAPPR_EXPECT)) {
         /* Approximate B-Z quotient (divappr): pad the divisor to a
          * multiple-of-8 width so the recursion stays on even splits down

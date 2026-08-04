@@ -3889,7 +3889,8 @@ static void fuzz_boxed_mul_sqr_against_gmp(
 
 static void fuzz_boxed_mul1_against_gmp(int cases) {
     static const int32_t widths[] = {
-        2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 64, 128
+        2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 64, 128,
+        256, 384, 512, 1024
     };
     uint64_t state = 0xbb67ae8584caa73bULL;
     mpz_t za, zb, zg;
@@ -3931,10 +3932,31 @@ static void fuzz_boxed_mul1_against_gmp(int cases) {
         bench_free_value(big_base);
         bench_free_value(word_base);
     }
+
+    /* Force a carry-select boundary correction to wrap.  With v=2^64-1,
+     * limbs 14/15 make chunk zero return the extra carry bit and limb 16's
+     * independently computed low word is UINT64_MAX.  Correcting it wraps,
+     * so the 128-limb block must replay its seeded serial fallback. */
+    WBigint *boundary = bigint_alloc(256);
+    boundary->size = 256;
+    boundary->limbs[14] = UINT64_MAX;
+    boundary->limbs[15] = 1;
+    boundary->limbs[16] = 1;
+    boundary->limbs[255] = 1;
+    WValue boundary_value = bigint_box(boundary);
+    gmp_import_value(za, boundary_value);
+    mpz_mul_ui(zg, za, UINT64_MAX);
+    WValue boundary_product =
+        bigint_mul_ui_any(boundary_value, UINT64_MAX);
+    if (!value_matches_mpz(boundary_product, zg))
+        die("boxed mul1 carry-select replay mismatch");
+    bench_free_value(boundary_product);
+    bench_free_value(boundary_value);
+
     mpz_clears(za, zb, zg, NULL);
     bigint_pool_release_thread();
     printf("boxed mul1 fuzz vs GMP: %d/%d match"
-           " (2..128 limbs, both orders/sign encodings)\n",
+           " (2..1024 limbs, both orders/sign encodings; replay boundary)\n",
            cases, cases);
 }
 
@@ -4991,6 +5013,11 @@ static double bench_prime_prefilter(const char *mode, int iters) {
 #endif
 
 int main(int argc, char **argv) {
+#if BN_BENCH_RUNTIME_MUL1_CSEL_KNOB
+    const char *mul1_csel128 = getenv("BENCH_MUL1_CSEL128");
+    bn_bench_runtime_mul1_csel128 =
+        mul1_csel128 && strcmp(mul1_csel128, "0") != 0;
+#endif
 #if BN_BENCH_RUNTIME_WS_ZERO_KNOB
     const char *force_ws_zero = getenv("BENCH_WS_FORCE_ZERO");
     bn_bench_runtime_ws_force_zero =

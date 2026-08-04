@@ -509,6 +509,49 @@ The source candidate was removed without escalating it to an acceptance run.
 Artifact:
 `baselines/inline-placement-key-screen-bb153db-m5max-20260804.json`.
 
+## Mul1 128-limb carry-select blocks — RETAINED (2026-08-04)
+
+The retained AArch64 path processes exact multiples of 128 limbs as eight
+independent seeded 16-limb multiplication chains per block.  Each chain
+returns its final product high word and the one-bit addition carry.  Once all
+eight chains finish, the caller adds each preceding carry bit to the next
+chunk's first result limb.  A correction wrap is the only case that can alter
+the rest of that chunk, so it replays the exact seeded serial 128-limb block.
+
+Immediately before this change, the add128-retaining tree's complete screen
+measured 457/485 wins and its 9 x 110 ms promotion left thirteen losses, ten
+of them mul1 widths.  Artifacts:
+`baselines/matrix-42ffc87-screen-m5max-20260804.json` and
+`baselines/matrix-42ffc87-residual095-accurate-m5max-20260804.json`.
+
+An initial 7 x 80 ms complete-width screen included 128 limbs and suggested a
+7.5% mul1-band win.  The first 9 x 110 ms replication confirmed the aggregate
+gain but made 128 itself 2.1% slower with spread larger than the effect, so the
+production selector begins at 256 limbs.  A byte-identical runtime-selector
+acceptance then won every changed 256/384/512/1024/2048/4096/8192 cell by
+13--20%, measured 0.933 geomean over all twenty mul1 controls, and had no
+regression over 5%.  The final compile-time production A/B again won every
+changed width by 5--24%, measured 0.933 full-band geomean, and had no >5%
+regression.  All changed complete boxed cells measured faster than GMP.
+
+The post-change 485-cell fast matrix measured 458 wins at 0.617 geomean.  Its
+9 x 110 ms follow-up promoted all seventy cells at or above 0.95x GMP,
+including screen wins, and measured 64 wins with six remaining losses:
+div@4, gcd@2048, isqrt@384, sub1@1, mul1@128, and mul1@448.  The new selector
+deliberately leaves the last two shapes on the prior rolling kernel.
+
+Every timed sample checked the full boxed result against public GMP.  The
+expanded randomized checker passed 100000 optimized cases and 20000
+ASAN/UBSAN cases through 1024 limbs across both operand orders and sign
+encodings.  A constructed v=2^64-1 case forces the boundary correction to
+wrap and therefore exercises the serial replay.  Artifacts:
+`baselines/mul1-csel128-screen-42ffc87-m5max-20260804.json`,
+`baselines/mul1-csel128-acceptance-42ffc87-m5max-20260804.json`,
+`baselines/mul1-csel128-same-binary-42ffc87-m5max-20260804.json`,
+`baselines/mul1-csel128-production-42ffc87-m5max-20260804.json`,
+`baselines/matrix-mul1csel-screen-42ffc87-m5max-20260804.json`, and
+`baselines/matrix-mul1csel-residual095-accurate-42ffc87-m5max-20260804.json`.
+
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 
 **Claimed win (prior session, real workloads):** hybrid (p2<=32 + q32)

@@ -3453,6 +3453,15 @@ static uint64_t bn_mul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uint64
     return carry;
 }
 #if defined(__aarch64__)
+#ifndef BN_MUL1_CSEL128
+#define BN_MUL1_CSEL128 1
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_CSEL_KNOB
+#define BN_BENCH_RUNTIME_MUL1_CSEL_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_CSEL_KNOB
+static int bn_bench_runtime_mul1_csel128;
+#endif
 /* Rolling-carry scheme: the (C flag, previous high word) pair is the loop-
  * carried state, so each limb costs exactly one flag op (adcs lo, hi_prev)
  * and the chain closes ONCE after the loop (adc hi_last + C).  Loop control
@@ -3593,6 +3602,105 @@ static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v
 #define BN_M1F_TAIL                                                       \
     "adc x0, x15, xzr\n\t"                                                \
     "ret\n\t"
+
+#if BN_MUL1_CSEL128
+typedef struct {
+    uint64_t high;
+    uint64_t carry_bit;
+} BnMul1SplitCarry;
+
+/* One independent 16-limb carry chain.  `seed` is the complete carry word
+ * entering limb zero.  Returning the last product high word separately from
+ * the final one-bit addition carry lets a 128-limb caller correct adjacent
+ * chains after all eight have executed. */
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static BnMul1SplitCarry bn_mul_1_f16_seed(
+    uint64_t *rp, const uint64_t *up, uint64_t v, uint64_t seed) {
+    __asm__(
+        "ldp x4, x5, [x1]\n\t"
+        "ldp x6, x7, [x1, #16]\n\t"
+        "mul x8, x4, x2\n\t"
+        "umulh x12, x4, x2\n\t"
+        "mul x9, x5, x2\n\t"
+        "umulh x13, x5, x2\n\t"
+        "mul x10, x6, x2\n\t"
+        "umulh x14, x6, x2\n\t"
+        "adds x8, x8, x3\n\t"
+        "mul x11, x7, x2\n\t"
+        "umulh x15, x7, x2\n\t"
+        "adcs x9, x9, x12\n\t"
+        "adcs x10, x10, x13\n\t"
+        "adcs x11, x11, x14\n\t"
+        "stp x8, x9, [x0]\n\t"
+        "stp x10, x11, [x0, #16]\n\t"
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        "mov x0, x15\n\t"
+        "cset x1, cs\n\t"
+        "ret\n\t"
+    );
+}
+
+static __attribute__((noinline)) uint64_t bn_mul_1_seeded_serial(
+    uint64_t *rp, const uint64_t *up, uint64_t v, uint64_t carry,
+    int32_t n) {
+    for (int32_t i = 0; i < n; i++) {
+        __uint128_t product = (__uint128_t)up[i] * v + carry;
+        rp[i] = (uint64_t)product;
+        carry = (uint64_t)(product >> 64);
+    }
+    return carry;
+}
+
+#define BN_MUL1_SPLIT_CHUNK(bit)                                         \
+    BnMul1SplitCarry c##bit = bn_mul_1_f16_seed(                         \
+        rp + 16 * (bit), up + 16 * (bit), v,                            \
+        (uint64_t)(((__uint128_t)up[16 * (bit) - 1] * v) >> 64));        \
+    carry_mask |= c##bit.carry_bit << (bit)
+
+static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
+bn_mul_1_csel128(uint64_t *rp, const uint64_t *up, uint64_t v,
+                 uint64_t seed) {
+    BnMul1SplitCarry c0 = bn_mul_1_f16_seed(rp, up, v, seed);
+    uint64_t carry_mask = c0.carry_bit;
+    BN_MUL1_SPLIT_CHUNK(1);
+    BN_MUL1_SPLIT_CHUNK(2);
+    BN_MUL1_SPLIT_CHUNK(3);
+    BN_MUL1_SPLIT_CHUNK(4);
+    BN_MUL1_SPLIT_CHUNK(5);
+    BN_MUL1_SPLIT_CHUNK(6);
+    BN_MUL1_SPLIT_CHUNK(7);
+
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 1; chunk < 8; chunk++) {
+        uint64_t increment = (carry_mask >> (chunk - 1)) & 1U;
+        uint64_t old = rp[16 * chunk];
+        uint64_t adjusted = old + increment;
+        rp[16 * chunk] = adjusted;
+        wrapped |= (uint64_t)(adjusted == 0) & increment;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_mul_1_seeded_serial(rp, up, v, seed, 128);
+    return c7.high + c7.carry_bit;
+}
+
+static uint64_t bn_mul_1_csel(uint64_t *rp, const uint64_t *up, int32_t n,
+                              uint64_t v) {
+    uint64_t carry = 0;
+    do {
+        carry = bn_mul_1_csel128(rp, up, v, carry);
+        rp += 128;
+        up += 128;
+        n -= 128;
+    } while (n != 0);
+    return carry;
+}
+#undef BN_MUL1_SPLIT_CHUNK
+#endif
 
 #if BN_MUL_EQ17
 __attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
@@ -8793,6 +8901,18 @@ static WValue bigint_mul_n1(const uint64_t *al, int32_t n, uint64_t w,
         bn_addsub_page_hazard(r->limbs, al) &&
         !bn_addsub_placement_is_settled(r, al, al))
         r = bigint_rehome_binary_result(r, al, al);
+#endif
+#if defined(__aarch64__) && BN_MUL1_CSEL128
+    /* Eight independent 16-limb chains amortize their boundary-high products
+     * from 256 limbs onward.  The exact-multiple gate leaves the 128- and
+     * 448-limb controls on the lower-overhead rolling kernel. */
+    if (n >= 256 && (n & 127) == 0
+#if BN_BENCH_RUNTIME_MUL1_CSEL_KNOB
+        && bn_bench_runtime_mul1_csel128
+#endif
+        )
+        r->limbs[n] = bn_mul_1_csel(r->limbs, al, n, w);
+    else
 #endif
 #if BN_MUL_POWER2_FIXED
     if (n == 8)

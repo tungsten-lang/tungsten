@@ -346,6 +346,18 @@ kernel candidates.  Artifacts:
 `baselines/mul1-inline-wrapper-screen-3001650-m5max-20260804.json` and
 `baselines/mul1-inline-wrapper-replication-3001650-m5max-20260804.json`.
 
+After the decoded unsigned-word entry removed most dispatcher overhead, a new
+five-second boxed `mul1@128` profile assigned 87.4% of sampled branch events to
+`bn_mul_1`, 6.8% to the lane, 4.4% to its wrapper, and 0.8% to TLS resolution.
+Raw checks put the kernel itself at 0.98--1.05× public `mpn_mul_1` from 32
+through 8192 limbs, with the clearest loss at 4096.  Explicit 256-byte source
+and destination prefetches were then tested over all 20 boxed widths.  Every
+actually affected width from 128 through 8192 lost, including 2.1% at 4096;
+the apparent 1.0% all-cell geomean win came entirely from inactive small-width
+layout movement.  The prefetch source was removed.  Artifacts:
+`baselines/mul1-boxed-128-6767146-m5max-20260804.svg` and
+`baselines/mul1-a64-prefetch256-screen-6767146-m5max-20260804.json`.
+
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 
 **Claimed win (prior session, real workloads):** hybrid (p2<=32 + q32)

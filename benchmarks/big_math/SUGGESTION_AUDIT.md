@@ -38,7 +38,7 @@ Source fingerprints:
 | ID | Hypothesis | Status | Evidence |
 | --- | --- | --- | --- |
 | GLM-01 | Destination-passing / mutate-if-unique ABI for every operation | pending | |
-| GLM-02 | Direct hot-handoff slot for results up to 64 limbs | pending | |
+| GLM-02 | Direct hot-handoff slot for results up to 64 limbs | kept | disabling only BN_BIGINT_HOT_SLOT while retaining the thread-local size buckets made the current direct handoff win 26/28 boxed add1/sub1/mul1/div1 cells from 2 through 64 limbs and improve the geomean 12.6%; the only losses were div1 at 32/64 limbs by 0.01%/0.14%, with no >5% regression; hot-handoff-6f41042-m5max-20260804.json |
 | GLM-03 | Hand-written AArch64 normalized div-by-word kernel | pending | audit related commits 3926cbb, 6aea99c |
 | GLM-04 | Branch-free reciprocal correction for 32-bit divisors | premise rejected | the separate two-half-limb 32-bit reciprocal loop is disabled on AArch64; routing small divisors through the normalized 64-bit preinverse path cut the divchain lane from 1.95x GMP to 1.002x; divchain-m5max-20260803.tsv |
 | GLM-05 | Subquadratic half-GCD above about 1024 limbs | kept | existing recursive HGCD retained; half-slice band added at 6144; gcdlcm-half-slice-7096978-m5max-20260804.json; GMP fuzz 1000x8192 + 10x65536; sanitizer fuzz 250x8192 |
@@ -122,7 +122,7 @@ Source fingerprints:
 | QWEN-08 | Barrett precomputation for repeated reductions | kept | WPrimeModCtx precomputes the modulus reciprocal and reuses it across the full powmod ladder and decimal D&C levels; matrix-7a96d5c-accurate-20260802.json has all powmod cells faster than GMP, including even-modulus/large-width Barrett coverage in focused fuzz |
 | QWEN-09 | Parallel-prefix carry add/sub | kept | the general-length AArch64 hybrid computes vector generate/propagate masks, resolves exact per-limb carry masks with a word-level prefix formula, and applies them in a second SIMD pass; lowering its boxed cutoff to 288 improved the 272..384 add/sub matrix 2.0% geomean with no >5% regression; addsub-neon-min288-f011cd7-m5max-20260804.json; GMP fuzz 100000x1024 passed |
 | QWEN-10 | Skip zero spans in sparse add/sub | pending | |
-| QWEN-11 | Per-thread allocation slot cache | kept | production has one direct TLS handoff plus two buffers per logarithmic class; result-pool-132f1c7-m5max-20260804.tsv measures 21 boxed cells including existing winners: 1.00-1.56x at 1024 limbs and 5.2-8.5x at four-limb word operations versus malloc/free |
+| QWEN-11 | Per-thread allocation slot cache | kept | production has one direct TLS handoff plus two buffers per logarithmic class; hot-handoff-6f41042-m5max-20260804.json isolates the handoff from those buckets and measures a 12.6% geomean win across 28 small boxed cells, while result-pool-132f1c7-m5max-20260804.tsv measures the complete pool at 1.00-1.56x for 1024-limb operations and 5.2-8.5x for four-limb word operations versus malloc/free |
 | QWEN-12 | Stack-passed scratch results up to eight limbs | pending | |
 | QWEN-13 | SIMD bitwise operations | pending | |
 | QWEN-14 | Cache/decompose shift offsets | pending | |
@@ -201,6 +201,7 @@ existence does not automatically disposition an item:
 - fbf77a1 follow-up artifact: rejected branch-free div1 second reciprocal correction across 2-1024 limbs.
 - f011cd7 follow-up artifacts: fixed add/sub basecase disable A/B and 224/288-limb NEON crossover probes.
 - 673ec76 follow-up artifact: exact 128/256-limb add/sub carry-select disable A/B.
+- 6f41042 follow-up artifact: direct hot handoff versus thread-local size buckets across 28 small boxed cells.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

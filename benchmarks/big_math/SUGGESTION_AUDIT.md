@@ -139,7 +139,7 @@ Source fingerprints:
 | --- | --- | --- | --- |
 | GROK-01 | Close residual mul1 kernel throughput gaps | kept | rolling-carry AArch64 bn_mul_1 keeps flags live across the loop and settles carry once; 1ba1be6 probes moved 64/256/1024-limb kernels to 1.01/1.02/1.01x GMP and mulchain to 0.98x; remaining boxed mul1 overhead is recorded separately |
 | GROK-02 | Mutate/recycle the destination for N×1 multiply | kept | w_bigint_mul_mut writes the one-word product into a proven-dead unique receiver and falls back on alias/capacity guards; program-loops-6e7c006-m5max-20260804.tsv measures mulchain at 0.989x GMP with matched checksum |
-| GROK-03 | Fixed-length add1/sub1 kernels at 2–8 limbs | pending | audit related commits 74f497c, ec92b25 |
+| GROK-03 | Fixed-length add1/sub1 kernels at 2–8 limbs | pending | a C straight-line 2/3/4-limb candidate was rejected after losing 9/10 boxed cells, regressing 3.5% geomean with five >5% regressions; production stayed unchanged; addsub1-straight234-dd523e6-m5max-20260804.json; genuinely hand-scheduled AArch64 rungs through 8 remain distinct and untested |
 | GROK-04 | Optimize Toom-3 evaluation/pointwise/interpolation at 400–500 | kept | dfb94bc optimized the pointwise phase by running independent Toom-3 products through the persistent worker pool; boxed mul improved 20.5%/1.7%/10.2% at 384/448/512 versus the matched ce81fcb baseline, held at 1024, and won all five measured GMP cells; mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json -> mul-a64-par-toom3-ce81fcb-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | GROK-05 | Re-fit the 48-limb multiply ladder | kept | disabling BN_MUL_SPLIT_48 while holding the source/build constant made boxed mul48 1.189x slower; the current path is 0.841x its generic fallback and 0.848x GMP over nine alternating 110 ms rounds; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
 | GROK-06 | Fill the 384–512 squaring-ladder gap | kept | ce81fcb lowered the AArch64 Karatsuba-square parallel cutoff to 384; boxed sqr improved 49.6% at 384 and 68.3% at 448, flipping both to clear GMP wins; sqr512 regressed 8.6% but stayed at 0.720x GMP, and the five-cell 256..1024 sqr geomean was 0.712x GMP; mulsqr-df0c604-accurate-m5max-20260804.json -> mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
@@ -203,6 +203,7 @@ existence does not automatically disposition an item:
 - 673ec76 follow-up artifact: exact 128/256-limb add/sub carry-select disable A/B.
 - 6f41042 follow-up artifact: direct hot handoff versus thread-local size buckets across 28 small boxed cells.
 - 1ee775a follow-up artifacts: inline release handoff A/B and neutral hot-slot live-header A/B.
+- dd523e6 screen: current 485-cell default matrix, plus accurate 1..16-limb add1/sub1 confirmation and rejected C straight-line 2/3/4-limb candidate.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

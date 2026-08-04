@@ -1588,6 +1588,38 @@ static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
     return elapsed * 1e9 / (double)iters;
 }
 
+/* Full boxed immutable-result lane for an explicitly rectangular multiply.
+ * The ordinary matrix supplies equal limb counts, so keep this separate from
+ * bench_boxed_operands while preserving the same one-previous-result-live
+ * lifecycle used by the documented boxed operation rows. */
+static double bench_boxed_mul_rect_churn(
+    int32_t na, int32_t nb, int iters) {
+    WValue a = bench_bigint(
+        na, UINT64_C(0x243f6a8885a308d3) ^ (uint64_t)na);
+    WValue b = bench_bigint(
+        nb, UINT64_C(0x13198a2e03707344) ^ (uint64_t)nb);
+
+    bigint_pool_release_thread();
+    BenchLaneCtx cx;
+    cx.a = a;
+    cx.b = b;
+    cx.m = W_NIL;
+    cx.parse_input = W_NIL;
+    cx.previous = W_NIL;
+    cx.recycle = 1;
+    cx.warm_chunk = bench_boxed_warm_chunk(
+        BENCH_BOXED_MUL, na > nb ? na : nb);
+    cx.iters = iters;
+    double elapsed = bench_lane_mul(&cx);
+
+    if (w_is_bigint(cx.previous))
+        bench_direct_free(w_as_bigint(cx.previous));
+    bigint_pool_release_thread();
+    bench_free_value(a);
+    bench_free_value(b);
+    return elapsed * 1e9 / (double)iters;
+}
+
 /*
  * Focused algebraic fast-path benchmark.  Unlike the general boxed-result
  * lanes above, these operations are explicitly allowed to return one of
@@ -4158,6 +4190,65 @@ static double bench_gmp_boxed_result_churn(
     mpz_clears(a, b, zm, result[0], result[1], NULL);
     return elapsed * 1e9 / (double)iters;
 }
+
+static void check_boxed_mul_rect_against_gmp(int32_t na, int32_t nb) {
+    WValue a = bench_bigint(
+        na, UINT64_C(0x243f6a8885a308d3) ^ (uint64_t)na);
+    WValue b = bench_bigint(
+        nb, UINT64_C(0x13198a2e03707344) ^ (uint64_t)nb);
+    WValue got = bigint_mul_any(a, b);
+    mpz_t za, zb, expected;
+    mpz_inits(za, zb, expected, NULL);
+    gmp_import_value(za, a);
+    gmp_import_value(zb, b);
+    mpz_mul(expected, za, zb);
+    if (!value_matches_mpz(got, expected))
+        die("boxed rectangular multiply mismatch vs GMP");
+    if (got != a && got != b) bench_free_value(got);
+    bench_free_value(a);
+    bench_free_value(b);
+    mpz_clears(za, zb, expected, NULL);
+}
+
+/* GMP control for the boxed rectangular lane.  As in the documented matrix,
+ * two alternating mpz destinations preserve one previous immutable result
+ * while retaining result capacity across iterations. */
+static double bench_gmp_boxed_mul_rect_churn(
+    int32_t na, int32_t nb, int iters) {
+    WValue av = bench_bigint(
+        na, UINT64_C(0x243f6a8885a308d3) ^ (uint64_t)na);
+    WValue bv = bench_bigint(
+        nb, UINT64_C(0x13198a2e03707344) ^ (uint64_t)nb);
+    mpz_t a, b, result[2];
+    mpz_inits(a, b, result[0], result[1], NULL);
+    gmp_import_value(a, av);
+    gmp_import_value(b, bv);
+    bench_free_value(av);
+    bench_free_value(bv);
+
+    int32_t max_limbs = na > nb ? na : nb;
+    int warm_chunk = bench_boxed_warm_chunk(BENCH_BOXED_MUL, max_limbs);
+    int warm_index = 0;
+    double warm_start = bench_now();
+    do {
+        for (int warm_i = 0; warm_i < warm_chunk;
+             warm_i++, warm_index++) {
+            mpz_ptr r = result[warm_index & 1];
+            mpz_mul(r, a, b);
+            bench_sink ^= (uint64_t)mpz_get_ui(r);
+        }
+    } while (bench_now() - warm_start < bench_warm_seconds);
+
+    double timed_start = bench_now();
+    for (int timed_i = 0; timed_i < iters; timed_i++) {
+        mpz_ptr r = result[(warm_index + timed_i) & 1];
+        mpz_mul(r, a, b);
+        bench_sink ^= (uint64_t)mpz_get_ui(r) ^ (uint64_t)timed_i;
+    }
+    double elapsed = bench_now() - timed_start;
+    mpz_clears(a, b, result[0], result[1], NULL);
+    return elapsed * 1e9 / (double)iters;
+}
 #endif
 
 /*
@@ -5963,6 +6054,29 @@ int main(int argc, char **argv) {
 #endif
         free(a);
         free(b);
+        return 0;
+    }
+    if (argc == 5 && strcmp(argv[1], "--bench-boxed-mul-rect") == 0) {
+        int32_t na = (int32_t)atoi(argv[2]);
+        int32_t nb = (int32_t)atoi(argv[3]);
+        int iters = atoi(argv[4]);
+        if (na <= 0 || nb <= 0 || iters <= 0)
+            die("boxed rectangular multiply expects two positive limb counts"
+                " and positive iterations");
+#ifdef HAVE_GMP
+        check_boxed_mul_rect_against_gmp(na, nb);
+#endif
+        double tw = bench_boxed_mul_rect_churn(na, nb, iters);
+#ifdef HAVE_GMP
+        double gm = bench_gmp_boxed_mul_rect_churn(na, nb, iters);
+        printf("boxed rectangular multiply %d x %d limbs (%d iters):"
+               " tungsten %.1f ns, gmp %.1f ns, gap %.4fx\n",
+               na, nb, iters, tw, gm, ratio(tw, gm));
+#else
+        printf("boxed rectangular multiply %d x %d limbs (%d iters):"
+               " tungsten %.1f ns\n",
+               na, nb, iters, tw);
+#endif
         return 0;
     }
     if (argc == 5 && strcmp(argv[1], "--bench-mul-rect") == 0) {

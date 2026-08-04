@@ -2427,6 +2427,13 @@ WValue bigint_sub_any(WValue a, WValue b) {
 #ifndef BN_TOOM_PAR_THRESHOLD
 #define BN_TOOM_PAR_THRESHOLD 576
 #endif
+#ifndef BN_TOOM3_PAR_THRESHOLD
+#if defined(__aarch64__)
+#define BN_TOOM3_PAR_THRESHOLD 384
+#else
+#define BN_TOOM3_PAR_THRESHOLD INT32_MAX
+#endif
+#endif
 #ifndef BN_TOOM2_PAR_THRESHOLD
 #if defined(__aarch64__)
 #define BN_TOOM2_PAR_THRESHOLD 448
@@ -5700,6 +5707,10 @@ static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
     uint64_t *te  = cc3 + w;
     uint64_t *tf  = te + w;
     uint64_t *ksc = tf + w;
+    WToomPointSet points;
+    bn_toom_point_set_init(
+        &points, kp1, ksc, 5, 0,
+        n >= BN_TOOM3_PAR_THRESHOLD, BN_TOOM_PAR_SMALL_THREADS);
 
     bn_load(pa0, a, k, kp1);
     bn_load(pa1, a + k, k, kp1);
@@ -5709,16 +5720,13 @@ static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
     bn_load(pb2, b + k2, n2k, kp1);
 
     /* v0 = a0*b0 */
-    bn_mul_eq(v0, pa0, pb0, k, ksc);
-    for (int32_t i = 2 * k; i < w; i++) v0[i] = 0;
+    bn_toom_point_set_add(&points, v0, pa0, pb0);
     /* vinf = a2*b2 */
-    bn_mul_eq(vinf, pa2, pb2, n2k, ksc);
-    for (int32_t i = 2 * n2k; i < w; i++) vinf[i] = 0;
+    bn_toom_point_set_add(&points, vinf, pa2, pb2);
     /* v1 = (a0+a1+a2)(b0+b1+b2) */
     bn_add_n(ea, pa0, pa1, kp1); bn_add_n(ea, ea, pa2, kp1);
     bn_add_n(eb, pb0, pb1, kp1); bn_add_n(eb, eb, pb2, kp1);
-    bn_mul_eq(v1, ea, eb, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) v1[i] = 0;
+    bn_toom_point_set_add(&points, v1, ea, eb);
     /* vm1 = (a0-a1+a2)(b0-b1+b2), signed */
     bn_add_n(ea, pa0, pa2, kp1);
     int sa = 0, cmpa = bn_cmp_n(ea, pa1, kp1);
@@ -5729,8 +5737,7 @@ static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
     if (cmpb < 0) { bn_sub_n(eb, pb1, eb, kp1); sb = 1; }
     else          { bn_sub_n(eb, eb, pb1, kp1); }
     int svm1 = (sa != sb) ? 1 : 0;
-    bn_mul_eq(vm1, ea, eb, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) vm1[i] = 0;
+    bn_toom_point_set_add(&points, vm1, ea, eb);
     /* v2 = (a0+2a1+4a2)(b0+2b1+4b2) */
     memcpy(ea, pa0, (size_t)kp1 * sizeof(uint64_t));
 #if BN_TOOM3_SINGLE_SHIFT
@@ -5748,8 +5755,15 @@ static void bn_toom3(uint64_t *out, const uint64_t *a, const uint64_t *b,
     bn_dbl(tt, pb1, kp1); bn_add_n(eb, eb, tt, kp1);
     bn_dbl(tt, pb2, kp1); bn_dbl(tt, tt, kp1); bn_add_n(eb, eb, tt, kp1);
 #endif
-    bn_mul_eq(v2, ea, eb, kp1, ksc);
-    for (int32_t i = tk; i < w; i++) v2[i] = 0;
+    bn_toom_point_set_add(&points, v2, ea, eb);
+    bn_toom_point_set_run(&points);
+    for (int32_t i = tk; i < w; i++) {
+        v0[i] = 0;
+        v1[i] = 0;
+        vm1[i] = 0;
+        v2[i] = 0;
+        vinf[i] = 0;
+    }
 
     /* ---- interpolate (all magnitudes nonneg by construction) ---- */
     if (svm1 == 0) { bn_add_n(ta, v1, vm1, w); bn_sub_n(tb, v1, vm1, w); }

@@ -3933,6 +3933,24 @@ static void fuzz_boxed_mul1_against_gmp(int cases) {
         bench_free_value(word_base);
     }
 
+    /* Force the exact-128 four-chain correction to wrap at its first
+     * 32-limb boundary. */
+    WBigint *boundary128 = bigint_alloc(128);
+    boundary128->size = 128;
+    boundary128->limbs[30] = UINT64_MAX;
+    boundary128->limbs[31] = 1;
+    boundary128->limbs[32] = 1;
+    boundary128->limbs[127] = 1;
+    WValue boundary128_value = bigint_box(boundary128);
+    gmp_import_value(za, boundary128_value);
+    mpz_mul_ui(zg, za, UINT64_MAX);
+    WValue boundary128_product =
+        bigint_mul_ui_any(boundary128_value, UINT64_MAX);
+    if (!value_matches_mpz(boundary128_product, zg))
+        die("boxed mul1 128-limb carry-select replay mismatch");
+    bench_free_value(boundary128_product);
+    bench_free_value(boundary128_value);
+
     /* Force a carry-select boundary correction to wrap.  With v=2^64-1,
      * limbs 14/15 make chunk zero return the extra carry bit and limb 16's
      * independently computed low word is UINT64_MAX.  Correcting it wraps,
@@ -5031,6 +5049,11 @@ static double bench_prime_prefilter(const char *mode, int iters) {
 #endif
 
 int main(int argc, char **argv) {
+#if BN_BENCH_RUNTIME_MUL1_CSEL128X32_KNOB
+    const char *mul1_csel128x32 = getenv("BENCH_MUL1_CSEL128X32");
+    bn_bench_runtime_mul1_csel128x32 =
+        mul1_csel128x32 && strcmp(mul1_csel128x32, "0") != 0;
+#endif
 #if BN_BENCH_RUNTIME_MUL1_CSEL_KNOB
     const char *mul1_csel128 = getenv("BENCH_MUL1_CSEL128");
     bn_bench_runtime_mul1_csel128 =

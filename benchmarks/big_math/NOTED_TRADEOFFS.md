@@ -550,12 +550,24 @@ lower-overhead rolling kernel selected at 128 limbs.  Artifacts:
 `baselines/mul1-csel448-screen-2779b76-m5max-20260804.json` and
 `baselines/mul1-csel448-acceptance-2779b76-m5max-20260804.json`.
 
+The remaining exact-128 loss needed less setup, not shorter carry chains.  A
+four-by-32-limb carry-select leaf improved the target 14.0% to 0.918x GMP in
+its 7 x 80 ms screen.  The production-shaped 9 x 110 ms A/B retained a 13.0%
+target win but moved one unchanged 448-limb control 5.3%, so it was not used
+alone for acceptance.  A byte-identical runtime-selector replication removed
+that placement ambiguity: exact 128 improved 13.5% to 0.913x GMP, 17/20 mul1
+controls won at 0.971 geomean, and none regressed over 5%.  Every documented
+mul1 cell in that final artifact is faster than GMP.  Artifacts:
+`baselines/mul1-csel128x32-screen-0ceddc3-m5max-20260804.json`,
+`baselines/mul1-csel128x32-acceptance-0ceddc3-m5max-20260804.json`, and
+`baselines/mul1-csel128x32-same-binary-0ceddc3-m5max-20260804.json`.
+
 Every timed sample checked the full boxed result against public GMP.  The
 expanded randomized checker passed 100000 optimized cases and 20000
 ASAN/UBSAN cases through 1024 limbs across both operand orders and sign
 encodings.  Constructed v=2^64-1 cases force the boundary correction to wrap
-in both a complete block and the 448-limb tail, exercising both serial
-replays.  Artifacts:
+in the exact-128 32-limb chain, a complete 16-limb-chain block, and the
+448-limb tail, exercising every serial replay.  Artifacts:
 `baselines/mul1-csel128-screen-42ffc87-m5max-20260804.json`,
 `baselines/mul1-csel128-acceptance-42ffc87-m5max-20260804.json`,
 `baselines/mul1-csel128-same-binary-42ffc87-m5max-20260804.json`,

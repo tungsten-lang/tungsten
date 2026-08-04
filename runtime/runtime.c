@@ -3459,6 +3459,15 @@ static uint64_t bn_mul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uint64
 #ifndef BN_MUL1_CSEL448
 #define BN_MUL1_CSEL448 1
 #endif
+#ifndef BN_MUL1_CSEL128X32
+#define BN_MUL1_CSEL128X32 1
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_CSEL128X32_KNOB
+#define BN_BENCH_RUNTIME_MUL1_CSEL128X32_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_CSEL128X32_KNOB
+static int bn_bench_runtime_mul1_csel128x32;
+#endif
 #ifndef BN_BENCH_RUNTIME_MUL1_CSEL_KNOB
 #define BN_BENCH_RUNTIME_MUL1_CSEL_KNOB 0
 #endif
@@ -3645,6 +3654,41 @@ static BnMul1SplitCarry bn_mul_1_f16_seed(
     );
 }
 
+#if BN_MUL1_CSEL128X32
+__attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
+static BnMul1SplitCarry bn_mul_1_f32_seed(
+    uint64_t *rp, const uint64_t *up, uint64_t v, uint64_t seed) {
+    __asm__(
+        "ldp x4, x5, [x1]\n\t"
+        "ldp x6, x7, [x1, #16]\n\t"
+        "mul x8, x4, x2\n\t"
+        "umulh x12, x4, x2\n\t"
+        "mul x9, x5, x2\n\t"
+        "umulh x13, x5, x2\n\t"
+        "mul x10, x6, x2\n\t"
+        "umulh x14, x6, x2\n\t"
+        "adds x8, x8, x3\n\t"
+        "mul x11, x7, x2\n\t"
+        "umulh x15, x7, x2\n\t"
+        "adcs x9, x9, x12\n\t"
+        "adcs x10, x10, x13\n\t"
+        "adcs x11, x11, x14\n\t"
+        "stp x8, x9, [x0]\n\t"
+        "stp x10, x11, [x0, #16]\n\t"
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_BLOCK(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_BLOCK(192)
+        BN_M1F_BLOCK(224)
+        "mov x0, x15\n\t"
+        "cset x1, cs\n\t"
+        "ret\n\t"
+    );
+}
+#endif
+
 static __attribute__((noinline)) uint64_t bn_mul_1_seeded_serial(
     uint64_t *rp, const uint64_t *up, uint64_t v, uint64_t carry,
     int32_t n) {
@@ -3661,6 +3705,39 @@ static __attribute__((noinline)) uint64_t bn_mul_1_seeded_serial(
         rp + 16 * (bit), up + 16 * (bit), v,                            \
         (uint64_t)(((__uint128_t)up[16 * (bit) - 1] * v) >> 64));        \
     carry_mask |= c##bit.carry_bit << (bit)
+
+#if BN_MUL1_CSEL128X32
+#define BN_MUL1_SPLIT32_CHUNK(bit)                                       \
+    BnMul1SplitCarry d##bit = bn_mul_1_f32_seed(                         \
+        rp + 32 * (bit), up + 32 * (bit), v,                            \
+        (uint64_t)(((__uint128_t)up[32 * (bit) - 1] * v) >> 64));        \
+    carry_mask |= d##bit.carry_bit << (bit)
+
+static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
+bn_mul_1_csel128x32(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    BnMul1SplitCarry d0 = bn_mul_1_f32_seed(rp, up, v, 0);
+    uint64_t carry_mask = d0.carry_bit;
+    BN_MUL1_SPLIT32_CHUNK(1);
+    BN_MUL1_SPLIT32_CHUNK(2);
+    BN_MUL1_SPLIT32_CHUNK(3);
+
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 1; chunk < 4; chunk++) {
+        uint64_t increment = (carry_mask >> (chunk - 1)) & 1U;
+        uint64_t old = rp[32 * chunk];
+        uint64_t adjusted = old + increment;
+        rp[32 * chunk] = adjusted;
+        wrapped |= (uint64_t)(adjusted == 0) & increment;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_mul_1_seeded_serial(rp, up, v, 0, 128);
+    return d3.high + d3.carry_bit;
+}
+#undef BN_MUL1_SPLIT32_CHUNK
+#endif
 
 #if BN_MUL1_CSEL448
 static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
@@ -8937,9 +9014,19 @@ static WValue bigint_mul_n1(const uint64_t *al, int32_t n, uint64_t w,
         r = bigint_rehome_binary_result(r, al, al);
 #endif
 #if defined(__aarch64__) && BN_MUL1_CSEL128
-    /* Eight independent 16-limb chains amortize their boundary-high products
+    /* Four longer chains minimize setup at exactly 128 limbs.  Eight
+     * independent 16-limb chains amortize their boundary-high products
      * from 256 limbs onward.  448 uses three complete blocks plus a measured
      * four-chain tail; other nonmultiples retain the rolling kernel. */
+#if BN_MUL1_CSEL128X32
+    if (n == 128
+#if BN_BENCH_RUNTIME_MUL1_CSEL128X32_KNOB
+        && bn_bench_runtime_mul1_csel128x32
+#endif
+        )
+        r->limbs[n] = bn_mul_1_csel128x32(r->limbs, al, w);
+    else
+#endif
     if (n >= 256 && ((n & 127) == 0
 #if BN_MUL1_CSEL448
                      || n == 448

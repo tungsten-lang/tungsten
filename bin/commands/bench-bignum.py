@@ -8,6 +8,7 @@ import json
 import math
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -367,8 +368,20 @@ def command_output(command: list[str], default: str = "unknown") -> str:
 
 def machine_metadata() -> dict[str, Any]:
     cpu = platform.processor() or platform.machine() or "unknown"
+    power_source = "unknown"
+    battery_percent: int | None = None
     if platform.system() == "Darwin":
         cpu = command_output(["sysctl", "-n", "machdep.cpu.brand_string"], cpu)
+        try:
+            power = run_checked(["pmset", "-g", "batt"])
+        except (RuntimeError, FileNotFoundError):
+            power = ""
+        source = re.search(r"Now drawing from '([^']+)'", power)
+        charge = re.search(r"\b(\d+)%", power)
+        if source:
+            power_source = source.group(1)
+        if charge:
+            battery_percent = int(charge.group(1))
     elif platform.system() == "Linux":
         try:
             for line in Path("/proc/cpuinfo").read_text().splitlines():
@@ -390,6 +403,8 @@ def machine_metadata() -> dict[str, Any]:
         "compiler": command_output([compiler, "--version"]),
         "compiler_command": compiler,
         "compiler_flags": flags,
+        "power_source": power_source,
+        "battery_percent": battery_percent,
     }
 
 
@@ -762,13 +777,16 @@ def sweep_operation(operation, sizes, runs, target_ms, on_row):
             "gmp_ns": float(fields[5]),
             "python_ns": 0.0,
         }
-        # FFT band (> 8192 limbs): the harness reports median-of-reps with
-        # the interquartile spread instead of min — not directly comparable
-        # to the min-based cells, so the band is flagged on the row.
+        # Every row retains its interquartile spread so throttling and host
+        # noise remain visible in the JSON.  The FFT band additionally uses
+        # the median rather than the best sample for its representative time.
+        row["selection"] = (
+            "median_iqr" if int(fields[2]) > FFT_BAND_LIMBS else "best_iqr"
+        )
+        row["tungsten_iqr_ns"] = float(fields[6])
+        row["gmp_iqr_ns"] = float(fields[7])
         if int(fields[2]) > FFT_BAND_LIMBS:
             row["fft_band"] = True
-            row["tungsten_iqr_ns"] = float(fields[6])
-            row["gmp_iqr_ns"] = float(fields[7])
         row["tungsten_over_gmp"] = row["tungsten_ns"] / row["gmp_ns"]
         row["tungsten_over_python"] = 0.0
         row["fastest"] = fastest_label(
@@ -1518,6 +1536,15 @@ def main() -> int:
             ),
         },
     }
+    machine = metadata["machine"]
+    if machine.get("power_source") == "Battery Power":
+        charge = machine.get("battery_percent")
+        detail = f" at {charge}%" if charge is not None else ""
+        print(
+            "tungsten bench bignum: warning: running on battery"
+            f"{detail}; CPU power policy can invalidate performance comparisons",
+            file=sys.stderr,
+        )
 
     results: list[dict[str, Any]] = []
     if args.worker_sweep:

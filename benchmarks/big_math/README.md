@@ -36,8 +36,11 @@ is the reproducible threshold/FFT-band preset: it implies `--accurate` and
 `--no-capacity`, uses at least nine 110 ms timing repetitions, brackets the
 multiply/square and recycler cutoffs, and takes selected operations through
 1,048,576 limbs. It does not form a wasteful Cartesian product of every cheap
-operation and every huge size. Above 8192 limbs, rows report the median and
-interquartile spread; smaller rows retain the normal best-of-N statistic.
+operation and every huge size. Every repeated native row records its
+interquartile spread so host noise and power throttling remain visible in JSON
+artifacts. Above 8192 limbs, rows report the median; smaller rows retain the
+normal best-of-N statistic. On macOS, artifacts also record AC/battery state
+and charge level.
 `--full` cannot be combined with `--quick`. `--operations` selects a subset of
 the preset, and `--sizes` replaces its per-operation sizes (and is required if
 an operation outside the preset is requested). `--output FILE` writes the full

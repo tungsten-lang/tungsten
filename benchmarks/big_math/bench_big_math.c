@@ -4703,16 +4703,15 @@ int main(int argc, char **argv) {
                 if (r == 0 || tw < tw_best) tw_best = tw;
                 if (r == 0 || gm < gm_best) gm_best = gm;
             }
-            /* FFT band (> 8192 limbs): a single op exceeds the timing
-             * window, calibration yields one iteration, and min-of-reps
-             * measures page-fault luck on multi-MB operands. Report the
-             * median with the interquartile spread instead; these cells
-             * are not directly comparable to the min-based band below and
-             * every report must say so. Below the band the spread fields
-             * are 0 and the min semantics are unchanged. */
+            /* Retain interquartile spread at every width so power throttling
+             * and host noise are visible even though the practical band
+             * keeps its historical min-of-reps representative.  In the FFT
+             * band (>8192 limbs), a single op can exceed the timing window;
+             * use the median as well so page-fault luck cannot become the
+             * reported result. */
             double tw_rep = tw_best, gm_rep = gm_best;
             double tw_iqr = 0.0, gm_iqr = 0.0;
-            if (limbs > 8192 && kept >= 3) {
+            if (kept >= 3) {
                 for (int i = 1; i < kept; i++) {   /* insertion sort, n<=64 */
                     double tv = tw_s[i], gv = gm_s[i];
                     int j = i;
@@ -4722,10 +4721,12 @@ int main(int argc, char **argv) {
                     while (j > 0 && gm_s[j - 1] > gv) { gm_s[j] = gm_s[j - 1]; j--; }
                     gm_s[j] = gv;
                 }
-                tw_rep = tw_s[kept / 2];
-                gm_rep = gm_s[kept / 2];
                 tw_iqr = tw_s[(3 * kept) / 4] - tw_s[kept / 4];
                 gm_iqr = gm_s[(3 * kept) / 4] - gm_s[kept / 4];
+                if (limbs > 8192) {
+                    tw_rep = tw_s[kept / 2];
+                    gm_rep = gm_s[kept / 2];
+                }
             }
             printf("boxed\t%s\t%d\t%d\t%.3f\t%.3f\t%.3f\t%.3f\n",
                    argv[2], limbs, iters, tw_rep, gm_rep, tw_iqr, gm_iqr);

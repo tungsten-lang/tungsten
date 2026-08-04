@@ -46,6 +46,10 @@
     top_level_var_types: {},
     top_level_static_types: {},
     next_string:      0,
+    # One process-lifetime cache slot per source BigInt literal.  The emitted
+    # module owns the slots; the runtime publishes an immutable template on
+    # first use so loop-local literals replace decimal parsing with a copy.
+    next_bigint_literal: 0,
     next_block:       0,
     next_ic:          0,
     next_call_site:   0,

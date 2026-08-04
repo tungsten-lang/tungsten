@@ -270,12 +270,19 @@ use target
       # A decimal literal above the signed-i64 range wrapped at parse time
       # (parse_int_value's accumulator is compiled native i64), so rebuild it
       # as a BigInt from the original text — the runtime primitive the compiled
-      # path uses for the same case (lowering/literals.w). Hex/bin/oct and all
-      # in-range literals keep their cached value.
+      # path uses for the same case (lowering/literals.w).  The parser's AST
+      # may itself hold a boxed BigInt for an in-range hex/bin/oct or >i48
+      # literal; never return that mutable template directly, because an
+      # alias-visible bang method would then change every later evaluation of
+      # the source literal.  Reparse its exact decimal value into a fresh
+      # ordinary BigInt, mirroring the compiled template-copy contract.
       raw = ast_get(node, :raw)
       if interp_decimal_exceeds_i64?(raw)
         return ccall("w_bigint_from_dec_str", "" + raw.replace("_", ""))
-      return ast_get(node, :value)
+      value = ast_get(node, :value)
+      if type(value) == "BigInt"
+        return ccall("w_bigint_from_dec_str", value.to_s())
+      return value
     if t == :char
       return ast_get(node, :value)
     if t == :codepoint

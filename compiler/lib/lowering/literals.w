@@ -103,6 +103,31 @@
 # node's already-correct value rendered back to decimal via val.to_s()).
 -> lower_int_bigint_from_text(ctx, text)
   wfn = ctx[:func]
+  # A source literal is immutable and has module lifetime.  Give it a
+  # dedicated publication slot rather than reparsing its decimal spelling at
+  # every dynamic evaluation (for example, when the literal appears in a
+  # loop).  The opt-out is retained solely for matched compiler A/Bs.
+  # Restrict the cache to lexically repeated sites.  A one-shot literal would
+  # still need its initial parse plus a template copy, so caching it is a pure
+  # regression; a loop-local site amortizes that setup and is the measured
+  # workload this opcode is intended to remove.
+  if env("TUNGSTEN_BIGINT_LITERAL_CACHE") != "0" && current_loop(wfn) != nil
+    mod = ctx[:mod]
+    str_id = module_string_constant(mod, text)
+    slot_id = mod[:next_bigint_literal]
+    mod[:next_bigint_literal] = slot_id + 1
+    temp_ptr = next_temp(wfn)
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {
+      op: :bigint_literal_i64,
+      temp: temp,
+      temp_ptr: temp_ptr,
+      string_id: str_id,
+      byte_len: utf8_byte_length(text) + 1,
+      slot_id: slot_id
+    })
+    return typed_value(:i64, temp)
+
   str_tv = lower_string(ctx, Tungsten:AST:String.new(text))
   str_reg = ensure_i64_value(wfn, str_tv)
   temp = next_temp(wfn)

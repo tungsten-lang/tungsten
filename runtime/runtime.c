@@ -30900,8 +30900,7 @@ static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
     return rn;
 }
 
-WValue w_bigint_from_dec_str(WValue str) {
-    const char *s = as_str(str);
+static WValue w_bigint_from_dec_cstr(const char *s) {
     if (!s) return w_box_int(0);
     size_t i = 0;
     int neg = 0;
@@ -30961,6 +30960,55 @@ WValue w_bigint_from_dec_str(WValue str) {
     free(scratch);
     r->size = neg ? -n : n;
     return bigint_normalize(r);
+}
+
+WValue w_bigint_from_dec_str(WValue str) {
+    return w_bigint_from_dec_cstr(as_str(str));
+}
+
+static inline WValue w_bigint_literal_clone(WValue template) {
+    if (!w_is_bigint(template)) return template;
+    int32_t signed_size;
+    WBigint *src = w_bigint_view(template, &signed_size);
+    int32_t n = signed_size < 0 ? -signed_size : signed_size;
+    WBigint *dst = bigint_alloc_raw(n);
+    memcpy(dst->limbs, src->limbs, (size_t)n * sizeof(uint64_t));
+    dst->size = signed_size;
+    return bigint_box(dst);
+}
+
+/* Publish an immutable source-literal TEMPLATE once per emitted module slot.
+ * Literal templates may be read by any runtime thread, so the slot uses
+ * acquire/release publication.  BigInt's saturated shared count means
+ * "immortal and never mutate in place", which pins the template.  Each
+ * evaluation still returns a normal fresh/recycled value copied from it:
+ * explicit alias-visible bang methods (`neg!`, `abs!`) must never mutate the
+ * module template or change a later evaluation of the same source literal. */
+WValue w_bigint_literal_cached(const char *text, _Atomic uint64_t *slot) {
+    uint64_t cached = atomic_load_explicit(slot, memory_order_acquire);
+    if (__builtin_expect(cached != 0, 1))
+        return w_bigint_literal_clone((WValue)cached);
+
+    WValue candidate = w_bigint_from_dec_cstr(text);
+    WBigint *candidate_big = NULL;
+    if (w_is_bigint(candidate)) {
+        candidate_big = w_as_bigint(candidate);
+        candidate_big->shared = 255;
+    }
+
+    uint64_t expected = 0;
+    if (atomic_compare_exchange_strong_explicit(
+            slot, &expected, (uint64_t)candidate,
+            memory_order_release, memory_order_acquire))
+        return w_bigint_literal_clone(candidate);
+
+    /* A concurrent publisher won.  Undo this candidate's temporary pin and
+     * return its allocation through the ordinary BigInt recycler. */
+    if (candidate_big) {
+        candidate_big->shared = 0;
+        bigint_release_if_live(candidate_big);
+    }
+    return w_bigint_literal_clone((WValue)expected);
 }
 
 WValue w_div(WValue a, WValue b) {

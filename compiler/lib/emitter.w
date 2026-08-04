@@ -282,6 +282,7 @@ use hashing
   # @w_float in practice (float boxing lowers inline). Drop the dead alwaysinline.
   out << declare_fn_attrs("w_float", wv, "double", "nounwind willreturn memory(none) speculatable")
   out << declare_fn("w_decimal", wv, "i64, i32")
+  out << declare_fn("w_bigint_literal_cached", wv, "ptr, ptr")
   # Numeric->raw-double coercion for ensure_raw_f64's fallback: converts a boxed
   # double/Decimal/Int correctly (a plain bitcast-unbox only works for a genuine
   # boxed double; a Decimal reinterprets to garbage). memory(read) — a heap
@@ -1500,6 +1501,8 @@ ewscope_md_state = {ids: {}, order: []}
     ["w_node_alloc", "w_ast_freeze_if_array"]
   when :call_direct_i64_ptr1, :call_direct_void_ptr1
     [inst[:name]]
+  when :bigint_literal_i64
+    ["w_bigint_literal_cached"]
   when :call_libm_f64
     [inst[:name]]
   when :call_num_to_f64
@@ -2055,6 +2058,19 @@ ewscope_md_state = {ids: {}, order: []}
       used_runtime_fns["w_closure_cell_new"] = true
     fi += 1
   globals_out = StringBuffer(4096)
+
+  # Immutable BigInt source literals publish into one process-lifetime slot
+  # apiece.  The zero sentinel is W_NIL and cannot be a lowered over-i64
+  # literal; the C runtime performs the atomic first-use publication.
+  bigint_literal_count = mod[:next_bigint_literal]
+  if bigint_literal_count != nil && bigint_literal_count > 0
+    bli = 0
+    while bli < bigint_literal_count
+      globals_out << "@.bigint.literal."
+      globals_out << bli.to_s()
+      globals_out << " = internal global i64 0, align 8\n"
+      bli += 1
+    globals_out << "\n"
 
   # Memo table globals
   memo_tables = mod[:fn_memo_tables]
@@ -3702,6 +3718,17 @@ ewscope_md_state = {ids: {}, order: []}
       rbr = "]"
       bl = inst[:byte_len].to_s()
       inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:string_id].to_s() + ", i32 0, i32 0\n  " + inst[:temp] + " = call i64 @w_string(ptr " + inst[:temp_ptr] + ")"
+
+  # BigInt source literal: pass the executable's constant decimal bytes and
+  # its module-local publication slot directly to the runtime.  The steady
+  # state is one atomic load plus a recycler-backed copy of the pinned
+  # template, preserving explicit alias-visible BigInt bang semantics.
+  when :bigint_literal_i64
+    used_ptr_ids[inst[:string_id]] = true
+    lbr = "\["
+    rbr = "]"
+    bl = inst[:byte_len].to_s()
+    inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:string_id].to_s() + ", i32 0, i32 0\n  " + inst[:temp] + " = call i64 @w_bigint_literal_cached(ptr " + inst[:temp_ptr] + ", ptr @.bigint.literal." + inst[:slot_id].to_s() + ")"
 
   # Symbol: string WValue with bit 0 set
   when :symbol_i64

@@ -329,6 +329,7 @@ compiled_specs=(
   spec/compiler/global_demotion_scopes_spec.w
   spec/compiler/strbuf_bytes_spec.w
   spec/compiler/int_bigint_promotion_spec.w
+  spec/compiler/bigint_literal_cache_spec.w
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w
   spec/compiler/top_level_method_name_hygiene_spec.w
@@ -431,6 +432,7 @@ interpreter_specs=(
   # identically interpreted (compiled-only verification has missed clobbered
   # interpreter.w hunks before).
   spec/compiler/int_bigint_promotion_spec.w
+  spec/compiler/bigint_literal_cache_spec.w
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w
   spec/compiler/top_level_method_name_hygiene_spec.w

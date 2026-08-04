@@ -1,0 +1,44 @@
+{
+  "metadata": {
+    "generated_at": "2026-08-04T05:28:19-04:00",
+    "git_commit": "033ea108d2f0a25f87433b225211ae3c44195cf9",
+    "host": "Apple M5 Max",
+    "os": "macOS 26.6 (25G72)",
+    "xcode": "26.4.1 (17E202)",
+    "xctrace": "16.0 (17E202)",
+    "gmp": "6.3.0"
+  },
+  "probe": {
+    "command": "xcrun xctrace record --template 'CPU Counters' --output /tmp/tungsten-counters-033ea10.trace --target-stdout - --time-limit 10s --no-prompt --launch -- benchmarks/big_math/bench_big_math --bench-boxed-compare add 64 50000000",
+    "template": "CPU Counters",
+    "template_configuration": "Guided",
+    "template_mode": "CPU Bottlenecks",
+    "sampling_period_ms": 1,
+    "trace_bundle_kib": 46980,
+    "profiled_stdout": "boxed add 64 50000000 12.526 14.832",
+    "unprofiled_controls": [
+      "boxed add 64 50000000 12.134 12.633",
+      "boxed add 64 50000000 12.377 13.078 reverse",
+      "boxed add 64 50000000 12.764 13.222"
+    ],
+    "exported_counter_schemas": [
+      "CounterMetricAggregatedForProcess",
+      "CounterMetricByThread",
+      "CountingModeSamples",
+      "MetricAggregationForProcess",
+      "MetricTable",
+      "kdebug-counters-with-time-sample"
+    ],
+    "raw_sample_payload": "opaque cumulative pmc-events array with no exported event-name mapping"
+  },
+  "findings": {
+    "public_cli_capture_succeeded": true,
+    "retired_instruction_total_exposed": false,
+    "tungsten_and_gmp_phases_separated": false,
+    "powermetrics_unprivileged": false,
+    "powermetrics_error": "powermetrics must be invoked as the superuser",
+    "private_kperf_dependency_accepted": false,
+    "matrix_integration_recommended": false,
+    "reason": "The supported command-line template provides sampled bottleneck categories, not a documented retired-instruction count per operation. Private kperf or privileged system-wide sampling would make the benchmark nonportable and still require explicit phase markers. Retain xctrace as an auxiliary profiler and use alternating long-window wall-time samples for matrix acceptance."
+  }
+}

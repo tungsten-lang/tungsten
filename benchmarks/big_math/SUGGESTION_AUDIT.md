@@ -40,7 +40,7 @@ Source fingerprints:
 | GLM-01 | Destination-passing / mutate-if-unique ABI for every operation | pending | |
 | GLM-02 | Direct hot-handoff slot for results up to 64 limbs | pending | |
 | GLM-03 | Hand-written AArch64 normalized div-by-word kernel | pending | audit related commits 3926cbb, 6aea99c |
-| GLM-04 | Branch-free reciprocal correction for 32-bit divisors | pending | audit related commit 3926cbb |
+| GLM-04 | Branch-free reciprocal correction for 32-bit divisors | premise rejected | the separate two-half-limb 32-bit reciprocal loop is disabled on AArch64; routing small divisors through the normalized 64-bit preinverse path cut the divchain lane from 1.95x GMP to 1.002x; divchain-m5max-20260803.tsv |
 | GLM-05 | Subquadratic half-GCD above about 1024 limbs | kept | existing recursive HGCD retained; half-slice band added at 6144; gcdlcm-half-slice-7096978-m5max-20260804.json; GMP fuzz 1000x8192 + 10x65536; sanitizer fuzz 250x8192 |
 | GLM-06 | Reuse one scratch remainder across Lehmer steps | pending | |
 | GLM-07 | isqrt reciprocal-sqrt seed, scratch reuse, and fewer divisions | pending | audit related commits 4b823f3, df0c604 |
@@ -63,12 +63,12 @@ Source fingerprints:
 | ID | Hypothesis | Status | Evidence |
 | --- | --- | --- | --- |
 | KIMI-01 | AArch64 normalized divrem_1-class kernel | pending | audit related commits 3926cbb, 6aea99c |
-| KIMI-02 | Route 32-bit divisors through normalized preinverse division | pending | |
-| KIMI-03 | Hoist N×1 routing in the multiply entry | pending | |
-| KIMI-04 | Straight-line mul1 rungs and close fixed-kernel gaps | pending | audit related commits 1ba1be6, 5cb55ac |
+| KIMI-02 | Route 32-bit divisors through normalized preinverse division | kept | BN_DIV_SINGLE_32BIT_RECIP=0 on AArch64 routes non-power-of-two small words through the normalized preinverse path; divchain-m5max-20260803.tsv records 1.95x -> 1.002x versus GMP with matched checksums |
+| KIMI-03 | Hoist N×1 routing in the multiply entry | kept | bigint_mul_any tests the positive N×1 shape before the general pair dispatcher; mul1-13689fa-accurate-m5max-20260803.json -> mul1-lifecycle-a64-accurate-m5max-20260803.json reduced boxed 2-8-limb time 39-45% |
+| KIMI-04 | Straight-line mul1 rungs and close fixed-kernel gaps | kept | inline 2-4 and fixed 8/16/24/32/40/48/64 boxed rungs plus rolling-carry kernels; lifecycle artifact cuts 2-8-limb boxed time 39-45%, and 1ba1be6 kernel probes moved 64/256/1024 limbs to 1.01/1.02/1.01x GMP |
 | KIMI-05 | Extend page-hazard guard to division and large results | pending | |
-| KIMI-06 | Mutate-if-unique entries for word add/sub/mul/div | pending | audit related commit d1715f9 |
-| KIMI-07 | Extend compiler mut-accumulator recognition | pending | |
+| KIMI-06 | Mutate-if-unique entries for word add/sub/mul/div | kept | compiler/runtime ship guarded w_bigint_{add,sub,mul,div}_mut entries; program-loops-6e7c006-m5max-20260804.tsv measures release/native/fast end-to-end loops (0.346x accumulate, 0.989x mulchain, 1.007x divchain in the final interleaved batch); --fuzz-mut covers all four entries and alias refusal |
+| KIMI-07 | Extend compiler mut-accumulator recognition | kept | fail-closed accumulator and rotation-shape analyses route dead locals to mut/destination entries while preserving value aliases; program-loops-6e7c006-m5max-20260804.tsv records 0.738x GMP addchain and focused bigint_mutate_unique_spec covers aliases and disqualification |
 | KIMI-08 | Add mulchain1/divchain1 whole-language-loop lanes | kept | run_program_loops.sh builds Tungsten release/native/fast and matched GMP loops, alternates lanes, checks checksums, and now reports median/IQR; program-loops-6e7c006-m5max-20260804.tsv records a noisy loaded-host run without using it for a performance disposition |
 | KIMI-09 | Skip redundant write-before-read workspace clearing | pending | |
 | KIMI-10 | Fixed-size multiply study at 32/40/48 limbs | pending | |
@@ -131,14 +131,14 @@ Source fingerprints:
 | QWEN-17 | Divide-and-conquer decimal conversion | pending | |
 | QWEN-18 | Preserve O(1) sign-overlay paths in all lowering modes | pending | |
 | QWEN-19 | Function attributes and vectorization controls for limb loops | pending | |
-| QWEN-20 | Return one-limb multiply results without a general ladder | pending | audit related commit 5cb55ac |
+| QWEN-20 | Return one-limb multiply results without a general ladder | kept | bigint_mul_positive_11 and early boxed N×1 entries allocate/publish directly without the general ladder; mul1 lifecycle artifact cuts 2-8-limb boxed time 39-45% and current 1-limb mul1 is faster than GMP |
 
 ## Grok
 
 | ID | Hypothesis | Status | Evidence |
 | --- | --- | --- | --- |
-| GROK-01 | Close residual mul1 kernel throughput gaps | pending | audit related commits 1ba1be6, 5cb55ac |
-| GROK-02 | Mutate/recycle the destination for N×1 multiply | pending | |
+| GROK-01 | Close residual mul1 kernel throughput gaps | kept | rolling-carry AArch64 bn_mul_1 keeps flags live across the loop and settles carry once; 1ba1be6 probes moved 64/256/1024-limb kernels to 1.01/1.02/1.01x GMP and mulchain to 0.98x; remaining boxed mul1 overhead is recorded separately |
+| GROK-02 | Mutate/recycle the destination for N×1 multiply | kept | w_bigint_mul_mut writes the one-word product into a proven-dead unique receiver and falls back on alias/capacity guards; program-loops-6e7c006-m5max-20260804.tsv measures mulchain at 0.989x GMP with matched checksum |
 | GROK-03 | Fixed-length add1/sub1 kernels at 2–8 limbs | pending | audit related commits 74f497c, ec92b25 |
 | GROK-04 | Optimize Toom-3 evaluation/pointwise/interpolation at 400–500 | pending | audit related commit dfb94bc |
 | GROK-05 | Re-fit the 48-limb multiply ladder | pending | |
@@ -146,7 +146,7 @@ Source fingerprints:
 | GROK-07 | Polish mid-size equal-length add/sub kernels | pending | |
 | GROK-08 | Reduce large HGCD application and matrix-product cost | kept | half slices amortize row application at 6144+; accurate boxed artifact gcdlcm-half-slice-7096978-m5max-20260804.json; remaining GMP losses recorded |
 | GROK-09 | Reduce large-isqrt iteration/fallback cost | pending | audit related commits 4b823f3, df0c604 |
-| GROK-10 | Extend compiler mutate-if-unique coverage | pending | |
+| GROK-10 | Extend compiler mutate-if-unique coverage | kept | compiler covers +,-,*,/ dead accumulators plus Fibonacci rotation destinations with fail-closed alias analysis; bigint_mutate_unique_spec and program-loops-6e7c006-m5max-20260804.tsv provide correctness and end-to-end evidence |
 | GROK-11 | Pool TLS scratch for Toom/isqrt/NTT | pending | |
 | GROK-12 | Fit threshold crossovers instead of choosing first-best | pending | |
 | GROK-13 | Improve rectangular/lopsided multiplication | pending | |
@@ -162,10 +162,10 @@ Source fingerprints:
 
 | ID | Hypothesis | Status | Evidence |
 | --- | --- | --- | --- |
-| DEEP-01 | Inline tiny add1/sub1 at 1–8 limbs | pending | audit related commits 74f497c, ec92b25 |
-| DEEP-02 | Register-only mul1 paths at 1–4 limbs | pending | audit related commit 5cb55ac |
+| DEEP-01 | Inline tiny add1/sub1 at 1–8 limbs | kept | always-inlining the word add/sub kernels improved accurate 4/8-limb add1 by 14/19% and sub1 by 2/11%; addsub1-dfb94bc-accurate-m5max-20260804.json -> addsub1-inline-dfb94bc-m5max-20260804.json; residual 2-4-limb losses remain explicit |
+| DEEP-02 | Register-only mul1 paths at 1–4 limbs | kept | bigint_mul_positive_11 and bigint_mul_n1_small keep 1-4-limb products in inline scalar carry chains and publish directly; mul1 lifecycle artifact reduced 2/3/4-limb boxed time 45/44/42% |
 | DEEP-03 | Fixed mul1 kernels at 5–7 limbs | pending | |
-| DEEP-04 | Software-pipeline mul1 at 8–48 limbs | pending | audit related commit 1ba1be6 |
+| DEEP-04 | Software-pipeline mul1 at 8–48 limbs | kept | rolling-carry asm interleaves next-half loads with the adcs chain and fixed rungs cover 8/16/24/32/40/48; 1ba1be6 kernel and boxed measurements show broad improvement with differential/ASan coverage |
 | DEEP-05 | Tune Karatsuba/Toom transitions at 32–48 limbs | pending | |
 | DEEP-06 | Add/fix a fixed-shape 32-limb Toom-2 difference path | pending | |
 | DEEP-07 | Optimize the 384–448 multiply/square transition | pending | audit related commits ce81fcb, dfb94bc |

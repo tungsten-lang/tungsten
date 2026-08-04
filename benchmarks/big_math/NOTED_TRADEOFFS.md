@@ -15,7 +15,7 @@ INT32_MAX. The kernel is written but not competitive on this uarch.
 interpolation separately to identify the dominant gap, then re-run the
 crossover. Threshold flipping alone cannot help.
 
-## Per-host threshold tuner output — REJECTED as built (2026-08-02)
+## Forced-kernel threshold inference — REJECTED (updated 2026-08-04)
 
 `tune_bigint_thresholds.sh` (first-best-per-family heuristic, REPS=3)
 proposed KARA=15 / TOOM3=176 / TOOM4=2816 — contradicted by the forced
@@ -23,13 +23,19 @@ crossover data (toom4 dominates from ~600, toom2 wins to ~360). The
 heuristic picks the first size a family wins a noisy 3-rep row, which is
 not a crossover. Its generated header is also invisible to
 `harness_is_stale` (fixed: `runtime/generated/*.h` is now watched), so
-past tuner validations may have measured stale binaries. Before the
-tuner's output is trusted, it needs best-of-9 rows and a
-crossover-by-fit, not first-best.
+past tuner validations may have measured stale binaries.
 
-**Parallel cutoffs (BN_TOOM_PAR/BN_SSA_PAR/threads): retune deferred** —
-thread-timing measurements on this box (load 12+) cannot adjudicate the
-1-5% at stake, and every affected cell is currently green.
+A best-of-9 smooth log-log fit was tested as the replacement rule. It predicted
+a 13-limb schoolbook/Toom-2 crossover from the same raw sweep. The exact boxed
+13-versus-24 affected-cell A/B lost 10/11 cells and regressed 6.5% by geomean;
+several green cells became slower than GMP. Recursive leaf choices and
+fixed-shape kernels make these curves discontinuous, so fitting is not a valid
+product-threshold oracle either. The tuner now records a best-of-9 forced sweep
+but does not generate an active header. Each candidate cutoff must be validated
+over every boxed cell whose dispatch changes.
+
+Parallel and family cutoffs have since been calibrated with alternating boxed
+A/Bs on the M5 Max; see the suggestion ledger and retained JSON artifacts.
 
 ## NEW red cells: mul@384 (1.03) and mul@448 (1.20) — kernel gap, not tuning
 

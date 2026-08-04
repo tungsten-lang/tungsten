@@ -2425,10 +2425,10 @@ WValue bigint_sub_any(WValue a, WValue b) {
 #define BN_TOOM_COPY_V0 1
 #endif
 #ifndef BN_TOOM3_THRESHOLD
-#define BN_TOOM3_THRESHOLD 368 /* < : Toom-2 */
+#define BN_TOOM3_THRESHOLD 341 /* < : Toom-2 */
 #endif
 #ifndef BN_TOOM4_THRESHOLD
-#define BN_TOOM4_THRESHOLD 456 /* < : Toom-3, >= : Toom-4 */
+#define BN_TOOM4_THRESHOLD 452 /* < : Toom-3, >= : Toom-4 */
 #endif
 #ifndef BN_TOOM6_THRESHOLD
 #define BN_TOOM6_THRESHOLD INT32_MAX

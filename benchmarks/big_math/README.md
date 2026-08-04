@@ -162,17 +162,24 @@ benchmarks/big_math/run_toom_sweep.sh 225:320 320:512
 benchmarks/big_math/run_toom_sweep.sh --ntt 1930:2005
 ```
 
-To generate local candidate runtime thresholds, run:
+To record a local forced-kernel threshold sweep, run:
 
 ```sh
 make -C runtime tune-bigint
 ```
 
-This writes `runtime/generated/bigint_thresholds.h` and the raw sweep output
-next to it. Normal builds do not tune automatically; they include that generated
-header only when it exists, otherwise the checked-in defaults in `runtime.c` are
-used. Treat generated thresholds as machine/profile-specific benchmark output
-and review the sweep before committing or using them for release builds.
+This records a best-of-9 raw sweep in
+`runtime/generated/bigint_thresholds.last.txt`; set `REPS`, `RANGES`, or `LOG`
+to override those defaults. It deliberately does not infer or activate a
+runtime threshold: forced-kernel curves are discontinuous at fixed shapes and
+recursive leaves, and neither a first-win rule nor a smooth fitted crossover
+predicts the boxed-operation optimum reliably. Test a proposed cutoff with
+`run_variant_ab.py` over every boxed cell whose dispatch changes, then update
+the checked-in default only when that A/B passes the acceptance rule.
+
+Normal builds still include `runtime/generated/bigint_thresholds.h` when a
+developer creates one explicitly for an experiment; otherwise the checked-in
+defaults in `runtime.c` are used.
 
 For direct comparison of Tungsten's forced Toom kernels with GMP's public
 equal-length multiplication dispatcher:

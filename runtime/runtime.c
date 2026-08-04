@@ -2008,6 +2008,21 @@ static uint64_t *bn_eq_redirect_slot(const uint64_t *a, const uint64_t *b);
 #endif
 
 #if BN_EQ_PAGE_HAZARD_GUARD
+/* Same-binary benchmark toggle shared by the equal-width and add/sub-style
+ * placement predicates.  It compiles to a constant true in production. */
+#if defined(BN_PAGE_HAZARD_RUNTIME_TOGGLE) && BN_PAGE_HAZARD_RUNTIME_TOGGLE
+static inline int bn_page_hazard_runtime_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_PAGE_HAZARD");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_page_hazard_runtime_enabled(void) { return 1; }
+#endif
+
 /* Add/sub writes one linear destination stream, while multiplication has a
  * denser two-dimensional store schedule.  Keep their empirically tuned
  * low-12-bit exclusion windows independent. */
@@ -2019,6 +2034,7 @@ static inline uint32_t bn_addsub_page_distance(
 
 static inline int bn_addsub_page_hazard(
     const uint64_t *dst, const uint64_t *src) {
+    if (!bn_page_hazard_runtime_enabled()) return 0;
     return bn_addsub_page_distance(dst, src) <
            BN_ADDSUB_PAGE_HAZARD_WINDOW;
 }
@@ -8309,20 +8325,6 @@ static void bigint_mul_dispatch_cap(uint64_t *out, int32_t out_cap,
 #define BN_EQ_PAGE_HAZARD_MIN 9
 #endif
 #if BN_EQ_PAGE_HAZARD_GUARD
-/* Same-binary benchmark toggle.  It compiles away unless explicitly enabled,
- * keeping the production predicate to one offset comparison. */
-#if defined(BN_PAGE_HAZARD_RUNTIME_TOGGLE) && BN_PAGE_HAZARD_RUNTIME_TOGGLE
-static inline int bn_page_hazard_runtime_enabled(void) {
-    static __thread int enabled = -1;
-    if (enabled < 0) {
-        const char *value = getenv("TUNGSTEN_BN_PAGE_HAZARD");
-        enabled = !value || value[0] != '0';
-    }
-    return enabled;
-}
-#else
-static inline int bn_page_hazard_runtime_enabled(void) { return 1; }
-#endif
 static inline int bn_page_hazard(const uint64_t *dst, const uint64_t *src) {
     if (!bn_page_hazard_runtime_enabled()) return 0;
     uintptr_t delta = ((uintptr_t)dst - (uintptr_t)src) & 4095u;

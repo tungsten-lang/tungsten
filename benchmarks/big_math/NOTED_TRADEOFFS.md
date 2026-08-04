@@ -72,6 +72,31 @@ intended 2-8-limb add1/sub1 cells by roughly 4-9%.  The complete alternating
 add/sub regressions over 5%.  Production keeps equal-width dispatch first.
 Artifact: `baselines/addsub-word-first-3aab316-m5max-20260804.json`.
 
+A layout-only follow-up kept the original predicate order but moved the N×1
+path onto the fall-through edge.  Its first 9×110 ms run suggested a 1.4%
+add-only win, but a 15×200 ms replication reversed to a 0.7% loss.  Both the
+combined and add-only candidates were removed.  Artifacts:
+`baselines/addsub-word-fallthrough-48dffb5-m5max-20260804.json` and
+`baselines/add-word-fallthrough-replication-48dffb5-m5max-20260804.json`.
+
+## Mul1 wide dispatch and page rehoming — NOT taken (2026-08-04)
+
+Routing widths above 64 ahead of the fixed-width ladder initially measured a
+2.6% full-band win, then reversed to a 1.2% loss with three >5% regressions in
+the 15×200 ms replication.  The candidate was removed.  Artifacts:
+`baselines/mul1-wide-early-48dffb5-m5max-20260804.json` and
+`baselines/mul1-wide-early-replication-48dffb5-m5max-20260804.json`.
+
+The first same-binary mul1 page-hazard experiment was not causal: its runtime
+toggle did not reach the add/sub-style predicate used by generic N×1
+multiplication.  The corrected toggle now covers both predicate families.
+Corrected runs still showed 2.4-4.8% movement in inactive fixed-width controls,
+so no sub-2% toggle effect was accepted.  A compile-time removal then made the
+actually affected 128..8192 band 0.8% slower and regressed 2048 limbs 6.1%; it
+was removed.  Artifacts: `baselines/mul1-page-hazard-causal-48dffb5-m5max-20260804.json`,
+`baselines/mul1-page-hazard-causal-replication-48dffb5-m5max-20260804.json`,
+and `baselines/mul1-no-page-rehome-48dffb5-m5max-20260804.json`.
+
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 
 **Claimed win (prior session, real workloads):** hybrid (p2<=32 + q32)

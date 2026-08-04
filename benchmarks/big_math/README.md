@@ -77,7 +77,11 @@ and requires a separate guarded full-language A/B before retaining a change.
 
 The page-hazard policy can be compared within one byte-identical benchmark
 binary by building with `-DBN_PAGE_HAZARD_RUNTIME_TOGGLE=1` and setting
-`TUNGSTEN_BN_PAGE_HAZARD=0` or `1`. The hook compiles away in normal builds.
+`TUNGSTEN_BN_PAGE_HAZARD=0` or `1`. The toggle covers both equal-product and
+add/sub-style placement predicates (including generic N×1 multiplication) and
+compiles away in normal builds. Separate-process results still need inactive
+controls because heap placement can move offset-sensitive kernels even when
+the binary hash is identical.
 
 For a compile-time optimization hypothesis, use the isolated boxed-operation
 A/B driver rather than comparing raw kernels or replacing the normal harness:

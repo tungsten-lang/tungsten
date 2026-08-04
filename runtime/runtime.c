@@ -6546,7 +6546,7 @@ static void bigint_sqr_dispatch(uint64_t *out, const uint64_t *a, int32_t na);
 
 static __thread uint64_t *w_ssa_ws = NULL;
 static __thread size_t w_ssa_ws_cap = 0;
-static uint64_t *ssa_ws_get_zeroed(size_t limbs) {
+static uint64_t *ssa_ws_get(size_t limbs) {
     if (limbs > w_ssa_ws_cap) {
         free(w_ssa_ws);
         size_t ncap = limbs + limbs / 4 + 64;
@@ -6554,8 +6554,13 @@ static uint64_t *ssa_ws_get_zeroed(size_t limbs) {
         w_ssa_ws_cap = w_ssa_ws ? ncap : 0;
         if (!w_ssa_ws) return NULL;
     }
-    memset(w_ssa_ws, 0, limbs * sizeof(uint64_t));
     return w_ssa_ws;
+}
+static uint64_t *ssa_ws_get_zeroed(size_t limbs) {
+    uint64_t *ws = ssa_ws_get(limbs);
+    if (!ws) return NULL;
+    memset(w_ssa_ws, 0, limbs * sizeof(uint64_t));
+    return ws;
 }
 
 /* Canonicalize: value ≡ (e[0..m) as unsigned) − c (mod 2^K+1), |c| ≤ 4.
@@ -7071,6 +7076,32 @@ static void *ssa_pointwise_worker(void *arg) {
     return NULL;
 }
 
+#ifndef BN_BENCH_RUNTIME_SSA_PACK_KNOB
+#define BN_BENCH_RUNTIME_SSA_PACK_KNOB 0
+#endif
+#ifndef BN_SSA_PACK_ZERO_ONLY
+#define BN_SSA_PACK_ZERO_ONLY 1
+#endif
+#if BN_BENCH_RUNTIME_SSA_PACK_KNOB
+static int bn_bench_runtime_ssa_pack_zero_only;
+#endif
+
+static void ssa_pack_zero_padded(uint64_t *dst, long L, int32_t S,
+                                 const uint64_t *src, int32_t n,
+                                 int32_t piece_limbs) {
+    long pieces = (n + piece_limbs - 1) / piece_limbs;
+    for (long piece = 0; piece < pieces; piece++) {
+        int32_t off = (int32_t)piece * piece_limbs;
+        int32_t live = n - off < piece_limbs ? n - off : piece_limbs;
+        uint64_t *slot = dst + piece * S;
+        for (int32_t j = 0; j < live; j++) slot[j] = src[off + j];
+        for (int32_t j = live; j < S; j++) slot[j] = 0;
+    }
+    if (pieces < L)
+        memset(dst + pieces * S, 0,
+               (size_t)(L - pieces) * (size_t)S * sizeof(uint64_t));
+}
+
 /* out[0..na+nb) = a·b (b == NULL: square, nb ignored → na). */
 static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
                        const uint64_t *b, int32_t nb) {
@@ -7095,7 +7126,12 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
 
     size_t total = (size_t)L * S * (b ? 2 : 1)
                  + 4 * (size_t)S + (size_t)point_threads * point_stride;
-    uint64_t *ws = ssa_ws_get_zeroed(total);
+    int pack_zero_only = BN_SSA_PACK_ZERO_ONLY;
+#if BN_BENCH_RUNTIME_SSA_PACK_KNOB
+    pack_zero_only = bn_bench_runtime_ssa_pack_zero_only;
+#endif
+    uint64_t *ws = pack_zero_only ? ssa_ws_get(total)
+                                  : ssa_ws_get_zeroed(total);
     if (!ws) { bigint_mul_schoolbook_into(out, a, na, b ? b : a, nb); return; }
     uint64_t *fa = ws;
     uint64_t *fb = b ? fa + (size_t)L * S : NULL;
@@ -7105,19 +7141,31 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
     uint64_t *t4 = t3 + S;
     uint64_t *point_ws = t4 + S;
 
-    /* pack: piece i = limbs [i·w, i·w+w) (workspace pre-zeroed ⇒ padding) */
-    long pa = (na + w - 1) / w;
-    for (long i = 0; i < pa; i++) {
-        int32_t off = (int32_t)i * w;
-        int32_t len = (na - off < w) ? na - off : w;
-        for (int32_t j2 = 0; j2 < len; j2++) fa[i * S + j2] = a[off + j2];
-    }
-    if (b) {
-        long pb = (nb + w - 1) / w;
-        for (long i = 0; i < pb; i++) {
+    if (pack_zero_only) {
+        /* Transform points must carry explicit zero padding, but the four
+         * butterfly temporaries and each pointwise product frame are fully
+         * written before their first read.  Fill every transform limb once
+         * instead of clearing the complete arena and overwriting live input. */
+        ssa_pack_zero_padded(fa, L, S, a, na, w);
+        if (b) ssa_pack_zero_padded(fb, L, S, b, nb, w);
+    } else {
+        /* pack: piece i = limbs [i*w, i*w+w); the full clear supplied
+         * transform padding and all unused points. */
+        long pa = (na + w - 1) / w;
+        for (long i = 0; i < pa; i++) {
             int32_t off = (int32_t)i * w;
-            int32_t len = (nb - off < w) ? nb - off : w;
-            for (int32_t j2 = 0; j2 < len; j2++) fb[i * S + j2] = b[off + j2];
+            int32_t len = (na - off < w) ? na - off : w;
+            for (int32_t j2 = 0; j2 < len; j2++)
+                fa[i * S + j2] = a[off + j2];
+        }
+        if (b) {
+            long pb = (nb + w - 1) / w;
+            for (long i = 0; i < pb; i++) {
+                int32_t off = (int32_t)i * w;
+                int32_t len = (nb - off < w) ? nb - off : w;
+                for (int32_t j2 = 0; j2 < len; j2++)
+                    fb[i * S + j2] = b[off + j2];
+            }
         }
     }
 

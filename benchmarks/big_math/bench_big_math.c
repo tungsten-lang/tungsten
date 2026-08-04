@@ -4436,6 +4436,11 @@ int main(int argc, char **argv) {
     bn_bench_runtime_ws_force_zero =
         force_ws_zero && strcmp(force_ws_zero, "0") != 0;
 #endif
+#if BN_BENCH_RUNTIME_SSA_PACK_KNOB
+    const char *ssa_pack_zero_only = getenv("BENCH_SSA_PACK_ZERO_ONLY");
+    bn_bench_runtime_ssa_pack_zero_only =
+        ssa_pack_zero_only && strcmp(ssa_pack_zero_only, "0") != 0;
+#endif
 #if BENCH_ARITH_WS_RELEASE_KNOB
     const char *release_arith_ws = getenv("BENCH_RELEASE_ARITH_WS");
     bench_release_arith_ws_each_iteration =

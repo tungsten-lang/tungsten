@@ -1383,8 +1383,22 @@ DEFINE_BENCH_LANE(add, bigint_add_any(a, b))
 DEFINE_BENCH_LANE(sub, bigint_sub_any(a, b))
 DEFINE_BENCH_LANE(mul, bigint_mul_any(a, b))
 DEFINE_BENCH_LANE(sqr, bigint_mul_any(a, a))
+#ifndef BENCH_DIV_RECIP_REUSE
+#define BENCH_DIV_RECIP_REUSE 0
+#endif
+#if BENCH_DIV_RECIP_REUSE > 0
+static uint64_t bench_div_recip_reuse_counter;
+static inline WValue bench_div_recip_reuse(WValue a, WValue b, int mod) {
+    if (bench_div_recip_reuse_counter++ % BENCH_DIV_RECIP_REUSE == 0)
+        bn_div_recip_cache.state = 0;
+    return mod ? bigint_mod_any(a, b) : bigint_div_any(a, b);
+}
+DEFINE_BENCH_LANE(div, bench_div_recip_reuse(a, b, 0))
+DEFINE_BENCH_LANE(mod, bench_div_recip_reuse(a, b, 1))
+#else
 DEFINE_BENCH_LANE(div, bigint_div_any(a, b))
 DEFINE_BENCH_LANE(mod, bigint_mod_any(a, b))
+#endif
 DEFINE_BENCH_LANE(band, bignum_bitwise('&', a, b))
 DEFINE_BENCH_LANE(bor, bignum_bitwise('|', a, b))
 DEFINE_BENCH_LANE(bxor, bignum_bitwise('^', a, b))

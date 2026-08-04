@@ -10623,6 +10623,12 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
 #ifndef BN_DIV_BARRETT_SKIP_MAX
 #define BN_DIV_BARRETT_SKIP_MAX 64
 #endif
+#ifndef BN_DIV_RECIP_WARMUP_SIGHTINGS
+#define BN_DIV_RECIP_WARMUP_SIGHTINGS 3
+#endif
+_Static_assert(BN_DIV_RECIP_WARMUP_SIGHTINGS >= 1 &&
+               BN_DIV_RECIP_WARMUP_SIGHTINGS <= 3,
+               "reciprocal warmup sightings must be in 1..3");
 
 static int bn_div_recip_reserve(
     uint64_t **memory, size_t *capacity, size_t need) {
@@ -10717,15 +10723,21 @@ static int mag_divmod_reciprocal_certified(
         }
         memcpy(cache->key, v, n * sizeof(uint64_t));
         cache->n = vlen;
+#if BN_DIV_RECIP_WARMUP_SIGHTINGS == 1
+        cache->state = 2;
+#else
         cache->state = 1;
         BN_DIV_ROUTE_COUNT(bn_div_recip_warmup);
         return 0;
+#endif
     }
     if (cache->state < 0) return 0;
     if (cache->state == 1) {
         cache->state = 2;
+#if BN_DIV_RECIP_WARMUP_SIGHTINGS == 3
         BN_DIV_ROUTE_COUNT(bn_div_recip_warmup);
         return 0;
+#endif
     }
 
     size_t guard = BN_DIV_RECIP_Q_GUARD_LIMBS;

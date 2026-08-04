@@ -3417,8 +3417,11 @@ static void gmp_import_value(mpz_t z, WValue v) {
 
 static void fuzz_isqrt_against_gmp(int cases) {
     static const int32_t edges[] = {
+        1023, 1024, 1025,
         1534, 1535, 1536, 2047, 2048, 2049,
-        3071, 3072, 3073, 4093, 4094, 4095
+        3071, 3072, 3073, 4093, 4094, 4095, 4096, 4097,
+        8191, 8192, 8193, 16383, 16384, 16385,
+        32767, 32768, 32769, 65535, 65536
     };
     uint64_t state = 0xd1b54a32d192ed03ULL;
     mpz_t za, zg;
@@ -3426,7 +3429,7 @@ static void fuzz_isqrt_against_gmp(int cases) {
     for (int t = 0; t < cases; t++) {
         int32_t root_limbs = (t & 1)
             ? edges[(unsigned)t % (sizeof(edges) / sizeof(edges[0]))]
-            : 1534 + (int32_t)(gcd_fuzz_next(&state) % (4095 - 1534 + 1));
+            : 1023 + (int32_t)(gcd_fuzz_next(&state) % (16385 - 1023 + 1));
         WValue a = bench_bigint(
             2 * root_limbs, gcd_fuzz_next(&state));
         WValue got = bigint_isqrt_any(a);
@@ -3440,7 +3443,8 @@ static void fuzz_isqrt_against_gmp(int cases) {
     }
     mpz_clears(za, zg, NULL);
     bigint_pool_release_thread();
-    printf("isqrt fuzz vs GMP: %d/%d match (root widths 1534..4095 limbs)\n",
+    printf("isqrt fuzz vs GMP: %d/%d match"
+           " (random 1023..16385 limbs plus edges through 65536)\n",
            cases, cases);
 }
 

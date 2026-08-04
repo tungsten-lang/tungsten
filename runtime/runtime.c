@@ -11303,6 +11303,17 @@ static uint64_t bn_sqrt_divrem(uint64_t *up, int32_t l, int32_t h,
     return carry;
 }
 
+#ifndef BN_SQRTREM_POW2_HIGH_SPLIT
+#  if defined(__aarch64__)
+#    define BN_SQRTREM_POW2_HIGH_SPLIT 1
+#  else
+#    define BN_SQRTREM_POW2_HIGH_SPLIT 0
+#  endif
+#endif
+#ifndef BN_SQRTREM_POW2_HIGH_MIN
+#define BN_SQRTREM_POW2_HIGH_MIN 1025
+#endif
+
 /* In-place divide-and-conquer sqrtrem: np holds 2n limbs with
  * np[2n-1] >= 2^62. On return sp[0..n) is floor(sqrt) (top bit set),
  * np[0..n) the remainder's low limbs, and the returned carry (0 or 1) its
@@ -11310,6 +11321,17 @@ static uint64_t bn_sqrt_divrem(uint64_t *up, int32_t l, int32_t h,
 static uint64_t bn_dc_sqrtrem(uint64_t *np, uint64_t *sp, int32_t n) {
     if (n == 1) return bn_sqrtrem2(sp, np);
     int32_t l = n >> 1, h = n - l;              /* 1 <= l <= h */
+#if BN_SQRTREM_POW2_HIGH_SPLIT
+    /* At 2^k+1, a balanced split sends the entire expensive recurrence
+     * through another odd width.  Extend a 2^k-limb high root by one limb
+     * instead: the recurrence permits any l <= h, and the final division
+     * then has only one quotient limb. */
+    if (n >= BN_SQRTREM_POW2_HIGH_MIN &&
+        ((uint32_t)(n - 1) & (uint32_t)(n - 2)) == 0) {
+        l = 1;
+        h = n - 1;
+    }
+#endif
     /* Root of the high 2h limbs (a prefix, so it stays normalized). */
     uint64_t q = bn_dc_sqrtrem(np + 2 * l, sp + l, h);
     /* r' = q*B^h + {np+2l, h} <= 2s'. Fold a set carry as r' - s' (exact:
@@ -11451,6 +11473,34 @@ static uint64_t bn_sqrt_divq_guard(const uint64_t *up, int32_t l1, int32_t h,
 #ifndef BN_SQRT_DIVAPPR_EXPECT
 #define BN_SQRT_DIVAPPR_EXPECT 0
 #endif
+#ifndef BN_SQRT_DIVAPPR_PAD_LIMBS
+#define BN_SQRT_DIVAPPR_PAD_LIMBS 0
+#endif
+#if BN_SQRT_DIVAPPR_PAD_LIMBS && \
+    (BN_SQRT_DIVAPPR_PAD_LIMBS & (BN_SQRT_DIVAPPR_PAD_LIMBS - 1))
+#error "BN_SQRT_DIVAPPR_PAD_LIMBS must be zero or a power of two"
+#endif
+
+static inline int32_t bn_sqrt_divappr_pad_limbs(int32_t n) {
+#if BN_SQRT_DIVAPPR_PAD_LIMBS
+    (void)n;
+    return BN_SQRT_DIVAPPR_PAD_LIMBS;
+#elif defined(__aarch64__)
+    /* Larger alignment trades a small amount of zero padding for additional
+     * even B-Z splits before the quadratic odd leaf.  The AArch64 crossover
+     * sweep favors progressively smoother widths through the measured
+     * 65,536-limb root band. */
+    if (n >= 32768) return 256;
+    if (n >= 16384) return 128;
+    if (n >= 8192) return 64;
+    if (n >= 4095) return 32;
+    if (n >= 1024) return 16;
+    return 8;
+#else
+    (void)n;
+    return 8;
+#endif
+}
 
 /* The exact quotient spine wins in one middle AArch64 band: below it the
  * serial-product guard makes the full correction work more expensive than
@@ -11529,12 +11579,13 @@ static int bn_dc_sqrt_only(uint64_t *np, uint64_t *sp, uint64_t *qp,
     if (__builtin_expect(!exact_q && h + t >= BN_SQRT_DIVAPPR_MIN,
                          BN_SQRT_DIVAPPR_EXPECT)) {
         /* Approximate B-Z quotient (divappr): pad the divisor to a
-         * multiple-of-8 width so the recursion stays on even splits down
+         * fixed-width multiple so the recursion stays on even splits down
          * to the Knuth base.  Each pad limb cancels one extra dividend
          * limb, so the quotient is unchanged apart from e extra guard
          * limbs appearing below it. */
         int32_t p = t;
-        while ((h + p) & 7) p++;
+        int32_t pad_limbs = bn_sqrt_divappr_pad_limbs(n);
+        while ((h + p) & (pad_limbs - 1)) p++;
         uint64_t *sc = bz_ws_get((size_t)(12 * (h + p) + 64));
         if (sc) {
             e = h - l - 1 + p;

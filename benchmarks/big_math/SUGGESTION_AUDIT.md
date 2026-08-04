@@ -46,7 +46,7 @@ Source fingerprints:
 | GLM-07 | isqrt reciprocal-sqrt seed, scratch reuse, and fewer divisions | pending | audit related commits 4b823f3, df0c604 |
 | GLM-08 | Retune Toom-3 / Toom-4 crossover | premise rejected | the proposed diagnosis said 448 limbs was already in Toom-4 and should move back to Toom-3, but BN_TOOM4_THRESHOLD=456 means 448 already selected Toom-3; the GMP-verified forced sweep found Toom-3 was the best available rung there and still lost, so a threshold-only change could not close the cell; NOTED_TRADEOFFS.md; the later ce81fcb/dfb94bc kernel/parallel work is accounted for separately |
 | GLM-09 | Lower NTT threshold and reduce SSA workspace clearing | pending | |
-| GLM-10 | Widen NEON hybrid add/sub dispatch | pending | |
+| GLM-10 | Widen NEON hybrid add/sub dispatch | kept | lowering the boxed hybrid cutoff from 384 to 288 limbs improved the 272..384 add/sub matrix 2.0% geomean with no >5% regression; add304..368 improved 3.1-4.5%, sub336..368 improved 4.1-4.7%, and the apparent sub288..320 losses were smaller than their paired IQRs; addsub-neon-min288-f011cd7-m5max-20260804.json; GMP add/sub fuzz 100000x1024 passed |
 | GLM-11 | General carry-select add/sub | pending | |
 | GLM-12 | Recognize and fuse addmul_1 / submul_1 language shapes | pending | |
 | GLM-13 | BigInt Montgomery reduction for powmod | kept | bigint_powmod_any uses register, CIOS, or SOS Montgomery for supported odd moduli and Barrett otherwise; matrix-7a96d5c-accurate-20260802.json has all 12 powmod cells faster than GMP (0.60-0.998x), with GMP and independent-naive differential checks in the harness |
@@ -54,7 +54,7 @@ Source fingerprints:
 | GLM-15 | Multi-limb exact division | kept | mag_divexact is the Jebelean/Hensel multi-limb exact quotient used by LCM; matrix-7a96d5c-accurate-20260802.json and gcdlcm-par-apply-3ccd13b-m5max-20260804.json provide end-to-end LCM evidence and GMP differential checks |
 | GLM-16 | Defer boxing and merge shared-check with pool return | pending | |
 | GLM-17 | Page-offset rehoming at 384–512 limbs | rejected | extending add/sub rehoming through 512 limbs produced 1.003x geomean, five wins/five losses, and a 6.1% sub256 regression; a separate safe fresh-capacity mul/sqr rehome produced an unresolved 0.978x geomean with paired spreads larger than the effect and regressed the named mul448 cell 1.1%; both candidates were removed; addsub-rehome512-996180d-m5max-20260804.json and mulsqr-large-rehome-996180d-m5max-20260804.json |
-| GLM-18 | Hand-written add/sub basecases for 8–128 limbs | pending | |
+| GLM-18 | Hand-written add/sub basecases for 8–128 limbs | kept | the existing straight-line AArch64 8/16/24/32/40/48/64 kernels and sub128 carry-select path were isolated from the generic scalar fallback; across the broader 3..128 boxed matrix current paths won 18/20 cells and improved 9.7% geomean, with the only >5% median loss in add128 where neither variant changes the arithmetic path and the paired IQR was twice the apparent effect; addsub-fixed-basecases-f011cd7-m5max-20260804.json |
 | GLM-19 | Toom-2 equal/difference specializations at 32–48 limbs | kept | the current fixed 32/40/48 difference paths were measured against one otherwise-identical build with BN_MUL_POWER2_FIXED, BN_MUL_SPLIT_40_BLOCKS, and BN_MUL_SPLIT_48 disabled; nine alternating 110 ms boxed rounds measured candidate/baseline 0.851x/0.852x/0.841x, with all current cells faster than GMP; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
 | GLM-20 | Branch-free carry/correction tails in mul1 and div1 | rejected | current mul1 rolling-carry kernels already return carry without a correction branch, so that half of the proposed transformation has no matching branch to remove; replacing div1's rare second reciprocal-correction branch with AArch64 cmp/sub/csel/cinc lost all nine boxed cells from 2 through 1024 limbs and slowed the geometric mean 1.107x, so the candidate was removed; div1-branchless-second-fbf77a1-m5max-20260804.json |
 
@@ -75,7 +75,7 @@ Source fingerprints:
 | KIMI-11 | Optimize Toom-3 evaluation/interpolation at 400–500 limbs | kept | dfb94bc parallelizes the independent Toom-3 point products while leaving interpolation serial; against the ce81fcb accurate baseline, boxed mul improved 20.5% at 384, 1.7% at 448, and 10.2% at 512 limbs, held at 1024, and remained faster than GMP in all five measured cells; mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json -> mul-a64-par-toom3-ce81fcb-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | KIMI-12 | Rebalance large isqrt division | pending | audit related commits 4b823f3, df0c604 |
 | KIMI-13 | Audit HGCD inner routing and tune its band | kept | counters found 100% block acceptance and row-apply dominance; propagated half slices win 4–7% at 8192–16384; gcdlcm-half-slice-7096978-m5max-20260804.json |
-| KIMI-14 | Probe NEON add crossover at 96–256 limbs | pending | |
+| KIMI-14 | Probe NEON add crossover at 96–256 limbs | kept | the requested low-band probe rejected 96 as too aggressive in the smoke screen and an acceptance-grade 224 cutoff split 10 wins/10 losses with a 5.9% add240 regression; narrowing upward found 288 as the first safe mixed-operation cutoff, improving the 16-cell boxed matrix 2.0% geomean with no >5% regression; addsub-neon-min224-f011cd7-m5max-20260804.json and addsub-neon-min288-f011cd7-m5max-20260804.json |
 | KIMI-15 | Add mid-band fixed squaring rungs | pending | |
 | KIMI-16 | Mark generic entries and error paths cold | pending | |
 | KIMI-17 | Re-open the live-depth capacity-policy default | rejected | 48 hybrid capacity points x live depths 1/4/8 x 1024/4096-limb traces produced zero candidates meeting the fixed RSS/churn criteria; power-of-two remains default; b4-base-*.tsv, b4-grid-*.tsv, NOTED_TRADEOFFS.md |
@@ -120,7 +120,7 @@ Source fingerprints:
 | QWEN-06 | Increase Lehmer window and tighten simulation | pending | current HGCD counter audit is prerequisite evidence only |
 | QWEN-07 | Batched Newton–Raphson reciprocal digits for division | pending | |
 | QWEN-08 | Barrett precomputation for repeated reductions | kept | WPrimeModCtx precomputes the modulus reciprocal and reuses it across the full powmod ladder and decimal D&C levels; matrix-7a96d5c-accurate-20260802.json has all powmod cells faster than GMP, including even-modulus/large-width Barrett coverage in focused fuzz |
-| QWEN-09 | Parallel-prefix carry add/sub | pending | |
+| QWEN-09 | Parallel-prefix carry add/sub | kept | the general-length AArch64 hybrid computes vector generate/propagate masks, resolves exact per-limb carry masks with a word-level prefix formula, and applies them in a second SIMD pass; lowering its boxed cutoff to 288 improved the 272..384 add/sub matrix 2.0% geomean with no >5% regression; addsub-neon-min288-f011cd7-m5max-20260804.json; GMP fuzz 100000x1024 passed |
 | QWEN-10 | Skip zero spans in sparse add/sub | pending | |
 | QWEN-11 | Per-thread allocation slot cache | kept | production has one direct TLS handoff plus two buffers per logarithmic class; result-pool-132f1c7-m5max-20260804.tsv measures 21 boxed cells including existing winners: 1.00-1.56x at 1024 limbs and 5.2-8.5x at four-limb word operations versus malloc/free |
 | QWEN-12 | Stack-passed scratch results up to eight limbs | pending | |
@@ -143,7 +143,7 @@ Source fingerprints:
 | GROK-04 | Optimize Toom-3 evaluation/pointwise/interpolation at 400–500 | kept | dfb94bc optimized the pointwise phase by running independent Toom-3 products through the persistent worker pool; boxed mul improved 20.5%/1.7%/10.2% at 384/448/512 versus the matched ce81fcb baseline, held at 1024, and won all five measured GMP cells; mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json -> mul-a64-par-toom3-ce81fcb-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
 | GROK-05 | Re-fit the 48-limb multiply ladder | kept | disabling BN_MUL_SPLIT_48 while holding the source/build constant made boxed mul48 1.189x slower; the current path is 0.841x its generic fallback and 0.848x GMP over nine alternating 110 ms rounds; mul-fixed-toom2-32-40-48-1f431bc-m5max-20260804.json; GMP fuzz 10000x64 passed |
 | GROK-06 | Fill the 384–512 squaring-ladder gap | kept | ce81fcb lowered the AArch64 Karatsuba-square parallel cutoff to 384; boxed sqr improved 49.6% at 384 and 68.3% at 448, flipping both to clear GMP wins; sqr512 regressed 8.6% but stayed at 0.720x GMP, and the five-cell 256..1024 sqr geomean was 0.712x GMP; mulsqr-df0c604-accurate-m5max-20260804.json -> mulsqr-a64-par-cutoffs-df0c604-m5max-20260804.json; current GMP fuzz 2000x2048 passed |
-| GROK-07 | Polish mid-size equal-length add/sub kernels | pending | |
+| GROK-07 | Polish mid-size equal-length add/sub kernels | kept | the fixed 3..64/sub128 ladder improves its generic fallback 9.7% geomean across 20 boxed cells, and the 288-limb SIMD cutoff improves the adjacent 272..384 matrix another 2.0% geomean without a >5% regression; addsub-fixed-basecases-f011cd7-m5max-20260804.json and addsub-neon-min288-f011cd7-m5max-20260804.json; GMP fuzz 100000x1024 passed |
 | GROK-08 | Reduce large HGCD application and matrix-product cost | kept | half slices amortize row application at 6144+; accurate boxed artifact gcdlcm-half-slice-7096978-m5max-20260804.json; remaining GMP losses recorded |
 | GROK-09 | Reduce large-isqrt iteration/fallback cost | pending | audit related commits 4b823f3, df0c604 |
 | GROK-10 | Extend compiler mutate-if-unique coverage | kept | compiler covers +,-,*,/ dead accumulators plus Fibonacci rotation destinations with fail-closed alias analysis; bigint_mutate_unique_spec and program-loops-6e7c006-m5max-20260804.tsv provide correctness and end-to-end evidence |
@@ -199,6 +199,7 @@ existence does not automatically disposition an item:
 - 10ffc4b follow-up artifact: boxed 5-7-limb mul1 straight-line A/B.
 - 996180d follow-up artifacts: rejected 128-512 add/sub and 256-1024 mul/sqr rehome extensions.
 - fbf77a1 follow-up artifact: rejected branch-free div1 second reciprocal correction across 2-1024 limbs.
+- f011cd7 follow-up artifacts: fixed add/sub basecase disable A/B and 224/288-limb NEON crossover probes.
 - 1aa9e10: timing stability metadata.
 - 66227a5: documented --full large/FFT-band preset.
 - JSON and flamegraph artifacts under benchmarks/big_math/baselines/.

@@ -1234,6 +1234,9 @@ static BN_ADDSUB_MAG_ATTR WBigint *mag_sub(
 #ifndef BN_ADDSUB_EQUAL_FAST
 #define BN_ADDSUB_EQUAL_FAST 1
 #endif
+#ifndef BN_ADDSUB_FIXED_KERNELS
+#define BN_ADDSUB_FIXED_KERNELS 1
+#endif
 #ifndef BN_ADDSUB_CSEL128
 #define BN_ADDSUB_CSEL128 1
 #endif
@@ -1981,6 +1984,7 @@ WValue bigint_add_equal_fast(
      * limb operations; the long streamed leaves are the only fixed cases
      * that need page-offset rehoming. */
     switch (len) {
+#if BN_ADDSUB_FIXED_KERNELS
     case 3: carry = bn_add3_fixed(dst, a, b); break;
     case 4: carry = bn_add4_fixed(dst, a, b); break;
     case 8: carry = bn_add8_fixed(dst, a, b); break;
@@ -2006,6 +2010,7 @@ WValue bigint_add_equal_fast(
         dst = r->limbs;
         carry = bn_add64_fixed(dst, a, b);
         break;
+#endif
 #if BN_ADDSUB_CSEL256
     case 256:
         carry = bn_add256_carry_select(dst, a, b);
@@ -2061,6 +2066,7 @@ WValue bigint_sub_equal_fast(
     uint64_t borrow;
 #if defined(__aarch64__)
     switch (len) {
+#if BN_ADDSUB_FIXED_KERNELS
     case 3: borrow = bn_sub3_fixed(dst, larger, smaller); break;
     case 4: borrow = bn_sub4_fixed(dst, larger, smaller); break;
     case 8: borrow = bn_sub8_fixed(dst, larger, smaller); break;
@@ -2086,6 +2092,7 @@ WValue bigint_sub_equal_fast(
         dst = r->limbs;
         borrow = bn_sub64_fixed(dst, larger, smaller);
         break;
+#endif
 #if BN_ADDSUB_CSEL128
     case 128:
         borrow = bn_sub128_256_carry_select(
@@ -4145,12 +4152,13 @@ static void bigint_mul_schoolbook_into(uint64_t *out,
  * C = ((G<<1|cin)+P)^P (exact because G&P == 0).  Fully non-speculative and
  * branchless on data: all-propagate inputs (e.g. Mersenne limbs) run at the
  * same speed as random data.  Measured on Apple M5 Max: 1.15x over the ADCS
- * chain at 512 limbs, 1.31x at 1024, 1.39x at 2048; crossover ~384. */
+ * chain at 512 limbs, 1.31x at 1024, 1.39x at 2048.  A boxed threshold sweep
+ * places the safe mixed-operation crossover at 288 limbs. */
 #ifndef BN_ADDSUB_NEON_HYBRID
 #define BN_ADDSUB_NEON_HYBRID 1
 #endif
 #ifndef BN_ADDSUB_NEON_HYBRID_MIN
-#define BN_ADDSUB_NEON_HYBRID_MIN 384
+#define BN_ADDSUB_NEON_HYBRID_MIN 288
 #endif
 #if defined(__aarch64__) && BN_ADDSUB_NEON_HYBRID
 #include <arm_neon.h>

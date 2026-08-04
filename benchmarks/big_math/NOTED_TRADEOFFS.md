@@ -172,6 +172,47 @@ acceptance-length measurements.  All candidates were removed.  Artifacts:
 `baselines/gcd-u64-hybrid2-screen-eaafe25-m5max-20260804.json`, and
 `baselines/gcd-u64-hybrid3-screen-eaafe25-m5max-20260804.json`.
 
+## Wide NEON add/sub cadence — NOT taken (2026-08-04)
+
+A five-second boxed `sub@8192` profile put 50.1% of sampled branch events in
+`bn_hyb_sub_pass1` and 49.5% in `bn_hyb_round`; cache/TLB event views had the
+same split.  The ordinary boxed residual is therefore the two-pass hybrid
+itself, not allocator or generic dispatch overhead.  Artifact:
+`baselines/sub-boxed-8192-28be5b6-m5max-20260804.svg`.
+
+Nine short screens swept the scalar A phase through 32/40/48/56/64 limbs and
+the middle scalar C share through 25/40/50/60/75 percent at 2048--16384 limbs,
+covering add and subtract together.  A=40/C=25 looked best in the screen: all
+eight cells won at a 0.905 candidate/baseline geomean.  That result did not
+survive the required affected-band run.  At 9x110 ms over 26 cells from 288
+through 65536 limbs, it lost 16 cells, regressed three above 5%, and measured
+1.014 overall; add/sub at 4096 regressed 11.0%/8.8%.  A selector limiting
+A=40 to 6144--12288 limbs then lost 7/10 boundary cells at 1.025 geomean.
+All cadence candidates were removed.
+
+A byte-identical runtime-toggle control also extended the existing 4 KiB
+destination rehoming predicate through 16384 limbs.  It was neutral overall
+(0.997 geomean), split 6/4, and made the target `sub@8192` cell 6.7% slower;
+wide rehoming was rejected independently of cadence.  Artifact:
+`baselines/addsub-wide-page-rehome-screen-28be5b6-m5max-20260804.json`.
+
+Artifacts: `baselines/addsub-hyb-a32-c50-screen-28be5b6-m5max-20260804.json`,
+`baselines/addsub-hyb-a40-c50-screen-28be5b6-m5max-20260804.json`,
+`baselines/addsub-hyb-a56-c50-screen-28be5b6-m5max-20260804.json`,
+`baselines/addsub-hyb-a64-c50-screen-28be5b6-m5max-20260804.json`,
+`baselines/addsub-hyb-a48-c25-screen-28be5b6-m5max-20260804.json`,
+`baselines/addsub-hyb-a48-c75-screen-28be5b6-m5max-20260804.json`,
+`baselines/addsub-hyb-a40-c25-screen-28be5b6-m5max-20260804.json`,
+`baselines/addsub-hyb-a40-c40-screen-28be5b6-m5max-20260804.json`,
+`baselines/addsub-hyb-a40-c60-screen-28be5b6-m5max-20260804.json`,
+`baselines/addsub-hyb-a40-c25-acceptance-28be5b6-m5max-20260804.json`, and
+`baselines/addsub-hyb-mid-a40-screen-28be5b6-m5max-20260804.json`.
+
+**Condition to revisit:** change pass-1 mask construction or eliminate a
+result reread in pass 2.  Repartitioning the existing scalar/NEON phases only
+moves the same bandwidth and carry-resolution work between width-specific
+local optima.
+
 ## Mul1 wide dispatch and page rehoming — NOT taken (2026-08-04)
 
 Routing widths above 64 ahead of the fixed-width ladder initially measured a

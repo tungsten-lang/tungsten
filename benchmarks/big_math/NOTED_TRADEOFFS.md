@@ -121,6 +121,25 @@ the observed deficit.  Artifacts:
 `baselines/matrix-8305ff1-screen-m5max-20260804.json` and
 `baselines/matrix-8305ff1-residual095-accurate-m5max-20260804.json`.
 
+## 40-limb subtraction follow-ups — NOT taken (2026-08-04)
+
+The accurate `sub@40` result was only 1.2% behind GMP but had the lowest
+relative spread among the remaining ordinary add/sub cells.  A five-second
+boxed profile kept 99.6% of sampled events inside the compiler-deduplicated
+add/sub lane, so it could not distinguish the inlined allocator/dispatch from
+the fixed kernel.  Disassembly confirmed that the selected leaf is the
+existing straight-line 40-limb `SBCS` chain.  Artifact:
+`baselines/sub-boxed-40-cc14371-m5max-20260804.svg`.
+
+Two causal candidates failed.  Disabling the existing page-offset guard in a
+byte-identical binary lost 13/20 add/sub affected and adjacent-control cells,
+measured 1.010 geomean, and had three regressions above 5%; `sub@40` itself
+became 4.2% slower.  A 16+16+8-limb carry-select prototype then lost every
+screen cell, measured 1.077 geomean, and made `sub@40` 10.9% slower.  Both
+production candidates were removed.  Artifacts:
+`baselines/sub40-page-hazard-causal-cc14371-m5max-20260804.json` and
+`baselines/sub40-csel-screen-cc14371-m5max-20260804.json`.
+
 A profile of boxed add1@3 put 56% of sampled branch events in the inlined
 Tungsten lane, but symbol deduplication prevented a reliable sub-function
 split.  Disassembly exposed one remaining general smallest-fitting capacity

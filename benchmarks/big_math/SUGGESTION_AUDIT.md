@@ -38,7 +38,7 @@ Source fingerprints:
 | GLM-02 | Direct hot-handoff slot for results up to 64 limbs | pending | |
 | GLM-03 | Hand-written AArch64 normalized div-by-word kernel | pending | audit related commits 3926cbb, 6aea99c |
 | GLM-04 | Branch-free reciprocal correction for 32-bit divisors | pending | audit related commit 3926cbb |
-| GLM-05 | Subquadratic half-GCD above about 1024 limbs | active | current HGCD slice-depth experiment |
+| GLM-05 | Subquadratic half-GCD above about 1024 limbs | kept | existing recursive HGCD retained; half-slice band added at 6144; gcdlcm-half-slice-7096978-m5max-20260804.json; GMP fuzz 1000x8192 + 10x65536; sanitizer fuzz 250x8192 |
 | GLM-06 | Reuse one scratch remainder across Lehmer steps | pending | |
 | GLM-07 | isqrt reciprocal-sqrt seed, scratch reuse, and fewer divisions | pending | audit related commits 4b823f3, df0c604 |
 | GLM-08 | Retune Toom-3 / Toom-4 crossover | pending | audit related commits ce81fcb, dfb94bc |
@@ -71,7 +71,7 @@ Source fingerprints:
 | KIMI-10 | Fixed-size multiply study at 32/40/48 limbs | pending | |
 | KIMI-11 | Optimize Toom-3 evaluation/interpolation at 400–500 limbs | pending | audit related commit dfb94bc |
 | KIMI-12 | Rebalance large isqrt division | pending | audit related commits 4b823f3, df0c604 |
-| KIMI-13 | Audit HGCD inner routing and tune its band | active | current HGCD counters and slice-depth sweep |
+| KIMI-13 | Audit HGCD inner routing and tune its band | kept | counters found 100% block acceptance and row-apply dominance; propagated half slices win 4–7% at 8192–16384; gcdlcm-half-slice-7096978-m5max-20260804.json |
 | KIMI-14 | Probe NEON add crossover at 96–256 limbs | pending | |
 | KIMI-15 | Add mid-band fixed squaring rungs | pending | |
 | KIMI-16 | Mark generic entries and error paths cold | pending | |
@@ -141,7 +141,7 @@ Source fingerprints:
 | GROK-05 | Re-fit the 48-limb multiply ladder | pending | |
 | GROK-06 | Fill the 384–512 squaring-ladder gap | pending | audit related commit ce81fcb |
 | GROK-07 | Polish mid-size equal-length add/sub kernels | pending | |
-| GROK-08 | Reduce large HGCD application and matrix-product cost | active | current profile and half-slice experiment |
+| GROK-08 | Reduce large HGCD application and matrix-product cost | kept | half slices amortize row application at 6144+; accurate boxed artifact gcdlcm-half-slice-7096978-m5max-20260804.json; remaining GMP losses recorded |
 | GROK-09 | Reduce large-isqrt iteration/fallback cost | pending | audit related commits 4b823f3, df0c604 |
 | GROK-10 | Extend compiler mutate-if-unique coverage | pending | |
 | GROK-11 | Pool TLS scratch for Toom/isqrt/NTT | pending | |

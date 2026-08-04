@@ -673,6 +673,73 @@ static void bench_gcd_random_operands(int32_t limbs, WValue *a_out, WValue *b_ou
 #define BN_BENCH_GCD_RECYCLE 1
 #endif
 
+#ifdef BN_GCD_PROFILE_COUNTS
+static void bench_gcd_profile_reset(void) {
+    gcd_profile_sim_calls = 0;
+    gcd_profile_sim_steps = 0;
+    gcd_profile_fast_q1 = 0;
+    gcd_profile_pair_calls = 0;
+    gcd_profile_pair_limbs = 0;
+    gcd_profile_matrix_products = 0;
+    gcd_profile_matrix_product_work = 0;
+    memset(gcd_profile_matrix_product_bins, 0,
+           sizeof(gcd_profile_matrix_product_bins));
+    gcd_profile_hgcd_top_calls = 0;
+    gcd_profile_hgcd_top_ok = 0;
+    gcd_profile_hgcd_top_xlen = 0;
+    gcd_profile_child_calls = 0;
+    gcd_profile_child_ok = 0;
+    gcd_profile_child_removed = 0;
+    memset(gcd_profile_block_calls, 0, sizeof(gcd_profile_block_calls));
+    memset(gcd_profile_block_ok, 0, sizeof(gcd_profile_block_ok));
+    memset(gcd_profile_block_removed, 0, sizeof(gcd_profile_block_removed));
+    memset(gcd_profile_block_batches, 0, sizeof(gcd_profile_block_batches));
+    memset(gcd_profile_block_batch_limbs, 0,
+           sizeof(gcd_profile_block_batch_limbs));
+    memset(gcd_profile_ctx_work, 0, sizeof(gcd_profile_ctx_work));
+    memset(gcd_profile_block_fail, 0, sizeof(gcd_profile_block_fail));
+    memset(gcd_profile_block_fail_xlen, 0,
+           sizeof(gcd_profile_block_fail_xlen));
+}
+
+static void bench_gcd_profile_print(void) {
+    printf("  hgcd top=%llu ok=%llu avg-xlen=%.1f"
+           " child=%llu ok=%llu removed=%llu\n",
+           (unsigned long long)gcd_profile_hgcd_top_calls,
+           (unsigned long long)gcd_profile_hgcd_top_ok,
+           gcd_profile_hgcd_top_calls
+               ? (double)gcd_profile_hgcd_top_xlen /
+                     (double)gcd_profile_hgcd_top_calls
+               : 0.0,
+           (unsigned long long)gcd_profile_child_calls,
+           (unsigned long long)gcd_profile_child_ok,
+           (unsigned long long)gcd_profile_child_removed);
+    printf("  blocks scalar=%llu/%llu removed=%llu batches=%llu/%llu"
+           " recursive=%llu/%llu removed=%llu batches=%llu/%llu\n",
+           (unsigned long long)gcd_profile_block_ok[0],
+           (unsigned long long)gcd_profile_block_calls[0],
+           (unsigned long long)gcd_profile_block_removed[0],
+           (unsigned long long)gcd_profile_block_batches[0],
+           (unsigned long long)gcd_profile_block_batch_limbs[0],
+           (unsigned long long)gcd_profile_block_ok[1],
+           (unsigned long long)gcd_profile_block_calls[1],
+           (unsigned long long)gcd_profile_block_removed[1],
+           (unsigned long long)gcd_profile_block_batches[1],
+           (unsigned long long)gcd_profile_block_batch_limbs[1]);
+    printf("  matrix work tree=%llu apply=%llu acc=%llu fails",
+           (unsigned long long)gcd_profile_ctx_work[0],
+           (unsigned long long)gcd_profile_ctx_work[1],
+           (unsigned long long)gcd_profile_ctx_work[2]);
+    for (int ar = 0; ar < 2; ar++) {
+        printf(" %c:", ar ? 'r' : 's');
+        for (int reason = 0; reason < 6; reason++)
+            printf("%s%llu", reason ? "," : "",
+                   (unsigned long long)gcd_profile_block_fail[ar][reason]);
+    }
+    printf("\n");
+}
+#endif
+
 static double bench_tungsten_gcd(int32_t limbs, int iters) {
     WValue a, b;
     bench_gcd_operands(limbs, &a, &b);
@@ -5226,14 +5293,7 @@ int main(int argc, char **argv) {
 #ifdef HAVE_GMP
         check_random_gcd_against_gmp(limbs);
 #ifdef BN_GCD_PROFILE_COUNTS
-        gcd_profile_sim_calls = 0;
-        gcd_profile_sim_steps = 0;
-        gcd_profile_fast_q1 = 0;
-        gcd_profile_pair_calls = 0;
-        gcd_profile_pair_limbs = 0;
-        gcd_profile_matrix_products = 0;
-        gcd_profile_matrix_product_work = 0;
-        for (int i = 0; i < 12; i++) gcd_profile_matrix_product_bins[i] = 0;
+        bench_gcd_profile_reset();
 #endif
         double tg = bench_tungsten_gcd_random(limbs, iters);
 #ifdef BN_GCD_PROFILE_COUNTS
@@ -5269,6 +5329,7 @@ int main(int argc, char **argv) {
                        (unsigned long long)matrix_bins[i]);
         }
         printf("\n");
+        bench_gcd_profile_print();
 #endif
 #else
         printf("random gcd %d limbs (%d iters): tungsten %.1f ns\n",

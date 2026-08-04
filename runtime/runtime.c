@@ -12765,9 +12765,9 @@ static int mag_linear_comb_pair(uint64_t *rx, uint64_t *ry, int32_t n,
 
 /* A leading-slice half-GCD block.  Lehmer's scalar matrix is excellent while its
  * entries fit one limb, but a full GCD still makes O(n) passes over n-limb
- * operands.  For large inputs, reduce only the leading quarter, accumulate the
- * inverse transform M with arbitrary-size nonnegative entries, then apply
- * M^-1 to the full operands using four subquadratic multiplies.
+ * operands.  Reduce a leading slice, accumulate the inverse transform M with
+ * arbitrary-size nonnegative entries, then apply M^-1 to the full operands
+ * using four subquadratic multiplies.
  *
  * The leading slice can occasionally choose a quotient invalidated by the
  * omitted low limbs.  This is harmless: the exact full-width application is
@@ -12780,26 +12780,20 @@ static int mag_linear_comb_pair(uint64_t *rx, uint64_t *ry, int32_t n,
 #ifndef BN_GCD_HGCD_RECURSIVE_THRESHOLD
 #define BN_GCD_HGCD_RECURSIVE_THRESHOLD 512
 #endif
-/* Workspace is sized for the largest slice, one quarter of the operand.
- * With the low-split row application (products against only the low p limbs
- * plus the shifted slice residue), the deepest slice the workspace allows --
- * a quarter -- wins everywhere below 2K limbs: apply cost per removed limb
- * is ~4*p*disc and p shrinks as the slice grows, while denser slices also
- * feed the multiply ladder larger, better-discounted chunks.  Above 2K the
- * pre-existing eighth/fifth/sixth ladder is retained.  Keeping the choice
- * keyed to the current xlen (not the workspace cap) lets a large GCD select
- * the geometry again after every successful reduction. */
+/* With the low-split row application (products against only the low p limbs
+ * plus the shifted slice residue), quarter slices win at practical widths.
+ * From 6K limbs, half slices amortize the four full-width row products over
+ * twice as much reduction.  Choose that geometry once from the root capacity
+ * and propagate it through the recursive chain; changing geometry after a
+ * successful reduction loses the larger-slice advantage. */
 #ifndef BN_GCD_HGCD_TOP_DEN
 #define BN_GCD_HGCD_TOP_DEN 4
 #endif
+#ifndef BN_GCD_HGCD_HALF_THRESHOLD
+#define BN_GCD_HGCD_HALF_THRESHOLD 6144
+#endif
 #ifndef BN_GCD_HGCD_DEN5_THRESHOLD
 #define BN_GCD_HGCD_DEN5_THRESHOLD 2048
-#endif
-#ifndef BN_GCD_HGCD_DEN6_THRESHOLD
-#define BN_GCD_HGCD_DEN6_THRESHOLD 640
-#endif
-#ifndef BN_GCD_HGCD_DEN8_THRESHOLD
-#define BN_GCD_HGCD_DEN8_THRESHOLD 1536
 #endif
 #ifndef BN_GCD_HGCD_LARGE_DEN5_THRESHOLD
 #define BN_GCD_HGCD_LARGE_DEN5_THRESHOLD 3072
@@ -12810,20 +12804,21 @@ static int mag_linear_comb_pair(uint64_t *rx, uint64_t *ry, int32_t n,
 
 static inline int gcd_hgcd_top_den(int32_t n) {
     if (n < BN_GCD_HGCD_DEN5_THRESHOLD) return BN_GCD_HGCD_TOP_DEN;
-    if (n < BN_GCD_HGCD_DEN6_THRESHOLD) return 5;
-    if (n < BN_GCD_HGCD_DEN8_THRESHOLD) return 6;
     if (n < BN_GCD_HGCD_LARGE_DEN5_THRESHOLD) return 8;
     if (n < BN_GCD_HGCD_RECURSIVE_DEN_THRESHOLD) return 5;
     return 6;
+}
+
+static inline int gcd_hgcd_work_den(int32_t n) {
+    return n >= BN_GCD_HGCD_HALF_THRESHOLD ? 2 : BN_GCD_HGCD_TOP_DEN;
 }
 
 /* Matrix caps carry 12 limbs of slack: the first block of a GCD runs at
  * xlen == cap, where a full half-slice reduction produces entries within a
  * couple of limbs of hcap/2, and a tight cap makes the final tree multiply
  * overflow and discard the entire block. */
-static size_t gcd_hgcd_level_ws_need(int32_t cap) {
-    int32_t hcap = (cap + BN_GCD_HGCD_TOP_DEN - 1)
-                 / BN_GCD_HGCD_TOP_DEN;
+static size_t gcd_hgcd_level_ws_need(int32_t cap, int work_den) {
+    int32_t hcap = (cap + work_den - 1) / work_den;
     int32_t mcap = (hcap + 1) / 2 + 12;
     int32_t pcap = cap + mcap + 2;
     int32_t max_matrices = 2 * hcap;
@@ -12837,12 +12832,11 @@ static size_t gcd_hgcd_level_ws_need(int32_t cap) {
          + (size_t)2 * pcap;
 }
 
-static size_t gcd_hgcd_ws_need(int32_t cap) {
-    size_t total = gcd_hgcd_level_ws_need(cap);
-    int32_t hcap = (cap + BN_GCD_HGCD_TOP_DEN - 1)
-                 / BN_GCD_HGCD_TOP_DEN;
+static size_t gcd_hgcd_ws_need(int32_t cap, int work_den) {
+    size_t total = gcd_hgcd_level_ws_need(cap, work_den);
+    int32_t hcap = (cap + work_den - 1) / work_den;
     if (hcap >= BN_GCD_HGCD_RECURSIVE_THRESHOLD)
-        total += gcd_hgcd_ws_need(hcap);
+        total += gcd_hgcd_ws_need(hcap, work_den);
     return total;
 }
 
@@ -13005,29 +12999,21 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
                           uint64_t *ry, int32_t cap,
                           uint64_t *mem, int32_t *rxlen, int32_t *rylen,
                           uint64_t *out_matrix[4], int32_t out_ml[4],
-                          int *out_det, int allow_recursive) {
+                          int *out_det, int allow_recursive, int work_den) {
     /* allow_recursive is a remaining recursion depth: children run with
      * allow_recursive - 1, and 0 forces a pure scalar block (also used by
      * the failure-retry paths).  Depth in practice is bounded by geometry:
-     * each level's slice is at least 4x smaller, and levels below
+     * each level's slice is at least 2x smaller, and levels below
      * BN_GCD_HGCD_RECURSIVE_THRESHOLD never engage children -- the
      * recursive gcd_hgcd_ws_need provisions exactly that chain. */
-    /* Geometry follows the current operand, not the workspace cap: cap never
-     * shrinks across reductions, xlen does.  Safe because every top_den >= 4
-     * keeps h = xlen - p <= ceil(xlen/4) <= hcap. */
-    /* The eighth/fifth/sixth ladder is tuned for the scalar-reduction
-     * regime.  Once the slice is large enough for child blocks to carry
-     * the reduction, the deepest slice the workspace allows wins: the
-     * full-width application then runs with the largest matrix entries
-     * (best multiply-ladder discount) and the fewest blocks per halving. */
-    int top_den = (allow_recursive > 0 &&
-                   xlen / 4 >= BN_GCD_HGCD_RECURSIVE_THRESHOLD)
-                      ? 4
-                      : gcd_hgcd_top_den(xlen);
+    /* Recursive blocks retain the root geometry so every slice fits the
+     * recursively provisioned workspace and the large-width half-slice win
+     * survives later reductions.  The eighth/fifth/sixth ladder is only a
+     * fallback for a scalar retry after a recursive application fails. */
+    int top_den = allow_recursive > 0 ? work_den : gcd_hgcd_top_den(xlen);
     int32_t p = (int32_t)(((int64_t)(top_den - 1) * xlen) / top_den);
     int32_t h = xlen - p;
-    int32_t hcap = (cap + BN_GCD_HGCD_TOP_DEN - 1)
-                 / BN_GCD_HGCD_TOP_DEN;
+    int32_t hcap = (cap + work_den - 1) / work_den;
     int32_t mcap = (hcap + 1) / 2 + 12;
     int32_t prod_cap = cap + mcap + 2;
 #ifdef BN_GCD_PROFILE_COUNTS
@@ -13061,13 +13047,18 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
     uint64_t *tree_scratch = matrix + 12 * mcap;
     uint64_t *prod0 = tree_scratch + tree_stride * (size_t)depth;
     uint64_t *prod1 = prod0 + prod_cap;
-    uint64_t *child_mem = mem + gcd_hgcd_level_ws_need(cap);
+    uint64_t *child_mem = mem + gcd_hgcd_level_ws_need(cap, work_den);
 
-    memset(hx, 0, (size_t)4 * hcap * sizeof(uint64_t));
+    /* hx is overwritten across its full live slice, and every producer of
+     * hnx/hny returns explicit lengths.  Only hy's short high slice needs a
+     * zero tail; clearing four capacity-sized buffers here was dead work. */
     memcpy(hx, x + p, (size_t)(xlen - p) * sizeof(uint64_t));
-    memcpy(hy, y + p, (size_t)(ylen - p) * sizeof(uint64_t));
+    int32_t yh = ylen - p;
+    memcpy(hy, y + p, (size_t)yh * sizeof(uint64_t));
+    if (yh < h)
+        memset(hy + yh, 0, (size_t)(h - yh) * sizeof(uint64_t));
     int32_t hxl = mag_norm_len(hx, h);
-    int32_t hyl = mag_norm_len(hy, ylen - p);
+    int32_t hyl = mag_norm_len(hy, yh);
     if (!hyl || mag_cmp(hx, hxl, hy, hyl) < 0) { GCD_PROF_FAIL(1); return 0; }
 
     int det = 1;
@@ -13150,7 +13141,7 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
                                hny, hcap,
                                child_mem, &hnxl, &hnyl,
                                step, sl, &step_det,
-                               allow_recursive - 1)) {
+                               allow_recursive - 1, work_den)) {
 #ifdef BN_GCD_PROFILE_COUNTS
                 gcd_profile_child_ok++;
                 gcd_profile_child_removed +=
@@ -13324,14 +13315,14 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
     if (!ok && used_recursive)
         return gcd_hgcd_block(x, xlen, y, ylen, rx, min_result, ry, cap,
                               mem, rxlen, rylen,
-                              out_matrix, out_ml, out_det, 0);
+                              out_matrix, out_ml, out_det, 0, work_den);
     if (!ok) return 0;
     int32_t out_max = *rxlen > *rylen ? *rxlen : *rylen;
     if (out_max >= xlen) GCD_PROF_FAIL(5);
     if (out_max >= xlen && used_recursive)
         return gcd_hgcd_block(x, xlen, y, ylen, rx, min_result, ry, cap,
                               mem, rxlen, rylen,
-                              out_matrix, out_ml, out_det, 0);
+                              out_matrix, out_ml, out_det, 0, work_den);
     if (out_max >= xlen) return 0;
     if (out_matrix) {
         for (int i = 0; i < 4; i++) {
@@ -13445,8 +13436,9 @@ WValue bigint_gcd_any_generic(WValue a, WValue b) {
     }
 #endif
     int32_t cap = an > bn ? an : bn;
+    int hgcd_work_den = gcd_hgcd_work_den(cap);
     size_t hgcd_need = cap >= BN_GCD_HGCD_THRESHOLD
-        ? gcd_hgcd_ws_need(cap) : 0;
+        ? gcd_hgcd_ws_need(cap, hgcd_work_den) : 0;
     uint64_t *buf = gcd_ws_get((size_t)cap * 4 + hgcd_need);
     if (!buf) die("out of memory in bigint gcd");
     uint64_t *x = buf;
@@ -13477,7 +13469,7 @@ WValue bigint_gcd_any_generic(WValue a, WValue b) {
 #endif
             if (gcd_hgcd_block(x, xlen, y, ylen, nx, 0, ny, cap,
                                buf + (size_t)4 * cap, &nxl, &nyl,
-                               NULL, NULL, NULL, 8)) {
+                               NULL, NULL, NULL, 8, hgcd_work_den)) {
 #ifdef BN_GCD_PROFILE_COUNTS
                 gcd_profile_hgcd_top_ok++;
 #endif

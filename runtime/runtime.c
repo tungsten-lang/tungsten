@@ -5323,9 +5323,13 @@ static void bn_load(uint64_t *dst, const uint64_t *src, int32_t cnt, int32_t kp1
     for (; i < kp1; i++) dst[i] = 0;
 }
 
+static inline __attribute__((always_inline))
+void bigint_mul_dispatch(uint64_t *out, const uint64_t *a, int32_t na,
+                         const uint64_t *b, int32_t nb);
+
 typedef struct {
     int parallel;
-    int square;
+    int square; /* 0 = equal multiply, 1 = square, 2 = generic product */
     int spin_budget;
     int count;
     int capacity;
@@ -5441,10 +5445,50 @@ static void bn_toom_point_set_add_padded(
     set->b[i] = cb;
 }
 
+static void bn_toom_product_set_init(WToomPointSet *set, int capacity,
+                                     int thread_limit) {
+    /* Generic products already own stable operands and use each worker's TLS
+     * multiply workspace.  Reuse the point scheduler's persistent pool; its
+     * small arena stores only the per-job operand lengths. */
+    memset(set, 0, sizeof(*set));
+    set->square = 2;
+    set->capacity = capacity;
+    set->thread_limit = thread_limit < BN_TOOM_PAR_THREADS ?
+                        thread_limit : BN_TOOM_PAR_THREADS;
+    if (set->thread_limit < 1) set->thread_limit = 1;
+    set->spin_budget = bn_toom_no_spin ? 0 : BN_TOOM_POOL_SPIN;
+    if (bn_toom_parallel_depth) return;
+#if BN_TOOM_POINT_TLS_MEMORY
+    set->memory = bn_toom_point_memory_get((size_t)capacity);
+#else
+    set->memory = (uint64_t *)malloc((size_t)capacity * sizeof(uint64_t));
+#endif
+    set->parallel = set->memory != NULL;
+}
+
+static void bn_toom_product_set_add(WToomPointSet *set, uint64_t *out,
+                                    const uint64_t *a, int32_t na,
+                                    const uint64_t *b, int32_t nb) {
+    if (!set->parallel || set->count >= set->capacity || na <= 0 || nb <= 0)
+        die("generic product scheduler bounds");
+    int i = set->count++;
+    set->out[i] = out;
+    set->a[i] = a;
+    set->b[i] = b;
+    int32_t *lengths = (int32_t *)set->memory;
+    lengths[2 * i] = na;
+    lengths[2 * i + 1] = nb;
+}
+
 static void bn_toom_point_range(WToomPointJob *job) {
     bn_toom_parallel_depth++;
     for (int i = job->start; i < job->end; i++) {
-        if (job->set->square)
+        if (job->set->square == 2) {
+            int32_t *lengths = (int32_t *)job->set->memory;
+            bigint_mul_dispatch(job->set->out[i], job->set->a[i],
+                                lengths[2 * i], job->set->b[i],
+                                lengths[2 * i + 1]);
+        } else if (job->set->square)
             bn_sqr_eq(job->set->out[i], job->set->a[i],
                       job->set->n, job->scratch);
         else
@@ -12792,6 +12836,9 @@ static int mag_linear_comb_pair(uint64_t *rx, uint64_t *ry, int32_t n,
 #ifndef BN_GCD_HGCD_HALF_THRESHOLD
 #define BN_GCD_HGCD_HALF_THRESHOLD 6144
 #endif
+#ifndef BN_GCD_HGCD_APPLY_PAR_THRESHOLD
+#define BN_GCD_HGCD_APPLY_PAR_THRESHOLD 2048
+#endif
 #ifndef BN_GCD_HGCD_DEN5_THRESHOLD
 #define BN_GCD_HGCD_DEN5_THRESHOLD 2048
 #endif
@@ -12829,7 +12876,7 @@ static size_t gcd_hgcd_level_ws_need(int32_t cap, int work_den) {
          + (size_t)4 * max_matrices
          + (size_t)12 * mcap
          + tree_stride * (size_t)depth
-         + (size_t)2 * pcap;
+         + (size_t)4 * pcap;
 }
 
 static size_t gcd_hgcd_ws_need(int32_t cap, int work_den) {
@@ -12944,19 +12991,11 @@ static int gcd_matrix_product_tree(const uint64_t *leaves, int32_t count,
  * products against the LOW p limbs of each operand plus the shifted slice
  * residue -- at top_den 4 that is a quarter less multiplication work than
  * multiplying the whole operands. */
-static int gcd_hgcd_apply_row_low(uint64_t *out, int32_t out_cap,
-                                  const uint64_t *pc, int32_t pcn,
-                                  const uint64_t *pv,
-                                  const uint64_t *nc, int32_t ncn,
-                                  const uint64_t *nv, int32_t p,
-                                  const uint64_t *hi, int32_t hin,
-                                  uint64_t *p0, uint64_t *p1,
-                                  int32_t prod_cap, int32_t *out_len) {
-#ifdef BN_GCD_PROFILE_COUNTS
-    gcd_profile_ctx = 1;
-#endif
-    int32_t n0 = gcd_matrix_product(p0, pc, pcn, pv, mag_norm_len(pv, p));
-    int32_t n1 = gcd_matrix_product(p1, nc, ncn, nv, mag_norm_len(nv, p));
+static int gcd_hgcd_finish_row_low(uint64_t *out, int32_t out_cap,
+                                    uint64_t *p0, int32_t n0,
+                                    uint64_t *p1, int32_t n1, int32_t p,
+                                    const uint64_t *hi, int32_t hin,
+                                    int32_t prod_cap, int32_t *out_len) {
     if (n0 > prod_cap || n1 > prod_cap) return 0;
     if (hin) {
         int32_t hi_end = p + hin;
@@ -12991,6 +13030,23 @@ static int gcd_hgcd_apply_row_low(uint64_t *out, int32_t out_cap,
     memset(out + n, 0, (size_t)(out_cap - n) * sizeof(uint64_t));
     *out_len = n;
     return 1;
+}
+
+static int gcd_hgcd_apply_row_low(uint64_t *out, int32_t out_cap,
+                                  const uint64_t *pc, int32_t pcn,
+                                  const uint64_t *pv,
+                                  const uint64_t *nc, int32_t ncn,
+                                  const uint64_t *nv, int32_t p,
+                                  const uint64_t *hi, int32_t hin,
+                                  uint64_t *p0, uint64_t *p1,
+                                  int32_t prod_cap, int32_t *out_len) {
+#ifdef BN_GCD_PROFILE_COUNTS
+    gcd_profile_ctx = 1;
+#endif
+    int32_t n0 = gcd_matrix_product(p0, pc, pcn, pv, mag_norm_len(pv, p));
+    int32_t n1 = gcd_matrix_product(p1, nc, ncn, nv, mag_norm_len(nv, p));
+    return gcd_hgcd_finish_row_low(out, out_cap, p0, n0, p1, n1, p,
+                                   hi, hin, prod_cap, out_len);
 }
 
 static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
@@ -13047,6 +13103,8 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
     uint64_t *tree_scratch = matrix + 12 * mcap;
     uint64_t *prod0 = tree_scratch + tree_stride * (size_t)depth;
     uint64_t *prod1 = prod0 + prod_cap;
+    uint64_t *prod2 = prod1 + prod_cap;
+    uint64_t *prod3 = prod2 + prod_cap;
     uint64_t *child_mem = mem + gcd_hgcd_level_ws_need(cap, work_den);
 
     /* hx is overwritten across its full live slice, and every producer of
@@ -13296,6 +13354,62 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
         }
     }
     int ok;
+    if (xlen >= BN_GCD_HGCD_APPLY_PAR_THRESHOLD) {
+        int32_t xn = mag_norm_len(x, p);
+        int32_t yn = mag_norm_len(y, p);
+        const uint64_t *pc[4];
+        const uint64_t *pv[4];
+        int32_t pcn[4], pvn[4];
+        if (det > 0) {
+            pc[0] = cur[3]; pcn[0] = cl[3]; pv[0] = x; pvn[0] = xn;
+            pc[1] = cur[1]; pcn[1] = cl[1]; pv[1] = y; pvn[1] = yn;
+            pc[2] = cur[0]; pcn[2] = cl[0]; pv[2] = y; pvn[2] = yn;
+            pc[3] = cur[2]; pcn[3] = cl[2]; pv[3] = x; pvn[3] = xn;
+        } else {
+            pc[0] = cur[1]; pcn[0] = cl[1]; pv[0] = y; pvn[0] = yn;
+            pc[1] = cur[3]; pcn[1] = cl[3]; pv[1] = x; pvn[1] = xn;
+            pc[2] = cur[2]; pcn[2] = cl[2]; pv[2] = x; pvn[2] = xn;
+            pc[3] = cur[0]; pcn[3] = cl[0]; pv[3] = y; pvn[3] = yn;
+        }
+        if (xn && yn && pcn[0] && pcn[1] && pcn[2] && pcn[3]) {
+            WToomPointSet products;
+            bn_toom_product_set_init(&products, 4, 4);
+            if (!products.parallel) goto sequential_apply;
+            uint64_t *out[4] = {prod0, prod1, prod2, prod3};
+#ifdef BN_GCD_PROFILE_COUNTS
+            gcd_profile_ctx = 1;
+            for (int i = 0; i < 4; i++) {
+                int32_t width = pcn[i] > pvn[i] ? pcn[i] : pvn[i];
+                int bin = 0;
+                while (width > 1 && bin < 11) {
+                    width = (width + 1) >> 1;
+                    bin++;
+                }
+                gcd_profile_matrix_products++;
+                gcd_profile_matrix_product_work +=
+                    (uint64_t)pcn[i] * (uint64_t)pvn[i];
+                gcd_profile_matrix_product_bins[bin]++;
+                gcd_profile_ctx_work[1] +=
+                    (uint64_t)pcn[i] * (uint64_t)pvn[i];
+            }
+#endif
+            for (int i = 0; i < 4; i++)
+                bn_toom_product_set_add(&products, out[i], pc[i], pcn[i],
+                                        pv[i], pvn[i]);
+            bn_toom_point_set_run(&products);
+            int32_t pn[4];
+            for (int i = 0; i < 4; i++)
+                pn[i] = mag_norm_len(out[i], pcn[i] + pvn[i]);
+            ok = gcd_hgcd_finish_row_low(rx, cap, prod0, pn[0],
+                                         prod1, pn[1], p, hx, hxl,
+                                         prod_cap, rxlen)
+              && gcd_hgcd_finish_row_low(ry, cap, prod2, pn[2],
+                                         prod3, pn[3], p, hy, hyl,
+                                         prod_cap, rylen);
+            goto apply_done;
+        }
+    }
+sequential_apply:
     if (det > 0) {
         ok = gcd_hgcd_apply_row_low(rx, cap, cur[3], cl[3], x,
                                     cur[1], cl[1], y, p, hx, hxl,
@@ -13311,6 +13425,7 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
                                     cur[0], cl[0], y, p, hy, hyl,
                                     prod0, prod1, prod_cap, rylen);
     }
+apply_done:
     if (!ok) GCD_PROF_FAIL(4);
     if (!ok && used_recursive)
         return gcd_hgcd_block(x, xlen, y, ylen, rx, min_result, ry, cap,

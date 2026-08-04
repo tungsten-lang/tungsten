@@ -4,6 +4,9 @@ This ledger tracks the six 20-item suggestion sets supplied during the BigNum
 performance campaign. Suggestions are hypotheses, not accepted designs.
 Every one of the 120 source items receives its own disposition even when
 several items share one experiment.
+The audit is exhaustive: an item is measured even when it only intersects
+cells Tungsten already wins.  Current GMP losses influence scheduling, not
+whether a hypothesis is tested.
 
 The acceptance rule for a performance candidate is:
 
@@ -112,9 +115,9 @@ Source fingerprints:
 | QWEN-01 | Recalibrate the Karatsuba threshold and basecase | pending | |
 | QWEN-02 | Fold coefficients in squaring kernels | pending | audit related commit ce81fcb |
 | QWEN-03 | Redundant/Montgomery representation for multiply chains | pending | |
-| QWEN-04 | Johnson-style fast GCD at large widths | active | compare against current HGCD work model |
+| QWEN-04 | Johnson-style fast GCD at large widths | pending | compare against current HGCD work model |
 | QWEN-05 | Strip common trailing zeros before GCD | pending | |
-| QWEN-06 | Increase Lehmer window and tighten simulation | active | current HGCD counter audit |
+| QWEN-06 | Increase Lehmer window and tighten simulation | pending | current HGCD counter audit is prerequisite evidence only |
 | QWEN-07 | Batched Newton–Raphson reciprocal digits for division | pending | |
 | QWEN-08 | Barrett precomputation for repeated reductions | pending | |
 | QWEN-09 | Parallel-prefix carry add/sub | pending | |
@@ -166,8 +169,8 @@ Source fingerprints:
 | DEEP-05 | Tune Karatsuba/Toom transitions at 32–48 limbs | pending | |
 | DEEP-06 | Add/fix a fixed-shape 32-limb Toom-2 difference path | pending | |
 | DEEP-07 | Optimize the 384–448 multiply/square transition | pending | audit related commits ce81fcb, dfb94bc |
-| DEEP-08 | Parallelize large GCD matrix work | active | current HGCD work audit |
-| DEEP-09 | Adapt NEON add/sub to GCD pair replay | active | current GCD flame/profile evidence |
+| DEEP-08 | Parallelize large GCD matrix work | kept | four independent row products use the persistent worker pool at 2048+; baseline gcdlcm-half-slice-7096978-m5max-20260804.json; result gcdlcm-par-apply-3ccd13b-m5max-20260804.json; 20/22 through 65536 and every cell through 16385 wins; GMP fuzz 1000x8192 + 20x65536; sanitizer fuzz 500x8192; interpreted and release/native/fast GCD/LCM specs |
+| DEEP-09 | Adapt NEON add/sub to GCD pair replay | pending | current GCD flame/profile evidence is prerequisite evidence only |
 | DEEP-10 | Seed large isqrt more accurately | pending | audit related commits 4b823f3, df0c604 |
 | DEEP-11 | Add a fixed eight-limb modulo path | pending | |
 | DEEP-12 | Optimize the 128-limb division choice | pending | |

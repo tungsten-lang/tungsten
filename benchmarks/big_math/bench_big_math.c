@@ -1054,6 +1054,9 @@ static int32_t bench_boxed_a_limbs(int op, int32_t limbs) {
 #ifndef BENCH_CMP_SHAPE
 #define BENCH_CMP_SHAPE 0
 #endif
+#ifndef BENCH_GCD_COMMON_TZ
+#define BENCH_GCD_COMMON_TZ 0
+#endif
 
 /*
  * Operand contract shared by the correctness check, the Tungsten lane, and
@@ -1091,6 +1094,19 @@ static void bench_boxed_operands(int op, int32_t limbs,
                 : limbs;
         b = bench_bigint(b_limbs, 0x13198a2e03707344ULL ^ (uint64_t)limbs);
     }
+#if BENCH_GCD_COMMON_TZ > 0
+#if BENCH_GCD_COMMON_TZ >= 64
+#error "BENCH_GCD_COMMON_TZ must be in 0..63"
+#endif
+    if (op == BENCH_BOXED_GCD) {
+        const uint64_t bit = 1ULL << BENCH_GCD_COMMON_TZ;
+        const uint64_t low_mask = bit - 1;
+        w_as_bigint(a)->limbs[0] =
+            (w_as_bigint(a)->limbs[0] & ~low_mask) | bit;
+        w_as_bigint(b)->limbs[0] =
+            (w_as_bigint(b)->limbs[0] & ~low_mask) | bit;
+    }
+#endif
     if (op == BENCH_BOXED_ABS || op == BENCH_BOXED_ABS_BANG)
         w_as_bigint(a)->size = -w_as_bigint(a)->size;
     *m_out = W_NIL;
@@ -3581,6 +3597,17 @@ static void fuzz_gcd_against_gmp(int cases, int32_t max_limbs) {
         default:
             b = bench_bigint(limbs, gcd_fuzz_next(&state));
             break;
+        }
+        if ((t % 5) == 3) {
+            /* Exercise a nontrivial shared power of two independently of
+             * the usual odd random-input matrix. */
+            unsigned shift = 1u + (unsigned)(gcd_fuzz_next(&state) % 63u);
+            uint64_t bit = 1ULL << shift;
+            uint64_t low_mask = bit - 1;
+            w_as_bigint(a)->limbs[0] =
+                (w_as_bigint(a)->limbs[0] & ~low_mask) | bit;
+            w_as_bigint(b)->limbs[0] =
+                (w_as_bigint(b)->limbs[0] & ~low_mask) | bit;
         }
         if ((t % 7) == 3) w_as_bigint(a)->size = -w_as_bigint(a)->size;
         if ((t % 11) == 5) w_as_bigint(b)->size = -w_as_bigint(b)->size;

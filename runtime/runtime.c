@@ -36925,7 +36925,7 @@ WValue w_pow(WValue base, WValue ex) {
         }
         if (e >= 0 && w_is_integer_any(base)) {
             if (e == 0) return w_int(1);
-            if (e == 1) return base;
+            if (e == 1) return w_bigint_mark_shared_value(base);
             /* (Small bigint bases already took the stack kernel above.) */
             /* Binary ladder aliasing the result to the factor at the
              * lowest set bit (values are immutable, so sharing is safe):

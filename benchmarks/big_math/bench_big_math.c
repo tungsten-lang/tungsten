@@ -1623,6 +1623,13 @@ typedef struct {
     BenchFastpathLaneCtx cx;
 } BenchFastpathScenario;
 
+/* Default mode leaves benchmark-owned aliases live and lets their shared
+ * count saturate, isolating the arithmetic dispatch itself.  The paired mode
+ * mirrors a consumed temporary: every alias result immediately releases its
+ * shared mark, measuring the steady mark/unmark tax without risking the
+ * benchmark's still-live owner. */
+static int bench_fastpath_release_alias;
+
 static int bench_fastpath_is_owned(WValue value,
                                    const BenchFastpathOwned *owned) {
     return value == owned->x || value == owned->negative_x ||
@@ -1632,8 +1639,17 @@ static int bench_fastpath_is_owned(WValue value,
 
 static void bench_fastpath_release_result(WValue result,
                                           const BenchFastpathOwned *owned) {
-    if (w_is_bigint(result) && !bench_fastpath_is_owned(result, owned))
-        bigint_release_if_live(w_as_bigint(result));
+    if (!w_is_bigint(result)) return;
+    if (bench_fastpath_is_owned(result, owned)) {
+        if (bench_fastpath_release_alias) {
+            WBigint *b = w_as_bigint(result);
+            if (b->shared == 0)
+                die("fastpath alias result was not marked shared");
+            bigint_release_if_live(b);
+        }
+        return;
+    }
+    bigint_release_if_live(w_as_bigint(result));
 }
 
 static void bench_fastpath_expect(BenchFastpathLaneCtx *cx, WValue got) {
@@ -1724,6 +1740,8 @@ bench_fastpath_lane_powmod(BenchFastpathLaneCtx *cx, int iters) {
 
 static void bench_fastpaths(int32_t limbs, int iters, int runs) {
     bigint_pool_release_thread();
+    bench_fastpath_release_alias =
+        getenv("BENCH_FASTPATH_RELEASE_ALIAS") != NULL;
 
     BenchFastpathOwned owned;
     owned.x = bench_bigint(limbs,

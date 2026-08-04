@@ -32,6 +32,16 @@ small = 42
 ccall("w_bigint_mark_shared_value", small)
 check("smallint.unshared", ccall("w_bigint_shared_value", small), "false")
 
+# Returning a heap BigInt from an algebraic identity creates a second live
+# handle.  In particular, x ** 1 used to return x without publishing that
+# alias to the recycler, so disposing the result could recycle x underneath
+# its original binding.
+pow_source = (1 << 240) + 123
+check("pow_one.source_fresh", ccall("w_bigint_shared_value", pow_source), "false")
+pow_alias = pow_source ** 1
+check("pow_one.alias_marked", ccall("w_bigint_shared_value", pow_source), "true")
+check("pow_one.value_intact", pow_alias.to_s(), pow_source.to_s())
+
 # a shared buffer survives allocation churn that recycles same-class
 # buffers: if the release guard failed, the churn below would take a's
 # buffer and overwrite its limbs.

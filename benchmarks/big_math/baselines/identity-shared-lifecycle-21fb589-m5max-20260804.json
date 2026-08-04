@@ -1,0 +1,6761 @@
+{
+  "schema": "tungsten-bignum-suggestion-ab-v1",
+  "date": "2026-08-04",
+  "suggestions": [
+    "GEMMA-13",
+    "GROK-18"
+  ],
+  "description": "algebraic identity fast paths enabled versus disabled across saturated and paired shared-mark lifecycles",
+  "git_head": "21fb589",
+  "machine": {
+    "cpu": "Apple M5 Max",
+    "uname": "Darwin Eriks-BigMac-Pro.local 25.6.0 Darwin Kernel Version 25.6.0: Sat Jul 11 15:27:04 PDT 2026; root:xnu-12377.161.13~4/RELEASE_ARM64_T6050 arm64"
+  },
+  "build": {
+    "flags": [
+      "-O3",
+      "-DNDEBUG",
+      "-mcpu=native",
+      "-falign-functions=64"
+    ],
+    "candidate_macro": "BN_ALGEBRAIC_IDENTITY_FAST=1",
+    "control_macro": "BN_ALGEBRAIC_IDENTITY_FAST=0",
+    "paired_env": {
+      "BENCH_FASTPATH_RELEASE_ALIAS": "1"
+    }
+  },
+  "benchmark": {
+    "command": "--bench-fastpaths LIMBS ITERATIONS 1",
+    "alternating_repetitions": 9,
+    "scenario_count": 37
+  },
+  "summary": {
+    "current_over_disabled_geomean": 0.23718095577042203,
+    "modes": [
+      {
+        "mode": "saturated",
+        "current_over_disabled_geomean": 0.23254142557810065,
+        "wins": 86,
+        "cells": 111,
+        "regressions_over_5pct": 12
+      },
+      {
+        "mode": "paired-release",
+        "current_over_disabled_geomean": 0.2419130511491478,
+        "wins": 86,
+        "cells": 111,
+        "regressions_over_5pct": 16
+      }
+    ]
+  },
+  "measurements": [
+    {
+      "mode": "saturated",
+      "reps": 9,
+      "sizes": [
+        {
+          "limbs": 1,
+          "iterations": 200000,
+          "cells": [
+            {
+              "scenario": "add_x_0",
+              "current_ns_median": 3.415,
+              "current_ns_iqr": 0.40000000000000036,
+              "disabled_ns_median": 3.775,
+              "disabled_ns_iqr": 0.8650000000000002,
+              "current_over_disabled": 0.904635761589404,
+              "current_samples_ns": [
+                2.905,
+                2.765,
+                3.28,
+                3.5,
+                3.68,
+                3.41,
+                3.705,
+                4.045,
+                3.415
+              ],
+              "disabled_samples_ns": [
+                2.775,
+                2.835,
+                3.11,
+                3.775,
+                3.975,
+                3.69,
+                4.475,
+                4.325,
+                3.93
+              ]
+            },
+            {
+              "scenario": "sub_x_0",
+              "current_ns_median": 3.27,
+              "current_ns_iqr": 0.7399999999999998,
+              "disabled_ns_median": 3.26,
+              "disabled_ns_iqr": 0.855,
+              "current_over_disabled": 1.0030674846625767,
+              "current_samples_ns": [
+                2.62,
+                2.545,
+                2.765,
+                3.27,
+                3.165,
+                3.505,
+                3.605,
+                3.825,
+                3.325
+              ],
+              "disabled_samples_ns": [
+                2.465,
+                2.615,
+                2.64,
+                3.495,
+                3.26,
+                3.1,
+                4.37,
+                3.82,
+                3.465
+              ]
+            },
+            {
+              "scenario": "sub_x_x",
+              "current_ns_median": 1.045,
+              "current_ns_iqr": 0.265,
+              "disabled_ns_median": 2.01,
+              "disabled_ns_iqr": 0.605,
+              "current_over_disabled": 0.5199004975124378,
+              "current_samples_ns": [
+                0.785,
+                0.755,
+                0.93,
+                1.165,
+                0.945,
+                1.32,
+                1.045,
+                1.385,
+                1.195
+              ],
+              "disabled_samples_ns": [
+                1.77,
+                1.83,
+                1.915,
+                2.56,
+                2.2,
+                1.83,
+                2.78,
+                2.435,
+                2.01
+              ]
+            },
+            {
+              "scenario": "mul_x_0",
+              "current_ns_median": 3.14,
+              "current_ns_iqr": 0.6699999999999999,
+              "disabled_ns_median": 2.645,
+              "disabled_ns_iqr": 0.31999999999999984,
+              "current_over_disabled": 1.1871455576559546,
+              "current_samples_ns": [
+                2.39,
+                2.515,
+                2.805,
+                3.205,
+                2.9,
+                3.575,
+                3.475,
+                3.835,
+                3.14
+              ],
+              "disabled_samples_ns": [
+                2.545,
+                2.645,
+                2.38,
+                1.945,
+                2.85,
+                2.515,
+                2.835,
+                3.35,
+                2.705
+              ]
+            },
+            {
+              "scenario": "mul_x_1",
+              "current_ns_median": 3.68,
+              "current_ns_iqr": 0.8749999999999996,
+              "disabled_ns_median": 3.27,
+              "disabled_ns_iqr": 0.6999999999999997,
+              "current_over_disabled": 1.1253822629969419,
+              "current_samples_ns": [
+                3.15,
+                2.76,
+                3.265,
+                3.68,
+                3.775,
+                3.66,
+                4.14,
+                4.555,
+                4.55
+              ],
+              "disabled_samples_ns": [
+                3.14,
+                3.395,
+                3.19,
+                3.84,
+                3.27,
+                2.97,
+                4.57,
+                4.165,
+                2.95
+              ]
+            },
+            {
+              "scenario": "mul_x_neg1",
+              "current_ns_median": 5.305,
+              "current_ns_iqr": 0.9850000000000003,
+              "disabled_ns_median": 5.025,
+              "disabled_ns_iqr": 1.0149999999999997,
+              "current_over_disabled": 1.0557213930348257,
+              "current_samples_ns": [
+                4.55,
+                4.285,
+                4.105,
+                5.05,
+                5.375,
+                5.305,
+                5.535,
+                5.985,
+                5.95
+              ],
+              "disabled_samples_ns": [
+                4.33,
+                5.025,
+                4.6,
+                5.34,
+                5.345,
+                4.15,
+                5.905,
+                5.915,
+                4.165
+              ]
+            },
+            {
+              "scenario": "div_x_1",
+              "current_ns_median": 1.89,
+              "current_ns_iqr": 0.6700000000000002,
+              "disabled_ns_median": 10.01,
+              "disabled_ns_iqr": 1.3650000000000002,
+              "current_over_disabled": 0.1888111888111888,
+              "current_samples_ns": [
+                1.61,
+                1.505,
+                1.76,
+                1.76,
+                1.89,
+                1.89,
+                2.43,
+                2.45,
+                2.45
+              ],
+              "disabled_samples_ns": [
+                10.01,
+                9.14,
+                8.58,
+                10.75,
+                11.095,
+                9.615,
+                10.64,
+                12.66,
+                9.385
+              ]
+            },
+            {
+              "scenario": "div_x_neg1",
+              "current_ns_median": 4.45,
+              "current_ns_iqr": 1.0000000000000004,
+              "disabled_ns_median": 10.515,
+              "disabled_ns_iqr": 1.0050000000000008,
+              "current_over_disabled": 0.42320494531621494,
+              "current_samples_ns": [
+                3.66,
+                3.905,
+                3.37,
+                4.13,
+                4.525,
+                4.45,
+                4.945,
+                4.905,
+                5.245
+              ],
+              "disabled_samples_ns": [
+                9.985,
+                8.725,
+                8.72,
+                10.695,
+                10.67,
+                10.515,
+                10.79,
+                11.825,
+                9.69
+              ]
+            },
+            {
+              "scenario": "div_x_x",
+              "current_ns_median": 2.54,
+              "current_ns_iqr": 0.3150000000000004,
+              "disabled_ns_median": 2.43,
+              "disabled_ns_iqr": 0.2450000000000001,
+              "current_over_disabled": 1.045267489711934,
+              "current_samples_ns": [
+                2.125,
+                1.855,
+                2.3,
+                2.365,
+                2.54,
+                2.585,
+                2.62,
+                2.78,
+                2.615
+              ],
+              "disabled_samples_ns": [
+                2.05,
+                2.095,
+                2.575,
+                2.4,
+                2.405,
+                2.43,
+                2.645,
+                2.665,
+                2.755
+              ]
+            },
+            {
+              "scenario": "mod_x_1",
+              "current_ns_median": 1.205,
+              "current_ns_iqr": 0.31499999999999995,
+              "disabled_ns_median": 4.29,
+              "disabled_ns_iqr": 0.8999999999999999,
+              "current_over_disabled": 0.2808857808857809,
+              "current_samples_ns": [
+                1.06,
+                1.02,
+                1.075,
+                1.165,
+                1.27,
+                1.205,
+                1.39,
+                1.41,
+                1.39
+              ],
+              "disabled_samples_ns": [
+                3.3,
+                3.655,
+                3.52,
+                4.105,
+                4.42,
+                4.29,
+                4.555,
+                4.86,
+                4.91
+              ]
+            },
+            {
+              "scenario": "mod_x_x",
+              "current_ns_median": 4.73,
+              "current_ns_iqr": 0.9950000000000001,
+              "disabled_ns_median": 5.115,
+              "disabled_ns_iqr": 0.9349999999999996,
+              "current_over_disabled": 0.924731182795699,
+              "current_samples_ns": [
+                3.97,
+                3.815,
+                4.545,
+                4.215,
+                4.73,
+                4.9,
+                5.21,
+                5.605,
+                5.355
+              ],
+              "disabled_samples_ns": [
+                3.93,
+                4.245,
+                3.66,
+                5.035,
+                5.18,
+                5.115,
+                5.655,
+                5.215,
+                5.145
+              ]
+            },
+            {
+              "scenario": "shl_x_0",
+              "current_ns_median": 1.92,
+              "current_ns_iqr": 0.69,
+              "disabled_ns_median": 7.215,
+              "disabled_ns_iqr": 1.4450000000000003,
+              "current_over_disabled": 0.2661122661122661,
+              "current_samples_ns": [
+                1.74,
+                1.55,
+                1.92,
+                1.795,
+                1.915,
+                3.645,
+                2.075,
+                2.485,
+                2.52
+              ],
+              "disabled_samples_ns": [
+                6.42,
+                6.315,
+                5.75,
+                7.865,
+                7.555,
+                7.215,
+                8.43,
+                8.83,
+                6.86
+              ]
+            },
+            {
+              "scenario": "shr_x_0",
+              "current_ns_median": 2.15,
+              "current_ns_iqr": 0.5699999999999998,
+              "disabled_ns_median": 7.385,
+              "disabled_ns_iqr": 1.865000000000001,
+              "current_over_disabled": 0.2911306702775897,
+              "current_samples_ns": [
+                1.83,
+                1.505,
+                1.875,
+                2.15,
+                1.905,
+                2.205,
+                2.48,
+                2.46,
+                2.445
+              ],
+              "disabled_samples_ns": [
+                6.13,
+                6.14,
+                6.14,
+                7.56,
+                7.385,
+                7.075,
+                8.02,
+                8.34,
+                8.005
+              ]
+            },
+            {
+              "scenario": "and_x_x",
+              "current_ns_median": 1.75,
+              "current_ns_iqr": 0.5349999999999999,
+              "disabled_ns_median": 6,
+              "disabled_ns_iqr": 1.58,
+              "current_over_disabled": 0.2916666666666667,
+              "current_samples_ns": [
+                1.56,
+                1.28,
+                1.59,
+                1.75,
+                1.575,
+                1.96,
+                2.545,
+                2.11,
+                2.115
+              ],
+              "disabled_samples_ns": [
+                4.81,
+                4.77,
+                4.815,
+                6,
+                6.065,
+                4.575,
+                6.47,
+                6.42,
+                6.39
+              ]
+            },
+            {
+              "scenario": "and_x_0",
+              "current_ns_median": 3.24,
+              "current_ns_iqr": 0.645,
+              "disabled_ns_median": 3.215,
+              "disabled_ns_iqr": 0.7449999999999997,
+              "current_over_disabled": 1.0077760497667185,
+              "current_samples_ns": [
+                2.475,
+                2.545,
+                3.35,
+                2.915,
+                3.24,
+                2.705,
+                3.285,
+                3.53,
+                3.89
+              ],
+              "disabled_samples_ns": [
+                2.515,
+                2.615,
+                2.825,
+                3.15,
+                3.215,
+                3.35,
+                3.755,
+                3.605,
+                3.57
+              ]
+            },
+            {
+              "scenario": "and_x_neg1",
+              "current_ns_median": 4.08,
+              "current_ns_iqr": 1.1400000000000001,
+              "disabled_ns_median": 17.365,
+              "disabled_ns_iqr": 3.0000000000000018,
+              "current_over_disabled": 0.23495536999712066,
+              "current_samples_ns": [
+                3.415,
+                3.49,
+                3.735,
+                4.08,
+                4.45,
+                3.965,
+                5.175,
+                4.875,
+                5.245
+              ],
+              "disabled_samples_ns": [
+                14.57,
+                14.905,
+                13.76,
+                17.365,
+                17.905,
+                15.65,
+                19.535,
+                19.655,
+                17.39
+              ]
+            },
+            {
+              "scenario": "or_x_x",
+              "current_ns_median": 1.735,
+              "current_ns_iqr": 0.18999999999999995,
+              "disabled_ns_median": 5.05,
+              "disabled_ns_iqr": 0.9000000000000004,
+              "current_over_disabled": 0.3435643564356436,
+              "current_samples_ns": [
+                1.335,
+                1.29,
+                1.59,
+                1.75,
+                1.575,
+                1.765,
+                1.735,
+                2.11,
+                2.11
+              ],
+              "disabled_samples_ns": [
+                4.725,
+                5.05,
+                4.86,
+                5.695,
+                5.86,
+                5,
+                6.635,
+                6.595,
+                4.96
+              ]
+            },
+            {
+              "scenario": "or_x_0",
+              "current_ns_median": 3.785,
+              "current_ns_iqr": 0.6349999999999998,
+              "disabled_ns_median": 8.62,
+              "disabled_ns_iqr": 1.4750000000000005,
+              "current_over_disabled": 0.43909512761020886,
+              "current_samples_ns": [
+                3.19,
+                2.84,
+                3.2,
+                3.785,
+                3.835,
+                3.73,
+                3.83,
+                4.55,
+                4.59
+              ],
+              "disabled_samples_ns": [
+                6.63,
+                7.335,
+                6.855,
+                8.625,
+                8.62,
+                7.265,
+                9.435,
+                9.72,
+                8.74
+              ]
+            },
+            {
+              "scenario": "or_x_neg1",
+              "current_ns_median": 3.495,
+              "current_ns_iqr": 0.7549999999999999,
+              "disabled_ns_median": 13.61,
+              "disabled_ns_iqr": 2.914999999999999,
+              "current_over_disabled": 0.25679647318148424,
+              "current_samples_ns": [
+                2.895,
+                2.63,
+                3.095,
+                3.495,
+                3.85,
+                3.775,
+                3.31,
+                4.19,
+                3.99
+              ],
+              "disabled_samples_ns": [
+                10.42,
+                11.675,
+                11.46,
+                12.955,
+                13.61,
+                14.59,
+                14.37,
+                15.51,
+                15.32
+              ]
+            },
+            {
+              "scenario": "xor_x_x",
+              "current_ns_median": 0.945,
+              "current_ns_iqr": 0.31500000000000006,
+              "disabled_ns_median": 1.68,
+              "disabled_ns_iqr": 0.18999999999999995,
+              "current_over_disabled": 0.5625,
+              "current_samples_ns": [
+                0.785,
+                0.81,
+                0.83,
+                1.165,
+                0.97,
+                0.945,
+                0.92,
+                1.4,
+                1.145
+              ],
+              "disabled_samples_ns": [
+                1.32,
+                1.565,
+                1.635,
+                1.89,
+                1.575,
+                1.68,
+                1.75,
+                1.765,
+                2.435
+              ]
+            },
+            {
+              "scenario": "xor_x_0",
+              "current_ns_median": 3.17,
+              "current_ns_iqr": 0.28500000000000014,
+              "disabled_ns_median": 8.255,
+              "disabled_ns_iqr": 1.4949999999999992,
+              "current_over_disabled": 0.38400969109630523,
+              "current_samples_ns": [
+                2.66,
+                2.63,
+                2.92,
+                3.205,
+                3.17,
+                3.155,
+                3.2,
+                3.555,
+                3.51
+              ],
+              "disabled_samples_ns": [
+                6.575,
+                7.33,
+                6.945,
+                8.825,
+                8.475,
+                7.4,
+                9.445,
+                9.395,
+                8.255
+              ]
+            },
+            {
+              "scenario": "xor_x_neg1",
+              "current_ns_median": 14.245,
+              "current_ns_iqr": 2.0749999999999993,
+              "disabled_ns_median": 17.715,
+              "disabled_ns_iqr": 5.109999999999999,
+              "current_over_disabled": 0.8041208015805814,
+              "current_samples_ns": [
+                12.365,
+                11.83,
+                13.15,
+                14.245,
+                15.225,
+                15.085,
+                13.185,
+                16.405,
+                15.97
+              ],
+              "disabled_samples_ns": [
+                14.15,
+                14.27,
+                14.23,
+                17.345,
+                18.4,
+                17.715,
+                19.425,
+                26.595,
+                19.38
+              ]
+            },
+            {
+              "scenario": "gcd_x_0",
+              "current_ns_median": 2.335,
+              "current_ns_iqr": 0.73,
+              "disabled_ns_median": 9.56,
+              "disabled_ns_iqr": 2.8000000000000007,
+              "current_over_disabled": 0.24424686192468617,
+              "current_samples_ns": [
+                2.12,
+                2.09,
+                2.195,
+                2.335,
+                2.57,
+                2.925,
+                2.24,
+                3.185,
+                3.195
+              ],
+              "disabled_samples_ns": [
+                7.89,
+                8.17,
+                8.31,
+                9.785,
+                9.56,
+                8.11,
+                11.105,
+                10.97,
+                12.11
+              ]
+            },
+            {
+              "scenario": "gcd_x_1",
+              "current_ns_median": 1.895,
+              "current_ns_iqr": 0.47,
+              "disabled_ns_median": 28.22,
+              "disabled_ns_iqr": 8.04,
+              "current_over_disabled": 0.06715095676824948,
+              "current_samples_ns": [
+                1.61,
+                1.61,
+                1.615,
+                1.75,
+                1.905,
+                1.895,
+                2.095,
+                2.085,
+                2.11
+              ],
+              "disabled_samples_ns": [
+                22.41,
+                23.35,
+                23.34,
+                27.81,
+                28.22,
+                31.39,
+                30.485,
+                31.95,
+                31.84
+              ]
+            },
+            {
+              "scenario": "gcd_x_x",
+              "current_ns_median": 2.35,
+              "current_ns_iqr": 0.375,
+              "disabled_ns_median": 9.16,
+              "disabled_ns_iqr": 1.9449999999999994,
+              "current_over_disabled": 0.25655021834061137,
+              "current_samples_ns": [
+                2.11,
+                1.955,
+                2.325,
+                2.205,
+                2.35,
+                2.5,
+                2.58,
+                2.715,
+                2.825
+              ],
+              "disabled_samples_ns": [
+                7.42,
+                7.615,
+                7.94,
+                9.16,
+                8.23,
+                10.265,
+                9.885,
+                10.02,
+                9.83
+              ]
+            },
+            {
+              "scenario": "lcm_x_0",
+              "current_ns_median": 3.935,
+              "current_ns_iqr": 0.7949999999999999,
+              "disabled_ns_median": 3.46,
+              "disabled_ns_iqr": 0.8500000000000001,
+              "current_over_disabled": 1.1372832369942196,
+              "current_samples_ns": [
+                3.4,
+                3.41,
+                3.55,
+                3.855,
+                3.935,
+                4.345,
+                4.3,
+                4.525,
+                4.555
+              ],
+              "disabled_samples_ns": [
+                2.56,
+                2.625,
+                2.615,
+                3.46,
+                3.125,
+                3.81,
+                3.5,
+                3.475,
+                3.475
+              ]
+            },
+            {
+              "scenario": "lcm_x_1",
+              "current_ns_median": 3.68,
+              "current_ns_iqr": 0.8200000000000003,
+              "disabled_ns_median": 28.7,
+              "disabled_ns_iqr": 5.729999999999997,
+              "current_over_disabled": 0.12822299651567945,
+              "current_samples_ns": [
+                3.035,
+                2.985,
+                3.68,
+                3.38,
+                3.855,
+                3.565,
+                4.215,
+                4.2,
+                4.36
+              ],
+              "disabled_samples_ns": [
+                22.835,
+                23.85,
+                25.6,
+                28.7,
+                28.365,
+                31.33,
+                31.885,
+                31.33,
+                32.395
+              ]
+            },
+            {
+              "scenario": "lcm_x_x",
+              "current_ns_median": 2.835,
+              "current_ns_iqr": 0.5700000000000003,
+              "disabled_ns_median": 2.755,
+              "disabled_ns_iqr": 0.6549999999999998,
+              "current_over_disabled": 1.029038112522686,
+              "current_samples_ns": [
+                2.24,
+                2.255,
+                3.42,
+                2.465,
+                2.835,
+                2.77,
+                2.945,
+                3.035,
+                3.06
+              ],
+              "disabled_samples_ns": [
+                2.22,
+                2.315,
+                2.395,
+                2.755,
+                2.75,
+                2.99,
+                3.12,
+                3.37,
+                3.05
+              ]
+            },
+            {
+              "scenario": "pow_x_0",
+              "current_ns_median": 4.73,
+              "current_ns_iqr": 1.3200000000000003,
+              "disabled_ns_median": 5.045,
+              "disabled_ns_iqr": 0.8700000000000001,
+              "current_over_disabled": 0.937561942517344,
+              "current_samples_ns": [
+                3.95,
+                4.205,
+                4.415,
+                4.26,
+                4.73,
+                5.035,
+                5.58,
+                5.625,
+                5.605
+              ],
+              "disabled_samples_ns": [
+                4.05,
+                4.345,
+                4.02,
+                5.035,
+                5.045,
+                5.63,
+                5.215,
+                5.21,
+                5.32
+              ]
+            },
+            {
+              "scenario": "pow_x_1",
+              "current_ns_median": 5.12,
+              "current_ns_iqr": 1,
+              "disabled_ns_median": 5.405,
+              "disabled_ns_iqr": 1.3050000000000006,
+              "current_over_disabled": 0.9472710453283996,
+              "current_samples_ns": [
+                3.915,
+                4.505,
+                4.97,
+                4.96,
+                5.12,
+                5.48,
+                5.96,
+                6.295,
+                6.31
+              ],
+              "disabled_samples_ns": [
+                4.61,
+                4.76,
+                4.665,
+                5.35,
+                5.405,
+                5.83,
+                6.065,
+                6.45,
+                6.125
+              ]
+            },
+            {
+              "scenario": "powmod_exp_0",
+              "current_ns_median": 3.465,
+              "current_ns_iqr": 0.7200000000000002,
+              "disabled_ns_median": 3.46,
+              "disabled_ns_iqr": 0.8049999999999997,
+              "current_over_disabled": 1.0014450867052023,
+              "current_samples_ns": [
+                2.935,
+                2.65,
+                3.11,
+                2.965,
+                3.685,
+                3.465,
+                3.82,
+                3.52,
+                3.85
+              ],
+              "disabled_samples_ns": [
+                2.835,
+                3.015,
+                2.87,
+                3.46,
+                3.46,
+                3.93,
+                3.9,
+                3.82,
+                3.82
+              ]
+            },
+            {
+              "scenario": "powmod_exp_1",
+              "current_ns_median": 5.35,
+              "current_ns_iqr": 1.33,
+              "disabled_ns_median": 20.39,
+              "disabled_ns_iqr": 2.1650000000000027,
+              "current_over_disabled": 0.26238352133398724,
+              "current_samples_ns": [
+                4.355,
+                4.44,
+                4.57,
+                4.955,
+                5.35,
+                5.59,
+                5.9,
+                6.1,
+                5.96
+              ],
+              "disabled_samples_ns": [
+                15.215,
+                23.725,
+                15.64,
+                19.53,
+                18.65,
+                20.635,
+                21.04,
+                20.39,
+                20.815
+              ]
+            },
+            {
+              "scenario": "powmod_base_0",
+              "current_ns_median": 5.355,
+              "current_ns_iqr": 1.3400000000000007,
+              "disabled_ns_median": 5.27,
+              "disabled_ns_iqr": 0.5249999999999995,
+              "current_over_disabled": 1.0161290322580647,
+              "current_samples_ns": [
+                4.785,
+                4.735,
+                4.935,
+                5.31,
+                5.355,
+                5.765,
+                6.58,
+                6.3,
+                6.275
+              ],
+              "disabled_samples_ns": [
+                4.15,
+                5.89,
+                5.18,
+                5.03,
+                4.915,
+                5.555,
+                5.27,
+                5.555,
+                5.59
+              ]
+            },
+            {
+              "scenario": "powmod_base_1",
+              "current_ns_median": 4.42,
+              "current_ns_iqr": 1.0200000000000005,
+              "disabled_ns_median": 28.69,
+              "disabled_ns_iqr": 4.254999999999999,
+              "current_over_disabled": 0.1540606483095155,
+              "current_samples_ns": [
+                3.68,
+                3.67,
+                3.84,
+                4.08,
+                4.42,
+                4.635,
+                4.86,
+                4.86,
+                4.885
+              ],
+              "disabled_samples_ns": [
+                23.3,
+                27.69,
+                27.27,
+                28.215,
+                28.69,
+                32.54,
+                31.945,
+                31.655,
+                32.015
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_even",
+              "current_ns_median": 4.56,
+              "current_ns_iqr": 0.8450000000000006,
+              "disabled_ns_median": 25.27,
+              "disabled_ns_iqr": 4.59,
+              "current_over_disabled": 0.18045112781954886,
+              "current_samples_ns": [
+                3.95,
+                3.835,
+                4.135,
+                4.23,
+                4.56,
+                4.58,
+                4.98,
+                5.035,
+                5
+              ],
+              "disabled_samples_ns": [
+                19.77,
+                22.775,
+                21.54,
+                25.27,
+                24.44,
+                26.865,
+                30.925,
+                28.005,
+                27.365
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_odd",
+              "current_ns_median": 11.66,
+              "current_ns_iqr": 1.5199999999999996,
+              "disabled_ns_median": 31.795,
+              "disabled_ns_iqr": 4.509999999999998,
+              "current_over_disabled": 0.366724327724485,
+              "current_samples_ns": [
+                9.24,
+                9.53,
+                11.015,
+                10.515,
+                11.66,
+                11.74,
+                12.905,
+                12.72,
+                12.035
+              ],
+              "disabled_samples_ns": [
+                25.545,
+                26.03,
+                31.795,
+                31.22,
+                30.96,
+                35.59,
+                35.47,
+                35.18,
+                35.965
+              ]
+            },
+            {
+              "scenario": "powmod_mod_1",
+              "current_ns_median": 3.41,
+              "current_ns_iqr": 0.5749999999999997,
+              "disabled_ns_median": 3.425,
+              "disabled_ns_iqr": 0.28500000000000014,
+              "current_over_disabled": 0.9956204379562045,
+              "current_samples_ns": [
+                2.83,
+                2.745,
+                4.175,
+                3.12,
+                3.305,
+                3.41,
+                3.645,
+                3.8,
+                3.695
+              ],
+              "disabled_samples_ns": [
+                2.72,
+                2.94,
+                3.52,
+                3.31,
+                3.36,
+                3.645,
+                3.425,
+                3.65,
+                3.595
+              ]
+            }
+          ]
+        },
+        {
+          "limbs": 8,
+          "iterations": 100000,
+          "cells": [
+            {
+              "scenario": "add_x_0",
+              "current_ns_median": 4.03,
+              "current_ns_iqr": 0.3500000000000001,
+              "disabled_ns_median": 4.17,
+              "disabled_ns_iqr": 0.33000000000000007,
+              "current_over_disabled": 0.9664268585131895,
+              "current_samples_ns": [
+                3.82,
+                5.75,
+                3.33,
+                3.84,
+                3.02,
+                4.3,
+                4.03,
+                4.06,
+                4.17
+              ],
+              "disabled_samples_ns": [
+                4.17,
+                3.78,
+                4.17,
+                4.17,
+                4.17,
+                4.17,
+                4.07,
+                3.84,
+                3.65
+              ]
+            },
+            {
+              "scenario": "sub_x_0",
+              "current_ns_median": 3.49,
+              "current_ns_iqr": 0.1200000000000001,
+              "disabled_ns_median": 3.82,
+              "disabled_ns_iqr": 0.36999999999999966,
+              "current_over_disabled": 0.9136125654450262,
+              "current_samples_ns": [
+                3.5,
+                3.56,
+                3.99,
+                3.36,
+                3.24,
+                3.98,
+                3.44,
+                3.49,
+                3.49
+              ],
+              "disabled_samples_ns": [
+                3.82,
+                3.46,
+                3.84,
+                3.88,
+                3.82,
+                3.84,
+                3.82,
+                3.47,
+                3.07
+              ]
+            },
+            {
+              "scenario": "sub_x_x",
+              "current_ns_median": 1.05,
+              "current_ns_iqr": 0.1399999999999999,
+              "disabled_ns_median": 4.91,
+              "disabled_ns_iqr": 0.2400000000000002,
+              "current_over_disabled": 0.21384928716904278,
+              "current_samples_ns": [
+                1.07,
+                1.26,
+                0.93,
+                1.18,
+                1.01,
+                1.04,
+                1.05,
+                1.05,
+                1.4
+              ],
+              "disabled_samples_ns": [
+                4.92,
+                4.72,
+                5.32,
+                5.29,
+                4.87,
+                4.91,
+                5.11,
+                4.87,
+                4.41
+              ]
+            },
+            {
+              "scenario": "mul_x_0",
+              "current_ns_median": 3.18,
+              "current_ns_iqr": 0.75,
+              "disabled_ns_median": 3.49,
+              "disabled_ns_iqr": 0.27,
+              "current_over_disabled": 0.9111747851002865,
+              "current_samples_ns": [
+                2.73,
+                3.18,
+                3.38,
+                2.71,
+                2.52,
+                3.48,
+                3.55,
+                2.78,
+                3.87
+              ],
+              "disabled_samples_ns": [
+                2.8,
+                3.49,
+                3.48,
+                3.58,
+                3.49,
+                3.22,
+                3.83,
+                3.49,
+                3.16
+              ]
+            },
+            {
+              "scenario": "mul_x_1",
+              "current_ns_median": 4.17,
+              "current_ns_iqr": 0.3200000000000003,
+              "disabled_ns_median": 4.33,
+              "disabled_ns_iqr": 0.6600000000000001,
+              "current_over_disabled": 0.9630484988452656,
+              "current_samples_ns": [
+                4.24,
+                4.43,
+                3.92,
+                2.98,
+                2.74,
+                4.54,
+                4.06,
+                4.21,
+                4.17
+              ],
+              "disabled_samples_ns": [
+                4.52,
+                4.93,
+                4.05,
+                7.1,
+                3.82,
+                4.71,
+                4.33,
+                4.16,
+                3.58
+              ]
+            },
+            {
+              "scenario": "mul_x_neg1",
+              "current_ns_median": 5.91,
+              "current_ns_iqr": 0.5,
+              "disabled_ns_median": 5.9,
+              "disabled_ns_iqr": 0.47999999999999954,
+              "current_over_disabled": 1.0016949152542372,
+              "current_samples_ns": [
+                6.03,
+                5.46,
+                4.11,
+                6.87,
+                4.13,
+                5.79,
+                5.95,
+                5.91,
+                5.96
+              ],
+              "disabled_samples_ns": [
+                5.96,
+                5.03,
+                5.56,
+                5.93,
+                5.9,
+                6.1,
+                5.48,
+                6.17,
+                5.37
+              ]
+            },
+            {
+              "scenario": "div_x_1",
+              "current_ns_median": 2.17,
+              "current_ns_iqr": 0.43999999999999995,
+              "disabled_ns_median": 11.54,
+              "disabled_ns_iqr": 0.7400000000000002,
+              "current_over_disabled": 0.18804159445407279,
+              "current_samples_ns": [
+                2.47,
+                1.91,
+                1.99,
+                2.49,
+                2,
+                2.44,
+                2.09,
+                2.44,
+                2.17
+              ],
+              "disabled_samples_ns": [
+                11.54,
+                10.39,
+                11.59,
+                12.23,
+                12.15,
+                11.47,
+                11.07,
+                11.81,
+                11.04
+              ]
+            },
+            {
+              "scenario": "div_x_neg1",
+              "current_ns_median": 4.89,
+              "current_ns_iqr": 0.6400000000000006,
+              "disabled_ns_median": 11.49,
+              "disabled_ns_iqr": 1.299999999999999,
+              "current_over_disabled": 0.42558746736292424,
+              "current_samples_ns": [
+                5.23,
+                4.63,
+                4.14,
+                4.59,
+                3.66,
+                5.21,
+                5.45,
+                5.26,
+                4.89
+              ],
+              "disabled_samples_ns": [
+                12.03,
+                9.66,
+                11.1,
+                12.04,
+                12.23,
+                11.49,
+                10.09,
+                12.28,
+                10.74
+              ]
+            },
+            {
+              "scenario": "div_x_x",
+              "current_ns_median": 2.82,
+              "current_ns_iqr": 0.20999999999999996,
+              "disabled_ns_median": 36.28,
+              "disabled_ns_iqr": 2.740000000000002,
+              "current_over_disabled": 0.07772877618522601,
+              "current_samples_ns": [
+                2.85,
+                2.56,
+                2.86,
+                2.63,
+                2.58,
+                2.84,
+                2.82,
+                2.78,
+                2.82
+              ],
+              "disabled_samples_ns": [
+                37.2,
+                34.46,
+                36.57,
+                36.28,
+                35.67,
+                38.68,
+                33.25,
+                37.88,
+                33.53
+              ]
+            },
+            {
+              "scenario": "mod_x_1",
+              "current_ns_median": 1.28,
+              "current_ns_iqr": 0.18999999999999995,
+              "disabled_ns_median": 4.41,
+              "disabled_ns_iqr": 0.71,
+              "current_over_disabled": 0.29024943310657597,
+              "current_samples_ns": [
+                1.41,
+                1.28,
+                1.19,
+                1.21,
+                1.2,
+                1.39,
+                1.17,
+                1.39,
+                1.39
+              ],
+              "disabled_samples_ns": [
+                4.93,
+                3.43,
+                4.69,
+                4.9,
+                4.18,
+                4.89,
+                4.4,
+                4.16,
+                4.41
+              ]
+            },
+            {
+              "scenario": "mod_x_x",
+              "current_ns_median": 6.33,
+              "current_ns_iqr": 0.35000000000000053,
+              "disabled_ns_median": 37.68,
+              "disabled_ns_iqr": 1.3900000000000006,
+              "current_over_disabled": 0.1679936305732484,
+              "current_samples_ns": [
+                6.63,
+                6.31,
+                6.33,
+                4.91,
+                4.81,
+                6.3,
+                6.94,
+                6.78,
+                6.65
+              ],
+              "disabled_samples_ns": [
+                38.33,
+                40.08,
+                36.81,
+                37.71,
+                37.58,
+                37.68,
+                33.21,
+                38.2,
+                33.48
+              ]
+            },
+            {
+              "scenario": "shl_x_0",
+              "current_ns_median": 2.44,
+              "current_ns_iqr": 0.40000000000000036,
+              "disabled_ns_median": 14.93,
+              "disabled_ns_iqr": 1.6099999999999994,
+              "current_over_disabled": 0.16342933690555927,
+              "current_samples_ns": [
+                2.8,
+                28.77,
+                2.46,
+                1.63,
+                1.92,
+                2.43,
+                2.49,
+                2.44,
+                2.09
+              ],
+              "disabled_samples_ns": [
+                15,
+                11.96,
+                14.93,
+                15.31,
+                16.07,
+                15.18,
+                13.85,
+                13.01,
+                13.57
+              ]
+            },
+            {
+              "scenario": "shr_x_0",
+              "current_ns_median": 2.46,
+              "current_ns_iqr": 0.5899999999999999,
+              "disabled_ns_median": 11.11,
+              "disabled_ns_iqr": 1.3000000000000007,
+              "current_over_disabled": 0.22142214221422143,
+              "current_samples_ns": [
+                2.46,
+                30.46,
+                1.64,
+                1.64,
+                1.92,
+                2.47,
+                2.51,
+                2.57,
+                2.08
+              ],
+              "disabled_samples_ns": [
+                11.23,
+                8.98,
+                11.11,
+                12.2,
+                12.22,
+                10.95,
+                11.41,
+                10.03,
+                10.11
+              ]
+            },
+            {
+              "scenario": "and_x_x",
+              "current_ns_median": 2.09,
+              "current_ns_iqr": 0.3800000000000001,
+              "disabled_ns_median": 7.64,
+              "disabled_ns_iqr": 1.0899999999999999,
+              "current_over_disabled": 0.27356020942408377,
+              "current_samples_ns": [
+                2.12,
+                2.17,
+                2,
+                1.64,
+                1.62,
+                2.21,
+                2.11,
+                2.09,
+                1.74
+              ],
+              "disabled_samples_ns": [
+                8.02,
+                6.71,
+                6.7,
+                8.09,
+                7.64,
+                7.77,
+                7.15,
+                8.19,
+                6.93
+              ]
+            },
+            {
+              "scenario": "and_x_0",
+              "current_ns_median": 3.53,
+              "current_ns_iqr": 0.31999999999999984,
+              "disabled_ns_median": 3.49,
+              "disabled_ns_iqr": 0.16000000000000014,
+              "current_over_disabled": 1.011461318051576,
+              "current_samples_ns": [
+                3.91,
+                3.82,
+                3.52,
+                2.55,
+                2.76,
+                3.53,
+                3.5,
+                3.82,
+                3.53
+              ],
+              "disabled_samples_ns": [
+                3.47,
+                3.4,
+                3.6,
+                3.56,
+                3.82,
+                3.5,
+                3.15,
+                3.49,
+                3.19
+              ]
+            },
+            {
+              "scenario": "and_x_neg1",
+              "current_ns_median": 5.21,
+              "current_ns_iqr": 0.33000000000000007,
+              "disabled_ns_median": 33.33,
+              "disabled_ns_iqr": 3.210000000000001,
+              "current_over_disabled": 0.1563156315631563,
+              "current_samples_ns": [
+                5.26,
+                5.22,
+                4.93,
+                3.45,
+                3.94,
+                5.08,
+                5.26,
+                5.35,
+                5.21
+              ],
+              "disabled_samples_ns": [
+                32.79,
+                30.14,
+                28.27,
+                33.89,
+                34.38,
+                33.33,
+                34.37,
+                33.88,
+                30.68
+              ]
+            },
+            {
+              "scenario": "or_x_x",
+              "current_ns_median": 2.09,
+              "current_ns_iqr": 0.04999999999999982,
+              "disabled_ns_median": 7.14,
+              "disabled_ns_iqr": 1.04,
+              "current_over_disabled": 0.2927170868347339,
+              "current_samples_ns": [
+                2.08,
+                2.13,
+                3.36,
+                1.55,
+                1.54,
+                2.24,
+                2.09,
+                2.1,
+                2.09
+              ],
+              "disabled_samples_ns": [
+                6.95,
+                5.91,
+                5.73,
+                7.75,
+                7.64,
+                7.14,
+                7.77,
+                7.65,
+                6.61
+              ]
+            },
+            {
+              "scenario": "or_x_0",
+              "current_ns_median": 4.55,
+              "current_ns_iqr": 0.09000000000000075,
+              "disabled_ns_median": 11.14,
+              "disabled_ns_iqr": 1.6900000000000013,
+              "current_over_disabled": 0.4084380610412926,
+              "current_samples_ns": [
+                4.59,
+                4.55,
+                3.23,
+                3.25,
+                6.88,
+                4.55,
+                4.61,
+                4.52,
+                4.7
+              ],
+              "disabled_samples_ns": [
+                10.86,
+                9.38,
+                9.02,
+                11.81,
+                11.81,
+                11.59,
+                11.81,
+                11.14,
+                10.12
+              ]
+            },
+            {
+              "scenario": "or_x_neg1",
+              "current_ns_median": 4.22,
+              "current_ns_iqr": 1.0899999999999994,
+              "disabled_ns_median": 32.02,
+              "disabled_ns_iqr": 2.030000000000001,
+              "current_over_disabled": 0.13179262960649593,
+              "current_samples_ns": [
+                4.56,
+                4.56,
+                3.23,
+                3.47,
+                2.97,
+                4.59,
+                4.17,
+                4.22,
+                4.52
+              ],
+              "disabled_samples_ns": [
+                32.35,
+                30.9,
+                27.69,
+                33.97,
+                33.55,
+                31.72,
+                32.02,
+                32.93,
+                27.8
+              ]
+            },
+            {
+              "scenario": "xor_x_x",
+              "current_ns_median": 1.07,
+              "current_ns_iqr": 0.45999999999999985,
+              "disabled_ns_median": 10.42,
+              "disabled_ns_iqr": 1.4399999999999995,
+              "current_over_disabled": 0.10268714011516315,
+              "current_samples_ns": [
+                1.39,
+                1.39,
+                0.93,
+                0.92,
+                0.92,
+                1.39,
+                1.07,
+                1.04,
+                1.42
+              ],
+              "disabled_samples_ns": [
+                10.42,
+                9.21,
+                8,
+                10.39,
+                10.65,
+                10.53,
+                11.14,
+                10.65,
+                9.09
+              ]
+            },
+            {
+              "scenario": "xor_x_0",
+              "current_ns_median": 3.83,
+              "current_ns_iqr": 0.13000000000000034,
+              "disabled_ns_median": 11.22,
+              "disabled_ns_iqr": 1.3100000000000005,
+              "current_over_disabled": 0.3413547237076649,
+              "current_samples_ns": [
+                3.95,
+                3.82,
+                5.06,
+                3.49,
+                3.2,
+                3.86,
+                4.28,
+                3.83,
+                3.82
+              ],
+              "disabled_samples_ns": [
+                11.43,
+                9.46,
+                9.03,
+                11.22,
+                11.96,
+                11.14,
+                11.39,
+                12.07,
+                10.12
+              ]
+            },
+            {
+              "scenario": "xor_x_neg1",
+              "current_ns_median": 30.68,
+              "current_ns_iqr": 1.370000000000001,
+              "disabled_ns_median": 33.73,
+              "disabled_ns_iqr": 3.5199999999999996,
+              "current_over_disabled": 0.9095760450637416,
+              "current_samples_ns": [
+                32.03,
+                30.39,
+                30.61,
+                29.08,
+                26.01,
+                30.68,
+                31.76,
+                31.68,
+                32.32
+              ],
+              "disabled_samples_ns": [
+                32.61,
+                30.52,
+                29.92,
+                37.37,
+                35.25,
+                33.95,
+                33.73,
+                34.07,
+                30.55
+              ]
+            },
+            {
+              "scenario": "gcd_x_0",
+              "current_ns_median": 3.02,
+              "current_ns_iqr": 0.7599999999999998,
+              "disabled_ns_median": 19.1,
+              "disabled_ns_iqr": 2.1999999999999993,
+              "current_over_disabled": 0.1581151832460733,
+              "current_samples_ns": [
+                3.18,
+                2.41,
+                3.02,
+                2.16,
+                2.07,
+                2.78,
+                3.2,
+                3.17,
+                3.13
+              ],
+              "disabled_samples_ns": [
+                19.64,
+                14.24,
+                17.28,
+                19.36,
+                20.19,
+                19.59,
+                18.08,
+                19.1,
+                17.39
+              ]
+            },
+            {
+              "scenario": "gcd_x_1",
+              "current_ns_median": 2.08,
+              "current_ns_iqr": 0.8000000000000003,
+              "disabled_ns_median": 14.52,
+              "disabled_ns_iqr": 1,
+              "current_over_disabled": 0.14325068870523416,
+              "current_samples_ns": [
+                2.51,
+                1.63,
+                1.83,
+                1.61,
+                1.6,
+                2.11,
+                2.44,
+                2.08,
+                2.43
+              ],
+              "disabled_samples_ns": [
+                15.32,
+                10.77,
+                10.85,
+                16.57,
+                15.52,
+                14.32,
+                14.48,
+                14.59,
+                14.52
+              ]
+            },
+            {
+              "scenario": "gcd_x_x",
+              "current_ns_median": 2.63,
+              "current_ns_iqr": 0.17999999999999972,
+              "disabled_ns_median": 33.93,
+              "disabled_ns_iqr": 2.6799999999999997,
+              "current_over_disabled": 0.07751252578838785,
+              "current_samples_ns": [
+                2.78,
+                2.59,
+                2.55,
+                3.38,
+                2.63,
+                2.6,
+                2.62,
+                2.78,
+                2.78
+              ],
+              "disabled_samples_ns": [
+                34.99,
+                28.96,
+                28.97,
+                33.93,
+                36.64,
+                34.08,
+                32.31,
+                36.13,
+                32.54
+              ]
+            },
+            {
+              "scenario": "lcm_x_0",
+              "current_ns_median": 4.54,
+              "current_ns_iqr": 0.34000000000000075,
+              "disabled_ns_median": 3.47,
+              "disabled_ns_iqr": 0.2799999999999998,
+              "current_over_disabled": 1.3083573487031699,
+              "current_samples_ns": [
+                4.77,
+                3.6,
+                4.52,
+                4.52,
+                4.91,
+                4.54,
+                4.86,
+                4.52,
+                4.92
+              ],
+              "disabled_samples_ns": [
+                3.48,
+                3.24,
+                2.97,
+                4.34,
+                3.25,
+                3.61,
+                3.47,
+                3.52,
+                2.94
+              ]
+            },
+            {
+              "scenario": "lcm_x_1",
+              "current_ns_median": 4.19,
+              "current_ns_iqr": 0.11000000000000032,
+              "disabled_ns_median": 20.72,
+              "disabled_ns_iqr": 3.2600000000000016,
+              "current_over_disabled": 0.20222007722007726,
+              "current_samples_ns": [
+                4.24,
+                3.71,
+                4.13,
+                4.39,
+                4.22,
+                3.96,
+                4.19,
+                4.35,
+                4.18
+              ],
+              "disabled_samples_ns": [
+                21.31,
+                17.35,
+                15.56,
+                21,
+                21.81,
+                20.8,
+                17.74,
+                20.72,
+                19.52
+              ]
+            },
+            {
+              "scenario": "lcm_x_x",
+              "current_ns_median": 4.52,
+              "current_ns_iqr": 0.3099999999999996,
+              "disabled_ns_median": 59.01,
+              "disabled_ns_iqr": 5.43,
+              "current_over_disabled": 0.07659718691747161,
+              "current_samples_ns": [
+                4.52,
+                3.77,
+                4.9,
+                4.73,
+                3.85,
+                4.28,
+                4.59,
+                4.52,
+                4.52
+              ],
+              "disabled_samples_ns": [
+                60.32,
+                52.04,
+                60.18,
+                57.71,
+                61.24,
+                59.01,
+                54.89,
+                60.32,
+                53.2
+              ]
+            },
+            {
+              "scenario": "pow_x_0",
+              "current_ns_median": 5.62,
+              "current_ns_iqr": 0.1200000000000001,
+              "disabled_ns_median": 5.22,
+              "disabled_ns_iqr": 1.1399999999999997,
+              "current_over_disabled": 1.0766283524904214,
+              "current_samples_ns": [
+                5.6,
+                5.01,
+                5.39,
+                6.11,
+                5.68,
+                5.56,
+                6.08,
+                5.62,
+                5.63
+              ],
+              "disabled_samples_ns": [
+                5.6,
+                3.99,
+                3.97,
+                6,
+                5.55,
+                5.56,
+                4.42,
+                5.22,
+                5.08
+              ]
+            },
+            {
+              "scenario": "pow_x_1",
+              "current_ns_median": 6.22,
+              "current_ns_iqr": 0.3700000000000001,
+              "disabled_ns_median": 5.91,
+              "disabled_ns_iqr": 1.17,
+              "current_over_disabled": 1.0524534686971234,
+              "current_samples_ns": [
+                6.22,
+                6.37,
+                7.1,
+                6.3,
+                5.25,
+                6,
+                6.22,
+                6.41,
+                5.56
+              ],
+              "disabled_samples_ns": [
+                5.91,
+                5.08,
+                4.83,
+                6.25,
+                6.28,
+                6.25,
+                5.04,
+                6.32,
+                5.36
+              ]
+            },
+            {
+              "scenario": "powmod_exp_0",
+              "current_ns_median": 3.56,
+              "current_ns_iqr": 0.3599999999999999,
+              "disabled_ns_median": 3.5,
+              "disabled_ns_iqr": 0.45999999999999996,
+              "current_over_disabled": 1.0171428571428571,
+              "current_samples_ns": [
+                3.56,
+                3.87,
+                3.28,
+                5.92,
+                3.5,
+                3.61,
+                3.49,
+                3.47,
+                3.85
+              ],
+              "disabled_samples_ns": [
+                3.54,
+                3.61,
+                3.11,
+                3.77,
+                3.89,
+                3.47,
+                3.14,
+                3.5,
+                3.15
+              ]
+            },
+            {
+              "scenario": "powmod_exp_1",
+              "current_ns_median": 5.68,
+              "current_ns_iqr": 0.3100000000000005,
+              "disabled_ns_median": 705.06,
+              "disabled_ns_iqr": 36.15999999999997,
+              "current_over_disabled": 0.008056051967208464,
+              "current_samples_ns": [
+                5.64,
+                6.24,
+                5.83,
+                5.47,
+                5.68,
+                5.58,
+                5.65,
+                5.95,
+                6.62
+              ],
+              "disabled_samples_ns": [
+                705.06,
+                651.51,
+                695.02,
+                698.76,
+                731.18,
+                732.99,
+                732.25,
+                721.93,
+                631.04
+              ]
+            },
+            {
+              "scenario": "powmod_base_0",
+              "current_ns_median": 5.66,
+              "current_ns_iqr": 0.33000000000000007,
+              "disabled_ns_median": 4.95,
+              "disabled_ns_iqr": 0.3200000000000003,
+              "current_over_disabled": 1.1434343434343435,
+              "current_samples_ns": [
+                5.58,
+                5.15,
+                6.18,
+                5.23,
+                5.85,
+                5.52,
+                5.67,
+                5.66,
+                6.03
+              ],
+              "disabled_samples_ns": [
+                5.04,
+                4.88,
+                5.28,
+                3.71,
+                4.95,
+                4.79,
+                5.53,
+                5.11,
+                4.56
+              ]
+            },
+            {
+              "scenario": "powmod_base_1",
+              "current_ns_median": 4.71,
+              "current_ns_iqr": 0.1999999999999993,
+              "disabled_ns_median": 954.07,
+              "disabled_ns_iqr": 68.53999999999996,
+              "current_over_disabled": 0.00493674468330416,
+              "current_samples_ns": [
+                4.88,
+                4.64,
+                4.89,
+                4.55,
+                4.69,
+                4.71,
+                5.04,
+                4.69,
+                5.05
+              ],
+              "disabled_samples_ns": [
+                982.8,
+                914.26,
+                973.32,
+                924.45,
+                1005.18,
+                990.3,
+                902.6,
+                954.07,
+                852.07
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_even",
+              "current_ns_median": 4.88,
+              "current_ns_iqr": 0.05000000000000071,
+              "disabled_ns_median": 924.8,
+              "disabled_ns_iqr": 53.940000000000055,
+              "current_over_disabled": 0.00527681660899654,
+              "current_samples_ns": [
+                4.88,
+                4.68,
+                4.85,
+                4.66,
+                4.9,
+                4.91,
+                4.89,
+                4.91,
+                4.86
+              ],
+              "disabled_samples_ns": [
+                920.73,
+                936.41,
+                980.43,
+                962.84,
+                962.85,
+                924.8,
+                908.15,
+                908.9,
+                784.45
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_odd",
+              "current_ns_median": 16.53,
+              "current_ns_iqr": 1.0300000000000011,
+              "disabled_ns_median": 993.71,
+              "disabled_ns_iqr": 26.769999999999982,
+              "current_over_disabled": 0.016634631834237353,
+              "current_samples_ns": [
+                16.75,
+                14.08,
+                16.53,
+                14,
+                17.16,
+                16.04,
+                17.65,
+                16.36,
+                17.07
+              ],
+              "disabled_samples_ns": [
+                981.9,
+                984.09,
+                1016.29,
+                1008.53,
+                1008.67,
+                1020.77,
+                993.71,
+                919.91,
+                894.09
+              ]
+            },
+            {
+              "scenario": "powmod_mod_1",
+              "current_ns_median": 3.69,
+              "current_ns_iqr": 0.20999999999999996,
+              "disabled_ns_median": 3.68,
+              "disabled_ns_iqr": 0.31999999999999984,
+              "current_over_disabled": 1.0027173913043477,
+              "current_samples_ns": [
+                4.04,
+                3.37,
+                4.06,
+                3.37,
+                3.77,
+                3.69,
+                3.69,
+                3.64,
+                3.85
+              ],
+              "disabled_samples_ns": [
+                3.33,
+                3.47,
+                3.79,
+                3.55,
+                3.84,
+                3.83,
+                3.69,
+                3.68,
+                2.49
+              ]
+            }
+          ]
+        },
+        {
+          "limbs": 64,
+          "iterations": 5000,
+          "cells": [
+            {
+              "scenario": "add_x_0",
+              "current_ns_median": 3.2,
+              "current_ns_iqr": 0.19999999999999973,
+              "disabled_ns_median": 3.4,
+              "disabled_ns_iqr": 0.5999999999999996,
+              "current_over_disabled": 0.9411764705882354,
+              "current_samples_ns": [
+                3.4,
+                3.4,
+                3.2,
+                2.8,
+                3.2,
+                3.2,
+                4.2,
+                3.4,
+                3.2
+              ],
+              "disabled_samples_ns": [
+                3.2,
+                3.4,
+                3.2,
+                3.4,
+                3.2,
+                6,
+                4.2,
+                3.8,
+                3.6
+              ]
+            },
+            {
+              "scenario": "sub_x_0",
+              "current_ns_median": 3.4,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 3.2,
+              "disabled_ns_iqr": 0.3999999999999999,
+              "current_over_disabled": 1.0625,
+              "current_samples_ns": [
+                3.6,
+                3.2,
+                3,
+                3.2,
+                3.2,
+                3.6,
+                4.2,
+                3.4,
+                3.4
+              ],
+              "disabled_samples_ns": [
+                3.2,
+                3,
+                3.4,
+                3.2,
+                3,
+                3.2,
+                3.8,
+                3.8,
+                3.6
+              ]
+            },
+            {
+              "scenario": "sub_x_x",
+              "current_ns_median": 1,
+              "current_ns_iqr": 0.19999999999999996,
+              "disabled_ns_median": 21.6,
+              "disabled_ns_iqr": 3.1999999999999993,
+              "current_over_disabled": 0.046296296296296294,
+              "current_samples_ns": [
+                1.2,
+                0.8,
+                1,
+                0.8,
+                1,
+                1,
+                1.4,
+                1.2,
+                1
+              ],
+              "disabled_samples_ns": [
+                17.4,
+                23.2,
+                20.2,
+                19.2,
+                20,
+                21.6,
+                25.8,
+                23.2,
+                21.6
+              ]
+            },
+            {
+              "scenario": "mul_x_0",
+              "current_ns_median": 3,
+              "current_ns_iqr": 0.40000000000000036,
+              "disabled_ns_median": 3.6,
+              "disabled_ns_iqr": 0.7999999999999998,
+              "current_over_disabled": 0.8333333333333333,
+              "current_samples_ns": [
+                3.2,
+                2.6,
+                2.8,
+                2.8,
+                5,
+                2.6,
+                3.4,
+                3.2,
+                3
+              ],
+              "disabled_samples_ns": [
+                2.8,
+                2,
+                3.6,
+                3.2,
+                3,
+                5.8,
+                3.6,
+                4,
+                3.8
+              ]
+            },
+            {
+              "scenario": "mul_x_1",
+              "current_ns_median": 3.4,
+              "current_ns_iqr": 0.19999999999999973,
+              "disabled_ns_median": 4,
+              "disabled_ns_iqr": 0.8000000000000003,
+              "current_over_disabled": 0.85,
+              "current_samples_ns": [
+                3.4,
+                3.2,
+                3.4,
+                3.2,
+                3.4,
+                2.8,
+                4.2,
+                3.2,
+                9.8
+              ],
+              "disabled_samples_ns": [
+                3.2,
+                3.4,
+                4.2,
+                4,
+                3.6,
+                3,
+                4.2,
+                5,
+                4.4
+              ]
+            },
+            {
+              "scenario": "mul_x_neg1",
+              "current_ns_median": 4.6,
+              "current_ns_iqr": 1,
+              "disabled_ns_median": 4.8,
+              "disabled_ns_iqr": 1.3999999999999995,
+              "current_over_disabled": 0.9583333333333333,
+              "current_samples_ns": [
+                5.4,
+                4.8,
+                4.4,
+                4.4,
+                4.4,
+                4.2,
+                6,
+                4.6,
+                5.6
+              ],
+              "disabled_samples_ns": [
+                4.2,
+                4.8,
+                5.4,
+                4.4,
+                4.8,
+                4.2,
+                5.8,
+                5.8,
+                5.8
+              ]
+            },
+            {
+              "scenario": "div_x_1",
+              "current_ns_median": 2,
+              "current_ns_iqr": 0.19999999999999996,
+              "disabled_ns_median": 12.8,
+              "disabled_ns_iqr": 0.8000000000000007,
+              "current_over_disabled": 0.15625,
+              "current_samples_ns": [
+                1.8,
+                2,
+                1.6,
+                2,
+                2,
+                2,
+                4,
+                1.8,
+                2
+              ],
+              "disabled_samples_ns": [
+                13,
+                12.6,
+                12.4,
+                12.4,
+                12.6,
+                12.8,
+                16.2,
+                14.6,
+                13.4
+              ]
+            },
+            {
+              "scenario": "div_x_neg1",
+              "current_ns_median": 4,
+              "current_ns_iqr": 0.6000000000000005,
+              "disabled_ns_median": 13,
+              "disabled_ns_iqr": 3.4000000000000004,
+              "current_over_disabled": 0.3076923076923077,
+              "current_samples_ns": [
+                4.6,
+                3.8,
+                4,
+                3.6,
+                4,
+                3.8,
+                4.8,
+                3.8,
+                4.4
+              ],
+              "disabled_samples_ns": [
+                13,
+                12.6,
+                12.6,
+                12,
+                17.8,
+                12.8,
+                16,
+                17.2,
+                15.2
+              ]
+            },
+            {
+              "scenario": "div_x_x",
+              "current_ns_median": 2.4,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 82.4,
+              "disabled_ns_iqr": 4.599999999999994,
+              "current_over_disabled": 0.029126213592233007,
+              "current_samples_ns": [
+                2.6,
+                2.2,
+                2,
+                2.6,
+                2.2,
+                2.6,
+                3,
+                2.4,
+                2.4
+              ],
+              "disabled_samples_ns": [
+                85.8,
+                81.6,
+                79.4,
+                75.2,
+                81.2,
+                84,
+                97.2,
+                92,
+                82.4
+              ]
+            },
+            {
+              "scenario": "mod_x_1",
+              "current_ns_median": 1.2,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 4,
+              "disabled_ns_iqr": 0.8000000000000003,
+              "current_over_disabled": 0.3,
+              "current_samples_ns": [
+                1.4,
+                1,
+                1.2,
+                1,
+                1,
+                1.4,
+                1.4,
+                1.2,
+                1.2
+              ],
+              "disabled_samples_ns": [
+                3.4,
+                3.6,
+                4.4,
+                4,
+                3.4,
+                4,
+                5,
+                4.2,
+                4.4
+              ]
+            },
+            {
+              "scenario": "mod_x_x",
+              "current_ns_median": 20.8,
+              "current_ns_iqr": 3.1999999999999993,
+              "disabled_ns_median": 104,
+              "disabled_ns_iqr": 11.400000000000006,
+              "current_over_disabled": 0.2,
+              "current_samples_ns": [
+                24.6,
+                20.8,
+                20,
+                20,
+                20.6,
+                18.4,
+                26.8,
+                22.4,
+                23.2
+              ],
+              "disabled_samples_ns": [
+                103,
+                104,
+                99.6,
+                94.4,
+                102,
+                116.6,
+                126.4,
+                113.4,
+                105.2
+              ]
+            },
+            {
+              "scenario": "shl_x_0",
+              "current_ns_median": 1.8,
+              "current_ns_iqr": 0.19999999999999996,
+              "disabled_ns_median": 17,
+              "disabled_ns_iqr": 1.3999999999999986,
+              "current_over_disabled": 0.10588235294117647,
+              "current_samples_ns": [
+                2,
+                2,
+                1.8,
+                1.6,
+                1.8,
+                1.6,
+                2.2,
+                1.8,
+                2
+              ],
+              "disabled_samples_ns": [
+                16,
+                16.6,
+                18,
+                17,
+                16.6,
+                15.8,
+                20.6,
+                19.2,
+                17.4
+              ]
+            },
+            {
+              "scenario": "shr_x_0",
+              "current_ns_median": 1.8,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 13,
+              "disabled_ns_iqr": 1.799999999999999,
+              "current_over_disabled": 0.13846153846153847,
+              "current_samples_ns": [
+                1.8,
+                2,
+                1.6,
+                1.6,
+                1.8,
+                1.6,
+                2,
+                1.8,
+                2
+              ],
+              "disabled_samples_ns": [
+                12.4,
+                13,
+                13.8,
+                13,
+                12,
+                12.2,
+                17,
+                15.8,
+                14.2
+              ]
+            },
+            {
+              "scenario": "and_x_x",
+              "current_ns_median": 1.6,
+              "current_ns_iqr": 0.40000000000000013,
+              "disabled_ns_median": 12,
+              "disabled_ns_iqr": 0.40000000000000036,
+              "current_over_disabled": 0.13333333333333333,
+              "current_samples_ns": [
+                1.6,
+                1.8,
+                1.4,
+                1.2,
+                1.6,
+                1.6,
+                1.8,
+                1.4,
+                1.8
+              ],
+              "disabled_samples_ns": [
+                12.4,
+                11.6,
+                12,
+                11.2,
+                12,
+                12,
+                14.6,
+                14,
+                12.4
+              ]
+            },
+            {
+              "scenario": "and_x_0",
+              "current_ns_median": 2.8,
+              "current_ns_iqr": 0.6000000000000001,
+              "disabled_ns_median": 3.4,
+              "disabled_ns_iqr": 0.6000000000000001,
+              "current_over_disabled": 0.8235294117647058,
+              "current_samples_ns": [
+                3.4,
+                2.6,
+                2.6,
+                2.6,
+                2.8,
+                2.6,
+                3.8,
+                3.2,
+                3
+              ],
+              "disabled_samples_ns": [
+                3.4,
+                2.6,
+                3.2,
+                3,
+                3.6,
+                3.4,
+                3.6,
+                3.6,
+                3
+              ]
+            },
+            {
+              "scenario": "and_x_neg1",
+              "current_ns_median": 4,
+              "current_ns_iqr": 0.8000000000000003,
+              "disabled_ns_median": 128,
+              "disabled_ns_iqr": 14.399999999999991,
+              "current_over_disabled": 0.03125,
+              "current_samples_ns": [
+                4.4,
+                4.2,
+                3.6,
+                3.6,
+                3.6,
+                3.4,
+                4.8,
+                4,
+                4.4
+              ],
+              "disabled_samples_ns": [
+                123.2,
+                118.8,
+                122.8,
+                118.4,
+                133,
+                137.2,
+                151.2,
+                138,
+                128
+              ]
+            },
+            {
+              "scenario": "or_x_x",
+              "current_ns_median": 1.6,
+              "current_ns_iqr": 0,
+              "disabled_ns_median": 12,
+              "disabled_ns_iqr": 2.1999999999999993,
+              "current_over_disabled": 0.13333333333333333,
+              "current_samples_ns": [
+                1.6,
+                1.6,
+                1.4,
+                1.6,
+                1.6,
+                1.6,
+                1.8,
+                1.4,
+                1.8
+              ],
+              "disabled_samples_ns": [
+                18.2,
+                11.6,
+                12,
+                10.8,
+                11.8,
+                12,
+                14.6,
+                14,
+                12.4
+              ]
+            },
+            {
+              "scenario": "or_x_0",
+              "current_ns_median": 3.6,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 14,
+              "disabled_ns_iqr": 2.5999999999999996,
+              "current_over_disabled": 0.2571428571428572,
+              "current_samples_ns": [
+                3.8,
+                3.6,
+                3.2,
+                3.4,
+                3.6,
+                3.2,
+                4.2,
+                3.6,
+                3.8
+              ],
+              "disabled_samples_ns": [
+                15,
+                13.4,
+                14,
+                12.4,
+                13.4,
+                13.2,
+                17,
+                16,
+                16
+              ]
+            },
+            {
+              "scenario": "or_x_neg1",
+              "current_ns_median": 3.4,
+              "current_ns_iqr": 0.7999999999999998,
+              "disabled_ns_median": 148.8,
+              "disabled_ns_iqr": 10.400000000000006,
+              "current_over_disabled": 0.022849462365591395,
+              "current_samples_ns": [
+                4,
+                3.4,
+                3.2,
+                4,
+                3.2,
+                3.2,
+                4.6,
+                3.8,
+                3.4
+              ],
+              "disabled_samples_ns": [
+                148.8,
+                142.8,
+                133.6,
+                129.6,
+                152.2,
+                152.8,
+                171,
+                155.6,
+                142.4
+              ]
+            },
+            {
+              "scenario": "xor_x_x",
+              "current_ns_median": 1,
+              "current_ns_iqr": 0.19999999999999996,
+              "disabled_ns_median": 28.8,
+              "disabled_ns_iqr": 4.199999999999999,
+              "current_over_disabled": 0.034722222222222224,
+              "current_samples_ns": [
+                1.4,
+                0.8,
+                0.8,
+                1,
+                1.2,
+                1,
+                1.4,
+                1.2,
+                1
+              ],
+              "disabled_samples_ns": [
+                27.6,
+                28.8,
+                29.6,
+                28,
+                27.2,
+                27.2,
+                36.8,
+                33.4,
+                31.8
+              ]
+            },
+            {
+              "scenario": "xor_x_0",
+              "current_ns_median": 3.2,
+              "current_ns_iqr": 0.40000000000000036,
+              "disabled_ns_median": 13.2,
+              "disabled_ns_iqr": 1.8000000000000007,
+              "current_over_disabled": 0.24242424242424246,
+              "current_samples_ns": [
+                3.2,
+                3,
+                2.6,
+                3.2,
+                2.8,
+                3.2,
+                3.6,
+                2.8,
+                3.2
+              ],
+              "disabled_samples_ns": [
+                11.4,
+                13.2,
+                14.2,
+                12.6,
+                13.2,
+                13.2,
+                16.8,
+                15,
+                15
+              ]
+            },
+            {
+              "scenario": "xor_x_neg1",
+              "current_ns_median": 137,
+              "current_ns_iqr": 31.19999999999999,
+              "disabled_ns_median": 121,
+              "disabled_ns_iqr": 17.799999999999997,
+              "current_over_disabled": 1.1322314049586777,
+              "current_samples_ns": [
+                137,
+                117,
+                114.2,
+                115.6,
+                168,
+                145.4,
+                148.2,
+                158.2,
+                124.6
+              ],
+              "disabled_samples_ns": [
+                112.2,
+                118.8,
+                119.4,
+                114,
+                121,
+                138.2,
+                151.4,
+                136.6,
+                126.2
+              ]
+            },
+            {
+              "scenario": "gcd_x_0",
+              "current_ns_median": 2.2,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 27.8,
+              "disabled_ns_iqr": 5.600000000000001,
+              "current_over_disabled": 0.07913669064748202,
+              "current_samples_ns": [
+                2.2,
+                2.2,
+                4,
+                2,
+                2,
+                2.2,
+                2.6,
+                2.4,
+                2.8
+              ],
+              "disabled_samples_ns": [
+                22,
+                26.4,
+                27.8,
+                24.4,
+                30,
+                23.8,
+                33.2,
+                30.8,
+                29
+              ]
+            },
+            {
+              "scenario": "gcd_x_1",
+              "current_ns_median": 1.6,
+              "current_ns_iqr": 0.19999999999999996,
+              "disabled_ns_median": 16.8,
+              "disabled_ns_iqr": 1.8000000000000007,
+              "current_over_disabled": 0.09523809523809523,
+              "current_samples_ns": [
+                1.6,
+                1.6,
+                1.8,
+                1.6,
+                1.8,
+                1.6,
+                2.4,
+                2.2,
+                1.6
+              ],
+              "disabled_samples_ns": [
+                13.8,
+                17.6,
+                16.8,
+                15,
+                16.2,
+                16.6,
+                20.8,
+                19.2,
+                18
+              ]
+            },
+            {
+              "scenario": "gcd_x_x",
+              "current_ns_median": 2.4,
+              "current_ns_iqr": 0.19999999999999973,
+              "disabled_ns_median": 111.8,
+              "disabled_ns_iqr": 8,
+              "current_over_disabled": 0.02146690518783542,
+              "current_samples_ns": [
+                2.4,
+                2.2,
+                2.2,
+                2,
+                2.4,
+                2.4,
+                2.6,
+                2.2,
+                2.4
+              ],
+              "disabled_samples_ns": [
+                215,
+                111.8,
+                102,
+                96.4,
+                107.6,
+                108.6,
+                134,
+                114.6,
+                115.6
+              ]
+            },
+            {
+              "scenario": "lcm_x_0",
+              "current_ns_median": 3.6,
+              "current_ns_iqr": 0.19999999999999973,
+              "disabled_ns_median": 3,
+              "disabled_ns_iqr": 0.6000000000000001,
+              "current_over_disabled": 1.2,
+              "current_samples_ns": [
+                3.4,
+                3.6,
+                3.8,
+                3.2,
+                3.6,
+                3.6,
+                4.8,
+                4.2,
+                3.8
+              ],
+              "disabled_samples_ns": [
+                2.4,
+                2.8,
+                2.8,
+                2.8,
+                3,
+                7,
+                3.4,
+                3.6,
+                3.2
+              ]
+            },
+            {
+              "scenario": "lcm_x_1",
+              "current_ns_median": 3.6,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 21.8,
+              "disabled_ns_iqr": 3.8000000000000007,
+              "current_over_disabled": 0.1651376146788991,
+              "current_samples_ns": [
+                3.8,
+                3.4,
+                3.2,
+                3.6,
+                3.8,
+                3.6,
+                4,
+                3.2,
+                3.6
+              ],
+              "disabled_samples_ns": [
+                20.4,
+                20,
+                21.8,
+                19.4,
+                21,
+                25,
+                25.8,
+                24.2,
+                23.8
+              ]
+            },
+            {
+              "scenario": "lcm_x_x",
+              "current_ns_median": 3.8,
+              "current_ns_iqr": 0.6000000000000001,
+              "disabled_ns_median": 123.2,
+              "disabled_ns_iqr": 23.000000000000014,
+              "current_over_disabled": 0.03084415584415584,
+              "current_samples_ns": [
+                3.4,
+                3,
+                3.4,
+                3.8,
+                5.4,
+                3.6,
+                4.2,
+                4,
+                3.8
+              ],
+              "disabled_samples_ns": [
+                106,
+                123.2,
+                122,
+                113.4,
+                113.8,
+                126,
+                158,
+                142.6,
+                136.8
+              ]
+            },
+            {
+              "scenario": "pow_x_0",
+              "current_ns_median": 4.4,
+              "current_ns_iqr": 0.7999999999999998,
+              "disabled_ns_median": 4.2,
+              "disabled_ns_iqr": 0.7999999999999998,
+              "current_over_disabled": 1.0476190476190477,
+              "current_samples_ns": [
+                4,
+                4.4,
+                4.6,
+                4.8,
+                4.2,
+                4,
+                6,
+                5,
+                4
+              ],
+              "disabled_samples_ns": [
+                3.8,
+                4.2,
+                4.6,
+                4.2,
+                4,
+                4,
+                5.4,
+                4.8,
+                6
+              ]
+            },
+            {
+              "scenario": "pow_x_1",
+              "current_ns_median": 5,
+              "current_ns_iqr": 0.20000000000000018,
+              "disabled_ns_median": 5,
+              "disabled_ns_iqr": 0.40000000000000036,
+              "current_over_disabled": 1,
+              "current_samples_ns": [
+                4.8,
+                7.2,
+                4.8,
+                4.8,
+                4.6,
+                5,
+                6,
+                5,
+                5
+              ],
+              "disabled_samples_ns": [
+                4,
+                5,
+                4.6,
+                4.6,
+                5,
+                4.8,
+                6.2,
+                5.8,
+                5
+              ]
+            },
+            {
+              "scenario": "powmod_exp_0",
+              "current_ns_median": 3,
+              "current_ns_iqr": 0.20000000000000018,
+              "disabled_ns_median": 3.2,
+              "disabled_ns_iqr": 0.40000000000000036,
+              "current_over_disabled": 0.9375,
+              "current_samples_ns": [
+                3,
+                3,
+                3,
+                3.2,
+                2.6,
+                3.2,
+                4,
+                3.2,
+                3
+              ],
+              "disabled_samples_ns": [
+                2.6,
+                2.8,
+                3.2,
+                2.6,
+                3.2,
+                3.2,
+                3.4,
+                3.6,
+                3
+              ]
+            },
+            {
+              "scenario": "powmod_exp_1",
+              "current_ns_median": 5.2,
+              "current_ns_iqr": 0.8000000000000007,
+              "disabled_ns_median": 14807.8,
+              "disabled_ns_iqr": 460.59999999999854,
+              "current_over_disabled": 0.0003511662772322695,
+              "current_samples_ns": [
+                5.4,
+                7,
+                4.2,
+                5.2,
+                4.2,
+                5.2,
+                5.6,
+                4.8,
+                4.6
+              ],
+              "disabled_samples_ns": [
+                14654.6,
+                14881.8,
+                13930.8,
+                13125.2,
+                14822.2,
+                14807.8,
+                16046.2,
+                15746.8,
+                14421.2
+              ]
+            },
+            {
+              "scenario": "powmod_base_0",
+              "current_ns_median": 4.6,
+              "current_ns_iqr": 0.7999999999999998,
+              "disabled_ns_median": 4.2,
+              "disabled_ns_iqr": 0.5999999999999996,
+              "current_over_disabled": 1.0952380952380951,
+              "current_samples_ns": [
+                5.2,
+                4.4,
+                4.4,
+                4.6,
+                4.2,
+                5.2,
+                6,
+                5,
+                4.6
+              ],
+              "disabled_samples_ns": [
+                4,
+                3.8,
+                4.4,
+                3.8,
+                4.2,
+                4.6,
+                4.6,
+                4.8,
+                4.2
+              ]
+            },
+            {
+              "scenario": "powmod_base_1",
+              "current_ns_median": 4,
+              "current_ns_iqr": 1,
+              "disabled_ns_median": 23870,
+              "disabled_ns_iqr": 2152.399999999998,
+              "current_over_disabled": 0.00016757436112274822,
+              "current_samples_ns": [
+                4.4,
+                5.8,
+                3.8,
+                4,
+                3.4,
+                4.8,
+                5,
+                4,
+                3.8
+              ],
+              "disabled_samples_ns": [
+                23371.4,
+                22319.2,
+                23721,
+                21275.8,
+                24394,
+                25839.8,
+                25523.8,
+                23870,
+                25672
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_even",
+              "current_ns_median": 4.2,
+              "current_ns_iqr": 1,
+              "disabled_ns_median": 21796.2,
+              "disabled_ns_iqr": 2031,
+              "current_over_disabled": 0.0001926941393453905,
+              "current_samples_ns": [
+                4.6,
+                5.8,
+                3.6,
+                4.2,
+                3.6,
+                5,
+                5,
+                4,
+                4
+              ],
+              "disabled_samples_ns": [
+                21503,
+                19256.2,
+                21796.2,
+                19310.2,
+                22612.4,
+                25787,
+                23478.2,
+                21447.2,
+                23733
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_odd",
+              "current_ns_median": 18.2,
+              "current_ns_iqr": 1.8000000000000007,
+              "disabled_ns_median": 23259.8,
+              "disabled_ns_iqr": 2776,
+              "current_over_disabled": 0.0007824658853472514,
+              "current_samples_ns": [
+                18,
+                17.8,
+                16.8,
+                17,
+                21.2,
+                18.2,
+                22.6,
+                18.4,
+                19.6
+              ],
+              "disabled_samples_ns": [
+                22261.6,
+                23169.2,
+                21698,
+                21777.2,
+                23627.8,
+                27461,
+                25037.6,
+                23259.8,
+                25202
+              ]
+            },
+            {
+              "scenario": "powmod_mod_1",
+              "current_ns_median": 3.2,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 3.2,
+              "disabled_ns_iqr": 0.3999999999999999,
+              "current_over_disabled": 1,
+              "current_samples_ns": [
+                3.4,
+                3,
+                3,
+                3.2,
+                2.8,
+                3.4,
+                4,
+                3.2,
+                3.2
+              ],
+              "disabled_samples_ns": [
+                3,
+                3.2,
+                3.2,
+                3.2,
+                3.6,
+                3.6,
+                3.8,
+                3.2,
+                3.2
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "paired-release",
+      "reps": 9,
+      "sizes": [
+        {
+          "limbs": 1,
+          "iterations": 200000,
+          "cells": [
+            {
+              "scenario": "add_x_0",
+              "current_ns_median": 3.575,
+              "current_ns_iqr": 0.18000000000000016,
+              "disabled_ns_median": 3.655,
+              "disabled_ns_iqr": 0.1499999999999999,
+              "current_over_disabled": 0.9781121751025993,
+              "current_samples_ns": [
+                3.665,
+                3.305,
+                3.575,
+                3.57,
+                2.965,
+                3.745,
+                4.28,
+                3.565,
+                4.01
+              ],
+              "disabled_samples_ns": [
+                3.115,
+                3.36,
+                3.575,
+                3.565,
+                3.655,
+                3.72,
+                3.715,
+                3.84,
+                3.655
+              ]
+            },
+            {
+              "scenario": "sub_x_0",
+              "current_ns_median": 3.5,
+              "current_ns_iqr": 0.18999999999999995,
+              "disabled_ns_median": 3.48,
+              "disabled_ns_iqr": 0.16999999999999993,
+              "current_over_disabled": 1.0057471264367817,
+              "current_samples_ns": [
+                3.385,
+                3.565,
+                3.5,
+                3.495,
+                3.31,
+                4.925,
+                3.655,
+                3.465,
+                3.85
+              ],
+              "disabled_samples_ns": [
+                3.02,
+                3.395,
+                3.585,
+                3.48,
+                3.27,
+                3.565,
+                3.465,
+                3.55,
+                3.565
+              ]
+            },
+            {
+              "scenario": "sub_x_x",
+              "current_ns_median": 0.99,
+              "current_ns_iqr": 0.30999999999999994,
+              "disabled_ns_median": 2.045,
+              "disabled_ns_iqr": 0.35499999999999976,
+              "current_over_disabled": 0.4841075794621027,
+              "current_samples_ns": [
+                0.825,
+                1.17,
+                0.96,
+                0.945,
+                0.785,
+                1.45,
+                1.28,
+                1.255,
+                0.99
+              ],
+              "disabled_samples_ns": [
+                2.045,
+                2.33,
+                1.86,
+                2.215,
+                1.83,
+                1.845,
+                2.065,
+                1.86,
+                2.605
+              ]
+            },
+            {
+              "scenario": "mul_x_0",
+              "current_ns_median": 2.855,
+              "current_ns_iqr": 0.52,
+              "disabled_ns_median": 2.65,
+              "disabled_ns_iqr": 0.2799999999999998,
+              "current_over_disabled": 1.0773584905660378,
+              "current_samples_ns": [
+                2.54,
+                2.925,
+                2.855,
+                3.145,
+                2.355,
+                3.22,
+                2.625,
+                3.46,
+                2.75
+              ],
+              "disabled_samples_ns": [
+                2.85,
+                2.34,
+                2.58,
+                2.65,
+                2.62,
+                2.55,
+                3.375,
+                2.86,
+                3.18
+              ]
+            },
+            {
+              "scenario": "mul_x_1",
+              "current_ns_median": 3.46,
+              "current_ns_iqr": 0.4849999999999999,
+              "disabled_ns_median": 3.205,
+              "disabled_ns_iqr": 0.43000000000000016,
+              "current_over_disabled": 1.079563182527301,
+              "current_samples_ns": [
+                3.045,
+                3.055,
+                3.485,
+                3.46,
+                2.875,
+                3.685,
+                3.54,
+                3.46,
+                4.285
+              ],
+              "disabled_samples_ns": [
+                3.865,
+                3.205,
+                3.38,
+                3.48,
+                2.875,
+                3.03,
+                3.185,
+                3.475,
+                3.045
+              ]
+            },
+            {
+              "scenario": "mul_x_neg1",
+              "current_ns_median": 5.69,
+              "current_ns_iqr": 0.5750000000000002,
+              "disabled_ns_median": 4.615,
+              "disabled_ns_iqr": 0.7650000000000006,
+              "current_over_disabled": 1.2329360780065006,
+              "current_samples_ns": [
+                4.43,
+                5.08,
+                5.875,
+                5.565,
+                5.995,
+                5.3,
+                5.7,
+                5.69,
+                6.53
+              ],
+              "disabled_samples_ns": [
+                5.275,
+                5.285,
+                6.51,
+                5.68,
+                4.615,
+                4.35,
+                4.57,
+                4.52,
+                4.415
+              ]
+            },
+            {
+              "scenario": "div_x_1",
+              "current_ns_median": 2.3,
+              "current_ns_iqr": 0.14000000000000012,
+              "disabled_ns_median": 9.44,
+              "disabled_ns_iqr": 1.2850000000000001,
+              "current_over_disabled": 0.24364406779661016,
+              "current_samples_ns": [
+                2.3,
+                2.17,
+                2.205,
+                2.325,
+                2.525,
+                2.345,
+                2.205,
+                2.3,
+                3.075
+              ],
+              "disabled_samples_ns": [
+                9.44,
+                10.115,
+                9,
+                10.775,
+                8.765,
+                8.735,
+                9.65,
+                11.445,
+                8.83
+              ]
+            },
+            {
+              "scenario": "div_x_neg1",
+              "current_ns_median": 4.51,
+              "current_ns_iqr": 0.2649999999999997,
+              "disabled_ns_median": 9.27,
+              "disabled_ns_iqr": 1.4949999999999992,
+              "current_over_disabled": 0.48651564185544766,
+              "current_samples_ns": [
+                4.115,
+                4.45,
+                4.5,
+                4.69,
+                4.51,
+                3.66,
+                4.715,
+                5.005,
+                5.215
+              ],
+              "disabled_samples_ns": [
+                8.505,
+                10.305,
+                9.775,
+                10.725,
+                10.875,
+                8.81,
+                7.345,
+                9.27,
+                8.875
+              ]
+            },
+            {
+              "scenario": "div_x_x",
+              "current_ns_median": 2.49,
+              "current_ns_iqr": 0.2749999999999999,
+              "disabled_ns_median": 2.655,
+              "disabled_ns_iqr": 0.11500000000000021,
+              "current_over_disabled": 0.9378531073446329,
+              "current_samples_ns": [
+                2.465,
+                2.49,
+                2.38,
+                2.37,
+                2.885,
+                2.685,
+                2.41,
+                2.555,
+                2.745
+              ],
+              "disabled_samples_ns": [
+                2.065,
+                2.81,
+                2.72,
+                2.54,
+                2.655,
+                2.59,
+                2.705,
+                2.605,
+                2.675
+              ]
+            },
+            {
+              "scenario": "mod_x_1",
+              "current_ns_median": 1.255,
+              "current_ns_iqr": 0.1399999999999999,
+              "disabled_ns_median": 3.565,
+              "disabled_ns_iqr": 0.5549999999999997,
+              "current_over_disabled": 0.35203366058906027,
+              "current_samples_ns": [
+                1.095,
+                1.145,
+                1.06,
+                1.255,
+                1.39,
+                1.35,
+                1.255,
+                1.285,
+                1.25
+              ],
+              "disabled_samples_ns": [
+                3.565,
+                4.015,
+                3.96,
+                4.435,
+                4.545,
+                3.43,
+                3.135,
+                3.46,
+                3.49
+              ]
+            },
+            {
+              "scenario": "mod_x_x",
+              "current_ns_median": 4.735,
+              "current_ns_iqr": 0.5800000000000001,
+              "disabled_ns_median": 4.79,
+              "disabled_ns_iqr": 0.4400000000000004,
+              "current_over_disabled": 0.9885177453027141,
+              "current_samples_ns": [
+                4.615,
+                4.085,
+                4.735,
+                4.715,
+                5.315,
+                5.34,
+                4.43,
+                5.035,
+                5.195
+              ],
+              "disabled_samples_ns": [
+                4.28,
+                4.79,
+                4.915,
+                5.38,
+                5.55,
+                4.745,
+                4.365,
+                4.67,
+                5.11
+              ]
+            },
+            {
+              "scenario": "shl_x_0",
+              "current_ns_median": 2.06,
+              "current_ns_iqr": 0.17000000000000037,
+              "disabled_ns_median": 6.935,
+              "disabled_ns_iqr": 1.4299999999999997,
+              "current_over_disabled": 0.2970439798125451,
+              "current_samples_ns": [
+                1.88,
+                2.005,
+                2.05,
+                2.03,
+                2.2,
+                2.265,
+                2.06,
+                2.13,
+                2.455
+              ],
+              "disabled_samples_ns": [
+                6.865,
+                6.2,
+                6.96,
+                7.885,
+                7.915,
+                6.17,
+                7.63,
+                6.19,
+                6.935
+              ]
+            },
+            {
+              "scenario": "shr_x_0",
+              "current_ns_median": 2.02,
+              "current_ns_iqr": 0.18499999999999983,
+              "disabled_ns_median": 6.78,
+              "disabled_ns_iqr": 0.7549999999999999,
+              "current_over_disabled": 0.29793510324483774,
+              "current_samples_ns": [
+                1.76,
+                2.015,
+                1.915,
+                1.97,
+                2.155,
+                2.09,
+                2.17,
+                2.02,
+                2.175
+              ],
+              "disabled_samples_ns": [
+                6.715,
+                6.67,
+                6.49,
+                7.48,
+                7.18,
+                6.42,
+                8.155,
+                6.78,
+                7.425
+              ]
+            },
+            {
+              "scenario": "and_x_x",
+              "current_ns_median": 2,
+              "current_ns_iqr": 0.14500000000000002,
+              "disabled_ns_median": 5.235,
+              "disabled_ns_iqr": 1.1499999999999995,
+              "current_over_disabled": 0.38204393505253104,
+              "current_samples_ns": [
+                1.875,
+                2.085,
+                2.165,
+                1.955,
+                2.235,
+                2,
+                1.98,
+                1.955,
+                2.1
+              ],
+              "disabled_samples_ns": [
+                5.235,
+                4.92,
+                4.57,
+                6.025,
+                4.57,
+                4.575,
+                5.725,
+                5.695,
+                5.835
+              ]
+            },
+            {
+              "scenario": "and_x_0",
+              "current_ns_median": 3.07,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 3.425,
+              "disabled_ns_iqr": 0.25,
+              "current_over_disabled": 0.8963503649635036,
+              "current_samples_ns": [
+                2.63,
+                2.765,
+                3.165,
+                2.83,
+                3.235,
+                4.36,
+                3.07,
+                3.145,
+                2.665
+              ],
+              "disabled_samples_ns": [
+                2.865,
+                3.44,
+                3.435,
+                3.185,
+                3.43,
+                3.44,
+                3.155,
+                3.425,
+                3.34
+              ]
+            },
+            {
+              "scenario": "and_x_neg1",
+              "current_ns_median": 4.405,
+              "current_ns_iqr": 0.33000000000000007,
+              "disabled_ns_median": 16.765,
+              "disabled_ns_iqr": 2.3800000000000026,
+              "current_over_disabled": 0.2627497763197137,
+              "current_samples_ns": [
+                3.895,
+                4.97,
+                4.46,
+                4.09,
+                4.51,
+                4.87,
+                4.385,
+                4.405,
+                4.18
+              ],
+              "disabled_samples_ns": [
+                15.5,
+                16.18,
+                16.005,
+                18.385,
+                18.695,
+                15.485,
+                17.435,
+                16.765,
+                26.13
+              ]
+            },
+            {
+              "scenario": "or_x_x",
+              "current_ns_median": 2,
+              "current_ns_iqr": 0.1299999999999999,
+              "disabled_ns_median": 5.415,
+              "disabled_ns_iqr": 1.005,
+              "current_over_disabled": 0.3693444136657433,
+              "current_samples_ns": [
+                1.955,
+                2.445,
+                1.985,
+                1.905,
+                2.14,
+                2.085,
+                2,
+                1.955,
+                2.065
+              ],
+              "disabled_samples_ns": [
+                4.94,
+                5.5,
+                5.415,
+                5.98,
+                4.62,
+                4.575,
+                5.69,
+                5.655,
+                4.65
+              ]
+            },
+            {
+              "scenario": "or_x_0",
+              "current_ns_median": 4.115,
+              "current_ns_iqr": 0.375,
+              "disabled_ns_median": 7.615,
+              "disabled_ns_iqr": 1.29,
+              "current_over_disabled": 0.5403808273145109,
+              "current_samples_ns": [
+                4.13,
+                4.315,
+                3.88,
+                4.115,
+                4.175,
+                4.27,
+                3.785,
+                3.8,
+                3.765
+              ],
+              "disabled_samples_ns": [
+                7.2,
+                7.615,
+                8.26,
+                9.115,
+                6.595,
+                6.905,
+                8.58,
+                7.955,
+                6.97
+              ]
+            },
+            {
+              "scenario": "or_x_neg1",
+              "current_ns_median": 3.835,
+              "current_ns_iqr": 0.2250000000000001,
+              "disabled_ns_median": 13.03,
+              "disabled_ns_iqr": 1.4900000000000002,
+              "current_over_disabled": 0.2943207981580967,
+              "current_samples_ns": [
+                3.68,
+                4.1,
+                3.95,
+                4.07,
+                3.83,
+                3.76,
+                3.775,
+                4,
+                3.835
+              ],
+              "disabled_samples_ns": [
+                11.98,
+                13.03,
+                14.19,
+                13.25,
+                11.635,
+                12.7,
+                12.965,
+                14.52,
+                14.35
+              ]
+            },
+            {
+              "scenario": "xor_x_x",
+              "current_ns_median": 0.95,
+              "current_ns_iqr": 0.09999999999999998,
+              "disabled_ns_median": 1.665,
+              "disabled_ns_iqr": 0.16000000000000014,
+              "current_over_disabled": 0.5705705705705705,
+              "current_samples_ns": [
+                0.915,
+                1.375,
+                0.915,
+                0.945,
+                1.045,
+                1.045,
+                0.945,
+                0.95,
+                0.99
+              ],
+              "disabled_samples_ns": [
+                1.65,
+                1.46,
+                1.575,
+                1.68,
+                1.76,
+                1.665,
+                1.575,
+                1.885,
+                1.735
+              ]
+            },
+            {
+              "scenario": "xor_x_0",
+              "current_ns_median": 3.62,
+              "current_ns_iqr": 0.31000000000000005,
+              "disabled_ns_median": 7.87,
+              "disabled_ns_iqr": 0.48499999999999943,
+              "current_over_disabled": 0.4599745870393901,
+              "current_samples_ns": [
+                3.575,
+                3.995,
+                3.62,
+                3.51,
+                3.82,
+                4.085,
+                3.5,
+                3.51,
+                3.82
+              ],
+              "disabled_samples_ns": [
+                7.57,
+                7.41,
+                9.12,
+                7.89,
+                7.34,
+                7.22,
+                7.895,
+                7.87,
+                9.63
+              ]
+            },
+            {
+              "scenario": "xor_x_neg1",
+              "current_ns_median": 14.95,
+              "current_ns_iqr": 1.3149999999999995,
+              "disabled_ns_median": 17.09,
+              "disabled_ns_iqr": 1.139999999999997,
+              "current_over_disabled": 0.8747805734347571,
+              "current_samples_ns": [
+                13.32,
+                13.77,
+                14.74,
+                15.58,
+                17.47,
+                14.265,
+                15.19,
+                14.95,
+                16.79
+              ],
+              "disabled_samples_ns": [
+                14.955,
+                17.1,
+                18.14,
+                17.09,
+                15.935,
+                16.475,
+                17.04,
+                17.615,
+                18.41
+              ]
+            },
+            {
+              "scenario": "gcd_x_0",
+              "current_ns_median": 2.535,
+              "current_ns_iqr": 0.125,
+              "disabled_ns_median": 8.75,
+              "disabled_ns_iqr": 0.7949999999999999,
+              "current_over_disabled": 0.28971428571428576,
+              "current_samples_ns": [
+                2.13,
+                2.49,
+                2.545,
+                2.595,
+                2.72,
+                2.47,
+                2.47,
+                2.535,
+                3.01
+              ],
+              "disabled_samples_ns": [
+                8.4,
+                8.75,
+                10.51,
+                9.34,
+                8.04,
+                8.675,
+                9.195,
+                8.23,
+                8.87
+              ]
+            },
+            {
+              "scenario": "gcd_x_1",
+              "current_ns_median": 1.89,
+              "current_ns_iqr": 0.365,
+              "disabled_ns_median": 28.085,
+              "disabled_ns_iqr": 1.2899999999999991,
+              "current_over_disabled": 0.06729570945344489,
+              "current_samples_ns": [
+                1.635,
+                1.605,
+                1.89,
+                2,
+                2.085,
+                1.635,
+                1.89,
+                1.925,
+                2.055
+              ],
+              "disabled_samples_ns": [
+                27.855,
+                26.04,
+                29.145,
+                29.605,
+                28.69,
+                26.67,
+                28.085,
+                27.91,
+                29.39
+              ]
+            },
+            {
+              "scenario": "gcd_x_x",
+              "current_ns_median": 2.885,
+              "current_ns_iqr": 0.26000000000000023,
+              "disabled_ns_median": 8.165,
+              "disabled_ns_iqr": 0.8400000000000007,
+              "current_over_disabled": 0.3533374157991427,
+              "current_samples_ns": [
+                2.715,
+                5.495,
+                2.71,
+                2.61,
+                2.99,
+                2.885,
+                2.75,
+                2.97,
+                2.975
+              ],
+              "disabled_samples_ns": [
+                7.785,
+                8.165,
+                8.55,
+                9.205,
+                8.285,
+                6.535,
+                9.53,
+                7.67,
+                7.71
+              ]
+            },
+            {
+              "scenario": "lcm_x_0",
+              "current_ns_median": 3.975,
+              "current_ns_iqr": 0.27500000000000036,
+              "disabled_ns_median": 3.15,
+              "disabled_ns_iqr": 0.27500000000000036,
+              "current_over_disabled": 1.2619047619047619,
+              "current_samples_ns": [
+                3.395,
+                3.565,
+                4.365,
+                3.855,
+                4.275,
+                3.975,
+                4.11,
+                3.835,
+                4.04
+              ],
+              "disabled_samples_ns": [
+                3.2,
+                2.925,
+                2.96,
+                3.15,
+                2.915,
+                2.65,
+                3.155,
+                4.055,
+                3.245
+              ]
+            },
+            {
+              "scenario": "lcm_x_1",
+              "current_ns_median": 4.085,
+              "current_ns_iqr": 0.40500000000000025,
+              "disabled_ns_median": 28.92,
+              "disabled_ns_iqr": 2.3699999999999974,
+              "current_over_disabled": 0.14125172890733056,
+              "current_samples_ns": [
+                3.495,
+                4.085,
+                4.01,
+                4.015,
+                4.63,
+                4.42,
+                4.09,
+                4.035,
+                4.715
+              ],
+              "disabled_samples_ns": [
+                28.5,
+                26.925,
+                28.31,
+                28.92,
+                29.14,
+                30.865,
+                28.495,
+                32.425,
+                31.22
+              ]
+            },
+            {
+              "scenario": "lcm_x_x",
+              "current_ns_median": 3.11,
+              "current_ns_iqr": 0.30500000000000016,
+              "disabled_ns_median": 3.005,
+              "disabled_ns_iqr": 0.7549999999999999,
+              "current_over_disabled": 1.0349417637271214,
+              "current_samples_ns": [
+                2.585,
+                3,
+                2.96,
+                3.295,
+                3.265,
+                2.935,
+                3.14,
+                3.11,
+                3.31
+              ],
+              "disabled_samples_ns": [
+                2.825,
+                2.78,
+                2.94,
+                3.005,
+                2.915,
+                3.815,
+                3.21,
+                4.2,
+                3.67
+              ]
+            },
+            {
+              "scenario": "pow_x_0",
+              "current_ns_median": 4.825,
+              "current_ns_iqr": 0.2600000000000007,
+              "disabled_ns_median": 4.625,
+              "disabled_ns_iqr": 0.3799999999999999,
+              "current_over_disabled": 1.0432432432432432,
+              "current_samples_ns": [
+                4.45,
+                4.805,
+                5.12,
+                4.825,
+                5.6,
+                3.99,
+                5.065,
+                5.035,
+                4.815
+              ],
+              "disabled_samples_ns": [
+                4.39,
+                4.15,
+                4.715,
+                4.48,
+                3.945,
+                4.625,
+                4.77,
+                5.195,
+                4.805
+              ]
+            },
+            {
+              "scenario": "pow_x_1",
+              "current_ns_median": 5.715,
+              "current_ns_iqr": 0.5399999999999991,
+              "disabled_ns_median": 5.715,
+              "disabled_ns_iqr": 0.5099999999999998,
+              "current_over_disabled": 1,
+              "current_samples_ns": [
+                4.815,
+                5.155,
+                5.715,
+                5.355,
+                6.165,
+                5.72,
+                5.695,
+                5.895,
+                6.17
+              ],
+              "disabled_samples_ns": [
+                5.855,
+                5.285,
+                5.44,
+                5.38,
+                5.715,
+                6.06,
+                5.365,
+                7.115,
+                5.89
+              ]
+            },
+            {
+              "scenario": "powmod_exp_0",
+              "current_ns_median": 3.46,
+              "current_ns_iqr": 0.20999999999999996,
+              "disabled_ns_median": 3.51,
+              "disabled_ns_iqr": 0.31000000000000005,
+              "current_over_disabled": 0.9857549857549858,
+              "current_samples_ns": [
+                3.095,
+                3.285,
+                3.46,
+                3.465,
+                4.005,
+                3.265,
+                3.475,
+                3.25,
+                3.675
+              ],
+              "disabled_samples_ns": [
+                5.475,
+                3.5,
+                3.48,
+                3.46,
+                3.595,
+                3.42,
+                3.51,
+                4.535,
+                3.79
+              ]
+            },
+            {
+              "scenario": "powmod_exp_1",
+              "current_ns_median": 5.975,
+              "current_ns_iqr": 0.25,
+              "disabled_ns_median": 20.6,
+              "disabled_ns_iqr": 3.5950000000000024,
+              "current_over_disabled": 0.29004854368932037,
+              "current_samples_ns": [
+                4.98,
+                5.745,
+                5.975,
+                5.975,
+                6.375,
+                5.77,
+                6.02,
+                5.87,
+                6.08
+              ],
+              "disabled_samples_ns": [
+                28.175,
+                19.29,
+                18.64,
+                19.53,
+                20.6,
+                22.655,
+                18.765,
+                22.885,
+                22.95
+              ]
+            },
+            {
+              "scenario": "powmod_base_0",
+              "current_ns_median": 5.685,
+              "current_ns_iqr": 0.1349999999999998,
+              "disabled_ns_median": 5.035,
+              "disabled_ns_iqr": 0.39999999999999947,
+              "current_over_disabled": 1.1290963257199602,
+              "current_samples_ns": [
+                4.97,
+                5.475,
+                5.67,
+                5.805,
+                6.35,
+                6.325,
+                5.685,
+                5.67,
+                5.79
+              ],
+              "disabled_samples_ns": [
+                4.66,
+                4.585,
+                5.035,
+                6.14,
+                4.925,
+                4.825,
+                5.085,
+                5.57,
+                5.225
+              ]
+            },
+            {
+              "scenario": "powmod_base_1",
+              "current_ns_median": 4.525,
+              "current_ns_iqr": 0.35000000000000053,
+              "disabled_ns_median": 30.315,
+              "disabled_ns_iqr": 2.5700000000000003,
+              "current_over_disabled": 0.14926603991423387,
+              "current_samples_ns": [
+                3.87,
+                4.545,
+                4.525,
+                4.425,
+                5.09,
+                4.775,
+                4.425,
+                4.405,
+                5.05
+              ],
+              "disabled_samples_ns": [
+                26.95,
+                27.055,
+                30.315,
+                30.205,
+                36.665,
+                31.34,
+                28.9,
+                31.47,
+                32.66
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_even",
+              "current_ns_median": 4.65,
+              "current_ns_iqr": 0.46999999999999975,
+              "disabled_ns_median": 27.595,
+              "disabled_ns_iqr": 0.6600000000000001,
+              "current_over_disabled": 0.16850878782388115,
+              "current_samples_ns": [
+                3.955,
+                4.48,
+                4.615,
+                4.65,
+                5.5,
+                5.085,
+                4.62,
+                4.855,
+                5.415
+              ],
+              "disabled_samples_ns": [
+                27.455,
+                24.63,
+                27.05,
+                27.92,
+                28.1,
+                27.44,
+                32.91,
+                27.595,
+                29.09
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_odd",
+              "current_ns_median": 11.575,
+              "current_ns_iqr": 0.5950000000000006,
+              "disabled_ns_median": 33.56,
+              "disabled_ns_iqr": 2.965,
+              "current_over_disabled": 0.34490464839094154,
+              "current_samples_ns": [
+                10.4,
+                11.34,
+                11.935,
+                11.515,
+                12.715,
+                12.25,
+                11.575,
+                11.845,
+                10.245
+              ],
+              "disabled_samples_ns": [
+                30.375,
+                33.335,
+                31.73,
+                35.61,
+                34.695,
+                34.13,
+                31.64,
+                33.56,
+                36.85
+              ]
+            },
+            {
+              "scenario": "powmod_mod_1",
+              "current_ns_median": 3.435,
+              "current_ns_iqr": 0.1499999999999999,
+              "disabled_ns_median": 3.405,
+              "disabled_ns_iqr": 0.33499999999999996,
+              "current_over_disabled": 1.0088105726872247,
+              "current_samples_ns": [
+                2.96,
+                3.18,
+                3.435,
+                3.39,
+                3.7,
+                3.69,
+                3.36,
+                3.51,
+                3.505
+              ],
+              "disabled_samples_ns": [
+                3.06,
+                3.3,
+                3.305,
+                3.64,
+                3.695,
+                3.405,
+                3.35,
+                3.42,
+                3.65
+              ]
+            }
+          ]
+        },
+        {
+          "limbs": 8,
+          "iterations": 100000,
+          "cells": [
+            {
+              "scenario": "add_x_0",
+              "current_ns_median": 3.94,
+              "current_ns_iqr": 0.6800000000000002,
+              "disabled_ns_median": 3.66,
+              "disabled_ns_iqr": 0.98,
+              "current_over_disabled": 1.076502732240437,
+              "current_samples_ns": [
+                3.67,
+                4.01,
+                3.94,
+                3.99,
+                3.97,
+                4.79,
+                2.97,
+                3.31,
+                3.31
+              ],
+              "disabled_samples_ns": [
+                4.04,
+                4.01,
+                3.98,
+                4.01,
+                3.66,
+                2.71,
+                3.03,
+                2.96,
+                3.31
+              ]
+            },
+            {
+              "scenario": "sub_x_0",
+              "current_ns_median": 3.87,
+              "current_ns_iqr": 0.7799999999999994,
+              "disabled_ns_median": 3.53,
+              "disabled_ns_iqr": 0.94,
+              "current_over_disabled": 1.096317280453258,
+              "current_samples_ns": [
+                3.58,
+                3.87,
+                4.02,
+                3.91,
+                4.02,
+                4.06,
+                2.93,
+                3.21,
+                3.24
+              ],
+              "disabled_samples_ns": [
+                4.22,
+                3.83,
+                3.82,
+                3.83,
+                3.53,
+                2.63,
+                2.89,
+                2.89,
+                3.21
+              ]
+            },
+            {
+              "scenario": "sub_x_x",
+              "current_ns_median": 1.05,
+              "current_ns_iqr": 0.020000000000000018,
+              "disabled_ns_median": 4.37,
+              "disabled_ns_iqr": 1.29,
+              "current_over_disabled": 0.2402745995423341,
+              "current_samples_ns": [
+                0.92,
+                1.05,
+                1.06,
+                1.04,
+                1.04,
+                0.92,
+                1.05,
+                1.16,
+                1.17
+              ],
+              "disabled_samples_ns": [
+                4.47,
+                5.24,
+                5.31,
+                5.04,
+                3.75,
+                3.59,
+                3.68,
+                4.19,
+                4.37
+              ]
+            },
+            {
+              "scenario": "mul_x_0",
+              "current_ns_median": 2.88,
+              "current_ns_iqr": 0.41000000000000014,
+              "disabled_ns_median": 2.75,
+              "disabled_ns_iqr": 0.77,
+              "current_over_disabled": 1.0472727272727271,
+              "current_samples_ns": [
+                2.85,
+                2.73,
+                3.2,
+                3.14,
+                3.17,
+                2.52,
+                2.88,
+                2.92,
+                2.34
+              ],
+              "disabled_samples_ns": [
+                2.8,
+                3.29,
+                3.88,
+                3.15,
+                2.75,
+                2.53,
+                2.13,
+                2.38,
+                2.35
+              ]
+            },
+            {
+              "scenario": "mul_x_1",
+              "current_ns_median": 3.18,
+              "current_ns_iqr": 0.7999999999999998,
+              "disabled_ns_median": 3.24,
+              "disabled_ns_iqr": 0.9199999999999999,
+              "current_over_disabled": 0.9814814814814815,
+              "current_samples_ns": [
+                3.02,
+                3.09,
+                3.88,
+                3.87,
+                3.82,
+                2.94,
+                2.7,
+                3.2,
+                3.18
+              ],
+              "disabled_samples_ns": [
+                4.27,
+                3.82,
+                3.82,
+                3.84,
+                2.76,
+                2.79,
+                2.96,
+                2.9,
+                3.24
+              ]
+            },
+            {
+              "scenario": "mul_x_neg1",
+              "current_ns_median": 5.24,
+              "current_ns_iqr": 1.1800000000000006,
+              "disabled_ns_median": 6,
+              "disabled_ns_iqr": 1.4699999999999998,
+              "current_over_disabled": 0.8733333333333334,
+              "current_samples_ns": [
+                4.94,
+                4.76,
+                5.94,
+                6.35,
+                6.26,
+                4.34,
+                4.47,
+                5.24,
+                5.25
+              ],
+              "disabled_samples_ns": [
+                6.2,
+                6.34,
+                6.29,
+                6.32,
+                5.01,
+                4.3,
+                4.72,
+                4.82,
+                6
+              ]
+            },
+            {
+              "scenario": "div_x_1",
+              "current_ns_median": 2.36,
+              "current_ns_iqr": 0.3799999999999999,
+              "disabled_ns_median": 9.34,
+              "disabled_ns_iqr": 2.8499999999999996,
+              "current_over_disabled": 0.2526766595289079,
+              "current_samples_ns": [
+                2.14,
+                2.54,
+                2.73,
+                2.44,
+                2.46,
+                2.36,
+                1.83,
+                2.08,
+                2.04
+              ],
+              "disabled_samples_ns": [
+                11.87,
+                11.51,
+                12.18,
+                11.86,
+                9.11,
+                8.43,
+                8.79,
+                9.34,
+                9.01
+              ]
+            },
+            {
+              "scenario": "div_x_neg1",
+              "current_ns_median": 4.37,
+              "current_ns_iqr": 0.94,
+              "disabled_ns_median": 9.91,
+              "disabled_ns_iqr": 2.4000000000000004,
+              "current_over_disabled": 0.4409687184661958,
+              "current_samples_ns": [
+                4.44,
+                3.97,
+                4.91,
+                5.26,
+                4.92,
+                3.91,
+                3.92,
+                4.37,
+                4.37
+              ],
+              "disabled_samples_ns": [
+                12.02,
+                11.49,
+                11.87,
+                11.29,
+                9.09,
+                8.46,
+                8.64,
+                9.63,
+                9.91
+              ]
+            },
+            {
+              "scenario": "div_x_x",
+              "current_ns_median": 2.58,
+              "current_ns_iqr": 0.45999999999999996,
+              "disabled_ns_median": 36.46,
+              "disabled_ns_iqr": 9.040000000000003,
+              "current_over_disabled": 0.07076247942951179,
+              "current_samples_ns": [
+                2.2,
+                2.78,
+                2.85,
+                2.81,
+                2.83,
+                2.58,
+                2.03,
+                2.35,
+                2.52
+              ],
+              "disabled_samples_ns": [
+                41.13,
+                37.94,
+                38.77,
+                36.46,
+                29.73,
+                46.61,
+                27.48,
+                29.25,
+                34.65
+              ]
+            },
+            {
+              "scenario": "mod_x_1",
+              "current_ns_median": 1.18,
+              "current_ns_iqr": 0.25,
+              "disabled_ns_median": 4.42,
+              "disabled_ns_iqr": 1.25,
+              "current_over_disabled": 0.2669683257918552,
+              "current_samples_ns": [
+                1.1,
+                1.35,
+                1.39,
+                1.4,
+                1.21,
+                1.18,
+                1.04,
+                1.17,
+                0.98
+              ],
+              "disabled_samples_ns": [
+                3.77,
+                4.87,
+                5.26,
+                5.21,
+                2.92,
+                3.62,
+                3.48,
+                4.42,
+                4.64
+              ]
+            },
+            {
+              "scenario": "mod_x_x",
+              "current_ns_median": 5.32,
+              "current_ns_iqr": 1.1100000000000003,
+              "disabled_ns_median": 37.17,
+              "disabled_ns_iqr": 4.830000000000005,
+              "current_over_disabled": 0.1431261770244821,
+              "current_samples_ns": [
+                5.24,
+                5.32,
+                6.35,
+                5.91,
+                6.62,
+                4.8,
+                4.7,
+                5.54,
+                4.67
+              ],
+              "disabled_samples_ns": [
+                39.46,
+                38.28,
+                37.17,
+                38.77,
+                33.94,
+                42.48,
+                27.75,
+                32.66,
+                34.9
+              ]
+            },
+            {
+              "scenario": "shl_x_0",
+              "current_ns_median": 1.95,
+              "current_ns_iqr": 0.4099999999999997,
+              "disabled_ns_median": 12.9,
+              "disabled_ns_iqr": 3.26,
+              "current_over_disabled": 0.1511627906976744,
+              "current_samples_ns": [
+                1.77,
+                3.28,
+                2.28,
+                2.27,
+                2.3,
+                1.95,
+                1.69,
+                1.87,
+                1.91
+              ],
+              "disabled_samples_ns": [
+                13.83,
+                15.19,
+                15.35,
+                15.81,
+                11.93,
+                10.53,
+                11.8,
+                12.2,
+                12.9
+              ]
+            },
+            {
+              "scenario": "shr_x_0",
+              "current_ns_median": 2.02,
+              "current_ns_iqr": 0.42000000000000015,
+              "disabled_ns_median": 10.07,
+              "disabled_ns_iqr": 2.4399999999999995,
+              "current_over_disabled": 0.20059582919563057,
+              "current_samples_ns": [
+                2.02,
+                2.25,
+                2.38,
+                2.18,
+                2.13,
+                1.97,
+                1.65,
+                1.75,
+                1.76
+              ],
+              "disabled_samples_ns": [
+                10.07,
+                11.56,
+                11.12,
+                11.49,
+                8.51,
+                14.99,
+                8.68,
+                9.05,
+                9.4
+              ]
+            },
+            {
+              "scenario": "and_x_x",
+              "current_ns_median": 2,
+              "current_ns_iqr": 0.19000000000000017,
+              "disabled_ns_median": 6.57,
+              "disabled_ns_iqr": 1.9800000000000004,
+              "current_over_disabled": 0.30441400304414,
+              "current_samples_ns": [
+                1.97,
+                2.16,
+                2.49,
+                2.16,
+                2.15,
+                1.99,
+                1.63,
+                1.81,
+                2
+              ],
+              "disabled_samples_ns": [
+                10.4,
+                8.2,
+                6.57,
+                8.08,
+                5.74,
+                8.03,
+                6.1,
+                5.9,
+                6.41
+              ]
+            },
+            {
+              "scenario": "and_x_0",
+              "current_ns_median": 2.76,
+              "current_ns_iqr": 0.4500000000000002,
+              "disabled_ns_median": 3.5,
+              "disabled_ns_iqr": 0.6600000000000001,
+              "current_over_disabled": 0.7885714285714285,
+              "current_samples_ns": [
+                2.75,
+                2.73,
+                3.52,
+                3.79,
+                3.18,
+                2.51,
+                2.61,
+                2.76,
+                2.99
+              ],
+              "disabled_samples_ns": [
+                3.6,
+                3.56,
+                3.83,
+                3.88,
+                3.5,
+                2.57,
+                2.66,
+                3.02,
+                2.94
+              ]
+            },
+            {
+              "scenario": "and_x_neg1",
+              "current_ns_median": 4.27,
+              "current_ns_iqr": 0.8200000000000003,
+              "disabled_ns_median": 32.79,
+              "disabled_ns_iqr": 5.289999999999999,
+              "current_over_disabled": 0.1302226288502592,
+              "current_samples_ns": [
+                4.27,
+                4.28,
+                4.9,
+                4.7,
+                4.74,
+                3.88,
+                3.66,
+                3.88,
+                4.07
+              ],
+              "disabled_samples_ns": [
+                33.27,
+                34.66,
+                34.76,
+                34.46,
+                32.79,
+                31.69,
+                25.67,
+                26.87,
+                29.17
+              ]
+            },
+            {
+              "scenario": "or_x_x",
+              "current_ns_median": 2.09,
+              "current_ns_iqr": 0.21999999999999997,
+              "disabled_ns_median": 6.82,
+              "disabled_ns_iqr": 0.5699999999999994,
+              "current_over_disabled": 0.30645161290322576,
+              "current_samples_ns": [
+                2.09,
+                2.09,
+                2.4,
+                2.22,
+                2.15,
+                1.93,
+                1.57,
+                1.93,
+                2.15
+              ],
+              "disabled_samples_ns": [
+                6.82,
+                6.99,
+                8.44,
+                7.3,
+                7.56,
+                6.76,
+                5.77,
+                5.96,
+                6.73
+              ]
+            },
+            {
+              "scenario": "or_x_0",
+              "current_ns_median": 3.86,
+              "current_ns_iqr": 0.6299999999999999,
+              "disabled_ns_median": 10.44,
+              "disabled_ns_iqr": 1.7599999999999998,
+              "current_over_disabled": 0.36973180076628354,
+              "current_samples_ns": [
+                4.4,
+                3.86,
+                4.3,
+                4.17,
+                4.17,
+                3.54,
+                3.14,
+                3.59,
+                3.5
+              ],
+              "disabled_samples_ns": [
+                9.56,
+                11.4,
+                10.44,
+                11.63,
+                11.32,
+                10.75,
+                8.85,
+                8.77,
+                9.7
+              ]
+            },
+            {
+              "scenario": "or_x_neg1",
+              "current_ns_median": 3.51,
+              "current_ns_iqr": 0.6499999999999999,
+              "disabled_ns_median": 31.4,
+              "disabled_ns_iqr": 4.270000000000003,
+              "current_over_disabled": 0.11178343949044586,
+              "current_samples_ns": [
+                3.51,
+                3.22,
+                4.28,
+                3.93,
+                3.85,
+                3.2,
+                3.19,
+                2.98,
+                3.78
+              ],
+              "disabled_samples_ns": [
+                33.62,
+                31.4,
+                31.44,
+                33.85,
+                30.24,
+                32.2,
+                23.69,
+                25.05,
+                27.93
+              ]
+            },
+            {
+              "scenario": "xor_x_x",
+              "current_ns_median": 0.99,
+              "current_ns_iqr": 0.10000000000000009,
+              "disabled_ns_median": 9.24,
+              "disabled_ns_iqr": 2.1999999999999993,
+              "current_over_disabled": 0.10714285714285714,
+              "current_samples_ns": [
+                0.96,
+                0.99,
+                1.05,
+                1.05,
+                1.06,
+                0.95,
+                0.78,
+                0.92,
+                1.41
+              ],
+              "disabled_samples_ns": [
+                9.24,
+                10.18,
+                9.73,
+                14.26,
+                10.31,
+                7.83,
+                7.76,
+                7.98,
+                8.6
+              ]
+            },
+            {
+              "scenario": "xor_x_0",
+              "current_ns_median": 3.75,
+              "current_ns_iqr": 0.3200000000000003,
+              "disabled_ns_median": 10.49,
+              "disabled_ns_iqr": 2.0299999999999994,
+              "current_over_disabled": 0.3574833174451859,
+              "current_samples_ns": [
+                3.75,
+                3.91,
+                3.96,
+                3.91,
+                3.86,
+                3.62,
+                2.88,
+                3.59,
+                3.21
+              ],
+              "disabled_samples_ns": [
+                10.49,
+                11.3,
+                11.5,
+                14.68,
+                11.53,
+                8.89,
+                8.45,
+                9.47,
+                9.59
+              ]
+            },
+            {
+              "scenario": "xor_x_neg1",
+              "current_ns_median": 31.45,
+              "current_ns_iqr": 4.780000000000001,
+              "disabled_ns_median": 32.14,
+              "disabled_ns_iqr": 8.39,
+              "current_over_disabled": 0.9785314250155569,
+              "current_samples_ns": [
+                34.75,
+                31.45,
+                31.61,
+                31.54,
+                31.78,
+                27.03,
+                23.78,
+                26.66,
+                26.83
+              ],
+              "disabled_samples_ns": [
+                32.14,
+                33.02,
+                36.3,
+                35.93,
+                44.71,
+                27.54,
+                24.72,
+                26.82,
+                30.6
+              ]
+            },
+            {
+              "scenario": "gcd_x_0",
+              "current_ns_median": 2.61,
+              "current_ns_iqr": 0.27,
+              "disabled_ns_median": 17.69,
+              "disabled_ns_iqr": 3.910000000000002,
+              "current_over_disabled": 0.14754098360655735,
+              "current_samples_ns": [
+                2.61,
+                3.27,
+                3.19,
+                2.72,
+                2.75,
+                2.48,
+                2.05,
+                2.49,
+                2.28
+              ],
+              "disabled_samples_ns": [
+                18.96,
+                19.79,
+                19.1,
+                21.15,
+                14.39,
+                16.32,
+                14.82,
+                15.19,
+                17.69
+              ]
+            },
+            {
+              "scenario": "gcd_x_1",
+              "current_ns_median": 1.81,
+              "current_ns_iqr": 0.48,
+              "disabled_ns_median": 13.13,
+              "disabled_ns_iqr": 2.3200000000000003,
+              "current_over_disabled": 0.13785224676313784,
+              "current_samples_ns": [
+                1.92,
+                1.81,
+                2.43,
+                2.17,
+                2.1,
+                1.6,
+                1.57,
+                1.62,
+                1.75
+              ],
+              "disabled_samples_ns": [
+                14.5,
+                15.84,
+                15.15,
+                13.89,
+                11.06,
+                13.13,
+                11.98,
+                12.18,
+                12.87
+              ]
+            },
+            {
+              "scenario": "gcd_x_x",
+              "current_ns_median": 2.94,
+              "current_ns_iqr": 0.3500000000000001,
+              "disabled_ns_median": 29.88,
+              "disabled_ns_iqr": 7.159999999999997,
+              "current_over_disabled": 0.09839357429718876,
+              "current_samples_ns": [
+                3.02,
+                3.24,
+                3.19,
+                2.94,
+                2.95,
+                2.67,
+                2.17,
+                2.68,
+                2.42
+              ],
+              "disabled_samples_ns": [
+                36.06,
+                36.57,
+                34.64,
+                35.55,
+                26.06,
+                29.76,
+                26.67,
+                28.39,
+                29.88
+              ]
+            },
+            {
+              "scenario": "lcm_x_0",
+              "current_ns_median": 4.48,
+              "current_ns_iqr": 0.6899999999999995,
+              "disabled_ns_median": 3.25,
+              "disabled_ns_iqr": 0.5500000000000003,
+              "current_over_disabled": 1.3784615384615386,
+              "current_samples_ns": [
+                4.77,
+                3.83,
+                4.97,
+                4.52,
+                4.51,
+                4.48,
+                3.39,
+                3.55,
+                3.96
+              ],
+              "disabled_samples_ns": [
+                3.47,
+                3.52,
+                3.26,
+                3.25,
+                2.38,
+                3.09,
+                2.63,
+                2.76,
+                3.31
+              ]
+            },
+            {
+              "scenario": "lcm_x_1",
+              "current_ns_median": 4.43,
+              "current_ns_iqr": 0.4500000000000002,
+              "disabled_ns_median": 19.24,
+              "disabled_ns_iqr": 2.6799999999999997,
+              "current_over_disabled": 0.23024948024948025,
+              "current_samples_ns": [
+                4.43,
+                5.04,
+                4.54,
+                4.43,
+                4.45,
+                4.66,
+                3.33,
+                4.09,
+                3.72
+              ],
+              "disabled_samples_ns": [
+                20.94,
+                22.19,
+                21.32,
+                24.22,
+                19.24,
+                18.93,
+                15.5,
+                16.28,
+                18.64
+              ]
+            },
+            {
+              "scenario": "lcm_x_x",
+              "current_ns_median": 4.31,
+              "current_ns_iqr": 0.41999999999999993,
+              "disabled_ns_median": 55.5,
+              "disabled_ns_iqr": 6.839999999999996,
+              "current_over_disabled": 0.07765765765765766,
+              "current_samples_ns": [
+                4.41,
+                4.43,
+                4.3,
+                4.31,
+                4.44,
+                4.6,
+                4.01,
+                3.97,
+                3.73
+              ],
+              "disabled_samples_ns": [
+                52.74,
+                63.84,
+                59.58,
+                56.78,
+                73.76,
+                53.38,
+                43.27,
+                49.26,
+                55.5
+              ]
+            },
+            {
+              "scenario": "pow_x_0",
+              "current_ns_median": 4.9,
+              "current_ns_iqr": 1.0100000000000007,
+              "disabled_ns_median": 5.03,
+              "disabled_ns_iqr": 1.2299999999999995,
+              "current_over_disabled": 0.974155069582505,
+              "current_samples_ns": [
+                5.64,
+                4.28,
+                5.9,
+                4.9,
+                5.21,
+                4.45,
+                5.44,
+                3.96,
+                4.43
+              ],
+              "disabled_samples_ns": [
+                4.36,
+                5.96,
+                4.56,
+                5.76,
+                5.59,
+                5.03,
+                4.27,
+                5.09,
+                4.02
+              ]
+            },
+            {
+              "scenario": "pow_x_1",
+              "current_ns_median": 5.9,
+              "current_ns_iqr": 1,
+              "disabled_ns_median": 5.66,
+              "disabled_ns_iqr": 0.8099999999999996,
+              "current_over_disabled": 1.0424028268551238,
+              "current_samples_ns": [
+                6.25,
+                6.52,
+                6.34,
+                6.02,
+                5.9,
+                5.26,
+                5.16,
+                5.25,
+                5.22
+              ],
+              "disabled_samples_ns": [
+                5.55,
+                6.31,
+                6.05,
+                6.37,
+                6.34,
+                5.66,
+                4.81,
+                5.5,
+                5.28
+              ]
+            },
+            {
+              "scenario": "powmod_exp_0",
+              "current_ns_median": 3.48,
+              "current_ns_iqr": 0.6099999999999999,
+              "disabled_ns_median": 3.36,
+              "disabled_ns_iqr": 0.5800000000000001,
+              "current_over_disabled": 1.0357142857142858,
+              "current_samples_ns": [
+                3.52,
+                7.15,
+                3.82,
+                3.47,
+                3.92,
+                2.96,
+                3.48,
+                3.16,
+                3.21
+              ],
+              "disabled_samples_ns": [
+                3.36,
+                3.84,
+                3.83,
+                3.72,
+                3.48,
+                3.15,
+                2.63,
+                2.76,
+                3.14
+              ]
+            },
+            {
+              "scenario": "powmod_exp_1",
+              "current_ns_median": 6.08,
+              "current_ns_iqr": 0.5699999999999994,
+              "disabled_ns_median": 678.63,
+              "disabled_ns_iqr": 66.55000000000007,
+              "current_over_disabled": 0.008959226677276277,
+              "current_samples_ns": [
+                6.47,
+                78.85,
+                6.08,
+                6.09,
+                6.07,
+                4.75,
+                6.31,
+                5.74,
+                5.11
+              ],
+              "disabled_samples_ns": [
+                710.48,
+                708.72,
+                735.46,
+                678.63,
+                692.36,
+                653.97,
+                537.51,
+                594.04,
+                642.17
+              ]
+            },
+            {
+              "scenario": "powmod_base_0",
+              "current_ns_median": 5.31,
+              "current_ns_iqr": 0.4900000000000002,
+              "disabled_ns_median": 5.03,
+              "disabled_ns_iqr": 0.20999999999999996,
+              "current_over_disabled": 1.055666003976143,
+              "current_samples_ns": [
+                5.55,
+                5.31,
+                5.91,
+                5.7,
+                5.9,
+                4.38,
+                5.28,
+                5.21,
+                4.66
+              ],
+              "disabled_samples_ns": [
+                5.08,
+                5.16,
+                5.33,
+                5.03,
+                5.11,
+                4.95,
+                3.75,
+                4.08,
+                4.9
+              ]
+            },
+            {
+              "scenario": "powmod_base_1",
+              "current_ns_median": 4.69,
+              "current_ns_iqr": 0.40000000000000036,
+              "disabled_ns_median": 926.33,
+              "disabled_ns_iqr": 69.71000000000004,
+              "current_over_disabled": 0.0050629905109410255,
+              "current_samples_ns": [
+                4.69,
+                4.94,
+                5.01,
+                4.69,
+                4.86,
+                3.73,
+                4.79,
+                4.46,
+                4.1
+              ],
+              "disabled_samples_ns": [
+                1004.16,
+                996.05,
+                960.77,
+                963.5,
+                926.33,
+                893.79,
+                807.64,
+                792.81,
+                897.54
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_even",
+              "current_ns_median": 4.86,
+              "current_ns_iqr": 0.15000000000000036,
+              "disabled_ns_median": 889.8,
+              "disabled_ns_iqr": 101.45000000000005,
+              "current_over_disabled": 0.005461901550910317,
+              "current_samples_ns": [
+                4.86,
+                4.86,
+                4.86,
+                4.87,
+                4.86,
+                3.87,
+                5.2,
+                4.71,
+                4.08
+              ],
+              "disabled_samples_ns": [
+                945.73,
+                964.13,
+                889.8,
+                963.9,
+                930.77,
+                854.11,
+                827,
+                811.45,
+                844.28
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_odd",
+              "current_ns_median": 16.18,
+              "current_ns_iqr": 2.0500000000000007,
+              "disabled_ns_median": 965.64,
+              "disabled_ns_iqr": 100.8599999999999,
+              "current_over_disabled": 0.01675572677188186,
+              "current_samples_ns": [
+                16.98,
+                17.14,
+                16.18,
+                16.85,
+                17.16,
+                13.19,
+                15.35,
+                14.09,
+                14.93
+              ],
+              "disabled_samples_ns": [
+                965.64,
+                1025.72,
+                1003.99,
+                1022.9,
+                1006.43,
+                919.88,
+                832.92,
+                878.9,
+                905.57
+              ]
+            },
+            {
+              "scenario": "powmod_mod_1",
+              "current_ns_median": 3.64,
+              "current_ns_iqr": 0.15000000000000036,
+              "disabled_ns_median": 3.65,
+              "disabled_ns_iqr": 0.3500000000000001,
+              "current_over_disabled": 0.9972602739726028,
+              "current_samples_ns": [
+                3.64,
+                3.75,
+                3.67,
+                3.7,
+                3.82,
+                2.88,
+                3.55,
+                3.38,
+                3.55
+              ],
+              "disabled_samples_ns": [
+                3.65,
+                3.85,
+                3.77,
+                3.74,
+                3.94,
+                3.01,
+                3.39,
+                3.63,
+                3.42
+              ]
+            }
+          ]
+        },
+        {
+          "limbs": 64,
+          "iterations": 5000,
+          "cells": [
+            {
+              "scenario": "add_x_0",
+              "current_ns_median": 3.8,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 4,
+              "disabled_ns_iqr": 0.3999999999999999,
+              "current_over_disabled": 0.95,
+              "current_samples_ns": [
+                3.6,
+                4,
+                4,
+                3,
+                4.2,
+                4,
+                3,
+                3.6,
+                3.8
+              ],
+              "disabled_samples_ns": [
+                3.6,
+                4,
+                4,
+                4,
+                4,
+                3.6,
+                3.6,
+                3.4,
+                4.2
+              ]
+            },
+            {
+              "scenario": "sub_x_0",
+              "current_ns_median": 4.2,
+              "current_ns_iqr": 0.6000000000000005,
+              "disabled_ns_median": 3.8,
+              "disabled_ns_iqr": 0.6000000000000001,
+              "current_over_disabled": 1.105263157894737,
+              "current_samples_ns": [
+                3.8,
+                4.2,
+                4.2,
+                3,
+                4.4,
+                4.2,
+                7.2,
+                6,
+                3.8
+              ],
+              "disabled_samples_ns": [
+                3.4,
+                3.8,
+                4,
+                4,
+                4.2,
+                3.4,
+                3.8,
+                3.4,
+                3.8
+              ]
+            },
+            {
+              "scenario": "sub_x_x",
+              "current_ns_median": 1.2,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 25.4,
+              "disabled_ns_iqr": 2.400000000000002,
+              "current_over_disabled": 0.047244094488188976,
+              "current_samples_ns": [
+                1,
+                1.4,
+                1.4,
+                0.8,
+                1.4,
+                1.4,
+                1,
+                1.2,
+                1
+              ],
+              "disabled_samples_ns": [
+                23.2,
+                25.4,
+                25.8,
+                25.6,
+                26.2,
+                20.6,
+                24.2,
+                21.4,
+                25.4
+              ]
+            },
+            {
+              "scenario": "mul_x_0",
+              "current_ns_median": 3.8,
+              "current_ns_iqr": 1.4,
+              "disabled_ns_median": 3.4,
+              "disabled_ns_iqr": 0.5999999999999996,
+              "current_over_disabled": 1.1176470588235294,
+              "current_samples_ns": [
+                3.2,
+                4,
+                3.8,
+                5,
+                4,
+                3.8,
+                2.6,
+                2.6,
+                2.6
+              ],
+              "disabled_samples_ns": [
+                3,
+                3.4,
+                4.2,
+                3.4,
+                4.6,
+                2.8,
+                3.8,
+                3.2,
+                3.4
+              ]
+            },
+            {
+              "scenario": "mul_x_1",
+              "current_ns_median": 3.6,
+              "current_ns_iqr": 0.7999999999999998,
+              "disabled_ns_median": 3.8,
+              "disabled_ns_iqr": 0.3999999999999999,
+              "current_over_disabled": 0.9473684210526316,
+              "current_samples_ns": [
+                3.6,
+                3.8,
+                3.8,
+                3,
+                3.8,
+                3.8,
+                3,
+                3,
+                3
+              ],
+              "disabled_samples_ns": [
+                3.6,
+                4,
+                3.8,
+                3.8,
+                4.6,
+                4.8,
+                3.4,
+                3.4,
+                3.8
+              ]
+            },
+            {
+              "scenario": "mul_x_neg1",
+              "current_ns_median": 5.4,
+              "current_ns_iqr": 1.7999999999999998,
+              "disabled_ns_median": 6.2,
+              "disabled_ns_iqr": 1,
+              "current_over_disabled": 0.8709677419354839,
+              "current_samples_ns": [
+                5.4,
+                6.2,
+                6.2,
+                4.2,
+                6.4,
+                6.4,
+                4.4,
+                4.4,
+                4.4
+              ],
+              "disabled_samples_ns": [
+                5.6,
+                6.4,
+                6.2,
+                6.2,
+                6.6,
+                8.8,
+                5.6,
+                5,
+                21.6
+              ]
+            },
+            {
+              "scenario": "div_x_1",
+              "current_ns_median": 2.4,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 15.4,
+              "disabled_ns_iqr": 1.5999999999999996,
+              "current_over_disabled": 0.15584415584415584,
+              "current_samples_ns": [
+                2.2,
+                2.6,
+                2.6,
+                2.4,
+                2.8,
+                2.8,
+                2.4,
+                2.2,
+                2.2
+              ],
+              "disabled_samples_ns": [
+                13.8,
+                15.4,
+                15.4,
+                17.2,
+                16.6,
+                14.8,
+                14.6,
+                13.4,
+                16.2
+              ]
+            },
+            {
+              "scenario": "div_x_neg1",
+              "current_ns_median": 5.2,
+              "current_ns_iqr": 1.4000000000000004,
+              "disabled_ns_median": 16,
+              "disabled_ns_iqr": 1.799999999999999,
+              "current_over_disabled": 0.325,
+              "current_samples_ns": [
+                4.4,
+                5.2,
+                5.2,
+                7,
+                5.2,
+                5.2,
+                3.8,
+                3.6,
+                3.8
+              ],
+              "disabled_samples_ns": [
+                13.8,
+                16.2,
+                15.8,
+                17.2,
+                16,
+                18,
+                14.4,
+                13.4,
+                16
+              ]
+            },
+            {
+              "scenario": "div_x_x",
+              "current_ns_median": 2.8,
+              "current_ns_iqr": 0.19999999999999973,
+              "disabled_ns_median": 95.8,
+              "disabled_ns_iqr": 9,
+              "current_over_disabled": 0.029227557411273485,
+              "current_samples_ns": [
+                2.6,
+                2.8,
+                2.8,
+                2.6,
+                3.2,
+                3,
+                2.8,
+                2.6,
+                2.6
+              ],
+              "disabled_samples_ns": [
+                89.4,
+                101,
+                98.4,
+                89.4,
+                100.8,
+                97.6,
+                86.8,
+                81.6,
+                95.8
+              ]
+            },
+            {
+              "scenario": "mod_x_1",
+              "current_ns_median": 1.4,
+              "current_ns_iqr": 0.19999999999999996,
+              "disabled_ns_median": 4.4,
+              "disabled_ns_iqr": 0.7999999999999998,
+              "current_over_disabled": 0.3181818181818181,
+              "current_samples_ns": [
+                1.2,
+                1.4,
+                1.4,
+                1.4,
+                1.4,
+                1.4,
+                1.2,
+                1.2,
+                1.2
+              ],
+              "disabled_samples_ns": [
+                4.4,
+                4.8,
+                5.6,
+                3.4,
+                4.6,
+                3.6,
+                4.4,
+                3.8,
+                4.4
+              ]
+            },
+            {
+              "scenario": "mod_x_x",
+              "current_ns_median": 24,
+              "current_ns_iqr": 7,
+              "disabled_ns_median": 114.8,
+              "disabled_ns_iqr": 13,
+              "current_over_disabled": 0.20905923344947736,
+              "current_samples_ns": [
+                24,
+                26.8,
+                26.4,
+                21.6,
+                27,
+                26.8,
+                19.8,
+                17.8,
+                17.8
+              ],
+              "disabled_samples_ns": [
+                113.6,
+                126.2,
+                131.8,
+                123.4,
+                125.6,
+                112.6,
+                114.8,
+                104.8,
+                107.8
+              ]
+            },
+            {
+              "scenario": "shl_x_0",
+              "current_ns_median": 2.2,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 20.2,
+              "disabled_ns_iqr": 3.8000000000000007,
+              "current_over_disabled": 0.10891089108910892,
+              "current_samples_ns": [
+                2,
+                2.2,
+                2.4,
+                1.8,
+                2.4,
+                2.6,
+                1.8,
+                2,
+                2.2
+              ],
+              "disabled_samples_ns": [
+                18.2,
+                22.8,
+                20.4,
+                25.4,
+                22,
+                19.8,
+                20.2,
+                17.2,
+                15.6
+              ]
+            },
+            {
+              "scenario": "shr_x_0",
+              "current_ns_median": 2,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 16.4,
+              "disabled_ns_iqr": 1.8000000000000007,
+              "current_over_disabled": 0.12195121951219513,
+              "current_samples_ns": [
+                2,
+                2.4,
+                2.2,
+                1.8,
+                2.6,
+                2.6,
+                1.6,
+                2,
+                2
+              ],
+              "disabled_samples_ns": [
+                16.4,
+                16.6,
+                16.6,
+                16.4,
+                16.8,
+                15.4,
+                14.8,
+                14,
+                12
+              ]
+            },
+            {
+              "scenario": "and_x_x",
+              "current_ns_median": 2.2,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 13.4,
+              "disabled_ns_iqr": 1.4000000000000004,
+              "current_over_disabled": 0.16417910447761194,
+              "current_samples_ns": [
+                2,
+                2.4,
+                2.4,
+                1.8,
+                2.6,
+                2.4,
+                1.6,
+                2,
+                2.2
+              ],
+              "disabled_samples_ns": [
+                13,
+                14.2,
+                15,
+                14.4,
+                17,
+                13.4,
+                13.4,
+                12.4,
+                12.2
+              ]
+            },
+            {
+              "scenario": "and_x_0",
+              "current_ns_median": 3.2,
+              "current_ns_iqr": 1.1999999999999997,
+              "disabled_ns_median": 3.4,
+              "disabled_ns_iqr": 0.3999999999999999,
+              "current_over_disabled": 0.9411764705882354,
+              "current_samples_ns": [
+                3.2,
+                3.8,
+                4,
+                2.8,
+                3.8,
+                3.6,
+                2.6,
+                2.6,
+                2.6
+              ],
+              "disabled_samples_ns": [
+                3.2,
+                3.6,
+                3.6,
+                5.8,
+                3.6,
+                3.2,
+                3,
+                3,
+                3.4
+              ]
+            },
+            {
+              "scenario": "and_x_neg1",
+              "current_ns_median": 4.4,
+              "current_ns_iqr": 0.7999999999999998,
+              "disabled_ns_median": 142.4,
+              "disabled_ns_iqr": 13,
+              "current_over_disabled": 0.030898876404494385,
+              "current_samples_ns": [
+                4.4,
+                4.8,
+                4.8,
+                3.6,
+                5,
+                4.6,
+                3.4,
+                4,
+                4
+              ],
+              "disabled_samples_ns": [
+                136.4,
+                150.6,
+                151.8,
+                166.2,
+                150,
+                142.4,
+                138.6,
+                126.2,
+                137.6
+              ]
+            },
+            {
+              "scenario": "or_x_x",
+              "current_ns_median": 2.4,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 13.2,
+              "disabled_ns_iqr": 2.1999999999999993,
+              "current_over_disabled": 0.18181818181818182,
+              "current_samples_ns": [
+                2,
+                2.4,
+                2.4,
+                4,
+                2.6,
+                2.4,
+                1.6,
+                2,
+                2
+              ],
+              "disabled_samples_ns": [
+                13,
+                14.8,
+                14.8,
+                12,
+                14.6,
+                13.4,
+                13.2,
+                12.4,
+                12
+              ]
+            },
+            {
+              "scenario": "or_x_0",
+              "current_ns_median": 4,
+              "current_ns_iqr": 0.6000000000000001,
+              "disabled_ns_median": 15.4,
+              "disabled_ns_iqr": 2.3999999999999986,
+              "current_over_disabled": 0.2597402597402597,
+              "current_samples_ns": [
+                3.6,
+                4.2,
+                4.2,
+                5.2,
+                4,
+                4.6,
+                3,
+                3.6,
+                3.6
+              ],
+              "disabled_samples_ns": [
+                15.2,
+                16.6,
+                17.6,
+                17.8,
+                17.4,
+                15.4,
+                15,
+                14,
+                13.2
+              ]
+            },
+            {
+              "scenario": "or_x_neg1",
+              "current_ns_median": 3.8,
+              "current_ns_iqr": 1,
+              "disabled_ns_median": 154.6,
+              "disabled_ns_iqr": 15.799999999999983,
+              "current_over_disabled": 0.02457956015523933,
+              "current_samples_ns": [
+                4,
+                4.6,
+                4.2,
+                3.2,
+                4.2,
+                3.8,
+                3,
+                3.2,
+                3.4
+              ],
+              "disabled_samples_ns": [
+                152.8,
+                168.4,
+                168.6,
+                173.4,
+                170.2,
+                153.6,
+                154.6,
+                141,
+                151.6
+              ]
+            },
+            {
+              "scenario": "xor_x_x",
+              "current_ns_median": 1,
+              "current_ns_iqr": 0.19999999999999996,
+              "disabled_ns_median": 33.8,
+              "disabled_ns_iqr": 3.6000000000000014,
+              "current_over_disabled": 0.02958579881656805,
+              "current_samples_ns": [
+                1,
+                1.4,
+                1,
+                1,
+                1.2,
+                1.4,
+                1,
+                1,
+                1
+              ],
+              "disabled_samples_ns": [
+                33.8,
+                36.6,
+                36.6,
+                42.6,
+                37,
+                33.4,
+                33,
+                30.8,
+                27.2
+              ]
+            },
+            {
+              "scenario": "xor_x_0",
+              "current_ns_median": 3.6,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 15.2,
+              "disabled_ns_iqr": 2.6000000000000014,
+              "current_over_disabled": 0.2368421052631579,
+              "current_samples_ns": [
+                3.4,
+                4,
+                3.8,
+                2.8,
+                4,
+                3.8,
+                2.8,
+                3.4,
+                3.6
+              ],
+              "disabled_samples_ns": [
+                15,
+                16.6,
+                17.8,
+                25.4,
+                17.6,
+                15.2,
+                15,
+                13.2,
+                13
+              ]
+            },
+            {
+              "scenario": "xor_x_neg1",
+              "current_ns_median": 143.8,
+              "current_ns_iqr": 12.600000000000023,
+              "disabled_ns_median": 140,
+              "disabled_ns_iqr": 17,
+              "current_over_disabled": 1.0271428571428571,
+              "current_samples_ns": [
+                135.8,
+                152.4,
+                156,
+                140,
+                148,
+                149.8,
+                137.2,
+                143.8,
+                136.4
+              ],
+              "disabled_samples_ns": [
+                135.6,
+                151.4,
+                153.2,
+                156.2,
+                171.2,
+                136.2,
+                140,
+                126.2,
+                138.2
+              ]
+            },
+            {
+              "scenario": "gcd_x_0",
+              "current_ns_median": 2.6,
+              "current_ns_iqr": 0.3999999999999999,
+              "disabled_ns_median": 31.2,
+              "disabled_ns_iqr": 5,
+              "current_over_disabled": 0.08333333333333334,
+              "current_samples_ns": [
+                2.4,
+                2.6,
+                3,
+                2.6,
+                3,
+                4.2,
+                2.4,
+                2.6,
+                2.6
+              ],
+              "disabled_samples_ns": [
+                30.2,
+                35.6,
+                33,
+                23.4,
+                32.6,
+                55,
+                31.2,
+                28,
+                23.6
+              ]
+            },
+            {
+              "scenario": "gcd_x_1",
+              "current_ns_median": 2,
+              "current_ns_iqr": 0.40000000000000013,
+              "disabled_ns_median": 19,
+              "disabled_ns_iqr": 3,
+              "current_over_disabled": 0.10526315789473684,
+              "current_samples_ns": [
+                2,
+                3.4,
+                2.2,
+                1.8,
+                2,
+                2.2,
+                1.8,
+                2,
+                1.6
+              ],
+              "disabled_samples_ns": [
+                18.8,
+                22,
+                29.4,
+                15.8,
+                19.6,
+                19,
+                20.2,
+                17.2,
+                15.8
+              ]
+            },
+            {
+              "scenario": "gcd_x_x",
+              "current_ns_median": 2.8,
+              "current_ns_iqr": 0.20000000000000018,
+              "disabled_ns_median": 119.2,
+              "disabled_ns_iqr": 17.80000000000001,
+              "current_over_disabled": 0.023489932885906038,
+              "current_samples_ns": [
+                2.6,
+                3,
+                2.8,
+                2.8,
+                3,
+                3,
+                2.6,
+                4.8,
+                2.8
+              ],
+              "disabled_samples_ns": [
+                119.2,
+                159.2,
+                131.4,
+                98.8,
+                136,
+                125,
+                113.6,
+                116.8,
+                95
+              ]
+            },
+            {
+              "scenario": "lcm_x_0",
+              "current_ns_median": 4.2,
+              "current_ns_iqr": 0.9999999999999996,
+              "disabled_ns_median": 3.2,
+              "disabled_ns_iqr": 0.6000000000000001,
+              "current_over_disabled": 1.3125,
+              "current_samples_ns": [
+                4,
+                4.6,
+                4.2,
+                3.6,
+                4.6,
+                4.6,
+                5.4,
+                3.6,
+                3.6
+              ],
+              "disabled_samples_ns": [
+                3,
+                3.6,
+                3.4,
+                3,
+                3.6,
+                3.2,
+                3.6,
+                2.8,
+                3
+              ]
+            },
+            {
+              "scenario": "lcm_x_1",
+              "current_ns_median": 4.4,
+              "current_ns_iqr": 0.5999999999999996,
+              "disabled_ns_median": 24,
+              "disabled_ns_iqr": 4.800000000000001,
+              "current_over_disabled": 0.18333333333333335,
+              "current_samples_ns": [
+                4,
+                4.6,
+                4.4,
+                4,
+                4.6,
+                4.6,
+                3.2,
+                5.6,
+                4.2
+              ],
+              "disabled_samples_ns": [
+                24.2,
+                26.2,
+                27,
+                21.4,
+                29,
+                23.2,
+                24,
+                21.2,
+                20.8
+              ]
+            },
+            {
+              "scenario": "lcm_x_x",
+              "current_ns_median": 4.2,
+              "current_ns_iqr": 0.40000000000000036,
+              "disabled_ns_median": 140.6,
+              "disabled_ns_iqr": 18,
+              "current_over_disabled": 0.029871977240398296,
+              "current_samples_ns": [
+                3.8,
+                4.2,
+                4.4,
+                5,
+                4.4,
+                4.2,
+                3,
+                5.6,
+                4
+              ],
+              "disabled_samples_ns": [
+                148.8,
+                188.4,
+                182.2,
+                112.4,
+                155.6,
+                140.6,
+                138.8,
+                137.6,
+                116
+              ]
+            },
+            {
+              "scenario": "pow_x_0",
+              "current_ns_median": 5,
+              "current_ns_iqr": 1.5999999999999996,
+              "disabled_ns_median": 5.4,
+              "disabled_ns_iqr": 1.2000000000000002,
+              "current_over_disabled": 0.9259259259259258,
+              "current_samples_ns": [
+                5,
+                5.6,
+                5.6,
+                4,
+                5.6,
+                5.2,
+                3.6,
+                4,
+                4
+              ],
+              "disabled_samples_ns": [
+                6,
+                5.6,
+                5.8,
+                4,
+                6.2,
+                5,
+                5.4,
+                4.6,
+                4
+              ]
+            },
+            {
+              "scenario": "pow_x_1",
+              "current_ns_median": 6,
+              "current_ns_iqr": 0.7999999999999998,
+              "disabled_ns_median": 5.6,
+              "disabled_ns_iqr": 0.7999999999999998,
+              "current_over_disabled": 1.0714285714285714,
+              "current_samples_ns": [
+                5.6,
+                6,
+                6,
+                5.4,
+                6.2,
+                8.2,
+                6.2,
+                5.2,
+                5.4
+              ],
+              "disabled_samples_ns": [
+                5.6,
+                6.2,
+                6.8,
+                5.2,
+                6.6,
+                5.6,
+                5.4,
+                5.2,
+                6
+              ]
+            },
+            {
+              "scenario": "powmod_exp_0",
+              "current_ns_median": 3.4,
+              "current_ns_iqr": 0.19999999999999973,
+              "disabled_ns_median": 3.2,
+              "disabled_ns_iqr": 0.3999999999999999,
+              "current_over_disabled": 1.0625,
+              "current_samples_ns": [
+                3,
+                3.4,
+                3.4,
+                3,
+                3.6,
+                3.2,
+                4.8,
+                3.2,
+                3.4
+              ],
+              "disabled_samples_ns": [
+                3,
+                3.6,
+                3.4,
+                3,
+                4.2,
+                3.2,
+                3.4,
+                3,
+                3.2
+              ]
+            },
+            {
+              "scenario": "powmod_exp_1",
+              "current_ns_median": 5.8,
+              "current_ns_iqr": 0.40000000000000036,
+              "disabled_ns_median": 15979.4,
+              "disabled_ns_iqr": 759.7999999999993,
+              "current_over_disabled": 0.00036296732042504724,
+              "current_samples_ns": [
+                5.6,
+                6,
+                6.2,
+                5.6,
+                6.2,
+                8.4,
+                5.8,
+                5.8,
+                5.8
+              ],
+              "disabled_samples_ns": [
+                15548.2,
+                16308,
+                16804.4,
+                15979.4,
+                17622,
+                16038.6,
+                15613,
+                14376.6,
+                15101.8
+              ]
+            },
+            {
+              "scenario": "powmod_base_0",
+              "current_ns_median": 5.2,
+              "current_ns_iqr": 0.39999999999999947,
+              "disabled_ns_median": 4.6,
+              "disabled_ns_iqr": 0.20000000000000018,
+              "current_over_disabled": 1.1304347826086958,
+              "current_samples_ns": [
+                5.2,
+                5.6,
+                5.6,
+                5.2,
+                5.6,
+                6,
+                5.2,
+                5.2,
+                5.2
+              ],
+              "disabled_samples_ns": [
+                4.4,
+                4.6,
+                5,
+                3.8,
+                4.8,
+                4.6,
+                5,
+                4.6,
+                4.8
+              ]
+            },
+            {
+              "scenario": "powmod_base_1",
+              "current_ns_median": 4.6,
+              "current_ns_iqr": 0.39999999999999947,
+              "disabled_ns_median": 25461.4,
+              "disabled_ns_iqr": 799,
+              "current_over_disabled": 0.00018066563503970715,
+              "current_samples_ns": [
+                4.2,
+                4.8,
+                4.6,
+                4.4,
+                5.4,
+                4.8,
+                4.6,
+                4.6,
+                4.4
+              ],
+              "disabled_samples_ns": [
+                25531.8,
+                26378.4,
+                28538.4,
+                26014.2,
+                24773.4,
+                25461.4,
+                25215.2,
+                24371.4,
+                25283.6
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_even",
+              "current_ns_median": 4.8,
+              "current_ns_iqr": 0.40000000000000036,
+              "disabled_ns_median": 24010,
+              "disabled_ns_iqr": 1345.7999999999993,
+              "current_over_disabled": 0.0001999167013744273,
+              "current_samples_ns": [
+                4.4,
+                5,
+                4.8,
+                4.6,
+                5,
+                5,
+                4.6,
+                6.8,
+                4.6
+              ],
+              "disabled_samples_ns": [
+                24010,
+                24090.6,
+                25025,
+                25354.6,
+                23783.6,
+                24744.8,
+                23228,
+                22908.8,
+                23399
+              ]
+            },
+            {
+              "scenario": "powmod_base_neg1_odd",
+              "current_ns_median": 20.2,
+              "current_ns_iqr": 3.1999999999999993,
+              "disabled_ns_median": 25462.6,
+              "disabled_ns_iqr": 1051.199999999997,
+              "current_over_disabled": 0.0007933203993307832,
+              "current_samples_ns": [
+                20.2,
+                25.8,
+                22.4,
+                18,
+                23,
+                21.8,
+                19.2,
+                19.4,
+                18.2
+              ],
+              "disabled_samples_ns": [
+                25265.4,
+                27009,
+                26037.8,
+                26316.6,
+                25150,
+                27059.8,
+                23541.2,
+                25377.8,
+                25462.6
+              ]
+            },
+            {
+              "scenario": "powmod_mod_1",
+              "current_ns_median": 3.6,
+              "current_ns_iqr": 0.20000000000000018,
+              "disabled_ns_median": 3.4,
+              "disabled_ns_iqr": 0.6000000000000001,
+              "current_over_disabled": 1.0588235294117647,
+              "current_samples_ns": [
+                3.4,
+                3.6,
+                3.8,
+                3.4,
+                3.6,
+                4,
+                3.6,
+                3.2,
+                3.2
+              ],
+              "disabled_samples_ns": [
+                3.4,
+                3.6,
+                3.8,
+                2.6,
+                3.4,
+                2.6,
+                3.2,
+                3.4,
+                2.8
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

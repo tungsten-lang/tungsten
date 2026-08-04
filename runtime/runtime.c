@@ -8772,6 +8772,13 @@ static inline uint64_t bn_invert_limb(uint64_t d) {
  * set), so the zero-initialized entries can never false-hit. */
 static inline __attribute__((always_inline))
 uint64_t bn_div_preinv_cached(uint64_t d, BnDivPreinvCache *cache) {
+#ifndef BN_DIV_PREINV_CACHE
+#define BN_DIV_PREINV_CACHE 1
+#endif
+#if !BN_DIV_PREINV_CACHE
+    (void)cache;
+    return bn_invert_limb(d);
+#else
     if (cache->d[0] == d) return cache->v[0];
     if (cache->d[1] == d) return cache->v[1];
     uint64_t v = bn_invert_limb(d);
@@ -8780,6 +8787,7 @@ uint64_t bn_div_preinv_cached(uint64_t d, BnDivPreinvCache *cache) {
     cache->d[slot] = d;
     cache->v[slot] = v;
     return v;
+#endif
 }
 
 /* floor((B^3-1)/(d1*B+d0)) - B for normalized d1: the 2-limb reciprocal
@@ -10539,6 +10547,16 @@ static void mag_divmod_bz(const uint64_t *u, int32_t ulen,
 #ifndef BN_DIV_BARRETT_LOW_MUL_MIN
 #define BN_DIV_BARRETT_LOW_MUL_MIN 24
 #endif
+/* At exactly 64 divisor limbs the full two-product Barrett rung sits between
+ * the triangular low-product range and the width where its products amortize;
+ * ordinary division is faster there.  Retain reciprocal reduction on both
+ * sides of this narrow hole. */
+#ifndef BN_DIV_BARRETT_SKIP_MIN
+#define BN_DIV_BARRETT_SKIP_MIN 64
+#endif
+#ifndef BN_DIV_BARRETT_SKIP_MAX
+#define BN_DIV_BARRETT_SKIP_MAX 64
+#endif
 
 static int bn_div_recip_reserve(
     uint64_t **memory, size_t *capacity, size_t need) {
@@ -10599,6 +10617,10 @@ static int mag_divmod_reciprocal_certified(
     const uint64_t *u, int32_t ulen,
     const uint64_t *v, int32_t vlen,
     WBigint **q_out, WBigint **r_out) {
+    if (r_out && !q_out &&
+        vlen >= BN_DIV_BARRETT_SKIP_MIN &&
+        vlen <= BN_DIV_BARRETT_SKIP_MAX)
+        return 0;
 #ifdef BN_DIV_ROUTE_COUNTERS
     if (vlen > BN_DIV_RECIP_Q_MAX)
         bn_div_recip_reject_qmax++;
@@ -10865,10 +10887,15 @@ static void mag_divmod(const uint64_t *u, int32_t ulen,
         return;
     }
 #endif
+#ifndef BN_DIV_RECIP_CACHE
+#define BN_DIV_RECIP_CACHE 1
+#endif
+#if BN_DIV_RECIP_CACHE
     if ((q_out || r_out) &&
         mag_divmod_reciprocal_certified(
             u, ulen, v, vlen, q_out, r_out))
         return;
+#endif
     if (q_out && !r_out) {
 #if BN_DIV_TRIANGULAR_Q_CERTIFIED
 #if BN_DIV_63_DIRECT

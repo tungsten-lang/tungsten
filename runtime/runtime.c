@@ -1010,7 +1010,8 @@ static inline void bn_copy_tail(uint64_t *restrict dst,
     memcpy(dst, src, (size_t)n * sizeof(uint64_t));
 }
 
-static WValue bigint_add_word_into(
+static inline __attribute__((always_inline))
+WValue bigint_add_word_into(
     const uint64_t *al, int32_t alen, int a_neg,
     uint64_t w, WBigint *r) {
     /* Same effective sign: |a| + w, sign of a.  Exact-length allocation;
@@ -1052,7 +1053,8 @@ static WValue bigint_add_word_into(
     return bigint_box(r);
 }
 
-static WValue bigint_sub_word_into(
+static inline __attribute__((always_inline))
+WValue bigint_sub_word_into(
     WBigint *r, const uint64_t *al, int32_t alen, int a_neg, uint64_t w) {
     /* Opposite effective signs: |a| - w, sign of a (alen >= 2 => |a| > w). */
     uint64_t a0 = al[0];

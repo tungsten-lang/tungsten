@@ -70,6 +70,18 @@ def parse_csv(value: str, *, integers: bool = False) -> list[Any]:
     return result
 
 
+def parse_env(entries: list[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for entry in entries:
+        name, separator, value = entry.partition("=")
+        if not separator or not name:
+            raise argparse.ArgumentTypeError(
+                f"environment override must be NAME=VALUE: {entry!r}"
+            )
+        result[name] = value
+    return result
+
+
 def percentile(values: list[float], fraction: float) -> float:
     ordered = sorted(values)
     if len(ordered) == 1:
@@ -148,6 +160,7 @@ def run_sweep(
     target_ms: float,
     *,
     tungsten_only: bool,
+    env: dict[str, str],
 ) -> dict[int, dict[str, float]]:
     output = run_checked(
         [
@@ -157,7 +170,8 @@ def run_sweep(
             ",".join(str(size) for size in sizes),
             "1",
             f"{target_ms:g}",
-        ]
+        ],
+        env=env,
     )
     rows: dict[int, dict[str, float]] = {}
     for line in output.splitlines():
@@ -201,6 +215,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--baseline-name", default="baseline")
     parser.add_argument("--candidate-name", default="candidate")
     parser.add_argument(
+        "--baseline-env",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="runtime environment override for only the baseline lane",
+    )
+    parser.add_argument(
+        "--candidate-env",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="runtime environment override for only the candidate lane",
+    )
+    parser.add_argument(
         "--tungsten-only",
         action="store_true",
         help=(
@@ -219,6 +247,11 @@ def main() -> int:
     args = parser.parse_args()
     operations = parse_csv(args.operations)
     sizes = parse_csv(args.sizes, integers=True)
+    try:
+        baseline_env_overrides = parse_env(args.baseline_env)
+        candidate_env_overrides = parse_env(args.candidate_env)
+    except argparse.ArgumentTypeError as error:
+        parser.error(str(error))
     if args.rounds <= 0:
         parser.error("--rounds must be positive")
     if args.target_ms <= 0:
@@ -240,6 +273,10 @@ def main() -> int:
         part for part in (DEFAULT_CFLAGS, args.candidate_extra_flags.strip()) if part
     )
     variants = (args.baseline_name, args.candidate_name)
+    variant_env = {
+        args.baseline_name: {**os.environ, **baseline_env_overrides},
+        args.candidate_name: {**os.environ, **candidate_env_overrides},
+    }
     samples: dict[tuple[str, str, int], list[dict[str, float]]] = {
         (variant, operation, limbs): []
         for variant in variants
@@ -256,8 +293,16 @@ def main() -> int:
         }
         print(f"Building {args.baseline_name} variant...", file=sys.stderr)
         build_variant(binaries[args.baseline_name], base_cflags)
-        print(f"Building {args.candidate_name} variant...", file=sys.stderr)
-        build_variant(binaries[args.candidate_name], candidate_cflags)
+        if candidate_cflags == base_cflags:
+            binaries[args.candidate_name] = binaries[args.baseline_name]
+            print(
+                f"Reusing the byte-identical {args.baseline_name} binary for "
+                f"{args.candidate_name}; runtime environment differs.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"Building {args.candidate_name} variant...", file=sys.stderr)
+            build_variant(binaries[args.candidate_name], candidate_cflags)
         binary_hashes = {
             variant: file_sha256(binary) for variant, binary in binaries.items()
         }
@@ -275,6 +320,7 @@ def main() -> int:
                     rows = run_sweep(
                         binaries[variant], operation, sizes, args.target_ms,
                         tungsten_only=args.tungsten_only,
+                        env=variant_env[variant],
                     )
                     for limbs, row in rows.items():
                         samples[(variant, operation, limbs)].append(row)
@@ -360,6 +406,8 @@ def main() -> int:
             "candidate_name": args.candidate_name,
             "baseline_flags": base_cflags,
             "candidate_flags": candidate_cflags,
+            "baseline_env": baseline_env_overrides,
+            "candidate_env": candidate_env_overrides,
             "binary_sha256": binary_hashes,
             "operations": operations,
             "sizes": sizes,

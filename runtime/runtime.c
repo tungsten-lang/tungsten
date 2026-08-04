@@ -7509,6 +7509,12 @@ static size_t bn_sqr_scratch_need(int32_t n) {
  * rely on zero padding explicitly request the zeroed form. */
 static __thread uint64_t *bn_ws = NULL;
 static __thread size_t bn_ws_cap = 0;
+#ifndef BN_BENCH_RUNTIME_WS_ZERO_KNOB
+#define BN_BENCH_RUNTIME_WS_ZERO_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_WS_ZERO_KNOB
+static int bn_bench_runtime_ws_force_zero;
+#endif
 typedef struct {
     uint64_t *key;
     size_t key_cap;
@@ -7555,11 +7561,20 @@ static uint64_t *bn_ws_get(size_t limbs) {
         bn_ws_cap = bn_ws ? ncap : 0;
         if (!bn_ws) return NULL;                    /* caller falls back to calloc */
     }
+#if BN_BENCH_RUNTIME_WS_ZERO_KNOB
+    if (bn_bench_runtime_ws_force_zero && bn_ws)
+        memset(bn_ws, 0, limbs * sizeof(uint64_t));
+#endif
     return bn_ws;
 }
 static uint64_t *bn_ws_get_zeroed(size_t limbs) {
     uint64_t *p = bn_ws_get(limbs);
+#if BN_BENCH_RUNTIME_WS_ZERO_KNOB
+    if (p && !bn_bench_runtime_ws_force_zero)
+        memset(p, 0, limbs * sizeof(uint64_t));
+#else
     if (p) memset(p, 0, limbs * sizeof(uint64_t));
+#endif
     return p;
 }
 

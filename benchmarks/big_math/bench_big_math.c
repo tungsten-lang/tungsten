@@ -1294,6 +1294,50 @@ typedef struct {
     int iters;
 } BenchLaneCtx;
 
+#ifndef BENCH_ARITH_WS_RELEASE_KNOB
+#define BENCH_ARITH_WS_RELEASE_KNOB 0
+#endif
+
+#if BENCH_ARITH_WS_RELEASE_KNOB
+static int bench_release_arith_ws_each_iteration;
+static void bench_release_arith_workspaces(void) {
+    free(bn_ws);
+    bn_ws = NULL;
+    bn_ws_cap = 0;
+#if BN_TOOM_POINT_TLS_MEMORY
+    free(bn_toom_point_memory);
+    bn_toom_point_memory = NULL;
+    bn_toom_point_memory_cap = 0;
+#endif
+    for (int depth = 0; depth < BN_RECT_WS_DEPTH; depth++) {
+        free(bn_rect_ws[depth]);
+        bn_rect_ws[depth] = NULL;
+        bn_rect_ws_cap[depth] = 0;
+    }
+    bn_rect_depth = 0;
+    free(w_ssa_ws);
+    w_ssa_ws = NULL;
+    w_ssa_ws_cap = 0;
+    for (int slot = 0; slot < 2; slot++) {
+        free(w_ntt_workspace[slot]);
+        w_ntt_workspace[slot] = NULL;
+        w_ntt_workspace_cap[slot] = 0;
+    }
+    free(bz_ws);
+    bz_ws = NULL;
+    bz_ws_cap = 0;
+    free(bn_sqrt_ws);
+    bn_sqrt_ws = NULL;
+    bn_sqrt_ws_cap = 0;
+}
+#define BENCH_MAYBE_RELEASE_ARITH_WS() do {                               \
+    if (bench_release_arith_ws_each_iteration)                            \
+        bench_release_arith_workspaces();                                 \
+} while (0)
+#else
+#define BENCH_MAYBE_RELEASE_ARITH_WS() ((void)0)
+#endif
+
 #define DEFINE_BENCH_LANE(NAME, APPLY)                                     \
 static double __attribute__((noinline, aligned(128)))                      \
 bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
@@ -1313,6 +1357,7 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
                 else bench_direct_free(w_as_bigint(previous));                          \
             }                                                              \
             previous = result;                                             \
+            BENCH_MAYBE_RELEASE_ARITH_WS();                                \
         }                                                                  \
     } while (bench_now() - warm_start < bench_warm_seconds);                            \
     int iters = cx->iters;                                                 \
@@ -1327,6 +1372,7 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
             else bench_direct_free(w_as_bigint(previous));                              \
         }                                                                  \
         previous = result;                                                 \
+        BENCH_MAYBE_RELEASE_ARITH_WS();                                    \
     }                                                                      \
     double elapsed = bench_now() - timed_start;                            \
     cx->previous = previous;                                               \
@@ -4385,6 +4431,16 @@ static BenchCapacityStats bench_capacity_policy_grid(
 }
 
 int main(int argc, char **argv) {
+#if BN_BENCH_RUNTIME_WS_ZERO_KNOB
+    const char *force_ws_zero = getenv("BENCH_WS_FORCE_ZERO");
+    bn_bench_runtime_ws_force_zero =
+        force_ws_zero && strcmp(force_ws_zero, "0") != 0;
+#endif
+#if BENCH_ARITH_WS_RELEASE_KNOB
+    const char *release_arith_ws = getenv("BENCH_RELEASE_ARITH_WS");
+    bench_release_arith_ws_each_iteration =
+        release_arith_ws && strcmp(release_arith_ws, "0") != 0;
+#endif
     /* Compiled Tungsten initializes its static string slab and freezes it
      * before user code.  This source-including native harness has no emitted
      * startup, so reproduce that lifecycle before correctness checks or

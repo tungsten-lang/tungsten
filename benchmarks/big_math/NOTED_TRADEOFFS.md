@@ -694,3 +694,46 @@ measurements stand.
 weighted toward large live sets of bignums, measured against the same
 acceptance discipline. Until then BN_BIGINT_HYBRID_CAP stays opt-in for
 liveset-heavy programs, default off.
+
+## Residual isqrt384 and gcd2048 follow-ups — NOT taken (2026-08-04)
+
+Acceptance-grade residual measurements left isqrt384 roughly 2.3% and
+gcd2048 roughly 4.0% behind public GMP, with materially wider IQRs than the
+small linear lanes. Full boxed profiles ruled out result allocation as the
+dominant isqrt cost and ruled out worker creation as the GCD cost: isqrt was
+concentrated in B-Z base-division addmul/submul arithmetic, while three GCD
+workers slept for about 97% of their samples and the caller retained the
+HGCD/Lehmer work. Residual artifacts:
+`baselines/residual-four-bf00da8-accurate-m5max-20260804.json` and
+`baselines/residual-two-bf00da8-15x200-m5max-20260804.json`.
+
+Raising the approximate-quotient admission from 193 to 194 first made the
+target 1.7% slower. The approximate-divisor alignment was then swept at fixed
+2/4/16 limbs against the retained dynamic 8-limb policy across 256..1024.
+None passed: 2 and 4 lost their matrices, while 16 was neutral overall but
+made the target 8.4% slower. A fixed 23-limb submul leaf then improved
+isqrt384 in a short screen but reversed to a 2.2% loss in the 9 x 110 ms
+acceptance band. The candidate was removed. Artifacts:
+`baselines/isqrt-divappr-min194-screen-bf00da8-m5max-20260804.json`,
+`baselines/isqrt-pad2-screen-bf00da8-m5max-20260804.json`,
+`baselines/isqrt-pad4-screen-bf00da8-m5max-20260804.json`,
+`baselines/isqrt-pad16-screen-bf00da8-m5max-20260804.json`, and
+`baselines/isqrt-submul23-acceptance-bf00da8-m5max-20260804.json`.
+
+For GCD, moving parallel row application above 2048 made the target 5.9%
+slower. The current four-step row-serial linear-combination kernel also beat
+both the existing interleaved schedule (10/12 losses, 1.028 geomean) and a
+smaller two-step serial loop (9/12 losses, 1.007 geomean). Scalar HGCD retry
+geometry was then filled in rather than inferred: denominators 4, 5, 6, and 7
+all failed against current 8. A capacity-gated denominator-5 screen looked
+strong, but its acceptance replication reversed to 1.005 geomean, three
+regressions over 5%, and a 2.1% target loss. All selectors were removed.
+Artifacts:
+`baselines/gcd-par-min2049-screen-bf00da8-m5max-20260804.json`,
+`baselines/gcd-den8-min2049-screen-bf00da8-m5max-20260804.json`,
+`baselines/gcd-row-interleaved-screen-bf00da8-m5max-20260804.json`,
+`baselines/gcd-row-serial-unroll2-screen-bf00da8-m5max-20260804.json`,
+`baselines/gcd-exact2048-den5-screen-bf00da8-m5max-20260804.json`,
+`baselines/gcd-exact2048-den6-screen-bf00da8-m5max-20260804.json`,
+`baselines/gcd-exact2048-den7-screen-bf00da8-m5max-20260804.json`, and
+`baselines/gcd-cap2048-den5-acceptance-bf00da8-m5max-20260804.json`.

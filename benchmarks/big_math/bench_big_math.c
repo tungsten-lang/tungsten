@@ -1412,7 +1412,24 @@ DEFINE_BENCH_LANE(abs, bigint_copy_signed(w_as_bigint(a), 0))
 DEFINE_BENCH_LANE(add1, bigint_add_any(a, b))
 DEFINE_BENCH_LANE(sub1, bigint_sub_any(a, b))
 DEFINE_BENCH_LANE(mul1, bigint_mul_any(a, b))
+#ifndef BENCH_DIV1_THRASH
+#define BENCH_DIV1_THRASH 0
+#endif
+#if BENCH_DIV1_THRASH
+static inline WValue bench_div1_thrash(WValue a, WValue b) {
+    WBigint *divisor = w_as_bigint(b);
+#if BENCH_DIV1_THRASH == 1
+    divisor->limbs[0] += UINT64_C(0x9e3779b97f4a7c15);
+    divisor->limbs[0] |= UINT64_C(1) << 63;
+#else
+    divisor->limbs[0] ^= UINT64_C(0x1e3779b97f4a7c15);
+#endif
+    return bigint_div_any(a, b);
+}
+DEFINE_BENCH_LANE(div1, bench_div1_thrash(a, b))
+#else
 DEFINE_BENCH_LANE(div1, bigint_div_any(a, b))
+#endif
 /* In-place sign mutation: O(1) field write, nothing allocated.  These
  * return the RECEIVER, so they must not go through the result-churn macro
  * (which would release the operand).  Compared against GMP's equivalent

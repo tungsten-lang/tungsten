@@ -27,8 +27,11 @@
       ctx[:enclosing_stmts] = prev_stmts
       return nil
     ctx[:enclosing_stmt_idx] = i
-    lower_statement(ctx, statements[i])
-    i += 1
+    if i + 1 < statements.size() && try_lower_bigint_modular_pair(ctx, statements[i], statements[i + 1])
+      i += 2
+    else
+      lower_statement(ctx, statements[i])
+      i += 1
   ctx[:enclosing_stmts] = prev_stmts
 
 # -- Statements --

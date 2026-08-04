@@ -155,6 +155,11 @@ counts, source/binary hashes, GMP version, and machine/load metadata. This is
 a modular-loop experiment outside the default operation matrix; report its GMP
 comparisons separately rather than treating a control win as a matrix win.
 
+Use `--comparison fusion` with the same runner to hold the power-of-two
+reduction constant and compare separate `r += x; r %= 2^k` operations with
+the compiler's adjacent modular-add fusion. This second comparison records the
+fused call count independently and uses the same public-GMP lane.
+
 To reproduce the constant-argument function experiment (ordinary recomputation,
 current pure-`fn` memoization, and an ideal manually hoisted value), run:
 

@@ -23,7 +23,7 @@ SOURCE = ROOT / "benchmarks/big_math/mod_pow2_context.w"
 GMP_SOURCE = ROOT / "benchmarks/big_math/mod_pow2_context_gmp.c"
 WIDTHS = (64, 65, 127, 128, 129, 256, 1024, 4096)
 WORKLOADS = tuple(f"modpow2_{bits}" for bits in WIDTHS)
-LANES = ("generic-control", "pow2-context", "gmp-tdiv-r-2exp")
+GMP_LANE = "gmp-tdiv-r-2exp"
 LINE = re.compile(r"(modpow2_\d+)\t(\d+)\t([0-9.]+)\t(-?\d+)")
 
 
@@ -76,11 +76,15 @@ def machine() -> dict:
     }
 
 
-def build_tungsten(compiler: Path, path: Path, ll_path: Path, enabled: bool) -> None:
+def build_tungsten(
+    compiler: Path, path: Path, ll_path: Path, *,
+    pow2_enabled: bool, fusion_enabled: bool,
+) -> None:
     env = os.environ.copy()
     env["TUNGSTEN_ROOT"] = str(ROOT)
     env["TUNGSTEN_LL_PATH"] = str(ll_path)
-    env["TUNGSTEN_BIGINT_MOD_POW2"] = "1" if enabled else "0"
+    env["TUNGSTEN_BIGINT_MOD_POW2"] = "1" if pow2_enabled else "0"
+    env["TUNGSTEN_BIGINT_MOD_RING_FUSION"] = "1" if fusion_enabled else "0"
     run([
         str(compiler), "-o", str(path), "--release", "--native", "--fast",
         str(SOURCE),
@@ -112,6 +116,7 @@ def sample(path: Path, workload: str, iterations: int) -> tuple[float, int]:
 
 def call_counts(text: str) -> dict[str, int]:
     symbols = (
+        "w_bigint_add_mod_pow2_mut",
         "w_bigint_mod_pow2_mut", "w_bigint_mod_pow2",
         "w_bigint_mod_mut", "w_mod", "w_bit_shl",
     )
@@ -125,14 +130,29 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds", type=int, default=9)
     parser.add_argument("--target-ms", type=float, default=80.0)
+    parser.add_argument(
+        "--comparison", choices=("context", "fusion"), default="context",
+        help="context: generic modulo vs 2^k reduction; fusion: separate add/reduce vs fused modular add",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.rounds < 9 or args.target_ms < 20:
         parser.error("acceptance runs require >=9 rounds and >=20 ms samples")
 
+    if args.comparison == "context":
+        lanes = ("generic-control", "pow2-context", GMP_LANE)
+        build_modes = ((False, False), (True, False))
+        suggestions = ["GEMMA-14"]
+        label = "compile-time power-of-two modular context"
+    else:
+        lanes = ("pow2-control", "modular-fusion", GMP_LANE)
+        build_modes = ((True, False), (True, True))
+        suggestions = ["GEMMA-08", "GEMMA-12"]
+        label = "adjacent power-of-two modular-add context fusion"
+
     start_machine = machine()
     samples = {
-        (lane, workload): [] for lane in LANES for workload in WORKLOADS
+        (lane, workload): [] for lane in lanes for workload in WORKLOADS
     }
     checksums: dict[str, int] = {}
     iterations: dict[str, int] = {}
@@ -141,13 +161,13 @@ def main() -> None:
         directory = Path(temp)
         compiler = directory / "tungsten-compiler"
         binaries = {
-            "generic-control": directory / "generic-control",
-            "pow2-context": directory / "pow2-context",
-            "gmp-tdiv-r-2exp": directory / "gmp",
+            lanes[0]: directory / "control",
+            lanes[1]: directory / "candidate",
+            GMP_LANE: directory / "gmp",
         }
         ir_paths = {
-            "generic-control": directory / "generic-control.ll",
-            "pow2-context": directory / "pow2-context.ll",
+            lanes[0]: directory / "control.ll",
+            lanes[1]: directory / "candidate.ll",
         }
 
         print("Building current compiler release/native/fast...", flush=True)
@@ -158,15 +178,17 @@ def main() -> None:
         ])
         print("Building exact opt-out and candidate binaries...", flush=True)
         build_tungsten(
-            compiler, binaries["generic-control"],
-            ir_paths["generic-control"], False,
+            compiler, binaries[lanes[0]], ir_paths[lanes[0]],
+            pow2_enabled=build_modes[0][0],
+            fusion_enabled=build_modes[0][1],
         )
         build_tungsten(
-            compiler, binaries["pow2-context"],
-            ir_paths["pow2-context"], True,
+            compiler, binaries[lanes[1]], ir_paths[lanes[1]],
+            pow2_enabled=build_modes[1][0],
+            fusion_enabled=build_modes[1][1],
         )
         print("Building public-GMP twin...", flush=True)
-        build_gmp(binaries["gmp-tdiv-r-2exp"])
+        build_gmp(binaries[GMP_LANE])
 
         # Calibrate every width from the slowest lane so all three use the
         # same exact iteration count and the fastest lane still gets a long
@@ -174,7 +196,7 @@ def main() -> None:
         for workload in WORKLOADS:
             probe_ns = []
             probe_checksum = None
-            for lane in LANES:
+            for lane in lanes:
                 ns, checksum = sample(binaries[lane], workload, 100_000)
                 probe_ns.append(ns)
                 if probe_checksum is None:
@@ -187,7 +209,7 @@ def main() -> None:
                 count += 1
             iterations[workload] = count
             warm_checksum = None
-            for lane in LANES:
+            for lane in lanes:
                 _, checksum = sample(binaries[lane], workload, count)
                 if warm_checksum is None:
                     warm_checksum = checksum
@@ -195,7 +217,7 @@ def main() -> None:
                     raise RuntimeError(f"warmup checksum mismatch for {workload}")
             checksums[workload] = warm_checksum
 
-        orders = list(itertools.permutations(LANES))
+        orders = list(itertools.permutations(lanes))
         for round_index in range(args.rounds):
             order = orders[round_index % len(orders)]
             workloads = WORKLOADS[round_index % len(WORKLOADS):] + WORKLOADS[:round_index % len(WORKLOADS)]
@@ -223,9 +245,9 @@ def main() -> None:
 
     results = []
     for workload in WORKLOADS:
-        control = samples[("generic-control", workload)]
-        candidate = samples[("pow2-context", workload)]
-        gmp = samples[("gmp-tdiv-r-2exp", workload)]
+        control = samples[(lanes[0], workload)]
+        candidate = samples[(lanes[1], workload)]
+        gmp = samples[(GMP_LANE, workload)]
         over_control = [
             c / b for c, b in zip(candidate, control, strict=True)
         ]
@@ -245,9 +267,9 @@ def main() -> None:
             "candidate_over_gmp_paired_median": statistics.median(over_gmp),
             "candidate_over_gmp_paired_iqr": iqr(over_gmp),
             "samples_ns": {
-                "generic-control": control,
-                "pow2-context": candidate,
-                "gmp-tdiv-r-2exp": gmp,
+                lanes[0]: control,
+                lanes[1]: candidate,
+                GMP_LANE: gmp,
             },
             "paired_ratios": {
                 "candidate_over_control": over_control,
@@ -261,15 +283,22 @@ def main() -> None:
     gmp_ratios = [row["candidate_over_gmp_paired_median"] for row in results]
     artifact = {
         "schema": 1,
-        "suggestions": ["GEMMA-14"],
+        "suggestions": suggestions,
         "experiment": {
-            "label": "compile-time power-of-two modular context",
+            "label": label,
+            "comparison": args.comparison,
             "rounds": args.rounds,
             "target_ms": args.target_ms,
             "build": "--release --native --fast",
             "build_modes": {
-                "generic-control": {"TUNGSTEN_BIGINT_MOD_POW2": 0},
-                "pow2-context": {"TUNGSTEN_BIGINT_MOD_POW2": 1},
+                lanes[0]: {
+                    "TUNGSTEN_BIGINT_MOD_POW2": int(build_modes[0][0]),
+                    "TUNGSTEN_BIGINT_MOD_RING_FUSION": int(build_modes[0][1]),
+                },
+                lanes[1]: {
+                    "TUNGSTEN_BIGINT_MOD_POW2": int(build_modes[1][0]),
+                    "TUNGSTEN_BIGINT_MOD_RING_FUSION": int(build_modes[1][1]),
+                },
             },
             "source_sha256": {
                 str(SOURCE.relative_to(ROOT)): sha256(SOURCE),
@@ -291,7 +320,7 @@ def main() -> None:
             "machine_end": machine(),
             "methodology": (
                 "identical Tungsten source compiled release/native/fast with "
-                "only literal 2^k context disabled/enabled; public GMP twin "
+                "only the selected modular context feature disabled/enabled; public GMP twin "
                 "reuses mpz destinations and calls mpz_tdiv_r_2exp; exact "
                 "per-width iteration counts and checksums match; six lane "
                 "orders and rotating width order reduce drift"

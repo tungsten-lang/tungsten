@@ -31381,6 +31381,84 @@ __attribute__((preserve_most)) WValue w_bigint_mod_pow2_mut(
     return bigint_mod_pow2_impl(a, bits, 1);
 }
 
+static WValue bigint_add_mod_pow2_mut_fallback(
+    WValue a, WValue b, WValue bits) {
+    WValue sum = w_bigint_add_mut(a, b);
+    return w_bigint_mod_pow2_mut(sum, bits);
+}
+
+/* One boxed operation for the compiler-proved adjacent `r += b; r %= 2^k`
+ * context. Positive residues can add directly into the consumed receiver and
+ * discard every limb above the modulus; signs, aliases, dynamic types, and
+ * insufficient capacity retain the exact two-operation path. */
+__attribute__((preserve_most)) WValue w_bigint_add_mod_pow2_mut(
+    WValue a, WValue b, WValue bits) {
+    if (!w_is_int(bits) || !w_is_bigint(a) ||
+        (a & W_BIGINT_SIGN_BIT) != 0)
+        return bigint_add_mod_pow2_mut_fallback(a, b, bits);
+
+    int64_t k = w_as_int(bits);
+    WBigint *ba = w_as_bigint(a);
+    if (k < 0 || ba->shared != 0 || ba->size <= 0)
+        return bigint_add_mod_pow2_mut_fallback(a, b, bits);
+
+    uint64_t b_scratch = 0;
+    const uint64_t *bp;
+    int32_t bn;
+    if (w_is_int(b)) {
+        int64_t bv = w_as_int(b);
+        if (bv < 0)
+            return bigint_add_mod_pow2_mut_fallback(a, b, bits);
+        b_scratch = (uint64_t)bv;
+        bn = bv == 0 ? 0 : 1;
+        bp = &b_scratch;
+    } else if (w_is_bigint(b)) {
+        int32_t bs;
+        WBigint *bb = w_bigint_view(b, &bs);
+        if (bs < 0)
+            return bigint_add_mod_pow2_mut_fallback(a, b, bits);
+        bn = bs;
+        bp = bb->limbs;
+    } else {
+        return bigint_add_mod_pow2_mut_fallback(a, b, bits);
+    }
+
+    if (k == 0) {
+        bigint_release_if_live(ba);
+        return w_box_int(0);
+    }
+
+    int32_t an = ba->size;
+    int32_t maxn = an > bn ? an : bn;
+    uint64_t keep64 = ((uint64_t)k + 63U) >> 6;
+    uint64_t limit64 = (uint64_t)maxn < keep64 ? (uint64_t)maxn : keep64;
+    if (limit64 > INT32_MAX)
+        return bigint_add_mod_pow2_mut_fallback(a, b, bits);
+    int32_t limit = (int32_t)limit64;
+    uint64_t need64 = limit64 + (limit64 < keep64);
+    if (need64 > ba->cap)
+        return bigint_add_mod_pow2_mut_fallback(a, b, bits);
+
+    uint64_t carry = 0;
+    for (int32_t i = 0; i < limit; i++) {
+        uint64_t av = i < an ? ba->limbs[i] : 0;
+        uint64_t bv = i < bn ? bp[i] : 0;
+        unsigned __int128 sum = (unsigned __int128)av + bv + carry;
+        ba->limbs[i] = (uint64_t)sum;
+        carry = (uint64_t)(sum >> 64);
+    }
+
+    int32_t outn = limit;
+    if (carry != 0 && (uint64_t)outn < keep64)
+        ba->limbs[outn++] = carry;
+    unsigned rem = (unsigned)k & 63U;
+    if (rem != 0 && (uint64_t)outn == keep64)
+        ba->limbs[outn - 1] &= (UINT64_C(1) << rem) - 1U;
+    while (outn > 0 && ba->limbs[outn - 1] == 0) outn--;
+    ba->size = outn;
+    return bigint_finish_mag_sub(ba);
+}
+
 /* Helper: extract low 64-bit word from any integer (inline or bigint) */
 static int64_t integer_low_i64(WValue v) {
     if (w_is_int(v)) return w_as_int(v);

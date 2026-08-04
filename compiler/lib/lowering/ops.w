@@ -568,6 +568,61 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     ctx[:bindings][name] = result
   typed_value(:i64, result)
 
+# Fuse the exact adjacent context
+#
+#   r += value
+#   r %= 1 << literal_bits
+#
+# after the existing liveness analysis proved r's old binding consumable.
+# There is no reordering across statements and the runtime entry retains a
+# complete add-then-mod fallback for every guard-refused dynamic shape.
+-> try_lower_bigint_modular_pair(ctx, add_node, mod_node)
+  if env("TUNGSTEN_BIGINT_MOD_RING_FUSION") == "0"
+    return false
+  if add_node == nil || mod_node == nil || ast_kind(add_node) != :compound_assign || ast_kind(mod_node) != :compound_assign
+    return false
+  if add_node.op != :PLUS || mod_node.op != :PERCENT
+    return false
+  if add_node.target == nil || mod_node.target == nil || ast_kind(add_node.target) != :var || ast_kind(mod_node.target) != :var
+    return false
+  name = add_node.target.name
+  if mod_node.target.name != name || ctx[:var_types][name] != :bigint
+    return false
+  if ctx[:mut_accumulators] == nil || ctx[:mut_accumulators][name] != true
+    return false
+  if ctx[:sum_chunk] != nil && name == ctx[:sum_chunk][:var]
+    return false
+  bits = bigint_pow2_modulus_bits(mod_node.value)
+  if bits == nil
+    return false
+
+  wfn = ctx[:func]
+  range_binding_invalidate(ctx, name)
+  binding = ctx[:bindings][name]
+  if binding != nil
+    cur = binding
+    ptr = nil
+  else
+    ptr = ensure_var_slot(wfn, name)
+    cur = next_temp(wfn)
+    emit_instruction(wfn, {op: :load_i64, temp: cur, ptr: ptr})
+
+  rhs_tv = lower_expression(ctx, add_node.value)
+  rhs_reg = ensure_i64_value(wfn, rhs_tv)
+  if ptr == nil && ctx[:bindings][name] == nil
+    ptr = ensure_var_slot(wfn, name)
+  bits_reg = ensure_i64_value(wfn, typed_value(:raw_int, bits.to_s()))
+  result = next_temp(wfn)
+  emit_instruction(wfn, {
+    op: :call_direct_i64, temp: result, name: "w_bigint_add_mod_pow2_mut",
+    args: [cur, rhs_reg, bits_reg], call_conv: "preserve_mostcc"
+  })
+  if ptr != nil
+    emit_instruction(wfn, {op: :store_i64, value: result, ptr: ptr})
+  else
+    ctx[:bindings][name] = result
+  true
+
 -> lower_compound_assign(ctx, node)
   # Desugar: x += val  →  x = x op val
   target = node.target

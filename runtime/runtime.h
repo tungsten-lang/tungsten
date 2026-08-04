@@ -680,6 +680,8 @@ __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_mod_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_mod_pow2_mut(
     WValue a, WValue bits);
+__attribute__((preserve_most)) WValue w_bigint_add_mod_pow2_mut(
+    WValue a, WValue b, WValue bits);
 __attribute__((preserve_most)) WValue w_bigint_addmul_mut(
     WValue a, WValue x, WValue word);
 __attribute__((preserve_most)) WValue w_bigint_submul_mut(

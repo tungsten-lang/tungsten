@@ -71,4 +71,116 @@ zeroed = ((1 << 200) + 99) ## big
 zeroed %= 1 << 0
 check("pow2.compound.zero", zeroed, 0)
 
+# Adjacent modular context: the compiled engine may fuse these two statements
+# only when the receiver is proven dead. Variable-modulus twins keep the
+# arithmetic reference on the ordinary two-operation path.
+-> fused_chain(n)
+  r = ((1 << 257) + 12345) ## big
+  bump = (1 << 127) + 98765
+  i = 0 ## i64
+  while i < n
+    r += bump
+    r %= 1 << 128
+    i += 1
+  r % 1000000007
+
+-> fused_chain_ref(n)
+  r = ((1 << 257) + 12345) ## big
+  bump = (1 << 127) + 98765
+  modulus = 1 << 128
+  i = 0 ## i64
+  while i < n
+    r += bump
+    r %= modulus
+    i += 1
+  r % 1000000007
+
+-> fused_negative_receiver(n)
+  r = (0 - ((1 << 257) + 12345)) ## big
+  bump = (1 << 127) + 98765
+  i = 0 ## i64
+  while i < n
+    r += bump
+    r %= 1 << 128
+    i += 1
+  r % 1000000007
+
+-> fused_negative_receiver_ref(n)
+  r = (0 - ((1 << 257) + 12345)) ## big
+  bump = (1 << 127) + 98765
+  modulus = 1 << 128
+  i = 0 ## i64
+  while i < n
+    r += bump
+    r %= modulus
+    i += 1
+  r % 1000000007
+
+-> fused_negative_rhs(n)
+  r = ((1 << 257) + 12345) ## big
+  bump = 0 - ((1 << 127) + 98765)
+  i = 0 ## i64
+  while i < n
+    r += bump
+    r %= 1 << 128
+    i += 1
+  r % 1000000007
+
+-> fused_negative_rhs_ref(n)
+  r = ((1 << 257) + 12345) ## big
+  bump = 0 - ((1 << 127) + 98765)
+  modulus = 1 << 128
+  i = 0 ## i64
+  while i < n
+    r += bump
+    r %= modulus
+    i += 1
+  r % 1000000007
+
+-> fused_self(n)
+  r = ((1 << 200) + 17) ## big
+  i = 0 ## i64
+  while i < n
+    r += r
+    r %= 1 << 129
+    i += 1
+  r % 1000000007
+
+-> fused_self_ref(n)
+  r = ((1 << 200) + 17) ## big
+  modulus = 1 << 129
+  i = 0 ## i64
+  while i < n
+    r += r
+    r %= modulus
+    i += 1
+  r % 1000000007
+
+-> fused_capacity_fallback
+  r = ((1 << 63) + 7) ## big
+  i = 0 ## i64
+  while i < 1
+    r += (1 << 500) + 11
+    r %= 1 << 512
+    i += 1
+  r % 1000000007
+
+check("ring.fused.positive", fused_chain(33), fused_chain_ref(33))
+check("ring.fused.negative_receiver", fused_negative_receiver(33), fused_negative_receiver_ref(33))
+check("ring.fused.negative_rhs", fused_negative_rhs(33), fused_negative_rhs_ref(33))
+check("ring.fused.self", fused_self(9), fused_self_ref(9))
+check("ring.fused.capacity_fallback", fused_capacity_fallback(), ((1 << 500) + (1 << 63) + 18) % 1000000007)
+
+ring_alias = ((1 << 300) + 31) ## big
+ring_snapshot = ring_alias
+ring_alias += (1 << 200) + 7
+ring_alias %= 1 << 129
+check("ring.alias.old", ring_snapshot, (1 << 300) + 31)
+check("ring.alias.result", ring_alias, 38)
+
+ring_zero = ((1 << 200) + 9) ## big
+ring_zero += (1 << 100) + 5
+ring_zero %= 1 << 0
+check("ring.modulus.one", ring_zero, 0)
+
 << "bigint_mod_pow2_context_spec: all checks passed"

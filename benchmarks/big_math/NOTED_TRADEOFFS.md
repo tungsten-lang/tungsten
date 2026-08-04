@@ -134,6 +134,26 @@ load.  Artifacts:
 `baselines/matrix-d0ecda6-screen-m5max-20260804.json` and
 `baselines/matrix-d0ecda6-residual095-accurate-m5max-20260804.json`.
 
+## 128-limb addition carry-select — RETAINED (2026-08-04)
+
+The low-noise `add@128` residual selected a dedicated eight-way carry-select
+leaf.  It computes eight independent 16-limb chains with carry-in zero, then
+applies each preceding chunk's carry to the next chunk's first limb.  If that
+increment wraps, the rare path replays the exact serial 128-limb kernel;
+otherwise the independently computed chunk carry remains valid.
+
+The first 7 x 80 ms screen over add/sub at 13 target and adjacent widths was
+slightly noisy: 12/26 wins, 0.995 geomean, and one inactive add64 control over
+5%.  The acceptance-grade 9 x 110 ms replication won 19/26 cells at 0.972
+geomean with no regression over 5%; add128 improved to 0.659x its serial
+fallback and 0.668x GMP.  Every timed sample used the full boxed immutable
+operation and public-GMP oracle.  Optimized differential fuzz passed 500000
+random cases through 256 limbs plus three deterministic carry/borrow boundary
+cases, including the add128 wrap replay; ASAN/UBSAN passed 20000 cases plus
+the same boundaries.  Artifacts:
+`baselines/add128-carry-select-screen-69086b0-m5max-20260804.json` and
+`baselines/add128-carry-select-acceptance-69086b0-m5max-20260804.json`.
+
 ## 40-limb subtraction follow-ups — NOT taken (2026-08-04)
 
 The accurate `sub@40` result was only 1.2% behind GMP but had the lowest

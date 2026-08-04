@@ -1460,6 +1460,9 @@ static BN_ADDSUB_MAG_ATTR WBigint *mag_sub(
 #ifndef BN_ADDSUB_CSEL128
 #define BN_ADDSUB_CSEL128 1
 #endif
+#ifndef BN_ADDSUB_CSEL_ADD128
+#define BN_ADDSUB_CSEL_ADD128 1
+#endif
 #ifndef BN_ADDSUB_CSEL256
 #define BN_ADDSUB_CSEL256 1
 #endif
@@ -1883,7 +1886,7 @@ BN_FIXED_ADDSUB(
     "stp x14, x15, [%[rp], #112]\n\t"
     "cset %[flag], lo")
 
-#if BN_ADDSUB_CSEL128 || BN_ADDSUB_CSEL256
+#if BN_ADDSUB_CSEL128 || BN_ADDSUB_CSEL_ADD128 || BN_ADDSUB_CSEL256
 #if BN_ADDSUB_CSEL256
 /* Compute sixteen independent 16-limb chains with carry-in zero.  Apple
  * cores rename NZCV, so the short flag chains can overlap instead of making
@@ -1905,6 +1908,41 @@ static __attribute__((noinline)) uint64_t bn_sub_csel_serial_fallback(
 #define BN_CSEL_CHUNK(kernel, bit)                                        \
     carry_mask |= kernel(r + 16 * (bit), a + 16 * (bit),                 \
                          b + 16 * (bit)) << (bit)
+
+#if BN_ADDSUB_CSEL_ADD128
+static __attribute__((noinline)) uint64_t bn_add128_serial_fallback(
+    uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    return bn_add_n(r, a, b, 128);
+}
+
+static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
+bn_add128_carry_select(uint64_t *r, const uint64_t *a, const uint64_t *b) {
+    uint64_t carry_mask = 0;
+    BN_CSEL_CHUNK(bn_add16_fixed, 0);
+    BN_CSEL_CHUNK(bn_add16_fixed, 1);
+    BN_CSEL_CHUNK(bn_add16_fixed, 2);
+    BN_CSEL_CHUNK(bn_add16_fixed, 3);
+    BN_CSEL_CHUNK(bn_add16_fixed, 4);
+    BN_CSEL_CHUNK(bn_add16_fixed, 5);
+    BN_CSEL_CHUNK(bn_add16_fixed, 6);
+    BN_CSEL_CHUNK(bn_add16_fixed, 7);
+
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 1; chunk < 8; chunk++) {
+        uint64_t increment = (carry_mask >> (chunk - 1)) & 1U;
+        uint64_t old = r[16 * chunk];
+        uint64_t adjusted = old + increment;
+        r[16 * chunk] = adjusted;
+        wrapped |= (uint64_t)(adjusted == 0) & increment;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_add128_serial_fallback(r, a, b);
+    return (carry_mask >> 7) & 1U;
+}
+#endif
 
 #if BN_ADDSUB_CSEL256
 static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
@@ -2245,6 +2283,11 @@ WValue bigint_add_equal_fast(
         BN_ADDSUB_REHOME_IF_HAZARD(r, a, b);
         dst = r->limbs;
         carry = bn_add64_fixed(dst, a, b);
+        break;
+#endif
+#if BN_ADDSUB_CSEL_ADD128
+    case 128:
+        carry = bn_add128_carry_select(dst, a, b);
         break;
 #endif
 #if BN_ADDSUB_CSEL256

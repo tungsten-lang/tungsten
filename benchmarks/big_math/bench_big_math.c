@@ -3584,6 +3584,30 @@ static void fuzz_add_sub_against_gmp(int cases, int32_t max_limbs) {
     mpz_t za, zb, zg;
     mpz_inits(za, zb, zg, NULL);
     if (max_limbs >= 128) {
+        /* Force the add128 chunk correction to wrap.  Chunk zero produces a
+         * carry, while chunk one's independently computed first limb is
+         * UINT64_MAX; incrementing it must trigger the serial replay. */
+        WBigint *add_ab = bigint_alloc(128);
+        WBigint *add_bb = bigint_alloc(128);
+        add_ab->size = 128;
+        add_bb->size = 128;
+        add_ab->limbs[0] = UINT64_MAX;
+        add_bb->limbs[0] = 1;
+        add_ab->limbs[16] = UINT64_MAX;
+        add_ab->limbs[127] = 1;
+        add_bb->limbs[127] = 1;
+        WValue add_a = bigint_box(add_ab);
+        WValue add_b = bigint_box(add_bb);
+        gmp_import_value(za, add_a);
+        gmp_import_value(zb, add_b);
+        WValue sum = bigint_add_any(add_a, add_b);
+        mpz_add(zg, za, zb);
+        if (!value_matches_mpz(sum, zg))
+            die("add128 carry-select ripple fallback mismatch");
+        bench_free_value(sum);
+        bench_free_value(add_a);
+        bench_free_value(add_b);
+
         /* Force the 128-limb carry-select boundary correction to ripple.
          * The independent chunk result starts with zero at limb 16, while
          * the borrow produced by limb 0 must pass through it; the optimized

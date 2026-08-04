@@ -147,6 +147,14 @@ python3 benchmarks/big_math/run_interprocedural_constant.py \
 
 This is a compiler-opportunity bound rather than a GMP operation lane.
 
+To distinguish ordinary compiled BigInt bindings from explicit dictionary
+lookup and a user-hoisted cached binding, run:
+
+```sh
+python3 benchmarks/big_math/run_symbol_lookup.py \
+  --rounds 9 --output /tmp/symbol-lookup.json
+```
+
 To compare Tungsten's full-width `uint64_t` radix with an Odin-style 63-bit
 "nail" radix on the same ARM64 machine:
 

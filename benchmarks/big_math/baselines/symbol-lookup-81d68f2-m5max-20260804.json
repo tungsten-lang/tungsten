@@ -1,0 +1,124 @@
+{
+  "schema": 1,
+  "suggestion": "GEMMA-19",
+  "experiment": {
+    "label": "compiled local vs explicit hash vs cached local",
+    "rounds": 9,
+    "iterations": 2000001,
+    "build": "--release --native --fast",
+    "binary_sha256": {
+      "compiler": "b23458fb85e8bcc1abb4b5d8f204a548d339a2fc54ed86299b00f3bcdd97034e",
+      "binary": "7c23fcd5f9e3e3f822f617ca78fd7a645e4737bc824d1b84c5ea47f48bff30e1"
+    },
+    "ir_hash_get_calls": 10
+  },
+  "metadata": {
+    "generated_at": "2026-08-04T13:48:11.774393+00:00",
+    "git_commit": "81d68f28bad99422162dc76cb87ddb6692abdb84",
+    "git_dirty_tracked": true,
+    "machine_start": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        3.21240234375,
+        4.0302734375,
+        4.19677734375
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "machine_end": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        4.57470703125,
+        4.310546875,
+        4.2919921875
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "methodology": "one release/native/fast binary; separate processes per lane; six lane orders rotate; exact iteration counts and low-bit checksums match"
+  },
+  "summary": {
+    "medians_ns": {
+      "local": 6.19403857198566,
+      "hash": 7.439954611838127,
+      "cached": 6.408434296577968
+    },
+    "hash_over_local_paired_median": 1.137015865904766,
+    "hash_over_local_paired_iqr": 0.07586456115050089,
+    "cached_over_local_paired_median": 1.0141230397916734,
+    "cached_over_local_paired_iqr": 0.0494187710360936
+  },
+  "samples_ns": {
+    "local": [
+      6.370913482490572,
+      6.1459344280927475,
+      6.19403857198566,
+      5.775934611525705,
+      6.144351093196077,
+      6.617434191891407,
+      6.747684127204976,
+      5.992476169559619,
+      7.192725571946811
+    ],
+    "hash": [
+      7.243829709898366,
+      6.646100844834492,
+      7.029058986276101,
+      7.439954611838127,
+      7.46091293723997,
+      7.552308723529105,
+      7.4588504389372305,
+      7.253267207919801,
+      8.160370918438861
+    ],
+    "cached": [
+      6.618038358005776,
+      6.081121959930758,
+      6.479642593857363,
+      6.407309295850121,
+      6.124017770421802,
+      6.71089247830227,
+      6.408434296577968,
+      6.2923510201866915,
+      7.200246399973076
+    ]
+  },
+  "checksums": {
+    "local": 26801,
+    "hash": 26801,
+    "cached": 26801
+  },
+  "paired_ratios": {
+    "hash_over_local": [
+      1.137015865904766,
+      1.0813816715088123,
+      1.1348103349028311,
+      1.2880953667640074,
+      1.2142719099339525,
+      1.1412744735388884,
+      1.1053941320200527,
+      1.2103956699510474,
+      1.1345311088005465
+    ],
+    "cached_over_local": [
+      1.0387895513248433,
+      0.9894544159362106,
+      1.0461095000543637,
+      1.1093112590063825,
+      0.99669072901827,
+      1.0141230397916734,
+      0.949723516360341,
+      1.050041892890683,
+      1.0010456158727363
+    ]
+  }
+}

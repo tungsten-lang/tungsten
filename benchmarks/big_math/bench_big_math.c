@@ -3890,7 +3890,7 @@ static void fuzz_boxed_mul_sqr_against_gmp(
 static void fuzz_boxed_mul1_against_gmp(int cases) {
     static const int32_t widths[] = {
         2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 40, 48, 64, 128,
-        256, 384, 512, 1024
+        256, 384, 448, 512, 1024
     };
     uint64_t state = 0xbb67ae8584caa73bULL;
     mpz_t za, zb, zg;
@@ -3953,10 +3953,28 @@ static void fuzz_boxed_mul1_against_gmp(int cases) {
     bench_free_value(boundary_product);
     bench_free_value(boundary_value);
 
+    /* Repeat the same forced wrap in the 64-limb tail of the dedicated
+     * 448-limb shape.  The zero prefix makes the carry entering limb 384
+     * exactly zero, isolating the tail replay. */
+    WBigint *tail_boundary = bigint_alloc(448);
+    tail_boundary->size = 448;
+    tail_boundary->limbs[398] = UINT64_MAX;
+    tail_boundary->limbs[399] = 1;
+    tail_boundary->limbs[400] = 1;
+    tail_boundary->limbs[447] = 1;
+    WValue tail_value = bigint_box(tail_boundary);
+    gmp_import_value(za, tail_value);
+    mpz_mul_ui(zg, za, UINT64_MAX);
+    WValue tail_product = bigint_mul_ui_any(tail_value, UINT64_MAX);
+    if (!value_matches_mpz(tail_product, zg))
+        die("boxed mul1 carry-select tail replay mismatch");
+    bench_free_value(tail_product);
+    bench_free_value(tail_value);
+
     mpz_clears(za, zb, zg, NULL);
     bigint_pool_release_thread();
     printf("boxed mul1 fuzz vs GMP: %d/%d match"
-           " (2..1024 limbs, both orders/sign encodings; replay boundary)\n",
+           " (2..1024 limbs, both orders/sign encodings; replay boundaries)\n",
            cases, cases);
 }
 

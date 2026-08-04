@@ -537,14 +537,25 @@ regression.  All changed complete boxed cells measured faster than GMP.
 The post-change 485-cell fast matrix measured 458 wins at 0.617 geomean.  Its
 9 x 110 ms follow-up promoted all seventy cells at or above 0.95x GMP,
 including screen wins, and measured 64 wins with six remaining losses:
-div@4, gcd@2048, isqrt@384, sub1@1, mul1@128, and mul1@448.  The new selector
-deliberately leaves the last two shapes on the prior rolling kernel.
+div@4, gcd@2048, isqrt@384, sub1@1, mul1@128, and mul1@448.  At that point the
+selector deliberately left the last two shapes on the prior rolling kernel.
+
+A narrow follow-up composed three retained 128-limb blocks with a four-chain
+64-limb tail for the exact 448-limb shape.  The 7 x 80 ms screen improved the
+target 21.7% to 0.792x GMP with no >5% control regression.  Its 9 x 110 ms
+acceptance replication improved the target 19.6% to 0.823x GMP; the complete
+twenty-width mul1 band measured 0.992 candidate/baseline geomean and again had
+no >5% regression.  This closes the measured 448-limb loss while leaving the
+lower-overhead rolling kernel selected at 128 limbs.  Artifacts:
+`baselines/mul1-csel448-screen-2779b76-m5max-20260804.json` and
+`baselines/mul1-csel448-acceptance-2779b76-m5max-20260804.json`.
 
 Every timed sample checked the full boxed result against public GMP.  The
 expanded randomized checker passed 100000 optimized cases and 20000
 ASAN/UBSAN cases through 1024 limbs across both operand orders and sign
-encodings.  A constructed v=2^64-1 case forces the boundary correction to
-wrap and therefore exercises the serial replay.  Artifacts:
+encodings.  Constructed v=2^64-1 cases force the boundary correction to wrap
+in both a complete block and the 448-limb tail, exercising both serial
+replays.  Artifacts:
 `baselines/mul1-csel128-screen-42ffc87-m5max-20260804.json`,
 `baselines/mul1-csel128-acceptance-42ffc87-m5max-20260804.json`,
 `baselines/mul1-csel128-same-binary-42ffc87-m5max-20260804.json`,

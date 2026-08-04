@@ -3456,6 +3456,9 @@ static uint64_t bn_mul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uint64
 #ifndef BN_MUL1_CSEL128
 #define BN_MUL1_CSEL128 1
 #endif
+#ifndef BN_MUL1_CSEL448
+#define BN_MUL1_CSEL448 1
+#endif
 #ifndef BN_BENCH_RUNTIME_MUL1_CSEL_KNOB
 #define BN_BENCH_RUNTIME_MUL1_CSEL_KNOB 0
 #endif
@@ -3659,6 +3662,33 @@ static __attribute__((noinline)) uint64_t bn_mul_1_seeded_serial(
         (uint64_t)(((__uint128_t)up[16 * (bit) - 1] * v) >> 64));        \
     carry_mask |= c##bit.carry_bit << (bit)
 
+#if BN_MUL1_CSEL448
+static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
+bn_mul_1_csel64(uint64_t *rp, const uint64_t *up, uint64_t v,
+                uint64_t seed) {
+    BnMul1SplitCarry c0 = bn_mul_1_f16_seed(rp, up, v, seed);
+    uint64_t carry_mask = c0.carry_bit;
+    BN_MUL1_SPLIT_CHUNK(1);
+    BN_MUL1_SPLIT_CHUNK(2);
+    BN_MUL1_SPLIT_CHUNK(3);
+
+    uint64_t wrapped = 0;
+#if defined(__clang__)
+#pragma clang loop unroll(full)
+#endif
+    for (int32_t chunk = 1; chunk < 4; chunk++) {
+        uint64_t increment = (carry_mask >> (chunk - 1)) & 1U;
+        uint64_t old = rp[16 * chunk];
+        uint64_t adjusted = old + increment;
+        rp[16 * chunk] = adjusted;
+        wrapped |= (uint64_t)(adjusted == 0) & increment;
+    }
+    if (__builtin_expect(wrapped != 0, 0))
+        return bn_mul_1_seeded_serial(rp, up, v, seed, 64);
+    return c3.high + c3.carry_bit;
+}
+#endif
+
 static __attribute__((noinline, BN_HOT_SECTION, aligned(64))) uint64_t
 bn_mul_1_csel128(uint64_t *rp, const uint64_t *up, uint64_t v,
                  uint64_t seed) {
@@ -3691,12 +3721,16 @@ bn_mul_1_csel128(uint64_t *rp, const uint64_t *up, uint64_t v,
 static uint64_t bn_mul_1_csel(uint64_t *rp, const uint64_t *up, int32_t n,
                               uint64_t v) {
     uint64_t carry = 0;
-    do {
+    while (n >= 128) {
         carry = bn_mul_1_csel128(rp, up, v, carry);
         rp += 128;
         up += 128;
         n -= 128;
-    } while (n != 0);
+    }
+#if BN_MUL1_CSEL448
+    if (n == 64)
+        carry = bn_mul_1_csel64(rp, up, v, carry);
+#endif
     return carry;
 }
 #undef BN_MUL1_SPLIT_CHUNK
@@ -8904,9 +8938,13 @@ static WValue bigint_mul_n1(const uint64_t *al, int32_t n, uint64_t w,
 #endif
 #if defined(__aarch64__) && BN_MUL1_CSEL128
     /* Eight independent 16-limb chains amortize their boundary-high products
-     * from 256 limbs onward.  The exact-multiple gate leaves the 128- and
-     * 448-limb controls on the lower-overhead rolling kernel. */
-    if (n >= 256 && (n & 127) == 0
+     * from 256 limbs onward.  448 uses three complete blocks plus a measured
+     * four-chain tail; other nonmultiples retain the rolling kernel. */
+    if (n >= 256 && ((n & 127) == 0
+#if BN_MUL1_CSEL448
+                     || n == 448
+#endif
+                     )
 #if BN_BENCH_RUNTIME_MUL1_CSEL_KNOB
         && bn_bench_runtime_mul1_csel128
 #endif

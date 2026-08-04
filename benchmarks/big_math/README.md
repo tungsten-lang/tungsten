@@ -137,6 +137,9 @@ python3 benchmarks/big_math/run_program_mutation_ab.py --feature mod \
 It tests 2 through 128 limbs, retains exact checksums and LLVM call counts, and
 records the GMP version plus machine/load metadata in JSON.
 
+Use `--feature sqr` with the same command to isolate a consumed one-limb
+self-square after modulo has retained a larger destination buffer.
+
 To reproduce the constant-argument function experiment (ordinary recomputation,
 current pure-`fn` memoization, and an ideal manually hoisted value), run:
 

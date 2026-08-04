@@ -95,6 +95,24 @@
   c = r % 1000000007
   << "modchain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
 
+-> bench_sqrchain(n, limbs)
+  # `%=` leaves a one-limb value in the proven-dead wide receiver. Its spare
+  # capacity lets the existing N×1 mut entry consume `r *= r` as a square.
+  r = (1 << 8191) + 123456789 ## big
+  bits = limbs * 64 - 1
+  bump = (1 << bits) + 987654321
+  divisor = (1 << 63) + 29
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r += bump
+    r %= divisor
+    r *= r
+    i += 1
+  t1 = clock()
+  c = r % 1000000007
+  << "sqrchain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
 args = argv()
 workload = args.size() > 0 ? args[0] : "all"
 n = args.size() > 1 ? args[1].to_i() : 0
@@ -112,3 +130,5 @@ if workload == "divchain" || workload == "all"
   bench_divchain(n > 0 ? n : 30000)
 if workload == "modchain" || workload == "all"
   bench_modchain(n > 0 ? n : 2000000, limbs)
+if workload == "sqrchain" || workload == "all"
+  bench_sqrchain(n > 0 ? n : 2000000, limbs)

@@ -824,6 +824,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   op = node.op
   int_op = lowering_int_op_map[op]
   rt_op = lowering_op_map[op]
+  self_square = op == :STAR && node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :var && node.value.name == name
 
   # Check if both sides are int for inline op
   lt = ctx[:var_types][name]
@@ -848,12 +849,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # accumulator takes the in-place entry; its runtime guards fall back.
     mut_cc = nil
     if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
-      if op == :PERCENT
+      if self_square && env("TUNGSTEN_BIGINT_SQR_MUT") == "0"
+        rt_fb = "w_mul"
+      elsif op == :PERCENT
         rt_fb = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
       else
         rt_fb = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
       # must match the preserve_mostcc declaration or the call is UB
-      if rt_fb != "w_mod"
+      if rt_fb != "w_mod" && rt_fb != "w_mul"
         mut_cc = "preserve_mostcc"
     result_temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rhs_reg], call_conv: mut_cc})
@@ -915,11 +918,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if rt_op != nil
     rt_call_conv = nil
     if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT)
-      if op == :PERCENT
+      if self_square && env("TUNGSTEN_BIGINT_SQR_MUT") == "0"
+        rt_op = "w_mul"
+      elsif op == :PERCENT
         rt_op = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
       else
         rt_op = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
-      if rt_op != "w_mod"
+      if rt_op != "w_mod" && rt_op != "w_mul"
         rt_call_conv = "preserve_mostcc"
     result = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg], call_conv: rt_call_conv})
@@ -1676,11 +1681,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # instead of __w_add_fast/__w_sub_fast.
   rt_call_conv = nil
   if ctx[:mut_accum_target] != nil && op in (:PLUS :MINUS :STAR :SLASH :PERCENT) && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
-    if op == :PERCENT
+    self_square = op == :STAR && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :var && node.right.name == ctx[:mut_accum_target]
+    if self_square && env("TUNGSTEN_BIGINT_SQR_MUT") == "0"
+      rt_name = "w_mul"
+    elsif op == :PERCENT
       rt_name = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
     else
       rt_name = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
-    if rt_name != "w_mod"
+    if rt_name != "w_mod" && rt_name != "w_mul"
       rt_call_conv = "preserve_mostcc"
 
   temp = next_temp(wfn)

@@ -23,6 +23,7 @@ SOURCE = ROOT / "benchmarks/big_math/program_loops.w"
 GMP_SOURCE = ROOT / "benchmarks/big_math/program_loops_gmp.c"
 WORKLOADS = ("accumulate", "mulchain", "addchain", "subchain", "divchain")
 MOD_WORKLOADS = tuple(f"modchain{limbs}" for limbs in (2, 4, 8, 16, 32, 65, 128))
+SQR_WORKLOADS = tuple(f"sqrchain{limbs}" for limbs in (2, 4, 8, 16, 32, 65, 128))
 LINE = re.compile(r"(\w+)\t(\d+)\t([0-9.]+)\t(-?\d+)")
 
 
@@ -78,12 +79,14 @@ def machine() -> dict:
 
 
 def build_tungsten(
-    compiler: Path, path: Path, *, mutate: bool, mod_mut: bool = True
+    compiler: Path, path: Path, *, mutate: bool, mod_mut: bool = True,
+    sqr_mut: bool = True,
 ) -> Path:
     env = os.environ.copy()
     env["TUNGSTEN_ROOT"] = str(ROOT)
     env["TUNGSTEN_BIGINT_MUTATE_UNIQUE"] = "1" if mutate else "0"
     env["TUNGSTEN_BIGINT_MOD_MUT"] = "1" if mod_mut else "0"
+    env["TUNGSTEN_BIGINT_SQR_MUT"] = "1" if sqr_mut else "0"
     ll_path = path.with_suffix(".ll")
     env["TUNGSTEN_LL_PATH"] = str(ll_path)
     run([
@@ -107,9 +110,10 @@ def build_gmp(path: Path) -> None:
 
 
 def sample(path: Path, workload: str) -> tuple[int, float, int]:
-    if workload.startswith("modchain"):
-        limbs = workload.removeprefix("modchain")
-        text = run([str(path), "modchain", "2000000", limbs]).stdout.strip()
+    if workload.startswith("modchain") or workload.startswith("sqrchain"):
+        base = "modchain" if workload.startswith("modchain") else "sqrchain"
+        limbs = workload.removeprefix(base)
+        text = run([str(path), base, "2000000", limbs]).stdout.strip()
     else:
         text = run([str(path), workload]).stdout.strip()
     match = LINE.fullmatch(text)
@@ -122,7 +126,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds", type=int, default=9)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--feature", choices=("all", "mod"), default="all")
+    parser.add_argument("--feature", choices=("all", "mod", "sqr"), default="all")
     args = parser.parse_args()
     if args.rounds < 9:
         parser.error("acceptance runs require --rounds >= 9")
@@ -130,11 +134,15 @@ def main() -> None:
     if args.feature == "mod":
         workloads = MOD_WORKLOADS
         lanes = ("immutable-mod", "mutating-mod", "gmp-destination")
-        build_modes = ((True, False), (True, True))
+        build_modes = ((True, False, True), (True, True, True))
+    elif args.feature == "sqr":
+        workloads = SQR_WORKLOADS
+        lanes = ("immutable-sqr", "mutating-sqr", "gmp-destination")
+        build_modes = ((True, True, False), (True, True, True))
     else:
         workloads = WORKLOADS
         lanes = ("immutable-churn", "mutate-if-unique", "gmp-destination")
-        build_modes = ((False, True), (True, True))
+        build_modes = ((False, True, True), (True, True, True))
     samples = {
         (lane, workload): [] for lane in lanes for workload in workloads
     }
@@ -161,11 +169,13 @@ def main() -> None:
         ir_paths[lanes[0]] = build_tungsten(
             compiler, binaries[lanes[0]],
             mutate=build_modes[0][0], mod_mut=build_modes[0][1],
+            sqr_mut=build_modes[0][2],
         )
         print(f"Building {lanes[1]} release/native/fast...", flush=True)
         ir_paths[lanes[1]] = build_tungsten(
             compiler, binaries[lanes[1]],
             mutate=build_modes[1][0], mod_mut=build_modes[1][1],
+            sqr_mut=build_modes[1][2],
         )
         print("Building GMP destination-reuse twin...", flush=True)
         build_gmp(binaries["gmp-destination"])
@@ -234,10 +244,12 @@ def main() -> None:
                 lanes[0]: {
                     "TUNGSTEN_BIGINT_MUTATE_UNIQUE": int(build_modes[0][0]),
                     "TUNGSTEN_BIGINT_MOD_MUT": int(build_modes[0][1]),
+                    "TUNGSTEN_BIGINT_SQR_MUT": int(build_modes[0][2]),
                 },
                 lanes[1]: {
                     "TUNGSTEN_BIGINT_MUTATE_UNIQUE": int(build_modes[1][0]),
                     "TUNGSTEN_BIGINT_MOD_MUT": int(build_modes[1][1]),
+                    "TUNGSTEN_BIGINT_SQR_MUT": int(build_modes[1][2]),
                 },
             },
             "compiler_sha256": compiler_hash,

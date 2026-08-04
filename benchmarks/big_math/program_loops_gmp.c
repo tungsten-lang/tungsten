@@ -115,6 +115,30 @@ static void bench_modchain(long n, unsigned long limbs) {
     mpz_clears(r, bump, divisor, NULL);
 }
 
+static void bench_sqrchain(long n, unsigned long limbs) {
+    mpz_t r, bump, divisor;
+    mpz_inits(r, bump, divisor, NULL);
+    mpz_set_ui(r, 1);
+    mpz_mul_2exp(r, r, 8191UL);
+    mpz_add_ui(r, r, 123456789UL);
+    mpz_set_ui(bump, 1);
+    mpz_mul_2exp(bump, bump, limbs * 64UL - 1UL);
+    mpz_add_ui(bump, bump, 987654321UL);
+    mpz_set_ui(divisor, 1);
+    mpz_mul_2exp(divisor, divisor, 63);
+    mpz_add_ui(divisor, divisor, 29UL);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) {
+        mpz_add(r, r, bump);
+        mpz_tdiv_r(r, r, divisor);
+        mpz_mul(r, r, r);
+    }
+    double t1 = now_sec();
+    printf("sqrchain%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n, checksum(r));
+    mpz_clears(r, bump, divisor, NULL);
+}
+
 int main(int argc, char **argv) {
     const char *workload = argc > 1 ? argv[1] : "all";
     long n = argc > 2 ? atol(argv[2]) : 0;
@@ -131,5 +155,7 @@ int main(int argc, char **argv) {
         bench_divchain(n > 0 ? n : 30000);
     if (!strcmp(workload, "modchain") || !strcmp(workload, "all"))
         bench_modchain(n > 0 ? n : 2000000, limbs);
+    if (!strcmp(workload, "sqrchain") || !strcmp(workload, "all"))
+        bench_sqrchain(n > 0 ? n : 2000000, limbs);
     return 0;
 }

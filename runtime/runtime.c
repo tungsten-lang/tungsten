@@ -1316,6 +1316,9 @@ static const uint64_t *integer_limbs(WValue v, uint64_t *stack_limb, int32_t *ou
 #ifndef BN_WORD_UI_POSITIVE_FAST
 #define BN_WORD_UI_POSITIVE_FAST 1
 #endif
+#ifndef BN_ADD_UI_POSITIVE_11_AFTER
+#define BN_ADD_UI_POSITIVE_11_AFTER 1
+#endif
 static inline __attribute__((always_inline))
 WValue bigint_add_ui_any(WValue a, uint64_t word) {
     if (word == 0) {
@@ -1330,6 +1333,13 @@ WValue bigint_add_ui_any(WValue a, uint64_t word) {
             WBigint *r = bigint_alloc_raw_hot(n);
             return bigint_add_word_into(ba->limbs, n, 0, word, r);
         }
+#if BN_ADD_UI_POSITIVE_11_AFTER
+        /* Keep the one-limb leaf after the wide return so the streamed hot
+         * path does not acquire another predicate or a larger live block. */
+        if (n == 1)
+            return bigint_add_one_limb_magnitudes(
+                ba->limbs[0], 0, word, 0);
+#endif
     }
 #endif
     uint64_t scratch;

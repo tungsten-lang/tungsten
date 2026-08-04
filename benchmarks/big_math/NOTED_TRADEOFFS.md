@@ -225,6 +225,33 @@ Optimized public-GMP differential fuzz passed 100,000 signed/overlay cases
 through 1024 limbs, including 0/1, i48, high-bit, and `UINT64_MAX` words for
 all four operations.  ASAN/UBSAN passed 10,000 cases through 128 limbs.
 
+A later byte-identical 15×250 ms replication confirmed that the remaining
+one-limb add/sub results were real, though small: add1@1 was 1.013× GMP and
+sub1@1 was 1.035×.  Four attempts to put a positive one-limb leaf before the
+wide add/sub return were rejected: two inline predicate layouts, a cold
+inline block, and an outlined helper either produced three to ten >5% control
+regressions or made the target slower.  Reusing the already-decoded receiver
+on the fallback edge was neutral overall and produced eight >5% regressions.
+Artifacts:
+`baselines/addsub1-one-limb-current-replication-4dbb251-m5max-20260804.json`,
+`baselines/addsub1-positive11-screen-4dbb251-m5max-20260804.json`,
+`baselines/addsub1-positive11-onecmp-screen-4dbb251-m5max-20260804.json`,
+`baselines/addsub1-positive11-cold-screen-4dbb251-m5max-20260804.json`,
+`baselines/addsub1-positive11-outline-screen-4dbb251-m5max-20260804.json`, and
+`baselines/addsub1-reuse-decode-screen-4dbb251-m5max-20260804.json`.
+
+Putting the leaf after the existing `n >= 2` return finally preserved the
+wide add1 path.  Its isolated 9×110 ms acceptance won 11/20 cells at 0.9781
+geomean with no >5% regression; add1@1 improved 19.4% and became 0.840× GMP,
+leaving every add1 width green.  The same placement was not safe for sub1:
+the combined acceptance regressed sub1@384/448 by 9.1%/8.4%, and an isolated
+sub1 screen lost 11/20 cells at 1.0100 geomean with three >5% regressions.
+Only the add leaf remains in production.  Artifacts:
+`baselines/addsub1-positive11-after-screen-4dbb251-m5max-20260804.json`,
+`baselines/addsub1-positive11-after-acceptance-4dbb251-m5max-20260804.json`,
+`baselines/add1-positive11-after-acceptance-4dbb251-m5max-20260804.json`, and
+`baselines/sub1-positive11-after-isolated-screen-4dbb251-m5max-20260804.json`.
+
 ## One-word and terminal GCD schedules — NOT taken (2026-08-04)
 
 A five-second boxed `lcm@1` flame profile put 59% of sampled branch events in
@@ -357,6 +384,15 @@ the apparent 1.0% all-cell geomean win came entirely from inactive small-width
 layout movement.  The prefetch source was removed.  Artifacts:
 `baselines/mul1-boxed-128-6767146-m5max-20260804.svg` and
 `baselines/mul1-a64-prefetch256-screen-6767146-m5max-20260804.json`.
+
+Doubling the proven eight-limb rolling-carry body without changing its inner
+schedule saved one loop-control pair per 16 limbs.  A 7×80 ms complete-width
+screen suggested 17/20 wins at 0.9927 geomean with no >5% regression, but the
+required 9×110 ms replication reversed to 7/20 wins at 1.0121 geomean and
+regressed 64/128 limbs by more than 5%.  The 16-limb outer unroll was removed.
+Artifacts:
+`baselines/mul1-a64-unroll16-screen-4dbb251-m5max-20260804.json` and
+`baselines/mul1-a64-unroll16-acceptance-4dbb251-m5max-20260804.json`.
 
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 

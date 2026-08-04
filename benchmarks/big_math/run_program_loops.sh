@@ -85,7 +85,7 @@ run_pair() {
 printf '%-12s %14s %12s %14s %12s %8s\n' \
   "workload" "tungsten med" "tungsten IQR" "gmp med" "gmp IQR" "T/G"
 order=0
-for workload in accumulate mulchain addchain divchain; do
+for workload in accumulate mulchain addchain subchain divchain; do
   pair=$(run_pair "$workload" "$order")
   set -- $pair
   t_ns=$1; t_iqr=$2; t_check=$3

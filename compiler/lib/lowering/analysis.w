@@ -1903,6 +1903,11 @@
   nil
 
 -> mut_accumulator_candidates(body)
+  # Reproducible performance control: production/default compilation keeps
+  # mutate-if-unique enabled, while the BigInt loop A/B can force ordinary
+  # immutable result churn from the same source program.
+  if env("TUNGSTEN_BIGINT_MUTATE_UNIQUE") == "0"
+    return {}
   assigned = {}
   dead = {}
   mut_walk_stmts(body, assigned, dead)

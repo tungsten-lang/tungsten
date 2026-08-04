@@ -49,6 +49,22 @@
   c = b % 1000000007
   << "addchain\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
 
+-> bench_subchain(n)
+  # Keep a wide positive accumulator while subtracting changing inline words.
+  r = 1 << 65536 ## big
+  i = 0 ## i64
+  probe = 0 ## i64
+  t0 = clock()
+  while i < n
+    r = r - i
+    # This value-dependent read prevents sum-chunk folding, isolating the
+    # ordinary w_bigint_sub_mut destination path.
+    probe = r & 1
+    i = i + 1
+  t1 = clock()
+  c = (r % 1000000007) + probe
+  << "subchain\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
 -> bench_divchain(n)
   # The start width keeps the positive accumulator boxed across the timed
   # interval while `/ 3` steadily exercises division by an inline word.
@@ -72,5 +88,7 @@ if workload == "mulchain" || workload == "all"
   bench_mulchain(n > 0 ? n : 50000)
 if workload == "addchain" || workload == "all"
   bench_addchain(n > 0 ? n : 300000)
+if workload == "subchain" || workload == "all"
+  bench_subchain(n > 0 ? n : 100000)
 if workload == "divchain" || workload == "all"
   bench_divchain(n > 0 ? n : 30000)

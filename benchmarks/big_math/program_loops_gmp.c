@@ -64,6 +64,22 @@ static void bench_addchain(long n) {
     mpz_clear(b);
 }
 
+static void bench_subchain(long n) {
+    mpz_t r;
+    mpz_init_set_ui(r, 0);
+    mpz_setbit(r, 65536);
+    unsigned long probe = 0;
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) {
+        mpz_sub_ui(r, r, (unsigned long)i);
+        probe = mpz_tstbit(r, 0);
+    }
+    double t1 = now_sec();
+    printf("subchain\t%ld\t%.1f\t%lu\n", n,
+           (t1 - t0) * 1e9 / (double)n, checksum(r) + probe);
+    mpz_clear(r);
+}
+
 static void bench_divchain(long n) {
     mpz_t r;
     mpz_init_set_ui(r, 0);
@@ -85,6 +101,8 @@ int main(int argc, char **argv) {
         bench_mulchain(n > 0 ? n : 50000);
     if (!strcmp(workload, "addchain") || !strcmp(workload, "all"))
         bench_addchain(n > 0 ? n : 300000);
+    if (!strcmp(workload, "subchain") || !strcmp(workload, "all"))
+        bench_subchain(n > 0 ? n : 100000);
     if (!strcmp(workload, "divchain") || !strcmp(workload, "all"))
         bench_divchain(n > 0 ? n : 30000);
     return 0;

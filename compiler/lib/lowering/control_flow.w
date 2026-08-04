@@ -413,7 +413,7 @@
   # Rotation shape (E4 stage 2): t = a + b; a = b; b = t with the triple
   # isolated — the sum computes into old-a's dying buffer
   # (w_bigint_add_dest), so the steady state allocates nothing.
-  rot = rotation_shape_spec(node)
+  rot = env("TUNGSTEN_BIGINT_MUTATE_UNIQUE") == "0" ? nil : rotation_shape_spec(node)
   if rot != nil
     prev_rot = ctx[:rotation_shape]
     ctx[:rotation_shape] = rot

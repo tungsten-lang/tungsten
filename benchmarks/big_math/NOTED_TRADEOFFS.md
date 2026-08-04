@@ -213,6 +213,18 @@ result reread in pass 2.  Repartitioning the existing scalar/NEON phases only
 moves the same bandwidth and carry-resolution work between width-specific
 local optima.
 
+The result-reread condition was subsequently met without changing the cadence.
+Pass 1 now computes only generate/propagate masks; pass 2 rereads the two input
+streams, reconstructs the provisional sum/difference, applies the resolved
+carry mask, and writes the destination once.  The 9x110 ms boxed acceptance
+run improved 19/24 add/sub cells from 288 through 65536 limbs, measured 0.957
+candidate/baseline geomean, and had no regression above 5%.  The five slower
+cells were 0.5--4.6% regressions.  Public-GMP differential fuzz passed 2000
+random signed cases through 65536 limbs plus carry/borrow boundaries; an
+ASAN/UBSAN build passed 500 cases through 8192 limbs.  Artifacts:
+`baselines/addsub-hyb-deferred-store-screen-083526d-m5max-20260804.json` and
+`baselines/addsub-hyb-deferred-store-acceptance-083526d-m5max-20260804.json`.
+
 ## Mul1 wide dispatch and page rehoming — NOT taken (2026-08-04)
 
 Routing widths above 64 ahead of the fixed-width ladder initially measured a

@@ -4358,6 +4358,11 @@ static void bigint_mul_schoolbook_into(uint64_t *out,
 #ifndef BN_ADDSUB_NEON_HYBRID_MIN
 #define BN_ADDSUB_NEON_HYBRID_MIN 288
 #endif
+/* Pass 1 can write a provisional result for pass 2 to correct, or retain only
+ * its generate/propagate masks and let pass 2 write the final result once. */
+#ifndef BN_HYB_DEFER_STORE
+#define BN_HYB_DEFER_STORE 1
+#endif
 #if defined(__aarch64__) && BN_ADDSUB_NEON_HYBRID
 #include <arm_neon.h>
 
@@ -4464,7 +4469,11 @@ static inline void bn_hyb_add_pass1(uint64_t *r, const uint64_t *a,
             uint64x2_t va = vld1q_u64(ac + 2 * j);
             uint64x2_t vb = vld1q_u64(bc + 2 * j);
             uint64x2_t vs = vaddq_u64(va, vb);
+#if !BN_HYB_DEFER_STORE
             vst1q_u64(rc + 2 * j, vs);
+#else
+            (void)rc;
+#endif
             g[j] = vcgtq_u64(va, vs);
             p[j] = vceqq_u64(vs, ones);
         }
@@ -4488,7 +4497,11 @@ static inline void bn_hyb_sub_pass1(uint64_t *r, const uint64_t *a,
             uint64x2_t va = vld1q_u64(ac + 2 * j);
             uint64x2_t vb = vld1q_u64(bc + 2 * j);
             uint64x2_t vd = vsubq_u64(va, vb);
+#if !BN_HYB_DEFER_STORE
             vst1q_u64(rc + 2 * j, vd);
+#else
+            (void)rc;
+#endif
             g[j] = vcgtq_u64(vb, va);
             p[j] = vceqzq_u64(vd);
         }
@@ -4546,6 +4559,60 @@ static inline void bn_hyb_sub_pass2(uint64_t *r, uint64_t C) {
     }
 }
 
+#if BN_HYB_DEFER_STORE
+static inline void bn_hyb_add_pass2_deferred(
+    uint64_t *r, const uint64_t *a, const uint64_t *b, uint64_t C) {
+    uint64x2_t vc = vdupq_n_u64(C);
+    const uint64x2_t w0 = {1u << 0, 1u << 1}, w1 = {1u << 2, 1u << 3};
+    const uint64x2_t w2 = {1u << 4, 1u << 5}, w3 = {1u << 6, 1u << 7};
+    for (int c = 0; c < 8; c++) {
+        const uint64_t *ac = a + 8 * c, *bc = b + 8 * c;
+        uint64_t *rc = r + 8 * c;
+        uint64x2_t r0 = vaddq_u64(vld1q_u64(ac + 0), vld1q_u64(bc + 0));
+        uint64x2_t r1 = vaddq_u64(vld1q_u64(ac + 2), vld1q_u64(bc + 2));
+        uint64x2_t r2 = vaddq_u64(vld1q_u64(ac + 4), vld1q_u64(bc + 4));
+        uint64x2_t r3 = vaddq_u64(vld1q_u64(ac + 6), vld1q_u64(bc + 6));
+        r0 = vsubq_u64(r0, vtstq_u64(vc, w0));
+        r1 = vsubq_u64(r1, vtstq_u64(vc, w1));
+        r2 = vsubq_u64(r2, vtstq_u64(vc, w2));
+        r3 = vsubq_u64(r3, vtstq_u64(vc, w3));
+        vst1q_u64(rc + 0, r0); vst1q_u64(rc + 2, r1);
+        vst1q_u64(rc + 4, r2); vst1q_u64(rc + 6, r3);
+        vc = vshrq_n_u64(vc, 8);
+    }
+}
+
+static inline void bn_hyb_sub_pass2_deferred(
+    uint64_t *r, const uint64_t *a, const uint64_t *b, uint64_t C) {
+    uint64x2_t vc = vdupq_n_u64(C);
+    const uint64x2_t w0 = {1u << 0, 1u << 1}, w1 = {1u << 2, 1u << 3};
+    const uint64x2_t w2 = {1u << 4, 1u << 5}, w3 = {1u << 6, 1u << 7};
+    for (int c = 0; c < 8; c++) {
+        const uint64_t *ac = a + 8 * c, *bc = b + 8 * c;
+        uint64_t *rc = r + 8 * c;
+        uint64x2_t r0 = vsubq_u64(vld1q_u64(ac + 0), vld1q_u64(bc + 0));
+        uint64x2_t r1 = vsubq_u64(vld1q_u64(ac + 2), vld1q_u64(bc + 2));
+        uint64x2_t r2 = vsubq_u64(vld1q_u64(ac + 4), vld1q_u64(bc + 4));
+        uint64x2_t r3 = vsubq_u64(vld1q_u64(ac + 6), vld1q_u64(bc + 6));
+        r0 = vaddq_u64(r0, vtstq_u64(vc, w0));
+        r1 = vaddq_u64(r1, vtstq_u64(vc, w1));
+        r2 = vaddq_u64(r2, vtstq_u64(vc, w2));
+        r3 = vaddq_u64(r3, vtstq_u64(vc, w3));
+        vst1q_u64(rc + 0, r0); vst1q_u64(rc + 2, r1);
+        vst1q_u64(rc + 4, r2); vst1q_u64(rc + 6, r3);
+        vc = vshrq_n_u64(vc, 8);
+    }
+}
+
+#define BN_HYB_ADD_PASS2(r, a, b, c) \
+    bn_hyb_add_pass2_deferred((r), (a), (b), (c))
+#define BN_HYB_SUB_PASS2(r, a, b, c) \
+    bn_hyb_sub_pass2_deferred((r), (a), (b), (c))
+#else
+#define BN_HYB_ADD_PASS2(r, a, b, c) bn_hyb_add_pass2((r), (c))
+#define BN_HYB_SUB_PASS2(r, a, b, c) bn_hyb_sub_pass2((r), (c))
+#endif
+
 /* Cadence constants tuned by sweep on Apple M5 (see the section comment).
  * A-chunk limbs per phase-1 block, and C's percentage of the leftover
  * scalar limbs in phase 2. */
@@ -4596,11 +4663,15 @@ static uint64_t bn_hyb_round(uint64_t *r, const uint64_t *a, const uint64_t *b,
         int64_t mb = (nC / nb) & ~7, mx = (nC - nb * mb) >> 3, coff = 0;
         for (int64_t k = 0; k < nb; k++) {
             if (op) {
-                bn_hyb_sub_pass2(r + offN1 + (k << 6), CM1[k]);
+                BN_HYB_SUB_PASS2(
+                    r + offN1 + (k << 6), a + offN1 + (k << 6),
+                    b + offN1 + (k << 6), CM1[k]);
                 bn_hyb_sub_pass1(r + offN2 + (k << 6), a + offN2 + (k << 6),
                                  b + offN2 + (k << 6), &G[k], &P[k]);
             } else {
-                bn_hyb_add_pass2(r + offN1 + (k << 6), CM1[k]);
+                BN_HYB_ADD_PASS2(
+                    r + offN1 + (k << 6), a + offN1 + (k << 6),
+                    b + offN1 + (k << 6), CM1[k]);
                 bn_hyb_add_pass1(r + offN2 + (k << 6), a + offN2 + (k << 6),
                                  b + offN2 + (k << 6), &G[k], &P[k]);
             }
@@ -4623,8 +4694,12 @@ static uint64_t bn_hyb_round(uint64_t *r, const uint64_t *a, const uint64_t *b,
     {
         int64_t mb = (nE / nb) & ~7, mx = (nE - nb * mb) >> 3, eoff = 0;
         for (int64_t k = 0; k < nb; k++) {
-            if (op) bn_hyb_sub_pass2(r + offN2 + (k << 6), CM2[k]);
-            else    bn_hyb_add_pass2(r + offN2 + (k << 6), CM2[k]);
+            if (op) BN_HYB_SUB_PASS2(
+                r + offN2 + (k << 6), a + offN2 + (k << 6),
+                b + offN2 + (k << 6), CM2[k]);
+            else    BN_HYB_ADD_PASS2(
+                r + offN2 + (k << 6), a + offN2 + (k << 6),
+                b + offN2 + (k << 6), CM2[k]);
             int64_t me = mb + (k < mx ? 8 : 0);
             if (k == nb - 1) me = nE - eoff;
             if (me) {

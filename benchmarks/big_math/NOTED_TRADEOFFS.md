@@ -116,6 +116,31 @@ was removed.  Artifacts: `baselines/mul1-page-hazard-causal-48dffb5-m5max-202608
 `baselines/mul1-page-hazard-causal-replication-48dffb5-m5max-20260804.json`,
 and `baselines/mul1-no-page-rehome-48dffb5-m5max-20260804.json`.
 
+## Mul1 carry scheduling and wrapper inlining — NOT taken (2026-08-04)
+
+A five-second `tungsten flame` run at boxed mul1@256 attributed 64% of sampled
+branch events to `bn_mul_1`, 3.2% to `bigint_mul_n1`, and 2.0% to TLS address
+resolution.  Raw `bn_mul_1` measurements were approximately at public
+`mpn_mul_1` parity, while the full boxed lane retained the larger gap.
+Artifact: `baselines/mul1-boxed-256-3001650-m5max-20260804.svg`.
+
+Four complete 20-width kernel experiments did not create a safe margin.  A
+globally earlier carry schedule measured 0.9991 geomean but had three >5%
+regressions; selecting it only around 128--512 limbs measured 1.0082.  A
+compact four-limb streaming loop measured 1.0040, and a pair-pipelined
+four-limb loop measured 1.0071 with one >5% regression.  Artifacts:
+`baselines/mul1-a64-early-carry-3001650-m5max-20260804.json`,
+`baselines/mul1-a64-early-carry-band-3001650-m5max-20260804.json`,
+`baselines/mul1-a64-stream4-3001650-m5max-20260804.json`, and
+`baselines/mul1-a64-pair-pipeline-3001650-m5max-20260804.json`.
+
+Inlining the dynamic boxed wrapper improved every affected width in its short
+screen, but the required 15×200 ms full-band replication reversed to 1.0104
+geomean with two >5% small-control regressions.  It was removed along with all
+kernel candidates.  Artifacts:
+`baselines/mul1-inline-wrapper-screen-3001650-m5max-20260804.json` and
+`baselines/mul1-inline-wrapper-replication-3001650-m5max-20260804.json`.
+
 ## BN_BIGINT_HYBRID_CAP default flip — NOT taken (2026-08-02)
 
 **Claimed win (prior session, real workloads):** hybrid (p2<=32 + q32)

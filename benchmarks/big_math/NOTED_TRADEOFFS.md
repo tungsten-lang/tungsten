@@ -885,3 +885,14 @@ public-GMP checks passed 100,000 random roots through 512 limbs and 100 mixed
 large/edge cases through 65,536 limbs.  The rejected candidate separately
 passed 100,000 small and 100 mixed optimized cases plus 20,000 small and 48
 mixed ASAN/UBSAN cases before the performance gate removed it.
+
+## Fixed 22-limb division submul row -- NOT taken (2026-08-04)
+
+The recurring 48-by-24 Knuth leaf under `isqrt@384` multiply-subtracts the
+22 divisor limbs below its 3-by-2 estimate.  A fully unrolled fixed-22 row was
+therefore measured across 39 `isqrt`/`div`/`mod` cells at thirteen widths,
+including every nearby green control.  It lost 23/39 cells at a 1.015
+candidate/baseline geomean, caused seven regressions above 5%, and made the
+target `isqrt@384` 9.7% slower.  The candidate and benchmark knob were removed
+without an acceptance replication.  Artifact:
+`baselines/submul-f22-screen-26a4a17-m5max-20260804.json`.

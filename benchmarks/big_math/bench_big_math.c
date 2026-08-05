@@ -5080,6 +5080,11 @@ static double bench_prime_prefilter(const char *mode, int iters) {
 #endif
 
 int main(int argc, char **argv) {
+#if BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB
+    const char *div_recip_diff28 = getenv("BENCH_DIV_RECIP_DIFF28");
+    bn_bench_runtime_div_recip_diff28 =
+        div_recip_diff28 && strcmp(div_recip_diff28, "0") != 0;
+#endif
 #if BN_BENCH_RUNTIME_TOOM480_KNOB
     const char *toom480_fixed = getenv("BENCH_TOOM480_FIXED");
     bn_bench_runtime_toom480_fixed =

@@ -768,3 +768,32 @@ Optimized GMP differential fuzz passed 10,000 exact 480-limb products and
 5,000 random products through 1024 limbs. ASAN/UBSAN passed 1,000 exact and
 1,000 random products. The benchmark exposes `--fuzz-mul-exact` so future
 fixed-width cutoff changes can be validated directly.
+
+## Cached-remainder 28-limb child selection — TAKEN (2026-08-04)
+
+The `mod@448` flamegraph's fixed 15-limb row was not reached through one of
+the named fixed Toom trees. A recursion-width trace instead found repeated
+`bn_toom2_sum(28)` calls under 448/449, 224/225, 112/113, 56/57, and 28/29
+difference-form parents. The width-28 sum form creates a 15-limb third child.
+Globally removing the measured width-28 difference-form exclusion improved
+the target but was neutral over 30 affected/control cells (1.00008 geomean),
+so that broad candidate was rejected:
+`baselines/toom2-diff28-screen-7fdd96e-m5max-20260804.json`.
+
+The retained change supplies the difference-form hint only while cached
+remainder division computes its two Barrett products; direct 28-limb products
+keep their faster sum form. A byte-identical 15 x 200 ms replication over six
+mod widths and twelve div/mul controls won 14/18 cells at 0.995 geomean with
+no regression above 5%; the six mod cells improved 0.9% by geomean. The final
+production pass put `mod@448` at 0.99x GMP, and the focused residual
+replication measured it at 0.97x. Artifacts:
+`baselines/div-recip-diff28-context-screen-7fdd96e-m5max-20260804.json`,
+`baselines/div-recip-diff28-context-replication-7fdd96e-m5max-20260804.json`,
+`baselines/div-recip-diff28-production-15x200-7fdd96e-m5max-20260804.json`,
+and `baselines/residual-three-diff28-15x200-7fdd96e-m5max-20260804.json`.
+
+Cached-reciprocal GMP differential fuzz passed 25,000 optimized cases at
+112/224/448/512 divisor limbs, including 10,000 at the target width.
+ASAN/UBSAN passed another 3,000 cases at 112/448/512. The same residual pass
+measured `sub1@1` at 0.98x GMP; `isqrt@384` remained the sole red cell in that
+nine-cell replication at 1.02x.

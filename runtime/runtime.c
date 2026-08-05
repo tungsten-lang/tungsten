@@ -2733,6 +2733,24 @@ static int bn_bench_runtime_toom480_fixed;
 #ifndef BN_TOOM2_DIFF_SKIP
 #define BN_TOOM2_DIFF_SKIP 28
 #endif
+/* The direct 28-limb product still favors the sum form.  The two Barrett
+ * products in cached remainder division reach that width repeatedly under
+ * 448-ish parents, where avoiding the 15-limb sum child wins end to end. */
+#ifndef BN_DIV_RECIP_DIFF28
+#define BN_DIV_RECIP_DIFF28 1
+#endif
+#ifndef BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB
+#define BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB 0
+#endif
+#if BN_DIV_RECIP_DIFF28 || BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB
+static __thread int bn_div_recip_diff28_depth;
+#endif
+#if BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB
+static int bn_bench_runtime_div_recip_diff28;
+#define BN_DIV_RECIP_DIFF28_ENABLED() bn_bench_runtime_div_recip_diff28
+#else
+#define BN_DIV_RECIP_DIFF28_ENABLED() BN_DIV_RECIP_DIFF28
+#endif
 #ifndef BN_TOOM3_SINGLE_SHIFT
 #define BN_TOOM3_SINGLE_SHIFT 1
 #endif
@@ -5943,7 +5961,12 @@ static void bn_toom2(uint64_t *out, const uint64_t *a, const uint64_t *b,
         return;
     }
 #if BN_TOOM2_DIFFERENCE
-    if (n >= BN_TOOM2_DIFF_MIN && n != BN_TOOM2_DIFF_SKIP &&
+    if (n >= BN_TOOM2_DIFF_MIN &&
+        (n != BN_TOOM2_DIFF_SKIP
+#if BN_DIV_RECIP_DIFF28 || BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB
+         || bn_div_recip_diff28_depth != 0
+#endif
+        ) &&
         n < BN_TOOM3_THRESHOLD) {
         bn_toom2_diff(out, a, b, n, scratch);
         return;
@@ -11552,6 +11575,10 @@ static int mag_divmod_reciprocal_certified(
 #endif
         int sequential_products = vlen < BN_DIV_RECIP_PAR_MIN;
         if (sequential_products) bn_toom_parallel_depth++;
+#if BN_DIV_RECIP_DIFF28 || BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB
+        int use_diff28 = BN_DIV_RECIP_DIFF28_ENABLED();
+        if (use_diff28) bn_div_recip_diff28_depth++;
+#endif
 
         const uint64_t *q1 = u + n - 1;
         const uint64_t *mu = cache->reciprocal + 1;
@@ -11626,6 +11653,9 @@ static int mag_divmod_reciprocal_certified(
         if (verification_redirected)
             memcpy(cache->verification, verification_out,
                    (n + 1) * sizeof(uint64_t));
+#if BN_DIV_RECIP_DIFF28 || BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB
+        if (use_diff28) bn_div_recip_diff28_depth--;
+#endif
         if (sequential_products) bn_toom_parallel_depth--;
 
         uint64_t *reduced = cache->product;

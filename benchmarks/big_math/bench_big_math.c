@@ -1633,6 +1633,22 @@ DEFINE_BENCH_LANE(add, bigint_add_any(a, b))
 DEFINE_BENCH_LANE(sub, bigint_sub_any(a, b))
 DEFINE_BENCH_LANE(mul, bigint_mul_any(a, b))
 DEFINE_BENCH_LANE(sqr, bigint_mul_any(a, a))
+#ifndef BENCH_MOD84_DIVISOR_TOGGLE
+#define BENCH_MOD84_DIVISOR_TOGGLE 0
+#endif
+#if BENCH_MOD84_DIVISOR_TOGGLE
+static inline WValue bench_mod84_divisor_toggle(WValue a, WValue b) {
+    WBigint *dividend = w_as_bigint(a);
+    WBigint *divisor = w_as_bigint(b);
+    int32_t dividend_size = dividend->size < 0
+        ? -dividend->size : dividend->size;
+    int32_t divisor_size = divisor->size < 0
+        ? -divisor->size : divisor->size;
+    if (dividend_size == 8 && divisor_size == 4)
+        divisor->limbs[2] ^= UINT64_C(0x1e3779b97f4a7c15);
+    return bigint_mod_any(a, b);
+}
+#endif
 #ifndef BENCH_DIV_RECIP_REUSE
 #define BENCH_DIV_RECIP_REUSE 0
 #endif
@@ -1647,7 +1663,11 @@ DEFINE_BENCH_LANE(div, bench_div_recip_reuse(a, b, 0))
 DEFINE_BENCH_LANE(mod, bench_div_recip_reuse(a, b, 1))
 #else
 DEFINE_BENCH_LANE(div, bigint_div_any(a, b))
+#if BENCH_MOD84_DIVISOR_TOGGLE
+DEFINE_BENCH_LANE(mod, bench_mod84_divisor_toggle(a, b))
+#else
 DEFINE_BENCH_LANE(mod, bigint_mod_any(a, b))
+#endif
 #endif
 DEFINE_BENCH_LANE(band, bignum_bitwise('&', a, b))
 DEFINE_BENCH_LANE(bor, bignum_bitwise('|', a, b))
@@ -5080,6 +5100,20 @@ static double bench_prime_prefilter(const char *mode, int iters) {
 #endif
 
 int main(int argc, char **argv) {
+#if BN_BENCH_RUNTIME_MOD84_CACHE_ENTRIES_KNOB
+    const char *mod84_cache_entries = getenv("BENCH_MOD84_CACHE_ENTRIES");
+    if (mod84_cache_entries) {
+        bn_bench_runtime_mod84_cache_entries = atoi(mod84_cache_entries);
+        if (bn_bench_runtime_mod84_cache_entries < 1 ||
+            bn_bench_runtime_mod84_cache_entries > 2)
+            die("BENCH_MOD84_CACHE_ENTRIES must be 1 or 2");
+    }
+#endif
+#if BN_BENCH_RUNTIME_MOD84_KNOB
+    const char *mod84_direct = getenv("BENCH_MOD84_DIRECT");
+    bn_bench_runtime_mod84_direct =
+        mod84_direct && strcmp(mod84_direct, "0") != 0;
+#endif
 #if BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB
     const char *div_recip_diff28 = getenv("BENCH_DIV_RECIP_DIFF28");
     bn_bench_runtime_div_recip_diff28 =

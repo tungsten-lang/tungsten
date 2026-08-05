@@ -10441,6 +10441,168 @@ WBigint *mag_div_q_triangular_certified(
 }
 #endif
 
+/* Fixed 8-by-4-limb remainder.  Keep the normalized running remainder's
+ * high two limbs in registers and subtract only the divisor's low two limbs
+ * after each 3-by-2 quotient estimate. */
+#ifndef BN_MOD_84_DIRECT
+#define BN_MOD_84_DIRECT 1
+#endif
+#ifndef BN_BENCH_RUNTIME_MOD84_KNOB
+#define BN_BENCH_RUNTIME_MOD84_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MOD84_KNOB
+static int bn_bench_runtime_mod84_direct;
+#define BN_MOD_84_DIRECT_ENABLED() bn_bench_runtime_mod84_direct
+#else
+#define BN_MOD_84_DIRECT_ENABLED() BN_MOD_84_DIRECT
+#endif
+
+#if BN_MOD_84_DIRECT || BN_BENCH_RUNTIME_MOD84_KNOB
+#ifndef BN_MOD84_PREINV_CACHE
+#define BN_MOD84_PREINV_CACHE 1
+#endif
+#if BN_MOD84_PREINV_CACHE
+#ifndef BN_MOD84_PREINV_CACHE_ENTRIES
+#define BN_MOD84_PREINV_CACHE_ENTRIES 2
+#endif
+#if BN_MOD84_PREINV_CACHE_ENTRIES < 1 || BN_MOD84_PREINV_CACHE_ENTRIES > 2
+#error "BN_MOD84_PREINV_CACHE_ENTRIES must be 1 or 2"
+#endif
+#ifndef BN_BENCH_RUNTIME_MOD84_CACHE_ENTRIES_KNOB
+#define BN_BENCH_RUNTIME_MOD84_CACHE_ENTRIES_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MOD84_CACHE_ENTRIES_KNOB
+static int bn_bench_runtime_mod84_cache_entries = 2;
+#define BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() \
+    bn_bench_runtime_mod84_cache_entries
+#else
+#define BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() BN_MOD84_PREINV_CACHE_ENTRIES
+#endif
+static __thread uint64_t bn_mod84_preinv_d1[2];
+static __thread uint64_t bn_mod84_preinv_d0[2];
+static __thread uint64_t bn_mod84_preinv_value[2];
+static __thread uint8_t bn_mod84_preinv_next;
+#endif
+
+static inline __attribute__((always_inline))
+uint64_t bn_submul_2_inline(uint64_t *rp, const uint64_t *up, uint64_t v) {
+    __uint128_t product0 = (__uint128_t)up[0] * v;
+    uint64_t low0 = (uint64_t)product0;
+    uint64_t old0 = rp[0];
+    rp[0] = old0 - low0;
+    uint64_t borrow = (uint64_t)(product0 >> 64) + (old0 < low0);
+
+    __uint128_t product1 = (__uint128_t)up[1] * v;
+    uint64_t low1 = (uint64_t)product1;
+    uint64_t sub1 = low1 + borrow;
+    uint64_t carry1 = sub1 < low1;
+    uint64_t old1 = rp[1];
+    rp[1] = old1 - sub1;
+    return (uint64_t)(product1 >> 64) + carry1 + (old1 < sub1);
+}
+
+static __attribute__((no_stack_protector))
+WBigint *mag_mod_84(const uint64_t *u, const uint64_t *v) {
+    uint64_t un[8], vn_work[4];
+    const uint64_t *vn;
+    int shift = __builtin_clzll(v[3]);
+    uint64_t r1, r0;
+    if (shift) {
+        vn_work[0] = v[0] << shift;
+        for (int32_t i = 1; i < 4; i++)
+            vn_work[i] = (v[i] << shift) | (v[i - 1] >> (64 - shift));
+        vn = vn_work;
+        for (int32_t i = 0; i < 8; i++) {
+            uint64_t lower = i ? u[i - 1] : 0;
+            un[i] = (u[i] << shift) | (lower >> (64 - shift));
+        }
+        r1 = u[7] >> (64 - shift);
+        r0 = un[7];
+    } else {
+        vn = v;
+        memcpy(un, u, sizeof(un));
+        r1 = 0;
+        r0 = un[7];
+    }
+
+    uint64_t d1 = vn[3], d0 = vn[2];
+#if BN_MOD84_PREINV_CACHE
+    uint64_t dinv;
+    if (bn_mod84_preinv_d1[0] == d1 && bn_mod84_preinv_d0[0] == d0) {
+        dinv = bn_mod84_preinv_value[0];
+    } else if (BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() > 1 &&
+               bn_mod84_preinv_d1[1] == d1 &&
+               bn_mod84_preinv_d0[1] == d0) {
+        dinv = bn_mod84_preinv_value[1];
+    } else {
+        dinv = bn_invert_pi1(d1, d0);
+        int slot = BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() > 1
+            ? (bn_mod84_preinv_next++ & 1) : 0;
+        bn_mod84_preinv_d1[slot] = d1;
+        bn_mod84_preinv_d0[slot] = d0;
+        bn_mod84_preinv_value[slot] = dinv;
+    }
+#else
+    uint64_t dinv = bn_invert_pi1(d1, d0);
+#endif
+    for (int32_t j = 4; j >= 0; j--) {
+        uint64_t qhat;
+        if (__builtin_expect(r1 >= d1 && (r1 > d1 || r0 >= d0), 0)) {
+            uint64_t window[5] = {
+                un[j], un[j + 1], un[j + 2], r0, r1
+            };
+            qhat = UINT64_MAX;
+            uint64_t borrow = bn_submul_1(window, vn, 4, qhat);
+            uint64_t top = window[4];
+            window[4] = top - borrow;
+            if (top < borrow) {
+                qhat--;
+                uint64_t carry = bn_add_n(window, window, vn, 4);
+                window[4] += carry;
+            }
+            un[j] = window[0];
+            un[j + 1] = window[1];
+            un[j + 2] = window[2];
+            r0 = window[3];
+            r1 = window[4];
+        } else {
+            qhat = bn_udiv_qr_3by2(
+                r1, r0, un[j + 2], d1, d0, dinv, &r1, &r0);
+            uint64_t carry =
+                bn_submul_2_inline(un + j, vn, qhat);
+            uint64_t carry1 = r0 < carry;
+            r0 -= carry;
+            uint64_t carry2 = r1 < carry1;
+            r1 -= carry1;
+            if (__builtin_expect(carry2 != 0, 0)) {
+                qhat--;
+                uint64_t low_carry = bn_add_n(un + j, un + j, vn, 2);
+                __uint128_t sum = (__uint128_t)r0 + d0 + low_carry;
+                r0 = (uint64_t)sum;
+                r1 += d1 + (uint64_t)(sum >> 64);
+            }
+        }
+        (void)qhat;
+    }
+
+    WBigint *r = bigint_alloc_raw_hot(4);
+    if (shift) {
+        r->limbs[0] = (un[0] >> shift) | (un[1] << (64 - shift));
+        r->limbs[1] = (un[1] >> shift) | (r0 << (64 - shift));
+        r->limbs[2] = (r0 >> shift) | (r1 << (64 - shift));
+        r->limbs[3] = r1 >> shift;
+    } else {
+        r->limbs[0] = un[0];
+        r->limbs[1] = un[1];
+        r->limbs[2] = r0;
+        r->limbs[3] = r1;
+    }
+    r->size = 4;
+    while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
+    return r;
+}
+#endif
+
 /*
  * Fixed 6-by-3-limb remainder kernel.  The quotient-only 6/3 leaf above has
  * no remainder twin, so 6/3 mod used to fall into the generic Knuth entry
@@ -11736,6 +11898,13 @@ static int mag_divmod_reciprocal_certified(
 static void mag_divmod(const uint64_t *u, int32_t ulen,
                        const uint64_t *v, int32_t vlen,
                        WBigint **q_out, WBigint **r_out) {
+#if BN_MOD_84_DIRECT || BN_BENCH_RUNTIME_MOD84_KNOB
+    if (BN_MOD_84_DIRECT_ENABLED() &&
+        ulen == 8 && vlen == 4 && r_out && !q_out) {
+        *r_out = mag_mod_84(u, v);
+        return;
+    }
+#endif
 #if BN_DIVMOD_42
     if (ulen == 4 && vlen == 2) {
         mag_divmod_42(u, v, q_out, r_out);

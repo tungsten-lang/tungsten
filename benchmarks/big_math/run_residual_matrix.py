@@ -88,7 +88,10 @@ def main() -> None:
 
     screen = json.loads(args.screen.read_text())
     cells: dict[str, list[tuple[int, float]]] = defaultdict(list)
-    for row in screen["results"]:
+    screen_rows = screen.get("results", screen.get("records"))
+    if screen_rows is None:
+        raise RuntimeError("screen must contain results or records")
+    for row in screen_rows:
         ratio = float(row["tungsten_over_gmp"])
         limbs = int(row["limbs"])
         if ratio >= args.threshold:

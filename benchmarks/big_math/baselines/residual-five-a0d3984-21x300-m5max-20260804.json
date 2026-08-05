@@ -1,0 +1,101 @@
+{
+  "schema": "tungsten.bigint.residual-matrix/v1",
+  "metadata": {
+    "generated_at": "2026-08-05T00:42:04.337590+00:00",
+    "git_commit": "a0d3984e8cf3c2814c7086795d84d371aca35738",
+    "git_dirty_tracked": true,
+    "screen": "/tmp/tungsten-bignum-residual-five-screen.json",
+    "screen_sha256": "48b156e07a8755fca1fd5f0c5646efce0e048fcc2cf11bc9924fc554d0fdffdc",
+    "threshold": 0.95,
+    "runs": 21,
+    "target_ms": 300.0,
+    "selection": "best elapsed time with IQR retained, matching the default <=8192-limb matrix",
+    "machine": {
+      "hostname": "Eriks-BigMac-Pro.local",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "machine": "arm64",
+      "logical_cpus": 18,
+      "target_triple": "arm64-apple-darwin25.6.0",
+      "clang": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "gmp_version": "6.3.0",
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; finishing charge; 0:23 remaining present: true",
+      "load_average": [
+        4.33349609375,
+        4.72900390625,
+        4.40087890625
+      ]
+    }
+  },
+  "records": [
+    {
+      "operation": "mod",
+      "limbs": 4,
+      "iterations": 8969343,
+      "tungsten_ns": 33.655,
+      "gmp_ns": 32.83,
+      "tungsten_iqr_ns": 1.281,
+      "gmp_iqr_ns": 0.167,
+      "tungsten_over_gmp": 1.0251294547669816,
+      "selection": "best_iqr",
+      "relative_iqr": 0.03840109887378335,
+      "screen_ratio": 1.036
+    },
+    {
+      "operation": "mod",
+      "limbs": 448,
+      "iterations": 8108,
+      "tungsten_ns": 36333.251,
+      "gmp_ns": 36844.968,
+      "tungsten_iqr_ns": 1563.148,
+      "gmp_iqr_ns": 781.327,
+      "tungsten_over_gmp": 0.9861116177384113,
+      "selection": "best_iqr",
+      "relative_iqr": 0.04796481119326599,
+      "screen_ratio": 1.0075
+    },
+    {
+      "operation": "gcd",
+      "limbs": 2048,
+      "iterations": 151,
+      "tungsten_ns": 1831000.0,
+      "gmp_ns": 1877423.841,
+      "tungsten_iqr_ns": 84754.967,
+      "gmp_iqr_ns": 71788.079,
+      "tungsten_over_gmp": 0.9752725836403182,
+      "selection": "best_iqr",
+      "relative_iqr": 0.06003975080693817,
+      "screen_ratio": 1.0059
+    },
+    {
+      "operation": "isqrt",
+      "limbs": 384,
+      "iterations": 22222,
+      "tungsten_ns": 13665.737,
+      "gmp_ns": 13479.57,
+      "tungsten_iqr_ns": 115.606,
+      "gmp_iqr_ns": 412.429,
+      "tungsten_over_gmp": 1.0138110488687695,
+      "selection": "best_iqr",
+      "relative_iqr": 0.031744541007183644,
+      "screen_ratio": 1.0169
+    },
+    {
+      "operation": "sub1",
+      "limbs": 1,
+      "iterations": 40000000,
+      "tungsten_ns": 1.99,
+      "gmp_ns": 1.909,
+      "tungsten_iqr_ns": 0.046,
+      "gmp_iqr_ns": 0.082,
+      "tungsten_over_gmp": 1.042430591932949,
+      "selection": "best_iqr",
+      "relative_iqr": 0.048779223944463525,
+      "screen_ratio": 1.024
+    }
+  ],
+  "summary": {
+    "screen_cells": 5,
+    "accurate_wins": 2,
+    "accurate_losses": 3
+  }
+}

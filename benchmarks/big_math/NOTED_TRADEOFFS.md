@@ -807,3 +807,56 @@ Cached-reciprocal GMP differential fuzz passed 25,000 optimized cases at
 ASAN/UBSAN passed another 3,000 cases at 112/448/512. The same residual pass
 measured `sub1@1` at 0.98x GMP; `isqrt@384` remained the sole red cell in that
 nine-cell replication at 1.02x.
+
+## Tiny word-subtraction outlining -- NOT taken (2026-08-04)
+
+The one-limb `sub1` residual was tested as part of a complete 80-cell
+`add1`/`sub1`/`add`/`sub` screen over all twenty default widths, rather than
+only at the losing cell.  Outlining `bigint_sub_ui_any` lost 42/80 cells at a
+1.017 candidate/baseline geomean and produced twelve regressions above 5%.
+At `sub1@1` it was 1.256x the current inline implementation and still 1.235x
+public GMP.  The outline was removed.  Artifact:
+`baselines/sub-ui-noinline-screen-a0d3984-m5max-20260804.json`.
+
+## Fixed 8-by-4-limb remainder -- TAKEN (2026-08-04)
+
+The `mod@4` boxed fixture is an 8-limb dividend modulo a 4-limb divisor.  Its
+cached Barrett path performs two products after the cache lookup; a fixed
+remainder leaf instead keeps the normalized high remainder pair in registers,
+uses five 3-by-2 reciprocal quotient estimates, and subtracts only the lower
+two divisor limbs around each estimate.  The fixed leaf without a reciprocal
+cache was only a 3.1% target win in its byte-identical 15 x 200 ms replication
+and remained 1.019x GMP, so that incomplete form was not enabled.
+
+The starting 15 x 200 ms refresh measured every one of the 68 cells selected
+at 0.95x GMP or slower from the current default screen: 63 won and five lost.
+A 21 x 300 ms replication of those five left `mod@4`, `isqrt@384`, and
+`sub1@1` red, while `mod@448` and `gcd@2048` moved just below parity.
+Artifacts: `baselines/matrix-a0d3984-residual095-15x200-m5max-20260804.json`
+and `baselines/residual-five-a0d3984-21x300-m5max-20260804.json`.
+
+Caching the normalized two-limb preinverse changed the result.  A
+byte-identical runtime-knob replication over `mod`/`div` at
+3/4/5/8/16/24 limbs measured `mod@4` at 0.747x the prior path and 0.816x GMP;
+the twelve-cell geomean was 0.982 with no regression above 5%.  Two cache
+entries were also measured directly instead of assuming one repeated divisor:
+they were neutral-to-positive for a stable divisor (0.994x one entry) and
+0.784x one entry when the normalized divisor pair alternated every operation.
+The alternating experiment used the same binary for both cache policies.
+Artifacts:
+`baselines/mod84-direct-screen-a0d3984-m5max-20260804.json`,
+`baselines/mod84-runtime-knob-replication-a0d3984-m5max-20260804.json`,
+`baselines/mod84-preinv-runtime-knob-a0d3984-m5max-20260804.json`,
+`baselines/mod84-preinv-cache-entries-stable-a0d3984-m5max-20260804.json`,
+`baselines/mod84-preinv-cache-entries-alternating-a0d3984-m5max-20260804.json`,
+and `baselines/mod84-two-entry-runtime-knob-a0d3984-m5max-20260804.json`.
+
+Optimized public-GMP differential checks passed 200,000 mixed multi-limb
+div/mod cases through sixteen divisor limbs and 200,000 repeated/replaced
+four-limb reciprocal cases.  ASAN/UBSAN passed another 100,000 cases in each
+family.  The final 21 x 300 ms boxed residual refresh measured `mod@4` at
+0.808x GMP, down from 1.025x, while also rechecking all four neighboring
+frontier cells.  `mod@448` measured 0.999x; `gcd@2048`, `isqrt@384`, and
+`sub1@1` measured 1.003x, 1.020x, and 1.017x respectively, but all three had
+relative IQR above 10%.  Artifact:
+`baselines/residual-five-mod84-production-21x300-m5max-20260804.json`.

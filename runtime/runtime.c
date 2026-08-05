@@ -11343,7 +11343,7 @@ static void bz_d3n2n(const uint64_t *a, const uint64_t *b, int32_t n,
         bz_profile_mul_equal += qt == b0t;
         bz_profile_mul_full += qt == k && b0t == k;
         bz_profile_mul_bins[bin]++;
-        if ((qt != k || b0t != k) && bz_profile_shape_count < 32) {
+        if (bz_profile_shape_count < 32) {
             int32_t shape = bz_profile_shape_count++;
             bz_profile_shape_k[shape] = k;
             bz_profile_shape_q[shape] = qt;

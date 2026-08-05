@@ -1,0 +1,75 @@
+{
+  "schema": "tungsten.bigint.residual-matrix/v1",
+  "metadata": {
+    "generated_at": "2026-08-05T01:58:40.122933+00:00",
+    "git_commit": "bfda652da143916f38130e3bf764df1af1d9a246",
+    "git_dirty_tracked": true,
+    "screen": "benchmarks/big_math/baselines/residual-five-mod84-production-21x300-m5max-20260804.json",
+    "screen_sha256": "f8294ad9153c562462ea0dc40475fe94bf842868cf196523d904015b0d21cc63",
+    "threshold": 1.0,
+    "runs": 31,
+    "target_ms": 500.0,
+    "selection": "best elapsed time with IQR retained, matching the default <=8192-limb matrix",
+    "machine": {
+      "hostname": "Eriks-BigMac-Pro.local",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "machine": "arm64",
+      "logical_cpus": 18,
+      "target_triple": "arm64-apple-darwin25.6.0",
+      "clang": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "gmp_version": "6.3.0",
+      "power": "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=22610019)\t84%; discharging; 1:14 remaining present: true",
+      "load_average": [
+        4.443359375,
+        4.3759765625,
+        4.544921875
+      ]
+    }
+  },
+  "records": [
+    {
+      "operation": "gcd",
+      "limbs": 2048,
+      "iterations": 185,
+      "tungsten_ns": 2318778.378,
+      "gmp_ns": 2450356.757,
+      "tungsten_iqr_ns": 404281.081,
+      "gmp_iqr_ns": 308610.811,
+      "tungsten_over_gmp": 0.9463023583712386,
+      "selection": "best_iqr",
+      "relative_iqr": 0.21508240657506938,
+      "screen_ratio": 1.0025652209166658
+    },
+    {
+      "operation": "isqrt",
+      "limbs": 384,
+      "iterations": 29304,
+      "tungsten_ns": 16111.555,
+      "gmp_ns": 15945.332,
+      "tungsten_iqr_ns": 1420.864,
+      "gmp_iqr_ns": 1750.58,
+      "tungsten_over_gmp": 1.0104245556003475,
+      "selection": "best_iqr",
+      "relative_iqr": 0.14082033891328458,
+      "screen_ratio": 1.019858386125695
+    },
+    {
+      "operation": "sub1",
+      "limbs": 1,
+      "iterations": 40000000,
+      "tungsten_ns": 2.355,
+      "gmp_ns": 2.365,
+      "tungsten_iqr_ns": 0.347,
+      "gmp_iqr_ns": 0.395,
+      "tungsten_over_gmp": 0.9957716701902748,
+      "selection": "best_iqr",
+      "relative_iqr": 0.22272453957891036,
+      "screen_ratio": 1.0171457387796268
+    }
+  ],
+  "summary": {
+    "screen_cells": 3,
+    "accurate_wins": 2,
+    "accurate_losses": 1
+  }
+}

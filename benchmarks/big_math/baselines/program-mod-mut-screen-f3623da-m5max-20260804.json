@@ -1,0 +1,160 @@
+{
+  "schema": 1,
+  "suggestion": "GLM-01",
+  "experiment": {
+    "label": "whole-language mutate-if-unique mod",
+    "rounds": 9,
+    "build": "--release --native --fast",
+    "feature": "mod",
+    "build_modes": {
+      "immutable-mod": {
+        "TUNGSTEN_BIGINT_MUTATE_UNIQUE": 1,
+        "TUNGSTEN_BIGINT_MOD_MUT": 0
+      },
+      "mutating-mod": {
+        "TUNGSTEN_BIGINT_MUTATE_UNIQUE": 1,
+        "TUNGSTEN_BIGINT_MOD_MUT": 1
+      }
+    },
+    "compiler_sha256": "b23458fb85e8bcc1abb4b5d8f204a548d339a2fc54ed86299b00f3bcdd97034e",
+    "binary_sha256": {
+      "immutable-mod": "1a1df1248641e7e43a4a8e1d53a81e88dc5b8fd150386a187f24b386bfaa811c",
+      "mutating-mod": "f5c74e633ecac56b04723de9e59d286d3dccbb0711b0e69bb99667e5d9a88a47",
+      "gmp-destination": "5174e9df714cf18600a1a6e8d736b9b65e068ae87f167d2954633e10a660ed42"
+    },
+    "mutating_call_counts": {
+      "immutable-mod": {
+        "w_bigint_add_mut": 3,
+        "w_bigint_sub_mut": 1,
+        "w_bigint_mul_mut": 1,
+        "w_bigint_div_mut": 1,
+        "w_bigint_mod_mut": 0,
+        "w_bigint_add_dest": 1
+      },
+      "mutating-mod": {
+        "w_bigint_add_mut": 3,
+        "w_bigint_sub_mut": 1,
+        "w_bigint_mul_mut": 1,
+        "w_bigint_div_mut": 1,
+        "w_bigint_mod_mut": 1,
+        "w_bigint_add_dest": 1
+      }
+    }
+  },
+  "metadata": {
+    "generated_at": "2026-08-04T13:28:53.056760+00:00",
+    "git_commit": "f3623da2899318157041b8bd0d1c36836b5264a6",
+    "git_dirty_tracked": true,
+    "gmp_version": "6.3.0",
+    "machine_start": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        3.58984375,
+        3.95654296875,
+        4.12548828125
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "machine_end": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        4.3974609375,
+        4.10400390625,
+        4.1669921875
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "methodology": "same Tungsten source compiled release/native/fast with the fail-closed mutate-if-unique analysis disabled/enabled; GMP uses idiomatic retained destinations; all lanes share exact iteration counts and checksums; six lane orders rotate"
+  },
+  "summary": {
+    "cells": 1,
+    "candidate_wins": 1,
+    "candidate_losses": 0,
+    "candidate_over_control_geomean": 0.918162763933785,
+    "regressions_over_5_percent": 0
+  },
+  "results": [
+    {
+      "workload": "modchain",
+      "iterations": 1000000,
+      "checksum": 917555204,
+      "immutable_ns_median": 266.8366249999963,
+      "immutable_ns_iqr": 9.84312499713269,
+      "mutating_ns_median": 240.91212499843095,
+      "mutating_ns_iqr": 4.170874999545049,
+      "gmp_ns_median": 190.1,
+      "gmp_ns_iqr": 2.5,
+      "mutating_over_immutable_paired_median": 0.918162763933785,
+      "mutating_over_immutable_paired_iqr": 0.045894559109547095,
+      "mutating_over_gmp_paired_median": 1.2672915570669698,
+      "mutating_over_gmp_paired_iqr": 0.010599843711773138,
+      "samples": {
+        "immutable-mod": [
+          268.70691666408675,
+          266.8366249999963,
+          252.45195833122125,
+          253.92445833495003,
+          275.7708333301707,
+          260.28137499815784,
+          273.73429166618735,
+          258.9167500009353,
+          268.75987499806797
+        ],
+        "mutating-mod": [
+          248.44862499958253,
+          238.3428333341726,
+          240.91212499843095,
+          238.7123333319323,
+          242.6027083347435,
+          238.98066666879458,
+          239.3616666631715,
+          243.15154166833963,
+          243.89729166796315
+        ],
+        "gmp-destination": [
+          193.1,
+          200.5,
+          190.1,
+          188.9,
+          189.8,
+          189.1,
+          189.0,
+          190.8,
+          191.6
+        ]
+      },
+      "paired_ratios": [
+        0.9246082240233908,
+        0.8932163391520034,
+        0.9542889926104283,
+        0.9400919269346181,
+        0.8797257686939062,
+        0.918162763933785,
+        0.8744306941092624,
+        0.9391108982615505,
+        0.9074914611778132
+      ],
+      "paired_gmp_ratios": [
+        1.2866319264608106,
+        1.188742310893629,
+        1.2672915570669698,
+        1.263696841354856,
+        1.2782018352726212,
+        1.263779305493361,
+        1.2664638447786851,
+        1.2743791492051342,
+        1.272950374049912
+      ]
+    }
+  ]
+}

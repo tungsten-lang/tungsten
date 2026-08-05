@@ -896,3 +896,65 @@ candidate/baseline geomean, caused seven regressions above 5%, and made the
 target `isqrt@384` 9.7% slower.  The candidate and benchmark knob were removed
 without an acceptance replication.  Artifact:
 `baselines/submul-f22-screen-26a4a17-m5max-20260804.json`.
+
+## Current default matrix residuals -- 483/485 composed wins (2026-08-05)
+
+The current M5 Max/public-GMP-6.3.0 default screen measured 472/485 boxed
+cells ahead of GMP at a 0.618 Tungsten/GMP geomean.  The short screen was
+used only to select the 51 cells at 0.95x GMP or slower.  A 15 x 200 ms
+promotion cleared 44 of those; a 31 x 500 ms promotion cleared five of the
+remaining seven.  Repeating the last two on AC power left two stable losses:
+`isqrt@384` at 1.016x GMP (13,518.816 ns versus 13,304.902 ns, 1.35%
+relative IQR) and `sub1@1` at 1.032x GMP (1.920 ns versus 1.861 ns, 1.81%
+relative IQR).  The resulting 483/485 count is composed from the screen and
+promotions, not a claim that one long 485-cell pass was run.  Artifacts:
+`baselines/matrix-bfda652-current-screen-m5max-20260804.json`,
+`baselines/matrix-bfda652-current-residual095-15x200-m5max-20260804.json`,
+`baselines/matrix-bfda652-current-residual-red-31x500-m5max-20260804.json`,
+and
+`baselines/matrix-bfda652-current-residual-two-ac-31x500-m5max-20260805.json`.
+
+## One-limb subtraction dispatch and reserve selection -- NOT taken (2026-08-05)
+
+A direct positive one-by-one subtraction leaf closed the target cell at
+0.964x GMP, but its production-shaped 15 x 200 ms family run won only 4/20
+cells, regressed the family by 1.34% geomean, and made `sub1@64` 7.9% slower.
+The broader same-binary trial likewise lost 36/60 cells and had thirteen
+regressions above 5%.  Moving the sign split after word decoding was nearly
+neutral across the family (0.996 geomean, no >5% regression) but made
+`sub1@1` 0.6% slower and left it 1.064x GMP.  Selecting an exact one-limb hot
+reserve instead of the smallest fitting reserve was also neutral overall
+(0.9997 geomean across 50 cells), while making the target 1.5% slower and
+1.052x GMP.  All candidates were removed.  Artifacts:
+`baselines/sub1-positive11-same-binary-bfda652-m5max-20260804.json`,
+`baselines/sub1-positive11-production-bfda652-m5max-20260805.json`,
+`baselines/sub1-signsplit-word-screen-bfda652-m5max-20260805.json`, and
+`baselines/one-limb-exact-hot-screen-bfda652-m5max-20260805.json`.
+
+## B-Z correction-shape and isqrt384 follow-ups -- NOT taken (2026-08-05)
+
+The B-Z trace now records full as well as shortened correction products.  The
+384-limb isqrt fixture reaches seventeen full correction products: four at
+`k=24`, seven at `k=25`, two at `k=48`, three at `k=50`, and one at `k=100`.
+Lowering the B-Z base threshold from 24 to 20 lost the target and introduced
+a >5% regression.  Routing the 24-limb top product to schoolbook arithmetic,
+forcing a fixed 100-limb split, moving the product into the high remainder,
+and placing submul in a hot section all failed their complete affected/control
+screens.  A 32-limb approximate-divisor pad lost 8/9 cells.
+
+Forcing the exact quotient only at 384 initially looked favorable in a
+separate-binary screen, but the same-binary target was 1.9% slower and still
+1.069x GMP.  Sum/difference selectors at the traced parent widths did not
+replicate: the best parent-200/sum-100 screen became 1.0008 geomean with a
+>5% regression in its 10-cell acceptance run.  The final 31 x 500 ms
+three-cell check was directionally positive overall but still lost the
+target, so no selector was retained.  Representative artifacts:
+`baselines/bz-threshold20-screen-bfda652-m5max-20260804.json`,
+`baselines/isqrt-bz-school24-context-screen-bfda652-m5max-20260804.json`,
+`baselines/isqrt-pad32-screen-bfda652-m5max-20260804.json`,
+`baselines/isqrt-exact384-same-binary-screen-bfda652-m5max-20260804.json`,
+`baselines/isqrt-bz-parent200-sum100-acceptance-bfda652-m5max-20260804.json`,
+`baselines/isqrt-bz-parent200-sum100-31x500-bfda652-m5max-20260804.json`,
+`baselines/mul-split100-fixed-screen-bfda652-m5max-20260804.json`,
+`baselines/bz-product-in-rh-screen-bfda652-m5max-20260804.json`, and
+`baselines/submul-hot-section-screen-bfda652-m5max-20260804.json`.

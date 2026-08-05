@@ -5129,6 +5129,50 @@ static double bench_prime_prefilter(const char *mode, int iters) {
 #endif
 
 int main(int argc, char **argv) {
+#ifdef BN_BZ_PROFILE_COUNTS
+    if (argc == 3 && strcmp(argv[1], "--trace-isqrt-bz") == 0) {
+        int32_t limbs = (int32_t)atoi(argv[2]);
+        if (limbs <= 0) die("isqrt B-Z trace expects positive limbs");
+        WValue a, b, m;
+        bench_boxed_operands(BENCH_BOXED_ISQRT, limbs, &a, &b, &m);
+        bz_profile_mul_calls = 0;
+        bz_profile_mul_q_limbs = 0;
+        bz_profile_mul_b_limbs = 0;
+        bz_profile_mul_equal = 0;
+        bz_profile_mul_full = 0;
+        bz_profile_clamped = 0;
+        bz_profile_shape_count = 0;
+        memset(bz_profile_mul_bins, 0, sizeof(bz_profile_mul_bins));
+        WValue root = bigint_isqrt_any(a);
+        printf("isqrt %d: correction mul calls=%llu q-limbs=%llu"
+               " b-limbs=%llu equal=%llu full=%llu clamped=%llu bins:",
+               limbs,
+               (unsigned long long)bz_profile_mul_calls,
+               (unsigned long long)bz_profile_mul_q_limbs,
+               (unsigned long long)bz_profile_mul_b_limbs,
+               (unsigned long long)bz_profile_mul_equal,
+               (unsigned long long)bz_profile_mul_full,
+               (unsigned long long)bz_profile_clamped);
+        for (int i = 0; i < 12; i++) {
+            if (bz_profile_mul_bins[i])
+                printf(" <=%d:%llu", 1 << i,
+                       (unsigned long long)bz_profile_mul_bins[i]);
+        }
+        printf("\n");
+        if (bz_profile_shape_count) {
+            printf("correction shapes:");
+            for (int i = 0; i < bz_profile_shape_count; i++)
+                printf(" k%d=%dx%d", bz_profile_shape_k[i],
+                       bz_profile_shape_q[i], bz_profile_shape_b[i]);
+            printf("\n");
+        }
+        bench_free_value(root);
+        bench_free_value(a);
+        bench_free_value(b);
+        bench_free_value(m);
+        return 0;
+    }
+#endif
 #if BN_BENCH_RUNTIME_MOD84_CACHE_ENTRIES_KNOB
     const char *mod84_cache_entries = getenv("BENCH_MOD84_CACHE_ENTRIES");
     if (mod84_cache_entries) {
@@ -6714,7 +6758,7 @@ int main(int argc, char **argv) {
         }
         printf("\n");
         if (bz_shape_count) {
-            printf("  non-full correction shapes:");
+            printf("  correction shapes:");
             for (int i = 0; i < bz_shape_count; i++)
                 printf(" k%d=%dx%d",
                        bz_shape_k[i], bz_shape_q[i], bz_shape_b[i]);

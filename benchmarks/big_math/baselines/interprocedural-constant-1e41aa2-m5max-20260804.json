@@ -1,0 +1,128 @@
+{
+  "schema": 1,
+  "suggestion": "GEMMA-20",
+  "experiment": {
+    "label": "constant-call recompute vs fn memo vs ideal hoist",
+    "rounds": 9,
+    "iterations": 2000000,
+    "build": "--release --native --fast",
+    "binary_sha256": {
+      "compiler": "b23458fb85e8bcc1abb4b5d8f204a548d339a2fc54ed86299b00f3bcdd97034e",
+      "binary": "a31baa2aad571d3dd2b284c0c1d38a04b85f8294e84c1e25ed4950f2a51e686e"
+    },
+    "ir_call_counts": {
+      "memo_call1": 2,
+      "ordinary_body": 0,
+      "memoized_body": 0
+    }
+  },
+  "metadata": {
+    "generated_at": "2026-08-04T13:43:00.494075+00:00",
+    "git_commit": "1e41aa2da01a57c4b1f4cc21c1b1a05b20088544",
+    "git_dirty_tracked": true,
+    "machine_start": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        3.73974609375,
+        4.23876953125,
+        4.25
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "machine_end": {
+      "cpu": "Apple M5 Max",
+      "machine": "arm64",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "logical_cpus": 18,
+      "load_average": [
+        5.14306640625,
+        4.51318359375,
+        4.34814453125
+      ],
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t100%; charged; 0:00 remaining present: true",
+      "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "target_triple": "arm64-apple-darwin25.6.0"
+    },
+    "methodology": "one release/native/fast binary; separate processes per lane; six lane orders rotate; fn memo seeded before timing; exact iteration counts and low-bit checksums match"
+  },
+  "summary": {
+    "medians_ns": {
+      "ordinary": 421.2252916659054,
+      "memoized": 10.345916665755793,
+      "hoisted": 17.226937499799536
+    },
+    "memoized_over_ordinary_paired_median": 0.02402233220491992,
+    "memoized_over_ordinary_paired_iqr": 0.0012873499333409567,
+    "hoisted_over_memoized_paired_median": 1.667290235357301,
+    "hoisted_over_memoized_paired_iqr": 0.07770684681762652
+  },
+  "samples_ns": {
+    "ordinary": [
+      398.1456458332104,
+      386.36124999902677,
+      409.84731249955075,
+      435.54437499915366,
+      421.2252916659054,
+      430.627125000683,
+      482.4546666677634,
+      462.50422916637035,
+      417.0249791659444
+    ],
+    "memoized": [
+      9.584541667209121,
+      9.0620624996518,
+      9.235624998837011,
+      10.462791666213889,
+      10.791624999910708,
+      10.345916665755793,
+      10.993020832756885,
+      10.4466875000071,
+      10.177833331908916
+    ],
+    "hoisted": [
+      16.525687498869956,
+      15.556812501017703,
+      18.199541666035657,
+      17.226937499799536,
+      15.452770830961525,
+      17.249645832634997,
+      18.305395833522198,
+      18.12012499976845,
+      13.94629166497907
+    ]
+  },
+  "checksums": {
+    "ordinary": 0,
+    "memoized": 0,
+    "hoisted": 0
+  },
+  "paired_ratios": {
+    "memoized_over_ordinary": [
+      0.02407295362266561,
+      0.02345489486762616,
+      0.02253430659947815,
+      0.02402233220491992,
+      0.025619603602696484,
+      0.024025232190701837,
+      0.022785603689324654,
+      0.022587225891612883,
+      0.024405812218406486
+    ],
+    "hoisted_over_memoized": [
+      1.7242021655983886,
+      1.7166966682932783,
+      1.9705804066673798,
+      1.646495318780762,
+      1.4319225168674212,
+      1.667290235357301,
+      1.6651834024525793,
+      1.7345330756525583,
+      1.370261352311156
+    ]
+  }
+}

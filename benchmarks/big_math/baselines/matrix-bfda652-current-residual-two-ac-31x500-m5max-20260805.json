@@ -1,0 +1,62 @@
+{
+  "schema": "tungsten.bigint.residual-matrix/v1",
+  "metadata": {
+    "generated_at": "2026-08-05T06:02:21.728517+00:00",
+    "git_commit": "bfda652da143916f38130e3bf764df1af1d9a246",
+    "git_dirty_tracked": true,
+    "screen": "benchmarks/big_math/baselines/matrix-bfda652-current-residual-red-31x500-m5max-20260804.json",
+    "screen_sha256": "5cbd67d7861c1a51baa57d2db0220e3c3a74e571de26b6ede414e8f6c252a24c",
+    "threshold": 1.0,
+    "runs": 31,
+    "target_ms": 500.0,
+    "selection": "best elapsed time with IQR retained, matching the default <=8192-limb matrix",
+    "machine": {
+      "hostname": "Eriks-BigMac-Pro.local",
+      "platform": "macOS-26.6-arm64-arm-64bit-Mach-O",
+      "machine": "arm64",
+      "logical_cpus": 18,
+      "target_triple": "arm64-apple-darwin25.6.0",
+      "clang": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+      "gmp_version": "6.3.0",
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22610019)\t54%; charging; 0:59 remaining present: true",
+      "load_average": [
+        2.9453125,
+        2.8056640625,
+        2.53662109375
+      ]
+    }
+  },
+  "records": [
+    {
+      "operation": "isqrt",
+      "limbs": 384,
+      "iterations": 36697,
+      "tungsten_ns": 13518.816,
+      "gmp_ns": 13304.902,
+      "tungsten_iqr_ns": 162.656,
+      "gmp_iqr_ns": 82.432,
+      "tungsten_over_gmp": 1.0160778335684097,
+      "selection": "best_iqr",
+      "relative_iqr": 0.013533305609015778,
+      "screen_ratio": 1.0033056421608575
+    },
+    {
+      "operation": "sub1",
+      "limbs": 1,
+      "iterations": 40000000,
+      "tungsten_ns": 1.92,
+      "gmp_ns": 1.861,
+      "tungsten_iqr_ns": 0.007,
+      "gmp_iqr_ns": 0.033,
+      "tungsten_over_gmp": 1.031703385276733,
+      "selection": "best_iqr",
+      "relative_iqr": 0.01810331955910607,
+      "screen_ratio": 1.0176991150442478
+    }
+  ],
+  "summary": {
+    "screen_cells": 2,
+    "accurate_wins": 0,
+    "accurate_losses": 2
+  }
+}

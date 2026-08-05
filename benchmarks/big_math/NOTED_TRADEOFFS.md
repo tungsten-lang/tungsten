@@ -720,6 +720,16 @@ acceptance band. The candidate was removed. Artifacts:
 `baselines/isqrt-pad16-screen-bf00da8-m5max-20260804.json`, and
 `baselines/isqrt-submul23-acceptance-bf00da8-m5max-20260804.json`.
 
+A temporary recurrence trace then replaced the single-row guess with the
+actual `384 -> 192 -> 96 -> 48 -> 24 -> 12 -> 6 -> 3` root chain.  Each root
+iteration reaches seven 50-by-25 and five 48-by-24 Knuth leaves.  Deferring
+the leaf's initial quotient/remainder zeroing until an unwritten tail needed
+it was tested across boxed isqrt/div/mod at 24..512 limbs, including the
+already-green shared users.  It split 17 wins and 16 losses at 1.0028x
+candidate/baseline geomean and caused two regressions above 5%, so the change
+was removed.  Artifact:
+`baselines/bz-defer-output-zero-screen-d3f83b9-m5max-20260804.json`.
+
 For GCD, moving parallel row application above 2048 made the target 5.9%
 slower. The current four-step row-serial linear-combination kernel also beat
 both the existing interleaved schedule (10/12 losses, 1.028 geomean) and a

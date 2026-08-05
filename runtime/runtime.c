@@ -2706,6 +2706,18 @@ WValue bigint_sub_any(WValue a, WValue b) {
 #ifndef BN_FROMSTR_FIXED_TOOM
 #define BN_FROMSTR_FIXED_TOOM 1
 #endif
+/* At 480 limbs the ordinary difference-form path can schedule its three
+ * 240-limb child products in parallel; the fully fixed recursive tree cannot.
+ * Keep the slower selector available only for byte-identical benchmark A/Bs. */
+#ifndef BN_MUL_SPLIT_480_FIXED
+#define BN_MUL_SPLIT_480_FIXED 0
+#endif
+#ifndef BN_BENCH_RUNTIME_TOOM480_KNOB
+#define BN_BENCH_RUNTIME_TOOM480_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_TOOM480_KNOB
+static int bn_bench_runtime_toom480_fixed;
+#endif
 #ifndef BN_MUL_POWER2_FIXED
 #define BN_MUL_POWER2_FIXED 1
 #endif
@@ -5789,7 +5801,16 @@ static void bn_toom2_diff(uint64_t *out,
     if (n == 168) { bn_toom2_diff168(out, a, b); return; }
     if (n == 240) { bn_toom2_diff240(out, a, b); return; }
     if (n == 336) { bn_toom2_diff336(out, a, b); return; }
-    if (n == 480) { bn_toom2_diff480(out, a, b); return; }
+    if (n == 480
+#if BN_BENCH_RUNTIME_TOOM480_KNOB
+        && bn_bench_runtime_toom480_fixed
+#else
+        && BN_MUL_SPLIT_480_FIXED
+#endif
+       ) {
+        bn_toom2_diff480(out, a, b);
+        return;
+    }
 #endif
 #if BN_MUL_SPLIT_40_BLOCKS
     if (n == 40) { bn_toom2_diff40(out, a, b); return; }

@@ -2853,6 +2853,37 @@ static int fuzz_mul_against_gmp(int cases, int32_t max_limbs) {
     return 0;
 }
 
+static int fuzz_mul_exact_against_gmp(int cases, int32_t limbs) {
+    uint64_t state = 0x13198a2e03707344ULL ^ (uint64_t)limbs;
+    for (int t = 0; t < cases; t++) {
+        uint64_t *a = bench_limbs(limbs, gcd_fuzz_next(&state));
+        uint64_t *b = bench_limbs(limbs, gcd_fuzz_next(&state));
+        size_t product_limbs = (size_t)2 * (size_t)limbs;
+        uint64_t *tw = (uint64_t *)calloc(product_limbs + 4U, sizeof(uint64_t));
+        uint64_t *gm = (uint64_t *)calloc(product_limbs + 4U, sizeof(uint64_t));
+        if (!a || !b || !tw || !gm)
+            die("out of memory in exact-width multiply fuzz");
+        bigint_mul_dispatch(tw, a, limbs, b, limbs);
+        mpn_mul((mp_limb_t *)gm, (const mp_limb_t *)a, (mp_size_t)limbs,
+                (const mp_limb_t *)b, (mp_size_t)limbs);
+        if (memcmp(tw, gm, product_limbs * sizeof(uint64_t)) != 0) {
+            fprintf(stderr,
+                    "exact-width multiply fuzz mismatch: case=%d limbs=%d\n",
+                    t, limbs);
+            free(gm);
+            free(tw);
+            free(b);
+            free(a);
+            return 1;
+        }
+        free(gm);
+        free(tw);
+        free(b);
+        free(a);
+    }
+    return 0;
+}
+
 static int fuzz_mul_rect4_against_gmp(int cases, int32_t max_short_limbs) {
     static const int32_t boundary_short_limbs[] = {
         BN_RECT4_PAR_THRESHOLD,
@@ -5049,6 +5080,11 @@ static double bench_prime_prefilter(const char *mode, int iters) {
 #endif
 
 int main(int argc, char **argv) {
+#if BN_BENCH_RUNTIME_TOOM480_KNOB
+    const char *toom480_fixed = getenv("BENCH_TOOM480_FIXED");
+    bn_bench_runtime_toom480_fixed =
+        toom480_fixed && strcmp(toom480_fixed, "0") != 0;
+#endif
 #if BN_BENCH_RUNTIME_MUL1_CSEL128X32_KNOB
     const char *mul1_csel128x32 = getenv("BENCH_MUL1_CSEL128X32");
     bn_bench_runtime_mul1_csel128x32 =
@@ -6060,6 +6096,21 @@ int main(int argc, char **argv) {
         return bad ? 1 : 0;
 #else
         die("multiply fuzz requires GMP");
+#endif
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-mul-exact") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || limbs <= 0)
+            die("exact-width multiply fuzz expects positive cases and limbs");
+#ifdef HAVE_GMP
+        int bad = fuzz_mul_exact_against_gmp(cases, limbs);
+        printf("exact-width multiply fuzz vs GMP: %d/%d match (%d limbs)%s\n",
+               cases - bad, cases, limbs,
+               bad ? "  *** MISMATCH ***" : "");
+        return bad ? 1 : 0;
+#else
+        die("exact-width multiply fuzz requires GMP");
 #endif
     }
     if (argc == 4 && strcmp(argv[1], "--fuzz-mul-rect4") == 0) {

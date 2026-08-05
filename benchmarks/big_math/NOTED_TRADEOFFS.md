@@ -737,3 +737,34 @@ Artifacts:
 `baselines/gcd-exact2048-den6-screen-bf00da8-m5max-20260804.json`,
 `baselines/gcd-exact2048-den7-screen-bf00da8-m5max-20260804.json`, and
 `baselines/gcd-cap2048-den5-acceptance-bf00da8-m5max-20260804.json`.
+
+## Exact 480-limb serial Toom-2 recursion — REMOVED (2026-08-04)
+
+The boxed `mod@448` profile made the fixed 15-limb addmul leaf look like a
+candidate bottleneck, but replacing the 15- or 21-limb fixed rows with the
+generic row lost 25/40 and 27/40 cells. A cross-block 15-limb schedule lost
+22/40, and routing the fixed 12-limb row through the generic block kernel lost
+32/45. These screens covered their complete `mod`/`div`/`mul`/`sqr`/
+`fromstr`/`isqrt` bands, including green controls, so none of those leaf
+changes was retained. Artifacts:
+`baselines/addmul-f15-fixed-row-screen-11eb818-m5max-20260804.json`,
+`baselines/addmul-f21-fixed-row-screen-11eb818-m5max-20260804.json`,
+`baselines/addmul-f15-cross-screen-11eb818-m5max-20260804.json`, and
+`baselines/addmul-f12-generic-screen-11eb818-m5max-20260804.json`.
+
+The higher-level exact-480 dispatch was different: its fixed recursion ran
+the three 240-limb products serially, while the generic difference-form path
+qualified for the existing parallel product scheduler. A byte-identical
+runtime-knob replication over the six reached cells plus six inactive controls
+measured generic/fixed at 0.961 geomean, with no regression above 5%; boxed
+`mul@480` improved to 0.601x its fixed baseline. The production 15 x 200 ms
+matrix then put all 12 `mod`/`div`/`mul`/`fromstr` cells at 480/960/1024 limbs
+ahead of public GMP, at 0.708 geomean. The fixed 480 selector is therefore off
+by default; its benchmark knob remains for causal replication. Artifacts:
+`baselines/toom480-runtime-knob-replication-11eb818-m5max-20260804.json` and
+`baselines/toom480-production-15x200-11eb818-m5max-20260804.json`.
+
+Optimized GMP differential fuzz passed 10,000 exact 480-limb products and
+5,000 random products through 1024 limbs. ASAN/UBSAN passed 1,000 exact and
+1,000 random products. The benchmark exposes `--fuzz-mul-exact` so future
+fixed-width cutoff changes can be validated directly.

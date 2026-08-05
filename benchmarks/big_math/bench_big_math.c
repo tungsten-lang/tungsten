@@ -4133,6 +4133,9 @@ static void gmp_import_value(mpz_t z, WValue v) {
 
 static void fuzz_isqrt_against_gmp(int cases) {
     static const int32_t edges[] = {
+        1, 2, 3, 4, 5, 6, 7, 8,
+        16, 24, 32, 40, 48, 64, 96, 128, 192, 256,
+        383, 384, 385, 511, 512, 513,
         1023, 1024, 1025,
         1534, 1535, 1536, 2047, 2048, 2049,
         3071, 3072, 3073, 4093, 4094, 4095, 4096, 4097,
@@ -4160,8 +4163,34 @@ static void fuzz_isqrt_against_gmp(int cases) {
     mpz_clears(za, zg, NULL);
     bigint_pool_release_thread();
     printf("isqrt fuzz vs GMP: %d/%d match"
-           " (random 1023..16385 limbs plus edges through 65536)\n",
+           " (random 1023..16385 limbs plus edges 1..65536)\n",
            cases, cases);
+}
+
+static void fuzz_isqrt_small_against_gmp(
+    int cases, int32_t max_root_limbs) {
+    uint64_t state = UINT64_C(0x94d049bb133111eb);
+    mpz_t za, zg;
+    mpz_inits(za, zg, NULL);
+    for (int t = 0; t < cases; t++) {
+        int32_t root_limbs = 1 + (int32_t)(
+            gcd_fuzz_next(&state) % (uint64_t)max_root_limbs);
+        WValue a = bench_bigint(
+            2 * root_limbs, gcd_fuzz_next(&state));
+        WValue got = bigint_isqrt_any(a);
+        gmp_import_value(za, a);
+        mpz_sqrt(zg, za);
+        if (!value_matches_mpz(got, zg))
+            dief("small isqrt fuzz mismatch case=%d root-width=%d",
+                 t, root_limbs);
+        if (got != a) bench_free_value(got);
+        bench_free_value(a);
+    }
+    mpz_clears(za, zg, NULL);
+    bigint_pool_release_thread();
+    printf("small isqrt fuzz vs GMP: %d/%d match"
+           " (random 1..%d root limbs)\n",
+           cases, cases, max_root_limbs);
 }
 
 static void fuzz_gcd_against_gmp(int cases, int32_t max_limbs) {
@@ -6104,6 +6133,19 @@ int main(int argc, char **argv) {
         fuzz_isqrt_against_gmp(cases);
 #else
         die("isqrt fuzz requires GMP");
+#endif
+        return 0;
+    }
+    if (argc == 4 && strcmp(argv[1], "--fuzz-isqrt-small") == 0) {
+        int cases = atoi(argv[2]);
+        int32_t max_root_limbs = (int32_t)atoi(argv[3]);
+        if (cases <= 0 || max_root_limbs <= 0 || max_root_limbs > 4096)
+            die("small isqrt fuzz expects positive cases and"
+                " max root limbs in 1..4096");
+#ifdef HAVE_GMP
+        fuzz_isqrt_small_against_gmp(cases, max_root_limbs);
+#else
+        die("small isqrt fuzz requires GMP");
 #endif
         return 0;
     }

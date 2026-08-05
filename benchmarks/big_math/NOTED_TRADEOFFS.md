@@ -860,3 +860,28 @@ frontier cells.  `mod@448` measured 0.999x; `gcd@2048`, `isqrt@384`, and
 `sub1@1` measured 1.003x, 1.020x, and 1.017x respectively, but all three had
 relative IQR above 10%.  Artifact:
 `baselines/residual-five-mod84-production-21x300-m5max-20260804.json`.
+
+## Caller-provided triangular isqrt quotient -- NOT taken (2026-08-04)
+
+The exact top-level square-root quotient at 8..256 result limbs was tested
+with a caller-provided destination, removing its temporary BigInt allocation,
+copy, and recycle.  This deliberately covered already-green cells: the
+`isqrt@384` residual uses the approximate B-Z branch and is not affected.
+A byte-identical 9 x 110 ms screen won all nine affected isqrt cells at a
+0.985 geomean, and a 15 x 200 ms replication again won all nine at 0.980.
+However, the final current-source 9 x 110 ms replication reversed to only
+4/9 affected wins at a 1.002 geomean; `isqrt@16` regressed 6.8%.  Across the
+thirteen affected/control cells it lost 7/13.  The destination ABI and its
+runtime knob were removed.  Artifacts:
+`baselines/sqrt-triangular-destination-screen-6ab814b-m5max-20260804.json`,
+`baselines/sqrt-triangular-destination-replication-6ab814b-m5max-20260804.json`,
+and `baselines/sqrt-triangular-destination-final-6ab814b-m5max-20260804.json`.
+
+The trial exposed a validation gap even though it was not retained.  The
+isqrt differential fuzzer now includes explicit 1..513-limb edges and a
+separate random 1..4096-limb mode, so small exact-quotient paths can be mixed
+with large roots in one process.  With the production algorithm restored,
+public-GMP checks passed 100,000 random roots through 512 limbs and 100 mixed
+large/edge cases through 65,536 limbs.  The rejected candidate separately
+passed 100,000 small and 100 mixed optimized cases plus 20,000 small and 48
+mixed ASAN/UBSAN cases before the performance gate removed it.

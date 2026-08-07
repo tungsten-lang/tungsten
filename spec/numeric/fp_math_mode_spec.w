@@ -63,10 +63,9 @@ check("precise.two_products_add", sum2 == (x1 * y2) + (x2 * y1), true)
 # -- Explicit fma(a,b,c): a fused multiply-add. --
 # Compiled, this is llvm.fma.f64 (single rounding), so fma(x,y,-(x*y)) isolates
 # the nonzero rounding error of x*y — the opt-in precision precise mode refuses
-# to apply implicitly to a*b - c*d. That single-rounding residual is a
-# compiled-codegen property (the tree-walking interpreter double-rounds), so it
-# is NOT asserted here to keep this spec passing under both `-o` and `run`;
-# it was verified live: `fma(~1.7,~3.3, ~0.0 - ~1.7*~3.3)` == 1.199e-16 compiled.
+# to apply implicitly to a*b - c*d. The primary and Ruby tree-walkers now call
+# host fma as well; the exact residual parity is covered by the focused native
+# math intrinsic spec.
 check("fma.basic", fma(~2.0, ~3.0, ~1.0) == ~7.0, true)
 
 # -- @fastmath block: fast-math flags on; ordinary arithmetic stays correct. --

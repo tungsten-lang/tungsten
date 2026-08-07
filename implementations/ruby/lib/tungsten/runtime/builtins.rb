@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 require "rbconfig"
+begin
+  require "fiddle"
+rescue LoadError
+  # Minimal Ruby builds may omit Fiddle; fma reports a targeted error below.
+end
 
 module Tungsten
   module Runtime
@@ -893,6 +898,28 @@ module Tungsten
           Math.atan2(y, x)
         end
 
+        # Ruby exposes no Math.fma, so bind the host C99 libm operation. Do not
+        # fall back to a*b+c: that would double-round and disagree with
+        # Tungsten's llvm.fma.f64 and primary-interpreter semantics.
+        native_fma = nil
+        if defined?(Fiddle::Function)
+          begin
+            native_fma = Fiddle::Function.new(
+              Fiddle::Handle::DEFAULT["fma"],
+              [Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE, Fiddle::TYPE_DOUBLE],
+              Fiddle::TYPE_DOUBLE
+            )
+          rescue Fiddle::DLError
+            native_fma = nil
+          end
+        end
+        interpreter.define_builtin("fma") do |_recv, args, _block|
+          unless native_fma
+            raise Tungsten::Error.new("fma is unavailable in the host math library")
+          end
+          native_fma.call(args[0].to_f, args[1].to_f, args[2].to_f)
+        end
+
         interpreter.define_builtin("from_legacy") do |_recv, args, _block|
           Tungsten::Key.from_legacy(args[0])
         end
@@ -1044,6 +1071,18 @@ module Tungsten
 
         interpreter.define_method_builtin("replace") do |recv, args, _block|
           recv.gsub(args[0], args[1])
+        end
+
+        interpreter.define_method_builtin("gsub") do |recv, args, block|
+          if block
+            recv.gsub(args[0]) { |m| block.call(m) }
+          elsif args[0].is_a?(String)
+            # Compiled-engine parity: a string-pattern replacement is literal.
+            # Ruby's two-arg gsub would interpret \', \1, ... replacement tokens.
+            recv.gsub(args[0]) { args[1] }
+          else
+            recv.gsub(args[0], args[1])
+          end
         end
 
         interpreter.define_method_builtin("map_with_index") do |recv, args, block|

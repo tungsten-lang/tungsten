@@ -580,9 +580,15 @@ use hashing
   # Math.* libm wrappers
   out << declare_fn("w_math_exp", wv, wv)
   out << declare_fn("w_math_log", wv, wv)
+  out << declare_fn("w_math_expm1", wv, wv)
+  out << declare_fn("w_math_log1p", wv, wv)
   out << declare_fn("w_math_sin", wv, wv)
   out << declare_fn("w_math_cos", wv, wv)
   out << declare_fn("w_math_tan", wv, wv)
+  out << declare_fn("w_math_asin", wv, wv)
+  out << declare_fn("w_math_acos", wv, wv)
+  out << declare_fn("w_math_atan", wv, wv)
+  out << declare_fn("w_math_cbrt", wv, wv)
   out << declare_fn("w_math_sqrt", wv, wv)
   out << declare_fn("w_math_floor", wv, wv)
   out << declare_fn("w_math_ceil", wv, wv)
@@ -591,6 +597,8 @@ use hashing
   out << declare_fn("w_math_pow", wv, wv2)
   out << declare_fn("w_math_ldexp", wv, wv2)
   out << declare_fn("w_math_atan2", wv, wv2)
+  out << declare_fn("w_math_hypot", wv, wv2)
+  out << declare_fn("w_math_fma", wv, wv3)
 
   # Raw libm — targets of :call_libm_f64 (the Math.* fast path on unboxed
   # operands). memory(none) is required for the loop vectorizer to widen

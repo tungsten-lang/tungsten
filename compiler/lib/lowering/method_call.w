@@ -8,6 +8,55 @@
 #
 # This file deliberately has no `use` directives — see pass_registry.w.
 
+# One registry for Math intrinsics that have both a native implementation and,
+# in some cases, a source-level fallback in core/math.w. Static source dispatch
+# must not shadow a matching intrinsic: the same lookup drives precedence and
+# the boxed runtime call, so adding a fallback cannot silently change codegen.
+-> math_intrinsic_runtime_name(name, arity)
+  if arity == 1
+    if name == "exp"
+      return "w_math_exp"
+    if name == "log"
+      return "w_math_log"
+    if name == "expm1"
+      return "w_math_expm1"
+    if name == "log1p"
+      return "w_math_log1p"
+    if name == "sin"
+      return "w_math_sin"
+    if name == "cos"
+      return "w_math_cos"
+    if name == "tan"
+      return "w_math_tan"
+    if name == "asin"
+      return "w_math_asin"
+    if name == "acos"
+      return "w_math_acos"
+    if name == "atan"
+      return "w_math_atan"
+    if name == "cbrt"
+      return "w_math_cbrt"
+    if name == "sqrt"
+      return "w_math_sqrt"
+    if name == "floor"
+      return "w_math_floor"
+    if name == "ceil"
+      return "w_math_ceil"
+    if name == "round"
+      return "w_math_round"
+    if name == "abs"
+      return "w_math_abs"
+  if arity == 2
+    if name == "pow"
+      return "w_math_pow"
+    if name == "ldexp"
+      return "w_math_ldexp"
+    if name == "atan2"
+      return "w_math_atan2"
+    if name == "hypot"
+      return "w_math_hypot"
+  nil
+
 -> lower_method_call(ctx, node)
   wfn = ctx[:func]
   method_name = node.name
@@ -487,7 +536,11 @@
         if candidate != nil && candidate[:is_static] == true
           static_info = candidate
         guard += 1
-    if static_info != nil
+    math_intrinsic_runtime = nil
+    if recv_name == "Math"
+      math_intrinsic_runtime = math_intrinsic_runtime_name(method_name, node.args.size())
+    lower_math_intrinsic = math_intrinsic_runtime != nil
+    if static_info != nil && !lower_math_intrinsic
       return lower_direct_static_method_call(ctx, static_info, recv_node, node.args)
 
     # Constructor arity: `C.new(...)` with fewer arguments than C's `-> new`
@@ -662,28 +715,7 @@
     # Math.* libm wrappers — direct runtime calls.
     if recv_name == "Math"
       args = node.args
-      math_unary = nil
-      if method_name == "exp"
-        math_unary = "w_math_exp"
-      elsif method_name == "log"
-        math_unary = "w_math_log"
-      elsif method_name == "sin"
-        math_unary = "w_math_sin"
-      elsif method_name == "cos"
-        math_unary = "w_math_cos"
-      elsif method_name == "tan"
-        math_unary = "w_math_tan"
-      elsif method_name == "sqrt"
-        math_unary = "w_math_sqrt"
-      elsif method_name == "floor"
-        math_unary = "w_math_floor"
-      elsif method_name == "ceil"
-        math_unary = "w_math_ceil"
-      elsif method_name == "round"
-        math_unary = "w_math_round"
-      elsif method_name == "abs"
-        math_unary = "w_math_abs"
-      if math_unary != nil && args.size() == 1
+      if math_intrinsic_runtime != nil && args.size() == 1
         arg_val = lower_expression(ctx, args[0])
         # Raw fast path: operand is already an unboxed machine number — call
         # libm directly on the double (call_libm_f64) and stay raw, skipping
@@ -700,16 +732,16 @@
           return typed_value(:raw_f64, temp)
         arg_reg = ensure_i64_value(wfn, arg_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_unary, args: [arg_reg]})
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_intrinsic_runtime, args: [arg_reg]})
         return typed_value(:i64, temp)
-      if method_name in ("pow" "ldexp" "atan2") && args.size() == 2
+      if math_intrinsic_runtime != nil && args.size() == 2
         a_val = lower_expression(ctx, args[0])
         b_val = lower_expression(ctx, args[1])
         # Raw fast path for the pure-libm pair (ldexp's second arg is an
         # int, so it stays on the runtime path). Both operands must already
         # be raw — a boxed WValue needs w_math_to_double's dynamic Int/Float
         # handling.
-        if method_name in ("pow" "atan2")
+        if method_name in ("pow" "atan2" "hypot")
           if a_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64) && b_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64)
             a_raw = ensure_raw_f64(wfn, a_val)
             b_raw = ensure_raw_f64(wfn, b_val)
@@ -718,13 +750,8 @@
             return typed_value(:raw_f64, temp)
         a_reg = ensure_i64_value(wfn, a_val)
         b_reg = ensure_i64_value(wfn, b_val)
-        rt_name = "w_math_pow"
-        if method_name == "ldexp"
-          rt_name = "w_math_ldexp"
-        elsif method_name == "atan2"
-          rt_name = "w_math_atan2"
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: rt_name, args: [a_reg, b_reg]})
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_intrinsic_runtime, args: [a_reg, b_reg]})
         return typed_value(:i64, temp)
 
     # Float.from_u32_bits / to_u32_bits / from_u64_bits / to_u64_bits —

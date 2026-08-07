@@ -1193,10 +1193,22 @@ use target
         return ccall("w_math_cos", x)
       when "tan"
         return ccall("w_math_tan", x)
+      when "asin"
+        return ccall("w_math_asin", x)
+      when "acos"
+        return ccall("w_math_acos", x)
+      when "atan"
+        return ccall("w_math_atan", x)
+      when "cbrt"
+        return ccall("w_math_cbrt", x)
       when "exp"
         return ccall("w_math_exp", x)
       when "log"
         return ccall("w_math_log", x)
+      when "expm1"
+        return ccall("w_math_expm1", x)
+      when "log1p"
+        return ccall("w_math_log1p", x)
       when "floor"
         return ccall("w_math_floor", x)
       when "ceil"
@@ -1211,6 +1223,8 @@ use target
         return ccall("w_math_pow", args[0], args[1])
       when "atan2"
         return ccall("w_math_atan2", args[0], args[1])
+      when "hypot"
+        return ccall("w_math_hypot", args[0], args[1])
       when "ldexp"
         return ccall("w_math_ldexp", args[0], args[1])
     nil
@@ -2571,13 +2585,10 @@ use target
       value = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
       return ccall("w_int", ccall_nobox("w_raw_store_u8", ptr, index, value))
 
-    # Explicit fused multiply-add. The tree-walker has no hardware FMA and no
-    # runtime fma() to call, so it computes a*b+c directly — double-rounded,
-    # NOT the single-rounding the compiled `llvm.fma.f64` gives. Good enough as
-    # a reference value; code that depends on the exact single-rounding residual
-    # is compiled-path-specific.
+    # Explicit fused multiply-add. Route the tree-walker through libm so its
+    # single-rounding result agrees with compiled llvm.fma.f64.
     if name == "fma" && args.size() == 3
-      return args[0] * args[1] + args[2]
+      return ccall("w_math_fma", args[0], args[1], args[2])
 
     # Σ(f, a..b): sum f(x) over the integer range. ∫(f, a..b): numeric integral
     # of f over [a, b] (composite Simpson's rule, n = 256). Both receive the

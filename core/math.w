@@ -1,13 +1,14 @@
 # Math — pure-Tungsten implementations of math functions derived from
 # the libm primitives the runtime exposes (`Math.exp`, `Math.log`,
-# `Math.sin`, `Math.cos`, `Math.tan`, `Math.sqrt`, `Math.floor`,
+# `Math.expm1`, `Math.log1p`, `Math.sin`, `Math.cos`, `Math.tan`,
+# `Math.asin`, `Math.acos`, `Math.atan`, `Math.atan2`, `Math.cbrt`,
+# `Math.hypot`, `Math.sqrt`, `Math.floor`,
 # `Math.ceil`, `Math.round`, `Math.abs`, `Math.pow`, `Math.ldexp`).
 #
 # These derivations are accurate to within ~ulp for typical inputs.
-# For specialized accuracy near edge cases (small-x for expm1, log1p,
-# inverse hyperbolic for x >> 1, etc.) the libm intrinsics in the
-# runtime are more precise — we wrap from the available primitives
-# rather than ccall directly to keep the surface in Tungsten.
+# The primary interpreter and compiler lower the matching native operations
+# directly to libm. Their source definitions below remain portable fallbacks
+# for frontends that do not recognize those intrinsics.
 
 + Math
 

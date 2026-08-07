@@ -72,6 +72,11 @@ module Tungsten
 
     def clean(code)
       code.dup.tap do |copy|
+        # Tungsten source is UTF-8 by definition; reinterpret locale-encoded
+        # bytes (empty locale → US-ASCII/BINARY) so the UTF-8 regexes below
+        # don't raise Encoding::CompatibilityError.
+        copy.force_encoding(Encoding::UTF_8) unless copy.encoding == Encoding::UTF_8
+
         # Strip initial BOM, if present
         copy.gsub! BOM, ''
 

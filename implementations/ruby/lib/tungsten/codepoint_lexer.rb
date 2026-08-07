@@ -106,6 +106,12 @@ module Tungsten
 
     def clean(code)
       copy = code.dup
+      # Tungsten source is UTF-8 by definition. Under an empty locale
+      # (Encoding.default_external = US-ASCII/BINARY) the CLI hands us the
+      # bytes in the locale encoding and the UTF-8 regexes below raise
+      # Encoding::CompatibilityError — reinterpret rather than requiring
+      # the user to export LC_ALL.
+      copy.force_encoding(Encoding::UTF_8) unless copy.encoding == Encoding::UTF_8
       copy.gsub!(BOM, "")
       copy.gsub!(TRAILING_SPACE, "")
       copy.sub!(/\A(#![^\n]*bash[^\n]*\n)exec /, '\1#exec ')

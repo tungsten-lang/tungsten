@@ -1218,6 +1218,13 @@
       elsif overload_group_dispatchable?(g) && expr.param_types != nil && has_body
         worker = ast_deep_clone(expr)
         worker.name = overload_internal_name("" + expr.name, expr.param_types)
+        # Mark the worker as dispatcher-gated: every bare-name route to it
+        # runs the synthesized dispatcher's is_a gate first, which is what
+        # justifies seeding :structural tag facts for its typed params in
+        # lower_method_def. The marker is load-bearing only for guard
+        # ELISION — if it fails to round-trip, facts never seed and every
+        # guard stays (the safe direction).
+        ast_set(worker, :overload_gated_worker, true)
         new_body.push(worker)
       else
         new_body.push(expr)
@@ -1841,6 +1848,46 @@
       pti += 1
 
   child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod)
+
+  # Tag facts (Phase 2): seed the side map with what this body's ENTRY
+  # CONDITIONS prove, never with what annotations claim.
+  #   __self — an instance method of an exact-tag class only executes with
+  #   a receiver carrying that tag: method-table dispatch routes by the
+  #   receiver's dispatch key, and the weak seam's shape gate re-proves
+  #   both operands before calling a source body directly. A registered
+  #   subclass voids the rule (inheritance can route a heap instance
+  #   here); overload_exact_tag_test already accounts for that.
+  #   typed params — only on a dispatcher-gated overload worker (the
+  #   :overload_gated_worker marker set by synthesize_overload_dispatchers):
+  #   the dispatcher's exact-tag compare ran before the worker call. A
+  #   stand-alone typed method has no gate and seeds nothing.
+  # Params the body reassigns never seed (find_reassigned_params — the
+  # same scan the slot logic trusts); lower_assign_expr / compound assigns
+  # kill facts for every other write they lower. Blocks build fresh ctxs
+  # without the map, so a fact never crosses a closure boundary.
+  tag_facts = {}
+  if node.is_class_method != true
+    self_tag = overload_exact_tag_test(mod, class_name)
+    if self_tag != nil
+      tag_facts["__self"] = {entry: self_tag, provenance: :structural}
+  if node.param_types != nil && ast_get(node, :overload_gated_worker) == true
+    seed_pts = node.param_types
+    seed_reassigned = find_reassigned_params(body, param_names)
+    spi = 0
+    while spi < seed_pts.size() && spi < params.size()
+      seed_name = param_runtime_name(params[spi])
+      seed_entry = overload_exact_tag_test(mod, "" + seed_pts[spi].to_s())
+      seed_hit = false
+      sri = 0
+      while sri < seed_reassigned.size()
+        if seed_reassigned[sri] == seed_name
+          seed_hit = true
+        sri += 1
+      if seed_entry != nil && seed_hit == false
+        tag_facts[seed_name] = {entry: seed_entry, provenance: :structural}
+      spi += 1
+  child_ctx[:tag_facts] = tag_facts
+
   child_ctx[:mut_accumulators] = mut_accumulator_candidates(body)
 
   block_return_buf = nil

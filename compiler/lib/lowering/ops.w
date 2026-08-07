@@ -628,6 +628,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   target = node.target
   wfn = ctx[:func]
 
+  # Tag facts (Phase 2): compound writes void entry-condition facts the
+  # same way lower_assign_expr's plain writes do.
+  if ctx[:tag_facts] != nil && target != nil && is_ast_node?(target) && ast_kind(target) == :var
+    ctx[:tag_facts][target.name] = nil
+
   # Method/index compound assignment must dispatch through the setter while
   # preserving the target's original arguments:
   #

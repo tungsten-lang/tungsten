@@ -1023,6 +1023,40 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     return nil
   entry
 
+# -- Tag facts (Phase 2) --
+#
+# A PARALLEL side map (`ctx[:tag_facts]`) of NaN-box tag knowledge,
+# deliberately outside the type symbols: symbols feed
+# overload_signature_key / mangle_type_signature, so refining them would
+# change emitted symbol names. A fact is
+#   {entry: <overload_exact_tag_entry descriptor>, provenance: p}
+# where p is :structural or :inferred.
+#   :structural — guaranteed by something that already EXECUTED before
+#   this body: the synthesized dispatcher's exact-tag gate, receiver-
+#   routed method dispatch, or the weak seam's shape gate. May justify
+#   deleting a guard.
+#   :inferred — a dataflow-derived claim (`## Type` hints and the like).
+#   May only pick a cheaper guard form, NEVER elide one; this class of
+#   knowledge has been wrong at runtime before (ops.w's raw-unbox
+#   exclusions, lowering.w's nil-typed literal notes).
+# An absent fact is nil, absent provenance reads as :inferred, and every
+# consumer must converge on "keep the guard" for both.
+-> infer_tag(node, ctx)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  facts = ctx[:tag_facts]
+  if facts == nil
+    return nil
+  k = ast_kind(node)
+  if k == :var
+    return facts[node.name]
+  if k == :self
+    return facts["__self"]
+  nil
+
+-> tag_fact_structural?(fact)
+  fact != nil && fact[:provenance] == :structural
+
 # True when a trailing block on `recv.name` should iterate the call's RESULT
 # (implicit `.each`) rather than be passed to `name` as a block — i.e. `name`
 # takes no block of its own. Block-taking methods are excluded three ways:

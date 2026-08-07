@@ -2365,6 +2365,13 @@ use lowering/definitions
   stmt_position = ctx[:assign_stmt_position] == true
   ctx[:assign_stmt_position] = nil
 
+  # Tag facts (Phase 2): a write to a name voids what the body's entry
+  # conditions proved about it. nil-ing the slot is indistinguishable from
+  # an absent fact, and every consumer treats absent as "keep the guard",
+  # so killing is always safe; seeding never was (see lower_method_def).
+  if ctx[:tag_facts] != nil && target != nil && is_ast_node?(target) && ast_kind(target) == :var
+    ctx[:tag_facts][target.name] = nil
+
   # Rotation shape (E4 stage 2): the triple's FIRST statement computes
   # the sum into old-a's dying buffer; the two slot-copy statements that
   # follow lower ordinarily. The vars live in slots (the isolation proof

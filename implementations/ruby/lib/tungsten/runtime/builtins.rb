@@ -800,9 +800,12 @@ module Tungsten
             if dim.dimensionless?
               x.value.to_f * x.unit.factor
             elsif dim.custom? && dim.custom_name == "π"
-              x.value.to_f * Math::PI
+              # Reduce the exact multiple mod 2 BEFORE going to Float, so
+              # sin(1000000π) is exactly 0 at any magnitude (the compiled
+              # runtime's sinpi-style reduction).
+              (x.value.to_r % 2).to_f * Math::PI
             elsif dim.custom? && dim.custom_name == "τ"
-              x.value.to_f * 2 * Math::PI
+              (x.value.to_r % 1).to_f * 2 * Math::PI
             else
               raise Tungsten::Error.new("trig argument must be an angle, got #{Tungsten::Units.dimension_name(x.unit.dimension)}")
             end

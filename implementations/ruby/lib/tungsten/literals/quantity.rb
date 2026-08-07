@@ -75,9 +75,24 @@ module Tungsten
       q.__send__(:copy_with, value: hole_count(q.value))
     end
 
+    # π-quantities (`2π`) are numbers: an exact multiple of π riding the
+    # unit machinery. Evaluation boundaries (mixed +/- with plain numerics,
+    # order comparisons, to_f, Math.*) collapse them to value·π as a Float,
+    # mirroring the compiled runtime's semantics.
+    def pi_multiple?
+      dim = @unit.dimension
+      dim.respond_to?(:custom?) && dim.custom? && dim.custom_name == "π"
+    end
+
+    def to_f
+      return @value.to_f * Math::PI if pi_multiple?
+      @value.to_f
+    end
+
     def +(other)
       return self if heap?
       return other if other.is_a?(Quantity) && other.heap?
+      return to_f + other.to_f if pi_multiple? && other.is_a?(Numeric)
       result = case other
                when Quantity
                  return Sandwich.new if pbj_pair?(other)
@@ -111,6 +126,7 @@ module Tungsten
     def -(other)
       return self if heap?
       return other if other.is_a?(Quantity) && other.heap?
+      return to_f - other.to_f if pi_multiple? && other.is_a?(Numeric)
       result = case other
                when Quantity
                  return subtract_temperature(other) if temperature_quantity?(other)
@@ -234,6 +250,9 @@ module Tungsten
     def coerce(other)
       case other
       when Numeric
+        # `1 - 2π`: a π-quantity meeting a plain numeric evaluates, so hand
+        # back two Floats instead of a scalar/quantity pair.
+        return [other.to_f, to_f] if pi_multiple?
         [CoercedScalar.new(other), self]
       else
         raise TypeError, "#{other.class} can't be coerced into Quantity"
@@ -248,6 +267,7 @@ module Tungsten
       if other.is_a?(Quantity) && other.heap?
         return -1
       end
+      return to_f <=> other.to_f if pi_multiple? && other.is_a?(Numeric)
       return nil unless other.is_a?(Quantity)
       return nil unless @unit.compatible?(other.unit)
       to_si <=> other.to_si

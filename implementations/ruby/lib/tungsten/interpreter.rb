@@ -1495,12 +1495,34 @@ module Tungsten
             "Class"
           elsif node.name == "name"
             recv.name
-          elsif recv.name == "Math" && %w[floor ceil].include?(node.name) && node.args&.size == 1
-            # Ruby's Math module has no floor/ceil module functions, while
-            # Tungsten exposes both as libm-backed Math class intrinsics. Keep
-            # the runtime contract here: both return Float WValues.
+          elsif recv.name == "Math" && %w[sin cos tan].include?(node.name) && node.args&.size == 1 && @builtins[node.name]
+            # The trig builtins are π-quantity-aware (to_radians + exact
+            # symbolic matching), so Math.sin(2π) routes through them rather
+            # than raw ::Math, which rejects Quantities.
+            @builtins[node.name].call(nil, [evaluate(node.args[0])], nil)
+          elsif recv.name == "Math" && %w[floor ceil expm1 log1p asin acos atan cbrt].include?(node.name) && node.args&.size == 1
+            # Keep the Ruby tree-walker on the same native math paths as the
+            # primary interpreter/compiler. Ruby has no floor/ceil module
+            # functions, so those two retain their explicit conversions.
             number = evaluate(node.args[0]).to_f
-            (node.name == "floor" ? number.floor : number.ceil).to_f
+            begin
+              case node.name
+              when "floor" then number.floor.to_f
+              when "ceil" then number.ceil.to_f
+              when "expm1" then Math.expm1(number)
+              when "log1p" then Math.log1p(number)
+              when "asin" then Math.asin(number)
+              when "acos" then Math.acos(number)
+              when "atan" then Math.atan(number)
+              else Math.cbrt(number)
+              end
+            rescue Math::DomainError
+              Float::NAN
+            end
+          elsif recv.name == "Math" && %w[atan2 hypot].include?(node.name) && node.args&.size == 2
+            left = evaluate(node.args[0]).to_f
+            right = evaluate(node.args[1]).to_f
+            node.name == "atan2" ? Math.atan2(left, right) : Math.hypot(left, right)
           else
             method = resolve_w_method(node, recv, node.name)
             if method
@@ -1521,6 +1543,11 @@ module Tungsten
               ruby_class = ruby_constant_for_w_class(recv.name)
               if !hidden_ruby_object_method?(node.name) && ruby_class&.respond_to?(node.name)
                 args = evaluate_args(node.args)
+                if ruby_class == ::Math
+                  # π-quantities evaluate to value·π at the Math boundary;
+                  # ::Math itself rejects Quantity arguments.
+                  args = args.map { |a| a.is_a?(Tungsten::Quantity) && a.pi_multiple? ? a.to_f : a }
+                end
                 return ruby_class.send(node.name, *args)
               end
               runtime_error("undefined method '#{node.name}' for #{recv}", node: node, length: node.name.to_s.length)

@@ -270,6 +270,16 @@
     i = i + 1
   lower_array(ctx, Tungsten:AST:Array.new(elements))
 
+# `%i[a b c]` — same desugar, but the spellings become Symbol literal nodes
+# so the elements evaluate to interned Symbols, matching the interpreter.
+-> lower_symbol_array(ctx, symbols)
+  elements = []
+  i = 0
+  while i < symbols.size()
+    elements.push(Tungsten:AST:Symbol.new(symbols[i]))
+    i = i + 1
+  lower_array(ctx, Tungsten:AST:Array.new(elements))
+
 -> lower_array(ctx, node)
   wfn = ctx[:func]
   arr = next_temp(wfn)

@@ -3009,10 +3009,13 @@ use ../../core/token
         body = [trailing_expr]
     elsif at_type?(T_INDENT)
       body = parse_body()
-    elsif at_type?(T_DEDENT) || at_type?(T_EOF) || at_type?(T_CLASS_DEF) || at_type?(T_ARROW)
-      body = []
     else
-      body = [parse_expression()]
+      # No trailing expression and no indented block: the method is bodiless
+      # (an abstract/interface declaration). A following statement at the
+      # SAME indent is a sibling — `-> to_s` then `alias_method :to_s/1,
+      # :strftime/1` in a class body must leave to_s abstract, not slurp the
+      # alias call as its body.
+      body = []
 
     # Fallthrough: `: expr` after body — default return value
     if at_type?(T_COLON)

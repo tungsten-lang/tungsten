@@ -365,6 +365,16 @@ use target
         result.push(words[i])
         i += 1
       return result
+    if t == :symbol_array
+      # `%i[a b c]` — the spellings are stored as Strings; materialize a
+      # fresh Array of Symbols per evaluation, mirroring lower_symbol_array.
+      syms = ast_get(node, :symbols)
+      result = []
+      i = 0
+      while i < syms.size()
+        result.push(("" + syms[i].to_s()).to_sym())
+        i += 1
+      return result
     if t in (:typed_array :typed_array_new)
       return eval_typed_array_new(node, env)
     if t == :hash_literal

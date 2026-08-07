@@ -25274,8 +25274,14 @@ static int quantity_pi_parts(WValue v, int64_t *sig, int *scale) {
     int unit;
     if (!is_quantity_any(v)) return 0;
     quantity_extract(v, &unit, sig, scale);
-    return unit >= 0 && unit < W_UNIT_CAPACITY && unit_names[unit] &&
-           strcmp(unit_names[unit], "\xcf\x80") == 0;
+    if (unit < 0 || unit >= W_UNIT_CAPACITY || !unit_names[unit]) return 0;
+    if (strcmp(unit_names[unit], "\xcf\x80") == 0) return 1;      /* π */
+    if (strcmp(unit_names[unit], "\xcf\x84") == 0) {              /* τ = 2π */
+        if (*sig > INT64_MAX / 2 || *sig < INT64_MIN / 2) return 0;
+        *sig *= 2;
+        return 1;
+    }
+    return 0;
 }
 
 static double quantity_pi_double(int64_t sig, int scale) {

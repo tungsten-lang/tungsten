@@ -81,11 +81,14 @@ module Tungsten
     # mirroring the compiled runtime's semantics.
     def pi_multiple?
       dim = @unit.dimension
-      dim.respond_to?(:custom?) && dim.custom? && dim.custom_name == "π"
+      dim.respond_to?(:custom?) && dim.custom? && ["π", "τ"].include?(dim.custom_name)
     end
 
     def to_f
-      return @value.to_f * Math::PI if pi_multiple?
+      if pi_multiple?
+        turns = @unit.dimension.custom_name == "τ" ? 2 : 1
+        return @value.to_f * turns * Math::PI
+      end
       @value.to_f
     end
 

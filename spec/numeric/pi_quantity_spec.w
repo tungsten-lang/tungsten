@@ -67,3 +67,11 @@ check("sqrt.collapses", Math.sqrt(2π) > ~2.5066 && Math.sqrt(2π) < ~2.5067, tr
 # -- π + π stays in the exact domain (same unit, quantity addition) --
 check("pi_plus_pi", (2π + 1π).value, 3.0)
 check("pi_plus_pi_unit", (2π + 1π).unit_name, "π")
+
+# -- τ-quantities: 1τ = 2π, same exactness and boundaries --
+check("tau.whole_turn", Math.sin(1τ), ~0.0)
+check("tau.huge_multiple", Math.sin(1000000τ), ~0.0)
+check("tau.quarter_turn", Math.sin(0.25τ), ~1.0)
+check("tau.cos_half", Math.cos(0.5τ), ~-1.0)
+check("tau.add_collapses", 1τ + 1 > ~7.28 && 1τ + 1 < ~7.29, true)
+check("tau.to_f", (1τ).to_f > ~6.283 && (1τ).to_f < ~6.284, true)

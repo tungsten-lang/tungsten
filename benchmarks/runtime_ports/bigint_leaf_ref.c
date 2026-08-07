@@ -98,7 +98,10 @@ WValue w_ref_bigint_leaf_case(WValue index_value) {
     value->size = src->size;
     value->cap = src->cap;
     for (uint32_t i = 0; i < src->cap; i++) value->limbs[i] = src->limbs[i];
-    return w_box_ptr(value, W_SUBTAG_GENERIC);
+    /* Encoding v4: BigInt rides the dedicated top-level tag, not a generic
+     * heap box. The overlay bit stays clear, so each case's effective sign
+     * is its header sign, exactly as the corpus table intends. */
+    return W_TAG_BIGINT | (WValue)(uintptr_t)value;
 }
 
 WValue w_ref_bigint_value_p(WValue value) {

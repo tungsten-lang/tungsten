@@ -77,9 +77,9 @@ reject_wire() {
 
 require_wire "__w_BigInt___w_to_i__a1" 'ret_i64 %__self'
 reject_wire  "__w_BigInt___w_to_i__a1" 'call_(method|direct)_i64'
-require_wire "__w_BigInt___w_prev__a1" 'call_direct_i64 .*@w_sub'
-require_wire "__w_BigInt___w_succ__a1" 'call_direct_i64 .*@w_add'
-require_wire "__w_BigInt___w_next__a1" 'call_direct_i64 .*@w_add'
+require_wire "__w_BigInt___w_prev__a1" 'call_direct_i64 .*@(__w_sub_fast|w_sub)'
+require_wire "__w_BigInt___w_succ__a1" 'call_direct_i64 .*@(__w_add_fast|w_add)'
+require_wire "__w_BigInt___w_next__a1" 'call_direct_i64 .*@(__w_add_fast|w_add)'
 
 # Generic predicate candidates must remain explicit numeric operations with no
 # call through their public names. Direct controls separately prove corrected
@@ -87,11 +87,11 @@ require_wire "__w_BigInt___w_next__a1" 'call_direct_i64 .*@w_add'
 for fn in zero_Q even_Q odd_Q negative_Q positive_Q; do
   reject_wire "__w_BigInt___w_${fn}__a1" 'call_method_i64'
 done
-require_wire "__w_BigInt___w_zero_Q__a1" 'call_direct_i64 .*@w_eq'
+require_wire "__w_BigInt___w_zero_Q__a1" 'call_direct_i64 .*@(__w_eq_fast|w_eq)'
 require_wire "__w_BigInt___w_even_Q__a1" 'call_direct_i64 .*@w_mod'
 require_wire "__w_BigInt___w_odd_Q__a1" 'call_direct_i64 .*@w_mod'
-require_wire "__w_BigInt___w_negative_Q__a1" 'call_direct_i64 .*@w_lt'
-require_wire "__w_BigInt___w_positive_Q__a1" 'call_direct_i64 .*@w_gt'
+require_wire "__w_BigInt___w_negative_Q__a1" 'call_direct_i64 .*@(__w_lt_fast|w_lt)'
+require_wire "__w_BigInt___w_positive_Q__a1" 'call_direct_i64 .*@(__w_gt_fast|w_gt)'
 
 for fn in zero_Q even_Q odd_Q negative_Q positive_Q; do
   direct="__w_BigInt___w_direct_${fn}__a1"

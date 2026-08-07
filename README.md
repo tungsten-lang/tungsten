@@ -159,7 +159,8 @@ Run `bin/tungsten doctor` to check your toolchain (bash; no compiler needed).
 On a fresh clone, get a stage-1 compiler with:
 
 ```bash
-bin/tungsten bootstrap   # C VM → stage 1 → bin/tungsten-compiler (no Ruby)
+bin/bootstrap            # C VM → stage 1 → bin/tungsten-compiler (no Ruby)
+                         # (same as: bin/tungsten bootstrap)
 bin/tungsten build       # full self-host (stage1+stage2 + bits); still builds stage 1
 ```
 

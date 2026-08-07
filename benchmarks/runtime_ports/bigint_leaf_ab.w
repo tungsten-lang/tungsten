@@ -17,11 +17,14 @@ WARMUP_ITERS = 1_000_000
   # pulling the unfinished abstract numeric hierarchy into a standalone port
   # benchmark while exercising the same corrected offsets and raw loads.
   - data
+    # Same explicit layout as core/numeric/big_int.w: the leading type byte
+    # must be declared so size/capacity/limb0 land at offsets 4/8/16.
+    u8 _type
     u8[3] _pad
     i32 size
     u32 capacity
     u32 _pad2
-    u64[] limbs
+    u64 limb0
 
   -> __c_to_i
     ccall("w_ref_bigint_to_i", self)
@@ -89,16 +92,16 @@ WARMUP_ITERS = 1_000_000
     n = $size ## i64
     if n == 0
       return true
-    # `limbs` is a flexible inline C array. A bare field load reads limb 0;
-    # wvalue_bits keeps that machine word raw instead of treating it as WValue.
-    low = wvalue_bits($limbs) ## i64
+    # Same scalar first-limb window as the retained core declaration: naming
+    # the word `limb0` keeps the load a declared u64 view field.
+    low = $limb0 ## u64
     (low & 1) == 0
 
   -> __w_direct_odd?
     n = $size ## i64
     if n == 0
       return false
-    low = wvalue_bits($limbs) ## i64
+    low = $limb0 ## u64
     (low & 1) != 0
 
   -> __w_direct_negative?

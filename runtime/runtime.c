@@ -14824,7 +14824,7 @@ WValue bigint_gcd_boxed_one_limb(const WBigint *a, const WBigint *b) {
 }
 
 static inline __attribute__((always_inline))
-WValue bigint_gcd_any(WValue a, WValue b) {
+WValue bigint_gcd_any_inline(WValue a, WValue b) {
 #if BN_GCD_BOXED_SMALL_FAST
     if (w_is_bigint(a) && w_is_bigint(b)) {
         int32_t as, bs;
@@ -14885,6 +14885,14 @@ WValue bigint_gcd_any(WValue a, WValue b) {
 #endif
     return bigint_gcd_any_generic(a, b);
 }
+
+/* Exported entry with external linkage for core/numeric/big_int.w's
+ * `ccall("bigint_gcd_any", …)` — the always_inline copy above has none.
+ * Internal hot paths keep calling the inline directly. */
+WValue bigint_gcd_any(WValue a, WValue b) {
+    return bigint_gcd_any_inline(a, b);
+}
+
 
 /* ---- Bigint comparison ---- */
 
@@ -31190,7 +31198,7 @@ static WValue w_rational_add(WValue a, WValue b) {
     WValue an, ad, bn, bd;
     rational_parts(a, &an, &ad);
     rational_parts(b, &bn, &bd);
-    WValue gcd = bigint_gcd_any(ad, bd);
+    WValue gcd = bigint_gcd_any_inline(ad, bd);
     WValue ad_reduced = bigint_div_any(ad, gcd);
     WValue bd_reduced = bigint_div_any(bd, gcd);
     WValue numerator = bigint_add_any(bigint_mul_any(an, bd_reduced),
@@ -31203,7 +31211,7 @@ static WValue w_rational_sub(WValue a, WValue b) {
     WValue an, ad, bn, bd;
     rational_parts(a, &an, &ad);
     rational_parts(b, &bn, &bd);
-    WValue gcd = bigint_gcd_any(ad, bd);
+    WValue gcd = bigint_gcd_any_inline(ad, bd);
     WValue ad_reduced = bigint_div_any(ad, gcd);
     WValue bd_reduced = bigint_div_any(bd, gcd);
     WValue numerator = bigint_sub_any(bigint_mul_any(an, bd_reduced),
@@ -31216,8 +31224,8 @@ static WValue w_rational_mul(WValue a, WValue b) {
     WValue an, ad, bn, bd;
     rational_parts(a, &an, &ad);
     rational_parts(b, &bn, &bd);
-    WValue gcd_left = bigint_gcd_any(an, bd);
-    WValue gcd_right = bigint_gcd_any(bn, ad);
+    WValue gcd_left = bigint_gcd_any_inline(an, bd);
+    WValue gcd_right = bigint_gcd_any_inline(bn, ad);
     WValue numerator = bigint_mul_any(bigint_div_any(an, gcd_left),
                                      bigint_div_any(bn, gcd_right));
     WValue denominator = bigint_mul_any(bigint_div_any(ad, gcd_right),
@@ -31231,8 +31239,8 @@ static WValue w_rational_div(WValue a, WValue b) {
     rational_parts(b, &bn, &bd);
     if (bigint_compare(bn, w_int(0)) == 0)
         die("division by zero (rational)");
-    WValue gcd_num = bigint_gcd_any(an, bn);
-    WValue gcd_den = bigint_gcd_any(bd, ad);
+    WValue gcd_num = bigint_gcd_any_inline(an, bn);
+    WValue gcd_den = bigint_gcd_any_inline(bd, ad);
     WValue numerator = bigint_mul_any(bigint_div_any(an, gcd_num),
                                      bigint_div_any(bd, gcd_den));
     WValue denominator = bigint_mul_any(bigint_div_any(ad, gcd_den),

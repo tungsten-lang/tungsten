@@ -123,6 +123,12 @@ Equilibrium branches follow the fixed point across a parameter sweep
 every point; periodic orbits solve φ_T(x0) = x0 by single shooting on the
 monodromy with a bordered phase row (autonomous) or plain Newton (forced).
 
+At a detected bifurcation, `Dynamics.switch_branch(maker, p_bif, x_bif,
+dp, delta)` seeds the emanating branches along the Jacobian's near-null
+direction (`LinAlg.null_vector`, shifted inverse iteration) and
+Newton-corrects both sides — at the Lorenz pitchfork it lands exactly on
+C± = (±√(β(ρ−1)), ·, ρ−1).
+
 Two heavier tools sit on top:
 
 ```tungsten
@@ -139,6 +145,13 @@ pc = Dynamics.poincare(stiff, x0, normal, c, transient, run, dt)
 guess_t = pc[:t].last - pc[:t][pc[:t].size - 2]
 so = Dynamics.shoot_periodic_multi(stiff, pc[:points].last, guess_t, dt, 8)
 # Van der Pol μ=5: T = 11.6122, residual 1e-13, multipliers {1, ≈0}
+
+# Orthogonal collocation (Gauss-Legendre k=3, AUTO-style): the orbit is
+# a piecewise cubic over m mesh intervals with dx/dσ = (T/m)·f enforced
+# at the Gauss points — spectral per-interval accuracy, analytic block
+# Jacobian. Mesh density is the accuracy knob (high-order convergence:
+# VdP period error 3e-4 → 2e-5 → 3e-7 as m goes 10 → 20 → 40).
+co = Dynamics.collocate_periodic(vdp, [~2.0, ~0.0], ~6.28, 20)
 ```
 
 ## Basins of attraction
@@ -161,6 +174,14 @@ Parameter grids parallelize the same way. `Dynamics.lyapunov_map` computes
 plane — chaotic bands and periodic windows resolved per thread, verified
 against the CPU map on every non-escaping cell.
 
+Forced oscillators get isoperiodic (period-count) diagrams:
+`Dynamics.stroboscopic_period` strobes a forced flow at its forcing
+period and reports the attractor's period in cycles (0 = aperiodic);
+`Dynamics.isoperiodic_map` sweeps it over a 2-parameter grid, and
+`doc/examples/gpu_isoperiodic.w` is the Metal twin on the forced
+Duffing's (γ, ω) plane — period-1 regions, subharmonic windows, and
+chaotic bands, one thread per cell.
+
 ## Attractor reconstruction
 
 ```tungsten
@@ -181,8 +202,8 @@ pairwise: keep N ≲ 2000, or expect quadratic time.
 
 ## Follow-ups
 
-- Orthogonal collocation (Gauss-Legendre) as the next step past multiple
-  shooting for very stiff orbits.
-- Branch switching at detected bifurcation points (pitchfork/Hopf
-  emanating branches).
-- Isoperiodic (period-count) GPU diagrams for forced oscillators.
+- Adaptive mesh refinement for collocation (uniform meshes under-resolve
+  relaxation spikes; AUTO-style equidistribution is the standard cure).
+- Periodic-orbit continuation in a parameter (branches of orbits, not
+  just equilibria) with Floquet-based stability along the branch.
+- Hopf normal-form coefficients (sub/supercritical classification).

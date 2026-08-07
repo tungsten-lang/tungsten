@@ -209,6 +209,26 @@
         k = nsteps
     {:p => ps, :x => xs, :stability => cls, :folds => folds, :complete => complete}
 
+  # Branch switching at a bifurcation: at (x_bif, p_bif) the Jacobian is
+  # singular; the near-null direction v seeds the emanating branches.
+  # Newton-corrects x_bif ± delta·v at p_bif + dp and returns the branch
+  # points [x_plus, x_minus] (either may equal the trivial branch when
+  # the step is too small to escape its basin — pick delta ≳ the
+  # emanating branch's amplitude at dp). Continue each with
+  # continue_equilibria / continue_arclength.
+  -> .switch_branch(maker, p_bif, x_bif, dp, delta)
+    sysb = maker.call(p_bif)
+    v = LinAlg.null_vector(sysb.jac(~0.0, x_bif))
+    sysn = maker.call(p_bif + dp)
+    up = []
+    dn = []
+    i = 0
+    while i < x_bif.size()
+      up = up.push(x_bif[i] + delta * v[i])
+      dn = dn.push(x_bif[i] - delta * v[i])
+      i = i + 1
+    [Dynamics.fixed_point_flow(sysn, up), Dynamics.fixed_point_flow(sysn, dn)]
+
   # Monodromy matrix: the tangent flow of an autonomous system over
   # [0, period] from x0, integrated jointly with the state in `steps`
   # RK4 stages. Returns [x_at_period, M].
@@ -393,6 +413,215 @@
     if collapsed
       raise "Dynamics.shoot_periodic_multi: period collapsed — bad initial guess"
     raise "Dynamics.shoot_periodic_multi: no convergence"
+
+  # Lagrange basis L_l over nodes tn, evaluated / differentiated at x.
+  -> .lagrange_at(tn, l, x)
+    out = ~1.0
+    q = 0
+    while q < tn.size()
+      if q != l
+        out = out * (x - tn[q]) / (tn[l] - tn[q])
+      q = q + 1
+    out
+
+  -> .lagrange_deriv(tn, l, x)
+    sum = ~0.0
+    r = 0
+    while r < tn.size()
+      if r != l
+        term = ~1.0 / (tn[l] - tn[r])
+        q = 0
+        while q < tn.size()
+          if q != l
+            if q != r
+              term = term * (x - tn[q]) / (tn[l] - tn[q])
+          q = q + 1
+        sum = sum + term
+      r = r + 1
+    sum
+
+  # Orthogonal collocation (Gauss-Legendre, k = 3, order 6) for periodic
+  # orbits of an AUTONOMOUS flow: the orbit is a piecewise degree-3
+  # polynomial over m mesh intervals, with dx/dσ = (T/m)·f(x) enforced at
+  # the three Gauss points of every interval, continuity/periodicity at
+  # interval ends, and an anchor phase row. Newton with the analytic
+  # block Jacobian (Lagrange differentiation matrix ± (T/m)·J). The
+  # method of AUTO-style continuation packages; spectrally accurate per
+  # interval and robust where shooting struggles. Returns the same hash
+  # as shoot_periodic plus :nodes (the m mesh states).
+  -> .collocate_periodic(sys, x0_guess, t_guess, m)
+    n = x0_guess.size()
+    k = 3
+    c1 = (~5.0 - Math.sqrt(~15.0)) / ~10.0
+    c3 = (~5.0 + Math.sqrt(~15.0)) / ~10.0
+    tn = [~0.0, c1, ~0.5, c3]
+    dmat = []
+    j = 1
+    while j <= k
+      drow = []
+      l = 0
+      while l <= k
+        drow = drow.push(Dynamics.lagrange_deriv(tn, l, tn[j]))
+        l = l + 1
+      dmat = dmat.push(drow)
+      j = j + 1
+    evec = []
+    l = 0
+    while l <= k
+      evec = evec.push(Dynamics.lagrange_at(tn, l, ~1.0))
+      l = l + 1
+    # Seed every node and stage value by integrating the guess once.
+    period = t_guess
+    bs = (k + 1) * n
+    dim = m * bs + 1
+    u = []
+    i = 0
+    while i < dim
+      u = u.push(~0.0)
+      i = i + 1
+    x = Dynamics.vcopy(x0_guess)
+    t = ~0.0
+    prev_tau = ~0.0
+    i = 0
+    while i < m
+      l = 0
+      while l <= k
+        tau = (i + tn[l]) / m
+        span = (tau - prev_tau) * period
+        if span > ~0.0
+          fsteps = (span / ~0.01).to_i
+          if fsteps < 4
+            fsteps = 4
+          x = Dynamics.advance(sys, x, t, fsteps, span / fsteps)
+          t = t + span
+          prev_tau = tau
+        r = 0
+        while r < n
+          u[i * bs + l * n + r] = x[r]
+          r = r + 1
+        l = l + 1
+      i = i + 1
+    x_ref = []
+    f_ref = nil
+    r = 0
+    while r < n
+      x_ref = x_ref.push(u[r])
+      r = r + 1
+    f_ref = sys.f(~0.0, x_ref)
+    it = 0
+    while it < 30
+      big = LinAlg.zeros(dim, dim)
+      rhs = []
+      i = 0
+      while i < dim
+        rhs = rhs.push(~0.0)
+        i = i + 1
+      # collocation + continuity blocks
+      i = 0
+      while i < m
+        nxt = ((i + 1) % m) * bs
+        j = 1
+        while j <= k
+          # row layout: per interval, k·n collocation rows then n
+          # continuity rows — same block size as the unknowns.
+          rowb = i * bs + (j - 1) * n
+          sv = []
+          r = 0
+          while r < n
+            sv = sv.push(u[i * bs + j * n + r])
+            r = r + 1
+          fs = sys.f(~0.0, sv)
+          js = sys.jac(~0.0, sv)
+          r = 0
+          while r < n
+            acc = ~0.0
+            l = 0
+            while l <= k
+              acc = acc + dmat[j - 1][l] * u[i * bs + l * n + r]
+              l = l + 1
+            acc = acc - period / m * fs[r]
+            rhs[rowb + r] = ~0.0 - acc
+            l = 0
+            while l <= k
+              big[rowb + r][i * bs + l * n + r] = big[rowb + r][i * bs + l * n + r] + dmat[j - 1][l]
+              l = l + 1
+            c = 0
+            while c < n
+              big[rowb + r][i * bs + j * n + c] = big[rowb + r][i * bs + j * n + c] - period / m * js[r][c]
+              c = c + 1
+            big[rowb + r][dim - 1] = ~0.0 - fs[r] / m
+            r = r + 1
+          j = j + 1
+        # continuity rows for interval i
+        rowc = i * bs + k * n
+        r = 0
+        while r < n
+          acc = ~0.0
+          l = 0
+          while l <= k
+            acc = acc + evec[l] * u[i * bs + l * n + r]
+            l = l + 1
+          acc = acc - u[nxt + r]
+          rhs[rowc + r] = ~0.0 - acc
+          l = 0
+          while l <= k
+            big[rowc + r][i * bs + l * n + r] = big[rowc + r][i * bs + l * n + r] + evec[l]
+            l = l + 1
+          big[rowc + r][nxt + r] = big[rowc + r][nxt + r] - ~1.0
+          r = r + 1
+        i = i + 1
+      # phase row: f_ref · (X_0 − x_ref) = 0
+      acc = ~0.0
+      r = 0
+      while r < n
+        acc = acc + f_ref[r] * (u[r] - x_ref[r])
+        big[dim - 1][r] = f_ref[r]
+        r = r + 1
+      rhs[dim - 1] = ~0.0 - acc
+      total = ~0.0
+      i = 0
+      while i < dim
+        total = total + rhs[i] * rhs[i]
+        i = i + 1
+      total = Math.sqrt(total)
+      if total < ~1.0e-10
+        x0 = []
+        r = 0
+        while r < n
+          x0 = x0.push(u[r])
+          r = r + 1
+        nodes = []
+        i = 0
+        while i < m
+          nd = []
+          r = 0
+          while r < n
+            nd = nd.push(u[i * bs + r])
+            r = r + 1
+          nodes = nodes.push(nd)
+          i = i + 1
+        msteps = (period / ~0.01).to_i
+        if msteps < 50
+          msteps = 50
+        mono = Dynamics.monodromy(sys, x0, period, msteps)
+        mults = LinAlg.eigenvalues(mono[1])
+        return {:x => x0, :period => period, :multipliers => mults, :residual => total, :nodes => nodes}
+      delta = LinAlg.solve(big, rhs)
+      damp = ~1.0
+      dtd = delta[dim - 1]
+      if dtd < ~0.0
+        dtd = ~0.0 - dtd
+      if dtd > period * ~0.2
+        damp = period * ~0.2 / dtd
+      i = 0
+      while i < dim - 1
+        u[i] = u[i] + damp * delta[i]
+        i = i + 1
+      period = period + damp * delta[dim - 1]
+      if period < ~1.0e-3
+        raise "Dynamics.collocate_periodic: period collapsed — bad initial guess"
+      it = it + 1
+    raise "Dynamics.collocate_periodic: no convergence"
 
   # Single-shooting for a FORCED (non-autonomous) system with known
   # period T (e.g. the forcing period): Newton on (M − I)δx = −res.

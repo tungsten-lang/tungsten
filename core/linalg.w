@@ -369,6 +369,42 @@
       k = k + 1
     out
 
+  # Near-null vector of an n×n float matrix by shifted inverse iteration:
+  # repeatedly solve (A + ε·I)·v_next = v and normalize. Converges to the
+  # eigenvector of the smallest-magnitude eigenvalue — the branch-switch
+  # direction at a bifurcation's singular Jacobian.
+  -> .null_vector(a)
+    n = LinAlg.rows(a)
+    shifted = LinAlg.copy_mat(a)
+    i = 0
+    while i < n
+      shifted[i][i] = shifted[i][i] + ~1.0e-8
+      i = i + 1
+    v = []
+    i = 0
+    while i < n
+      v = v.push(~1.0 / (i + ~1.0))
+      i = i + 1
+    it = 0
+    while it < 20
+      w = nil
+      begin
+        w = LinAlg.solve(shifted, v)
+      rescue serr
+        w = nil
+      if w == nil
+        it = 20
+      else
+        nm = LinAlg.norm(w)
+        if nm > ~0.0
+          i = 0
+          while i < n
+            w[i] = w[i] / nm
+            i = i + 1
+        v = w
+        it = it + 1
+    v
+
   # Eigenvalues of an n×n float matrix → [[re, im], …] (unordered).
   # Small n (≤ 8) stays on characteristic polynomial + Durand-Kerner —
   # dependency-free and robust at Jacobian sizes. Larger n routes through

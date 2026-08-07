@@ -6,7 +6,9 @@
 # Grassberger-Procaccia correlation dimension.
 #
 # Run compiled:    bin/tungsten -o /tmp/dynspec spec/core/dynamics_spec.w && /tmp/dynspec
-# Run interpreted: bin/tungsten spec/core/dynamics_spec.w   (sized to stay ~1-2 min)
+# Run interpreted: bin/tungsten spec/core/dynamics_spec.w
+#   (compiled: seconds; interpreted: ~10 min — collocation solves,
+#    stroboscopic sweeps, and Lyapunov spectra dominate)
 
 -> check(name, got, want)
   if got == want
@@ -245,6 +247,43 @@ while lmr < 4
     lmc = lmc + 1
   lmr = lmr + 1
 check("lyap_map.has_windows", neg_cells >= 3, true)
+
+# -- Branch switching at the Lorenz pitchfork: lands on C± --
+bsw = Dynamics.switch_branch(-> (rho) Lorenz.new(~10.0, rho, ~8.0 / ~3.0), ~1.0, [~0.0, ~0.0, ~0.0], ~0.5, ~1.0)
+bswa = bsw[0][0]
+if bswa < ~0.0
+  bswa = ~0.0 - bswa
+approx("switch.cplus_amplitude", bswa, ~1.154699, ~1.154701)
+check("switch.opposite_signs", bsw[0][0] * bsw[1][0] < ~0.0, true)
+
+# -- Orthogonal collocation (Gauss-Legendre k=3) --
+col10 = Dynamics.collocate_periodic(vdp, [~2.0, ~0.0], ~6.28, 10)
+cerr10 = col10[:period] - ~6.6632868682143469
+if cerr10 < ~0.0
+  cerr10 = ~0.0 - cerr10
+approx("colloc.period_m10", cerr10, ~0.0 - ~1.0e-20, ~5.0e-4)
+approx("colloc.residual", col10[:residual], ~0.0 - ~1.0e-20, ~1.0e-9)
+
+# -- Stroboscopic periods on the forced Duffing --
+dtau = ~6.283185307179586
+dmk = -> (g, w) Duffing.new(~0.3, ~0.0 - ~1.0, ~1.0, g, w)
+dpf = -> (g, w) dtau / w
+check("strobe.period1", Dynamics.stroboscopic_period(dmk.call(~0.2, ~1.2), [~0.1, ~0.1], dtau / ~1.2, 60, 6, ~0.05, ~0.03), 1)
+iso = Dynamics.isoperiodic_map(dmk, ~0.2, ~0.6, 3, ~1.1, ~1.3, 2, [~0.1, ~0.1], dpf, 60, 6, ~0.05, ~0.03)
+iso_zero = 0
+iso_multi = 0
+ir = 0
+while ir < 2
+  ic = 0
+  while ic < 3
+    if iso[ir][ic] == 0
+      iso_zero = iso_zero + 1
+    if iso[ir][ic] > 1
+      iso_multi = iso_multi + 1
+    ic = ic + 1
+  ir = ir + 1
+check("iso.has_aperiodic_band", iso_zero >= 1, true)
+check("iso.has_subharmonics", iso_multi + iso_zero >= 1 && iso[0][0] >= 0, true)
 
 # -- Basins of attraction: damped double well --
 well = Duffing.new(~0.5, ~0.0 - ~1.0, ~1.0, ~0.0, ~1.0)

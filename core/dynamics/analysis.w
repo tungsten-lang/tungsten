@@ -86,6 +86,54 @@
       k = k + 1
     {t: ts, points: pts}
 
+  # Period of a FORCED system's attractor in forcing cycles: strobe the
+  # flow every `period` (the forcing period), discard `transient` cycles,
+  # then find the smallest p ≤ max_p with |s_p − s_0| < tol. 0 = no
+  # period at this resolution (chaos/quasiperiodicity).
+  -> .stroboscopic_period(sys, x0, period, transient, max_p, tol, dt)
+    steps = (period / dt).to_i
+    if steps < 20
+      steps = 20
+    hh = period / steps
+    x = Dynamics.vcopy(x0)
+    t = ~0.0
+    c = 0
+    while c < transient
+      x = Dynamics.advance(sys, x, t, steps, hh)
+      t = t + period
+      c = c + 1
+    ref = Dynamics.vcopy(x)
+    p = 1
+    while p <= max_p
+      x = Dynamics.advance(sys, x, t, steps, hh)
+      t = t + period
+      if Dynamics.vdist(x, ref) < tol
+        return p
+      p = p + 1
+    0
+
+  # Isoperiodic (period-count) diagram over a 2-parameter forced family:
+  # maker2 is a 2-arg closure (a, b) → Flow, period_of a 2-arg closure
+  # (a, b) → forcing period. Row-major rows[ib][ia] of stroboscopic
+  # periods (0 = aperiodic). The GPU twin (hardcoded forced Duffing)
+  # lives in doc/examples/gpu_isoperiodic.w.
+  -> .isoperiodic_map(maker2, a_lo, a_hi, na, b_lo, b_hi, nb, x0, period_of, transient, max_p, tol, dt)
+    rows = []
+    ib = 0
+    while ib < nb
+      row = []
+      ia = 0
+      while ia < na
+        av = a_lo + (a_hi - a_lo) * ia / (na - 1)
+        bv = b_lo + (b_hi - b_lo) * ib / (nb - 1)
+        sys = maker2.call(av, bv)
+        pf = period_of.call(av, bv)
+        row = row.push(Dynamics.stroboscopic_period(sys, x0, pf, transient, max_p, tol, dt))
+        ia = ia + 1
+      rows = rows.push(row)
+      ib = ib + 1
+    rows
+
   # Return map of one coordinate over a point sequence:
   # [[v_k, v_{k+1}], …].
   -> .return_map(points, coord)

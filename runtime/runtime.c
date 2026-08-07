@@ -31820,15 +31820,28 @@ static int __attribute__((noinline)) bigint_src_ops_resolve(void) {
 }
 
 WValue w_add(WValue a, WValue b) {
+    /* E2(a): chain ordered by observed frequency. Integer arms lead —
+     * every boxed int add (the guarded i48 arm's overflow/boxed fallback)
+     * and every bigint add walks this chain, and the flame put the old
+     * preamble (two array tests + a strbuf test first) at ~10% of the
+     * equal-length add workload. The leading tests are disjoint tag
+     * classes, so hoisting the int arms past arrays/strbuf cannot change
+     * which arm fires; arrays and strbuf pay two extra compares against
+     * operations orders of magnitude heavier. */
+    if (w_is_int(a) && w_is_int(b))
+        return w_box_int_checked(w_as_int(a) + w_as_int(b));
+    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+        int src_off = g_bigint_src_ops_off;
+        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
+        if (__builtin_expect(src_off == 0, 1) && bigint_src_shape(a, b, 0))
+            return __w_bigint_plus_src(a, b);
+        return bigint_add_any(a, b);
+    }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_add_elem(a, b);
     if (w_is_array(a) && w_is_array(b)) return w_array_concat(a, b);
     /* StringBuffer << value → in-place append, return buffer */
     if (w_is_strbuf(a))
         return w_strbuf_append(a, w_to_s(b));
-    if (w_is_int(a) && w_is_int(b))
-        return w_box_int_checked(w_as_int(a) + w_as_int(b));
-    if (w_is_integer_any(a) && w_is_integer_any(b))
-        return bigint_add_any(a, b);
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_decimal_add(a, b);
     if (is_decimal_any(a) && w_is_int(b))
@@ -31938,6 +31951,21 @@ WValue w_add(WValue a, WValue b) {
 }
 
 WValue w_sub(WValue a, WValue b) {
+    /* E2(a): integer arms lead, mirroring w_add — they were dead last
+     * behind ~20 tests (decimals, chars, instants, rationals, complex,
+     * dates). Every earlier arm requires a non-integer tag on a side
+     * these tests require integer, so hoisting cannot change which arm
+     * fires. */
+    if (w_is_int(a) && w_is_int(b))
+        return w_box_int_checked(w_as_int(a) - w_as_int(b));
+    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+        /* Weak-linkage source routing, exactly like w_add's `+` arm. */
+        int src_off = g_bigint_src_ops_off;
+        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
+        if (__builtin_expect(src_off == 0, 1) && bigint_src_shape(a, b, 1))
+            return __w_bigint_minus_src(a, b);
+        return bigint_sub_any(a, b);
+    }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_sub_elem(a, b);
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_decimal_sub(a, b);
@@ -32012,15 +32040,7 @@ WValue w_sub(WValue a, WValue b) {
     /* date - date → difference in days */
     if (w_is_date(a) && w_is_date(b))
         return w_int(date_to_jdn(a) - date_to_jdn(b));
-    if (w_is_int(a) && w_is_int(b))
-        return w_box_int_checked(w_as_int(a) - w_as_int(b));
-    if (w_is_integer_any(a) && w_is_integer_any(b)) {
-        /* Weak-linkage source routing, exactly like w_add's `+` arm. */
-        int src_off = g_bigint_src_ops_off;
-        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
-        if (__builtin_expect(src_off != 0, 0)) return bigint_sub_any(a, b);
-        return __w_bigint_minus_src(a, b);
-    }
+    /* Integer arms hoisted to the chain head (E2(a)). */
     /* User-defined classes: route `a - b` to a.-(b). */
     if (w_is_instance(a))
         return w_method_call_fast(a, w_string("-"), &b, 1);
@@ -32028,6 +32048,23 @@ WValue w_sub(WValue a, WValue b) {
 }
 
 WValue w_mul(WValue a, WValue b) {
+    /* E2(a): integer arms lead, mirroring w_add/w_sub. Every earlier arm
+     * of the historical order requires a non-integer tag on a side these
+     * tests require integer, so hoisting cannot change which arm fires. */
+    if (w_is_int(a) && w_is_int(b)) {
+        __int128 r = (__int128)w_as_int(a) * w_as_int(b);
+        if (r >= W_INT48_MIN && r <= W_INT48_MAX)
+            return w_box_int((int64_t)r);
+        return bigint_from_i128(r);
+    }
+    if (w_is_integer_any(a) && w_is_integer_any(b))
+    {
+        int src_off = g_bigint_src_ops_off;
+        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
+        if (__builtin_expect(src_off == 0, 1) && bigint_mul_src_shape(a, b))
+            return __w_bigint_times_src(a, b);
+        return bigint_mul_any(a, b);
+    }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_mul_elem(a, b);
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_decimal_mul(a, b);
@@ -32064,14 +32101,7 @@ WValue w_mul(WValue a, WValue b) {
         return w_complex_mul_int(b, w_as_int(a));
     if (w_is_double(a) || w_is_double(b))
         return w_float(as_numeric_double(a) * as_numeric_double(b));
-    if (w_is_int(a) && w_is_int(b)) {
-        __int128 r = (__int128)w_as_int(a) * w_as_int(b);
-        if (r >= W_INT48_MIN && r <= W_INT48_MAX)
-            return w_box_int((int64_t)r);
-        return bigint_from_i128(r);
-    }
-    if (w_is_integer_any(a) && w_is_integer_any(b))
-        return bigint_mul_any(a, b);
+    /* Integer arms hoisted to the chain head (E2(a)). */
     /* string * int → repeat string */
     if ((w_is_string(a) || w_is_symbol(a)) && w_is_int(b)) {
         int64_t n = w_as_int(b);

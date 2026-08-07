@@ -341,6 +341,7 @@ compiled_specs=(
   spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/overload_exact_tag_parity_spec.w
+  spec/numeric/bigint_seam_disjoint_spec.w
   spec/compiler/uuid_byte_revisit_autoload_spec.w
   spec/compiler/autoload_walker_fields_spec.w
   spec/compiler/view_field_var_spec.w
@@ -466,6 +467,11 @@ interpreter_specs=(
   # tag-table rule; pin the interpreted side so a compiled-only change
   # cannot drift the copy.
   spec/compiler/overload_exact_tag_parity_spec.w
+  # B6 one-way disjointness of the bigint source-op seam: a pair the
+  # source bodies bail on must never be re-admitted by bigint_src_shape
+  # (w_add → src → w_add recursion presents as a segfault). Exercises
+  # every boundary of both sets on both engines.
+  spec/numeric/bigint_seam_disjoint_spec.w
   spec/compiler/bigint_shared_bit_spec.w
   spec/compiler/bigint_mutate_unique_spec.w
   spec/compiler/bigint_mod_pow2_context_spec.w

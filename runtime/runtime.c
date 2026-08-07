@@ -34691,6 +34691,9 @@ static int w_instance_spaceship_compare(WValue a, WValue b) {
     return comparison < 0 ? -1 : (comparison > 0 ? 1 : 0);
 }
 
+/* Order two quantities on a shared dimension: convert b into a's unit and
+ * compare the aligned decimals. Dies on dimension mismatch, mirroring the
+ * quantity arithmetic paths. */
 static int quantity_order_compare(WValue a, WValue b) {
     int ua, ub, sa, sb;
     int64_t ga, gb;

@@ -12,16 +12,19 @@ program.
 Compilation has two codegen targets. Most code lowers through a Tungsten-IR
 layer called **WIRE** to LLVM IR, which clang turns into a native binary.
 Functions annotated `@gpu fn` take a parallel path through
-`compiler/lib/metal_emitter.w` to Metal Shading Language (MSL), which
-`xcrun metal` compiles into a Metal binary. The Metal pass is wired in at
-lowering (`lowering/definitions.w` hands `@gpu fn` defs to the emitter
-instead of producing LLVM); current v0 is MSL-only — see
-`doc/gpu-dialects.md` for the planned multi-dialect expansion.
+`compiler/lib/metal_emitter.w`, a **multi-dialect GPU emitter**: MSL
+(compiled by `xcrun metal`) is always emitted when kernels are present,
+CUDA C is emitted by default (same kernel AST and statement emitters),
+and WGSL when `TUNGSTEN_GPU_DIALECTS` includes it (e.g.
+`TUNGSTEN_GPU_DIALECTS=cuda,wgsl`; `none` disables sidecars) — see
+`doc/gpu-cuda.md`. The GPU pass is wired in at lowering
+(`lowering/definitions.w` hands `@gpu fn` defs to the emitter instead of
+producing LLVM).
 
 ```
                                 ┌→ WIRE → LLVM IR → clang → native binary
 Source → Lexer → Parser → AST ──┤
-                                └→ metal_emitter → MSL → xcrun metal (@gpu fn)
+                                └→ metal_emitter → MSL / CUDA / WGSL (@gpu fn)
 ```
 
 ## Bootstrap (the central build concern)

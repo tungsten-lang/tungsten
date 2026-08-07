@@ -9,10 +9,10 @@
 #       y[i] = x[i] + 1.0
 #
 # Anything outside the supported subset raises a compile-time error with
-# the usual `-->` formatter. The emitter is NOT the eventual 5-dialect
-# pipeline — that lands in later phases per doc/gpu-dialects.md. This
-# pass is the provenance smoke: source → MSL text that `xcrun metal`
-# compiles, wired up enough to dispatch one trivial kernel.
+# the usual `-->` formatter. The emitter is multi-dialect: MSL is always
+# emitted when kernels are present, CUDA C by default (sharing the kernel
+# AST and statement emitters, switched on ctx[:dialect]), and WGSL when
+# TUNGSTEN_GPU_DIALECTS includes it — see doc/gpu-cuda.md.
 
 use ast
 

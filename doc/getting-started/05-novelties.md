@@ -219,10 +219,11 @@ See [04 — Literals & units](04-literals-and-units.md).
     y[i] = x[i] + 1.0
 ```
 
-`@gpu fn` lowers to Metal Shading Language (MSL) on Apple platforms (v0 is
-MSL-only). It is a **subset** of the language — typed buffers, limited control
-flow — not "any Tungsten on the GPU". Details and pitfalls:
-[06 — Gotchas](06-gotchas.md).
+`@gpu fn` lowers to Metal Shading Language (MSL) on Apple platforms, and the
+emitter is multi-dialect: CUDA C is emitted by default alongside, and WGSL
+opt-in via `TUNGSTEN_GPU_DIALECTS` (see `doc/gpu-cuda.md`). It is a
+**subset** of the language — typed buffers, limited control flow — not "any
+Tungsten on the GPU". Details and pitfalls: [06 — Gotchas](06-gotchas.md).
 
 ---
 

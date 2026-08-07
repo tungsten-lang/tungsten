@@ -340,6 +340,7 @@ compiled_specs=(
   spec/compiler/typed_array_param_width_spec.w
   spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
+  spec/compiler/overload_exact_tag_parity_spec.w
   spec/compiler/uuid_byte_revisit_autoload_spec.w
   spec/compiler/autoload_walker_fields_spec.w
   spec/compiler/view_field_var_spec.w
@@ -460,6 +461,11 @@ interpreter_specs=(
   spec/numeric/bigint_bang_spec.w
   spec/numeric/bigint_limb_sweep_spec.w
   spec/numeric/bigint_tag_sign_spec.w
+  # Exact-tag overload gate (B3/Phase 1): the interpreter's
+  # overload_matches_args? carries a HAND-COPIED mirror of lowering's
+  # tag-table rule; pin the interpreted side so a compiled-only change
+  # cannot drift the copy.
+  spec/compiler/overload_exact_tag_parity_spec.w
   spec/compiler/bigint_shared_bit_spec.w
   spec/compiler/bigint_mutate_unique_spec.w
   spec/compiler/bigint_mod_pow2_context_spec.w

@@ -99,6 +99,26 @@
       raise compile_error_for_node(:E_LOWER_RESERVED_INTRINSIC, "reserved compiler intrinsic '" + name + "'", ctx[:source_path], node)
 
   if name == "__compiler_overload_is_a" && receiver == nil && args != nil && args.size() == 2
+    # Exact-tag gate (B3/Phase 1): a type name whose membership test is
+    # provably equivalent to a NaN-box tag compare for ALL values lowers
+    # to the inline compare instead of the `w_value_is_a` ancestry call
+    # (which is `nounwind`-only and thus an optimization barrier). Every
+    # other name — including `Number` and the other tower bases — keeps
+    # the ancestry call, which is what preserves the `(Number)` catch-all
+    # arm. Admission and the subclass scope rule live in
+    # overload_exact_tag_test (lowering/types.w); the interpreter carries
+    # a hand-copied mirror (interpreter.w, overload_matches_args?).
+    tag_entry = nil
+    if is_ast_node?(args[1]) && ast_kind(args[1]) == :string
+      tag_entry = overload_exact_tag_test(ctx[:mod], "" + args[1].value)
+    if tag_entry != nil && tag_entry[:shape] == :top_tag
+      recv_tv = lower_expression(ctx, args[0])
+      recv_reg = ensure_i64_value(wfn, recv_tv)
+      masked = next_temp(wfn)
+      emit_instruction(wfn, {op: :and_i64, temp: masked, lhs: recv_reg, rhs: tag_entry[:mask]})
+      cmp = next_temp(wfn)
+      emit_instruction(wfn, {op: :icmp_i64, temp: cmp, pred: "eq", lhs: masked, rhs: tag_entry[:tag]})
+      return typed_value(:i1, cmp)
     recv_tv = lower_expression(ctx, args[0])
     type_tv = lower_expression(ctx, args[1])
     recv_reg = ensure_i64_value(wfn, recv_tv)

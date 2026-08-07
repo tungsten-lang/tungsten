@@ -121,9 +121,17 @@ f = ~0.1 + ~0.2              # machine floats
 Equality follows exactness. Integer, Rational, and Decimal are all exact,
 so `==` compares them by mathematical value — `2.0 == 2`, `1/2 == 0.5`,
 and `4/2 == 2` are `true`, and hash keys agree (`{2 => v}[2.0]` hits).
-Floats are approximations, so they equal only other Floats: `~2.0 == 2.0`
-is `false`, even though ordering still crosses the boundary (`~2.0 < 3`
-works). Convert explicitly (`.to_f`, `.to_d`) when you mean to cross.
+Floats are approximations, so they equal only other Float *values*:
+with `f = ~2.0` and `d = 2.0`, `f == d` is `false`, even though ordering
+still crosses the boundary (`~2.0 < 3` works).
+
+*Literals* adapt, Odin-style, when nothing is lost: an int or decimal
+literal written directly in a comparison takes the Float side's type iff
+its value is exactly representable as a double. So `~x == 0`,
+`~x == 0.5`, and `case ~x when 2` work — while `~x == 0.3` stays `false`
+(0.3 has no exact double) and values in variables never adapt. Convert
+explicitly (`.to_f`, `.to_d`) or use `≈` when you mean to cross with a
+variable.
 
 For approximate comparison use `≈` (equality precedence): it coerces any
 numerics through one double path and passes within

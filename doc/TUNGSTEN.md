@@ -52,7 +52,8 @@ COMMANDS
     ai / symbolicate / forge / flame
                          Additional tools
 
-    doctor and bootstrap are pure bash (bin/commands/*.sh) and work on a fresh
+    doctor and bootstrap are pure bash (bin/bootstrap, bin/commands/doctor.sh)
+    and work on a fresh
     clone. compile, run, console, start, new, fmt, forge, flame, bit, ai, and
     symbolicate use the compiled CLI when present. `build` still uses the
     Ruby bootstrap driver for the full pipeline; see DEVELOPER OPTIONS.

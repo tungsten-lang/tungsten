@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(464 total), grouped by area, with its declaration, a one-line
+(477 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -87,6 +87,15 @@ summary from the source header, and a link to the source.
 | `BraneBulkChord` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
 | `RandallSundrumSpacetime` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
 | `RandallSundrum` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
+| `Physics` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
+| `IdealGas` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
+| `EulerSystem` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
+| `CompressibleEuler` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
+| `IsothermalEuler` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
+| `LaxFriedrichs` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
+| `Minmod` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
+| `FiniteVolume` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
+| `EulerSimulation` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
 | `Dual` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Tape` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Autodiff` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
@@ -95,6 +104,7 @@ summary from the source header, and a link to the source.
 | `Interpolate` | `+ Interpolate` | Interpolate — interpolation and numerical quadrature. | [`core/interpolate.w`](../core/interpolate.w) |
 | `SciIO` | `+ SciIO` | SciIO — scientific data interchange (no system libhdf5/netcdf/arrow). | [`core/io.w`](../core/io.w) |
 | `Plot` | `+ Plot` | Plot — terminal sparklines / heatmaps (zero-dep). | [`core/plot.w`](../core/plot.w) |
+| `Plot3D` | `+ Plot3D` | Plot3D — interactive 3D visualization export for grid simulations. | [`core/plot3d.w`](../core/plot3d.w) |
 | `Sparse` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
 | `SparseMatrix` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
 | `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
@@ -122,6 +132,9 @@ summary from the source header, and a link to the source.
 | `UUID` | `+ UUID` | — | [`core/uuid.w`](../core/uuid.w) |
 | `Value` | `+ Value` | — | [`core/value.w`](../core/value.w) |
 | `Vector` | `+ Vector<T> < Number` | Vector — generic real-valued N-dimensional vectors. Distinct from | [`core/vector.w`](../core/vector.w) |
+| `FlatTorusOrbit` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
+| `FlatTorusOrbitExtremum` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
+| `FlatTorusOrbitStraightening` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `Algebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
 | `LatticeSimplex` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
 | `LatticePolygon` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |

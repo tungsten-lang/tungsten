@@ -1,8 +1,9 @@
 # Embedded LLVM IR and assembly function bodies
 
-A top-level typed `fn` whose entire body is a single `ll <<~IR` or
-`asm <<~ASM` call becomes that LLVM IR or AArch64 assembly verbatim.
-Heredocs lex as raw text, so IR/asm brackets never interpolate.
+A typed `fn` whose entire body is a single `ll <<~IR` or `asm <<~ASM`
+call becomes that LLVM IR or AArch64 assembly verbatim. Heredocs lex as
+raw text, so IR/asm brackets never interpolate. The form works at top
+level and inside a class body (see "Class-scoped kernels" below).
 
 ```
 fn add_n8(rp, ap, bp, n) (u64[] u64[] u64[] i64) i64
@@ -42,11 +43,34 @@ it). Measured on the 64-limb add kernel (Apple M): portable `addcarry` loop
 - Callers use the raw ABI: no boxing on either side. A declared `u64`
   return boxes unsigned.
 - Compile-only: no interpreter or stage-0 execution (same restriction as
-  `mulhi`/`addcarry`). Do not use in `core/` or the compiler itself.
+  `mulhi`/`addcarry`). A class method whose body calls a kernel therefore
+  needs a walker story (a C-delegation arm or an interpreter-reachable
+  fallback path) before it can live in `core/`; the compiler's own
+  sources must not use embedded bodies at all.
 - The embedded text participates in the function's content hash
   (`content_hash.w`), so incremental caching and the compact `__wy_`
   symbol names stay correct.
 
-Spec: `spec/compiler/embedded_ll_asm_spec.w`.
+## Class-scoped kernels
+
+The same `fn` + heredoc shape inside a class body compiles to a
+class-mangled raw-ABI kernel (`__w_<Class>_<name>__aN` symbol — kernels
+in different classes never collide). A kernel:
+
+- takes NO implicit `__self`; pass what it needs explicitly (machine
+  ints, typed arrays, or `wvalue_bits`-derived addresses),
+- never enters the method-dispatch tables — it is not a method, and
+  dynamic dispatch cannot reach its raw ABI,
+- is callable by bare name from sibling methods through the raw path.
+  Single-definition kernels also register under their plain name (the
+  same courtesy top-level typed fns get), so keep kernel names
+  program-unique.
+
+Sibling methods defined before the kernel in the class body still lower
+their call sites correctly — class bodies participate in the raw-ABI
+pre-registration walk.
+
+Spec: `spec/compiler/embedded_ll_asm_spec.w` (top level),
+`spec/compiler/embedded_class_kernel_spec.w` (class-scoped).
 Benchmark: `benchmarks/limb_native/bench_embed.w` (three-way carry-chain
 comparison, cross-checked limb-exact before timing).

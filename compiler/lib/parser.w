@@ -3833,6 +3833,16 @@ use ../../core/token
     elsif !@no_bare_args && (call_line == nil || current_line() == call_line) && bare_arg_start?()
       if at_type?(T_LBRACKET) && call_col != nil && call_name != nil && current_col() <= call_col + call_name.size()
         return [args, block]
+      # `myVar` / `s.myMethod` — a lowercase name immediately followed
+      # (NO space) by a Capitalized run is not a call: calls take a space
+      # or a paren, and uppercase ASCII is not valid inside identifiers.
+      # The one adjacent join that means anything is a unit spelling
+      # (`eV`, `mmHg`, `kWh`), which unit-expecting surfaces reconstruct
+      # from the juxtaposition call this falls through to.
+      if (at_type?(T_NAME) || at_type?(T_CONSTANT)) && call_col != nil && call_name != nil && current_line() == call_line && current_col() == call_col + call_name.size()
+        joined_ident = call_name + current_value()
+        if !known_unit_name?(joined_ident)
+          raise compile_error_at(:E_PARSE_UNEXPECTED_TOKEN, "uppercase ASCII is not valid in identifiers: '" + joined_ident + "' — use snake_case")
       args = parse_bare_args()
 
     # Bare `name ->` is ambiguous with constructs like range implicit-each,

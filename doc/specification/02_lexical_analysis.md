@@ -151,7 +151,7 @@ Identifiers (also referred to as _names_) are described by the following lexical
 
 The syntax of identifiers in Tungsten is based on _[UAX #31: Unicode Identifier and Pattern Syntax][tr31]_, with elaboration and changes as defined below:
 
-Within the ASCII range `U+0001`…`U+007F`, the valid characters for identifiers are the uppercase letters `A`…`Z`, the lowercase letters `a`…`z`, the underscore `_` and, except as an _identifier start_, the digits `0`…`9`.
+Within the ASCII range `U+0001`…`U+007F`, a lowercase-started identifier (variables, methods) consists of the lowercase letters `a`…`z`, the underscore `_` and, except as an _identifier start_, the digits `0`…`9`. **Uppercase ASCII is not valid inside an identifier**: `myVar` is a lexical error (`uppercase ASCII is not valid in identifiers — use snake_case`). Uppercase-started spellings are class references (PascalCase, token `NAME`) or assignable constants (SCREAMING_SNAKE, token `CONSTANT`); a call requires a space or a left paren after the callee, so an adjacent lower+Upper join never forms a call. The one adjacent join the grammar accepts is a registered unit spelling (`eV`, `mmHg`, `kWh`), reconstructed by unit-expecting surfaces such as conversion-pipe targets.
 
 Identifiers are unlimited in length. Case is significant.
 

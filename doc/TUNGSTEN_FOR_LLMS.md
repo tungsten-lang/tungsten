@@ -238,6 +238,9 @@ ensure
   (bare compound/mixed-case spellings; `(N)` = rounding digits) — also inside
   interpolation: `"[speed | km/h(1)]"`. Bare numbers attach the unit
   (`2.5 | km` → `2.5 km`); piped onto an array it maps elementwise.
+- **Identifiers are snake_case** — uppercase ASCII is not valid inside an
+  identifier (`myVar` is a lexical error; write `my_var`). PascalCase is
+  class references, SCREAMING_SNAKE is constants.
 - **Decimal array**: `%d[1.0 2.5 3.75]` — array of exact Decimals; pairs
   with the pipe for measurement series: `%d[1.0 2.5] | m/s`. Array stats
   `mean` / `variance` / `stdev` / `median` are quantity-aware.

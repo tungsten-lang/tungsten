@@ -1088,6 +1088,24 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
 # True when `nm` names a local slot, binding, typed var, or a known
 # fn/call — i.e. the identifier refers to real code, not a unit name.
+# Anything a bare name could legitimately resolve to at lowering time —
+# the pipe shadow set plus function parameters (fn bodies have no
+# class_name, and params live in wfn[:params], not var_slots) and
+# already-registered top-level globals. Used by the symbolic `*` rewrite.
+-> star_ident_bound?(ctx, nm)
+  if pipe_ident_shadowed?(ctx, nm)
+    return true
+  if ctx[:mod][:top_level_vars] != nil && ctx[:mod][:top_level_vars][nm] != nil
+    return true
+  params = ctx[:func][:params]
+  if params != nil
+    i = 0
+    while i < params.size()
+      if params[i] == nm
+        return true
+      i += 1
+  false
+
 -> pipe_ident_shadowed?(ctx, nm)
   if ctx[:func][:var_slots][nm] != nil || ctx[:bindings][nm] != nil || ctx[:var_types][nm] != nil
     return true
@@ -1229,6 +1247,22 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_quantity_pipe", args: [lhs_reg, uname_reg, dig_reg]})
       return typed_value(:i64, temp)
+
+  # `2 * x` with an undefined bare name at SCRIPT level mirrors the `2x`
+  # juxtaposition — the name becomes a 1·name unit factor
+  # (w_quantity_parse registers custom units on demand), so explicit-star
+  # and juxtaposed spellings of the same symbolic product agree. Scoped
+  # OUTSIDE class bodies (implicit-self dispatch owns bare names there)
+  # and to names no local/param/binding/fn/global shadows.
+  if op == :STAR && ctx[:class_name] == nil
+    if is_ast_node?(node.left) && ast_kind(node.left) == :var
+      sym_lname = node.left.name
+      if sym_lname != nil && !star_ident_bound?(ctx, sym_lname)
+        node.left = Tungsten:AST:Quantity.new("1", sym_lname)
+    if is_ast_node?(node.right) && ast_kind(node.right) == :var
+      sym_rname = node.right.name
+      if sym_rname != nil && !star_ident_bound?(ctx, sym_rname)
+        node.right = Tungsten:AST:Quantity.new("1", sym_rname)
 
   # Phase 4e dot-prefix elementwise operators — `lhs .+ rhs` etc. The
   # lexer guards whitespace at scan time so these never collide with

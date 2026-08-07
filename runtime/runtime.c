@@ -24917,7 +24917,16 @@ static int quantity_delta_unit_for_point(int point_unit) {
     return unit_lookup_id(delta);
 }
 
+/* Defined with the date helpers below; the compiler's static-quantity
+ * lowering routes `date ± <time quantity>` through these entry points,
+ * so they must delegate before extracting quantity fields. */
+static WValue date_shift_quantity(WValue d, WValue q, int sign);
+
 WValue w_quantity_add(WValue a, WValue b) {
+    if (w_is_date(a) && is_quantity_any(b))
+        return date_shift_quantity(a, b, 1);
+    if (is_quantity_any(a) && w_is_date(b))
+        return date_shift_quantity(b, a, 1);
     int unit_a, unit_b;
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
@@ -24974,6 +24983,8 @@ WValue w_quantity_add(WValue a, WValue b) {
 }
 
 WValue w_quantity_sub(WValue a, WValue b) {
+    if (w_is_date(a) && is_quantity_any(b))
+        return date_shift_quantity(a, b, -1);
     int unit_a, unit_b;
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
@@ -30455,6 +30466,7 @@ static void die(const char *msg) {
         int rc = system("stty sane 2>/dev/null");
         (void)rc;
     }
+    fflush(stdout);   /* program output precedes the diagnostic */
     fprintf(stderr, "runtime error: %s\n", msg);
     w_print_error_tail(32);
     exit(1);
@@ -31559,6 +31571,65 @@ WValue w_date_scrub(WValue str_v, int64_t unit, int64_t delta) {
     return w_string(buf);
 }
 
+/* date/datetime ± duration. ns-mode durations shift by whole seconds
+ * with calendar rollover through date_add_days; calendar-mode (months)
+ * durations shift months with day clamping, then apply the ms part. */
+static WValue date_shift_duration(WValue d, WValue dur, int sign) {
+    int y = w_unbox_date_year(d), mo = w_unbox_date_month(d), day = w_unbox_date_day(d);
+    int h = w_unbox_date_hour(d), mi = w_unbox_date_min(d), sec = w_unbox_date_sec(d);
+    int tz = w_unbox_date_tz(d);
+    int64_t days, insec;
+    if (duration_get_mode(dur) == 0) {
+        int64_t total_sec = duration_get_ns(dur) / 1000000000LL * (int64_t)sign;
+        days = total_sec / 86400;
+        insec = (int64_t)h * 3600 + mi * 60 + sec + total_sec % 86400;
+    } else {
+        int32_t months = (int32_t)w_unbox_duration_months(dur) * sign;
+        int64_t ms = (int64_t)w_unbox_duration_ms(dur) * sign;
+        int tot = y * 12 + (mo - 1) + months;
+        y = tot / 12;
+        mo = tot % 12;
+        if (mo < 0) { mo += 12; y -= 1; }
+        mo += 1;
+        if (day > days_in_month(y, mo)) day = days_in_month(y, mo);
+        days = 0;
+        insec = (int64_t)h * 3600 + mi * 60 + sec + ms / 1000;
+    }
+    while (insec < 0)      { insec += 86400; days -= 1; }
+    while (insec >= 86400) { insec -= 86400; days += 1; }
+    WValue shifted = date_add_days(w_box_date(y, mo, day, 0, 0, 0, tz), days);
+    return w_box_date(w_unbox_date_year(shifted), w_unbox_date_month(shifted),
+                      w_unbox_date_day(shifted), (int)(insec / 3600),
+                      (int)((insec / 60) % 60), (int)(insec % 60), tz);
+}
+
+/* date/datetime ± a time-dimensioned quantity (`210 days`, `2h`): the
+ * registry converts to seconds, then the same calendar shift applies.
+ * Non-time quantities are a dimension error. */
+static WValue date_shift_quantity(WValue d, WValue q, int sign) {
+    int unit, scale;
+    int64_t sig;
+    quantity_extract(q, &unit, &sig, &scale);
+    int s_unit = unit_lookup_id("s");
+    if (s_unit < 0 || !quantity_convert(&sig, &scale, unit, s_unit))
+        dief("cannot shift a date by a non-time quantity (%s)",
+             (unit >= 0 && unit < W_UNIT_CAPACITY && unit_names[unit]) ? unit_names[unit] : "?");
+    while (scale > 0 && sig < (int64_t)1 << 60) { sig *= 10; scale--; }
+    while (scale < 0) { sig /= 10; scale++; }
+    int64_t total_sec = sig * sign;
+    int y = w_unbox_date_year(d), mo = w_unbox_date_month(d), day = w_unbox_date_day(d);
+    int h = w_unbox_date_hour(d), mi = w_unbox_date_min(d), sec = w_unbox_date_sec(d);
+    int tz = w_unbox_date_tz(d);
+    int64_t days = total_sec / 86400;
+    int64_t insec = (int64_t)h * 3600 + mi * 60 + sec + total_sec % 86400;
+    while (insec < 0)      { insec += 86400; days -= 1; }
+    while (insec >= 86400) { insec -= 86400; days += 1; }
+    WValue shifted = date_add_days(w_box_date(y, mo, day, 0, 0, 0, tz), days);
+    return w_box_date(w_unbox_date_year(shifted), w_unbox_date_month(shifted),
+                      w_unbox_date_day(shifted), (int)(insec / 3600),
+                      (int)((insec / 60) % 60), (int)(insec % 60), tz);
+}
+
 /* Julian day number for date comparison/difference */
 static int64_t date_to_jdn(WValue d) {
     int y = w_unbox_date_year(d), m = w_unbox_date_month(d), day = w_unbox_date_day(d);
@@ -31739,6 +31810,16 @@ WValue w_add(WValue a, WValue b) {
         return date_add_days(a, w_as_int(b));
     if (w_is_int(a) && w_is_date(b))
         return date_add_days(b, w_as_int(a));
+    /* date/datetime + duration (either order) */
+    if (w_is_date(a) && is_duration_any(b))
+        return date_shift_duration(a, b, 1);
+    if (is_duration_any(a) && w_is_date(b))
+        return date_shift_duration(b, a, 1);
+    /* date/datetime + time quantity (`210 days`, `2h`), either order */
+    if (w_is_date(a) && is_quantity_any(b))
+        return date_shift_quantity(a, b, 1);
+    if (is_quantity_any(a) && w_is_date(b))
+        return date_shift_quantity(b, a, 1);
     /* User-defined classes: route `a + b` to a.+(b). Same pattern as
      * w_mul — the compiler's lower_binary_op fallback emits w_add,
      * and user classes with a `+` method (Quaternion, Vec, Mat …)
@@ -31822,13 +31903,24 @@ WValue w_sub(WValue a, WValue b) {
     /* date - int → shift days backward */
     if (w_is_date(a) && w_is_int(b))
         return date_add_days(a, -w_as_int(b));
+    /* date/datetime - duration */
+    if (w_is_date(a) && is_duration_any(b))
+        return date_shift_duration(a, b, -1);
+    /* date/datetime - time quantity */
+    if (w_is_date(a) && is_quantity_any(b))
+        return date_shift_quantity(a, b, -1);
     /* date - date → difference in days */
     if (w_is_date(a) && w_is_date(b))
         return w_int(date_to_jdn(a) - date_to_jdn(b));
     if (w_is_int(a) && w_is_int(b))
         return w_box_int_checked(w_as_int(a) - w_as_int(b));
-    if (w_is_integer_any(a) && w_is_integer_any(b))
-        return bigint_sub_any(a, b);
+    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+        /* Weak-linkage source routing, exactly like w_add's `+` arm. */
+        int src_off = g_bigint_src_ops_off;
+        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
+        if (__builtin_expect(src_off != 0, 0)) return bigint_sub_any(a, b);
+        return __w_bigint_minus_src(a, b);
+    }
     /* User-defined classes: route `a - b` to a.-(b). */
     if (w_is_instance(a))
         return w_method_call_fast(a, w_string("-"), &b, 1);
@@ -38062,6 +38154,11 @@ void w_exception_pop(void) {
 void w_raise(WValue msg) {
     if (!w_exception_stack) {
         WValue s = w_to_s(msg);
+        /* Program output first, then the diagnostic: stdout is block-
+         * buffered into a pipe/file while stderr is unbuffered, so
+         * without this flush the error text lands BEFORE everything the
+         * program printed — which reads as output being lost. */
+        fflush(stdout);
         fprintf(stderr, "unhandled exception: %s\n", as_str(s));
         w_print_error_tail(16);
         exit(1);

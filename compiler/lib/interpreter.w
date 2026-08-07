@@ -1111,7 +1111,7 @@ use target
       return ~0.5772156649015329
     nil
 
-  -> eval_var(node, env)
+  -> eval_var(node, env, symbolic = false)
     name = ast_get(node, :name)
     if name == "ARGV"
       return argv()
@@ -1169,6 +1169,11 @@ use target
       delta_base = name.slice(dlen, name.size() - dlen)
       delta_node = Tungsten:AST:BinaryOp.new(Tungsten:AST:Var.new(delta_base), :MINUS, Tungsten:AST:Call.new(Tungsten:AST:Parg.new(1), delta_base, [], nil))
       return evaluate(delta_node, env)
+    if symbolic
+      # `2 * x` multiplication operand: an undefined bare name becomes a
+      # 1·name unit factor, mirroring the `2x` juxtaposition (and the
+      # compiled lowering's :STAR rewrite).
+      return ccall("w_quantity_parse", "1", "" + name.to_s())
     hint = foreign_name_hint(name)
     if hint != nil
       raise "Undefined variable or method '[name]' — [hint]"
@@ -1993,6 +1998,24 @@ use target
         tn = w_type_name(left)
         if tn == "Quantity" || tn == "Array" || tn == "Decimal" || tn == "Integer"
           return ccall("w_quantity_pipe", left, "" + pu[:name], pu[:digits])
+    if node_op == :STAR && current_self() == nil
+      # Script-level multiplication operands that are undefined bare
+      # names resolve as symbolic 1·name unit factors (mirrors `2x`
+      # juxtaposition and the compiled :STAR rewrite); inside class
+      # bodies implicit-self dispatch keeps sole ownership of bare names.
+      star_l = ast_get(node, :left)
+      star_r = ast_get(node, :right)
+      star_lv = nil
+      if is_ast_node?(star_l) && ast_kind(star_l) == :var
+        star_lv = eval_var(star_l, env, true)
+      else
+        star_lv = evaluate(star_l, env)
+      star_rv = nil
+      if is_ast_node?(star_r) && ast_kind(star_r) == :var
+        star_rv = eval_var(star_r, env, true)
+      else
+        star_rv = evaluate(star_r, env)
+      return apply_binary_op(node_op, star_lv, star_rv)
     if node_op == :LSHIFT && ast_get(node, :left) != nil && ast_kind(ast_get(node, :left)) == :var
       left = evaluate(ast_get(node, :left), env)
       if type(left) == "String"

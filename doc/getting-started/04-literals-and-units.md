@@ -144,6 +144,12 @@ Also seen in the language surface:
 | `Δx` / prime `x'` | Deltas / "other" field in binary methods |
 | `Σ(...)` | Summation sugar |
 | `∫(...)` | Numerical integral; REPL can plot |
+| `π` `τ` `ℯ` `ϕ` | Math constants (Decimals); `π²`, `2 * π` work |
+| `2π`, `0.5τ` | Exact π-multiple quantities — `Math.sin(1000000π)` is exactly 0 |
+
+A number written against `π` or `τ` (no space) is an exact π-multiple that
+survives scalar arithmetic and reduces exactly inside `Math.sin`/`cos`/`tan`
+— see [Quantities § Mathematical constants and π-quantities](../scientific-computing/units.md#mathematical-constants-and-π-quantities).
 
 ```tungsten
 # Pipeline / sum sketches (see man page / REPL for full forms)

@@ -167,6 +167,36 @@ The coverage and spelling policy follow the [BIPM SI Brochure](https://www.bipm.
 with cross-domain spellings informed by [UCUM](https://unitsofmeasure.org/ucum).
 Nominal solar values follow [IAU Resolution B3](https://www.iau.org/common/Uploaded%20files/IAUGA2015-Resolution-B3-recommended-nominal-conversion.pdf).
 
+## Mathematical constants and π-quantities
+
+Bare mathematical constants evaluate as Decimals on both engines: `π`
+(3.14159…), `τ` (2π), `ℯ` (Euler's number), and `ϕ`/`φ` (the golden
+ratio). Superscript powers apply to any of them (`π²`, `x⁷`), and `2 * π`
+multiplies out to a plain number immediately.
+
+A number written *against* π or τ is different: `2π`, `0.5π`, `1000000τ`
+lex through the unit machinery as a **π-quantity** — an exact decimal
+multiple of π (τ counts as 2π). Multiplying or dividing by scalars keeps
+the multiple exact, and the trig functions reduce it mod 2 *before* any
+floating-point rounding, so whole and quarter turns are exact at any
+magnitude:
+
+```tungsten
+Math.sin(2π)                # 0 — exactly
+Math.sin(1000000π)          # 0 — exactly, no drift at any magnitude
+Math.sin(0.5π)              # 1 — exactly
+Math.sin(0.25τ)             # 1 — quarter turn
+2π * 50                     # 100 π — scalar scaling stays exact
+Math.sin(2π * 50 * t)       # phase reduced exactly even for huge 50t
+```
+
+Evaluation boundaries collapse a π-quantity to an imprecise Float:
+mixing with plain numbers (`2π + 1` → 7.28318…), order comparisons
+(`2π > 6`), `.to_f`, and the non-trig `Math.*` functions. Same-unit
+arithmetic stays exact (`2π + 1π` → `3 π`). A Float scalar joining a
+quantity (of any unit) snaps to 12 significant digits, the same
+precision decimal division carries.
+
 ## Points and deltas
 
 Ordinary quantities are vectors, preserving familiar arithmetic:

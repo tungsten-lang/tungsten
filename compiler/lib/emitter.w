@@ -2249,9 +2249,58 @@ ewscope_md_state = {ids: {}, order: []}
   i = 0
   while i < mod[:functions].size()
     mod[:functions][i][:fp_flags] = fp_flags
-    fn_out << emit_function(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups)
+    fn_out << emit_function(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, emit_target_is_arm64(mod))
     fn_out << "\n"
     i += 1
+
+  # Source-routed operator export: when this module compiles BigInt#+, wrap
+  # the (content-hash-renamed) method body in a STRONG stable-named symbol.
+  # The runtime declares the same symbol WEAK with the C kernel as its
+  # default, so strong-over-weak link resolution routes every bigint-shaped
+  # `+` through source — and, unlike a runtime-resolved pointer, the static
+  # reference is transparent to whole-program LTO. A reopened `+` wins here
+  # exactly as it does in the method table: last definition survives the
+  # replace_or_append pass, so the wrapper names the surviving body.
+  big_op_wrappers = {"+" => "__w_bigint_plus_src", "-" => "__w_bigint_minus_src", "*" => "__w_bigint_times_src"}
+  big_op_fns = {}
+  bfi = 0
+  while bfi < mod[:functions].size()
+    bff = mod[:functions][bfi]
+    if bff[:source_class] == "BigInt" && bff[:source_kind] == :method && big_op_wrappers[bff[:source_method]] != nil
+      big_op_fns[bff[:source_method]] = bff
+    bfi += 1
+  # Plain loop, not `.each` — the body mutates `used_runtime_fns`, and a
+  # closure boundary here is exactly the kind of capture ambiguity that
+  # silently dropped the declare-suppression flag.
+  seam_decls = StringBuffer(256)
+  # FIXED iteration order, never .keys(): hash iteration order differs
+  # between the C VM stage-0 host and the native compiler, and the seam
+  # wrappers' emission order otherwise swaps between stage 1 and stage 2
+  # (an 8-line byte-identity break that only surfaces under --force).
+  bop_keys = ["+", "-", "*"]
+  bki = 0
+  while bki < bop_keys.size()
+    bop = bop_keys[bki]
+    bki += 1
+    bigop = big_op_fns[bop]
+    if bigop != nil
+      bp_cc = ""
+      if bigop[:call_conv] != nil && bigop[:call_conv] != ""
+        bp_cc = bigop[:call_conv] + " "
+      fn_out << "define i64 @" + big_op_wrappers[bop] + "(i64 %a, i64 %b) nounwind {\n"
+      fn_out << "  %r = tail call " + bp_cc + "i64 @" + bigop[:name] + "(i64 %a, i64 %b)\n"
+      fn_out << "  ret i64 %r\n"
+      fn_out << "}\n\n"
+      # This module DEFINES the seam, so no declaration may be emitted for
+      # it — from the runtime list OR from the ccall auto-declare path,
+      # which keys off known_fns (the wrapper is raw text, so register it).
+      used_runtime_fns[big_op_wrappers[bop]] = false
+      known_fns[big_op_wrappers[bop]] = true
+    elsif used_runtime_fns[big_op_wrappers[bop]] == true
+      # Direct-lowered call sites exist but this module does not compile
+      # BigInt#+/#-; declare the seam so it binds at link time (to the
+      # runtime's weak C-kernel default, or to whichever object defines it).
+      seam_decls << "declare i64 @" + big_op_wrappers[bop] + "(i64, i64) nounwind\n"
 
   # String constants that still need raw ptr access; slab emitted as constant array
   strings_out = emit_string_constants(mod[:strings], slab_info, used_ptr_ids)

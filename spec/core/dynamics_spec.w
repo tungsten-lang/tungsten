@@ -140,6 +140,64 @@ df = Duffing.classic
 flast = Dynamics.advance(df, [~0.1, ~0.1], ~0.0, 2000, ~0.01)
 check("duffing.finite", Dynamics.vnorm(flast) < ~10.0, true)
 
+# -- LAPACK eigen bridge (n > 8 routes through dgeev; DK fallback) --
+lap = LinAlg.zeros(20, 20)
+li = 0
+while li < 20
+  lap[li][li] = ~0.0 - ~2.0
+  if li > 0
+    lap[li][li - 1] = ~1.0
+  if li < 19
+    lap[li][li + 1] = ~1.0
+  li = li + 1
+lape = LinAlg.eigenvalues(lap)
+lre = []
+li = 0
+while li < 20
+  lre = lre.push(lape[li][0])
+  li = li + 1
+lre = lre.sort
+lmin = lre[0] - (~0.0 - ~2.0 + ~2.0 * Math.cos(~20.0 * ~3.141592653589793 / ~21.0))
+if lmin < ~0.0
+  lmin = ~0.0 - lmin
+approx("lapack.laplacian_min", lmin, ~0.0 - ~1.0e-20, ~1.0e-9)
+
+# -- Periodic-orbit shooting: Van der Pol limit cycle --
+vdp = VanDerPol.classic
+orb = Dynamics.shoot_periodic(vdp, [~2.0, ~0.0], ~6.28, ~0.01)
+approx("vdp.period", orb[:period], ~6.6630, ~6.6636)
+approx("vdp.residual", orb[:residual], ~0.0 - ~1.0e-20, ~1.0e-9)
+mm = orb[:multipliers]
+d0 = Math.hypot(mm[0][0] - ~1.0, mm[0][1])
+d1 = Math.hypot(mm[1][0] - ~1.0, mm[1][1])
+mtriv = d0
+msec = Math.hypot(mm[1][0], mm[1][1])
+if d1 < d0
+  mtriv = d1
+  msec = Math.hypot(mm[0][0], mm[0][1])
+approx("vdp.trivial_multiplier", mtriv, ~0.0 - ~1.0e-20, ~1.0e-4)
+approx("vdp.contraction_multiplier", msec, ~0.0001, ~0.01)
+
+# -- Equilibrium continuation: Lorenz pitchfork at rho = 1 --
+br = Dynamics.continue_equilibria(-> (rho) Lorenz.new(~10.0, rho, ~8.0 / ~3.0), ~0.5, ~1.5, 11, [~0.1, ~0.1, ~0.1])
+check("branch.complete", br[:complete], true)
+chg = Dynamics.stability_changes(br)
+check("branch.pitchfork_detected", chg.size >= 1, true)
+approx("branch.pitchfork_location", chg[0][1], ~0.89, ~1.11)
+
+# Subcritical Hopf on the C+ branch near rho = 24.737
+hb = Dynamics.continue_equilibria(-> (rho) Lorenz.new(~10.0, rho, ~8.0 / ~3.0), ~20.0, ~26.0, 13, [~7.0, ~7.0, ~19.0])
+hchg = Dynamics.stability_changes(hb)
+check("branch.hopf_detected", hchg.size >= 1, true)
+approx("branch.hopf_location", (hchg[0][0] + hchg[0][1]) * ~0.5, ~24.2, ~25.2)
+
+# -- Basins of attraction: damped double well --
+well = Duffing.new(~0.5, ~0.0 - ~1.0, ~1.0, ~0.0, ~1.0)
+bg = Dynamics.basins(well, ~0.0 - ~2.0, ~2.0, ~0.0 - ~2.0, ~2.0, 9, 9, ~50.0, ~0.01, [[~0.0 - ~1.0, ~0.0], [~1.0, ~0.0]], ~0.5)
+bc = Dynamics.basin_counts(bg)
+check("basins.symmetric", bc[0], bc[1])
+check("basins.nontrivial", bc[0] >= 20, true)
+
 # -- Embedding + correlation dimension --
 sr = [~1.0, ~2.0, ~1.0, ~2.0, ~1.0, ~2.0, ~1.0, ~2.0]
 check("embed.count", Dynamics.embed(sr, 2, 1).size, 7)

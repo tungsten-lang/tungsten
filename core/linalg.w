@@ -370,8 +370,44 @@
     out
 
   # Eigenvalues of an n×n float matrix → [[re, im], …] (unordered).
-  # Route: characteristic polynomial + Durand-Kerner — robust at the small
-  # dimensions dynamical-systems Jacobians have. Large dense eigen is a
-  # LAPACK-bridge follow-up.
+  # Small n (≤ 8) stays on characteristic polynomial + Durand-Kerner —
+  # dependency-free and robust at Jacobian sizes. Larger n routes through
+  # the LAPACK dgeev bridge (Accelerate / OpenBLAS), falling back to
+  # Durand-Kerner wherever the bridge is unavailable.
   -> .eigenvalues(a)
+    n = LinAlg.rows(a)
+    if n <= 8
+      return LinAlg.poly_roots(LinAlg.charpoly(a))
+    out = nil
+    begin
+      out = LinAlg.eigenvalues_lapack(a)
+    rescue err
+      out = nil
+    if out != nil
+      return out
     LinAlg.poly_roots(LinAlg.charpoly(a))
+
+  # LAPACK route: flatten row-major into a typed f64 buffer, run dgeev,
+  # pair the wr/wi outputs.
+  -> .eigenvalues_lapack(a)
+    n = LinAlg.rows(a)
+    flat = []
+    i = 0
+    while i < n
+      j = 0
+      while j < n
+        flat = flat.push(a[i][j] + ~0.0)
+        j = j + 1
+      i = i + 1
+    af = flat.to_f64
+    wr = f64[n]
+    wi = f64[n]
+    info = ccall("w_blas_dgeev", af, wr, wi, n)
+    if info != 0
+      raise "LinAlg.eigenvalues_lapack: dgeev info=" + info.to_s()
+    out = []
+    i = 0
+    while i < n
+      out = out.push([wr[i], wi[i]])
+      i = i + 1
+    out

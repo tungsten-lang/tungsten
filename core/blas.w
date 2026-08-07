@@ -129,6 +129,11 @@ fn dgesv(a, b, n)
 fn dpotrf(a, n)
   ccall("w_blas_dpotrf", a, n)
 
+# All eigenvalues of a general real n×n matrix (LAPACK dgeev; a is
+# row-major f64[] and is destroyed; wr/wi f64[n] receive re/im parts).
+fn dgeev(a, wr, wi, n)
+  ccall("w_blas_dgeev", a, wr, wi, n)
+
 # vDSP FFT on f32 re/im arrays, length n = power of 2. inverse: 0|1.
 fn fft_f32(re, im, n, inverse)
   ccall("w_blas_fft_f32", re, im, n, inverse)

@@ -102,3 +102,43 @@ WValue w_blas_vtanh_f32(WValue a_wval, WValue out_wval, WValue n_wval) {
     for (int64_t i = 0; i < n; i++) o[i] = tanhf(a[i]);
     return out_wval;
 }
+
+/* dgeev via OpenBLAS's bundled LAPACK — same manual-prototype contract
+ * as the Accelerate bridge (see blas_bridge.c). */
+static double *oblas_f64_ptr(WValue v, int64_t *len_out) {
+    WArray *a = (WArray *)w_as_ptr(v);
+    *len_out = (int64_t)a->size;
+    return (double *)a->slots + a->start;
+}
+
+extern void dgeev_(const char *jobvl, const char *jobvr, const int *n,
+                   double *a, const int *lda, double *wr, double *wi,
+                   double *vl, const int *ldvl, double *vr, const int *ldvr,
+                   double *work, const int *lwork, int *info);
+
+WValue w_blas_dgeev(WValue a_wval, WValue wr_wval, WValue wi_wval, WValue n_wval) {
+    int64_t la, lr, li;
+    double *A = oblas_f64_ptr(a_wval, &la);
+    double *WR = oblas_f64_ptr(wr_wval, &lr);
+    double *WI = oblas_f64_ptr(wi_wval, &li);
+    int n = (int)w_as_int(n_wval);
+    if (n <= 0 || la < (int64_t)n * n || lr < n || li < n) {
+        w_raise(w_string("dgeev: bad dimensions"));
+        return w_int(-1);
+    }
+    int lda = n, ldv = 1, info = 0;
+    int lwork = -1;
+    double wkopt = 0.0;
+    dgeev_("N", "N", &n, A, &lda, WR, WI, NULL, &ldv, NULL, &ldv, &wkopt, &lwork, &info);
+    if (info != 0) return w_int((int64_t)info);
+    lwork = (int)wkopt;
+    if (lwork < 4 * n) lwork = 4 * n;
+    double *work = (double *)malloc((size_t)lwork * sizeof(double));
+    if (!work) {
+        w_raise(w_string("dgeev: out of memory"));
+        return w_int(-1);
+    }
+    dgeev_("N", "N", &n, A, &lda, WR, WI, NULL, &ldv, NULL, &ldv, work, &lwork, &info);
+    free(work);
+    return w_int((int64_t)info);
+}

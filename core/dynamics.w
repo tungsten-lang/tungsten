@@ -14,6 +14,8 @@
 #   lyapunov     Benettin max exponent, QR spectra, Kaplan-Yorke
 #   analysis     bifurcation sweeps, period detection, Poincaré sections
 #   embedding    delay embedding, correlation dimension
+#   continuation equilibrium branches, periodic-orbit shooting, Floquet
+#   basins       basin-of-attraction grids (GPU twin: doc/examples/gpu_basins.w)
 #
 # Numeric substrate: states are plain Arrays of ~f64 Floats; Jacobian
 # and spectral work rides LinAlg (solve/qr/eigenvalues); the closure-based
@@ -27,3 +29,5 @@ use core/dynamics/stability
 use core/dynamics/lyapunov
 use core/dynamics/analysis
 use core/dynamics/embedding
+use core/dynamics/continuation
+use core/dynamics/basins

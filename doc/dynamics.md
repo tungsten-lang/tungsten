@@ -68,8 +68,10 @@ Dynamics.classify_map(Henon.classic, mp)                  # :saddle
 Flow classes: `:sink`, `:spiral_sink`, `:source`, `:spiral_source`,
 `:saddle`, `:center`, `:nonhyperbolic`. Map classes compare |λ| to 1:
 `:sink`, `:source`, `:saddle`, `:nonhyperbolic`. Eigenvalues come from
-`LinAlg.eigenvalues` (characteristic polynomial via Faddeev-LeVerrier +
-Durand-Kerner) — solid at Jacobian sizes (n ≲ 10).
+`LinAlg.eigenvalues`: n ≤ 8 uses the characteristic polynomial +
+Durand-Kerner (dependency-free); larger matrices route through the
+LAPACK `dgeev` bridge (Accelerate / OpenBLAS) with Durand-Kerner as the
+fallback wherever the bridge is unavailable.
 
 ## Lyapunov exponents
 
@@ -101,6 +103,40 @@ pc = Dynamics.poincare(lz, x0, [~0.0, ~0.0, ~1.0], ~27.0, ~5.0, ~200.0, ~0.005)
 Dynamics.return_map(pc[:points], 0)    # [[v_k, v_{k+1}], …]
 ```
 
+## Continuation and periodic orbits
+
+```tungsten
+br = Dynamics.continue_equilibria(-> (rho) Lorenz.new(~10.0, rho, ~8.0/~3.0), ~0.5, ~1.5, 41, [~0.1, ~0.1, ~0.1])
+Dynamics.stability_changes(br)     # [[p_before, p_after, class_before, class_after], …]
+# → detects the pitchfork at ρ = 1 and (on the C± branch) the
+#   subcritical Hopf at ρ ≈ 24.74
+
+orb = Dynamics.shoot_periodic(VanDerPol.classic, [~2.0, ~0.0], ~6.28, ~0.01)
+orb[:period]        # 6.66328687 (Van der Pol μ = 1)
+orb[:multipliers]   # Floquet spectrum from the monodromy — {1, 0.00086}
+Dynamics.shoot_forced(sys, x0, forcing_period, dt)   # non-autonomous, T known
+Dynamics.monodromy(sys, x0, period, steps)           # [φ_T(x0), M]
+```
+
+Equilibrium branches follow the fixed point across a parameter sweep
+(secant predictor + Newton corrector), recording the stability class at
+every point; periodic orbits solve φ_T(x0) = x0 by single shooting on the
+monodromy with a bordered phase row (autonomous) or plain Newton (forced).
+
+## Basins of attraction
+
+```tungsten
+well = Duffing.new(~0.5, ~0.0 - ~1.0, ~1.0, ~0.0, ~1.0)   # damped double well
+grid = Dynamics.basins(well, ~0.0-~2.0, ~2.0, ~0.0-~2.0, ~2.0, 200, 200,
+                       ~50.0, ~0.01, [[~0.0-~1.0, ~0.0], [~1.0, ~0.0]], ~0.5)
+Dynamics.basin_counts(grid)    # {0 => …, 1 => …, -1 => …}
+```
+
+Each cell integrates independently and labels itself by the attractor it
+lands nearest — which is also why the sweep is embarrassingly parallel:
+`doc/examples/gpu_basins.w` is the same sweep as a `@gpu fn` Metal kernel
+(one thread per cell), verified cell-for-cell against the CPU twin.
+
 ## Attractor reconstruction
 
 ```tungsten
@@ -121,6 +157,8 @@ pairwise: keep N ≲ 2000, or expect quadratic time.
 
 ## Follow-ups
 
-- LAPACK-bridge eigenvalues for large dense systems.
-- GPU sweeps (`@gpu` basins of attraction, parameter grids).
-- Continuation/AUTO-style branch following and periodic-orbit shooting.
+- Pseudo-arclength continuation (the natural-parameter sweep stops at
+  folds; arclength follows the branch around them).
+- Multiple shooting / collocation for stiff or long-period orbits.
+- GPU parameter-grid sweeps beyond basins (Lyapunov maps, isoperiodic
+  diagrams).

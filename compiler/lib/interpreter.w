@@ -1547,6 +1547,9 @@ use target
       return ccall("w_blas_sgemm_nn", args[1], args[2], args[3], args[4], args[5], args[6])
     when "w_blas_dgemm_nn"
       return ccall("w_blas_dgemm_nn", args[1], args[2], args[3], args[4], args[5], args[6])
+    when "w_blas_dgeev"
+      # LAPACK eigenvalues bridge (core/linalg.w eigenvalues_lapack).
+      return ccall("w_blas_dgeev", args[1], args[2], args[3], args[4])
 
     # -- Array#csort / #tsort / #skasort / #wolfsort (core/array.w) --
     when "w_array_csort"

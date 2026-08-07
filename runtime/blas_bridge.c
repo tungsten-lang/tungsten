@@ -276,3 +276,43 @@ WValue w_blas_dpotrf(WValue a_wval, WValue n_wval) {
     }
     return w_int(0);
 }
+
+/* dgeev: all eigenvalues of a general real n×n matrix via the LAPACK
+ * dgeev_ FORTRAN symbol, manually prototyped — the deprecated clapack
+ * HEADERS stay un-included (including them is what broke bootstrap on
+ * new-LAPACK-only Xcodes); the legacy LP64 symbol itself is stable ABI.
+ * A is row-major f64 and is DESTROYED. Eigenvalues only: A and Aᵀ share
+ * a spectrum, so the row/column-major mismatch is harmless with
+ * jobvl = jobvr = 'N'. wr/wi receive the real/imaginary parts.
+ * Returns info (0 = ok, >0 = QR failed to converge at that index). */
+extern int dgeev_(char *jobvl, char *jobvr, int *n,
+                  double *a, int *lda, double *wr, double *wi,
+                  double *vl, int *ldvl, double *vr, int *ldvr,
+                  double *work, int *lwork, int *info);
+
+WValue w_blas_dgeev(WValue a_wval, WValue wr_wval, WValue wi_wval, WValue n_wval) {
+    int64_t la, lr, li;
+    double *A = blas_f64_ptr(a_wval, &la);
+    double *WR = blas_f64_ptr(wr_wval, &lr);
+    double *WI = blas_f64_ptr(wi_wval, &li);
+    int n = (int)w_as_int(n_wval);
+    if (n <= 0 || la < (int64_t)n * n || lr < n || li < n) {
+        w_raise(w_string("dgeev: bad dimensions"));
+        return w_int(-1);
+    }
+    int lda = n, ldv = 1, info = 0;
+    int lwork = -1;
+    double wkopt = 0.0;
+    dgeev_("N", "N", &n, A, &lda, WR, WI, NULL, &ldv, NULL, &ldv, &wkopt, &lwork, &info);
+    if (info != 0) return w_int((int64_t)info);
+    lwork = (int)wkopt;
+    if (lwork < 4 * n) lwork = 4 * n;
+    double *work = (double *)malloc((size_t)lwork * sizeof(double));
+    if (!work) {
+        w_raise(w_string("dgeev: out of memory"));
+        return w_int(-1);
+    }
+    dgeev_("N", "N", &n, A, &lda, WR, WI, NULL, &ldv, NULL, &ldv, work, &lwork, &info);
+    free(work);
+    return w_int((int64_t)info);
+}

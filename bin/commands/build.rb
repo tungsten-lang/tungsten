@@ -85,6 +85,15 @@ if ARGV.include?("--ruby-bootstrap")
   exit 1
 end
 
+# B10: the TAG_ASSERT compiler configuration (guards kept live with traps
+# wired to their disproven sides — the tag-elision differential oracle's
+# lever) must never produce stage1/stage2, or the identity check would
+# compare two different compilers. Stage builds always run with it clear.
+if ENV["TUNGSTEN_TAG_ASSERT"] && !ENV["TUNGSTEN_TAG_ASSERT"].empty?
+  warn "build: ignoring TUNGSTEN_TAG_ASSERT for stage builds (oracle-only configuration)"
+  ENV.delete("TUNGSTEN_TAG_ASSERT")
+end
+
 ruby_bootstrap_requested = !!ARGV.delete("--ruby") || ENV["TUNGSTEN_BOOTSTRAP"] == "ruby"
 spinel_requested = !!ARGV.delete("--spinel") || ENV["TUNGSTEN_BOOTSTRAP"] == "spinel"
 stage0_only = ARGV.include?("-0")

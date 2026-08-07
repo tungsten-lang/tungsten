@@ -64,6 +64,15 @@ use target
   t_lower = clock() - lower_started_at
 
   cfg_started_at = clock()
+  # B8 detector: TUNGSTEN_SSA_REPORT=<path> dumps every function mem2reg
+  # actually converts (overflow-checked gate passed AND promotable slots
+  # exist), one name per line. Guard-elision work can remove a function's
+  # last *_i48_checked op, silently flipping has_overflow_checked and
+  # newly running SSA on code it never ran on — and stage identity cannot
+  # catch that (both stages agree on the mis-lowering). Diff this dump
+  # across the change; any new member is newly SSA-converted.
+  ssa_report = env("TUNGSTEN_SSA_REPORT")
+  ssa_converted = []
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
@@ -75,11 +84,15 @@ use target
       if !has_overflow_checked(func)
         promotable = find_promotable_vars(func)
         if promotable.keys().size() > 0
+          if ssa_report != nil && ssa_report != ""
+            ssa_converted.push(func[:name])
           analysis = analyze_function(func)
           func[:cfg_analysis] = analysis
           ssa_convert(func, analysis, nil, promotable)
       prune_empty_blocks(func)
     fi += 1
+  if ssa_report != nil && ssa_report != ""
+    write_file(ssa_report, ssa_converted.sort().join("\n") + "\n")
   t_cfg = clock() - cfg_started_at
 
   ownership_pass(mod)

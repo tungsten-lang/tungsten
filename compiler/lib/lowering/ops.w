@@ -1201,9 +1201,134 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   lower_expression(ctx, Tungsten:AST:Var.new(arr_name))
 
+# -- Tag-guard folding (Phase 3, with Phase 2.5's assert lever) --
+#
+# Known-bits abstract evaluation of NaN-box tag expressions. The only
+# base fact is `wvalue_bits(X)` where X carries a :structural tag fact
+# (Phase 2, infer_tag): a :top_tag entry fixes bits 48..63 and nothing
+# else — bit 47 (the sign overlay) stays a runtime value, so sign reads
+# never fold. The guard idioms in core sources are
+# `(bits >> 48) & 0xFFFF` and `bits & TAG_MASK` against a tag constant;
+# RSHIFT, AND and integer literals are the whole expression language,
+# evaluated through a {known-mask, bits} lattice with bits normalized to
+# known positions. `fact` marks that a tag fact fed the value — the
+# engagement condition, so plain integer compares lower exactly as
+# before (no drive-by constant folding, no byte drift off the fact path).
+-> tag_known_bits(ctx, node)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  if k == :int
+    return {known: 0 - 1, bits: node.value, fact: false}
+  if k == :call && node.name == "wvalue_bits" && node.receiver == nil && node.args != nil && node.args.size() == 1
+    f = infer_tag(node.args[0], ctx)
+    if f != nil && tag_fact_structural?(f)
+      entry = f[:entry]
+      if entry != nil && entry[:shape] == :top_tag
+        m = entry[:mask].to_i
+        return {known: m, bits: entry[:tag].to_i & m, fact: true}
+    return nil
+  if k == :binary_op
+    if node.op == :RSHIFT
+      rk = tag_known_bits(ctx, node.right)
+      if rk == nil || rk[:known] != 0 - 1 || rk[:bits] < 0 || rk[:bits] > 63
+        return nil
+      lk = tag_known_bits(ctx, node.left)
+      if lk == nil
+        return nil
+      sh = rk[:bits]
+      # Arithmetic shift of both fields: fill positions inherit bit 63's
+      # known-ness and value; re-normalize bits to the known mask.
+      known2 = lk[:known] >> sh
+      return {known: known2, bits: (lk[:bits] >> sh) & known2, fact: lk[:fact]}
+    if node.op == :AMPERSAND
+      lk = tag_known_bits(ctx, node.left)
+      rk = tag_known_bits(ctx, node.right)
+      if lk == nil || rk == nil
+        return nil
+      allb = 0 - 1
+      # Known where both are known, or where either side is a known zero.
+      known2 = (lk[:known] & rk[:known]) | (lk[:known] & (lk[:bits] ^ allb)) | (rk[:known] & (rk[:bits] ^ allb))
+      return {known: known2, bits: (lk[:bits] & rk[:bits]) & known2, fact: lk[:fact] || rk[:fact]}
+  nil
+
+# Decide an EQ/NEQ over tag bits: :true_const, :false_const, or nil
+# (lower normally). A known-bit mismatch decides inequality even under
+# partial knowledge; equality needs both sides fully known.
+-> fold_tag_compare(ctx, node)
+  if ctx[:tag_assert_skip] == true
+    return nil
+  lk = tag_known_bits(ctx, node.left)
+  if lk == nil
+    return nil
+  rk = tag_known_bits(ctx, node.right)
+  if rk == nil
+    return nil
+  if lk[:fact] == false && rk[:fact] == false
+    return nil
+  common = lk[:known] & rk[:known]
+  differs = ((lk[:bits] ^ rk[:bits]) & common) != 0
+  allb = 0 - 1
+  eq_val = nil
+  if differs
+    eq_val = false
+  elsif lk[:known] == allb && rk[:known] == allb
+    eq_val = true
+  if eq_val == nil
+    return nil
+  want = node.op == :EQ ? eq_val : !eq_val
+  want ? :true_const : :false_const
+
+# Phase 2.5 (E4): TUNGSTEN_TAG_ASSERT=1 keeps every foldable guard live
+# and wires llvm.trap to its disproven side — an unsoundly elided guard
+# becomes an uncatchable abort instead of a silent wrong path, which is
+# what the differential oracle byte-compares against the folded build.
+# This configuration must NEVER produce stage1/stage2 (B10): build.rb
+# clears the variable for stage builds, and the flag keys the
+# incremental cache alongside TUNGSTEN_FREE.
+-> lower_tag_assert_compare(ctx, node, fold)
+  wfn = ctx[:func]
+  ctx[:tag_assert_skip] = true
+  tv = lower_binary_op(ctx, node)
+  ctx[:tag_assert_skip] = nil
+  abool = tv[:value]
+  if tv[:type] != :i1
+    ab = next_temp(wfn)
+    emit_instruction(wfn, {op: :truthy_inline, temp: ab, value: ensure_i64_value(wfn, tv)})
+    abool = ab
+  bad = abool
+  if fold == :true_const
+    nb = next_temp(wfn)
+    emit_instruction(wfn, {op: :not_i1, temp: nb, value: abool})
+    bad = nb
+  trap_label = next_label(wfn, "tagassert.trap")
+  cont_label = next_label(wfn, "tagassert.cont")
+  emit_instruction(wfn, {op: :cond_br, cond: bad, then_label: trap_label, else_label: cont_label})
+  start_block(wfn, trap_label)
+  emit_instruction(wfn, {op: :trap_intrinsic})
+  emit_instruction(wfn, {op: :unreachable})
+  start_block(wfn, cont_label)
+  tv
+
 -> lower_binary_op(ctx, node)
   wfn = ctx[:func]
   op = node.op
+
+  # Tag-guard fold (Phase 3): a comparison over NaN-box tag bits decided
+  # by a :structural fact folds to its constant, making the re-checks in
+  # seam-reached bodies (big_int.w) dead branches; under
+  # TUNGSTEN_TAG_ASSERT=1 the compare instead stays live with a trap on
+  # the disproven side. An undecided or fact-free compare falls through
+  # unchanged — the nil path is the load-bearing safe default.
+  if op in (:EQ :NEQ)
+    tfold = fold_tag_compare(ctx, node)
+    if tfold != nil
+      if env("TUNGSTEN_TAG_ASSERT") == "1"
+        return lower_tag_assert_compare(ctx, node, tfold)
+      fold_rhs = tfold == :true_const ? "0" : "1"
+      tconst = next_temp(wfn)
+      emit_instruction(wfn, {op: :icmp_i64, temp: tconst, pred: "eq", lhs: "0", rhs: fold_rhs})
+      return typed_value(:i1, tconst)
 
   # Reject dimensionally impossible additions/subtractions while compiling
   # when both sides are statically known quantities. Dynamic and user-defined

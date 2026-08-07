@@ -4248,6 +4248,11 @@ ewscope_md_state = {ids: {}, order: []}
     "ret void"
   when :unreachable
     "unreachable"
+  # TUNGSTEN_TAG_ASSERT trap (Phase 2.5): an elidable tag guard's
+  # disproven side aborts hard. LLVM's parser auto-declares llvm.*
+  # intrinsics, same as the Math.trap guarded-i48 arm relies on.
+  when :trap_intrinsic
+    "call void @llvm.trap()"
 
   # Phi
   when :phi_i1

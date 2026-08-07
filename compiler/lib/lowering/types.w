@@ -1050,7 +1050,7 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   k = ast_kind(node)
   if k == :var
     return facts[node.name]
-  if k == :self
+  if k == :self_ref
     return facts["__self"]
   nil
 

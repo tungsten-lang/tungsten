@@ -9,6 +9,7 @@ ROOT = File.expand_path("../..", __dir__)
 GENERATOR = File.join(ROOT, "scripts/gen_units.rb")
 COMPILER = File.join(ROOT, "bin/tungsten")
 LEGACY_UNITS = File.join(ROOT, "data/units.tsv")
+LEXER_UNIT_NAMES = File.join(ROOT, "data/unit_names.txt")
 BATCH_SIZE = Integer(ENV.fetch("UNIT_PARITY_BATCH_SIZE", "80"))
 
 $LOAD_PATH.unshift File.join(ROOT, "implementations/ruby/lib")
@@ -111,6 +112,14 @@ manifest_text = capture!(ruby, GENERATOR, "--manifest")
 manifest_rows = manifest_text.lines(chomp: true).map { |line| line.split("\t", 3) }
 compiler_registry = manifest_rows.to_h { |name, _id, canonical| [name, canonical] }
 compiler_ids = manifest_rows.to_h { |name, id, _canonical| [name, Integer(id)] }
+lexer_names = File.readlines(LEXER_UNIT_NAMES, chomp: true, encoding: "utf-8")
+expected_lexer_names = compiler_registry.keys.reject { |name| name == "%" || name == "in" }.sort
+unless lexer_names == expected_lexer_names
+  missing = expected_lexer_names - lexer_names
+  extra = lexer_names - expected_lexer_names
+  abort "lexer unit-name file differs from the compiled registry " \
+        "(missing #{missing.first(10).inspect}, extra #{extra.first(10).inspect})"
+end
 
 legacy_names = File.foreach(LEGACY_UNITS, encoding: "utf-8").filter_map do |line|
   line = line.strip

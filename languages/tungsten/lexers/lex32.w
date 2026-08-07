@@ -713,7 +713,9 @@
             break
         if prev_pos >= 0
           c2 = (lc[prev_pos] >> 11) & cp_mask
-          if (lc[prev_pos] & 0x20) != 0 || (lc[prev_pos] & 0x01) != 0 || c2 == :-) || c2 == :-] || c2 == :-} || c2 == :-\" || c2 == :-\' || c2 == :-? || c2 == :-! || c2 == 0xBB
+          # Superscript digits (² ³ ¹ and ⁰…⁹) end a value — `a²/b` divides;
+          # mirrors compiler/lib/lexer.w's regex-context predicate.
+          if (lc[prev_pos] & 0x20) != 0 || (lc[prev_pos] & 0x01) != 0 || c2 == :-) || c2 == :-] || c2 == :-} || c2 == :-\" || c2 == :-\' || c2 == :-? || c2 == :-! || c2 == 0xBB || c2 == 0xB2 || c2 == 0xB3 || c2 == 0xB9 || (c2 >= 0x2070 && c2 <= 0x2079)
             regex_context = 0
         if regex_context != 0 && pos + 1 < count
           c2 = (lc[pos + 1] >> 11) & cp_mask

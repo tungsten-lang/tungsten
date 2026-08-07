@@ -523,7 +523,7 @@ use known_units
         break
       candidate += ch
       @pos += 1
-      if regex_known_unit_name?(candidate)
+      if known_unit_name?(candidate)
         last_unit = "" + candidate
         last_pos = @pos
     if last_unit != nil

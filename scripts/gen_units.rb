@@ -2,9 +2,10 @@
 # frozen_string_literal: true
 
 # Generates unit lookup tables from the stable legacy IDs in data/units.tsv
-# plus the full Ruby reference registry for both:
+# plus the full Ruby reference registry for:
 #   1. compiler/lib/lowering/literals.w  (Tungsten case/when)
 #   2. runtime/runtime.c (C initializer)
+#   3. data/unit_names.txt (lexer membership, one spelling per line)
 #
 # Usage:
 #   ruby scripts/gen_units.rb              # prints both outputs
@@ -16,6 +17,7 @@
 
 ROOT = File.expand_path("..", __dir__)
 TSV_PATH = File.join(ROOT, "data/units.tsv")
+UNIT_NAMES_PATH = File.join(ROOT, "data/unit_names.txt")
 
 Unit = Struct.new(:id, :name, :category, keyword_init: true)
 Registry = Struct.new(:units, :aliases, :custom_dimensions, keyword_init: true)
@@ -304,22 +306,15 @@ def generate_c_info(registry)
   lines.join("\n")
 end
 
-# Lexer-side membership test for space-separated quantities (`10 ft`):
-# after a number + single space, an identifier that names a known unit makes
-# the pair one QUANTITY token. `%` is excluded — it never follows a space.
-def generate_lexer(registry, function_name = "known_unit_name?")
+# Lexer-side membership data for space-separated quantities (`10 ft`): after
+# a number + single space, an identifier in this set makes the pair one
+# QUANTITY token. `%` is excluded because it never follows a space; `in` is
+# excluded because it is the membership keyword.
+def generate_unit_names(registry)
   # `%` never follows a space; `in` is the membership keyword (`x in (…)`)
   # and must not turn `3 in (...)` into 3 inches.
   scannable = registry.aliases.keys.reject { |name| name == "%" || name == "in" }.sort
-  lines = []
-  lines << "-> #{function_name}(s)"
-  scannable.each_slice(12) do |slice|
-    lines << "  if s in (" + slice.map { |name| "\"#{name}\"" }.join(" ") + ")"
-    lines << "    return true"
-  end
-  lines << "  false"
-  lines << ""
-  lines.join("\n")
+  scannable.join("\n") + "\n"
 end
 
 # -- Markers for in-place replacement --
@@ -332,9 +327,7 @@ LEXER_FILE = File.join(ROOT, "compiler/lib/lexer.w")
 LEXER_START = "# --- BEGIN GENERATED: known_unit_name ---"
 LEXER_END   = "# --- END GENERATED: known_unit_name ---"
 
-REGEX_LEXER_FILE = File.join(ROOT, "languages/tungsten/lexers/known_units.w")
-REGEX_LEXER_START = "# --- BEGIN GENERATED: regex_known_unit_name ---"
-REGEX_LEXER_END   = "# --- END GENERATED: regex_known_unit_name ---"
+LEXER_EXTERNAL_STUB = "# Unit membership is loaded once from data/unit_names.txt by known_units.w."
 
 C_FILE = File.join(ROOT, "runtime/runtime.c")
 C_START = "/* --- BEGIN GENERATED: unit_names --- */"
@@ -374,6 +367,20 @@ def check_between(file, start_marker, end_marker, replacement)
   false
 end
 
+def write_if_changed(file, content)
+  return false if File.exist?(file) && File.read(file, encoding: "utf-8") == content
+
+  File.write(file, content, encoding: "utf-8")
+  true
+end
+
+def check_file(file, expected)
+  return true if File.exist?(file) && File.read(file, encoding: "utf-8") == expected
+
+  warn "Generated file is stale: #{file}"
+  false
+end
+
 # -- Main --
 
 registry = load_registry
@@ -386,7 +393,7 @@ when "--c"
 when "--c-info"
   puts generate_c_info(registry)
 when "--lexer"
-  puts generate_lexer(registry)
+  print generate_unit_names(registry)
 when "--manifest"
   canonical_by_id = registry.units.to_h { |unit| [unit.id, unit.name] }
   registry.aliases.sort.each do |name, id|
@@ -396,19 +403,18 @@ when "--write"
   tungsten_code = generate_tungsten(registry)
   c_code = generate_c(registry)
   c_info_code = generate_c_info(registry)
-  lexer_code = generate_lexer(registry)
-  regex_lexer_code = generate_lexer(registry, "regex_known_unit_name?")
+  unit_names = generate_unit_names(registry)
 
   if replace_between(TUNGSTEN_FILE, TUNGSTEN_START, TUNGSTEN_END, tungsten_code)
     puts "Updated #{TUNGSTEN_FILE}"
   end
 
-  if replace_between(LEXER_FILE, LEXER_START, LEXER_END, lexer_code)
-    puts "Updated #{LEXER_FILE} (known_unit_name?)"
+  if replace_between(LEXER_FILE, LEXER_START, LEXER_END, LEXER_EXTERNAL_STUB)
+    puts "Updated #{LEXER_FILE} (external unit membership)"
   end
 
-  if replace_between(REGEX_LEXER_FILE, REGEX_LEXER_START, REGEX_LEXER_END, regex_lexer_code)
-    puts "Updated #{REGEX_LEXER_FILE} (regex_known_unit_name?)"
+  if write_if_changed(UNIT_NAMES_PATH, unit_names)
+    puts "Updated #{UNIT_NAMES_PATH}"
   end
 
   if replace_between(C_FILE, C_START, C_END, c_code)
@@ -422,13 +428,12 @@ when "--check"
   tungsten_code = generate_tungsten(registry)
   c_code = generate_c(registry)
   c_info_code = generate_c_info(registry)
-  lexer_code = generate_lexer(registry)
-  regex_lexer_code = generate_lexer(registry, "regex_known_unit_name?")
+  unit_names = generate_unit_names(registry)
 
   ok = true
   ok = check_between(TUNGSTEN_FILE, TUNGSTEN_START, TUNGSTEN_END, tungsten_code) && ok
-  ok = check_between(LEXER_FILE, LEXER_START, LEXER_END, lexer_code) && ok
-  ok = check_between(REGEX_LEXER_FILE, REGEX_LEXER_START, REGEX_LEXER_END, regex_lexer_code) && ok
+  ok = check_between(LEXER_FILE, LEXER_START, LEXER_END, LEXER_EXTERNAL_STUB) && ok
+  ok = check_file(UNIT_NAMES_PATH, unit_names) && ok
   ok = check_between(C_FILE, C_START, C_END, c_code) && ok
   ok = check_between(C_FILE, C_INFO_START, C_INFO_END, c_info_code) && ok
 

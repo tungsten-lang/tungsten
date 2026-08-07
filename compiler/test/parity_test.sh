@@ -244,6 +244,7 @@ echo ""
 echo "==> Compiled REPL external unit metadata..."
 META_ROOT="$TMP/metadata-root"
 mkdir -p "$META_ROOT/data"
+cp "$ROOT/data/unit_names.txt" "$META_ROOT/data/unit_names.txt"
 printf '# symbol<TAB>description<TAB>etymology<TAB>history<TAB>source<TAB>year<TAB>status\nm\tEXTERNAL-METADATA-SENTINEL\tfrom-test-etymology\tfrom-test-history\ttest-source\t2026\texact\n' \
   > "$META_ROOT/data/unit_metadata.tsv"
 REPL_OUT="$TMP/repl-metadata.out"
@@ -255,6 +256,23 @@ if printf '? 1 m\n' | TUNGSTEN_ROOT="$META_ROOT" "$ROOT/bin/tungsten-compiler" -
 else
   echo "FAIL  compiled REPL external unit metadata"
   ERRORS="${ERRORS}\n--- compiled REPL metadata ---\n$(head -20 "$REPL_OUT")"
+  FAIL=$((FAIL + 1))
+fi
+
+# Unit spellings are also data, loaded once when the lexer module initializes.
+# A spelling absent from the compiled source must become a quantity when it is
+# present in the external registry, proving the membership set is not embedded.
+echo ""
+echo "==> Compiled lexer external unit-name registry..."
+printf 'external_startup_unit\n' >> "$META_ROOT/data/unit_names.txt"
+printf '1 external_startup_unit\n' > "$TMP/external-unit-name.w"
+LEXER_REGISTRY_OUT="$TMP/lexer-registry.out"
+if TUNGSTEN_ROOT="$META_ROOT" "$ROOT/bin/tungsten-compiler" --lex "$TMP/external-unit-name.w" > "$LEXER_REGISTRY_OUT" 2>&1 &&
+   grep -Fq '44 [1, external_startup_unit]' "$LEXER_REGISTRY_OUT"; then
+  echo "PASS  compiled lexer external unit-name registry"
+else
+  echo "FAIL  compiled lexer external unit-name registry"
+  ERRORS="${ERRORS}\n--- compiled lexer unit names ---\n$(head -20 "$LEXER_REGISTRY_OUT")"
   FAIL=$((FAIL + 1))
 fi
 

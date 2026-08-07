@@ -56,6 +56,12 @@ binary prefixes run from kibi (`Ki`, 2¹⁰) through quebi (`Qi`, 2¹⁰⁰). Ex
 unit and alias spellings take precedence over prefix decomposition, so `M` is
 molar concentration while `Mm` is a megametre.
 
+The compiler and reference lexers load `data/unit_names.txt` once at process
+startup and retain its names in a hash. Tokenization performs only in-memory
+membership checks; it does not read the file per token. The file is generated
+from the shared registry by `scripts/gen_units.rb` and must be shipped beside
+the compiler's other external data.
+
 The focused cross-domain surface includes:
 
 | Domain | Representative units and conventions |

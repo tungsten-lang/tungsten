@@ -1894,20 +1894,33 @@ use lowering/definitions
     << ""
     << "  done (" + mod[:functions].size().to_s() + " functions)"
 
-  # Register custom units (if any were assigned during lowering)
-  # Prepend to main function so they run before any quantity display
-  if ctx[:custom_units] != nil
-    cu_keys = ctx[:custom_units].keys().sort()
+  # Register custom units (if any were assigned during lowering).
+  # Prepend to main function so they run before any quantity display.
+  # They live on mod, not ctx — see assign_custom_unit in literals.w.
+  if mod[:custom_units] != nil && mod[:custom_units].size() > 0
+    cu_keys = mod[:custom_units].keys().sort()
     reg_instructions = []
     cui = 0
     while cui < cu_keys.size()
       unit_name = cu_keys[cui]
-      unit_id = ctx[:custom_units][unit_name]
+      unit_id = mod[:custom_units][unit_name]
       str_id = module_string_constant(mod, unit_name)
       byte_len = utf8_byte_length(unit_name) + 1
       reg_instructions.push({op: :register_unit, unit_id: unit_id, str_id: str_id, byte_len: byte_len})
       cui += 1
-    main_fn[:instructions] = reg_instructions + main_fn[:instructions]
+    # Prepend into the entry block, same shape as prepend_memo_table_initializers.
+    cu_entry = main_fn[:blocks][0]
+    cu_old = cu_entry[:instructions]
+    cu_new = []
+    cui = 0
+    while cui < reg_instructions.size()
+      cu_new.push(reg_instructions[cui])
+      cui += 1
+    cui = 0
+    while cui < cu_old.size()
+      cu_new.push(cu_old[cui])
+      cui += 1
+    cu_entry[:instructions] = cu_new
 
   # Drain any pending goroutines before main exits.
   # If no goroutines were spawned, the run queue is empty and this returns immediately.

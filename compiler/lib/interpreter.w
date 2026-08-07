@@ -1322,6 +1322,23 @@ use target
       if args.size() != 2
         raise "w_quantity_unit_name expects one argument"
       return ccall("w_quantity_unit_name", args[1])
+    when "w_quantity_value"
+      # Bare numeric value (Decimal) of a Quantity — core/quantity.w#value.
+      if args.size() != 2
+        raise "w_quantity_value expects one argument"
+      return ccall("w_quantity_value", args[1])
+    when "w_quantity_to_f"
+      # Evaluated Float of a Quantity (π-quantities collapse to coeff·π) —
+      # core/quantity.w#to_f.
+      if args.size() != 2
+        raise "w_quantity_to_f expects one argument"
+      return ccall("w_quantity_to_f", args[1])
+    when "w_quantity_pipe"
+      # Unit attach/convert used by Array#stdev's quantity arm; also maps
+      # elementwise over arrays.
+      if args.size() != 4
+        raise "w_quantity_pipe expects three arguments"
+      return ccall("w_quantity_pipe", args[1], args[2], args[3])
     when "w_executable_path"
       if args.size() != 1
         raise "w_executable_path expects no arguments"

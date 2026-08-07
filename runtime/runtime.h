@@ -499,6 +499,8 @@ WValue w_decimal_parse(WValue str_v);
 WValue w_currency_parse(WValue amount_v, WValue prefix_v, WValue suffix_v);
 WValue w_quantity_parse(WValue num_v, WValue unit_v);
 WValue w_quantity_unit_name(WValue quantity);
+WValue w_quantity_value(WValue quantity);
+WValue w_quantity_to_f(WValue quantity);
 WValue w_quantity_add(WValue a, WValue b);
 WValue w_quantity_sub(WValue a, WValue b);
 WValue w_quantity_mul(WValue a, WValue b);

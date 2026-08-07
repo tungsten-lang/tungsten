@@ -200,7 +200,7 @@
   recv_is_known_quantity = recv_type == :quantity || ast_kind(recv_node) == :quantity
   if !recv_is_known_quantity && ast_kind(recv_node) == :var && ctx[:quantity_dimensions] != nil
     recv_is_known_quantity = ctx[:quantity_dimensions][recv_node.name] != nil
-  if recv_is_known_quantity && node.block == nil && method_name in ("point" "delta" "point?" "delta?" "origin" "equivalent" "equivalent_to")
+  if recv_is_known_quantity && node.block == nil && method_name in ("point" "delta" "point?" "delta?" "origin" "equivalent" "equivalent_to" "value" "unit_name" "to_f")
     recv_tv = lower_expression(ctx, recv_node)
     call_args = [ensure_i64_value(wfn, recv_tv)]
     helper = "w_quantity_origin"
@@ -216,6 +216,12 @@
       helper = "w_quantity_point_p"
     elsif method_name == "delta?"
       helper = "w_quantity_delta_p"
+    elsif method_name == "value"
+      helper = "w_quantity_value"
+    elsif method_name == "unit_name"
+      helper = "w_quantity_unit_name"
+    elsif method_name == "to_f"
+      helper = "w_quantity_to_f"
     elsif method_name == "equivalent" || method_name == "equivalent_to"
       if node.args.size() != 2
         raise compile_error_for_node(:E_LOWER_QUANTITY_EQUIVALENCE, "quantity equivalence expects target unit and named bridge", ctx[:source_path], node)

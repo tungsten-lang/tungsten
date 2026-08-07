@@ -24710,9 +24710,14 @@ WValue w_quantity_parse(WValue num_v, WValue unit_v) {
     if (!parse_sig_scale_cstr(num, &sig, &scale)) dief("invalid quantity literal: %s", num);
     int unit_id = unit_lookup_id(unit);
     if (unit_id < 0) {
-        /* Unknown unit: register it in the reserved custom region
-         * so the value displays with its own name. */
+        /* Unknown named unit: reuse an already-registered custom slot with
+         * this name — every parse of `2π` must yield the SAME unit id, or
+         * same-unit arithmetic (2π + 1π) sees a dimension mismatch. Only
+         * then claim a free slot so the value displays with its own name. */
         for (int i = W_UNIT_CUSTOM_BASE; i < W_UNIT_CAPACITY; i++) {
+            if (unit_names[i] && strcmp(unit_names[i], unit) == 0) { unit_id = i; break; }
+        }
+        for (int i = W_UNIT_CUSTOM_BASE; unit_id < 0 && i < W_UNIT_CAPACITY; i++) {
             if (!unit_names[i]) { w_register_unit(i, unit); unit_id = i; break; }
         }
         if (unit_id < 0) dief("too many custom units: %s", unit);
@@ -24727,6 +24732,14 @@ WValue w_quantity_unit_name(WValue quantity) {
     quantity_extract(quantity, &unit, &sig, &scale);
     if (unit < 0 || unit >= W_UNIT_CAPACITY || !unit_names[unit]) return W_NIL;
     return w_string(unit_names[unit]);
+}
+
+WValue w_quantity_value(WValue quantity) {
+    if (!is_quantity_any(quantity)) return W_NIL;
+    int unit, scale;
+    int64_t sig;
+    quantity_extract(quantity, &unit, &sig, &scale);
+    return w_decimal(sig, scale);
 }
 
 /* ---- Cross-unit conversion ----
@@ -25231,21 +25244,89 @@ static WValue quantity_combine(WValue a, WValue b, int divide) {
 WValue w_quantity_mul(WValue a, WValue b) { return quantity_combine(a, b, 0); }
 WValue w_quantity_div(WValue a, WValue b) { return quantity_combine(a, b, 1); }
 
+/* Snap a raw double into decimal sig/scale at the same 12 significant
+ * digits decimal division carries. Shared by `| unit` attachment and the
+ * scalar-arithmetic rows that admit a Float into the quantity domain —
+ * the value goes imprecise at this boundary, but stays a quantity. */
+static int double_to_sig_scale(double d, int64_t *sig, int *scale) {
+    char dbuf[40];
+    if (!isfinite(d)) return 0;
+    snprintf(dbuf, sizeof dbuf, "%.12g", d);
+    return parse_sig_scale_cstr(dbuf, sig, scale);
+}
+
+/* ---- π-quantities ----
+ * `2π` lexes through the unit machinery (custom-unit fall-through, name
+ * "π"): an exact decimal multiple of π. Unlike a dimensioned quantity it
+ * is a NUMBER, so evaluation boundaries — Math.*, mixed +/- with plain
+ * numerics, order comparisons, to_f — collapse it to coeff·π as an
+ * (imprecise) double. Multiplicative scaling stays exact and keeps the
+ * unit, so `2π * 50 * t` reaches Math.sin as an exact multiple of π. */
+static int quantity_pi_parts(WValue v, int64_t *sig, int *scale) {
+    int unit;
+    if (!is_quantity_any(v)) return 0;
+    quantity_extract(v, &unit, sig, scale);
+    return unit >= 0 && unit < W_UNIT_CAPACITY && unit_names[unit] &&
+           strcmp(unit_names[unit], "\xcf\x80") == 0;
+}
+
+static double quantity_pi_double(int64_t sig, int scale) {
+    return (double)sig * pow(10.0, (double)scale) * M_PI;
+}
+
+/* Quantity#to_f — evaluate to an imprecise Float: π-quantities collapse
+ * to coeff·π, dimensioned quantities to their bare numeric value. */
+WValue w_quantity_to_f(WValue quantity) {
+    int unit, scale;
+    int64_t sig;
+    if (!is_quantity_any(quantity)) return W_NIL;
+    if (quantity_pi_parts(quantity, &sig, &scale))
+        return w_float(quantity_pi_double(sig, scale));
+    quantity_extract(quantity, &unit, &sig, &scale);
+    return w_float((double)sig * pow(10.0, (double)scale));
+}
+
 /* ---- Conversion pipe: `5 kg + 3 kg | lb(2)` ----
  * Convert a quantity into the named unit, optionally rounding half-up to
  * `digits` decimals (digits < 0 = no rounding). The unit arrives as its
  * NAME — both front-ends intercept `| unit` / `| unit(d)` syntactically. */
 WValue w_quantity_pipe(WValue q, WValue unit_name_v, WValue digits_v) {
-    if (!is_quantity_any(q)) dief("| unit conversion expects a quantity");
+    /* Array lhs (`%d[1.0 2.5] | m/s`): map elementwise — decimals/ints
+     * attach the unit, quantities convert. Boxed arrays only; a typed
+     * buffer has no per-element WValues to rebuild as quantities. */
+    if (w_is_array(q)) {
+        WArray *a = (WArray *)w_as_ptr(q);
+        if (a->ebits != 65)
+            dief("| unit conversion: expected a boxed array, not a typed buffer");
+        WValue *slots = (WValue *)a->slots;
+        WValue out = w_array_new_empty();
+        for (int64_t i = 0; i < a->size; i++)
+            out = w_array_push(out, w_quantity_pipe(slots[a->start + i], unit_name_v, digits_v));
+        return out;
+    }
     const char *uname = as_str(unit_name_v);
     int target = unit_lookup_id(uname);
     if (target < 0) dief("unknown unit in | conversion: %s", uname);
     int unit, scale;
     int64_t sig;
-    quantity_extract(q, &unit, &sig, &scale);
-    if (!quantity_convert(&sig, &scale, unit, target))
-        dief("cannot convert %s to %s (dimension mismatch)",
-             unit_names[unit] ? unit_names[unit] : "?", uname);
+    if (is_quantity_any(q)) {
+        quantity_extract(q, &unit, &sig, &scale);
+        if (!quantity_convert(&sig, &scale, unit, target))
+            dief("cannot convert %s to %s (dimension mismatch)",
+                 unit_names[unit] ? unit_names[unit] : "?", uname);
+    } else if (is_decimal_any(q)) {
+        /* Bare number | unit — nothing to convert from; attach the unit. */
+        decimal_extract(q, &sig, &scale);
+    } else if (w_is_int(q)) {
+        sig = w_as_int(q);
+        scale = 0;
+    } else if (w_is_double(q)) {
+        /* Raw float (e.g. a sqrt result) — snap, then attach. */
+        if (!double_to_sig_scale(w_as_double(q), &sig, &scale))
+            dief("| unit conversion: non-finite float");
+    } else {
+        dief("| unit conversion expects a quantity");
+    }
     int64_t digits = w_is_int(digits_v) ? w_as_int(digits_v) : -1;
     if (digits >= 0 && scale < -digits) {
         int64_t div = 1;
@@ -25279,6 +25360,14 @@ WValue w_quantity_mul_scalar(WValue quantity, WValue scalar) {
         decimal_extract(scalar, &s_sig, &s_scale);
         q_sig *= s_sig;
         q_scale += s_scale;
+    } else if (w_is_double(scalar)) {
+        /* Float scalar joins the decimal domain the way `| unit` does:
+         * snapped to 12 significant digits. Imprecise, but stays a unit. */
+        int64_t s_sig; int s_scale;
+        if (!double_to_sig_scale(w_as_double(scalar), &s_sig, &s_scale))
+            die("cannot multiply quantity by non-finite float");
+        q_sig *= s_sig;
+        q_scale += s_scale;
     } else {
         die("cannot multiply quantity by non-numeric");
     }
@@ -25304,9 +25393,15 @@ WValue w_quantity_div_scalar(WValue quantity, WValue scalar) {
         int result_scale = q_scale - 12;
         __int128 result_sig = q_sig / sv;
         return quantity_result_with_role(w_quantity(unit, (int64_t)result_sig, result_scale), role, quantity_origin_value(quantity));
-    } else if (is_decimal_any(scalar)) {
+    } else if (is_decimal_any(scalar) || w_is_double(scalar)) {
         int64_t s_sig; int s_scale;
-        decimal_extract(scalar, &s_sig, &s_scale);
+        if (w_is_double(scalar)) {
+            /* Float divisor: snap to 12 significant digits, like `| unit`. */
+            if (!double_to_sig_scale(w_as_double(scalar), &s_sig, &s_scale))
+                die("cannot divide quantity by non-finite float");
+        } else {
+            decimal_extract(scalar, &s_sig, &s_scale);
+        }
         if (s_sig == 0) die("division by zero");
         __int128 q_sig = (__int128)q_sig64;
         q_sig *= (__int128)1000000000000LL;
@@ -30980,8 +31075,25 @@ static double cmp_numeric_double(WValue v) {
         decimal_extract(v, &sig, &scale);
         return (double)sig * pow(10.0, (double)scale);
     }
+    /* π-quantities order-compare as their numeric value: 2π > 6. */
+    {
+        int64_t sig; int scale;
+        if (quantity_pi_parts(v, &sig, &scale))
+            return quantity_pi_double(sig, scale);
+    }
     die("expected numeric type");
     return 0.0;
+}
+
+/* A π-quantity next to a plain numeric: the pair order-compares through
+ * cmp_numeric_double (which evaluates the π side). Quantity-vs-quantity
+ * pairs never reach this — quantity_order_compare owns those. */
+static int is_pi_mixed_pair(WValue a, WValue b) {
+    int64_t sig; int scale;
+    int a_num = w_is_double(a) || w_is_integer_any(a) || w_is_rational_any(a) || is_decimal_any(a);
+    int b_num = w_is_double(b) || w_is_integer_any(b) || w_is_rational_any(b) || is_decimal_any(b);
+    return (quantity_pi_parts(a, &sig, &scale) && b_num) ||
+           (quantity_pi_parts(b, &sig, &scale) && a_num);
 }
 
 /* ---- Arithmetic ---- */
@@ -31028,7 +31140,7 @@ static WValue rational_from_parts(WValue numerator, WValue denominator) {
         denominator = bigint_sub_any(zero, denominator);
     }
 
-    WValue gcd = bigint_gcd_any(numerator, denominator);
+    WValue gcd = bigint_gcd_any_inline(numerator, denominator);
     numerator = bigint_div_any(numerator, gcd);
     denominator = bigint_div_any(denominator, gcd);
 
@@ -31446,6 +31558,17 @@ WValue w_add(WValue a, WValue b) {
         return w_currency_add(a, b);
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_quantity_add(a, b);
+    /* π-quantity + plain numeric: π is a number, so mixed addition is an
+     * evaluation boundary — collapse to coeff·π and go imprecise. */
+    {
+        int64_t psig; int pscale;
+        if (quantity_pi_parts(a, &psig, &pscale) &&
+            (w_is_double(b) || w_is_integer_any(b) || w_is_rational_any(b) || is_decimal_any(b)))
+            return w_float(quantity_pi_double(psig, pscale) + as_numeric_double(b));
+        if (quantity_pi_parts(b, &psig, &pscale) &&
+            (w_is_double(a) || w_is_integer_any(a) || w_is_rational_any(a) || is_decimal_any(a)))
+            return w_float(as_numeric_double(a) + quantity_pi_double(psig, pscale));
+    }
     if (is_duration_any(a) && is_duration_any(b))
         return w_duration_add(a, b);
     if (w_is_double(a) || w_is_double(b)) {
@@ -31535,6 +31658,16 @@ WValue w_sub(WValue a, WValue b) {
         return w_currency_sub(a, b);
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_quantity_sub(a, b);
+    /* π-quantity ∓ plain numeric: evaluation boundary, same as w_add. */
+    {
+        int64_t psig; int pscale;
+        if (quantity_pi_parts(a, &psig, &pscale) &&
+            (w_is_double(b) || w_is_integer_any(b) || w_is_rational_any(b) || is_decimal_any(b)))
+            return w_float(quantity_pi_double(psig, pscale) - as_numeric_double(b));
+        if (quantity_pi_parts(b, &psig, &pscale) &&
+            (w_is_double(a) || w_is_integer_any(a) || w_is_rational_any(a) || is_decimal_any(a)))
+            return w_float(as_numeric_double(a) - quantity_pi_double(psig, pscale));
+    }
     if (is_duration_any(a) && is_duration_any(b))
         return w_duration_sub(a, b);
     if (w_is_double(a) || w_is_double(b))
@@ -31609,10 +31742,10 @@ WValue w_mul(WValue a, WValue b) {
     /* quantity * quantity — dimensional algebra (ft × ft → ft²) */
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_quantity_mul(a, b);
-    /* quantity * scalar or scalar * quantity */
-    if (is_quantity_any(a) && (w_is_int(b) || is_decimal_any(b)))
+    /* quantity * scalar or scalar * quantity (Floats snap to decimal) */
+    if (is_quantity_any(a) && (w_is_int(b) || is_decimal_any(b) || w_is_double(b)))
         return w_quantity_mul_scalar(a, b);
-    if ((w_is_int(a) || is_decimal_any(a)) && is_quantity_any(b))
+    if ((w_is_int(a) || is_decimal_any(a) || w_is_double(a)) && is_quantity_any(b))
         return w_quantity_mul_scalar(b, a);
     /* rational * rational, rational * int */
     if (w_is_rational_any(a) && w_is_rational_any(b))
@@ -32000,8 +32133,8 @@ WValue w_div(WValue a, WValue b) {
     /* quantity / quantity — dimensional algebra (ft² ÷ ft → ft; ft ÷ ft → ratio) */
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_quantity_div(a, b);
-    /* quantity / scalar */
-    if (is_quantity_any(a) && (w_is_int(b) || is_decimal_any(b)))
+    /* quantity / scalar (Floats snap to decimal) */
+    if (is_quantity_any(a) && (w_is_int(b) || is_decimal_any(b) || w_is_double(b)))
         return w_quantity_div_scalar(a, b);
     /* rational / rational, rational / int */
     if (w_is_rational_any(a) && w_is_rational_any(b))
@@ -34248,6 +34381,18 @@ static int w_instance_spaceship_compare(WValue a, WValue b) {
     return comparison < 0 ? -1 : (comparison > 0 ? 1 : 0);
 }
 
+static int quantity_order_compare(WValue a, WValue b) {
+    int ua, ub, sa, sb;
+    int64_t ga, gb;
+    quantity_extract(a, &ua, &ga, &sa);
+    quantity_extract(b, &ub, &gb, &sb);
+    if (ua != ub && !quantity_convert(&gb, &sb, ub, ua))
+        dief("cannot compare %s with %s (dimension mismatch)",
+             unit_names[ua] ? unit_names[ua] : "?",
+             unit_names[ub] ? unit_names[ub] : "?");
+    return decimal_compare(w_decimal(ga, sa), w_decimal(gb, sb));
+}
+
 WValue w_lt(WValue a, WValue b) {
     if (w_is_int(a) && w_is_int(b))
         return w_bool(w_as_int(a) < w_as_int(b));
@@ -34263,6 +34408,11 @@ WValue w_lt(WValue a, WValue b) {
 
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) < 0);
+
+    if (is_quantity_any(a) && is_quantity_any(b))
+        return w_bool(quantity_order_compare(a, b) < 0);
+    if (is_pi_mixed_pair(a, b))
+        return w_bool(cmp_numeric_double(a) < cmp_numeric_double(b));
 
     {
         int supported;
@@ -34321,6 +34471,14 @@ WValue w_spaceship(WValue a, WValue b) {
         int c = decimal_compare(a, b);
         return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
     }
+    if (is_quantity_any(a) && is_quantity_any(b)) {
+        int c = quantity_order_compare(a, b);
+        return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
+    }
+    if (is_pi_mixed_pair(a, b)) {
+        double x = cmp_numeric_double(a), y = cmp_numeric_double(b);
+        return w_int(x < y ? -1 : (x > y ? 1 : 0));
+    }
     {
         int supported;
         int comparison = rational_compare_exact(a, b, &supported);
@@ -34363,6 +34521,11 @@ WValue w_gt(WValue a, WValue b) {
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) > 0);
 
+    if (is_quantity_any(a) && is_quantity_any(b))
+        return w_bool(quantity_order_compare(a, b) > 0);
+    if (is_pi_mixed_pair(a, b))
+        return w_bool(cmp_numeric_double(a) > cmp_numeric_double(b));
+
     {
         int supported;
         int comparison = rational_compare_exact(a, b, &supported);
@@ -34403,6 +34566,11 @@ WValue w_lte(WValue a, WValue b) {
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) <= 0);
 
+    if (is_quantity_any(a) && is_quantity_any(b))
+        return w_bool(quantity_order_compare(a, b) <= 0);
+    if (is_pi_mixed_pair(a, b))
+        return w_bool(cmp_numeric_double(a) <= cmp_numeric_double(b));
+
     {
         int supported;
         int comparison = rational_compare_exact(a, b, &supported);
@@ -34442,6 +34610,11 @@ WValue w_gte(WValue a, WValue b) {
 
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) >= 0);
+
+    if (is_quantity_any(a) && is_quantity_any(b))
+        return w_bool(quantity_order_compare(a, b) >= 0);
+    if (is_pi_mixed_pair(a, b))
+        return w_bool(cmp_numeric_double(a) >= cmp_numeric_double(b));
 
     {
         int supported;
@@ -38271,15 +38444,86 @@ static double w_math_to_double(WValue v) {
         decimal_extract(v, &sig, &scale);
         return (double)sig * pow(10.0, (double)scale);
     }
+    /* π-quantities (`2π`) evaluate to coeff·π at the Math boundary. The
+     * trig entry points never reach this: they reduce the exact multiple
+     * first (below). */
+    {
+        int64_t sig; int scale;
+        if (quantity_pi_parts(v, &sig, &scale))
+            return quantity_pi_double(sig, scale);
+    }
     w_raise(w_string("Math: numeric argument expected"));
     return 0.0;
 }
 
+/* ---- Exact trig on π-multiples ----
+ * For Math.sin/cos/tan of a π-quantity, reduce the exact decimal
+ * coefficient mod 2 BEFORE any double rounding: sin(1000000π) is exactly
+ * 0, the quarter points hit 0/±1 exactly, and everything else computes
+ * sin(π·r) with r reflected into [0, ½] — no magnitude-driven precision
+ * loss, ever. r = m/q ∈ [0,2) with m,q exact integers. */
+static int pi_reduce_mod2(int64_t sig, int scale, int64_t *m_out, int64_t *q_out) {
+    if (scale > 0) { *m_out = 0; *q_out = 1; return 1; }  /* sig·10^s, s≥1 ⇒ even */
+    if (scale < -15) return 0;                 /* q wouldn't fit a double exactly */
+    int64_t q = 1;
+    for (int i = 0; i < -scale; i++) q *= 10;
+    int64_t m = sig % (2 * q);
+    if (m < 0) m += 2 * q;
+    *m_out = m;
+    *q_out = q;
+    return 1;
+}
+
+static double sinpi_reduced(int64_t m, int64_t q) {
+    int neg = 0;
+    if (m >= q) { neg = 1; m -= q; }           /* sin(π+x) = -sin(x) */
+    if (2 * m > q) m = q - m;                  /* reflect about ½ */
+    if (m == 0) return 0.0;                    /* unsigned zero: no "-0" output */
+    double s = (2 * m == q) ? 1.0 : sin(M_PI * ((double)m / (double)q));
+    return neg ? -s : s;
+}
+
+static double cospi_reduced(int64_t m, int64_t q) {
+    if (q == 1) return m == 0 ? 1.0 : -1.0;    /* whole turns; q=1 is odd */
+    int64_t m2 = m + q / 2;                    /* cos(πr) = sin(π(r+½)); 10^s is even */
+    if (m2 >= 2 * q) m2 -= 2 * q;
+    return sinpi_reduced(m2, q);
+}
+
+static double tanpi_reduced(int64_t m, int64_t q) {
+    if (m >= q) m -= q;                        /* tan has period π */
+    if (m == 0) return 0.0;
+    if (2 * m == q) return tan(M_PI * 0.5);    /* pole: keep libm's huge value */
+    if (2 * m < q) return tan(M_PI * ((double)m / (double)q));
+    return -tan(M_PI * ((double)(q - m) / (double)q));
+}
+
 WValue w_math_exp(WValue x)   { return w_float(exp(w_math_to_double(x))); }
 WValue w_math_log(WValue x)   { return w_float(log(w_math_to_double(x))); }
-WValue w_math_sin(WValue x)   { return w_float(sin(w_math_to_double(x))); }
-WValue w_math_cos(WValue x)   { return w_float(cos(w_math_to_double(x))); }
-WValue w_math_tan(WValue x)   { return w_float(tan(w_math_to_double(x))); }
+WValue w_math_expm1(WValue x) { return w_float(expm1(w_math_to_double(x))); }
+WValue w_math_log1p(WValue x) { return w_float(log1p(w_math_to_double(x))); }
+WValue w_math_sin(WValue x) {
+    int64_t sig, m, q; int scale;
+    if (quantity_pi_parts(x, &sig, &scale) && pi_reduce_mod2(sig, scale, &m, &q))
+        return w_float(sinpi_reduced(m, q));
+    return w_float(sin(w_math_to_double(x)));
+}
+WValue w_math_cos(WValue x) {
+    int64_t sig, m, q; int scale;
+    if (quantity_pi_parts(x, &sig, &scale) && pi_reduce_mod2(sig, scale, &m, &q))
+        return w_float(cospi_reduced(m, q));
+    return w_float(cos(w_math_to_double(x)));
+}
+WValue w_math_tan(WValue x) {
+    int64_t sig, m, q; int scale;
+    if (quantity_pi_parts(x, &sig, &scale) && pi_reduce_mod2(sig, scale, &m, &q))
+        return w_float(tanpi_reduced(m, q));
+    return w_float(tan(w_math_to_double(x)));
+}
+WValue w_math_asin(WValue x)  { return w_float(asin(w_math_to_double(x))); }
+WValue w_math_acos(WValue x)  { return w_float(acos(w_math_to_double(x))); }
+WValue w_math_atan(WValue x)  { return w_float(atan(w_math_to_double(x))); }
+WValue w_math_cbrt(WValue x)  { return w_float(cbrt(w_math_to_double(x))); }
 WValue w_math_sqrt(WValue x)  { return w_float(sqrt(w_math_to_double(x))); }
 WValue w_math_floor(WValue x) { return w_float(floor(w_math_to_double(x))); }
 WValue w_math_ceil(WValue x)  { return w_float(ceil(w_math_to_double(x))); }
@@ -39612,6 +39856,8 @@ static WValue WN_prime_q = 0;
 static WValue WN_prime_12k_q = 0;
 static WValue WN_prime_30k_q = 0;
 static WValue WN_isqrt = 0;
+static WValue WN_unit_name = 0;
+#define WN_value W_M5("value")
 static WValue WN_downcase = 0, WN_upcase = 0, WN_swapcase = 0, WN_capitalize = 0;
 static WValue WN_ascii_q = 0, WN_valid_utf8_q = 0;
 static WValue WN_prepend = 0, WN_append = 0, WN_to_sym = 0, WN_infinite_q = 0;
@@ -39793,6 +40039,7 @@ static void w_init_method_names(void) {
     WN_prime_12k_q   = w_string("prime_12k?");
     WN_prime_30k_q   = w_string("prime_30k?");
     WN_isqrt         = w_string("isqrt");
+    WN_unit_name     = w_string("unit_name");
     WN_ends_with_q  = w_string("ends_with?");
     WN_replace      = w_string("replace");
     WN_rindex       = w_string("rindex");
@@ -41113,6 +41360,21 @@ static WValue w_ic_string_to_i(WValue r, WValue *a, int c) {
 static WValue w_ic_string_to_f(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_float(atof(as_str(r)));
+}
+static WValue w_ic_string_to_d(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    int64_t sig; int scale;
+    /* Lenient like to_i/to_f: unparseable input yields Decimal 0, not a die. */
+    if (!parse_sig_scale_cstr(as_str(r), &sig, &scale)) return w_decimal(0, 0);
+    return w_decimal(sig, scale);
+}
+static WValue w_ic_decimal_to_d(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return r;  /* already an exact Decimal */
+}
+static WValue w_ic_int_to_d(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_decimal(w_as_int(r), 0);
 }
 static WValue w_ic_string_to_sym(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -44276,6 +44538,13 @@ static WValue w_ic_bigint_prime_q(WValue r, WValue *a, int c) {
     return w_bool(w_prime_test_bigint(r));
 }
 
+/* Exported ccall boundary for the BigInt#prime? source shim
+ * (core/numeric/big_int.w). The screen/Mersenne/Proth/BPSW policy above
+ * stays in the runtime until source code can index limbs directly. */
+WValue w_bigint_prime_q(WValue r) {
+    return w_ic_bigint_prime_q(r, NULL, 0);
+}
+
 static int w_to_s_base_arg(WValue *a, int c) {
     if (c <= 0) return 10;
     if (!w_is_int(a[0])) die("to_s base must be an Int");
@@ -44400,7 +44669,7 @@ static WValue w_ic_int_gcd(WValue r, WValue *a, int c) {
             return w_int((int64_t)bn_gcd_u64_nonzero(xm, ym));
         return w_int((int64_t)(xm | ym));
     }
-    return bigint_gcd_any(r, arg);
+    return bigint_gcd_any_inline(r, arg);
 }
 /* Int#isqrt — bodyless in core/numeric/int.w like prime?; both receiver
  * shapes route here (inline int via the 0xFA table, BigInt via its own). */
@@ -44413,6 +44682,39 @@ static WValue w_ic_int_isqrt(WValue r, WValue *a, int c) {
 static WValue w_ic_bigint_isqrt(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return bigint_isqrt_any(r);
+}
+
+/* Exported ccall boundary for the BigInt#gcd source shim
+ * (core/numeric/big_int.w). bigint_gcd_any itself is static
+ * always_inline for its rational-normalization callers, so this thin
+ * external wrapper is what compiled and tree-walked source dispatch to. */
+WValue w_bigint_gcd(WValue a, WValue b) {
+    return bigint_gcd_any(a, b);
+}
+
+/* Exported reentry-free add boundary for the source-routed operator arm:
+ * BigInt#__big_add composes this (never `+`, which would re-enter the arm
+ * in w_add). Same static-always-inline story as gcd above. */
+WValue w_bigint_add(WValue a, WValue b) {
+    return bigint_add_any(a, b);
+}
+
+/* Result-construction boundaries for source kernel bodies. Alloc hands out
+ * a fresh boxed BigInt with at least `cap` limbs reserved and the limb
+ * storage uninitialized — the source kernel must publish every limb it
+ * claims before sealing. Seal installs the signed size and then trims,
+ * demotes to inline i48, and recycler-releases exactly like every C
+ * kernel's bigint_normalize epilogue. */
+WValue w_bigint_alloc_boxed(WValue cap) {
+    int64_t c = w_to_i64(cap);
+    if (c < 1) c = 1;
+    if (c > (int64_t)INT32_MAX / 8) die("w_bigint_alloc_boxed: capacity too large");
+    return bigint_box(bigint_alloc_raw((int32_t)c));
+}
+WValue w_bigint_seal(WValue v, WValue signed_size) {
+    WBigint *b = w_as_bigint(v);
+    b->size = (int32_t)w_to_i64(signed_size);
+    return bigint_normalize(b);
 }
 
 /* Bigint builtin wrappers (Phase 7+m) */
@@ -44428,7 +44730,7 @@ static WValue w_ic_bigint_to_f(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_bigint_gcd(WValue r, WValue *a, int c) {
     if (c < 1) die("gcd requires 1 argument");
-    return bigint_gcd_any(r, a[0]);
+    return bigint_gcd_any_inline(r, a[0]);
 }
 static inline __attribute__((always_inline))
 WValue w_ic_bigint_abs(WValue r, WValue *a, int c) {
@@ -44492,7 +44794,7 @@ WValue w_ic_integer_lcm_generic(WValue r, WValue *a, int c) {
      * w_div/w_mul dispatch preambles are integer-dead weight here.  Random
      * operands are almost always coprime, so a unit gcd skips the exact
      * division (and its allocation) entirely. */
-    WValue divisor = bigint_gcd_any(r, arg);
+    WValue divisor = bigint_gcd_any_inline(r, arg);
     WValue product;
     if (w_is_int(divisor) && w_as_int(divisor) == 1) {
         product = bigint_mul_any(r, arg);
@@ -45404,6 +45706,20 @@ static WICEntry w_ic_hash_table[] = {      /* Phase 7+l */
 static WICEntry w_ic_float_table[] = {     /* Phase 7+i */
     {0, w_ic_float_to_i},
     {0, w_ic_float_to_s},
+    {0, w_ic_float_sqrt},
+    {0, NULL}
+};
+
+/* Quantity metadata accessors (0xFFFD tag with a unit; heap-domain form
+ * shares the key). Backs core/quantity.w#value/#unit_name for receivers
+ * whose static type the compiler cannot prove. */
+static WValue w_ic_quantity_value_fn(WValue r, WValue *a, int c) { (void)a; (void)c; return w_quantity_value(r); }
+static WValue w_ic_quantity_unit_name_fn(WValue r, WValue *a, int c) { (void)a; (void)c; return w_quantity_unit_name(r); }
+static WValue w_ic_quantity_to_f_fn(WValue r, WValue *a, int c) { (void)a; (void)c; return w_quantity_to_f(r); }
+static WICEntry w_ic_quantity_table[] = {
+    {0, w_ic_quantity_value_fn},
+    {0, w_ic_quantity_unit_name_fn},
+    {0, w_ic_quantity_to_f_fn},
     {0, NULL}
 };
 
@@ -45416,6 +45732,14 @@ static WICEntry w_ic_decimal_table[] = {     /* 0xFFFD numeric tag */
     {0, w_ic_num_sq},
     {0, w_ic_decimal_to_f},
     {0, w_ic_decimal_abs},
+    {0, w_ic_decimal_to_d},    /* WN_to_d — identity */
+    {0, NULL}
+};
+
+static WICEntry w_ic_date_table[] = {        /* packed date, subtype 4 */
+    {0, w_ic_date_to_s},         /* to_s — ISO; with a format arg, strftime */
+    {0, w_ic_date_to_s},         /* strftime — same handler */
+    {0, w_ic_value_to_s},        /* inspect */
     {0, NULL}
 };
 
@@ -45522,6 +45846,7 @@ static void w_init_ic_tables(void) {
     /* Slot 34 (reverse) retired to core/string_native.w. */
     w_ic_string_table[35].name = WN_size;    /* round-5: dynamic-path gap */
     w_ic_string_table[36].name = WN_length;
+    w_ic_string_table[37].name = WN_to_d;
     /* Int */
     /* Slot 0 (to_s, both arities) retired to core/integer.w. */
     w_ic_int_table[1].name    = WN_abs;
@@ -45624,6 +45949,10 @@ static void w_init_ic_tables(void) {
     w_ic_ipv4_table[0].name = w_string("inspect");
     w_ic_ipv6_table[0].name = w_string("inspect");
     w_ic_mac_table[0].name = w_string("inspect");
+
+    w_ic_quantity_table[0].name = WN_value;
+    w_ic_quantity_table[1].name = WN_unit_name;
+    w_ic_quantity_table[2].name = WN_to_f;
 }
 
 static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WValue*, int) {
@@ -45639,7 +45968,8 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
              * handlers funnel through cmp_numeric_double, which die()s on a
              * currency/quantity receiver (e.g. `(2 m).round`). Send those to
              * the cascade instead, which dispatches their real methods. */
-            if (is_currency_any(recv) || is_quantity_any(recv)) return NULL;
+            if (is_currency_any(recv)) return NULL;
+            if (is_quantity_any(recv)) { table = w_ic_quantity_table; break; }
             table = w_ic_decimal_table; break;  /* 0xFFFD numeric (decimal) */
         case 0x05: table = w_ic_hash_table;    break;  /* Phase 7+l */
         case 0x01: table = w_ic_atomic_table;  break;  /* Phase 7+m */

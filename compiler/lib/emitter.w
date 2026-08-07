@@ -511,6 +511,8 @@ use hashing
 
   # Closures
   out << declare_fn("w_closure_new", wv, ptr_ptr_i32)
+  out << declare_fn("w_closure_new_a", wv, "ptr, ptr, i32, i32")
+  out << declare_fn("w_destructure_index", wv, wv2)
   out << declare_fn("w_closure_cell_new", "ptr", "")
   out << declare_fn("w_closure_call_0", wv, wv)
   out << declare_fn("w_closure_call_1", wv, wv2)
@@ -1623,7 +1625,7 @@ ewscope_md_state = {ids: {}, order: []}
     else
       ["w_method_call_cached"]
   when :closure_new
-    ["w_closure_new"]
+    ["w_closure_new_a"]
   when :free_value
     ["w_value_free"]
 
@@ -4998,7 +5000,7 @@ ewscope_md_state = {ids: {}, order: []}
   when :i64_to_ptr
     inst[:temp] + " = inttoptr i64 " + inst[:value] + " to ptr"
   when :closure_new
-    inst[:temp] + " = call i64 @w_closure_new(ptr @" + inst[:fn_name] + ", ptr " + inst[:captures_ptr] + ", i32 " + inst[:capture_count].to_s() + ")"
+    inst[:temp] + " = call i64 @w_closure_new_a(ptr @" + inst[:fn_name] + ", ptr " + inst[:captures_ptr] + ", i32 " + inst[:capture_count].to_s() + ", i32 " + (inst[:block_arity] == nil ? 0 : inst[:block_arity]).to_s() + ")"
   when :alloca_array
     lbr = "\["
     rbr = "]"

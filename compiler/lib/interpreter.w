@@ -3591,9 +3591,17 @@ use target
             argi += 1
           i += 1
       else
+        # Ruby-style destructuring: a multi-param block receiving a single
+        # Array element spreads it across the params (missing → nil).
+        eff_args = args
+        if params.size() > 1 && args.size() == 1 && type(args[0]) == "Array"
+          eff_args = args[0]
         i = 0
         while i < params.size()
-          block_env.define(params[i], args[i])
+          if i < eff_args.size()
+            block_env.define(params[i], eff_args[i])
+          else
+            block_env.define(params[i], nil)
           i += 1
       # Evaluate the body under the closure's captured self (see the :block
       # arm of evaluate). Interpreter-built [env, node] pairs carry no

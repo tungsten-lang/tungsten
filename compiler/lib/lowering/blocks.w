@@ -826,5 +826,10 @@
     emit_instruction(wfn, {op: :null_ptr, temp: cap_ptr})
 
   closure = next_temp(wfn)
-  emit_instruction(wfn, {op: :closure_new, temp: closure, fn_name: fn_name, captures_ptr: cap_ptr, capture_count: captures.size()})
+  # block_arity carries the DECLARED param count so single-arg yields can
+  # destructure an Array element across a multi-param block
+  # (w_closure_call_1). Free-var implicit blocks stay arity 0 — implicit
+  # binding is first-reference order, never destructuring.
+  declared_arity = block.params.size()
+  emit_instruction(wfn, {op: :closure_new, temp: closure, fn_name: fn_name, captures_ptr: cap_ptr, capture_count: captures.size(), block_arity: declared_arity})
   typed_value(:i64, closure)

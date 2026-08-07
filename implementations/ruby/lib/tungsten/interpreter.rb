@@ -2024,6 +2024,9 @@ module Tungsten
           block_env.set_slot(i, args[i])
         end
       else
+        # Ruby-style destructuring: a multi-param block receiving a single
+        # Array element spreads it across the params (missing -> nil).
+        args = args[0] if params.length > 1 && args.length == 1 && args[0].is_a?(Array)
         block_env = new_param_env(closure_env, params, block)
         params.each_index do |i|
           block_env.set_slot(i, args[i])

@@ -784,10 +784,13 @@ typedef struct {
     void *fn_ptr;
     WValue *captures;
     int capture_count;
+    int arity;              /* declared block params; 0 = unknown (legacy) */
 } WClosure;
 
 void *w_closure_cell_new(void);
 WValue w_closure_new(void *fn, WValue *captures, int count);
+WValue w_closure_new_a(void *fn, WValue *captures, int count, int arity);
+WValue w_destructure_index(WValue v, int64_t i);
 WValue w_closure_call_0(WValue closure_val);
 WValue w_closure_call_1(WValue closure_val, WValue arg);
 WValue w_closure_call_2(WValue closure_val, WValue arg1, WValue arg2);

@@ -37975,6 +37975,27 @@ WValue w_closure_new(void *fn, WValue *captures, int count) {
     return w_box_ptr(cl, W_SUBTAG_CLOSURE);
 }
 
+/* Closure creation carrying the block's declared param count, so single-arg
+ * yields can destructure an Array element across a multi-param block
+ * (Ruby proc semantics). The compiler emits this; w_closure_new stays for
+ * runtime-internal closures (arity 0 = unknown, never destructured). */
+WValue w_closure_new_a(void *fn, WValue *captures, int count, int arity) {
+    WValue v = w_closure_new(fn, captures, count);
+    ((WClosure *)w_as_ptr(v))->arity = arity;
+    return v;
+}
+
+/* Block-param destructuring accessor: element i of an Array (nil past the
+ * end); a non-array value goes to param 0 verbatim, nil beyond. */
+WValue w_destructure_index(WValue v, int64_t i) {
+    if (w_is_array(v)) {
+        WArray *a = (WArray *)w_as_ptr(v);
+        if (i < a->size) return w_array_get(v, w_int(i));
+        return W_NIL;
+    }
+    return i == 0 ? v : W_NIL;
+}
+
 static WValue call_closure_1(WClosure *cl, WValue arg) {
     typedef WValue (*fn_t)(WValue *, WValue);
     return ((fn_t)cl->fn_ptr)(cl->captures, arg);
@@ -37989,6 +38010,16 @@ WValue w_closure_call_0(WValue closure_val) {
 
 WValue w_closure_call_1(WValue closure_val, WValue arg) {
     WClosure *cl = as_closure(closure_val);
+    /* Ruby-style destructuring: a multi-param block yielded one Array
+     * element spreads it across the params (missing → nil, extras dropped). */
+    if (cl->arity >= 2 && w_is_array(arg)) {
+        WValue a0 = w_destructure_index(arg, 0);
+        WValue a1 = w_destructure_index(arg, 1);
+        if (cl->arity == 2) return w_closure_call_2(closure_val, a0, a1);
+        WValue a2 = w_destructure_index(arg, 2);
+        if (cl->arity == 3) return w_closure_call_3(closure_val, a0, a1, a2);
+        return w_closure_call_4(closure_val, a0, a1, a2, w_destructure_index(arg, 3));
+    }
     typedef WValue (*fn_t)(WValue *, WValue);
     return ((fn_t)cl->fn_ptr)(cl->captures, arg);
 }

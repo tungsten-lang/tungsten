@@ -1326,7 +1326,23 @@
     si += 1
   elem = next_temp(wfn)
   emit_instruction(wfn, {op: :array_get_inline, temp: elem, arr: receiver_reg, idx: idx_boxed[:value], s: scratch})
-  if param_name != nil
+  iter_bparams = block.params
+  if iter_bparams != nil && iter_bparams.size() > 1
+    # ->(a, b): destructure the yielded element across the declared params
+    # (Ruby proc semantics; missing → nil), matching w_closure_call_1.
+    dpi = 0
+    while dpi < iter_bparams.size()
+      dp_name = iter_bparams[dpi]
+      if is_ast_node?(dp_name)
+        dp_name = dp_name.name
+      dp_val = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: dp_val, name: "w_destructure_index", args: [elem, dpi.to_s()]})
+      dp_ptr = ensure_var_slot(wfn, dp_name)
+      emit_instruction(wfn, {op: :store_i64, value: dp_val, ptr: dp_ptr})
+      ctx[:bindings][dp_name] = nil
+      ctx[:var_types][dp_name] = nil
+      dpi += 1
+  elsif param_name != nil
     ptr = ensure_var_slot(wfn, param_name)
     emit_instruction(wfn, {op: :store_i64, value: elem, ptr: ptr})
     ctx[:bindings][param_name] = nil

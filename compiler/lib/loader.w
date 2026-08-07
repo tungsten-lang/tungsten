@@ -116,6 +116,9 @@ use parser
     ast.expressions.each -> (e)
       expressions.push(e)
     user_count = expressions.size()
+    # [start, count] per autoloaded file so the final reorder can reverse
+    # at file granularity (see below).
+    blocks = []
     iteration = 0
     # Deep autoload walk watermark: each iteration only recurses into
     # expressions appended since the last one. Re-walking already-scanned
@@ -159,10 +162,12 @@ use parser
               << "  autoload skip " + name + " (parse error in core/" + path + ")"
             loaded = nil
           if loaded != nil
+            block_start = expressions.size()
             li = 0
             while li < loaded.expressions.size()
               expressions.push(loaded.expressions[li])
               li += 1
+            blocks.push([block_start, loaded.expressions.size()])
         pi += 1
       iteration += 1
     # Reorder so autoloaded class defs come before user code that inherits
@@ -170,12 +175,21 @@ use parser
     # before Object's class_new ran. Autoload pulls in top-down order
     # (user-referenced first, then their deps), so the deepest dependency
     # was loaded LAST — reversing the autoloaded tail puts roots first,
-    # which is what class creation needs.
+    # which is what class creation needs. The reverse is at FILE-BLOCK
+    # granularity: each autoloaded file keeps its own declaration order
+    # (an orchestrator like core/dynamics.w splices `use`d workers with
+    # parents before children — an expression-level reverse would run
+    # child class_new before its parent and leave a nil superclass).
     reordered = []
-    ai = expressions.size() - 1
-    while ai >= user_count
-      reordered.push(expressions[ai])
-      ai -= 1
+    bi = blocks.size() - 1
+    while bi >= 0
+      bstart = blocks[bi][0]
+      bcount = blocks[bi][1]
+      k = 0
+      while k < bcount
+        reordered.push(expressions[bstart + k])
+        k += 1
+      bi -= 1
     ui = 0
     while ui < user_count
       reordered.push(expressions[ui])
@@ -627,7 +641,7 @@ use parser
         # incremental cost of also loading it for the integer methods is small,
         # and it makes a standalone bigint-method program (e.g. `n.modpow(...)`
         # with no predicate) resolve instead of dispatching to Object.
-        if @bigint_predicates_unresolved && call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length")
+        if @bigint_predicates_unresolved && call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "abs" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length" "prev" "succ" "next" "prime?")
           consider_autoload_name("BigInt", defined, registry, seen, pending)
           @bigint_predicates_unresolved = false
 

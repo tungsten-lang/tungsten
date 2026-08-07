@@ -40178,8 +40178,19 @@ static inline uint64_t w_dispatch_key(WValue v) {
             uint8_t type = *(uint8_t *)w_as_ptr(v);
             return 0x80u | (uint64_t)type;
         }
-        if (subtag == W_SUBTAG_DOMAIN && w_is_big_rational(v))
-            return 0xE0u | W_PACKED_RATIONAL;
+        if (subtag == W_SUBTAG_DOMAIN) {
+            if (w_is_big_rational(v))
+                return 0xE0u | W_PACKED_RATIONAL;
+            /* Heap-domain numerics (significands or unit ids past the
+             * nan-box width — long division results, wide-σ quantities,
+             * compound units) share the packed 0xFD key so the decimal /
+             * quantity IC tables and class methods resolve identically to
+             * their packed forms. */
+            uint8_t dt = w_as_domain(v)->domain_type;
+            if (dt == W_DOMAIN_DECIMAL || dt == W_DOMAIN_QUANTITY ||
+                dt == W_DOMAIN_CURRENCY)
+                return 0xFDu;
+        }
         return subtag;
     }
     /* BigInt's top-level tag (v4) keeps its historical dispatch key so
@@ -45121,6 +45132,10 @@ static WValue w_ic_float_to_i(WValue r, WValue *a, int c) {
     return w_int((int64_t)w_as_double(r));
 }
 static WValue w_ic_float_to_s(WValue r, WValue *a, int c) { (void)a; (void)c; return w_to_s(r); }
+static WValue w_ic_float_sqrt(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_box_double(sqrt(w_as_double(r)));
+}
 /* Decimal (0xFFFD "numeric" tag) numeric conversions. Decimals had no IC
  * table, so `8.0.to_i`, `Vector#length`'s sqrt, etc. missed the cache and
  * died with "undefined method ... for Object". A decimal isn't a raw double,
@@ -45936,6 +45951,7 @@ static void w_init_ic_tables(void) {
     /* Float */
     w_ic_float_table[0].name  = WN_to_i;
     w_ic_float_table[1].name  = WN_to_s;
+    w_ic_float_table[2].name  = WN_sqrt;
 
     w_ic_decimal_table[0].name = WN_to_i;
     w_ic_decimal_table[1].name = WN_sqrt;
@@ -49037,6 +49053,29 @@ WValue w_array_new_uninit_sized(int64_t element_bits, int64_t n) {
     a->size = (int32_t)n;
     return v;
 }
+
+/* Boxed numeric array → typed float buffer (Array#to_f32/to_f64; the
+ * `%f32[…]`/`%f64[…]` literals desugar through these). Elements coerce
+ * through as_numeric_double, so ints, decimals, and raw floats all land. */
+static WValue array_to_float_typed(WValue arr, int64_t element_bits) {
+    if (!w_is_array(arr)) dief("to_f32/to_f64 expects an array");
+    WArray *a = (WArray *)w_as_ptr(arr);
+    int64_t n = a->size;
+    WValue out = w_array_new(element_bits, n > 0 ? n : 8);
+    WArray *o = (WArray *)w_as_ptr(out);
+    for (int64_t i = 0; i < n; i++) {
+        double d;
+        if (a->ebits == 65) d = as_numeric_double(((WValue *)a->slots)[a->start + i]);
+        else if (array_is_float(a)) d = array_read_float(a, a->start + i);
+        else dief("to_f32/to_f64: unsupported source element type");
+        array_write_float(o, i, d);
+    }
+    o->size = (int32_t)n;
+    return out;
+}
+
+WValue w_array_to_f64(WValue arr) { return array_to_float_typed(arr, -64); }
+WValue w_array_to_f32(WValue arr) { return array_to_float_typed(arr, -32); }
 
 WValue w_elementwise_size_check(WValue lhs, WValue rhs) {
     WArray *la = (WArray *)w_as_ptr(lhs);

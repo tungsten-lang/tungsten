@@ -1562,6 +1562,12 @@ use target
     when "w_array_ipnsort"
       return ccall("w_array_ipnsort", args[1])
 
+    # -- Array#to_f64 / #to_f32 (core/array.w; %f64[…]/%f32[…] desugar) --
+    when "w_array_to_f64"
+      return ccall("w_array_to_f64", args[1])
+    when "w_array_to_f32"
+      return ccall("w_array_to_f32", args[1])
+
     raise "Unsupported ccall '[cname]' in interpreter"
 
   -> interpreted_thread?(value)

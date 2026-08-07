@@ -969,6 +969,10 @@ module Tungsten
         parse_word_array
       when :SYMBOL_ARRAY
         parse_symbol_array
+      when :DECIMAL_ARRAY
+        parse_decimal_array
+      when :FLOAT_ARRAY
+        parse_float_array
 
       when :SYMBOL
         node_and_next_token Symbol.new(@token.value)
@@ -1503,6 +1507,19 @@ module Tungsten
     def parse_symbol_array
       words = scan_word_array_body
       ArrayLiteral.new(words.map { |w| Symbol.new(w) })
+    end
+
+    # %d[1.0 2.5 3.75] — a plain array of Decimal literals.
+    def parse_decimal_array
+      words = scan_word_array_body
+      ArrayLiteral.new(words.map { |w| Decimal.new(w) })
+    end
+
+    # %f32[…] / %f64[…] — this engine has no typed buffers, so both desugar
+    # to a plain array of Float literals (the width is accepted and dropped).
+    def parse_float_array
+      words = scan_word_array_body
+      ArrayLiteral.new(words.map { |w| Float.new(w) })
     end
 
     def scan_word_array_body

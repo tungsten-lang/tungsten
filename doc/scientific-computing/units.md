@@ -72,14 +72,57 @@ The focused cross-domain surface includes:
 Some examples:
 
 ```tungsten
-1 M | "mmol/L"               # 1000 mmol/L
+1 M | mmol/L                 # 1000 mmol/L
 1 statV | V                  # 299.792458 V
-1 Jy | "W/m²/Hz"             # 1e-26 W/m²/Hz
+1 Jy | W/m²/Hz               # 1e-26 W/m²/Hz
 1 rad_dose | Gy              # 0.01 Gy
 1 sverdrup | "m³/s"          # 1000000 m³/s
 1 Rm | Qm                    # 0.001 Qm
 1 Kib | b                    # 1024 b
 ```
+
+### Conversion-pipe targets
+
+The right side of a conversion pipe is a unit spelling, written bare in any
+of the registry's forms — simple (`| km`), prefixed and mixed-case (`| eV`,
+`| mmHg`, `| kWh`), compound with `/` and `·` (`| km/h`, `| W/m²/Hz`,
+`| kg·m/s`), and with superscript exponents (`| W/m²`). Rounding digits
+attach in parentheses: `| cm(2)`, `| km/h(2)`, `| eV(3)`.
+
+A quoted spelling (`| "m³/s"`) is always accepted and remains necessary for
+names the expression grammar cannot carry bare: multi-word spellings such as
+`"metric cup"` and negative superscript exponents such as `"cm⁻¹"`.
+
+A bare component that names a local variable or function keeps its ordinary
+expression meaning — shadowed spellings fall back to division/bitwise-or, so
+`x | y` on integers stays bitwise-or whenever `y` is real code. Conversion
+pipes also work inside string interpolation, which is the idiomatic
+formatting position:
+
+```tungsten
+speed = 5 m/s
+<< "cruise: [speed | km/h(1)]"      # cruise: 18 km/h
+<< "flux: [340.25 W/m² | W/m²]"     # flux: 340.25 W/m²
+```
+
+### Attaching units to bare numbers and arrays
+
+A pipe whose left side is a bare number has nothing to convert from, so it
+*attaches* the unit instead: `2.5 | km` is `2.5 km`. Piped onto an array,
+the conversion maps elementwise — decimals and ints attach, quantities
+convert — which pairs with the `%d[…]` decimal-array literal for building
+measurement series:
+
+```tungsten
+samples = %d[1.0 2.5 4.0] | m/s     # [1 m/s, 2.5 m/s, 4 m/s]
+samples | km/h                       # [3.6 km/h, 9 km/h, 14.4 km/h]
+samples.mean                         # 2.5 m/s
+samples.stdev                        # sample σ, unit re-attached
+```
+
+Array statistics (`mean`, `variance`, `stdev`, `median`) are quantity-aware:
+`mean`/`median` keep the element unit, `variance` carries the squared unit,
+and `stdev` converts elements to the first element's unit before taking σ.
 
 The registry keeps common same-shape distinctions semantic. Baud is symbols
 per second, not bits per second. `M` cannot silently add to `mEq/L`; `CFU`

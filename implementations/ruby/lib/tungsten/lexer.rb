@@ -406,6 +406,10 @@ module Tungsten
         token :WORD_ARRAY
       elsif skip_scan(/%i\[/)
         token :SYMBOL_ARRAY
+      elsif skip_scan(/%d\[/)
+        token :DECIMAL_ARRAY
+      elsif (text = scan(/%f(32|64)\[/))
+        token :FLOAT_ARRAY, text[2, 2]
 
       elsif skip_scan(/"(?!>(?:\s|$))/)
         scan_string

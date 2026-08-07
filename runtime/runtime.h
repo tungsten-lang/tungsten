@@ -654,6 +654,8 @@ int64_t w_truthy(WValue v);
 
 /* ---- Array ---- */
 WValue w_array_new_empty(void);     /* polymorphic, default cap */
+WValue w_array_to_f64(WValue arr);  /* boxed numeric → typed f64 buffer */
+WValue w_array_to_f32(WValue arr);  /* boxed numeric → typed f32 buffer */
 void   w_array_recycle_public(WValue v);
 WValue w_array_push(WValue arr, WValue val);
 WValue w_array_pop(WValue arr);

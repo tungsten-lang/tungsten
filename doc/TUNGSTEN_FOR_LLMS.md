@@ -232,9 +232,22 @@ ensure
 - **ByteArray**: `« ff 00 a5 »` (hex bytes)
 - **StringBuffer**: `StringBuffer()` (mutable UTF-8 builder, `.append`, `.to_s`)
 - **Currency**: `$3.50`, `25¢` — and percent literals: `price - 15%`
-- **Quantity**: `5 kg`, `100 mph` (units with conversion: `1 acre | sqft`)
-- **Date/Time**: `2024-01-15`, `14:30:00`
+- **Quantity**: `5 kg`, `100 mph`, compound `9.8 m/s²`, `1 J·s` — scientific
+  notation with digit grouping works too: `6.626_070_15e-34 J·s`
+- **Unit conversion pipe**: `1 acre | sqft`, `5 m/s | km/h`, `1 J | eV(3)`
+  (bare compound/mixed-case spellings; `(N)` = rounding digits) — also inside
+  interpolation: `"[speed | km/h(1)]"`. Bare numbers attach the unit
+  (`2.5 | km` → `2.5 km`); piped onto an array it maps elementwise.
+- **Decimal array**: `%d[1.0 2.5 3.75]` — array of exact Decimals; pairs
+  with the pipe for measurement series: `%d[1.0 2.5] | m/s`. Array stats
+  `mean` / `variance` / `stdev` / `median` are quantity-aware.
+- **Typed float arrays**: `%f64[1.5 2.5]`, `%f32[…]` — real typed f64/f32
+  buffers (elementwise `.+ .- .* ./` ready), not boxed arrays.
+- **Date/Time**: `2024-01-15`, `14:30:00` — `d.strftime("%Y/%m/%d")` /
+  `d.to_s(fmt)` format
 - **Duration**: `5m30s`
+- **Math constants**: `π`, `τ`, with superscript powers (`π²`, `π⁴`);
+  `Math.exp/log/expm1/log1p/cbrt/hypot/atan2` and the hyperbolics are native
 
 ## Key Differences from Ruby/Python
 

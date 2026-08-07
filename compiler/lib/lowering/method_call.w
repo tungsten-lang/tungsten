@@ -232,6 +232,36 @@
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: helper, args: call_args})
     return typed_value(:i64, temp)
 
+  # `%f32[…]`/`%f64[…]` literals parse as `[~…].to_f32/to_f64`. When every
+  # element is a float literal, skip the boxed intermediate entirely:
+  # allocate the typed buffer at exact capacity and push each element — the
+  # runtime write narrows to the element width. Dynamic receivers and
+  # non-literal elements keep the Array#to_f32/to_f64 converter path.
+  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && method_name in ("to_f64" "to_f32") && ast_kind(recv_node) == :array
+    pfa_els = recv_node.elements
+    pfa_all_float = true
+    pfa_i = 0
+    while pfa_i < pfa_els.size()
+      if !is_ast_node?(pfa_els[pfa_i]) || ast_kind(pfa_els[pfa_i]) != :float
+        pfa_all_float = false
+      pfa_i += 1
+    if pfa_all_float
+      pfa_bits = "-64"
+      if method_name == "to_f32"
+        pfa_bits = "-32"
+      pfa_cap = pfa_els.size()
+      if pfa_cap < 1
+        pfa_cap = 1
+      pfa_arr = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: pfa_arr, name: "w_array_new", args: [pfa_bits, pfa_cap.to_s()]})
+      pfa_i = 0
+      while pfa_i < pfa_els.size()
+        pfa_val = ensure_i64_value(wfn, lower_expression(ctx, pfa_els[pfa_i]))
+        pfa_tmp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: pfa_tmp, name: "w_array_push", args: [pfa_arr, pfa_val]})
+        pfa_i += 1
+      return typed_value(:i64, pfa_arr)
+
   if recv_type == :array && call_has_ast_block?(node) && (node.args == nil || node.args.size() == 0) && inline_array_iterator_method?(method_name)
     inlined = lower_inline_array_iterator_call(ctx, recv_node, method_name, node.block)
     if inlined != nil

@@ -2065,6 +2065,37 @@ use ../../core/token
     # Symbol array (%i[one two three])
     if at_type?(T_SYMBOL_ARRAY)
       return Tungsten:AST:SymbolArray.new(advance_value())
+
+    # Decimal array (%d[1.0 2.5 3.75]) — desugars to a plain Array of
+    # Decimal literals, so lowering, the interpreter, and `| <unit>`
+    # treat it exactly like [1.0, 2.5, 3.75].
+    if at_type?(T_DECIMAL_ARRAY)
+      comps = advance_value()
+      nodes = []
+      ci = 0
+      while ci < comps.size()
+        nodes.push(Tungsten:AST:Decimal.new(comps[ci]))
+        ci += 1
+      return Tungsten:AST:Array.new(nodes)
+
+    # Typed float array (%f32[1.0 2.5] / %f64[…]) — desugars to a Float
+    # literal Array piped through Array#to_f32/to_f64, which build a real
+    # typed buffer (ebits -32/-64), the same storage f64[n] fills.
+    if at_type?(T_FLOAT_ARRAY)
+      payload = advance_value()
+      width = payload[0]
+      if width != "32" && width != "64"
+        raise compile_error_at(:E_PARSE_UNEXPECTED_TOKEN, "unsupported float array width %f" + width + " — use %f32 or %f64")
+      comps = payload[1]
+      nodes = []
+      ci = 0
+      while ci < comps.size()
+        nodes.push(Tungsten:AST:Float.new(comps[ci]))
+        ci += 1
+      conv = "to_f64"
+      if width == "32"
+        conv = "to_f32"
+      return Tungsten:AST:Call.new(Tungsten:AST:Array.new(nodes), conv, [])
     # Hypercomplex literal: %h4-f32[1 2 3 4] -> Quaternion<f32>.new([1, 2, 3, 4]).
     # Desugars to a generic constructor call, reusing the whole construction path.
     if at_type?(T_HYPER_ARRAY)

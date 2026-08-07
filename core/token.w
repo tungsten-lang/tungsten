@@ -224,6 +224,15 @@ T_CARET_EQ        = 163
 T_LSHIFT_EQ       = 164
 T_RSHIFT_EQ       = 165
 
+# `%d[1.0 2.5 …]` decimal array literal — desugars in the parser to a
+# plain Array of Decimal literals (no dedicated AST kind).
+T_DECIMAL_ARRAY   = 166
+
+# `%f32[…]` / `%f64[…]` typed float array literals — desugar in the
+# parser to a Float-literal Array converted via Array#to_f32/to_f64
+# into a real typed buffer (ebits -32/-64).
+T_FLOAT_ARRAY     = 167
+
 + Token
   # Force-load helper — referencing this from a caller triggers the
   # autoload pass to load core/token.w, which in turn registers Token

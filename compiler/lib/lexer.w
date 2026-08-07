@@ -65,6 +65,8 @@ use ../../languages/tungsten/lexers/regex_helpers
   # are consumed.
   t_constant     = tag | (0x1A << 38)
   t_hyper_array  = tag | (0x1B << 38)
+  t_decimal_array = tag | (0x1C << 38)
+  t_float_array  = tag | (0x1D << 38)
 
   loop
     if pos >= count
@@ -720,7 +722,7 @@ use ../../languages/tungsten/lexers/regex_helpers
       if c == :-% && pos + 2 < count
         c2 = (lc[pos + 1] >> 18) & cp_mask
         c3 = (lc[pos + 2] >> 18) & cp_mask
-        if (c2 == :-w || c2 == :-i) && c3 == :-[
+        if (c2 == :-w || c2 == :-i || c2 == :-d) && c3 == :-[
           pos += 3
           while pos < count && ((lc[pos] >> 18) & cp_mask) != :-]
             pos++
@@ -728,8 +730,10 @@ use ../../languages/tungsten/lexers/regex_helpers
             pos++
           if c2 == :-w
             tokens[tc] = t_word_array | ((pos - start) << 26) | (start << 2)
-          else
+          elsif c2 == :-i
             tokens[tc] = t_symbol_array | ((pos - start) << 26) | (start << 2)
+          else
+            tokens[tc] = t_decimal_array | ((pos - start) << 26) | (start << 2)
           tc++
           next
         # `%h<dim>-<type>[…]` hypercomplex literal — `%h` then a digit; scan to
@@ -741,6 +745,17 @@ use ../../languages/tungsten/lexers/regex_helpers
           if pos < count
             pos++
           tokens[tc] = t_hyper_array | ((pos - start) << 26) | (start << 2)
+          tc++
+          next
+        # `%f<width>[…]` typed float array literal (%f32[…]/%f64[…]) — `%f`
+        # then a digit; scan to the closing `]` (materialize splits width/comps).
+        if c2 == :-f && c3 >= 48 && c3 <= 57
+          pos += 2
+          while pos < count && ((lc[pos] >> 18) & cp_mask) != :-]
+            pos++
+          if pos < count
+            pos++
+          tokens[tc] = t_float_array | ((pos - start) << 26) | (start << 2)
           tc++
           next
 
@@ -2480,6 +2495,83 @@ use ../../languages/tungsten/lexers/regex_helpers
       @col += 1
     raise compile_error(:E_LEX_UNTERMINATED_PI, "Unterminated %i[] literal", @file, @line, @col)
 
+  -> scan_decimal_array
+    # Already consumed "%d[" — scan space-separated decimal spellings until ].
+    # Values stay strings here; the parser desugars to Decimal literal nodes.
+    decimals = []
+    word = StringBuffer(16)
+    while @pos < @char_count
+      ch = @chars[@pos]
+      if ch == "]"
+        @pos += 1
+        @col += 1
+        if word.size() > 0
+          decimals.push(word.to_s())
+        emit(:DECIMAL_ARRAY, decimals)
+        return nil
+      if ch == " " || ch == "\t"
+        if word.size() > 0
+          decimals.push(word.to_s())
+          word = StringBuffer(16)
+        @pos += 1
+        @col += 1
+        next
+      if ch == "\n"
+        if word.size() > 0
+          decimals.push(word.to_s())
+          word = StringBuffer(16)
+        @pos += 1
+        @line += 1
+        @col = 1
+        next
+      word << ch
+      @pos += 1
+      @col += 1
+    raise compile_error(:E_LEX_UNTERMINATED_PD, "Unterminated %d[] literal", @file, @line, @col)
+
+  -> scan_float_array
+    # Already consumed "%f"; @pos is at the width digits. Read <width> '['
+    # then space/tab/newline-separated float spellings until ']'. The parser
+    # validates the width (32/64) and desugars to [~…].to_f32/to_f64.
+    width = StringBuffer(4)
+    while @pos < @char_count && @chars[@pos] != "\["
+      width << @chars[@pos]
+      @pos += 1
+      @col += 1
+    if @pos < @char_count
+      @pos += 1
+      @col += 1
+    comps = []
+    word = StringBuffer(16)
+    while @pos < @char_count
+      ch = @chars[@pos]
+      if ch == "]"
+        @pos += 1
+        @col += 1
+        if word.size() > 0
+          comps.push(word.to_s())
+        emit(:FLOAT_ARRAY, [width.to_s(), comps])
+        return nil
+      if ch == " " || ch == "\t"
+        if word.size() > 0
+          comps.push(word.to_s())
+          word = StringBuffer(16)
+        @pos += 1
+        @col += 1
+        next
+      if ch == "\n"
+        if word.size() > 0
+          comps.push(word.to_s())
+          word = StringBuffer(16)
+        @pos += 1
+        @line += 1
+        @col = 1
+        next
+      word << ch
+      @pos += 1
+      @col += 1
+    raise compile_error(:E_LEX_UNTERMINATED_PF, "Unterminated %f[] literal", @file, @line, @col)
+
   -> scan_hyper_array
     # Already consumed "%h"; @pos is at the first dim digit. Read
     # <dim> '-' <type> '[' then space/tab/newline-separated components until ']'.
@@ -2910,6 +3002,8 @@ use ../../languages/tungsten/lexers/regex_helpers
     when :CARET_EQ then 163
     when :LSHIFT_EQ then 164
     when :RSHIFT_EQ then 165
+    when :DECIMAL_ARRAY then 166
+    when :FLOAT_ARRAY then 167
     else 0
 
   -> emit_at(type, value, off)
@@ -3019,6 +3113,12 @@ use ../../languages/tungsten/lexers/regex_helpers
     when 21
       reset_scan_position(off + 3)
       scan_symbol_array()
+    when 28
+      reset_scan_position(off + 3)
+      scan_decimal_array()
+    when 29
+      reset_scan_position(off + 2)
+      scan_float_array()
     when 27
       reset_scan_position(off + 2)
       scan_hyper_array()

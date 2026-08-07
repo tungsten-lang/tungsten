@@ -77,6 +77,9 @@ Expressions contained within the following pairs can be split over more than one
      %i[  ] array of symbols
      %w[  ] array of words
     %wc[  ] array of words for case
+     %d[  ] array of decimals
+   %f32[  ] typed f32 array
+   %f64[  ] typed f64 array
     
     months = [ 'January', 'February', 'March'     # List of month names
              , 'April',   'May',      'June'
@@ -1474,15 +1477,32 @@ Examples
 
     Multiset = "<{" Expression { "," Expression } "}>" .
 
-### 2.14.6 Word and symbol arrays
+### 2.14.6 Word, symbol, and numeric arrays
 
-Two percent-literal forms build arrays of short strings or symbols without quotes or commas. Only the `[ ]` delimiter is accepted, and elements are separated by whitespace (spaces, tabs, or newlines).
+Percent-literal forms build arrays of short strings, symbols, or numbers without quotes or commas. Only the `[ ]` delimiter is accepted, and elements are separated by whitespace (spaces, tabs, or newlines).
 
-    WordArray   = "%w[" { Whitespace Word } Whitespace "]" .
-    SymbolArray = "%i[" { Whitespace Word } Whitespace "]" .
+    WordArray    = "%w["   { Whitespace Word } Whitespace "]" .
+    SymbolArray  = "%i["   { Whitespace Word } Whitespace "]" .
+    DecimalArray = "%d["   { Whitespace Decimal } Whitespace "]" .
+    FloatArray   = "%f32[" { Whitespace Decimal } Whitespace "]"
+                 | "%f64[" { Whitespace Decimal } Whitespace "]" .
 
     %w[red green blue]     # => ["red", "green", "blue"]
     %i[get post put]       # => [:get, :post, :put]
+    %d[1.0 2.5 3.75]       # => [1, 2.5, 3.75]        (exact Decimals)
+    %f64[1.5 2.5 4.0]      # => typed f64 buffer      (raw floats)
+    %f32[1.5 2.5]          # => typed f32 buffer
+
+`%d[…]` is exactly the bracketed Decimal-literal array (`[1.0, 2.5, 3.75]`)
+— exact decimal elements, boxed storage. `%f32[…]`/`%f64[…]` build *typed*
+float buffers (the storage `f64[n]` allocates), ready for elementwise
+operators and numeric kernels; elements are parsed as raw floats, and
+compiled code allocates the buffer at exact capacity and stores each
+element directly — no boxed intermediate.
+
+A decimal array composes with the unit conversion pipe elementwise:
+`%d[1.0 2.5] | m/s` attaches the unit to every element, producing an array
+of quantities (see the units guide).
 
 Multi-line forms are allowed, with newlines acting as separators. There is no escape mechanism, so an element cannot itself contain `]`.
 

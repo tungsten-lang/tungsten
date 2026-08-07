@@ -47,6 +47,9 @@
   t_magic        = tag | (0x16 << 40)
   t_eof          = tag | (0x17 << 40)
   t_path         = tag | (0x18 << 40)
+  # 0x19–0x1B (sp/constant/hyper) exist only in compiler/lib/lexer.w;
+  # 0x1C matches its t_decimal_array id.
+  t_decimal_array = tag | (0x1C << 40)
 
   loop
     if pos >= count
@@ -564,7 +567,7 @@
       if c == :-% && pos + 2 < count
         c2 = (lc[pos + 1] >> 11) & cp_mask
         c3 = (lc[pos + 2] >> 11) & cp_mask
-        if (c2 == :-w || c2 == :-i) && c3 == :-[
+        if (c2 == :-w || c2 == :-i || c2 == :-d) && c3 == :-[
           pos += 3
           while pos < count && ((lc[pos] >> 11) & cp_mask) != :-]
             pos++
@@ -572,8 +575,10 @@
             pos++
           if c2 == :-w
             tokens[tc] = t_word_array | ((pos - start) << 28) | (start << 4)
-          else
+          elsif c2 == :-i
             tokens[tc] = t_symbol_array | ((pos - start) << 28) | (start << 4)
+          else
+            tokens[tc] = t_decimal_array | ((pos - start) << 28) | (start << 4)
           tc++
           next
 

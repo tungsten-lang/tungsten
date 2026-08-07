@@ -199,6 +199,8 @@ Useful when reading code or the value encoding docs:
 | CIDR | `10.0.0.0/8` | network prefix |
 | Word array | `%w[red green blue]` | `["red", "green", "blue"]` |
 | Symbol array | `%i[get post put]` | `[:get, :post, :put]` |
+| Decimal array | `%d[1.0 2.5 3.75]` | `[1, 2.5, 3.75]` (exact Decimals) |
+| Typed float array | `%f64[1.5 2.5]`, `%f32[…]` | typed f64/f32 buffer |
 
 `#` starts a comment unless it is exactly a 3/4/6/8-digit hex color run.
 

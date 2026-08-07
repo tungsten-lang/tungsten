@@ -1949,6 +1949,12 @@ module Tungsten
         return emit_fixed(:WORD_ARRAY, 3)
       elsif match_bytes?("%i[")
         return emit_fixed(:SYMBOL_ARRAY, 3)
+      elsif match_bytes?("%d[")
+        return emit_fixed(:DECIMAL_ARRAY, 3)
+      elsif match_bytes?("%f32[")
+        return emit_fixed(:FLOAT_ARRAY, 5, "32")
+      elsif match_bytes?("%f64[")
+        return emit_fixed(:FLOAT_ARRAY, 5, "64")
       elsif byte(1) == 37 || byte(1) == 61
         return scan_operator_or_punctuation
       end

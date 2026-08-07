@@ -349,9 +349,88 @@
   -> pythagorean
     self/sq:sum.sqrt
 
+  # Standard name for the L2 (Euclidean) norm — alias of pythagorean.
+  -> norm
+    pythagorean
+
   # Direction with magnitude 1: each element divided by the L2 norm.
   -> normalize
     self / pythagorean
+
+  # Boxed → typed float buffer conversions (the %f32[…]/%f64[…] literals
+  # desugar through these). Elements may be ints, decimals, or raw floats.
+  -> to_f64
+    ccall("w_array_to_f64", self)
+
+  -> to_f32
+    ccall("w_array_to_f32", self)
+
+  # Arithmetic mean: Σxᵢ / n. Quantity elements fold from the first
+  # element (there is no reverse-operand dispatch for 0 + quantity);
+  # everything else rides the sum fast path.
+  -> mean
+    n = size
+    if n == 0
+      raise "mean of an empty array is undefined"
+    x0 = self[0]
+    if type(x0) == "Quantity"
+      total = x0
+      i = 1
+      while i < n
+        total += self[i]
+        i += 1
+      return total / n
+    sum / n
+
+  # Sample variance (Bessel-corrected: Σ(xᵢ−x̄)²/(n−1)), matching the
+  # Ruby engine builtin. Folding from the first squared deviation keeps
+  # Quantity elements on quantity arithmetic throughout — their variance
+  # is a squared-unit quantity.
+  -> variance
+    n = size
+    if n < 2
+      raise "variance requires at least 2 values"
+    m = mean
+    d0 = self[0] - m
+    acc = d0 * d0
+    i = 1
+    while i < n
+      d = self[i] - m
+      acc += d * d
+      i += 1
+    acc / (n - 1)
+
+  # Sample standard deviation: √variance, matching the Ruby engine
+  # builtin. Quantity elements convert to the first element's unit, σ is
+  # computed on the bare values, and the unit re-attaches at the end —
+  # √ of a squared-unit quantity has no runtime representation.
+  -> stdev
+    n = size
+    if n < 2
+      raise "stdev requires at least 2 values"
+    x0 = self[0]
+    nodigits = nil
+    if type(x0) == "Quantity"
+      uname = x0.unit_name
+      vals = []
+      i = 0
+      while i < n
+        q = ccall("w_quantity_pipe", self[i], uname, nodigits)
+        vals.push(q.value)
+        i += 1
+      return ccall("w_quantity_pipe", vals.stdev, uname, nodigits)
+    variance.sqrt
+
+  # Middle value of the sorted elements; even sizes average the two
+  # middles, matching the Ruby engine builtin.
+  -> median
+    n = size
+    if n == 0
+      raise "median of an empty array is undefined"
+    sorted = sort
+    if n % 2 == 1
+      return sorted[n / 2]
+    (sorted[n / 2 - 1] + sorted[n / 2]) / 2
 
   # Sorted copy. Blockless `sort` is ascending `<=>` order; a Ruby-style
   # comparator block (returning negative/zero/positive) picks the order.

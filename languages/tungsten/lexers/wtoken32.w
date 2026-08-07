@@ -51,6 +51,9 @@
   t_magic        = (0x16 << 2)
   t_eof          = (0x17 << 2)
   t_path         = (0x18 << 2)
+  # 0x19–0x1B (sp/constant/hyper) exist only in compiler/lib/lexer.w;
+  # 0x1C matches its t_decimal_array id.
+  t_decimal_array = (0x1C << 2)
 
   loop
     if pos >= count
@@ -667,7 +670,7 @@
       if c == :-% && pos + 2 < count
         c2 = (lc[pos + 1] >> 11) & cp_mask
         c3 = (lc[pos + 2] >> 11) & cp_mask
-        if (c2 == :-w || c2 == :-i) && c3 == :-[
+        if (c2 == :-w || c2 == :-i || c2 == :-d) && c3 == :-[
           pos += 3
           while pos < count && ((lc[pos] >> 11) & cp_mask) != :-]
             pos++
@@ -679,8 +682,14 @@
             if out_len > 255
               out_len = 255
             lengths[tc] = out_len
-          else
+          elsif c2 == :-i
             tokens[tc] = t_symbol_array | (start << 8)
+            out_len = pos - start
+            if out_len > 255
+              out_len = 255
+            lengths[tc] = out_len
+          else
+            tokens[tc] = t_decimal_array | (start << 8)
             out_len = pos - start
             if out_len > 255
               out_len = 255

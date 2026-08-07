@@ -175,17 +175,83 @@ use lowering/definitions
         # The store at module-init time is skipped; every load of the
         # global folds to the literal.
         if assign_count[name] == 1 && expr.type_hint == "i64"
-          val_node = expr.value
-          if val_node != nil && is_ast_node?(val_node)
-            vk = ast_kind(val_node)
-            # :int  — small integer literal (e.g. KIND_PROGRAM = 60)
-            # :wvalue — raw 64-bit literal (e.g. AST_NIL = u0xFFFE60CC00000000),
-            #   needed for tag-only singletons whose values overflow i48.
-            if vk == :int || vk == :wvalue
-              iv = val_node.value
-              if type(iv) == "Integer"
-                mod[:top_level_const_values][name] = iv
+          cv_val = top_level_const_eval(expr.value)
+          if cv_val != nil
+            mod[:top_level_const_values][name] = cv_val
     i += 1
+
+# Constant-expression evaluator for `constant`-eligible top-level `## i64`
+# bindings. Beyond the original bare :int / :wvalue literals (KIND_PROGRAM
+# = 60, AST_NIL = u0xFFFE...), it folds unary minus and the closed integer
+# ops over constant operands, so a named tag constant can be CONSTRUCTED
+# readably — `W_BI_TAG = ((0xFFF8 - 0x10000) << 48) ## i64` — and still
+# emit as an LLVM `constant` whose loads fold to the immediate.
+#
+# Every intermediate is range-guarded to |v| < 2^62: this pre-pass runs on
+# whatever host is bootstrapping (the stage-0 C VM has no bigint tower),
+# so an expression whose folding would need arbitrary-precision arithmetic
+# must fall back to a runtime global on EVERY host identically, or stage
+# identity breaks. Shift counts are bounded to 0..62 for the same reason.
+-> top_level_const_eval(node)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  if k == :int || k == :wvalue
+    v = node.value
+    # Raw :wvalue payloads exceed i48 and read back as BigInt under the
+    # compiled engine's exact type() split; both are integers here.
+    if type(v) in ("Integer" "BigInt")
+      return v
+    return nil
+  if k == :unary_op && node.op == :MINUS
+    uv = top_level_const_eval(node.operand)
+    if uv == nil
+      return nil
+    return 0 - uv
+  if k == :binary_op
+    lv = top_level_const_eval(node.left)
+    if lv == nil
+      return nil
+    rv = top_level_const_eval(node.right)
+    if rv == nil
+      return nil
+    bound = 4611686018427387904
+    if lv >= bound || lv <= 0 - bound || rv >= bound || rv <= 0 - bound
+      return nil
+    bop = node.op
+    out = nil
+    if bop == :PLUS
+      out = lv + rv
+    elsif bop == :MINUS
+      out = lv - rv
+    elsif bop == :STAR
+      # Division precheck so the product never overflows on a host with no
+      # bigint tower (the post-check alone would be too late there).
+      sla = lv < 0 ? 0 - lv : lv
+      sra = rv < 0 ? 0 - rv : rv
+      if sla != 0 && sra > (bound - 1) / sla
+        return nil
+      out = lv * rv
+    elsif bop == :LSHIFT
+      if rv < 0 || rv > 62
+        return nil
+      factor = 1 << rv
+      sla = lv < 0 ? 0 - lv : lv
+      if sla != 0 && sla > (bound - 1) / factor
+        return nil
+      out = lv * factor
+    elsif bop == :AMPERSAND
+      out = lv & rv
+    elsif bop == :PIPE
+      out = lv | rv
+    elsif bop == :CARET
+      out = lv ^ rv
+    if out == nil
+      return nil
+    if out >= bound || out <= 0 - bound
+      return nil
+    return out
+  nil
 
 -> closure_binding_assignment_count(node, name)
   if node == nil

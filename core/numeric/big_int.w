@@ -1,3 +1,14 @@
+# NaN-box tag constants for the operator guards, constructed from the
+# 16-bit tag values themselves (v4 encoding, wvalue.h: the mask is
+# 0xFFFF << 48, the BigInt top tag 0xFFF8 << 48). `TAG - 0x10000` is the
+# two's-complement fold of the high 16 bits, so the shift lands the exact
+# SIGNED i64 bit pattern with every intermediate small enough to compute
+# identically on every bootstrap host (the stage-0 VM has no bigint
+# tower). Single-assignment `## i64` bindings emit as LLVM `constant`s
+# whose loads fold to the immediate, so the named spelling costs nothing
+# over inline literals — verified by byte-comparing emitted worker bodies.
+W_TAG_MASK = ((0xFFFF - 0x10000) << 48) ## i64
+W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
 
 + BigInt < Int
   - data
@@ -109,23 +120,31 @@
   # migration proceeds arm by arm, each with its own gate. See
   # benchmarks/runtime_ports/README.md.
   -> +(other)(BigInt)
-    if (wvalue_bits(self) & -281474976710656) != -2251799813685248
+    if ($value & W_TAG_MASK) != W_BIG_TAG
       return ccall("w_add", self, other)
-    if (wvalue_bits(other) & -281474976710656) != -2251799813685248
+
+    if (wvalue_bits(other) & W_TAG_MASK) != W_BIG_TAG
       return ccall("w_add", self, other)
+
     an = $size ## i64
     if ((wvalue_bits(self) >> 47) & 1) == 1
       an = 0 - an
+
     o = other ## BigInt
     bn = o$size ## i64
+
     if ((wvalue_bits(other) >> 47) & 1) == 1
       bn = 0 - bn
+
     if an == 0 || bn == 0
       return ccall("w_add", self, other)
+
     am = an < 0 ? 0 - an : an
     bm = bn < 0 ? 0 - bn : bn
+
     if am > 4096 || bm > 4096
       return ccall("w_add", self, other)
+
     mask = 140737488355312
     pa = (wvalue_bits(self) & mask) + 16
     pb = (wvalue_bits(other) & mask) + 16
@@ -196,9 +215,9 @@
     ccall("w_add", self, other)
 
   -> -(other)(BigInt)
-    if (wvalue_bits(self) & -281474976710656) != -2251799813685248
+    if ($value & W_TAG_MASK) != W_BIG_TAG
       return ccall("w_sub", self, other)
-    if (wvalue_bits(other) & -281474976710656) != -2251799813685248
+    if (wvalue_bits(other) & W_TAG_MASK) != W_BIG_TAG
       return ccall("w_sub", self, other)
     an = $size ## i64
     if ((wvalue_bits(self) >> 47) & 1) == 1
@@ -286,9 +305,9 @@
   # reach the kernel, so a zero result cannot occur here (both operands are
   # multi-limb, hence nonzero).
   -> *(other)(BigInt)
-    if (wvalue_bits(self) & -281474976710656) != -2251799813685248
+    if ($value & W_TAG_MASK) != W_BIG_TAG
       return ccall("w_mul", self, other)
-    if (wvalue_bits(other) & -281474976710656) != -2251799813685248
+    if (wvalue_bits(other) & W_TAG_MASK) != W_BIG_TAG
       return ccall("w_mul", self, other)
     an = $size ## i64
     if ((wvalue_bits(self) >> 47) & 1) == 1

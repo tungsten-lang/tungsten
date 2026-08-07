@@ -1354,6 +1354,33 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if uk != nil && uk[:known] == 0 - 1
       return {known: 0 - 1, bits: 0 - uk[:bits], fact: uk[:fact]}
     return nil
+  if k == :var || k == :gvar
+    # `$value` is the receiver's own 64-bit content (parsed as a GVar in
+    # expression position, a Var in others; lower_gvar/lower_var both
+    # expose it raw for any class) — exactly wvalue_bits(self), so it
+    # carries the same __self fact.
+    if node.name == "$value"
+      facts = ctx[:tag_facts]
+      if facts != nil
+        f = facts["__self"]
+        if f != nil && tag_fact_structural?(f)
+          entry = f[:entry]
+          if entry != nil && entry[:shape] == :top_tag
+            m = entry[:mask].to_i
+            return {known: m, bits: entry[:tag].to_i & m, fact: true}
+      return nil
+    # A single-assignment `## i64` top-level constant with a literal RHS
+    # (mod[:top_level_const_values]) loads as its literal — resolve it so
+    # named tag constants (`__W_BI_TAG`) fold exactly like immediates.
+    cvals = ctx[:mod][:top_level_const_values]
+    if cvals != nil
+      cv = cvals[node.name]
+      # Values outside the inline i48 payload live as BigInts in compiler
+      # arithmetic (the tag constants themselves do) — both spellings of
+      # integer are table-valid.
+      if cv != nil && type(cv) in ("Integer" "BigInt")
+        return {known: 0 - 1, bits: cv, fact: false}
+    return nil
   if k == :call && node.name == "wvalue_bits" && node.receiver == nil && node.args != nil && node.args.size() == 1
     f = infer_tag(node.args[0], ctx)
     if f != nil && tag_fact_structural?(f)

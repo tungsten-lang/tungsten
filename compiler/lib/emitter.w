@@ -611,8 +611,14 @@ use hashing
   out << declare_fn_attrs("sin", "double", "double", libm_attrs)
   out << declare_fn_attrs("cos", "double", "double", libm_attrs)
   out << declare_fn_attrs("tan", "double", "double", libm_attrs)
+  out << declare_fn_attrs("asin", "double", "double", libm_attrs)
+  out << declare_fn_attrs("acos", "double", "double", libm_attrs)
+  out << declare_fn_attrs("atan", "double", "double", libm_attrs)
+  out << declare_fn_attrs("cbrt", "double", "double", libm_attrs)
   out << declare_fn_attrs("exp", "double", "double", libm_attrs)
   out << declare_fn_attrs("log", "double", "double", libm_attrs)
+  out << declare_fn_attrs("expm1", "double", "double", libm_attrs)
+  out << declare_fn_attrs("log1p", "double", "double", libm_attrs)
   out << declare_fn_attrs("sqrt", "double", "double", libm_attrs)
   out << declare_fn_attrs("floor", "double", "double", libm_attrs)
   out << declare_fn_attrs("ceil", "double", "double", libm_attrs)
@@ -620,6 +626,7 @@ use hashing
   out << declare_fn_attrs("fabs", "double", "double", libm_attrs)
   out << declare_fn_attrs("pow", "double", dd, libm_attrs)
   out << declare_fn_attrs("atan2", "double", dd, libm_attrs)
+  out << declare_fn_attrs("hypot", "double", dd, libm_attrs)
 
   # Float bit-cast
   out << declare_fn("w_float_from_u32_bits", wv, wv)
@@ -1588,7 +1595,7 @@ ewscope_md_state = {ids: {}, order: []}
   when :view_load_byte, :view_load_bit
     # Dynamic byte/bit views still produce language Integers directly.
     ["w_int"]
-  when :view_load_field, :view_store_field, :view_load_inline_byte
+  when :view_load_field, :view_store_field, :view_load_inline_byte, :view_load_inline_elem, :view_store_inline_elem
     # Named fields stay in their declared machine representation; lowering
     # inserts boxing only when the value crosses a WValue boundary.
     []
@@ -2358,7 +2365,7 @@ ewscope_md_state = {ids: {}, order: []}
   if slab_info != nil && slab_info[:slab_entries].size() > 0
     used_runtime_fns["w_slab_init_static"] = true
 
-  decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns)
+  decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns) + seam_decls.to_s()
   # Slab-AST runtime globals: always emit as external declarations so
   # the inline-IR :slab_node_get_idx / :slab_node_set_idx ops can
   # reference them without per-emit-site duplication. `[` is escaped
@@ -2592,7 +2599,7 @@ ewscope_md_state = {ids: {}, order: []}
     return "csd." + inst[:loc_site_id].to_s() + ".ret"
   nil
 
--> build_phi_label_redirects(f)
+-> build_phi_label_redirects(f, arm64_target = true)
   redirect = {}
   bi = 0
   while bi < f[:blocks].size()
@@ -2600,7 +2607,7 @@ ewscope_md_state = {ids: {}, order: []}
     exit_label = blk[:label]
     ii = 0
     while ii < blk[:instructions].size()
-      hidden = hidden_exit_label_for_inst(blk[:instructions][ii])
+      hidden = hidden_exit_label_for_inst(blk[:instructions][ii], arm64_target)
       if hidden != nil
         exit_label = hidden
       ii += 1
@@ -2667,7 +2674,15 @@ ewscope_md_state = {ids: {}, order: []}
   out << ") nounwind\n"
   out.to_s()
 
--> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil)
+# The emitted triple decides per-arch instruction selection (the asm-backed
+# carry ops emit hand templates on arm64 and portable IR loops elsewhere).
+-> emit_target_is_arm64(mod)
+  triple = mod[:llvm_triple]
+  if triple == nil
+    return true
+  triple.index("arm64") != nil || triple.index("aarch64") != nil
+
+-> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true)
   if f[:embedded_ll] != nil
     return emit_embedded_ll_function(f)
   if f[:embedded_asm] != nil
@@ -2725,7 +2740,7 @@ ewscope_md_state = {ids: {}, order: []}
   slots = f[:var_slots]
   slot_types = f[:var_slot_types]
   promoted = f[:promoted_vars]
-  phi_label_redirects = build_phi_label_redirects(f)
+  phi_label_redirects = build_phi_label_redirects(f, arm64_target)
   i = 0
   while i < f[:blocks].size()
     blk = f[:blocks][i]
@@ -2776,7 +2791,7 @@ ewscope_md_state = {ids: {}, order: []}
     j = 0
     while j < blk[:instructions].size()
       out << "  "
-      out << render_instruction(blk[:instructions][j], string_wvs, used_ptr_ids, phi_label_redirects, fp_flags)
+      out << render_instruction(blk[:instructions][j], string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target)
       out << "\n"
       j += 1
     i += 1
@@ -2888,7 +2903,7 @@ ewscope_md_state = {ids: {}, order: []}
     out << t + " = phi i64 \[" + boxed + ", %g.box." + bid + "], \[" + slow + ", %g.rt." + bid + "]"
   out.to_s()
 
--> render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "")
+-> render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true)
   op = inst[:op]
 
   case op
@@ -3951,6 +3966,37 @@ ewscope_md_state = {ids: {}, order: []}
     byte_ptr = inst[:temp] + ".bp"
     byte_val = inst[:temp] + ".b"
     ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:offset].to_s() + "\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + inst[:temp] + ".base, i64 " + inst[:index] + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + " = zext i8 " + byte_val + " to i64"
+
+  # Widened inline array element (`u64[] limbs` and friends): strided load at
+  # field offset + index * element size. i-prefixed elements sign-extend,
+  # u-prefixed zero-extend; 64-bit elements load raw. Alignment is the static
+  # residue of the field offset, which every element shares. Like the byte
+  # form, no hidden bounds branch is emitted — the method owns the check.
+  when :view_load_inline_elem
+    ptr_raw = inst[:temp] + ".ptr"
+    byte_ptr = inst[:temp] + ".bp"
+    bits = (inst[:size] * 8).to_s()
+    elem_align = (inst[:offset] % inst[:size]) == 0 ? inst[:size].to_s() : "1"
+    head = ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:offset].to_s() + "\n  " + inst[:temp] + ".gep = getelementptr i" + bits + ", ptr " + inst[:temp] + ".base, i64 " + inst[:index] + "\n  "
+    if inst[:size] == 8
+      head + inst[:temp] + " = load i64, ptr " + inst[:temp] + ".gep, align " + elem_align
+    else
+      extension = inst[:elem].starts_with?("i") ? "sext" : "zext"
+      head + inst[:temp] + ".w = load i" + bits + ", ptr " + inst[:temp] + ".gep, align " + elem_align + "\n  " + inst[:temp] + " = " + extension + " i" + bits + " " + inst[:temp] + ".w to i64"
+
+  # Store twin: truncate the raw value to the element width and store at the
+  # same strided address; the instruction's temp carries the raw value
+  # through so `$f[i] = v` keeps ordinary assignment-expression semantics.
+  when :view_store_inline_elem
+    ptr_raw = inst[:temp] + ".ptr"
+    byte_ptr = inst[:temp] + ".bp"
+    bits = (inst[:size] * 8).to_s()
+    elem_align = (inst[:offset] % inst[:size]) == 0 ? inst[:size].to_s() : "1"
+    head = ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:offset].to_s() + "\n  " + inst[:temp] + ".gep = getelementptr i" + bits + ", ptr " + inst[:temp] + ".base, i64 " + inst[:index] + "\n  "
+    if inst[:size] == 8
+      head + "store i64 " + inst[:value] + ", ptr " + inst[:temp] + ".gep, align " + elem_align + "\n  " + inst[:temp] + " = add i64 " + inst[:value] + ", 0"
+    else
+      head + inst[:temp] + ".t = trunc i64 " + inst[:value] + " to i" + bits + "\n  store i" + bits + " " + inst[:temp] + ".t, ptr " + inst[:temp] + ".gep, align " + elem_align + "\n  " + inst[:temp] + " = add i64 " + inst[:value] + ", 0"
 
   # View access: load bit from raw object pointer
   when :view_load_bit

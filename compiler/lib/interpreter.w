@@ -308,6 +308,8 @@ use target
     # evaluate (and live-scrub) in the REPL. Same constructors as the -o path.
     if t == :date
       return ccall("w_date_parse", "" + ast_get(node, :value).to_s())
+    if t == :uuid
+      return ccall("w_uuid_parse", "" + ast_get(node, :value).to_s())
     if t == :datetime
       return ccall("w_date_parse", "" + ast_get(node, :value).to_s())
     if t == :time
@@ -2001,8 +2003,13 @@ use target
   # -- Binary operations --
 
   # Conversion-pipe target for `| lb` / `| lb(2)` / `| J` / `| "metric cup"`:
-  # a known-unit spelling that isn't shadowed by a local. Mirrors
-  # lowering/ops.w pipe_unit_target.
+  # a known-unit spelling that isn't shadowed by a local. Bare compound
+  # spellings arrive as expression shapes and are rebuilt by
+  # interp_pipe_unit_spelling: `km/h` is a `/`-map, `J·s` a DOT_PRODUCT,
+  # `W/m²` a POW over a map, and a mixed-case name like `eV` or `mmHg` is a
+  # juxtaposition call `e(V)`. The rebuilt spelling must name a registry unit
+  # or the pipe evaluates as ordinary bitwise-or. Mirrors lowering/ops.w
+  # pipe_unit_target.
   -> interp_pipe_unit_target(node, env)
     r = ast_get(node, :right)
     if !is_ast_node?(r)
@@ -2021,6 +2028,30 @@ use target
       if cargs != nil && cargs.size() == 1 && is_ast_node?(cargs[0]) && ast_kind(cargs[0]) == :int
         uname = ast_get(r, :name)
         udigits = ast_get(cargs[0], :value)
+    if uname == nil && k == :call && ast_get(r, :receiver) == nil
+      # `eV` / `mmHg` / `eV(3)`: mixed-case juxtaposition, digits riding the
+      # innermost call.
+      jt = interp_pipe_juxta_target(r)
+      if jt != nil
+        uname = jt[:name]
+        udigits = jt[:digits]
+    if uname == nil && k == :map
+      # `km/h(2)`: a compound rate with rounding digits — the map's func call
+      # carries the one-int-arg form.
+      src = ast_get(r, :source)
+      fnode = ast_get(r, :func)
+      if is_ast_node?(src) && is_ast_node?(fnode) && ast_kind(fnode) == :call && ast_get(fnode, :receiver) == nil
+        fargs = ast_get(fnode, :args)
+        if fargs != nil && fargs.size() == 1 && is_ast_node?(fargs[0]) && ast_kind(fargs[0]) == :int
+          l = interp_pipe_unit_spelling(src, env)
+          fname = ast_get(fnode, :name)
+          if l != nil && fname != nil
+            fname = "" + fname.to_s()
+            if !env.defined?(fname) && !@env.defined?(fname)
+              uname = l + "/" + fname
+              udigits = ast_get(fargs[0], :value)
+    if uname == nil
+      uname = interp_pipe_unit_spelling(r, env)
     if uname == nil
       return nil
     # Materialize: node-field strings can be lexer slices whose WValue bits
@@ -2031,6 +2062,110 @@ use target
     if !quoted && (env.defined?(uname) || @env.defined?(uname))
       return nil
     {name: uname, digits: udigits}
+
+  # Rebuild a bare unit spelling from the expression shape a compound or
+  # mixed-case conversion target parses to. Leaves that name real locals stay
+  # expressions; the caller validates the joined spelling against the unit
+  # registry. Mirrors lowering/ops.w pipe_unit_spelling.
+  -> interp_pipe_unit_spelling(r, env)
+    if !is_ast_node?(r)
+      return nil
+    k = ast_kind(r)
+    if k == :var || k == :class_ref
+      nm = ast_get(r, :name)
+      if nm == nil
+        return nil
+      nm = "" + nm.to_s()
+      if env.defined?(nm) || @env.defined?(nm)
+        return nil
+      return nm
+    if k == :binary_op
+      bop = ccall("w_switch_canonical", ast_get(r, :op))
+      if bop == :SLASH || bop == :DOT_PRODUCT
+        lsp = interp_pipe_unit_spelling(ast_get(r, :left), env)
+        if lsp == nil
+          return nil
+        rsp = interp_pipe_unit_spelling(ast_get(r, :right), env)
+        if rsp == nil
+          return nil
+        if bop == :SLASH
+          return lsp + "/" + rsp
+        return lsp + "·" + rsp
+      if bop == :POW
+        ex = ast_get(r, :right)
+        if is_ast_node?(ex) && ast_kind(ex) == :int
+          lsp = interp_pipe_unit_spelling(ast_get(r, :left), env)
+          if lsp == nil
+            return nil
+          sup = unit_superscript_for_power(ast_get(ex, :value))
+          if sup == nil
+            return nil
+          return lsp + sup
+      return nil
+    if k == :map
+      src = ast_get(r, :source)
+      fnode = ast_get(r, :func)
+      if !is_ast_node?(src) || !is_ast_node?(fnode)
+        return nil
+      fname = nil
+      fk = ast_kind(fnode)
+      if fk == :call && ast_get(fnode, :receiver) == nil
+        fargs = ast_get(fnode, :args)
+        if fargs == nil || fargs.size() == 0
+          fname = ast_get(fnode, :name)
+      elsif fk == :var || fk == :class_ref
+        fname = ast_get(fnode, :name)
+      if fname == nil
+        return nil
+      fname = "" + fname.to_s()
+      if env.defined?(fname) || @env.defined?(fname)
+        return nil
+      lsp = interp_pipe_unit_spelling(src, env)
+      if lsp == nil
+        return nil
+      return lsp + "/" + fname
+    if k == :call
+      jt = interp_pipe_juxta_target(r)
+      if jt == nil
+        return nil
+      if jt[:digits] >= 0
+        return nil
+      return jt[:name]
+    nil
+
+  # `eV` lexes as ident + Constant and parses as the juxtaposition call
+  # `e(V)`; `mmHg` and `kWh` nest the same way, and rounding digits ride the
+  # innermost call — `eV(3)` is `e(V(3))`. Rejoin the pieces — the parts are
+  # lexer artifacts, not identifiers, so only the joined spelling is
+  # meaningful (and is registry-checked by the caller). Returns
+  # {name, digits}; digits is -1 when absent.
+  -> interp_pipe_juxta_target(r)
+    if !is_ast_node?(r)
+      return nil
+    k = ast_kind(r)
+    if k == :var || k == :class_ref
+      nm = ast_get(r, :name)
+      if nm == nil
+        return nil
+      return {name: "" + nm.to_s(), digits: 0 - 1}
+    if k != :call
+      return nil
+    if ast_get(r, :receiver) != nil
+      return nil
+    nm = ast_get(r, :name)
+    if nm == nil
+      return nil
+    cargs = ast_get(r, :args)
+    if cargs == nil || cargs.size() != 1
+      return nil
+    if !is_ast_node?(cargs[0])
+      return nil
+    if ast_kind(cargs[0]) == :int
+      return {name: "" + nm.to_s(), digits: ast_get(cargs[0], :value)}
+    inner = interp_pipe_juxta_target(cargs[0])
+    if inner == nil
+      return nil
+    {name: ("" + nm.to_s()) + inner[:name], digits: inner[:digits]}
 
   -> eval_binary_op(node, env)
     # Canonicalize the op symbol: slab-stored short symbols carry different
@@ -3051,6 +3186,13 @@ use target
           i = i + 1
         return dispatch_method(arr, name, args, block, env)
 
+    # Date formatting: `d.strftime(fmt)` and its core alias `d.to_s(fmt)`
+    # are runtime-backed (w_ic_date_to_s) — the core/date.w declarations are
+    # bodiless. Checked before the generic builtins: builtin to_s ignores
+    # its arguments, which would drop the format string.
+    if args.size() == 1 && name in ("strftime" "to_s") && w_type_name(recv) == "Date"
+      return ccall("w_method_call", recv, "" + name, args)
+
     # Builtins
     if is_builtin?(name)
       return dispatch_builtin(self, name, recv, args, block)
@@ -3110,6 +3252,14 @@ use target
     if type(recv) != "Hash"
       if args.size() == 0 && name in ("to_f" "to_i" "floor" "ceil" "round" "chr" "ord" "prime?" "prime_12k?" "prime_30k?" "abs" "to_s" "sqrt" "sq" "succ" "prev" "negative?")
         return ccall("w_method_call", recv, "" + name, [])
+      # `to_d` is receiver-gated: only String (exact-Decimal parse), Decimal
+      # (identity), and Integer (scale-0 convert) have runtime IC handlers.
+      # Other receivers keep the catchable undefined-method error below — the
+      # runtime dispatcher exits instead of raising.
+      if args.size() == 0 && name == "to_d"
+        tdn = w_type_name(recv)
+        if tdn == "String" || tdn == "Decimal" || tdn == "Integer"
+          return ccall("w_method_call", recv, "" + name, [])
       if args.size() == 1 && name == "gcd"
         return ccall("w_method_call", recv, "" + name, args)
 
@@ -3254,7 +3404,7 @@ use target
     w_class = primitive_runtime_class(recv)
     if w_class == nil
       return nil
-    lookup_method(w_class, name, argc, has_block)
+    lookup_method(w_class, name, argc, has_block, args)
 
   -> w_type_name(value)
     if value == nil
@@ -3951,6 +4101,7 @@ use target
     @defining_class = w_class
     if w_class[:cvars] == nil
       w_class[:cvars] = {}
+    pending_aliases = []
     expand_trait_includes(ast_get(node, :body)).each -> (entry)
       expr = entry[0]
       from_trait = entry[1]
@@ -3967,6 +4118,11 @@ use target
         # Standalone class-body `ro :name` / `rw :name` — synthesize accessors
         # (mirrors expand_class_body_accessors / lower_accessors).
         register_class_body_accessors(expr, w_class)
+      elsif ast_kind(expr) == :call && ast_get(expr, :receiver) == nil && ast_get(expr, :name) == "alias_method"
+        # Class-body `alias_method :new/N, :old/N` — deferred to the end of
+        # the body walk: the alias may textually precede the definition it
+        # points at (core/date.w aliases to_s/1 above strftime's def).
+        pending_aliases.push(expr)
       else
         # Declarative class-body pragmas (noncommutative / noassoc / runtime …)
         # are bare receiver-less calls the interpreter has no handler for. The
@@ -3976,8 +4132,47 @@ use target
         # leaves the class a method-less husk (autoload's rescue then hides it).
         if !(ast_kind(expr) == :call && ast_get(expr, :receiver) == nil)
           evaluate(expr, env)
+    ai = 0
+    while ai < pending_aliases.size()
+      register_method_alias(pending_aliases[ai], w_class)
+      ai += 1
     @defining_class = prev_defining
     w_class
+
+  # `alias_method :new/N, :old/N` in a class body: re-register the named
+  # method's overloads under the new spelling. An /arity suffix narrows the
+  # alias to that overload; without one every overload is copied.
+  -> register_method_alias(expr, w_class)
+    cargs = ast_get(expr, :args)
+    if cargs == nil || cargs.size() != 2
+      return nil
+    if !is_ast_node?(cargs[0]) || !is_ast_node?(cargs[1])
+      return nil
+    if ast_kind(cargs[0]) != :symbol || ast_kind(cargs[1]) != :symbol
+      return nil
+    new_raw = "" + ast_get(cargs[0], :value).to_s()
+    old_raw = "" + ast_get(cargs[1], :value).to_s()
+    new_name = new_raw
+    slash = new_raw.index("/")
+    if slash != nil
+      new_name = new_raw.slice(0, slash)
+    old_name = old_raw
+    old_arity = 0 - 1
+    slash = old_raw.index("/")
+    if slash != nil
+      old_name = old_raw.slice(0, slash)
+      old_arity = old_raw.slice(slash + 1, old_raw.size() - slash - 1).to_i()
+    overloads = w_class[:method_overloads][old_name]
+    if overloads == nil
+      return nil
+    i = 0
+    while i < overloads.size()
+      m = overloads[i]
+      if old_arity < 0 || m[:params].size() == old_arity
+        alias_m = {rt: :method, name: new_name, params: m[:params], body: m[:body], w_class: m[:w_class], file: m[:file], trait_default: m[:trait_default], param_types: m[:param_types]}
+        register_instance_method(w_class, alias_m)
+      i += 1
+    nil
 
   # Standalone `ro :x, :y` / `rw :x` in a class body → getter (and setter for
   # rw) methods reading `@x` ivars. Args are Symbol nodes (`:name`).

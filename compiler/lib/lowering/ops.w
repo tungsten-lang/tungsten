@@ -1220,6 +1220,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   k = ast_kind(node)
   if k == :int
     return {known: 0 - 1, bits: node.value, fact: false}
+  # Negative literals parse as unary MINUS over an int; a fully-known
+  # operand negates to a fully-known constant (mask-compare guards spell
+  # TAG_MASK/BIGINT_TAG as signed literals).
+  if k == :unary_op && node.op == :MINUS
+    uk = tag_known_bits(ctx, node.operand)
+    if uk != nil && uk[:known] == 0 - 1
+      return {known: 0 - 1, bits: 0 - uk[:bits], fact: uk[:fact]}
+    return nil
   if k == :call && node.name == "wvalue_bits" && node.receiver == nil && node.args != nil && node.args.size() == 1
     f = infer_tag(node.args[0], ctx)
     if f != nil && tag_fact_structural?(f)

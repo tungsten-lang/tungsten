@@ -109,9 +109,9 @@
   # migration proceeds arm by arm, each with its own gate. See
   # benchmarks/runtime_ports/README.md.
   -> +(other)(BigInt)
-    if ((wvalue_bits(self) >> 48) & 65535) != 65528
+    if (wvalue_bits(self) & -281474976710656) != -2251799813685248
       return ccall("w_add", self, other)
-    if ((wvalue_bits(other) >> 48) & 65535) != 65528
+    if (wvalue_bits(other) & -281474976710656) != -2251799813685248
       return ccall("w_add", self, other)
     an = $size ## i64
     if ((wvalue_bits(self) >> 47) & 1) == 1
@@ -196,9 +196,9 @@
     ccall("w_add", self, other)
 
   -> -(other)(BigInt)
-    if ((wvalue_bits(self) >> 48) & 65535) != 65528
+    if (wvalue_bits(self) & -281474976710656) != -2251799813685248
       return ccall("w_sub", self, other)
-    if ((wvalue_bits(other) >> 48) & 65535) != 65528
+    if (wvalue_bits(other) & -281474976710656) != -2251799813685248
       return ccall("w_sub", self, other)
     an = $size ## i64
     if ((wvalue_bits(self) >> 47) & 1) == 1
@@ -286,9 +286,9 @@
   # reach the kernel, so a zero result cannot occur here (both operands are
   # multi-limb, hence nonzero).
   -> *(other)(BigInt)
-    if ((wvalue_bits(self) >> 48) & 65535) != 65528
+    if (wvalue_bits(self) & -281474976710656) != -2251799813685248
       return ccall("w_mul", self, other)
-    if ((wvalue_bits(other) >> 48) & 65535) != 65528
+    if (wvalue_bits(other) & -281474976710656) != -2251799813685248
       return ccall("w_mul", self, other)
     an = $size ## i64
     if ((wvalue_bits(self) >> 47) & 1) == 1

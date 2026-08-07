@@ -31719,6 +31719,106 @@ WValue w_range_bound_i64_w(WValue v) {
     return w_int(w_range_bound_i64(v));
 }
 
+/* ---- Source-routed bigint `+` (weak-linkage arm) ----
+ * __w_bigint_plus_src has a WEAK default that is exactly the C kernel; a
+ * program that compiles core/numeric/big_int.w emits a STRONG wrapper
+ * around the compiled BigInt#+ body (emitter.w), and strong-over-weak
+ * link resolution routes every bigint-shaped `+` through source. Unlike
+ * the earlier runtime-resolved pointer arm, the static reference is
+ * transparent to whole-program LTO — no opaque call boundary, no ~3-4ns
+ * tax. Programs without BigInt (thin -e snippets, stage-0 hosts, the
+ * Ruby engine's host binary) link the weak default, i.e. the C path.
+ * The source body must never apply infix `+` to bigint operands (that
+ * would re-enter this arm); it composes kernels and exported C
+ * boundaries instead. TUNGSTEN_BIGINT_SRC_OPS=0 pins the C path (the
+ * same-binary A/B lever and escape hatch); =trace reports once. */
+__attribute__((weak)) WValue __w_bigint_plus_src(WValue a, WValue b) {
+    return bigint_add_any(a, b);
+}
+__attribute__((weak)) WValue __w_bigint_minus_src(WValue a, WValue b) {
+    return bigint_sub_any(a, b);
+}
+__attribute__((weak)) WValue __w_bigint_times_src(WValue a, WValue b) {
+    return bigint_mul_any(a, b);
+}
+
+/* Multiply routes to source only for the SCHOOLBOOK band: both operands
+ * multi-limb and small enough that C stays in bigint_mul_schoolbook_into.
+ * Karatsuba/Toom/NTT crossovers, squaring, and the n-by-1 specializations
+ * all keep their C dispatch — porting those is a separate gated step. */
+static inline int bigint_mul_src_shape(WValue a, WValue b) {
+    if (!w_is_bigint(a) || !w_is_bigint(b)) return 0;
+    if (a == b) return 0;                     /* squaring has its own C path */
+    int32_t sa, sb;
+    (void)w_bigint_view(a, &sa);
+    (void)w_bigint_view(b, &sb);
+    int32_t la = sa < 0 ? -sa : sa;
+    int32_t lb = sb < 0 ? -sb : sb;
+    /* Same boundary the add/sub arms landed on: C specializes equal-length
+     * same-sign operands (`bigint_mul_positive_equal`), measured 1.106 vs
+     * source. Equal-length with differing signs, and every unequal-length
+     * pair in the band, have no such arm — 0.92-1.00 in source. */
+    if (la == lb && ((sa > 0) == (sb > 0))) return 0;
+    return la >= 2 && lb >= 2 && la <= 24 && lb <= 24;
+}
+static int g_bigint_src_ops_off = -1;   /* -1 unresolved, 0 route, 1 pin C */
+
+/* Shape gate for the source arms. The migrated source bodies implement the
+ * GENERAL multi-limb case; C's kernels additionally carry small-operand
+ * specializations (one-limb fused paths, word shapes, identity arms) that a
+ * source body cannot beat — a ~20ns operation cannot absorb the shape tests
+ * needed to pick a path. So the arm, which already holds both values in
+ * registers, decides: two heap BigInts of 2..256 limbs go to source,
+ * everything else keeps C's specialized path. Migration proceeds by moving
+ * this boundary outward as each specialization is ported and gated. */
+static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
+    if (!w_is_bigint(a) || !w_is_bigint(b)) return 0;
+    int32_t sa, sb;
+    (void)w_bigint_view(a, &sa);
+    (void)w_bigint_view(b, &sb);
+    (void)neg_b;
+    int32_t la = sa < 0 ? -sa : sa;
+    int32_t lb = sb < 0 ? -sb : sb;
+    /* Exclusion keys on the RAW operand signs, NOT the post-flip effective
+     * ones: C's `bigint_add_equal_fast` and `bigint_sub_equal_fast` each
+     * specialize equal-length pairs whose own signs match, per operator.
+     * (Flipping for `-` inverted this and mis-routed `a - b` with both
+     * operands positive into source, where it measured 1.21-1.24.)
+     * Equal-length pairs with differing raw signs have no such C arm and
+     * measured 1.02-1.04 in source, so they migrate.
+     *
+     * RE-MEASURED after the tag-guard elision campaign (typed-overload
+     * dispatch, all six guards folded, seam bound directly to the
+     * (BigInt) worker): same-binary TUNGSTEN_BIGINT_SRC_OPS A/B, RUNS=9,
+     * add-four 1.12 and add-sixtyfour 1.30 against C — still over the
+     * 1.10 gate, decisively at width. The residual is the specialized
+     * equal_fast arm itself (hot-slot alloc + fused epilogue), not gate
+     * or guard overhead; migrating this shape means porting that arm,
+     * not re-testing this boundary. */
+    if (la == lb && ((sa > 0) == (sb > 0))) return 0;
+    /* Migrated arm: unequal-length multi-limb pairs, which the source
+     * bodies handle with a FUSED kernel (combine + propagate in one asm
+     * pass, no strided tail loop). skew rows measure 0.93-1.00 — source
+     * at or better than C. One-limb operands and equal-length same-sign
+     * pairs keep C's dedicated specializations (fused u64 arm,
+     * *_equal_fast).
+     *
+     * B6 (spec/numeric/bigint_seam_disjoint_spec.w): nothing this gate
+     * admits may be a shape the source bodies bail on, or w_add → src →
+     * w_add recurses. Admission requires 2..4096 limbs on both sides, so
+     * the bail set (foreign tag, effective zero, over-band) stays
+     * disjoint. */
+    return la >= 2 && lb >= 2 && la <= 4096 && lb <= 4096;
+}
+static int __attribute__((noinline)) bigint_src_ops_resolve(void) {
+    const char *v = getenv("TUNGSTEN_BIGINT_SRC_OPS");
+    int off = (v && v[0] == '0') ? 1 : 0;
+    if (v && v[0] == 't')
+        fprintf(stderr, "[bigint-src-ops] + arm active (weak/strong link routing)\n");
+    g_bigint_src_ops_off = off;
+    return off;
+}
+
 WValue w_add(WValue a, WValue b) {
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_add_elem(a, b);
     if (w_is_array(a) && w_is_array(b)) return w_array_concat(a, b);

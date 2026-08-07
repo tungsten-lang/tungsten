@@ -213,8 +213,11 @@ See [04 — Literals & units](04-literals-and-units.md).
 ## 13. `@gpu fn` — GPU kernels in the same file
 
 ```tungsten
-@gpu fn add_one(x ## f32[], y ## f32[], n ## i32)
-  i ## i32 = gpu.thread_position_in_grid.x
+## f32[]: x
+## f32[]: y
+## i32: n
+@gpu fn add_one(x, y, n)
+  i = gpu.thread_position_in_grid.x ## i32
   if i < n
     y[i] = x[i] + 1.0
 ```

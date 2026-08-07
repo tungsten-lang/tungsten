@@ -1140,7 +1140,7 @@ use ast
   if msg.include?("elsif")
     return "rewrite as nested `if` / `else` (elsif is supported as nested if/else chains in recent emitters — rebuild the compiler if you still see this)"
   if msg.include?("type hint")
-    return "annotate parameters and locals: `x ## f32[]`, `i ## i32 = …`"
+    return "hint params on preceding lines (`## f32[]: x` above the @gpu fn) and locals with a trailing hint (`i = … ## i32`)"
   if msg.include?("CUDA-only")
     return "build with TUNGSTEN_GPU_DIALECTS=cuda (default) or use the Metal simdgroup_* surface"
   if msg.include?("unsupported statement") || msg.include?("unsupported expression")

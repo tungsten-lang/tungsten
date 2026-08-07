@@ -1,4 +1,48 @@
 #!/bin/bash
+TUNGSTEN_POLYGLOT=1 <<2
+# ──────────────────────────────────────────────────────────────────────────
+# bin/tungsten is a POLYGLOT — one file, two programs.
+#
+#   bash bin/tungsten ARGS...       line 2 is a no-op assignment whose
+#                                   heredoc (its delimiter is the bare 2
+#                                   on a line of its own, below) makes bash
+#                                   skip this whole Tungsten half; the
+#                                   dispatcher after it is plain bash.
+#                                   Kernel exec via the shebang takes the
+#                                   same path.
+#
+#   tungsten bin/tungsten ARGS...   to Tungsten, line 2 is the constant
+#                                   assignment TUNGSTEN_POLYGLOT = 1 shl 2.
+#                                   This trampoline re-runs the bash half
+#                                   on this same file, forwarding argv; the
+#                                   bash half never reaches the parser — it
+#                                   is swallowed as the (unused) heredoc
+#                                   string opened just before that bare-2
+#                                   line.
+#
+# Rules for editing this half: it sits inside a bash heredoc whose delimiter
+# cannot be quoted (quoted forms are not valid Tungsten), so bash performs
+# expansions on the text. Keep it free of dollar signs and backticks, and
+# never add a line consisting of only the digit 2.
+# ──────────────────────────────────────────────────────────────────────────
+
+-> sh_quote(s)
+  "'" + s.gsub("'", "'\\''") + "'"
+
+cmd = "bash " + sh_quote(__DIR__ + "/tungsten")
+args = argv()
+i = 0
+while i < args.size
+  cmd = cmd + " " + sh_quote(args[i])
+  i = i + 1
+# system() reports only success/failure, so this path collapses exit codes
+# to 0/1 (Process.spawn is not available in the interpreters).
+if system(cmd)
+  exit(0)
+exit(1)
+
+bash_half = <<~TUNGSTEN_POLYGLOT_BASH
+2
 
 # Resolve symlinks so ROOT is the real install dir even when invoked via a
 # symlink on PATH (the installer links this script into ~/.local/bin).
@@ -61,7 +105,7 @@ case "$1" in
     ;;
   bootstrap)
     shift
-    exec bash "$ROOT/bin/commands/bootstrap.sh" "$@"
+    exec bash "$ROOT/bin/bootstrap" "$@"
     ;;
   # build still uses the bootstrap driver (Ruby orchestrator); --ruby/--spinel
   # are developer options on that path. Stage1+stage2 behavior unchanged.
@@ -492,7 +536,7 @@ else
     start|"")
       echo "The Tungsten Programming Language"
       echo
-      echo "  Next: bin/tungsten bootstrap  # stage-1 compiler (no Ruby)"
+      echo "  Next: bin/bootstrap           # stage-1 compiler (no Ruby)"
       echo "        bin/tungsten build      # full self-host + bits"
       echo "  Docs: doc/getting-started/"
       exit 0
@@ -504,3 +548,4 @@ else
   esac
   exec "$RUBY" "$RUBY_CLI" "$@"
 fi
+TUNGSTEN_POLYGLOT_BASH

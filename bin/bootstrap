@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# tungsten bootstrap — host path to a working stage-1 compiler (no Ruby)
+# bin/bootstrap — host path to a working stage-1 compiler (no Ruby).
+# Also reachable as `bin/tungsten bootstrap`.
 #
 # Builds:
 #   1. implementations/c (stage-0 C VM)
@@ -11,7 +12,7 @@
 # Use bootstrap on a fresh clone; use build for the full self-host pipeline.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 . "$ROOT/bin/commands/bootstrap_helpers.sh"
 . "$ROOT/bin/commands/config.sh"
@@ -25,6 +26,13 @@ NO_DEBUG_REQUESTED=0
 CPU_ARG=""
 TARGET_TRIPLE=""
 TARGET_SYSROOT=""
+set_value_opt() {
+  case "$1" in
+    --cpu) CPU_ARG="$2" ;;
+    --target) TARGET_TRIPLE="$2" ;;
+    --sysroot) TARGET_SYSROOT="$2" ;;
+  esac
+}
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force|-f) FORCE=1 ;;
@@ -32,28 +40,16 @@ while [ "$#" -gt 0 ]; do
     --debug) DEBUG_REQUESTED=1 ;;
     --no-debug) NO_DEBUG_REQUESTED=1 ;;
     --native) CPU_ARG=native ;;
-    --cpu)
+    --cpu|--target|--sysroot)
+      [ "$#" -ge 2 ] || { printf 'error: %s requires a value\n' "$1" >&2; exit 1; }
+      set_value_opt "$1" "$2"
       shift
-      [ "$#" -gt 0 ] || { printf 'error: --cpu requires a value\n' >&2; exit 1; }
-      CPU_ARG="$1"
       ;;
-    --cpu=*) CPU_ARG="${1#--cpu=}" ;;
-    --target)
-      shift
-      [ "$#" -gt 0 ] || { printf 'error: --target requires a value\n' >&2; exit 1; }
-      TARGET_TRIPLE="$1"
-      ;;
-    --target=*) TARGET_TRIPLE="${1#--target=}" ;;
-    --sysroot)
-      shift
-      [ "$#" -gt 0 ] || { printf 'error: --sysroot requires a value\n' >&2; exit 1; }
-      TARGET_SYSROOT="$1"
-      ;;
-    --sysroot=*) TARGET_SYSROOT="${1#--sysroot=}" ;;
+    --cpu=*|--target=*|--sysroot=*) set_value_opt "${1%%=*}" "${1#*=}" ;;
     --portable) PORTABLE=1 ;;
     -h|--help)
       cat <<'EOF'
-Usage: tungsten bootstrap [options]
+Usage: tungsten bootstrap [options]   (or: bin/bootstrap [options])
 
   Build a stage-1 compiler without Ruby (C VM host path).
 
@@ -109,10 +105,7 @@ if [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then DEBUG_ENABLED=0; fi
 
 normalize_cpu() {
   case "$1" in
-    v1) printf 'x86-64-v1' ;;
-    v2) printf 'x86-64-v2' ;;
-    v3) printf 'x86-64-v3' ;;
-    v4) printf 'x86-64-v4' ;;
+    v1|v2|v3|v4) printf 'x86-64-%s' "$1" ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -166,31 +159,21 @@ case "$disable_zstd" in
   *) die "TUNGSTEN_BOOTSTRAP_DISABLE_ZSTD must be 0 or 1" ;;
 esac
 
-sha256_stdin() {
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 | awk '{print $1}'
-  elif command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | awk '{print $1}'
-  else
-    openssl dgst -sha256 | awk '{print $NF}'
-  fi
-}
-
-sha256_file() {
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}'
-  elif command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-  else
-    openssl dgst -sha256 "$1" | awk '{print $NF}'
-  fi
-}
-
-sha256_path() {
-  if [ -f "$1" ]; then sha256_file "$1"; else printf 'missing'; fi
-}
+# Pick the hash tool once; shasum/sha256sum print "<hash> <name>", openssl
+# prints "SHA2-256(name)= <hash>" — hence the per-tool awk field.
+if command -v shasum >/dev/null 2>&1; then
+  sha256() { shasum -a 256 "$@" | awk '{print $1}'; }
+elif command -v sha256sum >/dev/null 2>&1; then
+  sha256() { sha256sum "$@" | awk '{print $1}'; }
+else
+  sha256() { openssl dgst -sha256 "$@" | awk '{print $NF}'; }
+fi
+sha256_stdin() { sha256; }
+sha256_file()  { sha256 "$1"; }
+sha256_path()  { if [ -f "$1" ]; then sha256 "$1"; else printf 'missing'; fi; }
 
 tool_identity() {
+  local tool_path tool_version
   tool_path="$(command -v "$1" 2>/dev/null || printf '%s' "$1")"
   tool_version="$("$1" --version 2>/dev/null | head -n 1 || true)"
   printf '%s|%s' "$tool_path" "$tool_version"
@@ -261,7 +244,7 @@ if [ "$FORCE" -eq 0 ] && [ -x "$C_INTERP_CACHE" ]; then
 else
   log_path="/tmp/tungsten-bootstrap-c-vm-$$.log"
   rm -rf "$C_INTERP_DIR/$CVM_BUILD_DIR"
-  if ! make -B "${MAKE_JOB_ARGS[@]}" -C "$C_INTERP_DIR" \
+  if ! make -B ${MAKE_JOB_ARGS[@]+"${MAKE_JOB_ARGS[@]}"} -C "$C_INTERP_DIR" \
       BUILD_DIR="$CVM_BUILD_DIR" CC="$BOOTSTRAP_CC" CFLAGS="$CVM_CFLAGS" \
       >"$log_path" 2>&1; then
     cat "$log_path" >&2
@@ -292,7 +275,6 @@ step "Runtime archive"
 UNAME_S="$(uname -s)"
 case "$UNAME_S" in
   Darwin) EVENT_SRC=event_kqueue.c; METAL_SRCS="metal.m blas_bridge.c" ;;
-  Linux)  EVENT_SRC=event_epoll.c;  METAL_SRCS="" ;;
   *)      EVENT_SRC=event_epoll.c;  METAL_SRCS="" ;;
 esac
 
@@ -381,35 +363,21 @@ runtime_identity="$({
   done
 } | sha256_stdin)"
 RUNTIME_A="$CACHE/bootstrap-runtime-$runtime_identity.a"
-need_runtime=1
-if [ "$FORCE" -eq 0 ] && [ -f "$RUNTIME_A" ]; then need_runtime=0; fi
 
-if [ "$need_runtime" -eq 0 ]; then
+if [ "$FORCE" -eq 0 ] && [ -f "$RUNTIME_A" ]; then
   ok "CACHED" "$RUNTIME_A"
 else
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-bootstrap-rt.XXXXXX")"
   runtime_publish="$RUNTIME_A.tmp-$$"
   trap 'rm -rf "$tmpdir"; rm -f "$runtime_publish"' EXIT
 
+  # The full source set is at most ~9 files; compile them all concurrently
+  # and gate on the slowest.
   objs=()
   compile_pids=()
   compile_names=()
-  wait_compile_batch() {
-    batch_failed=0
-    for i in "${!compile_pids[@]}"; do
-      if ! wait "${compile_pids[$i]}"; then
-        printf '%serror:%s failed to compile runtime/%s\n' \
-          "$red" "$reset" "${compile_names[$i]}" >&2
-        batch_failed=1
-      fi
-    done
-    compile_pids=()
-    compile_names=()
-    [ "$batch_failed" -eq 0 ]
-  }
   for src in "${RUNTIME_SRCS[@]}"; do
-    base="$(basename "$src")"
-    obj="$tmpdir/${base%.*}.o"
+    obj="$tmpdir/${src%.*}.o"
     if [[ "$src" == *.m ]]; then
       "$BOOTSTRAP_CC" "${runtime_objc_flags[@]}" "$RUNTIME_DIR/$src" -o "$obj" &
     else
@@ -418,11 +386,16 @@ else
     compile_pids+=("$!")
     compile_names+=("$src")
     objs+=("$obj")
-    if [ "${#compile_pids[@]}" -ge "$BUILD_JOBS" ]; then
-      wait_compile_batch || die "runtime compilation failed"
+  done
+  compile_failed=0
+  for i in "${!compile_pids[@]}"; do
+    if ! wait "${compile_pids[$i]}"; then
+      printf '%serror:%s failed to compile runtime/%s\n' \
+        "$red" "$reset" "${compile_names[$i]}" >&2
+      compile_failed=1
     fi
   done
-  wait_compile_batch || die "runtime compilation failed"
+  [ "$compile_failed" -eq 0 ] || die "runtime compilation failed"
 
   tmp_archive="$tmpdir/$(basename "$RUNTIME_A")"
   "$BOOTSTRAP_AR" rcs "$tmp_archive" "${objs[@]}"
@@ -471,19 +444,16 @@ stage1_identity="$({
 } | sha256_stdin)"
 STAGE1="$CACHE/bootstrap-stage1-$stage1_identity"
 STAGE1_COMPLETE="$STAGE1.complete"
+# The marker records which optional outputs (.ll/.sidemap) the cached stage-1
+# build produced, so a hit is honored only when the same set is still present.
+stage1_state() {
+  printf 'll=%s sidemap=%s\n' \
+    "$([ -f "$STAGE1.ll" ] && echo present || echo missing)" \
+    "$([ -f "$STAGE1.sidemap" ] && echo present || echo missing)"
+}
 stage1_cache_complete() {
   [ -x "$STAGE1" ] && [ -f "$STAGE1_COMPLETE" ] || return 1
-  case "$(cat "$STAGE1_COMPLETE")" in
-    "ll=present sidemap=present")
-      [ -f "$STAGE1.ll" ] && [ -f "$STAGE1.sidemap" ] ;;
-    "ll=present sidemap=missing")
-      [ -f "$STAGE1.ll" ] && [ ! -e "$STAGE1.sidemap" ] ;;
-    "ll=missing sidemap=present")
-      [ ! -e "$STAGE1.ll" ] && [ -f "$STAGE1.sidemap" ] ;;
-    "ll=missing sidemap=missing")
-      [ ! -e "$STAGE1.ll" ] && [ ! -e "$STAGE1.sidemap" ] ;;
-    *) return 1 ;;
-  esac
+  [ "$(cat "$STAGE1_COMPLETE")" = "$(stage1_state)" ]
 }
 if [ "$FORCE" -eq 0 ] && stage1_cache_complete; then
   ok "CACHED" "$STAGE1"
@@ -493,24 +463,15 @@ else
   rm -f "$stage1_tmp" "$stage1_tmp.ll" "$stage1_tmp.sidemap"
   # Development bootstrap keeps the fast cached-runtime/no-LTO path. A
   # release bootstrap recompiles runtime sources into the full-LTO product.
-  stage1_ok=0
-  if [ "$RELEASE" -eq 1 ]; then
-    if TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
-      "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
-        --out "$stage1_tmp" "${STAGE_FLAGS[@]}" \
-        >"$stage1_log" 2>&1; then
-      stage1_ok=1
-    fi
-  else
-    if TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
-      "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
-        --out "$stage1_tmp" "${STAGE_FLAGS[@]}" \
-        --runtime "$RUNTIME_A" --no-lto \
-        >"$stage1_log" 2>&1; then
-      stage1_ok=1
-    fi
+  stage1_link_flags=()
+  if [ "$RELEASE" -ne 1 ]; then
+    stage1_link_flags=(--runtime "$RUNTIME_A" --no-lto)
   fi
-  if [ "$stage1_ok" -ne 1 ]; then
+  if ! TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
+      "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
+        --out "$stage1_tmp" "${STAGE_FLAGS[@]}" \
+        ${stage1_link_flags[@]+"${stage1_link_flags[@]}"} \
+        >"$stage1_log" 2>&1; then
     cat "$stage1_log" >&2
     die "stage 1 (C VM) failed — see $stage1_log"
   fi
@@ -528,21 +489,17 @@ else
   rm -f "$STAGE1_COMPLETE"
   if [ -f "$stage1_tmp.ll" ]; then
     mv "$stage1_tmp.ll" "$STAGE1.ll"
-    stage1_ll_state=present
   else
     rm -f "$STAGE1.ll"
-    stage1_ll_state=missing
   fi
   if [ -f "$stage1_tmp.sidemap" ]; then
     mv "$stage1_tmp.sidemap" "$STAGE1.sidemap"
-    stage1_sidemap_state=present
   else
     rm -f "$STAGE1.sidemap"
-    stage1_sidemap_state=missing
   fi
   mv "$stage1_tmp" "$STAGE1"
   stage1_complete_tmp="$STAGE1_COMPLETE.$$"
-  printf 'll=%s sidemap=%s\n' "$stage1_ll_state" "$stage1_sidemap_state" > "$stage1_complete_tmp"
+  stage1_state > "$stage1_complete_tmp"
   mv "$stage1_complete_tmp" "$STAGE1_COMPLETE"
   ok "built" "$STAGE1"
 fi
@@ -641,7 +598,7 @@ if [ -f "$WC" ]; then
   elif BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
       "$COMPILER_BIN" compile "$WC" --out "$WC_OUT" --no-lto \
       >/tmp/tungsten-bootstrap-cli.log 2>&1; then
-    if [ "$(uname -s)" = Darwin ]; then
+    if [ "$UNAME_S" = Darwin ]; then
       codesign --force -s - "$WC_OUT" >/dev/null 2>&1 || true
     fi
     ok "built" "$WC_OUT"

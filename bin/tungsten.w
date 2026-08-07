@@ -199,7 +199,7 @@ MANPAGE = manpage_lines.join("\n")
   exit(1)
 
 -> run_bootstrap(tool_args)
-  cmd = "bash " + sh_quote(ROOT + "/bin/commands/bootstrap.sh")
+  cmd = "bash " + sh_quote(ROOT + "/bin/bootstrap")
   i = 0
   while i < tool_args.size
     cmd = cmd + " " + sh_quote(tool_args[i])

@@ -503,7 +503,7 @@ end
 
 # Install through a content-addressed signed cache. This makes the requested
 # live compiler directly comparable to a stable artifact (no separate stamp
-# can lie after bootstrap.sh or another build replaces the live binary).
+# can lie after bin/bootstrap or another build replaces the live binary).
 install_compiler = lambda do |src, label = nil, announce: true|
   sidemap = "#{src}.sidemap"
   install_sha = Digest::SHA256.hexdigest([
@@ -757,7 +757,7 @@ zstd_cflags, zstd_libs = cached_system_deps("zstd_flags", [
   [cflags, libs]
 end
 
-# Mirror bootstrap.sh's optional-zstd contract: hosts without libzstd (or with
+# Mirror bin/bootstrap's optional-zstd contract: hosts without libzstd (or with
 # TUNGSTEN_BOOTSTRAP_DISABLE_ZSTD=1) link runtime/slab_zstd_stub.c — same
 # symbols, aborts only if a zstd slab path is actually exercised — instead of
 # dying on <zstd.h> at compile. Every successful detection above ends with a
@@ -1155,7 +1155,7 @@ unless bit_only
     puts "#{bold}==> Stage 1: implementations/c VM compiles tungsten.w#{reset}"
     stage1_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     # Fixed-point builds always use the canonical parser. The C-native parser
-    # is a bootstrap.sh acceleration and intentionally emits a different
+    # is a bin/bootstrap acceleration and intentionally emits a different
     # stage-1 IR, so an ambient environment value must not leak in here.
     lex_table_path = ENV.fetch("TUNGSTEN_LEX64_TABLE",
                                File.join(ROOT, "languages/tungsten/tungsten.lex64"))

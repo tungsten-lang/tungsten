@@ -118,6 +118,19 @@ f = ~0.1 + ~0.2              # machine floats
 | `$3.14` | Currency | Money |
 | `3.14%` / `15%` | Percent | Relative change |
 
+Equality follows exactness. Integer, Rational, and Decimal are all exact,
+so `==` compares them by mathematical value — `2.0 == 2`, `1/2 == 0.5`,
+and `4/2 == 2` are `true`, and hash keys agree (`{2 => v}[2.0]` hits).
+Floats are approximations, so they equal only other Floats: `~2.0 == 2.0`
+is `false`, even though ordering still crosses the boundary (`~2.0 < 3`
+works). Convert explicitly (`.to_f`, `.to_d`) when you mean to cross.
+
+For approximate comparison use `≈` (equality precedence): it coerces any
+numerics through one double path and passes within
+`|a-b| ≤ 1e-12 · max(1, |a|, |b|)` — so `~0.1 + ~0.2 ≈ ~0.3` and
+`~2.0 ≈ 2` are `true`, while `0.99971 ≈ 1` still fails. Quantities
+convert units first (`1 km ≈ 1000 m`).
+
 ---
 
 ## Unicode math in source

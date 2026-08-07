@@ -43,6 +43,8 @@ parameters: `Lorenz` (10, 28, 8/3), `Rossler` (0.2, 0.2, 5.7), `VanDerPol`,
 lz = Lorenz.classic
 tr = Dynamics.trajectory(lz, [~1.0, ~1.0, ~1.0], ~0.0, ~50.0, ~0.01)
 # tr[:t] — times, tr[:x] — states (fixed-step RK4)
+ta = Dynamics.trajectory_adaptive(lz, x0, ~0.0, ~50.0, ~0.01)
+# adaptive Dormand-Prince 5(4) via Solve.rk45 — tolerances pick the step
 x  = Dynamics.advance(lz, x0, ~0.0, 5000, ~0.01)   # no path storage
 orb = Dynamics.orbit(Henon.classic, [~0.1, ~0.1], 10_000)
 ```
@@ -117,8 +119,6 @@ pairwise: keep N ≲ 2000, or expect quadratic time.
 
 ## Follow-ups
 
-- Adaptive Dormand-Prince 5(4) in `Solve` (the current `rk45` is a
-  Heun/Euler embedded pair).
 - LAPACK-bridge eigenvalues for large dense systems.
 - GPU sweeps (`@gpu` basins of attraction, parameter grids).
 - Continuation/AUTO-style branch following and periodic-orbit shooting.

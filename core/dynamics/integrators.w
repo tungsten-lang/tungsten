@@ -33,6 +33,12 @@
       xs = xs.push(x)
     {t: ts, x: xs}
 
+  # Adaptive trajectory through Solve's Dormand-Prince 5(4): error
+  # tolerances pick the step, dt0 only seeds it. Returns {t:, x:}.
+  -> .trajectory_adaptive(sys, x0, t_start, t_stop, dt0)
+    r = Solve.rk45(-> (t, y) sys.f(t, y), t_start, t_stop, x0, dt0)
+    {t: r[:t], x: r[:y]}
+
   # Advance a flow by n RK4 steps without storing the path.
   -> .advance(sys, x0, t_start, n, dt)
     x = x0

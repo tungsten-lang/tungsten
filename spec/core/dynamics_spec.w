@@ -191,6 +191,61 @@ hchg = Dynamics.stability_changes(hb)
 check("branch.hopf_detected", hchg.size >= 1, true)
 approx("branch.hopf_location", (hchg[0][0] + hchg[0][1]) * ~0.5, ~24.2, ~25.2)
 
+# -- Pseudo-arclength continuation rounds the saddle-node fold --
++ SnTest < Flow
+  -> new(p)
+    @p = p
+    self
+
+  -> dim
+    1
+
+  -> f(t, x)
+    [@p - x[0] * x[0]]
+
+  -> jac(t, x)
+    [[~0.0 - ~2.0 * x[0]]]
+
+arc = Dynamics.continue_arclength(-> (p) SnTest.new(p), ~4.0, [~2.0], ~0.0 - ~0.3, 40)
+check("arclength.complete", arc[:complete], true)
+check("arclength.fold_found", arc[:folds].size >= 1, true)
+afold = arc[:folds][0]
+approx("arclength.fold_p", arc[:p][afold], ~0.0 - ~0.15, ~0.15)
+alast = arc[:p].size - 1
+check("arclength.rounds_fold", arc[:x][alast][0] < ~0.0 - ~1.0 && arc[:p][alast] > ~1.0, true)
+check("arclength.lower_branch_unstable", arc[:stability].last.to_s(), "source")
+
+# -- Multiple shooting matches single shooting (VdP mu=1) --
+mo = Dynamics.shoot_periodic_multi(vdp, [~2.0, ~0.0], ~6.28, ~0.01, 4)
+approx("multi.period", mo[:period], ~6.6630, ~6.6636)
+approx("multi.residual", mo[:residual], ~0.0 - ~1.0e-20, ~1.0e-9)
+mdp = mo[:period] - orb[:period]
+if mdp < ~0.0
+  mdp = ~0.0 - mdp
+approx("multi.matches_single", mdp, ~0.0 - ~1.0e-20, ~1.0e-7)
+
+# Stiff VdP mu=5: Poincaré-seeded multiple shooting
+stiffv = VanDerPol.new(~5.0)
+spc = Dynamics.poincare(stiffv, [~2.0, ~0.0], [~1.0, ~0.0], ~0.0, ~25.0, ~26.0, ~0.01)
+sguess_t = spc[:t][spc[:t].size - 1] - spc[:t][spc[:t].size - 2]
+sorb = Dynamics.shoot_periodic_multi(stiffv, spc[:points].last, sguess_t, ~0.01, 6)
+approx("multi.stiff_period", sorb[:period], ~11.57, ~11.66)
+approx("multi.stiff_residual", sorb[:residual], ~0.0 - ~1.0e-20, ~1.0e-8)
+
+# -- Lyapunov parameter map (CPU; GPU twin in doc/examples) --
+lmap = Dynamics.lyapunov_map(-> (a, b) Henon.new(a, b), ~1.0, ~1.4, 8, ~0.2, ~0.3, 4, [~0.1, ~0.1], 200, 1200)
+approx("lyap_map.classic_cell", lmap[3][7], ~0.35, ~0.50)
+neg_cells = 0
+lmr = 0
+while lmr < 4
+  lmc = 0
+  while lmc < 8
+    if lmap[lmr][lmc] < ~0.0
+      neg_cells = neg_cells + 1
+    lmc = lmc + 1
+  lmr = lmr + 1
+check("lyap_map.has_windows", neg_cells >= 3, true)
+
 # -- Basins of attraction: damped double well --
 well = Duffing.new(~0.5, ~0.0 - ~1.0, ~1.0, ~0.0, ~1.0)
 bg = Dynamics.basins(well, ~0.0 - ~2.0, ~2.0, ~0.0 - ~2.0, ~2.0, 9, 9, ~50.0, ~0.01, [[~0.0 - ~1.0, ~0.0], [~1.0, ~0.0]], ~0.5)

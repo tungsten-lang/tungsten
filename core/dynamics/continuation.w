@@ -62,6 +62,153 @@
       i = i + 1
     out
 
+  # ∂f/∂p of a family at (x, p) by central differences over the maker.
+  -> .family_fp(maker, p, x)
+    hp = ~1.0e-6 * (~1.0 + Math.hypot(p, ~0.0))
+    fp = maker.call(p + hp).f(~0.0, x)
+    fm = maker.call(p - hp).f(~0.0, x)
+    out = []
+    i = 0
+    while i < fp.size()
+      out = out.push((fp[i] - fm[i]) / (~2.0 * hp))
+      i = i + 1
+    out
+
+  # Pseudo-arclength continuation of an equilibrium branch — follows the
+  # curve f(x, p) = 0 in (x, p) THROUGH folds, where the natural sweep
+  # stalls. Tangent predictor (bordered solve against the previous
+  # tangent, so orientation is preserved), Newton corrector on the
+  # extended system with the arclength constraint, ds halving on
+  # corrector failure. Returns {p:, x:, stability:, folds: [indices
+  # where the tangent's p-component changes sign], complete: bool}.
+  -> .continue_arclength(maker, p_start, x_guess, ds, nsteps)
+    sys0 = maker.call(p_start)
+    x = Dynamics.fixed_point_flow(sys0, x_guess)
+    n = x.size()
+    p = p_start
+    ps = [p + ~0.0]
+    xs = [Dynamics.vcopy(x)]
+    cls = [Dynamics.classify_flow(sys0, x)]
+    folds = []
+    tang = []
+    i = 0
+    while i < n
+      tang = tang.push(~0.0)
+      i = i + 1
+    tang = tang.push(~1.0)
+    step = ds
+    complete = true
+    k = 0
+    while k < nsteps
+      sys = maker.call(p)
+      j = sys.jac(~0.0, x)
+      fpcol = Dynamics.family_fp(maker, p, x)
+      big = []
+      i = 0
+      while i < n
+        row = []
+        c = 0
+        while c < n
+          row = row.push(j[i][c])
+          c = c + 1
+        row = row.push(fpcol[i])
+        big = big.push(row)
+        i = i + 1
+      big = big.push(Dynamics.vcopy(tang))
+      rhs = []
+      i = 0
+      while i < n
+        rhs = rhs.push(~0.0)
+        i = i + 1
+      rhs = rhs.push(~1.0)
+      newt = LinAlg.solve(big, rhs)
+      tn = LinAlg.norm(newt)
+      i = 0
+      while i <= n
+        newt[i] = newt[i] / tn
+        i = i + 1
+      if newt[n] * tang[n] < ~0.0 && k > 0
+        folds = folds.push(ps.size() - 1)
+      tang = newt
+      # predictor
+      xp = []
+      i = 0
+      while i < n
+        xp = xp.push(x[i] + step * tang[i])
+        i = i + 1
+      pp = p + step * tang[n]
+      # corrector: Newton on [f(x,p); tangᵀ·((x,p) − predictor)]
+      ok = false
+      attempt = 0
+      while attempt < 2
+        xc = Dynamics.vcopy(xp)
+        pc = pp
+        it = 0
+        while it < 25
+          sysc = maker.call(pc)
+          fx = sysc.f(~0.0, xc)
+          arc = ~0.0
+          i = 0
+          while i < n
+            arc = arc + tang[i] * (xc[i] - xp[i])
+            i = i + 1
+          arc = arc + tang[n] * (pc - pp)
+          rnorm = Math.hypot(Dynamics.vnorm(fx), arc)
+          if rnorm < ~1.0e-10
+            ok = true
+            it = 25
+          else
+            jc = sysc.jac(~0.0, xc)
+            fpc = Dynamics.family_fp(maker, pc, xc)
+            bigc = []
+            i = 0
+            while i < n
+              row = []
+              c = 0
+              while c < n
+                row = row.push(jc[i][c])
+                c = c + 1
+              row = row.push(fpc[i])
+              bigc = bigc.push(row)
+              i = i + 1
+            bigc = bigc.push(Dynamics.vcopy(tang))
+            rhsc = []
+            i = 0
+            while i < n
+              rhsc = rhsc.push(~0.0 - fx[i])
+              i = i + 1
+            rhsc = rhsc.push(~0.0 - arc)
+            dc = LinAlg.solve(bigc, rhsc)
+            i = 0
+            while i < n
+              xc[i] = xc[i] + dc[i]
+              i = i + 1
+            pc = pc + dc[n]
+            it = it + 1
+        if ok
+          attempt = 2
+        else
+          step = step * ~0.5
+          i = 0
+          while i < n
+            xp[i] = x[i] + step * tang[i]
+            i = i + 1
+          pp = p + step * tang[n]
+          attempt = attempt + 1
+      if ok
+        x = xc
+        p = pc
+        ps = ps.push(p)
+        xs = xs.push(Dynamics.vcopy(x))
+        cls = cls.push(Dynamics.classify_flow(maker.call(p), x))
+        if step * ~1.5 < ds * ~2.0
+          step = step * ~1.5
+        k = k + 1
+      else
+        complete = false
+        k = nsteps
+    {:p => ps, :x => xs, :stability => cls, :folds => folds, :complete => complete}
+
   # Monodromy matrix: the tangent flow of an autonomous system over
   # [0, period] from x0, integrated jointly with the state in `steps`
   # RK4 stages. Returns [x_at_period, M].
@@ -141,6 +288,111 @@
         raise "Dynamics.shoot_periodic: period collapsed — bad initial guess"
       it = it + 1
     raise "Dynamics.shoot_periodic: no convergence"
+
+  # Multiple shooting: the period splits into m segments with node
+  # states x_0..x_{m−1} and unknown T, Newton-solving
+  #   φ_{T/m}(x_i) − x_{i+1 mod m} = 0     (m·n equations)
+  #   f(x_0)·δx_0 = 0                       (phase row)
+  # with the segment monodromies filling the block Jacobian. More robust
+  # than single shooting on stiff or long orbits; Floquet multipliers
+  # come from the ordered product M_{m−1}···M_0. Returns the same hash
+  # as shoot_periodic plus :nodes.
+  -> .shoot_periodic_multi(sys, x0_guess, t_guess, dt, m)
+    n = x0_guess.size()
+    seg0 = t_guess / m
+    steps0 = (seg0 / dt).to_i
+    if steps0 < 10
+      steps0 = 10
+    nodes = [Dynamics.vcopy(x0_guess)]
+    xw = Dynamics.vcopy(x0_guess)
+    i = 1
+    while i < m
+      xw = Dynamics.advance(sys, xw, ~0.0, steps0, seg0 / steps0)
+      nodes = nodes.push(Dynamics.vcopy(xw))
+      i = i + 1
+    period = t_guess
+    collapsed = false
+    it = 0
+    while it < 40
+      seg = period / m
+      steps = (seg / dt).to_i
+      if steps < 10
+        steps = 10
+      ends = []
+      mons = []
+      si = 0
+      while si < m
+        pair = Dynamics.monodromy(sys, nodes[si], seg, steps)
+        ends = ends.push(pair[0])
+        mons = mons.push(pair[1])
+        si = si + 1
+      total = ~0.0
+      si = 0
+      while si < m
+        nxt = (si + 1) % m
+        rvec = Dynamics.vsub(ends[si], nodes[nxt])
+        rn = Dynamics.vnorm(rvec)
+        total = total + rn * rn
+        si = si + 1
+      total = Math.sqrt(total)
+      if total < ~1.0e-10
+        prod = mons[0]
+        si = 1
+        while si < m
+          prod = LinAlg.matmul(mons[si], prod)
+          si = si + 1
+        mults = LinAlg.eigenvalues(prod)
+        return {:x => nodes[0], :period => period, :multipliers => mults, :residual => total, :nodes => nodes}
+      dim = m * n + 1
+      big = LinAlg.zeros(dim, dim)
+      rhs = []
+      i = 0
+      while i < dim
+        rhs = rhs.push(~0.0)
+        i = i + 1
+      si = 0
+      while si < m
+        nxt = (si + 1) % m
+        fe = sys.f(~0.0, ends[si])
+        r = 0
+        while r < n
+          c = 0
+          while c < n
+            big[si * n + r][si * n + c] = big[si * n + r][si * n + c] + mons[si][r][c]
+            c = c + 1
+          big[si * n + r][nxt * n + r] = big[si * n + r][nxt * n + r] - ~1.0
+          big[si * n + r][dim - 1] = fe[r] / m
+          rhs[si * n + r] = nodes[nxt][r] - ends[si][r]
+          r = r + 1
+        si = si + 1
+      f0 = sys.f(~0.0, nodes[0])
+      c = 0
+      while c < n
+        big[dim - 1][c] = f0[c]
+        c = c + 1
+      delta = LinAlg.solve(big, rhs)
+      damp = ~1.0
+      dtd = delta[dim - 1]
+      if dtd < ~0.0
+        dtd = ~0.0 - dtd
+      if dtd > period * ~0.2
+        damp = period * ~0.2 / dtd
+      si = 0
+      while si < m
+        r = 0
+        while r < n
+          nodes[si][r] = nodes[si][r] + damp * delta[si * n + r]
+          r = r + 1
+        si = si + 1
+      period = period + damp * delta[dim - 1]
+      if period < dt * ~10.0
+        collapsed = true
+        it = 40
+      else
+        it = it + 1
+    if collapsed
+      raise "Dynamics.shoot_periodic_multi: period collapsed — bad initial guess"
+    raise "Dynamics.shoot_periodic_multi: no convergence"
 
   # Single-shooting for a FORCED (non-autonomous) system with known
   # period T (e.g. the forcing period): Newton on (M − I)δx = −res.

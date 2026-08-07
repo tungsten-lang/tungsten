@@ -34,6 +34,27 @@
       iy = iy + 1
     rows
 
+  # Lyapunov parameter map: λ_max per cell of an na×nb grid over a
+  # 2-parameter map family (maker2 is a 2-arg closure (a, b) → MapSystem),
+  # via the tangent method. Row-major: rows[ib][ia], a varying along a
+  # row. The GPU twin (one thread per cell, hardcoded Hénon) lives in
+  # doc/examples/gpu_lyapunov_map.w.
+  -> .lyapunov_map(maker2, a_lo, a_hi, na, b_lo, b_hi, nb, x0, transient, n)
+    rows = []
+    ib = 0
+    while ib < nb
+      row = []
+      ia = 0
+      while ia < na
+        av = a_lo + (a_hi - a_lo) * ia / (na - 1)
+        bv = b_lo + (b_hi - b_lo) * ib / (nb - 1)
+        msys = maker2.call(av, bv)
+        row = row.push(Dynamics.lyapunov_max_map(msys, x0, transient, n))
+        ia = ia + 1
+      rows = rows.push(row)
+      ib = ib + 1
+    rows
+
   # Count of each label in a basin grid: {label => cells}.
   -> .basin_counts(rows)
     out = {}

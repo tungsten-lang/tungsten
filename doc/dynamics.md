@@ -123,6 +123,24 @@ Equilibrium branches follow the fixed point across a parameter sweep
 every point; periodic orbits solve φ_T(x0) = x0 by single shooting on the
 monodromy with a bordered phase row (autonomous) or plain Newton (forced).
 
+Two heavier tools sit on top:
+
+```tungsten
+# Pseudo-arclength continuation — follows f(x, p) = 0 in (x, p) THROUGH
+# folds, where the natural sweep stalls. Detects folds as tangent
+# p-component sign changes; ds < 0 walks the branch toward smaller p.
+arc = Dynamics.continue_arclength(-> (p) SaddleNode.new(p), ~4.0, [~2.0], ~0.0 - ~0.3, 40)
+arc[:folds]      # indices of fold points; the branch continues past them
+
+# Multiple shooting — m segment nodes + T, segment monodromies filling
+# the block Jacobian. More robust than single shooting on stiff or long
+# orbits; for strongly stiff cycles seed from Poincaré returns:
+pc = Dynamics.poincare(stiff, x0, normal, c, transient, run, dt)
+guess_t = pc[:t].last - pc[:t][pc[:t].size - 2]
+so = Dynamics.shoot_periodic_multi(stiff, pc[:points].last, guess_t, dt, 8)
+# Van der Pol μ=5: T = 11.6122, residual 1e-13, multipliers {1, ≈0}
+```
+
 ## Basins of attraction
 
 ```tungsten
@@ -136,6 +154,12 @@ Each cell integrates independently and labels itself by the attractor it
 lands nearest — which is also why the sweep is embarrassingly parallel:
 `doc/examples/gpu_basins.w` is the same sweep as a `@gpu fn` Metal kernel
 (one thread per cell), verified cell-for-cell against the CPU twin.
+
+Parameter grids parallelize the same way. `Dynamics.lyapunov_map` computes
+λ_max per cell over a 2-parameter map family (tangent method), and
+`doc/examples/gpu_lyapunov_map.w` is its Metal twin for the Hénon (a, b)
+plane — chaotic bands and periodic windows resolved per thread, verified
+against the CPU map on every non-escaping cell.
 
 ## Attractor reconstruction
 
@@ -157,8 +181,8 @@ pairwise: keep N ≲ 2000, or expect quadratic time.
 
 ## Follow-ups
 
-- Pseudo-arclength continuation (the natural-parameter sweep stops at
-  folds; arclength follows the branch around them).
-- Multiple shooting / collocation for stiff or long-period orbits.
-- GPU parameter-grid sweeps beyond basins (Lyapunov maps, isoperiodic
-  diagrams).
+- Orthogonal collocation (Gauss-Legendre) as the next step past multiple
+  shooting for very stiff orbits.
+- Branch switching at detected bifurcation points (pitchfork/Hopf
+  emanating branches).
+- Isoperiodic (period-count) GPU diagrams for forced oscillators.

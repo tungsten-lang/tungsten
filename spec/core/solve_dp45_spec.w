@@ -37,6 +37,30 @@ if e2 < ~0.0
 check("sho.10pi", e2 < ~1.0e-4, true)
 check("sho.step_efficiency", sho[:t].size < 400, true)
 
+# Dense output: the free order-4 interpolant samples anywhere in range
+sol = Solve.rk45_dense(-> (t, y) [y[0]], ~0.0, ~1.0, [~1.0], ~0.01)
+de = sol.at(~1.0)[0] - Math.exp(~1.0)
+if de < ~0.0
+  de = ~0.0 - de
+check("dense.endpoint_consistent", de < ~3.0e-6, true)
+dm = sol.at(~0.5)[0] - Math.exp(~0.5)
+if dm < ~0.0
+  dm = ~0.0 - dm
+check("dense.midpoint", dm < ~1.0e-6, true)
+shod = Solve.rk45_dense(-> (t, y) [y[1], ~0.0 - y[0]], ~0.0, ~10.0, [~1.0, ~0.0], ~0.01)
+qp = shod.at(~1.5707963267948966)
+qc = qp[0]
+if qc < ~0.0
+  qc = ~0.0 - qc
+check("dense.sho_quarter_cos", qc < ~1.0e-5, true)
+check("dense.sho_quarter_sin", qp[1] > ~0.0 - ~1.00001 && qp[1] < ~0.0 - ~0.99999, true)
+dr = false
+begin
+  shod.at(~11.0)
+rescue derr
+  dr = true
+check("dense.out_of_range_raises", dr, true)
+
 # Dynamics wrapper agrees with a 20x-finer fixed-step reference on Lorenz
 lz = Lorenz.classic
 ta = Dynamics.trajectory_adaptive(lz, [~1.0, ~1.0, ~1.0], ~0.0, ~2.0, ~0.01)

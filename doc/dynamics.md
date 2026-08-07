@@ -45,6 +45,8 @@ tr = Dynamics.trajectory(lz, [~1.0, ~1.0, ~1.0], ~0.0, ~50.0, ~0.01)
 # tr[:t] — times, tr[:x] — states (fixed-step RK4)
 ta = Dynamics.trajectory_adaptive(lz, x0, ~0.0, ~50.0, ~0.01)
 # adaptive Dormand-Prince 5(4) via Solve.rk45 — tolerances pick the step
+sol = Solve.rk45_dense(-> (t, y) lz.f(t, y), ~0.0, ~50.0, x0, ~0.01)
+sol.at(~12.34)   # dense output: continuous solution at any time in range
 x  = Dynamics.advance(lz, x0, ~0.0, 5000, ~0.01)   # no path storage
 orb = Dynamics.orbit(Henon.classic, [~0.1, ~0.1], 10_000)
 ```

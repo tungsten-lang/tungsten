@@ -101,6 +101,7 @@
   auto :Tape,         "autodiff"
   auto :Autodiff,     "autodiff"
   auto :Solve,        "solve"
+  auto :DenseSolution, "solve"
   auto :Optim,        "optim"
   auto :Interpolate,  "interpolate"
   auto :SciIO,        "io"

@@ -8,6 +8,10 @@
 #   :rk4     — classical 4th-order Runge–Kutta
 #   :rk45    — adaptive Dormand–Prince 5(4), FSAL, embedded error control
 #
+# Solve.rk45_dense returns a DenseSolution: the continuous solution,
+# sampled anywhere in range via the method's free order-4 interpolant
+# (`sol.at(t)` / `sol.at_many(ts)`), SciPy dense_output analogue.
+#
 # Lives in core/solve (not core/ode): matches SciPy's `solve_ivp` naming and
 # leaves room for BVP / DAE later without a rename.
 
@@ -101,11 +105,25 @@
   # embedded 4th-order error control, and 0.2×..5× step adaptation at
   # safety 0.9. Error is scaled per component by atol + rtol·|y|.
   -> .rk45(f, t_start, t_stop, y0, dt0, rtol = ~1.0e-6, atol = ~1.0e-9)
+    r = Solve.rk45_run(f, t_start, t_stop, y0, dt0, rtol, atol, false)
+    {:t => r[:t], :y => r[:y]}
+
+  # Dense-output DP5(4): same integration, but every accepted step also
+  # keeps its size and seven stage slopes, which feed the method's free
+  # order-4 interpolant. Returns a DenseSolution — `sol.at(t)` samples
+  # the continuous solution anywhere in [t_start, t_stop].
+  -> .rk45_dense(f, t_start, t_stop, y0, dt0, rtol = ~1.0e-6, atol = ~1.0e-9)
+    r = Solve.rk45_run(f, t_start, t_stop, y0, dt0, rtol, atol, true)
+    DenseSolution.new(r[:t], r[:y], r[:h], r[:k])
+
+  -> .rk45_run(f, t_start, t_stop, y0, dt0, rtol, atol, record)
     t = t_start
     y = Solve.clone_y(y0)
     h = dt0
     ts = [t]
     ys = [Solve.clone_y(y)]
+    hs = []
+    ks = []
     safety = ~0.9
     a21 = ~1.0 / ~5.0
     a31 = ~3.0 / ~40.0
@@ -163,6 +181,9 @@
           err = r
         i = i + 1
       if err <= ~1.0 || h < ~1.0e-12
+        if record
+          hs = hs.push(h)
+          ks = ks.push([k1, k2, k3, k4, k5, k6, k7])
         y = y_new
         k1 = k7
         t = t + h
@@ -183,4 +204,87 @@
         if fac > ~0.9
           fac = ~0.9
         h = h * fac
-    {:t => ts, :y => ys}
+    {:t => ts, :y => ys, :h => hs, :k => ks}
+
+# Continuous DP5(4) solution. Each accepted step keeps its size and the
+# seven stage slopes; sampling evaluates the method's free order-4
+# interpolant bᵢ(θ) (the classical P-matrix continuous extension, whose
+# θ=1 row sums are exactly the 5th-order weights, so `at(t_stop)`
+# reproduces the discrete endpoint).
++ DenseSolution
+  -> new(@ts, @ys, @hs, @ks)
+    self
+
+  -> t_start
+    @ts.first
+
+  -> t_stop
+    @ts.last
+
+  -> size
+    @ts.size()
+
+  # Solution vector at time tq (raises outside the integrated range).
+  -> at(tq)
+    n = @ts.size()
+    if tq < @ts.first - ~1.0e-12 || tq > @ts.last + ~1.0e-12
+      raise "DenseSolution.at: time outside the integrated range"
+    lo = 0
+    hi = n - 1
+    while hi - lo > 1
+      mid = (lo + hi) / 2
+      if @ts[mid] <= tq
+        lo = mid
+      else
+        hi = mid
+    h = @hs[lo]
+    theta = ~0.0
+    if h != ~0.0
+      theta = (tq - @ts[lo]) / h
+    if theta < ~0.0
+      theta = ~0.0
+    if theta > ~1.0
+      theta = ~1.0
+    p12 = ~0.0 - ~8048581381.0 / ~2820520608.0
+    p13 = ~8663915743.0 / ~2820520608.0
+    p14 = ~0.0 - ~12715105075.0 / ~11282082432.0
+    p32 = ~131558114200.0 / ~32700410799.0
+    p33 = ~0.0 - ~68118460800.0 / ~10900136933.0
+    p34 = ~87487479700.0 / ~32700410799.0
+    p42 = ~0.0 - ~1754552775.0 / ~470086768.0
+    p43 = ~14199869525.0 / ~1410260304.0
+    p44 = ~0.0 - ~10690763975.0 / ~1880347072.0
+    p52 = ~127303824393.0 / ~49829197408.0
+    p53 = ~0.0 - ~318862633887.0 / ~49829197408.0
+    p54 = ~701980252875.0 / ~199316789632.0
+    p62 = ~0.0 - ~282668133.0 / ~205662961.0
+    p63 = ~2019193451.0 / ~616988883.0
+    p64 = ~0.0 - ~1453857185.0 / ~822651844.0
+    p72 = ~40617522.0 / ~29380423.0
+    p73 = ~0.0 - ~110615467.0 / ~29380423.0
+    p74 = ~69997945.0 / ~29380423.0
+    th2 = theta * theta
+    b1 = theta * (~1.0 + theta * (p12 + theta * (p13 + theta * p14)))
+    b3 = th2 * (p32 + theta * (p33 + theta * p34))
+    b4 = th2 * (p42 + theta * (p43 + theta * p44))
+    b5 = th2 * (p52 + theta * (p53 + theta * p54))
+    b6 = th2 * (p62 + theta * (p63 + theta * p64))
+    b7 = th2 * (p72 + theta * (p73 + theta * p74))
+    kk = @ks[lo]
+    base = @ys[lo]
+    out = []
+    i = 0
+    while i < base.size()
+      s = b1 * kk[0][i] + b3 * kk[2][i] + b4 * kk[3][i] + b5 * kk[4][i] + b6 * kk[5][i] + b7 * kk[6][i]
+      out = out.push(base[i] + h * s)
+      i = i + 1
+    out
+
+  # Sample many times at once: [at(t) for each t].
+  -> at_many(tqs)
+    out = []
+    i = 0
+    while i < tqs.size()
+      out = out.push(at(tqs[i]))
+      i = i + 1
+    out

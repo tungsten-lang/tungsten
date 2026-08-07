@@ -638,7 +638,7 @@ module Tungsten
     end
 
     parse_operator :cmp,         :eql,         nil,                   %i[< <= >= > <=>]
-    parse_operator :eql,         :logical_or,  nil,                   %i[== != =~]
+    parse_operator :eql,         :logical_or,  nil,                   %i[== != =~ ≈]
     parse_operator :logical_and, :shift,       nil,                   %i[& .&]
 
     # Override parse_shift: << at the start of a new line is Print (puts), not binary shift.

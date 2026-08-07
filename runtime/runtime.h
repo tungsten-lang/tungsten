@@ -587,12 +587,20 @@ WValue w_pow(WValue base, WValue exp);
 WValue w_div(WValue a, WValue b);
 WValue w_mod(WValue a, WValue b);
 WValue w_bigint_mod_pow2(WValue a, WValue bits);
+WValue w_bigint_gcd(WValue a, WValue b);
+WValue w_bigint_prime_q(WValue r);
+WValue w_bigint_add(WValue a, WValue b);
+WValue w_bigint_alloc_boxed(WValue cap);
+WValue w_bigint_seal(WValue v, WValue signed_size);
+WValue w_native_data_elem(WValue recv, WValue field, WValue idx);
+WValue w_native_data_elem_set(WValue recv, WValue field, WValue idx, WValue val);
 WValue w_neg(WValue v);
 WValue w_bit_shl(WValue a, WValue b);
 
 /* ---- Comparison ---- */
 WValue w_eq(WValue a, WValue b);
 WValue w_neq(WValue a, WValue b);
+WValue w_approx_eq(WValue a, WValue b);
 WValue w_lt(WValue a, WValue b);
 WValue w_gt(WValue a, WValue b);
 WValue w_lte(WValue a, WValue b);

@@ -2101,6 +2101,8 @@ use target
       return left == right
     if op == :NEQ
       return left != right
+    if op == :APPROX
+      return ccall("w_approx_eq", left, right)
     if op == :LT
       return left < right
     if op == :LTE

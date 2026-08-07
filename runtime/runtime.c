@@ -34459,6 +34459,43 @@ WValue w_neq(WValue a, WValue b) {
     return w_eq(a, b) == W_TRUE ? W_FALSE : W_TRUE;
 }
 
+/* ---- `a ≈ b` — approximate equality ----
+ * Both sides evaluate to doubles and compare within
+ * |a-b| <= 1e-12 · max(1, |a|, |b|) — relative above magnitude 1,
+ * absolute below it. 1e-12 forgives the last ~3 digits of double
+ * precision (accumulated rounding) while failing anything meaningfully
+ * different. Every numeric coerces through the same path, so ~2.0 ≈ 2
+ * is true where ~2.0 == 2 is not. Quantities compare after converting
+ * into the left unit (dimension mismatch → false, not an error).
+ * Non-numeric pairs fall back to exact w_eq. */
+#define W_APPROX_EPS 1e-12
+
+static WValue w_approx_tail(double da, double db) {
+    if (da == db) return W_TRUE;                    /* covers ±inf; NaN falls through */
+    double diff = fabs(da - db);
+    double scl = fmax(1.0, fmax(fabs(da), fabs(db)));
+    return w_bool(diff <= W_APPROX_EPS * scl);      /* NaN diff compares false */
+}
+
+WValue w_approx_eq(WValue a, WValue b) {
+    if (is_quantity_any(a) && is_quantity_any(b)) {
+        int ua, ub, sa, sb;
+        int64_t ga, gb;
+        quantity_extract(a, &ua, &ga, &sa);
+        quantity_extract(b, &ub, &gb, &sb);
+        if (ua != ub && !quantity_convert(&gb, &sb, ub, ua)) return W_FALSE;
+        return w_approx_tail((double)ga * pow(10.0, (double)sa),
+                             (double)gb * pow(10.0, (double)sb));
+    }
+    int64_t psig; int pscale;
+    int a_num = w_is_double(a) || w_is_integer_any(a) || w_is_rational_any(a) ||
+                is_decimal_any(a) || quantity_pi_parts(a, &psig, &pscale);
+    int b_num = w_is_double(b) || w_is_integer_any(b) || w_is_rational_any(b) ||
+                is_decimal_any(b) || quantity_pi_parts(b, &psig, &pscale);
+    if (!a_num || !b_num) return w_eq(a, b);
+    return w_approx_tail(as_numeric_double(a), as_numeric_double(b));
+}
+
 /* Compare a user instance through its `<=>` override. Object's bodyless
  * declaration is only the builtin fallback contract and must not recurse
  * back through w_lt/w_gt. Ordered user classes (Comparable, algebraic roots,

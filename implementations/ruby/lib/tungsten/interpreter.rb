@@ -902,6 +902,26 @@ module Tungsten
       left == right
     end
 
+    # `a ≈ b` — approximate equality: |a-b| <= 1e-12 · max(1, |a|, |b|),
+    # matching the native runtime's w_approx_eq. Every numeric coerces
+    # through the same double path (so ~2.0 ≈ 2 is true where == is not);
+    # quantities compare in SI after a dimension check; non-numeric pairs
+    # fall back to exact equality.
+    def tungsten_approx_eq(left, right)
+      if left.is_a?(Quantity) && right.is_a?(Quantity)
+        return false unless left.unit.compatible?(right.unit)
+        a = left.to_si.to_f
+        b = right.to_si.to_f
+      elsif left.is_a?(Numeric) && right.is_a?(Numeric)
+        a = left.to_f
+        b = right.to_f
+      else
+        return tungsten_eq(left, right)
+      end
+      return true if a == b
+      (a - b).abs <= 1e-12 * [1.0, a.abs, b.abs].max
+    end
+
     def visit_binary_op(node)
       @profile_binary_ops[node.operator] += 1 if @profile_enabled
       left = evaluate(node.left)
@@ -920,6 +940,7 @@ module Tungsten
 
       case node.operator
       when :==  then tungsten_eq(left, right)
+      when :≈   then tungsten_approx_eq(left, right)
       when :<   then left < right
       when :!=  then !tungsten_eq(left, right)
       when :"=~"

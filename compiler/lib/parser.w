@@ -322,6 +322,7 @@ use ../../core/token
     when 156 then "IP6"
     when 157 then "CIDR6"
     when 159 then "PLUS_MINUS"
+    when 168 then "APPROX"
     when 160 then "POW_EQ"
     when 161 then "AMP_EQ"
     when 162 then "PIPE_EQ"
@@ -373,6 +374,7 @@ use ../../core/token
     when T_DOT_RSHIFT then :DOT_RSHIFT
     when T_EQ then :EQ
     when T_NEQ then :NEQ
+    when T_APPROX then :APPROX
     when T_MATCH then :MATCH
     when T_LT then :LT
     when T_GT then :GT
@@ -549,7 +551,7 @@ use ../../core/token
       if at_type?(T_ASSIGN)
         advance()
       return nil
-    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP)
+    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP T_APPROX)
       advance()
       return nil
     raise compile_error_at(:E_PARSE_EXPECTED_METHOD_NAME, "Expected method name, got [current_desc()]")
@@ -568,7 +570,7 @@ use ../../core/token
         advance()
         return "[]="
       return "[]"
-    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP)
+    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP T_APPROX)
       return advance_value()
     # T_CLASS_DEF is the bare `+` token at line-start positions; after
     # `-> ` it's still the plus method name. Accept it here so
@@ -1444,7 +1446,7 @@ use ../../core/token
 
   -> parse_equality
     left = parse_bitwise_or()
-    while parser_tok_type(@current_packed) in (T_EQ T_NEQ T_MATCH)
+    while parser_tok_type(@current_packed) in (T_EQ T_NEQ T_MATCH T_APPROX)
       op = advance_op_sym()
       right = parse_bitwise_or()
       left = Tungsten:AST:BinaryOp.new(left, op, right)

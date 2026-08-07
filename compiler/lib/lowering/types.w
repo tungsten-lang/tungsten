@@ -45,6 +45,7 @@
   # icmp at every call site, everything else tail-calls the runtime op.
   m[:EQ]        = "__w_eq_fast"
   m[:NEQ]       = "__w_neq_fast"
+  m[:APPROX]    = "w_approx_eq"
   m[:MATCH]     = "w_regex_match"
   m[:LT]        = "__w_lt_fast"
   m[:GT]        = "__w_gt_fast"

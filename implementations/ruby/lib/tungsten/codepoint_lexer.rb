@@ -2313,6 +2313,10 @@ module Tungsten
         # Uncertainty operator: `5.0 ± 0.1` builds a Measurement.
         advance_utf8_char
         set_token(:±, nil, @row, start_col)
+      elsif match_bytes?("≈")
+        # Approximate equality (`a ≈ b`, equality precedence).
+        advance_utf8_char
+        set_token(:≈, nil, @row, start_col)
       else
         error "can't lex anymore: #{@source.byteslice(@pos, [40, @length - @pos].min)}"
       end

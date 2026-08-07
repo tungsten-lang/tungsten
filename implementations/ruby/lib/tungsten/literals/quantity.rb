@@ -288,7 +288,9 @@ module Tungsten
       return false unless other.is_a?(Quantity)
       return false if other.heap?
       return false unless @unit.compatible?(other.unit)
-      (to_si - other.to_si).abs < 1e-10
+      # Exact: conversion factors are rationals, so equal quantities agree
+      # exactly in SI. Approximate comparison is the ≈ operator's job.
+      to_si == other.to_si
     end
 
     def convert_to(target_str)

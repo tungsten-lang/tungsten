@@ -2999,6 +2999,7 @@ use ../../languages/tungsten/lexers/regex_helpers
     when :POW_EQ then 160
     when :AMP_EQ then 161
     when :PIPE_EQ then 162
+    when :APPROX then 168
     when :CARET_EQ then 163
     when :LSHIFT_EQ then 164
     when :RSHIFT_EQ then 165
@@ -3447,10 +3448,10 @@ use ../../languages/tungsten/lexers/regex_helpers
     elsif raw == "±"
       emit_at(:PLUS_MINUS, raw, off)
     elsif raw == "≈"
-      # Approx-equal. Currently only a method NAME in the stdlib (String#≈, a
-      # bodyless declaration); not yet a binary operator. Emit as ID so
-      # expect_method_name accepts `-> ≈(other)` — same shape as `-@`/`+@`.
-      emit_at(:ID, raw, off)
+      # Approximate equality (`a ≈ b`, equality precedence). Also accepted
+      # as a method name (`-> ≈(other)`) via the parser's operator-method
+      # list, like == and <=>.
+      emit_at(:APPROX, raw, off)
     elsif raw == "%"
       emit_at(:PERCENT, raw, off)
     elsif raw == "<"

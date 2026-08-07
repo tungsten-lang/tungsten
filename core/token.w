@@ -233,6 +233,9 @@ T_DECIMAL_ARRAY   = 166
 # into a real typed buffer (ebits -32/-64).
 T_FLOAT_ARRAY     = 167
 
+# `a ≈ b` — approximate equality (equality precedence; w_approx_eq).
+T_APPROX          = 168
+
 + Token
   # Force-load helper — referencing this from a caller triggers the
   # autoload pass to load core/token.w, which in turn registers Token

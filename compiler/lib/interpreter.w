@@ -1422,6 +1422,16 @@ use target
       return ccall("w_int_to_str_base_boxed", args[1], args[2])
     when "bigint_powmod_any"
       return ccall("bigint_powmod_any", args[1], args[2], args[3])
+    when "w_bigint_gcd"
+      return ccall("w_bigint_gcd", args[1], args[2])
+    when "w_bigint_prime_q"
+      return ccall("w_bigint_prime_q", args[1])
+    when "w_bigint_add"
+      return ccall("w_bigint_add", args[1], args[2])
+    when "w_bigint_sub"
+      return ccall("w_bigint_sub", args[1], args[2])
+    when "bigint_isqrt_any"
+      return ccall("bigint_isqrt_any", args[1])
     when "w_bigint_mark_shared_value"
       return ccall("w_bigint_mark_shared_value", args[1])
     when "w_bigint_shared_value"
@@ -1861,7 +1871,23 @@ use target
     value
 
   -> eval_call_assign(call_node, value, env)
-    recv = evaluate(ast_get(call_node, :receiver), env)
+    recv_node = ast_get(call_node, :receiver)
+    # `$limbs[i] = v` / `result$limbs[i] = v` — indexed native array element
+    # stores on a BigInt's u64[] tail (walker mirror of the compiled strided
+    # store). Intercept before receiver evaluation: the `$limbs` gvar itself
+    # has no interpreter value.
+    if ast_get(call_node, :name) == "\[]=" && ast_kind(recv_node) == :gvar && ast_get(recv_node, :name) == "$limbs"
+      current_method = @method_stack.last()
+      if current_method != nil && current_method[:w_class] != nil
+        idx = evaluate(ast_get(call_node, :args)[0], env)
+        rhs = evaluate(ast_get(call_node, :args)[1], env)
+        return ccall("w_native_data_elem_set", current_self(), "limbs", idx, rhs)
+    if ast_get(call_node, :name) == "\[]=" && ast_kind(recv_node) == :view_field_var && ast_get(recv_node, :field) == "limbs"
+      explicit_recv = evaluate(ast_get(recv_node, :receiver), env)
+      idx = evaluate(ast_get(call_node, :args)[0], env)
+      rhs = evaluate(ast_get(call_node, :args)[1], env)
+      return ccall("w_native_data_elem_set", explicit_recv, "limbs", idx, rhs)
+    recv = evaluate(recv_node, env)
     if ast_get(call_node, :name) == "\[]="
       index_val = evaluate(ast_get(call_node, :args)[0], env)
       rhs = evaluate(ast_get(call_node, :args)[1], env)
@@ -2433,6 +2459,24 @@ use target
         if w_type_name(explicit_recv) == "UUID"
           return ccall("w_uuid_byte", explicit_recv, args[0])
         return ccall("w_netaddr_raw_byte", explicit_recv, args[0])
+      # `$limbs[i]` / `other$limbs[i]` — indexed native array element on a
+      # BigInt's u64[] tail, the walker mirror of the compiled strided load.
+      if ast_get(node, :name) in ("\[]" "[]") && ast_kind(recv_node) == :gvar && ast_get(recv_node, :name) == "$limbs"
+        current_method = @method_stack.last()
+        if current_method != nil && current_method[:w_class] != nil
+          return ccall("w_native_data_elem", current_self(), "limbs", args[0])
+      if ast_get(node, :name) in ("\[]" "[]") && ast_kind(recv_node) == :view_field_var && ast_get(recv_node, :field) == "limbs"
+        explicit_recv = evaluate(ast_get(recv_node, :receiver), env)
+        return ccall("w_native_data_elem", explicit_recv, "limbs", args[0])
+      # `$limbs[i] = v` reaches the walker as an expression call named "[]="
+      # (two args), not through eval_call_assign — handle both stores here.
+      if ast_get(node, :name) in ("\[]=" "[]=") && ast_kind(recv_node) == :gvar && ast_get(recv_node, :name) == "$limbs"
+        current_method = @method_stack.last()
+        if current_method != nil && current_method[:w_class] != nil
+          return ccall("w_native_data_elem_set", current_self(), "limbs", args[0], args[1])
+      if ast_get(node, :name) in ("\[]=" "[]=") && ast_kind(recv_node) == :view_field_var && ast_get(recv_node, :field) == "limbs"
+        explicit_recv = evaluate(ast_get(recv_node, :receiver), env)
+        return ccall("w_native_data_elem_set", explicit_recv, "limbs", args[0], args[1])
       recv = evaluate(ast_get(node, :receiver), env)
       result = dispatch_method(recv, ast_get(node, :name), args, block, env)
       if ast_kind(ast_get(node, :receiver)) == :var && type(recv) == "String"
@@ -2495,6 +2539,11 @@ use target
       # The upper bound is the runtime's canonical positive NaN.
       if bits >= 0x0001000000000000 && bits <= 0x7FF9000000000000
         return ccall("w_float_from_u64_bits", bits - 0x0001000000000000)
+      # BigInt#abs flips the tag-sign overlay directly on the raw WValue.
+      # Rebox through the checked BigInt-only bridge, mirroring the String
+      # arm; native lowering is still an instruction-free identity.
+      if ((bits >> 48) & 0xFFFF) == 0xFFF8
+        return ccall("w_bigint_from_bits", bits)
       # Decode packed IPv4 through the existing interpreter ccall allowlist;
       # native code remains a zero-call i64 bit cast.
       if ((bits >> 48) & 0xFFFF) == 0xFFFE && ((bits >> 45) & 0x7) == 5
@@ -3128,7 +3177,9 @@ use target
     if cname == "Hash"
       return name in ("count" "capacity" "flags")
     if cname == "BigInt"
-      return name in ("size" "limb0")
+      # `limbs` is the indexed u64[] tail — served by the w_native_data_elem
+      # bridge in eval_call/eval_call_assign, not by this scalar path.
+      return name == "size"
     if cname == "StringBuffer"
       return name == "length"
     if cname == "Mmap"

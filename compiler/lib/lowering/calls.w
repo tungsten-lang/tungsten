@@ -79,6 +79,23 @@
   emit_instruction(wfn, {op: :call_direct_i64, temp: checked, name: "w_check_array_ebits", args: [arg_reg, typed_array_element_bits(dt).to_s(), want_poly.to_s(), site_reg]})
   checked
 
+# Pointer operand for asm-backed kernels: a typed array yields its
+# start-corrected element-0 data address; an explicitly machine-typed
+# value (`## i64`/`## u64` or a raw temp — an address the caller derived,
+# e.g. a masked wvalue_bits limb base) passes through unboxed. Boxed
+# `:int` deliberately does NOT qualify: a promotable int's payload is not
+# an address, and unboxing it raw is the classic BigInt-pointer bug.
+-> asm_ptr_operand(ctx, arg)
+  wfn = ctx[:func]
+  at = infer_type(arg, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+  tv = lower_expression(ctx, arg)
+  if at != nil && (is_i64_type(at) || is_u64_type(at) || at == :raw_int)
+    return ensure_raw_machine_int(wfn, tv, :i64, at)
+  handle = ensure_i64_value(wfn, tv)
+  t = next_temp(wfn)
+  emit_instruction(wfn, {op: :arr_data_ptr, temp: t, arr: handle})
+  t
+
 -> lower_call(ctx, node)
   wfn = ctx[:func]
   name = node.name
@@ -375,39 +392,47 @@
     return typed_value(:raw_i64, tc)
 
   # asm_add_no(out, oo, a, ao, b, bo, n): offset add_n; adc loop; returns carry.
+  # Pointer operands accept BOTH typed arrays (data address extracted here)
+  # and raw machine-int addresses (`## i64` limb bases from wvalue_bits
+  # masking — the BigInt kernel shape). A raw value passes through verbatim.
   if name == "asm_add_no" && receiver == nil && args != nil && args.size() == 7
-    ov = lower_expression(ctx, args[0])
     oor = lower_machine_int_expression(ctx, args[1], :i64)
-    av = lower_expression(ctx, args[2])
     aor = lower_machine_int_expression(ctx, args[3], :i64)
-    bv = lower_expression(ctx, args[4])
     bor = lower_machine_int_expression(ctx, args[5], :i64)
     nraw = lower_machine_int_expression(ctx, args[6], :i64)
-    to = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: to, arr: ov[:value]})
-    ta = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ta, arr: av[:value]})
-    tb = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tb, arr: bv[:value]})
+    to = asm_ptr_operand(ctx, args[0])
+    ta = asm_ptr_operand(ctx, args[2])
+    tb = asm_ptr_operand(ctx, args[4])
     tc = next_temp(wfn)
     emit_instruction(wfn, {op: :asm_add_no, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bp: tb, boff: bor, n: nraw})
     return typed_value(:raw_i64, tc)
 
+  # asm_{add,sub}_uneq(out, a, alen, b, blen): fused unequal-length kernel —
+  # combine over the shorter operand then propagate carry/borrow across the
+  # longer one's remainder, in a single pass. `a` MUST be the longer operand
+  # (alen >= blen); the caller orders them. Returns carry/borrow out.
+  if name in ("asm_add_uneq" "asm_sub_uneq") && receiver == nil && args != nil && args.size() == 5
+    uo = asm_ptr_operand(ctx, args[0])
+    ua = asm_ptr_operand(ctx, args[1])
+    ualen = lower_machine_int_expression(ctx, args[2], :i64)
+    ub = asm_ptr_operand(ctx, args[3])
+    ublen = lower_machine_int_expression(ctx, args[4], :i64)
+    ut = next_temp(wfn)
+    uop = name == "asm_add_uneq" ? :asm_add_uneq : :asm_sub_uneq
+    emit_instruction(wfn, {op: uop, temp: ut, outp: uo, ap: ua, na: ualen, bp: ub, nb: ublen, entry_label: current_block(wfn)[:label]})
+    return typed_value(:raw_i64, ut)
+
   # asm_sub_no(out, oo, a, ao, b, bo, n): offset sub_n; sbcs loop; returns borrow.
+  # Pointer operands accept typed arrays AND raw machine-int addresses,
+  # exactly like asm_add_no above.
   if name == "asm_sub_no" && receiver == nil && args != nil && args.size() == 7
-    ov = lower_expression(ctx, args[0])
     oor = lower_machine_int_expression(ctx, args[1], :i64)
-    av = lower_expression(ctx, args[2])
     aor = lower_machine_int_expression(ctx, args[3], :i64)
-    bv = lower_expression(ctx, args[4])
     bor = lower_machine_int_expression(ctx, args[5], :i64)
     nraw = lower_machine_int_expression(ctx, args[6], :i64)
-    to = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: to, arr: ov[:value]})
-    ta = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ta, arr: av[:value]})
-    tb = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tb, arr: bv[:value]})
+    to = asm_ptr_operand(ctx, args[0])
+    ta = asm_ptr_operand(ctx, args[2])
+    tb = asm_ptr_operand(ctx, args[4])
     tc = next_temp(wfn)
     emit_instruction(wfn, {op: :asm_sub_no, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bp: tb, boff: bor, n: nraw})
     return typed_value(:raw_i64, tc)
@@ -432,20 +457,14 @@
   # asm_mulbase(out, oo, a, ao, b, bo, na, nb): schoolbook multiplication in one asm
   # block; out[oo..oo+na+nb) = a[ao..]*b[bo..]. One call/basecase. Returns 0.
   if name == "asm_mulbase" && receiver == nil && args != nil && args.size() == 8
-    ov = lower_expression(ctx, args[0])
     oor = lower_machine_int_expression(ctx, args[1], :i64)
-    av = lower_expression(ctx, args[2])
     aor = lower_machine_int_expression(ctx, args[3], :i64)
-    bv = lower_expression(ctx, args[4])
     bor = lower_machine_int_expression(ctx, args[5], :i64)
     nar = lower_machine_int_expression(ctx, args[6], :i64)
     nbr = lower_machine_int_expression(ctx, args[7], :i64)
-    to = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: to, arr: ov[:value]})
-    ta = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ta, arr: av[:value]})
-    tb = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tb, arr: bv[:value]})
+    to = asm_ptr_operand(ctx, args[0])
+    ta = asm_ptr_operand(ctx, args[2])
+    tb = asm_ptr_operand(ctx, args[4])
     tc = next_temp(wfn)
     emit_instruction(wfn, {op: :asm_mulbase, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bp: tb, boff: bor, na: nar, nb: nbr})
     return typed_value(:raw_i64, tc)
@@ -506,9 +525,45 @@
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :view_load_inline_byte, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw})
       return typed_value(:raw_int, temp)
+    # Widened inline elements (u16..u64 and bare `T[]` tails, e.g. BigInt's
+    # `u64[] limbs`): strided raw load at field_offset + index * elem_size.
+    if finfo != nil && inline_array_field?(finfo[:type])
+      self_tv = lower_var(ctx, Tungsten:AST:Var.new("__self"))
+      self_reg = ensure_i64_value(wfn, self_tv)
+      idx_tv = lower_expression(ctx, args[0])
+      idx_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+      effective_offset = finfo[:offset]
+      if class_uses_implicit_type_byte?(ctx[:class_name])
+        effective_offset += 1
+      elem = inline_array_element_type(finfo[:type])
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :view_load_inline_elem, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw, elem: elem, size: type_size(elem)})
+      return typed_value(:raw_int, temp)
     # Unknown `$view[i]` names retain the older raw-object-relative behavior.
     if finfo == nil
       return lower_view_access(ctx, Tungsten:AST:ViewAccess.new(bare, args[0]))
+
+  # Store twin of the gvar-shaped element load above.
+  if receiver != nil && name in ("\[]=" "[]=") && args.size() == 2 && (ast_kind(receiver) == :var || ast_kind(receiver) == :gvar) && receiver.name != nil && receiver.name.starts_with?("$") && ctx[:class_name] != nil
+    bare = receiver.name.slice(1, receiver.name.size() - 1)
+    finfo = view_field_info(ctx, bare)
+    if finfo != nil && inline_array_field?(finfo[:type])
+      self_tv = lower_var(ctx, Tungsten:AST:Var.new("__self"))
+      self_reg = ensure_i64_value(wfn, self_tv)
+      idx_tv = lower_expression(ctx, args[0])
+      idx_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+      val_tv = lower_expression(ctx, args[1])
+      val_type = infer_type(args[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      val_raw = ensure_raw_machine_int(wfn, val_tv, :i64, val_type)
+      effective_offset = finfo[:offset]
+      if class_uses_implicit_type_byte?(ctx[:class_name])
+        effective_offset += 1
+      elem = inline_array_element_type(finfo[:type])
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :view_store_inline_elem, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw, value: val_raw, elem: elem, size: type_size(elem)})
+      return typed_value(:raw_int, temp)
 
   # Phase 6i follow-up: `$<view>.<field>` — explicit access to a named
   # view's field. With one data block per class, `$data.tag` is
@@ -536,6 +591,21 @@
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :view_load_inline_byte, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw})
       return typed_value(:raw_int, temp)
+    # Widened inline elements (u16..u64 and bare `T[]` tails): strided raw
+    # load; the containing method owns the semantic bounds check.
+    if info != nil && inline_array_field?(info[:type])
+      self_tv = lower_var(ctx, Tungsten:AST:Var.new("__self"))
+      self_reg = ensure_i64_value(wfn, self_tv)
+      idx_tv = lower_expression(ctx, args[0])
+      idx_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+      effective_offset = info[:offset]
+      if class_uses_implicit_type_byte?(ctx[:class_name])
+        effective_offset += 1
+      elem = inline_array_element_type(info[:type])
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :view_load_inline_elem, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw, elem: elem, size: type_size(elem)})
+      return typed_value(:raw_int, temp)
     if info != nil && pointer_array_field?(info[:type])
       ptr_tv = lower_view_field(ctx, receiver)
       idx_tv = lower_expression(ctx, args[0])
@@ -546,6 +616,29 @@
       emit_instruction(wfn, {op: :ptr_slot_get, temp: temp, ptr: ptr_tv[:value], index: idx_raw, slot_type: elem_type})
       if elem_type == "w64"
         return typed_value(:i64, temp)
+      return typed_value(:raw_int, temp)
+
+  # `$limbs[i] = v` — inline array element store, the truncate-and-store twin
+  # of the strided load. Bounds-independent raw memory like the loads; the
+  # containing method owns the semantic check and any shared/alias contract
+  # (for BigInt limbs that is the WBigint.shared discipline).
+  if receiver != nil && name in ("\[]=" "[]=") && args.size() == 2 && ast_kind(receiver) == :view_field && ctx[:class_name] != nil
+    info = view_field_info(ctx, receiver.field)
+    if info != nil && inline_array_field?(info[:type])
+      self_tv = lower_var(ctx, Tungsten:AST:Var.new("__self"))
+      self_reg = ensure_i64_value(wfn, self_tv)
+      idx_tv = lower_expression(ctx, args[0])
+      idx_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+      val_tv = lower_expression(ctx, args[1])
+      val_type = infer_type(args[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      val_raw = ensure_raw_machine_int(wfn, val_tv, :i64, val_type)
+      effective_offset = info[:offset]
+      if class_uses_implicit_type_byte?(ctx[:class_name])
+        effective_offset += 1
+      elem = inline_array_element_type(info[:type])
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :view_store_inline_elem, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw, value: val_raw, elem: elem, size: type_size(elem)})
       return typed_value(:raw_int, temp)
 
   # `value$bytes[i]` — explicit-receiver fixed inline field access. A named
@@ -568,6 +661,46 @@
           effective_offset += 1
         temp = next_temp(wfn)
         emit_instruction(wfn, {op: :view_load_inline_byte, temp: temp, ptr: recv_reg, offset: effective_offset, index: idx_raw})
+        return typed_value(:raw_int, temp)
+      # Widened inline elements on an explicit receiver (`other$limbs[i]`):
+      # binary numeric methods read the second operand's limbs this way.
+      if info != nil && inline_array_field?(info[:type])
+        recv_tv = lower_expression(ctx, recv_node)
+        recv_reg = ensure_i64_value(wfn, recv_tv)
+        idx_tv = lower_expression(ctx, args[0])
+        idx_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+        idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+        effective_offset = info[:offset]
+        if class_uses_implicit_type_byte?(layout_class)
+          effective_offset += 1
+        elem = inline_array_element_type(info[:type])
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :view_load_inline_elem, temp: temp, ptr: recv_reg, offset: effective_offset, index: idx_raw, elem: elem, size: type_size(elem)})
+        return typed_value(:raw_int, temp)
+
+  # Store twin of the explicit-receiver element load (`result$limbs[i] = v`):
+  # kernel methods write a fresh result object's limbs this way.
+  if receiver != nil && name in ("\[]=" "[]=") && args.size() == 2 && ast_kind(receiver) == :view_field_var
+    recv_node = receiver.receiver
+    recv_type = infer_type(recv_node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    layout_class = view_layout_class_for_type(ctx[:mod], recv_type)
+    if layout_class != nil
+      info = ctx[:mod][:view_layouts][layout_class][receiver.field]
+      if info != nil && inline_array_field?(info[:type])
+        recv_tv = lower_expression(ctx, recv_node)
+        recv_reg = ensure_i64_value(wfn, recv_tv)
+        idx_tv = lower_expression(ctx, args[0])
+        idx_type = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+        idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
+        val_tv = lower_expression(ctx, args[1])
+        val_type = infer_type(args[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+        val_raw = ensure_raw_machine_int(wfn, val_tv, :i64, val_type)
+        effective_offset = info[:offset]
+        if class_uses_implicit_type_byte?(layout_class)
+          effective_offset += 1
+        elem = inline_array_element_type(info[:type])
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :view_store_inline_elem, temp: temp, ptr: recv_reg, offset: effective_offset, index: idx_raw, value: val_raw, elem: elem, size: type_size(elem)})
         return typed_value(:raw_int, temp)
 
   # Fast `node.field` access: when the receiver's static type is a

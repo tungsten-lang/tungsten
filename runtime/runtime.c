@@ -112,6 +112,19 @@ WValue w_string_from_bits(WValue bits_v) {
     return bits;
 }
 
+/* Checked BigInt mirror of w_string_from_bits: the tree walker's
+ * wvalue_from_bits bridge reboxes source-level tag-overlay flips (e.g.
+ * BigInt#abs). The header type byte must still read live — a parked
+ * recycler buffer or stray pointer is rejected rather than reboxed. */
+WValue w_bigint_from_bits(WValue bits_v) {
+    WValue bits = (WValue)w_to_u64(bits_v);
+    if (!w_is_bigint(bits) || w_as_bigint(bits)->type != W_TYPE_BIGINT) {
+        w_raise(w_string("w_bigint_from_bits expects BigInt WValue bits"));
+        return W_NIL;
+    }
+    return bits;
+}
+
 const char *w_symbol_name(uint64_t id) {
     /* id is now a slab index */
     if (id > 0 && id < g_string_slab.next_slot) {
@@ -31161,6 +31174,13 @@ static double as_numeric_double(WValue v) {
         decimal_extract(v, &sig, &scale);
         return (double)sig * pow(10.0, (double)scale);
     }
+    /* π-quantities are numbers — reaching the double branch is an
+     * evaluation boundary, so collapse to coeff·π. */
+    {
+        int64_t sig; int scale;
+        if (quantity_pi_parts(v, &sig, &scale))
+            return quantity_pi_double(sig, scale);
+    }
     die("expected numeric type");
     return 0.0;
 }
@@ -36605,6 +36625,36 @@ static WHash *as_hash(WValue v) {
 /* Tree-walker mirror for the explicitly allowlisted scalar `- data` accessors
  * on runtime-backed primitive values. Fixed arrays are intentionally absent:
  * compiled view loads treat those as raw scalar chunks, not byte arrays. */
+/* Indexed native array elements for the tree walker ($limbs[i] and its
+ * explicit-receiver twin). Deliberately narrow: BigInt's u64[] limbs is the
+ * only bridged field so far. Indexes check against CAPACITY — the walker
+ * adds the safety net the compiled bounds-independent strided load cannot. */
+WValue w_native_data_elem(WValue recv, WValue field, WValue idx) {
+    const char *f = as_str(field);
+    if (f && strcmp(f, "limbs") == 0 && w_is_bigint(recv)) {
+        WBigint *b = w_as_bigint(recv);
+        int64_t i = w_to_i64(idx);
+        if (i < 0 || (uint64_t)i >= (uint64_t)b->cap)
+            die("BigInt limb index out of capacity");
+        return w_u64(b->limbs[i]);
+    }
+    die("unsupported native array element read");
+    return W_NIL;
+}
+WValue w_native_data_elem_set(WValue recv, WValue field, WValue idx, WValue val) {
+    const char *f = as_str(field);
+    if (f && strcmp(f, "limbs") == 0 && w_is_bigint(recv)) {
+        WBigint *b = w_as_bigint(recv);
+        int64_t i = w_to_i64(idx);
+        if (i < 0 || (uint64_t)i >= (uint64_t)b->cap)
+            die("BigInt limb index out of capacity");
+        b->limbs[i] = w_to_u64(val);
+        return val;
+    }
+    die("unsupported native array element write");
+    return W_NIL;
+}
+
 WValue w_native_data_field(WValue recv, WValue name_v) {
     const char *name = as_str(name_v);
 
@@ -39252,6 +39302,15 @@ WValue w_math_atan2(WValue y, WValue x) {
     return w_float(atan2(w_math_to_double(y), w_math_to_double(x)));
 }
 
+WValue w_math_hypot(WValue x, WValue y) {
+    return w_float(hypot(w_math_to_double(x), w_math_to_double(y)));
+}
+
+WValue w_math_fma(WValue x, WValue y, WValue z) {
+    return w_float(fma(w_math_to_double(x), w_math_to_double(y),
+                       w_math_to_double(z)));
+}
+
 /* ---- Float bit-cast ---- */
 
 WValue w_float_from_u32_bits(WValue bits_v) {
@@ -40262,6 +40321,7 @@ WValue __w_prime_aks(WValue n) {
 #define WN_ord     W_M3("ord")
 #define WN_to_i    W_M4("to_i")
 #define WN_to_f    W_M4("to_f")
+#define WN_to_d    W_M4("to_d")
 #define WN_to_s    W_M4("to_s")
 #define WN_abs     W_M3("abs")
 #define WN_min     W_M3("min")
@@ -40335,6 +40395,7 @@ static WValue WN_prime_q = 0;
 static WValue WN_prime_12k_q = 0;
 static WValue WN_prime_30k_q = 0;
 static WValue WN_isqrt = 0;
+static WValue WN_strftime = 0;
 static WValue WN_unit_name = 0;
 #define WN_value W_M5("value")
 static WValue WN_downcase = 0, WN_upcase = 0, WN_swapcase = 0, WN_capitalize = 0;
@@ -40517,8 +40578,9 @@ static void w_init_method_names(void) {
     WN_prime_q       = w_string("prime?");
     WN_prime_12k_q   = w_string("prime_12k?");
     WN_prime_30k_q   = w_string("prime_30k?");
-    WN_isqrt         = w_string("isqrt");
+    WN_strftime      = w_string("strftime");
     WN_unit_name     = w_string("unit_name");
+    WN_isqrt         = w_string("isqrt");
     WN_ends_with_q  = w_string("ends_with?");
     WN_replace      = w_string("replace");
     WN_rindex       = w_string("rindex");
@@ -45188,6 +45250,9 @@ WValue w_bigint_gcd(WValue a, WValue b) {
 WValue w_bigint_add(WValue a, WValue b) {
     return bigint_add_any(a, b);
 }
+WValue w_bigint_sub(WValue a, WValue b) {
+    return bigint_sub_any(a, b);
+}
 
 /* Result-construction boundaries for source kernel bodies. Alloc hands out
  * a fresh boxed BigInt with at least `cap` limbs reserved and the limb
@@ -45200,6 +45265,34 @@ WValue w_bigint_alloc_boxed(WValue cap) {
     if (c < 1) c = 1;
     if (c > (int64_t)INT32_MAX / 8) die("w_bigint_alloc_boxed: capacity too large");
     return bigint_box(bigint_alloc_raw((int32_t)c));
+}
+
+/* Fast prologue/epilogue pair for source kernels, matching what the C
+ * kernels use internally instead of the general-purpose alloc/normalize:
+ *   - alloc_hot rides the single-buffer hot-slot handoff (the common
+ *     immutable-result path) rather than the size-bucket pool walk;
+ *   - finish_add skips normalize's trailing-zero scan, which the
+ *     magnitude-add postcondition (published top limb nonzero) makes
+ *     unnecessary — it only tests the one-limb i48 demotion;
+ *   - finish_sub keeps the scan, since cancellation genuinely leaves
+ *     leading zeros.
+ * Callers own the same contracts the C kernels do: every published limb
+ * written, and `signed_size` already carrying the result's sign. */
+WValue w_bigint_alloc_hot(WValue cap) {
+    int64_t c = w_to_i64(cap);
+    if (c < 1) c = 1;
+    if (c > (int64_t)INT32_MAX / 8) die("w_bigint_alloc_hot: capacity too large");
+    return bigint_box(bigint_alloc_raw_hot((int32_t)c));
+}
+WValue w_bigint_finish_add(WValue v, WValue signed_size) {
+    WBigint *b = w_as_bigint(v);
+    b->size = (int32_t)w_to_i64(signed_size);
+    return bigint_finish_mag_add(b);
+}
+WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
+    WBigint *b = w_as_bigint(v);
+    b->size = (int32_t)w_to_i64(signed_size);
+    return bigint_finish_mag_sub(b);
 }
 WValue w_bigint_seal(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
@@ -45670,6 +45763,36 @@ static WValue w_ic_value_to_s(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_to_s(r);
 }
+/* Packed-date strftime. Decodes the packed fields into a struct tm — with
+ * tm_wday/tm_yday derived via the Julian-day-number civil formula, no
+ * timegm/mktime so no TZ or libc-extension dependence — and lets libc
+ * strftime render the directives core/date.w documents. `to_s` with a
+ * format argument aliases strftime (core/date.w: `alias_method :to_s/1,
+ * :strftime/1`); without one it is the canonical ISO form from w_to_s. */
+static WValue w_ic_date_to_s(WValue r, WValue *a, int c) {
+    if (c < 1) return w_to_s(r);
+    struct tm tm;
+    memset(&tm, 0, sizeof(tm));
+    int year  = w_unbox_date_year(r);
+    int month = w_unbox_date_month(r);
+    int day   = w_unbox_date_day(r);
+    tm.tm_year = year - 1900;
+    tm.tm_mon  = (month > 0 ? month : 1) - 1;
+    tm.tm_mday = day;
+    tm.tm_hour = w_unbox_date_hour(r);
+    tm.tm_min  = w_unbox_date_min(r);
+    tm.tm_sec  = w_unbox_date_sec(r);
+    int64_t m2 = month > 0 ? month : 1;
+    int64_t adj = (14 - m2) / 12, yy = (int64_t)year + 4800 - adj, mm = m2 + 12 * adj - 3;
+    int64_t jdn = day + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045;
+    int64_t adj1 = (14 - 1) / 12, yy1 = (int64_t)year + 4800 - adj1, mm1 = 1 + 12 * adj1 - 3;
+    int64_t jdn_jan1 = 1 + (153 * mm1 + 2) / 5 + 365 * yy1 + yy1 / 4 - yy1 / 100 + yy1 / 400 - 32045;
+    tm.tm_wday = (int)((jdn + 1) % 7);
+    tm.tm_yday = (int)(jdn - jdn_jan1);
+    char dbuf[256];
+    strftime(dbuf, sizeof(dbuf), as_str(a[0]), &tm);
+    return w_string(dbuf);
+}
 
 /* Resolution tables — WValue keys for O(1) integer compare */
 typedef struct { WValue name; WValue (*fn)(WValue, WValue*, int); } WICEntry;
@@ -45767,6 +45890,7 @@ static WICEntry w_ic_string_table[] = {
     {0, w_ic_string_reverse},   /* WN_reverse */
     {0, w_ic_string_size},      /* WN_size — round-5, dynamic-path gap */
     {0, w_ic_string_size},      /* WN_length — same handler */
+    {0, w_ic_string_to_d},      /* WN_to_d — "42.50".to_d → exact Decimal */
     {0, NULL}
 };
 
@@ -45787,6 +45911,7 @@ static WICEntry w_ic_int_table[] = {
     {0, w_ic_int_prime_30k_q},
     {0, w_ic_integer_lcm},
     {0, w_ic_int_isqrt},
+    {0, w_ic_int_to_d},        /* WN_to_d — Integer → Decimal, scale 0 */
     {0, NULL}
 };
 
@@ -46355,6 +46480,7 @@ static void w_init_ic_tables(void) {
     w_ic_int_table[10].name   = WN_prime_30k_q;
     /* Slot 11 (lcm) retired to core/integer.w; bigint receivers keep theirs. */
     w_ic_int_table[12].name   = WN_isqrt;
+    w_ic_int_table[13].name   = WN_to_d;
     /* BigArray (Phase 7+p) */
     w_ic_big_array_table[0].name   = WN_idx;
     w_ic_big_array_table[1].name   = WN_idxset;
@@ -46399,15 +46525,23 @@ static void w_init_ic_tables(void) {
     w_ic_strbuf_table[2].name  = WN_starts_with_q;
     /* Bigint (Phase 7+m) */
     w_ic_bigint_table[0].name  = WN_to_s;
-    w_ic_bigint_table[1].name  = WN_gcd;
-    w_ic_bigint_table[2].name  = WN_abs;
-    w_ic_bigint_table[3].name  = WN_prime_q;
+    /* Slot 1 (gcd) is retired: BigInt#gcd in core/numeric/big_int.w is a
+     * source shim over the exported w_bigint_gcd kernel boundary. */
+    /* Slot 2 (abs) is retired: BigInt#abs in core/numeric/big_int.w does
+     * the same O(1) mark-shared + tag-overlay flip in source. */
+    /* Slot 3 (prime?) is retired: BigInt#prime? in core/numeric/big_int.w
+     * is a source shim over the exported w_bigint_prime_q boundary. */
     w_ic_bigint_table[4].name  = WN_to_f;
-    w_ic_bigint_table[5].name  = WN_prev;
-    w_ic_bigint_table[6].name  = WN_succ;
-    w_ic_bigint_table[7].name  = WN_next;
+    /* Slots 5-7 (prev, succ, next) are retired: Int's source bodies
+     * (core/numeric/int.w) serve BigInt receivers through type-class
+     * dispatch, so the names stay unregistered and lookup falls through. */
+    /* Slot 8 (lcm) survives a 2026-08-06 port attempt: Int#lcm's source
+     * body lost 1.28-1.68x on one-limb and near-equal strata against this
+     * handler's fused u64 kernel and mag_divexact path (see
+     * benchmarks/runtime_ports/README.md). Deliberately retained native. */
     w_ic_bigint_table[8].name  = WN_lcm;
-    w_ic_bigint_table[9].name  = WN_isqrt;
+    /* Slot 9 (isqrt) is retired: BigInt#isqrt in core/numeric/big_int.w is
+     * a source shim over the exported bigint_isqrt_any kernel. */
     /* Channel (Phase 7+m) */
     w_ic_channel_table[0].name = WN_send;
     w_ic_channel_table[1].name = WN_close;
@@ -46440,6 +46574,7 @@ static void w_init_ic_tables(void) {
     w_ic_decimal_table[5].name = WN_sq;
     w_ic_decimal_table[6].name = WN_to_f;
     w_ic_decimal_table[7].name = WN_abs;
+    w_ic_decimal_table[8].name = WN_to_d;
 
     w_ic_ipv4_table[0].name = w_string("inspect");
     w_ic_ipv6_table[0].name = w_string("inspect");
@@ -46448,6 +46583,10 @@ static void w_init_ic_tables(void) {
     w_ic_quantity_table[0].name = WN_value;
     w_ic_quantity_table[1].name = WN_unit_name;
     w_ic_quantity_table[2].name = WN_to_f;
+
+    w_ic_date_table[0].name = WN_to_s;
+    w_ic_date_table[1].name = WN_strftime;
+    w_ic_date_table[2].name = w_string("inspect");
 }
 
 static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WValue*, int) {
@@ -46477,6 +46616,7 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
         case 0x91: table = w_ic_mmap_table;    break;  /* 0x80 | W_TYPE_MMAP=17 */
         case 0x92: table = w_ic_big_array_table;   break;  /* 0x80 | W_TYPE_BIG_ARRAY=18 (Phase 7+p) */
         case 0x09: table = w_ic_small_array_table; break;  /* W_SUBTAG_SMALL_ARRAY=9 */
+        case 0xE4: table = w_ic_date_table;        break;  /* packed date subtype 4 */
         case 0xE5: table = w_ic_ipv4_table;        break;  /* packed IPv4 subtype 5 */
         case 0x85: table = w_ic_mac_table;         break;  /* 0x80 | W_TYPE_MAC=5 */
         case 0x86: table = w_ic_ipv6_table;        break;  /* 0x80 | W_TYPE_IPV6=6 */

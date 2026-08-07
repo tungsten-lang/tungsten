@@ -1118,12 +1118,120 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return true
   false
 
+# Rebuild a bare unit spelling from the expression shape a compound or
+# mixed-case conversion target parses to: `km/h` is a `/`-map, `J·s` a
+# DOT_PRODUCT, `W/m²` a POW over a map, and a mixed-case name like `eV` or
+# `mmHg` is a juxtaposition call `e(V)`. Leaves that name real locals or fns
+# stay expressions; the caller validates the joined spelling against the unit
+# registry. Mirrors interpreter.w interp_pipe_unit_spelling.
+-> pipe_unit_spelling(ctx, rhs)
+  if !is_ast_node?(rhs)
+    return nil
+  k = ast_kind(rhs)
+  if k == :var || k == :class_ref
+    nm = ast_get(rhs, :name)
+    if nm == nil
+      return nil
+    if pipe_ident_shadowed?(ctx, nm)
+      return nil
+    return nm
+  if k == :binary_op
+    bop = rhs.op
+    if bop == :SLASH || bop == :DOT_PRODUCT
+      lsp = pipe_unit_spelling(ctx, rhs.left)
+      if lsp == nil
+        return nil
+      rsp = pipe_unit_spelling(ctx, rhs.right)
+      if rsp == nil
+        return nil
+      if bop == :SLASH
+        return lsp + "/" + rsp
+      return lsp + "·" + rsp
+    if bop == :POW
+      ex = rhs.right
+      if is_ast_node?(ex) && ast_kind(ex) == :int
+        lsp = pipe_unit_spelling(ctx, rhs.left)
+        if lsp == nil
+          return nil
+        sup = unit_superscript_for_power(ast_get(ex, :value))
+        if sup == nil
+          return nil
+        return lsp + sup
+    return nil
+  if k == :map
+    src = ast_get(rhs, :source)
+    fnode = ast_get(rhs, :func)
+    if !is_ast_node?(src) || !is_ast_node?(fnode)
+      return nil
+    fname = nil
+    fk = ast_kind(fnode)
+    if fk == :call && fnode.receiver == nil
+      fargs = fnode.args
+      if fargs == nil || fargs.size() == 0
+        fname = ast_get(fnode, :name)
+    elsif fk == :var || fk == :class_ref
+      fname = ast_get(fnode, :name)
+    if fname == nil
+      return nil
+    if pipe_ident_shadowed?(ctx, fname)
+      return nil
+    lsp = pipe_unit_spelling(ctx, src)
+    if lsp == nil
+      return nil
+    return lsp + "/" + fname
+  if k == :call
+    cname = ast_get(rhs, :name)
+    if cname != nil && (ctx[:mod][:known_calls][cname] != nil || ctx[:mod][:known_fn_param_counts][cname] != nil)
+      return nil
+    jt = pipe_juxta_target(rhs)
+    if jt == nil
+      return nil
+    if jt[:digits] >= 0
+      return nil
+    return jt[:name]
+  nil
+
+# `eV` lexes as ident + Constant and parses as the juxtaposition call `e(V)`;
+# `mmHg` and `kWh` nest the same way, and rounding digits ride the innermost
+# call — `eV(3)` is `e(V(3))`. Rejoin the pieces — the parts are lexer
+# artifacts, not identifiers, so only the joined spelling is meaningful (and
+# is registry-checked by the caller). Returns {name, digits}; digits is -1
+# when absent. Mirrors interpreter.w interp_pipe_juxta_target.
+-> pipe_juxta_target(rhs)
+  if !is_ast_node?(rhs)
+    return nil
+  k = ast_kind(rhs)
+  if k == :var || k == :class_ref
+    nm = ast_get(rhs, :name)
+    if nm == nil
+      return nil
+    return {name: nm, digits: 0 - 1}
+  if k != :call
+    return nil
+  if rhs.receiver != nil
+    return nil
+  nm = ast_get(rhs, :name)
+  if nm == nil
+    return nil
+  cargs = rhs.args
+  if cargs == nil || cargs.size() != 1
+    return nil
+  if !is_ast_node?(cargs[0])
+    return nil
+  if ast_kind(cargs[0]) == :int
+    return {name: nm, digits: ast_get(cargs[0], :value)}
+  inner = pipe_juxta_target(cargs[0])
+  if inner == nil
+    return nil
+  {name: nm + inner[:name], digits: inner[:digits]}
+
 # Conversion-pipe target: `| lb`, `| lb(2)`, `| J`, or a quoted registry
 # spelling such as `| "metric cup"`. Returns
 # {name, digits} when the RHS is a quoted spelling or a bare known-unit name —
-# a var, PascalCase class_ref, one-int-arg call, or a compound rate unit that
-# parsed as a `/`-map. Anything a local/fn shadows lowers as ordinary
-# bitwise-or / division instead; quoted spellings are always explicit.
+# a var, PascalCase class_ref, one-int-arg call, or a compound spelling that
+# parsed as an expression shape (see pipe_unit_spelling). Anything a local/fn
+# shadows lowers as ordinary bitwise-or / division instead; quoted spellings
+# are always explicit.
 -> pipe_unit_target(ctx, rhs)
   if !is_ast_node?(rhs)
     return nil
@@ -1141,19 +1249,37 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if cargs != nil && cargs.size() == 1 && is_ast_node?(cargs[0]) && ast_kind(cargs[0]) == :int
       name = ast_get(rhs, :name)
       digits = ast_get(cargs[0], :value)
+    else
+      # `eV` / `mmHg` / `eV(3)`: mixed-case juxtaposition, digits riding the
+      # innermost call. A name that resolves to real code stays a call.
+      cname = ast_get(rhs, :name)
+      if cname == nil || (ctx[:mod][:known_calls][cname] == nil && ctx[:mod][:known_fn_param_counts][cname] == nil)
+        jt = pipe_juxta_target(rhs)
+        if jt != nil
+          name = jt[:name]
+          digits = jt[:digits]
   elsif k == :map
-    # `km/h` lexes as a `/`-map: source `km`, func the bare call `h`. Rebuild
-    # the compound name and require BOTH components to be unshadowed — else
+    # `km/h` lexes as a `/`-map: source `km`, func the bare call `h`; the
+    # rounding form `km/h(2)` carries one int arg on the func call. Rebuild
+    # the compound name and require the components to be unshadowed — else
     # `x | a/b` with a real variable a or b stays a division.
     src = ast_get(rhs, :source)
     fnode = ast_get(rhs, :func)
-    if is_ast_node?(src) && is_ast_node?(fnode) && ast_kind(src) == :var && ast_kind(fnode) == :call && fnode.receiver == nil
+    if is_ast_node?(src) && is_ast_node?(fnode) && ast_kind(fnode) == :call && fnode.receiver == nil
       fargs = fnode.args
-      if fargs == nil || fargs.size() == 0
-        sname = ast_get(src, :name)
+      fdigits = 0 - 1
+      fok = fargs == nil || fargs.size() == 0
+      if !fok && fargs.size() == 1 && is_ast_node?(fargs[0]) && ast_kind(fargs[0]) == :int
+        fok = true
+        fdigits = ast_get(fargs[0], :value)
+      if fok
+        sname = pipe_unit_spelling(ctx, src)
         fname = ast_get(fnode, :name)
-        if sname != nil && fname != nil && !pipe_ident_shadowed?(ctx, sname) && !pipe_ident_shadowed?(ctx, fname)
+        if sname != nil && fname != nil && !pipe_ident_shadowed?(ctx, fname)
           name = sname + "/" + fname
+          digits = fdigits
+  if name == nil
+    name = pipe_unit_spelling(ctx, rhs)
   if name == nil
     return nil
   if !known_unit_name?(name)

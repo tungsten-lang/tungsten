@@ -334,6 +334,11 @@ use hashing
   out << declare_fn("w_div", wv, wv2)
   out << declare_fn("w_mod", wv, wv2)
   out << declare_fn("w_bigint_mod_pow2", wv, wv2)
+  # NOTE: the bigint operator seams (__w_bigint_{plus,minus}_src) are
+  # deliberately NOT declared here. A module that compiles BigInt#+/#-
+  # DEFINES them, and LLVM rejects a declare alongside a define; modules
+  # that only call them get the declaration emitted next to the wrapper
+  # block in emit_artifact instead.
   out << declare_fn("w_neg", wv, wv)
   out << declare_fn("w_bit_and", wv, wv2)
   out << declare_fn("w_bit_or", wv, wv2)
@@ -2549,8 +2554,18 @@ ewscope_md_state = {ids: {}, order: []}
 
 # -- Emit a single function --
 
--> hidden_exit_label_for_inst(inst)
+-> hidden_exit_label_for_inst(inst, arm64_target = true)
   op = inst[:op]
+  # Portable (non-arm64) lowering of the asm-backed carry ops renders a
+  # real IR loop whose final block is the instruction's exit.
+  if op == :asm_add_no && !arm64_target
+    return "ano.exit." + inst[:temp].slice(1, inst[:temp].size() - 1)
+  if op == :asm_sub_no && !arm64_target
+    return "sno.exit." + inst[:temp].slice(1, inst[:temp].size() - 1)
+  if op == :asm_add_uneq && !arm64_target
+    return "aue.x." + inst[:temp].slice(1, inst[:temp].size() - 1)
+  if op == :asm_sub_uneq && !arm64_target
+    return "sue.x." + inst[:temp].slice(1, inst[:temp].size() - 1)
   if op in (:add_i48_checked :sub_i48_checked :mul_i48_checked)
     return "ovf.merge." + inst[:block_id].to_s()
   if op in (:add_i48_guarded :sub_i48_guarded :mul_i48_guarded)
@@ -3061,14 +3076,223 @@ ewscope_md_state = {ids: {}, order: []}
   when :asm_add_no
     # offset add_n: out[oo..]=a[ao..]+b[bo..] over n limbs; ptr = base + off<<3 in
     # asm. Flag-threaded adc returns carry. (basecase for the Toom ladder)
+    # Non-arm64 targets get a portable i128-carry IR loop with identical
+    # semantics (the arch-gated-kernel contract: WIRE op is the portable
+    # boundary, the emitter target-selects the body).
     t = inst[:temp]
-    asmt = "add x15, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Aadd x14, ${5:x}, ${6:x}, lsl #3\\0Amov x9, ${7:x}\\0Acmn xzr, xzr\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Aadcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Acset ${0:x}, cs"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:n] + ")"
+    if !arm64_target
+      bid = t.slice(1, t.size() - 1)
+      po = StringBuffer(1024)
+      po << t + ".oo3 = shl i64 " + inst[:ooff] + ", 3\n  "
+      po << t + ".ob = add i64 " + inst[:outp] + ", " + t + ".oo3\n  "
+      po << t + ".ao3 = shl i64 " + inst[:aoff] + ", 3\n  "
+      po << t + ".ab = add i64 " + inst[:ap] + ", " + t + ".ao3\n  "
+      po << t + ".bo3 = shl i64 " + inst[:boff] + ", 3\n  "
+      po << t + ".bb = add i64 " + inst[:bp] + ", " + t + ".bo3\n  "
+      po << "br label %ano.pre." + bid + "\n"
+      po << "ano.pre." + bid + ":\n  "
+      po << "br label %ano.head." + bid + "\n"
+      po << "ano.head." + bid + ":\n  "
+      po << t + ".i = phi i64 \[ 0, %ano.pre." + bid + " ], \[ " + t + ".i2, %ano.body." + bid + " ]\n  "
+      po << t + ".c = phi i64 \[ 0, %ano.pre." + bid + " ], \[ " + t + ".c2, %ano.body." + bid + " ]\n  "
+      po << t + ".done = icmp sge i64 " + t + ".i, " + inst[:n] + "\n  "
+      po << "br i1 " + t + ".done, label %ano.exit." + bid + ", label %ano.body." + bid + "\n"
+      po << "ano.body." + bid + ":\n  "
+      po << t + ".i8 = shl i64 " + t + ".i, 3\n  "
+      po << t + ".aa = add i64 " + t + ".ab, " + t + ".i8\n  "
+      po << t + ".ap = inttoptr i64 " + t + ".aa to ptr\n  "
+      po << t + ".av = load i64, ptr " + t + ".ap, align 8\n  "
+      po << t + ".ba = add i64 " + t + ".bb, " + t + ".i8\n  "
+      po << t + ".bpp = inttoptr i64 " + t + ".ba to ptr\n  "
+      po << t + ".bv = load i64, ptr " + t + ".bpp, align 8\n  "
+      po << t + ".az = zext i64 " + t + ".av to i128\n  "
+      po << t + ".bz = zext i64 " + t + ".bv to i128\n  "
+      po << t + ".cz = zext i64 " + t + ".c to i128\n  "
+      po << t + ".s1 = add i128 " + t + ".az, " + t + ".bz\n  "
+      po << t + ".s2 = add i128 " + t + ".s1, " + t + ".cz\n  "
+      po << t + ".lo = trunc i128 " + t + ".s2 to i64\n  "
+      po << t + ".hi = lshr i128 " + t + ".s2, 64\n  "
+      po << t + ".c2 = trunc i128 " + t + ".hi to i64\n  "
+      po << t + ".oa = add i64 " + t + ".ob, " + t + ".i8\n  "
+      po << t + ".op = inttoptr i64 " + t + ".oa to ptr\n  "
+      po << "store i64 " + t + ".lo, ptr " + t + ".op, align 8\n  "
+      po << t + ".i2 = add i64 " + t + ".i, 1\n  "
+      po << "br label %ano.head." + bid + "\n"
+      po << "ano.exit." + bid + ":\n  "
+      po << t + " = add i64 " + t + ".c, 0"
+      return po.to_s()
+    # 4x-unrolled adcs quad loop (ldp/stp paired, ~3 insns/limb vs 5 for
+    # the old 1x form — the delta that separated the harness loop from
+    # the C kernel's unrolled ladder). Flag audit: lsr/and/sub/cbz/cbnz
+    # never touch flags, so the carry threads across quads, across the
+    # loop back-edge, and into the 1x remainder untouched.
+    asmt = "add x15, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Aadd x14, ${5:x}, ${6:x}, lsl #3\\0Amov x9, ${7:x}\\0Acmn xzr, xzr\\0Alsr x8, x9, #2\\0Aand x9, x9, #3\\0Acbz x8, 2f\\0A1:\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x14], #16\\0Aadcs x12, x10, x16\\0Aadcs x16, x11, x17\\0Astp x12, x16, \[x15], #16\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x14], #16\\0Aadcs x12, x10, x16\\0Aadcs x16, x11, x17\\0Astp x12, x16, \[x15], #16\\0Asub x8, x8, #1\\0Acbnz x8, 1b\\0A2:\\0Acbz x9, 4f\\0A3:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Aadcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 3b\\0A4:\\0Acset ${0:x}, cs"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:n] + ")"
   when :asm_sub_no
     # offset sub_n: out[oo..]=a[ao..]-b[bo..]; flag-threaded sbcs returns borrow.
+    # 4x-unrolled quad loop mirroring asm_add_no's: ldp/sbcs/stp pairs with a
+    # 1x remainder; lsr/and/sub/cbz/cbnz never touch flags, so the borrow
+    # (carry-clear) threads across quads, the back-edge, and the remainder.
+    # `subs xzr, xzr, xzr` seeds C=1 (no borrow). Non-arm64 targets get a
+    # portable i128 borrow loop with identical semantics.
     t = inst[:temp]
-    asmt = "add x15, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Aadd x14, ${5:x}, ${6:x}, lsl #3\\0Amov x9, ${7:x}\\0Asubs xzr, xzr, xzr\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Asbcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Acset ${0:x}, cc"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:n] + ")"
+    if !arm64_target
+      bid = t.slice(1, t.size() - 1)
+      po = StringBuffer(1024)
+      po << t + ".oo3 = shl i64 " + inst[:ooff] + ", 3\n  "
+      po << t + ".ob = add i64 " + inst[:outp] + ", " + t + ".oo3\n  "
+      po << t + ".ao3 = shl i64 " + inst[:aoff] + ", 3\n  "
+      po << t + ".ab = add i64 " + inst[:ap] + ", " + t + ".ao3\n  "
+      po << t + ".bo3 = shl i64 " + inst[:boff] + ", 3\n  "
+      po << t + ".bb = add i64 " + inst[:bp] + ", " + t + ".bo3\n  "
+      po << "br label %sno.pre." + bid + "\n"
+      po << "sno.pre." + bid + ":\n  "
+      po << "br label %sno.head." + bid + "\n"
+      po << "sno.head." + bid + ":\n  "
+      po << t + ".i = phi i64 \[ 0, %sno.pre." + bid + " ], \[ " + t + ".i2, %sno.body." + bid + " ]\n  "
+      po << t + ".w = phi i64 \[ 0, %sno.pre." + bid + " ], \[ " + t + ".w2, %sno.body." + bid + " ]\n  "
+      po << t + ".done = icmp sge i64 " + t + ".i, " + inst[:n] + "\n  "
+      po << "br i1 " + t + ".done, label %sno.exit." + bid + ", label %sno.body." + bid + "\n"
+      po << "sno.body." + bid + ":\n  "
+      po << t + ".i8 = shl i64 " + t + ".i, 3\n  "
+      po << t + ".aa = add i64 " + t + ".ab, " + t + ".i8\n  "
+      po << t + ".apt = inttoptr i64 " + t + ".aa to ptr\n  "
+      po << t + ".av = load i64, ptr " + t + ".apt, align 8\n  "
+      po << t + ".ba = add i64 " + t + ".bb, " + t + ".i8\n  "
+      po << t + ".bpt = inttoptr i64 " + t + ".ba to ptr\n  "
+      po << t + ".bv = load i64, ptr " + t + ".bpt, align 8\n  "
+      po << t + ".az = zext i64 " + t + ".av to i128\n  "
+      po << t + ".bz = zext i64 " + t + ".bv to i128\n  "
+      po << t + ".wz = zext i64 " + t + ".w to i128\n  "
+      po << t + ".d1 = sub i128 " + t + ".az, " + t + ".bz\n  "
+      po << t + ".d2 = sub i128 " + t + ".d1, " + t + ".wz\n  "
+      po << t + ".lo = trunc i128 " + t + ".d2 to i64\n  "
+      po << t + ".hb = lshr i128 " + t + ".d2, 127\n  "
+      po << t + ".w2 = trunc i128 " + t + ".hb to i64\n  "
+      po << t + ".oa = add i64 " + t + ".ob, " + t + ".i8\n  "
+      po << t + ".opt = inttoptr i64 " + t + ".oa to ptr\n  "
+      po << "store i64 " + t + ".lo, ptr " + t + ".opt, align 8\n  "
+      po << t + ".i2 = add i64 " + t + ".i, 1\n  "
+      po << "br label %sno.head." + bid + "\n"
+      po << "sno.exit." + bid + ":\n  "
+      po << t + " = add i64 " + t + ".w, 0"
+      return po.to_s()
+    asmt = "add x15, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Aadd x14, ${5:x}, ${6:x}, lsl #3\\0Amov x9, ${7:x}\\0Asubs xzr, xzr, xzr\\0Alsr x8, x9, #2\\0Aand x9, x9, #3\\0Acbz x8, 2f\\0A1:\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x14], #16\\0Asbcs x12, x10, x16\\0Asbcs x16, x11, x17\\0Astp x12, x16, \[x15], #16\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x14], #16\\0Asbcs x12, x10, x16\\0Asbcs x16, x11, x17\\0Astp x12, x16, \[x15], #16\\0Asub x8, x8, #1\\0Acbnz x8, 1b\\0A2:\\0Acbz x9, 4f\\0A3:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Asbcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 3b\\0A4:\\0Acset ${0:x}, cc"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:n] + ")"
+  # Fused UNEQUAL-length add: adcs over the shorter operand, then propagate
+  # the carry across the longer operand's remaining limbs — one pass, one
+  # call. This exists because a source-level tail loop over those remaining
+  # limbs runs on the strided view-field path and measured 2.5x against C's
+  # single propagate. ${1}=out ${2}=a(longer) ${3}=alen ${4}=b(shorter)
+  # ${5}=blen; returns carry-out. `sub` is flag-neutral, so the carry
+  # threads from the adcs loop through the propagate loop untouched.
+  when :asm_add_uneq
+    t = inst[:temp]
+    if !arm64_target
+      bid = t.slice(1, t.size() - 1)
+      po = StringBuffer(1400)
+      po << t + ".op = inttoptr i64 " + inst[:outp] + " to ptr\n  "
+      po << t + ".apx = inttoptr i64 " + inst[:ap] + " to ptr\n  "
+      po << t + ".bpx = inttoptr i64 " + inst[:bp] + " to ptr\n  "
+      po << "br label %aue.h1." + bid + "\n"
+      po << "aue.h1." + bid + ":\n  "
+      po << t + ".i = phi i64 \[ 0, %" + inst[:entry_label] + " ], \[ " + t + ".i2, %aue.b1." + bid + " ]\n  "
+      po << t + ".c = phi i64 \[ 0, %" + inst[:entry_label] + " ], \[ " + t + ".c2, %aue.b1." + bid + " ]\n  "
+      po << t + ".d1 = icmp sge i64 " + t + ".i, " + inst[:nb] + "\n  "
+      po << "br i1 " + t + ".d1, label %aue.h2." + bid + ", label %aue.b1." + bid + "\n"
+      po << "aue.b1." + bid + ":\n  "
+      po << t + ".ag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".i\n  "
+      po << t + ".av = load i64, ptr " + t + ".ag, align 8\n  "
+      po << t + ".bg = getelementptr i64, ptr " + t + ".bpx, i64 " + t + ".i\n  "
+      po << t + ".bv = load i64, ptr " + t + ".bg, align 8\n  "
+      po << t + ".az = zext i64 " + t + ".av to i128\n  "
+      po << t + ".bz = zext i64 " + t + ".bv to i128\n  "
+      po << t + ".cz = zext i64 " + t + ".c to i128\n  "
+      po << t + ".s1 = add i128 " + t + ".az, " + t + ".bz\n  "
+      po << t + ".s2 = add i128 " + t + ".s1, " + t + ".cz\n  "
+      po << t + ".lo = trunc i128 " + t + ".s2 to i64\n  "
+      po << t + ".hi = lshr i128 " + t + ".s2, 64\n  "
+      po << t + ".c2 = trunc i128 " + t + ".hi to i64\n  "
+      po << t + ".og = getelementptr i64, ptr " + t + ".op, i64 " + t + ".i\n  "
+      po << "store i64 " + t + ".lo, ptr " + t + ".og, align 8\n  "
+      po << t + ".i2 = add i64 " + t + ".i, 1\n  "
+      po << "br label %aue.h1." + bid + "\n"
+      po << "aue.h2." + bid + ":\n  "
+      po << t + ".j = phi i64 \[ " + t + ".i, %aue.h1." + bid + " ], \[ " + t + ".j2, %aue.b2." + bid + " ]\n  "
+      po << t + ".tc = phi i64 \[ " + t + ".c, %aue.h1." + bid + " ], \[ " + t + ".tc2, %aue.b2." + bid + " ]\n  "
+      po << t + ".d2 = icmp sge i64 " + t + ".j, " + inst[:na] + "\n  "
+      po << "br i1 " + t + ".d2, label %aue.x." + bid + ", label %aue.b2." + bid + "\n"
+      po << "aue.b2." + bid + ":\n  "
+      po << t + ".tag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".j\n  "
+      po << t + ".tav = load i64, ptr " + t + ".tag, align 8\n  "
+      po << t + ".ts = add i64 " + t + ".tav, " + t + ".tc\n  "
+      po << t + ".tov = icmp ult i64 " + t + ".ts, " + t + ".tav\n  "
+      po << t + ".tc2 = zext i1 " + t + ".tov to i64\n  "
+      po << t + ".tog = getelementptr i64, ptr " + t + ".op, i64 " + t + ".j\n  "
+      po << "store i64 " + t + ".ts, ptr " + t + ".tog, align 8\n  "
+      po << t + ".j2 = add i64 " + t + ".j, 1\n  "
+      po << "br label %aue.h2." + bid + "\n"
+      po << "aue.x." + bid + ":\n  "
+      po << t + " = add i64 " + t + ".tc, 0"
+      return po.to_s()
+    asmt = "mov x15, ${1:x}\\0Amov x13, ${2:x}\\0Amov x14, ${4:x}\\0Amov x9, ${5:x}\\0Amov x8, ${3:x}\\0Asub x8, x8, x9\\0Acmn xzr, xzr\\0Acbz x9, 2f\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Aadcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0A2:\\0Acbz x8, 3f\\0A4:\\0Aldr x10, \[x13], #8\\0Aadcs x12, x10, xzr\\0Astr x12, \[x15], #8\\0Asub x8, x8, #1\\0Acbz x8, 3f\\0Ab.cc 5f\\0Ab 4b\\0A5:\\0Acmp x8, #4\\0Ab.lt 6f\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x13], #16\\0Astp x10, x11, \[x15], #16\\0Astp x16, x17, \[x15], #16\\0Asub x8, x8, #4\\0Acbnz x8, 5b\\0Ab 7f\\0A6:\\0Aldr x10, \[x13], #8\\0Astr x10, \[x15], #8\\0Asub x8, x8, #1\\0Acbnz x8, 6b\\0A7:\\0Amov ${0:x}, #0\\0Ab 8f\\0A3:\\0Acset ${0:x}, cs\\0A8:"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ap] + ", i64 " + inst[:na] + ", i64 " + inst[:bp] + ", i64 " + inst[:nb] + ")"
+
+  # Fused UNEQUAL-length subtract: sbcs over the shorter operand, then
+  # propagate the borrow across the longer operand's remaining limbs.
+  # `subs xzr, xzr, xzr` seeds C=1 (no borrow).
+  when :asm_sub_uneq
+    t = inst[:temp]
+    if !arm64_target
+      bid = t.slice(1, t.size() - 1)
+      po = StringBuffer(1400)
+      po << t + ".op = inttoptr i64 " + inst[:outp] + " to ptr\n  "
+      po << t + ".apx = inttoptr i64 " + inst[:ap] + " to ptr\n  "
+      po << t + ".bpx = inttoptr i64 " + inst[:bp] + " to ptr\n  "
+      po << "br label %sue.h1." + bid + "\n"
+      po << "sue.h1." + bid + ":\n  "
+      po << t + ".i = phi i64 \[ 0, %" + inst[:entry_label] + " ], \[ " + t + ".i2, %sue.b1." + bid + " ]\n  "
+      po << t + ".w = phi i64 \[ 0, %" + inst[:entry_label] + " ], \[ " + t + ".w2, %sue.b1." + bid + " ]\n  "
+      po << t + ".d1 = icmp sge i64 " + t + ".i, " + inst[:nb] + "\n  "
+      po << "br i1 " + t + ".d1, label %sue.h2." + bid + ", label %sue.b1." + bid + "\n"
+      po << "sue.b1." + bid + ":\n  "
+      po << t + ".ag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".i\n  "
+      po << t + ".av = load i64, ptr " + t + ".ag, align 8\n  "
+      po << t + ".bg = getelementptr i64, ptr " + t + ".bpx, i64 " + t + ".i\n  "
+      po << t + ".bv = load i64, ptr " + t + ".bg, align 8\n  "
+      po << t + ".az = zext i64 " + t + ".av to i128\n  "
+      po << t + ".bz = zext i64 " + t + ".bv to i128\n  "
+      po << t + ".wz = zext i64 " + t + ".w to i128\n  "
+      po << t + ".s1 = sub i128 " + t + ".az, " + t + ".bz\n  "
+      po << t + ".s2 = sub i128 " + t + ".s1, " + t + ".wz\n  "
+      po << t + ".lo = trunc i128 " + t + ".s2 to i64\n  "
+      po << t + ".hb = lshr i128 " + t + ".s2, 127\n  "
+      po << t + ".w2 = trunc i128 " + t + ".hb to i64\n  "
+      po << t + ".og = getelementptr i64, ptr " + t + ".op, i64 " + t + ".i\n  "
+      po << "store i64 " + t + ".lo, ptr " + t + ".og, align 8\n  "
+      po << t + ".i2 = add i64 " + t + ".i, 1\n  "
+      po << "br label %sue.h1." + bid + "\n"
+      po << "sue.h2." + bid + ":\n  "
+      po << t + ".j = phi i64 \[ " + t + ".i, %sue.h1." + bid + " ], \[ " + t + ".j2, %sue.b2." + bid + " ]\n  "
+      po << t + ".tw = phi i64 \[ " + t + ".w, %sue.h1." + bid + " ], \[ " + t + ".tw2, %sue.b2." + bid + " ]\n  "
+      po << t + ".d2 = icmp sge i64 " + t + ".j, " + inst[:na] + "\n  "
+      po << "br i1 " + t + ".d2, label %sue.x." + bid + ", label %sue.b2." + bid + "\n"
+      po << "sue.b2." + bid + ":\n  "
+      po << t + ".tag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".j\n  "
+      po << t + ".tav = load i64, ptr " + t + ".tag, align 8\n  "
+      po << t + ".ts = sub i64 " + t + ".tav, " + t + ".tw\n  "
+      po << t + ".tov = icmp ult i64 " + t + ".tav, " + t + ".tw\n  "
+      po << t + ".tw2 = zext i1 " + t + ".tov to i64\n  "
+      po << t + ".tog = getelementptr i64, ptr " + t + ".op, i64 " + t + ".j\n  "
+      po << "store i64 " + t + ".ts, ptr " + t + ".tog, align 8\n  "
+      po << t + ".j2 = add i64 " + t + ".j, 1\n  "
+      po << "br label %sue.h2." + bid + "\n"
+      po << "sue.x." + bid + ":\n  "
+      po << t + " = add i64 " + t + ".tw, 0"
+      return po.to_s()
+    asmt = "mov x15, ${1:x}\\0Amov x13, ${2:x}\\0Amov x14, ${4:x}\\0Amov x9, ${5:x}\\0Amov x8, ${3:x}\\0Asub x8, x8, x9\\0Asubs xzr, xzr, xzr\\0Acbz x9, 2f\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Asbcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0A2:\\0Acbz x8, 3f\\0A4:\\0Aldr x10, \[x13], #8\\0Asbcs x12, x10, xzr\\0Astr x12, \[x15], #8\\0Asub x8, x8, #1\\0Acbz x8, 3f\\0Ab.cs 5f\\0Ab 4b\\0A5:\\0Acmp x8, #4\\0Ab.lt 6f\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x13], #16\\0Astp x10, x11, \[x15], #16\\0Astp x16, x17, \[x15], #16\\0Asub x8, x8, #4\\0Acbnz x8, 5b\\0Ab 7f\\0A6:\\0Aldr x10, \[x13], #8\\0Astr x10, \[x15], #8\\0Asub x8, x8, #1\\0Acbnz x8, 6b\\0A7:\\0Amov ${0:x}, #0\\0Ab 8f\\0A3:\\0Acset ${0:x}, cc\\0A8:"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ap] + ", i64 " + inst[:na] + ", i64 " + inst[:bp] + ", i64 " + inst[:nb] + ")"
+
   when :asm_addmul1
     # offset addmul_1: out[oo..] += a[ao..]*bsc; returns carry.
     # x14=out ptr, x13=a ptr, x3=bsc, x9=n, x15=carry.

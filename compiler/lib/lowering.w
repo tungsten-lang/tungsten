@@ -944,12 +944,11 @@ use lowering/definitions
     # unconditionally. Without this, an expression like `Math.sin(x) + c`
     # infers nil and the `+` falls back to a boxed w_add call instead of a
     # raw fadd — the shared-inference twin of the raw libm fast path. This
-    # list covers ONLY the intercepted builtins, which have no .w
-    # definition to annotate; core/math.w methods (atan, tanh, hypot, …)
-    # carry `f64` return-type annotations and resolve through the
-    # static-receiver fn_return_types lookup above.
+    # The shared registry includes intrinsics with source fallbacks too; those
+    # fallbacks remain available to other frontends, while compiled calls use
+    # the native path consistently.
     if node.receiver != nil && ast_kind(node.receiver) in (:var :class_ref :call) && node.receiver.name == "Math"
-      if node.name in ("exp" "log" "sin" "cos" "tan" "sqrt" "floor" "ceil" "round" "abs" "pow" "ldexp" "atan2")
+      if math_intrinsic_runtime_name(node.name, node.args.size()) != nil
         return :float
     recv_t = infer_type(node.receiver, var_types, fn_return_types, infer_maps)
     # bool_array is its own legacy type and not in is_array_type?, so name it
@@ -1770,6 +1769,12 @@ use lowering/definitions
                 static_key = cname + "." + mnode.name
                 mod[:fn_return_types][static_key] = static_rt
                 mod[:known_static_methods][static_key][:return_type] = static_rt
+            elsif mnode.from_fn == true && mnode.param_types != nil && embedded_body_directive(mnode) != nil
+              # Embedded ll/asm kernels are raw-ABI helpers, not dispatchable
+              # methods — registering one would hand the dynamic dispatcher a
+              # function expecting raw machine args. lower_class_method owns
+              # their raw-callable registration.
+              nil
             else
               register_class_method_def(main_fn, mod, cname, mnode)
               # `-> new(@x, @y) ro` — a bare ro/rw body statement generates
@@ -2877,6 +2882,26 @@ use lowering/definitions
 -> inline_u8_array_field?(t)
   !t.starts_with?("*") && t.starts_with?("u8\[") && t.ends_with?("\]") && t != "u8\[]"
 
+# The widened form (bignum limb access): any non-pointer `T[N]` or flexible
+# `T[]` tail whose element is a fixed machine scalar. Fixed `u8[N]` keeps its
+# dedicated byte op through inline_u8_array_field?; this predicate serves the
+# strided general load/store path (e.g. BigInt's `u64[] limbs`). Element
+# access is bounds-independent raw memory, exactly like the byte form — the
+# containing method owns the semantic bounds check.
+-> inline_array_element_type(t)
+  if t.starts_with?("*")
+    return nil
+  bracket = t.index("\[")
+  if bracket == nil || !t.ends_with?("\]")
+    return nil
+  base = t.slice(0, bracket)
+  if base in ("u8" "i8" "u16" "i16" "u32" "i32" "u64" "i64")
+    return base
+  nil
+
+-> inline_array_field?(t)
+  inline_array_element_type(t) != nil
+
 -> view_field_info(ctx, field_name)
   class_name = ctx[:class_name]
   layouts = ctx[:mod][:view_layouts]
@@ -3003,6 +3028,13 @@ use lowering/definitions
   wfn = ctx[:func]
   field_name = node.field
   recv = node.receiver
+
+  # `recv$value` is the explicit-receiver twin of bare `$value`: the raw
+  # NaN-boxed word of the receiver, typed :raw_i64. Needs no layout (it is
+  # the WValue itself, not memory), so it resolves before the layout lookup
+  # and works for any receiver — same emitted code as wvalue_bits(recv).
+  if field_name == "value"
+    return typed_value(:raw_i64, ensure_i64_value(wfn, lower_expression(ctx, recv)))
 
   recv_type = infer_type(recv, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   class_name = view_layout_class_for_type(ctx[:mod], recv_type)

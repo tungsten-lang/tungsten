@@ -873,7 +873,7 @@
   # CSE-forwarded machine-int local passed as an asm-builtin operand (e.g.
   # asm_add_no's n) kept referencing the eliminated load's temp — clang
   # rejected the IR with `use of undefined value %tN`.
-  if inst[:op] in (:asm_add_n :asm_add_no :asm_sub_no :asm_addmul1 :asm_mulbase :asm_neon_umull :asm_neon_redc :asm_neon_redc4 :asm_neon_madd4 :asm_neon_msub4 :asm_neon_gadd2 :asm_neon_ntt_stage :asm_gold_stage :asm_gold_stage_inv)
+  if inst[:op] in (:asm_add_n :asm_add_no :asm_sub_no :asm_addmul1 :asm_mulbase :asm_neon_umull :asm_neon_redc :asm_neon_redc4 :asm_neon_madd4 :asm_neon_msub4 :asm_neon_gadd2 :asm_neon_ntt_stage :asm_gold_stage :asm_gold_stage_inv :asm_add_uneq :asm_sub_uneq)
     asm_fields = [:outp, :ap, :bp, :vp, :twp, :ivp, :n, :ooff, :aoff, :boff, :bsc, :na, :nb, :hq]
     fi = 0
     while fi < asm_fields.size()

@@ -596,6 +596,32 @@
   i = 0
   while i < expressions.size()
     node = expressions[i]
+    # Class-scoped embedded ll/asm kernels: pre-register their raw ABI so a
+    # sibling method defined BEFORE the kernel in the class body still
+    # lowers its call sites through the raw path. Symbol comes from the
+    # class mangling; the registry key stays the call name, as at top level.
+    if ast_kind(node) == :class_def && node.body != nil
+      ci = 0
+      while ci < node.body.size()
+        cnode = node.body[ci]
+        if is_ast_node?(cnode) && ast_kind(cnode) in (:method_def :fn_def) && cnode.from_fn == true && cnode.param_types != nil
+          cembedded = embedded_body_directive(cnode)
+          if cembedded != nil
+            c_types = {}
+            populate_definition_var_types(cnode, c_types, mod)
+            c_key = method_call_key_for_def(cnode)
+            c_sym = class_method_function_name(node.name, cnode)
+            c_kinds = embedded_param_kinds(cnode, c_types, nil, cembedded[0])
+            mod[:raw_callable_fns][c_key] = c_sym
+            mod[:raw_fn_param_kinds][c_key] = c_kinds
+            if mod[:raw_callable_fns][cnode.name] == nil
+              mod[:known_calls][cnode.name] = c_sym
+              mod[:known_fn_param_counts][cnode.name] = cnode.params.size()
+              mod[:raw_callable_fns][cnode.name] = c_sym
+              mod[:raw_fn_param_kinds][cnode.name] = c_kinds
+              if mod[:fn_return_types][cnode.name] == nil
+                mod[:fn_return_types][cnode.name] = :i64
+        ci += 1
     if ast_kind(node) in (:method_def :fn_def)
       child_var_types = {}
       populate_definition_var_types(node, child_var_types, mod)
@@ -1742,6 +1768,59 @@
   body = node.body
   analysis = method_lowering_analysis(node)
   fn_name = class_method_function_name(class_name, node)
+
+  # Embedded `ll` / `asm` kernels inside a class body: a typed `fn` whose
+  # body is a single ll/asm heredoc, exactly like the top-level form. The
+  # kernel is a raw-ABI helper scoped to the class for organization — it
+  # takes NO implicit __self (pass wvalue_bits-derived scalars or typed
+  # arrays explicitly), never enters the method-dispatch tables, and its
+  # symbol is class-mangled so kernels in different classes cannot collide.
+  # In-class bare calls resolve through the raw-callable registry, which is
+  # keyed by call name: keep kernel names program-unique, as with top-level
+  # embedded fns. Compile-only, like every embedded body.
+  if node.from_fn == true && node.param_types != nil
+    embedded = embedded_body_directive(node)
+    if embedded != nil
+      embed_types = {}
+      populate_definition_var_types(node, embed_types, mod)
+      kernel_params = []
+      kpi = 0
+      while kpi < params.size()
+        kernel_params.push(param_runtime_name(params[kpi]))
+        kpi += 1
+      kernel_fn = build_function(fn_name, kernel_params, "i64", false, [])
+      kernel_fn[:source_kind] = :method
+      kernel_fn[:source_method] = name
+      kernel_fn[:source_class] = class_name
+      kernel_fn[:source_path] = ctx[:source_path]
+      kernel_fn[:source_line] = node.line
+      replace_or_append_function(mod, kernel_fn)
+      call_key = method_call_key_for_def(node)
+      kernel_kinds = embedded_param_kinds(node, embed_types, ctx[:source_path], embedded[0])
+      mod[:known_calls][call_key] = fn_name
+      mod[:known_fn_param_counts][call_key] = kernel_params.size()
+      mod[:raw_callable_fns][call_key] = fn_name
+      mod[:raw_fn_param_kinds][call_key] = kernel_kinds
+      if mod[:fn_return_types][call_key] == nil
+        mod[:fn_return_types][call_key] = :i64
+      # Also register under the PLAIN name (single-definition kernels), the
+      # same courtesy function_name_for_def extends to top-level typed fns:
+      # in-class bare calls then skip the implicit-self intercept and reach
+      # the plain-name raw path without depending on call-site inference.
+      if mod[:known_calls][name] == nil
+        mod[:known_calls][name] = fn_name
+        mod[:known_fn_param_counts][name] = kernel_params.size()
+        mod[:raw_callable_fns][name] = fn_name
+        mod[:raw_fn_param_kinds][name] = kernel_kinds
+        if mod[:fn_return_types][name] == nil
+          mod[:fn_return_types][name] = :i64
+      kernel_fn[:raw_i64_signature] = true
+      kernel_fn[:raw_return_type] = :i64
+      if embedded[0] == "ll"
+        kernel_fn[:embedded_ll] = embedded[1]
+      else
+        kernel_fn[:embedded_asm] = embedded[1]
+      return nil
   # Phase 5: monomorphization override — uses a mangled fn name and pre-types
   # __self so dispatch in the body picks up the variant (e.g. typed_array_u8
   # → :typed_array_get_inline instead of method_call_dispatch).

@@ -326,9 +326,11 @@
 
   when :word_array     # `%w[a b c]` → Array of String literals
     return lower_word_or_symbol_array(ctx, node.words)
+  when :symbol_array   # `%i[a b c]` → Array of Symbol literals
+    return lower_symbol_array(ctx, node.symbols)
 
   # Shallow-wired literal types (return nil at runtime)
-  when :month, :key, :symbol_array, :map_op, :lambda_arity, :superscript, :encoded
+  when :month, :key, :map_op, :lambda_arity, :superscript, :encoded
     return unsupported_node(ctx, node)
 
   when :view_access

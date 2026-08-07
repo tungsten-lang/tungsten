@@ -58,8 +58,11 @@
   -> succ
     self + 1
 
+  # Alias of succ with a direct body: a bare `succ` call would cost a second
+  # dynamic dispatch on every `.next`, which the BigInt runtime-to-core port
+  # measured as a 6-8% public regression.
   -> next
-    succ
+    self + 1
 
   -> to_s(base = 10)
 

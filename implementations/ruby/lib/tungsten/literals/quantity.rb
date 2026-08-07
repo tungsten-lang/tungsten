@@ -75,6 +75,11 @@ module Tungsten
       q.__send__(:copy_with, value: hole_count(q.value))
     end
 
+    # Registry spelling of the unit — core/quantity.w#unit_name parity.
+    def unit_name
+      display_unit_symbol
+    end
+
     # π-quantities (`2π`) are numbers: an exact multiple of π riding the
     # unit machinery. Evaluation boundaries (mixed +/- with plain numerics,
     # order comparisons, to_f, Math.*) collapse them to value·π as a Float,

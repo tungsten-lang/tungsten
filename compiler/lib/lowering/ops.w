@@ -1774,10 +1774,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       emit_instruction(wfn, {op: :fcmp_f64, temp: temp, pred: fcmp_pred, lhs: lhs_raw, rhs: rhs_raw})
       return typed_value(:i1, temp)
 
-  # Mixed int×float: promote int to double, then inline float op
+  # Mixed int×float: promote int to double, then inline float op.
+  # Equality is EXCLUDED from the promotion: Floats equal only Floats
+  # (exact-tower rule — see w_eq), so == / != fall through to the runtime
+  # call while ordering comparisons still promote and compare.
   if (lt == :float && is_integer_like_type(rt)) || (is_integer_like_type(lt) && rt == :float)
     float_op = lowering_float_op_map[op]
-    fcmp_pred = lowering_fcmp_op_map[op]
+    fcmp_pred = op in (:EQ :NEQ) ? nil : lowering_fcmp_op_map[op]
 
     if float_op != nil || fcmp_pred != nil
       lhs = lower_expression(ctx, node.left)

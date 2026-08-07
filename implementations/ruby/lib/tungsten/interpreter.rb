@@ -789,7 +789,7 @@ module Tungsten
     def visit_hash_literal(node)
       result = {}
       node.entries.each do |key_node, value_node|
-        result[evaluate(key_node)] = evaluate(value_node)
+        result[canonical_hash_key(evaluate(key_node))] = evaluate(value_node)
       end
       result
     end
@@ -889,6 +889,19 @@ module Tungsten
       result
     end
 
+    # Exact-tower equality: Integer/Rational/Decimal (BigDecimal) cross-
+    # equal by mathematical value, which plain Ruby == already provides.
+    # Binary Floats are approximations and equal only other Floats —
+    # ordering crosses the boundary, equality deliberately does not
+    # (matching the native runtime's w_eq).
+    def tungsten_eq(left, right)
+      if (left.is_a?(Float) ^ right.is_a?(Float)) &&
+         left.is_a?(Numeric) && right.is_a?(Numeric)
+        return false
+      end
+      left == right
+    end
+
     def visit_binary_op(node)
       @profile_binary_ops[node.operator] += 1 if @profile_enabled
       left = evaluate(node.left)
@@ -906,9 +919,9 @@ module Tungsten
       right = evaluate(node.right)
 
       case node.operator
-      when :==  then left == right
+      when :==  then tungsten_eq(left, right)
       when :<   then left < right
-      when :!=  then !(left == right)
+      when :!=  then !tungsten_eq(left, right)
       when :"=~"
         regex, subject = left.is_a?(Regexp) ? [left, right] : [right, left]
         runtime_error("=~ requires a regex operand", node: node) unless regex.is_a?(Regexp)
@@ -4028,7 +4041,9 @@ module Tungsten
         key = direct_arg_value(arg_nodes[0])
         value = direct_arg_value(arg_nodes[1])
         case recv
-        when ::Hash, ::Array, Tungsten::ByteArray
+        when ::Hash
+          recv[canonical_hash_key(key)] = value
+        when ::Array, Tungsten::ByteArray
           recv[key] = value
         else
           NO_DIRECT_CALL
@@ -4889,7 +4904,23 @@ module Tungsten
       end
     end
 
+    # Exact-tower key canonicalization, matching the native runtime's
+    # unified hashing: integer-valued Decimals/Rationals key as their
+    # Integer, fractional Decimals as their lowest-terms Rational — so
+    # {2 => v}[2.0] and {0.5 => v}[1/2] hit. Floats stay themselves
+    # (equality-isolated). Ruby Hash uses type-strict eql?, hence the
+    # explicit canonical form.
+    def canonical_hash_key(key)
+      if key.is_a?(BigDecimal)
+        r = key.to_r
+        return r.denominator == 1 ? r.numerator : r
+      end
+      return key.numerator if key.is_a?(::Rational) && key.denominator == 1
+      key
+    end
+
     def hash_indifferent_get(hash, key)
+      key = canonical_hash_key(key)
       val = hash.fetch(key, HASH_MISS)
       return val unless val.equal?(HASH_MISS)
 

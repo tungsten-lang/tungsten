@@ -30890,6 +30890,53 @@ static uint64_t w_hash_integer_value(WValue value) {
         ? 0x9e3779b97f4a7c15ULL : 0x243f6a8885a308d3ULL));
 }
 
+/* ---- Exact numeric tower ----
+ * Integer/BigInt, Rational, and Decimal are all EXACT, so they cross-
+ * compare by mathematical value. Binary Floats are approximations by
+ * construction and equal only other Floats — ordering still crosses the
+ * boundary (cmp_numeric_double), equality deliberately does not. */
+
+/* sig · 10^p as a boxed integer (bigint beyond i48), exactly. */
+static WValue exact_pow10_scaled(int64_t sig, int p) {
+    WValue acc = w_box_int_checked(sig);
+    while (p > 0) {
+        int chunk = p > 18 ? 18 : p;
+        int64_t f = 1;
+        for (int i = 0; i < chunk; i++) f *= 10;
+        acc = bigint_mul_any(acc, w_box_int_checked(f));
+        p -= chunk;
+    }
+    return acc;
+}
+
+/* 1/0 equality verdict for two exact numerics, -1 when the pair isn't two
+ * exact numerics. Mixed decimal/rational pairs become integer (n, d)
+ * pairs and cross-multiply in the bigint domain — no rounding anywhere. */
+static int exact_tower_eq(WValue a, WValue b) {
+    int a_dec = is_decimal_any(a), b_dec = is_decimal_any(b);
+    int a_ok = a_dec || w_is_integer_any(a) || w_is_rational_any(a);
+    int b_ok = b_dec || w_is_integer_any(b) || w_is_rational_any(b);
+    if (!a_ok || !b_ok) return -1;
+    if (a_dec && b_dec) return decimal_compare(a, b) == 0;
+    if (!a_dec && !b_dec) {
+        if (w_is_integer_any(a) && w_is_integer_any(b))
+            return bigint_compare(a, b) == 0;
+        int supported;
+        int c = rational_compare_exact(a, b, &supported);
+        return supported ? (c == 0) : -1;
+    }
+    WValue dv = a_dec ? a : b, ov = a_dec ? b : a;
+    int64_t sig; int scale;
+    decimal_extract(dv, &sig, &scale);
+    WValue dn, dd;
+    if (scale >= 0) { dn = exact_pow10_scaled(sig, scale); dd = w_int(1); }
+    else            { dn = w_box_int_checked(sig); dd = exact_pow10_scaled(1, -scale); }
+    WValue on, od;
+    if (w_is_rational_any(ov)) rational_parts(ov, &on, &od);
+    else { on = ov; od = w_int(1); }
+    return bigint_compare(bigint_mul_any(dn, od), bigint_mul_any(on, dd)) == 0;
+}
+
 static uint64_t w_hash_value(WValue v) {
     if (w_is_rope(v)) {
         uint32_t len = w_rope_len(v);
@@ -30932,8 +30979,51 @@ static uint64_t w_hash_value(WValue v) {
     if (w_is_rational_any(v)) {
         WValue numerator, denominator;
         rational_parts(v, &numerator, &denominator);
+        /* Exact-tower hashing: an integer-valued rational (4/2 → 2/1)
+         * hashes as its integer, so it keys with equal ints/decimals.
+         * Inline ints hash by BOX BITS (w_hash_value_fast's int arm and
+         * w_hash_value's fallback) — match that exactly. */
+        if (bigint_compare(denominator, w_int(1)) == 0)
+            return w_is_int(numerator) ? w_hash_splitmix64(numerator)
+                                       : w_hash_integer_value(numerator);
         uint64_t left = w_hash_integer_value(numerator);
         uint64_t right = w_hash_integer_value(denominator);
+        return w_hash_splitmix64(left ^ (right << 1) ^ (right >> 63) ^
+                                 0xa4093822299f31d0ULL);
+    }
+    if (is_decimal_any(v)) {
+        /* Exact-tower hashing: integer-valued decimals hash as their
+         * integer (2.0 keys hit 2); fractional ones as their lowest-terms
+         * (n, d) pair with the rational formula above (0.5 keys hit 1/2).
+         * The denominator 10^p reduces by stripping shared 2s and 5s. */
+        int64_t sig; int scale;
+        decimal_extract(v, &sig, &scale);
+        if (scale >= 0) {
+            WValue iv = exact_pow10_scaled(sig, scale);
+            return w_is_int(iv) ? w_hash_splitmix64(iv)
+                                : w_hash_integer_value(iv);
+        }
+        int64_t n = sig;
+        int twos = -scale, fives = -scale;
+        while (twos > 0 && n % 2 == 0) { n /= 2; twos--; }
+        while (fives > 0 && n % 5 == 0) { n /= 5; fives--; }
+        int common = twos < fives ? twos : fives;
+        WValue den = exact_pow10_scaled(1, common);
+        int rest2 = twos - common, rest5 = fives - common;
+        while (rest2 > 0) {
+            int c = rest2 > 62 ? 62 : rest2;
+            den = bigint_mul_any(den, w_box_int_checked((int64_t)1 << c));
+            rest2 -= c;
+        }
+        while (rest5 > 0) {
+            int c = rest5 > 27 ? 27 : rest5;
+            int64_t f = 1;
+            for (int i = 0; i < c; i++) f *= 5;
+            den = bigint_mul_any(den, w_box_int_checked(f));
+            rest5 -= c;
+        }
+        uint64_t left = w_hash_integer_value(w_box_int_checked(n));
+        uint64_t right = w_hash_integer_value(den);
         return w_hash_splitmix64(left ^ (right << 1) ^ (right >> 63) ^
                                  0xa4093822299f31d0ULL);
     }
@@ -30978,6 +31068,12 @@ static int w_hash_key_eq(WValue a, WValue b) {
         if (ba == 0x8000000000000000ULL) ba = 0;
         if (bb == 0x8000000000000000ULL) bb = 0;
         return ba == bb;
+    }
+    /* Cross-type exact numerics (2.0 keys hit 2, 0.5 keys hit 1/2),
+     * consistent with w_eq and the tower-unified hashes above. */
+    {
+        int xeq = exact_tower_eq(a, b);
+        if (xeq >= 0) return xeq;
     }
     return 0;
 }
@@ -34261,18 +34357,17 @@ WValue w_eq(WValue a, WValue b) {
         if (supported) return w_bool(comparison == 0);
     }
 
-    /* Numeric equality coerces across the int/float boundary, matching the
-     * ordering comparisons (w_lt/w_gt, which use cmp_numeric_double). A bare
-     * int literal compared to a float is promoted to the float's type, so
-     * 0 == 0.0 and 1 == 1.0 are true. Gated on both sides being coercible
-     * numerics (int/float/decimal) so double-vs-string stays false below
-     * rather than tripping cmp_numeric_double's "expected numeric type" die. */
-    if (w_is_double(a) || w_is_double(b)) {
-        int a_num = w_is_double(a) || w_is_integer_any(a) || w_is_rational_any(a) || is_decimal_any(a);
-        int b_num = w_is_double(b) || w_is_integer_any(b) || w_is_rational_any(b) || is_decimal_any(b);
-        if (a_num && b_num)
-            return w_bool(cmp_numeric_double(a) == cmp_numeric_double(b));
+    /* Exact tower: Integer/Rational/Decimal cross-equal by mathematical
+     * value (2.0 == 2, 1/2 == 0.5) — they are all exact representations.
+     * Floats are approximations by construction and equal only other
+     * Floats: ordering crosses the boundary (w_lt via cmp_numeric_double),
+     * equality deliberately does not, so ~2.0 == 2.0 is FALSE. */
+    {
+        int xeq = exact_tower_eq(a, b);
+        if (xeq >= 0) return w_bool(xeq);
     }
+    if (w_is_double(a) && w_is_double(b))
+        return w_bool(w_as_double(a) == w_as_double(b));
 
     /* Strings and symbols compare by content, but only within the same type.
      * Ropes are string values, so compare them directly without flattening.

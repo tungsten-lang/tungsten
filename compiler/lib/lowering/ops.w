@@ -1999,6 +1999,15 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if rt_name == nil
     rt_name = "w_add"  # fallback, should not happen
 
+  # RETIRED (Phase 4): the TUNGSTEN_BIGINT_DIRECT_OPS lever that called
+  # `__w_bigint_{plus,minus}_src` directly from `## big`-typed call sites.
+  # Its safety argument was "the source body re-checks operand shapes
+  # anyway" — no longer true: the typed-overload worker's tag guards FOLD
+  # under the dispatcher/seam contract (Phase 3), and a `## big` value can
+  # hold a demoted inline int that neither the dispatcher nor
+  # bigint_src_shape ever saw. Every static call site now routes through
+  # w_add/w_sub, whose arm re-proves shapes before taking the seam.
+
   # Exactness-gated literal adaptation: ==/!= with an int or decimal
   # LITERAL operand routes through w_eq_lit, which adapts the literal to
   # a Float operand iff exactly representable. Provenance-based —

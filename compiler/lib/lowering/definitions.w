@@ -1157,7 +1157,12 @@
   while pi <= arity
     params.push(Tungsten:AST:Param.new("__arg" + pi.to_s(), nil, false, false, false, false))
     pi += 1
-  Tungsten:AST:MethodDef.new(name, params, [branch], nil, false)
+  dispatcher = Tungsten:AST:MethodDef.new(name, params, [branch], nil, false)
+  # Mark the synthesized gate so downstream consumers can tell it apart
+  # from a real (possibly reopened) body of the same name — the bigint
+  # seam wrapper must never bind the gate (emitter.w, big_op_wrappers).
+  ast_set(dispatcher, :overload_dispatcher, true)
+  dispatcher
 
 -> overload_group_dispatchable?(g)
   g[:arity] == 1 && g[:overloads].size() >= 2 && g[:plain_count] == 0
@@ -1773,6 +1778,8 @@
   new_fn[:source_class] = class_name
   new_fn[:source_path] = ctx[:source_path]
   new_fn[:source_line] = node.line
+  if ast_get(node, :overload_dispatcher) == true
+    new_fn[:overload_dispatcher] = true
   replace_or_append_function(mod, new_fn)
   if node.return_type != nil
     raw_return_type = normalize_type_symbol(node.return_type)

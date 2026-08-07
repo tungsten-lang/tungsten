@@ -2262,13 +2262,47 @@ ewscope_md_state = {ids: {}, order: []}
   # exactly as it does in the method table: last definition survives the
   # replace_or_append pass, so the wrapper names the surviving body.
   big_op_wrappers = {"+" => "__w_bigint_plus_src", "-" => "__w_bigint_minus_src", "*" => "__w_bigint_times_src"}
+  # B2: the seam target per op, in preference order —
+  #   1. the LAST plain-named body (source_method exactly "+"/"-"/"*",
+  #      not the synthesized dispatcher): post-Phase-4 core has no such
+  #      body, so one existing means a program REOPENED the operator, and
+  #      it must win the seam exactly as it wins the method table;
+  #   2. the typed overload worker (`+__ovl_BigInt`, …): the fast body
+  #      behind the dispatcher gate. The seam binds it DIRECTLY —
+  #      bigint_src_shape already proved both operands, so routing
+  #      through the dispatcher would re-test what the arm knows.
+  # The dispatcher itself is never wrapped (fn[:overload_dispatcher]).
+  big_op_worker_names = {"+__ovl_BigInt" => "+", "-__ovl_BigInt" => "-", "*__ovl_BigInt" => "*"}
   big_op_fns = {}
+  big_op_worker_fns = {}
+  big_op_dispatchers = {}
   bfi = 0
   while bfi < mod[:functions].size()
     bff = mod[:functions][bfi]
-    if bff[:source_class] == "BigInt" && bff[:source_kind] == :method && big_op_wrappers[bff[:source_method]] != nil
-      big_op_fns[bff[:source_method]] = bff
+    if bff[:source_class] == "BigInt" && bff[:source_kind] == :method
+      bfm = bff[:source_method]
+      if big_op_wrappers[bfm] != nil
+        if bff[:overload_dispatcher] == true
+          big_op_dispatchers[bfm] = true
+        else
+          big_op_fns[bfm] = bff
+      elsif big_op_worker_names[bfm] != nil
+        big_op_worker_fns[big_op_worker_names[bfm]] = bff
     bfi += 1
+  # T3 build assertion: a module that synthesized a BigInt operator
+  # dispatcher but yields no seam target has broken the wrapper keying —
+  # the strong symbol would silently fall to the runtime's weak C default
+  # and the whole migration would revert with every gate reading green.
+  bo_keys = big_op_wrappers.keys()
+  boi = 0
+  while boi < bo_keys.size()
+    bop_check = bo_keys[boi]
+    if big_op_dispatchers[bop_check] == true && big_op_fns[bop_check] == nil && big_op_worker_fns[bop_check] == nil
+      << "error: BigInt#" + bop_check + " lowered a dispatcher but no seam target; __w_bigint_*_src would bind the weak C default"
+      exit(1)
+    if big_op_fns[bop_check] == nil
+      big_op_fns[bop_check] = big_op_worker_fns[bop_check]
+    boi += 1
   # Plain loop, not `.each` — the body mutates `used_runtime_fns`, and a
   # closure boundary here is exactly the kind of capture ambiguity that
   # silently dropped the declare-suppression flag.

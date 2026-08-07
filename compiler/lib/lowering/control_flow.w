@@ -1326,7 +1326,10 @@
   else
     subj_reg = ensure_i64_value(wfn, subj_tv)
     emit_instruction(wfn, {op: :store_i64, value: subj_reg, ptr: subj_ptr})
-    if !has_recase && subj_type != nil
+    # The slot holds a BOXED value; recording a float type would make the
+    # when-arm comparisons read it as a raw f64 (invalid bitcast IR). Only
+    # propagate types whose var reads expect boxed storage.
+    if !has_recase && subj_type != nil && subj_type != :float && !is_machine_float_type(subj_type)
       ctx[:var_types][subj_var] = subj_type
 
   # recase: open the re-dispatch header (a synthetic loop). `recase` rewrites

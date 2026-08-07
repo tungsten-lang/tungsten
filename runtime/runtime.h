@@ -601,6 +601,8 @@ WValue w_bit_shl(WValue a, WValue b);
 WValue w_eq(WValue a, WValue b);
 WValue w_neq(WValue a, WValue b);
 WValue w_approx_eq(WValue a, WValue b);
+WValue w_eq_lit(WValue a, WValue b);
+WValue w_neq_lit(WValue a, WValue b);
 WValue w_lt(WValue a, WValue b);
 WValue w_gt(WValue a, WValue b);
 WValue w_lte(WValue a, WValue b);

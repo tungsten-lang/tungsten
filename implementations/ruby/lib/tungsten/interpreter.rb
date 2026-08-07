@@ -902,6 +902,28 @@ module Tungsten
       left == right
     end
 
+    # Exactness-gated literal adaptation (matches the native w_eq_lit):
+    # an int/decimal LITERAL operand adapts to a Float operand iff its
+    # value is exactly representable as a double — `~x == 0`, `~x == 0.5`,
+    # `case ~x when 2` hit; `~x == 0.3` stays false; variables never adapt.
+    def numeric_lit_node?(n)
+      n.is_a?(Tungsten::AST::Int) || n.is_a?(Tungsten::AST::Decimal)
+    end
+
+    def exactly_double?(v)
+      return false unless v.is_a?(Integer) || v.is_a?(BigDecimal)
+      f = v.to_f
+      f.finite? && f.to_r == v.to_r
+    end
+
+    def adaptive_eq(literal_adjacent, l, r)
+      if literal_adjacent
+        return l == r.to_f if l.is_a?(Float) && exactly_double?(r)
+        return r == l.to_f if r.is_a?(Float) && exactly_double?(l)
+      end
+      tungsten_eq(l, r)
+    end
+
     # `a ≈ b` — approximate equality: |a-b| <= 1e-12 · max(1, |a|, |b|),
     # matching the native runtime's w_approx_eq. Every numeric coerces
     # through the same double path (so ~2.0 ≈ 2 is true where == is not);
@@ -939,10 +961,10 @@ module Tungsten
       right = evaluate(node.right)
 
       case node.operator
-      when :==  then tungsten_eq(left, right)
+      when :==  then adaptive_eq(numeric_lit_node?(node.left) || numeric_lit_node?(node.right), left, right)
       when :≈   then tungsten_approx_eq(left, right)
       when :<   then left < right
-      when :!=  then !tungsten_eq(left, right)
+      when :!=  then !adaptive_eq(numeric_lit_node?(node.left) || numeric_lit_node?(node.right), left, right)
       when :"=~"
         regex, subject = left.is_a?(Regexp) ? [left, right] : [right, left]
         runtime_error("=~ requires a regex operand", node: node) unless regex.is_a?(Regexp)
@@ -2849,6 +2871,11 @@ module Tungsten
                 match.captures.each_with_index { |capture, i| @globals["$#{i + 1}"] = capture }
                 return evaluate(body)
               end
+            elsif cond_val.is_a?(Numeric)
+              # Numeric when-matching follows == semantics: exact tower
+              # crosses, floats isolated, literal whens adapt when exact.
+              # (Ranges/Classes are non-Numeric and keep === below.)
+              return evaluate(body) if adaptive_eq(numeric_lit_node?(cond), cond_val, receiver_val)
             elsif cond_val === receiver_val || cond_val == receiver_val
               return evaluate(body)
             end

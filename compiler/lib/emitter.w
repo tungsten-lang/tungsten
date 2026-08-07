@@ -1472,7 +1472,7 @@ ewscope_md_state = {ids: {}, order: []}
   direct_range_metadata_suffix("i64", w_tag_char + subtype_span * 3, w_tag_char + subtype_span * 4)
 
 -> wvalue_bool_call?(name)
-  name in ("w_bool" "w_eq" "w_neq" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_streq_fast" "__w_streq2_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
+  name in ("w_bool" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_streq_fast" "__w_streq2_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
 
 -> known_call_range_metadata_suffix(inst, llvm_type)
   suffix = range_metadata_suffix(inst, llvm_type)
@@ -2311,6 +2311,8 @@ ewscope_md_state = {ids: {}, order: []}
   cmp_fast_specs = [
     ["__w_eq_fast", "w_eq", "eq", false],
     ["__w_neq_fast", "w_neq", "ne", false],
+    ["__w_eq_lit_fast", "w_eq_lit", "eq", false],
+    ["__w_neq_lit_fast", "w_neq_lit", "ne", false],
     ["__w_lt_fast", "w_lt", "slt", true],
     ["__w_gt_fast", "w_gt", "sgt", true],
     ["__w_lte_fast", "w_lte", "sle", true],

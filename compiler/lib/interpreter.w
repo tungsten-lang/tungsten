@@ -2007,6 +2007,22 @@ use target
         return result
     left = evaluate(ast_get(node, :left), env)
     right = evaluate(ast_get(node, :right), env)
+    # Exactness-gated literal adaptation: ==/!= with an int or decimal
+    # LITERAL operand routes through w_eq_lit — the literal adapts to a
+    # Float operand iff exactly representable. Variables stay strict.
+    if node_op == :EQ || node_op == :NEQ
+      eq_ln = ast_get(node, :left)
+      eq_rn = ast_get(node, :right)
+      eq_lit = false
+      if eq_ln != nil && is_ast_node?(eq_ln) && ast_kind(eq_ln) in (:int :decimal)
+        eq_lit = true
+      if eq_rn != nil && is_ast_node?(eq_rn) && ast_kind(eq_rn) in (:int :decimal)
+        eq_lit = true
+      if eq_lit
+        eq_r = ccall("w_eq_lit", left, right)
+        if node_op == :NEQ
+          return !eq_r
+        return eq_r
     apply_binary_op(node_op, left, right)
 
   -> apply_binary_op(op, left, right)
@@ -2354,8 +2370,14 @@ use target
     i = 0
     while i < arms.size()
       arm = arms[i]
-      pattern = evaluate(ast_get(arm, :pattern), env)
-      if pattern == subject
+      pat_node = ast_get(arm, :pattern)
+      pattern = evaluate(pat_node, env)
+      matched = pattern == subject
+      if !matched && pat_node != nil && is_ast_node?(pat_node) && ast_kind(pat_node) in (:int :decimal)
+        # when-literals get the same exactness-gated adaptation as ==:
+        # `case ~x when 2` hits when x is exactly 2.0.
+        matched = ccall("w_eq_lit", subject, pattern)
+      if matched
         guard = ast_get(arm, :guard)
         if guard == nil || truthy?(evaluate(guard, env))
           return evaluate_body(ast_get(arm, :body), env)

@@ -1775,12 +1775,21 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       return typed_value(:i1, temp)
 
   # Mixed int×float: promote int to double, then inline float op.
-  # Equality is EXCLUDED from the promotion: Floats equal only Floats
-  # (exact-tower rule — see w_eq), so == / != fall through to the runtime
-  # call while ordering comparisons still promote and compare.
+  # Equality promotes ONLY for an int LITERAL whose value is exactly
+  # representable (|n| ≤ 2^47 covers every inline literal) — the
+  # exactness-gated adaptation rule. A non-literal int operand falls to
+  # the runtime call and stays strict (Floats equal only Float VALUES).
   if (lt == :float && is_integer_like_type(rt)) || (is_integer_like_type(lt) && rt == :float)
     float_op = lowering_float_op_map[op]
-    fcmp_pred = op in (:EQ :NEQ) ? nil : lowering_fcmp_op_map[op]
+    fcmp_pred = lowering_fcmp_op_map[op]
+    if op in (:EQ :NEQ)
+      eq_lit_node = lt == :float ? node.right : node.left
+      eq_lit_ok = eq_lit_node != nil && is_ast_node?(eq_lit_node) && ast_kind(eq_lit_node) == :int
+      if eq_lit_ok
+        eq_lit_v = eq_lit_node.value
+        eq_lit_ok = eq_lit_v > 0 - 140737488355328 && eq_lit_v < 140737488355328
+      if !eq_lit_ok
+        fcmp_pred = nil
 
     if float_op != nil || fcmp_pred != nil
       lhs = lower_expression(ctx, node.left)
@@ -1825,6 +1834,20 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   rt_name = lowering_op_map[op]
   if rt_name == nil
     rt_name = "w_add"  # fallback, should not happen
+
+  # Exactness-gated literal adaptation: ==/!= with an int or decimal
+  # LITERAL operand routes through w_eq_lit, which adapts the literal to
+  # a Float operand iff exactly representable. Provenance-based —
+  # variables keep the plain strict w_eq path. case/when inherits this
+  # via its BinaryOp(:EQ, pattern) desugar.
+  if op in (:EQ :NEQ)
+    lit_adjacent = false
+    if node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) in (:int :decimal)
+      lit_adjacent = true
+    if node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) in (:int :decimal)
+      lit_adjacent = true
+    if lit_adjacent
+      rt_name = op == :EQ ? "__w_eq_lit_fast" : "__w_neq_lit_fast"
   # Mutate-if-unique (E4 stage 1): the untyped accumulator shape lands here
   # (an nil-typed `r` skips the machine and guarded arms), so the marker
   # set by lower_assign_expr routes `r = r ± e` through the in-place entry

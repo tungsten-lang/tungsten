@@ -34459,6 +34459,78 @@ WValue w_neq(WValue a, WValue b) {
     return w_eq(a, b) == W_TRUE ? W_FALSE : W_TRUE;
 }
 
+/* ---- Exactness-gated literal adaptation (provenance-based) ----
+ * The front ends route ==/!= through w_eq_lit ONLY when one operand is an
+ * int or decimal LITERAL in the source. A literal adapts to a Float
+ * operand iff its value is EXACTLY representable as a double — so
+ * `~x == 0`, `~x == 0.5`, and `case ~x when 2` work, while `~x == 0.3`
+ * stays false (0.3 has no exact double, so no double can equal it) and
+ * values that flowed through variables never adapt. Everything else
+ * falls through to exact w_eq. */
+
+/* num · 2^-neg_pow2 as an exact double, or 0 if not representable. */
+static int i128_dyadic_double(__int128 num, int neg_pow2, double *out) {
+    if (num == 0) { *out = 0.0; return 1; }
+    __int128 m = num < 0 ? -num : num;
+    int t = 0;
+    while ((m & 1) == 0) { m >>= 1; t++; }
+    if (m > ((__int128)1 << 53)) return 0;
+    double d = ldexp((double)(int64_t)m, t - neg_pow2);
+    *out = num < 0 ? -d : d;
+    return 1;
+}
+
+static int numeric_lit_exact_double(WValue v, double *out) {
+    if (w_is_int(v)) {                     /* inline i48 always round-trips */
+        *out = (double)w_as_int(v);
+        return 1;
+    }
+    if (w_is_bigint(v)) {
+        double d = bigint_to_double_boxed(v);
+        if (!(fabs(d) < 9.2e18)) return 0;
+        int64_t r = (int64_t)d;
+        if ((double)r != d) return 0;
+        if (bigint_compare(v, w_box_int_checked(r)) != 0) return 0;
+        *out = d;
+        return 1;
+    }
+    if (is_decimal_any(v)) {
+        int64_t sig; int scale;
+        decimal_extract(v, &sig, &scale);
+        if (scale >= 0) {                  /* integer-valued: sig · 10^scale */
+            __int128 num = sig;
+            __int128 lim = ((__int128)1 << 120);
+            while (scale > 0) {
+                if (num > lim || num < -lim) return 0;
+                num *= 10;
+                scale--;
+            }
+            return i128_dyadic_double(num, 0, out);
+        }
+        int k = -scale;                    /* sig / 10^k = (sig/5^k) / 2^k */
+        if (k > 27) return 0;
+        int64_t p5 = 1;
+        for (int i = 0; i < k; i++) p5 *= 5;
+        if (sig % p5 != 0) return 0;       /* non-dyadic: no exact double */
+        return i128_dyadic_double((__int128)(sig / p5), k, out);
+    }
+    return 0;
+}
+
+WValue w_eq_lit(WValue a, WValue b) {
+    if (w_is_int(a) && w_is_int(b)) return w_bool(a == b);
+    double d;
+    if (w_is_double(a) && numeric_lit_exact_double(b, &d))
+        return w_bool(w_as_double(a) == d);
+    if (w_is_double(b) && numeric_lit_exact_double(a, &d))
+        return w_bool(w_as_double(b) == d);
+    return w_eq(a, b);
+}
+
+WValue w_neq_lit(WValue a, WValue b) {
+    return w_eq_lit(a, b) == W_TRUE ? W_FALSE : W_TRUE;
+}
+
 /* ---- `a ≈ b` — approximate equality ----
  * Both sides evaluate to doubles and compare within
  * |a-b| <= 1e-12 · max(1, |a|, |b|) — relative above magnitude 1,

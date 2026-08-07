@@ -39,12 +39,44 @@ check("rat_int_unequal", 3/2 == 1, false)
 check("big_dec", 10 ** 20 == 1.0e20, true)
 check("big_dec_off", 10 ** 20 + 1 == 1.0e20, false)
 
-# -- Floats equal only Floats --
+# -- Floats equal only Float VALUES: variables never adapt --
+f = ~2.0
+n = 2
+d = 2.0
 check("float_float", ~2.0 == ~2.0, true)
-check("float_dec", ~2.0 == 2.0, false)
-check("float_int", ~2.0 == 2, false)
-check("int_float", 2 == ~2.0, false)
-check("float_dec_neq", ~2.0 != 2.0, true)
+check("float_var_dec_var", f == d, false)
+check("float_var_int_var", f == n, false)
+check("int_var_float_var", n == f, false)
+check("float_var_dec_var_neq", f != d, true)
+
+# -- Exactness-gated literal adaptation: an int/decimal LITERAL adapts to
+# a Float operand iff exactly representable as a double (Odin-style,
+# provenance-based — spellings adapt, values don't) --
+check("lit_int_adapts", ~2.0 == 2, true)
+check("lit_int_adapts_rev", 2 == ~2.0, true)
+check("lit_dec_dyadic", ~0.5 == 0.5, true)
+check("lit_dec_dyadic_two", ~2.0 == 2.0, true)
+check("lit_dec_nondyadic_strict", ~0.3 == 0.3, false)
+check("lit_zero_adapts", ~0.0 == 0, true)
+check("lit_wrong_value", ~2.5 == 2, false)
+check("lit_neq_adapts", ~2.0 != 2, false)
+# 2^53 is the last exactly-representable odd-free integer; 2^53+1 is not.
+check("lit_2p53_adapts", ~9.007199254740992e15 == 9007199254740992, true)
+check("lit_2p53_plus1_strict", ~9.007199254740992e15 == 9007199254740993, false)
+
+# -- case/when literals get the same adaptation --
+y = ~0.5
+case_hit = "no"
+case y
+  when 0.5
+    case_hit = "yes"
+check("case_when_adapts", case_hit, "yes")
+y2 = ~0.3
+case_hit2 = "no"
+case y2
+  when 0.3
+    case_hit2 = "yes"
+check("case_when_nondyadic_strict", case_hit2, "no")
 
 # -- ordering still crosses the float boundary --
 check("float_orders", ~2.0 < 3 && ~2.0 > 1.5, true)

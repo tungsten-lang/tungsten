@@ -928,6 +928,101 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 -> inline_closure_arg_iterator_method?(method_name)
   method_name in ("each" "map" "select" "reject" "find" "detect" "all?" "any?" "none?" "count" "reduce" "flat_map" "each_with_index" "map_with_index" "group_by" "partition" "find_index" "each_slice" "each_cons")
 
+# -- Exact-tag overload gates (B3) --
+#
+# Typed-overload dispatch gates (`__compiler_overload_is_a`) normally lower
+# to a `w_value_is_a` ancestry call. For a type name whose membership test
+# is EQUIVALENT to a NaN-box tag test — for every possible value, not just
+# values of the type — the gate can instead be an inline tag compare, which
+# the optimizer sees through (`w_value_is_a` is declared `nounwind`-only,
+# so the call is an optimization barrier) and which later phases use to
+# prove operand tags inside the selected overload body.
+#
+# Equivalence, not tag-injectivity, is the admission rule: `Int` maps to
+# exactly one tag (0xFFFA) yet `is_a?(v, "Int")` is also true for BigInt,
+# Signed and Unsigned values, so an exact compare would silently drop
+# them. A name is admitted only when `w_value_is_a(v, name)` agrees with
+# the tag test for ALL v — which excludes every name appearing in more
+# than one arm of `w_primitive_is_a_type_name` (runtime.c) and every
+# ancestor in the numeric/string/array towers, leaving essentially BigInt.
+#
+# THE TABLE BETWEEN THE MARKERS IS GENERATED — do not hand-edit it. It is
+# derived from the runtime relation by scripts/gen_tag_table.rb, which
+# probes `is_a?` across representative values of every runtime shape and
+# admits a name only when one of the three tag-test shapes reproduces the
+# relation exactly:
+#   :top_tag    — (bits & 0xFFFF000000000000) == tag          (and + icmp)
+#   :low_nibble — hi16 == 0, payload >= 0x10, low nibble == subtag
+#   :gen_type   — :low_nibble(SUBTAG_GENERIC) + dependent type-byte load
+# Run `ruby scripts/gen_tag_table.rb --check` to verify freshness.
+#
+# The interpreter carries a HAND-COPIED mirror of the same rule
+# (interpreter.w, overload_matches_args?): no shared module exists between
+# lowering and the interpreter, so the copy is deliberate and guarded by
+# an engine-parity spec (spec/compiler/overload_exact_tag_parity_spec.w).
+
+# --- BEGIN GENERATED TAG TABLE (scripts/gen_tag_table.rb) ---
+-> overload_exact_tag_entry(name)
+  # tag/mask are the signed-i64 spellings of the uint64 bit patterns
+  # (0xFFF8000000000000 and 0xFFFF000000000000).
+  if name == "BigInt"
+    return {shape: :top_tag, tag: "-2251799813685248", mask: "-281474976710656"}
+  nil
+# --- END GENERATED TAG TABLE ---
+
+# Scope rule: even an admitted name must fall back to the ancestry call
+# when the program registers a class that DESCENDS from it — a subclass
+# instance satisfies `is_a?` by ancestry but never carries the primitive
+# tag, and ancestry is what routes it to the arm the program wrote for it.
+# `known_classes` is fully populated by the registration walk before any
+# dispatcher synthesis or call lowering, so the answer is stable for the
+# whole compile. Generic templates never enter known_classes, but their
+# monomorphized specializations do, so specialized subclasses are seen.
+-> class_descends_from?(mod, child, anc)
+  cur = child
+  guard = 0
+  while guard < 64
+    cls = mod[:known_classes][cur]
+    if cls == nil
+      return false
+    sup = cls.superclass
+    if sup == nil
+      return false
+    sup = "" + sup.to_s()
+    if sup == anc
+      return true
+    cur = sup
+    guard += 1
+  false
+
+-> exact_tag_name_subclassed?(mod, name)
+  cache = mod[:exact_tag_subclassed]
+  if cache == nil
+    cache = {}
+    mod[:exact_tag_subclassed] = cache
+  hit = cache[name]
+  if hit != nil
+    return hit
+  found = false
+  ks = mod[:known_classes].keys()
+  i = 0
+  while i < ks.size()
+    if found == false && class_descends_from?(mod, "" + ks[i].to_s(), name)
+      found = true
+    i += 1
+  cache[name] = found
+  found
+
+# The one lookup call sites use: nil (keep the `w_value_is_a` ancestry
+# call) or a test descriptor {shape:, tag:, mask:} for an inline compare.
+-> overload_exact_tag_test(mod, name)
+  entry = overload_exact_tag_entry(name)
+  if entry == nil
+    return nil
+  if exact_tag_name_subclassed?(mod, name)
+    return nil
+  entry
+
 # True when a trailing block on `recv.name` should iterate the call's RESULT
 # (implicit `.each`) rather than be passed to `name` as a block — i.e. `name`
 # takes no block of its own. Block-taking methods are excluded three ways:

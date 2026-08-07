@@ -99,6 +99,8 @@ module Tungsten::AST
     def clone
       self.class.new(name, args.map(&:clone), body.clone, receiver: receiver.clone, block: block.clone, yields:, splat_index:, double_splat: double_splat.clone).tap do |node|
         node.location = location
+        node.param_types = param_types
+        node.return_type = return_type
         # @todo
         # super?
         # new?

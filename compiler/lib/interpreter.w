@@ -2607,7 +2607,7 @@ use target
     # must resolve before `is_builtin?("max")`, which would otherwise call
     # dispatch_builtin with a hardcoded nil receiver and crash).
     s = current_self()
-    m = implicit_self_method(s, name, args.size(), block != nil)
+    m = implicit_self_method(s, name, args.size(), block != nil, args)
     if m != nil
       return call_w_method(s, m, args, block, env)
 
@@ -2799,7 +2799,17 @@ use target
       # calls to the runtime twin, w_array_sort_block).
       if primitive_class[:name] == "Array" && name == "sort" && type(recv) == "Array" && args.empty?() && block == nil
         return recv.sort()
-      m = lookup_method(primitive_class, name, args.size(), block != nil)
+      # BigInt#+ carries a compile-only embedded limb kernel; the walker
+      # delegates the selector to the same exported C boundary the kernel's
+      # fallback arms use, exactly like compiled infix `+` reaching the
+      # runtime arm. Values are engine-identical either way.
+      if primitive_class[:name] == "BigInt" && name in ("+" "-" "*") && args.size() == 1 && block == nil
+        if name == "+"
+          return ccall("w_bigint_add", recv, args[0])
+        if name == "*"
+          return ccall("w_mul", recv, args[0])
+        return ccall("w_bigint_sub", recv, args[0])
+      m = lookup_method(primitive_class, name, args.size(), block != nil, args)
       # For names the interpreter implements as builtins, a TRAIT DEFAULT
       # must not preempt the builtin: the builtins mirror the compiled
       # engine's native IC rows and proven host semantics (Enumerable's
@@ -3146,12 +3156,17 @@ use target
   # Keep this lookup narrow: dispatch_bare_call retains its existing global and
   # builtin ordering, and does not recurse through dispatch_method (which would
   # consult builtins and the runtime IC again).
-  -> implicit_self_method(recv, name, argc = nil, has_block = false)
+  # `args` (when the call site has evaluated them) flows to lookup_method
+  # so same-arity typed overloads select by value on this path too — the
+  # bare-sibling route previously took the last-registered def and
+  # silently skipped the (BigInt)/(Number) selection the explicit-receiver
+  # path performs.
+  -> implicit_self_method(recv, name, argc = nil, has_block = false, args = nil)
     if recv == nil
       return nil
     if type(recv) == "Hash" && recv.has_key?(:rt)
       if recv[:rt] == :object
-        return lookup_method(recv[:w_class], name, argc, has_block)
+        return lookup_method(recv[:w_class], name, argc, has_block, args)
       # Inside a class method (`-> .parse`) self is the class sentinel, and a
       # bare call there names a sibling CLASS method — `parse_value_b(s, ...)`
       # in core/json.w is the canonical case. The compiled engine resolves it;

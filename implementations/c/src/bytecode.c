@@ -26,8 +26,17 @@ void tc_chunk_free(TcChunk *chunk) {
     free(chunk->functions[i].name);
     free(chunk->functions[i].param_slots);
     free(chunk->functions[i].touched_slots);
+    for (uint32_t j = 0; j < chunk->functions[i].param_type_count; j++) {
+      free(chunk->functions[i].param_type_names[j]);
+    }
+    free(chunk->functions[i].param_type_names);
   }
   free(chunk->functions);
+  for (size_t i = 0; i < chunk->class_super_count; i++) {
+    free(chunk->class_supers[i].name);
+    free(chunk->class_supers[i].super);
+  }
+  free(chunk->class_supers);
   free(chunk->fn_for_const);
   free(chunk->ctor_fn_for_const);
   free(chunk->ctor_is_slab);
@@ -83,6 +92,224 @@ int tc_chunk_is_slab_class(const TcChunk *chunk, const char *name, size_t name_l
     if (chunk->slab_class_names[i] == interned) return 1;
   }
   return 0;
+}
+
+// ── Typed-overload support ───────────────────────────────────────────────
+// Mirrors the self-hosted compiler's typed operator-overload dispatch
+// (compiler/lib/lowering/definitions.w, synthesize_overload_dispatchers):
+// same-name / same-arity methods that differ only in a declared param
+// type are selected at call time by matching the argument values against
+// the declared types, most specific first, falling back to the historic
+// first-name-match when no typed candidate matches.
+
+static const TcClassSuper *find_class_super(const TcChunk *chunk, const char *name, size_t name_len) {
+  for (size_t i = 0; i < chunk->class_super_count; i++) {
+    if (chunk->class_supers[i].name_len == name_len &&
+        memcmp(chunk->class_supers[i].name, name, name_len) == 0) {
+      return &chunk->class_supers[i];
+    }
+  }
+  return NULL;
+}
+
+int tc_chunk_register_class_super(TcChunk *chunk, const char *name, size_t name_len,
+                                  const char *super, size_t super_len, TcError *err) {
+  char *super_copy = NULL;
+  if (super && super_len > 0) {
+    super_copy = (char *)malloc(super_len + 1);
+    if (!super_copy) {
+      tc_error_set(err, "class superclass allocation failed");
+      return 0;
+    }
+    memcpy(super_copy, super, super_len);
+    super_copy[super_len] = '\0';
+  }
+  // Re-registration (a class compiled again) updates in place.
+  for (size_t i = 0; i < chunk->class_super_count; i++) {
+    if (chunk->class_supers[i].name_len == name_len &&
+        memcmp(chunk->class_supers[i].name, name, name_len) == 0) {
+      free(chunk->class_supers[i].super);
+      chunk->class_supers[i].super = super_copy;
+      chunk->class_supers[i].super_len = super_copy ? super_len : 0;
+      chunk->bigint_scope_state = 0;
+      return 1;
+    }
+  }
+  if (chunk->class_super_count == chunk->class_super_cap) {
+    size_t cap = chunk->class_super_cap ? chunk->class_super_cap * 2 : 32;
+    TcClassSuper *next = (TcClassSuper *)realloc(chunk->class_supers, cap * sizeof(*next));
+    if (!next) {
+      free(super_copy);
+      tc_error_set(err, "class superclass table allocation failed");
+      return 0;
+    }
+    chunk->class_supers = next;
+    chunk->class_super_cap = cap;
+  }
+  char *name_copy = (char *)malloc(name_len + 1);
+  if (!name_copy) {
+    free(super_copy);
+    tc_error_set(err, "class name allocation failed");
+    return 0;
+  }
+  memcpy(name_copy, name, name_len);
+  name_copy[name_len] = '\0';
+  chunk->class_supers[chunk->class_super_count++] = (TcClassSuper){
+      .name = name_copy,
+      .name_len = name_len,
+      .super = super_copy,
+      .super_len = super_copy ? super_len : 0,
+  };
+  chunk->bigint_scope_state = 0;  // invalidate the lazy BigInt-scope cache
+  return 1;
+}
+
+static int type_name_is(const char *name, size_t len, const char *lit) {
+  size_t lit_len = strlen(lit);
+  return len == lit_len && memcmp(name, lit, lit_len) == 0;
+}
+
+// Walk `start`'s class chain (the class itself, then declared
+// superclasses) looking for `target`. A chain link with no table entry is
+// unresolvable: per the self-hosted rule (definitions.w
+// overload_type_is_ancestor?), it matches only when the target is
+// "Number", the universal numeric base. Depth-capped like the
+// self-hosted guard.
+static int class_chain_matches(const TcChunk *chunk, const char *start, size_t start_len,
+                               const char *target, size_t target_len) {
+  const char *cur = start;
+  size_t cur_len = start_len;
+  for (int guard = 0; guard < 64; guard++) {
+    if (cur_len == target_len && memcmp(cur, target, target_len) == 0) return 1;
+    const TcClassSuper *entry = find_class_super(chunk, cur, cur_len);
+    if (!entry) return type_name_is(target, target_len, "Number");
+    if (!entry->super) return 0;
+    cur = entry->super;
+    cur_len = entry->super_len;
+  }
+  return 0;
+}
+
+// Does any compiled class live in a BigInt hierarchy (named BigInt or
+// with a superclass chain reaching it)? Cached on the chunk; the cast
+// mirrors tc_chunk_find_function's const-away pattern.
+static int chunk_has_bigint_class(const TcChunk *chunk) {
+  TcChunk *m = (TcChunk *)chunk;
+  if (m->bigint_scope_state == 0) {
+    m->bigint_scope_state = 1;
+    for (size_t i = 0; i < m->class_super_count; i++) {
+      if (class_chain_matches(chunk, m->class_supers[i].name, m->class_supers[i].name_len,
+                              "BigInt", 6)) {
+        m->bigint_scope_state = 2;
+        break;
+      }
+    }
+  }
+  return m->bigint_scope_state == 2;
+}
+
+// Mirror of vm.c's value_is_int: inline i48 ints and TC_TAG_HEAP_INT
+// heap spillover boxes both count.
+static int overload_value_is_int(TcValue v) {
+  if (w_is_int(v)) return 1;
+  return (v & W_TAG_MASK) == 0 && (v & 0xFU) == TC_TAG_HEAP_INT;
+}
+
+// Does runtime value `v` satisfy declared param type `t`? Exact-tag
+// mirror of the self-hosted `is_a?` overload gates for the builtin
+// kinds; TC_VAL_OBJECT walks the compiled superclass table.
+static int typed_value_matches(const TcChunk *chunk, TcValue v, const char *t, size_t tlen) {
+  // "BigInt" outside any compiled BigInt class hierarchy is the exact-tag
+  // rule: an integer that does not fit the inline i48 payload. With a
+  // compiled BigInt hierarchy present, ancestry semantics below apply.
+  if (type_name_is(t, tlen, "BigInt") && !chunk_has_bigint_class(chunk)) {
+    return overload_value_is_int(v) && !w_is_int(v);
+  }
+  switch (tc_kind(v)) {
+    case TC_VAL_INT:
+      if (type_name_is(t, tlen, "Int") || type_name_is(t, tlen, "Integer") ||
+          type_name_is(t, tlen, "Real") || type_name_is(t, tlen, "Number")) {
+        return 1;
+      }
+      return !w_is_int(v) && type_name_is(t, tlen, "BigInt");
+    case TC_VAL_STRING: return type_name_is(t, tlen, "String");
+    case TC_VAL_SYMBOL: return type_name_is(t, tlen, "Symbol");
+    case TC_VAL_ARRAY:  return type_name_is(t, tlen, "Array");
+    case TC_VAL_HASH:   return type_name_is(t, tlen, "Hash");
+    case TC_VAL_OBJECT: {
+      TcRuntimeObject *object = tc_as_object(v);
+      if (!object || !object->class_name) return 0;
+      return class_chain_matches(chunk, object->class_name, object->class_name_len, t, tlen);
+    }
+    case TC_VAL_WVALUE:
+      // tc_kind routes bools and doubles here; everything pointer-tagged
+      // was already peeled off above, so w_is_double is alias-safe.
+      if (v == W_TRUE || v == W_FALSE) return type_name_is(t, tlen, "Boolean");
+      if (w_is_double(v)) {
+        return type_name_is(t, tlen, "Float") || type_name_is(t, tlen, "Real") ||
+               type_name_is(t, tlen, "Number");
+      }
+      return 0;
+    default: return 0;
+  }
+}
+
+// subtype(a, b): a == b, or b is the universal "Number" base, or a's
+// compiled superclass chain reaches b, or one of the hardcoded numeric
+// tower edges (so ordering works without core classes compiled):
+// BigInt < Int/Integer/Real/Number; Int/Integer/Float/Decimal <
+// Real/Number.
+static int type_is_subtype(const TcChunk *chunk, const char *a, size_t alen,
+                           const char *b, size_t blen) {
+  if (alen == blen && memcmp(a, b, alen) == 0) return 1;
+  if (type_name_is(b, blen, "Number")) return 1;
+  const TcClassSuper *entry = find_class_super(chunk, a, alen);
+  if (entry && class_chain_matches(chunk, a, alen, b, blen)) return 1;
+  if (type_name_is(a, alen, "BigInt")) {
+    return type_name_is(b, blen, "Int") || type_name_is(b, blen, "Integer") ||
+           type_name_is(b, blen, "Real");
+  }
+  if (type_name_is(a, alen, "Int") || type_name_is(a, alen, "Integer") ||
+      type_name_is(a, alen, "Float") || type_name_is(a, alen, "Decimal")) {
+    return type_name_is(b, blen, "Real");
+  }
+  return 0;
+}
+
+// Candidate A beats B when every declared type of A is a subtype of B's
+// corresponding type.
+static int overload_beats(const TcChunk *chunk, const TcFunction *a, const TcFunction *b) {
+  for (uint32_t i = 0; i < a->param_type_count; i++) {
+    if (!type_is_subtype(chunk, a->param_type_names[i], strlen(a->param_type_names[i]),
+                         b->param_type_names[i], strlen(b->param_type_names[i]))) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+TcFunction *tc_select_overload(const TcChunk *chunk, const TcFunction *resolved,
+                               const TcValue *args, uint32_t argc) {
+  TcFunction *best = NULL;
+  for (size_t i = 0; i < chunk->function_count; i++) {
+    TcFunction *f = &((TcChunk *)chunk)->functions[i];
+    if (f->name_len != resolved->name_len ||
+        memcmp(f->name, resolved->name, resolved->name_len) != 0) {
+      continue;
+    }
+    if (f->arity != argc || f->param_type_count != argc || !f->param_type_names) continue;
+    int matches = 1;
+    for (uint32_t a = 0; a < argc && matches; a++) {
+      matches = typed_value_matches(chunk, args[a], f->param_type_names[a],
+                                    strlen(f->param_type_names[a]));
+    }
+    if (!matches) continue;
+    // Most-specific wins; first-declared wins ties (strict replacement).
+    if (!best || (overload_beats(chunk, f, best) && !overload_beats(chunk, best, f))) best = f;
+  }
+  if (best) return best;
+  // No typed candidate: exactly today's behavior — first name match.
+  return tc_chunk_find_function(chunk, resolved->name, resolved->name_len);
 }
 
 int tc_chunk_alloc_case_table(TcChunk *chunk, uint32_t count, TcError *err) {
@@ -285,8 +512,52 @@ int tc_chunk_local(TcChunk *chunk, const char *name, size_t len, TcError *err) {
   return (int)chunk->local_count++;
 }
 
+// Split a raw param-types annotation ("(BigInt)", "(i64 i64)",
+// "(Vector, Number)") into owned NUL-terminated name copies. Parens,
+// whitespace, and commas separate; everything else is type-name bytes.
+static int split_param_types(const char *raw, size_t raw_len, char ***names_out,
+                             uint32_t *count_out, TcError *err) {
+  char **names = NULL;
+  uint32_t count = 0;
+  uint32_t cap = 0;
+  size_t i = 0;
+  while (i < raw_len) {
+    char c = raw[i];
+    if (c == '(' || c == ')' || c == ',' || c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+      i++;
+      continue;
+    }
+    size_t start = i;
+    while (i < raw_len && raw[i] != '(' && raw[i] != ')' && raw[i] != ',' &&
+           raw[i] != ' ' && raw[i] != '\t' && raw[i] != '\n' && raw[i] != '\r') {
+      i++;
+    }
+    if (count == cap) {
+      uint32_t next_cap = cap ? cap * 2 : 4;
+      char **next = (char **)realloc(names, next_cap * sizeof(*next));
+      if (!next) goto fail;
+      names = next;
+      cap = next_cap;
+    }
+    char *copy = (char *)malloc(i - start + 1);
+    if (!copy) goto fail;
+    memcpy(copy, raw + start, i - start);
+    copy[i - start] = '\0';
+    names[count++] = copy;
+  }
+  *names_out = names;
+  *count_out = count;
+  return 1;
+fail:
+  for (uint32_t j = 0; j < count; j++) free(names[j]);
+  free(names);
+  tc_error_set(err, "param type list allocation failed");
+  return 0;
+}
+
 int tc_chunk_add_function(TcChunk *chunk, const char *name, size_t name_len, uint32_t entry,
-                          const uint32_t *param_slots, uint32_t arity, TcError *err) {
+                          const uint32_t *param_slots, uint32_t arity,
+                          const char *param_types, size_t param_types_len, TcError *err) {
   if (chunk->function_count == chunk->function_cap) {
     size_t cap = chunk->function_cap ? chunk->function_cap * 2 : 16;
     TcFunction *functions = (TcFunction *)realloc(chunk->functions, cap * sizeof(TcFunction));
@@ -317,6 +588,15 @@ int tc_chunk_add_function(TcChunk *chunk, const char *name, size_t name_len, uin
     memcpy(slots, param_slots, (size_t)arity * sizeof(uint32_t));
   }
 
+  char **type_names = NULL;
+  uint32_t type_count = 0;
+  if (param_types && param_types_len > 0 &&
+      !split_param_types(param_types, param_types_len, &type_names, &type_count, err)) {
+    free(name_copy);
+    free(slots);
+    return 0;
+  }
+
   chunk->functions[chunk->function_count++] = (TcFunction){
       .name = name_copy,
       .name_len = name_len,
@@ -326,7 +606,26 @@ int tc_chunk_add_function(TcChunk *chunk, const char *name, size_t name_len, uin
       .touched_slots = NULL,
       .touched_slot_count = 0,
       .touched_slots_analyzed = 0,
+      .param_type_names = type_names,
+      .param_type_count = type_count,
+      .overloaded = 0,
   };
+
+  // Overload-group detection: a redefinition of an existing full name
+  // marks both entries so dispatch knows to run typed selection. Any
+  // earlier duplicates were already flagged when the second was added,
+  // so flagging the first match plus the new entry keeps the whole
+  // group marked. Linear scan is compile-time-only and bounded by the
+  // ~1,400-function bootstrap table.
+  TcFunction *added = &chunk->functions[chunk->function_count - 1];
+  for (size_t i = 0; i + 1 < chunk->function_count; i++) {
+    if (chunk->functions[i].name_len == name_len &&
+        memcmp(chunk->functions[i].name, name, name_len) == 0) {
+      chunk->functions[i].overloaded = 1;
+      added->overloaded = 1;
+      break;
+    }
+  }
   return 1;
 }
 

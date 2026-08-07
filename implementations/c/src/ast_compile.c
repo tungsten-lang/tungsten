@@ -1647,9 +1647,21 @@ static int compile_function_def(TcAstValue node, const char *prefix, size_t pref
   memcpy(full_name + prefix_len, name->as.string.bytes, name->as.string.len);
   full_name[full_name_len] = '\0';
 
+  // Typed-overload annotation (`-> +(other)(BigInt)` / `-> +/1(BigInt)`):
+  // the parser stores the raw paren group; tc_chunk_add_function splits
+  // it into per-param type names for dispatch-time selection.
+  TcAstValue *ptypes = ast_get(node, "param_types");
+  const char *ptype_bytes = NULL;
+  size_t ptype_len = 0;
+  if (ptypes && ptypes->kind == TC_AST_STRING) {
+    ptype_bytes = ptypes->as.string.bytes;
+    ptype_len = ptypes->as.string.len;
+  }
+
   uint32_t entry = (uint32_t)chunk->count;
   if (!tc_chunk_add_function(chunk, full_name, full_name_len, entry,
-                             param_slots, (uint32_t)arity, err)) {
+                             param_slots, (uint32_t)arity,
+                             ptype_bytes, ptype_len, err)) {
     free(full_name);
     free(param_slots);
     return 0;
@@ -1745,6 +1757,21 @@ static int compile_class_definitions(TcAstValue node, TcChunk *chunk, TcError *e
     if (!tc_chunk_register_slab_class(chunk, name->as.string.bytes, name->as.string.len, err)) {
       return 0;
     }
+  }
+
+  // Record class → superclass so typed-overload dispatch can walk
+  // ancestry chains (the parser already resolved the superclass onto the
+  // class_def node; it was previously dropped here).
+  TcAstValue *superclass = ast_get(node, "superclass");
+  const char *super_bytes = NULL;
+  size_t super_len = 0;
+  if (superclass && superclass->kind == TC_AST_STRING) {
+    super_bytes = superclass->as.string.bytes;
+    super_len = superclass->as.string.len;
+  }
+  if (!tc_chunk_register_class_super(chunk, name->as.string.bytes, name->as.string.len,
+                                     super_bytes, super_len, err)) {
+    return 0;
   }
 
   size_t prefix_len = name->as.string.len + 1;

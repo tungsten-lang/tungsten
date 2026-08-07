@@ -2779,6 +2779,32 @@ static int method_name_token_ast(TcAstParser *p) {
          kind == TC_K_PUTS_OP || kind == TC_K_CLASS_DEF;
 }
 
+/* Lookahead: does the paren group at p->pos hold only type-name tokens
+ * (builtin lowercase TC_K_TYPE or capitalized TC_K_NAME class names,
+ * each with an optional `[]` suffix) up to the closing paren? Mirrors
+ * compiler/lib/parser.w's looks_like_param_types? so `-> +/1(BigInt)`
+ * and `-> combine(other)(BigInt)` read the group as a param-type
+ * annotation while `(a + b)` / `(Foo.bar)` trailing expressions fall
+ * through untouched. Empty parens are not a type list. */
+static int paren_is_type_list_ast(const TcAstParser *p) {
+  if (p->pos >= p->tokens->count || p->tokens->items[p->pos].kind != TC_K_LPAREN) return 0;
+  size_t pos = p->pos + 1;
+  size_t limit = pos + 256;  /* safety cap, same spirit as the self-hosted walk */
+  int saw_type = 0;
+  while (pos < p->tokens->count && pos < limit) {
+    TcKind kind = p->tokens->items[pos].kind;
+    if (kind == TC_K_RPAREN) return saw_type;
+    if (kind != TC_K_TYPE && kind != TC_K_NAME) return 0;
+    saw_type = 1;
+    pos++;
+    if (pos + 1 < p->tokens->count && p->tokens->items[pos].kind == TC_K_LBRACKET &&
+        p->tokens->items[pos + 1].kind == TC_K_RBRACKET) {
+      pos += 2;
+    }
+  }
+  return 0;
+}
+
 static int looks_like_return_type_ast(TcAstParser *p) {
   if (!at_ast(p, TC_K_TYPE)) return 0;
   size_t pos = p->pos + 1;
@@ -2850,13 +2876,19 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
   split_method_arity(name, &name_len, &arity, &arity_len);
 
   TcAstValue params;
-  if (!parse_param_list_ast(p, &params, err)) {
-    free(name);
-    return 0;
-  }
-
   TcAstValue param_types = tc_ast_nil();
-  if (at_ast(p, TC_K_LPAREN) && p->pos + 1 < p->tokens->count && p->tokens->items[p->pos + 1].kind == TC_K_TYPE) {
+  if (arity && paren_is_type_list_ast(p)) {
+    /* Arity-suffix form (`-> +/1(BigInt)`): a paren group holding only
+     * type names annotates the positional @N args — it must NOT be
+     * swallowed as the param list. Mirrors compiler/lib/parser.w's
+     * phase-3 handling: params stay empty (compile_function_def
+     * synthesizes the __argN slots from the arity) and the group is
+     * captured as param_types. */
+    params = tc_ast_array_new(err);
+    if (params.kind != TC_AST_ARRAY) {
+      free(name);
+      return 0;
+    }
     size_t type_start = p->pos;
     advance_ast(p);
     while (!at_ast(p, TC_K_RPAREN) && !at_ast(p, TC_K_EOF)) advance_ast(p);
@@ -2867,6 +2899,31 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
       return 0;
     }
     param_types = raw_string(p, type_start, p->pos, err);
+  } else if (!parse_param_list_ast(p, &params, err)) {
+    free(name);
+    return 0;
+  }
+
+  if (param_types.kind == TC_AST_NIL && at_ast(p, TC_K_LPAREN) && p->pos + 1 < p->tokens->count) {
+    /* Param-type annotation after the param list. Lowercase machine
+     * types (`(i64 i64)`) keep the historical first-token gate;
+     * capitalized class names (`(BigInt)`, TC_K_NAME) additionally need
+     * the full type-list walk so a trailing parenthesized expression is
+     * never mis-captured. */
+    TcKind first_kind = p->tokens->items[p->pos + 1].kind;
+    if (first_kind == TC_K_TYPE ||
+        (first_kind == TC_K_NAME && paren_is_type_list_ast(p))) {
+      size_t type_start = p->pos;
+      advance_ast(p);
+      while (!at_ast(p, TC_K_RPAREN) && !at_ast(p, TC_K_EOF)) advance_ast(p);
+      if (!match_ast(p, TC_K_RPAREN)) {
+        parse_ast_error(p, err, "expected ')' after param types");
+        free(name);
+        tc_ast_free(params);
+        return 0;
+      }
+      param_types = raw_string(p, type_start, p->pos, err);
+    }
   }
 
   TcAstValue return_type = tc_ast_nil();

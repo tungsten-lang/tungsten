@@ -622,6 +622,71 @@ RSpec.describe Tungsten::Interpreter do
     expect(run(code)).to eq(7)
   end
 
+  # Typed overloads: `-> name(arg) (Type)` sibling definitions select by
+  # the argument's runtime type, mirroring the self-hosted interpreter's
+  # select_typed_overload (see spec/compiler/overload_exact_tag_parity_spec.w).
+
+  it "dispatches typed overloads by argument runtime type" do
+    code = <<~W
+      + TagBox
+        -> combine(other) (BigInt)
+          "bigint-arm"
+        -> combine(other) (Number)
+          "number-arm"
+      b = TagBox.new
+      b.combine(5) + " " + b.combine(2.5) + " " + b.combine(10 ** 30) + " " + b.combine(1 << 50)
+    W
+    expect(run(code)).to eq("number-arm number-arm bigint-arm bigint-arm")
+  end
+
+  it "dispatches typed overloads declared in arity form" do
+    code = <<~W
+      + TagBox
+        -> combine/1(BigInt)
+          "bigint-arm"
+        -> combine/1(Number)
+          "number-arm"
+      b = TagBox.new
+      b.combine(5) + " " + b.combine(10 ** 30)
+    W
+    expect(run(code)).to eq("number-arm bigint-arm")
+  end
+
+  it "selects typed overloads through a subclass receiver" do
+    code = <<~W
+      + TagBox
+        -> combine(other) (BigInt)
+          "bigint-arm"
+        -> combine(other) (Number)
+          "number-arm"
+      + TagBoxKid < TagBox
+        -> kid?
+          true
+      k = TagBoxKid.new
+      k.combine(7) + " " + k.combine(10 ** 30)
+    W
+    expect(run(code)).to eq("number-arm bigint-arm")
+  end
+
+  it "matches typed overloads by user-class ancestry" do
+    code = <<~W
+      + VecLike
+        -> v?
+          true
+      + Vec3 < VecLike
+        -> v3?
+          true
+      + TagSort
+        -> pick(x) (VecLike)
+          "vec-arm"
+        -> pick(x) (Number)
+          "num-arm"
+      s = TagSort.new
+      s.pick(Vec3.new) + " " + s.pick(VecLike.new) + " " + s.pick(3) + " " + s.pick(10 ** 30)
+    W
+    expect(run(code)).to eq("vec-arm vec-arm num-arm num-arm")
+  end
+
   it "evaluates lazy ro defaults" do
     code = <<~W
       + Commands

@@ -691,6 +691,9 @@
           // dominant user-fn dispatch shape, e.g. `lower_var(ctx, node)`).
           TcFunction *fn = chunk->fn_for_const ? chunk->fn_for_const[name_id] : NULL;
           if (fn) {
+            // Typed-overload selection: only paid when the name is
+            // actually defined more than once (see tc_select_overload).
+            if (fn->overloaded) fn = tc_select_overload(chunk, fn, args, argc);
             if (!vm_call_function(&vm, fn, args, argc, tc_box_nil(), 0,
                                   tc_box_nil(), 0, err)) {
               FREE_ARGS();
@@ -720,6 +723,10 @@
                 chunk->method_ic_fn[name_id] = fn;
               }
             }
+            // The IC caches the name resolution (first match); typed
+            // selection must re-run per call because it depends on the
+            // argument values, not just the receiver class.
+            if (fn && fn->overloaded) fn = tc_select_overload(chunk, fn, args, argc);
             if (fn) {
               if (!vm_call_function(&vm, fn, args, argc, self, 1,
                                     tc_box_nil(), 0, err)) {
@@ -1458,6 +1465,9 @@
           full_name[full_len] = '\0';
           TcFunction *fn = tc_chunk_find_function(chunk, full_name, full_len);
           free(full_name);
+          // Same-name typed overloads: pick the most specific candidate
+          // whose declared param types match the argument values.
+          if (fn && fn->overloaded) fn = tc_select_overload(chunk, fn, args, argc);
           if (fn) {
             if (!vm_call_function(&vm, fn, args, argc, receiver, 1,
                                   tc_box_nil(), 0, err)) {

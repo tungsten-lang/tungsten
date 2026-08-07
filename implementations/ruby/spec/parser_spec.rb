@@ -248,6 +248,35 @@ module Tungsten::AST
       expect(defn.body.first).to eq("x".var)
     end
 
+    it "parses class-name param types directly after the arg list" do
+      result = described_class.parse("-> combine(other)(BigInt)\n  other")
+      defn = result.list[0]
+      expect(defn.param_types).to eq([ :BigInt ])
+      expect(defn.args[0].name).to eq("other")
+      expect(defn.body.first).to eq("other".var)
+    end
+
+    it "parses class-name param types on arity methods" do
+      result = described_class.parse("-> combine/1(BigInt)\n  @1")
+      defn = result.list[0]
+      expect(defn.param_types).to eq([ :BigInt ])
+      expect(defn.args.size).to eq(1)
+    end
+
+    it "parses builtin param types with a return annotation and inline body" do
+      result = described_class.parse("-> combine(a) (i64 f64) i64: a")
+      defn = result.list[0]
+      expect(defn.param_types).to eq([ :i64, :f64 ])
+      expect(defn.return_type).to eq(:i64)
+      expect(defn.body.first).to eq("a".var)
+    end
+
+    it "still rejects non-type parenthesized parameters on arity methods" do
+      expect {
+        described_class.parse("-> combine/1(a, b)\n  a")
+      }.to raise_error(Tungsten::Error, /arity methods cannot have parenthesized parameters/)
+    end
+
     it "raises error for old -> self.method syntax" do
       expect {
         described_class.parse("-> self.foo")

@@ -341,6 +341,7 @@ compiled_specs=(
   spec/compiler/typed_helper_array_signature_spec.w
   spec/compiler/typed_overload_spec.w
   spec/compiler/overload_exact_tag_parity_spec.w
+  spec/compiler/typed_overload_hosts_spec.w
   spec/numeric/bigint_seam_disjoint_spec.w
   spec/compiler/uuid_byte_revisit_autoload_spec.w
   spec/compiler/autoload_walker_fields_spec.w
@@ -467,6 +468,11 @@ interpreter_specs=(
   # tag-table rule; pin the interpreted side so a compiled-only change
   # cannot drift the copy.
   spec/compiler/overload_exact_tag_parity_spec.w
+  # Host-parity pin: the implicit-self (bare sibling call) route must run
+  # typed-overload selection like the explicit-receiver route — it
+  # silently took the last-registered arm before args were threaded
+  # through implicit_self_method.
+  spec/compiler/typed_overload_hosts_spec.w
   # B6 one-way disjointness of the bigint source-op seam: a pair the
   # source bodies bail on must never be re-admitted by bigint_src_shape
   # (w_add → src → w_add recursion presents as a segfault). Exercises

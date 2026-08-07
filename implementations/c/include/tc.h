@@ -616,7 +616,28 @@ typedef struct {
   // Distinguishes a successfully analyzed function that touches no slots
   // from an analysis/allocation failure, which must use the full-save path.
   uint8_t touched_slots_analyzed;
+  // Typed-overload support. Declared parameter type names from a
+  // `-> name(a)(BigInt)` / `-> name/1(BigInt)` annotation, split out of
+  // the raw source string (parens/whitespace/commas stripped). NULL / 0
+  // when the definition carries no annotation. Each entry is a
+  // NUL-terminated owned copy.
+  char **param_type_names;
+  uint32_t param_type_count;
+  // Set when another function with the same full name exists in the
+  // chunk (an overload group). Dispatch only pays for typed selection
+  // when this is set — see tc_select_overload.
+  uint8_t overloaded;
 } TcFunction;
+
+// class_name → superclass name pair recorded from a class_def AST.
+// Drives typed-overload ancestry matching (tc_select_overload). `super`
+// is NULL when the class declared no superclass.
+typedef struct {
+  char *name;
+  size_t name_len;
+  char *super;
+  size_t super_len;
+} TcClassSuper;
 
 typedef struct {
   char *name;
@@ -708,6 +729,18 @@ typedef struct {
   // first AstNode dispatch.
   TcFunction **astnode_fn_cache;
   uint8_t *astnode_fn_state;
+  // Compiled class → declared superclass table. Populated by
+  // compile_class_definitions; consumed by typed-overload dispatch to
+  // walk ancestry chains (see tc_select_overload).
+  TcClassSuper *class_supers;
+  size_t class_super_count;
+  size_t class_super_cap;
+  // Lazily computed: does any compiled class sit in a "BigInt" hierarchy
+  // (is named BigInt or has a superclass chain reaching it)? 0 = unknown,
+  // 1 = no, 2 = yes. When no such class exists, a declared "BigInt" param
+  // type matches by exact tag (heap int, i.e. an integer that does not
+  // fit i48) instead of by ancestry. Invalidated on class registration.
+  uint8_t bigint_scope_state;
   // Class names registered with class_role == "slab". The .new dispatch
   // on these classes skips the auto-allocated TcRuntimeObject and
   // instead calls the body as a static fn, returning whatever the body
@@ -785,7 +818,17 @@ int  tc_chunk_is_slab_class(const TcChunk *chunk, const char *name, size_t name_
 int tc_chunk_add_const(TcChunk *chunk, TcValue value, TcError *err);
 int tc_chunk_local(TcChunk *chunk, const char *name, size_t len, TcError *err);
 int tc_chunk_add_function(TcChunk *chunk, const char *name, size_t name_len, uint32_t entry,
-                          const uint32_t *param_slots, uint32_t arity, TcError *err);
+                          const uint32_t *param_slots, uint32_t arity,
+                          const char *param_types, size_t param_types_len, TcError *err);
+int tc_chunk_register_class_super(TcChunk *chunk, const char *name, size_t name_len,
+                                  const char *super, size_t super_len, TcError *err);
+// Typed-overload selection. `resolved` is the first-name-match function a
+// dispatch site found for an overloaded name; returns the most specific
+// same-name candidate whose declared param types match `args`, or the
+// first name match (today's behavior) when no typed candidate matches.
+// Never returns NULL for a non-NULL `resolved`.
+TcFunction *tc_select_overload(const TcChunk *chunk, const TcFunction *resolved,
+                               const TcValue *args, uint32_t argc);
 TcFunction *tc_chunk_find_function(const TcChunk *chunk, const char *name, size_t name_len);
 TcFunction *tc_chunk_find_method(const TcChunk *chunk,
                                  const char *class_name, size_t class_len,

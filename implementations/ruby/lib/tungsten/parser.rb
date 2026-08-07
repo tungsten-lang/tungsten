@@ -2033,6 +2033,7 @@ module Tungsten
 
       trailing_expr = nil
       inline_body = false
+      param_types = nil
 
       case @token.type
 
@@ -2052,26 +2053,40 @@ module Tungsten
       # -> name(args)
       when :"("
         if arity
-          error "arity methods cannot have parenthesized parameters"
-        end
-
-        # don't skip nl, looks ugly to start arguments on next line
-        next_token_skip_space
-        parse_method_args
-        consume :")"
-
-        if base_name.to_s.end_with?("=")
-          if base_name != "[]=" && (@method[:args].size > 1 || @method[:splat] || @method[:double_splat])
-            error "setter method '#{base_name}' has arity > 1"
-          elsif @method[:block]
-            error "setter method '#{base_name}' has a block"
+          # `-> name/1(BigInt)` — an arity method followed directly by a
+          # paren group that reads as a type list captures it as the
+          # param-type annotation (sync with parser.w's arity-method
+          # param-type capture). Any other paren group keeps the error.
+          unless looks_like_param_types_ahead?
+            error "arity methods cannot have parenthesized parameters"
           end
-        end
 
-        # Check for trailing expression after ): -> name(args) expr
-        if @token.type?(:SP)
-          next_token
-          inline_body = true
+          param_types = parse_param_type_list
+
+          # Check for trailing expression after ): -> name/1(T) expr
+          if @token.type?(:SP)
+            next_token
+            inline_body = true
+          end
+        else
+          # don't skip nl, looks ugly to start arguments on next line
+          next_token_skip_space
+          parse_method_args
+          consume :")"
+
+          if base_name.to_s.end_with?("=")
+            if base_name != "[]=" && (@method[:args].size > 1 || @method[:splat] || @method[:double_splat])
+              error "setter method '#{base_name}' has arity > 1"
+            elsif @method[:block]
+              error "setter method '#{base_name}' has a block"
+            end
+          end
+
+          # Check for trailing expression after ): -> name(args) expr
+          if @token.type?(:SP)
+            next_token
+            inline_body = true
+          end
         end
       else
         unexpected
@@ -2081,25 +2096,16 @@ module Tungsten
       # return type after the param list. Sync with compiler-side
       # parser.w's looks_like_param_types? / looks_like_return_type?.
       # See CLAUDE.md dual-parser-sync rule.
-      param_types = nil
       return_type = nil
-      if inline_body || @token.type?(:SP)
+      if inline_body || @token.type?(:SP) || (@token.type?(:"(") && looks_like_param_types_ahead?)
         # Bring us to the first non-space token after the arg list.
         skip_space if @token.type?(:SP)
 
-        # Param types: `(TYPE TYPE ...)` where contents are only :TYPE
-        # tokens and spaces, terminated by `)`.
-        if @token.type?(:"(") && looks_like_param_types_ahead?
-          next_token_skip_space
-          param_types = []
-          while !@token.type?(:")")
-            unless @token.type?(:TYPE)
-              error "expected type name in param type list, got #{@token.type}"
-            end
-            param_types << @token.value.to_sym
-            next_token_skip_space
-          end
-          consume :")"
+        # Param types: `(TYPE TYPE ...)` where contents are type tokens or
+        # class names and spaces, terminated by `)`. The arity form above
+        # may already have captured them.
+        if param_types.nil? && @token.type?(:"(") && looks_like_param_types_ahead?
+          param_types = parse_param_type_list
           skip_space
         end
 
@@ -2248,17 +2254,41 @@ module Tungsten
       node
     end
 
+    # A param-type-list element is a builtin type name (`i64`) or a class
+    # name (`BigInt`, `Number`, `VECTOR`), matching the compiler parser's
+    # is_param_type_token? (T_TYPE | T_NAME | T_CONSTANT).
+    PARAM_TYPE_NAME_PATTERN = "(?:#{Tungsten::Lexer::TYPE_NAME_PATTERN})\\b|[A-Z]\\w*".freeze
+    PARAM_TYPE_LIST_AHEAD =
+      /\A\s*(?:#{PARAM_TYPE_NAME_PATTERN})(?:\s+(?:#{PARAM_TYPE_NAME_PATTERN}))*\s*\)/
+
     # Phase 3 lookahead: when @token is at `:"("` and the paren group
-    # contains only space-separated type names (no identifiers, commas,
-    # or operators), it's a param-type annotation. Sync with the
-    # compiler's parser.w looks_like_param_types? helper.
+    # contains only space-separated type or class names (no lowercase
+    # identifiers, commas, or operators), it's a param-type annotation.
+    # Sync with the compiler's parser.w looks_like_param_types? helper.
     def looks_like_param_types_ahead?
       saved_pos = pos
       # The scanner has already consumed the `(` token's text, so pos
       # is at the content inside the paren group.
-      result = !!scan(/\A\s*(?:#{Tungsten::Lexer::TYPE_NAME_PATTERN})(?:\s+(?:#{Tungsten::Lexer::TYPE_NAME_PATTERN}))*\s*\)/)
+      result = !!scan(PARAM_TYPE_LIST_AHEAD)
       self.pos = saved_pos
       result
+    end
+
+    # Parse a `(type type ...)` annotation with @token at the opening
+    # paren, leaving @token just past `)`. Callers gate entry with
+    # looks_like_param_types_ahead?.
+    def parse_param_type_list
+      next_token_skip_space
+      types = []
+      until @token.type?(:")")
+        unless @token.type?(:TYPE) || @token.type?(:NAME) || @token.type?(:CONSTANT)
+          error "expected type name in param type list, got #{@token.type}"
+        end
+        types << @token.value.to_sym
+        next_token_skip_space
+      end
+      consume :")"
+      types
     end
 
     # Phase 3 lookahead: when @token is at `:TYPE`, is the token a

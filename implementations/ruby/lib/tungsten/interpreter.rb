@@ -424,6 +424,7 @@ module Tungsten
         seen[klass] = {
           superclass: klass.superclass,
           methods: klass.methods.dup,
+          method_overloads: klass.method_overloads.transform_values(&:dup),
           traits: klass.traits.dup,
           version: klass.version,
           class_vars: klass.class_vars.dup
@@ -438,6 +439,7 @@ module Tungsten
       snapshot.each do |klass, state|
         klass.superclass = state[:superclass]
         klass.methods = state[:methods]
+        klass.method_overloads = state[:method_overloads]
         klass.traits = state[:traits]
         klass.version = state[:version]
         klass.class_vars = state[:class_vars]
@@ -596,6 +598,183 @@ module Tungsten
       method = owner.lookup_method(name)
       cache_w_method(node, owner, method) if method
       method
+    end
+
+    # ---- Typed overloads ------------------------------------------------
+    #
+    # `-> combine(other) (BigInt)` / `-> combine(other) (Number)` sibling
+    # definitions select by the ARGUMENT's runtime type at dispatch,
+    # mirroring the self-hosted interpreter's select_typed_overload /
+    # overload_matches_args? / exact_tag_overload_name? chain
+    # (compiler/lib/interpreter.w; parity guard:
+    # spec/compiler/overload_exact_tag_parity_spec.w). Names without typed
+    # overloads never enter this path — the WClass.typed_overload_names
+    # gate is a single hash probe — so untyped dispatch (including its
+    # per-node inline caches and simple-method plans, which memoize one
+    # callee per name and would otherwise serve a stale pick) is unchanged.
+
+    I48_MIN = -(2**47)
+    I48_MAX = (2**47) - 1
+
+    # Numeric-tower ancestry hardcoded so specificity ordering works even
+    # when the core class files are not loaded (mirrors interpreter.w's
+    # class_name_subtype? Number fallback philosophy).
+    TYPED_OVERLOAD_TOWER = {
+      "BigInt" => %w[Int Integer Real Number].freeze,
+      "Int" => %w[Real Number].freeze,
+      "Integer" => %w[Real Number].freeze,
+      "Float" => %w[Real Number].freeze,
+      "Decimal" => %w[Real Number].freeze
+    }.freeze
+
+    def typed_overload_group(owner, name)
+      return nil unless owner && Runtime::WClass.typed_overload_names.key?(name)
+
+      owner.typed_overloads_for(name)
+    end
+
+    def dispatch_typed_overload(recv, owner, overloads, node, block)
+      args = evaluate_args(node.args)
+      method = select_typed_overload(overloads, args.size, args)
+
+      unless method
+        # No typed match — the last-definition pick, exactly as untyped
+        # dispatch would resolve it.
+        method = owner.lookup_method(node.name)
+        unless method
+          runtime_error("undefined method '#{node.name}' for #{recv}", node: node, length: node.name.to_s.length)
+        end
+
+        # Preserve implicit construction from the receiver's class (see
+        # the untyped WObject dispatch path in visit_call).
+        if recv.is_a?(Runtime::WObject) && args.size > 1 &&
+           (method.params || EMPTY_ARGS).size == 1 && method.splat_index.nil?
+          constructor = owner.lookup_method("new")
+          if constructor && (constructor.params || EMPTY_ARGS).size == args.size
+            return call_w_method(recv, method, [ instantiate(owner, args) ], block, call_node: node)
+          end
+        end
+      end
+
+      call_w_method(recv, method, args, block, call_node: node)
+    end
+
+    # Among same-arity typed overloads whose declared parameter types all
+    # match the evaluated arguments' runtime types, the most specific wins.
+    def select_typed_overload(overloads, argc, args)
+      best = nil
+      overloads.each do |m|
+        pts = m.param_types
+        next unless pts
+        next unless m.splat_index.nil? && (m.params || EMPTY_ARGS).size == argc
+        next unless typed_overload_args_match?(pts, args)
+
+        best = m if best.nil? || param_types_more_specific?(pts, best.param_types)
+      end
+      best
+    end
+
+    def typed_overload_args_match?(pts, args)
+      pts.each_with_index do |pt, j|
+        return false if j >= args.size
+        return false unless typed_overload_arg_matches?(args[j], pt.to_s)
+      end
+      true
+    end
+
+    def typed_overload_arg_matches?(value, type_name)
+      # Exact-tag rule, mirroring interpreter.w's exact_tag_overload_name?:
+      # "BigInt" matches by magnitude alone (outside the i48 inline range)
+      # — unless some interpreted class DESCENDS from BigInt, in which
+      # case ancestry routes subclass instances to the arm written for
+      # them and plain integers keep the same magnitude test below.
+      if type_name == "BigInt" && bigint_exact_tag_overload?
+        return value.is_a?(::Integer) && (value < I48_MIN || value > I48_MAX)
+      end
+
+      typed_overload_value_matches?(value, type_name)
+    end
+
+    def bigint_exact_tag_overload?
+      @classes.each_value do |klass|
+        next unless klass.is_a?(Runtime::WClass)
+
+        sup = klass.superclass
+        guard = 0
+        while sup && guard < 64
+          return false if sup.name == "BigInt"
+
+          sup = sup.superclass
+          guard += 1
+        end
+      end
+      true
+    end
+
+    def typed_overload_value_matches?(value, type_name)
+      case value
+      when Runtime::WObject
+        klass = value.w_class
+        while klass
+          return true if klass.name == type_name
+
+          klass = klass.superclass
+        end
+        # Load-order-tolerant fallback mirroring class_name_subtype?: an
+        # instance whose class the table cannot resolve still matches the
+        # universal numeric-tower base.
+        type_name == "Number" && !@classes.key?(value.w_class.name)
+      when ::Integer
+        case type_name
+        when "Int", "Integer", "Real", "Number" then true
+        when "BigInt" then value < I48_MIN || value > I48_MAX
+        else false
+        end
+      when ::Float
+        type_name == "Float" || type_name == "Real" || type_name == "Number"
+      when ::BigDecimal
+        type_name == "Decimal" || type_name == "Real" || type_name == "Number"
+      when ::String then type_name == "String"
+      when ::Symbol then type_name == "Symbol"
+      when ::Array then type_name == "Array"
+      when ::Hash then type_name == "Hash"
+      when true, false then type_name == "Boolean"
+      else
+        false
+      end
+    end
+
+    # `a` is at least as specific as `b` when each declared type is the
+    # same as, or a subclass of, `b`'s — so `(VecLike)` beats `(Number)`
+    # for a Vec3 argument while `(Number)` stays the base fallback.
+    def param_types_more_specific?(a, b)
+      return true if b.nil?
+
+      a.each_with_index do |pt, j|
+        return true if j >= b.size
+        return false unless class_name_subtype?(pt.to_s, b[j].to_s)
+      end
+      true
+    end
+
+    # Is the class named `a_name` the same as, or a descendant of,
+    # `b_name`? Walks the class table's superclass chain; Number is the
+    # universal numeric-tower base (load-order tolerant).
+    def class_name_subtype?(a_name, b_name)
+      return true if a_name == b_name
+
+      klass = @classes[a_name]
+      guard = 0
+      while klass.is_a?(Runtime::WClass) && guard < 64
+        return true if klass.name == b_name
+
+        klass = klass.superclass
+        guard += 1
+      end
+      return true if b_name == "Number"
+
+      supers = TYPED_OVERLOAD_TOWER[a_name]
+      !supers.nil? && supers.include?(b_name)
     end
 
     def build_call_stack
@@ -1315,7 +1494,8 @@ module Tungsten
           case expr
           when Tungsten::AST::Def
             body = register_trailing_accessors(expr, w_class)
-            w_method = Runtime::WMethod.new(expr.name, expr.args, body, w_class, splat_index: expr.splat_index)
+            w_method = Runtime::WMethod.new(expr.name, expr.args, body, w_class,
+                                            splat_index: expr.splat_index, param_types: expr.param_types)
             w_class.define_method(expr.name.to_s, w_method)
           when Tungsten::AST::Is
             trait = @modules[expr.trait_name]
@@ -1508,6 +1688,10 @@ module Tungsten
 
         if recv.is_a?(Runtime::WObject)
           owner = recv.w_class
+          if (overloads = typed_overload_group(owner, node.name))
+            return dispatch_typed_overload(recv, owner, overloads, node, block)
+          end
+
           method = resolve_w_method(node, owner, node.name)
           if method
             # Implicit construction from the receiver's class: a one-param
@@ -1611,6 +1795,10 @@ module Tungsten
           end
         else
           if (w_class = primitive_runtime_class(recv))
+            if (overloads = typed_overload_group(w_class, node.name))
+              return dispatch_typed_overload(recv, w_class, overloads, node, block)
+            end
+
             method = resolve_w_method(node, w_class, node.name)
             if method
               begin
@@ -1671,6 +1859,12 @@ module Tungsten
         if local_miss_cached
           self_obj = @self_stack.last
           if self_obj.is_a?(Runtime::WClass)
+            if (overloads = typed_overload_group(self_obj, name))
+              block = node.block
+              block.closure_env = @env if block
+              return dispatch_typed_overload(self_obj, self_obj, overloads, node, block)
+            end
+
             method = resolve_w_method(node, self_obj, name)
             if method
               block = node.block
@@ -1679,6 +1873,12 @@ module Tungsten
             end
           elsif self_obj.is_a?(Runtime::WObject)
             owner = self_obj.w_class
+            if (overloads = typed_overload_group(owner, name))
+              block = node.block
+              block.closure_env = @env if block
+              return dispatch_typed_overload(self_obj, owner, overloads, node, block)
+            end
+
             method = resolve_w_method(node, owner, name)
             if method
               block = node.block
@@ -1710,6 +1910,13 @@ module Tungsten
         # Implicit self dispatch: bare method call inside a class or instance method
         self_obj = @self_stack.last
         if self_obj.is_a?(Runtime::WClass)
+          if (overloads = typed_overload_group(self_obj, name))
+            profile_visit_call("#{self_obj.name}##{name}") if @profile_enabled
+            block = node.block
+            block.closure_env = @env if block
+            return dispatch_typed_overload(self_obj, self_obj, overloads, node, block)
+          end
+
           method = resolve_w_method(node, self_obj, name)
           if method
             profile_visit_call("#{self_obj.name}##{name}") if @profile_enabled
@@ -1722,6 +1929,13 @@ module Tungsten
           end
         elsif self_obj.is_a?(Runtime::WObject)
           owner = self_obj.w_class
+          if (overloads = typed_overload_group(owner, name))
+            profile_visit_call("#{owner.name}##{name}") if @profile_enabled
+            block = node.block
+            block.closure_env = @env if block
+            return dispatch_typed_overload(self_obj, owner, overloads, node, block)
+          end
+
           method = resolve_w_method(node, owner, name)
           if method
             profile_visit_call("#{owner.name}##{name}") if @profile_enabled
@@ -3288,6 +3502,9 @@ module Tungsten
 
           recv = slots[bound_receiver]
           return nil unless recv.is_a?(Runtime::WObject)
+          # Typed overloads select per-call by argument type — a plan
+          # memoizing one callee for the name would bypass selection.
+          return nil if typed_overload_group(recv.w_class, step[2])
 
           method = recv.w_class.lookup_method(step[2])
           return nil unless method

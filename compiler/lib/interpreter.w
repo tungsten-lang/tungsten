@@ -1984,7 +1984,11 @@ use target
       pu = interp_pipe_unit_target(node, env)
       if pu != nil
         left = evaluate(ast_get(node, :left), env)
-        if w_type_name(left) == "Quantity"
+        # Quantities convert; bare numbers attach; arrays (`%d[…] | m/s`)
+        # map elementwise — all inside w_quantity_pipe, mirroring the
+        # compiled path which routes every unit-target pipe through it.
+        tn = w_type_name(left)
+        if tn == "Quantity" || tn == "Array" || tn == "Decimal" || tn == "Integer"
           return ccall("w_quantity_pipe", left, "" + pu[:name], pu[:digits])
     if node_op == :LSHIFT && ast_get(node, :left) != nil && ast_kind(ast_get(node, :left)) == :var
       left = evaluate(ast_get(node, :left), env)

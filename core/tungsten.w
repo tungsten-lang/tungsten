@@ -183,6 +183,9 @@
   auto :Float256,     "numeric/float256"
 
   auto :Rational,     "numeric/rational"
+  auto :FlatTorusOrbit, "geometry/flat_torus"
+  auto :FlatTorusOrbitExtremum, "geometry/flat_torus"
+  auto :FlatTorusOrbitStraightening, "geometry/flat_torus"
   auto :Real,         "numeric/real"
 
   # Exact algebra. All public entry points load through the orchestrator so

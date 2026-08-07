@@ -13,6 +13,7 @@ use core/calculus
 use core/solve
 use core/geometry/support
 use core/geometry/measure
+use core/geometry/flat_torus
 use core/geometry/chart
 use core/geometry/tensor_field
 use core/geometry/metric

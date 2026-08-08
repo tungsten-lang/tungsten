@@ -485,6 +485,58 @@ WValue w_f32_to_bf16_array(WValue src_wv, WValue dst_wv, WValue len_wv) {
     return w_int(1);
 }
 
+// --- f32 → f16 array conversion -----------------------------------------
+// IEEE-half twin of w_f32_to_bf16_array (Tungsten ebits=-16). The compiled
+// engine converts natively via fptrunc; this helper keeps interpreter-side
+// and driver code able to populate f16 buffers the same way as bf16.
+static inline uint16_t mlx_f32_to_f16(float f) {
+#if defined(__aarch64__)
+    __fp16 h = (__fp16)f;
+    uint16_t out;
+    memcpy(&out, &h, sizeof(out));
+    return out;
+#else
+    union { float f; uint32_t u; } v = { f };
+    uint32_t u = v.u;
+    uint32_t sign = (u >> 16) & 0x8000u;
+    uint32_t fexp = (u >> 23) & 0xFFu;
+    uint32_t man = u & 0x7FFFFFu;
+    if (fexp == 0xFFu) return (uint16_t)(sign | 0x7C00u | (man ? (0x200u | (man >> 13)) : 0));
+    int32_t exp = (int32_t)fexp - 112;
+    if (exp >= 0x1F) return (uint16_t)(sign | 0x7C00u);
+    if (exp <= 0) {
+        if (exp < -10) return (uint16_t)sign;
+        man |= 0x800000u;
+        uint32_t shift = (uint32_t)(14 - exp);
+        uint32_t out = man >> shift;
+        uint32_t rem = man & ((1u << shift) - 1u);
+        uint32_t halfway = 1u << (shift - 1);
+        if (rem > halfway || (rem == halfway && (out & 1u))) out++;
+        return (uint16_t)(sign | out);
+    }
+    uint32_t out = ((uint32_t)exp << 10) | (man >> 13);
+    uint32_t rem = man & 0x1FFFu;
+    if (rem > 0x1000u || (rem == 0x1000u && (out & 1u))) out++;
+    return (uint16_t)(sign | out);
+#endif
+}
+
+WValue w_f32_to_f16_array(WValue src_wv, WValue dst_wv, WValue len_wv) {
+    WArray *src_arr = (WArray *)w_as_ptr(src_wv);
+    WArray *dst_arr = (WArray *)w_as_ptr(dst_wv);
+    int64_t len = w_as_int(len_wv);
+
+    if (dst_arr->size < len) dst_arr->size = len;
+
+    const float *src = (const float *)src_arr->slots + src_arr->start;
+    uint16_t *dst = (uint16_t *)dst_arr->slots + dst_arr->start;
+
+    for (int64_t i = 0; i < len; i++) {
+        dst[i] = mlx_f32_to_f16(src[i]);
+    }
+    return w_int(1);
+}
+
 // --- bfloat16 MLX matmul ------------------------------------------------
 // Inputs are bf16 (2 bytes/elem, Tungsten ebits=-116).
 WValue w_mlx_bgemm_nn(

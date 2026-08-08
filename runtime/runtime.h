@@ -297,7 +297,7 @@ void   w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
  *   unsigned int: 1,4,8,16,32,64 (=u1/bool,u4,u8,u16,u32,u64)
  *   signed int:   -4,108,116,33,66 (=i4,i8,i16,i32,i64 — see array_storage_bits
  *                 for why i32/i64 use 33/66 rather than the +100 band)
- *   float:        -32,-64,-116,-108,-109,-104 (f32,f64,bf16,fp8 e4m3/e5m2,fp4)
+ *   float:        -32,-64,-16,-116,-108,-109,-104 (f32,f64,f16,bf16,fp8 e4m3/e5m2,fp4)
  * `slots` is declared `WValue *` (the dominant polymorphic access pattern).
  * Typed-tier code that does byte/halfword/word arithmetic casts to
  * `(uint8_t *)slots` explicitly — see array_read/array_write etc. */
@@ -1667,6 +1667,25 @@ WValue w_crypto_sha512_224_bytes(WValue data);
 WValue w_crypto_sha512_224_hex(WValue data);
 WValue w_crypto_sha512_256_bytes(WValue data);
 WValue w_crypto_sha512_256_hex(WValue data);
+WValue w_crypto_sha3_bytes(WValue data, WValue bits);
+WValue w_crypto_sha3_hex(WValue data, WValue bits);
+WValue w_crypto_shake_bytes(WValue data, WValue bits, WValue outlen);
+WValue w_crypto_shake_hex(WValue data, WValue bits, WValue outlen);
+WValue w_crypto_crc32(WValue data);
+WValue w_crypto_crc32c(WValue data);
+WValue w_crypto_aes_gcm_seal(WValue key, WValue nonce, WValue plaintext, WValue aad);
+WValue w_crypto_aes_gcm_open(WValue key, WValue nonce, WValue sealed, WValue aad);
+
+/* Hardware SHA-256 (also consumed by bits/tungsten-crypto miner). */
+int w_sha256_hw_available(void);
+void w_sha256_hw_compress(uint32_t *state, const uint8_t *data, size_t nblocks);
+int64_t w_sha256_hw_mine(const uint32_t *midstate, const uint8_t *tail, const uint32_t *target_be,
+                         uint32_t start, int64_t count, uint32_t *out_hash, uint32_t *out_best,
+                         uint32_t *out_best_hash);
+void w_sha256_sw_compress(uint32_t *state, const uint8_t *data, size_t nblocks);
+int64_t w_sha256_sw_mine(const uint32_t *midstate, const uint8_t *tail, const uint32_t *target_be,
+                         uint32_t start, int64_t count, uint32_t *out_hash, uint32_t *out_best,
+                         uint32_t *out_best_hash);
 
 /* ---- Outbound TCP connect (Phase 8b) ---- */
 WValue w_socket_tcp_connect(const char *host, int port);

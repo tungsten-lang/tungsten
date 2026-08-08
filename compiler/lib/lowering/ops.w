@@ -2339,6 +2339,17 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_instruction(wfn, {op: :add_i64, temp: rounded, lhs: bits64, rhs: bias})
     emit_instruction(wfn, {op: :lshr_i64, temp: bf16, lhs: rounded, rhs: "16"})
     return bf16
+  if elem_type == :typed_array_f16
+    # f32 → half is a real rounding conversion (fcvt), unlike bf16's
+    # truncate-with-RNE bit trick; round-trip the bits through LLVM half.
+    raw32 = ensure_raw_f32(wfn, tv)
+    half = next_temp(wfn)
+    bits16 = next_temp(wfn)
+    bits64 = next_temp(wfn)
+    emit_instruction(wfn, {op: :fptrunc_f32_f16, temp: half, value: raw32})
+    emit_instruction(wfn, {op: :bitcast_f16_i16, temp: bits16, value: half})
+    emit_instruction(wfn, {op: :zext_i16_i64, temp: bits64, value: bits16})
+    return bits64
   raw64 = ensure_raw_f64(wfn, tv)
   bits = next_temp(wfn)
   emit_instruction(wfn, {op: :bitcast_f64_i64, temp: bits, value: raw64})
@@ -2358,6 +2369,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_instruction(wfn, {op: :shl_i64, temp: shifted, lhs: bits, rhs: "16"})
     emit_instruction(wfn, {op: :trunc_i64_i32, temp: bits32, value: shifted})
     emit_instruction(wfn, {op: :bitcast_i32_f32, temp: raw32, value: bits32})
+    return typed_value(:raw_f32, raw32)
+  if elem_type == :typed_array_f16
+    bits16 = next_temp(wfn)
+    half = next_temp(wfn)
+    raw32 = next_temp(wfn)
+    emit_instruction(wfn, {op: :trunc_i64_i16, temp: bits16, value: bits})
+    emit_instruction(wfn, {op: :bitcast_i16_f16, temp: half, value: bits16})
+    emit_instruction(wfn, {op: :fpext_f16_f32, temp: raw32, value: half})
     return typed_value(:raw_f32, raw32)
   raw64 = next_temp(wfn)
   emit_instruction(wfn, {op: :bitcast_i64_f64, temp: raw64, value: bits})
@@ -3122,3 +3141,97 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   start_block(wfn, done_label)
   typed_value(:i64, out_reg)
+
+# One registry for Math intrinsics that have both a native implementation and,
+# in some cases, a source-level fallback in core/math.w. Static source dispatch
+# must not shadow a matching intrinsic: the same lookup drives precedence and
+# the boxed runtime call, so adding a fallback cannot silently change codegen.
+# Lives here (not method_call.w) so lower_call — earlier in the worker chain —
+# can consult it for `use math/globals` alias calls.
+-> math_intrinsic_runtime_name(name, arity)
+  if arity == 1
+    if name == "exp"
+      return "w_math_exp"
+    if name == "log"
+      return "w_math_log"
+    if name == "expm1"
+      return "w_math_expm1"
+    if name == "log1p"
+      return "w_math_log1p"
+    if name == "sin"
+      return "w_math_sin"
+    if name == "cos"
+      return "w_math_cos"
+    if name == "tan"
+      return "w_math_tan"
+    if name == "asin"
+      return "w_math_asin"
+    if name == "acos"
+      return "w_math_acos"
+    if name == "atan"
+      return "w_math_atan"
+    if name == "cbrt"
+      return "w_math_cbrt"
+    if name == "sqrt"
+      return "w_math_sqrt"
+    if name == "floor"
+      return "w_math_floor"
+    if name == "ceil"
+      return "w_math_ceil"
+    if name == "round"
+      return "w_math_round"
+    if name == "abs"
+      return "w_math_abs"
+  if arity == 2
+    if name == "pow"
+      return "w_math_pow"
+    if name == "ldexp"
+      return "w_math_ldexp"
+    if name == "atan2"
+      return "w_math_atan2"
+    if name == "hypot"
+      return "w_math_hypot"
+  nil
+
+# Shared Math-intrinsic call lowering, used by the `Math.<name>` receiver
+# branch (method_call.w) and by bare calls to registered `use math/globals`
+# aliases (calls.w). Raw operands go straight to libm (call_libm_f64),
+# skipping the box -> w_math_* -> unbox -> re-box round-trip; boxed WValues
+# keep the runtime path, which resolves Int/Float dynamically. Returns nil
+# for shapes the intrinsic path doesn't cover (caller falls back).
+-> lower_math_intrinsic_call(ctx, method_name, math_runtime, args)
+  wfn = ctx[:func]
+  if args.size() == 1
+    arg_val = lower_expression(ctx, args[0])
+    if arg_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64)
+      libm_name = method_name
+      if method_name == "abs"
+        libm_name = "fabs"
+      arg_raw = ensure_raw_f64(wfn, arg_val)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: libm_name, value: arg_raw})
+      return typed_value(:raw_f64, temp)
+    arg_reg = ensure_i64_value(wfn, arg_val)
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_runtime, args: [arg_reg]})
+    return typed_value(:i64, temp)
+  if args.size() == 2
+    a_val = lower_expression(ctx, args[0])
+    b_val = lower_expression(ctx, args[1])
+    # Raw fast path for the pure-libm pair (ldexp's second arg is an
+    # int, so it stays on the runtime path). Both operands must already
+    # be raw — a boxed WValue needs w_math_to_double's dynamic Int/Float
+    # handling.
+    if method_name in ("pow" "atan2" "hypot")
+      if a_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64) && b_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64)
+        a_raw = ensure_raw_f64(wfn, a_val)
+        b_raw = ensure_raw_f64(wfn, b_val)
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: method_name, lhs: a_raw, rhs: b_raw})
+        return typed_value(:raw_f64, temp)
+    a_reg = ensure_i64_value(wfn, a_val)
+    b_reg = ensure_i64_value(wfn, b_val)
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_runtime, args: [a_reg, b_reg]})
+    return typed_value(:i64, temp)
+  nil

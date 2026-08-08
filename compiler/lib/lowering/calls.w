@@ -1226,6 +1226,17 @@
       return typed_value(:raw_u64, temp)
     return typed_value(:raw_i64, temp)
 
+  # `use math/globals` alias: a bare call to a registered exact-delegation
+  # alias lowers as the Math intrinsic itself — raw f64 operands hit
+  # call_libm_f64 instead of boxing through the wrapper fn. Semantics are
+  # identical to calling the wrapper (its body is the same Math call).
+  if receiver == nil && node.block == nil && args != nil && ctx[:mod][:math_alias_fns] != nil && ctx[:mod][:math_alias_fns][name] == true
+    math_runtime = math_intrinsic_runtime_name(name, args.size())
+    if math_runtime != nil
+      math_lowered = lower_math_intrinsic_call(ctx, name, math_runtime, args)
+      if math_lowered != nil
+        return math_lowered
+
   # Known function → direct call
   arg_regs = []
   i = 0

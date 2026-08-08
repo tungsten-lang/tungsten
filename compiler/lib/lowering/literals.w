@@ -585,6 +585,8 @@
     bits = 66
   elsif etype == "f32"
     bits = -32
+  elsif etype == "f16"
+    bits = -16
   elsif etype == "bf16"
     bits = -116
   elsif etype == "w64"
@@ -631,12 +633,12 @@
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_zeros", args: [bits.to_s(), size_raw]})
     return typed_value(:i64, temp)
 
-  # The lexer types more names than the runtime has storage for (f16, fp8,
+  # The lexer types more names than the runtime has storage for (fp8,
   # fp4, i128, …). The old fallback silently emitted an EMPTY untyped array
   # here — dropping both the size and the element type, and later writes
   # produced slots even w_value_compare couldn't order. Error until the
   # format is actually implemented.
-  raise compile_error_for_node(:E_LOWER_TYPED_ARRAY_UNSUPPORTED, "typed array element type '" + etype + "' is not supported yet (supported: u1/i1/u4/i4/u8/i8/u16/i16/u32/i32/u64/i64/f32/f64/bf16/w64/bool)", ctx[:source_path], node)
+  raise compile_error_for_node(:E_LOWER_TYPED_ARRAY_UNSUPPORTED, "typed array element type '" + etype + "' is not supported yet (supported: u1/i1/u4/i4/u8/i8/u16/i16/u32/i32/u64/i64/f16/f32/f64/bf16/w64/bool)", ctx[:source_path], node)
 
 -> lookup_currency_id(prefix, suffix)
   # Map currency symbol to symbol_id matching runtime.c currency_symbols table

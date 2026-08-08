@@ -2784,6 +2784,7 @@ RSpec.describe "Compiler regressions" do
       -> id_i64(x)  (i64)  i64  : x
       -> id_u64(x)  (u64)  u64  : x
       -> id_bf16(x) (bf16) bf16 : x
+      -> id_f16(x)  (f16)  f16  : x
       -> id_f32(x)  (f32)  f32  : x
       -> id_f64(x)  (f64)  f64  : x
 
@@ -2799,6 +2800,7 @@ RSpec.describe "Compiler regressions" do
       a64 = i64[1];   a64[0] = -9876543210;     << id_i64(a64[0]).to_s
       au64 = u64[1];  au64[0] = 18000000000;    << id_u64(au64[0]).to_s
       abf = bf16[1];  abf[0] = ~1.5;            << id_bf16(abf[0]).to_s
+      ah = f16[1];    ah[0] = ~-3.25;           << id_f16(ah[0]).to_s
       af32 = f32[1];  af32[0] = ~2.5;           << id_f32(af32[0]).to_s
       af64 = f64[1];  af64[0] = ~3.5;           << id_f64(af64[0]).to_s
     W
@@ -2816,6 +2818,7 @@ RSpec.describe "Compiler regressions" do
       -9876543210
       18000000000
       1.5
+      -3.25
       2.5
       3.5
     OUT
@@ -2871,6 +2874,7 @@ RSpec.describe "Compiler regressions" do
       -> tag(x) (i64) i64 : 10
       -> tag(x) (u64) i64 : 11
       -> tag(x) (bf16) i64 : 12
+      -> tag(x) (f16) i64 : 15
       -> tag(x) (f32) i64 : 13
       -> tag(x) (f64) i64 : 14
 
@@ -2910,6 +2914,9 @@ RSpec.describe "Compiler regressions" do
       abf = bf16[1]; abf.push(~1.5)
       abf.each -> (v)
         rbf = tag(v)
+      ah = f16[1]; ah.push(~-3.25)
+      ah.each -> (v)
+        rh = tag(v)
       af32 = f32[1]; af32.push(~2.5)
       af32.each -> (v)
         rf32 = tag(v)
@@ -2921,7 +2928,7 @@ RSpec.describe "Compiler regressions" do
     expect(llvm).not_to include("declare i64 @__w_tag(i64) nounwind")
     expect(llvm).not_to match(/call i64 @__w_tag\(/)
 
-    %w[bool i4 u4 i8 u8 i16 u16 i32 u32 i64 u64 bf16 f32 f64].each do |type|
+    %w[bool i4 u4 i8 u8 i16 u16 i32 u32 i64 u64 bf16 f16 f32 f64].each do |type|
       expect(llvm).to include("call i64 @#{symbol_for("__w_tag__#{type}")}(")
     end
   end

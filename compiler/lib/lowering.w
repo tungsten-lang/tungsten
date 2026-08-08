@@ -948,7 +948,7 @@ use lowering/definitions
       return small_array_etype_to_sym(etype)
     if etype in ("u4" "i4")
       return typed_array_etype_to_sym(etype)
-    if etype in ("u8" "i8" "u16" "i16" "u32" "i32" "u64" "i64" "f64" "f32" "bf16" "w64")
+    if etype in ("u8" "i8" "u16" "i16" "u32" "i32" "u64" "i64" "f64" "f32" "f16" "bf16" "w64")
       return typed_array_etype_to_sym(etype)
     return :array
   when :array
@@ -1079,6 +1079,8 @@ use lowering/definitions
           return :small_array_f64
         if ebits == -116
           return :small_array_bf16
+        if ebits == -16
+          return :small_array_f16
         if ebits == 65
           return :small_array
     if node.name == "lchs"
@@ -1121,16 +1123,16 @@ use lowering/definitions
     if is_array_type?(recv_t) && node.name == "size"
       return :i64
     if is_typed_array_type?(recv_t) && node.name in ("min" "max" "sum")
-      if recv_t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16)
+      if recv_t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16 :typed_array_f16)
         return :float
       return :int
     if is_typed_array_type?(recv_t) && node.name in ("fastsum" "sumsq" "dot")
-      if recv_t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16)
+      if recv_t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16 :typed_array_f16)
         return :float
       if recv_t in (:typed_array_i8 :typed_array_u8) && node.name == "dot"
         return :int
     if is_typed_array_type?(recv_t) && node.name in ("cross" "scale" "scale!")
-      if recv_t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16)
+      if recv_t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16 :typed_array_f16)
         return recv_t
     if is_typed_array_type?(recv_t) && node.name in ("matvec_i8" "matmul_i8")
       if recv_t in (:typed_array_i8 :typed_array_u8)
@@ -1651,6 +1653,15 @@ use lowering/definitions
         mod[:block_method_names][expr.name] = true
       mod[:known_calls][call_key] = fn_name
       mod[:known_fn_param_counts][call_key] = param_count
+      # `use math/globals`: an untyped top-level fn that exactly delegates
+      # to the same-named Math intrinsic registers as an alias, so call
+      # sites can lower as the intrinsic itself — raw f64 operands reach
+      # libm directly instead of boxing through the wrapper fn.
+      if expr.param_types == nil && math_intrinsic_runtime_name(expr.name, expr.params.size()) != nil
+        if math_global_alias_def?(expr)
+          if mod[:math_alias_fns] == nil
+            mod[:math_alias_fns] = {}
+          mod[:math_alias_fns][expr.name] = true
       if expr.param_types != nil
         arity_key = typed_overload_arity_key(expr.name, expr.params.size())
         overload_count = mod[:known_typed_overload_counts][arity_key]
@@ -3495,3 +3506,40 @@ use lowering/definitions
     out = out + "\n"
     i += 1
   out
+
+# `use math/globals` alias detection: true when a top-level fn def is an
+# exact delegation to the same-named Math intrinsic — a single-expression
+# body `Math.<name>(params...)` passing the params through in order. The
+# prepass registers matches in mod[:math_alias_fns]; lower_call consults
+# that to lower alias calls as the intrinsic itself.
+-> math_global_alias_def?(expr)
+  body = expr.body
+  if body == nil || body.size() != 1
+    return false
+  b = body[0]
+  if !is_ast_node?(b) || ast_kind(b) != :call
+    return false
+  if b.block != nil
+    return false
+  if b.name != expr.name
+    return false
+  recv = b.receiver
+  if recv == nil || !is_ast_node?(recv) || ast_kind(recv) != :class_ref
+    return false
+  if recv.name != "Math"
+    return false
+  params = expr.params
+  bargs = b.args
+  if bargs == nil || params == nil
+    return false
+  if bargs.size() != params.size()
+    return false
+  i = 0
+  while i < bargs.size()
+    a = bargs[i]
+    if !is_ast_node?(a) || ast_kind(a) != :var
+      return false
+    if a.name != param_runtime_name(params[i])
+      return false
+    i += 1
+  true

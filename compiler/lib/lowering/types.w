@@ -230,6 +230,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_mlx_hgemm_nn"] = true
   m["w_mlx_bgemm_nn"] = true
   m["w_f32_to_bf16_array"] = true
+  m["w_f32_to_f16_array"] = true
   m["w_mlxb_load_safetensors"] = true
   m["w_mlxb_quantized_matmul_nvfp4"] = true
   m["w_mlxb_tensor_count"] = true
@@ -298,6 +299,10 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_crypto_sha512_bytes"] = true
   m["w_crypto_sha512_224_bytes"] = true
   m["w_crypto_sha512_256_bytes"] = true
+  m["w_crypto_sha3_bytes"] = true
+  m["w_crypto_shake_bytes"] = true
+  m["w_crypto_aes_gcm_seal"] = true
+  m["w_crypto_aes_gcm_open"] = true
   m["w_uuid_bytes"] = true
   m["w_uuid_v1"] = true
   m["w_uuid_v2"] = true
@@ -771,7 +776,7 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   t == :char
 
 -> is_typed_array_type?(t)
-  t in (:typed_array :typed_array_bool :typed_array_u4 :typed_array_i4 :typed_array_u8 :typed_array_i8 :typed_array_u16 :typed_array_i16 :typed_array_u32 :typed_array_i32 :typed_array_u64 :typed_array_i64 :typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f8_e4m3 :typed_array_f8_e5m2 :typed_array_f4_e2m1 :typed_array_w64)
+  t in (:typed_array :typed_array_bool :typed_array_u4 :typed_array_i4 :typed_array_u8 :typed_array_i8 :typed_array_u16 :typed_array_i16 :typed_array_u32 :typed_array_i32 :typed_array_u64 :typed_array_i64 :typed_array_f32 :typed_array_f64 :typed_array_f16 :typed_array_bf16 :typed_array_f8_e4m3 :typed_array_f8_e5m2 :typed_array_f4_e2m1 :typed_array_w64)
 
 # Render a type symbol back in source spelling, for diagnostics. Accepts both
 # the normalized internal form (`:typed_array_i32`) and the raw declared
@@ -804,10 +809,10 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 # w64 bf16 f8_e4m3 f8_e5m2 f4_e2m1. Phase 5 monomorphization uses
 # (tier, ebits) as the cache key for specialized method instances.
 -> is_big_array_type?(t)
-  t in (:big_array :big_array_u4 :big_array_i4 :big_array_u8 :big_array_i8 :big_array_u16 :big_array_i16 :big_array_u32 :big_array_i32 :big_array_u64 :big_array_i64 :big_array_f32 :big_array_f64 :big_array_w64 :big_array_bf16 :big_array_f8_e4m3 :big_array_f8_e5m2 :big_array_f4_e2m1)
+  t in (:big_array :big_array_u4 :big_array_i4 :big_array_u8 :big_array_i8 :big_array_u16 :big_array_i16 :big_array_u32 :big_array_i32 :big_array_u64 :big_array_i64 :big_array_f32 :big_array_f64 :big_array_w64 :big_array_f16 :big_array_bf16 :big_array_f8_e4m3 :big_array_f8_e5m2 :big_array_f4_e2m1)
 
 -> is_small_array_type?(t)
-  t in (:small_array :small_array_u4 :small_array_i4 :small_array_u8 :small_array_i8 :small_array_u16 :small_array_i16 :small_array_u32 :small_array_i32 :small_array_u64 :small_array_i64 :small_array_f32 :small_array_f64 :small_array_w64 :small_array_bf16 :small_array_f8_e4m3 :small_array_f8_e5m2 :small_array_f4_e2m1)
+  t in (:small_array :small_array_u4 :small_array_i4 :small_array_u8 :small_array_i8 :small_array_u16 :small_array_i16 :small_array_u32 :small_array_i32 :small_array_u64 :small_array_i64 :small_array_f32 :small_array_f64 :small_array_w64 :small_array_f16 :small_array_bf16 :small_array_f8_e4m3 :small_array_f8_e5m2 :small_array_f4_e2m1)
 
 # Tier-agnostic predicate: matches anything in the WTypedArray / WBigArray /
 # WSmallArray family. Phase 4 unification will collapse the Array tier into
@@ -862,6 +867,7 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   when "i64"  then :typed_array_i64
   when "f32"  then :typed_array_f32
   when "f64"  then :typed_array_f64
+  when "f16"  then :typed_array_f16
   when "bf16" then :typed_array_bf16
   when "w64"  then :typed_array_w64
   else nil
@@ -900,6 +906,8 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     return :f64
   if elem_t == :typed_array_bf16
     return :bf16
+  if elem_t == :typed_array_f16
+    return :f16
   if elem_t == :typed_array_f8_e4m3
     return :f8_e4m3
   if elem_t == :typed_array_f8_e5m2
@@ -984,6 +992,10 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   while guard < 64
     cls = mod[:known_classes][cur]
     if cls == nil
+      return false
+    # Builtin runtime classes (Socket, StandardError, …) enter known_classes
+    # as plain placeholder hashes with superclass: nil — no AST accessors.
+    if !is_ast_node?(cls)
       return false
     sup = cls.superclass
     if sup == nil

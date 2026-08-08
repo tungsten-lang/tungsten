@@ -242,7 +242,7 @@ section["rational_harmonic"] = "t"
 -> compile_command(lang, src, out, bench)
   case lang
   when "w"
-    return "\"[tungsten]\" compile --release --native \"[src]\" -o \"[out]\" >/dev/null 2>&1"
+    return "\"[tungsten]\" compile --release --native --fast \"[src]\" -o \"[out]\" >/dev/null 2>&1"
   when "c"
     extra = ""
     if bench == "bigint_fib" || bench == "rational_harmonic"
@@ -757,7 +757,7 @@ if best_interp > 0
 
 << ""
 << "  [GREY]flags  C clang -O3 -march=native -flto · rustc -O target-cpu=native · go build[RESET]"
-<< "  [GREY]       crystal --release · ruby --yjit · python3 · tungsten compile --release --native[RESET]"
+<< "  [GREY]       crystal --release · ruby --yjit · python3 · tungsten compile --release --native --fast[RESET]"
 << "  [GREY]★ fastest   ≠ differs beyond fp tolerance   fp escape/iter counts vary in the last digits[RESET]"
 << ""
 

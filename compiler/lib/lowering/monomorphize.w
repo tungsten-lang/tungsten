@@ -222,6 +222,7 @@
   when "i64" then :small_array_i64
   when "f32" then :small_array_f32
   when "f64" then :small_array_f64
+  when "f16" then :small_array_f16
   when "bf16" then :small_array_bf16
   when "w64" then :small_array_w64
   else nil
@@ -1016,7 +1017,7 @@
     4
   when :typed_array_u8, :typed_array_i8
     8
-  when :typed_array_u16, :typed_array_i16, :typed_array_bf16
+  when :typed_array_u16, :typed_array_i16, :typed_array_bf16, :typed_array_f16
     16
   when :typed_array_u32, :typed_array_i32, :typed_array_f32
     32
@@ -1027,7 +1028,7 @@
   t in (:typed_array_i4 :typed_array_i8 :typed_array_i16 :typed_array_i32 :typed_array_i64 :typed_array :typed_array_f32 :typed_array_f64)
 
 -> typed_array_kernel_suffix(t)
-  if t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16)
+  if t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16 :typed_array_f16)
     return "float"
   if t in (:typed_array_i4 :typed_array_i8 :typed_array_i16 :typed_array_i32 :typed_array_i64)
     return "signed"
@@ -1055,6 +1056,7 @@
   when "f64"     then -64
   when "w64"     then 65    # raw WValue slot
   when "bf16"    then -116  # extended float: 16-bit storage, f32 arithmetic
+  when "f16"     then -16   # IEEE half: 16-bit storage, f32 arithmetic
   when "f8_e4m3" then -108  # all float ebits are negative — bit width = abs(value)
   when "f8_e5m2" then -109
   when "f4_e2m1" then -104
@@ -1135,6 +1137,8 @@
     :typed_array_f64
   when "bf16"
     :typed_array_bf16
+  when "f16"
+    :typed_array_f16
   when "f8_e4m3"
     :typed_array_f8_e4m3
   when "f8_e5m2"
@@ -1777,7 +1781,7 @@
 # the fp8/fp4 variants are deliberately excluded — the stack small-array path
 # doesn't cover them.
 -> small_array_elem_type?(name)
-  name in ("u4" "i4" "u8" "i8" "u16" "i16" "u32" "i32" "u64" "i64" "f32" "f64" "bf16" "w64")
+  name in ("u4" "i4" "u8" "i8" "u16" "i16" "u32" "i32" "u64" "i64" "f32" "f64" "f16" "bf16" "w64")
 
 # Desugar `SmallArray<T, N>.new` → the typed-array literal `T[N]`. SmallArray is a
 # builtin, not a user generic template, so monomorphize_generics leaves the

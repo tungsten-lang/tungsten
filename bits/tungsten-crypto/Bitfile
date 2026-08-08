@@ -3,9 +3,8 @@ tungsten "tungsten-crypto-0.1.0"
 name "tungsten-crypto"
 version "0.1.0"
 
-# ARMv8 SHA-256 crypto-extension accelerator. Compiles everywhere: the NEON
-# path is #if-guarded and falls back to portable scalar C, and the entry
-# points probe at runtime before using the hardware instructions.
-includes ["runtime/sha256_hw.c"]
+# The ARMv8 SHA-256 accelerator (w_sha256_hw_available / _compress / _mine) now
+# lives in the shared runtime (runtime/runtime.c), so every binary gets it and
+# the bit needs no private C include.
 
 bit "tungsten-spec", group: :spec

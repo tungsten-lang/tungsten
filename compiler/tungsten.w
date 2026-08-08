@@ -828,6 +828,8 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
     return "-march=" + normalized + " -mtune=generic"
   if normalized == "native" && detect_target()[:arch] == "x86_64"
     return "-march=native -mtune=native"
+  if normalized == "native"
+    return native_arm_cpu_flags()
   "-mcpu=" + normalized
 
 # CPU/tuning flags for the C compiler. Target resolution sets

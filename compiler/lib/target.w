@@ -31,6 +31,38 @@ host_cc_memo = {}
   host_cc_memo[:cc] = chosen
   chosen
 
+# `-mcpu=native` is only as good as the host clang's CPU detection, which
+# lags new silicon: Xcode clang 21 and Homebrew LLVM 22 both resolve
+# `native` to apple-m4 on an M5. Name the chip explicitly instead: when the
+# brand string says M5 and the host compiler knows `apple-m5`, use that;
+# otherwise approximate as apple-m4 plus the ISA features the M5 adds
+# (each verified against `--print-supported-extensions`). Other chips keep
+# plain `-mcpu=native`.
+native_cpu_memo = {}
+
+-> native_arm_cpu_flags
+  cached = native_cpu_memo[:flags]
+  if cached != nil
+    return cached
+  flags = "-mcpu=native"
+  target = detect_target()
+  if target[:os] == "macos" && target[:arch] == "arm64"
+    brand = capture("sysctl -n machdep.cpu.brand_string 2>/dev/null").strip()
+    if brand.index("M5") != nil
+      if host_cc_supports_mcpu?("apple-m5")
+        flags = "-mcpu=apple-m5"
+      else
+        flags = "-mcpu=apple-m4+sme2p1+sme-f16f16+sme-b16b16+cssc+wfxt+hbc"
+  native_cpu_memo[:flags] = flags
+  flags
+
+# A clean `-fsyntax-only` run prints nothing; an unknown -mcpu value is an
+# error on both clang ("unsupported argument") and gcc ("unknown value").
+-> host_cc_supports_mcpu?(cpu)
+  cc = host_c_compiler()
+  out = capture("\"" + cc + "\" -mcpu=" + cpu + " -fsyntax-only -x c /dev/null 2>&1")
+  out.index("error") == nil
+
 # detect_target is called once per class definition and once per @on
 # guard during lowering — 260+ times per compile of tungsten.w. Each
 # uncached call spawns `uname -s` + `uname -m` subprocesses (~8ms each,
@@ -142,7 +174,7 @@ detect_target_memo = {}
       if host_arch == "x86_64" || host_arch == "amd64"
         march = "-march=native -mtune=native"
       else
-        march = "-mcpu=native"
+        march = native_arm_cpu_flags()
   target_flag = ""
   if cross != nil && cross != ""
     target_flag = " --target=" + cross

@@ -138,7 +138,7 @@
   auto :Value,        "value"
   auto :Vector,       "vector"
 
-  auto :BF16,         "numeric/bf16"
+  auto :BF16,         "numeric/bfloat16"
 
   auto :BigComplex,   "numeric/big_complex"
   auto :BigDecimal,   "numeric/big_decimal"

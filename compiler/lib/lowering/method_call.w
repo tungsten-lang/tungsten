@@ -8,54 +8,9 @@
 #
 # This file deliberately has no `use` directives — see pass_registry.w.
 
-# One registry for Math intrinsics that have both a native implementation and,
-# in some cases, a source-level fallback in core/math.w. Static source dispatch
-# must not shadow a matching intrinsic: the same lookup drives precedence and
-# the boxed runtime call, so adding a fallback cannot silently change codegen.
--> math_intrinsic_runtime_name(name, arity)
-  if arity == 1
-    if name == "exp"
-      return "w_math_exp"
-    if name == "log"
-      return "w_math_log"
-    if name == "expm1"
-      return "w_math_expm1"
-    if name == "log1p"
-      return "w_math_log1p"
-    if name == "sin"
-      return "w_math_sin"
-    if name == "cos"
-      return "w_math_cos"
-    if name == "tan"
-      return "w_math_tan"
-    if name == "asin"
-      return "w_math_asin"
-    if name == "acos"
-      return "w_math_acos"
-    if name == "atan"
-      return "w_math_atan"
-    if name == "cbrt"
-      return "w_math_cbrt"
-    if name == "sqrt"
-      return "w_math_sqrt"
-    if name == "floor"
-      return "w_math_floor"
-    if name == "ceil"
-      return "w_math_ceil"
-    if name == "round"
-      return "w_math_round"
-    if name == "abs"
-      return "w_math_abs"
-  if arity == 2
-    if name == "pow"
-      return "w_math_pow"
-    if name == "ldexp"
-      return "w_math_ldexp"
-    if name == "atan2"
-      return "w_math_atan2"
-    if name == "hypot"
-      return "w_math_hypot"
-  nil
+# math_intrinsic_runtime_name and the shared Math-intrinsic call lowering
+# moved to lowering/ops.w so lower_call (calls.w, earlier in the worker
+# chain) can reach them for `use math/globals` alias calls.
 
 -> lower_method_call(ctx, node)
   wfn = ctx[:func]
@@ -712,47 +667,12 @@
         emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: digest_target, args: [arg_reg]})
         return typed_value(:i64, temp)
 
-    # Math.* libm wrappers — direct runtime calls.
+    # Math.* libm wrappers — shared intrinsic lowering (lowering/ops.w).
     if recv_name == "Math"
-      args = node.args
-      if math_intrinsic_runtime != nil && args.size() == 1
-        arg_val = lower_expression(ctx, args[0])
-        # Raw fast path: operand is already an unboxed machine number — call
-        # libm directly on the double (call_libm_f64) and stay raw, skipping
-        # the box → w_math_* → unbox → re-box round-trip. Boxed WValues keep
-        # the runtime path: they carry Int/Float dynamically and
-        # w_math_to_double resolves that at runtime.
-        if arg_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64)
-          libm_name = method_name
-          if method_name == "abs"
-            libm_name = "fabs"
-          arg_raw = ensure_raw_f64(wfn, arg_val)
-          temp = next_temp(wfn)
-          emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: libm_name, value: arg_raw})
-          return typed_value(:raw_f64, temp)
-        arg_reg = ensure_i64_value(wfn, arg_val)
-        temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_intrinsic_runtime, args: [arg_reg]})
-        return typed_value(:i64, temp)
-      if math_intrinsic_runtime != nil && args.size() == 2
-        a_val = lower_expression(ctx, args[0])
-        b_val = lower_expression(ctx, args[1])
-        # Raw fast path for the pure-libm pair (ldexp's second arg is an
-        # int, so it stays on the runtime path). Both operands must already
-        # be raw — a boxed WValue needs w_math_to_double's dynamic Int/Float
-        # handling.
-        if method_name in ("pow" "atan2" "hypot")
-          if a_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64) && b_val[:type] in (:raw_f64 :raw_f32 :raw_int :raw_i64 :raw_u64)
-            a_raw = ensure_raw_f64(wfn, a_val)
-            b_raw = ensure_raw_f64(wfn, b_val)
-            temp = next_temp(wfn)
-            emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: method_name, lhs: a_raw, rhs: b_raw})
-            return typed_value(:raw_f64, temp)
-        a_reg = ensure_i64_value(wfn, a_val)
-        b_reg = ensure_i64_value(wfn, b_val)
-        temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_intrinsic_runtime, args: [a_reg, b_reg]})
-        return typed_value(:i64, temp)
+      if math_intrinsic_runtime != nil
+        math_lowered = lower_math_intrinsic_call(ctx, method_name, math_intrinsic_runtime, node.args)
+        if math_lowered != nil
+          return math_lowered
 
     # Float.from_u32_bits / to_u32_bits / from_u64_bits / to_u64_bits —
     # reinterpret integer bits as a float (or back). Needed for GGUF
@@ -1306,7 +1226,7 @@
       # Keep signed/unhandled payloads on the direct runtime idx helper:
       # it preserves today's BigArray boxing semantics while still avoiding
       # cached method dispatch. Unsigned integer, float, and w64 loads are raw.
-      inline_raw_get = elem_type in (:typed_array_u4 :typed_array_u8 :typed_array_u16 :typed_array_u32 :typed_array_u64 :typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_w64)
+      inline_raw_get = elem_type in (:typed_array_u4 :typed_array_u8 :typed_array_u16 :typed_array_u32 :typed_array_u64 :typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16 :typed_array_w64)
       if !inline_raw_get
         idx_reg = ensure_i64_value(wfn, idx_val)
         temp = next_temp(wfn)
@@ -1327,7 +1247,7 @@
         si += 1
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :big_array_get_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, s: scratch, bits: elem_bits, signed: false})
-      if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16)
+      if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         return raw_float_from_bits_i64(wfn, temp, elem_type)
       if elem_type == :typed_array_w64
         return typed_value(:i64, temp)
@@ -1432,7 +1352,7 @@
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :small_array_get_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, s: scratch, bits: elem_bits, signed: elem_signed, headerless: sa_hl})
       elem_type = small_array_to_typed_array_type(recv_type)
-      if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16)
+      if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         return raw_float_from_bits_i64(wfn, temp, elem_type)
       # A 64-bit SmallArray element cannot use the generic :raw_int path:
       # ensure_i64_value nanboxes :raw_int by masking it to the signed i48
@@ -1462,7 +1382,7 @@
         idx_reg = ensure_i64_value(wfn, idx_val)
       val_expr = lower_expression(ctx, node.args[1])
       elem_type = small_array_to_typed_array_type(recv_type)
-      if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16)
+      if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         val_reg = raw_float_bits_i64(wfn, val_expr, elem_type)
       elsif val_expr[:type] in (:raw_int :raw_i64 :raw_u64)
         val_reg = val_expr[:value]
@@ -1528,7 +1448,7 @@
         fn_name = "w_array_fastsum_float"
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: [receiver_reg]})
       return typed_value(:i64, temp)
-    if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16) && method_name in ("fastsum" "sumsq") && node.args.size() == 0
+    if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16) && method_name in ("fastsum" "sumsq") && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
@@ -1569,7 +1489,7 @@
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_matmul_i8", args: [receiver_reg, rhs_reg, m_reg, k_reg, n_reg]})
       return typed_value(:i64, temp)
-    if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16) && method_name in ("dot" "cross" "scale" "scale!") && node.args.size() == 1
+    if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16) && method_name in ("dot" "cross" "scale" "scale!") && node.args.size() == 1
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       arg_val = lower_expression(ctx, node.args[0])
@@ -1614,7 +1534,7 @@
         si += 1
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :typed_array_get_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, s: scratch, bits: elem_bits, signed: elem_signed})
-      if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16)
+      if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         return raw_float_from_bits_i64(wfn, temp, recv_type)
       # w64 arrays store raw WValue bits. The loaded i64 IS a fully-tagged
       # WValue; return it as :i64 (WValue) so downstream method dispatch,
@@ -1690,7 +1610,7 @@
       else
         idx_reg = ensure_i64_value(wfn, idx_val)
       val_expr = lower_expression(ctx, node.args[1])
-      if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16)
+      if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         val_reg = raw_float_bits_i64(wfn, val_expr, recv_type)
       elsif recv_type == :typed_array_w64
         # w64 slots hold fully-tagged WValues (reads hand the loaded bits

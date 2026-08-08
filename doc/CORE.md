@@ -459,7 +459,7 @@ summary from the source header, and a link to the source.
 | `Hypercomplex` | `+ Hypercomplex<T> < Number` | Hypercomplex — the Cayley–Dickson algebras above the reals: | [`core/numeric/hypercomplex.w`](../core/numeric/hypercomplex.w) |
 | `Interval` | `+ Interval` | Interval — rigorous interval arithmetic over Float endpoints. | [`core/numeric/interval.w`](../core/numeric/interval.w) |
 | `IntervalF64` | `+ IntervalF64 < Interval` | — | [`core/numeric/intervalf64.w`](../core/numeric/intervalf64.w) |
-| `BF16` | — | — | [`core/numeric/bf16.w`](../core/numeric/bf16.w) |
+| `BF16` | `+ BF16 < Float` | — | [`core/numeric/bfloat16.w`](../core/numeric/bfloat16.w) |
 | `BigComplex` | `+ BigComplex < Complex` | — | [`core/numeric/big_complex.w`](../core/numeric/big_complex.w) |
 | `BigDecimal` | `+ BigDecimal < Decimal` | — | [`core/numeric/big_decimal.w`](../core/numeric/big_decimal.w) |
 | `BigInt` | `+ BigInt < Int` | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |

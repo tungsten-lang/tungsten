@@ -1514,6 +1514,8 @@ use target
       return ccall("w_crypto_sha224_bytes", args[1])
     when "w_crypto_sha224_hex"
       return ccall("w_crypto_sha224_hex", args[1])
+    when "w_eputs"
+      return ccall("w_eputs", args[1])
     when "w_crypto_sha256_bytes"
       return ccall("w_crypto_sha256_bytes", args[1])
     when "w_crypto_sha256_hex"
@@ -1534,6 +1536,22 @@ use target
       return ccall("w_crypto_sha512_256_bytes", args[1])
     when "w_crypto_sha512_256_hex"
       return ccall("w_crypto_sha512_256_hex", args[1])
+    when "w_crypto_sha3_bytes"
+      return ccall("w_crypto_sha3_bytes", args[1], args[2])
+    when "w_crypto_sha3_hex"
+      return ccall("w_crypto_sha3_hex", args[1], args[2])
+    when "w_crypto_shake_bytes"
+      return ccall("w_crypto_shake_bytes", args[1], args[2], args[3])
+    when "w_crypto_shake_hex"
+      return ccall("w_crypto_shake_hex", args[1], args[2], args[3])
+    when "w_crypto_crc32"
+      return ccall("w_crypto_crc32", args[1])
+    when "w_crypto_crc32c"
+      return ccall("w_crypto_crc32c", args[1])
+    when "w_crypto_aes_gcm_seal"
+      return ccall("w_crypto_aes_gcm_seal", args[1], args[2], args[3], args[4])
+    when "w_crypto_aes_gcm_open"
+      return ccall("w_crypto_aes_gcm_open", args[1], args[2], args[3], args[4])
 
     when "w_uuid_parse"
       return ccall("w_uuid_parse", args[1])
@@ -4912,6 +4930,8 @@ use target
       bits = 66
     elsif etype == "f32"
       bits = 0 - 32
+    elsif etype == "f16"
+      bits = 0 - 16
     elsif etype == "bf16"
       bits = 0 - 116
     elsif etype == "w64"
@@ -4920,7 +4940,7 @@ use target
       bits = 0 - 64
     if bits != 0
       return ccall_rawargs("w_array_zeros", bits, size_raw)
-    raise "typed array element type '" + etype + "' is not supported yet (supported: u1/i1/u4/i4/u8/i8/u16/i16/u32/i32/u64/i64/f32/f64/bf16/w64/bool)"
+    raise "typed array element type '" + etype + "' is not supported yet (supported: u1/i1/u4/i4/u8/i8/u16/i16/u32/i32/u64/i64/f16/f32/f64/bf16/w64/bool)"
 
   # -- String interpolation --
 

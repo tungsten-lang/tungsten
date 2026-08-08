@@ -16,6 +16,8 @@ use core/crypto/sha224
 use core/crypto/sha256
 use core/crypto/sha384
 use core/crypto/sha512
+use core/crypto/sha3
+use core/crypto/crc32
 
 + Digest
   -> .bytes64(bytes)
@@ -78,3 +80,15 @@ use core/crypto/sha512
 
   -> .sha2_bytes(data, bits = 256)
     Crypto:SHA2.digest(data, bits)
+
+  -> .sha3(data, bits = 256)
+    Crypto:SHA3.hexdigest(data, bits)
+
+  -> .sha3_bytes(data, bits = 256)
+    Crypto:SHA3.digest(data, bits)
+
+  -> .crc32(data)
+    Crypto:CRC32.checksum(data)
+
+  -> .crc32c(data)
+    Crypto:CRC32.castagnoli(data)

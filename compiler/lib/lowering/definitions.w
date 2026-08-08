@@ -1109,6 +1109,10 @@
       # Number is the universal base of the numeric tower; treat it as the
       # ancestor of any class we cannot resolve here (load-order tolerant).
       return ancs == "Number"
+    # Builtin runtime classes are placeholder hashes (superclass: nil), not
+    # AST nodes — same guard as class_descends_from?.
+    if !is_ast_node?(cls)
+      return false
     sup = cls.superclass
     if sup == nil
       return false

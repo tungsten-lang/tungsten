@@ -11,6 +11,10 @@ use core/crypto/sha224
 use core/crypto/sha256
 use core/crypto/sha384
 use core/crypto/sha512
+use core/crypto/sha3
+use core/crypto/shake
+use core/crypto/crc32
+use core/crypto/aes
 use core/crypto/hmac
 use core/crypto/pbkdf2
 use core/crypto/scram
@@ -85,3 +89,27 @@ use core/crypto/scram
 
   -> .sha2_bytes(data, bits = 256)
     Crypto:SHA2.digest(data, bits)
+
+  -> .sha3(data, bits = 256)
+    Crypto:SHA3.hexdigest(data, bits)
+
+  -> .sha3_bytes(data, bits = 256)
+    Crypto:SHA3.digest(data, bits)
+
+  -> .shake128(data, outlen)
+    Crypto:SHAKE.shake128(data, outlen)
+
+  -> .shake256(data, outlen)
+    Crypto:SHAKE.shake256(data, outlen)
+
+  -> .crc32(data)
+    Crypto:CRC32.checksum(data)
+
+  -> .crc32c(data)
+    Crypto:CRC32.castagnoli(data)
+
+  -> .aes_gcm_encrypt(key, nonce, plaintext, aad = "")
+    Crypto:AES.gcm_encrypt(key, nonce, plaintext, aad)
+
+  -> .aes_gcm_decrypt(key, nonce, sealed, aad = "")
+    Crypto:AES.gcm_decrypt(key, nonce, sealed, aad)

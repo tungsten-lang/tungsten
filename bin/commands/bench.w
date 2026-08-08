@@ -307,9 +307,11 @@ CAL_MAX = 4000000000
 # Returns [ops_per_sec, ok]. Integer microseconds throughout.
 -> bench_native(src, runs)
   out = builddir + "/" + capture("basename \"[src]\" .w").strip
-  # Fast archive-linked -o path (~9x faster to compile than `compile --release --native`,
-  # identical runtime for these self-contained hot loops).
-  system("\"[tungsten]\" -o \"[out]\" \"[src]\" >/dev/null 2>&1")
+  # Same flags as bench-suite and bench-bignum so numbers are comparable
+  # across the bench subcommands. The old fast -o path compiled ~9x quicker
+  # but was -O0 end to end, which is NOT identical runtime: measured 2026-08-08,
+  # method_call 6.6x / hash_get 6.8x / float_mul 2.1x slower than --release.
+  system("\"[tungsten]\" compile --release --native --fast \"[src]\" -o \"[out]\" >/dev/null 2>&1")
   if !is_exe(out)
     return [0, false]
   pilot = run_with(out, CAL_PILOT)

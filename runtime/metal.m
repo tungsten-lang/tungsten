@@ -137,7 +137,7 @@ static int metal_array_storage_bits(int ebits, int64_t *bits_out) {
     switch (ebits) {
         case 8: case 16: case 32: case 33: case 64: case 66:
         case 108: case 116:
-        case -32: case -64: case -116:
+        case -16: case -32: case -64: case -116:
         case -108: case -109: case -104:
             *bits_out = w_array_storage_bits(ebits);
             return *bits_out > 0;
@@ -490,6 +490,7 @@ WValue w_array_as_metal_buffer(WValue device_v, WValue arr_v) {
      *   33 / 66          — i32 / i64, storage = 32 / 64
      *   108 / 116        — i8 / i16, storage = 8 / 16
      *   -32 / -64        — f32 / f64, storage = abs(bits)
+     *   -16              — f16 (IEEE half), storage = 16
      *   -116             — bf16, storage = 16
      *   -108 / -109      — fp8 e4m3 / e5m2, storage = 8
      *   -104             — fp4 e2m1, storage = 4
@@ -498,7 +499,7 @@ WValue w_array_as_metal_buffer(WValue device_v, WValue arr_v) {
     int e_int = (int)e;
     int64_t bits_per_elt;
     if (!metal_array_storage_bits(e_int, &bits_per_elt)) {
-        w_raise(w_string("array.as_metal_buffer: requires fixed-width typed array (u8/i8/u16/i16/u32/i32/u64/i64/f32/f64/bf16/f8/f4)"));
+        w_raise(w_string("array.as_metal_buffer: requires fixed-width typed array (u8/i8/u16/i16/u32/i32/u64/i64/f16/f32/f64/bf16/f8/f4)"));
     }
     int64_t byte_length = (logical_size * bits_per_elt) / 8;
     if (byte_length <= 0) {
@@ -810,7 +811,7 @@ WValue w_metal_buffer_read_bf16(WValue buffer_v, WValue index_v) {
  * MTLResourceStorageModeShared (unified memory), the returned array aliases the
  * same bytes the GPU sees — used by Tensor.matmul to hand the shared buffers to
  * Accelerate's sgemm without a copy. `ebits` is the array element encoding
- * (-32 = f32, -64 = f64, -116 = bf16); `length` is the element count. */
+ * (-32 = f32, -64 = f64, -16 = f16, -116 = bf16); `length` is the element count. */
 WValue w_metal_buffer_view(WValue buffer_v, WValue ebits_v, WValue length_v) {
     WMetalBuffer *b = as_metal_buffer(buffer_v);
     if (!b) w_raise(w_string("metal_buffer_view: not a buffer"));

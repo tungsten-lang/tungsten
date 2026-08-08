@@ -50,8 +50,8 @@ fn mlx_dgemm(a, b, c, m, n, k)
   ccall("w_mlx_dgemm_nn", a, b, c, m, n, k)
 
 # Half-precision (f16) matmul. Inputs and outputs are f16 arrays
-# (ebits = -16). Tungsten can't write f16 scalars directly — call
-# a conversion kernel up-front to populate the inputs.
+# (ebits = -16). Populate inputs natively (`arr[i] = value` on f16[]
+# converts via fcvt) or bulk-convert with f32_to_f16 below.
 fn mlx_hgemm(a, b, c, m, n, k)
   ccall("w_mlx_hgemm_nn", a, b, c, m, n, k)
 
@@ -64,6 +64,10 @@ fn mlx_bgemm(a, b, c, m, n, k)
 # Use this to populate bf16 inputs from f32 fill code.
 fn f32_to_bf16(src, dst, len)
   ccall("w_f32_to_bf16_array", src, dst, len)
+
+# CPU-side f32 → f16 array conversion (IEEE half twin of f32_to_bf16).
+fn f32_to_f16(src, dst, len)
+  ccall("w_f32_to_f16_array", src, dst, len)
 
 # ---- Elementwise graph ops (f32 arrays; in/out same shape) ----
 # These schedule MLX ops on the default GPU stream; call mlx_eval to sync.

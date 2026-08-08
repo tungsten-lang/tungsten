@@ -4,7 +4,19 @@ set -eu
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$DIR/../.." && pwd)
 RUNTIME="$ROOT/runtime"
-CC=${CC:-clang}
+# Match the tungsten driver's compiler preference: a clang with LLVM >= 22
+# when installed (better vectorizer; same toolchain users' --release builds
+# get), else the system clang.
+if [ -z "${CC:-}" ]; then
+  CC=clang
+  for cand in /opt/homebrew/opt/llvm/bin/clang /usr/local/opt/llvm/bin/clang; do
+    if [ -x "$cand" ]; then
+      case "$("$cand" --version 2>/dev/null | head -1)" in
+        *"version 22."*|*"version 23."*|*"version 24."*) CC=$cand; break ;;
+      esac
+    fi
+  done
+fi
 # A worker-count sweep builds several otherwise-identical harnesses with
 # different compile-time parallelism caps.  Keep those binaries outside the
 # normal development harness so a measurement cannot silently replace it.
@@ -12,10 +24,26 @@ OUT=${BENCH_OUT:-"$DIR/bench_big_math"}
 PROFILE=${BENCH_PROFILE:-"$OUT.profile"}
 mkdir -p "$(dirname "$OUT")"
 
+# Match the driver's CPU resolution: clang's `native` detection lags new
+# silicon (resolves an M5 to apple-m4), so name the chip explicitly when the
+# compiler knows it, with the driver's same feature-suffix fallback.
+MCPU=native
+if [ "$(uname -s)" = "Darwin" ] && sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -q "M5"; then
+  if "$CC" -mcpu=apple-m5 -fsyntax-only -x c /dev/null >/dev/null 2>&1; then
+    MCPU=apple-m5
+  else
+    MCPU="apple-m4+sme2p1+sme-f16f16+sme-b16b16+cssc+wfxt+hbc"
+  fi
+fi
+
 # -falign-functions=64: the bignum kernels are layout-sensitive (unaligned
 # hot-loop heads swing small-multiply timings by 10-20% between otherwise
 # identical builds); fixed alignment keeps benchmark results comparable.
-CFLAGS=${CFLAGS:-"-O3 -DNDEBUG -mcpu=native -falign-functions=64 -Wno-deprecated-declarations"}
+# -flto -ffast-math: mirror `tungsten compile --release --fast` (fast FP
+# semantics + backend -ffast-math, NOT the FAST_MATH source define) so the
+# `bench bignum` lane is built the way the other bench subcommands build
+# Tungsten. IEEE-sensitive kernels can opt out locally (strict math blocks).
+CFLAGS=${CFLAGS:-"-O3 -flto -ffast-math -DNDEBUG -mcpu=$MCPU -falign-functions=64 -Wno-deprecated-declarations"}
 
 if [ "${1:-}" = "--profile" ]; then
   printf '%s\n' "$CC|$CFLAGS"

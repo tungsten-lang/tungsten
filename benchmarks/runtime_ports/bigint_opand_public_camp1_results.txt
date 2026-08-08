@@ -1,0 +1,15 @@
+# Campaign 1 (quad kernel), interleaved ABBA pairs x8, thread-CPU medians,
+# loaded host (load ~12, concurrent builds; pairing cancels drift):
+# stratum          src med    c med   ratio-of-med  med-pair-ratio
+# and-one           31.696   32.009      0.990          1.013
+# and-int-arg       14.952   15.149      0.987          0.990
+# and-four          35.621   33.570      1.061          1.076
+# and-fortyeight    43.721   49.167      0.889          0.879
+# and-sixtyfour     45.138   43.877      1.029          1.038
+# and-skew          19.311   21.318      0.906          0.917
+# and-neg           33.404   32.317      1.034          1.021
+# (campaign 2 raw samples in bigint_opand_public_camp2_results.txt; its
+#  medians: 1.023/0.994/1.055/0.881/1.046/0.909/1.026)
+# REJECTED intermediate: the 2-limb-per-iteration kernel measured
+# and-sixtyfour 1.149/1.136 in two campaigns; the 4-limb quad kernel
+# replaced it and passed everywhere.

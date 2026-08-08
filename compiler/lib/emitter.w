@@ -2251,7 +2251,7 @@ ewscope_md_state = {ids: {}}
   # reference is transparent to whole-program LTO. A reopened `+` wins here
   # exactly as it does in the method table: last definition survives the
   # replace_or_append pass, so the wrapper names the surviving body.
-  big_op_wrappers = {"+" => "__w_bigint_plus_src", "-" => "__w_bigint_minus_src", "*" => "__w_bigint_times_src"}
+  big_op_wrappers = {"+" => "__w_bigint_plus_src", "-" => "__w_bigint_minus_src", "*" => "__w_bigint_times_src", "&" => "__w_bigint_and_src", "|" => "__w_bigint_or_src", "^" => "__w_bigint_xor_src"}
   # B2: the seam target per op, in preference order —
   #   1. the LAST plain-named body (source_method exactly "+"/"-"/"*",
   #      not the synthesized dispatcher): post-Phase-4 core has no such
@@ -2262,7 +2262,7 @@ ewscope_md_state = {ids: {}}
   #      bigint_src_shape already proved both operands, so routing
   #      through the dispatcher would re-test what the arm knows.
   # The dispatcher itself is never wrapped (fn[:overload_dispatcher]).
-  big_op_worker_names = {"+__ovl_BigInt" => "+", "-__ovl_BigInt" => "-", "*__ovl_BigInt" => "*"}
+  big_op_worker_names = {"+__ovl_BigInt" => "+", "-__ovl_BigInt" => "-", "*__ovl_BigInt" => "*", "&__ovl_BigInt" => "&", "|__ovl_BigInt" => "|", "^__ovl_BigInt" => "^"}
   big_op_fns = {}
   big_op_worker_fns = {}
   big_op_dispatchers = {}
@@ -2301,7 +2301,7 @@ ewscope_md_state = {ids: {}}
   # between the C VM stage-0 host and the native compiler, and the seam
   # wrappers' emission order otherwise swaps between stage 1 and stage 2
   # (an 8-line byte-identity break that only surfaces under --force).
-  bop_keys = ["+", "-", "*"]
+  bop_keys = ["+", "-", "*", "&", "|", "^"]
   bki = 0
   while bki < bop_keys.size()
     bop = bop_keys[bki]
@@ -3479,6 +3479,21 @@ ewscope_md_state = {ids: {}}
     inst[:temp] + " = bitcast i32 " + inst[:value] + " to float"
   when :bitcast_f32_i32
     inst[:temp] + " = bitcast float " + inst[:value] + " to i32"
+
+  # IEEE-half (f16) element conversion. Storage is i16; arithmetic is f32.
+  # fptrunc/fpext lower to single fcvt instructions on AArch64.
+  when :fptrunc_f32_f16
+    inst[:temp] + " = fptrunc float " + inst[:value] + " to half"
+  when :fpext_f16_f32
+    inst[:temp] + " = fpext half " + inst[:value] + " to float"
+  when :bitcast_f16_i16
+    inst[:temp] + " = bitcast half " + inst[:value] + " to i16"
+  when :bitcast_i16_f16
+    inst[:temp] + " = bitcast i16 " + inst[:value] + " to half"
+  when :zext_i16_i64
+    inst[:temp] + " = zext i16 " + inst[:value] + " to i64"
+  when :trunc_i64_i16
+    inst[:temp] + " = trunc i64 " + inst[:value] + " to i16"
 
   # Float arithmetic — inst[:fp_flags] overrides the function-level default for
   # @fastmath / @strictmath block scopes; nil means use the function default.

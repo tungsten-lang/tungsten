@@ -2729,10 +2729,12 @@ static int parse_param_ast(TcAstParser *p, TcAstValue *out, TcError *err) {
   return 1;
 }
 
-static int parse_param_list_ast(TcAstParser *p, TcAstValue *out, TcError *err) {
+static int parse_param_list_ast(TcAstParser *p, int paren_open, TcAstValue *out, TcError *err) {
   TcAstValue params = tc_ast_array_new(err);
   if (params.kind != TC_AST_ARRAY) return 0;
-  if (!match_ast(p, TC_K_LPAREN)) {
+  /* paren_open: the caller consumed a fused name+LPAREN token
+   * (BLOCK_CALL `&(`), so the list is already open. */
+  if (!paren_open && !match_ast(p, TC_K_LPAREN)) {
     *out = params;
     return 1;
   }
@@ -2776,7 +2778,8 @@ static int method_name_token_ast(TcAstParser *p) {
   TcKind kind = current_ast(p).kind;
   return name_token_ast(p) || kind == TC_K_PLUS || kind == TC_K_MINUS || kind == TC_K_STAR || kind == TC_K_SLASH ||
          kind == TC_K_EQ || kind == TC_K_LT || kind == TC_K_GT || kind == TC_K_LBRACKET ||
-         kind == TC_K_PUTS_OP || kind == TC_K_CLASS_DEF;
+         kind == TC_K_PUTS_OP || kind == TC_K_CLASS_DEF ||
+         kind == TC_K_AMPERSAND || kind == TC_K_PIPE || kind == TC_K_CARET;
 }
 
 /* Lookahead: does the paren group at p->pos hold only type-name tokens
@@ -2821,14 +2824,30 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
   int is_class_method = 0;
   if (match_ast(p, TC_K_DOT)) is_class_method = 1;
 
-  if (!method_name_token_ast(p)) {
+  /* `-> &(other)` — the lexer fuses `&(` into one BLOCK_CALL token, so
+   * the method name is `&` and the param list's LPAREN is already
+   * consumed; parse_param_list_ast is told the list is open. */
+  int fused_amp_paren = at_ast(p, TC_K_BLOCK_CALL);
+
+  if (!fused_amp_paren && !method_name_token_ast(p)) {
     parse_ast_error(p, err, "expected method name");
     return 0;
   }
 
   char *name = NULL;
   size_t name_len = 0;
-  if (!current_token_text(p, &name, &name_len, err)) return 0;
+  if (fused_amp_paren) {
+    name = malloc(2);
+    if (!name) {
+      parse_ast_error(p, err, "out of memory");
+      return 0;
+    }
+    name[0] = '&';
+    name[1] = '\0';
+    name_len = 1;
+  } else if (!current_token_text(p, &name, &name_len, err)) {
+    return 0;
+  }
   advance_ast(p);
   if (match_ast(p, TC_K_ASSIGN)) {
     if (!append_bytes(&name, &name_len, "=", 1, err)) {
@@ -2899,7 +2918,7 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
       return 0;
     }
     param_types = raw_string(p, type_start, p->pos, err);
-  } else if (!parse_param_list_ast(p, &params, err)) {
+  } else if (!parse_param_list_ast(p, fused_amp_paren, &params, err)) {
     free(name);
     return 0;
   }

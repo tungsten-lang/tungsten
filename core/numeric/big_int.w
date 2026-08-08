@@ -324,6 +324,104 @@
   -> *(other)(Number)
     ccall("w_mul", self, other)
 
+  # Bitwise limb kernels. No carry chains, so no asm is needed: the loops
+  # are hand-vectorized <2 x i64> IR, which legalizes to NEON/SSE at every
+  # opt level and — unlike a scalar loop — never depends on the
+  # vectorizer's runtime alias checks (the fresh result buffer cannot be
+  # proven noalias from inside the kernel). Both operand counts are >= 2
+  # by the callers' shape tests, so the paired loop always runs.
+  fn __bigint_bw_and(rp, ap, bp, n) (i64 i64 i64 i64) i64
+    ll <<~IR
+      entry:
+        %rq = inttoptr i64 %rp to ptr
+        %aq = inttoptr i64 %ap to ptr
+        %bq = inttoptr i64 %bp to ptr
+        %n4 = and i64 %n, -4
+        %has4 = icmp ne i64 %n4, 0
+        br i1 %has4, label %v4, label %mid
+      v4:
+        %i = phi i64 [ 0, %entry ], [ %inext, %v4 ]
+        %i2 = or i64 %i, 2
+        %ag0 = getelementptr inbounds i64, ptr %aq, i64 %i
+        %bg0 = getelementptr inbounds i64, ptr %bq, i64 %i
+        %rg0 = getelementptr inbounds i64, ptr %rq, i64 %i
+        %ag1 = getelementptr inbounds i64, ptr %aq, i64 %i2
+        %bg1 = getelementptr inbounds i64, ptr %bq, i64 %i2
+        %rg1 = getelementptr inbounds i64, ptr %rq, i64 %i2
+        %av0 = load <2 x i64>, ptr %ag0, align 8
+        %bv0 = load <2 x i64>, ptr %bg0, align 8
+        %av1 = load <2 x i64>, ptr %ag1, align 8
+        %bv1 = load <2 x i64>, ptr %bg1, align 8
+        %rv0 = and <2 x i64> %av0, %bv0
+        %rv1 = and <2 x i64> %av1, %bv1
+        store <2 x i64> %rv0, ptr %rg0, align 8
+        store <2 x i64> %rv1, ptr %rg1, align 8
+        %inext = add nuw nsw i64 %i, 4
+        %done4 = icmp uge i64 %inext, %n4
+        br i1 %done4, label %mid, label %v4
+      mid:
+        %j = phi i64 [ 0, %entry ], [ %n4, %v4 ]
+        %rem = sub i64 %n, %j
+        %has2 = icmp uge i64 %rem, 2
+        br i1 %has2, label %pair, label %oddpre
+      pair:
+        %pag = getelementptr inbounds i64, ptr %aq, i64 %j
+        %pbg = getelementptr inbounds i64, ptr %bq, i64 %j
+        %prg = getelementptr inbounds i64, ptr %rq, i64 %j
+        %pav = load <2 x i64>, ptr %pag, align 8
+        %pbv = load <2 x i64>, ptr %pbg, align 8
+        %prv = and <2 x i64> %pav, %pbv
+        store <2 x i64> %prv, ptr %prg, align 8
+        %jp = add nuw nsw i64 %j, 2
+        br label %oddchk
+      oddpre:
+        br label %oddchk
+      oddchk:
+        %k = phi i64 [ %jp, %pair ], [ %j, %oddpre ]
+        %hasodd = icmp ult i64 %k, %n
+        br i1 %hasodd, label %scalar, label %exit
+      scalar:
+        %sag = getelementptr inbounds i64, ptr %aq, i64 %k
+        %sbg = getelementptr inbounds i64, ptr %bq, i64 %k
+        %srg = getelementptr inbounds i64, ptr %rq, i64 %k
+        %sav = load i64, ptr %sag, align 8
+        %sbv = load i64, ptr %sbg, align 8
+        %srv = and i64 %sav, %sbv
+        store i64 %srv, ptr %srg, align 8
+        br label %exit
+      exit:
+        ret i64 0
+    IR
+
+  # Bitwise AND. Both-effective-positive multi-limb pairs run the source
+  # kernel over the common limbs (higher limbs of the longer operand AND
+  # to zero, so the result is exactly min-width); seal trims any top
+  # zeros and demotes a small survivor to inline i48. One-limb operands,
+  # negative operands (C's fused on-the-fly two's-complement pass), and
+  # the aliased-receiver identity keep the C arms, mirroring
+  # bigint_bitwise_src_shape — the gate and these bails must stay
+  # disjoint or w_bit_and would re-enter this body.
+  -> &(other)(BigInt)
+    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
+    bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
+    if an < 2 || bn < 2 || an > 4096 || bn > 4096 || $value == other$value
+      return ccall("w_bit_and", self, other)
+
+    n = an
+    if bn < an
+      n = bn
+
+    mask = 140737488355312
+    pa = ($value & mask) + 16
+    pb = (other$value & mask) + 16
+    result = ccall("w_bigint_alloc_boxed", n) ## BigInt
+    rp = (result$value & mask) + 16
+    __bigint_bw_and(rp ## i64, pa ## i64, pb ## i64, n ## i64)
+    ccall("w_bigint_seal", result, n)
+
+  -> &(other)(Number)
+    ccall("w_bit_and", self, other)
+
   # Greatest common divisor. The Lehmer/HGCD kernel stays in the runtime
   # (same tier as modpow's bigint_powmod_any); this override exists so the
   # method surface lives in source AND so dispatch never falls through to

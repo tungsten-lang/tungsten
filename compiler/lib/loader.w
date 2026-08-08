@@ -634,7 +634,12 @@ use parser
       # Integer/Number leaf methods commonly receive literals or locals, which
       # carry no explicit class reference. The to_i spelling is shared with
       # source-only BigInt identity, so schedule that tiny class once as well.
-      if call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "digits" "isqrt" "bit_length" "to_s" "abs" "prime?" "+" "-" "*")
+      # The bitwise spellings require an explicit receiver: a receiverless
+      # call named "&" is BLOCK INVOCATION `&(args)` — gating on it would
+      # autoload Integer/BigInt into every block-using program (including
+      # the compiler itself, which broke stage identity).
+      bitwise_op_send = call_receiver != nil && call_name in ("&" "|" "^")
+      if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "digits" "isqrt" "bit_length" "to_s" "abs" "prime?" "+" "-" "*")
         consider_autoload_name("Integer", defined, registry, seen, pending)
         if call_name == "to_i" && @bigint_to_i_unresolved
           consider_autoload_name("BigInt", defined, registry, seen, pending)
@@ -644,7 +649,7 @@ use parser
         # incremental cost of also loading it for the integer methods is small,
         # and it makes a standalone bigint-method program (e.g. `n.modpow(...)`
         # with no predicate) resolve instead of dispatching to Object.
-        if @bigint_predicates_unresolved && call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "abs" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length" "prev" "succ" "next" "prime?" "+" "-" "*")
+        if @bigint_predicates_unresolved && (bitwise_op_send || call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "abs" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length" "prev" "succ" "next" "prime?" "+" "-" "*"))
           consider_autoload_name("BigInt", defined, registry, seen, pending)
           @bigint_predicates_unresolved = false
 

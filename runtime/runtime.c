@@ -33703,6 +33703,40 @@ WValue bignum_shr(WValue a, int64_t k) {
     return bignum_shr_generic(a, k);
 }
 
+/* ---- Source-routed bigint bitwise ops (weak-linkage arms) ----
+ * Same seam design as __w_bigint_plus_src (see the block above w_add): the
+ * weak default is exactly the C kernel; a program that compiles
+ * core/numeric/big_int.w emits a STRONG wrapper around the compiled
+ * BigInt#&/#|/#^ worker (emitter.w big_op_wrappers), and strong-over-weak
+ * link resolution routes every gated bitwise op through source.
+ * TUNGSTEN_BIGINT_SRC_OPS=0 pins the C path. */
+__attribute__((weak)) WValue __w_bigint_and_src(WValue a, WValue b) {
+    return bignum_bitwise('&', a, b);
+}
+__attribute__((weak)) WValue __w_bigint_or_src(WValue a, WValue b) {
+    return bignum_bitwise('|', a, b);
+}
+__attribute__((weak)) WValue __w_bigint_xor_src(WValue a, WValue b) {
+    return bignum_bitwise('^', a, b);
+}
+
+/* Shape gate for the bitwise source arms. Source implements the sign-free
+ * straight-loop domain: both heap BigInts, both effective-positive,
+ * multi-limb, inside the band. C keeps its measurably-specialized strata:
+ * the a==b identity arm (O(1) alias), one-limb operands (fused u64 arm),
+ * and every negative operand (the fused on-the-fly two's-complement pass
+ * in bignum_bitwise_generic). The source bodies' bail set must stay
+ * DISJOINT from this gate's admission set (B6 discipline: an admitted
+ * shape the body bails on would recurse w_bit_* -> src -> w_bit_*). */
+static inline int bigint_bitwise_src_shape(WValue a, WValue b) {
+    if (!w_is_bigint(a) || !w_is_bigint(b)) return 0;
+    if (a == b) return 0;                 /* identity arm is O(1) in C */
+    int32_t sa, sb;
+    (void)w_bigint_view(a, &sa);
+    (void)w_bigint_view(b, &sb);
+    return sa >= 2 && sb >= 2 && sa <= 4096 && sb <= 4096;
+}
+
 /* Shared dispatcher for &, |, ^: native both-int fast path first (the hot
  * case), then the small/coerced path, then the full-width bignum kernel. */
 static WValue bit_binop(char op, WValue a, WValue b) {
@@ -33710,6 +33744,17 @@ static WValue bit_binop(char op, WValue a, WValue b) {
         return w_box_int_checked((int64_t)apply_bitop(op, (uint64_t)w_as_int(a), (uint64_t)w_as_int(b)));
     if (!w_is_bigint(a) && !w_is_bigint(b))
         return w_box_int_checked((int64_t)apply_bitop(op, (uint64_t)coerce_bitwise_i64(a), (uint64_t)coerce_bitwise_i64(b)));
+    {
+        int src_off = g_bigint_src_ops_off;
+        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
+        if (__builtin_expect(src_off == 0, 1) && bigint_bitwise_src_shape(a, b)) {
+            switch (op) {
+                case '&': return __w_bigint_and_src(a, b);
+                case '|': return __w_bigint_or_src(a, b);
+                default:  return __w_bigint_xor_src(a, b);
+            }
+        }
+    }
     return bignum_bitwise(op, a, b);
 }
 WValue w_bit_and(WValue a, WValue b) { return bit_binop('&', a, b); }

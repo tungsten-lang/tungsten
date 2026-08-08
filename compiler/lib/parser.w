@@ -551,7 +551,7 @@ use ../../core/token
       if at_type?(T_ASSIGN)
         advance()
       return nil
-    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP T_APPROX)
+    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_AMPERSAND T_PIPE T_CARET T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP T_APPROX)
       advance()
       return nil
     raise compile_error_at(:E_PARSE_EXPECTED_METHOD_NAME, "Expected method name, got [current_desc()]")
@@ -570,7 +570,7 @@ use ../../core/token
         advance()
         return "[]="
       return "[]"
-    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP T_APPROX)
+    if parser_tok_type(@current_packed) in (T_BANG T_PUTS_OP T_LSHIFT T_RSHIFT T_PLUS T_MINUS T_STAR T_POW T_SLASH T_PERCENT T_AMPERSAND T_PIPE T_CARET T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_LT T_GT T_LTE T_GTE T_SPACESHIP T_APPROX)
       return advance_value()
     # T_CLASS_DEF is the bare `+` token at line-start positions; after
     # `-> ` it's still the plus method name. Accept it here so
@@ -1575,8 +1575,15 @@ use ../../core/token
         name_line = current_line()
         name_col = current_col()
         name_loc = make_loc_here()
-        name = expect_method_name_value()
-        result = parse_call_args_and_block(true, name_line, name_col, name)
+        # `x.&(y)` — the lexer fuses `&(` into one BLOCK_CALL token; the
+        # name is `&` with the arg list's LPAREN already consumed.
+        dot_name_fused = at_type?(T_BLOCK_CALL)
+        if dot_name_fused
+          advance()
+          name = "&"
+        else
+          name = expect_method_name_value()
+        result = parse_call_args_and_block(true, name_line, name_col, name, dot_name_fused)
         args = result[0]
         block = result[1]
         if args == nil
@@ -1855,12 +1862,35 @@ use ../../core/token
           ci += 1
     nil
 
+  # Classify an int literal's spelling from its TOKEN TEXT. Beyond-i64
+  # decimals are marked :dec_big AT PARSE TIME: magnitude must be decided
+  # here, not during inference — reading a packed literal node's sparse
+  # raw/value fields in infer_type materializes the node and perturbs
+  # slab-arena state, which shifts block numbering between stage 1 and
+  # stage 2 (a .ll identity break). `format` is an eager constructor
+  # field, so its reads stay side-effect-free. Decimal literals are
+  # unsigned in source; 19 same-length digit strings compare numerically.
+  -> int_literal_format(raw)
+    if raw.starts_with?("0x") || raw.starts_with?("0X")
+      return :hex
+    if raw.starts_with?("0b") || raw.starts_with?("0B")
+      return :bin
+    if raw.starts_with?("0o") || raw.starts_with?("0O")
+      return :oct
+    digits = raw
+    if digits.index("_") != nil
+      digits = digits.replace("_", "")
+    dl = digits.size()
+    if dl > 19 || (dl == 19 && digits > "9223372036854775807")
+      return :dec_big
+    nil
+
   # Build an Int AST node from an integer value via its decimal text — the
   # same construction T_INT uses (a bare Int.new(n) stores a value that
   # ast_get(:value) reads back wrong downstream).
   -> sigma_int(n)
     s = "" + n.to_s()
-    Tungsten:AST:Int.new(parse_int_value(s), nil, s)
+    Tungsten:AST:Int.new(parse_int_value(s), int_literal_format(s), s)
 
   # Rewrite implicit-mult quantities whose base is the bound variable into
   # arithmetic: QUANTITY[2,"x⁷"] with svar="x" → `2 * x ** 7`. A quantity
@@ -1947,14 +1977,7 @@ use ../../core/token
     # Integer
     if at_type?(T_INT)
       raw = advance_value()
-      fmt = nil
-      if raw.starts_with?("0x") || raw.starts_with?("0X")
-        fmt = :hex
-      elsif raw.starts_with?("0b") || raw.starts_with?("0B")
-        fmt = :bin
-      elsif raw.starts_with?("0o") || raw.starts_with?("0O")
-        fmt = :oct
-      return Tungsten:AST:Int.new(parse_int_value(raw), fmt, raw)
+      return Tungsten:AST:Int.new(parse_int_value(raw), int_literal_format(raw), raw)
 
     # Raw WValue literal: u0x followed by exactly 16 hex digits
     if at_type?(T_WVALUE)
@@ -2872,7 +2895,14 @@ use ../../core/token
     # advances — the identifier-vs-operator distinction below depends
     # on it for arity suffix handling.
     name_tok_type = parser_tok_type(@current_packed)
-    name = expect_method_name_value()
+    # `-> &(other)` — the lexer fuses `&(` into one BLOCK_CALL token, so
+    # the method name is `&` and the param list's LPAREN is already
+    # consumed; the params branch below keys on name_tok_type.
+    if name_tok_type == T_BLOCK_CALL
+      advance()
+      name = "&"
+    else
+      name = expect_method_name_value()
     # Setter methods: name= (e.g. cache_dir=)
     if at_type?(T_ASSIGN)
       advance()
@@ -2908,7 +2938,14 @@ use ../../core/token
 
     params = []
 
-    if arity == :block
+    if name_tok_type == T_BLOCK_CALL
+      # `&(`'s paren is part of the fused token — parse the param list
+      # straight to its closing RPAREN.
+      while !at_type?(T_RPAREN)
+        params.push(parse_method_param())
+        match_type?(T_COMMA)
+      expect_type(T_RPAREN)
+    elsif arity == :block
       params.push(Tungsten:AST:Param.new("&", nil, false, false, true, false))
     elsif arity != nil && arity != :splat
       i = 1
@@ -3670,7 +3707,7 @@ use ../../core/token
     if s.include?(".")
       return Tungsten:AST:Decimal.new(s)
     if s.to_i().to_s() == s
-      return Tungsten:AST:Int.new(parse_int_value(s), nil, s)
+      return Tungsten:AST:Int.new(parse_int_value(s), int_literal_format(s), s)
     Tungsten:AST:Var.new(s)
 
   # Class-body `with NAME in (type1 type2 …)` constraint clause.
@@ -3823,12 +3860,18 @@ use ../../core/token
       body = [parse_expression(false)]
     Tungsten:AST:Block.new(params, body)
 
-  -> parse_call_args_and_block(allow_block_without_args = false, call_line = nil, call_col = nil, call_name = nil)
+  -> parse_call_args_and_block(allow_block_without_args = false, call_line = nil, call_col = nil, call_name = nil, paren_open = false)
     args = nil
     block = nil
     has_parens = false
 
-    if at_type?(T_LPAREN)
+    # paren_open: the caller consumed a fused name+LPAREN token
+    # (BLOCK_CALL `&(`), so the arg list is already open.
+    if paren_open
+      has_parens = true
+      args = parse_arg_list(:RPAREN)
+      expect_type(T_RPAREN)
+    elsif at_type?(T_LPAREN)
       has_parens = true
       advance()
       args = parse_arg_list(:RPAREN)

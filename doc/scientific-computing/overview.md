@@ -7,7 +7,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | `tensor.w` | multi-D dense — **CPU** `Tensor.zeros([m,n])` + Metal path |
 | `tensor/decomposition.w` | [CP-ALS and Tucker HOSVD/HOOI](tensor-decomposition.md), dense CPU f32/f64 |
 | `linalg.w` | dense LA (nested lists) + BLAS |
-| `sparse.w` | **SparseMatrix** CSR/COO; SpMV + Apple Sparse Solvers (QR/Cholesky) |
+| `sparse.w` | **SparseMatrix** canonical CSR/COO; operators, iterative solves, diagnostics, Apple Sparse Solvers |
 | `fft.w` | pure radix-2 DFT |
 | `special.w` / `stats.w` | specials + distributions |
 | `solve.w` / `optim.w` / `interpolate.w` | ODE / opt / interp |
@@ -30,6 +30,7 @@ bin/tungsten -o /tmp/tcpu spec/sci/tensor_cpu_spec.w && /tmp/tcpu     # TENSOR_C
 bin/tungsten -o /tmp/tunit spec/sci/tensor_unit_spec.w && /tmp/tunit   # TENSOR_UNIT_OK
 bin/tungsten -o /tmp/spmv spec/sci/sparse_accel_spec.w && /tmp/spmv    # SPARSE_ACCEL_OK
 bin/tungsten -o /tmp/ssol spec/sci/sparse_solve_spec.w && /tmp/ssol    # SPARSE_SOLVE_OK
+bin/tungsten -o /tmp/score spec/sci/sparse_core_spec.w && /tmp/score  # SPARSE_CORE_OK
 bin/tungsten -o /tmp/wt   spec/sci/wtensor_spec.w && /tmp/wt            # WTENSOR_OK
 bin/tungsten -o /tmp/wts  spec/sci/wtensor_slice_spec.w && /tmp/wts     # WTENSOR_SLICE_OK
 bin/tungsten -o /tmp/ion  spec/sci/io_native_spec.w && /tmp/ion         # IO_NATIVE_OK

@@ -229,6 +229,8 @@
   auto :SparseAnalysis, "sparse_factor"
   auto :SparseFactor,   "sparse_factor"
   auto :SparseBlockFactor, "sparse_factor"
+  auto :SparseSolveCriteria, "sparse"
+  auto :SparseSolveResult,   "sparse"
   auto :CUDA,         "cuda"
   auto :MAC,          "mac"
   auto :Mutex,        "mutex"

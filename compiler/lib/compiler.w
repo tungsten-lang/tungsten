@@ -59,8 +59,7 @@ use target
   compile_started_at = clock()
 
   lower_started_at = clock()
-  mod = lower_ast(ast, source_path, verbose, fast_mode, build_defines, math_mode)
-  mod[:no_static_slab] = no_static_slab
+  mod = lower_ast(ast, source_path, verbose, fast_mode, build_defines, math_mode, no_static_slab)
   t_lower = clock() - lower_started_at
 
   cfg_started_at = clock()

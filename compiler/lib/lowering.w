@@ -1394,10 +1394,16 @@ use lowering/definitions
     i += 1
   defs
 
--> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise)
+-> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false)
   mod = wire_module(source_path)
   mod[:fast_mode] = fast_mode
   mod[:math_mode] = math_mode
+  # Must be set BEFORE body lowering: the slab-freeze emission below
+  # reads it mid-lowering. compile() historically stamped it onto mod
+  # only after lower_ast returned, so the flag never suppressed the
+  # freeze — no-static-slab builds froze the intern table anyway and
+  # their lazily-materialized literals paid heap-string minting.
+  mod[:no_static_slab] = no_static_slab
   # Build-time defines come from two sources, in priority order:
   #   1. `build_defines` arg — populated from `-D NAME=VALUE` CLI flags
   #   2. TUNGSTEN_DEFINES env var — useful for shell scripts and tests

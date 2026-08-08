@@ -2035,6 +2035,19 @@ ewscope_md_state = {ids: {}, order: []}
   nil
 
 -> emit_artifact(mod, frame_pointers = false)
+  # Per-module metadata state MUST reset here: both containers are
+  # process-global (top-level rebinding from a function would shadow, so
+  # they are mutated in place) and survive across compiles in one
+  # process. Without the reset, compile-batch's program N re-emits every
+  # prior program's loop-metadata nodes (novec bloat) and — worse —
+  # ewscope's cache is keyed by mod[:next_fuse_site] ids that restart at
+  # 0 per module, so program N's fused loop 0 would REUSE program N-1's
+  # !alias.scope/!noalias list: unrelated loops sharing a no-alias scope
+  # is a miscompile, not bloat.
+  novec_md_state[:kinds] = []
+  ewscope_md_state[:ids] = {}
+  ewscope_md_state[:order] = []
+
   datalayout = mod[:llvm_datalayout]
   triple = mod[:llvm_triple]
 

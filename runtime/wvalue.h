@@ -948,8 +948,11 @@ static inline int w_is_rational_any(WValue v) {
 
 /* ---- Decimal unboxing (subtype 00) ---- */
 static inline int64_t w_unbox_decimal_sig(WValue v) {
-    /* 39-bit sig at bits 45-7, sign-extend from bit 38 */
-    return ((int64_t)((v >> 7) & 0x7FFFFFFFFFULL) << 25) >> 25;
+    /* 39-bit sig at bits 45-7, sign-extend from bit 38. Shift UNSIGNED,
+     * cast after: left-shifting a negative int64 (bit 38 set — any
+     * negative sig) is formal UB that UBSan flags; the unsigned shift is
+     * defined and codegens identically. */
+    return ((int64_t)(((v >> 7) & 0x7FFFFFFFFFULL) << 25)) >> 25;
 }
 
 static inline int w_unbox_decimal_scale(WValue v) {
@@ -962,8 +965,9 @@ static inline int w_unbox_currency_symbol(WValue v) {
 }
 
 static inline int64_t w_unbox_currency_sig(WValue v) {
-    /* 37-bit sig at bits 41-5, sign-extend from bit 36 */
-    return ((int64_t)((v >> 5) & 0x1FFFFFFFFFULL) << 27) >> 27;
+    /* 37-bit sig at bits 41-5, sign-extend from bit 36. Unsigned shift,
+     * cast after — same UB avoidance as w_unbox_decimal_sig. */
+    return ((int64_t)((((v >> 5) & 0x1FFFFFFFFFULL) << 27))) >> 27;
 }
 
 static inline int w_unbox_currency_scale(WValue v) {

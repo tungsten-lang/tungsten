@@ -2028,8 +2028,20 @@ elsif command == "compile-batch"
 
   runtime_objs = nil
 
-  if ll_jobs.size() > 0
-    tmp_dir = files[0].split("/").copy(0, files[0].split("/").size() - 1).join("/")
+  # Runtime objects: link_binary's nil-runtime_objs default already
+  # serves the cached dev archive for the common configuration, so only
+  # pre-build a batch-local runtime when that default cannot (LTO
+  # release links compile the runtime from source per link — amortize it
+  # once; zstd needs the flag-compiled variant). The archive lands in a
+  # private scratch dir, NEVER the first input's directory (the old
+  # `files[0]`-derived path wrote `spec/numeric/runtime.a` into the
+  # source tree and broke outside it).
+  batch_lto = (release_mode || explicit_lto) && !no_lto
+  if ll_jobs.size() > 0 && (batch_lto || needs_zstd_runtime || frame_pointers)
+    tmp_dir = capture("mktemp -d " + dev_runtime_shell_quote(implicit_ll_root() + "/batch-rt.XXXXXX") + " 2>/dev/null").strip()
+    if tmp_dir == ""
+      << "Failed to create batch runtime scratch directory"
+      exit 1
     runtime_objs = compile_runtime_objs(tmp_dir, needs_zstd_runtime, verbose)
 
     if runtime_objs == nil

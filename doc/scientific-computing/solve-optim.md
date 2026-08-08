@@ -258,6 +258,103 @@ callback counts, skipped updates, active bounds, and convergence reason.
 Callback, non-finite, invalid-gradient, line-search, and iteration failures are
 explicit statuses.
 
+### Gradient-norm safeguarded globalized L-BFGS
+
+`Optimization.globalized_lbfgs` is an additive, unconstrained variant for
+small finite-dimensional binary64 problems with an analytic gradient:
+
+```w
+criteria = OptimizationGlobalizedLBFGSCriteria.new(
+  ~1.0e-8, # Euclidean gradient tolerance
+  300,     # maximum iterations
+  40,      # maximum Armijo trials per iteration
+  5,       # correction-history size m
+  ~1.0e-4, # c0
+  ~1.0,    # c1
+  nil)     # c2 = 1 / (2m + 3)
+
+result = Optimization.globalized_lbfgs(
+  objective, initial, analytic_gradient, criteria)
+```
+
+This method preserves the existing `Optimization.lbfgs` API and adds the
+gradient-dependent safeguards of Florian Mannel's globalized L-BFGS method.
+For a stored secant pair `s = x_next - x` and
+`y = grad(x_next) - grad(x)`, it computes the Euclidean-norm quality
+
+```text
+q(s, y) = min((y' s) / ||s||^2, (y' s) / ||y||^2)
+omega   = min(c0, c1 * ||grad(x)||^c2).
+```
+
+Positive-curvature pairs with a representable reciprocal curvature enter the
+bounded history, but every iteration reconsiders them: only pairs with
+`q(s, y) >= omega` participate in that iteration's two-loop recursion. A
+retained pair may therefore be used, filtered out, and used again before it is
+evicted. The scalar seed prefers the lower Barzilai--Borwein scale and is
+clipped to the intersection of
+`[(y's)/||y||^2, ||s||^2/(y's)]` and `[omega, 1/omega]` when that intersection
+is nonempty; otherwise it is clipped to `[omega, 1/omega]`. A history size of
+zero is supported and gives the safeguarded Barzilai--Borwein case without
+stored correction pairs. BB bounds are tracked separately from correction
+storage, so a representable BB interval can still seed the next iteration
+when absolute curvature or its reciprocal cannot be stored in binary64.
+
+The criteria defaults are `gradient_tol = 1e-8`, `max_iterations = 300`,
+`line_search_iterations = 40`, `history_size = 5`, `c0 = 1e-4`, `c1 = 1`,
+and `c2 = 1/(2m+3)` (therefore `1/13` for the default history). The default
+exponent is strictly below the paper's Armijo local-rate calibration
+`1/(2m+1)`. A custom positive `c2` is allowed; the result's
+`armijo_rate_parameter_condition?` diagnostic records whether that one
+exponent inequality holds. It does not verify the paper's other hypotheses.
+
+`OptimizationGlobalizedLBFGSResult` inherits the ordinary multivariate
+parameters, value, gradient, iteration/evaluation counts, line-search count,
+accepted-step count, status, and convergence reason. It additionally reports
+`safeguard_gradient_norm` (also available as `euclidean_gradient_norm`),
+`stored_pairs`, `last_pairs_used`, `maximum_pairs_used`,
+`filtered_pair_uses`, accepted and rejected curvature-pair counts,
+`bb_scale_updates`,
+`nonpositive_curvature_pairs`, `numerically_unusable_pairs`,
+`history_restarts` (also available as `descent_fallbacks`), the last
+`safeguard_threshold`/`omega`, and the last `seed_scale`.
+`filtered_pair_uses` counts pair/iteration occurrences, not distinct pairs.
+For compatibility, inherited `gradient_norm` remains the infinity norm; the
+safeguard and convergence test use the separately reported Euclidean norm.
+
+Convergence is an engineering stopping decision made only when the Euclidean
+gradient norm is at most `gradient_tol`; there is no step-size or objective
+change stopping test. Exhausted work returns `:iteration_limit`, and failed
+Armijo backtracking returns `:line_search_failed`. Callback exceptions,
+malformed gradients, and non-finite values use `:callback_error`,
+`:invalid_gradient`, and `:non_finite_value`, respectively. Safeguard
+underflow or inverse-scale overflow returns `:precision_limit`; a non-finite
+or non-descent quasi-Newton direction clears the suspect history, restarts
+with safeguarded steepest descent, and is counted. If the restarted direction
+or an Armijo trial step is not representable, the result is
+`:precision_limit`. Invalid criteria and initial vectors raise before
+iteration. Backtracking can recover from an invalid large trial; if it
+exhausts its limit, the status describes the terminal trial (callback,
+non-finite, precision, or insufficient decrease).
+
+The paper's global stationarity results assume a continuously differentiable,
+bounded-below objective and suitable continuity on the relevant level set;
+its stronger local-rate result additionally assumes a locally strongly convex
+cluster point with a Lipschitz gradient and the exponent calibration above.
+Core does not check those mathematical assumptions. “Globalized” means the
+search direction is safeguarded for convergence toward stationarity under the
+stated assumptions; it does not mean global optimization or a globally optimal
+answer. This API does not accept bounds, constraints, finite-difference
+gradients, sparse operators, separate evaluation budgets, cancellation, or a
+trace. It has no binary64 rounding-error theorem and always reports
+`certified? == false`.
+
+The algorithm and assumptions follow Mannel,
+[*A Globalization of L-BFGS and the Barzilai--Borwein Method for Nonconvex
+Unconstrained Optimization*](https://doi.org/10.1007/s10957-024-02565-5);
+the author's version is available as
+[arXiv:2401.03805](https://arxiv.org/abs/2401.03805).
+
 ### Carefully scoped equality and inequality constraints
 
 ```w

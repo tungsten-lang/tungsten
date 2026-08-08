@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(704 total), grouped by area, with its declaration, a one-line
+(706 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -203,6 +203,8 @@ summary from the source header, and a link to the source.
 | `OptimizationCriteria` | `+ OptimizationCriteria` | — | [`core/optimization.w`](../core/optimization.w) |
 | `OptimizationLeastSquaresCriteria` | — | — | [`core/optimization.w`](../core/optimization.w) |
 | `OptimizationLeastSquaresResult` | — | — | [`core/optimization.w`](../core/optimization.w) |
+| `OptimizationGlobalizedLBFGSCriteria` | — | — | [`core/optimization.w`](../core/optimization.w) |
+| `OptimizationGlobalizedLBFGSResult` | — | — | [`core/optimization.w`](../core/optimization.w) |
 | `OptimizationMultivariateCriteria` | — | — | [`core/optimization.w`](../core/optimization.w) |
 | `OptimizationMultivariateResult` | — | — | [`core/optimization.w`](../core/optimization.w) |
 | `OptimizationBounds` | — | — | [`core/optimization.w`](../core/optimization.w) |

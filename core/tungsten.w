@@ -192,6 +192,8 @@
   auto :OptimizationCriteria, "optimization"
   auto :OptimizationLeastSquaresCriteria, "optimization"
   auto :OptimizationLeastSquaresResult, "optimization"
+  auto :OptimizationGlobalizedLBFGSCriteria, "optimization"
+  auto :OptimizationGlobalizedLBFGSResult, "optimization"
   auto :OptimizationMultivariateCriteria, "optimization"
   auto :OptimizationMultivariateResult, "optimization"
   auto :OptimizationBounds, "optimization"

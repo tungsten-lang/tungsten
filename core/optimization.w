@@ -7,8 +7,9 @@
 #
 # Additional factored layers provide finite differences and explicit Calculus
 # adapters, safeguarded Brent/Newton/secant roots, small dense nonlinear least
-# squares, BFGS/L-BFGS with Armijo line search and projected box bounds, and a
-# deliberately limited quadratic-penalty constrained wrapper.
+# squares, BFGS/L-BFGS with Armijo line search and projected box bounds, a
+# gradient-norm safeguarded globalized L-BFGS variant, and a deliberately
+# limited quadratic-penalty constrained wrapper.
 #
 # Inputs and callback values are coerced to Float, so the numerical contract is
 # finite IEEE-754 binary64 arithmetic. Bisection assumes a continuous function
@@ -30,6 +31,7 @@ use core/optimization/dense_qr
 use core/optimization/root_methods
 use core/optimization/least_squares
 use core/optimization/multivariate
+use core/optimization/globalized_lbfgs
 
 + OptimizationStatus
   -> new(@code, @message)

@@ -15,6 +15,10 @@ optimization_autoload_check(
   OptimizationMultivariateCriteria.new.class_name,
   "OptimizationMultivariateCriteria")
 optimization_autoload_check(
+  "globalized_lbfgs_criteria",
+  OptimizationGlobalizedLBFGSCriteria.new.class_name,
+  "OptimizationGlobalizedLBFGSCriteria")
+optimization_autoload_check(
   "bounds",
   OptimizationBounds.new([~0.0], [~1.0]).class_name,
   "OptimizationBounds")
@@ -28,5 +32,14 @@ autoload_result = Optimization.least_squares(
 optimization_autoload_check(
   "result", autoload_result.class_name,
   "OptimizationLeastSquaresResult")
+
+autoload_globalized_result = Optimization.globalized_lbfgs(
+  -> (x) (x[0] - ~2.0) * (x[0] - ~2.0), [~0.0],
+  -> (x) [~2.0 * (x[0] - ~2.0)])
+optimization_autoload_check(
+  "globalized_lbfgs_result", autoload_globalized_result.class_name,
+  "OptimizationGlobalizedLBFGSResult")
+optimization_autoload_check(
+  "globalized_lbfgs_converged", autoload_globalized_result.converged?, true)
 
 << "optimization_autoload_spec: all checks passed"

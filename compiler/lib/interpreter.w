@@ -1832,6 +1832,14 @@ use target
   -> eval_view_field_var(node, env)
     recv = evaluate(ast_get(node, :receiver), env)
     field = ast_get(node, :field)
+    # `recv$value` is the raw NaN-boxed word of the receiver — the
+    # explicit-receiver twin of bare `$value`. Resolved before any data
+    # field or method named `value`, mirroring lower_view_field_var's
+    # precedence exactly (without this, `q$value` on a Quantity would
+    # dispatch the `value` METHOD and diverge from compiled). w_u64
+    # preserves the full bit pattern, promoting to BigInt as needed.
+    if field == "value"
+      return ccall("w_u64", recv)
     primitive_class = primitive_runtime_class(recv)
     if primitive_class != nil
       accessor = lookup_method(primitive_class, field)

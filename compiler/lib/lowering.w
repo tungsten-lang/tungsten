@@ -923,6 +923,19 @@ use lowering/definitions
     if n == "$value"
       return :raw_i64
     return var_types[n]
+  when :view_field_var
+    # `recv$value` is the explicit-receiver twin of bare `$value` and must
+    # infer :raw_i64 in EVERY expression context, exactly like the gvar
+    # case above. Without this, `(other$value >> 47) & 1` in an
+    # if-expression typed nil and the shift lowered through the BOXED
+    # w_bit path — which, on a bigint receiver, is a LIMB shift: the
+    # garbage magnitude tripped the over-band bail to w_add, whose shape
+    # gate re-admitted the pair, and the recursion presented as a silent
+    # stack death. (Real declared fields fall through to nil here — their
+    # lowering resolves the layout itself.)
+    if node.field == "value"
+      return :raw_i64
+    return nil
   when :self_ref
     return var_types["__self"]
   when :call

@@ -9,7 +9,8 @@
     u32 capacity
     u32 _pad2
     # The flexible limb tail, indexable through the strided inline-element
-    # path ($limbs[i], and other$limbs[i] on a `## BigInt`-hinted receiver).
+    # path ($limbs[i], and other$limbs[i] on a receiver whose type is
+    # known — a `(BigInt)` typed param or a `## BigInt` hint).
     # Element access is bounds-independent raw memory: every method owns its
     # own semantic bounds check against |$size| (or $capacity for writes).
     u64[] limbs
@@ -40,14 +41,14 @@
     n = $size ## i64
     if n == 0
       return false
-    flip = (wvalue_bits(self) >> 47) & 1
+    flip = ($value >> 47) & 1
     flip == 1 ? n > 0 : n < 0
 
   -> positive?
     n = $size ## i64
     if n == 0
       return false
-    flip = (wvalue_bits(self) >> 47) & 1
+    flip = ($value >> 47) & 1
     flip == 1 ? n < 0 : n > 0
 
   # In-place sign mutation, following the `!` convention (Array#sort!,
@@ -73,7 +74,7 @@
 
   -> abs!
     n = $size ## i64
-    flip = (wvalue_bits(self) >> 47) & 1
+    flip = ($value >> 47) & 1
     if flip == 1
       if n > 0
         $size = 0 - n
@@ -113,15 +114,8 @@
   # migration proceeds arm by arm, each with its own gate. See
   # benchmarks/runtime_ports/README.md.
   -> +(other)(BigInt)
-    an = $size ## i64
-    if ((wvalue_bits(self) >> 47) & 1) == 1
-      an = 0 - an
-
-    o = other ## BigInt
-    bn = o$size ## i64
-
-    if ((wvalue_bits(other) >> 47) & 1) == 1
-      bn = 0 - bn
+    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
+    bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
 
     am = an < 0 ? 0 - an : an
     bm = bn < 0 ? 0 - bn : bn
@@ -130,8 +124,8 @@
       return ccall("w_add", self, other)
 
     mask = 140737488355312
-    pa = (wvalue_bits(self) & mask) + 16
-    pb = (wvalue_bits(other) & mask) + 16
+    pa = ($value & mask) + 16
+    pb = (other$value & mask) + 16
 
     if (an > 0) == (bn > 0)
       # Equal-length same-sign pairs are bigint_add_equal_fast's domain —
@@ -155,13 +149,12 @@
         ll = bm
         sp = pa
         sl = am
-      result = ccall("w_bigint_alloc_boxed", ll + 1)
-      rp = (wvalue_bits(result) & mask) + 16
+      result = ccall("w_bigint_alloc_boxed", ll + 1) ## BigInt
+      rp = (result$value & mask) + 16
       carry = asm_add_uneq(rp ## i64, lp ## i64, ll ## i64, sp ## i64, sl ## i64) ## u64
       n = ll
       if carry != 0
-        r = result ## BigInt
-        r$limbs[ll] = carry
+        result$limbs[ll] = carry
         n = ll + 1
       return ccall("w_bigint_seal", result, an < 0 ? 0 - n : n)
 
@@ -173,7 +166,7 @@
       k = am - 1
       while k >= 0 && cmp == 0
         xa = $limbs[k] ## u64
-        xb = o$limbs[k] ## u64
+        xb = other$limbs[k] ## u64
         if xa != xb
           cmp = xa > xb ? 1 : 0 - 1
         k -= 1
@@ -189,7 +182,7 @@
       sp2 = pa
       sl2 = am
     dresult = ccall("w_bigint_alloc_boxed", bl)
-    drp = (wvalue_bits(dresult) & mask) + 16
+    drp = (dresult$value & mask) + 16
     asm_sub_uneq(drp ## i64, bp2 ## i64, bl ## i64, sp2 ## i64, sl2 ## i64)
     dneg = an < 0
     if cmp < 0
@@ -205,15 +198,8 @@
     ccall("w_add", self, other)
 
   -> -(other)(BigInt)
-    an = $size ## i64
-    if ((wvalue_bits(self) >> 47) & 1) == 1
-      an = 0 - an
-
-    o = other ## BigInt
-    bn0 = o$size ## i64
-
-    if ((wvalue_bits(other) >> 47) & 1) == 1
-      bn0 = 0 - bn0
+    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
+    bn0 = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
     bn = 0 - bn0
 
     am = an < 0 ? 0 - an : an
@@ -223,8 +209,8 @@
       return ccall("w_sub", self, other)
 
     mask = 140737488355312
-    pa = (wvalue_bits(self) & mask) + 16
-    pb = (wvalue_bits(other) & mask) + 16
+    pa = ($value & mask) + 16
+    pb = (other$value & mask) + 16
 
     if (an > 0) == (bn > 0)
       # Same sign: magnitude add. One fused kernel call covers the common
@@ -242,13 +228,12 @@
         ll = bm
         sp = pa
         sl = am
-      result = ccall("w_bigint_alloc_boxed", ll + 1)
-      rp = (wvalue_bits(result) & mask) + 16
+      result = ccall("w_bigint_alloc_boxed", ll + 1) ## BigInt
+      rp = (result$value & mask) + 16
       carry = asm_add_uneq(rp ## i64, lp ## i64, ll ## i64, sp ## i64, sl ## i64) ## u64
       n = ll
       if carry != 0
-        r = result ## BigInt
-        r$limbs[ll] = carry
+        result$limbs[ll] = carry
         n = ll + 1
       return ccall("w_bigint_seal", result, an < 0 ? 0 - n : n)
 
@@ -267,7 +252,7 @@
       k = am - 1
       while k >= 0 && cmp == 0
         xa = $limbs[k] ## u64
-        xb = o$limbs[k] ## u64
+        xb = other$limbs[k] ## u64
         if xa != xb
           cmp = xa > xb ? 1 : 0 - 1
         k -= 1
@@ -283,7 +268,7 @@
       sp2 = pa
       sl2 = am
     dresult = ccall("w_bigint_alloc_boxed", bl)
-    drp = (wvalue_bits(dresult) & mask) + 16
+    drp = (dresult$value & mask) + 16
     asm_sub_uneq(drp ## i64, bp2 ## i64, bl ## i64, sp2 ## i64, sl2 ## i64)
     dneg = an < 0
     if cmp < 0
@@ -301,28 +286,23 @@
   # reach the kernel, so a zero result cannot occur here (both operands are
   # multi-limb, hence nonzero).
   -> *(other)(BigInt)
-    an = $size ## i64
-    if ((wvalue_bits(self) >> 47) & 1) == 1
-      an = 0 - an
-    o = other ## BigInt
-    bn = o$size ## i64
-    if ((wvalue_bits(other) >> 47) & 1) == 1
-      bn = 0 - bn
+    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
+    bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
     am = an < 0 ? 0 - an : an
     bm = bn < 0 ? 0 - bn : bn
     if am < 2 || bm < 2 || am > 24 || bm > 24
       return ccall("w_mul", self, other)
     # Squaring (identical boxed bits, flip included) keeps C's dedicated
     # square path, mirroring bigint_mul_src_shape's a == b exclusion.
-    if wvalue_bits(self) == wvalue_bits(other)
+    if $value == other$value
       return ccall("w_mul", self, other)
 
     mask = 140737488355312
-    pa = (wvalue_bits(self) & mask) + 16
-    pb = (wvalue_bits(other) & mask) + 16
+    pa = ($value & mask) + 16
+    pb = (other$value & mask) + 16
     total = am + bm
     result = ccall("w_bigint_alloc_boxed", total)
-    rp = (wvalue_bits(result) & mask) + 16
+    rp = (result$value & mask) + 16
     asm_mulbase(rp ## i64, 0, pa ## i64, 0, pb ## i64, 0, am ## i64, bm ## i64)
     neg = false
     if (an < 0) != (bn < 0)
@@ -364,11 +344,11 @@
     n = $size ## i64
     if n == 0
       return self
-    flip = (wvalue_bits(self) >> 47) & 1
+    flip = ($value >> 47) & 1
     if flip == 1 ? n < 0 : n > 0
       return self
     ccall("w_bigint_mark_shared_value", self)
-    wvalue_from_bits(wvalue_bits(self) ^ 140737488355328)
+    wvalue_from_bits($value ^ 140737488355328)
 
   # Conversion to the already-integral representation is receiver identity.
   # Do not normalize: callers can observe exact heap identity.

@@ -64,8 +64,24 @@ check("neg_small", (0 - 6) & 13, 8)
 # Explicit operator send
 check("explicit_send", a.&(b), (1 << 130) + 4145)
 
-# Chained ops across the family (| and ^ remain runtime-routed today).
+# Chained ops across the family.
 # a & b is odd, so `| 1` is a no-op and `^ 1` clears bit 0.
 check("mix_family", ((a & b) | 1) ^ 1, (1 << 130) + 4144)
+
+# --- Bitwise OR (source-routed for both-positive multi-limb pairs) ---
+or_uneq_want = 1608507319692836945734282169164648272980082081073635916837945
+check("or_pp_uneq", a | b, or_uneq_want)
+check("or_pp_uneq_comm", b | a, or_uneq_want)
+or_eq_want = 1809251394333065553493296640760748560207343511668284413344754151620345856079
+check("or_pp_eq", c4 | d4, or_eq_want)
+# Tail-copy path: max-width result from a skew pair
+or_skew_want = 1606938044258990275543323221808846356376056492212519908147215
+check("or_skew", ((1 << 200) + 7) | ((1 << 130) + 9), or_skew_want)
+# Negatives keep C's fused two's-complement pass
+or_np_want = 1606938044258990275541962092341162602522202993782792835309577
+check("or_neg_pos", (0 - a) | b, 0 - or_np_want)
+check("or_self", a | a, a)
+check("or_int_arg", a | 255, a + 255 - 57)
+check("or_explicit_send", a.|(b), or_uneq_want)
 
 << "bigint_bitwise_spec: all checks passed"

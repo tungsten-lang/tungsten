@@ -1,0 +1,12 @@
+# OR campaigns, interleaved ABBA pairs, thread-CPU medians.
+# Campaign A (SPOILED: host load ~12-22, concurrent Ruby bootstrap builds;
+# recorded for honesty — the or-sixtyfour 1.144 did not reproduce):
+#   or-one 0.995  or-int-arg 1.001  or-four 1.066  or-fortyeight 0.911
+#   or-sixtyfour 1.144  or-skew 0.946  or-neg 1.014
+# Campaign B (load ~3.4, PAIRS=10, arm rows): or-four 1.082
+#   or-fortyeight 0.887  or-sixtyfour 1.034
+# Campaign C (load ~3.4, full PAIRS=8, raw samples in
+#   bigint_opor_public_camp2_results.txt):
+#   or-one 1.001  or-int-arg 1.009  or-four 1.090  or-fortyeight 0.936
+#   or-sixtyfour 1.021  or-skew 0.939  or-neg 1.049
+# Worst passing row 1.090; retention gate <= 1.10 met in B and C.

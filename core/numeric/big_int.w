@@ -19,18 +19,14 @@
     $size == 0
 
   -> even?
-    n = $size ## i64
-    if n == 0
+    if $size == 0
       return true
-    low = $limbs[0] ## u64
-    (low & 1) == 0
+    ($limbs[0] & 1) == 0
 
   -> odd?
-    n = $size ## i64
-    if n == 0
+    if $size == 0
       return false
-    low = $limbs[0] ## u64
-    (low & 1) != 0
+    ($limbs[0] & 1) != 0
 
   # Sign predicates compose the header sign with the tag-sign overlay
   # (encoding v4): `-x` hands out the same buffer with bit 47 of the boxed

@@ -323,7 +323,7 @@
     # the static slab was frozen. StringBuffer#to_s can instead return the old
     # slab value; append it to an empty string to mint the exact fresh mode-7
     # representation in that one state.
-    if ((wvalue_bits(result) >> 1) & 7) == 6
+    if ((result$value >> 1) & 7) == 6
       slab_frozen = ccall_nobox("w_slab_is_frozen") ## i64
       if slab_frozen == 1
         fresh = ""

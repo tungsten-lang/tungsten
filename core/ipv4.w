@@ -123,7 +123,7 @@
     self.netmask
 
   -> include?(address)
-    candidate = wvalue_bits(address)
+    candidate = address$value
     # Comparing tag+packed-subtype rejects non-IPv4 values without a runtime
     # type lookup. `$value` is necessarily IPv4 inside this method.
     if (candidate >> 45) != ($value >> 45)
@@ -142,7 +142,7 @@
     (candidate_address & mask) == (cidr_address & mask)
 
   -> contains?(address)
-    candidate = wvalue_bits(address)
+    candidate = address$value
     if (candidate >> 45) != ($value >> 45)
       return false
     p = (($value >> 6) & 0x3F) ## i64

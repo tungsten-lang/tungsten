@@ -158,13 +158,13 @@
   # payload boxing of the result is exact. A BigInt argument falls through
   # to the generic promoting loop below.
   -> gcd(other)
-    if ((wvalue_bits(other) >> 48) & 0xFFFF) == 0xFFFA
+    if ((other$value >> 48) & 0xFFFF) == 0xFFFA
       a = ($value & 0xFFFFFFFFFFFF) ## i64
       if (a & 0x800000000000) != 0
         a -= 281_474_976_710_656
       if a < 0
         a = 0 - a
-      b = (wvalue_bits(other) & 0xFFFFFFFFFFFF) ## i64
+      b = (other$value & 0xFFFFFFFFFFFF) ## i64
       if (b & 0x800000000000) != 0
         b -= 281_474_976_710_656
       if b < 0
@@ -191,13 +191,13 @@
   # 48-bit payload still become exact BigInts. By convention any lcm with
   # zero is zero, including lcm(0, 0).
   -> lcm(other)
-    if ((wvalue_bits(other) >> 48) & 0xFFFF) == 0xFFFA
+    if ((other$value >> 48) & 0xFFFF) == 0xFFFA
       aa = ($value & 0xFFFFFFFFFFFF) ## i64
       if (aa & 0x800000000000) != 0
         aa -= 281_474_976_710_656
       if aa < 0
         aa = 0 - aa
-      bb = (wvalue_bits(other) & 0xFFFFFFFFFFFF) ## i64
+      bb = (other$value & 0xFFFFFFFFFFFF) ## i64
       if (bb & 0x800000000000) != 0
         bb -= 281_474_976_710_656
       if bb < 0

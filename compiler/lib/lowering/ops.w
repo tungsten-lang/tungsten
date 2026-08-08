@@ -2368,6 +2368,23 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if node.op == :PLUS
       return lower_int(ctx, node.operand)
 
+  # Integer-scalar `-x` desugars to `0 - x` so the binary machinery's
+  # native/raw/guarded arms apply — the generic path below boxes the
+  # operand and calls the polymorphic w_neg, measured 4-9x slower in
+  # tight loops (worst on ## i32). Scope is deliberate:
+  #   - machine ints and boxed :int only. The guarded/binary w_sub
+  #     fallback matches w_neg's promotion semantics exactly.
+  #   - floats KEEP w_neg: `0.0 - x` turns +0.0 into +0.0 where negation
+  #     must produce -0.0.
+  #   - bigints KEEP w_neg: it is the O(1) tag-flip alias; `0 - x` would
+  #     route w_sub's promotion arm and allocate.
+  #   - objects KEEP w_neg: they dispatch `-@`; `0 - obj` has no
+  #     reverse-operand dispatch.
+  if node.op == :MINUS && node.operand != nil
+    ut = infer_type(node.operand, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    if ut != nil && !is_bigint_type(ut) && (ut == :int || ut in (:raw_int :raw_i64 :raw_u64) || is_machine_int_type(ut))
+      return lower_binary_op(ctx, Tungsten:AST:BinaryOp.new(Tungsten:AST:Int.new(0, nil, "0"), :MINUS, node.operand))
+
   operand = lower_expression(ctx, node.operand)
   operand_reg = ensure_i64_value(wfn, operand)
 

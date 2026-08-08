@@ -4867,8 +4867,8 @@ use target
   # `bool[N]` / `i32[N]` / etc. — zero-filled typed array. Mirrors
   # lower_typed_array_new (compiler/lib/lowering/literals.w): bool routes
   # to the bit-packed BoolArray allocator, other known element types to
-  # the generic bits-keyed zero-fill, anything else falls back to a plain
-  # empty Array so the tree-walker never crashes on an unrecognized etype.
+  # the generic bits-keyed zero-fill, anything else raises — mirroring
+  # the compiled engine's E_LOWER_TYPED_ARRAY_UNSUPPORTED.
   -> eval_typed_array_new(node, env)
     etype = ast_get(node, :element_type)
     size = evaluate(ast_get(node, :size), env)
@@ -4908,7 +4908,7 @@ use target
       bits = 0 - 64
     if bits != 0
       return ccall_rawargs("w_array_zeros", bits, size_raw)
-    ccall("w_array_new_empty")
+    raise "typed array element type '" + etype + "' is not supported yet (supported: u1/i1/u4/i4/u8/i8/u16/i16/u32/i32/u64/i64/f32/f64/bf16/w64/bool)"
 
   # -- String interpolation --
 

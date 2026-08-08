@@ -99,6 +99,11 @@ matching (`.int`, `.var`, `.call`, …).
 `TUNGSTEN_FREE` (default on) controls compile-time `free` insertion for
 non-escaping heap values; set `TUNGSTEN_FREE=0` to disable.
 
+**Benchmarking**: plain `-o` builds are `-O0` end to end (user program AND
+the runtime archive) — always benchmark with `--release` (`-O3` + LTO).
+`-O0` numbers don't just scale, they invert algorithm rankings: branchless
+kernels degrade 4-6x while simple loops degrade ~2x.
+
 ## Repository layout
 
 - `compiler/` — the self-hosted compiler. `tungsten.w` is the entry point;

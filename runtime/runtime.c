@@ -52048,9 +52048,12 @@ static WValue w_array_csort_impl(WValue arr, int64_t lo, int64_t hi, int auto_ra
     }
     if (fallback || hi < lo) return w_array_sort(arr);
     uint64_t range = (uint64_t)(hi - lo) + 1;
-    /* Counting sort is only viable when the range is comparable to n; a sparse
-     * range would allocate (and zero) an enormous counts array. */
-    if (range > (uint64_t)n * 4 + (1u << 20)) return w_array_sort(arr);
+    /* Counting sort is only viable when the range is comparable to n; a
+     * sparse range would allocate (and zero) an enormous counts array. The
+     * old floor of 1MB let a 64-element array with a 64k range pay ~900
+     * ns/elem zeroing counts nobody used — 4096 keeps the small-n floor
+     * proportionate while still admitting every n>=range/4 workload. */
+    if (range > (uint64_t)n * 4 + 4096) return w_array_sort(arr);
     int64_t *counts = (int64_t *)calloc((size_t)range, sizeof(int64_t));
     if (!counts) return w_array_sort(arr);
     for (int64_t i = 0; i < n; i++)

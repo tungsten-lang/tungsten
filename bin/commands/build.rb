@@ -836,7 +836,12 @@ end
 # Bit entry points still use LTO_FLAG independently in link_flags below.
 runtime_cache_schema = "runtime-cache-v2"
 fast_clang_flags = fast_mode ? %w[-ffast-math] : []
-profile_cflags = [release_mode ? "-O3" : "-O0", debug_enabled ? "-g" : "-DNDEBUG"]
+# Dev runtime at -O1 (E6): -O0 masked UB that only optimization surfaces
+# (the sweep found and fixed the one real diagnostic — shift-of-negative
+# in the sig unboxers), and the security-adjacent sources (http2/http3)
+# deserve optimized-build coverage in the daily loop. -O1 keeps compile
+# time close to -O0; --release stays -O3.
+profile_cflags = [release_mode ? "-O3" : "-O1", debug_enabled ? "-g" : "-DNDEBUG"]
 cc_flags = profile_cflags + %w[-pthread] + MARCH_FLAGS + fast_clang_flags + %w[-c] + tls_flags + http2_flags + onig_cflags + zstd_cflags
 runtime_objc_flags = profile_cflags + MARCH_FLAGS + fast_clang_flags + %w[-c -x objective-c]
 # TUNGSTEN_SANITIZE="-fsanitize=thread" (or address) instruments the runtime
@@ -895,7 +900,10 @@ bootstrap_compiler_clang_opt =
   else
     debug_flag = debug_enabled ? " -g" : ""
     fast_flag = fast_mode ? " -ffast-math" : ""
-    "-O0#{debug_flag}#{fast_flag}"
+    # Stage-2 compiler at -O1 (E6): the installed dev compiler runs every
+    # spec compile; -O0 was pure lost throughput. Stage 1 stays -O0
+    # below (throwaway binary, link speed dominates).
+    "-O1#{debug_flag}#{fast_flag}"
   end
 
 runtime_dependencies_key = Digest::SHA256.new

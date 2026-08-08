@@ -64,6 +64,18 @@ Equivalently, at the language level:
 
 Identity versus structural equality for collections is defined by the classes involved; a strictly conforming program **must not** assume pointer identity for immutable immediates that the runtime may intern or tag.
 
+### 4.2.3 Hash iteration order
+
+Hashes iterate in **insertion order**, on every conforming engine. This is a guaranteed language semantic, not an implementation detail:
+
+* A hash literal iterates in source order.
+* `each`, `keys`, `values`, `to_s`, and everything built on them (`merge`, `invert`, `transform_*`, the `Enumerable` surface, JSON serialization) observe the same order.
+* Overwriting an existing key's value keeps the key's original position.
+* Deleting a key removes it without disturbing the relative order of the others.
+* Inserting a key that is not present — including re-inserting a previously deleted key — appends it at the end.
+
+Programs may rely on this order; conversely, programs must not rely on any relationship between iteration order and key hash values.
+
 ## 4.3 Scoping and environments
 
 Names are resolved in an _environment_: a chain of variable maps with a current _self_ (the receiver of the active method).

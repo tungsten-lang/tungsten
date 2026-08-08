@@ -38,7 +38,7 @@ summary from the source header, and a link to the source.
 | `Duration` | `+ Duration` | Duration — time span (tag 0xFFFF). Two-component representation: | [`core/duration.w`](../core/duration.w) |
 | `Error` | `+ Error` | Error — base error class | [`core/error.w`](../core/error.w) |
 | `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
-| `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
+| `Hash` | `+ Hash` | Hash — compact dict; iteration is insertion order (guaranteed, all engines) | [`core/hash.w`](../core/hash.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
 | `Instant` | `+ Instant` | Instant — millisecond-precision timestamp (tag 0xFFFB). | [`core/instant.w`](../core/instant.w) |

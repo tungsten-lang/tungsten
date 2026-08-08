@@ -16,8 +16,7 @@
     u64[] limbs
 
   -> zero?
-    n = $size ## i64
-    n == 0
+    $size == 0
 
   -> even?
     n = $size ## i64
@@ -114,7 +113,7 @@
   # migration proceeds arm by arm, each with its own gate. See
   # benchmarks/runtime_ports/README.md.
   -> +(other)(BigInt)
-    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
+    an = ((     $value >> 47) & 1) == 1 ? 0 - $size      : $size
     bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
 
     am = an < 0 ? 0 - an : an
@@ -134,6 +133,7 @@
       # proven, skip the polymorphic preamble).
       if am == bm
         return ccall("w_bigint_add", self, other)
+
       # Same sign: magnitude add. One fused kernel call covers the common
       # limbs AND the longer operand's remainder — no source tail loop.
       # Plain assignments, never ternaries, for raw limb ADDRESSES: a
@@ -144,18 +144,22 @@
       ll = am
       sp = pb
       sl = bm
+
       if am < bm
         lp = pb
         ll = bm
         sp = pa
         sl = am
+
       result = ccall("w_bigint_alloc_boxed", ll + 1) ## BigInt
       rp = (result$value & mask) + 16
       carry = asm_add_uneq(rp ## i64, lp ## i64, ll ## i64, sp ## i64, sl ## i64) ## u64
       n = ll
+
       if carry != 0
         result$limbs[ll] = carry
         n = ll + 1
+
       return ccall("w_bigint_seal", result, an < 0 ? 0 - n : n)
 
     # Opposite signs: magnitude subtract, larger operand's sign wins.
@@ -198,7 +202,7 @@
     ccall("w_add", self, other)
 
   -> -(other)(BigInt)
-    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
+    an  = ((     $value >> 47) & 1) == 1 ? 0 - $size      : $size
     bn0 = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
     bn = 0 - bn0
 
@@ -223,18 +227,22 @@
       ll = am
       sp = pb
       sl = bm
+
       if am < bm
         lp = pb
         ll = bm
         sp = pa
         sl = am
+
       result = ccall("w_bigint_alloc_boxed", ll + 1) ## BigInt
       rp = (result$value & mask) + 16
       carry = asm_add_uneq(rp ## i64, lp ## i64, ll ## i64, sp ## i64, sl ## i64) ## u64
       n = ll
+
       if carry != 0
         result$limbs[ll] = carry
         n = ll + 1
+
       return ccall("w_bigint_seal", result, an < 0 ? 0 - n : n)
 
     # Post-flip opposite signs mean the RAW operand signs MATCH — and the
@@ -256,23 +264,29 @@
         if xa != xb
           cmp = xa > xb ? 1 : 0 - 1
         k -= 1
+
     if cmp == 0
       return 0
+
     bp2 = pa
     bl = am
     sp2 = pb
     sl2 = bm
+
     if cmp < 0
       bp2 = pb
       bl = bm
       sp2 = pa
       sl2 = am
+
     dresult = ccall("w_bigint_alloc_boxed", bl)
     drp = (dresult$value & mask) + 16
     asm_sub_uneq(drp ## i64, bp2 ## i64, bl ## i64, sp2 ## i64, sl2 ## i64)
     dneg = an < 0
+
     if cmp < 0
       dneg = bn < 0
+
     ccall("w_bigint_seal", dresult, dneg ? 0 - bl : bl)
 
   -> -(other)(Number)

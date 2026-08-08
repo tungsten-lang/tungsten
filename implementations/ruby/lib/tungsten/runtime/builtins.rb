@@ -1535,8 +1535,23 @@ module Tungsten
           end
         end
 
+        # Hash delete matches the indifferent read path ([] / fetch via
+        # hash_indifferent_get): canonicalize exact-numeric keys, then try
+        # the alternate symbol ↔ string form before giving up.
         interpreter.define_method_builtin("delete") do |recv, args, _block|
-          recv.delete(args[0])
+          if recv.is_a?(::Hash)
+            key = interpreter.send(:canonical_hash_key, args[0])
+            unless recv.key?(key)
+              if key.is_a?(::Symbol) && recv.key?(key.name)
+                key = key.name
+              elsif key.is_a?(String) && recv.key?(key.to_sym)
+                key = key.to_sym
+              end
+            end
+            recv.delete(key)
+          else
+            recv.delete(args[0])
+          end
         end
 
         # ── Integer/Float builtins ───────────────────────────────────────

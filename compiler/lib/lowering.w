@@ -1593,7 +1593,6 @@ use lowering/definitions
           mod[:known_pure_calls][call_key] = fn_name
           if mod[:fn_memo_tables][call_key] == nil
             mod[:fn_memo_tables][call_key] = fn_name + ".memo"
-            mod[:fn_memo_table_order].push(call_key)
     if ast_kind(expr) in (:class_def :module_def)
       # Skip generic templates from known_classes / builtin marking —
       # they're not real classes. The specialization pass synthesizes
@@ -1909,7 +1908,6 @@ use lowering/definitions
                     mod[:known_pure_calls][static_key] = inst_fn_name
                     if mod[:fn_memo_tables][static_key] == nil
                       mod[:fn_memo_tables][static_key] = inst_fn_name + ".memo"
-                      mod[:fn_memo_table_order].push(static_key)
           elsif ast_kind(mnode) == :call && mnode.name in ("ro" "rw")
             ai = 0
             while ai < mnode.args.size()
@@ -1988,7 +1986,7 @@ use lowering/definitions
   # Prepend to main function so they run before any quantity display.
   # They live on mod, not ctx — see assign_custom_unit in literals.w.
   if mod[:custom_units] != nil && mod[:custom_units].size() > 0
-    cu_keys = mod[:custom_units].keys().sort()
+    cu_keys = mod[:custom_units].keys()
     reg_instructions = []
     cui = 0
     while cui < cu_keys.size()

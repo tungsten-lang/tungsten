@@ -257,7 +257,7 @@ use wire
     return {}
   # Start assuming all are promotable
   promotable = {}
-  slot_names = slots.keys().sort()
+  slot_names = slots.keys()
   si = 0
   while si < slot_names.size()
     name = slot_names[si]
@@ -300,7 +300,7 @@ use wire
 
   # Return set of promotable pointer names
   result = {}
-  slot_names = slots.keys().sort()
+  slot_names = slots.keys()
   si = 0
   while si < slot_names.size()
     ptr = slots[slot_names[si]]
@@ -334,7 +334,7 @@ use wire
 
 -> place_phi_nodes(func, promotable, var_defs, df)
   placements = {}  # block_index → [ptr, ...]
-  ptrs = promotable.keys().sort()
+  ptrs = promotable.keys()
   pi = 0
   while pi < ptrs.size()
     ptr = ptrs[pi]
@@ -399,7 +399,7 @@ use wire
 
   # current_def[ptr] = stack of current SSA values
   current_def = {}
-  ptrs = promotable.keys().sort()
+  ptrs = promotable.keys()
   pi = 0
   while pi < ptrs.size()
     current_def[ptrs[pi]] = []
@@ -459,7 +459,7 @@ use wire
       stack.pop()
       pushes = stack_push_counts[block_idx]
       if pushes != nil
-        dptrs = pushes.keys().sort()
+        dptrs = pushes.keys()
         di = 0
         while di < dptrs.size()
           dp = dptrs[di]
@@ -697,7 +697,7 @@ use wire
       pbi += 1
 
     pruned = {}
-    pkeys = promotable.keys().sort()
+    pkeys = promotable.keys()
     pi = 0
     while pi < pkeys.size()
       ptr = pkeys[pi]
@@ -716,7 +716,7 @@ use wire
 
   if profile != nil
     profile[:phi_secs] = profile[:phi_secs] + (clock() - phi_started_at)
-    phi_blocks = phi_placements.keys().sort()
+    phi_blocks = phi_placements.keys()
     profile[:phi_block_count] = profile[:phi_block_count] + phi_blocks.size()
     pbi = 0
     while pbi < phi_blocks.size()

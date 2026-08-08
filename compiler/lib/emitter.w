@@ -1440,16 +1440,15 @@ novec_md_state = {kinds: []}
 # and the novec range (31423+k), which would need ~270k stamped loops to
 # collide. Deterministic: sites are numbered in lowering order and the map
 # fills in render order.
-ewscope_md_state = {ids: {}, order: []}
+ewscope_md_state = {ids: {}}
 
 -> ewscope_list_id(sid)
   cached = ewscope_md_state[:ids][sid]
   if cached != nil
     return cached
-  k = ewscope_md_state[:order].size()
+  k = ewscope_md_state[:ids].size()
   list_id = (300001 + k * 2).to_s()
   ewscope_md_state[:ids][sid] = list_id
-  ewscope_md_state[:order].push(sid)
   list_id
 
 -> ewscope_store_suffix(inst)
@@ -1463,7 +1462,7 @@ ewscope_md_state = {ids: {}, order: []}
   ", !noalias !" + ewscope_list_id(inst[:ewscope])
 
 -> ewscope_md_defs()
-  n = ewscope_md_state[:order].size()
+  n = ewscope_md_state[:ids].size()
   if n == 0
     return ""
   o = StringBuffer(96)
@@ -1760,18 +1759,12 @@ ewscope_md_state = {ids: {}, order: []}
   lbr = "\["
   rbr = "]"
 
-  # One private constant per unique source file path.
+  # One private constant per unique source file path. Ids are assigned
+  # first-seen, so the hash's insertion order IS id order (spec §4.2.3).
   file_keys = files.keys()
-  # Build id-sorted key list so emission order matches id values.
-  id_to_key = {}
   fi = 0
   while fi < file_keys.size()
     k = file_keys[fi]
-    id_to_key[files[k]] = k
-    fi += 1
-  fi = 0
-  while fi < file_keys.size()
-    k = id_to_key[fi]
     bl = utf8_byte_length(k) + 1
     out << "@.wcs.file."
     out << fi.to_s()
@@ -2046,7 +2039,6 @@ ewscope_md_state = {ids: {}, order: []}
   # is a miscompile, not bloat.
   novec_md_state[:kinds] = []
   ewscope_md_state[:ids] = {}
-  ewscope_md_state[:order] = []
 
   datalayout = mod[:llvm_datalayout]
   triple = mod[:llvm_triple]
@@ -2118,12 +2110,13 @@ ewscope_md_state = {ids: {}, order: []}
       bli += 1
     globals_out << "\n"
 
-  # Memo table globals
+  # Memo table globals, in first-use order (hash insertion order).
   memo_tables = mod[:fn_memo_tables]
   if memo_tables != nil
-    memo_keys = mod[:used_memo_table_order]
+    memo_keys = mod[:used_memo_tables]
     if memo_keys == nil
-      memo_keys = memo_tables.keys().sort()
+      memo_keys = memo_tables
+    memo_keys = memo_keys.keys()
     emitted_memo_globals = {}
     emitted_memo_global_count = 0
     mk = 0
@@ -2142,7 +2135,7 @@ ewscope_md_state = {ids: {}, order: []}
   # Class globals
   classes = mod[:known_classes]
   if classes != nil
-    class_keys = classes.keys().sort()
+    class_keys = classes.keys()
     ck = 0
     while ck < class_keys.size()
       globals_out << "@class."
@@ -2166,7 +2159,7 @@ ewscope_md_state = {ids: {}, order: []}
     var_types = mod[:top_level_var_types]
     if var_types == nil
       var_types = {}
-    tlv_keys = tlv.keys().sort()
+    tlv_keys = tlv.keys()
     ti = 0
     while ti < tlv_keys.size()
       nm = tlv_keys[ti]
@@ -2203,7 +2196,7 @@ ewscope_md_state = {ids: {}, order: []}
   # global mangling above.
   cvg = mod[:cvar_globals]
   if cvg != nil
-    cvg_keys = cvg.keys().sort()
+    cvg_keys = cvg.keys()
     ci = 0
     while ci < cvg_keys.size()
       globals_out << "@cvar."
@@ -2545,7 +2538,7 @@ ewscope_md_state = {ids: {}, order: []}
         if paren != nil && paren > at
           declared_names[dl.slice(at + 1, paren - at - 1)] = true
     dli += 1
-  ccall_keys = ccall_needed.keys().sort()
+  ccall_keys = ccall_needed.keys()
   ck = 0
   while ck < ccall_keys.size()
     iname = ccall_keys[ck]
@@ -2763,7 +2756,7 @@ ewscope_md_state = {ids: {}, order: []}
     if i == 0
       if slots != nil
         heap_slots = f[:heap_slot_names]
-        slot_names = slots.keys().sort()
+        slot_names = slots.keys()
         j = 0
         while j < slot_names.size()
           ptr = slots[slot_names[j]]

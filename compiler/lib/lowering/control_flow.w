@@ -683,7 +683,7 @@
   # accumulated value can exceed the 48-bit nanbox payload range.
   # Inline nanbox would mask to 48 bits and truncate. w_int handles
   # any i64 correctly, promoting to bigint when needed.
-  unames = unboxed.keys().sort()
+  unames = unboxed.keys()
   ui = 0
   while ui < unames.size()
     vname = unames[ui]

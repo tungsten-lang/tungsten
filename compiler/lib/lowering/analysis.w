@@ -28,7 +28,7 @@
   # back into the boxed path. This change is the primary perf
   # unblocker for Phase 2's hot-loop story.
   result = []
-  keys = compound_vars.keys().sort()
+  keys = compound_vars.keys()
   i = 0
   while i < keys.size()
     name = keys[i]

@@ -145,15 +145,14 @@
   arity
 
 -> mark_memo_table_used(mod, call_key)
-  if mod[:used_memo_tables][call_key] == true
-    return nil
   mod[:used_memo_tables][call_key] = true
-  mod[:used_memo_table_order].push(call_key)
   nil
 
+# Hash iteration is insertion order (spec §4.2.3), so used_memo_tables
+# itself carries first-use order — no side array needed.
 -> prepend_memo_table_initializers(main_fn, mod)
-  memo_keys = mod[:used_memo_table_order]
-  if memo_keys == nil || memo_keys.size() == 0
+  memo_keys = mod[:used_memo_tables].keys()
+  if memo_keys.size() == 0
     return nil
 
   init_instructions = []
@@ -1027,7 +1026,6 @@
     mod[:known_pure_calls][call_key] = fn_name
     if mod[:fn_memo_tables][call_key] == nil
       mod[:fn_memo_tables][call_key] = fn_name + ".memo"
-      mod[:fn_memo_table_order].push(call_key)
   if node.param_types != nil
     mod[:known_fn_overloads][name] = true
 

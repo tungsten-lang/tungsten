@@ -374,7 +374,7 @@
 -> materialize_bindings(ctx)
   wfn = ctx[:func]
   bindings = ctx[:bindings]
-  names = bindings.keys().sort()
+  names = bindings.keys()
   preserved = {}
   i = 0
   while i < names.size()

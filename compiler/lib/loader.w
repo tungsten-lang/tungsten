@@ -36,6 +36,9 @@ use parser
     bindings
 
   -> canonical_service_bindings(bindings)
+    # Sorted deliberately (NOT an iteration-order workaround): the env
+    # string's pair order is caller-controlled, and the canonical form
+    # must be identical regardless of how the pairs were written.
     keys = bindings.keys().sort()
     parts = []
     i = 0

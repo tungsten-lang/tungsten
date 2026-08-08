@@ -561,7 +561,7 @@ use hashing
 -> build_hash_symbols(hash_groups, min_prefix)
   used = {}
   hash_symbols = {}
-  hkeys = hash_groups.keys().sort()
+  hkeys = hash_groups.keys()
   hi = 0
   while hi < hkeys.size()
     h = hkeys[hi]
@@ -633,7 +633,7 @@ use hashing
   out << ",\n"
   out << "  \"hashes\": {\n"
 
-  hkeys = hash_groups.keys().sort()
+  hkeys = hash_groups.keys()
   hi = 0
   while hi < hkeys.size()
     h = hkeys[hi]

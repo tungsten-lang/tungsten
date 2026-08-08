@@ -1734,6 +1734,9 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
   if em == nil
     return nil
   defs = ""
+  # Sorted deliberately (NOT an iteration-order workaround): -D flags may
+  # arrive in any order across invocations, and the cache identity string
+  # must not change when they do.
   dk = build_defines.keys().sort()
   dki = 0
   while dki < dk.size()

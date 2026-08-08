@@ -55,7 +55,7 @@ record_result() {
   # Job mode: persist for the parent's ordered aggregation instead of
   # printing/flagging here.
   if [[ -n "$JOB_RESULT_DIR" ]]; then
-    local key="${name//\//__}"
+    local key="${TUNGSTEN_SPECS_KEY_PREFIX:-}${name//\//__}"
     printf '%s\n' "$output" > "$JOB_RESULT_DIR/$key.out"
     echo "$status" > "$JOB_RESULT_DIR/$key.status"
     return
@@ -79,7 +79,7 @@ record_failure_note() {
   local name="$1"
   local why="$2"
   if [[ -n "$JOB_RESULT_DIR" ]]; then
-    printf '%s\n' "$why" > "$JOB_RESULT_DIR/${name//\//__}.note"
+    printf '%s\n' "$why" > "$JOB_RESULT_DIR/${TUNGSTEN_SPECS_KEY_PREFIX:-}${name//\//__}.note"
     return
   fi
   echo "FAIL [$name] $why" >&2
@@ -92,7 +92,7 @@ record_failure_note() {
 # lane must never shadow the next lane's fresh result.
 finish_job() {
   local name="$1"
-  local key="${name//\//__}"
+  local key="${2:-}${name//\//__}"
   local out status
   if [[ -f "$TUNGSTEN_SPECS_JOBS_DIR/$key.note" ]]; then
     echo "FAIL [$name] $(cat "$TUNGSTEN_SPECS_JOBS_DIR/$key.note")" >&2
@@ -119,14 +119,28 @@ run_parallel() {
     if [[ "$seen_sep" -eq 1 ]]; then extra+=("$a"); else specs+=("$a"); fi
   done
   [[ ${#specs[@]} -eq 0 ]] && return 0
-  printf '%s\n' "${specs[@]}" | xargs -P "$JOBS" -I{} "$0" "--job-$mode" {} "${extra[@]:-}"
+  printf '%s\n' "${specs[@]}" | TUNGSTEN_SPECS_KEY_PREFIX="$mode." xargs -P "$JOBS" -I{} "$0" "--job-$mode" {} "${extra[@]:-}"
+  run_parallel_aggregate "$mode" "${specs[@]}"
+}
+
+# Launch a lane without blocking (results aggregated later); pair every
+# call with run_parallel_aggregate after wait. Keys are mode-prefixed, so
+# overlapping lanes never collide even when spec names repeat.
+run_parallel_launch() {
+  local mode="$1"; shift
+  [[ $# -eq 0 ]] && return 0
+  printf '%s\n' "$@" | TUNGSTEN_SPECS_KEY_PREFIX="$mode." xargs -P "$JOBS" -I{} "$0" "--job-$mode" {} &
+}
+
+run_parallel_aggregate() {
+  local mode="$1"; shift
   local spec name
-  for spec in "${specs[@]}"; do
+  for spec in "$@"; do
     name="$(basename "${spec%.w}")"
     if [[ "$mode" == "wassat" ]]; then
       name="wassat/$name"
     fi
-    finish_job "$name"
+    finish_job "$name" "$mode."
   done
 }
 
@@ -717,8 +731,11 @@ if [[ "${FAST:-0}" == "1" ]]; then
     spec/numeric/bigint_tag_sign_spec.w
     spec/numeric/rational_spec.w
   )
-  run_parallel compiled "${fast_compiled[@]}"
-  run_parallel interp "${fast_interp[@]}"
+  run_parallel_launch compiled "${fast_compiled[@]}"
+  run_parallel_launch interp "${fast_interp[@]}"
+  wait
+  run_parallel_aggregate compiled "${fast_compiled[@]}"
+  run_parallel_aggregate interp "${fast_interp[@]}"
   if [[ "$fail" -ne 0 ]]; then
     echo "test-specs: FAIL (fast tier)"
     exit 1

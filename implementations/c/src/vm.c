@@ -128,6 +128,7 @@ static TcRuntimeHash *cvar_table = NULL;
   X(KEY_Q,          "key?")          \
   X(KEYS,           "keys")          \
   X(VALUES,         "values")        \
+  X(MERGE,          "merge")         \
   X(FIRST,          "first")         \
   X(LAST,           "last")          \
   X(SORT,           "sort")          \
@@ -683,6 +684,112 @@ static int copy_string_bytes(const char *bytes, size_t len, char **out, size_t *
   return 1;
 }
 
+static int value_to_string_copy(TcValue value, char **out, size_t *len_out, TcError *err);
+
+/* Recursive container rendering for to_s — matches native w_to_s's
+ * `[a, b]` / `{k: v, ...}` shapes (bare strings, insertion order). Depth
+ * is capped at 8: beyond it (including reference cycles, which present as
+ * unbounded depth) rendering falls back to the old count placeholder so
+ * conversion always terminates. */
+static int container_placeholder(TcValue value, char **out, size_t *len_out, TcError *err) {
+  char buf[64];
+  int len;
+  if (tc_kind(value) == TC_VAL_ARRAY) {
+    size_t n = tc_as_array(value) ? (size_t)tc_as_array(value)->size : 0;
+    len = snprintf(buf, sizeof(buf), "[%zu item%s]", n, n == 1 ? "" : "s");
+  } else {
+    size_t n = tc_as_hash(value) ? (size_t)tc_as_hash(value)->count : 0;
+    len = snprintf(buf, sizeof(buf), "{%zu pair%s}", n, n == 1 ? "" : "s");
+  }
+  if (len < 0) {
+    tc_error_set(err, "container string conversion failed");
+    return 0;
+  }
+  return copy_string_bytes(buf, (size_t)len, out, len_out, err);
+}
+
+static int sb_append(char **buf, size_t *len, size_t *cap, const char *s,
+                     size_t n, TcError *err) {
+  if (*len + n + 1 > *cap) {
+    size_t nc = *cap * 2 + n + 16;
+    char *nb = (char *)realloc(*buf, nc);
+    if (!nb) {
+      tc_error_set(err, "container string append failed");
+      return 0;
+    }
+    *buf = nb;
+    *cap = nc;
+  }
+  memcpy(*buf + *len, s, n);
+  *len += n;
+  (*buf)[*len] = '\0';
+  return 1;
+}
+
+static int container_element_to_string(TcValue v, int depth, char **out,
+                                       size_t *len_out, TcError *err);
+
+static int container_to_string_copy(TcValue value, int depth, char **out,
+                                    size_t *len_out, TcError *err) {
+  if (depth >= 8) return container_placeholder(value, out, len_out, err);
+  size_t cap = 64, len = 0;
+  char *buf = (char *)malloc(cap);
+  if (!buf) {
+    tc_error_set(err, "container string alloc failed");
+    return 0;
+  }
+  buf[0] = '\0';
+  int ok = 1;
+  if (tc_kind(value) == TC_VAL_ARRAY) {
+    TcRuntimeArray *arr = tc_as_array(value);
+    ok = sb_append(&buf, &len, &cap, "[", 1, err);
+    for (int32_t i = 0; ok && arr && i < arr->size; i++) {
+      if (i > 0) ok = sb_append(&buf, &len, &cap, ", ", 2, err);
+      char *es = NULL;
+      size_t el = 0;
+      if (ok) ok = container_element_to_string(arr->slots[i], depth + 1, &es, &el, err);
+      if (ok) ok = sb_append(&buf, &len, &cap, es, el, err);
+      free(es);
+    }
+    if (ok) ok = sb_append(&buf, &len, &cap, "]", 1, err);
+  } else {
+    TcRuntimeHash *h = tc_as_hash(value);
+    ok = sb_append(&buf, &len, &cap, "{", 1, err);
+    int first = 1;
+    for (uint32_t i = 0; ok && h && i < h->used; i++) {
+      if (h->keys[i] == TC_HASH_TOMBSTONE) continue;
+      if (!first) ok = sb_append(&buf, &len, &cap, ", ", 2, err);
+      first = 0;
+      char *ks = NULL;
+      size_t kl = 0;
+      if (ok) ok = container_element_to_string(h->keys[i], depth + 1, &ks, &kl, err);
+      if (ok) ok = sb_append(&buf, &len, &cap, ks, kl, err);
+      free(ks);
+      if (ok) ok = sb_append(&buf, &len, &cap, ": ", 2, err);
+      char *vs = NULL;
+      size_t vl = 0;
+      if (ok) ok = container_element_to_string(h->values[i], depth + 1, &vs, &vl, err);
+      if (ok) ok = sb_append(&buf, &len, &cap, vs, vl, err);
+      free(vs);
+    }
+    if (ok) ok = sb_append(&buf, &len, &cap, "}", 1, err);
+  }
+  if (!ok) {
+    free(buf);
+    return 0;
+  }
+  *out = buf;
+  *len_out = len;
+  return 1;
+}
+
+static int container_element_to_string(TcValue v, int depth, char **out,
+                                       size_t *len_out, TcError *err) {
+  if (tc_kind(v) == TC_VAL_ARRAY || tc_kind(v) == TC_VAL_HASH)
+    return container_to_string_copy(v, depth, out, len_out, err);
+  return value_to_string_copy(v, out, len_out, err);
+}
+
 static int value_to_string_copy(TcValue value, char **out, size_t *len_out, TcError *err) {
   if (tc_kind(value) == TC_VAL_STRING || tc_kind(value) == TC_VAL_SYMBOL) {
     return copy_string_bytes(tc_str_bytes_only(value), tc_str_len(value), out, len_out, err);
@@ -717,24 +824,10 @@ static int value_to_string_copy(TcValue value, char **out, size_t *len_out, TcEr
     return copy_string_bytes(buf, (size_t)len, out, len_out, err);
   }
   if (tc_kind(value) == TC_VAL_ARRAY) {
-    char buf[64];
-    int len = snprintf(buf, sizeof(buf), "[%zu item%s]", (size_t)(tc_as_array(value) ? tc_as_array(value)->size : 0),
-                       tc_as_array(value) && tc_as_array(value)->size == 1 ? "" : "s");
-    if (len < 0) {
-      tc_error_set(err, "array string conversion failed");
-      return 0;
-    }
-    return copy_string_bytes(buf, (size_t)len, out, len_out, err);
+    return container_to_string_copy(value, 0, out, len_out, err);
   }
   if (tc_kind(value) == TC_VAL_HASH) {
-    char buf[64];
-    int len = snprintf(buf, sizeof(buf), "{%zu pair%s}", (size_t)(tc_as_hash(value) ? tc_as_hash(value)->count : 0),
-                       tc_as_hash(value) && tc_as_hash(value)->count == 1 ? "" : "s");
-    if (len < 0) {
-      tc_error_set(err, "hash string conversion failed");
-      return 0;
-    }
-    return copy_string_bytes(buf, (size_t)len, out, len_out, err);
+    return container_to_string_copy(value, 0, out, len_out, err);
   }
   if (tc_kind(value) == TC_VAL_OBJECT) {
     if (!tc_as_object(value)) return copy_string_bytes("#<nil-object>", 13, out, len_out, err);

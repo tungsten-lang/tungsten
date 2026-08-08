@@ -1287,6 +1287,40 @@
           }
           CNEXT();
         }
+        if (has_receiver && name == NAME_MERGE && argc == 1 &&
+            tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver) &&
+            tc_kind(args[0]) == TC_VAL_HASH && tc_as_hash(args[0])) {
+          // Non-destructive union, other wins on collision (core/hash.w
+          // merge semantics — that source body rides `each`, which this
+          // VM cannot run: blocks are compile-time inlined, there is no
+          // closure value kind). Entries insert in self-then-other order,
+          // so the result's iteration order matches the other engines.
+          TcRuntimeHash *ra = tc_as_hash(receiver);
+          TcRuntimeHash *rb = tc_as_hash(args[0]);
+          TcRuntimeHash *merged = runtime_hash_new(ra->count + rb->count, err);
+          if (!merged) {
+            FREE_ARGS();
+            goto cleanup_fail;
+          }
+          int merge_ok = 1;
+          for (uint32_t i = 0; merge_ok && i < ra->used; i++) {
+            if (ra->keys[i] == TC_HASH_TOMBSTONE) continue;
+            merge_ok = hash_set_value(merged, ra->keys[i], ra->values[i], err);
+          }
+          for (uint32_t i = 0; merge_ok && i < rb->used; i++) {
+            if (rb->keys[i] == TC_HASH_TOMBSTONE) continue;
+            merge_ok = hash_set_value(merged, rb->keys[i], rb->values[i], err);
+          }
+          if (!merge_ok) {
+            FREE_ARGS();
+            goto cleanup_fail;
+          }
+          FREE_ARGS();
+          if (!push(&vm, tc_box_hash(merged), err)) {
+            goto cleanup_fail;
+          }
+          CNEXT();
+        }
         if (has_receiver && ((name == NAME_HAS_KEY_Q) ||
                              (name == NAME_KEY_Q)) && argc == 1) {
           int ok = 0;

@@ -26,10 +26,40 @@ fi
 # an isolated TUNGSTEN_CACHE_DIR.
 export TUNGSTEN_INCREMENTAL=0
 
+# Parallelism: specs are independent (per-spec temp outputs), so the
+# compile+run stages fan out across JOBS workers via self-exec (--job-*
+# modes below). Results land in a shared directory and are aggregated in
+# list order, so output and failure attribution stay deterministic. The
+# cache-lifecycle test and the gated tails (metal, PTY, api) stay serial.
+# JOBS=1 restores fully serial behavior. FAST=1 runs the curated inner-
+# loop slice only (see fast_* lists) and skips the serial tails.
+JOBS="${JOBS:-auto}"
+if [[ "$JOBS" == "auto" ]]; then
+  JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+  JOBS=$(( JOBS - 2 ))
+  (( JOBS < 1 )) && JOBS=1
+fi
+if [[ -n "${TUNGSTEN_SPECS_JOBS_DIR:-}" ]]; then
+  JOB_RESULT_DIR="$TUNGSTEN_SPECS_JOBS_DIR"
+else
+  JOB_RESULT_DIR=""
+  export TUNGSTEN_SPECS_JOBS_DIR="$TMP_ROOT/job-results"
+  mkdir -p "$TUNGSTEN_SPECS_JOBS_DIR"
+fi
+
 record_result() {
   local name="$1"
   local output="$2"
   local status="$3"
+
+  # Job mode: persist for the parent's ordered aggregation instead of
+  # printing/flagging here.
+  if [[ -n "$JOB_RESULT_DIR" ]]; then
+    local key="${name//\//__}"
+    printf '%s\n' "$output" > "$JOB_RESULT_DIR/$key.out"
+    echo "$status" > "$JOB_RESULT_DIR/$key.status"
+    return
+  fi
 
   printf '%s\n' "$output"
 
@@ -40,6 +70,64 @@ record_result() {
     echo "FAIL [$name] emitted failing checks" >&2
     fail=1
   fi
+}
+
+# Early-exit failures (compile failed, ...) that bypass record_result:
+# in job mode persist a note the parent replays verbatim, so failure
+# lines keep their exact serial-mode format.
+record_failure_note() {
+  local name="$1"
+  local why="$2"
+  if [[ -n "$JOB_RESULT_DIR" ]]; then
+    printf '%s\n' "$why" > "$JOB_RESULT_DIR/${name//\//__}.note"
+    return
+  fi
+  echo "FAIL [$name] $why" >&2
+  fail=1
+}
+
+# Aggregate one job's captured result through the normal reporting path.
+# Results are CONSUMED: the same spec name can run in more than one lane
+# (compiled and interpreted), and a stale note or output from an earlier
+# lane must never shadow the next lane's fresh result.
+finish_job() {
+  local name="$1"
+  local key="${name//\//__}"
+  local out status
+  if [[ -f "$TUNGSTEN_SPECS_JOBS_DIR/$key.note" ]]; then
+    echo "FAIL [$name] $(cat "$TUNGSTEN_SPECS_JOBS_DIR/$key.note")" >&2
+    fail=1
+    rm -f "$TUNGSTEN_SPECS_JOBS_DIR/$key.note" "$TUNGSTEN_SPECS_JOBS_DIR/$key.out" "$TUNGSTEN_SPECS_JOBS_DIR/$key.status"
+    return
+  fi
+  out="$(cat "$TUNGSTEN_SPECS_JOBS_DIR/$key.out" 2>/dev/null || echo "MISSING JOB OUTPUT for $name")"
+  status="$(cat "$TUNGSTEN_SPECS_JOBS_DIR/$key.status" 2>/dev/null || echo 99)"
+  rm -f "$TUNGSTEN_SPECS_JOBS_DIR/$key.out" "$TUNGSTEN_SPECS_JOBS_DIR/$key.status"
+  record_result "$name" "$out" "$status"
+}
+
+# Fan a spec list out across JOBS self-exec workers, then aggregate in
+# the original order. Extra args after the mode are forwarded to every
+# job (the wassat CLI path rides this).
+run_parallel() {
+  local mode="$1"; shift
+  local -a specs=()
+  local -a extra=()
+  local seen_sep=0 a
+  for a in "$@"; do
+    if [[ "$a" == "--" ]]; then seen_sep=1; continue; fi
+    if [[ "$seen_sep" -eq 1 ]]; then extra+=("$a"); else specs+=("$a"); fi
+  done
+  [[ ${#specs[@]} -eq 0 ]] && return 0
+  printf '%s\n' "${specs[@]}" | xargs -P "$JOBS" -I{} "$0" "--job-$mode" {} "${extra[@]:-}"
+  local spec name
+  for spec in "${specs[@]}"; do
+    name="$(basename "${spec%.w}")"
+    if [[ "$mode" == "wassat" ]]; then
+      name="wassat/$name"
+    fi
+    finish_job "$name"
+  done
 }
 
 run_compiled_spec() {
@@ -60,8 +148,7 @@ run_compiled_spec() {
     compile_cmd=("$TUNGSTEN")
   fi
   if ! "${compile_cmd[@]}" compile "$path" --out "$out" >/dev/null; then
-    echo "FAIL [$name] compile failed" >&2
-    fail=1
+    record_failure_note "$name" "compile failed"
     return
   fi
 
@@ -111,8 +198,7 @@ run_wassat_spec() {
     spec_bin="$TMP_ROOT/wassat-$name"
     echo "compile+run $path (WASSAT_TEST_BIN=$wassat_bin)"
     if ! "$TUNGSTEN" compile "$path" --out "$spec_bin" --no-lto >/dev/null; then
-      echo "FAIL [wassat/$name] compile failed" >&2
-      fail=1
+      record_failure_note "wassat/$name" "compile failed"
       return
     fi
     set +e
@@ -181,8 +267,7 @@ run_cuda_emit_spec() {
   echo "compile+run $path (TUNGSTEN_GPU_DIALECTS=cuda)"
   if ! TUNGSTEN_GPU_DIALECTS=cuda TUNGSTEN_LL_PATH="$ll_path" \
       "$TUNGSTEN" compile "$path" --out "$out" >/dev/null; then
-    echo "FAIL [$name] compile failed" >&2
-    fail=1
+    record_failure_note "$name" "compile failed"
     rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path"
     return
   fi
@@ -265,6 +350,19 @@ run_cache_lifecycle_test() {
   cache_lifecycle_step "deep output path cold compile misses" no 1 "$src" "$deep/prog"
   cache_lifecycle_step "deep output path recompile hits" yes 1 "$src" "$deep/prog"
 }
+
+# Self-exec worker entry: run exactly one spec, persist its result for
+# the parent, and exit 0 (pass/fail travels through the status file).
+if [[ "${1:-}" == --job-* ]]; then
+  case "$1" in
+    --job-compiled) run_compiled_spec "$2" ;;
+    --job-interp)   run_interpreter_spec "$2" ;;
+    --job-cuda)     run_cuda_emit_spec "$2" ;;
+    --job-wassat)   run_wassat_spec "$2" "$3" ;;
+    *) echo "unknown job mode $1" >&2; exit 2 ;;
+  esac
+  exit 0
+fi
 
 compiled_specs=(
   spec/compiler/ast_body_native_spec.w
@@ -593,19 +691,49 @@ wrat_specs=(
   bits/tungsten-wrat/spec/checker_spec.w
 )
 
-for spec in "${compiled_specs[@]}"; do
-  run_compiled_spec "$spec"
-done
+# FAST=1: the curated inner-loop slice — the engine-parity and bignum
+# pins that gate day-to-day compiler work — in parallel, skipping the
+# serial tails. The full battery remains the commit gate.
+if [[ "${FAST:-0}" == "1" ]]; then
+  fast_compiled=(
+    spec/compiler/typed_overload_spec.w
+    spec/compiler/overload_exact_tag_parity_spec.w
+    spec/compiler/typed_overload_hosts_spec.w
+    spec/numeric/bigint_seam_disjoint_spec.w
+    spec/numeric/bigint_bang_spec.w
+    spec/numeric/bigint_tag_sign_spec.w
+    spec/numeric/bigint_limb_sweep_spec.w
+    spec/compiler/int_bigint_promotion_spec.w
+    spec/compiler/bigint_mutate_unique_spec.w
+    spec/compiler/devirt_method_call_spec.w
+    spec/numeric/rational_spec.w
+    spec/numeric/fp_math_mode_spec.w
+  )
+  fast_interp=(
+    spec/compiler/overload_exact_tag_parity_spec.w
+    spec/compiler/typed_overload_hosts_spec.w
+    spec/numeric/bigint_seam_disjoint_spec.w
+    spec/numeric/bigint_bang_spec.w
+    spec/numeric/bigint_tag_sign_spec.w
+    spec/numeric/rational_spec.w
+  )
+  run_parallel compiled "${fast_compiled[@]}"
+  run_parallel interp "${fast_interp[@]}"
+  if [[ "$fail" -ne 0 ]]; then
+    echo "test-specs: FAIL (fast tier)"
+    exit 1
+  fi
+  echo "test-specs: OK (fast tier)"
+  exit 0
+fi
+
+run_parallel compiled "${compiled_specs[@]}"
 
 run_cache_lifecycle_test
 
-for spec in "${cuda_emit_specs[@]}"; do
-  run_cuda_emit_spec "$spec"
-done
+run_parallel cuda "${cuda_emit_specs[@]}"
 
-for spec in "${interpreter_specs[@]}"; do
-  run_interpreter_spec "$spec"
-done
+run_parallel interp "${interpreter_specs[@]}"
 
 # Wassat's native DIMACS parser, process portfolio, atomic proof publishing,
 # and worker lifecycle exist only in compiled programs. Build the exact CLI
@@ -614,13 +742,9 @@ done
 wassat_bin="$TMP_ROOT/wassat"
 echo "compile bits/tungsten-wassat/bin/wassat.w"
 if "$TUNGSTEN" compile bits/tungsten-wassat/bin/wassat.w --out "$wassat_bin" --no-lto >/dev/null; then
-  for spec in "${wassat_specs[@]}"; do
-    run_wassat_spec "$spec" "$wassat_bin"
-  done
+  run_parallel wassat "${wassat_specs[@]}" -- "$wassat_bin"
   if [ -n "${TUNGSTEN_SLOW_SPECS:-}" ]; then
-    for spec in "${wassat_slow_specs[@]}"; do
-      run_wassat_spec "$spec" "$wassat_bin"
-    done
+    run_parallel wassat "${wassat_slow_specs[@]}" -- "$wassat_bin"
   else
     echo "skip ${wassat_slow_specs[*]} (set TUNGSTEN_SLOW_SPECS=1 to run)"
   fi
@@ -629,18 +753,14 @@ else
   fail=1
 fi
 
-for spec in "${wrat_specs[@]}"; do
-  run_interpreter_spec "$spec"
-done
+run_parallel interp "${wrat_specs[@]}"
 
 if [[ "${RUN_CORE_SPECS:-0}" == "1" ]]; then
   # High-bit words pin the SIGNED view encodings (as_i32/as_i64 vs as_u32):
   # a positive-only fixture decodes identically under the old unsigned
   # encodings and cannot catch a sign-extension regression.
   ruby -e 'File.binwrite("/tmp/tungsten-mmap-view-smoke.bin", [1, 2, 3, 4, 0xFFFFFFFF, 0xFFFFFFFE, 0x89ABCDEF, 0x01234567].pack("V*"))'
-  for spec in "${core_specs[@]}"; do
-    run_compiled_spec "$spec"
-  done
+  run_parallel compiled "${core_specs[@]}"
 else
   echo "skip core runtime specs (set RUN_CORE_SPECS=1 to run)"
 fi

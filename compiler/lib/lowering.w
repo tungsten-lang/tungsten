@@ -262,6 +262,70 @@ use lowering/definitions
     return out
   nil
 
+# `tungsten --tags <file.w>`: the dispatch report. Rows are collected
+# during lowering (calls.w's overload-gate arm, ops.w's infix classifier)
+# into mod[:tag_report_gates] / mod[:tag_report_infix] — side data no
+# hashing or emission pass reads. Output is sorted, so the report is
+# deterministic for a given program.
+-> tag_report_text(mod, file_path)
+  out = StringBuffer(512)
+  out << "dispatch report: " << file_path << "\n\n"
+
+  gates = mod[:tag_report_gates]
+  if gates == nil
+    gates = []
+  out << "typed-overload gates (" << gates.size().to_s() << ")\n"
+  gate_counts = {}
+  gi = 0
+  while gi < gates.size()
+    g = gates[gi]
+    reason = ""
+    if g[:route] == :ancestry
+      reason = g[:reason] == :subclassed ? " (in table, reverted: subclass registered)" : ""
+    key = "  " + (g[:route] == :exact_tag ? "exact-tag" : "ancestry ") + "  (" + g[:type_name] + ")" + reason + "  in " + (g[:class_name] == nil ? "<top>" : g[:class_name])
+    cur = gate_counts[key]
+    gate_counts[key] = cur == nil ? 1 : cur + 1
+    gi += 1
+  gate_keys = gate_counts.keys().sort()
+  gk = 0
+  while gk < gate_keys.size()
+    out << gate_keys[gk] << "  x" << gate_counts[gate_keys[gk]].to_s() << "\n"
+    gk += 1
+
+  infix = mod[:tag_report_infix]
+  if infix == nil
+    infix = []
+  out << "\ninfix +/-/* runtime-fallback sites (" << infix.size().to_s() << ")\n"
+  route_counts = {}
+  miss_sites = {}
+  ii = 0
+  while ii < infix.size()
+    r = infix[ii]
+    op_name = r[:op] == :PLUS ? "+" : (r[:op] == :MINUS ? "-" : "*")
+    rkey = "  " + (r[:route] == :static_direct ? "static-direct" : (r[:route] == :near_miss ? "near-miss    " : "polymorphic  ")) + "  " + op_name
+    cur = route_counts[rkey]
+    route_counts[rkey] = cur == nil ? 1 : cur + 1
+    if r[:route] == :near_miss
+      where = r[:class_name] == nil ? "" : r[:class_name] + "#"
+      mkey = "    " + op_name + "  in " + where + (r[:fname] == nil ? "<top>" : r[:fname])
+      mcur = miss_sites[mkey]
+      miss_sites[mkey] = mcur == nil ? 1 : mcur + 1
+    ii += 1
+  route_keys = route_counts.keys().sort()
+  rk = 0
+  while rk < route_keys.size()
+    out << route_keys[rk] << "  x" << route_counts[route_keys[rk]].to_s() << "\n"
+    rk += 1
+  if miss_sites.keys().size() > 0
+    out << "\n  near-miss detail (one operand inferred bigint — typing the other\n"
+    out << "  upgrades the site to a static direct call):\n"
+    miss_keys = miss_sites.keys().sort()
+    mk = 0
+    while mk < miss_keys.size()
+      out << miss_keys[mk] << "  x" << miss_sites[miss_keys[mk]].to_s() << "\n"
+      mk += 1
+  out.to_s()
+
 -> closure_binding_assignment_count(node, name)
   if node == nil
     return 0

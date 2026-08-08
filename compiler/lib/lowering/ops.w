@@ -2140,6 +2140,20 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # routing. Mutate-if-unique accumulator sites keep their in-place
   # entries (the marker check below mirrors the fallback rewrite).
   bidir_mut = ctx[:mut_accum_target] != nil && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
+  # --tags report: classify this infix arithmetic site. :static_direct
+  # takes the guarded direct-worker call below; :near_miss has exactly
+  # one bigint-inferred operand (typing the other would upgrade it);
+  # :polymorphic is everything else reaching the runtime entry. Side
+  # data only — never read by hashing or emission.
+  if op in (:PLUS :MINUS :STAR)
+    bidir_report = :polymorphic
+    if !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
+      bidir_report = :static_direct
+    elsif !bidir_mut && (is_bigint_type(lt) || is_bigint_type(rt))
+      bidir_report = :near_miss
+    if ctx[:mod][:tag_report_infix] == nil
+      ctx[:mod][:tag_report_infix] = []
+    ctx[:mod][:tag_report_infix].push({op: op, route: bidir_report, fname: wfn[:source_method], class_name: ctx[:class_name]})
   if op in (:PLUS :MINUS :STAR) && !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
     bidir_fast = op == :PLUS ? "__w_bigint_plus_src" : (op == :MINUS ? "__w_bigint_minus_src" : "__w_bigint_times_src")
     bidir_slow = op == :PLUS ? "w_add" : (op == :MINUS ? "w_sub" : "w_mul")

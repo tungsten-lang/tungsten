@@ -46,6 +46,7 @@ if args.size() == 0
   << "  --emit-ll        Write LLVM IR and skip native linking"
   << "  --ast            Print the AST and exit"
   << "  --lex            Print tokens and exit"
+  << "  --tags           Print the dispatch report and exit"
   << "  -e CODE          Evaluate a string of code"
   << "  -v, --verbose    Verbose output / print version"
   << "  --help           Show this help"
@@ -56,6 +57,7 @@ out_path       = nil
 file_path      = nil
 eval_code      = nil
 emit_wire      = false
+tags_mode      = false
 verbose        = false
 show_ast       = false
 show_lex       = false
@@ -144,6 +146,9 @@ while i < args.size()
     out_path = args[i]
   elsif arg == "--emit-wire"
     emit_wire = true
+  elsif arg == "--tags"
+    emit_wire = true
+    tags_mode = true
   elsif arg == "--no-lto"
     no_lto = true
   elsif arg == "--lto"
@@ -643,6 +648,14 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
 
     if verbose
       << fmt_elapsed(phase_elapsed(wire_started_at)) + " lower to wire"
+
+    if tags_mode
+      # `--tags`: the dispatch report instead of the wire dump — which
+      # typed-overload gates lowered exact-tag vs ancestry (and why), and
+      # how every infix +/-/* site routed (static direct worker call,
+      # near-miss with one typed operand, or the polymorphic entry).
+      << tag_report_text(mod, file_path)
+      return nil
 
     emit_started_at = clock
 

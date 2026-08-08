@@ -452,12 +452,12 @@ if [ "$1" = "--interpret" ]; then
   exec "$RUBY" "$RUBY_CLI" --ruby "$@"
 fi
 
-# `--ast` / `--lex` are file-inspection modes implemented by the compiled
-# frontend (compiler/tungsten.w). Route them straight to the compiled binary
-# — the Ruby CLI's handling is stale. Falls back to Ruby only if the compiled
-# binary hasn't been built yet.
+# `--ast` / `--lex` / `--tags` are file-inspection modes implemented by the
+# compiled frontend (compiler/tungsten.w). Route them straight to the compiled
+# binary — the Ruby CLI's handling is stale. Falls back to Ruby only if the
+# compiled binary hasn't been built yet.
 case "$1" in
-  --ast|--lex)
+  --ast|--lex|--tags)
     if [ -x "$COMPILER" ]; then
       exec "$COMPILER" "$@"
     else

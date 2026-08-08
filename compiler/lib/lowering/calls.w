@@ -126,8 +126,22 @@
     # overload_exact_tag_test (lowering/types.w); the interpreter carries
     # a hand-copied mirror (interpreter.w, overload_matches_args?).
     tag_entry = nil
+    gate_type_name = ""
     if is_ast_node?(args[1]) && ast_kind(args[1]) == :string
-      tag_entry = overload_exact_tag_test(ctx[:mod], "" + args[1].value)
+      gate_type_name = "" + args[1].value
+      tag_entry = overload_exact_tag_test(ctx[:mod], gate_type_name)
+    # --tags report: one row per lowered overload gate. Side data only —
+    # never read by content hashing or emission, so identity holds.
+    gate_route = :ancestry
+    gate_reason = :not_in_table
+    if tag_entry != nil
+      gate_route = :exact_tag
+      gate_reason = nil
+    elsif gate_type_name != "" && overload_exact_tag_entry(gate_type_name) != nil
+      gate_reason = :subclassed
+    if ctx[:mod][:tag_report_gates] == nil
+      ctx[:mod][:tag_report_gates] = []
+    ctx[:mod][:tag_report_gates].push({class_name: ctx[:class_name], type_name: gate_type_name, route: gate_route, reason: gate_reason})
     if tag_entry != nil && tag_entry[:shape] == :top_tag
       recv_tv = lower_expression(ctx, args[0])
       recv_reg = ensure_i64_value(wfn, recv_tv)

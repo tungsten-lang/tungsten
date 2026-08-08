@@ -172,10 +172,12 @@
         k -= 1
     if cmp == 0
       return 0
+
     bp2 = pa
     bl = am
     sp2 = pb
     sl2 = bm
+
     if cmp < 0
       bp2 = pb
       bl = bm

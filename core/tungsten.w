@@ -55,6 +55,7 @@
   auto :Integer,      "integer"
   auto :JSON,         "json"
   auto :LaTeX,        "latex"
+  auto :LatexMath,    "latex/math"
   auto :LaTeXProfiles, "latex/profiles"
   auto :Locale,       "locale"
   auto :Math,         "math"

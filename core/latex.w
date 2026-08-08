@@ -5,10 +5,13 @@
 # boundary; ordinary strings and document metadata are escaped by default.
 
 use core/latex/profiles
+use core/latex/math
+use core/latex/validation
 
 + LaTeX
   # Explicitly trust caller-supplied TeX. Prefer the structured helpers below
-  # for values or text that did not originate in source code.
+  # for values or text that did not originate in source code. Raw fragments
+  # intentionally carry no label/reference/citation provenance.
   -> .raw(source)
     LatexFragment.new(source.to_s)
 
@@ -62,11 +65,19 @@ use core/latex/profiles
 
   -> .compose(values, separator)
     raise "LaTeX.join needs an Array" if values.class_name != "Array"
-    separator_source = separator.class_name == "LatexFragment" ? separator.source : escape(separator)
+    separator_fragment = separator
+    if separator.class_name != "LatexFragment"
+      separator_fragment = raw(escape(separator))
     parts = []
+    fragments = []
+    i = 0
     values.each -> (value)
-      parts.push(coerce(value).source)
-    raw(parts.join(separator_source))
+      fragment = coerce(value)
+      parts.push(fragment.source)
+      fragments.push(separator_fragment) if i > 0
+      fragments.push(fragment)
+      i += 1
+    LatexFragment.from_parts(parts.join(separator_fragment.source), fragments)
 
   -> .join(values, separator = nil)
     separator = raw(", ") if separator == nil
@@ -74,6 +85,9 @@ use core/latex/profiles
 
   -> .builder
     LatexBuilder.new
+
+  -> .semantic(value)
+    LatexMath.from(value)
 
   # Publication profiles are loaded through the separate profiles
   # orchestrator; the generic renderer has no venue-specific policy.
@@ -279,46 +293,65 @@ use core/latex/profiles
   # ---- composable math primitives ----
 
   -> .group(value)
-    raw("{" + coerce(value).source + "}")
+    fragment = coerce(value)
+    LatexFragment.from_parts("{" + fragment.source + "}", [fragment])
 
   -> .parenthesize(value)
-    raw("\\left(" + coerce(value).source + "\\right)")
+    fragment = coerce(value)
+    LatexFragment.from_parts("\\left(" + fragment.source + "\\right)", [fragment])
 
   -> .bracket(value)
-    raw("\\left\[" + coerce(value).source + "\\right]")
+    fragment = coerce(value)
+    LatexFragment.from_parts("\\left\[" + fragment.source + "\\right]", [fragment])
 
   -> .absolute(value)
-    raw("\\left|" + coerce(value).source + "\\right|")
+    fragment = coerce(value)
+    LatexFragment.from_parts("\\left|" + fragment.source + "\\right|", [fragment])
 
   -> .fraction(numerator, denominator)
-    raw("\\frac{" + coerce(numerator).source + "}{" + coerce(denominator).source + "}")
+    top = coerce(numerator)
+    bottom = coerce(denominator)
+    source = "\\frac{" + top.source + "}{" + bottom.source + "}"
+    LatexFragment.from_parts(source, [top, bottom])
 
   -> .sqrt(value)
-    raw("\\sqrt{" + coerce(value).source + "}")
+    fragment = coerce(value)
+    LatexFragment.from_parts("\\sqrt{" + fragment.source + "}", [fragment])
 
   -> .superscript(base, exponent)
-    raw(coerce(base).source + "^{" + coerce(exponent).source + "}")
+    base_fragment = coerce(base)
+    exponent_fragment = coerce(exponent)
+    source = base_fragment.source + "^{" + exponent_fragment.source + "}"
+    LatexFragment.from_parts(source, [base_fragment, exponent_fragment])
 
   -> .subscript(base, index)
-    raw(coerce(base).source + "_{" + coerce(index).source + "}")
+    base_fragment = coerce(base)
+    index_fragment = coerce(index)
+    source = base_fragment.source + "_{" + index_fragment.source + "}"
+    LatexFragment.from_parts(source, [base_fragment, index_fragment])
 
   -> .command(name, argument)
     control = validated_control_name(name, "command")
-    raw("\\" + control + "{" + coerce(argument).source + "}")
+    fragment = coerce(argument)
+    source = "\\" + control + "{" + fragment.source + "}"
+    LatexFragment.from_parts(source, [fragment])
 
   -> .operator(name)
     raw("\\operatorname{" + escape(name) + "}")
 
   -> .environment(name, body)
     environment_name = validated_control_name(name, "environment")
+    body_fragment = coerce(body)
     source = "\\begin{" + environment_name + "}\n"
-    source += coerce(body).source + "\n"
-    raw(source + "\\end{" + environment_name + "}")
+    source += body_fragment.source + "\n"
+    source += "\\end{" + environment_name + "}"
+    LatexFragment.from_parts(source, [body_fragment])
 
   # ---- structural value renderers ----
 
   -> .render(value)
     return value if value.class_name == "LatexFragment"
+    return value.to_latex if value.class_name == "LatexMath"
     name = value.class_name
     return LaTeX.number(value) if LaTeX.scalar?(value)
     return LaTeX.symbol(value) if name == "Symbol"
@@ -529,13 +562,17 @@ use core/latex/profiles
     coordinates = []
     value.coordinates.each -> (coordinate)
       coordinates.push(LaTeX.render(coordinate))
-    LaTeX.raw("\\left\[" + LaTeX.join(coordinates, LaTeX.raw(":")).source + "\\right]")
+    joined = LaTeX.join(coordinates, LaTeX.raw(":"))
+    source = "\\left\[" + joined.source + "\\right]"
+    LatexFragment.from_parts(source, [joined])
 
   -> .array(values)
     parts = []
     values.each -> (value)
       parts.push(LaTeX.render(value))
-    LaTeX.raw("\\left\[" + LaTeX.join(parts).source + "\\right]")
+    joined = LaTeX.join(parts)
+    source = "\\left\[" + joined.source + "\\right]"
+    LatexFragment.from_parts(source, [joined])
 
   -> .vector(values)
     rows = []
@@ -566,25 +603,36 @@ use core/latex/profiles
     width = rows[0].size
     raise "LaTeX.matrix needs at least one column" if width == 0
     rendered_rows = []
+    rendered_cells = []
     rows.each -> (row)
       raise "LaTeX.matrix rows must have equal size" if row.size != width
       cells = []
       row.each -> (cell)
-        cells.push(LaTeX.render(cell))
+        rendered = LaTeX.render(cell)
+        cells.push(rendered)
+        rendered_cells.push(rendered)
       rendered_rows.push(LaTeX.join(cells, LaTeX.raw(" & ")).source)
     row_break = "\\\\"
     source = "\\begin{" + environment + "}"
     source += rendered_rows.join(" " + row_break + "\n")
-    LaTeX.raw(source + "\\end{" + environment + "}")
+    source += "\\end{" + environment + "}"
+    LatexFragment.from_parts(source, rendered_cells)
 
   -> .interval(value)
     return math_text(value) if !value.respond_to?("lo") && !value.respond_to?("first")
     lower = value.respond_to?("lo") ? value.lo : value.first
     upper = value.respond_to?("hi") ? value.hi : value.last
-    raw("\\left\[" + render(lower).source + ", " + render(upper).source + "\\right]")
+    lower_fragment = render(lower)
+    upper_fragment = render(upper)
+    source = "\\left\[" + lower_fragment.source + ", "
+    source += upper_fragment.source + "\\right]"
+    LatexFragment.from_parts(source, [lower_fragment, upper_fragment])
 
   -> .quadrature_result(value)
-    raw(render(value.value).source + " \\pm " + render(value.error_estimate).source)
+    result = render(value.value)
+    error = render(value.error_estimate)
+    source = result.source + " \\pm " + error.source
+    LatexFragment.from_parts(source, [result, error])
 
   -> .complex(value)
     real = value.real
@@ -678,34 +726,59 @@ use core/latex/profiles
   # ---- paper-oriented fragments ----
 
   -> .inline(value)
-    raw("\\(" + render(value).source + "\\)")
+    fragment = render(value)
+    LatexFragment.from_parts("\\(" + fragment.source + "\\)", [fragment])
 
   -> .display(value)
-    raw("\\\[\n" + render(value).source + "\n\\]")
+    fragment = render(value)
+    source = "\\\[\n" + fragment.source + "\n\\]"
+    LatexFragment.from_parts(source, [fragment])
 
   -> .label(value)
-    raw("\\label{" + validated_label(value) + "}")
+    key = validated_label(value)
+    LatexFragment.new(
+      "\\label{" + key + "}", [LatexReferenceEvent.new(:label, key)])
 
   -> .ref(value)
-    raw("\\ref{" + validated_label(value) + "}")
+    key = validated_label(value)
+    LatexFragment.new(
+      "\\ref{" + key + "}", [LatexReferenceEvent.new(:ref, key)])
 
   -> .eqref(value)
-    raw("\\eqref{" + validated_label(value) + "}")
+    key = validated_label(value)
+    LatexFragment.new(
+      "\\eqref{" + key + "}", [LatexReferenceEvent.new(:eqref, key)])
 
   -> .equation(value, label_value = nil)
-    source = "\\begin{equation}\n" + render(value).source
-    source += "\n" + label(label_value).source if label_value != nil
-    raw(source + "\n\\end{equation}")
+    rendered = render(value)
+    parts = [rendered]
+    source = "\\begin{equation}\n" + rendered.source
+    if label_value != nil
+      label_fragment = label(label_value)
+      parts.push(label_fragment)
+      source += "\n" + label_fragment.source
+    source += "\n\\end{equation}"
+    LatexFragment.from_parts(source, parts)
 
   -> .align(lines, label_value = nil)
     raise "LaTeX.align needs an Array" if lines.class_name != "Array"
     rendered = []
     lines.each -> (line)
-      rendered.push(coerce(line).source)
+      rendered.push(coerce(line))
     row_break = "\\\\"
-    source = "\\begin{align}\n" + rendered.join(" " + row_break + "\n")
-    source += "\n" + label(label_value).source if label_value != nil
-    raw(source + "\n\\end{align}")
+    rendered_sources = []
+    rendered.each -> (fragment)
+      rendered_sources.push(fragment.source)
+    parts = []
+    rendered.each -> (fragment)
+      parts.push(fragment)
+    source = "\\begin{align}\n" + rendered_sources.join(" " + row_break + "\n")
+    if label_value != nil
+      label_fragment = label(label_value)
+      parts.push(label_fragment)
+      source += "\n" + label_fragment.source
+    source += "\n\\end{align}"
+    LatexFragment.from_parts(source, parts)
 
   -> .table_alignment(width, alignment)
     if alignment == nil
@@ -722,11 +795,15 @@ use core/latex/profiles
     raise "LaTeX table alignment column count mismatch" if columns != width
     text
 
-  -> .table_cell(value)
+  -> .table_cell_fragment(value)
     name = value.class_name
-    return value.source if name == "LatexFragment"
-    return escape(value) if name == "String" || name == "Symbol"
-    "$" + render(value).source + "$"
+    return value if name == "LatexFragment"
+    return text(value) if name == "String" || name == "Symbol"
+    rendered = render(value)
+    LatexFragment.from_parts("$" + rendered.source + "$", [rendered])
+
+  -> .table_cell(value)
+    table_cell_fragment(value).source
 
   -> .tabular(headers, rows, alignment = nil)
     if headers.class_name != "Array" || headers.empty?
@@ -734,15 +811,20 @@ use core/latex/profiles
     raise "LaTeX.tabular rows must be an Array" if rows.class_name != "Array"
     width = headers.size
     header_cells = []
+    all_cells = []
     headers.each -> (cell)
-      header_cells.push(table_cell(cell))
+      fragment = table_cell_fragment(cell)
+      header_cells.push(fragment.source)
+      all_cells.push(fragment)
     body_rows = []
     rows.each -> (row)
       if row.class_name != "Array" || row.size != width
         raise "LaTeX.tabular rows must match the header width"
       cells = []
       row.each -> (cell)
-        cells.push(table_cell(cell))
+        fragment = table_cell_fragment(cell)
+        cells.push(fragment.source)
+        all_cells.push(fragment)
       body_rows.push(cells.join(" & "))
     row_break = "\\\\"
     source = "\\begin{tabular}{" + table_alignment(width, alignment) + "}\n"
@@ -750,48 +832,86 @@ use core/latex/profiles
     source += "\\hline\n"
     if !body_rows.empty?
       source += body_rows.join(" " + row_break + "\n") + " " + row_break + "\n"
-    raw(source + "\\hline\n\\end{tabular}")
+    source += "\\hline\n\\end{tabular}"
+    LatexFragment.from_parts(source, all_cells)
 
   -> .table(headers, rows, caption = nil, label_value = nil, alignment = nil)
     source = "\\begin{table}\n\\centering\n"
-    source += tabular(headers, rows, alignment).source
+    tabular_fragment = tabular(headers, rows, alignment)
+    parts = [tabular_fragment]
+    source += tabular_fragment.source
     source += "\n\\caption{" + escape(caption) + "}" if caption != nil
-    source += "\n" + label(label_value).source if label_value != nil
-    raw(source + "\n\\end{table}")
+    if label_value != nil
+      label_fragment = label(label_value)
+      parts.push(label_fragment)
+      source += "\n" + label_fragment.source
+    source += "\n\\end{table}"
+    LatexFragment.from_parts(source, parts)
 
   -> .paragraph(value)
     raw(escape(value) + "\n\n")
 
   -> .section(title, body, label_value = nil)
     source = "\\section{" + escape(title) + "}"
-    source += "\n" + label(label_value).source if label_value != nil
-    body_source = body.class_name == "LatexFragment" ? body.source : escape(body)
-    raw(source + "\n" + body_source)
+    parts = []
+    if label_value != nil
+      label_fragment = label(label_value)
+      parts.push(label_fragment)
+      source += "\n" + label_fragment.source
+    body_fragment = body.class_name == "LatexFragment" ? body : raw(escape(body))
+    parts.push(body_fragment)
+    source += "\n" + body_fragment.source
+    LatexFragment.from_parts(source, parts)
 
   -> .document(body, title = nil, author = nil)
-    body_source = body.class_name == "LatexFragment" ? body.source : escape(body)
+    body_fragment = body.class_name == "LatexFragment" ? body : raw(escape(body))
     source = "\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{amssymb}\n"
     source += "\\title{" + escape(title) + "}\n" if title != nil
     source += "\\author{" + escape(author) + "}\n" if author != nil
     source += "\\begin{document}\n"
     source += "\\maketitle\n" if title != nil || author != nil
-    source += body_source + "\n\\end{document}"
-    raw(source)
+    source += body_fragment.source + "\n\\end{document}"
+    LatexFragment.from_parts(source, [body_fragment])
 
 
 # Immutable trusted TeX source. Construct through LaTeX helpers so the raw
 # boundary stays visible at call sites.
 + LatexFragment
-  -> new(@source)
+  -> new(source, reference_events = nil)
+    @source = source
+    if reference_events == nil
+      @reference_chain = LatexEventChain.leaf([])
+    elsif reference_events.class_name == "LatexEventChain"
+      @reference_chain = reference_events
+    else
+      if reference_events.class_name != "Array"
+        raise "LatexFragment reference events must be an Array"
+      @reference_chain = LatexEventChain.leaf(reference_events)
+
+  -> .from_parts(source, parts)
+    raise "LatexFragment parts must be an Array" if parts.class_name != "Array"
+    chains = []
+    parts.each -> (part)
+      if part.class_name != "LatexFragment"
+        raise "LatexFragment parts must contain fragments"
+      chains.push(part.reference_chain)
+    LatexFragment.new(source, LatexEventChain.combine(chains))
 
   -> source
     @source
 
+  -> reference_events
+    @reference_chain.flatten
+
+  -> reference_chain
+    @reference_chain
+
   -> +(other)
-    LatexFragment.new(@source + LaTeX.coerce(other).source)
+    fragment = LaTeX.coerce(other)
+    LatexFragment.from_parts(@source + fragment.source, [self, fragment])
 
   -> append(other)
-    LatexFragment.new(@source + LaTeX.coerce(other).source)
+    self + other
 
   -> empty?
     @source.empty?

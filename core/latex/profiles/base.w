@@ -10,13 +10,34 @@
   -> initialize_profile(name, document_class, class_options, packages,
                         bibliography_style, metadata_style,
                         extra_preamble = nil)
+    if class_options.class_name != "Array"
+      raise "LaTeX profile class options must be an Array"
+    if packages.class_name != "Array"
+      raise "LaTeX profile packages must be an Array"
     @name = name
     @document_class = document_class
-    @class_options = class_options
-    @packages = packages
+    @class_options = []
+    class_options.each -> (option)
+      @class_options.push(option)
+    @packages = []
+    packages.each -> (package)
+      if package.class_name == "Array"
+        copied = []
+        package.each -> (part)
+          copied.push(part)
+        @packages.push(copied)
+      else
+        @packages.push(package)
     @bibliography_style = bibliography_style
     @metadata_style = metadata_style
-    @extra_preamble = extra_preamble == nil ? [] : extra_preamble
+    @extra_preamble = []
+    if extra_preamble != nil
+      if extra_preamble.class_name != "Array"
+        raise "LaTeX profile extra preamble must be an Array of LatexFragment values"
+      extra_preamble.each -> (fragment)
+        if fragment.class_name != "LatexFragment"
+          raise "LaTeX profile extra preamble entries must be LatexFragment values"
+        @extra_preamble.push(fragment)
     self
 
   -> name
@@ -26,10 +47,22 @@
     @document_class
 
   -> class_options
-    @class_options
+    out = []
+    @class_options.each -> (option)
+      out.push(option)
+    out
 
   -> packages
-    @packages
+    out = []
+    @packages.each -> (package)
+      if package.class_name == "Array"
+        copied = []
+        package.each -> (part)
+          copied.push(part)
+        out.push(copied)
+      else
+        out.push(package)
+    out
 
   -> bibliography_style
     @bibliography_style
@@ -68,6 +101,11 @@
     return value.source if value.class_name == "LatexFragment"
     LaTeX.escape(value)
 
+  -> metadata_fragment(value)
+    return LaTeX.raw("") if value == nil
+    return value if value.class_name == "LatexFragment"
+    LaTeX.text(value)
+
   -> authors_source(value, separator)
     return "" if value == nil
     return metadata_source(value) if value.class_name != "Array"
@@ -76,6 +114,14 @@
       authors.push(metadata_source(author))
     authors.join(separator)
 
+  -> authors_fragment(value, separator)
+    return LaTeX.raw("") if value == nil
+    return metadata_fragment(value) if value.class_name != "Array"
+    authors = []
+    value.each -> (author)
+      authors.push(metadata_fragment(author))
+    LaTeX.join(authors, LaTeX.raw(separator))
+
   -> keywords_source(value)
     return "" if value == nil
     return metadata_source(value) if value.class_name != "Array"
@@ -83,6 +129,14 @@
     value.each -> (keyword)
       keywords.push(metadata_source(keyword))
     keywords.join(", ")
+
+  -> keywords_value_fragment(value)
+    return LaTeX.raw("") if value == nil
+    return metadata_fragment(value) if value.class_name != "Array"
+    keywords = []
+    value.each -> (keyword)
+      keywords.push(metadata_fragment(keyword))
+    LaTeX.join(keywords, LaTeX.raw(", "))
 
   -> document_class_fragment
     class_name = validate_package(@document_class)
@@ -109,8 +163,8 @@
     parts = [document_class_fragment]
     @packages.each -> (package)
       parts.push(package_fragment(package))
-    @extra_preamble.each -> (line)
-      parts.push(LaTeX.raw(line))
+    @extra_preamble.each -> (fragment)
+      parts.push(fragment)
     metadata_part = metadata_preamble(metadata)
     parts.push(metadata_part) if !metadata_part.empty?
     LaTeX.join(parts, LaTeX.raw("\n"))
@@ -122,28 +176,30 @@
     authors = metadata_value(metadata, :authors)
     authors = metadata_value(metadata, :author) if authors == nil
     date = metadata_value(metadata, :date)
-    parts.push(LaTeX.raw("\\title{" + metadata_source(title) + "}")) if title != nil
+    parts.push(LaTeX.command("title", metadata_fragment(title))) if title != nil
     if authors != nil && @metadata_style == :acm && authors.class_name == "Array"
       authors.each -> (author)
-        parts.push(LaTeX.raw("\\author{" + metadata_source(author) + "}"))
+        parts.push(LaTeX.command("author", metadata_fragment(author)))
     elsif authors != nil
-      parts.push(LaTeX.raw("\\author{" + authors_source(authors, " \\and ") + "}"))
-    parts.push(LaTeX.raw("\\date{" + metadata_source(date) + "}")) if date != nil
+      parts.push(LaTeX.command("author", authors_fragment(authors, " \\and ")))
+    parts.push(LaTeX.command("date", metadata_fragment(date))) if date != nil
     LaTeX.join(parts, LaTeX.raw("\n"))
 
   -> abstract_fragment(metadata)
     abstract_value = metadata_value(metadata, :abstract)
     return LaTeX.raw("") if abstract_value == nil
-    LaTeX.environment("abstract", LaTeX.raw(metadata_source(abstract_value)))
+    LaTeX.environment("abstract", metadata_fragment(abstract_value))
 
   -> keywords_fragment(metadata)
     keywords = metadata_value(metadata, :keywords)
     return LaTeX.raw("") if keywords == nil
+    content = keywords_value_fragment(keywords)
     if @metadata_style == :ieee
-      return LaTeX.environment("IEEEkeywords", LaTeX.raw(keywords_source(keywords)))
+      return LaTeX.environment("IEEEkeywords", content)
     if @metadata_style == :acm
-      return LaTeX.raw("\\keywords{" + keywords_source(keywords) + "}")
-    LaTeX.raw("\\paragraph{Keywords} " + keywords_source(keywords))
+      return LaTeX.command("keywords", content)
+    source = "\\paragraph{Keywords} " + content.source
+    LatexFragment.from_parts(source, [content])
 
   -> opening_fragment(metadata)
     return thesis_opening_fragment(metadata) if @metadata_style == :thesis
@@ -165,20 +221,35 @@
     institution = metadata_value(metadata, :institution)
     degree = metadata_value(metadata, :degree)
     date = metadata_value(metadata, :date)
-    lines = ["\\begin{titlepage}", "\\centering"]
-    lines.push("{\\LARGE " + metadata_source(title) + "\\par}") if title != nil
-    lines.push("\\vfill")
-    lines.push("{\\large " + authors_source(authors, ", ") + "\\par}") if authors != nil
-    lines.push(metadata_source(degree) + "\\par") if degree != nil
-    lines.push(metadata_source(institution) + "\\par") if institution != nil
-    lines.push("\\vfill")
-    lines.push(metadata_source(date) + "\\par") if date != nil
-    lines.push("\\end{titlepage}")
+    lines = [LaTeX.raw("\\begin{titlepage}"), LaTeX.raw("\\centering")]
+    if title != nil
+      title_fragment = metadata_fragment(title)
+      lines.push(LatexFragment.from_parts(
+        "{\\LARGE " + title_fragment.source + "\\par}", [title_fragment]))
+    lines.push(LaTeX.raw("\\vfill"))
+    if authors != nil
+      author_fragment = authors_fragment(authors, ", ")
+      lines.push(LatexFragment.from_parts(
+        "{\\large " + author_fragment.source + "\\par}", [author_fragment]))
+    if degree != nil
+      degree_fragment = metadata_fragment(degree)
+      lines.push(LatexFragment.from_parts(
+        degree_fragment.source + "\\par", [degree_fragment]))
+    if institution != nil
+      institution_fragment = metadata_fragment(institution)
+      lines.push(LatexFragment.from_parts(
+        institution_fragment.source + "\\par", [institution_fragment]))
+    lines.push(LaTeX.raw("\\vfill"))
+    if date != nil
+      date_fragment = metadata_fragment(date)
+      lines.push(LatexFragment.from_parts(
+        date_fragment.source + "\\par", [date_fragment]))
+    lines.push(LaTeX.raw("\\end{titlepage}"))
     abstract_part = abstract_fragment(metadata)
-    lines.push(abstract_part.source) if !abstract_part.empty?
+    lines.push(abstract_part) if !abstract_part.empty?
     keyword_part = keywords_fragment(metadata)
-    lines.push(keyword_part.source) if !keyword_part.empty?
-    LaTeX.raw(lines.join("\n"))
+    lines.push(keyword_part) if !keyword_part.empty?
+    LaTeX.join(lines, LaTeX.raw("\n"))
 
   -> bibliography_fragment(metadata)
     resource = metadata_value(metadata, :bibliography)
@@ -192,11 +263,11 @@
 
   -> document(body, metadata = nil)
     metadata = {} if metadata == nil
-    body_source = body.class_name == "LatexFragment" ? body.source : LaTeX.escape(body)
+    body_fragment = body.class_name == "LatexFragment" ? body : LaTeX.raw(LaTeX.escape(body))
     parts = [preamble_fragment(metadata), LaTeX.raw("\\begin{document}")]
     opening = opening_fragment(metadata)
     parts.push(opening) if !opening.empty?
-    parts.push(LaTeX.raw(body_source))
+    parts.push(body_fragment)
     bibliography = bibliography_fragment(metadata)
     parts.push(bibliography) if !bibliography.empty?
     parts.push(LaTeX.raw("\\end{document}"))

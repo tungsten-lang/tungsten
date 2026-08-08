@@ -37,6 +37,48 @@ table = LaTeX.table(
   "lc")
 ```
 
+## Semantic mathematics
+
+`LatexMath` preserves construction-time meaning before lowering to a
+`LatexFragment`. Its vocabulary and presentation-semantic sorts are
+deliberately closed so unsupported operations fail instead of silently
+acquiring the wrong meaning:
+
+```tungsten
+x = LatexMath.symbol(:x)
+y = LatexMath.symbol(:y)
+
+formula = LatexMath.product([
+  LatexMath.sum([x, LatexMath.number(1)]),
+  y
+])
+
+formula.concept       # "times"
+formula.sort          # :scalar
+formula.to_latex      # \left(x + 1\right)\,y
+LaTeX.render(formula) # the same LatexFragment
+```
+
+The initial constructors are `number`, `named_constant`, `symbol`, `sum`,
+`product`, `quotient`, `power`, `square_root`, `absolute_value`, `determinant`,
+`cartesian_product`, `matrix_product`, and `equals`. Symbols may be scalar,
+set, or matrix values; equality yields a proposition. Constructors validate
+arity and sorts, and `children` returns a defensive copy. Typed leaf accessors
+`number_value` and `symbol_name` let later backends traverse the tree without
+parsing its rendered source.
+
+`LaTeX.semantic(value)` / `LatexMath.from(value)` convert supported Core
+scalars, symbols, and the stable subset of `Expression` nodes: constants,
+variables, named constants, addition, multiplication, division, powers, square
+roots, and absolute values. Strings, fragments, arbitrary objects, and other
+expression operations are rejected. Escaped presentation or trusted source
+cannot be retroactively declared semantic.
+
+Sorts describe presentation semantics; they do not prove scalar-domain
+membership, matrix conformability, set theory, or dimensional consistency.
+MathML, generated speech, and caller-defined notation registries are not part
+of this initial public contract.
+
 ## Safety model
 
 Ordinary strings are escaped. `LaTeX.escape`, `text`, `math_text`, document
@@ -52,7 +94,48 @@ trusted = LaTeX.raw("E = mc^{2}")
 ```
 
 Only use `raw` for source controlled by the program. It deliberately bypasses
-escaping.
+escaping and carries no structured reference provenance.
+
+## Reference and citation validation
+
+Labels, references, equation references, and citations created through Core
+helpers retain immutable provenance as fragments are appended, joined, nested
+in equations/tables/sections, and wrapped by publication profiles. Validation
+is opt-in and never scans TeX source:
+
+```tungsten
+body = LaTeX.concat([
+  LaTeX.text("See "),
+  LaTeX.eqref("eq:energy"),
+  LaTeX.equation(LaTeX.raw("E=mc^{2}"), "eq:energy"),
+  LaTeX.cite(["einstein1905", "review2025"])
+])
+
+document = LaTeX.profile(:arxiv).document(body)
+report = LaTeX.validate(document, ["einstein1905", "review2025"])
+report.raise_if_invalid
+```
+
+`LatexValidationReport` exposes `labels`, `references`, `citations`,
+`duplicate_labels`, `unresolved_references`, `unresolved_citations`,
+`citation_check_complete?`, `tracked_valid?`, `issues`, and
+`raise_if_invalid`. The shorter `complete?` and `valid?` aliases have the same
+tracked-only meaning. `scope` returns `:structured_helpers` and
+`tracked_only?` is always true so callers cannot confuse the result with a
+whole-TeX parser. References may precede their definitions. Repeated uses are
+valid; repeated label definitions are not. Reference diagnostics retain
+whether the original helper was `ref` or `eqref`.
+
+Citation resolution requires an explicit Array of bibliography keys. Passing
+`nil` records citations but makes the report incomplete and invalid; passing
+an empty Array authoritatively marks every citation unresolved. Core does not
+read bibliography files or infer keys from a profile’s bibliography resource.
+
+Validation is exact only for structured helpers. `LaTeX.raw`, direct
+`LatexFragment.new`, included files, custom macros, `autoref`/`cref`, and
+package-specific citation commands are untracked. Reconstructing a fragment
+from its `.source` also discards provenance. This is safer than a partial TeX
+scanner whose result could be mistaken for complete validation.
 
 ## Rendered values
 
@@ -118,6 +201,11 @@ Supported metadata keys are `title`, `author` or `authors`, `date`,
 `document`, so applications can replace or reorder parts without duplicating
 the generic renderer.
 
+Custom profile `extra_preamble` entries must already be explicit
+`LatexFragment` values; ordinary strings are rejected rather than silently
+treated as trusted source. Profile option and package Arrays are defensively
+copied on input and output.
+
 These profiles are deliberately not claims of submission compliance. Venue
 classes, package rules, author metadata, rights blocks, bibliography policy,
 and formatting requirements change and often vary by track. Review the
@@ -134,6 +222,8 @@ belongs there; value rendering stays in `core/latex.w`.
 No TeX syntax checker or external engine is invoked, so source generation does
 not prove that a locally installed class/package set can compile a complete
 document. The module does not run bibliography tools, manage figures, choose
-pagination, or validate venue-specific constraints. Complex custom objects
-should be assembled from structural helpers until they have a stable public
-representation suitable for a dedicated renderer.
+pagination, or validate venue-specific constraints. Reference validation does
+not inspect arbitrary TeX or external files, and semantic sorts are not a type
+proof. Complex custom objects should be assembled from structural helpers
+until they have a stable public representation suitable for a dedicated
+renderer.

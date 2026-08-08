@@ -1440,52 +1440,17 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   want = node.op == :EQ ? eq_val : !eq_val
   want ? :true_const : :false_const
 
-# Phase 2.5 (E4): TUNGSTEN_TAG_ASSERT=1 keeps every foldable guard live
-# and wires llvm.trap to its disproven side — an unsoundly elided guard
-# becomes an uncatchable abort instead of a silent wrong path, which is
-# what the differential oracle byte-compares against the folded build.
-# This configuration must NEVER produce stage1/stage2 (B10): build.rb
-# clears the variable for stage builds, and the flag keys the
-# incremental cache alongside TUNGSTEN_FREE.
--> lower_tag_assert_compare(ctx, node, fold)
-  wfn = ctx[:func]
-  ctx[:tag_assert_skip] = true
-  tv = lower_binary_op(ctx, node)
-  ctx[:tag_assert_skip] = nil
-  abool = tv[:value]
-  if tv[:type] != :i1
-    ab = next_temp(wfn)
-    emit_instruction(wfn, {op: :truthy_inline, temp: ab, value: ensure_i64_value(wfn, tv)})
-    abool = ab
-  bad = abool
-  if fold == :true_const
-    nb = next_temp(wfn)
-    emit_instruction(wfn, {op: :not_i1, temp: nb, value: abool})
-    bad = nb
-  trap_label = next_label(wfn, "tagassert.trap")
-  cont_label = next_label(wfn, "tagassert.cont")
-  emit_instruction(wfn, {op: :cond_br, cond: bad, then_label: trap_label, else_label: cont_label})
-  start_block(wfn, trap_label)
-  emit_instruction(wfn, {op: :trap_intrinsic})
-  emit_instruction(wfn, {op: :unreachable})
-  start_block(wfn, cont_label)
-  tv
-
 -> lower_binary_op(ctx, node)
   wfn = ctx[:func]
   op = node.op
 
-  # Tag-guard fold (Phase 3): a comparison over NaN-box tag bits decided
-  # by a :structural fact folds to its constant, making the re-checks in
-  # seam-reached bodies (big_int.w) dead branches; under
-  # TUNGSTEN_TAG_ASSERT=1 the compare instead stays live with a trap on
-  # the disproven side. An undecided or fact-free compare falls through
-  # unchanged — the nil path is the load-bearing safe default.
+  # Tag-guard fold: a comparison over NaN-box tag bits decided by a
+  # :structural fact folds to its constant. An undecided or fact-free
+  # compare falls through unchanged — the nil path is the load-bearing
+  # safe default.
   if op in (:EQ :NEQ)
     tfold = fold_tag_compare(ctx, node)
     if tfold != nil
-      if env("TUNGSTEN_TAG_ASSERT") == "1"
-        return lower_tag_assert_compare(ctx, node, tfold)
       fold_rhs = tfold == :true_const ? "0" : "1"
       tconst = next_temp(wfn)
       emit_instruction(wfn, {op: :icmp_i64, temp: tconst, pred: "eq", lhs: "0", rhs: fold_rhs})
@@ -2160,14 +2125,56 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if rt_name == nil
     rt_name = "w_add"  # fallback, should not happen
 
-  # RETIRED (Phase 4): the TUNGSTEN_BIGINT_DIRECT_OPS lever that called
-  # `__w_bigint_{plus,minus}_src` directly from `## big`-typed call sites.
-  # Its safety argument was "the source body re-checks operand shapes
-  # anyway" — no longer true: the typed-overload worker's tag guards FOLD
-  # under the dispatcher/seam contract (Phase 3), and a `## big` value can
-  # hold a demoted inline int that neither the dispatcher nor
-  # bigint_src_shape ever saw. Every static call site now routes through
-  # w_add/w_sub, whose arm re-proves shapes before taking the seam.
+  # Static typed dispatch (DEFAULT): a call site whose operand types both
+  # infer bigint lowers to a tag-GUARDED direct call to the operator
+  # worker through its stable alias (`__w_bigint_{plus,minus,times}_src`,
+  # strong when the program compiles BigInt, weak C kernel otherwise) —
+  # w_add/w_sub/w_mul stay the slow path for types the compiler cannot
+  # see. The two masked compares are load-bearing, not paranoia: a bigint
+  # RESULT demotes to an inline int whenever it fits i48 (`d = a - b` of
+  # near-equal bigints), so an inferred-bigint slot can legally hold an
+  # int at runtime, and the worker bodies carry NO tag checks of their
+  # own. A failed test falls to the polymorphic entry. The worker itself
+  # re-routes the C-favored strata (equal-length same-raw-sign, squaring)
+  # to the direct C entries, so this path keeps the measured per-shape
+  # routing. Mutate-if-unique accumulator sites keep their in-place
+  # entries (the marker check below mirrors the fallback rewrite).
+  bidir_mut = ctx[:mut_accum_target] != nil && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
+  if op in (:PLUS :MINUS :STAR) && !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
+    bidir_fast = op == :PLUS ? "__w_bigint_plus_src" : (op == :MINUS ? "__w_bigint_minus_src" : "__w_bigint_times_src")
+    bidir_slow = op == :PLUS ? "w_add" : (op == :MINUS ? "w_sub" : "w_mul")
+    # Tag/mask spellings come from the generated B3 table — the same
+    # single source the typed-overload gate emission uses.
+    bidir_entry = overload_exact_tag_entry("BigInt")
+    bm1 = next_temp(wfn)
+    emit_instruction(wfn, {op: :and_i64, temp: bm1, lhs: lhs_reg, rhs: bidir_entry[:mask]})
+    bc1 = next_temp(wfn)
+    emit_instruction(wfn, {op: :icmp_i64, temp: bc1, pred: "eq", lhs: bm1, rhs: bidir_entry[:tag]})
+    bm2 = next_temp(wfn)
+    emit_instruction(wfn, {op: :and_i64, temp: bm2, lhs: rhs_reg, rhs: bidir_entry[:mask]})
+    bc2 = next_temp(wfn)
+    emit_instruction(wfn, {op: :icmp_i64, temp: bc2, pred: "eq", lhs: bm2, rhs: bidir_entry[:tag]})
+    bboth = next_temp(wfn)
+    emit_instruction(wfn, {op: :and_i1, temp: bboth, lhs: bc1, rhs: bc2})
+    fast_label = next_label(wfn, "bidir.fast")
+    slow_label = next_label(wfn, "bidir.slow")
+    done_label = next_label(wfn, "bidir.done")
+    bidir_slot = ensure_var_slot(wfn, "__bidir." + done_label)
+    emit_instruction(wfn, {op: :cond_br, cond: bboth, then_label: fast_label, else_label: slow_label})
+    start_block(wfn, fast_label)
+    bfast = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: bfast, name: bidir_fast, args: [lhs_reg, rhs_reg]})
+    emit_instruction(wfn, {op: :store_i64, value: bfast, ptr: bidir_slot})
+    emit_instruction(wfn, {op: :br, label: done_label})
+    start_block(wfn, slow_label)
+    bslow = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: bslow, name: bidir_slow, args: [lhs_reg, rhs_reg]})
+    emit_instruction(wfn, {op: :store_i64, value: bslow, ptr: bidir_slot})
+    emit_instruction(wfn, {op: :br, label: done_label})
+    start_block(wfn, done_label)
+    bres = next_temp(wfn)
+    emit_instruction(wfn, {op: :load_i64, temp: bres, ptr: bidir_slot})
+    return typed_value(:i64, bres)
 
   # Exactness-gated literal adaptation: ==/!= with an int or decimal
   # LITERAL operand routes through w_eq_lit, which adapts the literal to

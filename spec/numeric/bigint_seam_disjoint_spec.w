@@ -4,11 +4,14 @@
 # `bigint_src_shape` / `bigint_mul_src_shape` (runtime.c): both heap
 # BigInts, 2..4096 limbs (2..24 for `*`), excluding equal-length pairs
 # whose RAW signs match (C keeps its *_equal_fast arms) and squaring.
-# The source bodies (core/numeric/big_int.w) BAIL back to the C boundary
-# on: a non-0xFFF8 tag on either operand, an effective-zero operand, or a
-# magnitude over the band. These sets are NOT complements — the source
-# bodies carry no `< 2`-limb and no equal-length bail — so the property
-# that keeps the seam sound is one-way disjointness:
+# The source bodies (core/numeric/big_int.w) carry NO tag or zero checks
+# of their own — every entry route proves heap-BigInt operands (the
+# guarded direct call site, the w_add shape gate, the dispatcher's typed
+# gate). They BAIL back to C on: a magnitude over the band (w_add/w_sub,
+# re-gated), the equal-length same-raw-sign stratum and squaring (direct
+# bigint entries, which bypass the gate entirely). The sets are NOT
+# complements, so the property that keeps the seam sound is one-way
+# disjointness:
 #
 #     bail_set ∩ admit_set = ∅
 #
@@ -21,10 +24,10 @@
 # widened into the other, the overlapping pair recurses and this spec
 # crashes or hangs instead of printing its PASS lines.
 #
-# The effective-zero bail is unreachable through the seam (admission
-# requires >= 2 limbs, so magnitudes are nonzero) and a normalized zero is
-# an inline int, never a heap BigInt — it is covered by the int/bigint
-# mixed rows below, which must keep routing through C's promotion arms.
+# A zero-magnitude heap BigInt cannot reach the bodies at all: every
+# route proves a tagged operand and normalization demotes any i48-range
+# result (zero included) to an inline int — the int/bigint mixed rows
+# below pin C's promotion arms for inline values.
 #
 # Run both engines; a mid-program runtime error still exits 0, so gates
 # must diff the full output:

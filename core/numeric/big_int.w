@@ -1,15 +1,3 @@
-# NaN-box tag constants for the operator guards, constructed from the
-# 16-bit tag values themselves (v4 encoding, wvalue.h: the mask is
-# 0xFFFF << 48, the BigInt top tag 0xFFF8 << 48). `TAG - 0x10000` is the
-# two's-complement fold of the high 16 bits, so the shift lands the exact
-# SIGNED i64 bit pattern with every intermediate small enough to compute
-# identically on every bootstrap host (the stage-0 VM has no bigint
-# tower). Single-assignment `## i64` bindings emit as LLVM `constant`s
-# whose loads fold to the immediate, so the named spelling costs nothing
-# over inline literals — verified by byte-comparing emitted worker bodies.
-W_TAG_MASK = ((0xFFFF - 0x10000) << 48) ## i64
-W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
-
 + BigInt < Int
   - data
     # BigInt rides a dedicated top-level NaN-box tag (0xFFF8, v4), but WBigint retains its C header
@@ -94,23 +82,28 @@ W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
         $size = 0 - n
     self
 
-  # Source-routed operators, DECLARATIVE-DISPATCH form (Phase 4): each
-  # operator is a typed overload pair. The compiler rewrites the pair
-  # into a synthesized dispatcher (exact-tag gate, Phase 1) plus renamed
-  # workers; the weak seam (`__w_bigint_plus_src` / `_minus_src` /
-  # `_times_src`) binds the (BigInt) WORKER directly — `bigint_src_shape`
-  # already proved both operands, so the seam never re-runs the gate.
-  # Explicit `x.+(y)` and every dynamic send run the dispatcher: BigInt
-  # argument → fast worker, anything else → the (Number) catch-all, which
-  # is the polymorphic C boundary (w_add — NEVER w_bigint_add: mixed
-  # rational/decimal/complex operands need its full arm chain).
-  #
-  # The tag re-checks below STAY IN SOURCE and cost nothing: both entry
-  # routes prove the operands (dispatcher gate / seam shape gate), so
-  # Phase 3's known-bits fold deletes them from the emitted code — and
-  # TUNGSTEN_TAG_ASSERT=1 re-arms every one of them as a trap for the
-  # differential oracle. NEVER apply infix `+`/`-` to bigint operands in
+  # Source-routed operators, typed overload pairs. Every entry route
+  # PROVES both operands are heap BigInts before the body runs, so the
+  # bodies carry no tag checks of their own:
+  #   - infix `a + b` with statically-inferred bigint operands lowers to
+  #     a tag-GUARDED direct call to this worker (ops.w) — the guard is
+  #     what makes inference safe, since a bigint RESULT demotes to an
+  #     inline int whenever it fits i48;
+  #   - infix with unknown types calls w_add, whose bigint arm re-proves
+  #     both operands (bigint_src_shape) before routing here;
+  #   - explicit `x.+(y)` and dynamic sends run the synthesized
+  #     dispatcher, whose (BigInt) gate is an exact-tag compare.
+  # The (Number) catch-all keeps the polymorphic C boundary (w_add —
+  # NEVER w_bigint_add: mixed rational/decimal/complex operands need its
+  # full arm chain). NEVER apply infix `+`/`-` to bigint operands in
   # these bodies — that re-enters the arm; compose exported boundaries.
+  #
+  # Per-shape routing: C keeps the strata it measurably wins — the
+  # equal-length same-RAW-sign pairs (bigint_{add,sub}_equal_fast,
+  # source measured 1.12-1.30 against them) and squaring — via in-body
+  # bails to the DIRECT bigint entries; w_add's shape gate makes the
+  # same split for the unknown-type route. The migrated arm (unequal
+  # multi-limb) runs the fused asm kernels at 0.93-1.00 vs C.
   #
   # Kernel history (why the bodies look like this): SEVEN kernel bodies
   # were measured and rejected under the 5% budget before the fused
@@ -120,12 +113,6 @@ W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
   # migration proceeds arm by arm, each with its own gate. See
   # benchmarks/runtime_ports/README.md.
   -> +(other)(BigInt)
-    if ($value & W_TAG_MASK) != W_BIG_TAG
-      return ccall("w_add", self, other)
-
-    if (wvalue_bits(other) & W_TAG_MASK) != W_BIG_TAG
-      return ccall("w_add", self, other)
-
     an = $size ## i64
     if ((wvalue_bits(self) >> 47) & 1) == 1
       an = 0 - an
@@ -135,9 +122,6 @@ W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
 
     if ((wvalue_bits(other) >> 47) & 1) == 1
       bn = 0 - bn
-
-    if an == 0 || bn == 0
-      return ccall("w_add", self, other)
 
     am = an < 0 ? 0 - an : an
     bm = bn < 0 ? 0 - bn : bn
@@ -150,6 +134,12 @@ W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
     pb = (wvalue_bits(other) & mask) + 16
 
     if (an > 0) == (bn > 0)
+      # Equal-length same-sign pairs are bigint_add_equal_fast's domain —
+      # the dedicated C arm source measured 1.12-1.30 against. Route them
+      # through the direct bigint entry (not w_add: both operands are
+      # proven, skip the polymorphic preamble).
+      if am == bm
+        return ccall("w_bigint_add", self, other)
       # Same sign: magnitude add. One fused kernel call covers the common
       # limbs AND the longer operand's remainder — no source tail loop.
       # Plain assignments, never ternaries, for raw limb ADDRESSES: a
@@ -215,24 +205,23 @@ W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
     ccall("w_add", self, other)
 
   -> -(other)(BigInt)
-    if ($value & W_TAG_MASK) != W_BIG_TAG
-      return ccall("w_sub", self, other)
-    if (wvalue_bits(other) & W_TAG_MASK) != W_BIG_TAG
-      return ccall("w_sub", self, other)
     an = $size ## i64
     if ((wvalue_bits(self) >> 47) & 1) == 1
       an = 0 - an
+
     o = other ## BigInt
     bn0 = o$size ## i64
+
     if ((wvalue_bits(other) >> 47) & 1) == 1
       bn0 = 0 - bn0
     bn = 0 - bn0
-    if an == 0 || bn == 0
-      return ccall("w_sub", self, other)
+
     am = an < 0 ? 0 - an : an
     bm = bn < 0 ? 0 - bn : bn
+
     if am > 4096 || bm > 4096
       return ccall("w_sub", self, other)
+
     mask = 140737488355312
     pa = (wvalue_bits(self) & mask) + 16
     pb = (wvalue_bits(other) & mask) + 16
@@ -262,6 +251,13 @@ W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
         r$limbs[ll] = carry
         n = ll + 1
       return ccall("w_bigint_seal", result, an < 0 ? 0 - n : n)
+
+    # Post-flip opposite signs mean the RAW operand signs MATCH — and the
+    # equal-length slice of that stratum is bigint_sub_equal_fast's domain
+    # (the C arm source measured up to 1.30 against). Direct bigint entry:
+    # both operands are proven, skip the polymorphic preamble.
+    if am == bm
+      return ccall("w_bigint_sub", self, other)
 
     # Opposite signs: magnitude subtract, larger operand's sign wins.
     cmp = 0
@@ -305,10 +301,6 @@ W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
   # reach the kernel, so a zero result cannot occur here (both operands are
   # multi-limb, hence nonzero).
   -> *(other)(BigInt)
-    if ($value & W_TAG_MASK) != W_BIG_TAG
-      return ccall("w_mul", self, other)
-    if (wvalue_bits(other) & W_TAG_MASK) != W_BIG_TAG
-      return ccall("w_mul", self, other)
     an = $size ## i64
     if ((wvalue_bits(self) >> 47) & 1) == 1
       an = 0 - an
@@ -316,12 +308,15 @@ W_BIG_TAG  = ((0xFFF8 - 0x10000) << 48) ## i64
     bn = o$size ## i64
     if ((wvalue_bits(other) >> 47) & 1) == 1
       bn = 0 - bn
-    if an == 0 || bn == 0
-      return ccall("w_mul", self, other)
     am = an < 0 ? 0 - an : an
     bm = bn < 0 ? 0 - bn : bn
     if am < 2 || bm < 2 || am > 24 || bm > 24
       return ccall("w_mul", self, other)
+    # Squaring (identical boxed bits, flip included) keeps C's dedicated
+    # square path, mirroring bigint_mul_src_shape's a == b exclusion.
+    if wvalue_bits(self) == wvalue_bits(other)
+      return ccall("w_mul", self, other)
+
     mask = 140737488355312
     pa = (wvalue_bits(self) & mask) + 16
     pb = (wvalue_bits(other) & mask) + 16

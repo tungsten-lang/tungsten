@@ -19,9 +19,13 @@ while i < 8
   b[i] = ~2.0
   i = i + 1
 c = a .* b
-check("dot.f64_mul", c[7], 3.0)
+# Machine-float wants (~3.0, not 3.0): f64[] kernels return machine Floats,
+# and the 8/7 exactness landing makes boxed Float == Decimal FALSE by design
+# (same rule as 2.0 == 2). A bare 3.0 literal is an exact Decimal once it
+# crosses the check() call boundary, so it can never equal the kernel result.
+check("dot.f64_mul", c[7], ~3.0)
 d = a .+ b
-check("dot.f64_add", d[0], 3.5)
+check("dot.f64_add", d[0], ~3.5)
 
 x = i64[4]
 j = 0 ## i64

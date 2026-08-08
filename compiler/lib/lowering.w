@@ -49,8 +49,17 @@ use lowering/definitions
     htl = ht.size()
     # `## f32[]` / `## i32[]` / etc. — normalize to :typed_array_<etype>
     # so receiver_static_type → typed_array_get_inline fast path fires.
+    # EXCEPT when the hint matches a typed-array literal RHS that stack-
+    # promotes (`a = bf16[4] ## bf16[]`): resolve to the :small_array_*
+    # symbol exactly as inference would, because forcing :typed_array_*
+    # sends every reader down heap-WArray offsets against a SmallArray
+    # handle — a segfault, not a type error.
     if htl >= 3 && ht.slice(htl - 2, 2) == "\[]"
-      return typed_array_etype_to_sym(ht.slice(0, htl - 2))
+      hint_etype = ht.slice(0, htl - 2)
+      v = expr.value
+      if v != nil && is_ast_node?(v) && ast_kind(v) in (:typed_array_new :typed_array) && v.element_type == hint_etype && typed_array_new_stack_promoted?(v)
+        return small_array_etype_to_sym(hint_etype)
+      return typed_array_etype_to_sym(hint_etype)
     return normalize_type_symbol(expr.type_hint)
   # Infer the RHS against the static types collected so far, not an empty
   # map — otherwise a reassignment like `x = x * y` (no `##` hint) can't see
@@ -2765,8 +2774,17 @@ use lowering/definitions
       # to the canonical :typed_array_<etype> symbol so element access
       # (`a[i]`) lowers via :typed_array_get_inline instead of
       # dispatching through generic Array#[]. Mirrors the param-hint
-      # normalization in definitions.w.
-      target_type = typed_array_etype_to_sym(hint_text.slice(0, htl - 2))
+      # normalization in definitions.w. EXCEPT when the hint matches a
+      # typed-array literal RHS that stack-promotes (`a = bf16[4] ##
+      # bf16[]`) — same rule as top_level_assignment_static_type: resolve
+      # to the :small_array_* symbol as inference would, or readers run
+      # heap-WArray offsets against a SmallArray handle (segfault).
+      hv = node.value
+      hint_etype = hint_text.slice(0, htl - 2)
+      if hv != nil && is_ast_node?(hv) && ast_kind(hv) in (:typed_array_new :typed_array) && hv.element_type == hint_etype && typed_array_new_stack_promoted?(hv)
+        target_type = small_array_etype_to_sym(hint_etype)
+      else
+        target_type = typed_array_etype_to_sym(hint_etype)
     elsif hint_text == "big" || hint_text == "bigint" || hint_text == "bignum"
       # Opt-in auto-promoting BigInt accumulator. Canonicalize all three
       # spellings to the single :bigint type so the value stays off the

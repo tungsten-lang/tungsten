@@ -23,9 +23,10 @@ use math/globals
 << "atan0 " + atan(0.0).to_s()
 
 # Accumulation through the alias in a typed loop (raw-f64 path compiled).
+# Closed form: sum sin(ka), k=0..99, a=0.01 = sin(50a)sin(49.5a)/sin(a/2) ~ 45.55.
 acc = 0.0 ## f64
 i = 0 ## i64
 while i < 100
   acc = acc + sin(i.to_f() * 0.01)
   i += 1
-<< "loop " + (acc > 4.9 && acc < 5.0).to_s()
+<< "loop " + (acc > 45.5 && acc < 45.6).to_s()

@@ -84,4 +84,19 @@ check("or_self", a | a, a)
 check("or_int_arg", a | 255, a + 255 - 57)
 check("or_explicit_send", a.|(b), or_uneq_want)
 
+# --- Bitwise XOR (source-routed for both-positive multi-limb pairs) ---
+xor_uneq_want = 1608507319692836945732921039696964519126228582643908843987976
+check("xor_pp_uneq", a ^ b, xor_uneq_want)
+check("xor_pp_uneq_comm", b ^ a, xor_uneq_want)
+# Equal-length XOR cancels every shared top limb — the trim/demote path
+check("xor_eq_cancel", c4 ^ d4, 67)
+check("xor_self_zero", a ^ a, 0)
+xor_np_want = 1608507319692836945732921039696964519126228582643908843987978
+check("xor_neg_pos", (0 - a) ^ b, 0 - xor_np_want)
+xor_int_want = 1606938044258990275543323221808846356376056492212519908159686
+check("xor_int_arg", a ^ 255, xor_int_want)
+check("xor_explicit_send", a.^(b), xor_uneq_want)
+# Involution: (x ^ y) ^ y == x across the family
+check("xor_involution", (a ^ b) ^ b, a)
+
 << "bigint_bitwise_spec: all checks passed"

@@ -1,0 +1,14 @@
+# XOR campaigns, interleaved ABBA pairs, thread-CPU medians.
+# Campaign A (first kernel, no equal-4 fast path — REJECTED on xor-four):
+#   xor-four 1.115/1.108, repeat 1.121/1.120 (real; C's BN_BITWISE_SMALL
+#   fully-unrolled n<=4 arm); all other rows passed (fortyeight 0.772-0.780).
+# Campaign B (kernel + straight-line equal-4 fast path):
+#   xor-one 1.042  xor-int-arg 1.007  xor-four 1.055  xor-fortyeight 0.774
+#   xor-sixtyfour 1.025  xor-skew 0.968  xor-neg 1.015
+# Campaign C (independent repeat; raw samples in
+#   bigint_opxor_public_camp2_results.txt):
+#   xor-one 1.055  xor-int-arg 0.999  xor-four 1.087  xor-fortyeight 0.771
+#   xor-sixtyfour 1.060  xor-skew 0.969  xor-neg 1.036
+# Worst passing row 1.087; retention gate <= 1.10 met in B and C.
+# (xor-one's ~9.4ns absolute scale: the corpus' close one-limb values XOR
+#  to inline-i48 results — no allocation — unlike the AND/OR one rows.)

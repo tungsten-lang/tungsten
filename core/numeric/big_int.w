@@ -566,6 +566,168 @@
   -> |(other)(Number)
     ccall("w_bit_or", self, other)
 
+  # OR/XOR share this two-phase kernel shape: combine over the SHORTER
+  # operand's limbs, then copy the longer operand's remainder. lp/ll is
+  # the longer operand (callers sort with plain if/else), sl >= 2.
+  fn __bigint_bw_xor_uneq(rp, lp, ln, sp, sn) (i64 i64 i64 i64 i64) i64
+    ll <<~IR
+      entry:
+        %rq = inttoptr i64 %rp to ptr
+        %lq = inttoptr i64 %lp to ptr
+        %sq = inttoptr i64 %sp to ptr
+        %islong4 = icmp eq i64 %ln, 4
+        %isshort4 = icmp eq i64 %sn, 4
+        %eq4 = and i1 %islong4, %isshort4
+        br i1 %eq4, label %fast4, label %general
+      fast4:
+        %f4l0 = load <2 x i64>, ptr %lq, align 8
+        %f4s0 = load <2 x i64>, ptr %sq, align 8
+        %f4lg1 = getelementptr inbounds i64, ptr %lq, i64 2
+        %f4sg1 = getelementptr inbounds i64, ptr %sq, i64 2
+        %f4rg1 = getelementptr inbounds i64, ptr %rq, i64 2
+        %f4l1 = load <2 x i64>, ptr %f4lg1, align 8
+        %f4s1 = load <2 x i64>, ptr %f4sg1, align 8
+        %f4r0 = xor <2 x i64> %f4l0, %f4s0
+        %f4r1 = xor <2 x i64> %f4l1, %f4s1
+        store <2 x i64> %f4r0, ptr %rq, align 8
+        store <2 x i64> %f4r1, ptr %f4rg1, align 8
+        ret i64 0
+      general:
+        %s4 = and i64 %sn, -4
+        %ahas4 = icmp ne i64 %s4, 0
+        br i1 %ahas4, label %av4, label %amid
+      av4:
+        %i = phi i64 [ 0, %general ], [ %inext, %av4 ]
+        %i2 = or i64 %i, 2
+        %alg0 = getelementptr inbounds i64, ptr %lq, i64 %i
+        %asg0 = getelementptr inbounds i64, ptr %sq, i64 %i
+        %arg0 = getelementptr inbounds i64, ptr %rq, i64 %i
+        %alg1 = getelementptr inbounds i64, ptr %lq, i64 %i2
+        %asg1 = getelementptr inbounds i64, ptr %sq, i64 %i2
+        %arg1 = getelementptr inbounds i64, ptr %rq, i64 %i2
+        %alv0 = load <2 x i64>, ptr %alg0, align 8
+        %asv0 = load <2 x i64>, ptr %asg0, align 8
+        %alv1 = load <2 x i64>, ptr %alg1, align 8
+        %asv1 = load <2 x i64>, ptr %asg1, align 8
+        %arv0 = xor <2 x i64> %alv0, %asv0
+        %arv1 = xor <2 x i64> %alv1, %asv1
+        store <2 x i64> %arv0, ptr %arg0, align 8
+        store <2 x i64> %arv1, ptr %arg1, align 8
+        %inext = add nuw nsw i64 %i, 4
+        %adone4 = icmp uge i64 %inext, %s4
+        br i1 %adone4, label %amid, label %av4
+      amid:
+        %j = phi i64 [ 0, %general ], [ %s4, %av4 ]
+        %arem = sub i64 %sn, %j
+        %ahas2 = icmp uge i64 %arem, 2
+        br i1 %ahas2, label %apair, label %aoddpre
+      apair:
+        %plg = getelementptr inbounds i64, ptr %lq, i64 %j
+        %psg = getelementptr inbounds i64, ptr %sq, i64 %j
+        %prg = getelementptr inbounds i64, ptr %rq, i64 %j
+        %plv = load <2 x i64>, ptr %plg, align 8
+        %psv = load <2 x i64>, ptr %psg, align 8
+        %prv = xor <2 x i64> %plv, %psv
+        store <2 x i64> %prv, ptr %prg, align 8
+        %jp = add nuw nsw i64 %j, 2
+        br label %aoddchk
+      aoddpre:
+        br label %aoddchk
+      aoddchk:
+        %k = phi i64 [ %jp, %apair ], [ %j, %aoddpre ]
+        %ahasodd = icmp ult i64 %k, %sn
+        br i1 %ahasodd, label %aodd, label %bstart
+      aodd:
+        %olg = getelementptr inbounds i64, ptr %lq, i64 %k
+        %osg = getelementptr inbounds i64, ptr %sq, i64 %k
+        %org = getelementptr inbounds i64, ptr %rq, i64 %k
+        %olv = load i64, ptr %olg, align 8
+        %osv = load i64, ptr %osg, align 8
+        %orv = xor i64 %olv, %osv
+        store i64 %orv, ptr %org, align 8
+        br label %bstart
+      bstart:
+        %m = sub i64 %ln, %sn
+        %m4 = and i64 %m, -4
+        %bhas4 = icmp ne i64 %m4, 0
+        br i1 %bhas4, label %bv4, label %bmid
+      bv4:
+        %ci = phi i64 [ 0, %bstart ], [ %cinext, %bv4 ]
+        %bi = add i64 %sn, %ci
+        %bi2 = add i64 %bi, 2
+        %blg0 = getelementptr inbounds i64, ptr %lq, i64 %bi
+        %brg0 = getelementptr inbounds i64, ptr %rq, i64 %bi
+        %blg1 = getelementptr inbounds i64, ptr %lq, i64 %bi2
+        %brg1 = getelementptr inbounds i64, ptr %rq, i64 %bi2
+        %blv0 = load <2 x i64>, ptr %blg0, align 8
+        %blv1 = load <2 x i64>, ptr %blg1, align 8
+        store <2 x i64> %blv0, ptr %brg0, align 8
+        store <2 x i64> %blv1, ptr %brg1, align 8
+        %cinext = add nuw nsw i64 %ci, 4
+        %bdone4 = icmp uge i64 %cinext, %m4
+        br i1 %bdone4, label %bmid, label %bv4
+      bmid:
+        %cj = phi i64 [ 0, %bstart ], [ %m4, %bv4 ]
+        %brem = sub i64 %m, %cj
+        %bhas2 = icmp uge i64 %brem, 2
+        br i1 %bhas2, label %bpair, label %boddpre
+      bpair:
+        %cbi = add i64 %sn, %cj
+        %cplg = getelementptr inbounds i64, ptr %lq, i64 %cbi
+        %cprg = getelementptr inbounds i64, ptr %rq, i64 %cbi
+        %cplv = load <2 x i64>, ptr %cplg, align 8
+        store <2 x i64> %cplv, ptr %cprg, align 8
+        %cjp = add nuw nsw i64 %cj, 2
+        br label %boddchk
+      boddpre:
+        br label %boddchk
+      boddchk:
+        %ck = phi i64 [ %cjp, %bpair ], [ %cj, %boddpre ]
+        %bhasodd = icmp ult i64 %ck, %m
+        br i1 %bhasodd, label %bodd, label %exit
+      bodd:
+        %obi = add i64 %sn, %ck
+        %oblg = getelementptr inbounds i64, ptr %lq, i64 %obi
+        %obrg = getelementptr inbounds i64, ptr %rq, i64 %obi
+        %oblv = load i64, ptr %oblg, align 8
+        store i64 %oblv, ptr %obrg, align 8
+        br label %exit
+      exit:
+        ret i64 0
+    IR
+
+  # Bitwise XOR. Same arm as `&`/`|`; equal-length pairs can cancel any
+  # number of top limbs, and seal's trim scan restores canonical form
+  # (identical pairs never reach here — the gate excludes a == b, whose
+  # x ^ x = 0 stays on C's O(1) identity arm).
+  -> ^(other)(BigInt)
+    an = (($value >> 47) & 1) == 1 ? 0 - $size : $size
+    bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
+    if an < 2 || bn < 2 || an > 4096 || bn > 4096 || $value == other$value
+      return ccall("w_bit_xor", self, other)
+
+    mask = 140737488355312
+    pa = ($value & mask) + 16
+    pb = (other$value & mask) + 16
+
+    lp = pa
+    ln = an
+    sp = pb
+    sn = bn
+    if an < bn
+      lp = pb
+      ln = bn
+      sp = pa
+      sn = an
+
+    result = ccall("w_bigint_alloc_boxed", ln) ## BigInt
+    rp = (result$value & mask) + 16
+    __bigint_bw_xor_uneq(rp ## i64, lp ## i64, ln ## i64, sp ## i64, sn ## i64)
+    ccall("w_bigint_seal", result, ln)
+
+  -> ^(other)(Number)
+    ccall("w_bit_xor", self, other)
+
   # Greatest common divisor. The Lehmer/HGCD kernel stays in the runtime
   # (same tier as modpow's bigint_powmod_any); this override exists so the
   # method surface lives in source AND so dispatch never falls through to

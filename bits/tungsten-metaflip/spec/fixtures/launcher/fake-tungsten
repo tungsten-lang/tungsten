@@ -1,0 +1,30 @@
+#!/bin/sh
+
+set -eu
+
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' 'fake-tungsten launcher-test-v1'
+  exit 0
+fi
+
+[ "${1:-}" = "compile" ] || exit 64
+source_path=${2:-}
+shift 2
+output=
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then
+    output=${2:-}
+    shift 2
+  else
+    shift
+  fi
+done
+
+[ -n "$source_path" ] || exit 65
+[ -n "$output" ] || exit 66
+[ -n "${METAFLIP_LAUNCHER_COMPILE_LOG:-}" ] || exit 67
+
+printf '%s\n' "$source_path" >> "$METAFLIP_LAUNCHER_COMPILE_LOG"
+fixture_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+cp "$fixture_dir/fake-metaflip" "$output"
+chmod +x "$output"

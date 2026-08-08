@@ -53,6 +53,10 @@ the user cache when needed and then reuses it:
 bin/metaflip --tensor 5x5
 ```
 
+`bin/metaflip` is the tracked shell launcher, not a generated native binary.
+Compiled coordinators belong in the launcher cache, `build/bin/`, or the
+ignored checkout-root `./metaflip`; do not use `--out bin/metaflip`.
+
 Set `METAFLIP_TUNGSTEN=/path/to/tungsten` to select its compiler or
 `TUNGSTEN_METAFLIP_CACHE_DIR=/path` to relocate the launcher cache.
 
@@ -178,11 +182,11 @@ standard `J64` six-leaf campaign this is 32 independent leader streams and 32
 balanced side-door streams, rather than concentrating 63 lanes on a handful
 of shoulders.
 
-For explicitly wide CPU fleets (`-J` greater than 32), `--steps` is the
-nominal worker chunk rather than a forced coordinator cadence.  After the
-first measured epoch, each non-fringe island adapts toward about three seconds
-of parallel work, capped at 64 nominal chunks, before the serial exact-intake
-and archive pass.  Fleets of 32 or fewer walkers are unchanged.  Status files
+For CPU fleets of eight or more walkers, `--steps` is the nominal worker chunk
+rather than a forced coordinator cadence. After the first measured epoch,
+fleets of 8--32 walkers adapt toward about 250 milliseconds of parallel work;
+wider fleets adapt toward about three seconds. Tiny fleets retain the
+historical cadence. The adaptive range remains bounded, and status files
 report `cpu_seed_nonce`, `cpu_epoch_target_ms`, and the live
 `cpu_epoch_steps_min`/`cpu_epoch_steps_max` range so cloud campaigns can audit
 both diversity and cadence.
@@ -274,8 +278,11 @@ its Metal kernels: `mode-cpals` (one-factor affine re-solve), `debt-mitm`
 (direct 6-to-4 and split-assisted closing), and `dynamic-syzygy`. Each costs
 one logical 32-lane quantum and rotates under the same contextual policy;
 dynamic syzygy is currently 7x7-only because that is its only demonstrated
-plateau win. The strongest planted-debt move, block-interior refactoring, is a
-permanent selector inside both exact `span-refactor-3` and
+plateau win. Adaptive exploitation is normalized by measured 32-lane/100-ms
+exposure, including failed and stale children, while cold coverage and the
+hard one-in-four rotation preserve diversity. The strongest planted-debt move,
+block-interior refactoring, is a permanent selector inside both exact
+`span-refactor-3` and
 `span-refactor-4`: one quarter of their neighborhoods target composition
 seams, including the 7x7 4+3 cut, without duplicating the expensive join or
 adding a fourth physical pool slot.
@@ -379,7 +386,9 @@ the kernel reclaims its complete state arena at the exact epoch boundary.
 This process boundary is important on long, high-core-count runs: Tungsten's
 native arrays are campaign-lifetime allocations, so repeatedly constructing
 shape campaigns in coordinator threads would otherwise retain every completed
-epoch until the whole portfolio exited.
+epoch until the whole portfolio exited. Within each square or rectangular
+coordinator, serial exact-admission gates reuse one caller-owned parity slab;
+compatibility APIs still allocate when a standalone caller does not supply one.
 
 Use `--no-gpu` on machines without a supported GPU. The CPU fleet requires a
 64-bit Tungsten target. GPU acceleration currently requires macOS on Apple

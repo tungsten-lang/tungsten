@@ -8,7 +8,7 @@
 # that shape's checkpoint, refreshing basins without unsafe live migration.
 #
 # Within an epoch, every shape first runs `shape_epoch_rounds` ordinary rounds
-# (default four). Fast shapes then keep taking one extra round at a time while
+# (default sixteen). Fast shapes then keep taking one extra round at a time while
 # their observed average round wall-time still fits before the predicted finish
 # of the slowest shape's base quota — straggler-fill instead of sitting idle at
 # the portfolio join.

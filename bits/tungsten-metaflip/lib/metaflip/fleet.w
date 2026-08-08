@@ -6,6 +6,7 @@
 # native GPU policy module; there is no Python in the campaign runtime.
 
 use core/system
+use cli
 use scheme
 use strategies/escape
 use fleet/banks
@@ -45,65 +46,6 @@ use strategies/global_isotropy
 use strategies/partial_automorphism_nullspace
 use seeds/shoulders
 use paths
-
--> ffn_parse_tensor(text) (String) i64
-  normalized = text.downcase
-  parts = normalized.split("x")
-  n = 0 ## i64
-  if parts.size() == 2
-    left = parts[0].to_i() ## i64
-    right = parts[1].to_i() ## i64
-    if left == right
-      n = left
-  n
-
--> ffn_parse_scaled_moves(text) (String) i64
-  normalized = text.strip().downcase
-  factor = 1 ## i64
-  number = normalized
-  if normalized.ends_with?("k")
-    factor = 1000
-    number = normalized.slice(0, normalized.size() - 1)
-  if normalized.ends_with?("m")
-    factor = 1000000
-    number = normalized.slice(0, normalized.size() - 1)
-  if normalized.ends_with?("b")
-    factor = 1000000000
-    number = normalized.slice(0, normalized.size() - 1)
-  parts = number.split(".")
-  if parts.size() < 1 || parts.size() > 2
-    return 0 - 1
-  whole = parts[0].to_i() ## i64
-  if whole < 0
-    return 0 - 1
-  value = whole * factor ## i64
-  if parts.size() == 2
-    fraction_text = parts[1]
-    if fraction_text.size() < 1 || fraction_text.size() > 3
-      return 0 - 1
-    denominator = 1 ## i64
-    i = 0 ## i64
-    while i < fraction_text.size()
-      denominator *= 10
-      i += 1
-    fraction = fraction_text.to_i() ## i64
-    value += fraction * factor / denominator
-  if value < 1
-    return 0 - 1
-  value
-
--> ffn_parse_move_portfolio(text, output) (String i64[]) i64
-  parts = text.split(",")
-  if parts.size() != 4
-    return 0
-  i = 0 ## i64
-  while i < 4
-    value = ffn_parse_scaled_moves(parts[i]) ## i64
-    if value < 1
-      return 0
-    output[i] = value
-    i += 1
-  1
 
 -> ffn_better(rank, bits, best_rank, best_bits) (i64 i64 i64 i64) i64
   better = 0 ## i64
@@ -1899,6 +1841,33 @@ use paths
   flush()
   1
 
+-> ffn_print_usage() i64
+  << "Usage: metaflip \[OPTIONS]"
+  << ""
+  << "Exact GF(2) matrix-multiplication decomposition search."
+  << ""
+  << "Campaign selection:"
+  << "  --tensor SHAPE          square 2x2..7x7 or a supported rectangular shape"
+  << "  --rect                  adaptive multi-shape rectangular portfolio"
+  << "  --rect-shapes LIST      comma-separated rectangular portfolio subset"
+  << "  --seed PATH             start from one exact decomposition"
+  << "  --naive                 start from the naive decomposition"
+  << ""
+  << "Resources and limits:"
+  << "  -J, --walkers N         CPU islands (default: host-adjusted)"
+  << "  --steps N               moves per nominal CPU chunk"
+  << "  --rounds N              maximum coordinator rounds"
+  << "  --secs N                wall-time limit in seconds"
+  << "  --gpu / --no-gpu        enable or disable GPU lanes (GPU is default)"
+  << "  --gpu-policy POLICY     adaptive (default) or single"
+  << ""
+  << "Output and diagnostics:"
+  << "  --tui / --no-tui        enable or disable the terminal dashboard"
+  << "  --quiet                 suppress interactive output"
+  << "  --self-test             short exact CPU-only smoke test"
+  << "  -h, --help              show this help"
+  1
+
 # ---- CLI -----------------------------------------------------------------
 N = 5 ## i64
 TENSOR_LABEL = "5x5"
@@ -1967,7 +1936,7 @@ NEAR_EXPLICIT = 0 ## i64
 
 av = argv()
 value_options = ["--tensor", "--rect-shapes", "--rect-epoch-rounds", "--rect-restart-nonce", "--rect-door-ticket", "-J", "--walkers", "--steps", "--rounds", "--secs", "-d", "--density", "--cycles", "--seed", "--seed-nonce", "--record", "--gpu-walkers", "--gpu-policy", "--gpu-steps", "--gpu-epoch-rounds", "--gpu-binary", "--gpu-novelty-size", "--runtime-root", "--asset-root", "--repo-root", "--state-dir", "--strategy", "--migrate", "--archive-size", "--cpu-near-size", "--cpu-near-signature-quota", "--cpu-symmetry-seeds", "--cpu-work-moves", "--cpu-wander-moves", "--status", "--best", "--run-tag", "--near-dir"]
-switch_options = ["--rect", "--rect-portfolio-child", "--rebuild-gpu", "--no-gpu", "--gpu", "--no-tui", "--tui", "--quiet", "--stop-on-record", "--self-test", "--naive"]
+switch_options = ["--rect", "--rect-portfolio-child", "--rebuild-gpu", "--no-gpu", "--gpu", "--no-tui", "--tui", "--quiet", "--stop-on-record", "--self-test", "--naive", "--help", "-h"]
 ai = 0 ## i64
 while ai < av.size()
   arg = av[ai]
@@ -1980,13 +1949,16 @@ while ai < av.size()
   if needs_value == 0 && known_switch == 0
     << "metaflip: unknown option " + arg
     exit(2)
+  if arg == "--help" || arg == "-h"
+    z = ffn_print_usage() ## i64
+    exit(0)
   if needs_value == 1 && ai + 1 >= av.size()
     << "metaflip: missing value for " + arg
     exit(2)
   if arg == "--tensor" && ai + 1 < av.size()
     TENSOR_EXPLICIT = 1
     TENSOR_LABEL = av[ai + 1].downcase
-    N = ffn_parse_tensor(TENSOR_LABEL)
+    N = ffcli_parse_square_tensor(TENSOR_LABEL)
     RECT_MODE = 0
     if N == 0 && ffrp_supported_label(TENSOR_LABEL) == 1
       RECT_MODE = 1
@@ -1998,65 +1970,65 @@ while ai < av.size()
     RECT_PORTFOLIO = 1
     ai += 1
   if arg == "--rect-epoch-rounds" && ai + 1 < av.size()
-    RECT_EPOCH_ROUNDS = av[ai + 1].to_i()
+    RECT_EPOCH_ROUNDS = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--rect-portfolio-child"
     RECT_PORTFOLIO_CHILD = 1
   if arg == "--rect-restart-nonce" && ai + 1 < av.size()
-    RECT_RESTART_NONCE = av[ai + 1].to_i()
+    RECT_RESTART_NONCE = ffcli_require_i64(arg, av[ai + 1])
     RECT_RESTART_EXPLICIT = 1
     ai += 1
   if arg == "--rect-door-ticket" && ai + 1 < av.size()
-    RECT_DOOR_TICKET = av[ai + 1].to_i()
+    RECT_DOOR_TICKET = ffcli_require_i64(arg, av[ai + 1])
     RECT_DOOR_EXPLICIT = 1
     ai += 1
   if (arg == "-J" || arg == "--walkers") && ai + 1 < av.size()
-    J = av[ai + 1].to_i()
+    J = ffcli_require_i64(arg, av[ai + 1])
     J_EXPLICIT = 1
     ai += 1
   if arg == "--steps" && ai + 1 < av.size()
-    STEPS = av[ai + 1].to_i()
+    STEPS = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--rounds" && ai + 1 < av.size()
-    MAX_ROUNDS = av[ai + 1].to_i()
+    MAX_ROUNDS = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--secs" && ai + 1 < av.size()
-    MAX_SECS = av[ai + 1].to_i()
+    MAX_SECS = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if (arg == "-d" || arg == "--density") && ai + 1 < av.size()
-    DSLACK = av[ai + 1].to_i()
+    DSLACK = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--cycles" && ai + 1 < av.size()
-    CYCLES = av[ai + 1].to_i()
+    CYCLES = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--seed" && ai + 1 < av.size()
     SEED_PATH = av[ai + 1]
     ai += 1
   if arg == "--seed-nonce" && ai + 1 < av.size()
-    SEED_NONCE = av[ai + 1].to_i()
+    SEED_NONCE = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--naive"
     SEED_NAIVE = 1
   if arg == "--record" && ai + 1 < av.size()
-    RECORD_OVERRIDE = av[ai + 1].to_i()
+    RECORD_OVERRIDE = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--gpu-walkers" && ai + 1 < av.size()
-    GPU_WALKERS = av[ai + 1].to_i()
+    GPU_WALKERS = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--gpu-policy" && ai + 1 < av.size()
     GPU_POLICY = av[ai + 1]
     ai += 1
   if arg == "--gpu-steps" && ai + 1 < av.size()
-    GPU_STEPS = av[ai + 1].to_i()
+    GPU_STEPS = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--gpu-epoch-rounds" && ai + 1 < av.size()
-    GPU_EPOCH_ROUNDS = av[ai + 1].to_i()
+    GPU_EPOCH_ROUNDS = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--gpu-binary" && ai + 1 < av.size()
     GPU_BINARY = av[ai + 1]
     ai += 1
   if arg == "--gpu-novelty-size" && ai + 1 < av.size()
-    GPU_NOVELTY_CAP = av[ai + 1].to_i()
+    GPU_NOVELTY_CAP = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if (arg == "--runtime-root" || arg == "--asset-root" || arg == "--repo-root") && ai + 1 < av.size()
     RUNTIME_ROOT = av[ai + 1]
@@ -2082,19 +2054,19 @@ while ai < av.size()
     STRATEGY = av[ai + 1]
     ai += 1
   if arg == "--migrate" && ai + 1 < av.size()
-    MIGRATE = av[ai + 1].to_i()
+    MIGRATE = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--archive-size" && ai + 1 < av.size()
-    ARCHIVE_CAP = av[ai + 1].to_i()
+    ARCHIVE_CAP = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--cpu-near-size" && ai + 1 < av.size()
-    NEAR_CAP = av[ai + 1].to_i()
+    NEAR_CAP = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--cpu-near-signature-quota" && ai + 1 < av.size()
-    NEAR_SIGNATURE_QUOTA = av[ai + 1].to_i()
+    NEAR_SIGNATURE_QUOTA = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--cpu-symmetry-seeds" && ai + 1 < av.size()
-    SYMMETRY_CAP = av[ai + 1].to_i()
+    SYMMETRY_CAP = ffcli_require_i64(arg, av[ai + 1])
     ai += 1
   if arg == "--cpu-work-moves" && ai + 1 < av.size()
     CPU_WORK_SPEC = av[ai + 1]
@@ -2129,6 +2101,17 @@ while ai < av.size()
     J = 2
     J_EXPLICIT = 1
   ai += 1
+
+# Validate structured numeric budgets at the CLI boundary as well as when
+# installing the tensor-specific defaults below.  This keeps malformed input
+# from reaching runtime discovery, state-directory setup, or worker launch.
+cli_move_scratch = i64[4]
+if CPU_WORK_SPEC != "" && ffcli_parse_move_portfolio(CPU_WORK_SPEC, cli_move_scratch) == 0
+  << "metaflip: --cpu-work-moves requires four positive comma-separated budgets"
+  exit(2)
+if CPU_WANDER_SPEC != "" && ffcli_parse_move_portfolio(CPU_WANDER_SPEC, cli_move_scratch) == 0
+  << "metaflip: --cpu-wander-moves requires four positive comma-separated budgets"
+  exit(2)
 
 if RECT_PORTFOLIO != 0 && TENSOR_EXPLICIT != 0
   << "metaflip: --rect conflicts with --tensor; use --rect-shapes to select the portfolio"
@@ -2302,6 +2285,10 @@ if RECORD_OVERRIDE > 0
 
 CAPACITY = ffw_default_capacity(N) ## i64
 STATE_SIZE = ffw_state_size(CAPACITY) ## i64
+# Coordinator-only parity workspace. Worker threads never receive this mutable
+# slab; all serial intake/proof boundaries can therefore reuse it safely.
+exact_scratch_words = ffw_verify_scratch_words(N, N, N) ## i64
+exact_scratch = i64[exact_scratch_words]
 cpu_work_moves = i64[4]
 cpu_wander_moves = i64[4]
 zone_index = 0 ## i64
@@ -2310,11 +2297,11 @@ while zone_index < 4
   cpu_wander_moves[zone_index] = ffp_wander_moves(N, zone_index)
   zone_index += 1
 if CPU_WORK_SPEC != ""
-  if ffn_parse_move_portfolio(CPU_WORK_SPEC, cpu_work_moves) == 0
+  if ffcli_parse_move_portfolio(CPU_WORK_SPEC, cpu_work_moves) == 0
     << "metaflip: --cpu-work-moves requires four positive comma-separated budgets"
     exit(2)
 if CPU_WANDER_SPEC != ""
-  if ffn_parse_move_portfolio(CPU_WANDER_SPEC, cpu_wander_moves) == 0
+  if ffcli_parse_move_portfolio(CPU_WANDER_SPEC, cpu_wander_moves) == 0
     << "metaflip: --cpu-wander-moves requires four positive comma-separated budgets"
     exit(2)
 balanced_work = cpu_work_moves[1] ## i64
@@ -2344,7 +2331,7 @@ if SEED_NAIVE == 0
     exit(2)
   if SEED_PATH == "" && loaded < 1
     loaded = ffw_init_naive_cap(anchor, N, CAPACITY, ffcp_campaign_seed(17, SEED_NONCE), DSLACK, CYCLES, balanced_work, balanced_wander)
-if loaded < 1 || ffw_verify_best_exact(anchor, N) != 1
+if loaded < 1 || ffw_verify_best_exact_scratch(anchor, N, exact_scratch, exact_scratch_words) != 1
   << "metaflip: exact anchor initialization failed"
   exit(2)
 
@@ -2433,9 +2420,10 @@ while frontier_index < frontier_paths.size()
   frontier_candidate = i64[STATE_SIZE]
   frontier_path = RUNTIME_ROOT + "/" + frontier_paths[frontier_index]
   frontier_rank = ffw_load_scheme_cap(frontier_candidate, frontier_path, N, CAPACITY, 3001 + frontier_index * 17, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
+  # A positive loader result has already crossed ffw_adopt_current's exhaustive
+  # tensor gate.  Do not allocate a second parity slab before archive intake.
   if frontier_rank == ffw_best_rank(best)
-    if ffw_verify_best_exact(frontier_candidate, N) == 1
-      z = ffn_archive_add(archive, frontier_candidate, ARCHIVE_CAP, 4, archive_counters)
+    z = ffn_archive_add(archive, frontier_candidate, ARCHIVE_CAP, 4, archive_counters)
   frontier_index += 1
 archive_min_cache = ffn_archive_min_distance(archive) ## i64
 # Algebraic escapes of the live best, then any file-backed shoulder inventory
@@ -3128,7 +3116,7 @@ if GPU == 1
   pool_count = 0 ## i64
   rect_ready_count = ff7_fill_rect_sched_ready(0, rect_ready, rect_retry_round, rect_sched_ready) ## i64
   if gpu_eligible[10] != 0
-    pool_count = ffkp_select_group_modes_ready(pool_selection_epoch, N, ffw_best_rank(best), 0, GPU_WALKERS, pool_mode_ready, pool_last_modes, pool_pulls, pool_rewards, pool_modes)
+    pool_count = ffkp_select_group_modes_ready(pool_selection_epoch, N, ffw_best_rank(best), 0, GPU_WALKERS, pool_mode_ready, pool_last_modes, pool_pulls, pool_rewards, pool_exposure, pool_modes)
   pool_full_budget = ffkp_lane_budget(GPU_WALKERS) ## i64
   rect_reserved = ff7_rect_pool_allocation(pool_full_budget, pool_selection_epoch, rect_sched_ready, rect_exposure, rect_rewards, rect_lanes) ## i64
   pool_remainder = pool_full_budget - rect_reserved ## i64
@@ -3736,7 +3724,7 @@ while running == 1
     # bypass the window and retain the original immediate exact-gated path.
     candidate_intake = ffci_should_intake(candidate_changed, i, J, round, rank, bits, ffw_best_rank(best), ffw_best_bits(best)) ## i64
     if candidate_intake == 1
-      exact = ffw_verify_best_exact(state, N) ## i64
+      exact = ffw_verify_best_exact_scratch(state, N, exact_scratch, exact_scratch_words) ## i64
       if exact == 1
         descendant_identity = ffbi_best_id(state) ## i64
         if lineage_roles[i] >= 0 && lineage_paid[i] == 0
@@ -3975,6 +3963,8 @@ while running == 1
           if elapsed_quanta < 1
             elapsed_quanta = 1
           lane_exposure = lane_chunks * elapsed_quanta ## i64
+          if gpu_role == 10 && completed_pool_mode >= 0
+            z = ffkp_record_completion_exposure(completed_pool_mode, N, 0, lane_chunks, gpu_elapsed_ms[gpu_slot], pool_exposure)
           transition_context = ffkp_context(N, gpu_launch_debt[gpu_slot]) ## i64
           transition_index = gpu_role * ffkp_context_count() + transition_context ## i64
           gpu_transition_exposure[transition_index] = gpu_transition_exposure[transition_index] + lane_exposure
@@ -4399,7 +4389,7 @@ while running == 1
         pool_group = pool_slot_groups[pool_slot] ## i64
         pool_lanes = pool_slot_lanes[pool_slot] ## i64
         if gpu_threads[gpu_slot] == nil && pool_group >= 0 && pool_lanes > 0 && round >= pool_slot_retry_round[pool_slot]
-          pool_mode = ffkp_select_group_mode_ready(pool_group_epochs[pool_group], pool_group, N, ffw_best_rank(best), 0, pool_mode_ready, pool_last_modes, pool_pulls, pool_rewards) ## i64
+          pool_mode = ffkp_select_group_mode_ready(pool_group_epochs[pool_group], pool_group, N, ffw_best_rank(best), 0, pool_mode_ready, pool_last_modes, pool_pulls, pool_rewards, pool_exposure) ## i64
           if pool_mode >= 0
             pool_cap = ffkp_mode_lane_budget_for_tensor(N, GPU_WALKERS, pool_mode) ## i64
             if pool_lanes > pool_cap
@@ -4476,7 +4466,7 @@ while running == 1
       # adoption event. Gate it before mutation, then publish a distinct event
       # whose parent is that adopted leader; otherwise the final sidecar can
       # name the producer's pre-normalization identity and density.
-      isotropy_exact = ffw_verify_best_exact(global_isotropy_scratch, N) ## i64
+      isotropy_exact = ffw_verify_best_exact_scratch(global_isotropy_scratch, N, exact_scratch, exact_scratch_words) ## i64
       if isotropy_exact == 1
         isotropy_parent_id = ffbi_best_id(best) ## i64
         isotropy_parent_rank = ffw_best_rank(best) ## i64
@@ -4732,7 +4722,7 @@ while running == 1
           if tunnel_found == tunnel_rank && partial_auto_meta[6] == 1 && partial_auto_meta[15] == 0
             tunnel_seed = 29001 + round * 61 + partial_auto_source_index * 193 + partial_auto_nonce ## i64
             tunnel_loaded = ffw_init_terms_cap(partial_auto_state, partial_auto_out_u, partial_auto_out_v, partial_auto_out_w, tunnel_found, N, CAPACITY, tunnel_seed, DSLACK, CYCLES, balanced_work, balanced_wander) ## i64
-            if tunnel_loaded == tunnel_found && ffw_verify_best_exact(partial_auto_state, N) == 1
+            if tunnel_loaded == tunnel_found && ffw_verify_best_exact_scratch(partial_auto_state, N, exact_scratch, exact_scratch_words) == 1
               partial_auto_hits += 1
               z = ff7_partial_auto_admit(archive, ARCHIVE_CAP, 4, archive_counters, map_states, map_keys, map_uses, map_sources, MAP_CAPACITY, partial_auto_state, ffw_best_rank(best), N, STATE_SIZE, 0, 29101 + round * 61 + partial_auto_source_index * 193 + partial_auto_nonce, partial_auto_intake) ## i64
               if partial_auto_intake[0] == 1
@@ -4975,7 +4965,7 @@ while running == 1
       pool_count = 0
       rect_ready_count = ff7_fill_rect_sched_ready(round, rect_ready, rect_retry_round, rect_sched_ready) ## i64
       if gpu_eligible[10] != 0
-        pool_count = ffkp_select_group_modes_ready(pool_selection_epoch, N, ffw_best_rank(best), 0, GPU_WALKERS, pool_mode_ready, pool_last_modes, pool_pulls, pool_rewards, pool_modes)
+        pool_count = ffkp_select_group_modes_ready(pool_selection_epoch, N, ffw_best_rank(best), 0, GPU_WALKERS, pool_mode_ready, pool_last_modes, pool_pulls, pool_rewards, pool_exposure, pool_modes)
       pool_full_budget = ffkp_lane_budget(GPU_WALKERS) ## i64
       rect_reserved = ff7_rect_pool_allocation(pool_full_budget, pool_selection_epoch, rect_sched_ready, rect_exposure, rect_rewards, rect_lanes) ## i64
       pool_remainder = pool_full_budget - rect_reserved ## i64
@@ -5396,7 +5386,7 @@ final_write_failed = 0 ## i64
 # Every adoption path is already exact-gated, but make the durable handoff a
 # proof boundary of its own. A would-be record is never written or reported as
 # exact merely because an earlier in-memory invariant was expected to hold.
-final_exact = ffw_verify_best_exact(best, N) ## i64
+final_exact = ffw_verify_best_exact_scratch(best, N, exact_scratch, exact_scratch_words) ## i64
 if final_exact != 1
   gpu_degraded = 1
   final_write_failed = 1

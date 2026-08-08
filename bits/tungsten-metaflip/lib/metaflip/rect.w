@@ -19,6 +19,7 @@
 #   ffr_init_terms_cap(st,us,vs,ws,rank,n,m,p,cap,...)
 #   ffr_load_scheme_cap(st,path,n,m,p,cap,...)
 #   ffr_verify_current_exact / ffr_verify_best_exact(st,n,m,p)
+#   ffr_verify_*_exact_scratch(...,scratch,words)
 #   ffr_walk / ffr_work / ffr_wander(st,steps)
 #   ffr_dump_best / ffr_dump_current(st,path)
 #
@@ -100,6 +101,15 @@ use seeds/rect
   (1 << width) - 1
 
 -> ffr_view_error(st, uo, vo, wo, liveo, rank, n, m, p) (i64[] i64 i64 i64 i64 i64 i64 i64 i64) i64
+  # Do not size an allocation from an unsupported external shape before the
+  # rectangular structural checks have had a chance to reject it.
+  words = 1 ## i64
+  if ffr_supported(n, m, p) == 1
+    words = ffw_verify_scratch_words(n, m, p)
+  parity = i64[words]
+  ffr_view_error_scratch(st, uo, vo, wo, liveo, rank, n, m, p, parity, words)
+
+-> ffr_view_error_scratch(st, uo, vo, wo, liveo, rank, n, m, p, parity, scratch_words) (i64[] i64 i64 i64 i64 i64 i64 i64 i64 i64[] i64) i64
   error = 0 ## i64
   uw = n * m ## i64
   vw = m * p ## i64
@@ -133,7 +143,7 @@ use seeds/rect
   # packed support parity.  This keeps the independent gate deterministic and
   # exact while avoiding rank rescans for the overwhelmingly zero cells.
   if error == 0
-    error = ffw_support_tensor_error(st, uo, vo, wo, liveo, rank, n, m, p)
+    error = ffw_support_tensor_error_scratch(st, uo, vo, wo, liveo, rank, n, m, p, parity, scratch_words)
   error
 
 -> ffr_verify_current_exact(st, n, m, p) (i64[] i64 i64 i64) i64
@@ -155,6 +165,31 @@ use seeds/rect
     if ffr_shape_n(st) == n && ffr_shape_m(st) == m && ffr_shape_p(st) == p
       if st[7] > 0
         if ffr_view_error(st, st[47], st[48], st[49], 0 - 1, st[7], n, m, p) == 0
+          ok = 1
+  st[38] = ok
+  if ok == 0
+    st[30] = st[30] + 1
+  ok
+
+-> ffr_verify_current_exact_scratch(st, n, m, p, parity, scratch_words) (i64[] i64 i64 i64 i64[] i64) i64
+  ok = 0 ## i64
+  st[29] = st[29] + 1
+  if ffr_valid(st) == 1
+    if ffr_shape_n(st) == n && ffr_shape_m(st) == m && ffr_shape_p(st) == p
+      if ffr_view_error_scratch(st, st[44], st[45], st[46], st[50], st[6], n, m, p, parity, scratch_words) == 0
+        ok = 1
+  st[38] = ok
+  if ok == 0
+    st[30] = st[30] + 1
+  ok
+
+-> ffr_verify_best_exact_scratch(st, n, m, p, parity, scratch_words) (i64[] i64 i64 i64 i64[] i64) i64
+  ok = 0 ## i64
+  st[29] = st[29] + 1
+  if ffr_valid(st) == 1
+    if ffr_shape_n(st) == n && ffr_shape_m(st) == m && ffr_shape_p(st) == p
+      if st[7] > 0
+        if ffr_view_error_scratch(st, st[47], st[48], st[49], 0 - 1, st[7], n, m, p, parity, scratch_words) == 0
           ok = 1
   st[38] = ok
   if ok == 0

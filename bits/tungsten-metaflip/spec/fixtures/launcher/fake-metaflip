@@ -1,0 +1,20 @@
+#!/bin/sh
+
+case ${1:-} in
+  --self-test)
+    printf '%s\n' 'metaflip native done: fake self-test exact=1'
+    exit 0
+    ;;
+  --help|-h)
+    printf '%s\n' 'Usage: metaflip [OPTIONS]'
+    exit 0
+    ;;
+  --definitely-invalid)
+    printf '%s\n' 'metaflip: unknown option --definitely-invalid' >&2
+    exit 2
+    ;;
+esac
+
+printf 'fake metaflip delegated:'
+printf ' <%s>' "$@"
+printf '\n'

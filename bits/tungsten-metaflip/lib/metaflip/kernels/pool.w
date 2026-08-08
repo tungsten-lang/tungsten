@@ -28,8 +28,9 @@
 #
 # One worker is selected from each complementary family.  Within a family,
 # every fourth launch is strict rotation and the others use contextual integer
-# UCB.  This prevents a noisy early reward from starving either a kernel or an
-# entire approach family while still learning tensor/rank-debt niches.
+# UCB normalized by 32-lane/100-ms exposure quanta.  This prevents a noisy
+# early reward from starving either a kernel or an entire approach family while
+# still learning tensor/rank-debt niches without favoring expensive launches.
 
 use ../scheme
 use ../strategies/escape
@@ -330,6 +331,14 @@ use ../strategies/projective_circuit
     mode += 1
   total
 
+-> ffkp_total_exposure(exposure, context) (i64[] i64) i64
+  total = 0 ## i64
+  mode = 0 ## i64
+  while mode < ffkp_mode_count()
+    total += exposure[ffkp_index(mode, context)]
+    mode += 1
+  total
+
 -> ffkp_next_rotating(last_mode, n, rank) (i64 i64 i64) i64
   offset = 1 ## i64
   while offset <= ffkp_mode_count()
@@ -348,15 +357,15 @@ use ../strategies/projective_circuit
     offset += 1
   0 - 1
 
--> ffkp_select_mode(epoch, last_mode, n, rank, rank_debt, pulls, rewards) (i64 i64 i64 i64 i64 i64[] i64[]) i64
+-> ffkp_select_mode(epoch, last_mode, n, rank, rank_debt, pulls, rewards, exposure) (i64 i64 i64 i64 i64 i64[] i64[] i64[]) i64
   ready = i64[ffkp_mode_count()]
   i = 0 ## i64
   while i < ffkp_mode_count()
     ready[i] = 1
     i += 1
-  ffkp_select_mode_ready(epoch, last_mode, n, rank, rank_debt, ready, pulls, rewards)
+  ffkp_select_mode_ready(epoch, last_mode, n, rank, rank_debt, ready, pulls, rewards, exposure)
 
--> ffkp_select_mode_ready(epoch, last_mode, n, rank, rank_debt, ready, pulls, rewards) (i64 i64 i64 i64 i64 i64[] i64[] i64[]) i64
+-> ffkp_select_mode_ready(epoch, last_mode, n, rank, rank_debt, ready, pulls, rewards, exposure) (i64 i64 i64 i64 i64 i64[] i64[] i64[] i64[]) i64
   context = ffkp_context(n, rank_debt) ## i64
   # Cold-start every eligible mode, then retain a hard 25% rotation cadence.
   start = epoch % ffkp_mode_count() ## i64
@@ -370,7 +379,7 @@ use ../strategies/projective_circuit
   if (epoch % 4) == 0
     return ffkp_next_rotating_ready(last_mode, n, rank, ready)
 
-  total = ffkp_total_pulls(pulls, context) ## i64
+  total = ffkp_total_exposure(exposure, context) ## i64
   if total < 2
     total = 2
   best = ffkp_next_rotating_ready(last_mode, n, rank, ready) ## i64
@@ -381,7 +390,7 @@ use ../strategies/projective_circuit
   while mode < ffkp_mode_count()
     if ffkp_mode_eligible(mode, n, rank) == 1 && ready[mode] != 0
       index = ffkp_index(mode, context) ## i64
-      count = pulls[index] ## i64
+      count = exposure[index] ## i64
       score = 1000000000 ## i64
       if count > 0
         mean = rewards[index] / count ## i64
@@ -398,7 +407,7 @@ use ../strategies/projective_circuit
 # can relaunch while a host-heavy surgery child remains in flight.  The
 # group's private cursor retains scalar cold-start, forced-rotation, and UCB
 # semantics without allowing another family to occupy its slot.
--> ffkp_select_group_mode_ready(epoch, group, n, rank, rank_debt, ready, last_modes, pulls, rewards) (i64 i64 i64 i64 i64 i64[] i64[] i64[] i64[]) i64
+-> ffkp_select_group_mode_ready(epoch, group, n, rank, rank_debt, ready, last_modes, pulls, rewards, exposure) (i64 i64 i64 i64 i64 i64[] i64[] i64[] i64[] i64[]) i64
   if group < 0 || group >= ffkp_group_count()
     return 0 - 1
   scratch_ready = i64[ffkp_mode_count()]
@@ -411,7 +420,7 @@ use ../strategies/projective_circuit
   cursor = 0 - 1 ## i64
   if group < last_modes.size()
     cursor = last_modes[group]
-  ffkp_select_mode_ready(epoch, cursor, n, rank, rank_debt, scratch_ready, pulls, rewards)
+  ffkp_select_mode_ready(epoch, cursor, n, rank, rank_debt, scratch_ready, pulls, rewards, exposure)
 
 # Select one bounded batch containing at most one child from each complementary
 # kernel family.  `epoch` is the batch epoch, so each family's scalar policy
@@ -419,7 +428,7 @@ use ../strategies/projective_circuit
 # cadence.  Group order rotates to avoid giving the water-fill tie break to the
 # same family every batch.  The caller owns `last_modes[group]` and updates it
 # only after that group's selected child launches successfully.
--> ffkp_select_group_modes_ready(epoch, n, rank, rank_debt, total_lanes, ready, last_modes, pulls, rewards, selected) (i64 i64 i64 i64 i64 i64[] i64[] i64[] i64[] i64[]) i64
+-> ffkp_select_group_modes_ready(epoch, n, rank, rank_debt, total_lanes, ready, last_modes, pulls, rewards, exposure, selected) (i64 i64 i64 i64 i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
   slot = 0 ## i64
   while slot < selected.size()
     selected[slot] = 0 - 1
@@ -437,7 +446,7 @@ use ../strategies/projective_circuit
   count = 0 ## i64
   while group_offset < ffkp_group_count() && count < limit
     group = (start_group + group_offset) % ffkp_group_count() ## i64
-    chosen = ffkp_select_group_mode_ready(epoch, group, n, rank, rank_debt, ready, last_modes, pulls, rewards) ## i64
+    chosen = ffkp_select_group_mode_ready(epoch, group, n, rank, rank_debt, ready, last_modes, pulls, rewards, exposure) ## i64
     if chosen >= 0
       selected[count] = chosen
       count += 1
@@ -453,6 +462,23 @@ use ../strategies/projective_circuit
     quanta = 1
   exposure[index] = exposure[index] + quanta
   index
+
+# ffkp_record_launch charges the first 100-ms quantum immediately.  Once the
+# child finishes, charge only the remaining elapsed quanta so a completed
+# launch has exact standardized exposure:
+#   (lanes / 32) * ceil(elapsed_ms / 100).
+-> ffkp_record_completion_exposure(mode, n, rank_debt, lane_quanta, elapsed_ms, exposure) (i64 i64 i64 i64 i64 i64[]) i64
+  index = ffkp_index(mode, ffkp_context(n, rank_debt)) ## i64
+  lanes = lane_quanta ## i64
+  if lanes < 1
+    lanes = 1
+  elapsed = elapsed_ms ## i64
+  if elapsed < 1
+    elapsed = 1
+  time_quanta = (elapsed + 99) / 100 ## i64
+  if time_quanta > 1
+    exposure[index] = exposure[index] + lanes * (time_quanta - 1)
+  exposure[index]
 
 -> ffkp_record_reward(mode, n, rank_debt, reward, rewards) (i64 i64 i64 i64 i64[]) i64
   index = ffkp_index(mode, ffkp_context(n, rank_debt)) ## i64

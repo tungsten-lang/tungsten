@@ -22,6 +22,7 @@
 #   ffw_walk / ffw_work / ffw_wander(st,steps)
 #   ffw_walk_axis_sweep(st,steps)             # opt-in adaptive racer
 #   ffw_verify_best_exact / ffw_verify_current_exact(st,n)
+#   ffw_verify_*_exact_scratch(...,scratch,words) # reusable exact gate
 #   ffw_adopt_current(st,allow_density_tie)
 #   ffw_export_best / ffw_export_current(st,us,vs,ws)
 #   ffw_dump_best / ffw_dump_current(st,path)
@@ -463,13 +464,33 @@
 # positive index is still the first mismatch in canonical coefficient order.
 # Structural factor/rank checks remain in the square/rectangular callers so
 # their public negative diagnostic codes stay unchanged.
--> ffw_support_tensor_error(st, uo, vo, wo, liveo, rank, n, m, p) (i64[] i64 i64 i64 i64 i64 i64 i64 i64) i64
+-> ffw_verify_scratch_words(n, m, p) (i64 i64 i64) i64
   uw = n * m ## i64
   vw = m * p ## i64
   ww = n * p ## i64
   cells = uw * vw * ww ## i64
-  words = (cells + 63) / 64 ## i64
-  parity = i64[words]
+  (cells + 63) / 64
+
+# Caller-owned variant of the support-major gate.  Long-lived coordinators and
+# strategy loops can reuse one zeroable parity slab instead of retaining a new
+# typed array at every exactness check.  `scratch_words` is explicit because
+# typed-array `.size()` is not a safe raw/native worker boundary.  An
+# undersized buffer fails closed before either reading or writing it.
+-> ffw_support_tensor_error_scratch(st, uo, vo, wo, liveo, rank, n, m, p, parity, scratch_words) (i64[] i64 i64 i64 i64 i64 i64 i64 i64 i64[] i64) i64
+  uw = n * m ## i64
+  vw = m * p ## i64
+  ww = n * p ## i64
+  cells = uw * vw * ww ## i64
+  words = ffw_verify_scratch_words(n, m, p) ## i64
+  if scratch_words < words
+    return 0 - 20
+
+  # Exact inputs leave the slab zero, but rejected external candidates do not.
+  # Clear on every entry so the same buffer is valid after either outcome.
+  clear_word = 0 ## i64
+  while clear_word < words
+    parity[clear_word] = 0
+    clear_word += 1
 
   term = 0 ## i64
   while term < rank
@@ -524,10 +545,27 @@
     word += 1
   0
 
+# Compatibility wrapper for existing callers.  New repeated-call sites should
+# allocate `ffw_verify_scratch_words(n,m,p)` words once and call the explicit
+# scratch API above.
+-> ffw_support_tensor_error(st, uo, vo, wo, liveo, rank, n, m, p) (i64[] i64 i64 i64 i64 i64 i64 i64 i64) i64
+  words = ffw_verify_scratch_words(n, m, p) ## i64
+  parity = i64[words]
+  ffw_support_tensor_error_scratch(st, uo, vo, wo, liveo, rank, n, m, p, parity, words)
+
 # Return zero for an exact tensor, a positive 1-based coefficient index for
 # the first mismatch, or a negative structural error.  Early mismatch exit is
 # both diagnostic and important when rejecting a malformed external seed.
 -> ffw_verify_view_error(st, uo, vo, wo, liveo, rank, n) (i64[] i64 i64 i64 i64 i64 i64) i64
+  # Preserve the old structural-error path without deriving an allocation size
+  # from a hostile dimension before it has been range-checked.
+  words = 1 ## i64
+  if n >= 2 && n <= 7
+    words = ffw_verify_scratch_words(n, n, n)
+  parity = i64[words]
+  ffw_verify_view_error_scratch(st, uo, vo, wo, liveo, rank, n, parity, words)
+
+-> ffw_verify_view_error_scratch(st, uo, vo, wo, liveo, rank, n, parity, scratch_words) (i64[] i64 i64 i64 i64 i64 i64 i64[] i64) i64
   error = 0 ## i64
   dim = n * n ## i64
   one = 1 ## i64
@@ -562,7 +600,7 @@
       error = 0 - 15
     t += 1
   if error == 0
-    error = ffw_support_tensor_error(st, uo, vo, wo, liveo, rank, n, n, n)
+    error = ffw_support_tensor_error_scratch(st, uo, vo, wo, liveo, rank, n, n, n, parity, scratch_words)
   error
 
 -> ffw_verify_view_exact(st, uo, vo, wo, liveo, rank, n) (i64[] i64 i64 i64 i64 i64 i64) i64
@@ -571,11 +609,23 @@
     result = 1
   result
 
+-> ffw_verify_view_exact_scratch(st, uo, vo, wo, liveo, rank, n, parity, scratch_words) (i64[] i64 i64 i64 i64 i64 i64 i64[] i64) i64
+  result = 0 ## i64
+  if ffw_verify_view_error_scratch(st, uo, vo, wo, liveo, rank, n, parity, scratch_words) == 0
+    result = 1
+  result
+
 -> ffw_current_exact_error(st, n) (i64[] i64) i64
   ffw_verify_view_error(st, st[44], st[45], st[46], st[50], st[6], n)
 
 -> ffw_best_exact_error(st, n) (i64[] i64) i64
   ffw_verify_view_error(st, st[47], st[48], st[49], 0 - 1, st[7], n)
+
+-> ffw_current_exact_error_scratch(st, n, parity, scratch_words) (i64[] i64 i64[] i64) i64
+  ffw_verify_view_error_scratch(st, st[44], st[45], st[46], st[50], st[6], n, parity, scratch_words)
+
+-> ffw_best_exact_error_scratch(st, n, parity, scratch_words) (i64[] i64 i64[] i64) i64
+  ffw_verify_view_error_scratch(st, st[47], st[48], st[49], 0 - 1, st[7], n, parity, scratch_words)
 
 -> ffw_verify_current_exact(st, n) (i64[] i64) i64
   ok = 0 ## i64
@@ -595,6 +645,29 @@
     if n == st[2]
       if st[7] > 0
         ok = ffw_verify_view_exact(st, st[47], st[48], st[49], 0 - 1, st[7], n)
+  st[38] = ok
+  if ok == 0
+    st[30] = st[30] + 1
+  ok
+
+-> ffw_verify_current_exact_scratch(st, n, parity, scratch_words) (i64[] i64 i64[] i64) i64
+  ok = 0 ## i64
+  st[29] = st[29] + 1
+  if ffw_valid(st) == 1
+    if n == st[2]
+      ok = ffw_verify_view_exact_scratch(st, st[44], st[45], st[46], st[50], st[6], n, parity, scratch_words)
+  st[38] = ok
+  if ok == 0
+    st[30] = st[30] + 1
+  ok
+
+-> ffw_verify_best_exact_scratch(st, n, parity, scratch_words) (i64[] i64 i64[] i64) i64
+  ok = 0 ## i64
+  st[29] = st[29] + 1
+  if ffw_valid(st) == 1
+    if n == st[2]
+      if st[7] > 0
+        ok = ffw_verify_view_exact_scratch(st, st[47], st[48], st[49], 0 - 1, st[7], n, parity, scratch_words)
   st[38] = ok
   if ok == 0
     st[30] = st[30] + 1

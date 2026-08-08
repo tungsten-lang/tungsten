@@ -1,7 +1,12 @@
+# Bit/package outputs and ad-hoc native builds. The source-checkout command at
+# bin/metaflip is a tracked shell launcher; compiled coordinators live here or
+# in the user cache, never at the launcher path.
 /build/
 /pkg/
 /metaflip
 !/bin/metaflip
+
+# Runtime-generated compiler and GPU sidecars.
 *.sidemap
 *.metal
 *.air

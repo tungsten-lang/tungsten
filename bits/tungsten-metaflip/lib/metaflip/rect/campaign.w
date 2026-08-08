@@ -567,6 +567,10 @@ use doors
 
   capacity = ffr_default_capacity(n, m, p) ## i64
   state_size = ffr_state_size(capacity) ## i64
+  # The rectangular coordinator owns this slab and never passes it to its CPU,
+  # GPU, block, or MITM threads. Reuse it across serial admission gates.
+  exact_scratch_words = ffw_verify_scratch_words(n, m, p) ## i64
+  exact_scratch = i64[exact_scratch_words]
   workq = ffrp_work_quota(steps) ## i64
   wanderq = ffrp_wander_quota(steps) ## i64
   record = ffrp_record_rank(n, m, p) ## i64
@@ -644,7 +648,9 @@ use doors
       frontier_path = repo_root + "/" + frontier_rel
       frontier = i64[state_size]
       frontier_rank = ffr_load_scheme_cap(frontier, frontier_path, n, m, p, capacity, ffrcb_seed(81101, restart_nonce, frontier_slot, 0), dslack, cycles, workq, wanderq) ## i64
-      if frontier_rank < 1 || ffr_verify_best_exact(frontier, n, m, p) != 1
+      # The loader admits only through ffr_adopt_current's exhaustive gate.
+      # Avoid an immediate second allocation/gate for every frontier seed.
+      if frontier_rank < 1
         << "RECT_ERROR code=frontier-seed tensor=" + tensor + " slot=" + frontier_slot.to_s() + " path=" + frontier_path
         return 2
       if ffrc_frontier_rank_eligible(frontier_rank, ffr_best_rank(best)) != 0
@@ -1088,7 +1094,7 @@ use doors
         island_last_bits[lane] = lane_bits
         island_last_progress_ms[lane] = now_ms
       island_ages[lane] = (now_ms - island_last_progress_ms[lane]) / 1000
-      if ffr_verify_best_exact(candidate, n, m, p) == 1
+      if ffr_verify_best_exact_scratch(candidate, n, m, p, exact_scratch, exact_scratch_words) == 1
         candidate_rank = ffr_best_rank(candidate) ## i64
         candidate_bits = ffr_best_bits(candidate) ## i64
         if ffrc_better(candidate_rank, candidate_bits, ffr_best_rank(best), ffr_best_bits(best)) == 1
@@ -1228,7 +1234,7 @@ use doors
     if mitm_ok == 1 && ffrc_file_nonempty(mitm_output_path) == 1
       mitm_candidate = i64[state_size]
       mitm_rank = ffr_load_scheme_cap(mitm_candidate, mitm_output_path, n, m, p, capacity, 84503 + round * 149, dslack, cycles, workq, wanderq) ## i64
-      if mitm_rank > 0 && ffr_verify_best_exact(mitm_candidate, n, m, p) == 1
+      if mitm_rank > 0 && ffr_verify_best_exact_scratch(mitm_candidate, n, m, p, exact_scratch, exact_scratch_words) == 1
         if ffrc_better(mitm_rank, ffr_best_bits(mitm_candidate), ffr_best_rank(best), ffr_best_bits(best)) == 1
           mitm_clone = ffrc_clone_exact(mitm_candidate, n, m, p, capacity, 84509 + round * 151, dslack, cycles, workq, wanderq)
           if mitm_clone != nil
@@ -1498,5 +1504,5 @@ use doors
   # frame/status record.  Suppress only the child summary in that mode; exact
   # failures still surface immediately through RECT_ERROR.
   if portfolio_child == 0
-    << "RECT_RESULT tensor=" + tensor + " rank=" + ffr_best_rank(best).to_s() + " bits=" + ffr_best_bits(best).to_s() + " exact=" + ffr_verify_best_exact(best, n, m, p).to_s() + " path=" + best_path
+    << "RECT_RESULT tensor=" + tensor + " rank=" + ffr_best_rank(best).to_s() + " bits=" + ffr_best_bits(best).to_s() + " exact=" + ffr_verify_best_exact_scratch(best, n, m, p, exact_scratch, exact_scratch_words).to_s() + " path=" + best_path
   0

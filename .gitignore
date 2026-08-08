@@ -62,6 +62,9 @@ benchmarks/big_math/kernel_crossover
 benchmarks/big_math/program_loops
 benchmarks/big_math/program_loops_gmp
 benchmarks/big_math/stirling_factorial
+# Per-worker-cap sweep harness builds (bin/tungsten bench bignum --worker-sweep);
+# results are the tracked baselines/worker-sweep-*.json artifacts.
+benchmarks/big_math/.worker-sweep/
 scripts/.ucd_cache/
 runtime/test_nanbox
 runtime/test_nanbox_debug

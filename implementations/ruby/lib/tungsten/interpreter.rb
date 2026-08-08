@@ -1078,7 +1078,60 @@ module Tungsten
          left.is_a?(Numeric) && right.is_a?(Numeric)
         return false
       end
+      if (left.is_a?(::Hash) && right.is_a?(::Hash)) ||
+         (left.is_a?(::Array) && right.is_a?(::Array))
+        return container_eq(left, right, {})
+      end
       left == right
+    end
+
+    # Structural container equality with symbol/string key indifference —
+    # this engine stores label-literal keys as strings but subscript symbol
+    # writes as symbols, so raw ::Hash#== would see two spellings of the
+    # same Tungsten hash as unequal. Mirrors native w_eq's container arms:
+    # hash equality is order-independent, nested scalars keep exact-tower
+    # semantics (float isolation), and a pair already under comparison is
+    # presumed equal so reference cycles terminate.
+    def container_eq(a, b, seen)
+      pair = [a.object_id, b.object_id]
+      return true if seen[pair]
+      seen[pair] = true
+      begin
+        if a.is_a?(::Array) && b.is_a?(::Array)
+          return false unless a.length == b.length
+          a.each_index do |i|
+            return false unless container_element_eq(a[i], b[i], seen)
+          end
+          true
+        elsif a.is_a?(::Hash) && b.is_a?(::Hash)
+          return false unless a.size == b.size
+          a.each do |k, v|
+            if b.key?(k)
+              bk = k
+            elsif k.is_a?(::Symbol) && b.key?(k.name)
+              bk = k.name
+            elsif k.is_a?(String) && b.key?(k.to_sym)
+              bk = k.to_sym
+            else
+              return false
+            end
+            return false unless container_element_eq(v, b[bk], seen)
+          end
+          true
+        else
+          false
+        end
+      ensure
+        seen.delete(pair)
+      end
+    end
+
+    def container_element_eq(x, y, seen)
+      if (x.is_a?(::Hash) && y.is_a?(::Hash)) || (x.is_a?(::Array) && y.is_a?(::Array))
+        container_eq(x, y, seen)
+      else
+        tungsten_eq(x, y)
+      end
     end
 
     # Exactness-gated literal adaptation (matches the native w_eq_lit):

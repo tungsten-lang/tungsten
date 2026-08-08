@@ -30870,6 +30870,7 @@ static WArray *as_array(WValue v) {
  * once array_storage_bits / array_read are visible. Used here so to_s,
  * push-from-view, freeze_recursive can decode packed slots correctly. */
 static WValue array_slot_load_decoded(WArray *a, int64_t i);
+static inline int64_t w_hash_probe(WHash *hash, WValue key);
 
 static double as_float(WValue v) {
     return w_as_double(v);
@@ -34387,6 +34388,62 @@ WValue w_eq(WValue a, WValue b) {
         if (na->type != nb->type || na->len != nb->len || na->prefix != nb->prefix)
             return W_FALSE;
         return w_bool(memcmp(na->bytes, nb->bytes, na->len) == 0);
+    }
+
+    /* Structural container equality (recursive, cycle-guarded) — matching
+     * the Ruby engine's ::Array#== / ::Hash#== and array `<=>`, which was
+     * already structural while `==` was pointer identity. Arrays: same
+     * length, pairwise w_eq (decode-aware loads cover the typed tiers).
+     * Hashes: same live count and every entry of `a` present in `b` with a
+     * w_eq-equal value — order-INDEPENDENT: insertion order is an iteration
+     * guarantee (spec 4.2.3), not part of a hash's value. Hash keys
+     * themselves still compare by w_hash_key_eq; container-typed keys stay
+     * identity-keyed. A thread-local pair stack breaks reference cycles
+     * (a pair already under comparison is presumed equal); at the depth
+     * cap comparison degrades to the pointer identity already ruled out. */
+    if ((w_is_array(a) && w_is_array(b)) || (w_is_hash(a) && w_is_hash(b))) {
+        #define W_EQ_PAIR_MAX 64
+        static __thread struct { WValue a, b; } eq_pairs[W_EQ_PAIR_MAX];
+        static __thread int eq_pair_depth = 0;
+        for (int pi = 0; pi < eq_pair_depth; pi++)
+            if (eq_pairs[pi].a == a && eq_pairs[pi].b == b) return W_TRUE;
+        if (eq_pair_depth >= W_EQ_PAIR_MAX) return W_FALSE;
+        eq_pairs[eq_pair_depth].a = a;
+        eq_pairs[eq_pair_depth].b = b;
+        eq_pair_depth++;
+        WValue result = W_TRUE;
+        if (w_is_array(a)) {
+            WArray *aa = (WArray *)w_as_ptr(a);
+            WArray *bb = (WArray *)w_as_ptr(b);
+            if (aa->size != bb->size) {
+                result = W_FALSE;
+            } else {
+                for (int32_t i = 0; i < aa->size; i++) {
+                    if (w_eq(array_slot_load_decoded(aa, i),
+                             array_slot_load_decoded(bb, i)) != W_TRUE) {
+                        result = W_FALSE;
+                        break;
+                    }
+                }
+            }
+        } else {
+            WHash *ha = (WHash *)w_as_ptr(a);
+            WHash *hb = (WHash *)w_as_ptr(b);
+            if (ha->count != hb->count) {
+                result = W_FALSE;
+            } else {
+                for (uint32_t i = 0; i < ha->used; i++) {
+                    if (ha->keys[i] == W_MEMO_MISS) continue;
+                    int64_t d = w_hash_probe(hb, ha->keys[i]);
+                    if (d < 0 || w_eq(ha->values[i], hb->values[d]) != W_TRUE) {
+                        result = W_FALSE;
+                        break;
+                    }
+                }
+            }
+        }
+        eq_pair_depth--;
+        return result;
     }
 
     /* User-defined `==`: if `a` is a class instance whose class OVERRIDES `==`

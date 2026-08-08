@@ -476,6 +476,7 @@ compiled_specs=(
   spec/core/classes_spec.w
   spec/core/arrays_hashes_spec.w
   spec/core/hash_insertion_order_spec.w
+  spec/core/container_equality_spec.w
   spec/core/calculus_spec.w
   spec/core/calculus_complex_spec.w
   spec/core/expression_spec.w

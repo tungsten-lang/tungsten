@@ -316,3 +316,47 @@ WValue w_blas_dgeev(WValue a_wval, WValue wr_wval, WValue wi_wval, WValue n_wval
     free(work);
     return w_int((int64_t)info);
 }
+
+/* In-place complex FFT on split f32 re/im arrays via vDSP. Matches
+ * core/fft.w's convention: forward = unscaled DFT (e^(-2*pi*i*j*k/n)),
+ * inverse scaled by 1/n so ifft(fft(x)) == x. Power-of-2 lengths only —
+ * the same contract FFT.fft_inplace enforces. FFT setups are cached per
+ * log2n and never freed (create-once; first use per size is not
+ * thread-safe, matching the bridge's single-threaded contract). */
+WValue w_blas_fft_f32(WValue re_wval, WValue im_wval, WValue n_wval, WValue inv_wval) {
+    int64_t lre, lim;
+    float *re = blas_f32_ptr(re_wval, &lre);
+    float *im = blas_f32_ptr(im_wval, &lim);
+    int64_t n = w_as_int(n_wval);
+    int inverse = (int)w_truthy(inv_wval);
+    if (n <= 0 || (n & (n - 1)) != 0) {
+        w_raise(w_string("fft_f32: length must be a power of 2"));
+        return W_NIL;
+    }
+    if (lre < n || lim < n) {
+        w_raise(w_string("fft_f32: re/im arrays shorter than n"));
+        return W_NIL;
+    }
+    vDSP_Length log2n = 0;
+    while (((int64_t)1 << log2n) < n) log2n++;
+    static FFTSetup fft_setups[31];
+    if (log2n >= 31) {
+        w_raise(w_string("fft_f32: length too large"));
+        return W_NIL;
+    }
+    if (fft_setups[log2n] == NULL)
+        fft_setups[log2n] = vDSP_create_fftsetup(log2n, kFFTRadix2);
+    if (fft_setups[log2n] == NULL) {
+        w_raise(w_string("fft_f32: vDSP setup allocation failed"));
+        return W_NIL;
+    }
+    DSPSplitComplex sc = { re, im };
+    vDSP_fft_zip(fft_setups[log2n], &sc, 1, log2n,
+                 inverse ? kFFTDirection_Inverse : kFFTDirection_Forward);
+    if (inverse) {
+        float s = 1.0f / (float)n;
+        vDSP_vsmul(re, 1, &s, re, 1, (vDSP_Length)n);
+        vDSP_vsmul(im, 1, &s, im, 1, (vDSP_Length)n);
+    }
+    return W_NIL;
+}

@@ -27097,17 +27097,55 @@ static void w_ghash_mul_sw(uint8_t X[16], const uint8_t H[16]) {
     memcpy(X, Z, 16);
 }
 
-/* GHASH multiply currently always uses the software field multiply above.
- *
- * The AES block work (key expansion, CTR keystream, the H = E_K(0) subkey) all
- * takes the hardware AESE/AESMC path, which is the dominant cost for bulk data;
- * GHASH is the minority term. A PMULL-accelerated GHASH is a worthwhile future
- * optimization but must reduce in the *reflected* GHASH field — full 128-bit
- * bit-reversal moves the modulus from x^128+x^7+x^2+x+1 (constant 0x87) to its
- * reflection x^128+x^127+x^126+x^121+1 (constant 0xc2), so it needs the
- * Montgomery-style 0xc2 reduction (OpenSSL ghashv8), not an 0x87 fold. The
- * differential harness in scratch pins any such kernel to a GF(2^128) oracle. */
+#if W_CRYPTO_HW
+/* PMULL GHASH multiply. GHASH's bit order is reflected WITHIN each byte
+ * (coefficient x^(8b+k) is bit 7-k of byte b), so vrbit — bit-reverse per
+ * byte, byte positions unchanged — maps blocks to plain little-endian
+ * polynomials: byte b bit j becomes x^(8b+j), low 64-bit lane = x^0..x^63.
+ * In that domain the product is a standard 128x128 carryless multiply
+ * reduced mod x^128+x^7+x^2+x+1 (0x87 folds). This is the mbedTLS-style
+ * formulation; OpenSSL's ghashv8 works byte-swapped instead and therefore
+ * needs the reflected 0xc2 constant — the earlier failed attempt mixed the
+ * two domains (0x87 fold without the vrbit transform). Pinned to
+ * w_ghash_mul_sw by the differential harness (100k random + 128 edges). */
+W_TARGET_AES static void w_ghash_mul_hw(uint8_t X[16], const uint8_t H[16]) {
+    poly64x2_t a = vreinterpretq_p64_u8(vrbitq_u8(vld1q_u8(X)));
+    poly64x2_t b = vreinterpretq_p64_u8(vrbitq_u8(vld1q_u8(H)));
+
+    /* 128x128 -> 256-bit carryless product (schoolbook, 4 pmulls) */
+    poly64_t a0 = (poly64_t)vgetq_lane_p64(a, 0), a1 = (poly64_t)vgetq_lane_p64(a, 1);
+    poly64_t b0 = (poly64_t)vgetq_lane_p64(b, 0), b1 = (poly64_t)vgetq_lane_p64(b, 1);
+    uint64x2_t lo = vreinterpretq_u64_p128(vmull_p64(a0, b0));  /* bits   0..127 */
+    uint64x2_t hi = vreinterpretq_u64_p128(vmull_p64(a1, b1));  /* bits 128..255 */
+    uint64x2_t m  = veorq_u64(vreinterpretq_u64_p128(vmull_p64(a0, b1)),
+                              vreinterpretq_u64_p128(vmull_p64(a1, b0))); /* bits 64..191 */
+    uint64x2_t z  = vdupq_n_u64(0);
+    lo = veorq_u64(lo, vextq_u64(z, m, 1));  /* [0, m0]: mid bits  64..127 */
+    hi = veorq_u64(hi, vextq_u64(m, z, 1));  /* [m1, 0]: mid bits 128..191 */
+
+    /* Reduce mod x^128 + x^7 + x^2 + x + 1: x^128 == 0x87. The high 128
+     * bits fold as h0*0x87 (bits 0..70) + h1*0x87 at offset 64 (64..134);
+     * the <=7 bits that land past x^128 fold once more into bits 0..14. */
+    uint64_t h0 = vgetq_lane_u64(hi, 0), h1 = vgetq_lane_u64(hi, 1);
+    uint64x2_t p0 = vreinterpretq_u64_p128(vmull_p64((poly64_t)h0, (poly64_t)0x87ULL));
+    uint64x2_t p1 = vreinterpretq_u64_p128(vmull_p64((poly64_t)h1, (poly64_t)0x87ULL));
+    uint64_t of = vgetq_lane_u64(p1, 1);
+    uint64_t f2 = vgetq_lane_u64(vreinterpretq_u64_p128(vmull_p64((poly64_t)of, (poly64_t)0x87ULL)), 0);
+    uint64_t r0 = vgetq_lane_u64(lo, 0) ^ vgetq_lane_u64(p0, 0) ^ f2;
+    uint64_t r1 = vgetq_lane_u64(lo, 1) ^ vgetq_lane_u64(p0, 1) ^ vgetq_lane_u64(p1, 0);
+    vst1q_u8(X, vrbitq_u8(vreinterpretq_u8_u64(vcombine_u64(vcreate_u64(r0), vcreate_u64(r1)))));
+}
+#endif
+
+/* GHASH multiply: PMULL kernel when the CPU has it (FEAT_PMULL rides the
+ * same probe as AES), NIST SP 800-38D software reference otherwise. */
 static void w_ghash_mul(uint8_t X[16], const uint8_t H[16]) {
+#if W_CRYPTO_HW
+    if (w_hw_aes_available()) {
+        w_ghash_mul_hw(X, H);
+        return;
+    }
+#endif
     w_ghash_mul_sw(X, H);
 }
 
@@ -53436,6 +53474,10 @@ __attribute__((weak)) WValue w_blas_dgesv(WValue a, WValue b, WValue n) {
 }
 __attribute__((weak)) WValue w_blas_dpotrf(WValue a, WValue n) {
     (void)a; (void)n; w_raise(w_string("dpotrf: BLAS/LAPACK bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dgeev(WValue a, WValue wr, WValue wi, WValue n) {
+    (void)a; (void)wr; (void)wi; (void)n;
+    w_raise(w_string("dgeev: BLAS/LAPACK bridge not linked")); return W_NIL;
 }
 __attribute__((weak)) WValue w_blas_fft_f32(WValue re, WValue im, WValue n, WValue inv) {
     (void)re; (void)im; (void)n; (void)inv;

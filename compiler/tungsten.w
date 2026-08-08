@@ -1090,10 +1090,11 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
       clang_cmd << " "
       clang_cmd << mif
 
-  # Framework links. Accelerate is unconditional (runtime.c calls
-  # cblas_sgemm/dgemm directly); everything else only when the bridges are
-  # linked — "harmless" turned out to cost ~1.5ms warm and most of the
-  # first-run dyld closure on every plain CLI binary.
+  # Framework links. Accelerate links only when the IR references
+  # @w_blas_ / @w_sparse_ (blas_needed || sparse_needed below — runtime.c
+  # carries weak raising stubs otherwise); everything else only when the
+  # bridges are linked — "harmless" turned out to cost ~1.5ms warm and most
+  # of the first-run dyld closure on every plain CLI binary.
   if detect_target()[:os] == "macos"
     if bridges_needed
       clang_cmd << " -framework Metal -framework Foundation -framework AppKit -framework QuartzCore -framework CoreGraphics -framework IOKit -framework CoreFoundation"

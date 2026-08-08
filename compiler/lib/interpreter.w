@@ -1593,6 +1593,8 @@ use target
       return ccall("w_blas_dgeev", args[1], args[2], args[3], args[4])
 
     # -- Array#csort / #tsort / #skasort / #wolfsort (core/array.w) --
+    when "w_array_stable_sort"
+      return ccall("w_array_stable_sort", args[1])
     when "w_array_csort"
       return ccall("w_array_csort", args[1])
     when "w_array_csort_range"

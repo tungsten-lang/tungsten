@@ -274,8 +274,9 @@
     ccall("w_array_csort_range", self, min, max)
 
   # -- Explicit alternative sort algorithms (integer arrays) --
-  # `sort` already picks the best of pdqsort/radix by size; these let you
-  # request a specific algorithm. Float/generic arrays fall back to `sort`.
+  # `sort` already picks the best of pdqsort/ipnsort/radix by element width,
+  # size, and input pattern; these let you request a specific algorithm.
+  # Float/generic arrays fall back to `sort`.
   #   tsort    — timsort: stable, adaptive (near-linear on already-sorted data)
   #   skasort  — in-place MSD byte-radix (american-flag sort)
   #   wolfsort — distribution + pdqsort hybrid
@@ -462,6 +463,24 @@
     sorted = self.sort -> (a, b)
       &(a, b)
     self.__replace_elements(sorted)
+
+  # Stable sorted copy: elements that compare equal keep their input
+  # order. Typed and homogeneous arrays ride the same width-tuned kernels
+  # as `sort` (equal values there are indistinguishable, and the radix
+  # tiers are stable by construction); mixed polymorphic arrays — the one
+  # blockless case where stability is observable, e.g. 2 vs 2.0 — use a
+  # stable bottom-up mergesort where `sort` uses an unstable qsort. The
+  # comparator-block form mirrors `sort`'s, which is stable on every path.
+  #
+  # Dispatch note: like `sort`, the compiled engine intercepts every call
+  # through the WN_stable_sort IC row (blockless → w_array_stable_sort,
+  # block → w_array_sort_block) — this body runs on the interpreter only.
+  -> stable_sort(&)
+    if block_given?
+      self.__mergesort_copy -> (a, b)
+        &(a, b)
+    else
+      ccall("w_array_stable_sort", self)
 
   # Stable in-place sort. Uses `<=>` by default and accepts a Ruby-style
   # comparator block returning negative/zero/positive. Unlike blockless

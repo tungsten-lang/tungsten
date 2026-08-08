@@ -1351,6 +1351,20 @@ module Tungsten
           end
         end
 
+        # Array#stable_sort — the same stable bottom-up mergesort as `sort`
+        # above (already stable on this engine). The distinct name exists for
+        # parity with the compiled/interpreter engines, where blockless `sort`
+        # may use unstable kernels on mixed polymorphic arrays.
+        interpreter.define_method_builtin("stable_sort") do |recv, _args, block|
+          if recv.is_a?(Array)
+            array_mergesort_copy(recv, block)
+          elsif block
+            recv.sort { |a, b| block.call(a, b) }
+          else
+            recv.sort
+          end
+        end
+
         interpreter.define_method_builtin("sort!") do |recv, _args, block|
           if recv.is_a?(Array)
             array_mergesort_in_place!(recv, block)

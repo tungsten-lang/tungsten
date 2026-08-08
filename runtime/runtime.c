@@ -40295,6 +40295,7 @@ static WValue WN_matvec_i8 = 0, WN_matmul_i8 = 0;
 /* Phase 4e: long-name intrinsics on typed arrays */
 static WValue WN_raw_ptr = 0;
 static WValue WN_slice_view = 0;
+static WValue WN_stable_sort = 0;
 
 static void w_init_method_names(void) {
     WN_empty_q      = w_string("empty?");
@@ -40322,6 +40323,7 @@ static void w_init_method_names(void) {
     WN_matmul_i8    = w_string("matmul_i8");
     WN_raw_ptr      = w_string("raw_ptr");
     WN_slice_view   = w_string("slice_view");
+    WN_stable_sort  = w_string("stable_sort");
     WN_values       = w_string("values");
     WN_delete       = w_string("delete");
     WN_has_key_q    = w_string("has_key?");
@@ -41301,6 +41303,14 @@ static WValue w_ic_array_sort(WValue r, WValue *a, int c) {
     if (c >= 1 && w_is_closure(a[c - 1]))
         return w_array_sort_block(r, a[c - 1]);
     return w_array_sort(r);
+}
+static WValue w_ic_array_stable_sort(WValue r, WValue *a, int c) {
+    /* Same routing as sort's row — the block mergesort is already stable;
+     * blockless takes the stability-safe fast paths (stable merge instead
+     * of qsort on the mixed polymorphic fallback). */
+    if (c >= 1 && w_is_closure(a[c - 1]))
+        return w_array_sort_block(r, a[c - 1]);
+    return w_array_stable_sort(r);
 }
 static WValue w_ic_array_reverse(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -45563,7 +45573,7 @@ static WICEntry w_ic_array_table[] = {
     {0, w_ic_array_include},  /* WN_include_q — legacy alias for has? (Phase 7+d) */
     {0, w_ic_array_unshift},  /* Phase 7+e */
     {0, w_ic_array_sort},     /* Phase 7+e */
-    {0, w_ic_array_reverse},  /* Phase 7+e */
+    {0, w_ic_array_stable_sort}, /* slot 12: was reverse (retired to core) */
     {0, w_ic_array_copy},     /* Phase 7+e */
     {0, w_ic_array_fill},       /* Phase 7+f */
     {0, w_ic_array_view},
@@ -46144,7 +46154,8 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[9].name  = WN_include_q; /* Phase 7+d: legacy alias for has? */
     w_ic_array_table[10].name = WN_unshift;   /* Phase 7+e */
     w_ic_array_table[11].name = WN_sort;
-    /* Slots 12-13 (reverse, copy) retired to core/array.w. */
+    w_ic_array_table[12].name = WN_stable_sort; /* reclaimed from retired reverse */
+    /* Slot 13 (copy) retired to core/array.w. */
     w_ic_array_table[14].name = WN_fill;       /* Phase 7+f */
     w_ic_array_table[15].name = WN_view;
     w_ic_array_table[16].name = WN_slice_view;
@@ -51710,17 +51721,12 @@ WValue w_array_tan_signed(WValue arr) { return array_map_f64(arr, 1, tan); }
 WValue w_array_tan_unsigned(WValue arr) { return array_map_f64(arr, 0, tan); }
 WValue w_array_tan_float(WValue arr) { return array_map_f64(arr, 0, tan); }
 
-static int w_ta_cmp8(const void *a, const void *b)  { return (int)*(const uint8_t *)a - (int)*(const uint8_t *)b; }
-static int w_ta_cmp16(const void *a, const void *b) { uint16_t va = *(const uint16_t *)a, vb = *(const uint16_t *)b; return (va > vb) - (va < vb); }
-static int w_ta_cmp32(const void *a, const void *b) { uint32_t va = *(const uint32_t *)a, vb = *(const uint32_t *)b; return (va > vb) - (va < vb); }
-static int w_ta_cmp64(const void *a, const void *b) { uint64_t va = *(const uint64_t *)a, vb = *(const uint64_t *)b; return (va > vb) - (va < vb); }
-static int w_ta_cmpf32(const void *a, const void *b) { float va = *(const float *)a, vb = *(const float *)b; return (va > vb) - (va < vb); }
-static int w_ta_cmpf64(const void *a, const void *b) { double va = *(const double *)a, vb = *(const double *)b; return (va > vb) - (va < vb); }
-
 /* pdqsort — pattern-defeating quicksort, type-specialized for integer typed
- * arrays. Replaces the qsort-with-callback path: inlined comparisons + branchless
- * block partitioning make it ~4x faster on random data. Unsigned comparison
- * matches the w_ta_cmp* semantics above. */
+ * arrays. Replaces the old qsort-with-callback path: inlined comparisons +
+ * branchless block partitioning make it ~4x faster on random data. The
+ * kernels compare raw storage bits as unsigned; signed and float element
+ * types are mapped onto unsigned order around the kernel call (see
+ * w_ta_sign_flip and the w_ta_f*_enc key transforms below). */
 #define PDQ_T uint8_t
 #define PDQ_SUF u8
 #include "pdqsort.inc"
@@ -51791,9 +51797,82 @@ static int w_ta_cmpf64(const void *a, const void *b) { double va = *(const doubl
 #undef RDX_T
 #undef RDX_SUF
 
-#define RADIX_THRESHOLD 256
+/* Comparison→radix crossover, per storage width. LSD radix does one
+ * histogram scan plus up to sizeof(T) scatter passes, so its break-even
+ * against the comparison kernels scales with element width: measured on
+ * random data (kernel-only harness, Apple Silicon) the crossover sits near
+ * n=64 for u8 and near n=2k for u64. The old single RADIX_THRESHOLD of 256
+ * put 64-bit arrays on radix ~8x too early and 8-bit arrays ~4x too late. */
+static inline int w_ta_use_radix(int64_t storage_bits, int64_t n) {
+    switch (storage_bits) {
+        case 8:  return n >= 64;
+        case 16: return n >= 128;
+        case 32: return n >= 512;
+        /* 64-bit radix also has an upper cutoff: its scratch ping-pong
+         * (2x the array footprint in cold pages) loses to in-place ipnsort
+         * once the working set outgrows cache — measured in situ, radix
+         * wins [2k, 128k) and ipnsort wins above even on low-entropy data. */
+        default: return n >= 2048 && n < 131072;
+    }
+}
 
-WValue w_array_sort(WValue arr) {
+/* Signed typed arrays ride the unsigned kernels through a sign-bit flip:
+ * XOR of the sign bit maps two's-complement order onto unsigned order, and
+ * the flip is its own inverse. Two linear passes — noise next to the sort
+ * itself — and every kernel (pdq/radix/ipn/tim/ska/wolf) inherits signed
+ * correctness from this one place. */
+static void w_ta_sign_flip(void *slots, int64_t storage_bits, int64_t n) {
+    int64_t i;
+    switch (storage_bits) {
+        case 8:  { uint8_t  *p = (uint8_t *)slots;  for (i = 0; i < n; i++) p[i] ^= 0x80u; break; }
+        case 16: { uint16_t *p = (uint16_t *)slots; for (i = 0; i < n; i++) p[i] ^= 0x8000u; break; }
+        case 32: { uint32_t *p = (uint32_t *)slots; for (i = 0; i < n; i++) p[i] ^= 0x80000000u; break; }
+        case 64: { uint64_t *p = (uint64_t *)slots; for (i = 0; i < n; i++) p[i] ^= 0x8000000000000000ULL; break; }
+    }
+}
+
+/* IEEE-754 total-order keys: XOR all bits of a negative, only the sign bit
+ * of a non-negative — a monotone bijection from float order onto unsigned
+ * integer order, so float arrays ride the same integer kernels. The decode
+ * mask mirrors the encode: the encoded sign bit records which mask was
+ * applied. Deterministic NaN placement falls out (-NaN first, +NaN last),
+ * where the old qsort comparator — for which NaN "equals" everything —
+ * left NaNs stranded wherever the pivots happened to put them. */
+static void w_ta_f32_enc(uint32_t *p, int64_t n) { for (int64_t i = 0; i < n; i++) p[i] ^= (p[i] & 0x80000000u) ? 0xFFFFFFFFu : 0x80000000u; }
+static void w_ta_f32_dec(uint32_t *p, int64_t n) { for (int64_t i = 0; i < n; i++) p[i] ^= (p[i] & 0x80000000u) ? 0x80000000u : 0xFFFFFFFFu; }
+static void w_ta_f64_enc(uint64_t *p, int64_t n) { for (int64_t i = 0; i < n; i++) p[i] ^= (p[i] & 0x8000000000000000ULL) ? 0xFFFFFFFFFFFFFFFFULL : 0x8000000000000000ULL; }
+static void w_ta_f64_dec(uint64_t *p, int64_t n) { for (int64_t i = 0; i < n; i++) p[i] ^= (p[i] & 0x8000000000000000ULL) ? 0x8000000000000000ULL : 0xFFFFFFFFFFFFFFFFULL; }
+static void w_ta_f16_enc(uint16_t *p, int64_t n) { for (int64_t i = 0; i < n; i++) p[i] ^= (p[i] & 0x8000u) ? 0xFFFFu : 0x8000u; }
+static void w_ta_f16_dec(uint16_t *p, int64_t n) { for (int64_t i = 0; i < n; i++) p[i] ^= (p[i] & 0x8000u) ? 0x8000u : 0xFFFFu; }
+
+/* Bottom-up stable mergesort over raw WValue slots ordered by
+ * w_value_compare — Array#stable_sort's fallback for mixed polymorphic
+ * arrays, where qsort could reorder distinguishable elements that compare
+ * equal (2 vs 2.0). Ties keep the left (earlier) run's element. O(n)
+ * scratch; on OOM falls back to qsort — order still correct, stability
+ * no longer guaranteed. */
+static void w_stable_merge_wvalues(WValue *a, int64_t n) {
+    if (n < 2) return;
+    WValue *tmp = (WValue *)malloc((size_t)n * sizeof(WValue));
+    if (!tmp) { qsort(a, (size_t)n, sizeof(WValue), w_value_compare); return; }
+    WValue *src = a, *dst = tmp;
+    for (int64_t width = 1; width < n; width *= 2) {
+        for (int64_t left = 0; left < n; left += width * 2) {
+            int64_t mid = left + width; if (mid > n) mid = n;
+            int64_t right = left + width * 2; if (right > n) right = n;
+            int64_t i = left, j = mid, k = left;
+            while (i < mid && j < right)
+                dst[k++] = (w_value_compare(&src[i], &src[j]) <= 0) ? src[i++] : src[j++];
+            while (i < mid) dst[k++] = src[i++];
+            while (j < right) dst[k++] = src[j++];
+        }
+        WValue *t = src; src = dst; dst = t;
+    }
+    if (src != a) memcpy(a, src, (size_t)n * sizeof(WValue));
+    free(tmp);
+}
+
+static WValue w_array_sort_impl(WValue arr, int stable) {
     WArray *src = (WArray *)w_as_ptr(arr);
     WValue result = w_array_new(src->ebits, src->size);
     WArray *dst = (WArray *)w_as_ptr(result);
@@ -51801,41 +51880,115 @@ WValue w_array_sort(WValue arr) {
     int64_t src_off = array_byte_size(src->ebits, src->start);
     memcpy(dst->slots, (uint8_t *)src->slots + src_off, nbytes);
     dst->size = src->size;
+    int64_t sz = dst->size;
     if (dst->ebits == 65) {
-        qsort(dst->slots, dst->size, sizeof(WValue), w_value_compare);
+        /* Polymorphic slots. A homogeneous array of small ints (every plain
+         * `[3, 1, 2]` literal) or of doubles sorts through the typed kernels
+         * on a decoded key buffer — both element kinds are immediates, so
+         * decode and re-encode are pure bit math, ~4x faster at scale than
+         * qsort bouncing through w_value_compare. One classifying scan;
+         * mixed or heap-element arrays keep the general comparator path. */
+        WValue *slots = (WValue *)dst->slots;
+        if (sz > 1) {
+            int all_int = 1, all_dbl = 1;
+            for (int64_t i = 0; i < sz && (all_int | all_dbl); i++) {
+                all_int &= w_is_int(slots[i]);
+                all_dbl &= w_is_double(slots[i]);
+            }
+            uint64_t *keys = (all_int | all_dbl)
+                ? (uint64_t *)malloc((size_t)sz * sizeof(uint64_t)) : NULL;
+            if (keys) {
+                if (all_int) {
+                    for (int64_t i = 0; i < sz; i++)
+                        keys[i] = (uint64_t)w_as_int(slots[i]) ^ 0x8000000000000000ULL;
+                    if (w_ta_use_radix(64, sz)) rdx_sort_u64(keys, sz); else ipn_sort_u64(keys, sz);
+                    for (int64_t i = 0; i < sz; i++)
+                        slots[i] = w_int((int64_t)(keys[i] ^ 0x8000000000000000ULL));
+                } else {
+                    for (int64_t i = 0; i < sz; i++) {
+                        double d = w_as_double(slots[i]);
+                        memcpy(&keys[i], &d, sizeof(double));
+                    }
+                    w_ta_f64_enc(keys, sz);
+                    if (w_ta_use_radix(64, sz)) rdx_sort_u64(keys, sz); else ipn_sort_u64(keys, sz);
+                    w_ta_f64_dec(keys, sz);
+                    for (int64_t i = 0; i < sz; i++) {
+                        double d;
+                        memcpy(&d, &keys[i], sizeof(double));
+                        slots[i] = w_box_double(d);
+                    }
+                }
+                free(keys);
+                return result;
+            }
+        }
+        if (stable) w_stable_merge_wvalues((WValue *)dst->slots, sz);
+        else qsort(dst->slots, dst->size, sizeof(WValue), w_value_compare);
         return result;
     }
     if (array_is_float(dst)) {
+        /* f32/f64/bf16 sort as unsigned keys under the total-order transform.
+         * (The old path qsort'ed through a callback — and would have read
+         * bf16's 2-byte slots as doubles, 4x past the buffer.) */
         if (dst->ebits == -32) {
-            qsort(dst->slots, dst->size, sizeof(float), w_ta_cmpf32);
+            uint32_t *p = (uint32_t *)dst->slots;
+            w_ta_f32_enc(p, sz);
+            if (w_ta_use_radix(32, sz)) rdx_sort_u32(p, sz); else pdq_sort_u32(p, sz);
+            w_ta_f32_dec(p, sz);
+        } else if (dst->ebits == -116) {
+            uint16_t *p = (uint16_t *)dst->slots;
+            w_ta_f16_enc(p, sz);
+            if (w_ta_use_radix(16, sz)) rdx_sort_u16(p, sz); else pdq_sort_u16(p, sz);
+            w_ta_f16_dec(p, sz);
         } else {
-            qsort(dst->slots, dst->size, sizeof(double), w_ta_cmpf64);
+            uint64_t *p = (uint64_t *)dst->slots;
+            w_ta_f64_enc(p, sz);
+            if (w_ta_use_radix(64, sz)) rdx_sort_u64(p, sz); else ipn_sort_u64(p, sz);
+            w_ta_f64_dec(p, sz);
         }
         return result;
     }
-    int64_t sz = dst->size;
-    int use_radix = sz >= RADIX_THRESHOLD;
-    switch (array_storage_bits(dst->ebits)) {
+    int64_t bits = array_storage_bits(dst->ebits);
+    int use_radix = w_ta_use_radix(bits, sz);
+    int is_signed = array_is_signed_int(dst);
+    if (is_signed) w_ta_sign_flip(dst->slots, bits, sz);
+    switch (bits) {
         case 8:  if (use_radix) rdx_sort_u8((uint8_t *)dst->slots, sz);   else pdq_sort_u8((uint8_t *)dst->slots, sz); break;
         case 16: if (use_radix) rdx_sort_u16((uint16_t *)dst->slots, sz); else pdq_sort_u16((uint16_t *)dst->slots, sz); break;
         case 32: if (use_radix) rdx_sort_u32((uint32_t *)dst->slots, sz); else pdq_sort_u32((uint32_t *)dst->slots, sz); break;
-        case 64: if (use_radix) rdx_sort_u64((uint64_t *)dst->slots, sz); else pdq_sort_u64((uint64_t *)dst->slots, sz); break;
+        /* 64-bit's comparison tier is ipnsort, not pdqsort: measured in situ
+         * it matches pdq at n<128 and pulls ahead everywhere above. */
+        case 64: if (use_radix) rdx_sort_u64((uint64_t *)dst->slots, sz); else ipn_sort_u64((uint64_t *)dst->slots, sz); break;
         case 4: {
             uint8_t *tmp = malloc(dst->size);
-            for (int64_t j = 0; j < dst->size; j++) tmp[j] = (uint8_t)array_read(dst, j);
+            /* i4: two's-complement order at nibble width — same flip, 4-bit sign. */
+            uint8_t nibble_flip = (dst->ebits == -4) ? 0x8u : 0x0u;
+            for (int64_t j = 0; j < dst->size; j++) tmp[j] = (uint8_t)((array_read(dst, j) & 0xFu) ^ nibble_flip);
             if (use_radix) rdx_sort_u8(tmp, sz); else pdq_sort_u8(tmp, sz);
-            for (int64_t j = 0; j < dst->size; j++) array_write(dst, j, tmp[j]);
+            for (int64_t j = 0; j < dst->size; j++) array_write(dst, j, (uint64_t)(tmp[j] ^ nibble_flip));
             free(tmp);
             break;
         }
     }
+    if (is_signed) w_ta_sign_flip(dst->slots, bits, sz);
     return result;
 }
 
+WValue w_array_sort(WValue arr) { return w_array_sort_impl(arr, 0); }
+
+/* Array#stable_sort — sorted copy where elements that compare equal keep
+ * their input order. Typed and homogeneous-boxed arrays share sort's
+ * width-tuned kernel selection unchanged: equal elements there are
+ * indistinguishable values (and the radix tiers are stable by
+ * construction), so those fast paths are stability-safe as-is. Only the
+ * mixed polymorphic fallback differs — stable mergesort instead of qsort. */
+WValue w_array_stable_sort(WValue arr) { return w_array_sort_impl(arr, 1); }
+
 /* Array#ipnsort — explicit instruction-parallel network sort. Same integer
- * typed-array semantics as w_array_sort's pdqsort path (unsigned compare,
- * per-width specialization), but always ipnsort — no radix crossover. w64,
- * float, and 4-bit arrays fall back to w_array_sort, which owns those tiers. */
+ * typed-array semantics as w_array_sort's comparison tier (per-width
+ * specialization, signed types via the sign flip), but always ipnsort — no
+ * radix crossover. w64, float, and 4-bit arrays fall back to w_array_sort,
+ * which owns those tiers. */
 WValue w_array_ipnsort(WValue arr) {
     WArray *src = (WArray *)w_as_ptr(arr);
     if (src->ebits == 65 || array_is_float(src) || array_storage_bits(src->ebits) == 4) {
@@ -51848,12 +52001,16 @@ WValue w_array_ipnsort(WValue arr) {
     memcpy(dst->slots, (uint8_t *)src->slots + src_off, nbytes);
     dst->size = src->size;
     int64_t sz = dst->size;
-    switch (array_storage_bits(dst->ebits)) {
+    int64_t bits = array_storage_bits(dst->ebits);
+    int is_signed = array_is_signed_int(dst);
+    if (is_signed) w_ta_sign_flip(dst->slots, bits, sz);
+    switch (bits) {
         case 8:  ipn_sort_u8((uint8_t *)dst->slots, sz);   break;
         case 16: ipn_sort_u16((uint16_t *)dst->slots, sz); break;
         case 32: ipn_sort_u32((uint32_t *)dst->slots, sz); break;
         case 64: ipn_sort_u64((uint64_t *)dst->slots, sz); break;
     }
+    if (is_signed) w_ta_sign_flip(dst->slots, bits, sz);
     return result;
 }
 
@@ -51916,10 +52073,11 @@ WValue w_array_csort_range(WValue arr, WValue lo, WValue hi) {
 }
 
 /* Explicit alternative sort algorithms — Array#tsort / #skasort / #wolfsort.
- * Integer typed arrays only (unsigned comparison, matching Array#sort);
- * float/generic arrays fall back to Array#sort. timsort is stable + adaptive
- * to near-sorted data; skasort is an in-place MSD radix; wolfsort is a
- * distribution+pdqsort hybrid. All templated per element width. */
+ * Integer typed arrays only (storage-width kernels, signed element types via
+ * the sign flip — matching Array#sort); float/generic arrays fall back to
+ * Array#sort. timsort is stable + adaptive to near-sorted data; skasort is
+ * an in-place MSD radix; wolfsort is a distribution+pdqsort hybrid. All
+ * templated per element width. */
 #define TIM_T uint8_t
 #define TIM_SUF u8
 #include "timsort.inc"
@@ -51993,20 +52151,25 @@ WValue fname(WValue arr) {                                                      
     int64_t src_off = array_byte_size(src->ebits, src->start);                   \
     memcpy(dst->slots, (uint8_t *)src->slots + src_off, nbytes);                 \
     dst->size = src->size;                                                       \
-    switch (array_storage_bits(dst->ebits)) {                                    \
+    int64_t bits_ = array_storage_bits(dst->ebits);                              \
+    int is_signed_ = array_is_signed_int(dst);                                   \
+    if (is_signed_) w_ta_sign_flip(dst->slots, bits_, dst->size);                \
+    switch (bits_) {                                                             \
         case 8:  algo##_u8((uint8_t *)dst->slots, dst->size); break;             \
         case 16: algo##_u16((uint16_t *)dst->slots, dst->size); break;           \
         case 32: algo##_u32((uint32_t *)dst->slots, dst->size); break;           \
         case 64: algo##_u64((uint64_t *)dst->slots, dst->size); break;           \
         case 4: {                                                                \
             uint8_t *tmp = malloc(dst->size);                                    \
-            for (int64_t j = 0; j < dst->size; j++) tmp[j] = (uint8_t)array_read(dst, j); \
+            uint8_t nf_ = (dst->ebits == -4) ? 0x8u : 0x0u;                      \
+            for (int64_t j = 0; j < dst->size; j++) tmp[j] = (uint8_t)((array_read(dst, j) & 0xFu) ^ nf_); \
             algo##_u8(tmp, dst->size);                                           \
-            for (int64_t j = 0; j < dst->size; j++) array_write(dst, j, tmp[j]); \
+            for (int64_t j = 0; j < dst->size; j++) array_write(dst, j, (uint64_t)(tmp[j] ^ nf_)); \
             free(tmp);                                                           \
             break;                                                               \
         }                                                                        \
     }                                                                            \
+    if (is_signed_) w_ta_sign_flip(dst->slots, bits_, dst->size);                \
     return result;                                                               \
 }
 DEFINE_ARRAY_ALGO_SORT(w_array_tsort, tim_sort)

@@ -169,6 +169,18 @@ static void IPN_FN(qs)(IPN_T *v, long n, int limit) {
 }
 void IPN_FN(sort)(IPN_T *a, long n) {
     if (n < 2) return;
+    /* Whole-array run pre-scans, mirroring upstream ipnsort's run
+     * detection: already-sorted input is a no-op, reversed input one
+     * in-place reverse. ~2 wasted comparisons on random data. */
+    long s = 1;
+    while (s < n && !IPN_LESS(a[s], a[s - 1])) s++;
+    if (s == n) return;
+    s = 1;
+    while (s < n && !IPN_LESS(a[s - 1], a[s])) s++;
+    if (s == n) {
+        for (long i = 0, j = n - 1; i < j; i++, j--) IPN_SWAP(a[i], a[j]);
+        return;
+    }
     int lim = 0; long t = n; while (t >>= 1) lim++;
     IPN_FN(qs)(a, n, 2 * lim);
 }

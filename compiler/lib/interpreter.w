@@ -1540,6 +1540,12 @@ use target
       return ccall("w_crypto_sha512_256_bytes", args[1])
     when "w_crypto_sha512_256_hex"
       return ccall("w_crypto_sha512_256_hex", args[1])
+    when "w_carr_mul_f64"
+      return ccall("w_carr_mul_f64", args[1], args[2])
+    when "w_carr_conj_dot_f64"
+      return ccall("w_carr_conj_dot_f64", args[1], args[2])
+    when "w_carr_scale_f64"
+      return ccall("w_carr_scale_f64", args[1], args[2], args[3])
     when "w_crypto_sha3_bytes"
       return ccall("w_crypto_sha3_bytes", args[1], args[2])
     when "w_crypto_sha3_hex"

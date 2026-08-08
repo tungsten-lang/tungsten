@@ -301,6 +301,10 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_crypto_sha512_256_bytes"] = true
   m["w_crypto_sha3_bytes"] = true
   m["w_crypto_shake_bytes"] = true
+  # complex-array kernels allocate fresh result buffers
+  m["w_carr_mul_f64"] = true
+  m["w_carr_conj_dot_f64"] = true
+  m["w_carr_scale_f64"] = true
   m["w_crypto_aes_gcm_seal"] = true
   m["w_crypto_aes_gcm_open"] = true
   m["w_uuid_bytes"] = true

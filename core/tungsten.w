@@ -152,6 +152,7 @@
   # base stays at `numeric/hypercomplex.w` as the orchestrator.
   auto :Centumduodetrigintanion,   "numeric/hypercomplex/centumduodetrigintanion"
   auto :Complex,                   "numeric/hypercomplex/complex"
+  auto :ComplexArray,              "numeric/complex_array"
   auto :Ducentiquinquagintasexion, "numeric/hypercomplex/ducentiquinquagintasexion"
   auto :Octonion,                  "numeric/hypercomplex/octonion"
   auto :Quaternion,                "numeric/hypercomplex/quaternion"

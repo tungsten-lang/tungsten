@@ -11,11 +11,17 @@ Tungsten's tower is rare in production languages:
 
 ## Packaging as a product
 
-1. **Docs first** (this file + getting-started examples).  
-2. **GPU path**: keep `QuaternionMetal` hot for SLAM / game-style workloads.  
-3. **Interop**: convert `Complex` ↔ FFT split arrays (`FFT` uses re/im lists).  
+1. **Docs first** (this file + getting-started examples).
+2. **GPU path**: keep `QuaternionMetal` hot for SLAM / game-style workloads.
+3. **Interop**: two scalar representations now exist — bare `Complex.new(re, im)`
+   (lightweight wvalue slots) and `Complex<T>.new([re, im])` (array-backed tower);
+   convert with `Complex.from(z)` / `Complex<f64>.from(z)`. Bulk math lives in
+   `ComplexArray` (interleaved `(re, im)` f64 storage): `mul` / `conj_dot` /
+   `scale` run FEAT_FCMA FCMLA kernels (`w_carr_*`, ~140x over a boxed
+   multiply loop at 100k elements). FFT split re/im arrays remain a separate
+   layout; `ComplexArray` ↔ split-array conversion is still open.
 4. **Benchmarks**: rotate 10⁷ quaternions CPU vs Metal (qjulia already exists
-   under `benchmarks/qjulia/`).  
+   under `benchmarks/qjulia/`).
 5. **Narrative**: “pseudocode for geometric algebra” — not “another NumPy”.
 
 Do not hide the tower in a bit: it is a **language identity** feature.

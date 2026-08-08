@@ -53437,6 +53437,117 @@ WValue w_array_scale_float_bang(WValue arr, WValue scalar) {
 }
 
 /* ---------------------------------------------------------------------
+ * Interleaved complex f64 kernels (core/numeric/complex_array.w).
+ *
+ * Buffers are f64 typed arrays of length 2N holding (re, im) pairs — the
+ * layout FCMLA wants: one 128-bit vector = one complex. FEAT_FCMA's
+ * rotate-0 + rotate-90 pair computes a full complex multiply-accumulate:
+ *   rot0:  dst.re += a.re*b.re ; dst.im += a.re*b.im
+ *   rot90: dst.re -= a.im*b.im ; dst.im += a.im*b.re
+ * The conjugate dot uses rot0 + rot270 (conj(a)*b). Scalar fallbacks keep
+ * non-FCMA targets correct and serve as the differential oracle.
+ * ------------------------------------------------------------------- */
+
+static WArray *carr_pair_arg(WValue v, const char *who) {
+    if (!w_is_array(v)) w_raise(w_string("complex array kernel: expected f64[] backing"));
+    WArray *a = (WArray *)w_as_ptr(v);
+    if (a->ebits != -64) w_raise(w_string("complex array kernel: backing must be f64[]"));
+    if (a->size & 1) w_raise(w_string("complex array kernel: odd backing length"));
+    (void)who;
+    return a;
+}
+
+WValue w_carr_mul_f64(WValue a_v, WValue b_v) {
+    WArray *a = carr_pair_arg(a_v, "mul");
+    WArray *b = carr_pair_arg(b_v, "mul");
+    if (a->size != b->size) w_raise(w_string("complex array mul: size mismatch"));
+    int64_t n2 = a->size;
+    WValue out_v = w_array_new(-64, n2);
+    WArray *out = (WArray *)w_as_ptr(out_v);
+    out->size = (int32_t)n2;
+    const double *ap = (const double *)a->slots + a->start;
+    const double *bp = (const double *)b->slots + b->start;
+    double *op = (double *)out->slots + out->start;
+    int64_t i = 0;
+#if defined(__aarch64__) && defined(__ARM_FEATURE_COMPLEX)
+    for (; i + 4 <= n2; i += 4) {
+        float64x2_t a0 = vld1q_f64(ap + i), a1 = vld1q_f64(ap + i + 2);
+        float64x2_t b0 = vld1q_f64(bp + i), b1 = vld1q_f64(bp + i + 2);
+        float64x2_t r0 = vcmlaq_rot90_f64(vcmlaq_f64(vdupq_n_f64(0.0), a0, b0), a0, b0);
+        float64x2_t r1 = vcmlaq_rot90_f64(vcmlaq_f64(vdupq_n_f64(0.0), a1, b1), a1, b1);
+        vst1q_f64(op + i, r0);
+        vst1q_f64(op + i + 2, r1);
+    }
+#endif
+    for (; i < n2; i += 2) {
+        double ar = ap[i], ai = ap[i + 1], br = bp[i], bi = bp[i + 1];
+        op[i] = ar * br - ai * bi;
+        op[i + 1] = ar * bi + ai * br;
+    }
+    return out_v;
+}
+
+WValue w_carr_conj_dot_f64(WValue a_v, WValue b_v) {
+    WArray *a = carr_pair_arg(a_v, "conj_dot");
+    WArray *b = carr_pair_arg(b_v, "conj_dot");
+    if (a->size != b->size) w_raise(w_string("complex array conj_dot: size mismatch"));
+    int64_t n2 = a->size;
+    const double *ap = (const double *)a->slots + a->start;
+    const double *bp = (const double *)b->slots + b->start;
+    double acc_re = 0.0, acc_im = 0.0;
+    int64_t i = 0;
+#if defined(__aarch64__) && defined(__ARM_FEATURE_COMPLEX)
+    float64x2_t acc = vdupq_n_f64(0.0);
+    for (; i + 2 <= n2; i += 2) {
+        float64x2_t av = vld1q_f64(ap + i);
+        float64x2_t bv = vld1q_f64(bp + i);
+        acc = vcmlaq_rot270_f64(vcmlaq_f64(acc, av, bv), av, bv);
+    }
+    acc_re = vgetq_lane_f64(acc, 0);
+    acc_im = vgetq_lane_f64(acc, 1);
+#endif
+    for (; i < n2; i += 2) {
+        double ar = ap[i], ai = ap[i + 1], br = bp[i], bi = bp[i + 1];
+        acc_re += ar * br + ai * bi;
+        acc_im += ar * bi - ai * br;
+    }
+    WValue out_v = w_array_new(-64, 2);
+    WArray *out = (WArray *)w_as_ptr(out_v);
+    out->size = 2;
+    double *op = (double *)out->slots + out->start;
+    op[0] = acc_re;
+    op[1] = acc_im;
+    return out_v;
+}
+
+WValue w_carr_scale_f64(WValue a_v, WValue re_v, WValue im_v) {
+    WArray *a = carr_pair_arg(a_v, "scale");
+    double sr = w_math_to_double(re_v);
+    double si = w_math_to_double(im_v);
+    int64_t n2 = a->size;
+    WValue out_v = w_array_new(-64, n2);
+    WArray *out = (WArray *)w_as_ptr(out_v);
+    out->size = (int32_t)n2;
+    const double *ap = (const double *)a->slots + a->start;
+    double *op = (double *)out->slots + out->start;
+    int64_t i = 0;
+#if defined(__aarch64__) && defined(__ARM_FEATURE_COMPLEX)
+    double spair[2] = {sr, si};
+    float64x2_t sv = vld1q_f64(spair);
+    for (; i + 2 <= n2; i += 2) {
+        float64x2_t av = vld1q_f64(ap + i);
+        vst1q_f64(op + i, vcmlaq_rot90_f64(vcmlaq_f64(vdupq_n_f64(0.0), av, sv), av, sv));
+    }
+#endif
+    for (; i < n2; i += 2) {
+        double ar = ap[i], ai = ap[i + 1];
+        op[i] = ar * sr - ai * si;
+        op[i + 1] = ar * si + ai * sr;
+    }
+    return out_v;
+}
+
+/* ---------------------------------------------------------------------
  * BLAS bridge — Apple Accelerate framework
  *
  * Provides direct cblas_sgemm / cblas_dgemm dispatch for f32[] / f64[]

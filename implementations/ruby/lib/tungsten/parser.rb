@@ -410,6 +410,20 @@ module Tungsten
 
           unexpected unless allow_ops
 
+          if compound_call_target?(exp)
+            # `h[k] += v` / `obj.attr += v` — desugar to the read-op-write
+            # call pair, mirroring the plain `=` branch above. The receiver
+            # and index subtrees are shared between the read and the write,
+            # so they evaluate twice (the compiled engine does the same;
+            # the stage interpreter evaluates them once in total).
+            op = @token.type.to_s.chop.to_sym
+            next_token_skip_whitespace
+            value = parse_assignment_no_control
+            exp = build_compound_call_assign(exp, op, value)
+            allow_ops = true
+            next
+          end
+
           break unless exp.can_assign?
 
           if exp.is_a?(Path)
@@ -912,13 +926,13 @@ module Tungsten
 
           atomic = Call.new(atomic, "[]", args)
         when :"++"
-          break unless atomic.can_assign?
+          break unless atomic.can_assign? || compound_call_target?(atomic)
           next_token
-          atomic = AssignOp.new(atomic, :+, Int.new(1))
+          atomic = increment_node(atomic, :+)
         when :"--"
-          break unless atomic.can_assign?
+          break unless atomic.can_assign? || compound_call_target?(atomic)
           next_token
-          atomic = AssignOp.new(atomic, :-, Int.new(1))
+          atomic = increment_node(atomic, :-)
         when :SUPERSCRIPT
           exp_str = @token.value
           digits = exp_str.chars.map { |c| Tungsten::Units::SUPERSCRIPT_DIGITS[c] || c }.join
@@ -3214,6 +3228,46 @@ module Tungsten
       end
 
       node
+    end
+
+    # A call expression that can take compound assignment (`+=`, `++`, …):
+    # a subscript read (`h[k]`) or a no-arg getter with a receiver
+    # (`obj.attr`). Bare-name calls stay on the local-variable path, and
+    # `?`/`!` methods are not assignable.
+    def compound_call_target?(node)
+      node.is_a?(Call) && node.obj && node.block.nil? &&
+        (node.name == "[]" || (node.args.empty? && !node.name.to_s.match?(/[?!]\z/)))
+    end
+
+    # `h[k] op= v` → `h.[]=(k, h[k] op v)` and `o.attr op= v` →
+    # `o.attr=(o.attr op v)` — the same shapes the `=` branch of
+    # parse_assignment builds for plain subscript/setter assigns.
+    def build_compound_call_assign(exp, op, value)
+      if exp.name == "[]"
+        read = Call.new(exp.obj, "[]", exp.args.dup)
+        Call.new(exp.obj, "[]=", exp.args + [ combined_op_value(read, op, value) ])
+      else
+        read = Call.new(exp.obj, exp.name.to_s, [])
+        Call.new(exp.obj, "#{exp.name}=", [ combined_op_value(read, op, value) ])
+      end
+    end
+
+    def combined_op_value(read, op, value)
+      case op
+      when :"||" then Or.new(read, value)
+      when :"&&" then And.new(read, value)
+      else BinaryOp.new(read, op, value)
+      end
+    end
+
+    # Postfix `++` / `--`: locals and bare names keep the AssignOp shape;
+    # subscript/setter targets desugar like the compound operators.
+    def increment_node(target, op)
+      if compound_call_target?(target)
+        build_compound_call_assign(target, op, Int.new(1))
+      else
+        AssignOp.new(target, op, Int.new(1))
+      end
     end
 
     def push_var_name(name)

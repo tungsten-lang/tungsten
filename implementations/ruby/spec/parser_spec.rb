@@ -564,6 +564,59 @@ module Tungsten::AST
       expect(result.obj.name).to eq("commands")
     end
 
+    it "parses compound assignment onto a subscript as a read-op-write pair" do
+      result = described_class.parse(%(h["a"] += 1)).first
+      expect(result).to be_a(Call)
+      expect(result.name).to eq("[]=")
+      expect(result.args.length).to eq(2)
+      combined = result.args.last
+      expect(combined).to be_a(BinaryOp)
+      expect(combined.operator).to eq(:+)
+      expect(combined.right).to eq(1.int)
+      read = combined.left
+      expect(read).to be_a(Call)
+      expect(read.name).to eq("[]")
+      expect(read.obj).to eq(result.obj)
+      expect(read.args.first).to eq(result.args.first)
+    end
+
+    it "parses ++ and -- onto a subscript" do
+      result = described_class.parse("counts[3]++").first
+      expect(result).to be_a(Call)
+      expect(result.name).to eq("[]=")
+      combined = result.args.last
+      expect(combined).to be_a(BinaryOp)
+      expect(combined.operator).to eq(:+)
+      expect(combined.right).to eq(1.int)
+
+      result = described_class.parse("counts[3]--").first
+      expect(result.name).to eq("[]=")
+      expect(result.args.last.operator).to eq(:-)
+    end
+
+    it "parses compound assignment and ++ onto a setter target" do
+      result = described_class.parse("obj.count += 2").first
+      expect(result).to be_a(Call)
+      expect(result.name).to eq("count=")
+      combined = result.args.first
+      expect(combined).to be_a(BinaryOp)
+      expect(combined.operator).to eq(:+)
+      expect(combined.left).to be_a(Call)
+      expect(combined.left.name).to eq("count")
+      expect(combined.left.obj).to eq(result.obj)
+
+      result = described_class.parse("obj.count++").first
+      expect(result.name).to eq("count=")
+      expect(result.args.first.right).to eq(1.int)
+    end
+
+    it "parses ||= onto a subscript as an Or write-back" do
+      result = described_class.parse(%(h["k"] ||= 5)).first
+      expect(result).to be_a(Call)
+      expect(result.name).to eq("[]=")
+      expect(result.args.last).to be_a(Or)
+    end
+
     it "parses spaced keyword args after positional args" do
       result = described_class.parse("middleware.use Middleware:Session, store: config.session_store").first
       expect(result).to be_a(Call)

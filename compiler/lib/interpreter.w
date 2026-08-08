@@ -1971,6 +1971,18 @@ use target
       dispatch_method(recv, "\[]=", [idx, result], nil, env)
       return result
 
+    # `obj.attr += v` — a no-arg getter call with a receiver. Read through
+    # the getter, apply the operator, write back through the `attr=` setter,
+    # matching the compiled engine (which already lowered this form).
+    if ast_kind(target) == :call && ast_get(target, :receiver) != nil
+      target_args = ast_get(target, :args)
+      if target_args == nil || target_args.size == 0
+        recv = evaluate(ast_get(target, :receiver), env)
+        old = dispatch_method(recv, ast_get(target, :name), [], nil, env)
+        result = apply_compound_op(op, old, new_val)
+        dispatch_method(recv, ast_get(target, :name) + "=", [result], nil, env)
+        return result
+
     raise "Invalid compound assignment target"
 
   -> apply_compound_op(op, left, right)

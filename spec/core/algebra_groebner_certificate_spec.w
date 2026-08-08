@@ -101,3 +101,39 @@ groebner_certificate_check("zero.basis",
 zero_membership = zero.membership_certificate(R.zero)
 groebner_certificate_check("zero.membership",
                             zero_membership.verified?)
+
+# Extension-field coefficients are already normalized field elements.  They
+# must not be embedded through the prime subfield again while making labeled
+# remainders monic (in F_4 the packed element 2 would otherwise coerce to 0).
+F4 = FiniteField.extension(2, 2)
+R4 = PolynomialRing.new([:u, :v], F4, :grevlex)
+u4, v4 = R4.generators
+a4 = F4.generator
+a4_plus_one = F4.add(a4, F4.one)
+scaled_u = R4.monomial_raw(a4_plus_one, [1, 0]) + R4.one
+extension_initial = Ideal.new(
+  [scaled_u]).certified_groebner_basis
+groebner_certificate_check("extension.initial_scale_certified",
+                            extension_initial.certified?)
+groebner_certificate_check("extension.initial_scale_monic",
+                            F4.equal?(
+                              extension_initial[0].leading_coefficient,
+                              F4.one))
+
+# S(u^2 + a v, u v + 1) = a v^2 - u has an extension-valued leading
+# coefficient, exercising the later S-pair normalization path as well.
+a4_v = R4.monomial_raw(a4, [0, 1])
+extension_pairs = Ideal.new([
+  u4**2 + a4_v,
+  u4 * v4 + R4.one
+]).certified_groebner_basis
+groebner_certificate_check("extension.s_pair_scale_certified",
+                            extension_pairs.certified?)
+groebner_certificate_check("extension.s_pair_present",
+                            extension_pairs.certificate.
+                              s_pair_reductions.size > 0)
+groebner_certificate_check("extension.s_pair_basis_monic",
+                            extension_pairs.basis.all? ->
+                              F4.equal?(
+                                item.leading_coefficient,
+                                F4.one))

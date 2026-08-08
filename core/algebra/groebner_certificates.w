@@ -344,8 +344,10 @@ use core/algebra/groebner
           scale = @ring.field.divide(
             @ring.field.one,
             remainder.leading_coefficient)
-          multiplier = @ring.constant(scale)
-          remainder = remainder*scale
+          multiplier = @ring.monomial_raw(
+            scale, @ring.zero_exponents)
+          remainder = remainder.monomial_multiply_raw(
+            @ring.zero_exponents, scale)
           representation = (
             GroebnerProofArithmetic.scale_representation(
               representation, multiplier))
@@ -403,8 +405,10 @@ use core/algebra/groebner
             scale = @ring.field.divide(
               @ring.field.one,
               remainder.leading_coefficient)
-            multiplier = @ring.constant(scale)
-            remainder = remainder*scale
+            multiplier = @ring.monomial_raw(
+              scale, @ring.zero_exponents)
+            remainder = remainder.monomial_multiply_raw(
+              @ring.zero_exponents, scale)
             representation = (
               GroebnerProofArithmetic.scale_representation(
                 representation, multiplier))

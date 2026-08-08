@@ -251,6 +251,14 @@
   -> generators
     @generators
 
+  -> fresh_auxiliary_name(stem)
+    candidate = stem.to_sym
+    suffix = 0
+    while @ring.index_of(candidate) != nil
+      suffix += 1
+      candidate = (stem + "_" + suffix.to_s).to_sym
+    candidate
+
   -> .zero(ring)
     Ideal.new([ring.zero])
 
@@ -295,6 +303,63 @@
     raise "cannot add ideals from different rings" if other.ring != @ring
     Ideal.new(@generators + other.source_generators)
 
+  -> product(other)
+    if other.class_name != "Ideal"
+      raise "ideal product needs another Ideal"
+    if other.ring != @ring
+      raise "cannot multiply ideals from different rings"
+    return Ideal.zero(@ring) if zero? || other.zero?
+    return other if unit?
+    return self if other.unit?
+    products = []
+    @generators.each -> (left)
+      other.source_generators.each -> (right)
+        products.push(left * right)
+    Ideal.new(products)
+
+  -> *(other)
+    product(other)
+
+  # Scheme-theoretic union: I ∩ J.  In R[t], elimination from
+  #
+  #   t I + (1 - t) J
+  #
+  # recovers the intersection in R.  The auxiliary variable is placed in the
+  # eliminating block, so the result does not depend on the caller's order
+  # being lexicographic.
+  -> intersect(other)
+    if other.class_name != "Ideal"
+      raise "ideal intersection needs another Ideal"
+    if other.ring != @ring
+      raise "cannot intersect ideals from different rings"
+    return Ideal.zero(@ring) if zero? || other.zero?
+    return other if unit?
+    return self if other.unit?
+
+    tagged_names = [fresh_auxiliary_name("__intersection_t")]
+    @ring.names.each -> tagged_names.push(item)
+    tagged = PolynomialRing.new(
+      tagged_names, @ring.field,
+      MonomialOrder.product(1, :lex, @ring.order))
+    t = tagged.generator(0)
+    one_minus_t = tagged.one - t
+    lifted = []
+    @generators.each ->
+      lifted.push(t * item.lift_variables(1, tagged))
+    other.source_generators.each ->
+      lifted.push(one_minus_t * item.lift_variables(1, tagged))
+
+    eliminated = Ideal.new(lifted).eliminate(1)
+    return Ideal.unit(@ring) if eliminated.unit?
+    return Ideal.zero(@ring) if eliminated.zero?
+    rebound = []
+    eliminated.source_generators.each ->
+      rebound.push(item.rename_into(@ring))
+    Ideal.new(rebound)
+
+  -> intersection(other)
+    intersect(other)
+
   -> ==/1
     self.eql?(@1)
 
@@ -336,16 +401,59 @@
     return Ideal.zero(remaining_ring) if kept.size == 0
     Ideal.new(kept)
 
-  # Colon / saturation I : f^∞ = { g | ∃k. g f^k ∈ I }.  Computed from a
-  # Gröbner basis of I + ⟨t f - 1⟩ by eliminating the auxiliary tag t under a
-  # product order that puts t first (Cox–Little–O'Shea, §4.4).
-  -> colon(element)
+  # Ordinary principal ideal quotient I : f = { g | g f ∈ I }.  Since
+  # I ∩ (f) = f (I : f) in a polynomial domain, compute the intersection and
+  # divide its generators exactly by f.
+  -> principal_quotient(element)
     f = @ring.coerce(element)
     return Ideal.unit(@ring) if unit?
-    if f.zero?
-      return contains?(@ring.zero) ? Ideal.unit(@ring) : Ideal.zero(@ring)
-    return self if f.constant? && !f.zero?
-    tagged_names = [("__t").to_sym]
+    return Ideal.unit(@ring) if f.zero?
+    return self if f.constant?
+    return Ideal.zero(@ring) if zero?
+
+    common = intersect(Ideal.new([f]))
+    return Ideal.zero(@ring) if common.zero?
+    quotients = []
+    common.basis.each -> (generator)
+      division = generator.divmod(f)
+      if !division[1].zero?
+        raise "principal ideal quotient intersection was not divisible"
+      quotients.push(division[0])
+    return Ideal.zero(@ring) if quotients.size == 0
+    Ideal.new(quotients)
+
+  # Ordinary quotient by J = (f_1, ..., f_r):
+  # I : J = intersection_i (I : f_i).
+  -> ideal_quotient(other)
+    if other.class_name != "Ideal"
+      raise "ideal quotient needs another Ideal"
+    if other.ring != @ring
+      raise "cannot quotient by an ideal from a different ring"
+    return Ideal.unit(@ring) if other.zero?
+    return self if other.unit?
+    result = nil
+    other.source_generators.each ->
+      component = principal_quotient(item)
+      result = result == nil ? component : result.intersect(component)
+      return result if result.zero?
+    result == nil ? Ideal.unit(@ring) : result
+
+  -> colon(element)
+    return ideal_quotient(element) if element.class_name == "Ideal"
+    principal_quotient(element)
+
+  -> quotient(element)
+    colon(element)
+
+  # Principal saturation I : f^∞ = { g | some g f^k lies in I }.  Computed
+  # from a Gröbner basis of I + <t f - 1> by eliminating the auxiliary tag t
+  # under a product order that puts t first (Cox--Little--O'Shea, section 4.4).
+  -> principal_saturation(element)
+    f = @ring.coerce(element)
+    return Ideal.unit(@ring) if unit?
+    return Ideal.unit(@ring) if f.zero?
+    return self if f.constant?
+    tagged_names = [fresh_auxiliary_name("__t")]
     @ring.names.each -> tagged_names.push(item)
     tagged = PolynomialRing.new(
       tagged_names, @ring.field, MonomialOrder.product(1, :lex, @ring.order))
@@ -363,21 +471,45 @@
   # Saturation I : f^∞ = ∪_k (I : f^k).  The single tagged construction
   # I + ⟨t f - 1⟩ eliminates to I : f^∞ (not merely I : f).
   -> saturate(element)
-    colon(element)
+    return saturate_ideal(element) if element.class_name == "Ideal"
+    principal_saturation(element)
 
   -> saturation(element)
     saturate(element)
 
-  # Saturate by every coordinate: I : (x0,...,x_{n-1})^∞.  A homogeneous ideal
-  # cuts out the empty projective scheme iff this saturation is the unit ideal.
+  # Saturation by a finitely generated ideal J = (f_1, ..., f_r):
+  #
+  #   I : J^∞ = intersection_i (I : f_i^∞).
+  #
+  # One inclusion is immediate.  For the converse, if h f_i^n_i lies in I
+  # for every i, every sufficiently high-degree monomial in the f_i contains
+  # one of those powers, so h J^N lies in I.  This also shows that the result
+  # is independent of the chosen generating set.
+  -> saturate_ideal(other)
+    if other.class_name != "Ideal"
+      raise "ideal saturation needs another Ideal"
+    if other.ring != @ring
+      raise "cannot saturate by an ideal from a different ring"
+    return Ideal.unit(@ring) if other.zero?
+    return self if other.unit?
+
+    result = nil
+    other.source_generators.each ->
+      component = principal_saturation(item)
+      result = result == nil ? component : result.intersect(component)
+      return result if result.zero?
+    result == nil ? Ideal.unit(@ring) : result
+
+  # True irrelevant-ideal saturation I : (x0,...,x_{n-1})^∞.  Sequential
+  # principal saturation would instead saturate by the product
+  # x0...x_{n-1} and can incorrectly delete components lying on individual
+  # coordinate charts.
+  # A homogeneous ideal cuts out the empty projective scheme iff this
+  # saturation is the unit ideal.
   -> saturate_irrelevant
-    result = self
-    i = 0
-    while i < @ring.arity
-      result = result.saturate(@ring.generator(i))
-      return result if result.unit?
-      i += 1
-    result
+    coordinates = []
+    @ring.generators.each -> coordinates.push(item)
+    saturate_ideal(Ideal.new(coordinates))
 
   -> to_s
     pieces = []

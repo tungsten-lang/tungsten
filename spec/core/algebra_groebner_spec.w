@@ -74,6 +74,123 @@ check("saturation.contains_y", saturated.contains?(y), true)
 check("saturation.excludes_x", saturated.contains?(x), false)
 check("saturation.basis", saturated.basis[0], y)
 
+# Ideal intersection: (x) ∩ (y) = (x y), including neutral/absorbing edges.
+x_ideal = Ideal.new([x])
+y_ideal = Ideal.new([y])
+axes_union = x_ideal.intersection(y_ideal)
+check("intersection.contains_product", axes_union.contains?(x * y), true)
+check("intersection.excludes_x", axes_union.contains?(x), false)
+check("intersection.excludes_y", axes_union.contains?(y), false)
+check("intersection.basis", axes_union.basis[0], x * y)
+check("intersection.unit_neutral", x_ideal.intersect(Ideal.unit(ring)), x_ideal)
+check("intersection.zero_absorbing", x_ideal.intersect(zero), zero)
+
+# Products distribute over the displayed generators.
+coordinate_ideal = Ideal.new([x, y])
+coordinate_square = coordinate_ideal
+coordinate_square = coordinate_square * coordinate_ideal
+check("product.contains_x2", coordinate_square.contains?(x**2), true)
+check("product.contains_xy", coordinate_square.contains?(x * y), true)
+check("product.contains_y2", coordinate_square.contains?(y**2), true)
+check("product.excludes_x", coordinate_square.contains?(x), false)
+
+# Saturation by J=(x,y) is the intersection of the two principal saturations.
+# It is not sequential saturation by x and then y: for I=(xy), the true result
+# remains (xy), while sequential saturation would incorrectly return (1).
+by_coordinates = product_ideal.saturate(coordinate_ideal)
+check("ideal_saturation.contains_product",
+      by_coordinates.contains?(x * y), true)
+check("ideal_saturation.excludes_x", by_coordinates.contains?(x), false)
+check("ideal_saturation.excludes_y", by_coordinates.contains?(y), false)
+check("ideal_saturation.basis", by_coordinates.basis[0], x * y)
+
+# The result depends only on J, not its displayed generators.
+same_coordinates = Ideal.new([x, x + y])
+check("ideal_saturation.generator_invariant",
+      product_ideal.saturate(same_coordinates), by_coordinates)
+
+# Irrelevant saturation removes an embedded component at the origin but keeps
+# projective components visible in a coordinate chart.
+embedded_origin = Ideal.new([x**2, x * y])
+check("principal_quotient.differs_from_saturation",
+      embedded_origin.colon(x), coordinate_ideal)
+check("principal_saturation.reaches_unit",
+      embedded_origin.saturate(x).unit?, true)
+check("ideal_quotient.recovers_factor",
+      embedded_origin.colon(coordinate_ideal), x_ideal)
+check("ideal_quotient.generator_invariant",
+      embedded_origin.colon(same_coordinates), x_ideal)
+check("ideal_quotient.product_inverse",
+      (x_ideal * coordinate_ideal).quotient(coordinate_ideal), x_ideal)
+check("ideal_quotient.zero_denominator",
+      x_ideal.quotient(zero).unit?, true)
+check("ideal_quotient.unit_denominator",
+      x_ideal.quotient(Ideal.unit(ring)), x_ideal)
+check("irrelevant_saturation.removes_embedded_origin",
+      embedded_origin.saturate_irrelevant, x_ideal)
+check("irrelevant_saturation.keeps_axes",
+      product_ideal.saturate_irrelevant, product_ideal)
+check("irrelevant_saturation.empty_projective_scheme",
+      coordinate_ideal.saturate_irrelevant.unit?, true)
+check("irrelevant_saturation.zero_stays_zero",
+      zero.saturate_irrelevant.zero?, true)
+
+intersection_mismatch = false
+begin
+  x_ideal.intersection(Ideal.new([other_ring.generator(0)]))
+rescue error
+  intersection_mismatch = error.to_s.include?("different rings")
+check("intersection.ring_mismatch_raises", intersection_mismatch, true)
+
+saturation_mismatch = false
+begin
+  x_ideal.saturate(Ideal.new([other_ring.generator(0)]))
+rescue error
+  saturation_mismatch = error.to_s.include?("different ring")
+check("ideal_saturation.ring_mismatch_raises", saturation_mismatch, true)
+
+product_mismatch = false
+begin
+  x_ideal.product(Ideal.new([other_ring.generator(0)]))
+rescue error
+  product_mismatch = error.to_s.include?("different rings")
+check("product.ring_mismatch_raises", product_mismatch, true)
+
+quotient_mismatch = false
+begin
+  x_ideal.quotient(Ideal.new([other_ring.generator(0)]))
+rescue error
+  quotient_mismatch = error.to_s.include?("different ring")
+check("ideal_quotient.ring_mismatch_raises", quotient_mismatch, true)
+
+# Auxiliary elimination tags are fresh even when users choose the internal
+# stem names as coordinates.
+collision_ring = PolynomialRing.new(
+  ["__t".to_sym, "__intersection_t".to_sym],
+  RationalField.new, :lex)
+tag_x, tag_y = collision_ring.generators
+tag_product = Ideal.new([tag_x * tag_y])
+check("auxiliary_name.intersection_collision",
+      Ideal.new([tag_x]).intersect(Ideal.new([tag_y])), tag_product)
+check("auxiliary_name.saturation_collision",
+      tag_product.saturate(tag_x), Ideal.new([tag_y]))
+
+# The outer eliminating block composes with a non-lex caller order.
+grev_ring = PolynomialRing.new(
+  [:a, :b], RationalField.new, :grevlex)
+grev_a, grev_b = grev_ring.generators
+grev_a_ideal = Ideal.new([grev_a])
+grev_b_ideal = Ideal.new([grev_b])
+check("grevlex.intersection",
+      grev_a_ideal.intersect(grev_b_ideal),
+      Ideal.new([grev_a * grev_b]))
+grev_embedded = Ideal.new([grev_a**2, grev_a * grev_b])
+check("grevlex.quotient",
+      grev_embedded.colon(grev_a),
+      Ideal.new([grev_a, grev_b]))
+check("grevlex.irrelevant_saturation",
+      grev_embedded.saturate_irrelevant, grev_a_ideal)
+
 # Elimination of the first variable from ⟨y - x^2⟩ is the zero ideal in k[y].
 parabola = Ideal.new([y - x * x])
 eliminated = parabola.eliminate(1)

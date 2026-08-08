@@ -568,7 +568,7 @@ operator dispatch. Enabling it requires a real `use algebra` (or
 | Finite étale algebras | Certified squarefree quotients `K[t]/(f)`; exact quotient arithmetic; units and zero divisors; multiplication-matrix trace/norm; supplied CRT components, primitive idempotents, component maps, reconstruction, degree-generic integral closures, prime ideals and finite residue fields above rational primes, exact real-place sign maps without assuming irreducible components, replay-certified product S-class 2-torsion proofs, and supplied product S-unit square classes modulo diagonal rational S-units | Automatic product unit discovery, full product class-group structures, and complex embeddings with selected numerical values are not implemented |
 | Integral orders | Degree-generic monogenic and arbitrary-lattice ℤ-orders; exact membership, discriminant, units, trace, and norm, including bound-certified modular reconstruction for larger integer norm matrices; exact Frobenius-Gram LLL with replay certificates plus explicitly bounded floating producer reduction; Dedekind local index certificates; Pohst--Zassenhaus Round 2 p-maximal overorders and global maximal-order certificates; certified p-radicals, prime ideals, residue maps, ramification indices, and residue degrees; canonical full-rank HNF integral ideals with sum, product, powers, norm, containment, prime valuations, certified factorization, and bounded exact principal-generator search; invertible fractional ideals as finite signed prime valuations, including principal fractional ideals and exact rational norms; product-order finite S-place data; unconditional certificates for `Cl(O_K,S)[2] = 0` from Minkowski factor bases and odd principal-relation quotients; checkpointable relation witnesses and certified transfer through an exact isomorphic field model | Full class-group structures and algorithms that discover unit-group bases are not implemented. Supplied number-field S-unit square-class bases can be certified. Fractional ideals currently use their certified prime-factor representation rather than an explicit fractional lattice. Discriminant factorization, Round 2 steps, relation search, finite-field factorization, residue-generator search, and ideal factorization are resource-bounded and raise `unknown` on exhaustion |
 | Polynomials | Sparse sorted terms; merge-multiply; dense univariate quotient arithmetic; `lex`/`grlex`/`grevlex`/product orders; division, content, multivariate primitive GCD, subresultant resultant, discriminant; exact factorization over ℚ and arbitrary finite fields as **unit × monic irreducibles**, with replay certificates; exact Sturm counts, Cauchy bounds, and certified isolation of every distinct real root | Kronecker and deterministic equal-degree factor search, Gröbner elimination, and root-interval splitting have explicit resource limits; complex-root isolation, complex algebraic-number arithmetic, and multivariate factorization are not implemented |
-| Ideals | Reduced Gröbner bases, membership, sum, equality; principal **saturation** `I : f^∞`; **elimination** ideals under eliminating orders; representation-carrying Buchberger production with exact reduction, ideal-membership, source-containment, and S-pair witnesses | The Buchberger criterion is named as a trusted theorem import around exact replayed identities. Ideal saturation by a non-principal ideal (full irrelevant ideal) is not a single primitive; F4/F5 are not implemented |
+| Ideals | Reduced Gröbner bases, membership, sum, product, equality, and intersection; ordinary principal/finitely generated quotients `I : J`; principal and finitely generated ideal **saturation** `I : J^∞`; correct irrelevant-ideal saturation; **elimination** ideals under eliminating orders; representation-carrying Buchberger production with exact reduction, ideal-membership, source-containment, and S-pair witnesses | The Buchberger and elimination criteria are named trusted theorem imports around exact replayed identities. F4/F5 are not implemented |
 | Projective geometry | Arbitrary `ℙⁿ` over ℚ, packed or structured finite fields, simple extensions, and exact number fields; normalized points, affine charts, homogenize/dehomogenize; over ℚ, certified integral homogeneous maps, Nullstellensatz height-defect bounds, exact forward orbits, canonical dynamical-height enclosures, and exact height-to-Mordell--Weil-index candidate bounds for degree-four duplication maps | Automatic production of Nullstellensatz witnesses, Kummer duplication maps, uniform nontorsion height lower bounds, and non-rational dynamical heights are not implemented; `Curve` currently models projective planes, even though `ProjectiveSpace` itself has arbitrary dimension |
 | Plane curves | Homogeneity, membership, singular-locus ideal, chart-based nonsingularity, smooth plane genus, Jacobian dimension, finite exact local normalization jets, certified one-point `C_ab` normal forms with exact `L(n infinity)` bases, prime-field function subspaces, evaluation kernels, multiplication/preimage, rational and line-presented closed-place divisors, Khuri--Makdisi AddFlip/sum/difference, deterministic affine moving zeros, zero/equality tests, scalar multiplication, exact element orders, and finite-group nondivisibility certificates | Completed local normalization rings, global normalization morphisms, extension-field subspaces beyond exact closed-place evaluation, multiplicity/jet divisors, rational Kummer coordinates and duplication maps for general Jacobians, Jacobian local-height corrections, and a general plane-curve Jacobian API are not implemented |
 | Local plane geometry | Exact local multiplicity and tangent cones; rational, algebraic, and vertical tangent-direction packets; lower Newton polygons and dense exact Newton--Hensel lifting; recursive repeated rational tangents; rational and algebraic Puiseux sheet packets; primitive parameterization jets; replayed source substitution and complete Newton-factor covers; theorem-labelled root-of-unity orbit branch counts; exact bivariate derivative resultants, polar intersections, Milnor numbers, general reduced delta invariants, and local intersection multiplicities | Repeated higher-degree algebraic factors, component extraction, completed local rings, semigroups/conductors, and analytic branch cuts remain missing. The Newton--Puiseux orbit, Milnor/delta, polar, and branch-valuation formulas are explicit trusted theorem imports; precision and unsupported cases raise |
@@ -2321,12 +2321,32 @@ instead of returning a partial factorization as a certified ideal.
 I = Ideal.new([x * y])
 I.saturate(x)          # (y)
 
+X = Ideal.new([x])
+Y = Ideal.new([y])
+X.intersection(Y)      # (x y)
+X * Ideal.new([x, y])  # (x^2, x y)
+
+embedded = Ideal.new([x**2, x*y])
+embedded.colon(x)      # ordinary quotient: (x, y)
+embedded.saturate(x)   # saturation: (1)
+
+irrelevant = Ideal.new([x, y])
+I.saturate(irrelevant) # (x y), not sequential saturation by x then y
+I.saturate_irrelevant  # the same true irrelevant-ideal saturation
+
 J = Ideal.new([u + v - 1, u - v])   # lex ring in (u, v)
 J.eliminate(1)         # ideal in k[v]
 ```
 
 Elimination is correct when the monomial order eliminates the first `count`
 variables (lex with those variables first, or a matching product order).
+Intersection is computed by eliminating `t` from
+`t I + (1-t) J`. Ordinary quotient uses
+`I : J = intersection_i (I : f_i)` and obtains `I : f` by dividing
+`I intersection (f)` by `f`. For `J=(f_1,...,f_r)`, saturation uses the identity
+`I : J^∞ = intersection_i (I : f_i^∞)`. This is independent of the displayed
+generators. Sequential principal saturation instead computes saturation by the
+product of the generators and is generally different.
 
 For calculations that need an auditable ideal proof rather than only a
 computed basis, use the representation-carrying producer:

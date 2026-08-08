@@ -362,16 +362,6 @@ WValue w_tensor_rank(WValue t_wv);
 WValue w_tensor_view_f32(WValue t_wv, WValue offset_wv, WValue shape_wv);
 WValue w_tensor_slice0_f32(WValue t_wv, WValue start_wv, WValue stop_wv);
 
-/* ---- Hash functions ---- */
-typedef uint64_t (*WHashFn)(const uint8_t *data, size_t len);
-
-#define W_HASH_WYHASH  0
-#define W_HASH_SIP24   1
-#define W_HASH_CRC64   2
-#define W_HASH_SHA64   3
-#define W_HASH_AES     4
-#define W_HASH_XXHASH  5
-
 /* ---- Hash table ---- */
 #define W_HASH_FLAG_FROZEN  (1u << 0)
 #define W_HASH_FLAG_POOLED  (1u << 1)  /* set when hash is in the recycle pool */

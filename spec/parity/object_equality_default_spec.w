@@ -1,4 +1,3 @@
-## parity xfail == on two distinct instances of a user class with equal fields is true interpreted (structural) but false compiled (identity)
 # Classes: default == between instances.
 #
 # Cross-engine parity spec (scripts/parity.sh).

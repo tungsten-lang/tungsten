@@ -1,11 +1,6 @@
-# Physics module spec — constants, ideal gas EOS, Euler systems, and the
-# Lax–Friedrichs/minmod blocks with their verified-property predicates.
-#
-# The block formulas mirror Lanyon's formally verified CompressibleEuler C
-# implementations; the identities checked here (wave-sum, flux-jump,
-# reconstruction consistency) are the same properties the Lean proofs
-# certify for the C. Cross-validation against the C binaries themselves
-# lives in ~/math/lanyonai/compressible-euler/validation.
+# Physics model spec — constants, ideal-gas EOS, Euler systems, and numerical
+# Lax-Friedrichs/minmod identities. These are repository regression checks,
+# not formal proof artifacts.
 #
 # Runs in both engines:
 #   bin/tungsten spec/core/physics_spec.w
@@ -76,6 +71,26 @@ while k < 5
 physics_check("ce.primitive_roundtrip", ok)
 physics_check("ce.state_valid", ce.state_valid?(u))
 physics_check("ce.pressure", close?(ce.pressure(u), ~0.7))
+physics_check("ce.negative_internal_energy_invalid",
+  !ce.state_valid?([~1.0, ~10.0, ~0.0, ~0.0, ~1.0]))
+physics_check("ce.wrong_arity_invalid", !ce.state_valid?([~1.0, ~1.0]))
+not_a_number = ~1.0e999 - ~1.0e999
+physics_check("ce.nonfinite_state_invalid",
+  !ce.state_valid?([~1.0, not_a_number, ~0.0, ~0.0, ~3.0]))
+
+bad_gamma_rejected = false
+begin
+  Physics.compressible_euler(1, ~1.0)
+rescue error
+  bad_gamma_rejected = error.to_s.include?("greater than one")
+physics_check("ce.bad_gamma_rejected", bad_gamma_rejected)
+
+overflow_state_rejected = false
+begin
+  ce.conserved([~1.0, ~1.0e308, ~0.0, ~0.0, ~1.0])
+rescue error
+  overflow_state_rejected = error.to_s.include?("admissible set")
+physics_check("ce.overflowed_conserved_rejected", overflow_state_rejected)
 
 # Wavespeed ordering: u_n - c < u_n < u_n + c in every direction.
 dir = 0
@@ -97,7 +112,7 @@ u2 = ie.conserved([~1.5, ~0.4, ~-0.2])
 physics_check("ie.pressure", close?(ie.pressure(u2), ~1.5 * ~4.0))
 physics_check("ie.sound_speed", close?(ie.sound_speed(u2), ~2.0))
 
-# -- Lax–Friedrichs blocks: the verified properties ----------------------------
+# -- Lax-Friedrichs numerical identities ------------------------------------
 
 ce1 = Physics.compressible_euler(1, 1.4)
 ul = ce1.conserved([~1.0, ~0.75, ~1.0])
@@ -107,6 +122,14 @@ physics_check("lf.waves_consistent", LaxFriedrichs.waves_consistent?(ce1, ul, 0)
 physics_check("lf.waves_valid", LaxFriedrichs.waves_valid?(ce1, ul, ur, 0))
 physics_check("lf.fluct_consistent", LaxFriedrichs.fluctuations_consistent?(ce1, ul, 0))
 physics_check("lf.flux_jump", LaxFriedrichs.fluctuations_valid?(ce1, ul, ur, 0))
+physics_check("lf.invalid_state_rejected",
+  !LaxFriedrichs.waves_valid?(ce1, [~1.0, ~10.0, ~1.0], ur, 0))
+physics_check("lf.nonfinite_state_rejected",
+  !LaxFriedrichs.waves_valid?(
+    ce1, [~1.0, not_a_number, ~3.0], ur, 0))
+infinity = ~1.0e999
+physics_check("lf.infinite_tolerance_rejected",
+  !LaxFriedrichs.waves_valid?(ce1, ul, ur, 0, infinity))
 
 # Explicit flux-jump identity: A- + A+ == F(ur) - F(ul), componentwise.
 left = LaxFriedrichs.left_fluctuation(ce1, ul, ur, 0)
@@ -139,10 +162,28 @@ physics_check("minmod.takes_smaller", close?(Minmod.slope(~0.5, ~2.0), ~0.5))
 physics_check("minmod.negative", close?(Minmod.slope(~-0.5, ~-2.0), ~-0.5))
 physics_check("minmod.left_consistent", Minmod.left_consistent?(ul))
 physics_check("minmod.right_consistent", Minmod.right_consistent?(ul))
+physics_check("minmod.infinite_tolerance_rejected",
+  !Minmod.left_consistent?(ul, infinity))
+physics_check("minmod.negative_tolerance_rejected",
+  !Minmod.right_consistent?(ul, ~-1.0))
 
 rec_l = Minmod.left([~1.0, ~1.0, ~1.0], [~2.0, ~2.0, ~2.0], [~4.0, ~4.0, ~4.0])
 rec_r = Minmod.right([~1.0, ~1.0, ~1.0], [~2.0, ~2.0, ~2.0], [~4.0, ~4.0, ~4.0])
 physics_check("minmod.left_edge", close?(rec_l[0], ~1.5))
 physics_check("minmod.right_edge", close?(rec_r[0], ~2.5))
+
+minmod_shape_rejected = false
+begin
+  Minmod.left([~1.0], [~1.0, ~2.0], [~1.0, ~2.0])
+rescue error
+  minmod_shape_rejected = error.to_s.include?("equal nonempty Arrays")
+physics_check("minmod.shape_rejected", minmod_shape_rejected)
+
+minmod_nonfinite_rejected = false
+begin
+  Minmod.slope(not_a_number, ~1.0)
+rescue error
+  minmod_nonfinite_rejected = error.to_s.include?("finite numbers")
+physics_check("minmod.nonfinite_rejected", minmod_nonfinite_rejected)
 
 << "PHYSICS_SPEC_OK"

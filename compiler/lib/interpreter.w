@@ -2874,6 +2874,12 @@ use target
           if op == :EQ
             return result
           return result == true ? false : true
+        # Plain source objects use identity equality. Their interpreter
+        # representation is a metadata Hash, so falling through to Hash#==
+        # would compare fields structurally and diverge from native w_eq.
+        identical = wvalue_bits(left) == wvalue_bits(right)
+        return identical if op == :EQ
+        return !identical
     if op == :PLUS
       # Strict string `+` — only text concatenates with text; a String
       # mixed with anything else is a TypeError, mirroring runtime w_add.

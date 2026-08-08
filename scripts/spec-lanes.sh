@@ -440,6 +440,11 @@ compiled_specs=(
   spec/core/os_spec.w
   spec/core/path_spec.w
   spec/core/physics_finite_volume_spec.w
+  spec/core/physics_finite_volume_contract_spec.w
+  spec/core/physics_measurement_spec.w
+  spec/core/physics_experiment_spec.w
+  spec/core/physics_nonlinear_reference_spec.w
+  spec/core/physics_spec.w
   spec/core/physics_simulation_spec.w
   spec/core/plot_spec.w
   spec/core/plot3d_spec.w
@@ -685,6 +690,11 @@ interpreter_specs=(
   spec/core/object_spec.w
   spec/core/path_spec.w
   spec/core/physics_finite_volume_spec.w
+  spec/core/physics_finite_volume_contract_spec.w
+  spec/core/physics_measurement_spec.w
+  spec/core/physics_experiment_spec.w
+  spec/core/physics_nonlinear_reference_spec.w
+  spec/core/physics_spec.w
   spec/core/physics_simulation_spec.w
   spec/core/plot_spec.w
   spec/core/plot3d_spec.w
@@ -1106,7 +1116,6 @@ exclude_specs=(
   spec/core/metal_i64_buffer_spec.w
   spec/core/metal_metallib_spec.w
   spec/core/metal_mmap_buffer_spec.w
-  spec/core/physics_spec.w
   spec/core/plus_type_error_spec.w
   spec/core/polygon_lattice_spec.w
   spec/core/polyomino_spec.w

@@ -74,6 +74,51 @@ RSpec.describe "Advanced measurements and quantity semantics" do
       expect(a.components).to eq(random: 0.3, systematic: 0.4)
     end
 
+    it "propagates first-order uncertainty through arithmetic and powers" do
+      x = described_class.new(10, 1)
+      y = described_class.new(2, 0.2)
+
+      expect((x + y).uncertainty).to be_within(1e-12).of(Math.sqrt(1.04))
+      expect((x - y).uncertainty).to be_within(1e-12).of(Math.sqrt(1.04))
+      expect((x * y).uncertainty).to be_within(1e-12).of(Math.sqrt(8))
+      expect((x / y).uncertainty).to be_within(1e-12).of(Math.sqrt(0.5))
+      expect((x**2).uncertainty).to be_within(1e-12).of(20)
+      expect((x * x).uncertainty).to be_within(1e-12).of(20)
+      expect((x - x).uncertainty).to eq(0)
+      expect((x / x).uncertainty).to eq(0)
+
+      x.correlate(y, 1)
+      expect((x * y).uncertainty).to be_within(1e-12).of(4)
+    end
+
+    it "handles zero and identical-input propagation explicitly" do
+      zero = described_class.new(0, 0.25)
+      expect((zero**1).uncertainty).to eq(0.25)
+      expect((zero**2).uncertainty).to eq(0)
+      expect { zero**0.5 }.to raise_error(
+        ArgumentError, /uncertain zero/)
+      expect { zero / described_class.new(0, 0.1) }.to raise_error(
+        ZeroDivisionError, /division by zero/)
+      expect { zero / 0 }.to raise_error(ZeroDivisionError, /division by zero/)
+      expect { zero.correlate(zero, 1) }.to raise_error(
+        ArgumentError, /distinct Measurement/)
+    end
+
+    it "retains propagated multiplication uncertainty inside a Quantity" do
+      length = Tungsten::Quantity.new(
+        described_class.new(10, 1), Tungsten::Units.parse("m")
+      )
+      duration = Tungsten::Quantity.new(
+        described_class.new(2, 0.2), Tungsten::Units.parse("s")
+      )
+
+      result = length * duration
+      expect(result.value).to be_a(described_class)
+      expect(result.value.value).to eq(20)
+      expect(result.value.uncertainty).to be_within(1e-12).of(Math.sqrt(8))
+      expect(result.unit.to_s).to eq("m·s")
+    end
+
     it "offers seeded Monte Carlo propagation for nonlinear models" do
       input = described_class.new(2, 0.1)
       result = described_class.propagate(input, samples: 20_000, seed: 7) { |x| x**2 }

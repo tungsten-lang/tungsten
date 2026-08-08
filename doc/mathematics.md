@@ -37,6 +37,7 @@ of every theorem for which that claim might be useful.
 | Radial Mellin/Fourier identities | `use calculus`; `RadialMellinTransform` | [scientific-computing/calculus.md](scientific-computing/calculus.md) |
 | Finite graphs, Ramsey audits, binary and constant-norm codes | `use combinatorics`; `FiniteSimpleGraph`, `BinaryBlockCode` | [combinatorics.md](combinatorics.md) |
 | Euclidean ball volume and boundary area | `use geometry`; `EuclideanMeasure` | this guide |
+| Measurements, experimental GLS, gas dynamics, nonlinear PDE references | `use physics`; `Physics`, `Measurement`, `FiniteVolume` | [physics.md](physics.md) |
 | Arrays, tensors, linear algebra, optimization, ODEs | flat modules under `core/` | [scientific-computing/overview.md](scientific-computing/overview.md) |
 | SAT-backed finite certificates | `tungsten-wassat` producer + `tungsten-wrat` checker | [certified-mathematics.md](certified-mathematics.md) |
 | Hash-bound external proof artifacts | `ProofArtifactBundle` | [certified-mathematics.md](certified-mathematics.md) |

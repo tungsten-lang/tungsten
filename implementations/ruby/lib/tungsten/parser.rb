@@ -2144,7 +2144,9 @@ module Tungsten
 
       fused_and_parameters = @token.type?(:"&(") || @token.type?(:"<(")
       name = parse_method_name
-      arity = extract_arity(name)
+      # Only identifiers lexed with an explicit /N suffix are arity methods.
+      # The division operator's name is itself "/".
+      arity = @token.type?(:ID_WITH_ARITY) ? extract_arity(name) : nil
       base_name = arity ? name.to_s.split("/", 2)[0] : name
 
       next_token

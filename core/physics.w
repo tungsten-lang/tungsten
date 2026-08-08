@@ -1,29 +1,39 @@
-# Physics — physical constants, ideal-gas thermodynamics, Euler systems of
-# gas dynamics, and finite-volume machinery for solving them.
+# Physics — physical models, numerical solvers, and experimental data.
 #
-# Orchestrator for core/physics/ (module-split pattern; the use order is
-# the dependency chain):
+# One facade owns both previously divergent APIs:
 #
-#   constants       + Physics facade root; CODATA constants (Quantity + _si)
-#   ideal_gas       + IdealGas equation of state
-#   euler           + EulerSystem / CompressibleEuler / IsothermalEuler
-#   wave_solver     + LaxFriedrichs fluctuation solver, + Minmod limiter
-#   finite_volume   + FiniteVolume grids with native f64[] sweep kernels
-#   simulation      + EulerSimulation — dimensioned config, run loop, frames
+#   experimental    Measurement, observations, covariance, and constant GLS
+#   thermodynamics  physical constants and an ideal-gas equation of state
+#   hyperbolic PDE  Euler systems, Burgers references, wave solvers, and FV
 #
-# The Euler blocks mirror Lanyon's formally verified CompressibleEuler C
-# implementations (github.com/lanyonai/CompressibleEuler): the same state
-# layouts, fluxes, wavespeeds, Lax–Friedrichs wave/speed families,
-# fluctuations, minmod reconstructions, and validity predicates. The
-# project ~/math/lanyonai/compressible-euler cross-validates this module
-# against those C blocks line by line.
-#
-# Layer rule: Quantities (units of measurement) live at configuration and
-# reporting boundaries; every hot loop runs on raw f64[] typed arrays.
+# Selected constants, gas-law helpers, and simulation configuration accept
+# Quantities; experiment units are metadata and finite-volume hot loops use raw
+# SI f64[] storage. Repository checks are regression evidence, not formal proof
+# artifacts.
 
+use core/measurement
+use core/linalg
 use core/physics/constants
 use core/physics/ideal_gas
 use core/physics/euler
 use core/physics/wave_solver
+use core/physics/burgers
 use core/physics/finite_volume
+use core/physics/finite_volume_diagnostics
 use core/physics/simulation
+use core/physics/experiment
+
++ Physics
+  -> .observable(name, unit = nil, symbol = nil, description = nil)
+    PhysicalObservable.new(name, unit, symbol, description)
+
+  -> .observation(observable, measurement, run_id,
+                  captured_at = nil, metadata = nil)
+    PhysicalObservation.new(
+      observable, measurement, run_id, captured_at, metadata)
+
+  -> .dataset(observable, observations, covariance = nil)
+    ExperimentalDataset.new(observable, observations, covariance)
+
+  -> .fit_constant(dataset)
+    dataset.gls_mean

@@ -1272,6 +1272,18 @@ module Tungsten
 
       right = evaluate(node.right)
 
+      # Source-defined objects own their arithmetic operators just as they do
+      # in the self-hosted interpreter and native lowering. Ruby cannot apply
+      # primitive arithmetic directly to Runtime::WObject.
+      if left.is_a?(Runtime::WObject)
+        operator_name = {
+          :+ => "+", :- => "-", :* => "*", :/ => "/", :** => "**", :% => "%"
+        }[node.operator]
+        if operator_name && (method = left.w_class.lookup_method(operator_name))
+          return call_w_method(left, method, [right], call_node: node)
+        end
+      end
+
       case node.operator
       when :==  then adaptive_eq(numeric_lit_node?(node.left) || numeric_lit_node?(node.right), left, right)
       when :≈   then tungsten_approx_eq(left, right)

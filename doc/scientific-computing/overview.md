@@ -12,6 +12,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | `solve.w` / `optim.w` / `interpolate.w` | ODE / opt / interp |
 | `calculus.w` | Taylor jets, gradients/Jacobians/Hessians, adaptive quadrature |
 | `autodiff.w` | Dual + Tape |
+| `physics.w` | measurements/GLS, gas laws, Euler systems, Cartesian finite volume, diagnostics |
 | `blas.w` | Accelerate BLAS1/2/3 + vDSP |
 | `mlx.w` | MLX GPU opt-in: GEMM + elementwise + reduce + softmax + FFT + RNG |
 | `plot.w` | **Plot** sparklines |
@@ -40,4 +41,4 @@ Link gating (stage-1 rebuild): `@w_sparse_` → SparseBLAS+Solvers, `@w_tensor_`
 Large multi-module programs can hit a compiler SSA name-clash (`t0`); keep specs focused.
 
 Docs: `calculus.md`, `tensor-vs-array.md`, `wtensor.md`, `sparse.md`,
-`io.md` (TH5 honesty), `units.md`.
+`io.md` (TH5 honesty), `units.md`, [physics.md](../physics.md).

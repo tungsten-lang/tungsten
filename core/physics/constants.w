@@ -1,12 +1,12 @@
-# Physical constants (CODATA 2022) and the Physics facade root.
+# Selected physical constants, conventional standards, and gas references.
 #
 # First worker of core/physics: defines + Physics and carries no dependency
 # on any sibling worker (dispatch-shim role, per the module-split pattern).
 # Later workers reopen + Physics to add facade methods.
 #
-# Every constant is exposed twice:
+# Most dimensioned entries are exposed twice:
 #   Physics.boltzmann      -> Quantity (dimensioned, for config/report layers)
-#   Physics.boltzmann_si   -> raw ~f64 in SI base units (for numeric kernels)
+#   Physics.boltzmann_si   -> rounded raw ~f64 in SI base units (for kernels)
 #
 # Quantities must never enter a hot loop (float * quantity dies; compound
 # units heap-allocate) — cross to _si at the boundary, compute raw, and

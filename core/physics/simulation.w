@@ -2,10 +2,10 @@
 #
 # Configuration accepts units of measurement (Quantities) everywhere a
 # physical quantity appears — domain lengths in m/km, end time in s/ms,
-# thermal velocity in m/s, pressures in Pa/atm — and crosses to raw SI
-# f64 exactly once, at solver construction. Initial conditions are given
-# in primitive SI variables. Frames are captured as 8-bit quantized
-# fields ready for the Plot3D web viewer.
+# thermal velocity in m/s, pressures in Pa/atm — and converts configuration
+# values to raw SI f64 before solver construction. Initial-condition lambdas
+# return primitive SI arrays. Captured frames are 8-bit quantized fields for
+# the Plot3D web viewer, not lossless solver state.
 #
 #   sim = EulerSimulation.compressible(2)
 #     .titled("2D Riemann problem")
@@ -28,6 +28,10 @@
     EulerSimulation.new(:isothermal, dim)
 
   -> new(mode, dim)
+    if mode != :compressible && mode != :isothermal
+      raise "EulerSimulation: mode must be compressible or isothermal"
+    if dim.class_name != "Integer" || dim < 1 || dim > 3
+      raise "EulerSimulation: dim must be 1, 2, or 3"
     @mode = mode
     @dim = dim
     @title = "euler simulation"
@@ -53,40 +57,69 @@
     self
 
   -> resolution(cells)
-    if cells.size != @dim
+    if cells.class_name != "Array" || cells.size != @dim
       raise "EulerSimulation: resolution needs [@dim] entries"
-    @cells = cells
+    cells.each -> (count)
+      if count.class_name != "Integer" || count <= 0
+        raise "EulerSimulation: resolution entries must be positive Integers"
+    @cells = cells.dup
     self
 
   # Domain lengths: Quantities (any length unit) or raw metres.
   -> domain(lengths)
-    if lengths.size != @dim
+    if lengths.class_name != "Array" || lengths.size != @dim
       raise "EulerSimulation: domain needs [@dim] entries"
     @lengths_si = lengths.map -> (v) Physics.si(v, "m")
+    @lengths_si.each -> (length)
+      if !EulerSystem.finite_number?(length) || length <= ~0.0
+        raise "EulerSimulation: domain lengths must be positive and finite"
     self
 
   -> gas_gamma(value)
     @gamma = Physics.dimensionless(value)
+    if !EulerSystem.finite_number?(@gamma) || @gamma <= ~1.0
+      raise "EulerSimulation: gas gamma must be finite and greater than one"
     self
 
   # Isothermal thermal velocity: Quantity (speed) or raw m/s.
   -> thermal_velocity(value)
     @vt_si = Physics.si(value, "m/s")
+    if !EulerSystem.finite_number?(@vt_si) || @vt_si <= ~0.0
+      raise "EulerSimulation: thermal velocity must be positive and finite"
     self
 
   -> courant(value)
     @cfl = Physics.dimensionless(value)
+    if (!EulerSystem.finite_number?(@cfl) || @cfl <= ~0.0 ||
+        @cfl > ~1.0)
+      raise "EulerSimulation: CFL must be finite and in (0, 1]"
     self
 
   # Physical duration to simulate: Quantity (time) or raw seconds.
   -> duration(value)
     @t_end_si = Physics.si(value, "s")
+    if !EulerSystem.finite_number?(@t_end_si) || @t_end_si < ~0.0
+      raise "EulerSimulation: duration must be finite and nonnegative"
     self
 
-  # Fields to record (subset of :rho :pressure :speed :vx
-  # :internal_energy) and how many frames to capture across the run.
+  # Fields to record (subset of :rho :pressure :speed :vx,
+  # :internal_energy, and :specific_internal_energy) and how many frames to
+  # capture across the run.
   -> capture(fields, frame_count = 40)
-    @capture_fields = fields
+    if fields.class_name != "Array" || fields.size == 0
+      raise "EulerSimulation: capture needs at least one field"
+    fields.each -> (name)
+      supported = name == :rho || name == :pressure || name == :speed
+      supported = true if name == :vx || name == :internal_energy
+      supported = true if name == :specific_internal_energy
+      if !supported
+        raise "EulerSimulation: unsupported capture field [name]"
+      if (@mode == :isothermal &&
+          (name == :internal_energy || name == :specific_internal_energy))
+        raise "EulerSimulation: isothermal mode has no internal-energy field"
+    if frame_count.class_name != "Integer" || frame_count <= 0
+      raise "EulerSimulation: frame count must be a positive Integer"
+    @capture_fields = fields.dup
     @frame_count = frame_count
     self
 
@@ -96,6 +129,10 @@
     self
 
   -> boundary_face(dir, side, kind, prim = nil)
+    if dir.class_name != "Integer" || dir < 0 || dir >= @dim
+      raise "EulerSimulation: boundary direction is out of range"
+    if side.class_name != "Integer" || side < 0 || side > 1
+      raise "EulerSimulation: boundary side must be 0 or 1"
     @bc_faces.push([dir, side, kind, prim])
     self
 
@@ -133,7 +170,13 @@
     @fv
 
   -> frames
-    @frames
+    @frames.dup
+
+  -> mode
+    @mode
+
+  -> dim
+    @dim
 
   -> title
     @title
@@ -158,6 +201,8 @@
     fv.init_each(@init_fn)
     if @solid_fn != nil
       fv.solid_each(@solid_fn)
+    if fv.invalid_cells() > 0
+      raise "EulerSimulation: initial condition is not admissible"
     @fv = fv
     fv
 
@@ -170,10 +215,12 @@
     @frames.push({t: @fv.time, fields: fields})
     nil
 
-  # Run the configured simulation, capturing frames at a uniform cadence.
+  # Run the configured simulation from a newly built initial state, capturing
+  # that state and then frame_count states at a uniform cadence
+  # (frame_count + 1 total). For continuation, use fv.run_to! directly.
   # Prints one progress line per ten frames.
   -> run!
-    self.build_solver() if @fv == nil
+    self.build_solver()
     @frames = []
     self.capture_frame()
     n = @frame_count
@@ -184,7 +231,7 @@
       self.capture_frame()
       bad = @fv.invalid_cells()
       if bad > 0
-        raise "EulerSimulation: [bad] cells lost positivity at t=[@fv.time]"
+        raise "EulerSimulation: [bad] cells lost admissibility at t=[@fv.time]"
       if i % 10 == 0
         << "  frame [i]/[n]  t=[@fv.time]  steps=[@fv.steps]"
       i = i + 1
@@ -241,3 +288,10 @@
     html = Plot3D.render(self.viewer_spec())
     Plot3D.write_and_open(out, html)
     out
+
++ Physics
+  -> .compressible_simulation(dim)
+    EulerSimulation.compressible(dim)
+
+  -> .isothermal_simulation(dim)
+    EulerSimulation.isothermal(dim)

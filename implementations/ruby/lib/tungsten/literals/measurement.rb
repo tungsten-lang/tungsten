@@ -104,11 +104,13 @@ module Tungsten
     def /(other)
       case other
       when Measurement
+        raise ZeroDivisionError, "Measurement division by zero" if other.value.zero?
         new_val = @value.to_f / other.value
         dx = 1.0 / other.value
         dy = -@value.to_f / (other.value.to_f**2)
         derived(new_val, variance_with(other, dx, dy), other)
       when Numeric
+        raise ZeroDivisionError, "Measurement division by zero" if other.zero?
         derived(@value.to_f / other, (@uncertainty / other.to_f.abs)**2)
       else
         raise TypeError, "cannot divide Measurement by #{other.class}"
@@ -118,8 +120,15 @@ module Tungsten
     def **(exp)
       raise TypeError, "Measurement exponent must be Numeric" unless exp.is_a?(Numeric)
       new_val = @value ** exp
-      # σ_z/|z| = |n| · σ_x/|x|, only meaningful for non-zero base
-      derivative = @value.zero? ? 0 : exp * (@value.to_f ** (exp - 1))
+      if @value.zero?
+        derivative = 1 if exp == 1
+        derivative = 0 if exp == 0 || exp > 1
+        if derivative.nil?
+          raise ArgumentError, "uncertain zero cannot be raised to this exponent"
+        end
+      else
+        derivative = exp * (@value.to_f ** (exp - 1))
+      end
       derived(new_val, (derivative * @uncertainty)**2)
     end
 
@@ -144,6 +153,7 @@ module Tungsten
     # symmetric and is used by subsequent first-order propagation.
     def correlate(other, coefficient)
       raise TypeError, "can only correlate two Measurements" unless other.is_a?(Measurement)
+      raise ArgumentError, "correlation needs a distinct Measurement" if equal?(other)
       rho = coefficient.to_f
       raise ArgumentError, "correlation must be between -1 and 1" unless rho.between?(-1, 1)
       @correlations[other.object_id] = rho
@@ -152,6 +162,7 @@ module Tungsten
     end
 
     def correlation_with(other)
+      return 1.0 if equal?(other)
       @correlations.fetch(other.object_id, 0.0)
     end
 

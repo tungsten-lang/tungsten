@@ -36,7 +36,8 @@ int main(void) {
     }
 
     ASSERT(hash->count == 0, "all live entries were deleted");
-    ASSERT(hash->occupied < hash->cap, "tombstone maintenance retains an empty slot");
+    ASSERT(hash->used <= hash->cap - hash->cap / 4,
+           "dense usage stays under the load-factor ceiling");
     ASSERT(w_hash_get(hash_value, w_int(999)) == W_NIL, "missing lookup terminates");
     ASSERT(w_hash_has_key(hash_value, w_int(999)) == W_FALSE, "missing membership terminates");
     ASSERT(w_hash_delete(hash_value, w_int(999)) == W_NIL, "missing delete terminates");

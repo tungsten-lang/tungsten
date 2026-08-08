@@ -1267,15 +1267,32 @@
             CNEXT();
           }
         }
+        if (has_receiver && name == NAME_VALUES && argc == 0 &&
+            tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver)) {
+          // Mirror of `keys` above: dense values[] in insertion order.
+          TcRuntimeHash *rh = tc_as_hash(receiver);
+          TcRuntimeArray *array = runtime_array_new(rh->count, err);
+          if (!array) {
+            FREE_ARGS();
+            goto cleanup_fail;
+          }
+          size_t out_i = 0;
+          for (uint32_t i = 0; i < rh->used; i++) {
+            if (rh->keys[i] == TC_HASH_TOMBSTONE) continue;
+            array->slots[out_i++] = rh->values[i];
+          }
+          FREE_ARGS();
+          if (!push(&vm, tc_box_array(array), err)) {
+            goto cleanup_fail;
+          }
+          CNEXT();
+        }
         if (has_receiver && ((name == NAME_HAS_KEY_Q) ||
                              (name == NAME_KEY_Q)) && argc == 1) {
           int ok = 0;
           if (tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver)) {
-            int64_t dense = -1;
-            if (tc_as_hash(receiver)->cap > 0) {
-              (void)hash_find_slot(tc_as_hash(receiver), args[0], &dense);
-            }
-            ok = dense >= 0;
+            ok = tc_as_hash(receiver)->cap > 0 &&
+                 hash_probe(tc_as_hash(receiver), args[0]) >= 0;
           } else if (tc_kind(receiver) == TC_VAL_AST && tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH) {
             TcValue ignored;
             if (!ast_hash_lookup(*tc_as_ast_ptr(&receiver), args[0], &ignored, err)) {

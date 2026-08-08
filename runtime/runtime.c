@@ -37258,6 +37258,25 @@ static int64_t w_hash_find_slot(WHash *hash, WValue key, int64_t *dense_out) {
     return first_tombstone;
 }
 
+/* Read-only probe: dense offset of key, or -1. Skips the insertion-slot
+ * bookkeeping (first-tombstone tracking) that w_hash_find_slot carries,
+ * which keeps the get/has_key hot loop to two dependent loads. */
+static inline int64_t w_hash_probe(WHash *hash, WValue key) {
+    uint64_t mask = (uint64_t)(hash->cap - 1);
+    uint64_t idx = w_hash_value_fast(key) & mask;
+    for (uint32_t probes = 0; probes < hash->cap; probes++) {
+        int32_t d = hash->index[idx];
+        if (d == W_HASH_SLOT_EMPTY) return -1;
+        if (d != W_HASH_SLOT_TOMB) {
+            WValue slot_key = hash->keys[d];
+            if ((slot_key == key && key >= 0x10) || w_hash_key_eq(slot_key, key))
+                return (int64_t)d;
+        }
+        idx = (idx + 1) & mask;
+    }
+    return -1;
+}
+
 /* Compact the dense arrays in place (dropping holes, preserving insertion
  * order), then rebuild the index table — at a doubled cap when the live
  * count justifies it, else at the same cap to purge tombstones. */
@@ -37395,17 +37414,14 @@ WValue w_hash_set(WValue hash_val, WValue key, WValue val) {
 
 WValue w_hash_get(WValue hash_val, WValue key) {
     WHash *hash = as_hash(hash_val);
-    int64_t dense = -1;
-    (void)w_hash_find_slot(hash, key, &dense);
+    int64_t dense = w_hash_probe(hash, key);
     if (dense < 0) return W_NIL;
     return hash->values[dense];
 }
 
 WValue w_hash_has_key(WValue hash_val, WValue key) {
     WHash *hash = as_hash(hash_val);
-    int64_t dense = -1;
-    (void)w_hash_find_slot(hash, key, &dense);
-    return dense >= 0 ? W_TRUE : W_FALSE;
+    return w_hash_probe(hash, key) >= 0 ? W_TRUE : W_FALSE;
 }
 
 /* ---- Keyword arguments ----

@@ -127,6 +127,7 @@ static TcRuntimeHash *cvar_table = NULL;
   X(HAS_KEY_Q,      "has_key?")      \
   X(KEY_Q,          "key?")          \
   X(KEYS,           "keys")          \
+  X(VALUES,         "values")        \
   X(FIRST,          "first")         \
   X(LAST,           "last")          \
   X(SORT,           "sort")          \
@@ -1150,6 +1151,25 @@ static int64_t hash_find_slot(TcRuntimeHash *hash, TcValue key, int64_t *dense_o
   return first_tombstone;
 }
 
+// Read-only probe: dense offset of key, or -1. Skips the insertion-slot
+// bookkeeping hash_find_slot carries. Mirrors runtime.c:w_hash_probe.
+static inline int64_t hash_probe(TcRuntimeHash *hash, TcValue key) {
+  size_t mask = hash->cap - 1;
+  size_t idx = (size_t)hash_value64(key) & mask;
+  for (size_t probes = 0; probes < hash->cap; probes++) {
+    int32_t d = hash->index[idx];
+    if (d == TC_HASH_SLOT_EMPTY) return -1;
+    if (d != TC_HASH_SLOT_TOMB) {
+      TcValue k = hash->keys[d];
+      if (k == key ||
+          (!(w_is_symbol(k) && w_is_symbol(key)) && value_equal(k, key)))
+        return (int64_t)d;
+    }
+    idx = (idx + 1) & mask;
+  }
+  return -1;
+}
+
 // Compact the dense arrays in place (dropping holes, preserving insertion
 // order), then rebuild the index table at `min_cap` rounded up to a power
 // of two >= 8. Mirrors runtime/runtime.c:w_hash_rebuild.
@@ -1253,8 +1273,7 @@ static int hash_set_value(TcRuntimeHash *hash, TcValue key, TcValue value, TcErr
 
 static TcValue hash_get_value(TcRuntimeHash *hash, TcValue key) {
   if (!hash || hash->cap == 0) return tc_box_nil();
-  int64_t dense = -1;
-  (void)hash_find_slot(hash, key, &dense);
+  int64_t dense = hash_probe(hash, key);
   return dense >= 0 ? hash->values[dense] : tc_box_nil();
 }
 
@@ -2771,13 +2790,22 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         if (!hash) {
           goto cleanup_fail;
         }
-        for (uint32_t i = count; i > 0; i--) {
-          TcValue value = pop(&vm);
-          TcValue key = pop(&vm);
-          if (!hash_set_value(hash, key, value, err)) {
+        /* Pairs sit on the stack in source order (k0 v0 k1 v1 ...); read
+         * them in place so the literal's insertion order is source order,
+         * then drop the whole group. Popping pairwise would reverse it. */
+        size_t need = (size_t)count * 2;
+        if (vm.sp < need) {
+          tc_error_set(err, "hash literal stack underflow");
+          goto cleanup_fail;
+        }
+        size_t base = vm.sp - need;
+        for (uint32_t i = 0; i < count; i++) {
+          if (!hash_set_value(hash, vm.stack[base + i * 2],
+                              vm.stack[base + i * 2 + 1], err)) {
             goto cleanup_fail;
           }
         }
+        vm.sp = base;
         if (!push(&vm, tc_box_hash(hash), err)) {
           goto cleanup_fail;
         }

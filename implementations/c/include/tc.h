@@ -566,26 +566,35 @@ struct TcRuntimeArray {
   WValue *slots;
 };
 
-// Layout matches runtime/runtime.h's WHash exactly: same field order, same
-// sizes, same sentinels. Iteration walks 0..cap-1 and skips W_UNDEF /
-// W_MEMO_MISS slots — bit-exact with native's slot order so hash iteration
-// produces identical IR ordering across C VM and stage 2.
+// Layout matches runtime/runtime.h's WHash exactly: a compact dict.
+// Entries live in dense insertion-ordered keys/values arrays (sized to
+// 3/4 of cap); the power-of-two index table takes the probing and stores
+// dense offsets. ITERATION ORDER IS INSERTION ORDER — the guaranteed
+// language semantic shared by the native runtime, this VM, and the Ruby
+// host, which is what keeps emitted IR ordering identical across C VM
+// and stage 2 (probe layout no longer matters for iteration).
+// Deletion tombstones the index slot and leaves a TC_HASH_TOMBSTONE hole
+// in the dense keys; holes compact on rebuild. A deleted-then-reinserted
+// key moves to the end.
 struct TcRuntimeHash {
-  uint32_t count;
-  uint32_t cap;
+  uint32_t count;     // live entries
+  uint32_t cap;       // index-table slots (power of 2)
   uint8_t flags;
   uint8_t pad[3];
-  uint32_t occupied;
-  WValue *keys;
-  WValue *values;
+  uint32_t used;      // dense entries consumed: live + holes
+  WValue *keys;       // dense, insertion-ordered; TC_HASH_TOMBSTONE = hole
+  WValue *values;     // dense, parallel to keys
+  int32_t *index;     // sparse probe table: TC_HASH_SLOT_* / dense offset
 };
 
-// Hash sentinels — same as runtime/wvalue.h's W_UNDEF (empty slot) and
-// W_MEMO_MISS (tombstone). Sub-tag-mask values that no real boxed kind can
-// take. The hash machinery always checks for them explicitly before any
-// tc_kind / value_equal call, so the type-tag overlap (W_MEMO_MISS shares
-// a low nibble with TC_TAG_OBJECT) is never observed in practice.
-#define TC_HASH_EMPTY     W_UNDEF
+#define TC_HASH_SLOT_EMPTY (-1)
+#define TC_HASH_SLOT_TOMB  (-2)
+
+// Dense-hole sentinel — same as runtime/wvalue.h's W_MEMO_MISS, a
+// sub-tag-mask value no real boxed kind can take. Dense iteration checks
+// for it explicitly before any tc_kind / value_equal call, so the
+// type-tag overlap (W_MEMO_MISS shares a low nibble with TC_TAG_OBJECT)
+// is never observed in practice.
 #define TC_HASH_TOMBSTONE W_MEMO_MISS
 
 struct TcRuntimeObject {

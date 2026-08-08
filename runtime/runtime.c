@@ -35522,8 +35522,8 @@ WValue w_to_s(WValue v) {
         WValue sb = w_strbuf_new(w_box_int(256));
         w_strbuf_append(sb, w_string("{"));
         int first = 1;
-        for (int64_t i = 0; i < hash->cap; i++) {
-            if (hash->keys[i] == W_UNDEF || hash->keys[i] == W_MEMO_MISS) continue;
+        for (uint32_t i = 0; i < hash->used; i++) {
+            if (hash->keys[i] == W_MEMO_MISS) continue;
             if (!first) w_strbuf_append(sb, w_string(", "));
             w_strbuf_append(sb, w_to_s(hash->keys[i]));
             w_strbuf_append(sb, w_string(": "));
@@ -37469,13 +37469,18 @@ WValue w_native_data_field_set(WValue recv, WValue name_v, WValue value) {
     return W_NIL;
 }
 
+/* Dense capacity for an index-table cap: the load-factor ceiling (3/4)
+ * guarantees `used` never reaches this before a rebuild triggers. */
+static inline int64_t w_hash_dense_cap(int64_t cap) { return cap - cap / 4; }
+
 static void w_hash_allocate_storage(WHash *hash, int64_t cap) {
-    hash->cap = cap;
+    hash->cap = (uint32_t)cap;
     hash->count = 0;
-    hash->occupied = 0;
-    hash->keys = malloc(sizeof(WValue) * cap);
-    hash->values = calloc(1, sizeof(WValue) * cap);
-    for (int64_t i = 0; i < cap; i++) hash->keys[i] = W_UNDEF;
+    hash->used = 0;
+    hash->keys = malloc(sizeof(WValue) * w_hash_dense_cap(cap));
+    hash->values = malloc(sizeof(WValue) * w_hash_dense_cap(cap));
+    hash->index = malloc(sizeof(int32_t) * cap);
+    memset(hash->index, 0xFF, sizeof(int32_t) * cap);  /* all W_HASH_SLOT_EMPTY */
 }
 
 /* Hash with the dominant key kinds inlined: canonical strings/symbols
@@ -37490,75 +37495,79 @@ static inline uint64_t w_hash_value_fast(WValue key) {
     return w_hash_value(key);
 }
 
-static int64_t w_hash_find_slot(WHash *hash, WValue key, int *found) {
+/* Probe the index table for key. Returns the index-table slot where the
+ * key lives or where an insert should land (first tombstone reused), and
+ * writes the dense offset to *dense_out on a hit (-1 on a miss). Returns
+ * -1 only for the degenerate all-tombstone table with no match. */
+static int64_t w_hash_find_slot(WHash *hash, WValue key, int64_t *dense_out) {
     uint64_t mask = (uint64_t)(hash->cap - 1);
     uint64_t idx = w_hash_value_fast(key) & mask;
     int64_t first_tombstone = -1;
     for (uint32_t probes = 0; probes < hash->cap; probes++) {
-        WValue slot_key = hash->keys[idx];
-        /* identity hit first: canonical keys (inline/slab strings, symbols,
-         * ints) compare equal by bits, no w_hash_key_eq call needed. The
-         * key >= 0x10 guard (loop-invariant, hoisted) keeps sentinel-range
-         * bit patterns (W_UNDEF empty / W_MEMO_MISS tombstone, and the
-         * nil/bool singletons) on the explicit checks below. */
-        if (slot_key == key && key >= 0x10) {
-            *found = 1;
-            return (int64_t)idx;
-        }
-        if (slot_key == W_UNDEF) {
-            *found = 0;
+        int32_t d = hash->index[idx];
+        if (d == W_HASH_SLOT_EMPTY) {
+            *dense_out = -1;
             return first_tombstone >= 0 ? first_tombstone : (int64_t)idx;
         }
-        if (slot_key == W_MEMO_MISS) {
+        if (d == W_HASH_SLOT_TOMB) {
             if (first_tombstone < 0) first_tombstone = (int64_t)idx;
-        } else if (w_hash_key_eq(slot_key, key)) {
-            *found = 1;
-            return (int64_t)idx;
+        } else {
+            /* identity hit first: canonical keys (inline/slab strings,
+             * symbols, ints) compare equal by bits, no w_hash_key_eq call
+             * needed. The key >= 0x10 guard keeps the nil/bool singletons
+             * on the delegated compare. Live index slots never reference a
+             * hole, so dense keys need no sentinel checks here. */
+            WValue slot_key = hash->keys[d];
+            if ((slot_key == key && key >= 0x10) || w_hash_key_eq(slot_key, key)) {
+                *dense_out = (int64_t)d;
+                return (int64_t)idx;
+            }
         }
         idx = (idx + 1) & mask;
     }
-
-    /* A table containing no W_UNDEF slots is possible after enough deletes.
-     * Bound the probe so a miss terminates and insertion can reuse a tombstone. */
-    *found = 0;
+    *dense_out = -1;
     return first_tombstone;
 }
 
-static void w_hash_reinsert(WHash *hash, WValue key, WValue value) {
-    int found = 0;
-    int64_t idx = w_hash_find_slot(hash, key, &found);
-    if (idx < 0) die("hash reinsert found no available slot");
-    WValue old_key = hash->keys[idx];
-    hash->keys[idx] = key;
-    hash->values[idx] = value;
-    if (!found) {
-        hash->count++;
-        if (old_key == W_UNDEF) hash->occupied++;
-    }
-}
-
-static void w_hash_rehash(WHash *hash, int64_t new_capacity) {
-    WValue *old_keys = hash->keys;
-    WValue *old_values = hash->values;
-    int64_t old_capacity = hash->cap;
-
-    w_hash_allocate_storage(hash, new_capacity);
-
-    for (int64_t i = 0; i < old_capacity; i++) {
-        if (old_keys[i] != W_UNDEF && old_keys[i] != W_MEMO_MISS) {
-            w_hash_reinsert(hash, old_keys[i], old_values[i]);
+/* Compact the dense arrays in place (dropping holes, preserving insertion
+ * order), then rebuild the index table — at a doubled cap when the live
+ * count justifies it, else at the same cap to purge tombstones. */
+static void w_hash_rebuild(WHash *hash, int64_t new_capacity) {
+    uint32_t w = 0;
+    for (uint32_t i = 0; i < hash->used; i++) {
+        if (hash->keys[i] == W_MEMO_MISS) continue;
+        if (w != i) {
+            hash->keys[w] = hash->keys[i];
+            hash->values[w] = hash->values[i];
         }
+        w++;
     }
+    hash->used = w;
+    hash->count = w;
 
-    free(old_keys);
-    free(old_values);
+    if (new_capacity != (int64_t)hash->cap) {
+        int64_t dense_cap = w_hash_dense_cap(new_capacity);
+        hash->keys = realloc(hash->keys, sizeof(WValue) * dense_cap);
+        hash->values = realloc(hash->values, sizeof(WValue) * dense_cap);
+        hash->index = realloc(hash->index, sizeof(int32_t) * new_capacity);
+        hash->cap = (uint32_t)new_capacity;
+    }
+    memset(hash->index, 0xFF, sizeof(int32_t) * hash->cap);
+
+    /* Keys are unique, so probing to the first empty slot is sufficient. */
+    uint64_t mask = (uint64_t)(hash->cap - 1);
+    for (uint32_t d = 0; d < hash->used; d++) {
+        uint64_t idx = w_hash_value_fast(hash->keys[d]) & mask;
+        while (hash->index[idx] != W_HASH_SLOT_EMPTY) idx = (idx + 1) & mask;
+        hash->index[idx] = (int32_t)d;
+    }
 }
 
 static void w_hash_prepare_set(WHash *hash) {
-    if ((hash->occupied + 1) * 4 >= hash->cap * 3) {
+    if ((hash->used + 1) * 4 >= hash->cap * 3) {
         int64_t new_capacity =
             (hash->count + 1) * 4 >= hash->cap * 3 ? hash->cap * 2 : hash->cap;
-        w_hash_rehash(hash, new_capacity);
+        w_hash_rebuild(hash, new_capacity);
     }
 }
 
@@ -37568,15 +37577,13 @@ WValue w_hash_new(void) {
     return w_box_ptr(hash, W_SUBTAG_HASH);
 }
 
-/* Reset entries in place without freeing the bucket arrays. Keeps cap,
- * clears all slots to W_UNDEF. O(cap). */
+/* Reset entries in place without freeing the arrays. Keeps cap, empties
+ * the index table. O(cap/2) words — the dense arrays need no clearing
+ * because `used` bounds every walk. */
 static inline void w_hash_reset(WHash *hash) {
-    for (int64_t i = 0; i < hash->cap; i++) {
-        hash->keys[i] = W_UNDEF;
-        hash->values[i] = W_NIL;
-    }
+    memset(hash->index, 0xFF, sizeof(int32_t) * hash->cap);
     hash->count = 0;
-    hash->occupied = 0;
+    hash->used = 0;
     hash->flags &= ~W_HASH_FLAG_KWARGS;
 }
 
@@ -37603,9 +37610,8 @@ WValue w_hash_reuse_and_drain_or_new(WValue *slot) {
     if (v != W_NIL) {
         WHash *hash = (WHash *)w_as_ptr(v);
         WValue self_v = v;
-        for (int64_t i = 0; i < hash->cap; i++) {
-            WValue key = hash->keys[i];
-            if (key == W_UNDEF || key == W_MEMO_MISS) continue;
+        for (uint32_t i = 0; i < hash->used; i++) {
+            if (hash->keys[i] == W_MEMO_MISS) continue;
             WValue val = hash->values[i];
             /* Circular-ref guard — never recycle the hash back into itself. */
             if (val == self_v) continue;
@@ -37636,44 +37642,46 @@ WValue w_hash_reuse_and_drain_or_new(WValue *slot) {
 
 WValue w_hash_new_with_fn(int64_t fn_id) {
     (void)fn_id;
-    WHash *hash = calloc(1, sizeof(WHash));
-    w_hash_allocate_storage(hash, 8);
-    return w_box_ptr(hash, W_SUBTAG_HASH);
+    return w_hash_new();
 }
 
 WValue w_hash_set(WValue hash_val, WValue key, WValue val) {
     WHash *hash = as_hash(hash_val);
     w_hash_prepare_set(hash);
-    int found = 0;
-    int64_t idx = w_hash_find_slot(hash, key, &found);
-    if (idx < 0) {
+    int64_t dense = -1;
+    int64_t slot = w_hash_find_slot(hash, key, &dense);
+    if (slot < 0) {
         /* Defensive fallback for a corrupt/full-live table. Normal insertion
          * reaches w_hash_prepare_set first and cannot take this branch. */
-        w_hash_rehash(hash, hash->cap * 2);
-        idx = w_hash_find_slot(hash, key, &found);
+        w_hash_rebuild(hash, hash->cap * 2);
+        slot = w_hash_find_slot(hash, key, &dense);
     }
-    if (!found) {
-        if (hash->keys[idx] == W_UNDEF) hash->occupied++;
-        hash->keys[idx] = key;
-        hash->count++;
+    if (dense >= 0) {
+        /* Overwrite keeps the key's insertion position. */
+        hash->values[dense] = val;
+        return val;
     }
-    hash->values[idx] = val;
+    uint32_t d = hash->used++;
+    hash->keys[d] = key;
+    hash->values[d] = val;
+    hash->index[slot] = (int32_t)d;
+    hash->count++;
     return val;
 }
 
 WValue w_hash_get(WValue hash_val, WValue key) {
     WHash *hash = as_hash(hash_val);
-    int found = 0;
-    int64_t idx = w_hash_find_slot(hash, key, &found);
-    if (!found) return W_NIL;
-    return hash->values[idx];
+    int64_t dense = -1;
+    (void)w_hash_find_slot(hash, key, &dense);
+    if (dense < 0) return W_NIL;
+    return hash->values[dense];
 }
 
 WValue w_hash_has_key(WValue hash_val, WValue key) {
     WHash *hash = as_hash(hash_val);
-    int found = 0;
-    (void)w_hash_find_slot(hash, key, &found);
-    return found ? W_TRUE : W_FALSE;
+    int64_t dense = -1;
+    (void)w_hash_find_slot(hash, key, &dense);
+    return dense >= 0 ? W_TRUE : W_FALSE;
 }
 
 /* ---- Keyword arguments ----
@@ -37792,9 +37800,9 @@ WValue w_kwargs_remap12(WValue spec,
         }
         if (slot >= 0) {
             WValue residual = w_hash_new();
-            for (int64_t i = 0; i < hh->cap; i++) {
+            for (uint32_t i = 0; i < hh->used; i++) {
                 WValue key = hh->keys[i];
-                if (key == W_UNDEF || key == W_MEMO_MISS) continue;
+                if (key == W_MEMO_MISS) continue;
                 int is_consumed = 0;
                 for (int c = 0; c < nconsumed; c++) {
                     if (w_hash_key_eq(consumed[c], key)) { is_consumed = 1; break; }
@@ -37829,8 +37837,8 @@ W_KWARGS_SLOT_FN(11)
 WValue w_hash_keys(WValue hash_val) {
     WHash *hash = as_hash(hash_val);
     WValue arr = w_array_new_empty();
-    for (int64_t i = 0; i < hash->cap; i++) {
-        if (hash->keys[i] != W_UNDEF && hash->keys[i] != W_MEMO_MISS) w_array_push(arr, hash->keys[i]);
+    for (uint32_t i = 0; i < hash->used; i++) {
+        if (hash->keys[i] != W_MEMO_MISS) w_array_push(arr, hash->keys[i]);
     }
     return arr;
 }
@@ -37838,21 +37846,26 @@ WValue w_hash_keys(WValue hash_val) {
 WValue w_hash_values(WValue hash_val) {
     WHash *hash = as_hash(hash_val);
     WValue arr = w_array_new_empty();
-    for (int64_t i = 0; i < hash->cap; i++) {
-        if (hash->keys[i] != W_UNDEF && hash->keys[i] != W_MEMO_MISS) w_array_push(arr, hash->values[i]);
+    for (uint32_t i = 0; i < hash->used; i++) {
+        if (hash->keys[i] != W_MEMO_MISS) w_array_push(arr, hash->values[i]);
     }
     return arr;
 }
 
 WValue w_hash_delete(WValue hash_val, WValue key) {
     WHash *hash = as_hash(hash_val);
-    int found = 0;
-    int64_t idx = w_hash_find_slot(hash, key, &found);
-    if (!found) return W_NIL;
-    WValue removed = hash->values[idx];
-    hash->keys[idx] = W_MEMO_MISS;
-    hash->values[idx] = W_NIL;
+    int64_t dense = -1;
+    int64_t slot = w_hash_find_slot(hash, key, &dense);
+    if (dense < 0) return W_NIL;
+    WValue removed = hash->values[dense];
+    hash->keys[dense] = W_MEMO_MISS;   /* dense hole; compacted on rebuild */
+    hash->values[dense] = W_NIL;
+    hash->index[slot] = W_HASH_SLOT_TOMB;
     hash->count--;
+    /* Trailing holes can be reclaimed immediately — no index entry
+     * references them once tombstoned. */
+    while (hash->used > 0 && hash->keys[hash->used - 1] == W_MEMO_MISS)
+        hash->used--;
     return removed;
 }
 
@@ -37860,8 +37873,8 @@ WValue __w_hash_match(WValue subject, WValue pattern) {
     if (!w_is_hash(subject) || !w_is_hash(pattern)) return W_NIL;
 
     WHash *pat = as_hash(pattern);
-    for (int64_t i = 0; i < pat->cap; i++) {
-        if (pat->keys[i] == W_UNDEF || pat->keys[i] == W_MEMO_MISS) continue;
+    for (uint32_t i = 0; i < pat->used; i++) {
+        if (pat->keys[i] == W_MEMO_MISS) continue;
         WValue subject_val = w_hash_get(subject, pat->keys[i]);
         if (subject_val == W_NIL && w_hash_has_key(subject, pat->keys[i]) == W_FALSE) return W_NIL;
 
@@ -45669,8 +45682,8 @@ static WValue w_ic_hash_values(WValue r, WValue *a, int c) {
 static WValue w_ic_hash_merge_bang(WValue r, WValue *a, int c) {
     if (c < 1 || !w_is_hash(a[0])) die("merge! requires 1 hash argument");
     WHash *other = as_hash(a[0]);
-    for (int64_t i = 0; i < other->cap; i++) {
-        if (other->keys[i] != W_UNDEF && other->keys[i] != W_MEMO_MISS)
+    for (uint32_t i = 0; i < other->used; i++) {
+        if (other->keys[i] != W_MEMO_MISS)
             w_hash_set(r, other->keys[i], other->values[i]);
     }
     return r;
@@ -45679,8 +45692,8 @@ static WValue w_ic_hash_each(WValue r, WValue *a, int c) {
     if (c < 1 || !w_is_closure(a[c - 1])) die("each requires a block");
     WHash *hash = as_hash(r);
     WValue cl_v = a[c - 1];
-    for (int64_t i = 0; i < hash->cap; i++) {
-        if (hash->keys[i] != W_UNDEF && hash->keys[i] != W_MEMO_MISS)
+    for (uint32_t i = 0; i < hash->used; i++) {
+        if (hash->keys[i] != W_MEMO_MISS)
             w_closure_call_2(cl_v, hash->keys[i], hash->values[i]);
     }
     return r;
@@ -55244,8 +55257,8 @@ void w_value_free(WValue v) {
         return;
     }
     /* Hash (W_SUBTAG_HASH). w_hash_new calloc's the WHash and mallocs
-     * keys/values (w_hash_allocate_storage); all three are private to the
-     * hash. Freed WValues inside are NOT recursed into — they may be live
+     * keys/values/index (w_hash_allocate_storage); all four are private to
+     * the hash. Freed WValues inside are NOT recursed into — they may be live
      * elsewhere, exactly like closure captures below. Bail when the pool
      * still holds it (W_HASH_FLAG_POOLED) or it was frozen for sharing.
      * History: this branch was a deliberate no-op for a while — the
@@ -55261,6 +55274,7 @@ void w_value_free(WValue v) {
         if (h->flags & (W_HASH_FLAG_POOLED | W_HASH_FLAG_FROZEN)) return;
         free(h->keys);
         free(h->values);
+        free(h->index);
         free(h);
         return;
     }

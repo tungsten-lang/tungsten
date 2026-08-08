@@ -1,14 +1,18 @@
 + Hash
   is Enumerable
 
+  # Mirrors runtime/runtime.h WHash — a compact dict: dense insertion-ordered
+  # keys/values plus a sparse index table that takes the probing. Iteration
+  # order is insertion order, guaranteed, on every engine.
   - data
     u32    count
     u32    capacity
     u8     flags
     u8[3]  _pad
-    u32    occupied
+    u32    used
     * w64[] keys
     * w64[] values
+    * i32[] index
 
   -> __enumerable_yields_pair?
     true

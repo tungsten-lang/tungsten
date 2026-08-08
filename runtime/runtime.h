@@ -377,14 +377,25 @@ typedef uint64_t (*WHashFn)(const uint8_t *data, size_t len);
 #define W_HASH_FLAG_POOLED  (1u << 1)  /* set when hash is in the recycle pool */
 #define W_HASH_FLAG_KWARGS  (1u << 2)  /* hash born from a call-site kwargs group */
 
+/* Compact dict (CPython/Ruby-st_table shape): entries live in dense
+ * insertion-ordered keys/values arrays sized to 3/4 of cap; a sparse
+ * power-of-two index table holds dense offsets and takes the probing.
+ * ITERATION ORDER IS INSERTION ORDER — a guaranteed, cross-engine
+ * (native / C VM / Ruby host) language semantic. Deletion tombstones the
+ * index slot and leaves a W_MEMO_MISS hole in the dense arrays; holes are
+ * compacted on rebuild. A deleted-then-reinserted key moves to the end. */
+#define W_HASH_SLOT_EMPTY (-1)
+#define W_HASH_SLOT_TOMB  (-2)
+
 typedef struct {
-    uint32_t count;
-    uint32_t cap;       /* allocated slots (renamed from cap) */
+    uint32_t count;     /* live entries */
+    uint32_t cap;       /* index-table slots (power of 2) */
     uint8_t flags;
     uint8_t pad[3];
-    uint32_t occupied;  /* live entries + tombstones */
-    WValue *keys;       /* W_UNDEF = empty slot, W_MEMO_MISS = tombstone */
-    WValue *values;
+    uint32_t used;      /* dense entries consumed: live + holes */
+    WValue *keys;       /* dense, insertion-ordered; W_MEMO_MISS = hole */
+    WValue *values;     /* dense, parallel to keys */
+    int32_t *index;     /* sparse probe table: W_HASH_SLOT_EMPTY / _TOMB / dense offset */
 } WHash;
 
 /* ---- Domain heap object (overflow for currency/quantity/duration/decimal;

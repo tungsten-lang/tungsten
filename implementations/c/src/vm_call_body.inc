@@ -261,7 +261,7 @@
                 TcRuntimeHash *h = tc_as_hash(x);
                 /* Probe the hash for the :node symbol key. */
                 if (h) {
-                  for (size_t i = 0; i < h->cap; i++) {
+                  for (uint32_t i = 0; i < h->used; i++) {
                     if (h->keys[i] == node_sym) {
                       r = (tc_kind(h->values[i]) != TC_VAL_NIL) ? 1 : 0;
                       break;
@@ -436,9 +436,9 @@
             const char *message = NULL; size_t message_len = 0;
             const char *file = NULL; size_t file_len = 0;
             int64_t row = 0, col = 0;
-            for (size_t i = 0; i < tc_as_hash(val)->cap; i++) {
+            for (uint32_t i = 0; i < tc_as_hash(val)->used; i++) {
               TcValue k = tc_as_hash(val)->keys[i];
-              if (k == TC_HASH_EMPTY || k == TC_HASH_TOMBSTONE) continue;
+              if (k == TC_HASH_TOMBSTONE) continue;
               TcValue v = tc_as_hash(val)->values[i];
               if (tc_kind(k) != TC_VAL_SYMBOL) continue;
               const char *kb = tc_str_bytes_only(k);
@@ -1230,8 +1230,8 @@
         if (has_receiver && name == NAME_KEYS && argc == 0) {
           TcRuntimeArray *array = NULL;
           if (tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver)) {
-            // Walk slot-indexed keys[] in slot order (matches native's
-            // hash iteration), skipping empty / tombstone slots.
+            // Walk the dense keys[] in insertion order (the guaranteed
+            // cross-engine iteration order), skipping holes.
             TcRuntimeHash *rh = tc_as_hash(receiver);
             array = runtime_array_new(rh->count, err);
             if (!array) {
@@ -1239,9 +1239,9 @@
               goto cleanup_fail;
             }
             size_t out_i = 0;
-            for (size_t i = 0; i < rh->cap; i++) {
+            for (uint32_t i = 0; i < rh->used; i++) {
               TcValue k = rh->keys[i];
-              if (k == TC_HASH_EMPTY || k == TC_HASH_TOMBSTONE) continue;
+              if (k == TC_HASH_TOMBSTONE) continue;
               array->slots[out_i++] = k;
             }
           } else if (tc_kind(receiver) == TC_VAL_AST && tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH && tc_as_ast_ptr(&receiver)->as.hash) {
@@ -1271,11 +1271,11 @@
                              (name == NAME_KEY_Q)) && argc == 1) {
           int ok = 0;
           if (tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver)) {
-            int found = 0;
+            int64_t dense = -1;
             if (tc_as_hash(receiver)->cap > 0) {
-              hash_find_slot(tc_as_hash(receiver), args[0], &found);
+              (void)hash_find_slot(tc_as_hash(receiver), args[0], &dense);
             }
-            ok = found;
+            ok = dense >= 0;
           } else if (tc_kind(receiver) == TC_VAL_AST && tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH) {
             TcValue ignored;
             if (!ast_hash_lookup(*tc_as_ast_ptr(&receiver), args[0], &ignored, err)) {
@@ -1598,10 +1598,10 @@
           int is_ast_hash = 0;
           if (node_sym_bytes && h && h->cap > 0) {
             TcValue node_key = tc_box_symbol_bytes(node_sym_bytes, 4, 0);
-            size_t node_slot = hash_find_slot(h, node_key, &is_ast_hash);
-            if (is_ast_hash && tc_kind(h->values[node_slot]) != TC_VAL_SYMBOL) {
-              is_ast_hash = 0;
-            }
+            int64_t node_dense = -1;
+            (void)hash_find_slot(h, node_key, &node_dense);
+            is_ast_hash = node_dense >= 0 &&
+                          tc_kind(h->values[node_dense]) == TC_VAL_SYMBOL;
           }
           if (is_ast_hash) {
             if (argc == 0) {

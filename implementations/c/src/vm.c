@@ -175,9 +175,9 @@ static int value_text_eq(TcValue value, const char *text) {
 }
 
 static int hash_has_key_text(TcRuntimeHash *hash, const char *text) {
-  for (size_t i = 0; i < hash->cap; i++) {
+  for (uint32_t i = 0; i < hash->used; i++) {
     TcValue k = hash->keys[i];
-    if (k == TC_HASH_EMPTY || k == TC_HASH_TOMBSTONE) continue;
+    if (k == TC_HASH_TOMBSTONE) continue;
     if (value_text_eq(k, text)) return 1;
   }
   return 0;
@@ -956,44 +956,43 @@ static int runtime_array_ensure_cap(TcRuntimeArray *array, size_t needed, TcErro
   return 1;
 }
 
-// Mirror runtime/runtime.c:w_hash_allocate_storage exactly — keys[] gets
-// W_UNDEF (empty marker) via a manual loop, values[] gets calloc'd nil.
-// Tombstones (W_MEMO_MISS) never appear at allocation time; the probe path
-// is the only thing that ever writes one.
+// Mirror runtime/runtime.c:w_hash_allocate_storage — dense keys/values
+// arrays at 3/4 of cap (the load-factor ceiling guarantees `used` never
+// reaches that before a rebuild), index table memset to all-empty (-1).
+static inline size_t hash_dense_cap(size_t cap) { return cap - cap / 4; }
+
 static int hash_allocate_storage(TcRuntimeHash *hash, size_t cap, TcError *err) {
-  WValue *keys = (WValue *)malloc(cap * sizeof(WValue));
-  WValue *values = (WValue *)calloc(1, cap * sizeof(WValue));
-  if (!keys || !values) {
+  WValue *keys = (WValue *)malloc(hash_dense_cap(cap) * sizeof(WValue));
+  WValue *values = (WValue *)malloc(hash_dense_cap(cap) * sizeof(WValue));
+  int32_t *index = (int32_t *)malloc(cap * sizeof(int32_t));
+  if (!keys || !values || !index) {
     free(keys);
     free(values);
+    free(index);
     tc_error_set(err, "hash entry allocation failed");
     return 0;
   }
-  for (size_t i = 0; i < cap; i++) keys[i] = TC_HASH_EMPTY;
+  memset(index, 0xFF, cap * sizeof(int32_t));  // all TC_HASH_SLOT_EMPTY
 
   hash->cap = (uint32_t)cap;
   hash->count = 0;
-  hash->occupied = 0;
+  hash->used = 0;
   hash->keys = keys;
   hash->values = values;
+  hash->index = index;
   return 1;
 }
 
 // Capacity must be a power of two for `& (cap - 1)`-based slotting.
-// Match runtime/runtime.c:w_hash_new — always start at 8 slots; the size
-// `hint` is ignored. The compiler creates lots of small AST hashes, so
-// matching the initial cap and grow threshold is what keeps slot layouts
-// (and iteration order) lined up between C VM and stage 2.
+// Iteration order is insertion order on every engine, so the pre-size
+// here is purely an allocation optimization — `hint` inserts complete
+// without intermediate rebuilds.
 static TcRuntimeHash *runtime_hash_new(size_t hint, TcError *err) {
   TcRuntimeHash *hash = (TcRuntimeHash *)calloc(1, sizeof(TcRuntimeHash));
   if (!hash) {
     tc_error_set(err, "hash allocation failed");
     return NULL;
   }
-  // Pre-size so `hint` inserts can complete without grows. Mirrors the
-  // load-factor check in hash_set_value (`(count+1)*4 >= cap*3` triggers
-  // grow); pre-iterating gets us to the same final cap native would
-  // settle at, so slot layout and iteration order match exactly.
   size_t cap = 8;
   while (hint * 4 >= cap * 3) cap *= 2;
   if (!hash_allocate_storage(hash, cap, err)) {
@@ -1113,64 +1112,90 @@ static uint64_t hash_value64(TcValue value) {
   }
 }
 
-// Slot-indexed find: probe from the hashed slot, return either the slot
-// holding `key` (`*found = 1`) or the first viable insertion slot
-// (`*found = 0`). A tombstone counts as viable for insertion but we keep
-// scanning for a real hit past it. Same behaviour as runtime.c:w_hash_find_slot.
-static size_t hash_find_slot(TcRuntimeHash *hash, TcValue key, int *found) {
+// Probe the index table for `key`. Returns the index-table slot where the
+// key lives or where an insert should land (first tombstone reused), and
+// writes the dense offset to *dense_out on a hit (-1 on a miss). Returns
+// -1 only for the degenerate all-tombstone table with no match. Mirrors
+// runtime.c:w_hash_find_slot.
+static int64_t hash_find_slot(TcRuntimeHash *hash, TcValue key, int64_t *dense_out) {
   size_t mask = hash->cap - 1;
   size_t idx = (size_t)hash_value64(key) & mask;
-  size_t first_tombstone = SIZE_MAX;
+  int64_t first_tombstone = -1;
   for (size_t probes = 0; probes < hash->cap; probes++) {
-    TcValue k = hash->keys[idx];
-    if (k == TC_HASH_EMPTY) {
-      *found = 0;
-      return first_tombstone == SIZE_MAX ? idx : first_tombstone;
+    int32_t d = hash->index[idx];
+    if (d == TC_HASH_SLOT_EMPTY) {
+      *dense_out = -1;
+      return first_tombstone >= 0 ? first_tombstone : (int64_t)idx;
     }
-    if (k == TC_HASH_TOMBSTONE) {
-      if (first_tombstone == SIZE_MAX) first_tombstone = idx;
-    } else if (k == key ||
-               (!(w_is_symbol(k) && w_is_symbol(key)) && value_equal(k, key))) {
+    if (d == TC_HASH_SLOT_TOMB) {
+      if (first_tombstone < 0) first_tombstone = (int64_t)idx;
+    } else {
       // Bit-equal short-circuit: interned symbols and inline ints compare
       // equal at the WValue bit level, so the hot probe shape (sym key,
-      // sym slot) hits without entering the function.
-      *found = 1;
-      return idx;
+      // sym slot) hits without entering the function. Live index slots
+      // never reference a hole, so no sentinel checks on dense keys.
+      TcValue k = hash->keys[d];
+      if (k == key ||
+          (!(w_is_symbol(k) && w_is_symbol(key)) && value_equal(k, key))) {
+        *dense_out = (int64_t)d;
+        return (int64_t)idx;
+      }
     }
     idx = (idx + 1) & mask;
   }
 
   // A delete-heavy table may contain no empty slot. Terminate after one full
   // circuit and let insertion reuse the first tombstone instead of spinning.
-  *found = 0;
+  *dense_out = -1;
   return first_tombstone;
 }
 
-// Grow the slot table to `min_cap` (rounded up to a power of two >= 8) and
-// re-probe every live entry into a fresh layout. Tombstones are dropped.
-// Mirrors runtime/runtime.c:w_hash_grow.
+// Compact the dense arrays in place (dropping holes, preserving insertion
+// order), then rebuild the index table at `min_cap` rounded up to a power
+// of two >= 8. Mirrors runtime/runtime.c:w_hash_rebuild.
 static int hash_grow(TcRuntimeHash *hash, size_t min_cap, TcError *err) {
   size_t cap = 8;
   while (cap < min_cap) cap *= 2;
-  WValue *old_keys = hash->keys;
-  WValue *old_values = hash->values;
-  size_t old_cap = hash->cap;
-  if (!hash_allocate_storage(hash, cap, err)) {
-    return 0;
+
+  uint32_t w = 0;
+  for (uint32_t i = 0; i < hash->used; i++) {
+    if (hash->keys[i] == TC_HASH_TOMBSTONE) continue;
+    if (w != i) {
+      hash->keys[w] = hash->keys[i];
+      hash->values[w] = hash->values[i];
+    }
+    w++;
   }
-  size_t mask = cap - 1;
-  for (size_t i = 0; i < old_cap; i++) {
-    WValue k = old_keys[i];
-    if (k == TC_HASH_EMPTY || k == TC_HASH_TOMBSTONE) continue;
-    size_t idx = (size_t)hash_value64(k) & mask;
-    while (hash->keys[idx] != TC_HASH_EMPTY) idx = (idx + 1) & mask;
-    hash->keys[idx] = k;
-    hash->values[idx] = old_values[i];
-    hash->count++;
-    hash->occupied++;
+  hash->used = w;
+  hash->count = w;
+
+  if (cap != hash->cap) {
+    WValue *keys = (WValue *)realloc(hash->keys, hash_dense_cap(cap) * sizeof(WValue));
+    WValue *values = (WValue *)realloc(hash->values, hash_dense_cap(cap) * sizeof(WValue));
+    int32_t *index = (int32_t *)realloc(hash->index, cap * sizeof(int32_t));
+    if (!keys || !values || !index) {
+      // A successful realloc already moved that array; store whatever we
+      // have so the hash stays freeable, then report the failure.
+      if (keys) hash->keys = keys;
+      if (values) hash->values = values;
+      if (index) hash->index = index;
+      tc_error_set(err, "hash entry allocation failed");
+      return 0;
+    }
+    hash->keys = keys;
+    hash->values = values;
+    hash->index = index;
+    hash->cap = (uint32_t)cap;
   }
-  free(old_keys);
-  free(old_values);
+  memset(hash->index, 0xFF, hash->cap * sizeof(int32_t));
+
+  // Keys are unique, so probing to the first empty slot is sufficient.
+  size_t mask = hash->cap - 1;
+  for (uint32_t d = 0; d < hash->used; d++) {
+    size_t idx = (size_t)hash_value64(hash->keys[d]) & mask;
+    while (hash->index[idx] != TC_HASH_SLOT_EMPTY) idx = (idx + 1) & mask;
+    hash->index[idx] = (int32_t)d;
+  }
   return 1;
 }
 
@@ -1194,49 +1219,59 @@ static int promote_ast_value(TcValue *value, TcError *err) {
 static int hash_set_value(TcRuntimeHash *hash, TcValue key, TcValue value, TcError *err) {
   if (!promote_ast_value(&value, err)) return 0;
   if (hash->cap == 0 && !hash_grow(hash, 8, err)) return 0;
-  // Keep total occupied slots (live + tombstones) below 75%. Grow when live
+  // Keep consumed dense entries (live + holes) below 75% of cap — that
+  // bound is also what guarantees a free dense slot. Grow when live
   // entries need the room; otherwise rebuild at the same size to discard
-  // tombstones. Mirrors runtime/runtime.c:w_hash_prepare_set.
-  if ((hash->occupied + 1) * 4 >= hash->cap * 3) {
+  // holes and tombstones. Mirrors runtime/runtime.c:w_hash_prepare_set.
+  if ((hash->used + 1) * 4 >= hash->cap * 3) {
     size_t min_cap =
         (hash->count + 1) * 4 >= hash->cap * 3 ? hash->cap * 2 : hash->cap;
     if (!hash_grow(hash, min_cap, err)) return 0;
   }
-  int found = 0;
-  size_t slot = hash_find_slot(hash, key, &found);
-  if (slot == SIZE_MAX) {
+  int64_t dense = -1;
+  int64_t slot = hash_find_slot(hash, key, &dense);
+  if (slot < 0) {
     if (!hash_grow(hash, hash->cap * 2, err)) return 0;
-    slot = hash_find_slot(hash, key, &found);
-    if (slot == SIZE_MAX) {
+    slot = hash_find_slot(hash, key, &dense);
+    if (slot < 0) {
       tc_error_set(err, "hash insertion found no available slot");
       return 0;
     }
   }
-  if (!found) {
-    if (hash->keys[slot] == TC_HASH_EMPTY) hash->occupied++;
-    hash->count++;
+  if (dense >= 0) {
+    // Overwrite keeps the key's insertion position.
+    hash->values[dense] = value;
+    return 1;
   }
-  hash->keys[slot] = key;
-  hash->values[slot] = value;
+  uint32_t d = hash->used++;
+  hash->keys[d] = key;
+  hash->values[d] = value;
+  hash->index[slot] = (int32_t)d;
+  hash->count++;
   return 1;
 }
 
 static TcValue hash_get_value(TcRuntimeHash *hash, TcValue key) {
   if (!hash || hash->cap == 0) return tc_box_nil();
-  int found = 0;
-  size_t slot = hash_find_slot(hash, key, &found);
-  return found ? hash->values[slot] : tc_box_nil();
+  int64_t dense = -1;
+  (void)hash_find_slot(hash, key, &dense);
+  return dense >= 0 ? hash->values[dense] : tc_box_nil();
 }
 
 static TcValue hash_delete_value(TcRuntimeHash *hash, TcValue key) {
   if (!hash || hash->cap == 0) return tc_box_nil();
-  int found = 0;
-  size_t slot = hash_find_slot(hash, key, &found);
-  if (!found) return tc_box_nil();
-  TcValue removed = hash->values[slot];
-  hash->keys[slot] = TC_HASH_TOMBSTONE;
-  hash->values[slot] = tc_box_nil();
+  int64_t dense = -1;
+  int64_t slot = hash_find_slot(hash, key, &dense);
+  if (dense < 0) return tc_box_nil();
+  TcValue removed = hash->values[dense];
+  hash->keys[dense] = TC_HASH_TOMBSTONE;  // dense hole; compacted on rebuild
+  hash->values[dense] = tc_box_nil();
+  hash->index[slot] = TC_HASH_SLOT_TOMB;
   hash->count--;
+  // Trailing holes can be reclaimed immediately — no index entry
+  // references them once tombstoned.
+  while (hash->used > 0 && hash->keys[hash->used - 1] == TC_HASH_TOMBSTONE)
+    hash->used--;
   return removed;
 }
 
@@ -2317,9 +2352,9 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
               TcValue from_v = tc_box_nil();
               TcValue to_v = tc_box_nil();
               int excl = 0;
-              for (size_t k = 0; k < rh->cap; k++) {
+              for (uint32_t k = 0; k < rh->used; k++) {
                 TcValue key = rh->keys[k];
-                if (key == TC_HASH_EMPTY || key == TC_HASH_TOMBSTONE) continue;
+                if (key == TC_HASH_TOMBSTONE) continue;
                 if (tc_kind(key) != TC_VAL_SYMBOL) continue;
                 const char *kb = tc_str_bytes_only(key);
                 size_t kl = tc_str_len(key);
@@ -2455,9 +2490,9 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
               TcValue from_v = tc_box_nil();
               TcValue to_v = tc_box_nil();
               int excl = 0;
-              for (size_t k = 0; k < rh->cap; k++) {
+              for (uint32_t k = 0; k < rh->used; k++) {
                 TcValue key = rh->keys[k];
-                if (key == TC_HASH_EMPTY || key == TC_HASH_TOMBSTONE) continue;
+                if (key == TC_HASH_TOMBSTONE) continue;
                 if (tc_kind(key) != TC_VAL_SYMBOL) continue;
                 const char *kb = tc_str_bytes_only(key);
                 size_t kl = tc_str_len(key);
@@ -2701,9 +2736,9 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
           TcValue from_v = tc_box_nil();
           TcValue to_v = tc_box_nil();
           int excl = 0;
-          for (size_t k = 0; k < rh->cap; k++) {
+          for (uint32_t k = 0; k < rh->used; k++) {
             TcValue key = rh->keys[k];
-            if (key == TC_HASH_EMPTY || key == TC_HASH_TOMBSTONE) continue;
+            if (key == TC_HASH_TOMBSTONE) continue;
             if (tc_kind(key) != TC_VAL_SYMBOL) continue;
             const char *kb = tc_str_bytes_only(key);
             size_t kl = tc_str_len(key);

@@ -79,6 +79,51 @@
       raise "plot metadata must be a Hash"
     copy(value)
 
+  -> .portable_number?(value)
+    names = [
+      "Integer", "Int", "BigInt", "Float", "Float16", "Float32",
+      "Float64", "Float80", "Float128", "Float256", "Rational",
+      "Decimal", "Decimal32", "Decimal64", "Decimal128"
+    ]
+    names.include?(value.class_name)
+
+  # Validate and copy a backend-portable value tree. Hash keys remain exact but
+  # must be Strings or Symbols so JSON/object backends do not invent a key
+  # conversion. Numeric leaves must be finite.
+  -> .portable(value, context = "plot portable data")
+    return nil if value == nil
+    name = value.class_name
+    return value if name == "String" || name == "Symbol"
+    return value if value == true || value == false
+    if portable_number?(value)
+      number(value, context)
+      return value
+    if name == "Array"
+      out = []
+      index = 0
+      while index < value.size
+        out.push(portable(value[index], context))
+        index += 1
+      return out
+    if name == "Hash"
+      out = {}
+      encoded_keys = {}
+      keys = value.keys
+      index = 0
+      while index < keys.size
+        key = keys[index]
+        key_name = key.class_name
+        if key_name != "String" && key_name != "Symbol"
+          raise context + " keys must be Strings or Symbols"
+        encoded_key = key.to_s()
+        if encoded_keys.has_key?(encoded_key)
+          raise context + " keys must be unique after String/Symbol encoding"
+        encoded_keys[encoded_key] = true
+        out[key] = portable(value[key], context)
+        index += 1
+      return out
+    raise context + " must contain only portable value-tree data"
+
   -> .positive_integer(value, context, maximum = 100_000)
     integer = value.to_i()
     if integer != value || integer <= 0 || integer > maximum

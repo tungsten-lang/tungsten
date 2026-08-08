@@ -83,6 +83,56 @@ binary64 environment, and metadata insertion order produce the same value tree
 and JSON bytes. Core does not make an impure, random, concurrent, or
 platform-dependent callback deterministic.
 
+## Realized model checks
+
+`Plot.model_check` records already-realized observed values and model draws as
+a composable plot group. It deliberately does not fit or sample a model:
+
+```tungsten
+use core/plot
+
+observed = [[~0.0, ~0.1], [~1.0, ~0.8], [~2.0, ~0.2]]
+draws = [
+  [[~0.0, ~0.2], [~1.0, ~0.7], [~2.0, ~0.3]],
+  [[~0.0, ~0.0], [~1.0, ~0.9], [~2.0, ~0.1]]
+]
+check = Plot.model_check(
+  observed, draws, "posterior-predictive-curve", "shared-linear-y",
+  {
+    :observed_transform_id => "identity-v1",
+    :draw_source_id => "posterior-draws-2026-08-08",
+    :seed => 17
+  },
+  :animate,
+  {:id => "fit-check", :units => "m/s"})
+
+scene = Plot.scene()
+check.add_to(scene)
+```
+
+The required quantity and scale identifiers state the caller's comparability
+claim. Required provenance identifies the observed-data transform and source
+of the ordered draws. `PlotModelCheck#to_data` preserves those declarations,
+optional units, raw points, draw order, coordinate mapping, node data, and
+caller metadata under `tungsten.plot.model-check/v1`; it records statistical
+validity as `:not_assessed`. Scene-group and timeline metadata embed the smaller
+`tungsten.plot.model-check-summary/v1` declaration rather than duplicating all
+draw values.
+
+`:superpose` emits `id/observed` plus stable `id/draw-N` polylines. `:animate`
+emits `id/observed` and one `id/model-draw` polyline for an Animation timeline
+to update. Both forms are ordinary `PlotGroup` data and can be composed with
+axes, labels, and layouts. If a `PlotCoordinateSystem` is supplied in options,
+the node geometry is mapped while the source points remain unchanged in the
+full `PlotModelCheck#to_data` payload.
+
+Inputs must be finite polylines with at least two points and a nonempty ordered
+draw Array. Quantity, scale, group id, provenance ids, and units are checked
+strictly; unknown option keys raise. Provenance and caller metadata must be
+portable nested Arrays/Hashes with String or Symbol keys and scalar leaves. A
+shared label does not prove that a transform, sampling process, residual, or
+visual comparison is scientifically appropriate.
+
 ## Output contract
 
 `PlotScene#to_data` returns only ordinary Arrays, Hashes, Strings, Symbols,
@@ -106,6 +156,11 @@ optional drawille bit remains the existing bounded terminal renderer. Legacy
 bin/tungsten run spec/core/plot_scene_spec.w
 bin/tungsten compile spec/core/plot_scene_spec.w --out /tmp/plot-scene-spec
 /tmp/plot-scene-spec
+
+bin/tungsten run spec/core/plot_model_check_spec.w
+bin/tungsten compile spec/core/plot_model_check_spec.w \
+  --out /tmp/plot-model-check-spec
+/tmp/plot-model-check-spec
 
 bin/tungsten run spec/core/visualization_autoload_spec.w
 bin/tungsten compile spec/core/visualization_autoload_spec.w \

@@ -13,6 +13,7 @@ use core/plot/geometry
 use core/plot/scene
 use core/plot/sampling
 use core/plot/layout
+use core/plot/model_check
 
 + Plot
   # ASCII levels as a list of 1-char strings (avoids String#[] edge cases).

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(715 total), grouped by area, with its declaration, a one-line
+(720 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -216,6 +216,7 @@ summary from the source header, and a link to the source.
 | `PlotGroup` | — | — | [`core/plot.w`](../core/plot.w) |
 | `PlotScene` | — | — | [`core/plot.w`](../core/plot.w) |
 | `PlotLayout` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotModelCheck` | — | — | [`core/plot.w`](../core/plot.w) |
 | `Animation` | — | — | [`core/animation.w`](../core/animation.w) |
 | `AnimationValue` | — | — | [`core/animation.w`](../core/animation.w) |
 | `AnimationCamera2D` | — | — | [`core/animation.w`](../core/animation.w) |
@@ -223,6 +224,10 @@ summary from the source header, and a link to the source.
 | `AnimationTrack` | — | — | [`core/animation.w`](../core/animation.w) |
 | `AnimationFrame` | — | — | [`core/animation.w`](../core/animation.w) |
 | `AnimationTimeline` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationTrackIntervalAssertion` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationVerificationResult` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationVerificationReport` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationVerifier` | — | — | [`core/animation.w`](../core/animation.w) |
 | `Plot3D` | `+ Plot3D` | Plot3D — interactive 3D visualization export for grid simulations. | [`core/plot3d.w`](../core/plot3d.w) |
 | `Raster` | `+ Raster` | Raster — an RGB pixel canvas with PNG and animated-GIF encoders. | [`core/raster.w`](../core/raster.w) |
 | `PngEncoder` | `+ PngEncoder` | -------------------------------------------------------------------------- | [`core/raster.w`](../core/raster.w) |

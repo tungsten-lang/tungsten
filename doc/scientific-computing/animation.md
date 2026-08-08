@@ -44,6 +44,92 @@ There is no automatic curve correspondence, path resampling, formula parsing,
 or glyph-to-glyph matching. That limitation is explicit so a plausible-looking
 animation cannot silently invent mathematical correspondence.
 
+## Hypothetical outcome timelines
+
+An animated `PlotModelCheck` compiles into an exact-frame step timeline:
+
+```tungsten
+use core/animation
+
+observed = [[~0.0, ~0.1], [~1.0, ~0.8], [~2.0, ~0.2]]
+draws = [
+  [[~0.0, ~0.2], [~1.0, ~0.7], [~2.0, ~0.3]],
+  [[~0.0, ~0.0], [~1.0, ~0.9], [~2.0, ~0.1]]
+]
+check = Plot.model_check(
+  observed, draws, "posterior-predictive-curve", "shared-linear-y",
+  {:observed_transform_id => "identity-v1",
+   :draw_source_id => "posterior-draws-2026-08-08"},
+  :animate,
+  {:id => "fit-check"})
+scene = Plot.scene()
+check.add_to(scene)
+
+# Every draw owns five frame intervals at 20 frames/second.
+timeline = Animation.model_check(scene, check, 5, 20)
+```
+
+Keyframe `i` is placed at frame `i * frames_per_draw`. The mathematical
+duration is `draw_count * frames_per_draw / fps`, so the last draw remains
+visible through the final sample. If binary division would make the timeline's
+ceiling rule add a duplicate terminal frame, the stored duration is moved a
+few binary64 ulps inward; `:total_frame_intervals` in timeline metadata remains
+authoritative. The ordinary `:step` `:points` track preserves input draw order
+and supports different point counts between draws. This is retained HOP data,
+not a perceptual dwell-time recommendation, statistical validity claim, GIF,
+or video renderer. Caller timeline metadata must use the same portable
+Array/Hash/scalar value-tree contract as model-check provenance.
+
+## Track-interval verification
+
+Direct assertions can make temporal claims over declared node-property track
+supports executable:
+
+```tungsten
+use core/animation
+
+verification_scene = Plot.scene()
+verification_scene.add(Plot.polyline(
+  [[~0.0, ~0.0], [~1.0, ~1.0]], false, "curve"))
+verification_timeline = Animation.timeline(verification_scene, ~2.0, 20)
+verification_timeline.add(Animation.move(
+  "curve", ~0.0, ~1.0, [~0.0, ~0.0], [~1.0, ~0.0]))
+verification_timeline.add(Animation.fade(
+  "curve", ~1.0, ~1.0, ~1.0, ~0.0))
+
+claim = Animation.assert_track_relation(
+  "move-meets-fade",
+  "curve", :translate, :meets,
+  "curve", :opacity)
+report = Animation.verify(verification_timeline, [claim])
+raise "temporal claim failed" if !report.passed?()
+```
+
+The verifier implements Allen's 13 relations:
+
+```text
+before / after                 meets / met_by
+overlaps / overlapped_by       starts / started_by
+during / contains              finishes / finished_by
+equals
+```
+
+An interval is exactly the first and last declared keyframe time for one node
+track. It is not the interval of nonzero velocity, visible change, or rendered
+motion. Equal-valued endpoint keyframes still have support. Camera tracks are
+not included in this initial node-track scope.
+
+The default epsilon is exactly zero. A caller may provide one finite,
+nonnegative absolute tolerance in timeline seconds. The verifier classifies
+all 13 relations together: if tolerance makes zero or multiple relations
+consistent, the result is `unknown` with an `:epsilon_ambiguous` diagnostic.
+Missing tracks, ambiguous lookup, and intervals no wider than epsilon are also
+`unknown`; a uniquely observed relation different from the assertion is
+`fail`. Reports preserve assertion order and use
+`tungsten.animation.verification/v1`, with pass/fail/unknown counts and witness
+intervals. Spatial bounds, collision, path shape, renderer output, natural
+language assertion synthesis, and automatic repair are not verified.
+
 ## Camera and frame stepping
 
 `AnimationCamera2D` records center, positive zoom, and rotation for an
@@ -91,4 +177,14 @@ bin/tungsten run spec/core/animation_timeline_spec.w
 bin/tungsten compile spec/core/animation_timeline_spec.w \
   --out /tmp/animation-timeline-spec
 /tmp/animation-timeline-spec
+
+bin/tungsten run spec/core/animation_model_check_spec.w
+bin/tungsten compile spec/core/animation_model_check_spec.w \
+  --out /tmp/animation-model-check-spec
+/tmp/animation-model-check-spec
+
+bin/tungsten run spec/core/animation_verification_spec.w
+bin/tungsten compile spec/core/animation_verification_spec.w \
+  --out /tmp/animation-verification-spec
+/tmp/animation-verification-spec
 ```

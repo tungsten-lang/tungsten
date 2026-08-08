@@ -47,3 +47,12 @@
 
   -> .ease(name, progress)
     AnimationValue.ease(name, progress)
+
+  -> .assert_track_relation(id, left_target, left_property, relation,
+                            right_target, right_property)
+    AnimationTrackIntervalAssertion.new(
+      id, left_target, left_property, relation,
+      right_target, right_property)
+
+  -> .verify(timeline, assertions, epsilon = ~0.0)
+    AnimationVerifier.verify(timeline, assertions, epsilon)

@@ -11,4 +11,6 @@ use core/animation/keyframe
 use core/animation/track
 use core/animation/frame
 use core/animation/timeline
+use core/animation/model_check
+use core/animation/verification
 use core/animation/facade

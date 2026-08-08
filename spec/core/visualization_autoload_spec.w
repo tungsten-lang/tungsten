@@ -15,4 +15,21 @@ visualization_check("autoload.plot_scene", scene.to_data[:nodes].size == 1)
 visualization_check("autoload.animation", timeline.frame_count == 3)
 visualization_check("autoload.frame", timeline.frame(1).updates[0][:value] == ~0.5)
 
+model_points = [[~0.0, ~0.0], [~1.0, ~1.0]]
+model_check = PlotModelCheck.new(
+  model_points, [model_points], "response", "linear-y",
+  {:observed_transform_id => "identity-v1", :draw_source_id => "fixture-v1"})
+visualization_check("autoload.model_check",
+                    model_check.to_data[:draw_count] == 1)
+
+assertion = AnimationTrackIntervalAssertion.new(
+  "fade-equals-itself", "line", :opacity, :equals, "line", :opacity)
+verification = AnimationVerifier.verify(timeline, [assertion])
+result = verification.results[0]
+visualization_check("autoload.verification_result",
+                    result.class_name == "AnimationVerificationResult")
+visualization_check("autoload.verification_report",
+                    verification.class_name == "AnimationVerificationReport")
+visualization_check("autoload.verifier", verification.passed?)
+
 << "visualization_autoload_spec: all checks passed"

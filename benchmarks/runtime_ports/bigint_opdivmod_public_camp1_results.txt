@@ -1,0 +1,11 @@
+# Div/mod re-assessment campaigns, interleaved ABBA pairs x8, thread-CPU
+# medians (med-pair-ratio column):
+# Campaign A: div-one 1.086  div-intarg 1.037  div-fourtwo 1.018
+#   div-eq 1.010  div-bz 0.998  div-neg 0.994  mod-one 1.035
+#   mod-intarg 1.018  mod-fourtwo 1.043  mod-eq 1.014  mod-bz 1.017
+#   mod-neg 1.020
+# Campaign B (raw samples in bigint_opdivmod_public_camp2_results.txt):
+#   div-one 1.014  div-intarg 0.992  div-fourtwo 1.027  div-eq 1.005
+#   div-bz 1.003  div-neg 0.979  mod-one 1.046  mod-intarg 0.989
+#   mod-fourtwo 1.024  mod-eq 1.014  mod-bz 1.006  mod-neg 1.006
+# Worst rows 1.086 / 1.046 — retention gate <= 1.10 met everywhere.

@@ -33824,6 +33824,30 @@ WValue w_bigint_literal_cached(const char *text, _Atomic uint64_t *slot) {
     return w_bigint_literal_clone((WValue)expected);
 }
 
+/* ---- Source-routed bigint `/` and `%` (weak-linkage arms) ----
+ * Same seam design as __w_bigint_plus_src / __w_bigint_and_src: the weak
+ * default is exactly the C kernel; a program that compiles
+ * core/numeric/big_int.w emits a STRONG wrapper around the compiled
+ * BigInt#/ and BigInt#% workers, and strong-over-weak link resolution
+ * routes both-heap-bigint division through source. The retained source
+ * bodies are single-boundary compositions over bigint_div_any /
+ * bigint_mod_any — the division specialization tree (preinverse 2-by-1,
+ * Burnikel-Ziegler, Jebelean exact, width-certified kernels) stays in C.
+ * TUNGSTEN_BIGINT_SRC_OPS=0 pins the C path. */
+__attribute__((weak)) WValue __w_bigint_div_src(WValue a, WValue b) {
+    return bigint_div_any(a, b);
+}
+__attribute__((weak)) WValue __w_bigint_mod_src(WValue a, WValue b) {
+    return bigint_mod_any(a, b);
+}
+
+/* Both heap BigInts, any signs and widths: the source bodies pass every
+ * admitted shape to the same kernel entry the C arm used, so the bail
+ * set (any non-heap operand) is disjoint by construction. */
+static inline int bigint_divmod_src_shape(WValue a, WValue b) {
+    return w_is_bigint(a) && w_is_bigint(b);
+}
+
 WValue w_div(WValue a, WValue b) {
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_div_elem(a, b);
     if (is_decimal_any(a) && is_decimal_any(b))
@@ -33855,8 +33879,13 @@ WValue w_div(WValue a, WValue b) {
         if (bv == 0) die("division by zero");
         return w_box_int_checked(w_as_int(a) / bv);
     }
-    if (w_is_integer_any(a) && w_is_integer_any(b))
+    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+        int src_off = g_bigint_src_ops_off;
+        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
+        if (__builtin_expect(src_off == 0, 1) && bigint_divmod_src_shape(a, b))
+            return __w_bigint_div_src(a, b);
         return bigint_div_any(a, b);
+    }
     /* User-defined classes: route `a / b` to a./(b). */
     if (w_is_instance(a))
         return w_method_call_fast(a, w_string("/"), &b, 1);
@@ -33942,8 +33971,13 @@ WValue w_mod(WValue a, WValue b) {
         if (bv == 0) die("modulo by zero");
         return w_box_int_checked(w_as_int(a) % bv);
     }
-    if (w_is_integer_any(a) && w_is_integer_any(b))
+    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+        int src_off = g_bigint_src_ops_off;
+        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
+        if (__builtin_expect(src_off == 0, 1) && bigint_divmod_src_shape(a, b))
+            return __w_bigint_mod_src(a, b);
         return bigint_mod_any(a, b);
+    }
     /* User-defined classes: route `a % b` to a.%(b). */
     if (w_is_instance(a))
         return w_method_call_fast(a, w_string("%"), &b, 1);
@@ -46753,6 +46787,15 @@ WValue w_bigint_add(WValue a, WValue b) {
 }
 WValue w_bigint_sub(WValue a, WValue b) {
     return bigint_sub_any(a, b);
+}
+/* Exported boundaries for the BigInt#/ and BigInt#% source bodies —
+ * bigint_div_any/mod_any get internalized out of the runtime archive,
+ * so these w_-prefixed wrappers are the ccall surface (gcd pattern). */
+WValue w_bigint_div(WValue a, WValue b) {
+    return bigint_div_any(a, b);
+}
+WValue w_bigint_mod(WValue a, WValue b) {
+    return bigint_mod_any(a, b);
 }
 
 /* Result-construction boundaries for source kernel bodies. Alloc hands out

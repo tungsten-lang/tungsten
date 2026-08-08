@@ -96,7 +96,25 @@ benchmark structure to compare C, first-source, and optimized-source versions.
 | BigInt `abs` | `run_bigint_abs_public.sh` | Retained under the 5% budget — a strict win. The source body mirrors the C IC exactly: identity for effective-positive receivers, `w_bigint_mark_shared_value` plus a tag-overlay flip through `wvalue_from_bits` for effective-negative ones; the IC row is retired. Two public campaigns measured 0.968/0.981 (positive), 0.969/0.962 (negative), and 0.947/0.941 (sign-alternating) against the native IC. The port exposed a tree-walker gap: `wvalue_from_bits` had no BigInt arm, so the interpreter died mid-spec on the first source-level overlay flip — while `bin/tungsten run` still exited 0, hiding the death from tail-line gates. The fix adds the checked `w_bigint_from_bits` bridge (rejects parked/dead headers), and the gate battery now diffs full compiled-vs-interpreter outputs (8 spec pairs byte-identical). Raw samples: `bigint_abs_public_{pre,post_v1,post_v2}_results.txt`. |
 | BigInt `gcd` | `run_bigint_gcd_public.sh` | Retained under the 5% budget. The port is a source shim: `BigInt#gcd` ccalls the new exported `w_bigint_gcd` boundary (the Lehmer/HGCD kernel `bigint_gcd_any` is deliberately static-always-inline for its rational-normalization callers, so a thin external wrapper is the ccall surface — the modpow pattern). The override also shields BigInt receivers from inheriting `Int#gcd`'s Euclidean remainder loop. Two public campaigns measured 1.006/1.004 (one-limb pairs, the dispatch-sensitive 20ns stratum), 0.987/0.972 (inline argument), 0.971/0.949 (near-equal 4-limb), 0.979/0.971 (8-vs-4-limb skew), 1.012/1.002 (32-limb shared-factor). Hardened gates: `gcd`/`int`/`bigint_identity`/`rational`/`bigint_tag_sign` specs byte-identical compiled vs tree walker; stage identity re-verified. Raw samples: `bigint_gcd_public_{pre,post_v1,post_v2}_results.txt`. |
 | BigInt `isqrt` | `run_bigint_isqrt_public.sh` | Retained under the 5% budget. `BigInt#isqrt` is a source shim over the already-exported `bigint_isqrt_any` divide-and-conquer kernel; the IC row is retired, and the override shields BigInt receivers from `Int#isqrt`'s Newton loop. Two public campaigns across 1/4/16/64-limb receivers measured 0.973/0.994, 1.043/1.009, 1.011/1.012, and 1.014/1.029 — every row inside the budget, including the 7.7ns one-limb u128 fast path. Negative-receiver error text is byte-identical (it lives in the kernel). Gates: `bigint_bang` (mixed-width isqrt sweep), `int`, `bigint_identity`, and the 769-line `bigint_limb_sweep` all byte-identical across engines; stage identity re-verified. Raw samples: `bigint_isqrt_public_{pre,post_v1,post_v2}_results.txt`. |
-### Division (`/`, `%`) — assessed, not attempted (2026-08-08)
+### Division (`/`, `%`) — re-assessed and dispatch-migrated (2026-08-08)
+
+RE-ASSESSMENT (Erik: "I can't think of any reason that the c should be
+faster — it likely was assessed on the old dispatch chain"): CONFIRMED
+empirically. With the weak-arm seam in `w_div`/`w_mod` routing every
+both-heap-BigInt pair through source plumbing bodies
+(`BigInt#/(BigInt) -> ccall w_bigint_div`, likewise `%`), two interleaved
+ABBA campaigns (`run_bigint_opdivmod_public.sh`, 12 rows) measured worst
+rows 1.086 then 1.046 — the one-limb ~11ns row's toll — with every
+at-width row 0.97-1.03 (fourtwo, near-equal, and the 11µs Burnikel-Ziegler
+band at parity). The dispatch chain is toll-free within the budget, so
+`/` and `%` are RETAINED as source-routed operators. What stays in C is
+the division KERNEL tier, per the original analysis below — those
+paragraphs still describe why a source division kernel is a from-scratch
+build, now decoupled from the (solved) dispatch question. Raw samples:
+`bigint_opdivmod_public_camp{1,2}_results.txt`; semantics pinned by
+`spec/numeric/bigint_divmod_spec.w` (truncated division, both engines).
+
+### Original kernel assessment (2026-08-08, still governing the kernel tier)
 
 Add, subtract, and multiply each migrated by standing on an existing
 hand-written asm kernel (`asm_add_no`, `asm_sub_no`, `asm_mulbase`), which

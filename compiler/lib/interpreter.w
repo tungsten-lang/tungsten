@@ -1462,6 +1462,10 @@ use target
       return ccall("w_bit_or", args[1], args[2])
     when "w_bit_xor"
       return ccall("w_bit_xor", args[1], args[2])
+    when "w_bigint_div"
+      return ccall("w_bigint_div", args[1], args[2])
+    when "w_bigint_mod"
+      return ccall("w_bigint_mod", args[1], args[2])
     when "bigint_isqrt_any"
       return ccall("bigint_isqrt_any", args[1])
     when "w_bigint_mark_shared_value"
@@ -3060,7 +3064,7 @@ use target
       # delegates the selector to the same exported C boundary the kernel's
       # fallback arms use, exactly like compiled infix `+` reaching the
       # runtime arm. Values are engine-identical either way.
-      if primitive_class[:name] == "BigInt" && name in ("+" "-" "*" "&" "|" "^") && args.size() == 1 && block == nil
+      if primitive_class[:name] == "BigInt" && name in ("+" "-" "*" "&" "|" "^" "/" "%") && args.size() == 1 && block == nil
         if name == "+"
           return ccall("w_bigint_add", recv, args[0])
         if name == "*"
@@ -3071,6 +3075,10 @@ use target
           return ccall("w_bit_or", recv, args[0])
         if name == "^"
           return ccall("w_bit_xor", recv, args[0])
+        if name == "/"
+          return ccall("w_div", recv, args[0])
+        if name == "%"
+          return ccall("w_mod", recv, args[0])
         return ccall("w_bigint_sub", recv, args[0])
       m = lookup_method(primitive_class, name, args.size(), block != nil, args)
       # For names the interpreter implements as builtins, a TRAIT DEFAULT

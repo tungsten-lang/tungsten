@@ -2779,7 +2779,7 @@ static int method_name_token_ast(TcAstParser *p) {
   return name_token_ast(p) || kind == TC_K_PLUS || kind == TC_K_MINUS || kind == TC_K_STAR || kind == TC_K_SLASH ||
          kind == TC_K_EQ || kind == TC_K_LT || kind == TC_K_GT || kind == TC_K_LBRACKET ||
          kind == TC_K_PUTS_OP || kind == TC_K_CLASS_DEF ||
-         kind == TC_K_AMPERSAND || kind == TC_K_PIPE || kind == TC_K_CARET;
+         kind == TC_K_AMPERSAND || kind == TC_K_PIPE || kind == TC_K_CARET || kind == TC_K_PERCENT;
 }
 
 /* Lookahead: does the paren group at p->pos hold only type-name tokens

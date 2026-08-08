@@ -728,6 +728,30 @@
   -> ^(other)(Number)
     ccall("w_bit_xor", self, other)
 
+  # Division and modulo, source-routed for both-heap-BigInt pairs (any
+  # signs and widths — the bodies pass every admitted shape to the same
+  # kernel entry the C arm used, so the seam's bail set stays disjoint by
+  # construction). The division SPECIALIZATION TREE (preinverse 2-by-1
+  # divide, Burnikel-Ziegler recursion, Jebelean exact division, the
+  # width-certified quotient/mod kernels) deliberately stays in the
+  # runtime: porting it means writing and oracle-validating a new division
+  # kernel from scratch, in the region where C's specialization density is
+  # highest (assessed 2026-08-08, re-measured with these bodies — the
+  # dispatch chain itself is toll-free within noise). The (Number)
+  # catch-alls keep the polymorphic entries for rational/decimal/float
+  # operands and int promotion.
+  -> /(other)(BigInt)
+    ccall("w_bigint_div", self, other)
+
+  -> /(other)(Number)
+    ccall("w_div", self, other)
+
+  -> %(other)(BigInt)
+    ccall("w_bigint_mod", self, other)
+
+  -> %(other)(Number)
+    ccall("w_mod", self, other)
+
   # Greatest common divisor. The Lehmer/HGCD kernel stays in the runtime
   # (same tier as modpow's bigint_powmod_any); this override exists so the
   # method surface lives in source AND so dispatch never falls through to

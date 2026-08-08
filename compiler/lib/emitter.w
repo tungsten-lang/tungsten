@@ -2251,7 +2251,7 @@ ewscope_md_state = {ids: {}}
   # reference is transparent to whole-program LTO. A reopened `+` wins here
   # exactly as it does in the method table: last definition survives the
   # replace_or_append pass, so the wrapper names the surviving body.
-  big_op_wrappers = {"+" => "__w_bigint_plus_src", "-" => "__w_bigint_minus_src", "*" => "__w_bigint_times_src", "&" => "__w_bigint_and_src", "|" => "__w_bigint_or_src", "^" => "__w_bigint_xor_src"}
+  big_op_wrappers = {"+" => "__w_bigint_plus_src", "-" => "__w_bigint_minus_src", "*" => "__w_bigint_times_src", "&" => "__w_bigint_and_src", "|" => "__w_bigint_or_src", "^" => "__w_bigint_xor_src", "/" => "__w_bigint_div_src", "%" => "__w_bigint_mod_src"}
   # B2: the seam target per op, in preference order —
   #   1. the LAST plain-named body (source_method exactly "+"/"-"/"*",
   #      not the synthesized dispatcher): post-Phase-4 core has no such
@@ -2262,7 +2262,7 @@ ewscope_md_state = {ids: {}}
   #      bigint_src_shape already proved both operands, so routing
   #      through the dispatcher would re-test what the arm knows.
   # The dispatcher itself is never wrapped (fn[:overload_dispatcher]).
-  big_op_worker_names = {"+__ovl_BigInt" => "+", "-__ovl_BigInt" => "-", "*__ovl_BigInt" => "*", "&__ovl_BigInt" => "&", "|__ovl_BigInt" => "|", "^__ovl_BigInt" => "^"}
+  big_op_worker_names = {"+__ovl_BigInt" => "+", "-__ovl_BigInt" => "-", "*__ovl_BigInt" => "*", "&__ovl_BigInt" => "&", "|__ovl_BigInt" => "|", "^__ovl_BigInt" => "^", "/__ovl_BigInt" => "/", "%__ovl_BigInt" => "%"}
   big_op_fns = {}
   big_op_worker_fns = {}
   big_op_dispatchers = {}
@@ -2301,7 +2301,7 @@ ewscope_md_state = {ids: {}}
   # between the C VM stage-0 host and the native compiler, and the seam
   # wrappers' emission order otherwise swaps between stage 1 and stage 2
   # (an 8-line byte-identity break that only surfaces under --force).
-  bop_keys = ["+", "-", "*", "&", "|", "^"]
+  bop_keys = ["+", "-", "*", "&", "|", "^", "/", "%"]
   bki = 0
   while bki < bop_keys.size()
     bop = bop_keys[bki]

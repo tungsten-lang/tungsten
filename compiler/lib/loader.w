@@ -634,11 +634,11 @@ use parser
       # Integer/Number leaf methods commonly receive literals or locals, which
       # carry no explicit class reference. The to_i spelling is shared with
       # source-only BigInt identity, so schedule that tiny class once as well.
-      # The bitwise spellings require an explicit receiver: a receiverless
-      # call named "&" is BLOCK INVOCATION `&(args)` — gating on it would
-      # autoload Integer/BigInt into every block-using program (including
-      # the compiler itself, which broke stage identity).
-      bitwise_op_send = call_receiver != nil && call_name in ("&" "|" "^")
+      # The bitwise/divmod spellings require an explicit receiver: a
+      # receiverless call named "&" is BLOCK INVOCATION `&(args)` — gating
+      # on it would autoload Integer/BigInt into every block-using program
+      # (including the compiler itself, which broke stage identity).
+      bitwise_op_send = call_receiver != nil && call_name in ("&" "|" "^" "/" "%")
       if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "digits" "isqrt" "bit_length" "to_s" "abs" "prime?" "+" "-" "*")
         consider_autoload_name("Integer", defined, registry, seen, pending)
         if call_name == "to_i" && @bigint_to_i_unresolved

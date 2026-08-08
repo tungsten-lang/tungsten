@@ -14,7 +14,13 @@ use core/statistics/univariate
 use core/statistics/bivariate
 use core/statistics/estimation/weighted
 use core/statistics/estimation/multivariate
+use core/statistics/robust/location/all_purpose_mean
 use core/statistics/inference/student_t
+use core/statistics/inference/conformal/rank
+use core/statistics/inference/conformal/half_mass
+use core/statistics/inference/relative_fit/bounded_kl
+use core/statistics/resampling/cheap_subsampling
+use core/statistics/sequential/empirical_bernstein
 use core/statistics/regression/solver
 use core/statistics/regression/diagnostics
 use core/statistics/regression/linear_model
@@ -74,6 +80,47 @@ use core/statistics/regression/linear_model
     if weight < ~0.0
       raise "statistics weights must be nonnegative"
     weight
+
+  -> .positive_scalar(value, operation)
+    scalar = Statistics.scalar(value)
+    if scalar <= ~0.0
+      raise operation + " must be positive"
+    scalar
+
+  -> .positive_integer(value, operation)
+    if !Statistics.integer?(value) || value <= 0
+      raise operation + " must be a positive integer"
+    value
+
+  -> .open_probability(value, operation)
+    probability = Statistics.scalar(value)
+    if probability <= ~0.0 || probability >= ~1.0
+      raise operation + " must be strictly between zero and one"
+    probability
+
+  -> .copy_values(values)
+    copy = []
+    values.each -> (value)
+      copy.push(value)
+    copy
+
+  -> .finite_values(values, operation)
+    converted = []
+    values.each -> (value)
+      converted.push(Statistics.scalar(value))
+    if converted.empty?
+      raise operation + " requires at least one observation"
+    converted
+
+  -> .finite_row(row, expected_dimension, operation)
+    converted = []
+    row.each -> (value)
+      converted.push(Statistics.scalar(value))
+    if converted.empty?
+      raise operation + " requires positive-dimensional rows"
+    if expected_dimension != nil && converted.size != expected_dimension
+      raise operation + " requires rectangular rows matching the declared dimension"
+    converted
 
   -> .copy_vector(values)
     copy = []
@@ -171,6 +218,15 @@ use core/statistics/regression/linear_model
   -> .median(values)
     Statistics.quantile(values, ~0.5)
 
+  # Exact one-based order statistic, without interpolated quantile semantics.
+  -> .order_statistic(values, rank)
+    if !Statistics.integer?(rank) || rank <= 0
+      raise "order statistic rank must be a positive integer"
+    sorted = Statistics.finite_values(values, "order statistic").sort
+    if rank > sorted.size
+      raise "order statistic rank exceeds the observation count"
+    sorted[rank - 1]
+
   -> .summarize_pairs(xs, ys)
     size = xs.size
     if size != ys.size
@@ -236,3 +292,44 @@ use core/statistics/regression/linear_model
                         weights = nil, tolerance = ~1.0e-12)
     StatisticsLinearRegression.fit(
       predictors, response, intercept, weights, tolerance)
+
+  -> .all_purpose_mean(values, failure_probability = ~0.05,
+                       max_iterations = 100,
+                       root_tolerance = ~1.0e-12)
+    StatisticsRobustMean.estimate(
+      values, failure_probability, max_iterations, root_tolerance)
+
+  -> .cheap_subsampling_interval(
+      point_estimate, subsample_estimates, sample_size, subsample_size,
+      level = ~0.95, assumption_acknowledgement = nil)
+    StatisticsResampling.cheap_subsampling_interval(
+      point_estimate, subsample_estimates, sample_size, subsample_size,
+      level, assumption_acknowledgement)
+
+  -> .cheap_subsampling_from_indices(
+      values, estimator, subset_indices, level = ~0.95,
+      assumption_acknowledgement = nil)
+    StatisticsResampling.cheap_subsampling_from_indices(
+      values, estimator, subset_indices, level, assumption_acknowledgement)
+
+  -> .conformal_rank(calibration_scores, candidate_score,
+                     miscoverage = ~0.05, tie_policy = :conservative)
+    StatisticsConformal.rank(
+      calibration_scores, candidate_score, miscoverage, tie_policy)
+
+  -> .conformal_half_mass_candidate(sample_rows, candidate_row,
+                                    miscoverage = ~0.05)
+    StatisticsHalfMassConformal.candidate(
+      sample_rows, candidate_row, miscoverage)
+
+  -> .empirical_bernstein_sequence(
+      miscoverage = ~0.05, support_lower = ~0.0,
+      support_upper = ~1.0, kappa = ~0.25)
+    StatisticsEmpiricalBernsteinSequence.new(
+      miscoverage, support_lower, support_upper, kappa)
+
+  -> .bounded_kl_relative_fit(
+      score_rows, score_bound, miscoverage = ~0.05,
+      assumption_acknowledgement = nil)
+    StatisticsRelativeFit.bounded_kl(
+      score_rows, score_bound, miscoverage, assumption_acknowledgement)

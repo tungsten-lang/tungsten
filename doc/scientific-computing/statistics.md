@@ -5,7 +5,12 @@ linear-model research. It is substantially more than a convenience collection,
 but it is not a claim to implement all modern statistics. The current tranche
 provides compensated and mergeable descriptive estimators, explicit weighted
 and multivariate moments, and rank-revealing ordinary/weighted least squares
-with classical and heteroskedasticity-consistent inference.
+with classical and heteroskedasticity-consistent inference. A second focused
+layer adds deterministic foundations from recent research: robust scalar mean
+estimation, cheap-subsampling interval postprocessing, conformal ranks and
+half-mass scores, bounded scalar confidence sequences, and finite-candidate
+relative-fit inversion. These additions expose their assumptions and do not
+claim to implement the full scope of the source papers.
 
 The public facade remains `Statistics`. Implementation is divided by ownership:
 
@@ -15,7 +20,18 @@ core/statistics/univariate.w              scalar moments
 core/statistics/bivariate.w               paired moments
 core/statistics/estimation/weighted.w     scalar weighted estimation
 core/statistics/estimation/multivariate.w weighted vector estimation
+core/statistics/robust/location/
+  all_purpose_mean.w                      robust scalar point estimation
 core/statistics/inference/student_t.w     internal inferential tail integration
+core/statistics/inference/conformal/
+  rank.w                                  exact conformal rank calibration
+  half_mass.w                             half-mass candidate scoring
+core/statistics/inference/relative_fit/
+  bounded_kl.w                            bounded finite-candidate KL inversion
+core/statistics/resampling/
+  cheap_subsampling.w                     deterministic interval postprocessing
+core/statistics/sequential/
+  empirical_bernstein.w                   bounded scalar confidence sequence
 core/statistics/regression/solver.w       column-pivoted Householder QR
 core/statistics/regression/diagnostics.w  immutable diagnostics
 core/statistics/regression/linear_model.w OLS/WLS results and inference
@@ -169,6 +185,205 @@ raise because residual scale is zero. HC2 and HC3 are unavailable if a
 positive-weight row has leverage numerically equal to one. A constant response
 returns `nil` for R-squared and adjusted R-squared with a warning.
 
+## Paper-derived deterministic foundations
+
+These methods are intentionally narrow implementations of the mathematical
+cores in the linked primary sources. Every result distinguishes mechanically
+checked input conditions from theoretical assumptions that cannot be verified
+from one sample.
+
+### Exact order statistics
+
+`Statistics.order_statistic(values, rank)` returns the one-based exact order
+statistic after sorting a finite copy. It does not interpolate. Conformal ranks
+and nearest-neighbor scores must not use the facade's type-7 `quantile`, whose
+interpolation has different semantics.
+
+### All-purpose robust scalar mean
+
+```tungsten
+result = Statistics.all_purpose_mean(values, ~0.05)
+<< result.estimate
+<< result.initial_estimate
+<< result.scaled_influence_parameter
+<< result.equation_residual
+<< result.assumptions
+```
+
+This implements the scalar estimator analyzed by Lee, Mckelvie, Song, and
+Valiant. With preliminary estimate `kappa`, it solves
+
+```text
+sum(min(alpha * (x - kappa)^2, 1)) = log(1 / delta) / 3
+```
+
+and clips each centered contribution by the resulting influence weight. The
+implementation uses balanced contiguous median-of-means groups and solves a
+scale-normalized equation, avoiding a raw square of very large observations.
+`influence_parameter` is `nil` if the unscaled alpha is outside binary64's
+representable range; `scaled_influence_parameter` remains meaningful.
+
+The method returns a `StatisticsRobustMeanResult`, not a confidence interval.
+Its finite-variance sub-Gaussian, strong-contamination, low-moment, neighborhood,
+and asymptotic-efficiency claims require the paper's IID and initializer
+conditions. In particular, input ordering must be independent of values.
+Nonconvergence, insufficient rows for `ceil(log(1/delta))` groups, or a root
+outside the finite representable range raises explicitly.
+
+Primary source: [Lee et al., ICML 2025](https://proceedings.mlr.press/v267/lee25w.html).
+
+### Cheap subsampling intervals
+
+```tungsten
+interval = Statistics.cheap_subsampling_interval(
+  full_estimate,
+  estimates_from_subsamples,
+  n,
+  m,
+  ~0.95,
+  :asymptotically_linear_iid)
+
+planned = Statistics.cheap_subsampling_from_indices(
+  values,
+  estimator,
+  explicit_subset_indices,
+  ~0.95,
+  :asymptotically_linear_iid)
+```
+
+For `B` supplied scalar estimates from independent size-`m` subsets drawn
+without replacement, this computes
+
+```text
+S^2 = (1 / B) * sum((subsample_estimate - full_estimate)^2)
+standard_error = sqrt(m / (n - m)) * S
+interval = full_estimate +/- t(B, level) * standard_error
+```
+
+`StatisticsCheapSubsamplingResult` records the finite-population scale,
+Student-t critical value, degrees of freedom `B`, endpoints, warnings, and
+assumptions. `S == 0` returns status `:degenerate` and does not support a nominal
+coverage claim. `B < 25` is a practical variability warning, not a theorem
+threshold.
+
+`cheap_subsampling_from_indices` validates equal nonempty subset sizes, integer
+range, and no duplicate index within a subset, then evaluates the supplied
+estimator on each subset and the full sample. Repeated subsets across
+replications are permitted. This makes deterministic plans replayable and
+testable without moving subset generation into Statistics.
+
+The acknowledgement symbol is mandatory because the method's coverage theorem
+requires an IID, asymptotically linear scalar estimator and an asymptotic
+subsample regime. Statistics does not generate subsets. Probability remains
+the owner of replayable RNG streams and uniform sampling without replacement.
+“Robust” in the paper's title concerns operational bootstrap behavior, not
+contamination resistance.
+
+Primary source: [Ohlendorff et al., arXiv:2501.10289v3](https://arxiv.org/abs/2501.10289).
+
+### Conformal rank and half-mass geometry
+
+```tungsten
+rank = Statistics.conformal_rank(
+  calibration_scores, candidate_score, ~0.05)
+
+candidate = Statistics.conformal_half_mass_candidate(
+  sample_rows, candidate_row, ~0.05)
+```
+
+`conformal_rank` uses the exact conservative p-value
+
+```text
+(1 + count(calibration_score >= candidate_score)) / (n + 1)
+```
+
+and includes a candidate only when `p > miscoverage`. Only
+`:conservative` ties are supported. Randomized ties would require an explicit
+Probability-owned RNG.
+
+The half-mass method applies that rank to augmented leave-one-out scores. For a
+bag of size `n`, each score is the distance to the
+`floor(n / 2) + 1` nearest neighbor, exactly the minimum radius containing a
+strict majority. `StatisticsHalfMassConformalResult` reports every score,
+candidate score, dimension, rank, p-value, and warnings.
+
+Under exchangeability this is a finite-sample **marginal** guarantee for the
+next row. It is not generic conditional coverage. The implementation is a
+quadratic reference candidate scorer using Euclidean geometry; it is not a
+scalable continuous-region constructor, and coordinate scaling remains the
+caller's responsibility.
+
+Primary source: [Cholaquidis, Joly, and Moreno, arXiv:2604.18441](https://arxiv.org/abs/2604.18441).
+
+### Closed-form empirical-Bernstein confidence sequences
+
+```tungsten
+sequence = Statistics.empirical_bernstein_sequence(
+  ~0.05, ~0.0, ~1.0, ~0.25)
+
+stream.each -> (value)
+  sequence.push(value)
+  current = sequence.snapshot
+  << current.interval
+```
+
+`StatisticsEmpiricalBernsteinSequence` accepts observations in a fixed known
+finite support, rescales to `[0, 1]`, and uses the predictable estimate
+
+```text
+(0.5 + sum(previous observations)) / t
+```
+
+with `psi(u) = -log1p(-u) - u`. It evaluates the paper's hitting condition in
+the log domain. Before the proved closed form becomes active, snapshots return
+the complete known support with status `:warming_up`. Afterward they return a
+`StatisticsConfidenceSequenceResult` with status `:active`, center, raw
+half-width, small outward numerical guard, support intersection, variance
+process, predictor, and `active_from` time.
+
+The simultaneous target is the **historical average conditional mean** of a
+bounded adapted stream. It is not the current instantaneous mean after drift.
+`kappa` and support are fixed at construction, and the state is order-dependent
+and deliberately not mergeable. Binary64 evaluation is not a formal coverage
+certificate. The matrix theorem is not implemented because Core lacks the
+required stable symmetric spectral functional calculus.
+
+Primary source: [Chugg and Ramdas, arXiv:2512.21300v1](https://arxiv.org/abs/2512.21300).
+
+### Bounded KL relative-fit inversion
+
+```tungsten
+result = Statistics.bounded_kl_relative_fit(
+  log_ratio_scores_by_candidate,
+  theoretical_score_bound,
+  ~0.05,
+  :iid_bounded_log_ratio)
+```
+
+Each row contains held-out
+`log(pilot_density / candidate_density)` scores for one candidate. The pilot
+must have been fit on an independent split. Given the paper's theoretical
+centered-score bound `B`, the method accepts candidates whose mean score is at
+most
+
+```text
+B * sqrt(log(1 / miscoverage) / (2 * holdout_size))
+```
+
+`StatisticsRelativeFitResult` reports accepted candidate indices, all mean
+scores, threshold, holdout/candidate counts, target `:kl`, scope
+`:finite_candidate_family`, and coverage kind `:finite_sample_bounded_score`.
+Observed score minima/maxima are not substitutes for the required theoretical
+bound. The acknowledgement is mandatory; split independence and the bound are
+not mechanically verified.
+
+This deterministic inversion avoids premature Probability coupling. Probability
+should eventually own models and normalized log-density protocols. Studentized,
+Gaussian-corrupted, Hellinger, density-power, continuous-parameter, and
+approximate-projection variants are not included.
+
+Primary source: [Park, Balakrishnan, and Wasserman, *Biometrika* 2025](https://doi.org/10.1093/biomet/asaf070).
+
 ## Shared assumptions and failures
 
 - Observations, predictors, responses, and weights must be finite built-in real
@@ -197,14 +412,18 @@ instrument-error propagation, a confidence interval, or a coverage guarantee.
 
 ## Scope and next layers
 
-This tranche enables reproducible weighted/covariance pipelines and diagnosed
-dense linear-model inference in both interpreted and native Tungsten. It does
-not yet supply standalone robust location/scale or M-estimation, bootstrap and
-permutation resampling, clustered or HAC covariance, generalized or nonlinear
-models, mixed effects, high-dimensional or `p >= n` methods, sparse/penalized
-estimation, Bayesian computation, survival/time-series methods, or
-domain-specific designs. SVD-backed near-rank-deficient analysis and stronger
-condition estimation are also future work.
+This tranche enables reproducible weighted/covariance pipelines, diagnosed
+dense linear models, a modern scalar robust point estimator, deterministic
+subsampling inference postprocessing, exact conformal ranks, bounded scalar
+sequential inference, and finite-grid bounded relative-fit inversion in both
+interpreted and native Tungsten. It does not yet supply robust scale/covariance
+or M-regression, RNG-backed bootstrap/permutation orchestration, clustered or
+HAC covariance, generalized or nonlinear models, mixed effects,
+high-dimensional or `p >= n` methods, sparse/penalized estimation, Bayesian
+computation, survival/time-series methods, or domain-specific designs.
+SVD-backed near-rank-deficient analysis, matrix confidence sequences, scalable
+continuous conformal geometry, and density/integration-backed robust universal
+inference are also future work.
 
 Those are coherent future submodules under `core/statistics/`; distributions,
 sampling algorithms, and stochastic-process primitives should instead enter

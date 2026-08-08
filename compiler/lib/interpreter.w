@@ -1928,6 +1928,12 @@ use target
       index_val = evaluate(ast_get(call_node, :args)[0], env)
       rhs = evaluate(ast_get(call_node, :args)[1], env)
       recv[index_val] = rhs
+    elsif ast_get(call_node, :name) == "\[]"
+      # `h[k] ||= v` — the or-assign desugar targets the subscript READ
+      # node; write through "[]=" with the index preserved (the compiled
+      # engine's lower_assign_expr does the same).
+      index_val = evaluate(ast_get(call_node, :args)[0], env)
+      recv[index_val] = value
     else
       dispatch_method(recv, ast_get(call_node, :name) + "=", [value], nil, env)
 

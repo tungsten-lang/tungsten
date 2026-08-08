@@ -446,7 +446,17 @@ module Tungsten
 
           value = parse_assignment_no_control
 
-          exp = AssignOp.new(exp, method.to_sym, value)
+          if method == "||" || method == "&&"
+            # ||= / &&= desugar to a plain assign of the short-circuit
+            # expression — Assign(x, x || v) — mirroring the self-hosted
+            # parser; the interpreter's AssignOp evaluator is
+            # arithmetic-only ("unknown compound operator: ||").
+            read = exp.is_a?(Call) ? Var.new(exp.name) : exp
+            combined = method == "||" ? Or.new(read, value) : And.new(read, value)
+            exp = Assign.new(read, combined)
+          else
+            exp = AssignOp.new(exp, method.to_sym, value)
+          end
         end
 
         allow_ops = true

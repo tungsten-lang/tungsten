@@ -2538,7 +2538,18 @@ use lowering/definitions
   # Method-style assignment: recv.field = value → dispatch recv.field=(value)
   # rw accessors and any user method ending in `=` go through this path.
   if ast_kind(target) == :call && target.receiver != nil
-    setter_call = Tungsten:AST:Call.new(target.receiver, target.name + "=", [node.value], nil)
+    # Preserve the target call's own arguments (mirrors
+    # lower_compound_assign): an or-assign subscript target arrives here
+    # as the "[]" READ node — `h[k] ||= v` must write through
+    # h.[]=(k, k_or_value), not h.[]=(or_value). Property setters
+    # (obj.attr = v) have no args, so this is the identity for them.
+    setter_args = []
+    ai = 0
+    while ai < target.args.size()
+      setter_args.push(target.args[ai])
+      ai += 1
+    setter_args.push(node.value)
+    setter_call = Tungsten:AST:Call.new(target.receiver, target.name + "=", setter_args, nil)
     setter_call.loc = ast_get(target, :loc)
     return lower_method_call(ctx, setter_call)
 

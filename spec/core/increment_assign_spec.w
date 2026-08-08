@@ -74,4 +74,20 @@ nested["x"]["y"] = 1
 nested["x"]["y"] += 2
 check("nested hash subscript +=", nested["x"]["y"], 3)
 
+# ||= — desugars to Assign(x, x || v) on every engine. Before 8/8 the
+# subscript form dropped the index on the compiled/interpreter engines
+# (lower_assign_expr built []=(or_value) with no key) and the var form
+# didn't evaluate at all on the Ruby engine ("unknown compound operator").
+z = nil
+z ||= 5
+check("var ||= from nil", z, 5)
+w = 3
+w ||= 9
+check("var ||= keeps value", w, 3)
+h2 = {}
+h2["k"] ||= 7
+check("hash subscript ||= missing key", h2["k"], 7)
+h2["k"] ||= 9
+check("hash subscript ||= existing key", h2["k"], 7)
+
 << "PASS increment_assign_spec"

@@ -164,6 +164,8 @@
     out
 
   # The selected training indices and their squared distances, nearest-first.
+  # A Boolean membership mask keeps the selection sweep O(training rows * k)
+  # after distances are computed; strict improvement preserves index-order ties.
   -> neighbors(row)
     trows = @train_rows
     limit = @k
@@ -171,21 +173,24 @@
     dists = []
     trows.each -> (tr)
       dists.push(KNNClassifier.sq_dist(row, tr))
+    used = []
+    trows.each -> (tr)
+      used.push(false)
     chosen = []
+    picked_d = []
     limit.times -> (c)
       best = -1
       bestv = 0.to_f
       i = 0
       dists.each -> (d)
-        if !chosen.include?(i)
+        if !used[i]
           if best == -1 || d < bestv
             best = i
             bestv = d
         i += 1
+      used[best] = true
       chosen.push(best)
-    picked_d = []
-    chosen.each -> (idx)
-      picked_d.push(dists[idx])
+      picked_d.push(bestv)
     { indices: chosen, distances: picked_d }
 
   # One query's weighted vote and normalized class probabilities.

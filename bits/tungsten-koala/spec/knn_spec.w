@@ -33,6 +33,13 @@ describe "KNNClassifier probabilities and weights" ->
     expect(probs.join(",")).to eq("0.5,0.5")
     expect(model.predict([[0]]).join(",")).to eq("a")
 
+  it "keeps training order when several neighbours are equidistant" ->
+    model = KNNClassifier.new(3)
+    model.fit([[-1, 0], [1, 0], [0, -1], [0, 1]], [:a, :b, :c, :d])
+    near = model.neighbors([0, 0])
+    expect(near[:indices].join(",")).to eq("0,1,2")
+    expect(near[:distances].join(",")).to eq("1,1,1")
+
   it "returns full rows or one requested class column" ->
     model = KNNClassifier.new(3)
     model.fit([[0], [4], [5]], [:b, :a, :a])

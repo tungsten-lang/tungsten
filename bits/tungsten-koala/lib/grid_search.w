@@ -77,6 +77,9 @@
 # A SINGLE candidate scoring nil (e.g. alpha = 0 on collinear features,
 # where the fit is singular) is not degenerate: it stays in `results` with
 # a nil score, ranked last, and never wins.
+# A failed re-fit also clears every learned search result before returning
+# nil, so callers cannot accidentally keep predicting through a winner from
+# an older dataset.
 #
 # `size` and `candidates` are computed at construction, so both read
 # correctly BEFORE fit (and `size` is 0 for a rejected grid).
@@ -214,6 +217,14 @@
   # imbalanced data is scored on the same weighting it will be trained
   # with.
   -> fit(x, y = nil, sample_weight = nil)
+    # Learned state belongs to exactly one successful search. Clear it before
+    # validating the next fit so a rejected re-fit cannot expose stale params,
+    # scores, rankings, or a previously refitted estimator.
+    @fitted = false
+    @best_params = nil
+    @best_score = nil
+    @best_estimator = nil
+    @results = nil
     est = @estimator
     cands = @candidates
     folds = @k

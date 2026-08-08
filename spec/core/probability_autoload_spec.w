@@ -25,6 +25,10 @@ probability_autoload_check("sampling.type",
                            ProbabilitySampling.class_name == "Class")
 probability_autoload_check("process.factory",
                            Probability.wiener.class_name == "WienerProcess")
+probability_autoload_check("ctmc.transition.result",
+                           Probability.continuous_time_markov_chain(
+                             [~1.0], [[~0.0]]).uniformize(~1.0).class_name ==
+                           "ContinuousTimeMarkovTransitionResult")
 probability_autoload_check("counter.factory",
                            Probability.counter_rng(9, 2).class_name ==
                            "ProbabilityCounterRng")

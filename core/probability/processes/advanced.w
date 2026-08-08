@@ -45,8 +45,8 @@ use core/probability/sampling
     @jump_cumulative = []
     row = 0
     while row < @generator.size
-      total = ~0.0
-      scale = ~0.0
+      magnitudes = []
+      maximum_magnitude = ~0.0
       column = 0
       while column < @generator.size
         value = @generator[row][column]
@@ -54,11 +54,29 @@ use core/probability/sampling
           raise "probability Markov generator off-diagonal entries must be nonnegative"
         if row == column && value > ~0.0
           raise "probability Markov generator diagonal entries must be nonpositive"
-        total += value
-        scale += ProbabilityLinearAlgebra.absolute(value)
+        magnitude = ProbabilityLinearAlgebra.absolute(value)
+        magnitudes.push(magnitude)
+        maximum_magnitude = magnitude if magnitude > maximum_magnitude
         column += 1
-      scale = ~1.0 if scale < ~1.0
-      if ProbabilityLinearAlgebra.absolute(total) > ~1.0e-12*scale
+      scaled_entries = []
+      scaled_magnitudes = []
+      column = 0
+      while column < @generator.size
+        if maximum_magnitude == ~0.0
+          scaled_entries.push(~0.0)
+          scaled_magnitudes.push(~0.0)
+        else
+          scaled_entries.push(@generator[row][column] / maximum_magnitude)
+          scaled_magnitudes.push(magnitudes[column] / maximum_magnitude)
+        column += 1
+      total = ProbabilityNumerics.sum(scaled_entries)
+      scale = ProbabilityNumerics.sum(scaled_magnitudes)
+      # Thirty-two binary64 epsilons relative to the row's actual L1 scale.
+      # Scaling by the largest entry avoids row-scale overflow in this
+      # comparison. There is deliberately no absolute floor: a tiny
+      # nonconservative row is still not a CTMC generator.
+      row_tolerance = ~7.105427357601002e-15*scale
+      if ProbabilityLinearAlgebra.absolute(total) > row_tolerance
         raise "probability Markov generator rows must sum to zero"
       rate = ~0.0 - @generator[row][row]
       @exit_rates.push(rate)

@@ -173,6 +173,37 @@ contract.certified?                            # false
 Numerical contract objects describe algorithms and known limitations. They do
 not contain invented error guarantees.
 
+Finite-state CTMC transition actions have a separate inspectable contract:
+
+```w
+ctmc = Probability.continuous_time_markov_chain(
+  [~1.0, ~0.0], [[~-2.0, ~2.0], [~0.0, ~0.0]])
+transition = ctmc.uniformize(~2.0, ~1.0e-12)
+transition.probabilities
+transition.poisson_tail_bound
+transition.estimated_omitted_poisson_mass
+transition.probability_mass
+Probability.numerical_contract(:ctmc_uniformization).certified?  # false
+```
+
+The implementation uses dense row-generator Poisson uniformization with
+compensated accumulation. It does not renormalize the truncated result.
+`poisson_tail_bound` is a post-mode geometric bound in exact arithmetic, with
+a `1e-12` relative inflation for the sequential binary64 recurrence;
+`estimated_omitted_poisson_mass` is the cancellation-prone diagnostic
+`1 - retained_poisson_mass`; and `probability_mass` separately exposes
+row-action rounding. None is a certified total error bound. The zero-origin
+binary64 recurrence requires `rate*time <= 500`; larger means raise rather than
+silently underflow.
+`uniformize_from(weights, time, tolerance, max_terms, rate)` propagates an
+explicit set of nonnegative initial weights, normalized before iteration. An
+explicit rate must dominate every exit rate, and exhaustion of `max_terms`
+raises. The result records the chosen rate, Poisson mean, retained mass, tail
+bound, mass estimate, term count, requested tolerance, and algorithm identifier.
+For `s` states and `k` retained Poisson terms, this dense reference path costs
+`O(k s^2)` time and stores an `O(s^2)` transition matrix; it is not a sparse or
+batched kernel.
+
 ## MCMC, SMC, variational inference, and diagnostics
 
 Inference objects accept log targets rather than owning fitted statistical
@@ -231,8 +262,9 @@ Implemented process models are:
   log mass;
 - `WienerProcess`: exact scalar Gaussian transitions and finite-grid paths;
 - `PoissonProcess`: interarrivals, counts, grids, and Poisson increments;
-- `ContinuousTimeMarkovChain`: validated generator matrices, absorbing states,
-  exponential holding times, bounded-event jump paths, and state queries;
+- `ContinuousTimeMarkovChain`: validated row-generator matrices, absorbing
+  states, exponential holding times, bounded-event jump paths, state queries,
+  and dense finite-time transition actions by Poisson uniformization;
 - `HiddenMarkovModel`: distribution-valued emissions, stable scaled forward
   likelihood/filtering, Viterbi paths, and joint sequence sampling;
 - `EulerMaruyamaProcess`: scalar, possibly state/time-dependent drift and
@@ -240,7 +272,9 @@ Implemented process models are:
 - `RenewalProcess`: positive finite interarrival laws, arrivals, and bounded
   count queries.
 
-CTMC matrix exponentials and finite-time transition matrices are absent.
+CTMC transition-matrix assembly, sparse/operator uniformization, centered
+Poisson windows beyond mean 500, and differentiated transition actions are
+absent. The implemented transition action is deterministic and dense.
 Euler-Maruyama is fixed-grid (typically strong order `1/2` and weak order `1`
 under regularity conditions), not an adaptive SDE solver; it supplies no
 weak/strong error estimator. Vector SDEs, Milstein,
@@ -284,14 +318,14 @@ bin/tungsten -o /tmp/probability_bench \
 Focused interpreted/native specs cover analytic references, numerical
 normalization, extreme tails, cross-engine RNG/sampler vectors, SPD rejection,
 Gaussian conditioning, MCMC moments, SMC weights, VI recovery, process
-invariants, copula formulas, transformation support, failure domains, and RNG
-smoke batteries. These tests characterize selected regimes, not universal
-statistical correctness.
+invariants, analytic CTMC transitions and truncation metadata, copula formulas,
+transformation support, failure domains, and RNG smoke batteries. These tests
+characterize selected regimes, not universal statistical correctness.
 
 `spec/reference/probability_numpy_reference.py` independently checks the
-multivariate Normal, conditioning, affine covariance, HMM, and Gaussian-copula
-constants against NumPy linear algebra. It is a development/reference check,
-not a runtime dependency.
+multivariate Normal, conditioning, affine covariance, HMM, Gaussian-copula, and
+dense CTMC transition constants against NumPy linear algebra. It is a
+development/reference check, not a runtime dependency.
 
 ## Symbolic probability boundary
 
@@ -314,8 +348,9 @@ Dirichlet/Wishart and other multivariate families, singular/low-rank Gaussian
 measures, sparse/BLAS/Tensor covariance backends, quasi-Monte Carlo, certified
 extreme-tail/arbitrary-precision algorithms, adaptive NUTS and mass matrices,
 advanced SMC/VI, generic random-variable graphs, measure-aware symbolic
-probability, continuous-time transition solvers, vector/adaptive SDE methods,
-Gaussian processes, random fields, and accelerator kernels.
+probability, large/sparse/differentiated continuous-time transition solvers,
+vector/adaptive SDE methods, Gaussian processes, random fields, and accelerator
+kernels.
 
 Statistical estimation, regression, hypothesis testing, model comparison, and
 fitted-distribution APIs remain deliberately in the Statistics domain.

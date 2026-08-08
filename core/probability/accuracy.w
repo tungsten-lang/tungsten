@@ -54,8 +54,16 @@
       false,
       "reported diagnostics estimate sampling error; they are not guarantees")
 
+  -> .ctmc_uniformization
+    ProbabilityNumericalContract.new(
+      "Finite CTMC transition action", "IEEE-754 binary64",
+      "dense row-generator Poisson uniformization with compensated accumulation",
+      false,
+      "rate*time <= 500; guarded Poisson tail bound is truncation-only, not a total error bound")
+
   -> .contract(name)
     return ProbabilityAccuracy.normal_tail if name == :normal_tail
     return ProbabilityAccuracy.multivariate_normal if name == :multivariate_normal
     return ProbabilityAccuracy.monte_carlo if name == :monte_carlo
+    return ProbabilityAccuracy.ctmc_uniformization if name == :ctmc_uniformization
     raise "probability numerical contract is unknown"

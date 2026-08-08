@@ -113,6 +113,7 @@
   auto :MeanFieldVariationalInference, "probability"
   auto :ContinuousTimeMarkovPath, "probability"
   auto :ContinuousTimeMarkovChain, "probability"
+  auto :ContinuousTimeMarkovTransitionResult, "probability"
   auto :HiddenMarkovSequence,     "probability"
   auto :HiddenMarkovModel,        "probability"
   auto :ScalarSdePath,            "probability"

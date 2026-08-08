@@ -68,4 +68,26 @@ correlation = np.array([[1.0, 0.5], [0.5, 1.0]])
 copula_center = -0.5 * np.linalg.slogdet(correlation)[1]
 np.testing.assert_allclose(copula_center, 0.14384103622589045, rtol=2e-15)
 
+# Dense row-generator CTMC reference.  This deliberately uses a spectral
+# matrix exponential rather than the Core uniformization recurrence.
+generator = np.array(
+    [[-3.0, 1.0, 2.0], [0.5, -1.0, 0.5], [0.25, 0.75, -1.0]]
+)
+eigenvalues, eigenvectors = np.linalg.eig(generator)
+transition = (
+    eigenvectors
+    @ np.diag(np.exp(0.8 * eigenvalues))
+    @ np.linalg.inv(eigenvectors)
+).real
+ctmc_probabilities = np.array([0.2, 0.3, 0.5]) @ transition
+np.testing.assert_allclose(
+    ctmc_probabilities,
+    np.array(
+        [0.11374376590160953, 0.41089706875887866, 0.47535916533951184]
+    ),
+    rtol=2e-15,
+    atol=2e-15,
+)
+np.testing.assert_allclose(transition.sum(axis=1), np.ones(3), atol=2e-15)
+
 print(f"PROBABILITY_NUMPY_REFERENCE_OK numpy={np.__version__}")

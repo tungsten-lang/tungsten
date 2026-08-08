@@ -24,6 +24,7 @@ use core/probability/multivariate
 use core/probability/process
 use core/probability/processes
 use core/probability/processes/advanced
+use core/probability/processes/uniformization
 use core/probability/dependence/copulas
 use core/probability/transforms
 use core/probability/inference/diagnostics

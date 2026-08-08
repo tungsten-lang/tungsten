@@ -37202,13 +37202,19 @@ WValue w_native_data_field_set(WValue recv, WValue name_v, WValue value) {
  * guarantees `used` never reaches this before a rebuild triggers. */
 static inline int64_t w_hash_dense_cap(int64_t cap) { return cap - cap / 4; }
 
+/* One malloc per hash: [keys dense][values dense][index cap]. keys is the
+ * block base — freeing keys frees everything. Small hashes dominate the
+ * compiler's allocation profile, so one block instead of three matters. */
 static void w_hash_allocate_storage(WHash *hash, int64_t cap) {
+    int64_t dense_cap = w_hash_dense_cap(cap);
+    uint8_t *block = malloc((size_t)(dense_cap * 2) * sizeof(WValue) +
+                            (size_t)cap * sizeof(int32_t));
     hash->cap = (uint32_t)cap;
     hash->count = 0;
     hash->used = 0;
-    hash->keys = malloc(sizeof(WValue) * w_hash_dense_cap(cap));
-    hash->values = malloc(sizeof(WValue) * w_hash_dense_cap(cap));
-    hash->index = malloc(sizeof(int32_t) * cap);
+    hash->keys = (WValue *)block;
+    hash->values = (WValue *)(block + dense_cap * sizeof(WValue));
+    hash->index = (int32_t *)(block + 2 * dense_cap * sizeof(WValue));
     memset(hash->index, 0xFF, sizeof(int32_t) * cap);  /* all W_HASH_SLOT_EMPTY */
 }
 
@@ -37277,30 +37283,40 @@ static inline int64_t w_hash_probe(WHash *hash, WValue key) {
     return -1;
 }
 
-/* Compact the dense arrays in place (dropping holes, preserving insertion
- * order), then rebuild the index table — at a doubled cap when the live
- * count justifies it, else at the same cap to purge tombstones. */
+/* Compact the dense entries (dropping holes, preserving insertion order),
+ * then rebuild the index table — at a doubled cap when the live count
+ * justifies it, else at the same cap to purge tombstones. A cap change
+ * compacts straight into a fresh block; same-cap compacts in place. */
 static void w_hash_rebuild(WHash *hash, int64_t new_capacity) {
-    uint32_t w = 0;
-    for (uint32_t i = 0; i < hash->used; i++) {
-        if (hash->keys[i] == W_MEMO_MISS) continue;
-        if (w != i) {
-            hash->keys[w] = hash->keys[i];
-            hash->values[w] = hash->values[i];
-        }
-        w++;
-    }
-    hash->used = w;
-    hash->count = w;
-
     if (new_capacity != (int64_t)hash->cap) {
-        int64_t dense_cap = w_hash_dense_cap(new_capacity);
-        hash->keys = realloc(hash->keys, sizeof(WValue) * dense_cap);
-        hash->values = realloc(hash->values, sizeof(WValue) * dense_cap);
-        hash->index = realloc(hash->index, sizeof(int32_t) * new_capacity);
-        hash->cap = (uint32_t)new_capacity;
+        WValue *old_keys = hash->keys;
+        WValue *old_values = hash->values;
+        uint32_t old_used = hash->used;
+        w_hash_allocate_storage(hash, new_capacity);
+        uint32_t w = 0;
+        for (uint32_t i = 0; i < old_used; i++) {
+            if (old_keys[i] == W_MEMO_MISS) continue;
+            hash->keys[w] = old_keys[i];
+            hash->values[w] = old_values[i];
+            w++;
+        }
+        hash->used = w;
+        hash->count = w;
+        free(old_keys);  /* block base — frees old values/index too */
+    } else {
+        uint32_t w = 0;
+        for (uint32_t i = 0; i < hash->used; i++) {
+            if (hash->keys[i] == W_MEMO_MISS) continue;
+            if (w != i) {
+                hash->keys[w] = hash->keys[i];
+                hash->values[w] = hash->values[i];
+            }
+            w++;
+        }
+        hash->used = w;
+        hash->count = w;
+        memset(hash->index, 0xFF, sizeof(int32_t) * hash->cap);
     }
-    memset(hash->index, 0xFF, sizeof(int32_t) * hash->cap);
 
     /* Keys are unique, so probing to the first empty slot is sufficient. */
     uint64_t mask = (uint64_t)(hash->cap - 1);
@@ -55162,9 +55178,9 @@ void w_value_free(WValue v) {
         free(arr);
         return;
     }
-    /* Hash (W_SUBTAG_HASH). w_hash_new calloc's the WHash and mallocs
-     * keys/values/index (w_hash_allocate_storage); all four are private to
-     * the hash. Freed WValues inside are NOT recursed into — they may be live
+    /* Hash (W_SUBTAG_HASH). w_hash_new calloc's the WHash plus ONE storage
+     * block (w_hash_allocate_storage) whose base is keys — freeing keys
+     * frees values and index with it; both are private to the hash. Freed WValues inside are NOT recursed into — they may be live
      * elsewhere, exactly like closure captures below. Bail when the pool
      * still holds it (W_HASH_FLAG_POOLED) or it was frozen for sharing.
      * History: this branch was a deliberate no-op for a while — the
@@ -55178,9 +55194,7 @@ void w_value_free(WValue v) {
     if (w_is_hash(v)) {
         WHash *h = (WHash *)w_as_ptr(v);
         if (h->flags & (W_HASH_FLAG_POOLED | W_HASH_FLAG_FROZEN)) return;
-        free(h->keys);
-        free(h->values);
-        free(h->index);
+        free(h->keys);  /* storage-block base: values and index live inside */
         free(h);
         return;
     }

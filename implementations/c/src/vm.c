@@ -957,30 +957,27 @@ static int runtime_array_ensure_cap(TcRuntimeArray *array, size_t needed, TcErro
   return 1;
 }
 
-// Mirror runtime/runtime.c:w_hash_allocate_storage — dense keys/values
-// arrays at 3/4 of cap (the load-factor ceiling guarantees `used` never
-// reaches that before a rebuild), index table memset to all-empty (-1).
+// Mirror runtime/runtime.c:w_hash_allocate_storage — ONE malloc block:
+// [keys dense][values dense][index cap], keys is the base. Dense arrays
+// hold 3/4 of cap (the load-factor ceiling guarantees `used` never
+// reaches that before a rebuild); index memset to all-empty (-1).
 static inline size_t hash_dense_cap(size_t cap) { return cap - cap / 4; }
 
 static int hash_allocate_storage(TcRuntimeHash *hash, size_t cap, TcError *err) {
-  WValue *keys = (WValue *)malloc(hash_dense_cap(cap) * sizeof(WValue));
-  WValue *values = (WValue *)malloc(hash_dense_cap(cap) * sizeof(WValue));
-  int32_t *index = (int32_t *)malloc(cap * sizeof(int32_t));
-  if (!keys || !values || !index) {
-    free(keys);
-    free(values);
-    free(index);
+  size_t dense_cap = hash_dense_cap(cap);
+  uint8_t *block = (uint8_t *)malloc(dense_cap * 2 * sizeof(WValue) +
+                                     cap * sizeof(int32_t));
+  if (!block) {
     tc_error_set(err, "hash entry allocation failed");
     return 0;
   }
-  memset(index, 0xFF, cap * sizeof(int32_t));  // all TC_HASH_SLOT_EMPTY
-
   hash->cap = (uint32_t)cap;
   hash->count = 0;
   hash->used = 0;
-  hash->keys = keys;
-  hash->values = values;
-  hash->index = index;
+  hash->keys = (WValue *)block;
+  hash->values = (WValue *)(block + dense_cap * sizeof(WValue));
+  hash->index = (int32_t *)(block + 2 * dense_cap * sizeof(WValue));
+  memset(hash->index, 0xFF, cap * sizeof(int32_t));  // all TC_HASH_SLOT_EMPTY
   return 1;
 }
 
@@ -1170,44 +1167,43 @@ static inline int64_t hash_probe(TcRuntimeHash *hash, TcValue key) {
   return -1;
 }
 
-// Compact the dense arrays in place (dropping holes, preserving insertion
-// order), then rebuild the index table at `min_cap` rounded up to a power
-// of two >= 8. Mirrors runtime/runtime.c:w_hash_rebuild.
+// Compact the dense entries (dropping holes, preserving insertion order),
+// then rebuild the index table at `min_cap` rounded up to a power of two
+// >= 8. A cap change compacts straight into a fresh block; same-cap
+// compacts in place. Mirrors runtime/runtime.c:w_hash_rebuild.
 static int hash_grow(TcRuntimeHash *hash, size_t min_cap, TcError *err) {
   size_t cap = 8;
   while (cap < min_cap) cap *= 2;
 
-  uint32_t w = 0;
-  for (uint32_t i = 0; i < hash->used; i++) {
-    if (hash->keys[i] == TC_HASH_TOMBSTONE) continue;
-    if (w != i) {
-      hash->keys[w] = hash->keys[i];
-      hash->values[w] = hash->values[i];
-    }
-    w++;
-  }
-  hash->used = w;
-  hash->count = w;
-
   if (cap != hash->cap) {
-    WValue *keys = (WValue *)realloc(hash->keys, hash_dense_cap(cap) * sizeof(WValue));
-    WValue *values = (WValue *)realloc(hash->values, hash_dense_cap(cap) * sizeof(WValue));
-    int32_t *index = (int32_t *)realloc(hash->index, cap * sizeof(int32_t));
-    if (!keys || !values || !index) {
-      // A successful realloc already moved that array; store whatever we
-      // have so the hash stays freeable, then report the failure.
-      if (keys) hash->keys = keys;
-      if (values) hash->values = values;
-      if (index) hash->index = index;
-      tc_error_set(err, "hash entry allocation failed");
-      return 0;
+    WValue *old_keys = hash->keys;
+    WValue *old_values = hash->values;
+    uint32_t old_used = hash->used;
+    if (!hash_allocate_storage(hash, cap, err)) return 0;
+    uint32_t w = 0;
+    for (uint32_t i = 0; i < old_used; i++) {
+      if (old_keys[i] == TC_HASH_TOMBSTONE) continue;
+      hash->keys[w] = old_keys[i];
+      hash->values[w] = old_values[i];
+      w++;
     }
-    hash->keys = keys;
-    hash->values = values;
-    hash->index = index;
-    hash->cap = (uint32_t)cap;
+    hash->used = w;
+    hash->count = w;
+    free(old_keys);  // block base — frees old values/index too
+  } else {
+    uint32_t w = 0;
+    for (uint32_t i = 0; i < hash->used; i++) {
+      if (hash->keys[i] == TC_HASH_TOMBSTONE) continue;
+      if (w != i) {
+        hash->keys[w] = hash->keys[i];
+        hash->values[w] = hash->values[i];
+      }
+      w++;
+    }
+    hash->used = w;
+    hash->count = w;
+    memset(hash->index, 0xFF, hash->cap * sizeof(int32_t));
   }
-  memset(hash->index, 0xFF, hash->cap * sizeof(int32_t));
 
   // Keys are unique, so probing to the first empty slot is sufficient.
   size_t mask = hash->cap - 1;

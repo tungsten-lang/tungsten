@@ -3,6 +3,11 @@
 
 use runtime_types
 use hashing
+# LLVM name transliteration (llvm_safe_name) — shared with lowering via
+# its own module so `use lib/emitter` STANDALONE (the emitter unit specs)
+# is a complete program instead of fabricating dangling `__w_*` symbols
+# that only die at link time.
+use naming
 
 # -- String escaping --
 
@@ -27,24 +32,6 @@ use hashing
       result << ch
     i += 1
   result.to_s()
-
--> utf8_byte_length(s)
-  n = 0
-  i = 0
-  chars = s.chars()
-  while i < chars.size()
-    ch = chars[i]
-    code = ch.ord()
-    if code < 128
-      n += 1
-    elsif code < 2048
-      n += 2
-    elsif code < 65536
-      n += 3
-    else
-      n += 4
-    i += 1
-  n
 
 -> llvm_wvalue_literal(value)
   u = value.to_i()
@@ -96,29 +83,6 @@ use hashing
 
 # -- String constants --
 
-# Compute SSO-5 WValue for a string ≤5 bytes.
--> sso5_wvalue(text)
-  byte_len = utf8_byte_length(text)
-  v = w_tag_stringsym + byte_len * 2
-  bytes = text.bytes()
-  i = 0
-  while i < byte_len
-    v = v + bytes[i] * (1 << (4 + 8 * i))
-    i += 1
-  v
-
-# Build a static slab map: string_id → pre-computed WValue.
-# SSO-5 strings (≤5 bytes) become inline i64 constants.
-# Medium strings (6-61 bytes) get slab slot indices.
-# Large strings (>61 bytes) keep the runtime w_string() call.
-#
-# `no_slab` (REPL/JIT snippets): a snippet's slab slot INDICES are relative to
-# the snippet's own slab, but a JIT'd snippet runs against the HOST's already-
-# initialized slab (w_slab_init_static is idempotent), so baked indices mis-
-# resolve. With no_slab we skip slab assignment for 6-61 byte strings so they
-# fall through to the runtime w_string() path — interned into the live host slab
-# (or heap if frozen), which is correct regardless of the host's slab layout.
-# SSO-5 (inline) and >61 byte (already runtime) strings are unaffected.
 -> build_string_wvalues(strings, no_slab = false)
   wvalues = {}  # string_id → i64 WValue (or nil for large strings)
   next_slot = 1  # slot 0 is reserved sentinel

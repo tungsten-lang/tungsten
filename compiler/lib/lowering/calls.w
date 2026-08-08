@@ -1270,6 +1270,16 @@
       if ctx[:mod][:known_typed_overload_counts][typed_arity_key] == 1 && declared_types != nil
         mismatch_msg = mismatch_msg + "; it is declared (" + type_signature_display(declared_types) + ")"
       raise compile_error_for_node(:E_LOWER_TYPED_ARG_MISMATCH, mismatch_msg, ctx[:source_path], node)
+    # No known call, class, idiom hint, or typed-overload group — and not
+    # one of the special-named intrinsics handled below. Left alone this
+    # would fabricate a `__w_NAME` call, auto-declare it, and die at LINK
+    # time as "Undefined symbols: ___w_NAME" (or worse, get silently
+    # DCE'd at higher opt levels and never die at all — a spec `use`-ing
+    # emitter.w standalone shipped exactly that way). Every legitimate
+    # runtime bridge is seeded into known_calls; anything else is an
+    # unknown function and must fail HERE, at the call site.
+    if name != "wymix"
+      raise compile_error_for_node(:E_LOWER_UNKNOWN_FN, "unknown function '" + name + "'", ctx[:source_path], node)
 
   # Inline wymix: 128-bit multiply, XOR high and low halves.
   # Returns i48 NaN-boxed integer (truncated to 48 bits for safe chaining).

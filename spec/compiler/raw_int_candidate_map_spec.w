@@ -4,8 +4,13 @@
 # and anything that depended on them.
 
 use ../../compiler/lib/ast
-use ../../compiler/lib/lowering/types
-use ../../compiler/lib/lowering/analysis
+# The full lowering orchestrator (plus its error-formatter dependency),
+# not individual workers: analysis.w references orchestrator-level
+# symbols (infer_type, normalize_type_symbol, compile_error_for_node)
+# through the flat namespace, so a worker-only use set fabricates
+# dangling `__w_*` calls that die at link time (now a compile error).
+use ../../compiler/lib/error_formatter
+use ../../compiler/lib/lowering
 
 -> assert_empty(name, candidates)
   keys = candidates.keys()

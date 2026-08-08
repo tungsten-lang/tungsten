@@ -6,6 +6,15 @@
 use runtime_types
 use wire
 use target
+use naming
+# Cross-tower dependencies the workers reference through the flat
+# namespace: unit superscripts (ops.w's quantity desugar) live in the
+# lexer's unit registry, and the return-type fixed point calls
+# infer_return_type. In the full compiler both are loaded long before
+# this file (dedup no-ops); declared here so `use lib/lowering`
+# STANDALONE (compiler unit specs) is a complete program.
+use ../../languages/tungsten/lexers/known_units
+use return_inference
 use lowering/pass_registry
 use lowering/types
 use lowering/analysis
@@ -1467,6 +1476,15 @@ use lowering/definitions
 
   # Register built-in runtime functions so they aren't rewritten to self.method()
   # inside class bodies. These map to __w_<name> in the C runtime.
+  #
+  # This table is now LOAD-BEARING for correctness, not just dispatch
+  # hygiene: an unseeded bare call no longer falls back to a fabricated
+  # `__w_<name>` symbol (which died at link time, or worse got DCE'd at
+  # higher opt levels and never died) — lower_call raises
+  # E_LOWER_UNKNOWN_FN instead. A new C-runtime bridge callable as a bare
+  # fn MUST be seeded here. The 2026-08-08 whole-corpus sweep (compiler,
+  # every spec, every bit) found exactly one unseeded bridge: argv.
+  mod[:known_calls]["argv"] = "__w_argv"
   mod[:known_calls]["read_file"] = "__w_read_file"
   mod[:known_calls]["read_file_bytes"] = "__w_read_file_bytes"
   mod[:known_calls]["file?"] = "__w_file_exists"

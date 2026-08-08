@@ -25,6 +25,8 @@ fail=0
 
 echo "### router tooling"
 python3 bits/tungsten-wassat/benchmarks/router_tools_test.py || fail=1
+python3 bits/tungsten-wassat/benchmarks/parallel_h2h_test.py || fail=1
+python3 bits/tungsten-wassat/competition/check_output_test.py || fail=1
 
 echo "### smoke"
 "$WASSAT_BIN" --version || { echo "FATAL: --version"; exit 2; }
@@ -37,8 +39,11 @@ fi
 
 echo
 echo "### library specs"
-for spec in solver cli preprocess incremental sls trim explain portfolio multiplier fermat sum_of_three_cubes mdp automata_sync ternary_affine ais coloring covering directed_kernel edge_matching sliding_puzzle stedman hantzsche_wendt knight_tour local_core latin_csp; do
+for spec in solver cli preprocess incremental sls trim explain portfolio multiplier fermat sum_of_three_cubes mdp automata_sync ternary_affine ais coloring covering directed_kernel edge_matching sliding_puzzle stedman hantzsche_wendt knight_tour local_core latin_csp algebra_certificate router_trainer; do
   path="bits/tungsten-wassat/spec/${spec}_spec.w"
+  if [[ "$spec" == "router_trainer" ]]; then
+    path="bits/tungsten-wassat/benchmarks/router_trainer_spec.w"
+  fi
   # `solver` includes true concurrent CAS/conflict-budget regressions and SLS
   # now exercises the same native atomic cancellation ABI. Run both against
   # the compiled runtime; compiler/test/test_interpreter.w separately pins the
@@ -76,19 +81,43 @@ for mode in default raw0; do
 done
 
 echo
-echo "### php87 --proof, verified by wrat"
+echo "### php87 certificate dialects, verified by wrat"
 PHP87="${BENCH:-/tmp/satbench}/php87.cnf"
 if [[ ! -f "$PHP87" ]]; then
   echo "  SKIP: $PHP87 absent (run benchmarks/gen_instances.py)"
 else
-  "$WASSAT_BIN" "$PHP87" --proof "$TMP/php87.wrat" > "$TMP/php87.out" 2>&1
+  for dialect in wrat lrat drat; do
+    cert="$TMP/php87.$dialect"
+    case "$dialect" in
+      wrat) proof_flag=--proof ;;
+      lrat) proof_flag=--lrat ;;
+      drat) proof_flag=--drat ;;
+    esac
+    "$WASSAT_BIN" "$PHP87" "$proof_flag" "$cert" > "$TMP/php87-$dialect.out" 2>&1
+    rc=$?
+    echo "  $dialect solve rc=$rc  $(grep '^s ' "$TMP/php87-$dialect.out")"
+    [[ $rc -ne 20 ]] && { echo "  FAIL: expected exit 20"; fail=1; }
+    "$WRAT_BIN" "$PHP87" "$cert" > "$TMP/check-$dialect.out" 2>&1
+    rc=$?
+    echo "  $dialect check rc=$rc  $(tail -1 "$TMP/check-$dialect.out")"
+    [[ $rc -ne 0 ]] && fail=1
+  done
+
+  # Main-track packaging asks for DRAT while the library's native audit trail
+  # is WRAT. Pin simultaneous emission too: a future output-plumbing change
+  # must not make either side stale while the other continues to verify.
+  "$WASSAT_BIN" "$PHP87" --proof "$TMP/php87-dual.wrat" \
+    --drat "$TMP/php87-dual.drat" > "$TMP/php87-dual.out" 2>&1
   rc=$?
-  echo "  solve rc=$rc  $(grep '^s ' "$TMP/php87.out")"
+  echo "  dual solve rc=$rc  $(grep '^s ' "$TMP/php87-dual.out")"
   [[ $rc -ne 20 ]] && { echo "  FAIL: expected exit 20"; fail=1; }
-  "$WRAT_BIN" "$PHP87" "$TMP/php87.wrat" > "$TMP/wrat.out" 2>&1
-  rc=$?
-  echo "  wrat  rc=$rc  $(tail -1 "$TMP/wrat.out")"
-  [[ $rc -ne 0 ]] && fail=1
+  for dialect in wrat drat; do
+    "$WRAT_BIN" "$PHP87" "$TMP/php87-dual.$dialect" \
+      > "$TMP/check-dual-$dialect.out" 2>&1
+    rc=$?
+    echo "  dual $dialect check rc=$rc  $(tail -1 "$TMP/check-dual-$dialect.out")"
+    [[ $rc -ne 0 ]] && fail=1
+  done
 fi
 
 echo

@@ -84,7 +84,7 @@ extractor pins the semantic payload SHA-256
 `6c74c4ea6a670c9ff8aab655baa60243d4f34c2869d3accd91d9924afea244ca`
 in every instance record and refuses to resume a JSONL with a different
 version, ordered name list, or checksum. The trainer independently pins Koala's
-ordered-name checksum `944208648`, verifies it before load and train, enforces
+ordered-name checksum `730840193`, verifies it before load and train, enforces
 the bounded feature maxima, and requires exported trees to carry the same
 checksum.
 
@@ -127,7 +127,7 @@ the train-weighted majority label. Export additionally requires:
 3. family utility capture and weighted accuracy do not regress;
 4. false-disable cost does not increase.
 
-The generated function requires feature-schema checksum `944208648` and exact
+The generated function requires feature-schema checksum `730840193` and exact
 width 31.
 Pin the exported checksum independently beside Wassat's feature construction;
 passing the generated checksum helper directly would defeat the drift guard.

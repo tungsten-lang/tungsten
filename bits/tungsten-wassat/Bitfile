@@ -8,3 +8,6 @@ license     "MIT"
 authors     ["Tungsten Language Project"]
 
 executable  "wassat", source: "bin/wassat.w"
+
+# Required only by the explicitly imported finite-algebra certificate bridge.
+dependency  "tungsten-wrat", "~> 0.0.2", optional: true

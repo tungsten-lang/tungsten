@@ -14,7 +14,7 @@ use knight_tour
 # public distance-pruned family. Transition auxiliaries are private positive
 # literals, keeping the fixture small while exercising complete recovery,
 # tour construction, conditioned completion, and original-CNF replay.
--> knight_fixture(corrupt_support = false)
+-> knight_fixture(corrupt_support)
   side = 6
   vertices = side * side
   positions = vertices - 1
@@ -130,7 +130,7 @@ use knight_tour
 
 describe "Wassat distance-pruned knight-tour specialist" ->
   it "recovers the two support families and generates a table-free tour" ->
-    formula = wassat_parse_cnf_native(knight_fixture)
+    formula = wassat_parse_cnf_native(knight_fixture(false))
     recovered = wassat_knight_recover(formula)
     expect(recovered.empty?).to eq(false)
     expect(recovered["side"]).to eq(6)
@@ -145,7 +145,7 @@ describe "Wassat distance-pruned knight-tour specialist" ->
     expect(meta[0] < WASSAT_KNIGHT_NODE_CAP).to eq(true)
 
   it "completes and replays a recovered tour against the original CNF" ->
-    formula = wassat_parse_cnf_native(knight_fixture)
+    formula = wassat_parse_cnf_native(knight_fixture(false))
     result = wassat_knight_tour_solve(formula)
     expect(result["recognized"]).to eq(true)
     expect(result["status"]).to eq(1)
@@ -153,7 +153,7 @@ describe "Wassat distance-pruned knight-tour specialist" ->
     expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
 
   it "treats a zero completion-conflict cap as unlimited" ->
-    formula = wassat_parse_cnf_native(knight_fixture)
+    formula = wassat_parse_cnf_native(knight_fixture(false))
     result = wassat_knight_tour_solve_budget(
       formula, 0, WASSAT_KNIGHT_NODE_CAP
     )
@@ -161,7 +161,7 @@ describe "Wassat distance-pruned knight-tour specialist" ->
     expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
 
   it "falls through when the bounded tour search is exhausted" ->
-    formula = wassat_parse_cnf_native(knight_fixture)
+    formula = wassat_parse_cnf_native(knight_fixture(false))
     result = wassat_knight_tour_solve_budget(formula, 100, 1)
     expect(result["recognized"]).to eq(true)
     expect(result["status"]).to eq(0)

@@ -28,7 +28,7 @@ describe "offline Wassat RouterTrainer" ->
     expect(loaded[:feature_names][30]).to eq("variable_occurrence_hhi_ppm")
     expect(RouterTrainer.feature_schema_valid?).to be_true
     expect(RouterTrainer.feature_schema_version).to eq(2)
-    expect(RouterTrainer.feature_schema_checksum).to eq(944208648)
+    expect(RouterTrainer.feature_schema_checksum).to eq(730840193)
     expect(RouterTrainer.extractor_schema_sha256).to eq(
       "6c74c4ea6a670c9ff8aab655baa60243d4f34c2869d3accd91d9924afea244ca"
     )
@@ -102,18 +102,20 @@ describe "offline Wassat RouterTrainer" ->
     result = RouterTrainer.train(loaded[:rows])
     expected_source = read_file(__DIR__ + "/fixtures/router_tiny_expected.w")
     expect(result[:export][:source]).to eq(expected_source)
-    expect(result[:export][:schema_checksum]).to eq(944208648)
+    expect(result[:export][:schema_checksum]).to eq(730840193)
     expect(result[:feature_schema_version]).to eq(2)
-    expect(result[:feature_schema_checksum]).to eq(944208648)
+    expect(result[:feature_schema_checksum]).to eq(730840193)
     expect(result[:extractor_schema_sha256]).to eq(
       "6c74c4ea6a670c9ff8aab655baa60243d4f34c2869d3accd91d9924afea244ca"
     )
-    expect(wassat_formula_router_schema_version).to eq(1)
+    expect(wassat_formula_router_schema_version).to eq(2)
     expect(wassat_formula_router_feature_count).to eq(31)
     test_rows = RouterTrainer.rows_for_split(loaded[:rows], "test")
     predictions = []
     test_rows.each -> (row)
-      predictions.push(wassat_formula_router(row[:features], 944208648))
+      predictions.push(wassat_formula_router(row[:features], 730840193))
     expect(predictions.to_s).to eq(RouterTrainer.labels_of(test_rows).to_s)
-    expect(-> () wassat_formula_router(test_rows[0][:features], 944208647)).to raise_error
-    expect(-> () wassat_formula_router([1, 2], 944208648)).to raise_error
+    expect(-> () wassat_formula_router(test_rows[0][:features], 730840192)).to raise_error
+    expect(-> () wassat_formula_router([1, 2], 730840193)).to raise_error
+
+spec_summary

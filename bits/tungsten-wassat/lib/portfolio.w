@@ -434,6 +434,11 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # main thread would put a from_flat back on the critical path, which is the
 # cost this arrangement exists to remove.
 -> wassat_lucky_arm_body(nv, art, res, base, stop)
+  # Keep the worker-side guard even though the coordinator normally avoids
+  # spawning this arm. It makes the no-construction contract local: a future
+  # caller cannot accidentally copy the full formula before discovering that
+  # shape policy disabled lucky phases.
+  return 0 unless art["config"].use_lucky
   s = Wassat.from_flat_lucky(nv, art)
   s.set_stop_cell(stop)
   s.lucky_shared(res, base)

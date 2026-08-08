@@ -16,6 +16,13 @@
 # This lane never claims UNSAT.  A structural miss, decoder miss, bounded CDCL
 # completion miss, or failed full-CNF replay falls through to ordinary Wassat.
 
+# Declared here rather than inherited accidentally from portfolio.w's later
+# umbrella import: the native decoder calls BitOps directly, then completes a
+# candidate with the ordinary solver over a raw preprocessing artifact.
+use ../../../core/bit_ops
+use preprocess
+use solver
+
 WASSAT_MDP_MIN_BITS = 8
 WASSAT_MDP_MAX_BITS = 36
 WASSAT_MDP_MAX_XOR_ROWS = 8192

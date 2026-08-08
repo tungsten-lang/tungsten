@@ -195,15 +195,21 @@ run_wassat_spec() {
   local spec_bin
   local output
   local status
+  local summary
+  local total
+  local passed
+  local failed
 
   name="$(basename "${path%.w}")"
   # Compile-and-run set, mirroring benchmarks/gate.sh: these exercise the
   # native DIMACS parser, process portfolio, or atomic-cancellation ABI that
-  # exist only in compiled programs. The interpreted remainder (solver, sls,
-  # incremental, trim, explain, algebra_certificate) stays interpreted here;
-  # gate.sh separately compiles solver/sls for the concurrency regressions.
+  # exist only in compiled programs. solver_spec belongs here too: its native
+  # CAS/conflict-ticket regressions are part of the default correctness gate,
+  # and compiling avoids the interpreter's tens-of-minutes runtime. The
+  # interpreted remainder (sls, incremental, trim, explain,
+  # algebra_certificate) stays interpreted here.
   case "$name" in
-    cli_spec|preprocess_spec|portfolio_spec|multiplier_spec|ternary_affine_spec|ais_spec|coloring_spec|covering_spec|directed_kernel_spec|local_core_spec|latin_csp_spec|fermat_spec|sum_of_three_cubes_spec|mdp_spec|automata_sync_spec|edge_matching_spec|sliding_puzzle_spec|stedman_spec|hantzsche_wendt_spec|knight_tour_spec)
+    solver_spec|cli_spec|preprocess_spec|portfolio_spec|multiplier_spec|ternary_affine_spec|ais_spec|coloring_spec|covering_spec|directed_kernel_spec|local_core_spec|latin_csp_spec|fermat_spec|sum_of_three_cubes_spec|mdp_spec|automata_sync_spec|edge_matching_spec|sliding_puzzle_spec|stedman_spec|hantzsche_wendt_spec|knight_tour_spec)
       compile_wassat_spec=1 ;;
     *)
       compile_wassat_spec=0 ;;
@@ -225,6 +231,25 @@ run_wassat_spec() {
     output="$(WASSAT_TEST_BIN="$wassat_bin" "$TUNGSTEN" run "$path" 2>&1)"
     status=$?
     set -e
+  fi
+
+  # A compiler/runtime failure has previously produced an executable that
+  # silently exited zero. Do not let that look like a green spec: a successful
+  # Wassat job must report an internally consistent, zero-failure summary.
+  if [[ "$status" -eq 0 ]]; then
+    summary="$(printf '%s\n' "$output" | grep -E '^[0-9]+ examples: [0-9]+ passed, [0-9]+ failed$' | tail -1 || true)"
+    if [[ -z "$summary" ]]; then
+      output="${output}${output:+$'\n'}FAIL: missing valid Wassat spec summary"
+      status=1
+    else
+      total="$(printf '%s\n' "$summary" | sed -nE 's/^([0-9]+) examples:.*/\1/p')"
+      passed="$(printf '%s\n' "$summary" | sed -nE 's/^[0-9]+ examples: ([0-9]+) passed,.*/\1/p')"
+      failed="$(printf '%s\n' "$summary" | sed -nE 's/.*, ([0-9]+) failed$/\1/p')"
+      if [[ "$failed" -ne 0 || "$total" -ne $((passed + failed)) ]]; then
+        output="${output}${output:+$'\n'}FAIL: inconsistent or failing Wassat spec summary"
+        status=1
+      fi
+    fi
   fi
   record_result "wassat/$name" "$output" "$status"
 }
@@ -664,15 +689,8 @@ metal_specs=(
   spec/core/schedule_unroll_spec.w
 )
 
-# Interpreted, solver_spec's pigeonhole/colouring families run for tens of
-# minutes on a loaded box (measured 45+ min). It still guards the solver —
-# run it with TUNGSTEN_SLOW_SPECS=1 (CI nightly / pre-release), not on the
-# default developer loop.
-wassat_slow_specs=(
-  bits/tungsten-wassat/spec/solver_spec.w
-)
-
 wassat_specs=(
+  bits/tungsten-wassat/spec/solver_spec.w
   bits/tungsten-wassat/spec/cli_spec.w
   bits/tungsten-wassat/spec/preprocess_spec.w
   bits/tungsten-wassat/spec/incremental_spec.w
@@ -762,11 +780,6 @@ wassat_bin="$TMP_ROOT/wassat"
 echo "compile bits/tungsten-wassat/bin/wassat.w"
 if "$TUNGSTEN" compile bits/tungsten-wassat/bin/wassat.w --out "$wassat_bin" --no-lto >/dev/null; then
   run_parallel wassat "${wassat_specs[@]}" -- "$wassat_bin"
-  if [ -n "${TUNGSTEN_SLOW_SPECS:-}" ]; then
-    run_parallel wassat "${wassat_slow_specs[@]}" -- "$wassat_bin"
-  else
-    echo "skip ${wassat_slow_specs[*]} (set TUNGSTEN_SLOW_SPECS=1 to run)"
-  fi
 else
   echo "FAIL [wassat] CLI compile failed" >&2
   fail=1

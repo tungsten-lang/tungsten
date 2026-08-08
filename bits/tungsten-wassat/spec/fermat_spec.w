@@ -7,7 +7,7 @@ use wassat
 # A small canonical width-four subtract block.  For target 15, Pollard-rho
 # recovers 3*5, hence a=4 and b=1.  The eight equivalences expose
 # a^2=0 and b^2=1 modulo 16 to the fixed subtractor.
--> fermat_fixture_cnf(target = 15)
+-> fermat_fixture_cnf(target)
   width = 4
   lines = []
   fermat_fixture_clause(lines, [-1, -2, -3, -4])
@@ -61,7 +61,7 @@ use wassat
 
 describe "Wassat Fermat circuit shortcut" ->
   it "derives the fixed constant from DIMACS structure" ->
-    formula = wassat_parse_cnf_native(fermat_fixture_cnf)
+    formula = wassat_parse_cnf_native(fermat_fixture_cnf(15))
     pm = i64[4]
     ok = wassat_fermat_scan(
       formula["flat_lits"], formula["flat_offs"], formula["flat_lens"],
@@ -72,7 +72,7 @@ describe "Wassat Fermat circuit shortcut" ->
     expect(pm[1]).to eq(15)
 
   it "factors, propagates, and verifies a complete model" ->
-    formula = wassat_parse_cnf_native(fermat_fixture_cnf)
+    formula = wassat_parse_cnf_native(fermat_fixture_cnf(15))
     model = wassat_fermat_model(formula)
     expect(model.empty?).to eq(false)
     expect(wassat_model_satisfies?(formula, model)).to eq(true)
@@ -80,14 +80,14 @@ describe "Wassat Fermat circuit shortcut" ->
     expect(model.slice(0, 8)).to eq([-1, -2, 3, -4, 5, -6, -7, -8])
 
   it "falls through on a malformed fixed-result parity table" ->
-    text = fermat_fixture_cnf.replace(
+    text = fermat_fixture_cnf(15).replace(
       "10 -14 17 0", "10 14 17 0"
     )
     formula = wassat_parse_cnf_native(text)
     expect(wassat_fermat_model(formula).empty?).to eq(true)
 
   it "falls through on a malformed no-borrow carry table" ->
-    text = fermat_fixture_cnf.replace(
+    text = fermat_fixture_cnf(15).replace(
       "9 -13 -17 0", "9 -13 17 0"
     )
     formula = wassat_parse_cnf_native(text)
@@ -105,7 +105,7 @@ describe "Wassat Fermat circuit shortcut" ->
     expect(wassat_fermat_model(formula).empty?).to eq(true)
 
   it "falls through when the leading primary-word contract is changed" ->
-    text = fermat_fixture_cnf.replace(
+    text = fermat_fixture_cnf(15).replace(
       "-5 -6 -7 -8 0", "-5 -6 -7 8 0"
     )
     formula = wassat_parse_cnf_native(text)
@@ -117,7 +117,7 @@ describe "Wassat Fermat circuit shortcut" ->
     input = "/tmp/wassat-fermat-proof-mode.cnf"
     proof = "/tmp/wassat-fermat-proof-mode.drat"
     output = "/tmp/wassat-fermat-proof-mode.out"
-    expect(write_file(input, fermat_fixture_cnf)).to eq(true)
+    expect(write_file(input, fermat_fixture_cnf(15))).to eq(true)
     z = ccall("__w_unlink", proof)
     cmd = "(" + bin + " " + input + " --drat " + proof
     cmd += " > " + output + " 2>&1); test $? -eq 10"

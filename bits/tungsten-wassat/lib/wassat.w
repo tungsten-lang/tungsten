@@ -712,9 +712,10 @@ use portfolio
         if options["conflicts"] > 0
           remaining = options["conflicts"] - budget_used
           probe_cap = remaining if remaining < probe_cap
-        # SCOUT RACE. Two arms over the same artifact, each on its own solver,
-        # concurrently: kissat's lucky phases (the four decision-free dives of
-        # lucky.c, its `luckyearly` shot) and the bounded CDCL scout.
+        # SCOUT RACE. One or two arms over the same artifact, each on its own
+        # solver, concurrently: kissat's lucky phases (the four decision-free
+        # dives of lucky.c, its `luckyearly` shot) when formula policy enables
+        # them, and the bounded CDCL scout.
         #
         # An arm, not a prologue, because the dives propagate — and propagation
         # permutes clause literals and moves watch entries, which reorders any
@@ -730,6 +731,7 @@ use portfolio
         # first is already running.
         scout_nv = formula["nvars"]
         scout_simplify = config.force_simplify?
+        scout_lucky = config.use_lucky
         # SLS always consumes an explicit RAW artifact, even when the CDCL
         # scout races a preprocessed rendering. This is built once on the
         # coordinator and shared by the scout and later race walkers.
@@ -759,7 +761,9 @@ use portfolio
         # 2,000 conflicts are expensive: n320p5q2_n spends 748ms there while the
         # walker reaches a model in 6,610 flips. Racing it means a formula local
         # search cracks is answered before the scout's cap is even approached.
-        lucky_h = Thread.new -> wassat_lucky_arm_body(scout_nv, art, scout_res, 0, scout_stop)
+        lucky_h = nil
+        if scout_lucky
+          lucky_h = Thread.new -> wassat_lucky_arm_body(scout_nv, art, scout_res, 0, scout_stop)
         scout_h = Thread.new -> wassat_scout_arm_body(
           scout_nv, art, scout_stop, probe_cap, probe_wall, raw_probe,
           scout_simplify, scout_out, scout_budget, probe_cap, 1
@@ -770,10 +774,12 @@ use portfolio
         # Memory ceiling: a walker whose arena would be enormous costs every
         # OTHER arm more than it can win back. See wassat_sls_max_arena_mb.
         scout_sls_flips = 0 unless wassat_sls_arm_memory_allowed?(formula)
-        # The scout owns two CDCL arenas (lucky plus ordinary). Count both
-        # beside the proposed walker instead of applying only a per-walker
-        # cap. The allocation remains resident after this stage.
-        unless wassat_race_memory_fits?(formula, 2, 1, 1)
+        # Count the ordinary CDCL arena and the optional lucky arena beside
+        # the proposed walker instead of applying only a per-walker cap. A
+        # disabled lucky arm must not consume either memory budget or startup
+        # time: its lean from_flat still copies the complete formula.
+        scout_cdcl_arenas = scout_lucky ? 2 : 1
+        unless wassat_race_memory_fits?(formula, scout_cdcl_arenas, 1, 1)
           scout_sls_flips = 0
         if scout_sls_flips > 0
           scout_sls_arenas = 1
@@ -797,7 +803,7 @@ use portfolio
           scout_nv, formula, scout_res, scout_xor_base, scout_stop, nil,
           scout_circuit, scout_xor_deadline
         )
-        z = lucky_h.join
+        z = lucky_h.join if lucky_h != nil
         z = scout_h.join
         # Exact-shape xorshift rows get one bounded full-domain preimage pass.
         # The measured family completes this in less time than generic search,
@@ -961,10 +967,11 @@ use portfolio
         sls_flips = wassat_sls_arm_flips
         sls_flips = 0 unless wassat_sls_arm_memory_allowed?(formula)
         # Completed scout allocations are still resident. The race walker is
-        # accepted only if every planned raw/preprocessed solver, both scout
-        # solvers, the retained scout walker, and this second walker fit
-        # together below the shared one-third-RAM ceiling.
-        race_cdcl_arenas = arms + pre_arms + 2
+        # accepted only if every planned raw/preprocessed solver, the scout's
+        # ordinary and optional lucky solvers, the retained scout walker, and
+        # this second walker fit together below the shared one-third-RAM
+        # ceiling.
+        race_cdcl_arenas = arms + pre_arms + scout_cdcl_arenas
         unless wassat_race_memory_fits?(
           formula, race_cdcl_arenas, scout_sls_arenas + 1,
           pre_arms + 1
@@ -976,7 +983,7 @@ use portfolio
           continuation_spent = continuation == nil ? 0 : scout_conflicts
           race = wassat_race_build(formula["nvars"], art, arms, formula,
                                    continuation, continuation_spent, pre_arms,
-                                   sls_flips > 0 ? 1 : 0, 2,
+                                   sls_flips > 0 ? 1 : 0, scout_cdcl_arenas,
                                    scout_sls_arenas, 1)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
           if pre_arms > 0

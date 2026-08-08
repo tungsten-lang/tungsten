@@ -6,8 +6,7 @@ use wassat
 # Every piece exposes color zero on every edge, so the first permutation is a
 # model. The fixture is intentionally generated independently of production
 # recognition code.
--> edge_matching_fixture(extra = [], reverse_partitions = false,
-                         omit_last_partition = false)
+-> edge_matching_fixture(extra, reverse_partitions, omit_last_partition)
   lines = []
   cells = [
     [1, 2, 3, 4],
@@ -61,7 +60,7 @@ use wassat
 
 describe "Wassat compact edge-matching specialist" ->
   it "reconstructs the square grid and returns a verified complete model" ->
-    formula = edge_matching_fixture
+    formula = edge_matching_fixture([], false, false)
     result = wassat_edge_matching_solve(formula)
     expect(result["recognized"]).to eq(true)
     expect(result["status"]).to eq(1)
@@ -73,13 +72,15 @@ describe "Wassat compact edge-matching specialist" ->
     expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
 
   it "falls through instead of claiming UNSAT at the search cap" ->
-    result = wassat_edge_matching_solve(edge_matching_fixture, 1)
+    result = wassat_edge_matching_solve(
+      edge_matching_fixture([], false, false), 1
+    )
     expect(result["recognized"]).to eq(true)
     expect(result["status"]).to eq(0)
     expect(result["model"]).to eq([])
 
   it "recognizes either ordering of the cell and piece partitions" ->
-    formula = edge_matching_fixture([], true)
+    formula = edge_matching_fixture([], true, false)
     result = wassat_edge_matching_solve(formula)
     expect(result["recognized"]).to eq(true)
     expect(result["status"]).to eq(1)
@@ -93,13 +94,13 @@ describe "Wassat compact edge-matching specialist" ->
     expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
 
   it "rejects a tail condition spanning two distinct cells" ->
-    formula = edge_matching_fixture(["-1 -5 0"])
+    formula = edge_matching_fixture(["-1 -5 0"], false, false)
     result = wassat_edge_matching_solve(formula)
     expect(result["recognized"]).to eq(false)
     expect(result["status"]).to eq(0)
 
   it "rejects a placement relation with no legal one-hot tuple" ->
-    formula = edge_matching_fixture(["-1 18 0"])
+    formula = edge_matching_fixture(["-1 18 0"], false, false)
     result = wassat_edge_matching_solve(formula)
     expect(result["recognized"]).to eq(false)
     expect(result["status"]).to eq(0)

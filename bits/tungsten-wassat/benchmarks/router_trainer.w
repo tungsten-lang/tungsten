@@ -70,7 +70,7 @@ use ../../tungsten-koala/lib/koala
     2
 
   -> .feature_schema_checksum
-    944208648
+    730840193
 
   -> .extractor_schema_sha256
     "6c74c4ea6a670c9ff8aab655baa60243d4f34c2869d3accd91d9924afea244ca"

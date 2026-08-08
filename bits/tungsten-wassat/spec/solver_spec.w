@@ -30,6 +30,12 @@ ALL_FOUR = "p cnf 2 4\n1 2 0\n1 -2 0\n-1 2 0\n-1 -2 0\n"
 # independently-budgeted continuation calls.
 ALL_EIGHT = "p cnf 3 8\n1 2 3 0\n1 2 -3 0\n1 -2 3 0\n1 -2 -3 0\n-1 2 3 0\n-1 2 -3 0\n-1 -2 3 0\n-1 -2 -3 0\n"
 
+# Seven of the eight three-variable assignments are excluded, leaving the
+# mixed assignment (-1, 2, -3) as the unique model. Unlike the all-positive
+# and all-negative lucky dives, ordinary search must reach this planted model
+# or retire safely when a fixed-capacity arena cannot store another lemma.
+PLANTED_MIXED_SAT = "p cnf 3 7\n1 2 3 0\n1 2 -3 0\n1 -2 -3 0\n-1 2 3 0\n-1 2 -3 0\n-1 -2 3 0\n-1 -2 -3 0\n"
+
 # The first conflict has an intermediate resolvent that subsumes one reason:
 # OTFS learns (5 v 2), while ordinary first-UIP learns the incomparable
 # assumption-blocking clause (5 v 1).
@@ -490,6 +496,15 @@ describe "Tungsten Wassat" ->
       s.force_tiny_arena_for_test(1)
       r = s.solve_budget(0)
       expect(r["status"] == -1 || r["status"] == 0).to eq(true)
+
+    it "never turns planted SAT into UNSAT when the arena is exhausted" ->
+      f = wassat_parse_cnf(PLANTED_MIXED_SAT)
+      s = Wassat.new(f["nvars"], f["clauses"], WASSAT_PROOF_NONE, 0)
+      s.force_tiny_arena_for_test(1)
+      r = s.solve_budget(0)
+      expect(r["status"] == 0 || r["status"] == 1).to eq(true)
+      if r["status"] == 1
+        expect(wassat_model_satisfies?(f, r["model"])).to eq(true)
 
   context "EVSIDS variable-order heap" ->
     it "raises bumped variables to the top and keeps inverse positions valid" ->

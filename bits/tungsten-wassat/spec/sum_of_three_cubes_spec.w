@@ -23,7 +23,7 @@ use ../lib/sum_of_three_cubes
 # Width eight is sufficient for target 91. The six anchor rows model the
 # recognizable x*x then x*x^2 shells; the production solver still supplies
 # and verifies the complete model rather than trusting this fixture shape.
--> sum3_fixture_cnf(target = 91)
+-> sum3_fixture_cnf(target)
   width = 8
   lines = []
   word = 0
@@ -57,7 +57,7 @@ use ../lib/sum_of_three_cubes
 
 describe "Wassat sum-of-three-cubes shortcut" ->
   it "derives the target from the terminal DIMACS units" ->
-    formula = wassat_parse_cnf_native(sum3_fixture_cnf)
+    formula = wassat_parse_cnf_native(sum3_fixture_cnf(91))
     pm = i64[8]
     ok = wassat_sum3_scan(
       formula["flat_lits"], formula["flat_offs"], formula["flat_lens"],
@@ -68,19 +68,19 @@ describe "Wassat sum-of-three-cubes shortcut" ->
     expect(pm[1]).to eq(91)
 
   it "finds bounded operands and verifies the complete model" ->
-    formula = wassat_parse_cnf_native(sum3_fixture_cnf)
+    formula = wassat_parse_cnf_native(sum3_fixture_cnf(91))
     result = wassat_sum3_solve(formula)
     expect(result["status"]).to eq(1)
     expect([result["x"], result["y"], result["z"]]).to eq([3, 4, 0])
     expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
 
   it "falls through on a malformed cube anchor" ->
-    text = sum3_fixture_cnf.replace("-1 -2 26 0", "-1 -2 -26 0")
+    text = sum3_fixture_cnf(91).replace("-1 -2 26 0", "-1 -2 -26 0")
     formula = wassat_parse_cnf_native(text)
     expect(wassat_sum3_solve(formula)["recognized"]).to eq(false)
 
   it "falls through on a malformed target suffix" ->
-    text = sum3_fixture_cnf.replace("-94 0\n79 0", "94 0\n79 0")
+    text = sum3_fixture_cnf(91).replace("-94 0\n79 0", "94 0\n79 0")
     formula = wassat_parse_cnf_native(text)
     expect(wassat_sum3_solve(formula)["recognized"]).to eq(false)
 
@@ -97,7 +97,7 @@ describe "Wassat sum-of-three-cubes shortcut" ->
     input = "/tmp/wassat-sum3-proof-mode.cnf"
     proof = "/tmp/wassat-sum3-proof-mode.drat"
     output = "/tmp/wassat-sum3-proof-mode.out"
-    expect(write_file(input, sum3_fixture_cnf)).to eq(true)
+    expect(write_file(input, sum3_fixture_cnf(91))).to eq(true)
     z = ccall("__w_unlink", proof)
     cmd = "(" + bin + " " + input + " --drat " + proof
     cmd += " > " + output + " 2>&1); test $? -eq 10"

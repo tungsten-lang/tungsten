@@ -125,7 +125,7 @@ PORT_SLS_UNSAT = "p cnf 2 4\n1 2 0\n1 -2 0\n-1 2 0\n-1 -2 0\n"
 
 # Two folds, ADD then XOR, plus the generator's final unused xorshift state.
 # Input 5 maps to the independently calculated 0x141dbeaf.
--> port_xs_fixture(final_add = false, wrong_wire = false)
+-> port_xs_fixture(final_add, wrong_wire)
   g = { "next": 33, "lines": [] }
   input = []
   v = 1
@@ -193,6 +193,20 @@ describe "Wassat portfolio (process race)" ->
       expect(wassat_model_satisfies?(f, model)).to eq(true)
 
   context "threaded --fast race" ->
+    it "returns before constructing a policy-disabled lucky solver" ->
+      counts = i64[8]
+      counts[4] = 199027
+      config = WassatConfig.new(272, [])
+      config.adopt_counts(200920, counts)
+      expect(config.use_lucky).to eq(false)
+      # Deliberately omit every flat-artifact array. Reaching from_flat_lucky
+      # would fail; a clean return proves policy is checked before allocation.
+      art = { "config": config }
+      res = i64[280]
+      stop = i64[4]
+      expect(wassat_lucky_arm_body(272, art, res, 0, stop)).to eq(0)
+      expect(res[0]).to eq(0)
+
     it "keeps the bounded dense SLS specialist just above the generic cap" ->
       divs = {
         "nvars": 862, "flat_ncl": 855716, "flat_nlits": 9386236
@@ -396,7 +410,7 @@ describe "Wassat portfolio (process race)" ->
       expect(metrics[3]).to eq(0)
 
     it "recognizes and solves a complete xorshift/add circuit as a model-only lane" ->
-      formula = wassat_parse_cnf_native(port_xs_fixture)
+      formula = wassat_parse_cnf_native(port_xs_fixture(false, false))
       plan = wassat_xs32_circuit_plan(formula["nvars"], formula)
       expect(plan == nil).to eq(false)
       expect(plan["nfolds"]).to eq(2)
@@ -423,7 +437,7 @@ describe "Wassat portfolio (process race)" ->
       expect(wassat_model_satisfies?(formula, model)).to eq(true)
 
     it "recognizes a final ripple-add fold whose sum wires are gapped" ->
-      formula = wassat_parse_cnf_native(port_xs_fixture(true))
+      formula = wassat_parse_cnf_native(port_xs_fixture(true, false))
       plan = wassat_xs32_circuit_plan(formula["nvars"], formula)
       expect(plan == nil).to eq(false)
       expect(plan["nfolds"]).to eq(2)

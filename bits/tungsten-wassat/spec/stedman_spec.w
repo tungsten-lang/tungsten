@@ -6,7 +6,7 @@ use stedman
 # nodes form a cycle, both calls preserve the type, and every sequence label is
 # copied from a fixed seven-bit boundary value. The fixture is generated
 # independently of production recognition code.
--> stedman_fixture_text(omit_last = false)
+-> stedman_fixture_text(omit_last)
   nnodes = 5
   nbits = 7
   type_base = nnodes + 1
@@ -75,12 +75,12 @@ use stedman
   lines.pop if omit_last
   "p cnf [nvars] [lines.size]\n" + lines.join("\n") + "\n"
 
--> stedman_fixture(omit_last = false)
+-> stedman_fixture(omit_last)
   wassat_parse_cnf_native(stedman_fixture_text(omit_last))
 
 describe "Wassat Stedman triples specialist" ->
   it "reconstructs the guarded cycle and returns a verified complete model" ->
-    formula = stedman_fixture
+    formula = stedman_fixture(false)
     result = wassat_stedman_solve(formula)
     expect(result["recognized"]).to eq(true)
     expect(result["status"]).to eq(1)
@@ -90,7 +90,7 @@ describe "Wassat Stedman triples specialist" ->
     expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
 
   it "falls through instead of claiming UNSAT at the search cap" ->
-    result = wassat_stedman_solve(stedman_fixture, 1)
+    result = wassat_stedman_solve(stedman_fixture(false), 1)
     expect(result["recognized"]).to eq(true)
     expect(result["status"]).to eq(0)
     expect(result["model"]).to eq([])
@@ -112,7 +112,7 @@ describe "Wassat Stedman triples specialist" ->
     input = "/tmp/wassat-stedman-proof-mode.cnf"
     proof = "/tmp/wassat-stedman-proof-mode.wrat"
     output = "/tmp/wassat-stedman-proof-mode.out"
-    expect(write_file(input, stedman_fixture_text)).to eq(true)
+    expect(write_file(input, stedman_fixture_text(false))).to eq(true)
     z = ccall("__w_unlink", proof)
     cmd = "(" + bin + " " + input + " --proof " + proof
     cmd += " > " + output + " 2>&1); test $? -eq 10"

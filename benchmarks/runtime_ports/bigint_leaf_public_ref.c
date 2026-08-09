@@ -2,16 +2,17 @@
  * campaign. These are identical in the before (IC-installed) and after
  * (source-dispatch) builds and are never themselves the measured path.
  *
- * The consume sink frees each fresh arithmetic result so 10M+ iteration
- * legs keep a flat heap; results are ordinary malloc-backed WBigint
- * buffers (or inline i48 ints at the demotion crossover), so libc free
- * is the correct disposal on both sides of the port. */
+ * The consume sink releases each fresh arithmetic result through Tungsten's
+ * ordinary value-disposal path so 10M+ iteration legs exercise the production
+ * BigInt recycler rather than bypassing its give/take handoff with libc free. */
 
 #include "runtime.h"
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
+
+void w_value_free(WValue value);
 
 __attribute__((noinline))
 WValue w_leafpub_consume_low_byte(WValue value) {
@@ -25,15 +26,13 @@ WValue w_leafpub_consume_low_byte(WValue value) {
     if (!w_is_bigint(value)) abort();
     WBigint *big = w_as_bigint(value);
     int64_t low = big->size == 0 ? 0 : (int64_t)(big->limbs[0] & UINT64_C(0xFF));
-    free(big);
+    w_value_free(value);
     return w_int(low);
 }
 
 /* Identity-result sink for alias-return benchmarks. Unlike the fresh-result
  * sink above, this must honor BigInt's shared-count handoff instead of freeing
  * the receiver's storage directly. */
-void w_value_free(WValue value);
-
 __attribute__((noinline))
 WValue w_leafpub_consume_alias_low_byte(WValue value) {
     if (!w_is_bigint(value)) abort();

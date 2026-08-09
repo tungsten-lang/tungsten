@@ -1,0 +1,148 @@
+Analysis of sampling tungsten-bigint-shift-profile-recycler (pid 19425) every 1 millisecond
+Process:         tungsten-bigint-shift-profile-recycler [19425]
+Path:            /private/tmp/tungsten-bigint-shift-profile-recycler
+Load Address:    0x1025c0000
+Identifier:      tungsten-bigint-shift-profile-recycler
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  codex [48627]
+Target Type:     live task
+
+Date/Time:       2026-08-09 17:02:33.000 -0400
+Launch Time:     2026-08-09 17:02:17.766 -0400
+OS Version:      macOS 26.6.1 (25G76)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         1424K
+Physical footprint (peak):  1424K
+Idle exit:                  untracked
+----
+
+Call graph:
+    3886 Thread_9448826   DispatchQueue_1: com.apple.main-thread  (serial)
+      2539 __wy_3b47a73d  (in tungsten-bigint-shift-profile-recycler) + 404  [0x10270d184]
+      + 1751 w_bigint_shr  (in tungsten-bigint-shift-profile-recycler) + 4108,4252,...  [0x10269d544,0x10269d5d4,...]  runtime.c:35583
+      + 282 w_bigint_shr  (in tungsten-bigint-shift-profile-recycler) + 4780  [0x10269d7e4]  runtime.c:35583
+      + ! 151 bigint_alloc_raw  (in tungsten-bigint-shift-profile-recycler) + 88,168,...  [0x1025d17e0,0x1025d1830,...]  runtime.c:696
+      + ! 47 bigint_alloc_raw  (in tungsten-bigint-shift-profile-recycler) + 48  [0x1025d17b8]  runtime.c:695
+      + ! 40 bigint_alloc_raw  (in tungsten-bigint-shift-profile-recycler) + 68  [0x1025d17cc]  runtime.c:696
+      + ! : 40 _tlv_get_addr  (in libdyld.dylib) + 20,12  [0x18932c39c,0x18932c394]
+      + ! 39 bigint_alloc_raw  (in tungsten-bigint-shift-profile-recycler) + 4  [0x1025d178c]  runtime.c:694
+      + ! 5 bigint_alloc_raw  (in tungsten-bigint-shift-profile-recycler) + 244  [0x1025d187c]  runtime.c:713
+      + 101 w_bit_shr  (in tungsten-bigint-shift-profile-recycler) + 104,80,...  [0x10269d9a0,0x10269d988,...]  runtime.c:35714
+      + 92 __wy_4ec47970  (in tungsten-bigint-shift-profile-recycler) + 28,84,...  [0x1026f87dc,0x1026f8814,...]
+      + 83 w_bit_shr  (in tungsten-bigint-shift-profile-recycler) + 32,36  [0x10269d958,0x10269d95c]  runtime.c:35713
+      + 58 w_bigint_shr  (in tungsten-bigint-shift-profile-recycler) + 24  [0x10269c550]  runtime.c:0
+      + 50 w_bigint_shr  (in tungsten-bigint-shift-profile-recycler) + 1372  [0x10269ca94]  runtime.c:35583
+      + ! 50 _tlv_get_addr  (in libdyld.dylib) + 20,12,...  [0x18932c39c,0x18932c394,...]
+      + 39 w_bit_shr  (in tungsten-bigint-shift-profile-recycler) + 208  [0x10269da08]  runtime.c:35715
+      + 37 bigint_alloc_raw  (in tungsten-bigint-shift-profile-recycler) + 248  [0x1025d1880]  runtime.c:713
+      + 21 w_bigint_shr  (in tungsten-bigint-shift-profile-recycler) + 4332  [0x10269d624]  runtime.c:35584
+      + 15 w_bigint_shr  (in tungsten-bigint-shift-profile-recycler) + 4  [0x10269c53c]  runtime.c:35580
+      + 10 w_bigint_shr  (in tungsten-bigint-shift-profile-recycler) + 36  [0x10269c55c]  runtime.c:35581
+      477 __wy_3b47a73d  (in tungsten-bigint-shift-profile-recycler) + 408  [0x10270d188]
+      + 437 w_leafpub_consume_low_byte  (in tungsten-bigint-shift-profile-recycler) + 88  [0x1026dd7fc]  bigint_leaf_public_ref.c:29
+      + ! 70 w_value_free  (in tungsten-bigint-shift-profile-recycler) + 76,104,...  [0x1025dfea8,0x1025dfec4,...]  runtime.c:57719
+      + ! 63 w_value_free  (in tungsten-bigint-shift-profile-recycler) + 4  [0x1025dfe60]  runtime.c:57712
+      + ! 60 bigint_release  (in tungsten-bigint-shift-profile-recycler) + 20,24  [0x1025dffd8,0x1025dffdc]  runtime.c:521
+      + ! 49 bigint_release  (in tungsten-bigint-shift-profile-recycler) + 160  [0x1025e0064]  runtime.c:547
+      + ! 46 bigint_release  (in tungsten-bigint-shift-profile-recycler) + 28  [0x1025dffe0]  runtime.c:521
+      + ! : 46 _tlv_get_addr  (in libdyld.dylib) + 12,20  [0x18932c394,0x18932c39c]
+      + ! 46 w_value_free  (in tungsten-bigint-shift-profile-recycler) + 112  [0x1025dfecc]  runtime.c:57719
+      + ! : 46 _tlv_get_addr  (in libdyld.dylib) + 20,12  [0x18932c39c,0x18932c394]
+      + ! 38 bigint_release  (in tungsten-bigint-shift-profile-recycler) + 96,88,...  [0x1025e0024,0x1025e001c,...]  runtime.c:546
+      + ! 31 bigint_release  (in tungsten-bigint-shift-profile-recycler) + 36  [0x1025dffe8]  runtime.c:522
+      + ! 22 bigint_release  (in tungsten-bigint-shift-profile-recycler) + 60,56  [0x1025e0000,0x1025dfffc]  runtime.c:529
+      + ! 11 w_value_free  (in tungsten-bigint-shift-profile-recycler) + 48,52  [0x1025dfe8c,0x1025dfe90]  runtime.c:57718
+      + ! 1 bigint_release  (in tungsten-bigint-shift-profile-recycler) + 48  [0x1025dfff4]  runtime.c:523
+      + 21 w_leafpub_consume_low_byte  (in tungsten-bigint-shift-profile-recycler) + 4  [0x1026dd7a8]  bigint_leaf_public_ref.c:18
+      + 10 w_leafpub_consume_low_byte  (in tungsten-bigint-shift-profile-recycler) + 88  [0x1026dd7fc]  bigint_leaf_public_ref.c:0
+      + 7 w_leafpub_consume_low_byte  (in tungsten-bigint-shift-profile-recycler) + 20  [0x1026dd7b8]  bigint_leaf_public_ref.c:19
+      + 2 w_leafpub_consume_low_byte  (in tungsten-bigint-shift-profile-recycler) + 64  [0x1026dd7e4]  bigint_leaf_public_ref.c:28
+      405 __wy_3b47a73d  (in tungsten-bigint-shift-profile-recycler) + 344  [0x10270d148]
+      + 143 w_method_call_cached  (in tungsten-bigint-shift-profile-recycler) + 80,116,...  [0x1026c43a4,0x1026c43c8,...]  runtime.c:48776
+      + 55 array_slot_load_decoded  (in tungsten-bigint-shift-profile-recycler) + 340  [0x1025c48d4]  runtime.c:51031
+      + 51 w_ic_array_idx  (in tungsten-bigint-shift-profile-recycler) + 120,116,...  [0x1025e2210,0x1025e220c,...]  runtime.c:42960
+      + 49 w_method_call_cached  (in tungsten-bigint-shift-profile-recycler) + 376  [0x1026c44cc]  runtime.c:48784
+      + 47 w_method_call_cached  (in tungsten-bigint-shift-profile-recycler) + 44,48,...  [0x1026c4380,0x1026c4384,...]  runtime.c:48774
+      + 37 array_slot_load_decoded  (in tungsten-bigint-shift-profile-recycler) + 20  [0x1025c4794]  runtime.c:0
+      + 6 w_method_call_cached  (in tungsten-bigint-shift-profile-recycler) + 20  [0x1026c4368]  runtime.c:48772
+      + 6 w_method_call_cached  (in tungsten-bigint-shift-profile-recycler) + 352  [0x1026c44b4]  runtime.c:48782
+      + 5 array_slot_load_decoded  (in tungsten-bigint-shift-profile-recycler) + 80  [0x1025c47d0]  runtime.c:51030
+      + 3 array_slot_load_decoded  (in tungsten-bigint-shift-profile-recycler) + 344  [0x1025c48d8]  runtime.c:51053
+      + 1 array_slot_load_decoded  (in tungsten-bigint-shift-profile-recycler) + 4  [0x1025c4784]  runtime.c:51029
+      + 1 w_method_call_cached  (in tungsten-bigint-shift-profile-recycler) + 588  [0x1026c45a0]  runtime.c:48793
+      + 1 w_method_call_cached  (in tungsten-bigint-shift-profile-recycler) + 644  [0x1026c45d8]  runtime.c:48794
+      301 __wy_3b47a73d  (in tungsten-bigint-shift-profile-recycler) + 268,152,...  [0x10270d0fc,0x10270d088,...]
+      56 w_leafpub_consume_low_byte  (in tungsten-bigint-shift-profile-recycler) + 100  [0x1026dd808]  bigint_leaf_public_ref.c:31
+      55 __wy_3b47a73d  (in tungsten-bigint-shift-profile-recycler) + 308  [0x10270d124]
+      + 55 _tlv_get_addr  (in libdyld.dylib) + 20,12  [0x18932c39c,0x18932c394]
+      30 w_method_call_cached  (in tungsten-bigint-shift-profile-recycler) + 664,668,...  [0x1026c45ec,0x1026c45f0,...]  runtime.c:48794
+      23 w_bigint_shr  (in tungsten-bigint-shift-profile-recycler) + 4340  [0x10269d62c]  runtime.c:35584
+
+Total number in stack (recursive counted multiple, when >=5):
+        5       _tlv_get_addr  (in libdyld.dylib) + 0  [0x18932c388]
+
+Sort by top of stack, same collapsed (when >= 5):
+        w_bigint_shr  (in tungsten-bigint-shift-profile-recycler)        1878
+        __wy_3b47a73d  (in tungsten-bigint-shift-profile-recycler)        301
+        w_method_call_cached  (in tungsten-bigint-shift-profile-recycler)        283
+        bigint_alloc_raw  (in tungsten-bigint-shift-profile-recycler)        279
+        _tlv_get_addr  (in libdyld.dylib)        237
+        w_bit_shr  (in tungsten-bigint-shift-profile-recycler)        223
+        bigint_release  (in tungsten-bigint-shift-profile-recycler)        201
+        w_value_free  (in tungsten-bigint-shift-profile-recycler)        144
+        array_slot_load_decoded  (in tungsten-bigint-shift-profile-recycler)        101
+        w_leafpub_consume_low_byte  (in tungsten-bigint-shift-profile-recycler)        96
+        __wy_4ec47970  (in tungsten-bigint-shift-profile-recycler)        92
+        w_ic_array_idx  (in tungsten-bigint-shift-profile-recycler)        51
+
+Binary Images:
+       0x1025c0000 -        0x1027ea07f +tungsten-bigint-shift-profile-recycler (0) <448BC7E7-037B-32A7-8737-8D1D3C9E0633> /tmp/tungsten-bigint-shift-profile-recycler
+       0x1892bc000 -        0x18930eb4b  libobjc.A.dylib (951.7) <40277974-D20C-3EC8-B25C-43AE30D8CC60> /usr/lib/libobjc.A.dylib
+       0x18930f000 -        0x189343d58  libdyld.dylib (1387) <634959D0-592E-349C-B549-B91F2FF09858> /usr/lib/system/libdyld.dylib
+       0x189344000 -        0x1893f74ff  dyld (1.0.0 - 1387) <DF42DD9D-AD11-33A7-8849-9AD5DF30A274> /usr/lib/dyld
+       0x1893f8000 -        0x1893fb228  libsystem_blocks.dylib (96) <A712B95E-BCEE-3F12-9F9B-58E6C2060E53> /usr/lib/system/libsystem_blocks.dylib
+       0x1893fc000 -        0x18945055f  libxpc.dylib (3102.160.5) <40BBE226-77D4-332E-9DA8-F0B5BACFB86D> /usr/lib/system/libxpc.dylib
+       0x189451000 -        0x1894719ff  libsystem_trace.dylib (1861.160.4) <E043667E-AD01-3228-837F-A381F32F2B30> /usr/lib/system/libsystem_trace.dylib
+       0x189472000 -        0x1895205f7  libcorecrypto.dylib (1922.160.10) <D54389FC-4078-370D-A863-9FEF16E00DFD> /usr/lib/system/libcorecrypto.dylib
+       0x189521000 -        0x189571257  libsystem_malloc.dylib (812.160.5) <971CDCFE-4D20-300E-A1D6-EC8672FDD258> /usr/lib/system/libsystem_malloc.dylib
+       0x189572000 -        0x1895b923f  libdispatch.dylib (1542.160.2) <243E06A0-7BFF-3C3F-8A9B-D7732729B361> /usr/lib/system/libdispatch.dylib
+       0x1895ba000 -        0x1895bcffb  libsystem_featureflags.dylib (103) <5E7CDBD5-44AB-34C0-A0F5-FC72F6116CDC> /usr/lib/system/libsystem_featureflags.dylib
+       0x1895bd000 -        0x18963e1e7  libsystem_c.dylib (1752.160.4) <FDC4E366-5C14-3A1E-BC35-D933D28CDCF3> /usr/lib/system/libsystem_c.dylib
+       0x18963f000 -        0x1896cfae7  libc++.1.dylib (2100.43) <C6DC2145-7B94-3E01-ADE5-96A6C2D078BC> /usr/lib/libc++.1.dylib
+       0x1896d0000 -        0x1896ea75f  libc++abi.dylib (2100.43) <DDE77B06-5E25-380B-85B7-BA1A27D09021> /usr/lib/libc++abi.dylib
+       0x1896eb000 -        0x1897282e7  libsystem_kernel.dylib (12377.161.13) <7CFB3A10-ADB2-32C4-99B5-922A111B3224> /usr/lib/system/libsystem_kernel.dylib
+       0x189729000 -        0x189735b3b  libsystem_pthread.dylib (539.100.4) <12342372-0084-37A5-9EA6-2E4DC940C685> /usr/lib/system/libsystem_pthread.dylib
+       0x189736000 -        0x18973e963  libsystem_platform.dylib (375.120.2) <4C6BD0FE-25F2-38D8-BE5C-24DAC1DEDCFB> /usr/lib/system/libsystem_platform.dylib
+       0x18973f000 -        0x18976e6eb  libsystem_info.dylib (600) <7402662E-F235-3F48-BB65-F64C8CF0F2BB> /usr/lib/system/libsystem_info.dylib
+       0x18d70c000 -        0x18d715e5f  libsystem_darwin.dylib (1752.160.4) <A095E4FE-0EE1-34DF-B00A-7D349FBC55E0> /usr/lib/system/libsystem_darwin.dylib
+       0x18db77000 -        0x18db891b6  libsystem_notify.dylib (348.160.3) <F9B1BAFF-4D09-3A1F-839B-189C21EB5FBB> /usr/lib/system/libsystem_notify.dylib
+       0x18fe48000 -        0x18fe62f7b  libsystem_networkextension.dylib (2226.160.6) <01D14A9E-16DC-372C-8AA8-CC7AD39E797F> /usr/lib/system/libsystem_networkextension.dylib
+       0x18fee5000 -        0x18fefcfdf  libsystem_asl.dylib (406) <FF57F6FA-F3A1-343D-815D-57B769D31445> /usr/lib/system/libsystem_asl.dylib
+       0x191a9e000 -        0x191aa6387  libsystem_symptoms.dylib (2169.160.3) <CE07A0DF-31B6-3528-B7CE-91CAD89AA519> /usr/lib/system/libsystem_symptoms.dylib
+       0x195d43000 -        0x195d7b5b7  libsystem_containermanager.dylib (725.160.3) <2E14025A-52C2-361D-8A8F-5DD45825A2C9> /usr/lib/system/libsystem_containermanager.dylib
+       0x197155000 -        0x1971595d7  libsystem_configuration.dylib (1405.160.3) <A14ED142-2F56-33A6-A23C-EEB8417DC90E> /usr/lib/system/libsystem_configuration.dylib
+       0x19715a000 -        0x19716099f  libsystem_sandbox.dylib (2680.160.6) <6592D3CE-38C6-3C08-9EA5-75D64F37993F> /usr/lib/system/libsystem_sandbox.dylib
+       0x1987b5000 -        0x1987b81fb  libquarantine.dylib (196.160.2) <78C5B827-8152-358D-90E9-B02F02A68B17> /usr/lib/system/libquarantine.dylib
+       0x198f54000 -        0x198f5ad03  libsystem_coreservices.dylib (191.5.1) <F335DA14-69E8-336E-85A3-11EE239255F0> /usr/lib/system/libsystem_coreservices.dylib
+       0x1994e3000 -        0x199520a77  libsystem_m.dylib (3312.100.1) <3739A40F-2C17-3503-92D6-098141E56E89> /usr/lib/system/libsystem_m.dylib
+       0x199522000 -        0x199525527  libmacho.dylib (1387) <3E43AF47-AD89-3BB4-82B9-A9533F4334DF> /usr/lib/system/libmacho.dylib
+       0x19953f000 -        0x19954c3a7  libcommonCrypto.dylib (600035) <72D94140-1281-3886-971B-37C810403C03> /usr/lib/system/libcommonCrypto.dylib
+       0x19954d000 -        0x199556ca3  libunwind.dylib (2100.2) <B21A1015-83D4-31D8-BA41-88688962D9A6> /usr/lib/system/libunwind.dylib
+       0x19955f000 -        0x199569bef  libcopyfile.dylib (240.160.2.0.1) <58F425CF-7D4F-34FD-9620-706A2A7F8BDC> /usr/lib/system/libcopyfile.dylib
+       0x19956a000 -        0x19956d987  libcompiler_rt.dylib (103.3) <D60A9B54-A909-3FD5-93B9-3F38BE0A2BE8> /usr/lib/system/libcompiler_rt.dylib
+       0x19956e000 -        0x19957278b  libsystem_collections.dylib (1752.160.4) <BDA28F78-F479-3C22-B9C7-4ABCB6801592> /usr/lib/system/libsystem_collections.dylib
+       0x199573000 -        0x1995764cf  libsystem_secinit.dylib (168.100.7) <C85AF062-AA9B-35BB-904C-C055B2C21602> /usr/lib/system/libsystem_secinit.dylib
+       0x199577000 -        0x199579bf7  libremovefile.dylib (85.100.6) <DA9C2B48-7A9C-32EA-888D-6C7AEB5250E6> /usr/lib/system/libremovefile.dylib
+       0x19957a000 -        0x19957af27  libkeymgr.dylib (31) <18EFA1CE-C535-3EAC-BC2C-7955593B7382> /usr/lib/system/libkeymgr.dylib
+       0x19957b000 -        0x199583e37  libsystem_dnssd.dylib (2881.160.4) <2C4C3043-008E-3BD8-BC29-AB9AD235DBA9> /usr/lib/system/libsystem_dnssd.dylib
+       0x199584000 -        0x19958909b  libcache.dylib (95) <EA7C2E0B-52BF-3D45-9A33-38F54A535452> /usr/lib/system/libcache.dylib
+       0x19958a000 -        0x19958bce3  libSystem.B.dylib (1356) <4CC4CAD6-45A6-361E-9343-DE636A0B5C02> /usr/lib/libSystem.B.dylib
+       0x28d533000 -        0x28d53a349  libRosetta.dylib (367.9) <F41D814B-FE1F-311A-A778-5F0699628188> /usr/lib/libRosetta.dylib
+       0x28f146000 -        0x28f149a4b  libsystem_darwindirectory.dylib (122) <6C03D78B-BFAB-3C7A-B713-50881791EE08> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x28f14a000 -        0x28f15439b  libsystem_eligibility.dylib (319.160.17) <A279E124-8499-3FFC-A788-655070028F97> /usr/lib/system/libsystem_eligibility.dylib
+       0x28f155000 -        0x28f15c88b  libsystem_sanitizers.dylib (26.1) <C92FAEE5-DAED-3340-96B3-0C42B005ADF9> /usr/lib/system/libsystem_sanitizers.dylib
+       0x28f15d000 -        0x28f15dbb7  libsystem_trial.dylib (474.2.18.2) <2FF186A6-F448-38CD-9A30-8B5B1AEFCA10> /usr/lib/system/libsystem_trial.dylib

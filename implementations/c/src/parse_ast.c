@@ -991,7 +991,17 @@ static TcAstValue binary_node_ast(TcAstParser *p, size_t start, size_t end, size
   if (left.kind == TC_AST_NIL || right.kind == TC_AST_NIL) {
     tc_ast_free(left);
     tc_ast_free(right);
-    return tc_ast_nil();
+    if (err->message) return tc_ast_nil();
+    /* An empty or unparseable operand span is not an error at this layer.
+     * Embedded-`ll` heredoc bodies are lexed as ordinary tokens by the
+     * bootstrap lexer, so a line ending in an inline vector constant —
+     * e.g. `shufflevector ... <2 x i32> <i32 1, i32 2>` — matches its
+     * trailing `>` as a top-level comparison whose right side is empty.
+     * Returning bare nil here killed the whole parse (and the VM) with
+     * no message. Fall back to the parser's raw-node contract instead:
+     * if the expression is ever actually compiled, ast_compile.c reports
+     * `unsupported AST node` with the source text and line. */
+    return raw_node(p, "expr", start, end, err);
   }
   TcAstValue node = node_hash(p, "binary_op", op_pos, err);
   if (node.kind != TC_AST_HASH) {

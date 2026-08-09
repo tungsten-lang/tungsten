@@ -155,6 +155,11 @@ static int parse_file_ast(const char *path, const unsigned char *flags, size_t f
   tc_syntax_tokens_free(&syntax_tokens);
   tc_tokens_free(&tokens);
   tc_source_free(&source);
+  /* A parse failure must never be silent: main's fail path prints only
+   * err->message, so a message-less failure exits 1 with no output at
+   * all (this hid a bootstrap-parser death inside an embedded-`ll`
+   * heredoc for a full debugging session). Name the file at minimum. */
+  if (!ok && !err->message) tc_error_set(err, "bootstrap AST parse failed: %s", path);
   return ok;
 }
 

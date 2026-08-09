@@ -176,6 +176,9 @@ static int fl_parse_file_ast(const char *path, const unsigned char *flags, size_
   tc_syntax_tokens_free(&syntax_tokens);
   tc_tokens_free(&tokens);
   tc_source_free(&source);
+  /* Mirror main.c's parse_file_ast: never let a parse failure travel
+   * without a message — callers print err->message or nothing. */
+  if (!ok && !err->message) tc_error_set(err, "bootstrap AST parse failed: %s", path);
   return ok;
 }
 

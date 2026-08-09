@@ -752,6 +752,22 @@
   -> %(other)(Number)
     ccall("w_mod", self, other)
 
+  # Shifts route multi-limb BigInts through source while retaining the tuned
+  # magnitude kernels behind reentry-free boundaries. The runtime gate keeps
+  # one-limb and zero-shift specializations in C; every admitted source shape
+  # reaches one of these typed bodies exactly once.
+  -> <<(other)(Int)
+    ccall("w_bigint_shl", self, other)
+
+  -> <<(other)(Number)
+    ccall("w_bit_shl", self, other)
+
+  -> >>(other)(Int)
+    ccall("w_bigint_shr", self, other)
+
+  -> >>(other)(Number)
+    ccall("w_bit_shr", self, other)
+
   # Greatest common divisor. The Lehmer/HGCD kernel stays in the runtime
   # (same tier as modpow's bigint_powmod_any); this override exists so the
   # method surface lives in source AND so dispatch never falls through to

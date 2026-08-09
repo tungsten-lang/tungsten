@@ -1468,6 +1468,14 @@ use target
       return ccall("w_bigint_div", args[1], args[2])
     when "w_bigint_mod"
       return ccall("w_bigint_mod", args[1], args[2])
+    when "w_bigint_shl"
+      return ccall("w_bigint_shl", args[1], args[2])
+    when "w_bigint_shr"
+      return ccall("w_bigint_shr", args[1], args[2])
+    when "w_bit_shl"
+      return ccall("w_bit_shl", args[1], args[2])
+    when "w_bit_shr"
+      return ccall("w_bit_shr", args[1], args[2])
     when "w_bigint_to_f"
       return ccall("w_bigint_to_f", args[1])
     when "w_bigint_to_s"

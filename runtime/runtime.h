@@ -608,6 +608,9 @@ WValue w_native_data_elem(WValue recv, WValue field, WValue idx);
 WValue w_native_data_elem_set(WValue recv, WValue field, WValue idx, WValue val);
 WValue w_neg(WValue v);
 WValue w_bit_shl(WValue a, WValue b);
+WValue w_bit_shr(WValue a, WValue b);
+WValue w_bigint_shl(WValue a, WValue b);
+WValue w_bigint_shr(WValue a, WValue b);
 
 /* ---- Comparison ---- */
 WValue w_eq(WValue a, WValue b);

@@ -35567,6 +35567,41 @@ WValue bignum_shr(WValue a, int64_t k) {
     return bignum_shr_generic(a, k);
 }
 
+/* Reentry-free boundaries for the source-routed BigInt shift arms. The
+ * source methods own dispatch while these retain the tuned magnitude
+ * kernels; calling w_bit_shl/w_bit_shr from the typed bodies would re-enter
+ * the source seam. */
+WValue w_bigint_shl(WValue a, WValue b) {
+    if (!w_is_bigint(a) || !w_is_int(b)) return w_bit_shl(a, b);
+    int64_t k = w_as_int(b);
+    return k < 0 ? bignum_shr(a, -k) : bignum_shl(a, k);
+}
+
+WValue w_bigint_shr(WValue a, WValue b) {
+    if (!w_is_bigint(a) || !w_is_int(b)) return w_bit_shr(a, b);
+    int64_t k = w_as_int(b);
+    return k < 0 ? bignum_shl(a, -k) : bignum_shr(a, k);
+}
+
+__attribute__((weak)) WValue __w_bigint_shl_src(WValue a, WValue b) {
+    return w_bigint_shl(a, b);
+}
+
+__attribute__((weak)) WValue __w_bigint_shr_src(WValue a, WValue b) {
+    return w_bigint_shr(a, b);
+}
+
+/* Keep the 6 ns one-limb right-shift specialization and O(1) zero-shift
+ * identity in C. Multi-limb shifts are long enough for the source seam to
+ * fit inside the migration budget while still reaching the same kernels. */
+static inline int bigint_shift_src_shape(WValue a, WValue b) {
+    if (!w_is_bigint(a) || !w_is_int(b) || w_as_int(b) == 0) return 0;
+    int32_t size;
+    (void)w_bigint_view(a, &size);
+    int32_t n = size < 0 ? -size : size;
+    return n >= 2 && n <= 4096;
+}
+
 /* ---- Source-routed bigint bitwise ops (weak-linkage arms) ----
  * Same seam design as __w_bigint_plus_src (see the block above w_add): the
  * weak default is exactly the C kernel; a program that compiles
@@ -35637,6 +35672,11 @@ WValue w_bit_shl(WValue a, WValue b) {
     /* Non-integer LHS or non-int shift count: preserve the overloaded `<<`
      * fallback. */
     if (!w_is_integer_any(a) || !w_is_int(b)) return w_add(a, b);
+    if (bigint_shift_src_shape(a, b)) {
+        int src_off = g_bigint_src_ops_off;
+        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
+        if (__builtin_expect(src_off == 0, 1)) return __w_bigint_shl_src(a, b);
+    }
     int64_t k = w_as_int(b);
     if (k < 0) return bignum_shr(a, -k);  /* negative left shift == right shift */
     /* Fast path: non-negative inline int with a small shift that cannot
@@ -35648,6 +35688,11 @@ WValue w_bit_shl(WValue a, WValue b) {
 }
 WValue w_bit_shr(WValue a, WValue b) {
     if (!w_is_integer_any(a) || !w_is_int(b)) return w_sub(a, b);  /* preserve fallback */
+    if (bigint_shift_src_shape(a, b)) {
+        int src_off = g_bigint_src_ops_off;
+        if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
+        if (__builtin_expect(src_off == 0, 1)) return __w_bigint_shr_src(a, b);
+    }
     int64_t k = w_as_int(b);
     if (k < 0) return bignum_shl(a, -k);  /* negative right shift == left shift */
     if (w_is_int(a)) {

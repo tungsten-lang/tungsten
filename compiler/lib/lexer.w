@@ -5,6 +5,13 @@
 #
 #   W_TAG_CHAR | (type_id << 38) | (length << 26) | (offset << 2) | line_start_flag
 #
+# The 12-bit length field wraps mod 4096 (`& 0xFFF` at every pack site):
+# an unmasked length would OR its high bits into the type-id field and
+# reclassify long tokens (a 20001-digit int became TYPE_HINT, a 79001-digit
+# int became CODEPOINT). Materializers for value-carrying kinds (numbers,
+# decimals, strings, heredocs, arrays) re-scan from `offset`, so the wrapped
+# length is advisory — it only feeds `raw` prefix dispatch.
+#
 # Type ids use bits 38..45 (8 bits → 256 distinct types). The single
 # preserved flag at bit 0 marks "first non-whitespace token on its source
 # line"; the older sp_before / sp_after flags were dropped because the
@@ -154,7 +161,7 @@ use ../../languages/tungsten/lexers/known_units
       pos++
       while pos < count && (lc[pos] & 0x10) != 0
         pos++
-      tokens[tc] = t_sp | ((pos - sp_start) << 26) | (sp_start << 2)
+      tokens[tc] = t_sp | (((pos - sp_start) & 0xFFF) << 26) | (sp_start << 2)
       tc++
 
     when 0x80
@@ -222,7 +229,7 @@ use ../../languages/tungsten/lexers/known_units
                   match = 1
                   len = 7
         if match != 0
-          tokens[tc] = t_magic | (len << 26) | (pos << 2)
+          tokens[tc] = t_magic | ((len & 0xFFF) << 26) | (pos << 2)
           tc++
           pos += len
           next
@@ -234,7 +241,7 @@ use ../../languages/tungsten/lexers/known_units
             pos += 2
             while pos < count && (lc[pos] & 0x08) != 0
               pos++
-            tokens[tc] = t_codepoint | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_codepoint | (((pos - start) & 0xFFF) << 26) | (start << 2)
             tc++
             next
 
@@ -291,16 +298,16 @@ use ../../languages/tungsten/lexers/known_units
               if ((lc[start + 7] >> 18) & cp_mask) == :-_
                 match = 1
       if match != 0
-        tokens[tc] = t_magic | (len << 26) | (start << 2)
+        tokens[tc] = t_magic | ((len & 0xFFF) << 26) | (start << 2)
       elsif c >= 65 && c <= 90
         # Uppercase first char: PascalCase iff later bytes include a
         # lowercase letter; otherwise SCREAMING_SNAKE_CASE constant.
         if has_lower != 0
-          tokens[tc] = t_name | (len << 26) | (start << 2)
+          tokens[tc] = t_name | ((len & 0xFFF) << 26) | (start << 2)
         else
-          tokens[tc] = t_constant | (len << 26) | (start << 2)
+          tokens[tc] = t_constant | ((len & 0xFFF) << 26) | (start << 2)
       else
-        tokens[tc] = t_id | (len << 26) | (start << 2)
+        tokens[tc] = t_id | ((len & 0xFFF) << 26) | (start << 2)
       tc++
 
       # Fast-path unquoted use paths so "use ./x" benchmarks like the real lexer.
@@ -340,7 +347,7 @@ use ../../languages/tungsten/lexers/known_units
                 break
               pos++
             if pos > start
-              tokens[tc] = t_path | ((pos - start) << 26) | (start << 2)
+              tokens[tc] = t_path | (((pos - start) & 0xFFF) << 26) | (start << 2)
               tc++
 
     when 0x01
@@ -410,7 +417,7 @@ use ../../languages/tungsten/lexers/known_units
           pos += 6
         else
           pos += 3
-        tokens[tc] = t_int | ((pos - start) << 26) | (start << 2)
+        tokens[tc] = t_int | (((pos - start) & 0xFFF) << 26) | (start << 2)
         tc++
         next
 
@@ -438,7 +445,7 @@ use ../../languages/tungsten/lexers/known_units
             while len < count && (lc[len] & 0x01) != 0
               len++
           pos = len
-          tokens[tc] = t_int | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_int | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
         match = 0
@@ -472,7 +479,7 @@ use ../../languages/tungsten/lexers/known_units
 
       if match == 0 && pos < count && ((lc[pos] >> 18) & cp_mask) == :-%
         pos++
-        tokens[tc] = t_decimal | ((pos - start) << 26) | (start << 2)
+        tokens[tc] = t_decimal | (((pos - start) & 0xFFF) << 26) | (start << 2)
         tc++
         next
 
@@ -480,7 +487,7 @@ use ../../languages/tungsten/lexers/known_units
         pos++
         while pos < count && ((lc[pos] & 0x01) != 0 || ((lc[pos] >> 18) & cp_mask) == :-_)
           pos++
-        tokens[tc] = t_int | ((pos - start) << 26) | (start << 2)
+        tokens[tc] = t_int | (((pos - start) & 0xFFF) << 26) | (start << 2)
         tc++
         next
 
@@ -494,15 +501,15 @@ use ../../languages/tungsten/lexers/known_units
               pos++
             else
               break
-          tokens[tc] = t_decimal | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_decimal | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
 
       len = pos - start
       if is_float != 0
-        tokens[tc] = t_decimal | (len << 26) | (start << 2)
+        tokens[tc] = t_decimal | ((len & 0xFFF) << 26) | (start << 2)
       else
-        tokens[tc] = t_int | (len << 26) | (start << 2)
+        tokens[tc] = t_int | ((len & 0xFFF) << 26) | (start << 2)
       tc++
 
     when 0x02
@@ -541,7 +548,7 @@ use ../../languages/tungsten/lexers/known_units
             pos++
           if done != 0
             break
-        tokens[tc] = t_string | ((pos - start) << 26) | (start << 2)
+        tokens[tc] = t_string | (((pos - start) & 0xFFF) << 26) | (start << 2)
       else
         loop
           if pos >= count
@@ -558,7 +565,7 @@ use ../../languages/tungsten/lexers/known_units
             pos++
           if done != 0
             break
-        tokens[tc] = t_string | ((pos - start) << 26) | (start << 2)
+        tokens[tc] = t_string | (((pos - start) & 0xFFF) << 26) | (start << 2)
       tc++
 
     when 0x04
@@ -596,7 +603,7 @@ use ../../languages/tungsten/lexers/known_units
               if cp_here == :-) || cp_here == :-, || cp_here == :-; || cp_here == :-: || cp_here == :-?
                 break
             pos++
-          tokens[tc] = t_type_hint | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_type_hint | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
         if pos + 1 < count && ((lc[pos + 1] >> 18) & cp_mask) == :-[
@@ -606,7 +613,7 @@ use ../../languages/tungsten/lexers/known_units
             pos++
           if pos < count
             pos++
-          tokens[tc] = t_key | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_key | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
         if pos + 1 < count && (lc[pos + 1] & 0x08) != 0
@@ -615,7 +622,7 @@ use ../../languages/tungsten/lexers/known_units
             pos++
           len = pos - start - 1
           if len == 3 || len == 4 || len == 6 || len == 8
-            tokens[tc] = t_color | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_color | (((pos - start) & 0xFFF) << 26) | (start << 2)
             tc++
             next
         pos = start + 1
@@ -630,7 +637,7 @@ use ../../languages/tungsten/lexers/known_units
             pos += 3
             if c2 == :-\\ && pos < count
               pos++
-            tokens[tc] = t_char | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_char | (((pos - start) & 0xFFF) << 26) | (start << 2)
             tc++
             next
         if pos + 1 < count
@@ -643,12 +650,12 @@ use ../../languages/tungsten/lexers/known_units
               c3 = (lc[pos + 1] >> 18) & cp_mask
               if op == :-= && c2 == :-= && c3 == :-=
                 pos += 2
-                tokens[tc] = t_symbol | ((pos - start) << 26) | (start << 2)
+                tokens[tc] = t_symbol | (((pos - start) & 0xFFF) << 26) | (start << 2)
                 tc++
                 next
               if op == :-< && c2 == :-= && c3 == :->
                 pos += 2
-                tokens[tc] = t_symbol | ((pos - start) << 26) | (start << 2)
+                tokens[tc] = t_symbol | (((pos - start) & 0xFFF) << 26) | (start << 2)
                 tc++
                 next
             if pos < count
@@ -681,7 +688,7 @@ use ../../languages/tungsten/lexers/known_units
                   match = 1
               if match != 0
                 pos++
-            tokens[tc] = t_symbol | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_symbol | (((pos - start) & 0xFFF) << 26) | (start << 2)
             tc++
             next
         if pos + 1 < count
@@ -707,7 +714,7 @@ use ../../languages/tungsten/lexers/known_units
                 pos += 1
                 while pos < count && (lc[pos] & 0x01) != 0
                   pos++
-          tokens[tc] = t_symbol | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_symbol | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
         if pos + 1 < count && ((lc[pos + 1] >> 18) & cp_mask) == :-[
@@ -716,7 +723,7 @@ use ../../languages/tungsten/lexers/known_units
             pos++
             if pos < count && ((lc[pos] >> 18) & cp_mask) == :-=
               pos++
-            tokens[tc] = t_symbol | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_symbol | (((pos - start) & 0xFFF) << 26) | (start << 2)
             tc++
             next
 
@@ -730,11 +737,11 @@ use ../../languages/tungsten/lexers/known_units
           if pos < count
             pos++
           if c2 == :-w
-            tokens[tc] = t_word_array | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_word_array | (((pos - start) & 0xFFF) << 26) | (start << 2)
           elsif c2 == :-i
-            tokens[tc] = t_symbol_array | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_symbol_array | (((pos - start) & 0xFFF) << 26) | (start << 2)
           else
-            tokens[tc] = t_decimal_array | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_decimal_array | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
         # `%h<dim>-<type>[…]` hypercomplex literal — `%h` then a digit; scan to
@@ -745,7 +752,7 @@ use ../../languages/tungsten/lexers/known_units
             pos++
           if pos < count
             pos++
-          tokens[tc] = t_hyper_array | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_hyper_array | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
         # `%f<width>[…]` typed float array literal (%f32[…]/%f64[…]) — `%f`
@@ -756,7 +763,7 @@ use ../../languages/tungsten/lexers/known_units
             pos++
           if pos < count
             pos++
-          tokens[tc] = t_float_array | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_float_array | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
 
@@ -764,14 +771,14 @@ use ../../languages/tungsten/lexers/known_units
         c2 = (lc[pos + 3] >> 18) & cp_mask
         if c2 == :-* || c2 == :-&
           pos += 4
-          tokens[tc] = t_op | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_op | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
         if (lc[pos + 3] & 0x01) != 0
           pos += 3
           while pos < count && (lc[pos] & 0x01) != 0
             pos++
-          tokens[tc] = t_op | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_op | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
           next
 
@@ -802,7 +809,7 @@ use ../../languages/tungsten/lexers/known_units
                   while scan < count && (lc[scan] & 0x01) != 0
                     scan++
             pos = scan
-            tokens[tc] = t_decimal | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_decimal | (((pos - start) & 0xFFF) << 26) | (start << 2)
             tc++
             next
 
@@ -876,7 +883,7 @@ use ../../languages/tungsten/lexers/known_units
               pos++
               if c2 == 13 && pos < count && ((lc[pos] >> 18) & cp_mask) == 10
                 pos++
-        tokens[tc] = t_string | ((pos - start) << 26) | (start << 2)
+        tokens[tc] = t_string | (((pos - start) & 0xFFF) << 26) | (start << 2)
         tc++
         next
 
@@ -968,7 +975,7 @@ use ../../languages/tungsten/lexers/known_units
                     while scan < count && (lc[scan] & 0x20) != 0
                       scan++
                     pos = scan
-                    tokens[tc] = t_string | ((pos - start) << 26) | (start << 2)
+                    tokens[tc] = t_string | (((pos - start) & 0xFFF) << 26) | (start << 2)
                     tc++
                     found = 1
               if found == 0
@@ -1060,7 +1067,7 @@ use ../../languages/tungsten/lexers/known_units
           if match != 0
             pos++
 
-      tokens[tc] = t_op | ((pos - start) << 26) | (start << 2)
+      tokens[tc] = t_op | (((pos - start) & 0xFFF) << 26) | (start << 2)
       tc++
 
     else
@@ -1071,7 +1078,7 @@ use ../../languages/tungsten/lexers/known_units
           pos += 2
           while pos < count && (lc[pos] & 0x08) != 0
             pos++
-          tokens[tc] = t_codepoint | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_codepoint | (((pos - start) & 0xFFF) << 26) | (start << 2)
         else
           pos++
           has_lower = 0
@@ -1086,9 +1093,9 @@ use ../../languages/tungsten/lexers/known_units
           # First char was `U` (uppercase). Same split as the fast path:
           # has any lowercase byte → t_name; else SCREAMING_SNAKE.
           if has_lower != 0
-            tokens[tc] = t_name | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_name | (((pos - start) & 0xFFF) << 26) | (start << 2)
           else
-            tokens[tc] = t_constant | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_constant | (((pos - start) & 0xFFF) << 26) | (start << 2)
         tc++
       when :-@
         pos++
@@ -1096,15 +1103,15 @@ use ../../languages/tungsten/lexers/known_units
           pos++
           while pos < count && (lc[pos] & 0x20) != 0
             pos++
-          tokens[tc] = t_cvar | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_cvar | (((pos - start) & 0xFFF) << 26) | (start << 2)
         elsif pos < count && (lc[pos] & 0x01) != 0
           while pos < count && (lc[pos] & 0x01) != 0
             pos++
-          tokens[tc] = t_parg | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_parg | (((pos - start) & 0xFFF) << 26) | (start << 2)
         elsif pos < count && (lc[pos] & 0x40) != 0
           while pos < count && (lc[pos] & 0x20) != 0
             pos++
-          tokens[tc] = t_ivar | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_ivar | (((pos - start) & 0xFFF) << 26) | (start << 2)
         else
           tokens[tc] = t_op | (1 << 26) | (start << 2)
         tc++
@@ -1117,12 +1124,12 @@ use ../../languages/tungsten/lexers/known_units
             pos++
             while pos < count && (lc[pos] & 0x01) != 0
               pos++
-          tokens[tc] = t_decimal | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_decimal | (((pos - start) & 0xFFF) << 26) | (start << 2)
         elsif pos + 1 < count && (lc[pos + 1] & 0x40) != 0
           pos += 1
           while pos < count && (lc[pos] & 0x20) != 0
             pos++
-          tokens[tc] = t_id | ((pos - start) << 26) | (start << 2)
+          tokens[tc] = t_id | (((pos - start) & 0xFFF) << 26) | (start << 2)
         else
           tokens[tc] = t_op | (1 << 26) | (pos << 2)
           pos++
@@ -1133,7 +1140,7 @@ use ../../languages/tungsten/lexers/known_units
           pos++
         if pos < count
           pos++
-        tokens[tc] = t_byte_array | ((pos - start) << 26) | (start << 2)
+        tokens[tc] = t_byte_array | (((pos - start) & 0xFFF) << 26) | (start << 2)
         tc++
       else
         if c >= 65 && c <= 90
@@ -1149,9 +1156,9 @@ use ../../languages/tungsten/lexers/known_units
               break
           # Slow path: same has_lower split (PascalCase vs constant).
           if has_lower != 0
-            tokens[tc] = t_name | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_name | (((pos - start) & 0xFFF) << 26) | (start << 2)
           else
-            tokens[tc] = t_constant | ((pos - start) << 26) | (start << 2)
+            tokens[tc] = t_constant | (((pos - start) & 0xFFF) << 26) | (start << 2)
           tc++
         else
           tokens[tc] = t_op | (1 << 26) | (pos << 2)

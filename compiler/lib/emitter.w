@@ -246,6 +246,7 @@ use naming
   # @w_float in practice (float boxing lowers inline). Drop the dead alwaysinline.
   out << declare_fn_attrs("w_float", wv, "double", "nounwind willreturn memory(none) speculatable")
   out << declare_fn("w_decimal", wv, "i64, i32")
+  out << declare_fn("w_decimal_from_digits", wv, wv3)
   out << declare_fn("w_bigint_literal_cached", wv, "ptr, ptr")
   # Numeric->raw-double coercion for ensure_raw_f64's fallback: converts a boxed
   # double/Decimal/Int correctly (a plain bitcast-unbox only works for a genuine

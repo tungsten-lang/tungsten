@@ -526,15 +526,35 @@
     s = s.slice(0, e_idx)
   # Find decimal point
   dot = s.index(".")
+  digits_txt = s
   if dot == nil
-    sig = s.to_i()
     scale = 0 + exp_adj
   else
     int_part = s.slice(0, dot)
     frac_part = s.slice(dot + 1, s.size())
-    sig_str = int_part + frac_part
-    sig = sig_str.to_i()
+    digits_txt = int_part + frac_part
     scale = 0 - frac_part.size() + exp_adj
+  # A significand beyond i64 constructs a BigDecimal at runtime from the
+  # digit TEXT (never through .to_i here — the stage-0 host stores compile-
+  # time ints in int64_t, so a value-level decision or constant would
+  # diverge between stages, and the value would wrap besides). The digit-
+  # count test strips leading zeros textually.
+  stripped = digits_txt
+  lz = 0
+  while lz < stripped.size() - 1 && stripped.slice(lz, 1) == "0"
+    lz += 1
+  if lz > 0
+    stripped = stripped.slice(lz, stripped.size() - lz)
+  if stripped.size() > 18
+    str_tv = lower_string(ctx, Tungsten:AST:String.new(digits_txt))
+    str_reg = ensure_i64_value(wfn, str_tv)
+    sc_masked = scale & 281474976710655
+    sc_bits = wvalue_literal_text(-1688849860263936 + sc_masked)
+    neg_arg = neg ? "2" : "1"
+    btemp = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: btemp, name: "w_decimal_from_digits", args: [str_reg, sc_bits, neg_arg]})
+    return typed_value(:i64, btemp)
+  sig = digits_txt.to_i()
   if neg
     sig = 0 - sig
   temp = next_temp(wfn)

@@ -17929,6 +17929,12 @@ static int is_currency_any(WValue v);
 static int is_quantity_any(WValue v);
 static int is_duration_any(WValue v);
 static int is_decimal_any(WValue v);
+#define W_DECFLAG_BIGSIG 1
+static int decimal_is_bigsig(WValue v);
+static WValue decimal_big_add(WValue a, WValue b, int subtract);
+static WValue decimal_big_mul(WValue a, WValue b);
+static WValue decimal_big_div(WValue a, WValue b);
+static int decimal_big_compare(WValue a, WValue b);
 
 WValue w_decimal(int64_t sig, int scale) {
     decimal_normalize(&sig, &scale);
@@ -17986,37 +17992,61 @@ static void decimal_align(__int128 *a_sig, int *a_scale,
     }
 }
 
+/* Wide-result guard for the plain decimal paths: a value outside i64 (or
+ * an alignment gap the __int128 fast path cannot express) reroutes
+ * through the exact BigDecimal arithmetic instead of truncating. */
+static int decimal_i128_fits_i64(__int128 v) {
+    return v <= (__int128)INT64_MAX && v >= (__int128)INT64_MIN;
+}
+
 WValue w_decimal_add(WValue a, WValue b) {
+    if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
+        return decimal_big_add(a, b, 0);
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
     decimal_extract(a, &a_sig64, &a_scale);
     decimal_extract(b, &b_sig64, &b_scale);
+    int gap = a_scale > b_scale ? a_scale - b_scale : b_scale - a_scale;
+    if (gap > 18) return decimal_big_add(a, b, 0);
     __int128 a_sig = a_sig64, b_sig = b_sig64;
     decimal_align(&a_sig, &a_scale, &b_sig, &b_scale);
-    return w_decimal((int64_t)(a_sig + b_sig), a_scale);
+    __int128 r = a_sig + b_sig;
+    if (!decimal_i128_fits_i64(r)) return decimal_big_add(a, b, 0);
+    return w_decimal((int64_t)r, a_scale);
 }
 
 WValue w_decimal_sub(WValue a, WValue b) {
+    if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
+        return decimal_big_add(a, b, 1);
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
     decimal_extract(a, &a_sig64, &a_scale);
     decimal_extract(b, &b_sig64, &b_scale);
+    int gap = a_scale > b_scale ? a_scale - b_scale : b_scale - a_scale;
+    if (gap > 18) return decimal_big_add(a, b, 1);
     __int128 a_sig = a_sig64, b_sig = b_sig64;
     decimal_align(&a_sig, &a_scale, &b_sig, &b_scale);
-    return w_decimal((int64_t)(a_sig - b_sig), a_scale);
+    __int128 r = a_sig - b_sig;
+    if (!decimal_i128_fits_i64(r)) return decimal_big_add(a, b, 1);
+    return w_decimal((int64_t)r, a_scale);
 }
 
 WValue w_decimal_mul(WValue a, WValue b) {
+    if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
+        return decimal_big_mul(a, b);
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
     decimal_extract(a, &a_sig64, &a_scale);
     decimal_extract(b, &b_sig64, &b_scale);
     __int128 sig = (__int128)a_sig64 * b_sig64;
     int scale = a_scale + b_scale;
+    if (!decimal_i128_fits_i64(sig)) return decimal_big_mul(a, b);
     return w_decimal((int64_t)sig, scale);
 }
 
 WValue w_decimal_div(WValue a, WValue b) {
+    if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
+        return decimal_big_div(a, b);
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
     decimal_extract(a, &a_sig64, &a_scale);
@@ -18030,14 +18060,19 @@ WValue w_decimal_div(WValue a, WValue b) {
     a_sig *= (__int128)1000000000000LL;
     int result_scale = a_scale - b_scale - 12;
     __int128 result_sig = a_sig / b_sig64;
+    if (!decimal_i128_fits_i64(result_sig)) return decimal_big_div(a, b);
     return w_decimal((int64_t)result_sig, result_scale);
 }
 
 static int decimal_compare(WValue a, WValue b) {
+    if (decimal_is_bigsig(a) || decimal_is_bigsig(b))
+        return decimal_big_compare(a, b);
     int64_t a_sig64, b_sig64;
     int a_scale, b_scale;
     decimal_extract(a, &a_sig64, &a_scale);
     decimal_extract(b, &b_sig64, &b_scale);
+    int gap = a_scale > b_scale ? a_scale - b_scale : b_scale - a_scale;
+    if (gap > 18) return decimal_big_compare(a, b);
     __int128 a_sig = a_sig64, b_sig = b_sig64;
     decimal_align(&a_sig, &a_scale, &b_sig, &b_scale);
     return (a_sig > b_sig) - (a_sig < b_sig);
@@ -18104,9 +18139,114 @@ static void decimal_extract(WValue v, int64_t *sig, int *scale) {
         *scale = w_unbox_decimal_scale(v);
     } else {
         WDomainHeap *d = w_as_domain(v);
+        /* Loud failure beats silent pointer arithmetic: any path that has
+         * not been widened for BigDecimal must not read the boxed
+         * significand's bits as an i64. */
+        if (d->domain_type == W_DOMAIN_DECIMAL && (d->domain_flags & W_DECFLAG_BIGSIG))
+            die("BigDecimal significand exceeds i64 on an unwidened path");
         *sig = d->sig;
         *scale = d->scale;
     }
+}
+
+/* ---- BigDecimal: decimals whose significand exceeds i64 ----
+ * A domain-heap decimal with W_DECFLAG_BIGSIG set stores a boxed BigInt
+ * WValue's bits in `sig` (marked shared so recycling never reclaims it
+ * while the decimal lives). Every decimal entry widens: big-sig operands
+ * — and plain-path results that overflow i64/__int128 — route through
+ * exact boxed-integer arithmetic and re-demote via w_decimal when the
+ * result significand fits again. */
+static int decimal_is_bigsig(WValue v) {
+    if (!w_is_domain_obj(v)) return 0;
+    WDomainHeap *d = w_as_domain(v);
+    return d->domain_type == W_DOMAIN_DECIMAL && (d->domain_flags & W_DECFLAG_BIGSIG);
+}
+
+static WValue decimal_pow10_boxed(int64_t k) {
+    return w_pow(w_box_int(10), w_box_int(k));
+}
+
+/* Construct from a boxed integer significand (inline int or heap BigInt)
+ * and a power-of-ten scale: value = sig * 10^scale. Normalizes trailing
+ * factors of ten and demotes to the packed/plain-heap form when the
+ * significand fits i64. */
+WValue w_decimal_big(WValue sig_boxed, int64_t scale) {
+    WValue ten = w_box_int(10);
+    while (w_is_bigint(sig_boxed) && scale < W_DECIMAL_SCALE_MAX) {
+        WValue r = w_mod(sig_boxed, ten);
+        if (!w_is_int(r) || w_as_int(r) != 0) break;
+        sig_boxed = w_div(sig_boxed, ten);
+        scale++;
+    }
+    if (w_is_int(sig_boxed))
+        return w_decimal(w_as_int(sig_boxed), (int)scale);
+    if (!w_is_bigint(sig_boxed)) die("w_decimal_big: significand must be an integer");
+    w_bigint_mark_shared(w_as_bigint(sig_boxed));
+    WValue v = domain_heap_alloc(W_DOMAIN_DECIMAL, (int64_t)sig_boxed, (int32_t)scale, 0, 0);
+    w_as_domain(v)->domain_flags |= W_DECFLAG_BIGSIG;
+    return v;
+}
+
+/* Boxed-significand extraction: plain forms box their i64 sig. */
+static void decimal_extract_boxed(WValue v, WValue *sig, int64_t *scale) {
+    if (decimal_is_bigsig(v)) {
+        WDomainHeap *d = w_as_domain(v);
+        *sig = (WValue)d->sig;
+        *scale = d->scale;
+        return;
+    }
+    int64_t s64; int sc;
+    decimal_extract(v, &s64, &sc);
+    *sig = w_int(s64);
+    *scale = sc;
+}
+
+/* Align two boxed significands to the smaller scale, exactly. */
+static void decimal_align_boxed(WValue *a_sig, int64_t *a_scale, WValue *b_sig, int64_t *b_scale) {
+    if (*a_scale > *b_scale) {
+        *a_sig = w_mul(*a_sig, decimal_pow10_boxed(*a_scale - *b_scale));
+        *a_scale = *b_scale;
+    } else if (*b_scale > *a_scale) {
+        *b_sig = w_mul(*b_sig, decimal_pow10_boxed(*b_scale - *a_scale));
+        *b_scale = *a_scale;
+    }
+}
+
+static WValue decimal_big_add(WValue a, WValue b, int subtract) {
+    WValue a_sig, b_sig; int64_t a_scale, b_scale;
+    decimal_extract_boxed(a, &a_sig, &a_scale);
+    decimal_extract_boxed(b, &b_sig, &b_scale);
+    decimal_align_boxed(&a_sig, &a_scale, &b_sig, &b_scale);
+    WValue r = subtract ? w_sub(a_sig, b_sig) : w_add(a_sig, b_sig);
+    return w_decimal_big(r, a_scale);
+}
+
+static WValue decimal_big_mul(WValue a, WValue b) {
+    WValue a_sig, b_sig; int64_t a_scale, b_scale;
+    decimal_extract_boxed(a, &a_sig, &a_scale);
+    decimal_extract_boxed(b, &b_sig, &b_scale);
+    return w_decimal_big(w_mul(a_sig, b_sig), a_scale + b_scale);
+}
+
+static WValue decimal_big_div(WValue a, WValue b) {
+    WValue a_sig, b_sig; int64_t a_scale, b_scale;
+    decimal_extract_boxed(a, &a_sig, &a_scale);
+    decimal_extract_boxed(b, &b_sig, &b_scale);
+    if (w_is_int(b_sig) && w_as_int(b_sig) == 0) die("decimal division by zero");
+    /* Mirror the plain path's policy: extend the dividend by 12 digits
+     * of precision, truncate the quotient. */
+    WValue scaled = w_mul(a_sig, decimal_pow10_boxed(12));
+    return w_decimal_big(w_div(scaled, b_sig), a_scale - b_scale - 12);
+}
+
+static int decimal_big_compare(WValue a, WValue b) {
+    WValue a_sig, b_sig; int64_t a_scale, b_scale;
+    decimal_extract_boxed(a, &a_sig, &a_scale);
+    decimal_extract_boxed(b, &b_sig, &b_scale);
+    decimal_align_boxed(&a_sig, &a_scale, &b_sig, &b_scale);
+    if (w_lt(a_sig, b_sig) == W_TRUE) return -1;
+    if (w_lt(b_sig, a_sig) == W_TRUE) return 1;
+    return 0;
 }
 
 WValue w_currency(int symbol_id, int64_t sig, int scale) {
@@ -24690,8 +24830,39 @@ static int parse_sig_scale_cstr(const char *s, int64_t *sig_out, int *scale_out)
     return 1;
 }
 
+/* Beyond-i64 significands parse exactly through the bigint reader and
+ * construct a BigDecimal (the walker's literal path; the compiled path
+ * reaches the same construction via w_decimal_from_digits). */
+WValue w_bigint_from_dec_str(WValue str);
+static WValue decimal_parse_big(const char *s) {
+    int neg = 0;
+    if (*s == '-') { neg = 1; s++; }
+    else if (*s == '+') s++;
+    size_t cap = strlen(s) + 1;
+    char *digits = malloc(cap);
+    size_t n = 0;
+    int64_t frac = 0, expv = 0;
+    int in_frac = 0;
+    const char *p = s;
+    for (; *p; p++) {
+        if (*p >= '0' && *p <= '9') { digits[n++] = *p; if (in_frac) frac++; }
+        else if (*p == '.' && !in_frac) in_frac = 1;
+        else if (*p == '_') continue;
+        else if (*p == 'e' || *p == 'E') { expv = strtoll(p + 1, NULL, 10); break; }
+        else { free(digits); dief("invalid decimal literal: %s", s); }
+    }
+    digits[n] = '\0';
+    WValue sig = w_bigint_from_dec_str(w_string_n(digits, n));
+    free(digits);
+    if (neg) sig = w_neg(sig);
+    return w_decimal_big(sig, expv - frac);
+}
+
 WValue w_decimal_parse(WValue str_v) {
     const char *s = as_str(str_v);
+    size_t digs = 0;
+    for (const char *q = s; *q; q++) if (*q >= '0' && *q <= '9') digs++;
+    if (digs > 18) return decimal_parse_big(s);
     int64_t sig; int scale;
     if (!parse_sig_scale_cstr(s, &sig, &scale)) dief("invalid decimal literal: %s", s);
     return w_decimal(sig, scale);
@@ -32300,11 +32471,18 @@ static int exact_tower_eq(WValue a, WValue b) {
         return supported ? (c == 0) : -1;
     }
     WValue dv = a_dec ? a : b, ov = a_dec ? b : a;
+    WValue dn, dd;
+    if (decimal_is_bigsig(dv)) {
+        WValue bsig; int64_t bscale;
+        decimal_extract_boxed(dv, &bsig, &bscale);
+        if (bscale >= 0) { dn = w_mul(bsig, decimal_pow10_boxed(bscale)); dd = w_int(1); }
+        else             { dn = bsig; dd = decimal_pow10_boxed(-bscale); }
+    } else {
     int64_t sig; int scale;
     decimal_extract(dv, &sig, &scale);
-    WValue dn, dd;
     if (scale >= 0) { dn = exact_pow10_scaled(sig, scale); dd = w_int(1); }
     else            { dn = w_box_int_checked(sig); dd = exact_pow10_scaled(1, -scale); }
+    }
     WValue on, od;
     if (w_is_rational_any(ov)) rational_parts(ov, &on, &od);
     else { on = ov; od = w_int(1); }
@@ -32370,6 +32548,30 @@ static uint64_t w_hash_value(WValue v) {
          * integer (2.0 keys hit 2); fractional ones as their lowest-terms
          * (n, d) pair with the rational formula above (0.5 keys hit 1/2).
          * The denominator 10^p reduces by stripping shared 2s and 5s. */
+        if (decimal_is_bigsig(v)) {
+            /* BigDecimal: same tower, boxed arithmetic. w_decimal_big
+             * normalizes trailing zeros, so (sig, scale) is canonical. */
+            WValue bsig; int64_t bscale;
+            decimal_extract_boxed(v, &bsig, &bscale);
+            if (bscale >= 0) {
+                WValue iv = w_mul(bsig, decimal_pow10_boxed(bscale));
+                return w_is_int(iv) ? w_hash_splitmix64(iv)
+                                    : w_hash_integer_value(iv);
+            }
+            WValue two = w_box_int(2), five = w_box_int(5);
+            WValue n = bsig;
+            int64_t twos = -bscale, fives = -bscale;
+            while (twos > 0 && w_mod(n, two) == w_box_int(0)) { n = w_div(n, two); twos--; }
+            while (fives > 0 && w_mod(n, five) == w_box_int(0)) { n = w_div(n, five); fives--; }
+            int64_t common = twos < fives ? twos : fives;
+            WValue den = decimal_pow10_boxed(common);
+            if (twos > common) den = w_mul(den, w_pow(two, w_box_int(twos - common)));
+            if (fives > common) den = w_mul(den, w_pow(five, w_box_int(fives - common)));
+            uint64_t bleft = w_is_int(n) ? w_hash_splitmix64(n) : w_hash_integer_value(n);
+            uint64_t bright = w_is_int(den) ? w_hash_splitmix64(den) : w_hash_integer_value(den);
+            return w_hash_splitmix64(bleft ^ (bright << 1) ^ (bright >> 63) ^
+                                     0xa4093822299f31d0ULL);
+        }
         int64_t sig; int scale;
         decimal_extract(v, &sig, &scale);
         if (scale >= 0) {
@@ -32519,6 +32721,10 @@ static double as_numeric_double(WValue v) {
      * Exact Decimal×Decimal is unaffected: that is handled earlier, before the
      * w_is_double branch that calls this. */
     if (is_decimal_any(v)) {
+        if (decimal_is_bigsig(v)) {
+            WDomainHeap *d = w_as_domain(v);
+            return bigint_to_double_boxed((WValue)d->sig) * pow(10.0, (double)d->scale);
+        }
         int64_t sig;
         int scale;
         decimal_extract(v, &sig, &scale);
@@ -32562,6 +32768,10 @@ static double cmp_numeric_double(WValue v) {
         return integer_to_double(w_rational_numerator(v)) /
                integer_to_double(w_rational_denominator(v));
     if (is_decimal_any(v)) {
+        if (decimal_is_bigsig(v)) {
+            WDomainHeap *d = w_as_domain(v);
+            return bigint_to_double_boxed((WValue)d->sig) * pow(10.0, (double)d->scale);
+        }
         int64_t sig;
         int scale;
         decimal_extract(v, &sig, &scale);
@@ -35881,7 +36091,10 @@ static __attribute__((noinline)) WValue w_neg_generic(WValue v) {
     if (w_is_domain_obj(v)) {
         WDomainHeap *d = w_as_domain(v);
         switch (d->domain_type) {
-        case W_DOMAIN_DECIMAL:  return w_decimal(-d->sig, d->scale);
+        case W_DOMAIN_DECIMAL:
+            if (d->domain_flags & W_DECFLAG_BIGSIG)
+                return w_decimal_big(w_neg((WValue)d->sig), d->scale);
+            return w_decimal(-d->sig, d->scale);
         case W_DOMAIN_CURRENCY: return w_currency(d->extra, -d->sig, d->scale);
         case W_DOMAIN_QUANTITY: return w_quantity(d->extra, -d->sig, d->scale);
         case W_DOMAIN_DURATION: return w_duration_ns(-d->sig);
@@ -36718,6 +36931,49 @@ static WValue w_decimal_to_string(char *stackbuf, size_t stackcap, int64_t sig, 
     return w_string(stackbuf);
 }
 
+/* BigDecimal rendering: the significand's exact decimal digits (through
+ * the bigint writer) with the point placed textually, mirroring
+ * format_sig_scale's rules; beyond the digit cap, exponent form. */
+static WValue decimal_big_to_s(WValue sig_boxed, int64_t scale) {
+    WValue digits_v = w_to_s(sig_boxed);
+    const char *digits = as_str(digits_v);
+    int neg = digits[0] == '-';
+    const char *mag = digits + (neg ? 1 : 0);
+    size_t len = strlen(mag);
+    size_t zeros = scale >= 0 ? (size_t)scale : (size_t)(-scale);
+    if (len + zeros > 4096) {
+        size_t cap = len + 32;
+        char *ebuf = malloc(cap + 2);
+        int n = snprintf(ebuf, cap, "%se%lld", digits, (long long)scale);
+        WValue out = w_string_n(ebuf, n);
+        free(ebuf);
+        return out;
+    }
+    size_t cap = len + zeros + 8;
+    char *buf = malloc(cap);
+    char *p = buf;
+    if (neg) *p++ = '-';
+    if (scale >= 0) {
+        memcpy(p, mag, len); p += len;
+        for (size_t i = 0; i < zeros; i++) *p++ = '0';
+    } else {
+        size_t frac = zeros;
+        if (len <= frac) {
+            *p++ = '0'; *p++ = '.';
+            for (size_t i = 0; i < frac - len; i++) *p++ = '0';
+            memcpy(p, mag, len); p += len;
+        } else {
+            memcpy(p, mag, len - frac); p += len - frac;
+            *p++ = '.';
+            memcpy(p, mag + len - frac, frac); p += frac;
+        }
+    }
+    *p = '\0';
+    WValue out = w_string_n(buf, (int)(p - buf));
+    free(buf);
+    return out;
+}
+
 /* Two-digit pairs "00".."99" for the itoa fast path: one divide per TWO
  * digits instead of one per digit (measured 1.57x on the conversion; itoa
  * was 23% of the new_string primitive). */
@@ -37097,6 +37353,8 @@ WValue w_to_s(WValue v) {
         WDomainHeap *d = w_as_domain(v);
         switch (d->domain_type) {
         case W_DOMAIN_DECIMAL:
+            if (d->domain_flags & W_DECFLAG_BIGSIG)
+                return decimal_big_to_s((WValue)d->sig, d->scale);
             return w_decimal_to_string(buf2, sizeof(buf2), d->sig, d->scale);
         case W_DOMAIN_CURRENCY:
             format_currency(buf2, sizeof(buf2), d->sig, d->scale, d->extra);
@@ -40192,7 +40450,7 @@ static int g_typenames_ready = 0;
 static WValue g_tn_nil, g_tn_bool, g_tn_int, g_tn_bigint, g_tn_float,
     g_tn_string, g_tn_strbuf, g_tn_symbol, g_tn_char, g_tn_big_array,
     g_tn_small_array, g_tn_array, g_tn_hash, g_tn_range, g_tn_regex,
-    g_tn_decimal, g_tn_currency, g_tn_quantity, g_tn_duration, g_tn_date,
+    g_tn_decimal, g_tn_bigdecimal, g_tn_currency, g_tn_quantity, g_tn_duration, g_tn_date,
     g_tn_complex, g_tn_rational, g_tn_color, g_tn_ipv4, g_tn_ipv6, g_tn_mac,
     g_tn_uuid, g_tn_mmap, g_tn_object, g_tn_class, g_tn_unknown;
 
@@ -40205,6 +40463,7 @@ static void w_typenames_init(void) {
     g_tn_small_array = w_string("SmallArray"); g_tn_array = w_string("Array");
     g_tn_hash = w_string("Hash");          g_tn_range = w_string("Range");
     g_tn_regex = w_string("Regex");        g_tn_decimal = w_string("Decimal");
+    g_tn_bigdecimal = w_string("BigDecimal");
     g_tn_currency = w_string("Currency");  g_tn_quantity = w_string("Quantity");
     g_tn_duration = w_string("Duration");  g_tn_date = w_string("Date");
     g_tn_complex = w_string("Complex");    g_tn_rational = w_string("Rational");
@@ -40248,7 +40507,9 @@ WValue __w_type(WValue v) {
     if (w_is_mmap(v))     return g_tn_mmap;
     if (w_is_domain_obj(v)) {
         switch (w_as_domain(v)->domain_type) {
-            case W_DOMAIN_DECIMAL:  return g_tn_decimal;
+            case W_DOMAIN_DECIMAL:
+                if (w_as_domain(v)->domain_flags & W_DECFLAG_BIGSIG) return g_tn_bigdecimal;
+                return g_tn_decimal;
             case W_DOMAIN_CURRENCY: return g_tn_currency;
             case W_DOMAIN_QUANTITY: return g_tn_quantity;
             case W_DOMAIN_DURATION: return g_tn_duration;
@@ -40555,6 +40816,10 @@ static double w_math_to_double(WValue v) {
      * doesn't apply here. Without this, 0.5 ** 2 dies — `0.5` is a Decimal
      * literal (`~0.5` is the Float spelling). */
     if (is_decimal_any(v)) {
+        if (decimal_is_bigsig(v)) {
+            WDomainHeap *d = w_as_domain(v);
+            return bigint_to_double_boxed((WValue)d->sig) * pow(10.0, (double)d->scale);
+        }
         int64_t sig;
         int scale;
         decimal_extract(v, &sig, &scale);
@@ -46864,6 +47129,15 @@ WValue w_bigint_mod(WValue a, WValue b) {
 WValue w_bigint_to_f(WValue r) {
     return w_box_double(bigint_to_double_boxed(r));
 }
+/* Constructor for decimal literals whose significand exceeds i64: the
+ * lowering emits the digit text and scale, and the significand parses
+ * exactly through the D&C decimal reader. */
+WValue w_decimal_from_digits(WValue digits_str, WValue scale, WValue negate) {
+    WValue sig = w_bigint_from_dec_str(digits_str);
+    if (negate == W_TRUE) sig = w_neg(sig);
+    return w_decimal_big(sig, w_to_i64(scale));
+}
+
 /* Exported boundary for the BigInt#to_s source shim — the divide-and-
  * conquer decimal writer and the base-N chunk loop stay in the runtime.
  * Base validation matches w_to_s_base_arg exactly. */
@@ -47356,6 +47630,12 @@ static WValue w_ic_decimal_to_f(WValue r, WValue *a, int c) {
  * exact Decimal (mirrors Integer#abs's exactness rather than Float#abs). */
 static WValue w_ic_decimal_abs(WValue r, WValue *a, int c) {
     (void)a; (void)c;
+    if (decimal_is_bigsig(r)) {
+        WValue bsig; int64_t bscale;
+        decimal_extract_boxed(r, &bsig, &bscale);
+        if (w_lt(bsig, w_box_int(0)) == W_TRUE) bsig = w_neg(bsig);
+        return w_decimal_big(bsig, bscale);
+    }
     int64_t sig;
     int scale;
     decimal_extract(r, &sig, &scale);

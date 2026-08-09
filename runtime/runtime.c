@@ -35591,11 +35591,11 @@ __attribute__((weak)) WValue __w_bigint_shr_src(WValue a, WValue b) {
     return w_bigint_shr(a, b);
 }
 
-/* Allocation-producing one-limb cases stay in C. Multi-limb shifts use the
- * source shim; zero shifts use its alias-handoff body. Header-only overshifts
- * join at every width: positive-count right shifts and negative-count left
- * shifts complete as inline 0/-1 without touching limb storage. One-limb
- * right shifts also join when source can finish directly as i48. */
+/* Allocation-producing one-limb cases stay in C. Measured multi-limb bands
+ * use the source shim; zero shifts use its alias-handoff body. Header-only
+ * overshifts join at every width: positive-count right shifts and
+ * negative-count left shifts complete as inline 0/-1 without touching limb
+ * storage. One-limb right shifts also join when source can finish as i48. */
 static inline int bigint_shl_src_shape(WValue a, WValue b) {
     if (!w_is_bigint(a) || !w_is_int(b)) return 0;
     int32_t size;
@@ -35604,7 +35604,10 @@ static inline int bigint_shl_src_shape(WValue a, WValue b) {
     int64_t k = w_as_int(b);
     if (k == 0) return 1;
     if (k < 0 && (uint64_t)-k >= (uint64_t)(uint32_t)n * 64u) return 1;
-    return n >= 2 && n <= 4096;
+    /* The source left-shift funnel is retained only in its measured positive
+     * 65..224-limb band. All other allocation-producing shapes enter the C
+     * kernel directly rather than paying a source call-and-bail toll. */
+    return k > 0 && k < 64 && size > 0 && n >= 65 && n <= 224;
 }
 
 static inline int bigint_shr_src_shape(WValue a, WValue b) {

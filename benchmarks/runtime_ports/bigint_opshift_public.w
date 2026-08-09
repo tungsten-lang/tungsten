@@ -20,10 +20,12 @@
 #   onetwentyeight13 — 128-limb, k=13
 #   onesixty13 — 160-limb, k=13
 #   oneninetytwo13 — 192-limb, k=13
+#   twotwentythree13 — 223-limb retained-band interior, k=13
 #   twotwentyfour13 — 224-limb, k=13
-#   wide13   — 256-limb, k=13
-#   max13    — 4096-limb, k=13 (source-band ceiling)
-#   overband13 — 4097-limb, k=13 (C-retained seam control)
+#   twotwentyfive13 — 225-limb C-retained seam control, k=13
+#   wide13   — 256-limb C-retained control, k=13
+#   max13    — 4096-limb, k=13 (wide C-retained control)
+#   overband13 — 4097-limb, k=13 (adjacent C-retained control)
 #   sf200    — 64-limb, k=200 (w=3, s=8)
 #   big1000  — 256-limb, k=1000
 #   neg      — 4-limb negative receiver, k=13 (control: C keeps negatives)
@@ -109,8 +111,12 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = (1 << 10239) + (1 << 5000) + 11 + i * 2
     elsif stratum == "oneninetytwo13"
       v = (1 << 12287) + (1 << 6000) + 11 + i * 2
+    elsif stratum == "twotwentythree13"
+      v = (1 << 14271) + (1 << 7000) + 11 + i * 2
     elsif stratum == "twotwentyfour13"
       v = (1 << 14335) + (1 << 7000) + 11 + i * 2
+    elsif stratum == "twotwentyfive13"
+      v = (1 << 14399) + (1 << 7000) + 11 + i * 2
     elsif stratum == "wide13"
       v = (1 << 16383) + (1 << 8000) + 11 + i * 2
     elsif stratum == "max13"
@@ -157,7 +163,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
   13
 
 -> run_correctness
-  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "fourneg13", "fourtail13", "fourtail64", "fourtailneg13", "fourtailneg64", "thirtytwo13", "thirtythree13", "thirtythree-trim13", "forty13", "sf13", "sixtyfive13", "eighty13", "ninetysix13", "ninetyseven13", "onetwentyeight13", "onesixty13", "oneninetytwo13", "twotwentyfour13", "wide13", "max13", "overband13", "sf200", "sfneg13", "sftailneg13", "sftailneg64", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg", "zero", "zeroneg"]
+  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "fourneg13", "fourtail13", "fourtail64", "fourtailneg13", "fourtailneg64", "thirtytwo13", "thirtythree13", "thirtythree-trim13", "forty13", "sf13", "sixtyfive13", "eighty13", "ninetysix13", "ninetyseven13", "onetwentyeight13", "onesixty13", "oneninetytwo13", "twotwentythree13", "twotwentyfour13", "twotwentyfive13", "wide13", "max13", "overband13", "sf200", "sfneg13", "sftailneg13", "sftailneg64", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg", "zero", "zeroneg"]
   s = 0
   while s < strata.size
     stratum = strata[s]

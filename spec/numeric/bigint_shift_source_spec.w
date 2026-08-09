@@ -23,7 +23,9 @@ use ../../core/numeric/big_int
   check(name + ".negative_left_count", (x << (0 - k)) == (x >> k))
   check(name + ".negative_right_count", (x >> (0 - k)) == left)
 
-widths = [64, 65, 127, 128, 129, 255, 256, 257, 4095, 4096, 4097]
+# Include both carry-producing and no-carry shapes around the native left-shift
+# funnel's 64/65 and 224/225-limb admission seams.
+widths = [64, 65, 127, 128, 129, 255, 256, 257, 4095, 4096, 4097, 4159, 14271, 14272, 14335, 14336, 14399]
 shifts = [1, 13, 63, 64, 65, 200, 1000]
 
 i = 0
@@ -110,4 +112,4 @@ check("band.4097.negative_left_overshift_negative", (0 - band_over) << (0 - band
 check("band.4097.negative_left_overshift_positive_explicit", band_over.<<(0 - band_over_shift) == 0)
 check("band.4097.negative_left_overshift_negative_explicit", (0 - band_over).<<(0 - band_over_shift) == -1)
 
-<< "bigint_shift_source_spec: all 674 checks passed"
+<< "bigint_shift_source_spec: all 1010 checks passed"

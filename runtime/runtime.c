@@ -35614,8 +35614,13 @@ static inline int bigint_shr_src_shape(WValue a, WValue b) {
     int64_t k = w_as_int(b);
     if (k > 0 && (uint64_t)k >= (uint64_t)(uint32_t)n * 64u) return 1;
     if (n >= 2 && n <= 4096) return 1;
-    return size == 1 && k > 0 && k < 64 &&
-           (big->limbs[0] >> k) <= (uint64_t)W_INT48_MAX;
+    if (n != 1 || k <= 0 || k >= 64) return 0;
+    uint64_t magnitude = big->limbs[0] >> k;
+    if (size < 0) {
+        magnitude += (magnitude << k) != big->limbs[0];
+        return magnitude <= (uint64_t)W_INT48_MAX + 1u;
+    }
+    return magnitude <= (uint64_t)W_INT48_MAX;
 }
 
 /* ---- Source-routed bigint bitwise ops (weak-linkage arms) ----

@@ -49,6 +49,9 @@ check("one_native.explicit", one_native.>>(13) == one_native / (1 << 13))
 one_max = (1 << 64) - 1
 check("one_native.i48_max", one_max >> 17 == 140737488355327)
 check("one_native.heap_control", one_max >> 16 == one_max / (1 << 16))
+check("one_native.negative_i48_min", (0 - one_max) >> 17 == -140737488355328)
+check("one_native.negative_heap_control", (0 - one_max) >> 16 == -281474976710656)
+check("one_native.negative_rounding", (0 - one_native) >> 13 == (0 - ((one_native + (1 << 13) - 1) / (1 << 13))))
 check("one_native.overshift_positive", one_max >> 100 == 0)
 check("one_native.overshift_negative", (0 - one_max) >> 100 == -1)
 check("one_native.negative_left_overshift_positive", one_max << -100 == 0)
@@ -84,4 +87,4 @@ check("band.4097.negative_left_overshift_negative", (0 - band_over) << (0 - band
 check("band.4097.negative_left_overshift_positive_explicit", band_over.<<(0 - band_over_shift) == 0)
 check("band.4097.negative_left_overshift_negative_explicit", (0 - band_over).<<(0 - band_over_shift) == -1)
 
-<< "bigint_shift_source_spec: all 656 checks passed"
+<< "bigint_shift_source_spec: all 659 checks passed"

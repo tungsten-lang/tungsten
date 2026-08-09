@@ -4,6 +4,8 @@
 # Strata (per op; argv mode selects shl or shr rows):
 #   one13    — 1-limb receiver, k=13 (source: result demotes to inline i48)
 #   oneheap  — 1-limb receiver, k=13 (control: result remains a heap BigInt)
+#   oneneg13 — negative 1-limb receiver, k=13 (candidate i48 demotion)
+#   onenegheap — negative 1-limb receiver, k=13 (control: result stays heap)
 #   four13   — 4-limb, k=13 (sub-limb funnel)
 #   four64   — 4-limb, k=64 (bit-aligned word path, s == 0)
 #   sf13     — 64-limb, k=13
@@ -41,7 +43,9 @@ CORPUS_MASK = CORPUS_SIZE - 1
   while i < CORPUS_SIZE
     if stratum == "one13"
       v = one_limb_value(i * 3)
-    elsif stratum == "oneheap"
+    elsif stratum == "oneneg13"
+      v = 0 - one_limb_value(i * 3)
+    elsif stratum == "oneheap" || stratum == "onenegheap"
       v = (1 << 63) + i * 2 + 1
     elsif stratum == "four13" || stratum == "four64" || stratum == "neg" || stratum == "overpos" || stratum == "overneg" || stratum == "negkpos" || stratum == "negkneg"
       v = 10 ** 76 + 3 + i * 2
@@ -52,6 +56,8 @@ CORPUS_MASK = CORPUS_SIZE - 1
     if stratum == "neg" && (i & 1) == 1
       v = 0 - v
     if stratum == "overneg" || stratum == "negkneg"
+      v = 0 - v
+    if stratum == "onenegheap"
       v = 0 - v
     values.push(v)
     i += 1
@@ -69,7 +75,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
   13
 
 -> run_correctness
-  strata = ["one13", "oneheap", "four13", "four64", "sf13", "sf200", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg"]
+  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "sf13", "sf200", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg"]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -87,7 +93,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
         check_value("shr_rebuild [stratum]/[i]", ((r << k) + (x - (r << k))).to_s(), x.to_s())
       i += 1
     s += 1
-  << "correctness: ok (shift identities, 12 strata)"
+  << "correctness: ok (shift identities, 14 strata)"
 
 -> time_shl(receivers, k, iters)
   checksum = 0

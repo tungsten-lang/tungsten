@@ -811,6 +811,14 @@
       magnitude = __bigint_shr_u64($limbs[0] ## u64, k) ## u64
       if magnitude <= 140737488355327
         return wvalue_from_bits((int_tag | magnitude) ## i64)
+    if n == -1 && k > 0 && k < 64
+      limb = $limbs[0] ## u64
+      magnitude = __bigint_shr_u64(limb, k) ## u64
+      if (magnitude << k) != limb
+        magnitude += 1
+      if magnitude <= 140737488355328
+        payload = (281474976710656 - magnitude) ## u64
+        return wvalue_from_bits((int_tag | payload) ## i64)
     ccall("w_bigint_shr", self, other)
 
   -> >>(other)(Number)

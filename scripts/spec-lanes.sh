@@ -335,6 +335,8 @@ compiled_specs=(
   spec/core/calculus_numerical_spec.w
   spec/core/calculus_improvements_spec.w
   spec/core/calculus_autoload_spec.w
+  spec/core/geometry_predicates_spec.w
+  spec/core/geometry_mesh_spec.w
   spec/core/expression_spec.w
   spec/core/expression_autoload_spec.w
   spec/core/expression_calculus_spec.w
@@ -626,6 +628,8 @@ interpreter_specs=(
   spec/core/calculus_numerical_spec.w
   spec/core/calculus_improvements_spec.w
   spec/core/calculus_autoload_spec.w
+  spec/core/geometry_predicates_spec.w
+  spec/core/geometry_mesh_spec.w
   spec/core/expression_spec.w
   spec/core/expression_autoload_spec.w
   spec/core/expression_calculus_spec.w

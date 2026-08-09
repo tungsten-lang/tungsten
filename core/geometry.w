@@ -1,13 +1,17 @@
-# Differential geometry over symbolic coordinate fields.
+# Symbolic differential geometry plus exact/discrete computational foundations.
 #
-# `use geometry` loads a small exact/numeric spine:
+# `use geometry` loads a small exact/numeric spine plus discrete foundations:
 #
 #   Chart -> TensorField -> Metric -> LeviCivitaConnection
 #                                -> RiemannCurvature
 #                                -> GeodesicSystem
 #
+#   exact affine predicates -> validated TriangleMesh topology
+#
 # Algebraic projective geometry remains under `use algebra`; these classes are
-# for smooth coordinate metrics and do not change that dependency boundary.
+# for smooth coordinate metrics and computational geometry, and do not change
+# that dependency boundary.  Mesh fields/operators remain with Tensor/Sparse;
+# mesh rendering remains with Plot/Plot3D.
 
 use core/calculus
 use core/solve
@@ -23,6 +27,8 @@ use core/geometry/wallpaper_group
 use core/geometry/polyomino
 use core/geometry/polyomino_packing
 use core/geometry/tiling
+use core/geometry/predicates
+use core/geometry/mesh
 use core/geometry/measure
 use core/geometry/flat_torus
 use core/geometry/chart

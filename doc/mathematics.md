@@ -90,6 +90,16 @@ Riemann/Ricci/scalar/Einstein curvature, the Kretschmann scalar, and geodesic
 systems. Exact symbolic metric operations are currently bounded to dimension
 six.
 
+The computational-geometry foundation adds exact `Integer`/`Rational`
+orientation and in-circle predicates plus a validated `TriangleMesh` topology
+owner.  Mesh reports audit boundary and nonmanifold edges, duplicate faces,
+orientation conflicts, isolated and bow-tie vertices, connected components,
+Euler characteristic, boundary components, and orientable genus when the
+combinatorial preconditions justify it.  This layer deliberately does not
+claim a valid embedding or nonzero face area, and it leaves dense mesh fields,
+sparse assembled operators, rendering, and physics discretizations with
+`Tensor`, `Sparse`, `Plot`/`Plot3D`, and `Physics`, respectively.
+
 `WarpedConeSurface` models the intrinsic metric
 `dt^2 + f(t)^2 dtheta^2`. Exponential and power profiles keep `f(t) > 0` at
 every finite proper height while shrinking toward an ideal apex at infinity;

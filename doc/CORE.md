@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(629 total), grouped by area, with its declaration, a one-line
+(632 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -116,6 +116,9 @@ summary from the source header, and a link to the source.
 | `BinaryCodeDistanceCertificate` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `ConstantNormCode` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `Geometry` | `+ Geometry` | — | [`core/geometry.w`](../core/geometry.w) |
+| `GeometryPredicates` | `+ GeometryPredicates` | — | [`core/geometry/predicates.w`](../core/geometry/predicates.w) |
+| `TriangleMesh` | `+ TriangleMesh` | — | [`core/geometry/mesh.w`](../core/geometry/mesh.w) |
+| `TriangleMeshTopology` | `+ TriangleMeshTopology` | Deterministic combinatorial diagnostics derived from a TriangleMesh. | [`core/geometry/mesh.w`](../core/geometry/mesh.w) |
 | `EuclideanMeasure` | `+ EuclideanMeasure` | — | [`core/geometry/measure.w`](../core/geometry/measure.w) |
 | `Polyomino` | `+ Polyomino` | Discrete lattice geometry: polyominoes on the integer grid Z x Z. | [`core/geometry/polyomino.w`](../core/geometry/polyomino.w) |
 | `LatticeSymmetry` | `+ LatticeSymmetry` | Finite symmetry groups acting on a lattice by integer matrices. | [`core/geometry/lattice_symmetry.w`](../core/geometry/lattice_symmetry.w) |

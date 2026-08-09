@@ -29,6 +29,20 @@ WValue w_leafpub_consume_low_byte(WValue value) {
     return w_int(low);
 }
 
+/* Identity-result sink for alias-return benchmarks. Unlike the fresh-result
+ * sink above, this must honor BigInt's shared-count handoff instead of freeing
+ * the receiver's storage directly. */
+void w_value_free(WValue value);
+
+__attribute__((noinline))
+WValue w_leafpub_consume_alias_low_byte(WValue value) {
+    if (!w_is_bigint(value)) abort();
+    WBigint *big = w_as_bigint(value);
+    int64_t low = big->size == 0 ? 0 : (int64_t)(big->limbs[0] & UINT64_C(0xFF));
+    w_value_free(value);
+    return w_int(low);
+}
+
 WValue w_leafpub_is_bigint(WValue value) {
     return w_bool(w_is_bigint(value));
 }

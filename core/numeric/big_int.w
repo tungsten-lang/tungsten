@@ -756,10 +756,10 @@
     ccall("w_mod", self, other)
 
   # Shifts route multi-limb BigInts through source while retaining the tuned
-  # magnitude kernels behind reentry-free boundaries. The runtime gate keeps
-  # ordinary one-limb and zero-shift specializations in C; header-only
-  # overshifts are admitted at every width. Every admitted source shape reaches
-  # one of these typed bodies exactly once.
+  # magnitude kernels behind reentry-free boundaries. Zero shifts perform only
+  # the immutable alias handoff in source; ordinary allocation-producing
+  # one-limb cases remain in C; header-only overshifts are admitted at every
+  # width. Every admitted source shape reaches one of these typed bodies once.
   -> <<(other)(Int)
     # A negative left-shift count is an arithmetic right shift. If that
     # count covers the full magnitude, complete it from header metadata as
@@ -770,6 +770,8 @@
       n = 0 - n
     k_payload = (other$value & 0xFFFFFFFFFFFF) ## i64
     k = (k_payload - ((k_payload >> 47) << 48)) ## i64
+    if k == 0
+      return ccall("w_bigint_mark_shared_value", self)
     if k < 0
       right_count = 0 - k
       magnitude_limbs = n
@@ -798,6 +800,8 @@
       n = 0 - n
     k_payload = (other$value & 0xFFFFFFFFFFFF) ## i64
     k = (k_payload - ((k_payload >> 47) << 48)) ## i64
+    if k == 0
+      return ccall("w_bigint_mark_shared_value", self)
     magnitude_limbs = n
     if magnitude_limbs < 0
       magnitude_limbs = 0 - magnitude_limbs

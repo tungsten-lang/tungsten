@@ -16,12 +16,17 @@
 #   overneg  — 4-limb negative receiver, k=1000 (result is inline minus one)
 #   negkpos  — 4-limb positive receiver, k=-1000 (`<<` overshift mirror)
 #   negkneg  — 4-limb negative receiver, k=-1000 (`<<` overshift mirror)
+#   zero     — 4-limb positive receiver, k=0 (identity + alias handoff)
+#   zeroneg  — 4-limb negative receiver, k=0 (identity + alias handoff)
 
 CORPUS_SIZE = 8
 CORPUS_MASK = CORPUS_SIZE - 1
 
 -> consume_low_byte(value)
   ccall("w_leafpub_consume_low_byte", value)
+
+-> consume_alias_low_byte(value)
+  ccall("w_leafpub_consume_alias_low_byte", value)
 
 -> thread_cpu_ns
   ccall("w_leafpub_thread_cpu_ns")
@@ -47,7 +52,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = 0 - one_limb_value(i * 3)
     elsif stratum == "oneheap" || stratum == "onenegheap"
       v = (1 << 63) + i * 2 + 1
-    elsif stratum == "four13" || stratum == "four64" || stratum == "neg" || stratum == "overpos" || stratum == "overneg" || stratum == "negkpos" || stratum == "negkneg"
+    elsif stratum == "four13" || stratum == "four64" || stratum == "neg" || stratum == "overpos" || stratum == "overneg" || stratum == "negkpos" || stratum == "negkneg" || stratum == "zero" || stratum == "zeroneg"
       v = 10 ** 76 + 3 + i * 2
     elsif stratum == "sf13" || stratum == "sf200"
       v = 10 ** 1232 + 11 + i * 2
@@ -55,7 +60,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = 10 ** 4928 + 11 + i * 2
     if stratum == "neg" && (i & 1) == 1
       v = 0 - v
-    if stratum == "overneg" || stratum == "negkneg"
+    if stratum == "overneg" || stratum == "negkneg" || stratum == "zeroneg"
       v = 0 - v
     if stratum == "onenegheap"
       v = 0 - v
@@ -72,10 +77,12 @@ CORPUS_MASK = CORPUS_SIZE - 1
     return 1000
   if stratum == "negkpos" || stratum == "negkneg"
     return -1000
+  if stratum == "zero" || stratum == "zeroneg"
+    return 0
   13
 
 -> run_correctness
-  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "sf13", "sf200", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg"]
+  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "sf13", "sf200", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg", "zero", "zeroneg"]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -93,7 +100,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
         check_value("shr_rebuild [stratum]/[i]", ((r << k) + (x - (r << k))).to_s(), x.to_s())
       i += 1
     s += 1
-  << "correctness: ok (shift identities, 14 strata)"
+  << "correctness: ok (shift identities, 16 strata)"
 
 -> time_shl(receivers, k, iters)
   checksum = 0
@@ -115,15 +122,43 @@ CORPUS_MASK = CORPUS_SIZE - 1
     i += 1
   [thread_cpu_ns() - started, checksum]
 
+-> time_shl_alias(receivers, k, iters)
+  checksum = 0
+  i = 0
+  started = thread_cpu_ns()
+  while i < iters
+    j = i & CORPUS_MASK
+    checksum += consume_alias_low_byte(receivers[j] << k)
+    i += 1
+  [thread_cpu_ns() - started, checksum]
+
+-> time_shr_alias(receivers, k, iters)
+  checksum = 0
+  i = 0
+  started = thread_cpu_ns()
+  while i < iters
+    j = i & CORPUS_MASK
+    checksum += consume_alias_low_byte(receivers[j] >> k)
+    i += 1
+  [thread_cpu_ns() - started, checksum]
+
 -> run_bench(op, stratum, iters, warmup)
   receivers = build_receivers(stratum)
   k = stratum_k(stratum)
   if op == "shl"
-    time_shl(receivers, k, warmup)
-    result = time_shl(receivers, k, iters)
+    if k == 0
+      time_shl_alias(receivers, k, warmup)
+      result = time_shl_alias(receivers, k, iters)
+    else
+      time_shl(receivers, k, warmup)
+      result = time_shl(receivers, k, iters)
   else
-    time_shr(receivers, k, warmup)
-    result = time_shr(receivers, k, iters)
+    if k == 0
+      time_shr_alias(receivers, k, warmup)
+      result = time_shr_alias(receivers, k, iters)
+    else
+      time_shr(receivers, k, warmup)
+      result = time_shr(receivers, k, iters)
   << "RESULT|[op]-[stratum]|[result[0]]|[iters]|[result[1]]"
 
 args_v = argv()

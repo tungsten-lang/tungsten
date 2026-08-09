@@ -597,6 +597,7 @@ WValue w_bigint_div(WValue a, WValue b);
 WValue w_bigint_mod(WValue a, WValue b);
 WValue w_bigint_to_f(WValue r);
 WValue w_bigint_to_s(WValue r, WValue base);
+WValue w_decimal_from_digits(WValue digits_str, WValue scale, WValue negate);
 WValue w_bigint_alloc_boxed(WValue cap);
 WValue w_bigint_alloc_hot(WValue cap);
 WValue w_bigint_finish_add(WValue v, WValue signed_size);

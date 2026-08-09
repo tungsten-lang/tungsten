@@ -13,7 +13,7 @@ PAIRS="${PAIRS:-8}"
 LABEL="${LABEL:-current}"
 OUT="${OUT:-/tmp/tungsten-bigint-opshift-${LABEL}.txt}"
 OPS="${OPS:-shl shr}"
-ROWS="${ROWS:-one13:30000000 oneheap:30000000 four13:10000000 four64:10000000 sf13:5000000 sf200:5000000 big1000:4000000 neg:10000000}"
+ROWS="${ROWS:-one13:30000000 oneheap:30000000 four13:10000000 four64:10000000 sf13:5000000 sf200:5000000 big1000:4000000 neg:10000000 overpos:30000000 overneg:30000000}"
 
 case "$PAIRS" in ''|*[!0-9]*|0) echo "PAIRS must be positive" >&2; exit 2 ;; esac
 

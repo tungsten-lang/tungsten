@@ -766,19 +766,30 @@
     ccall("w_bit_shl", self, other)
 
   -> >>(other)(Int)
-    # A positive one-limb result that fits i48 can be completed entirely in
-    # source: one limb load, one logical shift, and direct NaN-boxing. The
-    # runtime seam admits exactly this one-limb subset; explicit sends repeat
-    # the guards here before taking it.
+    # Overshifts and positive one-limb results that fit i48 can be completed
+    # entirely in source. Overshifts need only the effective sign and limb
+    # count: arithmetic right shift produces inline 0 or -1 without reading a
+    # limb. The one-limb arm is one load, one logical shift, and direct
+    # NaN-boxing. The runtime seam admits exactly these subsets; explicit
+    # sends repeat the guards here before taking them.
     n = $size ## i64
     flip = (($value >> 47) & 1) ## i64
     if flip == 1
       n = 0 - n
-    k = (other$value & 0xFFFFFFFFFFFF) ## i64
+    k_payload = (other$value & 0xFFFFFFFFFFFF) ## i64
+    k = (k_payload - ((k_payload >> 47) << 48)) ## i64
+    magnitude_limbs = n
+    if magnitude_limbs < 0
+      magnitude_limbs = 0 - magnitude_limbs
+    int_tag = -1688849860263936 ## i64
+    if k > 0
+      if k >= magnitude_limbs * 64
+        if n < 0
+          return wvalue_from_bits((int_tag | 281474976710655) ## i64)
+        return wvalue_from_bits(int_tag)
     if n == 1 && k > 0 && k < 64
       magnitude = __bigint_shr_u64($limbs[0] ## u64, k) ## u64
       if magnitude <= 140737488355327
-        int_tag = -1688849860263936 ## i64
         return wvalue_from_bits((int_tag | magnitude) ## i64)
     ccall("w_bigint_shr", self, other)
 

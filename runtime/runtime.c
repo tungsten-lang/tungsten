@@ -35592,8 +35592,9 @@ __attribute__((weak)) WValue __w_bigint_shr_src(WValue a, WValue b) {
 }
 
 /* Keep the O(1) zero-shift identity and allocation-producing one-limb cases
- * in C. Multi-limb shifts use the source shim; positive one-limb right shifts
- * join it only when the source body can finish directly as an inline i48. */
+ * in C. Multi-limb shifts use the source shim; right shifts also join it when
+ * the source body can finish directly as an inline i48 or complete an
+ * overshift as inline 0/-1 without touching the limb storage. */
 static inline int bigint_shl_src_shape(WValue a, WValue b) {
     if (!w_is_bigint(a) || !w_is_int(b) || w_as_int(b) == 0) return 0;
     int32_t size;
@@ -35607,8 +35608,9 @@ static inline int bigint_shr_src_shape(WValue a, WValue b) {
     int32_t size;
     WBigint *big = w_bigint_view(a, &size);
     int32_t n = size < 0 ? -size : size;
-    if (n >= 2 && n <= 4096) return 1;
     int64_t k = w_as_int(b);
+    if (k > 0 && (uint64_t)k >= (uint64_t)(uint32_t)n * 64u) return 1;
+    if (n >= 2 && n <= 4096) return 1;
     return size == 1 && k > 0 && k < 64 &&
            (big->limbs[0] >> k) <= (uint64_t)W_INT48_MAX;
 }

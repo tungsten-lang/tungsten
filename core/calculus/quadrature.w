@@ -6,7 +6,27 @@
 # presented as certified.
 
 + QuadratureResult
-  -> new(@value, @error_estimate, @evaluations, @intervals, @converged)
+  -> new(@value, @error_estimate, @evaluations, @intervals, @converged,
+         status = nil, algorithm = :adaptive_simpson,
+         error_model = :richardson_difference,
+         absolute_integral_estimate = nil,
+         worst_interval = nil, worst_error = nil,
+         companion_value = nil, estimate_available = true,
+         complete_coverage = true)
+    @status = status
+    if @status == nil
+      @status = @converged ? :converged : :max_depth
+    @converged = @status == :converged
+    @algorithm = algorithm
+    @error_model = error_model
+    @absolute_integral_estimate = absolute_integral_estimate
+    @worst_interval = nil
+    if worst_interval != nil
+      @worst_interval = [worst_interval[0], worst_interval[1]]
+    @worst_error = worst_error
+    @companion_value = companion_value
+    @estimate_available = estimate_available
+    @complete_coverage = complete_coverage
 
   -> value
     @value
@@ -23,6 +43,34 @@
   -> converged?
     @converged
 
+  -> status
+    @status
+
+  -> algorithm
+    @algorithm
+
+  -> error_model
+    @error_model
+
+  -> absolute_integral_estimate
+    @absolute_integral_estimate
+
+  -> worst_interval
+    return nil if @worst_interval == nil
+    [@worst_interval[0], @worst_interval[1]]
+
+  -> worst_error
+    @worst_error
+
+  -> companion_value
+    @companion_value
+
+  -> estimate_available?
+    @estimate_available
+
+  -> complete_coverage?
+    @complete_coverage
+
   -> certified?
     false
 
@@ -30,6 +78,8 @@
     [@value, @error_estimate]
 
   -> to_s
+    if !@estimate_available
+      return "QuadratureResult(no estimate, " + @status.to_s + ")"
     state = @converged ? "converged" : "not converged"
     "QuadratureResult(" + @value.to_s + " ± " + @error_estimate.to_s + ", " + state + ")"
 

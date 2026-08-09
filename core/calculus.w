@@ -2,15 +2,17 @@
 #
 # `use calculus` is the feature flag.  Exact polynomial differentiation and
 # integration remain methods on Polynomial; this module covers smooth numeric
-# functions with replayable coefficient propagation rather than finite
-# differences:
+# functions with replayable coefficient propagation, plus explicitly named
+# black-box numerical estimates:
 #
 #   Calculus.derivative(f, x, order)
 #   Calculus.taylor(f, x, order)
 #   Calculus.gradient(f, point)
 #   Calculus.jacobian(f, point)
 #   Calculus.hessian(f, point)
+#   Calculus.numerical_derivative(f, x, order, scheme)
 #   Calculus.integrate(f, a, b, abs_tol, rel_tol, max_depth)
+#   Calculus.integrate_gk15(f, a, b, abs_tol, rel_tol, limits)
 
 use core/math
 use core/numeric/rational
@@ -21,7 +23,9 @@ use core/calculus/laurent
 use core/calculus/puiseux
 use core/calculus/jet
 use core/calculus/differential
+use core/calculus/numerical
 use core/calculus/quadrature
+use core/calculus/gauss_kronrod
 use core/calculus/radial_mellin
 
 + Calculus
@@ -56,6 +60,10 @@ use core/calculus/radial_mellin
 
   -> .abs(value)
     value < ~0.0 ? ~0.0 - value : value
+
+  -> .finite_f64?(value)
+    return false if value.class_name != "Float"
+    !value.nan? && !value.infinite?
 
   # Norm used by numerical error estimators. Unlike `abs`, this also accepts
   # Complex and the normed Hypercomplex types.

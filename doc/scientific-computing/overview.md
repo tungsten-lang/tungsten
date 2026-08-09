@@ -10,7 +10,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | `fft.w` | pure radix-2 DFT |
 | `special.w` / `stats.w` | specials + distributions |
 | `solve.w` / `optim.w` / `interpolate.w` | ODE / opt / interp |
-| `calculus.w` | Taylor jets, gradients/Jacobians/Hessians, adaptive quadrature |
+| `calculus.w` | Taylor/differential AD, black-box derivatives, Simpson and GK15 quadrature |
 | `autodiff.w` | Dual + Tape |
 | `physics.w` | measurements/GLS, gas laws, Euler systems, Cartesian finite volume, diagnostics |
 | `blas.w` | Accelerate BLAS1/2/3 + vDSP |

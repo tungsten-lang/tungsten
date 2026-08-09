@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(626 total), grouped by area, with its declaration, a one-line
+(627 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -81,6 +81,7 @@ summary from the source header, and a link to the source.
 | `FormalPuiseuxSeries` | `+ FormalPuiseuxSeries` | — | [`core/calculus/puiseux.w`](../core/calculus/puiseux.w) |
 | `TaylorJet` | — | — | [`core/calculus.w`](../core/calculus.w) |
 | `Differential` | — | — | [`core/calculus.w`](../core/calculus.w) |
+| `NumericalDerivativeResult` | — | — | [`core/calculus.w`](../core/calculus.w) |
 | `QuadratureResult` | — | — | [`core/calculus.w`](../core/calculus.w) |
 | `RadialMellinTransform` | `+ RadialMellinTransform` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
 | `CohnElkiesAsymptotics` | `+ CohnElkiesAsymptotics` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |

@@ -69,6 +69,7 @@
   auto :FormalPuiseuxSeries, "calculus/puiseux"
   auto :TaylorJet,    "calculus"
   auto :Differential, "calculus"
+  auto :NumericalDerivativeResult, "calculus"
   auto :QuadratureResult, "calculus"
   auto :RadialMellinTransform, "calculus/radial_mellin"
   auto :CohnElkiesAsymptotics, "calculus/radial_mellin"

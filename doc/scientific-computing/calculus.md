@@ -144,6 +144,66 @@ gradient/Hessian `Differential` propagation. At the origin the implementation
 uses the analytic limits \(W'(0)=1\) and \(W''(0)=-2\); the branch point
 \(-1/e\) is correctly treated as singular for differentiation.
 
+## Black-box numerical derivatives
+
+`Calculus.numerical_derivative` is the explicit fallback for scalar callbacks
+that cannot accept `TaylorJet` or `Differential` values, such as foreign or
+opaque f64 functions. It does not replace `Calculus.derivative`.
+
+```w
+result = Calculus.numerical_derivative(
+  -> (x) Math.sin(x),
+  ~1.0,
+  1,          # derivative order: 1 or 2
+  :central,   # :central, :forward, or :backward
+  nil,        # initial step; nil uses 0.1 * max(1, abs(x))
+  ~1.0e-10,   # absolute tolerance
+  ~1.0e-8,    # relative tolerance
+  10,         # maximum refinement levels
+  ~1.4        # step contraction factor
+)
+
+result.value
+result.error_estimate
+result.step
+result.evaluations
+result.levels                 # valid Richardson rows
+result.attempts               # rows plus bounded coarse-step retries
+result.cancellation_indicator
+result.status
+result.algorithm              # :richardson_extrapolation
+result.error_model            # :successive_extrapolation_consistency
+result.estimate_available?
+result.converged?
+result.derivative             # alias for value
+```
+
+`contraction` must be at least `1.1`; values too close to one make the
+Richardson denominators ill-conditioned. Each refinement must also produce a
+strictly smaller representable step. `max_levels` bounds valid Richardson
+rows; before the first valid row, the controller may make at most that many
+additional coarse-step retries for a nonfinite coordinate, sample, or
+intermediate. `attempts` exposes both kinds of work.
+
+The implementation combines second-order central or one-sided stencils with
+Richardson/Ridders extrapolation. Central errors are eliminated in powers
+`h^2, h^4, ...`; one-sided errors use `h^2, h^3, ...`. Convergence requires two
+successive current refinement rows to satisfy both the requested tolerance and
+an inter-row consistency check. The returned converged value is that current
+candidate, not an older historical minimum.
+
+Visible statuses include `:converged`, `:max_levels`,
+`:roundoff_or_noise_limited`, `:step_unrepresentable`,
+`:nonfinite_abscissa`, `:nonfinite_sample`, and `:nonfinite_arithmetic`.
+Configuration errors raise. Callback exceptions propagate. If no valid
+extrapolated estimate exists, `estimate_available?` is false and the value,
+error, step, and cancellation indicator are `nil`.
+
+The callback must be a pure deterministic `f64 -> f64` function smooth near
+the query point. The error is a consistency estimate; it cannot establish
+differentiability, detect every scale, or separate truncation, roundoff, and
+sample noise. `NumericalDerivativeResult#certified?` is always false.
+
 ## Gradients, Jacobians, and Hessians
 
 `Differential` carries a value, gradient, and Hessian. The exact first- and
@@ -168,7 +228,7 @@ piecewise-smooth `abs` and constant powers. Branches and singular points retain
 their ordinary analytic limitations; `abs` at zero and `cbrt` derivatives at
 zero fail loudly.
 
-## Adaptive integration
+## Adaptive Simpson integration
 
 `Calculus.integrate` uses adaptive Simpson subdivision on a finite real
 parameter interval. Integrands may return real or complex values. The result
@@ -189,6 +249,9 @@ result.error_estimate
 result.evaluations
 result.intervals
 result.converged?
+result.status       # :converged or :max_depth
+result.algorithm    # :adaptive_simpson
+result.error_model  # :richardson_difference
 ```
 
 For example, complex quadrature uses the same call:
@@ -206,6 +269,62 @@ wave = Calculus.integrate(
 Simpson/Richardson estimate, not an interval-arithmetic proof. Improper,
 oscillatory-specialized, singular, and multidimensional quadrature remain
 future capabilities.
+
+## Adaptive Gauss-Kronrod integration
+
+`Calculus.integrate_gk15` is a separate finite-real f64 path. Each panel uses
+an embedded 7-point Gauss / 15-point Kronrod pair, QUADPACK-style `resasc`
+rescaling, and a binary64 roundoff floor. The global controller repeatedly
+bisects the panel with the largest estimated error and rebuilds active-panel
+totals with compensated summation.
+
+```w
+result = Calculus.integrate_gk15(
+  -> (x) Math.exp(~0.0 - x*x),
+  ~0.0,
+  ~1.0,
+  ~1.0e-10,  # absolute tolerance
+  ~1.0e-10,  # relative tolerance
+  1024,      # maximum active intervals
+  30_705     # maximum callback evaluations
+)
+
+result.value
+result.companion_value
+result.error_estimate
+result.absolute_integral_estimate
+result.worst_interval
+result.worst_error
+result.evaluations
+result.intervals
+result.status
+result.estimate_available?
+result.complete_coverage?
+```
+
+The algorithm is reported as `:adaptive_gk15` with error model
+`:embedded_gauss_kronrod`. Statuses include `:converged`, `:max_intervals`,
+`:max_evaluations`, `:roundoff_limited`, `:precision_limit`,
+`:nonfinite_integrand`, and `:nonfinite_arithmetic`. A successful initial panel
+uses 15 evaluations; each accepted bisection adds 30, so a normal run satisfies
+`evaluations == 15 + 30 * (intervals - 1)`.
+
+An initial sampling or precision failure returns no estimate: the value and
+error are `nil`, `estimate_available?` is false, and `complete_coverage?` is
+false. If a later child panel fails, the result retains the last complete
+active-partition estimate but remains nonconverged with the failure status.
+This makes the number inspectable without presenting it as a successful
+answer.
+
+Gauss-Kronrod agreement is still heuristic and can miss narrow or adversarial
+features. The method does not accept complex-valued integrands; use the
+existing Simpson path for those. Known discontinuities should be split by the
+caller. Panels whose smallest mapped weight would be subnormal stop with
+`:precision_limit`; so do nonzero mapped sample/deviation contributions that
+would be subnormal. This avoids trusting quantized embedded-rule agreement.
+Improper, singularity-specialized, oscillatory-specialized, and
+multidimensional rules remain separate future work. `certified?` is always
+false.
 
 ## Radial Mellin/Fourier identities
 

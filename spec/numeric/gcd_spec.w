@@ -28,6 +28,22 @@ gcd_check("gcd.i48_shared_factor", 281474976710650.gcd(422212465065975), "140737
 # 2^48 vs 2^47: the answer itself sits on the promotion boundary.
 gcd_check("gcd.i48_pow2", (2**48).gcd(2**47), "140737488355328")
 
+# --- full-u64 one-limb BigInts ---
+# The result itself exceeds the inline payload and must remain an exact,
+# positive one-limb BigInt. Neither operand divides the other.
+one_limb_factor = 140737488355329
+gcd_check(
+  "gcd.one_limb_heap_result",
+  (one_limb_factor * 5).gcd(0 - one_limb_factor * 7),
+  "140737488355329"
+)
+# Exercise unsigned comparisons with both magnitudes' high bit set.
+gcd_check(
+  "gcd.one_limb_high_bit",
+  "18446744073709551615".to_i.gcd("-9223372036854775809".to_i),
+  "3"
+)
+
 # --- multi-limb (BigInt) ---
 # 3^200 vs 3^150 -> 3^150.
 gcd_check("gcd.big_pow3", (3**200).gcd(3**150), "369988485035126972924700782451696644186473100389722973815184405301748249")

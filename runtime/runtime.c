@@ -47213,10 +47213,10 @@ static WValue w_ic_bigint_isqrt(WValue r, WValue *a, int c) {
     return bigint_isqrt_any(r);
 }
 
-/* Exported ccall boundary for the BigInt#gcd source shim
- * (core/numeric/big_int.w). bigint_gcd_any itself is static
- * always_inline for its rational-normalization callers, so this thin
- * external wrapper is what compiled and tree-walked source dispatch to. */
+/* Exported fallback boundary for mixed-representation and multi-limb
+ * BigInt#gcd source paths. bigint_gcd_any itself is static always_inline for
+ * its rational-normalization callers, so this thin external wrapper is the
+ * reentry-free source dispatch surface. */
 WValue w_bigint_gcd(WValue a, WValue b) {
     return bigint_gcd_any(a, b);
 }
@@ -48556,8 +48556,8 @@ static void w_init_ic_tables(void) {
      * :int-receiver intercept (method_call.w) keeps routing typed sites
      * to w_int_to_s, and print/interpolation paths use w_to_s directly —
      * both unaffected by this row. */
-    /* Slot 1 (gcd) is retired: BigInt#gcd in core/numeric/big_int.w is a
-     * source shim over the exported w_bigint_gcd kernel boundary. */
+    /* Slot 1 (gcd) is retired: BigInt#gcd completes one-limb BigInt pairs in
+     * source and uses w_bigint_gcd for mixed and multi-limb fallbacks. */
     /* Slot 2 (abs) is retired: BigInt#abs in core/numeric/big_int.w does
      * the same O(1) mark-shared + tag-overlay flip in source. */
     /* Slot 3 (prime?) is retired: BigInt#prime? in core/numeric/big_int.w

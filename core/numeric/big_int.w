@@ -1,6 +1,29 @@
 -> __bigint_shr_u64(value, count) (u64 i64) u64
   value >> count
 
+# Binary greatest-common-divisor loop for two nonzero machine-word
+# magnitudes. The caller proves nonzero through normalized one-limb BigInt
+# headers, so the loop can strip powers of two without separate zero arms.
+-> __bigint_gcd_u64_nonzero(a, b) (u64 u64) u64
+  az = ccall_nobox("__w_bit_cttz_u64", a) ## i64
+  bz = ccall_nobox("__w_bit_cttz_u64", b) ## i64
+  shift = az ## i64
+  if bz < shift
+    shift = bz
+  a >>= az
+  b >>= bz
+  while a != b
+    d = a - b ## u64
+    tz = ccall_nobox("__w_bit_cttz_u64", d) ## i64
+    lo = b ## u64
+    magnitude = d ## u64
+    if a < b
+      lo = a
+      magnitude = 0 - d ## u64
+    b = lo
+    a = magnitude >> tz ## u64
+  a << shift
+
 + BigInt < Int
   - data
     # BigInt rides a dedicated top-level NaN-box tag (0xFFF8, v4), but WBigint retains its C header
@@ -1074,12 +1097,27 @@
   -> >>(other)(Number)
     ccall("w_bit_shr", self, other)
 
-  # Greatest common divisor. The Lehmer/HGCD kernel stays in the runtime
-  # (same tier as modpow's bigint_powmod_any); this override exists so the
-  # method surface lives in source AND so dispatch never falls through to
-  # Int#gcd's Euclidean remainder loop, which is catastrophically slower on
-  # multi-limb receivers.
+  # Greatest common divisor. Normalized one-limb BigInt pairs complete in
+  # source with a raw binary-GCD loop and one final boxing decision. Wider
+  # pairs retain the Lehmer/HGCD specialization tree behind the existing
+  # runtime boundary.
   -> gcd(other)
+    if ((other$value >> 48) & 0xFFFF) == 0xFFF8
+      big_other = other ## BigInt
+      an = $size ## i64
+      bn = big_other$size ## i64
+      amask = an >> 63 ## i64
+      bmask = bn >> 63 ## i64
+      am = (an ^ amask) - amask ## i64
+      bm = (bn ^ bmask) - bmask ## i64
+      if (am | bm) == 1
+        magnitude = __bigint_gcd_u64_nonzero(
+          $limbs[0] ## u64,
+          big_other$limbs[0] ## u64
+        ) ## u64
+        if magnitude <= 140737488355327
+          return wvalue_from_bits((-1688849860263936 | magnitude) ## i64)
+        return ccall("w_u64", magnitude)
     ccall("w_bigint_gcd", self, other)
 
   # Least common multiple. The fused u64 and exact-division kernels stay

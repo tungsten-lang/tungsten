@@ -439,8 +439,10 @@ use naming
   out << declare_fn("w_class_new_wv", wv, wv2)
   out << declare_fn("w_class_add_method", "void", wv_ptr_ptr_i32)
   out << declare_fn("w_class_add_method_wv", "void", wv2_ptr_i32)
+  out << declare_fn("w_class_add_method_range_wv", "void", join_arg_types5(wv, wv, "ptr", "i32", "i32"))
   out << declare_fn("w_class_add_static_method", "void", wv_ptr_ptr_i32)
   out << declare_fn("w_class_add_static_method_wv", "void", wv2_ptr_i32)
+  out << declare_fn("w_class_add_static_method_range_wv", "void", join_arg_types5(wv, wv, "ptr", "i32", "i32"))
   out << declare_fn("w_type_class_register_wv", "void", i32_wv)
   out << declare_fn("w_node_kind_class_register_wv", "void", i32_wv)
   out << declare_fn("w_object_new", wv, wv)
@@ -1575,15 +1577,17 @@ ewscope_md_state = {ids: {}}
     else
       ["w_string", "w_class_new_wv"]
   when :class_add_method
+    range_method = inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
     if string_wvs != nil && string_wvs[inst[:method_str_id]] != nil
-      ["w_class_add_method_wv"]
+      [range_method ? "w_class_add_method_range_wv" : "w_class_add_method_wv"]
     else
-      ["w_string", "w_class_add_method_wv"]
+      ["w_string", range_method ? "w_class_add_method_range_wv" : "w_class_add_method_wv"]
   when :class_add_static_method
+    range_method = inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
     if string_wvs != nil && string_wvs[inst[:method_str_id]] != nil
-      ["w_class_add_static_method_wv"]
+      [range_method ? "w_class_add_static_method_range_wv" : "w_class_add_static_method_wv"]
     else
-      ["w_string", "w_class_add_static_method_wv"]
+      ["w_string", range_method ? "w_class_add_static_method_range_wv" : "w_class_add_static_method_wv"]
   when :class_add_ivar
     if string_wvs != nil && string_wvs[inst[:ivar_str_id]] != nil
       ["w_class_add_ivar_wv"]
@@ -4622,11 +4626,16 @@ ewscope_md_state = {ids: {}}
   when :node_kind_class_register
     "call void @w_node_kind_class_register_wv(i32 " + inst[:kind_id].to_s() + ", i64 " + inst[:class_temp] + ")"
   when :class_add_method
+    add_fn = "w_class_add_method_wv"
+    add_args = ", i32 " + inst[:arity].to_s()
+    if inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+      add_fn = "w_class_add_method_range_wv"
+      add_args += ", i32 " + inst[:min_arity].to_s()
     swv = nil
     if string_wvs != nil
       swv = string_wvs[inst[:method_str_id]]
     if swv != nil
-      "call void @w_class_add_method_wv(i64 " + inst[:class_temp] + ", i64 " + llvm_wvalue_literal(swv) + ", ptr @" + inst[:fn_name] + ", i32 " + inst[:arity].to_s() + ")"
+      "call void @" + add_fn + "(i64 " + inst[:class_temp] + ", i64 " + llvm_wvalue_literal(swv) + ", ptr @" + inst[:fn_name] + add_args + ")"
     else
       used_ptr_ids[inst[:method_str_id]] = true
       lbr = "\["
@@ -4635,14 +4644,19 @@ ewscope_md_state = {ids: {}}
       parts = StringBuffer(160)
       parts << inst[:class_temp] + ".mname = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:method_str_id].to_s() + ", i32 0, i32 0\n  "
       parts << inst[:class_temp] + ".mname.wv = call i64 @w_string(ptr " + inst[:class_temp] + ".mname)\n  "
-      parts << "call void @w_class_add_method_wv(i64 " + inst[:class_temp] + ", i64 " + inst[:class_temp] + ".mname.wv, ptr @" + inst[:fn_name] + ", i32 " + inst[:arity].to_s() + ")"
+      parts << "call void @" + add_fn + "(i64 " + inst[:class_temp] + ", i64 " + inst[:class_temp] + ".mname.wv, ptr @" + inst[:fn_name] + add_args + ")"
       parts.to_s()
   when :class_add_static_method
+    add_fn = "w_class_add_static_method_wv"
+    add_args = ", i32 " + inst[:arity].to_s()
+    if inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+      add_fn = "w_class_add_static_method_range_wv"
+      add_args += ", i32 " + inst[:min_arity].to_s()
     swv = nil
     if string_wvs != nil
       swv = string_wvs[inst[:method_str_id]]
     if swv != nil
-      "call void @w_class_add_static_method_wv(i64 " + inst[:class_temp] + ", i64 " + llvm_wvalue_literal(swv) + ", ptr @" + inst[:fn_name] + ", i32 " + inst[:arity].to_s() + ")"
+      "call void @" + add_fn + "(i64 " + inst[:class_temp] + ", i64 " + llvm_wvalue_literal(swv) + ", ptr @" + inst[:fn_name] + add_args + ")"
     else
       used_ptr_ids[inst[:method_str_id]] = true
       lbr = "\["
@@ -4651,7 +4665,7 @@ ewscope_md_state = {ids: {}}
       parts = StringBuffer(160)
       parts << inst[:class_temp] + ".smname = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:method_str_id].to_s() + ", i32 0, i32 0\n  "
       parts << inst[:class_temp] + ".smname.wv = call i64 @w_string(ptr " + inst[:class_temp] + ".smname)\n  "
-      parts << "call void @w_class_add_static_method_wv(i64 " + inst[:class_temp] + ", i64 " + inst[:class_temp] + ".smname.wv, ptr @" + inst[:fn_name] + ", i32 " + inst[:arity].to_s() + ")"
+      parts << "call void @" + add_fn + "(i64 " + inst[:class_temp] + ", i64 " + inst[:class_temp] + ".smname.wv, ptr @" + inst[:fn_name] + add_args + ")"
       parts.to_s()
   when :load_class
     inst[:temp] + " = load i64, ptr @class." + llvm_safe_name(inst[:class_name].gsub(":", "__"))

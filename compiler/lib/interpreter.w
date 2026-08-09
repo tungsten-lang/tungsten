@@ -3703,6 +3703,24 @@ use target
         if overloads[i][:params].size() == argc
           return overloads[i]
         i -= 1
+      # A trailing default makes the method callable at every smaller arity
+      # down to its last required parameter. Resolve that compatible range in
+      # the subclass before walking to an ancestor's exact-arity method.
+      i = overloads.size() - 1
+      while i >= 0
+        m = overloads[i]
+        takes_block = method_takes_block?(m)
+        declared = m[:params].size()
+        if takes_block
+          declared -= 1
+        minimum = declared
+        pi = declared - 1
+        while pi >= 0 && ast_get(m[:params][pi], :default) != nil
+          minimum -= 1
+          pi -= 1
+        if takes_block == has_block && argc >= minimum && argc <= declared
+          return m
+        i -= 1
     lookup_method_exact_arity(w_class[:superclass], name, argc, has_block, args)
 
   -> lookup_method_fallback(w_class, name)

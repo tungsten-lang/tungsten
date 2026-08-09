@@ -39857,6 +39857,30 @@ static WMethod *w_method_table_probe_arity(WMethod *table, int cap, WValue name,
     return NULL;
 }
 
+/* Resolve one call shape within ONE class. A method with trailing defaults
+ * accepts every arity in [min_arity, arity]; an exact declared-arity overload
+ * wins over a range match in the same class. The caller walks superclasses,
+ * so a subclass's default-compatible override wins before an ancestor's exact
+ * method, while a genuinely incompatible subclass overload does not hide it. */
+static WMethod *w_method_table_probe_call_arity(WMethod *table, int cap,
+                                                WValue name, uint64_t hash,
+                                                int arity) {
+    if (cap == 0) return NULL;
+    uint64_t mask = (uint64_t)cap - 1;
+    uint64_t idx = hash & mask;
+    WMethod *compatible = NULL;
+    while (table[idx].name != 0) {
+        if (w_hash_key_eq(table[idx].name, name)) {
+            if (table[idx].arity == arity) return &table[idx];
+            if (!compatible && arity >= table[idx].min_arity &&
+                arity <= table[idx].arity)
+                compatible = &table[idx];
+        }
+        idx = (idx + 1) & mask;
+    }
+    return compatible;
+}
+
 static WMethod *w_method_table_lookup(WMethod *table, int cap, WValue name) {
     return w_method_table_probe(table, cap, name, w_method_name_hash(name));
 }
@@ -40035,10 +40059,16 @@ void w_class_add_method(WValue klass_val, const char *name, void *fn_ptr, int ar
 }
 
 void w_class_add_method_wv(WValue klass_val, WValue name, void *fn_ptr, int arity) {
+    w_class_add_method_range_wv(klass_val, name, fn_ptr, arity, arity);
+}
+
+void w_class_add_method_range_wv(WValue klass_val, WValue name, void *fn_ptr,
+                                 int arity, int min_arity) {
     WClass *klass = as_class(klass_val);
     WMethod *m = w_method_table_upsert_slot_arity(&klass->methods, &klass->method_count, &klass->method_capacity, name, arity);
     m->fn_ptr = fn_ptr;
     m->arity = arity;
+    m->min_arity = min_arity;
 }
 
 void w_class_add_static_method(WValue klass_val, const char *name, void *fn_ptr, int arity) {
@@ -40046,10 +40076,17 @@ void w_class_add_static_method(WValue klass_val, const char *name, void *fn_ptr,
 }
 
 void w_class_add_static_method_wv(WValue klass_val, WValue name, void *fn_ptr, int arity) {
+    w_class_add_static_method_range_wv(klass_val, name, fn_ptr, arity, arity);
+}
+
+void w_class_add_static_method_range_wv(WValue klass_val, WValue name,
+                                        void *fn_ptr, int arity,
+                                        int min_arity) {
     WClass *klass = as_class(klass_val);
     WMethod *m = w_method_table_upsert_slot_arity(&klass->static_methods, &klass->static_method_count, &klass->static_method_capacity, name, arity);
     m->fn_ptr = fn_ptr;
     m->arity = arity;
+    m->min_arity = min_arity;
 }
 
 int w_class_add_ivar(WValue klass_val, const char *name) {
@@ -40158,7 +40195,7 @@ static WMethod *w_method_lookup(WClass *klass, WValue name) {
 static WMethod *w_method_lookup_arity(WClass *klass, WValue name, int arity) {
     uint64_t hash = w_method_name_hash(name);
     while (klass) {
-        WMethod *m = w_method_table_probe_arity(klass->methods, klass->method_capacity, name, hash, arity);
+        WMethod *m = w_method_table_probe_call_arity(klass->methods, klass->method_capacity, name, hash, arity);
         if (m) return m;
         klass = klass->superclass;
     }
@@ -40180,7 +40217,9 @@ static WMethod *w_static_method_lookup(WClass *klass, WValue name) {
 
 static WMethod *w_static_method_lookup_arity(WClass *klass, WValue name, int arity) {
     while (klass) {
-        WMethod *m = w_method_table_lookup_arity(klass->static_methods, klass->static_method_capacity, name, arity);
+        WMethod *m = w_method_table_probe_call_arity(
+            klass->static_methods, klass->static_method_capacity, name,
+            w_method_name_hash(name), arity);
         if (m) return m;
         klass = klass->superclass;
     }

@@ -751,6 +751,7 @@ typedef struct WMethod {
     uint64_t name_hash;
     void *fn_ptr;
     int arity;
+    int min_arity;
 } WMethod;
 
 typedef struct WClass {
@@ -790,8 +791,12 @@ WValue w_class_new(const char *name, WValue superclass);
 WValue w_class_new_wv(WValue name, WValue superclass);
 void   w_class_add_method(WValue klass, const char *name, void *fn_ptr, int arity);
 void   w_class_add_method_wv(WValue klass, WValue name, void *fn_ptr, int arity);
+void   w_class_add_method_range_wv(WValue klass, WValue name, void *fn_ptr,
+                                   int arity, int min_arity);
 void   w_class_add_static_method(WValue klass, const char *name, void *fn_ptr, int arity);
 void   w_class_add_static_method_wv(WValue klass, WValue name, void *fn_ptr, int arity);
+void   w_class_add_static_method_range_wv(WValue klass, WValue name, void *fn_ptr,
+                                          int arity, int min_arity);
 int    w_class_add_ivar(WValue klass, const char *name);
 int    w_class_add_ivar_wv(WValue klass, WValue name);
 int    w_class_ivar_offset(WValue klass, const char *name);

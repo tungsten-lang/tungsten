@@ -144,6 +144,17 @@
     arity += 1
   arity
 
+# Minimum runtime arity accepted without falling back by name. Trailing
+# default-valued parameters are genuinely optional; recording their range lets
+# a subclass defaulted method override an ancestor's smaller exact-arity stub.
+-> method_min_runtime_arity(node)
+  arity = method_runtime_arity(node)
+  i = node.params.size() - 1
+  while i >= 0 && node.params[i].default != nil
+    arity -= 1
+    i -= 1
+  arity
+
 -> mark_memo_table_used(mod, call_key)
   mod[:used_memo_tables][call_key] = true
   nil
@@ -1486,12 +1497,13 @@
 -> register_class_method_def(main_fn, mod, cname, node)
   mname = node.name
   arity = method_runtime_arity(node)
+  min_arity = method_min_runtime_arity(node)
   mfn_name = class_method_function_name(cname, node)
   mstr_id = module_string_constant(mod, mname)
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
   emit_instruction(main_fn, {op: :load_class, temp: cls_reload, class_name: cname})
-  emit_instruction(main_fn, {op: :class_add_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: mfn_name, arity: arity})
+  emit_instruction(main_fn, {op: :class_add_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: mfn_name, arity: arity, min_arity: min_arity})
   # Phase 5: stash the method-def AST so specialize_method can clone+re-lower
   # it under a child context with `__self` typed to a concrete variant.
   # Also stash an arity-keyed entry so monomorphization of an OVERLOADED method
@@ -1557,6 +1569,7 @@
 -> register_static_method(main_fn, mod, cname, node)
   mname = node.name
   arity = method_runtime_arity(node)
+  min_arity = method_min_runtime_arity(node)
   mfn_name = class_method_function_name(cname, node)
   method_fn_name = mfn_name
   raw_abi = static_method_raw_abi?(node)
@@ -1582,7 +1595,7 @@
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
   emit_instruction(main_fn, {op: :load_class, temp: cls_reload, class_name: cname})
-  emit_instruction(main_fn, {op: :class_add_static_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: method_fn_name, arity: arity})
+  emit_instruction(main_fn, {op: :class_add_static_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: method_fn_name, arity: arity, min_arity: min_arity})
 
 # `-> new(@x, @y) ro` — a bare ro/rw as a body statement of an @-binding
 # method marks those params for accessor generation, mirroring a class-body

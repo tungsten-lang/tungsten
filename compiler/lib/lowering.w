@@ -1825,7 +1825,12 @@ use lowering/definitions
       bc_byte_len = utf8_byte_length(bc_name) + 1
       emit_instruction(main_fn, {op: :builtin_class_init, class_name: bc_name, name_str_id: bc_str_id, name_byte_len: bc_byte_len})
     bci += 1
-  # Initialize classes in source order (respects inheritance dependencies).
+  # Initialize classes in stable dependency order. Autoload discovery order is
+  # demand-driven, so a thin program can contain `Int < Real` before Real's
+  # definition even though a wider program happens to load the same files in
+  # parent-first order. Build the class-only stream in passes: ready classes
+  # retain source order, children wait for their parent, and reopens retain
+  # their per-class order behind the first declaration.
   #
   # A class may be re-opened by multiple `class_def` / `+ ClassName` blocks
   # across files. For each class we instantiate w_class_new ONCE on the
@@ -1838,13 +1843,60 @@ use lowering/definitions
   # key). Re-opens can only add methods/accessors and append ivars.
   # Each class_def processes its OWN body (`expr.body`), not the
   # canonical one in mod[:known_classes] (which is the last-registered).
-  processed_classes = {}
+  runtime_class_names = {}
   ci = 0
   while ci < ast.expressions.size()
     expr = ast.expressions[ci]
-    # Skip generic templates — only specialized classes get class_init.
     is_generic_template = ast_kind(expr) == :class_def && expr.type_params != nil
     if !is_generic_template && ast_kind(expr) in (:class_def :module_def)
+      runtime_class_names[expr.name] = true
+    ci += 1
+
+  pending_class_exprs = []
+  ci = 0
+  while ci < ast.expressions.size()
+    expr = ast.expressions[ci]
+    is_generic_template = ast_kind(expr) == :class_def && expr.type_params != nil
+    if !is_generic_template && ast_kind(expr) in (:class_def :module_def)
+      pending_class_exprs.push(expr)
+    ci += 1
+
+  ordered_class_exprs = []
+  ordered_class_names = {}
+  while pending_class_exprs.size() > 0
+    next_pending = []
+    blocked_names = {}
+    progressed = false
+    ci = 0
+    while ci < pending_class_exprs.size()
+      expr = pending_class_exprs[ci]
+      cname = expr.name
+      ready = blocked_names[cname] != true
+      if ready && ordered_class_names[cname] == nil
+        order_super = expr.superclass
+        if order_super != nil && !order_super.include?(":") && mod[:known_classes][order_super] == nil
+          ns_super = resolve_class_in_namespace(mod, cname, order_super)
+          if ns_super != nil
+            order_super = ns_super
+        if order_super != nil && runtime_class_names[order_super] == true && ordered_class_names[order_super] == nil
+          ready = false
+          blocked_names[cname] = true
+      if ready
+        ordered_class_exprs.push(expr)
+        ordered_class_names[cname] = true
+        progressed = true
+      else
+        next_pending.push(expr)
+      ci += 1
+    if !progressed
+      raise "cyclic class inheritance prevents runtime initialization"
+    pending_class_exprs = next_pending
+
+  processed_classes = {}
+  ci = 0
+  while ci < ordered_class_exprs.size()
+    expr = ordered_class_exprs[ci]
+    if ast_kind(expr) in (:class_def :module_def)
       cname = expr.name
       is_reopen = processed_classes[cname] != nil
 

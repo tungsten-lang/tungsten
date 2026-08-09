@@ -374,3 +374,15 @@ Primary references:
   Theorem*](https://annals.math.princeton.edu/1995/141-3/p01)
 - [Taylor--Wiles, *Ring-theoretic properties of certain Hecke
   algebras*](https://annals.math.princeton.edu/1995/141-3/p02)
+## External proof-artifact integrity
+
+`ProofArtifactBundle` binds an external proof payload to its SHA-256 digest,
+producer/version, source hashes, and other proof-artifact dependencies. Its
+`verified?` method means **integrity and dependency closure only**;
+`claim_status` is `:integrity_only` and `kernel_checked?` is always false.
+
+This is the manifest substrate for future Lean and WRAT runners. A runner must
+still execute the pinned checker, bind its transcript and named theorem, and
+report the kernel and axioms before Tungsten can describe a result as
+kernel-checked. Possessing a correctly hashed `.lean`, `.olean`, LRAT, or WRAT
+file is not by itself a theorem verification.

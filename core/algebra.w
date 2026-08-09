@@ -27,6 +27,8 @@ use core/algebra/prime_subspace
 use core/algebra/orders
 use core/algebra/maximal_orders
 use core/algebra/lattice_reduction
+use core/combinatorics/support
+use core/algebra/arithmetic_circuit
 use core/algebra/lattice_polytope
 use core/algebra/toric_polytope
 use core/algebra/parity_lattice

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(477 total), grouped by area, with its declaration, a one-line
+(506 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -38,7 +38,7 @@ summary from the source header, and a link to the source.
 | `Duration` | `+ Duration` | Duration — time span (tag 0xFFFF). Two-component representation: | [`core/duration.w`](../core/duration.w) |
 | `Error` | `+ Error` | Error — base error class | [`core/error.w`](../core/error.w) |
 | `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
-| `Hash` | `+ Hash` | Hash — compact dict; iteration is insertion order (guaranteed, all engines) | [`core/hash.w`](../core/hash.w) |
+| `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
 | `Instant` | `+ Instant` | Instant — millisecond-precision timestamp (tag 0xFFFB). | [`core/instant.w`](../core/instant.w) |
@@ -65,6 +65,15 @@ summary from the source header, and a link to the source.
 | `QuadratureResult` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
 | `RadialMellinTransform` | — | Radial Mellin/Fourier identities used in high-dimensional sphere-packing | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
 | `CohnElkiesAsymptotics` | — | Radial Mellin/Fourier identities used in high-dimensional sphere-packing | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
+| `Combinatorics` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `FiniteSimpleGraph` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `GraphDegeneracyCertificate` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `CompleteGraphEdgeColoring` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `TriangleRamseyAudit` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `Krawtchouk` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `BinaryBlockCode` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `BinaryCodeDistanceCertificate` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `ConstantNormCode` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `Geometry` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
 | `EuclideanMeasure` | — | Euclidean ball and sphere measures in arbitrary integer dimension.  The | [`core/geometry/measure.w`](../core/geometry/measure.w) |
 | `Chart` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
@@ -96,15 +105,31 @@ summary from the source header, and a link to the source.
 | `Minmod` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
 | `FiniteVolume` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
 | `EulerSimulation` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
+| `Dynamics` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `Flow` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `MapSystem` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `HamiltonianSystem` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `Lorenz` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `Rossler` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `VanDerPol` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `Duffing` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `DoublePendulum` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `HarmonicOscillator` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `LogisticMap` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `Henon` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `StandardMap` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
 | `Dual` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Tape` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Autodiff` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
 | `Solve` | `+ Solve` | Solve — initial-value ODE solvers (SciPy solve_ivp analogue). | [`core/solve.w`](../core/solve.w) |
+| `DenseSolution` | `+ Solve` | Solve — initial-value ODE solvers (SciPy solve_ivp analogue). | [`core/solve.w`](../core/solve.w) |
 | `Optim` | `+ Optim` | Optim — scalar / vector optimization and root-finding (v0). | [`core/optim.w`](../core/optim.w) |
 | `Interpolate` | `+ Interpolate` | Interpolate — interpolation and numerical quadrature. | [`core/interpolate.w`](../core/interpolate.w) |
 | `SciIO` | `+ SciIO` | SciIO — scientific data interchange (no system libhdf5/netcdf/arrow). | [`core/io.w`](../core/io.w) |
 | `Plot` | `+ Plot` | Plot — terminal sparklines / heatmaps (zero-dep). | [`core/plot.w`](../core/plot.w) |
 | `Plot3D` | `+ Plot3D` | Plot3D — interactive 3D visualization export for grid simulations. | [`core/plot3d.w`](../core/plot3d.w) |
+| `ProofArtifacts` | — | Hash-bound external proof artifacts. | [`core/proof_artifact.w`](../core/proof_artifact.w) |
+| `ProofArtifactBundle` | — | Hash-bound external proof artifacts. | [`core/proof_artifact.w`](../core/proof_artifact.w) |
 | `Sparse` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
 | `SparseMatrix` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
 | `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
@@ -136,6 +161,9 @@ summary from the source header, and a link to the source.
 | `FlatTorusOrbitExtremum` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitStraightening` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `Algebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `ArithmeticCircuitNode` | — | Exact finite arithmetic-circuit DAGs. | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
+| `ArithmeticCircuit` | — | Exact finite arithmetic-circuit DAGs. | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
+| `ArithmeticCircuitEvaluationCertificate` | — | Exact finite arithmetic-circuit DAGs. | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
 | `LatticeSimplex` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
 | `LatticePolygon` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
 | `CenteredEhrhartSimplex` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
@@ -459,7 +487,7 @@ summary from the source header, and a link to the source.
 | `Hypercomplex` | `+ Hypercomplex<T> < Number` | Hypercomplex — the Cayley–Dickson algebras above the reals: | [`core/numeric/hypercomplex.w`](../core/numeric/hypercomplex.w) |
 | `Interval` | `+ Interval` | Interval — rigorous interval arithmetic over Float endpoints. | [`core/numeric/interval.w`](../core/numeric/interval.w) |
 | `IntervalF64` | `+ IntervalF64 < Interval` | — | [`core/numeric/intervalf64.w`](../core/numeric/intervalf64.w) |
-| `BF16` | `+ BF16 < Float` | — | [`core/numeric/bfloat16.w`](../core/numeric/bfloat16.w) |
+| `BF16` | `+ BF16 < Float` | Brain float 16 | [`core/numeric/bfloat16.w`](../core/numeric/bfloat16.w) |
 | `BigComplex` | `+ BigComplex < Complex` | — | [`core/numeric/big_complex.w`](../core/numeric/big_complex.w) |
 | `BigDecimal` | `+ BigDecimal < Decimal` | — | [`core/numeric/big_decimal.w`](../core/numeric/big_decimal.w) |
 | `BigInt` | `+ BigInt < Int` | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
@@ -468,6 +496,7 @@ summary from the source header, and a link to the source.
 | `PrimePower` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
 | `Centumduodetrigintanion` | `+ Centumduodetrigintanion<T> < Hypercomplex<T>` | Centumduodetrigintanion — dimension-128 hypercomplex algebra. | [`core/numeric/hypercomplex/centumduodetrigintanion.w`](../core/numeric/hypercomplex/centumduodetrigintanion.w) |
 | `Complex` | `+ Complex<T> < Hypercomplex<T>` | Complex — dimension-2 hypercomplex (basis: 1, i). | [`core/numeric/hypercomplex/complex.w`](../core/numeric/hypercomplex/complex.w) |
+| `ComplexArray` | `+ ComplexArray` | ComplexArray — N complex numbers in one contiguous interleaved f64 buffer: | [`core/numeric/complex_array.w`](../core/numeric/complex_array.w) |
 | `Ducentiquinquagintasexion` | `+ Ducentiquinquagintasexion<T> < Hypercomplex<T>` | Ducentiquinquagintasexion — dimension-256 hypercomplex algebra. | [`core/numeric/hypercomplex/ducentiquinquagintasexion.w`](../core/numeric/hypercomplex/ducentiquinquagintasexion.w) |
 | `Octonion` | `+ Octonion<T> < Hypercomplex<T>` | Octonion — dimension-8 hypercomplex algebra (basis: 1, e1…e7). | [`core/numeric/hypercomplex/octonion.w`](../core/numeric/hypercomplex/octonion.w) |
 | `Quaternion` | `+ Quaternion<T> < Hypercomplex<T>` | Quaternion — dimension-4 hypercomplex algebra (basis: 1, i, j, k). | [`core/numeric/hypercomplex/quaternion.w`](../core/numeric/hypercomplex/quaternion.w) |

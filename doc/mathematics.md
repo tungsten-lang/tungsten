@@ -35,9 +35,11 @@ of every theorem for which that claim might be useful.
 | Lattice polytopes, Ehrhart fixtures, Newton polytopes and toric periods | `use algebra`; `LatticeSimplex`, `DiagonalShellPolytope`, `LatticePolytope`, `ToricHypersurfacePeriod` | [algebra.md](algebra.md) |
 | Characteristic-two divided squares and carry laws | `use algebra`; `DividedSquareSpace`, `BinaryCarryGroup` | [algebra.md](algebra.md) |
 | Radial Mellin/Fourier identities | `use calculus`; `RadialMellinTransform` | [scientific-computing/calculus.md](scientific-computing/calculus.md) |
+| Finite graphs, Ramsey audits, binary and constant-norm codes | `use combinatorics`; `FiniteSimpleGraph`, `BinaryBlockCode` | [combinatorics.md](combinatorics.md) |
 | Euclidean ball volume and boundary area | `use geometry`; `EuclideanMeasure` | this guide |
 | Arrays, tensors, linear algebra, optimization, ODEs | flat modules under `core/` | [scientific-computing/overview.md](scientific-computing/overview.md) |
 | SAT-backed finite certificates | `tungsten-wassat` producer + `tungsten-wrat` checker | [certified-mathematics.md](certified-mathematics.md) |
+| Hash-bound external proof artifacts | `ProofArtifactBundle` | [certified-mathematics.md](certified-mathematics.md) |
 | Plots | `core/plot.w`, `tungsten-drawille` | [scientific-computing/plot.md](scientific-computing/plot.md) |
 
 Bare `π`, `τ`, `ϕ`/`φ`, `ℯ`, and `ℇ` are numeric `Float` constants. Exact
@@ -138,6 +140,18 @@ At a high level:
 
 Unsupported cases raise or return `unknown`; they must not silently change
 the coefficient field, model, or proof claim.
+
+## Arithmetic circuits and formulas
+
+`use algebra` includes `ArithmeticCircuit`, a topologically ordered DAG over
+constants, named variables, addition, subtraction, multiplication, negation,
+and division. Binary builders accept `[left, right]`. It reports reachable
+operation count, depth, whether a DAG is a
+formula (no shared child), expanded formula size under an explicit limit, and
+a syntactic degree bound for division-free outputs. Exact assignment
+evaluation and `ArithmeticCircuitEvaluationCertificate#verified?` replay a
+single point only. They do not establish a polynomial identity, rational-
+function equality on a domain, or an arithmetic-formula lower bound.
 
 ## Bruin--Poonen--Stoll descent
 

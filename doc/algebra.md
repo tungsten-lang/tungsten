@@ -35,6 +35,7 @@ core/algebra/orders.w             # monogenic orders and Dedekind certificates
 core/algebra/integer_lattice.w    # exact lattices and prime-field kernels
 core/algebra/maximal_orders.w     # degree-generic Round 2 integral closures
 core/algebra/lattice_reduction.w  # exact Gram-matrix LLL and ideal bases
+core/algebra/arithmetic_circuit.w # exact finite circuit/formula DAG semantics
 core/algebra/lattice_polytope.w   # exact simplices, polygons, Ehrhart fixtures, Laurent jets
 core/algebra/toric_polytope.w     # Newton polytopes, Ehrhart cones, toric periods
 core/algebra/parity_lattice.w     # certified affine F2 Construction-A lift
@@ -2377,3 +2378,19 @@ the classical Buchberger criterion. It is exposed as a
 identities themselves are replay-checked. This producer/verifier split is the
 path for expensive compiled computations to emit compact witnesses instead of
 forcing every consumer to rerun Buchberger.
+## Arithmetic circuits
+
+`ArithmeticCircuit` provides exact finite DAG semantics for constants,
+variables, addition, subtraction, multiplication, negation, and division.
+Binary builders take a pair of node indices, for example
+`circuit.multiply([left, right])`; this keeps the API portable across the
+interpreter and native dynamic-dispatch paths.
+It distinguishes circuit operation count from expanded formula size, detects
+fan-out, reports depth, and computes a syntactic degree bound when the selected
+output is division-free. `evaluation_certificate` independently replays a
+claimed value at one assignment and rejects division by zero.
+
+This is infrastructure for studying arithmetic formula constructions. It is
+not a polynomial-identity test and does not implement the geometric or
+dimension arguments needed for permanent lower bounds. Global semantic
+identity certificates and typed coefficient-domain constraints remain open.

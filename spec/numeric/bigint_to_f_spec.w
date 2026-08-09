@@ -1,7 +1,7 @@
-# BigInt#to_f — pins the source shim over the exported w_bigint_to_f
-# boundary (IC row 4 retired). Conversion is the runtime's correctly-
-# rounded magnitude walk; these rows pin exact rounding behavior at and
-# beyond the 53-bit mantissa boundary, on both engines.
+# BigInt#to_f — pins the native Tungsten unsigned-limb magnitude walk.
+# These rows cover exact rounding at and beyond the 53-bit mantissa boundary,
+# an unsigned limb whose high bit is set, sign-overlay composition, and the
+# finite/infinity seam on both engines.
 
 -> check(name, got, want)
   if got == want
@@ -22,6 +22,10 @@ check("pow2_exact", p100.to_f / (1 << 50).to_f, (1 << 50).to_f)
 m = (1 << 53) + 1
 check("mantissa_round", m.to_f, (1 << 53).to_f)
 
+# The limb conversion must be unsigned: 2^64 - 1 rounds to 2^64, not -1.
+u64_max = (1 << 64) - 1
+check("unsigned_limb", u64_max.to_f, (1 << 64).to_f)
+
 # Negative receivers carry sign through the overlay composition
 check("negative", (0 - p100).to_f, 0.0 - p100.to_f)
 
@@ -29,6 +33,12 @@ check("negative", (0 - p100).to_f, 0.0 - p100.to_f)
 big = (1 << 200) + (1 << 130) + 7
 check("multi_type", type(big.to_f), "Float")
 check("multi_ratio", big.to_f / (1 << 100).to_f > (1 << 99).to_f, true)
+
+# A normalized 17-limb magnitude starts at 2^1024 and converts to infinity.
+overflow = (1 << 1024).to_f
+check("overflow_type", type(overflow), "Float")
+check("overflow_infinite", overflow.infinite?, true)
+check("negative_overflow", (0 - (1 << 1024)).to_f < ~0.0, true)
 
 # Conversion feeds float division exactly
 check("arith", p100.to_f / p100.to_f, ~1.0)

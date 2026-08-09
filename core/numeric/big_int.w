@@ -1084,11 +1084,27 @@
   -> to_i
     self
 
-  # Conversion to Float: the correctly-rounded magnitude walk stays in the
-  # runtime behind one exported boundary; the method surface lives here
-  # (IC row 4 is retired).
+  # Conversion to Float. Walk the unsigned magnitude from most-significant
+  # limb to least, scaling by the exactly representable 2^64 radix each
+  # step. The raw f64 accumulator keeps the loop allocation-free; only the
+  # final result is boxed. Compose the header sign with the tag-sign overlay
+  # just as the other source-defined BigInt operations do.
   -> to_f
-    ccall("w_bigint_to_f", self)
+    signed_count = $size ## i64
+    count = signed_count ## i64
+    if count < 0
+      count = 0 - count
+    value = ~0.0 ## f64
+    i = count - 1 ## i64
+    while i >= 0
+      limb = $limbs[i] ## u64
+      limb_value = limb ## f64
+      value = value * ~18446744073709551616.0 + limb_value
+      i -= 1
+    flip = ($value >> 47) & 1
+    if flip == 1 ? signed_count > 0 : signed_count < 0
+      value = ~0.0 - value
+    value
 
   # Conversion to String: the divide-and-conquer decimal writer and the
   # base-N chunk loop stay in the runtime behind one exported boundary;

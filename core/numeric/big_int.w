@@ -841,25 +841,65 @@
   -> ^(other)(Number)
     ccall("w_bit_xor", self, other)
 
-  # Division and modulo, source-routed for both-heap-BigInt pairs (any
-  # signs and widths — the bodies pass every admitted shape to the same
-  # kernel entry the C arm used, so the seam's bail set stays disjoint by
-  # construction). The division SPECIALIZATION TREE (preinverse 2-by-1
-  # divide, Burnikel-Ziegler recursion, Jebelean exact division, the
-  # width-certified quotient/mod kernels) deliberately stays in the
-  # runtime: porting it means writing and oracle-validating a new division
-  # kernel from scratch, in the region where C's specialization density is
-  # highest (assessed 2026-08-08, re-measured with these bodies — the
-  # dispatch chain itself is toll-free within noise). The (Number)
-  # catch-alls keep the polymorphic entries for rational/decimal/float
-  # operands and int promotion.
+  # Division and modulo, source-routed for both-heap-BigInt pairs. A one-limb
+  # pair completes in native Tungsten with unsigned hardware division. Since
+  # a normalized one-limb heap divisor is > 2^47-1, its quotient is at most
+  # 2^17-1 and always fits the inline Integer representation. Remainders use
+  # direct inline boxing or the ordinary u64 allocation boundary. Wider pairs
+  # retain the division specialization tree (preinverse 2-by-1,
+  # Burnikel-Ziegler, Jebelean exact, and width-certified kernels) behind the
+  # existing C boundary. The (Number) catch-alls keep polymorphic rational,
+  # decimal, Float, and mixed-Integer semantics.
   -> /(other)(BigInt)
+    an = $size ## i64
+    bn = other$size ## i64
+    amask = an >> 63 ## i64
+    bmask = bn >> 63 ## i64
+    am = (an ^ amask) - amask ## i64
+    bm = (bn ^ bmask) - bmask ## i64
+    if (am | bm) == 1
+      dividend = $limbs[0] ## u64
+      divisor = other$limbs[0] ## u64
+      quotient = dividend / divisor ## u64
+      int_tag = -1688849860263936 ## i64
+      if quotient == 0
+        return wvalue_from_bits(int_tag)
+      asign = ((an >> 63) & 1) ^ (($value >> 47) & 1) ## i64
+      bsign = ((bn >> 63) & 1) ^ ((other$value >> 47) & 1) ## i64
+      if (asign ^ bsign) == 1
+        payload = (281474976710656 - quotient) ## u64
+        return wvalue_from_bits((int_tag | payload) ## i64)
+      return wvalue_from_bits((int_tag | quotient) ## i64)
     ccall("w_bigint_div", self, other)
 
   -> /(other)(Number)
     ccall("w_div", self, other)
 
   -> %(other)(BigInt)
+    an = $size ## i64
+    bn = other$size ## i64
+    amask = an >> 63 ## i64
+    bmask = bn >> 63 ## i64
+    am = (an ^ amask) - amask ## i64
+    bm = (bn ^ bmask) - bmask ## i64
+    if (am | bm) == 1
+      dividend = $limbs[0] ## u64
+      divisor = other$limbs[0] ## u64
+      remainder = dividend % divisor ## u64
+      int_tag = -1688849860263936 ## i64
+      if remainder == 0
+        return wvalue_from_bits(int_tag)
+      if remainder <= 140737488355327
+        asign = ((an >> 63) & 1) ^ (($value >> 47) & 1) ## i64
+        if asign == 1
+          payload = (281474976710656 - remainder) ## u64
+          return wvalue_from_bits((int_tag | payload) ## i64)
+        return wvalue_from_bits((int_tag | remainder) ## i64)
+      result = ccall("w_u64", remainder) ## BigInt
+      asign = ((an >> 63) & 1) ^ (($value >> 47) & 1) ## i64
+      if asign == 1
+        return wvalue_from_bits(result$value ^ 140737488355328)
+      return result
     ccall("w_bigint_mod", self, other)
 
   -> %(other)(Number)

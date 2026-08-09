@@ -1,17 +1,27 @@
 # True-public benchmark for the bigint `/` and `%` source-routed dispatch
-# arm (plumbing bodies over the exported w_bigint_div/w_bigint_mod
-# boundaries — the division specialization tree stays in C). Same binary
-# A/B via TUNGSTEN_BIGINT_SRC_OPS (unset = source arm, 0 = C pinned).
+# arm (native one-limb pairs; wider pairs use the exported
+# w_bigint_div/w_bigint_mod boundaries). Same-binary A/B via
+# TUNGSTEN_BIGINT_SRC_OPS (unset = source arm, 0 = C pinned).
 #
 # Strata (per op; `mode` argv selects div or mod rows):
-#   one      — 1-limb / 1-limb heap pairs (in-gate; the ~25ns
-#              dispatch-sensitive row where the plumbing toll shows)
+#   one      — 1-limb / 1-limb heap pairs with a heap-sized remainder
+#   one-smallrem — exact quotient plus an inline remainder
+#   one-high — dividend has bit 63 set (unsigned division/codegen seam)
+#   one-lt   — |dividend| < |divisor| (zero quotient, identity remainder)
+#   one-nega/one-negb/one-negboth — all truncated-sign combinations
 #   intarg   — bigint / inline int (control: C, gate excludes)
 #   fourtwo  — 4-limb / 2-limb (preinverse band)
 #   eq       — 64-limb / 61-limb near-equal (tiny quotient)
 #   bz       — 256-limb / 128-limb (Burnikel-Ziegler band)
 #   neg      — 4-limb / 2-limb with alternating signs (in-gate; kernel
 #              owns sign handling)
+
++ BigInt
+  -> __c_div_oracle(other)
+    ccall("w_bigint_div", self, other)
+
+  -> __c_mod_oracle(other)
+    ccall("w_bigint_mod", self, other)
 
 CORPUS_SIZE = 8
 CORPUS_MASK = CORPUS_SIZE - 1
@@ -33,19 +43,28 @@ CORPUS_MASK = CORPUS_SIZE - 1
 -> one_limb_value(k)
   1125899906842624 + k * 2 + 1
 
+-> one_limb_divisor(k)
+  one_limb_value(k * 5 + 64)
+
 -> build_receivers(stratum)
   values = []
   i = 0
   while i < CORPUS_SIZE
-    if stratum == "one" || stratum == "intarg"
+    if stratum == "one" || stratum == "one-nega" || stratum == "one-negb" || stratum == "one-negboth" || stratum == "intarg"
       v = one_limb_value(i * 3) * 512 + 255
+    elsif stratum == "one-smallrem"
+      v = one_limb_divisor(i) * 512 + 255 + i
+    elsif stratum == "one-high"
+      v = (1 << 64) - 257 - i * 2
+    elsif stratum == "one-lt"
+      v = one_limb_value(i * 3)
     elsif stratum == "fourtwo" || stratum == "neg"
       v = 10 ** 76 + 3 + i * 2
     elsif stratum == "eq"
       v = 10 ** 1232 + 11 + i * 2
     else
       v = 10 ** 4928 + 11 + i * 2
-    if stratum == "neg" && (i & 1) == 1
+    if stratum == "one-nega" || stratum == "one-negboth" || (stratum == "neg" && (i & 1) == 1)
       v = 0 - v
     values.push(v)
     i += 1
@@ -55,8 +74,12 @@ CORPUS_MASK = CORPUS_SIZE - 1
   values = []
   i = 0
   while i < CORPUS_SIZE
-    if stratum == "one"
-      v = one_limb_value(i * 5 + 64)
+    if stratum == "one" || stratum == "one-nega" || stratum == "one-negb" || stratum == "one-negboth" || stratum == "one-smallrem"
+      v = one_limb_divisor(i)
+    elsif stratum == "one-high"
+      v = one_limb_value(i * 7 + 96)
+    elsif stratum == "one-lt"
+      v = one_limb_value(i * 3) + 4096
     elsif stratum == "intarg"
       v = 1000003 + i * 2
     elsif stratum == "fourtwo" || stratum == "neg"
@@ -65,14 +88,14 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = 10 ** 1229 + 17 + i * 2
     else
       v = 10 ** 2464 + 7 + i * 2
-    if stratum == "neg" && (i & 1) == 0
+    if stratum == "one-negb" || stratum == "one-negboth" || (stratum == "neg" && (i & 1) == 0)
       v = 0 - v
     values.push(v)
     i += 1
   values
 
 -> run_correctness
-  strata = ["one", "intarg", "fourtwo", "eq", "bz", "neg"]
+  strata = ["one", "one-smallrem", "one-high", "one-lt", "one-nega", "one-negb", "one-negboth", "intarg", "fourtwo", "eq", "bz", "neg"]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -84,10 +107,12 @@ CORPUS_MASK = CORPUS_SIZE - 1
       y = args[i]
       q = x / y
       r = x % y
+      check_value("div C differential [stratum]/[i]", q.to_s(), x.__c_div_oracle(y).to_s())
+      check_value("mod C differential [stratum]/[i]", r.to_s(), x.__c_mod_oracle(y).to_s())
       check_value("roundtrip [stratum]/[i]", (q * y + r).to_s(), x.to_s())
       i += 1
     s += 1
-  << "correctness: ok (q*y + r == x, 6 strata)"
+  << "correctness: ok (192 exact C differentials + q*y + r == x, 12 strata)"
 
 -> time_div(receivers, args, iters)
   checksum = 0

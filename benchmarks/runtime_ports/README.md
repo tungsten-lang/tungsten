@@ -116,7 +116,7 @@ polymorphic chains (rational division through a `## big`-typed site
 verified engine-identical). Thin modules bind the seam declarations to
 the runtime's weak C defaults exactly as before.
 
-### Division (`/`, `%`) — re-assessed and dispatch-migrated (2026-08-08)
+### Division (`/`, `%`) — dispatch plus native one-limb pairs (2026-08-09)
 
 RE-ASSESSMENT (Erik: "I can't think of any reason that the c should be
 faster — it likely was assessed on the old dispatch chain"): CONFIRMED
@@ -134,7 +134,29 @@ build, now decoupled from the (solved) dispatch question. Raw samples:
 `bigint_opdivmod_public_camp{1,2}_results.txt`; semantics pinned by
 `spec/numeric/bigint_divmod_spec.w` (truncated division, both engines).
 
-### Original kernel assessment (2026-08-08, still governing the kernel tier)
+NATIVE ONE-LIMB FOLLOW-UP: the both-heap one-limb pair now completes in
+Tungsten with raw `u64` division/remainder. A heap BigInt divisor is greater
+than the signed-i48 maximum, so the quotient is bounded below 2^17 and can be
+tagged inline without allocation; modulo tags an inline remainder or uses the
+ordinary `w_u64` allocation boundary, then composes the dividend sign. The
+expanded harness covers heap/inline remainder, dividend bit 63, |a|<|b|, and
+all four sign combinations for both operators, while retaining int-argument,
+4/2-limb, near-equal, Burnikel-Ziegler, and signed wider controls. The shim
+baseline ranged 0.963--1.097 source/C. A first branchy source body was REJECTED
+because generated boxed boolean plumbing put division as high as 1.156.
+Replacing that plumbing with raw sign bits and one combined limb-count compare
+is RETAINED: two independent balanced 8-pair campaigns measured one-limb
+division at 0.987--1.052 then 0.967--1.031, one-limb modulo at 0.744--0.930
+then 0.734--0.919, and every wider/control row at or below 1.087. The harness
+passes 192 exact C differentials plus q*y+r round-trips; the focused spec passes
+interpreted and `--release --native --fast`, including unsigned-high-bit,
+inline/heap remainder, zero-quotient, and sign seams. LLVM contains `udiv i64`
+and `urem i64` in the source workers. Raw samples:
+`bigint_divmod_one_limb_native_{pre,camp1,camp2,camp3}_results.txt`.
+Host/build: Apple M5 Max, arm64 macOS 26.6.1, Homebrew LLVM 22.1.8,
+configured `-mcpu=apple-m5`, `--release --native --fast`.
+
+### Original kernel assessment (2026-08-08, still governing wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing
 hand-written asm kernel (`asm_add_no`, `asm_sub_no`, `asm_mulbase`), which

@@ -34040,10 +34040,10 @@ WValue w_bigint_literal_cached(const char *text, _Atomic uint64_t *slot) {
  * core/numeric/big_int.w emits a STRONG wrapper around the compiled
  * BigInt#/ and BigInt#% workers, and strong-over-weak link resolution
  * routes both-heap-bigint division through source. The retained source
- * bodies are single-boundary compositions over bigint_div_any /
- * bigint_mod_any — the division specialization tree (preinverse 2-by-1,
- * Burnikel-Ziegler, Jebelean exact, width-certified kernels) stays in C.
- * TUNGSTEN_BIGINT_SRC_OPS=0 pins the C path. */
+ * bodies implement one-limb pairs directly and route wider pairs through
+ * bigint_div_any / bigint_mod_any — the wider division specialization tree
+ * (preinverse 2-by-1, Burnikel-Ziegler, Jebelean exact, width-certified
+ * kernels) stays in C. TUNGSTEN_BIGINT_SRC_OPS=0 pins the C path. */
 __attribute__((weak)) WValue __w_bigint_div_src(WValue a, WValue b) {
     return bigint_div_any(a, b);
 }

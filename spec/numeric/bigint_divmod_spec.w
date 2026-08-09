@@ -1,8 +1,7 @@
-# BigInt `/` and `%` semantics — pins the source-routed dispatch surface
-# (weak-arm seam + BigInt#/ and BigInt#% plumbing bodies over the exported
-# w_bigint_div/w_bigint_mod boundaries) on both engines. Division is
-# TRUNCATED (C semantics): the quotient rounds toward zero and the
-# remainder carries the dividend's sign.
+# BigInt `/` and `%` semantics — pins the native Tungsten one-limb pair and
+# the source-routed wider-kernel boundary on both engines. Division is
+# TRUNCATED (C semantics): the quotient rounds toward zero and the remainder
+# carries the dividend's sign.
 
 -> check(name, got, want)
   if got == want
@@ -28,11 +27,28 @@ check("pn_mod", a % (0 - b), r_want)
 check("nn_div", (0 - a) / (0 - b), q_want)
 check("nn_mod", (0 - a) % (0 - b), 0 - r_want)
 
-# One-limb heap pairs (the fused u64 arm, in-gate)
+# One-limb heap pairs (native unsigned u64 arm)
 p1 = (1 << 60) + 999
 p2 = (1 << 49) + 123
 check("one_div", p1 / p2, 2047)
 check("one_mod", p1 % p2, p1 - 2047 * p2)
+check("one_np_div", (0 - p1) / p2, -2047)
+check("one_np_mod", (0 - p1) % p2, 0 - (p1 - 2047 * p2))
+check("one_pn_div", p1 / (0 - p2), -2047)
+check("one_pn_mod", p1 % (0 - p2), p1 - 2047 * p2)
+check("one_nn_div", (0 - p1) / (0 - p2), 2047)
+check("one_nn_mod", (0 - p1) % (0 - p2), 0 - (p1 - 2047 * p2))
+
+# Inline remainder, unsigned-high-bit dividend, and zero-quotient seams.
+smallrem = p2 * 512 + 255
+check("one_smallrem_div", smallrem / p2, 512)
+check("one_smallrem_mod", smallrem % p2, 255)
+check("one_smallrem_neg_mod", (0 - smallrem) % p2, -255)
+high = (1 << 64) - 257
+check("one_high_div", high / p2, 32767)
+check("one_high_mod", high % p2, 562949949390714)
+check("one_lt_div", p2 / p1, 0)
+check("one_lt_mod", p2 % p1, p2)
 
 # Exact multiple (Jebelean exact-division path)
 m = (1 << 300) + 7

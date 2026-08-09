@@ -2294,9 +2294,6 @@ ewscope_md_state = {ids: {}}
     if big_op_fns[bop_check] == nil
       big_op_fns[bop_check] = big_op_worker_fns[bop_check]
     boi += 1
-  # Plain loop, not `.each` — the body mutates `used_runtime_fns`, and a
-  # closure boundary here is exactly the kind of capture ambiguity that
-  # silently dropped the declare-suppression flag.
   seam_decls = StringBuffer(256)
   # FIXED iteration order, never .keys(): hash iteration order differs
   # between the C VM stage-0 host and the native compiler, and the seam

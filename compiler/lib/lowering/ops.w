@@ -2271,9 +2271,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if src_type != nil && tv[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128 :raw_int)
     return cast_raw_machine_int(wfn, tv[:value], src_type, type)
   boxed = ensure_i64_value(wfn, tv)
-  if inferred_type == :int
-    raw = nanunbox_int_emit(wfn, boxed)
-    return cast_raw_machine_int(wfn, raw, :int, type)
+  # No nanunbox shortcut for `:int`-inferred values: `:int` means "may have
+  # promoted to a heap BigInt at runtime" (same exclusion as every raw
+  # shortcut above), and nanunbox_int on a heap WValue reads pointer bits —
+  # `(x * <beyond-i64 literal>) ## u64` returned allocator garbage instead
+  # of the defined low-64 wrap. The runtime unbox (w_to_i64 family) gives
+  # the same value for inline ints and the defined truncation for BigInts.
   temp = next_temp(wfn)
   emit_instruction(wfn, {
     op: machine_call_return_op(type),

@@ -472,6 +472,7 @@ compiled_specs=(
   spec/compiler/top_level_method_name_hygiene_spec.w
   spec/compiler/u64_raw_multiply_spec.w
   spec/compiler/conditional_reassign_param_spec.w
+  spec/compiler/promotion_determinism_spec.w
   spec/compiler/begin_rescue_value_spec.w
   spec/compiler/wide_params_calls_spec.w
   spec/compiler/typed_array_param_width_spec.w

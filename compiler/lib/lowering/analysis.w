@@ -253,11 +253,10 @@
 
   when :class_def, :module_def, :trait_def
     mark_subtree_escape(node.superclass, records)
-    mark_subtree_escape(node.body, records)
+    free_scan_list(node.body, {}, records)
 
   when :method_def, :fn_def, :gpu_kernel_def
-    mark_subtree_escape(node.params, records)
-    mark_subtree_escape(node.body, records)
+    mark_nested_def_free_reads(node, records)
 
   when :param
     mark_subtree_escape(node.default, records)
@@ -291,6 +290,275 @@
   when :cidr_match
     mark_subtree_escape(node.subject, records)
     mark_subtree_escape(node.cidr, records)
+  nil
+
+# ── Scoped escape walk for nested definitions ────────────────────────────
+# A nested definition (fn/method/class body) is its own scope: assigning a
+# name inside it shadows the enclosing body's var from the point of
+# assignment onward (`<< gx; gx = 9` reads the enclosing global slot, then
+# binds a fresh local — both engines). Only FREE reads — a :var read at a
+# point no binding dominates — reach the enclosing scope's global slot and
+# must pin that var boxed. Walking def bodies position-blind (every :var an
+# escape) made promotion depend on which names happen to be locals in
+# autoloaded core methods: `x = <big>.to_i; << x % 97` stayed boxed while
+# the identical program spelled `ab` promoted and wrapped. Binds are
+# tracked in statement order; a branch arm's binds dominate only the rest
+# of that arm, so each arm scans a copy of the bound set. Unmodeled kinds
+# fall back to the position-blind walk (conservative, never unsound).
+
+-> free_bound_copy(bound)
+  copy = {}
+  ks = bound.keys()
+  i = 0
+  while i < ks.size()
+    copy[ks[i]] = true
+    i += 1
+  copy
+
+-> free_bind_name(entry, bound)
+  if entry == nil
+    return nil
+  if is_ast_node?(entry)
+    if entry.name != nil
+      bound[entry.name] = true
+    return nil
+  if type(entry) == "String"
+    bound[entry] = true
+  nil
+
+-> free_bind_params(params, bound)
+  if params == nil
+    return nil
+  i = 0
+  while i < params.size()
+    free_bind_name(params[i], bound)
+    i += 1
+  nil
+
+-> mark_nested_def_free_reads(def_node, records)
+  bound = {}
+  params = def_node.params
+  if params != nil
+    i = 0
+    while i < params.size()
+      p = params[i]
+      free_bind_name(p, bound)
+      # Defaults evaluate in a scope with no binds established yet —
+      # keep them position-blind.
+      if p != nil && is_ast_node?(p) && ast_kind(p) == :param
+        mark_subtree_escape(p.default, records)
+      i += 1
+  free_scan_list(def_node.body, bound, records)
+  nil
+
+-> free_scan_list(list, bound, records)
+  if list == nil
+    return nil
+  if type(list) != "Array"
+    free_scan_node(list, bound, records)
+    return nil
+  i = 0
+  while i < list.size()
+    free_scan_node(list[i], bound, records)
+    i += 1
+  nil
+
+-> free_scan_node(node, bound, records)
+  if node == nil
+    return nil
+  if type(node) == "Array"
+    i = 0
+    while i < node.size()
+      free_scan_node(node[i], bound, records)
+      i += 1
+    return nil
+  if !is_ast_node?(node)
+    return nil
+  t = ast_kind(node)
+  if t in (:fastmath_block :strictmath_block :overflow_block)
+    free_scan_list(node[:body], free_bound_copy(bound), records)
+    return nil
+
+  if t == :var
+    if bound[node.name] != true
+      rec = ensure_promote_record(records, node.name)
+      rec[:has_escape] = true
+    return nil
+
+  case t
+  when :assign
+    free_scan_node(node.value, bound, records)
+    target = node.target
+    if target != nil && is_ast_node?(target) && ast_kind(target) == :var
+      bound[target.name] = true
+    else
+      free_scan_node(target, bound, records)
+
+  when :compound_assign
+    free_scan_node(node.value, bound, records)
+    target = node.target
+    if target != nil && is_ast_node?(target) && ast_kind(target) == :var
+      # `x += v` reads x before binding it — a free read when unbound.
+      free_scan_node(target, bound, records)
+      bound[target.name] = true
+    else
+      free_scan_node(target, bound, records)
+
+  when :multi_assign
+    free_scan_node(node.value, bound, records)
+    targets = node.targets
+    if targets != nil
+      i = 0
+      while i < targets.size()
+        tg = targets[i]
+        if tg != nil && is_ast_node?(tg) && ast_kind(tg) == :var
+          bound[tg.name] = true
+        else
+          free_scan_node(tg, bound, records)
+        i += 1
+
+  when :call
+    free_scan_node(node.receiver, bound, records)
+    free_scan_node(node.args, bound, records)
+    if node.block != nil
+      blk = node.block
+      if is_ast_node?(blk) && ast_kind(blk) == :block
+        inner = free_bound_copy(bound)
+        free_bind_params(blk.params, inner)
+        free_scan_list(blk.body, inner, records)
+      else
+        mark_subtree_escape(blk, records)
+
+  when :block
+    inner = free_bound_copy(bound)
+    free_bind_params(node.params, inner)
+    free_scan_list(node.body, inner, records)
+
+  when :if
+    free_scan_node(node.condition, bound, records)
+    free_scan_list(node.then_body, free_bound_copy(bound), records)
+    if node.elsif_clauses != nil
+      j = 0
+      while j < node.elsif_clauses.size()
+        clause = node.elsif_clauses[j]
+        if clause != nil && type(clause) == "Array" && clause.size() >= 2
+          # An elsif condition only runs when earlier arms failed, so its
+          # binds dominate this arm's body but never the code after the if.
+          arm_bound = free_bound_copy(bound)
+          free_scan_node(clause[0], arm_bound, records)
+          free_scan_list(clause[1], arm_bound, records)
+        j += 1
+    free_scan_list(node.else_body, free_bound_copy(bound), records)
+
+  when :while
+    free_scan_node(node.condition, bound, records)
+    free_scan_list(node.body, free_bound_copy(bound), records)
+
+  when :case
+    if node.whens != nil
+      j = 0
+      while j < node.whens.size()
+        w = node.whens[j]
+        if w != nil
+          # A when-condition only runs when earlier arms failed — its binds
+          # dominate this arm's body but never the code after the case.
+          w_bound = free_bound_copy(bound)
+          if w.conditions != nil
+            k = 0
+            while k < w.conditions.size()
+              free_scan_node(w.conditions[k], w_bound, records)
+              k += 1
+          free_scan_list(w.body, w_bound, records)
+        j += 1
+    free_scan_list(node.else_body, free_bound_copy(bound), records)
+
+  when :case_value
+    if node.subject != nil
+      free_scan_node(node.subject, bound, records)
+    if node.arms != nil
+      j = 0
+      while j < node.arms.size()
+        a = node.arms[j]
+        if a != nil
+          free_scan_list(a.body, free_bound_copy(bound), records)
+        j += 1
+    free_scan_list(node.else_body, free_bound_copy(bound), records)
+
+  when :begin
+    free_scan_list(node.body, free_bound_copy(bound), records)
+    if node.rescue_body != nil
+      inner = free_bound_copy(bound)
+      free_bind_name(node.rescue_var, inner)
+      free_scan_list(node.rescue_body, inner, records)
+    free_scan_list(node.ensure_body, free_bound_copy(bound), records)
+
+  when :binary_op, :and, :or, :target_and, :target_or
+    free_scan_node(node.left, bound, records)
+    free_scan_node(node.right, bound, records)
+
+  when :unary_op, :not
+    free_scan_node(node.operand, bound, records)
+
+  when :target_not
+    free_scan_node(node.expression, bound, records)
+
+  when :in_test
+    free_scan_node(node.lhs, bound, records)
+    free_scan_node(node.elements, bound, records)
+
+  when :range
+    free_scan_node(node.from, bound, records)
+    free_scan_node(node.to, bound, records)
+
+  when :array
+    free_scan_node(node.elements, bound, records)
+
+  when :hash_literal
+    free_scan_node(node.entries, bound, records)
+
+  when :string_interp, :byte_array_interp
+    free_scan_node(node.parts, bound, records)
+
+  when :typed_array_new, :typed_array, :view_access
+    free_scan_node(node.size, bound, records)
+    free_scan_node(node.index, bound, records)
+
+  when :puts
+    vals = node.value
+    if vals != nil
+      i = 0
+      while i < vals.size()
+        free_scan_node(vals[i], bound, records)
+        i += 1
+
+  when :return, :print, :raise, :recase
+    free_scan_node(node.value, bound, records)
+
+  when :passthrough
+    free_scan_node(node.expression, bound, records)
+    free_scan_node(node.value, bound, records)
+
+  when :yield, :super
+    free_scan_node(node.args, bound, records)
+
+  when :program
+    free_scan_list(node.expressions, bound, records)
+
+  when :method_def, :fn_def, :gpu_kernel_def
+    mark_nested_def_free_reads(node, records)
+
+  when :class_def, :module_def, :trait_def
+    mark_subtree_escape(node.superclass, records)
+    free_scan_list(node.body, {}, records)
+
+  when :int, :float, :string, :symbol, :nil, :boolean
+    return nil
+
+  else
+    # Unmodeled kind: fall back to the position-blind escape walk. This
+    # over-marks locally-bound names in the subtree — conservative, and
+    # exactly the pre-scoping behavior.
+    mark_subtree_escape(node, records)
   nil
 
 # Return the exact machine return type of a call whose lowering is already

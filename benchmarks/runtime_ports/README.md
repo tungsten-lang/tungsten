@@ -96,6 +96,26 @@ benchmark structure to compare C, first-source, and optimized-source versions.
 | BigInt `abs` | `run_bigint_abs_public.sh` | Retained under the 5% budget — a strict win. The source body mirrors the C IC exactly: identity for effective-positive receivers, `w_bigint_mark_shared_value` plus a tag-overlay flip through `wvalue_from_bits` for effective-negative ones; the IC row is retired. Two public campaigns measured 0.968/0.981 (positive), 0.969/0.962 (negative), and 0.947/0.941 (sign-alternating) against the native IC. The port exposed a tree-walker gap: `wvalue_from_bits` had no BigInt arm, so the interpreter died mid-spec on the first source-level overlay flip — while `bin/tungsten run` still exited 0, hiding the death from tail-line gates. The fix adds the checked `w_bigint_from_bits` bridge (rejects parked/dead headers), and the gate battery now diffs full compiled-vs-interpreter outputs (8 spec pairs byte-identical). Raw samples: `bigint_abs_public_{pre,post_v1,post_v2}_results.txt`. |
 | BigInt `gcd` | `run_bigint_gcd_public.sh` | Retained under the 5% budget. The port is a source shim: `BigInt#gcd` ccalls the new exported `w_bigint_gcd` boundary (the Lehmer/HGCD kernel `bigint_gcd_any` is deliberately static-always-inline for its rational-normalization callers, so a thin external wrapper is the ccall surface — the modpow pattern). The override also shields BigInt receivers from inheriting `Int#gcd`'s Euclidean remainder loop. Two public campaigns measured 1.006/1.004 (one-limb pairs, the dispatch-sensitive 20ns stratum), 0.987/0.972 (inline argument), 0.971/0.949 (near-equal 4-limb), 0.979/0.971 (8-vs-4-limb skew), 1.012/1.002 (32-limb shared-factor). Hardened gates: `gcd`/`int`/`bigint_identity`/`rational`/`bigint_tag_sign` specs byte-identical compiled vs tree walker; stage identity re-verified. Raw samples: `bigint_gcd_public_{pre,post_v1,post_v2}_results.txt`. |
 | BigInt `isqrt` | `run_bigint_isqrt_public.sh` | Retained under the 5% budget. `BigInt#isqrt` is a source shim over the already-exported `bigint_isqrt_any` divide-and-conquer kernel; the IC row is retired, and the override shields BigInt receivers from `Int#isqrt`'s Newton loop. Two public campaigns across 1/4/16/64-limb receivers measured 0.973/0.994, 1.043/1.009, 1.011/1.012, and 1.014/1.029 — every row inside the budget, including the 7.7ns one-limb u128 fast path. Negative-receiver error text is byte-identical (it lives in the kernel). Gates: `bigint_bang` (mixed-width isqrt sweep), `int`, `bigint_identity`, and the 769-line `bigint_limb_sweep` all byte-identical across engines; stage identity re-verified. Raw samples: `bigint_isqrt_public_{pre,post_v1,post_v2}_results.txt`. |
+### Source-path boundary constant — measured, and direct lowering extended (2026-08-08)
+
+Follow-up to the shift skip's "~12ns boundary constant" attribution: on a
+quiet host the actual src-vs-C gap for the cheap in-arm ops is ~2ns
+(`and-four` src 27.4ns vs C 25.4ns) — the seam gate's two view loads, the
+weak-wrapper hop, and the worker re-deriving the shapes the gate already
+proved. The alloc/seal boundaries are NOT a recoverable component: they
+LTO-inline, and swapping the `&` body's pool alloc for the hot-slot
+allocator measured a wash (1.078/1.098 vs the landed 1.076/1.055),
+consistent with the add/sub configuration sweep. The shift family's loss
+therefore stands on C's kernel superiority at tiny op costs, not on a
+removable dispatch tax. What WAS worth extending: the statically-typed
+direct route (`lower_binary_op`'s exact-tag-guarded branch straight to
+the seam symbol, previously `+`/`-`/`*` only) now also covers `&`, `\|`,
+`^`, `/`, `%` — typed sites skip the fast wrapper, runtime entry, and
+seam gate entirely, with the guard's slow arm keeping the full
+polymorphic chains (rational division through a `## big`-typed site
+verified engine-identical). Thin modules bind the seam declarations to
+the runtime's weak C defaults exactly as before.
+
 ### Division (`/`, `%`) — re-assessed and dispatch-migrated (2026-08-08)
 
 RE-ASSESSMENT (Erik: "I can't think of any reason that the c should be

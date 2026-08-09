@@ -2145,7 +2145,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # one bigint-inferred operand (typing the other would upgrade it);
   # :polymorphic is everything else reaching the runtime entry. Side
   # data only — never read by hashing or emission.
-  if op in (:PLUS :MINUS :STAR)
+  if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT)
     bidir_report = :polymorphic
     if !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
       bidir_report = :static_direct
@@ -2154,9 +2154,36 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if ctx[:mod][:tag_report_infix] == nil
       ctx[:mod][:tag_report_infix] = []
     ctx[:mod][:tag_report_infix].push({op: op, route: bidir_report, fname: wfn[:source_method], class_name: ctx[:class_name]})
-  if op in (:PLUS :MINUS :STAR) && !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
-    bidir_fast = op == :PLUS ? "__w_bigint_plus_src" : (op == :MINUS ? "__w_bigint_minus_src" : "__w_bigint_times_src")
-    bidir_slow = op == :PLUS ? "w_add" : (op == :MINUS ? "w_sub" : "w_mul")
+  if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT) && !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
+    # Seam symbol per op (strong = the compiled typed worker, weak = the C
+    # kernel) and the polymorphic entry for the guard's slow arm. The
+    # workers handle every both-heap-bigint shape themselves (in-body
+    # bails go to the polymorphic entries, whose seam gates exclude
+    # exactly those shapes — no recursion), so the exact-tag guard is the
+    # only precondition this route needs.
+    bidir_fast = "__w_bigint_plus_src"
+    bidir_slow = "w_add"
+    if op == :MINUS
+      bidir_fast = "__w_bigint_minus_src"
+      bidir_slow = "w_sub"
+    elsif op == :STAR
+      bidir_fast = "__w_bigint_times_src"
+      bidir_slow = "w_mul"
+    elsif op == :AMPERSAND
+      bidir_fast = "__w_bigint_and_src"
+      bidir_slow = "w_bit_and"
+    elsif op == :PIPE
+      bidir_fast = "__w_bigint_or_src"
+      bidir_slow = "w_bit_or"
+    elsif op == :CARET
+      bidir_fast = "__w_bigint_xor_src"
+      bidir_slow = "w_bit_xor"
+    elsif op == :SLASH
+      bidir_fast = "__w_bigint_div_src"
+      bidir_slow = "w_div"
+    elsif op == :PERCENT
+      bidir_fast = "__w_bigint_mod_src"
+      bidir_slow = "w_mod"
     # Tag/mask spellings come from the generated B3 table — the same
     # single source the typed-overload gate emission uses.
     bidir_entry = overload_exact_tag_entry("BigInt")

@@ -9,7 +9,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | `linalg.w` | dense LA (nested lists) + BLAS |
 | `sparse.w` | **SparseMatrix** CSR/COO; SpMV + Apple Sparse Solvers (QR/Cholesky) |
 | `fft.w` | pure radix-2 DFT |
-| `signal.w` | finite convolution/correlation + one-sided real spectra |
+| `signal.w` | finite convolution/correlation + windowed periodogram/Welch spectra |
 | `special.w` / `stats.w` | specials + distributions |
 | `solve.w` / `optim.w` / `interpolate.w` | ODE / opt / interp |
 | `calculus.w` | Taylor/differential AD, numerical gradients/Jacobians, Simpson and breakpoint GK15 quadrature |

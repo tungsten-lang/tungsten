@@ -820,6 +820,35 @@
         magnitude = __bigint_shr_u64($limbs[n - 1] ## u64, k - top_start) ## u64
         if magnitude <= 140737488355327
           return wvalue_from_bits((int_tag | magnitude) ## i64)
+    # Tiny negative magnitudes use the same top-limb demotion with arithmetic
+    # rounding. The discarded-limb sticky test is unrolled through four limbs;
+    # any discarded bit increments the result magnitude before negative boxing.
+    if n < -1 && n >= -4
+      limb_count = 0 - n
+      top_start = (limb_count - 1) * 64
+      if k >= top_start
+        residual = k - top_start
+        top = $limbs[limb_count - 1] ## u64
+        magnitude = __bigint_shr_u64(top, residual) ## u64
+        sticky = 0 ## i64
+        if (magnitude << residual) != top
+          sticky = 1
+        low0 = $limbs[0] ## u64
+        if low0 != 0
+          sticky = 1
+        if limb_count > 2
+          low1 = $limbs[1] ## u64
+          if low1 != 0
+            sticky = 1
+        if limb_count > 3
+          low2 = $limbs[2] ## u64
+          if low2 != 0
+            sticky = 1
+        if sticky == 1
+          magnitude += 1
+        if magnitude <= 140737488355328
+          payload = (281474976710656 - magnitude) ## u64
+          return wvalue_from_bits((int_tag | payload) ## i64)
     if n == 1 && k > 0 && k < 64
       magnitude = __bigint_shr_u64($limbs[0] ## u64, k) ## u64
       if magnitude <= 140737488355327

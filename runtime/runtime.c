@@ -36341,6 +36341,39 @@ static int quantity_order_compare(WValue a, WValue b) {
     return decimal_compare(w_decimal(ga, sa), w_decimal(gb, sb));
 }
 
+/* Ordering of a decimal against a plain machine int: the int is exactly the
+ * decimal (sig=i, scale=0). Cross-type EQUALITY stays false by the exactness
+ * policy (2.0 == 2 is false); ORDERING is numeric and must never fault —
+ * before this helper, `x = -4.0; x >= 0` fell through every comparison arm
+ * to the as_int assert. Returns -1/0/1 for d <=> i. */
+static int decimal_int_compare(WValue d, int64_t i) {
+    int64_t sig64;
+    int a_scale, b_scale = 0;
+    decimal_extract(d, &sig64, &a_scale);
+    __int128 a_sig = sig64, b_sig = i;
+    decimal_align(&a_sig, &a_scale, &b_sig, &b_scale);
+    return (a_sig > b_sig) - (a_sig < b_sig);
+}
+
+/* Mixed decimal/integer ordering shared by the comparison ops: plain ints
+ * compare exactly; BigInt falls back to the double path (order only — the
+ * same approximation the rational/pi mixed arms accept). Sets *supported,
+ * returns a <=> b. */
+static int decimal_mixed_compare(WValue a, WValue b, int *supported) {
+    *supported = 1;
+    if (is_decimal_any(a) && w_is_int(b))
+        return decimal_int_compare(a, w_as_int(b));
+    if (w_is_int(a) && is_decimal_any(b))
+        return -decimal_int_compare(b, w_as_int(a));
+    if ((is_decimal_any(a) && w_is_integer_any(b)) ||
+        (w_is_integer_any(a) && is_decimal_any(b))) {
+        double x = cmp_numeric_double(a), y = cmp_numeric_double(b);
+        return (x > y) - (x < y);
+    }
+    *supported = 0;
+    return 0;
+}
+
 WValue w_lt(WValue a, WValue b) {
     if (w_is_int(a) && w_is_int(b))
         return w_bool(w_as_int(a) < w_as_int(b));
@@ -36356,6 +36389,12 @@ WValue w_lt(WValue a, WValue b) {
 
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) < 0);
+
+    {
+        int dm_ok;
+        int dm = decimal_mixed_compare(a, b, &dm_ok);
+        if (dm_ok) return w_bool(dm < 0);
+    }
 
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_bool(quantity_order_compare(a, b) < 0);
@@ -36419,6 +36458,11 @@ WValue w_spaceship(WValue a, WValue b) {
         int c = decimal_compare(a, b);
         return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
     }
+    {
+        int dm_ok;
+        int dm = decimal_mixed_compare(a, b, &dm_ok);
+        if (dm_ok) return w_int(dm);
+    }
     if (is_quantity_any(a) && is_quantity_any(b)) {
         int c = quantity_order_compare(a, b);
         return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
@@ -36469,6 +36513,12 @@ WValue w_gt(WValue a, WValue b) {
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) > 0);
 
+    {
+        int dm_ok;
+        int dm = decimal_mixed_compare(a, b, &dm_ok);
+        if (dm_ok) return w_bool(dm > 0);
+    }
+
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_bool(quantity_order_compare(a, b) > 0);
     if (is_pi_mixed_pair(a, b))
@@ -36514,6 +36564,12 @@ WValue w_lte(WValue a, WValue b) {
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) <= 0);
 
+    {
+        int dm_ok;
+        int dm = decimal_mixed_compare(a, b, &dm_ok);
+        if (dm_ok) return w_bool(dm <= 0);
+    }
+
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_bool(quantity_order_compare(a, b) <= 0);
     if (is_pi_mixed_pair(a, b))
@@ -36558,6 +36614,12 @@ WValue w_gte(WValue a, WValue b) {
 
     if (is_decimal_any(a) && is_decimal_any(b))
         return w_bool(decimal_compare(a, b) >= 0);
+
+    {
+        int dm_ok;
+        int dm = decimal_mixed_compare(a, b, &dm_ok);
+        if (dm_ok) return w_bool(dm >= 0);
+    }
 
     if (is_quantity_any(a) && is_quantity_any(b))
         return w_bool(quantity_order_compare(a, b) >= 0);

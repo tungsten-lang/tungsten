@@ -1450,6 +1450,8 @@ use target
       return ccall("bigint_powmod_any", args[1], args[2], args[3])
     when "w_bigint_gcd"
       return ccall("w_bigint_gcd", args[1], args[2])
+    when "w_bigint_lcm"
+      return ccall("w_bigint_lcm", args[1], args[2])
     when "w_bigint_prime_q"
       return ccall("w_bigint_prime_q", args[1])
     when "w_bigint_add"

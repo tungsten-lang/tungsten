@@ -47331,6 +47331,14 @@ WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {
     }
     return w_ic_integer_lcm_generic(r, a, c);
 }
+
+/* Exported ccall boundary for the BigInt#lcm source shim. Keep the fused
+ * one-limb path and the exact-division multi-limb path behind one call; a
+ * source composition of gcd, division, and multiplication repeats public
+ * dispatch and loses the small-width performance gate. */
+WValue w_bigint_lcm(WValue r, WValue arg) {
+    return w_ic_integer_lcm(r, &arg, 1);
+}
 static WValue w_ic_bigint_prev(WValue r, WValue *a, int c) { (void)a; (void)c; return w_sub(r, w_int(1)); }
 static WValue w_ic_bigint_succ(WValue r, WValue *a, int c) { (void)a; (void)c; return w_add(r, w_int(1)); }
 
@@ -48444,11 +48452,8 @@ static void w_init_ic_tables(void) {
     /* Slots 5-7 (prev, succ, next) are retired: Int's source bodies
      * (core/numeric/int.w) serve BigInt receivers through type-class
      * dispatch, so the names stay unregistered and lookup falls through. */
-    /* Slot 8 (lcm) survives a 2026-08-06 port attempt: Int#lcm's source
-     * body lost 1.28-1.68x on one-limb and near-equal strata against this
-     * handler's fused u64 kernel and mag_divexact path (see
-     * benchmarks/runtime_ports/README.md). Deliberately retained native. */
-    w_ic_bigint_table[8].name  = WN_lcm;
+    /* Slot 8 (lcm) is retired: BigInt#lcm in core/numeric/big_int.w is a
+     * source shim over the fused w_bigint_lcm boundary. */
     /* Slot 9 (isqrt) is retired: BigInt#isqrt in core/numeric/big_int.w is
      * a source shim over the exported bigint_isqrt_any kernel. */
     /* Channel (Phase 7+m) */

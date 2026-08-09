@@ -760,6 +760,13 @@
   -> gcd(other)
     ccall("w_bigint_gcd", self, other)
 
+  # Least common multiple. The fused u64 and exact-division kernels stay
+  # behind one exported boundary; composing the public gcd, division, and
+  # multiplication methods here repeats dispatch and is materially slower
+  # for small BigInts. The method surface itself is source-defined.
+  -> lcm(other)
+    ccall("w_bigint_lcm", self, other)
+
   # Primality. The small-screen / Mersenne Lucas-Lehmer / Proth / BPSW
   # policy rides the runtime kernel behind one exported boundary until
   # source code can index limbs directly; the method surface lives here.

@@ -9,6 +9,21 @@
 #   four13   — 4-limb, k=13 (sub-limb funnel)
 #   four64   — 4-limb, k=64 (bit-aligned word path, s == 0)
 #   sf13     — 64-limb, k=13
+#   thirtytwo13 — 32-limb fixed-rung control, k=13
+#   thirtythree13 — 33-limb, k=13 (first width above fixed C rungs)
+#   thirtythree-trim13 — 33 limbs whose shifted top vanishes
+#   forty13  — 40-limb, k=13
+#   sixtyfive13 — 65-limb, k=13
+#   eighty13 — 80-limb, k=13
+#   ninetysix13 — 96-limb, k=13
+#   ninetyseven13 — 97-limb C-retained seam control, k=13
+#   onetwentyeight13 — 128-limb, k=13
+#   onesixty13 — 160-limb, k=13
+#   oneninetytwo13 — 192-limb, k=13
+#   twotwentyfour13 — 224-limb, k=13
+#   wide13   — 256-limb, k=13
+#   max13    — 4096-limb, k=13 (source-band ceiling)
+#   overband13 — 4097-limb, k=13 (C-retained seam control)
 #   sf200    — 64-limb, k=200 (w=3, s=8)
 #   big1000  — 256-limb, k=1000
 #   neg      — 4-limb negative receiver, k=13 (control: C keeps negatives)
@@ -70,8 +85,38 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = (1 << 4032) + (1 << 2000) + 3 + i * 2
     elsif stratum == "four13" || stratum == "four64" || stratum == "fourneg13" || stratum == "neg" || stratum == "overpos" || stratum == "overneg" || stratum == "negkpos" || stratum == "negkneg" || stratum == "zero" || stratum == "zeroneg"
       v = 10 ** 76 + 3 + i * 2
+    elsif stratum == "thirtytwo13"
+      v = (1 << 2047) + (1 << 1000) + 11 + i * 2
+    elsif stratum == "thirtythree13"
+      v = (1 << 2111) + (1 << 1000) + 11 + i * 2
+    elsif stratum == "thirtythree-trim13"
+      v = (1 << 2048) + (1 << 1000) + 11 + i * 2
+    elsif stratum == "forty13"
+      v = (1 << 2559) + (1 << 1200) + 11 + i * 2
     elsif stratum == "sf13" || stratum == "sf200" || stratum == "sfneg13"
       v = 10 ** 1232 + 11 + i * 2
+    elsif stratum == "sixtyfive13"
+      v = (1 << 4159) + (1 << 2000) + 11 + i * 2
+    elsif stratum == "eighty13"
+      v = (1 << 5119) + (1 << 2500) + 11 + i * 2
+    elsif stratum == "ninetysix13"
+      v = (1 << 6143) + (1 << 3000) + 11 + i * 2
+    elsif stratum == "ninetyseven13"
+      v = (1 << 6207) + (1 << 3000) + 11 + i * 2
+    elsif stratum == "onetwentyeight13"
+      v = (1 << 8191) + (1 << 4000) + 11 + i * 2
+    elsif stratum == "onesixty13"
+      v = (1 << 10239) + (1 << 5000) + 11 + i * 2
+    elsif stratum == "oneninetytwo13"
+      v = (1 << 12287) + (1 << 6000) + 11 + i * 2
+    elsif stratum == "twotwentyfour13"
+      v = (1 << 14335) + (1 << 7000) + 11 + i * 2
+    elsif stratum == "wide13"
+      v = (1 << 16383) + (1 << 8000) + 11 + i * 2
+    elsif stratum == "max13"
+      v = (1 << 262143) + (1 << 131000) + 11 + i * 2
+    elsif stratum == "overband13"
+      v = (1 << 262207) + (1 << 131000) + 11 + i * 2
     else
       v = 10 ** 4928 + 11 + i * 2
     if stratum == "neg" && (i & 1) == 1
@@ -112,7 +157,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
   13
 
 -> run_correctness
-  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "fourneg13", "fourtail13", "fourtail64", "fourtailneg13", "fourtailneg64", "sf13", "sf200", "sfneg13", "sftailneg13", "sftailneg64", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg", "zero", "zeroneg"]
+  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "fourneg13", "fourtail13", "fourtail64", "fourtailneg13", "fourtailneg64", "thirtytwo13", "thirtythree13", "thirtythree-trim13", "forty13", "sf13", "sixtyfive13", "eighty13", "ninetysix13", "ninetyseven13", "onetwentyeight13", "onesixty13", "oneninetytwo13", "twotwentyfour13", "wide13", "max13", "overband13", "sf200", "sfneg13", "sftailneg13", "sftailneg64", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg", "zero", "zeroneg"]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -130,7 +175,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
         check_value("shr_rebuild [stratum]/[i]", ((r << k) + (x - (r << k))).to_s(), x.to_s())
       i += 1
     s += 1
-  << "correctness: ok (shift identities, 24 strata)"
+  << "correctness: ok (shift identities, [strata.size] strata)"
 
 -> time_shl(receivers, k, iters)
   checksum = 0

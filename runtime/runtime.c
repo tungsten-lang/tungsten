@@ -35615,6 +35615,11 @@ static inline int bigint_shr_src_shape(WValue a, WValue b) {
     int64_t k = w_as_int(b);
     if (k == 0) return 1;
     if (k > 0 && (uint64_t)k >= (uint64_t)(uint32_t)n * 64u) return 1;
+    /* Ordinary positive sub-limb shifts use the source funnel only in its
+     * measured 33..96-limb band. Keep other multi-limb shapes out of the
+     * source body so a C-retained case does not pay a source fallback toll. */
+    if (k > 0 && k < 64 && n >= 2)
+        return size > 0 && n >= 33 && n <= 96;
     if (n >= 2 && n <= 4096) return 1;
     if (n != 1 || k <= 0 || k >= 64) return 0;
     uint64_t magnitude = big->limbs[0] >> k;
@@ -47242,8 +47247,8 @@ WValue w_bigint_alloc_boxed(WValue cap) {
  *     leading zeros.
  * Callers own the same contracts the C kernels do: every published limb
  * written, and `signed_size` already carrying the result's sign. */
-WValue w_bigint_alloc_hot(WValue cap) {
-    int64_t c = w_to_i64(cap);
+WValue w_bigint_alloc_hot(int64_t cap) {
+    int64_t c = cap;
     if (c < 1) c = 1;
     if (c > (int64_t)INT32_MAX / 8) die("w_bigint_alloc_hot: capacity too large");
     return bigint_box(bigint_alloc_raw_hot((int32_t)c));

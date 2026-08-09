@@ -2,6 +2,8 @@
 # independent of the shift kernels and accounts for arithmetic right-shift
 # rounding toward negative infinity.
 
+use ../../core/numeric/big_int
+
 -> check(name, condition)
   if !condition
     << "FAIL " + name

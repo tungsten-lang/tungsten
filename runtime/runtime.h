@@ -600,7 +600,7 @@ WValue w_bigint_to_f(WValue r);
 WValue w_bigint_to_s(WValue r, WValue base);
 WValue w_decimal_from_digits(WValue digits_str, WValue scale, WValue negate);
 WValue w_bigint_alloc_boxed(WValue cap);
-WValue w_bigint_alloc_hot(WValue cap);
+WValue w_bigint_alloc_hot(int64_t cap);
 WValue w_bigint_finish_add(WValue v, WValue signed_size);
 WValue w_bigint_finish_sub(WValue v, WValue signed_size);
 WValue w_bigint_seal(WValue v, WValue signed_size);

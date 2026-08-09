@@ -794,3 +794,9 @@
   # Do not normalize: callers can observe exact heap identity.
   -> to_i
     self
+
+  # Conversion to Float: the correctly-rounded magnitude walk stays in the
+  # runtime behind one exported boundary; the method surface lives here
+  # (IC row 4 is retired).
+  -> to_f
+    ccall("w_bigint_to_f", self)

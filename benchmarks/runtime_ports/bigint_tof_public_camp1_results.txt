@@ -1,0 +1,8 @@
+# to_f pre/post campaigns (pre = IC row 4 live at b1b5c68; post = source
+# shim over w_bigint_to_f), interleaved pairs, thread-CPU medians:
+# Campaign A (8 pairs):  tof-one 0.976  tof-four 0.995  tof-sixtyfour 0.993
+# Campaign B (10 pairs): tof-one 0.996  tof-four 0.982  tof-sixtyfour 0.999
+# (raw samples of B in bigint_tof_public_camp2_results.txt)
+# The conversion kernel reads only the mantissa-bearing top limbs, so the
+# op is ~5-6ns at every width; source dispatch is at parity with the IC.
+# Note: an unwarmed single sample read 2.7x — warmup is load-bearing here.

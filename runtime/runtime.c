@@ -46859,6 +46859,11 @@ WValue w_bigint_div(WValue a, WValue b) {
 WValue w_bigint_mod(WValue a, WValue b) {
     return bigint_mod_any(a, b);
 }
+/* Exported boundary for the BigInt#to_f source shim — the correctly-
+ * rounded magnitude walk (bigint_to_double_boxed) stays in the runtime. */
+WValue w_bigint_to_f(WValue r) {
+    return w_box_double(bigint_to_double_boxed(r));
+}
 
 /* Result-construction boundaries for source kernel bodies. Alloc hands out
  * a fresh boxed BigInt with at least `cap` limbs reserved and the limb
@@ -48139,7 +48144,8 @@ static void w_init_ic_tables(void) {
      * the same O(1) mark-shared + tag-overlay flip in source. */
     /* Slot 3 (prime?) is retired: BigInt#prime? in core/numeric/big_int.w
      * is a source shim over the exported w_bigint_prime_q boundary. */
-    w_ic_bigint_table[4].name  = WN_to_f;
+    /* Slot 4 (to_f) is retired: BigInt#to_f in core/numeric/big_int.w is
+     * a source shim over the exported w_bigint_to_f boundary. */
     /* Slots 5-7 (prev, succ, next) are retired: Int's source bodies
      * (core/numeric/int.w) serve BigInt receivers through type-class
      * dispatch, so the names stay unregistered and lookup falls through. */

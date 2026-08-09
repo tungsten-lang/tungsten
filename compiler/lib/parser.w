@@ -1210,7 +1210,7 @@ use ../../core/token
 
   -> valid_assign_target?(node)
     t = ast_kind(node)
-    if !(t in (:var :gvar :ivar :cvar :call))
+    if !(t in (:var :gvar :ivar :cvar :call :view_field_var))
       return false
     # Reject bare `func(args)` (no receiver, has args) — it would
     # silently lower as `func = value` (local-var assign of the
@@ -1220,7 +1220,7 @@ use ../../core/token
     true
 
   -> to_assign_target(node)
-    if ast_kind(node) in (:var :gvar :ivar :cvar)
+    if ast_kind(node) in (:var :gvar :ivar :cvar :view_field_var)
       return node
     if ast_kind(node) == :call
       if node.receiver == nil && node.args.empty?() && node.block == nil

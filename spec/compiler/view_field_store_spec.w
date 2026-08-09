@@ -18,21 +18,32 @@ use ../../compiler/lib/emitter
   << "PASS writable view field " + name
 
 + BigInt
-  # WBigint.length is a signed i32 at byte offset 4. Restrict the test values
+  # WBigint.size is a signed i32 at byte offset 4. Restrict the test values
   # to +/-1 so the mutated object remains a valid one-limb BigInt.
   -> __store_size_for_spec(value) (i64) i64
     $size = value
 
-number = -1_000_000_000_000_000 ## BigInt
-check("signed i32 read before store", number$size == -1)
-stored_positive = number.__store_size_for_spec(1)
-check("store expression returns converted value", stored_positive == 1)
-check("signed i32 read after positive store", number$size == 1)
-check("positive object remains valid", number == 1_000_000_000_000_000)
+number = 1_000_000_000_000_000 ## BigInt
+check("signed i32 read before store", number$size == 1)
 stored_negative = number.__store_size_for_spec(-1)
 check("negative store expression remains signed", stored_negative == -1)
 check("signed i32 read after negative store", number$size == -1)
 check("negative object remains valid", number == -1_000_000_000_000_000)
+stored_positive = number.__store_size_for_spec(1)
+check("store expression returns converted value", stored_positive == 1)
+check("signed i32 read after positive store", number$size == 1)
+check("positive object remains valid", number == 1_000_000_000_000_000)
+
+# Explicit receivers use the same checked field and conversion rules. Pin both
+# direct and compound assignment because the parser routes both through the
+# ViewFieldVar assignment target.
+explicit_negative = (number$size = -1)
+check("explicit receiver store returns converted value", explicit_negative == -1)
+check("explicit receiver store updates field", number$size == -1)
+explicit_positive = (number$size += 2)
+check("explicit receiver compound store returns value", explicit_positive == 1)
+check("explicit receiver compound store updates field", number$size == 1)
+check("explicit receiver mutation preserves object", number == 1_000_000_000_000_000)
 
 # Pin the LLVM shape for signed/unsigned 32-bit and signed/unsigned 64-bit
 # fields. Narrow stores return the post-truncation value with the declaration's

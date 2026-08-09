@@ -7,6 +7,7 @@ use runtime_types
 use wire
 use target
 use naming
+use error_formatter
 # Cross-tower dependencies the workers reference through the flat
 # namespace: unit superscripts (ops.w's quantity desugar) live in the
 # lexer's unit registry, and the return-type fixed point calls
@@ -2660,6 +2661,11 @@ use lowering/definitions
     val = lower_expression(ctx, node.value)
     return lower_gvar_set(ctx, target.name, val)
 
+  # Explicit native-data field assignment: receiver$field = value.
+  if ast_kind(target) == :view_field_var
+    val = lower_expression(ctx, node.value)
+    return lower_view_field_var_set(ctx, target, val)
+
   # Method-style assignment: recv.field = value → dispatch recv.field=(value)
   # rw accessors and any user method ending in `=` go through this path.
   if ast_kind(target) == :call && target.receiver != nil
@@ -3286,6 +3292,56 @@ use lowering/definitions
     offset: effective_offset, size: info[:size], field_type: info[:type]
   })
   typed_value(view_field_value_type(info[:type]), temp)
+
+# `receiver$field = value` — explicit-receiver twin of
+# lower_view_field_set. The receiver's inferred type selects the layout; the
+# emitted store is otherwise identical to an implicit-self native-data store.
+-> lower_view_field_var_set(ctx, node, val_tv)
+  wfn = ctx[:func]
+  field_name = node.field
+  recv = node.receiver
+  recv_type = infer_type(recv, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+  class_name = view_layout_class_for_type(ctx[:mod], recv_type)
+  if class_name == nil
+    raise compile_error_for_node(:E_LOWER_VIEW_NO_LAYOUT, "No view-decl layout for receiver of '$" + field_name + "' (add a `## ClassName` type hint so the layout is known)", ctx[:source_path], node)
+  info = ctx[:mod][:view_layouts][class_name][field_name]
+  if info == nil
+    raise compile_error_for_node(:E_LOWER_VIEW_UNKNOWN_FIELD, "Unknown field '" + field_name + "' in " + class_name + " layout", ctx[:source_path], node)
+  field_type = info[:type]
+
+  if field_type.index("\[") != nil && !field_type.starts_with?("*")
+    raise "Cannot assign aggregate native-data field '$" + field_name + "' of type " + field_type
+  if type_size(field_type) > 8
+    raise "Cannot assign native-data field '$" + field_name + "' wider than 64 bits"
+
+  recv_tv = lower_expression(ctx, recv)
+  recv_reg = ensure_i64_value(wfn, recv_tv)
+
+  effective_offset = info[:offset]
+  if class_uses_implicit_type_byte?(class_name)
+    effective_offset = info[:offset] + 1
+
+  result_type = view_field_value_type(field_type)
+  value_reg = nil
+  if field_type == "f32"
+    value_reg = ensure_raw_f32(wfn, val_tv)
+  elsif field_type == "f64"
+    value_reg = ensure_raw_f64(wfn, val_tv)
+  elsif field_type.starts_with?("*")
+    value_reg = ensure_raw_i64(wfn, val_tv)
+  elsif field_type == "u64"
+    value_reg = ensure_raw_u64(wfn, val_tv)
+  elsif field_type in ("i8" "i16" "i32" "i64" "u8" "u16" "u32" "bool")
+    value_reg = ensure_raw_i64(wfn, val_tv)
+  else
+    value_reg = ensure_i64_value(wfn, val_tv)
+
+  temp = next_temp(wfn)
+  emit_instruction(wfn, {
+    op: :view_store_field, temp: temp, ptr: recv_reg, value: value_reg,
+    offset: effective_offset, size: info[:size], field_type: field_type
+  })
+  typed_value(result_type, temp)
 
 # Preserve scalar view fields in their machine representation until a real
 # WValue boundary. Previously u8/u16/u32 fields were boxed by the emitter and

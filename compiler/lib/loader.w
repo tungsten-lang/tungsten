@@ -1065,7 +1065,7 @@ use parser
       if project_root != ""
         core_path = project_root + "/" + path + ".w"
         if file?(core_path)
-          return core_path
+          return normalize_load_path(core_path)
 
     if !resolved.starts_with?("/")
       if resolved.starts_with?("lib/") && root_dir != ""
@@ -1112,10 +1112,10 @@ use parser
     if project_root != ""
       core_candidate = project_root + "/core/" + path + ".w"
       if file?(core_candidate)
-        return core_candidate
+        return normalize_load_path(core_candidate)
       lib_candidate = project_root + "/lib/" + path + ".w"
       if file?(lib_candidate)
-        return lib_candidate
+        return normalize_load_path(lib_candidate)
 
     # Stdlib fallback anchored on the install root rather than the caller's
     # ancestry. `project_root` above is Bitfile-anchored, so it is empty for
@@ -1133,10 +1133,10 @@ use parser
     if core_root != "" && core_root != project_root
       core_candidate = core_root + "/core/" + path + ".w"
       if file?(core_candidate)
-        return core_candidate
+        return normalize_load_path(core_candidate)
       lib_candidate = core_root + "/lib/" + path + ".w"
       if file?(lib_candidate)
-        return lib_candidate
+        return normalize_load_path(lib_candidate)
 
     resolved
 

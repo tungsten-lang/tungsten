@@ -1892,12 +1892,27 @@ use target
       return ccall("w_u64", recv)
     primitive_class = primitive_runtime_class(recv)
     if primitive_class != nil
-      accessor = lookup_method(primitive_class, field)
-      if accessor != nil && accessor[:data_field] == true
+      # View syntax names the declared storage field directly; it must not
+      # depend on a public accessor existing. BigInt intentionally suppresses
+      # a public `size` method while retaining the internal `value$size` view.
+      if native_data_field_declared?(primitive_class, field)
         if native_data_field_supported?(primitive_class, field)
           return ccall("w_native_data_field", recv, field)
         raise "native data field '[field]' is unavailable in the interpreter"
     dispatch_method(recv, field, [], nil, env)
+
+  # `receiver$field = value` — explicit-receiver native-data store. Keep the
+  # interpreter boundary as narrow as the implicit `$field = value` path:
+  # only declared fields with a checked runtime setter are writable.
+  -> eval_view_field_var_set(node, value, env)
+    recv = evaluate(ast_get(node, :receiver), env)
+    field = ast_get(node, :field)
+    primitive_class = primitive_runtime_class(recv)
+    if native_data_field_declared?(primitive_class, field)
+      if native_data_field_writable?(primitive_class, field)
+        return ccall("w_native_data_field_set", recv, field, value)
+      raise "native data field '[field]' is not writable in the interpreter"
+    raise "native data field '[field]' is unavailable in the interpreter"
 
   # -- Assignment --
 
@@ -1935,6 +1950,9 @@ use target
     if ast_kind(target) == :cvar
       set_cvar(ast_get(target, :name), value)
       return value
+
+    if ast_kind(target) == :view_field_var
+      return eval_view_field_var_set(target, value, env)
 
     if ast_kind(target) == :call
       eval_call_assign(target, value, env)
@@ -2013,6 +2031,11 @@ use target
       result = apply_compound_op(op, old, new_val)
       obj[:ivars][ast_get(target, :name)] = result
       return result
+
+    if ast_kind(target) == :view_field_var
+      old = eval_view_field_var(target, env)
+      result = apply_compound_op(op, old, new_val)
+      return eval_view_field_var_set(target, result, env)
 
     # `h[k] += v` / `a[i] -= v` — the parser hands the target over as an
     # index-read call (name "[]", one index arg). Read through the same

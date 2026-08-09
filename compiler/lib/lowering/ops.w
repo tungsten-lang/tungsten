@@ -654,6 +654,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     setter_call.loc = ast_get(target, :loc)
     return lower_method_call(ctx, setter_call)
 
+  if ast_kind(target) == :view_field_var
+    result = lower_binary_op(ctx, Tungsten:AST:BinaryOp.new(target, node.op, node.value))
+    return lower_view_field_var_set(ctx, target, result)
+
   name = target.name
   # A compound rebind invalidates range stashes exactly like a plain assign
   # (the var itself, and any recorded range whose bounds read it).

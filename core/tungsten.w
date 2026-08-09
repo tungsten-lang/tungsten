@@ -217,6 +217,8 @@
   auto :AnimationVerificationResult, "animation"
   auto :AnimationVerificationReport, "animation"
   auto :AnimationVerifier, "animation"
+  auto :AnimationPointPreview, "animation/point_preview"
+  auto :AnimationWindowPreview, "animation/window_preview"
   auto :Plot3D,       "plot3d"
   auto :Raster,       "raster"
   auto :PngEncoder,   "raster"

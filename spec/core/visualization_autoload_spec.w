@@ -32,4 +32,16 @@ visualization_check("autoload.verification_report",
                     verification.class_name == "AnimationVerificationReport")
 visualization_check("autoload.verifier", verification.passed?)
 
+preview_scene = PlotScene.new(~4.0, ~4.0, "#000000")
+preview_scene.add(PlotPoints.new(
+  [[~1.0, ~1.0]], ~0.5, "preview-point",
+  PlotStyle.new(nil, "#ff0000", ~0.0, ~1.0, [], :circle)))
+preview_timeline = AnimationTimeline.new(preview_scene, ~0.0, 1)
+preview = AnimationPointPreview.new(preview_timeline)
+preview_pixels = preview.render(0)[:pixels]
+visualization_check("autoload.point_preview",
+                    preview_pixels[9] == 0xff0000ff)
+visualization_check("autoload.window_preview",
+                    AnimationWindowPreview.class_name == "Class")
+
 << "visualization_autoload_spec: all checks passed"

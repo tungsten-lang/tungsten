@@ -54,6 +54,14 @@
   -> tracks
     PlotData.copy(@tracks)
 
+  # Resolve only the camera for one frame index. Backends that consume large
+  # point tracks can inspect view state without first materializing/copying the
+  # frame's complete node-update tree.
+  -> camera_at(index)
+    time = time_at(index)
+    return @camera if @camera_track == nil
+    @camera_track.value_at(time)
+
   -> frame(index)
     time = time_at(index)
     updates = []
@@ -63,10 +71,7 @@
         :property => track.property,
         :value => AnimationValue.data(track.value_at(time))
       })
-    camera = @camera
-    if @camera_track != nil
-      camera = @camera_track.value_at(time)
-    AnimationFrame.new(index, time, @scene, updates, camera)
+    AnimationFrame.new(index, time, @scene, updates, camera_at(index))
 
   -> each_frame/&
     index = 0

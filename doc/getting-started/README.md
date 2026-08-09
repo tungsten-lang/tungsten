@@ -57,12 +57,23 @@ Companion `.w` files live under [`doc/examples/`](../examples/):
 | [`02-data/`](../examples/02-data/) | arrays, hashes |
 | [`03-oop/`](../examples/03-oop/) | classes, traits |
 | [`04-ai-native/`](../examples/04-ai-native/) | token density sketch |
+| [`animations/`](../examples/animations/) | retained mathematical animation data |
 | [`rosetta_code/`](../examples/rosetta_code/) | many small task ports |
 
 ```bash
 bin/tungsten doc/examples/01-basics/hello.w
 bin/tungsten doc/examples/02-data/arrays.w
 bin/tungsten doc/examples/03-oop/classes.w
+bin/tungsten doc/examples/animations/generative_point_cloud.w
+bin/tungsten doc/examples/animations/cosine_lattice_point_cloud.w
+bin/tungsten doc/examples/animations/singular_tangent_point_cloud.w
+bin/tungsten doc/examples/animations/double_phase_tangent_point_cloud.w
+bin/tungsten doc/examples/animations/yin_yang_koi_point_cloud.w
+bin/tungsten doc/examples/animations/uncertain_light_flame_point_cloud.w
+# Native macOS window preview (Escape or close the window to stop)
+bin/tungsten compile doc/examples/animations/generative_point_cloud.w \
+  --out /tmp/generative-point-cloud --dev
+/tmp/generative-point-cloud --window
 ```
 
 ## Orientation commands

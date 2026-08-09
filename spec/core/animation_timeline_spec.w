@@ -50,10 +50,15 @@ camera_end = AnimationCamera2D.new([~4.0, ~2.0], ~2.0, ~0.5)
 timeline.camera_track(Animation.camera(
   ~0.0, ~1.0, camera_start, camera_end, :linear))
 camera_middle = timeline.frame(2).camera
+camera_only_middle = timeline.camera_at(2)
 animation_check("camera.center",
                 animation_point_close?(camera_middle.center, ~2.0, ~1.0))
 animation_check("camera.zoom", camera_middle.zoom == ~1.5)
 animation_check("camera.rotation", camera_middle.rotation == ~0.25)
+animation_check("camera.at_without_updates",
+                animation_point_close?(camera_only_middle.center, ~2.0, ~1.0) &&
+                camera_only_middle.zoom == ~1.5 &&
+                camera_only_middle.rotation == ~0.25)
 
 # Recursive interpolation supports caller-supplied point correspondence.
 morphed = Animation.interpolate(

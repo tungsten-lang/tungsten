@@ -83025,3 +83025,53 @@ W_BRIDGE_STUB WValue w_metal_dispatch1(WValue queue, WValue pipeline,
     return W_NIL;
 }
 /* end Metal bridge stubs (weak) */
+
+/* ---- Windowed graphics weak stubs (strong on macOS in graphics.m) ----
+ * Keep programs that reference core/graphics linkable on unsupported targets.
+ * They fail clearly at the first graphics call instead of producing an
+ * undefined-symbol linker error. */
+static WValue w_gfx_unavailable(void) {
+    w_raise(w_string("Graphics: not available on this platform"));
+    return W_NIL;
+}
+
+W_BRIDGE_STUB WValue w_gfx_window_new(WValue device, WValue title,
+                                       WValue width, WValue height) {
+    (void)device; (void)title; (void)width; (void)height;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_poll(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_key_down(WValue window, WValue keycode) {
+    (void)window; (void)keycode;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_mouse_dx(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_mouse_dy(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_should_close(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_set_mouse_capture(WValue window, WValue enabled) {
+    (void)window; (void)enabled;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_present(WValue window, WValue buffer,
+                                    WValue width, WValue height) {
+    (void)window; (void)buffer; (void)width; (void)height;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_present_wait(WValue window, WValue buffer,
+                                         WValue width, WValue height) {
+    (void)window; (void)buffer; (void)width; (void)height;
+    return w_gfx_unavailable();
+}
+/* end windowed graphics bridge stubs (weak) */

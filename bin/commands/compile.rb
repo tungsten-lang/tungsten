@@ -249,10 +249,12 @@ AKS_C       = File.join(RUNTIME_DIR, "aks.c")
 SSMR_C      = File.join(RUNTIME_DIR, "ssmr_witness.c")
 HAMMER_C    = File.join(RUNTIME_DIR, "hammer.c")
 METAL_M     = File.join(RUNTIME_DIR, "metal.m")
+GRAPHICS_M  = File.join(RUNTIME_DIR, "graphics.m")
 # hid_bridge.m: USB-HID (Elgato Stream Deck + dials) for the REPL scrub loop.
 # Needed in the compiled compiler binary because repl.w calls w_hid_streamdeck_*.
 HID_M       = File.join(RUNTIME_DIR, "hid_bridge.m")
 METAL_FRAMEWORK_FLAGS = MACOS ? ["-framework", "Metal", "-framework", "Foundation", "-framework", "IOKit", "-framework", "CoreFoundation"] : []
+GRAPHICS_FRAMEWORK_FLAGS = MACOS ? ["-framework", "AppKit", "-framework", "QuartzCore", "-framework", "CoreGraphics"] : []
 ACCELERATE_FRAMEWORK_FLAGS = MACOS ? ["-framework", "Accelerate"] : []
 EXTRA_SRCS  = [(TLS_ENABLED && OPENSSL_PREFIX ? TLS_C : TLS_STUB_C), HTTP2_C, HTTP3_C, (File.exist?(AKS_C) ? AKS_C : nil), (File.exist?(HAMMER_C) ? HAMMER_C : nil)].compact
 LEXCHAR_TABLES_C = File.join(RUNTIME_DIR, "lexchar_tables.c")
@@ -264,9 +266,15 @@ BLAS_BRIDGE_C = File.join(RUNTIME_DIR, "blas_bridge.c")
 # symbol; otherwise the runtime's W_NO_APPLE_BRIDGES stubs stand in and the
 # binary skips Metal/Foundation/IOKit/AppKit entirely (~2ms warm and far
 # cheaper first-run dyld closure).
-BRIDGE_SRCS = [(MACOS && File.exist?(METAL_M) ? METAL_M : nil), (MACOS && File.exist?(HID_M) ? HID_M : nil)].compact
+BRIDGE_SRCS = [
+  (MACOS && File.exist?(METAL_M) ? METAL_M : nil),
+  (MACOS && File.exist?(HID_M) ? HID_M : nil)
+].compact
 def ir_needs_apple_bridges?(ir)
   MACOS && ir.match?(/@"?w_(metal|hid|gpu|gfx|fused_gpu)_/)
+end
+def ir_needs_graphics_bridge?(ir)
+  MACOS && ir.match?(/@"?w_gfx_/)
 end
 def ir_needs_blas?(ir)
   MACOS && ir.match?(/@"?w_blas_/)
@@ -748,6 +756,10 @@ when ".w"
     if ir_needs_apple_bridges?(ir)
       clang_flags += METAL_FRAMEWORK_FLAGS
       clang_sources += BRIDGE_SRCS
+      if ir_needs_graphics_bridge?(ir)
+        clang_flags += GRAPHICS_FRAMEWORK_FLAGS
+        clang_sources << GRAPHICS_M if File.exist?(GRAPHICS_M)
+      end
     end
     if ir_needs_blas?(ir)
       clang_flags += ACCELERATE_FRAMEWORK_FLAGS

@@ -2,8 +2,10 @@
 
 `core/animation` adds a renderer-independent timeline to `core/plot`. A
 timeline resolves property tracks and camera state at exact frame indices. Its
-output is a portable description for a future SVG, canvas, image, or video
-backend—not encoded media.
+output remains a portable description rather than encoded media. The optional
+`core/animation/point_preview` module rasterizes a focused point-scene subset
+in memory; `core/animation/window_preview` presents those pixels in a native
+macOS window.
 
 ## Timeline and transforms
 
@@ -25,11 +27,66 @@ last = timeline.frame(timeline.frame_count - 1).to_data
 description = timeline.to_data
 ```
 
+Six runnable examples exercise one or more ordered `PlotPoints` nodes and
+deterministic retained tracks:
+
+- [`generative_point_cloud.w`](../examples/animations/generative_point_cloud.w)
+  retains 10,000 continuously parameterized source points per dense frame and
+  records the expression's 720-step mathematical period;
+- [`cosine_lattice_point_cloud.w`](../examples/animations/cosine_lattice_point_cloud.w)
+  retains an 8,200-point, 41-row quantized lattice;
+- [`singular_tangent_point_cloud.w`](../examples/animations/singular_tangent_point_cloud.w)
+  uses source `y = i / 233` and alpha 96/255, retaining 19,800 of 20,000
+  samples after omitting the exact `k = 0` column;
+- [`double_phase_tangent_point_cloud.w`](../examples/animations/double_phase_tangent_point_cloud.w)
+  uses source `y = i / 250`, alpha 66/255, and a `-2t` harmonic, likewise
+  retaining 19,800 of 20,000 samples;
+- [`yin_yang_koi_point_cloud.w`](../examples/animations/yin_yang_koi_point_cloud.w)
+  applies one compact Vogel/comma expression to paired formula indices,
+  producing two surreal koi as exact central reflections in one ordered point
+  cloud; and
+- [`uncertain_light_flame_point_cloud.w`](../examples/animations/uncertain_light_flame_point_cloud.w)
+  is an original equation-driven, three-contour stitched flame intended for
+  [The Book of Uncertain Light](https://uncertainlight.com/), with a
+  deterministic two-second halo pulse. It does not transcribe the site's SVG
+  paths or browser filters.
+
+Most executable smoke calls use smaller retained timelines for interpreter
+responsiveness; the flame can retain its full scalar-opacity loop cheaply.
+Without flags they emit deterministic diagnostics. On macOS, compile an
+example and pass `--window` to open its retained data in a native Metal/Cocoa
+window:
+
+```bash
+bin/tungsten compile doc/examples/animations/generative_point_cloud.w \
+  --out /tmp/generative-point-cloud --dev
+/tmp/generative-point-cloud --window
+```
+
+The same two commands work for the other files after changing the basename.
+Press Escape or close the window to stop. Dense, exactly closed timelines use
+`:closed_loop`, which omits their duplicate terminal sample; short retained
+excerpts use `:ping_pong` and play forward and backward without inventing
+intermediate geometry. Ordinary `:loop` includes every retained frame.
+
+`AnimationPointPreview` is the pure rasterizer and works in headless
+interpreted or native programs. `AnimationWindowPreview` is its optional,
+macOS-native Metal/Cocoa window. Together they support an intentionally narrow
+subset: ordered `PlotPoints` leaves, recursively nested identity `PlotGroup` values,
+`points`/`opacity` tracks, fixed `#RRGGBB` styles, circles, source-over alpha,
+clipping, and the default camera. Unsupported node kinds, coordinate/group
+transforms, cameras, and track properties raise instead of being silently
+misrendered. Window presentation is not available in interpreted runs or on
+Linux/Windows; SVG, video, blur/filter effects, exact browser antialiasing,
+and interactive scene editing are outside this first preview adapter. Finite
+geometry outside a source canvas remains in the scene and is clipped only
+during preview.
+
 `Animation.move`, `.scale`, `.rotate`, `.fade`, and `.morph_points` are
 convenience constructors for ordinary `AnimationTrack` values. A frame contains
 the immutable base scene description plus ordered updates of the form
-`{target, property, value}`. A backend applies those updates to node ids; Core
-does not mutate or rasterize the scene.
+`{target, property, value}`. A backend applies those updates to node ids; the
+portable timeline resolver itself neither mutates nor rasterizes the scene.
 
 Generic tracks are built from `AnimationKeyframe` values. Supported easing is
 `:linear`, `:ease_in`, `:ease_out`, `:ease_in_out`, and cubic `:smooth`.
@@ -165,10 +222,12 @@ The same input order, keyframes, callbacks, and binary64 environment produce
 the same descriptions. The contract does not claim bit-identical pixels across
 future renderers, nor does it sanitize nondeterministic user callbacks.
 
-Initial scope is deliberately 2-D and data-only. There is no renderer, media
-encoder, audio, TeX engine, formula correspondence solver, 3-D camera, physics
-simulation, live notebook control, interactive event loop, GPU path, or shell
-call to an external graphics program.
+The retained model remains deliberately 2-D and data-first. The optional
+point rasterizer and macOS window are a focused inspection backend, not a
+general renderer. There is no media encoder, audio, TeX engine, formula
+correspondence solver, 3-D camera, physics simulation, live notebook frontend,
+cross-platform interactive engine, or shell call to an external graphics
+program.
 
 ## Focused checks
 
@@ -187,4 +246,9 @@ bin/tungsten run spec/core/animation_verification_spec.w
 bin/tungsten compile spec/core/animation_verification_spec.w \
   --out /tmp/animation-verification-spec
 /tmp/animation-verification-spec
+
+bin/tungsten run spec/core/animation_point_preview_spec.w
+bin/tungsten compile spec/core/animation_point_preview_spec.w \
+  --out /tmp/animation-point-preview-spec
+/tmp/animation-point-preview-spec
 ```

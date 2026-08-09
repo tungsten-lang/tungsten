@@ -35591,15 +35591,26 @@ __attribute__((weak)) WValue __w_bigint_shr_src(WValue a, WValue b) {
     return w_bigint_shr(a, b);
 }
 
-/* Keep the 6 ns one-limb right-shift specialization and O(1) zero-shift
- * identity in C. Multi-limb shifts are long enough for the source seam to
- * fit inside the migration budget while still reaching the same kernels. */
-static inline int bigint_shift_src_shape(WValue a, WValue b) {
+/* Keep the O(1) zero-shift identity and allocation-producing one-limb cases
+ * in C. Multi-limb shifts use the source shim; positive one-limb right shifts
+ * join it only when the source body can finish directly as an inline i48. */
+static inline int bigint_shl_src_shape(WValue a, WValue b) {
     if (!w_is_bigint(a) || !w_is_int(b) || w_as_int(b) == 0) return 0;
     int32_t size;
     (void)w_bigint_view(a, &size);
     int32_t n = size < 0 ? -size : size;
     return n >= 2 && n <= 4096;
+}
+
+static inline int bigint_shr_src_shape(WValue a, WValue b) {
+    if (!w_is_bigint(a) || !w_is_int(b) || w_as_int(b) == 0) return 0;
+    int32_t size;
+    WBigint *big = w_bigint_view(a, &size);
+    int32_t n = size < 0 ? -size : size;
+    if (n >= 2 && n <= 4096) return 1;
+    int64_t k = w_as_int(b);
+    return size == 1 && k > 0 && k < 64 &&
+           (big->limbs[0] >> k) <= (uint64_t)W_INT48_MAX;
 }
 
 /* ---- Source-routed bigint bitwise ops (weak-linkage arms) ----
@@ -35672,7 +35683,7 @@ WValue w_bit_shl(WValue a, WValue b) {
     /* Non-integer LHS or non-int shift count: preserve the overloaded `<<`
      * fallback. */
     if (!w_is_integer_any(a) || !w_is_int(b)) return w_add(a, b);
-    if (bigint_shift_src_shape(a, b)) {
+    if (bigint_shl_src_shape(a, b)) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1)) return __w_bigint_shl_src(a, b);
@@ -35688,7 +35699,7 @@ WValue w_bit_shl(WValue a, WValue b) {
 }
 WValue w_bit_shr(WValue a, WValue b) {
     if (!w_is_integer_any(a) || !w_is_int(b)) return w_sub(a, b);  /* preserve fallback */
-    if (bigint_shift_src_shape(a, b)) {
+    if (bigint_shr_src_shape(a, b)) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1)) return __w_bigint_shr_src(a, b);

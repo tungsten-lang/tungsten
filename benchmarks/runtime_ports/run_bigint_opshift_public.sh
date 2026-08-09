@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Same-binary C/source gate for the BigInt << and >> source seams. Each
 # observation balances C/W/W/C with W/C/C/W and reports the median paired
-# source/C ratio. The one-limb rows are C-retained controls.
+# source/C ratio. `one13` exercises the native i48-demotion arm; `oneheap`
+# is the one-limb C-retained control.
 
 set -euo pipefail
 
@@ -11,6 +12,8 @@ TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 PAIRS="${PAIRS:-8}"
 LABEL="${LABEL:-current}"
 OUT="${OUT:-/tmp/tungsten-bigint-opshift-${LABEL}.txt}"
+OPS="${OPS:-shl shr}"
+ROWS="${ROWS:-one13:30000000 oneheap:30000000 four13:10000000 four64:10000000 sf13:5000000 sf200:5000000 big1000:4000000 neg:10000000}"
 
 case "$PAIRS" in ''|*[!0-9]*|0) echo "PAIRS must be positive" >&2; exit 2 ;; esac
 
@@ -38,8 +41,8 @@ run_leg() {
   printf '%s|%s\n' "$lane" "$line" >> "$OUT"
 }
 
-for op in shl shr; do
-  for row in one13:30000000 four13:10000000 four64:10000000 sf13:5000000 sf200:5000000 big1000:4000000 neg:10000000; do
+for op in $OPS; do
+  for row in $ROWS; do
     stratum="${row%%:*}"
     iters="${row##*:}"
     pair=1
@@ -74,8 +77,9 @@ median_stream() {
 
 printf '%-20s %14s\n' "operation" "median W/C"
 printf '%-20s %14s\n' "--------------------" "--------------"
-for op in shl shr; do
-  for stratum in one13 four13 four64 sf13 sf200 big1000 neg; do
+for op in $OPS; do
+  for row in $ROWS; do
+    stratum="${row%%:*}"
     name="$op-$stratum"
     median="$(awk -F'|' -v n="$name" '
       $2 == "RESULT" && $3 == n {

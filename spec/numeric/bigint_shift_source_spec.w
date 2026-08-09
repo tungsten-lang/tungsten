@@ -40,6 +40,16 @@ one = (1 << 60) + 17
 check("one_limb.left", (one << 13) >> 13 == one)
 check("one_limb.right", one >> 13 == one / (1 << 13))
 
+# The native one-limb right-shift arm is admitted only when the result fits
+# signed i48. Pin an ordinary demotion and the exact top boundary; the k=16
+# neighbor remains heap-valued and exercises the C control route.
+one_native = (1 << 50) + 12345
+check("one_native.infix", one_native >> 13 == one_native / (1 << 13))
+check("one_native.explicit", one_native.>>(13) == one_native / (1 << 13))
+one_max = (1 << 64) - 1
+check("one_native.i48_max", one_max >> 17 == 140737488355327)
+check("one_native.heap_control", one_max >> 16 == one_max / (1 << 16))
+
 heap = (1 << 200) + 33
 check("zero.left.identity", wvalue_bits(heap << 0) == wvalue_bits(heap))
 check("zero.right.identity", wvalue_bits(heap >> 0) == wvalue_bits(heap))
@@ -57,4 +67,4 @@ check_shift("band.4096.negative", 0 - band_hi, 13)
 check_shift("band.4097.positive", band_over, 13)
 check_shift("band.4097.negative", 0 - band_over, 13)
 
-<< "bigint_shift_source_spec: all 640 checks passed"
+<< "bigint_shift_source_spec: all 644 checks passed"

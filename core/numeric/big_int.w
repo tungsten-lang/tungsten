@@ -1,3 +1,6 @@
+-> __bigint_shr_u64(value, count) (u64 i64) u64
+  value >> count
+
 + BigInt < Int
   - data
     # BigInt rides a dedicated top-level NaN-box tag (0xFFF8, v4), but WBigint retains its C header
@@ -763,6 +766,20 @@
     ccall("w_bit_shl", self, other)
 
   -> >>(other)(Int)
+    # A positive one-limb result that fits i48 can be completed entirely in
+    # source: one limb load, one logical shift, and direct NaN-boxing. The
+    # runtime seam admits exactly this one-limb subset; explicit sends repeat
+    # the guards here before taking it.
+    n = $size ## i64
+    flip = (($value >> 47) & 1) ## i64
+    if flip == 1
+      n = 0 - n
+    k = (other$value & 0xFFFFFFFFFFFF) ## i64
+    if n == 1 && k > 0 && k < 64
+      magnitude = __bigint_shr_u64($limbs[0] ## u64, k) ## u64
+      if magnitude <= 140737488355327
+        int_tag = -1688849860263936 ## i64
+        return wvalue_from_bits((int_tag | magnitude) ## i64)
     ccall("w_bigint_shr", self, other)
 
   -> >>(other)(Number)

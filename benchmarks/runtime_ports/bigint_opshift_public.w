@@ -23,6 +23,9 @@
 #   fourtailneg13 — negative mirror with sticky-bit rounding
 #   fourtailneg64 — aligned negative mirror with lower-limb sticky bits
 #   fourneg13 — ordinary negative 4-limb fallback control, k=13
+#   sftailneg13 — negative 64-limb top-funnel demotion, low limb proves sticky
+#   sftailneg64 — aligned negative 64-limb demotion, low limb proves sticky
+#   sfneg13 — ordinary negative 64-limb fallback control, k=13
 
 CORPUS_SIZE = 8
 CORPUS_MASK = CORPUS_SIZE - 1
@@ -61,9 +64,13 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = (1 << 250) + (1 << 130) + 3 + i * 2
     elsif stratum == "fourtail64" || stratum == "fourtailneg64"
       v = (1 << 192) + (1 << 100) + 3 + i * 2
+    elsif stratum == "sftailneg13"
+      v = (1 << 4090) + (1 << 2000) + 3 + i * 2
+    elsif stratum == "sftailneg64"
+      v = (1 << 4032) + (1 << 2000) + 3 + i * 2
     elsif stratum == "four13" || stratum == "four64" || stratum == "fourneg13" || stratum == "neg" || stratum == "overpos" || stratum == "overneg" || stratum == "negkpos" || stratum == "negkneg" || stratum == "zero" || stratum == "zeroneg"
       v = 10 ** 76 + 3 + i * 2
-    elsif stratum == "sf13" || stratum == "sf200"
+    elsif stratum == "sf13" || stratum == "sf200" || stratum == "sfneg13"
       v = 10 ** 1232 + 11 + i * 2
     else
       v = 10 ** 4928 + 11 + i * 2
@@ -76,6 +83,8 @@ CORPUS_MASK = CORPUS_SIZE - 1
     if stratum == "fourtailneg13" || stratum == "fourtailneg64"
       v = 0 - v
     if stratum == "fourneg13"
+      v = 0 - v
+    if stratum == "sftailneg13" || stratum == "sftailneg64" || stratum == "sfneg13"
       v = 0 - v
     values.push(v)
     i += 1
@@ -90,6 +99,10 @@ CORPUS_MASK = CORPUS_SIZE - 1
     return 205
   if stratum == "fourtail64" || stratum == "fourtailneg64"
     return 192
+  if stratum == "sftailneg13"
+    return 4045
+  if stratum == "sftailneg64"
+    return 4032
   if stratum == "big1000" || stratum == "overpos" || stratum == "overneg"
     return 1000
   if stratum == "negkpos" || stratum == "negkneg"
@@ -99,7 +112,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
   13
 
 -> run_correctness
-  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "fourneg13", "fourtail13", "fourtail64", "fourtailneg13", "fourtailneg64", "sf13", "sf200", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg", "zero", "zeroneg"]
+  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "fourneg13", "fourtail13", "fourtail64", "fourtailneg13", "fourtailneg64", "sf13", "sf200", "sfneg13", "sftailneg13", "sftailneg64", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg", "zero", "zeroneg"]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -117,7 +130,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
         check_value("shr_rebuild [stratum]/[i]", ((r << k) + (x - (r << k))).to_s(), x.to_s())
       i += 1
     s += 1
-  << "correctness: ok (shift identities, 21 strata)"
+  << "correctness: ok (shift identities, 24 strata)"
 
 -> time_shl(receivers, k, iters)
   checksum = 0

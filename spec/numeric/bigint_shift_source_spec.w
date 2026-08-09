@@ -71,6 +71,13 @@ check("multi_tail.negative_aligned_sticky", (0 - multi_tail_aligned) >> 192 == -
 check("multi_tail.negative_i48_min", (0 - (140737488355328 << 192)) >> 192 == -140737488355328)
 check("multi_tail.negative_heap_control", (0 - ((140737488355328 << 192) + 7)) >> 192 == -140737488355329)
 
+wide_tail_unaligned = (1 << 4090) + (1 << 2000) + 3
+wide_tail_aligned = (1 << 4032) + (1 << 2000) + 3
+check("wide_tail.negative_unaligned", (0 - wide_tail_unaligned) >> 4045 == (0 - (1 << 45) - 1))
+check("wide_tail.negative_unaligned_explicit", (0 - wide_tail_unaligned).>>(4045) == (0 - (1 << 45) - 1))
+check("wide_tail.negative_aligned", (0 - wide_tail_aligned) >> 4032 == -2)
+check("wide_tail.negative_sparse_fallback", (0 - ((1 << 4090) + (1 << 2000))) >> 4045 == (0 - (1 << 45) - 1))
+
 heap = (1 << 200) + 33
 check("zero.left.identity", wvalue_bits(heap << 0) == wvalue_bits(heap))
 check("zero.right.identity", wvalue_bits(heap >> 0) == wvalue_bits(heap))
@@ -101,4 +108,4 @@ check("band.4097.negative_left_overshift_negative", (0 - band_over) << (0 - band
 check("band.4097.negative_left_overshift_positive_explicit", band_over.<<(0 - band_over_shift) == 0)
 check("band.4097.negative_left_overshift_negative_explicit", (0 - band_over).<<(0 - band_over_shift) == -1)
 
-<< "bigint_shift_source_spec: all 670 checks passed"
+<< "bigint_shift_source_spec: all 674 checks passed"

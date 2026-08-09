@@ -849,6 +849,27 @@
         if magnitude <= 140737488355328
           payload = (281474976710656 - magnitude) ## u64
           return wvalue_from_bits((int_tag | payload) ## i64)
+    # Wider negative magnitudes take a source demotion only when rounding is
+    # already proven without a scan: either the residual top bits or limb zero
+    # is nonzero. Unknown-sticky sparse shapes retain the tuned C scan.
+    if n < -4
+      limb_count = 0 - n
+      top_start = (limb_count - 1) * 64
+      if k >= top_start
+        residual = k - top_start
+        top = $limbs[limb_count - 1] ## u64
+        magnitude = __bigint_shr_u64(top, residual) ## u64
+        sticky = 0 ## i64
+        if (magnitude << residual) != top
+          sticky = 1
+        low0 = $limbs[0] ## u64
+        if low0 != 0
+          sticky = 1
+        if sticky == 1
+          magnitude += 1
+          if magnitude <= 140737488355328
+            payload = (281474976710656 - magnitude) ## u64
+            return wvalue_from_bits((int_tag | payload) ## i64)
     if n == 1 && k > 0 && k < 64
       magnitude = __bigint_shr_u64($limbs[0] ## u64, k) ## u64
       if magnitude <= 140737488355327

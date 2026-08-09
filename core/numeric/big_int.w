@@ -811,6 +811,15 @@
         if n < 0
           return wvalue_from_bits((int_tag | 281474976710655) ## i64)
         return wvalue_from_bits(int_tag)
+    # A positive multi-limb shift that discards every limb except the top can
+    # demote without allocating: load that normalized top limb, apply its
+    # residual 0..63-bit shift, and form the inline result directly.
+    if n > 1
+      top_start = (n - 1) * 64
+      if k >= top_start
+        magnitude = __bigint_shr_u64($limbs[n - 1] ## u64, k - top_start) ## u64
+        if magnitude <= 140737488355327
+          return wvalue_from_bits((int_tag | magnitude) ## i64)
     if n == 1 && k > 0 && k < 64
       magnitude = __bigint_shr_u64($limbs[0] ## u64, k) ## u64
       if magnitude <= 140737488355327

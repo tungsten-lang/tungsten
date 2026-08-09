@@ -18,6 +18,8 @@
 #   negkneg  — 4-limb negative receiver, k=-1000 (`<<` overshift mirror)
 #   zero     — 4-limb positive receiver, k=0 (identity + alias handoff)
 #   zeroneg  — 4-limb negative receiver, k=0 (identity + alias handoff)
+#   fourtail13 — 4-limb positive, k=205 (top-limb funnel demotes to i48)
+#   fourtail64 — 4-limb positive, k=192 (aligned top limb demotes to i48)
 
 CORPUS_SIZE = 8
 CORPUS_MASK = CORPUS_SIZE - 1
@@ -52,6 +54,10 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = 0 - one_limb_value(i * 3)
     elsif stratum == "oneheap" || stratum == "onenegheap"
       v = (1 << 63) + i * 2 + 1
+    elsif stratum == "fourtail13"
+      v = (1 << 250) + (1 << 130) + 3 + i * 2
+    elsif stratum == "fourtail64"
+      v = (1 << 192) + (1 << 100) + 3 + i * 2
     elsif stratum == "four13" || stratum == "four64" || stratum == "neg" || stratum == "overpos" || stratum == "overneg" || stratum == "negkpos" || stratum == "negkneg" || stratum == "zero" || stratum == "zeroneg"
       v = 10 ** 76 + 3 + i * 2
     elsif stratum == "sf13" || stratum == "sf200"
@@ -73,6 +79,10 @@ CORPUS_MASK = CORPUS_SIZE - 1
     return 64
   if stratum == "sf200"
     return 200
+  if stratum == "fourtail13"
+    return 205
+  if stratum == "fourtail64"
+    return 192
   if stratum == "big1000" || stratum == "overpos" || stratum == "overneg"
     return 1000
   if stratum == "negkpos" || stratum == "negkneg"
@@ -82,7 +92,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
   13
 
 -> run_correctness
-  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "sf13", "sf200", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg", "zero", "zeroneg"]
+  strata = ["one13", "oneheap", "oneneg13", "onenegheap", "four13", "four64", "fourtail13", "fourtail64", "sf13", "sf200", "big1000", "neg", "overpos", "overneg", "negkpos", "negkneg", "zero", "zeroneg"]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -100,7 +110,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
         check_value("shr_rebuild [stratum]/[i]", ((r << k) + (x - (r << k))).to_s(), x.to_s())
       i += 1
     s += 1
-  << "correctness: ok (shift identities, 16 strata)"
+  << "correctness: ok (shift identities, 18 strata)"
 
 -> time_shl(receivers, k, iters)
   checksum = 0

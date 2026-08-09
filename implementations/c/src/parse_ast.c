@@ -1139,6 +1139,18 @@ static const char *compound_op_name_ast(TcKind kind) {
       return "SLASH";
     case TC_K_PERCENT_EQ:
       return "PERCENT";
+    case TC_K_POW_EQ:
+      return "POW";
+    case TC_K_AMP_EQ:
+      return "AMPERSAND";
+    case TC_K_PIPE_EQ:
+      return "PIPE";
+    case TC_K_CARET_EQ:
+      return "CARET";
+    case TC_K_LSHIFT_EQ:
+      return "LSHIFT";
+    case TC_K_RSHIFT_EQ:
+      return "RSHIFT";
     default:
       return NULL;
   }
@@ -1160,7 +1172,9 @@ static TcAstValue parse_compound_assign_ast(TcAstParser *p, size_t start, size_t
   }
 
   static const TcKind compound_ops[] = {
-      TC_K_PLUS_EQ, TC_K_MINUS_EQ, TC_K_STAR_EQ, TC_K_SLASH_EQ, TC_K_PERCENT_EQ, TC_K_OR_ASSIGN};
+      TC_K_PLUS_EQ, TC_K_MINUS_EQ, TC_K_STAR_EQ, TC_K_SLASH_EQ, TC_K_PERCENT_EQ,
+      TC_K_POW_EQ, TC_K_AMP_EQ, TC_K_PIPE_EQ, TC_K_CARET_EQ,
+      TC_K_LSHIFT_EQ, TC_K_RSHIFT_EQ, TC_K_OR_ASSIGN};
   if (!top_level_any_ast(p, start, end, compound_ops, sizeof(compound_ops) / sizeof(compound_ops[0]), &op_pos) ||
       op_pos <= start) {
     return tc_ast_nil();

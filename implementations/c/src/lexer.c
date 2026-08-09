@@ -100,8 +100,9 @@ static int operator_second(uint32_t c, uint32_t c2, uint32_t c3, int have_c3) {
     case '=': return c2 == '>' || c2 == '=' || c2 == '~';
     case '!': return c2 == '=';
     case '>': return c2 == '>' || c2 == '=';
-    case '&': return c2 == '.' || c2 == '&' || c2 == '(';
-    case '|': return c2 == '|' || c2 == '>' || (c2 == '|' && have_c3 && c3 == '=');
+    case '&': return c2 == '.' || c2 == '&' || c2 == '(' || c2 == '=';
+    case '|': return c2 == '|' || c2 == '>' || c2 == '=' || (c2 == '|' && have_c3 && c3 == '=');
+    case '^': return c2 == '=';
     case '+': return c2 == '+' || c2 == '=';
     case '*': return c2 == '=' || c2 == '*';
     case '/': return c2 == '=';
@@ -600,6 +601,11 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
       if (c == '.' && c2 == '.' && pos + 1 < count && c3 == '.') {
         pos += 2;
       } else if (c == '|' && c2 == '|' && pos + 1 < count && c3 == '=') {
+        pos += 2;
+      } else if (pos + 1 < count && c3 == '=' &&
+                 ((c == '*' && c2 == '*') ||
+                  (c == '<' && c2 == '<') ||
+                  (c == '>' && c2 == '>'))) {
         pos += 2;
       } else if (c == '.' && start > 0 && cp_at(source, start - 1) == ' ' &&
                  (c2 == '+' || c2 == '-' || c2 == '*' || c2 == '/' || c2 == '|' || c2 == '&' || c2 == '^')) {

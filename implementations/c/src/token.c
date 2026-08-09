@@ -132,6 +132,7 @@ static TcKind classify_op(const TcSource *source, WValue token, TcKind last_kind
   int follows_value = is_value_kind(last_kind) || is_value_keyword(source, last_token, last_kind);
   if (token_text_is(source, token, "->")) return TC_K_ARROW;
   if (token_text_starts_with(source, token, "->/")) return TC_K_LAMBDA_ARITY;
+  if (token_text_is(source, token, "<<=")) return TC_K_LSHIFT_EQ;
   if (token_text_is(source, token, "<<")) return follows_value ? TC_K_LSHIFT : TC_K_PUTS_OP;
   if (token_text_is(source, token, "+")) return follows_value ? TC_K_PLUS : TC_K_CLASS_DEF;
 
@@ -147,6 +148,7 @@ static TcKind classify_op(const TcSource *source, WValue token, TcKind last_kind
   if (token_text_is(source, token, "=~")) return TC_K_MATCH;
   if (token_text_is(source, token, "!=")) return TC_K_NEQ;
   if (token_text_is(source, token, "<=")) return TC_K_LTE;
+  if (token_text_is(source, token, ">>=")) return TC_K_RSHIFT_EQ;
   if (token_text_is(source, token, ">>")) return TC_K_RSHIFT;
   if (token_text_is(source, token, ">=")) return TC_K_GTE;
   if (token_text_is(source, token, "&.")) return TC_K_SAFE_NAV;
@@ -158,10 +160,14 @@ static TcKind classify_op(const TcSource *source, WValue token, TcKind last_kind
   if (token_text_is(source, token, "+=")) return TC_K_PLUS_EQ;
   if (token_text_is(source, token, "--")) return TC_K_MINUS_MINUS;
   if (token_text_is(source, token, "-=")) return TC_K_MINUS_EQ;
+  if (token_text_is(source, token, "**=")) return TC_K_POW_EQ;
   if (token_text_is(source, token, "**")) return TC_K_POW;
   if (token_text_is(source, token, "*=")) return TC_K_STAR_EQ;
   if (token_text_is(source, token, "/=")) return TC_K_SLASH_EQ;
   if (token_text_is(source, token, "%=")) return TC_K_PERCENT_EQ;
+  if (token_text_is(source, token, "&=")) return TC_K_AMP_EQ;
+  if (token_text_is(source, token, "|=")) return TC_K_PIPE_EQ;
+  if (token_text_is(source, token, "^=")) return TC_K_CARET_EQ;
   if (token_text_is(source, token, "-")) return TC_K_MINUS;
   if (token_text_is(source, token, "*")) return TC_K_STAR;
   if (token_text_is(source, token, "/")) return TC_K_SLASH;
@@ -247,6 +253,8 @@ const char *tc_kind_name(TcKind kind) {
     TC_KIND_CASE(MATCH); TC_KIND_CASE(NEQ); TC_KIND_CASE(LTE); TC_KIND_CASE(RSHIFT);
     TC_KIND_CASE(GTE); TC_KIND_CASE(SAFE_NAV); TC_KIND_CASE(AND); TC_KIND_CASE(OR_ASSIGN);
     TC_KIND_CASE(OR); TC_KIND_CASE(PIPE_FWD); TC_KIND_CASE(PLUS_PLUS); TC_KIND_CASE(PLUS_EQ);
+    TC_KIND_CASE(POW_EQ); TC_KIND_CASE(AMP_EQ); TC_KIND_CASE(PIPE_EQ); TC_KIND_CASE(CARET_EQ);
+    TC_KIND_CASE(LSHIFT_EQ); TC_KIND_CASE(RSHIFT_EQ);
     TC_KIND_CASE(MINUS_MINUS); TC_KIND_CASE(MINUS_EQ); TC_KIND_CASE(POW); TC_KIND_CASE(STAR_EQ);
     TC_KIND_CASE(SLASH_EQ); TC_KIND_CASE(PERCENT_EQ); TC_KIND_CASE(MINUS); TC_KIND_CASE(STAR);
     TC_KIND_CASE(SLASH); TC_KIND_CASE(DOT_PRODUCT); TC_KIND_CASE(CROSS_PRODUCT); TC_KIND_CASE(PERCENT);

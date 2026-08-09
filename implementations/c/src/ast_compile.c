@@ -361,7 +361,24 @@ static int compile_assign(TcAstValue node, TcChunk *chunk, TcError *err) {
     return compile_expr(*value, chunk, err);
   }
   if (!ast_node_is(*target, "var") && !ast_node_is(*target, "ivar") && !ast_node_is(*target, "cvar")) {
-    tc_error_set(err, "unsupported assignment target");
+    TcAstValue *target_kind = ast_get(*target, "node");
+    TcAstValue *source = ast_get(node, "source");
+    TcAstValue *line = ast_get(node, "line");
+    if (!source) source = ast_get(*target, "source");
+    if (!line) line = ast_get(*target, "line");
+    if (target_kind && target_kind->kind == TC_AST_SYMBOL &&
+        source && source->kind == TC_AST_STRING &&
+        line && line->kind == TC_AST_INT) {
+      tc_error_set(err, "unsupported assignment target %.*s at line %lld: %.*s",
+                   (int)target_kind->as.string.len, target_kind->as.string.bytes,
+                   (long long)line->as.integer,
+                   (int)source->as.string.len, source->as.string.bytes);
+    } else if (target_kind && target_kind->kind == TC_AST_SYMBOL) {
+      tc_error_set(err, "unsupported assignment target %.*s",
+                   (int)target_kind->as.string.len, target_kind->as.string.bytes);
+    } else {
+      tc_error_set(err, "unsupported assignment target");
+    }
     return 0;
   }
   TcAstValue *name = ast_get(*target, "name");
@@ -998,36 +1015,44 @@ static int compile_compound_assign(TcAstValue node, TcChunk *chunk, TcError *err
     tc_error_set(err, "compound assignment target missing name");
     return 0;
   }
+  int shift = ast_text_eq(*op, "LSHIFT") || ast_text_eq(*op, "RSHIFT");
   uint8_t code = binary_opcode(*op);
-  if (code == 0) {
+  if (code == 0 && !shift) {
     tc_error_set(err, "unsupported compound assignment operator");
     return 0;
   }
+  const char *shift_name = ast_text_eq(*op, "RSHIFT") ? ">>" : "<<";
   if (ast_node_is(*target, "ivar")) {
     const char *bytes = name->as.string.bytes;
     size_t len = name->as.string.len;
     if (len > 0 && bytes[0] == '@') { bytes++; len--; }
     int cid = emit_symbol_const(chunk, bytes, len, err);
     if (cid < 0) return 0;
-    return tc_emit_op_u32(chunk, TC_OP_IVAR_GET, (uint32_t)cid, err) &&
-           compile_expr(*value, chunk, err) &&
-           tc_emit_op(chunk, code, err) &&
-           tc_emit_op_u32(chunk, TC_OP_IVAR_SET, (uint32_t)cid, err);
+    if (!tc_emit_op_u32(chunk, TC_OP_IVAR_GET, (uint32_t)cid, err) ||
+        !compile_expr(*value, chunk, err)) return 0;
+    if (shift) {
+      if (!emit_call_op(chunk, shift_name, 2, 1, 1, err)) return 0;
+    } else if (!tc_emit_op(chunk, code, err)) return 0;
+    return tc_emit_op_u32(chunk, TC_OP_IVAR_SET, (uint32_t)cid, err);
   }
   if (ast_node_is(*target, "cvar")) {
     int cid = emit_symbol_const(chunk, name->as.string.bytes, name->as.string.len, err);
     if (cid < 0) return 0;
-    return tc_emit_op_u32(chunk, TC_OP_CVAR_GET, (uint32_t)cid, err) &&
-           compile_expr(*value, chunk, err) &&
-           tc_emit_op(chunk, code, err) &&
-           tc_emit_op_u32(chunk, TC_OP_CVAR_SET, (uint32_t)cid, err);
+    if (!tc_emit_op_u32(chunk, TC_OP_CVAR_GET, (uint32_t)cid, err) ||
+        !compile_expr(*value, chunk, err)) return 0;
+    if (shift) {
+      if (!emit_call_op(chunk, shift_name, 2, 1, 1, err)) return 0;
+    } else if (!tc_emit_op(chunk, code, err)) return 0;
+    return tc_emit_op_u32(chunk, TC_OP_CVAR_SET, (uint32_t)cid, err);
   }
   int slot = tc_chunk_local(chunk, name->as.string.bytes, name->as.string.len, err);
   if (slot < 0) return 0;
-  return tc_emit_op_u32(chunk, TC_OP_LOAD_LOCAL, (uint32_t)slot, err) &&
-         compile_expr(*value, chunk, err) &&
-         tc_emit_op(chunk, code, err) &&
-         tc_emit_op_u32(chunk, TC_OP_STORE_LOCAL, (uint32_t)slot, err);
+  if (!tc_emit_op_u32(chunk, TC_OP_LOAD_LOCAL, (uint32_t)slot, err) ||
+      !compile_expr(*value, chunk, err)) return 0;
+  if (shift) {
+    if (!emit_call_op(chunk, shift_name, 2, 1, 1, err)) return 0;
+  } else if (!tc_emit_op(chunk, code, err)) return 0;
+  return tc_emit_op_u32(chunk, TC_OP_STORE_LOCAL, (uint32_t)slot, err);
 }
 
 static int compile_array(TcAstValue node, TcChunk *chunk, TcError *err) {

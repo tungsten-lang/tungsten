@@ -372,6 +372,21 @@
           }
           CNEXT();
         }
+        // Raw unsigned-word boxing used by source BigInt finish paths. The
+        // stage-0 VM already represents every bootstrap-reachable machine
+        // integer as an Integer value, so its exact boxing mirror is identity.
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 2
+            && tc_kind(args[0]) == TC_VAL_STRING
+            && tc_str_len(args[0]) == 5
+            && memcmp(tc_str_bytes_only(args[0]), "w_u64", 5) == 0
+            && value_is_int(args[1])) {
+          TcValue out = args[1];
+          FREE_ARGS();
+          if (!push(&vm, out, err)) {
+            goto cleanup_fail;
+          }
+          CNEXT();
+        }
         // Algebra notation is a native-loader source rewrite. Stage 0 only
         // compiles the compiler itself, which contains no algebra declarations,
         // so preserving the source is the exact bootstrap behavior required
@@ -1695,8 +1710,16 @@
         const char *fn_name = current_function_name(&vm, op_ip, &fn_len);
         size_t caller_len = 0;
         const char *caller_name = frame_function_name(&vm, 1, &caller_len);
-        tc_error_set(err, "unsupported runtime call: %.*s receiver=%s argc=%u arg0=%s fn=%.*s caller=%.*s ip=%zu",
-                     (int)name_len, name, has_receiver ? value_type_name(receiver) : "<none>", argc,
+        const char *target_name = "";
+        size_t target_len = 0;
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 &&
+            argc > 0 && tc_kind(args[0]) == TC_VAL_STRING) {
+          target_name = tc_str_bytes_only(args[0]);
+          target_len = tc_str_len(args[0]);
+        }
+        tc_error_set(err, "unsupported runtime call: %.*s target=%.*s receiver=%s argc=%u arg0=%s fn=%.*s caller=%.*s ip=%zu",
+                     (int)name_len, name, (int)target_len, target_name,
+                     has_receiver ? value_type_name(receiver) : "<none>", argc,
                      argc > 0 ? value_type_name(args[0]) : "<none>", (int)fn_len, fn_name,
                      (int)caller_len, caller_name, op_ip);
         FREE_ARGS();

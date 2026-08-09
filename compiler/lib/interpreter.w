@@ -1326,6 +1326,14 @@ use target
       if args.size() != 2 || !(type(args[1]) in ("Integer" "BigInt"))
         raise "w_int expects one Integer argument"
       return args[1]
+    when "w_u64"
+      # Unsigned machine-word boxing has the same tree-walker representation:
+      # Integer values are arbitrary precision already. Keep the explicit
+      # boundary so source methods can share their native boxing decision with
+      # eval mode, including values above signed i64 max.
+      if args.size() != 2 || !(type(args[1]) in ("Integer" "BigInt"))
+        raise "w_u64 expects one Integer argument"
+      return args[1]
     when "w_small_array_new"
       # Narrow fixture/constructor bridge for exercising runtime-backed
       # SmallArray source methods under eval mode. Convert the public WValue

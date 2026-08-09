@@ -370,7 +370,12 @@
   t = ast_kind(node)
   case t
   when :int
-    return true
+    # A beyond-i64 literal (classified :dec_big at parse time) cannot
+    # live in a raw machine slot — admitting it makes the enclosing tree
+    # a machine-int candidate and the stored value wraps. `format` is an
+    # eager field; reading the sparse raw/value fields here instead would
+    # materialize packed nodes and break stage identity.
+    return node.format != :dec_big
   when :char
     return true
   when :var

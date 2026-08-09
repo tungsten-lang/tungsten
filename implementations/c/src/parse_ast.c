@@ -1009,11 +1009,38 @@ static TcAstValue binary_node_ast(TcAstParser *p, size_t start, size_t end, size
   return node;
 }
 
+/* A decimal literal whose value exceeds i64. Mirrors compiler/lib/
+ * parser.w's int_literal_format: the classification must be made from the
+ * token text at PARSE time on both hosts and carried in the node's
+ * `format` field, so magnitude-sensitive type inference (infer_type's
+ * :dec_big -> :int rule) answers identically for stage 1 and stage 2. */
+static int dec_literal_beyond_i64(const char *raw) {
+  if (raw[0] == '0' && (raw[1] == 'x' || raw[1] == 'X' || raw[1] == 'b' ||
+                        raw[1] == 'B' || raw[1] == 'o' || raw[1] == 'O'))
+    return 0;
+  char digits[24];
+  size_t n = 0;
+  for (const char *q = raw; *q; q++) {
+    if (*q == '_') continue;
+    if (n < 20) digits[n] = *q;
+    n++;
+  }
+  if (n > 19) return 1;
+  if (n < 19) return 0;
+  digits[19] = '\0';
+  return strcmp(digits, "9223372036854775807") > 0;
+}
+
 static TcAstValue int_node_value_ast(TcAstParser *p, size_t pos, int64_t value, const char *raw, TcError *err) {
   TcAstValue node = node_hash(p, "int", pos, err);
   if (node.kind != TC_AST_HASH) return node;
   if (!tc_ast_hash_set(node, "value", tc_ast_int(value), err) ||
       !tc_ast_hash_set(node, "raw", tc_ast_string_copy(raw, strlen(raw), err), err)) {
+    tc_ast_free(node);
+    return tc_ast_nil();
+  }
+  if (dec_literal_beyond_i64(raw) &&
+      !tc_ast_hash_set(node, "format", tc_ast_symbol_copy("dec_big", 7, err), err)) {
     tc_ast_free(node);
     return tc_ast_nil();
   }
@@ -1192,6 +1219,13 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
       if (node.kind == TC_AST_HASH &&
           (!tc_ast_hash_set(node, "value", tc_ast_int((int64_t)strtoull(clean, NULL, 0)), err) ||
            !tc_ast_hash_set(node, "raw", tc_ast_string_copy(text, text_len, err), err))) {
+        tc_ast_free(node);
+        node = tc_ast_nil();
+      }
+      /* Beyond-i64 decimals carry format :dec_big (dec_literal_beyond_i64)
+       * so magnitude-sensitive inference matches the self-hosted parser. */
+      if (node.kind == TC_AST_HASH && dec_literal_beyond_i64(text) &&
+          !tc_ast_hash_set(node, "format", tc_ast_symbol_copy("dec_big", 7, err), err)) {
         tc_ast_free(node);
         node = tc_ast_nil();
       }

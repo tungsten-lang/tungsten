@@ -937,6 +937,19 @@ use lowering/definitions
         return :u32
       if v >= 0
         return :u64
+    # A literal beyond i64 must NOT infer a machine type — the machine
+    # arms emit it as a raw i64 immediate and LLVM wraps it (e.g.
+    # `(0 - <77-digit literal>) * 3` silently returned an i64-wrapped
+    # result). :int routes it through the boxed/guarded paths, whose
+    # runtime fallbacks are BigInt-correct. Magnitude was classified at
+    # PARSE time from the token text (:dec_big, int_literal_format and
+    # its stage-0 twin): reading the packed node's sparse raw/value
+    # fields HERE materializes it and perturbs slab-arena state, which
+    # shifts block numbering between stage 1 and stage 2 — an .ll
+    # identity break. `format` is an eager field; its read is
+    # side-effect-free (the :hex arm's precedent).
+    if node.format == :dec_big
+      return :int
     return :i64
   when :wvalue
     return nil
@@ -1209,6 +1222,16 @@ use lowering/definitions
       int_ops = infer_maps[:int_op_map]
       cmp_ops = infer_maps[:cmp_op_map]
       if int_ops[node.op] != nil
+        # A `:int` operand is boxed and may hold a BigInt, and the guarded
+        # arms' runtime fallbacks then produce a BigInt RESULT — so the
+        # result must stay `:int` too. machine_int_result_type ignores
+        # `:int` (it only ranks machine widths), and letting the other
+        # operand's :i64 label the result authorized the machine path for
+        # the ENCLOSING op: `(0 - <big literal>) * 3` kept the guarded
+        # subtract but then ran `mul i64` on its possibly-boxed result.
+        # Mirrors lower_binary_op's promotable_int_operand exclusion.
+        if lt == :int || rt == :int
+          return :int
         mt = machine_int_result_type(lt, rt)
         if mt != nil
           return mt

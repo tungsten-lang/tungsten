@@ -800,3 +800,12 @@
   # (IC row 4 is retired).
   -> to_f
     ccall("w_bigint_to_f", self)
+
+  # Conversion to String: the divide-and-conquer decimal writer and the
+  # base-N chunk loop stay in the runtime behind one exported boundary;
+  # the method surface lives here (IC row 0 is retired). Statically
+  # :int-typed call sites keep the compiler's w_int_to_s intercept, and
+  # print/interpolation paths use w_to_s directly — this body serves
+  # dynamic dispatch.
+  -> to_s(base = 10)
+    ccall("w_bigint_to_s", self, base)

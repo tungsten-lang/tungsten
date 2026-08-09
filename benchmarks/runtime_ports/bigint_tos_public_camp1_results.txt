@@ -1,0 +1,7 @@
+# to_s pre/post campaigns (pre = IC row 0 live; post = source shim over
+# w_bigint_to_s), per-stratum builders + corpus-width gate:
+# Campaign A (8 pairs):  tos-one 1.031  tos-four 0.956  tos-sixtyfour 1.000
+# Campaign B (10 pairs): tos-one 1.038  tos-four 0.940  tos-sixtyfour 1.000
+# (raw samples of B in bigint_tos_public_camp2_results.txt)
+# tos-sixtyfour is the 1.46µs D&C decimal writer — kernel-bound, dispatch
+# invisible; tos-four WINS ~5% via the retired IC hop.

@@ -46864,6 +46864,17 @@ WValue w_bigint_mod(WValue a, WValue b) {
 WValue w_bigint_to_f(WValue r) {
     return w_box_double(bigint_to_double_boxed(r));
 }
+/* Exported boundary for the BigInt#to_s source shim — the divide-and-
+ * conquer decimal writer and the base-N chunk loop stay in the runtime.
+ * Base validation matches w_to_s_base_arg exactly. */
+WValue w_bigint_to_s(WValue r, WValue base) {
+    if (!w_is_int(base)) die("to_s base must be an Int");
+    int64_t b = w_as_int(base);
+    if (b < 2 || b > 36) die("to_s base must be between 2 and 36");
+    int32_t s;
+    WBigint *bi = w_bigint_view(r, &s);
+    return bigint_to_s_base_impl(bi, s, (int)b);
+}
 
 /* Result-construction boundaries for source kernel bodies. Alloc hands out
  * a fresh boxed BigInt with at least `cap` limbs reserved and the limb
@@ -48137,7 +48148,11 @@ static void w_init_ic_tables(void) {
     w_ic_strbuf_table[1].name  = WN_include_q;
     w_ic_strbuf_table[2].name  = WN_starts_with_q;
     /* Bigint (Phase 7+m) */
-    w_ic_bigint_table[0].name  = WN_to_s;
+    /* Slot 0 (to_s) is retired: BigInt#to_s in core/numeric/big_int.w is
+     * a source shim over the exported w_bigint_to_s boundary. The static
+     * :int-receiver intercept (method_call.w) keeps routing typed sites
+     * to w_int_to_s, and print/interpolation paths use w_to_s directly —
+     * both unaffected by this row. */
     /* Slot 1 (gcd) is retired: BigInt#gcd in core/numeric/big_int.w is a
      * source shim over the exported w_bigint_gcd kernel boundary. */
     /* Slot 2 (abs) is retired: BigInt#abs in core/numeric/big_int.w does

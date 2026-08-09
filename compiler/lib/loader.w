@@ -649,7 +649,7 @@ use parser
         # incremental cost of also loading it for the integer methods is small,
         # and it makes a standalone bigint-method program (e.g. `n.modpow(...)`
         # with no predicate) resolve instead of dispatching to Object.
-        if @bigint_predicates_unresolved && (bitwise_op_send || call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "abs" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length" "prev" "succ" "next" "prime?" "to_f" "+" "-" "*"))
+        if @bigint_predicates_unresolved && (bitwise_op_send || call_name in ("zero?" "even?" "odd?" "negative?" "positive?" "neg!" "abs!" "abs" "gcd" "lcm" "pow" "modpow" "digits" "isqrt" "bit_length" "prev" "succ" "next" "prime?" "to_f" "to_s" "+" "-" "*"))
           consider_autoload_name("BigInt", defined, registry, seen, pending)
           @bigint_predicates_unresolved = false
 

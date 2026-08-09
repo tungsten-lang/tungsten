@@ -1468,6 +1468,8 @@ use target
       return ccall("w_bigint_mod", args[1], args[2])
     when "w_bigint_to_f"
       return ccall("w_bigint_to_f", args[1])
+    when "w_bigint_to_s"
+      return ccall("w_bigint_to_s", args[1], args[2])
     when "bigint_isqrt_any"
       return ccall("bigint_isqrt_any", args[1])
     when "w_bigint_mark_shared_value"

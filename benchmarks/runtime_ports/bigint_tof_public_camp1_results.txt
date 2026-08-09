@@ -1,8 +1,10 @@
-# to_f pre/post campaigns (pre = IC row 4 live at b1b5c68; post = source
-# shim over w_bigint_to_f), interleaved pairs, thread-CPU medians:
-# Campaign A (8 pairs):  tof-one 0.976  tof-four 0.995  tof-sixtyfour 0.993
-# Campaign B (10 pairs): tof-one 0.996  tof-four 0.982  tof-sixtyfour 0.999
+# to_f pre/post campaigns — CORRECTED RECORD. The first committed campaign
+# (15a4b70) was INVALID: the harness's shared multi-branch corpus var had
+# one inline machine-typed branch, which raw-promoted the var and silently
+# truncated the pow-built BigInt branches (10^76 = 0 mod 2^64) — every
+# stratum actually measured small-Int receivers. Rebuilt with per-stratum
+# builders and a corpus-width gate; the sixtyfour stratum was replaced by
+# sixteen (~10^300), the widest width converting to a FINITE double.
+# Campaign A (8 pairs):  tof-one 0.983  tof-four 0.953  tof-sixteen 0.922
+# Campaign B (10 pairs): tof-one 1.056  tof-four 0.990  tof-sixteen 0.963
 # (raw samples of B in bigint_tof_public_camp2_results.txt)
-# The conversion kernel reads only the mantissa-bearing top limbs, so the
-# op is ~5-6ns at every width; source dispatch is at parity with the IC.
-# Note: an unwarmed single sample read 2.7x — warmup is load-bearing here.

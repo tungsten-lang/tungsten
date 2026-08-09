@@ -757,9 +757,29 @@
 
   # Shifts route multi-limb BigInts through source while retaining the tuned
   # magnitude kernels behind reentry-free boundaries. The runtime gate keeps
-  # one-limb and zero-shift specializations in C; every admitted source shape
-  # reaches one of these typed bodies exactly once.
+  # ordinary one-limb and zero-shift specializations in C; header-only
+  # overshifts are admitted at every width. Every admitted source shape reaches
+  # one of these typed bodies exactly once.
   -> <<(other)(Int)
+    # A negative left-shift count is an arithmetic right shift. If that
+    # count covers the full magnitude, complete it from header metadata as
+    # inline 0/-1 without reading a limb or entering the C shift kernel.
+    n = $size ## i64
+    flip = (($value >> 47) & 1) ## i64
+    if flip == 1
+      n = 0 - n
+    k_payload = (other$value & 0xFFFFFFFFFFFF) ## i64
+    k = (k_payload - ((k_payload >> 47) << 48)) ## i64
+    if k < 0
+      right_count = 0 - k
+      magnitude_limbs = n
+      if magnitude_limbs < 0
+        magnitude_limbs = 0 - magnitude_limbs
+      if right_count >= magnitude_limbs * 64
+        int_tag = -1688849860263936 ## i64
+        if n < 0
+          return wvalue_from_bits((int_tag | 281474976710655) ## i64)
+        return wvalue_from_bits(int_tag)
     ccall("w_bigint_shl", self, other)
 
   -> <<(other)(Number)

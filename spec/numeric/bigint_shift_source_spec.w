@@ -51,6 +51,8 @@ check("one_native.i48_max", one_max >> 17 == 140737488355327)
 check("one_native.heap_control", one_max >> 16 == one_max / (1 << 16))
 check("one_native.overshift_positive", one_max >> 100 == 0)
 check("one_native.overshift_negative", (0 - one_max) >> 100 == -1)
+check("one_native.negative_left_overshift_positive", one_max << -100 == 0)
+check("one_native.negative_left_overshift_negative", (0 - one_max) << -100 == -1)
 
 heap = (1 << 200) + 33
 check("zero.left.identity", wvalue_bits(heap << 0) == wvalue_bits(heap))
@@ -77,5 +79,9 @@ check("band.4097.overshift_positive", band_over >> band_over_shift == 0)
 check("band.4097.overshift_negative", (0 - band_over) >> band_over_shift == -1)
 check("band.4097.overshift_positive_explicit", band_over.>>(band_over_shift) == 0)
 check("band.4097.overshift_negative_explicit", (0 - band_over).>>(band_over_shift) == -1)
+check("band.4097.negative_left_overshift_positive", band_over << (0 - band_over_shift) == 0)
+check("band.4097.negative_left_overshift_negative", (0 - band_over) << (0 - band_over_shift) == -1)
+check("band.4097.negative_left_overshift_positive_explicit", band_over.<<(0 - band_over_shift) == 0)
+check("band.4097.negative_left_overshift_negative_explicit", (0 - band_over).<<(0 - band_over_shift) == -1)
 
-<< "bigint_shift_source_spec: all 650 checks passed"
+<< "bigint_shift_source_spec: all 656 checks passed"

@@ -97,6 +97,58 @@ benchmark structure to compare C, first-source, and optimized-source versions.
 | BigInt comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`, `<=>`) | `run_bigint_compare_full.sh`, `bigint_compare_full.w` | **Complete mathematical migration.** Every route requiring BigInt ordering or magnitude work now reaches one allocation-free source comparator covering inline i48 values, heap BigInts, both sign encodings, unequal widths, equality, and arbitrary equal-width limb scans; intentional identical-WValue and inline-Int-only fast paths can finish before it. The C body remains only the stage0 weak default and explicit differential oracle. The compiler unconditionally injects the small support module, rejects a missing, duplicate, or ABI-invalid reserved helper, and emits one strong stable seam, so opaque/runtime-created BigInts cannot silently fall back to C. The same-binary boxed gate runs 4,232 exact C differentials plus every public operator. Eight balanced pairs under `--release --native --fast` measured all 30 strata at median source/C 0.672--1.073; the worst median was 1.073 at three limbs (individual noisy maxima reached 1.154). Retained raw and JSON evidence: `bigint_compare_full_boxed_final_results.{txt,json}`. Host/build: ARM64 T6050 macOS 26.0 target, LLVM 22.1.8, emitted `target-cpu=apple-m4`. |
 | BigInt `gcd` | `run_bigint_gcd_native.sh`, `bigint_gcd_public.w` | **RETAINED in the 10% migration revisit with a native Tungsten one-limb kernel.** A same-binary C/source baseline first measured every row at parity (0.997--1.020). The retained untyped source method uses one exact BigInt-tag guard, reads normalized one-limb magnitudes directly, and runs a raw binary-GCD loop (`llvm.cttz.i64`, unsigned subtract/compare, logical shifts) before one inline-or-heap boxing decision. Mixed inline-Int arguments and all multi-limb Lehmer/HGCD shapes still use the reentry-free `w_bigint_gcd` boundary. A typed-overload candidate was rejected because its dispatcher regressed the untouched inline-Int control to 1.423x. Two independent balanced 8-pair campaigns for the retained method measured one-limb BigInt pairs at 1.076/1.076 source/C; inline-Int controls at 1.006/0.954, near-equal four-limb controls at 1.019/1.010, 8-vs-4 skew at 0.973/1.010, and 32-limb shared-factor controls at 0.999/0.998. The harness runs 42 exact C differentials plus divisor/greatest identities, mixed signs, unsigned-high-bit magnitudes, and a heap one-limb result; `gcd_spec.w` passes interpreted and `--release --native --fast`. The source port exposed and fixed stage0's missing `**=`/`&=`/`\|=`/`^=`/`<<=`/`>>=` syntax and `w_u64` boxing support; the rebuilt stage1/stage2 LLVM modules are byte-identical. Raw samples: `bigint_gcd_one_limb_native_{pre,candidate1,candidate2,candidate2_repeat}_results.txt`. Host/build: Apple M5 Max, arm64 macOS 26.6.1, Homebrew LLVM 22.1.8, configured `-mcpu=apple-m5`, `--release --native --fast`. |
 | BigInt `isqrt` | `run_bigint_isqrt_public.sh` | Retained under the 5% budget. `BigInt#isqrt` is a source shim over the already-exported `bigint_isqrt_any` divide-and-conquer kernel; the IC row is retired, and the override shields BigInt receivers from `Int#isqrt`'s Newton loop. Two public campaigns across 1/4/16/64-limb receivers measured 0.973/0.994, 1.043/1.009, 1.011/1.012, and 1.014/1.029 — every row inside the budget, including the 7.7ns one-limb u128 fast path. Negative-receiver error text is byte-identical (it lives in the kernel). Gates: `bigint_bang` (mixed-width isqrt sweep), `int`, `bigint_identity`, and the 769-line `bigint_limb_sweep` all byte-identical across engines; stage identity re-verified. Raw samples: `bigint_isqrt_public_{pre,post_v1,post_v2}_results.txt`. |
+### Complete BigInt bitwise acceptance gate
+
+`run_bigint_bitwise_full.sh` compiles `bigint_bitwise_full.w` and
+`bigint_bitwise_full_ref.c` into one `--release --native --fast` binary. The
+timed lanes cross symmetric noinline wrappers around the public retained-C
+oracles and stable strong source seams. The default matrix covers the
+documented width points from 1 through 8192 limbs, 4095/4096/4097 boundaries,
+odd/remainder
+widths, severe skew in both orders, inline mixes, representative sign/width
+pairs, both negative encodings, identities, distinct-equal storage, and
+normalization/cancellation shapes. It also gates consumed `&=`, `|=`, and
+`^=` source seams against the retained C mutation entries at every 1--256-limb
+width supported by the established compound matrix. The one-limb correctness
+fixtures separately force nonzero i48 AND/XOR results and require exact inline
+canonicalization; the timed one-limb fixtures remain heap-valued so they keep
+measuring the consumed kernel across the full adaptive lane.
+
+Every row is adaptively calibrated until both lanes run for at least 110ms,
+then receives eight balanced C/W/W/C and W/C/C/W pairs. A median source/C
+ratio above 1.10 fails. The runner retains raw samples and a JSON summary with
+calibration, checksums, quartiles, build/source/IR/binary hashes, target
+CPU/triple, host/load/power metadata, and dirty state. Correctness runs the
+shape matrix plus 12,288 deterministic exact source/C differentials, public
+syntax, explicit sends, reversed operands, canonicality, and
+lifecycle-sensitive identity results.
+
+Short diagnostic screens may set `TARGET_NS` and a lower `SAMPLE_MIN_NS`:
+calibration still targets `TARGET_NS`, while the separate floor prevents a
+single noisy large-width leg from discarding the screen. Full acceptance does
+not set that override, so its sample floor remains exactly 110ms.
+
+The default `MODE=accept` is fail closed: it requires one strong completion
+marker, one strong seam per operation, and a reachable-LLVM audit proving that
+immutable source seams call no retained C/public bitwise fallback. Consumed
+seams must likewise avoid retained C math, but their direct raw helpers retain
+one explicitly reported matching `w_bit_*` policy edge for non-integer
+coercion and error handling; focused Float and invalid-String differentials
+exercise that edge. `MODE=baseline` allows an older partial build to be
+recorded, explicitly labels its partial source and C/C inline-control rows,
+omits compound rows whose old binaries have no strong consumed seams, and is
+not a full acceptance result.
+
+The initial full diagnostic is retained as
+`tungsten-bigint-bitwise-full-screen-p2-target20ms-floor10ms.{txt,json}`.
+Correctness, source-link, and IR gates passed, but 76 of 186 two-pair screening
+medians exceeded the 1.10 source/C limit, so this records an implementation
+checkpoint rather than a completed performance migration. The independently
+measured four-limb AND specialization improved from 1.270200x to 1.075932x in
+eight 110ms pairs; its retained evidence is
+`tungsten-bigint-bitwise-and-width4-{pre-specialization,candidate-specialized}.{txt,json}`.
+No cross-target or GMP claim follows from these host-specific source/C runs.
+
 ### Source-path boundary constant — measured, and direct lowering extended (2026-08-08)
 
 Follow-up to the shift skip's "~12ns boundary constant" attribution: on a

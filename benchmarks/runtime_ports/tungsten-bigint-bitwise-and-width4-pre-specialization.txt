@@ -1,0 +1,75 @@
+META|schema|tungsten/runtime-port-bigint-bitwise-full/v1
+META|generated_utc|2026-08-10T04:18:43Z
+META|label|and-width4-pre-specialization
+META|mode|accept
+META|matrix|custom-subset
+META|flags|--release --native --fast
+META|host_os|Darwin Eriks-BigMac-Pro.local 25.6.0 Darwin Kernel Version 25.6.0: Sat Jul 11 15:27:04 PDT 2026; root:xnu-12377.161.13~4/RELEASE_ARM64_T6050 arm64
+META|host_cpu|arm64
+META|logical_cpus|18
+META|host_load| 0:18  4 users, load averages: 2.90 3.02 2.97
+META|power|Now drawing from 'AC Power'; -InternalBattery-0 (id=35586147)	100%; charged; 0:00 remaining present: true;
+META|target_triple|arm64-apple-macosx26.0.0
+META|target_cpu|apple-m4
+META|clang|Homebrew clang version 22.1.8
+META|git_head|3c426a00d2077077ad540aea02f675df91f64f7b
+META|git_dirty|true
+META|pairs|8
+META|target_ns|110000000
+META|calibration_min_ns|5000000
+META|max_ratio|1.10
+META|row_count|1
+META|compound|source/C consumed seams included
+META|source_w_sha256|44a50e0d838e5649bd6d7d1a75af8f1eec8f1059512d9499feff0ddb282fa20c
+META|source_c_sha256|8aaf1c7d2ff45f981ce40ebca2658175ad90bccbc3f88ac4df66ede7a49a2b34
+META|runner_sha256|898c0f61cc779576082f016be049bae3956c1888914fe755844b6f8b2b74e588
+META|ir_sha256|e03eb2a8b8b63dac1dedff50eafdb93d13f17283f26fb972178a95f1760cabe3
+META|binary_sha256|eea25726a0a2c5dc3ed3d5ed90c92418e8f8998c1f79fafeee87fd35517fd228
+CHECK|correctness: ok (18709 exact checks; seam=full; partial_rows=0; c_controls=0)
+IR|and|fallback-free|reachable=5
+IR|or|fallback-free|reachable=5
+IR|xor|fallback-free|reachable=6
+IR|and-mut|allowed-noninteger-policy|__w_bigint_and_mut_src -> __wy_6a68b7c5 -> w_bit_and
+IR|and-mut|allowed-noninteger-policy|__w_bigint_and_mut_src -> __wy_6a68b7c5 -> w_bit_and
+IR|and-mut|integer-path-audited|reachable=9|policy_edges=2
+IR|or-mut|allowed-noninteger-policy|__w_bigint_or_mut_src -> __wy_d233bff2 -> w_bit_or
+IR|or-mut|allowed-noninteger-policy|__w_bigint_or_mut_src -> __wy_d233bff2 -> w_bit_or
+IR|or-mut|integer-path-audited|reachable=9|policy_edges=2
+IR|xor-mut|allowed-noninteger-policy|__w_bigint_xor_mut_src -> __wy_b03447e9 -> w_bit_xor
+IR|xor-mut|allowed-noninteger-policy|__w_bigint_xor_mut_src -> __wy_b03447e9 -> w_bit_xor
+IR|xor-mut|integer-path-audited|reachable=10|policy_edges=2
+IR|marker|complete|__w_bigint_bitwise_source_complete
+SEAMS|full|1
+CALIBRATION|and/width-4|12512442|123554792|153097625|800796516|2
+SAMPLE|and/width-4|1|1|c|119001041|12512442|800796516|2
+SAMPLE|and/width-4|1|2|source|165340375|12512442|800796516|2
+SAMPLE|and/width-4|1|3|source|156236666|12512442|800796516|2
+SAMPLE|and/width-4|1|4|c|118618750|12512442|800796516|2
+SAMPLE|and/width-4|2|1|source|156695834|12512442|800796516|2
+SAMPLE|and/width-4|2|2|c|121824625|12512442|800796516|2
+SAMPLE|and/width-4|2|3|c|118537333|12512442|800796516|2
+SAMPLE|and/width-4|2|4|source|154062041|12512442|800796516|2
+SAMPLE|and/width-4|3|1|c|121442667|12512442|800796516|2
+SAMPLE|and/width-4|3|2|source|150824917|12512442|800796516|2
+SAMPLE|and/width-4|3|3|source|157824083|12512442|800796516|2
+SAMPLE|and/width-4|3|4|c|122111584|12512442|800796516|2
+SAMPLE|and/width-4|4|1|source|157929042|12512442|800796516|2
+SAMPLE|and/width-4|4|2|c|123777833|12512442|800796516|2
+SAMPLE|and/width-4|4|3|c|126971125|12512442|800796516|2
+SAMPLE|and/width-4|4|4|source|151759167|12512442|800796516|2
+SAMPLE|and/width-4|5|1|c|124838458|12512442|800796516|2
+SAMPLE|and/width-4|5|2|source|156671000|12512442|800796516|2
+SAMPLE|and/width-4|5|3|source|154157166|12512442|800796516|2
+SAMPLE|and/width-4|5|4|c|121405166|12512442|800796516|2
+SAMPLE|and/width-4|6|1|source|155083625|12512442|800796516|2
+SAMPLE|and/width-4|6|2|c|119857083|12512442|800796516|2
+SAMPLE|and/width-4|6|3|c|120017167|12512442|800796516|2
+SAMPLE|and/width-4|6|4|source|154158208|12512442|800796516|2
+SAMPLE|and/width-4|7|1|c|121062167|12512442|800796516|2
+SAMPLE|and/width-4|7|2|source|152530750|12512442|800796516|2
+SAMPLE|and/width-4|7|3|source|152293375|12512442|800796516|2
+SAMPLE|and/width-4|7|4|c|118534125|12512442|800796516|2
+SAMPLE|and/width-4|8|1|source|157207041|12512442|800796516|2
+SAMPLE|and/width-4|8|2|c|119377000|12512442|800796516|2
+SAMPLE|and/width-4|8|3|c|122803750|12512442|800796516|2
+SAMPLE|and/width-4|8|4|source|149916875|12512442|800796516|2

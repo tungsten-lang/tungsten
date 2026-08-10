@@ -73,6 +73,11 @@ module Tungsten::AST
       it_parses "a #{op}= 1", AssignOp.new("a".var, op, 1.int)
     end
 
+    %w[& | ^].each do |op|
+      it_parses "a.#{op}(b)", Call.new("a".var, op, ["b".var])
+    end
+    it_parses "a\n  .&(b)", Call.new("a".var, "&", ["b".var])
+
     it_parses "a++", AssignOp.new("a".var, :+, 1.int)
     it_parses "a--", AssignOp.new("a".var, :-, 1.int)
 
@@ -269,6 +274,14 @@ module Tungsten::AST
       expect(defn.param_types).to eq([ :i64, :f64 ])
       expect(defn.return_type).to eq(:i64)
       expect(defn.body.first).to eq("a".var)
+    end
+
+    it "parses a fused ampersand operator method definition" do
+      result = described_class.parse("-> &(other)\n  other")
+      defn = result.list[0]
+      expect(defn.name).to eq("&")
+      expect(defn.args[0].name).to eq("other")
+      expect(defn.body.first).to eq("other".var)
     end
 
     it "still rejects non-type parenthesized parameters on arity methods" do

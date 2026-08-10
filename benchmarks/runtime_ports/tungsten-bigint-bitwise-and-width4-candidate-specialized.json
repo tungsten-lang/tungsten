@@ -1,0 +1,45 @@
+{
+  "schema": "tungsten/runtime-port-bigint-bitwise-full/v1",
+  "metadata": {
+    "generated_utc": "2026-08-10T04:20:46Z",
+    "label": "and-width4-candidate-specialized",
+    "mode": "accept",
+    "matrix": "custom-subset",
+    "flags": "--release --native --fast",
+    "host_os": "Darwin Eriks-BigMac-Pro.local 25.6.0 Darwin Kernel Version 25.6.0: Sat Jul 11 15:27:04 PDT 2026; root:xnu-12377.161.13~4/RELEASE_ARM64_T6050 arm64",
+    "host_cpu": "arm64",
+    "logical_cpus": "18",
+    "host_load": " 0:20  4 users, load averages: 4.95 3.61 3.20 ",
+    "power": "Now drawing from 'AC Power'; -InternalBattery-0 (id=35586147)\t100%; charged; 0:00 remaining present: true;",
+    "target_triple": "arm64-apple-macosx26.0.0",
+    "target_cpu": "apple-m4",
+    "clang": "Homebrew clang version 22.1.8",
+    "git_head": "3c426a00d2077077ad540aea02f675df91f64f7b",
+    "git_dirty": "true",
+    "pairs": "8",
+    "target_ns": "110000000",
+    "sample_min_ns": "110000000",
+    "calibration_min_ns": "5000000",
+    "max_ratio": "1.10",
+    "row_count": "1",
+    "compound": "source/C consumed seams included",
+    "source_w_sha256": "44a50e0d838e5649bd6d7d1a75af8f1eec8f1059512d9499feff0ddb282fa20c",
+    "source_c_sha256": "8aaf1c7d2ff45f981ce40ebca2658175ad90bccbc3f88ac4df66ede7a49a2b34",
+    "runner_sha256": "1ab6d2d3908ed5448273201f18e2f3dfa17b71a3a183ad4bcb811567fd03f00d",
+    "ir_sha256": "58663b933f51a69dd4331322099f67abae9a63b02a5991c603058d74f9a9e8e3",
+    "binary_sha256": "05acc474172bcbfa3ba33bb1844ad52c1951044131b2559026cf14e3d083c371"
+  },
+  "rows": [
+    {
+      "operation": "and/width-4",
+      "median_source_over_c": 1.075931782151,
+      "p25": 1.053651323054,
+      "p75": 1.084126252437,
+      "min": 1.039513746621,
+      "max": 1.096960813371,
+      "iterations_per_leg": 13635484,
+      "lane_kind": "complete-source"
+    }
+  ],
+  "raw_samples": "tungsten-bigint-bitwise-and-width4-candidate-specialized.txt"
+}

@@ -35668,12 +35668,10 @@ static inline int bigint_shr_src_shape(WValue a, WValue b) {
 }
 
 /* ---- Source-routed bigint bitwise ops (weak-linkage arms) ----
- * Same seam design as __w_bigint_plus_src (see the block above w_add): the
- * weak default is exactly the C kernel; a program that compiles
- * core/numeric/big_int.w emits a STRONG wrapper around the compiled
- * BigInt#&/#|/#^ worker (emitter.w big_op_wrappers), and strong-over-weak
- * link resolution routes every gated bitwise op through source.
- * TUNGSTEN_BIGINT_SRC_OPS=0 pins the C path. */
+ * Production targets always emit strong wrappers around the complete raw
+ * Tungsten helpers.  The weak bodies remain the stage0 implementation and
+ * the retained C differential oracle. TUNGSTEN_BIGINT_SRC_OPS=0 pins that
+ * implementation for focused A/B work. */
 __attribute__((weak)) WValue __w_bigint_and_src(WValue a, WValue b) {
     return bignum_bitwise('&', a, b);
 }
@@ -35684,25 +35682,18 @@ __attribute__((weak)) WValue __w_bigint_xor_src(WValue a, WValue b) {
     return bignum_bitwise('^', a, b);
 }
 
-/* Shape gate for the bitwise source arms. Source implements the sign-free
- * straight-loop domain: both heap BigInts, both effective-positive,
- * multi-limb, inside the band. C keeps its measurably-specialized strata:
- * the a==b identity arm (O(1) alias), one-limb operands (fused u64 arm),
- * and every negative operand (the fused on-the-fly two's-complement pass
- * in bignum_bitwise_generic). The source bodies' bail set must stay
- * DISJOINT from this gate's admission set (B6 discipline: an admitted
- * shape the body bails on would recurse w_bit_* -> src -> w_bit_*). */
-static inline int bigint_bitwise_src_shape(WValue a, WValue b) {
-    if (!w_is_bigint(a) || !w_is_bigint(b)) return 0;
-    if (a == b) return 0;                 /* identity arm is O(1) in C */
-    int32_t sa, sb;
-    (void)w_bigint_view(a, &sa);
-    (void)w_bigint_view(b, &sb);
-    return sa >= 2 && sb >= 2 && sa <= 4096 && sb <= 4096;
+/* Older stage compilers emitted the same stable seam names around the former
+ * shape-limited class workers. They must not receive every BigInt shape: a
+ * worker bail calls w_bit_* and would recurse. Complete source modules emit a
+ * strong marker; the weak bootstrap default keeps stage0 and old binaries on
+ * the retained C implementation until that complete helper family is linked. */
+__attribute__((weak)) int64_t __w_bigint_bitwise_source_complete(void) {
+    return 0;
 }
 
 /* Shared dispatcher for &, |, ^: native both-int fast path first (the hot
- * case), then the small/coerced path, then the full-width bignum kernel. */
+ * case), then the small/coerced path. Every pair containing a BigInt is
+ * coerced to integer WValues once and handed to the complete source seam. */
 static WValue bit_binop(char op, WValue a, WValue b) {
     if (w_is_int(a) && w_is_int(b))
         return w_box_int_checked((int64_t)apply_bitop(op, (uint64_t)w_as_int(a), (uint64_t)w_as_int(b)));
@@ -35711,11 +35702,14 @@ static WValue bit_binop(char op, WValue a, WValue b) {
     {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
-        if (__builtin_expect(src_off == 0, 1) && bigint_bitwise_src_shape(a, b)) {
+        if (__builtin_expect(src_off == 0, 1) &&
+            __builtin_expect(__w_bigint_bitwise_source_complete() != 0, 1)) {
+            WValue ia = bitwise_as_integer(a);
+            WValue ib = bitwise_as_integer(b);
             switch (op) {
-                case '&': return __w_bigint_and_src(a, b);
-                case '|': return __w_bigint_or_src(a, b);
-                default:  return __w_bigint_xor_src(a, b);
+                case '&': return __w_bigint_and_src(ia, ib);
+                case '|': return __w_bigint_or_src(ia, ib);
+                default:  return __w_bigint_xor_src(ia, ib);
             }
         }
     }
@@ -35724,6 +35718,25 @@ static WValue bit_binop(char op, WValue a, WValue b) {
 WValue w_bit_and(WValue a, WValue b) { return bit_binop('&', a, b); }
 WValue w_bit_or(WValue a, WValue b)  { return bit_binop('|', a, b); }
 WValue w_bit_xor(WValue a, WValue b) { return bit_binop('^', a, b); }
+
+/* Explicit boxed lanes for the complete same-binary source/C gate.  The C
+ * functions retain the old full dispatcher as an oracle; the source functions
+ * mirror production's one-time coercion and then enter the strong seams. */
+WValue w_bigint_and_c(WValue a, WValue b) { return bignum_bitwise('&', a, b); }
+WValue w_bigint_or_c(WValue a, WValue b)  { return bignum_bitwise('|', a, b); }
+WValue w_bigint_xor_c(WValue a, WValue b) { return bignum_bitwise('^', a, b); }
+WValue w_bigint_and_source(WValue a, WValue b) {
+    if (!__w_bigint_bitwise_source_complete()) return bignum_bitwise('&', a, b);
+    return __w_bigint_and_src(bitwise_as_integer(a), bitwise_as_integer(b));
+}
+WValue w_bigint_or_source(WValue a, WValue b) {
+    if (!__w_bigint_bitwise_source_complete()) return bignum_bitwise('|', a, b);
+    return __w_bigint_or_src(bitwise_as_integer(a), bitwise_as_integer(b));
+}
+WValue w_bigint_xor_source(WValue a, WValue b) {
+    if (!__w_bigint_bitwise_source_complete()) return bignum_bitwise('^', a, b);
+    return __w_bigint_xor_src(bitwise_as_integer(a), bitwise_as_integer(b));
+}
 WValue w_bit_shl(WValue a, WValue b) {
     if (w_is_strbuf(a)) return w_strbuf_append(a, w_to_s(b));
     /* String << x is the coercing append (builder semantics) — it can't
@@ -38914,6 +38927,27 @@ static WValue w_bigint_bitwise_mut_fallback(char op, WValue a, WValue b) {
 }
 
 static WValue w_bigint_bitwise_mut(char op, WValue a, WValue b) {
+    /* Consumed integer identities return the receiver without publishing a
+     * second alias. Handle them before the writable-buffer guards so a shared
+     * or tag-overlay receiver does not gain a spurious sticky alias count. */
+    if (w_is_bigint(a) && w_is_integer_any(b)) {
+        WValue zero = w_box_int(0);
+        WValue negative_one = w_box_int(-1);
+        if (a == b) return op == '^' ? zero : a;
+        switch (op) {
+        case '&':
+            if (b == zero) return zero;
+            if (b == negative_one) return a;
+            break;
+        case '|':
+            if (b == zero) return a;
+            if (b == negative_one) return negative_one;
+            break;
+        default:
+            if (b == zero) return a;
+            break;
+        }
+    }
     if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
         return w_bigint_bitwise_mut_fallback(op, a, b);
     WBigint *ba = w_as_bigint(a);
@@ -39020,6 +39054,9 @@ static WValue w_bigint_bitwise_mut(char op, WValue a, WValue b) {
         for (int32_t i = 0; i < n; i++) al[i] ^= bl[i];
         break;
     }
+    /* One-limb AND/XOR may cancel only the high bits and leave a nonzero i48
+     * result. Canonicalization must still demote that value from heap storage. */
+    if (n == 1) return bigint_normalize(ba);
     return al[n - 1] != 0 ? a : bigint_normalize(ba);
 }
 
@@ -39033,6 +39070,21 @@ __attribute__((preserve_most)) WValue w_bigint_or_mut(WValue a, WValue b) {
 
 __attribute__((preserve_most)) WValue w_bigint_xor_mut(WValue a, WValue b) {
     return w_bigint_bitwise_mut('^', a, b);
+}
+
+/* Stable consumed-operation seams. Production targets provide strong native
+ * Tungsten definitions; these weak bodies keep stage0 and retained C-oracle
+ * binaries on the complete C implementation. */
+__attribute__((weak, preserve_most)) WValue __w_bigint_and_mut_src(WValue a, WValue b) {
+    return w_bigint_and_mut(a, b);
+}
+
+__attribute__((weak, preserve_most)) WValue __w_bigint_or_mut_src(WValue a, WValue b) {
+    return w_bigint_or_mut(a, b);
+}
+
+__attribute__((weak, preserve_most)) WValue __w_bigint_xor_mut_src(WValue a, WValue b) {
+    return w_bigint_xor_mut(a, b);
 }
 
 static WValue w_bigint_shift_mut_fallback(int left, WValue a, WValue b) {
@@ -47345,6 +47397,13 @@ WValue w_bigint_finish_add(WValue v, WValue signed_size) {
     b->size = (int32_t)w_to_i64(signed_size);
     return bigint_finish_mag_add(b);
 }
+WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size) {
+    if (signed_size < INT32_MIN || signed_size > INT32_MAX)
+        die("w_bigint_finish_add_raw: signed size is outside i32");
+    WBigint *b = w_as_bigint(v);
+    b->size = (int32_t)signed_size;
+    return bigint_finish_mag_add(b);
+}
 WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)w_to_i64(signed_size);
@@ -47353,6 +47412,18 @@ WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
 WValue w_bigint_seal(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)w_to_i64(signed_size);
+    return bigint_normalize(b);
+}
+
+/* Raw-size twin for source kernels whose typed ABI already carries the
+ * result width as a machine i64.  Allocation, canonicalization, demotion,
+ * and recycler handoff remain runtime storage policy; the source operation
+ * owns every mathematical limb written before this boundary. */
+WValue w_bigint_seal_raw(WValue v, int64_t signed_size) {
+    if (signed_size < INT32_MIN || signed_size > INT32_MAX)
+        die("w_bigint_seal_raw: signed size is outside i32");
+    WBigint *b = w_as_bigint(v);
+    b->size = (int32_t)signed_size;
     return bigint_normalize(b);
 }
 
@@ -51775,9 +51846,9 @@ static WValue array_elementwise_into(WValue out_v, WValue lhs, WValue rhs, EltOp
                 case ELT_OP_SUB:  r = w_sub(a, b); break;
                 case ELT_OP_MUL:  r = w_mul(a, b); break;
                 case ELT_OP_DIV:  r = w_div(a, b); break;
-                case ELT_OP_BOR:  r = w_int(w_as_int(a) | w_as_int(b)); break;
-                case ELT_OP_BAND: r = w_int(w_as_int(a) & w_as_int(b)); break;
-                case ELT_OP_BXOR: r = w_int(w_as_int(a) ^ w_as_int(b)); break;
+                case ELT_OP_BOR:  r = w_bit_or(a, b); break;
+                case ELT_OP_BAND: r = w_bit_and(a, b); break;
+                case ELT_OP_BXOR: r = w_bit_xor(a, b); break;
                 case ELT_OP_SHL:  r = w_int(w_as_int(a) << w_as_int(b)); break;
                 case ELT_OP_SHR:  r = w_int(w_as_int(a) >> w_as_int(b)); break;
                 default:          r = W_NIL;

@@ -9,7 +9,7 @@ module Tungsten
     # != !== !~ are defined in terms of equality operators
     # || &&     are not user-definable
     # <= < > >= are not user-definable, use <=>
-    VALID_METHOD_NAMES = %i[ID ID_WITH_ARITY TYPE KEYWORD << == === =~ >> + - * / // ~ ~~ % %% & | ^ ** [] []? []= <=> <-> %+ %- %* %** +@ -@ ~@]
+    VALID_METHOD_NAMES = %i[ID ID_WITH_ARITY TYPE KEYWORD << == === =~ >> + - * / // ~ ~~ % %% & &( | ^ ** [] []? []= <=> <-> %+ %- %* %** +@ -@ ~@]
     EMPTY_ARGS = [].freeze
     SOFT_IDENTIFIER_KEYWORDS = %i[with].freeze
 
@@ -189,15 +189,20 @@ module Tungsten
       end
 
       next_token_skip_space
-      check_for :ID, :NAME, :KEYWORD
+      fused_and_call = @token.type?(:"&(")
+      operator_name = case @token.type
+                      when :"&(", :"&" then "&"
+                      when :"|", :"^" then @token.type.to_s
+                      end
+      check_for :ID, :NAME, :KEYWORD, :TYPE, :"&(", :"&", :"|", :"^"
 
-      name = @token.value.to_s
+      name = operator_name || @token.value.to_s
       name_file = @token.file
       name_row = @token.row
       name_col = @token.col
       next_token
 
-      args = parse_call_args
+      args = parse_call_args(opening_consumed: fused_and_call)
       block = parse_block
 
       call = if block
@@ -859,15 +864,20 @@ module Tungsten
           next_token_skip_space
           # :TYPE included so reserved type names double as method names
           # after a dot (`Tensor.bf16`) — the compiled parser accepts this.
-          check_for :ID, :NAME, :KEYWORD, :TYPE
+          fused_and_call = @token.type?(:"&(")
+          operator_name = case @token.type
+                          when :"&(", :"&" then "&"
+                          when :"|", :"^" then @token.type.to_s
+                          end
+          check_for :ID, :NAME, :KEYWORD, :TYPE, :"&(", :"&", :"|", :"^"
 
-          name = @token.value.to_s
+          name = operator_name || @token.value.to_s
           name_file = @token.file
           name_row = @token.row
           name_col = @token.col
           next_token
 
-          args = parse_call_args
+          args = parse_call_args(opening_consumed: fused_and_call)
           block = parse_block
 
           atomic = if block
@@ -2049,6 +2059,7 @@ module Tungsten
         error "use '-> .method_name' for class methods (not '-> self.method_name')"
       end
 
+      fused_and_parameters = @token.type?(:"&(")
       name = parse_method_name
       arity = extract_arity(name)
       base_name = arity ? name.to_s.split("/", 2)[0] : name
@@ -2059,7 +2070,7 @@ module Tungsten
       inline_body = false
       param_types = nil
 
-      case @token.type
+      case fused_and_parameters ? :"(" : @token.type
 
       # -> name
       when :NL, :";"
@@ -2094,7 +2105,11 @@ module Tungsten
           end
         else
           # don't skip nl, looks ugly to start arguments on next line
-          next_token_skip_space
+          if fused_and_parameters
+            skip_space
+          else
+            next_token_skip_space
+          end
           parse_method_args
           consume :")"
 
@@ -2547,6 +2562,8 @@ module Tungsten
         @token.value
       when :KEYWORD
         @token.value.to_s
+      when :"&("
+        "&"
       else
         # operator
         @token.type.to_s
@@ -2729,62 +2746,18 @@ module Tungsten
       node
     end
 
-    def parse_call_args
+    def parse_call_args(opening_consumed: false)
+      if opening_consumed
+        skip_whitespace_all
+        return parse_parenthesized_call_args
+      end
+
       case @token.type
       when :"{"
         nil
       when :"("
         next_token_skip_whitespace_all
-
-        if @token.type == :")"
-          next_token_skip_space
-          @last_call_parens = true
-          return EMPTY_ARGS
-        end
-
-        args = []
-        while @token.type != :")"
-          if @token.type?(:"*")
-            next_token
-            if @token.type?(:"*")
-              # ** double splat at call site
-              next_token
-              args << Splat.new(Splat.new(parse_expression))
-            else
-              args << Splat.new(parse_expression)
-            end
-          elsif @token.type?(:"**")
-            next_token
-            args << Splat.new(Splat.new(parse_expression))
-          elsif @token.type?(:"&")
-            # &block at call site
-            next_token
-            args << Call.new(nil, "&", [parse_expression])
-          elsif keyword_label_token?
-            # Keyword argument: name: value
-            key = @token.value.to_s
-            next_token  # past label
-            next_token_skip_whitespace_all  # past :
-            value = parse_expression
-            args << HashLiteral.new([[StringLiteral.new(key), value]])
-          else
-            arg = parse_expression
-            if @token.type?(:"=>")
-              next_token_skip_whitespace_all
-              arg = HashLiteral.new([[arg, parse_expression]])
-            end
-            args << arg
-          end
-          skip_whitespace_all
-
-          if @token.type?(:",")
-            next_token_skip_whitespace_all
-          end
-        end
-
-        next_token_skip_space
-        @last_call_parens = true
-        args
+        parse_parenthesized_call_args
       when :SP
         # Inside an `in (A B C)` tuple, space separates tuple elements, not
         # paren-less call args — suppress spaced-arg consumption so each
@@ -2825,6 +2798,58 @@ module Tungsten
           args
         end
       end
+    end
+
+    def parse_parenthesized_call_args
+      if @token.type == :")"
+        next_token_skip_space
+        @last_call_parens = true
+        return EMPTY_ARGS
+      end
+
+      args = []
+      while @token.type != :")"
+        if @token.type?(:"*")
+          next_token
+          if @token.type?(:"*")
+            # ** double splat at call site
+            next_token
+            args << Splat.new(Splat.new(parse_expression))
+          else
+            args << Splat.new(parse_expression)
+          end
+        elsif @token.type?(:"**")
+          next_token
+          args << Splat.new(Splat.new(parse_expression))
+        elsif @token.type?(:"&")
+          # &block at call site
+          next_token
+          args << Call.new(nil, "&", [parse_expression])
+        elsif keyword_label_token?
+          # Keyword argument: name: value
+          key = @token.value.to_s
+          next_token  # past label
+          next_token_skip_whitespace_all  # past :
+          value = parse_expression
+          args << HashLiteral.new([[StringLiteral.new(key), value]])
+        else
+          arg = parse_expression
+          if @token.type?(:"=>")
+            next_token_skip_whitespace_all
+            arg = HashLiteral.new([[arg, parse_expression]])
+          end
+          args << arg
+        end
+        skip_whitespace_all
+
+        if @token.type?(:",")
+          next_token_skip_whitespace_all
+        end
+      end
+
+      next_token_skip_space
+      @last_call_parens = true
+      args
     end
 
     def parse_block(same_line: nil)

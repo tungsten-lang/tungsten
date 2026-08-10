@@ -2248,26 +2248,158 @@ ewscope_md_state = {ids: {}}
     fn_out << "\n"
     i += 1
 
-  # Source-routed operator export: when this module compiles BigInt#+, wrap
-  # the (content-hash-renamed) method body in a STRONG stable-named symbol.
-  # The runtime declares the same symbol WEAK with the C kernel as its
-  # default, so strong-over-weak link resolution routes every bigint-shaped
-  # `+` through source — and, unlike a runtime-resolved pointer, the static
-  # reference is transparent to whole-program LTO. A reopened `+` wins here
-  # exactly as it does in the method table: last definition survives the
-  # replace_or_append pass, so the wrapper names the surviving body.
+  # Source-routed operator export: wrap the selected content-hash-renamed
+  # source body in a STRONG stable-named symbol. The runtime declares the same
+  # symbol WEAK with the C kernel as its bootstrap default, so strong-over-weak
+  # link resolution selects source and remains transparent to whole-program
+  # LTO. A genuinely reopened plain operator wins for its BigInt receiver,
+  # exactly as it does in the method table. Complete bitwise arithmetic for
+  # the remaining domain uses the reserved raw support helpers below rather
+  # than the shape-limited class workers.
   big_op_wrappers = {"+" => "__w_bigint_plus_src", "-" => "__w_bigint_minus_src", "*" => "__w_bigint_times_src", "&" => "__w_bigint_and_src", "|" => "__w_bigint_or_src", "^" => "__w_bigint_xor_src", "/" => "__w_bigint_div_src", "%" => "__w_bigint_mod_src", "<<" => "__w_bigint_shl_src", ">>" => "__w_bigint_shr_src"}
   # B2: the seam target per op, in preference order —
-  #   1. the LAST plain-named body (source_method exactly "+"/"-"/"*",
+  #   1. the LAST plain-named body (source_method exactly the public operator,
   #      not the synthesized dispatcher): post-Phase-4 core has no such
   #      body, so one existing means a program REOPENED the operator, and
-  #      it must win the seam exactly as it wins the method table;
-  #   2. the typed overload worker (`+__ovl_BigInt`, …): the fast body
+  #      it must win the seam for a BigInt left-hand receiver exactly as it
+  #      wins the method table;
+  #   2. for &, |, and ^, the complete reserved raw helper;
+  #   3. for the remaining ops, the typed overload worker: the fast body
   #      behind the dispatcher gate. The seam binds it DIRECTLY —
   #      bigint_src_shape already proved both operands, so routing
   #      through the dispatcher would re-test what the arm knows.
   # The dispatcher itself is never wrapped (fn[:overload_dispatcher]).
   big_op_worker_names = {"+__ovl_BigInt" => "+", "-__ovl_BigInt" => "-", "*__ovl_BigInt" => "*", "&__ovl_BigInt" => "&", "|__ovl_BigInt" => "|", "^__ovl_BigInt" => "^", "/__ovl_BigInt" => "/", "%__ovl_BigInt" => "%", "<<__ovl_Int" => "<<", ">>__ovl_Int" => ">>"}
+
+  # Full bitwise arithmetic is supplied by root-injected raw-ABI helpers. The
+  # names are reserved so application code cannot silently replace support or
+  # leave two ambiguous definitions. Validate all three before choosing seam
+  # targets: every helper takes two raw i64 WValue bit patterns and returns one
+  # raw i64 WValue bit pattern.
+  bitwise_raw_helper_ops = {"__bigint_and_raw" => "&", "__bigint_or_raw" => "|", "__bigint_xor_raw" => "^"}
+  bitwise_raw_helper_names = {"&" => "__bigint_and_raw", "|" => "__bigint_or_raw", "^" => "__bigint_xor_raw"}
+  bitwise_raw_fns = {}
+  bitwise_raw_matches = {}
+  bitwise_raw_complete = true
+  brfi = 0
+  while brfi < mod[:functions].size()
+    brff = mod[:functions][brfi]
+    if brff[:source_class] == nil
+      brop = bitwise_raw_helper_ops[brff[:source_method]]
+      if brop != nil
+        brcount = bitwise_raw_matches[brop]
+        if brcount == nil
+          brcount = 0
+        bitwise_raw_matches[brop] = brcount + 1
+        bitwise_raw_fns[brop] = brff
+    brfi += 1
+  bitwise_bop_keys = ["&", "|", "^"]
+  brki = 0
+  while brki < bitwise_bop_keys.size()
+    brop = bitwise_bop_keys[brki]
+    brki += 1
+    brname = bitwise_raw_helper_names[brop]
+    brmatches = bitwise_raw_matches[brop]
+    if brmatches != nil && brmatches > 1
+      << "error: " + brname + " is reserved for native BigInt bitwise support"
+      exit(1)
+    brfn = bitwise_raw_fns[brop]
+    if mod[:require_bigint_bitwise_src] == true && brfn == nil
+      brmissing = "error: required native BigInt bitwise helper " + brname
+      brmissing = brmissing + " is missing; " + big_op_wrappers[brop]
+      << brmissing + " would bind the weak C bootstrap default"
+      exit(1)
+    if brfn == nil
+      bitwise_raw_complete = false
+    if brfn != nil
+      br_signature_ok = brfn[:source_kind] == :fn_def
+      br_signature_ok = br_signature_ok && brfn[:raw_i64_signature] == true
+      br_signature_ok = br_signature_ok && brfn[:raw_return_type] == :i64
+      br_signature_ok = br_signature_ok && brfn[:params] != nil
+      if br_signature_ok
+        br_signature_ok = brfn[:params].size() == 2
+      if !br_signature_ok
+        << "error: invalid reserved native BigInt bitwise helper " + brname
+        exit(1)
+
+  # Consumed compound assignment has a distinct ABI: the source helper may
+  # trade the dead receiver's storage for the result, while the stable public
+  # seam uses preserve_mostcc. Compound assignment is language-defined rather
+  # than overload dispatch, so no class worker/reopen can replace these three
+  # reserved helpers.
+  bitwise_mut_raw_helper_ops = {"__bigint_and_mut_raw" => "&", "__bigint_or_mut_raw" => "|", "__bigint_xor_mut_raw" => "^"}
+  bitwise_mut_raw_helper_names = {"&" => "__bigint_and_mut_raw", "|" => "__bigint_or_mut_raw", "^" => "__bigint_xor_mut_raw"}
+  bitwise_mut_wrappers = {"&" => "__w_bigint_and_mut_src", "|" => "__w_bigint_or_mut_src", "^" => "__w_bigint_xor_mut_src"}
+  bitwise_mut_raw_fns = {}
+  bitwise_mut_raw_matches = {}
+  bmfi = 0
+  while bmfi < mod[:functions].size()
+    bmff = mod[:functions][bmfi]
+    if bmff[:source_class] == nil
+      bmop = bitwise_mut_raw_helper_ops[bmff[:source_method]]
+      if bmop != nil
+        bmcount = bitwise_mut_raw_matches[bmop]
+        if bmcount == nil
+          bmcount = 0
+        bitwise_mut_raw_matches[bmop] = bmcount + 1
+        bitwise_mut_raw_fns[bmop] = bmff
+    bmfi += 1
+  bmki = 0
+  while bmki < bitwise_bop_keys.size()
+    bmop = bitwise_bop_keys[bmki]
+    bmki += 1
+    bmname = bitwise_mut_raw_helper_names[bmop]
+    bmmatches = bitwise_mut_raw_matches[bmop]
+    if bmmatches != nil && bmmatches > 1
+      << "error: " + bmname + " is reserved for native consumed BigInt bitwise support"
+      exit(1)
+    bmfn = bitwise_mut_raw_fns[bmop]
+    if mod[:require_bigint_bitwise_mut_src] == true && bmfn == nil
+      bmmissing = "error: required native consumed BigInt bitwise helper " + bmname
+      bmmissing = bmmissing + " is missing; " + bitwise_mut_wrappers[bmop]
+      << bmmissing + " would bind the weak C bootstrap default"
+      exit(1)
+    if bmfn != nil
+      bm_signature_ok = bmfn[:source_kind] == :fn_def
+      bm_signature_ok = bm_signature_ok && bmfn[:raw_i64_signature] == true
+      bm_signature_ok = bm_signature_ok && bmfn[:raw_return_type] == :i64
+      bm_signature_ok = bm_signature_ok && bmfn[:params] != nil
+      if bm_signature_ok
+        bm_signature_ok = bmfn[:params].size() == 2
+      if !bm_signature_ok
+        << "error: invalid reserved native consumed BigInt bitwise helper " + bmname
+        exit(1)
+
+  # A strong marker distinguishes the complete immutable raw-helper family
+  # from older binaries whose same-named operator seams wrapped only partial
+  # class workers. Consumed seams fail closed independently above.
+  if bitwise_raw_complete
+    fn_out << "define i64 @__w_bigint_bitwise_source_complete() nounwind {\n"
+    fn_out << "  ret i64 1\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_bitwise_source_complete"] = false
+    known_fns["__w_bigint_bitwise_source_complete"] = true
+
+  # Stable consumed seams are preserve_mostcc by contract. The selected raw
+  # helper may itself be fastcc after the internal calling-convention plan;
+  # spell that convention on the tail call independently of the public ABI.
+  bmwi = 0
+  while bmwi < bitwise_bop_keys.size()
+    bmop = bitwise_bop_keys[bmwi]
+    bmwi += 1
+    bmfn = bitwise_mut_raw_fns[bmop]
+    if bmfn != nil
+      bmtarget_cc = ""
+      if bmfn[:call_conv] != nil && bmfn[:call_conv] != ""
+        bmtarget_cc = bmfn[:call_conv] + " "
+      bmwrapper = bitwise_mut_wrappers[bmop]
+      fn_out << "define preserve_mostcc i64 @" + bmwrapper + "(i64 %a, i64 %b) nounwind {\n"
+      fn_out << "  %r = tail call " + bmtarget_cc + "i64 @" + bmfn[:name] + "(i64 %a, i64 %b)\n"
+      fn_out << "  ret i64 %r\n"
+      fn_out << "}\n\n"
+      used_runtime_fns[bmwrapper] = false
+      known_fns[bmwrapper] = true
+
   big_op_fns = {}
   big_op_worker_fns = {}
   big_op_dispatchers = {}
@@ -2292,10 +2424,13 @@ ewscope_md_state = {ids: {}}
   boi = 0
   while boi < bo_keys.size()
     bop_check = bo_keys[boi]
-    if big_op_dispatchers[bop_check] == true && big_op_fns[bop_check] == nil && big_op_worker_fns[bop_check] == nil
+    if big_op_dispatchers[bop_check] == true && big_op_fns[bop_check] == nil && big_op_worker_fns[bop_check] == nil && bitwise_raw_fns[bop_check] == nil
       << "error: BigInt#" + bop_check + " lowered a dispatcher but no seam target; __w_bigint_*_src would bind the weak C default"
       exit(1)
-    if big_op_fns[bop_check] == nil
+    # The complete raw helper owns &, |, and ^ unless a plain BigInt operator
+    # body genuinely reopens that public method. Do not fall back to the old
+    # shape-limited typed worker, which would create a duplicate/partial seam.
+    if big_op_fns[bop_check] == nil && bitwise_raw_fns[bop_check] == nil
       big_op_fns[bop_check] = big_op_worker_fns[bop_check]
     boi += 1
   seam_decls = StringBuffer(256)
@@ -2309,13 +2444,35 @@ ewscope_md_state = {ids: {}}
     bop = bop_keys[bki]
     bki += 1
     bigop = big_op_fns[bop]
+    bitwise_raw = bitwise_raw_fns[bop]
+    bitwise_reopened = bitwise_raw != nil && bigop != nil
+    if bigop == nil
+      bigop = bitwise_raw
     if bigop != nil
       bp_cc = ""
       if bigop[:call_conv] != nil && bigop[:call_conv] != ""
         bp_cc = bigop[:call_conv] + " "
       fn_out << "define i64 @" + big_op_wrappers[bop] + "(i64 %a, i64 %b) nounwind {\n"
-      fn_out << "  %r = tail call " + bp_cc + "i64 @" + bigop[:name] + "(i64 %a, i64 %b)\n"
-      fn_out << "  ret i64 %r\n"
+      if bitwise_reopened
+        # The stable bitwise seam accepts the complete integer-pair domain,
+        # including `inline op BigInt`. A plain BigInt reopen is an instance
+        # override and may only receive a BigInt left-hand receiver; reverse
+        # mixed pairs stay on the complete raw helper.
+        br_cc = ""
+        if bitwise_raw[:call_conv] != nil && bitwise_raw[:call_conv] != ""
+          br_cc = bitwise_raw[:call_conv] + " "
+        fn_out << "  %a.tag = and i64 %a, -281474976710656\n"
+        fn_out << "  %a.is_bigint = icmp eq i64 %a.tag, -2251799813685248\n"
+        fn_out << "  br i1 %a.is_bigint, label %reopened, label %raw\n"
+        fn_out << "reopened:\n"
+        fn_out << "  %r.reopened = tail call " + bp_cc + "i64 @" + bigop[:name] + "(i64 %a, i64 %b)\n"
+        fn_out << "  ret i64 %r.reopened\n"
+        fn_out << "raw:\n"
+        fn_out << "  %r.raw = tail call " + br_cc + "i64 @" + bitwise_raw[:name] + "(i64 %a, i64 %b)\n"
+        fn_out << "  ret i64 %r.raw\n"
+      else
+        fn_out << "  %r = tail call " + bp_cc + "i64 @" + bigop[:name] + "(i64 %a, i64 %b)\n"
+        fn_out << "  ret i64 %r\n"
       fn_out << "}\n\n"
       # This module DEFINES the seam, so no declaration may be emitted for
       # it — from the runtime list OR from the ccall auto-declare path,

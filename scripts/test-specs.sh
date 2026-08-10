@@ -416,6 +416,9 @@ compiled_specs=(
   spec/compiler/big_array_cap_empty_no_use_subview_spec.w
   spec/compiler/big_array_cap_empty_no_use_view_spec.w
   benchmarks/runtime_ports/bigint_predicate_relaxed_autoload.w
+  spec/compiler/bigint_bitwise_mut_source_seam_spec.w
+  spec/compiler/bigint_bitwise_native_support_spec.w
+  spec/compiler/bigint_bitwise_reopen_source_seam_spec.w
   spec/compiler/bigint_to_i_autoload_spec.w
   spec/compiler/block_passthrough_spec.w
   spec/compiler/cfg_ssa_pruning_spec.w

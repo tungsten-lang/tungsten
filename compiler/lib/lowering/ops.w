@@ -960,7 +960,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     elsif op == :RSHIFT
       rt_fb = "__w_shr_fast"
     # Mutate-if-unique (E4 stage 1): compound arithmetic on a proven-dead
-    # accumulator takes the in-place entry; its runtime guards fall back.
+    # accumulator takes the consumed seam; its guards fall back immutably.
     mut_cc = nil
     if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
       if self_square && env("TUNGSTEN_BIGINT_SQR_MUT") == "0"
@@ -968,11 +968,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       elsif op == :PERCENT
         rt_fb = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
       elsif op == :AMPERSAND && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
-        rt_fb = "w_bigint_and_mut"
+        rt_fb = "__w_bigint_and_mut_src"
       elsif op == :PIPE && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
-        rt_fb = "w_bigint_or_mut"
+        rt_fb = "__w_bigint_or_mut_src"
       elsif op == :CARET && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
-        rt_fb = "w_bigint_xor_mut"
+        rt_fb = "__w_bigint_xor_mut_src"
       elsif op == :LSHIFT && env("TUNGSTEN_BIGINT_SHIFT_MUT") != "0"
         rt_fb = "w_bigint_shl_mut"
       elsif op == :RSHIFT && env("TUNGSTEN_BIGINT_SHIFT_MUT") != "0"
@@ -982,8 +982,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         nil
       else
         rt_fb = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
-      # must match the preserve_mostcc declaration or the call is UB
-      if rt_fb in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "w_bigint_and_mut" "w_bigint_or_mut" "w_bigint_xor_mut" "w_bigint_shl_mut" "w_bigint_shr_mut")
+      # must match the preserve_mostcc declaration/definition or the call is UB
+      if rt_fb in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "__w_bigint_and_mut_src" "__w_bigint_or_mut_src" "__w_bigint_xor_mut_src" "w_bigint_shl_mut" "w_bigint_shr_mut")
         mut_cc = "preserve_mostcc"
     result_temp = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rhs_reg], call_conv: mut_cc})
@@ -1050,11 +1050,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       elsif op == :PERCENT
         rt_op = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
       elsif op == :AMPERSAND && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
-        rt_op = "w_bigint_and_mut"
+        rt_op = "__w_bigint_and_mut_src"
       elsif op == :PIPE && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
-        rt_op = "w_bigint_or_mut"
+        rt_op = "__w_bigint_or_mut_src"
       elsif op == :CARET && env("TUNGSTEN_BIGINT_BITWISE_MUT") != "0"
-        rt_op = "w_bigint_xor_mut"
+        rt_op = "__w_bigint_xor_mut_src"
       elsif op == :LSHIFT && env("TUNGSTEN_BIGINT_SHIFT_MUT") != "0"
         rt_op = "w_bigint_shl_mut"
       elsif op == :RSHIFT && env("TUNGSTEN_BIGINT_SHIFT_MUT") != "0"
@@ -1063,7 +1063,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         nil
       else
         rt_op = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
-      if rt_op in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "w_bigint_and_mut" "w_bigint_or_mut" "w_bigint_xor_mut" "w_bigint_shl_mut" "w_bigint_shr_mut")
+      if rt_op in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "__w_bigint_and_mut_src" "__w_bigint_or_mut_src" "__w_bigint_xor_mut_src" "w_bigint_shl_mut" "w_bigint_shr_mut")
         rt_call_conv = "preserve_mostcc"
     result = next_temp(wfn)
     emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg], call_conv: rt_call_conv})
@@ -1112,8 +1112,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return nil
   bits
 
-# True when `nm` names a local slot, binding, typed var, or a known
-# fn/call — i.e. the identifier refers to real code, not a unit name.
+# True when `nm` names a local slot, binding, typed var, function parameter,
+# or a known fn/call — i.e. the identifier refers to real code, not a unit
+# name.
 # Anything a bare name could legitimately resolve to at lowering time —
 # the pipe shadow set plus function parameters (fn bodies have no
 # class_name, and params live in wfn[:params], not var_slots) and
@@ -1134,6 +1135,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
 -> pipe_ident_shadowed?(ctx, nm)
   if ctx[:func][:var_slots][nm] != nil || ctx[:bindings][nm] != nil || ctx[:var_types][nm] != nil
+    return true
+  params = ctx[:func][:params]
+  if params != nil && params.include?(nm)
     return true
   if ctx[:mod][:known_calls][nm] != nil || ctx[:mod][:known_fn_param_counts][nm] != nil
     return true
@@ -1305,9 +1309,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return nil
   if !known_unit_name?(name)
     return nil
-  if !quoted && (ctx[:func][:var_slots][name] != nil || ctx[:bindings][name] != nil || ctx[:var_types][name] != nil)
-    return nil
-  if !quoted && (ctx[:mod][:known_calls][name] != nil || ctx[:mod][:known_fn_param_counts][name] != nil)
+  if !quoted && pipe_ident_shadowed?(ctx, name)
     return nil
   {name: name, digits: digits}
 

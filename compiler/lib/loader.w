@@ -96,19 +96,26 @@ use parser
 
     ast = Tungsten:AST:Program.new(expressions)
     if from_file == nil
-      # BigInt comparison is runtime support, not a demand-loaded class
-      # method. Integer values can enter through opaque native boundaries and
-      # runtime-internal callers (for example sorting) without any BigInt name
-      # or comparison syntax in the source AST. Always prepend the tiny native
-      # comparator module so every production binary supplies the strong
-      # __w_bigint_compare_src seam; the runtime's weak C body remains only a
-      # stage0/bootstrap default and differential oracle. Loading this support
-      # module through the normal path also records and deduplicates it.
+      # BigInt comparison and bitwise arithmetic are runtime support, not
+      # demand-loaded class methods. Integer values can enter through opaque
+      # native boundaries and runtime-internal callers without any BigInt name
+      # or relevant syntax in the source AST. Always prepend the small native
+      # support modules so every production binary supplies their strong
+      # source seams; the runtime's weak C bodies remain only stage0/bootstrap
+      # defaults and differential oracles. Loading these modules through the
+      # normal path also records and deduplicates them.
       compare_support = load_program_ast("core/numeric/big_int_compare", resolved)
-      if compare_support != nil && compare_support.expressions.size() > 0
+      bitwise_support = load_program_ast("core/numeric/big_int_bitwise", resolved)
+      has_compare_support = compare_support != nil && compare_support.expressions.size() > 0
+      has_bitwise_support = bitwise_support != nil && bitwise_support.expressions.size() > 0
+      if has_compare_support || has_bitwise_support
         with_support = []
-        compare_support.expressions.each -> (support_expr)
-          with_support.push(support_expr)
+        if compare_support != nil
+          compare_support.expressions.each -> (support_expr)
+            with_support.push(support_expr)
+        if bitwise_support != nil
+          bitwise_support.expressions.each -> (support_expr)
+            with_support.push(support_expr)
         expressions.each -> (program_expr)
           with_support.push(program_expr)
         expressions = with_support
@@ -910,8 +917,8 @@ use parser
     nil
 
   -> cache_version
-    # v21: every root AST includes the native BigInt comparison support fn.
-    "loader-ast-v21"
+    # v22: every root AST also includes native BigInt bitwise support fns.
+    "loader-ast-v22"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")

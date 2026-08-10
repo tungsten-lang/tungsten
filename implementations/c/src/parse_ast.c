@@ -38,7 +38,18 @@ typedef struct {
   /* Mirrors Parser#@in_class_body for the `fn` alias: class-scoped `fn`
    * produces method_def + from_fn, while a top-level one produces fn_def. */
   int class_depth;
+  /* 1-based id in the VM's location registry (tc_vm_loc_register_source)
+   * for this parse's source file. When nonzero, call/raise nodes are
+   * stamped with `loc_bits` — a FileOffset-mode W_PACKED_LOCATION —
+   * mirroring parser.w's `call.loc = name_loc` etc. 0 = no stamping
+   * (VM-execution parses). */
+  int loc_file_id;
 } TcAstParser;
+
+/* Sticky file id consumed by tc_parse_bootstrap_ast — set by the fast-load
+ * path right before parsing each file. See tc_parse_set_loc_file_id (tc.h). */
+static int g_tc_parse_loc_file_id = 0;
+void tc_parse_set_loc_file_id(int file_id) { g_tc_parse_loc_file_id = file_id; }
 
 static TcSyntaxToken current_ast(TcAstParser *p) {
   if (p->pos >= p->tokens->count) return p->tokens->items[p->tokens->count - 1];
@@ -178,6 +189,7 @@ static int ast_string_eq(TcAstValue value, const char *text) {
 }
 
 static const char *pa_detect_acc(TcAstValue v);
+static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, TcError *err);
 
 static int ast_node_is(TcAstValue value, const char *node) {
   TcAstValue *node_value = hash_value_ast(value, "node");
@@ -219,6 +231,7 @@ static TcAstValue raw_string(TcAstParser *p, size_t start_pos, size_t end_pos, T
 }
 
 static TcAstValue unquoted_string_ast(const char *bytes, size_t len, TcError *err) {
+  int single_quoted = len >= 2 && bytes[0] == '\'' && bytes[len - 1] == '\'';
   if (len >= 2 && ((bytes[0] == '"' && bytes[len - 1] == '"') || (bytes[0] == '\'' && bytes[len - 1] == '\''))) {
     bytes++;
     len -= 2;
@@ -229,22 +242,86 @@ static TcAstValue unquoted_string_ast(const char *bytes, size_t len, TcError *er
     return tc_ast_nil();
   }
   size_t out_len = 0;
-  for (size_t i = 0; i < len; i++) {
-    if (bytes[i] == '\\' && i + 1 < len) {
-      i++;
-      switch (bytes[i]) {
-        case 'n': copy[out_len++] = '\n'; break;
-        case 'r': copy[out_len++] = '\r'; break;
-        case 't': copy[out_len++] = '\t'; break;
-        case '0': copy[out_len++] = '\0'; break;
-        case 'e': copy[out_len++] = 0x1b; break;
-        case '"': copy[out_len++] = '"'; break;
-        case '\'': copy[out_len++] = '\''; break;
-        case '\\': copy[out_len++] = '\\'; break;
-        default: copy[out_len++] = bytes[i]; break;
+  if (single_quoted) {
+    /* Mirror compiler/lib/lexer.w:unquote_single — only \n \r \t decode;
+     * any other escape drops the backslash and keeps the char. */
+    for (size_t i = 0; i < len; i++) {
+      if (bytes[i] == '\\' && i + 1 < len) {
+        i++;
+        switch (bytes[i]) {
+          case 'n': copy[out_len++] = '\n'; break;
+          case 'r': copy[out_len++] = '\r'; break;
+          case 't': copy[out_len++] = '\t'; break;
+          default: copy[out_len++] = bytes[i]; break;
+        }
+      } else {
+        copy[out_len++] = bytes[i];
       }
-    } else {
-      copy[out_len++] = bytes[i];
+    }
+  } else {
+    /* Mirror compiler/lib/lexer.w:scan_string's escape decode exactly:
+     * n r t \\ " [ ] 0 e decode; \e[ is consumed as a unit (ESC + '[');
+     * \uXXXX decodes the codepoint (to_i(16) prefix semantics, UTF-8
+     * encoded); anything ELSE keeps the BACKSLASH and reprocesses the
+     * next char — `"\x00"` is the four chars \ x 0 0, not `x00`. */
+    size_t i = 0;
+    while (i < len) {
+      char ch = bytes[i];
+      if (ch == '\\' && i + 1 < len) {
+        char esc = bytes[i + 1];
+        if (esc == 'e' && i + 2 < len && bytes[i + 2] == '[') {
+          copy[out_len++] = 0x1b;
+          copy[out_len++] = '[';
+          i += 3;
+          continue;
+        }
+        if (esc == 'u' && i + 5 < len) {
+          uint32_t cpv = 0;
+          for (size_t h = i + 2; h < i + 6; h++) {
+            unsigned char hc = (unsigned char)bytes[h];
+            uint32_t d;
+            if (hc >= '0' && hc <= '9') d = hc - '0';
+            else if (hc >= 'a' && hc <= 'f') d = hc - 'a' + 10;
+            else if (hc >= 'A' && hc <= 'F') d = hc - 'A' + 10;
+            else break;
+            cpv = cpv * 16 + d;
+          }
+          if (cpv < 0x80) {
+            copy[out_len++] = (char)cpv;
+          } else if (cpv < 0x800) {
+            copy[out_len++] = (char)(0xC0 | (cpv >> 6));
+            copy[out_len++] = (char)(0x80 | (cpv & 0x3F));
+          } else if (cpv < 0x10000) {
+            copy[out_len++] = (char)(0xE0 | (cpv >> 12));
+            copy[out_len++] = (char)(0x80 | ((cpv >> 6) & 0x3F));
+            copy[out_len++] = (char)(0x80 | (cpv & 0x3F));
+          } else {
+            copy[out_len++] = (char)(0xF0 | (cpv >> 18));
+            copy[out_len++] = (char)(0x80 | ((cpv >> 12) & 0x3F));
+            copy[out_len++] = (char)(0x80 | ((cpv >> 6) & 0x3F));
+            copy[out_len++] = (char)(0x80 | (cpv & 0x3F));
+          }
+          i += 6;
+          continue;
+        }
+        switch (esc) {
+          case 'n': copy[out_len++] = '\n'; i += 2; continue;
+          case 'r': copy[out_len++] = '\r'; i += 2; continue;
+          case 't': copy[out_len++] = '\t'; i += 2; continue;
+          case '0': copy[out_len++] = '\0'; i += 2; continue;
+          case '"': copy[out_len++] = '"'; i += 2; continue;
+          case '\\': copy[out_len++] = '\\'; i += 2; continue;
+          case '[': copy[out_len++] = '['; i += 2; continue;
+          case ']': copy[out_len++] = ']'; i += 2; continue;
+          case 'e': copy[out_len++] = 0x1b; i += 2; continue;
+          default: break;
+        }
+        copy[out_len++] = '\\';
+        i += 1;
+        continue;
+      }
+      copy[out_len++] = ch;
+      i++;
     }
   }
   copy[out_len] = '\0';
@@ -260,23 +337,71 @@ static TcAstValue unquoted_string_ast(const char *bytes, size_t len, TcError *er
 //   - `[]` (empty) is literal
 //   - `\e[` (ANSI escape prefix) is literal — the `\e` consumes the `[` too
 static int string_body_has_interp(const char *bytes, size_t len) {
-  for (size_t i = 0; i < len; i++) {
-    char ch = bytes[i];
+  size_t i = 0;
+  size_t seg_len = 0; /* decoded chars since body start / last interp */
+  int prev_esc = 0;   /* last decoded char was ESC (0x1B) */
+  while (i < len) {
+    unsigned char ch = (unsigned char)bytes[i];
     if (ch == '\\' && i + 1 < len) {
-      // \e[ — ANSI escape prefix. The Tungsten lexer consumes both `e`
-      // and `[` as a unit so the `[` isn't seen as an interp opener.
-      // Match that here so `"\e[m"` stays a plain string.
-      if (bytes[i + 1] == 'e' && i + 2 < len && bytes[i + 2] == '[') {
-        i += 2;  // skip `\e[`
+      unsigned char e = (unsigned char)bytes[i + 1];
+      if (e == 'n' || e == 'r' || e == 't' || e == '\\' || e == '"' ||
+          e == '[' || e == ']' || e == '0') {
+        i += 2;
+        seg_len++;
+        prev_esc = 0;
         continue;
       }
-      i++;  // skip generic escape
+      if (e == 'e') {
+        // \e[ — ANSI escape prefix. The Tungsten lexer consumes both `e`
+        // and `[` as a unit so the `[` isn't seen as an interp opener.
+        if (i + 2 < len && bytes[i + 2] == '[') {
+          i += 3;
+          seg_len += 2;
+          prev_esc = 0;
+        } else {
+          i += 2;
+          seg_len++;
+          prev_esc = 1; /* decoded ESC */
+        }
+        continue;
+      }
+      if (e == 'u' && i + 5 < len) {
+        uint32_t cpv = 0;
+        for (size_t h = i + 2; h < i + 6; h++) {
+          unsigned char hc = (unsigned char)bytes[h];
+          uint32_t d;
+          if (hc >= '0' && hc <= '9') d = hc - '0';
+          else if (hc >= 'a' && hc <= 'f') d = hc - 'a' + 10;
+          else if (hc >= 'A' && hc <= 'F') d = hc - 'A' + 10;
+          else break; /* to_i(16) prefix semantics */
+          cpv = cpv * 16 + d;
+        }
+        i += 6;
+        seg_len++;
+        prev_esc = (cpv == 27);
+        continue;
+      }
+      // Unrecognized escape — the canonical lexer consumes ONLY the
+      // backslash and reprocesses the next char as a regular character.
+      i += 1;
+      seg_len++;
+      prev_esc = 0;
       continue;
     }
-    if (ch == '[') {
-      if (i + 1 < len && bytes[i + 1] == ']') continue;  // [] literal pair
+    if (ch == '[' && i + 1 < len && bytes[i + 1] != ']' &&
+        !(seg_len > 0 && prev_esc)) {
       return 1;
     }
+    if (ch == '[') {
+      // literal `[]` pair or ESC-guarded `[` — plain character
+      i++;
+      seg_len++;
+      prev_esc = 0;
+      continue;
+    }
+    i++;
+    seg_len++;
+    prev_esc = (ch == 27);
   }
   return 0;
 }
@@ -318,23 +443,62 @@ static TcAstValue parse_string_interp_ast(TcAstParser *p, const char *bytes, siz
         i += 3;
         continue;
       }
-      // Resolve escape into the literal segment, same as unquoted_string_ast.
-      switch (esc) {
-        case 'n': lit[lit_len++] = '\n'; break;
-        case 'r': lit[lit_len++] = '\r'; break;
-        case 't': lit[lit_len++] = '\t'; break;
-        case '0': lit[lit_len++] = '\0'; break;
-        case '"': lit[lit_len++] = '"'; break;
-        case '\'': lit[lit_len++] = '\''; break;
-        case '\\': lit[lit_len++] = '\\'; break;
-        case 'e': lit[lit_len++] = 0x1b; break;
-        default: lit[lit_len++] = esc; break;
+      // \uXXXX — canonical scan_string consumes 6 chars and appends the
+      // decoded codepoint (UTF-8 encoded). to_i(16) prefix semantics on
+      // the 4 hex chars.
+      if (esc == 'u' && i + 5 < len) {
+        uint32_t cpv = 0;
+        for (size_t h = i + 2; h < i + 6; h++) {
+          unsigned char hc = (unsigned char)bytes[h];
+          uint32_t d;
+          if (hc >= '0' && hc <= '9') d = hc - '0';
+          else if (hc >= 'a' && hc <= 'f') d = hc - 'a' + 10;
+          else if (hc >= 'A' && hc <= 'F') d = hc - 'A' + 10;
+          else break;
+          cpv = cpv * 16 + d;
+        }
+        if (cpv < 0x80) {
+          lit[lit_len++] = (char)cpv;
+        } else if (cpv < 0x800) {
+          lit[lit_len++] = (char)(0xC0 | (cpv >> 6));
+          lit[lit_len++] = (char)(0x80 | (cpv & 0x3F));
+        } else if (cpv < 0x10000) {
+          lit[lit_len++] = (char)(0xE0 | (cpv >> 12));
+          lit[lit_len++] = (char)(0x80 | ((cpv >> 6) & 0x3F));
+          lit[lit_len++] = (char)(0x80 | (cpv & 0x3F));
+        } else {
+          lit[lit_len++] = (char)(0xF0 | (cpv >> 18));
+          lit[lit_len++] = (char)(0x80 | ((cpv >> 12) & 0x3F));
+          lit[lit_len++] = (char)(0x80 | ((cpv >> 6) & 0x3F));
+          lit[lit_len++] = (char)(0x80 | (cpv & 0x3F));
+        }
+        i += 6;
+        continue;
       }
-      i += 2;
+      // Recognized escapes, mirroring compiler/lib/lexer.w:scan_string.
+      switch (esc) {
+        case 'n': lit[lit_len++] = '\n'; i += 2; continue;
+        case 'r': lit[lit_len++] = '\r'; i += 2; continue;
+        case 't': lit[lit_len++] = '\t'; i += 2; continue;
+        case '0': lit[lit_len++] = '\0'; i += 2; continue;
+        case '"': lit[lit_len++] = '"'; i += 2; continue;
+        case '\\': lit[lit_len++] = '\\'; i += 2; continue;
+        case '[': lit[lit_len++] = '['; i += 2; continue;
+        case ']': lit[lit_len++] = ']'; i += 2; continue;
+        case 'e': lit[lit_len++] = 0x1b; i += 2; continue;
+        default: break;
+      }
+      // Unrecognized escape: canonical lexer appends ONLY the backslash
+      // and reprocesses the next char as a regular character.
+      lit[lit_len++] = '\\';
+      i += 1;
       continue;
     }
-    // [] empty pair is a literal
-    if (ch == '[' && i + 1 < len && bytes[i + 1] != ']') {
+    // [] empty pair is a literal; a `[` immediately after a decoded ESC
+    // is also literal (ANSI CSI guard — matches scan_string). The ESC
+    // check inspects the *decoded* segment accumulated so far.
+    if (ch == '[' && i + 1 < len && bytes[i + 1] != ']' &&
+        !(lit_len > 0 && (unsigned char)lit[lit_len - 1] == 27)) {
       // Flush accumulated literal segment, if any.
       if (lit_len > 0) {
         TcAstValue pair = tc_ast_array_new(err);
@@ -367,7 +531,17 @@ static TcAstValue parse_string_interp_ast(TcAstParser *p, const char *bytes, siz
         expr_end++;
       }
       // Parse the slice [expr_start..expr_end) as a Tungsten expression.
-      TcAstValue expr_ast = parse_interp_subexpression(p, bytes + expr_start, expr_end - expr_start, err);
+      // The canonical lexer pushes `expr.strip()` — trim ASCII whitespace
+      // from both ends before the sub-parse (String#strip's byte set).
+      size_t es = expr_start;
+      size_t ee = expr_end;
+      while (es < ee && (bytes[es] == ' ' || bytes[es] == '\t' || bytes[es] == '\n' ||
+                         bytes[es] == '\r' || bytes[es] == '\f' || bytes[es] == '\v'))
+        es++;
+      while (ee > es && (bytes[ee - 1] == ' ' || bytes[ee - 1] == '\t' || bytes[ee - 1] == '\n' ||
+                         bytes[ee - 1] == '\r' || bytes[ee - 1] == '\f' || bytes[ee - 1] == '\v'))
+        ee--;
+      TcAstValue expr_ast = parse_interp_subexpression(p, bytes + es, ee - es, err);
       if (expr_ast.kind == TC_AST_NIL) {
         tc_ast_free(parts);
         free(lit);
@@ -413,6 +587,30 @@ static TcAstValue parse_string_interp_ast(TcAstParser *p, const char *bytes, siz
   return node;
 }
 
+// True when an AST subtree contains a `raw` fallback node anywhere. Used
+// by parse_interp_subexpression to detect that a span attempt needed the
+// unparseable-span fallback (the canonical parser would instead have
+// stopped its expression parse earlier and discarded the tail).
+static int ast_contains_raw(TcAstValue v) {
+  if (v.kind == TC_AST_HASH && v.as.hash) {
+    for (size_t i = 0; i < v.as.hash->count; i++) {
+      TcAstEntry *e = &v.as.hash->items[i];
+      if (strcmp(e->key, "node") == 0 &&
+          (e->value.kind == TC_AST_STRING || e->value.kind == TC_AST_SYMBOL) &&
+          e->value.as.string.len == 3 &&
+          memcmp(e->value.as.string.bytes, "raw", 3) == 0) {
+        return 1;
+      }
+      if (ast_contains_raw(e->value)) return 1;
+    }
+  } else if (v.kind == TC_AST_ARRAY && v.as.array) {
+    for (size_t i = 0; i < v.as.array->count; i++) {
+      if (ast_contains_raw(v.as.array->items[i])) return 1;
+    }
+  }
+  return 0;
+}
+
 // Lex+parse a `[expr]` slice as a Tungsten expression. Drives a fresh
 // tc_source_build → tc_lex_source → tc_parse_bootstrap_ast pipeline on
 // a synthetic source containing just the expression bytes, then peels
@@ -455,29 +653,91 @@ static TcAstValue parse_interp_subexpression(TcAstParser *p, const char *bytes, 
     tc_source_free(&source);
     return tc_ast_nil();
   }
-  TcAstValue program;
-  TcAstStats stats;
-  int ok = tc_parse_bootstrap_ast(&source, &syntax, &program, &stats, p->flags, p->flags_len, err);
-  if (!ok) {
-    tc_syntax_tokens_free(&syntax);
-    tc_tokens_free(&tokens);
-    tc_source_free(&source);
-    return tc_ast_nil();
+  // Mirror parser.w:parse_string_interp exactly: a fresh parser on the
+  // segment, skip_newlines(), then parse ONE expression — anything after
+  // it in the segment is silently DISCARDED. Parsing the segment as a
+  // whole program (the old shape) errored on the discardable tail: the
+  // canonical lexer's quote-blind bracket scan can swallow lines of
+  // real code into a segment (an unmatched `[` at the end of a string),
+  // and the canonical parser never looks past the first expression.
+  TcAstParser sub = {
+      .source = &source, .tokens = &syntax, .pos = 0, .stats = {0, 0, 0},
+      .flags = p->flags, .flags_len = p->flags_len,
+      .namespace_prefix = NULL, .namespace_len = 0,
+      .declared_classes = NULL, .declared_class_lens = NULL,
+      .declared_class_count = 0, .declared_class_cap = 0,
+      .class_depth = 0,
+      /* parser.w's parse_string_interp spins up Parser.new(..., "<interp>"),
+       * which registers "<interp>" tables (first snippet wins, per the
+       * registry's path dedupe). Mirror that — but only when the outer
+       * parse is a location-bearing one (compiler fast-load); the VM's
+       * execution parses never register. */
+      .loc_file_id = p->loc_file_id > 0 ? tc_vm_loc_register_source("<interp>", &source) : 0,
+  };
+  // skip_newlines (+ leading layout tokens a fresh mid-indent segment
+  // lexes to; canonical's expression parse never treats them as content).
+  while (!at_ast(&sub, TC_K_EOF)) {
+    TcKind k = current_ast(&sub).kind;
+    if (k == TC_K_NEWLINE || k == TC_K_INDENT || k == TC_K_DEDENT) {
+      advance_ast(&sub);
+      continue;
+    }
+    break;
   }
-  // Extract first expression, deep-clone (the program is freed below).
+  // Expression span: up to the first top-level NEWLINE (expressions do
+  // not cross bare newlines in the canonical grammar).
+  size_t expr_start = sub.pos;
+  size_t expr_end = expr_start;
+  long depth = 0;
+  while (expr_end < sub.tokens->count) {
+    TcKind k = sub.tokens->items[expr_end].kind;
+    if (k == TC_K_EOF) break;
+    if (k == TC_K_LPAREN || k == TC_K_LBRACKET || k == TC_K_LBRACE ||
+        k == TC_K_BLOCK_CALL) {
+      depth++;
+    } else if (k == TC_K_RPAREN || k == TC_K_RBRACKET || k == TC_K_RBRACE) {
+      if (depth > 0) depth--;
+    } else if (depth == 0 &&
+               (k == TC_K_NEWLINE || k == TC_K_INDENT || k == TC_K_DEDENT)) {
+      break;
+    }
+    expr_end++;
+  }
   TcAstValue result = tc_ast_nil();
-  if (program.kind == TC_AST_HASH && program.as.hash) {
-    for (size_t i = 0; i < program.as.hash->count; i++) {
-      if (strcmp(program.as.hash->items[i].key, "expressions") == 0 &&
-          program.as.hash->items[i].value.kind == TC_AST_ARRAY &&
-          program.as.hash->items[i].value.as.array &&
-          program.as.hash->items[i].value.as.array->count > 0) {
-        result = tc_ast_clone(program.as.hash->items[i].value.as.array->items[0], err);
+  if (expr_end > expr_start) {
+    // The canonical parse_expression is recursive descent: it consumes the
+    // longest leading expression and leaves the rest of the segment
+    // unconsumed (then discarded). The span parser must consume its whole
+    // span, so approximate that with the longest token-prefix that parses
+    // WITHOUT the raw fallback: a swallowed segment like `"…" x i8`
+    // (quote-blind bracket scan over real code) parses as just the leading
+    // string, exactly as the canonical parser stops after the string.
+    for (size_t end_try = expr_end; end_try > expr_start; end_try--) {
+      TcError attempt_err = {0};
+      TcAstValue expr = parse_expr_span_ast(&sub, expr_start, end_try, &attempt_err);
+      if (expr.kind != TC_AST_NIL && !ast_contains_raw(expr)) {
+        result = tc_ast_clone(expr, err);
+        tc_error_free(&attempt_err);
         break;
       }
+      if (end_try == expr_start + 1) {
+        // No prefix parsed raw-free. Keep the shortest attempt's tree (or
+        // its error) so downstream reporting matches the old behavior.
+        if (expr.kind != TC_AST_NIL) {
+          result = tc_ast_clone(expr, err);
+        } else if (attempt_err.message && err && !err->message) {
+          tc_error_set(err, "%s", attempt_err.message);
+        }
+      }
+      tc_error_free(&attempt_err);
+    }
+    if (result.kind == TC_AST_NIL && err && err->message) {
+      tc_syntax_tokens_free(&syntax);
+      tc_tokens_free(&tokens);
+      tc_source_free(&source);
+      return tc_ast_nil();
     }
   }
-  tc_ast_free(program);
   tc_syntax_tokens_free(&syntax);
   tc_tokens_free(&tokens);
   tc_source_free(&source);
@@ -899,8 +1159,34 @@ static int early_bare_arg_start_ast(TcAstParser *p, size_t pos) {
   return bare_arg_start_ast(p, pos);
 }
 
-static TcAstValue call_node_ast(TcAstParser *p, size_t start, TcAstValue receiver, const char *name, size_t name_len,
-                                TcAstValue args, TcError *err) {
+/* Stamp a node with the canonical location triple derived from the anchor
+ * token: `line`/`col` ints (the values @line_at/@col_at would give) plus
+ * `loc_bits` — a FileOffset-mode W_PACKED_LOCATION whose file_id/offset
+ * resolve through the VM's registered tables, exactly like parser.w's
+ * `node.loc = make_loc_here()`. The wcs call-site table reads node.col,
+ * and lowering's setter-dispatch synthesis copies ast_get(node, :loc), so
+ * both representations must be present. */
+static int stamp_node_loc(TcAstParser *p, TcAstValue node, size_t anchor_pos, TcError *err) {
+  WValue tok = p->tokens->items[anchor_pos].packed;
+  uint32_t off = tc_token_offset(tok);
+  if (!tc_ast_hash_set(node, "line", tc_ast_int(token_line_ast(p->source, tok)), err) ||
+      !tc_ast_hash_set(node, "col", tc_ast_int((int64_t)p->source->cp_cols[off]), err)) {
+    return 0;
+  }
+  if (p->loc_file_id > 0) {
+    WValue loc = w_box_location_file_offset(p->loc_file_id, off);
+    if (!tc_ast_hash_set(node, "loc_bits", tc_ast_int((int64_t)loc), err)) return 0;
+  }
+  return 1;
+}
+
+/* anchor_pos: the token the canonical parser derives this call's `:loc`
+ * from (method-name token for tight dot-calls and bare calls, the dot for
+ * space-separated chains, the `[` for index calls, the arrow for the
+ * implicit-each synthesis). SIZE_MAX = no location (the canonical parser
+ * leaves `.loc` unset on this synthesized call). */
+static TcAstValue call_node_ast(TcAstParser *p, size_t start, size_t anchor_pos, TcAstValue receiver,
+                                const char *name, size_t name_len, TcAstValue args, TcError *err) {
   TcAstValue node = node_hash(p, "call", start, err);
   if (node.kind != TC_AST_HASH) return node;
   if (!tc_ast_hash_set(node, "receiver", receiver, err) ||
@@ -909,6 +1195,12 @@ static TcAstValue call_node_ast(TcAstParser *p, size_t start, TcAstValue receive
       !tc_ast_hash_set(node, "block", tc_ast_nil(), err)) {
     tc_ast_free(node);
     return tc_ast_nil();
+  }
+  if (anchor_pos != (size_t)-1) {
+    if (!stamp_node_loc(p, node, anchor_pos, err)) {
+      tc_ast_free(node);
+      return tc_ast_nil();
+    }
   }
   return node;
 }
@@ -932,6 +1224,14 @@ static TcAstValue parse_bare_command_call_ast(TcAstParser *p, size_t start, size
   }
   if (early && !early_bare_arg_start_ast(p, start + 1)) return tc_ast_nil();
   if (!early && !bare_arg_start_ast(p, start + 1)) return tc_ast_nil();
+  /* A tight `$field` (no space before the `$`) is the postfix view-decl
+   * field read `expr$field` (parser.w parse_postfix_from), NEVER a bare
+   * command argument — `other$value` as a command call turned a raw
+   * NaN-box bits read into a closure invocation of `other`. A spaced
+   * `cmd $global` stays a command call, exactly like canon (@sp_before). */
+  if (p->tokens->items[start + 1].kind == TC_K_GLOBAL && !token_sp_before_ast(p, start + 1)) {
+    return tc_ast_nil();
+  }
 
   char *name = NULL;
   size_t name_len = 0;
@@ -941,7 +1241,7 @@ static TcAstValue parse_bare_command_call_ast(TcAstParser *p, size_t start, size
     free(name);
     return tc_ast_nil();
   }
-  TcAstValue node = call_node_ast(p, start, tc_ast_nil(), name, name_len, args, err);
+  TcAstValue node = call_node_ast(p, start, start, tc_ast_nil(), name, name_len, args, err);
   free(name);
   return node;
 }
@@ -958,7 +1258,7 @@ static TcAstValue parse_call_span_ast(TcAstParser *p, size_t start, size_t end, 
       free(name);
       return tc_ast_nil();
     }
-    TcAstValue node = call_node_ast(p, start, tc_ast_nil(), name, name_len, args, err);
+    TcAstValue node = call_node_ast(p, start, start, tc_ast_nil(), name, name_len, args, err);
     free(name);
     return node;
   }
@@ -982,7 +1282,11 @@ static TcAstValue parse_call_span_ast(TcAstParser *p, size_t start, size_t end, 
         tc_ast_free(receiver);
         return tc_ast_nil();
       }
-      TcAstValue node = call_node_ast(p, start, receiver, name, name_len, args, err);
+      /* Anchor mirrors parser.w: tight `.name` chains use the NAME
+       * token (parse_postfix_from's name_loc), space-separated chains
+       * use the DOT (parse_message_chain's dot_loc). */
+      size_t anchor = token_sp_before_ast(p, dot) ? dot : name_pos;
+      TcAstValue node = call_node_ast(p, start, anchor, receiver, name, name_len, args, err);
       free(name);
       return node;
     }
@@ -1047,6 +1351,41 @@ static int dec_literal_beyond_i64(const char *raw) {
   return strcmp(digits, "9223372036854775807") > 0;
 }
 
+/* Mirror parser.w:int_literal_format — classify an int literal's spelling
+ * from its token text. The :hex/:bin/:oct marker matters beyond metadata:
+ * inference types hex literals as machine i64 (bit-pattern semantics) and
+ * the emitter prints them as `u0x…` immediates, so omitting it flipped
+ * whole functions (e.g. Integer#prev) from raw ops to boxed helper calls
+ * and changed the emitted constant spelling. Returns NULL for plain
+ * decimals (canonical format nil). */
+/* Mirror parser.w's type-hint text cleanup: cut at a trailing `#` comment,
+ * then strip ASCII whitespace from both ends (String#strip's byte set). */
+static void clean_type_hint_text(const char *text, size_t len, size_t *out_start, size_t *out_len) {
+  size_t s = 0, e = len;
+  for (size_t i = 0; i < len; i++) {
+    if (text[i] == '#') {
+      e = i;
+      break;
+    }
+  }
+  while (s < e && (text[s] == ' ' || text[s] == '\t' || text[s] == '\n' ||
+                   text[s] == '\r' || text[s] == '\f' || text[s] == '\v'))
+    s++;
+  while (e > s && (text[e - 1] == ' ' || text[e - 1] == '\t' || text[e - 1] == '\n' ||
+                   text[e - 1] == '\r' || text[e - 1] == '\f' || text[e - 1] == '\v'))
+    e--;
+  *out_start = s;
+  *out_len = e - s;
+}
+
+static const char *int_literal_format_ast(const char *raw) {
+  if (raw[0] == '0' && (raw[1] == 'x' || raw[1] == 'X')) return "hex";
+  if (raw[0] == '0' && (raw[1] == 'b' || raw[1] == 'B')) return "bin";
+  if (raw[0] == '0' && (raw[1] == 'o' || raw[1] == 'O')) return "oct";
+  if (dec_literal_beyond_i64(raw)) return "dec_big";
+  return NULL;
+}
+
 static TcAstValue int_node_value_ast(TcAstParser *p, size_t pos, int64_t value, const char *raw, TcError *err) {
   TcAstValue node = node_hash(p, "int", pos, err);
   if (node.kind != TC_AST_HASH) return node;
@@ -1055,8 +1394,8 @@ static TcAstValue int_node_value_ast(TcAstParser *p, size_t pos, int64_t value, 
     tc_ast_free(node);
     return tc_ast_nil();
   }
-  if (dec_literal_beyond_i64(raw) &&
-      !tc_ast_hash_set(node, "format", tc_ast_symbol_copy("dec_big", 7, err), err)) {
+  const char *fmt = int_literal_format_ast(raw);
+  if (fmt && !tc_ast_hash_set(node, "format", tc_ast_symbol_copy(fmt, strlen(fmt), err), err)) {
     tc_ast_free(node);
     return tc_ast_nil();
   }
@@ -1252,12 +1591,15 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
         tc_ast_free(node);
         node = tc_ast_nil();
       }
-      /* Beyond-i64 decimals carry format :dec_big (dec_literal_beyond_i64)
-       * so magnitude-sensitive inference matches the self-hosted parser. */
-      if (node.kind == TC_AST_HASH && dec_literal_beyond_i64(text) &&
-          !tc_ast_hash_set(node, "format", tc_ast_symbol_copy("dec_big", 7, err), err)) {
-        tc_ast_free(node);
-        node = tc_ast_nil();
+      /* Spelling format marker (:hex/:bin/:oct/:dec_big) mirrors
+       * parser.w:int_literal_format — inference and the emitter both key
+       * on it (machine-i64 typing, u0x immediates). */
+      if (node.kind == TC_AST_HASH) {
+        const char *fmt = int_literal_format_ast(text);
+        if (fmt && !tc_ast_hash_set(node, "format", tc_ast_symbol_copy(fmt, strlen(fmt), err), err)) {
+          tc_ast_free(node);
+          node = tc_ast_nil();
+        }
       }
       free(clean);
       break;
@@ -1400,7 +1742,13 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
     case TC_K_NAME:
     case TC_K_TYPE:
     case TC_K_GLOBAL:
-      node = node_hash(p, "var", pos, err);
+      /* `$name` globals are GVar nodes in the canonical parser (parser.w:
+       * `Tungsten:AST:GVar.new(...)`). The kind matters for inference:
+       * `$value` as :gvar infers :raw_i64 (the receiver's raw NaN-box
+       * bits), so `$value & MASK` lowers to a native `and` — as a plain
+       * :var it typed nil and every Integer tag test went through boxed
+       * __w_band_fast/__w_int_fast chains. */
+      node = node_hash(p, kind == TC_K_GLOBAL ? "gvar" : "var", pos, err);
       if (node.kind == TC_AST_HASH &&
           !tc_ast_hash_set(node, "name", tc_ast_string_copy(text, text_len, err), err)) {
         tc_ast_free(node);
@@ -1490,7 +1838,12 @@ static TcAstValue block_node_ast(TcAstParser *p, size_t start, TcAstValue params
     tc_ast_free(body);
     return block;
   }
-  if (!tc_ast_hash_set(block, "params", params, err) ||
+  /* The canonical parser never sets :loc on Block nodes (parser.w builds
+   * `Tungsten:AST:Block.new(params, body)` bare), so block.line is nil and
+   * the wfm function-metadata rows for block fns carry line 0. Mirror that:
+   * a real line here diverged every `block in …` wfm row. */
+  if (!tc_ast_hash_set(block, "line", tc_ast_nil(), err) ||
+      !tc_ast_hash_set(block, "params", params, err) ||
       !tc_ast_hash_set(block, "body", body, err)) {
     tc_ast_free(block);
     return tc_ast_nil();
@@ -1528,6 +1881,29 @@ static int attach_block_body_ast(TcAstValue node, TcAstValue body, TcError *err)
     if (!value) return 0;
     return attach_block_body_ast(*value, body, err);
   }
+  /* The canonical lambda parse consumes its indented body wherever the
+   * arrow sits in the statement, so the body belongs to the LAST lambda
+   * down the right-hand spine. Recurse through the statement wrappers
+   * that carry a trailing expression: `return x.map -> (e)` + INDENT
+   * body silently LOST the block body without this (the block compiled
+   * to `ret 0` — the interpreter's :array arm mapped every element to
+   * zero under fast parse). */
+  if (ast_node_is(node, "return") || ast_node_is(node, "print")) {
+    TcAstValue *value = hash_value_ast(node, "value");
+    if (!value) return 0;
+    return attach_block_body_ast(*value, body, err);
+  }
+  if (ast_node_is(node, "puts")) {
+    TcAstValue *value = hash_value_ast(node, "value");
+    if (value && value->kind == TC_AST_ARRAY && value->as.array && value->as.array->count > 0)
+      return attach_block_body_ast(value->as.array->items[value->as.array->count - 1], body, err);
+    return 0;
+  }
+  if (ast_node_is(node, "binary_op")) {
+    TcAstValue *right = hash_value_ast(node, "right");
+    if (!right) return 0;
+    return attach_block_body_ast(*right, body, err);
+  }
   if (!ast_node_is(node, "call")) return 0;
   TcAstValue *block = hash_value_ast(node, "block");
   if (!block || block->kind == TC_AST_NIL) return 0;
@@ -1561,7 +1937,7 @@ static TcAstValue arrow_call_or_block_ast(TcAstParser *p, size_t start, size_t e
         tc_ast_free(block);
         return tc_ast_nil();
       }
-      TcAstValue call = call_node_ast(p, start, tc_ast_nil(), "each", 4, args, err);
+      TcAstValue call = call_node_ast(p, start, arrow_pos, tc_ast_nil(), "each", 4, args, err);
       if (call.kind == TC_AST_HASH && !tc_ast_hash_set(call, "block", block, err)) {
         tc_ast_free(call);
         return tc_ast_nil();
@@ -1576,7 +1952,7 @@ static TcAstValue arrow_call_or_block_ast(TcAstParser *p, size_t start, size_t e
     tc_ast_free(block);
     return tc_ast_nil();
   }
-  TcAstValue call = call_node_ast(p, start, left, "each", 4, args, err);
+  TcAstValue call = call_node_ast(p, start, arrow_pos, left, "each", 4, args, err);
   if (call.kind == TC_AST_HASH && !tc_ast_hash_set(call, "block", block, err)) {
     tc_ast_free(call);
     return tc_ast_nil();
@@ -1869,7 +2245,7 @@ static TcAstValue parse_index_call_ast(TcAstParser *p, size_t start, size_t end,
     tc_ast_free(receiver);
     return tc_ast_nil();
   }
-  return call_node_ast(p, start, receiver, "[]", 2, args, err);
+  return call_node_ast(p, start, open, receiver, "[]", 2, args, err);
 }
 
 static TcAstValue parse_typed_array_ast(TcAstParser *p, size_t start, size_t end, TcError *err) {
@@ -2066,7 +2442,26 @@ static TcAstValue parse_keyword_arg_ast(TcAstParser *p, size_t start, size_t end
 static TcAstValue parse_io_ast(TcAstParser *p, size_t start, size_t end, TcError *err) {
   TcKind kind = p->tokens->items[start].kind;
   if (!(kind == TC_K_PUTS_OP || kind == TC_K_LSHIFT || kind == TC_K_PRINT_OP)) return tc_ast_nil();
-  /* Canonical Puts/Print nodes carry a LIST of value expressions
+  /* `<-` print: the canonical Print node (parser.w: `Tungsten:AST:
+   * Print.new(parse_assignment())`) carries a SINGLE value expression —
+   * NOT the Puts list shape. lower_print does lower_expression(node.value)
+   * directly, so an array here lowered to garbage (w_print(0)) and
+   * silently dropped the printed call. */
+  if (kind == TC_K_PRINT_OP) {
+    TcAstValue value = parse_expr_span_ast(p, start + 1, end, err);
+    if (value.kind == TC_AST_NIL && err && err->message) return tc_ast_nil();
+    TcAstValue node = node_hash(p, "print", start, err);
+    if (node.kind != TC_AST_HASH) {
+      tc_ast_free(value);
+      return node;
+    }
+    if (!tc_ast_hash_set(node, "value", value, err)) {
+      tc_ast_free(node);
+      return tc_ast_nil();
+    }
+    return node;
+  }
+  /* Canonical Puts nodes carry a LIST of value expressions
    * (ast.w `+ Puts`: @value is a list, length 1 for the common `<< x`;
    * `<< a, b` prints one line per value). The hosted compiler's
    * lower_puts iterates node.value, so a bare single node here made
@@ -2095,7 +2490,7 @@ static TcAstValue parse_io_ast(TcAstParser *p, size_t start, size_t end, TcError
     if (seg_end == end) break;
     seg_start = seg_end + 1;
   }
-  TcAstValue node = node_hash(p, kind == TC_K_PRINT_OP ? "print" : "puts", start, err);
+  TcAstValue node = node_hash(p, "puts", start, err);
   if (node.kind != TC_AST_HASH) {
     tc_ast_free(values);
     return node;
@@ -2127,6 +2522,65 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
     }
     return node;
   }
+  if (token_is_keyword_at_ast(p, start, "raise") ||
+      p->tokens->items[start].kind == TC_K_RAISE_OP) {
+    /* parser.w:parse_raise — a Raise node carrying ONE value; the
+     * two-arg `raise ExceptionClass, "msg"` form becomes
+     * `ExceptionClass.new(msg)`. Previously fast parsed `raise x` as a
+     * receiverless CALL named "raise", which lowered through the generic
+     * call path (call i64 @w_raise) instead of lower_raise's
+     * loc_set_col + noreturn + unreachable shape. The `<!` shorthand
+     * (TC_K_RAISE_OP) builds the same node but with NO location —
+     * parser.w never sets loc on it. */
+    int is_op_form = p->tokens->items[start].kind == TC_K_RAISE_OP;
+    TcAstValue node = node_hash(p, "raise", start, err);
+    if (node.kind != TC_AST_HASH) return node;
+    if (is_op_form && !tc_ast_hash_set(node, "line", tc_ast_nil(), err)) {
+      tc_ast_free(node);
+      return tc_ast_nil();
+    }
+    /* Keyword form carries raise_loc (the `raise` token) — line, col and
+     * the packed :loc, like every canon Raise node. */
+    if (!is_op_form && !stamp_node_loc(p, node, start, err)) {
+      tc_ast_free(node);
+      return tc_ast_nil();
+    }
+    TcAstValue value = tc_ast_nil();
+    size_t comma = 0;
+    if (!is_op_form && top_level_token_ast(p, start + 1, end, TC_K_COMMA, &comma, 1) &&
+        comma > start + 1 && comma < end) {
+      TcAstValue cls = parse_expr_span_ast(p, start + 1, comma, err);
+      TcAstValue msg = parse_expr_span_ast(p, comma + 1, end, err);
+      TcAstValue args = tc_ast_array_new(err);
+      if (cls.kind == TC_AST_NIL || msg.kind == TC_AST_NIL || args.kind != TC_AST_ARRAY ||
+          !tc_ast_array_push(args, msg, err)) {
+        tc_ast_free(cls);
+        tc_ast_free(msg);
+        tc_ast_free(args);
+        tc_ast_free(node);
+        return tc_ast_nil();
+      }
+      value = call_node_ast(p, start, (size_t)-1, cls, "new", 3, args, err);
+      /* The synthesized Call in parser.w carries no loc. */
+      if (value.kind != TC_AST_HASH ||
+          !tc_ast_hash_set(value, "line", tc_ast_nil(), err)) {
+        tc_ast_free(value);
+        tc_ast_free(node);
+        return tc_ast_nil();
+      }
+    } else {
+      value = parse_expr_span_ast(p, start + 1, end, err);
+      if (value.kind == TC_AST_NIL && err && err->message) {
+        tc_ast_free(node);
+        return tc_ast_nil();
+      }
+    }
+    if (!tc_ast_hash_set(node, "value", value, err)) {
+      tc_ast_free(node);
+      return tc_ast_nil();
+    }
+    return node;
+  }
   if (token_is_keyword_at_ast(p, start, "yield")) {
     TcAstValue args;
     if (!parse_call_args_after_name_ast(p, start + 1, end, &args, err)) {
@@ -2152,6 +2606,12 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
 
   size_t assign_pos = 0;
   if (top_level_token_ast(p, start, end, TC_K_ASSIGN, &assign_pos, 1) && assign_pos > start) {
+    /* Type-hint text cleanup shared with the ascription path below —
+     * parser.w cuts the hint at a trailing comment (`## i64  # note`)
+     * and strips whitespace (parse_assignment / consume_trailing_
+     * type_ascription). Without this, `x = -1 ## i64  # tag` stored the
+     * whole "i64  # tag" text, no lowering rule matched, and the local
+     * silently fell back to boxed ops. */
     TcAstValue target = parse_expr_span_ast(p, start, assign_pos, err);
     size_t value_end = end;
     TcAstValue type_hint = tc_ast_nil();
@@ -2164,7 +2624,9 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
         tc_ast_free(target);
         return tc_ast_nil();
       }
-      type_hint = tc_ast_string_copy(hint, hint_len, err);
+      size_t hs = 0, hl = 0;
+      clean_type_hint_text(hint, hint_len, &hs, &hl);
+      type_hint = tc_ast_string_copy(hint + hs, hl, err);
       free(hint);
     }
     TcAstValue value = parse_expr_span_ast(p, assign_pos + 1, value_end, err);
@@ -2239,7 +2701,9 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
       tc_ast_free(value);
       return tc_ast_nil();
     }
-    TcAstValue hint_value = tc_ast_string_copy(hint, hint_len, err);
+    size_t hs = 0, hl = 0;
+    clean_type_hint_text(hint, hint_len, &hs, &hl);
+    TcAstValue hint_value = tc_ast_string_copy(hint + hs, hl, err);
     free(hint);
     if (hint_value.kind == TC_AST_NIL) {
       tc_ast_free(value);
@@ -2324,10 +2788,17 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
 
   static const TcKind low_ops[] = {TC_K_OR, TC_K_AND};
   // OR/AND must produce {node: "or" | "and"} — see logical_node_ast.
+  // Precedence mirrors parser.w's descent chain (loosest to tightest):
+  // or/and -> in -> comparison (< <= > >=) -> equality (== != =~) ->
+  // bit-or -> bit-xor -> bit-and -> add -> shift -> mul -> pow. Bitwise
+  // ops bind TIGHTER than comparisons (the 2025 precedence ruling), so
+  // `(x >> 48) & 65535 == 65530` is `((x >> 48) & 65535) == 65530` —
+  // the old merged/reversed order compared the two literals instead.
+  static const TcKind rel_ops[] = {TC_K_LT, TC_K_LTE, TC_K_GT, TC_K_GTE};
+  static const TcKind eq_ops[] = {TC_K_EQ, TC_K_NEQ, TC_K_MATCH};
   static const TcKind bitwise_or_ops[] = {TC_K_PIPE, TC_K_DOT_PIPE};
   static const TcKind bitwise_xor_ops[] = {TC_K_CARET, TC_K_DOT_CARET};
   static const TcKind bitwise_and_ops[] = {TC_K_AMPERSAND, TC_K_DOT_AMP};
-  static const TcKind cmp_ops[] = {TC_K_EQ, TC_K_NEQ, TC_K_LT, TC_K_LTE, TC_K_GT, TC_K_GTE, TC_K_MATCH};
   static const TcKind add_ops[] = {TC_K_PLUS, TC_K_MINUS, TC_K_DOT_PLUS, TC_K_DOT_MINUS};
   static const TcKind shift_ops[] = {TC_K_LSHIFT, TC_K_RSHIFT, TC_K_DOT_LSHIFT, TC_K_DOT_RSHIFT};
   static const TcKind mul_ops[] = {
@@ -2340,6 +2811,12 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
   if (top_level_keyword_ast(p, start, end, "in", &op_pos, 1)) {
     return parse_in_test_ast(p, start, end, op_pos, err);
   }
+  if (top_level_any_ast(p, start, end, rel_ops, sizeof(rel_ops) / sizeof(rel_ops[0]), &op_pos)) {
+    return binary_node_ast(p, start, end, op_pos, err);
+  }
+  if (top_level_any_ast(p, start, end, eq_ops, sizeof(eq_ops) / sizeof(eq_ops[0]), &op_pos)) {
+    return binary_node_ast(p, start, end, op_pos, err);
+  }
   if (top_level_any_ast(p, start, end, bitwise_or_ops, sizeof(bitwise_or_ops) / sizeof(bitwise_or_ops[0]), &op_pos)) {
     return binary_node_ast(p, start, end, op_pos, err);
   }
@@ -2347,9 +2824,6 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
     return binary_node_ast(p, start, end, op_pos, err);
   }
   if (top_level_any_ast(p, start, end, bitwise_and_ops, sizeof(bitwise_and_ops) / sizeof(bitwise_and_ops[0]), &op_pos)) {
-    return binary_node_ast(p, start, end, op_pos, err);
-  }
-  if (top_level_any_ast(p, start, end, cmp_ops, sizeof(cmp_ops) / sizeof(cmp_ops[0]), &op_pos)) {
     return binary_node_ast(p, start, end, op_pos, err);
   }
   if (top_level_any_ast(p, start, end, add_ops, sizeof(add_ops) / sizeof(add_ops[0]), &op_pos) && op_pos > start) {
@@ -2380,6 +2854,40 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
 
   TcAstValue index_call = parse_index_call_ast(p, start, end, err);
   if (index_call.kind != TC_AST_NIL) return index_call;
+
+  /* `expr$field` — postfix view-decl field read on an explicit receiver
+   * (parser.w parse_postfix_from's T_GLOBAL arm: tight binding, no space
+   * before the `$`). The lexer hands `$field` as one GLOBAL token whose
+   * text includes the `$`; strip it for the field name. Without this,
+   * `other$value` split into a juxtaposition call — `other($value)` —
+   * which lowered `(other$value >> 48) & 0xFFFF == 0xFFFA` through a
+   * closure invocation instead of a raw NaN-box tag check. */
+  if (end > start + 1 && p->tokens->items[end - 1].kind == TC_K_GLOBAL &&
+      !token_sp_before_ast(p, end - 1)) {
+    size_t gpos = end - 1;
+    char *gtext = NULL;
+    size_t gtext_len = 0;
+    if (!token_text_at_ast(p, gpos, &gtext, &gtext_len, err)) return tc_ast_nil();
+    if (gtext_len > 1 && gtext[0] == '$') {
+      TcAstValue receiver = parse_expr_span_ast(p, start, gpos, err);
+      if (receiver.kind == TC_AST_NIL) {
+        free(gtext);
+        return tc_ast_nil();
+      }
+      TcAstValue node = node_hash(p, "view_field_var", gpos, err);
+      if (node.kind != TC_AST_HASH ||
+          !tc_ast_hash_set(node, "receiver", receiver, err) ||
+          !tc_ast_hash_set(node, "field", tc_ast_string_copy(gtext + 1, gtext_len - 1, err), err) ||
+          !stamp_node_loc(p, node, gpos, err)) {
+        free(gtext);
+        tc_ast_free(node);
+        return tc_ast_nil();
+      }
+      free(gtext);
+      return node;
+    }
+    free(gtext);
+  }
 
   TcAstValue call = parse_call_span_ast(p, start, end, err);
   if (call.kind != TC_AST_NIL) return call;
@@ -3137,6 +3645,28 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
           tc_ast_free(param_types);
           return 0;
         }
+      }
+    }
+    /* `-> name/&` — block arity. The canonical parser synthesizes
+     * Param("&", …, block_param: true), whose runtime name is
+     * "__yield_block" (definitions.w param_runtime_name). Without it the
+     * fn's block slot fell back to the implicit-yield "__block" name and
+     * every such define diverged on the parameter spelling. */
+    if (arity_len == 1 && arity[0] == '&') {
+      TcAstValue pnode = node_hash(p, "param", start, err);
+      if (pnode.kind != TC_AST_HASH ||
+          !tc_ast_hash_set(pnode, "name", tc_ast_string_copy("&", 1, err), err) ||
+          !tc_ast_hash_set(pnode, "default", tc_ast_nil(), err) ||
+          !tc_ast_hash_set(pnode, "ivar_assign", tc_ast_bool(0), err) ||
+          !tc_ast_hash_set(pnode, "keyword", tc_ast_bool(0), err) ||
+          !tc_ast_hash_set(pnode, "block_param", tc_ast_bool(1), err) ||
+          !tc_ast_hash_set(pnode, "splat", tc_ast_bool(0), err) ||
+          !tc_ast_array_push(params, pnode, err)) {
+        tc_ast_free(pnode);
+        free(name);
+        tc_ast_free(params);
+        tc_ast_free(param_types);
+        return 0;
       }
     }
   }
@@ -4535,7 +5065,7 @@ static int parse_heredoc_command_ast(TcAstParser *p, TcAstValue *out,
     return 0;
   }
 
-  TcAstValue call = call_node_ast(p, start, tc_ast_nil(), command, command_len, args, err);
+  TcAstValue call = call_node_ast(p, start, start, tc_ast_nil(), command, command_len, args, err);
   free(command);
   free(delimiter);
   if (call.kind != TC_AST_HASH) {
@@ -4771,6 +5301,7 @@ int tc_parse_bootstrap_ast(const TcSource *source, const TcSyntaxTokens *tokens,
       .declared_classes = NULL, .declared_class_lens = NULL,
       .declared_class_count = 0, .declared_class_cap = 0,
       .class_depth = 0,
+      .loc_file_id = g_tc_parse_loc_file_id,
   };
   TcAstValue expressions = tc_ast_array_new(err);
   if (expressions.kind != TC_AST_ARRAY) return 0;

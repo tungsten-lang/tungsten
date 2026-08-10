@@ -539,6 +539,53 @@ static int tc_loc_register_file(TcValue path, TcValue line_at_arr, TcValue col_a
   return (int)g_tc_loc_file_count;
 }
 
+// Register a fast-parsed source's per-codepoint line/col tables directly
+// (no TcValue arrays) — the C-side twin of tc_loc_register_file, sharing
+// its registry and first-wins-per-path dedupe. Returns the 1-based file_id
+// that parse_ast.c stamps into FileOffset-mode `:loc` values, so the
+// compiler's location_line/location_col ccalls resolve fast-parsed nodes
+// exactly like canon-parsed ones.
+int tc_vm_loc_register_source(const char *path, const TcSource *source) {
+  size_t len = strlen(path);
+  for (uint32_t i = 0; i < g_tc_loc_file_count; i++) {
+    size_t plen = strlen(g_tc_loc_files[i].path);
+    if (plen == len && memcmp(g_tc_loc_files[i].path, path, len) == 0) {
+      return (int)(i + 1);
+    }
+  }
+  if (g_tc_loc_file_count == g_tc_loc_file_cap) {
+    g_tc_loc_file_cap = g_tc_loc_file_cap == 0 ? 8 : g_tc_loc_file_cap * 2;
+    g_tc_loc_files = realloc(g_tc_loc_files, g_tc_loc_file_cap * sizeof(TcLocFileTable));
+  }
+  uint32_t n = (uint32_t)source->cp_count + 1; /* mirror build_line_index's trailing entry */
+  int32_t *line_buf = malloc(sizeof(int32_t) * n);
+  int32_t *col_buf = malloc(sizeof(int32_t) * n);
+  if (!line_buf || !col_buf) {
+    free(line_buf);
+    free(col_buf);
+    return 0;
+  }
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t byte = source->byte_offsets[i];
+    line_buf[i] = (int32_t)source->byte_lines[byte];
+    col_buf[i] = (int32_t)source->cp_cols[i];
+  }
+  char *path_copy = malloc(len + 1);
+  if (!path_copy) {
+    free(line_buf);
+    free(col_buf);
+    return 0;
+  }
+  memcpy(path_copy, path, len);
+  path_copy[len] = '\0';
+  g_tc_loc_files[g_tc_loc_file_count].path = path_copy;
+  g_tc_loc_files[g_tc_loc_file_count].line_at = line_buf;
+  g_tc_loc_files[g_tc_loc_file_count].col_at = col_buf;
+  g_tc_loc_files[g_tc_loc_file_count].len = n;
+  g_tc_loc_file_count++;
+  return (int)g_tc_loc_file_count;
+}
+
 static int tc_loc_line_for_offset(int file_id, int offset) {
   if (file_id < 1 || (uint32_t)file_id > g_tc_loc_file_count) return -1;
   TcLocFileTable *t = &g_tc_loc_files[file_id - 1];
@@ -1840,6 +1887,23 @@ static int ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
         // so promote the cstring to an interned symbol value.
         const char *key_bytes = ast->as.hash->items[i].key;
         size_t key_len = key_bytes ? strlen(key_bytes) : 0;
+        /* `loc_bits` carries a fully tagged W_PACKED_LOCATION bit pattern
+         * (FileOffset mode) that parse_ast.c stamped on call/raise nodes.
+         * Surface it as `:loc` holding the RAW WValue — TcValue IS WValue,
+         * so lowering's ast_get(node, :loc) and the w_unbox_location_*
+         * ccalls see exactly what a canon-parsed slab node's :loc holds. */
+        if (key_len == 8 && memcmp(key_bytes, "loc_bits", 8) == 0 &&
+            ast->as.hash->items[i].value.kind == TC_AST_INT) {
+          const char *loc_key = tc_intern("loc", 3);
+          if (!loc_key) {
+            tc_error_set(err, "ast_to_runtime: symbol intern failed");
+            return 0;
+          }
+          TcValue loc_key_v = tc_box_symbol_bytes(loc_key, 3, 0);
+          TcValue loc_val = (TcValue)(uint64_t)ast->as.hash->items[i].value.as.integer;
+          if (!hash_set_value(h, loc_key_v, loc_val, err)) return 0;
+          continue;
+        }
         const char *interned = tc_intern(key_bytes ? key_bytes : "", key_len);
         if (!interned) {
           tc_error_set(err, "ast_to_runtime: symbol intern failed");

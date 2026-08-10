@@ -173,7 +173,14 @@ static int fl_parse_file_ast(const char *path, const unsigned char *flags, size_
     return 0;
   }
   TcAstStats stats;
+  /* Register this file's line/col tables and stamp its id into the parse —
+   * the fast-parse twin of parser.w's Parser.new registration. Node
+   * `loc_bits` values from this parse resolve through these tables at
+   * lowering time (location_line/location_col ccalls). Reset after the
+   * parse so VM-execution parses stay unstamped. */
+  tc_parse_set_loc_file_id(tc_vm_loc_register_source(path, &source));
   int ok = tc_parse_bootstrap_ast(&source, &syntax_tokens, ast, &stats, flags, flags_len, err);
+  tc_parse_set_loc_file_id(0);
   tc_syntax_tokens_free(&syntax_tokens);
   tc_tokens_free(&tokens);
   tc_source_free(&source);

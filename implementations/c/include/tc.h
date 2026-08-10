@@ -174,6 +174,12 @@ typedef struct {
   // token_line_ast (which made AST construction quadratic in source
   // size and dominated VM-only bootstrap time).
   uint32_t *byte_lines;
+  // Per-CODEPOINT 1-based column, sized cp_count + 1 — the exact mirror
+  // of compiler/lib/lexer.w:build_line_index's @col_at table (col resets
+  // to 1 after '\n', +1 per codepoint otherwise). Token offsets are
+  // codepoint indices, so node columns and the FileOffset location
+  // tables both read this directly.
+  uint32_t *cp_cols;
 } TcSource;
 
 typedef struct {
@@ -825,6 +831,20 @@ void tc_ast_print(TcAstValue value, FILE *out);
 int tc_parse_bootstrap_ast(const TcSource *source, const TcSyntaxTokens *tokens, TcAstValue *out,
                            TcAstStats *stats, const unsigned char *flags, size_t flags_len,
                            TcError *err);
+
+// Register `source`'s per-codepoint line/col tables in the VM's location
+// registry (the same registry parser.w's register_file_tables ccall fills)
+// under `path`, returning the 1-based file_id — first registration wins per
+// path, matching w_loc_register_file's dedupe. The fast parser embeds the id
+// in FileOffset-mode `:loc` values so lowering's location_line/location_col
+// lookups resolve exactly like canon-parsed nodes. Implemented in vm.c.
+int tc_vm_loc_register_source(const char *path, const TcSource *source);
+
+// Set the file_id the bootstrap AST parser stamps into `loc_bits` on the
+// node kinds the canonical parser gives a `:loc` (calls, raise). 0 disables
+// stamping (VM-execution parses don't need locations). Sticky until changed;
+// implemented in parse_ast.c.
+void tc_parse_set_loc_file_id(int file_id);
 
 void tc_chunk_init(TcChunk *chunk);
 void tc_chunk_free(TcChunk *chunk);

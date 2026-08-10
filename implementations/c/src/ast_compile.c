@@ -360,7 +360,14 @@ static int compile_assign(TcAstValue node, TcChunk *chunk, TcError *err) {
      * behaviour: evaluate the RHS for side effects, discard. */
     return compile_expr(*value, chunk, err);
   }
-  if (!ast_node_is(*target, "var") && !ast_node_is(*target, "ivar") && !ast_node_is(*target, "cvar")) {
+  if (ast_node_is(*target, "view_field_var")) {
+    /* `recv$field = v` — a view-decl raw store. No C VM representation
+     * (see the view_field_var read case); the loaded method must still
+     * compile, so mirror the unusual-call-target precedent above:
+     * evaluate the RHS for side effects and yield it. */
+    return compile_expr(*value, chunk, err);
+  }
+  if (!ast_node_is(*target, "var") && !ast_node_is(*target, "gvar") && !ast_node_is(*target, "ivar") && !ast_node_is(*target, "cvar")) {
     TcAstValue *target_kind = ast_get(*target, "node");
     TcAstValue *source = ast_get(node, "source");
     TcAstValue *line = ast_get(node, "line");
@@ -1019,10 +1026,10 @@ static int compile_compound_assign(TcAstValue node, TcChunk *chunk, TcError *err
     tc_error_set(err, "compound assignment missing target/value/operator");
     return 0;
   }
-  if (ast_node_is(*target, "call")) {
+  if (ast_node_is(*target, "call") || ast_node_is(*target, "view_field_var")) {
     return compile_expr(*value, chunk, err);
   }
-  if (!ast_node_is(*target, "var") && !ast_node_is(*target, "ivar") && !ast_node_is(*target, "cvar")) {
+  if (!ast_node_is(*target, "var") && !ast_node_is(*target, "gvar") && !ast_node_is(*target, "ivar") && !ast_node_is(*target, "cvar")) {
     tc_error_set(err, "unsupported compound assignment target");
     return 0;
   }
@@ -1550,7 +1557,40 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
     }
     return tc_emit_op(chunk, TC_OP_RETURN, err);
   }
-  if (ast_node_is(node, "var") || ast_node_is(node, "ivar") || ast_node_is(node, "cvar")) return compile_var(node, chunk, err);
+  if (ast_node_is(node, "view_field_var")) {
+    /* `recv$field` — a view-decl raw-bits read (parse_ast.c now emits the
+     * canonical node; core/integer.w & friends are `use`d by the compiler,
+     * so the VM must at least LOAD them). `$value` is the receiver's own
+     * NaN-box bits — on the VM (TcValue IS WValue) that's the receiver
+     * value itself. Layout fields ($limbs/$size/...) have no C VM
+     * representation: compile them to a loud raise so loading succeeds and
+     * any actual execution fails with a message instead of garbage. */
+    TcAstValue *field = ast_get(node, "field");
+    TcAstValue *receiver = ast_get(node, "receiver");
+    if (field && field->kind == TC_AST_STRING && receiver &&
+        field->as.string.len == 5 && memcmp(field->as.string.bytes, "value", 5) == 0) {
+      return compile_expr(*receiver, chunk, err);
+    }
+    static const char vf_msg[] = "view-field read ($field) is not supported by the C VM interpreter";
+    char *msg = tc_heap_string_alloc(sizeof(vf_msg) - 1, 0, err);
+    if (!msg) return 0;
+    memcpy(msg, vf_msg, sizeof(vf_msg) - 1);
+    if (!emit_const(chunk, tc_box_string_bytes(msg, sizeof(vf_msg) - 1, 0), err)) return 0;
+    return emit_call_op(chunk, "raise", 5, 1, 0, err);
+  }
+  if (ast_node_is(node, "raise")) {
+    /* parse_ast.c now emits {node:"raise", value} (canonical shape) instead
+     * of a receiverless call named "raise". Execute it exactly as that call
+     * did: compile the value, then the interned-"raise" builtin path. */
+    TcAstValue *value = ast_get(node, "value");
+    if (value && value->kind != TC_AST_NIL) {
+      if (!compile_expr(*value, chunk, err)) return 0;
+    } else if (!emit_nil(chunk, err)) {
+      return 0;
+    }
+    return emit_call_op(chunk, "raise", 5, 1, 0, err);
+  }
+  if (ast_node_is(node, "var") || ast_node_is(node, "gvar") || ast_node_is(node, "ivar") || ast_node_is(node, "cvar")) return compile_var(node, chunk, err);
   if (ast_node_is(node, "parg")) return compile_parg(node, chunk, err);
   if (ast_node_is(node, "binary_op")) return compile_binary(node, chunk, err);
   if (ast_node_is(node, "assign")) return compile_assign(node, chunk, err);

@@ -173,20 +173,38 @@ int tc_source_build(TcSource *source, unsigned char *bytes, size_t len, const un
 
   size_t i = 0;
   size_t count = 0;
+  // Per-codepoint column table — the mirror of compiler/lib/lexer.w:
+  // build_line_index's @col_at (1-based; resets after '\n'; +1 per
+  // codepoint otherwise). Sized like lc: one entry per codepoint plus a
+  // trailing entry for the end-of-file position.
+  uint32_t *cp_cols = (uint32_t *)malloc((len + 1) * sizeof(uint32_t));
+  if (!cp_cols) {
+    free(lc);
+    free(byte_offsets);
+    free(byte_lines);
+    tc_error_set(err, "source allocation failed");
+    return 0;
+  }
+  uint32_t col = 1;
   while (i < len) {
     size_t byte_start = i;
     uint32_t cp = decode_utf8(bytes, len, &i);
     unsigned char f = cp < flags_len ? flags[cp] : 0;
     lc[count] = TC_LEX64_TAG | ((uint64_t)cp << 18) | (uint64_t)f;
     byte_offsets[count] = (uint32_t)byte_start;
+    cp_cols[count] = col;
+    if (cp == '\n') col = 1;
+    else col++;
     count++;
   }
 
   lc[count] = 0;
   byte_offsets[count] = (uint32_t)len;
+  cp_cols[count] = col;
   source->lc = lc;
   source->byte_offsets = byte_offsets;
   source->byte_lines = byte_lines;
+  source->cp_cols = cp_cols;
   source->cp_count = count;
   return 1;
 }
@@ -197,6 +215,7 @@ void tc_source_free(TcSource *source) {
   free(source->lc);
   free(source->byte_offsets);
   free(source->byte_lines);
+  free(source->cp_cols);
   memset(source, 0, sizeof(*source));
 }
 
@@ -452,8 +471,52 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
       continue;
     }
 
-    if (c == '"' || c == '\'') {
-      uint32_t quote = c;
+    if (c == '"') {
+      // Mirror compiler/lib/lexer.w:tungsten_tokenize_fast64's double-quote
+      // span rules exactly (the canonical tokenize path; scan_string only
+      // re-derives the VALUE from this span at materialize time):
+      //   \e[  → consumed as a unit (ANSI CSI prefix — the `[` can never
+      //          open interpolation),
+      //   \x   → generic two-char escape skip,
+      //   [    → with a following char that isn't `]`: quote-blind,
+      //          newline-blind bracket-depth scan to the matching `]`.
+      //          A `"` inside that scan does NOT end the string, so e.g.
+      //          `x = "table[" … y = "]…"` spans both lines as ONE token.
+      //   "    → end of string.
+      size_t start = pos++;
+      while (pos < count) {
+        uint32_t c2 = cp_at(source, pos);
+        if (c2 == '\\') {
+          if (pos + 2 < count && cp_at(source, pos + 1) == 'e' &&
+              cp_at(source, pos + 2) == '[') {
+            pos += 3;
+          } else {
+            pos += 2;
+          }
+          continue;
+        }
+        if (c2 == '"') {
+          pos++;
+          break;
+        }
+        if (c2 == '[' && pos + 1 < count && cp_at(source, pos + 1) != ']') {
+          pos++;
+          int depth = 1;
+          while (pos < count && depth > 0) {
+            uint32_t ic = cp_at(source, pos);
+            if (ic == '[') depth++;
+            else if (ic == ']') depth--;
+            pos++;
+          }
+          continue;
+        }
+        pos++;
+      }
+      if (!token_push(tokens, token_new(TC_T_STRING, start, pos, 0), err)) return 0;
+      continue;
+    }
+
+    if (c == '\'') {
       size_t start = pos++;
       while (pos < count) {
         uint32_t c2 = cp_at(source, pos);
@@ -462,7 +525,7 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
           pos++;
           continue;
         }
-        if (c2 == quote) break;
+        if (c2 == '\'') break;
       }
       if (!token_push(tokens, token_new(TC_T_STRING, start, pos, 0), err)) return 0;
       continue;

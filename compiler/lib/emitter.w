@@ -2328,6 +2328,43 @@ ewscope_md_state = {ids: {}}
       # runtime's weak C-kernel default, or to whichever object defines it).
       seam_decls << "declare i64 @" + big_op_wrappers[bop] + "(i64, i64) nounwind\n"
 
+  # Full BigInt/integer comparison is a raw top-level Tungsten helper rather
+  # than a boxed public method. Give its content-hash-renamed body one stable
+  # strong symbol so every runtime comparison entry can call it directly.
+  # The runtime supplies a weak C oracle/default for stage0. Root loading
+  # injects this support function into every production target, so strong-over-
+  # weak resolution selects the source implementation without a dispatch or
+  # box/unbox hop even when a BigInt entered through an opaque boundary.
+  big_compare_fn = nil
+  big_compare_matches = 0
+  bcfi = 0
+  while bcfi < mod[:functions].size()
+    bcff = mod[:functions][bcfi]
+    if bcff[:source_class] == nil && bcff[:source_method] == "__bigint_compare_raw"
+      big_compare_matches += 1
+      big_compare_fn = bcff
+    bcfi += 1
+  if big_compare_matches > 1
+    << "error: __bigint_compare_raw is reserved for the native BigInt comparator"
+    exit(1)
+  if mod[:require_bigint_compare_src] == true && big_compare_fn == nil
+    << "error: required native BigInt comparator is missing; __w_bigint_compare_src would bind the weak C bootstrap default"
+    exit(1)
+  if big_compare_fn != nil
+    compare_signature_ok = big_compare_fn[:source_kind] == :fn_def && big_compare_fn[:raw_i64_signature] == true && big_compare_fn[:raw_return_type] == :i64 && big_compare_fn[:params].size() == 2 && big_compare_fn[:embedded_ll] != nil
+    if !compare_signature_ok
+      << "error: invalid reserved native BigInt comparator definition"
+      exit(1)
+    bcmp_cc = ""
+    if big_compare_fn[:call_conv] != nil && big_compare_fn[:call_conv] != ""
+      bcmp_cc = big_compare_fn[:call_conv] + " "
+    fn_out << "define i64 @__w_bigint_compare_src(i64 %a, i64 %b) nounwind {\n"
+    fn_out << "  %r = tail call " + bcmp_cc + "i64 @" + big_compare_fn[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_compare_src"] = false
+    known_fns["__w_bigint_compare_src"] = true
+
   # String constants that still need raw ptr access; slab emitted as constant array
   strings_out = emit_string_constants(mod[:strings], slab_info, used_ptr_ids)
   if strings_out != ""

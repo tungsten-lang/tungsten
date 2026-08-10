@@ -35,6 +35,9 @@ typedef struct {
   size_t *declared_class_lens;
   size_t  declared_class_count;
   size_t  declared_class_cap;
+  /* Mirrors Parser#@in_class_body for the `fn` alias: class-scoped `fn`
+   * produces method_def + from_fn, while a top-level one produces fn_def. */
+  int class_depth;
 } TcAstParser;
 
 static TcSyntaxToken current_ast(TcAstParser *p) {
@@ -3122,6 +3125,30 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
   return 1;
 }
 
+/* `fn name(args) (types) return_type` has the same concrete signature/body
+ * grammar as `-> name(args) ...`. The native parser makes it a top-level
+ * fn_def, but inside a class it is a method_def carrying from_fn=true so
+ * method registration and memo/raw-ABI behavior match source semantics. */
+static int parse_fn_def_ast(TcAstParser *p, TcAstValue type_hints,
+                            TcAstValue *out, TcError *err) {
+  if (!parse_method_def_ast(p, type_hints, out, err)) return 0;
+  if (p->class_depth > 0) {
+    if (!tc_ast_hash_set(*out, "from_fn", tc_ast_bool(1), err)) {
+      tc_ast_free(*out);
+      *out = tc_ast_nil();
+      return 0;
+    }
+    return 1;
+  }
+  TcAstValue kind = tc_ast_symbol_copy("fn_def", 6, err);
+  if (kind.kind != TC_AST_SYMBOL || !tc_ast_hash_set(*out, "node", kind, err)) {
+    tc_ast_free(*out);
+    *out = tc_ast_nil();
+    return 0;
+  }
+  return 1;
+}
+
 static int parse_class_def_ast(TcAstParser *p, TcAstValue *out, TcError *err) {
   size_t start = p->pos;
   advance_ast(p);
@@ -3192,7 +3219,10 @@ static int parse_class_def_ast(TcAstParser *p, TcAstValue *out, TcError *err) {
   }
 
   TcAstValue body;
-  if (!parse_optional_body_ast(p, &body, err)) {
+  p->class_depth++;
+  int body_ok = parse_optional_body_ast(p, &body, err);
+  p->class_depth--;
+  if (!body_ok) {
     free(name);
     tc_ast_free(class_role);
     tc_ast_free(superclass);
@@ -3466,7 +3496,11 @@ static int parse_named_body_ast(TcAstParser *p, const char *keyword, const char 
     return 0;
   }
   TcAstValue body;
-  if (!parse_optional_body_ast(p, &body, err)) {
+  int method_scope = strcmp(node_name, "trait_def") == 0;
+  if (method_scope) p->class_depth++;
+  int body_ok = parse_optional_body_ast(p, &body, err);
+  if (method_scope) p->class_depth--;
+  if (!body_ok) {
     free(name);
     return 0;
   }
@@ -3865,6 +3899,179 @@ static int parse_case_ast(TcAstParser *p, TcAstValue *out, TcError *err) {
   return 1;
 }
 
+/* The lex64 bootstrap lexer intentionally stays context-free and therefore
+ * tokenizes `ll <<~IR ... IR` as ordinary operators/names plus the tokens in
+ * the heredoc body. Reconstruct the heredoc here, from the original source,
+ * into the same AST shape the self-hosted lexer/parser produces:
+ *
+ *   {node: :call, name: "ll", args: [{node: :string, value: "..."}]}
+ *
+ * This is a general bare-command heredoc parse, rather than an ll-specific
+ * skip: stage0 must preserve the embedded source text for downstream
+ * definition lowering. The body dedent mirrors Lexer#scan_heredoc.
+ * `matched` distinguishes an ordinary shift expression from an error while
+ * parsing a recognized `<<~` header. */
+static int parse_heredoc_command_ast(TcAstParser *p, TcAstValue *out,
+                                     int *matched, TcError *err) {
+  *matched = 0;
+  size_t start = p->pos;
+  if (start + 3 >= p->tokens->count ||
+      !name_kind_ast(p->tokens->items[start].kind) ||
+      p->tokens->items[start + 1].kind != TC_K_LSHIFT ||
+      p->tokens->items[start + 2].kind != TC_K_UNKNOWN ||
+      !name_kind_ast(p->tokens->items[start + 3].kind) ||
+      !tc_token_text_eq(p->source, p->tokens->items[start + 2].packed, "~")) {
+    return 1;
+  }
+
+  WValue shift_tok = p->tokens->items[start + 1].packed;
+  WValue tilde_tok = p->tokens->items[start + 2].packed;
+  uint32_t shift_end_cp = tc_token_offset(shift_tok) + tc_token_length(shift_tok);
+  uint32_t shift_end = p->source->byte_offsets[shift_end_cp];
+  uint32_t tilde_start = p->source->byte_offsets[tc_token_offset(tilde_tok)];
+  if (shift_end != tilde_start) return 1; /* `x << ~y`, not `<<~DELIM`. */
+
+  *matched = 1;
+  char *command = NULL;
+  size_t command_len = 0;
+  char *delimiter = NULL;
+  size_t delimiter_len = 0;
+  if (!token_text_at_ast(p, start, &command, &command_len, err) ||
+      !token_text_at_ast(p, start + 3, &delimiter, &delimiter_len, err)) {
+    free(command);
+    free(delimiter);
+    return 0;
+  }
+
+  WValue delimiter_tok = p->tokens->items[start + 3].packed;
+  size_t delimiter_end =
+      p->source->byte_offsets[tc_token_offset(delimiter_tok) + tc_token_length(delimiter_tok)];
+  size_t header_end = delimiter_end;
+  while (header_end < p->source->byte_len && p->source->bytes[header_end] != '\n') header_end++;
+  if (header_end >= p->source->byte_len) {
+    tc_error_set(err, "Unterminated heredoc (expected %.*s) on line %d",
+                 (int)delimiter_len, delimiter,
+                 token_line_ast(p->source, p->tokens->items[start].packed));
+    free(command);
+    free(delimiter);
+    return 0;
+  }
+
+  size_t body_start = header_end + 1;
+  size_t close_start = p->source->byte_len;
+  size_t close_end = p->source->byte_len;
+  size_t min_indent = (size_t)-1;
+  size_t line_start = body_start;
+  while (line_start <= p->source->byte_len) {
+    size_t line_end = line_start;
+    while (line_end < p->source->byte_len && p->source->bytes[line_end] != '\n') line_end++;
+
+    size_t indent = 0;
+    while (line_start + indent < line_end &&
+           (p->source->bytes[line_start + indent] == ' ' ||
+            p->source->bytes[line_start + indent] == '\t')) {
+      indent++;
+    }
+    size_t after_delimiter = line_start + indent + delimiter_len;
+    int closes = after_delimiter <= line_end &&
+                 memcmp(p->source->bytes + line_start + indent,
+                        delimiter, delimiter_len) == 0;
+    if (closes) {
+      size_t rest = after_delimiter;
+      while (rest < line_end &&
+             (p->source->bytes[rest] == ' ' || p->source->bytes[rest] == '\t')) {
+        rest++;
+      }
+      closes = rest == line_end;
+    }
+    if (closes) {
+      close_start = line_start;
+      close_end = line_end;
+      break;
+    }
+
+    int nonblank = 0;
+    for (size_t i = line_start; i < line_end; i++) {
+      if (p->source->bytes[i] != ' ' && p->source->bytes[i] != '\t') {
+        nonblank = 1;
+        break;
+      }
+    }
+    if (nonblank && indent < min_indent) min_indent = indent;
+    if (line_end >= p->source->byte_len) break;
+    line_start = line_end + 1;
+  }
+
+  if (close_start == p->source->byte_len) {
+    tc_error_set(err, "Unterminated heredoc (expected %.*s) on line %d",
+                 (int)delimiter_len, delimiter,
+                 token_line_ast(p->source, p->tokens->items[start].packed));
+    free(command);
+    free(delimiter);
+    return 0;
+  }
+
+  size_t body_cap = close_start >= body_start ? close_start - body_start + 1 : 1;
+  char *body_text = (char *)malloc(body_cap);
+  if (!body_text) {
+    tc_error_set(err, "heredoc AST allocation failed");
+    free(command);
+    free(delimiter);
+    return 0;
+  }
+  size_t body_len = 0;
+  line_start = body_start;
+  while (line_start < close_start) {
+    size_t line_end = line_start;
+    while (line_end < close_start && p->source->bytes[line_end] != '\n') line_end++;
+    size_t line_len = line_end - line_start;
+    if (line_len > 0 && min_indent != (size_t)-1 && line_len > min_indent) {
+      size_t copy_len = line_len - min_indent;
+      memcpy(body_text + body_len, p->source->bytes + line_start + min_indent, copy_len);
+      body_len += copy_len;
+    } else if (line_len > 0 && min_indent == (size_t)-1) {
+      memcpy(body_text + body_len, p->source->bytes + line_start, line_len);
+      body_len += line_len;
+    }
+    if (line_end < close_start && line_end + 1 < close_start) body_text[body_len++] = '\n';
+    line_start = line_end < close_start ? line_end + 1 : close_start;
+  }
+  body_text[body_len] = '\0';
+
+  TcAstValue string_node = node_hash(p, "string", start + 3, err);
+  TcAstValue args = tc_ast_array_new(err);
+  TcAstValue body_value = tc_ast_string_copy(body_text, body_len, err);
+  free(body_text);
+  if (string_node.kind != TC_AST_HASH || args.kind != TC_AST_ARRAY ||
+      body_value.kind != TC_AST_STRING ||
+      !tc_ast_hash_set(string_node, "value", body_value, err) ||
+      !tc_ast_array_push(args, string_node, err)) {
+    tc_ast_free(string_node);
+    tc_ast_free(args);
+    free(command);
+    free(delimiter);
+    return 0;
+  }
+
+  TcAstValue call = call_node_ast(p, start, tc_ast_nil(), command, command_len, args, err);
+  free(command);
+  free(delimiter);
+  if (call.kind != TC_AST_HASH) {
+    tc_ast_free(call);
+    return 0;
+  }
+
+  size_t after_close = close_end < p->source->byte_len ? close_end + 1 : close_end;
+  while (p->pos < p->tokens->count) {
+    WValue tok = p->tokens->items[p->pos].packed;
+    size_t tok_start = p->source->byte_offsets[tc_token_offset(tok)];
+    if (tok_start >= after_close) break;
+    p->pos++;
+  }
+  *out = call;
+  return 1;
+}
+
 static int parse_ast_statement(TcAstParser *p, TcAstValue *out, TcError *err) {
   skip_newlines_ast(p);
   TcAstValue type_hints = tc_ast_nil();
@@ -3984,6 +4191,23 @@ static int parse_ast_statement(TcAstParser *p, TcAstValue *out, TcError *err) {
     }
     free(next_text);
   }
+  int heredoc_matched = 0;
+  TcAstValue heredoc = tc_ast_nil();
+  if (!parse_heredoc_command_ast(p, &heredoc, &heredoc_matched, err)) {
+    tc_ast_free(type_hints);
+    return 0;
+  }
+  if (heredoc_matched) {
+    if (type_hints.kind != TC_AST_NIL &&
+        !tc_ast_hash_set(heredoc, "type_hints", type_hints, err)) {
+      tc_ast_free(type_hints);
+      tc_ast_free(heredoc);
+      return 0;
+    }
+    *out = heredoc;
+    return 1;
+  }
+  if (at_keyword_ast(p, "fn")) return parse_fn_def_ast(p, type_hints, out, err);
   if (at_ast(p, TC_K_ARROW)) return parse_method_def_ast(p, type_hints, out, err);
 
   size_t start = p->pos;
@@ -4059,6 +4283,7 @@ int tc_parse_bootstrap_ast(const TcSource *source, const TcSyntaxTokens *tokens,
       .namespace_prefix = NULL, .namespace_len = 0,
       .declared_classes = NULL, .declared_class_lens = NULL,
       .declared_class_count = 0, .declared_class_cap = 0,
+      .class_depth = 0,
   };
   TcAstValue expressions = tc_ast_array_new(err);
   if (expressions.kind != TC_AST_ARRAY) return 0;

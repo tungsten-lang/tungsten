@@ -1517,6 +1517,10 @@ use lowering/definitions
 
 -> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false)
   mod = wire_module(source_path)
+  # Root loading always injects the native BigInt comparison support module.
+  # Carry the invariant to emission so a loader/cache regression cannot
+  # silently bind the runtime's weak C bootstrap implementation.
+  mod[:require_bigint_compare_src] = true
   mod[:fast_mode] = fast_mode
   mod[:math_mode] = math_mode
   # Must be set BEFORE body lowering: the slab-freeze emission below

@@ -268,6 +268,9 @@ WValue w_regex_capture(WValue index_val) {
 static void die(const char *msg);
 static inline __attribute__((always_inline))
 int bigint_compare(WValue a, WValue b);
+static inline __attribute__((always_inline))
+int bigint_compare_c(WValue a, WValue b);
+int64_t __w_bigint_compare_src(WValue a, WValue b);
 
 /* ---- Bigint core ---- */
 
@@ -14957,7 +14960,7 @@ static __attribute__((noinline)) int bigint_compare_slow(
 }
 
 static inline __attribute__((always_inline))
-int bigint_compare(WValue a, WValue b) {
+int bigint_compare_c(WValue a, WValue b) {
     /* bigint_compare's callers have already established that both values are
      * integers, so a non-inline integer is a WBigint.  Keep the overwhelmingly
      * common boxed/boxed, positive, equal-width path out of integer_limbs.
@@ -14992,6 +14995,34 @@ int bigint_compare(WValue a, WValue b) {
 
     if (__builtin_expect(a == b, 0)) return 0;
     return bigint_compare_slow(a, b);
+}
+
+/* Stable source seam for the complete integer comparator. Stage0 uses the
+ * weak C oracle; every production target emits a strong wrapper around
+ * __bigint_compare_raw and therefore executes the native Tungsten body. */
+__attribute__((weak)) int64_t __w_bigint_compare_src(WValue a, WValue b) {
+    return (int64_t)bigint_compare_c(a, b);
+}
+
+static inline __attribute__((always_inline))
+int bigint_compare(WValue a, WValue b) {
+    return (int)__w_bigint_compare_src(a, b);
+}
+
+/* Public C differential oracle retained for the native-source benchmark and
+ * focused semantic tests. Production comparison entries call bigint_compare,
+ * which resolves to the strong Tungsten seam whenever BigInt is loaded. */
+WValue w_bigint_compare_c(WValue a, WValue b) {
+    int c = bigint_compare_c(a, b);
+    return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
+}
+
+/* Symmetric boxed source lane for the same-binary comparison gate. Keep the
+ * result normalization byte-for-byte parallel with w_bigint_compare_c: the
+ * only intended difference between the two lanes is the comparator body. */
+WValue w_bigint_compare_source(WValue a, WValue b) {
+    int c = bigint_compare(a, b);
+    return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
 }
 
 /* ---- Bigint to_s ---- */
@@ -42605,7 +42636,7 @@ static inline int array_is_float(const WArray *a);
 static inline int array_is_signed_int(const WArray *a);
 static inline int array_is_byte_int_array(const WArray *a);
 
-/* Comparison function for qsort — supports ints, floats, strings */
+/* Comparison function for qsort — supports integers, floats, strings */
 static int w_value_compare(const void *ap, const void *bp) {
     WValue a = *(const WValue *)ap;
     WValue b = *(const WValue *)bp;
@@ -42623,6 +42654,18 @@ static int w_value_compare(const void *ap, const void *bp) {
     if ((w_is_int(a) || w_is_double(a)) && (w_is_int(b) || w_is_double(b))) {
         double da = w_is_int(a) ? (double)w_as_int(a) : w_as_double(a);
         double db = w_is_int(b) ? (double)w_as_int(b) : w_as_double(b);
+        return (da > db) - (da < db);
+    }
+    /* Any pair containing heap integers must use mathematical order, never
+     * tagged-pointer order. This reaches the strong native source comparator
+     * in production and fixes polymorphic sort/min/max/nested-array paths. */
+    if (w_is_integer_any(a) && w_is_integer_any(b))
+        return bigint_compare(a, b);
+    /* Public ordering permits approximate Float/BigInt comparison. Mirror it
+     * here so a polymorphic numeric collection has the same order as `<=>`. */
+    if ((w_is_bigint(a) && w_is_double(b)) ||
+        (w_is_double(a) && w_is_bigint(b))) {
+        double da = cmp_numeric_double(a), db = cmp_numeric_double(b);
         return (da > db) - (da < db);
     }
     /* Both strings */
@@ -43100,9 +43143,8 @@ static WValue w_ic_array_raw_ptr(WValue r, WValue *a, int c) {
     return w_int((int64_t)base);
 }
 /* Polymorphic w64 arrays (ebits=65) hold tagged WValues, so use decoded
- * WValue comparison. Packed u64 arrays (ebits=64) must stay on the unsigned
- * reducer: decoding a value above INT64_MAX yields a BigInt, and the generic
- * comparator's fallback would compare BigInt object addresses, not values. */
+ * WValue comparison. Packed u64 arrays (ebits=64) stay on the direct unsigned
+ * reducer rather than allocating decoded BigInts. */
 static WValue w_ic_array_min(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WArray *arr = (WArray *)w_as_ptr(r);

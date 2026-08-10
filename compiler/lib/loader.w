@@ -96,6 +96,23 @@ use parser
 
     ast = Tungsten:AST:Program.new(expressions)
     if from_file == nil
+      # BigInt comparison is runtime support, not a demand-loaded class
+      # method. Integer values can enter through opaque native boundaries and
+      # runtime-internal callers (for example sorting) without any BigInt name
+      # or comparison syntax in the source AST. Always prepend the tiny native
+      # comparator module so every production binary supplies the strong
+      # __w_bigint_compare_src seam; the runtime's weak C body remains only a
+      # stage0/bootstrap default and differential oracle. Loading this support
+      # module through the normal path also records and deduplicates it.
+      compare_support = load_program_ast("core/numeric/big_int_compare", resolved)
+      if compare_support != nil && compare_support.expressions.size() > 0
+        with_support = []
+        compare_support.expressions.each -> (support_expr)
+          with_support.push(support_expr)
+        expressions.each -> (program_expr)
+          with_support.push(program_expr)
+        expressions = with_support
+        ast = Tungsten:AST:Program.new(expressions)
       ast = autoload_pass(ast, resolved)
       write_ast_cache(resolved, ast)
     ast
@@ -893,9 +910,8 @@ use parser
     nil
 
   -> cache_version
-    # v20: constant_alias directive parsed with a stamped namespace arg;
-    # qualified class names under `in` get the namespace prefix.
-    "loader-ast-v20"
+    # v21: every root AST includes the native BigInt comparison support fn.
+    "loader-ast-v21"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")

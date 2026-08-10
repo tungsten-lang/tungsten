@@ -482,6 +482,7 @@ compiled_specs=(
   spec/compiler/overload_exact_tag_parity_spec.w
   spec/compiler/typed_overload_hosts_spec.w
   spec/numeric/bigint_seam_disjoint_spec.w
+  spec/compiler/bigint_compare_native_support_spec.w
   spec/compiler/uuid_byte_revisit_autoload_spec.w
   spec/compiler/autoload_walker_fields_spec.w
   spec/compiler/view_field_var_spec.w

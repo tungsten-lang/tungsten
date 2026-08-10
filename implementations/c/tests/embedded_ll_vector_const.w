@@ -7,6 +7,16 @@
 # silently killed stage 1 when such a kernel was added to core/numeric/
 # big_int.w, which compiler/tungsten.w pulls in via `use`). The kernel is
 # never called; it only has to survive parsing and class compilation.
+
+# A top-level typed fn must likewise become fn_def. Before the bootstrap
+# parser learned `fn`, this signature fell through as a raw initializer and
+# died before stage1 could lower the embedded IR.
+fn __top_level_raw_probe(a, b) (i64 i64) i64
+  ll <<~IR
+    %r = xor i64 %a, %b
+    ret i64 %r
+  IR
+
 + EmbeddedLlVectorConst
   fn __shufmask_probe(rp, ap, n) (i64 i64 i64) i64
     ll <<~IR
@@ -17,7 +27,13 @@
         %b = load <2 x i64>, ptr %rq, align 8
         %s = shufflevector <2 x i64> %a, <2 x i64> %b, <2 x i32> <i32 1, i32 2>
         store <2 x i64> %s, ptr %rq, align 8
-        ret i64 0
+      ret i64 0
+    IR
+
+trait EmbeddedLlVectorTrait
+  fn __trait_raw_probe(a) (i64) i64
+    ll <<~IR
+      ret i64 %a
     IR
 
 << "ok"

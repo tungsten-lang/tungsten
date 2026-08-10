@@ -421,6 +421,7 @@ compiled_specs=(
   spec/compiler/bigint_bitwise_reopen_source_seam_spec.w
   spec/compiler/bigint_to_i_autoload_spec.w
   spec/compiler/block_passthrough_spec.w
+  spec/compiler/carry_intrinsics_parity_spec.w
   spec/compiler/cfg_ssa_pruning_spec.w
   spec/compiler/elementwise_fusion_spec.w
   spec/compiler/forward_typed_raw_call_spec.w
@@ -582,6 +583,7 @@ interpreter_specs=(
   # interpreter.w hunks before).
   spec/compiler/int_bigint_promotion_spec.w
   spec/compiler/bigint_literal_cache_spec.w
+  spec/compiler/carry_intrinsics_parity_spec.w
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w
   spec/compiler/top_level_method_name_hygiene_spec.w

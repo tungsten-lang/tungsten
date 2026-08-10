@@ -2811,6 +2811,22 @@ use target
       if args.size() != 1
         raise "wvalue_bits expects one argument"
       return ccall("w_u64", args[0])
+
+    # Tree-walker mirrors for the compiler's unsigned carry primitives. The
+    # interpreter already has arbitrary-precision integers, so compute the
+    # exact 64-bit result directly and keep the same 0..2^64-1 value domain as
+    # native u64 lowering.
+    if name in ("mulhi" "addcarry" "subborrow")
+      if args.size() != 2
+        raise "[name] expects two arguments"
+      mask = 18446744073709551615
+      a = args[0] & mask
+      b = args[1] & mask
+      if name == "mulhi"
+        return (a * b) >> 64
+      if name == "addcarry"
+        return (a + b) >> 64
+      return a < b ? 1 : 0
     if name == "wvalue_from_bits"
       if args.size() != 1
         raise "wvalue_from_bits expects one argument"

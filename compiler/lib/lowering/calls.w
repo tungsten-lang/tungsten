@@ -1692,3 +1692,14 @@
     return typed_value(:i64, temp)
   emit_instruction(wfn, {op: :print_i64, value: val_reg})
   nil
+
+-> inline_block_param_name(block, ctx)
+  params = block.params
+  if params == nil || params.size() == 0
+    params = lower_block_free_vars(block, ctx)
+  if params == nil || params.size() == 0
+    return nil
+  param = params[0]
+  if is_ast_node?(param)
+    return param.name
+  param

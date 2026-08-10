@@ -262,11 +262,8 @@ Issues, questions, or suggestions? Open an issue on GitHub.
 
 Tungsten is licensed under your choice of:
 
-* Apache License, Version 2.0, with the LLVM Exception
-  ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>;
-  exception at <https://spdx.org/licenses/LLVM-exception.html>)
-* MIT license ([LICENSE-MIT](LICENSE-MIT) or
-  <https://opensource.org/licenses/MIT>)
+* [Apache License](https://www.apache.org/licenses/LICENSE-2.0), Version 2.0, with the [LLVM Exception](https://spdx.org/licenses/LLVM-exception.html)
+* [MIT License](https://opensource.org/licenses/MIT)
 
 In [SPDX](https://spdx.dev) terms: `MIT OR Apache-2.0 WITH LLVM-exception`.
 

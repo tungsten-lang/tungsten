@@ -911,6 +911,16 @@
       exit(1)
     fn_name = fn_node.value
 
+    # Top-level fns compile under `__w_<name>` (the seam namespace that
+    # lets source fns override weak runtime defaults), and every call to
+    # that symbol — ccalls included — rebinds to the source fn. A fn whose
+    # body ccalls its OWN mangled name (`-> mkdir_p` wrapping
+    # ccall("__w_mkdir_p")) therefore calls itself forever and the binary
+    # dies at startup with a bare SIGBUS. Diagnose it here instead.
+    if fn_name == wfn[:name]
+      << "ccall: target '" + fn_name + "' is the enclosing fn's own compiled symbol (top-level `fn " + ("" + wfn[:source_method]) + "` mangles to `__w_" + ("" + wfn[:source_method]) + "`) — the call would recurse forever; rename the fn"
+      exit(1)
+
     # Register the function for declaration in emitter
     ctx[:mod][:ccall_fns][fn_name] = args.size() - 1
 
@@ -952,6 +962,10 @@
       << "ccall_nobox: first argument must be a string literal"
       exit(1)
     fn_name = fn_node.value
+    # Same self-binding hazard as ccall above.
+    if fn_name == wfn[:name]
+      << "ccall_nobox: target '" + fn_name + "' is the enclosing fn's own compiled symbol (top-level `fn " + ("" + wfn[:source_method]) + "` mangles to `__w_" + ("" + wfn[:source_method]) + "`) — the call would recurse forever; rename the fn"
+      exit(1)
     ctx[:mod][:ccall_fns][fn_name] = args.size() - 1
 
     # Float rounding source methods spell their historical boundary as

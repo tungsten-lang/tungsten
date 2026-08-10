@@ -60,10 +60,11 @@ BUILD_CACHE_DIR = ROOT + "/build/cache"
 -> sh_ok(cmd)
   sh(cmd) == 0
 
-# TODO(compiler bug): a top-level fn named `mkdir_p` collides with the
-# runtime extern __w_mkdir_p and the binary dies at startup (SIGBUS before
-# main output). Named make_dirs to dodge it; fix the symbol mangling and
-# rename back.
+# Named make_dirs, NOT mkdir_p: top-level fns compile under `__w_<name>`
+# (the seam namespace that lets source fns override weak runtime
+# defaults), so a fn named mkdir_p wrapping ccall("__w_mkdir_p") binds
+# the ccall to itself. The compiler diagnoses that self-binding now
+# (lowering/calls.w); the rename here is the by-design resolution.
 -> make_dirs(path)
   ccall("__w_mkdir_p", path)
 

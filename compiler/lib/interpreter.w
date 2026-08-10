@@ -1142,7 +1142,10 @@ use target
   -> eval_var(node, env, symbolic = false)
     name = ast_get(node, :name)
     if name == "ARGV"
-      return argv()
+      # Script-scoped args (the run driver strips `run <script> --`), NOT
+      # the bare argv() builtin — that one sees the compiler binary's own
+      # process argv and leaked `run|<script>|--|...` into programs.
+      return @argv.copy(0, @argv.size())
     # Bare `class` in a method body resolves to the current class — the runtime
     # class of the receiver for instance methods, or self for class methods — so
     # `class.new(...)` / `class.zero` factory methods work, matching the compiled

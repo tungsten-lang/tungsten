@@ -5,8 +5,8 @@
 #include <stdint.h>
 
 #define W_AST_SCHEMA_ABI_VERSION UINT32_C(2)
-#define W_AST_SCHEMA_HASH UINT64_C(0x000036E44C4350C8)
-#define W_AST_KIND_MAX UINT32_C(147)
+#define W_AST_SCHEMA_HASH UINT64_C(0x00002C5D9B2F7766)
+#define W_AST_KIND_MAX UINT32_C(148)
 
 static const uint8_t W_AST_KIND_WIDTH[W_AST_KIND_MAX + 1] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -18,7 +18,7 @@ static const uint8_t W_AST_KIND_WIDTH[W_AST_KIND_MAX + 1] = {
     3, 1, 2, 0, 2, 1, 6, 5, 0, 0, 1, 1, 0, 0, 1, 2,
     1, 1, 2, 1, 2, 1, 2, 2, 2, 1, 1, 0, 2, 0, 3, 1,
     0, 2, 2, 2, 1, 2, 1, 2, 2, 1, 1, 3, 3, 3, 0, 1,
-    0, 2, 1, 1
+    0, 2, 1, 1, 2
 };
 
 #endif

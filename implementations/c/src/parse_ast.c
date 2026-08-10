@@ -2192,26 +2192,37 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
 
   /* Expression-local type ascription, mirroring Parser#parse_expression.
    * Assignment handles its own trailing hint above so allocation hints keep
-   * their special semantics; here we cover parenthesized/argument forms such
-   * as `($value ## i64)` by attaching the hint to the underlying node. */
+   * their special semantics. The ascription must be an occurrence-local
+   * wrapper: Var nodes may be interned by name after this hash AST is imported
+   * into the slab arena, so metadata on the leaf would contaminate every
+   * occurrence of that variable. */
   if (end > start && p->tokens->items[end - 1].kind == TC_K_TYPE_HINT) {
     TcAstValue value = parse_expr_span_ast(p, start, end - 1, err);
-    if (value.kind == TC_AST_HASH) {
-      char *hint = NULL;
-      size_t hint_len = 0;
-      if (!token_text_at_ast(p, end - 1, &hint, &hint_len, err)) {
-        tc_ast_free(value);
-        return tc_ast_nil();
-      }
-      TcAstValue hint_value = tc_ast_string_copy(hint, hint_len, err);
-      free(hint);
-      if (hint_value.kind == TC_AST_NIL ||
-          !tc_ast_hash_set(value, "type_hint", hint_value, err)) {
-        tc_ast_free(value);
-        return tc_ast_nil();
-      }
+    if (value.kind == TC_AST_NIL) return value;
+    char *hint = NULL;
+    size_t hint_len = 0;
+    if (!token_text_at_ast(p, end - 1, &hint, &hint_len, err)) {
+      tc_ast_free(value);
+      return tc_ast_nil();
     }
-    return value;
+    TcAstValue hint_value = tc_ast_string_copy(hint, hint_len, err);
+    free(hint);
+    if (hint_value.kind == TC_AST_NIL) {
+      tc_ast_free(value);
+      return tc_ast_nil();
+    }
+    TcAstValue node = node_hash(p, "type_ascription", end - 1, err);
+    if (node.kind != TC_AST_HASH) {
+      tc_ast_free(value);
+      tc_ast_free(hint_value);
+      return node;
+    }
+    if (!tc_ast_hash_set(node, "expression", value, err) ||
+        !tc_ast_hash_set(node, "type_hint", hint_value, err)) {
+      tc_ast_free(node);
+      return tc_ast_nil();
+    }
+    return node;
   }
 
   size_t arrow_pos = 0;

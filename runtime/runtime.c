@@ -15884,11 +15884,7 @@ int64_t w_is_ast_node_full(WValue x, WValue node_sym) {
 
 WValue w_node_kind_sym(WValue node, WValue table) {
     int kind_id = w_node_kind(node);
-    /* Bound mirrors compiler/lib/ast_schema.w KIND_MAX.
-     * Tungsten-side bounds reference KIND_MAX directly; this C site
-     * + implementations/c/src/vm_call_body.inc are the two literals
-     * that must move in lockstep when KIND_MAX changes. */
-    if (kind_id < 0 || kind_id > 147) return W_NIL;
+    if (kind_id < 0 || kind_id > (int)W_AST_KIND_MAX) return W_NIL;
     return w_array_get(table, w_int((int64_t)kind_id));
 }
 
@@ -32752,6 +32748,13 @@ double w_num_to_f64(WValue v) {
     return as_numeric_double(v);
 }
 
+/* Boxed twin used by the tree walker for expression-local `## f64`/`## f32`
+ * ascriptions. Native lowering converts directly to raw double; eval mode
+ * needs the same numeric coercion represented as an ordinary Float WValue. */
+WValue w_num_to_float(WValue v) {
+    return w_float(as_numeric_double(v));
+}
+
 /* Promote any numeric (double/int/decimal) to a double for the purpose
  * of an order comparison only. Decimal precision loss is acceptable
  * here because the comparison's result is a single bit. Used by
@@ -48569,8 +48572,9 @@ static void w_init_ic_tables(void) {
      * dispatch, so the names stay unregistered and lookup falls through. */
     /* Slot 8 (lcm) is retired: BigInt#lcm in core/numeric/big_int.w is a
      * source shim over the fused w_bigint_lcm boundary. */
-    /* Slot 9 (isqrt) is retired: BigInt#isqrt in core/numeric/big_int.w is
-     * a source shim over the exported bigint_isqrt_any kernel. */
+    /* Slot 9 (isqrt) is retired: BigInt#isqrt completes positive one-limb
+     * magnitudes in source and uses bigint_isqrt_any for wider/negative
+     * fallbacks. */
     /* Channel (Phase 7+m) */
     w_ic_channel_table[0].name = WN_send;
     w_ic_channel_table[1].name = WN_close;

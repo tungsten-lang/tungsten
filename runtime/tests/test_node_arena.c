@@ -9,7 +9,8 @@
  *      same values that were boxed in.
  *   4. realloc-doubling fires when cursor reaches cap, and post-realloc
  *      allocations continue from the correct offset.
- *   5. w_node_arena_reset() returns all arenas to a clean state.
+ *   5. w_node_arena_reset() invalidates the generation, rewinds the cursor,
+ *      and retains the high-water allocation for reuse.
  */
 
 #include <stdio.h>
@@ -17,6 +18,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include "../runtime.h"  /* pulls in wvalue.h transitively */
+#include "../ast_schema_generated.h"
 
 static int failures = 0;
 #define CHECK(cond, msg) do { \
@@ -51,9 +53,12 @@ static void test_alloc_roundtrip(void) {
 }
 
 static void test_kind_bits_max(void) {
-    /* Full-tier kind field is 8 bits. Confirm the boundary round-trips. */
-    WValue n = w_node_alloc(147, 0);
-    CHECK(w_node_kind(n) == 147, "current maximum kind round-trips");
+    /* Confirm the generated schema boundary round-trips. Derive its layout
+     * class from the generated width so this test follows future additions. */
+    uint32_t width = W_AST_KIND_WIDTH[W_AST_KIND_MAX];
+    int sc = width <= 2 ? 0 : (width == 3 ? 1 : 2);
+    WValue n = w_node_alloc(W_AST_KIND_MAX, sc);
+    CHECK(w_node_kind(n) == W_AST_KIND_MAX, "current maximum kind round-trips");
 }
 
 static void test_realloc_doubling(void) {
@@ -82,10 +87,12 @@ static void test_realloc_doubling(void) {
 }
 
 static void test_reset(void) {
+    WValue *retained_base = g_node_arena.base;
+    uint32_t retained_cap = g_node_arena.cap;
     w_node_arena_reset();
-    CHECK(g_node_arena.base == NULL, "word arena base freed");
+    CHECK(g_node_arena.base == retained_base, "word arena base retained");
     CHECK(g_node_arena.cursor == 1, "cursor preserves offset zero");
-    CHECK(g_node_arena.cap == 0, "word arena capacity reset");
+    CHECK(g_node_arena.cap == retained_cap, "word arena capacity retained");
 }
 
 static void test_reuse_after_reset(void) {

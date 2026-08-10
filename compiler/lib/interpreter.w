@@ -263,7 +263,19 @@ use target
 
   # -- Main evaluation dispatch --
 
+  # Expression-local `## type` ascriptions belong to every AST expression,
+  # not only assignment RHSes. Keep the main evaluator unaware of the wrapper
+  # so all recursive calls still pass through this conversion boundary.
   -> evaluate(node, env)
+    value = evaluate_node(node, env)
+    return value if node == nil
+    hint = ast_get(node, :type_hint)
+    # Assignments must coerce before storing (eval_assign owns that boundary),
+    # so do not apply their hint a second time on the returned value.
+    return value if hint == nil || ast_kind(node) == :assign
+    apply_type_hint(value, hint)
+
+  -> evaluate_node(node, env)
     t = ast_kind(node)
 
     if t == :int
@@ -426,6 +438,10 @@ use target
       # while returning self (`$size -> &(self[i]) : self`).
       evaluate(ast_get(node, :expression), env)
       return evaluate(ast_get(node, :value), env)
+    if t == :type_ascription
+      # evaluate() applies this wrapper's type_hint after the underlying
+      # expression has produced its ordinary value.
+      return evaluate(ast_get(node, :expression), env)
     if t == :if
       return eval_if(node, env)
     if t == :while
@@ -1334,6 +1350,10 @@ use target
       if args.size() != 2 || !(type(args[1]) in ("Integer" "BigInt"))
         raise "w_u64 expects one Integer argument"
       return args[1]
+    when "w_num_to_float"
+      if args.size() != 2
+        raise "w_num_to_float expects one numeric argument"
+      return ccall("w_num_to_float", args[1])
     when "w_small_array_new"
       # Narrow fixture/constructor bridge for exercising runtime-backed
       # SmallArray source methods under eval mode. Convert the public WValue
@@ -2530,8 +2550,17 @@ use target
     raise "Unknown unary operator"
 
   -> apply_type_hint(value, hint)
+    if hint == nil
+      return value
     value_type = type(value)
-    if hint == nil || !(value_type in ("Integer" "BigInt"))
+    if hint == "f64" || hint == "f32"
+      if value_type in ("Integer" "BigInt" "Float" "Decimal" "Rational")
+        return ccall("w_num_to_float", value)
+      return value
+    if value_type == "Float" && hint in ("u64" "i64" "u128" "i128")
+      value = value.to_i()
+      value_type = type(value)
+    if !(value_type in ("Integer" "BigInt"))
       return value
     if hint == "u64"
       return wrap_unsigned_bits(value, 64)

@@ -467,6 +467,7 @@ WValue w_nil(void);
 WValue w_string(const char *s);
 WValue w_symbol(const char *s);
 WValue w_float(double v);
+WValue w_num_to_float(WValue v);
 WValue w_str_to_sym(WValue v);
 /* Interpreter-only checked rebox for source methods that construct an exact
  * raw String WValue representation. */

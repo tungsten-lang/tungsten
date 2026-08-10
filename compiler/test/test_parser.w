@@ -51,6 +51,17 @@ expr = first_expr("x")
 assert_eq expr[:node], :var
 assert_eq expr[:name], "x"
 
+test "keeps expression type ascriptions occurrence-local"
+ast = parse("identity(value ## f64)\n[value]")
+ascription = ast[:expressions][0][:args][0]
+assert_eq ascription[:node], :type_ascription
+assert_eq ascription[:expression][:node], :var
+assert_eq ascription[:expression][:name], "value"
+assert_eq ascription[:type_hint], "f64"
+plain_value = ast[:expressions][1][:elements][0]
+assert_eq plain_value[:node], :var
+assert_nil plain_value[:type_hint]
+
 test "parses assignment"
 expr = first_expr("x = 42")
 assert_eq expr[:node], :assign

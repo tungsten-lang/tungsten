@@ -396,6 +396,9 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   when :passthrough
     return fn_body_calls_impure_ccall?(node.expression) || fn_body_calls_impure_ccall?(node.value)
 
+  when :type_ascription
+    return fn_body_calls_impure_ccall?(node.expression)
+
   when :range
     return fn_body_calls_impure_ccall?(node.from) || fn_body_calls_impure_ccall?(node.to)
 
@@ -574,6 +577,9 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   when :passthrough
     mark_builtin_runtime_class_uses(node.expression, mod)
     mark_builtin_runtime_class_uses(node.value, mod)
+
+  when :type_ascription
+    mark_builtin_runtime_class_uses(node.expression, mod)
 
   when :range
     mark_builtin_runtime_class_uses(node.from, mod)

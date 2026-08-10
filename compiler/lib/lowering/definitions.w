@@ -234,6 +234,8 @@
     if has_yield_in_node(node.expression)
       return true
     return has_yield_in_node(node.value)
+  when :type_ascription
+    return has_yield_in_node(node.expression)
   when :block
     return has_yield_node(node.body)
   when :call

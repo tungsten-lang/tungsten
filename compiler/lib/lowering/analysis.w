@@ -195,6 +195,9 @@
     mark_subtree_escape(node.expression, records)
     mark_subtree_escape(node.value, records)
 
+  when :type_ascription
+    mark_subtree_escape(node.expression, records)
+
   when :range
     mark_subtree_escape(node.from, records)
     mark_subtree_escape(node.to, records)
@@ -537,6 +540,9 @@
   when :passthrough
     free_scan_node(node.expression, bound, records)
     free_scan_node(node.value, bound, records)
+
+  when :type_ascription
+    free_scan_node(node.expression, bound, records)
 
   when :yield, :super
     free_scan_node(node.args, bound, records)

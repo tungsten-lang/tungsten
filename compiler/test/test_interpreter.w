@@ -83,6 +83,10 @@ assert_eq eval("48 >> 4"), 3
 test "applies integer type hints during assignment"
 assert_eq eval("x = 18446744073709551615 ## i64\nx"), -1
 assert_eq eval("x = -1 ## u64\nx").to_s(), "18446744073709551615"
+
+test "applies expression-local numeric type hints"
+assert_eq eval("identity = ->(x) { x }\nidentity(-1 ## u64).to_s()"), "18446744073709551615"
+assert_eq eval("Math.sqrt((18446744073709551615 ## u64) ## f64) ## i64"), 4294967296
 assert_eq eval("x = 340282366920938463463374607431768211456 ## u128\nx"), 0
 
 test "evaluates unary minus"

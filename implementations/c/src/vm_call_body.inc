@@ -387,6 +387,30 @@
           }
           CNEXT();
         }
+        // Boxed numeric-to-f64 coercion for the interpreter's expression-local
+        // type-ascription mirror. Stage 0 has signed i64 and boxed doubles;
+        // wider integer semantics begin in the production runtime.
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 2
+            && tc_kind(args[0]) == TC_VAL_STRING
+            && tc_str_len(args[0]) == 14
+            && memcmp(tc_str_bytes_only(args[0]), "w_num_to_float", 14) == 0) {
+          double raw;
+          if (value_is_int(args[1])) {
+            raw = (double)value_as_int(args[1]);
+          } else if (w_is_double(args[1])) {
+            raw = w_as_double(args[1]);
+          } else {
+            FREE_ARGS();
+            tc_error_set(err, "w_num_to_float expects a numeric argument");
+            goto cleanup_fail;
+          }
+          TcValue out = w_box_double(raw);
+          FREE_ARGS();
+          if (!push(&vm, out, err)) {
+            goto cleanup_fail;
+          }
+          CNEXT();
+        }
         // Algebra notation is a native-loader source rewrite. Stage 0 only
         // compiles the compiler itself, which contains no algebra declarations,
         // so preserving the source is the exact bootstrap behavior required
@@ -414,9 +438,10 @@
             && memcmp(tc_str_bytes_only(args[0]), "w_node_kind_sym", 15) == 0) {
           int kind_id = w_node_kind(args[1]);
           TcValue r = tc_box_nil();
-          // Bound mirrors compiler/lib/ast_schema.w KIND_MAX. Must
-          // move in lockstep with runtime/runtime.c's w_node_kind_sym.
-          if (kind_id >= 0 && kind_id <= 147 && tc_kind(args[2]) == TC_VAL_ARRAY) {
+          // The generated schema is the single source of truth for the kind
+          // bound. Keeping a literal here made the first newly-added AST kind
+          // silently map to nil during stage 0.
+          if (kind_id >= 0 && kind_id <= (int)W_AST_KIND_MAX && tc_kind(args[2]) == TC_VAL_ARRAY) {
             TcRuntimeArray *arr = tc_as_array(args[2]);
             if (arr && kind_id < arr->size) {
               r = arr->slots[arr->start + kind_id];

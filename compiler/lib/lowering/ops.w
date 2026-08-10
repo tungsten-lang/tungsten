@@ -229,6 +229,17 @@
   else
     :sitofp_i64_f64
 
+-> f64_to_machine_int_op(type)
+  case type
+  when :u128
+    :fptoui_f64_i128
+  when :i128
+    :fptosi_f64_i128
+  when :u64
+    :fptoui_f64_i64
+  else
+    :fptosi_f64_i64
+
 -> raw_machine_source_type(tv, inferred_type = nil)
   case tv[:type]
   when :raw_int
@@ -2274,6 +2285,15 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return cast_raw_machine_int(wfn, tv[:value], :i64, type)
   if src_type != nil && tv[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128 :raw_int)
     return cast_raw_machine_int(wfn, tv[:value], src_type, type)
+  if tv[:type] in (:raw_f32 :raw_f64)
+    raw = tv[:value]
+    if tv[:type] == :raw_f32
+      extended = next_temp(wfn)
+      emit_instruction(wfn, {op: :fpext_f32_f64, temp: extended, value: raw})
+      raw = extended
+    converted = next_temp(wfn)
+    emit_instruction(wfn, {op: f64_to_machine_int_op(type), temp: converted, value: raw})
+    return converted
   boxed = ensure_i64_value(wfn, tv)
   # No nanunbox shortcut for `:int`-inferred values: `:int` means "may have
   # promoted to a heap BigInt at runtime" (same exclusion as every raw

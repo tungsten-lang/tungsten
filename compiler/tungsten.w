@@ -364,6 +364,14 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
     return false
   text.index(needle) != nil
 
+-> ll_needs_lexchars(text)
+  if ll_text_has(text, "lchs") || ll_text_has(text, "lexchars")
+    return true
+  # Short method names are emitted as inline-string WValue constants, so an
+  # ordinary `.lchs()` call may leave no readable "lchs" text in the module.
+  # Recognize the exact SSO-5 method-name literal used by its inline cache.
+  ll_text_has(text, wvalue_literal_text(sso5_wvalue("lchs")))
+
 -> ll_needs_apple_bridges(text)
   if ll_text_has(text, "@w_metal_")
     return true
@@ -881,9 +889,8 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
   #   lexchars → lexchar_tables.c (348KB SIMD-lexer tables; absent = clear
   #              raise if ever reached)
   prime_needed = ll_text_has(ll_probe_text, "prime")
-  # the String API is `.lchs` (IC name "lchs"); "lexchars" additionally covers
-  # direct @w_string_to_lexchars ccall users
-  lexchars_needed = ll_text_has(ll_probe_text, "lchs") || ll_text_has(ll_probe_text, "lexchars")
+  # The String API is `.lchs`; direct lexchars runtime calls are covered too.
+  lexchars_needed = ll_needs_lexchars(ll_probe_text)
   link_started_at = clock
   needs_zstd = ll_needs_zstd_text(ll_probe_text)
   # LTO is opt-in: whole-program LTO (lean binary, slow link) only for

@@ -45,6 +45,15 @@ in Tungsten:AST
   -> kind
     ast_kind(self)
 
+  # Preserve the hash-style AST API used by compiler tooling and tests. A
+  # generic method_missing fallback cannot implement this because it sees the
+  # method name `[]`, not the requested field key.
+  -> [](name)
+    ast_get(self, name)
+
+  -> []=(name, value)
+    ast_set(self, name, value)
+
   # Field setters — mirror the materialized getters so call sites can
   # write `node.field = v` instead of `ast_set(node, :field, v)`. Each
   # routes through ast_set, which dispatches slab-slot vs sparse-meta
@@ -1517,6 +1526,17 @@ in Tungsten:AST
 
   -> .new(expression, value)
     slab_alloc_init(KIND_PASSTHROUGH, SC_2, expression, value)
+
+# Occurrence-local `expr ## type`. Leaf references such as Var are interned by
+# name, so the ascription must live on a distinct wrapper rather than sparse
+# metadata on the referenced node.
++ TypeAscription < Node [slab]
+  - ivars
+    @expression ast
+    @type_hint w64
+
+  -> .new(expression, type_hint)
+    slab_alloc_init(KIND_TYPE_ASCRIPTION, SC_2, expression, type_hint)
 
 # -- Ranges --
 

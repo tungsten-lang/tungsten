@@ -556,6 +556,9 @@
     collect_free_vars_in_node(ast_get(node, :expression), vars, seen, outer_vars, params, known_calls, bindings)
     collect_free_vars_in_node(ast_get(node, :value), vars, seen, outer_vars, params, known_calls, bindings)
     return nil
+  when :type_ascription
+    collect_free_vars_in_node(ast_get(node, :expression), vars, seen, outer_vars, params, known_calls, bindings)
+    return nil
   when :view_field
     return nil
   when :if

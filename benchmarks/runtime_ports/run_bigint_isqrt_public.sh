@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
-# Compile and sample the true public BigInt#isqrt dispatch path. Run this
-# unchanged before and after the port; use LABEL to identify the campaign.
-# Per-stratum iteration counts keep every leg near or above 0.2s.
+# Same-binary public-source/C-oracle gate for BigInt#isqrt. Each pair balances
+# C/W/W/C with W/C/C/W and reports the median paired source/C ratio.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
-RUNS="${RUNS:-10}"
+PAIRS="${PAIRS:-8}"
 LABEL="${LABEL:-current}"
 OUT="${OUT:-/tmp/tungsten-bigint-isqrt-${LABEL}.txt}"
-ROWS="${ROWS:-one:5000000 four:2000000 sixteen:200000 sixtyfour:20000}"
+ROWS="${ROWS:-one:5000000 one-high:5000000 one-square:5000000 four:2000000 sixteen:200000 sixtyfour:20000}"
 
-case "$RUNS" in ''|*[!0-9]*|0) echo "RUNS must be positive" >&2; exit 2 ;; esac
+case "$PAIRS" in ''|*[!0-9]*|0) echo "PAIRS must be positive" >&2; exit 2 ;; esac
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-bigint-isqrt-public.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -27,14 +26,32 @@ TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/bigint_leaf_public_ref.c" \
 
 "$BIN" check
 : > "$OUT"
+
+run_leg() {
+  local lane="$1" stratum="$2" iters="$3"
+  local wire_lane="w"
+  if [ "$lane" = C ]; then wire_lane="c"; fi
+  printf '%s|%s\n' "$lane" "$("$BIN" bench "$wire_lane" "$stratum" "$iters")" >> "$OUT"
+}
+
 for row in $ROWS; do
   stratum="${row%%:*}"
   iters="${row##*:}"
-  i=1
-  while [ "$i" -le "$RUNS" ]; do
-    echo "  $LABEL isqrt-$stratum sample $i/$RUNS" >&2
-    "$BIN" bench "$stratum" "$iters" >> "$OUT"
-    i=$((i + 1))
+  pair=1
+  while [ "$pair" -le "$PAIRS" ]; do
+    echo "  $LABEL isqrt-$stratum pair $pair/$PAIRS" >&2
+    if [ $((pair % 2)) -eq 1 ]; then
+      run_leg C "$stratum" "$iters"
+      run_leg W "$stratum" "$iters"
+      run_leg W "$stratum" "$iters"
+      run_leg C "$stratum" "$iters"
+    else
+      run_leg W "$stratum" "$iters"
+      run_leg C "$stratum" "$iters"
+      run_leg C "$stratum" "$iters"
+      run_leg W "$stratum" "$iters"
+    fi
+    pair=$((pair + 1))
   done
 done
 
@@ -49,12 +66,21 @@ median_stream() {
   '
 }
 
-printf '%-20s %14s\n' "operation" "median ns/call"
+printf '%-20s %14s\n' "operation" "median W/C"
 printf '%-20s %14s\n' "--------------------" "--------------"
 for row in $ROWS; do
   stratum="${row%%:*}"
   name="isqrt-$stratum"
-  median="$(awk -F'|' -v n="$name" '$1 == "RESULT" && $2 == n { printf "%.9f\n", $3 / $4 }' "$OUT" | median_stream)"
+  median="$(awk -F'|' -v n="$name" '
+    $2 == "RESULT" && $3 == n {
+      if ($1 == "C") c += $4; else w += $4
+      legs++
+      if (legs == 4) {
+        printf "%.12f\n", w / c
+        c = 0; w = 0; legs = 0
+      }
+    }
+  ' "$OUT" | median_stream)"
   printf '%-20s %14.4f\n' "$name" "$median"
 done
 echo "raw samples: $OUT"

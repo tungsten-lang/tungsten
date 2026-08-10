@@ -3473,6 +3473,12 @@ ewscope_md_state = {ids: {}}
     inst[:temp] + " = fptrunc double " + inst[:value] + " to float"
   when :fptosi_f64_i64
     inst[:temp] + " = fptosi double " + inst[:value] + " to i64"
+  when :fptoui_f64_i64
+    inst[:temp] + " = fptoui double " + inst[:value] + " to i64"
+  when :fptosi_f64_i128
+    inst[:temp] + " = fptosi double " + inst[:value] + " to i128"
+  when :fptoui_f64_i128
+    inst[:temp] + " = fptoui double " + inst[:value] + " to i128"
   when :bitcast_i64_f64
     inst[:temp] + " = bitcast i64 " + inst[:value] + " to double"
   when :bitcast_f64_i64

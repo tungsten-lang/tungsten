@@ -132,7 +132,7 @@
   when :yield
     lower_yield(ctx, node)
     return nil
-  when :passthrough
+  when :passthrough, :type_ascription
     lower_expression(ctx, node)
     return nil
   when :go
@@ -244,6 +244,20 @@
   when :passthrough
     lower_statement(ctx, node.expression)
     return lower_expression(ctx, node.value)
+  when :type_ascription
+    value = lower_expression(ctx, node.expression)
+    hint = normalize_type_symbol(node.type_hint)
+    if node.type_hint == "w64" || node.type_hint in ("big" "bigint" "bignum")
+      return typed_value(:i64, ensure_i64_value(ctx[:func], value))
+    if is_machine_float_type(hint)
+      if hint in (:f32 :raw_f32)
+        return typed_value(:raw_f32, ensure_raw_f32(ctx[:func], value))
+      return typed_value(:raw_f64, ensure_raw_f64(ctx[:func], value))
+    if is_machine_int_type(hint)
+      inferred = infer_type(node.expression, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+      raw = ensure_raw_machine_int(ctx[:func], value, hint, inferred)
+      return typed_value(raw_machine_value_type(hint), raw)
+    return value
   # @fastmath / @strictmath blocks in expression position (e.g. a method whose
   # entire body is the block, or the block as an if/case arm) — return the
   # block body's value. Mirrors the statement dispatch in lower_statement.
@@ -446,4 +460,3 @@
   if value_type == nil
     value_type = "i64"
   emit_instruction(wfn, {op: :store_global, name: name, value: value_reg, type: value_type})
-

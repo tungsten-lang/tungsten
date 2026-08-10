@@ -24,6 +24,23 @@
     a = magnitude >> tz ## u64
   a << shift
 
+# Exact floor square root for one machine-word magnitude. A hardware f64
+# square root supplies a 32-bit seed; integer correction makes the result
+# exact at perfect-square and binary64-rounding boundaries.
+-> __bigint_isqrt_u64(value) (u64) u64
+  root_i = Math.sqrt(value ## f64) ## i64
+  if root_i > 4294967295
+    root_i = 4294967295
+  root = root_i ## u64
+  square = root * root ## u64
+  while square > value
+    root -= 1
+    square = root * root ## u64
+  while value - square > (root << 1)
+    root += 1
+    square = root * root ## u64
+  root
+
 + BigInt < Int
   - data
     # BigInt rides a dedicated top-level NaN-box tag (0xFFF8, v4), but WBigint retains its C header
@@ -1133,12 +1150,17 @@
   -> prime?
     ccall("w_bigint_prime_q", self)
 
-  # Integer square root. The divide-and-conquer kernel (workspace-managed
-  # sqrtrem over raw limbs) stays in the runtime; this override keeps the
-  # method surface in source and shields BigInt receivers from Int#isqrt's
-  # Newton loop, which would promote through full-width division at every
-  # step. Negative receivers die inside the kernel with the shared message.
+  # Integer square root. Positive one-limb magnitudes use a native raw-u64
+  # seed-and-correct kernel and always return an inline 32-bit root. Negative
+  # and wider receivers retain the workspace-managed divide-and-conquer
+  # sqrtrem kernel behind the runtime boundary.
   -> isqrt
+    n = $size ## i64
+    if (($value >> 47) & 1) == 1
+      n = 0 - n
+    if n == 1
+      root = __bigint_isqrt_u64($limbs[0] ## u64) ## u64
+      return wvalue_from_bits((-1688849860263936 | root) ## i64)
     ccall("bigint_isqrt_any", self)
 
   # Non-mutating absolute value. Effective-positive receivers (including

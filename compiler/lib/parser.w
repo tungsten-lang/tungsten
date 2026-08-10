@@ -953,7 +953,7 @@ use ../../core/token
       comment_pos = hint.index("#")
       if comment_pos != nil
         hint = hint.slice(0, comment_pos)
-      expr.type_hint = hint.strip()
+      expr = Tungsten:AST:TypeAscription.new(expr, hint.strip())
       advance()
 
     # Implicit each: expr -> block (must be same line)
@@ -4082,7 +4082,7 @@ use ../../core/token
         comment_pos = hint.index("#")
         if comment_pos != nil
           hint = hint.slice(0, comment_pos)
-        elem.type_hint = hint.strip()
+        elem = Tungsten:AST:TypeAscription.new(elem, hint.strip())
         advance()
       elements.push(elem)
       if at_type?(T_COMMA)

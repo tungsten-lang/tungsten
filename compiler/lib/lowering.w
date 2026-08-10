@@ -471,6 +471,8 @@ use lowering/definitions
     return closure_binding_consumed_as_iter_arg?(node.value, name)
   if ast_kind(node) == :passthrough
     return closure_binding_consumed_as_iter_arg?(node.expression, name) || closure_binding_consumed_as_iter_arg?(node.value, name)
+  if ast_kind(node) == :type_ascription
+    return closure_binding_consumed_as_iter_arg?(node.expression, name)
   false
 
 -> closure_binding_consumed_by_next_stmt?(ctx, name)
@@ -926,6 +928,16 @@ use lowering/definitions
   if node == nil
     return nil
   t = ast_kind(node)
+  if t == :type_ascription
+    hint = ast_get(node, :type_hint)
+    if hint == "w64"
+      return :i64
+    if hint in ("big" "bigint" "bignum")
+      return :bigint
+    htl = hint.size()
+    if htl >= 3 && hint.slice(htl - 2, 2) == "\[]"
+      return typed_array_etype_to_sym(hint.slice(0, htl - 2))
+    return normalize_type_symbol(hint)
   case t
   when :int
     if node.format == :hex
@@ -1392,6 +1404,7 @@ use lowering/definitions
   mod[:fn_return_types]["Tungsten:AST:Not.new"] = :not
   mod[:fn_return_types]["Tungsten:AST:InTest.new"] = :in_test
   mod[:fn_return_types]["Tungsten:AST:Passthrough.new"] = :passthrough
+  mod[:fn_return_types]["Tungsten:AST:TypeAscription.new"] = :type_ascription
   mod[:fn_return_types]["Tungsten:AST:Range.new"] = :range
   mod[:fn_return_types]["Tungsten:AST:If.new"] = :if
   mod[:fn_return_types]["Tungsten:AST:While.new"] = :while

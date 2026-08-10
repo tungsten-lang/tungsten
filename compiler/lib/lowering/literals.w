@@ -334,7 +334,7 @@
     # matrix `inverse` (`cofactor / determinant`) and any element division
     # would do integer arithmetic. Mirrors the assignment-hint coercion.
     eh = elem.type_hint
-    if eh != nil
+    if eh != nil && ast_kind(elem) != :type_ascription
       ht = eh.to_sym()
       if is_machine_float_type(ht)
         raw = nil

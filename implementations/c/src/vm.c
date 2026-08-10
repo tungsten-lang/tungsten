@@ -1,4 +1,5 @@
 #include "tc.h"
+#include "ast_schema_generated.h"
 #include "w_lexchar_cache.c"
 
 #include <ctype.h>

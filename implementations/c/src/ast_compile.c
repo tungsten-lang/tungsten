@@ -1302,6 +1302,18 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
     return 0;
   }
 
+  /* Type ascriptions affect the self-hosted compiler's static lowering, but
+   * stage 0 executes dynamically typed compiler code. Preserve the expression
+   * value exactly, matching the former metadata-on-node behavior. */
+  if (ast_node_is(node, "type_ascription")) {
+    TcAstValue *expression = ast_get(node, "expression");
+    if (!expression) {
+      tc_error_set(err, "type_ascription node missing expression");
+      return 0;
+    }
+    return compile_expr(*expression, chunk, err);
+  }
+
   if (ast_node_is(node, "int")) {
     TcAstValue *value = ast_get(node, "value");
     if (!value || value->kind != TC_AST_INT) {

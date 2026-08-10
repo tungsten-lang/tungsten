@@ -283,7 +283,9 @@ def ir_needs_ssmr?(ir)
   ir.include?("prime")
 end
 def ir_needs_lexchars?(ir)
-  ir.include?("lchs") || ir.include?("lexchars")
+  # `lchs` is a four-byte SSO method-name string and normally appears in emitted
+  # IR only as its inline WValue literal, not as readable text.
+  ir.include?("lchs") || ir.include?("lexchars") || ir.include?("u0xFFF90007368636C8")
 end
 
 flag_ast       = false

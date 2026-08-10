@@ -1,11 +1,11 @@
-# Phase 0: the "unexplained 4x" on bmc-ibm-12 — resolved
+# The "unexplained 4x" on bmc-ibm-12 — resolved
 
 2026-07-22. Question under investigation: `bmc-ibm-12` (SATISFIABLE, 39,598
 vars) was reported to take 11,224 conflicts on the shipped adaptive-restart
 build but 2,609 on a "pure rare-restart build", even though the 16,384-conflict
 restart floor means neither run should ever restart. The working theory was
 that "something in the adaptive bookkeeping changes the search". If real, an
-invisible 4x in the baseline would poison every measurement Phases 1–3 are
+invisible 4x in the baseline would poison every measurement the rest of the campaign is
 judged by.
 
 ## Verdict: the bookkeeping is exonerated, bit-for-bit
@@ -60,7 +60,7 @@ Candidates tested and excluded on the shipped core: initial phase polarity
    perturbations of the search (phase init, restart cadence, reduce cadence)
    swing `bmc-ibm-12` between 2.6k and 21k conflicts. A 4x difference between
    two builds on one satisfiable instance is trajectory noise, not signal.
-2. **Gates must be family-level.** Phase 1–3 success criteria are measured
+2. **Gates must be family-level.** The campaign's success criteria are measured
    over instance families with medians of repetitions (as the plan already
    specifies), never on a single instance.
 3. **The stats contract makes this visible.** `c stats restarts=… reduces=…`
@@ -69,7 +69,7 @@ Candidates tested and excluded on the shipped core: initial phase polarity
 4. **Reduce cadence is a real, separate question.** Scheduled reduction made
    this satisfiable BMC instance *worse* (21,119 vs 11,224), consistent with
    the reduce-on-restart coupling being harmless here. Revisit only with
-   family-level evidence, ideally after Phase 1 preprocessing changes clause
+   family-level evidence, ideally after the preprocessing work changes clause
    counts materially.
 
 Experiment logs: variants built from the shipped source in the session

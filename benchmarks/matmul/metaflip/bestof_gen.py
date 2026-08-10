@@ -21,7 +21,7 @@ mode="bestof": walks the ENTIRE axis hash chain (every valid partner, not a
 Diagnostics: every move logs candidates_scanned (chain length walked) so a
 "no improvement" result can be distinguished from "the prototype has a bug".
 
-Usage: python3 phase0_gen.py <n> <m> <p> <recv> <mode> [seed] [cap] [thr] [band]
+Usage: python3 bestof_gen.py <n> <m> <p> <recv> <mode> [seed] [cap] [thr] [band]
 """
 
 

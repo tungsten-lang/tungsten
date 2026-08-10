@@ -1,4 +1,4 @@
-# Phase 6 — tungsten-llama vs llama.cpp Metal benchmark
+# tungsten-llama vs llama.cpp Metal benchmark
 
 **Model:** `qwen3:30b-a3b-q8_0` (Q8_0 MoE, 48 blocks, 128 experts top-8,
 hidden 2048, head_dim 128, GQA 32q/4kv).
@@ -18,7 +18,7 @@ hidden 2048, head_dim 128, GQA 32q/4kv).
 
 | Stage | Decode tok/s | Notes |
 |---|---|---|
-| Phase 5 hand-tuned (Apr 23 morning) | 2.7 | initial steady-state measurement |
+| Hand-tuned kernels (Apr 23 morning) | 2.7 | initial steady-state measurement |
 | + concurrent dispatch + moe_combine_8 (5ee75b8) | 21.7 | 8× speedup. The 8 expert chains run in parallel inside one MTLDispatchTypeConcurrent encoder, and the 8-dispatch wadd phase is replaced by a single fused 8-input combine kernel that removes the per-wadd serialization |
 | + pre-router concurrent (05dae77) | 23.3 | small extra. Q/K/V projections, per-head norms, RoPE, KV writes all run concurrent within their phases (each phase 2-3 parallelizable dispatches separated from the next by a barrier) |
 | + GPU router top-K (router_topk_8) | 27.8 | killed the per-layer CPU sync. The 128-element top-K + softmax + per-slot weight unpack now runs on the GPU as a single lane-0 dispatch in the same concurrent batch, so the host commits the layer once instead of twice (no readback between router matvec and expert dispatch) |
@@ -52,7 +52,7 @@ across all prompt positions (Q/K/V projections become matrix-matrix
 instead of matrix-vector, attention is one big kernel covering all
 positions × all positions). Adding a batched prefill path to Tungsten
 is its own substantial slice — not impossible, but it's not what got
-built in Phase 5 (which targeted single-token decode).
+built earlier (targeting single-token decode).
 
 ## What we shipped
 
@@ -98,6 +98,6 @@ re-examination — those intrinsics are designed for matrix-matrix
 operations (matmul), and decode is matrix-vector (matvec). The
 intrinsics don't accelerate matvec, they accelerate matmul.
 
-The autotuner harness from Phase 4 stays useful for #2 once a
+The autotuner harness stays useful for #2 once a
 batched prefill path exists — the search grammar just gains a knob
 for `:simdgroup_matrix` parallelization on the prefill kernels.

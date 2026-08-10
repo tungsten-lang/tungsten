@@ -4,7 +4,7 @@
 # miscompile at higher levels — surface it BEFORE the flip).
 #
 # What it does:
-#   1. Compiles the same dev runtime source set bin/commands/build.rb uses
+#   1. Compiles the same dev runtime source set bin/commands/build.w uses
 #      into a side archive at -O2 -g -fsanitize=undefined (recoverable, so a
 #      single run enumerates EVERY diagnostic instead of halting at the
 #      first; set UBSAN_HALT=1 to turn the same archive into a hard gate via
@@ -51,7 +51,7 @@ fi
 mkdir -p "$OUT/obj" "$OUT/bin" "$OUT/log"
 cd "$ROOT"
 
-# ── 1. Sanitized runtime archive (same dev source set as build.rb) ────────
+# ── 1. Sanitized runtime archive (same dev source set as build.w) ────────
 srcs=(runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c)
 case "$(uname -s)" in
   Darwin) srcs+=(event_kqueue.c metal.m blas_bridge.c hid_bridge.m) ;;

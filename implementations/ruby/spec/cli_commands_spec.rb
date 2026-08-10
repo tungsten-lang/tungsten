@@ -42,11 +42,11 @@ RSpec.describe "CLI commands surface" do
       expect(out).to include("--release", "--debug", "--cpu", "--target", "--native", "--fast")
     end
 
-    it "documents the same build axes on build help" do
-      out, err, status = run_cli(ruby_cli, "build", "--help")
+    it "redirects build to the Tungsten orchestrator" do
+      _out, err, status = run_cli(ruby_cli, "build", "--help")
 
-      expect(status.exitstatus).to eq(0), err
-      expect(out).to include("--release", "--debug", "--no-debug", "--cpu", "--target", "--portable", "--fast")
+      expect(status.exitstatus).to eq(1)
+      expect(err).to include("bin/tungsten build")
     end
   end
 

@@ -103,6 +103,7 @@ bin/commands/ai
 bin/commands/symbolicate
 bin/commands/forge
 bin/commands/sandbox
+bin/commands/build
 bits/*/bin/*
 !bits/*/bin/.gitkeep
 # Per-bit build output dirs (compiled bit + sidemap); the tracked entry point

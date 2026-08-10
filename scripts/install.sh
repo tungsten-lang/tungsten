@@ -50,9 +50,11 @@ else
   git clone --depth 1 "$TUNGSTEN_REPO" "$TUNGSTEN_HOME"
 fi
 say "building the self-hosted compiler (stage 1 = stage 2 byte-identity is checked)"
-# Run from TUNGSTEN_HOME: `tungsten build` is cwd-sensitive — from inside a
-# directory with a Bitfile it builds that project, not the compiler.
-( cd "$TUNGSTEN_HOME" && bin/tungsten build )
+# bootstrap works on the fresh clone (no compiler yet) and chains into the
+# full `tungsten build` pipeline. Run from TUNGSTEN_HOME: the chained build
+# is cwd-sensitive — from inside a directory with a Bitfile it builds that
+# project, not the compiler.
+( cd "$TUNGSTEN_HOME" && bin/tungsten bootstrap )
 
 # --- link --------------------------------------------------------------------
 mkdir -p "$TUNGSTEN_BIN"

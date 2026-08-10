@@ -49,8 +49,10 @@ end
 namespace :build do
   desc "Build the Tungsten compiler"
   task :tungsten do
+    # bootstrap works on a cold checkout (no compiler yet) and chains into
+    # the full `tungsten build` pipeline; build alone requires a compiler.
     Bundler.with_unbundled_env do
-      run_command "bin/tungsten", "build"
+      run_command "bin/tungsten", "bootstrap"
     end
   end
 end

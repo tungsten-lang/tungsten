@@ -96,7 +96,7 @@ if [ "$identity_after" = "$identity_after_lexer_change" ]; then
 fi
 
 if ! grep -Fq 'bootstrap_stage1_source_manifest' \
-  "$ROOT/bin/bootstrap"; then
+  "$ROOT/bin/commands/bootstrap.sh"; then
   printf 'FAIL: bootstrap does not use the stage-1 source-input contract\n' >&2
   exit 1
 fi

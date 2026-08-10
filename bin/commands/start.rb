@@ -67,8 +67,7 @@ if HAVE_COMPILER
 else
   puts "#{bold}Next — bootstrap the compiler#{reset} #{dim}(a fresh clone ships without one)#{reset}"
   puts
-  puts "  #{green}bin/tungsten bootstrap#{reset}  #{dim}# stage 1, no Ruby#{reset}"
-  puts "  #{green}bin/tungsten build#{reset}      #{dim}# full self-host + bits#{reset}"
+  puts "  #{green}bin/tungsten bootstrap#{reset}  #{dim}# full self-host + bits, no Ruby#{reset}"
   puts "  #{dim}or one-line install:#{reset} #{green}curl -fsSL tungsten-lang.org/install | sh#{reset}"
 end
 puts

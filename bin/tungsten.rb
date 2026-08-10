@@ -32,7 +32,11 @@ when "compile", "compile-batch"
     ARGV.shift
     load File.join(COMMANDS_DIR, "compile.rb")
   end
-when "build"   then ARGV.shift; load File.join(COMMANDS_DIR, "build.rb")
+when "build"
+  # The build orchestrator is Tungsten now (bin/commands/build.w), driven by
+  # the bin/tungsten router — no Ruby in the build toolchain.
+  warn "tungsten build is not driven by Ruby anymore — run: bin/tungsten build (or bin/tungsten bootstrap on a fresh clone)"
+  exit 1
 when "fmt"     then ARGV.shift; load File.join(COMMANDS_DIR, "fmt.rb")
 when "new"     then ARGV.shift; load File.join(COMMANDS_DIR, "new.rb")
 when "start"   then ARGV.shift; load File.join(COMMANDS_DIR, "start.rb")

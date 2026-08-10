@@ -105,13 +105,31 @@ case "$1" in
     ;;
   bootstrap)
     shift
-    exec bash "$ROOT/bin/bootstrap" "$@"
+    exec bash "$ROOT/bin/commands/bootstrap.sh" "$@"
     ;;
-  # build still uses the bootstrap driver (Ruby orchestrator); --ruby/--spinel
-  # are developer options on that path. Stage1+stage2 behavior unchanged.
+  # build: the Tungsten orchestrator (bin/commands/build.w), compiled on
+  # demand like tungsten.wc. Needs an existing compiler — a fresh clone
+  # bootstraps first. --ruby/--spinel remain developer options inside it.
   # fmt/forge/flame/bit/ai/symbolicate are handled by bin/tungsten.wc.
   build)
-    exec "$RUBY" "$RUBY_CLI" "$@"
+    shift
+    if [ ! -x "$COMPILER" ]; then
+      echo "tungsten build: no compiler at bin/tungsten-compiler — run bin/tungsten bootstrap first" >&2
+      exit 1
+    fi
+    BUILD_W="$ROOT/bin/commands/build.w"
+    BUILD_BIN="$ROOT/bin/commands/build"
+    if [ ! -x "$BUILD_BIN" ] || [ "$BUILD_W" -nt "$BUILD_BIN" ] || [ "$COMPILER" -nt "$BUILD_BIN" ]; then
+      BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
+        "$COMPILER" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto >/dev/null 2>&1 || {
+        echo "tungsten build: failed to compile bin/commands/build.w" >&2
+        exit 1
+      }
+      case "$(uname -s)" in
+        Darwin) codesign --force -s - "$BUILD_BIN" >/dev/null 2>&1 || true ;;
+      esac
+    fi
+    exec "$BUILD_BIN" "$@"
     ;;
   # bench: Tungsten primitive-op velocity baseline (bin/commands/bench.w).
   # `--suite` switches to the cross-language algorithm suite (bench-suite.w).

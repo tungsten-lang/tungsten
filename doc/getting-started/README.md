@@ -28,8 +28,7 @@ the page you will reopen most.
 curl -fsSL https://tungsten-lang.org/install | sh
 
 # Or from a clone
-bin/bootstrap            # stage 1 (no Ruby; also: bin/tungsten bootstrap)
-bin/tungsten build       # full self-host + bits
+bin/tungsten bootstrap   # full self-host + bits (no Ruby)
 bin/tungsten -e '<< 1 + 1'          # => 2
 ```
 

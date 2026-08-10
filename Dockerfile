@@ -23,11 +23,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /tungsten
 COPY . .
 
-# Install the driver's gems, then bootstrap the compiler. --no-bits keeps the
-# image lean (bit entry points are optional tools; build them with
-# `bin/tungsten build` later).
-RUN (cd implementations/ruby && bundle install) \
- && ( ulimit -s 131072 2>/dev/null || true; bin/tungsten build --no-bits )
+# Bootstrap the compiler (no Ruby involved). --no-bits keeps the image lean
+# (bit entry points are optional tools; build them with `bin/tungsten build`
+# later).
+RUN ( ulimit -s 131072 2>/dev/null || true; bin/tungsten bootstrap --no-bits )
 
 # Fail the image build if the freshly built compiler can't run a program.
 RUN bin/tungsten -e '<< 6 * 7'

@@ -199,7 +199,7 @@ MANPAGE = manpage_lines.join("\n")
   exit(1)
 
 -> run_bootstrap(tool_args)
-  cmd = "bash " + sh_quote(ROOT + "/bin/bootstrap")
+  cmd = "bash " + sh_quote(ROOT + "/bin/commands/bootstrap.sh")
   i = 0
   while i < tool_args.size
     cmd = cmd + " " + sh_quote(tool_args[i])
@@ -264,8 +264,7 @@ MANPAGE = manpage_lines.join("\n")
   else
     << c(use_color, "\e[1m", "Next — bootstrap the compiler") + " " + c(use_color, "\e[2m", "(a fresh clone ships without one)")
     << ""
-    << "  " + c(use_color, "\e[32m", "bin/tungsten bootstrap") + "  " + c(use_color, "\e[2m", "# stage 1, no Ruby")
-    << "  " + c(use_color, "\e[32m", "bin/tungsten build") + "      " + c(use_color, "\e[2m", "# full self-host + bits")
+    << "  " + c(use_color, "\e[32m", "bin/tungsten bootstrap") + "  " + c(use_color, "\e[2m", "# full self-host + bits, no Ruby")
     << "  " + c(use_color, "\e[2m", "or one-line install:") + " " + c(use_color, "\e[32m", "curl -fsSL tungsten-lang.org/install | sh")
   << ""
   exit(0)
@@ -345,10 +344,10 @@ when "run"
   exec_compiler(forwarded)
 
 when "build"
-  # Bootstrap driver still lives in bin/commands/build.rb until the
-  # full build graph is ported. Default path uses the C VM (no --ruby).
-  # --ruby / --spinel are developer options (see manpage).
-  exec_ruby_driver()
+  # Tungsten build orchestrator (bin/commands/build.w), compiled on
+  # demand. Real exit status matters: a failed stage must not read as 0/1.
+  # --ruby / --spinel are developer options handled inside build.w.
+  run_command_w_status("bin/commands/build.w", tool_argv_after_command("build"))
 
 when "fmt"
   run_command_w("bin/commands/fmt.w", tool_argv_after_command("fmt"))

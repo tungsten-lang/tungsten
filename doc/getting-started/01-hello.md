@@ -20,15 +20,15 @@ curl -fsSL https://tungsten-lang.org/install | sh
 ```bash
 git clone https://github.com/tungsten-lang/tungsten
 cd tungsten
-bin/tungsten doctor          # check git, clang, LLVM, make, ruby
-bin/bootstrap                # stage-1 compiler (C VM, no Ruby)
-bin/tungsten build           # full self-host: stage1+stage2 + bits
+bin/tungsten doctor          # check git, clang, LLVM, make
+bin/tungsten bootstrap       # full build: stage 1 (C VM), stage 2, bits
 ```
 
-`bin/bootstrap` (also reachable as `bin/tungsten bootstrap`) is the fresh-clone path (stage 1 only, bash).  
-`bin/tungsten build` still builds stage 1 as before, then stage 2 (byte-identical IR) and bits. It
-builds stage 1 and stage 2 of the compiler and checks that they emit
+`bin/tungsten bootstrap` is the fresh-clone path (no Ruby): it builds a
+stage-1 compiler via the C VM, then chains into the full `bin/tungsten build`
+pipeline — stage 1 and stage 2 of the compiler, with a check that they emit
 **byte-identical LLVM IR** — proof the compiler self-hosts to a fixed point.
+Once a compiler exists, `bin/tungsten build` reruns that pipeline directly.
 
 On Windows, use [WSL2](../WSL2.md), then follow the Linux steps.
 

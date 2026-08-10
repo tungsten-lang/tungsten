@@ -52,11 +52,12 @@ COMMANDS
     ai / symbolicate / forge / flame
                          Additional tools
 
-    doctor and bootstrap are pure bash (bin/bootstrap, bin/commands/doctor.sh)
-    and work on a fresh
-    clone. compile, run, console, start, new, fmt, forge, flame, bit, ai, and
-    symbolicate use the compiled CLI when present. `build` still uses the
-    Ruby bootstrap driver for the full pipeline; see DEVELOPER OPTIONS.
+    doctor and bootstrap are pure bash (bin/commands/doctor.sh,
+    bin/commands/bootstrap.sh) and work on a fresh clone; bootstrap chains
+    into the full `tungsten build` pipeline. compile, run, console, start,
+    new, fmt, forge, flame, bit, ai, and symbolicate use the compiled CLI
+    when present. `build` is driven by the Tungsten orchestrator
+    (bin/commands/build.w) and requires an existing compiler.
 
     The REPL is started with `tungsten console` or the `wit` binary — not
     `tungsten --repl`.
@@ -214,7 +215,8 @@ DEVELOPER OPTIONS
         default C VM. Implies the experimental implementations/spinel/ tree.
         Mutually exclusive with --ruby. Used only with `tungsten build`.
 
-    Equivalent environment overrides for the build driver:
+    Equivalent environment overrides for the build orchestrator
+    (bin/commands/build.w):
 
         TUNGSTEN_BOOTSTRAP=ruby
         TUNGSTEN_BOOTSTRAP=spinel

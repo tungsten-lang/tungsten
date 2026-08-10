@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# bin/bootstrap — fresh-clone path to the self-hosted compiler.
-# Also reachable as `bin/tungsten bootstrap`.
+# bin/commands/bootstrap.sh — fresh-clone path to the self-hosted compiler.
+# Reached as `bin/tungsten bootstrap`.
 #
 # Builds:
 #   1. implementations/c (stage-0 C VM)
@@ -8,13 +8,13 @@
 #   3. stage-1 compiler via the C VM → bin/tungsten-compiler
 #   4. bin/tungsten.wc (Argon CLI) when possible
 #
-# Stages 1-4 need no Ruby. Afterwards this chains into `tungsten build`
-# (stage1+stage2 fixed-point, bits, caches) when a Ruby driver is
-# available, so one bootstrap ends with the full self-host pipeline;
-# with no Ruby it stops at the working stage-1 compiler and says so.
+# Afterwards this compiles the Tungsten build orchestrator
+# (bin/commands/build.w) with the stage-1 compiler just built and execs
+# it for the stage1+stage2 fixed-point + bits pipeline, so one bootstrap
+# ends with the full self-host pipeline. No Ruby anywhere.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 . "$ROOT/bin/commands/bootstrap_helpers.sh"
 . "$ROOT/bin/commands/config.sh"
@@ -25,6 +25,7 @@ RELEASE=0
 PORTABLE=0
 DEBUG_REQUESTED=0
 NO_DEBUG_REQUESTED=0
+NO_BITS=0
 CPU_ARG=""
 TARGET_TRIPLE=""
 TARGET_SYSROOT=""
@@ -41,6 +42,7 @@ while [ "$#" -gt 0 ]; do
     --release) RELEASE=1 ;;
     --debug) DEBUG_REQUESTED=1 ;;
     --no-debug) NO_DEBUG_REQUESTED=1 ;;
+    --no-bits) NO_BITS=1 ;;
     --native) CPU_ARG=native ;;
     --cpu|--target|--sysroot)
       [ "$#" -ge 2 ] || { printf 'error: %s requires a value\n' "$1" >&2; exit 1; }
@@ -51,7 +53,7 @@ while [ "$#" -gt 0 ]; do
     --portable) PORTABLE=1 ;;
     -h|--help)
       cat <<'EOF'
-Usage: tungsten bootstrap [options]   (or: bin/bootstrap [options])
+Usage: tungsten bootstrap [options]
 
   Build the compiler from a fresh clone (C VM host path).
 
@@ -60,11 +62,12 @@ Usage: tungsten bootstrap [options]   (or: bin/bootstrap [options])
   3. Build a runtime archive
   4. Compile stage 1 → bin/tungsten-compiler
   5. Compile bin/tungsten.w → bin/tungsten.wc
-  6. Continue into `bin/tungsten build` (stage1 + stage2 identity, bits)
-     when a Ruby driver is available; steps 1-5 need no Ruby.
+  6. Compile bin/commands/build.w and exec it — the full `tungsten build`
+     pipeline (stage1 + stage2 identity, bits). No Ruby anywhere.
 
 Options:
   --force          Ignore cached bootstrap artifacts
+  --no-bits        Skip compiling bit entry points in the chained build
   --release        -O3, full LTO, no dev checks, reduced metadata
   --debug          Include symbols, safety checks, and runtime metadata
   --no-debug       Omit debug symbols and development checks
@@ -611,27 +614,36 @@ fi
 printf '\n%sStage-1 bootstrap complete.%s\n' "$bold" "$reset"
 printf '  compiler: %s\n' "$COMPILER_BIN"
 
-# ── 7. Full self-host build ─────────────────────────────────────
-# bootstrap includes `tungsten build`: continue into the stage1+stage2
-# fixed-point + bits pipeline. build.rb needs a Ruby to drive it; with
-# no Ruby on the host, stop at the working stage-1 compiler.
-RUBY_BIN="$ROOT/src/patched/ruby/ruby"
-if [ ! -x "$RUBY_BIN" ]; then RUBY_BIN=ruby; fi
-if command -v "$RUBY_BIN" >/dev/null 2>&1; then
-  build_flags=()
-  if [ "$FORCE" -eq 1 ]; then build_flags+=(--force); fi
-  if [ "$RELEASE" -eq 1 ]; then build_flags+=(--release); fi
-  if [ "$DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--debug); fi
-  if [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--no-debug); fi
-  if [ -n "$CPU_ARG" ]; then build_flags+=(--cpu "$CPU_ARG"); fi
-  if [ -n "$TARGET_TRIPLE" ]; then build_flags+=(--target "$TARGET_TRIPLE"); fi
-  if [ -n "$TARGET_SYSROOT" ]; then build_flags+=(--sysroot "$TARGET_SYSROOT"); fi
-  if [ "$PORTABLE" -eq 1 ]; then build_flags+=(--portable); fi
-  step "Full build: stage1+stage2 + bits (tungsten build)"
-  exec "$RUBY_BIN" "$ROOT/bin/tungsten.rb" build ${build_flags[@]+"${build_flags[@]}"}
+# ── 7. Build orchestrator + full self-host build ────────────────
+# bootstrap includes `tungsten build`: compile the Tungsten build
+# orchestrator (bin/commands/build.w) with the stage-1 compiler just
+# built, then exec it for the stage1+stage2 fixed-point + bits pipeline.
+BUILD_W="$ROOT/bin/commands/build.w"
+BUILD_BIN="$ROOT/bin/commands/build"
+step "Build orchestrator: bin/commands/build"
+if [ -x "$BUILD_BIN" ] && [ ! "$BUILD_W" -nt "$BUILD_BIN" ] && [ ! "$COMPILER_BIN" -nt "$BUILD_BIN" ]; then
+  ok "CACHED" "${BUILD_BIN#$ROOT/}"
+else
+  BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
+    "$COMPILER_BIN" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto \
+    >/tmp/tungsten-bootstrap-buildw.log 2>&1 \
+    || die "failed to compile bin/commands/build.w (see /tmp/tungsten-bootstrap-buildw.log)"
+  if [ "$UNAME_S" = Darwin ]; then
+    codesign --force -s - "$BUILD_BIN" >/dev/null 2>&1 || true
+  fi
+  ok "built" "${BUILD_BIN#$ROOT/}"
 fi
 
-printf '  no ruby on this host — stopped at stage 1 (a working compiler).\n'
-printf '  next:     %sbin/tungsten doctor%s\n' "$green" "$reset"
-printf '            %sbin/tungsten build%s   # full stage1+stage2 + bits (needs ruby)\n' "$green" "$reset"
-printf '            %sbin/wit%s\n' "$green" "$reset"
+build_flags=()
+if [ "$FORCE" -eq 1 ]; then build_flags+=(--force); fi
+if [ "$RELEASE" -eq 1 ]; then build_flags+=(--release); fi
+if [ "$DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--debug); fi
+if [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--no-debug); fi
+if [ "$NO_BITS" -eq 1 ]; then build_flags+=(--no-bits); fi
+if [ -n "$CPU_ARG" ]; then build_flags+=(--cpu "$CPU_ARG"); fi
+if [ -n "$TARGET_TRIPLE" ]; then build_flags+=(--target "$TARGET_TRIPLE"); fi
+if [ -n "$TARGET_SYSROOT" ]; then build_flags+=(--sysroot "$TARGET_SYSROOT"); fi
+if [ "$PORTABLE" -eq 1 ]; then build_flags+=(--portable); fi
+step "Full build: stage1+stage2 + bits (tungsten build)"
+exec env TUNGSTEN_ROOT="$ROOT" BIT_HOME="$ROOT/bits" \
+  "$BUILD_BIN" ${build_flags[@]+"${build_flags[@]}"}

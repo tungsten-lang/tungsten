@@ -11,7 +11,7 @@
 # count, it loops forever(ish), re-reading the seed file and re-dispatching
 # a short run each time.
 #
-# Seed file format (matches phase0_gen.py's dump-on-improvement output):
+# Seed file format (matches bestof_gen.py's dump-on-improvement output):
 #   line 0: rank
 #   lines 1..rank: "u v w" (space-separated ints), one term per line
 

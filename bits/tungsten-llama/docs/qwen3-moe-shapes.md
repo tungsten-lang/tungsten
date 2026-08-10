@@ -1,6 +1,6 @@
 # qwen3:30b-a3b-q8_0 tensor shapes
 
-Pinned shapes that drive Phase 2 matvec tuning. Source: GGUF header of
+Pinned shapes that drive the matvec tuning. Source: GGUF header of
 `~/.ollama/models/blobs/sha256-ae354763fe478c790125fb993e59bb1266655b3fa721eebe4a931660c3ed2ce9`
 (32.5 GB, 579 tensors).
 
@@ -58,7 +58,7 @@ of usable memory bandwidth, so the bandwidth floor is ~10 ms/token →
 Note `attn_v` is f16, not Q8_0 — qwen3 quantizes only the dense matmuls
 above. The router matmul `ffn_gate_inp` is f32 (negligible cost).
 
-## Phase 2 baseline shapes
+## Baseline shapes
 
 The "canonical" Q8_0 matvec for the gate is the expert FFN
 `(K=2048, N=768)` — most common in the hot path (8 per layer per token).

@@ -135,7 +135,7 @@ Cloudflare as the edge.
 
 A future alternative is compiling the C bytecode VM
 (`implementations/c/`) to WASM, which *would* run on Workers and needs no VM at
-all. That is a phase-2 idea: the C VM has known gaps against the self-hosted
+all. That is a follow-on idea: the C VM has known gaps against the self-hosted
 compiler, and for agents fidelity matters more than cleverness — teaching a
 model on an engine that diverges from the real compiler undermines the point.
 

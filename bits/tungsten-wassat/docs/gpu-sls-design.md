@@ -1,6 +1,6 @@
 # E3: GPU-parallel SLS — design
 
-2026-07-22. Hard gate satisfied first: the CPU engine passed the Phase 2
+2026-07-22. Hard gate satisfied first: the CPU engine passed the
 statistical gate (uf250 100/100 on first seeds, 4 bmc kernels, 0 invalid
 models), so it now serves as the correctness oracle for the GPU version.
 

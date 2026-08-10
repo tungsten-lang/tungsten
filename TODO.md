@@ -177,7 +177,7 @@ messages, contiguous f32/f64/integer datasets (LE/BE). TH5C/TH5D unchanged.
 
 ## Wassat: merged multi-thread proof stream (deferred by CEO review 2026-07-22)
 
-**Trigger:** Phase 3 `--fast` clause sharing lands AND demonstrates superlinear
+**Trigger:** the plan's `--fast` clause sharing lands AND demonstrates superlinear
 gains AND certified (`--proof`) runs become the wall-clock bottleneck. Until
 all three hold, do not build this.
 

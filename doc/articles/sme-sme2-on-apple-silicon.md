@@ -192,7 +192,7 @@ the same memory, GPU wins.
   hitting the streaming-SVE / SVE-attribute traps.
 - Smoke files in `/tmp/sme_*.c` (not committed) document the working
   pure-asm pattern and the LUTI4 quirks.
-- Confidence that Phase 3 was explored, characterized, and ruled out
+- Confidence that the SME path was explored, characterized, and ruled out
   with real numbers — not predicted on theory.
 
 ## References

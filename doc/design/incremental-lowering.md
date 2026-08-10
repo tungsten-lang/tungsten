@@ -61,12 +61,12 @@ audit; summarized here because each item is a design constraint):
 
 ## Phased plan
 
-**Phase 0 — correctness (small, land first):** emitter metadata-state
+**Stage 0 — correctness (small, land first):** emitter metadata-state
 reset per emission; `compile-batch` runtime pathing + cached-archive
 reuse. Gates: forced identity, battery, and a batch-vs-solo `.ll`
 byte-compare oracle over a spec shard.
 
-**Phase 1 — prelude-stability contract (the real work):** make core
+**Stage 1 — prelude-stability contract (the real work):** make core
 lowering independent of user code, behind a flag, by contract:
 - no param-type observation from user call sites into core fns
   (`TUNGSTEN_PARAM_INFER` already exists as a lever and cache key);
@@ -81,13 +81,13 @@ Program-context triggers that force monolithic fallback: subclassing or
 reopening a core class, generics instantiating core templates, build
 defines / math mode divergence.
 
-**Phase 2 — in-process reuse:** with Phase 1's contract, warm a curated
+**Stage 2 — in-process reuse:** with Stage 1's contract, warm a curated
 core union once per process; per program: append user expressions, run
 the (now decoupled) user-side analyses, lower user code only, deep-copy
 or copy-on-write the function list for the destructive passes, emit.
 Oracle: batch-vs-solo byte-identical `.ll` across the whole spec corpus.
 
-**Phase 3 — cross-process and parallel:** stable prelude symbol names
+**Stage 3 — cross-process and parallel:** stable prelude symbol names
 (skip compaction for the warm set, pin linkage) enable a cached prelude
 object so clang sees only user code; deterministic pre-assigned ID
 ranges (strings, block ids, IC slots) make method-level lowering

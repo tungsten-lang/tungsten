@@ -1,10 +1,10 @@
 # Schedule language design (P3.4)
 
-Phase 3 deliverable from the plan: "Halide-style schedule primitives:
+Deliverable from the plan: "Halide-style schedule primitives:
 `.tile`, `.vectorize`, `.parallelize`, `.threadgroup`, `.unroll`,
 `.split`. Same algorithm definition declares multiple named schedules.
 Compiler pass transforms kernel IR per schedule before MSL emission.
-Verify on Phase 2's Q8 matvec: one algorithm, three schedules, three
+Verify on the bakeoff's Q8 matvec: one algorithm, three schedules, three
 measurably-different MSL outputs + three measurably-different GPU
 times."
 
@@ -24,7 +24,7 @@ accordingly.
 
 **Why this over full Halide:**
 
-- Phase 2 already showed we can hand-write the cooperative imperative
+- The bakeoff already showed we can hand-write the cooperative imperative
   kernel in 50 lines. The schedule pass only needs to *generate* that
   imperative form from a default + transformations, not synthesize
   imperative loops from a pure DAG.
@@ -39,7 +39,7 @@ accordingly.
 as Halide. We can rewrite axis bindings, loop bounds/strides, and
 inject reductions, but we can't (initially) split a single loop into
 two nested ones, fuse loops, or reorder. Those land if/when we need
-them; the cooperative + tiled patterns are what Phase 5 uses.
+them; the cooperative + tiled patterns are what end-to-end inference uses.
 
 ## Proposed syntax
 

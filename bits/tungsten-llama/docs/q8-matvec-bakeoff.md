@@ -1,6 +1,6 @@
-# Phase 2 Q8_0 matvec bakeoff: Tungsten vs llama.cpp
+# Q8_0 matvec bakeoff: Tungsten vs llama.cpp
 
-Phase 2 deliverable: hand-tuned `@gpu` Q8_0 matvec kernel running on
+Deliverable: hand-tuned `@gpu` Q8_0 matvec kernel running on
 GPU at qwen3 MoE shapes, measured against llama.cpp's
 `kernel_mul_mv_q8_0_f32_nsg=4` baseline. The plan's kill-switch gate is
 "within 10% of llama.cpp's matvec → proceed" (i.e. ≥90% of their GB/s).
@@ -63,7 +63,7 @@ Closing the gap needs:
 3. **Threadgroup tiling for x** — load x once into shared memory per
    threadgroup, reuse across the rows that group computes.
 
-These are exactly what Phase 3's schedule language is supposed to
+These are exactly what the schedule language is supposed to
 express: `.tile(...)`, `.vectorize(K, 16)`, `.parallelize(K, 32)`,
 `.threadgroup(x)`.
 
@@ -71,7 +71,7 @@ express: `.tile(...)`, `.vectorize(K, 16)`, `.parallelize(K, 32)`,
 
 Per the plan: "Otherwise re-plan before investing in Phases 3-5."
 
-Recommended re-plan: **proceed to Phase 3 anyway, with a tighter scope**.
+Recommended re-plan: **proceed to the schedule language anyway, with a tighter scope**.
 The kill-switch was framed against a baseline that was assumed to be
 hand-tuneable to within 10% in v0; the actual gap is structural (no
 SIMD primitives in the @gpu emitter) rather than a tuning miss. Phase
@@ -81,7 +81,7 @@ back at v0 forever.
 The plan's escape hatch covers this: "If Phase 2 gate is marginal or
 painful, defer Phases 3-4 (schedule language + autotuner) to v2. Ship
 Phase 5 on hand-tuned kernels only." That option is also live —
-Phase 5 inference at ~50% of llama.cpp's per-token throughput would
+End-to-end inference at ~50% of llama.cpp's per-token throughput would
 still be a working pure-Tungsten LLM, which is the actual product
 goal.
 
@@ -143,7 +143,7 @@ Numbers (M3 Max, same shapes as the baseline table above):
   2-row tiling (V5) is also slower than no tiling at most shapes;
   only marginally helps at the smallest dispatch (768).
 - The structural gap that's left (~12% at lm_head, ~30–55% at smaller
-  shapes) really is what Phase 3 is for: SIMD-group reductions over K.
+  shapes) really is what the schedule language is for: SIMD-group reductions over K.
 
 Updated final ratios vs llama.cpp (V2 = production):
 
@@ -163,19 +163,19 @@ Bench: `scripts/bench/tungsten_q8_matvec_packed.w`.
 Pre-opt, lm_head was 0.52× and the gate verdict was unambiguous fail.
 Post-opt, lm_head is 0.88× — within the gate's 10% threshold. The
 smaller shapes still trail (0.45–0.76×), but those are dispatch-overhead
-dominated, not compute-bound — Phase 3 thread-cooperation primitives
+dominated, not compute-bound — schedule-language thread-cooperation primitives
 will close that gap because they reduce per-output dispatch overhead.
 
-**Recommended path: proceed to Phase 3.** The remaining gap on smaller
+**Recommended path: proceed to the schedule language.** The remaining gap on smaller
 shapes is genuinely structural (per-output thread cooperation, simdgroup
 reductions); the schedule language is exactly what closes it.
 
 Phase-5 fallback (ship inference on hand-tuned kernels at ~50% of
 llama.cpp) is no longer the necessary plan — pre-Phase-3 we've already
 landed at ~0.7× geometric mean, which is a usable inference floor on
-its own if Phase 3 takes longer than the 5-week estimate.
+its own if the schedule language takes longer than the 5-week estimate.
 
-## Phase 3 part 1: cooperative reduction
+## Part 1: cooperative reduction
 
 First Phase-3 experiment, hand-written kernel using the
 simdgroup-cooperative pattern that llama.cpp's
@@ -237,7 +237,7 @@ schedule q8_matvec.coop
 That's the P3.4 deliverable: a compiler pass that takes the algorithm
 and a schedule and produces the cooperative MSL above.
 
-## Phase 3 part 2: schedule language end-to-end
+## Part 2: schedule language end-to-end
 
 The plan-required verification: "one algorithm, three schedules,
 three measurably-different MSL outputs + three measurably-different
@@ -289,6 +289,6 @@ Schedule language v1 primitives implemented:
 
 Deferred (need vectorize-style inner-loop restructuring; not
 required for Q8_0 parity since `device char *` reads coalesce, but
-needed for sub-byte packings like MXFP4 in Phase 5):
+needed for sub-byte packings like MXFP4 for end-to-end inference):
 - Loop unroll/vectorize that turns a tight inner byte-iteration
   loop into a word-iteration with explicit per-byte unpacks.

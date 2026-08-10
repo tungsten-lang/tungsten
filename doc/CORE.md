@@ -23,8 +23,8 @@ summary from the source header, and a link to the source.
 | `BitOps` | `+ BitOps` | Fixed-width bit operations. | [`core/bit_ops.w`](../core/bit_ops.w) |
 | `BlankSlate` | `+ BlankSlate` | BlankSlate is the parent class of all classes in Tungsten. It's an explicit blank class. | [`core/blank_slate.w`](../core/blank_slate.w) |
 | `Bool` | `+ Bool` | Bool — true (subtag 0x2) and false (subtag 0x1) singletons | [`core/bool.w`](../core/bool.w) |
-| `BoolArray` | `+ BoolArray` | Bit-packed boolean array. Phase 6i.1b folded the dedicated WBoolArray | [`core/bool_array.w`](../core/bool_array.w) |
-| `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. Phase 6i.1 | [`core/byte_array.w`](../core/byte_array.w) |
+| `BoolArray` | `+ BoolArray` | Bit-packed boolean array; the dedicated WBoolArray runtime type is folded into WArray. | [`core/bool_array.w`](../core/bool_array.w) |
+| `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. | [`core/byte_array.w`](../core/byte_array.w) |
 | `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
 | `Channel` | `+ Channel` | — | [`core/channel.w`](../core/channel.w) |
 | `Class` | `+ Class` | — | [`core/class.w`](../core/class.w) |

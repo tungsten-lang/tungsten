@@ -1,7 +1,7 @@
 require "colored"
 require "bundler"
 require "tmpdir"
-require_relative "lib/tungsten/external_dependencies"
+require_relative "implementations/ruby/lib/tungsten/external_dependencies"
 
 ROOT = __dir__
 

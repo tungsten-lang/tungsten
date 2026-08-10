@@ -4,7 +4,7 @@ require "fileutils"
 require "stringio"
 require "tmpdir"
 
-require_relative "../../../lib/tungsten/external_dependencies"
+require_relative "../lib/tungsten/external_dependencies"
 
 RSpec.describe Tungsten::ExternalDependencies do
   def build_manager(latest_versions)

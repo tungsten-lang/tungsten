@@ -8,7 +8,7 @@ require "uri"
 
 module Tungsten
   module ExternalDependencies
-    ROOT = File.expand_path("../..", __dir__)
+    ROOT = File.expand_path("../../../..", __dir__)
     USER_AGENT = "tungsten-deps/1.0"
     CURRENT_SELECTORS = %w[current latest].freeze
 

@@ -111,8 +111,6 @@ kernels degrade 4-6x while simple loops degrade ~2x.
   `lowering`, `emitter`, `environment`, …).
 - `core/` — the Tungsten standard library (`.w` files). `core/tungsten.w` is
   its manifest (see below); `core/traits/` holds traits.
-- `lib/` — additional Tungsten library code, organized as `base/`, `core/`,
-  `ext/`, `tungsten/`, with a `tungsten.w` orchestrator.
 - `runtime/` — C runtime that compiled Tungsten binaries link against. Much
   more than a GC core: platform event loops (`event_kqueue.c` /
   `event_iouring.c` / `event_epoll.c`), HTTP/2 and HTTP/3 (`http2.c` /

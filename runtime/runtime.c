@@ -6017,10 +6017,45 @@ int bn_abs_diff_half(uint64_t *dst, const uint64_t *lo, const uint64_t *hi,
  * in a register through interpolation instead of a spare scratch limb.
  * The signed intermediate (sign-agreeing case) keeps that register as the
  * two's-complement top limb; adding z2 restores a positive value. */
+/* Scratch lives in TLS, not the stack: a stack array's page offset is a
+ * function of ambient frame depth AND the process environment block (environ
+ * sits at the stack top, so `export FOO=...` slides every frame).  With
+ * stack scratch, mul@48 swung 0.87x..1.73x vs GMP purely on environment
+ * size — the z1 store stream false-aliased the heap operand loads whenever
+ * the slide landed them near the same 4K page offset.  A __thread arena's
+ * offset is fixed at image load, independent of environ, and each kernel
+ * owns a disjoint slice (diff48 nests diff24; nothing self-recurses, and
+ * parallel Toom workers each see their own TLS copy). */
+/* One 4*HALF slice per distinct half width (prefix-sum layout).  Nesting
+ * always halves (diff48 -> diff24 -> eq12), so no two live activations
+ * share a slice. */
+static __thread uint64_t bn_toom2_fixed_ws[4508];
+#define BN_TOOM2_FIXED_WS_12  0
+#define BN_TOOM2_FIXED_WS_15  48
+#define BN_TOOM2_FIXED_WS_16  108
+#define BN_TOOM2_FIXED_WS_17  172
+#define BN_TOOM2_FIXED_WS_20  240
+#define BN_TOOM2_FIXED_WS_21  320
+#define BN_TOOM2_FIXED_WS_24  404
+#define BN_TOOM2_FIXED_WS_30  500
+#define BN_TOOM2_FIXED_WS_32  620
+#define BN_TOOM2_FIXED_WS_34  748
+#define BN_TOOM2_FIXED_WS_42  884
+#define BN_TOOM2_FIXED_WS_60  1052
+#define BN_TOOM2_FIXED_WS_64  1292
+#define BN_TOOM2_FIXED_WS_84  1548
+#define BN_TOOM2_FIXED_WS_120 1884
+#define BN_TOOM2_FIXED_WS_128 2364
+#define BN_TOOM2_FIXED_WS_168 2876
+#define BN_TOOM2_FIXED_WS_240 3548
+_Static_assert(3548 + 4 * 240 == 4508, "arena prefix sums cover every slice");
+
 #define BN_TOOM2_DIFF_FIXED(name, HALF, child_mul)                        \
 __attribute__((noinline, BN_HOT_SECTION, aligned(64)))                    \
 static void name(uint64_t *out, const uint64_t *a, const uint64_t *b) {   \
-    uint64_t da[HALF], db[HALF], z1[2 * HALF];                            \
+    uint64_t *da = bn_toom2_fixed_ws + BN_TOOM2_FIXED_WS_##HALF;          \
+    uint64_t *db = da + HALF;                                             \
+    uint64_t *z1 = db + HALF;                                             \
     int da_neg = bn_abs_diff_half(da, a, a + HALF, HALF);                 \
     int db_neg = bn_abs_diff_half(db, b, b + HALF, HALF);                 \
     child_mul(out, a, b);                       /* z0 = a0*b0 */          \

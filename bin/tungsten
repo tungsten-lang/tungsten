@@ -536,8 +536,7 @@ else
     start|"")
       echo "The Tungsten Programming Language"
       echo
-      echo "  Next: bin/bootstrap           # stage-1 compiler (no Ruby)"
-      echo "        bin/tungsten build      # full self-host + bits"
+      echo "  Next: bin/tungsten bootstrap  # build the compiler (full self-host + bits)"
       echo "  Docs: doc/getting-started/"
       exit 0
       ;;

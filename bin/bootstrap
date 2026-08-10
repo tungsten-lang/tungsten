@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bin/bootstrap — host path to a working stage-1 compiler (no Ruby).
+# bin/bootstrap — fresh-clone path to the self-hosted compiler.
 # Also reachable as `bin/tungsten bootstrap`.
 #
 # Builds:
@@ -8,8 +8,10 @@
 #   3. stage-1 compiler via the C VM → bin/tungsten-compiler
 #   4. bin/tungsten.wc (Argon CLI) when possible
 #
-# Does NOT replace `tungsten build` (stage1+stage2 fixed-point, bits, caches).
-# Use bootstrap on a fresh clone; use build for the full self-host pipeline.
+# Stages 1-4 need no Ruby. Afterwards this chains into `tungsten build`
+# (stage1+stage2 fixed-point, bits, caches) when a Ruby driver is
+# available, so one bootstrap ends with the full self-host pipeline;
+# with no Ruby it stops at the working stage-1 compiler and says so.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -51,16 +53,15 @@ while [ "$#" -gt 0 ]; do
       cat <<'EOF'
 Usage: tungsten bootstrap [options]   (or: bin/bootstrap [options])
 
-  Build a stage-1 compiler without Ruby (C VM host path).
+  Build the compiler from a fresh clone (C VM host path).
 
   1. Run doctor (toolchain check)
   2. Build implementations/c (stage 0)
   3. Build a runtime archive
   4. Compile stage 1 → bin/tungsten-compiler
   5. Compile bin/tungsten.w → bin/tungsten.wc
-
-  Full self-host (stage1 + stage2 identity, bits) remains:
-    bin/tungsten build
+  6. Continue into `bin/tungsten build` (stage1 + stage2 identity, bits)
+     when a Ruby driver is available; steps 1-5 need no Ruby.
 
 Options:
   --force          Ignore cached bootstrap artifacts
@@ -607,8 +608,30 @@ if [ -f "$WC" ]; then
   fi
 fi
 
-printf '\n%sBootstrap complete.%s\n' "$bold" "$reset"
+printf '\n%sStage-1 bootstrap complete.%s\n' "$bold" "$reset"
 printf '  compiler: %s\n' "$COMPILER_BIN"
+
+# ── 7. Full self-host build ─────────────────────────────────────
+# bootstrap includes `tungsten build`: continue into the stage1+stage2
+# fixed-point + bits pipeline. build.rb needs a Ruby to drive it; with
+# no Ruby on the host, stop at the working stage-1 compiler.
+RUBY_BIN="$ROOT/src/patched/ruby/ruby"
+if [ ! -x "$RUBY_BIN" ]; then RUBY_BIN=ruby; fi
+if command -v "$RUBY_BIN" >/dev/null 2>&1; then
+  build_flags=()
+  if [ "$FORCE" -eq 1 ]; then build_flags+=(--force); fi
+  if [ "$RELEASE" -eq 1 ]; then build_flags+=(--release); fi
+  if [ "$DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--debug); fi
+  if [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--no-debug); fi
+  if [ -n "$CPU_ARG" ]; then build_flags+=(--cpu "$CPU_ARG"); fi
+  if [ -n "$TARGET_TRIPLE" ]; then build_flags+=(--target "$TARGET_TRIPLE"); fi
+  if [ -n "$TARGET_SYSROOT" ]; then build_flags+=(--sysroot "$TARGET_SYSROOT"); fi
+  if [ "$PORTABLE" -eq 1 ]; then build_flags+=(--portable); fi
+  step "Full build: stage1+stage2 + bits (tungsten build)"
+  exec "$RUBY_BIN" "$ROOT/bin/tungsten.rb" build ${build_flags[@]+"${build_flags[@]}"}
+fi
+
+printf '  no ruby on this host — stopped at stage 1 (a working compiler).\n'
 printf '  next:     %sbin/tungsten doctor%s\n' "$green" "$reset"
-printf '            %sbin/tungsten build%s   # full stage1+stage2 + bits\n' "$green" "$reset"
+printf '            %sbin/tungsten build%s   # full stage1+stage2 + bits (needs ruby)\n' "$green" "$reset"
 printf '            %sbin/wit%s\n' "$green" "$reset"

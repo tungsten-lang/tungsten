@@ -41,6 +41,138 @@
     square = root * root ## u64
   root
 
+# Montgomery multiplication modulo an odd machine-word modulus. The reduction
+# keeps the low-limb carry explicit so it remains exact when the modulus has its
+# high bit set and the conceptual 128-bit sum overflows by one bit.
+-> __bigint_mont_mul_u64(a, b, modulus, neg_inverse) (u64 u64 u64 u64) u64
+  product_low = a * b ## u64
+  product_high = mulhi(a, b) ## u64
+  multiplier = product_low * neg_inverse ## u64
+  correction_low = multiplier * modulus ## u64
+  correction_high = mulhi(multiplier, modulus) ## u64
+
+  # The Montgomery multiplier makes product_low + correction_low congruent to
+  # zero modulo 2^64. It therefore carries exactly when product_low is nonzero.
+  carry = (product_low != 0 ? 1 : 0) ## u64
+  wide_reduced = (product_high ## u128) + (correction_high ## u128) ## u128
+  wide_reduced = wide_reduced + (carry ## u128) ## u128
+  reduced = wide_reduced ## u64
+  if (wide_reduced >> 64) != 0
+    return reduced - modulus ## u64
+  if reduced >= modulus
+    return reduced - modulus ## u64
+  reduced
+
+# One strong Miller-Rabin witness in Montgomery form. The caller supplies the
+# shared per-candidate setup and a base smaller than the normalized one-limb
+# BigInt magnitude.
+-> __bigint_prime_mr_base_u64(modulus, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, base) (u64 u64 u64 u64 u64 u64 i64 u64) i64
+  x = one_m ## u64
+  power = __bigint_mont_mul_u64(base, r2, modulus, neg_inverse) ## u64
+  e = exponent ## u64
+  while e != 0
+    if (e & 1) != 0
+      x = __bigint_mont_mul_u64(x, power, modulus, neg_inverse) ## u64
+    power = __bigint_mont_mul_u64(power, power, modulus, neg_inverse) ## u64
+    e = e >> 1 ## u64
+  if x == one_m || x == minus_one_m
+    return 1 ## i64
+  r = 1 ## i64
+  while r < shifts
+    x = __bigint_mont_mul_u64(x, x, modulus, neg_inverse) ## u64
+    if x == minus_one_m
+      return 1 ## i64
+    r += 1
+  0 ## i64
+
+# Exact deterministic primality for normalized positive one-limb BigInts. Such
+# values are at least 2^47, so after the small-factor screen the all-u64
+# seven-witness set is the only required range; smaller witness tiers can never
+# be reached by this representation.
+-> __bigint_prime_u64(value) (u64) i64
+  # Keep the helper exact for the whole machine-word range. The equality arms
+  # also preserve early exits between the constant-divisibility tests instead
+  # of encouraging the optimizer to speculate the complete screen at once.
+  if value < 2
+    return 0 ## i64
+  if value == 2
+    return 1 ## i64
+  if value % 2 == 0
+    return 0 ## i64
+  if value == 3
+    return 1 ## i64
+  if value % 3 == 0
+    return 0 ## i64
+  if value == 5
+    return 1 ## i64
+  if value % 5 == 0
+    return 0 ## i64
+  if value == 7
+    return 1 ## i64
+  if value % 7 == 0
+    return 0 ## i64
+  if value == 11
+    return 1 ## i64
+  if value % 11 == 0
+    return 0 ## i64
+  if value == 13
+    return 1 ## i64
+  if value % 13 == 0
+    return 0 ## i64
+  if value == 17
+    return 1 ## i64
+  if value % 17 == 0
+    return 0 ## i64
+  if value == 19
+    return 1 ## i64
+  if value % 19 == 0
+    return 0 ## i64
+  if value == 23
+    return 1 ## i64
+  if value % 23 == 0
+    return 0 ## i64
+  if value == 29
+    return 1 ## i64
+  if value % 29 == 0
+    return 0 ## i64
+  if value == 31
+    return 1 ## i64
+  if value % 31 == 0
+    return 0 ## i64
+  if value == 37
+    return 1 ## i64
+  if value % 37 == 0
+    return 0 ## i64
+
+  inverse = value ## u64
+  inverse = inverse * (2 - value * inverse) ## u64
+  inverse = inverse * (2 - value * inverse) ## u64
+  inverse = inverse * (2 - value * inverse) ## u64
+  inverse = inverse * (2 - value * inverse) ## u64
+  inverse = inverse * (2 - value * inverse) ## u64
+  neg_inverse = 0 - inverse ## u64
+  one_m = (0 - value ## u64) % value ## u64
+  r2 = (((one_m ## u128) * (one_m ## u128)) % (value ## u128)) ## u64
+  minus_one_m = value - one_m ## u64
+  shifts = ccall_nobox("__w_bit_cttz_u64", value - 1 ## u64) ## i64
+  exponent = (value - 1 ## u64) >> shifts ## u64
+
+  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 2 ## u64) == 0
+    return 0 ## i64
+  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 325 ## u64) == 0
+    return 0 ## i64
+  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 9375 ## u64) == 0
+    return 0 ## i64
+  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 28178 ## u64) == 0
+    return 0 ## i64
+  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 450775 ## u64) == 0
+    return 0 ## i64
+  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 9780504 ## u64) == 0
+    return 0 ## i64
+  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 1795265022 ## u64) == 0
+    return 0 ## i64
+  1 ## i64
+
 + BigInt < Int
   - data
     # BigInt rides a dedicated top-level NaN-box tag (0xFFF8, v4), but WBigint retains its C header
@@ -1166,10 +1298,17 @@
         return ccall("w_u128", product)
     ccall("w_bigint_lcm", self, other)
 
-  # Primality. The small-screen / Mersenne Lucas-Lehmer / Proth / BPSW
-  # policy rides the runtime kernel behind one exported boundary until
-  # source code can index limbs directly; the method surface lives here.
+  # Primality. Positive one-limb magnitudes use the exact native all-u64
+  # deterministic Miller-Rabin path above. Negative and wider receivers retain
+  # the Mersenne Lucas-Lehmer / Proth / BPSW runtime policy.
   -> prime?
+    n = $size ## i64
+    if (($value >> 47) & 1) == 1
+      n = 0 - n
+    if n == 1
+      return __bigint_prime_u64($limbs[0] ## u64) != 0
+    if n == -1
+      return false
     ccall("w_bigint_prime_q", self)
 
   # Integer square root. Positive one-limb magnitudes use a native raw-u64

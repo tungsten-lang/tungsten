@@ -346,12 +346,16 @@ typedef struct {
 typedef struct {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
     WBigint *hot;
-    /* Mirror of hot->cap, valid whenever hot != NULL.  The hot-slot take is
-     * on the immutable-churn critical path (release stores hot -> next take
-     * loads it); reading the capacity from the pool struct instead of
-     * through the just-forwarded pointer removes a dependent L1 load from
-     * that recurrence. */
-    uint32_t hot_cap;
+    /* Mirror of hot->cap, and the slot's occupancy encoding: zero exactly
+     * when hot == NULL (every writer that clears `hot` zeroes this too).
+     * The hot-slot take is on the immutable-churn critical path (release
+     * stores hot -> next take loads it); reading the capacity from the pool
+     * struct instead of through the just-forwarded pointer removes a
+     * dependent L1 load from that recurrence, and the zero-when-empty
+     * invariant lets the take test occupancy and smallest-fitting class in
+     * ONE unsigned compare (see bigint_alloc_raw_hot).  64-bit so the
+     * adjacent hot/hot_cap pair loads and clears as one LDP/STP. */
+    uint64_t hot_cap;
 #endif
     WBigint *slot[BN_BIGINT_POOL_BUCKETS][BN_BIGINT_POOL_PER_BUCKET];
     uint8_t count[BN_BIGINT_POOL_BUCKETS];
@@ -378,6 +382,7 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
     WBigint *hot = pool->hot;
     if (hot && hot->cap == min_cap) {
         pool->hot = NULL;
+        pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
 #endif
@@ -394,6 +399,7 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
         if (bucket == hot_bucket) {
             pool->hot = NULL;
+            pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
             hot->type = W_TYPE_BIGINT;
 #endif
@@ -428,6 +434,7 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
     WBigint *hot = pool->hot;
     if (hot && hot->cap == min_cap) {
         pool->hot = NULL;
+        pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
 #endif
@@ -444,6 +451,7 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
         if (bucket == hot_bucket) {
             pool->hot = NULL;
+            pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
             hot->type = W_TYPE_BIGINT;
 #endif
@@ -558,16 +566,35 @@ static void bigint_release(WBigint *b) {
  */
 static inline __attribute__((always_inline))
 void bigint_release_if_live(WBigint *b) {
-    if (__builtin_expect(b->type != W_TYPE_BIGINT, 0)) return;
     /* The shared byte counts tag-sign aliases (see wvalue.h). While it is
      * nonzero, a release means "one of the references died": swallow it
      * and decrement (255 saturates and pins the buffer forever). The
      * release that arrives at zero is the last reference — recycle. This
-     * keeps -x churn leak-free without taxing never-negated buffers. */
+     * keeps -x churn leak-free without taxing never-negated buffers.
+     *
+     * `type` (offset 0) and `shared` (offset 1) share one halfword, so on
+     * little-endian one load answers both "is this a live bigint" and "is
+     * it alias-free" — the only state the churn fast path may recycle —
+     * folding two loaded-and-branched bytes into one compare (the
+     * bigint_publish_header trick applied to the release side). */
+#if defined(__LITTLE_ENDIAN__) || (defined(__BYTE_ORDER__) && \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+    _Static_assert(offsetof(WBigint, type) == 0, "type at 0");
+    _Static_assert(offsetof(WBigint, shared) == 1, "shared at 1");
+    uint16_t head;
+    memcpy(&head, b, sizeof head);      /* one ldrh; no aliasing violation */
+    if (__builtin_expect(head != (uint16_t)W_TYPE_BIGINT, 0)) {
+        if (b->type != W_TYPE_BIGINT) return;
+        if (b->shared != 255) b->shared--;
+        return;
+    }
+#else
+    if (__builtin_expect(b->type != W_TYPE_BIGINT, 0)) return;
     if (__builtin_expect(b->shared != 0, 0)) {
         if (b->shared != 255) b->shared--;
         return;
     }
+#endif
 #ifndef BN_BIGINT_RELEASE_INLINE_HANDOFF
 #define BN_BIGINT_RELEASE_INLINE_HANDOFF 1
 #endif
@@ -599,6 +626,7 @@ static void bigint_pool_release_thread(void) {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
     free(pool->hot);
     pool->hot = NULL;
+    pool->hot_cap = 0;
 #endif
     for (int bucket = 0; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
         int count = pool->count[bucket];
@@ -739,15 +767,18 @@ static WBigint *bigint_alloc_raw_fresh_capacity(uint32_t alloc_cap) {
 static inline __attribute__((always_inline))
 WBigint *bigint_alloc_raw_hot(int32_t cap) {
 #if BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-    uint32_t requested = (uint32_t)cap;
+    uint64_t requested = (uint64_t)(uint32_t)cap;
     WBigintPool *pool = &bigint_pool_state;
     WBigint *hot = pool->hot;
-    uint32_t hot_cap = pool->hot_cap;
-    if (__builtin_expect(
-            hot != NULL &&
-            hot_cap >= requested &&
-            (hot_cap == 1 || (hot_cap >> 1) < requested), 1)) {
+    uint64_t hot_cap = pool->hot_cap;
+    /* One unsigned compare answers occupancy AND the smallest-fitting
+     * power-of-two class test: for p2 caps, n <= cap < 2n <=> cap - n < n
+     * (the wrap rejects cap < n, and the empty slot's cap == 0 encoding
+     * rejects everything).  Replaces a null check plus two range branches
+     * on the churn-critical take. */
+    if (__builtin_expect(hot_cap - requested < requested, 1)) {
         pool->hot = NULL;
+        pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
 #endif
@@ -768,8 +799,11 @@ WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
 #if BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
     WBigintPool *pool = &bigint_pool_state;
     WBigint *hot = pool->hot;
-    if (__builtin_expect(hot != NULL && pool->hot_cap == exact_cap, 1)) {
+    /* exact_cap >= 1 always, and the empty slot encodes as hot_cap == 0,
+     * so the capacity equality alone also proves occupancy. */
+    if (__builtin_expect(pool->hot_cap == exact_cap, 1)) {
         pool->hot = NULL;
+        pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
 #endif
@@ -870,7 +904,7 @@ WValue bigint_finish_one_limb(uint64_t magnitude, int negative) {
         int64_t value = (int64_t)magnitude;
         return w_box_int(negative ? -value : value);
     }
-    WBigint *result = bigint_alloc_raw_hot(1);
+    WBigint *result = bigint_alloc_raw_hot_exact(1U);
     result->limbs[0] = magnitude;
     result->size = negative ? -1 : 1;
     return bigint_box(result);
@@ -932,7 +966,7 @@ WValue bigint_add_one_limb_magnitudes(
         uint64_t sum = a + b;
         uint64_t carry = sum < a;
         if (!carry) return bigint_finish_one_limb(sum, a_negative);
-        WBigint *result = bigint_alloc_raw_hot(2);
+        WBigint *result = bigint_alloc_raw_hot_exact(2U);
         result->limbs[0] = sum;
         result->limbs[1] = 1;
         result->size = a_negative ? -2 : 2;
@@ -957,7 +991,9 @@ WValue bigint_add_two_limb_magnitudes(
         uint64_t carry_high = high_sum < a[1];
         uint64_t high = high_sum + carry_low;
         carry_high |= high < high_sum;
-        WBigint *result = bigint_alloc_raw_hot(3);
+        /* A three-limb request lands in the power-of-two class of four
+         * either way; the exact-class take is one compare cheaper. */
+        WBigint *result = bigint_alloc_raw_hot_exact(4U);
         result->limbs[0] = low;
         result->limbs[1] = high;
         result->limbs[2] = carry_high;
@@ -1342,7 +1378,10 @@ WValue bigint_add_ui_any(WValue a, uint64_t word) {
         return a;
     }
 #if BN_WORD_UI_POSITIVE_FAST
-    if (w_is_bigint(a) && (a & W_BIGINT_SIGN_BIT) == 0) {
+    /* Tag and sign in one compare: bit 47 is the tag-sign overlay and sits
+     * immediately below the 16 tag bits, so (v >> 47) is a single constant
+     * exactly for positive bigints. */
+    if ((a >> 47) == (W_TAG_BIGINT >> 47)) {
         WBigint *ba = w_as_bigint(a);
         int32_t n = ba->size;
         if (n >= 2) {
@@ -1377,13 +1416,25 @@ WValue bigint_sub_ui_any(WValue a, uint64_t word) {
         return a;
     }
 #if BN_WORD_UI_POSITIVE_FAST
-    if (w_is_bigint(a) && (a & W_BIGINT_SIGN_BIT) == 0) {
+    /* Tag and sign in one compare: bit 47 is the tag-sign overlay and sits
+     * immediately below the 16 tag bits, so (v >> 47) is a single constant
+     * exactly for positive bigints. */
+    if ((a >> 47) == (W_TAG_BIGINT >> 47)) {
         WBigint *ba = w_as_bigint(a);
         int32_t n = ba->size;
         if (n >= 2) {
             WBigint *r = bigint_alloc_raw_hot(n);
             return bigint_sub_word_into(r, ba->limbs, n, 0, word);
         }
+#if BN_ADD_UI_POSITIVE_11_AFTER
+        /* Same layout rule as the add entry: the one-limb leaf sits after
+         * the wide return so the streamed hot path does not acquire another
+         * predicate — without this, one-limb subtracts fell through to the
+         * generic decode and re-derived the operand view. */
+        if (n == 1)
+            return bigint_add_one_limb_magnitudes(
+                ba->limbs[0], 0, word, 1);
+#endif
     }
 #endif
     uint64_t scratch;
@@ -3520,6 +3571,47 @@ static int bn_bench_runtime_mul1_csel128x32;
 #if BN_BENCH_RUNTIME_MUL1_CSEL_KNOB
 static int bn_bench_runtime_mul1_csel128;
 #endif
+/* Fixed-shape mul_1 split-carry-chain kernel bodies (A/B apparatus, all
+ * OFF by default -- measured losers on M5 Max, 2026-08-10).  Each fixed
+ * f-kernel can split its rolling chain into independent 8/16-limb chains:
+ * every chain after the first opens with BN_M1F_BLOCKA, whose
+ * `adds x8, x8, x15` seeds it with the previous chain's final product
+ * high word (pure multiplier output, off the adcs critical path); the
+ * previous chain's one-bit carry is saved with cset and added into the
+ * boundary result limb after all chains have run, with a rare in-kernel
+ * ripple when that increment wraps.
+ *
+ * Measured verdict: the mechanism works exactly where chain latency is
+ * exposed -- in a serialized raw-kernel loop (v derived from the previous
+ * carry) the split shapes beat the serial bodies by 10-21% and GMP by
+ * 6-22% at 16..64 limbs.  But the boxed mul1 lane is throughput-shaped:
+ * consecutive boxed ops overlap in the OoO window, both our serial
+ * kernels and GMP's already run at the shared multiplier-pipe floor
+ * (~0.75-0.78 c/l marginal), so there is no serial-chain penalty left to
+ * harvest, and the boundary corrections cost 1-4% net.  Interleaved
+ * same-load A/B at 9 x 110 ms: split/serial = +0.8-1.4% @24, +1.2-2.6%
+ * @32, and +2-4% at 16/40/48/64.  Correctness of every split shape was
+ * fuzzed to 5M cases per width against the serial reference and
+ * mpn_mul_1, including in-place (rp == up) and constructed
+ * boundary-wrap/ripple/top-bump cases. */
+#ifndef BN_MUL1_SPLIT_F16
+#define BN_MUL1_SPLIT_F16 0
+#endif
+#ifndef BN_MUL1_SPLIT_F24
+#define BN_MUL1_SPLIT_F24 0
+#endif
+#ifndef BN_MUL1_SPLIT_F32
+#define BN_MUL1_SPLIT_F32 0
+#endif
+#ifndef BN_MUL1_SPLIT_F40
+#define BN_MUL1_SPLIT_F40 0
+#endif
+#ifndef BN_MUL1_SPLIT_F48
+#define BN_MUL1_SPLIT_F48 0
+#endif
+#ifndef BN_MUL1_SPLIT_F64
+#define BN_MUL1_SPLIT_F64 0
+#endif
 /* Rolling-carry scheme: the (C flag, previous high word) pair is the loop-
  * carried state, so each limb costs exactly one flag op (adcs lo, hi_prev)
  * and the chain closes ONCE after the loop (adc hi_last + C).  Loop control
@@ -3659,6 +3751,44 @@ static uint64_t bn_mul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v
 
 #define BN_M1F_TAIL                                                       \
     "adc x0, x15, xzr\n\t"                                                \
+    "ret\n\t"
+
+/* Split-chain building blocks for the fixed kernels (see the
+ * BN_MUL1_SPLIT_F* knobs).  BN_M1F_CUT ends the current carry chain,
+ * saving its one-bit carry in `creg`; the next block must be a BLOCKA,
+ * whose `adds x8, x8, x15` seeds the new chain with the ended chain's
+ * final product high word, so the flag chains stay independent and the
+ * core overlaps them.  BN_M1F_SPLIT_CLOSE folds the last chain's carry
+ * into the provisional top word (kept in x15 so a ripple can still bump
+ * it).  BN_M1F_FIX adds saved bit `creg` into the result limb at byte
+ * offset `boff`; when that increment wraps (rare), it ripples the +1
+ * through the following `rem` limbs and, off the end, into the top word.
+ * Register discipline: blocks use x4-x15, saved carry bits live in
+ * x16/x17/x3 (x18 is reserved on Darwin), FIX scratch is x4/x5/x6.
+ * In-place contract holds: every source limb is loaded by its own
+ * chain's blocks before any FIX touches the result. */
+#define BN_M1F_CUT(creg) "cset " creg ", cs\n\t"
+#define BN_M1F_SPLIT_CLOSE "adc x15, x15, xzr\n\t"
+#define BN_M1F_FIX(creg, boff, rem)                                       \
+    "ldr x5, [x0, #" #boff "]\n\t"                                        \
+    "adds x5, x5, " creg "\n\t"                                           \
+    "str x5, [x0, #" #boff "]\n\t"                                        \
+    "b.cc 5f\n\t"                                                          \
+    "add x6, x0, #(" #boff " + 8)\n\t"                                    \
+    "mov x4, #" #rem "\n\t"                                                \
+    "7:\n\t"                                                               \
+    "cbz x4, 6f\n\t"                                                       \
+    "ldr x5, [x6]\n\t"                                                     \
+    "adds x5, x5, #1\n\t"                                                  \
+    "str x5, [x6], #8\n\t"                                                 \
+    "sub x4, x4, #1\n\t"                                                   \
+    "b.cs 7b\n\t"                                                          \
+    "b 5f\n\t"                                                             \
+    "6:\n\t"                                                               \
+    "add x15, x15, #1\n\t"                                                 \
+    "5:\n\t"
+#define BN_M1F_SPLIT_RET                                                   \
+    "mov x0, x15\n\t"                                                      \
     "ret\n\t"
 
 #if BN_MUL1_CSEL128
@@ -3888,6 +4018,19 @@ static uint64_t bn_mul_1_f8(uint64_t *rp, const uint64_t *up, uint64_t v) {
 
 __attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
 static uint64_t bn_mul_1_f16(uint64_t *rp, const uint64_t *up, uint64_t v) {
+#if BN_MUL1_SPLIT_F16
+    /* 8+8 */
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_CUT("x16")
+        BN_M1F_BLOCKA(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_SPLIT_CLOSE
+        BN_M1F_FIX("x16", 64, 7)
+        BN_M1F_SPLIT_RET
+    );
+#else
     __asm__(
         BN_M1F_BLOCK0
         BN_M1F_BLOCK(32)
@@ -3895,10 +4038,32 @@ static uint64_t bn_mul_1_f16(uint64_t *rp, const uint64_t *up, uint64_t v) {
         BN_M1F_BLOCK(96)
         BN_M1F_TAIL
     );
+#endif
 }
 
 __attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
 static uint64_t bn_mul_1_f32(uint64_t *rp, const uint64_t *up, uint64_t v) {
+#if BN_MUL1_SPLIT_F32
+    /* 8+8+8+8 */
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_CUT("x16")
+        BN_M1F_BLOCKA(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_CUT("x17")
+        BN_M1F_BLOCKA(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_CUT("x3")
+        BN_M1F_BLOCKA(192)
+        BN_M1F_BLOCK(224)
+        BN_M1F_SPLIT_CLOSE
+        BN_M1F_FIX("x16", 64, 23)
+        BN_M1F_FIX("x17", 128, 15)
+        BN_M1F_FIX("x3", 192, 7)
+        BN_M1F_SPLIT_RET
+    );
+#else
     __asm__(
         BN_M1F_BLOCK0
         BN_M1F_BLOCK(32)
@@ -3910,10 +4075,32 @@ static uint64_t bn_mul_1_f32(uint64_t *rp, const uint64_t *up, uint64_t v) {
         BN_M1F_BLOCK(224)
         BN_M1F_TAIL
     );
+#endif
 }
 
 __attribute__((naked, noinline, aligned(64)))
 static uint64_t bn_mul_1_f40(uint64_t *rp, const uint64_t *up, uint64_t v) {
+#if BN_MUL1_SPLIT_F40
+    /* 16+16+8 */
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_CUT("x16")
+        BN_M1F_BLOCKA(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_BLOCK(192)
+        BN_M1F_BLOCK(224)
+        BN_M1F_CUT("x17")
+        BN_M1F_BLOCKA(256)
+        BN_M1F_BLOCK(288)
+        BN_M1F_SPLIT_CLOSE
+        BN_M1F_FIX("x16", 128, 23)
+        BN_M1F_FIX("x17", 256, 7)
+        BN_M1F_SPLIT_RET
+    );
+#else
     __asm__(
         BN_M1F_BLOCK0
         BN_M1F_BLOCK(32)
@@ -3927,10 +4114,34 @@ static uint64_t bn_mul_1_f40(uint64_t *rp, const uint64_t *up, uint64_t v) {
         BN_M1F_BLOCK(288)
         BN_M1F_TAIL
     );
+#endif
 }
 
 __attribute__((naked, noinline, aligned(64)))
 static uint64_t bn_mul_1_f48(uint64_t *rp, const uint64_t *up, uint64_t v) {
+#if BN_MUL1_SPLIT_F48
+    /* 16+16+16 */
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_CUT("x16")
+        BN_M1F_BLOCKA(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_BLOCK(192)
+        BN_M1F_BLOCK(224)
+        BN_M1F_CUT("x17")
+        BN_M1F_BLOCKA(256)
+        BN_M1F_BLOCK(288)
+        BN_M1F_BLOCK(320)
+        BN_M1F_BLOCK(352)
+        BN_M1F_SPLIT_CLOSE
+        BN_M1F_FIX("x16", 128, 31)
+        BN_M1F_FIX("x17", 256, 15)
+        BN_M1F_SPLIT_RET
+    );
+#else
     __asm__(
         BN_M1F_BLOCK0
         BN_M1F_BLOCK(32)
@@ -3946,10 +4157,40 @@ static uint64_t bn_mul_1_f48(uint64_t *rp, const uint64_t *up, uint64_t v) {
         BN_M1F_BLOCK(352)
         BN_M1F_TAIL
     );
+#endif
 }
 
 __attribute__((naked, noinline, aligned(64)))
 static uint64_t bn_mul_1_f64(uint64_t *rp, const uint64_t *up, uint64_t v) {
+#if BN_MUL1_SPLIT_F64
+    /* 16+16+16+16 */
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_BLOCK(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_CUT("x16")
+        BN_M1F_BLOCKA(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_BLOCK(192)
+        BN_M1F_BLOCK(224)
+        BN_M1F_CUT("x17")
+        BN_M1F_BLOCKA(256)
+        BN_M1F_BLOCK(288)
+        BN_M1F_BLOCK(320)
+        BN_M1F_BLOCK(352)
+        BN_M1F_CUT("x3")
+        BN_M1F_BLOCKA(384)
+        BN_M1F_BLOCK(416)
+        BN_M1F_BLOCK(448)
+        BN_M1F_BLOCK(480)
+        BN_M1F_SPLIT_CLOSE
+        BN_M1F_FIX("x16", 128, 47)
+        BN_M1F_FIX("x17", 256, 31)
+        BN_M1F_FIX("x3", 384, 15)
+        BN_M1F_SPLIT_RET
+    );
+#else
     __asm__(
         BN_M1F_BLOCK0
         BN_M1F_BLOCK(32)
@@ -3969,6 +4210,7 @@ static uint64_t bn_mul_1_f64(uint64_t *rp, const uint64_t *up, uint64_t v) {
         BN_M1F_BLOCK(480)
         BN_M1F_TAIL
     );
+#endif
 }
 #endif
 
@@ -3996,6 +4238,23 @@ static uint64_t bn_mul_1_f20(uint64_t *rp, const uint64_t *up, uint64_t v) {
 
 __attribute__((naked, noinline, aligned(64), BN_HOT_SECTION))
 static uint64_t bn_mul_1_f24(uint64_t *rp, const uint64_t *up, uint64_t v) {
+#if BN_MUL1_SPLIT_F24
+    /* 8+8+8 */
+    __asm__(
+        BN_M1F_BLOCK0
+        BN_M1F_BLOCK(32)
+        BN_M1F_CUT("x16")
+        BN_M1F_BLOCKA(64)
+        BN_M1F_BLOCK(96)
+        BN_M1F_CUT("x17")
+        BN_M1F_BLOCKA(128)
+        BN_M1F_BLOCK(160)
+        BN_M1F_SPLIT_CLOSE
+        BN_M1F_FIX("x16", 64, 15)
+        BN_M1F_FIX("x17", 128, 7)
+        BN_M1F_SPLIT_RET
+    );
+#else
     __asm__(
         BN_M1F_BLOCK0
         BN_M1F_BLOCK(32)
@@ -4005,6 +4264,7 @@ static uint64_t bn_mul_1_f24(uint64_t *rp, const uint64_t *up, uint64_t v) {
         BN_M1F_BLOCK(160)
         BN_M1F_TAIL
     );
+#endif
 }
 
 #undef BN_M1F_BLOCK0
@@ -4012,6 +4272,10 @@ static uint64_t bn_mul_1_f24(uint64_t *rp, const uint64_t *up, uint64_t v) {
 #undef BN_M1F_BLOCK
 #undef BN_M1F_BLOCKA
 #undef BN_M1F_TAIL
+#undef BN_M1F_CUT
+#undef BN_M1F_SPLIT_CLOSE
+#undef BN_M1F_FIX
+#undef BN_M1F_SPLIT_RET
 #else
 #define bn_mul_1 bn_mul_1_ref
 static inline uint64_t bn_mul_1_f12(uint64_t *rp, const uint64_t *up, uint64_t v) {
@@ -8261,7 +8525,19 @@ typedef struct {
     int32_t n;
     int state; /* 0 empty, 1/2 admission hits, 3 ready, -1 rejected */
 } WDivReciprocalCache;
-static __thread WDivReciprocalCache bn_div_recip_cache;
+/* Two independently warmed entries: repeated-divisor call patterns can
+ * alternate two eligible divisor widths within one outer operation (the
+ * sqrt recursion at an 8192-limb root exactly divides by its 2048- and
+ * 1024-limb partial roots each call), and a single entry then evicts the
+ * other width mid-warmup on every sighting, so neither ever warms.
+ * Entries are selected by key match, replaced empty-first then
+ * least-recently-used. */
+#ifndef BN_DIV_RECIP_CACHE_ENTRIES
+#define BN_DIV_RECIP_CACHE_ENTRIES 2
+#endif
+static __thread WDivReciprocalCache
+    bn_div_recip_caches[BN_DIV_RECIP_CACHE_ENTRIES];
+static __thread int bn_div_recip_cache_mru;
 #define BN_RECT_WS_DEPTH 32
 static __thread uint64_t *bn_rect_ws[BN_RECT_WS_DEPTH];
 static __thread size_t bn_rect_ws_cap[BN_RECT_WS_DEPTH];
@@ -8284,11 +8560,14 @@ static void bn_ws_release_thread(void) {
         bn_rect_ws_cap[i] = 0;
     }
     bn_rect_depth = 0;
-    free(bn_div_recip_cache.key);
-    free(bn_div_recip_cache.reciprocal);
-    free(bn_div_recip_cache.product);
-    free(bn_div_recip_cache.verification);
-    memset(&bn_div_recip_cache, 0, sizeof(bn_div_recip_cache));
+    for (int i = 0; i < BN_DIV_RECIP_CACHE_ENTRIES; i++) {
+        free(bn_div_recip_caches[i].key);
+        free(bn_div_recip_caches[i].reciprocal);
+        free(bn_div_recip_caches[i].product);
+        free(bn_div_recip_caches[i].verification);
+        memset(&bn_div_recip_caches[i], 0, sizeof(bn_div_recip_caches[i]));
+    }
+    bn_div_recip_cache_mru = 0;
 }
 static uint64_t *bn_ws_get(size_t limbs) {
     if (limbs > bn_ws_cap) {
@@ -8990,6 +9269,153 @@ WValue bigint_sqr_positive_16(WBigint *a) {
  * width dispatch.  Keep allocation and the complete carry chain in
  * the boxed caller; capacities match the recycler's power-of-two classes. */
 static inline __attribute__((always_inline))
+WValue bigint_mul_n1_tiny(const uint64_t *al, int32_t n, uint64_t w,
+                          int negative) {
+    /* n is a call-site constant (2..4), so each case specializes fully.
+     * Every mul/umulh issues independently and ONE add-with-carry chain
+     * settles the row — the f-kernel schedule, inlined: at these widths an
+     * out-of-line kernel call costs more than the whole chain, and the
+     * straight-line __builtin_addcll chain compiles to adds/adcs (the
+     * loop-carried-flag weakness does not apply to straight-line code).
+     * The serial 128-bit MAC form this replaces re-entered the carry into
+     * each product add: two flag ops per limb on the critical path. */
+    WBigint *r = bigint_alloc_raw_hot_exact(n <= 3 ? 4U : 8U);
+    __uint128_t p0 = (__uint128_t)al[0] * w;
+    __uint128_t p1 = (__uint128_t)al[1] * w;
+    r->limbs[0] = (uint64_t)p0;
+    unsigned long long c1, carry;
+    r->limbs[1] = __builtin_addcll((uint64_t)p1, (uint64_t)(p0 >> 64), 0, &c1);
+    if (n == 2) {
+        /* hi(p1) <= 2^64 - 2, so adding the chain carry cannot wrap. */
+        carry = (uint64_t)(p1 >> 64) + c1;
+    } else {
+        __uint128_t p2 = (__uint128_t)al[2] * w;
+        unsigned long long c2;
+        r->limbs[2] = __builtin_addcll((uint64_t)p2, (uint64_t)(p1 >> 64),
+                                       c1, &c2);
+        if (n == 3) {
+            carry = (uint64_t)(p2 >> 64) + c2;
+        } else {
+            __uint128_t p3 = (__uint128_t)al[3] * w;
+            unsigned long long c3;
+            r->limbs[3] = __builtin_addcll((uint64_t)p3, (uint64_t)(p2 >> 64),
+                                           c2, &c3);
+            carry = (uint64_t)(p3 >> 64) + c3;
+        }
+    }
+    r->limbs[n] = (uint64_t)carry;
+    int32_t size = n + (carry != 0);
+    r->size = negative ? -size : size;
+    return bigint_box(r);
+}
+
+/* Eight-limb sibling of the tiny rows: all eight products issue
+ * independently and one straight-line addcll chain settles the row.
+ * Compared to the out-of-line serial f8 kernel this trades a bl/ret and
+ * call shuffle for inline scheduling freedom — measured to matter at a
+ * cell whose whole budget is ~12 cycles. */
+static inline __attribute__((always_inline))
+WValue bigint_mul_n1_tiny8(const uint64_t *al, uint64_t w, int negative) {
+    WBigint *r = bigint_alloc_raw_hot_exact(16U);
+    __uint128_t p0 = (__uint128_t)al[0] * w;
+    __uint128_t p1 = (__uint128_t)al[1] * w;
+    __uint128_t p2 = (__uint128_t)al[2] * w;
+    __uint128_t p3 = (__uint128_t)al[3] * w;
+    __uint128_t p4 = (__uint128_t)al[4] * w;
+    __uint128_t p5 = (__uint128_t)al[5] * w;
+    __uint128_t p6 = (__uint128_t)al[6] * w;
+    __uint128_t p7 = (__uint128_t)al[7] * w;
+    unsigned long long c;
+    r->limbs[0] = (uint64_t)p0;
+    r->limbs[1] = __builtin_addcll((uint64_t)p1, (uint64_t)(p0 >> 64), 0, &c);
+    r->limbs[2] = __builtin_addcll((uint64_t)p2, (uint64_t)(p1 >> 64), c, &c);
+    r->limbs[3] = __builtin_addcll((uint64_t)p3, (uint64_t)(p2 >> 64), c, &c);
+    r->limbs[4] = __builtin_addcll((uint64_t)p4, (uint64_t)(p3 >> 64), c, &c);
+    r->limbs[5] = __builtin_addcll((uint64_t)p5, (uint64_t)(p4 >> 64), c, &c);
+    r->limbs[6] = __builtin_addcll((uint64_t)p6, (uint64_t)(p5 >> 64), c, &c);
+    r->limbs[7] = __builtin_addcll((uint64_t)p7, (uint64_t)(p6 >> 64), c, &c);
+    uint64_t carry = (uint64_t)(p7 >> 64) + c;
+    r->limbs[8] = carry;
+    int32_t size = 8 + (carry != 0);
+    r->size = negative ? -size : size;
+    return bigint_box(r);
+}
+
+/* Chained-block siblings for the fixed 24- and 32-limb rows: the constant
+ * trip count unrolls fully, so this is the tiny8 schedule extended block by
+ * block — products issue independently, one addcll chain settles the row,
+ * and the whole body inlines at the dispatch site (no bl/ret, allocation
+ * folded).  The out-of-line naked f24/f32 kernels these bypass are kernel-
+ * parity with mpn_mul_1; the ~3% the boxed cells trailed by was exactly the
+ * call + carry-close overhead this removes. */
+static inline __attribute__((always_inline))
+WValue bigint_mul_n1_tiny_wide(const uint64_t *al, int32_t n, uint64_t w,
+                               int negative, uint32_t cap) {
+    WBigint *r = bigint_alloc_raw_hot_exact(cap);
+    __uint128_t prev = (__uint128_t)al[0] * w;
+    r->limbs[0] = (uint64_t)prev;
+    unsigned long long c = 0;
+#pragma clang loop unroll(full)
+    for (int32_t i = 1; i < n; i++) {
+        __uint128_t p = (__uint128_t)al[i] * w;
+        r->limbs[i] = __builtin_addcll((uint64_t)p, (uint64_t)(prev >> 64),
+                                       c, &c);
+        prev = p;
+    }
+    uint64_t carry = (uint64_t)(prev >> 64) + c;
+    r->limbs[n] = carry;
+    int32_t size = n + (carry != 0);
+    r->size = negative ? -size : size;
+    return bigint_box(r);
+}
+
+/* Two independent 16-limb chains for the 32-limb row: chain B starts from
+ * hi(p15) with carry-in zero, and chain A's boundary carry is applied to
+ * B's first limb afterward.  The increment wraps only when that limb is
+ * all-ones (b16 == 0 after +1), where the carry keeps rippling; at random
+ * words the ripple is a cold straight line, never a loop — b17.. absorb it
+ * with the same test.  Halving the flag-serial chain matters here because
+ * the row inlines: there is no bl/ret to hide the chain tail under. */
+static inline __attribute__((always_inline))
+WValue bigint_mul_n1_tiny32x2(const uint64_t *al, uint64_t w, int negative) {
+    WBigint *r = bigint_alloc_raw_hot_exact(64U);
+    __uint128_t prev = (__uint128_t)al[0] * w;
+    r->limbs[0] = (uint64_t)prev;
+    unsigned long long ca = 0;
+#pragma clang loop unroll(full)
+    for (int32_t i = 1; i < 16; i++) {
+        __uint128_t p = (__uint128_t)al[i] * w;
+        r->limbs[i] = __builtin_addcll((uint64_t)p, (uint64_t)(prev >> 64),
+                                       ca, &ca);
+        prev = p;
+    }
+    uint64_t a_out = (uint64_t)(prev >> 64) + ca;   /* cannot wrap */
+    __uint128_t prev_b = (__uint128_t)al[16] * w;
+    uint64_t b16 = (uint64_t)prev_b;
+    unsigned long long cb = 0;
+#pragma clang loop unroll(full)
+    for (int32_t i = 17; i < 32; i++) {
+        __uint128_t p = (__uint128_t)al[i] * w;
+        r->limbs[i] = __builtin_addcll((uint64_t)p, (uint64_t)(prev_b >> 64),
+                                       cb, &cb);
+        prev_b = p;
+    }
+    uint64_t carry = (uint64_t)(prev_b >> 64) + cb;
+    b16 += a_out;
+    r->limbs[16] = b16;
+    if (__builtin_expect(b16 < a_out, 0)) {
+        int32_t i = 17;
+        while (++r->limbs[i] == 0) {
+            if (__builtin_expect(++i == 32, 0)) { carry++; break; }
+        }
+    }
+    r->limbs[32] = carry;
+    int32_t size = 32 + (carry != 0);
+    r->size = negative ? -size : size;
+    return bigint_box(r);
+}
+
+static inline __attribute__((always_inline))
 WValue bigint_mul_n1_small(const uint64_t *al, int32_t n, uint64_t w,
                            int negative) {
     WBigint *r = bigint_alloc_raw_hot_exact(n <= 3 ? 4U : 8U);
@@ -9127,13 +9553,17 @@ static WValue bigint_mul_n1(const uint64_t *al, int32_t n, uint64_t w,
  * tag/sign/shape dispatch. */
 static inline __attribute__((always_inline))
 WValue bigint_mul_ui_any(WValue a, uint64_t word) {
-    if (word == 0) return w_box_int(0);
-    if (word == 1) {
+    /* One compare covers both multiplicative identities; the split is cold. */
+    if (__builtin_expect(word <= 1, 0)) {
+        if (word == 0) return w_box_int(0);
         if (w_is_bigint(a)) w_bigint_mark_shared(w_as_bigint(a));
         return a;
     }
 #if BN_WORD_UI_POSITIVE_FAST
-    if (w_is_bigint(a) && (a & W_BIGINT_SIGN_BIT) == 0) {
+    /* Tag and sign in one compare: bit 47 is the tag-sign overlay and sits
+     * immediately below the 16 tag bits, so (v >> 47) is a single constant
+     * exactly for positive bigints. */
+    if ((a >> 47) == (W_TAG_BIGINT >> 47)) {
         WBigint *ba = w_as_bigint(a);
         int32_t n = ba->size;
         if (n == 1) {
@@ -9148,19 +9578,48 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
             return bigint_box(r);
         }
         if (n >= 2) {
-#if BN_MUL_N1_SMALL_STRAIGHT
+            /* Two-tier dispatch: n = 2..8 is DENSE, so one bounded jump
+             * table reaches any tiny/small/f8 leaf in a compare plus one
+             * predicted indirect branch; the sparse fixed powers keep a
+             * separate compare tree that no longer taxes the tiny rows. */
+#if BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED
+            if (n <= 8) {
+                switch (n) {
+                case 2: return bigint_mul_n1_tiny(ba->limbs, 2, word, 0);
+                case 3: return bigint_mul_n1_tiny(ba->limbs, 3, word, 0);
+                case 4: return bigint_mul_n1_tiny(ba->limbs, 4, word, 0);
+                case 5: case 6: case 7:
+                    return bigint_mul_n1_small(ba->limbs, n, word, 0);
+                default:
+                    return bigint_mul_n1_tiny8(ba->limbs, word, 0);
+                }
+            }
+#elif BN_MUL_N1_SMALL_STRAIGHT
+            if (n <= 4) return bigint_mul_n1_tiny(ba->limbs, n, word, 0);
             if (n <= BN_MUL_N1_SMALL_MAX)
                 return bigint_mul_n1_small(ba->limbs, n, word, 0);
 #endif
+            switch (n) {
 #if BN_MUL_POWER2_FIXED
-            if (n == 8) return bigint_mul_n1_fixed8(ba->limbs, word, 0);
-            if (n == 16) return bigint_mul_n1_fixed16(ba->limbs, word, 0);
-            if (n == 24) return bigint_mul_n1_fixed24(ba->limbs, word, 0);
-            if (n == 32) return bigint_mul_n1_fixed32(ba->limbs, word, 0);
-            if (n == 40) return bigint_mul_n1_fixed40(ba->limbs, word, 0);
-            if (n == 48) return bigint_mul_n1_fixed48(ba->limbs, word, 0);
-            if (n == 64) return bigint_mul_n1_fixed64(ba->limbs, word, 0);
+#if !BN_MUL_N1_SMALL_STRAIGHT
+            case 8:  return bigint_mul_n1_fixed8(ba->limbs, word, 0);
 #endif
+            case 16: return bigint_mul_n1_fixed16(ba->limbs, word, 0);
+#if BN_MUL_N1_SMALL_STRAIGHT
+            case 24:
+                return bigint_mul_n1_tiny_wide(ba->limbs, 24, word, 0, 32U);
+            case 32:
+                return bigint_mul_n1_tiny32x2(ba->limbs, word, 0);
+#else
+            case 24: return bigint_mul_n1_fixed24(ba->limbs, word, 0);
+            case 32: return bigint_mul_n1_fixed32(ba->limbs, word, 0);
+#endif
+            case 40: return bigint_mul_n1_fixed40(ba->limbs, word, 0);
+            case 48: return bigint_mul_n1_fixed48(ba->limbs, word, 0);
+            case 64: return bigint_mul_n1_fixed64(ba->limbs, word, 0);
+#endif
+            default: break;
+            }
             return bigint_mul_n1(ba->limbs, n, word, 0);
         }
     }
@@ -9182,19 +9641,42 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
         r->size = negative ? -2 : 2;
         return bigint_box(r);
     }
-#if BN_MUL_N1_SMALL_STRAIGHT
+#if BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED
+    if (n <= 8) {
+        switch (n) {
+        case 2: return bigint_mul_n1_tiny(al, 2, word, negative);
+        case 3: return bigint_mul_n1_tiny(al, 3, word, negative);
+        case 4: return bigint_mul_n1_tiny(al, 4, word, negative);
+        case 5: case 6: case 7:
+            return bigint_mul_n1_small(al, n, word, negative);
+        default:
+            return bigint_mul_n1_tiny8(al, word, negative);
+        }
+    }
+#elif BN_MUL_N1_SMALL_STRAIGHT
+    if (n <= 4) return bigint_mul_n1_tiny(al, n, word, negative);
     if (n <= BN_MUL_N1_SMALL_MAX)
         return bigint_mul_n1_small(al, n, word, negative);
 #endif
+    switch (n) {
 #if BN_MUL_POWER2_FIXED
-    if (n == 8) return bigint_mul_n1_fixed8(al, word, negative);
-    if (n == 16) return bigint_mul_n1_fixed16(al, word, negative);
-    if (n == 24) return bigint_mul_n1_fixed24(al, word, negative);
-    if (n == 32) return bigint_mul_n1_fixed32(al, word, negative);
-    if (n == 40) return bigint_mul_n1_fixed40(al, word, negative);
-    if (n == 48) return bigint_mul_n1_fixed48(al, word, negative);
-    if (n == 64) return bigint_mul_n1_fixed64(al, word, negative);
+#if !BN_MUL_N1_SMALL_STRAIGHT
+    case 8:  return bigint_mul_n1_fixed8(al, word, negative);
 #endif
+    case 16: return bigint_mul_n1_fixed16(al, word, negative);
+#if BN_MUL_N1_SMALL_STRAIGHT
+    case 24: return bigint_mul_n1_tiny_wide(al, 24, word, negative, 32U);
+    case 32: return bigint_mul_n1_tiny32x2(al, word, negative);
+#else
+    case 24: return bigint_mul_n1_fixed24(al, word, negative);
+    case 32: return bigint_mul_n1_fixed32(al, word, negative);
+#endif
+    case 40: return bigint_mul_n1_fixed40(al, word, negative);
+    case 48: return bigint_mul_n1_fixed48(al, word, negative);
+    case 64: return bigint_mul_n1_fixed64(al, word, negative);
+#endif
+    default: break;
+    }
     return bigint_mul_n1(al, n, word, negative);
 }
 #endif
@@ -11181,8 +11663,15 @@ void bz_base_div_into(const uint64_t *u, int32_t ulen,
         return;
     }
 
-    uint64_t un_local[129], vn_local[64];
-    int heap_work = ulen > 128 || vlen > 64;
+    /* The dividend arena covers every B-Z leaf the divappr padding rules
+     * produce (the odd leaves reach 130/65 at the 4096- and 8192-limb
+     * roots, which overflowed the old 129-limb arena by two limbs and paid
+     * a malloc/free per leaf) plus the sqrt recursion's raw-Knuth band
+     * (ulen <= 2h <= 256).  The divisor arena only backs shift != 0, which
+     * the pre-normalized B-Z/sqrt callers never take. */
+    uint64_t un_local[261], vn_local[64];
+    int un_heap = ulen > 260;
+    int vn_heap = vlen > 64;
     int shift = __builtin_clzll(v[vlen - 1]);
     /* Start the serial reciprocal chain before the normalization copies so
      * the two overlap in the out-of-order window. */
@@ -11196,11 +11685,11 @@ void bz_base_div_into(const uint64_t *u, int32_t ulen,
         d0 = v[vlen - 2];
     }
     uint64_t dinv = bn_invert_pi1(d1, d0);
-    uint64_t *un = heap_work
+    uint64_t *un = un_heap
         ? (uint64_t *)malloc((size_t)(ulen + 1) * sizeof(uint64_t))
         : un_local;
     uint64_t *vn_work = shift
-        ? (heap_work
+        ? (vn_heap
             ? (uint64_t *)malloc((size_t)vlen * sizeof(uint64_t))
             : vn_local)
         : NULL;
@@ -11285,10 +11774,8 @@ void bz_base_div_into(const uint64_t *u, int32_t ulen,
     } else {
         memcpy(r, un, (size_t)copy * sizeof(uint64_t));
     }
-    if (heap_work) {
-        free(un);
-        free(vn_work);
-    }
+    if (un_heap) free(un);
+    if (shift && vn_heap) free(vn_work);
 }
 
 /* Knuth base case with fixed-width outputs (zero-padded to qw / rw limbs). */
@@ -11664,12 +12151,41 @@ static int mag_divmod_reciprocal_certified(
             (q_out ? BN_DIV_RECIP_R_MIN : BN_DIV_BARRETT_R_MIN)))
         return 0;
 
-    WDivReciprocalCache *cache = &bn_div_recip_cache;
+    /* The most-recently-used entry hits on the very next call in every
+     * repeated-divisor pattern, so it is the ONLY entry the steady state
+     * tests — structured as the original single-entry probe so the compiled
+     * hot shape stays identical (an entry-scan loop here measurably slowed
+     * the whole certified divide).  The second entry exists for callers
+     * that alternate two divisor widths inside one outer operation (the
+     * sqrt recursion at an 8192-limb root divides by its 2048- and
+     * 1024-limb partial roots each call); those flip mru per call and pay
+     * one extra probe, which is what they saved by not thrashing. */
     size_t n = (size_t)vlen;
+    WDivReciprocalCache *cache = &bn_div_recip_caches[bn_div_recip_cache_mru];
     int same =
         cache->state != 0 && cache->n == vlen &&
         cache->key_cap >= n &&
         memcmp(cache->key, v, n * sizeof(uint64_t)) == 0;
+#if BN_DIV_RECIP_CACHE_ENTRIES > 1
+    if (__builtin_expect(!same, 0)) {
+        WDivReciprocalCache *other =
+            &bn_div_recip_caches[bn_div_recip_cache_mru ^ 1];
+        if (other->state != 0 && other->n == vlen &&
+            other->key_cap >= n &&
+            memcmp(other->key, v, n * sizeof(uint64_t)) == 0) {
+            cache = other;
+            same = 1;
+        } else if (cache->state != 0) {
+            /* Full miss with the MRU entry occupied: take the other slot —
+             * empty it is a plain fill, occupied it is the LRU eviction
+             * (never displace the most recently proven divisor). */
+            cache = other;
+        }
+        bn_div_recip_cache_mru = (int)(cache - bn_div_recip_caches);
+    }
+    _Static_assert(BN_DIV_RECIP_CACHE_ENTRIES == 2,
+                   "the mru^1 probe pairs exactly two entries");
+#endif
     if (!same) {
         if (!bn_div_recip_reserve(&cache->key, &cache->key_cap, n)) {
             cache->state = 0;
@@ -12442,8 +12958,12 @@ static inline uint64_t bn_sqrt_add_1(uint64_t *p, int32_t n, uint64_t v) {
 /* Divide {up, l+h} by the bit-63-normalized divisor {vp, h}: quotient into
  * qp[0..l) (returns its carry limb, <= 2), remainder into up[0..h). The
  * dividend may carry high zero limbs (the recursive remainder can be tiny).
- * h <= 2 runs allocation-free on the reciprocal step primitives; larger h
- * rides mag_divmod. */
+ * h <= 2 runs allocation-free on the reciprocal step primitives; below
+ * BN_SQRT_DIVREM_KNUTH_MAX the divide runs allocation-free raw Knuth;
+ * larger h rides mag_divmod. */
+#ifndef BN_SQRT_DIVREM_KNUTH_MAX
+#define BN_SQRT_DIVREM_KNUTH_MAX 64
+#endif
 static uint64_t bn_sqrt_divrem(uint64_t *up, int32_t l, int32_t h,
                                const uint64_t *vp, uint64_t *qp) {
     if (h == 1) {
@@ -12480,9 +13000,9 @@ static uint64_t bn_sqrt_divrem(uint64_t *up, int32_t l, int32_t h,
         memset(qp, 0, (size_t)l * sizeof(uint64_t));
         return 0;          /* quotient 0; dividend == remainder, in place */
     }
-    if (h < 64) {
+    if (h < BN_SQRT_DIVREM_KNUTH_MAX) {
         /* Allocation-free Knuth straight into the caller's buffers (the
-         * divisor is already normalized, and l + h <= 126 keeps the leaf
+         * divisor is already normalized, and l + h <= 2h - 1 keeps the leaf
          * on its stack arena).  Pre-fold the top block below the divisor
          * so the quotient fits l limbs exactly (r' <= 2s': one pass). */
         uint64_t carry = 0;
@@ -12492,11 +13012,39 @@ static uint64_t bn_sqrt_divrem(uint64_t *up, int32_t l, int32_t h,
             carry++;                            /* r' <= 2s': <= 2 passes */
             while (ulen > 0 && up[ulen - 1] == 0) ulen--;
         }
-        uint64_t rbuf[64];      /* r must not alias the dividend: the leaf
-                                 * zeroes its r buffer before reading u */
+        uint64_t rbuf[BN_SQRT_DIVREM_KNUTH_MAX];
+        /* r must not alias the dividend: the leaf
+         * zeroes its r buffer before reading u */
         bz_base_div_into(up, ulen, vp, h, qp, l, rbuf, h, 1);
         memcpy(up, rbuf, (size_t)h * sizeof(uint64_t));
         return carry;
+    }
+    if (l == h && !(h & 1) && h < BN_DIV_RECIP_R_MIN) {
+        /* Balanced even 2h/h shape below the cached-reciprocal band: the
+         * divisor is already bit-63-normalized, so run the B-Z engine in
+         * place -- quotient straight into qp, remainder straight into up --
+         * skipping mag_divmod's dispatch, workspace copies, and two result
+         * allocations per recursion level.  Even h > BZ_THRESHOLD keeps
+         * bz_d2n1n off its Knuth base at the top, whose r-buffer zeroing
+         * would otherwise clobber the aliased dividend; the recursive path
+         * consumes a's low half into scratch before r is written.  Pre-fold
+         * as the raw-Knuth band does so a < s' * B^h. */
+        uint64_t *sc = h > BZ_THRESHOLD
+            ? bz_ws_get((size_t)(12 * h + 64))
+            : NULL;
+        if (sc) {
+            uint64_t carry = 0;
+            while (ulen == l + h &&
+                   mag_cmp(up + l, bz_trim(up + l, h), vp, h) >= 0) {
+                (void)bn_sub_n(up + l, up + l, vp, h);
+                carry++;                        /* r' <= 2s': <= 2 passes */
+                while (ulen > 0 && up[ulen - 1] == 0) ulen--;
+            }
+            bn_toom_no_spin++;
+            bz_d2n1n(up, vp, h, qp, up, sc);
+            bn_toom_no_spin--;
+            return carry;
+        }
     }
     WBigint *q, *r;
     mag_divmod(up, ulen, vp, h, &q, &r);
@@ -12788,22 +13336,56 @@ static int bn_dc_sqrt_only(uint64_t *np, uint64_t *sp, uint64_t *qp,
                   n <= BN_SQRT_DIVQ_EXACT_MAX;
     if (__builtin_expect(!exact_q && h + t >= BN_SQRT_DIVAPPR_MIN,
                          BN_SQRT_DIVAPPR_EXPECT)) {
-        /* Approximate B-Z quotient (divappr): pad the divisor to a
-         * fixed-width multiple so the recursion stays on even splits down
-         * to the Knuth base.  Each pad limb cancels one extra dividend
-         * limb, so the quotient is unchanged apart from e extra guard
-         * limbs appearing below it. */
-        int32_t p = t;
-        int32_t pad_limbs = bn_sqrt_divappr_pad_limbs(n);
-        while ((h + p) & (pad_limbs - 1)) p++;
-        uint64_t *sc = bz_ws_get((size_t)(12 * (h + p) + 64));
-        if (sc) {
-            e = h - l - 1 + p;
-            for (int32_t i = 0; i < p; i++) sp[l - p + i] = 0;
-            bn_toom_no_spin++;
-            bz_d2n1n_q(np + 2 * l - h - 2 * p, sp + l - p, h + p, qp, sc);
-            bn_toom_no_spin--;
-            divided = 1;
+        /* Even n (t == 1): the divisor pad limb below s' is ZERO, so
+         * dividing by s'*B^p is exactly dividing by s'.  When h's halving
+         * chain bottoms exactly on the tuned Knuth leaf (h = leaf * 2^j,
+         * e.g. the 3*2^k family: 192 -> 96 -> 48 -> 24), peel the single
+         * top quotient digit with one exact Knuth row and hand the
+         * remaining 2h/h shape to the B-Z spine with NO padding at all --
+         * the padded alternative widens the divide by up to pad/h (3.6%
+         * at a 384-limb root) and fragments the leaves off the tuned
+         * width.  Q' then has h+1 limbs (root l+1 limbs above one guard
+         * limb, e = 0).  Relative to the padded dividend this drops the
+         * limbs below np[l-1], perturbing Q' by less than one unit of the
+         * guard limb -- absorbed by the certificate's 2^16 margin like
+         * the spine's own skipped corrections. */
+        int32_t w = h;
+        while (!(w & 1) && w > BZ_THRESHOLD) w >>= 1;
+        if (t && w == BZ_THRESHOLD) {
+            uint64_t *sc = bz_ws_get((size_t)(13 * h + 64));
+            if (sc) {
+                uint64_t *rt = sc + 12 * h + 64;    /* peel remainder */
+                uint64_t *dw = np + l - 1 + h;      /* top window, h+1 limbs */
+                uint64_t qtop;
+                /* {dw+1, h} < s' (folded above), so the window quotient is
+                 * a single digit and the remainder feeds the spine. */
+                bz_base_div_into(dw, h + 1, sp + l, h, &qtop, 1, rt, h, 1);
+                memcpy(dw, rt, (size_t)h * sizeof(uint64_t));
+                bn_toom_no_spin++;
+                bz_d2n1n_q(np + l - 1, sp + l, h, qp, sc);
+                bn_toom_no_spin--;
+                qp[h] = qtop;                       /* e stays 0 */
+                divided = 1;
+            }
+        }
+        if (!divided) {
+            /* Approximate B-Z quotient (divappr): pad the divisor to a
+             * fixed-width multiple so the recursion stays on even splits
+             * down to the Knuth base.  Each pad limb cancels one extra
+             * dividend limb, so the quotient is unchanged apart from e
+             * extra guard limbs appearing below it. */
+            int32_t p = t;
+            int32_t pad_limbs = bn_sqrt_divappr_pad_limbs(n);
+            while ((h + p) & (pad_limbs - 1)) p++;
+            uint64_t *sc = bz_ws_get((size_t)(12 * (h + p) + 64));
+            if (sc) {
+                e = h - l - 1 + p;
+                for (int32_t i = 0; i < p; i++) sp[l - p + i] = 0;
+                bn_toom_no_spin++;
+                bz_d2n1n_q(np + 2 * l - h - 2 * p, sp + l - p, h + p, qp, sc);
+                bn_toom_no_spin--;
+                divided = 1;
+            }
         }
     }
     if (!divided) {
@@ -12947,16 +13529,40 @@ WValue bigint_isqrt_any(WValue a) {
 #ifndef BN_GCD_U64_BRANCHY
 #define BN_GCD_U64_BRANCHY 0
 #endif
+/* Trailing-zero count inside the GCD asm kernels.  FEAT_CSSC cores (Apple
+ * M4/M5, reached via -mcpu=apple-m5 or an explicit +cssc) have a single-uop
+ * CTZ, which shortens every kernel's loop-carried chain
+ * (subs -> ctz -> lsr -> subs) from 4 cycles to 3 — measured 25% on the
+ * one-limb loop and 18% on the two-limb loop, which is what moves gcd@1/@2
+ * past GMP's rbit+clz gcd_11/gcd_22.  Without CSSC the classic rbit+clz
+ * pair is kept, machine-code-identical to the previous kernels:
+ * BN_ASM_CTZ2 preserves the interleaved two-register prologue schedule,
+ * and the EARLY/LATE pair keeps bn_gcd_odd_22's split placement (rbit
+ * issues before the flag-consuming selects, clz after; CSSC folds the
+ * whole count into the early slot). */
+#if defined(__ARM_FEATURE_CSSC)
+#define BN_ASM_CTZ(d, s)            "ctz " d ", " s "\n"
+#define BN_ASM_CTZ2(d1, s1, d2, s2) "ctz " d1 ", " s1 "\n" \
+                                    "ctz " d2 ", " s2 "\n"
+#define BN_ASM_CTZ_EARLY(d, s)      "ctz " d ", " s "\n"
+#define BN_ASM_CTZ_LATE(d)
+#else
+#define BN_ASM_CTZ(d, s)            "rbit " d ", " s "\n" \
+                                    "clz " d ", " d "\n"
+#define BN_ASM_CTZ2(d1, s1, d2, s2) "rbit " d1 ", " s1 "\n" \
+                                    "rbit " d2 ", " s2 "\n" \
+                                    "clz " d1 ", " d1 "\n" \
+                                    "clz " d2 ", " d2 "\n"
+#define BN_ASM_CTZ_EARLY(d, s)      "rbit " d ", " s "\n"
+#define BN_ASM_CTZ_LATE(d)          "clz " d ", " d "\n"
+#endif
 #if defined(__aarch64__) && BN_GCD_U64_ASM
 __attribute__((naked, noinline, aligned(64)))
 static uint64_t bn_gcd_u64_binary(uint64_t a, uint64_t b) {
     __asm__(
         "cbz x0, 3f\n"
         "cbz x1, 4f\n"
-        "rbit x2, x0\n"
-        "rbit x3, x1\n"
-        "clz x2, x2\n"
-        "clz x3, x3\n"
+        BN_ASM_CTZ2("x2", "x0", "x3", "x1")
         "lsr x0, x0, x2\n"
         "lsr x1, x1, x3\n"
         "cmp x2, x3\n"
@@ -12966,30 +13572,28 @@ static uint64_t bn_gcd_u64_binary(uint64_t a, uint64_t b) {
         "subs x3, x0, x1\n"
         "b.eq 2f\n"
         "b.lo 5f\n"
-        "rbit x4, x3\n"
-        "clz x4, x4\n"
+        BN_ASM_CTZ("x4", "x3")
         "lsr x0, x3, x4\n"
         "b 1b\n"
         "5:\n"
         "neg x3, x3\n"
-        "rbit x4, x3\n"
-        "clz x4, x4\n"
+        BN_ASM_CTZ("x4", "x3")
         "lsr x1, x3, x4\n"
         "b 1b\n"
 #else
         "subs x3, x0, x1\n"
         "b.eq 2f\n"
         /*
-         * Align the loop and begin its independent rbit/clz chain before
-         * consuming the subtraction flags.  On Apple AArch64 this overlaps
-         * trailing-zero latency with cneg/csel instead of serializing them.
+         * Align the loop and begin its independent trailing-zero chain
+         * (rbit+clz, or one ctz on CSSC cores) before consuming the
+         * subtraction flags.  On Apple AArch64 this overlaps trailing-zero
+         * latency with cneg/csel instead of serializing them.
          */
         "nop\n"
         "nop\n"
         "nop\n"
         "6:\n"
-        "rbit x4, x3\n"
-        "clz x4, x4\n"
+        BN_ASM_CTZ("x4", "x3")
         "cneg x3, x3, lo\n"
         "csel x0, x1, x0, hs\n"
         "lsr x1, x3, x4\n"
@@ -13015,15 +13619,13 @@ static uint64_t bn_gcd_u64_binary(uint64_t a, uint64_t b) {
 static inline __attribute__((always_inline))
 uint64_t bn_gcd_u64_nonzero(uint64_t a, uint64_t b) {
 #if defined(__aarch64__) && BN_GCD_U64_ASM
-    /* Same loop schedule as bn_gcd_u64_binary: the rbit/clz chain of the raw
-     * difference starts before cneg/csel resolve its sign (ctz(d) == ctz(-d)).
+    /* Same loop schedule as bn_gcd_u64_binary: the trailing-zero chain of
+     * the raw difference (rbit+clz, or one CSSC ctz) starts before cneg/csel
+     * resolve its sign (ctz(d) == ctz(-d)).
      * Inlined, minus that function's zero checks, which are dead here. */
     uint64_t sh, t3, t4;
     __asm__(
-        "rbit %[t3], %[a]\n\t"
-        "rbit %[t4], %[b]\n\t"
-        "clz %[t3], %[t3]\n\t"
-        "clz %[t4], %[t4]\n\t"
+        BN_ASM_CTZ2("%[t3]", "%[a]", "%[t4]", "%[b]")
         "lsr %[a], %[a], %[t3]\n\t"
         "lsr %[b], %[b], %[t4]\n\t"
         "cmp %[t3], %[t4]\n\t"
@@ -13031,8 +13633,7 @@ uint64_t bn_gcd_u64_nonzero(uint64_t a, uint64_t b) {
         "subs %[t3], %[a], %[b]\n\t"
         "b.eq 2f\n"
         "1:\n\t"
-        "rbit %[t4], %[t3]\n\t"
-        "clz %[t4], %[t4]\n\t"
+        BN_ASM_CTZ("%[t4]", "%[t3]")
         "cneg %[t3], %[t3], lo\n\t"
         "csel %[a], %[b], %[a], hs\n\t"
         "lsr %[b], %[t3], %[t4]\n\t"
@@ -13116,7 +13717,7 @@ static unsigned __int128 bn_gcd_odd_22(
         "subs x4, x1, x3\n"
         "cbz x4, 4f\n"
         "sbcs x5, x0, x2\n"
-        "rbit x6, x4\n"
+        BN_ASM_CTZ_EARLY("x6", "x4")
 #if BN_GCD_22_BRANCHY
         "b.hs 7f\n"
         "neg x4, x4\n"
@@ -13130,7 +13731,7 @@ static unsigned __int128 bn_gcd_odd_22(
         "csel x3, x3, x1, hs\n"
         "csel x2, x2, x0, hs\n"
 #endif
-        "clz x6, x6\n"          /* nonzero even low difference: 1..63 */
+        BN_ASM_CTZ_LATE("x6")   /* nonzero even low difference: 1..63 */
         "neg x7, x6\n"
         "lsr x1, x4, x6\n"
         "lsl x7, x5, x7\n"
@@ -13145,14 +13746,12 @@ static unsigned __int128 bn_gcd_odd_22(
         "subs x4, x1, x3\n"
         "b.eq 5f\n"
         "b.lo 8f\n"
-        "rbit x5, x4\n"
-        "clz x5, x5\n"
+        BN_ASM_CTZ("x5", "x4")
         "lsr x1, x4, x5\n"
         "b 2b\n"
         "8:\n"
         "neg x4, x4\n"
-        "rbit x5, x4\n"
-        "clz x5, x5\n"
+        BN_ASM_CTZ("x5", "x4")
         "lsr x3, x4, x5\n"
         "b 2b\n"
 #else
@@ -13161,8 +13760,7 @@ static unsigned __int128 bn_gcd_odd_22(
         "nop\n"
         "nop\n"
         "9:\n"
-        "rbit x5, x4\n"
-        "clz x5, x5\n"
+        BN_ASM_CTZ("x5", "x4")
         "cneg x4, x4, lo\n"
         "csel x1, x3, x1, hs\n"
         "lsr x3, x4, x5\n"
@@ -13176,8 +13774,7 @@ static unsigned __int128 bn_gcd_odd_22(
         "b.eq 6f\n"
         "cneg x5, x5, lo\n"
         "csel x2, x2, x0, hs\n"
-        "rbit x6, x5\n"
-        "clz x6, x6\n"
+        BN_ASM_CTZ("x6", "x5")
         "lsr x1, x5, x6\n"
         "mov x0, xzr\n"
         "cbnz x2, 1b\n"
@@ -14999,13 +15596,34 @@ int bigint_compare_c(WValue a, WValue b) {
 
 /* Stable source seam for the complete integer comparator. Stage0 uses the
  * weak C oracle; every production target emits a strong wrapper around
- * __bigint_compare_raw and therefore executes the native Tungsten body. */
+ * __bigint_compare_raw and therefore executes the native Tungsten body.
+ *
+ * A weak definition can be replaced at link time, so a call to the seam is
+ * never inlined (even under LTO).  That call is exactly what we want when
+ * the strong source wrapper is linked, but binaries that carry no source
+ * body at all (stage0 hosts, the C VM, pure-C harnesses) would pay an
+ * out-of-line hop plus per-call re-derivation of both operands' tag/size
+ * views for nothing — at 1-2 limbs the hop is most of the compare.  The
+ * weak default can only ever execute when no strong wrapper was linked, so
+ * it latches that fact the first time it runs, and every later
+ * bigint_compare inlines the C comparator directly.  With the strong
+ * wrapper present the default never runs, the latch stays clear, and all
+ * comparisons keep routing through the source seam.  Latching is a benign
+ * one-shot 0->1 relaxed store: a racing reader that still sees 0 takes the
+ * seam call and computes the identical result. */
+static _Atomic int w_bigint_compare_seam_is_c;
+
 __attribute__((weak)) int64_t __w_bigint_compare_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_compare_seam_is_c, 1,
+                          memory_order_relaxed);
     return (int64_t)bigint_compare_c(a, b);
 }
 
 static inline __attribute__((always_inline))
 int bigint_compare(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_compare_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_compare_c(a, b);
     return (int)__w_bigint_compare_src(a, b);
 }
 
@@ -36052,11 +36670,11 @@ WValue bigint_copy_signed(WBigint *b, int negate) {
     if (n <= BN_COPY_FUSED_MAX) {
         WBigintPool *pool = &bigint_pool_state;
         WBigint *hot = pool->hot;
-        uint32_t hot_cap = pool->hot_cap;
-        if (__builtin_expect(
-                hot != NULL &&
-                hot_cap == b->cap, 1)) {
+        /* Empty slot encodes as hot_cap == 0 and caps are >= 1, so the
+         * capacity equality alone also proves occupancy. */
+        if (__builtin_expect(pool->hot_cap == b->cap, 1)) {
             pool->hot = NULL;
+            pool->hot_cap = 0;
             const uint64_t *restrict src = b->limbs;
             uint64_t *restrict dst = hot->limbs;
             if (n == 3) {
@@ -47455,7 +48073,8 @@ WValue w_ic_bigint_abs(WValue r, WValue *a, int c) {
 }
 
 static inline __attribute__((always_inline))
-WValue bigint_lcm_one_limb(uint64_t x, uint64_t y) {
+WValue bigint_lcm_one_limb(uint64_t x, uint64_t y,
+                           const uint64_t *xl, const uint64_t *yl) {
     uint64_t g = bn_gcd_u64_nonzero(x, y);
     /* Random operands are usually coprime; skip the udiv then. */
     uint64_t q = g == 1 ? x : x / g;
@@ -47464,6 +48083,30 @@ WValue bigint_lcm_one_limb(uint64_t x, uint64_t y) {
     uint64_t high = (uint64_t)(product >> 64);
     if (high == 0) return bigint_finish_one_limb(low, 0);
     WBigint *out = bigint_alloc_raw_hot(2);
+#if BN_EQ_PAGE_HAZARD_GUARD
+    /* Result churn recirculates this buffer against long-lived operands.
+     * When its page offset lands on an operand's limbs, every subsequent
+     * call's operand loads false-alias the two limb stores below (4K
+     * store-load aliasing: +6-9ns per op on Apple Silicon, measured on the
+     * one-limb lcm lane with a cliff inside 16 bytes).  Same dodge the
+     * streamed add/sub kernels use, but with a window sized for one 16-byte
+     * store rather than a streamed destination: 64 bytes covers the
+     * measured zone 4x over while keeping false triggers (and the rehome
+     * search they start) rare.  Steady state rehomes once per recirculated
+     * buffer; the distance checks hide under the gcd dependency chain. */
+#ifndef BN_LCM1_PAGE_HAZARD_WINDOW
+#define BN_LCM1_PAGE_HAZARD_WINDOW 64u
+#endif
+    if (__builtin_expect(
+            bn_addsub_page_distance(out->limbs, xl) <
+                BN_LCM1_PAGE_HAZARD_WINDOW ||
+            bn_addsub_page_distance(out->limbs, yl) <
+                BN_LCM1_PAGE_HAZARD_WINDOW, 0) &&
+        !bn_addsub_placement_is_settled(out, xl, yl))
+        out = bigint_rehome_binary_result(out, xl, yl);
+#else
+    (void)xl; (void)yl;
+#endif
     out->limbs[0] = low;
     out->limbs[1] = high;
     out->size = 2;
@@ -47497,7 +48140,7 @@ WValue w_ic_integer_lcm_generic(WValue r, WValue *a, int c) {
         /* One-limb pair (inline ints and 1-limb bigints alike): u64 gcd,
          * exact u64 quotient, one 128-bit product, boxed once.  lcm is
          * nonnegative by definition, so magnitudes suffice. */
-        return bigint_lcm_one_limb(rl[0], al[0]);
+        return bigint_lcm_one_limb(rl[0], al[0], rl, al);
     }
 
     /* Multi-limb: |r/g * arg| through the direct bigint entries — the
@@ -47556,7 +48199,8 @@ WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {
                     (as == 1 || as == -1), 0)) {
                 if (r == arg)
                     return bigint_abs_alias(r);   /* lcm(x,x) = |x| */
-                return bigint_lcm_one_limb(rb->limbs[0], ab->limbs[0]);
+                return bigint_lcm_one_limb(rb->limbs[0], ab->limbs[0],
+                                           rb->limbs, ab->limbs);
             }
         }
     }

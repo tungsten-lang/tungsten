@@ -1587,6 +1587,22 @@ static void bench_release_arith_workspaces(void) {
 #define BENCH_MAYBE_RELEASE_ARITH_WS() ((void)0)
 #endif
 
+/* Observation mirror of the GMP lanes' mpz_get_ui: the low limb of the
+ * MAGNITUDE, no sign application (mpz_get_ui reads |z| mod 2^64).  The
+ * previous signed observation (integer_low_i64) charged every Tungsten
+ * lane an overlay-sign test plus two conditional negates per iteration
+ * that the GMP lanes never pay; the sink only needs result-dependent
+ * entropy, symmetrically priced. */
+static inline uint64_t bench_observe_low(WValue v) {
+    if (w_is_int(v)) {
+        int64_t iv = w_as_int(v);
+        return (uint64_t)(iv < 0 ? -iv : iv);
+    }
+    WBigint *b = w_as_bigint(v);
+    int32_t sz = b->size;   /* header length; overlay sign irrelevant here */
+    return sz != 0 ? b->limbs[0] : 0;
+}
+
 #define DEFINE_BENCH_LANE(NAME, APPLY)                                     \
 static double __attribute__((noinline, aligned(128)))                      \
 bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
@@ -1600,7 +1616,7 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
     do {                                                                   \
         for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {          \
             WValue result = (APPLY);                                       \
-            bench_sink ^= (uint64_t)integer_low_i64(result);               \
+            bench_sink ^= bench_observe_low(result);                       \
             if (w_is_bigint(previous)) {                                   \
                 if (recycle)                                               \
                     bigint_release_if_live(w_as_bigint(previous));         \
@@ -1614,7 +1630,7 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
     double timed_start = bench_now();                                      \
     for (int timed_i = 0; timed_i < iters; timed_i++) {                    \
         WValue result = (APPLY);                                           \
-        bench_sink ^= (uint64_t)integer_low_i64(result) ^                  \
+        bench_sink ^= bench_observe_low(result) ^                          \
                       (uint64_t)timed_i;                                   \
         if (w_is_bigint(previous)) {                                       \
             if (recycle)                                                   \
@@ -4534,6 +4550,124 @@ static void check_boxed_op_against_gmp(int op, int32_t limbs) {
     bench_free_value(m);
 }
 
+/* Per-op GMP lanes, mirroring DEFINE_BENCH_LANE on the Tungsten side: one
+ * noinline aligned(128) function per operation so each op's warm+timed loops
+ * sit at a fixed offset from their own aligned entry.  Before this, every
+ * GMP loop lived inside one switch function, so any growth elsewhere in the
+ * translation unit re-dealt loop alignments and small-op GMP timings swung
+ * 10-30% between otherwise-identical builds (the same artifact the Tungsten
+ * lanes were insulated from on 2026-08-01). */
+typedef struct GmpLaneCtx {
+    mpz_ptr r0, r1;   /* alternating retained destinations */
+    mpz_ptr a, b, m;
+    unsigned long w;  /* hoisted one-limb operand for the _ui rows */
+    char *dec;        /* fromstr input; tostr's fixed result block size */
+    size_t dec_block;
+    void (*free_fn)(void *, size_t);
+    int iters;
+    int warm_chunk;
+} GmpLaneCtx;
+
+#define DEFINE_GMP_LANE(NAME, APPLY)                                       \
+static double __attribute__((noinline, aligned(128)))                      \
+bench_gmp_lane_##NAME(GmpLaneCtx *cx) {                                    \
+    mpz_ptr result[2] = { cx->r0, cx->r1 };                                \
+    mpz_ptr a = cx->a, b = cx->b, m = cx->m;                               \
+    unsigned long w = cx->w;                                               \
+    char *dec = cx->dec;                                                   \
+    (void)a; (void)b; (void)m; (void)w; (void)dec;                         \
+    int warm_chunk = cx->warm_chunk;                                       \
+    int warm_index = 0;                                                    \
+    double warm_start = bench_now();                                       \
+    do {                                                                   \
+        for (int warm_i = 0; warm_i < warm_chunk;                          \
+             warm_i++, warm_index++) {                                     \
+            mpz_ptr r = result[warm_index & 1];                            \
+            APPLY;                                                         \
+            bench_sink ^= (uint64_t)mpz_get_ui(r);                         \
+        }                                                                  \
+    } while (bench_now() - warm_start < bench_warm_seconds);               \
+    int iters = cx->iters;                                                 \
+    double timed_start = bench_now();                                      \
+    for (int timed_i = 0; timed_i < iters; timed_i++) {                    \
+        mpz_ptr r = result[(warm_index + timed_i) & 1];                    \
+        APPLY;                                                             \
+        bench_sink ^= (uint64_t)mpz_get_ui(r) ^ (uint64_t)timed_i;         \
+    }                                                                      \
+    return bench_now() - timed_start;                                      \
+}
+
+DEFINE_GMP_LANE(add,    mpz_add(r, a, b))
+DEFINE_GMP_LANE(sub,    mpz_sub(r, a, b))
+DEFINE_GMP_LANE(mul,    mpz_mul(r, a, b))
+DEFINE_GMP_LANE(sqr,    mpz_mul(r, a, a))
+DEFINE_GMP_LANE(div,    mpz_tdiv_q(r, a, b))
+DEFINE_GMP_LANE(mod,    mpz_tdiv_r(r, a, b))
+DEFINE_GMP_LANE(band,   mpz_and(r, a, b))
+DEFINE_GMP_LANE(bor,    mpz_ior(r, a, b))
+DEFINE_GMP_LANE(bxor,   mpz_xor(r, a, b))
+DEFINE_GMP_LANE(shl,    mpz_mul_2exp(r, a, 13))
+DEFINE_GMP_LANE(shr,    mpz_fdiv_q_2exp(r, a, 13))
+DEFINE_GMP_LANE(gcd,    mpz_gcd(r, a, b))
+DEFINE_GMP_LANE(add1,   mpz_add_ui(r, a, w))
+DEFINE_GMP_LANE(sub1,   mpz_sub_ui(r, a, w))
+DEFINE_GMP_LANE(mul1,   mpz_mul_ui(r, a, w))
+DEFINE_GMP_LANE(div1,   mpz_tdiv_q_ui(r, a, w))
+DEFINE_GMP_LANE(neg,    mpz_neg(r, a))
+DEFINE_GMP_LANE(abs,    mpz_abs(r, a))
+/* in-place: GMP's own O(1) path (no copy when dest == source) */
+DEFINE_GMP_LANE(negbang, mpz_neg(a, a))
+DEFINE_GMP_LANE(absbang, mpz_abs(a, a))
+DEFINE_GMP_LANE(pow,    mpz_pow_ui(r, a, BENCH_BOXED_POW_EXP))
+DEFINE_GMP_LANE(powmod, mpz_powm(r, a, b, m))
+DEFINE_GMP_LANE(lcm,    mpz_lcm(r, a, b))
+DEFINE_GMP_LANE(isqrt,  mpz_sqrt(r, a))
+DEFINE_GMP_LANE(fromstr, mpz_set_str(r, dec, 10))
+
+static double __attribute__((noinline, aligned(128)))
+bench_gmp_lane_cmp(GmpLaneCtx *cx) {
+    mpz_ptr a = cx->a, b = cx->b;
+    int warm_chunk = cx->warm_chunk;
+    double warm_start = bench_now();
+    do {
+        for (int warm_i = 0; warm_i < warm_chunk; warm_i++)
+            bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b);
+    } while (bench_now() - warm_start < bench_warm_seconds);
+    int iters = cx->iters;
+    double timed_start = bench_now();
+    for (int timed_i = 0; timed_i < iters; timed_i++)
+        bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b) ^
+                      (uint64_t)timed_i;
+    return bench_now() - timed_start;
+}
+
+/* Mirror of the Tungsten lane: convert, observe, free every iteration
+ * through GMP's own allocator hooks. */
+static double __attribute__((noinline, aligned(128)))
+bench_gmp_lane_tostr(GmpLaneCtx *cx) {
+    mpz_ptr a = cx->a;
+    void (*free_fn)(void *, size_t) = cx->free_fn;
+    size_t dec_block = cx->dec_block;
+    int warm_chunk = cx->warm_chunk;
+    double warm_start = bench_now();
+    do {
+        for (int warm_i = 0; warm_i < warm_chunk; warm_i++) {
+            char *text = mpz_get_str(NULL, 10, a);
+            bench_sink ^= (uint64_t)(unsigned char)text[0];
+            free_fn(text, dec_block);
+        }
+    } while (bench_now() - warm_start < bench_warm_seconds);
+    int iters = cx->iters;
+    double timed_start = bench_now();
+    for (int timed_i = 0; timed_i < iters; timed_i++) {
+        char *text = mpz_get_str(NULL, 10, a);
+        bench_sink ^= (uint64_t)(unsigned char)text[0] ^
+                      (uint64_t)timed_i;
+        free_fn(text, dec_block);
+    }
+    return bench_now() - timed_start;
+}
+
 /* Same one-previous-result-live contract as the Tungsten churn benchmark.
  * Two alternating mpz destinations let GMP retain its own result capacity
  * without overwriting the immediately previous immutable result. */
@@ -4560,127 +4694,51 @@ static double bench_gmp_boxed_result_churn(
     bench_free_value(bv);
     bench_free_value(mv);
 
-    int warm_chunk = bench_boxed_warm_chunk(op, limbs);
-    int warm_index = 0;
-    double elapsed = 0.0;
-#define BENCH_BOXED_GMP_RUN(APPLY) do {                                   \
-        double warm_start = bench_now();                                  \
-        do {                                                              \
-            for (int warm_i = 0; warm_i < warm_chunk;                     \
-                 warm_i++, warm_index++) {                                \
-                mpz_ptr r = result[warm_index & 1];                       \
-                APPLY;                                                    \
-                bench_sink ^= (uint64_t)mpz_get_ui(r);                    \
-            }                                                             \
-        } while (bench_now() - warm_start < bench_warm_seconds);                       \
-        double timed_start = bench_now();                                 \
-        for (int timed_i = 0; timed_i < iters; timed_i++) {               \
-            mpz_ptr r = result[(warm_index + timed_i) & 1];               \
-            APPLY;                                                        \
-            bench_sink ^= (uint64_t)mpz_get_ui(r) ^ (uint64_t)timed_i;   \
-        }                                                                 \
-        elapsed = bench_now() - timed_start;                              \
-    } while (0)
-
-    switch (op) {
-    case BENCH_BOXED_ADD:
-        BENCH_BOXED_GMP_RUN(mpz_add(r, a, b)); break;
-    case BENCH_BOXED_SUB:
-        BENCH_BOXED_GMP_RUN(mpz_sub(r, a, b)); break;
-    case BENCH_BOXED_MUL:
-        BENCH_BOXED_GMP_RUN(mpz_mul(r, a, b)); break;
-    case BENCH_BOXED_SQR:
-        BENCH_BOXED_GMP_RUN(mpz_mul(r, a, a)); break;
-    case BENCH_BOXED_DIV:
-        BENCH_BOXED_GMP_RUN(mpz_tdiv_q(r, a, b)); break;
-    case BENCH_BOXED_MOD:
-        BENCH_BOXED_GMP_RUN(mpz_tdiv_r(r, a, b)); break;
-    case BENCH_BOXED_AND:
-        BENCH_BOXED_GMP_RUN(mpz_and(r, a, b)); break;
-    case BENCH_BOXED_OR:
-        BENCH_BOXED_GMP_RUN(mpz_ior(r, a, b)); break;
-    case BENCH_BOXED_XOR:
-        BENCH_BOXED_GMP_RUN(mpz_xor(r, a, b)); break;
-    case BENCH_BOXED_SHL:
-        BENCH_BOXED_GMP_RUN(mpz_mul_2exp(r, a, 13)); break;
-    case BENCH_BOXED_SHR:
-        BENCH_BOXED_GMP_RUN(mpz_fdiv_q_2exp(r, a, 13)); break;
-    case BENCH_BOXED_GCD:
-        BENCH_BOXED_GMP_RUN(mpz_gcd(r, a, b)); break;
+    GmpLaneCtx cx;
+    cx.r0 = result[0];
+    cx.r1 = result[1];
+    cx.a = a;
+    cx.b = b;
+    cx.m = zm;
     /* one-limb rows: idiomatic GMP uses the _ui entries; hoist the word. */
-    case BENCH_BOXED_ADD1: {
-        unsigned long w = mpz_get_ui(b);
-        BENCH_BOXED_GMP_RUN(mpz_add_ui(r, a, w)); break;
-    }
-    case BENCH_BOXED_SUB1: {
-        unsigned long w = mpz_get_ui(b);
-        BENCH_BOXED_GMP_RUN(mpz_sub_ui(r, a, w)); break;
-    }
-    case BENCH_BOXED_MUL1: {
-        unsigned long w = mpz_get_ui(b);
-        BENCH_BOXED_GMP_RUN(mpz_mul_ui(r, a, w)); break;
-    }
-    case BENCH_BOXED_DIV1: {
-        unsigned long w = mpz_get_ui(b);
-        BENCH_BOXED_GMP_RUN(mpz_tdiv_q_ui(r, a, w)); break;
-    }
-    case BENCH_BOXED_CMP: {
-        double warm_start = bench_now();
-        do {
-            for (int warm_i = 0; warm_i < warm_chunk; warm_i++)
-                bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b);
-        } while (bench_now() - warm_start < bench_warm_seconds);
-        double timed_start = bench_now();
-        for (int timed_i = 0; timed_i < iters; timed_i++)
-            bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b) ^
-                          (uint64_t)timed_i;
-        elapsed = bench_now() - timed_start;
-        break;
-    }
-    case BENCH_BOXED_NEG:
-        BENCH_BOXED_GMP_RUN(mpz_neg(r, a)); break;
-    case BENCH_BOXED_ABS:
-        BENCH_BOXED_GMP_RUN(mpz_abs(r, a)); break;
-    case BENCH_BOXED_NEG_BANG:
-        /* in-place: GMP's own O(1) path (no copy when dest == source) */
-        BENCH_BOXED_GMP_RUN(mpz_neg(a, a)); break;
-    case BENCH_BOXED_ABS_BANG:
-        BENCH_BOXED_GMP_RUN(mpz_abs(a, a)); break;
-    case BENCH_BOXED_POW:
-        BENCH_BOXED_GMP_RUN(mpz_pow_ui(r, a, BENCH_BOXED_POW_EXP)); break;
-    case BENCH_BOXED_POWMOD:
-        BENCH_BOXED_GMP_RUN(mpz_powm(r, a, b, zm)); break;
-    case BENCH_BOXED_LCM:
-        BENCH_BOXED_GMP_RUN(mpz_lcm(r, a, b)); break;
-    case BENCH_BOXED_ISQRT:
-        BENCH_BOXED_GMP_RUN(mpz_sqrt(r, a)); break;
-    case BENCH_BOXED_FROMSTR:
-        BENCH_BOXED_GMP_RUN(mpz_set_str(r, dec, 10)); break;
-    case BENCH_BOXED_TOSTR: {
-        /* Mirror of the Tungsten lane: convert, observe, free every
-         * iteration through GMP's own allocator hooks. */
-        double warm_start = bench_now();
-        do {
-            for (int warm_i = 0; warm_i < warm_chunk; warm_i++) {
-                char *text = mpz_get_str(NULL, 10, a);
-                bench_sink ^= (uint64_t)(unsigned char)text[0];
-                gmp_free_fn(text, dec_block);
-            }
-        } while (bench_now() - warm_start < bench_warm_seconds);
-        double timed_start = bench_now();
-        for (int timed_i = 0; timed_i < iters; timed_i++) {
-            char *text = mpz_get_str(NULL, 10, a);
-            bench_sink ^= (uint64_t)(unsigned char)text[0] ^
-                          (uint64_t)timed_i;
-            gmp_free_fn(text, dec_block);
-        }
-        elapsed = bench_now() - timed_start;
-        break;
-    }
+    cx.w = mpz_get_ui(b);
+    cx.dec = dec;
+    cx.dec_block = dec_block;
+    cx.free_fn = gmp_free_fn;
+    cx.iters = iters;
+    cx.warm_chunk = bench_boxed_warm_chunk(op, limbs);
+    double elapsed = 0.0;
+    switch (op) {
+    case BENCH_BOXED_ADD:      elapsed = bench_gmp_lane_add(&cx); break;
+    case BENCH_BOXED_SUB:      elapsed = bench_gmp_lane_sub(&cx); break;
+    case BENCH_BOXED_MUL:      elapsed = bench_gmp_lane_mul(&cx); break;
+    case BENCH_BOXED_SQR:      elapsed = bench_gmp_lane_sqr(&cx); break;
+    case BENCH_BOXED_DIV:      elapsed = bench_gmp_lane_div(&cx); break;
+    case BENCH_BOXED_MOD:      elapsed = bench_gmp_lane_mod(&cx); break;
+    case BENCH_BOXED_AND:      elapsed = bench_gmp_lane_band(&cx); break;
+    case BENCH_BOXED_OR:       elapsed = bench_gmp_lane_bor(&cx); break;
+    case BENCH_BOXED_XOR:      elapsed = bench_gmp_lane_bxor(&cx); break;
+    case BENCH_BOXED_SHL:      elapsed = bench_gmp_lane_shl(&cx); break;
+    case BENCH_BOXED_SHR:      elapsed = bench_gmp_lane_shr(&cx); break;
+    case BENCH_BOXED_GCD:      elapsed = bench_gmp_lane_gcd(&cx); break;
+    case BENCH_BOXED_ADD1:     elapsed = bench_gmp_lane_add1(&cx); break;
+    case BENCH_BOXED_SUB1:     elapsed = bench_gmp_lane_sub1(&cx); break;
+    case BENCH_BOXED_MUL1:     elapsed = bench_gmp_lane_mul1(&cx); break;
+    case BENCH_BOXED_DIV1:     elapsed = bench_gmp_lane_div1(&cx); break;
+    case BENCH_BOXED_CMP:      elapsed = bench_gmp_lane_cmp(&cx); break;
+    case BENCH_BOXED_NEG:      elapsed = bench_gmp_lane_neg(&cx); break;
+    case BENCH_BOXED_ABS:      elapsed = bench_gmp_lane_abs(&cx); break;
+    case BENCH_BOXED_NEG_BANG: elapsed = bench_gmp_lane_negbang(&cx); break;
+    case BENCH_BOXED_ABS_BANG: elapsed = bench_gmp_lane_absbang(&cx); break;
+    case BENCH_BOXED_POW:      elapsed = bench_gmp_lane_pow(&cx); break;
+    case BENCH_BOXED_POWMOD:   elapsed = bench_gmp_lane_powmod(&cx); break;
+    case BENCH_BOXED_LCM:      elapsed = bench_gmp_lane_lcm(&cx); break;
+    case BENCH_BOXED_ISQRT:    elapsed = bench_gmp_lane_isqrt(&cx); break;
+    case BENCH_BOXED_FROMSTR:  elapsed = bench_gmp_lane_fromstr(&cx); break;
+    case BENCH_BOXED_TOSTR:    elapsed = bench_gmp_lane_tostr(&cx); break;
     default:
         die("unknown GMP boxed benchmark operation");
     }
-#undef BENCH_BOXED_GMP_RUN
 
     if (dec) gmp_free_fn(dec, dec_block);
     mpz_clears(a, b, zm, result[0], result[1], NULL);

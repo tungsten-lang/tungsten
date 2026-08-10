@@ -958,3 +958,31 @@ target, so no selector was retained.  Representative artifacts:
 `baselines/mul-split100-fixed-screen-bfda652-m5max-20260804.json`,
 `baselines/bz-product-in-rh-screen-bfda652-m5max-20260804.json`, and
 `baselines/submul-hot-section-screen-bfda652-m5max-20260804.json`.
+
+## Split-carry-chain mul_1 kernels (16-64 limbs) — built, gated OFF (2026-08-10)
+
+GMP's small marginal cost per limb between mul1 sizes (~0.6-0.8 ns-cycles/limb)
+suggested `mpn_mul_1` overlaps carry chains within a call while our fixed
+kernels run one serial `adcs` chain.  The mechanism was built (`BN_M1F_CUT`/
+`BN_M1F_FIX` boundary correction with rare in-kernel ripple; shapes 8+8 through
+16x4 inside `bn_mul_1_f16..f64` behind per-width `BN_MUL1_SPLIT_F*` knobs) and
+validated by a 95,000,712-case fuzz against both the serial reference and
+`mpn_mul_1`.
+
+In latency mode (next multiplier derived from the previous carry — the chain
+fully exposed) splits win 0.77-0.93 vs GMP exactly as designed.  In the boxed
+lane they lose 0.8-2.6% at every width: back-to-back boxed calls already
+overlap in the out-of-order window (each call's chain opens with a
+flag-independent `adds`), so BOTH sides run at the shared multiplier-pipe
+floor (~0.75-0.78 c/l marginal, measured for our serial kernels and for
+`mpn_mul_1` alike) and the boundary corrections are pure overhead.  The
+`mul1@24/@32` residual (~1.00-1.03) lives in the boxed wrapper (alloc/release
+round-trip vs `mpz_mul_ui`'s retained destination — `sample` shows our lane at
+~1.45-1.5x GMP's wrapper cost at every width, kernels out-sampling
+`__gmpn_mul_1`), which prior wrapper campaigns above already measured as not
+closable without regressing controls.
+
+All `BN_MUL1_SPLIT_F*` default 0; the knobs-off binary compiles kernels
+identical to the serial baseline (disassembly-verified, no `cset` in `f24`).
+**Condition to enable:** a workload or silicon where the boxed lane is
+latency-exposed (e.g. dependent single-op chains), per width, via the knobs.

@@ -916,17 +916,23 @@
 
     # Lower remaining args — pass raw machine ints directly (no boxing)
     lowered_args = []
+    lowered_arg_types = []
     i = 1
     while i < args.size()
       arg_tv = lower_expression(ctx, args[i])
       if arg_tv[:type] in (:raw_int :raw_i64 :raw_u64)
         lowered_args.push(arg_tv[:value])
+        lowered_arg_types.push("i64")
+      elsif arg_tv[:type] in (:raw_i128 :raw_u128)
+        lowered_args.push(arg_tv[:value])
+        lowered_arg_types.push("i128")
       else
         lowered_args.push(ensure_i64_value(wfn, arg_tv))
+        lowered_arg_types.push("i64")
       i += 1
 
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: lowered_args})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: lowered_args, arg_types: lowered_arg_types})
     return typed_value(:i64, temp)
 
   # ccall_nobox("c_function_name", arg1, ...) → C function whose return is
@@ -973,16 +979,22 @@
           emit_instruction(wfn, {op: :fptosi_f64_i64, temp: converted, value: rounded})
           return typed_value(:raw_i64, converted)
     lowered_args = []
+    lowered_arg_types = []
     i = 1
     while i < args.size()
       arg_tv = lower_expression(ctx, args[i])
       if arg_tv[:type] in (:raw_int :raw_i64 :raw_u64)
         lowered_args.push(arg_tv[:value])
+        lowered_arg_types.push("i64")
+      elsif arg_tv[:type] in (:raw_i128 :raw_u128)
+        lowered_args.push(arg_tv[:value])
+        lowered_arg_types.push("i128")
       else
         lowered_args.push(ensure_i64_value(wfn, arg_tv))
+        lowered_arg_types.push("i64")
       i += 1
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: lowered_args})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: lowered_args, arg_types: lowered_arg_types})
     # Slab-AST exception: w_node_alloc returns a W_PACKED_NODE WValue,
     # not a raw int. w_node_field_load returns a slab slot value
     # (arbitrary WValue). w_node_singleton and w_ast_bool_cached also
@@ -1014,16 +1026,22 @@
     fn_name = fn_node.value
     ctx[:mod][:ccall_fns][fn_name] = args.size() - 1
     lowered_args = []
+    lowered_arg_types = []
     i = 1
     while i < args.size()
       arg_tv = lower_expression(ctx, args[i])
       if arg_tv[:type] in (:raw_int :raw_i64 :raw_u64)
         lowered_args.push(arg_tv[:value])
+        lowered_arg_types.push("i64")
+      elsif arg_tv[:type] in (:raw_i128 :raw_u128)
+        lowered_args.push(arg_tv[:value])
+        lowered_arg_types.push("i128")
       else
         lowered_args.push(ensure_i64_value(wfn, arg_tv))
+        lowered_arg_types.push("i64")
       i += 1
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: lowered_args})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: lowered_args, arg_types: lowered_arg_types})
     return typed_value(:i64, temp)
 
   # Typed overloads: resolve by inferred argument types and emit a direct call

@@ -40,3 +40,7 @@ raise "compiled f64 to i64 ascription failed" if as_i64((-81.9) ## f64) != -81
 raise "compiled f64 to u64 ascription failed" if as_u64(81.9 ## f64) != 81
 raise "compiled f32 to i128 ascription failed" if as_i128((-81.9) ## f32) != -81
 raise "compiled f32 to u128 ascription failed" if as_u128(81.9 ## f32) != 81
+
+wide = (1 ## u128) << 100 ## u128
+boxed_wide = ccall("w_u128", wide)
+raise "raw u128 ccall argument was not preserved" if boxed_wide.to_s() != "1267650600228229401496703205376"

@@ -1137,11 +1137,33 @@
         return ccall("w_u64", magnitude)
     ccall("w_bigint_gcd", self, other)
 
-  # Least common multiple. The fused u64 and exact-division kernels stay
-  # behind one exported boundary; composing the public gcd, division, and
-  # multiplication methods here repeats dispatch and is materially slower
-  # for small BigInts. The method surface itself is source-defined.
+  # Least common multiple. One-limb BigInt pairs stay raw through GCD, exact
+  # division, and u128 multiplication, then box once. Mixed and multi-limb
+  # pairs retain the fused exact-division runtime boundary.
   -> lcm(other)
+    if ((other$value >> 48) & 0xFFFF) == 0xFFF8
+      big_other = other ## BigInt
+      an = $size ## i64
+      bn = big_other$size ## i64
+      amask = an >> 63 ## i64
+      bmask = bn >> 63 ## i64
+      am = (an ^ amask) - amask ## i64
+      bm = (bn ^ bmask) - bmask ## i64
+      if (am | bm) == 1
+        a = $limbs[0] ## u64
+        b = big_other$limbs[0] ## u64
+        divisor = __bigint_gcd_u64_nonzero(a, b) ## u64
+        quotient = a ## u64
+        if divisor != 1
+          quotient = a / divisor ## u64
+        product = (quotient ## u128) * (b ## u128) ## u128
+        low = product ## u64
+        high = (product >> 64) ## u64
+        if high == 0
+          if low <= 140737488355327
+            return wvalue_from_bits((-1688849860263936 | low) ## i64)
+          return ccall("w_u64", low)
+        return ccall("w_u128", product)
     ccall("w_bigint_lcm", self, other)
 
   # Primality. The small-screen / Mersenne Lucas-Lehmer / Proth / BPSW

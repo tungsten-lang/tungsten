@@ -1,11 +1,13 @@
-# True-public before/after benchmark for the BigInt#lcm port. Receivers are
-# heap BigInts from decimal literals plus arithmetic; the timed loops call the
-# real public selector. Run unchanged before (C IC installed) and after (IC
-# row retired, Int#lcm source body dispatches); compare per-stratum medians.
+# Same-binary benchmark for the BigInt#lcm port. The W lane calls the public
+# method; the C lane calls the retained fused runtime boundary through a
+# benchmark-only method. Both pay source dispatch and return ordinary boxed
+# values, isolating the lcm implementation without a raw-kernel shortcut.
 #
 # Strata target the C handler's specializations:
 #   one-big    — 1-limb bigint receiver, 1-limb bigint argument (fused
-#                u64 kernel in C)
+#                u64 kernel in C, 2-limb result)
+#   one-share  — 1-limb bigint pair where one power-of-two magnitude divides
+#                the other (1-limb result)
 #   one-int    — 1-limb bigint receiver, inline-int argument
 #   multi-co   — 4-limb pairs, effectively coprime (mul-only path)
 #   multi-share— 8-limb operands sharing a 4-limb factor (divexact vs
@@ -14,6 +16,10 @@
 #
 # No stratum is identity-shaped (x == y, +/-1 argument, or x | y), so every
 # result is a fresh allocation and safe to consume/free.
+
++ BigInt
+  -> __c_lcm_oracle(other)
+    ccall("w_bigint_lcm", self, other)
 
 CORPUS_SIZE = 8
 CORPUS_MASK = CORPUS_SIZE - 1
@@ -48,7 +54,9 @@ CORPUS_MASK = CORPUS_SIZE - 1
   values = []
   i = 0
   while i < CORPUS_SIZE
-    if stratum == "one-big" || stratum == "one-int"
+    if stratum == "one-share"
+      v = 1 << (55 + i)
+    elsif stratum == "one-big" || stratum == "one-int"
       v = one_limb_value(i * 3 + 1)
     elsif stratum == "multi-co"
       v = four_limb_value(i * 3 + 1)
@@ -66,7 +74,9 @@ CORPUS_MASK = CORPUS_SIZE - 1
   values = []
   i = 0
   while i < CORPUS_SIZE
-    if stratum == "one-big"
+    if stratum == "one-share"
+      v = 1 << (48 + (i >> 1))
+    elsif stratum == "one-big"
       v = one_limb_value(i * 5 + 200)
     elsif stratum == "one-int"
       v = 1000003 + i * 2
@@ -90,7 +100,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
   check_value("lcm.neg_receiver", (0 - ten40).lcm(3).to_s(), (ten40 * 3).to_s())
   check_value("lcm.neg_arg", ten40.lcm(0 - 3).to_s(), (ten40 * 3).to_s())
 
-  strata = ["one-big", "one-int", "multi-co", "multi-share", "big-share"]
+  strata = ["one-big", "one-share", "one-int", "multi-co", "multi-share", "big-share"]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -101,6 +111,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
       x = receivers[i]
       y = args[i]
       m = x.lcm(y)
+      check_value("C differential [stratum]/[i]", m.to_s(), x.__c_lcm_oracle(y).to_s())
       check_value("nonneg [stratum]/[i]", m > 0, true)
       check_value("mod_x [stratum]/[i]", (m % x).to_s(), "0")
       check_value("mod_y [stratum]/[i]", (m % y).to_s(), "0")
@@ -108,9 +119,33 @@ CORPUS_MASK = CORPUS_SIZE - 1
       check_value("product [stratum]/[i]", (m * g).to_s(), (x * y).abs.to_s())
       i += 1
     s += 1
-  << "correctness: ok (edge semantics + divisibility/product identities, 5 strata, mixed signs)"
 
--> time_lcm(receivers, args, iters)
+  # Deterministic full-word sweep. Force bit 63 so both operands are
+  # normalized one-limb BigInts and exercise the raw-u64/u128 source arm.
+  state = 88172645463325252 ## u64
+  random_checks = 0
+  while random_checks < 2048
+    state = state ^ (state >> 12) ## u64
+    state = state ^ (state << 25) ## u64
+    state = state ^ (state >> 27) ## u64
+    state = state * 2685821657736338717 ## u64
+    a = state | (9223372036854775808 ## u64)
+    state = state ^ (state >> 12) ## u64
+    state = state ^ (state << 25) ## u64
+    state = state ^ (state >> 27) ## u64
+    state = state * 2685821657736338717 ## u64
+    b = state | (9223372036854775808 ## u64)
+    x = ccall("w_u64", a)
+    y = ccall("w_u64", b)
+    if (random_checks & 1) == 1
+      x = 0 - x
+    if (random_checks & 2) == 2
+      y = 0 - y
+    check_value("random C differential [random_checks]", x.lcm(y).to_s(), x.__c_lcm_oracle(y).to_s())
+    random_checks += 1
+  << "correctness: ok ([48 + random_checks] C differentials + edge/divisibility/product identities, 6 strata, mixed signs)"
+
+-> time_lcm_w(receivers, args, iters)
   checksum = 0
   i = 0
   started = thread_cpu_ns()
@@ -120,11 +155,26 @@ CORPUS_MASK = CORPUS_SIZE - 1
     i += 1
   [thread_cpu_ns() - started, checksum]
 
--> run_bench(stratum, iters, warmup)
+-> time_lcm_c(receivers, args, iters)
+  checksum = 0
+  i = 0
+  started = thread_cpu_ns()
+  while i < iters
+    k = i & CORPUS_MASK
+    checksum += consume_low_byte(receivers[k].__c_lcm_oracle(args[k]))
+    i += 1
+  [thread_cpu_ns() - started, checksum]
+
+-> run_bench(lane, stratum, iters, warmup)
   receivers = build_receivers(stratum)
   args = build_args(stratum)
-  time_lcm(receivers, args, warmup)
-  result = time_lcm(receivers, args, iters)
+  result = nil
+  if lane == "c"
+    time_lcm_c(receivers, args, warmup)
+    result = time_lcm_c(receivers, args, iters)
+  else
+    time_lcm_w(receivers, args, warmup)
+    result = time_lcm_w(receivers, args, iters)
   << "RESULT|lcm-[stratum]|[result[0]]|[iters]|[result[1]]"
 
 args_v = argv()
@@ -137,10 +187,11 @@ if mode != "bench"
   << "mode must be check or bench"
   exit(2)
 
-stratum = args_v.size() > 1 ? args_v[1] : "one-big"
-iters = args_v.size() > 2 ? args_v[2].to_i : 1_000_000
-warmup = args_v.size() > 3 ? args_v[3].to_i : iters / 10
+lane = args_v.size() > 1 ? args_v[1] : "w"
+stratum = args_v.size() > 2 ? args_v[2] : "one-big"
+iters = args_v.size() > 3 ? args_v[3].to_i : 1_000_000
+warmup = args_v.size() > 4 ? args_v[4].to_i : iters / 10
 if iters <= 0
   << "iterations must be positive"
   exit(2)
-run_bench(stratum, iters, warmup)
+run_bench(lane, stratum, iters, warmup)

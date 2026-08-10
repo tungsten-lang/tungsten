@@ -1,7 +1,12 @@
-# Lowering — transforms AST hashes into WIRE IR
-# Phase 3: handles int, string, bool, nil, var, assign, binary_op,
-# unary_op, simple calls, puts/print, if, while, return.
-# Unsupported nodes produce clear error messages.
+# Lowering — transforms AST nodes into WIRE IR.
+#
+# This file is the thin orchestrator of the lowering module: its `use`
+# block below merges the compiler/lib/lowering/ workers (the order is
+# the worker dependency chain — `make lowering-graph` prints it), and
+# lower_ast drives them phase by phase: module setup, the top-level
+# registration walk, return-type inference, class initialization, then
+# body lowering through lower_program (pass_registry.w). Worker roles
+# are documented in each worker's header.
 
 use runtime_types
 use wire
@@ -99,7 +104,11 @@ use lowering/definitions
     i += 1
   defs
 
--> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false)
+
+# Create and seed the WIRE module: bignum source invariants, build
+# defines, monomorphization registries, builtin-class tables, and the
+# known_calls registry for bare C-runtime bridges.
+-> init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines)
   mod = wire_module(source_path)
   # Root loading always injects native BigInt comparison and bitwise support.
   # Carry the invariants to emission so a loader/cache regression cannot
@@ -126,7 +135,6 @@ use lowering/definitions
     if env_defs.size() > 0
       mod[:build_defines] = env_defs
   register_ast_constructor_return_types(mod)
-  var_types = {}
 
   # Built-in runtime classes are available to top-level expressions; source
   # classes with the same name still take precedence.
@@ -224,46 +232,24 @@ use lowering/definitions
 
   # ccall target registry (populated by lower_call when ccall() is used)
   mod[:ccall_fns] = {}
+  mod
 
-  # Pre-pass: infer return types, register fn memo tables, collect classes.
-  #
-  # Phase 3b: return-type inference runs as a fixed-point pass. Each
-  # iteration re-runs infer_return_type on every method/fn; if the
-  # iteration changes any return type, we loop. This handles mutually
-  # recursive methods where method A's return type depends on method B
-  # (and vice versa): iteration 1 fills in whichever resolves without
-  # dependencies, iteration 2 uses iteration 1's results to resolve
-  # the next layer, and so on.
-  #
-  # Max 3 iterations per full sweep. Most call graphs converge in 1-2
-  # passes because real dependency chains are shallow. If we hit 3 and
-  # still have changes, bail out — the unresolved methods keep their
-  # last-inferred type and a warning is emitted. Users can resolve by
-  # annotating explicit return types on one method in the cycle.
-  #
-  # Explicit `:return_type` annotations (from Phase 3 inline signatures)
-  # are LOCKED IN on iteration 0 and never overwritten. Only inferred
-  # (nil-annotated) methods get updated per iteration.
-  # Generic class monomorphization runs BEFORE the main expressions walk
-  # so specialized classes are visible to every downstream pass.
-  monomorphize_generics(ast, mod)
-  # Desugar `SmallArray<T, N>.new` → `SmallArray.new(:T, N)`. Always runs (unlike
-  # monomorphize_generics, which early-returns when no user generic templates
-  # exist), so a program using SmallArray<T,N> without any user generics is still
-  # rewritten. Must precede the stack-promote / escape analysis so it sees the
-  # canonical constructor.
-  rewrite_smallarray_generic_ctors(ast)
+# Registration walk over the top-level expressions: constant aliases,
+# traits, fn/method defs (call keys, param counts, typed overloads,
+# math-intrinsic aliases, memo tables), and class/module defs. Returns
+# the list of methods whose return types still need inference.
+-> register_top_level_defs(mod, expressions, source_path)
   # Flag top-level typed-overload sets so they get distinct symbols (must
   # run before the registration walk below reads function_name_for_def).
-  mark_fn_overload_groups(ast.expressions)
+  mark_fn_overload_groups(expressions)
   # Reject true duplicate top-level defs (same final symbol) before the
   # content-hash topo-sort would infinite-loop on them.
-  check_duplicate_fn_defs(ast.expressions, source_path)
+  check_duplicate_fn_defs(expressions, source_path)
   # Collect methods and process class/module defs in a single walk.
   inferable_methods = []
   ei = 0
-  while ei < ast.expressions.size()
-    expr = ast.expressions[ei]
+  while ei < expressions.size()
+    expr = expressions[ei]
     # `constant_alias "WC"` — the parser stamped the declaring file's `in`
     # namespace as a second string arg (parser.w), so registration needs no
     # file context. Collected in this prepass so aliases resolve in every
@@ -335,7 +321,26 @@ use lowering/definitions
         if expr.superclass != nil
           mark_builtin_class_used(mod, expr.superclass)
     ei += 1
-  # Fixed-point iteration over the inferable methods.
+  inferable_methods
+
+# Phase 3b: return-type inference runs as a fixed-point pass. Each
+# iteration re-runs infer_return_type on every method/fn; if the
+# iteration changes any return type, we loop. This handles mutually
+# recursive methods where method A's return type depends on method B
+# (and vice versa): iteration 1 fills in whichever resolves without
+# dependencies, iteration 2 uses iteration 1's results to resolve
+# the next layer, and so on.
+#
+# Max 3 iterations per full sweep. Most call graphs converge in 1-2
+# passes because real dependency chains are shallow. If we hit 3 and
+# still have changes, bail out — the unresolved methods keep their
+# last-inferred type and a warning is emitted. Users can resolve by
+# annotating explicit return types on one method in the cycle.
+#
+# Explicit `:return_type` annotations (from Phase 3 inline signatures)
+# are LOCKED IN on iteration 0 and never overwritten. Only inferred
+# (nil-annotated) methods get updated per iteration.
+-> infer_return_types_fixed_point(mod, inferable_methods)
   iter = 0
   max_iter = 3
   still_changing = true
@@ -371,55 +376,11 @@ use lowering/definitions
     # Not a hard error: inference bail-out just means those methods
     # get their current best-effort type (may be nil).
     << "warning: return-type inference didn't converge in [max_iter] passes; consider adding explicit return type annotations on recursive methods"
+  nil
 
-  # Freeze every top-level function's boxed-vs-raw ABI before any body is
-  # lowered.  Forward typed calls must use the same ABI as callees declared
-  # earlier; discovering raw-callable functions incrementally made source
-  # order silently change the meaning of identical LLVM i64 parameters.
-  preregister_top_level_raw_abis(mod, ast.expressions)
-
-  collect_top_level_static_types(mod, ast.expressions)
-  collect_extern_var_refs(mod, ast.expressions)
-
-  # Tier-a call-site parameter type inference: seed unannotated top-level
-  # fn params from the unanimous concrete type seen across all call sites
-  # (typed arrays / floats only, no ABI change, no clone). Needs the
-  # top-level static types just collected; consumed in
-  # populate_definition_var_types when each body is lowered below.
-  collect_param_type_observations(mod, ast.expressions)
-
-  # ARGV use is discovered by the combined runtime-use walk below. Build the
-  # function first, then attach argc/argv before emission if that walk finds a
-  # use. No instructions are emitted between these points.
-  main_fn = build_function("main", [], "i32", true, nil)
-  main_fn[:source_kind] = :entry
-  main_fn[:source_path] = source_path
-  mod[:functions].push(main_fn)
-
-  ctx = {
-    mod: mod,
-    func: main_fn,
-    var_types: var_types,
-    class_name: nil,
-    source_path: source_path,
-    bindings: {},
-    unboxed_vars: {},
-    raw_int_candidates: raw_int_candidate_map(ast.expressions, var_types, mod),
-    mut_accumulators: mut_accumulator_candidates(ast.expressions),
-    method_name: nil,
-    is_class_method: false,
-    is_block: false,
-    verbose: verbose
-  }
-
-  mark_builtin_runtime_class_uses(ast.expressions, mod)
-
-  # Initialize argv subsystem only for programs that touch ARGV / argv().
-  if mod[:uses_argv]
-    main_fn[:extra_params] = [{type: "i32", name: "%argc"}, {type: "ptr", name: "%argv"}]
-    emit_instruction(main_fn, {op: :argv_init})
-
-  # Initialize built-in runtime classes
+# Emit startup init calls for the built-in runtime classes a program
+# actually uses (mark_builtin_runtime_class_uses fills the used set).
+-> emit_builtin_class_inits(main_fn, mod)
   bci = 0
   while bci < mod[:builtin_class_order].size()
     bc_name = mod[:builtin_class_order][bci]
@@ -428,28 +389,19 @@ use lowering/definitions
       bc_byte_len = utf8_byte_length(bc_name) + 1
       emit_instruction(main_fn, {op: :builtin_class_init, class_name: bc_name, name_str_id: bc_str_id, name_byte_len: bc_byte_len})
     bci += 1
-  # Initialize classes in stable dependency order. Autoload discovery order is
-  # demand-driven, so a thin program can contain `Int < Real` before Real's
-  # definition even though a wider program happens to load the same files in
-  # parent-first order. Build the class-only stream in passes: ready classes
-  # retain source order, children wait for their parent, and reopens retain
-  # their per-class order behind the first declaration.
-  #
-  # A class may be re-opened by multiple `class_def` / `+ ClassName` blocks
-  # across files. For each class we instantiate w_class_new ONCE on the
-  # first encounter; subsequent re-opens skip class creation and add their
-  # own methods, accessors, and ivars to the existing class via the
-  # register_class_method / load_class helpers. Last-defined method wins
-  # (backed by runtime-side replace-on-duplicate in w_class_add_method).
-  #
-  # First-declaration wins for structural fields (superclass, dispatch
-  # key). Re-opens can only add methods/accessors and append ivars.
-  # Each class_def processes its OWN body (`expr.body`), not the
-  # canonical one in mod[:known_classes] (which is the last-registered).
+  nil
+
+# Initialize classes in stable dependency order. Autoload discovery order is
+# demand-driven, so a thin program can contain `Int < Real` before Real's
+# definition even though a wider program happens to load the same files in
+# parent-first order. Build the class-only stream in passes: ready classes
+# retain source order, children wait for their parent, and reopens retain
+# their per-class order behind the first declaration.
+-> order_class_exprs(mod, expressions)
   runtime_class_names = {}
   ci = 0
-  while ci < ast.expressions.size()
-    expr = ast.expressions[ci]
+  while ci < expressions.size()
+    expr = expressions[ci]
     is_generic_template = ast_kind(expr) == :class_def && expr.type_params != nil
     if !is_generic_template && ast_kind(expr) in (:class_def :module_def)
       runtime_class_names[expr.name] = true
@@ -457,8 +409,8 @@ use lowering/definitions
 
   pending_class_exprs = []
   ci = 0
-  while ci < ast.expressions.size()
-    expr = ast.expressions[ci]
+  while ci < expressions.size()
+    expr = expressions[ci]
     is_generic_template = ast_kind(expr) == :class_def && expr.type_params != nil
     if !is_generic_template && ast_kind(expr) in (:class_def :module_def)
       pending_class_exprs.push(expr)
@@ -494,7 +446,20 @@ use lowering/definitions
     if !progressed
       raise "cyclic class inheritance prevents runtime initialization"
     pending_class_exprs = next_pending
+  ordered_class_exprs
 
+# A class may be re-opened by multiple `class_def` / `+ ClassName` blocks
+# across files. For each class we instantiate w_class_new ONCE on the
+# first encounter; subsequent re-opens skip class creation and add their
+# own methods, accessors, and ivars to the existing class via the
+# register_class_method / load_class helpers. Last-defined method wins
+# (backed by runtime-side replace-on-duplicate in w_class_add_method).
+#
+# First-declaration wins for structural fields (superclass, dispatch
+# key). Re-opens can only add methods/accessors and append ivars.
+# Each class_def processes its OWN body (`expr.body`), not the
+# canonical one in mod[:known_classes] (which is the last-registered).
+-> register_classes(main_fn, mod, ordered_class_exprs)
   processed_classes = {}
   ci = 0
   while ci < ordered_class_exprs.size()
@@ -716,6 +681,104 @@ use lowering/definitions
                   vdf += 1
           mi2 += 1
     ci += 1
+  nil
+
+# Register custom units (if any were assigned during lowering).
+# Prepend to main function so they run before any quantity display.
+# They live on mod, not ctx — see assign_custom_unit in literals.w.
+-> prepend_custom_unit_registrations(main_fn, mod)
+  if mod[:custom_units] != nil && mod[:custom_units].size() > 0
+    cu_keys = mod[:custom_units].keys()
+    reg_instructions = []
+    cui = 0
+    while cui < cu_keys.size()
+      unit_name = cu_keys[cui]
+      unit_id = mod[:custom_units][unit_name]
+      str_id = module_string_constant(mod, unit_name)
+      byte_len = utf8_byte_length(unit_name) + 1
+      reg_instructions.push({op: :register_unit, unit_id: unit_id, str_id: str_id, byte_len: byte_len})
+      cui += 1
+    # Prepend into the entry block, same shape as prepend_memo_table_initializers.
+    cu_entry = main_fn[:blocks][0]
+    cu_old = cu_entry[:instructions]
+    cu_new = []
+    cui = 0
+    while cui < reg_instructions.size()
+      cu_new.push(reg_instructions[cui])
+      cui += 1
+    cui = 0
+    while cui < cu_old.size()
+      cu_new.push(cu_old[cui])
+      cui += 1
+    cu_entry[:instructions] = cu_new
+  nil
+
+-> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false)
+  mod = init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines)
+
+  # Generic class monomorphization runs BEFORE the main expressions walk
+  # so specialized classes are visible to every downstream pass.
+  monomorphize_generics(ast, mod)
+  # Desugar `SmallArray<T, N>.new` → `SmallArray.new(:T, N)`. Always runs (unlike
+  # monomorphize_generics, which early-returns when no user generic templates
+  # exist), so a program using SmallArray<T,N> without any user generics is still
+  # rewritten. Must precede the stack-promote / escape analysis so it sees the
+  # canonical constructor.
+  rewrite_smallarray_generic_ctors(ast)
+  inferable_methods = register_top_level_defs(mod, ast.expressions, source_path)
+  infer_return_types_fixed_point(mod, inferable_methods)
+
+  # Freeze every top-level function's boxed-vs-raw ABI before any body is
+  # lowered.  Forward typed calls must use the same ABI as callees declared
+  # earlier; discovering raw-callable functions incrementally made source
+  # order silently change the meaning of identical LLVM i64 parameters.
+  preregister_top_level_raw_abis(mod, ast.expressions)
+
+  collect_top_level_static_types(mod, ast.expressions)
+  collect_extern_var_refs(mod, ast.expressions)
+
+  # Tier-a call-site parameter type inference: seed unannotated top-level
+  # fn params from the unanimous concrete type seen across all call sites
+  # (typed arrays / floats only, no ABI change, no clone). Needs the
+  # top-level static types just collected; consumed in
+  # populate_definition_var_types when each body is lowered below.
+  collect_param_type_observations(mod, ast.expressions)
+
+  # ARGV use is discovered by the combined runtime-use walk below. Build the
+  # function first, then attach argc/argv before emission if that walk finds a
+  # use. No instructions are emitted between these points.
+  main_fn = build_function("main", [], "i32", true, nil)
+  main_fn[:source_kind] = :entry
+  main_fn[:source_path] = source_path
+  mod[:functions].push(main_fn)
+
+  var_types = {}
+  ctx = {
+    mod: mod,
+    func: main_fn,
+    var_types: var_types,
+    class_name: nil,
+    source_path: source_path,
+    bindings: {},
+    unboxed_vars: {},
+    raw_int_candidates: raw_int_candidate_map(ast.expressions, var_types, mod),
+    mut_accumulators: mut_accumulator_candidates(ast.expressions),
+    method_name: nil,
+    is_class_method: false,
+    is_block: false,
+    verbose: verbose
+  }
+
+  mark_builtin_runtime_class_uses(ast.expressions, mod)
+
+  # Initialize argv subsystem only for programs that touch ARGV / argv().
+  if mod[:uses_argv]
+    main_fn[:extra_params] = [{type: "i32", name: "%argc"}, {type: "ptr", name: "%argv"}]
+    emit_instruction(main_fn, {op: :argv_init})
+
+  emit_builtin_class_inits(main_fn, mod)
+  ordered_class_exprs = order_class_exprs(mod, ast.expressions)
+  register_classes(main_fn, mod, ordered_class_exprs)
 
   # Freeze the string slab once startup registration is fully emitted (every
   # class/method-name intern above precedes this point in main). The compiled
@@ -763,33 +826,7 @@ use lowering/definitions
     << ""
     << "  done (" + mod[:functions].size().to_s() + " functions)"
 
-  # Register custom units (if any were assigned during lowering).
-  # Prepend to main function so they run before any quantity display.
-  # They live on mod, not ctx — see assign_custom_unit in literals.w.
-  if mod[:custom_units] != nil && mod[:custom_units].size() > 0
-    cu_keys = mod[:custom_units].keys()
-    reg_instructions = []
-    cui = 0
-    while cui < cu_keys.size()
-      unit_name = cu_keys[cui]
-      unit_id = mod[:custom_units][unit_name]
-      str_id = module_string_constant(mod, unit_name)
-      byte_len = utf8_byte_length(unit_name) + 1
-      reg_instructions.push({op: :register_unit, unit_id: unit_id, str_id: str_id, byte_len: byte_len})
-      cui += 1
-    # Prepend into the entry block, same shape as prepend_memo_table_initializers.
-    cu_entry = main_fn[:blocks][0]
-    cu_old = cu_entry[:instructions]
-    cu_new = []
-    cui = 0
-    while cui < reg_instructions.size()
-      cu_new.push(reg_instructions[cui])
-      cui += 1
-    cui = 0
-    while cui < cu_old.size()
-      cu_new.push(cu_old[cui])
-      cui += 1
-    cu_entry[:instructions] = cu_new
+  prepend_custom_unit_registrations(main_fn, mod)
 
   # Drain any pending goroutines before main exits.
   # If no goroutines were spawned, the run queue is empty and this returns immediately.

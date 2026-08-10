@@ -161,9 +161,11 @@ adding a file to `core/`, add the matching `auto` line.
 
 Large compiler modules are split into a thin orchestrator (`<module>.w`) plus
 a sibling `<module>/` directory of worker submodules. `compiler/lib/lowering.w`
-+ `compiler/lib/lowering/*.w` (`pass_registry`, `types`, `analysis`,
-`monomorphize`, `literals`, `ops`, `blocks`, `control_flow`, `calls`,
-`definitions`) is the canonical example. When working in such a module:
++ `compiler/lib/lowering/*.w` (`pass_registry`, `signatures`, `types`,
+`inference`, `analysis`, `elision`, `program`, `monomorphize`, `literals`,
+`ops`, `blocks`, `control_flow`, `poly_sum`, `pipeline_fusion`, `views`,
+`assign`, `calls`, `method_call`, `definitions`) is the canonical example.
+When working in such a module:
 
 - The first worker is a **dispatch shim** (e.g. `pass_registry.w`) holding the
   case-statement dispatchers and shared helpers. It imports no other worker,

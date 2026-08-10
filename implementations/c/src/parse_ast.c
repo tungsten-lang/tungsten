@@ -2062,14 +2062,41 @@ static TcAstValue parse_keyword_arg_ast(TcAstParser *p, size_t start, size_t end
 static TcAstValue parse_io_ast(TcAstParser *p, size_t start, size_t end, TcError *err) {
   TcKind kind = p->tokens->items[start].kind;
   if (!(kind == TC_K_PUTS_OP || kind == TC_K_LSHIFT || kind == TC_K_PRINT_OP)) return tc_ast_nil();
-  TcAstValue value = start + 1 < end ? parse_expr_span_ast(p, start + 1, end, err) : tc_ast_nil();
-  if (start + 1 < end && value.kind == TC_AST_NIL) return tc_ast_nil();
+  /* Canonical Puts/Print nodes carry a LIST of value expressions
+   * (ast.w `+ Puts`: @value is a list, length 1 for the common `<< x`;
+   * `<< a, b` prints one line per value). The hosted compiler's
+   * lower_puts iterates node.value, so a bare single node here made
+   * every fast-parsed `<<` print nils (values.size() saw the hash's
+   * entry count). Split the span on top-level commas. */
+  TcAstValue values = tc_ast_array_new(err);
+  if (values.kind != TC_AST_ARRAY) return tc_ast_nil();
+  size_t seg_start = start + 1;
+  while (seg_start < end) {
+    size_t seg_end = end;
+    size_t comma = 0;
+    if (top_level_token_ast(p, seg_start, end, TC_K_COMMA, &comma, 1) && comma > seg_start &&
+        comma < end) {
+      seg_end = comma;
+    }
+    TcAstValue v = parse_expr_span_ast(p, seg_start, seg_end, err);
+    if (v.kind == TC_AST_NIL) {
+      tc_ast_free(values);
+      return tc_ast_nil();
+    }
+    if (!tc_ast_array_push(values, v, err)) {
+      tc_ast_free(v);
+      tc_ast_free(values);
+      return tc_ast_nil();
+    }
+    if (seg_end == end) break;
+    seg_start = seg_end + 1;
+  }
   TcAstValue node = node_hash(p, kind == TC_K_PRINT_OP ? "print" : "puts", start, err);
   if (node.kind != TC_AST_HASH) {
-    tc_ast_free(value);
+    tc_ast_free(values);
     return node;
   }
-  if (!tc_ast_hash_set(node, "value", value, err)) {
+  if (!tc_ast_hash_set(node, "value", values, err)) {
     tc_ast_free(node);
     return tc_ast_nil();
   }
@@ -2881,6 +2908,63 @@ static int paren_is_type_list_ast(const TcAstParser *p) {
   return 0;
 }
 
+/* Capture a param-type paren group as the canonical array-of-symbols
+ * shape the self-hosted parser produces (parser.w
+ * parse_type_name_with_array_suffix + to_sym): one symbol per TYPE/NAME
+ * token, a "[]" suffix folded in when an empty bracket pair follows,
+ * commas tolerated as separators. p->pos must sit on the LPAREN; on
+ * success it sits past the RPAREN. The hosted compiler's lowering walks
+ * node.param_types as an array (definitions.w populate_definition_var_types),
+ * so a raw-string shape here silently unypes every annotated param — fatal
+ * for embedded ll/asm fns whose gate requires machine-int params. */
+static TcAstValue capture_param_types_ast(TcAstParser *p, TcError *err) {
+  TcAstValue arr = tc_ast_array_new(err);
+  if (arr.kind != TC_AST_ARRAY) return tc_ast_nil();
+  advance_ast(p);
+  while (!at_ast(p, TC_K_RPAREN) && !at_ast(p, TC_K_EOF)) {
+    TcKind kind = current_ast(p).kind;
+    if (kind == TC_K_COMMA) {
+      advance_ast(p);
+      continue;
+    }
+    if (kind != TC_K_TYPE && kind != TC_K_NAME) {
+      parse_ast_error(p, err, "expected type name in param type list");
+      tc_ast_free(arr);
+      return tc_ast_nil();
+    }
+    char *tname = NULL;
+    size_t tname_len = 0;
+    if (!current_token_text(p, &tname, &tname_len, err)) {
+      tc_ast_free(arr);
+      return tc_ast_nil();
+    }
+    advance_ast(p);
+    if (p->pos + 1 < p->tokens->count && at_ast(p, TC_K_LBRACKET) &&
+        p->tokens->items[p->pos + 1].kind == TC_K_RBRACKET) {
+      if (!append_bytes(&tname, &tname_len, "[]", 2, err)) {
+        free(tname);
+        tc_ast_free(arr);
+        return tc_ast_nil();
+      }
+      advance_ast(p);
+      advance_ast(p);
+    }
+    TcAstValue sym = tc_ast_symbol_copy(tname, tname_len, err);
+    free(tname);
+    if (sym.kind != TC_AST_SYMBOL || !tc_ast_array_push(arr, sym, err)) {
+      tc_ast_free(sym);
+      tc_ast_free(arr);
+      return tc_ast_nil();
+    }
+  }
+  if (!match_ast(p, TC_K_RPAREN)) {
+    parse_ast_error(p, err, "expected ')' after param types");
+    tc_ast_free(arr);
+    return tc_ast_nil();
+  }
+  return arr;
+}
+
 static int looks_like_return_type_ast(TcAstParser *p) {
   if (!at_ast(p, TC_K_TYPE)) return 0;
   size_t pos = p->pos + 1;
@@ -2981,16 +3065,12 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
       free(name);
       return 0;
     }
-    size_t type_start = p->pos;
-    advance_ast(p);
-    while (!at_ast(p, TC_K_RPAREN) && !at_ast(p, TC_K_EOF)) advance_ast(p);
-    if (!match_ast(p, TC_K_RPAREN)) {
-      parse_ast_error(p, err, "expected ')' after param types");
+    param_types = capture_param_types_ast(p, err);
+    if (param_types.kind != TC_AST_ARRAY) {
       free(name);
       tc_ast_free(params);
       return 0;
     }
-    param_types = raw_string(p, type_start, p->pos, err);
   } else if (!parse_param_list_ast(p, fused_amp_paren, &params, err)) {
     free(name);
     return 0;
@@ -3005,16 +3085,12 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
     TcKind first_kind = p->tokens->items[p->pos + 1].kind;
     if (first_kind == TC_K_TYPE ||
         (first_kind == TC_K_NAME && paren_is_type_list_ast(p))) {
-      size_t type_start = p->pos;
-      advance_ast(p);
-      while (!at_ast(p, TC_K_RPAREN) && !at_ast(p, TC_K_EOF)) advance_ast(p);
-      if (!match_ast(p, TC_K_RPAREN)) {
-        parse_ast_error(p, err, "expected ')' after param types");
+      param_types = capture_param_types_ast(p, err);
+      if (param_types.kind != TC_AST_ARRAY) {
         free(name);
         tc_ast_free(params);
         return 0;
       }
-      param_types = raw_string(p, type_start, p->pos, err);
     }
   }
 

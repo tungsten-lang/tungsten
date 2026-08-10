@@ -598,7 +598,10 @@ use lowering/definitions
                 static_rt = normalize_type_symbol(mnode.return_type)
                 static_key = cname + "." + mnode.name
                 mod[:fn_return_types][static_key] = static_rt
-                mod[:known_static_methods][static_key][:return_type] = static_rt
+                # Bodyless (abstract/intrinsic) statics are not in the
+                # direct-dispatch registry — see register_static_method.
+                if mod[:known_static_methods][static_key] != nil
+                  mod[:known_static_methods][static_key][:return_type] = static_rt
             elsif mnode.from_fn == true && mnode.param_types != nil && embedded_body_directive(mnode) != nil
               # Embedded ll/asm kernels are raw-ABI helpers, not dispatchable
               # methods — registering one would hand the dynamic dispatcher a

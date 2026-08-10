@@ -1597,15 +1597,22 @@
   # typed-instance-method entries lowering.w also stores in this registry
   # for `self.foo` fast dispatch. The inherited-static walk-up in
   # method_call.w only follows the superclass chain into is_static entries.
-  mod[:known_static_methods][cname + "." + mname] = {
-    fn_name: mfn_name,
-    method_fn_name: method_fn_name,
-    arity: arity,
-    return_type: return_type,
-    param_types: normalized_static_param_types(node),
-    raw_abi: raw_abi,
-    is_static: true
-  }
+  #
+  # Bodyless declarations stay OUT of this registry: a `-> .name` with no
+  # body is an abstract/intrinsic declaration (e.g. Digest.file64), and
+  # direct-dispatching it inlines the empty stub — returning nil BEFORE
+  # method_call.w's intrinsic special-cases get a look. Runtime-side
+  # registration below still happens so dynamic dispatch stays uniform.
+  if node.body != nil && node.body.size() > 0
+    mod[:known_static_methods][cname + "." + mname] = {
+      fn_name: mfn_name,
+      method_fn_name: method_fn_name,
+      arity: arity,
+      return_type: return_type,
+      param_types: normalized_static_param_types(node),
+      raw_abi: raw_abi,
+      is_static: true
+    }
   mstr_id = module_string_constant(mod, mname)
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)

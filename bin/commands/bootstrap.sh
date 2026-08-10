@@ -423,8 +423,14 @@ bootstrap_product_opt="$PROFILE_OPT"
 if [ "$DEBUG_ENABLED" -eq 1 ]; then bootstrap_product_opt="$bootstrap_product_opt -g"; fi
 export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:-$bootstrap_product_opt}"
 # C-native Loader#load_program_ast (parse_ast.c). ~2–3× faster stage1 under
-# the C VM. Off for `tungsten build` so stage1/stage2 keep identical ASTs.
-export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-1}"
+# the C VM, but its AST must stay in lockstep with the canonical parser and
+# it has trailed core's newer syntax (embedded-ll typed sigs and the puts
+# list shape are fixed; `- data` block `$field` lowering still diverges on
+# BigInt, producing a stage-1 compiler whose bignum shifts crash). Default
+# to the canonical parser — a fresh clone pays a few extra seconds once —
+# and keep the fast path as an explicit opt-in for parser-parity work.
+# Always off for `tungsten build` so stage1/stage2 keep identical ASTs.
+export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-0}"
 
 export TUNGSTEN_ZSTD_CFLAGS="$zstd_cflags"
 export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"

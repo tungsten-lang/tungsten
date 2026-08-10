@@ -1506,7 +1506,8 @@
             memcpy(path_buf, path, path_len);
             path_buf[path_len] = '\0';
             TcValue prog;
-            if (!tc_vm_fast_load_program_ast(path_buf, NULL, &prog, err)) {
+            TcValue fast_loaded = tc_box_nil();
+            if (!tc_vm_fast_load_program_ast(path_buf, NULL, &prog, &fast_loaded, err)) {
               FREE_ARGS();
               goto cleanup_fail;
             }
@@ -1527,11 +1528,15 @@
                 FREE_ARGS();
                 goto cleanup_fail;
               }
-              TcValue ap_args[2];
+              /* Third arg seeds Loader#@loaded_files with the files the
+               * C flatten inlined, so autoload_pass never re-loads one
+               * (a re-load duplicates every definition in the module). */
+              TcValue ap_args[3];
               ap_args[0] = prog;
               ap_args[1] = path_v;
+              ap_args[2] = fast_loaded;
               FREE_ARGS();
-              if (!vm_call_function(&vm, autoload_pass_fn, ap_args, 2,
+              if (!vm_call_function(&vm, autoload_pass_fn, ap_args, 3,
                                     receiver, 1, tc_box_nil(), 0, err)) {
                 goto cleanup_fail;
               }

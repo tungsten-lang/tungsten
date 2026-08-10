@@ -409,6 +409,22 @@ static int compile_assign(TcAstValue node, TcChunk *chunk, TcError *err) {
 
 static int compile_puts(TcAstValue node, TcChunk *chunk, TcError *err) {
   TcAstValue *value = ast_get(node, "value");
+  if (value && value->kind == TC_AST_ARRAY) {
+    /* Canonical list shape (`<< a, b` prints one line per value). PRINT
+     * pops the value and pushes nil; POP the intermediate nils so the
+     * statement leaves exactly one result on the stack. */
+    size_t n = value->as.array ? value->as.array->count : 0;
+    if (n == 0) {
+      if (!emit_nil(chunk, err)) return 0;
+      return tc_emit_op(chunk, TC_OP_PRINT, err);
+    }
+    for (size_t i = 0; i < n; i++) {
+      if (!compile_expr(value->as.array->items[i], chunk, err)) return 0;
+      if (!tc_emit_op(chunk, TC_OP_PRINT, err)) return 0;
+      if (i + 1 < n && !tc_emit_op(chunk, TC_OP_POP, err)) return 0;
+    }
+    return 1;
+  }
   if (!value || value->kind == TC_AST_NIL) {
     if (!emit_nil(chunk, err)) return 0;
   } else if (!compile_expr(*value, chunk, err)) {
@@ -1685,24 +1701,55 @@ static int compile_function_def(TcAstValue node, const char *prefix, size_t pref
   full_name[full_name_len] = '\0';
 
   // Typed-overload annotation (`-> +(other)(BigInt)` / `-> +/1(BigInt)`):
-  // the parser stores the raw paren group; tc_chunk_add_function splits
-  // it into per-param type names for dispatch-time selection.
+  // the parser stores the canonical array-of-symbols shape (join it back
+  // for tc_chunk_add_function's splitter); a raw paren-group string from
+  // older AST producers still passes straight through.
   TcAstValue *ptypes = ast_get(node, "param_types");
   const char *ptype_bytes = NULL;
   size_t ptype_len = 0;
+  char *ptype_joined = NULL;
   if (ptypes && ptypes->kind == TC_AST_STRING) {
     ptype_bytes = ptypes->as.string.bytes;
     ptype_len = ptypes->as.string.len;
+  } else if (ptypes && ptypes->kind == TC_AST_ARRAY && ptypes->as.array->count > 0) {
+    size_t total = 0;
+    for (size_t ti = 0; ti < ptypes->as.array->count; ti++) {
+      TcAstValue item = ptypes->as.array->items[ti];
+      if (item.kind == TC_AST_SYMBOL || item.kind == TC_AST_STRING) {
+        total += item.as.string.len + 1;
+      }
+    }
+    if (total > 0) {
+      ptype_joined = (char *)malloc(total);
+      if (!ptype_joined) {
+        free(full_name);
+        free(param_slots);
+        tc_error_set(err, "param type list allocation failed");
+        return 0;
+      }
+      size_t off = 0;
+      for (size_t ti = 0; ti < ptypes->as.array->count; ti++) {
+        TcAstValue item = ptypes->as.array->items[ti];
+        if (item.kind != TC_AST_SYMBOL && item.kind != TC_AST_STRING) continue;
+        if (off > 0) ptype_joined[off++] = ' ';
+        memcpy(ptype_joined + off, item.as.string.bytes, item.as.string.len);
+        off += item.as.string.len;
+      }
+      ptype_bytes = ptype_joined;
+      ptype_len = off;
+    }
   }
 
   uint32_t entry = (uint32_t)chunk->count;
   if (!tc_chunk_add_function(chunk, full_name, full_name_len, entry,
                              param_slots, (uint32_t)arity,
                              ptype_bytes, ptype_len, err)) {
+    free(ptype_joined);
     free(full_name);
     free(param_slots);
     return 0;
   }
+  free(ptype_joined);
   free(full_name);
   free(param_slots);
 

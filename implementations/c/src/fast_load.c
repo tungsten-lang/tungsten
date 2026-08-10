@@ -237,7 +237,8 @@ static int fl_flatten_program(const char *path, const unsigned char *flags, size
   return 1;
 }
 
-int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue *out, TcError *err) {
+int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue *out,
+                                TcValue *loaded_out, TcError *err) {
   /* Resolve relative path against from_file if needed. */
   char *resolved = NULL;
   const char *load_path = path;
@@ -278,6 +279,45 @@ int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue
     return 0;
   }
 
+  /* Mirror Loader#load_program_ast's top-level support prepend
+   * (compiler/lib/loader.w): the BigInt comparison/bitwise runtime
+   * support modules always join the program AHEAD of its own
+   * expressions, so every production binary supplies the strong source
+   * seams (__bigint_*_raw) that the emitter's require_bigint_bitwise_src
+   * gate demands — without them, fast-parse bootstraps die with
+   * "required native BigInt bitwise helper ... is missing". The shared
+   * seen-set dedupes when the program also loads them. Trees that
+   * predate the modules skip silently. */
+  static const char *fl_support_paths[] = {
+      "core/numeric/big_int_compare.w",
+      "core/numeric/big_int_bitwise.w",
+  };
+  for (size_t si = 0; si < sizeof(fl_support_paths) / sizeof(fl_support_paths[0]); si++) {
+    FILE *probe = fopen(fl_support_paths[si], "rb");
+    if (!probe) continue;
+    fclose(probe);
+    /* Canonicalize so the seen-set key matches use-resolved references
+     * (and the entry path when the program IS a support module). */
+    char *sp = fl_canonicalize_path(fl_support_paths[si], err);
+    if (!sp) {
+      tc_ast_free(exprs);
+      free(flags);
+      free(resolved);
+      fl_path_set_free(&seen);
+      return 0;
+    }
+    int sp_ok = fl_path_set_contains(&seen, sp) ||
+                fl_flatten_program(sp, flags, flags_len, &seen, &exprs, err);
+    free(sp);
+    if (!sp_ok) {
+      tc_ast_free(exprs);
+      free(flags);
+      free(resolved);
+      fl_path_set_free(&seen);
+      return 0;
+    }
+  }
+
   if (!fl_flatten_program(load_path, flags, flags_len, &seen, &exprs, err)) {
     tc_ast_free(exprs);
     free(flags);
@@ -307,6 +347,33 @@ int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue
   /* program owns exprs; free top-level hash structure only if convert failed? */
   /* ast_to_runtime deep-converts; we can free the AST tree. */
   tc_ast_free(program);
+
+  /* Hand back the inlined-file set so the caller can seed
+   * Loader#@loaded_files (via autoload_pass's fast_loaded param) — the
+   * autoload pass must not re-load a module the flatten already
+   * included, or every definition in it duplicates. */
+  if (ok && loaded_out) {
+    TcAstValue loaded = tc_ast_array_new(err);
+    if (loaded.kind != TC_AST_ARRAY) {
+      free(flags);
+      free(resolved);
+      fl_path_set_free(&seen);
+      return 0;
+    }
+    for (size_t i = 0; i < seen.count; i++) {
+      TcAstValue s = tc_ast_string_copy(seen.items[i], strlen(seen.items[i]), err);
+      if (s.kind != TC_AST_STRING || !tc_ast_array_push(loaded, s, err)) {
+        tc_ast_free(s);
+        tc_ast_free(loaded);
+        free(flags);
+        free(resolved);
+        fl_path_set_free(&seen);
+        return 0;
+      }
+    }
+    ok = tc_vm_ast_to_runtime(&loaded, loaded_out, err);
+    tc_ast_free(loaded);
+  }
   free(flags);
   free(resolved);
   fl_path_set_free(&seen);

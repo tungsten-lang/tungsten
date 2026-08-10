@@ -868,7 +868,8 @@ void tc_value_print(TcValue value, FILE *out);
 
 /* TUNGSTEN_C_FAST_PARSE: C-side Loader#load_program_ast (bootstrap only). */
 int tc_c_fast_parse_enabled(void);
-int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue *out, TcError *err);
+int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue *out,
+                                TcValue *loaded_out, TcError *err);
 int tc_vm_ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err);
 
 #endif

@@ -129,7 +129,19 @@ use parser
   # appear in core/tungsten.w's `auto :Name, "path"` registry. Load each
   # missing file once, append its expressions, and rescan — newly-loaded
   # files often introduce further references (e.g. core/array.w → Enumerable).
-  -> autoload_pass(ast, base_resolved)
+  -> autoload_pass(ast, base_resolved, fast_loaded = nil)
+    # TUNGSTEN_C_FAST_PARSE bootstrap: the C fast-loader inlines the whole
+    # use-graph itself, bypassing load_program_ast's bookkeeping, then
+    # re-enters here. It hands the inlined file list over so this pass
+    # doesn't re-load a module the flatten already included — a re-load
+    # duplicates every definition in it (e.g. `use core/numeric/big_int`
+    # at the compiler's top produced duplicate __bigint_* fns).
+    if fast_loaded != nil
+      @loaded_files = []
+      fli = 0
+      while fli < fast_loaded.size()
+        @loaded_files.push(fast_loaded[fli])
+        fli += 1
     registry = autoload_registry(base_resolved)
     if registry == nil
       return ast

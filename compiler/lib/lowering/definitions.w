@@ -295,8 +295,20 @@
     if n != nil && is_ast_node?(n)
       t = ast_kind(n)
       if t == :assign && n.target != nil && ast_kind(n.target) == :var
-        if int_shaped_node?(n.value, m) && m[n.target.name] == nil
-          m[n.target.name] = :i64
+        name = n.target.name
+        if m[name] == nil
+          hint_type = nil
+          if n.type_hint != nil
+            hint_type = normalize_type_symbol(n.type_hint)
+          # Explicit local machine annotations are stronger evidence than
+          # structural inference and must participate in the raw-ABI prepass.
+          # Without this, a chain of u128/u64 temporaries can lower natively in
+          # the body yet make its bare tail local infer as nil, causing callers
+          # and the callee to fall back to the boxed ABI.
+          if hint_type != nil && is_raw_int_storage_type(hint_type)
+            m[name] = hint_type
+          elsif int_shaped_node?(n.value, m)
+            m[name] = :i64
       if t == :if
         scan_int_local_assigns(n.then_body, m)
         scan_int_local_assigns(n.else_body, m)
@@ -540,7 +552,8 @@
 # the raw ABI.
 -> definition_raw_abi_flags(node, top_level, fn_return_types, rt, child_var_types)
   rt_int_ok = (rt == nil) || int_compatible_return_type?(rt)
-  body_int_ok = body_returns_only_int?(node.body, enrich_int_locals(node.body, child_var_types), fn_return_types)
+  enriched_types = enrich_int_locals(node.body, child_var_types)
+  body_int_ok = body_returns_only_int?(node.body, enriched_types, fn_return_types)
   raw_i64_sig = top_level && rt_int_ok && body_int_ok && (all_params_i64?(node.params, child_var_types) || mixed_raw_params?(node.params, child_var_types))
   raw_int_sig = !raw_i64_sig && top_level && rt_int_ok && body_int_ok && all_params_machine_int?(node.params, child_var_types) && body_is_param_passthrough?(node.body, node.params)
   [raw_i64_sig, raw_int_sig]

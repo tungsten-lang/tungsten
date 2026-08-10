@@ -347,6 +347,12 @@
   out.to_s()
 
 -> lower_machine_int_expression(ctx, node, type)
+  # An assignment hint belongs to the target, so a conditional RHS reaches
+  # this helper without an inner TypeAscription node. Merge its arms in a raw
+  # machine slot instead of first producing a boxed WValue and unboxing it.
+  if ast_kind(node) == :if && node.else_body != nil && node.else_body.size() > 0
+    materialize_bindings(ctx)
+    return lower_if_expr(ctx, node, type)[:value]
   if ast_kind(node) == :int
     return machine_int_literal_bits(node.value, type, node.raw)
   # `:-X` char literals flow as raw integer immediates so ARM64 can

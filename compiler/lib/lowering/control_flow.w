@@ -213,14 +213,20 @@
   ctx[:bindings] = merged
   nil
 
--> lower_if_expr(ctx, node)
+-> lower_if_expr(ctx, node, result_machine_type = nil)
   wfn = ctx[:func]
 
-  # Allocate a result slot
+  # A machine-typed conditional must merge raw branch values directly. Boxing
+  # each arm and unboxing after the merge is both semantically unnecessary and
+  # especially costly in arithmetic helpers where the conditional is inlined.
   result_var = "__if_expr." + next_label(wfn, "ie")
-  result_ptr = ensure_var_slot(wfn, result_var)
-  # Initialize to nil
-  emit_instruction(wfn, {op: :store_i64, value: w_nil.to_s(), ptr: result_ptr})
+  if result_machine_type != nil
+    result_ptr = ensure_var_slot(wfn, result_var, machine_slot_type(result_machine_type))
+    emit_instruction(wfn, {op: machine_store_op(result_machine_type), value: "0", ptr: result_ptr})
+  else
+    result_ptr = ensure_var_slot(wfn, result_var)
+    # Initialize an ordinary value conditional to nil.
+    emit_instruction(wfn, {op: :store_i64, value: w_nil.to_s(), ptr: result_ptr})
 
   cond = lower_expression(ctx, node.condition)
   if cond[:type] == :i1
@@ -248,7 +254,7 @@
   start_block(wfn, then_label)
   then_body = node.then_body
   if then_body != nil && then_body.size() > 0
-    lower_if_expr_body(ctx, wfn, then_body, result_ptr)
+    lower_if_expr_body(ctx, wfn, then_body, result_ptr, result_machine_type)
   materialize_bindings(ctx)
   if !block_terminated(wfn)
     emit_instruction(wfn, {op: :br, label: end_label})
@@ -288,7 +294,7 @@
       start_block(wfn, ethen_label)
       clause_body = clause[1]
       if clause_body != nil && clause_body.size() > 0
-        lower_if_expr_body(ctx, wfn, clause_body, result_ptr)
+        lower_if_expr_body(ctx, wfn, clause_body, result_ptr, result_machine_type)
       materialize_bindings(ctx)
       if !block_terminated(wfn)
         emit_instruction(wfn, {op: :br, label: end_label})
@@ -302,7 +308,7 @@
       start_block(wfn, current_else)
       else_body = node.else_body
       if else_body != nil && else_body.size() > 0
-        lower_if_expr_body(ctx, wfn, else_body, result_ptr)
+        lower_if_expr_body(ctx, wfn, else_body, result_ptr, result_machine_type)
       materialize_bindings(ctx)
       if !block_terminated(wfn)
         emit_instruction(wfn, {op: :br, label: end_label})
@@ -312,7 +318,7 @@
     start_block(wfn, else_label)
     else_body = node.else_body
     if else_body != nil && else_body.size() > 0
-      lower_if_expr_body(ctx, wfn, else_body, result_ptr)
+      lower_if_expr_body(ctx, wfn, else_body, result_ptr, result_machine_type)
     materialize_bindings(ctx)
     if !block_terminated(wfn)
       emit_instruction(wfn, {op: :br, label: end_label})
@@ -323,10 +329,13 @@
 
   start_block(wfn, end_label)
   result = next_temp(wfn)
+  if result_machine_type != nil
+    emit_instruction(wfn, {op: machine_load_op(result_machine_type), temp: result, ptr: result_ptr})
+    return typed_value(raw_machine_value_type(result_machine_type), result)
   emit_instruction(wfn, {op: :load_i64, temp: result, ptr: result_ptr})
   typed_value(:i64, result)
 
--> lower_if_expr_body(ctx, wfn, body, result_ptr)
+-> lower_if_expr_body(ctx, wfn, body, result_ptr, result_machine_type = nil)
   # Lower all but last as statements
   i = 0
   while i < body.size() - 1
@@ -338,6 +347,13 @@
   # (:begin left OFF this list 2026-07-22: begin/rescue is a value expression)
   if last_t in (:return :puts :print :raise :while :method_def :fn_def :class_def)
     lower_statement(ctx, last)
+  elsif result_machine_type != nil
+    # Lower under the destination type from the outset. Calling the generic
+    # expression lowerer first would construct a boxed BigInt for a u64 literal
+    # above INT64_MAX and then immediately unbox it at the branch merge.
+    last_reg = lower_machine_int_expression(ctx, last, result_machine_type)
+    if !block_terminated(wfn)
+      emit_instruction(wfn, {op: machine_store_op(result_machine_type), value: last_reg, ptr: result_ptr})
   else
     last_tv = lower_expression(ctx, last)
     if !block_terminated(wfn)

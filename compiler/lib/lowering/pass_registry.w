@@ -245,8 +245,11 @@
     lower_statement(ctx, node.expression)
     return lower_expression(ctx, node.value)
   when :type_ascription
-    value = lower_expression(ctx, node.expression)
     hint = normalize_type_symbol(node.type_hint)
+    if is_machine_int_type(hint) && ast_kind(node.expression) == :if && node.expression.else_body != nil && node.expression.else_body.size() > 0
+      materialize_bindings(ctx)
+      return lower_if_expr(ctx, node.expression, hint)
+    value = lower_expression(ctx, node.expression)
     if node.type_hint == "w64" || node.type_hint in ("big" "bigint" "bignum")
       return typed_value(:i64, ensure_i64_value(ctx[:func], value))
     if is_machine_float_type(hint)

@@ -948,13 +948,8 @@ use ../../core/token
     # ascriptions silently never typed their bodies). Defs take no trailing
     # ascription; own-line hints flow to @pending_type_hints via
     # skip_statement_end for the next def to consume.
-    if at_type?(T_TYPE_HINT) && ast_kind(expr) != :method_def && ast_kind(expr) != :fn_def
-      hint = current_value()
-      comment_pos = hint.index("#")
-      if comment_pos != nil
-        hint = hint.slice(0, comment_pos)
-      expr = Tungsten:AST:TypeAscription.new(expr, hint.strip())
-      advance()
+    if ast_kind(expr) != :method_def && ast_kind(expr) != :fn_def
+      expr = consume_trailing_type_ascription(expr)
 
     # Implicit each: expr -> block (must be same line)
     t = ast_kind(expr)
@@ -2666,7 +2661,24 @@ use ../../core/token
     advance()
     if at_type?(T_NEWLINE) || at_type?(T_EOF) || at_type?(T_DEDENT) || at_type?(T_SEMICOLON)
       return Tungsten:AST:ReturnNil.new
-    Tungsten:AST:Return.new(parse_assignment())
+    # `## type` annotates the returned VALUE, not the control-transfer node.
+    # The general expression wrapper cannot repair this after parse_return:
+    # lowering a TypeAscription(Return(...)) emits the return first and then
+    # tries to coerce its nil placeholder. Keep the annotation inside Return
+    # so typed raw helpers preserve early-return control flow and ABI.
+    value = parse_assignment()
+    value = consume_trailing_type_ascription(value)
+    Tungsten:AST:Return.new(value)
+
+  -> consume_trailing_type_ascription(expr)
+    if !at_type?(T_TYPE_HINT)
+      return expr
+    hint = current_value()
+    comment_pos = hint.index("#")
+    if comment_pos != nil
+      hint = hint.slice(0, comment_pos)
+    advance()
+    Tungsten:AST:TypeAscription.new(expr, hint.strip())
 
   # `recase` / `recase expr` — re-run the enclosing case. Bare form (nil value)
   # re-evaluates the original subject; the expr form dispatches on expr. Same

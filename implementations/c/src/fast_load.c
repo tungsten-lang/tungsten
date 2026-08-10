@@ -11,6 +11,7 @@
 #include "tc.h"
 
 #include <errno.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -351,8 +352,14 @@ int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue
   /* Hand back the inlined-file set so the caller can seed
    * Loader#@loaded_files (via autoload_pass's fast_loaded param) — the
    * autoload pass must not re-load a module the flatten already
-   * included, or every definition in it duplicates. */
+   * included, or every definition in it duplicates. The loader compares
+   * paths as strings and constructs them relative to how the entry was
+   * named ("./core/x.w" for a cwd-relative entry, absolute otherwise),
+   * so seed each file under all three spellings. */
   if (ok && loaded_out) {
+    char cwd_buf[4096];
+    size_t cwd_len = 0;
+    if (getcwd(cwd_buf, sizeof(cwd_buf))) cwd_len = strlen(cwd_buf);
     TcAstValue loaded = tc_ast_array_new(err);
     if (loaded.kind != TC_AST_ARRAY) {
       free(flags);
@@ -360,16 +367,39 @@ int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue
       fl_path_set_free(&seen);
       return 0;
     }
-    for (size_t i = 0; i < seen.count; i++) {
-      TcAstValue s = tc_ast_string_copy(seen.items[i], strlen(seen.items[i]), err);
-      if (s.kind != TC_AST_STRING || !tc_ast_array_push(loaded, s, err)) {
-        tc_ast_free(s);
-        tc_ast_free(loaded);
-        free(flags);
-        free(resolved);
-        fl_path_set_free(&seen);
-        return 0;
+    for (size_t i = 0; i < seen.count && ok; i++) {
+      const char *abs = seen.items[i];
+      size_t abs_len = strlen(abs);
+      const char *forms[3];
+      char rel_buf[4096];
+      char dotrel_buf[4096];
+      size_t nforms = 0;
+      forms[nforms++] = abs;
+      if (cwd_len > 0 && abs_len > cwd_len + 1 &&
+          memcmp(abs, cwd_buf, cwd_len) == 0 && abs[cwd_len] == '/' &&
+          abs_len - cwd_len - 1 < sizeof(rel_buf) - 2) {
+        memcpy(rel_buf, abs + cwd_len + 1, abs_len - cwd_len);
+        forms[nforms++] = rel_buf;
+        dotrel_buf[0] = '.';
+        dotrel_buf[1] = '/';
+        memcpy(dotrel_buf + 2, abs + cwd_len + 1, abs_len - cwd_len);
+        forms[nforms++] = dotrel_buf;
       }
+      for (size_t fi = 0; fi < nforms; fi++) {
+        TcAstValue s = tc_ast_string_copy(forms[fi], strlen(forms[fi]), err);
+        if (s.kind != TC_AST_STRING || !tc_ast_array_push(loaded, s, err)) {
+          tc_ast_free(s);
+          ok = 0;
+          break;
+        }
+      }
+    }
+    if (!ok) {
+      tc_ast_free(loaded);
+      free(flags);
+      free(resolved);
+      fl_path_set_free(&seen);
+      return 0;
     }
     ok = tc_vm_ast_to_runtime(&loaded, loaded_out, err);
     tc_ast_free(loaded);

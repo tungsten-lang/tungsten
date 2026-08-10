@@ -423,12 +423,16 @@ bootstrap_product_opt="$PROFILE_OPT"
 if [ "$DEBUG_ENABLED" -eq 1 ]; then bootstrap_product_opt="$bootstrap_product_opt -g"; fi
 export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:-$bootstrap_product_opt}"
 # C-native Loader#load_program_ast (parse_ast.c). ~2–3× faster stage1 under
-# the C VM, but its AST must stay in lockstep with the canonical parser and
-# it has trailed core's newer syntax (embedded-ll typed sigs and the puts
-# list shape are fixed; `- data` block `$field` lowering still diverges on
-# BigInt, producing a stage-1 compiler whose bignum shifts crash). Default
-# to the canonical parser — a fresh clone pays a few extra seconds once —
-# and keep the fast path as an explicit opt-in for parser-parity work.
+# the C VM, but its AST must stay in lockstep with the canonical parser.
+# Parity fixed so far: embedded-ll typed sigs, puts value lists, `- data`
+# view layouts, `## type:` hint keys, arity-suffix `__argN` synthesis, the
+# `/` operator name, `\e` escapes, and the loader's support prepend +
+# dedupe. Remaining known gap: interpolated-heredoc segment splitting
+# still diverges (emitter.w's IR templates), so a fast-parse-built
+# compiler does not yet self-host. Default to the canonical parser — a
+# fresh clone pays a few extra seconds once — and keep the fast path as
+# an explicit opt-in for parser-parity work (gate: stage-1 .ll must be
+# byte-identical fast vs canonical before flipping this back).
 # Always off for `tungsten build` so stage1/stage2 keep identical ASTs.
 export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-0}"
 

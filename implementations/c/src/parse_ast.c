@@ -177,6 +177,8 @@ static int ast_string_eq(TcAstValue value, const char *text) {
          memcmp(value.as.string.bytes, text, value.as.string.len) == 0;
 }
 
+static const char *pa_detect_acc(TcAstValue v);
+
 static int ast_node_is(TcAstValue value, const char *node) {
   TcAstValue *node_value = hash_value_ast(value, "node");
   return node_value && ast_string_eq(*node_value, node);
@@ -235,6 +237,7 @@ static TcAstValue unquoted_string_ast(const char *bytes, size_t len, TcError *er
         case 'r': copy[out_len++] = '\r'; break;
         case 't': copy[out_len++] = '\t'; break;
         case '0': copy[out_len++] = '\0'; break;
+        case 'e': copy[out_len++] = 0x1b; break;
         case '"': copy[out_len++] = '"'; break;
         case '\'': copy[out_len++] = '\''; break;
         case '\\': copy[out_len++] = '\\'; break;
@@ -1341,6 +1344,7 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
           case 't':  value = '\t'; break;
           case 'r':  value = '\r'; break;
           case '0':  value = '\0'; break;
+          case 'e':  value = 0x1b; break;
           case '\\': value = '\\'; break;
           case '"':  value = '"';  break;
           case '\'': value = '\''; break;
@@ -2861,7 +2865,10 @@ static int parse_param_list_ast(TcAstParser *p, int paren_open, TcAstValue *out,
 }
 
 static void split_method_arity(char *name, size_t *name_len, const char **arity, size_t *arity_len) {
-  char *slash = strchr(name, '/');
+  /* A leading '/' IS the method name (`-> /(other)` — the division
+   * operator overload); the arity suffix can only follow it. Splitting at
+   * position 0 registered the method under an EMPTY symbol. */
+  char *slash = strchr(name[0] == '/' ? name + 1 : name, '/');
   if (!slash) {
     *arity = NULL;
     *arity_len = 0;
@@ -3094,6 +3101,46 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
     }
   }
 
+  /* Digit arity suffix (`-> >>/1(Int)`, `-> foo/2`): the canonical
+   * parser synthesizes the positional `__argN` params in the AST, so
+   * the hosted compiler sees a complete signature. Without them the
+   * fn lowers with the wrong LLVM arity and `@1` in the body degrades
+   * to a slab-string read. The C VM's own compile_function_def fills
+   * missing slots identically, so pre-filled params stay in lockstep. */
+  if (arity && arity_len > 0 && params.kind == TC_AST_ARRAY &&
+      (!params.as.array || params.as.array->count == 0)) {
+    long long synth_n = 0;
+    int all_digits = 1;
+    for (size_t di = 0; di < arity_len; di++) {
+      if (arity[di] < '0' || arity[di] > '9') {
+        all_digits = 0;
+        break;
+      }
+      synth_n = synth_n * 10 + (arity[di] - '0');
+    }
+    if (all_digits && synth_n > 0 && synth_n <= 64) {
+      for (long long ai = 1; ai <= synth_n; ai++) {
+        char synth[32];
+        int slen = snprintf(synth, sizeof(synth), "__arg%lld", ai);
+        TcAstValue pnode = node_hash(p, "param", start, err);
+        if (pnode.kind != TC_AST_HASH ||
+            !tc_ast_hash_set(pnode, "name", tc_ast_string_copy(synth, (size_t)slen, err), err) ||
+            !tc_ast_hash_set(pnode, "default", tc_ast_nil(), err) ||
+            !tc_ast_hash_set(pnode, "ivar_assign", tc_ast_bool(0), err) ||
+            !tc_ast_hash_set(pnode, "keyword", tc_ast_bool(0), err) ||
+            !tc_ast_hash_set(pnode, "block_param", tc_ast_bool(0), err) ||
+            !tc_ast_hash_set(pnode, "splat", tc_ast_bool(0), err) ||
+            !tc_ast_array_push(params, pnode, err)) {
+          tc_ast_free(pnode);
+          free(name);
+          tc_ast_free(params);
+          tc_ast_free(param_types);
+          return 0;
+        }
+      }
+    }
+  }
+
   TcAstValue return_type = tc_ast_nil();
   if (looks_like_return_type_ast(p)) {
     char *rtype = NULL;
@@ -3137,11 +3184,23 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
     tc_ast_free(return_type);
     return 0;
   }
+  TcAstValue trailing = tc_ast_nil();
   if (has_inline && inline_start < header_end) {
-    TcAstValue expr = parse_expr_span_ast(p, inline_start, header_end, err);
-    if (expr.kind == TC_AST_NIL || !tc_ast_array_push(body, expr, err)) {
+    trailing = parse_expr_span_ast(p, inline_start, header_end, err);
+    if (trailing.kind == TC_AST_NIL) {
       free(name);
-      tc_ast_free(expr);
+      tc_ast_free(body);
+      tc_ast_free(params);
+      tc_ast_free(param_types);
+      tc_ast_free(return_type);
+      return 0;
+    }
+  }
+  int accumulator_form = trailing.kind != TC_AST_NIL && at_ast(p, TC_K_INDENT);
+  if (!accumulator_form && trailing.kind != TC_AST_NIL) {
+    if (!tc_ast_array_push(body, trailing, err)) {
+      free(name);
+      tc_ast_free(trailing);
       tc_ast_free(body);
       tc_ast_free(params);
       tc_ast_free(param_types);
@@ -3159,10 +3218,70 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
       tc_ast_free(return_type);
       return 0;
     }
+    /* Trailing expr + indented body = accumulator form (parser.w): seed
+     * `<acc> = <trailing>` (or keep an explicit `<acc> = seed` assign),
+     * run the body, and return the accumulator. Without this rewrite the
+     * seed becomes a dead statement, `out.push` reads an undefined name,
+     * and the method returns its last statement instead. */
+    const char *acc_name = NULL;
+    size_t acc_name_len = 0;
+    if (accumulator_form) {
+      if (ast_node_is(trailing, "assign")) {
+        TcAstValue *tgt = hash_value_ast(trailing, "target");
+        if (tgt && ast_node_is(*tgt, "var")) {
+          TcAstValue *nm = hash_value_ast(*tgt, "name");
+          if (nm && nm->kind == TC_AST_STRING) {
+            acc_name = nm->as.string.bytes;
+            acc_name_len = nm->as.string.len;
+            if (!tc_ast_array_push(body, trailing, err)) {
+              free(name);
+              tc_ast_free(body);
+              tc_ast_free(params);
+              tc_ast_free(param_types);
+              tc_ast_free(return_type);
+              return 0;
+            }
+          }
+        }
+      }
+      if (!acc_name) {
+        const char *det = pa_detect_acc(block_body);
+        acc_name = det ? det : "out";
+        acc_name_len = strlen(acc_name);
+        TcAstValue acc_var = node_hash(p, "var", start, err);
+        TcAstValue init = node_hash(p, "assign", start, err);
+        if (acc_var.kind != TC_AST_HASH || init.kind != TC_AST_HASH ||
+            !tc_ast_hash_set(acc_var, "name", tc_ast_string_copy(acc_name, acc_name_len, err), err) ||
+            !tc_ast_hash_set(init, "target", acc_var, err) ||
+            !tc_ast_hash_set(init, "value", trailing, err) ||
+            !tc_ast_hash_set(init, "type_hint", tc_ast_nil(), err) ||
+            !tc_ast_array_push(body, init, err)) {
+          free(name);
+          tc_ast_free(body);
+          tc_ast_free(params);
+          tc_ast_free(param_types);
+          tc_ast_free(return_type);
+          return 0;
+        }
+      }
+    }
     for (size_t i = 0; i < block_body.as.array->count; i++) {
       if (!tc_ast_array_push(body, block_body.as.array->items[i], err)) {
         free(name);
         tc_ast_free(block_body);
+        tc_ast_free(body);
+        tc_ast_free(params);
+        tc_ast_free(param_types);
+        tc_ast_free(return_type);
+        return 0;
+      }
+    }
+    if (accumulator_form) {
+      TcAstValue ret_var = node_hash(p, "var", start, err);
+      if (ret_var.kind != TC_AST_HASH ||
+          !tc_ast_hash_set(ret_var, "name", tc_ast_string_copy(acc_name, acc_name_len, err), err) ||
+          !tc_ast_array_push(body, ret_var, err)) {
+        free(name);
         tc_ast_free(body);
         tc_ast_free(params);
         tc_ast_free(param_types);
@@ -3549,6 +3668,293 @@ static int parse_ivars_decl_ast(TcAstParser *p, TcAstValue *out, TcError *err) {
   if (node.kind != TC_AST_HASH ||
       !tc_ast_hash_set(node, "entries", entries, err)) {
     tc_ast_free(entries);
+    tc_ast_free(node);
+    return 0;
+  }
+  *out = node;
+  return 1;
+}
+
+/* `- data` memory-layout block (canonical parser.w "Data declaration"):
+ *
+ *   - data (WArray)          ← optional backing C-struct name
+ *     u8    flags
+ *     u8[2] _pad
+ *     T components[4]        ← bracket may follow the field name too
+ *   * u8[]  slots            ← `*` marks a base-pointer field; such lines
+ *                              may sit at the OUTER indent after a dedent
+ *
+ * or `- data` + `raw N`. Emits the canonical shape lowering's
+ * collect_view_fields consumes:
+ *   {node: :view_decl, name: "data", kind: "struct"|"raw",
+ *    count: {fields: [{name, type}, ...], struct_name: <str|nil>} | <int>}
+ * Without this, fast-parsed classes carry NO view layout and every
+ * `$field` access degrades to dynamic dispatch — the compiled BigInt's
+ * `$size` reads crashed with "undefined method '$size'". */
+/* First `out`/`acc` variable use in a subtree — mirrors parser.w
+ * detect_accumulator_name for the trailing-expression accumulator form
+ * (`-> dup() []` seeds `out = []`, runs the body, returns `out`). */
+static const char *pa_detect_acc(TcAstValue v) {
+  if (v.kind == TC_AST_ARRAY && v.as.array) {
+    for (size_t i = 0; i < v.as.array->count; i++) {
+      const char *r = pa_detect_acc(v.as.array->items[i]);
+      if (r) return r;
+    }
+    return NULL;
+  }
+  if (v.kind != TC_AST_HASH || !v.as.hash) return NULL;
+  if (ast_node_is(v, "var")) {
+    TcAstValue *nm = hash_value_ast(v, "name");
+    if (nm && nm->kind == TC_AST_STRING) {
+      if (nm->as.string.len == 3 && memcmp(nm->as.string.bytes, "out", 3) == 0) return "out";
+      if (nm->as.string.len == 3 && memcmp(nm->as.string.bytes, "acc", 3) == 0) return "acc";
+    }
+    return NULL;
+  }
+  for (size_t i = 0; i < v.as.hash->count; i++) {
+    const char *r = pa_detect_acc(v.as.hash->items[i].value);
+    if (r) return r;
+  }
+  return NULL;
+}
+
+static int parse_view_data_field_bracket(TcAstParser *p, char **ftype, size_t *ftype_len,
+                                         TcError *err) {
+  /* p->pos sits on '['; append the verbatim "[...]" suffix to ftype. */
+  advance_ast(p);
+  if (!append_bytes(ftype, ftype_len, "[", 1, err)) return 0;
+  while (!at_ast(p, TC_K_RBRACKET) && !at_ast(p, TC_K_EOF) &&
+         !at_ast(p, TC_K_NEWLINE)) {
+    char *part = NULL;
+    size_t part_len = 0;
+    if (!current_token_text(p, &part, &part_len, err)) return 0;
+    int ok = append_bytes(ftype, ftype_len, part, part_len, err);
+    free(part);
+    if (!ok) return 0;
+    advance_ast(p);
+  }
+  if (!match_ast(p, TC_K_RBRACKET)) {
+    parse_ast_error(p, err, "expected ']' in data-field array suffix");
+    return 0;
+  }
+  return append_bytes(ftype, ftype_len, "]", 1, err);
+}
+
+static int parse_view_data_field(TcAstParser *p, TcAstValue *out, TcError *err) {
+  int pointer = 0;
+  if (at_ast(p, TC_K_STAR)) {
+    pointer = 1;
+    advance_ast(p);
+  }
+  TcKind kind = current_ast(p).kind;
+  if (kind != TC_K_ID && kind != TC_K_TYPE && kind != TC_K_NAME) {
+    parse_ast_error(p, err, "expected data field type");
+    return 0;
+  }
+  char *ftype = NULL;
+  size_t ftype_len = 0;
+  if (!current_token_text(p, &ftype, &ftype_len, err)) return 0;
+  advance_ast(p);
+  if (at_ast(p, TC_K_LBRACKET) &&
+      !parse_view_data_field_bracket(p, &ftype, &ftype_len, err)) {
+    free(ftype);
+    return 0;
+  }
+  kind = current_ast(p).kind;
+  if (kind != TC_K_ID && kind != TC_K_TYPE && kind != TC_K_NAME) {
+    parse_ast_error(p, err, "expected data field name");
+    free(ftype);
+    return 0;
+  }
+  char *fname = NULL;
+  size_t fname_len = 0;
+  if (!current_token_text(p, &fname, &fname_len, err)) {
+    free(ftype);
+    return 0;
+  }
+  advance_ast(p);
+  if (at_ast(p, TC_K_LBRACKET) &&
+      !parse_view_data_field_bracket(p, &ftype, &ftype_len, err)) {
+    free(ftype);
+    free(fname);
+    return 0;
+  }
+  if (pointer) {
+    char *starred = (char *)malloc(ftype_len + 2);
+    if (!starred) {
+      tc_error_set(err, "data field type allocation failed");
+      free(ftype);
+      free(fname);
+      return 0;
+    }
+    starred[0] = '*';
+    memcpy(starred + 1, ftype, ftype_len);
+    starred[ftype_len + 1] = '\0';
+    free(ftype);
+    ftype = starred;
+    ftype_len += 1;
+  }
+  TcAstValue entry = tc_ast_hash_new(err);
+  if (entry.kind != TC_AST_HASH ||
+      !tc_ast_hash_set(entry, "name", tc_ast_string_copy(fname, fname_len, err), err) ||
+      !tc_ast_hash_set(entry, "type", tc_ast_string_copy(ftype, ftype_len, err), err)) {
+    free(ftype);
+    free(fname);
+    tc_ast_free(entry);
+    return 0;
+  }
+  free(ftype);
+  free(fname);
+  *out = entry;
+  return 1;
+}
+
+static int parse_view_decl_ast(TcAstParser *p, TcAstValue *out, TcError *err) {
+  size_t start = p->pos;
+  advance_ast(p);  /* `-` */
+  advance_ast(p);  /* `data` */
+
+  TcAstValue struct_name = tc_ast_nil();
+  if (at_ast(p, TC_K_LPAREN)) {
+    advance_ast(p);
+    TcKind kind = current_ast(p).kind;
+    if (kind == TC_K_ID || kind == TC_K_TYPE || kind == TC_K_NAME) {
+      char *sname = NULL;
+      size_t sname_len = 0;
+      if (!current_token_text(p, &sname, &sname_len, err)) return 0;
+      struct_name = tc_ast_string_copy(sname, sname_len, err);
+      free(sname);
+      if (struct_name.kind != TC_AST_STRING) return 0;
+      advance_ast(p);
+    }
+    if (!match_ast(p, TC_K_RPAREN)) {
+      parse_ast_error(p, err, "expected ')' after data struct name");
+      tc_ast_free(struct_name);
+      return 0;
+    }
+  }
+  skip_newlines_ast(p);
+
+  TcAstValue node = node_hash(p, "view_decl", start, err);
+  if (node.kind != TC_AST_HASH ||
+      !tc_ast_hash_set(node, "name", tc_ast_string_copy("data", 4, err), err)) {
+    tc_ast_free(struct_name);
+    tc_ast_free(node);
+    return 0;
+  }
+
+  if (!at_ast(p, TC_K_INDENT)) {
+    /* Empty block: struct kind with no fields. */
+    TcAstValue layout = tc_ast_hash_new(err);
+    if (layout.kind != TC_AST_HASH ||
+        !tc_ast_hash_set(layout, "fields", tc_ast_array_new(err), err) ||
+        !tc_ast_hash_set(layout, "struct_name", struct_name, err) ||
+        !tc_ast_hash_set(node, "kind", tc_ast_string_copy("struct", 6, err), err) ||
+        !tc_ast_hash_set(node, "count", layout, err)) {
+      tc_ast_free(layout);
+      tc_ast_free(node);
+      return 0;
+    }
+    *out = node;
+    return 1;
+  }
+  advance_ast(p);  /* INDENT */
+  skip_newlines_ast(p);
+
+  /* `raw N` byte layout. */
+  if (at_ast(p, TC_K_ID)) {
+    char *maybe_raw = NULL;
+    size_t maybe_raw_len = 0;
+    if (!token_text_at_ast(p, p->pos, &maybe_raw, &maybe_raw_len, err)) {
+      tc_ast_free(struct_name);
+      tc_ast_free(node);
+      return 0;
+    }
+    int is_raw = maybe_raw_len == 3 && memcmp(maybe_raw, "raw", 3) == 0;
+    free(maybe_raw);
+    if (is_raw) {
+      advance_ast(p);
+      if (current_ast(p).kind != TC_K_INT) {
+        parse_ast_error(p, err, "expected byte count after `raw`");
+        tc_ast_free(struct_name);
+        tc_ast_free(node);
+        return 0;
+      }
+      char *count_text = NULL;
+      size_t count_text_len = 0;
+      if (!current_token_text(p, &count_text, &count_text_len, err)) {
+        tc_ast_free(struct_name);
+        tc_ast_free(node);
+        return 0;
+      }
+      long long count_value = strtoll(count_text, NULL, 10);
+      free(count_text);
+      advance_ast(p);
+      skip_newlines_ast(p);
+      if (at_ast(p, TC_K_DEDENT)) advance_ast(p);
+      tc_ast_free(struct_name);
+      if (!tc_ast_hash_set(node, "kind", tc_ast_string_copy("raw", 3, err), err) ||
+          !tc_ast_hash_set(node, "count", tc_ast_int(count_value), err)) {
+        tc_ast_free(node);
+        return 0;
+      }
+      *out = node;
+      return 1;
+    }
+  }
+
+  /* Structured layout: typed fields, with the canonical parser's depth
+   * walk — `*` base-pointer lines may continue at the OUTER indent
+   * after a dedent (core/array.w's `* u8[] slots`). */
+  TcAstValue fields = tc_ast_array_new(err);
+  if (fields.kind != TC_AST_ARRAY) {
+    tc_ast_free(struct_name);
+    tc_ast_free(node);
+    return 0;
+  }
+  int depth = 1;
+  int base_pointer_line = 0;
+  while (depth > 0 && !at_ast(p, TC_K_EOF)) {
+    TcKind kind = current_ast(p).kind;
+    if (kind == TC_K_INDENT) {
+      depth += 1;
+      advance_ast(p);
+    } else if (kind == TC_K_DEDENT) {
+      depth -= 1;
+      advance_ast(p);
+      if (depth == 0 && at_ast(p, TC_K_STAR)) {
+        depth = 1;
+        base_pointer_line = 1;
+      }
+    } else if (kind == TC_K_NEWLINE) {
+      advance_ast(p);
+      if (base_pointer_line && !at_ast(p, TC_K_STAR)) break;
+    } else if (kind == TC_K_STAR || kind == TC_K_ID || kind == TC_K_TYPE ||
+               kind == TC_K_NAME) {
+      TcAstValue entry;
+      if (!parse_view_data_field(p, &entry, err)) {
+        tc_ast_free(fields);
+        tc_ast_free(struct_name);
+        tc_ast_free(node);
+        return 0;
+      }
+      if (!tc_ast_array_push(fields, entry, err)) {
+        tc_ast_free(fields);
+        tc_ast_free(struct_name);
+        tc_ast_free(node);
+        return 0;
+      }
+    } else {
+      advance_ast(p);
+    }
+  }
+  TcAstValue layout = tc_ast_hash_new(err);
+  if (layout.kind != TC_AST_HASH ||
+      !tc_ast_hash_set(layout, "fields", fields, err) ||
+      !tc_ast_hash_set(layout, "struct_name", struct_name, err) ||
+      !tc_ast_hash_set(node, "kind", tc_ast_string_copy("struct", 6, err), err) ||
+      !tc_ast_hash_set(node, "count", layout, err)) {
+    tc_ast_free(layout);
     tc_ast_free(node);
     return 0;
   }
@@ -4253,7 +4659,7 @@ static int parse_ast_statement(TcAstParser *p, TcAstValue *out, TcError *err) {
     tc_ast_free(type_hints);
     return parse_class_def_ast(p, out, err);
   }
-  /* `- ivars` class-body directive — typed slab-layout declaration. */
+  /* `- ivars` / `- data` class-body directives — typed layout blocks. */
   if (p->tokens->items[p->pos].kind == TC_K_MINUS &&
       p->pos + 1 < p->tokens->count &&
       p->tokens->items[p->pos + 1].kind == TC_K_ID) {
@@ -4264,6 +4670,11 @@ static int parse_ast_statement(TcAstParser *p, TcAstValue *out, TcError *err) {
       free(next_text);
       tc_ast_free(type_hints);
       return parse_ivars_decl_ast(p, out, err);
+    }
+    if (next_text && next_text_len == 4 && memcmp(next_text, "data", 4) == 0) {
+      free(next_text);
+      tc_ast_free(type_hints);
+      return parse_view_decl_ast(p, out, err);
     }
     free(next_text);
   }

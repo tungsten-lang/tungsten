@@ -1847,7 +1847,40 @@ static int ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
         }
         TcValue key_v = tc_box_symbol_bytes(interned, key_len, 0);
         TcValue val_v;
-        if (!ast_to_runtime(&ast->as.hash->items[i].value, &val_v, err)) return 0;
+        TcAstValue *item = &ast->as.hash->items[i].value;
+        if (key_len == 10 && memcmp(key_bytes, "type_hints", 10) == 0 &&
+            item->kind == TC_AST_HASH && item->as.hash) {
+          // The type_hints map is DATA keyed by variable/param NAME —
+          // the canonical parser builds it with STRING keys
+          // (consume_type_hints: result[clean] = type.to_sym), and
+          // symbol and string keys are distinct in runtime hashes.
+          // Blanket symbol promotion here made every `## type: names`
+          // hint invisible to populate_definition_var_types, so typed
+          // hot loops (the lex64 tokenizer) compiled fully boxed and
+          // dynamic. Keep this one child hash string-keyed.
+          void *hint_cache_key = item->as.hash;
+          if (ast_rt_cache_lookup(hint_cache_key, &val_v)) {
+            if (!hash_set_value(h, key_v, val_v, err)) return 0;
+            continue;
+          }
+          size_t hn = item->as.hash->count;
+          TcRuntimeHash *hh = runtime_hash_new(hn, err);
+          if (!hh) return 0;
+          val_v = tc_box_hash(hh);
+          if (!ast_rt_cache_store(hint_cache_key, val_v, err)) return 0;
+          for (size_t hi = 0; hi < hn; hi++) {
+            const char *hk = item->as.hash->items[hi].key;
+            size_t hk_len = hk ? strlen(hk) : 0;
+            TcValue hkey;
+            if (!make_string_value(hk ? hk : "", hk_len, &hkey, err)) return 0;
+            TcValue hval;
+            if (!ast_to_runtime(&item->as.hash->items[hi].value, &hval, err)) return 0;
+            if (!hash_set_value(hh, hkey, hval, err)) return 0;
+          }
+          if (!hash_set_value(h, key_v, val_v, err)) return 0;
+          continue;
+        }
+        if (!ast_to_runtime(item, &val_v, err)) return 0;
         if (!hash_set_value(h, key_v, val_v, err)) return 0;
       }
       return 1;

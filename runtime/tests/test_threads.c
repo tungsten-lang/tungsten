@@ -1,5 +1,5 @@
 /*
- * test_threads.c — Phase 1: OS Thread Primitives
+ * test_threads.c — OS Thread Primitives
  *
  * Tests:
  *   1. __thread exception stack isolation
@@ -294,7 +294,7 @@ static void test_cancel_reaps_system_child(void) {
 
 int main(void) {
     setbuf(stdout, NULL);
-    printf("=== Phase 1: OS Thread Primitives ===\n\n");
+    printf("=== OS Thread Primitives ===\n\n");
 
     test_thread_local_exception_stack();
     test_thread_spawn_join();

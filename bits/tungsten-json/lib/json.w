@@ -47,11 +47,11 @@ in Tungsten
   -> .parse(s)
     n = s.size
     tokens = i32[n]
-    # Phase 0.1 fix (compiler/lib/lowering.w) makes ccall_nobox
+    # A lowering fix (compiler/lib/lowering.w) makes ccall_nobox
     # results survive local-variable stores without being NaN-box
     # re-tagged. We use that here to capture the classifier's
     # return value (the offset count) and reuse the source ptr/len
-    # locals — patterns that were unsafe before Phase 0.1 landed.
+    # locals — patterns that were unsafe before that fix landed.
     src_ptr = ccall_nobox("w_string_byte_ptr", s)
     src_len = ccall_nobox("w_string_byte_length", s)
     out_ptr = ccall_nobox("w_array_data_ptr", tokens)

@@ -162,7 +162,7 @@
 
     recv.slice(args[0])
 
-  # Phase 4f: arr.slice renamed to arr.copy for clarity (slice now connotes
+  # arr.slice renamed to arr.copy for clarity (slice now connotes
   # the zero-copy `arr[from..to]` view). Strings/bytes still use .slice.
   when "copy"
     if args.size() == 2

@@ -596,7 +596,7 @@ module Tungsten
       when 46
         return scan_dot if byte(1) == 46
 
-        # Phase 4e dot-prefix elementwise operators: .+ .- .* ./ .| .& .^ .<< .>>
+        # Dot-prefix elementwise operators: .+ .- .* ./ .| .& .^ .<< .>>
         # Whitespace before AND after disambiguates from method-call dot
         # syntax (`a.foo` stays a method call). Without space-before, fall
         # through to the single-char `.` emit and let the parser raise on
@@ -2153,7 +2153,7 @@ module Tungsten
         when 64 then emit_operator(:-@, 2, start_col)
         end
       when 46 # .
-        # Phase 4e dot-prefix elementwise operators: .+ .- .* ./ — only
+        # Dot-prefix elementwise operators: .+ .- .* ./ — only
         # when whitespace-bracketed (the disambiguator from method-call
         # syntax `a.foo`). Without space-before, fall through to the
         # ONE_CHAR_TOKENS '.' path; the parser raises on `a.+` since

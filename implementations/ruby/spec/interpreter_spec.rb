@@ -433,7 +433,7 @@ RSpec.describe Tungsten::Interpreter do
     expect { run("-> bad\n  yield\nbad") }.to raise_error(Tungsten::Error, /without a block/)
   end
 
-  # Phase 1: Arrays, ranges, chars, receiver dispatch
+  # Arrays, ranges, chars, receiver dispatch
 
   it "evaluates array literals" do
     expect(run("[1, 2, 3]")).to eq([1, 2, 3])
@@ -518,7 +518,7 @@ RSpec.describe Tungsten::Interpreter do
     expect(run("[10, 20, 30][1]")).to eq(20)
   end
 
-  # Phase 2: Strings
+  # Strings
 
   it "evaluates string literals" do
     expect(run('"hello"')).to eq("hello")
@@ -549,7 +549,7 @@ RSpec.describe Tungsten::Interpreter do
     expect(run('"hello".upcase')).to eq("HELLO")
   end
 
-  # Phase 3: Object model and classes
+  # Object model and classes
 
   it "defines and instantiates a class" do
     code = <<~W
@@ -697,7 +697,7 @@ RSpec.describe Tungsten::Interpreter do
     expect(run(code)).to eq({ "install" => :ok })
   end
 
-  # Phase 4: Hashes
+  # Hashes
 
   it "evaluates hash literals" do
     expect(run("{ one: 1, two: 2 }")).to eq({ "one" => 1, "two" => 2 })
@@ -719,7 +719,7 @@ RSpec.describe Tungsten::Interpreter do
     expect(run("h = { name: \"erik\" }\n[h[\"name\"], h[:name]]")).to eq(["erik", "erik"])
   end
 
-  # Phase 5: case/when
+  # case/when
 
   it "evaluates case/when" do
     code = "x = 2\ncase x\nwhen 1\n  10\nwhen 2\n  20\nelse\n  30"
@@ -808,7 +808,7 @@ RSpec.describe Tungsten::Interpreter do
     expect(run(code)).to eq("2 bottles")
   end
 
-  # Phase 6: begin/rescue/ensure
+  # begin/rescue/ensure
 
   it "raises errors" do
     expect { run('raise "oops"') }.to raise_error(Tungsten::Error, "oops")

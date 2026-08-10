@@ -1003,7 +1003,7 @@ use ../../languages/tungsten/lexers/known_units
         elsif c == :-| && c2 == :-| && pos + 1 < count && ((lc[pos + 1] >> 18) & cp_mask) == :-=
           pos += 2
         elsif c == :-. && start > 0 && ((lc[start - 1] >> 18) & cp_mask) == 32 && (c2 == :-+ || c2 == :-- || c2 == :-* || c2 == :-/ || c2 == :-| || c2 == :-& || c2 == :-^)
-          # Phase 4e dot-prefix elementwise operators: `.+ .- .* ./
+          # Dot-prefix elementwise operators: `.+ .- .* ./
           # .| .& .^` consumed as one token when preceded by whitespace.
           # The whitespace requirement disambiguates from method-call
           # syntax (`a.foo` stays a method call). Without space-before,

@@ -1090,9 +1090,9 @@ use ../../core/token
             value.drain_safe = true
           hint = nil
         elsif hint == "stack"
-          # Phase 6d: opt-in stack allocation for SmallArray.new (and
+          # Opt-in stack allocation for SmallArray.new (and
           # eventually array literals). Caller asserts the value won't
-          # outlive its allocating frame. Phase 6e's escape analysis
+          # outlive its allocating frame. A future escape analysis
           # will set this flag automatically when safe.
           if value != nil
             value.stack_safe = true
@@ -1374,7 +1374,7 @@ use ../../core/token
   # The tuple syntax is scoped to the RHS of `in` only; no other
   # production recognizes space-separated parenthesized expressions.
   # Lowered to a flat OR chain of equality comparisons at lowering
-  # time; Phase 8 peephole promotes homogeneous chains to dispatch.
+  # time; a peephole promotes homogeneous chains to dispatch.
   -> parse_in_test
     left = parse_comparison()
     if at_kw?("in")
@@ -1400,7 +1400,7 @@ use ../../core/token
 
   -> parse_bitwise_or
     left = parse_bitwise_xor()
-    # Phase 4e dot-prefix: `.|` shares bitwise-or precedence with `|`.
+    # Dot-prefix: `.|` shares bitwise-or precedence with `|`.
     while at_type?(T_PIPE) || at_type?(T_DOT_PIPE)
       op = advance_op_sym()
       right = parse_bitwise_xor()
@@ -1409,7 +1409,7 @@ use ../../core/token
 
   -> parse_bitwise_xor
     left = parse_bitwise_and()
-    # Phase 4e dot-prefix: `.^` shares bitwise-xor precedence with `^`.
+    # Dot-prefix: `.^` shares bitwise-xor precedence with `^`.
     while at_type?(T_CARET) || at_type?(T_DOT_CARET)
       op = advance_op_sym()
       right = parse_bitwise_and()
@@ -1418,7 +1418,7 @@ use ../../core/token
 
   -> parse_bitwise_and
     left = parse_addition()
-    # Phase 4e dot-prefix: `.&` shares bitwise-and precedence with `&`.
+    # Dot-prefix: `.&` shares bitwise-and precedence with `&`.
     while at_type?(T_AMPERSAND) || at_type?(T_DOT_AMP)
       op = advance_op_sym()
       right = parse_addition()
@@ -1455,7 +1455,7 @@ use ../../core/token
     # `while ...; -1` would parse as `(while ...) - 1` → nil-1.
     if is_block_node?(left)
       return left
-    # Phase 4e dot-prefix elementwise: `.+ .-` share addition precedence
+    # Dot-prefix elementwise: `.+ .-` share addition precedence
     # with their scalar counterparts. Julia convention.
     while parser_tok_type(@current_packed) in (T_PLUS T_MINUS T_DOT_PLUS T_DOT_MINUS T_PLUS_MINUS)
       measurement = at_type?(T_PLUS_MINUS)
@@ -1472,7 +1472,7 @@ use ../../core/token
 
   -> parse_shift
     left = parse_multiplication()
-    # Phase 4e dot-prefix: `.<<` `.>>` share shift precedence.
+    # Dot-prefix: `.<<` `.>>` share shift precedence.
     while parser_tok_type(@current_packed) in (T_LSHIFT T_RSHIFT T_DOT_LSHIFT T_DOT_RSHIFT)
       op = advance_op_sym()
       right = parse_multiplication()
@@ -1481,7 +1481,7 @@ use ../../core/token
 
   -> parse_multiplication
     left = parse_power()
-    # Phase 4e dot-prefix elementwise: `.* ./` share multiplication
+    # Dot-prefix elementwise: `.* ./` share multiplication
     # precedence with their scalar counterparts.
     while parser_tok_type(@current_packed) in (T_STAR T_SLASH T_PERCENT T_DOT_STAR T_DOT_SLASH T_DOT_PRODUCT T_CROSS_PRODUCT T_HADAMARD T_KRONECKER)
       op = advance_op_sym()
@@ -2973,7 +2973,7 @@ use ../../core/token
 
     skip_spaces()
 
-    # Phase 3: optional param-type list `(i64 i64)`. Disambiguated by
+    # Optional param-type list `(i64 i64)`. Disambiguated by
     # peeking inside the paren group — if the contents are all `:TYPE`
     # tokens followed by `)`, it's a param-type annotation. Otherwise
     # fall through to the trailing-expression path (which handles
@@ -2989,7 +2989,7 @@ use ../../core/token
       expect_type(T_RPAREN)
       skip_spaces()
 
-    # Phase 3: optional return type — a bare `:TYPE` token followed by
+    # Optional return type — a bare `:TYPE` token followed by
     # `:` (inline body introducer) or a newline/indent (multi-line body)
     # or the end of the header.
     return_type = nil
@@ -2999,7 +2999,7 @@ use ../../core/token
 
     annotations_present = param_types != nil || return_type != nil
 
-    # Phase 3: `:` is the inline-body introducer in both typed and
+    # `:` is the inline-body introducer in both typed and
     # untyped forms. The untyped form additionally keeps the old
     # bare-trailing-expression path for back-compat so `-> add(a,b) a+b`
     # still parses as today.
@@ -3012,7 +3012,7 @@ use ../../core/token
       trailing_expr = parse_expression()
     elsif !annotations_present
       # Untyped back-compat: bare trailing expression becomes accumulator
-      # init or inline body, same as before Phase 3.
+      # init or inline body, same as before typed signatures existed.
       if !at_type?(T_NEWLINE) && !at_type?(T_DEDENT) && !at_type?(T_EOF) && !at_type?(T_SEMICOLON)
         trailing_expr = parse_expression()
 
@@ -3087,7 +3087,7 @@ use ../../core/token
       result.return_type = return_type
     result
 
-  # Phase 3 lookahead: is the current LPAREN the start of a param-type
+  # Lookahead: is the current LPAREN the start of a param-type
   # annotation `(type type type)`? True iff inside the paren we see one
   # or more `:TYPE` tokens followed by `)`. Distinguishes param types
   # from a trailing expression like `(a + b)` or `(i64[5])`.
@@ -3125,7 +3125,7 @@ use ../../core/token
         off += 2
     false
 
-  # Phase 3 lookahead: is the current `:TYPE` token a return-type
+  # Lookahead: is the current `:TYPE` token a return-type
   # annotation? True iff the token after it is `:` (inline body
   # introducer), `:NEWLINE`, or `:INDENT`. False if it's anything that
   # could start an expression like `.method` or `[index]` or `(args)`.
@@ -4117,7 +4117,7 @@ use ../../core/token
     entries = []
 
     while !at_type?(T_RBRACE)
-      # Phase 4e: hash-key sigil shadowing fix — type-name tokens (`u8`, `f32`,
+      # Hash-key sigil shadowing fix — type-name tokens (`u8`, `f32`,
       # `i64`, etc.) followed by `:` parse as symbol keys here, matching the
       # shorthand for `:ID:`. Without this, `{f16: buf}` and `{u8: count}` would
       # fall into parse_expression for the key, where `f16` / `u8` start a

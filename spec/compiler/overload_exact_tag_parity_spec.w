@@ -1,4 +1,4 @@
-# Engine-parity spec for the exact-tag overload gate (B3/Phase 1) and its
+# Engine-parity spec for the exact-tag overload gate and its
 # HAND-COPIED interpreter mirror.
 #
 # Lowering emits an inline NaN-box tag compare for `(BigInt)`-typed overload

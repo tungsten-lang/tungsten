@@ -46,7 +46,7 @@
 -> metal_buffer(device, byte_length)
   ccall("w_metal_buffer_new", device, byte_length)
 
-# Phase 7a (#12): zero-copy wrap of a typed array as a Metal buffer.
+# Zero-copy wrap of a typed array as a Metal buffer. (#12)
 # Apple Silicon's unified memory means the GPU sees the same physical
 # pages as the CPU array — no upload, no copy. The buffer is a
 # borrowed view; caller must keep the source array alive while the
@@ -67,7 +67,7 @@
 -> metal_buffer_for(device, arr)
   ccall("w_array_as_metal_buffer", device, arr)
 
-# Phase 7b (#68): page-aligned typed-array allocator. Returns a
+# Page-aligned typed-array allocator (#68). Returns a
 # fixed-size (size = cap = N) typed array whose slots are mmap-backed
 # at a page boundary, enabling the no-copy MTLBuffer wrap to actually
 # stay zero-copy. Use this for arrays you intend to bind to the GPU.
@@ -187,7 +187,7 @@ fn metal_dispatch_groups(queue, pipeline, bufs, n_groups, threads_per_group)
 fn metal_dispatch_3d(queue, pipeline, bufs, n_tg_x, n_tg_y, n_tg_z, threads_x, threads_y, threads_z)
   ccall("w_metal_dispatch_groups_3d", queue, pipeline, bufs, n_tg_x, n_tg_y, n_tg_z, threads_x, threads_y, threads_z)
 
-# Phase 7e (#12): one-shot compute helper.
+# One-shot compute helper. (#12)
 # Compiles `source` against the default device, looks up `kernel_name`,
 # dispatches with `bufs` (each elem may be a Metal buffer or a typed
 # array) over `threads` linear threads. Compile + pipeline + queue are
@@ -200,7 +200,7 @@ fn metal_dispatch_3d(queue, pipeline, bufs, n_tg_x, n_tg_y, n_tg_z, threads_x, t
 fn metal_compute(source, kernel_name, bufs, threads)
   ccall("w_metal_compute", source, kernel_name, bufs, threads)
 
-# Phase 7f (#12): copy a Metal buffer's contents back into a typed
+# Copy a Metal buffer's contents back into a typed
 # array. Needed only when the array isn't page-aligned (so its wrap
 # took the COPY path) and the GPU has written through. For
 # page-aligned arrays from metal_array() this is a no-op (the buffer's

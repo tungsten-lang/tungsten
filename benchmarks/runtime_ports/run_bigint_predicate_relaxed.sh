@@ -101,8 +101,14 @@ removed_handlers = {f"w_ic_bigint_{p}" for p in preds} | {"w_ic_bigint_to_i"}
 if [x for x in btable if x not in removed_handlers] != ctable:
     raise SystemExit("integrated BigInt IC table is not baseline minus identity and five predicates")
 
-binit = names(section(brt, "/* Bigint (Phase 7+m) */", "/* Channel (Phase 7+m) */"))
-cinit = names(section(crt, "/* Bigint (Phase 7+m) */", "/* Channel (Phase 7+m) */"))
+def ic_name_markers(text):
+    # Older checkouts carry plan-numbered section banners; newer ones are bare.
+    if "/* Bigint (Phase 7+m) */" in text:
+        return ("/* Bigint (Phase 7+m) */", "/* Channel (Phase 7+m) */")
+    return ("/* Bigint */", "/* Channel */")
+
+binit = names(section(brt, *ic_name_markers(brt)))
+cinit = names(section(crt, *ic_name_markers(crt)))
 removed_names = {"WN_to_i", "WN_zero_q", "WN_even_q", "WN_odd_q", "WN_negative_q", "WN_positive_q"}
 if [x for x in binit if x not in removed_names] != cinit:
     raise SystemExit("integrated BigInt IC names are not baseline minus identity and five predicates")

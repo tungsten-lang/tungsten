@@ -1,10 +1,10 @@
-# Return type inference — Phase 3 of the compiler/language-improvements plan.
+# Return type inference.
 #
 # When a method or fn is defined without an explicit return type annotation
 # (the `-> add(a, b) i64 : a + b` form), infer one from the body so downstream
 # code can use type-directed optimizations and gradual-typing diagnostics.
 #
-# Phase 3 MVP ships one inference rule: accumulator-seed inference.
+# One inference rule is implemented: accumulator-seed inference.
 # When a method uses the accumulator form — where a trailing expression after
 # the param list becomes the seed for an indented body that mutates it — the
 # seed's static type IS the return type. The parser desugars this form at
@@ -17,7 +17,7 @@
 # of the body, see if it's `acc = seed` where the final return is `Var(acc)`,
 # and use infer_type(seed) as the return type.
 #
-# The fixed-point SCC pass for recursive methods is deferred to Phase 3b.
+# The fixed-point SCC pass for recursive methods is not yet implemented.
 # For that pass, topologically sort the call graph, handle leaf nodes first
 # with a single forward pass, iterate on mutually-recursive groups until the
 # types converge or a max-iterations guard fires with a warning.
@@ -67,7 +67,7 @@ use runtime_types
   acc_type = infer_accumulator_return_type(node.body, var_types, fn_return_types, infer_maps)
   if acc_type != nil
     return acc_type
-  # Fall through to the existing last-expression inference (Phase 3 does
+  # Fall through to the existing last-expression inference (this pass does
   # not add new machinery here — just uses whatever infer_fn_return_type
   # already does).
   infer_fn_return_type(node, infer_maps)

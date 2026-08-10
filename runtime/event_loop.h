@@ -41,12 +41,12 @@ int w_event_submit_send(WEventLoop *el, int fd, const void *buf, size_t len, WGo
 int w_event_submit_accept(WEventLoop *el, int fd, struct sockaddr *addr,
                            socklen_t *addrlen, WGoroutine *g);
 
-/* ---- Phase 4: Provided buffers + multi-shot recv + zero-copy send ---- */
+/* ---- Provided buffers + multi-shot recv + zero-copy send ---- */
 int  w_event_submit_recv_multishot(WEventLoop *el, int fd, WGoroutine *g);
 int  w_event_submit_send_zc(WEventLoop *el, int fd, const void *buf, size_t len, WGoroutine *g);
 void w_event_return_buf(WEventLoop *el, int buf_id);
 
-/* ---- Phase 5: Registered send buffers + multi-shot accept + linked SQEs ---- */
+/* ---- Registered send buffers + multi-shot accept + linked SQEs ---- */
 int  w_event_send_buf_alloc(WEventLoop *el);
 void w_event_send_buf_free(WEventLoop *el, int buf_id);
 void *w_event_send_buf_ptr(WEventLoop *el, int buf_id);

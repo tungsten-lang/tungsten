@@ -6,8 +6,8 @@ require "open3"
 
 # Bridge spec: exercises the tungsten-json bit's SIMD walker end-to-end
 # through compile + run, asserting that `JSON.parse` dispatches through
-# the class vtable to the bit's .parse after Phase 0c removed the
-# intrinsic bypass and Phase 2a wrote the walker body.
+# the class vtable to the bit's .parse now that the intrinsic
+# bypass is removed and the walker body is in place.
 #
 # The bit's own describe/it-style spec at bits/tungsten-json/spec/json_spec.w
 # is not yet wired to any runner, so this file takes its place for

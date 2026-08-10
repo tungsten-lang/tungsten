@@ -10,7 +10,7 @@
 
 + StringBuffer
   - data
-    # Phase 6i.2: type byte removed (StringBuffer promoted to W_SUBTAG_STRBUF).
+    # Type byte removed (StringBuffer promoted to W_SUBTAG_STRBUF).
     # Layout now starts directly with the flags byte.
     u8     flags
     u8[7]  _pad

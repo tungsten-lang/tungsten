@@ -113,7 +113,7 @@
     if method_name == "count"
       return lower_expression(ctx, Tungsten:AST:Calc.new("count", Tungsten:AST:Map.new(recv_node, per_elem, :map), :auto))
 
-  # Closure-escape Phase B (#61): rewrite `arr.<iter>(args..., cb)` into
+  # Closure-escape (#61): rewrite `arr.<iter>(args..., cb)` into
   # `arr.<iter>(args...) -> ...` when cb is a single-assignment local bound
   # to a block literal. The trait body (Enumerable's map/select/reduce/etc.)
   # then runs with the user's block in `&(...)` position; the existing
@@ -272,7 +272,7 @@
       return inlined
 
   if recv_node != nil && method_name == "each" && node.block != nil
-    # Phase 6i follow-up: rewrite bare `$field` var receivers (the syntax
+    # Rewrite bare `$field` var receivers (the syntax
     # the .each iteration in core/{small,big,}_array.w each-bodies uses)
     # into :view_field nodes so the integer-iteration shortcut below
     # fires. Without this, `$size -> &(self[i])` dispatches `int.each(closure)`
@@ -288,7 +288,7 @@
       range_each = Tungsten:AST:Call.new(range_node, "each", [], node.block)
       return lower_method_call(ctx, range_each)
 
-    # Phase 6g: typed-array.each (with explicit single block param) →
+    # typed-array.each (with explicit single block param) →
     # range with-loop over indices, with `param = recv[i]` synthesized
     # as the first body statement. Existing range.each path lowers as
     # a with-loop (no closure allocation, body inlined). Inside the
@@ -409,7 +409,7 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_rational_new", args: [numerator_reg, denominator_reg]})
       return typed_value(:i64, temp)
 
-    # Phase 3: BigArray.new(ebits, capacity) — i64-indexed array tier.
+    # BigArray.new(ebits, capacity) — i64-indexed array tier.
     # ebits is symbol (:u8, :i32, :f32, :w64, :bf16, …) or raw int (16/32/64/-32/…).
     if recv_name == "BigArray" && method_name == "new" && node.args.size() == 2
       ebits_raw = ebits_arg_to_raw(ctx, node.args[0])
@@ -419,16 +419,16 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_big_array_new", args: [ebits_raw, cap_raw]})
       return typed_value(:i64, temp)
 
-    # Phase 3: SmallArray.new(ebits, size) — frozen ≤255-element packed
+    # SmallArray.new(ebits, size) — frozen ≤255-element packed
     # array. Zero-initialized; richer from-bytes / from-array constructors
-    # land alongside the SmallArray inline ops in Phase 5. Third arg is a
+    # land alongside the SmallArray inline ops. Third arg is a
     # raw int byte-pointer (0 → leave the calloc-zeroed payload).
     #
-    # Phase 6d: when `## stack` annotation is present (or Phase 6e's
+    # When `## stack` annotation is present (or the v0
     # escape analysis deems the allocation non-escaping) AND both ebits
     # and size are compile-time int literals, emit LLVM `alloca` instead
     # of a heap calloc. The alloca lives in the current frame; misuse
-    # (escape) is the user's responsibility until 6e is automatic.
+    # (escape) is the user's responsibility until escape analysis is automatic.
     if recv_name == "SmallArray" && method_name == "new" && node.args.size() == 2
       ebits_arg = node.args[0]
       size_arg = node.args[1]
@@ -438,7 +438,7 @@
       if ast_kind(size_arg) == :int
         size_const = size_arg.value
       if stack_safe && ebits_const != nil && size_const != nil && size_const >= 0 && size_const <= 255
-        # Phase 6h: WSmallArray header is 2 bytes (ebits + size); slots
+        # WSmallArray header is 2 bytes (ebits + size); slots
         # start at offset 2. Total = 2 + packed payload bytes.
         payload_bytes = small_array_payload_bytes(ebits_const, size_const)
         total_bytes = 2 + payload_bytes
@@ -818,8 +818,8 @@
     return typed_value(:i64, w_nil.to_s())
 
   # arr[from..to] or arr[from...to] → zero-copy view via
-  # w_array_view_range. Phase 4e: was a copy through w_array_copy_range;
-  # the plan calls for view semantics by default (Rust-style explicit
+  # w_array_view_range. Formerly a copy through w_array_copy_range;
+  # now view semantics by default (Rust-style explicit
   # aliasing — mutations to the slice affect the parent). Callers that
   # want the legacy copy can explicitly call `arr.copy(from, len)`.
   if method_name == "\[]" && node.args.size() == 1 && ast_kind(node.args[0]) == :range
@@ -877,11 +877,11 @@
   if recv_node != nil && ast_kind(recv_node) == :var
     recv_type = ctx[:var_types][recv_node.name]
   elsif recv_node != nil && ast_kind(recv_node) == :self_ref
-    # Phase 5: transitive composition. Inside a specialized method, __self
+    # Transitive composition. Inside a specialized method, __self
     # carries the variant type so self.foo() inside re-specializes foo.
     recv_type = ctx[:var_types]["__self"]
   elsif recv_node != nil && ast_kind(recv_node) == :ivar && ctx[:class_name] != nil
-    # Phase 5 (gap #2): self.@arr.method() — look up the ivar's recorded
+    # self.@arr.method() (gap #2) — look up the ivar's recorded
     # type from the class-level pre-pass. nil here means either the ivar
     # was never written with an inferable type, or had conflicting writes
     # (so we bail to runtime dispatch, which is correct behavior).
@@ -1208,7 +1208,7 @@
 
   # BigArray direct ops. BigArray has the same packed element semantics as
   # WArray, but a different C layout (i64 start/size/cap, slots at offset 32).
-  # Keeping these before Phase 5 specialization lets the typed-array `each`
+  # Keeping these before monomorphization lets the typed-array `each`
   # rewrite turn `big[i]` into a direct load instead of a cached dispatch.
   if is_big_array_type?(recv_type)
     elem_type = small_array_to_typed_array_type(recv_type)
@@ -1263,7 +1263,7 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_big_array_idxset", args: [receiver_reg, idx_reg, val_reg]})
       return typed_value(:i64, temp)
 
-  # Phase 6f: SmallArray inline ops. Layout differs from WArray:
+  # SmallArray inline ops. Layout differs from WArray:
   # slots are inline at offset 2 (no separate ptr load), no `start`
   # (size==cap, no shift), no negative-index normalization at this
   # level. The GEP index is a full i64 — narrowing to i8 wraps any
@@ -1306,7 +1306,7 @@
     # boxed arrays fall through to generic dispatch unchanged.
     if method_name == "length" && node.args.size() == 0 && sa_hl
       return nanbox_int_emit(wfn, sa_n.to_s())
-    # Phase 6f: empty? is handled inline so Phase 5 specialization
+    # empty? is handled inline so specialization
     # doesn't try to monomorphize Enumerable's `each -> return false : true`
     # body (which would surface SmallArray-context bugs in `$size`
     # lowering). The fast path is a tiny size==0 compare.
@@ -1698,7 +1698,7 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_string_count", args: [receiver_reg, needle_reg]})
       return typed_value(:i64, temp)
 
-  # Phase 5: monomorphization. When the receiver has a known typed-array
+  # Monomorphization. When the receiver has a known typed-array
   # variant AND there's a user-defined method on the corresponding source
   # class (Array / BigArray / SmallArray), specialize the method (clone +
   # re-lower with __self pre-typed) and emit a direct call to the variant.
@@ -1747,7 +1747,7 @@
         # typed arrays use runtime kernels and never reach this path.)
         if caller_has_block
           materialize_bindings(ctx)
-        # Phase C (#61): if the call site has a literal block that's
+        # Closure-escape inlining (#61): if the call site has a literal block that's
         # captureless and a single expression, specialize with the block
         # inlined at every :yield. The resulting fn doesn't take the
         # closure at all — no allocation, no per-element call.

@@ -5,10 +5,10 @@
  *   epoll:    readiness notifications (fast for poll/wake patterns)
  *   io_uring: completion I/O for kTLS sockets + advanced features
  *
- * Phases:
- *   1: Basic RECV/SEND/ACCEPT completion ops
- *   4: Provided buffer ring + multi-shot recv + SEND_ZC
- *   5: Registered send buffers + multi-shot accept + linked SQEs
+ * Features:
+ *   - Basic RECV/SEND/ACCEPT completion ops
+ *   - Provided buffer ring + multi-shot recv + SEND_ZC
+ *   - Registered send buffers + multi-shot accept + linked SQEs
  *
  * Build with: -DUSE_IOURING -luring
  */
@@ -29,12 +29,12 @@
 
 #define URING_ENTRIES    1024
 
-/* Phase 4: provided recv buffer ring */
+/* provided recv buffer ring */
 #define RECV_BUF_COUNT   512
 #define RECV_BUF_SIZE    8192
 #define RECV_BUF_BGID    0
 
-/* Phase 5: registered send buffer pool */
+/* registered send buffer pool */
 #define SEND_BUF_COUNT   512
 #define SEND_BUF_SIZE    4096
 
@@ -48,12 +48,12 @@ struct WEventLoop {
     int sqpoll;
     int uring_efd;       /* eventfd bridging io_uring→epoll */
 
-    /* Phase 4: provided recv buffer ring */
+    /* provided recv buffer ring */
     struct io_uring_buf_ring *recv_ring;
     void *recv_base;     /* mmap'd contiguous recv buffers */
     int has_recv_ring;
 
-    /* Phase 5: registered send buffer pool */
+    /* registered send buffer pool */
     void *send_base;     /* mmap'd contiguous send buffers */
     struct iovec *send_iovecs;
     int send_free[SEND_BUF_COUNT];
@@ -100,7 +100,7 @@ WEventLoop *w_event_init(void) {
         epoll_ctl(el->epfd, EPOLL_CTL_ADD, el->uring_efd, &ev);
     }
 
-    /* Phase 4: provided recv buffer ring */
+    /* provided recv buffer ring */
     int ret;
     el->recv_ring = io_uring_setup_buf_ring(&el->ring, RECV_BUF_COUNT, RECV_BUF_BGID, 0, &ret);
     if (el->recv_ring) {
@@ -121,7 +121,7 @@ WEventLoop *w_event_init(void) {
         }
     }
 
-    /* Phase 5: registered send buffer pool */
+    /* registered send buffer pool */
     el->send_base = mmap(NULL, (size_t)SEND_BUF_COUNT * SEND_BUF_SIZE,
                          PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
@@ -200,7 +200,7 @@ static struct io_uring_sqe *get_sqe(WEventLoop *el) {
     return sqe;
 }
 
-/* ==== Phase 1: Basic completion I/O ==== */
+/* ==== Basic completion I/O ==== */
 
 int w_event_submit_recv(WEventLoop *el, int fd, void *buf, size_t len, WGoroutine *g) {
     if (!el->has_uring) return -1;
@@ -233,7 +233,7 @@ int w_event_submit_accept(WEventLoop *el, int fd, struct sockaddr *addr,
     return 0;
 }
 
-/* ==== Phase 4: Multi-shot recv with provided buffers ==== */
+/* ==== Multi-shot recv with provided buffers ==== */
 
 int w_event_submit_recv_multishot(WEventLoop *el, int fd, WGoroutine *g) {
     if (!el->has_uring || !el->has_recv_ring) return -1;
@@ -257,7 +257,7 @@ void w_event_return_buf(WEventLoop *el, int buf_id) {
     io_uring_buf_ring_advance(el->recv_ring, 1);
 }
 
-/* ==== Phase 4: Zero-copy send (SEND_ZC) ==== */
+/* ==== Zero-copy send (SEND_ZC) ==== */
 
 int w_event_submit_send_zc(WEventLoop *el, int fd, const void *buf, size_t len, WGoroutine *g) {
     if (!el->has_uring || !el->has_send_zc) return -1;
@@ -271,7 +271,7 @@ int w_event_submit_send_zc(WEventLoop *el, int fd, const void *buf, size_t len, 
     return 0;
 }
 
-/* ==== Phase 5: Registered send buffer pool ==== */
+/* ==== Registered send buffer pool ==== */
 
 int w_event_send_buf_alloc(WEventLoop *el) {
     if (!el->has_send_bufs || el->send_free_top < 0) return -1;
@@ -305,7 +305,7 @@ int w_event_submit_send_fixed(WEventLoop *el, int fd, int buf_id, size_t len, WG
     return 0;
 }
 
-/* ==== Phase 5: Multi-shot accept ==== */
+/* ==== Multi-shot accept ==== */
 
 int w_event_submit_accept_multishot(WEventLoop *el, int fd, struct sockaddr *addr,
                                      socklen_t *addrlen, WGoroutine *g) {
@@ -319,7 +319,7 @@ int w_event_submit_accept_multishot(WEventLoop *el, int fd, struct sockaddr *add
     return 0;
 }
 
-/* ==== Phase 5: Linked SQE chains ==== */
+/* ==== Linked SQE chains ==== */
 
 /* Persistent timespec for linked timeouts — must outlive the SQE because
  * the kernel reads this pointer asynchronously (especially with SQPOLL).

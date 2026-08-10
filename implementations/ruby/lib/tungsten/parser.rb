@@ -694,7 +694,7 @@ module Tungsten
           right = parse_add_or_sub
           left = BinaryOp.new(left, method, right)
         when :".<<", :".>>"
-          # Phase 4e: dot-prefix shifts share shift precedence with the
+          # Dot-prefix shifts share shift precedence with the
           # scalar counterparts. Always elementwise — `.<< ` at line start
           # is still a parse error since the lexer requires whitespace
           # AROUND the operator (see CodepointLexer's `when 46` block).
@@ -709,7 +709,7 @@ module Tungsten
       end
     end
 
-    # Phase 4e dot-prefix elementwise operators (.+ .- .* ./ .| .& .^
+    # Dot-prefix elementwise operators (.+ .- .* ./ .| .& .^
     # .<< .>>) ride at the same precedence as their scalar counterparts
     # (Julia convention).
     parse_operator :add_or_sub,  :mul_or_div,  nil,                   %i[+ - %+ %- .+ .- ±]
@@ -764,7 +764,7 @@ module Tungsten
           right = parse_logical_and
           left = BinaryOp.new(left, method, right)
         when :".|", :".^"
-          # Phase 4e: dot-prefix bitwise-or / bitwise-xor share the
+          # Dot-prefix bitwise-or / bitwise-xor share the
           # logical_or precedence slot with their scalar counterparts.
           check_void_value(left)
           method = @token.type
@@ -2131,7 +2131,7 @@ module Tungsten
         unexpected
       end
 
-      # Phase 3 annotations: optional `(i64 i64)` param types and bare
+      # Signature annotations: optional `(i64 i64)` param types and bare
       # return type after the param list. Sync with compiler-side
       # parser.w's looks_like_param_types? / looks_like_return_type?.
       # See CLAUDE.md dual-parser-sync rule.
@@ -2163,7 +2163,7 @@ module Tungsten
           inline_body = false
         end
 
-        # Phase 3 inline body introducer: `:` after annotations.
+        # Inline body introducer: `:` after annotations.
         if @token.type?(:":")
           next_token_skip_space
           inline_body = true
@@ -2300,7 +2300,7 @@ module Tungsten
     PARAM_TYPE_LIST_AHEAD =
       /\A\s*(?:#{PARAM_TYPE_NAME_PATTERN})(?:\s+(?:#{PARAM_TYPE_NAME_PATTERN}))*\s*\)/
 
-    # Phase 3 lookahead: when @token is at `:"("` and the paren group
+    # Lookahead: when @token is at `:"("` and the paren group
     # contains only space-separated type or class names (no lowercase
     # identifiers, commas, or operators), it's a param-type annotation.
     # Sync with the compiler's parser.w looks_like_param_types? helper.
@@ -2330,7 +2330,7 @@ module Tungsten
       types
     end
 
-    # Phase 3 lookahead: when @token is at `:TYPE`, is the token a
+    # Lookahead: when @token is at `:TYPE`, is the token a
     # return-type annotation? True iff what comes after it (modulo
     # trailing whitespace) is `:` (inline body), a newline, `;`, or EOF.
     # Rejects `type.method`, `type[idx]`, `type(args)` expression starts.

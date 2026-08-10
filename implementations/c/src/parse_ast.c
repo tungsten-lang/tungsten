@@ -2973,7 +2973,7 @@ static int parse_method_def_ast(TcAstParser *p, TcAstValue type_hints, TcAstValu
     /* Arity-suffix form (`-> +/1(BigInt)`): a paren group holding only
      * type names annotates the positional @N args — it must NOT be
      * swallowed as the param list. Mirrors compiler/lib/parser.w's
-     * phase-3 handling: params stay empty (compile_function_def
+     * signature-annotation handling: params stay empty (compile_function_def
      * synthesizes the __argN slots from the arity) and the group is
      * captured as param_types. */
     params = tc_ast_array_new(err);

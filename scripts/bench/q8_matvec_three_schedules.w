@@ -1,4 +1,4 @@
-# Phase 3 plan-required verification harness:
+# Verification harness:
 # "one algorithm, three schedules, three measurably-different MSL
 # outputs + three measurably-different GPU times."
 #

@@ -610,7 +610,7 @@ interpreter_specs=(
   spec/numeric/bigint_bang_spec.w
   spec/numeric/bigint_limb_sweep_spec.w
   spec/numeric/bigint_tag_sign_spec.w
-  # Exact-tag overload gate (B3/Phase 1): the interpreter's
+  # Exact-tag overload gate (B3): the interpreter's
   # overload_matches_args? carries a HAND-COPIED mirror of lowering's
   # tag-table rule; pin the interpreted side so a compiled-only change
   # cannot drift the copy.

@@ -3,7 +3,7 @@
 # This file is the thin orchestrator of the lowering module: its `use`
 # block below merges the compiler/lib/lowering/ workers (the order is
 # the worker dependency chain — `make lowering-graph` prints it), and
-# lower_ast drives them phase by phase: module setup, the top-level
+# lower_ast drives them in order: module setup, the top-level
 # registration walk, return-type inference, class initialization, then
 # body lowering through lower_program (pass_registry.w). Worker roles
 # are documented in each worker's header.
@@ -144,13 +144,13 @@ use lowering/definitions
   mod[:used_builtin_classes] = {}
   mod[:uses_argv] = false
 
-  # Phase 5: monomorphization registries.
+  # Monomorphization registries.
   # - class_method_asts[Class.method] → original method_def AST node
   #   (so specialize_method can clone it without re-parsing source).
   # - specialized_methods[Class.method.variant] → mangled fn name. Stub
   #   inserted before lowering body so recursive calls resolve via the cache.
   # - small_array_consts: list of {name, ebits, size, bytes} records for
-  #   compile-time const array literals (Phase 5g). Emitter writes each
+  #   compile-time const array literals. Emitter writes each
   #   as a private LLVM global; lowering ptrtoint's them at the load site.
   mod[:class_method_asts] = {}
   mod[:class_method_fn_names] = {}
@@ -323,7 +323,7 @@ use lowering/definitions
     ei += 1
   inferable_methods
 
-# Phase 3b: return-type inference runs as a fixed-point pass. Each
+# Return-type inference runs as a fixed-point pass. Each
 # iteration re-runs infer_return_type on every method/fn; if the
 # iteration changes any return type, we loop. This handles mutually
 # recursive methods where method A's return type depends on method B
@@ -337,7 +337,7 @@ use lowering/definitions
 # last-inferred type and a warning is emitted. Users can resolve by
 # annotating explicit return types on one method in the cycle.
 #
-# Explicit `:return_type` annotations (from Phase 3 inline signatures)
+# Explicit `:return_type` annotations (from inline signatures)
 # are LOCKED IN on iteration 0 and never overwritten. Only inferred
 # (nil-annotated) methods get updated per iteration.
 -> infer_return_types_fixed_point(mod, inferable_methods)
@@ -543,7 +543,7 @@ use lowering/definitions
       class_body = synthesize_overload_dispatchers(mod, cname, class_body)
       mod[:prepared_class_bodies][expr] = class_body
 
-      # Phase 6i follow-up: populate view_layouts in this pre-pass so that
+      # Populate view_layouts in this pre-pass so that
       # specialize_method's clone+re-lower (which can fire from user code
       # that runs BEFORE the class_def's own lower_class_def) finds the
       # layout when resolving `$field` accesses inside cloned method bodies.
@@ -795,19 +795,19 @@ use lowering/definitions
     slab_freeze_tmp = next_temp(main_fn)
     emit_instruction(main_fn, {op: :call_direct_i64, temp: slab_freeze_tmp, name: "w_slab_freeze_safe", args: []})
 
-  # Phase 5 (gap #2): pre-pass over class method ASTs to collect ivar
+  # Pre-pass (gap #2) over class method ASTs to collect ivar
   # types, so dispatch on `self.@arr.method()` can specialize when
   # @arr is statically typed. Runs after all class methods are
   # registered (mod[:class_method_asts] populated) so cross-method
   # ivar writes are visible.
   collect_ivar_types(mod)
 
-  # Phase 6e v0: AST-level escape pre-pass for SmallArray.new at top
+  # v0 AST-level escape pre-pass for SmallArray.new at top
   # level. Non-recursive (no nested-body walks); flips the # stack
   # annotation default to "on" for safe top-level patterns.
   mark_nonescaping_small_arrays(ast.expressions)
 
-  # Phase 6i: promote non-escaping, non-resized `i32[N]` (N<=255) locals to
+  # Promote non-escaping, non-resized `i32[N]` (N<=255) locals to
   # stack WSmallArrays. Recurses into every function/method body (unlike the
   # top-level-only SmallArray.new pass above). ~5.7x faster alloc + (with the
   # small-array rvalue reads routed through small_array_get_inline, lowering/ops.w)

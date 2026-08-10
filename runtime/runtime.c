@@ -29127,7 +29127,7 @@ int64_t w_lex32_scan_flag_pure(int64_t data_ptr, int64_t length, int64_t pos, in
     return w_lex32_scan_flag(data_ptr, length, pos, flag_mask_i64);
 }
 
-/* Phase 6.5 (#59) u8 SIMD: count occurrences of `needle` in a byte
+/* (#59) u8 SIMD: count occurrences of `needle` in a byte
  * array. 16 lanes per NEON cycle. Each chunk: vceqq_u8 → vshrq_n_u8(7)
  * collapses 0xFF to 1 and 0x00 to 0; vaddvq_u8 sums to a per-chunk
  * match count, accumulated across chunks. Total match count fits in
@@ -29154,7 +29154,7 @@ int64_t w_byte_scan_count(const uint8_t *data, int64_t size, uint8_t needle) {
     return total;
 }
 
-/* Phase 6.5 (#59) u8 SIMD: scan a byte array for the first occurrence
+/* (#59) u8 SIMD: scan a byte array for the first occurrence
  * of `needle`. 16 lanes per NEON cycle. Returns the byte index, or -1
  * on miss. Bounded — caller passes the live `size`; no sentinel needed
  * because we tail-loop the unaligned remainder.
@@ -29300,7 +29300,7 @@ int64_t w_byte_scan_count_any8(const uint8_t *data, int64_t size, int64_t a, int
     return total;
 }
 
-/* Phase 6.5 (#59) u8 SIMD: scan a byte array from the END for the last
+/* (#59) u8 SIMD: scan a byte array from the END for the last
  * occurrence of `needle`. 16 lanes per NEON cycle, marching backwards
  * one chunk at a time. Returns the byte index, or -1 on miss.
  *
@@ -29334,7 +29334,7 @@ int64_t w_byte_scan_eq_rev(const uint8_t *data, int64_t size, uint8_t needle) {
     return -1;
 }
 
-/* Phase 6.5 (#59) u8 SIMD: in-place byte replacement. For each chunk,
+/* (#59) u8 SIMD: in-place byte replacement. For each chunk,
  * build a mask of `old` matches via vceqq_u8 and use vbslq_u8 to select
  * between `new` (where mask is set) and the original byte (where not).
  * Returns the count of replaced bytes — useful for callers that want
@@ -29366,7 +29366,7 @@ int64_t w_byte_replace(uint8_t *data, int64_t size, uint8_t old_b, uint8_t new_b
     return total;
 }
 
-/* Phase 6.5 (#59) u16 SIMD scans. 8 lanes per 128-bit NEON cycle. The
+/* (#59) u16 SIMD scans. 8 lanes per 128-bit NEON cycle. The
  * bit-pattern equality compare doesn't care whether the array is u16
  * or i16 — the same vceqq_u16 produces the right answer for either
  * interpretation (twos-complement bits match across the sign). The
@@ -29422,7 +29422,7 @@ int64_t w_u16_scan_count(const uint16_t *data, int64_t size, uint16_t needle) {
     return total;
 }
 
-/* Phase 6.5 (#59) i32/u32 SIMD scans. 4 lanes per 128-bit NEON cycle.
+/* (#59) i32/u32 SIMD scans. 4 lanes per 128-bit NEON cycle.
  * Bit-pattern equality — same kernel covers both signed and unsigned
  * 32-bit interpretations.
  *
@@ -29531,7 +29531,7 @@ int64_t w_u32_scan_eq_rev(const uint32_t *data, int64_t size, uint32_t needle) {
     return -1;
 }
 
-/* Phase 6.5 (#59) u1 (bitpacked) SIMD scans. Each byte holds 8 bit-lanes.
+/* (#59) u1 (bitpacked) SIMD scans. Each byte holds 8 bit-lanes.
  * NEON `vcntq_u8` produces a per-byte popcount; horizontal-sum via
  * `vaddvq_u8` gives total set bits per 16-byte chunk (= 128 bits = 128
  * lanes per cycle).
@@ -29630,7 +29630,7 @@ int64_t w_u1_index_unset(const uint8_t *data, int64_t bit_size) {
     return -1;
 }
 
-/* Phase 6.5 (#59) i64/u64 SIMD scans. 2 lanes per 128-bit NEON cycle.
+/* (#59) i64/u64 SIMD scans. 2 lanes per 128-bit NEON cycle.
  * Bit-pattern equality — works for any 64-bit storage where the needle
  * has a unique bit pattern. Used for ebits=65 polymorphic arrays when
  * the needle is a NaN-boxed immediate (int, bool, nil) — those have
@@ -29704,7 +29704,7 @@ int64_t w_u64_scan_eq_rev(const uint64_t *data, int64_t size, uint64_t needle) {
     return -1;
 }
 
-/* Phase 6.5 (#59) threaded byte-scan: split the array across N pthreads,
+/* (#59) threaded byte-scan: split the array across N pthreads,
  * each running the serial scan kernel on its chunk. Used for very large
  * arrays where the serial scan time exceeds pthread spawn overhead.
  *
@@ -30448,7 +30448,7 @@ int64_t w_lex32_scan_to_cp2(int64_t data_ptr, int64_t length, int64_t pos,
     }
 }
 
-/* Phase 6.5 (#59) u8 SIMD: x86 / non-aarch64 scalar fallback for byte
+/* (#59) u8 SIMD: x86 / non-aarch64 scalar fallback for byte
  * scan. memchr() in modern libc is itself heavily SIMD-optimized
  * (typically AVX2 on x86), so this defers to it. */
 int64_t w_byte_scan_eq(const uint8_t *data, int64_t size, uint8_t needle) {
@@ -31192,7 +31192,7 @@ WValue w_ipv4_in_cidr(WValue ip, WValue cidr) {
     return (ip_addr & mask) == (cidr_addr & mask) ? W_TRUE : W_FALSE;
 }
 
-/* ---- IPv6 (Phase 6i.2: type byte 6 in W_SUBTAG_GENERIC bucket) ---- */
+/* ---- IPv6 (type byte 6 in W_SUBTAG_GENERIC bucket) ---- */
 WValue w_ipv6(const uint8_t *bytes, int cidr) {
     WNetAddr *na = calloc(1, sizeof(WNetAddr));
     na->type = W_TYPE_IPV6;
@@ -31452,7 +31452,7 @@ WValue w_ip_in_cidr(WValue ip, WValue cidr) {
     return W_FALSE;
 }
 
-/* ---- MAC (Phase 6i.2: type byte 5 in W_SUBTAG_GENERIC bucket) ---- */
+/* ---- MAC (type byte 5 in W_SUBTAG_GENERIC bucket) ---- */
 WValue w_mac(const uint8_t *bytes) {
     WNetAddr *na = calloc(1, sizeof(WNetAddr));
     na->type = W_TYPE_MAC;
@@ -31509,7 +31509,7 @@ WValue w_mac_parse(WValue str_v) {
     return w_mac(bytes);
 }
 
-/* ---- Encoded value (Phase 6i.2: type byte 8 in W_SUBTAG_GENERIC bucket) ---- */
+/* ---- Encoded value (type byte 8 in W_SUBTAG_GENERIC bucket) ---- */
 WValue w_encoded_value(uint8_t encoding, const uint8_t *decoded, int64_t decoded_len,
                        const char *display, int64_t display_len) {
     WEncodedValue *ev = calloc(1, sizeof(WEncodedValue));
@@ -32337,7 +32337,7 @@ static const char *w_type_label(WValue v) {
         /* Object pointer — identify by subtag */
         switch (v & 0xF) {
             case 0x0: return "object/generic";
-            case 0x1: return "object/atomic";       /* Phase 6i.2 */
+            case 0x1: return "object/atomic";
             case 0x4: return "object/instance";
             case 0x5: return "object/hash";
             case 0x6: return "object/closure";
@@ -32345,7 +32345,7 @@ static const char *w_type_label(WValue v) {
             case 0x8: return "object/range";
             case 0x9: return "object/small_array";
             case 0xA: return "object/array";
-            case 0xB: return "object/strbuf";       /* Phase 6i.2 (was bigint) */
+            case 0xB: return "object/strbuf";       /* was bigint */
             case 0xC: return "object/class";
             case 0xD: return "object/uuid";
             case 0xF: return "object/domain";
@@ -38204,7 +38204,7 @@ int64_t w_truthy(WValue v) {
 static __thread WValue g_array_pool[ARRAY_POOL_MAX];
 static __thread int g_array_pool_count = 0;
 
-/* Phase 4f: bare polymorphic-array constructor — no preset element type,
+/* Bare polymorphic-array constructor — no preset element type,
  * default cap. Use `w_array_new(ebits, cap)` for explicit typed allocation.
  * (C lacks overloading, so the void form gets a distinct name.) */
 WValue w_array_new_empty(void) {
@@ -38214,7 +38214,7 @@ WValue w_array_new_empty(void) {
         WArray *arr = (WArray *)w_as_ptr(v);
         arr->start = 0;
         arr->size = 0;
-        arr->flags = W_FLAG_OWNED;  /* Phase 4d: typed-style w_array_push checks this */
+        arr->flags = W_FLAG_OWNED;  /* typed-style w_array_push checks this */
         arr->ebits = 65;            /* w64 — recycled arrays still carry the polymorphic ebits */
         return v;
     }
@@ -38222,8 +38222,8 @@ WValue w_array_new_empty(void) {
     arr->start = 0;
     arr->size = 0;
     arr->cap = 8;
-    arr->flags = W_FLAG_OWNED;    /* Phase 4d: heap-allocated → owned, push/grow allowed */
-    arr->ebits = 65;              /* Phase 4c: polymorphic arrays carry ebits=w64 so the */
+    arr->flags = W_FLAG_OWNED;    /* heap-allocated → owned, push/grow allowed */
+    arr->ebits = 65;              /* polymorphic arrays carry ebits=w64 so the */
     arr->_pad[0] = 0;             /* typed-array machinery can drive their reads through */
     arr->_pad[1] = 0;             /* the same `slots` ptr without a struct re-cast. */
     arr->slots = malloc(sizeof(WValue) * arr->cap);
@@ -38353,7 +38353,7 @@ static void w_pool_stats_dump(void) {
 }
 
 /* Untyped arrays reuse the existing g_array_pool (see above). */
-/* Phase 4f: bare-poly recycle path; use w_array_recycle_or_new(ebits, cap)
+/* Bare-poly recycle path; use w_array_recycle_or_new(ebits, cap)
  * for the typed/bucketed pool. */
 WValue w_array_recycle_or_new_empty(void) {
     if (g_array_pool_count > 0) { w_pool_stat_hit(POOL_KIND_ARRAY); }
@@ -38478,7 +38478,7 @@ WValue w_strbuf_recycle_or_new(int64_t cap) {
     w_pool_stat_miss(POOL_KIND_STRBUF);
     if (cap < 16) cap = 16;
     WStrBuf *sb = malloc(sizeof(WStrBuf));
-    sb->flags = 0;  /* Phase 6i.2: type field removed (promoted to W_SUBTAG_STRBUF) */
+    sb->flags = 0;  /* type field removed (promoted to W_SUBTAG_STRBUF) */
     sb->data = malloc(cap);
     sb->data[0] = '\0';
     sb->size = 0;
@@ -38501,8 +38501,8 @@ void w_strbuf_recycle(WValue v) {
 /* Call-site reuse allocation: the compiler emits a thread-local slot per
  * safe allocation site. First call on a given thread allocates and stores the
  * pointer into the slot; subsequent calls reset length and return the cached
- * value. Zero malloc steady-state for non-escaping locals. Phase 4f: bare-poly
- * form; the typed/sized variant takes (slot, ebits, cap). */
+ * value. Zero malloc steady-state for non-escaping locals. This is the
+ * bare-poly form; the typed/sized variant takes (slot, ebits, cap). */
 WValue w_array_reuse_or_new_empty(WValue *slot) {
     WValue v = *slot;
     if (v != W_NIL) {
@@ -38516,7 +38516,7 @@ WValue w_array_reuse_or_new_empty(WValue *slot) {
     return v;
 }
 
-/* Phase 4f: typed_array_* renamed to canonical w_array_* below. The
+/* typed_array_* renamed to canonical w_array_* below. The
  * polymorphic-vs-typed split is now an `ebits` discriminator inside the
  * single WArray struct (ebits=65 → polymorphic, else typed). */
 
@@ -39618,7 +39618,7 @@ WValue w_hash_reuse_and_drain_or_new(WValue *slot) {
             /* Circular-ref guard — never recycle the hash back into itself. */
             if (val == self_v) continue;
             if (w_is_array(val)) {
-                /* Phase 4f: subtag merge — discriminate poly (ebits=65) vs
+                /* Subtag merge — discriminate poly (ebits=65) vs
                  * typed (ebits ∈ {4,8,16,32,64,-32,-64}) by ebits to route
                  * each to its correct pool. */
                 WArray *a = (WArray *)w_as_ptr(val);
@@ -40876,8 +40876,8 @@ WValue __w_read_file(WValue path_val) {
  * closed at mmap time — POSIX guarantees the mapping survives. Raises
  * on missing file / mmap failure.
  *
- * Used as the zero-copy on-ramp for tungsten-llama's GGUF loader; a
- * later phase wires `Mmap#as_u8`/`as_f32` etc. to expose the bytes as
+ * Used as the zero-copy on-ramp for tungsten-llama's GGUF loader;
+ * `Mmap#as_u8`/`as_f32` etc. expose the bytes as
  * non-owning typed-array views. */
 WValue __w_file_mmap(WValue path_val) {
     const char *path = as_str(path_val);
@@ -40951,7 +40951,7 @@ static inline int64_t array_storage_bits(int64_t bits);
 /* Mmap#as_<type> — return a non-owning typed-array view of the mmap's
  * bytes. element_bits encoding follows WArray's ebits convention; the
  * view's length is mmap_byte_length / sizeof(element). */
-/* Phase 4: returns a WBigArray view (i64 fields) so the i32 demote on
+/* Returns a WBigArray view (i64 fields) so the i32 demote on
  * WArray/WArray can land safely. File sizes routinely exceed
  * INT32_MAX once divided by element width (a 5 GB GGUF mmap viewed as
  * u8 has ~5 G elements — well past i32). The view is zero-copy: the
@@ -42384,7 +42384,7 @@ WValue __w_prime_aks(WValue n) {
 #define WN_cross   W_M5("cross")
 #define WN_scale   W_M5("scale")
 #define WN_sumsq   W_M5("sumsq")
-/* Phase 4e: short SSO names for the new arr.fill / arr.view intrinsics */
+/* Short SSO names for the new arr.fill / arr.view intrinsics */
 #define WN_fill    W_M4("fill")
 #define WN_view    W_M4("view")
 #define WN_data    W_M4("data")
@@ -42592,7 +42592,7 @@ static WValue WN_find_index = 0, WN_each_with_index = 0;
 static WValue WN_match_q = 0;
 static WValue WN_fastsum = 0, WN_scale_bang = 0;
 static WValue WN_matvec_i8 = 0, WN_matmul_i8 = 0;
-/* Phase 4e: long-name intrinsics on typed arrays */
+/* Long-name intrinsics on typed arrays */
 static WValue WN_raw_ptr = 0;
 static WValue WN_slice_view = 0;
 static WValue WN_stable_sort = 0;
@@ -42679,7 +42679,7 @@ static void w_init_method_names(void) {
 
 static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue args_arr);
 
-/* Phase 4f follow-up forward decl: the body lives with the typed-array
+/* Forward decl: the body lives with the typed-array
  * helpers. Native storage/leaf methods (each, any?/all?/none?, compact, dup,
  * uniq, count/index) use it so non-w64 arrays decode per ebits. Enumerable
  * combinators consume those decoded values through Array#each. */
@@ -43071,7 +43071,7 @@ static WValue w_ic_array_push(WValue r, WValue *a, int c) {
     return w_array_push(r, a[0]);
 }
 static WValue w_ic_array_pop(WValue r, WValue *a, int c)     { (void)a; (void)c; return w_array_pop(r); }
-/* Phase 7+d (#62 fix): use array_slot_load_decoded for the typed-array
+/* (#62 fix) use array_slot_load_decoded for the typed-array
  * cases (all ebits except 65, including packed u64 at ebits=64). The earlier
  * slots[i] direct-index was correct only for ebits == 65 (WValue-stride
  * storage); on packed arrays it read
@@ -43118,7 +43118,7 @@ static WValue w_ic_array_clear(WValue r, WValue *a, int c) {
 static WValue w_ic_array_include(WValue r, WValue *a, int c) {
     (void)c;
     WArray *arr = as_array(r);
-    /* Phase 6.5 (#59) typed-array SIMD fast path. */
+    /* (#59) typed-array SIMD fast path. */
     if (arr->ebits == 1 && (a[0] == W_TRUE || a[0] == W_FALSE) && (arr->start & 7) == 0) {
         int64_t idx = (a[0] == W_TRUE)
             ? w_u1_index_set((const uint8_t *)arr->slots + (arr->start >> 3), arr->size)
@@ -43167,7 +43167,7 @@ static WValue w_ic_array_include(WValue r, WValue *a, int c) {
     return W_FALSE;
 }
 
-/* Phase 7+f: typed-array math + view methods migrated from cascade. */
+/* Typed-array math + view methods migrated from cascade. */
 static WValue w_ic_array_fill(WValue r, WValue *a, int c) {
     if (c < 1) die("fill requires 1 argument");
     return w_array_fill(r, a[0]);
@@ -43344,7 +43344,7 @@ static WValue w_ic_array_matmul_i8(WValue r, WValue *a, int c) {
     if (c < 4) die("matmul_i8 requires 4 arguments");
     return w_array_matmul_i8(r, a[0], a[1], a[2], a[3]);
 }
-/* Phase 7+n: array count, find_index/index, last_index, replace_byte!, delete_at.
+/* Array count, find_index/index, last_index, replace_byte!, delete_at.
  * These keep the typed-array SIMD fast paths the cascade had. */
 static WValue w_ic_array_count(WValue r, WValue *a, int c) {
     WArray *arr = as_array(r);
@@ -43543,7 +43543,7 @@ static WValue w_ic_array_none_q(WValue r, WValue *a, int c) {
         if (w_truthy(array_slot_load_decoded(arr, i))) return W_FALSE;
     return W_TRUE;
 }
-/* Phase 7+j: uniq, take, drop, minmax. */
+/* uniq, take, drop, minmax. */
 static WValue w_ic_array_uniq(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WArray *arr = as_array(r);
@@ -43602,7 +43602,7 @@ static WValue w_ic_array_minmax(WValue r, WValue *a, int c) {
     return result_arr;
 }
 
-/* Phase 7+e: Array unshift/sort/reverse/copy migrated from cascade. */
+/* Array unshift/sort/reverse/copy migrated from cascade. */
 static WValue w_ic_array_unshift(WValue r, WValue *a, int c) {
     if (c < 1) die("unshift requires 1 argument");
     return w_array_unshift(r, a[0]);
@@ -43647,7 +43647,7 @@ static WValue w_ic_array_copy(WValue r, WValue *a, int c) {
 }
 
 /* `.slice(start, len)` — zero-copy view into the receiver's storage.
- * Phase 4f rename: slice now connotes the view (`arr[from..to]`), and
+ * Renamed: slice now connotes the view (`arr[from..to]`), and
  * `.copy(...)` is the value-copying counterpart. Implemented as an alias
  * for `.slice_view` so the same handler covers any WArray ebits including
  * 8 (bytes). Mutations to a view alias the parent's buffer. */
@@ -43657,7 +43657,7 @@ static WValue w_ic_array_slice(WValue r, WValue *a, int c) {
 }
 
 /* String builtin wrappers */
-/* Phase 7+g: String case-conversion and predicate methods. */
+/* String case-conversion and predicate methods. */
 static WValue w_ic_string_idx(WValue r, WValue *a, int c) {
     if (c < 1) die("[] requires 1 argument");
     char buf[6]; const char *s; size_t len;
@@ -43748,14 +43748,14 @@ static WValue w_ic_string_repeat(WValue r, WValue *a, int c) {
     if (c < 1) die("repeat requires 1 argument");
     return w_string_repeat(r, a[0]);
 }
-/* Phase 7+q: `string =~ regex` and `string.match?(regex)` swap so the
+/* `string =~ regex` and `string.match?(regex)` swap so the
  * regex receives the call. Mirrors the cascade's pre-7+g behavior. */
 static WValue w_ic_string_matchop(WValue r, WValue *a, int c) {
     if (c < 1 || !w_is_regex(a[0]))
         dief("=~ requires a Regex argument");
     return w_regex_match(a[0], r);
 }
-/* Phase 7+h: String UTF-8 / parse / mutate / convert. */
+/* String UTF-8 / parse / mutate / convert. */
 static WValue w_ic_string_chars(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     char buf[6]; const char *str; size_t str_len;
@@ -47427,7 +47427,7 @@ WValue w_bigint_seal_raw(WValue v, int64_t signed_size) {
     return bigint_normalize(b);
 }
 
-/* Bigint builtin wrappers (Phase 7+m) */
+/* Bigint builtin wrappers */
 static WValue w_ic_bigint_to_s(WValue r, WValue *a, int c) {
     int base = w_to_s_base_arg(a, c);
     int32_t s;
@@ -47600,7 +47600,7 @@ static WValue w_ic_atomic_add(WValue r, WValue *a, int c) {
     return w_atomic_add(r, a[0]);
 }
 
-/* Phase 7+p: BigArray and SmallArray inline fast paths. */
+/* BigArray and SmallArray inline fast paths. */
 /* Generic-dispatch `[]` / `[]=` must be bounds-checked — the unchecked
  * idx twins are for direct-emitted call sites with proven bounds (see
  * w_ic_array_idx). */
@@ -47771,7 +47771,7 @@ static WValue w_ic_int_times(WValue r, WValue *a, int c) {
     return W_NIL;
 }
 
-/* StringBuffer builtin wrappers (Phase 7+n) */
+/* StringBuffer builtin wrappers */
 static WValue w_ic_strbuf_to_s(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_strbuf_to_s(r);
@@ -47943,18 +47943,18 @@ static WICEntry w_ic_array_table[] = {
     {0, w_ic_array_push},     /* WN_push — patched at init */
     {0, w_ic_array_pop},
     {0, w_ic_array_shift},
-    {0, w_ic_array_idx},      /* WN_idx ([]) — unchecked (Phase 7+c fix) */
+    {0, w_ic_array_idx},      /* WN_idx ([]) — unchecked */
     {0, w_ic_array_idxset},   /* WN_idxset ([]=) — unchecked */
     {0, w_ic_array_include},  /* WN_has_q (canonical) — handler still named _include for now */
-    {0, w_ic_array_clear},    /* WN_clear (Phase 7+b: migrated from cascade) */
-    {0, w_ic_array_get},      /* WN_get — bounds-checked (Phase 7+c) */
+    {0, w_ic_array_clear},    /* WN_clear (migrated from cascade) */
+    {0, w_ic_array_get},      /* WN_get — bounds-checked */
     {0, w_ic_array_set},      /* WN_set — bounds-checked */
-    {0, w_ic_array_include},  /* WN_include_q — legacy alias for has? (Phase 7+d) */
-    {0, w_ic_array_unshift},  /* Phase 7+e */
-    {0, w_ic_array_sort},     /* Phase 7+e */
+    {0, w_ic_array_include},  /* WN_include_q — legacy alias for has? */
+    {0, w_ic_array_unshift},
+    {0, w_ic_array_sort},
     {0, w_ic_array_stable_sort}, /* slot 12: was reverse (retired to core) */
-    {0, w_ic_array_copy},     /* Phase 7+e */
-    {0, w_ic_array_fill},       /* Phase 7+f */
+    {0, w_ic_array_copy},
+    {0, w_ic_array_fill},
     {0, w_ic_array_view},
     {0, w_ic_array_slice_view},
     {0, w_ic_array_data},
@@ -47973,15 +47973,15 @@ static WICEntry w_ic_array_table[] = {
     {0, w_ic_array_sqrt},
     {0, w_ic_array_matvec_i8},
     {0, w_ic_array_matmul_i8},
-    {0, w_ic_array_uniq},        /* Phase 7+j */
+    {0, w_ic_array_uniq},
     {0, w_ic_array_take},
     {0, w_ic_array_drop},
     {0, w_ic_array_minmax},
-    {0, w_ic_array_each},        /* Phase 7+k */
+    {0, w_ic_array_each},
     {0, w_ic_array_any_q},
     {0, w_ic_array_all_q},
     {0, w_ic_array_none_q},
-    {0, w_ic_array_count},        /* Phase 7+n */
+    {0, w_ic_array_count},
     {0, w_ic_array_find_index},   /* WN_find_index */
     {0, w_ic_array_find_index},   /* WN_index — same handler */
     {0, w_ic_array_last_index},
@@ -47995,7 +47995,7 @@ static WICEntry w_ic_array_table[] = {
 };
 
 static WICEntry w_ic_string_table[] = {
-    {0, w_ic_string_idx},         /* Phase 7+g */
+    {0, w_ic_string_idx},
     {0, w_ic_string_upcase},
     {0, w_ic_string_downcase},
     {0, w_ic_string_swapcase},
@@ -48010,7 +48010,7 @@ static WICEntry w_ic_string_table[] = {
     {0, w_ic_string_ascii_q},
     {0, w_ic_string_valid_utf8_q},
     {0, w_ic_string_repeat},
-    {0, w_ic_string_chars},        /* Phase 7+h */
+    {0, w_ic_string_chars},
     {0, w_ic_string_codes},
     {0, w_ic_string_lchs},
     {0, w_ic_string_bytes},
@@ -48026,7 +48026,7 @@ static WICEntry w_ic_string_table[] = {
     {0, w_ic_string_replace},      /* WN_replace */
     {0, w_ic_string_replace},      /* WN_gsub — same handler */
     {0, w_ic_string_index},
-    {0, w_ic_string_matchop},   /* WN_matchop — Phase 7+q */
+    {0, w_ic_string_matchop},   /* WN_matchop */
     {0, w_ic_string_matchop},   /* WN_match_q — same handler */
     {0, w_ic_string_rindex},    /* WN_rindex */
     {0, w_ic_string_reverse},   /* WN_reverse */
@@ -48042,7 +48042,7 @@ static WICEntry w_ic_int_table[] = {
     {0, w_ic_int_to_f},
     {0, w_ic_int_chr},
     {0, w_ic_int_gcd},
-    {0, w_ic_int_times},       /* Phase 7+o */
+    {0, w_ic_int_times},
     {0, w_ic_int_sqrt},
     {0, w_ic_int_times},       /* each ≡ times for ints: iterate self times. Lets
                                 * a runtime-dispatched `n.each(block)` (e.g. the
@@ -48057,7 +48057,7 @@ static WICEntry w_ic_int_table[] = {
     {0, NULL}
 };
 
-static WICEntry w_ic_big_array_table[] = { /* Phase 7+p */
+static WICEntry w_ic_big_array_table[] = {
     {0, w_ic_big_array_idx},
     {0, w_ic_big_array_idxset},
     {0, w_ic_big_array_get},
@@ -48067,7 +48067,7 @@ static WICEntry w_ic_big_array_table[] = { /* Phase 7+p */
     {0, NULL}
 };
 
-static WICEntry w_ic_small_array_table[] = { /* Phase 7+p */
+static WICEntry w_ic_small_array_table[] = {
     {0, w_ic_small_array_idx},
     {0, w_ic_small_array_idxset},
     {0, w_ic_small_array_get},
@@ -48075,7 +48075,7 @@ static WICEntry w_ic_small_array_table[] = { /* Phase 7+p */
     {0, NULL}
 };
 
-static WICEntry w_ic_regex_table[] = {     /* Phase 7+o */
+static WICEntry w_ic_regex_table[] = {
     {0, w_ic_regex_match},  /* WN_case_eq */
     {0, w_ic_regex_match},  /* WN_matchop */
     {0, w_ic_regex_match},  /* WN_match_q */
@@ -48089,7 +48089,7 @@ static WICEntry w_ic_thread_table[] = {
     {0, NULL}
 };
 
-static WICEntry w_ic_socket_table[] = {    /* Phase 7+o */
+static WICEntry w_ic_socket_table[] = {
     {0, w_ic_socket_accept},
     {0, w_ic_socket_read},
     {0, w_ic_socket_read_exact},
@@ -48105,7 +48105,7 @@ static WICEntry w_ic_socket_table[] = {    /* Phase 7+o */
     {0, NULL}
 };
 
-static WICEntry w_ic_mmap_table[] = {      /* Phase 7+o */
+static WICEntry w_ic_mmap_table[] = {
     {0, w_ic_mmap_close},
     {0, w_ic_mmap_byte_at},
     {0, w_ic_mmap_idx},
@@ -48113,14 +48113,14 @@ static WICEntry w_ic_mmap_table[] = {      /* Phase 7+o */
     {0, NULL}
 };
 
-static WICEntry w_ic_strbuf_table[] = {    /* Phase 7+n */
+static WICEntry w_ic_strbuf_table[] = {
     {0, w_ic_strbuf_to_s},
     {0, w_ic_strbuf_include},
     {0, w_ic_strbuf_starts_with},
     {0, NULL}
 };
 
-static WICEntry w_ic_bigint_table[] = {    /* Phase 7+m */
+static WICEntry w_ic_bigint_table[] = {
     {0, w_ic_bigint_to_s},
     {0, w_ic_bigint_gcd},
     {0, w_ic_bigint_abs},
@@ -48450,7 +48450,7 @@ static WICEntry w_ic_atomic_table[] = {
     {0, NULL}
 };
 
-static WICEntry w_ic_hash_table[] = {      /* Phase 7+l */
+static WICEntry w_ic_hash_table[] = {
     {0, w_ic_hash_has_key},
     {0, w_ic_hash_keys},
     {0, w_ic_hash_values},
@@ -48464,7 +48464,7 @@ static WICEntry w_ic_hash_table[] = {      /* Phase 7+l */
     {0, NULL}
 };
 
-static WICEntry w_ic_float_table[] = {     /* Phase 7+i */
+static WICEntry w_ic_float_table[] = {
     {0, w_ic_float_to_i},
     {0, w_ic_float_to_s},
     {0, w_ic_float_sqrt},
@@ -48527,15 +48527,15 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[3].name  = WN_idx;
     w_ic_array_table[4].name  = WN_idxset;
     w_ic_array_table[5].name  = WN_has_q;     /* canonical Array#has? — IC fast path */
-    w_ic_array_table[6].name  = WN_clear;     /* Phase 7+b */
-    w_ic_array_table[7].name  = WN_get;       /* Phase 7+c */
-    w_ic_array_table[8].name  = WN_set;       /* Phase 7+c */
-    w_ic_array_table[9].name  = WN_include_q; /* Phase 7+d: legacy alias for has? */
-    w_ic_array_table[10].name = WN_unshift;   /* Phase 7+e */
+    w_ic_array_table[6].name  = WN_clear;
+    w_ic_array_table[7].name  = WN_get;
+    w_ic_array_table[8].name  = WN_set;
+    w_ic_array_table[9].name  = WN_include_q; /* legacy alias for has? */
+    w_ic_array_table[10].name = WN_unshift;
     w_ic_array_table[11].name = WN_sort;
     w_ic_array_table[12].name = WN_stable_sort; /* reclaimed from retired reverse */
     /* Slot 13 (copy) retired to core/array.w. */
-    w_ic_array_table[14].name = WN_fill;       /* Phase 7+f */
+    w_ic_array_table[14].name = WN_fill;
     w_ic_array_table[15].name = WN_view;
     w_ic_array_table[16].name = WN_slice_view;
     w_ic_array_table[17].name = WN_data;
@@ -48554,14 +48554,14 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[30].name = WN_sqrt;
     w_ic_array_table[31].name = WN_matvec_i8;
     w_ic_array_table[32].name = WN_matmul_i8;
-    /* Slots 33-36 (uniq/take/drop/minmax, Phase 7+j) are retired: their
+    /* Slots 33-36 (uniq/take/drop/minmax) are retired: their
      * implementations moved to core/array.w, so the names stay unregistered
      * and dispatch falls through to the Tungsten type-class bodies. */
-    w_ic_array_table[37].name = WN_each;        /* Phase 7+k */
+    w_ic_array_table[37].name = WN_each;
     w_ic_array_table[38].name = WN_any_q;
     w_ic_array_table[39].name = WN_all_q;
     w_ic_array_table[40].name = WN_none_q;
-    w_ic_array_table[41].name = WN_count;          /* Phase 7+n */
+    w_ic_array_table[41].name = WN_count;
     w_ic_array_table[42].name = WN_find_index;
     w_ic_array_table[43].name = WN_index;
     w_ic_array_table[44].name = WN_last_index;
@@ -48572,7 +48572,7 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[49].name = WN_log;
     w_ic_array_table[50].name = WN_tan;
     /* String */
-    w_ic_string_table[0].name  = WN_idx;          /* Phase 7+g */
+    w_ic_string_table[0].name  = WN_idx;
     /* Slot 1 (upcase) retired to core/string_native.w. */
     /* Slot 2 (downcase) retired to core/string_native.w. */
     /* Slots 3-4 (swapcase/capitalize) retired to core/string_native.w. */
@@ -48602,7 +48602,7 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[28].name = WN_replace;
     w_ic_string_table[29].name = WN_gsub;
     w_ic_string_table[30].name = WN_index;
-    w_ic_string_table[31].name = WN_matchop;     /* Phase 7+q */
+    w_ic_string_table[31].name = WN_matchop;
     w_ic_string_table[32].name = WN_match_q;
     w_ic_string_table[33].name = WN_rindex;
     /* Slot 34 (reverse) retired to core/string_native.w. */
@@ -48615,7 +48615,7 @@ static void w_init_ic_tables(void) {
     w_ic_int_table[2].name    = WN_to_f;
     /* Slot 3 (chr) retired to core/integer.w. */
     /* Slot 4 (gcd) retired to core/integer.w; bigint receivers keep theirs. */
-    w_ic_int_table[5].name    = WN_times;     /* Phase 7+o — added below */
+    w_ic_int_table[5].name    = WN_times;     /* added below */
     w_ic_int_table[6].name    = WN_sqrt;
     w_ic_int_table[7].name    = WN_each;      /* each ≡ times for ints */
     w_ic_int_table[8].name    = WN_prime_q;
@@ -48624,27 +48624,27 @@ static void w_init_ic_tables(void) {
     /* Slot 11 (lcm) retired to core/integer.w; bigint receivers keep theirs. */
     w_ic_int_table[12].name   = WN_isqrt;
     w_ic_int_table[13].name   = WN_to_d;
-    /* BigArray (Phase 7+p) */
+    /* BigArray */
     w_ic_big_array_table[0].name   = WN_idx;
     w_ic_big_array_table[1].name   = WN_idxset;
     w_ic_big_array_table[2].name   = WN_get;
     w_ic_big_array_table[3].name   = WN_set;
     w_ic_big_array_table[4].name   = WN_push;
     w_ic_big_array_table[5].name   = WN_subview;
-    /* SmallArray (Phase 7+p) */
+    /* SmallArray */
     w_ic_small_array_table[0].name = WN_idx;
     w_ic_small_array_table[1].name = WN_idxset;
     w_ic_small_array_table[2].name = WN_get;
     w_ic_small_array_table[3].name = WN_set;
-    /* Regex (Phase 7+o) */
+    /* Regex */
     w_ic_regex_table[0].name  = WN_case_eq;
     w_ic_regex_table[1].name  = WN_matchop;
     w_ic_regex_table[2].name  = WN_match_q;
     w_ic_regex_table[3].name  = WN_to_s;
-    /* Thread (Phase 7+o) */
+    /* Thread */
     w_ic_thread_table[0].name = WN_join;
     w_ic_thread_table[1].name = WN_kill;
-    /* Socket (Phase 7+o) */
+    /* Socket */
     w_ic_socket_table[0].name = WN_accept;
     w_ic_socket_table[1].name = WN_read;
     w_ic_socket_table[2].name = WN_read_exact;
@@ -48657,16 +48657,16 @@ static void w_init_ic_tables(void) {
     w_ic_socket_table[9].name = WN_serve_http;
     w_ic_socket_table[10].name = WN_read_into;
     w_ic_socket_table[11].name = WN_write_slice;
-    /* Mmap (Phase 7+o) */
+    /* Mmap */
     w_ic_mmap_table[0].name   = WN_close;
     w_ic_mmap_table[1].name   = WN_byte_at;
     w_ic_mmap_table[2].name   = WN_idx;
     w_ic_mmap_table[3].name   = WN_view_at;
-    /* StringBuffer (Phase 7+n) */
+    /* StringBuffer */
     w_ic_strbuf_table[0].name  = WN_to_s;
     w_ic_strbuf_table[1].name  = WN_include_q;
     w_ic_strbuf_table[2].name  = WN_starts_with_q;
-    /* Bigint (Phase 7+m) */
+    /* Bigint */
     /* Slot 0 (to_s) is retired: BigInt#to_s in core/numeric/big_int.w is
      * a source shim over the exported w_bigint_to_s boundary. The static
      * :int-receiver intercept (method_call.w) keeps routing typed sites
@@ -48688,15 +48688,15 @@ static void w_init_ic_tables(void) {
     /* Slot 9 (isqrt) is retired: BigInt#isqrt completes positive one-limb
      * magnitudes in source and uses bigint_isqrt_any for wider/negative
      * fallbacks. */
-    /* Channel (Phase 7+m) */
+    /* Channel */
     w_ic_channel_table[0].name = WN_send;
     w_ic_channel_table[1].name = WN_close;
-    /* Atomic (Phase 7+m) */
+    /* Atomic */
     w_ic_atomic_table[0].name  = WN_cas;
     w_ic_atomic_table[1].name  = WN_get;
     w_ic_atomic_table[2].name  = WN_set;
     w_ic_atomic_table[3].name  = WN_add;
-    /* Hash (Phase 7+l) */
+    /* Hash */
     w_ic_hash_table[0].name   = WN_has_key_q;
     w_ic_hash_table[1].name   = WN_keys;
     w_ic_hash_table[2].name   = WN_values;
@@ -48751,16 +48751,16 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
             if (is_currency_any(recv)) return NULL;
             if (is_quantity_any(recv)) { table = w_ic_quantity_table; break; }
             table = w_ic_decimal_table; break;  /* 0xFFFD numeric (decimal) */
-        case 0x05: table = w_ic_hash_table;    break;  /* Phase 7+l */
-        case 0x01: table = w_ic_atomic_table;  break;  /* Phase 7+m */
+        case 0x05: table = w_ic_hash_table;    break;
+        case 0x01: table = w_ic_atomic_table;  break;
         case 0x84: table = w_ic_channel_table; break;  /* 0x80 | W_TYPE_CHANNEL=4 */
         case W_SUBTAG_BIGINT: table = w_ic_bigint_table; break;
-        case 0x0B: table = w_ic_strbuf_table;  break;  /* W_SUBTAG_STRBUF (Phase 7+n) */
-        case 0x07: table = w_ic_regex_table;   break;  /* W_SUBTAG_REGEX (Phase 7+o) */
+        case 0x0B: table = w_ic_strbuf_table;  break;  /* W_SUBTAG_STRBUF */
+        case 0x07: table = w_ic_regex_table;   break;  /* W_SUBTAG_REGEX */
         case 0x81: table = w_ic_thread_table;  break;  /* 0x80 | W_TYPE_THREAD=1 */
         case 0x83: table = w_ic_socket_table;  break;  /* 0x80 | W_TYPE_SOCKET=3 */
         case 0x91: table = w_ic_mmap_table;    break;  /* 0x80 | W_TYPE_MMAP=17 */
-        case 0x92: table = w_ic_big_array_table;   break;  /* 0x80 | W_TYPE_BIG_ARRAY=18 (Phase 7+p) */
+        case 0x92: table = w_ic_big_array_table;   break;  /* 0x80 | W_TYPE_BIG_ARRAY=18 */
         case 0x09: table = w_ic_small_array_table; break;  /* W_SUBTAG_SMALL_ARRAY=9 */
         case 0xE4: table = w_ic_date_table;        break;  /* packed date subtype 4 */
         case 0xE5: table = w_ic_ipv4_table;        break;  /* packed IPv4 subtype 5 */
@@ -48836,7 +48836,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
     if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
         w_dispatch_init();
 
-    /* Phase 7+a (#45): try IC resolve BEFORE the cascade. Builtin
+    /* (#45) try IC resolve BEFORE the cascade. Builtin
      * methods registered in the per-type IC tables (Array, String, Int)
      * dispatch directly to their handler — no cascade walk on the
      * first call, just a populate-and-return. Methods not in any IC
@@ -49213,7 +49213,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
         if (result != W_UNDEF) return result;
     }
 
-    /* Phase 7+e: try IC table for migrated builtins. Lets w_method_call /
+    /* Try IC table for migrated builtins. Lets w_method_call /
      * w_method_call_fast (which bypass the cached fast path) reach the
      * IC handlers without falling through to a stale cascade entry. */
     {
@@ -49237,21 +49237,21 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
      * cas/get/set/add, Channel send/close, and Thread join/kill use ICs.
      * The four bounded synchronization leaves fall through to core sources. */
 
-    /* Phase 6i.1: ByteArray method dispatch removed — ByteArray is a
+    /* ByteArray method dispatch removed — ByteArray is a
      * WArray<u8>. Header query leaves reach Array's Tungsten type class;
      * get/set/idx/idxset/copy/etc. use the standard array IC above.
      * WN_concat is likewise handled by the type-class table. */
 
-    /* Phase 6i.1b: BoolArray dispatch removed — BoolArray is a WArray<u1>.
+    /* BoolArray dispatch removed — BoolArray is a WArray<u1>.
      * Query leaves reach Array's Tungsten type class; idx/idxset/each retain
      * the standard array path, whose ebits=1 cases convert bits ↔ Bool. */
 
-    /* Phase 7+p: BigArray (key 0x92) and SmallArray (key 0x09) inline fast
+    /* BigArray (key 0x92) and SmallArray (key 0x09) inline fast
      * paths live in their IC tables. Methods not in IC fall through here;
      * the global type-class dispatch at the bottom catches user-defined
      * trait methods (each, map, etc. from core/big_array.w / small_array.w). */
 
-    /* Phase 7+f: typed-array storage/mutation methods (fill, view,
+    /* Typed-array storage/mutation methods (fill, view,
      * slice_view, data, raw_ptr, push, pop, shift, unshift, idx, idxset,
      * get, set, min, max, sum, fastsum, sumsq, dot, cross, scale, scale!,
      * cos, sin, sqrt, matvec_i8, matmul_i8, sort) live in the Array IC.
@@ -49383,7 +49383,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             return w_bytes_new(len);
         }
 
-        /* BoolArray.new(length) — Phase 6i.1b: returns a bit-packed WArray<u1> */
+        /* BoolArray.new(length) — returns a bit-packed WArray<u1> */
         if (strcmp(klass->name, "BoolArray") == 0 && w_hash_key_eq(name, WN_new)) {
             int64_t len = (args->size > 0) ? w_as_int(args->slots[0]) : 0;
             return w_bool_array_new(len);
@@ -49508,7 +49508,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
     }
 
     /* ---- StringBuffer methods ---- */
-    /* Phase 7+n: retained StringBuffer primitives (to_s, include?,
+    /* Retained StringBuffer primitives (to_s, include?,
      * starts_with?) live in w_ic_strbuf_table; size is source-defined. */
 
     /* Universal to_s fallback for any type */
@@ -49875,7 +49875,7 @@ void w_thread_unregister(void) {
     /* No-op: GC removed */
 }
 
-/* ---- Thread primitives (Phase 1) ---- */
+/* ---- Thread primitives ---- */
 
 static void w_thread_mark_stopped(void *arg) {
     WThread *t = (WThread *)arg;
@@ -50215,7 +50215,7 @@ WValue w_signal_trap(int signum, WValue closure) {
     return W_NIL;
 }
 
-/* ---- Atomic operations (Phase 2) ---- */
+/* ---- Atomic operations ---- */
 
 static WAtomic *as_atomic(WValue v) {
     if (!w_is_atomic(v)) die("expected atomic");
@@ -50224,7 +50224,7 @@ static WAtomic *as_atomic(WValue v) {
 
 WValue w_atomic_new(WValue initial) {
     WAtomic *a = calloc(1, sizeof(WAtomic));
-    /* Phase 6i.2: type field gone — WAtomic now lives at W_SUBTAG_ATOMIC */
+    /* type field gone — WAtomic now lives at W_SUBTAG_ATOMIC */
     int64_t val = w_is_int(initial) ? w_as_int(initial) : 0;
     atomic_store(&a->value, val);
     return w_box_ptr(a, W_SUBTAG_ATOMIC);
@@ -50330,9 +50330,9 @@ WValue w_atomic_decrement(WValue a) {
     return w_box_int(old - 1);
 }
 
-/* ---- TCP Sockets (Phase 3) ---- */
+/* ---- TCP Sockets ---- */
 
-/* Forward declarations for goroutine parking (definitions in Phase 4 section below) */
+/* Forward declarations for goroutine parking (definitions in the goroutine scheduler section below) */
 extern __thread WGoroutine *g_current;
 extern __thread WContext g_scheduler_ctx;
 extern __thread WProcessor *p_current;
@@ -50874,7 +50874,7 @@ int64_t w_raw_memmove(int64_t dst, int64_t src, int64_t len) {
     return 0;
 }
 
-/* ---- ALPN protocol query (Phase 8b) ---- */
+/* ---- ALPN protocol query ---- */
 
 /* Implementation in tls.c when TLS enabled, stub below for non-TLS */
 #ifndef TUNGSTEN_TLS
@@ -50884,10 +50884,10 @@ WValue w_socket_alpn_protocol(WValue sock) {
 }
 #endif
 
-/* ---- ByteArray (Phase 6i.1: thin wrappers over WArray<u8>) ----
+/* ---- ByteArray (thin wrappers over WArray<u8>) ----
  *
- * Phase 8b introduced WBytes as a dedicated 24-byte struct with its own
- * subtag and dispatch path. Phase 6i.1 collapses that into WArray with
+ * WBytes was originally a dedicated 24-byte struct with its own
+ * subtag and dispatch path; it has since been collapsed into WArray with
  * ebits=8 so a single representation backs both `ByteArray.new(n)` and
  * `u8[n]`. The public C API (w_bytes_*) is preserved for internal
  * callers; each function is now a thin shim over w_array_* primitives. */
@@ -50900,7 +50900,7 @@ static WArray *as_bytes_arr(WValue v) {
 WValue w_bytes_new(int64_t length) {
     WValue arr = w_array_new(8, length > 0 ? length : 1);
     WArray *a = (WArray *)w_as_ptr(arr);
-    a->size = (int32_t)length;  /* Phase 6i.1: size==length, payload zero-init by w_array_new */
+    a->size = (int32_t)length;  /* size==length, payload zero-init by w_array_new */
     return arr;
 }
 
@@ -50955,7 +50955,7 @@ WValue w_bytes_concat(WValue a_val, WValue b_val) {
     return out;
 }
 
-/* ---- BoolArray (Phase 6i.1b: thin wrappers over WArray<u1>) ----
+/* ---- BoolArray (thin wrappers over WArray<u1>) ----
  *
  * Bit-packed array of booleans, backed by ebits=1 in the WArray tier.
  * The dispatch boundary maps W_TRUE/W_FALSE to bit values 1/0 on write
@@ -51000,7 +51000,7 @@ WValue w_bool_array_size(WValue arr) {
 }
 
 /* ---- Typed Array — packed integer array or float array ----
- * Phase 4f: WArray was merged into WArray. These helpers take WArray *
+ * WTypedArray was merged into WArray. These helpers take WArray *
  * and cast `slots` to uint8_t * (or wider) per ebits for the packed reads.
  * The polymorphic w64 case (ebits=65) still uses the WValue-major access
  * pattern through casting, since WArray.slots is declared `WValue *`. */
@@ -51182,7 +51182,7 @@ static inline double array_read_float(WArray *a, int64_t i) {
 
 static inline int64_t array_read_signed(WArray *a, int64_t i);
 
-/* Phase 4f follow-up: load element at logical index `i` (relative to start),
+/* Load element at logical index `i` (relative to start),
  * decoded into a WValue per the array's ebits. After the W_SUBTAG_ARRAY
  * merge, dispatch iterators (each/map/etc.) can no longer read slots[i]
  * as raw WValues — for u8/u16/u32/u64/f32/f64 arrays the bytes are packed
@@ -51200,7 +51200,7 @@ static WValue array_slot_load_decoded(WArray *a, int64_t i) {
     if (array_is_signed_int(a)) {
         return w_int(array_read_signed(a, abs_idx));
     }
-    /* Phase 6i.1b: ebits=1 (BoolArray) yields W_TRUE/W_FALSE so iteration
+    /* ebits=1 (BoolArray) yields W_TRUE/W_FALSE so iteration
      * matches user expectation that bools, not ints, come out. */
     if (a->ebits == 1) {
         return array_read(a, abs_idx) ? W_TRUE : W_FALSE;
@@ -51332,7 +51332,7 @@ WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
     return arr;
 }
 
-/* Phase 7b (#68): page-aligned typed-array allocation. Required for the
+/* (#68) page-aligned typed-array allocation. Required for the
  * Metal noCopy buffer wrap (`newBufferWithBytesNoCopy:`) to actually
  * succeed — Apple's API rejects non-page-aligned pointers and our
  * default calloc-backed slots are only 16-byte aligned. mmap is the
@@ -51343,7 +51343,7 @@ WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
  * where the user fills via `arr[i] =`, not `.push`). If the user does
  * push beyond cap, the standard grow path realloc()s into a fresh
  * heap block, breaking GPU binding — the runtime can't detect this
- * silently, so it's a known sharp edge until Phase 7c (lifetime guards). */
+ * silently, so it's a known sharp edge until lifetime guards land. */
 WValue w_array_new_aligned(WValue element_bits_v, WValue size_v) {
     int64_t element_bits = w_as_int(element_bits_v);
     int64_t size = w_as_int(size_v);
@@ -51380,9 +51380,9 @@ WValue w_array_new_aligned(WValue element_bits_v, WValue size_v) {
 
 
 /* Zero-copy view: WArray that borrows `slots` instead of owning it.
- * size == cap so push/grow paths don't try to realloc. Phase 4: views over
+ * size == cap so push/grow paths don't try to realloc. Views over
  * regions with >2^31 elements must go through `w_big_array_view` — this
- * constructor refuses oversized inputs loud and early. Phase 4f: low-level
+ * constructor refuses oversized inputs loud and early. This is the low-level
  * form taking a raw data pointer (used by mmap, ccall_nobox, etc.); the
  * high-level slice-of-array form is `w_array_view(arr, lo, len)` below. */
 WValue w_array_view_raw(uint8_t *data, int64_t element_bits, int64_t length) {
@@ -51476,7 +51476,7 @@ WValue w_array_push(WValue arr, WValue val) {
     return arr;
 }
 
-/* Phase 4e: elementwise dot-prefix operators — `.+ .- .* ./` lift their
+/* Elementwise dot-prefix operators — `.+ .- .* ./` lift their
  * scalar counterparts over a typed array. Lhs is always an array; rhs is
  * either an array (elementwise pair) or a scalar (broadcast). Returns a
  * NEW array with same ebits and size as lhs. Mismatched sizes raise.
@@ -51486,7 +51486,7 @@ WValue w_array_push(WValue arr, WValue val) {
  * WValues and runs the corresponding scalar binary op (w_add/w_sub/etc.)
  * on each pair — slow but correct fallback for `[1, 2.5, "three"] .+ 1`.
  *
- * Phase 6 SIMD will rewrite the float and 32-bit-integer paths to use
+ * A SIMD pass will rewrite the float and 32-bit-integer paths to use
  * NEON/AVX intrinsics. The scalar loops here are the correctness baseline
  * those vectorized variants will be measured against.
  */
@@ -52076,7 +52076,7 @@ WValue w_array_bxor_elem(WValue lhs, WValue rhs) { return array_elementwise(lhs,
 WValue w_array_shl_elem(WValue lhs, WValue rhs)  { return array_elementwise(lhs, rhs, ELT_OP_SHL); }
 WValue w_array_shr_elem(WValue lhs, WValue rhs)  { return array_elementwise(lhs, rhs, ELT_OP_SHR); }
 
-/* Phase 4e: arr[from..to] / arr[from...to] — zero-copy slice view via
+/* arr[from..to] / arr[from...to] — zero-copy slice view via
  * the Range-indexing sugar. Wraps `w_array_view` after
  * resolving the inclusive/exclusive bound and computing the length.
  *  - Negative indices wrap from the end.
@@ -52239,7 +52239,7 @@ void w_views_after_realloc(WValue parent, WValue *old_slots, WValue *new_slots) 
     }
 }
 
-/* Phase 4e: arr.slice_view(start, len) — zero-copy slice view.
+/* arr.slice_view(start, len) — zero-copy slice view.
  *
  * Returns a typed-array view sharing the parent's `slots` buffer with
  * `start = original_start + lo` and `size = len`. View semantics:
@@ -52281,7 +52281,7 @@ WValue w_array_view(WValue arr, WValue lo_v, WValue len_v) {
     return view_val;
 }
 
-/* Phase 4e: arr.view(other_ebits) — zero-copy reinterpret view.
+/* arr.view(other_ebits) — zero-copy reinterpret view.
  *
  * Returns a typed-array view over the same `slots` buffer with a new
  * element type. Length = total_bytes / target_size_bytes. Raises on
@@ -52339,7 +52339,7 @@ WValue w_array_reinterpret(WValue arr, int64_t target_ebits) {
     return w_array_view_raw((uint8_t *)src->slots + start_bytes, target_ebits, tgt_length);
 }
 
-/* Phase 4e: T[N] constructor semantic — same allocation as
+/* T[N] constructor semantic — same allocation as
  * w_array_new but with size==cap so reads from `f32[N]` see N
  * zero-initialized slots instead of an empty buffer that the caller has
  * to bump per write. The plan calls this out explicitly: T[N] is the
@@ -52355,7 +52355,7 @@ WValue w_array_zeros(int64_t element_bits, int64_t length) {
     return v;
 }
 
-/* Phase 4e: arr.fill(value) — broadcast `value` to every live slot.
+/* arr.fill(value) — broadcast `value` to every live slot.
  * Uses memset when the byte pattern is zero or the storage is 8-bit and
  * the value fits in a byte; otherwise falls back to a tight typed loop.
  * Returns the array for chaining. Operates in-place on owned storage;
@@ -52695,7 +52695,7 @@ WValue w_array_set_i64(WValue arr, int64_t i, WValue val) {
     return w_array_write_at((WArray *)w_as_ptr(arr), i, val);
 }
 
-/* Phase 6a: unchecked WN_idx / WN_idxset for Array tier. No negative-
+/* Unchecked WN_idx / WN_idxset for Array tier. No negative-
  * index normalization, no bounds check. Caller proves bounds. */
 WValue w_array_idx(WValue arr, WValue index) {
     WArray *a = (WArray *)w_as_ptr(arr);
@@ -52780,12 +52780,12 @@ WValue w_array_size(WValue arr) {
     return w_int(a->size);
 }
 
-/* ---- Phase 3: Big Array (i64 fields) ----
+/* ---- Big Array (i64 fields) ----
  *
  * Same shape as WArray but every length/cap/start is i64 so the
  * runtime can address >2^32 elements. Used by mmap views (file lengths can
  * exceed 4 GB / 4 G elements once the element type narrows), KV caches,
- * model weights. Subtag W_SUBTAG_GENERIC; Phase 4 wires class registration.
+ * model weights. Subtag W_SUBTAG_GENERIC; class registration is wired separately.
  */
 WValue w_big_array_new(int64_t ebits, int64_t cap) {
     if (cap <= 0) cap = 8;
@@ -52870,7 +52870,7 @@ WValue w_big_array_size(WValue arr) {
 /* w_big_array_get/set/push: minimal scalar paths. They read/write through
  * the WArray helpers by treating the WBigArray prefix as a transient
  * WArray view — same ebits, same packed-byte layout, same `slots`
- * pointer. Phase 4 collapses both into a single inline op family. */
+ * pointer. The two will later collapse into a single inline op family. */
 static inline WArray big_as_typed_view(WBigArray *a) {
     WArray view;
     view.flags = a->flags;
@@ -52909,7 +52909,7 @@ WValue w_big_array_set(WValue arr, WValue index, WValue val) {
     return val;
 }
 
-/* Phase 6a: unchecked WN_idx / WN_idxset for BigArray tier. */
+/* Unchecked WN_idx / WN_idxset for BigArray tier. */
 WValue w_big_array_idx(WValue arr, WValue index) {
     WBigArray *a = (WBigArray *)w_as_ptr(arr);
     int64_t i = w_as_int(index);
@@ -52982,7 +52982,7 @@ WValue w_big_array_push(WValue arr, WValue val) {
     return arr;
 }
 
-/* ---- Phase 3: Small Array (frozen, ≤255 elements, packed header) ----
+/* ---- Small Array (frozen, ≤255 elements, packed header) ----
  *
  * Single allocation: 2-byte header followed by inline element bytes. The
  * struct's flexible-array `slots` member lets us treat the payload as
@@ -53001,7 +53001,7 @@ WValue w_small_array_new(int64_t ebits, int64_t size, int64_t bytes_ptr) {
     return w_box_ptr(a, W_SUBTAG_SMALL_ARRAY);
 }
 
-/* Phase 6d: in-place SmallArray initialize at a caller-provided pointer.
+/* In-place SmallArray initialize at a caller-provided pointer.
  * Used when the compiler stack-allocates the buffer via LLVM `alloca` and
  * needs the runtime to stamp the WSmallArray header. The caller passes
  * `mem` as an int64-encoded pointer (matches the Tungsten ccall ABI for
@@ -55123,7 +55123,7 @@ WValue w_socket_read_into(WValue sock, WValue buf_val, WValue off_val, WValue n_
     return w_int(n);
 }
 
-/* Write ByteArray to socket (length-aware, no strlen). Phase 6i.1:
+/* Write ByteArray to socket (length-aware, no strlen).
  * ByteArray is now a WArray<u8>, so dig the payload out of `slots`. */
 WValue w_socket_write_bytes(WValue sock, WValue bytes_val) {
     WSocket *s = as_socket(sock);
@@ -55213,7 +55213,7 @@ WValue w_socket_write_slice(WValue sock, WValue bytes_val, WValue off_val, WValu
     return w_box_int(written);
 }
 
-/* ---- Outbound TCP connect (Phase 8b) ---- */
+/* ---- Outbound TCP connect ---- */
 
 #include <netdb.h>
 
@@ -55376,7 +55376,7 @@ WValue w_strbuf_new(WValue cap_val) {
     int64_t cap = w_is_int(cap_val) ? w_as_int(cap_val) : 16;
     if (cap < 16) cap = 16;
     WStrBuf *sb = malloc(sizeof(WStrBuf));
-    sb->flags = 0;  /* Phase 6i.2: type field removed (promoted to W_SUBTAG_STRBUF) */
+    sb->flags = 0;  /* type field removed (promoted to W_SUBTAG_STRBUF) */
     sb->data = malloc(cap);
     sb->data[0] = '\0';
     sb->size = 0;
@@ -55401,7 +55401,7 @@ WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap) {
     }
     if (cap < 16) cap = 16;
     WStrBuf *sb = malloc(sizeof(WStrBuf));
-    sb->flags = 0;  /* Phase 6i.2: type field removed (promoted to W_SUBTAG_STRBUF) */
+    sb->flags = 0;  /* type field removed (promoted to W_SUBTAG_STRBUF) */
     sb->data = malloc(cap);
     sb->data[0] = '\0';
     sb->size = 0;
@@ -55538,7 +55538,7 @@ WValue w_string_take_byte_array(WValue bytes, WValue len_wv) {
     return w_string_take(buf, (size_t)len);
 }
 
-/* ---- Goroutine Arena + Scheduler (Phase 4) ---- */
+/* ---- Goroutine Arena + Scheduler ---- */
 
 /* Suppress macOS deprecation warnings for ucontext */
 #pragma clang diagnostic push
@@ -56223,7 +56223,7 @@ int w_scheduler_queue_depth(void) {
     return depth;
 }
 
-/* ---- M:P Scheduler (Phase 5) ---- */
+/* ---- M:P Scheduler ---- */
 
 /* Per-P local queue: push to tail, pop from tail, steal from head */
 static void p_local_push_claimed(WProcessor *p, WGoroutine *g) {
@@ -56448,7 +56448,7 @@ void w_scheduler_stop(void) {
 
 #pragma clang diagnostic pop
 
-/* ---- Channels (Phase 4) ---- */
+/* ---- Channels ---- */
 
 static WChan *as_chan(WValue v) {
     if (!w_is_channel(v)) die("expected channel");
@@ -57796,7 +57796,7 @@ WValue w_socket_serve_http(WValue listener, WValue handler, int workers) {
     return W_NIL;
 }
 
-/* ---- Freeze / Immutability (Phase 4) ---- */
+/* ---- Freeze / Immutability ---- */
 
 /* Transitive freeze with cycle detection using a visited set */
 #define FREEZE_VISITED_MAX 1024

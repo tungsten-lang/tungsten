@@ -112,12 +112,12 @@
   self_tv = lower_var(ctx, Tungsten:AST:Var.new("__self"))
   self_reg = ensure_i64_value(wfn, self_tv)
 
-  # Phase 6f follow-up: classes that share the W_SUBTAG_GENERIC subtag
+  # Classes that share the W_SUBTAG_GENERIC subtag
   # (BigArray — keyed at 0x80|W_TYPE_*) embed a `type` byte at offset 0
   # of their heap struct as a secondary dispatch discriminator. The
   # .w data block describes the user-visible layout starting AFTER
   # that byte; add the implicit byte here so the gep lands on the
-  # right field of the C struct. (Phase 6h: SmallArray promoted to
+  # right field of the C struct. (SmallArray was promoted to
   # its own subtag and no longer carries this byte; its .w layout
   # starts directly at offset 0.)
   effective_offset = info[:offset]

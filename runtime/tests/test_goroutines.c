@@ -1,5 +1,5 @@
 /*
- * test_goroutines.c — Phase 4: Goroutines + Channels + Freeze
+ * test_goroutines.c — Goroutines + Channels + Freeze
  *
  * Tests:
  *   1. Goroutine spawn and scheduler
@@ -257,7 +257,7 @@ static void test_assert_frozen(void) {
 
 int main(void) {
     setbuf(stdout, NULL);
-    printf("=== Phase 4: Goroutines + Channels + Freeze ===\n\n");
+    printf("=== Goroutines + Channels + Freeze ===\n\n");
 
     test_goroutine_spawn();
     test_goroutine_yield();

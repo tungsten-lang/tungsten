@@ -1,4 +1,4 @@
-# Phase 4 — autotuner smoke. Loads the four hand-written variants of
+# Autotuner smoke. Loads the four hand-written variants of
 # the q8_matvec kernel from q8_matvec_three_schedules.w (default,
 # tgmapped, coop, coop_packed) and lets the Autotuner pick the winner.
 

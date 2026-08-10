@@ -1,4 +1,4 @@
-# Phase 4 — programmatic schedule enumeration over the bounded grammar.
+# Programmatic schedule enumeration over the bounded grammar.
 #
 # Generates a cross-product of schedule variants for q8_matvec
 # (parallelize × stride × vectorize × layout), writes the kernel +
@@ -6,8 +6,8 @@
 # feeds the compiled variants to the Autotuner harness from
 # tungsten-llama/lib/autotune.w.
 #
-# This is the last piece of Phase 4: the harness already exists; this
-# script is the candidate generator that drives it.
+# The harness already exists; this script is the candidate generator
+# that drives it.
 
 use core/metal
 use tungsten-llama/autotune

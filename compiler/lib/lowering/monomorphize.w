@@ -1,11 +1,11 @@
-# Lowering / monomorphize — Phase 5 typed-array specialization and the
+# Lowering / monomorphize — typed-array specialization and the
 # typed-array encoding helpers that drive method specialization.
 # Depends on pass_registry.w and types.w.
 #
 # Includes:
 #   - recv_type_variant_tag, mangled_specialized_name (name mangling)
 #   - mark_nonescaping_small_arrays + the "is the array used safely?"
-#     helpers (Phase 5g escape analysis)
+#     helpers (escape analysis)
 #   - collect_ivar_types / walk_ivar_assigns (per-class ivar typing)
 #   - specialize_method, specialize_method_with_inlined_block
 #   - inline-yields rewrite (substitute_vars_in_ast, inline_yields_in_ast)
@@ -17,7 +17,7 @@
 # This file deliberately has no `use` directives — see pass_registry.w.
 
 
-# Phase 5: monomorphization name mangling. Maps the receiver type symbol to
+# Monomorphization name mangling. Maps the receiver type symbol to
 # a short, filesystem/symbol-safe variant tag used in the specialized
 # function name. `:typed_array_u8` → `"u8"`, `:big_array_f32` → `"big_f32"`.
 # Returns nil for non-array types (caller should bail to runtime dispatch).
@@ -39,7 +39,7 @@
     return "small_w64"
   nil
 
-# Phase 5: build the mangled symbol for a specialized method instance.
+# Build the mangled symbol for a specialized method instance.
 # Format: __w_<Class>_<method>_<variant> (e.g. __w_Array_each_u8). Mirrors
 # class_method_function_name's transformation of `::` → `__` for namespaced
 # classes. `mangle_method_name` handles symbol-y characters in the name.
@@ -49,7 +49,7 @@
     return nil
   "__w_" + llvm_safe_name(class_name.gsub(":", "__")) + "_" + mangle_method_name(method_name) + "_" + variant
 
-# Phase 6e (v0): single-pass non-recursive escape pre-pass for SmallArray.new.
+# v0: single-pass non-recursive escape pre-pass for SmallArray.new.
 # Walks a single body (a flat list of statements), finds each assign of
 # `var = SmallArray.new(:ebits, size_const)`, then scans the SAME body for
 # subsequent uses of var. The classifier is intentionally minimal: each
@@ -465,7 +465,7 @@
     j += 1
   nil
 
-# Phase 5 (gap #2): walk every method body of every class, find ivar
+# Gap #2: walk every method body of every class, find ivar
 # assignments, and record the inferred RHS type into mod[:ivar_types]
 # [class_name][ivar_name]. Conflicting types across writes mark the ivar
 # unknown (recorded as nil so dispatch bails to runtime). Pre-pass: runs
@@ -716,7 +716,7 @@
       ai += 1
   nil
 
-# Phase 5: build a specialized variant of a user-defined class method,
+# Build a specialized variant of a user-defined class method,
 # with `__self` typed to a concrete array variant. Returns the mangled
 # function name so callers can emit a direct call. nil on bail-out
 # (method not registered, recv_type unrecognized).
@@ -755,7 +755,7 @@
   lower_class_method(parent_ctx, class_name, cloned, override)
   mangled
 
-# Phase C (#61): closure-escape inlining via :yield substitution.
+# Closure-escape inlining (#61) via :yield substitution.
 #
 # When a trait method's body invokes its block via `:yield(args)` (i.e.
 # `&(args)` in source), and the call site supplies a single-expression
@@ -959,7 +959,7 @@
     i += 1
   false
 
-# Phase C: specialize a trait method with the call site's literal block
+# Specialize a trait method with the call site's literal block
 # inlined at every :yield. The specialized fn has the block param removed
 # (the closure is no longer needed at runtime). Returns mangled name or
 # nil if specialization isn't applicable.
@@ -972,7 +972,7 @@
   ast = mod[:class_method_asts][class_name + "." + method_name]
   if ast == nil
     return nil
-  # Phase C only knows how to replace :yield nodes. A method with an
+  # Inlining only knows how to replace :yield nodes. A method with an
   # explicit named `&block` may invoke it as a local closure (`block(item)`),
   # which is deliberately not represented as :yield. Stripping that block
   # parameter would leave the closure call reading a nonexistent argument.
@@ -1034,7 +1034,7 @@
     return "signed"
   "unsigned"
 
-# Phase 3: lower an ebits argument (`:u8`, `:f32`, raw int 16, etc.) to the
+# Lower an ebits argument (`:u8`, `:f32`, raw int 16, etc.) to the
 # raw int code the C constructors expect. Symbol form covers the FP8/FP4/bf16
 # additions cleanly without forcing a numeric encoding on the .w side.
 -> ebits_symbol_to_int(name)
@@ -1073,7 +1073,7 @@
   inferred = infer_type(arg, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   ensure_raw_machine_int(wfn, tv, :i64, inferred)
 
-# Phase 6d: extract compile-time ebits value from an arg node, or nil
+# Extract compile-time ebits value from an arg node, or nil
 # if it isn't a constant. Used by stack-allocation lowering to size the
 # alloca correctly (only emitted when ebits is a literal).
 -> ebits_const_value(arg)
@@ -1085,7 +1085,7 @@
     return arg.value
   nil
 
-# Phase 6d: bytes needed to hold `size` elements of the given ebits.
+# Bytes needed to hold `size` elements of the given ebits.
 # Mirrors the C `array_byte_size` helper. 4-bit packs two-per-byte;
 # wider widths are size * (bits/8). Extended ebits (>64/-64) are
 # special-cased; ebits=65 (w64 polymorphic) takes 8 bytes/elt.

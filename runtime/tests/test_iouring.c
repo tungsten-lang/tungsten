@@ -1,9 +1,9 @@
 /*
  * test_iouring.c — io_uring completion I/O tests (Linux only)
  *
- * Tests Phase 1 (basic RECV/SEND/ACCEPT), Phase 4 (provided buffers,
- * multi-shot recv, SEND_ZC), and Phase 5 (registered send buffers,
- * multi-shot accept, linked SQEs).
+ * Tests basic RECV/SEND/ACCEPT completion, provided buffers with
+ * multi-shot recv and SEND_ZC, and registered send buffers with
+ * multi-shot accept and linked SQEs.
  *
  * Compile: clang -O2 -DUSE_IOURING -luring test_iouring.c ../runtime.c \
  *          ../event_iouring.c ../event_epoll.c ../event_kqueue.c \
@@ -494,20 +494,20 @@ static void test_send_and_close(void) {
 
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
-    printf("=== io_uring Tests (Phase 1 + 4 + 5) ===\n");
+    printf("=== io_uring Tests ===\n");
 
-    /* Phase 1: basic completion I/O */
+    /* basic completion I/O */
     test_submit_recv();
     test_submit_send();
     test_submit_accept();
     test_eof();
     test_cqe_advance();
 
-    /* Phase 4: provided buffers + multi-shot + SEND_ZC */
+    /* provided buffers + multi-shot + SEND_ZC */
     test_provided_buffers();
     test_send_zc();
 
-    /* Phase 5: registered send buffers + multi-shot accept + linked SQEs */
+    /* registered send buffers + multi-shot accept + linked SQEs */
     test_send_buffers();
     test_multishot_accept();
     test_linked_timeout();

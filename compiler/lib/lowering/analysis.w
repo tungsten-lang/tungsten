@@ -20,13 +20,13 @@
   scan_loop_vars(body, compound_vars, assigned_vars, var_types)
   scan_loop_vars([condition], compound_vars, assigned_vars, var_types)
 
-  # Phase 2 (2026-04-15): overflow_vars exclusion removed. Under the
+  # As of 2026-04-15: overflow_vars exclusion removed. Under the
   # silent-wrap semantics locked in by the plan, any compound +/-/* on
   # a loop-local int can stay in a raw i64 slot and run as native
   # add_i64/sub_i64/mul_i64 with no bigint-promotion fallback. Users
   # who explicitly want bigint promotion can annotate `## int` to opt
   # back into the boxed path. This change is the primary perf
-  # unblocker for Phase 2's hot-loop story.
+  # unblocker for the hot-loop story.
   result = []
   keys = compound_vars.keys()
   i = 0
@@ -103,7 +103,7 @@
 
 # Scan function body for assignments to parameter names.
 # Returns a list of parameter names that are reassigned somewhere in the body.
-# ── Phase 0.4b: local int escape analysis ─────────────────────────────
+# ── Local int escape analysis ─────────────────────────────────────────
 # Detect local vars that are exclusively used as raw machine ints (assigned
 # from int literals or arithmetic, read only in arithmetic / comparisons /
 # conditions / typed-array indices, never escape via string interp / method

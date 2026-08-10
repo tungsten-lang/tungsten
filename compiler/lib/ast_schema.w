@@ -1,4 +1,4 @@
-# ast_schema.w — slab-AST schema (PR #2 Phase 3).
+# ast_schema.w — slab-AST schema (PR #2).
 #
 # Defines stable kind IDs, exact field widths, and legacy layout-class
 # metadata used by W_PACKED_NODE handles and AST:Store.

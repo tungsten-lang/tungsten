@@ -172,11 +172,11 @@ typedef uint64_t WValue;
 /* ---- Object sub-tags (low 4 bits of value in 0x0000 space) ---- */
 /* Singletons 0-3 and sentinels 4-0xF are NOT objects.
    Objects: value >= 0x10 with top 16 bits == 0. */
-/* Phase 6i.2 subtag layout. BigInt reclaims one of the freed slots because
+/* Subtag layout. BigInt reclaims one of the freed slots because
  * arithmetic dispatch is hot enough that the generic-bucket header load is
  * measurable; slots 3 and 0xE remain free for future promotions. */
 #define W_SUBTAG_GENERIC     0   /* type discriminator in struct header byte */
-#define W_SUBTAG_ATOMIC      1   /* Phase 6i.2: was IPV6 (demoted to W_TYPE_IPV6 = 6) */
+#define W_SUBTAG_ATOMIC      1   /* was IPV6 (demoted to W_TYPE_IPV6 = 6) */
 /* slot 2 free (v4: was BIGINT — promoted to the top-level W_TAG_BIGINT).
  * W_SUBTAG_BIGINT survives ONLY as BigInt's stable dispatch key (0x02):
  * w_dispatch_key maps the 0xFFF8 tag back to it so inline caches, the
@@ -188,9 +188,9 @@ typedef uint64_t WValue;
 #define W_SUBTAG_CLOSURE     6
 #define W_SUBTAG_REGEX       7
 #define W_SUBTAG_RANGE       8
-#define W_SUBTAG_SMALL_ARRAY 9   /* Phase 6h: own subtag, no type byte */
+#define W_SUBTAG_SMALL_ARRAY 9   /* own subtag, no type byte */
 #define W_SUBTAG_ARRAY       0xA /* WArray; ebits=65 (w64) for polymorphic, else typed */
-#define W_SUBTAG_STRBUF      0xB /* Phase 6i.2: claimed BigInt's former slot */
+#define W_SUBTAG_STRBUF      0xB /* claimed BigInt's former slot */
 #define W_SUBTAG_CLASS       0xC
 #define W_SUBTAG_UUID        0xD
 /* slot E free (was ERROR; never used a constructor — no demote needed) */
@@ -205,15 +205,15 @@ typedef uint64_t WValue;
 
 /* ---- Generic object type discriminators (uint8_t in struct header) ---- */
 #define W_TYPE_THREAD    1
-/* Phase 6i.2: 2 freed (was W_TYPE_ATOMIC — promoted to W_SUBTAG_ATOMIC = 1). */
+/* 2 freed (was W_TYPE_ATOMIC — promoted to W_SUBTAG_ATOMIC = 1). */
 #define W_TYPE_SOCKET    3
 #define W_TYPE_CHANNEL   4
-#define W_TYPE_MAC       5  /* Phase 6i.2: demoted from W_SUBTAG_MAC */
-#define W_TYPE_IPV6      6  /* Phase 6i.2: demoted from W_SUBTAG_IPV6 */
+#define W_TYPE_MAC       5  /* demoted from W_SUBTAG_MAC */
+#define W_TYPE_IPV6      6  /* demoted from W_SUBTAG_IPV6 */
 #define W_TYPE_RESPONSE  7
-#define W_TYPE_ENCODED   8  /* Phase 6i.2: demoted from W_SUBTAG_ENCODED (was W_TYPE_STRBUF) */
+#define W_TYPE_ENCODED   8  /* demoted from W_SUBTAG_ENCODED (was W_TYPE_STRBUF) */
 #define W_TYPE_ROPE      9
-/* Phase 6i.1b: 10 freed (was W_TYPE_BOOL_ARRAY — folded into W_SUBTAG_ARRAY ebits=1). */
+/* 10 freed (was W_TYPE_BOOL_ARRAY — folded into W_SUBTAG_ARRAY ebits=1). */
 #define W_TYPE_BIGINT    11 /* live/parked allocation marker; dispatch uses W_SUBTAG_BIGINT */
 /* Metal compute primitives — defined in runtime/metal.m on darwin,
  * stubbed on other platforms. The Tungsten facade lives in core/metal.w. */
@@ -225,11 +225,11 @@ typedef uint64_t WValue;
 /* Memory-mapped file region — File.mmap(path) returns one of these.
  * The data pointer is borrowed; lifetime is tied to .close(). */
 #define W_TYPE_MMAP           17
-/* Phase 3: BigArray (i64 fields, mmap views, KV caches). SmallArray was
- * promoted to its own subtag in Phase 6h. */
+/* BigArray (i64 fields, mmap views, KV caches). SmallArray was
+ * promoted to its own subtag. */
 #define W_TYPE_BIG_ARRAY      18
-/* Phase 6h freed slot 19 (was W_TYPE_SMALL_ARRAY). Phase 6i.2: claimed by W_TYPE_ERROR. */
-#define W_TYPE_ERROR          19  /* Phase 6i.2: demoted from W_SUBTAG_ERROR (which had no constructor) */
+/* Slot 19 freed (was W_TYPE_SMALL_ARRAY), then claimed by W_TYPE_ERROR. */
+#define W_TYPE_ERROR          19  /* demoted from W_SUBTAG_ERROR (which had no constructor) */
 /* Metal 4 tensor + MTL4 command primitives (macOS 26+). The MTL4 command
  * stack is parallel to the existing MTLCommandQueue path — Metal 4 features
  * like matmul2d cooperative tensors require argument-table binding which
@@ -505,7 +505,7 @@ static inline int w_is_instance(WValue v)  { return w_is_obj(v) && w_subtag(v) =
 static inline int w_is_class(WValue v)     { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_CLASS; }
 static inline int w_is_range(WValue v)     { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_RANGE; }
 static inline int w_is_domain_obj(WValue v) { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_DOMAIN; }
-/* Phase 6i.2: w_is_ipv6, w_is_mac, w_is_encoded, w_is_bigint moved to runtime.h
+/* w_is_ipv6, w_is_mac, w_is_encoded, w_is_bigint moved to runtime.h
  * (they need struct access to read the type byte after demotion). w_is_error
  * removed — never had a constructor; the subtag was free real-estate. */
 

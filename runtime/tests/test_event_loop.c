@@ -1,5 +1,5 @@
 /*
- * test_event_loop.c — Phase 6: Event loop + non-blocking I/O tests
+ * test_event_loop.c — Event loop + non-blocking I/O tests
  *
  * Tests:
  * 1. Event loop init/destroy
@@ -433,7 +433,7 @@ static void test_two_scheduler_threads_deadline_timeout(void) {
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);  /* unbuffered stdout for test output */
 
-    printf("=== Phase 6: Event Loop + Non-blocking I/O ===\n");
+    printf("=== Event Loop + Non-blocking I/O ===\n");
 
     test_init_destroy();
     test_nonblocking_accept();

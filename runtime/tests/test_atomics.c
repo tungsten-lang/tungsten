@@ -1,5 +1,5 @@
 /*
- * test_atomics.c — Phase 2: Atomics stress test
+ * test_atomics.c — Atomics stress test
  *
  * Tests:
  *   1. Basic atomic new/get/set
@@ -190,7 +190,7 @@ static void test_atomic_cas_contention(void) {
 
 int main(void) {
     setbuf(stdout, NULL);
-    printf("=== Phase 2: Atomics ===\n\n");
+    printf("=== Atomics ===\n\n");
 
     test_atomic_basic();
     test_atomic_add();

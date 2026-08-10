@@ -371,7 +371,7 @@ use naming
   # BigInt exception here: results are only W_TRUE/W_FALSE).
   out << declare_fn_attrs("w_bool_array_get", wv, wv2, "nounwind willreturn memory(read)")
   out << declare_fn("w_bool_array_set", wv, wv3)
-  # Phase 4e dot-prefix elementwise operators (.+ .- .* ./ .| .& .^ .<< .>>)
+  # Dot-prefix elementwise operators (.+ .- .* ./ .| .& .^ .<< .>>)
   out << declare_fn("w_array_add_elem", wv, wv2)
   out << declare_fn("w_array_sub_elem", wv, wv2)
   out << declare_fn("w_array_mul_elem", wv, wv2)
@@ -453,7 +453,7 @@ use naming
   out << declare_fn("w_ivar_get_idx", wv, wv_i32)
   out << declare_fn("w_ivar_set_idx", wv, wv_i32_wv)
 
-  # PR #2 Phase 2: AST slab node primitives. w_node_alloc returns a
+  # PR #2: AST slab node primitives. w_node_alloc returns a
   # W_PACKED_NODE WValue for a freshly bumped arena slot; the field
   # load/store helpers do offset arithmetic on the encoded (sc, off)
   # pair inside the WValue. LTO inlines these at the call site.
@@ -2185,7 +2185,7 @@ ewscope_md_state = {ids: {}}
     globals_out << ic_count.to_s()
     globals_out << " x \[24 x i8]] zeroinitializer, align 8\n\n"
 
-  # Phase 5g (post-Phase-6h): compile-time SmallArray constants. Each
+  # Compile-time SmallArray constants. Each
   # entry is a private LLVM constant matching the WSmallArray header
   # layout (ebits, size) followed by inline byte slots. Subtag is
   # W_SUBTAG_SMALL_ARRAY=9, so the load site OR's 9 into the ptrtoint
@@ -2259,7 +2259,7 @@ ewscope_md_state = {ids: {}}
   big_op_wrappers = {"+" => "__w_bigint_plus_src", "-" => "__w_bigint_minus_src", "*" => "__w_bigint_times_src", "&" => "__w_bigint_and_src", "|" => "__w_bigint_or_src", "^" => "__w_bigint_xor_src", "/" => "__w_bigint_div_src", "%" => "__w_bigint_mod_src", "<<" => "__w_bigint_shl_src", ">>" => "__w_bigint_shr_src"}
   # B2: the seam target per op, in preference order —
   #   1. the LAST plain-named body (source_method exactly the public operator,
-  #      not the synthesized dispatcher): post-Phase-4 core has no such
+  #      not the synthesized dispatcher): core itself has no such
   #      body, so one existing means a program REOPENED the operator, and
   #      it must win the seam for a BigInt left-hand receiver exactly as it
   #      wins the method table;
@@ -3973,7 +3973,7 @@ ewscope_md_state = {ids: {}}
     out.to_s()
 
   # Inline bool array get (bit-packed): unbox ptr, load data, bit test.
-  # Phase 4f WArray-merge layout: slots ptr at offset 16, start i32 at
+  # WArray-merge layout: slots ptr at offset 16, start i32 at
   # offset 4 (matching typed_array_get_inline). Pre-merge this read from
   # offset 8, which now points at size/cap and produces a garbage pointer.
   when :bool_array_get_inline
@@ -4028,7 +4028,7 @@ ewscope_md_state = {ids: {}}
 
   # Inline bool array set: val is guaranteed W_TRUE(2) or W_FALSE(1) by lowering.
   # Same offset fix as bool_array_get_inline above (slots ptr at offset 16,
-  # start i32 at offset 4 — Phase 4f WArray-merge layout).
+  # start i32 at offset 4 — WArray-merge layout).
   when :bool_array_set_inline
     t = inst[:temp]
     arr = inst[:arr]
@@ -4473,7 +4473,7 @@ ewscope_md_state = {ids: {}}
   when :call_direct_i64_ptr1
     inst[:temp] + " = " + call_prefix(inst) + " i64 @" + inst[:name] + "(ptr " + inst[:arg] + ")"
 
-  # Phase 5g (post-Phase-6h): load a compile-time SmallArray constant.
+  # Load a compile-time SmallArray constant.
   # The named global is a private LLVM constant emitted at module scope
   # (see the small-array-consts emission pass; align 16). W_SUBTAG_SMALL_
   # ARRAY = 9, so the box is `(ptr & ~0xF) | 9`. Because the global is
@@ -4482,7 +4482,7 @@ ewscope_md_state = {ids: {}}
   when :small_array_const_load
     inst[:temp] + ".raw = ptrtoint ptr " + inst[:const_name] + " to i64\n  " + inst[:temp] + " = or i64 " + inst[:temp] + ".raw, 9"
 
-  # Phase 6d (post-Phase-6h): allocate a SmallArray on the stack via
+  # Allocate a SmallArray on the stack via
   # LLVM `alloca`. `total_bytes` is the WSmallArray header (2) + payload
   # bytes for the literal's ebits and size. The lowering follows up with
   # a ptrtoint and a call to w_small_array_init to stamp the header and
@@ -4885,7 +4885,7 @@ ewscope_md_state = {ids: {}}
     inst[:temp] + " = load i64, ptr @cvar." + llvm_safe_name(inst[:cvar_key].gsub(":", "__"))
   when :typed_array_get_inline
     # Inline typed array read: unmask → slots ptr (off 16) → start i32 (off 4) → GEP → load → ext
-    # Phase 4 i32 demote moved offsets: slots 32→16, start 8→4. Start is now
+    # The i32 demote moved offsets: slots 32→16, start 8→4. Start is now
     # i32 and gets sign-extended before being added to the unboxed index.
     # Offsets locked by _Static_assert in runtime.h.
     t = inst[:temp]
@@ -4970,7 +4970,7 @@ ewscope_md_state = {ids: {}}
       parts << t + " = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix()
     parts.to_s()
   when :typed_array_set_inline
-    # Inline typed array write: same Phase 4 i32-offset shift as get.
+    # Inline typed array write: same i32-offset shift as get.
     t = inst[:temp]
     s = inst[:s]
     arr = inst[:arr]
@@ -4983,9 +4983,9 @@ ewscope_md_state = {ids: {}}
     parts = StringBuffer(700)
     parts << s[0] + " = and i64 " + arr + ", -16\n  "
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
-    parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots (Phase 4: was 32)
+    parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots (i32 demote: was 32)
     parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it. TBAA=header lets LICM hoist it when no realloc is in the loop.
-    parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "   # &start (Phase 4: was 8)
+    parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "   # &start (i32 demote: was 8)
     parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4" + tbaa_header_suffix() + "\n  "   # start (i32) — re-read: shift/unshift move it. TBAA=header, same rationale.
     parts << s[5] + " = sext i32 " + s[5] + ".raw32 to i64\n  "
     if idx_raw == true
@@ -5232,7 +5232,7 @@ ewscope_md_state = {ids: {}}
       parts << t + " = load i64, ptr " + s[7] + ", align 8" + tbaa_elem_suffix()
     parts.to_s()
 
-  # Phase 6f (post-Phase-6h): SmallArray inline read. Layout differs
+  # SmallArray inline read. Layout differs
   # from WArray — slots are INLINE at offset 2 (header is just ebits +
   # size), no separate ptr load, no `start` shift. The index is kept as
   # a full i64 for the GEP: a `trunc … to i8` here silently maps any
@@ -5332,7 +5332,7 @@ ewscope_md_state = {ids: {}}
       parts << t + " = load i64, ptr " + s[4] + ", " + ealign + tbaa_elem_suffix()
     parts.to_s()
 
-  # Phase 6f: SmallArray inline write — same layout shortcuts as get.
+  # SmallArray inline write — same layout shortcuts as get.
   # Index kept as a full i64 (see get: an i8 trunc would address before
   # the struct for indices 128..255). No size update (SmallArray is
   # fixed-size by construction).
@@ -5425,7 +5425,7 @@ ewscope_md_state = {ids: {}}
 
   when :array_get_inline
     # Inline WArray read: unmask → slots (off 16) → start i32 (off 4) → unbox idx → GEP → load
-    # Offsets locked by _Static_assert in runtime.h (Phase 2 rename: items → slots).
+    # Offsets locked by _Static_assert in runtime.h (items renamed to slots).
     t = inst[:temp]
     s = inst[:s]
     arr = inst[:arr]
@@ -5511,12 +5511,12 @@ ewscope_md_state = {ids: {}}
     parts << t + " = load i64, ptr " + t + ".gep, align 8" + tbaa_ivar_suffix()
     parts.to_s()
   when :slab_node_get_idx
-    # PR #2 Phase 2: read one slab slot from an AST node.
+    # PR #2: read one slab slot from an AST node.
     # Unused — the active slab field path is the :call_direct_i64
     # branch above that special-cases inst[:name] == "w_node_field_load".
     inst[:temp] + " = call i64 @w_node_field_load(i64 " + inst[:node] + ", i64 " + inst[:offset].to_s() + ")"
   when :slab_node_set_idx
-    # PR #2 Phase 2: write one slab slot. Unused; see :slab_node_get_idx
+    # PR #2: write one slab slot. Unused; see :slab_node_get_idx
     # note above.
     t = inst[:temp]
     parts = StringBuffer(192)

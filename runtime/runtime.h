@@ -276,22 +276,22 @@ void   w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
  * double-push when a value is recycled from multiple places (aliased stores
  * in a drain hash). Cleared on pool pop. */
 #define W_POOL_FLAG_POOLED  (1u << 0)
-/* Phase 2 unified flag namespace: pooled bit aliased so new BigArray/SmallArray
+/* Unified flag namespace: pooled bit aliased so new BigArray/SmallArray
  * helpers can share W_FLAG_POOLED with the pre-existing W_POOL_FLAG_POOLED. */
 #define W_FLAG_POOLED       W_POOL_FLAG_POOLED
 #define W_FLAG_OWNED        (1u << 1)
 #define W_FLAG_VIEW         (1u << 2)
 #define W_FLAG_PAGE_ALIGNED (1u << 3)
-/* Phase 4f: BigArray tier indicator (size > INT32_MAX). Lives on the same
+/* BigArray tier indicator (size > INT32_MAX). Lives on the same
  * subtag (W_SUBTAG_ARRAY) and same flags byte as standard arrays — the bit
  * tells dispatch to read int64 sizes via WBigArray instead of int32. */
 #define W_FLAG_BIG          (1u << 4)
-/* Phase 4f: array-level immutability — same place as W_OBJ_FLAG_FROZEN on
+/* Array-level immutability — same place as W_OBJ_FLAG_FROZEN on
  * WObject and W_HASH_FLAG_FROZEN on WHash. Set by `w_freeze`; checked by
  * mutating ops (push, set, fill, …). */
 #define W_FLAG_FROZEN       (1u << 5)
 
-/* Phase 4f: WArray subsumes the old WTypedArray — same struct, same subtag
+/* WArray subsumes the old WTypedArray — same struct, same subtag
  * (W_SUBTAG_ARRAY = 0xA). The `ebits` byte discriminates the tier:
  *   ebits == 65   → polymorphic w64 (heterogeneous values, the `[1,2,3]` form)
  *   unsigned int: 1,4,8,16,32,64 (=u1/bool,u4,u8,u16,u32,u64)
@@ -419,7 +419,7 @@ static inline WBigRational *w_as_big_rational(WValue v) {
 }
 
 /* ---- Network address heap object (shared by IPv6 and MAC) ---- */
-/* Phase 6i.2: demoted to W_SUBTAG_GENERIC. The `type` byte at offset 0
+/* Demoted to W_SUBTAG_GENERIC. The `type` byte at offset 0
  * (W_TYPE_IPV6 / W_TYPE_MAC) is the dispatch discriminator; `len` is
  * derivable from `type` but kept for ergonomics (no callsite churn). */
 typedef struct {
@@ -438,7 +438,7 @@ _Static_assert(offsetof(WNetAddr, bytes)  == 4,  "WNetAddr bytes offset");
 _Static_assert(sizeof(WNetAddr)           == 32, "WNetAddr size");
 
 /* ---- Encoded value heap object (Base32/58/64) ---- */
-/* Phase 6i.2: demoted to W_SUBTAG_GENERIC; `type` byte at offset 0 holds
+/* Demoted to W_SUBTAG_GENERIC; `type` byte at offset 0 holds
  * W_TYPE_ENCODED. `encoding` (32/58/64) follows. */
 typedef struct {
     uint8_t  type;         /* W_TYPE_ENCODED */
@@ -955,7 +955,7 @@ void w_init_parallel(void);
 void w_thread_register(void);
 void w_thread_unregister(void);
 
-/* ---- Thread primitives (Phase 1) ---- */
+/* ---- Thread primitives ---- */
 typedef struct WThread {
     uint8_t type;        /* W_TYPE_THREAD */
     pthread_t handle;
@@ -978,9 +978,9 @@ WValue w_thread_kill(WValue thread);
 /* ---- Signal handling ---- */
 WValue w_signal_trap(int signum, WValue closure);
 
-/* ---- Atomic operations (Phase 2) ---- */
+/* ---- Atomic operations ---- */
 typedef struct WAtomic {
-    /* Phase 6i.2: type byte removed — WAtomic now lives at its own subtag
+    /* Type byte removed — WAtomic now lives at its own subtag
      * (W_SUBTAG_ATOMIC), so no in-struct discriminator is needed. */
     _Atomic int64_t value;
 } WAtomic;
@@ -1030,13 +1030,13 @@ WValue w_hid_streamdeck_open(void);      /* boxed WHIDDevice* or W_NIL */
 WValue w_hid_streamdeck_close(WValue dev);
 WValue w_hid_device_present(WValue dev); /* bool — live connectivity for status */
 
-/* ---- TCP Sockets (Phase 3) ---- */
+/* ---- TCP Sockets ---- */
 typedef struct WSocket {
     uint8_t type;    /* W_TYPE_SOCKET */
     int fd;
     int listening;   /* 1 = server socket, 0 = connection */
     int closed;
-    void *ssl;       /* NULL for plain, SSL* for TLS (Phase 8) */
+    void *ssl;       /* NULL for plain, SSL* for TLS */
     int ktls;        /* 1 = kernel TLS active, use read/write instead of SSL_* */
     int64_t read_timeout_ms; /* >0: Socket#read deadline from set_timeout; 0 = none */
 } WSocket;
@@ -1064,7 +1064,7 @@ int64_t w_raw_memmove(int64_t dst, int64_t src, int64_t len);
 void   w_socket_park(int fd, int events);
 int    w_socket_park_until(int fd, int events, int64_t deadline_ticks);
 
-/* ---- Goroutines (Phase 4) ---- */
+/* ---- Goroutines ---- */
 
 #include <ucontext.h>
 
@@ -1131,7 +1131,7 @@ void   w_goroutine_yield(void);
 WValue w_goroutine_current(void);
 void   w_scheduler_run(void);
 
-/* ---- M:P Scheduler (Phase 5) ---- */
+/* ---- M:P Scheduler ---- */
 
 #define W_MAX_PROCESSORS 64
 #define W_LOCAL_QUEUE_MAX 256
@@ -1159,7 +1159,7 @@ WValue w_scheduler_install_debug_signal(void);
 int64_t w_goroutine_count(void);
 int     w_scheduler_queue_depth(void);
 
-/* ---- Channels (Phase 4) ---- */
+/* ---- Channels ---- */
 
 typedef struct WChanWaiter {
     WGoroutine *g;
@@ -1191,12 +1191,12 @@ WValue w_chan_close(WValue ch);
  * synchronization handles intentionally remains "Unknown". */
 WValue w_sync_handle_kind_support(WValue value) __attribute__((visibility("hidden")));
 
-/* ---- Freeze / Immutability (Phase 4) ---- */
+/* ---- Freeze / Immutability ---- */
 WValue w_freeze(WValue obj);
 WValue w_frozen_p(WValue obj);
 WValue w_assert_frozen(WValue obj);
 
-/* Phase 6i.1: WBytes struct removed — ByteArray is now a WArray with
+/* WBytes struct removed — ByteArray is now a WArray with
  * ebits=8 (see w_is_bytes below + the w_bytes_* wrappers in runtime.c).
  * Kept the function signatures for internal callers. */
 
@@ -1246,9 +1246,9 @@ WValue w_metal_library_from_file(WValue device, WValue path);
 WValue w_metal_pipeline_for(WValue library, WValue name);
 WValue w_metal_buffer_new(WValue device, WValue byte_length);
 WValue w_metal_buffer_length(WValue buffer);
-/* Phase 7a (#12): zero-copy WArray → MTLBuffer wrap on unified memory. */
+/* (#12) zero-copy WArray → MTLBuffer wrap on unified memory. */
 WValue w_array_as_metal_buffer(WValue device, WValue arr);
-/* Phase 7b (#68): page-aligned typed-array allocator. Returns a
+/* (#68) page-aligned typed-array allocator. Returns a
  * fixed-size (size=cap=N) WArray whose slots are mmap-allocated at a
  * page boundary, enabling the noCopy MTLBuffer path. ccall-callable:
  * args arrive as NaN-boxed WValues. */
@@ -1436,8 +1436,8 @@ WValue w_bytes_length(WValue bytes);
 WValue w_bytes_slice(WValue bytes, WValue start, WValue len);
 WValue w_bytes_concat(WValue a, WValue b);
 
-/* ---- Bool Array (Phase 6i.1b: thin wrappers over WArray<u1>) ----
- * Phase 6i.1b folded the dedicated WBoolArray struct into WArray with
+/* ---- Bool Array (thin wrappers over WArray<u1>) ----
+ * The dedicated WBoolArray struct was folded into WArray with
  * ebits=1 (bit-packed). The C API is preserved for internal callers;
  * each function is a thin shim over w_array_* primitives. The dispatch
  * boundary handles 0/1 ↔ W_FALSE/W_TRUE conversion so user-facing
@@ -1448,33 +1448,33 @@ WValue w_bool_array_get(WValue arr, WValue index);
 WValue w_bool_array_set(WValue arr, WValue index, WValue val);
 WValue w_bool_array_size(WValue arr);
 
-/* Phase 4f: WTypedArray typedef removed — use WArray everywhere. The two
- * structs were declared byte-identical in Phase 4c and the user-facing
- * subtag merge in Phase 4f finished the unification. Layout asserts moved
+/* WTypedArray typedef removed — use WArray everywhere. The two
+ * structs were declared byte-identical and the user-facing
+ * subtag merge finished the unification. Layout asserts moved
  * to the WArray definition site; helper functions take WArray *. */
 
-/* Phase 2 static-assert wall: catches drift between Tungsten data-block
+/* Static-assert wall: catches drift between Tungsten data-block
  * layouts (core/array.w, core/big_array.w, core/small_array.w) and the C
  * structs the runtime actually allocates. Both lowering.w and the inline
  * codegen in emitter.w bake these offsets into IR — the IR breaks silently
  * if a struct field moves. */
 _Static_assert(offsetof(WArray, flags) == 0,  "WArray flags offset");
-_Static_assert(offsetof(WArray, ebits) == 1,  "WArray ebits offset (Phase 4c — added for unification)");
+_Static_assert(offsetof(WArray, ebits) == 1,  "WArray ebits offset (added for the array unification)");
 _Static_assert(offsetof(WArray, start) == 4,  "WArray start offset");
 _Static_assert(offsetof(WArray, size)  == 8,  "WArray size offset (was length)");
 _Static_assert(offsetof(WArray, cap)   == 12, "WArray cap offset (was cap)");
 _Static_assert(offsetof(WArray, slots) == 16, "WArray slots offset (was items)");
-_Static_assert(sizeof(WArray)          == 24, "WArray header size locked at 24 bytes (Phase 4 i32 demote — was 40)");
+_Static_assert(sizeof(WArray)          == 24, "WArray header size locked at 24 bytes (i32 demote — was 40)");
 
-/* ---- Phase 3: Big Array ---- *
+/* ---- Big Array ---- *
  * Same shape as WArray but with i64 start/size/cap so the runtime can
  * back >2^32-element collections (mmap'd weights, KV cache, datasets too
  * large to address with 32-bit indices). Subtag space is exhausted, so
  * BigArray boxes as W_SUBTAG_GENERIC with a `type` byte at offset 0 — that
  * makes w_dispatch_key (0x80 | type) stable for type-class dispatch. The
- * .w `core/big_array.w` data block keeps `flags` first; Phase 4 reconciles
- * the .w model with the C struct when it wires inline ops and view-field
- * loads. */
+ * .w `core/big_array.w` data block keeps `flags` first; the .w model is
+ * reconciled with the C struct when inline ops and view-field loads are
+ * wired. */
 typedef struct WBigArray {
     uint8_t  type;           /* W_TYPE_BIG_ARRAY — drives w_dispatch_key */
     uint8_t  ebits;          /* element-type code (matches WArray.ebits) */
@@ -1495,7 +1495,7 @@ _Static_assert(offsetof(WBigArray, cap)   == 24, "WBigArray cap offset");
 _Static_assert(offsetof(WBigArray, slots) == 32, "WBigArray slots offset");
 _Static_assert(sizeof(WBigArray) == 40, "WBigArray header size locked at 40 bytes");
 
-/* ---- Phase 3: Small Array ---- *
+/* ---- Small Array ---- *
  * Frozen, stack-allocatable, packed. Up to 255 elements. Header is
  * {type, ebits, size}; the rest of the allocation is inline element bytes
  * pointed at by `slots`. Size==cap (no shift, no resize). Never aliased,
@@ -1503,7 +1503,7 @@ _Static_assert(sizeof(WBigArray) == 40, "WBigArray header size locked at 40 byte
  * indices, scalar arg packs for kernel dispatch, memoization keys. The
  * type byte at offset 0 keeps SmallArray's dispatch_key stable across
  * instances (same rationale as WBigArray). */
-/* Phase 6h: SmallArray promoted to its own subtag (W_SUBTAG_SMALL_ARRAY = 9).
+/* SmallArray promoted to its own subtag (W_SUBTAG_SMALL_ARRAY = 9).
  * No type-byte discriminator needed — the subtag itself identifies the kind.
  * Header drops to 2 bytes (just ebits + size); slots[] starts at offset 2. */
 typedef struct WSmallArray {
@@ -1534,7 +1534,7 @@ WValue w_big_array_push(WValue arr, WValue val);
  * without needing a dedicated ptr-arg call op. NULL skips the memcpy and
  * leaves the calloc-zeroed payload. */
 WValue w_small_array_new(int64_t ebits, int64_t size, int64_t bytes_ptr);
-/* Phase 6d: in-place initialize at a caller-allocated buffer (typically
+/* In-place initialize at a caller-allocated buffer (typically
  * an LLVM `alloca` on the stack). `mem` is an integer-encoded pointer.
  * Caller is responsible for sizing the buffer to fit the WSmallArray
  * header + payload; this fn just stamps the header and returns the
@@ -1563,7 +1563,7 @@ int64_t w_fused_should_mt(int64_t n);
 int64_t w_fused_parallel_run(int64_t fn_addr, int64_t blk, int64_t n);
 /* ## reuse fused-output slot (per-site persistent buffer). */
 WValue w_fused_out_reuse_or_new(WValue *slot, int64_t element_bits, int64_t n);
-/* Phase 4e: T[N] constructor — size==cap, calloc-zeroed slots ready to
+/* T[N] constructor — size==cap, calloc-zeroed slots ready to
  * read. Callers that want the legacy "cap N, push to fill" semantics use
  * Array.new(ebits, cap: N) (lowers to w_array_new). */
 WValue w_array_zeros(int64_t element_bits, int64_t length);
@@ -1576,16 +1576,16 @@ WValue w_array_recycle_or_new(int64_t element_bits, int64_t cap);
 WValue w_array_recycle_or_new_empty(void);
 void   w_array_recycle(WValue v);
 WValue w_array_fill(WValue arr, WValue val);
-/* Phase 4e: arr.view(other_ebits) — zero-copy reinterpret view over the
+/* arr.view(other_ebits) — zero-copy reinterpret view over the
  * same `slots` buffer with a new element type. Raises on partial element. */
 WValue w_array_reinterpret(WValue arr, int64_t target_ebits);
-/* Phase 4e: arr.slice_view(start, len) — zero-copy slice view sharing the
+/* arr.slice_view(start, len) — zero-copy slice view sharing the
  * parent's `slots`. Caller's responsibility: parent must outlive each view. */
 WValue w_array_view(WValue arr, WValue lo_v, WValue len_v);
-/* Phase 4e: arr[from..to] / arr[from...to] — wraps the slice form above
+/* arr[from..to] / arr[from...to] — wraps the slice form above
  * with Range-arg resolution (inclusive vs exclusive end + neg-index wrap). */
 WValue w_array_view_range(WValue arr, WValue from_v, WValue to_v, WValue exclusive_v);
-/* Phase 4e: dot-prefix elementwise operators — `lhs .+ rhs` etc. lift
+/* Dot-prefix elementwise operators — `lhs .+ rhs` etc. lift
  * scalar arithmetic over a typed array. Lhs is the array; rhs is either
  * another array (elementwise pair) or a scalar (broadcast). Returns a
  * fresh array with same ebits and size as lhs. */
@@ -1718,10 +1718,10 @@ int64_t w_sha256_sw_mine(const uint32_t *midstate, const uint8_t *tail, const ui
                          uint32_t start, int64_t count, uint32_t *out_hash, uint32_t *out_best,
                          uint32_t *out_best_hash);
 
-/* ---- Outbound TCP connect (Phase 8b) ---- */
+/* ---- Outbound TCP connect ---- */
 WValue w_socket_tcp_connect(const char *host, int port);
 
-/* ---- TLS (Phase 8) ---- */
+/* ---- TLS ---- */
 WValue w_tls_init(void);
 WValue w_tls_load_cert(const char *cert_path, const char *key_path);
 WValue w_tls_wrap(WValue sock);
@@ -1730,10 +1730,10 @@ int w_tls_server_configured(void);
 const char *w_tls_get_cert_path(void);
 const char *w_tls_get_key_path(void);
 
-/* ---- ALPN (Phase 8b) ---- */
+/* ---- ALPN ---- */
 WValue w_socket_alpn_protocol(WValue sock);
 
-/* ---- RSA Crypto (Phase 8b) ---- */
+/* ---- RSA Crypto ---- */
 WValue w_crypto_generate_rsa_key(int64_t bits);
 WValue w_crypto_rsa_public_jwk(WValue key);
 WValue w_crypto_rsa_sign_sha256(WValue key, WValue data);
@@ -1817,7 +1817,7 @@ static inline int w_is_thread(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
            ((WThread *)w_as_ptr(v))->type == W_TYPE_THREAD;
 }
-/* Phase 6i.2: WAtomic promoted to its own subtag — single compare. */
+/* WAtomic promoted to its own subtag — single compare. */
 static inline int w_is_atomic(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_ATOMIC;
 }
@@ -1829,7 +1829,7 @@ static inline int w_is_channel(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
            ((WChan *)w_as_ptr(v))->type == W_TYPE_CHANNEL;
 }
-/* Phase 6i.1: ByteArray (was Bytes) is now a WArray with ebits=8.
+/* ByteArray (was Bytes) is now a WArray with ebits=8.
  * Same predicate as `w_is_array && ebits == 8`. */
 static inline int w_is_bytes(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_ARRAY &&
@@ -1839,28 +1839,28 @@ static inline int w_is_response(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
            ((WResponse *)w_as_ptr(v))->type == W_TYPE_RESPONSE;
 }
-/* Phase 6i.1b: BoolArray is now a WArray with ebits=1 (bit-packed). */
+/* BoolArray is now a WArray with ebits=1 (bit-packed). */
 static inline int w_is_bool_array(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_ARRAY &&
            ((WArray *)w_as_ptr(v))->ebits == 1;
 }
-/* Phase 3: BigArray lives on W_SUBTAG_GENERIC because the 4-bit subtag
+/* BigArray lives on W_SUBTAG_GENERIC because the 4-bit subtag
  * space was exhausted at the time; it's distinguished by the type byte at
  * offset 0 (W_TYPE_BIG_ARRAY). w_dispatch_key returns `0x80 | type`,
  * which keeps Tungsten-side type_class registration stable. SmallArray
- * was reclaimed as a dedicated subtag in Phase 6h (see w_is_small_array
+ * was reclaimed as a dedicated subtag (see w_is_small_array
  * below); only BigArray still uses the generic-bucket pattern. */
 static inline int w_is_big_array(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
            ((WBigArray *)w_as_ptr(v))->type == W_TYPE_BIG_ARRAY;
 }
-/* Phase 6h: SmallArray has its own dedicated subtag — single compare,
+/* SmallArray has its own dedicated subtag — single compare,
  * no struct read needed. */
 static inline int w_is_small_array(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_SMALL_ARRAY;
 }
 
-/* Phase 6i.2 generic-bucket predicates read the type byte at offset 0 of the
+/* Generic-bucket predicates read the type byte at offset 0 of the
  * heap struct.  BigInt was subsequently promoted into its own free subtag. */
 static inline int w_is_ipv6(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
@@ -1883,7 +1883,7 @@ static inline int w_is_bigint(WValue v) {
 static inline int w_is_integer_any(WValue v) { return w_is_int(v) || w_is_bigint(v); }
 
 /* ---- StringBuffer (mutable growable byte buffer) ----
- * Phase 6i.2: promoted to W_SUBTAG_STRBUF (subtag 0xB). Type byte removed
+ * Promoted to W_SUBTAG_STRBUF (subtag 0xB). Type byte removed
  * from offset 0 — the subtag now identifies StringBuffer. */
 typedef struct WStrBuf {
     uint8_t flags;       /* W_FLAG_* bits */
@@ -1900,7 +1900,7 @@ void   w_strbuf_recycle(WValue v);
 WValue w_strbuf_append(WValue buf, WValue str);
 WValue w_strbuf_to_s(WValue buf);
 
-/* Phase 6i.2: WStrBuf promoted to its own subtag (W_SUBTAG_STRBUF). */
+/* WStrBuf promoted to its own subtag (W_SUBTAG_STRBUF). */
 static inline int w_is_strbuf(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_STRBUF;
 }

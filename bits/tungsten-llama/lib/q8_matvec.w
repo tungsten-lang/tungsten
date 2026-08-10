@@ -1,4 +1,4 @@
-# Q8_0 matvec @gpu kernel — Phase 2 baseline.
+# Q8_0 matvec @gpu kernel — bakeoff baseline.
 #
 # Layout:
 #   y[N] = W[N, K] @ x[K]
@@ -12,7 +12,7 @@
 # v0 strategy: one thread per output row m. Walks the row's K weights
 # in 32-element blocks, dequantizing scale × quant on the fly and
 # accumulating against x. No shared memory, no SIMD intrinsics, no
-# threadgroup tiling — that's Phase 3 schedule-language territory.
+# threadgroup tiling — that's schedule-language territory.
 # Correctness first; the bakeoff harness reports the GB/s gap and we
 # iterate from there.
 

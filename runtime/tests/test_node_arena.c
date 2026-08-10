@@ -1,5 +1,5 @@
 /*
- * test_node_arena.c — Phase 1 smoke test for the slab-AST node arenas.
+ * test_node_arena.c — smoke test for the slab-AST node arenas.
  *
  * Verifies:
  *   1. w_node_arena_init() preserves lazy allocation.

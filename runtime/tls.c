@@ -242,7 +242,7 @@ ssize_t w_tls_write(WSocket *s, const char *buf, size_t len) {
     }
 }
 
-/* ---- ALPN protocol query (Phase 8b) ---- */
+/* ---- ALPN protocol query ---- */
 
 WValue w_socket_alpn_protocol(WValue sock) {
     WSocket *s = (WSocket *)w_as_ptr(sock);
@@ -264,7 +264,7 @@ WValue w_socket_alpn_protocol(WValue sock) {
     return W_NIL;
 }
 
-/* ---- TLS client wrap (Phase 8b) ---- */
+/* ---- TLS client wrap ---- */
 
 static void ensure_client_ctx(void) {
     if (g_ssl_client_ctx) return;
@@ -326,10 +326,10 @@ WValue w_tls_client_wrap(WValue sock, const char *hostname) {
     return sock;
 }
 
-/* ---- RSA Crypto for ACME JWS signing (Phase 8b) ---- */
+/* ---- RSA Crypto for ACME JWS signing ---- */
 
-/* RSA key handle stored as opaque pointer storage. Phase 6i.1 folded the
- * old WBytes struct into WArray<u8>; we now stash the EVP_PKEY* in an
+/* RSA key handle stored as opaque pointer storage. The old WBytes struct
+ * was folded into WArray<u8>; we now stash the EVP_PKEY* in an
  * 8-byte ByteArray (WArray with ebits=8, size = sizeof(EVP_PKEY *)). */
 
 WValue w_crypto_generate_rsa_key(int64_t bits) {

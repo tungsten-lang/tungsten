@@ -645,7 +645,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   target = node.target
   wfn = ctx[:func]
 
-  # Tag facts (Phase 2): compound writes void entry-condition facts the
+  # Tag facts: compound writes void entry-condition facts the
   # same way lower_assign_expr's plain writes do.
   if ctx[:tag_facts] != nil && target != nil && is_ast_node?(target) && ast_kind(target) == :var
     ctx[:tag_facts][target.name] = nil
@@ -732,7 +732,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   # Fast path: unboxed loop variable — operate on raw i64 directly.
   #
-  # Phase 2 change (2026-04-15): +/-/* now emit native add_i64/sub_i64/
+  # As of 2026-04-15: +/-/* now emit native add_i64/sub_i64/
   # mul_i64 directly, NOT through the w_add/w_sub/w_mul runtime helpers.
   # Silent-wrap overflow semantics per the plan decision — the old path
   # boxed both operands, called the runtime for bigint-promotion on
@@ -758,7 +758,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # correctly handles values outside the 48-bit nanbox range). If we
     # returned :raw_int here, a sum like 0..99999999 → 4999999950000000
     # would be truncated to 48 bits at the return site and produce
-    # garbage. :raw_i64 is the safe, Phase-2-correct shape.
+    # garbage. :raw_i64 is the safe, correct shape.
     if int_op != nil
       result_raw = next_temp(wfn)
       emit_instruction(wfn, {op: int_op, temp: result_raw, lhs: cur_raw, rhs: rhs_raw})
@@ -1350,11 +1350,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   lower_expression(ctx, Tungsten:AST:Var.new(arr_name))
 
-# -- Tag-guard folding (Phase 3, with Phase 2.5's assert lever) --
+# -- Tag-guard folding (with the assert lever) --
 #
 # Known-bits abstract evaluation of NaN-box tag expressions. The only
 # base fact is `wvalue_bits(X)` where X carries a :structural tag fact
-# (Phase 2, infer_tag): a :top_tag entry fixes bits 48..63 and nothing
+# (from infer_tag): a :top_tag entry fixes bits 48..63 and nothing
 # else — bit 47 (the sign overlay) stays a runtime value, so sign reads
 # never fold. The guard idioms in core sources are
 # `(bits >> 48) & 0xFFFF` and `bits & TAG_MASK` against a tag constant;
@@ -1543,10 +1543,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       if sym_rname != nil && !star_ident_bound?(ctx, sym_rname)
         node.right = Tungsten:AST:Quantity.new("1", sym_rname)
 
-  # Phase 4e dot-prefix elementwise operators — `lhs .+ rhs` etc. The
+  # Dot-prefix elementwise operators — `lhs .+ rhs` etc. The
   # lexer guards whitespace at scan time so these never collide with
   # method-call dot syntax. Runtime helpers handle the float/int/w64
-  # ebits split internally and broadcast scalar rhs. Phase 6 SIMD will
+  # ebits split internally and broadcast scalar rhs. A future SIMD pass will
   # rewrite the float and 32-bit-integer paths to use NEON/AVX intrinsics.
   if op in (:DOT_PLUS :DOT_MINUS :DOT_STAR :DOT_SLASH :DOT_PIPE :DOT_AMP :DOT_CARET :DOT_LSHIFT :DOT_RSHIFT)
     # f64 elementwise trees fuse into a single loop (see try_fuse_
@@ -2509,7 +2509,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   else
     arms.push(node)
 
-# Structural equality over AST hashes for the Phase 8 homogeneity
+# Structural equality over AST hashes for the homogeneity
 # check. Only handles the node shapes that the peephole can realistically
 # hoist: vars, ivars, cvars, simple binary ops, calls with pure args,
 # and literals. Returns true if both nodes are the same expression.
@@ -2593,15 +2593,15 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 -> lower_short_circuit(ctx, node, kind)
   wfn = ctx[:func]
 
-  # Phase 8 peephole: homogeneous OR chain → hoisted LHS chain.
+  # Peephole: homogeneous OR chain → hoisted LHS chain.
   # Detects `a == c1 || a == c2 || a == c3 [|| ...]` with structurally
   # identical LHS and integer-constant RHS, and lowers to a hoisted
   # form where the LHS is evaluated exactly once. This fixes a
-  # correctness issue in Phase 6's naive in-operator lowering where
+  # correctness issue in the older naive in-operator lowering where
   # a side-effecting LHS (e.g., a method call) would be evaluated
   # multiple times.
   #
-  # A future Phase 8b commit (gated on Phase 2's raw i64 default) will
+  # A future commit (gated on the raw i64 default) will
   # replace the hoisted comparison chain with a single bitmap test on
   # the raw integer, for the common case where the constants fit in
   # a u64 window. The recognition machinery (flatten_or_chain,
@@ -2679,7 +2679,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # that need a WValue will nanbox via ensure_i64_value.
   typed_value(:i1, negated)
 
-# Phase 8 dispatch: emit a homogeneous equality chain with a single
+# Emit a homogeneous equality chain with a single
 # evaluation of the LHS. All comparisons and OR reductions happen in
 # the current basic block as a straight-line sequence — no branching,
 # no multi-block control flow. This is safe because every comparison
@@ -2777,7 +2777,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   # Build the OR chain bottom-up: a == e0 || a == e1 || a == e2 ...
   # Note: the LHS is duplicated structurally at each arm. A following
-  # Phase 8 peephole will detect the homogeneous chain and hoist the
+  # peephole will detect the homogeneous chain and hoist the
   # LHS to a single temp before the dispatch.
   chain = Tungsten:AST:BinaryOp.new(lhs_node, :EQ, elements[0])
   i = 1

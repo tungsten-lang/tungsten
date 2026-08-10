@@ -44,7 +44,7 @@ RSpec.describe "Compiler parity", :parity do
     @expected = {}
     @skipped = []
 
-    # Phase 1: Generate expected output
+    # Step 1: Generate expected output
     $stderr.print "  parity: interpreting #{FIXTURES.size} fixtures..."
     FIXTURES.each do |name|
       fixture = File.join(FIXTURES_DIR, "#{name}.w")
@@ -75,13 +75,13 @@ RSpec.describe "Compiler parity", :parity do
     end
     $stderr.puts " done"
 
-    # Phase 2: Read embedded expectations for examples
+    # Step 2: Read embedded expectations for examples
     EXAMPLES.each do |path|
       key = example_key(path)
       @expected[key] = Tungsten::ExampleExpectations.parse(File.read(path)).stdout
     end
 
-    # Phase 3: Batch compile fixtures
+    # Step 3: Batch compile fixtures
     compile_list = []
     FIXTURES.each do |name|
       next if @skipped.include?(name)
@@ -105,7 +105,7 @@ RSpec.describe "Compiler parity", :parity do
       end
     end
 
-    # Phase 4: Batch compile examples (tolerates individual failures)
+    # Step 4: Batch compile examples (tolerates individual failures)
     example_list = []
     EXAMPLES.each do |path|
       key = example_key(path)

@@ -456,7 +456,7 @@ TENSOR_EW = {}
   # ---- views (zero-copy; alias the same buffer) ----
 
   # Same buffer, new shape — element count must match and the source must be
-  # contiguous (strided views must be copied contiguous first, a Phase B+ op).
+  # contiguous (strided views must be copied contiguous first, a future op).
   -> reshape(new_shape)
     if Tensor.elem_count(new_shape) != self.size
       raise "Tensor.reshape: element count mismatch"
@@ -524,7 +524,7 @@ TENSOR_EW = {}
   # kernels and the MTL4 residency set.
 
   # An MTLTensor view aliasing this tensor's bytes, for MTL4 argument tables.
-  # Rebuilt each call in v0 (a cheap descriptor wrap); caching is a Phase B
+  # Rebuilt each call in v0 (a cheap descriptor wrap); caching is a future
   # optimization.
   -> metal_tensor
     if strides[strides.size() - 1] != 1
@@ -927,7 +927,7 @@ TENSOR_EW = {}
   # out×in) → fresh [M,N] f32 = x · weight^T, computed on the GPU through the
   # `.metal_tensor` faces of x, weight, and the result. The buffers (residency)
   # and the tensors (argument table) of ONE allocation each are bound into a
-  # single MTL4 dispatch — the same share-and-both property Phase A proved, now
+  # single MTL4 dispatch — the same share-and-both property proved earlier, now
   # driving real compute.
   -> linear(weight)
     if dtype != 16 && dtype != 121

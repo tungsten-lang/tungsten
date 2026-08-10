@@ -1,5 +1,5 @@
 /*
- * test_goroutine_arena.c — Phase 0 Validation Sprint
+ * test_goroutine_arena.c — Goroutine stack arena validation
  *
  * Validates the goroutine stack arena design before committing to it:
  *   1. mmap arena with MAP_NORESERVE (virtual only, no RSS)
@@ -486,7 +486,7 @@ static void test_rapid_context_switching(void) {
 
 int main(void) {
     setbuf(stdout, NULL);  /* Unbuffer stdout for immediate output */
-    printf("=== Phase 0: Goroutine Arena Validation ===\n");
+    printf("=== Goroutine Arena Validation ===\n");
     printf("Platform: %s %s\n",
 #ifdef __APPLE__
            "macOS",

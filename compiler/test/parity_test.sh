@@ -59,7 +59,7 @@ cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
 echo "==> Generating ground truth (${#SUPPORTED[@]} fixtures)..."
-# Phase 1: Generate ground truth for fixtures without .expected files
+# Step 1: Generate ground truth for fixtures without .expected files
 for name in "${SUPPORTED[@]}"; do
   fixture="$FIXTURES/${name}.w"
   if [ ! -f "$fixture" ]; then
@@ -79,7 +79,7 @@ for name in "${SUPPORTED[@]}"; do
   fi
 done
 
-# Phase 2: Batch compile all fixtures in one stage compiler invocation
+# Step 2: Batch compile all fixtures in one stage compiler invocation
 COMPILE_LIST=()
 for name in "${SUPPORTED[@]}"; do
   fixture="$FIXTURES/${name}.w"
@@ -109,7 +109,7 @@ if [ ${#COMPILE_LIST[@]} -gt 0 ]; then
 fi
 
 echo "==> Running and comparing..."
-# Phase 3: Run each compiled binary and diff
+# Step 3: Run each compiled binary and diff
 for name in "${SUPPORTED[@]}"; do
   fixture="$FIXTURES/${name}.w"
   if [ ! -f "$fixture" ]; then
@@ -153,7 +153,7 @@ done
 echo ""
 echo "Results: $PASS pass, $FAIL fail, $SKIP skip (${#SUPPORTED[@]} total)"
 
-# Phase 4: the same fixtures through the compiled TREE-WALK INTERPRETER
+# Step 4: the same fixtures through the compiled TREE-WALK INTERPRETER
 # (`tungsten run`), diffed against the same expected output. Known gaps are
 # listed in INTERP_SKIP — a failure outside that list gates, so interpreter/
 # compiler divergence can only shrink.

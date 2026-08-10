@@ -1,4 +1,4 @@
-# Portfolio specs (Phase 3, --proof half). Correctness only — NEVER which
+# Portfolio specs (--proof half). Correctness only — NEVER which
 # arm wins. Runs the compiled binary via system(); the Process externs are
 # compiled-only.
 

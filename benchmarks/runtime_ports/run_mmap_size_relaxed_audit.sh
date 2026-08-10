@@ -78,13 +78,13 @@ if [ -z "$baseline_mmap_ic" ] || [ "$candidate_mmap_ic" != "$baseline_mmap_ic" ]
 fi
 
 baseline_mmap_names="$({
-  sed -n '/\/\* Mmap (Phase 7+o) \*\//,/\/\* StringBuffer/p' \
+  sed -n '/\/\* Mmap\( (Phase 7+o)\)\{0,1\} \*\//,/\/\* StringBuffer/p' \
     "$BASELINE_ROOT/runtime/runtime.c" |
     rg -o 'WN_[a-z0-9_]+' |
     rg -v '^WN_size$'
 } || true)"
 candidate_mmap_names="$({
-  sed -n '/\/\* Mmap (Phase 7+o) \*\//,/\/\* StringBuffer/p' \
+  sed -n '/\/\* Mmap\( (Phase 7+o)\)\{0,1\} \*\//,/\/\* StringBuffer/p' \
     "$CANDIDATE_ROOT/runtime/runtime.c" |
     rg -o 'WN_[a-z0-9_]+'
 } || true)"

@@ -76,7 +76,7 @@ wait_until() {
   done
 }
 
-# Phase 1: wait up to 60s, sample if still alive
+# Step 1: wait up to 60s, sample if still alive
 wait_until 60
 PEAK_RSS_60S=0
 if kill -0 "$BOOT_PID" 2>/dev/null; then
@@ -84,7 +84,7 @@ if kill -0 "$BOOT_PID" 2>/dev/null; then
   PEAK_RSS_60S=$(ps -o rss= -p "$BOOT_PID" 2>/dev/null | tr -d ' ' || echo 0)
 fi
 
-# Phase 2: wait up to 5min total, sample if still alive
+# Step 2: wait up to 5min total, sample if still alive
 wait_until 300
 PEAK_RSS_5M=0
 if kill -0 "$BOOT_PID" 2>/dev/null; then
@@ -92,7 +92,7 @@ if kill -0 "$BOOT_PID" 2>/dev/null; then
   PEAK_RSS_5M=$(ps -o rss= -p "$BOOT_PID" 2>/dev/null | tr -d ' ' || echo 0)
 fi
 
-# Phase 3: wait up to LIMIT seconds (default 60min, override via SP_BENCH_LIMIT)
+# Step 3: wait up to LIMIT seconds (default 60min, override via SP_BENCH_LIMIT)
 WAITED=300
 LIMIT="${SP_BENCH_LIMIT:-3600}"
 while kill -0 "$BOOT_PID" 2>/dev/null; do

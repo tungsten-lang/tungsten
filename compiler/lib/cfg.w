@@ -472,7 +472,7 @@ use wire
         rename_profile[:restore_secs] = rename_profile[:restore_secs] + (clock() - restore_started_at)
       next
 
-    # Phase 0: process this block
+    # phase 0: process this block
     if visited[block_idx] == true
       stack.pop()
       next

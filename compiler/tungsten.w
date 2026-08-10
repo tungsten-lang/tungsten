@@ -708,9 +708,8 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
     return ll_path
 
   # Emit a sibling .metal file for each `@gpu fn` found in the program.
-  # Runtime dispatch wiring (compile→library→pipeline→dispatch) lands
-  # in Phase 1; for the Phase 0 provenance smoke, the .metal file is
-  # the artifact we verify: source → MSL → (later) dispatch.
+  # Runtime dispatch wiring is compile→library→pipeline→dispatch; the
+  # .metal file is the artifact we verify: source → MSL → dispatch.
   kernels = collect_gpu_kernels(ast)
   if kernels.size() > 0
     metal_text = emit_gpu_kernels_metal(kernels)

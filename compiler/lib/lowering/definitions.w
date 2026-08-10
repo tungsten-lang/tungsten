@@ -435,7 +435,7 @@
     i += 1
   kinds
 
-# Phase: any machine-int param. Extends raw-i64 ABI to sub-i64 ints
+# Any machine-int param: extends the raw-i64 ABI to sub-i64 ints
 # (i8/u8/i16/u16/i32/u32) and i64/u64/bool. The fn body for these typed
 # annotations is already a passthrough (`ret %x`), so the elision is
 # entirely on the caller side: pass raw without nanbox, take return as
@@ -1519,7 +1519,7 @@
   cls_reload = next_temp(main_fn)
   emit_instruction(main_fn, {op: :load_class, temp: cls_reload, class_name: cname})
   emit_instruction(main_fn, {op: :class_add_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: mfn_name, arity: arity, min_arity: min_arity})
-  # Phase 5: stash the method-def AST so specialize_method can clone+re-lower
+  # Stash the method-def AST so specialize_method can clone+re-lower
   # it under a child context with `__self` typed to a concrete variant.
   # Also stash an arity-keyed entry so monomorphization of an OVERLOADED method
   # (e.g. Enumerable `sum`/`sum(init)`) specializes the body matching the call's
@@ -1851,7 +1851,7 @@
       else
         kernel_fn[:embedded_asm] = embedded[1]
       return nil
-  # Phase 5: monomorphization override — uses a mangled fn name and pre-types
+  # Monomorphization override — uses a mangled fn name and pre-types
   # __self so dispatch in the body picks up the variant (e.g. typed_array_u8
   # → :typed_array_get_inline instead of method_call_dispatch).
   if override != nil && override[:fn_name] != nil
@@ -1913,7 +1913,7 @@
 
   # Child context with class_name set
   child_var_types = {}
-  # Phase 5: seed __self type for specialized variants. Drives downstream
+  # Seed __self type for specialized variants. Drives downstream
   # dispatch (e.g. self[i] → :typed_array_get_inline at the variant's ebits).
   if override != nil && override[:self_type] != nil
     child_var_types["__self"] = override[:self_type]
@@ -1965,7 +1965,7 @@
 
   child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod)
 
-  # Tag facts (Phase 2): seed the side map with what this body's ENTRY
+  # Tag facts: seed the side map with what this body's ENTRY
   # CONDITIONS prove, never with what annotations claim.
   #   __self — an instance method of an exact-tag class only executes with
   #   a receiver carrying that tag: method-table dispatch routes by the

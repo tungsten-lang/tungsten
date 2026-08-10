@@ -1,5 +1,5 @@
 /*
- * test_sockets.c — Phase 3: Blocking TCP Sockets
+ * test_sockets.c — Blocking TCP Sockets
  *
  * Tests:
  *   1. TCP listen + accept + read + write (loopback)
@@ -296,7 +296,7 @@ static void test_socket_shutdown(void) {
 
 int main(void) {
     setbuf(stdout, NULL);
-    printf("=== Phase 3: TCP Sockets ===\n\n");
+    printf("=== TCP Sockets ===\n\n");
 
     test_tcp_echo();
     test_http_hello_world();

@@ -1,4 +1,4 @@
-# Portfolio coordinator (Phase 3, --proof half): a process race.
+# Portfolio coordinator (--proof half): a process race.
 #
 # One wassat worker process per arm over the SHARED preprocessed artifact;
 # first decisive answer wins; losers are killed by process group. Processes,

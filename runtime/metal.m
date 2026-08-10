@@ -146,7 +146,7 @@ static int metal_array_storage_bits(int ebits, int64_t *bits_out) {
     }
 }
 
-/* Phase 7d (#12): transparent buffer arg — accept either a WMetalBuffer,
+/* (#12) transparent buffer arg — accept either a WMetalBuffer,
  * a WArray with GPU-eligible ebits, or a scalar int/double (autoboxed).
  * For WArray, wrap on-the-fly via newBufferWithBytesNoCopy (zero-copy
  * when page-aligned) or newBufferWithBytes (copy fallback). Returned
@@ -437,7 +437,7 @@ WValue w_metal_buffer_length(WValue buffer_v) {
     return w_int(b->size);
 }
 
-/* Phase 7a (#12): zero-copy WArray → MTLBuffer wrap. On Apple Silicon's
+/* (#12) zero-copy WArray → MTLBuffer wrap. On Apple Silicon's
  * unified memory architecture, `newBufferWithBytesNoCopy:` makes the
  * GPU see the same physical pages as the CPU's allocation — no copy,
  * no upload. The buffer is a borrowed view; caller is responsible for
@@ -1419,7 +1419,7 @@ WValue w_metal_dispatch1(WValue queue_v,
         id<MTLCommandQueue> queue = (id<MTLCommandQueue>)q->handle;
         id<MTLComputePipelineState> ps = (id<MTLComputePipelineState>)p->handle;
         id<MTLDevice> dev = [queue device];
-        /* Phase 7d (#12): each buf arg may be a WMetalBuffer or WArray.
+        /* (#12) each buf arg may be a WMetalBuffer or WArray.
          * Wrap arrays inline; the helper returns autoreleased buffers
          * that survive until the @autoreleasepool exits at dispatch end. */
         id<MTLBuffer> mb0 = metal_buffer_or_wrap_array(buf0_v, dev);
@@ -1454,7 +1454,7 @@ WValue w_metal_dispatch1(WValue queue_v,
     return W_NIL;
 }
 
-/* Phase 7f (#12): explicit sync — copy a Metal buffer's contents back
+/* (#12) explicit sync — copy a Metal buffer's contents back
  * into a typed array. Needed when the array isn't page-aligned (so its
  * earlier wrap took the COPY path) and the GPU has written into the
  * buffer; the CPU-side array won't see those writes without this.
@@ -1488,7 +1488,7 @@ WValue w_metal_sync_array_from_buffer(WValue arr_v, WValue buf_v) {
     return W_NIL;
 }
 
-/* Phase 7e (#12): one-shot compute helper.
+/* (#12) one-shot compute helper.
  *
  *   metal_compute(source, kernel_name, bufs, threads)
  *

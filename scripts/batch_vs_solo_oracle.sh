@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Batch-vs-solo oracle: `compile-batch` must produce byte-identical .ll
 # for every file to what a fresh per-file `compile` produces. This is the
-# structural gate for all batch/warm-core work (incremental-lowering plan
-# Phase 0+): any state leaking across compiles in one process — emitter
+# structural gate for all batch/warm-core work (incremental lowering):
+# any state leaking across compiles in one process — emitter
 # metadata, mod residue, arena effects — shows up here as a byte diff.
 #
 # Usage: scripts/batch_vs_solo_oracle.sh [spec.w ...]

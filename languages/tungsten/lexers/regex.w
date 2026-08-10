@@ -112,7 +112,7 @@ use regex_base
       emit(:SYMBOL, word)
       return nil
 
-    # Char literal `:-X` (Phase 7). Recognized BEFORE the operator-symbol
+    # Char literal `:-X`. Recognized BEFORE the operator-symbol
     # dispatch below because `:-` itself is the method-name symbol for `-`
     # but `:-<non-whitespace>` is unambiguously a char literal. This works
     # because Tungsten requires leading whitespace on binary operators —

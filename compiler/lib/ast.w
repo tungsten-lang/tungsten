@@ -705,7 +705,7 @@ in Tungsten:AST
   ccall_nobox("w_is_ast_node_full", x, :node) == 1
 
 # -- Deep clone --
-# Phase 5: monomorphization clones a method-def AST so the body can be
+# Monomorphization clones a method-def AST so the body can be
 # re-lowered under a child context with a re-typed `__self`. Sharing policy:
 # - Hash and Array nodes are recursively copied (so child mutations of
 #   ctx[:var_types] etc. don't bleed back into the original).

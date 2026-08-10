@@ -1,6 +1,6 @@
 # Metal Shading Language emitter for `@gpu fn` kernels.
 #
-# v0 scope — Phase 0 kernel provenance smoke: walk a `:gpu_kernel_def`
+# v0 scope — kernel provenance smoke: walk a `:gpu_kernel_def`
 # AST node and produce a minimal .metal source string sufficient for
 #
 #   @gpu fn add_one(x ## f32[], y ## f32[], n ## i32)
@@ -1269,7 +1269,7 @@ use ast
   arr_elt = msl_array_elt_type(type_hint)
   if arr_elt != nil
     # Output buffers are mutable device pointers; the restriction is
-    # loosened in a later phase when we add `in`/`out` annotations.
+    # loosened when `in`/`out` annotations are added.
     return "device " + arr_elt + " *" + pname + " \[\[buffer(" + buf_index.to_s() + ")]]"
   scalar = msl_scalar_type(type_hint)
   if scalar != nil

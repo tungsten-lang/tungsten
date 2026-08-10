@@ -1,5 +1,5 @@
 /*
- * test_integration.c — Phase 7e: End-to-end HTTP server integration test
+ * test_integration.c — End-to-end HTTP server integration test
  *
  * Tests:
  * 1. Start an HTTP server using runtime socket + goroutine APIs
@@ -239,7 +239,7 @@ static void test_concurrent_clients(void) {
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    printf("=== Phase 7: Integration Tests ===\n");
+    printf("=== Integration Tests ===\n");
 
     test_http_server();
     test_concurrent_clients();

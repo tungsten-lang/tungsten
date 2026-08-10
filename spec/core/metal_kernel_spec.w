@@ -1,4 +1,4 @@
-# Phase 0 kernel provenance smoke — `@gpu fn` end-to-end.
+# Kernel provenance smoke — `@gpu fn` end-to-end.
 #
 # Compiles add_one to MSL, runtime-compiles the .metal, builds a
 # pipeline, fills `[1.0, 2.0, 3.0]` into an input buffer, dispatches

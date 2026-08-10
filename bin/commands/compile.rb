@@ -11,7 +11,7 @@ TLS_C       = File.join(RUNTIME_DIR, "tls.c")
 TLS_STUB_C  = File.join(RUNTIME_DIR, "tls_stub.c")
 LINUX = RUBY_PLATFORM =~ /linux/
 MACOS = RUBY_PLATFORM =~ /darwin/
-# Phase 6: thin-LTO by default, full-LTO via --release. The runtime
+# Thin-LTO by default, full-LTO via --release. The runtime
 # archive is built with the matching LTO mode by build.rb so the linker
 # has bitcode for both halves and can cross-optimize through dispatch
 # (w_method_call_cached etc.).
@@ -234,7 +234,7 @@ end
 
 # io_uring support (Linux only, opt-in via USE_IOURING=1 env var)
 # Disabled by default: io_uring POLL_ADD is slower than epoll for readiness polling.
-# Will be enabled when kTLS (Phase 2) makes completion I/O worthwhile.
+# Will be enabled when kTLS support makes completion I/O worthwhile.
 URING_FLAGS = if LINUX && ENV["USE_IOURING"] && find_header("/usr/include/liburing.h", "/usr/include/liburing/io_uring.h")
                 ["-DUSE_IOURING", "-luring"]
               else

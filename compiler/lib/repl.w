@@ -1310,7 +1310,7 @@ INSP_RESULT_VALUE_LIMIT = 240
   # ── Rich `? <date>` inspector (port of inspection.rb's date scene) ──────
   # Renders the long-date header, season rail, Day/Week stats, the month
   # calendar with the day boxed, and a holiday ASCII-art panel — using the
-  # Phase-1 date intrinsics (year/month/day/wday/day_of_year/cweek/days_in_month)
+  # date intrinsics (year/month/day/wday/day_of_year/cweek/days_in_month)
   # plus the name tables above (core/date.w's bodied strftime isn't loadable
   # yet). Layout is codepoint-aware (DATE_SCENE_WIDTH=80, right column=42).
 

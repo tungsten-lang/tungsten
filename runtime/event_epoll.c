@@ -80,7 +80,7 @@ int w_event_poll(WEventLoop *el, int timeout_ms, WGoroutine **out, int max_out) 
 
 /* ---- Completion API stubs (io_uring only — never called on epoll) ---- */
 
-/* Phase 1 */
+/* basic completion I/O */
 int w_event_submit_recv(WEventLoop *el, int fd, void *buf, size_t len, WGoroutine *g) {
     (void)el; (void)fd; (void)buf; (void)len; (void)g; return -1;
 }
@@ -91,7 +91,7 @@ int w_event_submit_accept(WEventLoop *el, int fd, struct sockaddr *addr, socklen
     (void)el; (void)fd; (void)addr; (void)addrlen; (void)g; return -1;
 }
 
-/* Phase 4 */
+/* multi-shot recv + zero-copy send */
 int w_event_submit_recv_multishot(WEventLoop *el, int fd, WGoroutine *g) {
     (void)el; (void)fd; (void)g; return -1;
 }
@@ -102,7 +102,7 @@ void w_event_return_buf(WEventLoop *el, int buf_id) {
     (void)el; (void)buf_id;
 }
 
-/* Phase 5 */
+/* registered send buffers + multi-shot accept */
 int w_event_send_buf_alloc(WEventLoop *el) { (void)el; return -1; }
 void w_event_send_buf_free(WEventLoop *el, int buf_id) { (void)el; (void)buf_id; }
 void *w_event_send_buf_ptr(WEventLoop *el, int buf_id) { (void)el; (void)buf_id; return NULL; }

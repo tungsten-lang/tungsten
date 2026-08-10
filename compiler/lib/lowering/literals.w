@@ -233,7 +233,7 @@
 
 # -- Arrays --
 
-# Phase 5g: try to fold a literal `[c1, c2, ...]` whose elements are all
+# Try to fold a literal `[c1, c2, ...]` whose elements are all
 # integer constants ≥0, ≤255, into a compile-time SmallArray. Returns
 # {ebits, size, bytes} on success or nil to bail to dynamic construction.
 # Bounds: 1..255 elements, u8 only for first cut (covers lookup tables,
@@ -283,7 +283,7 @@
 -> lower_array(ctx, node)
   wfn = ctx[:func]
   arr = next_temp(wfn)
-  # Phase 5g: const-folding to SmallArray is gated off by default. The
+  # Const-folding to SmallArray is gated off by default. The
   # element-only check in try_const_small_array bails on non-constant
   # *elements* but doesn't account for non-read-only *uses* — Array has
   # .each/.map/.push, SmallArray's dispatch is thin (size/cap/[]/empty?).
@@ -493,7 +493,7 @@
 
 
 
-# -- Deep literal lowerings (Phase 6 domain types) --
+# -- Deep literal lowerings (domain types) --
 
 -> lower_float(ctx, node)
   typed_value(:raw_f64, node.value.to_s())

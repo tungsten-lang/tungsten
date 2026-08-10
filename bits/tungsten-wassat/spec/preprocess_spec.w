@@ -1,5 +1,5 @@
 # Preprocessing specs: the four techniques, their proof obligations, the
-# elimination stack, and the edge-case traps from the Phase 1 checklist.
+# elimination stack, and the known edge-case traps.
 #
 # The independent checker is imported from its own bit for the certificate
 # regressions: every UNSAT fixture's proof is replayed by tungsten-wrat

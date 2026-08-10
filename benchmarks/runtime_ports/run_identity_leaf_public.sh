@@ -136,7 +136,7 @@ if "@identity_leaf_unresolved" in loader_text:
     raise SystemExit("obsolete identity-leaf aggregate loader flag is still present")
 
 runtime_text = (cand / "runtime/runtime.c").read_text()
-big_table = """static WICEntry w_ic_bigint_table[] = {    /* Phase 7+m */
+big_table = """static WICEntry w_ic_bigint_table[] = {
     {0, w_ic_bigint_to_s},
     {0, w_ic_bigint_gcd},
     {0, w_ic_bigint_abs},
@@ -159,7 +159,7 @@ big_assign = """    w_ic_bigint_table[0].name  = WN_to_s;
     w_ic_bigint_table[7].name  = WN_next;
     w_ic_bigint_table[8].name  = WN_lcm;
 """
-float_table = """static WICEntry w_ic_float_table[] = {     /* Phase 7+i */
+float_table = """static WICEntry w_ic_float_table[] = {
     {0, w_ic_float_to_i},
     {0, w_ic_float_to_s},
     {0, NULL}

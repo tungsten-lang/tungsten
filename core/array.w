@@ -129,7 +129,7 @@
       i += 1
     out
 
-  # take/drop are ports of the former runtime IC handlers (Phase 7+j),
+  # take/drop are ports of the former runtime IC handlers,
   # keeping their exact clamping semantics (negative counts clamp to 0,
   # oversized counts to $size). Like compact/dup they return ordinary
   # polymorphic Arrays for typed and view receivers. Benchmarked at parity

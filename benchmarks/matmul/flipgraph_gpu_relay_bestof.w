@@ -6,15 +6,15 @@
 #   - flipgraph_gpu_tg.w's per-step logic scanned candidates from a random
 #     offset and committed the FIRST valid match — that's still a single-
 #     candidate random walk, just implemented via linear scan instead of a
-#     CPU-style hash chain. It is NOT the algorithm Phase 0 validated.
+#     CPU-style hash chain. It is NOT the CPU-validated algorithm.
 #   - THIS kernel scans ALL `rank` candidates for the chosen reference term +
 #     axis, scores each by a local pressure heuristic (count of other terms
 #     in THIS walker's own scheme sharing exactly 2 of the 3 (u,v,w) factors
 #     with the candidate's hypothetical flip output — the same "share-2-of-3"
 #     semantics as bucket_gen.py's hash-chain-based pressure(), just computed
 #     via linear scan since a GPU thread's local array has no hash chain),
-#     and commits the single best-scoring one. This mirrors the CPU
-#     "bestof" selection rule Phase 0 validated, executed independently by
+#     and commits the single best-scoring one. This mirrors the CPU-validated
+#     "bestof" selection rule, executed independently by
 #     thousands of GPU threads in parallel instead of one CPU thread.
 #   - "short leash": the reset-to-personal-best threshold (`since`) is a few
 #     hundred steps, not 250,000 — each walker gets snapped back to its own

@@ -385,7 +385,7 @@ ensure_c_interp = lambda do
   [verb, elapsed, identity_binary, key]
 end
 
-# Phase 6: LTO mode for runtime compile + link.
+# LTO mode for runtime compile + link.
 #   default:    -flto=thin   — bitcode + summary-based imports; fast link;
 #                              lets LTO see into runtime functions (w_method_call,
 #                              w_array_get, etc.) for partial cross-optimization.
@@ -987,7 +987,7 @@ atomic_write([
 
 t_runtime_end = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-# ── Phase 1: Bootstrap compiler ───
+# ── Bootstrap compiler ───
 
 t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
@@ -1596,7 +1596,7 @@ unless artifact_specs.empty?
   end
 end
 
-# ── Phase 2: Runtime archive already built above ─────────────────
+# ── Runtime archive already built above ─────────────────
 t3 = t_runtime_start
 t4 = t_runtime_end
 
@@ -1630,7 +1630,7 @@ runtime_key = Digest::SHA256.hexdigest([
 
 colors = [bold, dim, green, red, reset]
 
-# ── Phase 3: Build bits ─────────────────────────────────────────
+# ── Build bits ─────────────────────────────────────────
 
 puts ""
 t5 = Process.clock_gettime(Process::CLOCK_MONOTONIC)

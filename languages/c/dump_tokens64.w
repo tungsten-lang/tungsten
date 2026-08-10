@@ -3,7 +3,7 @@ use ./lexer
 # Dump tokens from a hard-coded C source as `<idx>:<type>:<len>:<offset>`
 # lines, used by test_token_parity.sh to diff against dump_tokens32 / 16.
 #
-# Wrapped in `hot_dump` so Phase 0.4b's int escape analyzer promotes the
+# Wrapped in `hot_dump` so the int escape analyzer promotes the
 # loop locals to :i64 — without that the print path interpolates raw NaN
 # bits instead of unboxed integers.
 SRC = "int add(int a, int b) {\n  // sum\n  return a + b;\n}\n#include <x>\n#define M 1\nchar c='a';float f=3.14e-2;\nfloat h=0x1.fp3; float d=.5; pp=1e+;\na->b == c && d != e || f++ + g-- - h*i / j%k ^ l|m & n<<2 >>1\nx /* outer /* not nested */ y\n// trailing\nu8\"a\\nb\" \\u0041 <% %> a#b\nint x; // hellö wörld\n"

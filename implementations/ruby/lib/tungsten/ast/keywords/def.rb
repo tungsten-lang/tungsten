@@ -57,7 +57,7 @@ module Tungsten::AST
     attr_accessor :receiver, :block, :yields, :splat_index, :double_splat
     attr_accessor :instances, :owner
 
-    # Phase 3 method signature annotations. Both are optional. When
+    # Method signature annotations. Both are optional. When
     # present they flow to the compiler's child_var_types / fn_return_types
     # the same way the existing `##` type-hint path does.
     #

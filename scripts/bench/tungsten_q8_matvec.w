@@ -1,4 +1,4 @@
-# Phase 2 bakeoff: time the Tungsten Q8_0 matvec @gpu kernel.
+# Bakeoff: time the Tungsten Q8_0 matvec @gpu kernel.
 # Pairs with bits/tungsten-llama/bench/llama_q8_matvec.c (same shape,
 # same bytes touched, same all-1s pattern).
 #

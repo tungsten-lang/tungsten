@@ -1246,7 +1246,7 @@ module Tungsten
       when :|   then left | right
       when :^   then left ^ right
       when :".+", :".-", :".*", :"./", :".|", :".&", :".^", :".<<", :".>>"
-        # Phase 4e dot-prefix elementwise operators. Mirrors the runtime
+        # Dot-prefix elementwise operators. Mirrors the runtime
         # `w_array_*_elem` kernels — lhs is array, rhs is array (paired)
         # or scalar (broadcast). Returns a fresh array with values
         # computed pair-by-pair.

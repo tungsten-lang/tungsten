@@ -372,7 +372,7 @@
 # Ruby-style truthiness preserved across all types. Earlier versions of
 # this function incorrectly folded `:int 0` to `:false` — that rule
 # contradicted Tungsten's own semantics and was caught during the
-# Phase 2 Codex plan review (2026-04-14).
+# Codex plan review (2026-04-14).
 -> static_bool_value(node)
   if node == nil
     return nil
@@ -693,7 +693,7 @@
 
   start_block(wfn, end_label)
 
-  # Rebox unboxed vars back to WValue slots. Phase 2 (2026-04-15):
+  # Rebox unboxed vars back to WValue slots. As of 2026-04-15:
   # use w_int (runtime bigint-safe boxing) instead of inline
   # nanbox_int, because under silent-wrap native arithmetic the
   # accumulated value can exceed the 48-bit nanbox payload range.

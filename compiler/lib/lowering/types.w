@@ -61,7 +61,7 @@
 builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "StandardError", "Tungsten:AST:Node"]
 -> type_dispatch_key(class_name)
   case class_name
-    "Atomic"        => 0x01 # Phase 6i.2: promoted to W_SUBTAG_ATOMIC
+    "Atomic"        => 0x01 # promoted to W_SUBTAG_ATOMIC
     "Thread"        => 0x81 # 0x80 | W_TYPE_THREAD
     "Channel"       => 0x84 # 0x80 | W_TYPE_CHANNEL
     "Hash"          => 0x05
@@ -69,27 +69,27 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Regex"         => 0x07
     "Range"         => 0x08
     "Array"         => 0x0A
-    "StringBuffer"  => 0x0B # Phase 6i.2: promoted to W_SUBTAG_STRBUF
+    "StringBuffer"  => 0x0B # promoted to W_SUBTAG_STRBUF
     "Class"         => 0x0C
     "UUID"          => 0x0D
-    # Phase 4f: TypedArray collapsed into Array (single subtag 0x0A); the
+    # TypedArray collapsed into Array (single subtag 0x0A); the
     # tier is now distinguished by the `ebits` byte, not the subtag.
     "TypedArray"    => 0x0A
-    "ByteArray"     => 0x0A # Phase 6i.1: ByteArray is WArray<u8>
-    "BoolArray"     => 0x0A # Phase 6i.1b: BoolArray is WArray<u1>
-    "BigArray"      => 0x92 # Phase 3: 0x80 | W_TYPE_BIG_ARRAY (18)
+    "ByteArray"     => 0x0A # ByteArray is WArray<u8>
+    "BoolArray"     => 0x0A # BoolArray is WArray<u1>
+    "BigArray"      => 0x92 # 0x80 | W_TYPE_BIG_ARRAY (18)
     "Mmap"          => 0x91 # 0x80 | W_TYPE_MMAP (17)
-    "SmallArray"    => 0x09 # Phase 6h: own subtag (W_SUBTAG_SMALL_ARRAY); no type byte
+    "SmallArray"    => 0x09 # own subtag (W_SUBTAG_SMALL_ARRAY); no type byte
     "BigInt"        => 0x02 # historical dispatch key; the VALUE now rides
                             # the top-level 0xFFF8 tag (v4) and
                             # w_dispatch_key maps it back to 0x02, keeping
                             # this table, every IC, and
                             # class_uses_implicit_type_byte? (key < 0x80)
                             # unchanged across the encoding move
-    "Error"         => 0x93 # Phase 6i.2: 0x80 | W_TYPE_ERROR (19)
-    "IPv6"          => 0x86 # Phase 6i.2: 0x80 | W_TYPE_IPV6 (6)
-    "Mac"           => 0x85 # Phase 6i.2: 0x80 | W_TYPE_MAC (5)
-    "Encoded"       => 0x88 # Phase 6i.2: 0x80 | W_TYPE_ENCODED (8)
+    "Error"         => 0x93 # 0x80 | W_TYPE_ERROR (19)
+    "IPv6"          => 0x86 # 0x80 | W_TYPE_IPV6 (6)
+    "Mac"           => 0x85 # 0x80 | W_TYPE_MAC (5)
+    "Encoded"       => 0x88 # 0x80 | W_TYPE_ENCODED (8)
     "Float"         => 0xFF
     "String"        => 0xF9
     "Integer"       => 0xFA
@@ -684,7 +684,7 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 # must be :int in var_types, only modified via compound_assign, never full-assigned,
 # and only use compound ops that cannot overflow the raw i64 slot representation.
 
-# -- Type predicates (Phase 4 / Phase 6) --
+# -- Type predicates --
 
 -> is_int_expr?(node)
   if node == nil
@@ -814,9 +814,9 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     i += 1
   out
 
-# Phase 3: tier × ebits type symbols for the unified Array hierarchy.
+# Tier × ebits type symbols for the unified Array hierarchy.
 # Recognized variants per tier: u4 i4 u8 i8 u16 i16 u32 i32 u64 i64 f32 f64
-# w64 bf16 f8_e4m3 f8_e5m2 f4_e2m1. Phase 5 monomorphization uses
+# w64 bf16 f8_e4m3 f8_e5m2 f4_e2m1. Monomorphization uses
 # (tier, ebits) as the cache key for specialized method instances.
 -> is_big_array_type?(t)
   t in (:big_array :big_array_u4 :big_array_i4 :big_array_u8 :big_array_i8 :big_array_u16 :big_array_i16 :big_array_u32 :big_array_i32 :big_array_u64 :big_array_i64 :big_array_f32 :big_array_f64 :big_array_w64 :big_array_f16 :big_array_bf16 :big_array_f8_e4m3 :big_array_f8_e5m2 :big_array_f4_e2m1)
@@ -825,15 +825,15 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   t in (:small_array :small_array_u4 :small_array_i4 :small_array_u8 :small_array_i8 :small_array_u16 :small_array_i16 :small_array_u32 :small_array_i32 :small_array_u64 :small_array_i64 :small_array_f32 :small_array_f64 :small_array_w64 :small_array_f16 :small_array_bf16 :small_array_f8_e4m3 :small_array_f8_e5m2 :small_array_f4_e2m1)
 
 # Tier-agnostic predicate: matches anything in the WTypedArray / WBigArray /
-# WSmallArray family. Phase 4 unification will collapse the Array tier into
+# WSmallArray family. A future unification will collapse the Array tier into
 # this one too. Used by lowering paths that don't care which tier they're
-# operating on (e.g. monomorphic specialization detection in Phase 5 only
+# operating on (e.g. monomorphic specialization detection only
 # needs to know "this is some kind of typed array").
 -> is_array_type?(t)
   t == :array || is_typed_array_type?(t) || is_big_array_type?(t) || is_small_array_type?(t)
 
-# Phase 5: map an array variant type back to the source class name whose
-# user-defined methods get specialized for that variant. Phase 4 collapsed
+# Map an array variant type back to the source class name whose
+# user-defined methods get specialized for that variant. Unification collapsed
 # typed-and-poly arrays under "Array"; the big/small tiers have their own
 # class names. nil if t isn't an array variant.
 -> source_class_for_array_type(t)
@@ -845,7 +845,7 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     return "SmallArray"
   nil
 
-# Phase 6f: translate a small_array_* / big_array_* type symbol to
+# Translate a small_array_* / big_array_* type symbol to
 # the equivalent typed_array_* symbol, so the typed-array element-bits
 # and signed? helpers can be reused. nil for non-array types.
 -> small_array_to_typed_array_type(t)
@@ -953,7 +953,7 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 # is EQUIVALENT to a NaN-box tag test — for every possible value, not just
 # values of the type — the gate can instead be an inline tag compare, which
 # the optimizer sees through (`w_value_is_a` is declared `nounwind`-only,
-# so the call is an optimization barrier) and which later phases use to
+# so the call is an optimization barrier) and which later passes use to
 # prove operand tags inside the selected overload body.
 #
 # Equivalence, not tag-injectivity, is the admission rule: `Int` maps to
@@ -1045,7 +1045,7 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     return nil
   entry
 
-# -- Tag facts (Phase 2) --
+# -- Tag facts --
 #
 # A PARALLEL side map (`ctx[:tag_facts]`) of NaN-box tag knowledge,
 # deliberately outside the type symbols: symbols feed

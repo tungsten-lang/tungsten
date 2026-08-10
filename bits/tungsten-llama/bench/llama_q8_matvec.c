@@ -1,4 +1,4 @@
-// Phase 2 bakeoff: time llama.cpp's Q8_0 matvec at qwen3 shapes via the
+// Bakeoff: time llama.cpp's Q8_0 matvec at qwen3 shapes via the
 // Metal backend, report effective GB/s. Pairs with the Tungsten kernel
 // in bits/tungsten-llama/lib/q8_matvec.w (same shape, same bytes touched).
 //

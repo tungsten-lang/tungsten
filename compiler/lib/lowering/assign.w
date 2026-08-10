@@ -176,7 +176,7 @@
     emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_class_of", args: [self_reg]})
     return typed_value(:i64, temp)
 
-  # Phase 6i follow-up: bare `$field` inside a class method is a view-field
+  # Bare `$field` inside a class method is a view-field
   # access on `self`. The lexer emits `$<name>` as a :GLOBAL token which
   # the parser turns into `Tungsten:AST:Var.new("$field")`. Resolve here
   # by looking the bare name up in the class's view_layouts and routing
@@ -203,8 +203,8 @@
   if ctx[:mod][:top_level_var_types] != nil
     top_level_raw_type = ctx[:mod][:top_level_var_types][name]
 
-  # Unboxed loop variable: load raw, return as :raw_i64. Phase 2
-  # (2026-04-15): must be :raw_i64, NOT :raw_int, because under
+  # Unboxed loop variable: load raw, return as :raw_i64. As of
+  # 2026-04-15: must be :raw_i64, NOT :raw_int, because under
   # silent-wrap native arithmetic the accumulated value can exceed
   # the 48-bit nanbox payload range. :raw_i64 routes boundary-crossing
   # boxing through w_int (bigint-safe), while :raw_int would mask to
@@ -386,7 +386,7 @@
   name = node.name
   wfn = ctx[:func]
 
-  # Phase 6i follow-up, preserved from lower_var's original $-prefix
+  # Preserved from lower_var's original $-prefix
   # handling (predating :gvar as a distinct AST kind): bare `$field`
   # inside a class method with a matching view-field layout is a
   # view-field access on `self`, not a global-variable read. Checked
@@ -431,7 +431,7 @@
   stmt_position = ctx[:assign_stmt_position] == true
   ctx[:assign_stmt_position] = nil
 
-  # Tag facts (Phase 2): a write to a name voids what the body's entry
+  # Tag facts: a write to a name voids what the body's entry
   # conditions proved about it. nil-ing the slot is indistinguishable from
   # an absent fact, and every consumer treats absent as "keep the guard",
   # so killing is always safe; seeding never was (see lower_method_def).
@@ -580,7 +580,7 @@
     if stmt_position && range_assign_elidable?(ctx, name, node.value)
       return typed_value(:i64, w_nil.to_s())
 
-  # Closure-escape Phase B (#61): stash block-literal RHS so a later
+  # Closure-escape (#61): stash block-literal RHS so a later
   # `arr.each(cb)` substitutes the block at the call site and inlines
   # via the existing .each handler. Same shape as range_bindings —
   # reassigning to a non-block value clears the stash. Conservative
@@ -640,12 +640,12 @@
 
   target_type = ctx[:var_types][name]
   if node.type_hint != nil
-    # Phase 4: `w64` is a synonym for the NaN-boxed WValue-int64 form.
+    # `w64` is a synonym for the NaN-boxed WValue-int64 form.
     # Under the old semantics this was the default (unannotated) type,
-    # but Phase 2 made raw i64 the unannotated default. Users who want
+    # but raw i64 is now the unannotated default. Users who want
     # explicit boxed semantics annotate `## w64`, which maps to `:i64`
-    # here (the internal symbol for boxed that pre-dates Phase 2's
-    # full rename; the rename is deferred to a follow-up).
+    # here (the internal symbol for boxed that pre-dates the raw-i64
+    # switch; the full rename is deferred to a follow-up).
     hint_text = node.type_hint
     htl = hint_text.size()
     if hint_text == "w64"

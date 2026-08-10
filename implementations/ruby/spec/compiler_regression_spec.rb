@@ -1229,7 +1229,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "dispatches JSON.parse through class vtable after intrinsic removal" do
-    # Phase 0c: the JSON intrinsic bypass was removed from lowering.w;
+    # The JSON intrinsic bypass was removed from lowering.w;
     # JSON.parse now routes through the class method vtable to core's
     # recursive-descent parser. BIT_HOME=/nonexistent disables bit
     # resolution so this test exercises the core path in isolation
@@ -1244,7 +1244,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "handles += on a function parameter inside a while loop" do
-    # Phase 0c discovered a pre-existing compiler bug: `n += 1` on a
+    # Covers a pre-existing compiler bug: `n += 1` on a
     # typed-nil parameter inside a loop hit the string-append fast path
     # in lower_compound_assign, corrupting the value and hanging the
     # loop. Fix: require `lt == :string` (not `lt == nil`) to enter
@@ -1262,7 +1262,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "formats lex errors with source context and caret" do
-    # Phase 1: raise sites in lexer.w emit structured :compile_error hashes
+    # Raise sites in lexer.w emit structured :compile_error hashes
     # that the top-level driver routes through error_formatter.format.
     source_path = File.join(@tmpdir, "bad_lex.w")
     File.write(source_path, "x = 1\ny = 2\nz = `\nw = 4\n")
@@ -1395,7 +1395,7 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("both\n")
   end
 
-  it "fixed-point inference resolves recursive fn return type (Phase 3b)" do
+  it "fixed-point inference resolves recursive fn return type" do
     out = compile_and_run("recur_fact.w", <<~W)
       fn fact(n)
         if n <= 1
@@ -1407,7 +1407,7 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("3628800\n")
   end
 
-  it "fixed-point inference resolves mutually recursive fns (Phase 3b)" do
+  it "fixed-point inference resolves mutually recursive fns" do
     out = compile_and_run("recur_mutual.w", <<~W)
       fn is_even(n)
         if n == 0
@@ -1427,7 +1427,7 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("10 is even\n7 is odd\n")
   end
 
-  it "fixed-point inference resolves a call chain a → b → c (Phase 3b)" do
+  it "fixed-point inference resolves a call chain a → b → c" do
     out = compile_and_run("chain_infer.w", <<~W)
       fn c(n)
         n + 3
@@ -1646,40 +1646,40 @@ RSpec.describe "Compiler regressions" do
     expect(llvm).to include("ptr @__w_call_site")
   end
 
-  it "parses `(i64 i64) i64 : body` fully-annotated method signature (Phase 3)" do
-    out = compile_and_run("phase3_fully_typed.w", <<~W)
+  it "parses `(i64 i64) i64 : body` fully-annotated method signature" do
+    out = compile_and_run("fully_typed.w", <<~W)
       -> add(a, b) (i64 i64) i64 : a + b
       << add(3, 4).to_s
     W
     expect(out).to eq("7\n")
   end
 
-  it "parses return-type-only annotation `i64 : body` (Phase 3)" do
-    out = compile_and_run("phase3_return_type_only.w", <<~W)
+  it "parses return-type-only annotation `i64 : body`" do
+    out = compile_and_run("return_type_only.w", <<~W)
       -> mult(x, y) i64 : x * y
       << mult(5, 6).to_s
     W
     expect(out).to eq("30\n")
   end
 
-  it "parses param-types-only annotation `(i64 i64) : body` (Phase 3)" do
-    out = compile_and_run("phase3_param_types_only.w", <<~W)
+  it "parses param-types-only annotation `(i64 i64) : body`" do
+    out = compile_and_run("param_types_only.w", <<~W)
       -> diff(a, b) (i64 i64) : a - b
       << diff(10, 3).to_s
     W
     expect(out).to eq("7\n")
   end
 
-  it "parses naked `:` inline-body form with no annotations (Phase 3)" do
-    out = compile_and_run("phase3_naked_inline.w", <<~W)
+  it "parses naked `:` inline-body form with no annotations" do
+    out = compile_and_run("naked_inline.w", <<~W)
       -> pick(p, q) : p + q
       << pick(7, 8).to_s
     W
     expect(out).to eq("15\n")
   end
 
-  it "keeps untyped back-compat: bare trailing expression still works (Phase 3)" do
-    out = compile_and_run("phase3_untyped_backcompat.w", <<~W)
+  it "keeps untyped back-compat: bare trailing expression still works" do
+    out = compile_and_run("untyped_backcompat.w", <<~W)
       -> greet(name)
         "hi " + name
 
@@ -1688,14 +1688,14 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("hi world\n")
   end
 
-  it "parses fully-typed signature with post-body fallthrough `: body : default` (Phase 3)" do
+  it "parses fully-typed signature with post-body fallthrough `: body : default`" do
     # The post-body `: default` form pushes `default` onto the body as
     # the last statement. Since Tungsten returns the last expression,
     # the fallthrough value ends up being what the method returns when
     # nothing else in the body was the tail. Here the inline body `v`
     # is followed by the fallthrough `0`, so `0` becomes the final
     # statement and the return value.
-    out = compile_and_run("phase3_fallthrough.w", <<~W)
+    out = compile_and_run("fallthrough.w", <<~W)
       -> maybe(flag, v) i64 : v : 0
       << maybe(true, 42).to_s
     W
@@ -1948,8 +1948,8 @@ RSpec.describe "Compiler regressions" do
     expect(main).not_to include("@w_method_call_cached")
   end
 
-  it "`:-X` char literal is a raw ASCII integer (Phase 7)" do
-    # Phase 7 updated: `:-X` now lowers to a raw int constant, not a
+  it "`:-X` char literal is a raw ASCII integer" do
+    # `:-X` now lowers to a raw int constant, not a
     # boxed Char. Printing as .to_s yields the decimal value. Use
     # U+0041 (codepoint form) if you want a first-class char value.
     out = compile_and_run("char_lit_ascii.w", <<~W)
@@ -1964,7 +1964,7 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("65\n66\n41\n66\n")
   end
 
-  it "`:-X` supports the `in` operator for structural-char checks (Phase 7)" do
+  it "`:-X` supports the `in` operator for structural-char checks" do
     out = compile_and_run("char_in_test.w", <<~W)
       c = :-(
       if c in (:-( :-) :-;)
@@ -1975,7 +1975,7 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("structural\n")
   end
 
-  it "`:-` followed by whitespace still lexes as method-name symbol (Phase 7 back-compat)" do
+  it "`:-` followed by whitespace still lexes as method-name symbol (back-compat)" do
     out = compile_and_run("colon_minus_symbol.w", <<~W)
       sym = :-
       << sym.to_s
@@ -2125,7 +2125,7 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("65\n255\n65\n255\n")
   end
 
-  it "`## w64` hint annotates explicitly-boxed integer (Phase 4)" do
+  it "`## w64` hint annotates explicitly-boxed integer" do
     out = compile_and_run("w64_hint.w", <<~W)
       x = 0 ## w64
       if x
@@ -2138,7 +2138,7 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("boxed zero is truthy\n142\n")
   end
 
-  it "w_array_set soft-fails on out-of-bounds write (Phase 5)" do
+  it "w_array_set soft-fails on out-of-bounds write" do
     out = compile_and_run("array_oob_set.w", <<~W)
       a = [1, 2, 3]
       a[10] = "x"
@@ -2410,9 +2410,9 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "emits a .metal sidecar file for @gpu fn kernels" do
-    # Phase 0 kernel provenance smoke. Proves the source → MSL half of
-    # `@gpu fn`. Dispatch wiring (metal.m + core/metal.w) lands in a
-    # follow-up phase; here we verify the parser recognizes the
+    # Kernel provenance smoke. Proves the source → MSL half of
+    # `@gpu fn`. Dispatch wiring (metal.m + core/metal.w) is covered
+    # separately; here we verify the parser recognizes the
     # attribute, the emitter lowers a trivial kernel to valid MSL, and
     # the .metal sidecar appears next to the emitted .ll.
     source_path = File.join(@tmpdir, "add_one.w")
@@ -2455,7 +2455,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "dispatches an @gpu kernel and reads back the result (Metal end-to-end)", :metal do
-    # Phase 0 closure: compiles add_one, then loads its emitted MSL,
+    # End-to-end: compiles add_one, then loads its emitted MSL,
     # builds a pipeline, fills an input buffer with [1.0, 2.0, 3.0],
     # dispatches threads=3, reads back and asserts [2.0, 3.0, 4.0].
     # Skipped on non-darwin and on darwin without xcrun metal toolchain.
@@ -2540,7 +2540,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "parses `and` and `or` as logical operators inside while conditions" do
-    out = compile_and_run("phase0_while_and.w", <<~W)
+    out = compile_and_run("while_and.w", <<~W)
       i = 0
       ok = true
       while i < 5 and ok
@@ -2554,7 +2554,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "lexes division between two parenthesized constants without falling into regex mode" do
-    out = compile_and_run("phase0_paren_div.w", <<~W)
+    out = compile_and_run("paren_div.w", <<~W)
       N = 32
       M = 16
       x = (N / 8) * (M / 8)
@@ -2565,7 +2565,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "registers rw accessor functions with arity-suffixed mangled names" do
-    out = compile_and_run("phase0_rw_accessor.w", <<~W)
+    out = compile_and_run("rw_accessor.w", <<~W)
       + Foo
         rw :foo_bar
         -> new(@foo_bar = 0)
@@ -2580,7 +2580,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "allows `lib` as a regular identifier outside of `extern lib` blocks" do
-    out = compile_and_run("phase0_lib_var.w", <<~W)
+    out = compile_and_run("lib_var.w", <<~W)
       lib = "hello"
       << lib
     W
@@ -2589,7 +2589,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "captures top-level mutable variables by reference inside closures" do
-    out = compile_and_run("phase0_closure_capture.w", <<~W)
+    out = compile_and_run("closure_capture.w", <<~W)
       count = 0
       inc = -> () count = count + 1
       inc()
@@ -2600,8 +2600,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("2\n")
   end
 
-  it "applies dot-prefix elementwise add to a typed array (Phase 4e)" do
-    out = compile_and_run("phase4_dot_add.w", <<~W)
+  it "applies dot-prefix elementwise add to a typed array" do
+    out = compile_and_run("dot_add.w", <<~W)
       a = u8[4]
       a[0] = 1
       a[1] = 2
@@ -2616,8 +2616,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("11\n12\n13\n14\n")
   end
 
-  it "applies dot-prefix elementwise bitwise-or across typed arrays (Phase 4e)" do
-    out = compile_and_run("phase4_dot_bor.w", <<~W)
+  it "applies dot-prefix elementwise bitwise-or across typed arrays" do
+    out = compile_and_run("dot_bor.w", <<~W)
       a = u32[3]
       a[0] = 12
       a[1] = 12
@@ -2634,8 +2634,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("15\n13\n13\n")
   end
 
-  it "applies dot-prefix elementwise shift to a typed array (Phase 4e)" do
-    out = compile_and_run("phase4_dot_shl.w", <<~W)
+  it "applies dot-prefix elementwise shift to a typed array" do
+    out = compile_and_run("dot_shl.w", <<~W)
       a = u32[3]
       a[0] = 1
       a[1] = 2
@@ -2648,11 +2648,11 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("4\n8\n12\n")
   end
 
-  it "broadcasts a float scalar across an f32 array via .* (Phase 4e)" do
+  it "broadcasts a float scalar across an f32 array via .*" do
     # `~1.0` is the IEEE-double literal syntax in Tungsten; `1.0` parses
     # as Decimal (exact sig+scale) and is rejected by the float-storage
     # path. f32 arrays only accept floats.
-    out = compile_and_run("phase4_f32_dot_mul.w", <<~W)
+    out = compile_and_run("f32_dot_mul.w", <<~W)
       a = f32[3]
       a[0] = ~1.0
       a[1] = ~2.0
@@ -2666,8 +2666,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("2.5\n5\n7.5\n")
   end
 
-  it "applies dot-prefix elementwise multiply across two typed arrays (Phase 4e)" do
-    out = compile_and_run("phase4_dot_mul.w", <<~W)
+  it "applies dot-prefix elementwise multiply across two typed arrays" do
+    out = compile_and_run("dot_mul.w", <<~W)
       a = u8[3]
       a[0] = 10
       a[1] = 20
@@ -2684,8 +2684,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("10\n40\n90\n")
   end
 
-  it "broadcasts a value across a typed array via arr.fill (Phase 4e)" do
-    out = compile_and_run("phase4_fill.w", <<~W)
+  it "broadcasts a value across a typed array via arr.fill" do
+    out = compile_and_run("fill.w", <<~W)
       a = u8[8]
       a.push(1)
       a.push(2)
@@ -2699,8 +2699,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("99\n99\n99\n")
   end
 
-  it "parses typed-array sigils as hash-key symbols (Phase 4e shadowing fix)" do
-    out = compile_and_run("phase4_hash_sigil.w", <<~W)
+  it "parses typed-array sigils as hash-key symbols (shadowing fix)" do
+    out = compile_and_run("hash_sigil.w", <<~W)
       h = {u8: 100, f32: 99}
       << h[:u8]
       << h[:f32]
@@ -2709,8 +2709,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("100\n99\n")
   end
 
-  it "reinterprets a typed array via arr.view zero-copy (Phase 4e)" do
-    out = compile_and_run("phase4_view.w", <<~W)
+  it "reinterprets a typed array via arr.view zero-copy" do
+    out = compile_and_run("view.w", <<~W)
       a = u32[2]
       a[0] = 0x11223344
       a[1] = 0x55667788
@@ -2727,8 +2727,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("8\n68\n17\n136\n85\n")
   end
 
-  it "exposes arr.raw_ptr as a non-zero pointer for ccall ergonomics (Phase 4e)" do
-    out = compile_and_run("phase4_raw_ptr.w", <<~W)
+  it "exposes arr.raw_ptr as a non-zero pointer for ccall ergonomics" do
+    out = compile_and_run("raw_ptr.w", <<~W)
       a = u32[4]
       a.push(100)
       a.push(200)
@@ -2739,8 +2739,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("true\n")
   end
 
-  it "constructs and pushes through BigArray.new (Phase 3 i64-indexed tier)" do
-    out = compile_and_run("phase3_big_array.w", <<~W)
+  it "constructs and pushes through BigArray.new (i64-indexed tier)" do
+    out = compile_and_run("big_array.w", <<~W)
       b = BigArray.new(:u8, 100)
       b.push(42)
       b.push(43)
@@ -2754,8 +2754,8 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("3\n42\n43\n44\n")
   end
 
-  it "constructs SmallArray.new with frozen size (Phase 3 packed tier)" do
-    out = compile_and_run("phase3_small_array.w", <<~W)
+  it "constructs SmallArray.new with frozen size (packed tier)" do
+    out = compile_and_run("small_array.w", <<~W)
       s = SmallArray.new(:u8, 5)
       << s.size
       << s.empty?
@@ -2981,7 +2981,7 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "autoloads Enumerable from core/tungsten.w when included via `is`" do
-    out = compile_and_run("phase1_autoload_trait.w", <<~W)
+    out = compile_and_run("autoload_trait.w", <<~W)
       + Foo
         is Enumerable
         -> each/&

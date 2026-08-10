@@ -116,7 +116,7 @@
       raise compile_error_for_node(:E_LOWER_RESERVED_INTRINSIC, "reserved compiler intrinsic '" + name + "'", ctx[:source_path], node)
 
   if name == "__compiler_overload_is_a" && receiver == nil && args != nil && args.size() == 2
-    # Exact-tag gate (B3/Phase 1): a type name whose membership test is
+    # Exact-tag gate (B3): a type name whose membership test is
     # provably equivalent to a NaN-box tag compare for ALL values lowers
     # to the inline compare instead of the `w_value_is_a` ancestry call
     # (which is `nounwind`-only and thus an optimization barrier). Every
@@ -483,7 +483,7 @@
     emit_instruction(wfn, {op: :asm_mulbase, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bp: tb, boff: bor, na: nar, nb: nbr})
     return typed_value(:raw_i64, tc)
 
-  # Phase 2 lazy pipeline: `source.lazy/sq/cube.take(n)`. `.take(n)` on a
+  # Lazy pipeline: `source.lazy/sq/cube.take(n)`. `.take(n)` on a
   # fused-pipeline receiver (:map / :calc) routes to a take-bounded
   # variant of lower_pipeline that exits after n produced elements —
   # one loop, no source materialization. `.lazy` is a passthrough
@@ -514,7 +514,7 @@
       emit_instruction(wfn, {op: :fma_f64, temp: fma_t, lhs: fma_a, rhs: fma_b, value: fma_c})
       return typed_value(:raw_f64, fma_t)
 
-  # Phase 6i follow-up: rewrite `$bytes[i]` / `$bits[i]` (and any
+  # Rewrite `$bytes[i]` / `$bits[i]` (and any
   # `$<view>[i]`) into a :view_access AST node. The lexer emits the
   # `$<name>` as a :GLOBAL token which the parser turns into a :gvar
   # node (older parsers used :var), so the index call lands here as
@@ -579,7 +579,7 @@
       emit_instruction(wfn, {op: :view_store_inline_elem, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw, value: val_raw, elem: elem, size: type_size(elem)})
       return typed_value(:raw_int, temp)
 
-  # Phase 6i follow-up: `$<view>.<field>` — explicit access to a named
+  # `$<view>.<field>` — explicit access to a named
   # view's field. With one data block per class, `$data.tag` is
   # equivalent to bare `$tag`. Route to lower_view_field so the field
   # lookup goes through the same view_layouts table.

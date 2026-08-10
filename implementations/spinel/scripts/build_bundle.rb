@@ -472,7 +472,7 @@ def stage0_codepoint_lexer_compat(body)
   )
   body = body.sub(/        if \(@pos\.zero\? \|\| @line_start\) && space_byte\?\(next_byte\) && upper_byte\?\(byte\(2\)\)\n.*?        end\n\n        profile_path\(:plus\) if @profile_enabled\n/m,
                   "        profile_path(:plus) if @profile_enabled\n")
-  body = body.sub(/      when 46\n        return scan_dot if byte\(1\) == 46\n\n        # Phase 4e dot-prefix elementwise operators:.*?\n\n        return emit_fixed\(:\"\.\"\, 1\)\n      when 47/m,
+  body = body.sub(/      when 46\n        return scan_dot if byte\(1\) == 46\n\n        # Dot-prefix elementwise operators:.*?\n\n        return emit_fixed\(:\"\.\"\, 1\)\n      when 47/m,
                   "      when 46\n        return emit_fixed(:\".\", 1)\n      when 47")
   body = body.gsub("if next_byte == 126 && approximate_float_literal_possible?", "if false")
   body = replace_method(body, "clean", <<~RUBY)

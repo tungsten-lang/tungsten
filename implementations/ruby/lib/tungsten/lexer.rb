@@ -609,7 +609,7 @@ module Tungsten
       elsif (text = scan(%r[(?<=^|\s)(//|\|\||&&|\*\*|%%|~~|<<|>>|\|>)(?=\s|$)]))
         token text.to_sym
 
-      # Phase 4e dot-prefix elementwise operators: .+ .- .* ./
+      # Dot-prefix elementwise operators: .+ .- .* ./
       # Same whitespace-around requirement as the other binary ops above
       # disambiguates from method-call dot syntax (a.foo stays a method call).
       elsif (text = scan(%r[(?<=^|\s)(\.[+\-*/])(?=\s|$)]))

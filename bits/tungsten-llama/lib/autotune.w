@@ -1,4 +1,4 @@
-# Phase 4 autotuner — minimum-viable harness.
+# Autotuner — minimum-viable harness.
 #
 # Takes a list of named kernel variants (compiled from one or more
 # @schedule blocks) and a benchmark setup (input/output buffers, dispatch

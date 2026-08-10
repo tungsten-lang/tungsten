@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 2 statistical gate for the SLS engine.
+"""Statistical gate for the SLS engine.
 
 Over a FIXED seed set (20 seeds per instance -- one lucky seed does not
 pass), SLS alone must solve >= 80% of the satisfiable uf250 set and >= 1

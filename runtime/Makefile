@@ -163,49 +163,49 @@ bench-compare: bench_before bench_wvalue
 	@./bench_wvalue
 	@echo ""
 
-# Phase 0: Goroutine arena validation
+# Goroutine arena validation
 test-arena: tests/test_goroutine_arena
 	./tests/test_goroutine_arena
 
 tests/test_goroutine_arena: tests/test_goroutine_arena.c
 	$(CLANG) -O2 $(WARN_FLAGS) $(GC_CFLAGS) $(GC_LDFLAGS) tests/test_goroutine_arena.c -o tests/test_goroutine_arena
 
-# Phase 1: Thread primitives test
+# Thread primitives test
 test-threads: tests/test_threads
 	./tests/test_threads
 
 tests/test_threads: tests/test_threads.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_threads.c $(RUNTIME_LDFLAGS) -o tests/test_threads
 
-# Phase 2: Atomics stress test
+# Atomics stress test
 test-atomics: tests/test_atomics
 	./tests/test_atomics
 
 tests/test_atomics: tests/test_atomics.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_atomics.c $(RUNTIME_LDFLAGS) -o tests/test_atomics
 
-# Phase 3: Socket + FFI test
+# Socket + FFI test
 test-sockets: tests/test_sockets
 	./tests/test_sockets
 
 tests/test_sockets: tests/test_sockets.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_sockets.c $(RUNTIME_LDFLAGS) -o tests/test_sockets
 
-# Phase 4: Goroutine + channel test
+# Goroutine + channel test
 test-goroutines: tests/test_goroutines
 	./tests/test_goroutines
 
 tests/test_goroutines: tests/test_goroutines.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_goroutines.c $(RUNTIME_LDFLAGS) -o tests/test_goroutines
 
-# Phase 6: Event loop + non-blocking I/O test
+# Event loop + non-blocking I/O test
 test-event-loop: tests/test_event_loop
 	./tests/test_event_loop
 
 tests/test_event_loop: tests/test_event_loop.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_event_loop.c $(RUNTIME_LDFLAGS) -o tests/test_event_loop
 
-# Phase 7: Integration test (HTTP server + goroutines)
+# Integration test (HTTP server + goroutines)
 test-integration: tests/test_integration
 	./tests/test_integration
 
@@ -239,7 +239,7 @@ test-ivars: tests/test_ivars
 tests/test_ivars: tests/test_ivars.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_ivars.c $(RUNTIME_LDFLAGS) -o tests/test_ivars
 
-# AST node arena (PR #2 Phase 1) regression tests
+# AST node arena (PR #2) regression tests
 test-node-arena: tests/test_node_arena
 	./tests/test_node_arena
 

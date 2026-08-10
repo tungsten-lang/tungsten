@@ -336,7 +336,7 @@
     return lower_regex_match(ctx, node)
   when :parg
     # `@N` positional ref. `:index` is an inline(32) integer (the digit
-    # N); bind it to `__argN` — the param name that range.each / Phase 6g
+    # N); bind it to `__argN` — the param name that the .each rewrites
     # and the /N-arity method synthesizer (`__arg1`, …) both produce.
     name = "__arg" + node.index.to_s()
     return lower_var(ctx, Tungsten:AST:Var.new(name))

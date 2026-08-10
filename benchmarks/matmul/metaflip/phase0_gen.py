@@ -1,4 +1,4 @@
-"""Phase 0 prototype: single-candidate vs. exact-mirror best-of-N partner
+"""Prototype: single-candidate vs. exact-mirror best-of-N partner
 selection, isolated to that ONE variable — everything else (threshold
 schedule, fixed band, periodic plus-move, accept/reject test) is byte-
 identical between the two modes, copied verbatim from bucket_gen.py's
@@ -14,7 +14,7 @@ mode="bestof": walks the ENTIRE axis hash chain (every valid partner, not a
   inserted yet, so no commit+revert needed to score a candidate), picks the
   single best-scoring partner, then commits and runs the IDENTICAL
   accept/reject test as "single" mode on that one choice. This is a serial
-  reference implementation of the same selection rule Phase 2's GPU kernel
+  reference implementation of the same selection rule the GPU kernel
   would run in parallel (one reference term + axis, scan all candidates,
   commit the best) — same algorithm, different execution substrate.
 

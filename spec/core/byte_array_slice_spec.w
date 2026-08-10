@@ -1,5 +1,5 @@
 # ByteArray.slice(start, len) — returns a new ByteArray containing the
-# requested byte range. Phase 6i.1 lifted ByteArray to WArray with
+# requested byte range. ByteArray was lifted to WArray with
 # ebits=8; .slice wasn't on the array IC dispatch table, so calling it
 # on bytes failed with "undefined method 'slice' for Array".
 # (Regular Array uses .copy; .slice errors cleanly there.)

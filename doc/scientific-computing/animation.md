@@ -27,7 +27,7 @@ last = timeline.frame(timeline.frame_count - 1).to_data
 description = timeline.to_data
 ```
 
-Six runnable examples exercise one or more ordered `PlotPoints` nodes and
+Seven runnable examples exercise one or more ordered `PlotPoints` nodes and
 deterministic retained tracks:
 
 - [`generative_point_cloud.w`](../examples/animations/generative_point_cloud.w)
@@ -44,12 +44,20 @@ deterministic retained tracks:
 - [`yin_yang_koi_point_cloud.w`](../examples/animations/yin_yang_koi_point_cloud.w)
   applies one compact Vogel/comma expression to paired formula indices,
   producing two surreal koi as exact central reflections in one ordered point
-  cloud; and
+  cloud;
 - [`uncertain_light_flame_point_cloud.w`](../examples/animations/uncertain_light_flame_point_cloud.w)
   is an original equation-driven, three-contour stitched flame intended for
   [The Book of Uncertain Light](https://uncertainlight.com/), with a
   deterministic two-second halo pulse. It does not transcribe the site's SVG
-  paths or browser filters.
+  paths or browser filters; and
+- [`raymarched_flower_point_cloud.w`](../examples/animations/raymarched_flower_point_cloud.w)
+  expands [Yohei Nishitsuji's compact twigl “flower” shader](https://x.com/YoheiNishitsuji/status/2087060021528101362)
+  into explicitly sequenced binary64 fragment evaluations on the source's 4:3
+  viewport, then downsamples and quantizes finite colors into 63 fixed RGB
+  point layers. Nonfinite rays are omitted, so this is a retained-data
+  adaptation rather than pixel-exact GLSL output. Its 136×102 default uses four
+  times the former 68×51 fragment count, samples an open 0.8-second excerpt,
+  and plays it in ping-pong mode.
 
 Most executable smoke calls use smaller retained timelines for interpreter
 responsiveness; the flame can retain its full scalar-opacity loop cheaply.
@@ -68,6 +76,10 @@ Press Escape or close the window to stop. Dense, exactly closed timelines use
 `:closed_loop`, which omits their duplicate terminal sample; short retained
 excerpts use `:ping_pong` and play forward and backward without inventing
 intermediate geometry. Ordinary `:loop` includes every retained frame.
+The raymarched flower performs 130 outer steps with seven octaves per fragment;
+its 136×102 default can evaluate up to 164,105,760 octave bodies before the
+window opens. Compile that full preset with `--release --native` rather than
+`--dev`; pass `--window-smoke` for its faster 16×12, three-frame window check.
 
 `AnimationPointPreview` is the pure rasterizer and works in headless
 interpreted or native programs. `AnimationWindowPreview` is its optional,

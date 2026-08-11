@@ -6022,14 +6022,25 @@ int main(int argc, char **argv) {
             /* A shared iteration count keeps the input/lifecycle contract
              * identical, but derive it from the faster lane so BOTH timed
              * regions reach the requested window. */
-            double want = target_ns / fastest;
+            double cell_target_ns = target_ns;
+            int cell_runs = runs;
+            if (limbs <= 8) {
+                /* Sub-nanosecond-margin cells: a 2ms timed region under a
+                 * host-load burst flips a 1-3% verdict routinely, and these
+                 * cells cost microseconds to rerun.  Floor the window and
+                 * rep count so the default screen's tiny-cell verdicts mean
+                 * what they say; the suite pays ~10 extra seconds total. */
+                if (cell_target_ns < 8e6) cell_target_ns = 8e6;
+                if (cell_runs < 5) cell_runs = 5;
+            }
+            double want = cell_target_ns / fastest;
             int iters = want > 40000000.0 ? 40000000
                       : (want < 1.0 ? 1 : (int)want);
             double tw_best = 0.0, gm_best = 0.0;
             enum { SWEEP_KEEP = 64 };
             double tw_s[SWEEP_KEEP], gm_s[SWEEP_KEEP];
-            int kept = runs < SWEEP_KEEP ? runs : SWEEP_KEEP;
-            for (int r = 0; r < runs; r++) {
+            int kept = cell_runs < SWEEP_KEEP ? cell_runs : SWEEP_KEEP;
+            for (int r = 0; r < cell_runs; r++) {
                 double tw, gm;
                 if (tungsten_only) {
                     tw = bench_boxed_result_churn(op, limbs, iters, 1);

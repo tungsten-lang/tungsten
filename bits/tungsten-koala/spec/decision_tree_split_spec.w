@@ -230,3 +230,5 @@ describe "DecisionTree sorted feature sweep" ->
     queries.each -> (row)
       regression_expected.push(DecisionTree.descend(regressor.tree, row)[:prediction])
     expect(regressor.predict(queries).join(",")).to eq(regression_expected.join(","))
+
+spec_summary

@@ -362,3 +362,5 @@ describe "RandomForestExport standalone Tungsten source" ->
       2, :all, 1, 1, 3, :gini, false
     ).fit([[0], [1]], ["left", "bad" + 1.chr])
     expect(RandomForestExport.export_compact(unsupported, [:x])).to be_nil
+
+spec_summary

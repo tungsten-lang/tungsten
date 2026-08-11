@@ -15,7 +15,11 @@ in Tungsten:Slim
   # Escape HTML special characters in a string
   -> .escape_html(text)
     return "" if text.nil?
-    text.to_s.gsub(/[&<>"']/, ESCAPE_MAP)
+    out = text.to_s.gsub("&", "&amp;")
+    out = out.gsub("<", "&lt;")
+    out = out.gsub(">", "&gt;")
+    out = out.gsub("\"", "&quot;")
+    out.gsub("'", "&#39;")
 
   # Check if a value is "truthy" for attribute rendering
   # false and nil suppress the attribute entirely
@@ -33,16 +37,19 @@ in Tungsten:Slim
         true  => parts.push(key.to_s)
         false => nil  # skip
         nil   => nil  # skip
-        =>      parts.push("[key]=\"[Helpers.escape_html(value)]\"")
+        =>      parts.push("[key]=\"[Tungsten:Slim:Helpers.escape_html(value)]\"")
 
     parts.join(" ")
 
   # Merge class lists — combines explicit class attribute with shorthand classes
   -> .merge_classes(shorthand_classes, attr_classes)
-    all = []
-    all.concat(shorthand_classes) if shorthand_classes.any?
-    all.push(attr_classes) if attr_classes
-    all.flatten.join(" ")
+    out = shorthand_classes.join(" ")
+    if attr_classes
+      extra = attr_classes
+      extra = attr_classes.join(" ") if type(attr_classes) == "Array"
+      out = out + " " if out.size > 0 && extra.to_s.size > 0
+      out = out + extra.to_s
+    out
 
   # Build the full opening tag attributes string from an Element node
   -> .element_attributes(element)
@@ -54,14 +61,14 @@ in Tungsten:Slim
 
     # Merge classes from shorthand (.) and explicit class attribute
     if element.classes.any? || element.attributes["class"]
-      attrs["class"] = merge_classes(element.classes, element.attributes["class"])
+      attrs["class"] = Tungsten:Slim:Helpers.merge_classes(element.classes, element.attributes["class"])
 
     # Copy remaining attributes (skip class since we handled it)
     element.attributes.each -> (key, value)
       if key != "class"
         attrs[key] = value
 
-    build_attributes(attrs)
+    Tungsten:Slim:Helpers.build_attributes(attrs)
 
   # Generate an indentation string
   -> .indent(level)

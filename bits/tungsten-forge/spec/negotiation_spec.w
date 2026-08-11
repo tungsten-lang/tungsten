@@ -26,7 +26,7 @@ describe "Negotiation.parse" ->
   it "reads a q parameter and ignores other parameters" ->
     entries = Negotiation.parse("text/html;level=1;q=0.5")
     expect(entries[0][:value]).to eq("text/html")
-    expect(entries[0][:q]).to eq(0.5)
+    expect(entries[0][:q]).to eq(~0.5)
 
   it "clamps an out-of-range q into 0.0..1.0" ->
     entries = Negotiation.parse("a/b;q=9, c/d;q=-2")

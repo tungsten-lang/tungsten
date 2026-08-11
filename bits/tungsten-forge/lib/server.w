@@ -54,7 +54,7 @@
     @running = true
     @socket = Socket.listen(@host, @port, 128)
     Server.spawn_accept_loop(self)
-    ccall("w_scheduler_run")
+    ccall("w_scheduler_run_w")
 
   # `go` closure capture only works for the enclosing frame's PARAMS
   # (capturing a method local compiles to a bogus method call), so the

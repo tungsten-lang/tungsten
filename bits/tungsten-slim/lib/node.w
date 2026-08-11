@@ -22,12 +22,13 @@ in Tungsten:Slim
     @children.empty?
 
 # Root node — top of the document tree
-+ Root < Node
++ Root < Tungsten:Slim:Node
   -> new
-    super(line: 0)
+    @children = []
+    @line = 0
 
 # HTML element node: div.class#id(attr="val") "text"
-+ Element < Node
++ Element < Tungsten:Slim:Node
   ro :tag
   ro :id
   ro :classes
@@ -36,7 +37,8 @@ in Tungsten:Slim
   ro :inline_output
 
   -> new(tag:, id: nil, classes: [], attributes: {}, text: nil, inline_output: nil, line: 0)
-    super(line: line)
+    @children = []
+    @line = line
     @tag = tag
     @id = id
     @classes = classes
@@ -52,45 +54,50 @@ in Tungsten:Slim
     VOID_TAGS.include?(@tag.to_sym)
 
 # Plain text node
-+ Text < Node
++ Text < Tungsten:Slim:Node
   ro :value
 
   -> new(value:, line: 0)
-    super(line: line)
+    @children = []
+    @line = line
     @value = value
 
 # Code node — Tungsten code that does not produce output (- lines)
-+ Code < Node
++ Code < Tungsten:Slim:Node
   ro :expression
 
   -> new(expression:, line: 0)
-    super(line: line)
+    @children = []
+    @line = line
     @expression = expression
 
 # Output node — Tungsten expression whose result is inserted (= lines)
-+ Output < Node
++ Output < Tungsten:Slim:Node
   ro :expression
   ro :escape
 
   -> new(expression:, escape: true, line: 0)
-    super(line: line)
+    @children = []
+    @line = line
     @expression = expression
     @escape = escape
 
 # HTML comment node (/ lines)
-+ Comment < Node
++ Comment < Tungsten:Slim:Node
   ro :text
 
   -> new(text: nil, line: 0)
-    super(line: line)
+    @children = []
+    @line = line
     @text = text
 
 # Doctype node (doctype html, doctype xml, etc.)
-+ Doctype < Node
++ Doctype < Tungsten:Slim:Node
   ro :type
 
   -> new(type: "html", line: 0)
-    super(line: line)
+    @children = []
+    @line = line
     @type = type
 
   -> to_s
@@ -104,11 +111,12 @@ in Tungsten:Slim
       =>                 "<!DOCTYPE html>"
 
 # Table row node — represents a | cell1 | cell2 | row inside a table element
-+ TableRow < Node
++ TableRow < Tungsten:Slim:Node
   ro :cells
   ro :header
 
   -> new(cells:, header: false, line: 0)
-    super(line: line)
+    @children = []
+    @line = line
     @cells = cells
     @header = header

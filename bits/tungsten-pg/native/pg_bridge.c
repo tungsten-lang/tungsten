@@ -67,6 +67,23 @@ static void *pg_sym(const char *name) {
     return p;
 }
 
+static void pg_try_homebrew_formula(const char *formula) {
+    if (pq.lib) return;
+    char command[128];
+    if (snprintf(command, sizeof(command), "brew --prefix %s 2>/dev/null", formula) >= (int)sizeof(command)) return;
+    FILE *pipe = popen(command, "r");
+    if (!pipe) return;
+    char prefix[1024];
+    if (fgets(prefix, sizeof(prefix), pipe)) {
+        prefix[strcspn(prefix, "\r\n")] = '\0';
+        char path[1200];
+        if (*prefix && snprintf(path, sizeof(path), "%s/lib/libpq.5.dylib", prefix) < (int)sizeof(path)) {
+            pq.lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+        }
+    }
+    pclose(pipe);
+}
+
 static void pg_load(void) {
     if (pq.lib) return;
     const char *override = getenv("TUNGSTEN_PG_LIBPQ");
@@ -79,13 +96,6 @@ static void pg_load(void) {
     }
     static const char *candidates[] = {
         "libpq.5.dylib",
-        "/opt/homebrew/opt/libpq/lib/libpq.5.dylib",
-        "/opt/homebrew/lib/libpq.5.dylib",
-        /* Homebrew postgresql formula bundles libpq without exposing it */
-        "/opt/homebrew/lib/postgresql@18/libpq.5.dylib",
-        "/opt/homebrew/lib/postgresql@17/libpq.5.dylib",
-        "/opt/homebrew/lib/postgresql@16/libpq.5.dylib",
-        "/usr/local/opt/libpq/lib/libpq.5.dylib",
         "libpq.so.5",
         "libpq.so",
         NULL,
@@ -94,6 +104,11 @@ static void pg_load(void) {
         pq.lib = dlopen(candidates[i], RTLD_NOW | RTLD_LOCAL);
         if (pq.lib) break;
     }
+    /* Keg-only Homebrew formulae are not on dyld's default search path. */
+    pg_try_homebrew_formula("libpq");
+    pg_try_homebrew_formula("postgresql@18");
+    pg_try_homebrew_formula("postgresql@17");
+    pg_try_homebrew_formula("postgresql@16");
     if (!pq.lib) {
         w_raise(w_string("pg_bridge: libpq not found — brew install libpq "
                          "(or apt install libpq5)"));

@@ -252,3 +252,5 @@ describe "SVC validation" ->
     expect(model.fit([[0]], [:a])).to be_nil
     expect(model.fitted?).to be_false
     expect(model.predict([[0]])).to be_nil
+
+spec_summary

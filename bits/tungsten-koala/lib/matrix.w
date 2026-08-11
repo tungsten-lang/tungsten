@@ -155,6 +155,18 @@
   -> to_a
     @entries
 
+  # This compatibility class reopens Core's generic Matrix name. Keep its
+  # equality structural and nil-safe instead of inheriting Matrix<T>#==,
+  # whose shape comparison assumes the other operand has rows and cols.
+  -> ==(other)
+    out = false
+    if other != nil && other.respond_to?("to_a")
+      out = @entries == other.to_a
+    out
+
+  -> !=(other)
+    !(self == other)
+
   # Convert a fully populated Matrix into Core's f64 Tensor. Ragged Matrix
   # padding is nil by contract and has no numeric Tensor representation, so
   # leave it as nil rather than coercing it to an arbitrary scalar.

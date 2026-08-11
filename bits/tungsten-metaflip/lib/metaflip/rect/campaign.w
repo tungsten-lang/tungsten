@@ -139,7 +139,7 @@ use doors
     moved = ccall("__w_rename", tmp, path)
     if moved
       result = 1
-  ccall("w_value_free", tmp)
+  ccall("w_value_free_w", tmp)
   result
 
 -> ffrc_dump_atomic(state, path, run_tag, nonce) (i64[] String String i64) i64
@@ -156,7 +156,7 @@ use doors
     moved = ccall("__w_rename", tmp, path)
     if moved
       result = rank
-  ccall("w_value_free", tmp)
+  ccall("w_value_free_w", tmp)
   result
 
 # Clone through the rectangular initializer rather than ffw_reseed_from:

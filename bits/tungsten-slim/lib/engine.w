@@ -30,17 +30,17 @@ in Tungsten:Slim
 
   # Parse source into an AST
   -> parse(source)
-    parser = Parser.new
+    parser = Tungsten:Slim:Parser.new
     parser.parse(source)
 
   # Compile an AST into HTML output
   -> compile(root, locals = {})
-    compiler = Compiler.new
+    compiler = Tungsten:Slim:Compiler.new
     compiler.compile(root, locals)
 
   # Render from a pre-parsed tree (used by caching)
   -> render_from_tree(root, locals = {})
-    compiler = Compiler.new
+    compiler = Tungsten:Slim:Compiler.new
     compiler.compile(root, locals)
 
   # Clear the template cache
@@ -54,13 +54,13 @@ in Tungsten:Slim
   # Register Slim as a template handler with Carbide
   -> .register!
     if defined?(Tungsten:Carbide)
-      Carbide:View.register_handler(:slim, SlimHandler.new)
+      Carbide:View.register_handler(:slim, Tungsten:Slim:SlimHandler.new)
 
 
 # Handler that integrates with Carbide's view system
 + SlimHandler
   -> new
-    @engine = Engine.new
+    @engine = Tungsten:Slim:Engine.new
 
   -> render(source, locals = {})
     @engine.render(source, locals)

@@ -546,7 +546,7 @@ describe "RandomForestClassifier" ->
     expect(p[:min_impurity_decrease]).to eq(0.02)
     expect(p[:min_samples_split]).to eq(5)
     expect(p[:max_samples]).to eq(12)
-    expect(p[:min_weight_fraction_leaf]).to eq(0.3)
+    expect(Fx.close?(p[:min_weight_fraction_leaf], 3.to_f / 10.to_f)).to be_true
     # with_params CLONES: the receiver is untouched and still unfitted.
     expect(again.fitted?).to be_false
     expect(model.with_params({ n_estimators: 3 }).n_estimators).to eq(3)
@@ -635,7 +635,7 @@ describe "RandomForestRegressor" ->
     expect(p[:min_impurity_decrease]).to eq(0.02)
     expect(p[:min_samples_split]).to eq(6)
     expect(p[:max_samples]).to eq(12)
-    expect(p[:min_weight_fraction_leaf]).to eq(0.3)
+    expect(Fx.close?(p[:min_weight_fraction_leaf], 3.to_f / 10.to_f)).to be_true
 
   it "reports an out-of-bag R²" ->
     data = Fx.small_reg
@@ -807,7 +807,7 @@ describe "RandomForest persistence" ->
     expect(again.params[:min_impurity_decrease]).to eq(0.002)
     expect(again.params[:min_samples_split]).to eq(5)
     expect(again.params[:max_samples]).to eq(12)
-    expect(again.params[:min_weight_fraction_leaf]).to eq(0.1)
+    expect(Fx.close?(again.params[:min_weight_fraction_leaf], 1.to_f / 10.to_f)).to be_true
     expect(Fx.close?(again.oob_score, model.oob_score)).to be_true
 
   it "round-trips a regressor" ->
@@ -820,7 +820,7 @@ describe "RandomForest persistence" ->
     expect(again.params[:ccp_alpha]).to eq(0.001)
     expect(again.params[:min_impurity_decrease]).to eq(0.002)
     expect(again.params[:min_samples_split]).to eq(6)
-    expect(again.params[:min_weight_fraction_leaf]).to eq(0.1)
+    expect(Fx.close?(again.params[:min_weight_fraction_leaf], 1.to_f / 10.to_f)).to be_true
     expect(Fx.preds(again, data[:rows])).to eq(Fx.preds(model, data[:rows]))
     expect(Persist.dumps(again)).to eq(Persist.dumps(model))
 

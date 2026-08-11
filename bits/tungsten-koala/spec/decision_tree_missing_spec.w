@@ -213,3 +213,5 @@ describe "DecisionTree learned missing routing" ->
       expected_column.push(probability[1])
     expect(model.predict_proba(missing).to_s).to eq(expected_probabilities.to_s)
     expect(model.predict_proba(missing, 1).to_s).to eq(expected_column.to_s)
+
+spec_summary

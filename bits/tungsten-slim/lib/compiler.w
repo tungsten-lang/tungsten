@@ -14,24 +14,31 @@ in Tungsten:Slim
   # Compile a Root node tree into an HTML string
   -> compile(root, locals = {})
     @locals = locals
-    @output = StringIO.new
+    @output = StringBuffer()
 
     root.children.each -> (node)
       compile_node(node)
 
-    @output.string
+    @output.to_s
 
   # Dispatch to the appropriate compile method for each node type
   -> compile_node(node)
-    case node
-      Doctype  => compile_doctype(node)
-      Element  => compile_element(node)
-      Text     => compile_text(node)
-      Code     => compile_code(node)
-      Output   => compile_output(node)
-      Comment  => compile_comment(node)
-      TableRow => compile_table_row(node)
-      =>          <! CompileError, "Unknown node type at line [node.line]"
+    if node.is_a?(Tungsten:Slim:Doctype)
+      compile_doctype(node)
+    elsif node.is_a?(Tungsten:Slim:Element)
+      compile_element(node)
+    elsif node.is_a?(Tungsten:Slim:Text)
+      compile_text(node)
+    elsif node.is_a?(Tungsten:Slim:Code)
+      compile_code(node)
+    elsif node.is_a?(Tungsten:Slim:Output)
+      compile_output(node)
+    elsif node.is_a?(Tungsten:Slim:Comment)
+      compile_comment(node)
+    elsif node.is_a?(Tungsten:Slim:TableRow)
+      compile_table_row(node)
+    else
+      raise "Unknown Slim node type at line " + node.line.to_s
 
   # Compile a doctype declaration
   -> compile_doctype(node)
@@ -41,7 +48,7 @@ in Tungsten:Slim
   -> compile_element(node)
     # Build opening tag
     tag = node.tag
-    attr_str = Helpers.element_attributes(node)
+    attr_str = Tungsten:Slim:Helpers.element_attributes(node)
     opening = if attr_str.empty?
       "<[tag]>"
     else
@@ -63,14 +70,14 @@ in Tungsten:Slim
     elsif node.inline_output
       # Inline output: <tag>#{expression}</tag>
       value = evaluate(node.inline_output)
-      escaped = Helpers.escape_html(value.to_s)
+      escaped = Tungsten:Slim:Helpers.escape_html(value.to_s)
       write_line("[opening][escaped]</[tag]>")
 
     elsif node.leaf?
       # Empty element: <tag></tag>
       write_line("[opening]</[tag]>")
 
-    elsif tag == "table" && node.children.any?(-> (c) c.is_a?(TableRow))
+    elsif tag == "table" && node.children.any?(-> (c) c.is_a?(Tungsten:Slim:TableRow))
       # Table with table row children — auto-wrap in thead/tbody
       self.compile_table_element(node, opening, tag, attr_str)
 
@@ -94,10 +101,10 @@ in Tungsten:Slim
 
     # Handle control structures that have children
     case
-      expr.start_with?("if ") || expr.start_with?("unless ") =>
+      expr.starts_with?("if ") || expr.starts_with?("unless ") =>
         evaluate_conditional(node)
 
-      expr.match?(/\.each\s/) =>
+      expr.include?(".each ") =>
         evaluate_iteration(node)
 
       =>
@@ -107,7 +114,7 @@ in Tungsten:Slim
   -> compile_output(node)
     value = evaluate(node.expression)
     text = if node.escape
-      Helpers.escape_html(value.to_s)
+      Tungsten:Slim:Helpers.escape_html(value.to_s)
     else
       value.to_s
     write_line(text)
@@ -117,9 +124,9 @@ in Tungsten:Slim
     write_line(opening)
     @indent_level = @indent_level + 1
 
-    header_rows = node.children.select(-> (c) c.is_a?(TableRow) && c.header)
-    body_rows   = node.children.select(-> (c) c.is_a?(TableRow) && !c.header)
-    other       = node.children.reject(-> (c) c.is_a?(TableRow))
+    header_rows = node.children.select(-> (c) c.is_a?(Tungsten:Slim:TableRow) && c.header)
+    body_rows   = node.children.select(-> (c) c.is_a?(Tungsten:Slim:TableRow) && !c.header)
+    other       = node.children.reject(-> (c) c.is_a?(Tungsten:Slim:TableRow))
 
     # Compile non-table-row children first
     other.each -> (child)
@@ -149,10 +156,7 @@ in Tungsten:Slim
   # Compile a table row node into <tr><th>...</th></tr> or <tr><td>...</td></tr>
   -> compile_table_row(node)
     cell_tag = if node.header then "th" else "td"
-    cells_html = node.cells.map(-> (cell)
-      interpolated = interpolate(cell)
-      "<[cell_tag]>[interpolated]</[cell_tag]>"
-    ).join("")
+    cells_html = node.cells.map(-> (cell) "<[cell_tag]>[interpolate(cell)]</[cell_tag]>").join("")
     write_line("<tr>[cells_html]</tr>")
 
   # Compile an HTML comment
@@ -174,8 +178,11 @@ in Tungsten:Slim
   # Evaluate an if/unless/else conditional block
   -> evaluate_conditional(node)
     expr = node.expression
-    condition = expr.sub(/^(if|unless)\s+/, "")
-    negate = expr.start_with?("unless ")
+    condition = if expr.starts_with?("if ")
+      expr.slice(3, expr.size - 3)
+    else
+      expr.slice(7, expr.size - 7)
+    negate = expr.starts_with?("unless ")
 
     result = evaluate(condition)
     result = !result if negate
@@ -183,7 +190,7 @@ in Tungsten:Slim
     if result
       node.children.each -> (child)
         # Skip 'else' code nodes — they're the alternative branch
-        if child.is_a?(Code) && child.expression == "else"
+        if child.is_a?(Tungsten:Slim:Code) && child.expression == "else"
           << nil
         compile_node(child)
 
@@ -196,8 +203,12 @@ in Tungsten:Slim
     collection = evaluate(collection_expr)
 
     # Extract the block parameter name
-    param_match = expr.match(/-> \((\w+)\)/)
-    param_name = param_match ? param_match[1] : "item"
+    param_name = "item"
+    marker = expr.index("-> (")
+    if marker != nil
+      tail = expr.slice(marker + 4, expr.size - marker - 4)
+      close = tail.index(")")
+      param_name = tail.slice(0, close) if close != nil
 
     collection.each -> (item)
       prev = @locals[param_name.to_sym]
@@ -211,18 +222,40 @@ in Tungsten:Slim
   # Write a line to the output buffer with current indentation
   -> write_line(text)
     if @pretty
-      @output.write(Helpers.indent(@indent_level))
-      @output.write(text)
-      @output.write("\n")
+      @output << Tungsten:Slim:Helpers.indent(@indent_level)
+      @output << text
+      @output << "\n"
     else
-      @output.write(text)
+      @output << text
 
   # Interpolate [expression] references in text strings
   -> interpolate(text)
-    text.gsub(/\[([^\]]+)\]/) -> (match, expr)
-      value = evaluate(expr)
-      value.to_s
+    out = ""
+    rest = text
+    start = rest.index("\[")
+    while start != nil
+      out = out + rest.slice(0, start)
+      tail = rest.slice(start + 1, rest.size - start - 1)
+      close = tail.index("\]")
+      if close == nil
+        return out + rest.slice(start, rest.size - start)
+      expr = tail.slice(0, close)
+      out = out + evaluate(expr).to_s
+      rest = tail.slice(close + 1, tail.size - close - 1)
+      start = rest.index("\[")
+    out + rest
 
   # Evaluate a Tungsten expression in the current locals context
   -> evaluate(expression)
-    Evaluator.eval(expression, @locals)
+    expr = expression.strip
+    key = expr
+    key = expr.slice(1, expr.size - 1) if expr.starts_with?("@")
+    symbol_key = key.to_sym
+    if @locals.key?(symbol_key)
+      return @locals[symbol_key]
+    if @locals.key?(key)
+      return @locals[key]
+    return true if expr == "true"
+    return false if expr == "false"
+    return nil if expr == "nil"
+    raise "Unknown Slim local: " + expression

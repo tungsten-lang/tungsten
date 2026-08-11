@@ -110,3 +110,5 @@ describe "RandomForest leaf indices" ->
     expect(RandomForestRegressor.new.leaf_indices(rows)).to be_nil
     expect(forest.leaf_indices([[0, 1]])).to be_nil
     expect(forest.leaf_indices([]).to_s).to eq("\[\]")
+
+spec_summary

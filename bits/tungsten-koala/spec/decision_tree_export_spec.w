@@ -334,3 +334,5 @@ describe "DecisionTreeExport standalone Tungsten source" ->
       infinity *= 2.to_f
     expect(koala_export_missing_left_fixture([infinity], left_artifact[:schema_checksum])).to be_nil
     expect(koala_export_missing_right_fixture([infinity], right_artifact[:schema_checksum])).to be_nil
+
+spec_summary

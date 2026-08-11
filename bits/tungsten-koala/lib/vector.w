@@ -29,6 +29,19 @@
   -> [](i)
     @values[i]
 
+  # Koala's compatibility Vector reopens Core's generic Vector name. Own
+  # equality here so comparisons against nil or unrelated objects do not fall
+  # through to Core Vector<T>#==, which assumes the other operand has a
+  # dimension. This is also the natural structural equality for dense vectors.
+  -> ==(other)
+    out = false
+    if other != nil && other.respond_to?("to_a")
+      out = @values == other.to_a
+    out
+
+  -> !=(other)
+    !(self == other)
+
   # --- Elementwise arithmetic ---
 
   # Apply f(a, b) pairwise; nil when sizes differ.

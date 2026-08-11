@@ -237,3 +237,5 @@ describe "PermutationImportance validation" ->
     model.fit(x, y)
     expect(PermutationImportance.compute(model, x, y, 2, 42, [1])).to be_nil
     expect(PermutationImportance.compute(model, x, y, 2, 42, [0, 0, 0, 0, 0, 0, 0, 0])).to be_nil
+
+spec_summary

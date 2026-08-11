@@ -98,3 +98,5 @@ describe "RandomForest feature importances" ->
     expect(importance_close(values[0] + values[1], 1)).to be_true
     again = RandomForestRegressor.load_state(model.to_state)
     expect(again.feature_importances.join(",")).to eq(values.join(","))
+
+spec_summary

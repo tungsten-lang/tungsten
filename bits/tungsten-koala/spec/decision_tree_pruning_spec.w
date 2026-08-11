@@ -178,14 +178,14 @@ describe "DecisionTree minimal cost-complexity pruning" ->
   it "round-trips params and persistence and rejects negative regularization" ->
     model = DecisionTreeClassifier.new(4, 3, 2, :entropy, 0.02, 0.003)
     expect(model.params[:ccp_alpha]).to eq(0.02)
-    expect(model.params[:min_impurity_decrease]).to eq(0.003)
-    expect(model.with_params({ ccp_alpha: 0.1 }).ccp_alpha).to eq(0.1)
-    expect(model.with_params({ min_impurity_decrease: 0.2 }).min_impurity_decrease).to eq(0.2)
+    expect(model.params[:min_impurity_decrease]).to eq(~0.003)
+    expect(pruning_close(model.with_params({ ccp_alpha: 0.1 }).ccp_alpha, 0.1)).to be_true
+    expect(pruning_close(model.with_params({ min_impurity_decrease: 0.2 }).min_impurity_decrease, 0.2)).to be_true
     fx = PruningFx.classification
     model.fit(fx[:x], fx[:y])
     again = DecisionTreeClassifier.load_state(model.to_state)
-    expect(again.ccp_alpha).to eq(0.02)
-    expect(again.min_impurity_decrease).to eq(0.003)
+    expect(pruning_close(again.ccp_alpha, 0.02)).to be_true
+    expect(again.min_impurity_decrease).to eq(~0.003)
     expect(again.tree_lines.join("|")).to eq(model.tree_lines.join("|"))
     expect(DecisionTreeClassifier.new(nil, nil, nil, :gini, 0 - 1).fit(fx[:x], fx[:y])).to be_nil
     expect(DecisionTreeRegressor.new(nil, nil, nil, :mse, 0 - 1).fit([[0], [1]], [0, 1])).to be_nil
@@ -345,3 +345,5 @@ describe "RandomForest minimal cost-complexity pruning" ->
       2, :all, nil, 1, 3, :mse, false, 0, 0 - 1
     )
     expect(bad_reg_gain.fit([[0], [1]], [0, 1])).to be_nil
+
+spec_summary

@@ -40,9 +40,9 @@ in Tungsten:Bit:Commands
 
     # Initialize git
     unless flag?(:skip_git)
-      System.exec("git -C " + shell_quote(target) + " init")
-      System.exec("git -C " + shell_quote(target) + " add .")
-      System.exec("git -C " + shell_quote(target) + " commit -m 'Initial commit'")
+      Tungsten:Bit:System.exec("git -C " + shell_quote(target) + " init")
+      Tungsten:Bit:System.exec("git -C " + shell_quote(target) + " add .")
+      Tungsten:Bit:System.exec("git -C " + shell_quote(target) + " commit -m 'Initial commit'")
       verbose("  init   git repository")
 
     say ""

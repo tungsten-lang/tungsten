@@ -11,7 +11,7 @@
         go ->
           Hammer.tungsten_connection(host, port, batch, pipeline, duration, total, errors)
         i += 1
-      ccall("w_scheduler_run")
+      ccall("w_scheduler_run_w")
 
   -> .url_without_scheme(url)
     if url.starts_with?("http://")

@@ -303,3 +303,5 @@ describe "GradientBoosting validation" ->
     model.fit(BoostFx.binary_x, BoostFx.binary_y)
     expect(model.score(BoostFx.binary_x, [:cold])).to be_nil
     expect(model.score(BoostFx.binary_x, BoostFx.binary_y, [1])).to be_nil
+
+spec_summary

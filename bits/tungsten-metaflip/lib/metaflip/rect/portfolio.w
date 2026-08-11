@@ -518,8 +518,8 @@ use ../paths
       if ok == 0
         state[39] = state[39] + 1
   if content != nil
-    ccall("w_value_free", content)
-  ccall("w_value_free", scratch)
+    ccall("w_value_free_w", content)
+  ccall("w_value_free_w", scratch)
   result
 
 # Load the exact checkpoint when present, otherwise the profile seed.  The
@@ -615,14 +615,14 @@ use ../paths
       if cursor > chunk_start
         chunk = text.slice(chunk_start, cursor - chunk_start)
         command << chunk
-        ccall("w_value_free", chunk)
+        ccall("w_value_free_w", chunk)
       command << "'\"'\"'"
       chunk_start = cursor + 1
     cursor += 1
   if chunk_start < length
     chunk = text.slice(chunk_start, length - chunk_start)
     command << chunk
-    ccall("w_value_free", chunk)
+    ccall("w_value_free_w", chunk)
   command << "'"
   1
 
@@ -689,7 +689,7 @@ use ../paths
   command << " --rect-restart-nonce "
   restart_nonce_text = restart_nonce.to_s()
   command << restart_nonce_text
-  ccall("w_value_free", restart_nonce_text)
+  ccall("w_value_free_w", restart_nonce_text)
   command << " --rect-door-ticket "
   command << restart_door_ticket
   # Keep diagnostics out of the parent's TUI while retaining the most recent
@@ -697,7 +697,7 @@ use ../paths
   command << " > "
   child_log_path = status_path + ".child.log"
   z = ffrpo_shell_quote_append(command, child_log_path)
-  ccall("w_value_free", child_log_path)
+  ccall("w_value_free_w", child_log_path)
   command << " 2>&1"
   result = command.to_s()
   result
@@ -721,7 +721,7 @@ use ../paths
         # The command is an exact one-shot handoff. Clear the shared slot
         # before releasing its heap string, then publish completion last.
         commands[slot] = ""
-        ccall("w_value_free", command)
+        ccall("w_value_free_w", command)
         states[slot] = 2
       if states[slot] != 1 && states[slot] >= 0
         ccall("__w_sleep_ms", 2)
@@ -1597,7 +1597,7 @@ use ../paths
           segment_joined[i] = 1
           base_complete[i] = 1
         if worker_binary != nil && worker_binary != ""
-          ccall("w_value_free", child_tag)
+          ccall("w_value_free_w", child_tag)
       threads[i] = thread
       i += 1
 
@@ -1663,7 +1663,7 @@ use ../paths
                   reported_bits[i] = terminal_bits
                   reported_terminal[i] = 1
             if body != nil
-              ccall("w_value_free", body)
+              ccall("w_value_free_w", body)
             total_rounds[i] += seg_rounds
             if base_complete[i] == 0
               base_complete[i] = 1
@@ -1681,7 +1681,7 @@ use ../paths
             if predicted > deadline_ms
               deadline_ms = predicted
             if live_body != nil
-              ccall("w_value_free", live_body)
+              ccall("w_value_free_w", live_body)
         i += 1
 
       now_ms = ccall("__w_clock_ms") ## i64
@@ -1721,7 +1721,7 @@ use ../paths
               exit_codes[i] = 2
               segment_joined[i] = 1
           if worker_binary != nil && worker_binary != ""
-            ccall("w_value_free", child_tag)
+            ccall("w_value_free_w", child_tag)
         i += 1
 
       active_j = 0 ## i64
@@ -1826,7 +1826,7 @@ use ../paths
                   display_rewards[i] += live_bit_gain * 100
                   display_ages[i] = 0
             if live_body != nil
-              ccall("w_value_free", live_body)
+              ccall("w_value_free_w", live_body)
           i += 1
 
         degraded = ffrpo_degraded_state(permanent_failure, hard_degraded, gpu_degraded, side_degraded, display_child_degraded)
@@ -1834,7 +1834,7 @@ use ../paths
           sequence += 1
           live_status = ffrpo_status_body("running", sequence, epoch, elapsed_s, total_j, total_gpu_lanes, display_total_moves, degraded, labels, ready, cpu_allocation, gpu_allocation, display_ranks, display_bits, display_rank_drops, display_density_gains, display_shape_moves, display_shape_cpu_moves, display_shape_gpu_moves, display_shape_mitm_attempts, display_shape_mitm_pairs, display_shape_mitm_ms, display_shape_mitm_failures, display_exposure, display_cpu_failures, display_gpu_failures, scores, side_loaded, side_seeded, side_saved, side_rejects, side_write_failures)
           status_ok = ffrc_atomic_write(status_path, live_status, portfolio_write_tag, sequence)
-          ccall("w_value_free", live_status)
+          ccall("w_value_free_w", live_status)
           last_parent_status_ms = now_ms
           if status_ok == 0
             status_degraded = 1
@@ -1951,7 +1951,7 @@ use ../paths
                 reported_bits[i] = terminal_bits
                 reported_terminal[i] = 1
           if body != nil
-            ccall("w_value_free", body)
+            ccall("w_value_free_w", body)
           if base_complete[i] == 0
             base_complete[i] = 1
             base_wall_ms[i] = child_elapsed_ms[i]
@@ -2066,7 +2066,7 @@ use ../paths
     degraded = ffrpo_degraded_state(permanent_failure, hard_degraded, gpu_degraded, side_degraded, status_degraded)
     status = ffrpo_status_body("running", sequence, epoch, elapsed_s, total_j, total_gpu_lanes, total_moves, degraded, labels, ready, cpu_allocation, gpu_allocation, ranks, bits, rank_drops, density_gains, shape_moves, shape_cpu_moves, shape_gpu_moves, shape_mitm_attempts, shape_mitm_pairs, shape_mitm_ms, shape_mitm_failures, exposure, failures, gpu_failures, scores, side_loaded, side_seeded, side_saved, side_rejects, side_write_failures)
     status_ok = ffrc_atomic_write(status_path, status, portfolio_write_tag, sequence)
-    ccall("w_value_free", status)
+    ccall("w_value_free_w", status)
     last_parent_status_ms = now_ms
     if status_ok == 0
       status_degraded = 1
@@ -2103,8 +2103,8 @@ use ../paths
   degraded = ffrpo_degraded_state(permanent_failure, hard_degraded, gpu_degraded, side_degraded, status_degraded)
   final_status = ffrpo_status_body("stopped", sequence + 1, epoch, final_elapsed_s, total_j, total_gpu_lanes, total_moves, degraded, labels, ready, cpu_allocation, gpu_allocation, ranks, bits, rank_drops, density_gains, shape_moves, shape_cpu_moves, shape_gpu_moves, shape_mitm_attempts, shape_mitm_pairs, shape_mitm_ms, shape_mitm_failures, exposure, failures, gpu_failures, scores, side_loaded, side_seeded, side_saved, side_rejects, side_write_failures)
   z = ffrc_atomic_write(status_path, final_status, portfolio_write_tag, sequence + 1)
-  ccall("w_value_free", final_status)
-  ccall("w_value_free", portfolio_write_tag)
+  ccall("w_value_free_w", final_status)
+  ccall("w_value_free_w", portfolio_write_tag)
   result = "RECT_PORTFOLIO_RESULT epoch=" + epoch.to_s() + " elapsed=" + final_elapsed_s.to_s()
   i = 0
   while i < count

@@ -17,8 +17,8 @@ in Tungsten:Bit:Commands
     config = BuildConfig.new(
       output:  option(:output, "build"),
       release: flag?(:release),
-      target:  option(:target, System.target_triple),
-      jobs:    option(:jobs, System.cpu_count) |> self.to_i
+      target:  option(:target, Tungsten:Bit:System.target_triple),
+      jobs:    option(:jobs, Tungsten:Bit:System.cpu_count) |> self.to_i
     )
 
     say "Building " + bitfile.name + " " + bitfile.version + "..."

@@ -77,3 +77,5 @@ describe "CounterRates" ->
     expect(Tungsten:Flame:CounterRates.fmt_x100(250)).to eq("2.50")
     expect(Tungsten:Flame:CounterRates.fmt_x100(5)).to eq("0.05")
     expect(Tungsten:Flame:CounterRates.fmt_x10(900)).to eq("90.0")
+
+spec_summary

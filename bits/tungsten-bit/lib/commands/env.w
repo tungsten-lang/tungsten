@@ -23,7 +23,7 @@ in Tungsten:Bit:Commands
 
     say "bit 0.1.0"
     say "cwd " + Dir.pwd
-    say "target " + System.target_triple
+    say "target " + Tungsten:Bit:System.target_triple
     say "registry " + registry
     say "bit_home " + bit_home()
 

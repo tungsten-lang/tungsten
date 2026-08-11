@@ -7,20 +7,12 @@
 in Tungsten:Slim
 
 + Parser
-  # Regex patterns for line parsing
-  TAG_PATTERN     = /^([a-zA-Z][a-zA-Z0-9]*)/
-  ID_PATTERN      = /#([a-zA-Z_][a-zA-Z0-9_-]*)/
-  CLASS_PATTERN   = /\.([a-zA-Z_][a-zA-Z0-9_-]*)/
-  ATTR_PATTERN    = /\(([^)]*)\)/
-  TEXT_PATTERN    = /\s+"(.*)"\s*$/
-  OUTPUT_PATTERN  = /\s+=\s+(.+)$/
-
   -> new
     @line_number = 0
 
   # Parse a Slim template string into a Root node tree
   -> parse(source)
-    @root = Root.new
+    @root = Tungsten:Slim:Root.new
     @stack = [{node: @root, indent: -1}]
     @line_number = 0
 
@@ -61,49 +53,49 @@ in Tungsten:Slim
   -> parse_line(content)
     case
       # Doctype declaration
-      content.start_with?("doctype ") =>
-        type = content.sub("doctype ", "").strip
-        Doctype.new(type: type, line: @line_number)
+      content.starts_with?("doctype ") =>
+        type = content.slice(8, content.size - 8).strip
+        Tungsten:Slim:Doctype.new(type: type, line: @line_number)
 
       # HTML comment
-      content.start_with?("/") =>
-        text = content[1..].strip
-        Comment.new(text: text.empty? ? nil : text, line: @line_number)
+      content.starts_with?("/") =>
+        text = content.slice(1, content.size - 1).strip
+        Tungsten:Slim:Comment.new(text: text.empty? ? nil : text, line: @line_number)
 
       # Code line (no output)
-      content.start_with?("- ") =>
-        expression = content[2..].strip
-        Code.new(expression: expression, line: @line_number)
+      content.starts_with?("- ") =>
+        expression = content.slice(2, content.size - 2).strip
+        Tungsten:Slim:Code.new(expression: expression, line: @line_number)
 
       # Output expression
-      content.start_with?("= ") =>
-        expression = content[2..].strip
-        Output.new(expression: expression, line: @line_number)
+      content.starts_with?("= ") =>
+        expression = content.slice(2, content.size - 2).strip
+        Tungsten:Slim:Output.new(expression: expression, line: @line_number)
 
       # Table row: | cell | cell | cell |
-      content.match?(/^\|.*\|.*\|/) =>
+      content.starts_with?("|") && content.split("|").size > 3 =>
         self.parse_table_row(content)
 
       # Literal text block
-      content.start_with?("| ") =>
-        text = content[2..]
-        Text.new(value: text, line: @line_number)
+      content.starts_with?("| ") =>
+        text = content.slice(2, content.size - 2)
+        Tungsten:Slim:Text.new(value: text, line: @line_number)
 
       # Literal text (pipe with no space for empty lines)
       content == "|" =>
-        Text.new(value: "", line: @line_number)
+        Tungsten:Slim:Text.new(value: "", line: @line_number)
 
       # HTML element (starts with a letter, or with . or # for div shorthand)
-      content.match?(/^[a-zA-Z]/) =>
+      element_start?(content) =>
         parse_element(content)
 
       # Shorthand div with class or id
-      content.start_with?(".") || content.start_with?("#") =>
+      content.starts_with?(".") || content.starts_with?("#") =>
         parse_element("div" + content)
 
       # Anything else is plain text
       =>
-        Text.new(value: content, line: @line_number)
+        Tungsten:Slim:Text.new(value: content, line: @line_number)
 
   # Parse an element line: tag#id.class(attrs) "text" or tag = expr
   -> parse_element(content)
@@ -115,41 +107,41 @@ in Tungsten:Slim
     text = nil
     inline_output = nil
 
-    # Extract tag name
-    if match = remaining.match(TAG_PATTERN)
-      tag = match[1]
-      remaining = remaining[match[0].size..]
+    pos = 0
+    if element_start?(remaining)
+      while pos < remaining.size && identifier_char?(remaining.slice(pos, 1))
+        pos = pos + 1
+      tag = remaining.slice(0, pos)
     else
       tag = "div"
 
-    # Extract ID shorthand (#id)
-    while match = remaining.match(/^#([a-zA-Z_][a-zA-Z0-9_-]*)/)
-      id = match[1]
-      remaining = remaining[match[0].size..]
+    while pos < remaining.size && (remaining.slice(pos, 1) == "#" || remaining.slice(pos, 1) == ".")
+      marker = remaining.slice(pos, 1)
+      pos = pos + 1
+      start = pos
+      while pos < remaining.size && identifier_char?(remaining.slice(pos, 1))
+        pos = pos + 1
+      value = remaining.slice(start, pos - start)
+      if marker == "#"
+        id = value
+      else
+        classes.push(value)
 
-    # Extract class shorthands (.class)
-    while match = remaining.match(/^\.([a-zA-Z_][a-zA-Z0-9_-]*)/)
-      classes.push(match[1])
-      remaining = remaining[match[0].size..]
+    if pos < remaining.size && remaining.slice(pos, 1) == "("
+      close = remaining.index(")")
+      if close
+        attributes = parse_attributes(remaining.slice(pos + 1, close - pos - 1))
+        pos = close + 1
 
-    # Extract parenthesized attributes
-    if match = remaining.match(/^\(([^)]*)\)/)
-      attributes = parse_attributes(match[1])
-      remaining = remaining[match[0].size..]
+    tail = remaining.slice(pos, remaining.size - pos).strip
+    if tail.starts_with?("= ")
+      inline_output = tail.slice(2, tail.size - 2).strip
+    elsif tail.size >= 2 && tail.slice(0, 1) == "\"" && tail.slice(tail.size - 1, 1) == "\""
+      text = tail.slice(1, tail.size - 2)
+    elsif tail.size > 0
+      text = tail
 
-    # Check for inline output (tag = expression)
-    if match = remaining.match(/^\s+=\s+(.+)$/)
-      inline_output = match[1].strip
-
-    # Check for inline text ("quoted text")
-    elsif match = remaining.match(/^\s+"(.*)"\s*$/)
-      text = match[1]
-
-    # Check for unquoted inline text (after a space, not starting with special chars)
-    elsif match = remaining.match(/^\s+([^"=\-\/|].*)$/)
-      text = match[1].strip if match[1].strip.size > 0
-
-    Element.new(
+    Tungsten:Slim:Element.new(
       tag: tag,
       id: id,
       classes: classes,
@@ -162,27 +154,28 @@ in Tungsten:Slim
   # Parse attribute string: key="value" key="value" ...
   -> parse_attributes(attr_string)
     attrs = {}
-    remaining = attr_string.strip
-
-    while remaining.size > 0
-      # Match key="value" or key='value'
-      if match = remaining.match(/^([a-zA-Z_][a-zA-Z0-9_-]*)\s*=\s*"([^"]*)"/)
-        attrs[match[1]] = match[2]
-        remaining = remaining[match[0].size..].strip
-
-      elsif match = remaining.match(/^([a-zA-Z_][a-zA-Z0-9_-]*)\s*=\s*'([^']*)'/)
-        attrs[match[1]] = match[2]
-        remaining = remaining[match[0].size..].strip
-
-      # Boolean attribute (no value)
-      elsif match = remaining.match(/^([a-zA-Z_][a-zA-Z0-9_-]*)/)
-        attrs[match[1]] = true
-        remaining = remaining[match[0].size..].strip
-
+    attr_string.split(" ").each -> (part)
+      eq = part.index("=")
+      if eq
+        name = part.slice(0, eq)
+        value = part.slice(eq + 1, part.size - eq - 1)
+        if value.size >= 2
+          quote = value.slice(0, 1)
+          if (quote == "\"" || quote == "'") && value.slice(value.size - 1, 1) == quote
+            value = value.slice(1, value.size - 2)
+        attrs[name] = value
       else
-        break
+        attrs[part] = true
 
     attrs
+
+  -> element_start?(text)
+    return false if text.size == 0
+    ch = text.slice(0, 1)
+    (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z")
+
+  -> identifier_char?(ch)
+    element_start?(ch) || (ch >= "0" && ch <= "9") || ch == "_" || ch == "-"
 
   # Parse a table row: | cell1 | cell2 | cell3 |
   # First row under a `table` element becomes a header row
@@ -195,17 +188,17 @@ in Tungsten:Slim
     # Determine if this is a header row:
     # First | row under a table parent is treated as <thead>
     parent = @stack.last[:node]
-    is_header = parent.is_a?(Element) && parent.tag == "table" &&
-                parent.children.none?(-> (c) c.is_a?(TableRow))
+    is_header = (parent.is_a?(Tungsten:Slim:Element) && parent.tag == "table" &&
+      parent.children.none?(-> (c) c.is_a?(Tungsten:Slim:TableRow)))
 
-    TableRow.new(cells: cells, header: is_header, line: @line_number)
+    Tungsten:Slim:TableRow.new(cells: cells, header: is_header, line: @line_number)
 
   # Measure leading whitespace of a line (number of spaces)
   -> measure_indent(line)
     count = 0
-    line.each_char -> (ch)
+    line.chars.each -> (ch)
       if ch == " "
         count = count + 1
       else
-        << count
+        return count
     count

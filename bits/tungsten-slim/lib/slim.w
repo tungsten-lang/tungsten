@@ -12,7 +12,7 @@ use helpers
 
 # Render a Slim template string with the given local variables
 -> render(source, locals = {})
-  engine = Engine.new
+  engine = Tungsten:Slim:Engine.new
   engine.render(source, locals)
 
 # Render a Slim template from a file path
@@ -22,5 +22,5 @@ use helpers
 
 # Parse a Slim template into a node tree (useful for inspection)
 -> parse(source)
-  parser = Parser.new
+  parser = Tungsten:Slim:Parser.new
   parser.parse(source)

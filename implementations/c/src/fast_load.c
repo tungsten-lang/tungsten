@@ -245,6 +245,97 @@ static int fl_flatten_program(const char *path, const unsigned char *flags, size
   return 1;
 }
 
+/* Byte-faithful twin of Loader#normalize_load_path: split on '/', drop empty
+ * and "." segments, fold ".." (pop unless empty/"..", push when relative),
+ * re-join, restore the leading '/' for absolute inputs. The loader compares
+ * @loaded_files entries against normalize_load_path output, so alias-spelling
+ * seeds must be normalized the same way to byte-match. */
+static int fl_normalize_like_loader(const char *in, char *out, size_t out_cap) {
+  int absolute = in[0] == '/';
+  size_t out_len = 0;
+  /* Segment stack: byte offsets of each emitted segment start in out. */
+  size_t seg_starts[512];
+  size_t seg_count = 0;
+  const char *p = in;
+  while (*p) {
+    while (*p == '/') p++;
+    if (!*p) break;
+    const char *seg = p;
+    while (*p && *p != '/') p++;
+    size_t seg_len = (size_t)(p - seg);
+    if (seg_len == 1 && seg[0] == '.') continue;
+    if (seg_len == 2 && seg[0] == '.' && seg[1] == '.') {
+      int last_is_dotdot =
+          seg_count > 0 && out_len - seg_starts[seg_count - 1] == 2 &&
+          out[seg_starts[seg_count - 1]] == '.' && out[seg_starts[seg_count - 1] + 1] == '.';
+      if (seg_count > 0 && !last_is_dotdot) {
+        out_len = seg_starts[--seg_count];
+        if (out_len > 0) out_len--; /* drop the joining '/' too */
+        continue;
+      }
+      if (absolute) continue; /* loader drops unmatched ".." on absolute paths */
+      /* relative: fall through and emit the ".." segment */
+    }
+    if (seg_count == sizeof(seg_starts) / sizeof(seg_starts[0])) return 0;
+    if (out_len + (out_len > 0 ? 1 : 0) + seg_len + 2 > out_cap) return 0;
+    if (out_len > 0) out[out_len++] = '/';
+    seg_starts[seg_count++] = out_len;
+    memcpy(out + out_len, seg, seg_len);
+    out_len += seg_len;
+  }
+  if (absolute) {
+    if (out_len + 2 > out_cap) return 0;
+    memmove(out + 1, out, out_len);
+    out[0] = '/';
+    out_len++;
+  }
+  out[out_len] = '\0';
+  return 1;
+}
+
+/* Byte-faithful twin of Loader#find_core_root(dirname(file_path)): walk the
+ * dirname's slash-boundary prefixes deepest-first and return (malloc'd) the
+ * first whose "<prefix>/core/tungsten.w" exists. The probe goes through the
+ * filesystem exactly like the loader's file?() — symlinked or case-aliased
+ * spellings hit the same manifest the canonical walk would. NULL when no
+ * ancestor carries a core manifest. */
+static char *fl_core_root_of(const char *file_path) {
+  size_t len = strlen(file_path);
+  size_t dir_len = 0;
+  for (size_t i = len; i > 0; i--) {
+    if (file_path[i - 1] == '/') {
+      dir_len = i - 1;
+      break;
+    }
+  }
+  static const char probe_suffix[] = "/core/tungsten.w";
+  char probe[4096];
+  size_t p = dir_len;
+  for (;;) {
+    if (p + sizeof(probe_suffix) <= sizeof(probe)) {
+      memcpy(probe, file_path, p);
+      memcpy(probe + p, probe_suffix, sizeof(probe_suffix));
+      if (access(probe, F_OK) == 0) {
+        char *root = (char *)malloc(p + 1);
+        if (!root) return NULL;
+        memcpy(root, file_path, p);
+        root[p] = '\0';
+        return root;
+      }
+    }
+    if (p == 0) break;
+    size_t next = 0;
+    for (size_t i = p; i > 0; i--) {
+      if (file_path[i - 1] == '/') {
+        next = i - 1;
+        break;
+      }
+    }
+    p = next;
+  }
+  return NULL;
+}
+
 int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue *out,
                                 TcValue *loaded_out, TcError *err) {
   /* Resolve relative path against from_file if needed. */
@@ -362,13 +453,31 @@ int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue
    * included, or every definition in it duplicates. The loader compares
    * paths as strings and constructs them relative to how the entry was
    * named ("./core/x.w" for a cwd-relative entry, absolute otherwise),
-   * so seed each file under all three spellings. */
+   * so seed each file under all of those spellings.
+   *
+   * The absolute spelling the loader constructs is anchored at the entry
+   * path AS GIVEN: resolve_path builds core autoload paths as
+   * find_core_root(dirname(entry)) + "/core/<p>.w" by string algebra,
+   * never realpath. This seen-set, in contrast, is realpath-canonical.
+   * When the given entry spelling aliases the canonical one (symlinked
+   * root, APFS case variant, "."/".." segments), seed each file under the
+   * given-root spelling too — the class_def reopen arm of the autoload
+   * walker (loader.w) deliberately schedules `+ BigInt` even though the
+   * class is already defined, and only this seeding stops the resulting
+   * re-load from duplicating every fn in core/numeric/big_int.w. */
   if (ok && loaded_out) {
     char cwd_buf[4096];
     size_t cwd_len = 0;
     if (getcwd(cwd_buf, sizeof(cwd_buf))) cwd_len = strlen(cwd_buf);
+    char *given_root = path && path[0] == '/' ? fl_core_root_of(path) : NULL;
+    char *real_root = fl_core_root_of(resolved);
+    size_t real_root_len = real_root ? strlen(real_root) : 0;
+    int alias_roots = given_root && real_root && strcmp(given_root, real_root) != 0;
+    size_t given_root_len = given_root ? strlen(given_root) : 0;
     TcAstValue loaded = tc_ast_array_new(err);
     if (loaded.kind != TC_AST_ARRAY) {
+      free(given_root);
+      free(real_root);
       free(flags);
       free(resolved);
       fl_path_set_free(&seen);
@@ -377,9 +486,11 @@ int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue
     for (size_t i = 0; i < seen.count && ok; i++) {
       const char *abs = seen.items[i];
       size_t abs_len = strlen(abs);
-      const char *forms[3];
+      const char *forms[4];
       char rel_buf[4096];
       char dotrel_buf[4096];
+      char alias_raw[8192];
+      char alias_buf[8192];
       size_t nforms = 0;
       forms[nforms++] = abs;
       if (cwd_len > 0 && abs_len > cwd_len + 1 &&
@@ -392,6 +503,17 @@ int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue
         memcpy(dotrel_buf + 2, abs + cwd_len + 1, abs_len - cwd_len);
         forms[nforms++] = dotrel_buf;
       }
+      if (alias_roots && abs_len > real_root_len + 1 &&
+          memcmp(abs, real_root, real_root_len) == 0 && abs[real_root_len] == '/' &&
+          given_root_len + (abs_len - real_root_len) < sizeof(alias_raw)) {
+        memcpy(alias_raw, given_root, given_root_len);
+        memcpy(alias_raw + given_root_len, abs + real_root_len,
+               abs_len - real_root_len + 1);
+        if (fl_normalize_like_loader(alias_raw, alias_buf, sizeof(alias_buf)) &&
+            strcmp(alias_buf, abs) != 0) {
+          forms[nforms++] = alias_buf;
+        }
+      }
       for (size_t fi = 0; fi < nforms; fi++) {
         TcAstValue s = tc_ast_string_copy(forms[fi], strlen(forms[fi]), err);
         if (s.kind != TC_AST_STRING || !tc_ast_array_push(loaded, s, err)) {
@@ -401,6 +523,8 @@ int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue
         }
       }
     }
+    free(given_root);
+    free(real_root);
     if (!ok) {
       tc_ast_free(loaded);
       free(flags);

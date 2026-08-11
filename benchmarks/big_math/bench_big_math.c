@@ -172,7 +172,7 @@ static void bench_direct_free(WBigint *b) {
         if (b->shared != 255) b->shared--;
         return;
     }
-    free(b);
+    bigint_backing_free(b);
 }
 
 static void bench_free_value(WValue value) {
@@ -852,8 +852,8 @@ static double bench_tungsten_divmod_path(const uint64_t *u, const uint64_t *v,
         unsigned ri = r->size > 0 ? (unsigned)i % (unsigned)r->size : 0;
         bench_sink ^= (q->size > 0 ? q->limbs[qi] : 0) ^
                       (r->size > 0 ? r->limbs[ri] : 0) ^ (uint64_t)i;
-        free(q);
-        free(r);
+        bigint_backing_free(q);
+        bigint_backing_free(r);
     }
     return (bench_now() - start) * 1e9 / (double)iters;
 }
@@ -2678,8 +2678,8 @@ static void check_divmod_against_gmp(int32_t limbs, const uint64_t *u,
         uint64_t got = i < tr->size ? tr->limbs[i] : 0;
         if (got != gr[i]) die("div remainder mismatch vs GMP");
     }
-    free(tq);
-    free(tr);
+    bigint_backing_free(tq);
+    bigint_backing_free(tr);
     free(gq);
     free(gr);
 }
@@ -2759,7 +2759,7 @@ static void check_tostr_one_limb_case(uint64_t magnitude, int negative,
     gmp_free_fn(expected, strlen(expected) + 1);
     mpz_clear(expected_z);
     w_value_free(text);
-    free(b);
+    bigint_backing_free(b);
 }
 
 static void check_tostr_two_limb_case(uint64_t lo, uint64_t hi, int negative,
@@ -2790,7 +2790,7 @@ static void check_tostr_two_limb_case(uint64_t lo, uint64_t hi, int negative,
     gmp_free_fn(expected, strlen(expected) + 1);
     mpz_clear(expected_z);
     w_value_free(text);
-    free(b);
+    bigint_backing_free(b);
 }
 
 static void fuzz_tostr_small_against_gmp(int cases) {
@@ -3498,8 +3498,8 @@ static void fuzz_divmod_against_gmp(int cases, int32_t max_limbs) {
             }
         }
 
-        free(r);
-        free(q);
+        bigint_backing_free(r);
+        bigint_backing_free(q);
         free(gr);
         free(gq);
         free(v);
@@ -3548,7 +3548,7 @@ static void fuzz_div_reciprocal_against_gmp(
                 abort();
             }
         }
-        free(q);
+        bigint_backing_free(q);
 
         WBigint *r;
         mag_divmod(u, 2 * limbs, v, limbs, NULL, &r);
@@ -3562,7 +3562,7 @@ static void fuzz_div_reciprocal_against_gmp(
                 abort();
             }
         }
-        free(r);
+        bigint_backing_free(r);
 
         if ((t & 3) == 0) {
             WBigint *both_q, *both_r;
@@ -3580,8 +3580,8 @@ static void fuzz_div_reciprocal_against_gmp(
                 if (got != gr[i])
                     die("reciprocal divmod remainder mismatch");
             }
-            free(both_r);
-            free(both_q);
+            bigint_backing_free(both_r);
+            bigint_backing_free(both_q);
         }
     }
     free(v);
@@ -3631,7 +3631,7 @@ static void fuzz_div_single_against_gmp(int cases, int32_t max_limbs) {
                     t, limbs, (unsigned long long)d);
             abort();
         }
-        free(q);
+        bigint_backing_free(q);
         free(a);
     }
 

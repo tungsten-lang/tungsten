@@ -47,7 +47,7 @@ static WValue bench_bigint(int32_t n, uint64_t seed) {
 }
 
 static void bench_free_value(WValue value) {
-    if (w_is_bigint(value)) free(w_as_bigint(value));
+    if (w_is_bigint(value)) bigint_backing_free(w_as_bigint(value));
 }
 
 static int bench_bigint_recycle_check(void) {
@@ -79,8 +79,8 @@ static int bench_bigint_recycle_check(void) {
      * be returned a second time. */
     WBigint *simultaneous = bigint_alloc_raw(64);
     if (simultaneous == zeroed) bad++;
-    free(zeroed);
-    free(simultaneous);
+    bigint_backing_free(zeroed);
+    bigint_backing_free(simultaneous);
     bigint_pool_release_thread();
 
     /* Dedicated-subtag WValues still identify parked storage as BigInt, so
@@ -95,10 +95,10 @@ static int bench_bigint_recycle_check(void) {
     WBigint *second_take = bigint_alloc_raw(8);
     if (first_take == second_take) {
         bad++;
-        free(first_take);
+        bigint_backing_free(first_take);
     } else {
-        free(first_take);
-        free(second_take);
+        bigint_backing_free(first_take);
+        bigint_backing_free(second_take);
     }
     bigint_pool_release_thread();
 
@@ -188,7 +188,7 @@ static WValue bench_sub_negate_add_ref(WValue a, WValue b) {
     for (int32_t i = 0; i < n; i++) neg->limbs[i] = bb->limbs[i];
     neg->size = -bb->size;
     WValue result = bigint_add_any(a, bigint_box(neg));
-    free(neg);
+    bigint_backing_free(neg);
     return result;
 }
 
@@ -270,8 +270,8 @@ static int bench_div_single_equivalence(void) {
                            memcmp(ref->limbs, got->limbs,
                                   (size_t)limbs * sizeof(uint64_t)) != 0;
             free(a);
-            free(ref);
-            free(got);
+            bigint_backing_free(ref);
+            bigint_backing_free(got);
             if (mismatch) {
                 fprintf(stderr, "single-limb div mismatch: divisor=%llu sample=%d\n",
                         (unsigned long long)divisors[d], sample);
@@ -298,7 +298,7 @@ static double bench_div_single_raw(int32_t limbs, uint64_t d, int iters,
             WBigint *q = reference ? bench_div_single_ref(a, limbs, d, &rem)
                                    : mag_div_single(a, limbs, d, &rem);
             bench_sink ^= q->limbs[(unsigned)i % (unsigned)limbs] ^ rem ^ (uint64_t)i;
-            free(q);
+            bigint_backing_free(q);
         }
         double elapsed = (bench_now() - start) * 1e9 / (double)iters;
         if (elapsed < best) best = elapsed;
@@ -463,7 +463,7 @@ static double bench_value_forced_ntt(int32_t limbs, int iters, int square) {
             r->size = 2 * limbs;
             while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
             bench_sink ^= r->limbs[0] + (uint64_t)i;
-            free(r);
+            bigint_backing_free(r);
         }
         double elapsed = bench_now() - start;
         if (elapsed < best) best = elapsed;
@@ -555,7 +555,7 @@ static double bench_ctx_mulmod(int32_t limbs, int iters) {
     }
     double elapsed = bench_now() - start;
     w_prime_modctx_fini(&ctx);
-    free(dab); free(dbb);
+    bigint_backing_free(dab); bigint_backing_free(dbb);
     bench_free_value(a);
     bench_free_value(b);
     bench_free_value(m);
@@ -650,7 +650,7 @@ static int bench_mersenne_127_fuzz(int count) {
         if (w_eq(expected, actual) != W_TRUE) bad++;
         bench_free_value(expected);
         bench_free_value(actual);
-        free(s);
+        bigint_backing_free(s);
     }
     return bad;
 }
@@ -939,7 +939,7 @@ int main(int argc, char **argv) {
         double t_ctx = (bench_now() - t0) * 1e6 / iters;
         printf("%20d %9.1f %11.1f %11.1f %7d\n", bp[i].bits, t_total, t_ref, t_ctx, iters);
         w_prime_modctx_fini(&ctx);
-        free(nb);
+        bigint_backing_free(nb);
     }
 
     /* Lucas agreement fuzz: both implementations must agree on random odd n
@@ -957,7 +957,7 @@ int main(int argc, char **argv) {
           if (a != b) bad++;
           checked++;
           w_prime_modctx_fini(&ctx);
-          free(rb);
+          bigint_backing_free(rb);
       }
       printf("\nlucas agreement fuzz: %d/%d agree%s\n", checked - bad, checked, bad ? "  *** DISAGREE ***" : "");
       if (bad) return 1;
@@ -993,10 +993,10 @@ int main(int argc, char **argv) {
               WValue g = w_prime_modctx_mul(&c2, a, b);
               if (w_eq(e, g) != W_TRUE) bad++;
               checked++;
-              bench_free_value(e); free(ab); free(bb2);
+              bench_free_value(e); bigint_backing_free(ab); bigint_backing_free(bb2);
           }
           w_prime_modctx_fini(&c2);
-          free(nb2);
+          bigint_backing_free(nb2);
       }
       printf("mul2 (k=2) equivalence sweep: %d/%d match%s\n", checked - bad, checked, bad ? "  *** MISMATCH ***" : "");
       if (bad) return 1;
@@ -1096,12 +1096,12 @@ int main(int argc, char **argv) {
           int32_t sz = nl; while (sz > 0 && b->limbs[sz - 1] == 0) sz--;
           b->size = sz;
           WValue N = bigint_box(b);
-          if (!w_prime_proth_shape(b->limbs, sz)) { bad++; checked++; free(b); continue; }
+          if (!w_prime_proth_shape(b->limbs, sz)) { bad++; checked++; bigint_backing_free(b); continue; }
           int got = w_prime_test_proth(N);
           int bpw = w_prime_test_bigint(N);
           if (got != pr[i].prime || bpw != pr[i].prime) bad++;
           checked++;
-          free(b);
+          bigint_backing_free(b);
       }
       printf("proth proof vs expected+BPSW: %d/%d agree%s\n", checked - bad, checked,
              bad ? "  *** MISMATCH ***" : "");
@@ -1123,7 +1123,7 @@ int main(int argc, char **argv) {
         for (int r = 0; r < 20; r++) bench_sink ^= (uint64_t)w_prime_test_bigint(N);
         double tb = (bench_now() - t0) * 1e6 / 20;
         printf("proth 3*2^534+1: proof %.1fus  BPSW %.1fus  (%.1fx, and it IS a proof)\n", tp, tb, tb / tp);
-        free(b);
+        bigint_backing_free(b);
       }
     }
 
@@ -1171,7 +1171,7 @@ int main(int argc, char **argv) {
           }
           if (!ok) bad++;
           checked++;
-          free(q1); free(r1); free(q2); free(r2); free(U); free(V);
+          bigint_backing_free(q1); bigint_backing_free(r1); bigint_backing_free(q2); bigint_backing_free(r2); bigint_backing_free(U); bigint_backing_free(V);
       }
       printf("\nBZ divmod fuzz (vs Knuth + q*v+r==u): %d/%d ok%s\n", checked - bad, checked,
              bad ? "  *** MISMATCH ***" : "");
@@ -1188,10 +1188,10 @@ int main(int argc, char **argv) {
           if (V[n-1] == 0) V[n-1] = 1;
           int it = n <= 256 ? 60 : (n <= 1024 ? 16 : 6);
           double t0 = bench_now();
-          for (int r = 0; r < it; r++) { WBigint *qq, *rr; mag_divmod_knuth(U, 2*n, V, n, &qq, &rr); bench_sink ^= qq->limbs[0]; free(qq); free(rr); }
+          for (int r = 0; r < it; r++) { WBigint *qq, *rr; mag_divmod_knuth(U, 2*n, V, n, &qq, &rr); bench_sink ^= qq->limbs[0]; bigint_backing_free(qq); bigint_backing_free(rr); }
           double tk = (bench_now() - t0) * 1e6 / it;
           t0 = bench_now();
-          for (int r = 0; r < it; r++) { WBigint *qq, *rr; mag_divmod(U, 2*n, V, n, &qq, &rr); bench_sink ^= qq->limbs[0]; free(qq); free(rr); }
+          for (int r = 0; r < it; r++) { WBigint *qq, *rr; mag_divmod(U, 2*n, V, n, &qq, &rr); bench_sink ^= qq->limbs[0]; bigint_backing_free(qq); bigint_backing_free(rr); }
           double tb = (bench_now() - t0) * 1e6 / it;
           printf("%18d %9.1f %9.1f  (%.2fx)\n", n, tk, tb, tk / tb);
           free(U); free(V);
@@ -1216,7 +1216,7 @@ int main(int argc, char **argv) {
           int32_t l2 = w_dec_chunks_write(xb->limbs, nl, s2, 0); /* base oracle */
           if (l1 != l2 || memcmp(s1, s2, (size_t)l1) != 0) bad++;
           checked++;
-          free(s1); free(s2); free(xb);
+          free(s1); free(s2); bigint_backing_free(xb);
       }
       /* exact multiples of P_2 = 10^72: forces long zero-padded tails */
       { WBigint *p = bigint_alloc(4); p->limbs[0]=1000000000000000000ULL; p->size=1;
@@ -1241,7 +1241,7 @@ int main(int argc, char **argv) {
             checked++;
             free(s1); free(s2); free(k); free(x);
         }
-        free(p); }
+        bigint_backing_free(p); }
       printf("\nD&C to_s fuzz vs base: %d/%d match%s\n", checked - bad, checked,
              bad ? "  *** MISMATCH ***" : "");
       if (bad) return 1;

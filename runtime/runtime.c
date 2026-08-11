@@ -336,6 +336,100 @@ _Static_assert(BN_BIGINT_HYBRID_P2_LIMIT >= 8 &&
                "hybrid p2 limit must be a power of two >= 8");
 #endif
 
+/*
+ * BigInt limb-buffer arena (page-offset-scheduled backing allocator).
+ *
+ * Two-stream limb kernels stall when a result buffer lands within the
+ * LSU's 4 KiB disambiguation window of an operand: malloc turns that
+ * placement into a heap-layout lottery that environment-block size
+ * re-draws every launch (the historical mul@48 / lcm@1 swings).  The
+ * arena replaces malloc/free underneath the recycler for pool-band
+ * capacities (<= BN_BIGINT_POOL_MAX_CAP limbs) and makes placement
+ * deliberate:
+ *
+ *   - slots sit on a 512-byte grid inside 2 MiB-aligned per-thread
+ *     chunks, so every slot's page offset is one of eight 512-byte
+ *     phases; two slots on DIFFERENT phases are at least 512 bytes
+ *     apart mod 4096 -- outside both empirically tuned hazard windows
+ *     (each tests strictly `< 512` -- see bn_page_hazard and
+ *     bn_addsub_page_distance);
+ *   - the bump placer refuses any phase handed out in the last seven
+ *     allocations (bump or recycled), so ANY two of the last eight
+ *     buffers a thread received are pairwise phase-separated -- the
+ *     operands and result of one kernel call by construction;
+ *   - recycled slots keep their birth phase (a buffer re-taken from the
+ *     pool's hot slot is the same address aliasing itself, which is not
+ *     a hazard), so a phase-separated cohort stays separated however the
+ *     pool recirculates it.
+ *
+ * Residual exposure: two live buffers handed out >= 8 allocations apart
+ * can share a phase.  The kernels the guards covered stream a result
+ * against operands allocated adjacently, so with the arena on the
+ * page-hazard guard/rehome/redirect machinery is compiled out
+ * (BN_EQ_PAGE_HAZARD_GUARD defaults to the arena's negation below).
+ *
+ * The bucket pool and hot slot above are unchanged: the arena only
+ * replaces bigint_alloc*'s miss path and bigint_release*'s overflow
+ * path.  Capacities above the pool band stay on malloc.  Under ASan the
+ * arena compiles to malloc passthrough by default (freelist reuse would
+ * mask use-after-free; define BN_BIGINT_ARENA_ASAN=1 to force the arena
+ * on for arena-path coverage).
+ */
+#ifndef BN_BIGINT_ARENA
+#define BN_BIGINT_ARENA 1
+#endif
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define BN_BIGINT_ARENA_UNDER_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#undef BN_BIGINT_ARENA_UNDER_ASAN
+#define BN_BIGINT_ARENA_UNDER_ASAN 1
+#endif
+#ifndef BN_BIGINT_ARENA_UNDER_ASAN
+#define BN_BIGINT_ARENA_UNDER_ASAN 0
+#endif
+#ifndef BN_BIGINT_ARENA_ASAN
+#define BN_BIGINT_ARENA_ASAN 0
+#endif
+#if BN_BIGINT_ARENA && BN_BIGINT_RECYCLE && \
+    (!BN_BIGINT_ARENA_UNDER_ASAN || BN_BIGINT_ARENA_ASAN)
+#define BN_BIGINT_ARENA_ACTIVE 1
+#else
+#define BN_BIGINT_ARENA_ACTIVE 0
+#endif
+/* The page-hazard guards exist to fix up lottery placement; deliberate
+ * placement makes them dead weight.  Still overridable for A/B builds. */
+#ifndef BN_EQ_PAGE_HAZARD_GUARD
+#define BN_EQ_PAGE_HAZARD_GUARD (!BN_BIGINT_ARENA_ACTIVE)
+#endif
+
+/* Allocation-source tag, stored in the (otherwise unused) WBigint._pad[0].
+ * Every allocation path stamps it; the release overflow path routes on it.
+ * Malloc'd headers stamp it explicitly because their pad bytes are garbage. */
+#define BN_BIGINT_SRC_MALLOC 0u
+#define BN_BIGINT_SRC_ARENA  1u
+
+#if BN_BIGINT_ARENA_ACTIVE
+static WBigint *bigint_arena_take(uint32_t alloc_cap, int zero_limbs);
+static void bigint_arena_free(WBigint *b);
+static void bigint_arena_release_thread(void);
+#else
+static inline void bigint_arena_release_thread(void) {}
+#endif
+
+/* Route a buffer leaving the recycler back to its backing allocator. */
+static inline void bigint_backing_free(WBigint *b) {
+#if BN_BIGINT_ARENA_ACTIVE
+    if (b->_pad[0] == BN_BIGINT_SRC_ARENA) {
+        bigint_arena_free(b);
+        return;
+    }
+#endif
+    free(b);
+}
+
 typedef struct {
     uint64_t d[2];
     uint64_t v[2];
@@ -540,13 +634,13 @@ static void bigint_release_cold(WBigint *b) {
     WBigintPool *pool = &bigint_pool_state;
     uint32_t cap = b->cap;
     if (cap == 0 || cap > BN_BIGINT_POOL_MAX_CAP) {
-        free(b);
+        bigint_backing_free(b);
         return;
     }
     int bucket = bigint_pool_bucket(cap);
     int count = pool->count[bucket];
     if (count >= BN_BIGINT_POOL_PER_BUCKET) {
-        free(b);
+        bigint_backing_free(b);
         return;
     }
     b->type = 0;
@@ -562,7 +656,7 @@ static void bigint_release(WBigint *b) {
     WBigintPool *pool = &bigint_pool_state;
     uint32_t cap = b->cap;
     if (cap == 0 || cap > BN_BIGINT_POOL_MAX_CAP) {
-        free(b);
+        bigint_backing_free(b);
         return;
     }
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
@@ -690,13 +784,13 @@ void bigint_release_if_live(WBigint *b) {
 static void bigint_pool_release_thread(void) {
     WBigintPool *pool = &bigint_pool_state;
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-    if (pool->hot_word != 0) free(bigint_hot_ptr(pool->hot_word));
+    if (pool->hot_word != 0) bigint_backing_free(bigint_hot_ptr(pool->hot_word));
     pool->hot_word = 0;
 #endif
     for (int bucket = 0; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
         int count = pool->count[bucket];
         for (int i = 0; i < count; i++) {
-            free(pool->slot[bucket][i]);
+            bigint_backing_free(pool->slot[bucket][i]);
             pool->slot[bucket][i] = NULL;
         }
         pool->count[bucket] = 0;
@@ -767,6 +861,12 @@ static WBigint *bigint_alloc(int32_t cap) {
         memset(b->limbs, 0, (size_t)b->cap * sizeof(uint64_t));
         return b;
     }
+#if BN_BIGINT_ARENA_ACTIVE
+    if (alloc_cap - 1u < BN_BIGINT_POOL_MAX_CAP) { /* 1..MAX: pool band */
+        b = bigint_arena_take(alloc_cap, /*zero_limbs=*/1);
+        if (b) return b;
+    }
+#endif
     /* calloc guarantees 16-byte alignment on macOS/glibc */
     size_t sz = sizeof(WBigint) + (size_t)alloc_cap * sizeof(uint64_t);
     /* Round up to 16-byte alignment for w_box_ptr */
@@ -791,6 +891,12 @@ static WBigint *bigint_alloc_raw(int32_t cap) {
     uint32_t alloc_cap = bigint_alloc_capacity((uint32_t)cap);
     WBigint *b = bigint_pool_take(alloc_cap);
     if (b) return b;
+#if BN_BIGINT_ARENA_ACTIVE
+    if (alloc_cap - 1u < BN_BIGINT_POOL_MAX_CAP) { /* 1..MAX: pool band */
+        b = bigint_arena_take(alloc_cap, /*zero_limbs=*/0);
+        if (b) return b;
+    }
+#endif
     size_t sz = sizeof(WBigint) + (size_t)alloc_cap * sizeof(uint64_t);
     sz = (sz + 15) & ~(size_t)15;
     b = (WBigint *)malloc(sz);
@@ -798,16 +904,20 @@ static WBigint *bigint_alloc_raw(int32_t cap) {
 #if BN_RAW_HEADER_STORES
     b->type = W_TYPE_BIGINT;
     b->shared = 0;      /* fresh malloc: the shared bit is garbage bytes */
+#if BN_BIGINT_ARENA_ACTIVE
+    b->_pad[0] = BN_BIGINT_SRC_MALLOC;  /* fresh malloc: pads are garbage */
+#endif
     b->size = 0;
     b->cap = alloc_cap;
 #else
-    memset(b, 0, sizeof(WBigint));
+    memset(b, 0, sizeof(WBigint));      /* zeroed pads = BN_BIGINT_SRC_MALLOC */
     b->type = W_TYPE_BIGINT;
     b->cap = alloc_cap;
 #endif
     return b;
 }
 
+#if BN_EQ_PAGE_HAZARD_GUARD
 /* Allocate a normal raw BigInt while deliberately bypassing the recycler.
  * Used only to replace a recycled destination whose page offset aliases an
  * operand; the rejected buffer remains retained in its cold size class. */
@@ -818,10 +928,14 @@ static WBigint *bigint_alloc_raw_fresh_capacity(uint32_t alloc_cap) {
     if (!b) die("out of memory allocating bigint");
     b->type = W_TYPE_BIGINT;
     b->shared = 0;
+#if BN_BIGINT_ARENA_ACTIVE
+    b->_pad[0] = BN_BIGINT_SRC_MALLOC;  /* fresh malloc: pads are garbage */
+#endif
     b->size = 0;
     b->cap = alloc_cap;
     return b;
 }
+#endif
 
 /*
  * Fixed-shape arithmetic normally consumes exactly the buffer most recently
@@ -879,6 +993,254 @@ WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
     }
 #endif
     return bigint_alloc_raw((int32_t)exact_cap);
+}
+
+/* ---- BigInt arena implementation ----
+ * Placement policy and rationale are documented at the BN_BIGINT_ARENA
+ * definition above the pool. */
+#if BN_BIGINT_ARENA_ACTIVE
+
+#ifndef BN_BIGINT_ARENA_CHUNK_LOG2
+#define BN_BIGINT_ARENA_CHUNK_LOG2 21 /* 2 MiB chunks */
+#endif
+#define BN_BIGINT_ARENA_CHUNK_BYTES ((size_t)1 << BN_BIGINT_ARENA_CHUNK_LOG2)
+/* Slot grid: one grid step equals the guards' hazard window, so distinct
+ * grid phases are non-hazardous by definition (the windows test `< 512`). */
+#define BN_BIGINT_ARENA_GRID 512u
+#define BN_BIGINT_ARENA_PHASES (4096u / BN_BIGINT_ARENA_GRID)
+#define BN_BIGINT_ARENA_RING (BN_BIGINT_ARENA_PHASES - 1u)
+
+typedef struct BnArenaChunk {
+    struct BnArenaChunk *next;
+    /* Owner handshake: &bigint_arena_state of the owning thread while it
+     * lives, 0 once orphaned by teardown.  The seq_cst store/load pairs in
+     * bigint_arena_free/bigint_arena_release_thread arbitrate the final
+     * unmap (Dekker: either the releaser sees owner==0 or teardown sees
+     * outstanding==0; `claimed` breaks the tie when both do). */
+    _Atomic uintptr_t owner;
+    _Atomic uint32_t outstanding; /* slots handed out, not on any freelist */
+    _Atomic uint32_t claimed;     /* unmap arbitration */
+    _Atomic uintptr_t remote_free;/* MPSC stack of cross-thread releases */
+    uint32_t bump;                /* next grid-aligned candidate offset */
+} BnArenaChunk;
+
+typedef struct {
+    BnArenaChunk *chunks;         /* head = current bump chunk */
+    WBigint *free_head[BN_BIGINT_POOL_BUCKETS];
+    uint64_t reserved_bytes;
+    uint8_t ring[BN_BIGINT_ARENA_RING]; /* phases of the last 7 handouts */
+    uint8_t ring_pos;
+    uint8_t ring_count;
+} WBigintArena;
+static __thread WBigintArena bigint_arena_state;
+
+_Static_assert(sizeof(BnArenaChunk) <= BN_BIGINT_ARENA_GRID,
+               "chunk header must fit below the first slot grid point");
+_Static_assert((BN_BIGINT_ARENA_CHUNK_BYTES & 4095u) == 0,
+               "arena chunks must be page-multiples");
+_Static_assert(sizeof(WBigint) + (size_t)BN_BIGINT_POOL_MAX_CAP * 8 +
+                   (size_t)BN_BIGINT_ARENA_PHASES * BN_BIGINT_ARENA_GRID +
+                   BN_BIGINT_ARENA_GRID <=
+               BN_BIGINT_ARENA_CHUNK_BYTES,
+               "largest pool-band slot must fit a chunk with phase slack");
+
+static inline BnArenaChunk *bn_arena_chunk_of(WBigint *b) {
+    return (BnArenaChunk *)((uintptr_t)b &
+                            ~(uintptr_t)(BN_BIGINT_ARENA_CHUNK_BYTES - 1u));
+}
+
+static inline uint32_t bn_arena_phase(uint32_t chunk_off) {
+    return (chunk_off / BN_BIGINT_ARENA_GRID) & (BN_BIGINT_ARENA_PHASES - 1u);
+}
+
+static inline int bn_arena_ring_holds(const WBigintArena *a, uint32_t phase) {
+    for (uint32_t i = 0; i < a->ring_count; i++)
+        if (a->ring[i] == phase) return 1;
+    return 0;
+}
+
+static inline void bn_arena_ring_push(WBigintArena *a, uint32_t phase) {
+    a->ring[a->ring_pos] = (uint8_t)phase;
+    a->ring_pos = (uint8_t)((a->ring_pos + 1u) % BN_BIGINT_ARENA_RING);
+    if (a->ring_count < BN_BIGINT_ARENA_RING) a->ring_count++;
+}
+
+static BnArenaChunk *bn_arena_chunk_new(WBigintArena *a) {
+    /* Chunk-aligned so releases recover the header by masking the slot
+     * address.  Map twice the size and trim to alignment (portable on
+     * macOS and Linux); untouched pages stay uncommitted, so reservation
+     * is not residency. */
+    size_t sz = BN_BIGINT_ARENA_CHUNK_BYTES;
+    uint8_t *raw = (uint8_t *)mmap(NULL, sz * 2, PROT_READ | PROT_WRITE,
+                                   MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (raw == MAP_FAILED) return NULL;
+    uintptr_t base = ((uintptr_t)raw + (sz - 1)) & ~(uintptr_t)(sz - 1);
+    size_t head = (size_t)(base - (uintptr_t)raw);
+    if (head) munmap(raw, head);
+    if (sz - head) munmap((void *)(base + sz), sz - head);
+    BnArenaChunk *c = (BnArenaChunk *)base;
+    c->next = a->chunks;
+    atomic_init(&c->owner, (uintptr_t)a);
+    atomic_init(&c->outstanding, 0u);
+    atomic_init(&c->claimed, 0u);
+    atomic_init(&c->remote_free, (uintptr_t)0);
+    c->bump = BN_BIGINT_ARENA_GRID; /* first grid point past the header */
+    a->chunks = c;
+    a->reserved_bytes += sz;
+    return c;
+}
+
+static WBigint *bn_arena_freelist_pop(WBigintArena *a, uint32_t alloc_cap) {
+    int bucket = bigint_pool_bucket(alloc_cap);
+    WBigint **link = &a->free_head[bucket];
+#if BN_BIGINT_HYBRID_CAP || !BN_BIGINT_POWER2_CAP
+    /* Non-power-of-two capacity grids put several classes in one bucket;
+     * scan for the exact class so a smaller buffer is never handed out. */
+    while (*link && (*link)->cap != alloc_cap)
+        link = (WBigint **)&(*link)->limbs[0];
+#endif
+    WBigint *b = *link;
+    if (!b) return NULL;
+    assert(b->cap == alloc_cap);
+    *link = *(WBigint **)&b->limbs[0];
+    return b;
+}
+
+static void bn_arena_drain_remote(WBigintArena *a) {
+    for (BnArenaChunk *c = a->chunks; c; c = c->next) {
+        if (!atomic_load_explicit(&c->remote_free, memory_order_relaxed))
+            continue;
+        uintptr_t head = atomic_exchange_explicit(
+            &c->remote_free, (uintptr_t)0, memory_order_acquire);
+        while (head) {
+            WBigint *b = (WBigint *)head;
+            head = *(uintptr_t *)&b->limbs[0];
+            int bucket = bigint_pool_bucket(b->cap);
+            *(WBigint **)&b->limbs[0] = a->free_head[bucket];
+            a->free_head[bucket] = b;
+        }
+    }
+}
+
+static WBigint *bn_arena_bump(WBigintArena *a, uint32_t alloc_cap) {
+    size_t slot = sizeof(WBigint) + (size_t)alloc_cap * sizeof(uint64_t);
+    /* Reserve room for the worst-case phase scan below. */
+    size_t worst = slot + (size_t)BN_BIGINT_ARENA_RING * BN_BIGINT_ARENA_GRID;
+    BnArenaChunk *c = a->chunks;
+    if (!c || BN_BIGINT_ARENA_CHUNK_BYTES - c->bump < worst) {
+        c = bn_arena_chunk_new(a);
+        if (!c) return NULL;
+    }
+    uint32_t off = c->bump;
+    /* THE PLACEMENT POLICY: refuse any grid phase handed out in the last
+     * seven allocations.  The ring blocks at most 7 of the 8 phases, so
+     * this scan terminates within one page; `worst` reserved the room. */
+    while (bn_arena_ring_holds(a, bn_arena_phase(off)))
+        off += BN_BIGINT_ARENA_GRID;
+    assert(!bn_arena_ring_holds(a, bn_arena_phase(off)));
+    c->bump = (uint32_t)((off + slot + (BN_BIGINT_ARENA_GRID - 1u)) &
+                         ~(size_t)(BN_BIGINT_ARENA_GRID - 1u));
+    return (WBigint *)((uint8_t *)c + off);
+}
+
+static WBigint *bigint_arena_take(uint32_t alloc_cap, int zero_limbs) {
+    WBigintArena *a = &bigint_arena_state;
+    WBigint *b = bn_arena_freelist_pop(a, alloc_cap);
+    if (!b) {
+        bn_arena_drain_remote(a);
+        b = bn_arena_freelist_pop(a, alloc_cap);
+    }
+    if (b) {
+        if (zero_limbs)
+            memset(b->limbs, 0, (size_t)alloc_cap * sizeof(uint64_t));
+    } else {
+        b = bn_arena_bump(a, alloc_cap);
+        if (!b) return NULL; /* arena exhausted: caller falls back to malloc */
+        /* bump memory is virgin mmap: already zero, keep the pages clean */
+    }
+    BnArenaChunk *c = bn_arena_chunk_of(b);
+    atomic_fetch_add_explicit(&c->outstanding, 1u, memory_order_relaxed);
+    bn_arena_ring_push(
+        a, bn_arena_phase((uint32_t)((uintptr_t)b - (uintptr_t)c)));
+    b->type = W_TYPE_BIGINT;
+    b->shared = 0;
+    b->_pad[0] = BN_BIGINT_SRC_ARENA;
+    b->size = 0;
+    b->cap = alloc_cap;
+    return b;
+}
+
+static void bigint_arena_free(WBigint *b) {
+    BnArenaChunk *c = bn_arena_chunk_of(b);
+    WBigintArena *a = &bigint_arena_state;
+    b->type = 0;
+    if (atomic_load_explicit(&c->owner, memory_order_acquire) ==
+        (uintptr_t)a) {
+        int bucket = bigint_pool_bucket(b->cap);
+        *(WBigint **)&b->limbs[0] = a->free_head[bucket];
+        a->free_head[bucket] = b;
+        atomic_fetch_sub_explicit(&c->outstanding, 1u, memory_order_relaxed);
+        return;
+    }
+    /* Cross-thread (or post-teardown) release: hand the slot to the owning
+     * chunk's MPSC stack; the owner drains it on its next freelist miss. */
+    uintptr_t head = atomic_load_explicit(&c->remote_free,
+                                          memory_order_relaxed);
+    do {
+        *(uintptr_t *)&b->limbs[0] = head;
+    } while (!atomic_compare_exchange_weak_explicit(
+        &c->remote_free, &head, (uintptr_t)b,
+        memory_order_release, memory_order_relaxed));
+    if (atomic_fetch_sub(&c->outstanding, 1u) == 1u) {
+        /* Possibly the last slot of an orphaned chunk (seq_cst, see the
+         * owner-handshake comment on BnArenaChunk). */
+        if (atomic_load(&c->owner) == 0 &&
+            atomic_exchange(&c->claimed, 1u) == 0u)
+            munmap((void *)c, BN_BIGINT_ARENA_CHUNK_BYTES);
+    }
+}
+
+static void bigint_arena_release_thread(void) {
+    WBigintArena *a = &bigint_arena_state;
+    bn_arena_drain_remote(a);
+    memset(a->free_head, 0, sizeof(a->free_head));
+    a->ring_pos = 0;
+    a->ring_count = 0;
+    BnArenaChunk *c = a->chunks;
+    a->chunks = NULL;
+    a->reserved_bytes = 0;
+    while (c) {
+        BnArenaChunk *next = c->next;
+        atomic_store(&c->owner, (uintptr_t)0);       /* seq_cst handshake */
+        if (atomic_load(&c->outstanding) == 0u &&
+            atomic_exchange(&c->claimed, 1u) == 0u)
+            munmap((void *)c, BN_BIGINT_ARENA_CHUNK_BYTES);
+        /* else: escaped values still reference the chunk; the release that
+         * drops `outstanding` to zero unmaps it (bigint_arena_free). */
+        c = next;
+    }
+}
+
+#endif /* BN_BIGINT_ARENA_ACTIVE */
+
+/* Arena occupancy probe for RSS/fragmentation instrumentation.  Reports the
+ * calling thread's arena: bytes reserved in chunks, bytes consumed by the
+ * bump placers, and slots currently handed out.  All zero when the arena is
+ * compiled out. */
+void w_bigint_arena_stats(uint64_t *reserved, uint64_t *bumped,
+                          uint64_t *outstanding) {
+    uint64_t r = 0, bm = 0, o = 0;
+#if BN_BIGINT_ARENA_ACTIVE
+    WBigintArena *a = &bigint_arena_state;
+    r = a->reserved_bytes;
+    for (BnArenaChunk *c = a->chunks; c; c = c->next) {
+        bm += c->bump;
+        o += atomic_load_explicit(&c->outstanding, memory_order_relaxed);
+    }
+#endif
+    if (reserved) *reserved = r;
+    if (bumped) *bumped = bm;
+    if (outstanding) *outstanding = o;
 }
 
 /* BigInt has a dedicated top-level tag (v4); the header type byte is used
@@ -16164,7 +16526,7 @@ static int w_p10c_mu_build(int j) {
         mu = (uint64_t *)malloc((size_t)(n + 1) * sizeof(uint64_t));
         if (mu) memcpy(mu, q->limbs, (size_t)(n + 1) * sizeof(uint64_t));
     }
-    free(q);
+    bigint_backing_free(q);
     w_p10c_mu[j] = mu;
     return mu != NULL;
 }
@@ -16260,7 +16622,7 @@ static int w_dec_divmod_pj(const uint64_t *u, int32_t ulen, int j,
     while (rl > 0 && rb->limbs[rl - 1] == 0) rl--;
     int guard = 0;
     while (mag_cmp(rb->limbs, rl, d, n) >= 0) {
-        if (++guard > 5) { free(qb); free(rb); return 0; }  /* can't happen */
+        if (++guard > 5) { bigint_backing_free(qb); bigint_backing_free(rb); return 0; }  /* can't happen */
         uint64_t bw = bn_sub_n(rb->limbs, rb->limbs, d, n);
         if (rl > n) rb->limbs[n] -= bw;
         while (rl > 0 && rb->limbs[rl - 1] == 0) rl--;
@@ -16320,7 +16682,7 @@ static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t 
         hd = w_dec_write(q->limbs, q->size, dst, 0);
     }
     w_dec_write(r->limbs, r->size, dst + hd, D);
-    free(q); free(r);
+    bigint_backing_free(q); bigint_backing_free(r);
     return hd + D;
 }
 
@@ -46922,7 +47284,7 @@ static void w_prime_modctx_init_cap(WPrimeModCtx *ctx, WValue modulus, int32_t m
     WBigint *mu;
     WBigint *r2rem = NULL;      /* b^2k mod n = R² mod n — Montgomery's constant */
     mag_divmod(b2k->limbs, b2k->size, mlimbs, mlen, &mu, &r2rem);
-    free(b2k);
+    bigint_backing_free(b2k);
     ctx->mu = bigint_normalize(mu);
 
     /* work-buffer layout (see w_prime_modctx_reduce_limbs), sized to the ACTUAL
@@ -46966,7 +47328,7 @@ static void w_prime_modctx_init_cap(WPrimeModCtx *ctx, WValue modulus, int32_t m
         ctx->nm1mb->size = w_prime_sub_mag_inplace(ctx->nm1mb->limbs, mlen,
                                                    ctx->onemb->limbs, ol);
     } else {
-        free(r2rem);
+        bigint_backing_free(r2rem);
         uint64_t onelimb = 1;
         ctx->onemb->limbs[0] = 1;
         ctx->onemb->size = 1;
@@ -46983,16 +47345,19 @@ static void w_prime_modctx_fini(WPrimeModCtx *ctx) {
     free(ctx->work);
     ctx->work = NULL;
     for (int i = 0; i < 3; i++) {
-        if (ctx->slot[i]) { free(ctx->slot[i]); ctx->slot[i] = NULL; }
+        if (ctx->slot[i]) {
+            bigint_backing_free(ctx->slot[i]);
+            ctx->slot[i] = NULL;
+        }
     }
-    if (ctx->r2b)  { free(ctx->r2b);  ctx->r2b  = NULL; }
-    if (ctx->onemb) { free(ctx->onemb); ctx->onemb = NULL; }
-    if (ctx->nm1mb) { free(ctx->nm1mb); ctx->nm1mb = NULL; }
+    if (ctx->r2b)  { bigint_backing_free(ctx->r2b);  ctx->r2b  = NULL; }
+    if (ctx->onemb) { bigint_backing_free(ctx->onemb); ctx->onemb = NULL; }
+    if (ctx->nm1mb) { bigint_backing_free(ctx->nm1mb); ctx->nm1mb = NULL; }
     /* Both values are minted by w_prime_modctx_init (the quotient from
      * b^(2k)/n and b^(k+1), respectively).  They are not borrowed from the
      * caller and were the two context-owned allocations missing above. */
-    if (w_is_bigint(ctx->mu)) free(w_as_bigint(ctx->mu));
-    if (w_is_bigint(ctx->bkp1)) free(w_as_bigint(ctx->bkp1));
+    if (w_is_bigint(ctx->mu)) bigint_backing_free(w_as_bigint(ctx->mu));
+    if (w_is_bigint(ctx->bkp1)) bigint_backing_free(w_as_bigint(ctx->bkp1));
     ctx->mu = W_NIL;
     ctx->bkp1 = W_NIL;
 }
@@ -47674,7 +48039,10 @@ static int w_prime_lucas_strong_ctx(WValue n, WPrimeModCtx *ctx) {
         for (int32_t j = 0; j < ta; j++) Qkb->limbs[j] = sl[j];
         Qkb->size = ta;
     }
-    free(Ub); free(Vb); free(Qkb); free(Qb); free(Dvb); free(Tb); free(T2b);
+    bigint_backing_free(Ub); bigint_backing_free(Vb);
+    bigint_backing_free(Qkb); bigint_backing_free(Qb);
+    bigint_backing_free(Dvb); bigint_backing_free(Tb);
+    bigint_backing_free(T2b);
     return ok;
 }
 
@@ -47724,9 +48092,9 @@ static int w_prime_test_bigint(WValue n) {
             xbuf->size = w_prime_modctx_mul_bigint_into(xbuf, &modctx, xbuf, xbuf);
             if (w_prime_domain_eq(xbuf, modctx.nm1mb)) { composite = 0; break; }
         }
-        if (composite) { free(xbuf); free(basebuf); w_prime_modctx_fini(&modctx); return 0; }
+        if (composite) { bigint_backing_free(xbuf); bigint_backing_free(basebuf); w_prime_modctx_fini(&modctx); return 0; }
     }
-    free(xbuf); free(basebuf);
+    bigint_backing_free(xbuf); bigint_backing_free(basebuf);
     /* All MR bases passed (probable prime — the Sinclair set is proven only
      * below 2^64). Confirm with a strong Lucas test → Baillie-PSW: no known
      * counterexample at any size, but for n ≥ 2^64 this is a (deterministic,
@@ -47790,7 +48158,7 @@ static int w_prime_test_proth(WValue n) {
         base = w_prime_stable_copy(basebuf, w_prime_modctx_mul(&ctx, base, base));
     }
     int prime = (w_eq(x, ctx.nm1mv) == W_TRUE);
-    free(xbuf); free(basebuf);
+    bigint_backing_free(xbuf); bigint_backing_free(basebuf);
     w_prime_modctx_fini(&ctx);
     return prime;
 }
@@ -48067,7 +48435,7 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
         }
         free(arena);
         w_prime_modctx_fini(&ctx);
-        if (mposb) free(mposb);
+        if (mposb) bigint_backing_free(mposb);
         return result;
     }
 
@@ -48149,11 +48517,11 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
         result = bigint_normalize(r);
     }
 
-    free(xbuf);
-    free(gg);
-    for (int32_t t = 0; t < tcount; t++) free(tbl[t]);
+    bigint_backing_free(xbuf);
+    bigint_backing_free(gg);
+    for (int32_t t = 0; t < tcount; t++) bigint_backing_free(tbl[t]);
     w_prime_modctx_fini(&ctx);
-    if (mposb) free(mposb);
+    if (mposb) bigint_backing_free(mposb);
     return result;
 }
 
@@ -51223,6 +51591,7 @@ static void w_thread_mark_stopped(void *arg) {
      * them until process shutdown.
      */
     bigint_pool_release_thread();
+    bigint_arena_release_thread();
     bn_ws_release_thread();
     free(w_ssa_ws);
     w_ssa_ws = NULL;

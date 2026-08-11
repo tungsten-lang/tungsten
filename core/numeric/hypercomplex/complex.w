@@ -60,6 +60,12 @@
   -> imag
     components[1]
 
+  # Dimension-2 specialization of Hypercomplex#abs2. Besides avoiding the
+  # generic Enumerable pipeline, this keeps reciprocal and division on the
+  # same four scalar loads used by the optimized Complex arithmetic below.
+  -> abs2
+    real * real + imag * imag
+
   # Scaled modulus avoids overflow and destructive underflow in the inherited
   # naive sum-of-squares norm.
   -> abs
@@ -212,6 +218,12 @@
     if logarithm.scalar_like?(exponent)
       return logarithm.scale(exponent).complex_exp
     (logarithm * exponent).complex_exp
+
+  # Keep the public representation independent of the compiler's internal
+  # specialization name (Complex$f64, Complex$f32, ...), matching bare
+  # Complex and the interpreter's generic-erased class table.
+  -> to_s
+    "Complex(" + real.to_s + ", " + imag.to_s + ")"
 
 # Bare Complex — the lightweight wvalue scalar (Erik 8/8: "Complex.new for
 # the wvalue vs Complex<T>.new for the array-based ones"). Two plain ivar

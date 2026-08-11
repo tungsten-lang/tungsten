@@ -57,6 +57,7 @@ check("complex.euler", complex_close?(euler, Complex<f64>.real(~-1.0)))
 
 z = Complex<f64>.new([~0.4, ~-0.3])
 check("complex.to_s", z.to_s.starts_with?("Complex("))
+check("complex.abs2", close?(z.abs2, ~0.25, ~2.0e-15))
 check("complex.exp.log", complex_close?(z.exp.log, z, ~2.0e-13))
 
 negative_root = Complex<f64>.real(~-4.0).sqrt

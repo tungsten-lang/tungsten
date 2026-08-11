@@ -10,9 +10,9 @@
 #
 # Run: `bin/tungsten -o /tmp/vd spec/numeric/vector_spec.w && /tmp/vd`.
 #
-# Not exercised (separate, unrelated gaps): `length` needs `sqrt` on a
-# machine `## f64` (unimplemented, like `.to_i`); `.sum` on a plain float
-# array mis-sums via the fused-pipeline path. Use `length_squared` / `dot`.
+# `length_squared` intentionally reuses the indexed `dot` kernel. Besides
+# avoiding a pipeline temporary, this keeps typed f64 components in their raw
+# representation through the accumulation; `length` then takes its square root.
 
 -> check(name, got, want)
   if got == want
@@ -36,8 +36,8 @@ check("vec3.dot.i64", vi.dot(vi), 14)
 check("vec2.length_squared", v2.length_squared == (25.0 ## f64), true)
 check("vec2.length", v2.length == (5.0 ## f64), true)
 
-# -- float / int array .sum (boxed-array sum must accumulate via w_add). --
-check("array.sum.float", [1.0, 2.0, 3.0].sum == (6.0 ## f64), true)
+# -- f64 / int array .sum (boxed-array sum must accumulate via w_add). --
+check("array.sum.float", ([1.0, 2.0, 3.0] ## f64[3]).sum == (6.0 ## f64), true)
 check("array.sum.int", [1, 2, 3, 4].sum, 10)
 
 # -- to_i / floor on float-ish scalars. --

@@ -24,11 +24,11 @@
 
   # Squared L2 length: Σ cᵢ². Exact for integer T.
   -> length_squared
-    components/sq:sum
+    dot(self)
 
   # L2 length: √(Σ cᵢ²).
   -> length
-    components.pythagorean
+    length_squared.sqrt
 
   -> magnitude
     length

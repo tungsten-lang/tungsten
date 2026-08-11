@@ -4,6 +4,16 @@ unsetopt BG_NICE
 zmodload zsh/datetime
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+. "$ROOT/bin/commands/system_deps.sh"
+ZSTD_LDFLAGS="${TUNGSTEN_ZSTD_LDFLAGS:-$(pkg-config --libs libzstd 2>/dev/null || true)}"
+if [ -z "$ZSTD_LDFLAGS" ]; then
+  homebrew_prefix="$(tungsten_homebrew_prefix || true)"
+  if [ -n "$homebrew_prefix" ] && { [ -f "$homebrew_prefix/lib/libzstd.a" ] || [ -f "$homebrew_prefix/lib/libzstd.dylib" ]; }; then
+    ZSTD_LDFLAGS="-L$homebrew_prefix/lib -lzstd"
+  else
+    ZSTD_LDFLAGS="-lzstd"
+  fi
+fi
 BUILD="$ROOT/implementations/spinel/build"
 STAGE0="$BUILD/tungsten-stage0"
 STAGE0_FINGERPRINT="$BUILD/tungsten-stage0.fingerprint"
@@ -191,7 +201,7 @@ else
   fi
   if ! clang ${(z)TUNGSTEN_SPINEL_STAGE1_CLANG_OPT} -DNDEBUG ${=TUNGSTEN_MARCH_ARGS} \
       -Wl,-dead_strip -Wl,-stack_size,0x8000000 \
-      "$RUNTIME_ARCHIVE" "$STAGE1_LL" -L/opt/homebrew/lib -lzstd -o "$STAGE1" \
+      "$RUNTIME_ARCHIVE" "$STAGE1_LL" ${=ZSTD_LDFLAGS} -o "$STAGE1" \
       >>"$STAGE1_BUILD_LOG" 2>&1; then
     cat "$STAGE1_BUILD_LOG"
     echo "failed to link stage 1 from $STAGE1_LL — see $STAGE1_BUILD_LOG" >&2

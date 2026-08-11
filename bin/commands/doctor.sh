@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 . "$ROOT/bin/commands/config.sh"
+. "$ROOT/bin/commands/system_deps.sh"
 tungsten_load_build_config
 VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
 COMPILER="$ROOT/bin/tungsten-compiler"
@@ -54,10 +55,13 @@ clang_major() {
 }
 
 llvm22_candidate() {
-  local candidate major
+  local candidate major llvm_prefix llvm22_prefix
+  llvm_prefix="$(tungsten_homebrew_prefix llvm || true)"
+  llvm22_prefix="$(tungsten_homebrew_prefix llvm@22 || true)"
   for candidate in \
     "${TUNGSTEN_CC:-}" clang-22 \
-    /opt/homebrew/opt/llvm/bin/clang /usr/local/opt/llvm/bin/clang; do
+    "${llvm_prefix:+$llvm_prefix/bin/clang}" \
+    "${llvm22_prefix:+$llvm22_prefix/bin/clang}"; do
     [ -n "$candidate" ] || continue
     command -v "$candidate" >/dev/null 2>&1 || continue
     major="$(clang_major "$candidate")"
@@ -120,6 +124,13 @@ printf '%s\n\n' "$(c '\033[1m\033[33m' '✶ Tungsten Doctor')"
 
 check "Tungsten" "$VERSION" 1
 
+CACHE="$ROOT/build/cache"
+if mkdir -p "$CACHE" 2>/dev/null && [ -d "$CACHE" ] && [ -w "$CACHE" ]; then
+  check "build cache" "$CACHE" 1
+else
+  check "build cache" "cannot create or write $CACHE" 0
+fi
+
 # Missing stage-1 is expected on a fresh clone; bootstrap builds it.
 # Report status but never fail doctor for this alone.
 if [ -x "$COMPILER" ]; then
@@ -179,8 +190,9 @@ else
 fi
 
 zstd_cflags="$(pkg-config --cflags libzstd 2>/dev/null || true)"
-if [ -z "$zstd_cflags" ] && [ -f /opt/homebrew/include/zstd.h ]; then
-  zstd_cflags="-I/opt/homebrew/include"
+homebrew_prefix="$(tungsten_homebrew_prefix || true)"
+if [ -z "$zstd_cflags" ] && [ -n "$homebrew_prefix" ] && [ -f "$homebrew_prefix/include/zstd.h" ]; then
+  zstd_cflags="-I$homebrew_prefix/include"
 fi
 if printf '#include <zstd.h>\n' | "$DOCTOR_CC" $zstd_cflags -E -x c - >/dev/null 2>&1; then
   check "libzstd (zstd.h)" "ok" 1

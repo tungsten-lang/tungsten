@@ -13,6 +13,62 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  c-vm-sanitizers:
+    name: C VM sanitizers (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            runner: macos-15
+            full_self_host: "0"
+          - name: Linux x86_64
+            runner: ubuntu-24.04
+            full_self_host: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux toolchain
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y
+          clang llvm lld pkg-config libonig-dev libzstd-dev
+
+      - name: Install macOS runtime dependencies
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install llvm oniguruma zstd
+
+      - name: Exercise empty-stack transition under ASan and UBSan
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          san_flags="-O2 -march=native -mtune=native -g -DNDEBUG -std=c11 -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all"
+          make -C implementations/c BUILD_DIR=build/sanitize CC=clang CFLAGS="$san_flags"
+          export TUNGSTEN_LEX64_TABLE="$PWD/languages/tungsten/tungsten.lex64"
+          implementations/c/build/sanitize/tungsten-c \
+            implementations/c/tests/operand_stack_empty_transition.w |
+            diff -u implementations/c/tests/operand_stack_empty_transition.expected -
+          implementations/c/build/sanitize/tungsten-c \
+            implementations/c/tests/smoke.w
+
+      - name: Exercise x86_64 stage-1 self-host with sanitized C VM
+        if: matrix.full_self_host == '1'
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          CFLAGS: -O2 -march=native -mtune=native -g -DNDEBUG -std=c11 -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+        run: |
+          # Bootstrap chains into the fixed-point build; the build orchestrator
+          # inherits CFLAGS and rebuilds stage 0 with the sanitizer ABI.
+          bin/tungsten bootstrap --force --no-bits
+
   test:
     name: rake (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
@@ -23,8 +79,14 @@ jobs:
         include:
           - name: macOS arm64
             runner: macos-15
+            metal_specs: "1"
+            repl_specs: "1"
+            api_specs: "0"
           - name: Linux x86_64
             runner: ubuntu-latest
+            metal_specs: "0"
+            repl_specs: "0"
+            api_specs: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -58,4 +120,12 @@ jobs:
       # default non-hardware suite from the repository root.
       - name: rake
         working-directory: .
+        env:
+          # Metal requires Apple's compiler/runtime and a macOS runner. The PTY
+          # contract shares that interactive lane; the hermetic API contract
+          # runs on Linux so both platform legs add coverage without rerunning
+          # the ordinary suite in separate jobs.
+          RUN_METAL_SPECS: ${{ matrix.metal_specs }}
+          RUN_REPL_SPECS: ${{ matrix.repl_specs }}
+          RUN_API_SPECS: ${{ matrix.api_specs }}
         run: bundle exec rake

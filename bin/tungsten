@@ -107,6 +107,10 @@ case "$1" in
     shift
     exec bash "$ROOT/bin/commands/bootstrap.sh" "$@"
     ;;
+  release)
+    shift
+    exec bash "$ROOT/bin/commands/release.sh" "$@"
+    ;;
   # build: the Tungsten orchestrator (bin/commands/build.w), compiled on
   # demand like tungsten.wc. Needs an existing compiler — a fresh clone
   # bootstraps first. --ruby/--spinel remain developer options inside it.
@@ -470,12 +474,17 @@ if [ "$1" = "--interpret" ]; then
   exec "$RUBY" "$RUBY_CLI" --ruby "$@"
 fi
 
-# `--ast` / `--lex` / `--tags` are file-inspection modes implemented by the
+# `--check` / `-c` / `--ast` / `--lex` / `--tags` are frontend modes
+# implemented by the compiled stage-2 compiler. Route them straight to that
+# compiler so checking recognizes exactly the language that can be executed;
+# the Ruby parser is only the fresh-clone fallback.
+#
+# The remaining file-inspection modes are also implemented by the
 # compiled frontend (compiler/tungsten.w). Route them straight to the compiled
 # binary — the Ruby CLI's handling is stale. Falls back to Ruby only if the
 # compiled binary hasn't been built yet.
 case "$1" in
-  --ast|--lex|--tags)
+  -c|--check|--ast|--lex|--tags)
     if [ -x "$COMPILER" ]; then
       exec "$COMPILER" "$@"
     else

@@ -69,10 +69,16 @@ check("u64.trailing.high_bit", BitOps.trailing_zeros_u64(0x8000000000000000), 63
 check("u64.trailing.full", BitOps.trailing_zeros_u64(0xFFFFFFFFFFFFFFFF), 0)
 
 # Deterministic differential coverage across sparse, dense, and mixed words.
+# Native runs keep the 200,000-word stress sweep; the tree-walking parity lane
+# samples 2,000 words. The latter exercises the same recurrences and edge
+# families without spending most of the default suite in interpreter loops.
+iterations = 100_000
+if env("TUNGSTEN_INTERPRETED_SPEC") == "1"
+  iterations = 1_000
 x32_words = u32[1]
 x32_words[0] = 0x243F6A88
 i = 0
-while i < 100_000
+while i < iterations
   x32_words[0] = x32_words[0] * 1664525 + 1013904223
   x32 = x32_words[0] ## u32
   check("u32.differential." + i.to_s(), BitOps.count_ones_u32(x32), reference_u32(x32))
@@ -82,7 +88,7 @@ while i < 100_000
 x64_words = u64[1]
 x64_words[0] = 0x243F6A8885A308D3
 i = 0
-while i < 100_000
+while i < iterations
   x64_words[0] = x64_words[0] * 6364136223846793005 + 1442695040888963407
   x64 = x64_words[0] ## u64
   check("u64.differential." + i.to_s(), BitOps.count_ones_u64(x64), reference_u64(x64))

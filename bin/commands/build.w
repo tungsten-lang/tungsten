@@ -33,6 +33,20 @@ BUILD_CACHE_DIR = ROOT + "/build/cache"
 -> shq(s)
   "'" + s.gsub("'", "'\\''") + "'"
 
+build_homebrew_prefix_memo = {}
+
+-> build_homebrew_prefix(formula)
+  key = formula == "" ? :root : formula.to_sym()
+  cached = build_homebrew_prefix_memo[key]
+  if cached != nil
+    return cached
+  cmd = "brew --prefix"
+  if formula != ""
+    cmd = cmd + " " + shq(formula)
+  prefix = capture(cmd + " 2>/dev/null").strip
+  build_homebrew_prefix_memo[key] = prefix
+  prefix
+
 # substring test via slice scan — portable across core versions (contains?
 # is a recent alias; a fresh stage-1 compiler may carry an older core).
 -> str_has?(s, sub)
@@ -468,9 +482,12 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
 
 -> zstd_probe_cflags
   out = capture("pkg-config --cflags libzstd 2>/dev/null").strip
-  if out == ""
-    return "-I/opt/homebrew/include"
-  out
+  if out != ""
+    return out
+  prefix = build_homebrew_prefix("")
+  if prefix != "" && regular_file?(prefix + "/include/zstd.h")
+    return "-I" + prefix + "/include"
+  ""
 
 os_name = capture("uname -s").strip
 IS_DARWIN = os_name == "Darwin"
@@ -489,7 +506,7 @@ else
     pf_cpu = "native"
   if !cpu_supported?(pf_cpu, pf_cc)
     preflight_missing_names.push("configured CPU " + pf_cpu)
-    preflight_missing_hints.push(IS_LINUX ? "install LLVM/Clang 22+ or choose a supported \[build] cpu" : "brew install llvm; set \[build] cc = /opt/homebrew/opt/llvm/bin/clang")
+    preflight_missing_hints.push(IS_LINUX ? "install LLVM/Clang 22+ or choose a supported \[build] cpu" : "brew install llvm; set \[build] cc to $(brew --prefix llvm)/bin/clang")
 if !tool_on_path?("make")
   preflight_missing_names.push("make")
   preflight_missing_hints.push(IS_LINUX ? "sudo apt-get install build-essential" : "xcode-select --install")
@@ -546,6 +563,7 @@ use_spinel_bootstrap = spinel_requested
 use_c_bootstrap = !ruby_bootstrap_requested && !spinel_requested
 
 make_dirs(BUILD_CACHE_DIR)
+sh_ok("bash " + shq(ROOT + "/bin/commands/cache_gc.sh") + " " + shq(BUILD_CACHE_DIR))
 
 # Per-invocation scratch root (PID-scoped: concurrent builds must not
 # clobber each other's in-flight stage output or emitted .ll).
@@ -671,6 +689,35 @@ if fast_mode
 STAGE_FLAGS_CMD = flags_to_cmd(stage_flags)
 PROGRAM_FLAGS_CMD = flags_to_cmd(program_flags)
 
+# A fresh-clone bootstrap has already paid for the host runtime, C VM, and
+# canonical stage-1 compiler before it can compile this orchestrator. Carry
+# those immutable artifacts across the exec boundary so the full build starts
+# at stage 2 instead of rebuilding the same three phases. The handoff is
+# private to one bootstrap invocation and is accepted only when its profile
+# exactly matches this build's resolved host profile.
+handoff_path = env_or_empty("TUNGSTEN_BOOTSTRAP_HANDOFF")
+handoff_runtime = ""
+handoff_stage0 = ""
+handoff_stage1 = ""
+handoff_stage1_ll = ""
+handoff_stage1_sidemap = ""
+handoff_profile = host_cpu_name + "|" + (release_mode ? "1" : "0") + "|" + (debug_enabled ? "1" : "0") + "|" + (fast_mode ? "1" : "0") + "|" + (portable_mode ? "1" : "0") + "|" + target_triple
+if handoff_path != ""
+  if !handoff_path.starts_with?("/")
+    handoff_path = ROOT + "/" + handoff_path
+  handoff_text = read_file(handoff_path)
+  if handoff_text != nil
+    handoff_lines = handoff_text.split("\n")
+    if handoff_lines.size >= 7 && handoff_lines[0] == "tungsten-bootstrap-handoff-v1" && handoff_lines[1] == handoff_profile
+      handoff_stage0 = handoff_lines[2]
+      handoff_runtime = handoff_lines[3]
+      handoff_stage1 = handoff_lines[4]
+      handoff_stage1_ll = handoff_lines[5]
+      if handoff_lines[6] != "-"
+        handoff_stage1_sidemap = handoff_lines[6]
+    else
+      eputs(DIM + "ignoring incompatible bootstrap handoff" + RESET)
+
 # ── Toolchain identity material ─────────────────────────────────
 
 -> ambient_toolchain_identity
@@ -698,9 +745,11 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
 
 -> marker_fingerprint(marker_paths)
   common = []
-  common.push("/opt/homebrew/include")
-  common.push("/opt/homebrew/lib")
-  common.push("/opt/homebrew/lib/pkgconfig")
+  brew = build_homebrew_prefix("")
+  if brew != ""
+    common.push(brew + "/include")
+    common.push(brew + "/lib")
+    common.push(brew + "/lib/pkgconfig")
   common.push("/usr/local/include")
   common.push("/usr/local/lib")
   common.push("/usr/local/lib/pkgconfig")
@@ -753,22 +802,24 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
 # onig probe: value lines are [cflags, libs] (space-joined)
 -> probe_onig
   markers = []
-  markers.push("/opt/homebrew/include/oniguruma.h")
-  markers.push("/opt/homebrew/lib/libonig.dylib")
-  markers.push("/opt/homebrew/lib/libonig.a")
+  brew = build_homebrew_prefix("")
+  if brew != ""
+    markers.push(brew + "/include/oniguruma.h")
+    markers.push(brew + "/lib/libonig.dylib")
+    markers.push(brew + "/lib/libonig.a")
   fp = marker_fingerprint(markers)
   cached = cached_probe_read("onig", fp)
   if cached != nil && cached.size >= 2
     return cached
   cflags = split_ws(capture("pkg-config --cflags oniguruma 2>/dev/null"))
   libs = split_ws(capture("pkg-config --libs oniguruma 2>/dev/null"))
-  if cflags.size == 0 && regular_file?("/opt/homebrew/include/oniguruma.h")
+  if cflags.size == 0 && brew != "" && regular_file?(brew + "/include/oniguruma.h")
     cflags = []
-    cflags.push("-I/opt/homebrew/include")
+    cflags.push("-I" + brew + "/include")
   if libs.size == 0
-    if regular_file?("/opt/homebrew/lib/libonig.dylib") || regular_file?("/opt/homebrew/lib/libonig.a")
+    if brew != "" && (regular_file?(brew + "/lib/libonig.dylib") || regular_file?(brew + "/lib/libonig.a"))
       libs = []
-      libs.push("-L/opt/homebrew/lib")
+      libs.push("-L" + brew + "/lib")
       libs.push("-lonig")
     elsif cflags.size > 0
       libs = []
@@ -783,22 +834,24 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
 
 -> probe_zstd
   markers = []
-  markers.push("/opt/homebrew/include/zstd.h")
-  markers.push("/opt/homebrew/lib/libzstd.dylib")
-  markers.push("/opt/homebrew/lib/libzstd.a")
+  brew = build_homebrew_prefix("")
+  if brew != ""
+    markers.push(brew + "/include/zstd.h")
+    markers.push(brew + "/lib/libzstd.dylib")
+    markers.push(brew + "/lib/libzstd.a")
   fp = marker_fingerprint(markers)
   cached = cached_probe_read("zstd", fp)
   if cached != nil && cached.size >= 2
     return cached
   cflags = split_ws(capture("pkg-config --cflags libzstd 2>/dev/null"))
   libs = split_ws(capture("pkg-config --libs libzstd 2>/dev/null"))
-  if cflags.size == 0 && regular_file?("/opt/homebrew/include/zstd.h")
+  if cflags.size == 0 && brew != "" && regular_file?(brew + "/include/zstd.h")
     cflags = []
-    cflags.push("-I/opt/homebrew/include")
+    cflags.push("-I" + brew + "/include")
   if libs.size == 0
-    if regular_file?("/opt/homebrew/lib/libzstd.dylib") || regular_file?("/opt/homebrew/lib/libzstd.a")
+    if brew != "" && (regular_file?(brew + "/lib/libzstd.dylib") || regular_file?(brew + "/lib/libzstd.a"))
       libs = []
-      libs.push("-L/opt/homebrew/lib")
+      libs.push("-L" + brew + "/lib")
       libs.push("-lzstd")
     elsif cflags.size > 0
       libs = []
@@ -816,13 +869,17 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
 
 -> probe_openssl_prefix
   markers = []
-  markers.push("/opt/homebrew/opt/openssl@3")
-  markers.push("/opt/homebrew/bin/brew")
+  brew = build_homebrew_prefix("")
+  formula_prefix = build_homebrew_prefix("openssl@3")
+  if brew != ""
+    markers.push(brew + "/bin/brew")
+  if formula_prefix != ""
+    markers.push(formula_prefix)
   fp = marker_fingerprint(markers)
   cached = cached_probe_read("openssl_prefix", fp)
   if cached != nil && cached.size >= 1
     return cached[0]
-  prefix = capture("brew --prefix openssl@3 2>/dev/null").strip
+  prefix = formula_prefix
   value = []
   value.push(prefix)
   cached_probe_write("openssl_prefix", fp, value)
@@ -856,14 +913,12 @@ if IS_DARWIN
   runtime_srcs.push("hid_bridge.m")
 
 openssl_prefix = probe_openssl_prefix()
-if openssl_prefix == ""
-  openssl_prefix = "/opt/homebrew/opt/openssl@3"
 tls_flags = []
 if tls_enabled && regular_file?(openssl_prefix + "/include/openssl/ssl.h")
   tls_flags.push("-DTUNGSTEN_TLS")
   tls_flags.push("-I" + openssl_prefix + "/include")
 
-nghttp2_prefix = "/opt/homebrew/opt/libnghttp2"
+nghttp2_prefix = build_homebrew_prefix("libnghttp2")
 http2_flags = []
 http2_libs = []
 if http2_enabled && regular_file?(nghttp2_prefix + "/include/nghttp2/nghttp2.h")
@@ -973,6 +1028,9 @@ runtime_dependency_files = filtered_deps
 runtime_deps_digest = digest_file_list(runtime_dependency_files)
 runtime_compile_key = Digest.sha256(runtime_cache_schema + "\n" + runtime_deps_digest + "\n" + join_tab(cc_flags) + "\n" + join_tab(runtime_objc_flags) + "\n" + PLATFORM + "\n" + tool_identity(runtime_cc) + "\n" + tool_identity(runtime_ar) + "\n" + AMBIENT_TOOLCHAIN)
 runtime_archive = BUILD_CACHE_DIR + "/runtime-" + runtime_compile_key + ".a"
+runtime_handoff_ready = handoff_runtime != "" && regular_file?(handoff_runtime)
+if runtime_handoff_ready
+  runtime_archive = handoff_runtime
 
 runtime_env_contents = "runtime-env-v1\n" + zstd_cflags.join(" ") + "\n" + zstd_libs.join(" ") + "\n" + onig_cflags.join(" ") + "\n" + onig_libs.join(" ") + "\n" + (IS_DARWIN ? "Darwin" : (IS_LINUX ? "Linux" : "")) + "\n" + runtime_cc + "\n" + runtime_ar + "\n" + runtime_ranlib + "\n"
 runtime_env_manifest = BUILD_CACHE_DIR + "/runtime-env-" + Digest.sha256(runtime_env_contents) + ".env"
@@ -981,7 +1039,9 @@ runtime_current_manifest = BUILD_CACHE_DIR + "/runtime-current.manifest"
 if force_build
   << DIM + "--force: rebuilding all requested phases" + RESET
 
-if !force_build && regular_file?(runtime_archive)
+if runtime_handoff_ready
+  << "    " + GREEN + "REUSED" + RESET + " bootstrap runtime " + DIM + aligned_ms(clock_ms() - t_runtime_start) + RESET
+elsif !force_build && regular_file?(runtime_archive)
   << "    " + GREEN + "CACHED" + RESET + " runtime " + DIM + aligned_ms(clock_ms() - t_runtime_start) + RESET
 else
   runtime_tmp_dir = ccall("__w_mkdtemp", "tungsten-runtime")
@@ -1406,12 +1466,18 @@ if !bit_only
     c_stage1_sources_sha = tree_sha(compiler_source_paths)
     << ""
     << BOLD + "==> Stage 0: implementations/c VM" + RESET
-    vm = ensure_c_interp(force_build)
-    vm_verb = vm[0]
-    vm_elapsed = vm[1].to_i
-    c_interp_for_build = vm[2]
-    c_vm_key_for_build = vm[3]
-    verb_str = vm_verb == "cached" ? GREEN + "CACHED" + RESET : GREEN + "built " + RESET
+    if handoff_stage0 != "" && executable?(handoff_stage0)
+      vm_verb = "reused"
+      vm_elapsed = 0
+      c_interp_for_build = handoff_stage0
+      c_vm_key_for_build = "bootstrap-" + file_sha(handoff_stage0)
+    else
+      vm = ensure_c_interp(force_build)
+      vm_verb = vm[0]
+      vm_elapsed = vm[1].to_i
+      c_interp_for_build = vm[2]
+      c_vm_key_for_build = vm[3]
+    verb_str = vm_verb == "cached" ? GREEN + "CACHED" + RESET : (vm_verb == "reused" ? GREEN + "REUSED" + RESET : GREEN + "built " + RESET)
     << "    " + verb_str + " stage0 " + DIM + aligned_ms(vm_elapsed) + RESET
 
     requested_manifest = env_or_empty("TUNGSTEN_BUILD_MANIFEST")
@@ -1438,7 +1504,17 @@ if !bit_only
     c_stage1_cached = BUILD_CACHE_DIR + "/c-vm-stage1-" + c_stage1_identity
     c_stage1_cached_ll = c_stage1_cached + ".ll"
     c_stage1_cached_sidemap = c_stage1_cached + ".sidemap"
-    if !force_build && executable?(c_stage1_cached) && regular_file?(c_stage1_cached_ll) && optional_cache_complete?(c_stage1_cached_sidemap)
+    stage1_handoff_ready = handoff_stage1 != "" && executable?(handoff_stage1) && handoff_stage1_ll != "" && regular_file?(handoff_stage1_ll)
+    if stage1_handoff_ready
+      atomic_copy(handoff_stage1, stage1)
+      atomic_copy(handoff_stage1_ll, stage1_ll)
+      if handoff_stage1_sidemap != "" && regular_file?(handoff_stage1_sidemap)
+        atomic_copy(handoff_stage1_sidemap, stage1 + ".sidemap")
+      else
+        sh_ok("rm -f " + shq(stage1 + ".sidemap"))
+      t1 = clock_ms()
+      << "    " + GREEN + "REUSED" + RESET + " bootstrap stage1 " + DIM + aligned_ms(t1 - stage1_started) + RESET
+    elsif !force_build && executable?(c_stage1_cached) && regular_file?(c_stage1_cached_ll) && optional_cache_complete?(c_stage1_cached_sidemap)
       sh_ok("cp " + shq(c_stage1_cached) + " " + shq(stage1))
       sh_ok("cp " + shq(c_stage1_cached_ll) + " " + shq(stage1_ll))
       restore_optional_file(c_stage1_cached_sidemap, stage1 + ".sidemap")
@@ -1966,6 +2042,9 @@ else
         bits_skipped = bits_skipped + 1
 
 t6 = clock_ms()
+
+if handoff_path != ""
+  sh_ok("rm -f " + shq(handoff_path))
 
 # ── Summary ─────────────────────────────────────────────────────
 

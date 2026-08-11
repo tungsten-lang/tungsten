@@ -3,13 +3,17 @@ set -eu
 
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$DIR/../.." && pwd)
+. "$ROOT/bin/commands/system_deps.sh"
 RUNTIME="$ROOT/runtime"
 # Match the tungsten driver's compiler preference: a clang with LLVM >= 22
 # when installed (better vectorizer; same toolchain users' --release builds
 # get), else the system clang.
 if [ -z "${CC:-}" ]; then
   CC=clang
-  for cand in /opt/homebrew/opt/llvm/bin/clang /usr/local/opt/llvm/bin/clang; do
+  llvm_prefix="$(tungsten_homebrew_prefix llvm || true)"
+  llvm22_prefix="$(tungsten_homebrew_prefix llvm@22 || true)"
+  for cand in "${llvm_prefix:+$llvm_prefix/bin/clang}" "${llvm22_prefix:+$llvm22_prefix/bin/clang}"; do
+    [ -n "$cand" ] || continue
     if [ -x "$cand" ]; then
       case "$("$cand" --version 2>/dev/null | head -1)" in
         *"version 22."*|*"version 23."*|*"version 24."*) CC=$cand; break ;;

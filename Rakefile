@@ -18,18 +18,17 @@ def resolve_example_path(name)
   ].sort
 
   raise ArgumentError, "no example matched #{needle.inspect}" if candidates.empty?
-  raise ArgumentError, "multiple examples matched #{needle.inspect}: #{candidates.map { |path| path.delete_prefix("#{ROOT}/") }.join(', ')}" if candidates.length > 1
+  raise ArgumentError, "multiple examples matched #{needle.inspect}: #{candidates.map { |path| path.delete_prefix("#{ROOT}/") }.join(', ')}" if candidates.size > 1
 
   candidates.first.delete_prefix("#{ROOT}/")
 end
 
 def run_command(*cmd, chdir: nil, env: nil)
-  ok =
-    if chdir
-      Dir.chdir(chdir) { env ? system(env, *cmd) : system(*cmd) }
-    else
-      env ? system(env, *cmd) : system(*cmd)
-    end
+  # `test:remaining` is a multitask. Dir.chdir is process-global, so using it
+  # here lets concurrent tasks launch in one another's directories. Pass the
+  # working directory to the child process atomically instead.
+  options = chdir ? { chdir: chdir } : {}
+  ok = env ? system(env, *cmd, **options) : system(*cmd, **options)
 
   return if ok
 
@@ -38,7 +37,7 @@ def run_command(*cmd, chdir: nil, env: nil)
 end
 
 desc "Build compiler and run all test suites"
-task default: %i[check:all build:tungsten test:all]
+task default: %i[check:all build:tungsten test:all spec:bits]
 
 desc "Linux leg: assert we're on Linux, then run the full default suite"
 task :linux do
@@ -101,7 +100,30 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity c_vm]
+  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts cache_gc]
+
+  desc "Verify generated C-call ABI contracts and the WIRE consistency guard"
+  task :ccall_contracts do
+    run_command "ruby", File.join(ROOT, "scripts/verify-ccall-contracts.rb")
+    run_command File.join(ROOT, "bin/tungsten-compiler"), "run",
+                File.join(ROOT, "compiler/test/wire_call_contracts.w")
+    run_command File.join(ROOT, "bin/tungsten-compiler"), "run",
+                File.join(ROOT, "compiler/test/content_hash_symbol_collision.w")
+    run_command File.join(ROOT, "bin/tungsten-compiler"), "run",
+                File.join(ROOT, "compiler/test/portable_asm_lowering.w")
+    run_command File.join(ROOT, "bin/tungsten-compiler"), "run",
+                File.join(ROOT, "compiler/test/static_method_registry_guard.w")
+  end
+
+  desc "Run CLI exit-status, check-mode, and explain contracts"
+  task :cli_contracts do
+    run_command "bash", File.join(ROOT, "scripts/test-cli-contracts.sh")
+  end
+
+  desc "Run build/cache garbage-collection retention contracts"
+  task :cache_gc do
+    run_command "bash", File.join(ROOT, "scripts/test-cache-gc.sh")
+  end
 
   desc "Run the stage-0 C VM and bootstrap contract tests"
   task :c_vm do
@@ -155,7 +177,7 @@ namespace :test do
       run_command File.join(ROOT, "bin/tungsten"), "compile", "--no-lto",
                   File.join(ROOT, "compiler/lex_parity.w"), "--out", binary
       fixtures = Dir[File.join(ROOT, "compiler/test/fixtures/*.w")].sort
-      run_command binary, *fixtures
+      run_command binary, *fixtures, env: { "TUNGSTEN_ROOT" => ROOT }
     end
   end
 
@@ -165,6 +187,13 @@ namespace :test do
     run_command "bash", File.join(ROOT, "scripts/test-bit-count-intrinsics.sh")
     run_command "bash", File.join(ROOT, "scripts/test-raw-static-machine-return-wire.sh")
     run_command "bash", File.join(ROOT, "scripts/test-small-array-wide-element-boxing-wire.sh")
+  end
+end
+
+namespace :spec do
+  desc "Run every tracked bit spec, with specialized Wassat/Wrat execution"
+  task :bits do
+    run_command "bash", File.join(ROOT, "scripts/test-bit-specs.sh")
   end
 end
 

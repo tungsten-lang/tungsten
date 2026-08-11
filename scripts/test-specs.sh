@@ -182,7 +182,7 @@ run_interpreter_spec() {
   name="$(basename "${path%.w}")"
   echo "run $path"
   set +e
-  output="$("$TUNGSTEN" run "$path" 2>&1)"
+  output="$(TUNGSTEN_INTERPRETED_SPEC=1 "$TUNGSTEN" run "$path" 2>&1)"
   status=$?
   set -e
   record_result "$name" "$output" "$status"
@@ -408,6 +408,7 @@ compiled_specs=(
   spec/compiler/ast_typed_sidecar_spec.w
   spec/compiler/ast_typed_visitor_spec.w
   spec/compiler/array_compact_autoload_spec.w
+  spec/compiler/array_constructor_parity_spec.w
   spec/compiler/array_dup_autoload_spec.w
   spec/compiler/array_join_autoload_spec.w
   spec/compiler/argv_nested_scan_spec.w
@@ -421,6 +422,7 @@ compiled_specs=(
   spec/compiler/bigint_bitwise_reopen_source_seam_spec.w
   spec/compiler/bigint_to_i_autoload_spec.w
   spec/compiler/block_passthrough_spec.w
+  spec/compiler/block_presence_parity_spec.w
   spec/compiler/carry_intrinsics_parity_spec.w
   spec/compiler/cfg_ssa_pruning_spec.w
   spec/compiler/elementwise_fusion_spec.w
@@ -455,6 +457,7 @@ compiled_specs=(
   spec/compiler/string_interp_esc_bracket_spec.w
   spec/compiler/machine_int_subscript_fused_spec.w
   spec/compiler/machine_int_subscript_store_spec.w
+  spec/compiler/method_fallthrough_parity_spec.w
   spec/compiler/small_array_stack_escape_spec.w
   spec/compiler/small_array_stack_zero_init_spec.w
   spec/compiler/small_array_generic_spec.w
@@ -470,6 +473,9 @@ compiled_specs=(
   spec/compiler/ctor_inline_cache_nested_spec.w
   spec/compiler/global_demotion_scopes_spec.w
   spec/compiler/strbuf_bytes_spec.w
+  spec/compiler/string_buffer_dynamic_append_spec.w
+  spec/compiler/quantity_control_flow_parity_spec.w
+  spec/compiler/static_method_overload_spec.w
   spec/compiler/int_bigint_promotion_spec.w
   spec/compiler/bigint_literal_cache_spec.w
   spec/compiler/ivar_param_type_spec.w
@@ -581,12 +587,18 @@ interpreter_specs=(
   # Engine-parity pins: these compiler specs assert values that must hold
   # identically interpreted (compiled-only verification has missed clobbered
   # interpreter.w hunks before).
+  spec/compiler/block_presence_parity_spec.w
+  spec/compiler/array_constructor_parity_spec.w
+  spec/compiler/method_fallthrough_parity_spec.w
   spec/compiler/int_bigint_promotion_spec.w
   spec/compiler/bigint_literal_cache_spec.w
   spec/compiler/carry_intrinsics_parity_spec.w
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w
   spec/compiler/top_level_method_name_hygiene_spec.w
+  spec/compiler/string_buffer_dynamic_append_spec.w
+  spec/compiler/quantity_control_flow_parity_spec.w
+  spec/compiler/static_method_overload_spec.w
   # clock_ms had to be registered in BOTH lowering.w and builtins.w; pin the
   # interpreted side so a compiled-only fix cannot pass again.
   spec/core/clock_ms_spec.w
@@ -651,18 +663,18 @@ interpreter_specs=(
   spec/core/expression_special_spec.w
   spec/core/expression_transcendental_spec.w
   spec/core/expression_solve_spec.w
-  spec/core/algebra_real_roots_spec.w
-  spec/core/algebra_ideal_arithmetic_spec.w
-  spec/core/algebra_lattice_reduction_spec.w
-  spec/core/algebra_s_class_group_spec.w
-  spec/core/algebra_s_units_spec.w
+  # The exhaustive real-root/ideal/lattice/S-class/S-unit programs are gated
+  # above in the compiled lane. Repeating them in the tree walker consumed the
+  # entire suite tail (multiple full cores for 10+ minutes) without adding a
+  # distinct assertion; the focused expression/formal-series parity specs stay
+  # interpreted below.
   spec/core/algebra_shell_width_degree6_artifact_spec.w
   spec/core/algebra_shell_width_degree9_artifact_spec.w
   spec/core/algebra_shell_width_degree12_artifact_spec.w
   spec/core/algebra_shell_width_s_unit_artifacts_spec.w
-  spec/core/algebraic_real_spec.w
   spec/core/formal_series_spec.w
   spec/core/formal_series_autoload_spec.w
+  spec/core/enumerable_native_spec.w
   spec/core/system_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/hypercomplex_mul_spec.w
@@ -733,6 +745,39 @@ wrat_specs=(
   bits/tungsten-wrat/spec/checker_spec.w
 )
 
+run_special_bit_specs() {
+  # Wassat has a deliberate compiled/interpreted split: its native parser,
+  # process portfolio, and atomic ABI are not meaningful through the
+  # interpreter, while a few proof-library specs intentionally stay there.
+  # Keep this lane here, but let `rake spec:bits` own when it runs so every bit
+  # spec is executed exactly once by the default root suite.
+  local wassat_bin="$TMP_ROOT/wassat"
+  echo "compile bits/tungsten-wassat/bin/wassat.w"
+  if "$TUNGSTEN" compile bits/tungsten-wassat/bin/wassat.w --out "$wassat_bin" --no-lto >/dev/null; then
+    run_parallel wassat "${wassat_specs[@]}" -- "$wassat_bin"
+  else
+    echo "FAIL [wassat] CLI compile failed" >&2
+    fail=1
+  fi
+
+  # The independent proof checker has no shared parsing/checking code and does
+  # not need compiled runtime builtins, so its contract stays interpreted.
+  run_parallel interp "${wrat_specs[@]}"
+}
+
+# Narrow entry point used by `rake spec:bits`. All ordinary bit suites are run
+# by scripts/test-bit-specs.sh; this file retains the two suites that need its
+# specialized execution modes and result validation.
+if [[ "${BIT_SPECS_ONLY:-0}" == "1" ]]; then
+  run_special_bit_specs
+  if [[ "$fail" -ne 0 ]]; then
+    echo "test-specs: FAIL (special bit specs)"
+    exit 1
+  fi
+  echo "test-specs: PASS (special bit specs)"
+  exit 0
+fi
+
 # FAST=1: the curated inner-loop slice — the engine-parity and bignum
 # pins that gate day-to-day compiler work — in parallel, skipping the
 # serial tails. The full battery remains the commit gate.
@@ -779,21 +824,6 @@ run_cache_lifecycle_test
 run_parallel cuda "${cuda_emit_specs[@]}"
 
 run_parallel interp "${interpreter_specs[@]}"
-
-# Wassat's native DIMACS parser, process portfolio, atomic proof publishing,
-# and worker lifecycle exist only in compiled programs. Build the exact CLI
-# under test once, inject it into every library spec, and keep the corpus
-# hermetic so this gate runs on both CI architectures.
-wassat_bin="$TMP_ROOT/wassat"
-echo "compile bits/tungsten-wassat/bin/wassat.w"
-if "$TUNGSTEN" compile bits/tungsten-wassat/bin/wassat.w --out "$wassat_bin" --no-lto >/dev/null; then
-  run_parallel wassat "${wassat_specs[@]}" -- "$wassat_bin"
-else
-  echo "FAIL [wassat] CLI compile failed" >&2
-  fail=1
-fi
-
-run_parallel interp "${wrat_specs[@]}"
 
 if [[ "${RUN_CORE_SPECS:-0}" == "1" ]]; then
   # High-bit words pin the SIGNED view encodings (as_i32/as_i64 vs as_u32):

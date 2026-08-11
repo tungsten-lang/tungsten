@@ -2,6 +2,7 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+. "$ROOT/bin/commands/system_deps.sh"
 SPINEL_DIR="$ROOT/implementations/spinel"
 UPSTREAM="$ROOT/src/patched/spinel"
 BUILD="$SPINEL_DIR/build"
@@ -99,6 +100,11 @@ runtime_archive_stale() {
 }
 
 rebuild_runtime_archive() {
+  zstd_cflags="$(pkg-config --cflags libzstd 2>/dev/null || true)"
+  homebrew_prefix="$(tungsten_homebrew_prefix || true)"
+  if [ -z "$zstd_cflags" ] && [ -n "$homebrew_prefix" ] && [ -f "$homebrew_prefix/include/zstd.h" ]; then
+    zstd_cflags="-I$homebrew_prefix/include"
+  fi
   mkdir -p "$RUNTIME_OBJ_DIR"
   rm -f "$RUNTIME_OBJ_DIR"/*.o
   (
@@ -107,7 +113,7 @@ rebuild_runtime_archive() {
     # passes -flto=auto) can then inline runtime functions into the
     # generated stage0 code across the archive boundary.
     clang -O3 -DNDEBUG -march=native -mtune=native -flto=auto \
-      -I"$ROOT/runtime" -I/opt/homebrew/include \
+      -I"$ROOT/runtime" $zstd_cflags \
       -c "$ROOT/runtime/runtime.c" \
          "$ROOT/runtime/terminal_input.c" \
          "$ROOT/runtime/event_kqueue.c" \

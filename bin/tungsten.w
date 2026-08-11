@@ -58,9 +58,12 @@ MANPAGE = manpage_lines.join("\n")
   while i < extra_args.size
     cmd = cmd + " " + sh_quote(extra_args[i])
     i = i + 1
-  if system(cmd)
-    exit(0)
-  exit(1)
+  spawn_argv = []
+  spawn_argv.push("/bin/sh")
+  spawn_argv.push("-c")
+  spawn_argv.push(cmd)
+  proc = Process.spawn(spawn_argv)
+  exit(proc.wait)
 
 # Legacy bootstrap only: --ruby / --spinel / `build` still use the Ruby driver.
 -> exec_ruby_driver
@@ -208,6 +211,49 @@ MANPAGE = manpage_lines.join("\n")
     exit(0)
   exit(1)
 
+# ---- explain ----
+
+-> run_explain(tool_args)
+  if tool_args.size != 1
+    << "Usage: tungsten explain CODE"
+    exit(2)
+  code = tool_args[0].strip.upcase
+  lines = read_file(ROOT + "/doc/explain.md").split("\n")
+  heading = "## " + code
+  found = false
+  known = []
+  body = []
+  i = 0
+  while i < lines.size
+    line = lines[i]
+    if line.starts_with?("## ")
+      section_code = line.slice(3, line.size - 3).strip
+      known.push(section_code)
+      if found
+        break
+      if line == heading
+        found = true
+        i = i + 1
+        next
+    elsif found
+      body.push(line)
+    i = i + 1
+  if !found
+    << "No lesson for " + code + " yet — the registry lives in doc/explain.md."
+    << "Known codes with lessons: " + known.join(", ")
+    exit(1)
+  << code
+  << ""
+  while body.size > 0 && body[0].strip == ""
+    body.shift()
+  while body.size > 0 && body[body.size - 1].strip == ""
+    body.pop()
+  i = 0
+  while i < body.size
+    << body[i]
+    i = i + 1
+  exit(0)
+
 # ---- start ----
 
 -> run_start(args)
@@ -333,6 +379,16 @@ when "compile", "compile-batch"
     forwarded = ["compile"]
   exec_compiler(forwarded)
 
+when "check"
+  args = argv()
+  forwarded = ["check"]
+  i = 0
+  while i < args.size
+    if !(i == 0 && args[i] == "check")
+      forwarded.push(args[i])
+    i = i + 1
+  exec_compiler(forwarded)
+
 when "run"
   args = argv()
   forwarded = ["run"]
@@ -366,6 +422,9 @@ when "doctor"
 
 when "bootstrap"
   run_bootstrap(tool_argv_after_command("bootstrap"))
+
+when "explain"
+  run_explain(tool_argv_after_command("explain"))
 
 when "ai"
   run_command_w("bin/commands/ai.w", tool_argv_after_command("ai"))

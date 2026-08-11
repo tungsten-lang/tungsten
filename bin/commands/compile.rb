@@ -1,4 +1,5 @@
 require "open3"
+require File.join(ROOT, "implementations/ruby/lib/tungsten/system_dependencies")
 
 PRINT_IR    = File.join(ROOT, "compiler/print_ir.w")
 PRINT_AST   = File.join(ROOT, "compiler/print_ast.w")
@@ -119,9 +120,9 @@ CLANG_FLAGS = if ENV["CLANG_FLAGS"]
 
 # Helper: find a header in standard paths
 def find_header(*paths)
-  # Returns the install prefix (e.g. /opt/homebrew/opt/openssl@3)
+  # Returns the install prefix
   # from a header path like prefix/include/openssl/ssl.h (3 levels up)
-  paths.each { |p| return File.dirname(File.dirname(File.dirname(p))) if File.exist?(p) }
+  paths.compact.each { |p| return File.dirname(File.dirname(File.dirname(p))) if File.exist?(p) }
   nil
 end
 
@@ -129,13 +130,14 @@ def zstd_flags
   cflags = `pkg-config --cflags libzstd 2>/dev/null`.split
   libs = `pkg-config --libs libzstd 2>/dev/null`.split
 
-  if cflags.empty? && File.exist?("/opt/homebrew/include/zstd.h")
-    cflags = ["-I/opt/homebrew/include"]
+  brew_prefix = Tungsten::SystemDependencies.brew_prefix
+  if cflags.empty? && brew_prefix && File.exist?(File.join(brew_prefix, "include/zstd.h"))
+    cflags = ["-I#{brew_prefix}/include"]
   end
 
   if libs.empty?
-    if File.exist?("/opt/homebrew/lib/libzstd.dylib") || File.exist?("/opt/homebrew/lib/libzstd.a")
-      libs = ["-L/opt/homebrew/lib", "-lzstd"]
+    if brew_prefix && (File.exist?(File.join(brew_prefix, "lib/libzstd.dylib")) || File.exist?(File.join(brew_prefix, "lib/libzstd.a")))
+      libs = ["-L#{brew_prefix}/lib", "-lzstd"]
     else
       libs = ["-lzstd"]
     end
@@ -148,13 +150,14 @@ def onig_flags
   cflags = `pkg-config --cflags oniguruma 2>/dev/null`.split
   libs = `pkg-config --libs oniguruma 2>/dev/null`.split
 
-  if cflags.empty? && File.exist?("/opt/homebrew/include/oniguruma.h")
-    cflags = ["-I/opt/homebrew/include"]
+  brew_prefix = Tungsten::SystemDependencies.brew_prefix
+  if cflags.empty? && brew_prefix && File.exist?(File.join(brew_prefix, "include/oniguruma.h"))
+    cflags = ["-I#{brew_prefix}/include"]
   end
 
   if libs.empty?
-    if File.exist?("/opt/homebrew/lib/libonig.dylib") || File.exist?("/opt/homebrew/lib/libonig.a")
-      libs = ["-L/opt/homebrew/lib", "-lonig"]
+    if brew_prefix && (File.exist?(File.join(brew_prefix, "lib/libonig.dylib")) || File.exist?(File.join(brew_prefix, "lib/libonig.a")))
+      libs = ["-L#{brew_prefix}/lib", "-lonig"]
     elsif cflags.any?
       libs = ["-lonig"]
     end
@@ -172,8 +175,7 @@ TLS_ENABLED = ENV["TLS"] || ENV["TUNGSTEN_TLS"]
 OPENSSL_PREFIX = if TLS_ENABLED
                    find_header(
                      "/usr/include/openssl/ssl.h",
-                     "#{`brew --prefix openssl@3 2>/dev/null`.strip}/include/openssl/ssl.h",
-                     "/opt/homebrew/opt/openssl@3/include/openssl/ssl.h",
+                     Tungsten::SystemDependencies.brew_header("openssl@3", "openssl/ssl.h"),
                    )
                  end
 TLS_FLAGS = if TLS_ENABLED && OPENSSL_PREFIX
@@ -189,7 +191,7 @@ HTTP2_ENABLED = ENV["HTTP2"] || ENV["TUNGSTEN_HTTP2"]
 NGHTTP2_PREFIX = if HTTP2_ENABLED
                    find_header(
                      "/usr/include/nghttp2/nghttp2.h",
-                     "/opt/homebrew/opt/libnghttp2/include/nghttp2/nghttp2.h",
+                     Tungsten::SystemDependencies.brew_header("libnghttp2", "nghttp2/nghttp2.h"),
                    )
                  end
 if HTTP2_ENABLED && NGHTTP2_PREFIX
@@ -209,13 +211,13 @@ HTTP3_ENABLED = ENV["HTTP3"] || ENV["TUNGSTEN_HTTP3"]
 NGTCP2_PREFIX = if HTTP3_ENABLED
                   find_header(
                     "/usr/include/ngtcp2/ngtcp2.h",
-                    "/opt/homebrew/opt/libngtcp2/include/ngtcp2/ngtcp2.h",
+                    Tungsten::SystemDependencies.brew_header("libngtcp2", "ngtcp2/ngtcp2.h"),
                   )
                 end
 NGHTTP3_PREFIX = if HTTP3_ENABLED
                    find_header(
                      "/usr/include/nghttp3/nghttp3.h",
-                     "/opt/homebrew/opt/libnghttp3/include/nghttp3/nghttp3.h",
+                     Tungsten::SystemDependencies.brew_header("libnghttp3", "nghttp3/nghttp3.h"),
                    )
                  end
 if HTTP3_ENABLED && NGTCP2_PREFIX && NGHTTP3_PREFIX

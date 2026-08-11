@@ -15,6 +15,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/bin/commands/system_deps.sh"
 cd "$ROOT"
 . "$ROOT/bin/commands/bootstrap_helpers.sh"
 . "$ROOT/bin/commands/config.sh"
@@ -196,6 +197,7 @@ BOOTSTRAP_CC="${TUNGSTEN_CC:-clang}"
 BOOTSTRAP_AR="${TUNGSTEN_AR:-ar}"
 TOOLCHAIN_ENV_ID="${SDKROOT:-}|${MACOSX_DEPLOYMENT_TARGET:-}|${CPATH:-}|${C_INCLUDE_PATH:-}|${CPLUS_INCLUDE_PATH:-}|${LIBRARY_PATH:-}|${PKG_CONFIG_PATH:-}|${PKG_CONFIG_LIBDIR:-}"
 mkdir -p "$CACHE"
+bash "$ROOT/bin/commands/cache_gc.sh" "$CACHE" || true
 
 BUILD_JOBS="${TUNGSTEN_BUILD_JOBS:-}"
 if [ -z "$BUILD_JOBS" ]; then
@@ -278,7 +280,7 @@ fi
 step "Runtime archive"
 UNAME_S="$(uname -s)"
 case "$UNAME_S" in
-  Darwin) EVENT_SRC=event_kqueue.c; METAL_SRCS="metal.m blas_bridge.c" ;;
+  Darwin) EVENT_SRC=event_kqueue.c; METAL_SRCS="metal.m blas_bridge.c hid_bridge.m" ;;
   *)      EVENT_SRC=event_epoll.c;  METAL_SRCS="" ;;
 esac
 
@@ -286,8 +288,9 @@ if [ -n "${TUNGSTEN_ZSTD_CFLAGS+x}" ]; then
   zstd_cflags="$TUNGSTEN_ZSTD_CFLAGS"
 else
   zstd_cflags="$(pkg-config --cflags libzstd 2>/dev/null || true)"
-  if [ -z "$zstd_cflags" ] && [ -f /opt/homebrew/include/zstd.h ]; then
-    zstd_cflags="-I/opt/homebrew/include"
+  homebrew_prefix="$(tungsten_homebrew_prefix || true)"
+  if [ -z "$zstd_cflags" ] && [ -n "$homebrew_prefix" ] && [ -f "$homebrew_prefix/include/zstd.h" ]; then
+    zstd_cflags="-I$homebrew_prefix/include"
   fi
 fi
 
@@ -297,9 +300,10 @@ if [ -n "${TUNGSTEN_ZSTD_LDFLAGS+x}" ]; then
 else
   zstd_libs="$(pkg-config --libs libzstd 2>/dev/null || true)"
   if [ -z "$zstd_libs" ] &&
-     { [ -f /opt/homebrew/lib/libzstd.a ] ||
-       [ -f /opt/homebrew/lib/libzstd.dylib ]; }; then
-    zstd_libs="-L/opt/homebrew/lib -lzstd"
+     [ -n "$homebrew_prefix" ] &&
+     { [ -f "$homebrew_prefix/lib/libzstd.a" ] ||
+       [ -f "$homebrew_prefix/lib/libzstd.dylib" ]; }; then
+    zstd_libs="-L$homebrew_prefix/lib -lzstd"
   fi
   zstd_probe_libs="${zstd_libs:--lzstd}"
 fi
@@ -337,16 +341,56 @@ else
   zstd_libs=""
 fi
 
+if [ -n "${TUNGSTEN_ONIG_CFLAGS+x}" ]; then
+  onig_cflags="$TUNGSTEN_ONIG_CFLAGS"
+else
+  onig_cflags="$(pkg-config --cflags oniguruma 2>/dev/null || true)"
+  if [ -z "$onig_cflags" ] && [ -n "$homebrew_prefix" ] && [ -f "$homebrew_prefix/include/oniguruma.h" ]; then
+    onig_cflags="-I$homebrew_prefix/include"
+  fi
+  if [ -n "$onig_cflags" ]; then onig_cflags="$onig_cflags -DTUNGSTEN_ONIG"; fi
+fi
+if [ -n "${TUNGSTEN_ONIG_LDFLAGS+x}" ]; then
+  onig_libs="$TUNGSTEN_ONIG_LDFLAGS"
+else
+  onig_libs="$(pkg-config --libs oniguruma 2>/dev/null || true)"
+  if [ -z "$onig_libs" ] && [ -n "$homebrew_prefix" ] && \
+     { [ -f "$homebrew_prefix/lib/libonig.dylib" ] || [ -f "$homebrew_prefix/lib/libonig.a" ]; }; then
+    onig_libs="-L$homebrew_prefix/lib -lonig"
+  fi
+fi
+
+tls_flags=""
+http2_flags=""
+http2_libs=""
+EXTRA_RUNTIME_SRCS=""
+if [ -n "${TLS+x}" ] || [ -n "${TUNGSTEN_TLS+x}" ]; then
+  EXTRA_RUNTIME_SRCS="$EXTRA_RUNTIME_SRCS tls.c"
+  openssl_prefix="$(tungsten_homebrew_prefix openssl@3 || true)"
+  if [ -n "$openssl_prefix" ] && [ -f "$openssl_prefix/include/openssl/ssl.h" ]; then
+    tls_flags="-DTUNGSTEN_TLS -I$openssl_prefix/include"
+  fi
+fi
+if [ -n "${HTTP2+x}" ] || [ -n "${TUNGSTEN_HTTP2+x}" ]; then
+  nghttp2_prefix="$(tungsten_homebrew_prefix libnghttp2 || true)"
+  if [ -n "$nghttp2_prefix" ] && [ -f "$nghttp2_prefix/include/nghttp2/nghttp2.h" ]; then
+    EXTRA_RUNTIME_SRCS="$EXTRA_RUNTIME_SRCS http2.c"
+    http2_flags="-DTUNGSTEN_HTTP2 -I$nghttp2_prefix/include"
+    http2_libs="-L$nghttp2_prefix/lib -lnghttp2"
+  fi
+fi
+
 RUNTIME_SRCS=(
   runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c
   "$ZSTD_RUNTIME_SRC" "$EVENT_SRC"
 )
 # shellcheck disable=SC2206
 for m in $METAL_SRCS; do RUNTIME_SRCS+=("$m"); done
+for m in $EXTRA_RUNTIME_SRCS; do RUNTIME_SRCS+=("$m"); done
 
-if [ "$RELEASE" -eq 1 ]; then PROFILE_OPT=-O3; else PROFILE_OPT=-O0; fi
+if [ "$RELEASE" -eq 1 ]; then PROFILE_OPT=-O3; else PROFILE_OPT=-O1; fi
 if [ "$DEBUG_ENABLED" -eq 1 ]; then DEBUG_CFLAG=-g; else DEBUG_CFLAG=-DNDEBUG; fi
-cflags=("$PROFILE_OPT" "$DEBUG_CFLAG" -pthread "${HOST_CPU_FLAGS[@]}" $zstd_cflags)
+cflags=("$PROFILE_OPT" "$DEBUG_CFLAG" -pthread "${HOST_CPU_FLAGS[@]}" $tls_flags $http2_flags $onig_cflags $zstd_cflags)
 if [ "$UNAME_S" = Linux ]; then cflags+=(-D_DEFAULT_SOURCE); fi
 runtime_objc_flags=("$PROFILE_OPT" "$DEBUG_CFLAG" "${HOST_CPU_FLAGS[@]}" -c -x objective-c)
 
@@ -422,17 +466,17 @@ export TUNGSTEN_ROOT="$ROOT"
 bootstrap_product_opt="$PROFILE_OPT"
 if [ "$DEBUG_ENABLED" -eq 1 ]; then bootstrap_product_opt="$bootstrap_product_opt -g"; fi
 export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:-$bootstrap_product_opt}"
-# C-native Loader#load_program_ast (parse_ast.c). ~2–3× faster stage1 under
-# the C VM. Its AST is verified BYTE-IDENTICAL to the canonical parser's
-# at the stage-1 IR level — `scripts/test-fast-parse-parity.sh` is the
-# standing gate and MUST pass before any parse_ast.c/lexer.c change ships;
-# if it fails, set TUNGSTEN_C_FAST_PARSE=0 here until parity is restored.
-# Still off for `tungsten build` so stage1/stage2 keep identical ASTs by
-# construction rather than by verification.
-export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-1}"
+# The bootstrap stage is handed directly to `tungsten build` for fixed-point
+# verification, so it must use the canonical parser just like an ordinary
+# build stage 1. The faster C parser remains available for explicit developer
+# experiments but cannot be the default at this identity boundary.
+export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-0}"
 
 export TUNGSTEN_ZSTD_CFLAGS="$zstd_cflags"
 export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"
+export TUNGSTEN_ONIG_CFLAGS="$onig_cflags"
+export TUNGSTEN_ONIG_LDFLAGS="$onig_libs"
+export TUNGSTEN_HTTP2_LDFLAGS="$http2_libs"
 export TUNGSTEN_CC="${TUNGSTEN_CC:-$BOOTSTRAP_CC}"
 export TUNGSTEN_AR="${TUNGSTEN_AR:-$BOOTSTRAP_AR}"
 export TUNGSTEN_OS="${TUNGSTEN_OS:-$UNAME_S}"
@@ -649,6 +693,15 @@ if [ -n "$CPU_ARG" ]; then build_flags+=(--cpu "$CPU_ARG"); fi
 if [ -n "$TARGET_TRIPLE" ]; then build_flags+=(--target "$TARGET_TRIPLE"); fi
 if [ -n "$TARGET_SYSROOT" ]; then build_flags+=(--sysroot "$TARGET_SYSROOT"); fi
 if [ "$PORTABLE" -eq 1 ]; then build_flags+=(--portable); fi
+
+handoff_path="${TMPDIR:-/tmp}/tungsten-bootstrap-handoff-$$"
+handoff_sidemap="-"
+if [ -f "$STAGE1.sidemap" ]; then handoff_sidemap="$STAGE1.sidemap"; fi
+handoff_profile="$HOST_CPU|$RELEASE|$DEBUG_ENABLED|0|$PORTABLE|$TARGET_TRIPLE"
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+  tungsten-bootstrap-handoff-v1 "$handoff_profile" "$C_INTERP" "$RUNTIME_A" \
+  "$STAGE1" "$STAGE1.ll" "$handoff_sidemap" > "$handoff_path"
 step "Full build: stage1+stage2 + bits (tungsten build)"
 exec env TUNGSTEN_ROOT="$ROOT" BIT_HOME="$ROOT/bits" \
+  TUNGSTEN_BOOTSTRAP_HANDOFF="$handoff_path" \
   "$BUILD_BIN" ${build_flags[@]+"${build_flags[@]}"}

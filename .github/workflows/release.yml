@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            runner: macos-15
+            target: arm64-apple-macos
+            cpu: ""
+            artifact_dir: arm64-apple-macos/default
+          - label: macos-x86_64-v2
+            runner: macos-15-intel
+            target: x86_64-apple-macos
+            cpu: x86-64-v2
+            artifact_dir: x86_64-apple-macos/x86-64-v2
+          - label: macos-x86_64-v3
+            runner: macos-15-intel
+            target: x86_64-apple-macos
+            cpu: x86-64-v3
+            artifact_dir: x86_64-apple-macos/x86-64-v3
+          - label: linux-arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            cpu: ""
+            artifact_dir: aarch64-unknown-linux-gnu/default
+          - label: linux-x86_64-v2
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            cpu: x86-64-v2
+            artifact_dir: x86_64-unknown-linux-gnu/x86-64-v2
+          - label: linux-x86_64-v3
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            cpu: x86-64-v3
+            artifact_dir: x86_64-unknown-linux-gnu/x86-64-v3
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Linux toolchain
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y
+          clang llvm lld pkg-config libonig-dev libzstd-dev
+
+      - name: Install macOS runtime dependencies
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          brew install llvm oniguruma zstd
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0.5"
+          bundler-cache: true
+
+      - name: Build release compiler
+        env:
+          TARGET: ${{ matrix.target }}
+          CPU: ${{ matrix.cpu }}
+        run: |
+          args=(--release --target "$TARGET")
+          if [[ -n "$CPU" ]]; then args+=(--cpu "$CPU"); fi
+          bin/tungsten bootstrap "${args[@]}"
+
+      - name: Package release
+        env:
+          ARTIFACT_DIR: ${{ matrix.artifact_dir }}
+          TARGET_LABEL: ${{ matrix.label }}
+        run: |
+          scripts/package-release.sh \
+            "build/releases/$ARTIFACT_DIR/tungsten-compiler" \
+            "$TARGET_LABEL" build/packages
+
+      - name: Smoke packaged compiler
+        env:
+          TARGET_LABEL: ${{ matrix.label }}
+        run: |
+          package="tungsten-$(tr -d '[:space:]' < VERSION)-$TARGET_LABEL"
+          mkdir build/package-smoke
+          tar -xzf "build/packages/$package.tar.gz" -C build/package-smoke
+          "build/package-smoke/$package/bin/tungsten" -c \
+            "build/package-smoke/$package/doc/examples/01-basics/hello.w"
+
+      - name: Attest package
+        uses: actions/attest@v4
+        with:
+          subject-path: build/packages/*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tungsten-${{ matrix.label }}
+          path: build/packages/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tungsten-*
+          path: dist
+          merge-multiple: true
+
+      - name: Write checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz > SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ github.ref_name }}"
+          dist/*.tar.gz dist/SHA256SUMS
+          --repo "${{ github.repository }}"
+          --verify-tag
+          --generate-notes
+          --title "Tungsten ${GITHUB_REF_NAME#v}"

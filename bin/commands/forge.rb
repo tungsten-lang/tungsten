@@ -3,6 +3,7 @@ require "tmpdir"
 require "stringio"
 require "net/http"
 require "fileutils"
+require File.join(ROOT, "implementations/ruby/lib/tungsten/system_dependencies")
 
 # ── Compile infrastructure (mirrors compile.rb) ──────────────────
 
@@ -26,7 +27,7 @@ FORGE_CLANG_FLAGS = if LINUX
                     end
 
 def find_header(*paths)
-  paths.each { |p| return File.dirname(File.dirname(File.dirname(p))) if File.exist?(p) }
+  paths.compact.each { |p| return File.dirname(File.dirname(File.dirname(p))) if File.exist?(p) }
   nil
 end
 
@@ -34,8 +35,7 @@ TLS_ENABLED = ENV["TLS"] || ENV["TUNGSTEN_TLS"]
 OPENSSL_PREFIX = if TLS_ENABLED
                    find_header(
                      "/usr/include/openssl/ssl.h",
-                     "#{`brew --prefix openssl@3 2>/dev/null`.strip}/include/openssl/ssl.h",
-                     "/opt/homebrew/opt/openssl@3/include/openssl/ssl.h",
+                     Tungsten::SystemDependencies.brew_header("openssl@3", "openssl/ssl.h"),
                    )
                  end
 TLS_FLAGS = if TLS_ENABLED && OPENSSL_PREFIX
@@ -50,7 +50,7 @@ HTTP2_ENABLED = ENV["HTTP2"] || ENV["TUNGSTEN_HTTP2"]
 NGHTTP2_PREFIX = if HTTP2_ENABLED
                    find_header(
                      "/usr/include/nghttp2/nghttp2.h",
-                     "/opt/homebrew/opt/libnghttp2/include/nghttp2/nghttp2.h",
+                     Tungsten::SystemDependencies.brew_header("libnghttp2", "nghttp2/nghttp2.h"),
                    )
                  end
 HTTP2_C = HTTP2_ENABLED && NGHTTP2_PREFIX ? File.join(RUNTIME_DIR, "http2.c") : nil

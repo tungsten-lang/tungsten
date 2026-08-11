@@ -1612,20 +1612,24 @@ bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
     WValue previous = cx->previous;                                        \
     int recycle = cx->recycle;                                             \
     (void)a; (void)b; (void)m; (void)word; (void)parse_input;              \
-    double warm_start = bench_now();                                       \
-    do {                                                                   \
-        for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {          \
-            WValue result = (APPLY);                                       \
-            bench_sink ^= bench_observe_low(result);                       \
-            if (w_is_bigint(previous)) {                                   \
-                if (recycle)                                               \
-                    bigint_release_if_live(w_as_bigint(previous));         \
-                else bench_direct_free(w_as_bigint(previous));                          \
+    /* warm_chunk == 0 skips the warm-up entirely: the quartet sweep       \
+     * re-enters an already-warm lane for each short timed block. */       \
+    if (cx->warm_chunk > 0) {                                              \
+        double warm_start = bench_now();                                   \
+        do {                                                               \
+            for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {      \
+                WValue result = (APPLY);                                   \
+                bench_sink ^= bench_observe_low(result);                   \
+                if (w_is_bigint(previous)) {                               \
+                    if (recycle)                                           \
+                        bigint_release_if_live(w_as_bigint(previous));     \
+                    else bench_direct_free(w_as_bigint(previous));         \
+                }                                                          \
+                previous = result;                                         \
+                BENCH_MAYBE_RELEASE_ARITH_WS();                            \
             }                                                              \
-            previous = result;                                             \
-            BENCH_MAYBE_RELEASE_ARITH_WS();                                \
-        }                                                                  \
-    } while (bench_now() - warm_start < bench_warm_seconds);                            \
+        } while (bench_now() - warm_start < bench_warm_seconds);           \
+    }                                                                      \
     int iters = cx->iters;                                                 \
     double timed_start = bench_now();                                      \
     for (int timed_i = 0; timed_i < iters; timed_i++) {                    \
@@ -1748,11 +1752,13 @@ DEFINE_BENCH_LANE(div1, bigint_div_any(a, b))
 static double __attribute__((noinline, aligned(128)))                      \
 bench_lane_##NAME(BenchLaneCtx *cx) {                                      \
     WValue a = cx->a;                                                      \
-    double warm_start = bench_now();                                       \
-    do {                                                                   \
-        for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)            \
-            bench_sink ^= (uint64_t)integer_low_i64(APPLY);                \
-    } while (bench_now() - warm_start < bench_warm_seconds);                            \
+    if (cx->warm_chunk > 0) {                                              \
+        double warm_start = bench_now();                                   \
+        do {                                                               \
+            for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)        \
+                bench_sink ^= (uint64_t)integer_low_i64(APPLY);            \
+        } while (bench_now() - warm_start < bench_warm_seconds);           \
+    }                                                                      \
     int iters = cx->iters;                                                 \
     double timed_start = bench_now();                                      \
     for (int timed_i = 0; timed_i < iters; timed_i++)                      \
@@ -1773,11 +1779,13 @@ static double __attribute__((noinline, aligned(128)))
 bench_lane_cmp(BenchLaneCtx *cx) {
     volatile WValue cmp_operand = cx->a;
     WValue b = cx->b;
-    double warm_start = bench_now();
-    do {
-        for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)
-            bench_sink ^= (uint64_t)bigint_compare(cmp_operand, b);
-    } while (bench_now() - warm_start < bench_warm_seconds);
+    if (cx->warm_chunk > 0) {
+        double warm_start = bench_now();
+        do {
+            for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)
+                bench_sink ^= (uint64_t)bigint_compare(cmp_operand, b);
+        } while (bench_now() - warm_start < bench_warm_seconds);
+    }
     int iters = cx->iters;
     double timed_start = bench_now();
     for (int timed_i = 0; timed_i < iters; timed_i++)
@@ -1791,15 +1799,17 @@ bench_lane_cmp(BenchLaneCtx *cx) {
 static double __attribute__((noinline, aligned(128)))
 bench_lane_tostr(BenchLaneCtx *cx) {
     WValue a = cx->a;
-    double warm_start = bench_now();
-    do {
-        for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {
-            WValue text = w_int_to_s(a);
-            bench_sink ^= (uint64_t)(unsigned char)
-                          w_as_heap_str(text)->data[0];
-            w_value_free(text);
-        }
-    } while (bench_now() - warm_start < bench_warm_seconds);
+    if (cx->warm_chunk > 0) {
+        double warm_start = bench_now();
+        do {
+            for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++) {
+                WValue text = w_int_to_s(a);
+                bench_sink ^= (uint64_t)(unsigned char)
+                              w_as_heap_str(text)->data[0];
+                w_value_free(text);
+            }
+        } while (bench_now() - warm_start < bench_warm_seconds);
+    }
     int iters = cx->iters;
     double timed_start = bench_now();
     for (int timed_i = 0; timed_i < iters; timed_i++) {
@@ -1812,8 +1822,12 @@ bench_lane_tostr(BenchLaneCtx *cx) {
     return bench_now() - timed_start;
 }
 
-static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
-                                       int recycle) {
+/* The churn measurement, split into setup / run / teardown so the paired
+ * ABBA-quartet sweep can interleave many short Tungsten and GMP timed
+ * blocks over ONE prepared operand set.  bench_boxed_result_churn below
+ * composes the three pieces unchanged for every one-shot caller. */
+static void bench_boxed_lane_setup(int op, int32_t limbs, int recycle,
+                                   BenchLaneCtx *cx) {
     WValue a, b, m;
     bench_boxed_operands(op, limbs, &a, &b, &m);
     /* fromstr parses one fixed decimal string (precomputed outside timing);
@@ -1832,55 +1846,70 @@ static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
     }
 
     bigint_pool_release_thread();
-    BenchLaneCtx cx;
-    cx.a = a;
-    cx.b = b;
-    cx.m = m;
-    cx.parse_input = parse_input;
-    cx.previous = W_NIL;
-    cx.recycle = recycle;
-    cx.warm_chunk = bench_boxed_warm_chunk(op, limbs);
-    cx.iters = iters;
-    double elapsed = 0.0;
+    cx->a = a;
+    cx->b = b;
+    cx->m = m;
+    cx->parse_input = parse_input;
+    cx->previous = W_NIL;
+    cx->recycle = recycle;
+    cx->warm_chunk = bench_boxed_warm_chunk(op, limbs);
+    cx->iters = 0;
+}
 
+/* Returns the elapsed SECONDS of the timed region (cx->iters operations);
+ * cx->warm_chunk > 0 pays the per-lane warm-up first, 0 skips it. */
+static double bench_boxed_lane_run(int op, BenchLaneCtx *cx) {
     switch (op) {
-    case BENCH_BOXED_ADD:    elapsed = bench_lane_add(&cx); break;
-    case BENCH_BOXED_SUB:    elapsed = bench_lane_sub(&cx); break;
-    case BENCH_BOXED_MUL:    elapsed = bench_lane_mul(&cx); break;
-    case BENCH_BOXED_SQR:    elapsed = bench_lane_sqr(&cx); break;
-    case BENCH_BOXED_DIV:    elapsed = bench_lane_div(&cx); break;
-    case BENCH_BOXED_MOD:    elapsed = bench_lane_mod(&cx); break;
-    case BENCH_BOXED_AND:    elapsed = bench_lane_band(&cx); break;
-    case BENCH_BOXED_OR:     elapsed = bench_lane_bor(&cx); break;
-    case BENCH_BOXED_XOR:    elapsed = bench_lane_bxor(&cx); break;
-    case BENCH_BOXED_SHL:    elapsed = bench_lane_shl(&cx); break;
-    case BENCH_BOXED_SHR:    elapsed = bench_lane_shr(&cx); break;
-    case BENCH_BOXED_GCD:    elapsed = bench_lane_gcd(&cx); break;
-    case BENCH_BOXED_CMP:    elapsed = bench_lane_cmp(&cx); break;
-    case BENCH_BOXED_NEG:    elapsed = bench_lane_neg(&cx); break;
-    case BENCH_BOXED_ABS:    elapsed = bench_lane_abs(&cx); break;
-    case BENCH_BOXED_ADD1:   elapsed = bench_lane_add1(&cx); break;
-    case BENCH_BOXED_SUB1:   elapsed = bench_lane_sub1(&cx); break;
-    case BENCH_BOXED_MUL1:   elapsed = bench_lane_mul1(&cx); break;
-    case BENCH_BOXED_DIV1:   elapsed = bench_lane_div1(&cx); break;
-    case BENCH_BOXED_NEG_BANG: elapsed = bench_lane_negbang(&cx); break;
-    case BENCH_BOXED_ABS_BANG: elapsed = bench_lane_absbang(&cx); break;
-    case BENCH_BOXED_POW:    elapsed = bench_lane_pow(&cx); break;
-    case BENCH_BOXED_POWMOD: elapsed = bench_lane_powmod(&cx); break;
-    case BENCH_BOXED_LCM:    elapsed = bench_lane_lcm(&cx); break;
-    case BENCH_BOXED_ISQRT:  elapsed = bench_lane_isqrt(&cx); break;
-    case BENCH_BOXED_FROMSTR: elapsed = bench_lane_fromstr(&cx); break;
-    case BENCH_BOXED_TOSTR:  elapsed = bench_lane_tostr(&cx); break;
+    case BENCH_BOXED_ADD:    return bench_lane_add(cx);
+    case BENCH_BOXED_SUB:    return bench_lane_sub(cx);
+    case BENCH_BOXED_MUL:    return bench_lane_mul(cx);
+    case BENCH_BOXED_SQR:    return bench_lane_sqr(cx);
+    case BENCH_BOXED_DIV:    return bench_lane_div(cx);
+    case BENCH_BOXED_MOD:    return bench_lane_mod(cx);
+    case BENCH_BOXED_AND:    return bench_lane_band(cx);
+    case BENCH_BOXED_OR:     return bench_lane_bor(cx);
+    case BENCH_BOXED_XOR:    return bench_lane_bxor(cx);
+    case BENCH_BOXED_SHL:    return bench_lane_shl(cx);
+    case BENCH_BOXED_SHR:    return bench_lane_shr(cx);
+    case BENCH_BOXED_GCD:    return bench_lane_gcd(cx);
+    case BENCH_BOXED_CMP:    return bench_lane_cmp(cx);
+    case BENCH_BOXED_NEG:    return bench_lane_neg(cx);
+    case BENCH_BOXED_ABS:    return bench_lane_abs(cx);
+    case BENCH_BOXED_ADD1:   return bench_lane_add1(cx);
+    case BENCH_BOXED_SUB1:   return bench_lane_sub1(cx);
+    case BENCH_BOXED_MUL1:   return bench_lane_mul1(cx);
+    case BENCH_BOXED_DIV1:   return bench_lane_div1(cx);
+    case BENCH_BOXED_NEG_BANG: return bench_lane_negbang(cx);
+    case BENCH_BOXED_ABS_BANG: return bench_lane_absbang(cx);
+    case BENCH_BOXED_POW:    return bench_lane_pow(cx);
+    case BENCH_BOXED_POWMOD: return bench_lane_powmod(cx);
+    case BENCH_BOXED_LCM:    return bench_lane_lcm(cx);
+    case BENCH_BOXED_ISQRT:  return bench_lane_isqrt(cx);
+    case BENCH_BOXED_FROMSTR: return bench_lane_fromstr(cx);
+    case BENCH_BOXED_TOSTR:  return bench_lane_tostr(cx);
     default:
         die("unknown boxed-result benchmark operation");
     }
+    return 0.0;
+}
 
-    if (w_is_bigint(cx.previous)) bench_direct_free(w_as_bigint(cx.previous));
+static void bench_boxed_lane_teardown(int op, BenchLaneCtx *cx) {
+    if (w_is_bigint(cx->previous))
+        bench_direct_free(w_as_bigint(cx->previous));
     bigint_pool_release_thread();
-    bench_free_value(a);
-    bench_free_value(b);
-    bench_free_value(m);
-    if (op == BENCH_BOXED_FROMSTR) w_value_free(parse_input);
+    bench_free_value(cx->a);
+    bench_free_value(cx->b);
+    bench_free_value(cx->m);
+    if (op == BENCH_BOXED_FROMSTR) w_value_free(cx->parse_input);
+}
+
+static double bench_boxed_result_churn(int op, int32_t limbs, int iters,
+                                       int recycle) {
+    BenchLaneCtx cx;
+    bench_boxed_lane_setup(op, limbs, recycle, &cx);
+    cx.iters = iters;
+    double elapsed = bench_boxed_lane_run(op, &cx);
+    bench_boxed_lane_teardown(op, &cx);
     return elapsed * 1e9 / (double)iters;
 }
 
@@ -4578,15 +4607,17 @@ bench_gmp_lane_##NAME(GmpLaneCtx *cx) {                                    \
     (void)a; (void)b; (void)m; (void)w; (void)dec;                         \
     int warm_chunk = cx->warm_chunk;                                       \
     int warm_index = 0;                                                    \
-    double warm_start = bench_now();                                       \
-    do {                                                                   \
-        for (int warm_i = 0; warm_i < warm_chunk;                          \
-             warm_i++, warm_index++) {                                     \
-            mpz_ptr r = result[warm_index & 1];                            \
-            APPLY;                                                         \
-            bench_sink ^= (uint64_t)mpz_get_ui(r);                         \
-        }                                                                  \
-    } while (bench_now() - warm_start < bench_warm_seconds);               \
+    if (warm_chunk > 0) {                                                  \
+        double warm_start = bench_now();                                   \
+        do {                                                               \
+            for (int warm_i = 0; warm_i < warm_chunk;                      \
+                 warm_i++, warm_index++) {                                 \
+                mpz_ptr r = result[warm_index & 1];                        \
+                APPLY;                                                     \
+                bench_sink ^= (uint64_t)mpz_get_ui(r);                     \
+            }                                                              \
+        } while (bench_now() - warm_start < bench_warm_seconds);           \
+    }                                                                      \
     int iters = cx->iters;                                                 \
     double timed_start = bench_now();                                      \
     for (int timed_i = 0; timed_i < iters; timed_i++) {                    \
@@ -4628,11 +4659,13 @@ static double __attribute__((noinline, aligned(128)))
 bench_gmp_lane_cmp(GmpLaneCtx *cx) {
     mpz_ptr a = cx->a, b = cx->b;
     int warm_chunk = cx->warm_chunk;
-    double warm_start = bench_now();
-    do {
-        for (int warm_i = 0; warm_i < warm_chunk; warm_i++)
-            bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b);
-    } while (bench_now() - warm_start < bench_warm_seconds);
+    if (warm_chunk > 0) {
+        double warm_start = bench_now();
+        do {
+            for (int warm_i = 0; warm_i < warm_chunk; warm_i++)
+                bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b);
+        } while (bench_now() - warm_start < bench_warm_seconds);
+    }
     int iters = cx->iters;
     double timed_start = bench_now();
     for (int timed_i = 0; timed_i < iters; timed_i++)
@@ -4649,14 +4682,16 @@ bench_gmp_lane_tostr(GmpLaneCtx *cx) {
     void (*free_fn)(void *, size_t) = cx->free_fn;
     size_t dec_block = cx->dec_block;
     int warm_chunk = cx->warm_chunk;
-    double warm_start = bench_now();
-    do {
-        for (int warm_i = 0; warm_i < warm_chunk; warm_i++) {
-            char *text = mpz_get_str(NULL, 10, a);
-            bench_sink ^= (uint64_t)(unsigned char)text[0];
-            free_fn(text, dec_block);
-        }
-    } while (bench_now() - warm_start < bench_warm_seconds);
+    if (warm_chunk > 0) {
+        double warm_start = bench_now();
+        do {
+            for (int warm_i = 0; warm_i < warm_chunk; warm_i++) {
+                char *text = mpz_get_str(NULL, 10, a);
+                bench_sink ^= (uint64_t)(unsigned char)text[0];
+                free_fn(text, dec_block);
+            }
+        } while (bench_now() - warm_start < bench_warm_seconds);
+    }
     int iters = cx->iters;
     double timed_start = bench_now();
     for (int timed_i = 0; timed_i < iters; timed_i++) {
@@ -4670,79 +4705,161 @@ bench_gmp_lane_tostr(GmpLaneCtx *cx) {
 
 /* Same one-previous-result-live contract as the Tungsten churn benchmark.
  * Two alternating mpz destinations let GMP retain its own result capacity
- * without overwriting the immediately previous immutable result. */
-static double bench_gmp_boxed_result_churn(
-    int op, int32_t limbs, int iters) {
+ * without overwriting the immediately previous immutable result.  Split
+ * into setup / run / teardown exactly like the Tungsten side so the paired
+ * ABBA-quartet sweep can interleave short timed blocks from both lanes. */
+typedef struct {
+    mpz_t a, b, m, result0, result1;
+    char *dec;
+    size_t dec_block;
+    void (*free_fn)(void *, size_t);
+} GmpLaneOwn;
+
+static void bench_gmp_lane_setup(int op, int32_t limbs,
+                                 GmpLaneOwn *own, GmpLaneCtx *cx) {
     WValue av, bv, mv;
     bench_boxed_operands(op, limbs, &av, &bv, &mv);
-    mpz_t a, b, zm, result[2];
-    mpz_inits(a, b, zm, result[0], result[1], NULL);
-    gmp_import_value(a, av);
-    gmp_import_value(b, bv);
-    if (w_is_bigint(mv)) gmp_import_value(zm, mv);
+    mpz_inits(own->a, own->b, own->m, own->result0, own->result1, NULL);
+    gmp_import_value(own->a, av);
+    gmp_import_value(own->b, bv);
+    if (w_is_bigint(mv)) gmp_import_value(own->m, mv);
     /* tostr/fromstr: fixed operand means a fixed decimal length, so the
      * result block size is constant; fromstr parses one precomputed string. */
-    void (*gmp_free_fn)(void *, size_t) = NULL;
-    char *dec = NULL;
-    size_t dec_block = 0;
+    own->free_fn = NULL;
+    own->dec = NULL;
+    own->dec_block = 0;
     if (op == BENCH_BOXED_TOSTR || op == BENCH_BOXED_FROMSTR) {
-        mp_get_memory_functions(NULL, NULL, &gmp_free_fn);
-        dec = mpz_get_str(NULL, 10, a);
-        dec_block = strlen(dec) + 1;
+        mp_get_memory_functions(NULL, NULL, &own->free_fn);
+        own->dec = mpz_get_str(NULL, 10, own->a);
+        own->dec_block = strlen(own->dec) + 1;
     }
     bench_free_value(av);
     bench_free_value(bv);
     bench_free_value(mv);
 
-    GmpLaneCtx cx;
-    cx.r0 = result[0];
-    cx.r1 = result[1];
-    cx.a = a;
-    cx.b = b;
-    cx.m = zm;
+    cx->r0 = own->result0;
+    cx->r1 = own->result1;
+    cx->a = own->a;
+    cx->b = own->b;
+    cx->m = own->m;
     /* one-limb rows: idiomatic GMP uses the _ui entries; hoist the word. */
-    cx.w = mpz_get_ui(b);
-    cx.dec = dec;
-    cx.dec_block = dec_block;
-    cx.free_fn = gmp_free_fn;
-    cx.iters = iters;
-    cx.warm_chunk = bench_boxed_warm_chunk(op, limbs);
-    double elapsed = 0.0;
+    cx->w = mpz_get_ui(own->b);
+    cx->dec = own->dec;
+    cx->dec_block = own->dec_block;
+    cx->free_fn = own->free_fn;
+    cx->iters = 0;
+    cx->warm_chunk = bench_boxed_warm_chunk(op, limbs);
+}
+
+/* Returns the elapsed SECONDS of the timed region (cx->iters operations);
+ * cx->warm_chunk > 0 pays the per-lane warm-up first, 0 skips it. */
+static double bench_gmp_lane_run(int op, GmpLaneCtx *cx) {
     switch (op) {
-    case BENCH_BOXED_ADD:      elapsed = bench_gmp_lane_add(&cx); break;
-    case BENCH_BOXED_SUB:      elapsed = bench_gmp_lane_sub(&cx); break;
-    case BENCH_BOXED_MUL:      elapsed = bench_gmp_lane_mul(&cx); break;
-    case BENCH_BOXED_SQR:      elapsed = bench_gmp_lane_sqr(&cx); break;
-    case BENCH_BOXED_DIV:      elapsed = bench_gmp_lane_div(&cx); break;
-    case BENCH_BOXED_MOD:      elapsed = bench_gmp_lane_mod(&cx); break;
-    case BENCH_BOXED_AND:      elapsed = bench_gmp_lane_band(&cx); break;
-    case BENCH_BOXED_OR:       elapsed = bench_gmp_lane_bor(&cx); break;
-    case BENCH_BOXED_XOR:      elapsed = bench_gmp_lane_bxor(&cx); break;
-    case BENCH_BOXED_SHL:      elapsed = bench_gmp_lane_shl(&cx); break;
-    case BENCH_BOXED_SHR:      elapsed = bench_gmp_lane_shr(&cx); break;
-    case BENCH_BOXED_GCD:      elapsed = bench_gmp_lane_gcd(&cx); break;
-    case BENCH_BOXED_ADD1:     elapsed = bench_gmp_lane_add1(&cx); break;
-    case BENCH_BOXED_SUB1:     elapsed = bench_gmp_lane_sub1(&cx); break;
-    case BENCH_BOXED_MUL1:     elapsed = bench_gmp_lane_mul1(&cx); break;
-    case BENCH_BOXED_DIV1:     elapsed = bench_gmp_lane_div1(&cx); break;
-    case BENCH_BOXED_CMP:      elapsed = bench_gmp_lane_cmp(&cx); break;
-    case BENCH_BOXED_NEG:      elapsed = bench_gmp_lane_neg(&cx); break;
-    case BENCH_BOXED_ABS:      elapsed = bench_gmp_lane_abs(&cx); break;
-    case BENCH_BOXED_NEG_BANG: elapsed = bench_gmp_lane_negbang(&cx); break;
-    case BENCH_BOXED_ABS_BANG: elapsed = bench_gmp_lane_absbang(&cx); break;
-    case BENCH_BOXED_POW:      elapsed = bench_gmp_lane_pow(&cx); break;
-    case BENCH_BOXED_POWMOD:   elapsed = bench_gmp_lane_powmod(&cx); break;
-    case BENCH_BOXED_LCM:      elapsed = bench_gmp_lane_lcm(&cx); break;
-    case BENCH_BOXED_ISQRT:    elapsed = bench_gmp_lane_isqrt(&cx); break;
-    case BENCH_BOXED_FROMSTR:  elapsed = bench_gmp_lane_fromstr(&cx); break;
-    case BENCH_BOXED_TOSTR:    elapsed = bench_gmp_lane_tostr(&cx); break;
+    case BENCH_BOXED_ADD:      return bench_gmp_lane_add(cx);
+    case BENCH_BOXED_SUB:      return bench_gmp_lane_sub(cx);
+    case BENCH_BOXED_MUL:      return bench_gmp_lane_mul(cx);
+    case BENCH_BOXED_SQR:      return bench_gmp_lane_sqr(cx);
+    case BENCH_BOXED_DIV:      return bench_gmp_lane_div(cx);
+    case BENCH_BOXED_MOD:      return bench_gmp_lane_mod(cx);
+    case BENCH_BOXED_AND:      return bench_gmp_lane_band(cx);
+    case BENCH_BOXED_OR:       return bench_gmp_lane_bor(cx);
+    case BENCH_BOXED_XOR:      return bench_gmp_lane_bxor(cx);
+    case BENCH_BOXED_SHL:      return bench_gmp_lane_shl(cx);
+    case BENCH_BOXED_SHR:      return bench_gmp_lane_shr(cx);
+    case BENCH_BOXED_GCD:      return bench_gmp_lane_gcd(cx);
+    case BENCH_BOXED_ADD1:     return bench_gmp_lane_add1(cx);
+    case BENCH_BOXED_SUB1:     return bench_gmp_lane_sub1(cx);
+    case BENCH_BOXED_MUL1:     return bench_gmp_lane_mul1(cx);
+    case BENCH_BOXED_DIV1:     return bench_gmp_lane_div1(cx);
+    case BENCH_BOXED_CMP:      return bench_gmp_lane_cmp(cx);
+    case BENCH_BOXED_NEG:      return bench_gmp_lane_neg(cx);
+    case BENCH_BOXED_ABS:      return bench_gmp_lane_abs(cx);
+    case BENCH_BOXED_NEG_BANG: return bench_gmp_lane_negbang(cx);
+    case BENCH_BOXED_ABS_BANG: return bench_gmp_lane_absbang(cx);
+    case BENCH_BOXED_POW:      return bench_gmp_lane_pow(cx);
+    case BENCH_BOXED_POWMOD:   return bench_gmp_lane_powmod(cx);
+    case BENCH_BOXED_LCM:      return bench_gmp_lane_lcm(cx);
+    case BENCH_BOXED_ISQRT:    return bench_gmp_lane_isqrt(cx);
+    case BENCH_BOXED_FROMSTR:  return bench_gmp_lane_fromstr(cx);
+    case BENCH_BOXED_TOSTR:    return bench_gmp_lane_tostr(cx);
     default:
         die("unknown GMP boxed benchmark operation");
     }
+    return 0.0;
+}
 
-    if (dec) gmp_free_fn(dec, dec_block);
-    mpz_clears(a, b, zm, result[0], result[1], NULL);
+static void bench_gmp_lane_teardown(GmpLaneOwn *own) {
+    if (own->dec) own->free_fn(own->dec, own->dec_block);
+    mpz_clears(own->a, own->b, own->m, own->result0, own->result1, NULL);
+}
+
+/* Ascending-double comparator for the quartet statistics. */
+static int bench_double_cmp(const void *pa, const void *pb) {
+    double a = *(const double *)pa, b = *(const double *)pb;
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+static double bench_gmp_boxed_result_churn(
+    int op, int32_t limbs, int iters) {
+    GmpLaneOwn own;
+    GmpLaneCtx cx;
+    bench_gmp_lane_setup(op, limbs, &own, &cx);
+    cx.iters = iters;
+    double elapsed = bench_gmp_lane_run(op, &cx);
+    bench_gmp_lane_teardown(&own);
     return elapsed * 1e9 / (double)iters;
+}
+
+/*
+ * Quartet primitives for the paired sweep.  Each timed block rebuilds and
+ * tears down its OWN lane context so no block ever runs while the other
+ * lane's operands and destinations are resident: leaving both contexts
+ * alive moved the cheap-op cells by +-30% purely through allocation
+ * layout (the documented 4K page-offset hazard), independent of block
+ * length.  Per-block re-setup keeps every timed region under the same
+ * heap discipline as the historical sequential screen -- operand
+ * construction always follows the other lane's teardown -- and malloc's
+ * size-class reuse then hands back the same chunks block after block.
+ * Returns elapsed SECONDS for the whole block (iters operations).
+ */
+static double bench_boxed_churn_block(int op, int32_t limbs, int iters) {
+    BenchLaneCtx cx;
+    bench_boxed_lane_setup(op, limbs, 1, &cx);
+    cx.warm_chunk = 0;                 /* lanes are pre-warmed per rep */
+    cx.iters = iters;
+    double elapsed = bench_boxed_lane_run(op, &cx);
+    bench_boxed_lane_teardown(op, &cx);
+    return elapsed;
+}
+
+static double bench_gmp_churn_block(int op, int32_t limbs, int iters) {
+    GmpLaneOwn own;
+    GmpLaneCtx cx;
+    bench_gmp_lane_setup(op, limbs, &own, &cx);
+    cx.warm_chunk = 0;
+    cx.iters = iters;
+    double elapsed = bench_gmp_lane_run(op, &cx);
+    bench_gmp_lane_teardown(&own);
+    return elapsed;
+}
+
+/* Untimed per-rep warm-up: the full warm loop of the one-shot churn, no
+ * timed iterations, context torn down again so nothing stays resident. */
+static void bench_boxed_churn_warm(int op, int32_t limbs) {
+    BenchLaneCtx cx;
+    bench_boxed_lane_setup(op, limbs, 1, &cx);
+    cx.iters = 0;
+    (void)bench_boxed_lane_run(op, &cx);
+    bench_boxed_lane_teardown(op, &cx);
+}
+
+static void bench_gmp_churn_warm(int op, int32_t limbs) {
+    GmpLaneOwn own;
+    GmpLaneCtx cx;
+    bench_gmp_lane_setup(op, limbs, &own, &cx);
+    cx.iters = 0;
+    (void)bench_gmp_lane_run(op, &cx);
+    bench_gmp_lane_teardown(&own);
 }
 
 static void check_boxed_mul_rect_against_gmp(int32_t na, int32_t nb) {
@@ -6036,6 +6153,116 @@ int main(int argc, char **argv) {
             double want = cell_target_ns / fastest;
             int iters = want > 40000000.0 ? 40000000
                       : (want < 1.0 ? 1 : (int)want);
+            /*
+             * Paired ABBA quartets (the default two-lane verdict).  The old
+             * shape timed each lane's whole window back-to-back, so a
+             * millisecond-scale host-load burst landed on ONE lane and
+             * flipped small-margin verdicts (cells that win 0.87x in
+             * accurate mode screened at 1.02-1.05x).  Instead, split each
+             * rep's window into short blocks -- 10..24 per lane, >=100us
+             * each, block iterations derived from the same pilot -- and
+             * interleave them as T,G,G,T / G,T,T,G quartets.  A quartet is
+             * ~4 block-lengths wide, so slow drift (thermal, DVFS) cancels
+             * to first order inside it, and a burst inflates T and G blocks
+             * of the SAME quartet together.  Each quartet yields one ratio
+             * (T1+T2)/(G1+G2); the cell verdict is the MEDIAN of the
+             * quartet log-ratios, so a burst must corrupt half of all
+             * quartets across all reps -- not any single 2ms stretch -- to
+             * move the reported ratio.
+             *
+             * Printed columns in this regime: gm is the median per-op GMP
+             * block time (a genuine lane representative); tw is
+             * gm * exp(median log-ratio), the quartet-consistent Tungsten
+             * representative, so downstream tw/gm IS the robust paired
+             * ratio.  gm_iqr is the IQR of the per-op GMP block times;
+             * tw_iqr maps the log-ratio IQR onto ns as
+             * gm * (exp(q3) - exp(q1)) -- the spread of the quartet-implied
+             * Tungsten time.  Row format is unchanged.
+             *
+             * Every block rebuilds its own lane context (see the quartet
+             * primitives): with both contexts resident the cheap-op cells
+             * moved +-30% from allocation-layout luck alone.  The block
+             * length floor covers that rebuild cost -- >=100us and >=3x
+             * the measured per-pair setup cost -- so re-setup stays a few
+             * percent of the timed region and wide operands simply get
+             * fewer, longer blocks.
+             *
+             * The sequential min-of-reps path below remains for the
+             * tungsten-only sweep (no partner lane) and for cells whose
+             * calibrated window holds fewer than 4 operations (the FFT
+             * band), which keep their historical median+IQR semantics.
+             */
+            if (!tungsten_only && iters >= 4) {
+                /* Measure one setup+teardown round trip per lane; it also
+                 * primes malloc's free lists for the per-block rebuilds. */
+                double setup_start = bench_now();
+                bench_boxed_churn_block(op, limbs, 1);
+                bench_gmp_churn_block(op, limbs, 1);
+                double pair_setup_ns =
+                    (bench_now() - setup_start) * 1e9 - 2.0 * fastest;
+                double block_floor_ns = 3.0 * pair_setup_ns;
+                if (block_floor_ns < 1.0e5) block_floor_ns = 1.0e5;
+                int blocks = (int)(cell_target_ns / block_floor_ns);
+                if (blocks > 24) blocks = 24;
+                if (blocks > iters) blocks = iters;
+                blocks &= ~1;                      /* two T + two G per quartet */
+                if (blocks < 2) blocks = 2;
+                int block_iters = iters / blocks;
+                if (block_iters < 1) block_iters = 1;
+                enum { QUARTET_KEEP = 1024, BLOCK_KEEP = 2048 };
+                static double lr[QUARTET_KEEP];    /* quartet log-ratios */
+                static double gb[BLOCK_KEEP];      /* GMP per-op block ns */
+                int lr_n = 0, gb_n = 0;
+                for (int r = 0; r < cell_runs; r++) {
+                    /* Warm each lane before its first timed quartet, the
+                     * warm order rotating with the rep like the historical
+                     * alternate-lane-order loop. */
+                    if (r & 1) {
+                        bench_gmp_churn_warm(op, limbs);
+                        bench_boxed_churn_warm(op, limbs);
+                    } else {
+                        bench_boxed_churn_warm(op, limbs);
+                        bench_gmp_churn_warm(op, limbs);
+                    }
+                    for (int q = 0; q < blocks / 2; q++) {
+                        double t1, g1, g2, t2;
+                        if (((q + r) & 1) == 0) {  /* T,G,G,T */
+                            t1 = bench_boxed_churn_block(op, limbs, block_iters);
+                            g1 = bench_gmp_churn_block(op, limbs, block_iters);
+                            g2 = bench_gmp_churn_block(op, limbs, block_iters);
+                            t2 = bench_boxed_churn_block(op, limbs, block_iters);
+                        } else {                   /* G,T,T,G */
+                            g1 = bench_gmp_churn_block(op, limbs, block_iters);
+                            t1 = bench_boxed_churn_block(op, limbs, block_iters);
+                            t2 = bench_boxed_churn_block(op, limbs, block_iters);
+                            g2 = bench_gmp_churn_block(op, limbs, block_iters);
+                        }
+                        double tsum = t1 + t2, gsum = g1 + g2;
+                        if (tsum > 0.0 && gsum > 0.0 && lr_n < QUARTET_KEEP)
+                            lr[lr_n++] = log(tsum / gsum);
+                        double per_op = 1e9 / (double)block_iters;
+                        if (gb_n + 2 <= BLOCK_KEEP) {
+                            gb[gb_n++] = g1 * per_op;
+                            gb[gb_n++] = g2 * per_op;
+                        }
+                    }
+                }
+                if (lr_n == 0 || gb_n == 0)
+                    die("boxed sweep produced no quartets");
+                qsort(lr, (size_t)lr_n, sizeof lr[0], bench_double_cmp);
+                qsort(gb, (size_t)gb_n, sizeof gb[0], bench_double_cmp);
+                double ratio_med = exp(lr[lr_n / 2]);
+                double ratio_lo = exp(lr[lr_n / 4]);
+                double ratio_hi = exp(lr[(3 * lr_n) / 4]);
+                double gm_med = gb[gb_n / 2];
+                printf("boxed\t%s\t%d\t%d\t%.3f\t%.3f\t%.3f\t%.3f\n",
+                       argv[2], limbs, blocks * block_iters,
+                       gm_med * ratio_med, gm_med,
+                       gm_med * (ratio_hi - ratio_lo),
+                       gb[(3 * gb_n) / 4] - gb[gb_n / 4]);
+                fflush(stdout);                    /* stream to the driver */
+                continue;
+            }
             double tw_best = 0.0, gm_best = 0.0;
             enum { SWEEP_KEEP = 64 };
             double tw_s[SWEEP_KEEP], gm_s[SWEEP_KEEP];

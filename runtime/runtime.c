@@ -1617,15 +1617,26 @@ BN_WORD_FIXED_TWO_FN(bn_sub_word2_a64_fixed, "subs", "sbcs", "lo")
 #undef BN_WORD_LOAD2
 #endif
 
-/* Dynamic-length small tail copy. The platform memmove's dispatch
- * prologue was 20% of the whole add1@16 profile; below ~48 limbs the
- * repo's plain single-q vector loop (the bigint_copy_signed shape) beats
- * it, above that memcpy's wide path wins. */
+/* Dynamic-length tail copy for the addsub kernels' carry-death tails.
+ * These tails are write-only in the store-forward window (the only later
+ * touch is the sub top-limb length check), so wider stores win — the
+ * OPPOSITE regime from the copy-class kernels (neg/abs/copy), whose limb 0
+ * is immediately GPR-re-read and which keep their own pair/fixed loops.
+ * Measured in-context (sub1 boxed churn, tail lengths 1..126, min-of-9):
+ *   - below 4 limbs the plain pair loop wins (any wide shape pays its
+ *     branches; the platform memmove's dispatch prologue alone was 20% of
+ *     the whole add1@16 profile);
+ *   - from 4 limbs up, 64B chunks plus a final possibly-overlapping 32B
+ *     pair from the end (libc memcpy's own medium-copy trick, minus its
+ *     dispatch and alignment prologue — no scalar remainder loop) beat the
+ *     pair loop by 8-14% whole-op and beat calling memcpy at every
+ *     measured width, still ~9% ahead at 126-limb tails.
+ * The constant-size memcpy chunks below inline to ldp/stp q pairs at -O2+,
+ * which keeps this legal before arm_neon.h enters the file (and portable:
+ * every target inlines fixed 64B/32B copies). */
 static inline void bn_copy_tail(uint64_t *restrict dst,
                                 const uint64_t *restrict src, int32_t n) {
-    if (n <= 48) {
-        /* plain pair copies fuse to ldp/stp; arm_neon.h is not in scope
-         * this early in the file and isn't needed for this width */
+    if (n < 4) {
         int32_t i = 0;
         for (; i + 2 <= n; i += 2) {
             uint64_t lo = src[i], hi = src[i + 1];
@@ -1635,7 +1646,19 @@ static inline void bn_copy_tail(uint64_t *restrict dst,
         if (i < n) dst[i] = src[i];
         return;
     }
-    memcpy(dst, src, (size_t)n * sizeof(uint64_t));
+    /* Coverage: the chunk loop ends at i = 8*(n/8); rem = n-i in [0,8).
+     * rem in [1,4] is covered by the end pair alone (i >= n-4); rem in
+     * (4,8) needs the head pair at i too (i+4 >= n-4). Re-stored bytes are
+     * identical, and dst/src never overlap each other (restrict). */
+    int32_t i = 0;
+    for (; i + 8 <= n; i += 8)
+        memcpy(dst + i, src + i, 64);
+    int32_t rem = n - i;
+    if (rem != 0) {
+        if (rem > 4)
+            memcpy(dst + i, src + i, 32);
+        memcpy(dst + n - 4, src + n - 4, 32);
+    }
 }
 
 static inline __attribute__((always_inline))
@@ -1937,7 +1960,7 @@ static BN_ADDSUB_MAG_ATTR WBigint *mag_add(
         carry = r->limbs[i] == 0;
     }
     if (i < alen)
-        memcpy(r->limbs + i, a + i, (size_t)(alen - i) * sizeof(uint64_t));
+        bn_copy_tail(r->limbs + i, a + i, alen - i);
     if (carry) { r->limbs[alen] = carry; r->size = alen + 1; }
     else       { r->size = alen; }
     return r;
@@ -1956,7 +1979,7 @@ static BN_ADDSUB_MAG_ATTR WBigint *mag_sub(
         borrow = ai == 0;
     }
     if (i < alen)
-        memcpy(r->limbs + i, a + i, (size_t)(alen - i) * sizeof(uint64_t));
+        bn_copy_tail(r->limbs + i, a + i, alen - i);
     r->size = alen;
     while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
     return r;

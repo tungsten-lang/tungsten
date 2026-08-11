@@ -68,6 +68,7 @@ bin/tungsten doc/examples/animations/generative_point_cloud.w
 bin/tungsten doc/examples/animations/cosine_lattice_point_cloud.w
 bin/tungsten doc/examples/animations/singular_tangent_point_cloud.w
 bin/tungsten doc/examples/animations/double_phase_tangent_point_cloud.w
+bin/tungsten doc/examples/animations/near_pole_point_cloud.w
 bin/tungsten doc/examples/animations/yin_yang_koi_point_cloud.w
 bin/tungsten doc/examples/animations/uncertain_light_flame_point_cloud.w
 bin/tungsten doc/examples/animations/raymarched_flower_point_cloud.w

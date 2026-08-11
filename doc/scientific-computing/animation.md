@@ -27,7 +27,7 @@ last = timeline.frame(timeline.frame_count - 1).to_data
 description = timeline.to_data
 ```
 
-Seven runnable examples exercise one or more ordered `PlotPoints` nodes and
+Eight runnable examples exercise one or more ordered `PlotPoints` nodes and
 deterministic retained tracks:
 
 - [`generative_point_cloud.w`](../examples/animations/generative_point_cloud.w)
@@ -41,6 +41,10 @@ deterministic retained tracks:
 - [`double_phase_tangent_point_cloud.w`](../examples/animations/double_phase_tangent_point_cloud.w)
   uses source `y = i / 250`, alpha 66/255, and a `-2t` harmonic, likewise
   retaining 19,800 of 20,000 samples;
+- [`near_pole_point_cloud.w`](../examples/animations/near_pole_point_cloud.w)
+  translates [ア / A-na5's original `#つぶやきProcessing` sketch](https://x.com/yuruyurau/status/2087125958272909624),
+  retaining all 10,000 ordered samples—including finite excursions near the
+  formula's formal `1/k` pole—and records that the source license is not stated;
 - [`yin_yang_koi_point_cloud.w`](../examples/animations/yin_yang_koi_point_cloud.w)
   applies one compact Vogel/comma expression to paired formula indices,
   producing two surreal koi as exact central reflections in one ordered point

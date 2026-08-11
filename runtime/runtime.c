@@ -12568,7 +12568,15 @@ static int bn_div_recip_reserve(
 
 /* Low rn limbs of a*b.  Barrett reduction below never observes the upper
  * half of q3*D; for small operands, triangular addmul rows are cheaper than
- * computing and then discarding a complete balanced product. */
+ * computing and then discarding a complete balanced product.
+ *
+ * When a row is cut short by the operand (row == bn) rather than by the
+ * result window (row == rn - i), the addmul carry lands at rp[i + bn],
+ * which is still INSIDE the low-rn window and must be propagated.
+ * Discarding it (as this function did until 2026-08) made the Barrett
+ * certificate below fail whenever q3 trimmed to vlen limbs (~3 of 4
+ * random operand pairs), silently double-paying the 24..56-limb band:
+ * a full Barrett attempt, then the ordinary division it fell back to. */
 static void bn_mul_low(
     uint64_t *rp, int32_t rn,
     const uint64_t *a, int32_t an,
@@ -12585,7 +12593,12 @@ static void bn_mul_low(
     int32_t rows = an < rn ? an : rn;
     for (int32_t i = 0; i < rows; i++) {
         int32_t row = bn < rn - i ? bn : rn - i;
-        (void)bn_addmul_1(rp + i, b, row, a[i]);
+        uint64_t carry = bn_addmul_1(rp + i, b, row, a[i]);
+        for (int32_t p = i + row; carry && p < rn; p++) {
+            uint64_t old = rp[p];
+            rp[p] = old + carry;
+            carry = rp[p] < old;
+        }
     }
 }
 
@@ -12619,10 +12632,13 @@ static void bn_mul_low(
  *
  * sc needs 2n limbs and must not alias bn_ws (the full products own it).
  *
- * STATUS: correct but currently unwired — measured on Apple M5 Max
- * (LLVM 22, -O3 -flto -mcpu=apple-m5) it does NOT clear the cost bar that
- * would let a Newton-inversion top quotient beat the sqrt divappr spine.
- * mulhigh(n)/mul(n), median of 9:
+ * STATUS: wired into the certified-reciprocal division paths below (the
+ * 2n/n quotient step and the remainder-only Barrett arm), which consume
+ * only the top part of their reciprocal products and run where the pool
+ * cannot help the incumbent.  It remains NOT taken for the sqrt spine —
+ * measured on Apple M5 Max (LLVM 22, -O3 -flto -mcpu=apple-m5) it does
+ * not clear the cost bar that would let a Newton-inversion top quotient
+ * beat the sqrt divappr spine.  mulhigh(n)/mul(n), median of 9:
  *
  *     n      sequential   parallel-allowed (the sqrt path's regime)
  *     512      0.87           1.17
@@ -12668,9 +12684,8 @@ static void bn_mulhi_base(uint64_t *rp, const uint64_t *a, const uint64_t *b,
     }
 }
 
-static __attribute__((unused))
-void bn_mulhi_approx(uint64_t *rp, const uint64_t *a, const uint64_t *b,
-                     int32_t n, uint64_t *sc) {
+static void bn_mulhi_approx(uint64_t *rp, const uint64_t *a,
+                            const uint64_t *b, int32_t n, uint64_t *sc) {
     if (n <= BN_MULHI_BASE) {
         bn_mulhi_base(rp, a, b, n);
         return;
@@ -12805,7 +12820,10 @@ static int mag_divmod_reciprocal_certified(
 
     size_t guard = BN_DIV_RECIP_Q_GUARD_LIMBS;
     size_t reciprocal_len = n + guard + 1;
-    size_t product_len = 3 * n + guard + 2;
+    /* Sized for the widest client: the warm-fill numerator (2n+g+1), the
+     * half-width quotient product (2n+4), and the short-product layout
+     * rp[0..n+3) + 2*(n+2)-limb scratch = 3n+7. */
+    size_t product_len = 3 * n + guard + 6;
     if (!bn_div_recip_reserve(
             &cache->reciprocal, &cache->reciprocal_cap, reciprocal_len) ||
         !bn_div_recip_reserve(
@@ -12846,13 +12864,6 @@ static int mag_divmod_reciprocal_certified(
      */
     if (r_out && !q_out && vlen >= BN_DIV_BARRETT_R_MIN) {
         size_t barrett_product_len = 2 * n + 2;
-        if (!bn_div_recip_reserve(
-                &cache->product, &cache->product_cap,
-                barrett_product_len) ||
-            !bn_div_recip_reserve(
-                &cache->verification, &cache->verification_cap,
-                barrett_product_len))
-            return 0;
 
 /* Below this divisor width the two Barrett products sit at the parallel-Toom
  * floor: the pool's sleep/wake between them costs more than the split saves
@@ -12860,46 +12871,93 @@ static int mag_divmod_reciprocal_certified(
 #ifndef BN_DIV_RECIP_PAR_MIN
 #define BN_DIV_RECIP_PAR_MIN 768
 #endif
+/* In the forced-sequential band the q3 estimate comes from a Mulders short
+ * product over one extra live limb of U and the FULL cached reciprocal
+ * (floor(B^(2n+1)/D), n+2 limbs) instead of the complete (n+1)x(n+1)
+ * q1*mu product whose low half is discarded: measured (M5 Max, LLVM 22)
+ * mulhigh(N)/mul(N) = 0.63..0.87 sequentially across N = 26..770.  With
+ * pool-eligible products (vlen >= BN_DIV_RECIP_PAR_MIN) the short product
+ * loses (1.07-1.22x) and the incumbent stays.  Error bound: writing
+ * A = floor(U/B^(n-2)) (n+2 limbs) and R = floor(B^(2n+1)/D),
+ *
+ *   U*R = A*R*B^(n-2) + (U mod B^(n-2))*R,
+ *
+ * bn_mulhi_approx returns rp <= H = floor(A*R/B^(n+1)) with
+ * H - rp <= (n+2)*B, so with Δ collecting the three dropped tails
+ * (mulhigh deficit, A*R mod B^(n+1), (U mod B^(n-2))*R < 2*B^(2n-1)):
+ *
+ *   U*R = rp*B^(2n-1) + Δ,   0 <= Δ < (n+3)*B^(2n).
+ *
+ * For q̂ = floor(rp/B^2) and q̄ = floor(U*R/B^(2n+1)) that gives
+ * q̄ ∈ [q̂, q̂+1], and 0 <= U/D - U*R/B^(2n+1) < 1/B puts the true
+ * quotient in [q̄, q̄+1], so U - q̂*D ∈ [0, 3D): exactly the two
+ * correction subtractions the certificate below already allows. */
+#ifndef BN_DIV_RECIP_MULHI_R_MIN
+#define BN_DIV_RECIP_MULHI_R_MIN 8
+#endif
         int sequential_products = vlen < BN_DIV_RECIP_PAR_MIN;
+        int use_mulhi = sequential_products &&
+                        vlen >= BN_DIV_RECIP_MULHI_R_MIN;
+        /* mulhigh needs rp (n+3 limbs) plus 2*(n+2) scratch that must not
+         * alias bn_ws (its internal full product owns bn_ws). */
+        size_t first_product_len =
+            use_mulhi ? 3 * n + 7 : barrett_product_len;
+        if (!bn_div_recip_reserve(
+                &cache->product, &cache->product_cap,
+                first_product_len) ||
+            !bn_div_recip_reserve(
+                &cache->verification, &cache->verification_cap,
+                barrett_product_len))
+            return 0;
+
         if (sequential_products) bn_toom_parallel_depth++;
 #if BN_DIV_RECIP_DIFF28 || BN_BENCH_RUNTIME_DIV_RECIP_DIFF28_KNOB
         int use_diff28 = BN_DIV_RECIP_DIFF28_ENABLED();
         if (use_diff28) bn_div_recip_diff28_depth++;
 #endif
 
-        const uint64_t *q1 = u + n - 1;
-        const uint64_t *mu = cache->reciprocal + 1;
-        uint64_t *product_out = cache->product;
-        int product_redirected = 0;
+        const uint64_t *q3;
+        if (use_mulhi) {
+            bn_mulhi_approx(cache->product, u + n - 2,
+                            cache->reciprocal, vlen + 2,
+                            cache->product + (n + 3));
+            q3 = cache->product + 2;
+        } else {
+            const uint64_t *q1 = u + n - 1;
+            const uint64_t *mu = cache->reciprocal + 1;
+            uint64_t *product_out = cache->product;
+            int product_redirected = 0;
 #if BN_EQ_PAGE_HAZARD_GUARD
-        /* The TLS product buffer can land close enough to either source's
-         * page offset that streamed stores false-alias later loads.  From
-         * eight limbs up, always choosing the page-safe arena costs less than
-         * the residual layout modes; the tiny four-limb leaf redirects only
-         * when the explicit hazard test fires.  Copy the complete product
-         * back before q3 aliases it.  The length guard preserves the redirect
-         * arena's 128-result-limb contract. */
-        if (barrett_product_len <= 128 &&
-            (vlen >= 8 || BN_EQ_PAGE_HAZARD_FORCE ||
-             bn_page_hazard(product_out, q1) ||
-             bn_page_hazard(product_out, mu))) {
-            uint64_t *safe = bn_eq_redirect_slot(q1, mu);
-            if (safe) {
-                product_out = safe;
-                product_redirected = 1;
+            /* The TLS product buffer can land close enough to either
+             * source's page offset that streamed stores false-alias later
+             * loads.  From eight limbs up, always choosing the page-safe
+             * arena costs less than the residual layout modes; the tiny
+             * four-limb leaf redirects only when the explicit hazard test
+             * fires.  Copy the complete product back before q3 aliases
+             * it.  The length guard preserves the redirect arena's
+             * 128-result-limb contract. */
+            if (barrett_product_len <= 128 &&
+                (vlen >= 8 || BN_EQ_PAGE_HAZARD_FORCE ||
+                 bn_page_hazard(product_out, q1) ||
+                 bn_page_hazard(product_out, mu))) {
+                uint64_t *safe = bn_eq_redirect_slot(q1, mu);
+                if (safe) {
+                    product_out = safe;
+                    product_redirected = 1;
+                }
             }
-        }
 #endif
-        if (vlen == 4)
-            bigint_mul_schoolbook_into(product_out, q1, 5, mu, 5);
-        else
-            bigint_mul_dispatch(
-                product_out, q1, vlen + 1, mu, vlen + 1);
-        if (product_redirected)
-            memcpy(cache->product, product_out,
-                   barrett_product_len * sizeof(uint64_t));
+            if (vlen == 4)
+                bigint_mul_schoolbook_into(product_out, q1, 5, mu, 5);
+            else
+                bigint_mul_dispatch(
+                    product_out, q1, vlen + 1, mu, vlen + 1);
+            if (product_redirected)
+                memcpy(cache->product, product_out,
+                       barrett_product_len * sizeof(uint64_t));
 
-        const uint64_t *q3 = cache->product + n + 1;
+            q3 = cache->product + n + 1;
+        }
         int32_t q3_len = vlen + 1;
         while (q3_len > 0 && q3[q3_len - 1] == 0)
             q3_len--;
@@ -12972,47 +13030,90 @@ static int mag_divmod_reciprocal_certified(
         return 1;
     }
 
-    bigint_mul_dispatch(
-        cache->product, u, ulen,
-        cache->reciprocal, (int32_t)reciprocal_len);
+    /* Quotient step.  Only the top n+2+g limbs of U*R are ever consumed
+     * (g certificate limbs at B^(2n) plus the quotient), so the full
+     * 2n-by-(n+g+1) product is twice the needed work.  Both replacements
+     * drop the low n-2 limbs of U up front: with A = floor(U/B^(n-2))
+     * (n+2 limbs, all live) and R = floor(B^(2n+g)/D),
+     *
+     *   U*R = A*R*B^(n-2) + (U mod B^(n-2))*R,
+     *
+     * and the dropped tail is < 2*B^(2n-1).  rp names n+3 limbs
+     * approximating floor(A*R/B^(n+1)) from below:
+     *
+     *   - exact half-width product (pool-eligible widths): rp is the top
+     *     of the balanced (n+2)x(n+2) A*R, deficit only the sub-anchor
+     *     tails, Δ < B^(2n) in U*R terms;
+     *   - Mulders short product (below the pool floor, or when a caller
+     *     already forced products sequential): bn_mulhi_approx adds a
+     *     deficit <= (n+2)*B at B^(n+1), so Δ < (n+3)*B^(2n).
+     *
+     * With rp = Q̂*B^2 + rp[1]*B + rp[0],
+     *
+     *   Q̂ <= U*R/B^(2n+g) <= U/D < Q̂ + (rp[1] + n + 5)/B,
+     *
+     * (the n+5 collects Δ, rp[0], and the U/D - U*R/B^(2n+g) < B^-g gap),
+     * so rp[1] <= B - (n+5) certifies floor(U/D) = Q̂ outright — the
+     * all-ones probe of the exact product's certificate limbs becomes a
+     * headroom test on the one approximate certificate limb, failing with
+     * probability ~n/B instead of ~1/B; failure still falls back to the
+     * ordinary division path.  Measured (M5 Max): the incumbent product
+     * is 98-100% of this divide's cost; the half-width product more than
+     * halves it at 512+ limbs (the two-lane rect pool only ever recovered
+     * the unbalance penalty) and the short product wins 0.58x at 256. */
+    _Static_assert(BN_DIV_RECIP_Q_GUARD_LIMBS == 1,
+                   "the rp[1] headroom certificate is derived for g == 1");
+#ifndef BN_DIV_RECIP_MULHI_Q_MAX
+#define BN_DIV_RECIP_MULHI_Q_MAX 382
+#endif
+    const uint64_t *rp;
+    if (vlen < BN_DIV_RECIP_MULHI_Q_MAX || bn_toom_parallel_depth) {
+        /* rp = product[0..n+3); scratch above it (2n+4, never bn_ws). */
+        bn_mulhi_approx(cache->product, u + n - 2,
+                        cache->reciprocal, vlen + 2,
+                        cache->product + (n + 3));
+        rp = cache->product;
+    } else {
+        bigint_mul_dispatch(
+            cache->product, u + n - 2, vlen + 2,
+            cache->reciprocal, (int32_t)reciprocal_len);
+        rp = cache->product + n + 1;
+    }
 
-    for (size_t i = 2 * n; i < 2 * n + guard; i++) {
-        if (cache->product[i] != UINT64_MAX) {
-            const uint64_t *q_limbs =
-                cache->product + 2 * n + guard;
-            int32_t q_len = vlen + 1;
-            while (q_len > 0 && q_limbs[q_len - 1] == 0)
-                q_len--;
-            if (r_out) {
-                size_t verification_len = 2 * n + 2;
-                if (!bn_div_recip_reserve(
-                        &cache->verification,
-                        &cache->verification_cap,
-                        verification_len))
-                    return 0;
-                memset(cache->verification, 0,
-                       verification_len * sizeof(uint64_t));
-                bigint_mul_dispatch(
-                    cache->verification,
-                    q_limbs, q_len, v, vlen);
-                WBigint *r = bigint_alloc_raw_hot(vlen);
-                (void)bn_sub_n(
-                    r->limbs, u, cache->verification, vlen);
-                r->size = vlen;
-                while (r->size > 0 && r->limbs[r->size - 1] == 0)
-                    r->size--;
-                *r_out = r;
-            }
-            if (q_out) {
-                WBigint *q = bigint_alloc_raw_hot(vlen + 1);
-                memcpy(q->limbs, q_limbs,
-                       (size_t)q_len * sizeof(uint64_t));
-                q->size = q_len;
-                *q_out = q;
-            }
-            BN_DIV_ROUTE_COUNT(bn_div_route_recip_hit);
-            return 1;
+    if (rp[1] <= ~(uint64_t)(vlen + 8)) {
+        const uint64_t *q_limbs = rp + 2;
+        int32_t q_len = vlen + 1;
+        while (q_len > 0 && q_limbs[q_len - 1] == 0)
+            q_len--;
+        if (r_out) {
+            size_t verification_len = 2 * n + 2;
+            if (!bn_div_recip_reserve(
+                    &cache->verification,
+                    &cache->verification_cap,
+                    verification_len))
+                return 0;
+            memset(cache->verification, 0,
+                   verification_len * sizeof(uint64_t));
+            bigint_mul_dispatch(
+                cache->verification,
+                q_limbs, q_len, v, vlen);
+            WBigint *r = bigint_alloc_raw_hot(vlen);
+            (void)bn_sub_n(
+                r->limbs, u, cache->verification, vlen);
+            r->size = vlen;
+            while (r->size > 0 && r->limbs[r->size - 1] == 0)
+                r->size--;
+            *r_out = r;
         }
+        if (q_out) {
+            WBigint *q = bigint_alloc_raw_hot(vlen + 1);
+            memcpy(q->limbs, q_limbs,
+                   (size_t)q_len * sizeof(uint64_t));
+            q->size = q_len;
+            *q_out = q;
+        }
+        BN_DIV_ROUTE_COUNT(bn_div_route_recip_hit);
+        return 1;
     }
     BN_DIV_ROUTE_COUNT(bn_div_recip_cert_fail);
     return 0;

@@ -1051,3 +1051,81 @@ error bound ERR(n) <= 2*ERR(m)+1 proven in comments) but unused.
 **Condition to take it:** single-core targets (no pool asymmetry), or a
 cheap wraparound residual via mulmod B^m +/- 1 that dodges the
 cancellation.  isqrt@4096/@8192 stand at 0.92/0.90 vs GMP without it.
+## mulhigh wired: certified-reciprocal division (2026-08-11 addendum)
+
+DRAFT addendum to the "mulhigh (Mulders short product)" entry — for
+NOTED_TRADEOFFS.md when this lands (diff currently applied, uncommitted).
+
+The 2026-08-11 "gated OFF" verdict was measured against the isqrt Newton
+chain, where the competitor is ONE balanced pool-accelerated multiply.
+Re-examined where the competitor is not that, three of five candidates
+were negatives and two landed (plus one bug found by the route counters):
+
+**Taken (wired, ABBA battery: bench_big_math boxed cells, medians of 4/side,
+M5 Max, LLVM 22, -O3 -flto -mcpu=apple-m5):**
+
+1. `mag_divmod_reciprocal_certified` quotient step (2n/n, vlen>=256).
+   The incumbent full 2n x (n+2) U*R product measured 98-100% of the whole
+   certified divide, and only its top n+3 limbs are consumed.  Dropping
+   the low n-2 limbs of U up front (tail < 2*B^(2n-1)) leaves a balanced
+   (n+2)^2 product; below the pool floor (BN_DIV_RECIP_MULHI_Q_MAX=382,
+   or whenever bn_toom_parallel_depth is set) a Mulders short product
+   beats even that.  The all-ones certificate probe becomes a headroom
+   test rp[1] <= B-(vlen+9) proving the quotient exact outright
+   (derivation in the code comment); failure ~vlen/B, fallback unchanged.
+   Cells: div@256 0.57x, div@512 0.42x, div@1024 0.58x (controls
+   div@24/64/128 = 1.00; the two-lane rect pool had only ever recovered
+   the unbalance penalty, so the sequential short product still wins).
+
+2. Barrett remainder-only arm, forced-sequential band
+   (BN_DIV_RECIP_MULHI_R_MIN=8 .. BN_DIV_RECIP_PAR_MIN-1): first product
+   (n+1)^2 full with only the top half consumed, pool already disabled —
+   exact mulhigh shape.  The same one-extra-limb anchor keeps the
+   existing <= 2 correction certificate (q_hat in [q-2, q], derivation in
+   code; 30k-case fuzz measured zero corrections and zero cert failures).
+   Cells: mod@128 0.96x, mod@256 0.92x, mod@512 0.91x.  Above the band
+   the pool makes the full product cheaper (mulhigh 1.07-1.22x): incumbent
+   stays.
+
+3. `bn_mul_low` dropped-carry fix (found by the wiring's route counters):
+   rows cut short by the operand rather than the result window discarded
+   their addmul carry INSIDE the low-rn window, so the Barrett
+   verification product was short at limb n whenever q3 trimmed to vlen
+   limbs (~3 of 4 random operand pairs).  The certificate caught it —
+   correctness always held — but every such mod in the 24..56 triangular
+   band silently paid a full failed Barrett attempt plus the Knuth
+   division it fell back to.  Random-operand probe: mod@24/32/48
+   whole-call 0.37x/0.38x/0.39x once the certificate passes; the battery
+   cell mod@24 (a lucky fixed operand pair that already certified) still
+   shows 0.85x from the mulhigh product swap.
+
+**Rejected (measured):**
+
+- w_prime_modctx k>96 Barrett arm: q1*mu is only 29-38% of a ctx mulmod,
+  so mulhigh predicts 0.89-0.97x mulmod at k=97..256 and ~1.0x at 384+
+  (pool reaches the incumbent there).  Two premises of the plan were
+  wrong: BPSW spawns no worker threads, and its band (k<=96, in the bench
+  k<=17) is Montgomery — the Barrett arm only runs above 6144-bit moduli.
+  Not worth widening the cached mu by two limbs.  Revisit if
+  W_MONT_MAX_LIMBS drops.
+
+- tostr P_j path (w_dec_divmod_pj): never rides the certified-reciprocal
+  cache (P_j is not normalized; called out in its own comment block).
+  Its per-level product1 has the same top-consumed shape, but summing the
+  measured shares (top split 6-9%, balanced levels 30-56% of divisions
+  that are themselves 25%/14%/8%.. of tostr) puts product1 at ~25-30% of
+  tostr end-to-end; a 15% Mulders saving on that is ~3-4% — under the
+  cell noise floor, against a delicate <=5-correction budget that the
+  mulhigh deficit would eat into.  Battery: tostr@256 0.99x, tostr@1024
+  0.98x (untouched, as routed).
+
+- Fixed-kernel-riding recursion (candidate 3): the equal-shape dispatch
+  already lands on the tuned bn_mul_eq ladder; direct calls measure
+  0.993-0.999x at k=36..578 (0.98 at k=20).  Nothing to take, and the
+  0.92@2048 sequential cell no longer exists in shipped paths — wired
+  mulhigh runs at N <= ~770.
+
+Gates: 120k-case wired fuzz vs Knuth (q and r bit-exact, 48.7k certified
+hits, 0 cert failures), 30k more under ASAN+UBSAN clean, powmod/isqrt/
+div-below-256 control cells 1.00x, stage identity + int_spec + bigint
+specs (recorded in the landing report).

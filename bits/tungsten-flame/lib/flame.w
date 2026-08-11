@@ -12,6 +12,7 @@
 use argon
 use sidemap
 use analyzer
+use counter_rates
 use perf_script
 use xctrace_xml
 use sample_collapse
@@ -102,6 +103,17 @@ fl_output = opts.get("output")
 if fl_output == nil
   fl_output = ""
 fl_keeper      = opts.get("keeper")
+# --counters [SET]: PMC counter-set profiling (macOS). Bare --counters
+# selects "rates" (instructions + cycles + miss families -> the per-
+# function IPC/MPKI table); --counters cache / stalls pick the other
+# bundled templates. Argon stores `true` for the bare form.
+fl_counters_raw = opts.get("counters")
+fl_counters = ""
+if fl_counters_raw != nil
+  if fl_counters_raw == true
+    fl_counters = "rates"
+  else
+    fl_counters = fl_counters_raw.to_s()
 fl_lex         = opts.flag?("lex")
 fl_ruby        = opts.flag?("ruby")
 fl_parse       = opts.flag?("parse")
@@ -428,13 +440,13 @@ bin_path = tmpdir + "/flame_bin"
 metrics = nil
 if ext_argv.size > 0
   bin_path = source
-  metrics = Tungsten:Flame:Sampler.profile_cmd(ext_argv, fl_duration, fl_rate)
+  metrics = Tungsten:Flame:Sampler.profile_cmd(ext_argv, fl_duration, fl_rate, fl_counters)
 else
   build_ok = Tungsten:Flame:Builder.compile(source, bin_path)
   if !build_ok
     << "tungsten flame: build failed"
     exit(1)
-  metrics = Tungsten:Flame:Sampler.profile(bin_path, fl_duration, fl_rate)
+  metrics = Tungsten:Flame:Sampler.profile(bin_path, fl_duration, fl_rate, fl_counters)
 metric_names = metrics.keys
 if metric_names.size == 0
   << "tungsten flame: profiling produced no samples"
@@ -501,5 +513,20 @@ while i < metric_names.size
   if m != primary
     Tungsten:Flame:FlameAnalyzer.display_top_only(tmpdir + "/" + m + ".folded", fl_top, m, use_color)
   i = i + 1
+
+# Counters mode with the rates set: instructions and cycles were
+# recorded next to the miss families, so close with the per-function
+# IPC / misses-per-kilo-instruction table (reads the sidemap-rewritten
+# folded files, same as every display above).
+if fl_counters != "" && metrics.has_key?("instructions") && metrics.has_key?("cycles")
+  cr_metrics = {}
+  i = 0
+  while i < metric_names.size
+    m = metric_names[i]
+    cr_metrics[m] = read_file(tmpdir + "/" + m + ".folded")
+    i = i + 1
+  cr_out = Tungsten:Flame:CounterRates.report(cr_metrics, fl_top, use_color)
+  if cr_out != ""
+    << cr_out
 
 exit(0)

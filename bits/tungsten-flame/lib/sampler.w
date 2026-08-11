@@ -16,21 +16,91 @@ in Tungsten:Flame
   # Returns a dict { metric_name => folded_text } so flame.w can render
   # per-metric sections. Single-metric flows return one key ("cycles"
   # on Linux, "samples" on macOS). Multi-event extension fills more.
-  -> .profile(bin_path, duration, rate)
-    self.profile_cmd([bin_path], duration, rate)
+  # `counter_set` selects the PMC event set: "" is the default sampling
+  # path; "rates" / "cache" / "stalls" pick a bundled tracetemplate and
+  # collapse the per-thread counters-profile deltas instead (macOS only).
+  -> .profile(bin_path, duration, rate, counter_set)
+    self.profile_cmd([bin_path], duration, rate, counter_set)
 
   # Same contract, but the target is a full command line (binary + args):
   # the launched process is whatever argv describes, and symbolication
   # keys off argv[0].
-  -> .profile_cmd(argv, duration, rate)
+  -> .profile_cmd(argv, duration, rate, counter_set)
     os = self.os_name()
     if os == "Linux"
+      if counter_set != ""
+        << "sampler: --counters is macOS-only (Instruments PMC templates); using perf cycles"
       self.profile_linux(argv, duration, rate)
     elsif os == "Darwin"
-      self.profile_macos(argv, duration, rate)
+      if counter_set != ""
+        self.profile_macos_counters(argv, duration, rate, counter_set)
+      else
+        self.profile_macos(argv, duration, rate)
     else
       << "sampler: unsupported OS: " + os
       {}
+
+  # Counter-set table: name -> [template filename, slot-ordered metric
+  # names]. Slot order MUST match the event order in the template (see
+  # lib/xctrace/generate-templates.py, which builds the .tracetemplate
+  # files from these same event lists).
+  -> .counter_set_info(set_name)
+    if set_name == "rates"
+      return ["flame-counters-rates.tracetemplate", ["instructions", "cycles", "L1-dcache-load-misses", "L1-dcache-store-misses", "LLC-load-misses", "memsys-loads", "dTLB-misses", "L2-TLB-data-misses"]]
+    if set_name == "cache"
+      return ["flame-counters-cache.tracetemplate", ["branches", "branch-misses", "L1-dcache-load-misses", "L1-icache-misses", "LLC-load-misses", "dTLB-misses", "iTLB-misses", "L2-TLB-data-misses"]]
+    if set_name == "stalls"
+      return ["flame-counters-stalls.tracetemplate", ["frontend-stall-cycles", "backend-stall-cycles", "L2-TLB-instr-misses"]]
+    nil
+
+  # PMC-counters profiling via the counters-profile table. Unlike the
+  # default path's kdebug-counters-with-time-sample table (cumulative
+  # per-core readings), counters-profile rows are per-thread interval
+  # DELTAS that Instruments already differenced at context-switch
+  # boundaries — so a row's counts belong to that row's thread and
+  # stack, with no cross-thread double counting and no bleed-in from
+  # other processes sharing the core. The table carries every process
+  # on the system, so the collapse filters rows to the target process
+  # by name.
+  -> .profile_macos_counters(argv, duration, rate, counter_set)
+    info = self.counter_set_info(counter_set)
+    if info == nil
+      << "sampler: unknown counter set: " + counter_set + " (expected rates, cache, or stalls)"
+      return {}
+    tmpdir = self.mktmpdir()
+    bin_path = argv[0]
+    trace_path = tmpdir + "/flame.trace"
+    template = __DIR__ + "/xctrace/" + info[0]
+    if !file?(template)
+      << "sampler: template not found: " + template
+      return {}
+    bin_q = self.quote_argv(argv)
+    trace_q = Tungsten:Flame:Builder.shell_quote(trace_path)
+    tpl_q = Tungsten:Flame:Builder.shell_quote(template)
+    log_path = tmpdir + "/xctrace.log"
+    log_q = Tungsten:Flame:Builder.shell_quote(log_path)
+    target_out = tmpdir + "/target.out"
+    tgt_q = Tungsten:Flame:Builder.shell_quote(target_out)
+    rec_cmd = "xctrace record --template " + tpl_q + " --time-limit " + duration.to_s() + "s --output " + trace_q + " --env DYLD_PRINT_SEGMENTS=1 --target-stdout " + tgt_q + " --launch -- " + bin_q + " > " + log_q + " 2>&1"
+    system(rec_cmd)
+    if !file?(trace_path + "/form.template")
+      << "sampler: xctrace record failed"
+      log_text = read_file(log_path)
+      if log_text != nil && log_text.strip().size() > 0
+        << log_text.strip()
+      return {}
+    xpath = "/trace-toc/run\[@number=\"1\"\]/data/table\[@schema=\"counters-profile\"\]"
+    xpath_q = Tungsten:Flame:Builder.shell_quote(xpath)
+    xml_text = capture("xctrace export --input " + trace_q + " --xpath " + xpath_q + " 2>/dev/null")
+    if xml_text == nil || xml_text.size() == 0
+      << "sampler: xctrace export produced no XML"
+      return {}
+    # Rows for every process on the machine are in this table; filter to
+    # threads whose name column carries "(<binary basename>, pid:".
+    base = bin_path.split("/").last
+    proc_marker = "(" + base + ", pid:"
+    load_addr = self.parse_load_address(target_out, bin_path)
+    Tungsten:Flame:XctraceXml.collapse_counter_profile(xml_text, bin_path, load_addr, info[1], proc_marker)
 
   -> .quote_argv(argv)
     out = ""

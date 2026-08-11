@@ -31,6 +31,22 @@ BASE = HERE / "flame-counters.tracetemplate"
 # Event mnemonic + human explanation. Mnemonics validated against
 # /usr/share/kpep/as5.plist (Apple M5).
 TEMPLATES = {
+    # `flame --counters` default set: instructions + cycles alongside the
+    # dominant miss families, so the analyzer can print per-function IPC
+    # and misses-per-kilo-instruction (MPKI) rather than raw event counts.
+    # L1D_CACHE_MISS_LD/ST are the speculative counters on purpose — they
+    # count the cache traffic that actually happened, which is what
+    # prefetch/blocking work needs; INST_ALL (retired) is the denominator.
+    "flame-counters-rates.tracetemplate": [
+        ("INST_ALL",                   "All retired instructions"),
+        ("CORE_ACTIVE_CYCLE",          "Cycles while the core was active"),
+        ("L1D_CACHE_MISS_LD",          "Loads that missed the L1 data cache"),
+        ("L1D_CACHE_MISS_ST",          "Stores that missed the L1 data cache"),
+        ("PL2_CACHE_MISS_LD",          "Load requests that missed the L2 cache"),
+        ("LD_SRC_MEMSYS_NONSPEC",      "Retired loads sourced from the memory system (SLC or DRAM)"),
+        ("L1D_TLB_MISS",               "Loads and stores that missed the L1 data TLB"),
+        ("L2_TLB_MISS_DATA",           "Loads and stores that missed the L2 TLB"),
+    ],
     "flame-counters-cache.tracetemplate": [
         ("INST_BRANCH",                "Retired branch instructions including calls and returns"),
         ("BRANCH_MISPRED_NONSPEC",     "Mispredicted branches (non-speculative)"),

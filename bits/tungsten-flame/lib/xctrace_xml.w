@@ -326,6 +326,166 @@ in Tungsten:Flame
       mi = mi + 1
     result
 
+  # Multi-metric collapse over the counters-profile schema (the table
+  # `flame --counters` records). Each row is one sample carrying:
+  #   - a thread column whose first occurrence inlines the display name
+  #     ("Main Thread (0x...) (<proc>, pid: N)"), later rows ref it;
+  #   - a tagged-backtrace (inline <backtrace> with <frame addr="0x..">
+  #     children, leaf first; repeated stacks use ref);
+  #   - a pmc-events array of per-thread interval DELTAS — the counts
+  #     since the thread's previous sample, already differenced by
+  #     Instruments at context-switch boundaries.
+  # Because deltas are per-thread, each row is self-contained: add its
+  # values to its stack, done. The table includes every process on the
+  # system, so rows are filtered to threads whose inline name contains
+  # `proc_marker` ("(<binary basename>, pid:").
+  -> .collapse_counter_profile(xml_text, binary_path, load_addr, metric_names, proc_marker)
+    n_metrics = metric_names.size()
+
+    folded_by_metric = {}
+    i = 0
+    while i < n_metrics
+      folded_by_metric[metric_names[i]] = {}
+      i = i + 1
+
+    thread_is_target = {}
+    bt_by_id = {}
+
+    row_chunks = xml_text.split("<row>")
+    ri = 0
+    while true
+      ri = ri + 1
+      if ri >= row_chunks.size()
+        break
+      chunk = row_chunks[ri]
+      row_end = chunk.index("</row>")
+      row = row_end != nil ? chunk.slice(0, row_end) : chunk
+
+      is_target = self.row_thread_is_target(row, thread_is_target, proc_marker)
+      frames = self.row_profile_stack(row, bt_by_id)
+      if is_target && frames != nil && frames.size() > 0
+        pmc_vals = self.extract_pmc_values(row)
+        if pmc_vals.size() >= n_metrics
+          folded_stack = self.reverse(frames).join(";")
+          m = 0
+          while m < n_metrics
+            delta = pmc_vals[m]
+            if delta > 0
+              metric = metric_names[m]
+              fd = folded_by_metric[metric]
+              if fd.has_key?(folded_stack)
+                fd[folded_stack] = fd[folded_stack] + delta
+              else
+                fd[folded_stack] = delta
+            m = m + 1
+
+    # Symbolicate all unique addresses across every metric in one batch.
+    all_keys = []
+    mi = 0
+    while mi < n_metrics
+      fd = folded_by_metric[metric_names[mi]]
+      fd.keys().each -> (k)
+        all_keys.push(k)
+      mi = mi + 1
+    sym = self.symbolicate(all_keys, binary_path, load_addr)
+
+    result = {}
+    mi = 0
+    while mi < n_metrics
+      name = metric_names[mi]
+      fd = folded_by_metric[name]
+      keys = self.sort_strings(fd.keys())
+      lines = []
+      ki = 0
+      while ki < keys.size()
+        k = keys[ki]
+        frames2 = k.split(";")
+        symbolic = []
+        fri = 0
+        while fri < frames2.size()
+          addr = frames2[fri]
+          if sym.has_key?(addr)
+            symbolic.push(sym[addr])
+          else
+            symbolic.push(addr)
+          fri = fri + 1
+        lines.push(symbolic.join(";") + " " + fd[k].to_s())
+        ki = ki + 1
+      result[name] = lines.join("\n")
+      mi = mi + 1
+    result
+
+  # Resolve whether `row`'s thread belongs to the target process.
+  # Inline `<thread id="N" fmt="...">` definitions are memoized into
+  # `thread_is_target` (true when the fmt carries `proc_marker`);
+  # `<thread ref="N"/>` rows look the answer up. Unknown -> false.
+  -> .row_thread_is_target(row, thread_is_target, proc_marker)
+    dp = row.index("<thread id=\"")
+    if dp != nil
+      id_s = dp + 12
+      id_e = self.find_from(row, "\"", id_s)
+      if id_e == nil
+        return false
+      tid = row.slice(id_s, id_e - id_s)
+      fm = self.find_from(row, "fmt=\"", id_e)
+      hit = false
+      if fm != nil
+        v_s = fm + 5
+        v_e = self.find_from(row, "\"", v_s)
+        if v_e != nil
+          hit = row.slice(v_s, v_e - v_s).include?(proc_marker)
+      thread_is_target[tid] = hit
+      return hit
+    rp = row.index("<thread ref=\"")
+    if rp != nil
+      r_s = rp + 13
+      r_e = self.find_from(row, "\"", r_s)
+      if r_e != nil
+        rid = row.slice(r_s, r_e - r_s)
+        if thread_is_target.has_key?(rid)
+          return thread_is_target[rid]
+    false
+
+  # Frame list (leaf first) for a counters-profile row: the inline
+  # `<tagged-backtrace id="N">...<frame ... addr="0x..."/>...` children
+  # (memoized into bt_by_id), or `<tagged-backtrace ref="N"/>` looked
+  # up from an earlier inline. Returns nil when the row has no stack.
+  # The addr attribute is used rather than name: name is the display
+  # form and can be the return address +/-1.
+  -> .row_profile_stack(row, bt_by_id)
+    dp = row.index("<tagged-backtrace id=\"")
+    if dp != nil
+      id_s = dp + 22
+      id_e = self.find_from(row, "\"", id_s)
+      if id_e == nil
+        return nil
+      bt_id = row.slice(id_s, id_e - id_s)
+      close = self.find_from(row, "</tagged-backtrace>", id_e)
+      block = close != nil ? row.slice(id_e, close - id_e) : row.slice(id_e, row.size() - id_e)
+      frames = []
+      cur = 0
+      while true
+        ap = self.find_from(block, "addr=\"", cur)
+        if ap == nil
+          break
+        a_s = ap + 6
+        a_e = self.find_from(block, "\"", a_s)
+        if a_e == nil
+          break
+        frames.push(block.slice(a_s, a_e - a_s))
+        cur = a_e + 1
+      bt_by_id[bt_id] = frames
+      return frames
+    rp = row.index("<tagged-backtrace ref=\"")
+    if rp != nil
+      r_s = rp + 23
+      r_e = self.find_from(row, "\"", r_s)
+      if r_e != nil
+        rid = row.slice(r_s, r_e - r_s)
+        if bt_by_id.has_key?(rid)
+          return bt_by_id[rid]
+    nil
+
   # Find the first `<thread...>` or `<core...>` opening tag in `row` and
   # return its `id="..."` or `ref="..."` value as a string. Returns "?"
   # if neither attribute is present.

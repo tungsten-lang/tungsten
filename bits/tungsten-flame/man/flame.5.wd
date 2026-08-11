@@ -14,6 +14,7 @@ tungsten-flame(1) -- Make flame graphs
 -d, --duration N       Profiling seconds (default: 5)
     --rate N           Sample frequency in Hz (auto if omitted)
     --top N            Print the top N most expensive methods
+    --counters [SET]   PMC counter profile: SET = rates (default), cache, stalls
 
     --lex              Only lexing
     --ruby             Profile the Ruby interpreter path
@@ -58,3 +59,5 @@ Profile Tungsten or arbitrary processes
 If the top function is over 40% automatically include the caller/callee breakdown.
 
 Use `--pid PID` to attach to an existing process, or pass a command after `--` to launch and sample a non-Tungsten process for the requested duration.
+
+`--counters` (macOS) records hardware PMC events instead of the default sample set, attributing per-thread counter deltas to sampled call stacks. The `rates` set pairs instructions and cycles with the dominant miss families (L1D load/store misses, L2 load misses, memory-system-sourced loads, TLB misses) and closes with a per-function IPC / misses-per-kilo-instruction table. `cache` and `stalls` select the other bundled event templates. Tungsten frames symbolize through the compiler sidemap exactly like the default mode.

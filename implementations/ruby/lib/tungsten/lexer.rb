@@ -131,6 +131,11 @@ module Tungsten
           @indebt = diff
         elsif diff < 0
           @dedebt = diff.abs
+        else
+          # No INDENT/DEDENT token will carry the first body-token column on
+          # a continuation line, so preserve it explicitly. Otherwise the
+          # reusable Token falls back to column 1 after every newline.
+          @next_col = indent + 1
         end
       end
 

@@ -9,6 +9,18 @@ RSpec.shared_examples "a Tungsten lexer" do
     expect([indent.row, indent.col]).to eq([2, 3])
   end
 
+  it "preserves columns on successive lines at the same indentation" do
+    root = File.expand_path("../../..", __dir__)
+    source = File.read(File.join(root, "compiler/test/fixtures/frontend_fuzz_62f1c679cc3ef149.w"))
+    ids = described_class.new(source).tokens.select { |token| token.type == :ID }
+
+    expect(ids.map { |token| [token.value, token.row, token.col] }).to eq([
+      ["total_2", 1, 3],
+      ["count_2", 1, 14],
+      ["count_2", 2, 3]
+    ])
+  end
+
   class << self
     def it_lexes(string, type, value=nil)
       it "lexes #{string}" do

@@ -35,7 +35,7 @@ pair_products = pairs.map -> (pair)
 check("hash canonical entries", pair_products.include?(4) && pair_products.include?(10) && pair_products.include?(18))
 
 selected = hash.select -> (key, value)
-  value >= 5
+  !(value < 5)
 check("hash select entries", selected.size == 2)
 selected_values = selected.map -> (pair)
   pair[1]
@@ -99,5 +99,194 @@ check("generic any true", each_only.any? -> item == 7)
 check("generic none false", !(each_only.none? -> item == 4))
 check("generic empty false", !each_only.empty?)
 check("generic empty true", EachOnly.new([]).empty?)
+
+# The predicate latch is not enough: short-circuiting combinators must stop the
+# source's `each` itself.  Count visits in the producer, outside the consumer
+# block, so these checks catch a source that keeps yielding after the answer is
+# final.
++ CountingEach
+  is Enumerable
+
+  -> new(@items)
+    @visits = 0
+
+  -> visits
+    @visits
+
+  -> each(&block)
+    index = 0
+    while index < @items.size
+      @visits += 1
+      block(@items[index])
+      index += 1
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source find stops", counting.find -> item == 7)
+check("source find visits", counting.visits == 2)
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source first value", counting.first == 4)
+check("source first visits", counting.visits == 1)
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source include stops", counting.include?(9))
+check("source include visits", counting.visits == 3)
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source all stops", !(counting.all? -> item < 9))
+check("source all visits", counting.visits == 3)
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source any stops", counting.any? -> item == 7)
+check("source any visits", counting.visits == 2)
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source none stops", !(counting.none? -> item == 7))
+check("source none visits", counting.visits == 2)
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source take values", counting.take(2) == [4, 7])
+check("source take visits", counting.visits == 2)
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source take zero", counting.take(0) == [])
+check("source take zero visits", counting.visits == 0)
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source take_while values", (counting.take_while -> item < 9) == [4, 7])
+check("source take_while visits failing item", counting.visits == 3)
+
+counting = CountingEach.new([4, 7, 9, 12])
+check("source empty false", !counting.empty?)
+check("source empty visits", counting.visits == 1)
+
+# Pair-yielding collections use the same stop protocol without changing their
+# public `(key, value)` callback shape.
++ CountingPairs
+  is Enumerable
+
+  -> new(@pairs)
+    @visits = 0
+
+  -> visits
+    @visits
+
+  -> __enumerable_iteration_mode
+    2
+
+  -> __enumerable_yields_pair?
+    true
+
+  -> each(&block)
+    index = 0
+    while index < @pairs.size
+      @visits += 1
+      pair = @pairs[index]
+      block(pair[0], pair[1])
+      index += 1
+
+pair_source = CountingPairs.new([[:a, 2], [:b, 5], [:c, 9]])
+check("pair source first", pair_source.first == [:a, 2])
+check("pair source first visits", pair_source.visits == 1)
+
+pair_source = CountingPairs.new([[:a, 2], [:b, 5], [:c, 9]])
+check("pair source find", (pair_source.find -> (key, value) value == 5) == [:b, 5])
+check("pair source find visits", pair_source.visits == 2)
+
+pair_source = CountingPairs.new([[:a, 2], [:b, 5], [:c, 9]])
+check("pair source any", pair_source.any? -> (key, value) value == 5)
+check("pair source any visits", pair_source.visits == 2)
+
+pair_source = CountingPairs.new([[:a, 2], [:b, 5], [:c, 9]])
+check("pair source take", pair_source.take(2) == [[:a, 2], [:b, 5]])
+check("pair source take visits", pair_source.visits == 2)
+
+# A right-unbounded producer is the semantic proof: every operation below
+# would hang if Enumerable merely stopped calling its predicate while allowing
+# the source to continue.
++ InfiniteEach
+  is Enumerable
+
+  -> new
+    @visits = 0
+
+  -> visits
+    @visits
+
+  -> each(&block)
+    item = 0
+    while true
+      @visits += 1
+      block(item)
+      item += 1
+
+infinite = InfiniteEach.new
+check("infinite find", (infinite.find -> item == 3) == 3)
+check("infinite find visits", infinite.visits == 4)
+
+infinite = InfiniteEach.new
+check("infinite first", infinite.first == 0)
+check("infinite first visits", infinite.visits == 1)
+
+infinite = InfiniteEach.new
+check("infinite include", infinite.include?(4))
+check("infinite include visits", infinite.visits == 5)
+
+infinite = InfiniteEach.new
+check("infinite all", !(infinite.all? -> item < 3))
+check("infinite all visits", infinite.visits == 4)
+
+infinite = InfiniteEach.new
+check("infinite any", infinite.any? -> item == 2)
+check("infinite any visits", infinite.visits == 3)
+
+infinite = InfiniteEach.new
+check("infinite none", !(infinite.none? -> item == 3))
+check("infinite none visits", infinite.visits == 4)
+
+infinite = InfiniteEach.new
+check("infinite take", infinite.take(3) == [0, 1, 2])
+check("infinite take visits", infinite.visits == 3)
+
+infinite = InfiniteEach.new
+check("infinite take_while", (infinite.take_while -> item < 3) == [0, 1, 2])
+check("infinite take_while visits", infinite.visits == 4)
+
+infinite = InfiniteEach.new
+check("infinite empty", !infinite.empty?)
+check("infinite empty visits", infinite.visits == 1)
+
+# Early termination is an unwind, so producer cleanup must still run.  This is
+# why Enumerable uses a private exception signal rather than the compiler's
+# currently-cheaper block-return jump, which skips intervening ensure frames.
++ EnsuredInfiniteEach
+  is Enumerable
+
+  -> new
+    @finished = false
+
+  -> finished?
+    @finished
+
+  -> each(&block)
+    item = 0
+    begin
+      while true
+        block(item)
+        item += 1
+    ensure
+      @finished = true
+
+ensured = EnsuredInfiniteEach.new
+check("early stop runs source ensure value", ensured.first == 0)
+check("early stop runs source ensure", ensured.finished?)
+
+raised = false
+begin
+  EachOnly.new([1]).any? -> (item)
+    raise "predicate failure"
+rescue error
+  raised = error == "predicate failure"
+check("predicate errors propagate", raised)
 
 << "enumerable_native_spec: all checks passed"

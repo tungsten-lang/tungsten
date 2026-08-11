@@ -24,6 +24,49 @@ trait Enumerable
     each -> (item)
       block.call(item, nil)
 
+  # Iterate until the internal callback returns false.  This is the one
+  # cancellation protocol used by predicate/prefix combinators: true means
+  # "keep going", false means "the answer is final".  A unique per-call object
+  # is raised as a private control signal, then caught by identity here.  Using
+  # the ordinary exception unwind is deliberate: an arbitrary user-defined
+  # `each` may have `ensure` cleanup that must run when iteration stops.  A
+  # block-level non-local return is cheaper, but currently jumps past ensure
+  # frames in intervening methods.  Indexed and pair-yielding stores retain
+  # their direct iteration shapes and avoid the generic two-slot adapter.
+  #
+  # This stays private by convention: public `each` still returns exactly what
+  # its implementing collection returned before this protocol existed.
+  -> __enumerable_each_until(block)
+    mode = __enumerable_iteration_mode
+    # Indexed stores own their loop here, so they can stop with an ordinary
+    # return and pay neither a signal allocation nor an exception-frame push.
+    if mode == 1
+      i = 0
+      n = self.size
+      while i < n
+        if !block.call(self[i], nil)
+          return false
+        i++
+      return true
+
+    stop = EnumerableStopSignal.new
+    completed = true
+    begin
+      if mode == 2
+        self.each -> (first, second)
+          if !block.call(first, second)
+            raise stop
+      else
+        self.each -> (item)
+          if !block.call(item, nil)
+            raise stop
+    rescue signal
+      if signal == stop
+        completed = false
+      else
+        raise signal
+    completed
+
   -> to_a() []
     pairs = __enumerable_yields_pair?
     consumer = -> (first, second)
@@ -90,39 +133,23 @@ trait Enumerable
         if !block(item)
           out.push(item)
   # @todo initialize type of array
-  -> __enumerable_find_pair(block)
-    found = nil
-    seen = false
-    self.each -> (first, second)
-      if !seen && block(first, second)
-        found = [first, second]
-        seen = true
-    found
-
-  -> __enumerable_find_single(block)
-    found = nil
-    seen = false
-    self.each -> (item)
-      if !seen && block(item)
-        found = item
-        seen = true
-    found
-
   -> find(&block)
-    mode = __enumerable_iteration_mode
-    if mode == 2
-      return __enumerable_find_pair(block)
-    elsif mode == 1
-      i = 0
-      n = self.size
-      while i < n
-        item = self[i]
-        if block(item)
-          return item
-        i++
-    else
-      return __enumerable_find_single(block)
-    nil
+    pairs = __enumerable_yields_pair?
+    found = nil
+    consumer = -> (first, second)
+      if pairs
+        if block(first, second)
+          found = [first, second]
+          false
+        else
+          true
+      elsif block(first)
+        found = first
+        false
+      else
+        true
+    __enumerable_each_until(consumer)
+    found
 
   -> detect(&block)
     find(block)
@@ -150,45 +177,45 @@ trait Enumerable
     pairs = __enumerable_yields_pair?
     answer = true
     consumer = -> (first, second)
-      if answer
-        if pairs
-          answer = &(first, second)
-        else
-          answer = &(first)
-    __enumerable_each(consumer)
+      if pairs
+        answer = &(first, second)
+      else
+        answer = &(first)
+      answer
+    __enumerable_each_until(consumer)
     answer
 
   -> any?
     pairs = __enumerable_yields_pair?
     answer = false
     consumer = -> (first, second)
-      if !answer
-        answer = pairs || first
-    __enumerable_each(consumer)
+      answer = pairs || first
+      !answer
+    __enumerable_each_until(consumer)
     answer
 
   -> any?/&
     pairs = __enumerable_yields_pair?
     answer = false
     consumer = -> (first, second)
-      if !answer
-        if pairs
-          answer = &(first, second)
-        else
-          answer = &(first)
-    __enumerable_each(consumer)
+      if pairs
+        answer = &(first, second)
+      else
+        answer = &(first)
+      !answer
+    __enumerable_each_until(consumer)
     answer
 
   -> none?/&
     pairs = __enumerable_yields_pair?
     answer = true
     consumer = -> (first, second)
-      if answer
-        if pairs
-          answer = !&(first, second)
-        else
-          answer = !&(first)
-    __enumerable_each(consumer)
+      if pairs
+        answer = !&(first, second)
+      else
+        answer = !&(first)
+      answer
+    __enumerable_each_until(consumer)
     answer
 
   -> count() 0
@@ -397,29 +424,27 @@ trait Enumerable
   -> first
     pairs = __enumerable_yields_pair?
     out = nil
-    seen = false
     consumer = -> (first, second)
-      if !seen
-        if pairs
-          out = [first, second]
-        else
-          out = first
-        seen = true
-    __enumerable_each(consumer)
+      if pairs
+        out = [first, second]
+      else
+        out = first
+      false
+    __enumerable_each_until(consumer)
     out
 
   -> include?(value)
     pairs = __enumerable_yields_pair?
     found = false
     consumer = -> (first, second)
-      if !found
-        if pairs
-          if value.class_name == "Array" && value.size == 2
-            found = (
-              first == value[0] && second == value[1])
-        else
-          found = first == value
-    __enumerable_each(consumer)
+      if pairs
+        if value.class_name == "Array" && value.size == 2
+          found = (
+            first == value[0] && second == value[1])
+      else
+        found = first == value
+      !found
+    __enumerable_each_until(consumer)
     found
 
   -> flat_map(&block) []
@@ -496,17 +521,18 @@ trait Enumerable
     __enumerable_each(consumer)
   # @todo initialize size and type of array
   -> take(n) []
+    return out if n <= 0
     pairs = __enumerable_yields_pair?
     i = 0
     consumer = -> (first, second)
-      if i < n
-        if pairs
-          out.push([first, second])
-        else
-          out.push(first)
+      if pairs
+        out.push([first, second])
+      else
+        out.push(first)
       i++
+      i < n
 
-    __enumerable_each(consumer)
+    __enumerable_each_until(consumer)
   # @todo initialize size and type of array
   -> drop(n) []
     pairs = __enumerable_yields_pair?
@@ -525,18 +551,17 @@ trait Enumerable
   # first element that fails (the `taking` latch mirrors Ruby's take_while).
   -> take_while(&block) []
     pairs = __enumerable_yields_pair?
-    taking = true
     consumer = -> (first, second)
-      if taking
-        item = first
-        if pairs
-          item = [first, second]
-        if block(item)
-          out.push(item)
-        else
-          taking = false
+      item = first
+      if pairs
+        item = [first, second]
+      if block(item)
+        out.push(item)
+        true
+      else
+        false
 
-    __enumerable_each(consumer)
+    __enumerable_each_until(consumer)
 
   # Suffix of elements from the first one that fails the block onward. Drops
   # while the block holds, then keeps everything (Ruby drop_while).
@@ -587,7 +612,8 @@ trait Enumerable
     found = false
     consumer = -> (first, second)
       found = true
-    __enumerable_each(consumer)
+      false
+    __enumerable_each_until(consumer)
     !found
 
   -> sort
@@ -755,3 +781,10 @@ trait Enumerable
           counts[item] = 1
         else
           counts[item] = count + 1
+
+# Identity-bearing control token for Enumerable's private early-stop protocol.
+# It is intentionally not in core/tungsten.w's autoload manifest: loading the
+# Enumerable trait defines it as an implementation detail, and callers never
+# receive an instance. Keep it after the trait so generated Core documentation
+# identifies this file by its public declaration.
++ EnumerableStopSignal

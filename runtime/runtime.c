@@ -733,8 +733,21 @@ void bigint_release_if_live(WBigint *b) {
     memcpy(head01, b, sizeof head01);   /* one ldp; no aliasing violation */
     if (__builtin_expect((uint16_t)head01[0] != (uint16_t)W_TYPE_BIGINT, 0)) {
         if ((uint8_t)head01[0] != W_TYPE_BIGINT) return;
-        if ((uint8_t)(head01[0] >> 8) != 255)
-            b->shared = (uint8_t)((head01[0] >> 8) - 1);
+        /* Alias swallow: a tag-sign producer (-x, abs of a negative)
+         * byte-RMWs `shared` a few instructions before this release, and
+         * a 16-byte load spanning that pending byte store cannot
+         * store-forward on Apple Silicon.  As a branch condition the
+         * failed forward hides behind prediction, but deriving the
+         * DECREMENT from head01 chained mark-strb -> ldp -> strb through
+         * the stall every iteration (abs@1 0.70 -> 1.28 vs GMP).  Reload
+         * the byte instead — same address and size as the producer's
+         * store forwards cleanly — and keep it volatile so the compiler
+         * cannot fold it back into the fused value it just loaded.  The
+         * recycle fall-through below is untouched: no pending header
+         * store precedes it, and its early fused cap still feeds the
+         * hot-slot encode. */
+        uint8_t sh = *(volatile uint8_t *)&b->shared;
+        if (sh != 255) b->shared = (uint8_t)(sh - 1);
         return;
     }
 #elif defined(__LITTLE_ENDIAN__) || (defined(__BYTE_ORDER__) && \

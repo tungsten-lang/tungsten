@@ -48507,10 +48507,53 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
         /* The cyclic high product needs an even split.  Odd widths stay on
          * pairs REDC instead of paying mullo plus a fallback full product. */
         int use_mullo = k >= W_POWM_REDC_MULLO_MIN && (k & 1) == 0;
+        /* One-page ladders carry their REDC scratch and modulus stream in
+         * the SAME allocation as the window table, each region >= 512 B
+         * from the others — pairwise page offsets are then fixed by
+         * construction.  Split across independent blocks (T = ctx->work,
+         * the modulus wherever its owner put it), the relative page
+         * offsets are an allocation lottery, and a draw that lands a hot
+         * row or the modulus inside the LSU's 4 KiB store->load window of
+         * the per-op REDC stores taxes every operation (measured ~1.1% on
+         * powmod@8; the bigint arena's 512 B placement grid made the bad
+         * draw stable instead of occasional).  Multi-page ladders keep the
+         * status quo: their table alone blankets every page phase, so no
+         * placement is categorically safe.  The pairs REDC touches
+         * T[0..2k+1] only; mullo widths (>= 48 limbs) never fit the page
+         * and stay on ctx->work with its full 6k+4 window. */
+        size_t lad_limbs = ((size_t)tcount + 1 + (use_mullo ? 1 : 0)) *
+                           (size_t)k;
+        size_t t_off = 0, nl_off = 0, el_off = 0;
+        if (!use_mullo) {
+            /* Even limb offsets keep each region 16-byte aligned (odd k
+             * would otherwise tilt every region off the vector kernels'
+             * natural alignment). */
+            t_off = (lad_limbs + 64 + 1) & ~(size_t)1; /* >= 512 B past x */
+            size_t n_off = t_off + 2 * (size_t)k + 2 + 64;
+            size_t e_off = (n_off + (size_t)k + 64 + 1) & ~(size_t)1;
+            if ((e_off + (size_t)elen) * sizeof(uint64_t) <= 4096u) {
+                nl_off = n_off;
+                el_off = e_off;
+                lad_limbs = e_off + (size_t)elen;
+            } else {
+                t_off = 0;
+            }
+        }
         uint64_t *arena =
-            (uint64_t *)malloc(((size_t)tcount + 1 + (use_mullo ? 1 : 0)) *
-                               (size_t)k * sizeof(uint64_t));
+            (uint64_t *)malloc(lad_limbs * sizeof(uint64_t));
         uint64_t *x = arena + (size_t)tcount * (size_t)k;
+        if (nl_off) {
+            T = arena + t_off;
+            uint64_t *nl_copy = arena + nl_off;
+            for (int32_t j = 0; j < k; j++) nl_copy[j] = nl[j];
+            nl = nl_copy;
+            /* The exponent is the other per-step read stream (w_powm_bit
+             * on every ladder iteration); pin its page offsets with the
+             * rest of the working set. */
+            uint64_t *el_copy = arena + el_off;
+            for (int32_t j = 0; j < elen; j++) el_copy[j] = el[j];
+            el = el_copy;
+        }
         const uint64_t *mip = NULL;
         if (use_mullo) {                            /* Newton k-limb inverse */
             uint64_t *mipw = arena + ((size_t)tcount + 1) * (size_t)k;
@@ -48525,6 +48568,11 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
             for (int32_t j = 0; j < rabs; j++) x[j] = rl0[j];
             for (int32_t j = rabs; j < k; j++) x[j] = 0;
         }
+        /* The reduced base has been copied out; a heap remainder minted by
+         * the bigint_mod_any above was previously leaked (one k-limb buffer
+         * per call). */
+        if (r0v != base && w_is_bigint(r0v))
+            bigint_release_if_live(w_as_bigint(r0v));
         {   /* domain entry: tbl[0] = MontMul(base, R²) = base·R */
             WBigint *r2 = ctx.r2b;
             int32_t r2l = r2->size < 0 ? -r2->size : r2->size;
@@ -48598,6 +48646,9 @@ WValue bigint_powmod_any(WValue base, WValue expv, WValue modv) {
         for (int32_t i = 0; i < rabs; i++) xbuf->limbs[i] = rl0[i];
         xbuf->size = rabs;
     }
+    /* Same leak as the ladder branch: release the minted remainder. */
+    if (r0v != base && w_is_bigint(r0v))
+        bigint_release_if_live(w_as_bigint(r0v));
 
     /* Domain entry: tbl[0] = base·R (Montgomery) or the plain base (Barrett). */
     if (ctx.mont) {

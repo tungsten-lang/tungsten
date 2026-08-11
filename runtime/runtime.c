@@ -379,9 +379,8 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
      * bucket is not automatically large enough.  Only that first bucket
      * needs the check: every higher bucket starts at 2^(first+1) > min_cap. */
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-    WBigint *hot = pool->hot;
-    if (hot && hot->cap == min_cap) {
-        pool->hot = NULL;
+    WBigint *hot = pool->hot_cap != 0 ? pool->hot : NULL;
+    if (hot && pool->hot_cap == min_cap) {
         pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
@@ -390,15 +389,14 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
         return hot;
     }
     int hot_bucket =
-        hot && hot->cap >= min_cap
-            ? bigint_pool_bucket(hot->cap)
+        hot && (uint32_t)pool->hot_cap >= min_cap
+            ? bigint_pool_bucket((uint32_t)pool->hot_cap)
             : BN_BIGINT_POOL_BUCKETS;
 #endif
     int first = bigint_pool_bucket(min_cap);
     for (int bucket = first; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
         if (bucket == hot_bucket) {
-            pool->hot = NULL;
             pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
             hot->type = W_TYPE_BIGINT;
@@ -431,9 +429,8 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
     return NULL;
 #elif BN_BIGINT_POWER2_CAP
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-    WBigint *hot = pool->hot;
-    if (hot && hot->cap == min_cap) {
-        pool->hot = NULL;
+    WBigint *hot = pool->hot_cap != 0 ? pool->hot : NULL;
+    if (hot && pool->hot_cap == min_cap) {
         pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
@@ -442,15 +439,14 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
         return hot;
     }
     int hot_bucket =
-        hot && hot->cap >= min_cap
-            ? bigint_pool_bucket(hot->cap)
+        hot && (uint32_t)pool->hot_cap >= min_cap
+            ? bigint_pool_bucket((uint32_t)pool->hot_cap)
             : BN_BIGINT_POOL_BUCKETS;
 #endif
     int first = min_cap > 1 ? 32 - __builtin_clz(min_cap - 1) : 0;
     for (int bucket = first; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
         if (bucket == hot_bucket) {
-            pool->hot = NULL;
             pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
             hot->type = W_TYPE_BIGINT;
@@ -537,9 +533,9 @@ static void bigint_release(WBigint *b) {
     }
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
 #if BN_BIGINT_HOT_LIVE_HEADER
-    if (__builtin_expect(pool->hot == b, 0)) return;
+    if (__builtin_expect(pool->hot_cap != 0 && pool->hot == b, 0)) return;
 #endif
-    if (!pool->hot) {
+    if (!pool->hot_cap) {
         /* The direct handoff keeps its header live: pool->hot is the parked
          * marker and duplicate-return guard.  The conservative configuration
          * clears type instead.  Size need not be zeroed in either mode: every
@@ -608,7 +604,7 @@ void bigint_release_if_live(WBigint *b) {
     /* A live BigInt allocation always has at least one limb of capacity. */
     if (__builtin_expect(cap <= BN_BIGINT_POOL_MAX_CAP, 1)) {
         WBigintPool *pool = &bigint_pool_state;
-        if (__builtin_expect(pool->hot == NULL, 1)) {
+        if (__builtin_expect(pool->hot_cap == 0, 1)) {
 #if !BN_BIGINT_HOT_LIVE_HEADER
             b->type = 0;
 #endif
@@ -624,7 +620,7 @@ void bigint_release_if_live(WBigint *b) {
 static void bigint_pool_release_thread(void) {
     WBigintPool *pool = &bigint_pool_state;
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-    free(pool->hot);
+    if (pool->hot_cap != 0) free(pool->hot);
     pool->hot = NULL;
     pool->hot_cap = 0;
 #endif
@@ -777,7 +773,10 @@ WBigint *bigint_alloc_raw_hot(int32_t cap) {
      * rejects everything).  Replaces a null check plus two range branches
      * on the churn-critical take. */
     if (__builtin_expect(hot_cap - requested < requested, 1)) {
-        pool->hot = NULL;
+        /* hot_cap is the occupancy word: zero exactly when empty.  The
+         * pointer stays stale on purpose — every reader gates on hot_cap,
+         * so one scalar clear replaces the pair store on the take side of
+         * the churn recurrence. */
         pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
@@ -802,7 +801,6 @@ WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
     /* exact_cap >= 1 always, and the empty slot encodes as hot_cap == 0,
      * so the capacity equality alone also proves occupancy. */
     if (__builtin_expect(pool->hot_cap == exact_cap, 1)) {
-        pool->hot = NULL;
         pool->hot_cap = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
@@ -972,9 +970,14 @@ WValue bigint_add_one_limb_magnitudes(
         result->size = a_negative ? -2 : 2;
         return bigint_box(result);
     }
-    if (a == b) return w_box_int(0);
-    if (a > b) return bigint_finish_one_limb(a - b, a_negative);
-    return bigint_finish_one_limb(b - a, b_negative);
+    /* Mixed signs: |a| - |b| with the winner's sign, branch-free.  The
+     * wrap-and-negate pair compiles to subs+cneg+csel, replacing the
+     * three-way compare ladder — on a ~1.5ns cell the two spare branch
+     * slots are measurable, and the zero case folds into the finisher. */
+    uint64_t diff = a - b;
+    int lt = a < b;
+    uint64_t magnitude = lt ? 0 - diff : diff;
+    return bigint_finish_one_limb(magnitude, lt ? b_negative : a_negative);
 }
 
 #ifndef BN_ADDSUB_22_FAST
@@ -36708,7 +36711,6 @@ WValue bigint_copy_signed(WBigint *b, int negate) {
         /* Empty slot encodes as hot_cap == 0 and caps are >= 1, so the
          * capacity equality alone also proves occupancy. */
         if (__builtin_expect(pool->hot_cap == b->cap, 1)) {
-            pool->hot = NULL;
             pool->hot_cap = 0;
             const uint64_t *restrict src = b->limbs;
             uint64_t *restrict dst = hot->limbs;

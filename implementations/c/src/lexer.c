@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "unit_mixed_case_names.inc"
+
 static const uint64_t TC_LEX64_TAG = 0xFFFC000000000000ULL | (1ULL << 46);
 static const uint32_t TC_CP_MASK = 0x1FFFFFu;
 
@@ -91,6 +93,45 @@ static int id_text_is_use(const TcSource *source, size_t start, size_t end) {
 static int id_continue_or_upper(const TcSource *source, size_t pos) {
   uint32_t c = cp_at(source, pos);
   return (source->lc[pos] & TC_F_ID_CONTINUE) != 0 || (c >= 'A' && c <= 'Z');
+}
+
+static int span_is_mixed_case_unit(const TcSource *source, size_t start, size_t end) {
+  const unsigned char *bytes = source->bytes + source->byte_offsets[start];
+  size_t len = (size_t)(source->byte_offsets[end] - source->byte_offsets[start]);
+  size_t lo = 0;
+  size_t hi = sizeof(tc_mixed_case_unit_names) / sizeof(tc_mixed_case_unit_names[0]);
+
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    const char *candidate = tc_mixed_case_unit_names[mid];
+    size_t candidate_len = strlen(candidate);
+    size_t common = len < candidate_len ? len : candidate_len;
+    int cmp = memcmp(bytes, candidate, common);
+    if (cmp == 0) {
+      if (len < candidate_len) cmp = -1;
+      else if (len > candidate_len) cmp = 1;
+      else return 1;
+    }
+    if (cmp < 0) hi = mid;
+    else lo = mid + 1;
+  }
+  return 0;
+}
+
+static int reject_mixed_case_tail(const TcSource *source, size_t start, size_t pos,
+                                  size_t count, int allow_unit, TcError *err) {
+  if (pos >= count || cp_at(source, pos) < 'A' || cp_at(source, pos) > 'Z') return 1;
+
+  size_t spelling_end = pos + 1;
+  while (spelling_end < count && id_continue_or_upper(source, spelling_end)) spelling_end++;
+  if (allow_unit && span_is_mixed_case_unit(source, start, spelling_end)) return 1;
+
+  uint32_t byte_start = source->byte_offsets[start];
+  uint32_t byte_end = source->byte_offsets[spelling_end];
+  tc_error_set(err,
+               "uppercase ASCII is not valid in identifiers: '%.*s' — use snake_case",
+               (int)(byte_end - byte_start), source->bytes + byte_start);
+  return 0;
 }
 
 static int operator_second(uint32_t c, uint32_t c2, uint32_t c3, int have_c3) {
@@ -371,6 +412,8 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
       }
 
       while (pos < count && ((source->lc[pos] & TC_F_ID_CONTINUE) != 0)) pos++;
+      if ((c == '_' || (c >= 'a' && c <= 'z')) &&
+          !reject_mixed_case_tail(source, start, pos, count, 1, err)) return 0;
       if (pos < count) {
         uint32_t c2 = cp_at(source, pos);
         if (c2 == '?' || c2 == '!') pos++;
@@ -607,6 +650,8 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
         while (pos < count && (source->lc[pos] & TC_F_ID_CONTINUE) != 0) pos++;
         type = TC_T_IVAR;
       }
+      if ((type == TC_T_IVAR || type == TC_T_CVAR) &&
+          !reject_mixed_case_tail(source, start, pos, count, 0, err)) return 0;
       if (!token_push(tokens, token_new(type, start, pos, 0), err)) return 0;
       continue;
     }
@@ -622,6 +667,7 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
         if (!token_push(tokens, token_new(TC_T_DECIMAL, start, pos, 0), err)) return 0;
       } else if (pos < count && (source->lc[pos] & TC_F_ID_START) != 0) {
         while (pos < count && (source->lc[pos] & TC_F_ID_CONTINUE) != 0) pos++;
+        if (!reject_mixed_case_tail(source, start, pos, count, 0, err)) return 0;
         if (!token_push(tokens, token_new(TC_T_ID, start, pos, 0), err)) return 0;
       } else {
         if (!token_push(tokens, token_new(TC_T_OP, start, pos, 0), err)) return 0;

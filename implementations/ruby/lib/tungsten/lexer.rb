@@ -234,7 +234,11 @@ module Tungsten
         @indebt -= 1
         @indent += 1
 
-        @cols = 2
+        # INDENT is anchored at the first body-token column, matching the
+        # byte/codepoint and packed lexers. Preserve that column for the next
+        # real token rather than advancing it a second time.
+        @token.col = @indent * 2 + 1
+        @cols = 0
         @line_start = true
 
         token :INDENT
@@ -486,6 +490,15 @@ module Tungsten
 
       # @todo consider renaming...gvar, ivar, var
       #
+      elsif (mixed = scan(/\$[a-z_][a-z0-9_]*[A-Z][A-Za-z0-9_]*/))
+        error "uppercase ASCII is not valid in identifiers: '#{mixed}' — use snake_case"
+
+      elsif (mixed = scan(/@@[a-z_][a-z0-9_]*[A-Z][A-Za-z0-9_]*/))
+        error "uppercase ASCII is not valid in identifiers: '#{mixed}' — use snake_case"
+
+      elsif (mixed = scan(/@[a-z_][a-z0-9_]*[A-Z][A-Za-z0-9_]*/))
+        error "uppercase ASCII is not valid in identifiers: '#{mixed}' — use snake_case"
+
       # global variables
       elsif (text = scan(/\$[a-z_](?:_?[a-z0-9])*/))
         token :GLOBAL, text
@@ -508,6 +521,14 @@ module Tungsten
       # Scientific constant: Boltzmann constant kB
       elsif (text = scan(/kB\b/))
         token :ID, text
+
+      # Lowercase-started identifiers may not contain uppercase ASCII. Check
+      # the whole adjacent spelling before the ordinary lowercase identifier
+      # rule splits it into ID + NAME. Registered mixed-case units remain
+      # split so unit-expecting parser surfaces can reconstruct them.
+      elsif (mixed = check(/[a-z_][a-z0-9_]*[A-Z][A-Za-z0-9_]*/)) && !Units.known?(mixed)
+        scan(/[a-z_][a-z0-9_]*[A-Z][A-Za-z0-9_]*/)
+        error "uppercase ASCII is not valid in identifiers: '#{mixed}' — use snake_case"
 
       # Primed identifier: `x'` — the same-named property on the first
       # argument (README prime notation; the parser desugars it to

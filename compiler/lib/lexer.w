@@ -3101,8 +3101,10 @@ use ../../languages/tungsten/lexers/known_units
     when 11
       materialize_op(raw, off)
     when 12
+      reject_mixed_case_join(raw, off, false)
       emit_at(:IVAR, raw, off)
     when 13
+      reject_mixed_case_join(raw, off, false)
       emit_at(:CVAR, raw, off)
     when 14
       emit_at(:PARG, raw.slice(1, raw.size() - 1), off)
@@ -3153,7 +3155,28 @@ use ../../languages/tungsten/lexers/known_units
     else
       emit_at(:UNKNOWN, raw, off)
 
+  -> reject_mixed_case_join(raw, off, allow_unit)
+    # Lowercase identifiers stop before uppercase ASCII in the packed scanner,
+    # so `camelCase` would otherwise materialize as adjacent ID + NAME tokens
+    # and fail later (or be misread as a juxtaposition call). Reject that join
+    # at the lexical boundary. Registered mixed-case unit spellings such as
+    # `eV`, `mmHg`, and `kWh` remain split for the parser's unit-expecting
+    # surfaces; they are not admitted as ordinary identifiers.
+    mixed_end = off + raw.size()
+    if mixed_end < @char_count && @chars[mixed_end] >= "A" && @chars[mixed_end] <= "Z"
+      p = mixed_end
+      while p < @char_count
+        ch = @chars[p]
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_"
+          p += 1
+        else
+          break
+      joined = slice_chars(off, p - off)
+      if !allow_unit || !known_unit_name?(joined)
+        raise compile_error_with_span(:E_LEX_INVALID_IDENTIFIER, "uppercase ASCII is not valid in identifiers: '" + joined + "' — use snake_case", @file, @line_at[off], @col_at[off], joined.size())
+
   -> materialize_id(raw, off)
+    reject_mixed_case_join(raw, off, true)
     # A UUID whose first field starts with a hex letter (a–f) is chunked as an
     # identifier; recognize it here. Digit-first UUIDs go through scan_number.
     if raw.size() == 8 && off + 8 < @char_count && @chars[off + 8] == "-"

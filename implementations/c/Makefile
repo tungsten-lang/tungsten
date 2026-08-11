@@ -55,6 +55,8 @@ $(BUILD_DIR):
 $(BUILD_DIR)/%.o: src/%.c include/tc.h | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
+$(BUILD_DIR)/lexer.o: include/unit_mixed_case_names.inc
+
 # vm_call_body.inc is included twice by vm.c for the cached/non-cached call
 # paths. The generic object rule cannot discover that dependency until vm.c is
 # compiled, and older .d files did not list it, so an edited dispatch body
@@ -67,6 +69,12 @@ $(BIN): $(OBJ)
 -include $(DEP)
 
 test: $(BIN)
+	@for spelling in camelCase _camelCase @camelCase @@camelCase '$$camelCase'; do \
+		output="$$(TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --syntax-tokens-only -e "$$spelling = 1" 2>&1)"; rc=$$?; \
+		if [ "$$rc" -eq 0 ]; then echo "$$spelling unexpectedly lexed" >&2; exit 1; fi; \
+		printf '%s\n' "$$output" | grep -F "uppercase ASCII is not valid in identifiers: '$$spelling'" >/dev/null || exit 1; \
+	done
+	@TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --syntax-tokens-only -e 'eV mmHg kWh' >/dev/null
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/smoke.w
 	@TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/exit_status.w; \
 		status=$$?; \

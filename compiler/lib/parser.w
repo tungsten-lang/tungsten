@@ -3900,7 +3900,7 @@ use ../../core/token
       if (at_type?(T_NAME) || at_type?(T_CONSTANT)) && call_col != nil && call_name != nil && current_line() == call_line && current_col() == call_col + call_name.size()
         joined_ident = call_name + current_value()
         if !known_unit_name?(joined_ident)
-          raise compile_error_at(:E_PARSE_UNEXPECTED_TOKEN, "uppercase ASCII is not valid in identifiers: '" + joined_ident + "' — use snake_case")
+          raise compile_error_at(:E_LEX_INVALID_IDENTIFIER, "uppercase ASCII is not valid in identifiers: '" + joined_ident + "' — use snake_case")
       args = parse_bare_args()
 
     # Bare `name ->` is ambiguous with constructs like range implicit-each,

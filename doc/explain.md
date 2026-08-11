@@ -33,6 +33,17 @@ The lexer hit a character that does not start any token.
 **Fix:** Check for smart quotes, stray control characters, or a half-written
 operator. `#` starts a comment unless it is a hex color (`#FF0000`).
 
+## E_LEX_INVALID_IDENTIFIER
+
+The source joined a lowercase identifier directly to uppercase ASCII, such as
+`camelCase` or `@camelCase`. Tungsten local, instance, class, and global
+variables and methods use `snake_case`; PascalCase names are class references
+and SCREAMING_SNAKE names are constants. Registered mixed-case unit spellings
+remain valid only on unit-expecting surfaces.
+
+**Fix:** Rename the identifier using `snake_case` (for example,
+`camel_case`).
+
 ## E_LOWER_FOREIGN_IDIOM
 
 Lowering recognized a name or pattern common in another language that Tungsten

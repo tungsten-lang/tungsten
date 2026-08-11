@@ -4,6 +4,11 @@
 # rubocop:disable Layout/SpaceInsideArrayPercentLiteral
 
 RSpec.shared_examples "a Tungsten lexer" do
+  it "anchors INDENT at the first body-token column" do
+    indent = described_class.new("if true\n  << 1\n").tokens.find { |token| token.type == :INDENT }
+    expect([indent.row, indent.col]).to eq([2, 3])
+  end
+
   class << self
     def it_lexes(string, type, value=nil)
       it "lexes #{string}" do
@@ -132,6 +137,13 @@ RSpec.shared_examples "a Tungsten lexer" do
   lexes "true",                   :TRUE
   lexes "false",                  :FALSE
   lexes "nil",                    :NIL
+
+  it_lexes_error "camelCase identifier", "camelCase"
+  it_lexes_error "underscored camelCase identifier", "_camelCase"
+  it_lexes_error "camelCase global", "$camelCase"
+  it_lexes_error "camelCase class variable", "@@camelCase"
+  it_lexes_error "camelCase instance variable", "@camelCase"
+  it_lexes_all "registered mixed-case unit spelling", "eV", *%i[ID CONSTANT]
 
 
   it_lexes_all "comment and method call", "# comment\nmethod", *%i[NL ID]

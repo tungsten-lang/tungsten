@@ -183,6 +183,7 @@ use regex_base
       @pos += 2
       word = scan_ident()
       full = "@@" + word
+      reject_mixed_case_tail("@@", word, start_col, false)
       push_token({type: :CVAR, value: full, line: @line, col: start_col})
       @col = start_col + full.size()
       return nil
@@ -217,6 +218,7 @@ use regex_base
       @pos += 1
       word = scan_ident()
       full = "@" + word
+      reject_mixed_case_tail("@", word, start_col, false)
       push_token({type: :IVAR, value: full, line: @line, col: start_col})
       @col = start_col + full.size()
       return nil
@@ -252,8 +254,10 @@ use regex_base
 
     # Global variable
     if ch == "$" && @pos + 1 < @char_count && is_ident_start?(@lc[@pos + 1])
+      start_col = @col
       @pos += 1
       word = scan_ident()
+      reject_mixed_case_tail("$", word, start_col, false)
       emit(:GLOBAL, "$" + word)
       return nil
 
@@ -710,7 +714,9 @@ use regex_base
 
     # Identifier or keyword
     if is_ident_start?(cp)
+      ident_col = @col
       word = scan_ident()
+      reject_mixed_case_tail("", word, ident_col, true)
       if word.include?("__")
         raise {rt: :compile_error, code: :E_LEX_RESERVED_IDENT, message: "'__' is not allowed in identifiers (reserved for magic constants)", file: @file, row: @line, col: @col, span_length: word.size()}
       if word.starts_with?("_w_")
@@ -870,6 +876,27 @@ use regex_base
       word << @chars[@pos + 1]
       @pos += 2
     word.to_s()
+
+  # The packed scanners deliberately end lowercase identifiers before an
+  # uppercase ASCII byte. Treat the adjacent spelling as one invalid lexical
+  # unit instead of letting it become ID/IVAR/CVAR/GLOBAL + NAME. Registered
+  # unit spellings are the sole exception for unprefixed identifiers.
+  -> reject_mixed_case_tail(prefix, word, start_col, allow_unit)
+    if @pos >= @char_count || @chars[@pos] < "A" || @chars[@pos] > "Z"
+      return nil
+    p = @pos
+    spelling = "" + word
+    while p < @char_count
+      mixed_ch = @chars[p]
+      if (mixed_ch >= "a" && mixed_ch <= "z") || (mixed_ch >= "A" && mixed_ch <= "Z") || (mixed_ch >= "0" && mixed_ch <= "9") || mixed_ch == "_"
+        spelling += mixed_ch
+        p += 1
+      else
+        break
+    if allow_unit && known_unit_name?(spelling)
+      return nil
+    joined = prefix + spelling
+    raise {rt: :compile_error, code: :E_LEX_INVALID_IDENTIFIER, message: "uppercase ASCII is not valid in identifiers: '" + joined + "' — use snake_case", file: @file, row: @line, col: start_col, span_length: joined.size()}
 
   -> constant_name?(word)
     return false if word.size() == 0

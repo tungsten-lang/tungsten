@@ -1522,6 +1522,12 @@ module Tungsten
       start = @pos
       advance(prefix_len)
       scan_ident_bytes
+      if upper_byte?(byte)
+        advance while ident_continue_byte?(byte) || upper_byte?(byte)
+        mixed = slice(start)
+        @col = start_col
+        error "uppercase ASCII is not valid in identifiers: '#{mixed}' — use snake_case"
+      end
       set_token(type, slice(start), @row, start_col)
     end
 
@@ -1567,6 +1573,22 @@ module Tungsten
       else
         has_arity = scan_ident_bytes
         finish = @pos
+        # Keep the byte-oriented lexer aligned with the reference lexer: an
+        # uppercase ASCII byte immediately following a lowercase identifier is
+        # not a second token, but an invalid camelCase spelling. Known
+        # mixed-case units stay split for unit-expecting parser surfaces.
+        if upper_byte?(byte)
+          suffix_pos = @pos
+          suffix_col = @col
+          advance while ident_continue_byte?(byte) || upper_byte?(byte)
+          mixed = @source.byteslice(start, @pos - start)
+          unless Units.known?(mixed)
+            @col = start_col
+            error "uppercase ASCII is not valid in identifiers: '#{mixed}' — use snake_case"
+          end
+          @pos = suffix_pos
+          @col = suffix_col
+        end
         return if !has_arity && emit_reserved_identifier(start, finish, start_col)
       end
 

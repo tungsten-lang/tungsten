@@ -1937,6 +1937,19 @@ driver_homebrew_prefix_memo = {}
   << "200 OK"
   true
 
+# Frontend-only modes (`--lex` / `--ast`) run before the command dispatcher,
+# so they need the same structured-error boundary as check/run/compile.
+-> report_frontend_error(err, source_path)
+  if type(err) == "Hash" && err[:rt] == :compile_error
+    ccall("w_flush")
+    ccall("w_eputs", emit_compile_error(err))
+    return true
+  if type(err) == "String"
+    ccall("w_flush")
+    ccall("w_eputs", format_runtime_error(err, source_path))
+    return true
+  false
+
 # Handle --wit / --repl (interactive pure-Tungsten REPL)
 if wit_mode
   REPL.new(Interpreter.new([]), jit_mode, hot_mode).start()
@@ -1945,28 +1958,38 @@ if wit_mode
 # Handle -e (eval) mode
 if eval_code != nil
   if show_lex
-    eval_code = ccall("w_algebra_rewrite_source", eval_code)
-    lexer = Lexer.new(eval_code, "(eval)")
-    token_count = lexer.tokenize()
+    begin
+      eval_code = ccall("w_algebra_rewrite_source", eval_code)
+      lexer = Lexer.new(eval_code, "(eval)")
+      token_count = lexer.tokenize()
 
-    packed = lexer.packed_tokens
-    values = lexer.values
-    i = 0
-    while i < token_count
-      p = packed[i]
-      type_id = (p >> 38) & 0xFF
-      << type_id.to_s() + " " + values[i].to_s()
-      i += 1
+      packed = lexer.packed_tokens
+      values = lexer.values
+      i = 0
+      while i < token_count
+        p = packed[i]
+        type_id = (p >> 38) & 0xFF
+        << type_id.to_s() + " " + values[i].to_s()
+        i += 1
+    rescue err
+      if report_frontend_error(err, "(eval)")
+        exit 1
+      raise err
 
     exit 0
 
   if show_ast
-    eval_code = ccall("w_algebra_rewrite_source", eval_code)
-    lexer = Lexer.new(eval_code, "(eval)")
-    token_count = lexer.tokenize()
-    parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
-    ast = parser.parse()
-    << ast_to_tree(ast, "")
+    begin
+      eval_code = ccall("w_algebra_rewrite_source", eval_code)
+      lexer = Lexer.new(eval_code, "(eval)")
+      token_count = lexer.tokenize()
+      parser = Parser.new(token_count, lexer.packed_tokens, eval_code, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
+      ast = parser.parse()
+      << ast_to_tree(ast, "")
+    rescue err
+      if report_frontend_error(err, "(eval)")
+        exit 1
+      raise err
     exit 0
 
   begin
@@ -1993,30 +2016,40 @@ if file_path == nil && command != "compile-batch"
 
 # Handle --lex and --ast for files
 if show_lex
-  source = read_file(file_path)
-  source = ccall("w_algebra_rewrite_source", source)
-  lexer = Lexer.new(source, file_path)
-  token_count = lexer.tokenize()
+  begin
+    source = read_file(file_path)
+    source = ccall("w_algebra_rewrite_source", source)
+    lexer = Lexer.new(source, file_path)
+    token_count = lexer.tokenize()
 
-  packed = lexer.packed_tokens
-  values = lexer.values
-  i = 0
-  while i < token_count
-    p = packed[i]
-    type_id = (p >> 38) & 0xFF
-    << type_id.to_s() + " " + values[i].to_s()
-    i += 1
+    packed = lexer.packed_tokens
+    values = lexer.values
+    i = 0
+    while i < token_count
+      p = packed[i]
+      type_id = (p >> 38) & 0xFF
+      << type_id.to_s() + " " + values[i].to_s()
+      i += 1
+  rescue err
+    if report_frontend_error(err, file_path)
+      exit 1
+    raise err
 
   exit 0
 
 if show_ast
-  source = read_file(file_path)
-  source = ccall("w_algebra_rewrite_source", source)
-  lexer = Lexer.new(source, file_path)
-  token_count = lexer.tokenize()
-  parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
-  ast = parser.parse()
-  << ast_to_tree(ast, "")
+  begin
+    source = read_file(file_path)
+    source = ccall("w_algebra_rewrite_source", source)
+    lexer = Lexer.new(source, file_path)
+    token_count = lexer.tokenize()
+    parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
+    ast = parser.parse()
+    << ast_to_tree(ast, "")
+  rescue err
+    if report_frontend_error(err, file_path)
+      exit 1
+    raise err
   exit 0
 
 if command == "run"

@@ -1774,24 +1774,38 @@ DEFINE_BENCH_LANE(isqrt, bigint_isqrt_any(a))
 DEFINE_BENCH_LANE(fromstr, w_bigint_from_dec_str(parse_input))
 
 /* cmp needs its volatile-operand slot (bigint_compare is a same-TU static;
- * without it clang hoists the loop-invariant compare out of the loop). */
+ * without it clang hoists the loop-invariant compare out of the loop).
+ *
+ * Sink discipline, for parity with the external lanes: results accumulate
+ * in a REGISTER and flush to bench_sink once, after timing.  Compare is
+ * the one sub-ns lane, and the previous per-iteration `bench_sink ^=`
+ * volatile read-modify-write added two global memory ops to every
+ * iteration that the Rust lane (register sink, one black_box at the end)
+ * does not pay.  The volatile operand slot stays: one stack reload per
+ * iteration is the cheaper twin of rustc's black_box on each operand
+ * reference (a stack store+reload round-trip per operand per iteration),
+ * so the anti-hoist tax remains symmetric or slightly against us.  The
+ * GMP cmp lane below mirrors this structure exactly. */
 static double __attribute__((noinline, aligned(128)))
 bench_lane_cmp(BenchLaneCtx *cx) {
     volatile WValue cmp_operand = cx->a;
     WValue b = cx->b;
+    uint64_t sink = 0;
     if (cx->warm_chunk > 0) {
         double warm_start = bench_now();
         do {
             for (int warm_i = 0; warm_i < cx->warm_chunk; warm_i++)
-                bench_sink ^= (uint64_t)bigint_compare(cmp_operand, b);
+                sink ^= (uint64_t)bigint_compare(cmp_operand, b);
         } while (bench_now() - warm_start < bench_warm_seconds);
     }
     int iters = cx->iters;
     double timed_start = bench_now();
     for (int timed_i = 0; timed_i < iters; timed_i++)
-        bench_sink ^= (uint64_t)bigint_compare(cmp_operand, b) ^
-                      (uint64_t)timed_i;
-    return bench_now() - timed_start;
+        sink ^= (uint64_t)bigint_compare(cmp_operand, b) ^
+                (uint64_t)timed_i;
+    double elapsed = bench_now() - timed_start;
+    bench_sink ^= sink;
+    return elapsed;
 }
 
 /* tostr frees its string result every iteration (mirrors str(a) with no
@@ -4655,23 +4669,33 @@ DEFINE_GMP_LANE(lcm,    mpz_lcm(r, a, b))
 DEFINE_GMP_LANE(isqrt,  mpz_sqrt(r, a))
 DEFINE_GMP_LANE(fromstr, mpz_set_str(r, dec, 10))
 
+/* Mirror of bench_lane_cmp's measurement discipline (see its comment):
+ * volatile operand slot plus a register sink flushed once after timing,
+ * so every cmp lane pays the same per-iteration bookkeeping.  The
+ * volatile slot is load-bearing here too: gmp.h declares mpz_cmp
+ * __GMP_ATTRIBUTE_PURE, so with plain loop-invariant operands clang
+ * hoists the whole call out of the loop (measured 0.07 ns/op). */
 static double __attribute__((noinline, aligned(128)))
 bench_gmp_lane_cmp(GmpLaneCtx *cx) {
-    mpz_ptr a = cx->a, b = cx->b;
+    volatile mpz_ptr cmp_operand = cx->a;
+    mpz_ptr b = cx->b;
+    uint64_t sink = 0;
     int warm_chunk = cx->warm_chunk;
     if (warm_chunk > 0) {
         double warm_start = bench_now();
         do {
             for (int warm_i = 0; warm_i < warm_chunk; warm_i++)
-                bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b);
+                sink ^= (uint64_t)(int64_t)mpz_cmp(cmp_operand, b);
         } while (bench_now() - warm_start < bench_warm_seconds);
     }
     int iters = cx->iters;
     double timed_start = bench_now();
     for (int timed_i = 0; timed_i < iters; timed_i++)
-        bench_sink ^= (uint64_t)(int64_t)mpz_cmp(a, b) ^
-                      (uint64_t)timed_i;
-    return bench_now() - timed_start;
+        sink ^= (uint64_t)(int64_t)mpz_cmp(cmp_operand, b) ^
+                (uint64_t)timed_i;
+    double elapsed = bench_now() - timed_start;
+    bench_sink ^= sink;
+    return elapsed;
 }
 
 /* Mirror of the Tungsten lane: convert, observe, free every iteration

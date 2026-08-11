@@ -16332,6 +16332,35 @@ int bigint_compare_c(WValue a, WValue b) {
                 uint64_t bl = bb->limbs[0];
                 return al == bl ? 0 : (al > bl ? 1 : -1);
             }
+            /* 3 and 4 limbs (192/256-bit values) get the same straight-line
+             * treatment as 1 and 2: immediate-offset descending compares.
+             * The general path below costs ~20 extra instructions here (an
+             * aliasing identity check, the odd-length head, and a paired
+             * loop whose indexed loads and flag-chained resolve are only
+             * worth it from 5 limbs up), which at these widths is most of
+             * the compare.  Equal values fall through every test and return
+             * 0, so no identity check is needed.  One gate test keeps the
+             * 1- and 2-limb arms above as the first two checks (they
+             * dominate real workloads) and adds a single predicted branch
+             * to the >= 5 path. */
+            if (__builtin_expect(as <= 4, 0)) {
+                if (as == 3) {
+                    uint64_t a2 = aa->limbs[2], b2 = bb->limbs[2];
+                    if (a2 != b2) return a2 > b2 ? 1 : -1;
+                    uint64_t a1 = aa->limbs[1], b1 = bb->limbs[1];
+                    if (a1 != b1) return a1 > b1 ? 1 : -1;
+                    uint64_t a0 = aa->limbs[0], b0 = bb->limbs[0];
+                    return a0 == b0 ? 0 : (a0 > b0 ? 1 : -1);
+                }
+                uint64_t a3 = aa->limbs[3], b3 = bb->limbs[3];
+                if (a3 != b3) return a3 > b3 ? 1 : -1;
+                uint64_t a2 = aa->limbs[2], b2 = bb->limbs[2];
+                if (a2 != b2) return a2 > b2 ? 1 : -1;
+                uint64_t a1 = aa->limbs[1], b1 = bb->limbs[1];
+                if (a1 != b1) return a1 > b1 ? 1 : -1;
+                uint64_t a0 = aa->limbs[0], b0 = bb->limbs[0];
+                return a0 == b0 ? 0 : (a0 > b0 ? 1 : -1);
+            }
             if (__builtin_expect(a == b, 0)) return 0;
             return bigint_compare_mag(aa->limbs, bb->limbs, as);
         }

@@ -409,6 +409,7 @@ compiled_specs=(
   spec/compiler/ast_typed_visitor_spec.w
   spec/compiler/array_compact_autoload_spec.w
   spec/compiler/array_constructor_parity_spec.w
+  spec/compiler/heredoc_opaque_lexer_spec.w
   spec/compiler/array_dup_autoload_spec.w
   spec/compiler/array_join_autoload_spec.w
   spec/compiler/argv_nested_scan_spec.w
@@ -589,6 +590,7 @@ interpreter_specs=(
   # interpreter.w hunks before).
   spec/compiler/block_presence_parity_spec.w
   spec/compiler/array_constructor_parity_spec.w
+  spec/compiler/heredoc_opaque_lexer_spec.w
   spec/compiler/method_fallthrough_parity_spec.w
   spec/compiler/int_bigint_promotion_spec.w
   spec/compiler/bigint_literal_cache_spec.w

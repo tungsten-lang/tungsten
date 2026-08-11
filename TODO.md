@@ -49,22 +49,23 @@ repros and workarounds noted at the use sites.
    and the CLI contract gate checks a real `i64[]` signature through `-c` so
    checker/parser drift cannot silently return.
 
-6. **Stage binaries went stale across the unit-registry expansion
+6. **[FIXED] Stage binaries went stale across the unit-registry expansion
    (b7269d7): compiled `1 kg/m³` printed `1 mickey`.** The committed
    tables were consistent, but the cached stage compiler + prebuilt
    runtime predated the expansion, so compile-time unit ids and the
    linked runtime's unit_names[] disagreed by 4 slots. `build --force`
-   resyncs; the build should fingerprint the generated unit tables into
-   its staleness check so a registry change invalidates stages
-   automatically. (Also: `gen_units.rb --check` rewrites the generated
-   files — mtime churn — while reporting "up to date"; it should diff
-   without writing.)
+   resyncs. Runtime identities already content-hash the generated C table;
+   stage identities now also hash the external lexer membership table, so a
+   registry change invalidates both sides automatically. `gen_units.rb` also
+   skips byte-identical block rewrites, avoiding no-op mtime churn.
 
-7. **Interpreter: `Class.method(["array", "literal"])` binds the array as
-   a block.** `A.enc(["a", "b"])` with `-> .enc(v) JSON.encode(v)` raises
-   "Undefined variable or method 'item'" interpreted (works compiled).
+7. **[FIXED] Interpreter: `Class.method(["array", "literal"])` bound the
+   array as a block.** Call ASTs now carry trailing blocks explicitly instead
+   of inferring one from the final argument. The historical class-method shape
+   is pinned in `spec/compiler/array_constructor_parity_spec.w` across both
+   engines.
 
-8. **Packed lexer mis-scans heredoc content (`Unexpected token
+8. **[FIXED] Packed lexer mis-scanned heredoc content (`Unexpected token
    TYPE_HINT(<<~JS…`).** Heredocs whose bodies look token-dense to the
    fast64 tokenizer (e.g. many `//`-prefixed JavaScript lines) come back
    as a TYPE_HINT token instead of a STRING. Not a pure size limit:
@@ -74,7 +75,10 @@ repros and workarounds noted at the use sites.
    the heredoc span (`//` starts a regex/comment state) and the packed
    12-bit length or the materializer skip logic losing sync. Workaround:
    core/plot3d.w ships its viewer JS/CSS as data/viewer3d assets read at
-   runtime instead of heredocs.
+   runtime instead of heredocs. The packed lexer now skips directly to the
+   heredoc terminator and materializes the body as one string; a 240-line
+   token-dense body is pinned in `spec/compiler/heredoc_opaque_lexer_spec.w`
+   across interpreted and compiled execution.
 
 9. **[FIXED] `Closure#call` capped at 2 arguments.** `f.call(x, y, z)`
    died "closure .call supports up to 2 arguments"
@@ -210,6 +214,15 @@ projects stay unchecked until their stated acceptance criteria are met.
   and fast C paths, minimize disagreements, and retain every counterexample as
   a fixture. A crash is only one failure mode; any semantic disagreement is an
   oracle failure.
+  - [x] Deterministic seed/case generation, replay, line minimization, and
+    failure retention under `build/cache/frontend-fuzz/`.
+  - [x] Token/value/location/error parity for the Ruby regex/codepoint pair and
+    the self-hosted reference/packed pair.
+  - [x] Valid/invalid acceptance checks plus execution parity across Ruby,
+    self-hosted, and the C VM for the shared arithmetic/control-flow subset.
+  - [ ] Normalize and compare full parser ASTs across implementations, broaden
+    the grammar beyond the shared subset, and promote every minimized failure
+    into a committed regression fixture before calling this complete.
 - [ ] Add a GPU-kernel type/subset pre-pass at check time. Batch unsupported
   statements, bad address spaces, shape errors, and dialect-only intrinsics
   before invoking `metal` or `nvcc`.
@@ -221,9 +234,11 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Add a compiler consistency audit: every Core method requiring dynamic
   dispatch has the needed IC row and static-whitelist entry. Make missing wires
   a build error, not a release checklist item.
-- [ ] Reject ASCII `camelCase` identifiers lexically. Uppercase ASCII after a
-  lowercase start is neither a variable, `ClassName`, nor `CONSTANT`; add parity
-  fixtures across every lexer.
+- [x] Reject ASCII `camelCase` identifiers lexically. Uppercase ASCII after a
+  lowercase start is neither a variable, `ClassName`, nor `CONSTANT`. The
+  packed, reference self-hosted, Ruby regex/codepoint, and direct C lexers all
+  reject it; their generated unit-membership exception preserves valid `eV`,
+  `mmHg`, `kWh`, and other registered mixed-case unit spellings.
 - [x] Specify and test method fallthrough: a taken final conditional arm returns
   its bare value, while every path that reaches the end without producing one
   returns `nil`. Native and interpreted coverage includes `if`, `elsif`, nested
@@ -235,9 +250,12 @@ projects stay unchecked until their stated acceptance criteria are met.
 
 ### Frontend and compilation performance
 
-- [ ] Make the C fast loader/parser byte-for-byte equivalent and the default
-  bootstrap path. Profile its advantage by phase. Transfer its useful ideas to
-  the self-hosted frontend: flat packed token storage, one-pass use-graph
+- [x] Make the C fast loader/parser byte-for-byte equivalent and the default
+  bootstrap path. `scripts/test-fast-parse-parity.sh` compares byte-identical
+  stage-1 LLVM IR and runs an acid test against the fast-built compiler. The
+  native path is roughly 35x faster at lexing/parsing in its focused benchmark.
+  Transfer its useful ideas to the self-hosted frontend: flat packed token
+  storage, one-pass use-graph
   flattening, avoiding intermediate AST containers, memoized target probes,
   and watermarked rather than repeated whole-tree autoload scans.
 - [ ] Persist a reusable lowered-Core image under `build/cache/`. Its identity

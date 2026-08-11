@@ -7,6 +7,7 @@
 #   /tmp/tungsten-lex-parity compiler/tungsten.w compiler/lib/lexer.w ...
 
 use lib/lexer
+use lib/error_formatter
 use ../languages/tungsten/lexers/regex
 use ../languages/tungsten/lexers/lex32
 use ../languages/tungsten/lexers/wtoken32
@@ -154,6 +155,13 @@ use ../languages/tungsten/lexers/wtoken32
     return ""
   value.to_s()
 
+-> frontend_error_signature(err)
+  if err == nil
+    return "ok"
+  if type(err) == "Hash" && err[:rt] == :compile_error
+    return "compile:" + err[:code].to_s() + ":" + err[:row].to_s() + ":" + err[:col].to_s()
+  "runtime:" + type(err) + ":" + err.to_s()
+
 args = argv()
 if args.size() == 0
   << "usage: lex_parity <file.w> \[file.w ...]"
@@ -173,18 +181,30 @@ while i < args.size()
     next
 
   old_tokens = nil
+  old_error = nil
   begin
     old_tokens = RegexLexer.new(source, file).tokenize()
   rescue err
-    failed += 1
-    << "FAIL [file]: RegexLexer raised [err]"
+    old_error = err
+
+  new_lexer = Lexer.new(source, file)
+  new_error = nil
+  begin
+    new_lexer.tokenize()
+  rescue err
+    new_error = err
+
+  if old_error != nil || new_error != nil
+    old_signature = frontend_error_signature(old_error)
+    new_signature = frontend_error_signature(new_error)
+    if old_signature != new_signature
+      failed += 1
+      << "FAIL [file]: error regex=[old_signature] production=[new_signature]"
     checked += 1
     i += 1
     next
 
   old_count = old_tokens.size()
-  new_lexer = Lexer.new(source, file)
-  new_lexer.tokenize()
   packed = new_lexer.packed_tokens()
   values = new_lexer.values()
   line_at = new_lexer.line_at()

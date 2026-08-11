@@ -9,6 +9,15 @@
     << "FAIL " + name
     exit 1
 
++ ArrayArgumentProbe
+  -> .size_of(values)
+    values.size()
+
+# A parenthesized array literal is an ordinary positional argument. The
+# interpreter once peeled it off as a trailing block payload, turning
+# `A.f([1, 2])` into a block-bearing zero-argument call.
+check("array.literal.class_method_arg", ArrayArgumentProbe.size_of([1, 2]) == 2)
+
 empty = Array.new()
 check("array.new.empty", empty.size == 0)
 

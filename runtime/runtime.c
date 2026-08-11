@@ -34527,11 +34527,16 @@ static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
     }
     int use_3q = 0;
     if (j > 0 && p > 2 * (len - p)) {
-        if (len >= W_FROM_S_BALANCED_SPLIT_DIGITS) {
+        if (len >= W_FROM_S_BALANCED_SPLIT_DIGITS ||
+            p > W_FROM_S_THREE_QUARTER_MAX_SKEW * (len - p)) {
+            /* Halve whenever the alternative is a split beyond the 3/4
+             * rescue's skew cap: just past a power boundary the raw rule
+             * leaves splits up to ~16:1 (19,729 digits = 1,297 vs 18,432,
+             * the measured fromstr@1024 loss), and a one-level-down split
+             * is near-balanced there by construction. */
             p >>= 1;
             j--;
         } else if (W_FROM_S_THREE_QUARTER &&
-                   p <= W_FROM_S_THREE_QUARTER_MAX_SKEW * (len - p) &&
                    w_p10c_five_3q_build(j)) {
             /* At a power boundary the conventional split can be almost
              * 10:1.  A cached 3/4 power (levels j-1 plus j-2) gives the

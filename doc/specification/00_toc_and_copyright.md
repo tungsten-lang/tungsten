@@ -8,7 +8,7 @@ Syntax and lexical analysis are formally specified, the rest is described using 
 
 Every implementation comes with a number of core classes, see _[The Tungsten Core][Core]_. These classes are mentioned only when they are relevant to the language itself.
 
-<small>See the [changelog](CHANGELOG.md) for information on changes since this release.</small>
+<small>See the [changelog](../CHANGELOG.md) for information on changes since this release.</small>
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ Every implementation comes with a number of core classes, see _[The Tungsten Cor
 5. [Floating-Point Math Modes](floating-point-math.md)
 6. Appendix
     A: [Units of measurement](appendix_units_of_measurement.md)
-    B: [Inspiration](appendex_language_inspiration.md)
+    B: [Language inspiration](appendix_language_inspiration.md)
 
 [Home]:     https://tungsten-lang.org/
 [Docs]:     https://docs.tungsten-lang.org/2026.07.04/docs

@@ -223,10 +223,6 @@ The appendices contain more detailed background information on various topics.
 _[Appendix A]_ describes units of measurement that ship with Tungsten.
 _[Appendix B]_ discusses languages that inspired Tungsten.
 
-[Library]:  https://docs.tungsten-lang.org/2015.12.1/libray
-[Release]:  https://docs.tungsten-lang.org/2015.12.1/release
-[Tutorial]: https://docs.tungsten-lang.org/2015.12.1/tutorial
-
 [Appendix A]: appendix_units_of_measurement.md
 [Appendix B]: appendix_language_inspiration.md
 

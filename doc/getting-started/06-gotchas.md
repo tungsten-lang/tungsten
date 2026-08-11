@@ -233,13 +233,15 @@ the harness expects.
 If you change `compiler/`:
 
 ```bash
-bin/tungsten bootstrap       # stage 1 only (bash, no Ruby)
-bin/tungsten build           # stage 1 + stage 2, identical .ll required
-bin/tungsten build --force   # ignore cached stage binaries
+bin/tungsten bootstrap       # fresh clone: stage 0, runtime, stage 1, then full build
+bin/tungsten build           # existing compiler: stage 1 + stage 2
+bin/tungsten build --force   # ignore cached build artifacts
 ```
 
+Bootstrap hands its runtime and stage-1 artifacts to `build`; the chained build
+must reuse that exact matching profile rather than compiling them a second time.
 A green application program does not prove the compiler still fixed-points —
-the build's stage1/stage2 IR check does.
+the stage-1/stage-2 byte-identity check does.
 
 ---
 

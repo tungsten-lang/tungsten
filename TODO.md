@@ -28,31 +28,26 @@ repros and workarounds noted at the use sites.
    `WeilSexticGaloisGroup < GaloisGroup` (works only because it overrides
    everything it uses).
 
-3. **Compiled StringBuffer#append drops non-literal strings inside any
-   function body.** At top level all appends work; inside a `->` body
-   (top-level fn, instance or class method), `sb.append(x)` where x is a
-   param, a local, or a `+`-concat result appends NOTHING (only literals,
-   interpolated strings, and `.to_s` results survive). Repro:
-   `-> tf(x)\n  sb = StringBuffer(256)\n  sb.append(x)\n  sb.to_s` returns
-   "". Likely a representation mismatch on the w_strbuf_append fast path
-   (compiler/lib/lowering/method_call.w:978). Workaround used in
-   core/plot3d.w: wrap every dynamic append arg in interpolation
-   (`sb.append("[v]")`).
+3. **[FIXED] Compiled StringBuffer#append dropped non-literal strings
+   inside function bodies.** The known-StringBuffer lowering only used the
+   direct runtime append for statically inferred strings; parameters, locals,
+   concat results, and other dynamic values fell through the bodiless Core
+   declaration and silently appended nothing. All known-StringBuffer appends
+   now lower directly and dynamic values pass through `w_to_s`, matching the
+   interpreter and `StringBuffer#<<` runtime semantics. Pinned in
+   `spec/compiler/string_buffer_dynamic_append_spec.w`.
 
-4. **Quantity arg slot clobbered: inline `.class.to_s` guard + early
-   return + `case`.** In a class method
-   `if value.class.to_s != "Quantity"\n  return value.to_f()\n case ...`,
-   the quantity in `value` is corrupted before the case body's unit pipe
-   (dies "| unit conversion expects a quantity"). Landing the class name
-   in a local first avoids it. A related shape: a `case` whose branches
-   contain quantity literals miscompiled branch selection inside
-   core/physics Physics.si until it was rewritten as an if-chain (both
-   guards documented in core/physics/constants.w).
+4. **[FIXED] Quantity arg slot clobber around inline `.class.to_s`, early
+   return, and `case`.** The original Physics.si control-flow shape now
+   preserves the Quantity argument across the guard and case, including after
+   the same call site handles a Decimal, and quantity-literal case branches
+   select the right unit. The exact historical shape is pinned across both
+   engines in `spec/compiler/quantity_control_flow_parity_spec.w`.
 
-5. **`bin/tungsten -c` rejects array types in typed signatures.** Even
-   the doc example `-> dot(xs, ys, n) (f64[] f64[] i64) f64` fails
-   `-c` with "expected ')'" while running/compiling the same file works.
-   Checker-path lexer/parser divergence.
+5. **[FIXED] `bin/tungsten -c` rejected array types in typed signatures.**
+   Parameter and return type parsing now accepts the shared `T[]` spelling,
+   and the CLI contract gate checks a real `i64[]` signature through `-c` so
+   checker/parser drift cannot silently return.
 
 6. **Stage binaries went stale across the unit-registry expansion
    (b7269d7): compiled `1 kg/m³` printed `1 mickey`.** The committed
@@ -192,3 +187,255 @@ is the one door that design closes, and this note is where the key is.
 (Phase 3 section), CEO record
 `~/.gstack/projects/companygardener-math/ceo-plans/2026-07-22-wassat-portfolio.md`.
 Effort: XL human / L with CC. Priority: P3.
+
+## Engineering roadmap (2026-08-11)
+
+This is the execution checklist for the compiler/runtime review. A checked item
+has a regression or an independently runnable contract in the tree; broad
+projects stay unchecked until their stated acceptance criteria are met.
+
+### Correctness and compiler contracts
+
+- [x] Fix the C VM empty-operand-stack transition. `NEXT()` must not refresh
+  its top-of-stack cache when `sp == 0`; keep the exact `STORE_LOCAL; POP`
+  transition under ASan+UBSan on ARM64 and x86_64.
+- [x] Generate one machine-readable foreign-call contract table and verify
+  compiler declarations, WIRE calls, C symbols, arity, and raw/WValue ABI from
+  it. The default suite must fail on an undeclared or mismatched `ccall`.
+- [x] Route `tungsten check`, `-c`, and `--check` through the stage-2 loader and
+  lowering/type-inference path, stopping before CFG/LLVM/linking. Keep valid and
+  static-error CLI fixtures in the root gate.
+- [ ] Differential-fuzz all frontends: generate grammar-aware valid and
+  near-valid sources, compare canonical tokens/ASTs from the reference, packed,
+  and fast C paths, minimize disagreements, and retain every counterexample as
+  a fixture. A crash is only one failure mode; any semantic disagreement is an
+  oracle failure.
+- [ ] Add a GPU-kernel type/subset pre-pass at check time. Batch unsupported
+  statements, bad address spaces, shape errors, and dialect-only intrinsics
+  before invoking `metal` or `nvcc`.
+- [ ] Make `compiler2` packed/slab nodes use generated `node.field` accessors
+  instead of mixed `ast_get`/index access, then delete the compatibility path.
+- [ ] Enforce generic constraints when definitions are checked, including
+  parent constraints such as `Class<T> < Parent`, instead of deferring them to
+  runtime dispatch failures.
+- [ ] Add a compiler consistency audit: every Core method requiring dynamic
+  dispatch has the needed IC row and static-whitelist entry. Make missing wires
+  a build error, not a release checklist item.
+- [ ] Reject ASCII `camelCase` identifiers lexically. Uppercase ASCII after a
+  lowercase start is neither a variable, `ClassName`, nor `CONSTANT`; add parity
+  fixtures across every lexer.
+- [x] Specify and test method fallthrough: a taken final conditional arm returns
+  its bare value, while every path that reaches the end without producing one
+  returns `nil`. Native and interpreted coverage includes `if`, `elsif`, nested
+  conditionals, and an untaken explicit-return arm.
+- [ ] Preserve the intended numeric tower instead of merging names by accident:
+  document which of `Integer` and `Int` is generic/specialized, where promotion
+  to `BigInt` occurs, and why `BigInt` currently satisfies both runtime subtype
+  checks. Share only algorithms whose semantics are proven identical.
+
+### Frontend and compilation performance
+
+- [ ] Make the C fast loader/parser byte-for-byte equivalent and the default
+  bootstrap path. Profile its advantage by phase. Transfer its useful ideas to
+  the self-hosted frontend: flat packed token storage, one-pass use-graph
+  flattening, avoiding intermediate AST containers, memoized target probes,
+  and watermarked rather than repeated whole-tree autoload scans.
+- [ ] Persist a reusable lowered-Core image under `build/cache/`. Its identity
+  must cover compiler/schema version, all loaded Core contents, build defines,
+  target/mode, service bindings, and lowering configuration; remap IDs safely
+  when composing it with a user module. Benchmark cold miss, warm hit, and RSS.
+- [ ] Add file/use dependency tracking for incremental recompilation. Rebuild
+  only invalidated files and downstream users, while retaining stage-1/stage-2
+  byte identity as the bootstrap invariant.
+- [ ] Make codegen parallelism adaptive. Gate LLVM partitioning on module size,
+  available memory/cores, architecture, and measured benefit; fall back to one
+  TU on small modules or any split failure. Record the tradeoff: parallel jobs
+  raise peak RSS and can lose whole-module optimization, particularly on ARM64.
+- [ ] Promote compiler PGO from an opt-in experiment to a reproducible cold
+  bootstrap profile, with versioned training inputs and before/after timings.
+- [ ] Resolve the `-O0` performance inversion. User `-o` builds should default
+  to a meaningful optimized profile, while an explicit debug/O0 mode remains
+  available; all benchmark harnesses must require/restate release mode.
+- [ ] Move the remaining reusable runtime archive and incremental artifacts out
+  of `/tmp`/implicit home caches into the selected content-addressed cache, and
+  include tool contents, generated tables, runtime sources, ambient SDK paths,
+  flags, target, and optional features in their identities.
+
+### Build, cache, CI, and release
+
+- [x] Garbage-collect reproducible files in `build/cache/` after seven days.
+  Automatic sweeps are daily and concurrency-safe; a retention-contract test
+  covers fresh files, stale files, nested directories, and invalid settings.
+- [x] Unify `bootstrap` and `build` around one runtime/stage-1 build function and
+  artifact manifest. A chained fresh bootstrap must hand the verified artifacts
+  to build without recompiling them, while different flags/features remain
+  cache misses.
+- [x] Remove `/opt/homebrew` assumptions from executable paths. Prefer explicit
+  config, `pkg-config`, `brew --prefix <formula>`, the compiler search path, and
+  standard system prefixes; include discovered prefixes in cache identities.
+- [x] Add `rake spec:bits`: classify all tracked bit specs, exclude generator
+  templates explicitly, run each real suite exactly once, and fail discovery
+  drift. Wire it into root `rake` and CI.
+- [x] Put unit-registry superset and regex-lexer parity checks in the default
+  root gate; run Metal, REPL/PTY, and API contracts on appropriate CI hosts.
+- [x] Add x86_64 and ARM64 sanitizer lanes for the C VM/runtime. Keep ordinary
+  CI portable; use Spot only for a missing architecture or a failure that cannot
+  be reproduced on GitHub's native runners.
+- [ ] Add a GitHub performance workflow with pinned hardware classes, warmups,
+  multiple samples, machine-readable baselines, noise bands, and an explicitly
+  approved baseline-update path. Report regressions without comparing unlike
+  runner generations.
+- [x] Implement `bin/tungsten release`: validate a clean `main`, run root `rake`,
+  create/push an annotated version tag, then build, smoke, checksum, attest, and
+  publish native packages for macOS/Linux ARM64 baselines and x86-64-v2/v3.
+- [ ] Make the release workflow exercise `--dry-run` and package validation in
+  pull requests without creating tags or releases.
+- [ ] Repair `-march=native` on Apple Silicon so release/native never suppresses
+  crypto extensions. Stamp the explicit detected feature set and pin it with IR
+  and hardware tests.
+
+### CLI, package manager, and developer tools
+
+- [x] Add `tungsten explain CODE` and point structured diagnostics/API parsing
+  at that spelling; unknown codes must be non-zero.
+- [x] Preserve exact child status from `tungsten run` and compiler delegation.
+  A program that calls `exit(7)` must surface status 7, and exceptions must keep
+  their formatted diagnostic rather than becoming silent status 1.
+- [x] Keep runtime error source locations, context windows, and caret pointers
+  under compiled regression coverage, including the no-source fallback.
+- [ ] Port `implementations/ruby/lib/tungsten/formatter.rb` to the self-hosted
+  `bin/tungsten fmt`; require idempotence and AST equivalence over the corpus.
+- [ ] Add `bin/tungsten lint` with stable diagnostic codes, machine-readable
+  output, configurable severities, and no source mutation.
+- [ ] Add `bin/tungsten debug` for build/run with symbols, frame pointers,
+  sidemap validation, debugger selection, and faithful child exit status.
+- [ ] Finish the self-hosted REPL migration (`repl.rb` to `repl.w`) and remove
+  Ruby as an interactive runtime dependency after PTY/history/error parity.
+- [ ] Make `bit install` resolve a lockfile, verify checksums, and install to
+  `$BIT_HOME/<name>/<version>/`; default `BIT_HOME` to
+  `$TUNGSTEN_HOME/bits`, and `TUNGSTEN_HOME` to `~/.tungsten`. Support an
+  explicit system-wide prefix without requiring it for ordinary installs.
+- [ ] Add streaming CSV and broaden filesystem coverage (directory traversal,
+  links, permissions, metadata, atomic replace, memory mapping, and platform
+  error parity).
+- [ ] Improve FFI declaration, ownership, callbacks, strings/bytes, structs,
+  arrays, error translation, and marshalling; specify which side allocates and
+  frees every representation.
+
+### Core semantics and concurrency
+
+- [x] Give `Enumerable` real producer-side early termination. Indexed sources
+  return directly; generic/pair-yielding sources use an identity-checked private
+  unwind signal so infinite streams stop, `ensure` runs, and user exceptions
+  are rethrown.
+- [x] Implement `block?` in the self-hosted compiler and replace Core uses of
+  `block_given?`; retain a documented compatibility alias only if external code
+  requires it.
+- [ ] Complete interpreter/native parity for `SmallArray` and
+  `Array.new(n, fill)`, including zero size, mutable fill aliasing, typed fills,
+  bounds, stack promotion, and calls through dynamically typed receivers.
+- [ ] Eliminate remaining interpreter/compiled divergence systematically: bare
+  sibling class-method calls, array literals passed to class methods, packed
+  AST containers, reverse-operand dispatch, Hash keys/equality, and constructor
+  defaults all need paired fixtures.
+- [ ] Define cancellation and close semantics shared by `Thread`, `Channel`,
+  `Future`, and `Promise`: blocked send/receive wakeup, timeout races,
+  cancellation propagation, cleanup, and uncaught worker errors.
+- [ ] Expand `core/channel.w` with bounded/unbounded send, receive, close,
+  iteration, timeout/nonblocking operations, and select semantics.
+- [ ] Flesh out `core/mutex.w` with lock/try_lock/unlock/synchronize, ownership
+  errors, non-reentrancy policy, poisoning policy, and cancellation safety.
+- [ ] Flesh out `core/atomic.w` with typed load/store/exchange/CAS/fetch ops and
+  explicit memory-order semantics mapped consistently on every host.
+- [ ] Add `Future`/`Promise` after the concurrency contract is fixed: exactly
+  once settlement, error propagation, composition, timeout, and cancellation.
+- [ ] Add scope-safe/finalizer-backed release for Metal and Tensor handles.
+  Prefer explicit deterministic `close` plus idempotent finalization; prove that
+  finalizers never run GPU work or deadlock the runtime.
+- [ ] Add typed runtime error values without losing stable codes/source spans.
+  Specify hierarchy, cause/backtrace, rescue matching, serialization, and FFI
+  error translation before replacing string raises.
+
+### Core library surface
+
+- [ ] Add `core/socket.w`, `core/url.w`, and `core/http.w`. URL needs a strict
+  `URL.parse/1`; HTTP needs streaming bodies, redirects, timeouts, cancellation,
+  TLS verification, proxy behavior, and typed transport/status errors.
+- [ ] Replace curl subprocess TLS with an in-process transport. Reuse the native
+  HTTP/2/HTTP/3 work, avoid `system(3)` global signal/mutex hazards, and test
+  certificate validation plus concurrent requests on macOS and Linux.
+- [ ] Add `core/timezone.w`, `core/datetime.w`, and `core/timestamp.w` with a
+  versioned timezone database, DST gap/fold policy, monotonic-vs-wall-clock
+  separation, parsing/formatting, and serialization provenance.
+- [ ] Add `core/env.w` with the usual fetch/get/set/delete/keys/each/to_h
+  surface, process-local mutation semantics, encoding rules, and sandbox gates.
+- [ ] Add `File.stat` and `Tempfile`, including typed metadata, secure atomic
+  creation, cleanup/close behavior, symlink policy, and Windows parity.
+- [ ] Add `core/timer.w` with monotonic deadlines, one-shot/repeating timers,
+  cancellation, event-loop integration, and no callback after successful cancel.
+- [ ] Add regex capture groups with consistent numbered/named captures,
+  unmatched-group behavior, offsets, Unicode semantics, and engine parity.
+- [ ] Complete Hash on every host: insertion order, symbol/table separation,
+  char keys, structural equality/hash agreement, deletion/tombstones, and
+  mutation-during-iteration behavior.
+- [ ] Finish HDF5 and the multi-dimensional SciIO contract described above,
+  with h5py/`h5dump` golden fixtures and shapes that are not silently flattened.
+- [ ] Design unit conversion contexts as described above: versioned CODATA,
+  standard atmosphere, historical currency, effective dates, serialization,
+  cache identity, and provenance on results.
+
+### Native data and numerical performance
+
+- [ ] Start Array-to-native Tier A: instrument hot Array paths, move typed
+  storage/arithmetic to unboxed native buffers, retain WValue fallback, and pin
+  aliasing/GC/exception semantics. Matmul is the primary acceptance workload.
+- [ ] Close the integer pipeline-fusion dispatch gap and compose it with loop
+  versioning, stack promotion, and typed storage; compare fused/unfused output
+  and performance.
+- [ ] Apply the proven `## i64`/unboxed discipline to the regex VM and measure
+  instruction/boxing counts before and after.
+- [ ] Finish BigInt mutate-if-unique `add/sub` first, using the ownership proof
+  at the point an old LHS would be freed; model negate aliases and
+  differential-test against the immutable path before expanding to mul/div.
+- [ ] Add PMULL GHASH on supported Apple Silicon with feature dispatch and
+  standard test vectors; retain constant-time portable fallback.
+- [ ] Make small matrix multiplication competitive with C across tiny fixed
+  shapes. Benchmark call/shape-check/allocation overhead separately from the
+  arithmetic and generate specialized kernels where it wins.
+- [ ] Add shape-safe linear algebra: checked dimensions by default, compile-time
+  shapes when known, overflow-safe allocation math, and one explicit unsafe
+  escape hatch. Measure checks so small matrices do not regress.
+
+### GPU and additional platforms
+
+- [ ] Implement CUDA `tg_sum/tg_max/tg_min` equivalents or reject them during
+  the pre-pass; never emit undeclared MSL helpers. Likewise lower or clearly
+  reject `simdgroup_load/store` outside Metal.
+- [ ] Broaden WGSL beyond assignments/calls/if: while-as-loop, return,
+  workgroup memory, barriers, and atomics, with emitted WGSL validated by a real
+  tool in CI.
+- [ ] Make multi-dialect GPU sidecars deliberate and stable by default. Invalid
+  dialect combinations must be diagnostics, not skipped comments or silent
+  fallback; keep explicit opt-out for users who only want one backend.
+- [ ] Verify GPU kernel shapes and intrinsic legality before emission, including
+  SELF shapes, addcarry/asm restrictions, workgroup sizes, and buffer bounds.
+- [ ] Make carry-chain unroll count a source/env tuning hint rather than a
+  hardcoded 8, and add `bin/tungsten gpu-bench` to emit, compile, dispatch, and
+  time reproducible kernels with device/compiler metadata.
+- [ ] Add MinGW and a Windows-native event loop, filesystem/process/socket
+  parity, path/encoding rules, and x64/ARM64 CI. Use a temporary native host or
+  Spot runner only where GitHub runners cannot exercise the required kernel API.
+- [ ] Add a WASM target. First evaluate LLVM's wasm32 output against WIRE ABI,
+  exception, GC/ownership, filesystem, and browser/WASI constraints; avoid a
+  second lowering backend unless the LLVM route cannot meet the contract.
+
+### Documentation and onboarding
+
+- [x] Expand `doc/CONTRIBUTING.md` with fresh-clone build, root `rake`, focused
+  specs, style (`size`, not `length`), generated files, benchmark discipline,
+  stage identity, cache cleanup, PR expectations, and release verification.
+- [x] Fix case-sensitive/stale references: `doc/WSL2.md`, the specification TOC
+  and Appendix B spelling/link, current standard references, and the duplicate
+  `SYNTAX_WISHLIST` source of truth.
+- [x] Treat `tungsten-lang.org` as launched in project notes and future audits;
+  do not repeat the stale pre-launch status.

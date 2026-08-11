@@ -291,7 +291,7 @@ bin/tungsten --ast file.w           # AST dump
 bin/tungsten --lex file.w           # tokens
 bin/tungsten --ll file.w            # LLVM IR
 TUNGSTEN_ERROR_FORMAT=json bin/tungsten -c file.w   # structured errors
-bin/tungsten --explain E_PARSE_…    # lesson from doc/explain.md
+bin/tungsten explain E_PARSE_…      # lesson from doc/explain.md
 ```
 
 Structured compile errors (internal hash and JSON export) include:

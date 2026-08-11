@@ -351,3 +351,45 @@ methods returning `nil` or Bool.
 The grammar should make those two intentions visibly distinct while retaining
 ordinary block-taking calls as the concise common case. This is a syntax wish
 only; the synchronization-wrapper migration preserves the current behavior.
+
+## C-builtin port campaign notes (2026-07-18)
+
+The C-builtin port exposed several additional low-level friction points. These
+are retained here from the former lowercase wishlist so this file remains the
+single source of truth.
+
+1. **Primitive-class returns require manual NaN boxing.** Returning a raw
+   `i64` from an `Integer` or `String` method requires hand-building the tag.
+   A checked `n ## Int`-style boxing operation could replace copied constants.
+2. **Signed i48 payload extraction is verbose.** Core code must mask and then
+   explicitly sign-extend the 48-bit payload. A signed `$int` view would expose
+   the operation directly.
+3. **Typed parameters do not unbox at entry.** Hot bodies introduce a second
+   `i64` local for each boxed argument. A parameter annotation should be able to
+   request the existing entry-unboxing machinery.
+4. **Ternary and `if` can infer different loop-variable representations.** The
+   equivalent forms should retain the same raw integer fact and avoid a silent
+   performance cliff.
+5. **String byte access crosses a verbose C boundary.** A checked `byte` or
+   `each_byte` view and an owned-byte-buffer constructor would remove repeated
+   `ccall`, data-pointer, and allocation-order rituals.
+6. **A scaffold class looks live.** The loader should diagnose duplicate class
+   definitions or support an explicit scaffold marker so contributors do not
+   optimize a file that is never dispatched.
+7. **Autoload trigger lists are handwritten.** The registry should derive
+   method triggers from Core declarations or mechanically verify them against
+   the manifest.
+8. **Inline String construction repeats raw tag assembly.** A small-string
+   builder or checked literal representation would replace signed magic masks.
+9. **Bit masks are written as signed decimal constants.** Hexadecimal raw
+   integer literals should work directly in bitwise operations.
+10. **Transient byte buffers pay for an Array header.** An owned bare-buffer
+    type could support efficient construction and transfer without pretending
+    to be a full Array.
+11. **Foreign-call allowlists were duplicated.** The machine-readable foreign
+    call registry now removes part of this problem; a future typed FFI should
+    make declarations, representation, effects, and host availability one
+    checked contract.
+12. **Decimal and Float literals mix too quietly.** Diagnostics or lint should
+    flag code such as a Decimal `0.0` accumulator fed by Float timings; `~0.0`
+    is the explicit Float spelling today.

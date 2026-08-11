@@ -1,6 +1,6 @@
 # Tungsten error explanations
 
-Used by `tungsten --explain CODE` (and the `explain:` footer on compile errors).
+Used by `tungsten explain CODE` (and the `explain:` footer on compile errors).
 Each section is headed by the error code; the body is cause + fix.
 
 ## E_PARSE_UNEXPECTED_TOKEN

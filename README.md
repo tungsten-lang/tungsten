@@ -224,6 +224,11 @@ bin/tungsten build --release --target x86_64-unknown-linux-gnu --cpu v3
 bin/tungsten build --portable
 ```
 
+`bin/tungsten release [VERSION]` runs the root `rake` gate, creates and pushes
+an annotated version tag, and lets GitHub build and attest the native release
+matrix. ARM64 uses each target's portable baseline; x86_64 ships both v2 and
+v3 packages on macOS and Linux. Use `--dry-run` to validate without tagging.
+
 Tungsten's documented x86-64 release set is:
 
 | Artifact | Minimum ISA | Representative minimum CPUs |
@@ -238,12 +243,15 @@ Local defaults live in `~/.tungsten/config`:
 ```toml
 [build]
 cpu = apple-m5
-cc = /opt/homebrew/opt/llvm/bin/clang
+cc = clang
 ```
+
+For Homebrew LLVM, run `brew --prefix llvm` and set `cc` to that prefix
+followed by `/bin/clang`; Tungsten does not assume a Homebrew install root.
 
 
 > **_On Windows?_** Tungsten targets macOS and Linux
-> Use [WSL2](doc/wsl2.md) for a full Linux environment, then follow the Linux steps.
+> Use [WSL2](doc/WSL2.md) for a full Linux environment, then follow the Linux steps.
 
 ### Environment Variables
 

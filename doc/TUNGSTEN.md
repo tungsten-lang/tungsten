@@ -30,6 +30,8 @@ COMMANDS
     tungsten with no command runs FILE (compiling or interpreting as needed).
 
     compile FILE         Compile a .w file to a native binary (-o FILE)
+    check FILE           Parse and lower a .w file without emitting code
+                         (also: tungsten -c FILE / --check FILE)
     run FILE             Interpret a .w file
     sandbox FILE         Compile FILE, then run it with the sandbox gate
                          latched: file IO, sockets, process control, and
@@ -40,20 +42,24 @@ COMMANDS
     console              Interactive REPL (also: wit(1))
     start                First-run welcome: what Tungsten is + your next step
     new NAME             Scaffold a new project
-    bootstrap            Stage-1 compiler via C VM (bash; no Ruby). Runs doctor
-                         first. Fresh-clone entry point.
+    bootstrap            Fresh-clone build via the C VM (bash; no Ruby). Runs
+                         doctor, builds stage 0/runtime/stage 1, then hands
+                         those artifacts to the full build pipeline.
     build                Full self-host: stage 1 + stage 2 (byte-identical IR),
-                         install, bits. Same stage-1 path as before; not replaced
-                         by bootstrap.
+                         install, bits. Reuses a matching bootstrap handoff
+                         rather than rebuilding runtime and stage 1.
+    release [VERSION]    Run the root gate, tag, and push a native GitHub
+                         release matrix.
     doctor               Check your toolchain (clang, make, lld, zstd, compiler)
                          Implemented in bash — works without a built compiler.
     fmt FILE             Format .w source
+    explain CODE         Explain a stable compiler/runtime error code
     bit ...              The Bit package manager (install, new, search, ...)
     ai / symbolicate / forge / flame
                          Additional tools
 
-    doctor and bootstrap are pure bash (bin/commands/doctor.sh,
-    bin/commands/bootstrap.sh) and work on a fresh clone; bootstrap chains
+    doctor, bootstrap, and release are pure bash (bin/commands/*.sh).
+    Doctor and bootstrap work on a fresh clone; bootstrap chains
     into the full `tungsten build` pipeline. compile, run, console, start,
     new, fmt, forge, flame, bit, ai, and symbolicate use the compiled CLI
     when present. `build` is driven by the Tungsten orchestrator

@@ -23,8 +23,8 @@ summary from the source header, and a link to the source.
 | `BitOps` | `+ BitOps` | Fixed-width bit operations. | [`core/bit_ops.w`](../core/bit_ops.w) |
 | `BlankSlate` | `+ BlankSlate` | BlankSlate is the parent class of all classes in Tungsten. It's an explicit blank class. | [`core/blank_slate.w`](../core/blank_slate.w) |
 | `Bool` | `+ Bool` | Bool — true (subtag 0x2) and false (subtag 0x1) singletons | [`core/bool.w`](../core/bool.w) |
-| `BoolArray` | `+ BoolArray` | Bit-packed boolean array; the dedicated WBoolArray runtime type is folded into WArray. | [`core/bool_array.w`](../core/bool_array.w) |
-| `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. | [`core/byte_array.w`](../core/byte_array.w) |
+| `BoolArray` | `+ BoolArray` | Bit-packed boolean array. The dedicated WBoolArray struct was folded | [`core/bool_array.w`](../core/bool_array.w) |
+| `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. The dedicated | [`core/byte_array.w`](../core/byte_array.w) |
 | `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
 | `Channel` | `+ Channel` | — | [`core/channel.w`](../core/channel.w) |
 | `Class` | `+ Class` | — | [`core/class.w`](../core/class.w) |
@@ -490,7 +490,7 @@ summary from the source header, and a link to the source.
 | `BF16` | `+ BF16 < Float` | Brain float 16 | [`core/numeric/bfloat16.w`](../core/numeric/bfloat16.w) |
 | `BigComplex` | `+ BigComplex < Complex` | — | [`core/numeric/big_complex.w`](../core/numeric/big_complex.w) |
 | `BigDecimal` | `+ BigDecimal < Decimal` | — | [`core/numeric/big_decimal.w`](../core/numeric/big_decimal.w) |
-| `BigInt` | `+ BigInt < Int` | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
+| `BigInt` | — | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
 | `Int` | `+ Int < Real` | — | [`core/numeric/int.w`](../core/numeric/int.w) |
 | `IntegerFactorization` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
 | `PrimePower` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |

@@ -736,11 +736,11 @@ use ../../core/token
     out = current_line()
     if expr != nil
       el = expr.end_line
-      if el != nil && el != 0
+      if el != nil && el > 0
         out = el
       else
         sl = expr.line
-        out = sl if sl != nil && sl != 0
+        out = sl if sl != nil && sl > 0
     out
 
   -> parse_expression(allow_passthrough = true)

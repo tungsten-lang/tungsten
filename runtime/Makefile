@@ -1,8 +1,9 @@
 CLANG = clang
-ZSTD_CFLAGS = $(shell pkg-config --cflags libzstd 2>/dev/null || echo -I/opt/homebrew/include)
-ZSTD_LDFLAGS = $(shell pkg-config --libs libzstd 2>/dev/null || echo -L/opt/homebrew/lib -lzstd)
-ONIG_CFLAGS = $(shell pkg-config --cflags oniguruma 2>/dev/null || test -f /opt/homebrew/include/oniguruma.h && echo -I/opt/homebrew/include)
-ONIG_LDFLAGS = $(shell pkg-config --libs oniguruma 2>/dev/null || test -f /opt/homebrew/lib/libonig.dylib -o -f /opt/homebrew/lib/libonig.a && echo -L/opt/homebrew/lib -lonig)
+HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null)
+ZSTD_CFLAGS = $(shell pkg-config --cflags libzstd 2>/dev/null || { test -n "$(HOMEBREW_PREFIX)" && test -f "$(HOMEBREW_PREFIX)/include/zstd.h" && printf '%s\n' '-I$(HOMEBREW_PREFIX)/include'; })
+ZSTD_LDFLAGS = $(shell pkg-config --libs libzstd 2>/dev/null || { if test -n "$(HOMEBREW_PREFIX)" && { test -f "$(HOMEBREW_PREFIX)/lib/libzstd.dylib" || test -f "$(HOMEBREW_PREFIX)/lib/libzstd.a"; }; then printf '%s\n' '-L$(HOMEBREW_PREFIX)/lib -lzstd'; else printf '%s\n' '-lzstd'; fi; })
+ONIG_CFLAGS = $(shell pkg-config --cflags oniguruma 2>/dev/null || { test -n "$(HOMEBREW_PREFIX)" && test -f "$(HOMEBREW_PREFIX)/include/oniguruma.h" && printf '%s\n' '-I$(HOMEBREW_PREFIX)/include'; })
+ONIG_LDFLAGS = $(shell pkg-config --libs oniguruma 2>/dev/null || { test -n "$(HOMEBREW_PREFIX)" && { test -f "$(HOMEBREW_PREFIX)/lib/libonig.dylib" || test -f "$(HOMEBREW_PREFIX)/lib/libonig.a"; } && printf '%s\n' '-L$(HOMEBREW_PREFIX)/lib -lonig'; })
 ifneq ($(strip $(ONIG_CFLAGS)),)
   ONIG_CFLAGS += -DTUNGSTEN_ONIG
 endif
@@ -44,9 +45,9 @@ endif
 # TLS support (optional: set TLS=1 to enable)
 ifdef TLS
   ifeq ($(UNAME_S),Darwin)
-    OPENSSL_PREFIX = $(shell brew --prefix openssl@3 2>/dev/null || echo /opt/homebrew/opt/openssl@3)
-    TLS_CFLAGS = -DTUNGSTEN_TLS -I$(OPENSSL_PREFIX)/include
-    TLS_LDFLAGS = -L$(OPENSSL_PREFIX)/lib -lssl -lcrypto
+    OPENSSL_PREFIX = $(shell brew --prefix openssl@3 2>/dev/null)
+    TLS_CFLAGS = -DTUNGSTEN_TLS $(if $(OPENSSL_PREFIX),-I$(OPENSSL_PREFIX)/include)
+    TLS_LDFLAGS = $(if $(OPENSSL_PREFIX),-L$(OPENSSL_PREFIX)/lib) -lssl -lcrypto
   else
     TLS_CFLAGS = -DTUNGSTEN_TLS
     TLS_LDFLAGS = -lssl -lcrypto

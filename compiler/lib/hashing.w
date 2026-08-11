@@ -99,4 +99,11 @@
   out.to_s()
 
 -> wyhash64_hex_string(text)
+  # Stage 0 already intercepts this helper in the C VM. Do the equivalent in
+  # a compiled compiler: the source byte-at-a-time u64 assembly boxes each
+  # byte on the generic Array path, while the runtime implementation hashes
+  # the string buffer directly. Keep wyhash64_string as the portable fallback
+  # for the Ruby and self-hosted interpreters.
+  if runtime_identity() == "compiled-runtime"
+    return u64_hex(digest_string64(text))
   u64_hex(wyhash64_string(text))

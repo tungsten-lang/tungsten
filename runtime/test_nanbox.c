@@ -244,8 +244,11 @@ int main() {
     {
         assert(w_eq(w_int(5), w_int(5)) == W_TRUE);
         assert(w_eq(w_int(5), w_int(6)) == W_FALSE);
-        assert(w_eq(w_int(1), w_float(1.0)) == W_TRUE);   /* numeric == coerces int/float (3d126ac5) */
-        assert(w_eq(w_float(1.0), w_int(1)) == W_TRUE);
+        /* Float is approximate and only equals Float; exact numeric tower
+         * values compare exactly among themselves. Ordering may still cross
+         * this boundary. */
+        assert(w_eq(w_int(1), w_float(1.0)) == W_FALSE);
+        assert(w_eq(w_float(1.0), w_int(1)) == W_FALSE);
         assert(w_eq(w_float(0.0), w_float(-0.0)) == W_TRUE);
         assert(w_lt(w_int(3), w_int(5)) == W_TRUE);
         assert(w_gt(w_int(5), w_int(3)) == W_TRUE);
@@ -852,7 +855,9 @@ int main() {
         assert((v & (1ULL << 47)) == 0);      /* sign bit reserved, clear */
         assert(!w_is_double(v));
         assert(w_as_bigint(v)->type == W_TYPE_BIGINT);
-        free(w_as_bigint(v));
+        /* BigInts may come from the aligned recycler; release through the
+         * runtime owner instead of assuming malloc-compatible provenance. */
+        w_value_free(v);
         printf("  bigint dedicated tag: OK\n");
     }
 

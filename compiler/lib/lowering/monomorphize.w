@@ -519,7 +519,7 @@
     return false
   if mod[:fn_return_types][cname + ".new"] != nil
     return false
-  if mod[:known_static_methods][cname + ".new"] != nil
+  if known_static_method_for(mod, cname + ".new") != nil
     return false
   true
 
@@ -725,7 +725,7 @@
 # *before* the body is lowered. Recursive calls to (class, method, recv_type)
 # during body lowering hit the cache and emit a direct call to the same
 # mangled symbol — LLVM resolves it once finalization completes.
--> specialize_method(parent_ctx, class_name, method_name, recv_type, call_arity = nil)
+-> specialize_method(parent_ctx, class_name, method_name, recv_type, call_arity = nil, physical_arg_count = nil)
   mod = parent_ctx[:mod]
   cache_key = class_name + "." + method_name + "." + recv_type.to_s()
   if call_arity != nil
@@ -751,7 +751,7 @@
   # resolve to this same mangled name, producing a forward reference.
   mod[:specialized_methods][cache_key] = mangled
   cloned = ast_deep_clone(ast)
-  override = {fn_name: mangled, self_type: recv_type, source_class: class_name}
+  override = {fn_name: mangled, self_type: recv_type, source_class: class_name, physical_arg_count: physical_arg_count}
   lower_class_method(parent_ctx, class_name, cloned, override)
   mangled
 

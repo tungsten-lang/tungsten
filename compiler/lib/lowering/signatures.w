@@ -27,6 +27,20 @@
     return t.to_sym()
   t
 
+# Element name from `T[]` or fixed-size `T[N]` ascriptions. The size is a
+# shape contract; the lowering type is the same typed-array family in either
+# spelling. Return nil for scalars and malformed bracket text.
+-> array_hint_element_type(t)
+  if t == nil
+    return nil
+  text = t.to_s()
+  open = text.index("\[")
+  if open == nil || open == 0 || text.size() < open + 2
+    return nil
+  if text.slice(text.size() - 1, 1) != "\]"
+    return nil
+  text.slice(0, open)
+
 -> normalized_signature_types(types)
   if types == nil
     return nil
@@ -172,6 +186,54 @@
     out.push(normalize_type_symbol(infer_type(args[i], var_types, fn_return_types, infer_maps)))
     i += 1
   out
+
+# Static-method overloads are indexed by source argument count. Each value
+# carries every registry key that legitimately points to it, turning a bad host
+# Hash hit into a conservative miss instead of a cross-arity direct call.
+-> register_known_static_method_info(mod, method_key, info, min_arg_count, max_arg_count)
+  keys = [method_key]
+  argc = min_arg_count
+  while argc <= max_arg_count
+    keys.push(method_key + "/" + argc.to_s())
+    argc += 1
+  info[:lookup_keys] = keys
+  i = 0
+  while i < keys.size()
+    mod[:known_static_methods][keys[i]] = info
+    i += 1
+  info
+
+-> static_info_has_lookup_key?(info, key)
+  keys = info[:lookup_keys]
+  if keys == nil
+    legacy = info[:lookup_key]
+    return legacy == nil || (legacy.size() == key.size() && legacy == key)
+  i = 0
+  while i < keys.size()
+    if keys[i].size() == key.size() && keys[i] == key
+      return true
+    i += 1
+  false
+
+-> known_static_method_for(mod, key, arg_count = nil)
+  if mod == nil || mod[:known_static_methods] == nil
+    return nil
+  registry_key = key
+  if arg_count != nil
+    registry_key = key + "/" + arg_count.to_s()
+  info = mod[:known_static_methods][registry_key]
+  # Hand-built compiler fixtures and embedders predate arity-indexed entries.
+  # Accept their single legacy base-key record, but never fall back through a
+  # modern overload set: those records carry lookup_keys and an argc miss must
+  # remain a miss instead of selecting the last registered overload.
+  if info == nil && arg_count != nil
+    legacy = mod[:known_static_methods][key]
+    if legacy != nil && legacy[:lookup_keys] == nil
+      info = legacy
+      registry_key = key
+  if info != nil && !static_info_has_lookup_key?(info, registry_key)
+    return nil
+  info
 
 -> mangle_method_name(name)
   if name in ("[]" "\[]")

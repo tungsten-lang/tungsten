@@ -18220,7 +18220,7 @@ WValue w_node_field_load(WValue wnode, int64_t ivar_offset) {
     return g_node_arena.base[off + (uint64_t)ivar_offset];
 }
 
-void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value) {
+WValue w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value) {
     /* Same auto-unbox as w_node_field_load. */
     if (w_is_int((WValue)ivar_offset)) {
         ivar_offset = w_as_int((WValue)ivar_offset);
@@ -18241,6 +18241,7 @@ void w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value) {
     value = w_ast_freeze_if_array(value);   /* child lists live in the extra arena */
     uint64_t off = w_node_offset(wnode);
     g_node_arena.base[off + (uint64_t)ivar_offset] = value;
+    return value;
 }
 
 /* Exported wrapper around the static-inline w_node_kind in wvalue.h.
@@ -18327,7 +18328,7 @@ void w_slab_freeze(void) {
     /* Keep intern table for lookups — frozen slab still returns existing entries */
 }
 
-int w_slab_is_frozen(void) {
+int64_t w_slab_is_frozen(void) {
     return g_string_slab.frozen;
 }
 
@@ -27477,7 +27478,7 @@ static size_t w_digest_padded_len_128(size_t len) {
  * is usable. The `sw` pair is the portable implementation, exported under its
  * own name so a single test binary can run both against each other. */
 
-int w_sha256_hw_available(void);
+int64_t w_sha256_hw_available(void);
 void w_sha256_hw_compress(uint32_t *state, const uint8_t *data, size_t nblocks);
 int64_t w_sha256_hw_mine(const uint32_t *midstate, const uint8_t *tail,
                          const uint32_t *target_be, uint32_t start,
@@ -28159,7 +28160,7 @@ static int hw_probe(void) {
 
 /* ==== public entry points ================================================ */
 
-int w_sha256_hw_available(void) {
+int64_t w_sha256_hw_available(void) {
 #if W_SHA256_HW
   /* Benign race: hw_probe is pure and every writer stores the same value. */
   static int cached = -1;
@@ -33123,8 +33124,8 @@ WValue w_location_file_offset(int file_id, int offset) {
  * these wrappers are only consulted from compiled binaries. */
 int w_unbox_location_line_extern(WValue v) { return w_unbox_location_line(v); }
 int w_unbox_location_col_extern(WValue v)  { return w_unbox_location_col(v); }
-int w_unbox_location_file_id_extern(WValue v) { return w_unbox_location_file_id(v); }
-int w_unbox_location_offset_extern(WValue v) { return (int)w_unbox_location_offset(v); }
+int64_t w_unbox_location_file_id_extern(WValue v) { return (int64_t)w_unbox_location_file_id(v); }
+int64_t w_unbox_location_offset_extern(WValue v) { return (int64_t)w_unbox_location_offset(v); }
 
 /* Per-file line/col lookup tables backing FileOffset-mode Location
  * reconstruction (ast.w's register_file_tables / line_for_offset /
@@ -33155,7 +33156,7 @@ static WLocFileTable *g_loc_files = NULL;
 static uint32_t g_loc_file_count = 0;
 static uint32_t g_loc_file_cap = 0;
 
-int w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr) {
+int64_t w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr) {
     char buf[6]; const char *s; size_t len;
     w_str_data(path, buf, &s, &len);
     uint32_t n = (uint32_t)w_as_int(w_array_size(line_at_arr));
@@ -33207,14 +33208,20 @@ int w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr) {
     return (int)g_loc_file_count;
 }
 
-int w_loc_line_for_offset(int file_id, int offset) {
+int64_t w_loc_line_for_offset(int64_t file_id, int64_t offset) {
+    /* ccall_nobox preserves a general Tungsten local's WValue bits. Accept
+     * both those boxed inline Ints and already-raw machine integers. */
+    if (w_is_int((WValue)file_id)) file_id = w_as_int((WValue)file_id);
+    if (w_is_int((WValue)offset)) offset = w_as_int((WValue)offset);
     if (file_id < 1 || (uint32_t)file_id > g_loc_file_count) return -1;
     WLocFileTable *t = &g_loc_files[file_id - 1];
     if (offset < 0 || (uint32_t)offset >= t->len) return -1;
     return t->line_at[offset];
 }
 
-int w_loc_col_for_offset(int file_id, int offset) {
+int64_t w_loc_col_for_offset(int64_t file_id, int64_t offset) {
+    if (w_is_int((WValue)file_id)) file_id = w_as_int((WValue)file_id);
+    if (w_is_int((WValue)offset)) offset = w_as_int((WValue)offset);
     if (file_id < 1 || (uint32_t)file_id > g_loc_file_count) return -1;
     WLocFileTable *t = &g_loc_files[file_id - 1];
     if (offset < 0 || (uint32_t)offset >= t->len) return -1;
@@ -33505,9 +33512,11 @@ static void w_cs_init(void) {
     qsort(g_cs_sorted, (size_t)n, sizeof(WCallSite), wcs_cmp);
 }
 
-/* PC → call-site row, using "largest ret_pc ≤ pc AND within 16 bytes". The
- * slack accounts for the few instructions between the call and the block's
- * first instruction after LLVM's pass pipeline. */
+/* PC → call-site row, using the nearest ret_pc within 16 bytes. A call's
+ * captured return PC can be just BEFORE the synthetic return block: on ARM64
+ * it commonly points at the unconditional branch that precedes that label.
+ * The old one-sided `ret_pc <= pc` search therefore discarded the exact row
+ * and fell back to the enclosing function's first line. */
 static const WCallSite *w_resolve_call_site(void *pc) {
     pthread_once(&g_cs_once, w_cs_init);
     if (!g_cs_sorted || &__w_call_site_count == NULL || __w_call_site_count <= 0) {
@@ -33515,20 +33524,32 @@ static const WCallSite *w_resolve_call_site(void *pc) {
     }
     int n = __w_call_site_count;
     int lo = 0, hi = n - 1;
-    int best = -1;
+    int before = -1;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
         if ((uintptr_t)g_cs_sorted[mid].ret_pc <= (uintptr_t)pc) {
-            best = mid;
+            before = mid;
             lo = mid + 1;
         } else {
             hi = mid - 1;
         }
     }
-    if (best < 0) return NULL;
-    uintptr_t gap = (uintptr_t)pc - (uintptr_t)g_cs_sorted[best].ret_pc;
-    if (gap > 16) return NULL;
-    return &g_cs_sorted[best];
+    int after = before + 1;
+    const WCallSite *nearest = NULL;
+    uintptr_t nearest_gap = UINTPTR_MAX;
+    if (before >= 0) {
+        uintptr_t gap = (uintptr_t)pc - (uintptr_t)g_cs_sorted[before].ret_pc;
+        nearest = &g_cs_sorted[before];
+        nearest_gap = gap;
+    }
+    if (after < n) {
+        uintptr_t gap = (uintptr_t)g_cs_sorted[after].ret_pc - (uintptr_t)pc;
+        if (gap < nearest_gap) {
+            nearest = &g_cs_sorted[after];
+            nearest_gap = gap;
+        }
+    }
+    return nearest_gap <= 16 ? nearest : NULL;
 }
 
 static void w_print_backtrace(int max_depth);
@@ -35137,6 +35158,11 @@ WValue w_sub(WValue a, WValue b) {
     }
     if (is_duration_any(a) && is_duration_any(b))
         return w_duration_sub(a, b);
+    /* A Float on the RHS must not force a user object through numeric
+     * coercion. Give the receiver's operator the same precedence it has for
+     * non-Float operands; its method can decide whether the Float is valid. */
+    if (w_is_instance(a))
+        return w_method_call_fast(a, w_string("-"), &b, 1);
     if (w_is_double(a) || w_is_double(b))
         return w_float(as_numeric_double(a) - as_numeric_double(b));
     /* char - char → int (codepoint difference) */
@@ -35189,9 +35215,6 @@ WValue w_sub(WValue a, WValue b) {
     if (w_is_date(a) && w_is_date(b))
         return w_int(date_to_jdn(a) - date_to_jdn(b));
     /* Integer arms hoisted to the chain head (E2(a)). */
-    /* User-defined classes: route `a - b` to a.-(b). */
-    if (w_is_instance(a))
-        return w_method_call_fast(a, w_string("-"), &b, 1);
     return w_box_int_checked(as_int(a) - as_int(b));
 }
 
@@ -35247,6 +35270,11 @@ WValue w_mul(WValue a, WValue b) {
         return w_complex_mul_int(a, w_as_int(b));
     if (w_is_int(a) && w_is_complex(b))
         return w_complex_mul_int(b, w_as_int(a));
+    /* Dispatch user-defined receivers before the Float-promotion arm. Without
+     * this, `vector * 2.0` tries to coerce the vector to a double and never
+     * reaches its typed scalar overload. */
+    if (w_is_instance(a))
+        return w_method_call_fast(a, w_string("*"), &b, 1);
     if (w_is_double(a) || w_is_double(b))
         return w_float(as_numeric_double(a) * as_numeric_double(b));
     /* Integer arms hoisted to the chain head (E2(a)). */
@@ -35265,16 +35293,6 @@ WValue w_mul(WValue a, WValue b) {
         result[total] = '\0';
         return w_string_take(result, total);
     }
-    /* User-defined classes: route `a * b` to a.*(b). The compiler's
-     * lower_binary_op fallback unconditionally emits w_mul(a, b); if
-     * the LHS is a user-class instance with a `*` method we dispatch
-     * here so Quaternion / Vec / Mat / etc. compose with infix `*`
-     * exactly like their `+/1` / `-/1` siblings do via the same
-     * pattern in w_add / w_sub. Use w_string (not w_symbol) — the
-     * compiler registers methods under string-encoded keys, so the
-     * dispatch lookup needs the string form to match. */
-    if (w_is_instance(a))
-        return w_method_call_fast(a, w_string("*"), &b, 1);
     return w_box_int_checked(as_int(a) * as_int(b));
 }
 
@@ -35709,6 +35727,9 @@ WValue w_div(WValue a, WValue b) {
         return w_rational_div(a, rational_from_parts(b, w_int(1)));
     if (w_is_integer_any(a) && w_is_rational_any(b))
         return w_rational_div(rational_from_parts(a, w_int(1)), b);
+    /* Preserve user-defined operator dispatch when the divisor is a Float. */
+    if (w_is_instance(a))
+        return w_method_call_fast(a, w_string("/"), &b, 1);
     if (w_is_double(a) || w_is_double(b)) {
         double bv = as_numeric_double(b);
         if (bv == 0.0) die("division by zero");
@@ -35726,9 +35747,6 @@ WValue w_div(WValue a, WValue b) {
             return bigint_div_seam(a, b);
         return bigint_div_any(a, b);
     }
-    /* User-defined classes: route `a / b` to a./(b). */
-    if (w_is_instance(a))
-        return w_method_call_fast(a, w_string("/"), &b, 1);
     { int64_t bv = as_int(b);
       if (bv == 0) die("division by zero");
       return w_box_int_checked(as_int(a) / bv); }
@@ -35801,6 +35819,9 @@ static WValue w_string_format(WValue fmt_v, WValue arg_v) {
 WValue w_mod(WValue a, WValue b) {
     if (w_is_string(a) || w_is_rope(a))
         return w_string_format(a, b);
+    /* Preserve user-defined operator dispatch when the RHS is a Float. */
+    if (w_is_instance(a))
+        return w_method_call_fast(a, w_string("%"), &b, 1);
     if (w_is_double(a) || w_is_double(b)) {
         double bv = as_numeric_double(b);
         if (bv == 0.0) die("modulo by zero");
@@ -35818,9 +35839,6 @@ WValue w_mod(WValue a, WValue b) {
             return bigint_mod_seam(a, b);
         return bigint_mod_any(a, b);
     }
-    /* User-defined classes: route `a % b` to a.%(b). */
-    if (w_is_instance(a))
-        return w_method_call_fast(a, w_string("%"), &b, 1);
     int64_t bv = as_int(b);
     if (bv == 0) die("modulo by zero");
     return w_box_int_checked(as_int(a) % bv);
@@ -51306,6 +51324,25 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             return w_bytes_new(len);
         }
 
+        /* Array.new(size = 0, fill = nil). Repeating the same WValue is
+         * deliberate: mutable fill objects alias exactly as the source-level
+         * constructor contract requires. */
+        if (strcmp(klass->name, "Array") == 0 && w_hash_key_eq(name, WN_new)) {
+            if (args->size > 2)
+                w_raise(w_string("Array.new expects zero, one, or two arguments"));
+            WValue size = args->size > 0 ? args->slots[0] : w_int(0);
+            WValue fill = args->size > 1 ? args->slots[1] : W_NIL;
+            return w_array_new_filled(size, fill);
+        }
+
+        /* SmallArray.new(:element_type, size). The boxed helper accepts both
+         * literal and dynamically supplied element-type symbols. */
+        if (strcmp(klass->name, "SmallArray") == 0 && w_hash_key_eq(name, WN_new)) {
+            if (args->size != 2)
+                w_raise(w_string("SmallArray.new expects element type and size"));
+            return w_small_array_new_value(args->slots[0], args->slots[1]);
+        }
+
         /* BoolArray.new(length) — returns a bit-packed WArray<u1> */
         if (strcmp(klass->name, "BoolArray") == 0 && w_hash_key_eq(name, WN_new)) {
             int64_t len = (args->size > 0) ? w_as_int(args->slots[0]) : 0;
@@ -52956,6 +52993,33 @@ static inline int64_t array_storage_bits(int64_t bits) {
     return bits;
 }
 
+static inline int array_ebits_valid(int64_t bits) {
+    switch (bits) {
+        case 1:
+        case 4:
+        case -4:
+        case 8:
+        case 108:
+        case 16:
+        case 116:
+        case 32:
+        case 33:
+        case 64:
+        case 65:
+        case 66:
+        case -16:
+        case -32:
+        case -64:
+        case -104:
+        case -108:
+        case -109:
+        case -116:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 /* Public, non-inline wrapper so other translation units (metal.m) can size a
  * typed element without duplicating the ebits→bits table. */
 int64_t w_array_storage_bits(int64_t bits) {
@@ -54330,6 +54394,21 @@ WValue w_array_fill(WValue arr, WValue val) {
     return arr;
 }
 
+WValue w_array_new_filled(WValue size_v, WValue fill) {
+    if (!w_is_int(size_v) && !w_is_bigint(size_v)) {
+        w_raise(w_string("Array.new size must be an Integer"));
+    }
+    int64_t size = w_numeric_to_i64(size_v);
+    if (size < 0) {
+        w_raise(w_string("Array.new size must be non-negative"));
+    }
+    if (size > INT32_MAX) {
+        w_raise(w_string("Array.new size exceeds INT32_MAX — use BigArray"));
+    }
+    WValue arr = w_array_zeros(65, size);
+    return w_array_fill(arr, fill);
+}
+
 WValue w_array_pop(WValue arr) {
     WArray *a = (WArray *)w_as_ptr(arr);
     if (a->size == 0) return W_NIL;
@@ -54915,6 +54994,7 @@ WValue w_big_array_push(WValue arr, WValue val) {
  * construction — no push, no resize, no shift. */
 WValue w_small_array_new(int64_t ebits, int64_t size, int64_t bytes_ptr) {
     if (size < 0 || size > 255) w_raise(w_string("SmallArray size must be 0..255"));
+    if (!array_ebits_valid(ebits)) w_raise(w_string("SmallArray has an unsupported element type"));
     int64_t byte_count = array_byte_size(ebits, size);
     WSmallArray *a = (WSmallArray *)calloc(1, sizeof(WSmallArray) + (size_t)byte_count);
     a->ebits = (uint8_t)ebits;
@@ -54923,6 +55003,50 @@ WValue w_small_array_new(int64_t ebits, int64_t size, int64_t bytes_ptr) {
         memcpy(a->slots, (const uint8_t *)(uintptr_t)bytes_ptr, (size_t)byte_count);
     }
     return w_box_ptr(a, W_SUBTAG_SMALL_ARRAY);
+}
+
+static int64_t small_array_ebits_from_value(WValue value) {
+    if (w_is_int(value) || w_is_bigint(value)) {
+        int64_t bits = w_numeric_to_i64(value);
+        if (array_ebits_valid(bits)) return bits;
+        w_raise(w_string("SmallArray has an unsupported element type"));
+    }
+    if (!w_is_stringy(value)) {
+        w_raise(w_string("SmallArray element type must be a Symbol or ebits Integer"));
+    }
+
+    const char *name = as_str(value);
+    if (strcmp(name, "bool") == 0 || strcmp(name, "u1") == 0) return 1;
+    if (strcmp(name, "u4") == 0) return 4;
+    if (strcmp(name, "i4") == 0) return -4;
+    if (strcmp(name, "u8") == 0) return 8;
+    if (strcmp(name, "i8") == 0) return 108;
+    if (strcmp(name, "u16") == 0) return 16;
+    if (strcmp(name, "i16") == 0) return 116;
+    if (strcmp(name, "u32") == 0) return 32;
+    if (strcmp(name, "i32") == 0) return 33;
+    if (strcmp(name, "u64") == 0) return 64;
+    if (strcmp(name, "w64") == 0) return 65;
+    if (strcmp(name, "i64") == 0) return 66;
+    if (strcmp(name, "f16") == 0) return -16;
+    if (strcmp(name, "f32") == 0) return -32;
+    if (strcmp(name, "f64") == 0) return -64;
+    if (strcmp(name, "f4_e2m1") == 0) return -104;
+    if (strcmp(name, "f8_e4m3") == 0) return -108;
+    if (strcmp(name, "f8_e5m2") == 0) return -109;
+    if (strcmp(name, "bf16") == 0) return -116;
+
+    w_raise(w_string("SmallArray has an unsupported element type"));
+    return 0;
+}
+
+WValue w_small_array_new_value(WValue ebits_v, WValue size_v) {
+    if (!w_is_int(size_v) && !w_is_bigint(size_v)) {
+        w_raise(w_string("SmallArray size must be an Integer"));
+    }
+    int64_t size = w_numeric_to_i64(size_v);
+    int64_t ebits = small_array_ebits_from_value(ebits_v);
+    return w_small_array_new(ebits, size, 0);
 }
 
 /* In-place SmallArray initialize at a caller-provided pointer.
@@ -58096,6 +58220,11 @@ void w_scheduler_run(void) {
     }
 }
 
+WValue w_scheduler_run_w(void) {
+    w_scheduler_run();
+    return W_NIL;
+}
+
 /* Run exactly one goroutine from the run queue and return.
  * Returns 1 if a goroutine was run, 0 if the queue was empty.
  * Used by w_chan_recv/send on the main thread to drive goroutines
@@ -59871,6 +60000,11 @@ void w_value_free(WValue v) {
         free(cl);
         return;
     }
+}
+
+WValue w_value_free_w(WValue v) {
+    w_value_free(v);
+    return W_NIL;
 }
 
 /* Convert raw i64 bits to a 16-character hex string WValue. */

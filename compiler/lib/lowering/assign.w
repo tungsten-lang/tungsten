@@ -117,6 +117,11 @@
   name = node.name
   wfn = ctx[:func]
 
+  # Bare zero-argument block-presence query. This must precede ordinary
+  # function/implicit-self lookup: the parser represents `block?` as :var.
+  if name in ("block?" "block_given?")
+    return lower_block_present(ctx)
+
   # Build-time defines (`bin/tungsten -D NAME=VALUE`) win over any other
   # binding. Emit the corresponding nanboxed i64 literal directly so the
   # value is a compile-time constant — `if FAST_MATH` after substitution
@@ -339,8 +344,17 @@
   # Zero-arg function call: bare `greet` → call __w_greet()
   call_target = ctx[:mod][:known_calls][name]
   if call_target != nil
+    # The source call has zero positional arguments, but the callee can still
+    # own hidden/default slots. In particular `-> probe; block?` has one hidden
+    # block slot which must receive nil here; omitting the LLVM argument lets a
+    # caller's closure register leak into the nested call.
+    call_args = []
+    expected = ctx[:mod][:known_fn_param_counts][name]
+    if expected != nil
+      while call_args.size() < expected
+        call_args.push(w_nil.to_s())
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: call_target, args: []})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: call_target, args: call_args})
     if call_target == "__w_exit"
       emit_instruction(wfn, {op: :unreachable})
     return typed_value(:i64, temp)
@@ -349,7 +363,7 @@
   # direct static call on the current class when such a method is known.
   if ctx[:is_class_method] == true && ctx[:class_name] != nil
     static_key = ctx[:class_name] + "." + name
-    static_info = ctx[:mod][:known_static_methods][static_key]
+    static_info = known_static_method_for(ctx[:mod], static_key, 0)
     if static_info != nil && static_info[:arity] == 1
       return lower_direct_static_method_call(ctx, static_info, Tungsten:AST:Self.new, [])
 
@@ -717,6 +731,7 @@
       return typed_value(sa_sym, sa_ptr)
 
   target_type = ctx[:var_types][name]
+  hint_array_etype = nil
   if node.type_hint != nil
     # `w64` is a synonym for the NaN-boxed WValue-int64 form.
     # Under the old semantics this was the default (unannotated) type,
@@ -725,11 +740,11 @@
     # here (the internal symbol for boxed that pre-dates the raw-i64
     # switch; the full rename is deferred to a follow-up).
     hint_text = node.type_hint
-    htl = hint_text.size()
+    hint_array_etype = array_hint_element_type(hint_text)
     if hint_text == "w64"
       target_type = :i64
-    elsif htl >= 3 && hint_text.slice(htl - 2, 2) == "\[]"
-      # `## f32[]` / `## i32[]` / etc. — normalize the array-shaped hint
+    elsif hint_array_etype != nil
+      # `## f32[]` / `## i32[N]` / etc. — normalize the array-shaped hint
       # to the canonical :typed_array_<etype> symbol so element access
       # (`a[i]`) lowers via :typed_array_get_inline instead of
       # dispatching through generic Array#[]. Mirrors the param-hint
@@ -739,7 +754,7 @@
       # to the :small_array_* symbol as inference would, or readers run
       # heap-WArray offsets against a SmallArray handle (segfault).
       hv = node.value
-      hint_etype = hint_text.slice(0, htl - 2)
+      hint_etype = hint_array_etype
       if hv != nil && is_ast_node?(hv) && ast_kind(hv) in (:typed_array_new :typed_array) && hv.element_type == hint_etype && typed_array_new_stack_promoted?(hv)
         target_type = small_array_etype_to_sym(hint_etype)
       else
@@ -847,6 +862,13 @@
     return typed_value(raw_float_value_type(target_type), raw_val)
 
   val = lower_expression(ctx, node.value)
+  if hint_array_etype == "f64" || hint_array_etype == "f32"
+    if target_type == typed_array_etype_to_sym(hint_array_etype)
+      source = ensure_i64_value(wfn, val)
+      converted = next_temp(wfn)
+      helper = hint_array_etype == "f32" ? "w_array_to_f32" : "w_array_to_f64"
+      emit_instruction(wfn, {op: :call_direct_i64, temp: converted, name: helper, args: [source]})
+      val = typed_value(target_type, converted)
   if mut_target_set
     ctx[:mut_accum_target] = nil
   inferred = nil

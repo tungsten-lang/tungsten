@@ -23,16 +23,15 @@
     if expr.type_hint == "big" || expr.type_hint == "bigint" || expr.type_hint == "bignum"
       return :bigint
     ht = expr.type_hint
-    htl = ht.size()
-    # `## f32[]` / `## i32[]` / etc. — normalize to :typed_array_<etype>
+    hint_etype = array_hint_element_type(ht)
+    # `## f32[]` / `## i32[N]` / etc. — normalize to :typed_array_<etype>
     # so receiver_static_type → typed_array_get_inline fast path fires.
     # EXCEPT when the hint matches a typed-array literal RHS that stack-
     # promotes (`a = bf16[4] ## bf16[]`): resolve to the :small_array_*
     # symbol exactly as inference would, because forcing :typed_array_*
     # sends every reader down heap-WArray offsets against a SmallArray
     # handle — a segfault, not a type error.
-    if htl >= 3 && ht.slice(htl - 2, 2) == "\[]"
-      hint_etype = ht.slice(0, htl - 2)
+    if hint_etype != nil
       v = expr.value
       if v != nil && is_ast_node?(v) && ast_kind(v) in (:typed_array_new :typed_array) && v.element_type == hint_etype && typed_array_new_stack_promoted?(v)
         return small_array_etype_to_sym(hint_etype)

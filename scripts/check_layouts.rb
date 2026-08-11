@@ -29,7 +29,8 @@ REQUIRED_BACKED_STRUCTS = %w[
 # producing C offsets.
 C_PREFIX_FIELDS = {
   "WBigArray" => %w[type],
-  "WNetAddr" => %w[type]
+  "WNetAddr" => %w[type],
+  "WMmap" => %w[type]
 }.freeze
 
 LayoutField = Struct.new(:name, :type, :size, :align, :offset, keyword_init: true)

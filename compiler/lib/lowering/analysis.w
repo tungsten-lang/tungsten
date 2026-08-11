@@ -601,7 +601,7 @@
   if methods == nil
     return nil
   recv_name = recv.name
-  info = methods[recv_name + "." + node.name]
+  info = known_static_method_for(mod, recv_name + "." + node.name, node.args.size())
 
   # Mirror lower_method_call's inherited-static lookup. Only real static
   # entries participate in the superclass walk; the same registry also holds
@@ -616,7 +616,7 @@
         current = supers[current]
         if current == nil
           break
-        candidate = methods[current + "." + node.name]
+        candidate = known_static_method_for(mod, current + "." + node.name, node.args.size())
         if candidate != nil && candidate[:is_static] == true
           info = candidate
         guard += 1

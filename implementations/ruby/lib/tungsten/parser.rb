@@ -351,6 +351,15 @@ module Tungsten
         case @token.type
         when :SP
           next_token
+        when :TYPE_HINT
+          # Postfix coercions are expressions, not comments and not limited
+          # to assignment RHSes: `$size ## i64`, `(a + b) ## u64`, and
+          # native-call results all use this form in Core. Assignment keeps
+          # its compact AST::Assign hint below; every other shape gets an
+          # explicit node so the interpreter can apply identical wrapping.
+          hint = @token.value
+          next_token
+          exp = TypeHint.new(exp, hint).at(exp)
         when :"="
           if exp.is_a?(Call) && exp.name == "[]"
             next_token_skip_whitespace

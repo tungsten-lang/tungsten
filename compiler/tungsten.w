@@ -21,10 +21,11 @@ use lib/repl
 
 args = argv()
 if args.size() == 0
-  << "Usage: tungsten (run|compile) <file.w>"
+  << "Usage: tungsten (run|check|compile) <file.w>"
   << ""
   << "Commands:"
   << "  run              Interpret a .w file"
+  << "  check            Parse and lower a .w file without emitting code"
   << "  compile          Compile a .w file to a native binary"
   << "  compile-batch    Compile multiple .w files"
   << ""
@@ -109,10 +110,11 @@ while i < args.size()
   elsif arg == "--"
     parsing_script_args = true
   elsif arg in ("--help" "-h")
-    << "Usage: tungsten (run|compile) <file.w>"
+    << "Usage: tungsten (run|check|compile) <file.w>"
     << ""
     << "Commands:"
     << "  run              Interpret a .w file"
+    << "  check            Parse and lower a .w file without emitting code"
     << "  compile          Compile a .w file to a native binary"
     << "  compile-batch    Compile multiple .w files"
     << ""
@@ -239,6 +241,8 @@ while i < args.size()
     eval_code = args[i]
   elsif arg == "run"
     command = "run"
+  elsif arg == "check" || arg == "-c" || arg == "--check"
+    command = "check"
   elsif arg == "compile"
     command = "compile"
   elsif arg == "compile-batch"
@@ -412,6 +416,20 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
 # pre-resolved them, fall back to runtime probing" — preserves behavior
 # when the compiler is invoked outside bin/tungsten build.
 
+driver_homebrew_prefix_memo = {}
+
+-> driver_homebrew_prefix(formula)
+  key = formula == "" ? :root : formula.to_sym()
+  cached = driver_homebrew_prefix_memo[key]
+  if cached != nil
+    return cached
+  cmd = "brew --prefix"
+  if formula != ""
+    cmd = cmd + " " + formula
+  prefix = capture(cmd + " 2>/dev/null").strip()
+  driver_homebrew_prefix_memo[key] = prefix
+  prefix
+
 -> zstd_cflags
   if cross_target != ""
     cross_flags = env("TUNGSTEN_CROSS_ZSTD_CFLAGS")
@@ -422,8 +440,9 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
   flags = capture("pkg-config --cflags libzstd 2>/dev/null").strip()
   if flags != ""
     return flags
-  if capture("test -f /opt/homebrew/include/zstd.h && echo yes").strip() == "yes"
-    return "-I/opt/homebrew/include"
+  brew = driver_homebrew_prefix("")
+  if brew != "" && file?(brew + "/include/zstd.h")
+    return "-I" + brew + "/include"
   ""
 
 -> zstd_ldflags
@@ -436,8 +455,9 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
   flags = capture("pkg-config --libs libzstd 2>/dev/null").strip()
   if flags != ""
     return flags
-  if capture("test -f /opt/homebrew/lib/libzstd.dylib -o -f /opt/homebrew/lib/libzstd.a && echo yes").strip() == "yes"
-    return "-L/opt/homebrew/lib -lzstd"
+  brew = driver_homebrew_prefix("")
+  if brew != "" && (file?(brew + "/lib/libzstd.dylib") || file?(brew + "/lib/libzstd.a"))
+    return "-L" + brew + "/lib -lzstd"
   "-lzstd"
 
 -> onig_cflags
@@ -450,8 +470,9 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
   flags = capture("pkg-config --cflags oniguruma 2>/dev/null").strip()
   if flags != ""
     return flags + " -DTUNGSTEN_ONIG"
-  if capture("test -f /opt/homebrew/include/oniguruma.h && echo yes").strip() == "yes"
-    return "-I/opt/homebrew/include -DTUNGSTEN_ONIG"
+  brew = driver_homebrew_prefix("")
+  if brew != "" && file?(brew + "/include/oniguruma.h")
+    return "-I" + brew + "/include -DTUNGSTEN_ONIG"
   ""
 
 -> onig_ldflags
@@ -465,8 +486,9 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
   if flags != ""
     return flags
   if onig_cflags != ""
-    if capture("test -f /opt/homebrew/lib/libonig.dylib -o -f /opt/homebrew/lib/libonig.a && echo yes").strip() == "yes"
-      return "-L/opt/homebrew/lib -lonig"
+    brew = driver_homebrew_prefix("")
+    if brew != "" && (file?(brew + "/lib/libonig.dylib") || file?(brew + "/lib/libonig.a"))
+      return "-L" + brew + "/lib -lonig"
     return "-lonig"
   ""
 
@@ -484,7 +506,10 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
 -> mimalloc_link_flags
   if env("TUNGSTEN_MIMALLOC") != "1"
     return ""
-  candidates = ["/opt/homebrew/lib/libmimalloc.a", "/usr/local/lib/libmimalloc.a", "/usr/lib/libmimalloc.a"]
+  candidates = ["/usr/local/lib/libmimalloc.a", "/usr/lib/libmimalloc.a"]
+  brew = driver_homebrew_prefix("")
+  if brew != ""
+    candidates.unshift(brew + "/lib/libmimalloc.a")
   found = ""
   candidates.each ->(c)
     if found == "" && file?(c)
@@ -1635,13 +1660,16 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
 
 # Split the emitted module and compile the parts with parallel clang -c.
 # Returns the space-joined .o paths, or nil for "use the single-TU path"
-# (missing toolchain, or any split/compile failure). Uses homebrew LLVM's
+# (missing toolchain, or any split/compile failure). Uses Homebrew LLVM's
 # llvm-split + clang: llvm-split without -preserve-locals promotes module-
 # local symbols so partitions distribute (with it, every function glued to
 # the shared globals lands in one partition and nothing parallelizes), and
 # its bitcode output needs a matching-version clang to read.
 -> parallel_codegen_objects(ll_path, verbose)
-  llvm_bin = "/opt/homebrew/opt/llvm/bin"
+  llvm_prefix = driver_homebrew_prefix("llvm")
+  if llvm_prefix == ""
+    return nil
+  llvm_bin = llvm_prefix + "/bin"
   if !file?(llvm_bin + "/llvm-split") || !file?(llvm_bin + "/clang")
     return nil
   parts = 14
@@ -1898,6 +1926,17 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
 
   ok
 
+# Parse the complete program and run lowering/type inference, but deliberately
+# stop before CFG construction, ownership, LLVM emission, runtime compilation,
+# or linking. This is the same stage-2 frontend used by executable builds, so
+# `tungsten -c` cannot accept a different language from `tungsten compile`.
+-> check_one(file_path, verbose = false)
+  loader = Loader.new(verbose)
+  ast = loader.load_program_ast(file_path)
+  compile_to_wire(ast, file_path, verbose, fast_mode, math_mode)
+  << "200 OK"
+  true
+
 # Handle --wit / --repl (interactive pure-Tungsten REPL)
 if wit_mode
   REPL.new(Interpreter.new([]), jit_mode, hot_mode).start()
@@ -1985,6 +2024,20 @@ if command == "run"
     source = read_file(file_path)
     interp = Interpreter.new(script_args)
     interp.run(source, file_path)
+  rescue err
+    if type(err) == "Hash" && err[:rt] == :compile_error
+      ccall("w_flush")
+      ccall("w_eputs", emit_compile_error(err))
+      exit 1
+    if type(err) == "String"
+      ccall("w_flush")
+      ccall("w_eputs", format_runtime_error(err, file_path))
+      exit 1
+    raise err
+
+elsif command == "check"
+  begin
+    check_one(file_path, verbose)
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
       ccall("w_flush")

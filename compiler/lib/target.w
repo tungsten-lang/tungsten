@@ -8,6 +8,15 @@
 # (system default) when no newer clang is found, so other machines are unaffected.
 host_cc_memo = {}
 
+-> target_homebrew_formula_prefix(formula)
+  key = ("brew:" + formula).to_sym()
+  cached = host_cc_memo[key]
+  if cached != nil
+    return cached
+  prefix = capture("brew --prefix " + formula + " 2>/dev/null").strip()
+  host_cc_memo[key] = prefix
+  prefix
+
 -> host_c_compiler
   cc = env("TUNGSTEN_CC")
   if cc != nil && cc != ""
@@ -16,7 +25,11 @@ host_cc_memo = {}
   if cached != nil
     return cached
   chosen = "clang"
-  candidates = ["/opt/homebrew/opt/llvm/bin/clang", "/usr/local/opt/llvm/bin/clang", "/opt/homebrew/opt/llvm@22/bin/clang"]
+  candidates = ["clang-22"]
+  ["llvm", "llvm@22"].each ->(formula)
+    prefix = target_homebrew_formula_prefix(formula)
+    if prefix != ""
+      candidates.push(prefix + "/bin/clang")
   ci = 0
   while ci < candidates.size()
     c = candidates[ci]

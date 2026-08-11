@@ -250,6 +250,13 @@
       materialize_bindings(ctx)
       return lower_if_expr(ctx, node.expression, hint)
     value = lower_expression(ctx, node.expression)
+    array_etype = array_hint_element_type(node.type_hint)
+    if array_etype == "f64" || array_etype == "f32"
+      source = ensure_i64_value(ctx[:func], value)
+      converted = next_temp(ctx[:func])
+      helper = array_etype == "f32" ? "w_array_to_f32" : "w_array_to_f64"
+      emit_instruction(ctx[:func], {op: :call_direct_i64, temp: converted, name: helper, args: [source]})
+      return typed_value(typed_array_etype_to_sym(array_etype), converted)
     if node.type_hint == "w64" || node.type_hint in ("big" "bigint" "bignum")
       return typed_value(:i64, ensure_i64_value(ctx[:func], value))
     if is_machine_float_type(hint)

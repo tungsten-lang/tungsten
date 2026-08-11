@@ -64,7 +64,8 @@
   # Array, BigArray has no native sort IC row, so these bodies are live
   # on the compiled engine — which is also why blockless/comparator are
   # separate definitions: compiled block dispatch specializes per
-  # call-site block presence and `block_given?` is not implemented there.
+  # call-site block presence; keeping separate bodies also avoids a query in
+  # this hot implementation.
   -> sort
     self.to_a.sort
 

@@ -11,10 +11,8 @@
 #
 # Run: `bin/tungsten -o /tmp/md spec/numeric/matrix_spec.w && /tmp/md`.
 #
-# Known gap (tracked separately, NOT exercised here):
-#   - `.identity` / `.zero` elements stay integer (generic `## T` literal
-#     coercion is not applied during monomorphization), so identity-derived
-#     scalars are int-typed — checked with integer compares below.
+# Generic literal ascription is preserved through monomorphization, so
+# `MatN<f64>.identity` and `.zero` expose f64-derived scalars.
 
 -> check(name, got, want)
   if got == want
@@ -23,13 +21,17 @@
     << "FAIL " + name + " got " + got.to_s() + " want " + want.to_s()
 
 # -- Class methods build real instances (parser + class.new fixes). --
-# Identity elements are integer (see gap note), so these compare to ints.
-check("mat2.identity.det", Mat2<f64>.identity.determinant, 1)
-check("mat3.identity.det", Mat3<f64>.identity.determinant, 1)
-check("mat4.identity.det", Mat4<f64>.identity.determinant, 1)
-check("mat3.identity.trace", Mat3<f64>.identity.trace, 3)
-check("mat4.identity.trace", Mat4<f64>.identity.trace, 4)
-check("mat3.zero.trace", Mat3<f64>.zero.trace, 0)
+check("mat2.identity.det", Mat2<f64>.identity.determinant, 1.0 ## f64)
+check("mat3.identity.det", Mat3<f64>.identity.determinant, 1.0 ## f64)
+check("mat4.identity.det", Mat4<f64>.identity.determinant, 1.0 ## f64)
+check("mat3.identity.trace", Mat3<f64>.identity.trace, 3.0 ## f64)
+check("mat4.identity.trace", Mat4<f64>.identity.trace, 4.0 ## f64)
+check("mat3.zero.trace", Mat3<f64>.zero.trace, 0.0 ## f64)
+
+# Generic type arguments are scoped to each class send in the interpreter:
+# switching to i64 must neither inherit the f64 hint nor leak back into it.
+check("mat2.i64.identity.det", Mat2<i64>.identity.determinant, 1)
+check("mat2.f64.identity.again", Mat2<f64>.identity.determinant, 1.0 ## f64)
 
 # -- determinant / trace on explicit float matrices (column-major). --
 # 2·I3 → det = 8, trace = 6.

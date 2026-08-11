@@ -5,6 +5,7 @@ require "rbconfig"
 require "tmpdir"
 require "shellwords"
 require_relative "build_flags"
+require_relative "system_dependencies"
 
 module Tungsten
   class Doctor
@@ -25,8 +26,9 @@ module Tungsten
       else
         cpu = BuildFlags.configured_cpu || "native"
         unless cpu_supported?(cpu, cc)
+          llvm_prefix = SystemDependencies.brew_prefix("llvm")
           hint = linux ? "install LLVM/Clang 22+ or choose a supported [build] cpu" :
-                         "brew install llvm; set [build] cc = /opt/homebrew/opt/llvm/bin/clang"
+                         "brew install llvm; set [build] cc to #{llvm_prefix ? "#{llvm_prefix}/bin/clang" : "the path printed by brew --prefix llvm, plus /bin/clang"}"
           missing << ["configured CPU #{cpu}", hint]
         end
       end
@@ -83,12 +85,13 @@ module Tungsten
     end
 
     # zstd include flags, mirroring runtime/Makefile's ZSTD_CFLAGS exactly:
-    # pkg-config if it knows libzstd, else the Homebrew include dir. Keeps the
-    # doctor check honest against the real build (macOS finds zstd.h via
-    # -I/opt/homebrew/include, which a bare `clang -E` would miss).
+    # pkg-config if it knows libzstd, else Homebrew's discovered include dir.
     def self.zstd_cflags
       out = `pkg-config --cflags libzstd 2>/dev/null`.strip
-      out.empty? ? "-I/opt/homebrew/include" : out
+      return out unless out.empty?
+
+      prefix = SystemDependencies.brew_prefix
+      prefix && File.exist?(File.join(prefix, "include/zstd.h")) ? "-I#{prefix}/include" : ""
     end
 
     RESET      = "\e[0m"
@@ -148,7 +151,11 @@ module Tungsten
       major = version.to_s[/version\s+(\d+)/, 1].to_i
       return if major >= 22
 
-      candidates = ["clang-22", "/opt/homebrew/opt/llvm/bin/clang", "/usr/local/opt/llvm/bin/clang"]
+      candidates = ["clang-22"]
+      ["llvm", "llvm@22"].each do |formula|
+        prefix = SystemDependencies.brew_prefix(formula)
+        candidates << File.join(prefix, "bin/clang") if prefix
+      end
       preferred = candidates.find do |candidate|
         next false unless self.class.tool?(candidate)
         candidate_version = `#{Shellwords.escape(candidate)} --version 2>/dev/null`.lines.first.to_s

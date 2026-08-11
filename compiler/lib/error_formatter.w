@@ -350,7 +350,7 @@
   if code != nil
     out << "\n"
     out << c(color, ansi_dim())
-    out << "  explain: tungsten --explain "
+    out << "  explain: tungsten explain "
     out << code.to_s()
     out << c(color, ansi_reset())
     out << "\n"

@@ -97,6 +97,7 @@ module Tungsten
   autoload :Random,              "tungsten/support/crypto"
   autoload :Sandwich,            "tungsten/literals/sandwich"
   autoload :SetLiteral,          "tungsten/literals/set_literal"
+  autoload :SmallArrayValue,     "tungsten/literals/small_array_value"
   autoload :MultisetLiteral,     "tungsten/literals/set_literal"
   autoload :StringBuffer,        "tungsten/literals/string_buffer"
   autoload :Time,                "tungsten/literals/time"

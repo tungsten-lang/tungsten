@@ -160,7 +160,7 @@
   # a positional arg, which is the established compiled binding for these.
   if recv_node != nil && ast_kind(recv_node) == :self_ref && ctx[:class_name] != nil && node.block == nil
     static_key = ctx[:class_name] + "." + method_name
-    static_info = ctx[:mod][:known_static_methods][static_key]
+    static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
     if static_info != nil
       return lower_direct_static_method_call(ctx, static_info, recv_node, node.args)
 
@@ -409,6 +409,26 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_rational_new", args: [numerator_reg, denominator_reg]})
       return typed_value(:i64, temp)
 
+    # Array.new(size = 0, fill = nil) creates a sized polymorphic Array.
+    # The boxed runtime boundary is shared with dynamic class receivers so
+    # mutable fill values retain identity instead of being reconstructed per
+    # slot. A block is not silently discarded; unsupported block forms fall
+    # through to normal constructor dispatch and report an arity error.
+    if recv_name == "Array" && method_name == "new" && node.block == nil && node.args.size() <= 2
+      if node.args.size() == 0
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_new_empty", args: []})
+        return typed_value(:i64, temp)
+      size_val = lower_expression(ctx, node.args[0])
+      size_reg = ensure_i64_value(wfn, size_val)
+      fill_reg = w_nil.to_s()
+      if node.args.size() == 2
+        fill_val = lower_expression(ctx, node.args[1])
+        fill_reg = ensure_i64_value(wfn, fill_val)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_new_filled", args: [size_reg, fill_reg]})
+      return typed_value(:i64, temp)
+
     # BigArray.new(ebits, capacity) — i64-indexed array tier.
     # ebits is symbol (:u8, :i32, :f32, :w64, :bf16, …) or raw int (16/32/64/-32/…).
     if recv_name == "BigArray" && method_name == "new" && node.args.size() == 2
@@ -429,7 +449,7 @@
     # and size are compile-time int literals, emit LLVM `alloca` instead
     # of a heap calloc. The alloca lives in the current frame; misuse
     # (escape) is the user's responsibility until escape analysis is automatic.
-    if recv_name == "SmallArray" && method_name == "new" && node.args.size() == 2
+    if recv_name == "SmallArray" && method_name == "new" && node.block == nil && node.args.size() == 2
       ebits_arg = node.args[0]
       size_arg = node.args[1]
       stack_safe = node.stack_safe == true
@@ -449,11 +469,20 @@
         emit_instruction(wfn, {op: :ptr_to_i64, temp: temp_int, value: temp_ptr})
         emit_instruction(wfn, {op: :call_direct_i64, temp: temp_box, name: "w_small_array_init", args: [temp_int, ebits_const.to_s(), size_const.to_s()]})
         return typed_value(:i64, temp_box)
-      ebits_raw = ebits_arg_to_raw(ctx, ebits_arg)
-      size_val = lower_expression(ctx, size_arg)
-      size_raw = ensure_raw_machine_int(wfn, size_val, :i64, infer_type(size_arg, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps))
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_new", args: [ebits_raw, size_raw, "0"]})
+      if ebits_const != nil
+        size_val = lower_expression(ctx, size_arg)
+        size_raw = ensure_raw_machine_int(wfn, size_val, :i64, infer_type(size_arg, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps))
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_new", args: [ebits_const.to_s(), size_raw, "0"]})
+      else
+        # A runtime Symbol is a boxed String/Symbol WValue, not a machine
+        # integer. Preserve it across a boxed helper rather than NaN-unboxing
+        # its payload as an ebits code.
+        ebits_val = lower_expression(ctx, ebits_arg)
+        ebits_reg = ensure_i64_value(wfn, ebits_val)
+        size_val = lower_expression(ctx, size_arg)
+        size_reg = ensure_i64_value(wfn, size_val)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_new_value", args: [ebits_reg, size_reg]})
       return typed_value(:i64, temp)
 
     # Direct static dispatch — only for calls WITHOUT an attached block:
@@ -464,7 +493,7 @@
     static_info = nil
     if node.block == nil
       static_key = recv_name + "." + method_name
-      static_info = ctx[:mod][:known_static_methods][static_key]
+      static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
     if static_info == nil && node.block == nil && method_name != "new" && ctx[:mod][:known_classes][recv_name] != nil
       # Class methods are inherited: on a miss for a KNOWN class receiver,
       # walk the superclass chain (compile-time; the hierarchy is closed at
@@ -487,7 +516,7 @@
         if sup == nil
           break
         cur = sup
-        candidate = ctx[:mod][:known_static_methods][cur + "." + method_name]
+        candidate = known_static_method_for(ctx[:mod], cur + "." + method_name, node.args.size())
         if candidate != nil && candidate[:is_static] == true
           static_info = candidate
         guard += 1
@@ -959,15 +988,18 @@
   # Direct builtins for StringBuffer operations when receiver type is known.
   if recv_type == :string_buffer
     if method_name in ("append" "<<" "<</1") && node.args.size() == 1
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
       arg_type = infer_type(node.args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
-      if arg_type == :string
-        receiver_val = lower_expression(ctx, recv_node)
-        receiver_reg = ensure_i64_value(wfn, receiver_val)
-        arg_val = lower_expression(ctx, node.args[0])
-        arg_reg = ensure_i64_value(wfn, arg_val)
-        temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_strbuf_append", args: [receiver_reg, arg_reg]})
-        return typed_value(:i64, temp)
+      arg_val = lower_expression(ctx, node.args[0])
+      arg_reg = ensure_i64_value(wfn, arg_val)
+      if arg_type != :string
+        string_temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: string_temp, name: "w_to_s", args: [arg_reg]})
+        arg_reg = string_temp
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_strbuf_append", args: [receiver_reg, arg_reg]})
+      return typed_value(:i64, temp)
 
     if method_name == "to_s" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
@@ -1329,14 +1361,21 @@
       emit_instruction(wfn, {op: :select_i64, temp: temp, cond: cmp, then_val: w_true.to_s(), else_val: w_false.to_s()})
       return typed_value(:i64, temp)
     if method_name == "\[]" && node.args.size() == 1
-      # Headerless: the raw alloca ptr comes straight from wfn[:sa_ptr] (the var
-      # is NOT in ctx[:bindings], so don't lower it as a bare var). Boxed: lower
-      # the receiver and unmask the WValue as before.
-      if sa_hl
-        receiver_reg = sa_ptr
-      else
+      # Heap-backed SmallArrays use the checked runtime helper. Besides matching
+      # the interpreter for negative and out-of-range indices, this keeps an OOB
+      # read representable as nil; the raw inline result has no nil sentinel.
+      if !sa_hl
         receiver_val = lower_expression(ctx, recv_node)
         receiver_reg = ensure_i64_value(wfn, receiver_val)
+        idx_val = lower_expression(ctx, node.args[0])
+        idx_reg = ensure_i64_value(wfn, idx_val)
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_get", args: [receiver_reg, idx_reg]})
+        return typed_value(:i64, temp)
+
+      # Headerless: the raw alloca ptr comes straight from wfn[:sa_ptr] (the var
+      # is NOT in ctx[:bindings], so don't lower it as a bare var).
+      receiver_reg = sa_ptr
       idx_val = lower_expression(ctx, node.args[0])
       idx_raw = false
       if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
@@ -1368,11 +1407,21 @@
         return typed_value(:raw_u64, temp)
       return typed_value(:raw_int, temp)
     if method_name == "\[]=" && node.args.size() == 2
-      if sa_hl
-        receiver_reg = sa_ptr
-      else
+      # As with reads, preserve public SmallArray bounds and negative-index
+      # semantics for heap-backed values. Hot stack-promoted buffers retain the
+      # raw inline path below.
+      if !sa_hl
         receiver_val = lower_expression(ctx, recv_node)
         receiver_reg = ensure_i64_value(wfn, receiver_val)
+        idx_val = lower_expression(ctx, node.args[0])
+        idx_reg = ensure_i64_value(wfn, idx_val)
+        val_expr = lower_expression(ctx, node.args[1])
+        val_reg = ensure_i64_value(wfn, val_expr)
+        temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_set", args: [receiver_reg, idx_reg, val_reg]})
+        return typed_value(:i64, temp)
+
+      receiver_reg = sa_ptr
       idx_val = lower_expression(ctx, node.args[0])
       idx_raw = false
       if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
@@ -1404,7 +1453,10 @@
         si += 1
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :small_array_set_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, value: val_reg, s: scratch, bits: elem_bits, signed: elem_signed, headerless: sa_hl})
-      return typed_value(:i64, temp)
+      # []= evaluates to its RHS. Preserve the RHS representation instead of
+      # relabeling the raw slot-store result as a boxed WValue; callers can box
+      # it at an actual value boundary, while statement position stays free.
+      return val_expr
 
   # Direct builtins for typed arrays (integer widths plus runtime-backed floats)
   if is_typed_array_type?(recv_type)
@@ -1648,7 +1700,7 @@
         si += 1
       temp = next_temp(wfn)
       emit_instruction(wfn, {op: :typed_array_set_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, value: val_reg, s: scratch, bits: elem_bits, signed: elem_signed})
-      return typed_value(:i64, temp)
+      return val_expr
 
   # Direct builtins for string operations — bypass method dispatch
   if recv_type == :string
@@ -1769,7 +1821,10 @@
             temp = next_temp(wfn)
             emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: mangled, args: spec_args})
             return typed_value(:i64, temp)
-        mangled = specialize_method(ctx, spec_class, method_name, recv_type, call_arity)
+        physical_arg_count = 1 + node.args.size()
+        if caller_has_block
+          physical_arg_count += 1
+        mangled = specialize_method(ctx, spec_class, method_name, recv_type, call_arity, physical_arg_count)
         if mangled != nil
           receiver_val = lower_expression(ctx, recv_node)
           receiver_reg = ensure_i64_value(wfn, receiver_val)

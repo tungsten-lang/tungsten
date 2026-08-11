@@ -43,6 +43,9 @@
   explicit_name = explicit_block_param_name(params)
   if explicit_name != nil
     return explicit_name
+  # A block-presence query needs the same hidden closure slot as `yield`, even
+  # when the method never invokes the block. This keeps `-> probe; block?`
+  # entirely self-hosted in the compiler ABI rather than consulting runtime C.
   if !has_yield_node(body)
     return nil
   "__block"
@@ -198,6 +201,10 @@
     return false
   t = ast_kind(node)
   case t
+  when :var
+    # Bare zero-argument calls are represented as :var nodes. Both spellings
+    # reserve the hidden block slot; only block? is idiomatic Tungsten.
+    return node.name in ("block?" "block_given?")
   when :yield
     return true
   when :if
@@ -239,6 +246,8 @@
   when :block
     return has_yield_node(node.body)
   when :call
+    if node.receiver == nil && node.name in ("block?" "block_given?") && (node.args == nil || node.args.size() == 0)
+      return true
     if node.block != nil && has_yield_in_node(node.block)
       return true
     if node.args != nil
@@ -1501,12 +1510,12 @@
 
 -> class_method_function_name(cname, node)
   prefix = "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_"
-  # Static methods (class methods) don't carry an arity suffix — the
-  # raw-i64 ABI relies on the bare name + a `__boxed` wrapper variant
-  # for dynamic dispatch (test #980 / #1005 / #1062). Instance methods
-  # keep the arity suffix so multiple-arity overloads can coexist.
+  # Static methods carry an arity suffix just like instance methods. The
+  # runtime method table already indexes class methods by arity; using a bare
+  # native symbol made `Tensor.zeros/1` and `Tensor.zeros/3` overwrite each
+  # other and let a four-argument call target a two-argument function.
   if node.is_class_method == true
-    return "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_S_" + mangle_method_name(node.name)
+    return "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_S_" + mangle_method_name(node.name) + method_arity_suffix(node)
   prefix + mangle_method_name(node.name) + method_arity_suffix(node)
 
 -> register_class_method_def(main_fn, mod, cname, node)
@@ -1573,8 +1582,8 @@
       i += 1
   false
 
--> static_method_wrapper_name(cname, mname)
-  "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_S_" + mangle_method_name(mname) + "__boxed"
+-> static_method_wrapper_name(cname, node)
+  "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_S_" + mangle_method_name(node.name) + method_arity_suffix(node) + "__boxed"
 
 -> normalized_static_param_types(node)
   if node.param_types == nil
@@ -1589,7 +1598,7 @@
   method_fn_name = mfn_name
   raw_abi = static_method_raw_abi?(node)
   if raw_abi
-    method_fn_name = static_method_wrapper_name(cname, mname)
+    method_fn_name = static_method_wrapper_name(cname, node)
   return_type = nil
   if node.return_type != nil
     return_type = normalize_type_symbol(node.return_type)
@@ -1604,7 +1613,8 @@
   # method_call.w's intrinsic special-cases get a look. Runtime-side
   # registration below still happens so dynamic dispatch stays uniform.
   if node.body != nil && node.body.size() > 0
-    mod[:known_static_methods][cname + "." + mname] = {
+    lookup_key = cname + "." + mname
+    info = {
       fn_name: mfn_name,
       method_fn_name: method_fn_name,
       arity: arity,
@@ -1613,6 +1623,7 @@
       raw_abi: raw_abi,
       is_static: true
     }
+    register_known_static_method_info(mod, lookup_key, info, min_arity - 1, arity - 1)
   mstr_id = module_string_constant(mod, mname)
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
@@ -1866,7 +1877,7 @@
   raw_abi = false
   wrapper_fn_name = nil
   if node.is_class_method == true
-    static_info = mod[:known_static_methods][class_name + "." + name]
+    static_info = known_static_method_for(mod, class_name + "." + name, params.size())
     if static_info != nil && static_info[:raw_abi] == true
       raw_abi = true
       wrapper_fn_name = static_info[:method_fn_name]
@@ -1880,6 +1891,16 @@
   yield_block_name = analysis[:yield_block_name]
   if yield_block_name == "__block"
     param_names.push("__block")
+  # Tungsten intentionally permits surplus call arguments. A specialized
+  # array method is reached by a direct LLVM call, so retain ignored physical
+  # parameters instead of relying on a mismatched call-site signature. This
+  # also keeps content-addressed symbols from merging `_a0` and `_a3` variants
+  # that have identical bodies but different caller contracts.
+  if override != nil && override[:physical_arg_count] != nil
+    surplus_index = 0
+    while param_names.size() < override[:physical_arg_count]
+      param_names.push("__surplus" + surplus_index.to_s())
+      surplus_index += 1
 
   # Build function. If a function with this name already exists (from a
   # prior class_def for the same re-opened class), remove it first — last

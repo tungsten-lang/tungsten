@@ -96,7 +96,7 @@ void w_slab_init_static(const uint8_t *data, uint32_t total_slots);
 void w_slab_init_static_zstd(const uint8_t *data, uint32_t compressed_bytes, uint32_t total_slots);
 void w_slab_rebuild_intern(uint32_t total_slots);
 void w_slab_freeze(void);
-int  w_slab_is_frozen(void);
+int64_t w_slab_is_frozen(void);
 WValue w_zstd_compress_llvm_escaped(WValue escaped_val);
 
 /* ---- Exact-width AST word arena ----
@@ -269,7 +269,7 @@ WValue   w_body_arena_get(uint32_t offset, uint32_t i);
  * i64 parameter types match how Tungsten's `ccall_nobox` emits args
  * (all raw i64 on the call boundary). */
 WValue w_node_field_load(WValue wnode, int64_t ivar_offset);
-void   w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
+WValue w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
 
 /* ---- Dynamic array ---- */
 /* Pool-flag bit: set when array is currently held in a recycle pool. Prevents
@@ -528,6 +528,13 @@ WValue w_duration_sub(WValue a, WValue b);
 void w_type_class_register(uint8_t dispatch_key, uint16_t class_id);
 
 /* ---- UUID (subtag 0xD, heap-allocated 16 bytes) ---- */
+typedef struct {
+    uint8_t bytes[16];
+} WUUIDBytes;
+
+_Static_assert(offsetof(WUUIDBytes, bytes) == 0, "WUUIDBytes bytes offset");
+_Static_assert(sizeof(WUUIDBytes) == 16, "WUUIDBytes payload size");
+
 WValue w_uuid_from_hex(const char *hex);
 WValue w_uuid_parse(WValue text);
 WValue w_uuid_byte(WValue uuid, WValue index);
@@ -575,9 +582,11 @@ WValue w_complex(int16_t real_sig, int real_scale, int16_t imag_sig, int imag_sc
 WValue w_location_point(int32_t x, int32_t y);
 WValue w_location_file(int file_id, int line, int col);
 WValue w_location_file_offset(int file_id, int offset);
-int w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr);
-int w_loc_line_for_offset(int file_id, int offset);
-int w_loc_col_for_offset(int file_id, int offset);
+int64_t w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr);
+int64_t w_loc_line_for_offset(int64_t file_id, int64_t offset);
+int64_t w_loc_col_for_offset(int64_t file_id, int64_t offset);
+int64_t w_unbox_location_file_id_extern(WValue value);
+int64_t w_unbox_location_offset_extern(WValue value);
 
 /* ---- Instant (dedicated 0xFFFB tag) ---- */
 WValue w_instant_now(void);
@@ -886,6 +895,8 @@ int w_sandbox_stub(const char *op, const char *detail);
 typedef void (*WRecycleFn)(WValue);
 
 void w_cleanup_push(WValue value, WRecycleFn fn);
+void w_value_free(WValue value);
+WValue w_value_free_w(WValue value);
 void w_cleanup_pop(void);
 
 /* ---- Non-local block return ---- */
@@ -1139,6 +1150,7 @@ WValue w_goroutine_spawn(WValue closure);
 void   w_goroutine_yield(void);
 WValue w_goroutine_current(void);
 void   w_scheduler_run(void);
+WValue w_scheduler_run_w(void);
 
 /* ---- M:P Scheduler ---- */
 
@@ -1389,6 +1401,13 @@ typedef struct WMmap {
     int64_t  size;     /* byte length (renamed from length) */
 } WMmap;
 
+_Static_assert(offsetof(WMmap, type) == 0, "WMmap type offset");
+_Static_assert(offsetof(WMmap, closed) == 1, "WMmap closed offset");
+_Static_assert(offsetof(WMmap, pad) == 2, "WMmap pad offset");
+_Static_assert(offsetof(WMmap, data) == 8, "WMmap data offset");
+_Static_assert(offsetof(WMmap, size) == 16, "WMmap size offset");
+_Static_assert(sizeof(WMmap) == 24, "WMmap header size");
+
 WValue __w_file_mmap(WValue path);
 WValue __w_mmap_length(WValue mmap);
 WValue __w_mmap_byte_at(WValue mmap, WValue index);
@@ -1543,6 +1562,9 @@ WValue w_big_array_push(WValue arr, WValue val);
  * without needing a dedicated ptr-arg call op. NULL skips the memcpy and
  * leaves the calloc-zeroed payload. */
 WValue w_small_array_new(int64_t ebits, int64_t size, int64_t bytes_ptr);
+/* Boxed constructor boundary for SmallArray.new(:element_type, size), used by
+ * dynamic class receivers and the interpreters. */
+WValue w_small_array_new_value(WValue ebits, WValue size);
 /* In-place initialize at a caller-allocated buffer (typically
  * an LLVM `alloca` on the stack). `mem` is an integer-encoded pointer.
  * Caller is responsible for sizing the buffer to fit the WSmallArray
@@ -1576,6 +1598,9 @@ WValue w_fused_out_reuse_or_new(WValue *slot, int64_t element_bits, int64_t n);
  * read. Callers that want the legacy "cap N, push to fill" semantics use
  * Array.new(ebits, cap: N) (lowers to w_array_new). */
 WValue w_array_zeros(int64_t element_bits, int64_t length);
+/* Public Array.new(size, fill) constructor. Repeating the same fill WValue is
+ * intentional: mutable fill objects alias. */
+WValue w_array_new_filled(WValue size, WValue fill);
 /* Non-owning view over a raw pre-existing memory pointer (mmap, ccall, …).
  * `data` must outlive the array. push/grow on a view raises. */
 WValue w_array_view_raw(uint8_t *data, int64_t element_bits, int64_t length);
@@ -1717,7 +1742,7 @@ WValue w_crypto_aes_gcm_seal(WValue key, WValue nonce, WValue plaintext, WValue 
 WValue w_crypto_aes_gcm_open(WValue key, WValue nonce, WValue sealed, WValue aad);
 
 /* Hardware SHA-256 (also consumed by bits/tungsten-crypto miner). */
-int w_sha256_hw_available(void);
+int64_t w_sha256_hw_available(void);
 void w_sha256_hw_compress(uint32_t *state, const uint8_t *data, size_t nblocks);
 int64_t w_sha256_hw_mine(const uint32_t *midstate, const uint8_t *tail, const uint32_t *target_be,
                          uint32_t start, int64_t count, uint32_t *out_hash, uint32_t *out_best,

@@ -32,6 +32,7 @@
 set -o pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/bin/commands/system_deps.sh"
 CC="${TUNGSTEN_CC:-clang}"
 AR_TOOL="${TUNGSTEN_AR:-ar}"
 COMPILER="$ROOT/bin/tungsten-compiler"
@@ -58,15 +59,16 @@ case "$(uname -s)" in
   Linux)  srcs+=(event_epoll.c) ;;
 esac
 zstd_cflags=()
-if [[ -f /opt/homebrew/include/zstd.h ]]; then
-  zstd_cflags=(-I/opt/homebrew/include)
+homebrew_prefix="$(tungsten_homebrew_prefix || true)"
+if [[ -n "$homebrew_prefix" && -f "$homebrew_prefix/include/zstd.h" ]]; then
+  zstd_cflags=("-I$homebrew_prefix/include")
   srcs+=(slab_zstd.c)
 else
   srcs+=(slab_zstd_stub.c)
 fi
 onig_cflags=()
-if [[ -f /opt/homebrew/include/oniguruma.h ]]; then
-  onig_cflags=(-I/opt/homebrew/include -DTUNGSTEN_ONIG)
+if [[ -n "$homebrew_prefix" && -f "$homebrew_prefix/include/oniguruma.h" ]]; then
+  onig_cflags=("-I$homebrew_prefix/include" -DTUNGSTEN_ONIG)
 fi
 
 echo "==> Compiling sanitized runtime archive ($OPT -fsanitize=undefined)"
@@ -89,8 +91,8 @@ echo "    archive: $ARCHIVE"
 
 # ── 2. Compile-check env-gated network sources (no runtime exercise) ─────
 echo "==> Compile-checking env-gated network sources"
-openssl_prefix=/opt/homebrew/opt/openssl@3
-nghttp2_prefix=/opt/homebrew/opt/libnghttp2
+openssl_prefix="$(tungsten_homebrew_prefix openssl@3 || true)"
+nghttp2_prefix="$(tungsten_homebrew_prefix libnghttp2 || true)"
 if [[ -f "$openssl_prefix/include/openssl/ssl.h" ]]; then
   for src in tls.c http2.c http3.c; do
     [[ -f "$ROOT/runtime/$src" ]] || continue

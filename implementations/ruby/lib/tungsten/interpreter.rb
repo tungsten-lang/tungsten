@@ -143,7 +143,7 @@ module Tungsten
 
     BUILTIN_TYPES = %w[
       String Integer Float Boolean Nil
-      Array Hash Symbol Range Decimal Rational Tuple
+      Array SmallArray Hash Symbol Range Decimal Rational Tuple
       Class Tungsten
     ].freeze
     BUILTIN_CONSTANT_NAMES = %w[
@@ -472,6 +472,7 @@ module Tungsten
       when klass == AST::Symbol        then return cached_symbol_value(node)
       when klass == AST::If            then return visit_if(node)
       when klass == AST::Assign        then return visit_assign(node)
+      when klass == AST::TypeHint      then return apply_type_hint(evaluate(node.value), node.hint)
       when klass == AST::StringLiteral then return node.value
       when klass == AST::Nil           then return nil
       when klass == AST::InstanceVar   then return @self_stack.last.instance_vars[node.name]
@@ -595,7 +596,8 @@ module Tungsten
         return node.cached_w_method
       end
 
-      method = owner.lookup_method(name)
+      call_args = node.respond_to?(:args) ? node.args : nil
+      method = owner.lookup_method(name, argc: (call_args || EMPTY_ARGS).size)
       cache_w_method(node, owner, method) if method
       method
     end
@@ -640,7 +642,7 @@ module Tungsten
       unless method
         # No typed match — the last-definition pick, exactly as untyped
         # dispatch would resolve it.
-        method = owner.lookup_method(node.name)
+        method = owner.lookup_method(node.name, argc: args.size)
         unless method
           runtime_error("undefined method '#{node.name}' for #{recv}", node: node, length: node.name.to_s.length)
         end
@@ -649,7 +651,7 @@ module Tungsten
         # the untyped WObject dispatch path in visit_call).
         if recv.is_a?(Runtime::WObject) && args.size > 1 &&
            (method.params || EMPTY_ARGS).size == 1 && method.splat_index.nil?
-          constructor = owner.lookup_method("new")
+          constructor = owner.lookup_method("new", argc: args.size)
           if constructor && (constructor.params || EMPTY_ARGS).size == args.size
             return call_w_method(recv, method, [ instantiate(owner, args) ], block, call_node: node)
           end
@@ -736,6 +738,7 @@ module Tungsten
         type_name == "Decimal" || type_name == "Real" || type_name == "Number"
       when ::String then type_name == "String"
       when ::Symbol then type_name == "Symbol"
+      when Tungsten::SmallArrayValue then type_name == "SmallArray"
       when ::Array then type_name == "Array"
       when ::Hash then type_name == "Hash"
       when true, false then type_name == "Boolean"
@@ -1336,9 +1339,16 @@ module Tungsten
     end
 
     def apply_type_hint(value, hint)
-      return value unless hint && value.is_a?(Integer)
+      return value unless hint
 
-      case hint.to_s
+      text = hint.to_s
+      if value.is_a?(Array) && text.match?(/\A(?:f32|f64)\[[^\]]*\]\z/)
+        return value.map { |element| element.is_a?(Numeric) ? element.to_f : element }
+      end
+      return value.to_f if %w[f32 f64].include?(text) && value.is_a?(Numeric)
+      return value unless value.is_a?(Integer)
+
+      case text
       when "u64"
         wrap_unsigned_bits(value, 64)
       when "i64"
@@ -1753,7 +1763,7 @@ module Tungsten
             # p.distance(2, 3, 4) ≡ p.distance(Point.new(2, 3, 4)).
             if node.args && node.args.size > 1 &&
                (method.params || EMPTY_ARGS).size == 1 && method.splat_index.nil?
-              constructor = owner.lookup_method("new")
+              constructor = owner.lookup_method("new", argc: node.args.size)
               if constructor && (constructor.params || EMPTY_ARGS).size == node.args.size
                 instance = instantiate_from_nodes(owner, node.args)
                 return call_w_method(recv, method, [instance], block, call_node: node)
@@ -1779,7 +1789,13 @@ module Tungsten
             root_builtin = @builtins["__project_root"]
             Tungsten::PathValue.new(root_builtin ? root_builtin.call(nil, EMPTY_ARGS, nil) : Dir.pwd)
           elsif node.name == "new"
-            instantiate_from_nodes(recv, node.args)
+            if recv.name == "Array"
+              construct_array(evaluate_args(node.args), block, node)
+            elsif recv.name == "SmallArray"
+              construct_small_array(evaluate_args(node.args), block, node)
+            else
+              instantiate_from_nodes(recv, node.args)
+            end
           elsif node.name == "methods"
             (recv.methods.keys + @method_builtins.keys + BUILTIN_METHODS).uniq.sort.map(&:to_sym)
           elsif node.name == "class"
@@ -2897,9 +2913,34 @@ module Tungsten
       return Rational(*args) if w_class.name == "Rational"
 
       obj = Runtime::WObject.new(w_class)
-      constructor = w_class.lookup_method("new")
+      constructor = w_class.lookup_method("new", argc: args.size)
       call_w_method(obj, constructor, args) if constructor
       obj
+    end
+
+    def construct_array(args, block, node)
+      runtime_error("Array.new does not accept a block", node: node) if block
+      unless args.size <= 2
+        runtime_error("Array.new expects zero, one, or two arguments", node: node)
+      end
+
+      count = args.empty? ? 0 : args[0]
+      runtime_error("Array.new size must be an Integer", node: node) unless count.is_a?(Integer)
+      runtime_error("Array.new size must be non-negative", node: node) if count.negative?
+      runtime_error("Array.new size exceeds INT32_MAX — use BigArray", node: node) if count > 2_147_483_647
+
+      Array.new(count, args.size == 2 ? args[1] : nil)
+    end
+
+    def construct_small_array(args, block, node)
+      runtime_error("SmallArray.new does not accept a block", node: node) if block
+      unless args.size == 2
+        runtime_error("SmallArray.new expects element type and size", node: node)
+      end
+
+      Tungsten::SmallArrayValue.new(args[0], args[1])
+    rescue Tungsten::Error => e
+      runtime_error(e.message, node: node)
     end
 
     def visit_begin(node)
@@ -4952,7 +4993,7 @@ module Tungsten
       return Rational(*evaluate_args(arg_nodes)) if w_class.name == "Rational"
 
       obj = Runtime::WObject.new(w_class)
-      constructor = w_class.lookup_method("new")
+      constructor = w_class.lookup_method("new", argc: (arg_nodes || EMPTY_ARGS).size)
       call_w_method_from_nodes(obj, constructor, arg_nodes) if constructor
       obj
     end
@@ -5339,6 +5380,7 @@ module Tungsten
       ::Rational => "Rational",
       ::String   => "String",
       ::Symbol   => "Symbol",
+      Tungsten::SmallArrayValue => "SmallArray",
       ::Array    => "List",
       ::Hash     => "Map",
       ::Range    => "Range",
@@ -5349,6 +5391,7 @@ module Tungsten
 
     def tungsten_class_name(recv)
       case recv
+      when Tungsten::SmallArrayValue then "SmallArray"
       when Tungsten::ByteArray    then "ByteArray"
       when Tungsten::CharValue    then "Char"
       when Tungsten::StringBuffer then "StringBuffer"
@@ -5366,6 +5409,7 @@ module Tungsten
     def primitive_runtime_class(recv)
       name =
         case recv
+        when Tungsten::SmallArrayValue then "SmallArray"
         when ::Array then "Array"
         when ::Hash then "Hash"
         when ::String then "String"

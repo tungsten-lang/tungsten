@@ -600,8 +600,9 @@ use lowering/definitions
                 mod[:fn_return_types][static_key] = static_rt
                 # Bodyless (abstract/intrinsic) statics are not in the
                 # direct-dispatch registry — see register_static_method.
-                if mod[:known_static_methods][static_key] != nil
-                  mod[:known_static_methods][static_key][:return_type] = static_rt
+                static_info = known_static_method_for(mod, static_key, mnode.params.size())
+                if static_info != nil
+                  static_info[:return_type] = static_rt
             elsif mnode.from_fn == true && mnode.param_types != nil && embedded_body_directive(mnode) != nil
               # Embedded ll/asm kernels are raw-ABI helpers, not dispatchable
               # methods — registering one would hand the dynamic dispatcher a
@@ -641,7 +642,7 @@ use lowering/definitions
                 inst_fn_name = class_method_function_name(cname, mnode)
                 inst_raw_abi = static_method_raw_abi?(mnode)
                 mod[:fn_return_types][static_key] = static_rt
-                mod[:known_static_methods][static_key] = {
+                info = {
                   fn_name: inst_fn_name,
                   method_fn_name: inst_fn_name,
                   arity: method_runtime_arity(mnode),
@@ -650,6 +651,7 @@ use lowering/definitions
                   raw_abi: inst_raw_abi,
                   from_fn: mnode.from_fn == true
                 }
+                register_known_static_method_info(mod, static_key, info, mnode.params.size(), mnode.params.size())
                 if mnode.from_fn == true
                   impure_ccall = fn_body_calls_impure_ccall?(mnode.body)
                   mnode.calls_impure_ccall = impure_ccall

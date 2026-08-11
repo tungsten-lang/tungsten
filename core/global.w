@@ -14,7 +14,7 @@ in Global
 -> __dir__
 -> __method__
 
--> ``/1 (str)
+-> ``/1 (string)
 
 -> abort
 
@@ -26,6 +26,9 @@ in Global
 -> autoload?
 
 -> binding
+-> block?
+# Compatibility alias for Ruby-shaped Tungsten programs. New Core code uses
+# the shorter, native spelling above.
 -> block_given?
 
 -> caller
@@ -78,7 +81,7 @@ in Global
 -> puts --> STDOUT
 
 -> raise
--> raise/1 (str)
+-> raise/1 (string)
 -> raise(exception, string = nil, array = nil)
 -> readline
 -> readlines

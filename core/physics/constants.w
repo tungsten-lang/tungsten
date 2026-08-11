@@ -107,10 +107,10 @@
   # names are enumerated. Extend the case as new sim quantities appear.
   -> .si(value, unit_name)
     # Quantity detection uses w_quantity_unit_name (unit symbol, nil for
-    # non-quantities): compiled inline caches die rather than deoptimize
-    # when a .class/.to_f site alternates Decimal and Quantity receivers
-    # (same 0xFFFD box kind) — see TODO.md. The quantity path lives in
-    # its own method so every .to_f site stays monomorphic.
+    # non-quantities), avoiding reflective class-name allocation on this hot
+    # boundary. The historical inline-class/early-return/case compiler bug is
+    # pinned in quantity_control_flow_parity_spec.w; keeping the quantity path
+    # separate also leaves each .to_f site monomorphic.
     unit = ccall("w_quantity_unit_name", value)
     if unit != nil
       Physics.si_quantity(value, unit_name)

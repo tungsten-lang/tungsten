@@ -34,6 +34,7 @@ module Tungsten
     autoload :StringInterpolation, "tungsten/ast/string_interpolation"
     autoload :Symbol,          "tungsten/ast/symbol"
     autoload :Tuple,           "tungsten/ast/tuple"
+    autoload :TypeHint,        "tungsten/ast/type_hint"
 
     autoload :Accessor,        "tungsten/ast/keywords/accessor"
     autoload :Alias,           "tungsten/ast/keywords/alias"

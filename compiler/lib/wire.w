@@ -438,6 +438,12 @@
     temp = next_temp(f)
     emit_instruction(f, {op: :nanbox_float, temp: temp, temp_bits: temp_bits, raw: tv[:value]})
     return temp
+  # Aggregate/static receiver types (typed arrays, specialized classes, and
+  # similar inference-only symbols) still carry an ordinary boxed i64 WValue.
+  # Only :i1 needs conversion here; treating every unrecognized static type as
+  # a predicate emitted `select i1` over array/object registers.
+  if tv[:type] != :i1
+    return tv[:value]
   # i1 -> i64: nanbox bool (select i1 → W_TRUE/W_FALSE)
   temp = next_temp(f)
   emit_instruction(f, {op: :nanbox_bool, temp: temp, value: tv[:value]})

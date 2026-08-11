@@ -18,15 +18,13 @@ endif
 # in one TU. -DNDEBUG strips assert(); -march=native lets clang use the
 # host's full instruction set for the bit-twiddling hot ops (kind tag
 # tests, NaN-box decode).
-# Host-ISA gate: -march=native miscompiles the bytecode-dispatch hot path on
-# x86 Linux. A latent intra-struct OOB in the operand-stack fast path (UBSAN
-# flags the L_ARITH fast path in vm.c: an out-of-bounds vm.stack[] index that
-# aliases the struct's adjacent `ip` field) gets exploited by the host-ISA
-# codegen and intermittently corrupts the VM, derailing stage-1 self-compilation
-# (`unsupported runtime call: ... receiver=String ... fn=lower_*`, segfault, or
-# hang). The C VM is a throwaway bootstrap tool, so on Linux build it for a
-# portable baseline; macOS/arm64 — proven stable and green in CI — keeps
-# -march=native.
+# Host-ISA gate: -march=native exposed an operand-stack OOB in the x86 Linux
+# bytecode-dispatch path. A pop to sp == 0 refreshed the TOS cache from
+# vm.stack[sp - 1], aliasing the adjacent `ip` field and intermittently
+# derailing stage-1 self-compilation. NEXT now skips that reload on an empty
+# stack, but retain the portable Linux baseline until the sanitizer build and
+# full stage-1 identity path have also passed on x86_64. macOS/arm64 — validated
+# with the sanitizer and release builds — keeps -march=native.
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
   ARCH_FLAGS ?= -march=native -mtune=native
@@ -86,6 +84,8 @@ test: $(BIN)
 		diff -u tests/bit_count_intrinsics.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/compound_assignment_ops.w | \
 		diff -u tests/compound_assignment_ops.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/operand_stack_empty_transition.w | \
+		diff -u tests/operand_stack_empty_transition.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/parenthesized_type_hint.w
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --dump-ast tests/parenthesized_type_hint.w | \
 		diff -u tests/parenthesized_type_hint.expected -

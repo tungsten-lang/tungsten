@@ -37,6 +37,27 @@ use hashing
   op_codes[:next_code] = next_code + 1
   next_code
 
+-> exact_string_key?(left, right)
+  left != nil && right != nil && left.size() == right.size() && left == right
+
+-> fn_hash_put(fn_hashes, source, hash)
+  fn_hashes[source] = {source: source, hash: hash}
+
+-> fn_hash_get(fn_hashes, source)
+  entry = fn_hashes[source]
+  if entry == nil || !exact_string_key?(entry[:source], source)
+    return nil
+  entry[:hash]
+
+-> fn_content_put(fn_contents, source, content)
+  fn_contents[source] = {source: source, content: content}
+
+-> fn_content_get(fn_contents, source)
+  entry = fn_contents[source]
+  if entry == nil || !exact_string_key?(entry[:source], source)
+    return nil
+  entry[:content]
+
 
 # Hash one instruction canonically.
 # Encode a value (temp or literal) into the canonical string.
@@ -53,6 +74,105 @@ use hashing
     buf << text
   buf << ","
 
+# Canonicalize instruction fields that change emitted code but are not part of
+# the common value/lhs/rhs/ptr shape below. Keeping this list explicit makes a
+# missing WIRE operand fail closed (fewer deduplications) instead of silently
+# merging functions whose LLVM differs — boxed/headerless typed-array paths
+# were especially vulnerable to that class of bug.
+-> encode_codegen_meta_value(buf, value, temp_map)
+  if value == nil
+    buf << "_"
+    return nil
+  value_type = type(value)
+  if value_type == "Array" || value_type == "SmallArray"
+    buf << "\["
+    i = 0
+    while i < value.size()
+      encode_codegen_meta_value(buf, value[i], temp_map)
+      buf << ","
+      i += 1
+    buf << "\]"
+    return nil
+  if value_type == "Hash"
+    buf << "{"
+    keys = value.keys().sort()
+    i = 0
+    while i < keys.size()
+      encode_codegen_meta_value(buf, keys[i], temp_map)
+      buf << ":"
+      encode_codegen_meta_value(buf, value[keys[i]], temp_map)
+      buf << ","
+      i += 1
+    buf << "}"
+    return nil
+  scalar = value_type == "String" || value_type == "Symbol" || value_type == "Integer" || value_type == "Int" || value_type == "BigInt" || value_type == "Float" || value_type == "Decimal" || value_type == "Rational" || value_type == "Boolean" || value_type == "Bool"
+  if !scalar
+    # Source-only objects do not participate in LLVM emission. Encode one
+    # opaque marker: calling #to_s would serialize host-specific node or block
+    # internals, and some stage-0 values intentionally have no conversion.
+    buf << "x"
+    return nil
+  text = value.to_s()
+  if text.size() > 0 && text.slice(0, 1) == "%"
+    buf << "t"
+    buf << norm_temp(text, temp_map).to_s()
+  else
+    buf << text.size().to_s()
+    buf << ":"
+    buf << text
+
+-> encode_codegen_meta_field(inst, field, buf, temp_map)
+  value = inst[field]
+  if value == nil
+    return nil
+  # switch_i64 cases retain their source AST arm for the later block-lowering
+  # walk, but LLVM emission consumes only these three fields. Packed-node and
+  # hash AST hosts deliberately represent :arm differently, so never let that
+  # source-only payload enter a content address.
+  if field == :cases
+    buf << "kcases=("
+    i = 0
+    while i < value.size()
+      c = value[i]
+      encode_codegen_meta_value(buf, c[:value], temp_map)
+      buf << "/"
+      encode_codegen_meta_value(buf, c[:string_id], temp_map)
+      buf << "/"
+      encode_codegen_meta_value(buf, c[:label], temp_map)
+      buf << ";"
+      i += 1
+    buf << ")"
+    return nil
+  # The node_field_* WIRE ops store an SSA temp in :node. Other lowering
+  # records may retain an AST node under the same key; that object is not read
+  # by the LLVM emitter and differs by bootstrap host representation.
+  if field == :node && type(value) != "String"
+    return nil
+  buf << "k"
+  buf << field.to_s()
+  buf << "="
+  encode_codegen_meta_value(buf, value, temp_map)
+  buf << ";"
+
+content_hash_codegen_fields = [
+  :a_label, :a_value, :arg, :arg_types, :as_i1,
+  :b_label, :b_value, :base, :block_arity, :boxed, :buf,
+  :call_conv, :cap, :captures_ptr, :cases, :class_temp, :codepoint,
+  :col, :compound_op, :const_name, :count, :default_label, :dest,
+  :dispatch_key, :elem, :entry_label, :fields, :file_byte_len,
+  :file_str_id, :fp_flags, :headerless, :is_symbol, :ivar_byte_len,
+  :ivar_str_id, :kind, :kind_id, :lhs_boxed, :line, :method_byte_len,
+  :method_str_id, :min_arity, :n, :name_byte_len, :name_str_id,
+  :node, :novec, :range_high, :range_low, :rhs_boxed, :rt_fallback,
+  :scalar_source_argc1, :shift, :slot, :slot_id, :slot_type,
+  :super_reg, :table, :total_bytes, :trap, :type, :unroll8, :val
+]
+-> encode_codegen_metadata(inst, buf, temp_map)
+  i = 0
+  while i < content_hash_codegen_fields.size()
+    encode_codegen_meta_field(inst, content_hash_codegen_fields[i], buf, temp_map)
+    i += 1
+
 # Encode one instruction into the canonical string buffer.
 -> encode_inst(inst, buf, temp_map, label_map, fn_hashes, mod, self_name, op_codes)
   op = inst[:op]
@@ -63,14 +183,16 @@ use hashing
   if inst[:temp] != nil
     norm_temp(inst[:temp], temp_map)
 
+  encode_codegen_metadata(inst, buf, temp_map)
+
   if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
     callee = inst[:name]
 
     if callee == self_name
       buf << "@R"
-    elsif fn_hashes[callee] != nil
+    elsif fn_hash_get(fn_hashes, callee) != nil
       buf << "@"
-      buf << fn_hashes[callee]
+      buf << fn_hash_get(fn_hashes, callee)
     else
       buf << "@"
       buf << callee
@@ -110,9 +232,9 @@ use hashing
 
   if op == :closure_new
     callee = inst[:fn_name]
-    if fn_hashes[callee] != nil
+    if fn_hash_get(fn_hashes, callee) != nil
       buf << "@"
-      buf << fn_hashes[callee]
+      buf << fn_hash_get(fn_hashes, callee)
     else
       buf << "@"
       buf << callee
@@ -228,6 +350,16 @@ use hashing
   if inst[:bits] != nil
     buf << "W"
     buf << inst[:bits].to_s()
+  # Native view-field width and signedness determine the emitted load/store
+  # instruction. `u8 field@0` and `u32 field@0` have the same op, pointer and
+  # offset but are not interchangeable; omitting these fields previously
+  # merged Packet#tag into Hash#size and made the former read four bytes.
+  if inst[:size] != nil
+    buf << "Z"
+    buf << inst[:size].to_s()
+  if inst[:field_type] != nil
+    buf << "F"
+    buf << inst[:field_type].to_s()
   if inst[:signed] != nil
     if inst[:signed] == true
       buf << "Gs"
@@ -321,9 +453,11 @@ use hashing
       buf << "ir0"
   buf << ";"
 
-# Hash an entire function canonically.
--> canonical_hash(func, mod, fn_hashes, op_codes)
-  # Build a canonical string representation, then hash it with wyhash64.
+# Canonical content for an entire function. Keeping the content alongside its
+# fast hash lets the dedup pass prove equality instead of treating a 64-bit
+# digest as proof. Hash collisions must only lengthen a symbol, never merge two
+# functions.
+-> canonical_content(func, mod, fn_hashes, op_codes)
   instr_count = 0
   bi = 0
   while bi < func[:blocks].size()
@@ -389,7 +523,28 @@ use hashing
       ii += 1
     bi += 1
   encoded = buf.to_s()
-  wyhash64_hex_string(encoded)
+  encoded
+
+-> canonical_hash(func, mod, fn_hashes, op_codes)
+  wyhash64_hex_string(canonical_content(func, mod, fn_hashes, op_codes))
+
+# Rename maps carry their source key inside the value. This makes every lookup
+# self-validating: a host Hash collision can at worst become a miss, never
+# rewrite a different function whose name happens to share a bucket/prefix.
+-> rename_map_put(rename_map, source, replacement)
+  rename_map[source] = {source: source, replacement: replacement}
+
+-> rename_map_entry(rename_map, source)
+  entry = rename_map[source]
+  if entry == nil || !exact_string_key?(entry[:source], source)
+    return nil
+  entry
+
+-> rename_map_get(rename_map, source)
+  entry = rename_map_entry(rename_map, source)
+  if entry == nil
+    return nil
+  entry[:replacement]
 
 # Rewrite all function name references in a module.
 -> rewrite_references(mod, rename_map)
@@ -405,31 +560,31 @@ use hashing
         op = inst[:op]
         # Rewrite callee names
         if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
-          replacement = rename_map[inst[:name]]
+          replacement = rename_map_get(rename_map, inst[:name])
           if replacement != nil
             inst[:name] = replacement
         if op == :closure_new
-          replacement = rename_map[inst[:fn_name]]
+          replacement = rename_map_get(rename_map, inst[:fn_name])
           if replacement != nil
             inst[:fn_name] = replacement
         # Devirtualized direct-call target on an IC dispatch site — the
         # method function gets compact-symbol renamed like any function.
         if op == :call_method_i64 && inst[:devirt_fn] != nil
-          replacement = rename_map[inst[:devirt_fn]]
+          replacement = rename_map_get(rename_map, inst[:devirt_fn])
           if replacement != nil
             inst[:devirt_fn] = replacement
         # Fused-loop worker address (ptrtoint ptr @name) — the referenced
         # worker gets compact-symbol renamed like any function.
         if op == :fn_addr_i64
-          replacement = rename_map[inst[:name]]
+          replacement = rename_map_get(rename_map, inst[:name])
           if replacement != nil
             inst[:name] = replacement
         if op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
-          replacement = rename_map[inst[:fn_name]]
+          replacement = rename_map_get(rename_map, inst[:fn_name])
           if replacement != nil
             inst[:fn_name] = replacement
         if op in (:class_add_method :class_add_static_method)
-          replacement = rename_map[inst[:fn_name]]
+          replacement = rename_map_get(rename_map, inst[:fn_name])
           if replacement != nil
             inst[:fn_name] = replacement
         ii += 1
@@ -449,7 +604,7 @@ use hashing
         dot = old_global.index(".memo")
         if dot != nil
           old_fn = old_global.slice(0, dot)
-          replacement = rename_map[old_fn]
+          replacement = rename_map_get(rename_map, old_fn)
           if replacement != nil
             new_global = replacement + ".memo"
             global_rename[old_global] = new_global
@@ -482,7 +637,7 @@ use hashing
     kk = kcalls.keys()
     ki = 0
     while ki < kk.size()
-      replacement = rename_map[kcalls[kk[ki]]]
+      replacement = rename_map_get(rename_map, kcalls[kk[ki]])
       if replacement != nil
         kcalls[kk[ki]] = replacement
       ki += 1
@@ -492,7 +647,7 @@ use hashing
     kk = kpure.keys()
     ki = 0
     while ki < kk.size()
-      replacement = rename_map[kpure[kk[ki]]]
+      replacement = rename_map_get(rename_map, kpure[kk[ki]])
       if replacement != nil
         kpure[kk[ki]] = replacement
       ki += 1
@@ -503,10 +658,10 @@ use hashing
     si = 0
     while si < sk.size()
       info = statics[sk[si]]
-      replacement = rename_map[info[:fn_name]]
+      replacement = rename_map_get(rename_map, info[:fn_name])
       if replacement != nil
         info[:fn_name] = replacement
-      replacement = rename_map[info[:method_fn_name]]
+      replacement = rename_map_get(rename_map, info[:method_fn_name])
       if replacement != nil
         info[:method_fn_name] = replacement
       si += 1
@@ -565,9 +720,28 @@ use hashing
   hi = 0
   while hi < hkeys.size()
     h = hkeys[hi]
-    hash_symbols[h] = compact_symbol_for_hash(h, used, min_prefix)
+    hash_symbols[h] = {hash: h, symbol: compact_symbol_for_hash(h, used, min_prefix)}
     hi += 1
   hash_symbols
+
+-> hash_symbol_get(hash_symbols, hash)
+  entry = hash_symbols[hash]
+  if entry == nil || !exact_string_key?(entry[:hash], hash)
+    return nil
+  entry[:symbol]
+
+-> hash_group_add(hash_groups, hash, function_name)
+  entry = hash_groups[hash]
+  if entry == nil || !exact_string_key?(entry[:hash], hash)
+    entry = {hash: hash, functions: []}
+    hash_groups[hash] = entry
+  entry[:functions].push(function_name)
+
+-> hash_group_get(hash_groups, hash)
+  entry = hash_groups[hash]
+  if entry == nil || !exact_string_key?(entry[:hash], hash)
+    return []
+  entry[:functions]
 
 -> symbol_prefix_hex
   raw = env("TUNGSTEN_SYMBOL_PREFIX_HEX")
@@ -599,6 +773,29 @@ use hashing
     }
     fi += 1
   info
+
+-> function_physical_abi(func)
+  out = StringBuffer(32)
+  out << func[:return_type]
+  out << "("
+  out << func[:params].size().to_s()
+  extra = func[:extra_params]
+  if extra != nil
+    i = 0
+    while i < extra.size()
+      out << ","
+      out << extra[i][:type]
+      i += 1
+  out << ")"
+  out.to_s()
+
+-> function_by_exact_name(functions, name)
+  i = 0
+  while i < functions.size()
+    if exact_string_key?(functions[i][:name], name)
+      return functions[i]
+    i += 1
+  nil
 
 -> append_original_json(out, info)
   out << "{\"symbol\":"
@@ -640,10 +837,10 @@ use hashing
     out << "    "
     out << json_quote(h)
     out << ": {\"symbol\": "
-    out << json_quote(hash_symbols[h])
+    out << json_quote(hash_symbol_get(hash_symbols, h))
     out << ", \"originals\": \["
 
-    group = hash_groups[h].sort()
+    group = hash_group_get(hash_groups, h).sort()
     gi = 0
     emitted = 0
     while gi < group.size()
@@ -669,17 +866,23 @@ use hashing
   prefix_hex = symbol_prefix_hex()
   hash_symbols = build_hash_symbols(hash_groups, prefix_hex)
   rename_map = {}
+  compact_owners = {}
   functions = mod[:functions]
   fi = 0
   while fi < functions.size()
     func = functions[fi]
-    h = fn_hashes[func[:name]]
+    h = fn_hash_get(fn_hashes, func[:name])
     if h != nil
-      compact = hash_symbols[h]
+      compact = hash_symbol_get(hash_symbols, h)
       if compact != nil && compact != func[:name]
+        owner = compact_owners[compact]
+        abi = function_physical_abi(func)
+        if owner != nil && owner[:symbol] == compact && owner[:abi] != abi
+          raise "content symbol ABI collision for " + compact + ": " + owner[:source] + "=" + owner[:hash] + " " + owner[:abi] + " vs " + func[:name] + "=" + h + " " + abi
+        compact_owners[compact] = {symbol: compact, source: func[:name], hash: h, abi: abi}
         if func[:original_name] == nil
           func[:original_name] = func[:name]
-        rename_map[func[:name]] = compact
+        rename_map_put(rename_map, func[:name], compact)
     fi += 1
 
   if rename_map.keys().size() > 0
@@ -689,7 +892,7 @@ use hashing
 
     fi = 0
     while fi < functions.size()
-      replacement = rename_map[functions[fi][:name]]
+      replacement = rename_map_get(rename_map, functions[fi][:name])
       if replacement != nil
         functions[fi][:name] = replacement
         functions[fi][:llvm_internal] = true
@@ -744,6 +947,8 @@ use hashing
 -> content_hash_pass(mod, verbose = false)
   functions = mod[:functions]
   fn_hashes = {}
+  fn_contents = {}
+  hash_contents = {}
   op_codes = {next_code: 0}
 
   # Pre-build string ID → text index for fast lookup
@@ -825,8 +1030,25 @@ use hashing
     func = functions[order[oi]]
     # Skip main and empty functions
     if func[:is_toplevel] != true && func[:blocks].size() > 0
-      h = canonical_hash(func, mod, fn_hashes, op_codes)
-      fn_hashes[func[:name]] = h
+      content = canonical_content(func, mod, fn_hashes, op_codes)
+      h = wyhash64_hex_string(content)
+      salt = 0
+      resolved = false
+      while !resolved
+        prior = hash_contents[h]
+        if prior == nil
+          hash_contents[h] = {hash: h, content: content}
+          resolved = true
+        elsif prior[:hash] == h && prior[:content] == content
+          resolved = true
+        else
+          # A real hash collision (or a defensive mismatch returned by a host
+          # Hash implementation) gets a deterministic rehash. The full
+          # canonical content is still compared below before deduplication.
+          salt += 1
+          h = wyhash64_hex_string("collision:" + salt.to_s() + ":" + content)
+      fn_hash_put(fn_hashes, func[:name], h)
+      fn_content_put(fn_contents, func[:name], content)
     oi += 1
 
   # Group by hash
@@ -835,10 +1057,8 @@ use hashing
   hi = 0
   while hi < hkeys.size()
     fname = hkeys[hi]
-    h = fn_hashes[fname]
-    if hash_groups[h] == nil
-      hash_groups[h] = []
-    hash_groups[h].push(fname)
+    h = fn_hash_get(fn_hashes, fname)
+    hash_group_add(hash_groups, h, fname)
     hi += 1
   fn_info_by_name = build_function_info_by_name(functions)
 
@@ -851,7 +1071,7 @@ use hashing
   gkeys = hash_groups.keys()
   gi = 0
   while gi < gkeys.size()
-    group = hash_groups[gkeys[gi]]
+    group = hash_group_get(hash_groups, gkeys[gi])
     if group.size() > 1
       # Pick canonical name (first alphabetically)
       canonical = group[0]
@@ -877,8 +1097,13 @@ use hashing
       # Map all others to canonical
       ci = 0
       while ci < group.size()
-        if group[ci] != canonical
-          rename_map[group[ci]] = canonical
+        candidate_content = fn_content_get(fn_contents, group[ci])
+        canonical_content_value = fn_content_get(fn_contents, canonical)
+        candidate_func = function_by_exact_name(functions, group[ci])
+        canonical_func = function_by_exact_name(functions, canonical)
+        same_abi = candidate_func != nil && canonical_func != nil && function_physical_abi(candidate_func) == function_physical_abi(canonical_func)
+        if group[ci] != canonical && same_abi && candidate_content != nil && canonical_content_value != nil && candidate_content == canonical_content_value
+          rename_map_put(rename_map, group[ci], canonical)
           dedup_count = dedup_count + 1
         ci += 1
     gi += 1
@@ -890,7 +1115,7 @@ use hashing
     new_functions = []
     fi = 0
     while fi < functions.size()
-      if rename_map[functions[fi][:name]] == nil
+      if rename_map_get(rename_map, functions[fi][:name]) == nil
         new_functions.push(functions[fi])
       fi += 1
     mod[:functions] = new_functions
@@ -901,7 +1126,7 @@ use hashing
       kk = kcalls.keys()
       ki = 0
       while ki < kk.size()
-        replacement = rename_map[kcalls[kk[ki]]]
+        replacement = rename_map_get(rename_map, kcalls[kk[ki]])
         if replacement != nil
           kcalls[kk[ki]] = replacement
         ki += 1
@@ -911,7 +1136,7 @@ use hashing
       kk = kpure.keys()
       ki = 0
       while ki < kk.size()
-        replacement = rename_map[kpure[kk[ki]]]
+        replacement = rename_map_get(rename_map, kpure[kk[ki]])
         if replacement != nil
           kpure[kk[ki]] = replacement
         ki += 1
@@ -932,7 +1157,7 @@ use hashing
           dot = old_global.index(".memo")
           if dot != nil
             old_fn = old_global.slice(0, dot)
-            replacement = rename_map[old_fn]
+            replacement = rename_map_get(rename_map, old_fn)
             if replacement != nil
               new_global = replacement + ".memo"
               global_rename[old_global] = new_global

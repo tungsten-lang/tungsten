@@ -27,15 +27,28 @@ module Tungsten
         @class_vars = {}
       end
 
-      def lookup_method(name)
+      def lookup_method(name, argc: nil)
         klass = self
         while klass
-          method = klass.methods[name]
-          return method if method
+          if argc.nil?
+            method = klass.methods[name]
+            return method if method
+          else
+            overloads = klass.method_overloads[name]
+            if overloads
+              method = overloads.reverse_each.find { |candidate| method_accepts_arity?(candidate, argc) }
+              return method if method
+            end
+          end
 
           klass = klass.superclass
         end
-        nil
+        # Keep the historical name-only fallback for call shapes implemented
+        # above ordinary binding (notably implicit construction, where
+        # `point.distance(1, 2, 3)` first resolves distance/1 and then wraps
+        # the arguments in Point.new). Exact arity always wins across the
+        # whole superclass chain before this fallback is considered.
+        argc.nil? ? nil : lookup_method(name)
       end
 
       # Single insertion path for interpreted instance methods, mirroring
@@ -86,6 +99,15 @@ module Tungsten
       def to_s = name
 
       private
+
+      def method_accepts_arity?(method, argc)
+        params = method.params || EMPTY_PARAMS
+        required = params.count { |param| !param.default }
+        required -= 1 if method.splat_index
+        return argc >= required if method.splat_index
+
+        argc >= required && argc <= params.size
+      end
 
       def register_overload(name, method)
         overloads = (@method_overloads[name] ||= [])

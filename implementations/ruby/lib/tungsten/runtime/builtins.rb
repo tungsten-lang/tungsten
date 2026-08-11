@@ -541,9 +541,12 @@ module Tungsten
           File.extname(path_string(args[0]))
         end
 
-        interpreter.define_builtin("block_given?") do |_recv, _args, _block|
+        block_present = lambda do |_recv, _args, _block|
           !interpreter.instance_variable_get(:@current_block).nil?
         end
+        interpreter.define_builtin("block?", &block_present)
+        # Compatibility alias; Core and new Tungsten source use block?.
+        interpreter.define_builtin("block_given?", &block_present)
 
         interpreter.define_builtin("array_mergesort") do |_recv, args, block|
           array_mergesort_copy(args[0], block)
@@ -713,6 +716,7 @@ module Tungsten
           when Integer   then "Integer"
           when Float     then "Float"
           when String    then "String"
+          when Tungsten::SmallArrayValue then "SmallArray"
           when Array     then "Array"
           when Hash      then "Hash"
           when Symbol    then "Symbol"
@@ -937,6 +941,7 @@ module Tungsten
           when Integer   then "Integer"
           when Float     then "Float"
           when String    then "String"
+          when Tungsten::SmallArrayValue then "SmallArray"
           when Array     then "Array"
           when Hash      then "Hash"
           when Symbol    then "Symbol"

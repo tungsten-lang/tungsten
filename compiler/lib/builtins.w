@@ -391,6 +391,13 @@
   when "runtime_identity"
     runtime_identity()
 
+  # hashing.w uses the native string digest when the interpreter itself is a
+  # compiled compiler. Stage 0 and Ruby keep taking hashing.w's portable path;
+  # this arm prevents `tungsten run` from treating the runtime bridge as an
+  # unknown user function.
+  when "digest_string64"
+    digest_string64(args[0])
+
   when "capture"
     capture(args[0])
 
@@ -437,7 +444,7 @@ builtin_names = [
   "join", "sort", "flatten", "uniq", "delete", "each", "map", "select",
   "reject", "reduce", "each_with_index", "map_with_index", "zip", "any?", "all?",
   "find", "count", "sum", "times", "keys", "values", "has_key?", "abs", "max", "min",
-  "respond_to?", "is_a?", "freeze", "argv", "clock", "clock_ms", "runtime_identity",
+  "respond_to?", "is_a?", "freeze", "argv", "clock", "clock_ms", "runtime_identity", "digest_string64",
   "capture", "system", "env", "ljust", "rjust", "round", "gets"
 ]
 

@@ -8,6 +8,7 @@ git_source(:github) { |repo| "https://github.com/#{repo}" }
 gemspec
 
 gem "bigdecimal"
+gem "fiddle"
 gem "uuidtools"
 
 gem "irb",                   require: false

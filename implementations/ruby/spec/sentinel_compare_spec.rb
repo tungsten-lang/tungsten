@@ -24,7 +24,11 @@ RSpec.describe "sentinel equality fast path" do
       src = File.join(dir, "#{name}.w")
       File.write(src, source)
       out = File.join(dir, name)
-      env = { "TUNGSTEN_EMIT_LL" => "1", "TUNGSTEN_CACHE_DIR" => File.join(project_root, "build/cache") }
+      env = {
+        "TUNGSTEN_ROOT" => project_root,
+        "TUNGSTEN_EMIT_LL" => "1",
+        "TUNGSTEN_CACHE_DIR" => File.join(project_root, "build/cache")
+      }
       _o, err, status = Open3.capture3(env, compiler_bin, "compile", src, "--out", out)
       raise "compile failed: #{err}" unless status.success?
       @last_sidemap_path = "#{out}.sidemap"
@@ -140,7 +144,11 @@ RSpec.describe "sentinel equality fast path" do
         src = File.join(dir, "#{name}.w")
         File.write(src, source)
         bin_out = File.join(dir, name)
-        env = { "TUNGSTEN_EMIT_LL" => "1", "TUNGSTEN_CACHE_DIR" => File.join(project_root, "build/cache") }
+        env = {
+          "TUNGSTEN_ROOT" => project_root,
+          "TUNGSTEN_EMIT_LL" => "1",
+          "TUNGSTEN_CACHE_DIR" => File.join(project_root, "build/cache")
+        }
         _o, err, status = Open3.capture3(env, compiler_bin, "compile", src, "--out", bin_out)
         raise "compile failed: #{err}" unless status.success?
         @last_sidemap_path = "#{bin_out}.sidemap"

@@ -78,7 +78,7 @@
     $size -> &(self[i]) : self
 
   -> sort(&)
-    if block_given?
+    if block?
       to_a.sort -> (a, b)
         &(a, b)
     else

@@ -25,7 +25,8 @@
       return ccall("w_int", n)
     tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
     payload = (n & 0xFFFFFFFFFFFF) ## i64
-    wvalue_from_bits((tag | payload) ## i64)
+    bits = (tag | payload) ## i64
+    wvalue_from_bits(bits)
 
   # byte_at stays native because source dispatch pads a missing argument with
   # nil and thereby changes its dedicated fatal diagnostic. The typed-view

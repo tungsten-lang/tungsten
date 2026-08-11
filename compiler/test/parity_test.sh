@@ -289,7 +289,7 @@ REGEX_PARITY_BIN="$TMP/regex-lexer-parity"
 REGEX_PARITY_LOG="$TMP/regex-lexer-parity.log"
 REGEX_FIXTURES=("$FIXTURES"/*.w)
 if "$TUNGSTEN" compile --no-lto "$ROOT/compiler/lex_parity.w" --out "$REGEX_PARITY_BIN" > "$REGEX_PARITY_LOG" 2>&1 &&
-   "$REGEX_PARITY_BIN" "${REGEX_FIXTURES[@]}" >> "$REGEX_PARITY_LOG" 2>&1; then
+   TUNGSTEN_ROOT="$ROOT" "$REGEX_PARITY_BIN" "${REGEX_FIXTURES[@]}" >> "$REGEX_PARITY_LOG" 2>&1; then
   tail -1 "$REGEX_PARITY_LOG"
 else
   echo "FAIL  self-hosted RegexLexer parity"

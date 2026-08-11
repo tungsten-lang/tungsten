@@ -4,7 +4,7 @@ use core/mmap
   # Managed handles
   -> .open(path, *args)
     mode = args.size > 0 ? args[0] : "r"
-    if block_given?
+    if block?
       file_open(path, mode) -> (file)
         yield file
     else
@@ -21,7 +21,7 @@ use core/mmap
     read_file_bytes(path)
 
   -> .write(path, *args)
-    if block_given?
+    if block?
       mode = args.size > 0 ? args[0] : "w"
       file_open(path, mode) -> (file)
         yield file
@@ -97,14 +97,14 @@ use core/mmap
 
   # Filesystem mutation
   -> .chdir(dir)
-    if block_given?
+    if block?
       file_chdir(dir) ->
         yield
     else
       file_chdir(dir)
 
   -> .cd(dir)
-    if block_given?
+    if block?
       file_chdir(dir) ->
         yield
     else

@@ -9,6 +9,15 @@
     rooted = root + "/data/unit_names.txt"
     if file?(rooted)
       return rooted
+  # `bin/tungsten` exports TUNGSTEN_ROOT, but tungsten-compiler is also a
+  # public executable and must remain relocatable when invoked directly.
+  # Its installed layout is <root>/bin/tungsten-compiler, so the executable
+  # directory gives us the same root without depending on the invocation cwd.
+  executable_dir = ccall("w_executable_dir")
+  if executable_dir != nil && executable_dir != ""
+    installed = executable_dir + "/../data/unit_names.txt"
+    if file?(installed)
+      return installed
   if file?("data/unit_names.txt")
     return "data/unit_names.txt"
   nil

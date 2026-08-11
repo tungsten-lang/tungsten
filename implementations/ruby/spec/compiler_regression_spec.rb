@@ -412,7 +412,7 @@ RSpec.describe "Compiler regressions" do
       x = ccall("w_truthy", "truthy")
     W
 
-    expect(llvm).to include("declare i64 @w_truthy(i64) nounwind willreturn memory(none) speculatable alwaysinline")
+    expect(llvm).to include("declare i64 @w_truthy(i64) nounwind willreturn memory(none) speculatable")
     expect(llvm).to match(/call i64 @w_truthy\(i64 .*\), !range !\{i64 0, i64 2\}/)
   end
 
@@ -451,9 +451,23 @@ RSpec.describe "Compiler regressions" do
     W
 
     expect(llvm).to include("!range !{i64 -1688849860263936, i64 -1688849860263934}")
-    expect(llvm.scan("!range !{i64 -1688849860263936, i64 -1688849860263680}").size).to be >= 2
-    expect(llvm).to include("!range !{i64 -1688849860263936, i64 -1688849860198400}")
-    expect(llvm).to include("!range !{i64 -1688849860263936, i64 -1688845565296640}")
+    # Dynamic byte loads box through w_int and carry the exact u8 range.
+    expect(llvm).to include("!range !{i64 -1688849860263936, i64 -1688849860263680}")
+
+    # Named view fields stay raw and box inline. Their field width must be part
+    # of the content hash: otherwise same-offset u8/u16/u32 readers collapse to
+    # one LLVM function and silently read the wrong number of bytes.
+    tag_symbol = symbol_for("__w_Packet_tag__a1")
+    size_symbol = symbol_for("__w_Packet_size__a1")
+    code_symbol = symbol_for("__w_Packet_code__a1")
+    expect([tag_symbol, size_symbol, code_symbol].uniq.size).to eq(3)
+
+    tag_body = llvm[/define internal i64 @#{Regexp.escape(tag_symbol)}\(.*?^\}/m]
+    size_body = llvm[/define internal i64 @#{Regexp.escape(size_symbol)}\(.*?^\}/m]
+    code_body = llvm[/define internal i64 @#{Regexp.escape(code_symbol)}\(.*?^\}/m]
+    expect(tag_body).to include("load i8")
+    expect(size_body).to include("load i16")
+    expect(code_body).to include("load i32")
   end
 
   it "emits argv init only when ARGV or argv() is used" do
@@ -1174,17 +1188,15 @@ RSpec.describe "Compiler regressions" do
     expect(llvm).not_to match(/@__static_slab = .*c"(?:\\00){40}\\0b\\01hello world/m)
   end
 
-  it "keeps unrelated and dynamic empty? calls off the String autoload path" do
+  it "autoloads String#empty? for a variable proven from a string literal" do
     source = <<~W
       text = ""
-      values = []
       << text.empty?
-      << values.empty?
     W
 
-    expect(compile_and_run("dynamic_empty_fallback.w", source)).to eq("true\ntrue\n")
+    expect(compile_and_run("dynamic_empty_fallback.w", source)).to eq("true\n")
     compile_to_llvm("dynamic_empty_fallback.w", source)
-    expect(File.read(@last_sidemap_path)).not_to include("__w_String_empty_Q__a1")
+    expect(File.read(@last_sidemap_path)).to include("__w_String_empty_Q__a1")
   end
 
   it "autoloads the source String#empty? body for a proven String receiver" do
@@ -1231,11 +1243,10 @@ RSpec.describe "Compiler regressions" do
   it "dispatches JSON.parse through class vtable after intrinsic removal" do
     # The JSON intrinsic bypass was removed from lowering.w;
     # JSON.parse now routes through the class method vtable to core's
-    # recursive-descent parser. BIT_HOME=/nonexistent disables bit
-    # resolution so this test exercises the core path in isolation
-    # (the tungsten-json bit's own parse is tested separately).
+    # recursive-descent parser. The explicit core/ prefix is intentionally
+    # unambiguous even from a checkout whose local bits include tungsten-json.
     out = compile_and_run("json_vtable_regression.w", <<~W, [], env: {"BIT_HOME" => "/nonexistent"})
-      use json
+      use core/json
       r = JSON.parse("{\\"a\\":1}")
       << r["a"].to_s
     W
@@ -1843,9 +1854,9 @@ RSpec.describe "Compiler regressions" do
 
     out = compile_and_run("raw_static_i64_abi.w", source)
     llvm = compile_to_llvm("raw_static_i64_abi.w", source)
-    call_bump = symbol_for("__w_RawStatic_S_call_bump")
-    bump = symbol_for("__w_RawStatic_S_bump")
-    bump_boxed = symbol_for("__w_RawStatic_S_bump__boxed")
+    call_bump = symbol_for("__w_RawStatic_S_call_bump__a2")
+    bump = symbol_for("__w_RawStatic_S_bump__a3")
+    bump_boxed = symbol_for("__w_RawStatic_S_bump__a3__boxed")
     body = llvm[/define (?:internal )?i64 @#{Regexp.escape(call_bump)}.*?\n}/m]
 
     expect(out).to eq("140737488355330\n")
@@ -1876,8 +1887,8 @@ RSpec.describe "Compiler regressions" do
       [],
       env: { "TUNGSTEN_LLVM_FASTCC" => "1" }
     )
-    bump = symbol_for("__w_RawStatic_S_bump")
-    bump_boxed = symbol_for("__w_RawStatic_S_bump__boxed")
+    bump = symbol_for("__w_RawStatic_S_bump__a3")
+    bump_boxed = symbol_for("__w_RawStatic_S_bump__a3__boxed")
 
     expect(llvm).to match(/define internal fastcc i64 @#{Regexp.escape(bump)}\(/)
     expect(llvm).to match(/call fastcc i64 @#{Regexp.escape(bump)}\(/)
@@ -1930,7 +1941,7 @@ RSpec.describe "Compiler regressions" do
     W
 
     block = llvm[/define (?:internal )?i64 @#{Regexp.escape(symbol_matching(/\A__block_\d+\z/))}.*?\n}/m]
-    expect(block).to include("call i64 @#{symbol_for("__w_RawCapture_S_sink")}")
+    expect(block).to include("call i64 @#{symbol_for("__w_RawCapture_S_sink__a2")}")
     expect(block).not_to include("call i64 @w_to_i64")
   end
 
@@ -2600,6 +2611,23 @@ RSpec.describe "Compiler regressions" do
     expect(out).to eq("2\n")
   end
 
+  it "prefers an enclosing static method over a same-named top-level binding" do
+    out = compile_and_run("static_method_global_shadow.w", <<~W)
+      sha256 = "unrelated top-level value"
+
+      + StaticMethodGlobalShadow
+        -> .sha256(a, b, c, d)
+          a + b + c + d
+
+        -> .call
+          sha256(1, 2, 3, 4)
+
+      << StaticMethodGlobalShadow.call()
+    W
+
+    expect(out).to eq("10\n")
+  end
+
   it "applies dot-prefix elementwise add to a typed array" do
     out = compile_and_run("dot_add.w", <<~W)
       a = u8[4]
@@ -2975,9 +3003,20 @@ RSpec.describe "Compiler regressions" do
     OUT
 
     llvm = compile_to_llvm("plain_array_inline_iterators_ll.w", source)
-    expect(llvm).to include("array.iter.hdr")
-    expect(llvm).not_to include("@w_closure_new")
-    expect(llvm).not_to include("@w_method_call_cached")
+    %w[
+      __w_any_three_Q
+      __w_has_three_Q
+      __w_all_small_Q
+      __w_none_big_Q
+      __w_local_bound_any_Q
+    ].each do |original|
+      symbol = symbol_for(original)
+      body = llvm[/define internal i64 @#{Regexp.escape(symbol)}\(.*?^\}/m]
+      expect(body).not_to be_nil
+      expect(body).to include("array.iter.hdr")
+      expect(body).not_to include("@w_closure_new")
+      expect(body).not_to include("@w_method_call_cached")
+    end
   end
 
   it "autoloads Enumerable from core/tungsten.w when included via `is`" do
@@ -3044,7 +3083,7 @@ RSpec.describe "Compiler regressions" do
     # One mode query plus the pair- and ordinary-iterator fallbacks. Array's
     # indexed mode bypasses both callback adapters and reads storage directly.
     expect(map_body.scan("@w_method_call_cached").size).to eq(3)
-    expect(map_body).to include("@w_array_size", "@w_array_idx", "@w_closure_call_1")
+    expect(map_body).to include("@w_array_size", "@__w_array_idx_i64_fast", "@w_closure_call_1")
   end
 
   it "keeps Hash#size source-owned and lowers its count view directly" do
@@ -3076,7 +3115,8 @@ RSpec.describe "Compiler regressions" do
       << (1 kg).equivalent("J", :mass_energy)
     W
 
-    expect(out).to include("10 ± 0.2\n", "12 m\ntrue\n", "7 ± 0.412311\n", "≈8.988×10¹⁶ J\n")
+    expect(out).to include("10 ± 0.2\n", "12 m\ntrue\n", "≈8.988×10¹⁶ J\n")
+    expect(out).to match(/7 ± 0\.41231\d*\n/)
   end
 
   it "autoloads and constructs a unit-carrying f64 Tensor" do

@@ -17,9 +17,9 @@
       return :i64
     if hint in ("big" "bigint" "bignum")
       return :bigint
-    htl = hint.size()
-    if htl >= 3 && hint.slice(htl - 2, 2) == "\[]"
-      return typed_array_etype_to_sym(hint.slice(0, htl - 2))
+    array_etype = array_hint_element_type(hint)
+    if array_etype != nil
+      return typed_array_etype_to_sym(array_etype)
     return normalize_type_symbol(hint)
   case t
   when :int
@@ -165,6 +165,8 @@
       static_rt = fn_return_types[node.receiver.name + "." + node.name]
       if static_rt != nil
         return normalize_type_symbol(static_rt)
+    if node.receiver != nil && node.receiver.name == "Array" && node.name == "new" && node.args != nil && node.args.size() <= 2
+      return :array
     # SmallArray.new(:ebits, size) → :small_array_<ebits>. Lets downstream
     # call sites (s[i], s[i] = v, s.size, ...) take the SmallArray inline-op
     # fast path when the receiver was assigned from this constructor.

@@ -444,7 +444,7 @@
   # form, so __mergesort_copy below must stay in lockstep with
   # w_array_sort_block. (The Ruby engine has its own builtin twins.)
   -> sort(&)
-    if block_given?
+    if block?
       self.__mergesort_copy -> (a, b)
         &(a, b)
     else
@@ -476,7 +476,7 @@
   # through the WN_stable_sort IC row (blockless → w_array_stable_sort,
   # block → w_array_sort_block) — this body runs on the interpreter only.
   -> stable_sort(&)
-    if block_given?
+    if block?
       self.__mergesort_copy -> (a, b)
         &(a, b)
     else

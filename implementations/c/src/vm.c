@@ -2318,7 +2318,10 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
     op = chunk->code[vm.ip++]; \
     goto *targets[op]; \
   } while (0)
-#define NEXT() do { tos = vm.stack[vm.sp - 1]; NEXT_FAST(); } while (0)
+#define NEXT() do { \
+    if (vm.sp > 0) tos = vm.stack[vm.sp - 1]; \
+    NEXT_FAST(); \
+  } while (0)
 #define NEXT_INIT() NEXT_FAST()
 
   NEXT_INIT();

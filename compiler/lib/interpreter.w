@@ -71,7 +71,7 @@ use target
     while i < names.size()
       name = names[i]
       if !@classes.has_key?(name)
-        @classes[name] = {rt: :class, name: name, methods: {}, method_overloads: {}, class_methods: {}, parent: nil}
+        @classes[name] = {rt: :class, name: name, methods: {}, method_overloads: {}, class_methods: {}, class_method_overloads: {}, parent: nil}
       i += 1
 
   # Directory that contains `core/` for stdlib autoload. Prefer cwd
@@ -647,7 +647,7 @@ use target
   -> class_class_singleton
     if @classes.has_key?("Class")
       return @classes["Class"]
-    cls = {rt: :class, name: "Class", methods: {}, method_overloads: {}, class_methods: {}, parent: nil}
+    cls = {rt: :class, name: "Class", methods: {}, method_overloads: {}, class_methods: {}, class_method_overloads: {}, parent: nil}
     @classes["Class"] = cls
     cls
 
@@ -1818,9 +1818,10 @@ use target
       => nil
 
   -> callable?(name)
-    # Paren-less `block_given?` arrives as a bare :var; route it to
-    # dispatch_bare_call's handler.
-    if name == "block_given?"
+    # Paren-less block-presence queries arrive as bare :var nodes; route them
+    # to dispatch_bare_call's handler. `block_given?` remains a compatibility
+    # alias for the Tungsten spelling, `block?`.
+    if name in ("block?" "block_given?")
       return true
     if is_builtin?(name)
       return true
@@ -2555,7 +2556,16 @@ use target
   -> apply_type_hint(value, hint)
     if hint == nil
       return value
+    hint = resolve_interpreted_type_hint(hint)
     value_type = type(value)
+    if value_type == "Array"
+      open = hint.index("\[")
+      if open != nil && hint.slice(hint.size() - 1, 1) == "\]"
+        element_type = hint.slice(0, open)
+        if element_type == "f64"
+          return ccall("w_array_to_f64", value)
+        if element_type == "f32"
+          return ccall("w_array_to_f32", value)
     if hint == "f64" || hint == "f32"
       if value_type in ("Integer" "BigInt" "Float" "Decimal" "Rational")
         return ccall("w_num_to_float", value)
@@ -2574,6 +2584,41 @@ use target
     if hint == "i128"
       return wrap_signed_bits(value, 128)
     value
+
+  # Resolve a generic hint against the currently executing receiver. Generic
+  # templates are shared by the tree walker, so actual type arguments live on
+  # the scoped class send or on the object constructed by that send rather
+  # than being written into the template AST. Handles both `## T` and array
+  # forms such as `## T[4]`.
+  -> resolve_interpreted_type_hint(hint)
+    resolved = "" + hint.to_s()
+    method = @method_stack.last()
+    if method == nil || method[:w_class] == nil
+      return resolved
+    params = method[:w_class][:type_params]
+    if params == nil || params.size() == 0
+      return resolved
+    receiver = current_self()
+    if receiver == nil || type(receiver) != "Hash"
+      return resolved
+    actuals = nil
+    if receiver[:rt] == :class
+      actuals = receiver[:active_type_args]
+    elsif receiver[:rt] == :object
+      actuals = receiver[:type_args]
+    if actuals == nil
+      return resolved
+    i = 0
+    while i < params.size() && i < actuals.size()
+      param = "" + params[i].to_s()
+      actual = "" + actuals[i].to_s()
+      if resolved == param
+        return actual
+      prefix = param + "\["
+      if resolved.starts_with?(prefix)
+        return actual + resolved.slice(param.size(), resolved.size() - param.size())
+      i += 1
+    resolved
 
   -> wrap_unsigned_bits(value, bits)
     modulus = pow2(bits)
@@ -2776,7 +2821,20 @@ use target
         explicit_recv = evaluate(ast_get(recv_node, :receiver), env)
         return ccall("w_native_data_elem_set", explicit_recv, "limbs", args[0], args[1])
       recv = evaluate(ast_get(node, :receiver), env)
-      result = dispatch_method(recv, ast_get(node, :name), args, block, env)
+      # The parser transfers `Mat2<f64>.identity`'s type arguments from the
+      # class-ref receiver onto the call node. Keep them scoped to this class
+      # send so `## T` inside the class method (and a nested `class.new`) can
+      # resolve T without permanently specializing the shared class object.
+      call_type_args = ast_get(node, :type_args)
+      if call_type_args != nil && type(recv) == "Hash" && recv[:rt] == :class
+        previous_type_args = recv[:active_type_args]
+        recv[:active_type_args] = call_type_args
+        begin
+          result = dispatch_method(recv, ast_get(node, :name), args, block, env)
+        ensure
+          recv[:active_type_args] = previous_type_args
+      else
+        result = dispatch_method(recv, ast_get(node, :name), args, block, env)
       if ast_kind(ast_get(node, :receiver)) == :var && type(recv) == "String"
         if ast_get(node, :name) in ("concat" "append" "prepend" "<<" "<</1")
           env.set(ast_get(ast_get(node, :receiver), :name), result)
@@ -2789,12 +2847,12 @@ use target
       return dispatch_interpreted_ccall(args)
     if name == "ccall_nobox"
       return dispatch_interpreted_ccall_nobox(args)
-    # `block_given?` — true iff the innermost enclosing method call carries a
+    # `block?` — true iff the innermost enclosing method call carries a
     # block (attached trailing block, or a closure bound to its `&` param).
     # Every call_w_method frame owns a __block__ slot (nil when no block), so
     # the nearest binding is authoritative and a caller's block cannot leak
-    # through the environment chain.
-    if name == "block_given?" && args.size() == 0
+    # through the environment chain. `block_given?` is the compatibility alias.
+    if name in ("block?" "block_given?") && args.size() == 0
       if !env.defined?("__block__")
         return false
       return env.get("__block__") != nil
@@ -3053,7 +3111,7 @@ use target
       cname = type(recv)
       if @classes.has_key?(cname)
         return @classes[cname]
-      stub = {rt: :class, name: cname, methods: {}, method_overloads: {}, class_methods: {}, parent: nil}
+      stub = {rt: :class, name: cname, methods: {}, method_overloads: {}, class_methods: {}, class_method_overloads: {}, parent: nil}
       @classes[cname] = stub
       return stub
     # `.name` on a class returns its name string (Integer.name -> "Integer").
@@ -3071,7 +3129,7 @@ use target
     # Class methods (`-> .parse`) live on the class object, distinct from
     # instance methods/constructors (`-> parse`, `-> new`).
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :class
-      m = lookup_class_method(recv, name)
+      m = lookup_class_method(recv, name, args.size(), block != nil, args)
       if m != nil
         return call_w_method(recv, m, args, block, env)
 
@@ -3806,9 +3864,62 @@ use target
     # Check superclass
     lookup_method(w_class[:superclass], name)
 
-  -> lookup_class_method(w_class, name)
+  -> lookup_class_method_exact_arity(w_class, name, argc, has_block = false, args = nil)
     if w_class == nil
       return nil
+    overload_map = w_class[:class_method_overloads]
+    if overload_map != nil && overload_map.has_key?(name)
+      overloads = overload_map[name]
+      if args != nil
+        typed = select_typed_overload(overloads, argc, has_block, args)
+        if typed != nil
+          return typed
+      i = overloads.size() - 1
+      while i >= 0
+        method = overloads[i]
+        takes_block = method_takes_block?(method)
+        declared = method[:params].size()
+        if takes_block
+          declared -= 1
+        if declared == argc && takes_block == has_block
+          return method
+        i -= 1
+      i = overloads.size() - 1
+      while i >= 0
+        method = overloads[i]
+        takes_block = method_takes_block?(method)
+        declared = method[:params].size()
+        if takes_block
+          declared -= 1
+        minimum = declared
+        pi = declared - 1
+        while pi >= 0 && ast_get(method[:params][pi], :default) != nil
+          minimum -= 1
+          pi -= 1
+        if takes_block == has_block && argc >= minimum && argc <= declared
+          return method
+        i -= 1
+    lookup_class_method_exact_arity(w_class[:superclass], name, argc, has_block, args)
+
+  -> lookup_class_method_fallback(w_class, name)
+    if w_class == nil
+      return nil
+    class_methods = w_class[:class_methods]
+    overload_map = w_class[:class_method_overloads]
+    if class_methods != nil && class_methods.has_key?(name)
+      if overload_map != nil && overload_map.has_key?(name) && overload_map[name].size() > 0
+        return overload_map[name][0]
+      return class_methods[name]
+    lookup_class_method_fallback(w_class[:superclass], name)
+
+  -> lookup_class_method(w_class, name, argc = nil, has_block = false, args = nil)
+    if w_class == nil
+      return nil
+    if argc != nil
+      exact = lookup_class_method_exact_arity(w_class, name, argc, has_block, args)
+      if exact != nil
+        return exact
+      return lookup_class_method_fallback(w_class, name)
     class_methods = w_class[:class_methods]
     if class_methods != nil && class_methods.has_key?(name)
       return class_methods[name]
@@ -3922,7 +4033,7 @@ use target
     # because their block_env has no barrier and chains to this env.
     method_env = Environment.new(@env, true)
     # Own a __block__ slot per frame (nil when no block arrives) so
-    # block_given? answers for THIS call — without the slot, the lookup
+    # block? answers for THIS call — without the slot, the lookup
     # would walk past the barrier into a caller frame's binding. The
     # param-binding and block-binding paths below overwrite it.
     method_env.define("__block__", nil)
@@ -4223,6 +4334,28 @@ use target
       overloads.push(w_method)
     w_method
 
+  -> register_interpreted_class_method(w_class, w_method)
+    method_name = w_method[:name]
+    if w_class[:class_method_overloads] == nil
+      w_class[:class_method_overloads] = {}
+    overloads = w_class[:class_method_overloads][method_name]
+    if overloads == nil
+      overloads = []
+      w_class[:class_method_overloads][method_name] = overloads
+    w_class[:class_methods][method_name] = w_method
+    replaced = false
+    i = 0
+    while i < overloads.size()
+      if overloads[i][:params].size() == w_method[:params].size() && same_param_types?(overloads[i][:param_types], w_method[:param_types])
+        overloads[i] = w_method
+        replaced = true
+        i = overloads.size()
+      else
+        i += 1
+    if !replaced
+      overloads.push(w_method)
+    w_method
+
   # Two param-type signatures are equal when both are absent, or both list the
   # same type names in order. Used so typed operator overloads coexist while a
   # genuine redefinition still replaces its predecessor.
@@ -4263,7 +4396,7 @@ use target
         # bare lookup below would otherwise miss a not-yet-referenced parent.
         try_autoload_class(ast_get(node, :superclass))
         superclass = @classes[ast_get(node, :superclass)]
-      w_class = {rt: :class, name: ast_get(node, :name), superclass: superclass, methods: {}, method_overloads: {}, class_methods: {}}
+      w_class = {rt: :class, name: ast_get(node, :name), superclass: superclass, methods: {}, method_overloads: {}, class_methods: {}, class_method_overloads: {}}
       @classes[class_name] = w_class
     elsif ast_get(node, :superclass) != nil && w_class[:superclass] == nil
       # The entry may be a parentless autoload stub: when a registry entry
@@ -4277,8 +4410,15 @@ use target
       w_class[:superclass] = @classes[ast_get(node, :superclass)]
     if w_class[:class_methods] == nil
       w_class[:class_methods] = {}
+    if w_class[:class_method_overloads] == nil
+      w_class[:class_method_overloads] = {}
     if w_class[:method_overloads] == nil
       w_class[:method_overloads] = {}
+    # Retain template parameter names for interpret-time `## T` resolution.
+    # Native lowering substitutes these during monomorphization; the tree
+    # walker binds them to a scoped class send or its constructed instance.
+    if ast_get(node, :type_params) != nil
+      w_class[:type_params] = ast_get(node, :type_params)
 
     prev_defining = @defining_class
     @defining_class = w_class
@@ -4292,7 +4432,7 @@ use target
         mbody = register_trailing_accessors(expr, ast_get(expr, :body), w_class)
         w_method = {rt: :method, name: ast_get(expr, :name), params: ast_get(expr, :params), body: mbody, w_class: w_class, file: @current_file, trait_default: from_trait, param_types: ast_get(expr, :param_types)}
         if ast_get(expr, :is_class_method) == true
-          w_class[:class_methods][ast_get(expr, :name)] = w_method
+          register_interpreted_class_method(w_class, w_method)
         else
           register_instance_method(w_class, w_method)
       elsif ast_kind(expr) == :view_decl && ast_get(expr, :kind) == "struct"
@@ -4673,6 +4813,16 @@ use target
         raise "Rational.new expects one or two arguments"
       denominator = args.size() == 2 ? args[1] : 1
       return ccall("w_rational_new", args[0], denominator)
+    if w_class[:name] == "Array"
+      if args.size() > 2
+        raise "Array.new expects zero, one, or two arguments"
+      size = args.size() > 0 ? args[0] : 0
+      fill = args.size() > 1 ? args[1] : nil
+      return ccall("w_array_new_filled", size, fill)
+    if w_class[:name] == "SmallArray"
+      if args.size() != 2
+        raise "SmallArray.new expects element type and size"
+      return ccall("w_small_array_new_value", args[0], args[1])
     # ByteArray/BoolArray are Array facades whose `.new` the compiled
     # engine intercepts in runtime dispatch (WArray with ebits=8/1). The
     # scaffold classes define no `-> new`, so without this arm the tree
@@ -4688,6 +4838,8 @@ use target
       bn_raw = ccall_nobox("w_numeric_to_i64", bn) ## i64
       return ccall_rawargs("w_bool_array_new", bn_raw)
     obj = {rt: :object, w_class: w_class, ivars: {}}
+    if w_class[:active_type_args] != nil
+      obj[:type_args] = w_class[:active_type_args]
     # Arity-aware constructor selection: overloaded `-> new` definitions must
     # resolve like the compiled engine (exact name+arity first, then the
     # name-only fallback) — the bare name-only lookup returned the LAST

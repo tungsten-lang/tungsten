@@ -344,7 +344,7 @@ use naming
   out << declare_fn("w_array_new_empty", wv, "")
   out << declare_fn("w_array_new", wv, "i64, i64")
   out << declare_fn("w_range_pow_sum", wv, "i64, i64, i64, i64")
-  out << declare_fn("w_array_reuse_or_new", wv, "ptr")
+  out << declare_fn("w_array_reuse_or_new", wv, "ptr, i64, i64")
   out << declare_fn("w_fused_out_reuse_or_new", wv, "ptr, i64, i64")
   out << declare_fn("w_array_push", wv, wv2)
   out << declare_fn("w_array_get", wv, wv2)
@@ -359,10 +359,10 @@ use naming
   # invisible to the caller (fresh, unaliased), so the worst a memory(read)-
   # justified CSE can do is merge two structurally-equal BigInts. Keep the
   # attribute; do not "fix" it by dropping the hoisting win.
-  out << declare_fn_attrs("w_array_get_i64", wv, "i64, i64", "nounwind willreturn memory(read)")
-  out << declare_fn_attrs("w_array_idx_i64", wv, "i64, i64", "nounwind willreturn memory(read)")
+  out << declare_fn_attrs("w_array_get_i64", wv, join_arg_types2(wv, "i64"), "nounwind willreturn memory(read)")
+  out << declare_fn_attrs("w_array_idx_i64", wv, join_arg_types2(wv, "i64"), "nounwind willreturn memory(read)")
   out << declare_fn("w_array_set", wv, wv3)
-  out << declare_fn("w_array_set_i64", wv, "i64, i64, i64")
+  out << declare_fn("w_array_set_i64", wv, join_arg_types3(wv, "i64", wv))
   # `.size`/`.cap` read one header field, never raise — memory(read) lets LICM
   # hoist `arr.size` out of read-only loops and CSE repeated reads.
   out << declare_fn_attrs("w_array_size", wv, wv, "nounwind willreturn memory(read)")
@@ -465,23 +465,23 @@ use naming
   # pair inside the WValue. LTO inlines these at the call site.
   # i64 arg types match how ccall_nobox emits args on the call boundary.
   out << declare_fn("w_node_alloc", wv, "i64, i64")
-  out << declare_fn("w_node_field_load", wv, "i64, i64")
-  out << declare_fn("w_node_field_store", "void", "i64, i64, i64")
-  out << declare_fn("w_ast_sparse_set", wv, "i64, i64, i64")
-  out << declare_fn("w_ast_sparse_get", wv, "i64, i64")
-  out << declare_fn("w_ast_sparse_copy", wv, "i64, i64")
-  out << declare_fn("w_ast_analysis_set", wv, "i64, i64")
-  out << declare_fn("w_ast_analysis_get", wv, "i64")
-  out << declare_fn("w_ast_ivar_offsets_set", wv, "i64, i64")
-  out << declare_fn("w_ast_ivar_offsets_get", wv, "i64")
-  out << declare_fn("w_ast_ivar_count_set", wv, "i64, i64")
-  out << declare_fn("w_ast_ivar_count_get", wv, "i64")
-  out << declare_fn("w_ast_intern_node", wv, "i64, i64")
-  out << declare_fn("w_ast_intern_str_of", wv, "i64")
-  out << declare_fn("w_ast_freeze_if_array", wv, "i64")
+  out << declare_fn("w_node_field_load", wv, join_arg_types2(wv, "i64"))
+  out << declare_fn("w_node_field_store", wv, join_arg_types3(wv, "i64", wv))
+  out << declare_fn("w_ast_sparse_set", wv, join_arg_types3(wv, "i64", wv))
+  out << declare_fn("w_ast_sparse_get", wv, join_arg_types2(wv, "i64"))
+  out << declare_fn("w_ast_sparse_copy", wv, wv2)
+  out << declare_fn("w_ast_analysis_set", wv, wv2)
+  out << declare_fn("w_ast_analysis_get", wv, wv)
+  out << declare_fn("w_ast_ivar_offsets_set", wv, wv2)
+  out << declare_fn("w_ast_ivar_offsets_get", wv, wv)
+  out << declare_fn("w_ast_ivar_count_set", wv, wv2)
+  out << declare_fn("w_ast_ivar_count_get", wv, wv)
+  out << declare_fn("w_ast_intern_node", wv, i64_wv)
+  out << declare_fn("w_ast_intern_str_of", wv, wv)
+  out << declare_fn("w_ast_freeze_if_array", wv, wv)
   out << declare_fn("w_ast_body_builder_new", wv, "i64")
-  out << declare_fn("w_ast_body_builder_push", wv, "i64, i64, i64")
-  out << declare_fn("w_ast_body_builder_finish", wv, "i64, i64")
+  out << declare_fn("w_ast_body_builder_push", wv, join_arg_types3(wv, "i64", wv))
+  out << declare_fn("w_ast_body_builder_finish", wv, join_arg_types2(wv, "i64"))
   out << declare_fn("w_node_arena_reset", "void", "")
   out << declare_fn("w_ast_schema_hash_compute", "i64", "")
   out << declare_fn("w_class_add_ivar", "i32", wv_ptr)
@@ -490,7 +490,7 @@ use naming
   # Closures
   out << declare_fn("w_closure_new", wv, ptr_ptr_i32)
   out << declare_fn("w_closure_new_a", wv, "ptr, ptr, i32, i32")
-  out << declare_fn("w_destructure_index", wv, wv2)
+  out << declare_fn("w_destructure_index", wv, join_arg_types2(wv, "i64"))
   out << declare_fn("w_closure_cell_new", "ptr", "")
   out << declare_fn("w_closure_call_0", wv, wv)
   out << declare_fn("w_closure_call_1", wv, wv2)
@@ -527,7 +527,7 @@ use naming
   out << declare_fn("w_thread_join", wv, wv)
 
   # Channels
-  out << declare_fn("w_chan_new", wv, "i64")
+  out << declare_fn("w_chan_new", wv, wv)
   out << declare_fn("w_chan_send", wv, wv2)
   out << declare_fn("w_chan_recv", wv, wv)
   out << declare_fn("w_chan_close", wv, wv)
@@ -548,7 +548,7 @@ use naming
   out << declare_fn("__w_mmap_length", wv, wv)
   out << declare_fn("__w_mmap_byte_at", wv, wv2)
   out << declare_fn("__w_mmap_close", wv, wv)
-  out << declare_fn("__w_mmap_as_typed", wv, wv2)
+  out << declare_fn("__w_mmap_as_typed", wv, join_arg_types2(wv, "i64"))
 
   # Math.* libm wrappers
   out << declare_fn("w_math_exp", wv, wv)
@@ -611,7 +611,7 @@ use naming
   out << declare_fn("__w_argv_count", wv, "")
   out << declare_fn("__w_argv_at", wv, wv)
   out << declare_fn("__w_clock_ms", wv, "")
-  out << declare_fn("__w_sleep_ms", wv, wv)
+  out << declare_fn("__w_sleep_ms", wv, "i64")
   out << declare_fn("__w_clock", wv, "")
   out << declare_fn("__w_prime_aks", wv, wv)
 
@@ -629,7 +629,7 @@ use naming
   out << declare_fn("w_hash_recycle", "void", wv)
   out << declare_fn("w_array_recycle", "void", wv)
   out << declare_fn("w_strbuf_recycle", "void", wv)
-  out << declare_fn("w_cleanup_push", "void", "i64, ptr")
+  out << declare_fn("w_cleanup_push", "void", wv_ptr)
   out << declare_fn("w_cleanup_pop", "void", "")
   out << declare_fn("w_array_copy_range", wv, wv4)
 
@@ -2002,7 +2002,127 @@ ewscope_md_state = {ids: {}}
   mod[:fastcc_count] = count
   nil
 
+# A direct external call has one physical LLVM contract per symbol. Before
+# declarations are rendered, reject WIRE that asks the same symbol to return a
+# different type or accept a different physical argument list. This catches
+# the historical "first call wins" behavior in ccall_needed, where a later
+# mismatch survived lowering and failed only in LLVM (or linked with a wrong C
+# ABI when the declaration lived in another translation unit).
+-> wire_direct_call_contract(inst)
+  op = inst[:op]
+  return_type = nil
+  arg_types = []
+  if op == :call_direct_i64
+    return_type = "i64"
+  elsif op == :call_direct_i128
+    return_type = "i128"
+  elsif op == :call_direct_void
+    return_type = "void"
+  elsif op == :call_direct_ptr
+    return_type = "ptr"
+  elsif op == :call_direct_i64_ptr1
+    return "i64(ptr)"
+  elsif op == :call_direct_void_ptr1
+    return "void(ptr)"
+  else
+    return nil
+
+  args = inst[:args]
+  if args == nil
+    args = []
+  declared_types = inst[:arg_types]
+  i = 0
+  while i < args.size()
+    arg_type = nil
+    if declared_types != nil && i < declared_types.size()
+      arg_type = declared_types[i]
+    if arg_type == nil || arg_type == ""
+      arg_type = "i64"
+    arg_types.push(arg_type)
+    i += 1
+  return_type + "(" + arg_types.join(",") + ")"
+
+-> wire_fn_hash_get(fn_hashes, source)
+  entry = fn_hashes[source]
+  if entry == nil || entry[:source] == nil || entry[:source].size() != source.size() || entry[:source] != source
+    return nil
+  entry[:hash]
+
+-> wire_hash_symbol_get(hash_symbols, hash)
+  entry = hash_symbols[hash]
+  if entry == nil || entry[:hash] == nil || entry[:hash].size() != hash.size() || entry[:hash] != hash
+    return nil
+  entry[:symbol]
+
+-> wire_symbol_origins(mod, symbol)
+  out = []
+  hashes = mod[:fn_hashes]
+  symbols = mod[:fn_hash_symbols]
+  if hashes == nil || symbols == nil
+    return out
+  names = hashes.keys()
+  i = 0
+  while i < names.size()
+    hash = wire_fn_hash_get(hashes, names[i])
+    if wire_hash_symbol_get(symbols, hash) == symbol
+      out.push(names[i] + "=" + hash)
+    i += 1
+  out
+
+-> verify_wire_call_contracts(mod)
+  contracts = {}
+  target_details = {}
+  tfi = 0
+  while tfi < mod[:functions].size()
+    target_func = mod[:functions][tfi]
+    target_name = target_func[:original_name]
+    if target_name == nil
+      target_name = target_func[:name]
+    target_arity = 0
+    if target_func[:params] != nil
+      target_arity = target_func[:params].size()
+    target_details[target_func[:name]] = target_name + "/" + target_arity.to_s()
+    tfi += 1
+  fi = 0
+  while fi < mod[:functions].size()
+    func = mod[:functions][fi]
+    bi = 0
+    while bi < func[:blocks].size()
+      instructions = func[:blocks][bi][:instructions]
+      ii = 0
+      while ii < instructions.size()
+        inst = instructions[ii]
+        contract = wire_direct_call_contract(inst)
+        if contract != nil && inst[:name] != nil
+          prior = contracts[inst[:name]]
+          if prior != nil && prior[:contract] != contract
+            prior_name = prior[:function]
+            current_name = func[:original_name]
+            if current_name == nil
+              current_name = func[:name]
+            target_detail = target_details[inst[:name]]
+            if target_detail == nil
+              target_detail = "external"
+            origins = wire_symbol_origins(mod, inst[:name])
+            origin_detail = ""
+            if origins.size() > 0
+              origin_detail = "; origins " + origins.join(", ")
+            return "WIRE call contract mismatch for @" + inst[:name] + " (" + target_detail + origin_detail + "): " + prior[:contract] + " in @" + prior_name + " vs " + contract + " in @" + current_name
+          current_name = func[:original_name]
+          if current_name == nil
+            current_name = func[:name]
+          contracts[inst[:name]] = {contract: contract, function: current_name}
+        ii += 1
+      bi += 1
+    fi += 1
+  nil
+
 -> emit_artifact(mod, frame_pointers = false)
+  wire_contract_error = verify_wire_call_contracts(mod)
+  if wire_contract_error != nil
+    << "error: " + wire_contract_error
+    exit(1)
+
   # Per-module metadata state MUST reset here: both containers are
   # process-global (top-level rebinding from a function would shadow, so
   # they are mutated in place) and survive across compiles in one
@@ -3492,6 +3612,44 @@ ewscope_md_state = {ids: {}}
     # offset addmul_1: out[oo..] += a[ao..]*bsc; returns carry.
     # x14=out ptr, x13=a ptr, x3=bsc, x9=n, x15=carry.
     t = inst[:temp]
+    if !arm64_target
+      bid = t.slice(1, t.size() - 1)
+      po = StringBuffer(1200)
+      po << t + ".oo3 = shl i64 " + inst[:ooff] + ", 3\n  "
+      po << t + ".ob = add i64 " + inst[:outp] + ", " + t + ".oo3\n  "
+      po << t + ".ao3 = shl i64 " + inst[:aoff] + ", 3\n  "
+      po << t + ".ab = add i64 " + inst[:ap] + ", " + t + ".ao3\n  "
+      po << t + ".op = inttoptr i64 " + t + ".ob to ptr\n  "
+      po << t + ".apx = inttoptr i64 " + t + ".ab to ptr\n  "
+      po << "br label %am1.pre." + bid + "\n"
+      po << "am1.pre." + bid + ":\n  "
+      po << "br label %am1.head." + bid + "\n"
+      po << "am1.head." + bid + ":\n  "
+      po << t + ".i = phi i64 \[ 0, %am1.pre." + bid + " ], \[ " + t + ".i2, %am1.body." + bid + " ]\n  "
+      po << t + ".c = phi i64 \[ 0, %am1.pre." + bid + " ], \[ " + t + ".c2, %am1.body." + bid + " ]\n  "
+      po << t + ".done = icmp sge i64 " + t + ".i, " + inst[:n] + "\n  "
+      po << "br i1 " + t + ".done, label %am1.exit." + bid + ", label %am1.body." + bid + "\n"
+      po << "am1.body." + bid + ":\n  "
+      po << t + ".ag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".i\n  "
+      po << t + ".av = load i64, ptr " + t + ".ag, align 8\n  "
+      po << t + ".og = getelementptr i64, ptr " + t + ".op, i64 " + t + ".i\n  "
+      po << t + ".ov = load i64, ptr " + t + ".og, align 8\n  "
+      po << t + ".az = zext i64 " + t + ".av to i128\n  "
+      po << t + ".bz = zext i64 " + inst[:bsc] + " to i128\n  "
+      po << t + ".oz = zext i64 " + t + ".ov to i128\n  "
+      po << t + ".cz = zext i64 " + t + ".c to i128\n  "
+      po << t + ".prod = mul i128 " + t + ".az, " + t + ".bz\n  "
+      po << t + ".sum1 = add i128 " + t + ".prod, " + t + ".oz\n  "
+      po << t + ".sum2 = add i128 " + t + ".sum1, " + t + ".cz\n  "
+      po << t + ".lo = trunc i128 " + t + ".sum2 to i64\n  "
+      po << t + ".hi = lshr i128 " + t + ".sum2, 64\n  "
+      po << t + ".c2 = trunc i128 " + t + ".hi to i64\n  "
+      po << "store i64 " + t + ".lo, ptr " + t + ".og, align 8\n  "
+      po << t + ".i2 = add i64 " + t + ".i, 1\n  "
+      po << "br label %am1.head." + bid + "\n"
+      po << "am1.exit." + bid + ":\n  "
+      po << t + " = add i64 " + t + ".c, 0"
+      return po.to_s()
     asmt = "add x14, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Amov x3, ${5:x}\\0Amov x9, ${6:x}\\0Amov x15, #0\\0A1:\\0Aldr x4, \[x13], #8\\0Amul x8, x4, x3\\0Aumulh x12, x4, x3\\0Aadds x8, x8, x15\\0Aadc x12, x12, xzr\\0Aldr x5, \[x14]\\0Aadds x8, x5, x8\\0Aadc x15, x12, xzr\\0Astr x8, \[x14], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Amov ${0:x}, x15"
     t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,~{x3},~{x4},~{x5},~{x8},~{x9},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bsc] + ", i64 " + inst[:n] + ")"
   when :asm_mulbase
@@ -3499,6 +3657,74 @@ ewscope_md_state = {ids: {}}
     # row 0 = mul_1, rows 1..na-1 = addmul_1. One call/basecase (no per-row spill).
     # x16=out base, x17=a ptr, x7=b base; inner: x2=b ptr,x4=out ptr,x5=nb,x15=carry.
     t = inst[:temp]
+    if !arm64_target
+      bid = t.slice(1, t.size() - 1)
+      po = StringBuffer(2400)
+      po << t + ".oo3 = shl i64 " + inst[:ooff] + ", 3\n  "
+      po << t + ".ob = add i64 " + inst[:outp] + ", " + t + ".oo3\n  "
+      po << t + ".ao3 = shl i64 " + inst[:aoff] + ", 3\n  "
+      po << t + ".ab = add i64 " + inst[:ap] + ", " + t + ".ao3\n  "
+      po << t + ".bo3 = shl i64 " + inst[:boff] + ", 3\n  "
+      po << t + ".bb = add i64 " + inst[:bp] + ", " + t + ".bo3\n  "
+      po << t + ".op = inttoptr i64 " + t + ".ob to ptr\n  "
+      po << t + ".apx = inttoptr i64 " + t + ".ab to ptr\n  "
+      po << t + ".bpx = inttoptr i64 " + t + ".bb to ptr\n  "
+      po << t + ".total = add i64 " + inst[:na] + ", " + inst[:nb] + "\n  "
+      po << "br label %mb.zero.pre." + bid + "\n"
+      po << "mb.zero.pre." + bid + ":\n  "
+      po << "br label %mb.zero.head." + bid + "\n"
+      po << "mb.zero.head." + bid + ":\n  "
+      po << t + ".zi = phi i64 \[ 0, %mb.zero.pre." + bid + " ], \[ " + t + ".zi2, %mb.zero.body." + bid + " ]\n  "
+      po << t + ".zdone = icmp sge i64 " + t + ".zi, " + t + ".total\n  "
+      po << "br i1 " + t + ".zdone, label %mb.outer.pre." + bid + ", label %mb.zero.body." + bid + "\n"
+      po << "mb.zero.body." + bid + ":\n  "
+      po << t + ".zg = getelementptr i64, ptr " + t + ".op, i64 " + t + ".zi\n  "
+      po << "store i64 0, ptr " + t + ".zg, align 8\n  "
+      po << t + ".zi2 = add i64 " + t + ".zi, 1\n  "
+      po << "br label %mb.zero.head." + bid + "\n"
+      po << "mb.outer.pre." + bid + ":\n  "
+      po << "br label %mb.outer.head." + bid + "\n"
+      po << "mb.outer.head." + bid + ":\n  "
+      po << t + ".i = phi i64 \[ 0, %mb.outer.pre." + bid + " ], \[ " + t + ".i2, %mb.row.done." + bid + " ]\n  "
+      po << t + ".odone = icmp sge i64 " + t + ".i, " + inst[:na] + "\n  "
+      po << "br i1 " + t + ".odone, label %mb.exit." + bid + ", label %mb.row.pre." + bid + "\n"
+      po << "mb.row.pre." + bid + ":\n  "
+      po << t + ".ag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".i\n  "
+      po << t + ".av = load i64, ptr " + t + ".ag, align 8\n  "
+      po << t + ".az = zext i64 " + t + ".av to i128\n  "
+      po << "br label %mb.inner.head." + bid + "\n"
+      po << "mb.inner.head." + bid + ":\n  "
+      po << t + ".j = phi i64 \[ 0, %mb.row.pre." + bid + " ], \[ " + t + ".j2, %mb.inner.body." + bid + " ]\n  "
+      po << t + ".c = phi i64 \[ 0, %mb.row.pre." + bid + " ], \[ " + t + ".c2, %mb.inner.body." + bid + " ]\n  "
+      po << t + ".idone = icmp sge i64 " + t + ".j, " + inst[:nb] + "\n  "
+      po << "br i1 " + t + ".idone, label %mb.row.done." + bid + ", label %mb.inner.body." + bid + "\n"
+      po << "mb.inner.body." + bid + ":\n  "
+      po << t + ".bg = getelementptr i64, ptr " + t + ".bpx, i64 " + t + ".j\n  "
+      po << t + ".bv = load i64, ptr " + t + ".bg, align 8\n  "
+      po << t + ".oi = add i64 " + t + ".i, " + t + ".j\n  "
+      po << t + ".og = getelementptr i64, ptr " + t + ".op, i64 " + t + ".oi\n  "
+      po << t + ".ov = load i64, ptr " + t + ".og, align 8\n  "
+      po << t + ".bz = zext i64 " + t + ".bv to i128\n  "
+      po << t + ".oz = zext i64 " + t + ".ov to i128\n  "
+      po << t + ".cz = zext i64 " + t + ".c to i128\n  "
+      po << t + ".prod = mul i128 " + t + ".az, " + t + ".bz\n  "
+      po << t + ".sum1 = add i128 " + t + ".prod, " + t + ".oz\n  "
+      po << t + ".sum2 = add i128 " + t + ".sum1, " + t + ".cz\n  "
+      po << t + ".lo = trunc i128 " + t + ".sum2 to i64\n  "
+      po << t + ".hi = lshr i128 " + t + ".sum2, 64\n  "
+      po << t + ".c2 = trunc i128 " + t + ".hi to i64\n  "
+      po << "store i64 " + t + ".lo, ptr " + t + ".og, align 8\n  "
+      po << t + ".j2 = add i64 " + t + ".j, 1\n  "
+      po << "br label %mb.inner.head." + bid + "\n"
+      po << "mb.row.done." + bid + ":\n  "
+      po << t + ".ci = add i64 " + t + ".i, " + inst[:nb] + "\n  "
+      po << t + ".cg = getelementptr i64, ptr " + t + ".op, i64 " + t + ".ci\n  "
+      po << "store i64 " + t + ".c, ptr " + t + ".cg, align 8\n  "
+      po << t + ".i2 = add i64 " + t + ".i, 1\n  "
+      po << "br label %mb.outer.head." + bid + "\n"
+      po << "mb.exit." + bid + ":\n  "
+      po << t + " = add i64 0, 0"
+      return po.to_s()
     asmt = "add x16, ${1:x}, ${2:x}, lsl #3\\0Aadd x17, ${3:x}, ${4:x}, lsl #3\\0Aadd x7, ${5:x}, ${6:x}, lsl #3\\0Aldr x6, \[x17], #8\\0Amov x2, x7\\0Amov x4, x16\\0Amov x5, ${8:x}\\0Amov x15, #0\\0A1:\\0Aldr x10, \[x2], #8\\0Amul x8, x10, x6\\0Aumulh x12, x10, x6\\0Aadds x8, x8, x15\\0Aadc x15, x12, xzr\\0Astr x8, \[x4], #8\\0Asubs x5, x5, #1\\0Abne 1b\\0Astr x15, \[x4]\\0Asubs x3, ${7:x}, #1\\0Amov x14, x16\\0A2:\\0Acbz x3, 3f\\0Aadd x14, x14, #8\\0Aldr x6, \[x17], #8\\0Amov x2, x7\\0Amov x4, x14\\0Amov x5, ${8:x}\\0Amov x15, #0\\0A4:\\0Aldr x10, \[x2], #8\\0Amul x8, x10, x6\\0Aumulh x12, x10, x6\\0Aadds x8, x8, x15\\0Aadc x12, x12, xzr\\0Aldr x9, \[x4]\\0Aadds x8, x9, x8\\0Aadc x15, x12, xzr\\0Astr x8, \[x4], #8\\0Asubs x5, x5, #1\\0Abne 4b\\0Astr x15, \[x4]\\0Asub x3, x3, #1\\0Ab 2b\\0A3:\\0Amov ${0:x}, #0"
     t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,r,~{x2},~{x3},~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x12},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:na] + ", i64 " + inst[:nb] + ")"
   when :sdiv_i128

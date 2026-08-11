@@ -6,14 +6,14 @@
     file_pwd()
 
   -> .chdir(path)
-    if block_given?
+    if block?
       file_chdir(path) ->
         yield
     else
       file_chdir(path)
 
   -> .cd(path)
-    if block_given?
+    if block?
       file_chdir(path) ->
         yield
     else

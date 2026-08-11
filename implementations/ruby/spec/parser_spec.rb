@@ -146,6 +146,13 @@ module Tungsten::AST
       expect(result.elements.map { |e| e.is_a?(Call) && !e.args.empty? }).to all(be false)
     end
 
+    it "parses postfix type hints on arbitrary expressions" do
+      result = described_class.parse("(value + 1) ## i64\n").first
+      expect(result).to be_a(TypeHint)
+      expect(result.hint).to eq("i64")
+      expect(result.value).to be_a(BinaryOp)
+    end
+
     # A multi-line hash/array literal whose continuation lines are indented
     # deeper than the body must not be read as a nested block (the lexer
     # suppresses indentation inside (...)/[...]/{...}).

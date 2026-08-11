@@ -215,11 +215,15 @@
     diag[:line] = parts[1].to_i
     diag[:column] = parts[2].to_i
 
-  # `explain: tungsten --explain E_LEX_UNEXPECTED_CHAR`
+  # `explain: tungsten explain E_LEX_UNEXPECTED_CHAR`
   -> .attach_code(diag, line)
     return nil unless diag[:code] == nil
-    marker = "--explain "
+    marker = "tungsten explain "
     idx = line.index(marker)
+    # Backward compatibility with diagnostics produced by older compilers.
+    if idx == nil
+      marker = "--explain "
+      idx = line.index(marker)
     return nil if idx == nil
     diag[:code] = line.slice(idx + marker.size(), line.size()).strip
 

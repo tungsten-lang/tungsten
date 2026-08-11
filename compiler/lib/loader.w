@@ -305,6 +305,21 @@ use parser
     # literal is provably used in that inlined-iterator-only shape, and true
     # for anything it can't prove (unknown node, escape, non-safe method).
     @array_needed = array_class_needed?(exprs)
+    # Preserve simple String provenance across the pre-lowering autoload
+    # pass. `text = ""; text.empty?` used to miss String's source method
+    # because string_empty_receiver? could recognize only the literal node,
+    # not the variable that held it. Any second/non-string assignment drops
+    # the proof; a conservative extra autoload is preferable to an undefined
+    # method at runtime.
+    @string_literal_vars = {}
+    string_other_assign = {}
+    collect_string_literal_vars_list(exprs, @string_literal_vars, string_other_assign)
+    string_names = @string_literal_vars.keys()
+    sni = 0
+    while sni < string_names.size()
+      if string_other_assign[string_names[sni]] == true
+        @string_literal_vars[string_names[sni]] = nil
+      sni += 1
     # Source-defined Array methods have no runtime fallback, and an Array can
     # enter through argv/a parameter without any literal or class reference.
     # Scan call names only until the first such method schedules Array. Later
@@ -437,6 +452,42 @@ use parser
     collect_arr_literal_vars_list(node.expressions, arr_vars, other_assign)
     if node.value != nil && is_ast_node?(node.value)
       collect_arr_literal_vars_node(node.value, arr_vars, other_assign)
+    nil
+
+  -> collect_string_literal_vars_list(nodes, string_vars, other_assign)
+    if nodes == nil
+      return nil
+    if is_ast_node?(nodes)
+      collect_string_literal_vars_node(nodes, string_vars, other_assign)
+      return nil
+    i = 0
+    while i < nodes.size()
+      collect_string_literal_vars_node(nodes[i], string_vars, other_assign)
+      i += 1
+
+  -> collect_string_literal_vars_node(node, string_vars, other_assign)
+    if !is_ast_node?(node)
+      if type(node) == "Array"
+        collect_string_literal_vars_list(node, string_vars, other_assign)
+      return nil
+    t = ast_kind(node)
+    if t in (:fastmath_block :strictmath_block :overflow_block)
+      collect_string_literal_vars_list(node[:body], string_vars, other_assign)
+      return nil
+    if t == :assign && node.target != nil && ast_kind(node.target) == :var
+      value = node.value
+      if value != nil && is_ast_node?(value) && ast_kind(value) in (:string :string_interp)
+        string_vars[node.target.name] = true
+      else
+        other_assign[node.target.name] = true
+    if t == :compound_assign && node.target != nil && ast_kind(node.target) == :var
+      other_assign[node.target.name] = true
+    collect_string_literal_vars_list(node.body, string_vars, other_assign)
+    collect_string_literal_vars_list(node.then_body, string_vars, other_assign)
+    collect_string_literal_vars_list(node.else_body, string_vars, other_assign)
+    collect_string_literal_vars_list(node.expressions, string_vars, other_assign)
+    if node.value != nil && is_ast_node?(node.value)
+      collect_string_literal_vars_node(node.value, string_vars, other_assign)
     nil
 
   -> scan_arr_safety_list(nodes, arr_vars, st)
@@ -879,13 +930,13 @@ use parser
     # accessors such as w_big_array_size return Integer, not BigArray.
     if name in ("w_big_array_new" "w_big_array_view" "w_big_array_subview" "w_big_array_view_range")
       return "BigArray"
-    if name in ("w_small_array_new" "w_small_array_init")
+    if name in ("w_small_array_new" "w_small_array_new_value" "w_small_array_init")
       return "SmallArray"
     if name == "__w_file_mmap"
       return "Mmap"
     # Exact WArray-producing runtime entry points. Keep this a return-type map,
     # not a prefix match: w_array_size/w_array_get/etc. return other types.
-    if name in ("w_array_new_empty" "w_array_new" "w_array_new_uninit" "w_array_new_uninit_sized" "w_array_new_aligned" "w_array_zeros" "w_array_view_raw" "w_array_view" "w_array_view_range" "w_array_reinterpret" "w_array_copy_range" "w_array_reuse_or_new_empty" "w_bytes_new" "w_bool_array_new")
+    if name in ("w_array_new_empty" "w_array_new" "w_array_new_filled" "w_array_new_uninit" "w_array_new_uninit_sized" "w_array_new_aligned" "w_array_zeros" "w_array_view_raw" "w_array_view" "w_array_view_range" "w_array_reinterpret" "w_array_copy_range" "w_array_reuse_or_new_empty" "w_bytes_new" "w_bool_array_new")
       return "Array"
     nil
 
@@ -893,6 +944,8 @@ use parser
     if node == nil || !is_ast_node?(node)
       return false
     t = ast_kind(node)
+    if t == :var && @string_literal_vars != nil && @string_literal_vars[node.name] == true
+      return true
     if t == :string || t == :string_interp
       return true
     if t == :binary_op

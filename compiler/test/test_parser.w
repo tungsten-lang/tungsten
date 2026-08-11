@@ -314,6 +314,13 @@ expr = first_expr("a\[0]")
 assert_eq expr[:node], :call
 assert_eq expr[:name], "\[]"
 
+test "parses indexed access on a call result"
+expr = first_expr("detect_target()\[:arch]")
+assert_eq expr[:node], :call
+assert_eq expr[:name], "\[]"
+assert_eq expr[:receiver][:node], :call
+assert_eq expr[:receiver][:name], "detect_target"
+
 test "parses puts operator"
 expr = first_expr("<< 42")
 assert_eq expr[:node], :puts

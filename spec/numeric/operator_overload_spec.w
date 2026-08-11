@@ -105,3 +105,15 @@ check("isa.scalar.not_vector", (2.0 ## f64).is_a?("Vector"), false)
 probe = DispatchProbe.new
 check("dispatch.subclass", probe * DispatchDog.new, "dog")
 check("dispatch.ancestor", probe * DispatchCat.new, "animal")
+
+# Float promotion must not run before a user-defined receiver's operator.
++ FloatRhsOperatorProbe
+  -> -/1
+    "subtract"
+
+  -> %/1
+    "modulo"
+
+float_rhs_probe = FloatRhsOperatorProbe.new
+check("dispatch.float_rhs.subtract", float_rhs_probe - (2.0 ## f64), "subtract")
+check("dispatch.float_rhs.modulo", float_rhs_probe % (2.0 ## f64), "modulo")

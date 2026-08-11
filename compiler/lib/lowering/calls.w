@@ -26,6 +26,22 @@
   block = node.block
   block != nil && is_ast_node?(block)
 
+# Source-level `block?` reads the closure slot owned by the current method
+# frame. Methods that only query (and never yield) still receive this slot via
+# method_yield_block_name's analysis. The value is already a WValue closure or
+# nil, so presence lowers to one tag-independent integer comparison and needs
+# no runtime helper. `block_given?` reaches this helper as a compatibility
+# alias at the two dispatch sites below.
+-> lower_block_present(ctx)
+  block_name = ctx[:yield_block_name]
+  if block_name == nil
+    return typed_value(:i1, "0")
+  block_tv = lower_var(ctx, Tungsten:AST:Var.new(block_name))
+  block_reg = ensure_i64_value(ctx[:func], block_tv)
+  present = next_temp(ctx[:func])
+  emit_instruction(ctx[:func], {op: :icmp_i64, temp: present, pred: "ne", lhs: block_reg, rhs: w_nil.to_s()})
+  typed_value(:i1, present)
+
 -> name_is_local_var?(wfn, ctx, name)
   if wfn[:var_slots] != nil && wfn[:var_slots][name] != nil
     return true
@@ -101,6 +117,11 @@
   name = node.name
   receiver = node.receiver
   args = node.args
+
+  # Parenthesized block-presence query. The paren-less form is a :var and is
+  # handled in lower_var; keeping both routes on one helper pins AST parity.
+  if receiver == nil && name in ("block?" "block_given?") && args != nil && args.size() == 0 && node.block == nil
+    return lower_block_present(ctx)
 
   # Compiler-generated typed-overload dispatch. These calls never appear in
   # user AST: definitions.w synthesizes them only after it has selected the
@@ -1184,6 +1205,20 @@
             fb += 1
           return typed_value(:i64, temp)
 
+  # A method already declared on the enclosing class wins over a same-spelled
+  # top-level binding. Module variables are predeclared so nested scopes can
+  # read them, but that must not turn a lexical `sha256(a, b, c, d)` call in
+  # `Crypto:PBKDF2` into a call through an unrelated top-level `sha256` local.
+  # Preserve access to top-level closures when the class has no such method.
+  if ctx[:class_name] != nil && node.block == nil
+    if ctx[:is_class_method] == true
+      static_info = known_static_method_for(ctx[:mod], ctx[:class_name] + "." + name, args.size())
+      if static_info != nil
+        return lower_direct_static_method_call(ctx, static_info, Tungsten:AST:Self.new, args)
+    elsif class_has_instance_method?(ctx[:mod], ctx[:class_name], name)
+      self_node = Tungsten:AST:Call.new(Tungsten:AST:Self.new, name, args, nil)
+      return lower_method_call(ctx, self_node)
+
   # Variable holding a closure: load and dispatch via w_closure_call_<n>.
   # User wrote `inc()` where `inc` is a local/top-level variable (typically
   # assigned `inc = -> () body`); invoke it as a closure.
@@ -1212,7 +1247,7 @@
     elsif arg_regs.size() == 2
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_closure_call_2", args: [closure_reg, arg_regs[0], arg_regs[1]]})
     else
-      raise compile_error_for_node(:E_LOWER_CLOSURE_CALL_ARITY, "closure call supports 0..2 args, got [arg_regs.size()]", ctx[:source_path], node)
+      raise compile_error_for_node(:E_LOWER_CLOSURE_CALL_ARITY, "closure call '" + name + "' supports 0..2 args, got " + arg_regs.size().to_s(), ctx[:source_path], node)
     return typed_value(:i64, temp)
 
   # Inside a class method: implicit self dispatch for non-top-level calls

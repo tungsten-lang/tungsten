@@ -98,6 +98,41 @@ RSpec.describe Tungsten::Interpreter do
     expect(run("Rational.new(15, -20)")).to eq(Rational(-3, 4))
   end
 
+  it "constructs sized Arrays with aliased fill values" do
+    result = run(<<~W)
+      fill = [1]
+      klass = Array
+      values = klass.new(2, fill)
+      values[0].push(2)
+      [values.size, values[1].size, values[1][1]]
+    W
+
+    expect(result).to eq([2, 2, 2])
+    expect(run("Array.new(3)")).to eq([nil, nil, nil])
+    expect(run("Array.new().size")).to eq(0)
+  end
+
+  it "rejects invalid Array sizes" do
+    expect { run("Array.new(-1)") }.to raise_error(Tungsten::Error, /non-negative/)
+    expect { run('Array.new("2")') }.to raise_error(Tungsten::Error, /must be an Integer/)
+  end
+
+  it "constructs fixed-size typed SmallArrays" do
+    result = run(<<~W)
+      kind = :i32
+      klass = SmallArray
+      values = klass.new(kind, 3)
+      values[0] = 0xFFFFFFFF
+      values[-1] = -3
+      values[8] = 99
+      [values.type, values.size, values[0], values[2], values[8]]
+    W
+
+    expect(result).to eq(["SmallArray", 3, -1, -3, nil])
+    expect { run("SmallArray.new(:u8, 2).push(1)") }.to raise_error(Tungsten::Error, /fixed size/)
+    expect { run("SmallArray.new(:i32, 256)") }.to raise_error(Tungsten::Error, /0\.\.255/)
+  end
+
   it "evaluates parenthesized expressions" do
     expect(run("(1 + 2) * 3")).to eq(9)
   end
@@ -110,6 +145,17 @@ RSpec.describe Tungsten::Interpreter do
     expect(run("x = 18446744073709551615 ## i64\nx")).to eq(-1)
     expect(run("x = -1 ## u64\nx")).to eq(18_446_744_073_709_551_615)
     expect(run("x = 340282366920938463463374607431768211456 ## u128\nx")).to eq(0)
+  end
+
+  it "applies machine integer type hints to arbitrary expressions" do
+    expect(run("18446744073709551615 ## i64")).to eq(-1)
+    expect(run("(-1) ## u64")).to eq(18_446_744_073_709_551_615)
+    expect(run("(340282366920938463463374607431768211455 + 1) ## u128")).to eq(0)
+  end
+
+  it "applies float and fixed-array type hints" do
+    expect(run("1.25 ## f64")).to eq(1.25)
+    expect(run("values = [1.0, 2.5] ## f64[2]\nvalues")).to eq([1.0, 2.5])
   end
 
   it "evaluates multi-assignment" do
@@ -650,6 +696,18 @@ RSpec.describe Tungsten::Interpreter do
       b.combine(5) + " " + b.combine(10 ** 30)
     W
     expect(run(code)).to eq("number-arm bigint-arm")
+  end
+
+  it "dispatches class-method overloads by argument count" do
+    code = <<~W
+      + StaticOverloadProbe
+        -> .pick(value)
+          "one:" + value.to_s
+        -> .pick(a, b, c)
+          "three:" + (a + b + c).to_s
+      StaticOverloadProbe.pick(7) + " " + StaticOverloadProbe.pick(1, 2, 3)
+    W
+    expect(run(code)).to eq("one:7 three:6")
   end
 
   it "selects typed overloads through a subclass receiver" do

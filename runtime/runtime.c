@@ -12214,6 +12214,116 @@ static void bn_mul_low(
     }
 }
 
+/* ==== Truncated high product (Mulders short product), bn_mul_low's mirror.
+ *
+ * bn_mulhi_approx(rp, a, b, n, sc): rp[0..n+1) receives an
+ * under-approximation of H = floor(A*V / B^(n-1)) (A = {a,n}, V = {b,n},
+ * B = 2^64) — the 2n-limb product's top n+1 limbs, anchored one limb below
+ * its high half:
+ *
+ *     0 <= H - rp <= n*B.
+ *
+ * Base case: accumulate every cross product a_i*b_j with i+j >= n-1
+ * exactly (triangular addmul rows).  Each such term is divisible by
+ * B^(n-1), so the included sum is an integer at the anchor and fits n+1
+ * limbs (the full product is < B^(2n)).  The dropped terms total
+ *
+ *     sum_{k=0}^{n-2} (k+1)*(B-1)^2*B^k  <  (n-1)*B^n + n*B^(n-1),
+ *
+ * under n*B anchor units.  Mulders step: split off the low m = n - k limbs
+ * (k ~ 3n/4).  One FULL k-by-k product of the two high parts covers every
+ * pair with i >= m and j >= m; its limbs from k-m-1 upward land exactly on
+ * rp[0..n+1), and its (exact) sub-anchor limbs are dropped — at most one
+ * anchor unit.  Two recursive m-by-m short products cover {i < m, j >= k}
+ * and {i >= k, j < m}; their thresholds i'+j' >= m-1 sit on the same
+ * anchor because k + m = n.  No needed pair is missed (i+j >= n-1 with
+ * i < m forces j >= k), so ERR(n) <= 2*ERR(m) + 1, and with 2m < n the
+ * bound ERR(n) <= n*B holds inductively.  Callers thus keep >= 57 guard
+ * bits below the anchor limb at any n < 2^20 and supply whole guard limbs
+ * on top of that.
+ *
+ * sc needs 2n limbs and must not alias bn_ws (the full products own it).
+ *
+ * STATUS: correct but currently unwired — measured on Apple M5 Max
+ * (LLVM 22, -O3 -flto -mcpu=apple-m5) it does NOT clear the cost bar that
+ * would let a Newton-inversion top quotient beat the sqrt divappr spine.
+ * mulhigh(n)/mul(n), median of 9:
+ *
+ *     n      sequential   parallel-allowed (the sqrt path's regime)
+ *     512      0.87           1.17
+ *     1024     0.78           1.06
+ *     2048     0.92           1.17
+ *     4096     0.92           1.15
+ *
+ * (best of a {low_pct 20/25/30} x {base 24/48/96} sweep per cell; the
+ * defaults below are the best sequential config).  Two structural facts
+ * kill the isqrt application, not implementation quality: (a) a single
+ * balanced product this size gains ~2-2.5x from the parallel Toom pool,
+ * which the short product's serial composition cannot match, so in
+ * context mulhigh COSTS MORE than a full multiply; and (b) the Newton
+ * residual 1 - high(D*X) cancels its entire high half, so each precision
+ * doubling to width v needs the product's limbs down to position ~v -- a
+ * width-v short product, not width v/2 -- making an inversion chain to
+ * width h cost ~[hp(h) + 2*hp(h/2)/(1-0.4)] ~ 2.4*hp(h).  Composed:
+ * chain + high(U*R) ~ 294us at h = 2048 against the incumbent
+ * bz_d2n1n_q(2080) at ~266us measured in place (55% of isqrt@4096-root).
+ * Full products instead of hp: ~244us -- inside noise of the incumbent
+ * and not worth the certificate surface.  Revisit only if the multiply
+ * ladder's parallel advantage disappears (single-core targets) or a
+ * wraparound (mulmod B^m+-1) residual gets cheap enough to change (b). */
+#ifndef BN_MULHI_BASE
+#define BN_MULHI_BASE 48
+#endif
+#ifndef BN_MULHI_LOW_PCT
+#define BN_MULHI_LOW_PCT 25
+#endif
+
+static void bn_mulhi_base(uint64_t *rp, const uint64_t *a, const uint64_t *b,
+                          int32_t n) {
+    memset(rp, 0, (size_t)(n + 1) * sizeof(uint64_t));
+    for (int32_t i = 0; i < n; i++) {
+        uint64_t c = bn_addmul_1(rp, b + (n - 1 - i), i + 1, a[i]);
+        int32_t p = i + 1;
+        while (c) {
+            uint64_t old = rp[p];
+            rp[p] = old + c;
+            c = rp[p] < old;
+            p++;
+        }
+    }
+}
+
+static __attribute__((unused))
+void bn_mulhi_approx(uint64_t *rp, const uint64_t *a, const uint64_t *b,
+                     int32_t n, uint64_t *sc) {
+    if (n <= BN_MULHI_BASE) {
+        bn_mulhi_base(rp, a, b, n);
+        return;
+    }
+    int32_t m = (int32_t)(((int64_t)n * BN_MULHI_LOW_PCT) / 100);
+    if (m < 1) m = 1;
+    int32_t k = n - m;
+    int32_t off = k - m - 1;
+    bigint_mul_dispatch(sc, a + m, k, b + m, k);
+    memcpy(rp, sc + off, (size_t)(n + 1) * sizeof(uint64_t));
+    uint64_t *sub = sc;
+    uint64_t *sc2 = sc + (m + 1);
+    bn_mulhi_approx(sub, a, b + k, m, sc2);
+    uint64_t c = bn_add_n(rp, rp, sub, m + 1);
+    for (int32_t p = m + 1; c && p <= n; p++) {
+        uint64_t old = rp[p];
+        rp[p] = old + c;
+        c = rp[p] < old;
+    }
+    bn_mulhi_approx(sub, a + k, b, m, sc2);
+    c = bn_add_n(rp, rp, sub, m + 1);
+    for (int32_t p = m + 1; c && p <= n; p++) {
+        uint64_t old = rp[p];
+        rp[p] = old + c;
+        c = rp[p] < old;
+    }
+}
+
 /*
  * With g guard limbs, cache R = floor(B^(2n+g) / D) after seeing the same
  * n-limb divisor three times.  For U < B^(2n), let

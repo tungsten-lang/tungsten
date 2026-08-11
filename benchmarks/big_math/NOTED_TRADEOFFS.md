@@ -1030,3 +1030,24 @@ two independent 3-pair screens pooled, 12 samples/side):
 release header read from the slot encode (or re-widens the slot to two
 words) must re-run the paired screen — each half's cost is only hidden by
 the other's savings.
+
+## mulhigh (Mulders short product) — validated, gated OFF on M5 (2026-08-11)
+
+Built for the reciprocal-carrying isqrt recursion and intended to
+generalize into the Barrett/powmod division spine.  The premise fails on
+this uarch: best sequential config (beta=0.75, base=48) measures
+mulhigh(n)/mul(n) = 0.87/0.78/0.92/0.92 at n = 512/1024/2048/4096 —
+against a 0.75 gate — and in the sqrt path's parallel regime the short
+product is outright SLOWER than a full multiply (1.04-1.16x), because
+the worker pool gives one balanced product a ~2x speedup that a serially
+composed short product cannot use.  The Newton reciprocal chain has a
+second, structural failure: the residual 1 - high(D*X) cancels its
+entire high half, so each precision doubling needs true products down to
+the full doubled width (hp(v) + hp(v/2) per level, not 2*hp(v/2));
+recomposed from measured parts the chain is +11% over the incumbent
+bz_d2n1n_q, which itself measures 55% of isqrt@4096 exactly as profiled.
+The primitive ships validated (200k-case contract fuzz, ASAN clean,
+error bound ERR(n) <= 2*ERR(m)+1 proven in comments) but unused.
+**Condition to take it:** single-core targets (no pool asymmetry), or a
+cheap wraparound residual via mulmod B^m +/- 1 that dodges the
+cancellation.  isqrt@4096/@8192 stand at 0.92/0.90 vs GMP without it.

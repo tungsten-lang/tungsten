@@ -345,17 +345,21 @@ typedef struct {
 #if BN_BIGINT_RECYCLE
 typedef struct {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-    WBigint *hot;
-    /* Mirror of hot->cap, and the slot's occupancy encoding: zero exactly
-     * when hot == NULL (every writer that clears `hot` zeroes this too).
-     * The hot-slot take is on the immutable-churn critical path (release
-     * stores hot -> next take loads it); reading the capacity from the pool
-     * struct instead of through the just-forwarded pointer removes a
-     * dependent L1 load from that recurrence, and the zero-when-empty
-     * invariant lets the take test occupancy and smallest-fitting class in
-     * ONE unsigned compare (see bigint_alloc_raw_hot).  64-bit so the
-     * adjacent hot/hot_cap pair loads and clears as one LDP/STP. */
-    uint64_t hot_cap;
+    /* The hot slot packed into ONE word: buffer pointer in bits 0-47,
+     * capacity (limbs) in bits 48-63.  Zero exactly when empty — the
+     * capacity field doubles as the occupancy encoding, so every reader
+     * still gates on "cap != 0" like the old two-word {hot, hot_cap} pair.
+     * The hot-slot exchange is the immutable-churn critical path (release
+     * stores the word -> next take loads it); one word halves the slot's
+     * loads and stores and puts the store->load forward chain on a single
+     * location.  The capacity rides the HIGH bits (not a low-bit log2):
+     * user-space pointers stay under 2^47 on every supported platform (the
+     * same invariant bigint_box asserts — a violation already corrupts
+     * boxing), caps are <= BN_BIGINT_POOL_MAX_CAP so they fit 16 bits even
+     * under BN_BIGINT_HYBRID_CAP's non-power-of-two classes, decode is one
+     * shift, and encode is one orr-with-shifted-register — no clz/log2 on
+     * either side of the exchange. */
+    uint64_t hot_word;
 #endif
     WBigint *slot[BN_BIGINT_POOL_BUCKETS][BN_BIGINT_POOL_PER_BUCKET];
     uint8_t count[BN_BIGINT_POOL_BUCKETS];
@@ -363,6 +367,28 @@ typedef struct {
     BnDivPreinvCache div_preinv;
 } WBigintPool;
 static __thread WBigintPool bigint_pool_state;
+
+#if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+_Static_assert(BN_BIGINT_POOL_MAX_CAP <= (1U << 15),
+               "packed hot slot: capacity must fit the 16-bit high field");
+
+static inline __attribute__((always_inline))
+uint64_t bigint_hot_encode(WBigint *b, uint32_t cap) {
+#ifndef NDEBUG
+    /* Same pointer-width invariant bigint_box relies on (bits 48+ clear). */
+    assert(((uintptr_t)b & ~0x0000FFFFFFFFFFFFULL) == 0);
+#endif
+    return (uint64_t)(uintptr_t)b | ((uint64_t)cap << 48);
+}
+static inline __attribute__((always_inline))
+WBigint *bigint_hot_ptr(uint64_t word) {
+    return (WBigint *)(uintptr_t)(word & 0x0000FFFFFFFFFFFFULL);
+}
+static inline __attribute__((always_inline))
+uint32_t bigint_hot_capacity(uint64_t word) {
+    return (uint32_t)(word >> 48);
+}
+#endif
 
 static inline int bigint_pool_bucket(uint32_t cap) {
     return cap > 1 ? 31 - __builtin_clz(cap) : 0;
@@ -379,9 +405,13 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
      * bucket is not automatically large enough.  Only that first bucket
      * needs the check: every higher bucket starts at 2^(first+1) > min_cap. */
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-    WBigint *hot = pool->hot_cap != 0 ? pool->hot : NULL;
-    if (hot && pool->hot_cap == min_cap) {
-        pool->hot_cap = 0;
+    uint64_t hot_word = pool->hot_word;
+    WBigint *hot = bigint_hot_ptr(hot_word);
+    /* The empty word decodes as capacity 0, so for min_cap >= 1 the
+     * capacity tests below also prove occupancy; the general take must
+     * additionally reject a zero min_cap matching an empty slot. */
+    if (hot_word != 0 && bigint_hot_capacity(hot_word) == min_cap) {
+        pool->hot_word = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
 #endif
@@ -389,15 +419,15 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
         return hot;
     }
     int hot_bucket =
-        hot && (uint32_t)pool->hot_cap >= min_cap
-            ? bigint_pool_bucket((uint32_t)pool->hot_cap)
+        hot_word != 0 && bigint_hot_capacity(hot_word) >= min_cap
+            ? bigint_pool_bucket(bigint_hot_capacity(hot_word))
             : BN_BIGINT_POOL_BUCKETS;
 #endif
     int first = bigint_pool_bucket(min_cap);
     for (int bucket = first; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
         if (bucket == hot_bucket) {
-            pool->hot_cap = 0;
+            pool->hot_word = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
             hot->type = W_TYPE_BIGINT;
 #endif
@@ -429,9 +459,13 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
     return NULL;
 #elif BN_BIGINT_POWER2_CAP
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-    WBigint *hot = pool->hot_cap != 0 ? pool->hot : NULL;
-    if (hot && pool->hot_cap == min_cap) {
-        pool->hot_cap = 0;
+    uint64_t hot_word = pool->hot_word;
+    WBigint *hot = bigint_hot_ptr(hot_word);
+    /* The empty word decodes as capacity 0, so for min_cap >= 1 the
+     * capacity tests below also prove occupancy; the general take must
+     * additionally reject a zero min_cap matching an empty slot. */
+    if (hot_word != 0 && bigint_hot_capacity(hot_word) == min_cap) {
+        pool->hot_word = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
 #endif
@@ -439,15 +473,15 @@ static WBigint *bigint_pool_take(uint32_t min_cap) {
         return hot;
     }
     int hot_bucket =
-        hot && (uint32_t)pool->hot_cap >= min_cap
-            ? bigint_pool_bucket((uint32_t)pool->hot_cap)
+        hot_word != 0 && bigint_hot_capacity(hot_word) >= min_cap
+            ? bigint_pool_bucket(bigint_hot_capacity(hot_word))
             : BN_BIGINT_POOL_BUCKETS;
 #endif
     int first = min_cap > 1 ? 32 - __builtin_clz(min_cap - 1) : 0;
     for (int bucket = first; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
         if (bucket == hot_bucket) {
-            pool->hot_cap = 0;
+            pool->hot_word = 0;
 #if !BN_BIGINT_HOT_LIVE_HEADER
             hot->type = W_TYPE_BIGINT;
 #endif
@@ -533,18 +567,21 @@ static void bigint_release(WBigint *b) {
     }
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
 #if BN_BIGINT_HOT_LIVE_HEADER
-    if (__builtin_expect(pool->hot_cap != 0 && pool->hot == b, 0)) return;
+    /* An empty slot decodes to a NULL pointer (a take clears the WHOLE
+     * word, so no stale pointer survives), making the masked compare alone
+     * the duplicate-handoff guard — no separate occupancy test. */
+    if (__builtin_expect(bigint_hot_ptr(pool->hot_word) == b, 0)) return;
 #endif
-    if (!pool->hot_cap) {
-        /* The direct handoff keeps its header live: pool->hot is the parked
-         * marker and duplicate-return guard.  The conservative configuration
-         * clears type instead.  Size need not be zeroed in either mode: every
-         * raw take publishes a fresh value before it escapes. */
+    if (!pool->hot_word) {
+        /* The direct handoff keeps its header live: the packed slot pointer
+         * is the parked marker and duplicate-return guard.  The conservative
+         * configuration clears type instead.  Size need not be zeroed in
+         * either mode: every raw take publishes a fresh value before it
+         * escapes. */
 #if !BN_BIGINT_HOT_LIVE_HEADER
         b->type = 0;
 #endif
-        pool->hot = b;
-        pool->hot_cap = cap;
+        pool->hot_word = bigint_hot_encode(b, cap);
         return;
     }
 #endif
@@ -560,6 +597,27 @@ static void bigint_release(WBigint *b) {
  * internals release only known-live allocations; generic WValue disposal
  * uses this checked wrapper.
  */
+#ifndef BN_BIGINT_RELEASE_INLINE_HANDOFF
+#define BN_BIGINT_RELEASE_INLINE_HANDOFF 1
+#endif
+/* Fused release-side header read: `type` (offset 0), `shared` (offset 1)
+ * and `cap` (offset 8) all sit in the leading 16 bytes, so one 16-byte load
+ * (two u64s via memcpy — a single ldp on aarch64, no aliasing violation)
+ * answers the live-and-alias-free check AND supplies the capacity for the
+ * hot handoff, dropping the separate cap load from the churn-critical
+ * release (the bigint_publish_header trick widened to the whole header).
+ * Only profitable where the inline handoff consumes the capacity; the
+ * fallback paths reload b->cap out of line. */
+#ifndef BN_BIGINT_RELEASE_FUSED_HEADER
+#if (defined(__LITTLE_ENDIAN__) || (defined(__BYTE_ORDER__) && \
+     __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)) && \
+    BN_BIGINT_RELEASE_INLINE_HANDOFF && BN_BIGINT_HOT_SLOT && \
+    BN_BIGINT_POWER2_CAP
+#define BN_BIGINT_RELEASE_FUSED_HEADER 1
+#else
+#define BN_BIGINT_RELEASE_FUSED_HEADER 0
+#endif
+#endif
 static inline __attribute__((always_inline))
 void bigint_release_if_live(WBigint *b) {
     /* The shared byte counts tag-sign aliases (see wvalue.h). While it is
@@ -573,7 +631,19 @@ void bigint_release_if_live(WBigint *b) {
      * it alias-free" — the only state the churn fast path may recycle —
      * folding two loaded-and-branched bytes into one compare (the
      * bigint_publish_header trick applied to the release side). */
-#if defined(__LITTLE_ENDIAN__) || (defined(__BYTE_ORDER__) && \
+#if BN_BIGINT_RELEASE_FUSED_HEADER
+    _Static_assert(offsetof(WBigint, type) == 0, "type at 0");
+    _Static_assert(offsetof(WBigint, shared) == 1, "shared at 1");
+    _Static_assert(offsetof(WBigint, cap) == 8, "cap at 8");
+    uint64_t head01[2];
+    memcpy(head01, b, sizeof head01);   /* one ldp; no aliasing violation */
+    if (__builtin_expect((uint16_t)head01[0] != (uint16_t)W_TYPE_BIGINT, 0)) {
+        if ((uint8_t)head01[0] != W_TYPE_BIGINT) return;
+        if ((uint8_t)(head01[0] >> 8) != 255)
+            b->shared = (uint8_t)((head01[0] >> 8) - 1);
+        return;
+    }
+#elif defined(__LITTLE_ENDIAN__) || (defined(__BYTE_ORDER__) && \
     __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
     _Static_assert(offsetof(WBigint, type) == 0, "type at 0");
     _Static_assert(offsetof(WBigint, shared) == 1, "shared at 1");
@@ -591,25 +661,25 @@ void bigint_release_if_live(WBigint *b) {
         return;
     }
 #endif
-#ifndef BN_BIGINT_RELEASE_INLINE_HANDOFF
-#define BN_BIGINT_RELEASE_INLINE_HANDOFF 1
-#endif
 #if BN_BIGINT_RELEASE_INLINE_HANDOFF && BN_BIGINT_HOT_SLOT && \
     BN_BIGINT_POWER2_CAP
     /* Result churn overwhelmingly returns a valid pooled buffer while the
      * just-consumed hot slot is empty.  Keep that one-buffer give/take handoff
      * in the caller; the out-of-line release remains the duplicate, overflow,
      * and occupied-slot fallback. */
+#if BN_BIGINT_RELEASE_FUSED_HEADER
+    uint32_t cap = (uint32_t)head01[1];  /* fused from the header read */
+#else
     uint32_t cap = b->cap;
+#endif
     /* A live BigInt allocation always has at least one limb of capacity. */
     if (__builtin_expect(cap <= BN_BIGINT_POOL_MAX_CAP, 1)) {
         WBigintPool *pool = &bigint_pool_state;
-        if (__builtin_expect(pool->hot_cap == 0, 1)) {
+        if (__builtin_expect(pool->hot_word == 0, 1)) {
 #if !BN_BIGINT_HOT_LIVE_HEADER
             b->type = 0;
 #endif
-            pool->hot = b;
-            pool->hot_cap = cap;
+            pool->hot_word = bigint_hot_encode(b, cap);
             return;
         }
     }
@@ -620,9 +690,8 @@ void bigint_release_if_live(WBigint *b) {
 static void bigint_pool_release_thread(void) {
     WBigintPool *pool = &bigint_pool_state;
 #if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-    if (pool->hot_cap != 0) free(pool->hot);
-    pool->hot = NULL;
-    pool->hot_cap = 0;
+    if (pool->hot_word != 0) free(bigint_hot_ptr(pool->hot_word));
+    pool->hot_word = 0;
 #endif
     for (int bucket = 0; bucket < BN_BIGINT_POOL_BUCKETS; bucket++) {
         int count = pool->count[bucket];
@@ -765,19 +834,19 @@ WBigint *bigint_alloc_raw_hot(int32_t cap) {
 #if BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
     uint64_t requested = (uint64_t)(uint32_t)cap;
     WBigintPool *pool = &bigint_pool_state;
-    WBigint *hot = pool->hot;
-    uint64_t hot_cap = pool->hot_cap;
+    uint64_t hot_word = pool->hot_word;
+    uint64_t hot_cap = bigint_hot_capacity(hot_word);
     /* One unsigned compare answers occupancy AND the smallest-fitting
      * power-of-two class test: for p2 caps, n <= cap < 2n <=> cap - n < n
-     * (the wrap rejects cap < n, and the empty slot's cap == 0 encoding
-     * rejects everything).  Replaces a null check plus two range branches
-     * on the churn-critical take. */
+     * (the wrap rejects cap < n, and the empty word decodes as capacity 0,
+     * which rejects everything).  The compare runs on the DECODED capacity,
+     * not the raw word: a shifted `requested` would truncate mod 2^16 and
+     * falsely accept a tiny slot for an FFT-band request. */
     if (__builtin_expect(hot_cap - requested < requested, 1)) {
-        /* hot_cap is the occupancy word: zero exactly when empty.  The
-         * pointer stays stale on purpose — every reader gates on hot_cap,
-         * so one scalar clear replaces the pair store on the take side of
-         * the churn recurrence. */
-        pool->hot_cap = 0;
+        /* One xzr store empties the slot — pointer and occupancy in the
+         * same word, so nothing stale survives the take. */
+        pool->hot_word = 0;
+        WBigint *hot = bigint_hot_ptr(hot_word);
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
 #endif
@@ -797,11 +866,12 @@ static inline __attribute__((always_inline))
 WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
 #if BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
     WBigintPool *pool = &bigint_pool_state;
-    WBigint *hot = pool->hot;
-    /* exact_cap >= 1 always, and the empty slot encodes as hot_cap == 0,
-     * so the capacity equality alone also proves occupancy. */
-    if (__builtin_expect(pool->hot_cap == exact_cap, 1)) {
-        pool->hot_cap = 0;
+    uint64_t hot_word = pool->hot_word;
+    /* exact_cap >= 1 always, and the empty word decodes as capacity 0, so
+     * the capacity equality alone also proves occupancy. */
+    if (__builtin_expect(bigint_hot_capacity(hot_word) == exact_cap, 1)) {
+        pool->hot_word = 0;
+        WBigint *hot = bigint_hot_ptr(hot_word);
 #if !BN_BIGINT_HOT_LIVE_HEADER
         hot->type = W_TYPE_BIGINT;
 #endif
@@ -36848,11 +36918,12 @@ WValue bigint_copy_signed(WBigint *b, int negate) {
      * and the reads/writes stay inside both allocations. */
     if (n <= BN_COPY_FUSED_MAX) {
         WBigintPool *pool = &bigint_pool_state;
-        WBigint *hot = pool->hot;
-        /* Empty slot encodes as hot_cap == 0 and caps are >= 1, so the
+        uint64_t hot_word = pool->hot_word;
+        WBigint *hot = bigint_hot_ptr(hot_word);
+        /* The empty word decodes as capacity 0 and caps are >= 1, so the
          * capacity equality alone also proves occupancy. */
-        if (__builtin_expect(pool->hot_cap == b->cap, 1)) {
-            pool->hot_cap = 0;
+        if (__builtin_expect(bigint_hot_capacity(hot_word) == b->cap, 1)) {
+            pool->hot_word = 0;
             const uint64_t *restrict src = b->limbs;
             uint64_t *restrict dst = hot->limbs;
             if (n == 3) {

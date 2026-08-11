@@ -1005,3 +1005,28 @@ All `BN_MUL1_SPLIT_F*` default 0; the knobs-off binary compiles kernels
 identical to the serial baseline (disassembly-verified, no `cset` in `f24`).
 **Condition to enable:** a workload or silicon where the boxed lane is
 latency-exposed (e.g. dependent single-op chains), per width, via the knobs.
+## Hot-slot shave split halves — NOT taken individually (2026-08-11)
+
+The shipped packed-word hot slot (pointer | cap<<48 in ONE u64) plus the
+fused 16-byte release header read (type+shared+cap in one ldp) only wins as
+a UNIT.  Screened separately against the same baseline (ABBA T-only medians,
+two independent 3-pair screens pooled, 12 samples/side):
+
+- Packed word alone: mul1@2 0.909 but neg@4 1.175, sub@8 1.059, mul1@4
+  1.035.  The encode's orr must wait on the release path's late separate
+  cap load, and the take-side pointer decode adds a cycle nothing else
+  hides.
+- Fused header read alone: exactly 1.000 on every mul1/add1 cell (no win to
+  bank) with add@4 1.060 and neg@4 1.042.  The 16-byte header load spans
+  the producer's just-stored `size` word (offset 4), so tiny-cell releases
+  eat a store-forward partial-overlap penalty, and with the two-word slot
+  still in place nothing consumes the early cap.
+- Combined: mul1@2 0.875, mul1@4 0.932, neg@4 0.965, add1@1 0.983; every
+  other word cell holds within 1% (mul1@32 re-probed at 1.004, 12
+  samples/side).  The early fused cap feeds the packed encode directly and
+  the halved slot traffic pays for the pointer decode.
+
+**Condition to revisit the halves:** any future change that re-splits the
+release header read from the slot encode (or re-widens the slot to two
+words) must re-run the paired screen — each half's cost is only hidden by
+the other's savings.

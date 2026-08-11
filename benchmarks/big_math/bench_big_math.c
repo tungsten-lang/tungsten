@@ -6316,17 +6316,48 @@ int main(int argc, char **argv) {
 #endif
     }
     if (argc == 6 && strcmp(argv[1], "--profile-result-recycle") == 0) {
+        /* argv[3] is a comma list of limbs[:iters] entries run in sequence
+         * inside ONE process; iters defaults to argv[5].  A predecessor
+         * entry recreates allocator-history states (a smaller row poisoning
+         * a later row's buffer placements) that per-size processes and the
+         * adaptive sweep cannot pin down for counter differencing. */
         int op = bench_boxed_op_parse(argv[2]);
-        int32_t limbs = (int32_t)atoi(argv[3]);
         int recycle = strcmp(argv[4], "pool") == 0;
         int direct = strcmp(argv[4], "direct") == 0;
-        int iters = atoi(argv[5]);
-        if (op < 0 || (!recycle && !direct) || limbs <= 0 || iters <= 0)
-            die("profile result recycle expects op limbs direct|pool iterations");
-        double ns = bench_boxed_result_churn(op, limbs, iters, recycle);
-        printf("boxed-result profile %s %d limbs %s: %.1f ns sink=%llu\n",
-               argv[2], limbs, argv[4], ns,
-               (unsigned long long)bench_sink);
+        int default_iters = atoi(argv[5]);
+        if (op < 0 || (!recycle && !direct) || default_iters <= 0)
+            die("profile result recycle expects op limbs[:iters][,...] "
+                "direct|pool iterations");
+        /* Pre-parse the whole list: strtok keeps static state and the timed
+         * lanes below call into code that also tokenizes. */
+        char list[512];
+        snprintf(list, sizeof list, "%s", argv[3]);
+        int32_t entry_limbs[64];
+        int entry_iters[64];
+        int entry_count = 0;
+        for (char *tok = strtok(list, ","); tok; tok = strtok(NULL, ",")) {
+            if (entry_count >= (int)(sizeof entry_limbs / sizeof entry_limbs[0]))
+                die("profile result recycle supports at most 64 entries");
+            char *colon = strchr(tok, ':');
+            int iters = default_iters;
+            if (colon) {
+                *colon = '\0';
+                iters = atoi(colon + 1);
+            }
+            int32_t limbs = (int32_t)atoi(tok);
+            if (limbs <= 0 || iters <= 0)
+                die("profile result recycle expects positive limbs and iterations");
+            entry_limbs[entry_count] = limbs;
+            entry_iters[entry_count] = iters;
+            entry_count++;
+        }
+        for (int e = 0; e < entry_count; e++) {
+            double ns = bench_boxed_result_churn(
+                op, entry_limbs[e], entry_iters[e], recycle);
+            printf("boxed-result profile %s %d limbs %s: %.1f ns sink=%llu\n",
+                   argv[2], entry_limbs[e], argv[4], ns,
+                   (unsigned long long)bench_sink);
+        }
         return 0;
     }
     if (argc == 5 && strcmp(argv[1], "--profile-gmp-result") == 0) {

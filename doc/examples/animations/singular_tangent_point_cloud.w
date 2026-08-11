@@ -1,6 +1,12 @@
-# A deterministic retained-data translation of the third supplied p5/dwitter
-# point-cloud sketch. The source has a regular k=0 singularity; this example
-# records and omits those non-finite samples before building portable geometry.
+# A deterministic retained-data translation of the original p5.js sketch by
+# ア / A-na5 (@yuruyurau), posted August 8, 2026:
+# https://x.com/yuruyurau/status/2086124813534605701
+#
+# The author asks ports to link back to the original:
+# https://x.com/yuruyurau/status/2079938925720985812
+# No license is stated on the source post, so this example records attribution
+# without inferring a license grant. The source has a regular k=0 singularity;
+# this example omits those non-finite samples from portable geometry.
 
 use core/animation/point_preview
 
@@ -65,6 +71,27 @@ use core/animation/point_preview
     ~400.0, ~400.0, "#090909", nil,
     {
       :title => "Singular tangent point cloud",
+      :source_kind => :tweet_p5_point_sketch,
+      :source_author => "ア / A-na5",
+      :source_handle => "@yuruyurau",
+      :source_profile_url => "https://x.com/yuruyurau",
+      :source_post_url =>
+        "https://x.com/yuruyurau/status/2086124813534605701",
+      :source_attribution_request_url =>
+        "https://x.com/yuruyurau/status/2079938925720985812",
+      :source_published_at => "2026-08-08T16:18:08Z",
+      :source_hashtag => "#つぶやきProcessing",
+      :source_license => :not_stated,
+      :source_formula_sha256 =>
+        "8764d0cb7a57c0f1354458237e551bb1b75c30ef1c5b5d0ff58066cf44f1da7b",
+      :source_formula_hash_normalization =>
+        :two_code_lines_lf_no_trailing_lf_without_hashtag_comment,
+      :source_canvas => [400, 400],
+      :source_media_viewport => [800, 800],
+      :source_media_duration_seconds => 8,
+      :source_point_count => 20_000,
+      :source_stroke_alpha_byte => 96,
+      :source_y_divisor => 233,
       :source_coordinate_system => :p5_canvas,
       :geometry_coordinate_system => :cartesian_y_up,
       :source_renderer_clips_to_viewport => true,
@@ -80,7 +107,12 @@ use core/animation/point_preview
       :singularity_period => 100,
       :finite_filter_policy => :omit_k_zero_division,
       :point_order => :descending_index,
-      :row_width => 100
+      :row_width => 100,
+      :source_author => "ア / A-na5",
+      :source_handle => "@yuruyurau",
+      :source_post_url =>
+        "https://x.com/yuruyurau/status/2086124813534605701",
+      :source_license => :not_stated
     }))
 
   frame_intervals = retained_frames - 1
@@ -164,6 +196,12 @@ full_cycle_closed = full_x_closed && full_y_closed
 raise "singular-tangent half-cycle unexpectedly closed" if !half_cycle_moved
 raise "singular-tangent mathematical period changed" if !full_cycle_closed
 
+attribution_ok = point_metadata[:source_author] == "ア / A-na5"
+attribution_ok = attribution_ok && point_metadata[:source_handle] == "@yuruyurau"
+attribution_ok = attribution_ok && point_metadata[:source_post_url] == "https://x.com/yuruyurau/status/2086124813534605701"
+attribution_ok = attribution_ok && point_metadata[:source_license] == :not_stated
+raise "singular-tangent source attribution changed" if !attribution_ok
+
 << "frames: [timeline.frame_count]"
 << "fps: [timeline.fps]"
 << "source samples: [point_metadata[:source_sample_count]]"
@@ -173,6 +211,7 @@ raise "singular-tangent mathematical period changed" if !full_cycle_closed
 << "point motion: [point_moved]"
 << "formula anchors: ok"
 << "mathematical period: ok"
+<< "source attribution: ア / A-na5 (@yuruyurau)"
 
 if ARGV.include?("--window") || ARGV.include?("--window-smoke")
   window_timeline = ARGV.include?("--window-smoke") ? timeline : singular_tangent_point_cloud()
@@ -191,3 +230,4 @@ if ARGV.include?("--window") || ARGV.include?("--window-smoke")
 ## point motion: true
 ## formula anchors: ok
 ## mathematical period: ok
+## source attribution: ア / A-na5 (@yuruyurau)

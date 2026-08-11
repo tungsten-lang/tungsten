@@ -1,4 +1,5 @@
-# A compact deterministic, Dwitter-style mathematical point expression.
+# An original Tungsten, compact Dwitter-style mathematical point expression;
+# it is not a transcription of an external sketch.
 # One Vogel disk is warped into a swimming comma; adjacent formula indices use
 # signs -1 and +1, so the second surreal koi is the first one's exact central
 # reflection. There are no separately constructed eyes, fins, triangles,

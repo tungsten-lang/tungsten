@@ -31,24 +31,28 @@ Eight runnable examples exercise one or more ordered `PlotPoints` nodes and
 deterministic retained tracks:
 
 - [`generative_point_cloud.w`](../examples/animations/generative_point_cloud.w)
-  retains 10,000 continuously parameterized source points per dense frame and
-  records the expression's 720-step mathematical period;
+  translates [ア / A-na5's original sketch](https://x.com/yuruyurau/status/2086396764580634879),
+  retaining 10,000 continuously parameterized source points per dense frame
+  and recording the expression's 720-step mathematical period;
 - [`cosine_lattice_point_cloud.w`](../examples/animations/cosine_lattice_point_cloud.w)
-  retains an 8,200-point, 41-row quantized lattice;
+  translates [@yuruyurau's 8,200-point original](https://x.com/yuruyurau/status/2086405262936768716)
+  into a 41-row quantized lattice;
 - [`singular_tangent_point_cloud.w`](../examples/animations/singular_tangent_point_cloud.w)
-  uses source `y = i / 233` and alpha 96/255, retaining 19,800 of 20,000
-  samples after omitting the exact `k = 0` column;
+  translates [@yuruyurau's `y = i / 233` original](https://x.com/yuruyurau/status/2086124813534605701)
+  at alpha 96/255, retaining 19,800 of 20,000 samples after omitting the exact
+  `k = 0` column;
 - [`double_phase_tangent_point_cloud.w`](../examples/animations/double_phase_tangent_point_cloud.w)
-  uses source `y = i / 250`, alpha 66/255, and a `-2t` harmonic, likewise
-  retaining 19,800 of 20,000 samples;
+  translates [@yuruyurau's related `y = i / 250` original](https://x.com/yuruyurau/status/2086123857967190062),
+  with alpha 66/255 and a `-2t` harmonic, likewise retaining 19,800 of 20,000
+  samples;
 - [`near_pole_point_cloud.w`](../examples/animations/near_pole_point_cloud.w)
   translates [ア / A-na5's original `#つぶやきProcessing` sketch](https://x.com/yuruyurau/status/2087125958272909624),
   retaining all 10,000 ordered samples—including finite excursions near the
   formula's formal `1/k` pole—and records that the source license is not stated;
 - [`yin_yang_koi_point_cloud.w`](../examples/animations/yin_yang_koi_point_cloud.w)
-  applies one compact Vogel/comma expression to paired formula indices,
-  producing two surreal koi as exact central reflections in one ordered point
-  cloud;
+  applies one original Tungsten Vogel/comma expression to paired formula
+  indices, producing two surreal koi as exact central reflections in one
+  ordered point cloud rather than transcribing an external sketch;
 - [`uncertain_light_flame_point_cloud.w`](../examples/animations/uncertain_light_flame_point_cloud.w)
   is an original equation-driven, three-contour stitched flame intended for
   [The Book of Uncertain Light](https://uncertainlight.com/), with a

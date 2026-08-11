@@ -1,6 +1,12 @@
-# A deterministic, retained-data translation of the supplied p5/dwitter
-# point-cloud sketch. Core Animation describes frames; the optional point
-# preview below can open a native window without becoming part of that data.
+# A deterministic retained-data translation of the original p5.js sketch by
+# ア / A-na5 (@yuruyurau), posted August 9, 2026:
+# https://x.com/yuruyurau/status/2086396764580634879
+#
+# The author asks ports to link back to the original:
+# https://x.com/yuruyurau/status/2079938925720985812
+# No license is stated on the source post, so this example records attribution
+# without inferring a license grant. Core Animation describes frames; the
+# optional point preview can open a native window without changing that data.
 
 use core/animation/point_preview
 
@@ -60,12 +66,40 @@ use core/animation/point_preview
     ~400.0, ~400.0, "#090909", nil,
     {
       :title => "Generative point cloud",
+      :source_kind => :tweet_p5_point_sketch,
+      :source_author => "ア / A-na5",
+      :source_handle => "@yuruyurau",
+      :source_profile_url => "https://x.com/yuruyurau",
+      :source_post_url =>
+        "https://x.com/yuruyurau/status/2086396764580634879",
+      :source_attribution_request_url =>
+        "https://x.com/yuruyurau/status/2079938925720985812",
+      :source_published_at => "2026-08-09T10:18:46Z",
+      :source_hashtag => "#つぶやきProcessing",
+      :source_license => :not_stated,
+      :source_formula_sha256 =>
+        "d4945a2c145349c123f1adfd4ce8c8ac1f20527a4a97ee6d051b666f80d41247",
+      :source_formula_hash_normalization =>
+        :two_code_lines_lf_no_trailing_lf_without_hashtag_comment,
+      :source_canvas => [400, 400],
+      :source_media_viewport => [800, 800],
+      :source_media_duration_seconds => 12,
+      :source_point_count => 10_000,
+      :source_stroke_alpha_byte => 66,
+      :source_y_divisor => 43,
       :source_coordinate_system => :p5_canvas,
       :geometry_coordinate_system => :cartesian_y_up
     })
   scene.add(Plot.points(
     first_points, ~0.5, "point-cloud", point_style,
-    {:point_count => point_count}))
+    {
+      :point_count => point_count,
+      :source_author => "ア / A-na5",
+      :source_handle => "@yuruyurau",
+      :source_post_url =>
+        "https://x.com/yuruyurau/status/2086396764580634879",
+      :source_license => :not_stated
+    }))
 
   frame_intervals = retained_frames - 1
   duration = frame_intervals.to_f() / fps.to_f()
@@ -111,6 +145,7 @@ use core/animation/point_preview
 # with retained_frames * point_count.
 timeline = generative_point_cloud(1_000, 5)
 point_node = timeline.scene.node("point-cloud")
+point_metadata = point_node.metadata
 samples = timeline.tracks[0].keyframes
 first_point = samples[0].value[0]
 last_point = samples[samples.size - 1].value[0]
@@ -136,6 +171,12 @@ period_steps = (phase_step * ~720.0 - ~36.0 * pi).abs < ~1.0e-12
 period_ok = half_moved && period_return && period_steps
 raise "generative point-cloud mathematical period changed" if !period_ok
 
+attribution_ok = point_metadata[:source_author] == "ア / A-na5"
+attribution_ok = attribution_ok && point_metadata[:source_handle] == "@yuruyurau"
+attribution_ok = attribution_ok && point_metadata[:source_post_url] == "https://x.com/yuruyurau/status/2086396764580634879"
+attribution_ok = attribution_ok && point_metadata[:source_license] == :not_stated
+raise "generative point-cloud source attribution changed" if !attribution_ok
+
 << "frames: [timeline.frame_count]"
 << "fps: [timeline.fps]"
 << "points per frame: [point_node.points.size]"
@@ -143,6 +184,7 @@ raise "generative point-cloud mathematical period changed" if !period_ok
 << "point motion: [point_moved]"
 << "formula anchors: ok"
 << "mathematical period: ok"
+<< "source attribution: ア / A-na5 (@yuruyurau)"
 
 if ARGV.include?("--window") || ARGV.include?("--window-smoke")
   window_timeline = ARGV.include?("--window-smoke") ? timeline : generative_point_cloud()
@@ -159,3 +201,4 @@ if ARGV.include?("--window") || ARGV.include?("--window-smoke")
 ## point motion: true
 ## formula anchors: ok
 ## mathematical period: ok
+## source attribution: ア / A-na5 (@yuruyurau)

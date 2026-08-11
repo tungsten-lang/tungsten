@@ -1,8 +1,12 @@
-# A deterministic retained-data translation of the fourth supplied p5/dwitter
-# point-cloud sketch. Its q term advances at twice the base phase while the
-# viewing term advances at one quarter phase. The k=0 source column is
-# non-finite, so the example omits exactly those samples and retains every
-# other finite coordinate unchanged.
+# A deterministic retained-data translation of the original p5.js sketch by
+# ア / A-na5 (@yuruyurau), posted August 8, 2026:
+# https://x.com/yuruyurau/status/2086123857967190062
+#
+# The author asks ports to link back to the original:
+# https://x.com/yuruyurau/status/2079938925720985812
+# No license is stated on the source post, so this example records attribution
+# without inferring a license grant. Its q term advances at twice the base
+# phase; the non-finite k=0 source column is omitted from portable geometry.
 
 use core/animation/point_preview
 
@@ -68,6 +72,27 @@ use core/animation/point_preview
     ~400.0, ~400.0, "#090909", nil,
     {
       :title => "Double-phase tangent point cloud",
+      :source_kind => :tweet_p5_point_sketch,
+      :source_author => "ア / A-na5",
+      :source_handle => "@yuruyurau",
+      :source_profile_url => "https://x.com/yuruyurau",
+      :source_post_url =>
+        "https://x.com/yuruyurau/status/2086123857967190062",
+      :source_attribution_request_url =>
+        "https://x.com/yuruyurau/status/2079938925720985812",
+      :source_published_at => "2026-08-08T16:14:20Z",
+      :source_hashtag => "#つぶやきProcessing",
+      :source_license => :not_stated,
+      :source_formula_sha256 =>
+        "3eb5582ae8b65c4fa77da16aeda6a8fb899ccbd38d24db90bcc99bbd6ffbd68f",
+      :source_formula_hash_normalization =>
+        :two_code_lines_lf_no_trailing_lf_without_hashtag_comment,
+      :source_canvas => [400, 400],
+      :source_media_viewport => [800, 800],
+      :source_media_duration_seconds => 8,
+      :source_point_count => 20_000,
+      :source_stroke_alpha_byte => 66,
+      :source_y_divisor => 250,
       :source_coordinate_system => :p5_canvas,
       :geometry_coordinate_system => :cartesian_y_up,
       :source_renderer_clips_to_viewport => true,
@@ -85,7 +110,12 @@ use core/animation/point_preview
       :point_order => :descending_index,
       :row_width => 100,
       :source_y_divisor => 250,
-      :source_alpha_byte => 66
+      :source_alpha_byte => 66,
+      :source_author => "ア / A-na5",
+      :source_handle => "@yuruyurau",
+      :source_post_url =>
+        "https://x.com/yuruyurau/status/2086123857967190062",
+      :source_license => :not_stated
     }))
 
   frame_intervals = retained_frames - 1
@@ -177,6 +207,12 @@ full_cycle_closed = full_x_closed && full_y_closed
 raise "double-phase tangent half-cycle unexpectedly closed" if !half_cycle_moved
 raise "double-phase tangent mathematical period changed" if !full_cycle_closed
 
+attribution_ok = point_metadata[:source_author] == "ア / A-na5"
+attribution_ok = attribution_ok && point_metadata[:source_handle] == "@yuruyurau"
+attribution_ok = attribution_ok && point_metadata[:source_post_url] == "https://x.com/yuruyurau/status/2086123857967190062"
+attribution_ok = attribution_ok && point_metadata[:source_license] == :not_stated
+raise "double-phase tangent source attribution changed" if !attribution_ok
+
 << "frames: [timeline.frame_count]"
 << "fps: [timeline.fps]"
 << "source samples: [point_metadata[:source_sample_count]]"
@@ -187,6 +223,7 @@ raise "double-phase tangent mathematical period changed" if !full_cycle_closed
 << "point motion: [point_moved]"
 << "formula anchors: ok"
 << "mathematical period: ok"
+<< "source attribution: ア / A-na5 (@yuruyurau)"
 
 if ARGV.include?("--window") || ARGV.include?("--window-smoke")
   window_timeline = ARGV.include?("--window-smoke") ? timeline : double_phase_tangent_point_cloud()
@@ -206,3 +243,4 @@ if ARGV.include?("--window") || ARGV.include?("--window-smoke")
 ## point motion: true
 ## formula anchors: ok
 ## mathematical period: ok
+## source attribution: ア / A-na5 (@yuruyurau)

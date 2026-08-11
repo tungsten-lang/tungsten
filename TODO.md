@@ -220,9 +220,17 @@ projects stay unchecked until their stated acceptance criteria are met.
     the self-hosted reference/packed pair.
   - [x] Valid/invalid acceptance checks plus execution parity across Ruby,
     self-hosted, and the C VM for the shared arithmetic/control-flow subset.
-  - [ ] Normalize and compare full parser ASTs across implementations, broaden
-    the grammar beyond the shared subset, and promote every minimized failure
-    into a committed regression fixture before calling this complete.
+  - [x] Compare complete normalized AST trees for every generated valid source
+    across the Ruby, self-hosted packed, and fast C parsers. The canonical C
+    view is generated from the AST schema, so omitted nil fields and hash
+    insertion order cannot hide or invent disagreements.
+  - [x] Broaden the shared grammar through grouped expressions, arrays,
+    indexing/calls, and `while`/compound-assignment loops. Promote each observed
+    minimized disagreement into a committed fixture (the first caught a
+    same-indent token-column reset in the Ruby regex lexer).
+  - [ ] Extend the Ruby normalization adapter and generator through definitions,
+    classes/traits, blocks, exception handling, and the remaining literal
+    families before calling the differential campaign complete.
 - [ ] Add a GPU-kernel type/subset pre-pass at check time. Batch unsupported
   statements, bad address spaces, shape errors, and dialect-only intrinsics
   before invoking `metal` or `nvcc`.

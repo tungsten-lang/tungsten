@@ -474,7 +474,7 @@ if [ "$1" = "--interpret" ]; then
   exec "$RUBY" "$RUBY_CLI" --ruby "$@"
 fi
 
-# `--check` / `-c` / `--ast` / `--lex` / `--tags` are frontend modes
+# `--check` / `-c` / `--ast` / `--canonical-ast` / `--lex` / `--tags` are frontend modes
 # implemented by the compiled stage-2 compiler. Route them straight to that
 # compiler so checking recognizes exactly the language that can be executed;
 # the Ruby parser is only the fresh-clone fallback.
@@ -484,7 +484,7 @@ fi
 # binary — the Ruby CLI's handling is stale. Falls back to Ruby only if the
 # compiled binary hasn't been built yet.
 case "$1" in
-  -c|--check|--ast|--lex|--tags)
+  -c|--check|--ast|--canonical-ast|--lex|--tags)
     if [ -x "$COMPILER" ]; then
       exec "$COMPILER" "$@"
     else

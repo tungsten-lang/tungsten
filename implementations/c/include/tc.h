@@ -821,6 +821,7 @@ TcAstValue tc_ast_clone(TcAstValue value, TcError *err);
 int tc_ast_array_push(TcAstValue array, TcAstValue value, TcError *err);
 int tc_ast_hash_set(TcAstValue hash, const char *key, TcAstValue value, TcError *err);
 void tc_ast_free(TcAstValue value);
+void tc_ast_print_canonical(TcAstValue value, FILE *out);
 void tc_ast_print(TcAstValue value, FILE *out);
 // `flags` and `flags_len` are the same lex64 table used by the outer
 // tc_source_build/tc_lex_source pipeline. They're forwarded into the

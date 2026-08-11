@@ -48,6 +48,7 @@ _tungsten() {
             '--target[Target triple]:triple' \
             '--fast[Enable fast non-IEEE floating-point]' \
             '--ast[Print the AST and exit]' \
+            '--canonical-ast[Print a stable machine-readable AST and exit]' \
             '--lex[Print tokens and exit]' \
             '-v[Verbose output]' \
             '*:tungsten source:_files -g "*.w"'

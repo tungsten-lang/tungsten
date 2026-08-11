@@ -10,7 +10,7 @@ SYNOPSIS
     tungsten [command] [options] [file] -- [arguments]
 
     tungsten [--check] [--debug] [--eval] [--lex] [--parse] [--profile]
-             [--ast] [--wire] [--ll]
+             [--ast] [--canonical-ast] [--wire] [--ll]
              [-I dir]
              [-e expression | file...] [--] [arguments]
 
@@ -89,6 +89,10 @@ OPTIONS
 
         --ast
         Print the abstract syntax tree (AST). Does not run the program.
+
+        --canonical-ast
+        Print a stable, source-location-free AST encoding for differential
+        frontend tests and other machine comparisons. Does not run the program.
 
     -a, --autosplit
 

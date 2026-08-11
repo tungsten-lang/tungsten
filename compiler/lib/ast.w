@@ -668,6 +668,75 @@ in Tungsten:AST
       i += 1
   line + "\n" + rest
 
+# Stable, machine-readable AST encoding for cross-frontend differential tests.
+# It deliberately omits source locations but preserves node kinds, field kinds,
+# nil/empty fields, scalar types, and array structure. Strings and keys are
+# byte-length-prefixed, so arbitrary source text needs no escaping.
+-> ast_canonical_key(name)
+  key = name.to_s()
+  "k" + key.size().to_s() + ":" + key
+
+-> ast_canonical_value(value)
+  if value == nil
+    return "n;"
+  if is_ast_node?(value)
+    return ast_to_canonical(value)
+  value_type = type(value)
+  if value_type == "Array"
+    out = StringBuffer(32)
+    # `[` starts string interpolation unless escaped in Tungsten source.
+    out << "a\["
+    i = 0
+    while i < value.size()
+      out << ast_canonical_value(value[i])
+      i += 1
+    out << "]"
+    return out.to_s()
+  if value_type == "Hash"
+    out = StringBuffer(32)
+    out << "h{"
+    keys = value.keys()
+    i = 0
+    while i < keys.size()
+      key = keys[i]
+      if key != :line && key != :loc && key != :loc_end
+        out << ast_canonical_key(key)
+        out << ast_canonical_value(value[key])
+      i += 1
+    out << "}"
+    return out.to_s()
+  if value_type == "String"
+    return "s" + value.size().to_s() + ":" + value
+  if value_type == "Symbol"
+    text = value.to_s()
+    return "y" + text.size().to_s() + ":" + text
+  if value_type == "Boolean"
+    return value ? "b1;" : "b0;"
+  if value_type == "Integer"
+    return "i" + value.to_s() + ";"
+  text = value.to_s()
+  "o" + value_type.size().to_s() + ":" + value_type + text.size().to_s() + ":" + text
+
+-> ast_to_canonical(node)
+  if !is_ast_node?(node)
+    return ast_canonical_value(node)
+  out = StringBuffer(64)
+  out << "h{"
+  out << ast_canonical_key(:node)
+  out << ast_canonical_value(ast_kind(node))
+  kind_id = kind_id_table[ast_kind(node)]
+  keys = kind_id == nil ? nil : slab_keys_table[kind_id]
+  if keys != nil
+    i = 0
+    while i < keys.size()
+      key = keys[i]
+      if key != :line && key != :loc && key != :loc_end
+        out << ast_canonical_key(key)
+        out << ast_canonical_value(ast_get(node, key))
+      i += 1
+  out << "}"
+  out.to_s()
+
 # Collect every Array-valued field of `node` (the Array itself, not
 # its elements). Used by AST rewriters that descend into bodies/
 # then_body/else_body looking for nested loops — they need the Array

@@ -288,6 +288,7 @@ they build the self-hosted compiler; they are not the product runtime.
 bin/tungsten start --agent          # this primer + absolute doc paths
 bin/tungsten -c file.w              # syntax / lower check (exit code)
 bin/tungsten --ast file.w           # AST dump
+bin/tungsten --canonical-ast file.w # stable AST for machine comparison
 bin/tungsten --lex file.w           # tokens
 bin/tungsten --ll file.w            # LLVM IR
 TUNGSTEN_ERROR_FORMAT=json bin/tungsten -c file.w   # structured errors

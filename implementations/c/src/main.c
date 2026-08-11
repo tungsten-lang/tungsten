@@ -10,7 +10,7 @@ typedef struct {
 } PathSet;
 
 static void usage(FILE *out) {
-  fputs("usage: tungsten-c [--tokens] [--syntax-tokens] [--dump-ast] [--dump-bytecode] [-e source | file]\n", out);
+  fputs("usage: tungsten-c [--tokens] [--syntax-tokens] [--dump-ast|--canonical-ast] [--dump-bytecode] [-e source | file]\n", out);
 }
 
 static TcAstValue *main_ast_get(TcAstValue hash, const char *key) {
@@ -246,6 +246,7 @@ int main(int argc, char **argv) {
   int check_syntax_tokens = 0;
   int check_parse = 0;
   int dump_ast = 0;
+  int canonical_ast = 0;
   int check_ast = 0;
   const char *eval = NULL;
   const char *path = NULL;
@@ -275,6 +276,7 @@ int main(int argc, char **argv) {
       check_parse = 1;
     }
     else if (strcmp(argv[i], "--dump-ast") == 0) dump_ast = 1;
+    else if (strcmp(argv[i], "--canonical-ast") == 0) canonical_ast = 1;
     else if (strcmp(argv[i], "--check-ast") == 0) check_ast = 1;
     else if (strcmp(argv[i], "--dump-bytecode") == 0) dump_bytecode = 1;
     else if (strcmp(argv[i], "-e") == 0) {
@@ -337,7 +339,7 @@ int main(int argc, char **argv) {
     goto fail;
   }
   if (dump_syntax_tokens) tc_dump_syntax_tokens(&source, &syntax_tokens);
-  if (tokens_only || check_lex || check_syntax_tokens || check_parse || dump_ast || check_ast) {
+  if (tokens_only || check_lex || check_syntax_tokens || check_parse || dump_ast || canonical_ast || check_ast) {
     if (check_lex) printf("tokens=%zu\n", tokens.count);
     if (check_syntax_tokens) {
       size_t unknown = 0;
@@ -362,7 +364,7 @@ int main(int argc, char **argv) {
       }
       printf("parse=ok syntax_tokens=%zu\n", syntax_tokens.count);
     }
-    if (dump_ast || check_ast) {
+    if (dump_ast || canonical_ast || check_ast) {
       TcAstValue ast;
       TcAstStats stats;
       if (!tc_parse_bootstrap_ast(&source, &syntax_tokens, &ast, &stats, flags, flags_len, &err)) {
@@ -373,6 +375,10 @@ int main(int argc, char **argv) {
       }
       if (dump_ast) {
         tc_ast_print(ast, stdout);
+        fputc('\n', stdout);
+      }
+      if (canonical_ast) {
+        tc_ast_print_canonical(ast, stdout);
         fputc('\n', stdout);
       }
       if (check_ast) {

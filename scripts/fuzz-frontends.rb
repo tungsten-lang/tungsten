@@ -69,6 +69,113 @@ def command_result(*command, env: {})
   [status, stdout, stderr]
 end
 
+RUBY_BINARY_OPS = {
+  "+" => :PLUS,
+  "-" => :MINUS,
+  "*" => :STAR,
+  "/" => :SLASH,
+  "%" => :PERCENT,
+  "<" => :LT,
+  "<=" => :LTE,
+  ">" => :GT,
+  ">=" => :GTE,
+  "==" => :EQ,
+  "!=" => :NEQ
+}.freeze
+
+def ruby_body_wire(body)
+  body.list.map { |node| ruby_ast_wire(node) }
+end
+
+def ruby_ast_wire(node)
+  case node
+  when Tungsten::AST::ArrayLiteral
+    {node: :array, elements: node.list.map { |item| ruby_ast_wire(item) }}
+  when Tungsten::AST::List
+    {node: :program, expressions: ruby_body_wire(node)}
+  when Tungsten::AST::Assign
+    {node: :assign, target: ruby_ast_wire(node.name), value: ruby_ast_wire(node.value), type_hint: node.type_hint}
+  when Tungsten::AST::Var
+    {node: :var, name: node.name}
+  when Tungsten::AST::Int
+    {node: :int, value: node.value, format: nil, raw: node.value.to_s}
+  when Tungsten::AST::BinaryOp
+    operator = RUBY_BINARY_OPS.fetch(node.operator.to_s)
+    {node: :binary_op, left: ruby_ast_wire(node.left), op: operator, right: ruby_ast_wire(node.right)}
+  when Tungsten::AST::AssignOp
+    operator = RUBY_BINARY_OPS.fetch(node.operator.to_s)
+    {node: :compound_assign, target: ruby_ast_wire(node.name), op: operator, value: ruby_ast_wire(node.value)}
+  when Tungsten::AST::Call
+    {
+      node: :call,
+      receiver: node.obj && ruby_ast_wire(node.obj),
+      name: node.name,
+      args: node.args.map { |arg| ruby_ast_wire(arg) },
+      block: node.block && ruby_ast_wire(node.block)
+    }
+  when Tungsten::AST::Print
+    {node: :puts, value: node.args.map { |arg| ruby_ast_wire(arg) }}
+  when Tungsten::AST::If
+    {
+      node: :if,
+      condition: ruby_ast_wire(node.condition),
+      then_body: ruby_body_wire(node.then_block),
+      elsif_clauses: [],
+      else_body: ruby_body_wire(node.else_block)
+    }
+  when Tungsten::AST::While
+    {node: :while, condition: ruby_ast_wire(node.condition), body: ruby_body_wire(node.body)}
+  else
+    raise "unsupported Ruby AST node in differential grammar: #{node.class}"
+  end
+end
+
+def canonical_key(key)
+  text = key.to_s
+  "k#{text.bytesize}:#{text}"
+end
+
+def canonical_value(value)
+  case value
+  when nil
+    "n;"
+  when true
+    "b1;"
+  when false
+    "b0;"
+  when Integer
+    "i#{value};"
+  when String
+    "s#{value.bytesize}:#{value}"
+  when Symbol
+    text = value.to_s
+    "y#{text.bytesize}:#{text}"
+  when Array
+    "a[#{value.map { |item| canonical_value(item) }.join}]"
+  when Hash
+    fields = value.map { |key, item| canonical_key(key) + canonical_value(item) }.join
+    "h{#{fields}}"
+  else
+    raise "unsupported canonical value: #{value.class}"
+  end
+end
+
+def ruby_ast_result(source)
+  [0, canonical_value(ruby_ast_wire(Tungsten.parse(source))) + "\n", ""]
+rescue StandardError => error
+  [1, "", "#{error.class}: #{error.message}\n"]
+end
+
+def ast_disagreement(path, source)
+  env = {"TUNGSTEN_LEX64_TABLE" => LEX_TABLE}
+  ruby = ruby_ast_result(source)
+  self_hosted = command_result(TUNGSTEN, "--canonical-ast", path)
+  c_vm = command_result(C_VM, "--canonical-ast", path, env: env)
+  return nil if ruby == self_hosted && ruby == c_vm
+
+  "canonical AST mismatch\nruby=#{ruby.inspect}\nself_hosted=#{self_hosted.inspect}\nc_vm=#{c_vm.inspect}"
+end
+
 def execution_disagreement(path)
   env = {"TUNGSTEN_LEX64_TABLE" => LEX_TABLE}
   ruby = command_result(TUNGSTEN, "run", "--ruby", path)
@@ -88,15 +195,37 @@ def valid_source(rng, index)
   name = "value_#{index}"
   other = "other_#{index}"
 
-  <<~W
-    #{name} = #{left}
-    #{other} = #{right}
-    << #{name} #{operator} #{factor}
-    if #{name} #{comparison} #{other}
-      << #{name} + #{other}
-    else
-      << #{name} - #{other}
-  W
+  case index % 3
+  when 0
+    <<~W
+      #{name} = #{left}
+      #{other} = #{right}
+      << (#{name} #{operator} #{factor})
+      if #{name} #{comparison} #{other}
+        << (#{name} + #{other}) * #{factor}
+      else
+        << #{name} - (#{other} % #{factor})
+    W
+  when 1
+    values = "values_#{index}"
+    <<~W
+      #{values} = [#{left}, #{right}, #{factor}]
+      << #{values}[1]
+      << #{values}[0] + #{values}[2]
+      << #{values}.size()
+    W
+  else
+    count = "count_#{index}"
+    total = "total_#{index}"
+    <<~W
+      #{count} = 0
+      #{total} = #{left}
+      while #{count} < #{factor}
+        #{total} += #{count}
+        #{count} += 1
+      << #{total}
+    W
+  end
 end
 
 def invalid_source(rng, index)
@@ -205,6 +334,10 @@ cases.each_with_index do |(kind, source, valid), index|
     checks << ["valid-accept", lambda do |candidate|
       candidate_path = write_case("minimize", index, candidate)
       valid_acceptance_disagreement(candidate_path)
+    end]
+    checks << ["ast", lambda do |candidate|
+      candidate_path = write_case("minimize", index, candidate)
+      ast_disagreement(candidate_path, candidate)
     end]
     checks << ["execution", lambda do |candidate|
       candidate_path = write_case("minimize", index, candidate)

@@ -1,5 +1,8 @@
 #include "tc.h"
 
+#define W_AST_SCHEMA_INCLUDE_NAMES 1
+#include "ast_schema_generated.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -282,6 +285,92 @@ void tc_ast_print(TcAstValue value, FILE *out) {
         fputs(value.as.hash->items[i].key, out);
         fputs(" => ", out);
         tc_ast_print(value.as.hash->items[i].value, out);
+      }
+      fputc('}', out);
+      break;
+  }
+}
+
+static int canonical_skip_key(const char *key) {
+  return strcmp(key, "line") == 0 || strcmp(key, "loc") == 0 || strcmp(key, "loc_end") == 0;
+}
+
+static void canonical_key(const char *key, FILE *out) {
+  fprintf(out, "k%zu:", strlen(key));
+  fputs(key, out);
+}
+
+static const TcAstValue *canonical_hash_get(const TcAstHash *hash, const char *key) {
+  if (!hash) return NULL;
+  for (size_t i = 0; i < hash->count; i++) {
+    if (strcmp(hash->items[i].key, key) == 0) return &hash->items[i].value;
+  }
+  return NULL;
+}
+
+static int canonical_node_kind(const TcAstHash *hash) {
+  const TcAstValue *node = canonical_hash_get(hash, "node");
+  if (!node || (node->kind != TC_AST_STRING && node->kind != TC_AST_SYMBOL)) return -1;
+  for (uint32_t kind = 1; kind <= W_AST_KIND_MAX; kind++) {
+    const char *name = W_AST_KIND_NAME[kind];
+    if (name && strlen(name) == node->as.string.len &&
+        memcmp(name, node->as.string.bytes, node->as.string.len) == 0) {
+      return (int)kind;
+    }
+  }
+  return -1;
+}
+
+void tc_ast_print_canonical(TcAstValue value, FILE *out) {
+  switch (value.kind) {
+    case TC_AST_NIL:
+      fputs("n;", out);
+      break;
+    case TC_AST_BOOL:
+      fputs(value.as.boolean ? "b1;" : "b0;", out);
+      break;
+    case TC_AST_INT:
+      fprintf(out, "i%lld;", (long long)value.as.integer);
+      break;
+    case TC_AST_STRING:
+      fprintf(out, "s%zu:", value.as.string.len);
+      fwrite(value.as.string.bytes, 1, value.as.string.len, out);
+      break;
+    case TC_AST_SYMBOL:
+      fprintf(out, "y%zu:", value.as.string.len);
+      fwrite(value.as.string.bytes, 1, value.as.string.len, out);
+      break;
+    case TC_AST_ARRAY:
+      fputs("a[", out);
+      for (size_t i = 0; i < value.as.array->count; i++) {
+        tc_ast_print_canonical(value.as.array->items[i], out);
+      }
+      fputc(']', out);
+      break;
+    case TC_AST_HASH:
+      fputs("h{", out);
+      {
+        int kind = canonical_node_kind(value.as.hash);
+        if (kind >= 0) {
+          const TcAstValue *node = canonical_hash_get(value.as.hash, "node");
+          canonical_key("node", out);
+          tc_ast_print_canonical(*node, out);
+          for (uint8_t i = 0; i < W_AST_KIND_FIELD_COUNT[kind]; i++) {
+            const char *key = W_AST_KIND_FIELDS[kind][i];
+            if (canonical_skip_key(key)) continue;
+            canonical_key(key, out);
+            const TcAstValue *field = canonical_hash_get(value.as.hash, key);
+            tc_ast_print_canonical(field ? *field : tc_ast_nil(), out);
+          }
+          fputc('}', out);
+          break;
+        }
+      }
+      for (size_t i = 0; i < value.as.hash->count; i++) {
+        const char *key = value.as.hash->items[i].key;
+        if (canonical_skip_key(key)) continue;
+        canonical_key(key, out);
+        tc_ast_print_canonical(value.as.hash->items[i].value, out);
       }
       fputc('}', out);
       break;

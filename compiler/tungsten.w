@@ -46,6 +46,7 @@ if args.size() == 0
   << "  --ll             Write LLVM IR (.ll) next to the binary"
   << "  --emit-ll        Write LLVM IR and skip native linking"
   << "  --ast            Print the AST and exit"
+  << "  --canonical-ast  Print a stable machine-readable AST and exit"
   << "  --lex            Print tokens and exit"
   << "  --tags           Print the dispatch report and exit"
   << "  -e CODE          Evaluate a string of code"
@@ -61,6 +62,7 @@ emit_wire      = false
 tags_mode      = false
 verbose        = false
 show_ast       = false
+show_canonical_ast = false
 show_lex       = false
 wit_mode       = false
 jit_mode       = false
@@ -138,6 +140,7 @@ while i < args.size()
     << "  --emit-ll        Write LLVM IR and skip native linking"
     << "  --ast-stats      Print slab AST node counts after compiling"
     << "  --ast            Print the AST and exit"
+    << "  --canonical-ast  Print a stable machine-readable AST and exit"
     << "  --lex            Print tokens and exit"
     << "  -e CODE          Evaluate a string of code"
     << "  -v, --verbose    Verbose output / print version"
@@ -224,6 +227,8 @@ while i < args.size()
     << "tungsten version 2026.07.04"
   elsif arg == "--ast"
     show_ast = true
+  elsif arg == "--canonical-ast"
+    show_canonical_ast = true
   elsif arg == "--lex"
     show_lex = true
   elsif arg == "--wit"
@@ -1978,14 +1983,17 @@ if eval_code != nil
 
     exit 0
 
-  if show_ast
+  if show_ast || show_canonical_ast
     begin
       eval_code = ccall("w_algebra_rewrite_source", eval_code)
       lexer = Lexer.new(eval_code, "(eval)")
       token_count = lexer.tokenize()
       parser = Parser.new(token_count, lexer.packed_tokens, eval_code, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
       ast = parser.parse()
-      << ast_to_tree(ast, "")
+      if show_canonical_ast
+        << ast_to_canonical(ast)
+      else
+        << ast_to_tree(ast, "")
     rescue err
       if report_frontend_error(err, "(eval)")
         exit 1
@@ -2014,7 +2022,7 @@ if file_path == nil && command != "compile-batch"
   << "Missing input file"
   exit 1
 
-# Handle --lex and --ast for files
+# Handle --lex and AST inspection for files
 if show_lex
   begin
     source = read_file(file_path)
@@ -2037,7 +2045,7 @@ if show_lex
 
   exit 0
 
-if show_ast
+if show_ast || show_canonical_ast
   begin
     source = read_file(file_path)
     source = ccall("w_algebra_rewrite_source", source)
@@ -2045,7 +2053,10 @@ if show_ast
     token_count = lexer.tokenize()
     parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
     ast = parser.parse()
-    << ast_to_tree(ast, "")
+    if show_canonical_ast
+      << ast_to_canonical(ast)
+    else
+      << ast_to_tree(ast, "")
   rescue err
     if report_frontend_error(err, file_path)
       exit 1

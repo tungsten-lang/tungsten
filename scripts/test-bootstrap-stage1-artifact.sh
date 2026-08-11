@@ -40,6 +40,7 @@ lex64_table="$source_tree/languages/tungsten/tungsten.lex64"
 mkdir -p \
   "$source_tree/compiler/lib" \
   "$source_tree/core/numeric" \
+  "$source_tree/data" \
   "$source_tree/languages/tungsten/lexers"
 printf 'compiler\n' > "$compiler_w"
 printf 'lexer\n' > "$lex64_table"
@@ -48,6 +49,7 @@ printf 'compiler z\n' > "$source_tree/compiler/lib/z.w"
 printf 'core a\n' > "$source_tree/core/a.w"
 printf 'core numeric b\n' > "$source_tree/core/numeric/b.w"
 printf 'ignored\n' > "$source_tree/core/ignored.txt"
+printf 'eV\n' > "$source_tree/data/unit_names.txt"
 printf 'lexer helper a\n' > "$source_tree/languages/tungsten/lexers/a.w"
 printf 'lexer helper z\n' > "$source_tree/languages/tungsten/lexers/z.w"
 
@@ -58,6 +60,7 @@ bootstrap_stage1_source_inputs \
 printf '%s\n' \
   "$compiler_w" \
   "$lex64_table" \
+  "$source_tree/data/unit_names.txt" \
   "$source_tree/compiler/lib/a.w" \
   "$source_tree/compiler/lib/z.w" \
   "$source_tree/core/a.w" \
@@ -92,6 +95,16 @@ identity_after_lexer_change="$(
 )"
 if [ "$identity_after" = "$identity_after_lexer_change" ]; then
   printf 'FAIL: a lexer helper edit did not change stage-1 source identity\n' >&2
+  exit 1
+fi
+
+printf 'mmHg\n' >> "$source_tree/data/unit_names.txt"
+identity_after_unit_change="$(
+  bootstrap_stage1_source_manifest \
+    "$source_tree" "$compiler_w" "$lex64_table"
+)"
+if [ "$identity_after_lexer_change" = "$identity_after_unit_change" ]; then
+  printf 'FAIL: a unit-name registry edit did not change stage-1 source identity\n' >&2
   exit 1
 fi
 

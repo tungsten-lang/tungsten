@@ -1284,7 +1284,7 @@ skip_bits = skip_bits_requested || (!bit_only && (stage0_only || stage1_only || 
 
 -> c_vm_dependency_files
   files = []
-  patterns = capture("ls " + shq(C_INTERP_DIR) + "/src/*.c " + shq(C_INTERP_DIR) + "/src/*.inc " + shq(C_INTERP_DIR) + "/include/*.h 2>/dev/null").split("\n")
+  patterns = capture("ls " + shq(C_INTERP_DIR) + "/src/*.c " + shq(C_INTERP_DIR) + "/src/*.inc " + shq(C_INTERP_DIR) + "/include/*.h " + shq(C_INTERP_DIR) + "/include/*.inc 2>/dev/null").split("\n")
   i = 0
   while i < patterns.size
     if patterns[i].strip != ""
@@ -1443,6 +1443,7 @@ compiler_source_paths.push(compiler_dir_name + "/tungsten.w")
 compiler_source_paths.push(compiler_dir_name + "/lib")
 compiler_source_paths.push("core")
 compiler_source_paths.push("languages/tungsten/lexers")
+compiler_source_paths.push("data/unit_names.txt")
 
 if !bit_only
   stage1 = build_scratch_dir + "/tungsten.wc"
@@ -1490,12 +1491,15 @@ if !bit_only
     << ""
     << BOLD + "==> Stage 1: implementations/c VM compiles tungsten.w" + RESET
     stage1_started = clock_ms()
-    # Fixed-point builds always use the canonical parser (fast parse
-    # intentionally emits different stage-1 IR).
+    # The fast C parser is byte-identical at the stage-1 IR boundary; the
+    # focused fast-parse parity gate compares it against the canonical path.
     s1_keys = probe_keys + []
     s1_vals = probe_vals + []
     s1_keys.push("TUNGSTEN_C_FAST_PARSE")
-    s1_vals.push("0")
+    stage1_fast_parse = env_or_empty("TUNGSTEN_C_FAST_PARSE")
+    if stage1_fast_parse == ""
+      stage1_fast_parse = "1"
+    s1_vals.push(stage1_fast_parse)
     s1_keys.push("TUNGSTEN_CLANG_OPT")
     s1_vals.push("-O0")
     s1_keys.push("TUNGSTEN_LEX64_TABLE")

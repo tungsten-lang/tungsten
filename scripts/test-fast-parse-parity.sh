@@ -16,8 +16,8 @@
 # by a compiler whose own source was loaded through the fast path — is a
 # real oracle.
 #
-# This script is the gate for flipping TUNGSTEN_C_FAST_PARSE back to 1 in
-# bin/commands/bootstrap.sh: do not flip the default until this passes.
+# This script protects the TUNGSTEN_C_FAST_PARSE=1 bootstrap/build default.
+# Any divergence must disable the default until this gate passes again.
 #
 # Exit codes: 0 = parity + acid test pass; 1 = divergence or build/compile
 # failure; 2 = missing prerequisite (run `bin/tungsten build --no-bits`).

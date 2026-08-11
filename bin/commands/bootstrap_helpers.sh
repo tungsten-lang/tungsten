@@ -9,7 +9,7 @@ bootstrap_stage1_source_inputs() {
   local compiler_w="$2"
   local lex64_table="$3"
 
-  printf '%s\n' "$compiler_w" "$lex64_table"
+  printf '%s\n' "$compiler_w" "$lex64_table" "$root/data/unit_names.txt"
   find "$root/compiler/lib" -type f -name '*.w' -print | LC_ALL=C sort
   find "$root/core" -type f -name '*.w' -print | LC_ALL=C sort
   find "$root/languages/tungsten/lexers" \

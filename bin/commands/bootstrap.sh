@@ -466,11 +466,10 @@ export TUNGSTEN_ROOT="$ROOT"
 bootstrap_product_opt="$PROFILE_OPT"
 if [ "$DEBUG_ENABLED" -eq 1 ]; then bootstrap_product_opt="$bootstrap_product_opt -g"; fi
 export TUNGSTEN_CLANG_OPT="${TUNGSTEN_CLANG_OPT:-$bootstrap_product_opt}"
-# The bootstrap stage is handed directly to `tungsten build` for fixed-point
-# verification, so it must use the canonical parser just like an ordinary
-# build stage 1. The faster C parser remains available for explicit developer
-# experiments but cannot be the default at this identity boundary.
-export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-0}"
+# The C fast parser is byte-identical to the canonical parser at the stage-1
+# IR boundary; scripts/test-fast-parse-parity.sh keeps that invariant pinned.
+# Set TUNGSTEN_C_FAST_PARSE=0 to diagnose against the canonical path.
+export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-1}"
 
 export TUNGSTEN_ZSTD_CFLAGS="$zstd_cflags"
 export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"

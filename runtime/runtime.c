@@ -15866,6 +15866,109 @@ static int w_p10c_five_3q_build(int j) {
     return 1;
 }
 
+/* Exact-midpoint odd parts 5^(18·m) for the D&C parser, keyed by the chunk
+ * count m in a small round-robin TLS cache.  The ladder rescues above (half
+ * or 3/4 of a level) can only reach splits the binary ladder expresses;
+ * splitting at half the 18-digit chunk count reproduces the per-length
+ * power table GMP derives on every mpn_set_str call, with near-equal
+ * children at every node.  Only the odd part is cached: the parser's
+ * combine multiplies by 5^p and shifts — it never divides by the midpoint
+ * power, so no Barrett reciprocal accompanies these entries.  m always has
+ * ≤3 set bits (the caller rounds), so a miss assembles the power from
+ * already-cached ladder levels in at most two dispatch multiplies; entries
+ * persist for the thread's lifetime like the ladder itself, so repeated
+ * same-shape parses pay the build once — the cost GMP re-pays per call. */
+#define W_FROM_S_MID_SLOTS 8
+static __thread uint64_t  w_p10c_mid_m[W_FROM_S_MID_SLOTS];
+static __thread uint64_t *w_p10c_mid[W_FROM_S_MID_SLOTS];
+static __thread int32_t   w_p10c_mid_len[W_FROM_S_MID_SLOTS];
+static __thread int       w_p10c_mid_next;
+/* BN_FROMSTR_MID: 0 = off (ladder rescues only), 1 = build a midpoint
+ * power on first sighting (default; a cold build is ≤2 multiplies against
+ * far smaller operands than the level-j square the ladder path grows and
+ * then abandons), 2 = build only on the second sighting of a shape, like
+ * the reciprocal cache's warmup. */
+static int w_from_s_mid_policy(void) {
+    static __thread int policy = -1;
+    if (policy < 0) {
+        const char *value = getenv("BN_FROMSTR_MID");
+        int v = value ? atoi(value) : 1;
+        policy = (v >= 0 && v <= 2) ? v : 1;
+    }
+    return policy;
+}
+static const uint64_t *w_p10c_mid_get(uint64_t m, int32_t *n_out) {
+    int slot = -1;
+    for (int i = 0; i < W_FROM_S_MID_SLOTS; i++) {
+        if (w_p10c_mid_m[i] == m) {
+            if (w_p10c_mid[i]) {
+                *n_out = w_p10c_mid_len[i];
+                return w_p10c_mid[i];
+            }
+            slot = i;                    /* sighting marker from warmup */
+        }
+    }
+    int b1 = 63 - __builtin_clzll(m);
+    uint64_t rest = m ^ (1ULL << b1);
+    if (rest && slot < 0 && w_from_s_mid_policy() == 2) {
+        /* Warmup: record the first sighting in an empty slot and decline;
+         * the parse falls back to the ladder rescue.  Pure ladder powers
+         * (rest == 0) skip warmup — they cost nothing extra to serve. */
+        slot = w_p10c_mid_next;
+        w_p10c_mid_next = (slot + 1) % W_FROM_S_MID_SLOTS;
+        free(w_p10c_mid[slot]);
+        w_p10c_mid[slot] = NULL;
+        w_p10c_mid_m[slot] = m;
+        return NULL;
+    }
+    while (w_p10c_top < b1)
+        if (!w_p10c_grow()) return NULL;
+    if (!w_p10c_five_build(b1)) return NULL;
+    if (!rest) {                         /* power of two: the ladder's own */
+        *n_out = w_p10c_five_len[b1];
+        return w_p10c_five[b1];
+    }
+    int b2 = 63 - __builtin_clzll(rest);
+    uint64_t rest2 = rest ^ (1ULL << b2);
+    int b3 = -1;
+    if (rest2) {
+        if (rest2 & (rest2 - 1)) return NULL;   /* >3 set bits: not ours */
+        b3 = 63 - __builtin_clzll(rest2);
+        if (!w_p10c_five_build(b3)) return NULL;
+    }
+    if (!w_p10c_five_build(b2)) return NULL;
+    int32_t n1 = w_p10c_five_len[b1];
+    int32_t n2 = w_p10c_five_len[b2];
+    int32_t n3 = b3 >= 0 ? w_p10c_five_len[b3] : 0;
+    uint64_t *f = (uint64_t *)malloc((size_t)(n1 + n2 + n3) * sizeof(uint64_t));
+    if (!f) return NULL;
+    int32_t n;
+    if (b3 < 0) {
+        bigint_mul_dispatch(f, w_p10c_five[b1], n1, w_p10c_five[b2], n2);
+        n = n1 + n2;
+    } else {
+        uint64_t *t = (uint64_t *)malloc((size_t)(n1 + n2) * sizeof(uint64_t));
+        if (!t) { free(f); return NULL; }
+        bigint_mul_dispatch(t, w_p10c_five[b1], n1, w_p10c_five[b2], n2);
+        int32_t tn = n1 + n2;
+        while (tn > 0 && t[tn - 1] == 0) tn--;
+        bigint_mul_dispatch(f, t, tn, w_p10c_five[b3], n3);
+        n = tn + n3;
+        free(t);
+    }
+    while (n > 0 && f[n - 1] == 0) n--;
+    if (slot < 0) {
+        slot = w_p10c_mid_next;
+        w_p10c_mid_next = (slot + 1) % W_FROM_S_MID_SLOTS;
+        free(w_p10c_mid[slot]);
+    }
+    w_p10c_mid[slot] = f;
+    w_p10c_mid_m[slot] = m;
+    w_p10c_mid_len[slot] = n;
+    *n_out = n;
+    return f;
+}
+
 static int w_p10c_mu_build(int j) {
     int32_t n = w_p10c_len[j];
     int32_t num_len = 2 * n + 1;
@@ -34508,6 +34611,9 @@ static int32_t w_dec_parse_raw_base(const char *digits, size_t len, uint64_t *ou
 #ifndef W_FROM_S_THREE_QUARTER_MAX_SKEW
 #define W_FROM_S_THREE_QUARTER_MAX_SKEW 8
 #endif
+#ifndef W_FROM_S_MIDPOINT_DIGITS
+#define W_FROM_S_MIDPOINT_DIGITS 8000   /* exact-midpoint rescue floor */
+#endif
 static inline int32_t w_dec_limb_cap(size_t len) {
     /* limbs(10^len - 1) = floor(len·log2(10)/64) + 1; 3322/1000 > log2(10).
      * +3 covers that, the combine's untrimmed hn+pl product, and its carry. */
@@ -34521,35 +34627,65 @@ static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
     int j = 0;
     size_t p = 18;
     while ((p << 1) < len) { p <<= 1; j++; }
-    while (w_p10c_top < j) {
-        if (!w_p10c_grow())
-            return w_dec_parse_raw_base(digits, len, out);
-    }
-    int use_3q = 0;
-    if (j > 0 && p > 2 * (len - p)) {
-        if (len >= W_FROM_S_BALANCED_SPLIT_DIGITS ||
-            p > W_FROM_S_THREE_QUARTER_MAX_SKEW * (len - p)) {
-            /* Halve whenever the alternative is a split beyond the 3/4
-             * rescue's skew cap: just past a power boundary the raw rule
-             * leaves splits up to ~16:1 (19,729 digits = 1,297 vs 18,432,
-             * the measured fromstr@1024 loss), and a one-level-down split
-             * is near-balanced there by construction. */
-            p >>= 1;
-            j--;
-        } else if (W_FROM_S_THREE_QUARTER &&
-                   w_p10c_five_3q_build(j)) {
-            /* At a power boundary the conventional split can be almost
-             * 10:1.  A cached 3/4 power (levels j-1 plus j-2) gives the
-             * multiplication ladder an intermediate, much squarer shape. */
-            p -= p >> 2;
-            use_3q = 1;
+    const uint64_t *five = NULL;
+    int32_t n5 = 0;
+    int use_mid = 0;
+    if (j > 0 && p > 2 * (len - p) && len >= W_FROM_S_MIDPOINT_DIGITS &&
+        w_from_s_mid_policy()) {
+        /* Exact-midpoint rescue: split at (about) half the 18-digit chunk
+         * count — the per-length shape GMP's power table produces — rather
+         * than the nearest expressible ladder power.  m keeps its top three
+         * set bits (rounded to nearest) so 5^(18m) assembles from cached
+         * levels in ≤2 multiplies; the split is then ≤ ~1.3:1 versus the
+         * halving rescue's up-to-2:1, and every level below inherits the
+         * squarer shape.  The ladder need only reach m's top bit — one
+         * level *below* the level-j square the plain path grows and, after
+         * halving, abandons. */
+        uint64_t m = (uint64_t)(len / 36);
+        if (__builtin_popcountll((unsigned long long)m) > 3) {
+            uint64_t x = m ^ (1ULL << (63 - __builtin_clzll(m)));
+            x ^= 1ULL << (63 - __builtin_clzll(x));
+            int b3 = 63 - __builtin_clzll(x);   /* ≥ 1 when popcount > 3 */
+            uint64_t dn = m & ~((1ULL << b3) - 1);
+            m = (m - dn > (1ULL << (b3 - 1))) ? dn + (1ULL << b3) : dn;
+        }
+        five = w_p10c_mid_get(m, &n5);
+        if (five) {
+            p = 18 * (size_t)m;
+            use_mid = 1;
         }
     }
+    int use_3q = 0;
+    if (!use_mid) {
+        while (w_p10c_top < j) {
+            if (!w_p10c_grow())
+                return w_dec_parse_raw_base(digits, len, out);
+        }
+        if (j > 0 && p > 2 * (len - p)) {
+            if (len >= W_FROM_S_BALANCED_SPLIT_DIGITS ||
+                p > W_FROM_S_THREE_QUARTER_MAX_SKEW * (len - p)) {
+                /* Halve whenever the alternative is a split beyond the 3/4
+                 * rescue's skew cap: just past a power boundary the raw rule
+                 * leaves splits up to ~16:1 (19,729 digits = 1,297 vs 18,432,
+                 * the measured fromstr@1024 loss), and a one-level-down split
+                 * is near-balanced there by construction. */
+                p >>= 1;
+                j--;
+            } else if (W_FROM_S_THREE_QUARTER &&
+                       w_p10c_five_3q_build(j)) {
+                /* At a power boundary the conventional split can be almost
+                 * 10:1.  A cached 3/4 power (levels j-1 plus j-2) gives the
+                 * multiplication ladder an intermediate, much squarer shape. */
+                p -= p >> 2;
+                use_3q = 1;
+            }
+        }
+        five = use_3q ? w_p10c_five_3q[j] : w_p10c_five[j];
+        n5 = use_3q ? w_p10c_five_3q_len[j] : w_p10c_five_len[j];
+    }
     int32_t hcap = w_dec_limb_cap(len - p);
-    const uint64_t *five = use_3q ? w_p10c_five_3q[j] : w_p10c_five[j];
-    int32_t n5 = use_3q ? w_p10c_five_3q_len[j] : w_p10c_five_len[j];
     uint64_t *tmp = NULL;
-    if (five || (!use_3q && w_p10c_five_build(j))) {
+    if (five || (!use_3q && !use_mid && w_p10c_five_build(j))) {
         if (!five) {
             five = w_p10c_five[j];
             n5 = w_p10c_five_len[j];
@@ -34559,7 +34695,7 @@ static int32_t w_dec_parse_raw(const char *digits, size_t len, uint64_t *out) {
             (2 * (size_t)hcap + (size_t)n5 + 1) * sizeof(uint64_t));
     }
     if (!tmp) {
-        if (use_3q)
+        if (use_3q || use_mid)
             return w_dec_parse_raw_base(digits, len, out);
         /* No odd-part cache: fall back to the plain P_j multiply + add. */
         tmp = (uint64_t *)malloc((size_t)hcap * sizeof(uint64_t));

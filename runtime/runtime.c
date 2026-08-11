@@ -9862,26 +9862,56 @@ WValue bigint_mul_n1_tiny_wide(const uint64_t *al, int32_t n, uint64_t w,
 static inline __attribute__((always_inline))
 WValue bigint_mul_n1_tiny32x2(const uint64_t *al, uint64_t w, int negative) {
     WBigint *r = bigint_alloc_raw_hot_exact(64U);
-    __uint128_t prev = (__uint128_t)al[0] * w;
-    r->limbs[0] = (uint64_t)prev;
-    unsigned long long ca = 0;
+    /* Two limbs per unrolled step, loads and stores adjacent through
+     * DISTINCT temporaries: the single-limb form recycled one register for
+     * every load/store, which blocked ldp/stp formation entirely (31 ldr +
+     * 34 str for this row, zero pairs) — ~32 instructions of pure issue
+     * pressure at a cell whose whole budget is ~28 cycles.  The pairwise
+     * shape computes the identical addcll chain in the identical order;
+     * only the memory ops fuse. */
+    uint64_t a0 = al[0], a1 = al[1];
+    __uint128_t p0 = (__uint128_t)a0 * w;
+    __uint128_t p1 = (__uint128_t)a1 * w;
+    unsigned long long ca;
+    uint64_t s1 = __builtin_addcll((uint64_t)p1, (uint64_t)(p0 >> 64),
+                                   0, &ca);
+    r->limbs[0] = (uint64_t)p0;
+    r->limbs[1] = s1;
+    __uint128_t prev = p1;
 #pragma clang loop unroll(full)
-    for (int32_t i = 1; i < 16; i++) {
-        __uint128_t p = (__uint128_t)al[i] * w;
-        r->limbs[i] = __builtin_addcll((uint64_t)p, (uint64_t)(prev >> 64),
+    for (int32_t i = 2; i < 16; i += 2) {
+        uint64_t ai = al[i], ai1 = al[i + 1];
+        __uint128_t p = (__uint128_t)ai * w;
+        __uint128_t q = (__uint128_t)ai1 * w;
+        uint64_t t0 = __builtin_addcll((uint64_t)p, (uint64_t)(prev >> 64),
                                        ca, &ca);
-        prev = p;
+        uint64_t t1 = __builtin_addcll((uint64_t)q, (uint64_t)(p >> 64),
+                                       ca, &ca);
+        r->limbs[i] = t0;
+        r->limbs[i + 1] = t1;
+        prev = q;
     }
     uint64_t a_out = (uint64_t)(prev >> 64) + ca;   /* cannot wrap */
-    __uint128_t prev_b = (__uint128_t)al[16] * w;
-    uint64_t b16 = (uint64_t)prev_b;
-    unsigned long long cb = 0;
+    uint64_t b0 = al[16], b1 = al[17];
+    __uint128_t pb0 = (__uint128_t)b0 * w;
+    __uint128_t pb1 = (__uint128_t)b1 * w;
+    unsigned long long cb;
+    uint64_t b16 = (uint64_t)pb0;
+    r->limbs[17] = __builtin_addcll((uint64_t)pb1, (uint64_t)(pb0 >> 64),
+                                    0, &cb);
+    __uint128_t prev_b = pb1;
 #pragma clang loop unroll(full)
-    for (int32_t i = 17; i < 32; i++) {
-        __uint128_t p = (__uint128_t)al[i] * w;
-        r->limbs[i] = __builtin_addcll((uint64_t)p, (uint64_t)(prev_b >> 64),
+    for (int32_t i = 18; i < 32; i += 2) {
+        uint64_t bi = al[i], bi1 = al[i + 1];
+        __uint128_t p = (__uint128_t)bi * w;
+        __uint128_t q = (__uint128_t)bi1 * w;
+        uint64_t t0 = __builtin_addcll((uint64_t)p, (uint64_t)(prev_b >> 64),
                                        cb, &cb);
-        prev_b = p;
+        uint64_t t1 = __builtin_addcll((uint64_t)q, (uint64_t)(p >> 64),
+                                       cb, &cb);
+        r->limbs[i] = t0;
+        r->limbs[i + 1] = t1;
+        prev_b = q;
     }
     uint64_t carry = (uint64_t)(prev_b >> 64) + cb;
     b16 += a_out;

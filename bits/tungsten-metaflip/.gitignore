@@ -1,10 +1,10 @@
-# Bit/package outputs and ad-hoc native builds. The source-checkout command at
-# bin/metaflip is a tracked shell launcher; compiled coordinators live here or
-# in the user cache, never at the launcher path.
+# Bit/package outputs and ad-hoc native builds. bin/metaflip is the
+# compiled entry point `tungsten build` emits (untracked, like every
+# other bit's bin output); compiled coordinators live here or in the
+# user cache.
 /build/
 /pkg/
 /metaflip
-!/bin/metaflip
 
 # Runtime-generated compiler and GPU sidecars.
 *.sidemap

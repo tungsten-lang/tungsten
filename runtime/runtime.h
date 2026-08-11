@@ -729,6 +729,10 @@ WValue w_bigint_shared_value(WValue v);
  * preserve_mostcc declarations and callsites. */
 __attribute__((preserve_most)) WValue w_bigint_add_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_sub_mut(WValue a, WValue b);
+/* Consumed BigInt +/- a positive raw literal magnitude (currently 1 or 2).
+ * The second parameter is a raw u64, not a boxed WValue. */
+WValue w_bigint_add_small_mut(WValue a, uint64_t magnitude);
+WValue w_bigint_sub_small_mut(WValue a, uint64_t magnitude);
 __attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b);
 __attribute__((preserve_most)) WValue w_bigint_mod_mut(WValue a, WValue b);

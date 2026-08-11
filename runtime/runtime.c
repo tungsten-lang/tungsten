@@ -41362,6 +41362,170 @@ __attribute__((preserve_most)) WValue w_bigint_sub_mut(WValue a, WValue b) {
     return w_bigint_addsub_mut(a, b, 1);
 }
 
+/* Literal-small consumed add/sub.  The compiler passes the positive raw
+ * magnitude (currently 1 or 2), so this entry avoids constructing and
+ * decoding an inline WValue on the hot path.  It is deliberately narrower
+ * than w_bigint_addsub_mut: every rejected shape, including an unexpected
+ * magnitude, re-enters that existing semantic boundary.
+ *
+ * The hot leaf publishes either a limb-zero update or a capacity-safe
+ * carry/borrow ripple.  Every normalization or rejected receiver takes the
+ * cold semantic path before any limb is changed. */
+static __attribute__((noinline, cold, preserve_most)) WValue
+bigint_small_mut_fallback(
+    WValue a, uint64_t magnitude, int subtract) {
+    WValue b = w_u64(magnitude);
+    return subtract ? w_bigint_sub_mut(a, b) : w_bigint_add_mut(a, b);
+}
+
+static inline __attribute__((always_inline)) WValue bigint_addsub_small_mut(
+    WValue a, uint64_t magnitude, int subtract) {
+    if ((magnitude != 1 && magnitude != 2) ||
+        !w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
+        return bigint_small_mut_fallback(a, magnitude, subtract);
+
+    WBigint *ba = w_as_bigint(a);
+    int32_t signed_n = ba->size;        /* overlay clear: header is the sign */
+    if (ba->shared != 0 || signed_n == 0)
+        return bigint_small_mut_fallback(a, magnitude, subtract);
+
+    int negative = signed_n < 0;
+    uint32_t n = negative ? (uint32_t)(-(int64_t)signed_n)
+                          : (uint32_t)signed_n;
+    if (n > ba->cap)
+        return bigint_small_mut_fallback(a, magnitude, subtract);
+
+    uint64_t before = ba->limbs[0];
+
+    /* Same-sign arithmetic grows the magnitude.  The overwhelmingly common
+     * case changes only limb zero; a carry is capacity-gated below before
+     * this dying receiver is touched. */
+    if (negative == subtract) {
+        uint64_t result = before + magnitude;
+        if (result >= before) {
+            if (n == 1 && result <= (uint64_t)W_INT48_MAX)
+                return bigint_small_mut_fallback(a, magnitude, subtract);
+            ba->limbs[0] = result;
+            return a;
+        }
+
+        if (n < ba->cap) {
+#if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
+            /* The forced 8->9 boundary is common enough to justify the
+             * existing straight-line carry chain.  Spare capacity makes the
+             * possible ninth limb safe before the in-place asm writes. */
+            if (n == 8) {
+                uint64_t carry = bn_add_word_a64_fixed(
+                    ba->limbs, ba->limbs, 8, magnitude);
+                if (carry) {
+                    ba->limbs[8] = 1;
+                    ba->size = negative ? -9 : 9;
+                }
+                return a;
+            }
+#endif
+            /* Spare capacity makes a full ripple safe.  Commit in one pass;
+             * volatile keeps the scalar loop from becoming an outlined
+             * memset, which would put a call frame on every leaf entry. */
+            volatile uint64_t *commit_limbs = ba->limbs;
+            commit_limbs[0] = result;
+            uint32_t i = 1;
+            while (i < n) {
+                uint64_t limb = commit_limbs[i];
+                if (limb != UINT64_MAX) {
+                    commit_limbs[i] = limb + 1;
+                    return a;
+                }
+                commit_limbs[i] = 0;
+                i++;
+            }
+            commit_limbs[n] = 1;
+            n++;
+            ba->size = negative ? -(int32_t)n : (int32_t)n;
+            return a;
+        }
+
+        /* Exact capacity still needs a read-only preflight.  Only a carry
+         * through every published limb is refused before mutation. */
+        uint32_t stop = 1;
+        while (stop < n && ba->limbs[stop] == UINT64_MAX) stop++;
+        if (stop == n)
+            return bigint_small_mut_fallback(a, magnitude, subtract);
+
+        uint64_t stop_before = ba->limbs[stop];
+        volatile uint64_t *commit_limbs = ba->limbs;
+        commit_limbs[0] = result;
+        for (uint32_t i = 1; i < stop; i++) commit_limbs[i] = 0;
+        commit_limbs[stop] = stop_before + 1;
+        return a;
+    }
+
+    /* Opposite signs shrink the magnitude.  A one-limb result at the i48 edge
+     * needs normalization; decide that before publishing the low-limb store.
+     * Multi-limb borrow safety is established below before its one-pass
+     * commit begins. */
+    uint64_t result = before - magnitude;
+    if (before >= magnitude) {
+        if (n == 1 && result <= (uint64_t)W_INT48_MAX)
+            return bigint_small_mut_fallback(a, magnitude, subtract);
+        ba->limbs[0] = result;
+        return a;
+    }
+    if (n == 1)
+        return bigint_small_mut_fallback(a, magnitude, subtract);
+
+#if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
+    /* The matching forced 9->8 boundary subtracts through the first eight
+     * limbs in one straight-line chain.  Guard the canonical top before the
+     * asm commits; afterwards no edge may fall back. */
+    if (n == 9) {
+        uint64_t top = ba->limbs[8];
+        if (top == 0)
+            return bigint_small_mut_fallback(a, magnitude, subtract);
+        uint64_t borrow = bn_sub_word_a64_fixed(
+            ba->limbs, ba->limbs, 8, magnitude);
+        if (borrow) {
+            ba->limbs[8] = top - 1;
+            if (top == 1) ba->size = negative ? -8 : 8;
+        }
+        return a;
+    }
+#endif
+
+    /* A canonical magnitude's top limb is a guaranteed borrow terminator.
+     * Reject a malformed header before publishing any wrapped limb, then
+     * commit the ripple in one pass with no post-store fallback edge. */
+    if (ba->limbs[n - 1] == 0)
+        return bigint_small_mut_fallback(a, magnitude, subtract);
+
+    volatile uint64_t *commit_limbs = ba->limbs;
+    commit_limbs[0] = result;
+    uint32_t i = 1;
+    for (;;) {
+        uint64_t limb = commit_limbs[i];
+        if (limb != 0) {
+            commit_limbs[i] = limb - 1;
+            if (i == n - 1 && limb == 1) {
+                n--;
+                ba->size = negative ? -(int32_t)n : (int32_t)n;
+            }
+            return a;
+        }
+        commit_limbs[i] = UINT64_MAX;
+        i++;
+    }
+}
+
+__attribute__((noinline)) WValue w_bigint_add_small_mut(
+    WValue a, uint64_t magnitude) {
+    return bigint_addsub_small_mut(a, magnitude, 0);
+}
+
+__attribute__((noinline)) WValue w_bigint_sub_small_mut(
+    WValue a, uint64_t magnitude) {
+    return bigint_addsub_small_mut(a, magnitude, 1);
+}
+
 /* In-place N x 1 multiply for the same proven-dead accumulator shape
  * (`r = r * i`, mulchain). bn_mul_1 reads each source index before writing
  * the destination one, so dst == src is safe; the product needs at most

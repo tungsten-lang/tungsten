@@ -640,6 +640,20 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     ctx[:bindings][name] = result
   true
 
+# Raw-magnitude consumed entry selector. Deliberately accepts only the two
+# positive literal spellings measured by the small-delta tranche: preserving
+# the original PLUS/MINUS opcode avoids changing overload semantics by
+# normalizing subtraction into addition of a negative value.
+-> bigint_small_mut_magnitude(node)
+  if env("TUNGSTEN_BIGINT_SMALL_MUT") == "0"
+    return nil
+  if node == nil || !is_ast_node?(node) || ast_kind(node) != :int
+    return nil
+  magnitude = node.value
+  if magnitude == 1 || magnitude == 2
+    return magnitude.to_s()
+  nil
+
 -> lower_compound_assign(ctx, node)
   # Desugar: x += val  →  x = x op val
   target = node.target
@@ -934,6 +948,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   op = node.op
   int_op = lowering_int_op_map[op]
   rt_op = lowering_op_map[op]
+  small_mut_magnitude = op in (:PLUS :MINUS) ? bigint_small_mut_magnitude(node.value) : nil
   self_square = op == :STAR && node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :var && node.value.name == name
 
   # Check if both sides are int for inline op
@@ -969,6 +984,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # Mutate-if-unique (E4 stage 1): compound arithmetic on a proven-dead
     # accumulator takes the consumed seam; its guards fall back immutably.
     mut_cc = nil
+    rt_rhs = rhs_reg
     if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
       if self_square && env("TUNGSTEN_BIGINT_SQR_MUT") == "0"
         rt_fb = "w_mul"
@@ -989,11 +1005,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         nil
       else
         rt_fb = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
+      if small_mut_magnitude != nil && rt_fb in ("w_bigint_add_mut" "w_bigint_sub_mut")
+        rt_fb = rt_fb == "w_bigint_add_mut" ? "w_bigint_add_small_mut" : "w_bigint_sub_small_mut"
+        rt_rhs = small_mut_magnitude
       # must match the preserve_mostcc declaration/definition or the call is UB
       if rt_fb in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "__w_bigint_and_mut_src" "__w_bigint_or_mut_src" "__w_bigint_xor_mut_src" "w_bigint_shl_mut" "w_bigint_shr_mut")
         mut_cc = "preserve_mostcc"
     result_temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rhs_reg], call_conv: mut_cc})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rt_rhs], call_conv: mut_cc})
     if ptr != nil
       emit_instruction(wfn, {op: :store_i64, value: result_temp, ptr: ptr})
     else
@@ -1051,6 +1070,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # arm, so preserve their mutate-if-unique routing too.
   if rt_op != nil
     rt_call_conv = nil
+    rt_rhs = rhs_reg
     if ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true && op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT)
       if self_square && env("TUNGSTEN_BIGINT_SQR_MUT") == "0"
         rt_op = "w_mul"
@@ -1070,10 +1090,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         nil
       else
         rt_op = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
+      if small_mut_magnitude != nil && rt_op in ("w_bigint_add_mut" "w_bigint_sub_mut")
+        rt_op = rt_op == "w_bigint_add_mut" ? "w_bigint_add_small_mut" : "w_bigint_sub_small_mut"
+        rt_rhs = small_mut_magnitude
       if rt_op in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "__w_bigint_and_mut_src" "__w_bigint_or_mut_src" "__w_bigint_xor_mut_src" "w_bigint_shl_mut" "w_bigint_shr_mut")
         rt_call_conv = "preserve_mostcc"
     result = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg], call_conv: rt_call_conv})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rt_rhs], call_conv: rt_call_conv})
     if ptr != nil
       emit_instruction(wfn, {op: :store_i64, value: result, ptr: ptr})
     else
@@ -2339,6 +2362,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # set by lower_assign_expr routes `r = r ± e` through the in-place entry
   # instead of __w_add_fast/__w_sub_fast.
   rt_call_conv = nil
+  rt_rhs_reg = rhs_reg
   if ctx[:mut_accum_target] != nil && op in (:PLUS :MINUS :STAR :SLASH :PERCENT) && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
     self_square = op == :STAR && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :var && node.right.name == ctx[:mut_accum_target]
     if self_square && env("TUNGSTEN_BIGINT_SQR_MUT") == "0"
@@ -2347,11 +2371,15 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rt_name = env("TUNGSTEN_BIGINT_MOD_MUT") == "0" ? "w_mod" : "w_bigint_mod_mut"
     else
       rt_name = op == :PLUS ? "w_bigint_add_mut" : (op == :MINUS ? "w_bigint_sub_mut" : (op == :STAR ? "w_bigint_mul_mut" : "w_bigint_div_mut"))
-    if rt_name != "w_mod" && rt_name != "w_mul"
+    small_mut_magnitude = op in (:PLUS :MINUS) ? bigint_small_mut_magnitude(node.right) : nil
+    if small_mut_magnitude != nil && rt_name in ("w_bigint_add_mut" "w_bigint_sub_mut")
+      rt_name = rt_name == "w_bigint_add_mut" ? "w_bigint_add_small_mut" : "w_bigint_sub_small_mut"
+      rt_rhs_reg = small_mut_magnitude
+    if rt_name != "w_mod" && rt_name != "w_mul" && rt_name != "w_bigint_add_small_mut" && rt_name != "w_bigint_sub_small_mut"
       rt_call_conv = "preserve_mostcc"
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: rt_name, args: [lhs_reg, rhs_reg], call_conv: rt_call_conv})
+  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: rt_name, args: [lhs_reg, rt_rhs_reg], call_conv: rt_call_conv})
   typed_value(:i64, temp)
 
 # Get raw i64 from a typed_value — skip unbox if already raw

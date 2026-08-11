@@ -281,6 +281,11 @@ use naming
   # definitions and the guarded-fallback callsites (their only callers).
   out << declare_fn_attrs("w_bigint_add_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_sub_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  # Consumed +/- by an already-decoded positive literal magnitude. The second
+  # i64 is raw 1/2, not a boxed WValue; lowering only selects these entries at
+  # sites already admitted by the ordinary mutate-if-unique proof.
+  out << declare_fn_attrs("w_bigint_add_small_mut", wv, wv2, "nounwind")
+  out << declare_fn_attrs("w_bigint_sub_small_mut", wv, wv2, "nounwind")
   out << declare_fn_attrs("w_bigint_mul_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_div_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_mod_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")

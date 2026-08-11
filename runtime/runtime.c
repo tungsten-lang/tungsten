@@ -34284,15 +34284,81 @@ WValue w_range_bound_i64_w(WValue v) {
  * The source body must never apply infix `+` to bigint operands (that
  * would re-enter this arm); it composes kernels and exported C
  * boundaries instead. TUNGSTEN_BIGINT_SRC_OPS=0 pins the C path (the
- * same-binary A/B lever and escape hatch); =trace reports once. */
+ * same-binary A/B lever and escape hatch); =trace reports once.
+ *
+ * Seam latches (the proven __w_bigint_compare_src pattern, generalized):
+ * a weak default can only EXECUTE when no strong source wrapper was
+ * linked, so its first run performs a benign one-shot relaxed 0->1 store
+ * recording that link-time fact.  The operator arms consult the latch on
+ * the shape-admitted path and, once set, enter the always_inline C
+ * kernel directly instead of calling the seam: a weak call can never be
+ * inlined at compile time (only whole-program LTO of a final executable
+ * can internalize it), so every NON-LTO C-only link — most importantly
+ * the default -O1 runtime archive that every plain `tungsten -o` binary
+ * links, and non-LTO C tools — paid an out-of-line bl+ret+frame per
+ * operation for a call that could only ever land on the kernel it
+ * already contains (measured 5-12%/op on 2-9-limb entry shapes).  In an
+ * LTO'd C-only executable the seams were already internalized, so there
+ * the latch costs one relaxed load on the admitted path.  Binaries with
+ * the strong wrapper never run the weak default, the latch stays clear,
+ * and source routing is untouched.
+ *
+ * The TUNGSTEN_BIGINT_SRC_OPS kill switch is ORTHOGONAL and unchanged:
+ * the latch proves link-time ABSENCE of an override, while
+ * g_bigint_src_ops_off is runtime DISABLEMENT, consulted before the
+ * shape gate and therefore before any latch test on every path.  Trace
+ * both settings through either link state: with =0, src_off short-
+ * circuits the admitted branch, the seam and latch are never consulted,
+ * and the C kernel is taken exactly as before (in both C-only and
+ * strong-wrapper binaries); with routing on, a strong-wrapper binary
+ * never sets the latch so every admitted op still calls the seam, and a
+ * C-only binary behaves identically before and after its first seam
+ * call sets the latch — the weak default and the latched inline path
+ * compute through the same kernel.  =trace still prints at first
+ * resolve, because every arm resolves before its first seam call and
+ * the latch can only be set BY a seam call.  A racing reader that still
+ * sees 0 takes the seam call and computes the identical result through
+ * the weak default. */
+static _Atomic int w_bigint_plus_seam_is_c;
+static _Atomic int w_bigint_minus_seam_is_c;
+static _Atomic int w_bigint_times_seam_is_c;
+
 __attribute__((weak)) WValue __w_bigint_plus_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_plus_seam_is_c, 1, memory_order_relaxed);
     return bigint_add_any(a, b);
 }
 __attribute__((weak)) WValue __w_bigint_minus_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_minus_seam_is_c, 1, memory_order_relaxed);
     return bigint_sub_any(a, b);
 }
 __attribute__((weak)) WValue __w_bigint_times_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_times_seam_is_c, 1, memory_order_relaxed);
     return bigint_mul_any(a, b);
+}
+
+/* Latched seam entries for the operator arms.  Routing decisions (the
+ * arms' shape gates) are unchanged; only the admitted CALL is replaced
+ * by the inlined kernel once the latch proves no override was linked. */
+static inline __attribute__((always_inline))
+WValue bigint_plus_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_plus_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_add_any(a, b);
+    return __w_bigint_plus_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_minus_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_minus_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_sub_any(a, b);
+    return __w_bigint_minus_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_times_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_times_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_any(a, b);
+    return __w_bigint_times_src(a, b);
 }
 
 /* Multiply routes to source only for the SCHOOLBOOK band: both operands
@@ -34387,7 +34453,7 @@ WValue w_add(WValue a, WValue b) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1) && bigint_src_shape(a, b, 0))
-            return __w_bigint_plus_src(a, b);
+            return bigint_plus_seam(a, b);
         return bigint_add_any(a, b);
     }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_add_elem(a, b);
@@ -34516,7 +34582,7 @@ WValue w_sub(WValue a, WValue b) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1) && bigint_src_shape(a, b, 1))
-            return __w_bigint_minus_src(a, b);
+            return bigint_minus_seam(a, b);
         return bigint_sub_any(a, b);
     }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_sub_elem(a, b);
@@ -34615,7 +34681,7 @@ WValue w_mul(WValue a, WValue b) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1) && bigint_mul_src_shape(a, b))
-            return __w_bigint_times_src(a, b);
+            return bigint_times_seam(a, b);
         return bigint_mul_any(a, b);
     }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_mul_elem(a, b);
@@ -35054,12 +35120,36 @@ WValue w_bigint_literal_cached(const char *text, _Atomic uint64_t *slot) {
  * bodies implement one-limb pairs directly and route wider pairs through
  * bigint_div_any / bigint_mod_any — the wider division specialization tree
  * (preinverse 2-by-1, Burnikel-Ziegler, Jebelean exact, width-certified
- * kernels) stays in C. TUNGSTEN_BIGINT_SRC_OPS=0 pins the C path. */
+ * kernels) stays in C. TUNGSTEN_BIGINT_SRC_OPS=0 pins the C path.
+ * Seam latches and latched entries as at __w_bigint_plus_src: the weak
+ * default's first run proves no strong wrapper was linked, after which
+ * the arms enter the inlined kernel directly (kill switch and shape
+ * gates unchanged — see the + seam's comment for the full trace). */
+static _Atomic int w_bigint_div_seam_is_c;
+static _Atomic int w_bigint_mod_seam_is_c;
+
 __attribute__((weak)) WValue __w_bigint_div_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_div_seam_is_c, 1, memory_order_relaxed);
     return bigint_div_any(a, b);
 }
 __attribute__((weak)) WValue __w_bigint_mod_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mod_seam_is_c, 1, memory_order_relaxed);
     return bigint_mod_any(a, b);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_div_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_div_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_div_any(a, b);
+    return __w_bigint_div_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mod_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mod_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mod_any(a, b);
+    return __w_bigint_mod_src(a, b);
 }
 
 /* Both heap BigInts, any signs and widths: the source bodies pass every
@@ -35104,7 +35194,7 @@ WValue w_div(WValue a, WValue b) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1) && bigint_divmod_src_shape(a, b))
-            return __w_bigint_div_src(a, b);
+            return bigint_div_seam(a, b);
         return bigint_div_any(a, b);
     }
     /* User-defined classes: route `a / b` to a./(b). */
@@ -35196,7 +35286,7 @@ WValue w_mod(WValue a, WValue b) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1) && bigint_divmod_src_shape(a, b))
-            return __w_bigint_mod_src(a, b);
+            return bigint_mod_seam(a, b);
         return bigint_mod_any(a, b);
     }
     /* User-defined classes: route `a % b` to a.%(b). */
@@ -36594,12 +36684,36 @@ WValue w_bigint_shr(WValue a, WValue b) {
     return k < 0 ? bignum_shl(a, -k) : bignum_shr(a, k);
 }
 
+/* Seam latches and latched entries as at __w_bigint_plus_src (kill
+ * switch and shape gates unchanged; see the + seam's comment).  The
+ * latched entries call w_bigint_shl/w_bigint_shr — same-TU non-weak
+ * definitions the optimizer can inline, unlike the weak seam. */
+static _Atomic int w_bigint_shl_seam_is_c;
+static _Atomic int w_bigint_shr_seam_is_c;
+
 __attribute__((weak)) WValue __w_bigint_shl_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_shl_seam_is_c, 1, memory_order_relaxed);
     return w_bigint_shl(a, b);
 }
 
 __attribute__((weak)) WValue __w_bigint_shr_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_shr_seam_is_c, 1, memory_order_relaxed);
     return w_bigint_shr(a, b);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_shl_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_shl_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return w_bigint_shl(a, b);
+    return __w_bigint_shl_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_shr_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_shr_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return w_bigint_shr(a, b);
+    return __w_bigint_shr_src(a, b);
 }
 
 /* Allocation-producing one-limb cases stay in C. Measured multi-limb bands
@@ -36648,7 +36762,14 @@ static inline int bigint_shr_src_shape(WValue a, WValue b) {
  * Production targets always emit strong wrappers around the complete raw
  * Tungsten helpers.  The weak bodies remain the stage0 implementation and
  * the retained C differential oracle. TUNGSTEN_BIGINT_SRC_OPS=0 pins that
- * implementation for focused A/B work. */
+ * implementation for focused A/B work.
+ *
+ * These three carry NO seam latch of their own: every production caller
+ * (bit_binop's switch and the w_bigint_*_source lanes) sits behind the
+ * completeness marker below, so in a C-only binary they never execute at
+ * all — the per-op weak-call tax there is the MARKER call, and the latch
+ * lives on it.  The emitter validates and emits the arm family and the
+ * marker together, so a strong marker with a weak arm cannot be linked. */
 __attribute__((weak)) WValue __w_bigint_and_src(WValue a, WValue b) {
     return bignum_bitwise('&', a, b);
 }
@@ -36663,9 +36784,27 @@ __attribute__((weak)) WValue __w_bigint_xor_src(WValue a, WValue b) {
  * shape-limited class workers. They must not receive every BigInt shape: a
  * worker bail calls w_bit_* and would recurse. Complete source modules emit a
  * strong marker; the weak bootstrap default keeps stage0 and old binaries on
- * the retained C implementation until that complete helper family is linked. */
+ * the retained C implementation until that complete helper family is linked.
+ * Seam latch as at __w_bigint_plus_src: the weak marker can only execute
+ * when no strong marker was linked, and it always answers 0, so once its
+ * first run latches, bit_binop skips the (never-inlinable) weak call and
+ * falls to bignum_bitwise directly — the identical route.  The kill switch
+ * is unchanged: src_off is tested before the latch, and with =0 neither
+ * the marker nor the latch is consulted, exactly as before. */
+static _Atomic int w_bigint_bitwise_seam_is_c;
+
 __attribute__((weak)) int64_t __w_bigint_bitwise_source_complete(void) {
+    atomic_store_explicit(&w_bigint_bitwise_seam_is_c, 1,
+                          memory_order_relaxed);
     return 0;
+}
+
+static inline __attribute__((always_inline))
+int64_t bigint_bitwise_source_complete_seam(void) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_bitwise_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return 0;
+    return __w_bigint_bitwise_source_complete();
 }
 
 /* Shared dispatcher for &, |, ^: native both-int fast path first (the hot
@@ -36680,7 +36819,7 @@ static WValue bit_binop(char op, WValue a, WValue b) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1) &&
-            __builtin_expect(__w_bigint_bitwise_source_complete() != 0, 1)) {
+            __builtin_expect(bigint_bitwise_source_complete_seam() != 0, 1)) {
             WValue ia = bitwise_as_integer(a);
             WValue ib = bitwise_as_integer(b);
             switch (op) {
@@ -36730,7 +36869,7 @@ WValue w_bit_shl(WValue a, WValue b) {
     if (bigint_shl_src_shape(a, b)) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
-        if (__builtin_expect(src_off == 0, 1)) return __w_bigint_shl_src(a, b);
+        if (__builtin_expect(src_off == 0, 1)) return bigint_shl_seam(a, b);
     }
     int64_t k = w_as_int(b);
     if (k < 0) return bignum_shr(a, -k);  /* negative left shift == right shift */
@@ -36746,7 +36885,7 @@ WValue w_bit_shr(WValue a, WValue b) {
     if (bigint_shr_src_shape(a, b)) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
-        if (__builtin_expect(src_off == 0, 1)) return __w_bigint_shr_src(a, b);
+        if (__builtin_expect(src_off == 0, 1)) return bigint_shr_seam(a, b);
     }
     int64_t k = w_as_int(b);
     if (k < 0) return bignum_shl(a, -k);  /* negative right shift == left shift */

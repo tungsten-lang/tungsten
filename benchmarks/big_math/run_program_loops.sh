@@ -45,10 +45,11 @@ sample_stats() {
 }
 
 run_pair() {
-  # $1 workload, $2 initial lane order ->
+  # $1 workload, $2 initial lane order, $3 optional limbs ->
   # "t_median t_iqr t_checksum g_median g_iqr g_checksum"
   workload=$1
   first=$2
+  limbs=${3:-}
   t_samples=""
   g_samples=""
   t_expected=""
@@ -56,11 +57,11 @@ run_pair() {
   r=0
   while [ "$r" -lt "$REPS" ]; do
     if [ $(((r + first) % 2)) -eq 0 ]; then
-      t_line=$("$DIR/program_loops" "$workload")
-      g_line=$("$DIR/program_loops_gmp" "$workload")
+      t_line=$("$DIR/program_loops" "$workload" 0 ${limbs:+"$limbs"})
+      g_line=$("$DIR/program_loops_gmp" "$workload" 0 ${limbs:+"$limbs"})
     else
-      g_line=$("$DIR/program_loops_gmp" "$workload")
-      t_line=$("$DIR/program_loops" "$workload")
+      g_line=$("$DIR/program_loops_gmp" "$workload" 0 ${limbs:+"$limbs"})
+      t_line=$("$DIR/program_loops" "$workload" 0 ${limbs:+"$limbs"})
     fi
     t_ns=$(printf '%s' "$t_line" | cut -f3)
     t_check=$(printf '%s' "$t_line" | cut -f4)
@@ -98,6 +99,23 @@ for workload in accumulate mulchain addchain subchain divchain; do
   printf '%-12s %14s %12s %14s %12s %8s\n' \
     "$workload" "$t_ns" "$t_iqr" "$g_ns" "$g_iqr" "$ratio"
   order=$((order + 1))
+done
+# Word-overwrite lanes (E4 stage 3) at the mul1@2/4/32 parity widths.
+for workload in wordadd wordsub wordmul wordchain; do
+  for limbs in 2 4 32; do
+    pair=$(run_pair "$workload" "$order" "$limbs")
+    set -- $pair
+    t_ns=$1; t_iqr=$2; t_check=$3
+    g_ns=$4; g_iqr=$5; g_check=$6
+    if [ "$t_check" != "$g_check" ]; then
+      echo "CHECKSUM MISMATCH on $workload$limbs: tungsten=$t_check gmp=$g_check" >&2
+      exit 1
+    fi
+    ratio=$(printf '%s %s\n' "$t_ns" "$g_ns" | awk '{printf "%.2f", $1 / $2}')
+    printf '%-12s %14s %12s %14s %12s %8s\n' \
+      "$workload$limbs" "$t_ns" "$t_iqr" "$g_ns" "$g_iqr" "$ratio"
+    order=$((order + 1))
+  done
 done
 echo
 echo "Idiomatic loops: GMP reuses its mpz destination; Tungsten may reuse a"

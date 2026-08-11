@@ -139,6 +139,67 @@ static void bench_sqrchain(long n, unsigned long limbs) {
     mpz_clears(r, bump, divisor, NULL);
 }
 
+/* Word-overwrite lanes (E4 stage 3 twin): a retained base times/plus/minus
+ * one word, written into a retained destination every pass — idiomatic
+ * mpz_*_ui. Matches program_loops.w's wordadd/wordsub/wordmul/wordchain. */
+static void word_base_init(mpz_t a, unsigned long limbs) {
+    mpz_set_ui(a, 1);
+    mpz_mul_2exp(a, a, limbs * 64UL - 8UL);
+    mpz_add_ui(a, a, 987654321UL);
+}
+
+static void bench_wordadd(long n, unsigned long limbs) {
+    mpz_t a, r;
+    mpz_inits(a, r, NULL);
+    word_base_init(a, limbs);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) mpz_add_ui(r, a, 5UL);
+    double t1 = now_sec();
+    printf("wordadd%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n, checksum(r));
+    mpz_clears(a, r, NULL);
+}
+
+static void bench_wordsub(long n, unsigned long limbs) {
+    mpz_t a, r;
+    mpz_inits(a, r, NULL);
+    word_base_init(a, limbs);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) mpz_sub_ui(r, a, 7UL);
+    double t1 = now_sec();
+    printf("wordsub%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n, checksum(r));
+    mpz_clears(a, r, NULL);
+}
+
+static void bench_wordmul(long n, unsigned long limbs) {
+    mpz_t a, r;
+    mpz_inits(a, r, NULL);
+    word_base_init(a, limbs);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) mpz_mul_ui(r, a, 3UL);
+    double t1 = now_sec();
+    printf("wordmul%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n, checksum(r));
+    mpz_clears(a, r, NULL);
+}
+
+static void bench_wordchain(long n, unsigned long limbs) {
+    mpz_t a, r, sum;
+    mpz_inits(a, r, sum, NULL);
+    word_base_init(a, limbs);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) {
+        mpz_add_ui(r, a, 5UL);
+        mpz_sub_ui(a, r, 7UL);
+    }
+    double t1 = now_sec();
+    mpz_add(sum, a, r);
+    printf("wordchain%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n, checksum(sum));
+    mpz_clears(a, r, sum, NULL);
+}
+
 int main(int argc, char **argv) {
     const char *workload = argc > 1 ? argv[1] : "all";
     long n = argc > 2 ? atol(argv[2]) : 0;
@@ -157,5 +218,13 @@ int main(int argc, char **argv) {
         bench_modchain(n > 0 ? n : 2000000, limbs);
     if (!strcmp(workload, "sqrchain") || !strcmp(workload, "all"))
         bench_sqrchain(n > 0 ? n : 2000000, limbs);
+    if (!strcmp(workload, "wordadd") || !strcmp(workload, "all"))
+        bench_wordadd(n > 0 ? n : 2000000, limbs);
+    if (!strcmp(workload, "wordsub") || !strcmp(workload, "all"))
+        bench_wordsub(n > 0 ? n : 2000000, limbs);
+    if (!strcmp(workload, "wordmul") || !strcmp(workload, "all"))
+        bench_wordmul(n > 0 ? n : 2000000, limbs);
+    if (!strcmp(workload, "wordchain") || !strcmp(workload, "all"))
+        bench_wordchain(n > 0 ? n : 2000000, limbs);
     return 0;
 }

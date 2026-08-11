@@ -113,6 +113,68 @@
   c = r % 1000000007
   << "sqrchain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
 
+# -- word-overwrite lanes (E4 stage 3): `r = a op w` with a retained base.
+# GMP's twin writes into a retained destination (mpz_*_ui); the compiled
+# word-dest entries reuse the dying previous result the same way. The
+# limbs argument sets the base width (the mul1@2/4/32 parity cells).
+
+-> bench_wordadd(n, limbs)
+  a = ((1 << (limbs * 64 - 8)) + 987654321) ## big
+  r = 0 ## big
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r = a + 5
+    i = i + 1
+  t1 = clock()
+  c = r % 1000000007
+  << "wordadd" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
+-> bench_wordsub(n, limbs)
+  a = ((1 << (limbs * 64 - 8)) + 987654321) ## big
+  r = 0 ## big
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r = a - 7
+    i = i + 1
+  t1 = clock()
+  c = r % 1000000007
+  << "wordsub" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
+-> bench_wordmul(n, limbs)
+  a = ((1 << (limbs * 64 - 8)) + 987654321) ## big
+  r = 0 ## big
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r = a * 3
+    i = i + 1
+  t1 = clock()
+  c = r % 1000000007
+  << "wordmul" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
+-> bench_wordchain(n, limbs)
+  # both vars are dest candidates: the two buffers hand back and forth
+  # with no allocation in the steady state, GMP's retained r/a pair.
+  # a is overwritten INSIDE the loop, so candidacy needs the literal seed
+  # (the width expression reads a parameter and cannot seed); the computed
+  # base then flows in through an admitted arithmetic overwrite, whose
+  # identity return arrives shared-marked and self-heals on pass one.
+  base = (1 << (limbs * 64 - 8)) + 987654321
+  a = 0 ## big
+  a = base + 0
+  r = 0 ## big
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r = a + 5
+    a = r - 7
+    i = i + 1
+  t1 = clock()
+  c = (a + r) % 1000000007
+  << "wordchain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
 args = argv()
 workload = args.size() > 0 ? args[0] : "all"
 n = args.size() > 1 ? args[1].to_i() : 0
@@ -132,3 +194,11 @@ if workload == "modchain" || workload == "all"
   bench_modchain(n > 0 ? n : 2000000, limbs)
 if workload == "sqrchain" || workload == "all"
   bench_sqrchain(n > 0 ? n : 2000000, limbs)
+if workload == "wordadd" || workload == "all"
+  bench_wordadd(n > 0 ? n : 2000000, limbs)
+if workload == "wordsub" || workload == "all"
+  bench_wordsub(n > 0 ? n : 2000000, limbs)
+if workload == "wordmul" || workload == "all"
+  bench_wordmul(n > 0 ? n : 2000000, limbs)
+if workload == "wordchain" || workload == "all"
+  bench_wordchain(n > 0 ? n : 2000000, limbs)

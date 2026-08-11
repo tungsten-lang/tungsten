@@ -224,6 +224,25 @@ optional dead destination after its single shape decode, or prove/hoist the
 shape in compiler IR.  A second guard tree in the hot loop spends the measured
 reuse win before arithmetic starts.
 
+The condition was met on 2026-08-10 by moving the proof into the compiler
+(E4 stage 3).  Lowering's mut-candidate walker gained a word-overwrite arm:
+`r = a + w` / `r = a - w` / `r = a * w` over a dominating literal seed keeps
+r's candidacy, and the assignment lowers to `w_bigint_{add,sub,mul}_word_dest`
+with r's dying OLD value as the destination.  All guards sit inside the new
+entries after the shape decode — the generic entries carry no new branch, so
+the ordinary boxed lanes are untouched (the post-change 485-cell screen
+measured 458 wins at 0.636 geomean, unchanged).  Compiled word loops
+(`run_program_loops.sh` wordadd/wordsub/wordmul/wordchain at 2/4/32 limbs)
+improved 5-6x against the byte-identical TUNGSTEN_BIGINT_DEST_OPS=0 control
+— the previous emission leaked the dying result outright — and the 32-limb
+add/sub/chain lanes now beat the retained-destination GMP twin (0.61-0.67).
+The remaining 1.6-1.8x at 2-4 limbs is fixed loop machinery around a ~2.5 ns
+op, not the entry.  Page-offset hazards reuse bigint_mul_n1's >= 32-limb
+rehome-and-settle policy: a plain refusal is NOT self-healing for this shape,
+because the released destination becomes the hot slot and returns as the very
+next allocation (measured: wordadd2 stuck at 7.0 ns in permanent fallback
+versus 2.5 ns rehomed).
+
 ## Native unsigned-word entries — RETAINED (2026-08-04)
 
 The documented `add1`, `sub1`, `mul1`, and `div1` rows were asymmetric at the

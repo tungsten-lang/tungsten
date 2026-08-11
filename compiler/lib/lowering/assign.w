@@ -423,6 +423,50 @@
   emit_store_global_unless_const(wfn, ctx, name, val_reg)
   typed_value(:i64, val_reg)
 
+# Word-overwrite destination call spec (E4 stage 3). For a mut-candidate
+# `r = a op w` (the syntactic shape shared with the walker's admission arm
+# in analysis.w), pick the runtime entry and operand orientation, or nil
+# when the boxed-bigint gates fail. Gates mirror the rotation shape's:
+# the target must be an explicitly BigInt-typed boxed local (raw-slot-
+# promoted or machine-typed vars keep their documented native semantics),
+# the base operand a statically BigInt-typed var, and the word side
+# anything BUT a BigInt-typed var (both-big spellings keep the guarded
+# __w_bigint_*_src route). The word operand is passed BOXED — the entry
+# validates the dynamic inline-int/one-limb shape itself.
+-> bigint_word_dest_call_spec(ctx, name, v)
+  if bigint_word_dest_rhs_shape(v, name) == nil
+    return nil
+  if !is_bigint_type(ctx[:var_types][name])
+    return nil
+  if ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][name] != nil
+    return nil
+  l = v.left
+  r = v.right
+  lbig = is_ast_node?(l) && ast_kind(l) == :var && is_bigint_type(ctx[:var_types][l.name])
+  if lbig && ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][l.name] != nil
+    lbig = false
+  rbig = is_ast_node?(r) && ast_kind(r) == :var && is_bigint_type(ctx[:var_types][r.name])
+  if rbig && ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][r.name] != nil
+    rbig = false
+  a_node = nil
+  w_node = nil
+  if lbig && !rbig
+    a_node = l
+    w_node = r
+  elsif rbig && !lbig && v.op in (:PLUS :STAR)
+    # commutative ops accept the word on the left (`5 * a`); subtraction
+    # keeps strict left orientation (`w - a` is a different operation)
+    a_node = r
+    w_node = l
+  if a_node == nil
+    return nil
+  entry = "w_bigint_mul_word_dest"
+  if v.op == :PLUS
+    entry = "w_bigint_add_word_dest"
+  elsif v.op == :MINUS
+    entry = "w_bigint_sub_word_dest"
+  {entry: entry, a: a_node, w: w_node}
+
 -> lower_assign_expr(ctx, node)
   wfn = ctx[:func]
   target = node.target
@@ -472,6 +516,40 @@
       t_slot = ensure_var_slot(wfn2, rot[:t])
       emit_instruction(wfn2, {op: :store_i64, value: dest_temp, ptr: t_slot})
       return typed_value(:i64, dest_temp)
+
+  # Word-overwrite destination (E4 stage 3): `r = a op w` over a proven-
+  # dead candidate hands r's dying OLD value to the dest-taking word entry,
+  # which computes into that buffer when the dynamic shape allows. Every
+  # guard refusal inside the entry fails open to the ordinary polymorphic
+  # op with the dead buffer released — so this site also stops the
+  # overwrite-without-release churn the plain emission leaks. The walker's
+  # admission arm (analysis.w) guarantees the old value is unaliased-or-
+  # shared-marked and that a dominating literal seed initialized the slot.
+  if ast_kind(target) == :var && node.type_hint == nil && ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][target.name] == true && node.value != nil && is_ast_node?(node.value)
+    wd = bigint_word_dest_call_spec(ctx, target.name, node.value)
+    if wd != nil
+      wfn3 = ctx[:func]
+      wd_name = target.name
+      wd_ptr = nil
+      wd_old = ctx[:bindings][wd_name]
+      if wd_old == nil
+        wd_ptr = ensure_var_slot(wfn3, wd_name)
+        wd_old = next_temp(wfn3)
+        emit_instruction(wfn3, {op: :load_i64, temp: wd_old, ptr: wd_ptr})
+      # operands are plain vars/literals (walker leaves), so lowering them
+      # cannot materialize bindings or reorder effects
+      wd_a_tv = lower_expression(ctx, wd[:a])
+      wd_w_tv = lower_expression(ctx, wd[:w])
+      wd_a_reg = ensure_i64_value(wfn3, wd_a_tv)
+      wd_w_reg = ensure_i64_value(wfn3, wd_w_tv)
+      wd_temp = next_temp(wfn3)
+      emit_instruction(wfn3, {op: :call_direct_i64, temp: wd_temp, name: wd[:entry], args: [wd_old, wd_a_reg, wd_w_reg], call_conv: "preserve_mostcc"})
+      range_binding_invalidate(ctx, wd_name)
+      ctx[:bindings][wd_name] = nil
+      if wd_ptr == nil
+        wd_ptr = ensure_var_slot(wfn3, wd_name)
+      emit_instruction(wfn3, {op: :store_i64, value: wd_temp, ptr: wd_ptr})
+      return typed_value(:i64, wd_temp)
 
   # Sum-chunking: inside a qualifying while, this accumulator statement
   # feeds the raw partial instead of touching r at all.

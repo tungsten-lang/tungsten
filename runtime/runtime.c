@@ -40067,6 +40067,201 @@ WValue w_bigint_add_dest(WValue dest, WValue x, WValue y) {
     return dest;
 }
 
+/* ==== Word-overwrite destination entries (E4 stage 3) ====
+ *
+ * The compiler emits these for `r = a + w` / `r = a - w` / `r = a * w`
+ * where r's OLD value provably dies at the assignment (analysis.w mut
+ * walker, word-overwrite arm): the dying buffer arrives as `dead` and the
+ * result is computed INTO it when the dynamic shape allows, skipping the
+ * release->take recycler round trip — GMP's retained mpz_*_ui shape. All
+ * guards live inside the entry AFTER the shape decode, the exact
+ * condition recorded by the destination-passing decomposition in
+ * benchmarks/big_math/NOTED_TRADEOFFS.md (a second guard tree in the
+ * generic entries spends the reuse win before arithmetic starts).
+ *
+ * Every refusal fails open to the ordinary polymorphic op, which also
+ * keeps mixed-type / rational / decimal operands off the bigint kernels.
+ * The fallback preserves the fresh-or-MARKED invariant: an identity
+ * return of a LIVE operand is shared-marked before it escapes into the
+ * dying variable's slot (the immutable entries mark their own identity
+ * arms too — the extra count only over-swallows a release, never
+ * corrupts), and the dead buffer is released unless it IS one of the
+ * live values involved (an unmarked such alias is excluded by the
+ * candidate proof; the pointer test is the belt-and-suspenders). */
+static WValue bigint_word_dest_fallback(WValue dead, WValue a, WValue b,
+                                        WValue r) {
+    if ((r == a || r == b) && w_is_bigint(r))
+        w_bigint_mark_shared(w_as_bigint(r));
+    if (w_is_bigint(dead)) {
+        WBigint *bd = w_as_bigint(dead);
+        if (!(w_is_bigint(a) && w_as_bigint(a) == bd) &&
+            !(w_is_bigint(b) && w_as_bigint(b) == bd) &&
+            !(w_is_bigint(r) && w_as_bigint(r) == bd))
+            bigint_release_if_live(bd);
+    }
+    return r;
+}
+
+/* Decode a word-shaped rhs — inline int or one-limb bigint, mirroring the
+ * mut entries' operand decode (the word is not always statically
+ * extractable, so the compiler passes it boxed). */
+static inline int bigint_word_dest_operand(WValue b, uint64_t *w, int *neg,
+                                           WBigint **heap) {
+    *heap = NULL;
+    if (w_is_int(b)) {
+        int64_t ib = w_as_int(b);
+        *neg = ib < 0;
+        *w = *neg ? (uint64_t)(-(ib + 1)) + 1U : (uint64_t)ib;
+        return 1;
+    }
+    if (w_is_bigint(b)) {
+        int32_t bs;
+        WBigint *bb = w_bigint_view(b, &bs);
+        if (bs == 1 || bs == -1) {
+            *heap = bb;
+            *neg = bs < 0;
+            *w = bb->limbs[0];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Consumable-destination test shared by the three entries: a unique
+ * overlay-clear heap bigint (size != 0 rejects parked/degenerate headers,
+ * mirroring the mut guards) that is not the buffer of either live
+ * operand. */
+static inline WBigint *bigint_word_dest_take(WValue dead, WBigint *ba,
+                                             WBigint *bheap) {
+    if (!w_is_bigint(dead) || (dead & W_BIGINT_SIGN_BIT) != 0)
+        return NULL;
+    WBigint *bd = w_as_bigint(dead);
+    if (bd->shared != 0 || bd->size == 0 || bd == ba || bd == bheap)
+        return NULL;
+    return bd;
+}
+
+/* Add/sub share one body: subtraction only flips b's effective sign, and
+ * the |a| >= 2-limb gate makes the opposite-sign magnitude subtraction
+ * structural (|a| > w always — the raw-sign discipline of the word
+ * kernels). Sign selection reads a's RAW header sign; overlay-composed
+ * operands take the generic entry. Page-offset aliasing keeps the wide
+ * policy of the ordinary N x 1 paths: below 32 limbs the streams are too
+ * short to stall (bigint_addsub_word runs unguarded there), and from 32
+ * limbs a hazardous destination is REHOMED once (settled-table backed) —
+ * a refusal would not self-heal here, because the released buffer becomes
+ * the hot slot and returns as the very next allocation. */
+static WValue bigint_addsub_word_dest(WValue dead, WValue a, WValue b,
+                                      int negate_b) {
+    if (w_is_bigint(a) && (a & W_BIGINT_SIGN_BIT) == 0) {
+        WBigint *ba = w_as_bigint(a);
+        int32_t as = ba->size;
+        int a_neg = as < 0;
+        int32_t n = a_neg ? -as : as;
+        uint64_t w;
+        int b_neg;
+        WBigint *bheap;
+        if (n >= 2 && bigint_word_dest_operand(b, &w, &b_neg, &bheap) &&
+            w != 0) {
+            if (negate_b) b_neg = !b_neg;
+            WBigint *bd = bigint_word_dest_take(dead, ba, bheap);
+            if (bd != NULL && (uint32_t)n <= bd->cap) {
+#if BN_EQ_PAGE_HAZARD_GUARD
+                if (n >= 32 &&
+                    bn_addsub_page_hazard(bd->limbs, ba->limbs) &&
+                    !bn_addsub_placement_is_settled(bd, ba->limbs,
+                                                    ba->limbs))
+                    bd = bigint_rehome_binary_result(bd, ba->limbs,
+                                                     ba->limbs);
+#endif
+                if (a_neg == b_neg)
+                    return bigint_add_word_into(ba->limbs, n, a_neg, w, bd);
+                return bigint_sub_word_into(bd, ba->limbs, n, a_neg, w);
+            }
+        }
+    }
+    return bigint_word_dest_fallback(dead, a, b,
+                                     negate_b ? w_sub(a, b) : w_add(a, b));
+}
+
+__attribute__((preserve_most)) WValue w_bigint_add_word_dest(
+    WValue dead, WValue a, WValue b) {
+    return bigint_addsub_word_dest(dead, a, b, 0);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_sub_word_dest(
+    WValue dead, WValue a, WValue b) {
+    return bigint_addsub_word_dest(dead, a, b, 1);
+}
+
+/* N x 1 multiply into the dying destination. Kernel selection mirrors
+ * bigint_mul_ui_any's positive ladder (straight-line small, fixed
+ * power-of-two widths, rolling-carry generic); n >= 128 keeps the
+ * ordinary entry, whose carry-select blocks and placement machinery the
+ * dest path does not replicate (the measured dest win lives at 2..64
+ * limbs). w in {0, 1} keeps the identity/zero semantics of the ordinary
+ * entry. A >= 2-limb magnitude times w >= 2 never demotes, so the result
+ * boxes directly. */
+__attribute__((preserve_most)) WValue w_bigint_mul_word_dest(
+    WValue dead, WValue a, WValue b) {
+    if (w_is_bigint(a) && (a & W_BIGINT_SIGN_BIT) == 0) {
+        WBigint *ba = w_as_bigint(a);
+        int32_t as = ba->size;
+        int a_neg = as < 0;
+        int32_t n = a_neg ? -as : as;
+        uint64_t w;
+        int b_neg;
+        WBigint *bheap;
+        if (n >= 2 && n < 128 &&
+            bigint_word_dest_operand(b, &w, &b_neg, &bheap) && w >= 2) {
+            WBigint *bd = bigint_word_dest_take(dead, ba, bheap);
+            if (bd != NULL && (uint32_t)(n + 1) <= bd->cap) {
+#if BN_EQ_PAGE_HAZARD_GUARD
+                /* Same >= 32-limb rehome policy as bigint_mul_n1. */
+                if (n >= 32 &&
+                    bn_addsub_page_hazard(bd->limbs, ba->limbs) &&
+                    !bn_addsub_placement_is_settled(bd, ba->limbs,
+                                                    ba->limbs))
+                    bd = bigint_rehome_binary_result(bd, ba->limbs,
+                                                     ba->limbs);
+#endif
+                const uint64_t *al = ba->limbs;
+                uint64_t carry;
+#if BN_MUL_N1_SMALL_STRAIGHT
+                if (n <= BN_MUL_N1_SMALL_MAX) {
+                    __uint128_t product = (__uint128_t)al[0] * w;
+                    bd->limbs[0] = (uint64_t)product;
+                    carry = (uint64_t)(product >> 64);
+                    int32_t i = 1;
+                    while (i < n) {
+                        product = (__uint128_t)al[i] * w + carry;
+                        bd->limbs[i] = (uint64_t)product;
+                        carry = (uint64_t)(product >> 64);
+                        i++;
+                    }
+                } else
+#endif
+#if BN_MUL_POWER2_FIXED
+                if (n == 8) carry = bn_mul_1_f8(bd->limbs, al, w);
+                else if (n == 16) carry = bn_mul_1_f16(bd->limbs, al, w);
+                else if (n == 24) carry = bn_mul_1_f24(bd->limbs, al, w);
+                else if (n == 32) carry = bn_mul_1_f32(bd->limbs, al, w);
+                else if (n == 40) carry = bn_mul_1_f40(bd->limbs, al, w);
+                else if (n == 48) carry = bn_mul_1_f48(bd->limbs, al, w);
+                else if (n == 64) carry = bn_mul_1_f64(bd->limbs, al, w);
+                else
+#endif
+                    carry = bn_mul_1(bd->limbs, al, n, w);
+                bd->limbs[n] = carry;
+                int32_t size = n + (carry != 0);
+                bd->size = (a_neg != b_neg) ? -size : size;
+                return bigint_box(bd);
+            }
+        }
+    }
+    return bigint_word_dest_fallback(dead, a, b, w_mul(a, b));
+}
+
 /* Shared-bit surface for the tag-sign aliasing machinery and its specs.
  * Marking a non-bigint is a no-op; querying one answers false. The bit is
  * sticky for the buffer's live lifetime — see WBigint.shared in wvalue.h

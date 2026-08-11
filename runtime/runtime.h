@@ -737,6 +737,15 @@ __attribute__((preserve_most)) WValue w_bigint_submul_mut(
 /* Rotation-shape add into a dying destination buffer (E4 stage 2);
  * called unconditionally in the emitted shape, so plain CC. */
 WValue w_bigint_add_dest(WValue dest, WValue x, WValue y);
+/* Word-overwrite destination entries (E4 stage 3): `r = a op w` whose
+ * dying old r arrives as `dead`. Guards inside; fail-open to the
+ * polymorphic op with the dead buffer released. */
+__attribute__((preserve_most)) WValue w_bigint_add_word_dest(
+    WValue dead, WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_sub_word_dest(
+    WValue dead, WValue a, WValue b);
+__attribute__((preserve_most)) WValue w_bigint_mul_word_dest(
+    WValue dead, WValue a, WValue b);
 
 /* ---- Hash ---- */
 WValue w_hash_new(void);

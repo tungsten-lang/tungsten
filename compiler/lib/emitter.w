@@ -294,6 +294,12 @@ use naming
   out << declare_fn_attrs("w_bigint_addmul_mut", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn_attrs("w_bigint_submul_mut", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn("w_bigint_add_dest", wv, wv3)
+  # Word-overwrite destination entries (E4 stage 3): same preserve_mostcc
+  # contract as the mut family — the C definitions carry
+  # __attribute__((preserve_most)).
+  out << declare_fn_attrs("w_bigint_add_word_dest", "preserve_mostcc " + wv, wv3, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_sub_word_dest", "preserve_mostcc " + wv, wv3, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_mul_word_dest", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn("w_mul", wv, wv2)
   out << declare_fn("w_pow", wv, wv2)
   out << declare_fn("w_div", wv, wv2)

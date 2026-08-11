@@ -2094,6 +2094,43 @@
     return false
   node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == name
 
+# ==== Word-overwrite destination shape (E4 stage 3) ====
+#
+# `r = a + w` / `r = a - w` / `r = a * w` overwriting a candidate var: r's
+# OLD value provably dies at the assignment, so lowering hands it to a
+# dest-taking runtime entry (w_bigint_{add,sub,mul}_word_dest) that
+# computes into the dying buffer. This predicate is purely syntactic and
+# SHARED between walker admission and emission, keeping the proof and the
+# transform aligned. Leaves are int literals or plain vars OTHER than the
+# target: a self-reading spelling stays with the mutate-if-unique family,
+# and excluding the target from operand position means the dest can only
+# dynamically equal an operand through an alias — which the fresh-or-
+# MARKED invariant forces to carry a shared mark (and the entries also
+# pointer-compare, belt and suspenders).
+-> bigint_word_dest_leaf?(n, name)
+  if n == nil || !is_ast_node?(n)
+    return false
+  k = ast_kind(n)
+  if k == :int
+    return true
+  k == :var && n.name != name
+
+-> bigint_word_dest_rhs_shape(node, name)
+  if env("TUNGSTEN_BIGINT_DEST_OPS") == "0"
+    return nil
+  if node == nil || !is_ast_node?(node) || ast_kind(node) != :binary_op
+    return nil
+  if !(node.op in (:PLUS :MINUS :STAR))
+    return nil
+  if !(bigint_word_dest_leaf?(node.left, name) && bigint_word_dest_leaf?(node.right, name))
+    return nil
+  # at least one side must be a var — an all-literal RHS is a seed
+  # (mut_literal_leaves_only? claims it first), never an overwrite that
+  # wants the dying buffer
+  if ast_kind(node.left) != :var && ast_kind(node.right) != :var
+    return nil
+  node
+
 -> mut_walk_expr(node, assigned, dead)
   # expression position: operands of arithmetic/comparisons are plain reads
   if node == nil || !is_ast_node?(node)
@@ -2115,7 +2152,7 @@
   mut_mark_all_dead(node, dead)
   nil
 
--> mut_walk_stmts(body, assigned, dead)
+-> mut_walk_stmts(body, assigned, dead, seeds, depth)
   if body == nil
     return nil
   i = 0
@@ -2138,6 +2175,23 @@
         mut_walk_expr(st.value.right, assigned, dead)
       elsif mut_literal_leaves_only?(st.value)
         assigned[name] = true
+        # Word-overwrite admission (below) demands a DOMINATING seed: a
+        # direct top-level statement of this body, textually earlier. That
+        # proves both ownership of the dying buffer (a parameter's incoming
+        # value is caller-owned and must never be consumed) and that the
+        # slot is initialized on every path reaching the overwrite — the
+        # dest entry READS the old value, a load the user never wrote, so
+        # a conditionally-executed seed would let it read an undef slot.
+        if depth == 0
+          seeds[name] = true
+      elsif bigint_word_dest_rhs_shape(st.value, name) != nil
+        # Word-overwrite shape (E4 stage 3): `r = a op w` consumes r's OLD
+        # value as the op's destination. Admitted only over a dominating
+        # literal seed; the RHS operands are ordinary read positions
+        # (leaves exclude the target itself).
+        if seeds[name] != true
+          dead[name] = true
+        mut_walk_expr(st.value, assigned, dead)
       else
         dead[name] = true
         # A bare-var RHS is a plain slot copy — an alias minted with NO
@@ -2161,17 +2215,17 @@
         mut_walk_expr(st.value, assigned, dead)
     elsif k == :while
       mut_walk_expr(st.condition, assigned, dead)
-      mut_walk_stmts(st.body, assigned, dead)
+      mut_walk_stmts(st.body, assigned, dead, seeds, depth + 1)
     elsif k == :if
       mut_walk_expr(st.condition, assigned, dead)
-      mut_walk_stmts(st.then_body, assigned, dead)
-      mut_walk_stmts(st.else_body, assigned, dead)
+      mut_walk_stmts(st.then_body, assigned, dead, seeds, depth + 1)
+      mut_walk_stmts(st.else_body, assigned, dead, seeds, depth + 1)
       if st.elsif_clauses != nil
         j = 0
         while j < st.elsif_clauses.size()
           clause = st.elsif_clauses[j]
           mut_walk_expr(clause[0], assigned, dead)
-          mut_walk_stmts(clause[1], assigned, dead)
+          mut_walk_stmts(clause[1], assigned, dead, seeds, depth + 1)
           j += 1
     elsif k in (:binary_op :unary_op :not :and :or)
       # A pure-arithmetic expression statement (commonly the implicit
@@ -2195,7 +2249,7 @@
     return {}
   assigned = {}
   dead = {}
-  mut_walk_stmts(body, assigned, dead)
+  mut_walk_stmts(body, assigned, dead, {}, 0)
   result = {}
   if dead["__scope_poisoned__"] == true
     return result

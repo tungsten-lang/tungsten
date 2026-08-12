@@ -1140,6 +1140,46 @@ WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
     return bigint_alloc_raw((int32_t)exact_cap);
 }
 
+/* The sub1@1 boxed leaf is an instruction-floor cell.  Capacity occupies
+ * packed hot-word bits 48..63, and under the hybrid policy capacity one is
+ * the only valid odd class (powers of two through 32, then multiples of
+ * 32).  Bit 48 therefore answers both occupancy and exact-cap-one with one
+ * test; a clear bit proves the generic decoded-capacity comparison cannot
+ * recover a hit.  The displaced release handoff preserves this reading:
+ * every hot_word store is either zero (takes) or bigint_hot_encode(b,
+ * b->cap) with a class-valid capacity, displaced or not.  Keep this
+ * leaf-local so unrelated exact-cap callers retain their established code
+ * layout. */
+#ifndef BN_SUB1_HOT_EXACT1_BIT
+#define BN_SUB1_HOT_EXACT1_BIT 1
+#endif
+static inline __attribute__((always_inline))
+WBigint *bigint_alloc_raw_hot_sub1_exact_one(void) {
+#if BN_SUB1_HOT_EXACT1_BIT && BN_BIGINT_HYBRID_CAP && \
+    BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+    WBigintPool *pool = &bigint_pool_state;
+    uint64_t hot_word = pool->hot_word;
+    if (__builtin_expect(
+            (hot_word & (UINT64_C(1) << 48)) != 0, 1)) {
+#ifndef NDEBUG
+        assert(bigint_hot_capacity(hot_word) == 1U);
+#endif
+        pool->hot_word = 0;
+        WBigint *hot = bigint_hot_ptr(hot_word);
+#if !BN_BIGINT_HOT_LIVE_HEADER
+        hot->type = W_TYPE_BIGINT;
+#endif
+        return hot;
+    }
+    /* Miss: same fallback as the generic exact take's miss arm —
+     * bigint_alloc_raw probes the hot slot and buckets via
+     * bigint_pool_take before touching the arena or malloc. */
+    return bigint_alloc_raw(1);
+#else
+    return bigint_alloc_raw_hot_exact(1U);
+#endif
+}
+
 /* ---- BigInt arena implementation ----
  * Placement policy and rationale are documented at the BN_BIGINT_ARENA
  * definition above the pool. */
@@ -1501,6 +1541,35 @@ WValue bigint_finish_one_limb_sized(uint64_t magnitude, int32_t signed_size) {
     result->limbs[0] = magnitude;
     result->size = signed_size;
     return bigint_box(result);
+}
+
+/* Sub1-only clone of the sized finisher whose boxed arm takes through the
+ * bit-48 exact-one test instead of the XOR class compare.  Sign stays data
+ * (signed_size computed beside the flag-setting subtract in the leaf). */
+static inline __attribute__((always_inline))
+WValue bigint_finish_sub1_one_limb_sized(
+    uint64_t magnitude, int32_t signed_size) {
+    if (magnitude <= (uint64_t)W_INT48_MAX) {
+        int64_t value = (int64_t)magnitude;
+        return w_box_int(signed_size < 0 ? -value : value);
+    }
+    WBigint *result = bigint_alloc_raw_hot_sub1_exact_one();
+    result->limbs[0] = magnitude;
+    result->size = signed_size;
+    return bigint_box(result);
+}
+
+/* Positive minus word, one limb: the wrap-and-negate pair mirrors the
+ * mixed-sign arm of bigint_add_one_limb_magnitudes with both signs known,
+ * and materializes signed_size beside the flag-setting subtract so the
+ * sized finisher never re-compares the operands. */
+static inline __attribute__((always_inline))
+WValue bigint_sub1_positive_one_limb(uint64_t a, uint64_t word) {
+    uint64_t diff = a - word;
+    int lt = a < word;
+    uint64_t magnitude = lt ? 0 - diff : diff;
+    int32_t signed_size = lt ? -1 : 1;
+    return bigint_finish_sub1_one_limb_sized(magnitude, signed_size);
 }
 
 /* One-word division has already trimmed its quotient.  Keep its common
@@ -2118,8 +2187,7 @@ WValue bigint_sub_ui_any(WValue a, uint64_t word) {
          * predicate — without this, one-limb subtracts fell through to the
          * generic decode and re-derived the operand view. */
         if (n == 1)
-            return bigint_add_one_limb_magnitudes(
-                ba->limbs[0], 0, word, 1);
+            return bigint_sub1_positive_one_limb(ba->limbs[0], word);
 #endif
     }
 #endif

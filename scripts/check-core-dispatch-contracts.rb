@@ -112,6 +112,13 @@ RUNTIME_CLASS_CONTRACTS = {
       pf_advance pf_bm_search pf_set_match run set_match? set_split
       single_consuming? source span_str word_lex?
     ]
+  },
+  "BigInt" => {
+    path: "core/numeric/big_int.w",
+    table: nil,
+    retired_table: "w_ic_bigint_table",
+    native_ic: [],
+    source_fallback: %w[% & * + - / << >> ^ abs abs! even? gcd isqrt lcm neg! negative? odd? positive? prime? to_f to_i to_s zero? |]
   }
 }.freeze
 
@@ -194,13 +201,15 @@ end
 
 RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   source = File.read(File.join(ROOT, contract[:path]), encoding: "utf-8")
-  body = source[/^\+ #{Regexp.escape(class_name)}\s*$\n(?<body>.*?)(?=^\+ |\z)/m, :body]
+  body = source[/^\+ #{Regexp.escape(class_name)}(?:\s+<[^\n]+)?\s*$\n(?<body>.*?)(?=^\+ |\z)/m, :body]
   if body.nil?
     errors << "#{class_name}: missing class declaration in #{contract[:path]}"
     next
   end
 
-  source_methods = body.scan(/^  ->\s+(?!\.)([^\s(]+)/).flatten.map { |name| name.sub(%r{/.*\z}, "") }.uniq.sort
+  source_methods = body.scan(/^  ->\s+(?!\.)([^\s(]+)/).flatten.map do |name|
+    name == "/" ? name : name.sub(%r{/.*\z}, "")
+  end.uniq.sort
   native_methods = contract[:native_ic].uniq.sort
   native_only = contract.fetch(:native_only, []).uniq.sort
   fallback_methods = contract[:source_fallback].uniq.sort
@@ -226,7 +235,15 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   errors << "#{class_name}: unclassified source methods: #{unclassified.join(', ')}" unless unclassified.empty?
   errors << "#{class_name}: classifications not declared in #{contract[:path]}: #{stale.join(', ')}" unless stale.empty?
 
-  actual_ic = assignments.fetch(contract[:table], {}).values.uniq.sort
+  if contract[:table] == nil
+    retired_table = contract[:retired_table]
+    if retired_table != nil && tables.key?(retired_table)
+      errors << "#{class_name}: retired runtime IC table still exists: #{retired_table}"
+    end
+    actual_ic = []
+  else
+    actual_ic = assignments.fetch(contract[:table], {}).values.uniq.sort
+  end
   missing_ic = native_methods - actual_ic
   stale_ic = actual_ic - native_methods
   errors << "#{class_name}: native IC classification missing runtime rows: #{missing_ic.join(', ')}" unless missing_ic.empty?

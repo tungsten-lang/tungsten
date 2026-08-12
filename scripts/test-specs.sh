@@ -708,6 +708,7 @@ cuda_reject_specs=(
 
 interpreter_specs=(
   compiler/test/regex_features.w
+  benchmarks/runtime_ports/bigint_predicate_relaxed_autoload.w
   # Engine-parity pins: these compiler specs assert values that must hold
   # identically interpreted (compiled-only verification has missed clobbered
   # interpreter.w hunks before).

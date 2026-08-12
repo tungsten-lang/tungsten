@@ -1452,7 +1452,7 @@ WValue bigint_finish_div1(WBigint *b) {
 
 /* |x| of a boxed BigInt as an alias of the SAME buffer: the value itself
  * for effective-positive x, the O(1) tag-sign overlay flip otherwise
- * (mirroring w_neg / w_ic_bigint_abs). Either way one more reference to
+ * (mirroring w_neg / BigInt#abs). Either way one more reference to
  * the buffer escapes, so bump the saturating shared count first — that is
  * what lets a later bigint_release_if_live of the "result" be swallowed
  * instead of recycling the still-live operand. */
@@ -38842,9 +38842,7 @@ static __attribute__((noinline)) WValue w_neg_generic(WValue v) {
 
 /* always_inline on an exported entry: callers in this translation unit get
  * the copy-class fast path inlined, while the out-of-line symbol is still
- * emitted for the compiled-Tungsten ABI. Measured: the call boundary alone, not the TLS
- * thunk (0.07 ns, negligible), is what separated this from w_ic_bigint_abs,
- * which is a static and already inlines. */
+ * emitted for the compiled-Tungsten ABI. */
 __attribute__((always_inline))
 WValue w_neg(WValue v) {
     if (w_is_bigint(v)) {
@@ -51232,11 +51230,6 @@ static WValue w_ic_int_isqrt(WValue r, WValue *a, int c) {
     if (n < 0) die("Int#isqrt: negative receiver");
     return w_int((int64_t)bn_isqrt_u128((unsigned __int128)(uint64_t)n));
 }
-static WValue w_ic_bigint_isqrt(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return bigint_isqrt_any(r);
-}
-
 /* Exported fallback boundary for mixed-representation and multi-limb
  * BigInt#gcd source paths. bigint_gcd_any itself is static always_inline for
  * its rational-normalization callers, so this thin external wrapper is the
@@ -51352,33 +51345,6 @@ WValue w_bigint_seal_raw(WValue v, int64_t signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)signed_size;
     return bigint_normalize(b);
-}
-
-/* Bigint builtin wrappers */
-static WValue w_ic_bigint_to_s(WValue r, WValue *a, int c) {
-    int base = w_to_s_base_arg(a, c);
-    int32_t s;
-    WBigint *b = w_bigint_view(r, &s);
-    return bigint_to_s_base_impl(b, s, base);
-}
-static WValue w_ic_bigint_to_f(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    return w_box_double(bigint_to_double_boxed(r));
-}
-static WValue w_ic_bigint_gcd(WValue r, WValue *a, int c) {
-    if (c < 1) die("gcd requires 1 argument");
-    return bigint_gcd_any_inline(r, a[0]);
-}
-static inline __attribute__((always_inline))
-WValue w_ic_bigint_abs(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
-    /* Tag-sign abs (v4): effective-positive values keep the identity
-     * return; effective-negative ones hand out the same buffer with the
-     * overlay bit set so header-sign XOR overlay composes positive —
-     * O(1), zero allocation, like w_neg. */
-    if (__builtin_expect(!w_bigint_effective_negative(r), 1)) return r;
-    w_bigint_mark_shared(w_as_bigint(r));
-    return r ^ W_BIGINT_SIGN_BIT;
 }
 
 static inline __attribute__((always_inline))
@@ -51523,9 +51489,6 @@ WValue w_ic_integer_lcm(WValue r, WValue *a, int c) {
 WValue w_bigint_lcm(WValue r, WValue arg) {
     return w_ic_integer_lcm(r, &arg, 1);
 }
-static WValue w_ic_bigint_prev(WValue r, WValue *a, int c) { (void)a; (void)c; return w_sub(r, w_int(1)); }
-static WValue w_ic_bigint_succ(WValue r, WValue *a, int c) { (void)a; (void)c; return w_add(r, w_int(1)); }
-
 /* Retained native synchronization wrappers. */
 static WValue w_ic_channel_send(WValue r, WValue *a, int c) {
     if (c == 1) return w_chan_send(r, a[0]);
@@ -52116,20 +52079,6 @@ static WICEntry w_ic_strbuf_table[] = {
     {0, w_ic_strbuf_idx},
     {0, w_ic_strbuf_clear},
     {0, w_ic_strbuf_empty_q},
-    {0, NULL}
-};
-
-static WICEntry w_ic_bigint_table[] = {
-    {0, w_ic_bigint_to_s},
-    {0, w_ic_bigint_gcd},
-    {0, w_ic_bigint_abs},
-    {0, w_ic_bigint_prime_q},
-    {0, w_ic_bigint_to_f},
-    {0, w_ic_bigint_prev},
-    {0, w_ic_bigint_succ},
-    {0, w_ic_bigint_succ},      /* next */
-    {0, w_ic_integer_lcm},
-    {0, w_ic_bigint_isqrt},
     {0, NULL}
 };
 
@@ -52726,28 +52675,6 @@ static void w_init_ic_tables(void) {
     w_ic_strbuf_table[8].name  = WN_idx;
     w_ic_strbuf_table[9].name  = WN_clear;
     w_ic_strbuf_table[10].name = WN_empty_q;
-    /* Bigint */
-    /* Slot 0 (to_s) is retired: BigInt#to_s in core/numeric/big_int.w is
-     * a source shim over the exported w_bigint_to_s boundary. The static
-     * :int-receiver intercept (method_call.w) keeps routing typed sites
-     * to w_int_to_s, and print/interpolation paths use w_to_s directly —
-     * both unaffected by this row. */
-    /* Slot 1 (gcd) is retired: BigInt#gcd completes one-limb BigInt pairs in
-     * source and uses w_bigint_gcd for mixed and multi-limb fallbacks. */
-    /* Slot 2 (abs) is retired: BigInt#abs in core/numeric/big_int.w does
-     * the same O(1) mark-shared + tag-overlay flip in source. */
-    /* Slot 3 (prime?) is retired: BigInt#prime? in core/numeric/big_int.w
-     * is a source shim over the exported w_bigint_prime_q boundary. */
-    /* Slot 4 (to_f) is retired: BigInt#to_f in core/numeric/big_int.w owns
-     * the unsigned-limb-to-f64 walk and final Float boxing in source. */
-    /* Slots 5-7 (prev, succ, next) are retired: Int's source bodies
-     * (core/numeric/int.w) serve BigInt receivers through type-class
-     * dispatch, so the names stay unregistered and lookup falls through. */
-    /* Slot 8 (lcm) is retired: BigInt#lcm in core/numeric/big_int.w is a
-     * source shim over the fused w_bigint_lcm boundary. */
-    /* Slot 9 (isqrt) is retired: BigInt#isqrt completes positive one-limb
-     * magnitudes in source and uses bigint_isqrt_any for wider/negative
-     * fallbacks. */
     /* Channel */
     w_ic_channel_table[0].name = WN_send;
     w_ic_channel_table[1].name = WN_close;
@@ -52821,7 +52748,6 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
         case 0x05: table = w_ic_hash_table;    break;
         case 0x01: table = w_ic_atomic_table;  break;
         case 0x84: table = w_ic_channel_table; break;  /* 0x80 | W_TYPE_CHANNEL=4 */
-        case W_SUBTAG_BIGINT: table = w_ic_bigint_table; break;
         case 0x0B: table = w_ic_strbuf_table;  break;  /* W_SUBTAG_STRBUF */
         case 0x07: table = w_ic_regex_table;   break;  /* W_SUBTAG_REGEX */
         case 0x81: table = w_ic_thread_table;  break;  /* 0x80 | W_TYPE_THREAD=1 */

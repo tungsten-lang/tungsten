@@ -6,6 +6,9 @@
     << "FAIL autoload [name]: got=[got] expected=[expected]"
     exit(1)
 
+-> zero_after_erasure(value)
+  value.zero?()
+
 one = 281474976710656
 odd = one + 1
 negative = 0 - odd
@@ -13,6 +16,7 @@ multi = 18446744073709551616
 
 check("one class", one.class_name, "BigInt")
 check("one zero", one.zero?, false)
+check("one zero after receiver erasure", zero_after_erasure(one), false)
 check("one even", one.even?, true)
 check("odd odd", odd.odd?, true)
 check("negative", negative.negative?, true)

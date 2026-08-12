@@ -800,6 +800,7 @@ interpreter_specs=(
   spec/compiler/top_level_method_name_hygiene_spec.w
   spec/compiler/string_buffer_dynamic_append_spec.w
   spec/compiler/string_buffer_dynamic_receiver_spec.w
+  spec/compiler/string_dynamic_dispatch_spec.w
   spec/compiler/quantity_control_flow_parity_spec.w
   spec/core/quantity_dispatch_spec.w
   spec/compiler/static_method_block_dispatch_spec.w

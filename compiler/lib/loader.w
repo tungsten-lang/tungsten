@@ -305,21 +305,6 @@ use parser
     # literal is provably used in that inlined-iterator-only shape, and true
     # for anything it can't prove (unknown node, escape, non-safe method).
     @array_needed = array_class_needed?(exprs)
-    # Preserve simple String provenance across the pre-lowering autoload
-    # pass. `text = ""; text.empty?` used to miss String's source method
-    # because string_empty_receiver? could recognize only the literal node,
-    # not the variable that held it. Any second/non-string assignment drops
-    # the proof; a conservative extra autoload is preferable to an undefined
-    # method at runtime.
-    @string_literal_vars = {}
-    string_other_assign = {}
-    collect_string_literal_vars_list(exprs, @string_literal_vars, string_other_assign)
-    string_names = @string_literal_vars.keys()
-    sni = 0
-    while sni < string_names.size()
-      if string_other_assign[string_names[sni]] == true
-        @string_literal_vars[string_names[sni]] = nil
-      sni += 1
     # Source-defined Array methods have no runtime fallback, and an Array can
     # enter through argv/a parameter without any literal or class reference.
     # Scan call names only until the first such method schedules Array. Later
@@ -344,10 +329,10 @@ use parser
     # remainder of this walk/pass.
     @bigint_predicates_unresolved = defined["BigInt"] != true && registry["BigInt"] != nil && @autoload_loaded["BigInt"] != true
     # String and Symbol share runtime dispatch key 0xF9 and may arrive through
-    # parameters, native calls, or rope-producing expressions. Once both
-    # native length aliases are removed, a one-shot name gate is the sound
-    # registration boundary for their deliberately tiny source facade.
-    @string_length_unresolved = defined["String"] != true && registry["String"] != nil && @autoload_loaded["String"] != true
+    # parameters, native calls, or rope-producing expressions. A one-shot
+    # method-name gate is the sound registration boundary for their
+    # deliberately tiny source facade.
+    @string_source_method_unresolved = defined["String"] != true && registry["String"] != nil && @autoload_loaded["String"] != true
     # Opaque synchronization handles have no reliable receiver-class evidence
     # in the AST. Only the four bounded source leaves participate; ubiquitous
     # or hard-fatal native selectors deliberately keep their IC fallback.
@@ -457,42 +442,6 @@ use parser
     collect_arr_literal_vars_list(node.expressions, arr_vars, other_assign)
     if node.value != nil && is_ast_node?(node.value)
       collect_arr_literal_vars_node(node.value, arr_vars, other_assign)
-    nil
-
-  -> collect_string_literal_vars_list(nodes, string_vars, other_assign)
-    if nodes == nil
-      return nil
-    if is_ast_node?(nodes)
-      collect_string_literal_vars_node(nodes, string_vars, other_assign)
-      return nil
-    i = 0
-    while i < nodes.size()
-      collect_string_literal_vars_node(nodes[i], string_vars, other_assign)
-      i += 1
-
-  -> collect_string_literal_vars_node(node, string_vars, other_assign)
-    if !is_ast_node?(node)
-      if type(node) == "Array"
-        collect_string_literal_vars_list(node, string_vars, other_assign)
-      return nil
-    t = ast_kind(node)
-    if t in (:fastmath_block :strictmath_block :overflow_block)
-      collect_string_literal_vars_list(node[:body], string_vars, other_assign)
-      return nil
-    if t == :assign && node.target != nil && ast_kind(node.target) == :var
-      value = node.value
-      if value != nil && is_ast_node?(value) && ast_kind(value) in (:string :string_interp)
-        string_vars[node.target.name] = true
-      else
-        other_assign[node.target.name] = true
-    if t == :compound_assign && node.target != nil && ast_kind(node.target) == :var
-      other_assign[node.target.name] = true
-    collect_string_literal_vars_list(node.body, string_vars, other_assign)
-    collect_string_literal_vars_list(node.then_body, string_vars, other_assign)
-    collect_string_literal_vars_list(node.else_body, string_vars, other_assign)
-    collect_string_literal_vars_list(node.expressions, string_vars, other_assign)
-    if node.value != nil && is_ast_node?(node.value)
-      collect_string_literal_vars_node(node.value, string_vars, other_assign)
     nil
 
   -> scan_arr_safety_list(nodes, arr_vars, st)
@@ -661,37 +610,23 @@ use parser
       if call_receiver == nil && call_name == "StringBuffer"
         consider_autoload_name("StringBuffer", defined, registry, seen, pending)
 
-      # String#empty? lives in the native source class. Load it only for a
-      # receiver expression proven String/Symbol-producing.
-      if call_name == "empty?" && string_empty_receiver?(call_receiver)
+      # Every executable String source method lives in the deliberately tiny
+      # core/string_native.w facade. Name-gate the complete surface behind a
+      # one-shot latch: a false-positive Array#size/Object#to_s load is small,
+      # while omitting any name makes a value crossing an erased/native
+      # boundary fail only in compiled dispatch. String and Symbol share the
+      # 0xF9 registration, so the same trigger covers both representations.
+      if @string_source_method_unresolved && call_name in ("to_s" "empty?" "size" "length" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "center" "delete" "squeeze" "tr")
         consider_autoload_name("String", defined, registry, seen, pending)
-
-      # String/Symbol#to_s now lives in the shared 0xF9 native source class.
-      # Name-gating covers dynamic receivers; loading this tiny class does not
-      # interfere with other built-in or user-defined to_s implementations.
-      if call_name == "to_s" && (node.args == nil || node.args.size() == 0)
-        consider_autoload_name("String", defined, registry, seen, pending)
-
-      if @string_length_unresolved
-        # size/length and the source-defined transforms (swapcase/capitalize/
-        # reverse) all just need String's tiny facade scheduled once. Gating
-        # them behind this latch — false from the start whenever String is
-        # already loaded, which is nearly always — keeps the per-call-node
-        # autoload walk from re-testing these names on every compile after
-        # String is in. reverse also names an Array method; over-scheduling
-        # String on an array.reverse is harmless (matches the prior
-        # unconditional behavior) and only happens while String is unresolved.
-        if call_name in ("size" "length" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "center" "delete" "squeeze" "tr")
+        @string_source_method_unresolved = false
+      # Lowering synthesizes a per-element call for these Symbol-to-proc forms
+      # after this source-AST walk. Mirror that exact domain here so
+      # :size/:length cannot bypass String registration.
+      elsif @string_source_method_unresolved && call_name in ("map" "select" "reject" "count") && node.block == nil && call_receiver != nil && node.args != nil && node.args.size() == 1
+        iteratee = node.args[0]
+        if iteratee != nil && is_ast_node?(iteratee) && ast_kind(iteratee) == :symbol && iteratee.value in ("size" "length") && ast_kind(call_receiver) in (:range :array :var :call :map :calc)
           consider_autoload_name("String", defined, registry, seen, pending)
-          @string_length_unresolved = false
-        # Lowering synthesizes a per-element call for these Symbol-to-proc
-        # forms after this source-AST walk. Mirror that exact domain here so
-        # :size/:length cannot bypass String registration.
-        elsif call_name in ("map" "select" "reject" "count") && node.block == nil && call_receiver != nil && node.args != nil && node.args.size() == 1
-          iteratee = node.args[0]
-          if iteratee != nil && is_ast_node?(iteratee) && ast_kind(iteratee) == :symbol && iteratee.value in ("size" "length") && ast_kind(call_receiver) in (:range :array :var :call :map :calc)
-            consider_autoload_name("String", defined, registry, seen, pending)
-            @string_length_unresolved = false
+          @string_source_method_unresolved = false
 
       if @atomic_source_method_unresolved && call_name in ("increment" "decrement")
         consider_autoload_name("Atomic", defined, registry, seen, pending)
@@ -951,32 +886,6 @@ use parser
       return "Array"
     nil
 
-  -> string_empty_receiver?(node)
-    if node == nil || !is_ast_node?(node)
-      return false
-    t = ast_kind(node)
-    if t == :var && @string_literal_vars != nil && @string_literal_vars[node.name] == true
-      return true
-    if t == :string || t == :string_interp
-      return true
-    if t == :binary_op
-      if node.op == :PLUS
-        return string_empty_receiver?(node.left) || string_empty_receiver?(node.right)
-      if node.op == :STAR
-        return string_empty_receiver?(node.left)
-      return false
-    if t == :call
-      # Conversion is String-producing regardless of receiver type.
-      if node.name == "to_s"
-        return true
-      # These preserve/derive String storage when their receiver is known.
-      if node.name in ("slice" "strip" "ltrim" "rtrim" "upcase" "downcase" "swapcase" "capitalize" "concat" "append" "prepend" "replace" "gsub" "to_sym")
-        return string_empty_receiver?(node.receiver)
-      # Common dynamic String-producing boundaries.
-      if node.receiver == nil && node.name in ("read_file" "env" "gets")
-        return true
-    false
-
   -> consider_autoload_name(name, defined, registry, seen, pending, force = false)
     if name == nil
       return nil
@@ -993,8 +902,8 @@ use parser
     nil
 
   -> cache_version
-    # v23: dynamic Decimal source methods schedule their Core facade.
-    "loader-ast-v23"
+    # v24: the full executable String source facade uses one name gate.
+    "loader-ast-v24"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")

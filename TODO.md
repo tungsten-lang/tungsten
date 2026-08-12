@@ -292,6 +292,10 @@ projects stay unchecked until their stated acceptance criteria are met.
     - [ ] Add erased-receiver interpreter/native parity fixtures for the
       overlapping Array, String, and Int/Integer surfaces. Cover ordinary
       values and representation boundaries.
+      - [x] Classify String's 31 native rows and 18 executable source methods;
+        pin inline/slab/heap/rope/Symbol erased dispatch in both engines. The
+        legacy `core/string.w` API scaffold remains part of the broader
+        standard-library completion item below.
     - [ ] Implement and specify Date's deferred factory/calendar surface:
       `new`, `julian`, `ordinal`, `commercial`, `today`, `tomorrow`, `week`,
       `decade`/`decade_abbr`, `century`, `millenium`, and first/last period

@@ -147,13 +147,26 @@
     arity += 1
   arity
 
-# Minimum runtime arity accepted without falling back by name. Trailing
-# default-valued parameters are genuinely optional; recording their range lets
-# a subclass defaulted method override an ancestor's smaller exact-arity stub.
+# Minimum runtime arity accepted without falling back by name. A block slot is
+# supplied separately by source calls and is optional; trailing default-valued
+# parameters are optional too. Recording their range lets a subclass defaulted
+# method override an ancestor's smaller exact-arity stub.
 -> method_min_runtime_arity(node)
   arity = method_runtime_arity(node)
+  if method_lowering_analysis(node)[:yield_block_name] == "__block"
+    arity -= 1
+  i = 0
+  while i < node.params.size()
+    if node.params[i].block_param == true
+      arity -= 1
+    i += 1
   i = node.params.size() - 1
-  while i >= 0 && node.params[i].default != nil
+  while i >= 0
+    if node.params[i].block_param == true
+      i -= 1
+      next
+    if node.params[i].default == nil
+      break
     arity -= 1
     i -= 1
   arity
@@ -207,6 +220,8 @@
     return node.name in ("block?" "block_given?")
   when :yield
     return true
+  when :return
+    return has_yield_in_node(node.value)
   when :if
     if has_yield_node(node.then_body)
       return true
@@ -1614,6 +1629,7 @@
   # registration below still happens so dynamic dispatch stays uniform.
   if node.body != nil && node.body.size() > 0
     lookup_key = cname + "." + mname
+    accepts_block = method_lowering_analysis(node)[:yield_block_name] != nil
     info = {
       fn_name: mfn_name,
       method_fn_name: method_fn_name,
@@ -1621,7 +1637,8 @@
       return_type: return_type,
       param_types: normalized_static_param_types(node),
       raw_abi: raw_abi,
-      is_static: true
+      is_static: true,
+      accepts_block: accepts_block
     }
     register_known_static_method_info(mod, lookup_key, info, min_arity - 1, arity - 1)
   mstr_id = module_string_constant(mod, mname)

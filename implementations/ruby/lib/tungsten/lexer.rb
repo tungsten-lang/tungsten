@@ -607,7 +607,7 @@ module Tungsten
       # => -> []= []? []
       # e.g. -> [](x)
       # e.g. -> []=(i, value)
-      elsif (text = scan(%r[(?<=^|\s)(=>|->|\[\]=|\[\]\?|\[\])(?=\s|$|\()]))
+      elsif (text = scan(%r[(?:(?<=^)|(?<=[\s.]))(=>|->|\[\]=|\[\]\?|\[\])(?=\s|$|\()]))
         token text.to_sym
 
       # assignment operators

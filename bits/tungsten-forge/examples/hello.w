@@ -19,8 +19,8 @@ args = argv()
 if args.size > 0
   port = args[0].to_i
 
-# Positional-lambda route registration (the form that works compiled;
-# see compiled_smoke.w — trailing blocks on class methods are interp-only).
+# Positional-lambda route registration keeps the three routes visually compact;
+# Forge.routes also accepts a trailing block in interpreted and compiled code.
 router = Forge.instance.router
 router.get("/hello", -> (req) Response.text("world"))
 router.get("/users/:id", -> (req) Response.text("user " + req.params[:id]))

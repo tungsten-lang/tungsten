@@ -354,6 +354,15 @@ RSpec.shared_examples "a Tungsten lexer" do
     $ @
   ]
 
+  it "lexes dot-prefixed class index method names" do
+    source = "-> .[](name)\n-> .[]=(name, value)\n"
+    operator_types = described_class.new(source).tokens.map(&:type).select do |type|
+      type == :"[]" || type == :"[]="
+    end
+
+    expect(operator_types).to eq([:"[]", :"[]="])
+  end
+
   # `"> ` is valid only in operator position (after a value); standalone, the
   # leading `"` correctly opens a string (see codepoint_lexer.rb:435). Exercise
   # it after a value rather than via the standalone it_lexes_operators list.

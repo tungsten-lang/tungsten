@@ -30,9 +30,8 @@
 #     receives the message string) and fail just that example.
 #   - Zero-arg DSL calls taking a block need parens: `before_each() ->`
 #     (paren-less `name ->` is the implicit-.each iteration syntax).
-#   - `spec_configure() -> ...` registers global hooks on both engines;
-#     TungstenSpec.configure works interpreted only (compiled class-static
-#     methods never receive an attached block).
+#   - `spec_configure() -> ...` and `TungstenSpec.configure -> ...` register
+#     global hooks on both engines.
 #   - No instance_eval/method_missing exist, so `let`/`subject` bindings
 #     cannot be injected as bare names; they are accepted but inert (see
 #     context.w). Bind values inside the example instead.

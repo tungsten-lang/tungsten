@@ -1425,7 +1425,7 @@
     return pts[index]
   nil
 
--> lower_direct_static_method_call(ctx, static_info, recv_node, args)
+-> lower_direct_static_method_call(ctx, static_info, recv_node, args, block = nil)
   wfn = ctx[:func]
   receiver_val = lower_expression(ctx, recv_node)
   receiver_reg = ensure_i64_value(wfn, receiver_val)
@@ -1443,8 +1443,19 @@
       arg_val = lower_expression(ctx, call_args[i])
       arg_regs.push(ensure_i64_value(wfn, arg_val))
     i += 1
-  while arg_regs.size() < static_info[:arity]
+
+  # The physical block slot is always last. Source calls keep an attached
+  # block separate from their positional args, so fill any omitted defaults
+  # before materializing and appending the closure.
+  pad_to = static_info[:arity]
+  if block != nil
+    pad_to -= 1
+  while arg_regs.size() < pad_to
     arg_regs.push(w_nil.to_s())
+  if block != nil
+    materialize_bindings(ctx)
+    closure_tv = lower_block_closure(ctx, block)
+    arg_regs.push(ensure_i64_value(wfn, closure_tv))
 
   temp = next_temp(wfn)
 
@@ -1453,7 +1464,7 @@
   # applicable when arity ≤ 2 (the runtime exposes memo_call0/1/2_i64
   # variants); over that, fall back to a direct call.
   static_key = nil
-  if static_info[:from_fn] == true && arg_regs.size() <= 2 && !call_args_has_kwargs?(args)
+  if block == nil && static_info[:from_fn] == true && arg_regs.size() <= 2 && !call_args_has_kwargs?(args)
     keys = ctx[:mod][:known_pure_calls].keys()
     ki = 0
     while ki < keys.size()

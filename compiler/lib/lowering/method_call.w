@@ -154,15 +154,17 @@
   # cares about (a) the receiver being self_ref and (b) we're in a
   # known class. Untyped instance methods aren't registered so they
   # naturally fall through to w_method_call_cached.
-  # Calls WITH an attached block skip the direct path: it has no block-slot
-  # plumbing (the block would be silently dropped and the & param padded
-  # with nil). The generic dynamic path below appends the block closure as
-  # a positional arg, which is the established compiled binding for these.
-  if recv_node != nil && ast_kind(recv_node) == :self_ref && ctx[:class_name] != nil && node.block == nil
+  # Attached blocks can use this path only when the registered method owns a
+  # block slot and its ABI is boxed. Raw workers keep using the boxed dynamic
+  # wrapper because their block parameter has no raw-ABI contract.
+  if recv_node != nil && ast_kind(recv_node) == :self_ref && ctx[:class_name] != nil
     static_key = ctx[:class_name] + "." + method_name
     static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
+    if static_info != nil && node.block != nil
+      if static_info[:accepts_block] != true || static_info[:raw_abi] == true || node.args.size() >= static_info[:arity] - 1
+        static_info = nil
     if static_info != nil
-      return lower_direct_static_method_call(ctx, static_info, recv_node, node.args)
+      return lower_direct_static_method_call(ctx, static_info, recv_node, node.args, node.block)
 
   # NOTE: Per-method .map / .select / .reject lowering handlers were removed
   # here in favor of the trait-based path (core/traits/enumerable.w +
@@ -485,16 +487,15 @@
         emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_new_value", args: [ebits_reg, size_reg]})
       return typed_value(:i64, temp)
 
-    # Direct static dispatch — only for calls WITHOUT an attached block:
-    # lower_direct_static_method_call has no block-slot plumbing (the block
-    # would be dropped and the & param padded with nil). Calls with a block
-    # fall through to the generic dynamic path, which appends the block
-    # closure as a positional arg (the established compiled binding).
-    static_info = nil
-    if node.block == nil
-      static_key = recv_name + "." + method_name
-      static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
-    if static_info == nil && node.block == nil && method_name != "new" && ctx[:mod][:known_classes][recv_name] != nil
+    # Direct static dispatch owns the final physical block slot when the class
+    # method declares `&` or uses yield. Methods without a block slot, and raw
+    # workers whose closure ABI is not specialized, retain dynamic dispatch.
+    static_key = recv_name + "." + method_name
+    static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
+    if static_info != nil && node.block != nil
+      if static_info[:accepts_block] != true || static_info[:raw_abi] == true || node.args.size() >= static_info[:arity] - 1
+        static_info = nil
+    if static_info == nil && method_name != "new" && ctx[:mod][:known_classes][recv_name] != nil
       # Class methods are inherited: on a miss for a KNOWN class receiver,
       # walk the superclass chain (compile-time; the hierarchy is closed at
       # lowering) and direct-call the defining ancestor's static. The
@@ -518,14 +519,15 @@
         cur = sup
         candidate = known_static_method_for(ctx[:mod], cur + "." + method_name, node.args.size())
         if candidate != nil && candidate[:is_static] == true
-          static_info = candidate
+          if node.block == nil || (candidate[:accepts_block] == true && candidate[:raw_abi] != true && node.args.size() < candidate[:arity] - 1)
+            static_info = candidate
         guard += 1
     math_intrinsic_runtime = nil
     if recv_name == "Math"
       math_intrinsic_runtime = math_intrinsic_runtime_name(method_name, node.args.size())
     lower_math_intrinsic = math_intrinsic_runtime != nil
     if static_info != nil && !lower_math_intrinsic
-      return lower_direct_static_method_call(ctx, static_info, recv_node, node.args)
+      return lower_direct_static_method_call(ctx, static_info, recv_node, node.args, node.block)
 
     # Constructor arity: `C.new(...)` with fewer arguments than C's `-> new`
     # has REQUIRED parameters. Missing arguments are padded with nil by the

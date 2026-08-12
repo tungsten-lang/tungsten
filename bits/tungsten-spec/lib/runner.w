@@ -90,7 +90,7 @@ $spec_current_failure = nil
 # register global hooks:
 #   spec_configure() ->
 #     before_each() -> ...
-# Works on both engines (engine-split block capture, see hooks.w).
+# Works on both engines.
 -> spec_configure(&block)
   if block != nil
     block.call
@@ -102,10 +102,6 @@ $spec_current_failure = nil
 #   TungstenSpec.configure -> ...   (runs the block; use before_each inside)
 #   TungstenSpec.done               (summary + exit code)
 + TungstenSpec
-  # INTERPRETER-ONLY: compiled class-static methods never receive an
-  # attached block (verified by probe — the named param arrives nil and
-  # `&()` aborts with "expected closure"). Compiled specs must use the
-  # top-level `spec_configure() -> ...` instead.
   -> .configure(&)
     &()
     nil

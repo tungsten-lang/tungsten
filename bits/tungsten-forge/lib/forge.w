@@ -42,19 +42,17 @@ use server
   -> .reset
     @@instance = nil
 
-  # Forge.configure -> (config) ... — yields the Config object.
-  # Dual-form like Router#get: block binding diverges between engines
-  # (interp binds trailing blocks to &, compiled binds positional
-  # lambdas), so accept either a positional setup lambda or a block.
-  -> .configure(setup = nil, &)
+  # Forge.configure -> (config) ... — yields the Config object. A positional
+  # callback remains supported for callers that build configuration closures.
+  -> .configure(setup = nil, &block)
     if setup == nil
-      setup = -> (c) &(c)
+      setup = block
     self.instance.configure(setup)
 
   # Forge.routes -> (r) ... — yields the Router object.
-  -> .routes(registrar = nil, &)
+  -> .routes(registrar = nil, &block)
     if registrar == nil
-      registrar = -> (r) &(r)
+      registrar = block
     self.instance.router.draw(registrar)
 
   -> .use(middleware, options = {})

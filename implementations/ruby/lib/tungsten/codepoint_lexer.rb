@@ -385,7 +385,7 @@ module Tungsten
       return true if whitespace_or_start_before?
 
       prev = @source.getbyte(@pos - 1)
-      ident_continue_byte?(prev) || upper_byte?(prev)
+      prev == 46 || ident_continue_byte?(prev) || upper_byte?(prev)
     end
 
     def scan_token

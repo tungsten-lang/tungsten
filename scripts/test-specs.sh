@@ -521,6 +521,7 @@ compiled_specs=(
   spec/compiler/quantity_control_flow_parity_spec.w
   spec/compiler/static_method_block_dispatch_spec.w
   spec/compiler/static_method_overload_spec.w
+  spec/compiler/splat_parameter_parity_spec.w
   spec/compiler/int_bigint_promotion_spec.w
   spec/compiler/bigint_literal_cache_spec.w
   spec/compiler/ivar_param_type_spec.w
@@ -661,6 +662,7 @@ interpreter_specs=(
   spec/core/integer_tower_spec.w
   spec/core/url_spec.w
   spec/core/file_stat_tempfile_spec.w
+  spec/compiler/splat_parameter_parity_spec.w
   # JSON.parse was compiled-only until the interpreter learned to resolve bare
   # calls to sibling class methods; pin the interpreted side.
   spec/core/json_parse_spec.w

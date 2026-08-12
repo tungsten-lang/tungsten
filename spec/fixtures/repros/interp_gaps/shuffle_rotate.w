@@ -6,14 +6,13 @@
 #      only ever existed as Ruby-engine builtins (undefined method on the
 #      other two engines since inception — exactly the array_mergesort
 #      disease fixed in c69d2b9).
-#   2. The parameter was a `*args` splat, but variadic splat packing is not
-#      implemented on the compiled/self-hosted engines — a splat binds nil
-#      for zero args (and the raw first value, not a 1-element array, for
-#      one), so `args.size` raised before the extern was even reached.
+#   2. Parameter splats were not yet packed on the compiled/self-hosted
+#      engines: zero args bound nil and one bound the raw value. The varargs
+#      regression suite now gates the subsequently implemented packing.
 #
-# Fixed by adding the runtime's secure unbiased Fisher-Yates w_array_shuffle
-# (whitelisted in the interpreter's ccall bridge), and rewriting shuffle to a
-# plain optional `sel` param (no splat). shuffle! sorts a copy back through
+# Fixed initially by adding the runtime's secure unbiased Fisher-Yates
+# w_array_shuffle (whitelisted in the interpreter's ccall bridge), and using a
+# plain optional `sel` parameter. shuffle! sorts a copy back through
 # `[]=` like sort!.  The Ruby engine keeps its own shuffle method builtin, so
 # this source runs only on the compiled + self-hosted engines.
 #

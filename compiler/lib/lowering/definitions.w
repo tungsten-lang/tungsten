@@ -147,11 +147,44 @@
     arity += 1
   arity
 
+-> method_splat_index(node)
+  if node.params == nil
+    return -1
+  i = 0
+  while i < node.params.size()
+    if node.params[i].splat == true
+      return i
+    i += 1
+  -1
+
+-> method_block_param_index(node)
+  if node.params == nil
+    return -1
+  i = 0
+  while i < node.params.size()
+    if node.params[i].block_param == true
+      return i
+    i += 1
+  -1
+
 # Minimum runtime arity accepted without falling back by name. A block slot is
 # supplied separately by source calls and is optional; trailing default-valued
 # parameters are optional too. Recording their range lets a subclass defaulted
 # method override an ancestor's smaller exact-arity stub.
 -> method_min_runtime_arity(node)
+  splat_index = method_splat_index(node)
+  if splat_index >= 0
+    # __self plus every required fixed parameter. The splat itself accepts
+    # zero values; defaults and the block slot are optional regardless of
+    # whether they appear before or after it.
+    arity = 1
+    i = 0
+    while i < node.params.size()
+      p = node.params[i]
+      if p.splat != true && p.block_param != true && p.default == nil
+        arity += 1
+      i += 1
+    return arity
   arity = method_runtime_arity(node)
   if method_lowering_analysis(node)[:yield_block_name] == "__block"
     arity -= 1
@@ -1542,7 +1575,7 @@
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
   emit_instruction(main_fn, {op: :load_class, temp: cls_reload, class_name: cname})
-  emit_instruction(main_fn, {op: :class_add_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: mfn_name, arity: arity, min_arity: min_arity})
+  emit_instruction(main_fn, {op: :class_add_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: mfn_name, arity: arity, min_arity: min_arity, splat_index: method_splat_index(node)})
   # Stash the method-def AST so specialize_method can clone+re-lower
   # it under a child context with `__self` typed to a concrete variant.
   # Also stash an arity-keyed entry so monomorphization of an OVERLOADED method
@@ -1583,7 +1616,7 @@
   if params != nil
     pi = 0
     while pi < params.size()
-      if params[pi].default != nil
+      if params[pi].default != nil || params[pi].splat == true || params[pi].keyword == true || params[pi].block_param == true
         return false
       pi += 1
   if node.return_type != nil && is_machine_int64_type(normalize_type_symbol(node.return_type))
@@ -1638,14 +1671,17 @@
       param_types: normalized_static_param_types(node),
       raw_abi: raw_abi,
       is_static: true,
-      accepts_block: accepts_block
+      accepts_block: accepts_block,
+      param_count: node.params.size(),
+      splat_index: method_splat_index(node),
+      block_param_index: method_block_param_index(node)
     }
     register_known_static_method_info(mod, lookup_key, info, min_arity - 1, arity - 1)
   mstr_id = module_string_constant(mod, mname)
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
   emit_instruction(main_fn, {op: :load_class, temp: cls_reload, class_name: cname})
-  emit_instruction(main_fn, {op: :class_add_static_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: method_fn_name, arity: arity, min_arity: min_arity})
+  emit_instruction(main_fn, {op: :class_add_static_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: method_fn_name, arity: arity, min_arity: min_arity, splat_index: method_splat_index(node)})
 
 # `-> new(@x, @y) ro` — a bare ro/rw as a body statement of an @-binding
 # method marks those params for accessor generation, mirroring a class-body

@@ -446,9 +446,11 @@ use naming
   out << declare_fn("w_class_add_method", "void", wv_ptr_ptr_i32)
   out << declare_fn("w_class_add_method_wv", "void", wv2_ptr_i32)
   out << declare_fn("w_class_add_method_range_wv", "void", join_arg_types5(wv, wv, "ptr", "i32", "i32"))
+  out << declare_fn("w_class_add_method_splat_wv", "void", join_arg_types6(wv, wv, "ptr", "i32", "i32", "i32"))
   out << declare_fn("w_class_add_static_method", "void", wv_ptr_ptr_i32)
   out << declare_fn("w_class_add_static_method_wv", "void", wv2_ptr_i32)
   out << declare_fn("w_class_add_static_method_range_wv", "void", join_arg_types5(wv, wv, "ptr", "i32", "i32"))
+  out << declare_fn("w_class_add_static_method_splat_wv", "void", join_arg_types6(wv, wv, "ptr", "i32", "i32", "i32"))
   out << declare_fn("w_type_class_register_wv", "void", i32_wv)
   out << declare_fn("w_node_kind_class_register_wv", "void", i32_wv)
   out << declare_fn("w_object_new", wv, wv)
@@ -692,6 +694,21 @@ use naming
   out << d
   out << ", "
   out << e
+  out.to_s()
+
+-> join_arg_types6(a, b, c, d, e, f)
+  out = StringBuffer(a.size() + b.size() + c.size() + d.size() + e.size() + f.size() + 10)
+  out << a
+  out << ", "
+  out << b
+  out << ", "
+  out << c
+  out << ", "
+  out << d
+  out << ", "
+  out << e
+  out << ", "
+  out << f
   out.to_s()
 
 # -- Runtime declaration filtering --
@@ -1583,17 +1600,21 @@ ewscope_md_state = {ids: {}}
     else
       ["w_string", "w_class_new_wv"]
   when :class_add_method
+    splat_method = inst[:splat_index] != nil && inst[:splat_index] >= 0
     range_method = inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+    add_name = splat_method ? "w_class_add_method_splat_wv" : (range_method ? "w_class_add_method_range_wv" : "w_class_add_method_wv")
     if string_wvs != nil && string_wvs[inst[:method_str_id]] != nil
-      [range_method ? "w_class_add_method_range_wv" : "w_class_add_method_wv"]
+      [add_name]
     else
-      ["w_string", range_method ? "w_class_add_method_range_wv" : "w_class_add_method_wv"]
+      ["w_string", add_name]
   when :class_add_static_method
+    splat_method = inst[:splat_index] != nil && inst[:splat_index] >= 0
     range_method = inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+    add_name = splat_method ? "w_class_add_static_method_splat_wv" : (range_method ? "w_class_add_static_method_range_wv" : "w_class_add_static_method_wv")
     if string_wvs != nil && string_wvs[inst[:method_str_id]] != nil
-      [range_method ? "w_class_add_static_method_range_wv" : "w_class_add_static_method_wv"]
+      [add_name]
     else
-      ["w_string", range_method ? "w_class_add_static_method_range_wv" : "w_class_add_static_method_wv"]
+      ["w_string", add_name]
   when :class_add_ivar
     if string_wvs != nil && string_wvs[inst[:ivar_str_id]] != nil
       ["w_class_add_ivar_wv"]
@@ -5060,7 +5081,10 @@ ewscope_md_state = {ids: {}}
   when :class_add_method
     add_fn = "w_class_add_method_wv"
     add_args = ", i32 " + inst[:arity].to_s()
-    if inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+    if inst[:splat_index] != nil && inst[:splat_index] >= 0
+      add_fn = "w_class_add_method_splat_wv"
+      add_args += ", i32 " + inst[:min_arity].to_s() + ", i32 " + inst[:splat_index].to_s()
+    elsif inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
       add_fn = "w_class_add_method_range_wv"
       add_args += ", i32 " + inst[:min_arity].to_s()
     swv = nil
@@ -5081,7 +5105,10 @@ ewscope_md_state = {ids: {}}
   when :class_add_static_method
     add_fn = "w_class_add_static_method_wv"
     add_args = ", i32 " + inst[:arity].to_s()
-    if inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+    if inst[:splat_index] != nil && inst[:splat_index] >= 0
+      add_fn = "w_class_add_static_method_splat_wv"
+      add_args += ", i32 " + inst[:min_arity].to_s() + ", i32 " + inst[:splat_index].to_s()
+    elsif inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
       add_fn = "w_class_add_static_method_range_wv"
       add_args += ", i32 " + inst[:min_arity].to_s()
     swv = nil

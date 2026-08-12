@@ -566,16 +566,12 @@
   # leading Array of indexes keeps the existing indexed-gather overload
   # (gathers those positions in order).
   #
-  # Two same-disease bugs used to block this on the compiled and self-hosted
-  # engines: (1) the body called `array_shuffle`, an extern that only ever
-  # existed as a Ruby-engine builtin (undefined method on the other two
-  # engines since inception); and (2) the parameter was a `*args` splat, but
-  # variadic splat packing is not implemented on those engines — a splat binds
-  # nil for zero args instead of `[]`, so `args.size` raised before the extern
-  # was even reached. Rewriting to a plain optional `sel` sidesteps the splat
-  # gap (documented as a follow-up) and routes the random path through the
-  # runtime. On the Ruby engine this source is shadowed by that engine's own
-  # `shuffle` method builtin, so the ccall never runs there.
+  # Two bugs once blocked this on the compiled and self-hosted engines: the
+  # body called a Ruby-only `array_shuffle` extern, and parameter splats were
+  # not packed. Parameter splats are now supported; the plain optional `sel`
+  # remains the actual API because the runtime has no seeded/custom RNG option.
+  # On the Ruby engine this source is shadowed by that engine's own `shuffle`
+  # builtin, so the ccall never runs there.
   #
   # No seeding: the `random:` custom-RNG option the Ruby engine accepts is not
   # honored here — there is no seeded RNG in the runtime, so consumers needing

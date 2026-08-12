@@ -20,9 +20,8 @@
 #                           (compiled twin was fixed in e857a36)
 #   shuffle_rotate        — Array#shuffle/#shuffle! called the never-defined
 #                           array_shuffle extern (Ruby-engine-only builtin)
-#                           AND used a *args splat, which does not pack on the
-#                           compiled/self-hosted engines (binds nil for zero
-#                           args); both raised. Now: runtime w_array_shuffle
+#                           AND used a *args splat before parameter packing was
+#                           implemented; both raised. Now: runtime w_array_shuffle
 #                           (secure unbiased Fisher-Yates) + plain optional
 #                           param. rotate already worked; pinned as a guard.
 #                           Assertions are permutation properties, never a

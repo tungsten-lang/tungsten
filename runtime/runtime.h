@@ -788,6 +788,9 @@ typedef struct WMethod {
     void *fn_ptr;
     int arity;
     int min_arity;
+    /* Zero for a fixed signature; otherwise source `*rest` index + 1.
+     * The +1 encoding keeps calloc-zeroed method-table slots non-variadic. */
+    int splat_index_plus_one;
 } WMethod;
 
 typedef struct WClass {
@@ -829,10 +832,14 @@ void   w_class_add_method(WValue klass, const char *name, void *fn_ptr, int arit
 void   w_class_add_method_wv(WValue klass, WValue name, void *fn_ptr, int arity);
 void   w_class_add_method_range_wv(WValue klass, WValue name, void *fn_ptr,
                                    int arity, int min_arity);
+void   w_class_add_method_splat_wv(WValue klass, WValue name, void *fn_ptr,
+                                   int arity, int min_arity, int splat_index);
 void   w_class_add_static_method(WValue klass, const char *name, void *fn_ptr, int arity);
 void   w_class_add_static_method_wv(WValue klass, WValue name, void *fn_ptr, int arity);
 void   w_class_add_static_method_range_wv(WValue klass, WValue name, void *fn_ptr,
                                           int arity, int min_arity);
+void   w_class_add_static_method_splat_wv(WValue klass, WValue name, void *fn_ptr,
+                                          int arity, int min_arity, int splat_index);
 int    w_class_add_ivar(WValue klass, const char *name);
 int    w_class_add_ivar_wv(WValue klass, WValue name);
 int    w_class_ivar_offset(WValue klass, const char *name);
@@ -1834,6 +1841,8 @@ WValue __w_file_directory(WValue path_val);
 WValue __w_file_read_dir(WValue path_val);
 WValue __w_file_size(WValue path_val);
 WValue __w_file_mtime_ns(WValue path_val);
+WValue __w_file_expand_path(WValue path_val);
+WValue __w_file_expand_path_base(WValue path_val, WValue base_val);
 WValue __w_file_stat_data(WValue path_val, WValue follow_val);
 WValue __w_tempfile_create(WValue prefix_val, WValue directory_val);
 WValue __w_unlink(WValue path_val);

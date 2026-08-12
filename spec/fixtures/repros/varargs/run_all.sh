@@ -6,18 +6,12 @@
 # appear before AND after the splat and right-align against the end of args.
 # Reference semantics live in the Ruby engine (interpreter.rb bind_params).
 #
-# ENGINE STATUS (2026-07-20):
-#   * INTERPRETER (`bin/tungsten file.w`): FIXED — collects correctly, matches
-#     the Ruby engine exactly. This arm GATES the suite.
-#   * COMPILED (`bin/tungsten -o`): DOCUMENTED GAP. The dynamic-dispatch ABI
-#     drops args beyond the callee's declared fixed arity before the function
-#     is entered, so no function-body prologue can recover them; a fix needs a
-#     calling-convention change across ~6 dispatch sites + the WMethod/inline-
-#     cache structs + the static-call path (see the task report's compiled
-#     map). Until then the compiled arm is run and REPORTED but never fails the
-#     suite. NOTE: call-site splat forwarding (`f(*arr)`) is a separate
-#     unimplemented gap in BOTH self-hosted engines (the self-hosted parser
-#     discards the `*` marker at call sites); the Ruby engine handles it.
+# Both self-hosted engines gate this suite. Compiled direct calls pack the
+# middle source arguments into the callee's one Array slot; dynamic method
+# dispatch carries the splat index in WMethod and performs the same binding.
+# NOTE: call-site splat forwarding (`f(*arr)`) is a separate unimplemented gap
+# in BOTH self-hosted engines (the parser discards the `*` marker at call
+# sites); the Ruby engine handles it.
 set -u
 cd "$(dirname "$0")/../../../.." || exit 1
 TMP=$(mktemp -d)
@@ -52,20 +46,15 @@ run_repro() { # name sentinel...
     FAIL=1
   fi
 
-  # Compiled — documented gap; reported, never fails the suite.
-  local ok=1
+  # Compiled — the same sentinels are a correctness gate.
   if bin/tungsten -o "$TMP/$name" "$src" >"$TMP/$name.build" 2>&1 \
      && "$TMP/$name" >"$TMP/$name.out" 2>&1; then
-    for s in "$@"; do
-      grep -qF "$s" "$TMP/$name.out" || ok=0
-    done
-    if [ "$ok" -eq 1 ]; then
-      echo "!!   $name (compiled): now MATCHES — compiled splat gap appears CLOSED; update this suite to gate the compiled arm."
-    else
-      echo "gap  $name (compiled): documented gap (collection not implemented in codegen)"
-    fi
+    check_output "$name (compiled)" "$TMP/$name.out" "$@"
   else
-    echo "gap  $name (compiled): documented gap (drops rest args / crashes on empty)"
+    echo "FAIL $name (compiled): nonzero build or run"
+    sed 's/^/    | /' "$TMP/$name.build"
+    [ ! -f "$TMP/$name.out" ] || sed 's/^/    | /' "$TMP/$name.out"
+    FAIL=1
   fi
 }
 
@@ -94,8 +83,13 @@ run_repro top_fn \
   "gather n=1 v=[5]" \
   "gather n=3 v=[5, 6, 7]"
 
+run_repro static_splat \
+  "static x=1 n=0 mid=[] z=9" \
+  "static x=1 n=1 mid=[2] z=9" \
+  "static x=1 n=3 mid=[2, 3, 4] z=9"
+
 if [ "$FAIL" -ne 0 ]; then
   echo "varargs repros: FAILURES (interpreter arm)"
   exit 1
 fi
-echo "varargs repros: all green (interpreter); compiled arm = documented gap"
+echo "varargs repros: all green (interpreter + compiled)"

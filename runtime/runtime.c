@@ -41967,7 +41967,7 @@ static WMethod *w_method_table_probe_call_arity(WMethod *table, int cap,
         if (w_hash_key_eq(table[idx].name, name)) {
             if (table[idx].arity == arity) return &table[idx];
             if (!compatible && arity >= table[idx].min_arity &&
-                arity <= table[idx].arity)
+                (table[idx].splat_index_plus_one != 0 || arity <= table[idx].arity))
                 compatible = &table[idx];
         }
         idx = (idx + 1) & mask;
@@ -42163,6 +42163,17 @@ void w_class_add_method_range_wv(WValue klass_val, WValue name, void *fn_ptr,
     m->fn_ptr = fn_ptr;
     m->arity = arity;
     m->min_arity = min_arity;
+    m->splat_index_plus_one = 0;
+}
+
+void w_class_add_method_splat_wv(WValue klass_val, WValue name, void *fn_ptr,
+                                 int arity, int min_arity, int splat_index) {
+    WClass *klass = as_class(klass_val);
+    WMethod *m = w_method_table_upsert_slot_arity(&klass->methods, &klass->method_count, &klass->method_capacity, name, arity);
+    m->fn_ptr = fn_ptr;
+    m->arity = arity;
+    m->min_arity = min_arity;
+    m->splat_index_plus_one = splat_index + 1;
 }
 
 void w_class_add_static_method(WValue klass_val, const char *name, void *fn_ptr, int arity) {
@@ -42181,6 +42192,18 @@ void w_class_add_static_method_range_wv(WValue klass_val, WValue name,
     m->fn_ptr = fn_ptr;
     m->arity = arity;
     m->min_arity = min_arity;
+    m->splat_index_plus_one = 0;
+}
+
+void w_class_add_static_method_splat_wv(WValue klass_val, WValue name,
+                                        void *fn_ptr, int arity,
+                                        int min_arity, int splat_index) {
+    WClass *klass = as_class(klass_val);
+    WMethod *m = w_method_table_upsert_slot_arity(&klass->static_methods, &klass->static_method_count, &klass->static_method_capacity, name, arity);
+    m->fn_ptr = fn_ptr;
+    m->arity = arity;
+    m->min_arity = min_arity;
+    m->splat_index_plus_one = splat_index + 1;
 }
 
 int w_class_add_ivar(WValue klass_val, const char *name) {
@@ -42318,6 +42341,38 @@ static WMethod *w_static_method_lookup_arity(WClass *klass, WValue name, int ari
         klass = klass->superclass;
     }
     return NULL;
+}
+
+/* Bind source call arguments to a compiled method's physical parameter
+ * slots. Fixed signatures retain nil-padding. A `*rest` signature collects
+ * the middle arguments into one real Array and right-aligns trailing fixed
+ * parameters, matching both interpreters. */
+static void w_bind_method_args(WMethod *m, WValue *source, int argc,
+                               WValue *out, int capacity) {
+    int expected = m->arity - 1; /* subtract self */
+    int splat = m->splat_index_plus_one - 1;
+    if (splat < 0) {
+        for (int i = 0; i < expected && i < capacity; i++)
+            out[i] = (i < argc) ? source[i] : W_NIL;
+        return;
+    }
+
+    for (int i = 0; i < splat && i < capacity; i++)
+        out[i] = (i < argc) ? source[i] : W_NIL;
+
+    int rest_count = argc - expected + 1;
+    if (rest_count < 0) rest_count = 0;
+    WValue rest = w_array_new_uninit_sized(65, rest_count);
+    WArray *rest_array = (WArray *)w_as_ptr(rest);
+    for (int i = 0; i < rest_count; i++)
+        ((WValue *)rest_array->slots)[i] = source[splat + i];
+    if (splat < capacity) out[splat] = rest;
+
+    for (int i = splat + 1; i < expected && i < capacity; i++) {
+        int source_index = argc - expected + i;
+        out[i] = (source_index >= 0 && source_index < argc)
+            ? source[source_index] : W_NIL;
+    }
 }
 
 /* ---- Exceptions ---- */
@@ -43638,6 +43693,25 @@ WValue __w_file_expand_path(WValue path_val) {
         }
     }
     return w_string(path);
+}
+
+WValue __w_file_expand_path_base(WValue path_val, WValue base_val) {
+    const char *path = as_str(path_val);
+    if (path[0] == '/' || (path[0] == '~' && (path[1] == '/' || path[1] == '\0')))
+        return __w_file_expand_path(path_val);
+
+    const char *base = as_str(base_val);
+    size_t base_len = strlen(base);
+    size_t path_len = strlen(path);
+    char *joined = malloc(base_len + path_len + 2);
+    if (!joined) return W_NIL;
+    memcpy(joined, base, base_len);
+    if (base_len > 0 && base[base_len - 1] != '/')
+        joined[base_len++] = '/';
+    memcpy(joined + base_len, path, path_len + 1);
+    WValue joined_value = w_string(joined);
+    free(joined);
+    return __w_file_expand_path(joined_value);
 }
 
 WValue __w_file_join(WValue a, WValue b) {
@@ -45181,8 +45255,7 @@ static WMethod *w_type_class_method(uint16_t class_id, WValue name, int argc) {
 static WValue w_type_class_method_call(WMethod *m, WValue recv, WArray *args) {
     int expected = m->arity - 1;
     WValue a[8];
-    for (int i = 0; i < expected && i < 8; i++)
-        a[i] = (i < args->size) ? args->slots[i] : W_NIL;
+    w_bind_method_args(m, args->slots, args->size, a, 8);
     typedef WValue (*fn0)(WValue);
     typedef WValue (*fn1)(WValue, WValue);
     typedef WValue (*fn2)(WValue, WValue, WValue);
@@ -51143,7 +51216,8 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
      * merely-present method that an earlier special path actually handled. */
     WMethod *type_method = w_cacheable_type_class_method(recv, name, argc, key);
     if (type_method) {
-        w_ic_publish(cache, key, type_method->fn_ptr, type_method->arity - 1 /* subtract self */);
+        if (type_method->splat_index_plus_one == 0)
+            w_ic_publish(cache, key, type_method->fn_ptr, type_method->arity - 1 /* subtract self */);
         return w_type_class_method_call(type_method, recv, &stack_args);
     }
 
@@ -51156,7 +51230,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         WObject *obj = (WObject *)w_as_ptr(recv);
         WMethod *m = w_method_lookup_arity(g_class_table[obj->class_id], name, argc + 1);
         if (!m) m = w_method_lookup(g_class_table[obj->class_id], name);
-        if (m) {
+        if (m && m->splat_index_plus_one == 0) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract self */);
         }
     } else if (w_is_class(recv) && !w_hash_key_eq(name, WN_new)) {
@@ -51164,7 +51238,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         WClass *klass = (WClass *)w_as_ptr(recv);
         WMethod *m = w_static_method_lookup_arity(klass, name, argc + 1);
         if (!m) m = w_static_method_lookup(klass, name);
-        if (m) {
+        if (m && m->splat_index_plus_one == 0) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract class receiver */);
         }
     } else if (w_is_class(recv)) {
@@ -51175,7 +51249,7 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
          * allocate + init directly. Only the GENERIC ctor block sets
          * g_generic_ctor_selected, so builtin specials never publish. */
         WMethod *cm = g_generic_ctor_selected;
-        if (cm && g_generic_ctor_recv == recv && w_hash_key_eq(name, WN_new) &&
+        if (cm && cm->splat_index_plus_one == 0 && g_generic_ctor_recv == recv && w_hash_key_eq(name, WN_new) &&
             cm->arity - 1 == argc && argc <= 8) {
             w_ic_publish(cache, key, cm->fn_ptr, -2 - argc);
         }
@@ -51592,8 +51666,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
                 }
             }
             WValue a[8];
-            for (int i = 0; i < expected && i < 8; i++)
-                a[i] = (i < args->size) ? args->slots[i] : W_NIL;
+            w_bind_method_args(m, args->slots, args->size, a, 8);
             typedef WValue (*fn0)(WValue);
             typedef WValue (*fn1)(WValue, WValue);
             typedef WValue (*fn2)(WValue, WValue, WValue);
@@ -51709,8 +51782,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             if (m) {
                 int expected = m->arity - 1;
                 WValue a[16];
-                for (int i = 0; i < expected && i < 16; i++)
-                    a[i] = (i < args->size) ? args->slots[i] : W_NIL;
+                w_bind_method_args(m, args->slots, args->size, a, 16);
                 typedef WValue (*fn0)(WValue);
                 typedef WValue (*fn1)(WValue, WValue);
                 typedef WValue (*fn2)(WValue, WValue, WValue);
@@ -51785,8 +51857,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
         if (sm) {
             int expected = sm->arity - 1;  /* subtract self */
             WValue a[8];
-            for (int i = 0; i < expected && i < 8; i++)
-                a[i] = (i < args->size) ? args->slots[i] : W_NIL;
+            w_bind_method_args(sm, args->slots, args->size, a, 8);
             typedef WValue (*sfn1)(WValue);
             typedef WValue (*sfn2)(WValue, WValue);
             typedef WValue (*sfn3)(WValue, WValue, WValue);

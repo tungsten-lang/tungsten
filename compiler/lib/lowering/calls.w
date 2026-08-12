@@ -1304,13 +1304,22 @@
       if math_lowered != nil
         return math_lowered
 
-  # Known function → direct call
-  arg_regs = []
-  i = 0
-  while i < args.size()
-    val = lower_expression(ctx, args[i])
-    arg_regs.push(ensure_i64_value(wfn, val))
-    i += 1
+  # Known function → direct call. A `*rest` parameter is one physical
+  # Array slot in the callee ABI, so collect the source call's middle args
+  # before emitting the direct LLVM call.
+  splat_info = ctx[:mod][:known_fn_splat_info][name]
+  if splat_info != nil
+    pack_count = splat_info[:param_count]
+    if node.block != nil && splat_info[:block_param_index] >= 0
+      pack_count -= 1
+    arg_regs = lower_splat_call_arg_regs(ctx, args, splat_info[:splat_index], pack_count)
+  else
+    arg_regs = []
+    i = 0
+    while i < args.size()
+      val = lower_expression(ctx, args[i])
+      arg_regs.push(ensure_i64_value(wfn, val))
+      i += 1
 
   # If call has a block, materialize bindings for capture analysis
   cblk = node.block
@@ -1425,6 +1434,53 @@
     return pts[index]
   nil
 
+# Lower source arguments exactly once, then reshape them to the physical ABI
+# of a definition containing `*rest`: fixed leading slots, one boxed Array for
+# the collected middle, then right-aligned trailing slots. This mirrors the
+# interpreter binder while preserving left-to-right side-effect order.
+-> lower_splat_call_arg_regs(ctx, args, splat_index, param_count)
+  wfn = ctx[:func]
+  source_regs = []
+  i = 0
+  while i < args.size()
+    val = lower_expression(ctx, args[i])
+    source_regs.push(ensure_i64_value(wfn, val))
+    i += 1
+
+  out = []
+  i = 0
+  while i < splat_index
+    if i < source_regs.size()
+      out.push(source_regs[i])
+    else
+      out.push(w_nil.to_s())
+    i += 1
+
+  rest_count = source_regs.size() - param_count + 1
+  if rest_count < 0
+    rest_count = 0
+  rest = next_temp(wfn)
+  if rest_count == 0
+    emit_instruction(wfn, {op: :call_direct_i64, temp: rest, name: "w_array_new_empty", args: []})
+  else
+    emit_instruction(wfn, {op: :call_direct_i64, temp: rest, name: "w_array_new_uninit_sized", args: ["65", rest_count.to_s()]})
+    ri = 0
+    while ri < rest_count
+      stored = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: stored, name: "__w_array_lit_store", args: [rest, ri.to_s(), source_regs[splat_index + ri]]})
+      ri += 1
+  out.push(rest)
+
+  i = splat_index + 1
+  while i < param_count
+    source_index = source_regs.size() - param_count + i
+    if source_index >= 0 && source_index < source_regs.size()
+      out.push(source_regs[source_index])
+    else
+      out.push(w_nil.to_s())
+    i += 1
+  out
+
 -> lower_direct_static_method_call(ctx, static_info, recv_node, args, block = nil)
   wfn = ctx[:func]
   receiver_val = lower_expression(ctx, recv_node)
@@ -1434,15 +1490,25 @@
     call_args = []
 
   arg_regs = [receiver_reg]
-  i = 0
-  while i < call_args.size()
-    param_type = static_param_type(static_info, i)
-    if static_info[:raw_abi] == true && is_machine_int64_type(param_type)
-      arg_regs.push(lower_machine_int_expression(ctx, call_args[i], param_type))
-    else
-      arg_val = lower_expression(ctx, call_args[i])
-      arg_regs.push(ensure_i64_value(wfn, arg_val))
-    i += 1
+  if static_info[:splat_index] != nil && static_info[:splat_index] >= 0
+    pack_count = static_info[:param_count]
+    if block != nil && static_info[:block_param_index] != nil && static_info[:block_param_index] >= 0
+      pack_count -= 1
+    packed = lower_splat_call_arg_regs(ctx, call_args, static_info[:splat_index], pack_count)
+    pi = 0
+    while pi < packed.size()
+      arg_regs.push(packed[pi])
+      pi += 1
+  else
+    i = 0
+    while i < call_args.size()
+      param_type = static_param_type(static_info, i)
+      if static_info[:raw_abi] == true && is_machine_int64_type(param_type)
+        arg_regs.push(lower_machine_int_expression(ctx, call_args[i], param_type))
+      else
+        arg_val = lower_expression(ctx, call_args[i])
+        arg_regs.push(ensure_i64_value(wfn, arg_val))
+      i += 1
 
   # The physical block slot is always last. Source calls keep an attached
   # block separate from their positional args, so fill any omitted defaults

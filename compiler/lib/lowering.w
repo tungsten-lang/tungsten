@@ -202,6 +202,8 @@ use lowering/definitions
   mod[:known_calls]["file_directory?"] = "__w_file_directory"
   mod[:known_calls]["file_mtime_ns"] = "__w_file_mtime_ns"
   mod[:known_calls]["file_size"] = "__w_file_size"
+  mod[:known_calls]["file_expand_path"] = "__w_file_expand_path"
+  mod[:known_calls]["file_expand_path_base"] = "__w_file_expand_path_base"
   mod[:known_calls]["read_dir"] = "__w_file_read_dir"
   mod[:known_calls]["write_file"] = "__w_write_file"
   mod[:known_calls]["write_file_bytes"] = "__w_write_file"
@@ -278,6 +280,13 @@ use lowering/definitions
         mod[:block_method_names][expr.name] = true
       mod[:known_calls][call_key] = fn_name
       mod[:known_fn_param_counts][call_key] = param_count
+      splat_index = method_splat_index(expr)
+      if splat_index >= 0
+        mod[:known_fn_splat_info][call_key] = {
+          splat_index: splat_index,
+          param_count: expr.params.size(),
+          block_param_index: method_block_param_index(expr)
+        }
       # `use math/globals`: an untyped top-level fn that exactly delegates
       # to the same-named Math intrinsic registers as an alias, so call
       # sites can lower as the intrinsic itself — raw f64 operands reach
@@ -652,7 +661,10 @@ use lowering/definitions
                   return_type: static_rt,
                   param_types: normalized_static_param_types(mnode),
                   raw_abi: inst_raw_abi,
-                  from_fn: mnode.from_fn == true
+                  from_fn: mnode.from_fn == true,
+                  param_count: mnode.params.size(),
+                  splat_index: method_splat_index(mnode),
+                  block_param_index: method_block_param_index(mnode)
                 }
                 register_known_static_method_info(mod, static_key, info, mnode.params.size(), mnode.params.size())
                 if mnode.from_fn == true

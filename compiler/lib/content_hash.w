@@ -164,7 +164,7 @@ content_hash_codegen_fields = [
   :ivar_str_id, :kind, :kind_id, :lhs_boxed, :line, :method_byte_len,
   :method_str_id, :min_arity, :n, :name_byte_len, :name_str_id,
   :node, :novec, :range_high, :range_low, :rhs_boxed, :rt_fallback,
-  :scalar_source_argc1, :shift, :slot, :slot_id, :slot_type,
+  :scalar_source_argc1, :shift, :slot, :slot_id, :slot_type, :splat_index,
   :super_reg, :table, :total_bytes, :trap, :type, :unroll8, :val
 ]
 -> encode_codegen_metadata(inst, buf, temp_map)

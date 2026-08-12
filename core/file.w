@@ -238,7 +238,7 @@ use core/mmap
 
   -> .expand_path(path, *args)
     if args.size > 0
-      file_expand_path(path, args[0])
+      file_expand_path_base(path, args[0])
     else
       file_expand_path(path)
 

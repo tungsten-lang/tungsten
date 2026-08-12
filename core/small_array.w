@@ -84,8 +84,8 @@
     else
       to_a.sort
 
-  # Delegate to Array's working shuffle (the former `*opts` splat could not
-  # pack on the compiled/self-hosted engines; a bare `shuffle` needs none).
+  # Delegate to Array's working shuffle. A bare `shuffle` needs no options;
+  # seeded/custom RNG support remains outside the native runtime contract.
   -> shuffle
     to_a.shuffle
 

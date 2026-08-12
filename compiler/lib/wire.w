@@ -29,6 +29,10 @@
     block_method_names: {},
     known_static_methods: {},
     known_fn_param_counts: {},
+    # Direct-call ABI metadata for top-level definitions with `*rest`.
+    # The physical callee slot receives one Array even though the source call
+    # may supply any number of arguments at that position.
+    known_fn_splat_info: {},
     known_fn_overloads: {},
     known_typed_overload_counts: {},
     known_unique_typed_overload_keys: {},

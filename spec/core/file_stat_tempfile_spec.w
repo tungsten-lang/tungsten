@@ -25,6 +25,9 @@ lstat = File.lstat(path)
 check("lstat.regular", lstat != nil && lstat.file?())
 check("stat.missing", File.stat(path + ".missing") == nil)
 
+spec_root = File.expand_path("spec")
+check("expand_path.base", File.expand_path("compiler", spec_root) == File.expand_path("spec/compiler"))
+
 tempfile.close!()
 check("temp.close_bang", tempfile.closed?() && !File.exist?(path))
 begin

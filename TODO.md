@@ -278,7 +278,28 @@ projects stay unchecked until their stated acceptance criteria are met.
     native-IC, native-only, dual-dispatch, or deliberate source fallbacks; the
     gate also caught and restored Socket#serve_http's missing Core declaration.
   - [ ] Classify the remaining runtime-backed Core classes exhaustively so a
-    newly added source method must declare its native-IC or autoload fallback.
+    newly added source method must declare its native-IC or autoload fallback:
+    Array, String, Int/Integer, Decimal, and Date.
+    - [ ] Audit Decimal's bodyless declarations individually. The existing
+      runtime table covers `to_i`, `sqrt`, `floor`, `ceil`, `round`, `sq`,
+      `to_f`, `abs`, and `to_d`, while `new`, rational accessors,
+      normalization/reciprocal methods, `to_m`, and the trigonometric family
+      need an implemented source/native contract or an explicit unsupported
+      diagnostic. None may silently return `nil`.
+    - [ ] Add erased-receiver interpreter/native parity fixtures for Decimal
+      and Date, then for the overlapping Array, String, and Int/Integer
+      surfaces. Cover ordinary values and representation boundaries.
+    - [ ] Teach the audit to distinguish an implemented source fallback from
+      a bodyless declaration. A placeholder cannot satisfy the gate merely by
+      being listed as `source_fallback`.
+- [ ] Finish decomposing and ultimately eliminate the `runtime/runtime.c`
+  monolith. Inventory every exported and private responsibility, move portable
+  language semantics into `core/*.w`, and split irreducible ABI/platform
+  primitives into narrow translation units. Every C-to-Tungsten port needs
+  cross-engine correctness coverage and a matched microbenchmark of the
+  individual function; build-time-only measurements do not establish runtime
+  parity. Preserve bootstrap fixed-point identity throughout, and define the
+  native-only end state before removing the legacy aggregate runtime.
 - [x] Reject ASCII `camelCase` identifiers lexically. Uppercase ASCII after a
   lowercase start is neither a variable, `ClassName`, nor `CONSTANT`. The
   packed, reference self-hosted, Ruby regex/codepoint, and direct C lexers all
@@ -350,6 +371,11 @@ projects stay unchecked until their stated acceptance criteria are met.
   multiple samples, machine-readable baselines, noise bands, and an explicitly
   approved baseline-update path. Report regressions without comparing unlike
   runner generations.
+- [ ] Build and smoke reproducible Linux OCI images for both `linux/arm64` and
+  `linux/amd64` from the repository Dockerfile on native Blacksmith runners.
+  Pin the base/toolchain versions, verify stage fixed-point identity inside
+  each image, publish a manifest-list artifact for releases, and keep the
+  native package matrix as the non-container distribution contract.
 - [x] Implement `bin/tungsten release`: validate a clean `main`, run root `rake`,
   create/push an annotated version tag, then build, smoke, checksum, attest, and
   publish native packages for macOS/Linux ARM64 baselines and x86-64-v2/v3.
@@ -586,6 +612,11 @@ projects stay unchecked until their stated acceptance criteria are met.
     synchronous and batched timing, correctness checks, cached artifacts, and
     device/compiler/source provenance.
   - [ ] Add an equivalent standardized CUDA timing host to `gpu-bench`.
+- [ ] Exercise CUDA emission, compilation, dispatch, and reductions on real
+  NVIDIA hardware in CI or a scheduled workflow. A CUDA container supplies the
+  userspace toolkit but does not emulate GPU execution; use an ephemeral GPU
+  runner/Spot host, record the device/driver/toolkit identity, and retain the
+  CPU-only emit/preflight checks for ordinary pull requests.
 - [ ] Add MinGW and a Windows-native event loop, filesystem/process/socket
   parity, path/encoding rules, and x64/ARM64 CI. Use a temporary native host or
   Spot runner only where GitHub runners cannot exercise the required kernel API.

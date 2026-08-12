@@ -34,6 +34,11 @@ set: the harness sets `TUNGSTEN_GPU_DIALECTS=cuda` at compile time and the
 binary only greps the sibling `.cu` for markers (`__global__`, `threadIdx`,
 …). No CUDA toolkit or GPU is required.
 
+WGSL emit (`spec/compiler/gpu_wgsl_emit_spec.w`) is also in the default set.
+It exercises portable loops/returns, workgroup memory, barriers, invocation
+IDs, and i32 atomics by inspecting the generated `.wgsl`; adding a pinned
+shader validator remains tracked in `TODO.md`.
+
 ### Packed-token parser regression
 
 `compiler/parser_packed_token_access_spec.w` covers both numeric forms seen by

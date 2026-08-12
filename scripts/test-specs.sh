@@ -319,6 +319,42 @@ run_cuda_emit_spec() {
   rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path"
 }
 
+# Emit-only WGSL dialect check. The binary validates the generated source; no
+# browser, WebGPU implementation, shader compiler, or GPU is required.
+run_wgsl_emit_spec() {
+  local path="$1"
+  local name
+  local out
+  local ll_path
+  local metal_path
+  local cuda_path
+  local wgsl_path
+  local output
+  local status
+
+  name="$(basename "${path%.w}")"
+  out="$TMP_ROOT/$name"
+  ll_path="$ROOT/${path%.w}.ll"
+  metal_path="$ROOT/${path%.w}.metal"
+  cuda_path="$ROOT/${path%.w}.cu"
+  wgsl_path="$ROOT/${path%.w}.wgsl"
+
+  echo "compile+run $path (TUNGSTEN_GPU_DIALECTS=wgsl)"
+  if ! TUNGSTEN_GPU_DIALECTS=wgsl TUNGSTEN_LL_PATH="$ll_path" \
+      "$TUNGSTEN" compile "$path" --out "$out" >/dev/null; then
+    record_failure_note "$name" "compile failed"
+    rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path" "$wgsl_path"
+    return
+  fi
+
+  set +e
+  output="$("$out" 2>&1)"
+  status=$?
+  set -e
+  record_result "$name" "$output" "$status"
+  rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path" "$wgsl_path"
+}
+
 # CUDA expected-rejection checks. These prove a Metal-only intrinsic fails in
 # Tungsten's dialect emitter with a useful diagnostic, before an invalid .cu
 # reaches nvcc. No CUDA toolkit or GPU is required.
@@ -439,6 +475,7 @@ if [[ "${1:-}" == --job-* ]]; then
     --job-compiled) run_compiled_spec "$2" ;;
     --job-interp)   run_interpreter_spec "$2" ;;
     --job-cuda)     run_cuda_emit_spec "$2" ;;
+    --job-wgsl)     run_wgsl_emit_spec "$2" ;;
     --job-cuda-reject) run_cuda_reject_spec "$2" ;;
     --job-wassat)   run_wassat_spec "$2" "$3" ;;
     *) echo "unknown job mode $1" >&2; exit 2 ;;
@@ -628,6 +665,10 @@ compiled_specs=(
 # Emit-only GPU dialect specs (no hardware). Run always with make specs.
 cuda_emit_specs=(
   spec/compiler/gpu_cuda_emit_spec.w
+)
+
+wgsl_emit_specs=(
+  spec/compiler/gpu_wgsl_emit_spec.w
 )
 
 cuda_reject_specs=(
@@ -890,6 +931,7 @@ run_parallel compiled "${compiled_specs[@]}"
 run_cache_lifecycle_test
 
 run_parallel cuda "${cuda_emit_specs[@]}"
+run_parallel wgsl "${wgsl_emit_specs[@]}"
 run_parallel cuda-reject "${cuda_reject_specs[@]}"
 
 run_parallel interp "${interpreter_specs[@]}"

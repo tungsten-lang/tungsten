@@ -459,6 +459,11 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Broaden WGSL beyond assignments/calls/if: while-as-loop, return,
   workgroup memory, barriers, and atomics, with emitted WGSL validated by a real
   tool in CI.
+  - [x] Emit while/if/else, return/break/continue, compound assignment,
+    workgroup arrays, invocation/workgroup IDs, barriers, and i32 storage
+    atomics; keep an emit-only sidecar regression in the default spec gate.
+  - [ ] Pin a real WGSL validator in CI and reject invalid sidecars instead of
+    relying only on source markers.
 - [ ] Make multi-dialect GPU sidecars deliberate and stable by default. Invalid
   dialect combinations must be diagnostics, not skipped comments or silent
   fallback; keep explicit opt-out for users who only want one backend.

@@ -1,7 +1,9 @@
 # Metal Shading Language emitter for `@gpu fn` kernels.
 #
-# v0 scope — kernel provenance smoke: walk a `:gpu_kernel_def`
-# AST node and produce a minimal .metal source string sufficient for
+# Portable kernel emitter: walk a `:gpu_kernel_def` AST node and produce
+# MSL/CUDA source plus an opt-in WGSL sidecar. The common statement surface
+# includes assignments, scalar control flow, returns, and indexed buffers;
+# backend-specific primitives are checked by their dialect arms.
 #
 #   @gpu fn add_one(x ## f32[], y ## f32[], n ## i32)
 #     i ## i32 = gpu.thread_position_in_grid.x
@@ -1517,6 +1519,12 @@ use ast
   t = ast_kind(node)
   if t == :assign
     emit_assign(out, ctx, node)
+  elsif t == :compound_assign
+    emit_indent(out, ctx)
+    out << emit_expr(ctx, node.target)
+    out << " " + binop_symbol(node.op) + "= "
+    out << emit_expr(ctx, node.value)
+    out << ";\n"
   elsif t == :if
     emit_if(out, ctx, node)
   elsif t == :while
@@ -2446,11 +2454,11 @@ use ast
   out << "//   cudaDeviceSynchronize();\n"
   out.to_s()
 
-# ---- WGSL emission (WebGPU dialect, v0 — restricted subset) ----
+# ---- WGSL emission (WebGPU dialect) ----
 # WGSL is not C: buffers are module-scope bindings, locals declare with
-# `var`, and there's no pointer syntax. v0 translates the elementwise
-# kernel shape (assignments, if, indexing, arithmetic, the global thread
-# id); kernels outside the subset are skipped with a comment.
+# `var`, and there's no pointer syntax. The supported portable subset covers
+# scalar control flow, storage/workgroup arrays, barriers, and i32 atomics;
+# kernels using dialect-only features are skipped with a comment.
 
 -> wgsl_elt_name(msl_name)
   if msl_name == "float"
@@ -2464,13 +2472,86 @@ use ast
   msl_name
 
 -> wgsl_scalar(type_hint)
-  if type_hint == :i32 || type_hint == :u32
+  if type_hint == nil
+    return nil
+  name = type_hint.to_s()
+  if name == "i32"
     return "i32"
-  if type_hint == :f32
+  if name == "u32"
+    return "u32"
+  if name == "f32"
     return "f32"
   nil
 
+# Storage buffers touched through gpu.atomic_* must be declared with atomic
+# elements in WGSL. Collect only direct local/parameter buffer references; a
+# computed pointer shape is outside the portable subset and remains rejected
+# by wgsl_expr.
+-> wgsl_collect_atomic_buffers(node, found)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  t = ast_kind(node)
+  if t == :call
+    recv = node.receiver
+    name = "" + node.name.to_s()
+    if recv != nil && ast_kind(recv) == :var && recv.name == "gpu" && name in ("atomic_load_i32" "atomic_store_i32" "atomic_exchange_i32" "atomic_fetch_add_i32" "atomic_min_i32")
+      args = node.args
+      if args != nil && args.size() > 0 && ast_kind(args[0]) == :var
+        found[args[0].name] = true
+    wgsl_collect_atomic_buffers(recv, found)
+    args = node.args
+    if args != nil
+      ai = 0
+      while ai < args.size()
+        wgsl_collect_atomic_buffers(args[ai], found)
+        ai += 1
+    return nil
+  if t == :assign || t == :compound_assign
+    wgsl_collect_atomic_buffers(node.target, found)
+    wgsl_collect_atomic_buffers(node.value, found)
+    return nil
+  if t in (:binary_op :and :or)
+    wgsl_collect_atomic_buffers(node.left, found)
+    wgsl_collect_atomic_buffers(node.right, found)
+    return nil
+  if t == :not || t == :unary_op
+    wgsl_collect_atomic_buffers(node.operand, found)
+    return nil
+  if t == :return
+    wgsl_collect_atomic_buffers(node.value, found)
+    return nil
+  if t == :if
+    wgsl_collect_atomic_buffers(node.condition, found)
+    groups = [node.then_body, node.else_body]
+    if node.elsif_clauses != nil
+      ei = 0
+      while ei < node.elsif_clauses.size()
+        clause = node.elsif_clauses[ei]
+        wgsl_collect_atomic_buffers(clause[0], found)
+        groups.push(clause[1])
+        ei += 1
+    gi = 0
+    while gi < groups.size()
+      body = groups[gi]
+      if body != nil
+        bi = 0
+        while bi < body.size()
+          wgsl_collect_atomic_buffers(body[bi], found)
+          bi += 1
+      gi += 1
+    return nil
+  if t == :while
+    wgsl_collect_atomic_buffers(node.condition, found)
+    body = node.body
+    bi = 0
+    while bi < body.size()
+      wgsl_collect_atomic_buffers(body[bi], found)
+      bi += 1
+  nil
+
 -> wgsl_expr(ctx, node)
+  if node == nil
+    return nil
   t = ast_kind(node)
   if t == :int
     return node.value.to_s()
@@ -2480,9 +2561,22 @@ use ast
       return s
     return s + ".0"
   if t == :var
-    return "" + node.name
+    name = "" + node.name
+    renamed = ctx[:renames][name]
+    return renamed == nil ? name : renamed
   if t == :binary_op
-    return "(" + wgsl_expr(ctx, node.left) + " " + binop_symbol(node.op) + " " + wgsl_expr(ctx, node.right) + ")"
+    l = wgsl_expr(ctx, node.left)
+    r = wgsl_expr(ctx, node.right)
+    if l == nil || r == nil || node.op == :POW
+      return nil
+    return "(" + l + " " + binop_symbol(node.op) + " " + r + ")"
+  if t == :unary_op
+    value = wgsl_expr(ctx, node.operand)
+    if value == nil
+      return nil
+    return "(" + uop_symbol(node.op) + value + ")"
+  if t == :bool
+    return node.value ? "true" : "false"
   # WGSL has native short-circuit `&&`/`||`/`!` over bool. Keeping the
   # dialect at parity with MSL/CUDA here stops a kernel that uses logic
   # from being silently skipped on the WebGPU path.
@@ -2502,9 +2596,16 @@ use ast
   if t == :call
     recv = node.receiver
     nm = "" + node.name.to_s()
-    # gpu.thread_position_in_grid.x — global invocation id component.
-    if recv != nil && is_ast_node?(recv) && ast_kind(recv) == :call && ("" + recv.name.to_s()) == "thread_position_in_grid"
-      return "i32(__tid." + nm + ")"
+    # gpu.{thread_position_in_grid,thread_position_in_threadgroup,
+    # threadgroup_position_in_grid}.x/y/z builtins.
+    if nm in ("x" "y" "z") && recv != nil && is_ast_node?(recv) && ast_kind(recv) == :call && recv.receiver != nil && ast_kind(recv.receiver) == :var && recv.receiver.name == "gpu"
+      builtin = "" + recv.name.to_s()
+      if builtin == "thread_position_in_grid"
+        return "i32(__tid." + nm + ")"
+      if builtin == "thread_position_in_threadgroup"
+        return "i32(__tid_local." + nm + ")"
+      if builtin == "threadgroup_position_in_grid"
+        return "i32(__group_id." + nm + ")"
     # Array element read: receiver[idx] arrives as a `[]` call.
     if nm == "\[]" && recv != nil
       cargs = node.args
@@ -2513,6 +2614,33 @@ use ast
         idx = wgsl_expr(ctx, cargs[0])
         if base != nil && idx != nil
           return base + "\[" + idx + "\]"
+    if recv != nil && ast_kind(recv) == :var && recv.name == "gpu"
+      if nm == "threads_per_threadgroup"
+        return "256"
+      if nm in ("atomic_load_i32" "atomic_store_i32" "atomic_exchange_i32" "atomic_fetch_add_i32" "atomic_min_i32")
+        cargs = node.args
+        expected = nm == "atomic_load_i32" ? 2 : 3
+        if cargs == nil || cargs.size() != expected || ast_kind(cargs[0]) != :var
+          return nil
+        buffer = wgsl_expr(ctx, cargs[0])
+        index = wgsl_expr(ctx, cargs[1])
+        if buffer == nil || index == nil
+          return nil
+        pointer = "&" + buffer + "\[" + index + "\]"
+        if nm == "atomic_load_i32"
+          return "atomicLoad(" + pointer + ")"
+        value = wgsl_expr(ctx, cargs[2])
+        if value == nil
+          return nil
+        if nm == "atomic_store_i32"
+          return "atomicStore(" + pointer + ", " + value + ")"
+        if nm == "atomic_exchange_i32"
+          return "atomicExchange(" + pointer + ", " + value + ")"
+        if nm == "atomic_fetch_add_i32"
+          return "atomicAdd(" + pointer + ", " + value + ")"
+        return "atomicMin(" + pointer + ", " + value + ")"
+    if recv == nil && nm == "threadgroup_barrier" && (node.args == nil || node.args.size() == 0)
+      return "workgroupBarrier()"
     return nil
   if t == :index
     base = wgsl_expr(ctx, node.receiver)
@@ -2526,17 +2654,38 @@ use ast
   t = ast_kind(node)
   if t == :assign
     target = node.target
+    # WGSL workgroup variables live at module scope. Keep the source-local
+    # name through a rename map and emit one kernel-qualified declaration
+    # before the entry point.
+    if ast_kind(target) == :var && node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :call
+      shared_call = node.value
+      shared_recv = shared_call.receiver
+      shared_name = "" + shared_call.name.to_s()
+      if shared_recv != nil && ast_kind(shared_recv) == :var && shared_recv.name == "gpu" && shared_name in ("shared_f32" "shared_i32" "shared_i64")
+        shared_args = shared_call.args
+        if shared_args == nil || shared_args.size() != 1 || ast_kind(shared_args[0]) != :int || shared_name == "shared_i64"
+          return false
+        source_name = "" + target.name
+        global_name = "__wg_" + ctx[:kernel_name] + "_" + source_name
+        elt = shared_name == "shared_f32" ? "f32" : "i32"
+        ctx[:renames][source_name] = global_name
+        ctx[:shared_decls] << "var<workgroup> " + global_name + " : array<" + elt + ", " + shared_args[0].value.to_s() + ">;\n"
+        declared[source_name] = true
+        return true
     value = wgsl_expr(ctx, node.value)
     if value == nil
       return false
     tk = ast_kind(target)
     if tk == :var
       vname = "" + target.name
+      output_name = ctx[:renames][vname]
+      if output_name == nil
+        output_name = vname
       emit_indent(out, ctx)
       if declared[vname] == nil && !ctx[:params].include?(vname)
         declared[vname] = true
         out << "var "
-      out << vname
+      out << output_name
       out << " = "
       out << value
       out << ";\n"
@@ -2552,6 +2701,17 @@ use ast
       out << ";\n"
       return true
     return false
+  if t == :compound_assign
+    lhs = wgsl_expr(ctx, node.target)
+    rhs = wgsl_expr(ctx, node.value)
+    if lhs == nil || rhs == nil
+      return false
+    emit_indent(out, ctx)
+    out << lhs
+    out << " " + binop_symbol(node.op) + "= "
+    out << rhs
+    out << ";\n"
+    return true
   if t == :call && ("" + node.name.to_s()) == "\[]="
     # Indexed store: receiver[idx] = value arrives as a `[]=` call.
     recv = node.receiver
@@ -2579,9 +2739,72 @@ use ast
     out << ") {\n"
     ctx[:indent] = ctx[:indent] + 1
     body = node.then_body
+    if body == nil
+      body = []
+    branch_declared = dup_hash(declared)
     bi = 0
     while bi < body.size()
-      if !wgsl_stmt(out, ctx, body[bi], declared)
+      if !wgsl_stmt(out, ctx, body[bi], branch_declared)
+        ctx[:indent] = ctx[:indent] - 1
+        return false
+      bi += 1
+    ctx[:indent] = ctx[:indent] - 1
+    emit_indent(out, ctx)
+    out << "}"
+    elsif_clauses = node.elsif_clauses
+    if elsif_clauses != nil
+      ei = 0
+      while ei < elsif_clauses.size()
+        clause = elsif_clauses[ei]
+        clause_cond = wgsl_expr(ctx, clause[0])
+        if clause_cond == nil
+          return false
+        out << " else if (" + clause_cond + ") {\n"
+        ctx[:indent] = ctx[:indent] + 1
+        clause_body = clause[1]
+        if clause_body == nil
+          clause_body = []
+        branch_declared = dup_hash(declared)
+        ci = 0
+        while ci < clause_body.size()
+          if !wgsl_stmt(out, ctx, clause_body[ci], branch_declared)
+            ctx[:indent] = ctx[:indent] - 1
+            return false
+          ci += 1
+        ctx[:indent] = ctx[:indent] - 1
+        emit_indent(out, ctx)
+        out << "}"
+        ei += 1
+    else_body = node.else_body
+    if else_body != nil && else_body.size() > 0
+      out << " else {\n"
+      ctx[:indent] = ctx[:indent] + 1
+      branch_declared = dup_hash(declared)
+      ei = 0
+      while ei < else_body.size()
+        if !wgsl_stmt(out, ctx, else_body[ei], branch_declared)
+          ctx[:indent] = ctx[:indent] - 1
+          return false
+        ei += 1
+      ctx[:indent] = ctx[:indent] - 1
+      emit_indent(out, ctx)
+      out << "}"
+    out << "\n"
+    return true
+  if t == :while
+    cond = wgsl_expr(ctx, node.condition)
+    if cond == nil
+      return false
+    emit_indent(out, ctx)
+    out << "loop {\n"
+    ctx[:indent] = ctx[:indent] + 1
+    emit_indent(out, ctx)
+    out << "if (!(" + cond + ")) { break; }\n"
+    body = node.body
+    loop_declared = dup_hash(declared)
+    bi = 0
+    while bi < body.size()
+      if !wgsl_stmt(out, ctx, body[bi], loop_declared)
         ctx[:indent] = ctx[:indent] - 1
         return false
       bi += 1
@@ -2589,21 +2812,48 @@ use ast
     emit_indent(out, ctx)
     out << "}\n"
     return true
+  if t == :return
+    if node.value != nil && ast_kind(node.value) != :nil_lit
+      return false
+    emit_indent(out, ctx)
+    out << "return;\n"
+    return true
+  if t == :break || t == :next
+    emit_indent(out, ctx)
+    out << (t == :break ? "break;\n" : "continue;\n")
+    return true
+  if t == :call
+    expr = wgsl_expr(ctx, node)
+    if expr == nil
+      return false
+    emit_indent(out, ctx)
+    out << expr
+    out << ";\n"
+    return true
   false
 
--> emit_kernel_wgsl(node, group_base)
+-> emit_kernel_wgsl(node, binding_base)
   name = node.name
   params = node.params
   type_hints = node.type_hints
   if type_hints == nil
     type_hints = {}
   out = StringBuffer(512)
-  binding = 0
+  binding = binding_base
   pnames = []
+  param_renames = {}
+  atomic_buffers = {}
+  body = node.body
+  abi = 0
+  while abi < body.size()
+    wgsl_collect_atomic_buffers(body[abi], atomic_buffers)
+    abi += 1
   pi = 0
   while pi < params.size()
     p = params[pi]
     pname = p.name
+    binding_name = "__bind_" + name + "_" + pname
+    param_renames[pname] = binding_name
     ptype = type_hints[pname]
     pnames.push(pname)
     arr_elt = msl_array_elt_type(ptype)
@@ -2611,17 +2861,25 @@ use ast
     out << binding.to_s()
     out << ") "
     if arr_elt != nil
+      wgsl_elt = wgsl_elt_name(arr_elt)
+      if !(wgsl_elt in ("f32" "i32" "u32"))
+        return "// kernel `" + name + "` skipped: unsupported storage element type for WGSL\n"
       out << "var<storage, read_write> "
-      out << pname
+      out << binding_name
       out << " : array<"
-      out << wgsl_elt_name(arr_elt)
+      if atomic_buffers[pname] == true
+        if wgsl_elt != "i32"
+          return "// kernel `" + name + "` skipped: WGSL atomics require an i32[] buffer\n"
+        out << "atomic<i32>"
+      else
+        out << wgsl_elt
       out << ">;\n"
     else
       sc = wgsl_scalar(ptype)
       if sc == nil
-        return "// kernel `" + name + "` skipped: unsupported param type for WGSL v0\n"
+        return "// kernel `" + name + "` skipped: unsupported param type for WGSL\n"
       out << "var<uniform> "
-      out << pname
+      out << binding_name
       out << " : "
       out << sc
       out << ";\n"
@@ -2630,16 +2888,24 @@ use ast
   out << "@compute @workgroup_size(256)\n"
   out << "fn "
   out << name
-  out << "(@builtin(global_invocation_id) __tid : vec3<u32>) {\n"
-  ctx = {node: node, var_types: {}, params: pnames, indent: 1}
+  out << "(@builtin(global_invocation_id) __tid : vec3<u32>,\n"
+  out << "   @builtin(local_invocation_id) __tid_local : vec3<u32>,\n"
+  out << "   @builtin(workgroup_id) __group_id : vec3<u32>) {\n"
+  ctx = {node: node, kernel_name: name, var_types: {}, params: pnames, indent: 1, renames: param_renames, shared_decls: StringBuffer(128)}
   declared = {}
   body_out = StringBuffer(256)
-  body = node.body
   bi = 0
   while bi < body.size()
     if !wgsl_stmt(body_out, ctx, body[bi], declared)
-      return "// kernel `" + name + "` skipped: outside the WGSL v0 subset (stmt " + ast_kind(body[bi]).to_s() + ")\n"
+      return "// kernel `" + name + "` skipped: outside the portable WGSL subset (stmt " + ast_kind(body[bi]).to_s() + ")\n"
     bi += 1
+  if ctx[:shared_decls].size() > 0
+    with_shared = StringBuffer(out.size() + ctx[:shared_decls].size() + body_out.size() + 8)
+    with_shared << ctx[:shared_decls].to_s()
+    with_shared << out.to_s()
+    with_shared << body_out.to_s()
+    with_shared << "}\n"
+    return with_shared.to_s()
   out << body_out.to_s()
   out << "}\n"
   out.to_s()
@@ -2650,10 +2916,12 @@ use ast
   out = StringBuffer(1024)
   out << "// Tungsten @gpu kernel output (WGSL dialect) — do not edit by hand\n\n"
   i = 0
+  binding_base = 0
   while i < kernels.size()
-    # Skip device helper functions (ret-hinted) in the WGSL v0 path.
+    # Device helper functions remain outside the portable WGSL path.
     if gpu_fn_return_type(kernels[i]) == nil
-      out << emit_kernel_wgsl(kernels[i], i)
+      out << emit_kernel_wgsl(kernels[i], binding_base)
       out << "\n"
+      binding_base += kernels[i].params.size()
     i += 1
   out.to_s()

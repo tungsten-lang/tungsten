@@ -24,15 +24,15 @@ class ExternalCellTimeoutTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         fixture = Path(self.temporary.name) / "fake-external"
         fixture.write_text(
-            """#!/usr/bin/env python3
-import sys
-import time
-
-_, marker, operation, limbs, runs, target_ms = sys.argv
-assert marker == "--sweep"
-if limbs == "2":
-    time.sleep(0.5)
-print(f"external\\todin\\t{operation}\\t{limbs}\\t17\\t3.5")
+            """#!/bin/sh
+set -eu
+test "$1" = "--sweep"
+operation=$2
+limbs=$3
+if test "$limbs" = "2"; then
+    sleep 0.5
+fi
+printf 'external\\todin\\t%s\\t%s\\t17\\t3.5\\n' "$operation" "$limbs"
 """
         )
         fixture.chmod(fixture.stat().st_mode | stat.S_IXUSR)

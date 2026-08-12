@@ -1278,7 +1278,7 @@ static int compile_call(TcAstValue node, TcChunk *chunk, TcError *err) {
     tc_error_set(err, "malformed call");
     return 0;
   }
-  if (receiver && ast_node_is(*receiver, "var")) {
+  if (receiver && (ast_node_is(*receiver, "var") || ast_node_is(*receiver, "class_ref"))) {
     TcAstValue *receiver_name = ast_get(*receiver, "name");
     if (receiver_name && receiver_name->kind == TC_AST_STRING && receiver_name->as.string.len > 0 &&
         receiver_name->as.string.bytes[0] >= 'A' && receiver_name->as.string.bytes[0] <= 'Z') {
@@ -1590,7 +1590,7 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
     }
     return emit_call_op(chunk, "raise", 5, 1, 0, err);
   }
-  if (ast_node_is(node, "var") || ast_node_is(node, "gvar") || ast_node_is(node, "ivar") || ast_node_is(node, "cvar")) return compile_var(node, chunk, err);
+  if (ast_node_is(node, "var") || ast_node_is(node, "class_ref") || ast_node_is(node, "gvar") || ast_node_is(node, "ivar") || ast_node_is(node, "cvar")) return compile_var(node, chunk, err);
   if (ast_node_is(node, "parg")) return compile_parg(node, chunk, err);
   if (ast_node_is(node, "binary_op")) return compile_binary(node, chunk, err);
   if (ast_node_is(node, "assign")) return compile_assign(node, chunk, err);

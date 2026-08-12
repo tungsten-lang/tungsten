@@ -120,6 +120,7 @@ module Tungsten
       # no indent or end of file
       if check(/^(?=\S)|^(?=\z)/)
         @dedebt += @indent
+        @next_col = 1 if @indent.positive?
         @cols = nil
         return
       end
@@ -129,8 +130,10 @@ module Tungsten
 
         if diff > 0
           @indebt = diff
+          @next_col = indent + 1
         elsif diff < 0
           @dedebt = diff.abs
+          @next_col = indent + 1
         else
           # No INDENT/DEDENT token will carry the first body-token column on
           # a continuation line, so preserve it explicitly. Otherwise the
@@ -239,10 +242,10 @@ module Tungsten
         @indebt -= 1
         @indent += 1
 
-        # INDENT is anchored at the first body-token column, matching the
-        # byte/codepoint and packed lexers. Preserve that column for the next
-        # real token rather than advancing it a second time.
-        @token.col = @indent * 2 + 1
+        # All INDENTs in a multi-level jump are anchored at the first body
+        # token, matching the byte/codepoint and packed lexers. @next_col was
+        # consumed by this call; retain the column for any remaining INDENTs
+        # and the eventual body token.
         @cols = 0
         @line_start = true
 
@@ -252,12 +255,10 @@ module Tungsten
         @dedebt -= 1
         @indent -= 1
 
-        if @dedebt > 0
-          @cols = -2
-        else
-          @next_col = @indent * 2 + 1
-          @cols = nil
-        end
+        # Like INDENT, every DEDENT in one transition is anchored at the next
+        # line's first token (column 1 at EOF), never at a synthetic negative
+        # column. Preserve it through the remaining debt and real token.
+        @cols = 0
         @line_start = true
 
         token :DEDENT
@@ -490,7 +491,7 @@ module Tungsten
         token :CONSTANT, text
 
       # @todo consider renaming
-      elsif (text = scan(/[A-Z][a-zA-Z0-9]*/))
+      elsif (text = scan(/[A-Z][a-zA-Z0-9_]*/))
         token :NAME, text
 
       # @todo consider renaming...gvar, ivar, var

@@ -285,7 +285,10 @@ module Tungsten::AST
     def ast_fingerprint(name_map = {})
       parts = [self.class.name]
       instance_variables.each do |var|
-        next if location_instance_var?(var)
+        # Parent is navigation metadata, not AST identity. Parser.parse sets
+        # these upward links before the interpreter computes pure-function
+        # memo keys, so following one here creates a body -> fn -> body cycle.
+        next if location_instance_var?(var) || var == :@parent
         child = instance_variable_get(var)
         case child
         when Node then parts << child.ast_fingerprint(name_map)

@@ -851,6 +851,7 @@ void tc_chunk_init(TcChunk *chunk);
 void tc_chunk_free(TcChunk *chunk);
 int  tc_chunk_register_slab_class(TcChunk *chunk, const char *name, size_t name_len, TcError *err);
 int  tc_chunk_is_slab_class(const TcChunk *chunk, const char *name, size_t name_len);
+int  tc_chunk_has_class(const TcChunk *chunk, const char *name, size_t name_len);
 int tc_chunk_add_const(TcChunk *chunk, TcValue value, TcError *err);
 int tc_chunk_local(TcChunk *chunk, const char *name, size_t len, TcError *err);
 int tc_chunk_add_function(TcChunk *chunk, const char *name, size_t name_len, uint32_t entry,

@@ -112,6 +112,10 @@ static const TcClassSuper *find_class_super(const TcChunk *chunk, const char *na
   return NULL;
 }
 
+int tc_chunk_has_class(const TcChunk *chunk, const char *name, size_t name_len) {
+  return find_class_super(chunk, name, name_len) != NULL;
+}
+
 int tc_chunk_register_class_super(TcChunk *chunk, const char *name, size_t name_len,
                                   const char *super, size_t super_len, TcError *err) {
   char *super_copy = NULL;

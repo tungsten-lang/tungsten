@@ -75,6 +75,11 @@ test: $(BIN)
 		printf '%s\n' "$$output" | grep -F "uppercase ASCII is not valid in identifiers: '$$spelling'" >/dev/null || exit 1; \
 	done
 	@TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --syntax-tokens-only -e 'eV mmHg kWh' >/dev/null
+	@if TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 \
+		$(BIN) --check-ast ../../compiler/test/fixtures/frontend_fuzz_62f1c679cc3ef149.w >/dev/null 2>&1; then \
+		echo "orphan top-level indentation unexpectedly parsed" >&2; \
+		exit 1; \
+	fi
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/smoke.w
 	@TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/exit_status.w; \
 		status=$$?; \
@@ -88,6 +93,8 @@ test: $(BIN)
 		diff -u tests/positional_arity.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/string_buffer_size.w | \
 		diff -u tests/string_buffer_size.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/implicit_constructor.w | \
+		diff -u tests/implicit_constructor.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/bit_count_intrinsics.w | \
 		diff -u tests/bit_count_intrinsics.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/compound_assignment_ops.w | \

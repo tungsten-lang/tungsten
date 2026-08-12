@@ -698,6 +698,17 @@
           TcFunction *fn = chunk->ctor_fn_for_const ? chunk->ctor_fn_for_const[name_id] :
                                                        tc_chunk_find_method(chunk, name, class_len, "new", 3);
           if (!fn) {
+            // Every declared non-slab class has an implicit zero-argument
+            // constructor. This is the same rule used by the interpreter and
+            // native runtime; arguments still require an explicit `-> new`.
+            if (!is_slab && argc == 0 && tc_chunk_has_class(chunk, name, class_len)) {
+              TcRuntimeObject *object = runtime_object_new(name, class_len, err);
+              FREE_ARGS();
+              if (!object || !push(&vm, tc_box_object(object), err)) {
+                goto cleanup_fail;
+              }
+              CNEXT();
+            }
             tc_error_set(err, "missing initializer for class: %.*s", (int)class_len, name);
             FREE_ARGS();
             goto cleanup_fail;

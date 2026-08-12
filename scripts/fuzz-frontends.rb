@@ -10,6 +10,7 @@ require "digest"
 require "fileutils"
 require "open3"
 require "optparse"
+require "timeout"
 
 ROOT = File.expand_path("..", __dir__)
 RUBY_IMPL = File.join(ROOT, "implementations/ruby")
@@ -39,9 +40,25 @@ def parse_options
   options
 end
 
-def run(env, *command)
-  stdout, stderr, status = Open3.capture3(env, *command, chdir: ROOT)
-  [status.exitstatus, stdout, stderr]
+def run(env, *command, timeout: 30)
+  stdout = nil
+  stderr = nil
+  status = nil
+  Open3.popen3(env, *command, chdir: ROOT) do |stdin, out, error, wait_thread|
+    stdin.close
+    stdout_thread = Thread.new { out.read }
+    stderr_thread = Thread.new { error.read }
+    begin
+      status = Timeout.timeout(timeout) { wait_thread.value }
+    rescue Timeout::Error
+      Process.kill("KILL", wait_thread.pid) rescue nil
+      status = wait_thread.value
+      stderr = "command timed out after #{timeout}s: #{command.join(' ')}\n"
+    end
+    stdout = stdout_thread.value
+    stderr = stderr.to_s + stderr_thread.value
+  end
+  [status&.exitstatus || 124, stdout.to_s, stderr.to_s]
 end
 
 def token_result(lexer_class, source)
@@ -65,7 +82,7 @@ def ruby_lexer_disagreement(source)
 end
 
 def command_result(*command, env: {})
-  status, stdout, stderr = run(env, *command)
+  status, stdout, stderr = run(env, *command, timeout: 5)
   [status, stdout, stderr]
 end
 
@@ -87,6 +104,24 @@ def ruby_body_wire(body)
   body.list.map { |node| ruby_ast_wire(node) }
 end
 
+def ruby_params_wire(definition)
+  (definition.args || []).each_with_index.map do |arg, index|
+    {
+      node: :param,
+      name: arg.name,
+      default: arg.default && ruby_ast_wire(arg.default),
+      ivar_assign: !!arg.ivar,
+      keyword: !!arg.keyword,
+      block_param: definition.block.equal?(arg),
+      splat: definition.splat_index == index
+    }
+  end
+end
+
+def ruby_class_ref_name?(name)
+  name.match?(/\A[A-Z]/) && name.match?(/[a-z]/)
+end
+
 def ruby_ast_wire(node)
   case node
   when Tungsten::AST::ArrayLiteral
@@ -96,7 +131,7 @@ def ruby_ast_wire(node)
   when Tungsten::AST::Assign
     {node: :assign, target: ruby_ast_wire(node.name), value: ruby_ast_wire(node.value), type_hint: node.type_hint}
   when Tungsten::AST::Var
-    {node: :var, name: node.name}
+    {node: ruby_class_ref_name?(node.name) ? :class_ref : :var, name: node.name}
   when Tungsten::AST::Int
     {node: :int, value: node.value, format: nil, raw: node.value.to_s}
   when Tungsten::AST::BinaryOp
@@ -105,6 +140,31 @@ def ruby_ast_wire(node)
   when Tungsten::AST::AssignOp
     operator = RUBY_BINARY_OPS.fetch(node.operator.to_s)
     {node: :compound_assign, target: ruby_ast_wire(node.name), op: operator, value: ruby_ast_wire(node.value)}
+  when Tungsten::AST::Fn
+    {
+      node: :fn_def,
+      name: node.name,
+      params: ruby_params_wire(node),
+      body: ruby_body_wire(node.body),
+      type_hints: nil
+    }
+  when Tungsten::AST::Def
+    {
+      node: :method_def,
+      name: node.name,
+      params: ruby_params_wire(node),
+      body: ruby_body_wire(node.body),
+      type_hints: nil,
+      is_class_method: false
+    }
+  when Tungsten::AST::ClassDef
+    {
+      node: :class_def,
+      name: node.name,
+      superclass: node.superclass,
+      body: ruby_body_wire(node.body),
+      class_role: node.class_role
+    }
   when Tungsten::AST::Call
     {
       node: :call,
@@ -195,7 +255,7 @@ def valid_source(rng, index)
   name = "value_#{index}"
   other = "other_#{index}"
 
-  case index % 3
+  case index % 5
   when 0
     <<~W
       #{name} = #{left}
@@ -214,7 +274,7 @@ def valid_source(rng, index)
       << #{values}[0] + #{values}[2]
       << #{values}.size()
     W
-  else
+  when 2
     count = "count_#{index}"
     total = "total_#{index}"
     <<~W
@@ -224,6 +284,21 @@ def valid_source(rng, index)
         #{total} += #{count}
         #{count} += 1
       << #{total}
+    W
+  when 3
+    method = "combine_#{index}"
+    <<~W
+      -> #{method}(x, y)
+        (x * #{factor}) + y
+      << #{method}(#{left}, #{right})
+    W
+  else
+    class_name = "Box_#{index}"
+    <<~W
+      + #{class_name}
+        -> value
+          #{left}
+      << #{class_name}.new().value()
     W
   end
 end
@@ -294,13 +369,14 @@ def ensure_tools
 end
 
 def write_case(kind, index, source)
-  path = File.join(CORPUS, format("%s-%04d.w", kind, index))
+  name = kind == "minimize" ? format("%s-%d-%04d.w", kind, Process.pid, index) : format("%s-%04d.w", kind, index)
+  path = File.join(CORPUS, name)
   File.write(path, source)
   path
 end
 
 def lex_parity_disagreement(path)
-  status, stdout, stderr = run({"TUNGSTEN_ROOT" => ROOT}, LEX_PARITY, path)
+  status, stdout, stderr = run({"TUNGSTEN_ROOT" => ROOT}, LEX_PARITY, path, timeout: 5)
   return nil if status.zero?
 
   "self-hosted regex/packed mismatch\n#{stdout}#{stderr}"

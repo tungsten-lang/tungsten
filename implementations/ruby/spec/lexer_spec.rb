@@ -21,6 +21,24 @@ RSpec.shared_examples "a Tungsten lexer" do
     ])
   end
 
+  it "keeps underscores inside PascalCase class names" do
+    root = File.expand_path("../../..", __dir__)
+    source = File.read(File.join(root, "compiler/test/fixtures/frontend_fuzz_f42fa00c5ae29356.w"))
+    names = described_class.new(source).tokens.select { |token| token.type == :NAME }
+
+    expect(names.map(&:value)).to eq(["Box_4"])
+  end
+
+  it "anchors multi-level indentation tokens at the body column" do
+    root = File.expand_path("../../..", __dir__)
+    source = File.read(File.join(root, "compiler/test/fixtures/frontend_fuzz_20add648ea927d31.w"))
+    tokens = described_class.new(source).tokens
+
+    expect(tokens.filter_map { |token| [token.type, token.col] if %i[INDENT DEDENT].include?(token.type) }).to eq([
+      [:INDENT, 5], [:INDENT, 5], [:DEDENT, 1], [:DEDENT, 1]
+    ])
+  end
+
   class << self
     def it_lexes(string, type, value=nil)
       it "lexes #{string}" do

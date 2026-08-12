@@ -92,6 +92,11 @@ RSpec.describe Tungsten::Interpreter do
     expect(run("2 ** 8")).to eq(256)
   end
 
+  it "evaluates pure functions after parser parent links are installed" do
+    source = File.read(File.join(PROJECT_ROOT, "compiler/test/fixtures/frontend_fuzz_107b55fde813c430.w"))
+    expect(output(source)).to eq("14")
+  end
+
   it "constructs reduced rationals through the Rational class facade" do
     expect(run("Rational.new(6, 8)")).to eq(Rational(3, 4))
     expect(run("Rational.new(7)")).to eq(Rational(7, 1))

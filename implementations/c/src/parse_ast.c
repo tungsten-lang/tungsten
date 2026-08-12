@@ -1738,8 +1738,28 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
       }
       break;
     }
-    case TC_K_ID:
     case TC_K_NAME:
+      /* The compact syntax table folds PascalCase names and
+       * SCREAMING_SNAKE constants into TC_K_NAME. Recover the canonical AST
+       * distinction from the spelling: any lowercase ASCII makes this a
+       * class reference; all-uppercase/digit/underscore spellings stay vars. */
+      {
+        int has_lower = 0;
+        for (size_t i = 0; i < text_len; i++) {
+          if (text[i] >= 'a' && text[i] <= 'z') {
+            has_lower = 1;
+            break;
+          }
+        }
+        node = node_hash(p, has_lower ? "class_ref" : "var", pos, err);
+      }
+      if (node.kind == TC_AST_HASH &&
+          !tc_ast_hash_set(node, "name", tc_ast_string_copy(text, text_len, err), err)) {
+        tc_ast_free(node);
+        node = tc_ast_nil();
+      }
+      break;
+    case TC_K_ID:
     case TC_K_TYPE:
     case TC_K_GLOBAL:
       /* `$name` globals are GVar nodes in the canonical parser (parser.w:
@@ -5308,8 +5328,19 @@ int tc_parse_bootstrap_ast(const TcSource *source, const TcSyntaxTokens *tokens,
 
   skip_newlines_ast(&parser);
   while (!at_ast(&parser, TC_K_EOF)) {
+    if (at_ast(&parser, TC_K_DEDENT)) {
+      parse_ast_error(&parser, err, "unexpected DEDENT at top level");
+      tc_ast_free(expressions);
+      return 0;
+    }
+    size_t statement_start = parser.pos;
     TcAstValue stmt;
     if (!parse_ast_statement(&parser, &stmt, err)) {
+      tc_ast_free(expressions);
+      return 0;
+    }
+    if (parser.pos == statement_start) {
+      parse_ast_error(&parser, err, "parser made no progress");
       tc_ast_free(expressions);
       return 0;
     }

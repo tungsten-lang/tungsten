@@ -15,8 +15,11 @@ LOWERING_PATH = File.join(ROOT, "compiler", "lib", "lowering", "method_call.w")
 # Every instance method on these runtime-backed classes must be classified.
 # `native_ic` methods are intercepted by the runtime table even when the
 # receiver's concrete type is erased. `source_fallback` methods deliberately
-# dispatch through the loaded Core class. Adding a source method or IC row
-# without choosing one of those contracts is a gate failure.
+# dispatch through the loaded Core class. `representation_specific` names the
+# intentional overlap where one representation uses an IC and another uses
+# source (packed regex literals versus Regex objects, for example). Adding a
+# source method or IC row without choosing one of those contracts is a gate
+# failure.
 RUNTIME_CLASS_CONTRACTS = {
   "Mmap" => {
     path: "core/mmap.w",
@@ -92,6 +95,23 @@ RUNTIME_CLASS_CONTRACTS = {
     table: "w_ic_strbuf_table",
     native_ic: %w[<< [] append byte_size clear empty? include? length size starts_with? to_s],
     source_fallback: %w[new]
+  },
+  "Regex" => {
+    path: "core/regex.w",
+    table: "w_ic_regex_table",
+    native_ic: %w[=== =~ match? to_s],
+    native_only: %w[=== =~ to_s],
+    representation_specific: %w[match?],
+    source_fallback: %w[
+      advance at_end? at_word_boundary? build_result build_skip class_escape_char
+      class_match? clex collect_first compile_alt compile_node compile_opt
+      compile_plus compile_rep compile_star compute_prefilter consume_at?
+      decode_subject emit lazy? literal_prefix lone_flag_class make_saved match
+      match? new nullable? parse_alt parse_atom parse_brace parse_class
+      parse_escape parse_group parse_int parse_pattern parse_repeat parse_seq peek
+      pf_advance pf_bm_search pf_set_match run set_match? set_split
+      single_consuming? source span_str word_lex?
+    ]
   }
 }.freeze
 
@@ -184,10 +204,18 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   native_methods = contract[:native_ic].uniq.sort
   native_only = contract.fetch(:native_only, []).uniq.sort
   fallback_methods = contract[:source_fallback].uniq.sort
+  representation_specific = contract.fetch(:representation_specific, []).uniq.sort
   declared_native = native_methods - native_only
   classified = (declared_native + fallback_methods).uniq.sort
   overlap = native_methods & fallback_methods
-  errors << "#{class_name}: methods classified as both native IC and source fallback: #{overlap.join(', ')}" unless overlap.empty?
+  unexpected_overlap = overlap - representation_specific
+  missing_overlap = representation_specific - overlap
+  unless unexpected_overlap.empty?
+    errors << "#{class_name}: methods classified as both native IC and source fallback without a representation-specific contract: #{unexpected_overlap.join(', ')}"
+  end
+  unless missing_overlap.empty?
+    errors << "#{class_name}: representation-specific methods do not overlap native IC and source fallback: #{missing_overlap.join(', ')}"
+  end
   invalid_native_only = native_only - native_methods
   errors << "#{class_name}: native-only methods without IC classification: #{invalid_native_only.join(', ')}" unless invalid_native_only.empty?
   declared_native_only = native_only & source_methods

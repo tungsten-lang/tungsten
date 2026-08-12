@@ -1255,6 +1255,7 @@ WValue w_chan_new(WValue capacity_wv);
 WValue w_chan_new_unbounded(void);
 WValue w_chan_send(WValue ch, WValue val);
 WValue w_chan_try_send(WValue ch, WValue val);
+WValue w_chan_try_send_result(WValue ch, WValue val);
 WValue w_chan_send_timeout(WValue ch, WValue val, WValue milliseconds);
 WValue w_chan_recv(WValue ch);
 WValue w_chan_recv_result(WValue ch);

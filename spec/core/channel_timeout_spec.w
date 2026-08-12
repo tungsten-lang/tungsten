@@ -53,4 +53,36 @@ rescue error
   bad_select = error.to_s.include?("non-empty Array")
 check("channel.select.validation", bad_select)
 
+send_target = Channel.new(1)
+receive_target = Channel.new(1)
+mixed = Channel.select([
+  Channel.receive_case(receive_target),
+  Channel.send_case(send_target, 42)
+], 0)
+check("channel.select.send.operation", mixed != nil && mixed.operation() == :send)
+check("channel.select.send.ready", mixed.sent?() && mixed.value() == 42)
+check("channel.select.send.delivered", send_target.receive() == 42)
+
+receive_target.send(9)
+send_target.send(1)
+mixed_receive = Channel.select([
+  Channel.send_case(send_target, 2),
+  Channel.receive_case(receive_target)
+], 0)
+check("channel.select.receive.operation", mixed_receive.operation() == :receive)
+check("channel.select.receive.value", mixed_receive.received?() && mixed_receive.value() == 9)
+check("channel.select.full.send.no_ghost", send_target.receive() == 1 && send_target.try_receive().unavailable?())
+
+closed_send_target = Channel.new(1)
+closed_send_target.close()
+closed_send = Channel.select([Channel.send_case(closed_send_target, 3)], 0)
+check("channel.select.closed_send.ready", closed_send.closed?() && !closed_send.sent?())
+
+bad_arm = false
+begin
+  Channel.select([ChannelSelectArm.new(send_target, :other)], 0)
+rescue error
+  bad_arm = error.to_s.include?("operation")
+check("channel.select.arm_validation", bad_arm)
+
 << "channel_timeout_spec: all checks passed"

@@ -60881,13 +60881,13 @@ static int w_chan_take_locked(WChan *ch, WValue *value) {
     return 1;
 }
 
-WValue w_chan_try_send(WValue channel, WValue val) {
+static int w_chan_try_send_status(WValue channel, WValue val) {
     WChan *ch = as_chan(channel);
     pthread_mutex_lock(&ch->lock);
 
     if (ch->closed) {
         pthread_mutex_unlock(&ch->lock);
-        w_raise(w_string("send on closed channel"));
+        return W_CHAN_RESULT_CLOSED;
     }
 
     if (ch->unbounded) {
@@ -60899,31 +60899,45 @@ WValue w_chan_try_send(WValue channel, WValue val) {
         ch->tail = (ch->tail + 1) % ch->cap;
         ch->count++;
         pthread_mutex_unlock(&ch->lock);
-        return W_TRUE;
+        return W_CHAN_RESULT_RECEIVED;
     }
 
     if (ch->cap == 0) {
         if (ch->recv_waiters <= 0 || ch->count != 0) {
             pthread_mutex_unlock(&ch->lock);
-            return W_FALSE;
+            return W_CHAN_RESULT_UNAVAILABLE;
         }
         ch->buffer[0] = val;
         ch->count = 1;
         ch->handoff_seq++;
         ch->handoff_committed = 1;
         pthread_mutex_unlock(&ch->lock);
-        return W_TRUE;
+        return W_CHAN_RESULT_RECEIVED;
     }
 
     if (ch->count >= ch->cap) {
         pthread_mutex_unlock(&ch->lock);
-        return W_FALSE;
+        return W_CHAN_RESULT_UNAVAILABLE;
     }
     ch->buffer[ch->tail] = val;
     ch->tail = (ch->tail + 1) % ch->cap;
     ch->count++;
     pthread_mutex_unlock(&ch->lock);
-    return W_TRUE;
+    return W_CHAN_RESULT_RECEIVED;
+}
+
+WValue w_chan_try_send(WValue channel, WValue val) {
+    int status = w_chan_try_send_status(channel, val);
+    if (status == W_CHAN_RESULT_CLOSED) {
+        w_raise(w_string("send on closed channel"));
+    }
+    return w_bool(status == W_CHAN_RESULT_RECEIVED);
+}
+
+/* Non-raising three-state probe for mixed Channel.select arms. Keep the
+ * public try_send compatibility contract above: it still raises on closed. */
+WValue w_chan_try_send_result(WValue channel, WValue val) {
+    return w_int(w_chan_try_send_status(channel, val));
 }
 
 WValue w_chan_send_timeout(WValue channel, WValue val, WValue milliseconds) {

@@ -50,17 +50,54 @@
   -> to_a
     [@value, @status]
 
+# ChannelTrySendResult — nonblocking/select send outcome with three states.
++ ChannelTrySendResult
+  SENT = 1
+  UNAVAILABLE = 0
+  CLOSED = -1
+
+  -> new(@value, @status)
+
+  -> value
+    @value
+
+  -> sent?
+    @status == SENT
+
+  -> unavailable?
+    @status == UNAVAILABLE
+
+  -> closed?
+    @status == CLOSED
+
+  -> ready?
+    !unavailable?()
+
+  -> to_a
+    [@value, @status]
+
+# An explicit select arm. Raw Channel entries remain receive arms for
+# compatibility; these objects add send arms without making Array shape
+# carry hidden semantics.
++ ChannelSelectArm
+  ro :channel, :operation, :value
+
+  -> new(@channel, @operation, @value = nil)
+
 # ChannelSelection — the ready channel, result, and original input index.
 + ChannelSelection
-  ro :channel, :result, :index
+  ro :channel, :result, :index, :operation
 
-  -> new(@channel, @result, @index)
+  -> new(@channel, @result, @index, @operation = :receive)
 
   -> value
     @result.value()
 
   -> received?
-    @result.received?()
+    @operation == :receive && @result.received?()
+
+  -> sent?
+    @operation == :send && @result.sent?()
 
   -> closed?
     @result.closed?()
@@ -71,34 +108,55 @@
   -> .unbounded
     ccall("w_chan_new_unbounded")
 
-  # Receive-select over channels. A received value or a closed channel is
-  # ready; nil means the optional millisecond timeout expired. Mixed send and
-  # receive arms remain a future extension.
-  -> .select(channels, milliseconds = nil)
-    if !channels.is_a?(Array) || channels.empty?()
-      raise "Channel.select requires a non-empty Array of channels"
+  -> .receive_case(channel)
+    ChannelSelectArm.new(channel, :receive)
+
+  -> .send_case(channel, value)
+    ChannelSelectArm.new(channel, :send, value)
+
+  # A received value, completed send, or closed channel is ready; nil means
+  # the optional millisecond timeout expired. Raw Channels are receive arms.
+  -> .select(arms, milliseconds = nil)
+    if !arms.is_a?(Array) || arms.empty?()
+      raise "Channel.select requires a non-empty Array of arms"
     if milliseconds != nil && (!milliseconds.is_a?(Integer) || milliseconds < 0)
       raise "Channel.select timeout must be a non-negative Integer in milliseconds"
 
     deadline = nil
     if milliseconds != nil
       deadline = clock_ms() + milliseconds
-    offset = clock_ms() % channels.size
+    offset = clock_ms() % arms.size
 
     while true
       i = 0
-      while i < channels.size
-        index = (offset + i) % channels.size
-        channel = channels[index]
-        result = channel.try_receive()
+      while i < arms.size
+        index = (offset + i) % arms.size
+        arm = arms[index]
+        operation = :receive
+        channel = arm
+        value = nil
+        if arm.is_a?(ChannelSelectArm)
+          operation = arm.operation()
+          channel = arm.channel()
+          value = arm.value()
+        if ccall("w_sync_handle_kind_support", channel) != 3
+          raise "Channel.select arms must contain Channels"
+        result = nil
+        if operation == :receive
+          result = channel.try_receive()
+        elsif operation == :send
+          status = ccall("w_chan_try_send_result", channel, value)
+          result = ChannelTrySendResult.new(value, status)
+        else
+          raise "Channel.select arm operation must be :receive or :send"
         if result.ready?()
-          return ChannelSelection.new(channel, result, index)
+          return ChannelSelection.new(channel, result, index, operation)
         i += 1
 
       if deadline != nil && clock_ms() >= deadline
         return nil
       ccall("__w_sleep", ~0.0001)
-      offset = (offset + 1) % channels.size
+      offset = (offset + 1) % arms.size
 
   -> send(value)
     ccall("w_chan_send", self, value)

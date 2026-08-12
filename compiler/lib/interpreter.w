@@ -1387,10 +1387,18 @@ use target
       if args.size() != 3
         raise "w_chan_try_send expects one receiver and value"
       return ccall("w_chan_try_send", args[1], args[2])
+    when "w_chan_try_send_result"
+      if args.size() != 3
+        raise "w_chan_try_send_result expects one receiver and value"
+      return ccall("w_chan_try_send_result", args[1], args[2])
     when "w_chan_send_timeout"
       if args.size() != 4
         raise "w_chan_send_timeout expects one receiver, value, and timeout"
       return ccall("w_chan_send_timeout", args[1], args[2], args[3])
+    when "w_sync_handle_kind_support"
+      if args.size() != 2
+        raise "w_sync_handle_kind_support expects one value"
+      return ccall("w_sync_handle_kind_support", args[1])
     when "w_chan_close"
       if args.size() != 2
         raise "w_chan_close expects one receiver"

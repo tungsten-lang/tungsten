@@ -400,9 +400,9 @@ projects stay unchecked until their stated acceptance criteria are met.
   state and powers close-aware iteration. `Channel.unbounded` grows its FIFO
   geometrically, while `Channel.new(0)` performs a sender/receiver rendezvous.
   Nonblocking and millisecond-timeout send/receive operations use a three-state
-  result so nil, timeout, and closed remain distinct. Receive-side select uses
-  rotating probes with an optional timeout; mixed send/receive select arms and
-  event-loop-backed parking remain open. The unbuffered concurrency fixtures
+  result so nil, timeout, and closed remain distinct. Select uses rotating
+  receive/send probes with an optional timeout and treats closed arms as ready;
+  event-loop-backed parking remains open. The unbuffered concurrency fixtures
   cover close and cancellation waking or removing blocked participants and are
   compiled-only until interpreted `go` is asynchronous.
 - [x] Flesh out `core/mutex.w` with lock/try_lock/unlock/synchronize, ownership

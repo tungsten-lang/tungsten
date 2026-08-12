@@ -10513,6 +10513,9 @@ WValue bigint_sqr_positive_16(WBigint *a) {
 #ifndef BN_MUL_N1_SMALL_MAX
 #define BN_MUL_N1_SMALL_MAX 7
 #endif
+#ifndef BN_MUL_UI_DENSE_1_8
+#define BN_MUL_UI_DENSE_1_8 1
+#endif
 #if BN_MUL_N1_SMALL_MAX < 4 || BN_MUL_N1_SMALL_MAX > 7
 #error "BN_MUL_N1_SMALL_MAX must be in 4..7"
 #endif
@@ -10860,6 +10863,24 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
             r->size = 2;
             return bigint_box(r);
         }
+#if BN_MUL_UI_DENSE_1_8 && BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED
+        /* A single range gate preserves the old n == 1 and n > 8 paths.
+         * Keep every small width as a distinct constant arm: grouping 5..7
+         * hides their constant trip counts and makes LLVM prefer a comparison
+         * tree plus a dynamic inner kernel. */
+        if (n >= 2 && n <= 8) {
+            switch (n) {
+            case 2: return bigint_mul_n1_tiny(ba->limbs, 2, word, 0);
+            case 3: return bigint_mul_n1_tiny(ba->limbs, 3, word, 0);
+            case 4: return bigint_mul_n1_tiny(ba->limbs, 4, word, 0);
+            case 5: return bigint_mul_n1_small(ba->limbs, 5, word, 0);
+            case 6: return bigint_mul_n1_small(ba->limbs, 6, word, 0);
+            case 7: return bigint_mul_n1_small(ba->limbs, 7, word, 0);
+            default:
+                return bigint_mul_n1_tiny8(ba->limbs, word, 0);
+            }
+        }
+#else
         if (n >= 2) {
             /* Two-tier dispatch: n = 2..8 is DENSE, so one bounded jump
              * table reaches any tiny/small/f8 leaf in a compare plus one
@@ -10905,6 +10926,23 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
             }
             return bigint_mul_n1(ba->limbs, n, word, 0);
         }
+#endif
+#if BN_MUL_UI_DENSE_1_8 && BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED
+        if (n >= 2) {
+            switch (n) {
+            case 16: return bigint_mul_n1_fixed16(ba->limbs, word, 0);
+            case 24:
+                return bigint_mul_n1_tiny_wide(ba->limbs, 24, word, 0, 32U);
+            case 32:
+                return bigint_mul_n1_tiny32x2(ba->limbs, word, 0);
+            case 40: return bigint_mul_n1_fixed40(ba->limbs, word, 0);
+            case 48: return bigint_mul_n1_fixed48(ba->limbs, word, 0);
+            case 64: return bigint_mul_n1_fixed64(ba->limbs, word, 0);
+            default: break;
+            }
+            return bigint_mul_n1(ba->limbs, n, word, 0);
+        }
+#endif
     }
 #endif
     uint64_t scratch;

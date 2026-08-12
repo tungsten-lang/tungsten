@@ -491,8 +491,9 @@ run_cache_lifecycle_test() {
   cache_lifecycle_step "deep output path recompile hits" yes 1 "$src" "$deep/prog"
 }
 
-# Self-exec worker entry: run exactly one spec, persist its result for
-# the parent, and exit 0 (pass/fail travels through the status file).
+# Self-exec worker entry: run exactly one spec. Parallel children persist their
+# result for the parent and leave `fail` at zero; a directly invoked job has no
+# parent aggregator, so return its recorded failure status to the caller.
 if [[ "${1:-}" == --job-* ]]; then
   case "$1" in
     --job-compiled) run_compiled_spec "$2" ;;
@@ -503,7 +504,7 @@ if [[ "${1:-}" == --job-* ]]; then
     --job-wassat)   run_wassat_spec "$2" "$3" ;;
     *) echo "unknown job mode $1" >&2; exit 2 ;;
   esac
-  exit 0
+  exit "$fail"
 fi
 
 compiled_specs=(

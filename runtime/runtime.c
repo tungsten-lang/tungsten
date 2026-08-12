@@ -405,6 +405,27 @@ _Static_assert(BN_BIGINT_HYBRID_P2_LIMIT >= 8 &&
 #define BN_EQ_PAGE_HAZARD_GUARD (!BN_BIGINT_ARENA_ACTIVE)
 #endif
 
+/* Trailing-zero-limb pre-transforms: 2-adic factor-out at LIMB granularity.
+ * Detection is one never-taken load+branch per entry on random operands
+ * (normalized bigints have limbs[0] == 0 only when the value is a multiple
+ * of 2^64). Algebra shipped:
+ *   mul:  a·b = (a'·b')·B^(za+zb)         (strip each side independently)
+ *   div:  u/(v'·B^z) → q = (u>>64z)/v', r = ((u>>64z) mod v')·B^z + u_lo
+ *         (gated 2z ≥ vlen: small strips demote tuned division shapes,
+ *         see mag_divmod)
+ *   gcd:  gcd(x·B^m, y·B^m) = B^m·gcd(x,y) (COMMON count only: after the
+ *         common strip the other operand may still be even, so one side's
+ *         excess zeros must stay)
+ * isqrt is deliberately NOT stripped: floor(sqrt(a·B^2t)) ≠ B^t·floor(sqrt a)
+ * unless a is a perfect square (isqrt(200)=14, 10·isqrt(2)=10).
+ * Real-world traffic: powers of two, shifted values, and the D&C decimal
+ * ladder's 10^(18·2^j) powers (18·2^j trailing zero bits ⇒ whole zero limbs
+ * from j=3 up), so to_s/from_str divisions and multiplies ride this free.
+ * BN_TZ_STRIP=0 compiles every check out (A/B builds). */
+#ifndef BN_TZ_STRIP
+#define BN_TZ_STRIP 1
+#endif
+
 /* Allocation-source tag, stored in the (otherwise unused) WBigint._pad[0].
  * Every allocation path stamps it; the release overflow path routes on it.
  * Malloc'd headers stamp it explicitly because their pad bytes are garbage. */
@@ -10245,10 +10266,28 @@ WValue bigint_mul_any_generic(WValue a, WValue b) {
     }
 #endif
 
+    int32_t rz = 0;
+#if BN_TZ_STRIP
+    /* a·b = (a'·b')·B^(za+zb): strip each side's trailing zero limbs
+     * independently and give the product a zero prefix instead.  One
+     * never-taken load+branch pair on random operands (a normalized
+     * 1-limb magnitude cannot have limbs[0] == 0, so the 1×1 fast path
+     * above is unaffected). */
+    if (__builtin_expect(al[0] == 0 || bl[0] == 0, 0)) {
+        int32_t za = 0;
+        while (al[za] == 0) za++;           /* a_abs > 0: top limb nonzero */
+        int32_t zb = 0;
+        while (bl[zb] == 0) zb++;
+        al += za; a_abs -= za;
+        bl += zb; b_abs -= zb;
+        rz = za + zb;
+    }
+#endif
     int32_t cap = a_abs + b_abs;
     int32_t lo = a_abs < b_abs ? a_abs : b_abs;
     int32_t hi = a_abs < b_abs ? b_abs : a_abs;
     if (lo > BN_KARA_THRESHOLD && hi <= 2 * lo && hi >= BN_NTT_THRESHOLD) cap = 2 * hi + 2;
+    cap += rz;
 #ifndef BN_MUL_RAW_RESULT
 #define BN_MUL_RAW_RESULT 1
 #endif
@@ -10257,6 +10296,7 @@ WValue bigint_mul_any_generic(WValue a, WValue b) {
 #else
     WBigint *r = bigint_alloc(cap);
 #endif
+    if (rz) memset(r->limbs, 0, (size_t)rz * sizeof(uint64_t));
     /* Squaring fast path: pointer-identical magnitudes route to the one-input
      * ladder.  Comparing every equal-length x*y with memcmp penalized ordinary
      * multiplication merely to detect separately allocated equal values;
@@ -10272,11 +10312,13 @@ WValue bigint_mul_any_generic(WValue a, WValue b) {
          || memcmp(al, bl, (size_t)a_abs * sizeof(uint64_t)) == 0
 #endif
         )) {
-        bigint_sqr_dispatch_cap(r->limbs, (int32_t)r->cap, al, a_abs);
+        bigint_sqr_dispatch_cap(r->limbs + rz, (int32_t)r->cap - rz,
+                                al, a_abs);
     } else {
-        bigint_mul_dispatch_cap(r->limbs, (int32_t)r->cap, al, a_abs, bl, b_abs);
+        bigint_mul_dispatch_cap(r->limbs + rz, (int32_t)r->cap - rz,
+                                al, a_abs, bl, b_abs);
     }
-    r->size = a_abs + b_abs;
+    r->size = rz + a_abs + b_abs;
     while (r->size > 0 && r->limbs[r->size - 1] == 0) r->size--;
     if (result_neg && r->size > 0) r->size = -r->size;
 #ifndef BN_MUL_KNOWN_NORMALIZED
@@ -13177,6 +13219,52 @@ static int mag_divmod_reciprocal_certified(
 static void mag_divmod(const uint64_t *u, int32_t ulen,
                        const uint64_t *v, int32_t vlen,
                        WBigint **q_out, WBigint **r_out) {
+#if BN_TZ_STRIP
+    /* Divisor trailing zero limbs (v = v'·B^z): q = (u >> 64z) / v' and
+     * r = ((u >> 64z) mod v')·B^z + (u mod B^z).  Magnitude identity:
+     * r'·B^z + u_lo ≤ (v'−1)·B^z + B^z − 1 < v.  One never-taken
+     * load+branch on random divisors; the decimal D&C ladder divides by
+     * 10^(18·2^j) (≥2 whole zero limbs from j=3), which rides this. */
+    if (__builtin_expect(v[0] == 0, 0) &&
+        v[(vlen + 1) / 2 - 1] == 0) {
+        /* The second probe is the one-load pre-gate: 2z ≥ vlen (below)
+         * requires every limb under ⌈vlen/2⌉ to be zero, so a nonzero
+         * mid limb rejects without scanning the zero run. */
+        int32_t z = 1;
+        while (v[z] == 0) z++;              /* v normalized: z < vlen */
+        /* Only strip when it at least HALVES the divisor: the division
+         * spine is dense with shape-specialized paths (certified
+         * reciprocal at 2n/n, width-tuned kernels), and a small strip
+         * demotes a tuned shape to a generic one — measured 256/128
+         * z=32 → 224/96 = 0.91x (a loss) while z=64 → 192/64 = 1.26x.
+         * At 2z ≥ vlen the quadratic work reduction dominates any
+         * shape penalty.  Small-z divisors (the decimal ladder's P_j)
+         * deliberately stay on their tuned paths. */
+        if (ulen > z && 2 * z >= vlen) {
+            if (!r_out) {
+                mag_divmod(u + z, ulen - z, v + z, vlen - z, q_out, NULL);
+                return;
+            }
+            WBigint *q = NULL, *r2 = NULL;
+            mag_divmod(u + z, ulen - z, v + z, vlen - z,
+                       q_out ? &q : NULL, &r2);
+            int32_t r2n = r2->size;
+            WBigint *r = bigint_alloc_raw_hot(r2n + z);
+            memcpy(r->limbs, u, (size_t)z * sizeof(uint64_t));
+            if (r2n)
+                memcpy(r->limbs + z, r2->limbs,
+                       (size_t)r2n * sizeof(uint64_t));
+            int32_t rn = r2n + z;
+            while (rn > 0 && r->limbs[rn - 1] == 0) rn--;
+            r->size = rn;
+            bigint_release(r2);
+            if (q_out) *q_out = q;
+            *r_out = r;
+            return;
+        }
+        /* ulen ≤ z means u < v: leave the generic path to handle it. */
+    }
+#endif
 #if BN_MOD_84_DIRECT || BN_BENCH_RUNTIME_MOD84_KNOB
     if (BN_MOD_84_DIRECT_ENABLED() &&
         ulen == 8 && vlen == 4 && r_out && !q_out) {
@@ -16005,14 +16093,8 @@ static uint64_t *gcd_ws_get(size_t limbs) {
 }
 
 static __attribute__((noinline))
-WValue bigint_gcd_any_generic(WValue a, WValue b) {
-    uint64_t sa, sb;
-    int32_t alen, blen;
-    const uint64_t *al = integer_limbs(a, &sa, &alen);
-    const uint64_t *bl = integer_limbs(b, &sb, &blen);
-    int32_t an = alen < 0 ? -alen : alen;
-    int32_t bn = blen < 0 ? -blen : blen;
-
+WValue bigint_gcd_mag(const uint64_t *al, int32_t an,
+                      const uint64_t *bl, int32_t bn) {
     if (an <= 1 && bn <= 1) {
         uint64_t av = an ? al[0] : 0;
         uint64_t bv = bn ? bl[0] : 0;
@@ -16165,6 +16247,45 @@ WValue bigint_gcd_any_generic(WValue a, WValue b) {
         }
     }
     return result;
+}
+
+WValue bigint_gcd_any_generic(WValue a, WValue b) {
+    uint64_t sa, sb;
+    int32_t alen, blen;
+    const uint64_t *al = integer_limbs(a, &sa, &alen);
+    const uint64_t *bl = integer_limbs(b, &sb, &blen);
+    int32_t an = alen < 0 ? -alen : alen;
+    int32_t bn = blen < 0 ? -blen : blen;
+
+#if BN_TZ_STRIP
+    /* gcd(x·B^m, y·B^m) = B^m·gcd(x, y): strip only the COMMON trailing
+     * zero-limb count.  Full per-side stripping is invalid at limb
+     * granularity — after the common strip the other operand may still be
+     * even, so one side's excess factors of two can pair with it (e.g.
+     * gcd(3·B, 6) = 6, not 3).  One never-taken branch on random
+     * operands. */
+    if (__builtin_expect(an > 1 && bn > 1 &&
+                         (al[0] == 0 || bl[0] == 0), 0)) {
+        int32_t za = 0;
+        while (za < an && al[za] == 0) za++;
+        int32_t zb = 0;
+        while (zb < bn && bl[zb] == 0) zb++;
+        int32_t m = za < zb ? za : zb;
+        if (m > 0) {
+            WValue g = bigint_gcd_mag(al + m, an - m, bl + m, bn - m);
+            uint64_t sg;
+            int32_t lg;
+            const uint64_t *gl = integer_limbs(g, &sg, &lg);  /* gcd > 0 */
+            WBigint *r = bigint_alloc_raw(lg + m);
+            memset(r->limbs, 0, (size_t)m * sizeof(uint64_t));
+            memcpy(r->limbs + m, gl, (size_t)lg * sizeof(uint64_t));
+            r->size = lg + m;
+            if (w_is_bigint(g)) bigint_release_if_live(w_as_bigint(g));
+            return bigint_normalize(r);
+        }
+    }
+#endif
+    return bigint_gcd_mag(al, an, bl, bn);
 }
 
 #ifndef BN_GCD_BOXED_SMALL_FAST
@@ -48595,8 +48716,15 @@ static inline int w_powm_bits(const uint64_t *l, int32_t len, int lo, int cnt) {
     return v;
 }
 
-/* Sliding-window width selected from the exponent bit count. */
+/* Sliding-window width selected from the exponent bit count.  The
+ * thresholds are the exact 2^(w-1) + eb/(w+1) breakevens (673, 1793 and
+ * 4609 are where w and w+1 tie); W_POWM_WINDOW_FORCE pins a width for
+ * A/B measurement builds. */
 static int w_powm_window_bits(int eb) {
+#ifdef W_POWM_WINDOW_FORCE
+    (void)eb;
+    return W_POWM_WINDOW_FORCE;
+#endif
     if (eb < 7) return 1;
     if (eb < 25) return 2;
     if (eb < 81) return 3;

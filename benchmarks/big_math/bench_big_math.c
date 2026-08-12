@@ -149,6 +149,20 @@ static WValue bench_bigint(int32_t n, uint64_t seed) {
     return bigint_box(b);
 }
 
+/* Trailing-zero fixture: TOTAL n limbs with the low z limbs zero (a
+ * multiple of B^z), the stripped low limb odd, top bit set. z == 0
+ * degenerates to bench_bigint's shape (the control cell). */
+static WValue bench_bigint_tz(int32_t n, int32_t z, uint64_t seed) {
+    WBigint *b = bigint_alloc(n);
+    uint64_t state = seed;
+    for (int32_t i = 0; i < n; i++)
+        b->limbs[i] = i < z ? 0 : bench_rng(&state);
+    b->limbs[z] |= 1ULL;
+    b->limbs[n - 1] |= 1ULL << 63;
+    b->size = n;
+    return bigint_box(b);
+}
+
 static WValue bench_clone_integer(WValue value) {
     uint64_t scratch;
     int32_t len;
@@ -7223,6 +7237,136 @@ int main(int argc, char **argv) {
         printf("square profile sink=%llu\n", (unsigned long long)bench_sink);
         return 0;
     }
+#ifdef HAVE_GMP
+    if (argc == 6 && strcmp(argv[1], "--bench-tz") == 0) {
+        /* Trailing-zero-limb fixture lanes for the BN_TZ_STRIP pre-
+         * transforms: --bench-tz <op> <limbs> <zlimbs> <iters> with op in
+         * {mul, div, mod, gcd}.  Operands are TOTAL <limbs> wide with
+         * <zlimbs> trailing zero limbs — mul/gcd zero both sides, div/mod
+         * zero the divisor (dividend 2*<limbs> wide, random).  Results are
+         * checked against GMP on identical operands before timing.  GMP
+         * does not strip trailing zeros either, so the printed gap is the
+         * honest cross-library comparison; A/B the BN_TZ_STRIP=0 build for
+         * the isolated transform win. */
+        const char *opname = argv[2];
+        int32_t limbs = (int32_t)atoi(argv[3]);
+        int32_t z = (int32_t)atoi(argv[4]);
+        int iters = atoi(argv[5]);
+        if (limbs < 2 || z < 0 || z >= limbs || iters <= 0)
+            die("bench-tz expects limbs >= 2, 0 <= z < limbs, iters > 0");
+        int opk = strcmp(opname, "mul") == 0 ? 0
+                : strcmp(opname, "div") == 0 ? 1
+                : strcmp(opname, "mod") == 0 ? 2
+                : strcmp(opname, "gcd") == 0 ? 3 : -1;
+        if (opk < 0) die("bench-tz op must be mul, div, mod, or gcd");
+        WValue a, b;
+        if (opk == 1 || opk == 2) {
+            a = bench_bigint(2 * limbs, 0x9e3779b97f4a7c15ULL);
+            b = bench_bigint_tz(limbs, z, 0xd1b54a32d192ed03ULL);
+        } else {
+            a = bench_bigint_tz(limbs, z, 0x9e3779b97f4a7c15ULL);
+            b = bench_bigint_tz(limbs, z, 0xd1b54a32d192ed03ULL);
+        }
+        mpz_t za, zb, zg, zr;
+        mpz_inits(za, zb, zg, zr, NULL);
+        gmp_import_value(za, a);
+        gmp_import_value(zb, b);
+        {   /* Oracle check before timing. */
+            WValue got = opk == 0 ? bigint_mul_any(a, b)
+                       : opk == 1 ? bigint_div_any(a, b)
+                       : opk == 2 ? bigint_mod_any(a, b)
+                       :            bigint_gcd_any(a, b);
+            if (opk == 0) mpz_mul(zg, za, zb);
+            else if (opk == 1) mpz_tdiv_q(zg, za, zb);
+            else if (opk == 2) mpz_tdiv_r(zg, za, zb);
+            else mpz_gcd(zg, za, zb);
+            if (!value_matches_mpz(got, zg))
+                dief("bench-tz %s mismatch vs GMP (limbs=%d z=%d)",
+                     opname, limbs, z);
+            if (got != a && got != b) bench_free_value(got);
+        }
+        WValue previous = W_NIL;
+        double t0 = bench_now();
+        for (int i = 0; i < iters; i++) {
+            WValue result = opk == 0 ? bigint_mul_any(a, b)
+                          : opk == 1 ? bigint_div_any(a, b)
+                          : opk == 2 ? bigint_mod_any(a, b)
+                          :            bigint_gcd_any(a, b);
+            bench_sink ^= bench_observe_low(result) ^ (uint64_t)i;
+            if (w_is_bigint(previous))
+                bigint_release_if_live(w_as_bigint(previous));
+            previous = result;
+        }
+        double tw = (bench_now() - t0) * 1e9 / iters;
+        if (w_is_bigint(previous))
+            bigint_release_if_live(w_as_bigint(previous));
+        double g0 = bench_now();
+        for (int i = 0; i < iters; i++) {
+            if (opk == 0) mpz_mul(zr, za, zb);
+            else if (opk == 1) mpz_tdiv_q(zr, za, zb);
+            else if (opk == 2) mpz_tdiv_r(zr, za, zb);
+            else mpz_gcd(zr, za, zb);
+            bench_sink ^= mpz_getlimbn(zr, 0) ^ (uint64_t)i;
+        }
+        double gm = (bench_now() - g0) * 1e9 / iters;
+        printf("tz-%s %d limbs z=%d (%d iters): tungsten %.1f ns, "
+               "gmp %.1f ns, gap %.3fx\n",
+               opname, limbs, z, iters, tw, gm, ratio(tw, gm));
+        mpz_clears(za, zb, zg, zr, NULL);
+        bench_free_value(a);
+        bench_free_value(b);
+        return 0;
+    }
+#endif
+#ifdef HAVE_GMP
+    if (argc == 3 && strcmp(argv[1], "--fuzz-tz") == 0) {
+        /* Randomized trailing-zero-limb fuzz for BN_TZ_STRIP: random
+         * widths, random per-side trailing-zero counts (including 0), all
+         * tag-sign overlay combos, mul/div/mod/gcd each checked against
+         * GMP on identical operands. */
+        int cases = atoi(argv[2]);
+        if (cases <= 0) die("fuzz-tz expects a positive case count");
+        uint64_t state = 0x0ddc0ffeebadf00dULL;
+        mpz_t za, zb, zg;
+        mpz_inits(za, zb, zg, NULL);
+        for (int c = 0; c < cases; c++) {
+            int32_t na = 2 + (int32_t)(bench_rng(&state) % 96);
+            int32_t nb = 2 + (int32_t)(bench_rng(&state) % 96);
+            int32_t zla = (int32_t)(bench_rng(&state) % (uint64_t)na);
+            int32_t zlb = (int32_t)(bench_rng(&state) % (uint64_t)nb);
+            WValue a = bench_bigint_tz(na, zla, bench_rng(&state) | 1);
+            WValue b = bench_bigint_tz(nb, zlb, bench_rng(&state) | 1);
+            uint64_t signs = bench_rng(&state);
+            if (signs & 1) a ^= W_BIGINT_SIGN_BIT;
+            if (signs & 2) b ^= W_BIGINT_SIGN_BIT;
+            gmp_import_value(za, a);
+            gmp_import_value(zb, b);
+            for (int op = 0; op < 4; op++) {
+                WValue got = op == 0 ? bigint_mul_any(a, b)
+                           : op == 1 ? bigint_div_any(a, b)
+                           : op == 2 ? bigint_mod_any(a, b)
+                           :           bigint_gcd_any(a, b);
+                if (op == 0) mpz_mul(zg, za, zb);
+                else if (op == 1) mpz_tdiv_q(zg, za, zb);
+                else if (op == 2) mpz_tdiv_r(zg, za, zb);
+                else mpz_gcd(zg, za, zb);
+                if (!value_matches_mpz(got, zg))
+                    dief("fuzz-tz mismatch case=%d op=%d na=%d nb=%d "
+                         "za=%d zb=%d signs=%d",
+                         c, op, na, nb, zla, zlb, (int)(signs & 3));
+                /* Alias-safe: operand-identity returns (mod with |a|<|b|,
+                 * etc.) are always marked shared, so the alias-counting
+                 * release is correct for fresh AND aliased results. */
+                bench_free_value(got);
+            }
+            bench_free_value(a);
+            bench_free_value(b);
+        }
+        mpz_clears(za, zb, zg, NULL);
+        printf("fuzz-tz: %d cases x 4 ops OK\n", cases);
+        return 0;
+    }
+#endif
     if (argc == 4 && strcmp(argv[1], "--bench-mul-iters") == 0) {
         int32_t limbs = (int32_t)atoi(argv[2]);
         int iters = atoi(argv[3]);

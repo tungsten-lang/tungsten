@@ -226,16 +226,16 @@ projects stay unchecked until their stated acceptance criteria are met.
     insertion order cannot hide or invent disagreements.
   - [x] Broaden the shared grammar through grouped expressions, arrays,
     indexing/calls, `while`/compound-assignment loops, function/method
-    definitions, and simple classes. Promote each observed minimized
+    definitions, class declarations, and inherited constructors/methods.
+    Promote each observed minimized
     disagreement into a committed fixture; the campaign has caught
     same-indent and multi-level token-column bugs, cyclic Ruby `fn`
     fingerprints, a non-advancing C parse at top-level `DEDENT`, underscored
     PascalCase splitting, C `class_ref` drift, and missing implicit C-VM
     constructors.
   - [ ] Extend the Ruby normalization adapter and generator through
-    class inheritance/reopening, traits, blocks, exception handling, and the
-    remaining literal families before calling the differential campaign
-    complete.
+    blocks, exception handling, and the remaining literal families before
+    calling the differential campaign complete.
 - [ ] Add a GPU-kernel type/subset pre-pass at check time. Batch unsupported
   statements, bad address spaces, shape errors, and dialect-only intrinsics
   before invoking `metal` or `nvcc`.

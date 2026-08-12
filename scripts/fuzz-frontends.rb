@@ -118,6 +118,23 @@ def ruby_params_wire(definition)
   end
 end
 
+def ruby_definition_body_wire(definition)
+  nodes = definition.body.list.dup
+  (definition.args || []).each do |arg|
+    next unless arg.ivar
+
+    assignment = nodes.first
+    break unless assignment.is_a?(Tungsten::AST::Assign) &&
+                 assignment.name.is_a?(Tungsten::AST::InstanceVar) &&
+                 assignment.name.name == "@#{arg.name}" &&
+                 assignment.value.is_a?(Tungsten::AST::Var) &&
+                 assignment.value.name == arg.name
+
+    nodes.shift
+  end
+  nodes.map { |node| ruby_ast_wire(node) }
+end
+
 def ruby_class_ref_name?(name)
   name.match?(/\A[A-Z]/) && name.match?(/[a-z]/)
 end
@@ -131,7 +148,13 @@ def ruby_ast_wire(node)
   when Tungsten::AST::Assign
     {node: :assign, target: ruby_ast_wire(node.name), value: ruby_ast_wire(node.value), type_hint: node.type_hint}
   when Tungsten::AST::Var
-    {node: ruby_class_ref_name?(node.name) ? :class_ref : :var, name: node.name}
+    if node.name == "self"
+      {node: :self_ref}
+    else
+      {node: ruby_class_ref_name?(node.name) ? :class_ref : :var, name: node.name}
+    end
+  when Tungsten::AST::InstanceVar
+    {node: :ivar, name: node.name}
   when Tungsten::AST::Int
     {node: :int, value: node.value, format: nil, raw: node.value.to_s}
   when Tungsten::AST::BinaryOp
@@ -145,7 +168,7 @@ def ruby_ast_wire(node)
       node: :fn_def,
       name: node.name,
       params: ruby_params_wire(node),
-      body: ruby_body_wire(node.body),
+      body: ruby_definition_body_wire(node),
       type_hints: nil
     }
   when Tungsten::AST::Def
@@ -153,7 +176,7 @@ def ruby_ast_wire(node)
       node: :method_def,
       name: node.name,
       params: ruby_params_wire(node),
-      body: ruby_body_wire(node.body),
+      body: ruby_definition_body_wire(node),
       type_hints: nil,
       is_class_method: false
     }
@@ -165,6 +188,10 @@ def ruby_ast_wire(node)
       body: ruby_body_wire(node.body),
       class_role: node.class_role
     }
+  when Tungsten::AST::TraitDef
+    {node: :trait_def, name: node.name, body: ruby_body_wire(node.body)}
+  when Tungsten::AST::Is
+    {node: :trait_include, name: node.trait_name}
   when Tungsten::AST::Call
     {
       node: :call,
@@ -255,7 +282,7 @@ def valid_source(rng, index)
   name = "value_#{index}"
   other = "other_#{index}"
 
-  case index % 5
+  case index % 8
   when 0
     <<~W
       #{name} = #{left}
@@ -292,13 +319,52 @@ def valid_source(rng, index)
         (x * #{factor}) + y
       << #{method}(#{left}, #{right})
     W
-  else
+  when 4
     class_name = "Box_#{index}"
     <<~W
       + #{class_name}
         -> value
           #{left}
       << #{class_name}.new().value()
+    W
+  when 5
+    parent_name = "Parent_#{index}"
+    child_name = "Child_#{index}"
+    <<~W
+      + #{parent_name}
+        -> new(@value)
+          self
+        -> value
+          @value
+      + #{child_name} < #{parent_name}
+      << #{child_name}.new(#{left}).value()
+    W
+  when 6
+    class_name = "Box_#{index}"
+    <<~W
+      + #{class_name}
+        -> value
+          #{left}
+      + #{class_name}
+        -> value
+          #{right}
+      << #{class_name}.new().value()
+    W
+  else
+    trait_name = "Trait_#{index}"
+    class_name = "Host_#{index}"
+    <<~W
+      trait #{trait_name}
+        -> value
+          #{left}
+        -> overridden
+          1
+      + #{class_name}
+        is #{trait_name}
+        -> overridden
+          #{right}
+      << #{class_name}.new().value()
+      << #{class_name}.new().overridden()
     W
   end
 end

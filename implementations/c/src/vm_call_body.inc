@@ -1559,19 +1559,12 @@
           }
         }
         if (has_receiver && tc_kind(receiver) == TC_VAL_OBJECT && tc_as_object(receiver)) {
-          size_t full_len = tc_as_object(receiver)->class_name_len + 1 + name_len;
-          char *full_name = (char *)malloc(full_len + 1);
-          if (!full_name) {
-            tc_error_set(err, "method name allocation failed");
-            FREE_ARGS();
-            goto cleanup_fail;
-          }
-          memcpy(full_name, tc_as_object(receiver)->class_name, tc_as_object(receiver)->class_name_len);
-          full_name[tc_as_object(receiver)->class_name_len] = '#';
-          memcpy(full_name + tc_as_object(receiver)->class_name_len + 1, name, name_len);
-          full_name[full_len] = '\0';
-          TcFunction *fn = tc_chunk_find_function(chunk, full_name, full_len);
-          free(full_name);
+          TcFunction *fn = tc_chunk_find_method(
+              chunk,
+              tc_as_object(receiver)->class_name,
+              tc_as_object(receiver)->class_name_len,
+              name,
+              name_len);
           // Same-name typed overloads: pick the most specific candidate
           // whose declared param types match the argument values.
           if (fn && fn->overloaded) fn = tc_select_overload(chunk, fn, args, argc);

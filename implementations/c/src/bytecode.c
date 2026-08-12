@@ -295,8 +295,8 @@ static int overload_beats(const TcChunk *chunk, const TcFunction *a, const TcFun
 TcFunction *tc_select_overload(const TcChunk *chunk, const TcFunction *resolved,
                                const TcValue *args, uint32_t argc) {
   TcFunction *best = NULL;
-  for (size_t i = 0; i < chunk->function_count; i++) {
-    TcFunction *f = &((TcChunk *)chunk)->functions[i];
+  for (size_t i = chunk->function_count; i > 0; i--) {
+    TcFunction *f = &((TcChunk *)chunk)->functions[i - 1];
     if (f->name_len != resolved->name_len ||
         memcmp(f->name, resolved->name, resolved->name_len) != 0) {
       continue;
@@ -308,12 +308,15 @@ TcFunction *tc_select_overload(const TcChunk *chunk, const TcFunction *resolved,
                                     strlen(f->param_type_names[a]));
     }
     if (!matches) continue;
-    // Most-specific wins; first-declared wins ties (strict replacement).
+    // Most-specific wins; last-declared wins ties (strict replacement),
+    // matching class reopening/redefinition semantics.
     if (!best || (overload_beats(chunk, f, best) && !overload_beats(chunk, best, f))) best = f;
   }
   if (best) return best;
-  // No typed candidate: exactly today's behavior — first name match.
-  return tc_chunk_find_function(chunk, resolved->name, resolved->name_len);
+  // The caller already resolved the correct class-chain entry. Preserve it
+  // for untyped overload groups instead of falling back to a first-declared
+  // global name match.
+  return (TcFunction *)resolved;
 }
 
 int tc_chunk_alloc_case_table(TcChunk *chunk, uint32_t count, TcError *err) {
@@ -959,19 +962,28 @@ TcFunction *tc_chunk_find_function(const TcChunk *chunk, const char *name, size_
   return NULL;
 }
 
-// Find a method named "Class#method" without building the temp string. Used
-// on the implicit-self CALL hot path.
+// Find a method named "Class#method" without building a temporary string,
+// walking the declared superclass chain when the class does not own it.
+// Used by implicit-self, explicit-receiver, and constructor dispatch.
 TcFunction *tc_chunk_find_method(const TcChunk *chunk,
                                  const char *class_name, size_t class_len,
                                  const char *method_name, size_t method_len) {
-  size_t full_len = class_len + 1 + method_len;
-  for (size_t i = 0; i < chunk->function_count; i++) {
-    TcFunction *f = &((TcChunk *)chunk)->functions[i];
-    if (f->name_len != full_len) continue;
-    if (f->name[class_len] != '#') continue;
-    if (memcmp(f->name, class_name, class_len) != 0) continue;
-    if (memcmp(f->name + class_len + 1, method_name, method_len) != 0) continue;
-    return f;
+  const char *current_name = class_name;
+  size_t current_len = class_len;
+  for (int guard = 0; guard < 64; guard++) {
+    size_t full_len = current_len + 1 + method_len;
+    for (size_t i = chunk->function_count; i > 0; i--) {
+      TcFunction *f = &((TcChunk *)chunk)->functions[i - 1];
+      if (f->name_len != full_len) continue;
+      if (f->name[current_len] != '#') continue;
+      if (memcmp(f->name, current_name, current_len) != 0) continue;
+      if (memcmp(f->name + current_len + 1, method_name, method_len) != 0) continue;
+      return f;
+    }
+    const TcClassSuper *entry = find_class_super(chunk, current_name, current_len);
+    if (!entry || !entry->super) return NULL;
+    current_name = entry->super;
+    current_len = entry->super_len;
   }
   return NULL;
 }

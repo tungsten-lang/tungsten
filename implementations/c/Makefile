@@ -95,6 +95,12 @@ test: $(BIN)
 		diff -u tests/string_buffer_size.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/implicit_constructor.w | \
 		diff -u tests/implicit_constructor.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/inherited_dispatch.w | \
+		diff -u tests/inherited_dispatch.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/class_reopening.w | \
+		diff -u tests/class_reopening.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/trait_dispatch.w | \
+		diff -u tests/trait_dispatch.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/bit_count_intrinsics.w | \
 		diff -u tests/bit_count_intrinsics.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/compound_assignment_ops.w | \

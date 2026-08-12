@@ -1865,7 +1865,54 @@ static int compile_function_def(TcAstValue node, const char *prefix, size_t pref
          tc_emit_op(chunk, TC_OP_RETURN, err);
 }
 
-static int compile_class_definitions(TcAstValue node, TcChunk *chunk, TcError *err) {
+static int compile_trait_methods_for_class(TcAstValue expressions, TcAstValue include,
+                                           const char *prefix, size_t prefix_len,
+                                           TcChunk *chunk, int depth, TcError *err) {
+  if (depth >= 64 || expressions.kind != TC_AST_ARRAY) {
+    tc_error_set(err, "trait include nesting is too deep");
+    return 0;
+  }
+  TcAstValue *include_name = ast_get(include, "name");
+  if (!include_name || include_name->kind != TC_AST_STRING) return 1;
+
+  for (size_t i = 0; i < expressions.as.array->count; i++) {
+    TcAstValue trait = expressions.as.array->items[i];
+    if (!ast_node_is(trait, "trait_def")) continue;
+    TcAstValue *trait_name = ast_get(trait, "name");
+    TcAstValue *trait_body = ast_get(trait, "body");
+    if (!trait_name || trait_name->kind != TC_AST_STRING ||
+        trait_name->as.string.len != include_name->as.string.len ||
+        memcmp(trait_name->as.string.bytes, include_name->as.string.bytes,
+               include_name->as.string.len) != 0) {
+      continue;
+    }
+    if (!trait_body || trait_body->kind != TC_AST_ARRAY) return 1;
+
+    // Nested trait defaults arrive first. Methods declared directly by the
+    // including trait then replace same-name defaults, and the class's own
+    // methods are compiled after all includes below.
+    for (size_t j = 0; j < trait_body->as.array->count; j++) {
+      TcAstValue expr = trait_body->as.array->items[j];
+      if (ast_node_is(expr, "trait_include") &&
+          !compile_trait_methods_for_class(expressions, expr, prefix, prefix_len,
+                                           chunk, depth + 1, err)) {
+        return 0;
+      }
+    }
+    for (size_t j = 0; j < trait_body->as.array->count; j++) {
+      TcAstValue expr = trait_body->as.array->items[j];
+      if ((ast_node_is(expr, "method_def") || ast_node_is(expr, "fn_def")) &&
+          !compile_function_def(expr, prefix, prefix_len, chunk, err)) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+  return 1;
+}
+
+static int compile_class_definitions(TcAstValue node, TcAstValue expressions,
+                                     TcChunk *chunk, TcError *err) {
   TcAstValue *name = ast_get(node, "name");
   TcAstValue *body = ast_get(node, "body");
   if (!name || name->kind != TC_AST_STRING || !body || body->kind != TC_AST_ARRAY) return 1;
@@ -1907,6 +1954,16 @@ static int compile_class_definitions(TcAstValue node, TcChunk *chunk, TcError *e
   memcpy(prefix, name->as.string.bytes, name->as.string.len);
   prefix[name->as.string.len] = '#';
   prefix[prefix_len] = '\0';
+
+  for (size_t i = 0; i < body->as.array->count; i++) {
+    TcAstValue expr = body->as.array->items[i];
+    if (ast_node_is(expr, "trait_include") &&
+        !compile_trait_methods_for_class(expressions, expr, prefix, prefix_len,
+                                         chunk, 0, err)) {
+      free(prefix);
+      return 0;
+    }
+  }
 
   for (size_t i = 0; i < body->as.array->count; i++) {
     TcAstValue expr = body->as.array->items[i];
@@ -1972,7 +2029,8 @@ int tc_compile_ast_definitions(TcAstValue ast, TcChunk *chunk, TcError *err) {
         !compile_function_def(expr, NULL, 0, chunk, err)) {
       return 0;
     }
-    if (ast_node_is(expr, "class_def") && !compile_class_definitions(expr, chunk, err)) return 0;
+    if (ast_node_is(expr, "class_def") &&
+        !compile_class_definitions(expr, *exprs, chunk, err)) return 0;
   }
 
   return 1;

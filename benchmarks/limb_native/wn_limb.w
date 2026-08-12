@@ -15,8 +15,8 @@
 #     operand bound with `## u64` (an untyped-literal op can demote and turn
 #     lshr into ashr).
 #   * addcarry/subborrow/mulhi intrinsics for the carry chains; loops that
-#     contain them get `llvm.loop.unroll.count 8` latch metadata from the
-#     compiler automatically (lowering/analysis.w loop_has_carry_intrinsic?).
+#     contain them get `llvm.loop.unroll.count 8` latch metadata by default.
+#     Set TUNGSTEN_CARRY_UNROLL=0..64 to disable or tune the count.
 #   * impure helpers are `->` methods, NEVER `fn`: arity<=2 `fn` defs are
 #     auto-memoized keyed on WValue identity, which returns stale results for
 #     array-mutating helpers (rng!) and skips timed work.

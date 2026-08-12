@@ -1408,7 +1408,7 @@ use naming
 # Per-loop latch metadata (lowering stamps the latch :br):
 #   novec:true   — loop-vectorizer opt-out for masked-index while loops
 #                  (lowering/analysis.w loop_masked_array_index?)
-#   unroll8:true — `llvm.loop.unroll.count 8` for carry-intrinsic loops
+#   unroll_count — `llvm.loop.unroll.count N` for carry-intrinsic loops
 #                  (lowering/analysis.w loop_has_carry_intrinsic?); the
 #                  carry flag spills across the back-edge (llvm.org
 #                  #74493) and LLVM won't unroll these on its own —
@@ -1424,17 +1424,17 @@ use naming
 # from a function shadows instead of writing through — see detect_target_memo).
 novec_md_state = {kinds: []}
 
--> latch_loop_md_ref(kind)
+-> latch_loop_md_ref(kind, unroll_count = 0)
   ks = novec_md_state[:kinds]
   k = ks.size()
-  ks.push(kind)
-  (31423 + k).to_s()
+  ks.push([kind, unroll_count])
+  (31423 + k * 2).to_s()
 
-# Shared string-tuple nodes (!31422 novec, !31413 unroll8 — 31413 sits just
-# below the fixed TBAA block, clear of the upward-running per-loop IDs) + a
-# distinct per-loop node per marked latch. Rendered AFTER all functions
-# (emit_artifact's final concat), so the list is final. Emits nothing when no
-# loop was marked.
+# One shared novec tuple plus a distinct loop node and, when applicable, an
+# unroll-count tuple per marked latch. Per-loop tuples allow different tuning
+# counts in one emitter process without sharing loop identity. Rendered AFTER
+# all functions (emit_artifact's final concat), so the list is final. Emits
+# nothing when no loop was marked.
 -> novec_loop_md_defs()
   ks = novec_md_state[:kinds]
   n = ks.size()
@@ -1442,25 +1442,27 @@ novec_md_state = {kinds: []}
     return ""
   o = StringBuffer(64)
   any_novec = false
-  any_unroll = false
   i = 0
   while i < n
-    if ks[i] == :novec || ks[i] == :both
+    kind = ks[i][0]
+    if kind == :novec || kind == :both
       any_novec = true
-    if ks[i] == :unroll || ks[i] == :both
-      any_unroll = true
     i += 1
   if any_novec
     o << "!31422 = !{!\"llvm.loop.vectorize.enable\", i1 false}\n"
-  if any_unroll
-    o << "!31413 = !{!\"llvm.loop.unroll.count\", i32 8}\n"
   i = 0
   while i < n
-    id = (31423 + i).to_s()
-    if ks[i] == :both
-      o << "!" + id + " = distinct !{!" + id + ", !31422, !31413}\n"
-    elsif ks[i] == :unroll
-      o << "!" + id + " = distinct !{!" + id + ", !31413}\n"
+    entry = ks[i]
+    kind = entry[0]
+    unroll_count = entry[1]
+    id = (31423 + i * 2).to_s()
+    unroll_id = (31424 + i * 2).to_s()
+    if kind == :both
+      o << "!" + unroll_id + " = !{!\"llvm.loop.unroll.count\", i32 " + unroll_count.to_s() + "}\n"
+      o << "!" + id + " = distinct !{!" + id + ", !31422, !" + unroll_id + "}\n"
+    elsif kind == :unroll
+      o << "!" + unroll_id + " = !{!\"llvm.loop.unroll.count\", i32 " + unroll_count.to_s() + "}\n"
+      o << "!" + id + " = distinct !{!" + id + ", !" + unroll_id + "}\n"
     else
       o << "!" + id + " = distinct !{!" + id + ", !31422}\n"
     i += 1
@@ -4998,12 +5000,13 @@ ewscope_md_state = {ids: {}}
 
   # Control flow
   when :br
-    if inst[:novec] == true && inst[:unroll8] == true
-      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:both)
+    unroll_count = inst[:unroll_count]
+    if inst[:novec] == true && unroll_count != nil && unroll_count > 0
+      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:both, unroll_count)
     elsif inst[:novec] == true
       "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:novec)
-    elsif inst[:unroll8] == true
-      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:unroll)
+    elsif unroll_count != nil && unroll_count > 0
+      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:unroll, unroll_count)
     else
       "br label %" + inst[:label]
   when :cond_br

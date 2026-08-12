@@ -76,6 +76,15 @@ A class says `is TraitName` but that trait was not found at lower time.
 **Fix:** Define the trait (`trait Name`), `use` the file that defines it, or
 register a stdlib trait via `core/tungsten.w` autoload.
 
+## E_LOWER_CARRY_UNROLL
+
+`TUNGSTEN_CARRY_UNROLL` was set to an invalid LLVM loop-unroll count. The
+compiler accepts integers from 0 through 64; 0 disables the carry-chain hint,
+and an unset variable uses the measured default of 8.
+
+**Fix:** Unset the variable, or set it to a decimal integer in the accepted
+range. Benchmark with `--release`; do not compare unoptimized builds.
+
 ## E_TYPE_MISMATCH
 
 A value’s type is not compatible with the expected type at this site

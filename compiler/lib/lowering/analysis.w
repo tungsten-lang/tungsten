@@ -1715,15 +1715,30 @@
 # carry-chain kernel (bignum add_n / sub_n / addmul_1 shapes). LLVM will
 # not unroll these on its own (runtime trip count + flag-carried
 # dependence), and the carry flag spills across the back-edge (llvm.org
-# #74493), so lower_while stamps `llvm.loop.unroll.count 8` on exactly
-# these latches (the emitter's :br unroll8 flag) to amortize the spill
-# and loop overhead. Measured on Apple M5: +25% on the add_n shape, +8%
+# #74493), so lower_while stamps `llvm.loop.unroll.count N` on exactly
+# these latches (the emitter's :br unroll_count field) to amortize the spill
+# and loop overhead. N defaults to the measured value 8 and can be tuned with
+# TUNGSTEN_CARRY_UNROLL. Measured on Apple M5: +25% on the add_n shape, +8%
 # on addmul_1, neutral on sub_n / mul_1. Vectorization is deliberately
 # left ENABLED — a vectorize-disable on these loops measured
 # neutral-to-harmful (and badly hurts neighboring vectorizable shifts).
 # Nested while loops run their own lower_while pass and stamp their own
 # latch, so this walker does not descend into them (same convention as
 # loop_masked_array_index?).
+-> carry_chain_unroll_count(ctx, node)
+  raw = env("TUNGSTEN_CARRY_UNROLL")
+  if raw == nil || raw == ""
+    return 8
+  value_text = raw.strip()
+  value = value_text.to_i()
+  if value_text != value.to_s() || value < 0 || value > 64
+    raise compile_error_for_node(
+      :E_LOWER_CARRY_UNROLL,
+      "TUNGSTEN_CARRY_UNROLL must be an integer from 0 through 64 (0 disables the hint), got '" + raw + "'",
+      ctx[:source_path],
+      node)
+  value
+
 -> loop_has_carry_intrinsic?(nodes)
   if nodes == nil
     return false

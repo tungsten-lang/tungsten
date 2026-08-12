@@ -24,6 +24,9 @@ required_uses = [
   'stage1_input_paths.push("implementations/ruby")',
   'stage1_input_paths.push("bin/commands/build.w")',
   'stage2_input_paths.push("bin/commands/build.w")',
+  # Carry-loop tuning changes generated LLVM and must invalidate both direct
+  # binary caches and compiler-stage caches.
+  'env_or_empty("TUNGSTEN_CARRY_UNROLL")',
 ]
 required_uses.each do |source|
   raise "build.w does not use compiler source contract: #{source}" unless build_source.include?(source)

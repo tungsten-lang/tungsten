@@ -1,5 +1,5 @@
 # Embedded-kernel benchmark: the multi-limb add carry chain coded three ways.
-#   native  — portable .w loop (addcarry intrinsic; auto-unroll8 latch hint)
+#   native  — portable .w loop (addcarry intrinsic; tunable latch-unroll hint)
 #   ll      — embedded LLVM IR, i256 blocks (legalization emits adds/adcs runs)
 #   asm     — embedded AArch64, hardware ADCS chain (runtime.c block schedule)
 # Compile-only: bin/tungsten -o /tmp/bench_embed benchmarks/limb_native/bench_embed.w && /tmp/bench_embed

@@ -1504,7 +1504,7 @@ if !bit_only
     s1_vals.push("-O0")
     s1_keys.push("TUNGSTEN_LEX64_TABLE")
     s1_vals.push(lex_table_path)
-    c_stage1_identity = Digest.sha256(c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + c_vm_key_for_build + "\n" + file_sha(c_interp_for_build) + "\n" + file_sha(lex_table_path) + "\n" + compiler_dir_name + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + AMBIENT_TOOLCHAIN + "\n" + env_kv_join(s1_keys, s1_vals))
+    c_stage1_identity = Digest.sha256(c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + c_vm_key_for_build + "\n" + file_sha(c_interp_for_build) + "\n" + file_sha(lex_table_path) + "\n" + compiler_dir_name + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + "\n" + AMBIENT_TOOLCHAIN + "\n" + env_kv_join(s1_keys, s1_vals))
     c_stage1_cached = BUILD_CACHE_DIR + "/c-vm-stage1-" + c_stage1_identity
     c_stage1_cached_ll = c_stage1_cached + ".ll"
     c_stage1_cached_sidemap = c_stage1_cached + ".sidemap"
@@ -1741,7 +1741,7 @@ if !bit_only
     stage1_input_paths.push("bin/tungsten")
     stage1_input_paths.push("bin/commands/build.w")
     stage1_input_sha = tree_sha(stage1_input_paths)
-    stage1_sha = Digest.sha256(stage1_input_sha + ":" + runtime_compile_key + ":" + file_sha(legacy_lex_table)).slice(0, 16)
+    stage1_sha = Digest.sha256(stage1_input_sha + ":" + runtime_compile_key + ":" + file_sha(legacy_lex_table) + ":" + env_or_empty("TUNGSTEN_CARRY_UNROLL")).slice(0, 16)
     stage1_cached = BUILD_CACHE_DIR + "/stage1-" + stage1_sha
 
     if !stage2_only

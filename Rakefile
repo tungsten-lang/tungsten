@@ -195,6 +195,7 @@ namespace :test do
   task :tungsten do
     run_command "make", "specs", env: { "RUN_CORE_SPECS" => "1" }
     run_command "bash", File.join(ROOT, "scripts/test-bit-count-intrinsics.sh")
+    run_command "bash", File.join(ROOT, "scripts/test-carry-unroll.sh")
     run_command "bash", File.join(ROOT, "scripts/test-native-arm-crypto-features.sh")
     run_command "bash", File.join(ROOT, "scripts/test-raw-static-machine-return-wire.sh")
     run_command "bash", File.join(ROOT, "scripts/test-small-array-wide-element-boxing-wire.sh")
@@ -247,7 +248,7 @@ task :notes do
       file.each do |line|
         if line.include?('@todo') || line.include?('TODO')
           notes[filename] << [file.lineno.to_s, line.strip]
-          max = filename.length if filename.length > max
+          max = filename.size if filename.size > max
         end
       end
     end

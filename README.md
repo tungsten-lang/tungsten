@@ -262,6 +262,7 @@ followed by `/bin/clang`; Tungsten does not assume a Homebrew install root.
 | `TUNGSTEN_CPU`        | `native`                      | CPU name used when `--cpu` is absent; normally loaded from `[build] cpu` in `~/.tungsten/config`. |
 | `TUNGSTEN_CC`         | `clang`                       | C/LLVM driver; normally loaded from `[build] cc` when configured. |
 | `TUNGSTEN_MARCH_ARGS` | derived from CPU              | Legacy low-level override for clang CPU flags. Prefer `--cpu` or `[build] cpu`. |
+| `TUNGSTEN_CARRY_UNROLL` | 8                           | LLVM unroll count for `addcarry`/`subborrow` loops. Accepts 0 through 64; 0 disables the hint. |
 | `TUNGSTEN_BACKTRACE`  | off                           | Set to `1` to include full C backtrace in error dumps (defaults to only Tungsten-level frames).             |
 
 ## Contributing

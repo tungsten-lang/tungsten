@@ -1554,6 +1554,9 @@ WValue bigint_add_two_limb_magnitudes(
 #ifndef BN_ADDSUB_WORD_A64_FIXED
 #define BN_ADDSUB_WORD_A64_FIXED 1
 #endif
+#ifndef BN_ADD_WORD_A64_CARRY_DEATH8
+#define BN_ADD_WORD_A64_CARRY_DEATH8 1
+#endif
 
 #if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
 #define BN_WORD_LOAD2                                                     \
@@ -1634,7 +1637,65 @@ static inline uint64_t name(                                             \
     }                                                                    \
 }
 
+#if BN_ADD_WORD_A64_CARRY_DEATH8
+/* At eight limbs, stop the flag chain after limb 1 on the common path.
+ * A carry can survive that step only when limb 1 is UINT64_MAX; the rare
+ * arm retains the exact full chain.  Every source limb is loaded before the
+ * first store, so this remains valid when r == a.  Matched M5 measurements
+ * rejected the branch at widths 4..7 and retained it only at width 8. */
+#define BN_ADD_CARRY_DEATH_CASE(n, loads, fast_stores, ripple)           \
+    case n:                                                             \
+        __asm__ volatile(                                               \
+            loads                                                       \
+            "adds x4, x4, %[word]\n\t"                                  \
+            "adcs x5, x5, xzr\n\t"                                     \
+            "b.cs 1f\n\t"                                              \
+            fast_stores                                                 \
+            "mov %[flag], xzr\n\t"                                     \
+            "b 2f\n\t"                                                \
+            "1:\n\t"                                                  \
+            ripple                                                      \
+            "2:\n\t"                                                  \
+            : [flag] "=r" (flag)                                       \
+            : [ap] "r" (a), [rp] "r" (r), [word] "r" (word)           \
+            : "cc", "memory", "x4", "x5", "x6", "x7", "x8",       \
+              "x9", "x10", "x11");                                   \
+        return flag
+
+static inline uint64_t bn_add_word_a64_fixed(
+    uint64_t *r, const uint64_t *a, int32_t n, uint64_t word) {
+    uint64_t flag;
+    switch (n) {
+        BN_WORD_FIXED_CASE(2, BN_WORD_LOAD2,
+            BN_WORD_OPS2("adds", "adcs"), BN_WORD_STORE2, "hs");
+        BN_WORD_FIXED_CASE(3, BN_WORD_LOAD3,
+            BN_WORD_OPS3("adds", "adcs"), BN_WORD_STORE3, "hs");
+        BN_WORD_FIXED_CASE(4, BN_WORD_LOAD4,
+            BN_WORD_OPS4("adds", "adcs"), BN_WORD_STORE4, "hs");
+        BN_WORD_FIXED_CASE(5, BN_WORD_LOAD5,
+            BN_WORD_OPS5("adds", "adcs"), BN_WORD_STORE5, "hs");
+        BN_WORD_FIXED_CASE(6, BN_WORD_LOAD6,
+            BN_WORD_OPS6("adds", "adcs"), BN_WORD_STORE6, "hs");
+        BN_WORD_FIXED_CASE(7, BN_WORD_LOAD7,
+            BN_WORD_OPS7("adds", "adcs"), BN_WORD_STORE7, "hs");
+    BN_ADD_CARRY_DEATH_CASE(8, BN_WORD_LOAD8,
+        BN_WORD_STORE8,
+        "adcs x6, x6, xzr\n\t"
+        "adcs x7, x7, xzr\n\t"
+        "adcs x8, x8, xzr\n\t"
+        "adcs x9, x9, xzr\n\t"
+        "adcs x10, x10, xzr\n\t"
+        "adcs x11, x11, xzr\n\t"
+        BN_WORD_STORE8
+        "cset %[flag], cs\n\t");
+    default: return UINT64_MAX;
+    }
+}
+
+#undef BN_ADD_CARRY_DEATH_CASE
+#else
 BN_WORD_FIXED_FN(bn_add_word_a64_fixed, "adds", "adcs", "hs")
+#endif
 BN_WORD_FIXED_FN(bn_sub_word_a64_fixed, "subs", "sbcs", "lo")
 
 #define BN_WORD_FIXED_TWO_FN(name, first, next, condition)                \

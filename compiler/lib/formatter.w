@@ -220,6 +220,10 @@ use parser
     node.value.to_s()
   when :quantity
     node.number_str.to_s() + " " + node.unit.to_s()
+  when :currency
+    prefix = node.prefix == nil ? "" : node.prefix.to_s()
+    suffix = node.suffix == nil ? "" : node.suffix.to_s()
+    prefix + node.amount.to_s() + suffix
   when :date, :datetime, :time, :month, :ip4, :cidr4, :ip6, :cidr6, :rational
     node.value.to_s()
   when :duration
@@ -353,6 +357,24 @@ use parser
   body = formatter_sequence(node.body, depth + 1)
   body == "" ? header : header + "\n" + body
 
+-> formatter_gpu_definition(node, depth)
+  prefix = formatter_indent(depth)
+  header = prefix + "@" + node.attribute.to_s() + " fn " + node.name.to_s()
+  if node.params != nil && !node.params.empty?()
+    header += "(" + formatter_params(node.params, depth) + ")"
+  hints = node.type_hints
+  if hints != nil && !hints.empty?()
+    names = hints.keys()
+    hint_lines = StringBuffer(names.size * 24)
+    i = 0
+    while i < names.size
+      name = names[i]
+      hint_lines << prefix << "## " << hints[name].to_s() << ": " << name.to_s() << "\n"
+      i += 1
+    header = hint_lines.to_s() + header
+  body = formatter_sequence(node.body, depth + 1)
+  body == "" ? header : header + "\n" + body
+
 -> formatter_if(node, depth)
   out = formatter_indent(depth) + "if " + formatter_expr(node.condition, depth) + "\n"
   out += formatter_sequence(node.then_body, depth + 1)
@@ -428,7 +450,10 @@ use parser
   prefix = formatter_indent(depth)
   case kind
   when :assign
-    prefix + formatter_expr(node.target, depth) + " = " + formatter_expr(node.value, depth)
+    value = formatter_expr(node.value, depth)
+    if node.type_hint != nil
+      value += " ## " + node.type_hint.to_s()
+    prefix + formatter_expr(node.target, depth) + " = " + value
   when :multi_assign
     prefix + formatter_join_nodes(node.targets, ", ", depth) + " = " + formatter_expr(node.value, depth)
   when :compound_assign
@@ -443,6 +468,8 @@ use parser
     formatter_definition(node, depth, "->")
   when :fn_def
     formatter_definition(node, depth, "fn")
+  when :gpu_kernel_def
+    formatter_gpu_definition(node, depth)
   when :class_def
     header = prefix + "+ " + node.name.to_s() + formatter_type_args(node.type_params)
     if node.class_role != nil

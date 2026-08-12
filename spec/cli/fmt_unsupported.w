@@ -1,1 +1,2 @@
-value = $10
+on linux
+  << "linux"

@@ -352,6 +352,8 @@ projects stay unchecked until their stated acceptance criteria are met.
   - [x] Preserve generic call/class/parent/trait arguments, constraints, and
     attached type hints; pin their normalized source because canonical AST
     output intentionally omits some sparse parser metadata.
+  - [x] Format GPU kernel definitions and currency literals without losing
+    attached argument/assignment type hints; include them in corpus parity.
   - [ ] Attach comments and replace their lossless-whitespace safety path;
     cover the remaining GPU/domain nodes before widening parity to every
     tracked `.w`.

@@ -28,7 +28,7 @@ if "$TUNGSTEN" fmt "$UNSUPPORTED" >"$TMP/unsupported.out" 2>"$TMP/unsupported.er
   printf 'tungsten fmt accepted an unsupported AST node\n' >&2
   exit 1
 fi
-grep -q 'unsupported expression node :currency' "$TMP/unsupported.err"
+grep -q 'unsupported expression node :on_guard' "$TMP/unsupported.err"
 
 printf '# retained comment   \nvalue=1   \n\n' >"$TMP/commented.w"
 "$TUNGSTEN" fmt "$TMP/commented.w" >"$TMP/commented.out"
@@ -58,8 +58,7 @@ for fixture in "$ROOT"/compiler/test/fixtures/*.w "$ROOT"/spec/cli/*.w; do
     compiler/test/fixtures/frontend_fuzz_62f1c679cc3ef149.w|\
     spec/cli/camel_case_invalid.w|\
     spec/cli/str_type_invalid.w|\
-    spec/cli/fmt_unsupported.w|\
-    spec/cli/gpu_check_multiple_errors.w)
+    spec/cli/fmt_unsupported.w)
       continue
       ;;
   esac

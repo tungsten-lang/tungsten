@@ -1,5 +1,6 @@
 items=[1,2,"hi"]
 data={foo: 1,"bar":2}
+money=$10
 -> add(a,b=1)
   a+b
 + Box

@@ -1605,6 +1605,76 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
       break;
     }
     case TC_K_DECIMAL:
+      /* The compact C lexer intentionally keeps number+suffix spans in one
+       * token. Recover compact duration literals before the decimal/float
+       * split; e.g. `1h2m` is not a malformed decimal. */
+      {
+        if (text_len > 1 && text[0] == '$') {
+          node = node_hash(p, "currency", pos, err);
+          if (node.kind == TC_AST_HASH &&
+              (!tc_ast_hash_set(node, "amount", tc_ast_string_copy(text + 1, text_len - 1, err), err) ||
+               !tc_ast_hash_set(node, "prefix", tc_ast_string_copy("$", 1, err), err) ||
+               !tc_ast_hash_set(node, "suffix", tc_ast_nil(), err))) {
+            tc_ast_free(node);
+            node = tc_ast_nil();
+          }
+          break;
+        }
+        if (memchr(text, '/', text_len) != NULL) {
+          node = node_hash(p, "rational", pos, err);
+          if (node.kind == TC_AST_HASH &&
+              !tc_ast_hash_set(node, "value", tc_ast_string_copy(text, text_len, err), err)) {
+            tc_ast_free(node);
+            node = tc_ast_nil();
+          }
+          break;
+        }
+        const char *temporal_kind = NULL;
+        if (text_len == 8 && text[2] == ':' && text[5] == ':') temporal_kind = "time";
+        if (text_len == 10 && text[4] == '-' && text[7] == '-') temporal_kind = "date";
+        if (text_len == 20 && text[4] == '-' && text[7] == '-' && text[10] == 'T' &&
+            text[13] == ':' && text[16] == ':' && text[19] == 'Z') temporal_kind = "datetime";
+        if (temporal_kind) {
+          node = node_hash(p, temporal_kind, pos, err);
+          if (node.kind == TC_AST_HASH &&
+              !tc_ast_hash_set(node, "value", tc_ast_string_copy(text, text_len, err), err)) {
+            tc_ast_free(node);
+            node = tc_ast_nil();
+          }
+          break;
+        }
+        size_t di = 0;
+        int duration = 0;
+        while (di < text_len) {
+          size_t digits = di;
+          while (di < text_len && text[di] >= '0' && text[di] <= '9') di++;
+          if (di == digits || di >= text_len) {
+            duration = 0;
+            break;
+          }
+          if (di + 1 < text_len &&
+              ((text[di] == 'm' && (text[di + 1] == 'o' || text[di + 1] == 's')) ||
+               (text[di] == 'n' && text[di + 1] == 's'))) {
+            di += 2;
+          } else if (text[di] == 'y' || text[di] == 'w' || text[di] == 'd' ||
+                     text[di] == 'h' || text[di] == 'm' || text[di] == 's') {
+            di++;
+          } else {
+            duration = 0;
+            break;
+          }
+          duration = di == text_len;
+        }
+        if (duration) {
+          node = node_hash(p, "duration", pos, err);
+          if (node.kind == TC_AST_HASH &&
+              !tc_ast_hash_set(node, "raw", tc_ast_string_copy(text, text_len, err), err)) {
+            tc_ast_free(node);
+            node = tc_ast_nil();
+          }
+          break;
+        }
+      }
       // The lexer emits a single TC_T_DECIMAL token for both `3.14`
       // (decimal) and `~3.14` (approximate-float, runtime double).
       // Distinguish here by leading `~`. Emitting a {node:"decimal"}
@@ -1711,6 +1781,27 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
         node = tc_ast_nil();
       }
       break;
+    case TC_K_COLOR: {
+      uint32_t rgba = 0;
+      if (text_len == 4 || text_len == 5) {
+        uint32_t packed = (uint32_t)strtoul(text + 1, NULL, 16);
+        uint32_t r = (packed >> (text_len == 4 ? 8 : 12)) & 0xf;
+        uint32_t g = (packed >> (text_len == 4 ? 4 : 8)) & 0xf;
+        uint32_t b = (packed >> (text_len == 4 ? 0 : 4)) & 0xf;
+        uint32_t a = text_len == 4 ? 0xf : packed & 0xf;
+        rgba = ((r * 17) << 24) | ((g * 17) << 16) | ((b * 17) << 8) | (a * 17);
+      } else if (text_len == 7 || text_len == 9) {
+        uint32_t packed = (uint32_t)strtoul(text + 1, NULL, 16);
+        rgba = text_len == 7 ? (packed << 8) | 0xff : packed;
+      }
+      node = node_hash(p, "color", pos, err);
+      if (node.kind == TC_AST_HASH &&
+          !tc_ast_hash_set(node, "rgba", tc_ast_int((int64_t)rgba), err)) {
+        tc_ast_free(node);
+        node = tc_ast_nil();
+      }
+      break;
+    }
     case TC_K_IVAR:
       node = node_hash(p, "ivar", pos, err);
       if (node.kind == TC_AST_HASH &&
@@ -2744,8 +2835,44 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
   }
 
   size_t arrow_pos = 0;
-  if (top_level_token_ast(p, start, end, TC_K_ARROW, &arrow_pos, 0) && arrow_pos > start) {
-    return arrow_call_or_block_ast(p, start, end, arrow_pos, err);
+  if (top_level_token_ast(p, start, end, TC_K_ARROW, &arrow_pos, 0)) {
+    if (arrow_pos == start && start + 1 < end && p->tokens->items[start + 1].kind == TC_K_LPAREN) {
+      return parse_lambda_span_ast(p, arrow_pos, end, err);
+    }
+    if (arrow_pos > start) return arrow_call_or_block_ast(p, start, end, arrow_pos, err);
+  }
+
+  /* Number followed by a single unit word is one Quantity literal in the
+   * canonical lexer. The compact tokenizer preserves the separating source
+   * gap but materializes two tokens, so reconstruct the canonical node here. */
+  if (end == start + 2 &&
+      (p->tokens->items[start].kind == TC_K_INT || p->tokens->items[start].kind == TC_K_DECIMAL) &&
+      (p->tokens->items[start + 1].kind == TC_K_ID || p->tokens->items[start + 1].kind == TC_K_NAME ||
+       p->tokens->items[start + 1].kind == TC_K_TYPE)) {
+    WValue number_tok = p->tokens->items[start].packed;
+    WValue unit_tok = p->tokens->items[start + 1].packed;
+    size_t number_end = p->source->byte_offsets[tc_token_offset(number_tok) + tc_token_length(number_tok)];
+    size_t unit_start = p->source->byte_offsets[tc_token_offset(unit_tok)];
+    if (number_end < unit_start) {
+      char *number = NULL, *unit = NULL;
+      size_t number_len = 0, unit_len = 0;
+      if (!token_text_at_ast(p, start, &number, &number_len, err) ||
+          !token_text_at_ast(p, start + 1, &unit, &unit_len, err)) {
+        free(number);
+        free(unit);
+        return tc_ast_nil();
+      }
+      TcAstValue node = node_hash(p, "quantity", start, err);
+      if (node.kind == TC_AST_HASH &&
+          (!tc_ast_hash_set(node, "number_str", tc_ast_string_copy(number, number_len, err), err) ||
+           !tc_ast_hash_set(node, "unit", tc_ast_string_copy(unit, unit_len, err), err))) {
+        tc_ast_free(node);
+        node = tc_ast_nil();
+      }
+      free(number);
+      free(unit);
+      return node;
+    }
   }
 
   TcAstValue ternary = parse_ternary_ast(p, start, end, err);

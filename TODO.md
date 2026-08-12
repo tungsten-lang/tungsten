@@ -215,7 +215,7 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [x] Route `tungsten check`, `-c`, and `--check` through the stage-2 loader and
   lowering/type-inference path, stopping before CFG/LLVM/linking. Keep valid and
   static-error CLI fixtures in the root gate.
-- [ ] Differential-fuzz all frontends: generate grammar-aware valid and
+- [x] Differential-fuzz all frontends: generate grammar-aware valid and
   near-valid sources, compare canonical tokens/ASTs from the reference, packed,
   and fast C paths, minimize disagreements, and retain every counterexample as
   a fixture. A crash is only one failure mode; any semantic disagreement is an
@@ -240,9 +240,12 @@ projects stay unchecked until their stated acceptance criteria are met.
     fingerprints, a non-advancing C parse at top-level `DEDENT`, underscored
     PascalCase splitting, C `class_ref` drift, and missing implicit C-VM
     constructors.
-  - [ ] Extend the Ruby normalization adapter and generator through
+  - [x] Extend the Ruby normalization adapter and generator through
     general/escaping blocks, exception handling, and numeric/domain literal
-    families before calling the differential campaign complete.
+    families. The shared execution subset remains three-host; escaping blocks
+    compare the two closure-capable engines, while exceptions/domain values
+    retain token, acceptance, and complete normalized-AST parity. Eleven
+    minimized counterexamples are replayed before every generated campaign.
 - [ ] Add a GPU-kernel type/subset pre-pass at check time. Batch unsupported
   statements, bad address spaces, shape errors, and dialect-only intrinsics
   before invoking `metal` or `nvcc`.

@@ -70,6 +70,59 @@ static inline int is_newline_cp(uint32_t c) {
   return c == '\n' || c == '\r';
 }
 
+static size_t color_literal_end(const TcSource *source, size_t start, size_t count) {
+  if (start >= count || cp_at(source, start) != '#') return start;
+  size_t pos = start + 1;
+  while (pos < count && (source->lc[pos] & TC_F_HEX) != 0) pos++;
+  size_t digits = pos - start - 1;
+  if (!(digits == 3 || digits == 4 || digits == 6 || digits == 8)) return start;
+  if (pos < count && (source->lc[pos] & TC_F_ID_CONTINUE) != 0) return start;
+  return pos;
+}
+
+static int ascii_digit_at(const TcSource *source, size_t pos, size_t count) {
+  return pos < count && cp_at(source, pos) >= '0' && cp_at(source, pos) <= '9';
+}
+
+static size_t temporal_literal_end(const TcSource *source, size_t start, size_t count) {
+  /* The compact lexer has no dedicated temporal token IDs. Keep the complete
+   * spelling in one DECIMAL carrier token; atom_node_ast recovers its kind. */
+  if (start + 20 <= count &&
+      ascii_digit_at(source, start + 0, count) && ascii_digit_at(source, start + 1, count) &&
+      ascii_digit_at(source, start + 2, count) && ascii_digit_at(source, start + 3, count) &&
+      cp_at(source, start + 4) == '-' &&
+      ascii_digit_at(source, start + 5, count) && ascii_digit_at(source, start + 6, count) &&
+      cp_at(source, start + 7) == '-' &&
+      ascii_digit_at(source, start + 8, count) && ascii_digit_at(source, start + 9, count) &&
+      cp_at(source, start + 10) == 'T' &&
+      ascii_digit_at(source, start + 11, count) && ascii_digit_at(source, start + 12, count) &&
+      cp_at(source, start + 13) == ':' &&
+      ascii_digit_at(source, start + 14, count) && ascii_digit_at(source, start + 15, count) &&
+      cp_at(source, start + 16) == ':' &&
+      ascii_digit_at(source, start + 17, count) && ascii_digit_at(source, start + 18, count) &&
+      cp_at(source, start + 19) == 'Z') {
+    return start + 20;
+  }
+  if (start + 10 <= count &&
+      ascii_digit_at(source, start + 0, count) && ascii_digit_at(source, start + 1, count) &&
+      ascii_digit_at(source, start + 2, count) && ascii_digit_at(source, start + 3, count) &&
+      cp_at(source, start + 4) == '-' &&
+      ascii_digit_at(source, start + 5, count) && ascii_digit_at(source, start + 6, count) &&
+      cp_at(source, start + 7) == '-' &&
+      ascii_digit_at(source, start + 8, count) && ascii_digit_at(source, start + 9, count)) {
+    return start + 10;
+  }
+  if (start + 8 <= count &&
+      ascii_digit_at(source, start + 0, count) && ascii_digit_at(source, start + 1, count) &&
+      cp_at(source, start + 2) == ':' &&
+      ascii_digit_at(source, start + 3, count) && ascii_digit_at(source, start + 4, count) &&
+      cp_at(source, start + 5) == ':' &&
+      ascii_digit_at(source, start + 6, count) && ascii_digit_at(source, start + 7, count)) {
+    return start + 8;
+  }
+  return start;
+}
+
 static int token_is_at_statement_start(const TcSource *source, size_t start) {
   size_t scan = start;
   while (scan > 0) {
@@ -299,7 +352,8 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
         continue;
       }
 
-      if (c0 == '#' && !(pos + 1 < count && cp_at(source, pos + 1) == '#')) {
+      if (c0 == '#' && color_literal_end(source, pos, count) == pos &&
+          !(pos + 1 < count && cp_at(source, pos + 1) == '#')) {
         while (pos < count && !is_newline_cp(cp_at(source, pos))) pos++;
         if (pos < count) {
           uint32_t c2 = cp_at(source, pos++);
@@ -351,6 +405,13 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
     }
 
     if (c == '#') {
+      size_t color_end = color_literal_end(source, pos, count);
+      if (color_end > pos) {
+        size_t start = pos;
+        pos = color_end;
+        if (!token_push(tokens, token_new(TC_T_COLOR, start, pos, 0), err)) return 0;
+        continue;
+      }
       if (pos + 1 < count && cp_at(source, pos + 1) == '#') {
         pos += 2;
         while (pos < count && is_space_cp(cp_at(source, pos))) pos++;
@@ -450,6 +511,28 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
     if (f & TC_F_DIGIT) {
       size_t start = pos;
       int is_decimal = 0;
+      size_t temporal_end = temporal_literal_end(source, start, count);
+      if (temporal_end > start) {
+        pos = temporal_end;
+        if (!token_push(tokens, token_new(TC_T_DECIMAL, start, pos, 0), err)) return 0;
+        continue;
+      }
+      size_t rational_scan = start;
+      while (rational_scan < count &&
+             ((source->lc[rational_scan] & TC_F_DIGIT) != 0 || cp_at(source, rational_scan) == '_')) {
+        rational_scan++;
+      }
+      if (rational_scan + 1 < count && cp_at(source, rational_scan) == '/' &&
+          (source->lc[rational_scan + 1] & TC_F_DIGIT) != 0) {
+        rational_scan += 2;
+        while (rational_scan < count &&
+               ((source->lc[rational_scan] & TC_F_DIGIT) != 0 || cp_at(source, rational_scan) == '_')) {
+          rational_scan++;
+        }
+        pos = rational_scan;
+        if (!token_push(tokens, token_new(TC_T_DECIMAL, start, pos, 0), err)) return 0;
+        continue;
+      }
       if (c == '0' && pos + 1 < count) {
         uint32_t c2 = cp_at(source, pos + 1);
         if (c2 == 'x' || c2 == 'X') {

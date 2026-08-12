@@ -21,6 +21,19 @@ CACHE = File.join(ROOT, "build/cache/frontend-fuzz")
 CORPUS = File.join(CACHE, "corpus")
 FAILURES = File.join(CACHE, "failures")
 LEX_PARITY = File.join(CACHE, "lex-parity")
+REGRESSION_FIXTURES = %w[
+  frontend_fuzz_c76e9ad9cce48acb.w
+  frontend_fuzz_5fdb8fc588c8ccf1.w
+  frontend_fuzz_fc5ed0f8e6493ac2.w
+  frontend_fuzz_8ce6bee92547d01a.w
+  frontend_fuzz_4f7b4af744912a77.w
+  frontend_fuzz_1798aaaac8f1cb5c.w
+  frontend_fuzz_4b5c66c9a3bd16c5.w
+  frontend_fuzz_0d5787dd35f94804.w
+  frontend_fuzz_1d9b56c89b0cfe2c.w
+  frontend_fuzz_9979d964e1f27fec.w
+  frontend_fuzz_7f4b8186d9f8b8da.w
+].freeze
 
 $LOAD_PATH.unshift(File.join(RUBY_IMPL, "lib"))
 require "tungsten"
@@ -135,6 +148,21 @@ def ruby_definition_body_wire(definition)
   nodes.map { |node| ruby_ast_wire(node) }
 end
 
+def ruby_optional_body_wire(body)
+  return nil if body.nil? || body.list.empty?
+
+  ruby_body_wire(body)
+end
+
+def ruby_numeric_literal_text(node)
+  value = node.value
+  if value.is_a?(BigDecimal)
+    value.to_s("F")
+  else
+    value.to_s
+  end
+end
+
 def ruby_class_ref_name?(name)
   name.match?(/\A[A-Z]/) && name.match?(/[a-z]/)
 end
@@ -157,6 +185,29 @@ def ruby_ast_wire(node)
     {node: :ivar, name: node.name}
   when Tungsten::AST::Int
     {node: :int, value: node.value, format: nil, raw: node.value.to_s}
+  when Tungsten::AST::Float
+    {node: :float, value: ruby_numeric_literal_text(node)}
+  when Tungsten::AST::Decimal
+    {node: :decimal, value: ruby_numeric_literal_text(node)}
+  when Tungsten::AST::RationalLiteral
+    {node: :rational, value: "#{node.numerator}/#{node.denominator}"}
+  when Tungsten::AST::QuantityLiteral
+    {node: :quantity, number_str: ruby_numeric_literal_text(node.number), unit: node.unit_string}
+  when Tungsten::AST::CurrencyLiteral
+    prefix = %w[$ £ € ¥].include?(node.symbol) ? node.symbol : nil
+    suffix = prefix.nil? ? node.symbol : nil
+    {node: :currency, amount: node.value_str, prefix: prefix, suffix: suffix}
+  when Tungsten::AST::Date
+    {node: :date, value: node.value.iso8601}
+  when Tungsten::AST::DateTime
+    {node: :datetime, value: node.value.iso8601.sub(/\+00:00\z/, "Z")}
+  when Tungsten::AST::TimeLiteral
+    {node: :time, value: node.value}
+  when Tungsten::AST::Duration
+    {node: :duration, raw: node.value}
+  when Tungsten::AST::ColorLiteral
+    rgba = (node.r << 24) | (node.g << 16) | (node.b << 8) | node.a
+    {node: :color, rgba: rgba}
   when Tungsten::AST::StringLiteral
     {node: :string, value: node.value}
   when Tungsten::AST::Boolean
@@ -180,14 +231,20 @@ def ruby_ast_wire(node)
       type_hints: nil
     }
   when Tungsten::AST::Def
-    {
-      node: :method_def,
-      name: node.name,
-      params: ruby_params_wire(node),
-      body: ruby_definition_body_wire(node),
-      type_hints: nil,
-      is_class_method: false
-    }
+    if node.name.nil?
+      # The Ruby parser's legacy anonymous-arrow representation is a nameless
+      # Def; the packed/slab schema correctly calls the same value a Block.
+      {node: :block, params: (node.args || []).map(&:name), body: ruby_definition_body_wire(node)}
+    else
+      {
+        node: :method_def,
+        name: node.name,
+        params: ruby_params_wire(node),
+        body: ruby_definition_body_wire(node),
+        type_hints: nil,
+        is_class_method: false
+      }
+    end
   when Tungsten::AST::ClassDef
     {
       node: :class_def,
@@ -222,6 +279,27 @@ def ruby_ast_wire(node)
     }
   when Tungsten::AST::While
     {node: :while, condition: ruby_ast_wire(node.condition), body: ruby_body_wire(node.body)}
+  when Tungsten::AST::Raise
+    {node: :raise, value: node.value && ruby_ast_wire(node.value)}
+  when Tungsten::AST::Return
+    {node: :return, value: node.value && ruby_ast_wire(node.value)}
+  when Tungsten::AST::Begin
+    body = ruby_body_wire(node.body)
+    rescue_body = ruby_optional_body_wire(node.rescue_body)
+    ensure_body = ruby_optional_body_wire(node.ensure_body)
+    # The Ruby reference parser represents postfix rescue as a one-expression
+    # Begin. Packed/slab parsers use the dedicated rescue_expr node.
+    if node.rescue_var.nil? && ensure_body.nil? && body.size == 1 && rescue_body&.size == 1
+      {node: :rescue_expr, body: body[0], fallback: rescue_body[0]}
+    else
+      {
+        node: :begin,
+        body: body,
+        rescue_var: node.rescue_var,
+        rescue_body: rescue_body,
+        ensure_body: ensure_body
+      }
+    end
   else
     raise "unsupported Ruby AST node in differential grammar: #{node.class}"
   end
@@ -283,6 +361,26 @@ def execution_disagreement(path)
   "execution mismatch\nruby=#{ruby.inspect}\nself_hosted=#{self_hosted.inspect}\nc_vm=#{c_vm.inspect}"
 end
 
+def successful_execution_disagreement(path)
+  env = {"TUNGSTEN_LEX64_TABLE" => LEX_TABLE}
+  ruby = command_result(TUNGSTEN, "run", "--ruby", path)
+  self_hosted = command_result(TUNGSTEN, "run", path)
+  c_vm = command_result(C_VM, path, env: env)
+  return nil unless ruby[0].zero? && self_hosted[0].zero? && c_vm[0].zero?
+  return nil if ruby == self_hosted && ruby == c_vm
+
+  "execution mismatch\nruby=#{ruby.inspect}\nself_hosted=#{self_hosted.inspect}\nc_vm=#{c_vm.inspect}"
+end
+
+def pair_execution_disagreement(path, require_success: false)
+  ruby = command_result(TUNGSTEN, "run", "--ruby", path)
+  self_hosted = command_result(TUNGSTEN, "run", path)
+  return nil if require_success && !(ruby[0].zero? && self_hosted[0].zero?)
+  return nil if ruby == self_hosted
+
+  "Ruby/self-hosted execution mismatch\nruby=#{ruby.inspect}\nself_hosted=#{self_hosted.inspect}"
+end
+
 def valid_source(rng, index)
   left = rng.rand(1..500)
   right = rng.rand(1..500)
@@ -292,7 +390,7 @@ def valid_source(rng, index)
   name = "value_#{index}"
   other = "other_#{index}"
 
-  case index % 11
+  case index % 15
   when 0
     <<~W
       #{name} = #{left}
@@ -394,7 +492,7 @@ def valid_source(rng, index)
         #{total} += item
       << #{total}
     W
-  else
+  when 10
     <<~W
       << "text_#{index}"
       << true
@@ -402,7 +500,56 @@ def valid_source(rng, index)
       << nil
       << :item_#{index}
     W
+  when 11
+    closure = "closure_#{index}"
+    <<~W
+      #{name} = #{left}
+      #{closure} = -> (item) item * #{factor} + #{name}
+      << #{closure}.call(#{right})
+    W
+  when 12
+    <<~W
+      #{name} = 0
+      begin
+        raise "fuzz_#{index}"
+      rescue error
+        #{name} = #{left}
+      ensure
+        #{name} += #{factor}
+      << #{name}
+    W
+  when 13
+    method = "raise_#{index}"
+    <<~W
+      -> #{method}
+        raise "fuzz_#{index}"
+      << (#{method}() rescue #{right})
+    W
+  else
+    <<~W
+      << ~#{left}.25
+      << #{right}.125
+      << #{factor}/#{factor + 1}
+      << #{left} m
+      << $#{right}.50
+      << 2026-08-12
+      << 2026-08-12T12:34:56Z
+      << 12:34:56
+      << 1h2m
+      << #FF00AA
+    W
   end
+end
+
+def execution_mode(index)
+  # The C VM intentionally compiles begin as its body and has no rescue or
+  # ensure machinery. Domain values also have host-specific runtime wrappers.
+  # Keep those cases in the stronger token/acceptance/full-AST oracle without
+  # pretending they belong to the currently shared execution subset.
+  return :pair if index % 15 == 11
+  return nil if [12, 13, 14].include?(index % 15)
+
+  :all
 end
 
 def invalid_source(rng, index)
@@ -491,16 +638,22 @@ cases = []
 
 if options.replay
   source = File.read(File.expand_path(options.replay))
-  cases << [:replay, source, options.replay_valid]
+  cases << [:replay, source, options.replay_valid, true, true]
 else
+  REGRESSION_FIXTURES.each do |name|
+    source = File.read(File.join(ROOT, "compiler/test/fixtures", name))
+    # Minimized parser counterexamples need not form a lowerable whole
+    # program; their contract is token/full-AST parity.
+    cases << [:fixture, source, true, false, false]
+  end
   options.cases.times do |index|
-    cases << [:valid, valid_source(rng, index), true]
-    cases << [:invalid, invalid_source(rng, index), false]
+    cases << [:valid, valid_source(rng, index), true, execution_mode(index), true]
+    cases << [:invalid, invalid_source(rng, index), false, false, true]
   end
 end
 
 failures = 0
-cases.each_with_index do |(kind, source, valid), index|
+cases.each_with_index do |(kind, source, valid, execute, check_acceptance), index|
   path = write_case(kind, index, source)
   checks = []
   checks << ["ruby-lex", ->(candidate) { ruby_lexer_disagreement(candidate) }]
@@ -509,37 +662,51 @@ cases.each_with_index do |(kind, source, valid), index|
     lex_parity_disagreement(candidate_path)
   end]
   if valid
-    checks << ["valid-accept", lambda do |candidate|
-      candidate_path = write_case("minimize", index, candidate)
-      valid_acceptance_disagreement(candidate_path)
-    end]
+    if check_acceptance
+      checks << ["valid-accept", lambda do |candidate|
+        candidate_path = write_case("minimize", index, candidate)
+        valid_acceptance_disagreement(candidate_path)
+      end]
+    end
     checks << ["ast", lambda do |candidate|
       candidate_path = write_case("minimize", index, candidate)
       ast_disagreement(candidate_path, candidate)
     end]
-    checks << ["execution", lambda do |candidate|
-      candidate_path = write_case("minimize", index, candidate)
-      execution_disagreement(candidate_path)
-    end]
-  else
+    if execute
+      check = lambda do |candidate|
+        candidate_path = write_case("minimize", index, candidate)
+        execute == :pair ? pair_execution_disagreement(candidate_path) : execution_disagreement(candidate_path)
+      end
+      minimize_check = lambda do |candidate|
+        candidate_path = write_case("minimize", index, candidate)
+        if execute == :pair
+          pair_execution_disagreement(candidate_path, require_success: true)
+        else
+          successful_execution_disagreement(candidate_path)
+        end
+      end
+      checks << ["execution", check, minimize_check]
+    end
+  elsif check_acceptance
     checks << ["invalid-accept", lambda do |candidate|
       candidate_path = write_case("minimize", index, candidate)
       invalid_acceptance_disagreement(candidate_path)
     end]
   end
 
-  checks.each do |label, check|
+  checks.each do |label, check, minimize_check|
     detail = check.call(source)
     next unless detail
 
-    minimized = minimize_lines(source) { |candidate| !check.call(candidate).nil? }
+    reducer = minimize_check || check
+    minimized = minimize_lines(source) { |candidate| !reducer.call(candidate).nil? }
     persist_failure(label, options.seed, minimized, check.call(minimized))
     failures += 1
   end
 end
 
 if failures.zero?
-  puts "frontend differential fuzz: ok (seed=#{options.seed}, cases=#{cases.size})"
+  puts "frontend differential fuzz: ok (seed=#{options.seed}, cases=#{cases.size}, retained=#{options.replay ? 0 : REGRESSION_FIXTURES.size})"
 else
   abort "frontend differential fuzz: #{failures} disagreement(s) (seed=#{options.seed})"
 end

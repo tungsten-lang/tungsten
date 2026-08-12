@@ -334,7 +334,7 @@ module Tungsten
               unexpected
             end
 
-      check_for :SP, :NL, :EOF, :"=>"
+      check_for :SP, :NL, :EOF, :"=>", :")"
 
       exp
     end

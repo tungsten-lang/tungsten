@@ -1749,6 +1749,13 @@ module Tungsten
         when "+" then return +recv
         end
 
+        # Anonymous arrows are represented as nameless Def nodes by the Ruby
+        # reference parser. They retain their defining environment and expose
+        # the same call surface as compiled Block values.
+        if recv.is_a?(Tungsten::AST::Def) && node.name == "call"
+          return call_method(recv, node.args, block)
+        end
+
         if recv.is_a?(Runtime::WObject)
           owner = recv.w_class
           if (overloads = typed_overload_group(owner, node.name))

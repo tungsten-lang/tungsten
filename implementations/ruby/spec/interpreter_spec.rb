@@ -97,6 +97,10 @@ RSpec.describe Tungsten::Interpreter do
     expect(output(source)).to eq("14")
   end
 
+  it "calls escaping anonymous arrows with their captured environment" do
+    expect(run("offset = 3\nadder = -> (value) value + offset\nadder.call(4)")).to eq(7)
+  end
+
   it "constructs reduced rationals through the Rational class facade" do
     expect(run("Rational.new(6, 8)")).to eq(Rational(3, 4))
     expect(run("Rational.new(7)")).to eq(Rational(7, 1))

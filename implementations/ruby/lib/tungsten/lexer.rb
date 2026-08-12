@@ -1066,6 +1066,7 @@ module Tungsten
 
       # Try scanning optional space + unit (not followed by '(' which means function call)
       saved_pos = pos
+      saved_cols = @cols
       space = skip_scan(/ /)
       if (unit = scan(/Δ(?:°[\p{L}]+|K)/) || scan(UNIT_STRING))
         # "burned" prefix: "1 burned cord" → unit is "cord", flag burned
@@ -1076,6 +1077,7 @@ module Tungsten
             burned = true
           else
             self.pos = saved_pos + (space ? 1 : 0) + "burned".length
+            @cols = saved_cols + (space ? 1 : 0) + "burned".length
             # "burned" matched but next word isn't a unit — treat "burned" as unit
             # (will fail later, same as before)
           end
@@ -1088,15 +1090,18 @@ module Tungsten
 
         # Try to extend with one more space-separated word for multi-word units
         extend_pos = pos
+        extend_cols = @cols
         if skip_scan(/ /) && (word2 = scan(/[\p{L}]+/))
           combined = "#{unit} #{word2}"
           if Units::UNIT_ALIASES.key?(combined) || Units::UNIT_TABLE.key?(combined)
             unit = combined
           else
             self.pos = extend_pos
+            @cols = extend_cols
           end
         else
           self.pos = extend_pos
+          @cols = extend_cols
         end
 
         # Try "<unit> of <word>" extension — only when the full phrase is a registered
@@ -1104,28 +1109,34 @@ module Tungsten
         # "ft of water") without conflicting with the existing substance-modifier syntax
         # ("1 cup of flour" remains a method call because "cup of flour" is not a unit).
         extend_pos = pos
+        extend_cols = @cols
         if skip_scan(/ of /) && (word2 = scan(/[\p{L}\d]+/))
           combined = "#{unit} of #{word2}"
           if Units::UNIT_ALIASES.key?(combined) || Units::UNIT_TABLE.key?(combined)
             unit = combined
           else
             self.pos = extend_pos
+            @cols = extend_cols
           end
         else
           self.pos = extend_pos
+          @cols = extend_cols
         end
 
         # Try hyphenated extension: "beard-second", "barn-megaparsec"
         extend_pos = pos
+        extend_cols = @cols
         if skip_scan(/-/) && (word2 = scan(/[\p{L}]+/))
           combined = "#{unit}-#{word2}"
           if Units::UNIT_ALIASES.key?(combined) || Units::UNIT_TABLE.key?(combined)
             unit = combined
           else
             self.pos = extend_pos
+            @cols = extend_cols
           end
         else
           self.pos = extend_pos
+          @cols = extend_cols
         end
 
         # Prepend "burned " back into unit string for interpreter
@@ -1134,6 +1145,7 @@ module Tungsten
         # Make sure unit is not followed by ( which would be a function call
         if check(/\s*\(/)
           self.pos = saved_pos
+          @cols = saved_cols
           token num_type, num_str
         elsif uncertainty_str
           token :MEASURED_QUANTITY, [num_str, unit, num_type, uncertainty_str]
@@ -1143,6 +1155,7 @@ module Tungsten
       elsif space
         # Scanned a space but no unit — put the space back
         self.pos = saved_pos
+        @cols = saved_cols
         if uncertainty_str
           token :MEASUREMENT, [num_str, num_type, uncertainty_str]
         else
@@ -1321,7 +1334,7 @@ module Tungsten
 
       ~                          # approx.
 
-      (?:0|[1-9](?:_[0-9]+)*)    # 0.0 or 1_000.0
+      (?:0|[1-9][0-9]*(?:_[0-9]+)*) # 0.0, 486.0, or 1_000.0
 
       \.                         # decimal required
 

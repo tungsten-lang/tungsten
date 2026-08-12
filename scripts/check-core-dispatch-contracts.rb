@@ -191,6 +191,34 @@ RUNTIME_CLASS_CONTRACTS = {
       bytes capitalize center chars delete downcase empty? length lpad reverse rpad
       size squeeze swapcase to_s tr upcase
     ]
+  },
+  "Array" => {
+    path: "core/array.w",
+    table: "w_ic_array_table",
+    dispatch_key: "0x0A",
+    native_ic: %w[
+      [] []= all? any? clear cos count cross data dot each exp fastsum fill
+      find_index get has? include? index last_index log matmul_i8 matvec_i8 max
+      min none? pop push raw_ptr replace_byte! scale scale! set shift sin slice
+      slice_view sort sqrt stable_sort sum sumsq tan unshift view
+    ],
+    native_only: %w[
+      [] []= all? any? clear cos count cross data dot exp fastsum fill find_index
+      get has? include? index last_index log matmul_i8 matvec_i8 max min none? pop
+      push raw_ptr replace_byte! scale scale! set shift sin slice slice_view sqrt
+      sum sumsq tan unshift view
+    ],
+    dual_dispatch: %w[each sort stable_sort],
+    autoload_guard: "array_source_method_unresolved",
+    autoload_methods: %w[compact copy delete_at drop dup flatten join minmax reverse take uniq],
+    source_fallback: %w[
+      __enumerable_append_to __enumerable_iteration_mode __mergesort_copy
+      __replace_elements cap chunk_while compact concat copy csort delete_at drop
+      dup each empty? first flatten ipnsort join last mean median mergesort! minmax
+      norm normalize pythagorean reverse rotate rotate! shuffle shuffle! size
+      skasort sort sort! stable_sort stdev take to_a to_f32 to_f64 transpose
+      tsort uniq variance wolfsort
+    ]
   }
 }.freeze
 
@@ -357,8 +385,9 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
       errors << "#{class_name}: missing loader trigger for @#{contract[:autoload_guard]}"
     else
       trigger_methods = trigger[:names].scan(/"([^"]+)"/).flatten.uniq.sort
-      missing_trigger = fallback_methods - trigger_methods
-      stale_trigger = trigger_methods - fallback_methods
+      expected_trigger_methods = contract.fetch(:autoload_methods, fallback_methods).uniq.sort
+      missing_trigger = expected_trigger_methods - trigger_methods
+      stale_trigger = trigger_methods - expected_trigger_methods
       errors << "#{class_name}: source fallbacks missing loader triggers: #{missing_trigger.join(', ')}" unless missing_trigger.empty?
       errors << "#{class_name}: loader triggers without source fallbacks: #{stale_trigger.join(', ')}" unless stale_trigger.empty?
     end

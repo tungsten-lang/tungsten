@@ -296,6 +296,9 @@ projects stay unchecked until their stated acceptance criteria are met.
         pin inline/slab/heap/rope/Symbol erased dispatch in both engines. The
         legacy `core/string.w` API scaffold remains part of the broader
         standard-library completion item below.
+      - [x] Classify Array's 45 active native selectors and 47 source method
+        names, including the deliberate `each`/`sort`/`stable_sort` overlap;
+        pin erased ordinary, typed, bit-packed, and shifted-storage dispatch.
     - [ ] Implement and specify Date's deferred factory/calendar surface:
       `new`, `julian`, `ordinal`, `commercial`, `today`, `tomorrow`, `week`,
       `decade`/`decade_abbr`, `century`, `millenium`, and first/last period

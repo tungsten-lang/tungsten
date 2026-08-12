@@ -55074,12 +55074,9 @@ WValue w_bytes_concat(WValue a_val, WValue b_val) {
  * matches Tungsten convention (only W_NIL and W_FALSE are falsy). */
 
 WValue w_bool_array_new(int64_t cap) {
-    /* `bool[N]` lowers to `w_bool_array_new(N)` with N as the requested
-     * capacity (size 0), matching the typed-array convention so callers
-     * can do `arr = bool[N]; arr.push(...)` and find the pushed value at
-     * index 0. The previous semantic (size == length, all false) made
-     * the typed-overload roundtrip spec for bool[] read the original
-     * zero bit at index 0 instead of the pushed value. */
+    /* BoolArray.new(N) reserves N bits with size 0 for push-to-fill use.
+     * The `bool[N]` literal instead follows the fixed-size T[N] contract
+     * and lowers to w_array_zeros(1, N). */
     return w_array_new(1, cap > 0 ? cap : 1);
 }
 

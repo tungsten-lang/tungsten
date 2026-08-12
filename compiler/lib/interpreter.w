@@ -5497,18 +5497,16 @@ use target
     result
 
   # `bool[N]` / `i32[N]` / etc. — zero-filled typed array. Mirrors
-  # lower_typed_array_new (compiler/lib/lowering/literals.w): bool routes
-  # to the bit-packed BoolArray allocator, other known element types to
-  # the generic bits-keyed zero-fill, anything else raises — mirroring
-  # the compiled engine's E_LOWER_TYPED_ARRAY_UNSUPPORTED.
+  # lower_typed_array_new (compiler/lib/lowering/literals.w): known element
+  # types, including bit-packed bool, route to the generic bits-keyed
+  # zero-fill; anything else raises — mirroring the compiled engine's
+  # E_LOWER_TYPED_ARRAY_UNSUPPORTED.
   -> eval_typed_array_new(node, env)
     etype = ast_get(node, :element_type)
     size = evaluate(ast_get(node, :size), env)
     size_raw = ccall_nobox("w_numeric_to_i64", size) ## i64
-    if etype == "bool"
-      return ccall_rawargs("w_bool_array_new", size_raw)
     bits = 0 ## i64
-    if etype == "u1" || etype == "i1"
+    if etype == "bool" || etype == "u1" || etype == "i1"
       bits = 1
     elsif etype == "u4"
       bits = 4

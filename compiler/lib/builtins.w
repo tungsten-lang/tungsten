@@ -486,7 +486,7 @@ builtin_names = [
   "length", "size", "chars", "split", "strip", "ltrim", "rtrim", "ascii?", "valid_utf8?", "replace", "starts_with?",
   "ends_with?", "upcase", "downcase", "swapcase", "capitalize", "include?", "index", "rindex", "gsub", "concat",
   "append", "prepend",
-  "reverse", "slice", "copy", "push", "pop", "first", "last", "empty?", "nil?",
+  "reverse", "slice", "copy", "push", "pop", "shift", "first", "last", "empty?", "nil?",
   "join", "sort", "flatten", "uniq", "delete", "each", "map", "select",
   "reject", "reduce", "each_with_index", "map_with_index", "zip", "any?", "all?",
   "find", "count", "sum", "times", "keys", "values", "has_key?", "abs", "max", "min",

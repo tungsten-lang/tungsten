@@ -594,20 +594,15 @@
   size_reg = ensure_i64_value(wfn, size_tv)
   # Unbox the size to raw i64 for the runtime call
   size_raw = nanunbox_int_emit(wfn, size_reg)
-  if etype == "bool"
-    temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_bool_array_new", args: [size_raw]})
-    return typed_value(:i64, temp)
-
   # Map type name to element bits.
   # Extended bits carry signed/float-ish element identity in the runtime.
   # Bits == 65 is the w64 sentinel (64-bit WValue storage, no int coercion).
   bits = 0
-  if etype == "u1" || etype == "i1"
-    # 1-bit packed array. Same storage as bool[N] / BoolArray.new(N),
-    # but raw — caller is responsible for passing 0/1 (or true/false,
-    # which the runtime's ebits==1 fast path normalizes). BoolArray is
-    # the wrapper class that surfaces a true/false API on top of this.
+  if etype == "bool" || etype == "u1" || etype == "i1"
+    # 1-bit packed array. `bool[N]` follows the same fixed-size,
+    # zero-filled T[N] contract as every other typed-array literal.
+    # BoolArray.new(N) deliberately remains the capacity-N, size-zero
+    # push-to-fill constructor.
     bits = 1
   elsif etype == "u4"
     bits = 4

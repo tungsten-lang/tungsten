@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(519 total), grouped by area, with its declaration, a one-line
+(522 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -46,6 +46,8 @@ summary from the source header, and a link to the source.
 | `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
 | `File` | `+ File` | File — whole-file I/O, metadata, paths, and filesystem operations. | [`core/file.w`](../core/file.w) |
 | `FileStat` | `+ FileStat` | FileStat — portable POSIX file metadata with nanosecond timestamps. | [`core/file.w`](../core/file.w) |
+| `Future` | `+ Future` | Future — read-only handle for asynchronous settlement and composition. | [`core/future.w`](../core/future.w) |
+| `FutureState` | `+ FutureState` | Future/Promise shared state and read-only Future facade. | [`core/future.w`](../core/future.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
@@ -149,6 +151,7 @@ summary from the source header, and a link to the source.
 | `Number` | `+ Number` | Number — root of the numeric tower. Every concrete number is either a | [`core/number.w`](../core/number.w) |
 | `Object` | `+ Object < BlankSlate` | Object is the default root of all Tungsten objects. Object inherits from BlankSlate (the | [`core/object.w`](../core/object.w) |
 | `Path` | `+ Path` | Path — immutable filesystem path | [`core/path.w`](../core/path.w) |
+| `Promise` | `+ Promise` | Promise — writable, exactly-once settlement for a read-only Future. | [`core/promise.w`](../core/promise.w) |
 | `Quantity` | `+ Quantity` | Quantity — numeric value with unit (tag 0xFFFD) | [`core/quantity.w`](../core/quantity.w) |
 | `Measurement` | `+ Measurement` | Measurement — a measured scalar and its standard uncertainty. | [`core/measurement.w`](../core/measurement.w) |
 | `Calibration` | `+ Calibration` | Calibration — polynomial measurement model with a standard-uncertainty | [`core/calibration.w`](../core/calibration.w) |

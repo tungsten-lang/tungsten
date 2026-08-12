@@ -402,8 +402,11 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [x] Flesh out `core/atomic.w` with signed-i64 load/store/exchange/CAS/fetch
   ops, wide-value promotion, compatibility spellings, and explicit
   sequential-consistency semantics mapped consistently on every host.
-- [ ] Add `Future`/`Promise` after the concurrency contract is fixed: exactly
-  once settlement, error propagation, composition, timeout, and cancellation.
+- [x] Add `Future`/`Promise` with exactly-once settlement, multi-waiter
+  publication, worker-error propagation, map/flat-map/recover/finally
+  composition, timeout, and cancellation. Cancellation is explicit best-effort
+  worker interruption and never rolls back side effects or cancels a shared
+  parent Future.
 - [ ] Add scope-safe/finalizer-backed release for Metal and Tensor handles.
   Prefer explicit deterministic `close` plus idempotent finalization; prove that
   finalizers never run GPU work or deadlock the runtime.

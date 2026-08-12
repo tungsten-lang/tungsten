@@ -1988,6 +1988,8 @@ use ast
     # SIMD-group reductions: `simd_sum(x)`, `simd_max(x)`, `simd_min(x)`,
     # `simd_prefix_inclusive_sum(x)`. Operate within a 32-lane SIMD group.
     if name in ("simd_sum" "simd_max" "simd_min" "simd_prefix_inclusive_sum" "simd_broadcast_first")
+      if ctx[:dialect] == "cuda"
+        gpu_kernel_error(ctx[:node], "`" + name + "` is Metal-only; CUDA warp lowering is not implemented")
       if args.size() != 1
         gpu_kernel_error(ctx[:node], "`" + name + "` takes 1 arg")
       return name + "(" + emit_expr(ctx, args[0]) + ")"
@@ -1996,6 +1998,8 @@ use ast
     # simdgroups). Routed by inferred arg type to the right helper +
     # scratch buffer (f32 or i32).
     if name in ("tg_sum" "tg_max" "tg_min")
+      if ctx[:dialect] == "cuda"
+        gpu_kernel_error(ctx[:node], "`" + name + "` is not supported by the CUDA dialect")
       if args.size() != 1
         gpu_kernel_error(ctx[:node], "`" + name + "` takes 1 arg")
       arg_type = infer_expr_type(ctx, args[0])
@@ -2025,6 +2029,8 @@ use ast
     # The user can also pass 3 args if they prefer raw MSL-style: it
     # passes through unchanged.
     if name in ("simdgroup_load" "simdgroup_store")
+      if ctx[:dialect] == "cuda"
+        gpu_kernel_error(ctx[:node], "`" + name + "` is Metal-only; use gpu.wmma_* for CUDA matrices")
       if args.size() == 4
         m  = emit_expr(ctx, args[0])
         p  = emit_expr(ctx, args[1])
@@ -2043,6 +2049,8 @@ use ast
     #   simdgroup_multiply_accumulate(dest, a, b, c)  (dest = a·b + c)
     #   simdgroup_float8x8(0.0)
     if name in ("simdgroup_multiply_accumulate" "simdgroup_float8x8" "simdgroup_bfloat8x8" "simdgroup_half8x8")
+      if ctx[:dialect] == "cuda"
+        gpu_kernel_error(ctx[:node], "`" + name + "` is Metal-only; use gpu.wmma_* for CUDA matrices")
       argtext = ""
       ai = 0
       while ai < args.size()
@@ -2256,9 +2264,9 @@ use ast
 # The statement/expression emitters above generate C, and every gpu.*
 # builtin flows through the __tid/__tg_id/__simd_* locals — so CUDA reuses
 # them wholesale; only the signature and the prologue that derives those
-# locals from blockIdx/blockDim/threadIdx differ. Metal-only features
-# (threadgroup scratch, simdgroup matrices, tg_* reduction helpers) are
-# not mapped in v0 — kernels that use them get a skip comment.
+# locals from blockIdx/blockDim/threadIdx differ. Metal-only reduction and
+# simdgroup-matrix calls are rejected while emitting CUDA so invalid MSL names
+# never leak into a .cu sidecar and fail later inside nvcc.
 
 -> cuda_elt_name(msl_name)
   if msl_name == "bfloat"

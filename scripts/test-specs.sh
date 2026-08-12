@@ -319,6 +319,48 @@ run_cuda_emit_spec() {
   rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path"
 }
 
+# CUDA expected-rejection checks. These prove a Metal-only intrinsic fails in
+# Tungsten's dialect emitter with a useful diagnostic, before an invalid .cu
+# reaches nvcc. No CUDA toolkit or GPU is required.
+run_cuda_reject_spec() {
+  local path="$1"
+  local name
+  local out
+  local ll_path
+  local metal_path
+  local cuda_path
+  local needle
+  local output
+  local status
+
+  name="$(basename "${path%.w}")"
+  out="$TMP_ROOT/$name"
+  ll_path="$ROOT/${path%.w}.ll"
+  metal_path="$ROOT/${path%.w}.metal"
+  cuda_path="$ROOT/${path%.w}.cu"
+  case "$name" in
+    gpu_cuda_tg_reduce_reject_spec) needle='`tg_sum` is not supported by the CUDA dialect' ;;
+    gpu_cuda_simdgroup_reject_spec) needle='`simdgroup_load` is Metal-only' ;;
+    *) record_failure_note "$name" "missing expected CUDA diagnostic"; return ;;
+  esac
+
+  echo "compile-reject $path (TUNGSTEN_GPU_DIALECTS=cuda)"
+  set +e
+  output="$(TUNGSTEN_GPU_DIALECTS=cuda TUNGSTEN_LL_PATH="$ll_path" \
+    "$TUNGSTEN" compile "$path" --out "$out" 2>&1)"
+  status=$?
+  set -e
+  rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path" "$out"
+
+  if [[ "$status" -eq 0 ]]; then
+    record_failure_note "$name" "compile unexpectedly accepted Metal-only CUDA intrinsic"
+  elif ! grep -Fq "$needle" <<<"$output"; then
+    record_result "$name" "$output" 1
+  else
+    record_result "$name" "PASS $name" 0
+  fi
+}
+
 # ── Incremental binary cache lifecycle ────────────────────────────────────
 # One compile step of the lifecycle test: expects a cache hit ("(cache)" in
 # the driver output) or a miss, with TUNGSTEN_INCREMENTAL set explicitly so
@@ -397,6 +439,7 @@ if [[ "${1:-}" == --job-* ]]; then
     --job-compiled) run_compiled_spec "$2" ;;
     --job-interp)   run_interpreter_spec "$2" ;;
     --job-cuda)     run_cuda_emit_spec "$2" ;;
+    --job-cuda-reject) run_cuda_reject_spec "$2" ;;
     --job-wassat)   run_wassat_spec "$2" "$3" ;;
     *) echo "unknown job mode $1" >&2; exit 2 ;;
   esac
@@ -583,6 +626,11 @@ compiled_specs=(
 # Emit-only GPU dialect specs (no hardware). Run always with make specs.
 cuda_emit_specs=(
   spec/compiler/gpu_cuda_emit_spec.w
+)
+
+cuda_reject_specs=(
+  spec/compiler/gpu_cuda_tg_reduce_reject_spec.w
+  spec/compiler/gpu_cuda_simdgroup_reject_spec.w
 )
 
 interpreter_specs=(
@@ -837,6 +885,7 @@ run_parallel compiled "${compiled_specs[@]}"
 run_cache_lifecycle_test
 
 run_parallel cuda "${cuda_emit_specs[@]}"
+run_parallel cuda-reject "${cuda_reject_specs[@]}"
 
 run_parallel interp "${interpreter_specs[@]}"
 

@@ -449,9 +449,10 @@ projects stay unchecked until their stated acceptance criteria are met.
 
 ### GPU and additional platforms
 
-- [ ] Implement CUDA `tg_sum/tg_max/tg_min` equivalents or reject them during
-  the pre-pass; never emit undeclared MSL helpers. Likewise lower or clearly
-  reject `simdgroup_load/store` outside Metal.
+- [x] Reject unsupported CUDA `tg_sum/tg_max/tg_min`, SIMD reductions, and
+  `simdgroup_*` matrix intrinsics during dialect emission. Invalid MSL names
+  never reach a `.cu` sidecar; emit-only expected-failure fixtures keep the
+  diagnostics explicit until native CUDA equivalents are implemented.
 - [ ] Broaden WGSL beyond assignments/calls/if: while-as-loop, return,
   workgroup memory, barriers, and atomics, with emitted WGSL validated by a real
   tool in CI.

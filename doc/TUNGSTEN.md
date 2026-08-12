@@ -31,7 +31,8 @@ COMMANDS
 
     compile FILE         Compile a .w file to a native binary (-o FILE)
     check FILE           Parse and lower a .w file without emitting code
-                         (also: tungsten -c FILE / --check FILE)
+                         (also: tungsten -c FILE / --check FILE). Validates
+                         every selected @gpu fn dialect without sidecars.
     run FILE             Interpret a .w file
     sandbox FILE         Compile FILE, then run it with the sandbox gate
                          latched: file IO, sockets, process control, and

@@ -473,6 +473,11 @@ projects stay unchecked until their stated acceptance criteria are met.
     portable WGSL or receives an explicit dialect diagnostic.
 - [ ] Verify GPU kernel shapes and intrinsic legality before emission, including
   SELF shapes, addcarry/asm restrictions, workgroup sizes, and buffer bounds.
+  - [x] Run the actual selected-dialect GPU emitter as an early shared preflight
+    for compile and `-c`, with source-located subset/type diagnostics and no
+    sidecar writes in check mode.
+  - [ ] Accumulate independent kernel diagnostics so one check reports every
+    invalid kernel instead of stopping after the first.
 - [ ] Make carry-chain unroll count a source/env tuning hint rather than a
   hardcoded 8, and add `bin/tungsten gpu-bench` to emit, compile, dispatch, and
   time reproducible kernels with device/compiler metadata.

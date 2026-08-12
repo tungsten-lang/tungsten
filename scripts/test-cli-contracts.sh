@@ -7,6 +7,9 @@ VALID="$ROOT/spec/compiler/string_buffer_dynamic_append_spec.w"
 TYPED_SIGNATURE_VALID="$ROOT/spec/compiler/small_array_stack_escape_spec.w"
 INVALID="$ROOT/spec/cli/check_type_error.w"
 INVALID_CAMEL="$ROOT/spec/cli/camel_case_invalid.w"
+INVALID_GPU="$ROOT/spec/cli/gpu_check_missing_hint.w"
+VALID_GPU="$ROOT/spec/compiler/gpu_wgsl_emit_spec.w"
+CUDA_GPU="$ROOT/spec/compiler/gpu_cuda_tg_reduce_reject_spec.w"
 EXIT_7="$ROOT/spec/cli/exit_7.w"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-cli-contracts.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT INT TERM
@@ -32,6 +35,30 @@ if "$TUNGSTEN" --check "$INVALID_CAMEL" >"$TMP/check-camel-error.out" 2>&1; then
 fi
 grep -q 'E_LEX_INVALID_IDENTIFIER' "$TMP/check-camel-error.out"
 grep -q "uppercase ASCII is not valid in identifiers: 'camelCase'" "$TMP/check-camel-error.out"
+
+if "$TUNGSTEN" -c "$INVALID_GPU" >"$TMP/check-gpu-error.out" 2>&1; then
+  printf 'tungsten -c accepted an invalid @gpu fn\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-error.out"
+grep -q 'gpu_check_missing_hint.w:4:' "$TMP/check-gpu-error.out"
+[[ ! -e "${INVALID_GPU%.w}.metal" ]]
+[[ ! -e "${INVALID_GPU%.w}.cu" ]]
+[[ ! -e "${INVALID_GPU%.w}.wgsl" ]]
+
+TUNGSTEN_GPU_DIALECTS=wgsl "$TUNGSTEN" -c "$VALID_GPU" >"$TMP/check-gpu-valid.out"
+grep -qx '200 OK' "$TMP/check-gpu-valid.out"
+[[ ! -e "${VALID_GPU%.w}.metal" ]]
+[[ ! -e "${VALID_GPU%.w}.cu" ]]
+[[ ! -e "${VALID_GPU%.w}.wgsl" ]]
+
+if TUNGSTEN_GPU_DIALECTS=cuda "$TUNGSTEN" -c "$CUDA_GPU" \
+    >"$TMP/check-gpu-cuda-error.out" 2>&1; then
+  printf 'tungsten -c accepted a CUDA-incompatible @gpu fn\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-cuda-error.out"
+grep -q 'tg_sum.*not supported by the CUDA dialect' "$TMP/check-gpu-cuda-error.out"
 
 for spelling in _camelCase @camelCase @@camelCase '$camelCase'; do
   if "$TUNGSTEN" --check -e "$spelling = 1" >"$TMP/check-camel-variant.out" 2>&1; then
@@ -67,4 +94,4 @@ if "$TUNGSTEN" gpu-bench --backend bogus >"$TMP/gpu-bench-error.out" 2>&1; then
 fi
 grep -q "unsupported backend 'bogus'" "$TMP/gpu-bench-error.out"
 
-printf 'CLI check, explain, gpu-bench, and exit-status contracts: ok\n'
+printf 'CLI check, GPU preflight, explain, gpu-bench, and exit-status contracts: ok\n'

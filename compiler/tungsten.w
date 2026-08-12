@@ -680,11 +680,36 @@ driver_homebrew_prefix_memo = {}
       node)
   {cuda: seen["cuda"] == true, wgsl: seen["wgsl"] == true}
 
+# Validate and render every selected GPU dialect immediately after parsing.
+# Compile reuses these strings later, so this is a real pre-pass rather than a
+# second emitter run; check calls the same path without writing any sidecars.
+-> gpu_preflight(ast, file_path)
+  kernels = collect_gpu_kernels(ast)
+  if kernels.size() == 0
+    return {kernels: kernels, metal: nil, cuda: nil, wgsl: nil}
+
+  selection = gpu_dialect_selection(env("TUNGSTEN_GPU_DIALECTS"), file_path, kernels[0])
+  begin
+    metal_text = emit_gpu_kernels_metal(kernels)
+    cuda_text = nil
+    wgsl_text = nil
+    if selection[:cuda]
+      cuda_text = emit_gpu_kernels_cuda(kernels)
+    if selection[:wgsl]
+      wgsl_text = emit_gpu_kernels_wgsl(kernels)
+  rescue err
+    if type(err) == "Hash" && err[:rt] == :compile_error && err[:file] == nil
+      err[:file] = file_path
+    raise err
+
+  {kernels: kernels, metal: metal_text, cuda: cuda_text, wgsl: wgsl_text}
+
 -> emit_ir(file_path, emit_wire, verbose, intern_algo, sidemap_path = nil, emit_ll_only_arg = false, build_defines = nil, no_static_slab = false)
   # Emit LLVM IR (or WIRE text) for a single file, return ll_path or nil
   loader = Loader.new(verbose)
   load_started_at = clock
   ast = loader.load_program_ast(file_path)
+  gpu_artifacts = gpu_preflight(ast, file_path)
   g_incremental[:manifest] = loader.manifest_files()
   if ast_stats
     count_kinds(ast, g_ast_stats_counts)
@@ -780,10 +805,9 @@ driver_homebrew_prefix_memo = {}
   # Emit a sibling .metal file for each `@gpu fn` found in the program.
   # Runtime dispatch wiring is compile→library→pipeline→dispatch; the
   # .metal file is the artifact we verify: source → MSL → dispatch.
-  kernels = collect_gpu_kernels(ast)
+  kernels = gpu_artifacts[:kernels]
   if kernels.size() > 0
-    dialect_selection = gpu_dialect_selection(env("TUNGSTEN_GPU_DIALECTS"), file_path, kernels[0])
-    metal_text = emit_gpu_kernels_metal(kernels)
+    metal_text = gpu_artifacts[:metal]
     # Emit the .metal (and the opt-in .cu/.wgsl sidecars) next to the SOURCE,
     # not next to the .ll. For `-o` the .ll lands in a temp build dir, but the
     # runtime loads the kernel via a source-relative path (read_file →
@@ -803,22 +827,18 @@ driver_homebrew_prefix_memo = {}
     # Default: emit CUDA always (cross-platform kernel source). WGSL stays
     # opt-in. Set TUNGSTEN_GPU_DIALECTS=none to suppress extras; Metal is
     # always written when kernels are present.
-    emit_cuda = dialect_selection[:cuda]
-    emit_wgsl = dialect_selection[:wgsl]
-    if emit_cuda
-      cuda_text = emit_gpu_kernels_cuda(kernels)
-      if cuda_text != nil
-        cuda_path = file_path.replace(".w", ".cu")
-        write_file(cuda_path, cuda_text)
-        if verbose
-          << "Wrote " + cuda_path + " (" + kernels.size().to_s() + " @gpu fn → CUDA)"
-    if emit_wgsl
-      wgsl_text = emit_gpu_kernels_wgsl(kernels)
-      if wgsl_text != nil
-        wgsl_path = file_path.replace(".w", ".wgsl")
-        write_file(wgsl_path, wgsl_text)
-        if verbose
-          << "Wrote " + wgsl_path
+    cuda_text = gpu_artifacts[:cuda]
+    wgsl_text = gpu_artifacts[:wgsl]
+    if cuda_text != nil
+      cuda_path = file_path.replace(".w", ".cu")
+      write_file(cuda_path, cuda_text)
+      if verbose
+        << "Wrote " + cuda_path + " (" + kernels.size().to_s() + " @gpu fn → CUDA)"
+    if wgsl_text != nil
+      wgsl_path = file_path.replace(".w", ".wgsl")
+      write_file(wgsl_path, wgsl_text)
+      if verbose
+        << "Wrote " + wgsl_path
 
   return ll_path
 
@@ -1973,6 +1993,7 @@ driver_homebrew_prefix_memo = {}
   loader = Loader.new(verbose)
   ast = loader.load_program_ast(file_path)
   compile_to_wire(ast, file_path, verbose, fast_mode, math_mode)
+  gpu_preflight(ast, file_path)
   << "200 OK"
   true
 

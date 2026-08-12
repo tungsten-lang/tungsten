@@ -466,10 +466,10 @@ conclusion:
   certificate) or exercised trailing-zero shapes. Every kernel change ships
   with a randomized GMP-differential fuzz; the harness cross-checks every
   cell against GMP before timing and dies on mismatch.
-- **Wrappers swallow errors; dev builds lie about intrinsics.** `bin/tungsten
-  run` exits 0 after runtime death (diff full output, not exit codes), and
-  the default `-o` links an -O0 runtime archive where intrinsics-based C
-  runs ~30× slow — perf claims come from `--release` only.
+- **Wrappers and dev profiles used to distort results.** Runtime failures now
+  preserve their child status, and ordinary `-o` builds use an optimized
+  runtime archive. Explicit `--dev` remains -O0 and can still invert intrinsic
+  rankings, so performance claims continue to require `--release`.
 
 ---
 

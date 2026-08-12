@@ -41,6 +41,7 @@ _tungsten() {
             '--no-lto[Disable link-time optimization]' \
             '--frame-pointers[Keep frame pointers]' \
             '--release[-O3, full LTO, reduced metadata]' \
+            '--dev[-O0 edit/test build with development checks]' \
             '--debug[Include symbols, checks, and runtime metadata]' \
             '--no-debug[Omit debug symbols and development checks]' \
             '--cpu[Target CPU]:CPU:(v1 v2 v3 v4 native apple-m5)' \

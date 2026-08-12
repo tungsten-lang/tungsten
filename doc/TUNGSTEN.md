@@ -181,6 +181,12 @@ OPTIONS
         development safety checks, and reduced runtime metadata. Defaults to
         --no-debug; an explicit --debug retains symbols/checks/metadata.
 
+        --dev
+        Use the fast edit/test profile: -O0 application and runtime code with
+        development checks. Ordinary native compilation defaults to -O3 with
+        checks, symbols, and source metadata but without whole-program LTO.
+        Mutually exclusive with --release.
+
         --cpu CPU
         Optimize for a CPU or ISA group. v1, v2, v3, v4, and native are
         shorthand; LLVM CPU names such as apple-m5 are also accepted.

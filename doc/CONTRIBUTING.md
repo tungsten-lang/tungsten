@@ -82,8 +82,8 @@ Run `git diff --check` before submitting a change.
 
 ## Benchmarking and performance changes
 
-Always compile benchmark subjects with `--release`. Development/O0 builds can
-change algorithm rankings and do not support performance claims. Compare the
+Always compile benchmark subjects with `--release`. Explicit `--dev`/O0 builds
+can change algorithm rankings and do not support performance claims. Compare the
 same workload on the same hardware, include warmups and multiple samples, and
 record the compiler flags, target CPU, operating system, and summary statistics.
 Keep the correctness oracle separate from the timed region.

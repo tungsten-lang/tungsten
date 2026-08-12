@@ -12,11 +12,15 @@ TLS_C       = File.join(RUNTIME_DIR, "tls.c")
 TLS_STUB_C  = File.join(RUNTIME_DIR, "tls_stub.c")
 LINUX = RUBY_PLATFORM =~ /linux/
 MACOS = RUBY_PLATFORM =~ /darwin/
-# Thin-LTO by default, full-LTO via --release. The runtime
-# archive is built with the matching LTO mode by build.rb so the linker
-# has bitcode for both halves and can cross-optimize through dispatch
-# (w_method_call_cached etc.).
+# Optimized native-object linking by default; full LTO via --release and
+# explicit thin LTO via --lto. The ordinary profile retains debug checks and
+# source metadata, while --dev selects the intentionally unoptimized path.
 RELEASE_MODE = ARGV.delete("--release") ? true : false
+DEV_MODE     = ARGV.delete("--dev") ? true : false
+if RELEASE_MODE && DEV_MODE
+  warn "--dev and --release are mutually exclusive"
+  exit 1
+end
 # LTO policy: the compiled `compile` backend links a fast native-object runtime
 # archive by default and does whole-program LTO only for --release/--lto.
 # Strip those here (OptionParser would reject --lto) and forward them verbatim to
@@ -63,11 +67,18 @@ DEBUG_ENABLED = DEBUG_REQUESTED || (!NO_DEBUG_REQUESTED && !RELEASE_MODE)
 
 BACKEND_FLAGS = []
 BACKEND_FLAGS << "--release" if RELEASE_MODE
+BACKEND_FLAGS << "--dev" if DEV_MODE
 BACKEND_FLAGS << "--lto" if LTO_MODE
 BACKEND_FLAGS << "--native" if NATIVE_MODE
 BACKEND_FLAGS.concat(["--cpu", CPU_NAME]) if CPU_NAME
 BACKEND_FLAGS << (DEBUG_ENABLED ? "--debug" : "--no-debug")
-LTO_FLAG = RELEASE_MODE ? "-flto=full" : "-flto=thin"
+LTO_FLAGS = if RELEASE_MODE
+              ["-flto=full"]
+            elsif LTO_MODE
+              ["-flto=thin"]
+            else
+              []
+            end
 
 # Floating-point math mode. Unlike --release (which only tunes Ruby-side LTO),
 # these are codegen-level and must reach the compiled backend, so they are
@@ -102,20 +113,20 @@ rescue ArgumentError => e
   exit 1
 end
 ENV["TUNGSTEN_MARCH_ARGS"] = MARCH_FLAGS.join(" ")
-PROFILE_OPT = RELEASE_MODE ? "-O3" : "-O0"
+PROFILE_OPT = DEV_MODE ? "-O0" : "-O3"
 DEBUG_FLAGS = DEBUG_ENABLED ? ["-g"] : ["-DNDEBUG"]
 CLANG_FLAGS = if ENV["CLANG_FLAGS"]
                 ENV["CLANG_FLAGS"].split
               elsif LINUX
                 # No -fveclib here: libmvec coverage varies by glibc version and
                 # arch; an unresolved _ZGV* symbol would break the link.
-                [PROFILE_OPT, *DEBUG_FLAGS, *MARCH_FLAGS, LTO_FLAG, "-lm"]
+                [PROFILE_OPT, *DEBUG_FLAGS, *MARCH_FLAGS, *LTO_FLAGS, "-lm"]
               else
                 # -fveclib lets LLVM's loop vectorizer replace scalar libm calls
                 # (sin/cos/exp/…) in vectorizable loops — e.g. the fused
                 # elementwise loops the compiler emits — with libsystem_m's NEON
                 # SIMD variants (_simd_sin_d2 & co., 2 lanes per call).
-                [PROFILE_OPT, *DEBUG_FLAGS, *MARCH_FLAGS, LTO_FLAG, "-fveclib=Darwin_libsystem_m", "-Wl,-dead_strip"]
+                [PROFILE_OPT, *DEBUG_FLAGS, *MARCH_FLAGS, *LTO_FLAGS, "-fveclib=Darwin_libsystem_m", "-Wl,-dead_strip"]
               end
 
 # Helper: find a header in standard paths
@@ -364,6 +375,7 @@ parser = OptionParser.new do |opts|
   opts.separator ""
   opts.separator "Build flags:"
   opts.separator "    --release        -O3, full LTO, safety checks/metadata off"
+  opts.separator "    --dev            -O0 edit/test build with development checks"
   opts.separator "    --debug          Include symbols, safety checks, and runtime metadata"
   opts.separator "    --no-debug       Omit debug symbols and development checks"
   opts.separator "    --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)"

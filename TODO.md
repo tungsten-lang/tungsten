@@ -292,9 +292,10 @@ projects stay unchecked until their stated acceptance criteria are met.
   raise peak RSS and can lose whole-module optimization, particularly on ARM64.
 - [ ] Promote compiler PGO from an opt-in experiment to a reproducible cold
   bootstrap profile, with versioned training inputs and before/after timings.
-- [ ] Resolve the `-O0` performance inversion. User `-o` builds should default
-  to a meaningful optimized profile, while an explicit debug/O0 mode remains
-  available; all benchmark harnesses must require/restate release mode.
+- [x] Resolve the `-O0` performance inversion. Ordinary `-o` builds now use
+  `-O3` application/runtime code while retaining checks, symbols, and source
+  metadata; explicit `--dev` selects `-O0`, and benchmark guidance continues
+  to require the full release profile.
 - [ ] Move the remaining reusable runtime archive and incremental artifacts out
   of `/tmp`/implicit home caches into the selected content-addressed cache, and
   include tool contents, generated tables, runtime sources, ambient SDK paths,

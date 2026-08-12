@@ -289,6 +289,9 @@ while i < args.size()
 if debug_requested && no_debug_requested
   ccall("w_eputs", "--debug and --no-debug are mutually exclusive")
   exit 1
+if dev_mode && release_mode
+  ccall("w_eputs", "--dev and --release are mutually exclusive")
+  exit 1
 debug_enabled = debug_requested || (!no_debug_requested && !release_mode)
 if native_mode && cpu_name != "native"
   ccall("w_eputs", "--native conflicts with --cpu " + cpu_name)
@@ -1050,9 +1053,9 @@ driver_homebrew_prefix_memo = {}
   ""
 
 -> profile_opt_flag
-  if release_mode
-    return "-O3"
-  "-O0"
+  if dev_mode
+    return "-O0"
+  "-O3"
 
 -> debug_compile_flag
   if debug_enabled
@@ -1096,7 +1099,7 @@ driver_homebrew_prefix_memo = {}
   # --release / --lto; the default is a target-matched object runtime
   # archive (fatter binary, ~0.1s link vs ~5s recompiling the C runtime).
   doing_lto = (release_mode || explicit_lto) && !no_lto
-  # Fast dev link (default): reuse the cached native-object runtime archive
+  # Fast native-archive link (default): reuse the cached runtime objects
   # rather than recompiling the ~28k-line runtime every build. runtime.o's weak
   # companion stubs keep the gated ssmr/lexchar/metal/blas adds below valid.
   # Configs the shared archive can't represent (cross-target, frame pointers,
@@ -1108,9 +1111,9 @@ driver_homebrew_prefix_memo = {}
     # --dev: clang -O0 on the emitted module. Measured on the self-hosted
     # compiler: link 19.5s -> 5.2s (-O1 is no cheaper than -O3's 18s; only
     # -O0 skips the expensive passes), full build 2.8x faster, produced
-    # binary ~2.2x slower — the right trade for edit-test loops. The
-    # runtime archive it links against is still the cached -O3 build.
-    clang_opt = (dev_mode || !release_mode) ? "-O0" : "-O3"
+    # binary ~2.2x slower — the right trade for edit-test loops. Its
+    # separately keyed runtime archive uses the same -O0 profile.
+    clang_opt = dev_mode ? "-O0" : "-O3"
 
   # Parallel codegen — OPT-IN via TUNGSTEN_PARALLEL_CODEGEN=1. -O3 on one
   # big module is single-threaded and ~90% of a large build's wall; with
@@ -2314,7 +2317,7 @@ elsif command == "compile-batch"
       skip_next = false
     elsif a in ("--out" "-o" "--intern" "-e" "--cpu" "--target" "--sysroot")
       skip_next = true
-    elsif a != "compile-batch" && a != "--emit-wire" && a != "--no-lto" && a != "--frame-pointers" && a != "--release" && a != "--native" && a != "--debug" && a != "--no-debug" && a != "--fast" && a != "-fast" && a != "--verbose" && a != "-v" && a != "--ll" && !a.starts_with?("--cpu=")
+    elsif a != "compile-batch" && a != "--emit-wire" && a != "--no-lto" && a != "--frame-pointers" && a != "--release" && a != "--dev" && a != "--native" && a != "--debug" && a != "--no-debug" && a != "--fast" && a != "-fast" && a != "--verbose" && a != "-v" && a != "--ll" && !a.starts_with?("--cpu=")
       files.push(a)
 
   if files.size() == 0

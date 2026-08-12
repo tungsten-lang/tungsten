@@ -204,7 +204,9 @@ Ruby is **not** required for normal; it is needed for the `--ruby` developer opt
 
 | Flag              | What it does |
 | ----------------- | ------------ |
+| *(default)*        | Optimized `-O3` native-archive build with development checks, symbols, and source metadata; no whole-program LTO. |
 | `--release`       | Release profile: `-O3`, full LTO, no development safety checks, and reduced runtime metadata. Defaults to `--no-debug`. |
+| `--dev`           | Fast edit/test profile: `-O0` application and runtime code with development checks; mutually exclusive with `--release`. |
 | `--debug`         | Include debug symbols, safety checks, and full runtime/source-location metadata. Overrides the release profile's no-debug default. |
 | `--no-debug`      | Omit debug symbols and development checks. |
 | `--cpu CPU`       | Optimize for a CPU or ISA group. `v1`, `v2`, `v3`, `v4`, and `native` are shorthand for the corresponding x86-64 group/native host; LLVM names such as `apple-m5` and `neoverse-v2` are also accepted. |

@@ -19,36 +19,53 @@ codegen for a general matmul (minus the array-access tax measured separately).
 - `tungsten_matmul.w` — the actual `Mat3`/`Mat4` `*` operator, a hand-written
   NxN loop on `f64_array`, and warmed `dgemm` via `core/blas`.
 
-## Results (Apple M5 Max, clang 21, 2026-06)
+## Results
 
 ### Fixed small — current `Mat3`/`Mat4` vs ideal
 
-| kernel | Tungsten `*` (measured) | C schoolbook (ideal) | gap |
-|---|---|---|---|
-| Mat3 (27 mul) | 2837 ns/op | 2.0 ns/op (499 M/s) | **~1400×** |
-| Mat4 (64 mul) | 3267 ns/op | 2.5 ns/op (406 M/s) | **~1325×** |
+Apple M5 Max, Homebrew clang 22.1.8, 2026-08-12; median of three warmed
+Tungsten runs.
 
-The arithmetic is ~2 ns; the rest is operator-overload dispatch (runtime
-`is_a?` walks) + per-call `class.new` heap allocation. **Dispatch/alloc bound,
-not FLOP bound.**
+| kernel | Tungsten `*` | Tungsten `mul_into` | raw Tungsten kernel | C schoolbook | `*` gap |
+|---|---:|---:|---:|---:|---:|
+| Mat3 (27 mul) | 71.9 ns/op | 23.7 ns/op | 17.4 ns/op | 2.10 ns/op | **34.3×** |
+| Mat4 (64 mul) | 75.7 ns/op | 26.6 ns/op | 20.5 ns/op | 2.62 ns/op | **28.9×** |
+
+The compiler now preserves both matrix operands as typed float storage, lowers
+the arithmetic to native fmul/fadd/FMA, and constructs `[...] ## f64[N]`
+directly in one typed buffer rather than boxing into a temporary Array and
+copy-converting it. That cuts the value-semantic operators from the old
+2837/3267 ns baseline to 72/76 ns (**39×/43× faster**). Tiny typed
+literals also keep their WArray header and element payload in one allocation,
+removing the second malloc while retaining normal grow/free behavior.
+
+`mul_into(other, out)` separates allocation from arithmetic for hot loops.
+The raw-kernel row additionally removes the three matrix method sends and is
+the compiler/codegen floor. C still has stack-resident fixed arrays and no
+WArray header loads, so 2–3 ns is not yet a like-for-like API target. The
+remaining Tungsten gap is fixed-storage escape/stack promotion, object
+dispatch/allocation, and WArray access—not the schoolbook arithmetic.
 
 ### NxN sweep — GFLOP/s
 
+Current same-flags C, Apple M5 Max, Homebrew clang 22.1.8, 2026-08-12:
+
 | N | schoolbook | Strassen | dgemm (AMX) |
 |---|---|---|---|
-| 8 | 12.2 | 12.1 | 17 |
-| 16 | 12.3 | 12.8 | 36 |
-| 32 | 16.2 | 13.1 | 163 |
-| 64 | 21.8 | 20.1 | 375 |
-| 128 | 23.3 | 20.4 | 452 |
-| 256 | 18.6 | 22.3 | 429 |
-| 512 | 18.7 | **24.6** | 453 |
+| 8 | 11.4 | 11.1 | 15.8 |
+| 16 | 11.3 | 11.8 | 37.4 |
+| 32 | 15.0 | 11.9 | 164 |
+| 64 | 20.2 | 18.5 | 351 |
+| 128 | 21.6 | 19.0 | 431 |
+| 256 | 17.2 | 20.7 | 411 |
+| 512 | 17.3 | **22.8** | 443 |
 
-Tungsten-native: hand-written schoolbook loop ≈ **~17 GFLOP/s** at N=512
-(~6% slower than same-loop C at ~17.9 GF — within measurement noise); warmed
-`dgemm` ≈ **452 GFLOP/s** (full vendor speed, identical to C Accelerate).
+The current Tungsten hand-written `f64[]` schoolbook loop reaches only
+**~0.99 GFLOP/s** at N=512, while warmed `dgemm` reaches **~443 GFLOP/s**.
+The old near-C result below has regressed; it is retained as useful compiler
+history, not presented as current performance.
 
-Progress: 0.10 → 0.27 → 4.0 → 17 GFLOP/s across four compiler fixes:
+Historical progress: 0.10 → 0.27 → 4.0 → 17 GFLOP/s across four compiler fixes:
 1. `f64[n]` typed array + `:f64` float-path in `lower_assign_expr` / `lower_binary_op`
    (eliminated `store double <i64>` LLVM error; enabled inline `fmul`/`fadd`)
 2. `:i64` machine-int loop vars now populate `ctx[:unboxed_vars]` in `lower_while`

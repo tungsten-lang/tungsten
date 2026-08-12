@@ -509,8 +509,19 @@ projects stay unchecked until their stated acceptance criteria are met.
   differential coverage against the software oracle, standard AES-GCM vectors,
   and the portable fallback retained on unsupported CPUs.
 - [ ] Make small matrix multiplication competitive with C across tiny fixed
-  shapes. Benchmark call/shape-check/allocation overhead separately from the
-  arithmetic and generate specialized kernels where it wins.
+  shapes. First tranche: Mat3/Mat4 preserve typed operands, lower native FMA
+  arithmetic, construct typed result literals directly with one allocation,
+  and expose allocation-free `mul_into`; the benchmark separates value
+  semantics, caller-owned output, and raw-kernel floors. On M5 Max this moved
+  Mat3/Mat4 `*` from 2837/3267 ns to 72/76 ns (39x/43x), with `mul_into` at
+  24/27 ns and raw kernels at 17/21 ns versus same-flags C at 2.1/2.6 ns.
+  Finish with fixed-storage escape/stack promotion and eliminate remaining
+  object/accessor dispatch so the common API closes the final 29-34x gap.
+- [ ] Restore general `f64[]` schoolbook matmul throughput. The 2026-08-12
+  release/native benchmark reaches only ~0.99 GFLOP/s at N=512 versus current
+  same-flags C at ~17.3 GFLOP/s; the prior documented Tungsten result was
+  ~17 GFLOP/s. Profile the regression in header-load hoisting, integer index
+  lowering, and vectorization before making any new large-matrix claims.
 - [ ] Add shape-safe linear algebra: checked dimensions by default, compile-time
   shapes when known, overflow-safe allocation math, and one explicit unsafe
   escape hatch. Measure checks so small matrices do not regress.

@@ -74,3 +74,13 @@ check("mat4.general.det", m4.determinant == (72.0 ## f64), true)
 # accidentally scaled by the old, incorrect determinant.
 m4inv = m4.inverse
 check("mat4.general.inverse", m4inv.at(0, 0) == ((-1.0 ## f64) / (6.0 ## f64)), true)
+
+# Allocation-free products write into caller-owned storage and return it.
+m3_out = Mat3<f64>.zero
+m3_ret = two.mul_into(Mat3<f64>.identity, m3_out)
+check("mat3.mul_into.value", m3_out.at(0, 0) == (2.0 ## f64), true)
+check("mat3.mul_into.return", m3_ret.at(1, 1) == (2.0 ## f64), true)
+m4_out = Mat4<f64>.zero
+m4_ret = m4.mul_into(Mat4<f64>.identity, m4_out)
+check("mat4.mul_into.value", m4_out.at(2, 1) == m4.at(2, 1), true)
+check("mat4.mul_into.return", m4_ret.at(3, 3) == m4.at(3, 3), true)

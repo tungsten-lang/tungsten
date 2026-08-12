@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(507 total), grouped by area, with its declaration, a one-line
+(508 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -157,6 +157,7 @@ summary from the source header, and a link to the source.
 | `Tuple` | `+ Tuple` | Tuple — a heterogeneous, fixed, dynamically-indexable value grouping. | [`core/tuple.w`](../core/tuple.w) |
 | `UUID` | `+ UUID` | — | [`core/uuid.w`](../core/uuid.w) |
 | `Value` | `+ Value` | — | [`core/value.w`](../core/value.w) |
+| `URL` | `+ URL` | URL — strict absolute-URL parsing and canonical reconstruction. | [`core/url.w`](../core/url.w) |
 | `Vector` | `+ Vector<T> < Number` | Vector — generic real-valued N-dimensional vectors. Distinct from | [`core/vector.w`](../core/vector.w) |
 | `FlatTorusOrbit` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitExtremum` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |

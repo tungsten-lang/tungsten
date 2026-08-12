@@ -1232,11 +1232,11 @@ module Tungsten
         end
 
         interpreter.define_method_builtin("index") do |recv, args, _block|
-          recv.index(args[0])
+          args.size == 2 ? recv.index(args[0], args[1]) : recv.index(args[0])
         end
 
         interpreter.define_method_builtin("rindex") do |recv, args, _block|
-          recv.rindex(args[0])
+          args.size == 2 ? recv.rindex(args[0], args[1]) : recv.rindex(args[0])
         end
 
         interpreter.define_method_builtin("reverse") do |recv, _args, _block|

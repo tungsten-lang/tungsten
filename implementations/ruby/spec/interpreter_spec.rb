@@ -181,6 +181,20 @@ RSpec.describe Tungsten::Interpreter do
     end
   end
 
+  it "parses absolute URLs through the Core URL class" do
+    result = run(<<~W)
+      use core/url
+      url = URL.parse("HTTPS://user@example.COM:8443/a?q=1#f")
+      [url.scheme, url.username, url.host, url.port, url.request_target, url.to_s]
+    W
+
+    expect(result).to eq([
+      "https", "user", "example.com", 8443, "/a?q=1",
+      "https://user@example.com:8443/a?q=1#f"
+    ])
+    expect(run("use core/url\nURL.try_parse(\"http://example.com/%zz\")")).to be_nil
+  end
+
   it "evaluates parenthesized expressions" do
     expect(run("(1 + 2) * 3")).to eq(9)
   end
@@ -1401,6 +1415,13 @@ RSpec.describe Tungsten::Interpreter do
     expect(run('"hello".starts_with?("xyz")')).to eq(false)
     expect(run('"hello".ends_with?("llo")')).to eq(true)
     expect(run('"hello".ends_with?("xyz")')).to eq(false)
+  end
+
+  it "honors String index and rindex offsets" do
+    expect(run('"hello world hello".index("hello", 1)')).to eq(12)
+    expect(run('"hello world hello".index("hello", 13)')).to be_nil
+    expect(run('"hello world hello".rindex("hello", 11)')).to eq(0)
+    expect(run('"hello world hello".rindex("o", 6)')).to eq(4)
   end
 
   it "replace substitutes all occurrences" do

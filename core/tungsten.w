@@ -148,6 +148,7 @@
   auto :Tuple,        "tuple"
   auto :UUID,         "uuid"
   auto :Value,        "value"
+  auto :URL,          "url"
   auto :Vector,       "vector"
 
   auto :BF16,         "numeric/bfloat16"

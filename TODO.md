@@ -393,9 +393,11 @@ projects stay unchecked until their stated acceptance criteria are met.
 
 ### Core library surface
 
-- [ ] Add `core/socket.w`, `core/url.w`, and `core/http.w`. URL needs a strict
-  `URL.parse/1`; HTTP needs streaming bodies, redirects, timeouts, cancellation,
-  TLS verification, proxy behavior, and typed transport/status errors.
+- [x] Add `core/url.w` with strict absolute `URL.parse/1`, canonical
+  reconstruction, userinfo/IPv6/port handling, and malformed-input rejection.
+- [ ] Add `core/socket.w` and `core/http.w`. HTTP needs streaming bodies,
+  redirects, timeouts, cancellation, TLS verification, proxy behavior, and
+  typed transport/status errors.
 - [ ] Replace curl subprocess TLS with an in-process transport. Reuse the native
   HTTP/2/HTTP/3 work, avoid `system(3)` global signal/mutex hazards, and test
   certificate validation plus concurrent requests on macOS and Linux.

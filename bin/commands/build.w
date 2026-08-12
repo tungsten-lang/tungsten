@@ -880,6 +880,8 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
   if cached != nil && cached.size >= 1
     return cached[0]
   prefix = formula_prefix
+  if prefix == "" && regular_file?("/usr/include/openssl/ssl.h")
+    prefix = "/usr"
   value = []
   value.push(prefix)
   cached_probe_write("openssl_prefix", fp, value)
@@ -899,14 +901,11 @@ runtime_srcs.push("runtime.c")
 runtime_srcs.push("terminal_input.c")
 runtime_srcs.push("ssmr_witness.c")
 runtime_srcs.push("lexchar_tables.c")
-runtime_srcs.push("tls_stub.c")
 runtime_srcs.push("aks.c")
 if IS_DARWIN
   runtime_srcs.push("event_kqueue.c")
 elsif IS_LINUX
   runtime_srcs.push(env("USE_IOURING") != nil ? "event_iouring.c" : "event_epoll.c")
-if tls_enabled
-  runtime_srcs.push("tls.c")
 if IS_DARWIN
   runtime_srcs.push("metal.m")
   runtime_srcs.push("blas_bridge.c")
@@ -917,6 +916,9 @@ tls_flags = []
 if tls_enabled && regular_file?(openssl_prefix + "/include/openssl/ssl.h")
   tls_flags.push("-DTUNGSTEN_TLS")
   tls_flags.push("-I" + openssl_prefix + "/include")
+if tls_enabled && tls_flags.empty?
+  raise "Tungsten build: TLS requested but OpenSSL headers were not found"
+runtime_srcs.push(tls_flags.empty? ? "tls_stub.c" : "tls.c")
 
 nghttp2_prefix = build_homebrew_prefix("libnghttp2")
 http2_flags = []

@@ -56,12 +56,12 @@ ifdef TLS
 else
   TLS_CFLAGS =
   TLS_LDFLAGS =
-  TLS_IMPL =
+  TLS_IMPL = tls_stub.c
 endif
 
 # Common runtime sources (core + terminal input + event/TLS + optional companions)
-RUNTIME_SRCS = runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC)
-RUNTIME_DEPS = runtime.c terminal_input.c ssmr_witness.c runtime.h wvalue.h ast_schema_generated.h event_loop.h $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC)
+RUNTIME_SRCS = runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC)
+RUNTIME_DEPS = runtime.c terminal_input.c ssmr_witness.c runtime.h wvalue.h ast_schema_generated.h event_loop.h $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC)
 RUNTIME_CFLAGS = $(WARN_FLAGS) $(GC_CFLAGS) $(TLS_CFLAGS) $(ONIG_CFLAGS)
 RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(ONIG_LDFLAGS) $(PLATFORM_LDFLAGS)
 
@@ -69,8 +69,8 @@ RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(ONIG_LDFLAGS) $(PLATFORM_LDFLAG
 # Produces an executable next to the .ll file
 compile: $(SRC:.ll=)
 
-%: %.ll $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)tls_stub.c $(RUNTIME_DIR)aks.c $(if $(TLS_IMPL),$(RUNTIME_DIR)$(TLS_IMPL)) $(addprefix $(RUNTIME_DIR),$(METAL_SRC))
-	$(CLANG) -O2 $(RUNTIME_CFLAGS) $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)tls_stub.c $(if $(TLS_IMPL),$(RUNTIME_DIR)$(TLS_IMPL)) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC)) $< $(RUNTIME_LDFLAGS) -o $@
+%: %.ll $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)$(TLS_IMPL) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC))
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)$(TLS_IMPL) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC)) $< $(RUNTIME_LDFLAGS) -o $@
 
 # Build the split runtime objects for callers that do not use RUNTIME_SRCS.
 runtime-objects: runtime.o terminal_input.o
@@ -99,7 +99,7 @@ bench-bigint: bench_bigint
 	./bench_bigint
 
 bench_bigint: bench_bigint.c $(RUNTIME_DEPS) w_char_table.c
-	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_bigint.c terminal_input.c ssmr_witness.c $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_bigint
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_bigint.c terminal_input.c ssmr_witness.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_bigint
 
 # Benchmark the Int#prime? trial-division/Montgomery-FJ cutoff. The source
 # includes runtime.c directly so it can exercise the exact private tier helpers;
@@ -108,7 +108,7 @@ bench-prime-sweep: bench_prime_sweep
 	./bench_prime_sweep
 
 bench_prime_sweep: ../benchmarks/primes/prime_sweep.c $(RUNTIME_DEPS) w_char_table.c
-	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) ../benchmarks/primes/prime_sweep.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) tls_stub.c $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_prime_sweep
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) ../benchmarks/primes/prime_sweep.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_prime_sweep
 
 tune-bigint:
 	../benchmarks/big_math/tune_bigint_thresholds.sh

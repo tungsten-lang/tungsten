@@ -46315,7 +46315,7 @@ static WValue WN_merge_bang = 0;
 static WValue WN_read_exact = 0, WN_write_bytes = 0, WN_shutdown = 0, WN_set_timeout = 0;
 static WValue WN_read_into = 0, WN_write_slice = 0;
 static WValue WN_alpn_protocol = 0, WN_serve_http = 0, WN_concat = 0;
-static WValue WN_listen = 0, WN_connect = 0, WN_load_cert = 0;
+static WValue WN_listen = 0, WN_connect = 0, WN_load_cert = 0, WN_client_wrap = 0;
 static WValue WN_file_exists_q = 0, WN_read_file = 0, WN_write_file = 0;
 static WValue WN_length = 0;
 static WValue WN_respond_to_q = 0;
@@ -46525,6 +46525,7 @@ static void w_init_method_names(void) {
     WN_listen       = w_string("listen");
     WN_connect      = w_string("connect");
     WN_load_cert    = w_string("load_cert");
+    WN_client_wrap  = w_string("client_wrap");
     WN_file_exists_q = w_string("file_exists?");
     WN_read_file    = w_string("read_file");
     WN_write_file   = w_string("write_file");
@@ -52845,7 +52846,8 @@ static int w_builtin_static_precedes_source(WValue recv, WValue name) {
     if (strcmp(klass->name, "Socket") == 0)
         return w_hash_key_eq(name, WN_listen) || w_hash_key_eq(name, WN_connect);
     if (strcmp(klass->name, "TLS") == 0)
-        return w_hash_key_eq(name, WN_init) || w_hash_key_eq(name, WN_load_cert);
+        return w_hash_key_eq(name, WN_init) || w_hash_key_eq(name, WN_load_cert) ||
+               w_hash_key_eq(name, WN_client_wrap);
     return 0;
 }
 
@@ -53393,6 +53395,10 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
                 const char *cert = as_str(args->slots[0]);
                 const char *key = as_str(args->slots[1]);
                 return w_tls_load_cert(cert, key);
+            }
+            if (w_hash_key_eq(name, WN_client_wrap)) {
+                if (args->size < 2) die("TLS.client_wrap requires socket and hostname");
+                return w_tls_client_wrap(args->slots[0], as_str(args->slots[1]));
             }
         }
 
@@ -54942,6 +54948,7 @@ WValue w_socket_shutdown(WValue sock, int how) {
 WValue w_socket_close(WValue sock) {
     WSocket *s = as_socket(sock);
     if (!s->closed) {
+        w_tls_socket_cleanup(s);
         close(s->fd);
         s->closed = 1;
     }

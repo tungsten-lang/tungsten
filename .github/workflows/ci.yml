@@ -36,13 +36,13 @@ jobs:
         run: >-
           sudo apt-get update &&
           sudo apt-get install -y
-          clang llvm lld pkg-config libonig-dev libzstd-dev
+          clang llvm lld pkg-config libonig-dev libssl-dev libzstd-dev
 
       - name: Install macOS runtime dependencies
         if: runner.os == 'macOS'
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: brew install llvm oniguruma zstd
+        run: brew install llvm oniguruma openssl@3 zstd
 
       - name: Exercise empty-stack transition under ASan and UBSan
         env:
@@ -98,14 +98,14 @@ jobs:
         run: >-
           sudo apt-get update &&
           sudo apt-get install -y
-          clang llvm lld pkg-config libonig-dev libzstd-dev
+          clang llvm lld pkg-config libonig-dev libssl-dev libzstd-dev
 
       - name: Install macOS runtime dependencies
         if: runner.os == 'macOS'
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
-          brew install llvm oniguruma zstd
+          brew install llvm oniguruma openssl@3 zstd
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
       - uses: ruby/setup-ruby@v1

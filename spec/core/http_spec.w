@@ -63,8 +63,8 @@ early_hints = HTTP.parse_response(
 check("http.informational.final_status", early_hints.status == 200)
 check("http.informational.final_body", early_hints.body == "ok")
 
-rejects("http.reject.https") ->
-  HTTP.get("https://example.com/")
+rejects("http.reject.scheme") ->
+  HTTP.get("ftp://example.com/")
 rejects("http.reject.header_newline") ->
   HTTP.build_request_head("GET", url, {"Bad": "one\r\ntwo"})
 rejects("http.reject.header_nul") ->

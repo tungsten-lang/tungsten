@@ -365,11 +365,19 @@ http2_flags=""
 http2_libs=""
 EXTRA_RUNTIME_SRCS=""
 if [ -n "${TLS+x}" ] || [ -n "${TUNGSTEN_TLS+x}" ]; then
-  EXTRA_RUNTIME_SRCS="$EXTRA_RUNTIME_SRCS tls.c"
+  openssl_cflags="$(pkg-config --cflags openssl 2>/dev/null || true)"
   openssl_prefix="$(tungsten_homebrew_prefix openssl@3 || true)"
-  if [ -n "$openssl_prefix" ] && [ -f "$openssl_prefix/include/openssl/ssl.h" ]; then
-    tls_flags="-DTUNGSTEN_TLS -I$openssl_prefix/include"
+  if [ -z "$openssl_cflags" ] && [ -n "$openssl_prefix" ] && [ -f "$openssl_prefix/include/openssl/ssl.h" ]; then
+    openssl_cflags="-I$openssl_prefix/include"
   fi
+  # shellcheck disable=SC2086
+  if ! printf '#include <openssl/ssl.h>\n' | "$BOOTSTRAP_CC" $openssl_cflags -x c -E - >/dev/null 2>&1; then
+    die "TLS requested but OpenSSL headers were not found"
+  fi
+  tls_flags="-DTUNGSTEN_TLS $openssl_cflags"
+  EXTRA_RUNTIME_SRCS="$EXTRA_RUNTIME_SRCS tls.c"
+else
+  EXTRA_RUNTIME_SRCS="$EXTRA_RUNTIME_SRCS tls_stub.c"
 fi
 if [ -n "${HTTP2+x}" ] || [ -n "${TUNGSTEN_HTTP2+x}" ]; then
   nghttp2_prefix="$(tungsten_homebrew_prefix libnghttp2 || true)"
@@ -381,7 +389,7 @@ if [ -n "${HTTP2+x}" ] || [ -n "${TUNGSTEN_HTTP2+x}" ]; then
 fi
 
 RUNTIME_SRCS=(
-  runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c
+  runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c aks.c
   "$ZSTD_RUNTIME_SRC" "$EVENT_SRC"
 )
 # shellcheck disable=SC2206

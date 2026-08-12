@@ -5,6 +5,8 @@
 #include "runtime.h"
 #include <errno.h>
 
+#ifndef TUNGSTEN_TLS
+
 static WValue tls_not_compiled(void) {
     w_raise(w_string("TLS: not compiled in (build with TLS=1 and OpenSSL installed)"));
     return W_NIL;
@@ -27,6 +29,10 @@ WValue w_tls_client_wrap(WValue sock, const char *hostname) {
     (void)sock;
     (void)hostname;
     return tls_not_compiled();
+}
+
+void w_tls_socket_cleanup(WSocket *sock) {
+    (void)sock;
 }
 
 int w_tls_server_configured(void) { return 0; }
@@ -76,3 +82,5 @@ WValue w_crypto_generate_csr(WValue key, WValue domains) {
     (void)domains;
     return tls_not_compiled();
 }
+
+#endif /* !TUNGSTEN_TLS */

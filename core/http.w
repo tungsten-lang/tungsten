@@ -1,9 +1,8 @@
 # HTTP — bounded HTTP/1.1 client and response framing.
 #
-# The transport deliberately supports plain `http://` URLs only. Silently
-# sending an `https://` request over Socket's plain TCP connection would leak
-# credentials and body data; HTTPS stays unavailable until Core has an
-# in-process client TLS transport with certificate and hostname verification.
+# `https://` uses Core's in-process TLS client, including peer and hostname/IP
+# verification. A runtime built without TLS support raises rather than falling
+# back to a plain connection.
 #
 # Responses are buffered up to max_response_bytes. Streaming bodies, redirects,
 # proxies, cancellation, and typed transport/status errors remain future API.
@@ -27,7 +26,7 @@
     @status >= 300 && @status < 400
 
 
-# HTTP — plain HTTP/1.1 requests over the event-loop-backed Socket transport.
+# HTTP — HTTP/1.1 requests over event-loop-backed Socket and TLS transports.
 + HTTP
   -> .get(source, headers = {}, timeout = 30_000)
     HTTP.request("GET", source, headers, nil, timeout)
@@ -41,9 +40,7 @@
   -> .request(verb, source, headers = {}, body = nil, timeout = 30_000, max_response_bytes = 16_777_216)
     body = body.to_s if body != nil
     url = URL.parse(source.to_s)
-    if url.scheme != "http"
-      if url.scheme == "https"
-        raise "HTTP: https requires a verified in-process TLS client transport"
+    if url.scheme != "http" && url.scheme != "https"
       raise "HTTP: unsupported URL scheme: " + url.scheme
     if !url.authority? || url.host == nil || url.host.empty?
       raise "HTTP: URL requires a host"
@@ -56,9 +53,14 @@
 
     request_head = HTTP.build_request_head(verb, url, headers, body)
     socket = Socket.connect(url.host, url.effective_port)
-    socket.set_timeout(timeout)
     raw = ""
     begin
+      socket.set_timeout(timeout)
+      if url.scheme == "https"
+        TLS.client_wrap(socket, url.host)
+        protocol = socket.alpn_protocol()
+        if protocol != nil && protocol != "http/1.1"
+          raise "HTTP: TLS negotiated unsupported ALPN protocol: " + protocol
       written = socket.write(request_head)
       if written != request_head.size
         raise "HTTP: connection closed while writing request headers"

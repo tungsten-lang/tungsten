@@ -13,46 +13,25 @@
 # Both are free, keyless, and list even the long-dead coins this miner
 # targets.
 #
-# Transport is `curl` in a child process, not an in-process TLS socket.
-# TODO(tls): the root cause is two toolchain gaps — the runtime's
-# class-method hook (runtime.c "Class method dispatch") exposes TLS.init
-# and TLS.load_cert but not TLS.client_wrap, and the self-hosted compiler
-# links tls_stub.c unconditionally (compiler/tungsten.w, plus tls_stub.o
-# baked into the cached runtime archive), so no default-built program can
-# complete a TLS handshake. When those are fixed, replace price_curl with a
-# Socket + TLS.client_wrap client and delete the curl dependency.
+# Transport is Core HTTP over the runtime's verified in-process TLS client;
+# no child process or temporary response file is involved.
 #
 # Prices for dead-ish coins are routinely 1e-5 .. 1e-9 USD, which JSON
 # serializers emit in exponent notation, so the number parser here handles
 # the full float grammar rather than leaning on JSON.parse.
 
-# One HTTPS GET via curl. Returns the response body, or nil on any failure.
-# The body lands in a private temp file, not a pipe, so no deadlock is
-# possible however large the reply; -sS keeps curl quiet except on error.
--> price_curl(url)
-  tmp = "/tmp/tungsten-price-" + crypto_now_ms().to_s + "-" + price_seq().to_s
+# One bounded HTTPS GET through Core's verified in-process TLS transport.
+# Returns the response body on a successful HTTP status, or nil on failure.
+-> price_http(url)
   body = nil
   begin
-    p = Process.spawn(["curl", "-sS", "--max-time", "15", "-o", tmp, url])
-    code = p.wait
-    if code == 0
-      body = read_file(tmp)
+    headers = {"Accept": "application/json", "User-Agent": "Tungsten Crypto"}
+    response = HTTP.request("GET", url, headers, nil, 15_000, 2_097_152)
+    if response.success?()
+      body = response.body
   rescue e
     body = nil
-  # The file is absent when curl failed before writing (or when Process is
-  # unavailable — it is compiled-only, and interpreted callers get nil).
-  begin
-    ccall("__w_unlink", tmp)
-  rescue e
-    body = body
   body
-
-# Monotonic per-process counter so concurrent fetches never share a temp
-# file.
-PRICE_SEQ = i64[1]
--> price_seq
-  PRICE_SEQ[0] = PRICE_SEQ[0] + 1
-  PRICE_SEQ[0]
 
 # Parse the float starting at byte index `i` of `s`: -?digits[.digits][e±n].
 # Returns -1.0 when there is no number there. Good to ~15 significant
@@ -134,7 +113,7 @@ PRICE_SEQ = i64[1]
 
 # CoinPaprika: the USD quote lives at quotes.USD.price.
 -> price_from_paprika(id)
-  body = price_curl("https://api.coinpaprika.com/v1/tickers/" + id)
+  body = price_http("https://api.coinpaprika.com/v1/tickers/" + id)
   if body == nil
     return -1.0
   at = body.index("\"USD\"")
@@ -145,7 +124,7 @@ PRICE_SEQ = i64[1]
 
 # CoinGecko: {"<id>":{"usd":N}}.
 -> price_from_gecko(id)
-  body = price_curl("https://api.coingecko.com/api/v3/simple/price?ids=" + id + "&vs_currencies=usd")
+  body = price_http("https://api.coingecko.com/api/v3/simple/price?ids=" + id + "&vs_currencies=usd")
   if body == nil
     return -1.0
   at = body.index("\"" + id + "\"")
@@ -171,7 +150,7 @@ PRICE_SEQ = i64[1]
       joined = joined + ","
     joined = joined + ids[i]
     i += 1
-  body = price_curl("https://api.coingecko.com/api/v3/simple/price?ids=" + joined + "&vs_currencies=usd")
+  body = price_http("https://api.coingecko.com/api/v3/simple/price?ids=" + joined + "&vs_currencies=usd")
   if body == nil
     return out
   i = 0

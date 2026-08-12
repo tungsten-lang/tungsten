@@ -26,6 +26,7 @@
 #include <openssl/sha.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <arpa/inet.h>
 
 /* GC removed — using malloc/calloc directly */
 
@@ -35,6 +36,7 @@ extern __thread WGoroutine *g_current;
 /* Global SSL contexts — server and client */
 static SSL_CTX *g_ssl_ctx = NULL;
 static SSL_CTX *g_ssl_client_ctx = NULL;
+static pthread_mutex_t g_ssl_client_ctx_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Cert/key path storage for HTTP/3 (separate SSL context needs same certs) */
 static const char *g_cert_path = NULL;
@@ -267,23 +269,40 @@ WValue w_socket_alpn_protocol(WValue sock) {
 /* ---- TLS client wrap ---- */
 
 static void ensure_client_ctx(void) {
-    if (g_ssl_client_ctx) return;
+    pthread_mutex_lock(&g_ssl_client_ctx_lock);
+    if (g_ssl_client_ctx) {
+        pthread_mutex_unlock(&g_ssl_client_ctx_lock);
+        return;
+    }
 
-    g_ssl_client_ctx = SSL_CTX_new(TLS_client_method());
-    if (!g_ssl_client_ctx) {
+    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+    if (!ctx) {
+        pthread_mutex_unlock(&g_ssl_client_ctx_lock);
         w_raise(w_string("TLS: failed to create client SSL context"));
     }
 
     /* Use TLS 1.2+ for client (some servers don't support 1.3) */
-    SSL_CTX_set_min_proto_version(g_ssl_client_ctx, TLS1_2_VERSION);
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
 
     /* Load system CA certificates for verification */
-    SSL_CTX_set_default_verify_paths(g_ssl_client_ctx);
-    SSL_CTX_set_verify(g_ssl_client_ctx, SSL_VERIFY_PEER, NULL);
+    if (SSL_CTX_set_default_verify_paths(ctx) != 1) {
+        SSL_CTX_free(ctx);
+        pthread_mutex_unlock(&g_ssl_client_ctx_lock);
+        w_raise(w_string("TLS: failed to load default CA certificates"));
+    }
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
 
-    /* ALPN: advertise h2 and http/1.1 */
-    static const unsigned char alpn[] = "\x02h2\x08http/1.1";
-    SSL_CTX_set_alpn_protos(g_ssl_client_ctx, alpn, sizeof(alpn) - 1);
+    /* This transport is consumed by the HTTP/1.1 client. Advertising h2 here
+     * negotiated HTTP/2 and then sent HTTP/1.1 bytes on that connection. */
+    static const unsigned char alpn[] = "\x08http/1.1";
+    if (SSL_CTX_set_alpn_protos(ctx, alpn, sizeof(alpn) - 1) != 0) {
+        SSL_CTX_free(ctx);
+        pthread_mutex_unlock(&g_ssl_client_ctx_lock);
+        w_raise(w_string("TLS: failed to configure client ALPN"));
+    }
+
+    g_ssl_client_ctx = ctx;
+    pthread_mutex_unlock(&g_ssl_client_ctx_lock);
 }
 
 WValue w_tls_client_wrap(WValue sock, const char *hostname) {
@@ -301,11 +320,22 @@ WValue w_tls_client_wrap(WValue sock, const char *hostname) {
 
     SSL_set_fd(ssl, s->fd);
 
-    /* Set SNI hostname */
-    SSL_set_tlsext_host_name(ssl, hostname);
-
-    /* Also set hostname for certificate verification */
-    SSL_set1_host(ssl, hostname);
+    struct in6_addr address;
+    int is_ip = inet_pton(AF_INET, hostname, &address) == 1 ||
+                inet_pton(AF_INET6, hostname, &address) == 1;
+    int verify_configured;
+    if (is_ip) {
+        verify_configured = X509_VERIFY_PARAM_set1_ip_asc(
+            SSL_get0_param(ssl), hostname);
+    } else {
+        /* DNS names use SNI and hostname verification. */
+        verify_configured = SSL_set_tlsext_host_name(ssl, hostname) == 1 &&
+                            SSL_set1_host(ssl, hostname) == 1;
+    }
+    if (verify_configured != 1) {
+        SSL_free(ssl);
+        w_raise(w_string("TLS: failed to configure hostname verification"));
+    }
 
     /* Non-blocking handshake with goroutine parking */
     while (1) {
@@ -322,8 +352,20 @@ WValue w_tls_client_wrap(WValue sock, const char *hostname) {
         w_raise(w_string("TLS: client handshake failed"));
     }
 
+    if (SSL_get_verify_result(ssl) != X509_V_OK) {
+        SSL_free(ssl);
+        w_raise(w_string("TLS: certificate verification failed"));
+    }
+
     s->ssl = ssl;
     return sock;
+}
+
+void w_tls_socket_cleanup(WSocket *sock) {
+    if (sock && sock->ssl) {
+        SSL_free((SSL *)sock->ssl);
+        sock->ssl = NULL;
+    }
 }
 
 /* ---- RSA Crypto for ACME JWS signing ---- */
@@ -511,8 +553,11 @@ WValue w_crypto_rsa_thumbprint(WValue key) {
 
 WValue w_crypto_generate_csr(WValue key, WValue domains) {
     EVP_PKEY *pkey = extract_pkey(key);
+    if (!w_is_array(domains)) {
+        w_raise(w_string("Crypto: CSR domains must be an array"));
+    }
     WArray *dom_arr = (WArray *)w_as_ptr(domains);
-    if (!dom_arr || dom_arr->length < 1) {
+    if (dom_arr->size < 1) {
         w_raise(w_string("Crypto: CSR requires at least one domain"));
     }
 
@@ -525,34 +570,38 @@ WValue w_crypto_generate_csr(WValue key, WValue domains) {
     char cn_buf[6];
     const char *cn;
     size_t cn_len;
-    w_str_data(dom_arr->items[0], cn_buf, &cn, &cn_len);
+    w_str_data(w_array_get(domains, w_int(0)), cn_buf, &cn, &cn_len);
 
     X509_NAME *subj = X509_REQ_get_subject_name(req);
-    X509_NAME_add_entry_by_txt(subj, "CN", MBSTRING_ASC, (const unsigned char *)cn, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(subj, "CN", MBSTRING_ASC,
+                               (const unsigned char *)cn, (int)cn_len, -1, 0);
 
     /* Add SAN extension for all domains */
-    if (dom_arr->length > 0) {
+    if (dom_arr->size > 0) {
         STACK_OF(X509_EXTENSION) *exts = sk_X509_EXTENSION_new_null();
         /* Build SAN string: "DNS:a.com,DNS:b.com" */
         size_t san_len = 0;
-        for (int64_t i = 0; i < dom_arr->length; i++) {
+        for (int64_t i = 0; i < dom_arr->size; i++) {
             char d_buf[6];
             const char *d;
             size_t d_len;
-            w_str_data(dom_arr->items[i], d_buf, &d, &d_len);
+            w_str_data(w_array_get(domains, w_int(i)), d_buf, &d, &d_len);
             san_len += d_len + 5; /* "DNS:" + "," */
         }
         char *san = malloc(san_len + 1);
-        san[0] = '\0';
-        for (int64_t i = 0; i < dom_arr->length; i++) {
-            if (i > 0) strcat(san, ",");
-            strcat(san, "DNS:");
+        size_t san_pos = 0;
+        for (int64_t i = 0; i < dom_arr->size; i++) {
+            if (i > 0) san[san_pos++] = ',';
+            memcpy(san + san_pos, "DNS:", 4);
+            san_pos += 4;
             char d_buf2[6];
             const char *d;
             size_t d_len2;
-            w_str_data(dom_arr->items[i], d_buf2, &d, &d_len2);
-            strcat(san, d);
+            w_str_data(w_array_get(domains, w_int(i)), d_buf2, &d, &d_len2);
+            memcpy(san + san_pos, d, d_len2);
+            san_pos += d_len2;
         }
+        san[san_pos] = '\0';
 
         X509_EXTENSION *ext = X509V3_EXT_nconf_nid(NULL, NULL, NID_subject_alt_name, san);
         free(san);

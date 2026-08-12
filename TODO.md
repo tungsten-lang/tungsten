@@ -442,13 +442,15 @@ projects stay unchecked until their stated acceptance criteria are met.
   reconstruction, userinfo/IPv6/port handling, and malformed-input rejection.
 - [x] Define the `core/socket.w` facade for event-loop-backed TCP listen,
   connect, accept, String/ByteArray I/O, deadlines, shutdown, ALPN, and close.
-- [ ] Complete `core/http.w`. The bounded plain-HTTP/1.1 client and strict
-  response framer are implemented. Production HTTP still needs streaming
-  bodies, redirects, cancellation, per-phase timeouts, TLS verification, proxy
-  behavior, and typed transport/status errors.
-- [ ] Replace curl subprocess TLS with an in-process transport. Reuse the native
-  HTTP/2/HTTP/3 work, avoid `system(3)` global signal/mutex hazards, and test
-  certificate validation plus concurrent requests on macOS and Linux.
+- [ ] Complete `core/http.w`. The bounded HTTP/1.1 client and strict
+  response framer are implemented, including verified in-process TLS when the
+  runtime is built with TLS support. Production HTTP still needs streaming
+  bodies, redirects, cancellation, per-phase timeouts, configurable trust and
+  proxy behavior, and typed transport/status errors.
+- [x] Replace the tungsten-crypto price fetcher's curl subprocess with Core's
+  verified in-process TLS transport. The local integration test validates the
+  certificate chain and hostname on macOS and Linux CI; concurrency and
+  connection pooling remain part of the broader HTTP client work above.
 - [ ] Add `core/timezone.w`, `core/datetime.w`, and `core/timestamp.w` with a
   versioned timezone database, DST gap/fold policy, monotonic-vs-wall-clock
   separation, parsing/formatting, and serialization provenance.

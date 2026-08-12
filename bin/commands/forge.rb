@@ -45,6 +45,7 @@ TLS_FLAGS = if TLS_ENABLED && OPENSSL_PREFIX
             else
               []
             end
+raise "TLS requested but OpenSSL headers were not found" if TLS_ENABLED && !OPENSSL_PREFIX
 
 HTTP2_ENABLED = ENV["HTTP2"] || ENV["TUNGSTEN_HTTP2"]
 NGHTTP2_PREFIX = if HTTP2_ENABLED
@@ -65,7 +66,7 @@ HTTP2_FLAGS = if HTTP2_ENABLED && NGHTTP2_PREFIX
 AKS_C    = File.join(RUNTIME_DIR, "aks.c")
 SSMR_C   = File.join(RUNTIME_DIR, "ssmr_witness.c")
 HAMMER_C = File.join(RUNTIME_DIR, "hammer.c")
-FORGE_EXTRA_SRCS  = [TLS_STUB_C, (TLS_ENABLED && OPENSSL_PREFIX ? TLS_C : nil), HTTP2_C, (File.exist?(SSMR_C) ? SSMR_C : nil), (File.exist?(AKS_C) ? AKS_C : nil), (File.exist?(HAMMER_C) ? HAMMER_C : nil)].compact
+FORGE_EXTRA_SRCS  = [(TLS_ENABLED ? TLS_C : TLS_STUB_C), HTTP2_C, (File.exist?(SSMR_C) ? SSMR_C : nil), (File.exist?(AKS_C) ? AKS_C : nil), (File.exist?(HAMMER_C) ? HAMMER_C : nil)].compact
 FORGE_EXTRA_FLAGS = TLS_FLAGS + HTTP2_FLAGS
 
 # ── Defaults ─────────────────────────────────────────────────────

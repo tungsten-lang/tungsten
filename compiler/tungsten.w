@@ -497,6 +497,50 @@ driver_homebrew_prefix_memo = {}
     return "-lonig"
   ""
 
+-> tls_requested?
+  env("TLS") != nil || env("TUNGSTEN_TLS") != nil
+
+-> tls_cflags
+  return "" if !tls_requested?()
+  if cross_target != ""
+    flags = env("TUNGSTEN_CROSS_TLS_CFLAGS")
+    if flags == nil || flags == ""
+      raise "TLS cross-compilation requires TUNGSTEN_CROSS_TLS_CFLAGS"
+    return flags + " -DTUNGSTEN_TLS"
+  cached = env("TUNGSTEN_TLS_CFLAGS")
+  if cached != nil && cached != ""
+    return cached + " -DTUNGSTEN_TLS"
+  flags = capture("pkg-config --cflags openssl 2>/dev/null").strip()
+  if flags != ""
+    return flags + " -DTUNGSTEN_TLS"
+  prefix = driver_homebrew_prefix("openssl@3")
+  if prefix != "" && file?(prefix + "/include/openssl/ssl.h")
+    return "-I" + prefix + "/include -DTUNGSTEN_TLS"
+  if file?("/usr/include/openssl/ssl.h")
+    return "-DTUNGSTEN_TLS"
+  raise "TLS requested but OpenSSL headers were not found"
+
+-> tls_ldflags
+  return "" if !tls_requested?()
+  if cross_target != ""
+    flags = env("TUNGSTEN_CROSS_TLS_LDFLAGS")
+    if flags == nil || flags == ""
+      raise "TLS cross-compilation requires TUNGSTEN_CROSS_TLS_LDFLAGS"
+    return flags
+  cached = env("TUNGSTEN_TLS_LDFLAGS")
+  if cached != nil && cached != ""
+    return cached
+  flags = capture("pkg-config --libs openssl 2>/dev/null").strip()
+  if flags != ""
+    return flags
+  prefix = driver_homebrew_prefix("openssl@3")
+  if prefix != "" && file?(prefix + "/lib/libssl.dylib")
+    return "-L" + prefix + "/lib -lssl -lcrypto"
+  "-lssl -lcrypto"
+
+-> tls_runtime_source
+  tls_requested?() ? "tls.c" : "tls_stub.c"
+
 # mimalloc for compiled binaries — OPT-IN via TUNGSTEN_MIMALLOC=1. The
 # runtime is malloc-heavy and mimalloc measured -15.5% on new_string /
 # -11% on new_hash (macOS: zone registration; Linux: link-order malloc
@@ -1134,6 +1178,11 @@ driver_homebrew_prefix_memo = {}
     clang_cmd << ocf
     clang_cmd << " "
 
+  tcf = tls_cflags
+  if tcf != ""
+    clang_cmd << tcf
+    clang_cmd << " "
+
   if needs_zstd && runtime_objs == nil
     zcf = zstd_cflags
 
@@ -1166,7 +1215,8 @@ driver_homebrew_prefix_memo = {}
     clang_cmd << "aks.c "
 
     clang_cmd << runtime_dir
-    clang_cmd << "tls_stub.c "
+    clang_cmd << tls_runtime_source()
+    clang_cmd << " "
 
     if needs_zstd
       clang_cmd << runtime_dir
@@ -1245,6 +1295,11 @@ driver_homebrew_prefix_memo = {}
   if h2lf != ""
     clang_cmd << " "
     clang_cmd << h2lf
+
+  tlf = tls_ldflags
+  if tlf != ""
+    clang_cmd << " "
+    clang_cmd << tlf
 
   if cross_target == ""
     mif = mimalloc_link_flags()
@@ -1436,9 +1491,9 @@ driver_homebrew_prefix_memo = {}
 # The runtime sources an archive build reads — shared by the archive's own
 # mtime-freshness check and the incremental compile cache's manifest, so
 # the two invalidation rules can never drift.
--> dev_runtime_base_files(ev, generated_thresholds)
+-> dev_runtime_base_files(ev, generated_thresholds, tls_source)
   bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h",
-           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", "tls_stub.c",
+           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", tls_source,
            "pdqsort.inc", "ipnsort.inc", "radixsort.inc", "timsort.inc",
            "skasort.inc", "wolfsort.inc"]
   if ev == "event_*.c"
@@ -1451,7 +1506,7 @@ driver_homebrew_prefix_memo = {}
     bases.push("generated/bigint_thresholds.h")
   bases
 
--> dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds)
+-> dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds, tls_source)
   config = StringBuffer(0)
   config << "dev-runtime-archive-v4\n"
   config << runtime_root
@@ -1465,6 +1520,8 @@ driver_homebrew_prefix_memo = {}
   config << event_source
   config << "\nthresholds="
   config << generated_thresholds
+  config << "\ntls="
+  config << tls_source
   config << "\n"
   # Ambient compiler/header selection changes object code even when the clang
   # path and explicit flags are unchanged. Keep this list synchronized with
@@ -1491,15 +1548,19 @@ driver_homebrew_prefix_memo = {}
   if cc_identity == nil || ar_identity == nil
     return nil
   compile_flags = profile_opt_flag() + " " + debug_compile_flag() + " " + march_flags()
+  tcf = tls_cflags
+  if tcf != ""
+    compile_flags += " " + tcf
   thresholds_path = runtime_root + "/generated/bigint_thresholds.h"
   generated_thresholds = "absent"
   if file?(thresholds_path)
     generated_thresholds = "present"
-  archive = dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, ev, generated_thresholds)
+  tls_source = tls_runtime_source()
+  archive = dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, ev, generated_thresholds, tls_source)
   evo = ev.replace(".c", ".o")
 
   # Freshness: reuse the cached archive iff it is newer than every base source.
-  bases = dev_runtime_base_files(ev, generated_thresholds)
+  bases = dev_runtime_base_files(ev, generated_thresholds, tls_source)
 
   fresh = StringBuffer(0)
   fresh << "test -e "
@@ -1547,13 +1608,15 @@ driver_homebrew_prefix_memo = {}
   cc << " "
   cc << dev_runtime_shell_quote(runtime_root + "/aks.c")
   cc << " "
-  cc << dev_runtime_shell_quote(runtime_root + "/tls_stub.c")
+  cc << dev_runtime_shell_quote(runtime_root + "/" + tls_source)
   cc << " && "
   cc << ar_command
   cc << " rcs \"$archive_tmp\""
   cc << " runtime.o terminal_input.o "
   cc << event_object_arg
-  cc << " aks.o tls_stub.o && mv -f \"$archive_tmp\" "
+  cc << " aks.o "
+  cc << tls_source.replace(".c", ".o")
+  cc << " && mv -f \"$archive_tmp\" "
   cc << dev_runtime_shell_quote(archive)
   cc << "; status=$?; rm -rf \"$build_dir\" \"$archive_tmp\"; exit $status"
   if system(cc.to_s()) != true
@@ -1591,6 +1654,11 @@ driver_homebrew_prefix_memo = {}
     cc << ocf
     cc << " "
 
+  tcf = tls_cflags
+  if tcf != ""
+    cc << tcf
+    cc << " "
+
   if (release_mode || explicit_lto) && !no_lto
     cc << (release_mode ? "-flto=full " : "-flto ")
 
@@ -1599,7 +1667,9 @@ driver_homebrew_prefix_memo = {}
 
   cc << "-c runtime.c terminal_input.c "
   cc << runtime_event_source
-  cc << " ssmr_witness.c tls_stub.c aks.c "
+  cc << " ssmr_witness.c "
+  cc << tls_runtime_source()
+  cc << " aks.c "
 
   if needs_zstd
     cc << zstd_runtime_source()
@@ -1867,7 +1937,7 @@ driver_homebrew_prefix_memo = {}
   ev = runtime_event_source
   runtime_root = dev_runtime_source_identity(runtime_dir, runtime_identity())
   gt = file?(runtime_root + "/generated/bigint_thresholds.h") ? "present" : "absent"
-  bases = dev_runtime_base_files(ev, gt)
+  bases = dev_runtime_base_files(ev, gt, tls_runtime_source())
   entries = []
   bi = 0
   while bi < bases.size()

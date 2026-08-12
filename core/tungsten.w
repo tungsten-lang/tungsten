@@ -162,6 +162,7 @@
   auto :System,       "system"
   auto :Thread,       "thread"
   auto :Timer,        "timer"
+  auto :TLS,          "tls"
   auto :Token,        "token"
   auto :Tuple,        "tuple"
   auto :UUID,         "uuid"

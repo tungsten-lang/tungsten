@@ -185,6 +185,7 @@ TLS_FLAGS = if TLS_ENABLED && OPENSSL_PREFIX
             else
               []
             end
+raise "TLS requested but OpenSSL headers were not found" if TLS_ENABLED && !OPENSSL_PREFIX
 
 # HTTP/2 support (opt-in via HTTP2=1)
 HTTP2_ENABLED = ENV["HTTP2"] || ENV["TUNGSTEN_HTTP2"]

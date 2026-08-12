@@ -1106,6 +1106,7 @@ int64_t w_socket_close_fd(int64_t fd);
 WValue w_socket_set_timeout(WValue sock, int64_t ms);
 WValue w_socket_shutdown(WValue sock, int how);
 WValue w_socket_close(WValue sock);
+void w_tls_socket_cleanup(WSocket *sock);
 int64_t w_raw_malloc(int64_t size);
 int64_t w_raw_free(int64_t ptr);
 int64_t w_raw_memmove(int64_t dst, int64_t src, int64_t len);

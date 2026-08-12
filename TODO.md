@@ -481,7 +481,7 @@ projects stay unchecked until their stated acceptance criteria are met.
   - [x] Run the actual selected-dialect GPU emitter as an early shared preflight
     for compile and `-c`, with source-located subset/type diagnostics and no
     sidecar writes in check mode.
-  - [ ] Accumulate independent kernel diagnostics so one check reports every
+  - [x] Accumulate independent kernel diagnostics so one check reports every
     invalid kernel instead of stopping after the first.
 - [ ] Make carry-chain unroll count a source/env tuning hint rather than a
   hardcoded 8, and add `bin/tungsten gpu-bench` to emit, compile, dispatch, and

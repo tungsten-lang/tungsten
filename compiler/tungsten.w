@@ -683,6 +683,72 @@ driver_homebrew_prefix_memo = {}
 # Validate and render every selected GPU dialect immediately after parsing.
 # Compile reuses these strings later, so this is a real pre-pass rather than a
 # second emitter run; check calls the same path without writing any sidecars.
+-> gpu_preflight_validate(kernels, selection, file_path)
+  failures = []
+  i = 0
+  while i < kernels.size()
+    failure = nil
+    dialect = "metal"
+    begin
+      emit_gpu_kernels_metal(kernels, i)
+    rescue err
+      if type(err) == "Hash" && err[:rt] == :compile_error
+        failure = err
+      else
+        raise err
+
+    if failure == nil && selection[:cuda]
+      dialect = "cuda"
+      begin
+        emit_gpu_kernels_cuda(kernels, i)
+      rescue err
+        if type(err) == "Hash" && err[:rt] == :compile_error
+          failure = err
+        else
+          raise err
+
+    if failure == nil && selection[:wgsl]
+      dialect = "wgsl"
+      begin
+        emit_gpu_kernels_wgsl(kernels, i)
+      rescue err
+        if type(err) == "Hash" && err[:rt] == :compile_error
+          failure = err
+        else
+          raise err
+
+    if failure != nil
+      if failure[:file] == nil
+        failure[:file] = file_path
+      failures.push({node: kernels[i], dialect: dialect, error: failure})
+    i += 1
+
+  if failures.size() == 1
+    raise failures[0][:error]
+  if failures.size() > 1
+    message = StringBuffer(256)
+    message << failures.size().to_s()
+    message << " independent @gpu functions failed preflight:"
+    i = 0
+    while i < failures.size()
+      entry = failures[i]
+      message << "\n  "
+      message << (i + 1).to_s()
+      message << ". `"
+      message << entry[:node].name.to_s()
+      message << "` \["
+      message << entry[:dialect]
+      message << "\] at line "
+      message << entry[:node].line.to_s()
+      message << ": "
+      detail = entry[:error][:message].to_s().replace("\n", "\n     ")
+      message << detail
+      i += 1
+    first = failures[0][:error]
+    first[:message] = message.to_s()
+    raise first
+  nil
+
 -> gpu_preflight(ast, file_path)
   kernels = collect_gpu_kernels(ast)
   if kernels.size() == 0
@@ -700,6 +766,12 @@ driver_homebrew_prefix_memo = {}
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error && err[:file] == nil
       err[:file] = file_path
+    # Keep valid compilation on the one-pass fast path. Only after a selected
+    # dialect rejects the program do we isolate each function, retaining the
+    # full helper signature registry, so one check can report independent
+    # failures without making every successful GPU build emit N extra times.
+    if type(err) == "Hash" && err[:rt] == :compile_error
+      gpu_preflight_validate(kernels, selection, file_path)
     raise err
 
   {kernels: kernels, metal: metal_text, cuda: cuda_text, wgsl: wgsl_text}

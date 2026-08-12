@@ -22,7 +22,7 @@ use ast
 
 # Emit full .metal source for a list of `@gpu fn` AST nodes.
 # Returns the text, or nil when `kernels` is empty.
--> emit_gpu_kernels_metal(kernels)
+-> emit_gpu_kernels_metal(kernels, only_index = nil)
   if kernels == nil || kernels.size() == 0
     return nil
   out = StringBuffer(1024)
@@ -50,13 +50,13 @@ use ast
     i += 1
   i = 0
   while i < kernels.size()
-    if gpu_fn_return_type(kernels[i]) != nil
+    if gpu_fn_return_type(kernels[i]) != nil && (only_index == nil || only_index == i)
       out << emit_device_fn(kernels[i], gpu_fns)
       out << "\n"
     i += 1
   i = 0
   while i < kernels.size()
-    if gpu_fn_return_type(kernels[i]) == nil
+    if gpu_fn_return_type(kernels[i]) == nil && (only_index == nil || only_index == i)
       if kernel_uses_wmma?(kernels[i])
         out << "// kernel `"
         out << kernels[i].name
@@ -2416,7 +2416,7 @@ use ast
   out << "}\n"
   gpu_with_tables(ctx, out.to_s())
 
--> emit_gpu_kernels_cuda(kernels)
+-> emit_gpu_kernels_cuda(kernels, only_index = nil)
   if kernels == nil || kernels.size() == 0
     return nil
   out = StringBuffer(1024)
@@ -2438,13 +2438,13 @@ use ast
   # Device helpers first so kernels can call them.
   i = 0
   while i < kernels.size()
-    if gpu_fn_return_type(kernels[i]) != nil
+    if gpu_fn_return_type(kernels[i]) != nil && (only_index == nil || only_index == i)
       out << emit_device_fn_cuda(kernels[i], gpu_fns)
       out << "\n"
     i += 1
   i = 0
   while i < kernels.size()
-    if gpu_fn_return_type(kernels[i]) == nil
+    if gpu_fn_return_type(kernels[i]) == nil && (only_index == nil || only_index == i)
       out << emit_kernel_cuda(kernels[i])
       out << "\n"
     i += 1
@@ -2910,7 +2910,7 @@ use ast
   out << "}\n"
   out.to_s()
 
--> emit_gpu_kernels_wgsl(kernels)
+-> emit_gpu_kernels_wgsl(kernels, only_index = nil)
   if kernels == nil || kernels.size() == 0
     return nil
   out = StringBuffer(1024)
@@ -2920,8 +2920,9 @@ use ast
   while i < kernels.size()
     # Device helper functions remain outside the portable WGSL path.
     if gpu_fn_return_type(kernels[i]) == nil
-      out << emit_kernel_wgsl(kernels[i], binding_base)
-      out << "\n"
+      if only_index == nil || only_index == i
+        out << emit_kernel_wgsl(kernels[i], binding_base)
+        out << "\n"
       binding_base += kernels[i].params.size()
     i += 1
   out.to_s()

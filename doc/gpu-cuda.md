@@ -32,6 +32,16 @@ on Linux CI. For the same semantic validation locally, install `naga-cli`
 30.0.0 and either put `naga` on `PATH` or set `NAGA_BIN` before running
 `scripts/test-specs.sh --job-wgsl spec/compiler/gpu_wgsl_emit_spec.w`.
 
+## Check-time diagnostics
+
+`bin/tungsten --check kernels.w` runs the selected-dialect emitters without
+writing sidecars. Every `@gpu fn` is checked independently, so unrelated
+invalid kernels are reported together under `E_GPU_KERNEL_UNSUPPORTED` with
+the function name, dialect, and source line for each failure. The primary
+caret remains anchored on the first failure. A function that is invalid in
+more than one dialect reports the first selected-dialect failure, avoiding
+duplicate follow-on messages for the same body.
+
 ## Surface (v0+)
 
 Supported in both Metal and CUDA:

@@ -8,6 +8,7 @@ TYPED_SIGNATURE_VALID="$ROOT/spec/compiler/small_array_stack_escape_spec.w"
 INVALID="$ROOT/spec/cli/check_type_error.w"
 INVALID_CAMEL="$ROOT/spec/cli/camel_case_invalid.w"
 INVALID_GPU="$ROOT/spec/cli/gpu_check_missing_hint.w"
+MULTI_INVALID_GPU="$ROOT/spec/cli/gpu_check_multiple_errors.w"
 VALID_GPU="$ROOT/spec/compiler/gpu_wgsl_emit_spec.w"
 CUDA_GPU="$ROOT/spec/compiler/gpu_cuda_tg_reduce_reject_spec.w"
 EXIT_7="$ROOT/spec/cli/exit_7.w"
@@ -59,6 +60,18 @@ if TUNGSTEN_GPU_DIALECTS=cuda "$TUNGSTEN" -c "$CUDA_GPU" \
 fi
 grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-cuda-error.out"
 grep -q 'tg_sum.*not supported by the CUDA dialect' "$TMP/check-gpu-cuda-error.out"
+
+if TUNGSTEN_GPU_DIALECTS=cuda "$TUNGSTEN" -c "$MULTI_INVALID_GPU" \
+    >"$TMP/check-gpu-multiple-error.out" 2>&1; then
+  printf 'tungsten -c accepted multiple invalid @gpu functions\n' >&2
+  exit 1
+fi
+grep -q '3 independent @gpu functions failed preflight' "$TMP/check-gpu-multiple-error.out"
+grep -q '`missing_input_hint` \[metal\]' "$TMP/check-gpu-multiple-error.out"
+grep -q '`unsupported_expression` \[metal\]' "$TMP/check-gpu-multiple-error.out"
+grep -q '`cuda_reduction_error` \[cuda\]' "$TMP/check-gpu-multiple-error.out"
+[[ ! -e "${MULTI_INVALID_GPU%.w}.metal" ]]
+[[ ! -e "${MULTI_INVALID_GPU%.w}.cu" ]]
 
 for spelling in _camelCase @camelCase @@camelCase '$camelCase'; do
   if "$TUNGSTEN" --check -e "$spelling = 1" >"$TMP/check-camel-variant.out" 2>&1; then

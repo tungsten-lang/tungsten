@@ -435,9 +435,11 @@ projects stay unchecked until their stated acceptance criteria are met.
     output intentionally omits some sparse parser metadata.
   - [x] Format GPU kernel definitions and currency literals without losing
     attached argument/assignment type hints; include them in corpus parity.
-  - [ ] Attach comments and replace their lossless-whitespace safety path;
-    cover the remaining GPU/domain nodes before widening parity to every
-    tracked `.w`.
+  - [x] Attach standalone and ordinary line-end comments through stable AST
+    markers, preserving indentation, idempotence, and canonical-AST parity.
+  - [ ] Attach comments inside grouped expressions and trailing `##` hints,
+    then remove their lossless-whitespace fallback; cover the remaining
+    GPU/domain nodes before widening parity to every tracked `.w`.
 - [x] Add `bin/tungsten lint` with stable diagnostic codes, machine-readable
   output, configurable severities, and no source mutation.
 - [x] Add `bin/tungsten debug` for build/run with symbols, frame pointers,

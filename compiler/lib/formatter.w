@@ -5,19 +5,187 @@
 use lexer
 use parser
 
--> formatter_has_comment_lines?(source)
-  lines = source.split("\n")
+# Comments are not AST nodes yet. For comments at statement boundaries, mask
+# them as uniquely named zero-argument calls, format the real AST, then restore
+# the comment in the marker's formatted position. This keeps indentation tied
+# to the surrounding AST instead of making every documented file bypass the
+# formatter. Grouped-expression comments and comments swallowed by a `##` hint
+# remain on the lossless fallback until their exact attachment point is modeled.
+-> formatter_group_depth_at(tokens, token_count, offset)
+  depth = 0
   i = 0
-  while i < lines.size
-    stripped = lines[i].strip()
-    if stripped.starts_with?("#") && !stripped.starts_with?("##")
-      return true
+  while i < token_count
+    token = tokens[i]
+    if parser_tok_off(token) >= offset
+      break
+    kind = parser_tok_type(token)
+    if kind in (T_LPAREN T_LBRACKET T_LBRACE)
+      depth += 1
+    elsif kind in (T_RPAREN T_RBRACKET T_RBRACE)
+      depth -= 1
     i += 1
-  false
+  depth
 
-# Until comments are represented in the AST, retain their exact placement and
-# apply only lossless whitespace cleanup. This makes `fmt -w` safe on ordinary
-# documented source while the comment-attaching formatter pass is developed.
+-> formatter_line_indent(line)
+  chars = line.chars()
+  out = StringBuffer(chars.size())
+  i = 0
+  while i < chars.size()
+    if chars[i] != " " && chars[i] != "\t"
+      break
+    out << chars[i]
+    i += 1
+  out.to_s()
+
+-> formatter_line_slice(line, from, count)
+  chars = line.chars()
+  out = StringBuffer(count)
+  i = from
+  finish = from + count
+  if finish > chars.size()
+    finish = chars.size()
+  while i < finish
+    out << chars[i]
+    i += 1
+  out.to_s()
+
+-> formatter_next_content_indent(lines, index)
+  i = index + 1
+  while i < lines.size()
+    stripped = lines[i].strip()
+    if stripped != "" && !stripped.starts_with?("#")
+      return formatter_line_indent(lines[i])
+    i += 1
+  ""
+
+-> formatter_mask_comments(source, file)
+  if source.include?("__tungsten_fmt_comment_")
+    return nil
+  probe = Lexer.new(source, file)
+  token_count = probe.tokenize()
+  # Polyglot bash headers are rewritten in-place by Lexer. Keep their exact
+  # two-line trampoline on the lossless path until header attachment is a
+  # first-class formatter concept.
+  if probe.source() != source
+    return nil
+  tokens = probe.packed_tokens()
+  chars = probe.chars()
+  covered = {}
+  ti = 0
+  while ti < token_count
+    token = tokens[ti]
+    off = parser_tok_off(token)
+    size = parser_tok_len(token)
+    kind = parser_tok_type(token)
+    next_off = nil
+    if ti + 1 < token_count
+      next_off = parser_tok_off(tokens[ti + 1])
+    else
+      next_off = chars.size()
+    # Packed token lengths wrap at 4096. A hash inside a long string-like
+    # token would otherwise look uncovered and be mistaken for a comment.
+    # Conservatively keep that rare source on the lossless path.
+    if next_off - off >= 4096 && kind in (T_STRING T_STRING_INTERP T_REGEX T_REGEX_CAPTURE T_BYTE_ARRAY T_BYTE_ARRAY_INTERP T_WORD_ARRAY T_SYMBOL_ARRAY T_TYPE_HINT)
+      return nil
+    j = 0
+    while j < size
+      covered[off + j] = kind
+      j += 1
+    ti += 1
+
+  line_at = probe.line_at()
+  col_at = probe.col_at()
+  columns = {}
+  i = 0
+  while i < chars.size()
+    if chars[i] != "#"
+      i += 1
+      next
+    if i + 1 < chars.size() && chars[i + 1] == "#"
+      i += 2
+      next
+    # Key tokens store their packed span after the `#[` introducer, so the
+    # leading hash is not covered even though it is not a comment.
+    if i + 1 < chars.size() && chars[i + 1] == "\["
+      i += 2
+      next
+    token_kind = covered[i]
+    if token_kind != nil && token_kind != T_TYPE_HINT
+      i += 1
+      next
+    # A trailing comment is part of the packed TYPE_HINT token even though
+    # Parser later strips it. Replacing it with a statement would sever the
+    # pending hint from its definition, so retain the lossless fallback.
+    if token_kind == T_TYPE_HINT
+      return nil
+    if formatter_group_depth_at(tokens, token_count, i) > 0
+      return nil
+    line = line_at[i]
+    if columns[line] == nil
+      columns[line] = col_at[i]
+    while i < chars.size() && chars[i] != "\n"
+      i += 1
+
+  if columns.empty?()
+    return {source: source, comments: {}}
+
+  lines = source.split("\n")
+  comments = {}
+  out = StringBuffer(source.size() + columns.size() * 48)
+  li = 0
+  serial = 0
+  while li < lines.size()
+    column = columns[li + 1]
+    if column == nil
+      out << lines[li]
+    else
+      line = lines[li]
+      before = formatter_line_slice(line, 0, column - 1).rtrim()
+      comment = formatter_line_slice(line, column - 1, line.chars().size() - column + 1).rtrim()
+      marker = "__tungsten_fmt_comment_" + serial.to_s() + "__()"
+      if before.strip() == ""
+        indent = formatter_line_indent(line)
+        out << indent << marker
+        comments[marker] = {text: comment, inline: false}
+      else
+        indent = formatter_line_indent(line)
+        next_indent = formatter_next_content_indent(lines, li)
+        if next_indent.size() > indent.size()
+          indent = next_indent
+        out << before << "\n" << indent << marker
+        comments[marker] = {text: comment, inline: true}
+      serial += 1
+    if li + 1 < lines.size()
+      out << "\n"
+    li += 1
+  {source: out.to_s(), comments: comments}
+
+-> formatter_restore_comments(formatted, comments)
+  if comments == nil || comments.empty?()
+    return formatted
+  lines = formatted.split("\n")
+  restored = []
+  i = 0
+  while i < lines.size()
+    line = lines[i]
+    marker = line.strip()
+    attached = comments[marker]
+    if attached == nil
+      restored.push(line)
+    elsif attached[:inline]
+      if restored.empty?()
+        restored.push(attached[:text])
+      else
+        previous = restored.pop()
+        restored.push(previous + "  " + attached[:text])
+    else
+      indent = formatter_line_indent(line)
+      restored.push(indent + attached[:text])
+    i += 1
+  restored.join("\n").rtrim() + "\n"
+
+# Retain exact placement and apply only lossless whitespace cleanup when a
+# comment shape cannot yet be attached without changing program structure.
 -> formatter_lossless_whitespace(source)
   lines = source.split("\n")
   out = StringBuffer(source.size + 16)
@@ -110,6 +278,34 @@ use parser
     "<<"
   when :RSHIFT
     ">>"
+  when :DOT_PRODUCT
+    "·"
+  when :CROSS_PRODUCT
+    "×"
+  when :HADAMARD
+    "⊙"
+  when :KRONECKER
+    "⊗"
+  when :DOT_PLUS
+    ".+"
+  when :DOT_MINUS
+    ".-"
+  when :DOT_STAR
+    ".*"
+  when :DOT_SLASH
+    "./"
+  when :DOT_PIPE
+    ".|"
+  when :DOT_AMP
+    ".&"
+  when :DOT_CARET
+    ".^"
+  when :DOT_LSHIFT
+    ".<<"
+  when :DOT_RSHIFT
+    ".>>"
+  when :APPROX
+    "≈"
   when :PIPE_FWD
     "|>"
   else
@@ -246,7 +442,9 @@ use parser
   when :decimal
     node.value.to_s()
   when :quantity
-    node.number_str.to_s() + " " + node.unit.to_s()
+    unit = node.unit.to_s()
+    separator = unit == "%" ? "" : " "
+    node.number_str.to_s() + separator + unit
   when :currency
     prefix = node.prefix == nil ? "" : node.prefix.to_s()
     suffix = node.suffix == nil ? "" : node.suffix.to_s()
@@ -260,6 +458,11 @@ use parser
     while hex.size < 4
       hex = "0" + hex
     "U+" + hex
+  when :color
+    hex = node.rgba.to_s(16).upcase()
+    while hex.size < 8
+      hex = "0" + hex
+    "#" + hex
   when :bool
     node.value ? "true" : "false"
   when :nil_lit
@@ -319,8 +522,12 @@ use parser
     "« " + parts.join(" ") + " »"
   when :var, :ivar, :cvar, :gvar
     node.name.to_s()
+  when :parg
+    "@" + node.index.to_s()
   when :class_ref
     node.name.to_s() + formatter_type_args(node.type_args)
+  when :magic_constant
+    "__" + node.name.to_s() + "__"
   when :self_ref
     "self"
   when :binary_op
@@ -333,6 +540,13 @@ use parser
     "(" + formatter_expr(node.left, depth) + " && " + formatter_expr(node.right, depth) + ")"
   when :or
     "(" + formatter_expr(node.left, depth) + " || " + formatter_expr(node.right, depth) + ")"
+  when :assign
+    value = formatter_expr(node.value, depth)
+    if node.type_hint != nil
+      value += " ## " + node.type_hint.to_s()
+    "(" + formatter_expr(node.target, depth) + " = " + value + ")"
+  when :compound_assign
+    "(" + formatter_expr(node.target, depth) + " " + formatter_operator(node.op) + "= " + formatter_expr(node.value, depth) + ")"
   when :call
     formatter_call(node, depth)
   when :safe_nav
@@ -348,6 +562,8 @@ use parser
     formatter_block(node, depth)
   when :passthrough
     formatter_expr(node.expression, depth) + "; " + formatter_expr(node.value, depth)
+  when :rescue_expr
+    "(" + formatter_expr(node.body, depth) + " rescue " + formatter_expr(node.fallback, depth) + ")"
   when :type_ascription
     formatter_expr(node.expression, depth) + " ## " + node.type_hint.to_s()
   else
@@ -568,10 +784,13 @@ use parser
     prefix + formatter_expr(node, depth)
 
 -> format_tungsten_source(source, file = "(fmt)")
-  lexer = Lexer.new(source, file)
-  token_count = lexer.tokenize()
-  parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
-  ast = parser.parse()
-  if formatter_has_comment_lines?(source)
+  masked = formatter_mask_comments(source, file)
+  if masked == nil
     return formatter_lossless_whitespace(source)
-  formatter_sequence(ast.expressions, 0).rtrim() + "\n"
+  formatter_source = masked[:source]
+  lexer = Lexer.new(formatter_source, file)
+  token_count = lexer.tokenize()
+  parser = Parser.new(token_count, lexer.packed_tokens, formatter_source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
+  ast = parser.parse()
+  formatted = formatter_sequence(ast.expressions, 0).rtrim() + "\n"
+  formatter_restore_comments(formatted, masked[:comments])

@@ -44,8 +44,51 @@ cmp "$TMP/on-guard.in.ast" "$TMP/on-guard.out.ast"
 
 printf '# retained comment   \nvalue=1   \n\n' >"$TMP/commented.w"
 "$TUNGSTEN" fmt "$TMP/commented.w" >"$TMP/commented.out"
-printf '# retained comment\nvalue=1\n' >"$TMP/commented.expected"
+printf '# retained comment\nvalue = 1\n' >"$TMP/commented.expected"
 cmp "$TMP/commented.expected" "$TMP/commented.out"
+"$TUNGSTEN" fmt "$TMP/commented.out" >"$TMP/commented-twice.out"
+cmp "$TMP/commented.out" "$TMP/commented-twice.out"
+"$TUNGSTEN" --canonical-ast "$TMP/commented.w" >"$TMP/commented.in.ast"
+"$TUNGSTEN" --canonical-ast "$TMP/commented.out" >"$TMP/commented.out.ast"
+cmp "$TMP/commented.in.ast" "$TMP/commented.out.ast"
+
+cat >"$TMP/comment-attachment.w" <<'EOF'
+# file heading
+if true # branch reason
+  # before assignment
+  value=1 # retained inline
+  text="# not a comment"
+# file tail
+EOF
+cat >"$TMP/comment-attachment.expected" <<'EOF'
+# file heading
+if true  # branch reason
+  # before assignment
+  value = 1  # retained inline
+  text = "# not a comment"
+# file tail
+EOF
+"$TUNGSTEN" fmt "$TMP/comment-attachment.w" >"$TMP/comment-attachment.out"
+cmp "$TMP/comment-attachment.expected" "$TMP/comment-attachment.out"
+"$TUNGSTEN" fmt "$TMP/comment-attachment.out" >"$TMP/comment-attachment-twice.out"
+cmp "$TMP/comment-attachment.out" "$TMP/comment-attachment-twice.out"
+"$TUNGSTEN" --canonical-ast "$TMP/comment-attachment.w" >"$TMP/comment-attachment.in.ast"
+"$TUNGSTEN" --canonical-ast "$TMP/comment-attachment.out" >"$TMP/comment-attachment.out.ast"
+cmp "$TMP/comment-attachment.in.ast" "$TMP/comment-attachment.out.ast"
+
+# Grouped-expression comments remain on the explicit lossless fallback: no
+# comment is lost, and formatting never risks moving an array element.
+printf 'values=[\n  1, # first\n  2\n]   \n' >"$TMP/group-comment.w"
+"$TUNGSTEN" fmt "$TMP/group-comment.w" >"$TMP/group-comment.out"
+printf 'values=[\n  1, # first\n  2\n]\n' >"$TMP/group-comment.expected"
+cmp "$TMP/group-comment.expected" "$TMP/group-comment.out"
+
+# Packed token lengths wrap after 4095 codepoints. A hash inside a longer
+# string must never be mistaken for an uncovered comment marker.
+long_payload="$(printf '%04100d' 0 | tr '0' 'x')"
+printf 'text="%s#inside"\n' "$long_payload" >"$TMP/long-comment-like-string.w"
+"$TUNGSTEN" fmt "$TMP/long-comment-like-string.w" >"$TMP/long-comment-like-string.out"
+cmp "$TMP/long-comment-like-string.w" "$TMP/long-comment-like-string.out"
 
 printf 'value=Tensor<f64, m/s>.zeros([1])   \n' >"$TMP/generic.w"
 "$TUNGSTEN" fmt "$TMP/generic.w" >"$TMP/generic.out"

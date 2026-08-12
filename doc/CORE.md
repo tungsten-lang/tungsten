@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(524 total), grouped by area, with its declaration, a one-line
+(526 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -51,6 +51,8 @@ summary from the source header, and a link to the source.
 | `Future` | `+ Future` | Future — read-only handle for asynchronous settlement and composition. | [`core/future.w`](../core/future.w) |
 | `FutureState` | `+ FutureState` | Future/Promise shared state and read-only Future facade. | [`core/future.w`](../core/future.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
+| `HTTP` | `+ HTTP` | HTTP — plain HTTP/1.1 requests over the event-loop-backed Socket transport. | [`core/http.w`](../core/http.w) |
+| `HTTPResponse` | `+ HTTPResponse` | HTTPResponse — immutable buffered HTTP response. | [`core/http.w`](../core/http.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
 | `Instant` | `+ Instant` | Instant — millisecond-precision timestamp (tag 0xFFFB). | [`core/instant.w`](../core/instant.w) |

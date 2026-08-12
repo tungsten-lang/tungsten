@@ -35,6 +35,8 @@
   auto :Future,       "future"
   auto :FutureState,  "future"
   auto :Hash,         "hash"
+  auto :HTTP,         "http"
+  auto :HTTPResponse, "http"
   auto :Hypercomplex, "numeric/hypercomplex"
   auto :Interval,     "numeric/interval"
   auto :IntervalF64,  "numeric/intervalf64"

@@ -735,6 +735,7 @@ interpreter_specs=(
   spec/core/env_spec.w
   spec/core/integer_tower_spec.w
   spec/core/url_spec.w
+  spec/core/http_spec.w
   spec/core/filesystem_walk_spec.w
   spec/core/file_stat_tempfile_spec.w
   spec/compiler/splat_parameter_parity_spec.w
@@ -844,6 +845,9 @@ core_specs=(
   spec/core/env_spec.w
   spec/core/integer_tower_spec.w
   spec/core/url_spec.w
+  spec/core/http_spec.w
+  spec/core/http_socket_spec.w
+  spec/core/socket_repeated_connect_spec.w
   spec/core/socket_read_into_spec.w
   spec/core/byte_array_slice_spec.w
   spec/core/byte_array_view_flatten_spec.w

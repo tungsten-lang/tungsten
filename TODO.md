@@ -442,9 +442,10 @@ projects stay unchecked until their stated acceptance criteria are met.
   reconstruction, userinfo/IPv6/port handling, and malformed-input rejection.
 - [x] Define the `core/socket.w` facade for event-loop-backed TCP listen,
   connect, accept, String/ByteArray I/O, deadlines, shutdown, ALPN, and close.
-- [ ] Add `core/http.w`. HTTP needs streaming bodies, redirects, timeouts,
-  cancellation, TLS verification, proxy behavior, and typed transport/status
-  errors.
+- [ ] Complete `core/http.w`. The bounded plain-HTTP/1.1 client and strict
+  response framer are implemented. Production HTTP still needs streaming
+  bodies, redirects, cancellation, per-phase timeouts, TLS verification, proxy
+  behavior, and typed transport/status errors.
 - [ ] Replace curl subprocess TLS with an in-process transport. Reuse the native
   HTTP/2/HTTP/3 work, avoid `system(3)` global signal/mutex hazards, and test
   certificate validation plus concurrent requests on macOS and Linux.

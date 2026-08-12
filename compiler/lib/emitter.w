@@ -536,6 +536,11 @@ use naming
   out << declare_fn("w_thread_join", wv, wv)
 
   # Channels
+  out << declare_fn("w_mutex_new", wv, "")
+  out << declare_fn("w_mutex_lock", wv, wv)
+  out << declare_fn("w_mutex_try_lock", wv, wv)
+  out << declare_fn("w_mutex_unlock", wv, wv)
+  out << declare_fn("w_mutex_locked", wv, wv)
   out << declare_fn("w_chan_new", wv, wv)
   out << declare_fn("w_chan_new_unbounded", wv, "")
   out << declare_fn("w_chan_send", wv, wv2)

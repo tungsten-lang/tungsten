@@ -1232,6 +1232,22 @@ typedef struct WChan {
     pthread_mutex_t lock;
 } WChan;
 
+typedef struct WMutex {
+    uint8_t type;        /* W_TYPE_MUTEX — must stay first */
+    uint8_t locked;
+    uint8_t owner_is_goroutine;
+    pthread_mutex_t guard;
+    pthread_t owner_thread;
+    WGoroutine *owner_goroutine;
+    struct WMutex *held_next;
+} WMutex;
+
+WValue w_mutex_new(void);
+WValue w_mutex_lock(WValue mutex);
+WValue w_mutex_try_lock(WValue mutex);
+WValue w_mutex_unlock(WValue mutex);
+WValue w_mutex_locked(WValue mutex);
+
 WValue w_chan_new(WValue capacity_wv);
 WValue w_chan_new_unbounded(void);
 WValue w_chan_send(WValue ch, WValue val);
@@ -1898,6 +1914,10 @@ static inline int w_is_socket(WValue v) {
 static inline int w_is_channel(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
            ((WChan *)w_as_ptr(v))->type == W_TYPE_CHANNEL;
+}
+static inline int w_is_mutex(WValue v) {
+    return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
+           ((WMutex *)w_as_ptr(v))->type == W_TYPE_MUTEX;
 }
 /* ByteArray (was Bytes) is now a WArray with ebits=8.
  * Same predicate as `w_is_array && ebits == 8`. */

@@ -44228,12 +44228,13 @@ WValue __w_type(WValue v) {
 
 /* Compiler tree-walker support only. Keep synchronization-handle
  * discrimination out of public type()/class_name behavior. Codes are private:
- * 0=other, 1=Atomic, 2=Thread, 3=Channel. */
+ * 0=other, 1=Atomic, 2=Thread, 3=Channel, 4=Mutex. */
 __attribute__((visibility("hidden")))
 WValue w_sync_handle_kind_support(WValue v) {
     if (w_is_atomic(v)) return w_int(1);
     if (w_is_thread(v)) return w_int(2);
     if (w_is_channel(v)) return w_int(3);
+    if (w_is_mutex(v)) return w_int(4);
     return w_int(0);
 }
 
@@ -46552,6 +46553,7 @@ static void w_public_type_class_register(uint8_t key, WClass *klass) {
     /* These keys intentionally expose only method facades. Packed Body uses
      * Array as its public identity and is resolved/cached by __w_type below. */
     if (key == W_SUBTAG_ATOMIC || key == (0x80u | W_TYPE_THREAD) ||
+        key == (0x80u | W_TYPE_MUTEX) ||
         key == (0x80u | W_TYPE_CHANNEL) || key == 0xE6)
         return;
     WValue class_value = w_box_ptr(klass, W_SUBTAG_CLASS);
@@ -53690,8 +53692,32 @@ void w_thread_unregister(void) {
 
 /* ---- Thread primitives ---- */
 
+static __thread WMutex *g_thread_held_mutexes = NULL;
+
+/* pthread cancellation does not execute Tungsten ensure bodies. Native
+ * threads therefore register every held Mutex here so their cleanup handler
+ * can release ownership before the thread disappears. Mutexes are explicitly
+ * non-poisoning; protected-state validation remains the caller's policy. */
+static void w_mutex_release_owned_by_current_thread(void) {
+    WMutex *mutex = g_thread_held_mutexes;
+    g_thread_held_mutexes = NULL;
+    while (mutex) {
+        WMutex *next = mutex->held_next;
+        pthread_mutex_lock(&mutex->guard);
+        if (mutex->locked && !mutex->owner_is_goroutine &&
+            pthread_equal(mutex->owner_thread, pthread_self())) {
+            mutex->locked = 0;
+            mutex->owner_goroutine = NULL;
+        }
+        mutex->held_next = NULL;
+        pthread_mutex_unlock(&mutex->guard);
+        mutex = next;
+    }
+}
+
 static void w_thread_mark_stopped(void *arg) {
     WThread *t = (WThread *)arg;
+    w_mutex_release_owned_by_current_thread();
     /*
      * Pooled BigInts and arithmetic arenas are already dead, but their
      * backing allocations are ordinary TLS pointers.  Return all bignum
@@ -60376,6 +60402,129 @@ void w_scheduler_stop(void) {
 }
 
 #pragma clang diagnostic pop
+
+/* ---- Mutexes ---- */
+
+static WMutex *as_mutex(WValue value) {
+    if (!w_is_mutex(value)) die("expected Mutex");
+    return (WMutex *)w_as_ptr(value);
+}
+
+static int w_mutex_owned_by_current(WMutex *mutex) {
+    if (!mutex->locked) return 0;
+    if (g_current) {
+        return mutex->owner_is_goroutine &&
+               mutex->owner_goroutine == g_current;
+    }
+    return !mutex->owner_is_goroutine &&
+           pthread_equal(mutex->owner_thread, pthread_self());
+}
+
+static void w_mutex_track_thread_lock(WMutex *mutex) {
+    mutex->held_next = g_thread_held_mutexes;
+    g_thread_held_mutexes = mutex;
+}
+
+static void w_mutex_untrack_thread_lock(WMutex *mutex) {
+    WMutex **link = &g_thread_held_mutexes;
+    while (*link) {
+        if (*link == mutex) {
+            *link = mutex->held_next;
+            mutex->held_next = NULL;
+            return;
+        }
+        link = &(*link)->held_next;
+    }
+}
+
+static void w_mutex_pause(void) {
+    if (g_current) {
+        w_goroutine_yield();
+    } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
+        /* drove a goroutine cooperatively */
+    } else {
+        struct timespec ts = {0, 100000};
+        nanosleep(&ts, NULL);
+    }
+}
+
+static void w_mutex_take(WMutex *mutex) {
+    mutex->locked = 1;
+    mutex->owner_is_goroutine = g_current ? 1 : 0;
+    mutex->owner_goroutine = g_current;
+    if (!g_current) {
+        mutex->owner_thread = pthread_self();
+        w_mutex_track_thread_lock(mutex);
+    }
+}
+
+WValue w_mutex_new(void) {
+    WMutex *mutex = calloc(1, sizeof(WMutex));
+    if (!mutex) w_raise(w_string("Mutex allocation failed"));
+    mutex->type = W_TYPE_MUTEX;
+    if (pthread_mutex_init(&mutex->guard, NULL) != 0) {
+        free(mutex);
+        w_raise(w_string("Mutex initialization failed"));
+    }
+    return w_box_ptr(mutex, W_SUBTAG_GENERIC);
+}
+
+WValue w_mutex_lock(WValue value) {
+    WMutex *mutex = as_mutex(value);
+    while (1) {
+        pthread_mutex_lock(&mutex->guard);
+        if (!mutex->locked) {
+            w_mutex_take(mutex);
+            pthread_mutex_unlock(&mutex->guard);
+            return value;
+        }
+        if (w_mutex_owned_by_current(mutex)) {
+            pthread_mutex_unlock(&mutex->guard);
+            w_raise(w_string("Mutex is not reentrant"));
+        }
+        pthread_mutex_unlock(&mutex->guard);
+        w_mutex_pause();
+    }
+}
+
+WValue w_mutex_try_lock(WValue value) {
+    WMutex *mutex = as_mutex(value);
+    pthread_mutex_lock(&mutex->guard);
+    if (mutex->locked) {
+        pthread_mutex_unlock(&mutex->guard);
+        return W_FALSE;
+    }
+    w_mutex_take(mutex);
+    pthread_mutex_unlock(&mutex->guard);
+    return W_TRUE;
+}
+
+WValue w_mutex_unlock(WValue value) {
+    WMutex *mutex = as_mutex(value);
+    pthread_mutex_lock(&mutex->guard);
+    if (!mutex->locked) {
+        pthread_mutex_unlock(&mutex->guard);
+        w_raise(w_string("unlock of unlocked Mutex"));
+    }
+    if (!w_mutex_owned_by_current(mutex)) {
+        pthread_mutex_unlock(&mutex->guard);
+        w_raise(w_string("Mutex unlocked by non-owner"));
+    }
+    if (!mutex->owner_is_goroutine) w_mutex_untrack_thread_lock(mutex);
+    mutex->locked = 0;
+    mutex->owner_is_goroutine = 0;
+    mutex->owner_goroutine = NULL;
+    pthread_mutex_unlock(&mutex->guard);
+    return value;
+}
+
+WValue w_mutex_locked(WValue value) {
+    WMutex *mutex = as_mutex(value);
+    pthread_mutex_lock(&mutex->guard);
+    WValue locked = mutex->locked ? W_TRUE : W_FALSE;
+    pthread_mutex_unlock(&mutex->guard);
+    return locked;
+}
 
 /* ---- Channels ---- */
 

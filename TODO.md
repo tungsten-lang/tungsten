@@ -394,8 +394,9 @@ projects stay unchecked until their stated acceptance criteria are met.
   Timeout/nonblocking operations and select remain open. The unbuffered
   concurrency fixture covers close waking blocked senders/receivers and is
   compiled-only until interpreted `go` is asynchronous.
-- [ ] Flesh out `core/mutex.w` with lock/try_lock/unlock/synchronize, ownership
-  errors, non-reentrancy policy, poisoning policy, and cancellation safety.
+- [x] Flesh out `core/mutex.w` with lock/try_lock/unlock/synchronize, ownership
+  errors, an explicit non-reentrant/non-poisoning policy, ensure-based release,
+  and forced native-thread-exit cleanup.
 - [x] Flesh out `core/atomic.w` with signed-i64 load/store/exchange/CAS/fetch
   ops, wide-value promotion, compatibility spellings, and explicit
   sequential-consistency semantics mapped consistently on every host.

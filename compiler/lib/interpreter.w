@@ -1331,6 +1331,26 @@ use target
       if args.size() != 2
         raise "w_chan_new expects one capacity"
       return ccall("w_chan_new", args[1])
+    when "w_mutex_new"
+      if args.size() != 1
+        raise "w_mutex_new expects no arguments"
+      return ccall("w_mutex_new")
+    when "w_mutex_lock"
+      if args.size() != 2
+        raise "w_mutex_lock expects one receiver"
+      return ccall("w_mutex_lock", args[1])
+    when "w_mutex_try_lock"
+      if args.size() != 2
+        raise "w_mutex_try_lock expects one receiver"
+      return ccall("w_mutex_try_lock", args[1])
+    when "w_mutex_unlock"
+      if args.size() != 2
+        raise "w_mutex_unlock expects one receiver"
+      return ccall("w_mutex_unlock", args[1])
+    when "w_mutex_locked"
+      if args.size() != 2
+        raise "w_mutex_locked expects one receiver"
+      return ccall("w_mutex_locked", args[1])
     when "w_chan_new_unbounded"
       if args.size() != 1
         raise "w_chan_new_unbounded expects no arguments"
@@ -3600,6 +3620,8 @@ use target
         class_name = "Thread"
       elsif sync_kind == 3
         class_name = "Channel"
+      elsif sync_kind == 4
+        class_name = "Mutex"
     if class_name == nil
       tn = w_type_name(recv)
       # Generic-subtag runtime values report the host-level type "Object" to

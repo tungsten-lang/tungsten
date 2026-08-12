@@ -64,6 +64,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Atomic"        => 0x01 # promoted to W_SUBTAG_ATOMIC
     "Thread"        => 0x81 # 0x80 | W_TYPE_THREAD
     "Channel"       => 0x84 # 0x80 | W_TYPE_CHANNEL
+    "Mutex"         => 0x82 # 0x80 | W_TYPE_MUTEX
     "Hash"          => 0x05
     "Closure"       => 0x06
     "Regex"         => 0x07

@@ -205,7 +205,7 @@ typedef uint64_t WValue;
 
 /* ---- Generic object type discriminators (uint8_t in struct header) ---- */
 #define W_TYPE_THREAD    1
-/* 2 freed (was W_TYPE_ATOMIC — promoted to W_SUBTAG_ATOMIC = 1). */
+#define W_TYPE_MUTEX     2
 #define W_TYPE_SOCKET    3
 #define W_TYPE_CHANNEL   4
 #define W_TYPE_MAC       5  /* demoted from W_SUBTAG_MAC */

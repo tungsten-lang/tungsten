@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(514 total), grouped by area, with its declaration, a one-line
+(515 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -141,6 +141,7 @@ summary from the source header, and a link to the source.
 | `SparseMatrix` | `+ SparseMatrix` | — | [`core/sparse.w`](../core/sparse.w) |
 | `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
 | `MAC` | `+ MAC` | MAC — heap-backed 48-bit link-layer address with native byte predicates. | [`core/mac.w`](../core/mac.w) |
+| `Mutex` | `+ Mutex` | Mutex — a non-reentrant mutual-exclusion lock. | [`core/mutex.w`](../core/mutex.w) |
 | `Module` | `+ Module` | — | [`core/module.w`](../core/module.w) |
 | `Nil` | `+ Nil` | — | [`core/nil.w`](../core/nil.w) |
 | `Number` | `+ Number` | Number — root of the numeric tower. Every concrete number is either a | [`core/number.w`](../core/number.w) |

@@ -513,7 +513,7 @@
   # These names are intercepted by lower_method_call/runtime construction and
   # produce native handles or packed storage even when their interface is a
   # source class_def. Keep this list aligned with the constructor fast paths.
-  if cname in ("Atomic" "Channel" "Thread" "Response" "BigArray" "SmallArray" "ByteArray" "BoolArray")
+  if cname in ("Atomic" "Channel" "Mutex" "Thread" "Response" "BigArray" "SmallArray" "ByteArray" "BoolArray")
     return false
   if mod[:builtin_class_names][cname] == true || type_dispatch_key(cname) != nil
     return false

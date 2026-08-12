@@ -129,6 +129,7 @@
   auto :SparseMatrix, "sparse"
   auto :CUDA,         "cuda"
   auto :MAC,          "mac"
+  auto :Mutex,        "mutex"
   auto :Module,       "module"
   auto :Nil,          "nil"
   auto :Number,       "number"

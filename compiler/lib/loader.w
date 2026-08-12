@@ -921,6 +921,8 @@ use parser
       return "Atomic"
     if name == "w_chan_new"
       return "Channel"
+    if name == "w_mutex_new"
+      return "Mutex"
     if name in ("w_thread_spawn" "w_thread_spawn_slots")
       return "Thread"
     # Runtime-backed packed-array values can enter without a class reference

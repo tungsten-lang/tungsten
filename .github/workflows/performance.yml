@@ -1,0 +1,193 @@
+name: Performance
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/performance.yml
+      - benchmarks/performance/**
+      - benchmarks/primitives/**
+      - bin/commands/bench.w
+      - compiler/**
+      - core/**
+      - runtime/**
+      - scripts/performance-ci.py
+      - scripts/test-performance-ci.py
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/performance.yml
+      - benchmarks/performance/**
+      - benchmarks/primitives/**
+      - bin/commands/bench.w
+      - compiler/**
+      - core/**
+      - runtime/**
+      - scripts/performance-ci.py
+      - scripts/test-performance-ci.py
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      update_baselines:
+        description: Open an approval-gated PR with current long-term baselines
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux x86_64 / Blacksmith 4 vCPU
+            runner: blacksmith-4vcpu-ubuntu-2404
+            baseline_id: blacksmith-4vcpu-ubuntu-2404-x86_64
+          - label: Linux ARM64 / Blacksmith 4 vCPU
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+            baseline_id: blacksmith-4vcpu-ubuntu-2404-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install toolchain
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y
+          clang llvm lld pkg-config libonig-dev libssl-dev libzstd-dev
+
+      - name: Resolve base revision
+        id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          base_sha=""
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            base_sha="$PR_BASE_SHA"
+          elif [[ "$EVENT_NAME" == push && ! "$PUSH_BEFORE_SHA" =~ ^0+$ ]]; then
+            base_sha="$PUSH_BEFORE_SHA"
+          else
+            base_sha="$(git rev-parse HEAD^)"
+          fi
+          base_repo="$RUNNER_TEMP/tungsten-base"
+          git worktree add --detach "$base_repo" "$base_sha"
+          echo "sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "repo=$base_repo" >> "$GITHUB_OUTPUT"
+
+      - name: Bootstrap base revision
+        working-directory: ${{ steps.base.outputs.repo }}
+        env:
+          TUNGSTEN_CACHE_DIR: ${{ runner.temp }}/tungsten-cache-base
+        run: bin/tungsten bootstrap --no-bits
+
+      - name: Measure base revision
+        env:
+          TUNGSTEN_CACHE_DIR: ${{ runner.temp }}/tungsten-cache-base
+        run: >-
+          scripts/performance-ci.py measure
+          --repo "${{ steps.base.outputs.repo }}"
+          --output "$RUNNER_TEMP/base.json"
+          --runner-class "${{ matrix.runner }}"
+          --samples 3
+
+      - name: Bootstrap candidate revision
+        env:
+          TUNGSTEN_CACHE_DIR: ${{ runner.temp }}/tungsten-cache-candidate
+        run: bin/tungsten bootstrap --no-bits
+
+      - name: Measure candidate revision
+        env:
+          TUNGSTEN_CACHE_DIR: ${{ runner.temp }}/tungsten-cache-candidate
+        run: >-
+          scripts/performance-ci.py measure
+          --repo "$GITHUB_WORKSPACE"
+          --output "$RUNNER_TEMP/candidate.json"
+          --runner-class "${{ matrix.runner }}"
+          --samples 3
+
+      - name: Compare base and candidate on this runner
+        run: >-
+          scripts/performance-ci.py compare
+          --baseline "$RUNNER_TEMP/base.json"
+          --candidate "$RUNNER_TEMP/candidate.json"
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare long-term baseline
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.update_baselines) }}
+        run: >-
+          scripts/performance-ci.py compare
+          --baseline "benchmarks/performance/baselines/${{ matrix.baseline_id }}.json"
+          --candidate "$RUNNER_TEMP/candidate.json"
+          --summary "$GITHUB_STEP_SUMMARY"
+          --allow-missing
+
+      - name: Stage benchmark artifact
+        if: always()
+        run: |
+          mkdir -p build/performance-results
+          cp "$RUNNER_TEMP/base.json" build/performance-results/base.json
+          cp "$RUNNER_TEMP/candidate.json" build/performance-results/candidate.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-${{ matrix.baseline_id }}
+          path: build/performance-results/*.json
+          if-no-files-found: error
+
+  update-baselines:
+    name: Open baseline update PR
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.update_baselines }}
+    needs: benchmark
+    runs-on: ubuntu-24.04
+    environment: performance-baselines
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: performance-*
+          path: build/performance-artifacts
+
+      - name: Install candidate baselines
+        run: |
+          mkdir -p benchmarks/performance/baselines
+          for artifact in build/performance-artifacts/performance-*; do
+            baseline_id="${artifact##*/performance-}"
+            cp "$artifact/candidate.json" \
+              "benchmarks/performance/baselines/$baseline_id.json"
+          done
+
+      - name: Open review PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="performance-baselines/run-${GITHUB_RUN_ID}"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch -c "$branch"
+          git add benchmarks/performance/baselines/*.json
+          git commit -m "bench: update Blacksmith performance baselines"
+          git push origin "$branch"
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "bench: update Blacksmith performance baselines" \
+            --body "Approval-gated refresh from Performance workflow run $GITHUB_RUN_ID. Review the machine identities, samples, noise bands, and deltas before merging."

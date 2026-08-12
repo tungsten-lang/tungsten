@@ -321,7 +321,7 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [x] Add x86_64 and ARM64 sanitizer lanes for the C VM/runtime. Keep ordinary
   CI portable; use Spot only for a missing architecture or a failure that cannot
   be reproduced on GitHub's native runners.
-- [ ] Add a GitHub performance workflow with pinned hardware classes, warmups,
+- [x] Add a GitHub performance workflow with pinned hardware classes, warmups,
   multiple samples, machine-readable baselines, noise bands, and an explicitly
   approved baseline-update path. Report regressions without comparing unlike
   runner generations.

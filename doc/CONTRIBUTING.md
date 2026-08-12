@@ -92,6 +92,15 @@ Performance work on the compiler must still pass the stage-1/stage-2
 byte-identity check. A faster build that changes the fixed point is a compiler
 bug, not a benchmark win.
 
+GitHub's Performance workflow measures the base and candidate revisions on the
+same pinned Blacksmith 4-vCPU runner, then applies the committed long-term
+baseline when its runner identity still matches. Results, samples, and noise
+bands are JSON artifacts. Long-term baseline changes are created only by a
+manual workflow dispatch through the approval-gated `performance-baselines`
+environment; the job opens a pull request for review. See
+`benchmarks/performance/README.md` for the comparison, environment, and GitHub
+repository-setting contract.
+
 Builds keep reusable artifacts in `build/cache/`. A concurrency-safe sweep runs
 automatically and retains files for seven days by default. To exercise the
 retention contract directly, run `rake test:cache_gc`; do not commit cache or

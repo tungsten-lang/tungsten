@@ -1691,6 +1691,15 @@ use target
       if args.size() != 2
         raise "w_date_parse expects one string"
       return ccall("w_date_parse", args[1])
+    when "w_date_new_w"
+      if args.size() != 8
+        raise "w_date_new_w expects seven fields"
+      return ccall("w_date_new_w", args[1], args[2], args[3], args[4],
+                   args[5], args[6], args[7])
+    when "w_date_today"
+      if args.size() != 1
+        raise "w_date_today expects no arguments"
+      return ccall("w_date_today")
     when "w_ipv4_parse"
       return ccall("w_ipv4_parse", args[1])
     when "w_ipv4_from_octets"
@@ -5040,13 +5049,12 @@ use target
 
   -> instantiate(w_class, args, env)
     # Packed scalar facades cannot be represented by the ordinary Hash-backed
-    # object allocator below. Their stale bodyless constructors used to create
-    # objects whose `$value` calendar/decimal methods interpreted pointer bits
-    # as data. Keep construction explicit until each scalar has a real native
-    # constructor contract (Date literals/Date.parse and decimal literals are
-    # the supported entry points today).
+    # object allocator below. Date's source class method normally returns its
+    # validated packed value before this point; reaching instantiate means the
+    # call did not match that one-to-seven-argument contract. Decimal remains
+    # intentionally without a generic scalar constructor.
     if w_class[:name] == "Date"
-      raise "Date.new is not a supported scalar constructor; use a date literal or Date.parse"
+      raise "Date.new expects one to seven arguments"
     if w_class[:name] == "Decimal"
       raise "Decimal.new is not a supported scalar constructor; use a decimal literal or String#to_d"
     if w_class[:name] == "Rational"

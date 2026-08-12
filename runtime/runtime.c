@@ -35533,11 +35533,77 @@ static int days_in_month(int y, int m) {
     return days_in_month_table[m];
 }
 
+/* Boxed constructor boundary used by core/date.w. Keeping this one leaf in C
+ * gives compiled and tree-walked class methods the same validation before the
+ * representation's bit fields are truncated. Calendar transformations remain
+ * source-defined on Date. */
+WValue w_date_new_w(WValue year_v, WValue month_v, WValue day_v,
+                    WValue hour_v, WValue min_v, WValue sec_v, WValue tz_v) {
+    WValue fields[] = {year_v, month_v, day_v, hour_v, min_v, sec_v, tz_v};
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+        if (!w_is_integer_any(fields[i])) {
+            w_raise(w_string("Date.new expects integer fields"));
+            return W_NIL;
+        }
+    }
+
+    int64_t year = w_to_i64(year_v);
+    int64_t month = w_to_i64(month_v);
+    int64_t day = w_to_i64(day_v);
+    int64_t hour = w_to_i64(hour_v);
+    int64_t min = w_to_i64(min_v);
+    int64_t sec = w_to_i64(sec_v);
+    int64_t tz = w_to_i64(tz_v);
+
+    if (year < -2048 || year > 2047) {
+        w_raise(w_string("Date year must be between -2048 and 2047"));
+        return W_NIL;
+    }
+    if (month < 1 || month > 12) {
+        w_raise(w_string("Date month must be between 1 and 12"));
+        return W_NIL;
+    }
+    if (day < 1 || day > days_in_month((int)year, (int)month)) {
+        w_raise(w_string("Date day is outside the requested month"));
+        return W_NIL;
+    }
+    if (hour < 0 || hour > 23 || min < 0 || min > 59 || sec < 0 || sec > 59) {
+        w_raise(w_string("Date time must be within 00:00:00 and 23:59:59"));
+        return W_NIL;
+    }
+    if (tz < -960 || tz > 945 || tz % 15 != 0) {
+        w_raise(w_string("Date timezone must be a 15-minute offset between -960 and 945 minutes"));
+        return W_NIL;
+    }
+
+    return w_box_date((int)year, (int)month, (int)day,
+                      (int)hour, (int)min, (int)sec, (int)tz);
+}
+
+WValue w_date_today(void) {
+    time_t now = time(NULL);
+    struct tm local;
+#if defined(_WIN32)
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    return w_box_date(local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+                      0, 0, 0, 0);
+}
+
 /* Add n days to a date, handling month/year rollover */
 static WValue date_add_days(WValue d, int64_t n) {
     int y = w_unbox_date_year(d), m = w_unbox_date_month(d), day = w_unbox_date_day(d);
     int h = w_unbox_date_hour(d), min = w_unbox_date_min(d), sec = w_unbox_date_sec(d);
     int tz = w_unbox_date_tz(d);
+    /* The entire packed year domain spans fewer than 1.5 million days. Reject
+     * obviously unrepresentable shifts before narrowing into the int calendar
+     * loop; otherwise an i48-sized operand could overflow `day` first. */
+    if (n < -2000000 || n > 2000000) {
+        w_raise(w_string("Date arithmetic exceeded the representable year range"));
+        return W_NIL;
+    }
     day += (int)n;
     while (day > days_in_month(y, m)) {
         day -= days_in_month(y, m);
@@ -35548,6 +35614,10 @@ static WValue date_add_days(WValue d, int64_t n) {
         m--;
         if (m < 1) { m = 12; y--; }
         day += days_in_month(y, m);
+    }
+    if (y < -2048 || y > 2047) {
+        w_raise(w_string("Date arithmetic exceeded the representable year range"));
+        return W_NIL;
     }
     return w_box_date(y, m, day, h, min, sec, tz);
 }
@@ -53494,25 +53564,30 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             return w_bool_array_new(len);
         }
 
-        /* Packed Date/Decimal values cannot be represented by the generic
-         * WObject allocator below. A stale bodyless Date constructor (and an
-         * implicit zero-arg Decimal constructor) produced ordinary objects
-         * whose scalar methods then decoded pointer bits as value fields.
-         * Reject every arity until these classes define a real scalar
-         * constructor contract. */
-        if ((strcmp(klass->name, "Date") == 0 ||
-             strcmp(klass->name, "Decimal") == 0) &&
-            w_hash_key_eq(name, WN_new)) {
-            char cbuf[128];
-            if (strcmp(klass->name, "Date") == 0)
-                snprintf(cbuf, sizeof cbuf,
-                         "Date.new is not a supported scalar constructor; "
-                         "use a date literal or Date.parse");
-            else
-                snprintf(cbuf, sizeof cbuf,
-                         "Decimal.new is not a supported scalar constructor; "
-                         "use a decimal literal or String#to_d");
-            w_raise(w_string(cbuf));
+        /* Packed Date construction. Known `Date.new` calls inline the Core
+         * class method; this arm preserves the same contract when the class
+         * receiver is erased and dispatch reaches the runtime. */
+        if (strcmp(klass->name, "Date") == 0 && w_hash_key_eq(name, WN_new)) {
+            if (args->size < 1 || args->size > 7) {
+                w_raise(w_string("Date.new expects one to seven arguments"));
+                return W_NIL;
+            }
+            WValue defaults[] = {w_int(1), w_int(1), w_int(0), w_int(0),
+                                 w_int(0), w_int(0)};
+            WValue fields[7];
+            fields[0] = args->slots[0];
+            for (int i = 1; i < 7; i++)
+                fields[i] = i < args->size ? args->slots[i] : defaults[i - 1];
+            return w_date_new_w(fields[0], fields[1], fields[2], fields[3],
+                                fields[4], fields[5], fields[6]);
+        }
+
+        /* Packed Decimal values cannot be represented by the generic WObject
+         * allocator. Keep implicit construction rejected until Decimal owns a
+         * scalar constructor contract. */
+        if (strcmp(klass->name, "Decimal") == 0 && w_hash_key_eq(name, WN_new)) {
+            w_raise(w_string("Decimal.new is not a supported scalar constructor; "
+                             "use a decimal literal or String#to_d"));
         }
 
         /* Rational.new(numerator, denominator = 1) returns the packed scalar,

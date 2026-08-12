@@ -165,10 +165,14 @@ RUNTIME_CLASS_CONTRACTS = {
     native_ic: %w[inspect strftime to_s],
     native_only: %w[inspect],
     source_fallback: %w[
-      asctime ctime cwday cweek cwyear day day_abbr day_name day_of_month day_of_quarter
-      day_of_week day_of_year days_in_month days_in_year hour jd leap? leap_year?
-      minute month month_abbr month_name quarter quarter_abbr second tz
-      wday yday year year_with_quarter
+      asctime century ctime cwday cweek cwyear day day_abbr day_name day_of_month
+      day_of_quarter day_of_week day_of_year days_in_month days_in_year decade
+      decade_abbr first_of_century first_of_decade first_of_millenium
+      first_of_millennium first_of_month first_of_quarter first_of_week
+      first_of_year hour jd last_of_century last_of_decade last_of_millenium
+      last_of_millennium last_of_month last_of_quarter last_of_week last_of_year
+      leap? leap_year? millenium millennium minute month month_abbr month_name
+      quarter quarter_abbr second tz wday week yday year year_with_quarter
     ]
   },
   "String" => {

@@ -1,3 +1,8 @@
+# Date — validated packed proleptic-Gregorian calendar and datetime values.
+#
+# Years are limited by the WValue representation to -2048..2047. Constructors,
+# ISO/ordinal/Julian factories, and period boundaries raise rather than wrapping
+# when a requested result cannot be represented.
 + Date
   is Enumerable
 
@@ -12,11 +17,68 @@
   -> .parse(string)
     ccall("w_date_parse", string)
 
+  # Construct the packed scalar directly. The runtime leaf validates the
+  # representation bounds and calendar fields before packing; defaults keep
+  # the common Date.new(year, month, day) surface concise while still allowing
+  # the datetime fields represented by Date literals.
+  -> .new(year, month = 1, day = 1, hour = 0, minute = 0, second = 0, tz = 0)
+    if year == nil
+      raise "Date.new expects one to seven arguments"
+    ccall("w_date_new_w", year, month, day, hour, minute, second, tz)
+
+  # Proleptic-Gregorian date from a Julian day number.
+  -> .julian(number)
+    if !number.is_a?(Int)
+      raise "Date.julian expects an integer Julian day number"
+    a = number + 32_044
+    b = (4 * a + 3) / 146_097
+    c = a - (146_097 * b) / 4
+    d = (4 * c + 3) / 1_461
+    e = c - (1_461 * d) / 4
+    m = (5 * e + 2) / 153
+    day = e - (153 * m + 2) / 5 + 1
+    month = m + 3 - 12 * (m / 10)
+    year = 100 * b + d - 4_800 + m / 10
+    Date.new(year, month, day)
+
+  # Proleptic-Gregorian ordinal day, 1..365/366.
+  -> .ordinal(year, number)
+    if !number.is_a?(Int)
+      raise "Date.ordinal expects an integer ordinal day"
+    first = Date.new(year, 1, 1)
+    if number < 1 || number > first.days_in_year
+      raise "Date.ordinal day is outside the requested year"
+    first + (number - 1)
+
+  # ISO week date: Monday=1, Sunday=7; week 1 contains January 4.
+  -> .commercial(year, week, day)
+    if !week.is_a?(Int) || !day.is_a?(Int)
+      raise "Date.commercial expects integer week and day values"
+    if day < 1 || day > 7
+      raise "Date.commercial day must be between 1 and 7"
+    weeks = Date.new(year, 12, 28).cweek
+    if week < 1 || week > weeks
+      raise "Date.commercial week is outside the requested ISO year"
+    jan4 = Date.new(year, 1, 4)
+    first_monday = jan4 - (jan4.cwday - 1)
+    first_monday + (week - 1) * 7 + (day - 1)
+
+  # Local civil dates. The clock read remains a narrow runtime primitive;
+  # tomorrow's calendar arithmetic uses the ordinary Date operator.
+  -> .today
+    ccall("w_date_today")
+
+  -> .tomorrow
+    Date.today + 1
+
   # Date is packed directly into a WValue. `$value` exposes the raw bits to
   # compiled Tungsten, keeping these leaf accessors and calendar calculations
   # allocation-free and equivalent to their former runtime.c IC handlers.
   -> day
     ($value >> 24) & 0x1F
+
+  -> week
+    cweek
 
   -> month
     ($value >> 29) & 0xF
@@ -43,6 +105,28 @@
     if quarters >= 0x40
       quarters -= 0x80
     quarters * 15
+
+  # Period values are their starting Gregorian year, making decade_abbr
+  # naturally produce strings such as "2020s". Normalize negative remainders
+  # explicitly so BCE periods use mathematical floor rather than truncation.
+  -> decade
+    remainder = year % 10
+    remainder += 10 if remainder < 0
+    year - remainder
+
+  -> century
+    remainder = year % 100
+    remainder += 100 if remainder < 0
+    year - remainder
+
+  -> millenium
+    remainder = year % 1_000
+    remainder += 1_000 if remainder < 0
+    year - remainder
+
+  # Correctly spelled alias alongside the historical Tungsten API spelling.
+  -> millennium
+    millenium
 
   -> asctime
     self.ctime()
@@ -163,6 +247,9 @@
   -> year_with_quarter
     "[year]Q[quarter]"
 
+  -> decade_abbr
+    "[decade]s"
+
   -> day_of_week
     y = (($value >> 33) & 0xFFF) ## i64
     if y >= 0x800
@@ -275,6 +362,57 @@
       y -= 0x1000
     leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
     leap ? 366 : 365
+
+  -> first_of_week
+    self - (cwday - 1)
+
+  -> first_of_month
+    Date.new(year, month, 1, hour, minute, second, tz)
+
+  -> first_of_quarter
+    first_month = (quarter - 1) * 3 + 1
+    Date.new(year, first_month, 1, hour, minute, second, tz)
+
+  -> first_of_year
+    Date.new(year, 1, 1, hour, minute, second, tz)
+
+  -> first_of_decade
+    Date.new(decade, 1, 1, hour, minute, second, tz)
+
+  -> first_of_century
+    Date.new(century, 1, 1, hour, minute, second, tz)
+
+  -> first_of_millenium
+    Date.new(millenium, 1, 1, hour, minute, second, tz)
+
+  -> first_of_millennium
+    first_of_millenium
+
+  -> last_of_week
+    self + (7 - cwday)
+
+  -> last_of_month
+    Date.new(year, month, days_in_month, hour, minute, second, tz)
+
+  -> last_of_quarter
+    last_month = quarter * 3
+    month_end = Date.new(year, last_month, 1, hour, minute, second, tz)
+    Date.new(year, last_month, month_end.days_in_month, hour, minute, second, tz)
+
+  -> last_of_year
+    Date.new(year, 12, 31, hour, minute, second, tz)
+
+  -> last_of_decade
+    Date.new(decade + 9, 12, 31, hour, minute, second, tz)
+
+  -> last_of_century
+    Date.new(century + 99, 12, 31, hour, minute, second, tz)
+
+  -> last_of_millenium
+    Date.new(millenium + 999, 12, 31, hour, minute, second, tz)
+
+  -> last_of_millennium
+    last_of_millenium
 
   -> leap_year?
     y = (($value >> 33) & 0xFFF) ## i64

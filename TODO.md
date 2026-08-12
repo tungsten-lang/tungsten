@@ -266,7 +266,7 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Enforce generic constraints when definitions are checked, including
   parent constraints such as `Class<T> < Parent`, instead of deferring them to
   runtime dispatch failures.
-- [ ] Add a compiler consistency audit: every Core method requiring dynamic
+- [x] Add a compiler consistency audit: every Core method requiring dynamic
   dispatch has the needed IC row and static-whitelist entry. Make missing wires
   a build error, not a release checklist item.
   - [x] Validate every native IC initializer structurally and make Quantity's
@@ -277,7 +277,7 @@ projects stay unchecked until their stated acceptance criteria are met.
     Hash, StringBuffer, Regex, BigInt, Float, IPv4, IPv6, and MAC methods as
     native-IC, native-only, dual-dispatch, or deliberate source fallbacks; the
     gate also caught and restored Socket#serve_http's missing Core declaration.
-  - [ ] Classify the remaining runtime-backed Core classes exhaustively so a
+  - [x] Classify the remaining runtime-backed Core classes exhaustively so a
     newly added source method must declare its native-IC or autoload fallback:
     Array, String, Int/Integer, Decimal, and Date.
     - [x] Audit Decimal's bodyless declarations individually. Native
@@ -303,12 +303,13 @@ projects stay unchecked until their stated acceptance criteria are met.
         methods, and Int's 10 active native rows; pin inline/heap erased
         dispatch, promotion boundaries, subtype membership, and overload
         specificity in both engines.
-    - [ ] Implement and specify Date's deferred factory/calendar surface:
+    - [x] Implement and specify Date's deferred factory/calendar surface:
       `new`, `julian`, `ordinal`, `commercial`, `today`, `tomorrow`, `week`,
       `decade`/`decade_abbr`, `century`, `millenium`, and first/last period
-      helpers. These used to be bodyless declarations that silently returned
-      malformed values or `nil`; they are intentionally absent until semantics
-      exist.
+      helpers. Construction validates every packed field; period transforms
+      preserve time/offset fields and raise at the representable year boundary.
+      The correctly spelled `millennium` aliases accompany the historical
+      `millenium` spellings.
     - [x] Teach the audit to distinguish an implemented source fallback from
       a bodyless declaration. A placeholder cannot satisfy the gate merely by
       being listed as `source_fallback`.

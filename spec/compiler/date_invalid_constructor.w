@@ -1,3 +1,3 @@
-# Date is a packed scalar. Generic object construction must not create an
-# ordinary instance whose calendar accessors decode pointer bits.
+# Date is a packed scalar whose constructor requires at least a year. A
+# zero-argument call must not allocate an ordinary object.
 << Date.new()

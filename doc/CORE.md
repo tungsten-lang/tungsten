@@ -38,7 +38,7 @@ summary from the source header, and a link to the source.
 | `Color` | `+ Color` | — | [`core/color.w`](../core/color.w) |
 | `Crypto` | `+ Crypto` | — | [`core/crypto.w`](../core/crypto.w) |
 | `Currency` | `+ Currency` | Currency — monetary value with currency symbol (tag 0xFFFD) | [`core/currency.w`](../core/currency.w) |
-| `Date` | `+ Date` | — | [`core/date.w`](../core/date.w) |
+| `Date` | `+ Date` | Date — validated packed proleptic-Gregorian calendar and datetime values. | [`core/date.w`](../core/date.w) |
 | `Digest` | `+ Digest` | — | [`core/digest.w`](../core/digest.w) |
 | `Dir` | `+ Dir` | — | [`core/dir.w`](../core/dir.w) |
 | `Directory` | `+ Directory` | — | [`core/directory.w`](../core/directory.w) |

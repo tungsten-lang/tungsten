@@ -17266,6 +17266,51 @@
       ]
     },
     {
+      "symbol": "w_date_new_w",
+      "native": {
+        "symbol": "w_date_new_w",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 7,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_date_parse",
       "native": {
         "symbol": "w_date_parse",
@@ -17310,6 +17355,22 @@
         ],
         "arity": 3,
         "source": "runtime/runtime.c"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_date_today",
+      "native": {
+        "symbol": "w_date_today",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
       },
       "call_modes": [
         "ccall"

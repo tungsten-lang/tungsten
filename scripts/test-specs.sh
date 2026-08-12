@@ -200,7 +200,7 @@ run_compiled_reject_spec() {
   local needle
 
   case "$name" in
-    date_invalid_constructor) needle='Date.new is not a supported scalar constructor' ;;
+    date_invalid_constructor) needle='Date.new expects one to seven arguments' ;;
     decimal_invalid_constructor|decimal_invalid_zero_constructor) needle='Decimal.new is not a supported scalar constructor' ;;
     *) record_failure_note "$name" "missing expected compiled rejection diagnostic"; return ;;
   esac
@@ -233,7 +233,7 @@ run_interpreter_reject_spec() {
   local needle
 
   case "$name" in
-    date_invalid_constructor) needle='Date.new is not a supported scalar constructor' ;;
+    date_invalid_constructor) needle='Date.new expects one to seven arguments' ;;
     decimal_invalid_constructor|decimal_invalid_zero_constructor) needle='Decimal.new is not a supported scalar constructor' ;;
     *) record_failure_note "$name" "missing expected interpreted rejection diagnostic"; return ;;
   esac
@@ -577,6 +577,7 @@ fi
 
 compiled_specs=(
   compiler/test/regex_features.w
+  spec/core/date_calendar_surface_spec.w
   spec/compiler/date_dynamic_receiver_spec.w
   spec/compiler/decimal_dynamic_receiver_spec.w
   spec/compiler/float_dynamic_receiver_spec.w
@@ -785,6 +786,7 @@ cuda_reject_specs=(
 interpreter_specs=(
   compiler/test/regex_features.w
   benchmarks/runtime_ports/bigint_predicate_relaxed_autoload.w
+  spec/core/date_calendar_surface_spec.w
   spec/compiler/date_dynamic_receiver_spec.w
   spec/compiler/decimal_dynamic_receiver_spec.w
   spec/compiler/float_dynamic_receiver_spec.w

@@ -250,8 +250,8 @@ projects stay unchecked until their stated acceptance criteria are met.
   statements, bad address spaces, shape errors, and dialect-only intrinsics
   before invoking `metal` or `nvcc`.
   - [x] Reject missing/unsupported parameter types before external compilation;
-    selected WGSL incompatibilities are diagnostics rather than successful
-    `// skipped` sidecars.
+    CUDA-only type gaps and selected WGSL incompatibilities are diagnostics
+    rather than invalid or successful `// skipped` sidecars.
   - [ ] Add static address-space, workgroup-shape, and buffer-bound validation.
 - [ ] Make `compiler2` packed/slab nodes use generated `node.field` accessors
   instead of mixed `ast_get`/index access, then delete the compatibility path.

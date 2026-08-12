@@ -2286,20 +2286,39 @@ use ast
 # simdgroup-matrix calls are rejected while emitting CUDA so invalid MSL names
 # never leak into a .cu sidecar and fail later inside nvcc.
 
--> cuda_elt_name(msl_name)
+-> cuda_type_name(msl_name)
   if msl_name == "bfloat"
     return "__nv_bfloat16"
   if msl_name == "half"
     return "__half"
-  msl_name
+  if msl_name == "long"
+    return "long long"
+  if msl_name == "ulong"
+    return "unsigned long long"
+  if msl_name == "uchar"
+    return "unsigned char"
+  if msl_name == "ushort"
+    return "unsigned short"
+  if msl_name == "uint"
+    return "unsigned int"
+  if msl_name in ("char" "short" "int" "float" "float2" "float3" "float4" "int4" "uint4" "bool")
+    return msl_name
+  nil
+
+-> cuda_param_type_supported?(type_hint)
+  arr_elt = msl_array_elt_type(type_hint)
+  if arr_elt != nil
+    return cuda_type_name(arr_elt) != nil
+  scalar = msl_scalar_type(type_hint)
+  scalar != nil && cuda_type_name(scalar) != nil
 
 -> cuda_param_decl(type_hint, pname)
   arr_elt = msl_array_elt_type(type_hint)
   if arr_elt != nil
-    return cuda_elt_name(arr_elt) + " *" + pname
+    return cuda_type_name(arr_elt) + " *" + pname
   scalar = msl_scalar_type(type_hint)
   if scalar != nil
-    return scalar + " " + pname
+    return cuda_type_name(scalar) + " " + pname
   "/* unsupported type: " + type_hint.to_s() + " */ void *" + pname
 
 -> emit_kernel_cuda(node)
@@ -2319,6 +2338,8 @@ use ast
       gpu_kernel_error(node, "parameter `" + pname + "` needs a ## type hint (f32[] / i32 / etc)")
     if !gpu_param_type_supported?(ptype)
       gpu_kernel_error(node, "parameter `" + pname + "` has unsupported type `" + ptype.to_s() + "`")
+    if !cuda_param_type_supported?(ptype)
+      gpu_kernel_error(node, "parameter `" + pname + "` type `" + ptype.to_s() + "` is not supported by the CUDA dialect")
     param_types[pname] = ptype
     param_names.push(pname)
     pi += 1
@@ -2375,13 +2396,15 @@ use ast
   if type_hints == nil
     type_hints = {}
   ret = type_hints["ret"]
-  ret_c = msl_scalar_type(ret)
+  ret_msl = msl_scalar_type(ret)
+  ret_c = cuda_type_name(ret_msl)
   if ret_c == nil
     arr = msl_array_elt_type(ret)
-    if arr != nil
-      ret_c = cuda_elt_name(arr) + " *"
+    arr_c = cuda_type_name(arr)
+    if arr_c != nil
+      ret_c = arr_c + " *"
     else
-      gpu_kernel_error(node, "device fn `" + name + "` has unsupported return type `" + ret.to_s() + "`")
+      gpu_kernel_error(node, "device fn `" + name + "` return type `" + ret.to_s() + "` is not supported by the CUDA dialect")
   out = StringBuffer(512)
   out << "__device__ "
   out << ret_c
@@ -2399,6 +2422,8 @@ use ast
       gpu_kernel_error(node, "device fn `" + name + "` param `" + pname + "` needs a ## type hint")
     if !gpu_param_type_supported?(ptype)
       gpu_kernel_error(node, "device fn `" + name + "` param `" + pname + "` has unsupported type `" + ptype.to_s() + "`")
+    if !cuda_param_type_supported?(ptype)
+      gpu_kernel_error(node, "device fn `" + name + "` param `" + pname + "` type `" + ptype.to_s() + "` is not supported by the CUDA dialect")
     param_types[pname] = ptype
     param_names.push(pname)
     if pi > 0

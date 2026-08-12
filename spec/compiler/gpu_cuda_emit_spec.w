@@ -32,6 +32,12 @@
   if !(i < n)
     y[i] = 0.0
 
+# CUDA uses toolkit spellings for low-precision scalar parameters rather than
+# leaking Metal's `bfloat` name into the sidecar.
+## bf16: scale
+@gpu fn low_precision_scalar(scale)
+  value = 1 ## i32
+
 cu = read_file("spec/compiler/gpu_cuda_emit_spec.cu")
 
 -> expect_marker(text, label, needle)
@@ -66,5 +72,6 @@ expect_marker(cu, "sig.logic_ops", "logic_ops")
 expect_marker(cu, "logic.and", "((i > 0) && (i < n))")
 expect_marker(cu, "logic.or", "((i < 0) || (i >= n))")
 expect_marker(cu, "logic.not", "(!(i < n))")
+expect_marker(cu, "sig.bf16", "__nv_bfloat16 scale")
 
 << "gpu_cuda_emit_spec: all checks passed"

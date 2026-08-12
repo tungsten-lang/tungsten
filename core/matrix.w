@@ -49,6 +49,13 @@
   -> +/1
     class.new(elements.zip(@1.elements).map -> item[0] + item[1])
 
+  -> add_mut(other)
+    i = 0
+    while i < elements.size()
+      elements[i] = elements[i] + other.elements[i]
+      i += 1
+    self
+
   -> -/1
     class.new(elements.zip(@1.elements).map -> item[0] - item[1])
 

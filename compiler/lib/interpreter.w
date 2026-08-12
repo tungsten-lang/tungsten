@@ -1301,6 +1301,22 @@ use target
       if args.size() != 4
         raise "w_atomic_cas expects one receiver, expected, and desired"
       return ccall("w_atomic_cas", args[1], args[2], args[3])
+    when "w_setenv"
+      if args.size() != 3
+        raise "w_setenv expects a name and value"
+      return ccall("w_setenv", args[1], args[2])
+    when "w_unsetenv"
+      if args.size() != 2
+        raise "w_unsetenv expects a name"
+      return ccall("w_unsetenv", args[1])
+    when "w_env_keys"
+      if args.size() != 1
+        raise "w_env_keys expects no arguments"
+      return ccall("w_env_keys")
+    when "w_env_to_h"
+      if args.size() != 1
+        raise "w_env_to_h expects no arguments"
+      return ccall("w_env_to_h")
     when "w_chan_new"
       if args.size() != 2
         raise "w_chan_new expects one capacity"

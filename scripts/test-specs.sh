@@ -476,6 +476,7 @@ compiled_specs=(
   spec/compiler/strbuf_bytes_spec.w
   spec/compiler/string_buffer_dynamic_append_spec.w
   spec/compiler/quantity_control_flow_parity_spec.w
+  spec/compiler/static_method_block_dispatch_spec.w
   spec/compiler/static_method_overload_spec.w
   spec/compiler/int_bigint_promotion_spec.w
   spec/compiler/bigint_literal_cache_spec.w
@@ -600,11 +601,13 @@ interpreter_specs=(
   spec/compiler/top_level_method_name_hygiene_spec.w
   spec/compiler/string_buffer_dynamic_append_spec.w
   spec/compiler/quantity_control_flow_parity_spec.w
+  spec/compiler/static_method_block_dispatch_spec.w
   spec/compiler/static_method_overload_spec.w
   # clock_ms had to be registered in BOTH lowering.w and builtins.w; pin the
   # interpreted side so a compiled-only fix cannot pass again.
   spec/core/clock_ms_spec.w
   spec/core/atomic_spec.w
+  spec/core/env_spec.w
   # JSON.parse was compiled-only until the interpreter learned to resolve bare
   # calls to sibling class methods; pin the interpreted side.
   spec/core/json_parse_spec.w
@@ -697,6 +700,7 @@ core_specs=(
   spec/core/byte_array_equality_spec.w
   spec/core/crypto_accel_spec.w
   spec/core/crypto_hmac_scram_spec.w
+  spec/core/env_spec.w
   spec/core/socket_read_into_spec.w
   spec/core/byte_array_slice_spec.w
   spec/core/byte_array_view_flatten_spec.w

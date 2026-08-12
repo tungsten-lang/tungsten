@@ -156,6 +156,31 @@ RSpec.describe Tungsten::Interpreter do
       .to raise_error(Tungsten::Error, /range for i64/)
   end
 
+  it "exposes the process environment through Env" do
+    name = "TUNGSTEN_RUBY_ENV_SPEC"
+    old = ENV[name]
+
+    begin
+      result = run(<<~W)
+        use core/env
+        Env.delete("#{name}")
+        fallback = Env.fetch("#{name}", "missing")
+        blocked = Env.fetch("#{name}") -> (missing)
+          "missing:" + missing
+        Env["#{name}"] = "set"
+        snapshot = Env.to_h()
+        [fallback, blocked, Env["#{name}"], snapshot["#{name}"], Env.delete("#{name}")]
+      W
+      expect(result).to eq(["missing", "missing:#{name}", "set", "set", "set"])
+      expect { run("use core/env\nEnv.set(\"\", \"value\")") }
+        .to raise_error(Tungsten::Error, /non-empty String/)
+      expect { Tungsten::Env.set("BAD\0NAME", "value") }
+        .to raise_error(Tungsten::Error, /NUL/)
+    ensure
+      old.nil? ? ENV.delete(name) : ENV[name] = old
+    end
+  end
+
   it "evaluates parenthesized expressions" do
     expect(run("(1 + 2) * 3")).to eq(9)
   end

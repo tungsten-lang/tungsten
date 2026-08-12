@@ -402,8 +402,8 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Add `core/timezone.w`, `core/datetime.w`, and `core/timestamp.w` with a
   versioned timezone database, DST gap/fold policy, monotonic-vs-wall-clock
   separation, parsing/formatting, and serialization provenance.
-- [ ] Add `core/env.w` with the usual fetch/get/set/delete/keys/each/to_h
-  surface, process-local mutation semantics, encoding rules, and sandbox gates.
+- [x] Add `core/env.w` with fetch/get/set/delete/keys/each/to_h, process-local
+  mutation, point-in-time snapshots, String/NUL validation, and sandbox gates.
 - [ ] Add `File.stat` and `Tempfile`, including typed metadata, secure atomic
   creation, cleanup/close behavior, symlink policy, and Windows parity.
 - [ ] Add `core/timer.w` with monotonic deadlines, one-shot/repeating timers,

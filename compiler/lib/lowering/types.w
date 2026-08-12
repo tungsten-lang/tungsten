@@ -299,6 +299,10 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_atomic_cas"] = true
   m["w_atomic_increment"] = true
   m["w_atomic_decrement"] = true
+  m["w_setenv"] = true
+  m["w_unsetenv"] = true
+  m["w_env_keys"] = true
+  m["w_env_to_h"] = true
 
   # ---- Crypto / UUID helpers that allocate mutable data or use entropy/time ----
   m["w_crypto_random_bytes"] = true

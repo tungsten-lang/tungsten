@@ -20,6 +20,7 @@
   auto :Date,         "date"
   auto :Digest,       "digest"
   auto :Duration,     "duration"
+  auto :Env,          "env"
   auto :Error,        "error"
   auto :Float,        "float"
   auto :Hash,         "hash"

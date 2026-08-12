@@ -82,6 +82,7 @@ module Tungsten
   autoload :DateTime,            "tungsten/literals/date_time"
   autoload :Digest,              "tungsten/support/crypto"
   autoload :Duration,            "tungsten/literals/duration"
+  autoload :Env,                 "tungsten/support/env"
   autoload :IPv4,                "tungsten/literals/ip4"
   autoload :IPv6,                "tungsten/literals/ip6"
   autoload :IP4,                 "tungsten/literals/ip4"

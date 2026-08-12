@@ -62,9 +62,27 @@ rescue e4
   unlink_raised = true
   check("sandbox.unlink.error_names_op", "[e4]".include?("unlink") == true)
 
+# Process-environment mutations are actions; full snapshots are observations.
+env_name = "TUNGSTEN_SANDBOX_ENV_SPEC"
+env_old = Env.get(env_name)
+env_set_raised = false
+begin
+  Env.set(env_name, "sandbox")
+rescue e5
+  env_set_raised = true
+  check("sandbox.setenv.error_names_op", "[e5]".include?("setenv") == true)
+env_delete_raised = false
+begin
+  Env.delete(env_name)
+rescue e6
+  env_delete_raised = true
+  check("sandbox.unsetenv.error_names_op", "[e6]".include?("unsetenv") == true)
+
 # Stubbed OBSERVATIONS: benign values, never a raise.
 home = env("HOME")
 exists = File.exist?(probe)
+env_keys = Env.keys()
+env_snapshot = Env.to_h()
 
 attempts = Sandbox.attempts
 
@@ -75,8 +93,12 @@ if active
   check("sandbox.on.env_stubbed_nil", home == nil)
   check("sandbox.on.exist_stubbed_false", exists == false)
   check("sandbox.on.unlink_blocked", unlink_raised == true)
-  # write + read + system + unlink + env + exist? — every gated op is counted.
-  check("sandbox.on.attempts_counted", attempts >= 6)
+  check("sandbox.on.setenv_blocked", env_set_raised == true)
+  check("sandbox.on.unsetenv_blocked", env_delete_raised == true)
+  check("sandbox.on.env_keys_stubbed", env_keys.empty?)
+  check("sandbox.on.env_to_h_stubbed", env_snapshot.empty?)
+  # write + read + system + unlink + four env reads + two env actions + exist?
+  check("sandbox.on.attempts_counted", attempts >= 11)
 else
   check("sandbox.off.write_works", write_raised == false)
   check("sandbox.off.read_works", read_raised == false && read_back == payload)
@@ -84,7 +106,13 @@ else
   check("sandbox.off.env_real", home != nil)
   check("sandbox.off.exist_real", exists == true)
   check("sandbox.off.unlink_works", unlink_raised == false)
+  check("sandbox.off.setenv_works", env_set_raised == false)
+  check("sandbox.off.unsetenv_works", env_delete_raised == false)
+  check("sandbox.off.env_keys_real", !env_keys.empty?)
+  check("sandbox.off.env_to_h_real", !env_snapshot.empty?)
   check("sandbox.off.no_attempts", attempts == 0)
+  if env_old != nil
+    Env.set(env_name, env_old)
 
 # Pure computation is never gated, in either mode.
 total = 0 ## i64

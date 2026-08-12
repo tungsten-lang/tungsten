@@ -43912,19 +43912,100 @@ WValue __w_mkdir_p(WValue path_val) {
     return stat(path, &st) == 0 && S_ISDIR(st.st_mode) ? W_TRUE : W_FALSE;
 }
 
-/* setenv() from two WValue strings. ccall() passes its arguments as boxed
- * WValues, so libc setenv() cannot be invoked directly — it would treat the
- * NaN-boxed string as a char* and dereference garbage (the matmul_mlx_strict
- * crash). This unboxes both operands to C strings first. `name` is copied into
- * a local buffer before the second as_str() call so the thread-local ring
- * buffer can never alias the two; setenv() then copies both internally. */
+/* Process-environment access. Runtime-mediated operations serialize with each
+ * other so snapshots cannot observe one of our own half-completed mutations.
+ * Code outside Tungsten that calls libc getenv/setenv concurrently remains
+ * outside this contract, as it is on POSIX generally. */
+static pthread_mutex_t g_env_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void w_env_require_name(WValue value) {
+    if (!(w_is_string(value) || w_is_rope(value)))
+        w_raise(w_string("environment variable name must be a String"));
+    char inline_buf[6];
+    const char *name;
+    size_t size;
+    w_str_data(value, inline_buf, &name, &size);
+    if (size == 0 || memchr(name, '=', size) != NULL || memchr(name, '\0', size) != NULL)
+        w_raise(w_string("environment variable name must be non-empty and cannot contain '=' or NUL"));
+}
+
+static void w_env_require_value(WValue value) {
+    if (!(w_is_string(value) || w_is_rope(value)))
+        w_raise(w_string("environment variable value must be a String"));
+    char inline_buf[6];
+    const char *data;
+    size_t size;
+    w_str_data(value, inline_buf, &data, &size);
+    if (memchr(data, '\0', size) != NULL)
+        w_raise(w_string("environment variable value cannot contain NUL"));
+}
+
 WValue w_setenv(WValue name_val, WValue value_val) {
-    w_sandbox_gate("setenv", as_str(name_val));
-    char name[256];
-    snprintf(name, sizeof name, "%s", as_str(name_val));
+    w_env_require_name(name_val);
+    w_env_require_value(value_val);
+    const char *name_src = as_str(name_val);
+    w_sandbox_gate("setenv", name_src);
+    char *name = strdup(name_src);
     const char *value = as_str(value_val);
-    setenv(name, value, 1);
-    return W_TRUE;
+    pthread_mutex_lock(&g_env_lock);
+    int rc = setenv(name, value, 1);
+    int saved_errno = errno;
+    pthread_mutex_unlock(&g_env_lock);
+    free(name);
+    if (rc != 0) {
+        char message[320];
+        snprintf(message, sizeof message, "cannot set environment variable: %s", strerror(saved_errno));
+        w_raise(w_string(message));
+    }
+    return value_val;
+}
+
+WValue w_unsetenv(WValue name_val) {
+    w_env_require_name(name_val);
+    const char *name = as_str(name_val);
+    w_sandbox_gate("unsetenv", name);
+    pthread_mutex_lock(&g_env_lock);
+    const char *old = getenv(name);
+    WValue result = old ? w_string(old) : W_NIL;
+    int rc = unsetenv(name);
+    int saved_errno = errno;
+    pthread_mutex_unlock(&g_env_lock);
+    if (rc != 0) {
+        char message[320];
+        snprintf(message, sizeof message, "cannot delete environment variable: %s", strerror(saved_errno));
+        w_raise(w_string(message));
+    }
+    return result;
+}
+
+WValue w_env_keys(void) {
+    WValue result = w_array_new_empty();
+    if (w_sandbox_stub("env", "*")) return result;
+    extern char **environ;
+    pthread_mutex_lock(&g_env_lock);
+    for (char **entry = environ; entry && *entry; entry++) {
+        const char *separator = strchr(*entry, '=');
+        if (separator)
+            w_array_push(result, w_string_n(*entry, (size_t)(separator - *entry)));
+    }
+    pthread_mutex_unlock(&g_env_lock);
+    return result;
+}
+
+WValue w_env_to_h(void) {
+    WValue result = w_hash_new();
+    if (w_sandbox_stub("env", "*")) return result;
+    extern char **environ;
+    pthread_mutex_lock(&g_env_lock);
+    for (char **entry = environ; entry && *entry; entry++) {
+        const char *separator = strchr(*entry, '=');
+        if (!separator) continue;
+        WValue key = w_string_n(*entry, (size_t)(separator - *entry));
+        WValue value = w_string(separator + 1);
+        w_hash_set(result, key, value);
+    }
+    pthread_mutex_unlock(&g_env_lock);
+    return result;
 }
 
 WValue __w_capture(WValue cmd_val) {
@@ -44033,11 +44114,14 @@ WValue __w_elapsed_seconds_since_ticks(int64_t start_ticks) {
 }
 
 WValue __w_env(WValue name_val) {
+    w_env_require_name(name_val);
     const char *name = as_str(name_val);
     if (w_sandbox_stub("env", name)) return W_NIL;
+    pthread_mutex_lock(&g_env_lock);
     const char *val = getenv(name);
-    if (!val) return W_NIL;
-    return w_string(val);
+    WValue result = val ? w_string(val) : W_NIL;
+    pthread_mutex_unlock(&g_env_lock);
+    return result;
 }
 
 WValue __w_runtime_identity(void) {

@@ -54,6 +54,8 @@ COMMANDS
     gpu-bench            Emit, compile, dispatch, verify, and time the baseline
                          Metal kernel. Stores artifacts and JSON provenance in
                          build/cache/gpu-bench.
+    debug FILE           Build with symbols/frame pointers and a validated
+                         sidemap, then launch LLDB or GDB.
     doctor               Check your toolchain (clang, make, lld, zstd, compiler)
                          Implemented in bash — works without a built compiler.
     fmt FILE             Format .w source
@@ -82,6 +84,8 @@ EXAMPLES
     tungsten bootstrap
     tungsten build
     tungsten gpu-bench --elements 1048576 --runs 50
+    tungsten debug app.w -- --example argument
+    tungsten debug --run app.w -- --debug-build-smoke
     tungsten console
     wit
 

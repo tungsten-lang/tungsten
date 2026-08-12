@@ -94,4 +94,21 @@ if "$TUNGSTEN" gpu-bench --backend bogus >"$TMP/gpu-bench-error.out" 2>&1; then
 fi
 grep -q "unsupported backend 'bogus'" "$TMP/gpu-bench-error.out"
 
-printf 'CLI check, GPU preflight, explain, gpu-bench, and exit-status contracts: ok\n'
+"$TUNGSTEN" debug --help >"$TMP/debug-help.out"
+grep -q '^Usage: tungsten debug' "$TMP/debug-help.out"
+set +e
+"$TUNGSTEN" debug --run --output "$TMP/debug-exit" "$EXIT_7" \
+  >"$TMP/debug-build.out" 2>&1
+debug_child_status=$?
+set -e
+[[ -x "$TMP/debug-exit" ]]
+[[ -s "$TMP/debug-exit.sidemap" ]]
+if [[ "$(uname -s)" == Darwin ]]; then
+  [[ -d "$TMP/debug-exit.dSYM" ]]
+fi
+if [[ "$debug_child_status" -ne 7 ]]; then
+  printf 'tungsten debug build changed child exit 7 to %s\n' "$debug_child_status" >&2
+  exit 1
+fi
+
+printf 'CLI check, GPU preflight, debug, explain, gpu-bench, and exit-status contracts: ok\n'

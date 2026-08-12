@@ -3372,23 +3372,30 @@ static int bn_bench_runtime_div_recip_diff28;
 #ifndef BN_TOOM_PAR_THRESHOLD
 #define BN_TOOM_PAR_THRESHOLD 576
 #endif
+/* The ulock pool mechanics (parked-flag wakes, joiner spin, burst linger)
+ * cut the spin-covered dispatch from ~10us to ~6us wall and removed the
+ * per-dispatch kernel round-trips, which moves every parallel crossover
+ * down.  Values below re-derived on Apple M5 Max by forced A/B over every
+ * cell whose dispatch changes (see the pool-mechanics campaign): mul@288/
+ * 320 halved at 288 while mul@256 still prefers its fixed-split kernels;
+ * mul@360 -40% and mul@344 break-even at 344; sqr@256-320 halved at 256. */
 #ifndef BN_TOOM3_PAR_THRESHOLD
 #if defined(__aarch64__)
-#define BN_TOOM3_PAR_THRESHOLD 384
+#define BN_TOOM3_PAR_THRESHOLD 344
 #else
 #define BN_TOOM3_PAR_THRESHOLD INT32_MAX
 #endif
 #endif
 #ifndef BN_TOOM2_PAR_THRESHOLD
 #if defined(__aarch64__)
-#define BN_TOOM2_PAR_THRESHOLD 448
+#define BN_TOOM2_PAR_THRESHOLD 288
 #else
 #define BN_TOOM2_PAR_THRESHOLD 512
 #endif
 #endif
 #ifndef BN_KARA_SQ_PAR_THRESHOLD
 #if defined(__aarch64__)
-#define BN_KARA_SQ_PAR_THRESHOLD 384
+#define BN_KARA_SQ_PAR_THRESHOLD 128
 #else
 #define BN_KARA_SQ_PAR_THRESHOLD 512
 #endif
@@ -3411,31 +3418,103 @@ static int bn_bench_runtime_div_recip_diff28;
 #ifndef BN_TOOM_POOL_SPIN
 #define BN_TOOM_POOL_SPIN 32768
 #endif
+/* Thread counts re-derived with the cheap ulock dispatch (forced A/B per
+ * affected band on M5 Max): the seven-point Toom-4 sets want one point per
+ * thread from 768 limbs up (mul@1024 -13%, @4096 -21%, @8192 -24%), while
+ * the five-point Toom-3 band regresses past four threads (mul@344 +29% at
+ * five) and the small band is wake-latency bound.  Squares keep three
+ * threads below their large threshold (sqr@1024 preferred 3 over 4) and
+ * take the full seven above it (sqr@4096 -13%, @8192 -17%). */
 #ifndef BN_TOOM_PAR_THREADS
+#if defined(__aarch64__)
+#define BN_TOOM_PAR_THREADS 7
+#else
 #define BN_TOOM_PAR_THREADS 4
 #endif
+#endif
 #ifndef BN_TOOM_PAR_SMALL_THREADS
+#if defined(__aarch64__)
+#define BN_TOOM_PAR_SMALL_THREADS 4
+#else
 #define BN_TOOM_PAR_SMALL_THREADS 3
 #endif
+#endif
 #ifndef BN_TOOM_PAR_LARGE_THRESHOLD
+#if defined(__aarch64__)
+#define BN_TOOM_PAR_LARGE_THRESHOLD 768
+#else
 #define BN_TOOM_PAR_LARGE_THRESHOLD 1280
 #endif
+#endif
 #ifndef BN_SQR_TOOM_PAR_THREADS
-#define BN_SQR_TOOM_PAR_THREADS BN_TOOM_PAR_SMALL_THREADS
+#define BN_SQR_TOOM_PAR_THREADS 3
 #endif
 #ifndef BN_SQR_TOOM_PAR_LARGE_THRESHOLD
-#define BN_SQR_TOOM_PAR_LARGE_THRESHOLD BN_TOOM_PAR_LARGE_THRESHOLD
+#define BN_SQR_TOOM_PAR_LARGE_THRESHOLD 1280
 #endif
 #ifndef BN_SSA_PAR_THRESHOLD
 #define BN_SSA_PAR_THRESHOLD 8192
 #endif
+/* Eight transform lanes won every SSA-band cell of the post-mechanics
+ * worker sweep (mul/sqr at 16384..1048576; nine lanes lost ground). */
 #ifndef BN_SSA_PAR_THREADS
 #if defined(__APPLE__) && defined(__aarch64__)
-#define BN_SSA_PAR_THREADS 7
+#define BN_SSA_PAR_THREADS 8
 #else
 #define BN_SSA_PAR_THREADS 4
 #endif
 #endif
+/* Pool wake/join mechanics.  On Darwin the persistent point-set pool parks
+ * and wakes through os_sync_wait_on_address (the public ulock interface):
+ * dispatch publishes each worker's mailbox generation and issues one wake
+ * syscall per PARKED worker only — spinning workers observe the store with
+ * no syscall at all — and the joiner parks on the completion countdown,
+ * woken by the final decrementer, after a bounded spin that absorbs the
+ * short balanced-split tail without entering the kernel.  Elsewhere the
+ * original mutex/condvar protocol remains. */
+#ifndef BN_POOL_ULOCK
+#if defined(__APPLE__) && __has_include(<os/os_sync_wait_on_address.h>)
+#define BN_POOL_ULOCK 1
+#else
+#define BN_POOL_ULOCK 0
+#endif
+#endif
+#if BN_POOL_ULOCK
+#include <os/os_sync_wait_on_address.h>
+#endif
+/* Joiner spin bound before parking on the countdown word (yield loops). */
+#ifndef BN_POOL_JOIN_SPIN
+#define BN_POOL_JOIN_SPIN 4096
+#endif
+/* Adaptive linger: a kernel wake costs ~5-6us, so parking between the
+ * parallel regions of one multi-phase operation (division's reciprocal
+ * products, transform phases, benchmark-style call runs) forfeits most of
+ * the pool's advantage.  When consecutive dispatches arrive within
+ * BN_POOL_BURST_GAP_NS the workers extend their post-job spin from the
+ * per-job budget to BN_POOL_SPIN_LONG iterations; isolated dispatches keep
+ * the short budget so an idle process never burns more than one short spin
+ * window per worker.  Jobs whose budget is zero (recursive division marks
+ * its sets no-spin) never linger. */
+#ifndef BN_POOL_BURST_GAP_NS
+#define BN_POOL_BURST_GAP_NS 100000
+#endif
+#ifndef BN_POOL_SPIN_LONG
+#define BN_POOL_SPIN_LONG 1048576
+#endif
+/* Compile-time instrumentation for the pool-mechanics probe: per-dispatch
+ * publish/first-seen/done timestamps.  Costs nothing when off (default). */
+#ifndef BN_TOOM_POOL_STATS
+#define BN_TOOM_POOL_STATS 0
+#endif
+/* One pool serves both the Toom point scheduler and the SSA transform
+ * phases; size the worker array for the widest consumer. */
+#define BN_POOL_THREADS_MAX (BN_TOOM_PAR_THREADS > BN_SSA_PAR_THREADS ? \
+                             BN_TOOM_PAR_THREADS : BN_SSA_PAR_THREADS)
+#define BN_POOL_WORKERS (BN_POOL_THREADS_MAX > 1 ? BN_POOL_THREADS_MAX - 1 : 1)
+/* Largest generic task graph one dispatch may carry: the fused SSA forward
+ * phase submits four quarter-transforms even when the thread caps sit
+ * below four. */
+#define BN_POOL_TASKS_MAX (BN_POOL_THREADS_MAX > 4 ? BN_POOL_THREADS_MAX : 4)
 /* Squaring has different crossovers: its diagonal basecase stays profitable
  * longer, and the one-operand Toom evaluation costs shift both upper rungs. */
 #ifndef BN_SQR_KARA_THRESHOLD
@@ -6849,6 +6928,11 @@ typedef struct {
     uint64_t *out[11];
     const uint64_t *a[11];
     const uint64_t *b[11];
+    /* Shared claim cursor for tail-stealing dispatch: threads take the next
+     * unclaimed slot of order[] instead of a fixed range, so a straggling
+     * worker delays the join by at most one (the cheapest) job. */
+    _Atomic int next_point;
+    uint8_t order[11];
 } WToomPointSet;
 
 typedef struct {
@@ -6856,6 +6940,16 @@ typedef struct {
     int start;
     int end;
     uint64_t *scratch;
+    int takenext;
+    int spin_budget;
+    /* Whether burst detection may extend spin_budget: point sets opt in
+     * (their follow-up gaps are unpredictable); fused transform phases opt
+     * out (adjacent dispatches arrive immediately, and the workers left
+     * out of a later phase must not spin through the op's serial tail). */
+    int burst_ok;
+    /* Generic transform task (set == NULL): run fn(arg) on the pool. */
+    void (*fn)(void *);
+    void *arg;
 } WToomPointJob;
 
 static _Thread_local int bn_toom_parallel_depth;
@@ -6987,20 +7081,35 @@ static void bn_toom_product_set_add(WToomPointSet *set, uint64_t *out,
     lengths[2 * i + 1] = nb;
 }
 
+static void bn_toom_point_exec(WToomPointSet *set, int i, uint64_t *scratch) {
+    if (set->square == 2) {
+        int32_t *lengths = (int32_t *)set->memory;
+        bigint_mul_dispatch(set->out[i], set->a[i], lengths[2 * i],
+                            set->b[i], lengths[2 * i + 1]);
+    } else if (set->square)
+        bn_sqr_eq(set->out[i], set->a[i], set->n, scratch);
+    else
+        bn_mul_eq(set->out[i], set->a[i], set->b[i], set->n, scratch);
+}
+
 static void bn_toom_point_range(WToomPointJob *job) {
     bn_toom_parallel_depth++;
-    for (int i = job->start; i < job->end; i++) {
-        if (job->set->square == 2) {
-            int32_t *lengths = (int32_t *)job->set->memory;
-            bigint_mul_dispatch(job->set->out[i], job->set->a[i],
-                                lengths[2 * i], job->set->b[i],
-                                lengths[2 * i + 1]);
-        } else if (job->set->square)
-            bn_sqr_eq(job->set->out[i], job->set->a[i],
-                      job->set->n, job->scratch);
-        else
-            bn_mul_eq(job->set->out[i], job->set->a[i], job->set->b[i],
-                      job->set->n, job->scratch);
+    if (job->fn) {
+        job->fn(job->arg);
+        bn_toom_parallel_depth--;
+        return;
+    }
+    if (job->takenext) {
+        WToomPointSet *set = job->set;
+        for (;;) {
+            int slot = atomic_fetch_add_explicit(
+                &set->next_point, 1, memory_order_relaxed);
+            if (slot >= set->count) break;
+            bn_toom_point_exec(set, set->order[slot], job->scratch);
+        }
+    } else {
+        for (int i = job->start; i < job->end; i++)
+            bn_toom_point_exec(job->set, i, job->scratch);
     }
     bn_toom_parallel_depth--;
 }
@@ -7010,31 +7119,66 @@ static void *bn_toom_point_worker(void *arg) {
     return NULL;
 }
 
+/* Each worker's mailbox lives on its own cache line (Apple cores pair
+ * 64-byte lines; pad to 128 so a spinning worker's reload traffic cannot
+ * false-share a neighbor's mailbox or the countdown). */
 typedef struct {
     int slot;
     uint64_t seen_generation;
     _Atomic uint64_t published_generation;
+    _Atomic int parked;
     WToomPointJob job;
-} WToomPoolWorker;
+} __attribute__((aligned(128))) WToomPoolWorker;
 
 typedef struct {
     pthread_mutex_t lock;
     pthread_mutex_t submit_lock;
-    pthread_cond_t work_ready[BN_TOOM_PAR_THREADS > 1 ?
-                              BN_TOOM_PAR_THREADS - 1 : 1];
+    pthread_cond_t work_ready[BN_POOL_WORKERS];
     pthread_cond_t work_done;
     _Atomic uint64_t generation;
     int worker_count;
     int active_workers;
-    _Atomic int pending_workers;
-    WToomPointJob jobs[BN_TOOM_PAR_THREADS > 1 ?
-                       BN_TOOM_PAR_THREADS - 1 : 1];
-    WToomPoolWorker workers[BN_TOOM_PAR_THREADS > 1 ?
-                            BN_TOOM_PAR_THREADS - 1 : 1];
+    int join_spin;      /* joiner yield-loop bound before parking */
+    int spin_override;  /* worker linger override (< 0: per-job budget) */
+    int takenext;       /* tail-stealing point claims */
+    int wake_mode;      /* 1: one wake-all on the broadcast word */
+    int spin_long;      /* burst linger budget */
+    uint64_t burst_gap_ns;
+    uint64_t last_dispatch_ns;   /* submit-lock holder only */
+    _Atomic int burst_linger;    /* workers: extend post-job spin */
+    /* Completion countdown and broadcast word each own a padded line. */
+    _Atomic uint32_t pending_workers __attribute__((aligned(128)));
+    _Atomic int joiner_parked;
+    _Atomic uint64_t broadcast_generation __attribute__((aligned(128)));
+    WToomPoolWorker workers[BN_POOL_WORKERS] __attribute__((aligned(128)));
 } WToomPool;
 
 static WToomPool bn_toom_pool;
 static pthread_once_t bn_toom_pool_once = PTHREAD_ONCE_INIT;
+
+static inline uint64_t bn_pool_clock_ns(void) {
+#if defined(__APPLE__)
+    return clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+#endif
+}
+
+#if BN_TOOM_POOL_STATS
+typedef struct {
+    _Atomic uint64_t publish_ns;
+    _Atomic uint64_t master_done_ns;
+    _Atomic uint64_t join_done_ns;
+    _Atomic int active_workers;
+    _Atomic uint64_t first_seen_ns[BN_POOL_WORKERS];
+    _Atomic uint64_t done_ns[BN_POOL_WORKERS];
+    _Atomic int woke_parked[BN_POOL_WORKERS];
+} WToomPoolStatsSnap;
+static WToomPoolStatsSnap bn_toom_pool_stats;
+#define bn_pool_now_ns bn_pool_clock_ns
+#endif
 
 static void bn_toom_pool_after_fork_child(void) {
     /* Detached workers do not survive fork.  Leave the once-token complete
@@ -7043,6 +7187,8 @@ static void bn_toom_pool_after_fork_child(void) {
     bn_toom_pool.active_workers = 0;
     atomic_store_explicit(
         &bn_toom_pool.pending_workers, 0, memory_order_relaxed);
+    atomic_store_explicit(
+        &bn_toom_pool.joiner_parked, 0, memory_order_relaxed);
 }
 
 static inline void bn_toom_pool_spin_hint(void) {
@@ -7059,6 +7205,10 @@ static void *bn_toom_pool_worker(void *arg) {
     WToomPoolWorker *worker = (WToomPoolWorker *)arg;
     WToomPool *pool = &bn_toom_pool;
     int spin_budget = 0;
+#if BN_POOL_ULOCK
+    uint64_t broadcast_seen = atomic_load_explicit(
+        &pool->broadcast_generation, memory_order_acquire);
+#endif
     for (;;) {
         uint64_t generation = worker->seen_generation;
         for (int spin = 0; spin < spin_budget; spin++) {
@@ -7067,7 +7217,47 @@ static void *bn_toom_pool_worker(void *arg) {
             if (generation != worker->seen_generation) break;
             bn_toom_pool_spin_hint();
         }
+#if BN_TOOM_POOL_STATS
+        int was_parked = 0;
+#endif
         if (generation == worker->seen_generation) {
+#if BN_TOOM_POOL_STATS
+            was_parked = 1;
+#endif
+#if BN_POOL_ULOCK
+            /* parked must be visible before the mailbox re-check: either
+             * the submitter's flag load sees it and issues the wake, or
+             * this seq_cst load sees the freshly published generation and
+             * skips the sleep entirely (Dekker through two words). */
+            atomic_store_explicit(&worker->parked, 1, memory_order_seq_cst);
+            if (pool->wake_mode) {
+                for (;;) {
+                    generation = atomic_load_explicit(
+                        &worker->published_generation, memory_order_seq_cst);
+                    if (generation != worker->seen_generation) break;
+                    uint64_t current = atomic_load_explicit(
+                        &pool->broadcast_generation, memory_order_seq_cst);
+                    if (current != broadcast_seen) {
+                        /* Wake-all covered a dispatch that did not assign
+                         * this slot; track it and park for the next one. */
+                        broadcast_seen = current;
+                        continue;
+                    }
+                    os_sync_wait_on_address(
+                        (void *)&pool->broadcast_generation, broadcast_seen,
+                        sizeof(uint64_t), OS_SYNC_WAIT_ON_ADDRESS_NONE);
+                }
+            } else {
+                while ((generation = atomic_load_explicit(
+                            &worker->published_generation,
+                            memory_order_seq_cst)) == worker->seen_generation)
+                    os_sync_wait_on_address(
+                        (void *)&worker->published_generation,
+                        worker->seen_generation, sizeof(uint64_t),
+                        OS_SYNC_WAIT_ON_ADDRESS_NONE);
+            }
+            atomic_store_explicit(&worker->parked, 0, memory_order_relaxed);
+#else
             pthread_mutex_lock(&pool->lock);
             while ((generation = atomic_load_explicit(
                         &worker->published_generation,
@@ -7075,21 +7265,61 @@ static void *bn_toom_pool_worker(void *arg) {
                 pthread_cond_wait(
                     &pool->work_ready[worker->slot], &pool->lock);
             pthread_mutex_unlock(&pool->lock);
+#endif
         }
         worker->seen_generation = generation;
+#if BN_POOL_ULOCK
+        broadcast_seen = generation;
+#endif
+#if BN_TOOM_POOL_STATS
+        atomic_store_explicit(&bn_toom_pool_stats.first_seen_ns[worker->slot],
+                              bn_pool_now_ns(), memory_order_relaxed);
+        atomic_store_explicit(&bn_toom_pool_stats.woke_parked[worker->slot],
+                              was_parked, memory_order_relaxed);
+#endif
         /* Each worker has its own release-published mailbox.  A slot is only
          * republished after its prior job decremented pending_workers, so the
          * job payload cannot be overwritten while this local copy is made. */
         WToomPointJob job = worker->job;
         bn_toom_point_range(&job);
-        spin_budget = job.set->spin_budget;
+        if (pool->spin_override >= 0) {
+            spin_budget = pool->spin_override;
+        } else {
+            spin_budget = job.spin_budget;
+            if (job.burst_ok && spin_budget > 0 &&
+                spin_budget < pool->spin_long &&
+                atomic_load_explicit(&pool->burst_linger,
+                                     memory_order_relaxed))
+                spin_budget = pool->spin_long;
+        }
+#if BN_TOOM_POOL_STATS
+        atomic_store_explicit(&bn_toom_pool_stats.done_ns[worker->slot],
+                              bn_pool_now_ns(), memory_order_relaxed);
+#endif
+#if BN_POOL_ULOCK
+        if (atomic_fetch_sub_explicit(
+                &pool->pending_workers, 1, memory_order_seq_cst) == 1) {
+            if (atomic_load_explicit(
+                    &pool->joiner_parked, memory_order_seq_cst))
+                os_sync_wake_by_address_any(
+                    (void *)&pool->pending_workers, sizeof(uint32_t),
+                    OS_SYNC_WAKE_BY_ADDRESS_NONE);
+        }
+#else
         if (atomic_fetch_sub_explicit(
                 &pool->pending_workers, 1, memory_order_acq_rel) == 1) {
             pthread_mutex_lock(&pool->lock);
             pthread_cond_signal(&pool->work_done);
             pthread_mutex_unlock(&pool->lock);
         }
+#endif
     }
+}
+
+static int bn_pool_env_int(const char *name, int fallback) {
+    const char *value = getenv(name);
+    if (!value || !*value) return fallback;
+    return atoi(value);
 }
 
 static void bn_toom_pool_init(void) {
@@ -7100,20 +7330,52 @@ static void bn_toom_pool_init(void) {
     (void)pthread_atfork(NULL, NULL, bn_toom_pool_after_fork_child);
     atomic_init(&pool->generation, 1);
     atomic_init(&pool->pending_workers, 0);
-    for (int i = 0; i < BN_TOOM_PAR_THREADS - 1; i++) {
+    atomic_init(&pool->joiner_parked, 0);
+    atomic_init(&pool->broadcast_generation, 1);
+    pool->join_spin =
+        bn_pool_env_int("TUNGSTEN_BN_POOL_JOIN_SPIN", BN_POOL_JOIN_SPIN);
+    pool->spin_override = bn_pool_env_int("TUNGSTEN_BN_POOL_SPIN", -1);
+    /* Tail-stealing measured SLOWER here (mul@1024 -11%): the static split
+     * hands the +1 point to the caller, which runs on the fastest core
+     * tier, while greedy claims let a slower worker take it.  Kept as an
+     * opt-in experiment knob. */
+    pool->takenext = bn_pool_env_int("TUNGSTEN_BN_POOL_STEAL", 0) != 0;
+    pool->wake_mode = bn_pool_env_int("TUNGSTEN_BN_POOL_WAKE_ALL", 0) != 0;
+    pool->spin_long =
+        bn_pool_env_int("TUNGSTEN_BN_POOL_SPIN_LONG", BN_POOL_SPIN_LONG);
+    pool->burst_gap_ns = (uint64_t)bn_pool_env_int(
+        "TUNGSTEN_BN_POOL_BURST_GAP_US", BN_POOL_BURST_GAP_NS / 1000) * 1000u;
+    atomic_init(&pool->burst_linger, 0);
+    int qos = bn_pool_env_int("TUNGSTEN_BN_POOL_QOS", 1);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+#if defined(__APPLE__)
+    /* Workers inherit default QoS otherwise, letting the scheduler strand
+     * one on a lower-tier core mid-dispatch while the caller runs on the
+     * fastest cluster: the measured join-tail straggler.  Match the caller's
+     * interactive tier. */
+    if (qos)
+        (void)pthread_attr_set_qos_class_np(
+            &attr, QOS_CLASS_USER_INTERACTIVE, 0);
+#else
+    (void)qos;
+#endif
+    for (int i = 0; i < BN_POOL_WORKERS; i++) {
         pthread_cond_init(&pool->work_ready[i], NULL);
         pool->workers[i].slot = i;
         pool->workers[i].seen_generation =
             atomic_load_explicit(&pool->generation, memory_order_relaxed);
         atomic_init(&pool->workers[i].published_generation,
                     pool->workers[i].seen_generation);
+        atomic_init(&pool->workers[i].parked, 0);
         pthread_t thread;
-        if (pthread_create(&thread, NULL, bn_toom_pool_worker,
+        if (pthread_create(&thread, &attr, bn_toom_pool_worker,
                            &pool->workers[i]) != 0)
             break;
-        pthread_detach(thread);
         pool->worker_count++;
     }
+    pthread_attr_destroy(&attr);
 }
 
 /* Run the worker ranges on persistent threads.  A nonblocking submit lock
@@ -7126,43 +7388,200 @@ static int bn_toom_pool_run(WToomPointJob *jobs, int threads) {
         return 0;
     if (pthread_mutex_trylock(&pool->submit_lock) != 0)
         return -1;
-    pthread_mutex_lock(&pool->lock);
-    pool->active_workers = threads - 1;
-    atomic_store_explicit(
-        &pool->pending_workers, threads - 1, memory_order_relaxed);
+    uint64_t submit_ns = bn_pool_clock_ns();
+    int in_burst =
+        submit_ns - pool->last_dispatch_ns <= pool->burst_gap_ns;
+    if (in_burst !=
+        atomic_load_explicit(&pool->burst_linger, memory_order_relaxed))
+        atomic_store_explicit(&pool->burst_linger, in_burst,
+                              memory_order_relaxed);
+    int workers_needed = threads - 1;
+    pool->active_workers = workers_needed;
+    atomic_store_explicit(&pool->pending_workers, (uint32_t)workers_needed,
+                          memory_order_relaxed);
     uint64_t generation = atomic_fetch_add_explicit(
         &pool->generation, 1, memory_order_relaxed) + 1;
-    for (int i = 0; i < pool->active_workers; i++) {
-        pool->jobs[i] = jobs[i + 1];
+#if BN_TOOM_POOL_STATS
+    atomic_store_explicit(&bn_toom_pool_stats.active_workers, workers_needed,
+                          memory_order_relaxed);
+    atomic_store_explicit(&bn_toom_pool_stats.publish_ns, bn_pool_now_ns(),
+                          memory_order_relaxed);
+#endif
+#if BN_POOL_ULOCK
+    for (int i = 0; i < workers_needed; i++) {
+        pool->workers[i].job = jobs[i + 1];
+        atomic_store_explicit(
+            &pool->workers[i].published_generation, generation,
+            memory_order_seq_cst);
+    }
+    if (pool->wake_mode) {
+        atomic_store_explicit(&pool->broadcast_generation, generation,
+                              memory_order_seq_cst);
+        int any_parked = 0;
+        for (int i = 0; i < pool->worker_count && !any_parked; i++)
+            any_parked = atomic_load_explicit(
+                &pool->workers[i].parked, memory_order_seq_cst);
+        if (any_parked)
+            os_sync_wake_by_address_all(
+                (void *)&pool->broadcast_generation, sizeof(uint64_t),
+                OS_SYNC_WAKE_BY_ADDRESS_NONE);
+    } else {
+        for (int i = 0; i < workers_needed; i++)
+            if (atomic_load_explicit(&pool->workers[i].parked,
+                                     memory_order_seq_cst))
+                os_sync_wake_by_address_any(
+                    (void *)&pool->workers[i].published_generation,
+                    sizeof(uint64_t), OS_SYNC_WAKE_BY_ADDRESS_NONE);
+    }
+#else
+    pthread_mutex_lock(&pool->lock);
+    for (int i = 0; i < workers_needed; i++) {
         pool->workers[i].job = jobs[i + 1];
         atomic_store_explicit(
             &pool->workers[i].published_generation, generation,
             memory_order_release);
     }
-    for (int i = 0; i < pool->active_workers; i++)
+    for (int i = 0; i < workers_needed; i++)
         pthread_cond_signal(&pool->work_ready[i]);
     pthread_mutex_unlock(&pool->lock);
+#endif
 
     bn_toom_point_range(&jobs[0]);
 
+#if BN_TOOM_POOL_STATS
+    atomic_store_explicit(&bn_toom_pool_stats.master_done_ns,
+                          bn_pool_now_ns(), memory_order_relaxed);
+#endif
+#if BN_POOL_ULOCK
+    uint32_t pending = atomic_load_explicit(
+        &pool->pending_workers, memory_order_acquire);
+    if (pending) {
+        for (int spin = pool->join_spin; spin > 0; spin--) {
+            bn_toom_pool_spin_hint();
+            pending = atomic_load_explicit(
+                &pool->pending_workers, memory_order_acquire);
+            if (!pending) break;
+        }
+        if (pending) {
+            atomic_store_explicit(&pool->joiner_parked, 1,
+                                  memory_order_seq_cst);
+            while ((pending = atomic_load_explicit(
+                        &pool->pending_workers, memory_order_seq_cst)))
+                os_sync_wait_on_address(
+                    (void *)&pool->pending_workers, pending,
+                    sizeof(uint32_t), OS_SYNC_WAIT_ON_ADDRESS_NONE);
+            atomic_store_explicit(&pool->joiner_parked, 0,
+                                  memory_order_relaxed);
+        }
+    }
+#else
     pthread_mutex_lock(&pool->lock);
     while (atomic_load_explicit(
                &pool->pending_workers, memory_order_acquire))
         pthread_cond_wait(&pool->work_done, &pool->lock);
     pthread_mutex_unlock(&pool->lock);
+#endif
+#if BN_TOOM_POOL_STATS
+    atomic_store_explicit(&bn_toom_pool_stats.join_done_ns,
+                          bn_pool_now_ns(), memory_order_relaxed);
+#endif
+    pool->last_dispatch_ns = bn_pool_clock_ns();
     pthread_mutex_unlock(&pool->submit_lock);
     return 1;
+}
+
+static void bn_ws_release_thread(void);
+
+static void *bn_pool_task_thread(void *arg) {
+    bn_toom_point_range((WToomPointJob *)arg);
+    /* Raw fallback threads die after the task; return their lazily grown
+     * TLS multiply workspace instead of leaking one arena per spawn. */
+    bn_ws_release_thread();
+    return NULL;
+}
+
+/* Run fn(args[i]) for i in 0..count-1 with args[0] on the caller and the
+ * rest on persistent pool workers.  One pool dispatch doubles as the phase
+ * barrier, so a multi-phase transform pays a single wake/park cycle across
+ * its phases (the workers spin-linger between adjacent dispatches).  If the
+ * pool is occupied or too small, per-call threads preserve the old
+ * behavior. */
+static void bn_pool_run_tasks(void (*fn)(void *), void **args, int count,
+                              int spin_budget) {
+    WToomPointJob jobs[BN_POOL_TASKS_MAX];
+    if (count < 1) return;
+    /* Tasks beyond the dispatch capacity run inline on the caller first;
+     * none may ever be dropped. */
+    while (count > BN_POOL_TASKS_MAX) {
+        count--;
+        WToomPointJob inline_job = {NULL, 0, 0, NULL, 0, 0, 0, fn,
+                                    args[count]};
+        bn_toom_point_range(&inline_job);
+    }
+    for (int t = 0; t < count; t++) {
+        jobs[t].set = NULL;
+        jobs[t].start = 0;
+        jobs[t].end = 0;
+        jobs[t].scratch = NULL;
+        jobs[t].takenext = 0;
+        jobs[t].spin_budget = spin_budget;
+        jobs[t].burst_ok = 0;
+        jobs[t].fn = fn;
+        jobs[t].arg = args[t];
+    }
+    if (count == 1) {
+        bn_toom_point_range(&jobs[0]);
+        return;
+    }
+    if (bn_toom_pool_run(jobs, count) > 0)
+        return;
+    pthread_t threads[BN_POOL_TASKS_MAX];
+    int live[BN_POOL_TASKS_MAX];
+    for (int t = 1; t < count; t++)
+        live[t - 1] = pthread_create(&threads[t - 1], NULL,
+                                     bn_pool_task_thread, &jobs[t]) == 0;
+    bn_toom_point_range(&jobs[0]);
+    for (int t = 1; t < count; t++) {
+        if (live[t - 1])
+            pthread_join(threads[t - 1], NULL);
+        else
+            bn_toom_point_range(&jobs[t]);
+    }
 }
 
 static void bn_toom_point_set_run(WToomPointSet *set) {
     if (!set->parallel)
         return;
+    pthread_once(&bn_toom_pool_once, bn_toom_pool_init);
     int threads = set->thread_limit < set->count ?
                   set->thread_limit : set->count;
-    WToomPointJob jobs[BN_TOOM_PAR_THREADS > 0 ? BN_TOOM_PAR_THREADS : 1];
-    pthread_t workers[BN_TOOM_PAR_THREADS > 1 ? BN_TOOM_PAR_THREADS - 1 : 1];
-    int live[BN_TOOM_PAR_THREADS > 1 ? BN_TOOM_PAR_THREADS - 1 : 1];
+    WToomPointJob jobs[BN_POOL_THREADS_MAX > 0 ? BN_POOL_THREADS_MAX : 1];
+    pthread_t workers[BN_POOL_WORKERS];
+    int live[BN_POOL_WORKERS];
     uint64_t *scratch = set->memory + set->operand_limbs;
+    int takenext = bn_toom_pool.takenext;
+    atomic_store_explicit(&set->next_point, 0, memory_order_relaxed);
+    for (int i = 0; i < set->count; i++)
+        set->order[i] = (uint8_t)i;
+    if (set->square == 2) {
+        /* Generic products differ in cost; largest-first claims bound the
+         * join tail at the cheapest product (LPT).  Point products are
+         * equal-width, so their natural order already is LPT. */
+        int32_t *lengths = (int32_t *)set->memory;
+        for (int i = 1; i < set->count; i++) {
+            uint8_t item = set->order[i];
+            uint64_t cost = (uint64_t)lengths[2 * item] *
+                            (uint64_t)lengths[2 * item + 1];
+            int j = i;
+            while (j > 0 &&
+                   (uint64_t)lengths[2 * set->order[j - 1]] *
+                   (uint64_t)lengths[2 * set->order[j - 1] + 1] < cost) {
+                set->order[j] = set->order[j - 1];
+                j--;
+            }
+            set->order[j] = item;
+        }
+    }
     int base = set->count / threads;
     int extra = set->count % threads;
     for (int t = 0; t < threads; t++) {
@@ -7170,6 +7589,11 @@ static void bn_toom_point_set_run(WToomPointSet *set) {
         jobs[t].start = t * base + (t < extra ? t : extra);
         jobs[t].end = jobs[t].start + base + (t < extra);
         jobs[t].scratch = scratch + (size_t)t * set->scratch_need;
+        jobs[t].takenext = takenext;
+        jobs[t].spin_budget = set->spin_budget;
+        jobs[t].burst_ok = 1;
+        jobs[t].fn = NULL;
+        jobs[t].arg = NULL;
     }
     int pooled = threads > 1 ? bn_toom_pool_run(jobs, threads) : 0;
     if (pooled > 0) {
@@ -7180,7 +7604,8 @@ static void bn_toom_point_set_run(WToomPointSet *set) {
         return;
     }
     if (pooled < 0) {
-        WToomPointJob fallback = {set, 0, set->count, scratch};
+        WToomPointJob fallback =
+            {set, 0, set->count, scratch, 0, 0, 0, NULL, NULL};
         bn_toom_point_range(&fallback);
 #if !BN_TOOM_POINT_TLS_MEMORY
         free(set->memory);
@@ -8575,6 +9000,32 @@ static void *ssa_pointwise_worker(void *arg) {
     return NULL;
 }
 
+/* Pool-task thunks for the fused SSA schedule (persistent workers instead
+ * of per-phase thread spawns; each dispatch is the phase barrier). */
+static void ssa_forward_range_task(void *arg) {
+    WSSAForwardRangeJob *range = (WSSAForwardRangeJob *)arg;
+    ssa_forward_range(range->job, range->start, range->end,
+                      range->first_len, range->last_len);
+}
+
+static void ssa_pointwise_task(void *arg) {
+    ssa_pointwise_range((WSSAPointJob *)arg);
+}
+
+static void ssa_inverse_range_task(void *arg) {
+    ssa_inverse_range((WSSAInverseRangeJob *)arg);
+}
+
+static int bn_ssa_pool_enabled(void) {
+    static _Atomic int cached = -1;
+    int value = atomic_load_explicit(&cached, memory_order_relaxed);
+    if (value < 0) {
+        value = bn_pool_env_int("TUNGSTEN_BN_SSA_POOL", 1) != 0;
+        atomic_store_explicit(&cached, value, memory_order_relaxed);
+    }
+    return value;
+}
+
 #ifndef BN_BENCH_RUNTIME_SSA_PACK_KNOB
 #define BN_BENCH_RUNTIME_SSA_PACK_KNOB 0
 #endif
@@ -8624,7 +9075,8 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
     size_t point_stride = 3 * (size_t)m + 2;
 
     size_t total = (size_t)L * S * (b ? 2 : 1)
-                 + 4 * (size_t)S + (size_t)point_threads * point_stride;
+                 + 4 * (size_t)S + (size_t)point_threads * point_stride
+                 + 8 * (size_t)S;
     int pack_zero_only = BN_SSA_PACK_ZERO_ONLY;
 #if BN_BENCH_RUNTIME_SSA_PACK_KNOB
     pack_zero_only = bn_bench_runtime_ssa_pack_zero_only;
@@ -8639,6 +9091,7 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
     uint64_t *t3 = t2 + S;
     uint64_t *t4 = t3 + S;
     uint64_t *point_ws = t4 + S;
+    uint64_t *quad_ws = point_ws + (size_t)point_threads * point_stride;
 
     if (pack_zero_only) {
         /* Transform points must carry explicit zero padding, but the four
@@ -8670,16 +9123,56 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
 
     /* Forward DIF. For large multiplies the operand transforms are independent;
      * run B on one worker while the caller transforms A. */
-    WSSAForwardJob fa_job = {fa, L, m, K, t1, t2, parallel};
-    WSSAForwardJob fb_job = {fb, L, m, K, t3, t4, parallel};
-    pthread_t forward_thread;
-    int forward_live = 0;
-    if (parallel && b && pthread_create(&forward_thread, NULL, ssa_forward_worker, &fb_job) == 0)
-        forward_live = 1;
-    ssa_forward_transform(&fa_job);
-    if (b) {
-        if (forward_live) pthread_join(forward_thread, NULL);
-        else ssa_forward_transform(&fb_job);
+    int use_pool = parallel && L >= 4 && bn_ssa_pool_enabled();
+    WSSAForwardJob fa_job = {fa, L, m, K, t1, t2, use_pool ? 0 : parallel};
+    WSSAForwardJob fb_job = {fb, L, m, K, t3, t4, use_pool ? 0 : parallel};
+    if (use_pool) {
+        /* Fused schedule: each phase is one dispatch on the persistent
+         * pool and doubles as the phase barrier; burst linger carries the
+         * workers between phases without a park/wake cycle.  The first
+         * forward stage couples the halves, below it the quarters run
+         * independently to the leaves. */
+        WSSAForwardJob fa_hi = {fa, L, m, K, quad_ws, quad_ws + S, 0};
+        if (b) {
+            WSSAForwardRangeJob stage1[2] = {
+                {&fa_job, 0, L, L / 2, L / 2},
+                {&fb_job, 0, L, L / 2, L / 2},
+            };
+            void *stage_args[2] = {&stage1[0], &stage1[1]};
+            bn_pool_run_tasks(ssa_forward_range_task, stage_args, 2,
+                              BN_TOOM_POOL_SPIN);
+            WSSAForwardJob fb_hi = {fb, L, m, K, quad_ws + 2 * S,
+                                    quad_ws + 3 * S, 0};
+            WSSAForwardRangeJob quads[4] = {
+                {&fa_job, 0, L / 2, L / 4, 1},
+                {&fa_hi, L / 2, L, L / 4, 1},
+                {&fb_job, 0, L / 2, L / 4, 1},
+                {&fb_hi, L / 2, L, L / 4, 1},
+            };
+            void *quad_args[4] = {&quads[0], &quads[1], &quads[2],
+                                  &quads[3]};
+            bn_pool_run_tasks(ssa_forward_range_task, quad_args, 4,
+                              BN_TOOM_POOL_SPIN);
+        } else {
+            ssa_forward_range(&fa_job, 0, L, L / 2, L / 2);
+            WSSAForwardRangeJob halves[2] = {
+                {&fa_job, 0, L / 2, L / 4, 1},
+                {&fa_hi, L / 2, L, L / 4, 1},
+            };
+            void *half_args[2] = {&halves[0], &halves[1]};
+            bn_pool_run_tasks(ssa_forward_range_task, half_args, 2,
+                              BN_TOOM_POOL_SPIN);
+        }
+    } else {
+        pthread_t forward_thread;
+        int forward_live = 0;
+        if (parallel && b && pthread_create(&forward_thread, NULL, ssa_forward_worker, &fb_job) == 0)
+            forward_live = 1;
+        ssa_forward_transform(&fa_job);
+        if (b) {
+            if (forward_live) pthread_join(forward_thread, NULL);
+            else ssa_forward_transform(&fb_job);
+        }
     }
 
     WSSAPointJob point_jobs[BN_SSA_PAR_THREADS > 0 ? BN_SSA_PAR_THREADS : 1];
@@ -8693,19 +9186,36 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
         point_jobs[t].m = m;
         point_jobs[t].scratch = point_ws + (size_t)t * point_stride;
     }
-    for (int t = 1; t < point_threads; t++) {
-        point_live[t - 1] =
-            pthread_create(&point_workers[t - 1], NULL, ssa_pointwise_worker,
-                           &point_jobs[t]) == 0;
-        if (!point_live[t - 1]) ssa_pointwise_range(&point_jobs[t]);
+    if (use_pool && point_threads > 1) {
+        void *point_args[BN_SSA_PAR_THREADS > 0 ? BN_SSA_PAR_THREADS : 1];
+        for (int t = 0; t < point_threads; t++)
+            point_args[t] = &point_jobs[t];
+        bn_pool_run_tasks(ssa_pointwise_task, point_args, point_threads,
+                          BN_TOOM_POOL_SPIN);
+    } else {
+        for (int t = 1; t < point_threads; t++) {
+            point_live[t - 1] =
+                pthread_create(&point_workers[t - 1], NULL, ssa_pointwise_worker,
+                               &point_jobs[t]) == 0;
+            if (!point_live[t - 1]) ssa_pointwise_range(&point_jobs[t]);
+        }
+        ssa_pointwise_range(&point_jobs[0]);
+        for (int t = 1; t < point_threads; t++)
+            if (point_live[t - 1]) pthread_join(point_workers[t - 1], NULL);
     }
-    ssa_pointwise_range(&point_jobs[0]);
-    for (int t = 1; t < point_threads; t++)
-        if (point_live[t - 1]) pthread_join(point_workers[t - 1], NULL);
 
     /* Inverse DIT: both halves are independent through len=L/4; only the
      * final len=L/2 stage couples them. */
-    if (parallel) {
+    if (use_pool) {
+        WSSAInverseRangeJob left = {fa, 0, L / 2, 1, L / 4, m, K, t1, t2};
+        WSSAInverseRangeJob right = {fa, L / 2, L, 1, L / 4, m, K, t3, t4};
+        void *inverse_args[2] = {&left, &right};
+        /* Last dispatch of the fused schedule: a long serial tail (final
+         * stage, scaling, recompose) follows, so the worker parks at once. */
+        bn_pool_run_tasks(ssa_inverse_range_task, inverse_args, 2, 0);
+        WSSAInverseRangeJob final = {fa, 0, L, L / 2, L / 2, m, K, t1, t2};
+        ssa_inverse_range(&final);
+    } else if (parallel) {
         WSSAInverseRangeJob left = {fa, 0, L / 2, 1, L / 4, m, K, t1, t2};
         WSSAInverseRangeJob right = {fa, L / 2, L, 1, L / 4, m, K, t3, t4};
         pthread_t inverse_thread;
@@ -13002,10 +13512,17 @@ static int mag_divmod_reciprocal_certified(
         size_t barrett_product_len = 2 * n + 2;
 
 /* Below this divisor width the two Barrett products sit at the parallel-Toom
- * floor: the pool's sleep/wake between them costs more than the split saves
- * (~7% at 512 limbs), while 1024-limb products keep a large parallel win. */
+ * floor.  The condvar pool's sleep/wake between them once cost more than
+ * the split saved below 768 limbs; with the ulock mechanics and burst
+ * linger the parallel products win from the Toom-3 parallel floor up
+ * (mod@384 -43%, mod@512 -29%, mod@640 -41% in the forced A/B), so the
+ * gate now simply tracks that floor on Apple arm64. */
 #ifndef BN_DIV_RECIP_PAR_MIN
+#if defined(__aarch64__)
+#define BN_DIV_RECIP_PAR_MIN 344
+#else
 #define BN_DIV_RECIP_PAR_MIN 768
+#endif
 #endif
 /* In the forced-sequential band the q3 estimate comes from a Mulders short
  * product over one extra live limb of U and the FULL cached reciprocal
@@ -14360,7 +14877,14 @@ WValue bigint_isqrt_any(WValue a) {
     WBigint *res = bigint_alloc_raw_hot(m);
     /* Guard-limb quotient buffer ((m-1)/2 + 2 limbs) fits in the workspace
      * slack past the 2m operand limbs (cap >= 2m + m/2 + 16). */
-    if (!bn_dc_sqrt_only(np, res->limbs, np + wide, m)) {
+    /* The square-root recursion interleaves its parallel products with
+     * substantial serial quotient work; let the pool workers park right
+     * after each product instead of burst-lingering through those spans
+     * (measured +8-10% on isqrt@4096-8192 otherwise). */
+    bn_toom_no_spin++;
+    int sqrt_certified = bn_dc_sqrt_only(np, res->limbs, np + wide, m);
+    bn_toom_no_spin--;
+    if (!sqrt_certified) {
         /* Uncertified guard window (~2^-56): the workspace was consumed,
          * so re-normalize and take the exact full-sqrtrem path. */
         if (off) np[0] = 0;
@@ -14371,7 +14895,9 @@ WValue bigint_isqrt_any(WValue a) {
             for (int32_t i = 1; i < alen; i++)
                 np[off + i] = (al[i] << b) | (al[i - 1] >> (64 - b));
         }
+        bn_toom_no_spin++;
         (void)bn_dc_sqrtrem(np, res->limbs, m);
+        bn_toom_no_spin--;
     }
     int32_t back = shift >> 1;                  /* < 64 */
     if (back) {
@@ -15988,7 +16514,13 @@ static int gcd_hgcd_block(const uint64_t *x, int32_t xlen,
         }
         if (xn && yn && pcn[0] && pcn[1] && pcn[2] && pcn[3]) {
             WToomPointSet products;
+            /* Long serial hgcd spans separate these product bursts:
+             * parking immediately beats burst-lingering here (the same
+             * policy recursive division applies to its correction
+             * products).  The budget is captured at init time. */
+            bn_toom_no_spin++;
             bn_toom_product_set_init(&products, 4, 4);
+            bn_toom_no_spin--;
             if (!products.parallel) goto sequential_apply;
             uint64_t *out[4] = {prod0, prod1, prod2, prod3};
 #ifdef BN_GCD_PROFILE_COUNTS

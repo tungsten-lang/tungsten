@@ -1,0 +1,42 @@
+[
+ {
+  "default_g_med": 144101.695,
+  "default_t_all": [
+   90616.6,
+   95873.0,
+   103979.0
+  ],
+  "default_t_med": 95872.982,
+  "hyb32_g_med": 141975.0,
+  "hyb32_gmp_drift": 0.9852,
+  "hyb32_t_all": [
+   88144.9,
+   89609.0,
+   99018.5
+  ],
+  "hyb32_t_med": 89609.022,
+  "hyb32_vs_default": 0.9347,
+  "limbs": 2048,
+  "op": "mul"
+ },
+ {
+  "default_g_med": 192259.259,
+  "default_t_all": [
+   170497.0,
+   172986.5,
+   199311.9
+  ],
+  "default_t_med": 172986.496,
+  "hyb32_g_med": 189892.857,
+  "hyb32_gmp_drift": 0.9877,
+  "hyb32_t_all": [
+   165259.2,
+   166330.1,
+   167352.5
+  ],
+  "hyb32_t_med": 166330.104,
+  "hyb32_vs_default": 0.9615,
+  "limbs": 2048,
+  "op": "fromstr"
+ }
+]

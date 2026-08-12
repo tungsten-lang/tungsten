@@ -313,15 +313,37 @@ int64_t __w_bigint_compare_src(WValue a, WValue b);
 /* Hybrid capacity class: powers of two up to BN_BIGINT_HYBRID_P2_LIMIT (a
  * power of two >= 8), then multiples of BN_BIGINT_HYBRID_QUANTUM (any
  * multiple of 8 — the rounding below is division-form, so non-power-of-two
- * quanta are exact).  Off by default; see benchmarks/big_math. */
+ * quanta are exact).
+ *
+ * DEFAULT ON since 2026-08-11: the 8/02 rejection (27 op-matrix cells
+ * regressing >5%) pre-dated the arena (8d87a6c) and the packed hot-slot
+ * word (ff98d74).  Re-measured post-arena, the historical red cells
+ * (mul@64, div@256, shl@1024) are washes or wins, the mover ledger is
+ * 3 tiny-cell regressions (add1@3 1.7->1.9 ns, sub@1 2.0->2.1 ns,
+ * fromstr@2 +4-6% — the extra p2-band branch here) against sqr@512 -14%,
+ * shl@1024 -11%, mul@2 -8%, and a 200k-value live set commits -5.3%
+ * (max 1024 limbs) to -17.2% (max 4096) less real footprint than
+ * power-of-two.  Set BN_BIGINT_HYBRID_CAP=0 for the old pure-p2 caps;
+ * see benchmarks/big_math. */
 #ifndef BN_BIGINT_HYBRID_CAP
-#define BN_BIGINT_HYBRID_CAP 0
+#define BN_BIGINT_HYBRID_CAP 1
 #endif
 #ifndef BN_BIGINT_HYBRID_P2_LIMIT
 #define BN_BIGINT_HYBRID_P2_LIMIT 32
 #endif
 #ifndef BN_BIGINT_HYBRID_QUANTUM
 #define BN_BIGINT_HYBRID_QUANTUM 32
+#endif
+/* Optional second rung ("ladder"): above BN_BIGINT_HYBRID_MID_LIMIT round
+ * to BN_BIGINT_HYBRID_QUANTUM2 instead.  A single quantum's class count
+ * grows linearly with size while its waste% falls; a second, coarser rung
+ * caps the class count in the top decades at a still-bounded waste.
+ * MID_LIMIT 0 (the default) compiles the rung out entirely. */
+#ifndef BN_BIGINT_HYBRID_MID_LIMIT
+#define BN_BIGINT_HYBRID_MID_LIMIT 0
+#endif
+#ifndef BN_BIGINT_HYBRID_QUANTUM2
+#define BN_BIGINT_HYBRID_QUANTUM2 BN_BIGINT_HYBRID_QUANTUM
 #endif
 #if BN_BIGINT_HYBRID_CAP
 /* The copy kernels round to 8-limb blocks and the fused copy path's guard
@@ -334,6 +356,16 @@ _Static_assert(BN_BIGINT_HYBRID_P2_LIMIT >= 8 &&
                (BN_BIGINT_HYBRID_P2_LIMIT &
                 (BN_BIGINT_HYBRID_P2_LIMIT - 1)) == 0,
                "hybrid p2 limit must be a power of two >= 8");
+#if BN_BIGINT_HYBRID_MID_LIMIT
+_Static_assert(BN_BIGINT_HYBRID_QUANTUM2 % 8 == 0,
+               "hybrid second quantum must be a multiple of 8 limbs");
+_Static_assert(BN_BIGINT_HYBRID_MID_LIMIT % BN_BIGINT_HYBRID_QUANTUM == 0,
+               "ladder threshold must itself be a lower-rung class");
+_Static_assert(BN_BIGINT_HYBRID_MID_LIMIT > BN_BIGINT_HYBRID_P2_LIMIT,
+               "ladder threshold must sit above the p2 band");
+_Static_assert(BN_BIGINT_HYBRID_QUANTUM2 >= BN_BIGINT_HYBRID_QUANTUM,
+               "second rung must be coarser than the first");
+#endif
 #endif
 
 /*
@@ -867,6 +899,15 @@ static inline uint32_t bigint_alloc_capacity(uint32_t requested) {
     if (requested > 1 && requested <= BN_BIGINT_POOL_MAX_CAP) {
         if (requested <= BN_BIGINT_HYBRID_P2_LIMIT)
             return 1U << (32 - __builtin_clz(requested - 1));
+#if BN_BIGINT_HYBRID_MID_LIMIT
+        if (requested > BN_BIGINT_HYBRID_MID_LIMIT) {
+            uint32_t r2 = ((requested + (BN_BIGINT_HYBRID_QUANTUM2 - 1U)) /
+                           BN_BIGINT_HYBRID_QUANTUM2) *
+                          BN_BIGINT_HYBRID_QUANTUM2;
+            return r2 <= BN_BIGINT_POOL_MAX_CAP ? r2
+                                                : BN_BIGINT_POOL_MAX_CAP;
+        }
+#endif
         /* Division form: exact for any quantum. For a power-of-two quantum
          * clang strength-reduces it to the same add+and pair as the old
          * mask (verified on -O3 asm), and the mask was WRONG for other

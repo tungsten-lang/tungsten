@@ -1129,3 +1129,68 @@ Gates: 120k-case wired fuzz vs Knuth (q and r bit-exact, 48.7k certified
 hits, 0 cert failures), 30k more under ASAN+UBSAN clean, powmod/isqrt/
 div-below-256 control cells 1.00x, stage identity + int_spec + bigint
 specs (recorded in the landing report).
+
+## BN_BIGINT_HYBRID_CAP default flip — TAKEN post-arena (2026-08-11)
+
+Reverses the 2026-08-02 "NOT taken" above. That verdict pre-dated the
+limb-buffer arena (8d87a6c) and the packed hot-slot word (ff98d74, whose
+high-bits capacity field was chosen specifically to keep hybrid caps
+representable). Re-ran the whole decision at HEAD on M5 Max.
+
+**Real RSS (new `--bench-capacity-rss`: 200k mixed live values through the
+real allocator, one -D build per policy — not the waste model):**
+
+    policy               @1024 footprint      @4096 footprint
+    power-of-two         1106.8 MiB           3372.6 MiB
+    hybrid p2<=32+q32    1048.1 MiB  (-5.3%)  2791.8 MiB  (-17.2%)
+    ladder q32/512/q128  1074.1 MiB  (-3.0%)  2827.0 MiB  (-16.2%)
+    exact                1003.6 MiB  (-9.3%)  2748.0 MiB  (-18.5%)
+
+The pre-arena "-32% RSS" claim is obsolete — the arena's 512B-grid,
+8-phase placement absorbs most policy slack at the 1024 scale — but the
+win is still real and grows with value size. Allocation-storm cost also
+favors hybrid (7.5 vs 9.1 us/alloc at @1024, page-fault dominated).
+
+**Op matrix (screen x2 ABBA at 3x2ms over 25 ops x 17 sizes, then 9x110ms
+ABBA adjudication of every >5% mover with GMP drift < 3%, plus the 8/02
+red cells; min-of-samples):** the 8/02 regression tail is gone. mul@64
+1.02, div@256 1.00, shl@1024 0.89 (now a WIN). Ledger: 3 real regressions
+— add1@3 1.7->1.9 ns (+12%), sub@1 2.0->2.1 ns (+5%), fromstr@2 +4-6%,
+all the extra p2-band branch in bigint_alloc_capacity — against sqr@512
+-14%, shl@1024 -11%, mul@2 -8%; 24 washes. div@512's screen "-33%" was
+bimodal page-luck (min-ratio 0.98). A follow-up screen at 2048/4096/8192
+(intermediate-heavy ops; pure-p2 request sizes share classes between the
+policies) found no confirmed regression: its two >5% movers inverted
+under 9x110 adjudication (mul@2048 0.935, fromstr@2048 0.962) and the
+band geomean is 0.984 with isqrt@8192 -11%, tostr@2048 -8%, div@4096 -8%.
+Baselines:
+`baselines/matrix-screen-hybrid-postarena-20260811.json`,
+`baselines/adjudication-hybrid-postarena-20260811.json`.
+
+**Steady-state recycler sim (1M requests, depths 1/4/8):** hit% and
+ns/request are policy-insensitive (95.4-97.9%, 15-17.5 ns); no speed
+hazard in the pool loop. The B4 grid confirms the p2 limit (32/64/128)
+is inert and the quantum is the only lever.
+
+**Ladder hypothesis (multiple thresholds, e.g. p2<=32, q32 to 512, q128
+above) — NOT taken:** liveset waste 7.8%/2.9% (@1024/@4096) vs flat
+q32's 3.2%/0.8%; classes 25/49 vs 37/133 — but the class saving buys no
+measurable recycler advantage at any depth, real RSS loses ~26-35 MiB to
+flat q32, and the screen caught div@384/448 +30% (clean GMP drift) on
+the q128 rung. Flat q32 dominates. Runtime plumbing stays available
+(BN_BIGINT_HYBRID_MID_LIMIT/QUANTUM2, default 0 = compiled out) as the
+measurement lever, with static asserts pinning rung monotonicity.
+
+**Correctness (all clean):** ASAN forced-arena (BN_BIGINT_ARENA_ASAN=1)
+full-op sweeps at sizes 1,3,8,33,64,129,512,1000 with per-cell GMP
+self-checks for default/hybrid/ladder builds; --fuzz-tag-sign 64 and
+--fuzz-mut 64 on all three; `make -C runtime bench_bigint` recycler
+give/take on all three. Code-level: the arena freelist pop already does
+an exact-class scan under hybrid, the pool's first-bucket best-fit
+handles multi-class buckets, and the hot-slot word's 16-bit field covers
+every hybrid class (static assert).
+
+**Condition to revert:** a workload where the add1@3/sub@1-class
+sub-nanosecond alloc-branch cost dominates measured end-to-end time;
+BN_BIGINT_HYBRID_CAP=0 restores pure power-of-two caps with no other
+change.

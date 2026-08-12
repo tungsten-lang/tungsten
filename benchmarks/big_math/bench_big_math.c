@@ -20,6 +20,31 @@
 #endif
 #include TUNGSTEN_RUNTIME_SOURCE
 
+#include <sys/resource.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+
+/* Name the compile-time capacity policy this binary was built with, so the
+ * real-allocation probes below are self-describing. */
+#define BENCH_CAP_STR2(x) #x
+#define BENCH_CAP_STR(x) BENCH_CAP_STR2(x)
+#if BN_BIGINT_HYBRID_CAP && BN_BIGINT_HYBRID_MID_LIMIT
+#define BENCH_CAP_BUILD_POLICY                                        \
+    ("hybrid-p2" BENCH_CAP_STR(BN_BIGINT_HYBRID_P2_LIMIT)             \
+     "-q" BENCH_CAP_STR(BN_BIGINT_HYBRID_QUANTUM)                     \
+     "-mid" BENCH_CAP_STR(BN_BIGINT_HYBRID_MID_LIMIT)                 \
+     "-q" BENCH_CAP_STR(BN_BIGINT_HYBRID_QUANTUM2))
+#elif BN_BIGINT_HYBRID_CAP
+#define BENCH_CAP_BUILD_POLICY                                        \
+    ("hybrid-p2" BENCH_CAP_STR(BN_BIGINT_HYBRID_P2_LIMIT)             \
+     "-q" BENCH_CAP_STR(BN_BIGINT_HYBRID_QUANTUM))
+#elif BN_BIGINT_POWER2_CAP
+#define BENCH_CAP_BUILD_POLICY "power-of-two"
+#else
+#define BENCH_CAP_BUILD_POLICY "exact"
+#endif
+
 static volatile uint64_t bench_sink;
 
 static double bench_now(void) {
@@ -4995,23 +5020,37 @@ typedef struct {
 
 enum {
     BENCH_CAP_EXACT,
+    BENCH_CAP_QUANTUM_2,
     BENCH_CAP_QUANTUM_4,
     BENCH_CAP_QUANTUM_8,
     BENCH_CAP_QUANTUM_16,
+    BENCH_CAP_QUANTUM_24,
     BENCH_CAP_QUANTUM_32,
+    BENCH_CAP_QUANTUM_48,
+    BENCH_CAP_QUANTUM_64,
+    BENCH_CAP_QUANTUM_96,
+    BENCH_CAP_QUANTUM_128,
     BENCH_CAP_GROW_50,
     BENCH_CAP_POWER_2,
     BENCH_CAP_P2_32_Q32,
     BENCH_CAP_P2_64_Q64,
     BENCH_CAP_P2_128_Q32,
+    /* Multiple-threshold ladders: a second, coarser quantum above a mid
+     * threshold caps the class count in the top decades while the lower
+     * rung keeps waste small where sizes are dense. */
+    BENCH_CAP_LADDER_A,   /* p2<=32, q32 to 512, q128 above */
+    BENCH_CAP_LADDER_B,   /* p2<=32, q32 to 256, q96 above */
+    BENCH_CAP_LADDER_C,   /* p2<=32, q16 to 128, q64 to 1024, q128 above */
     BENCH_CAP_POLICY_COUNT
 };
 
 static const char *bench_capacity_policy_name(int policy) {
     static const char *const names[BENCH_CAP_POLICY_COUNT] = {
-        "exact/+1", "quantum-4", "quantum-8", "quantum-16",
-        "quantum-32", "reserve-1.5x", "power-of-two",
-        "p2<=32+q32", "p2<=64+q64", "p2<=128+q32"
+        "exact/+1", "quantum-2", "quantum-4", "quantum-8", "quantum-16",
+        "quantum-24", "quantum-32", "quantum-48", "quantum-64",
+        "quantum-96", "quantum-128", "reserve-1.5x", "power-of-two",
+        "p2<=32+q32", "p2<=64+q64", "p2<=128+q32",
+        "lad32/512/128", "lad32/256/96", "lad3step"
     };
     return names[policy];
 }
@@ -5032,15 +5071,30 @@ static uint32_t bench_capacity_hybrid(
     return ((requested + quantum - 1U) / quantum) * quantum;
 }
 
+/* Ladder: hybrid with a second, coarser quantum above `mid`. */
+static uint32_t bench_capacity_ladder(
+    uint32_t requested, uint32_t p2_limit, uint32_t mid,
+    uint32_t q_low, uint32_t q_high) {
+    if (requested <= mid)
+        return bench_capacity_hybrid(requested, p2_limit, q_low);
+    return ((requested + q_high - 1U) / q_high) * q_high;
+}
+
 static uint32_t bench_capacity_round(
     int policy, uint32_t requested, uint32_t max_cap) {
     uint32_t cap = requested;
     uint32_t quantum = 1;
     switch (policy) {
+    case BENCH_CAP_QUANTUM_2: quantum = 2; break;
     case BENCH_CAP_QUANTUM_4: quantum = 4; break;
     case BENCH_CAP_QUANTUM_8: quantum = 8; break;
     case BENCH_CAP_QUANTUM_16: quantum = 16; break;
+    case BENCH_CAP_QUANTUM_24: quantum = 24; break;
     case BENCH_CAP_QUANTUM_32: quantum = 32; break;
+    case BENCH_CAP_QUANTUM_48: quantum = 48; break;
+    case BENCH_CAP_QUANTUM_64: quantum = 64; break;
+    case BENCH_CAP_QUANTUM_96: quantum = 96; break;
+    case BENCH_CAP_QUANTUM_128: quantum = 128; break;
     case BENCH_CAP_GROW_50:
         cap = requested + (requested + 1U) / 2U;
         break;
@@ -5056,6 +5110,17 @@ static uint32_t bench_capacity_round(
         break;
     case BENCH_CAP_P2_128_Q32:
         cap = bench_capacity_hybrid(requested, 128U, 32U);
+        break;
+    case BENCH_CAP_LADDER_A:
+        cap = bench_capacity_ladder(requested, 32U, 512U, 32U, 128U);
+        break;
+    case BENCH_CAP_LADDER_B:
+        cap = bench_capacity_ladder(requested, 32U, 256U, 32U, 96U);
+        break;
+    case BENCH_CAP_LADDER_C:
+        cap = requested <= 128U
+                  ? bench_capacity_hybrid(requested, 32U, 16U)
+                  : bench_capacity_ladder(requested, 32U, 1024U, 64U, 128U);
         break;
     default:
         break;
@@ -5647,6 +5712,64 @@ int main(int argc, char **argv) {
                    worst, classes);
         }
         free(seen);
+        free(trace);
+        return 0;
+    }
+    /* REAL live-set probe: allocate `count` bigints through the actual
+     * configured allocator (bigint_alloc -> pool/arena/malloc; the policy is
+     * fixed at compile time — build one binary per policy via CFLAGS), hold
+     * every value live, and report process-level memory.  The simulated
+     * liveset above models rounding waste only; this measures the whole
+     * stack: policy slack, arena chunk carving, and allocator overhead. */
+    if (argc == 4 && strcmp(argv[1], "--bench-capacity-rss") == 0) {
+        uint32_t max_limbs = (uint32_t)strtoul(argv[2], NULL, 10);
+        uint32_t count = (uint32_t)strtoul(argv[3], NULL, 10);
+        if (max_limbs == 0 || max_limbs > BN_BIGINT_POOL_MAX_CAP ||
+            count < 1000)
+            die("capacity rss expects max limbs 1..16384 and >= 1000 values");
+        uint32_t *trace = bench_capacity_trace(max_limbs, count);
+        WValue *live = (WValue *)malloc((size_t)count * sizeof(WValue));
+        if (!live) die("out of memory in capacity rss probe");
+        uint64_t req_limbs = 0, cap_limbs = 0;
+        double start = bench_now();
+        for (uint32_t i = 0; i < count; i++) {
+            live[i] = bench_bigint((int32_t)trace[i],
+                                   0x9E3779B97F4A7C15ULL ^ i);
+            req_limbs += trace[i];
+        }
+        double elapsed = bench_now() - start;
+        for (uint32_t i = 0; i < count; i++)
+            cap_limbs += (uint64_t)w_as_bigint(live[i])->cap;
+        double footprint_mib = 0.0;
+#ifdef __APPLE__
+        task_vm_info_data_t vm_info;
+        mach_msg_type_number_t vm_count = TASK_VM_INFO_COUNT;
+        if (task_info(mach_task_self(), TASK_VM_INFO,
+                      (task_info_t)&vm_info, &vm_count) == KERN_SUCCESS)
+            footprint_mib =
+                (double)vm_info.phys_footprint / (1024.0 * 1024.0);
+#endif
+        struct rusage usage;
+        getrusage(RUSAGE_SELF, &usage);
+#ifdef __APPLE__
+        double maxrss_mib = (double)usage.ru_maxrss / (1024.0 * 1024.0);
+#else
+        double maxrss_mib = (double)usage.ru_maxrss / 1024.0;
+#endif
+        uint64_t arena_reserved = 0, arena_bumped = 0, arena_out = 0;
+        w_bigint_arena_stats(&arena_reserved, &arena_bumped, &arena_out);
+        /* rss POLICY max count req_MiB cap_MiB maxrss_MiB footprint_MiB
+         * arena_reserved_MiB arena_bumped_MiB ns/alloc */
+        printf("rss\t%s\t%u\t%u\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.1f\n",
+               BENCH_CAP_BUILD_POLICY, max_limbs, count,
+               (double)req_limbs * 8.0 / (1024.0 * 1024.0),
+               (double)cap_limbs * 8.0 / (1024.0 * 1024.0),
+               maxrss_mib, footprint_mib,
+               (double)arena_reserved / (1024.0 * 1024.0),
+               (double)arena_bumped / (1024.0 * 1024.0),
+               elapsed * 1e9 / (double)count);
+        for (uint32_t i = 0; i < count; i++) bench_free_value(live[i]);
+        free(live);
         free(trace);
         return 0;
     }

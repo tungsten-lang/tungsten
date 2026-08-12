@@ -1484,8 +1484,9 @@ def main() -> int:
             )
         print("worker sweep (mul/sqr limbs): " + ",".join(map(str, WORKER_SWEEP_SIZES)))
         print(
-            "capacity policies: exact/+1,quantum-4,quantum-8,"
-            "quantum-16,quantum-32,reserve-1.5x,power-of-two"
+            "capacity policies: exact/+1,quantum-{2,4,8,16,24,32,48,64,96,"
+            "128},reserve-1.5x,power-of-two,p2<=32+q32,p2<=64+q64,"
+            "p2<=128+q32,lad32/512/128,lad32/256/96,lad3step"
         )
         print("optional lanes: python,rust-num-bigint-0.5.1,odin-core-math-big")
         return 0
@@ -1499,7 +1500,7 @@ def main() -> int:
             return 1
 
     if not args.capacity_only:
-        for language in external_languages:
+        for language in list(external_languages):
             if not external_harness_is_stale(language):
                 continue
             print(
@@ -1509,8 +1510,16 @@ def main() -> int:
             try:
                 build_external_harness(language)
             except RuntimeError as error:
-                print(f"tungsten bench bignum: {error}", file=sys.stderr)
-                return 1
+                # A lane that cannot build must not take down the whole
+                # bench: warn, drop the lane, keep measuring the rest.
+                print(
+                    f"tungsten bench bignum: warning: skipping {language} "
+                    f"lane: {error}",
+                    file=sys.stderr,
+                )
+                external_languages.remove(language)
+                lanes.remove(language)
+                setattr(args, language, False)
 
     try:
         gmp_version = run_checked(

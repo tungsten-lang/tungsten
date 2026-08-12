@@ -92,6 +92,12 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Mac"           => 0x85 # 0x80 | W_TYPE_MAC (5)
     "Encoded"       => 0x88 # 0x80 | W_TYPE_ENCODED (8)
     "Float"         => 0xFF
+    # Packed and heap domain numerics share the physical 0xFFFD tag, but their
+    # method-cache identities are distinct. runtime.c's w_dispatch_key uses
+    # these same semantic keys so an erased Decimal/Quantity call site cannot
+    # reuse the other representation's cached handler.
+    "Decimal"       => 0xFD
+    "Quantity"      => 0xC1
     "String"        => 0xF9
     "Integer"       => 0xFA
     "Instant"       => 0xFB

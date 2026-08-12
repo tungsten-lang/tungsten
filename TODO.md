@@ -280,16 +280,16 @@ projects stay unchecked until their stated acceptance criteria are met.
   - [ ] Classify the remaining runtime-backed Core classes exhaustively so a
     newly added source method must declare its native-IC or autoload fallback:
     Array, String, Int/Integer, Decimal, and Date.
-    - [ ] Audit Decimal's bodyless declarations individually. The existing
-      runtime table covers `to_i`, `sqrt`, `floor`, `ceil`, `round`, `sq`,
-      `to_f`, `abs`, and `to_d`, while `new`, rational accessors,
-      normalization/reciprocal methods, `to_m`, and the trigonometric family
-      need an implemented source/native contract or an explicit unsupported
-      diagnostic. None may silently return `nil`.
+    - [x] Audit Decimal's bodyless declarations individually. Native
+      conversion/rounding leaves are classified; normalization, reciprocal,
+      formatting, and transcendental methods have source bodies; stale
+      constructor/rational-field/currency placeholders are removed. Invalid
+      construction is a clean cross-engine error rather than a malformed
+      value, and Decimal/Quantity/Currency have distinct cache identities.
     - [ ] Add erased-receiver interpreter/native parity fixtures for Decimal
       and Date, then for the overlapping Array, String, and Int/Integer
       surfaces. Cover ordinary values and representation boundaries.
-    - [ ] Teach the audit to distinguish an implemented source fallback from
+    - [x] Teach the audit to distinguish an implemented source fallback from
       a bodyless declaration. A placeholder cannot satisfy the gate merely by
       being listed as `source_fallback`.
 - [ ] Finish decomposing and ultimately eliminate the `runtime/runtime.c`

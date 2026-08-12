@@ -46650,15 +46650,15 @@ static inline uint64_t w_dispatch_key(WValue v) {
         if (subtag == W_SUBTAG_DOMAIN) {
             if (w_is_big_rational(v))
                 return 0xE0u | W_PACKED_RATIONAL;
-            /* Heap-domain numerics (significands or unit ids past the
-             * nan-box width — long division results, wide-σ quantities,
-             * compound units) share the packed 0xFD key so the decimal /
-             * quantity IC tables and class methods resolve identically to
-             * their packed forms. */
+            /* Heap-domain numerics mirror the semantic keys used by their
+             * packed forms below. Keeping Decimal, Currency, and Quantity
+             * distinct is required for monomorphic caches: all three share
+             * the physical 0xFFFD tag, but their handlers are not
+             * interchangeable. */
             uint8_t dt = w_as_domain(v)->domain_type;
-            if (dt == W_DOMAIN_DECIMAL || dt == W_DOMAIN_QUANTITY ||
-                dt == W_DOMAIN_CURRENCY)
-                return 0xFDu;
+            if (dt == W_DOMAIN_DECIMAL) return 0xFDu;
+            if (dt == W_DOMAIN_CURRENCY) return 0xC0u;
+            if (dt == W_DOMAIN_QUANTITY) return 0xC1u;
         }
         return subtag;
     }
@@ -46668,6 +46668,11 @@ static inline uint64_t w_dispatch_key(WValue v) {
      * catch-all: a bigint classified as 0xFF would hit the Float table. */
     if (hi == 0xFFF8) return W_SUBTAG_BIGINT;
     if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF2..0xFFF7 free) */
+    if (hi == 0xFFFD) {
+        if (is_currency_any(v)) return 0xC0u;
+        if (is_quantity_any(v)) return 0xC1u;
+        return 0xFDu;
+    }
     /* W_TAG_PACKED (hi=0xFFFE) holds 8 packed-value subtypes (color,
      * complex, rational, NODE, date, ipv4, …) that need distinct
      * dispatch keys so each can register its own class. Map subtype
@@ -52730,21 +52735,15 @@ static void w_init_ic_tables(void) {
 }
 
 static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WValue*, int) {
+    (void)recv;
     const WICEntry *table = NULL;
     switch (key) {
         case 0x0A: table = w_ic_array_table;   break;
         case 0xF9: table = w_ic_string_table;  break;
         case 0xFA: table = w_ic_int_table;     break;
         case 0xFF: table = w_ic_float_table;   break;
-        case 0xFD:
-            /* The 0xFFFD numeric tag is shared by decimal, currency, and
-             * quantity. Only plain decimals own these IC handlers — the
-             * handlers funnel through cmp_numeric_double, which die()s on a
-             * currency/quantity receiver (e.g. `(2 m).round`). Send those to
-             * the cascade instead, which dispatches their real methods. */
-            if (is_currency_any(recv)) return NULL;
-            if (is_quantity_any(recv)) { table = w_ic_quantity_table; break; }
-            table = w_ic_decimal_table; break;  /* 0xFFFD numeric (decimal) */
+        case 0xFD: table = w_ic_decimal_table;  break;
+        case 0xC1: table = w_ic_quantity_table; break;
         case 0x05: table = w_ic_hash_table;    break;
         case 0x01: table = w_ic_atomic_table;  break;
         case 0x84: table = w_ic_channel_table; break;  /* 0x80 | W_TYPE_CHANNEL=4 */

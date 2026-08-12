@@ -329,6 +329,11 @@ use parser
     # through a parameter or native call without a literal or class reference,
     # so schedule its class on the first matching method name.
     @float_source_method_unresolved = defined["Float"] != true && registry["Float"] != nil && @autoload_loaded["Float"] != true
+    # Decimal's portable source leaves (normalization, reciprocal, and the
+    # transcendental facade) likewise need the class even when a packed or
+    # heap Decimal crosses an untyped boundary. Its primitive conversions and
+    # rounding methods remain native IC rows and do not need this trigger.
+    @decimal_source_method_unresolved = defined["Decimal"] != true && registry["Decimal"] != nil && @autoload_loaded["Decimal"] != true
     # BigInt#to_i is likewise source-defined identity and a heap BigInt can
     # cross a parameter/native boundary without a literal in this AST.
     @bigint_to_i_unresolved = defined["BigInt"] != true && registry["BigInt"] != nil && @autoload_loaded["BigInt"] != true
@@ -705,9 +710,13 @@ use parser
         consider_autoload_name("Array", defined, registry, seen, pending)
         @array_source_method_unresolved = false
 
-      if @float_source_method_unresolved && call_name in ("to_f" "abs" "nan?" "infinite?" "sqrt" "ceil" "floor" "round" "sq")
+      if @float_source_method_unresolved && call_name in ("to_f" "abs" "nan?" "infinite?" "finite?" "sqrt" "ceil" "floor" "round" "sq" "truncate")
         consider_autoload_name("Float", defined, registry, seen, pending)
         @float_source_method_unresolved = false
+
+      if @decimal_source_method_unresolved && call_receiver != nil && call_name in ("to_s" "normalize" "reciprocal" "inv" "sin" "cos" "tan" "arcsin" "arccos" "arctan" "sinh" "cosh" "tanh" "arcsinh" "arccosh" "arctanh")
+        consider_autoload_name("Decimal", defined, registry, seen, pending)
+        @decimal_source_method_unresolved = false
 
       if @mmap_size_unresolved && call_name == "size"
         consider_autoload_name("Mmap", defined, registry, seen, pending)
@@ -984,8 +993,8 @@ use parser
     nil
 
   -> cache_version
-    # v22: every root AST also includes native BigInt bitwise support fns.
-    "loader-ast-v22"
+    # v23: dynamic Decimal source methods schedule their Core facade.
+    "loader-ast-v23"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")

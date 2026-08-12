@@ -11,6 +11,8 @@ ROOT = File.expand_path("..", __dir__)
 RUNTIME_PATH = File.join(ROOT, "runtime", "runtime.c")
 QUANTITY_PATH = File.join(ROOT, "core", "quantity.w")
 LOWERING_PATH = File.join(ROOT, "compiler", "lib", "lowering", "method_call.w")
+LOADER_PATH = File.join(ROOT, "compiler", "lib", "loader.w")
+TYPES_PATH = File.join(ROOT, "compiler", "lib", "lowering", "types.w")
 
 # Every instance method on these runtime-backed classes must be classified.
 # `native_ic` methods are intercepted by the runtime table even when the
@@ -18,18 +20,23 @@ LOWERING_PATH = File.join(ROOT, "compiler", "lib", "lowering", "method_call.w")
 # dispatch through the loaded Core class. `dual_dispatch` names an intentional
 # overlap where static/source dispatch and erased/native dispatch use different
 # implementations (packed regex literals versus Regex objects, or Float#sqrt,
-# for example). Adding a source method or IC row without choosing one of those
-# contracts is a gate failure.
+# for example). `native_declaration` is reserved for constructor/lowering
+# contracts that do not use an instance IC row. A bodyless method may only be
+# native-backed; listing it as a source fallback is never enough. Adding a
+# source method or IC row without choosing one of those contracts is a gate
+# failure.
 RUNTIME_CLASS_CONTRACTS = {
   "Mmap" => {
     path: "core/mmap.w",
     table: "w_ic_mmap_table",
+    dispatch_key: "0x91",
     native_ic: %w[[] byte_at close view_at],
     source_fallback: %w[as_f32 as_f64 as_i16 as_i32 as_i64 as_i8 as_u16 as_u32 as_u64 as_u8 size]
   },
   "Atomic" => {
     path: "core/atomic.w",
     table: "w_ic_atomic_table",
+    dispatch_key: "0x01",
     native_ic: %w[add cas get set],
     source_fallback: %w[compare_exchange decrement exchange fetch_add fetch_sub increment load store]
   },
@@ -42,18 +49,22 @@ RUNTIME_CLASS_CONTRACTS = {
   "Thread" => {
     path: "core/thread.w",
     table: "w_ic_thread_table",
+    dispatch_key: "0x81",
     native_ic: %w[join kill],
-    source_fallback: %w[alive? new]
+    native_declaration: %w[new],
+    source_fallback: %w[alive?]
   },
   "Channel" => {
     path: "core/channel.w",
     table: "w_ic_channel_table",
+    dispatch_key: "0x84",
     native_ic: %w[close send],
     source_fallback: %w[each receive receive_result recv try_receive try_receive_result try_send]
   },
   "BigArray" => {
     path: "core/big_array.w",
     table: "w_ic_big_array_table",
+    dispatch_key: "0x92",
     native_ic: %w[[] []= get push set subview],
     native_only: %w[[] []= get push set subview],
     source_fallback: %w[__enumerable_iteration_mode __replace_elements cap each empty? mergesort! rotate rotate! shuffle shuffle! size sort sort!]
@@ -61,6 +72,7 @@ RUNTIME_CLASS_CONTRACTS = {
   "SmallArray" => {
     path: "core/small_array.w",
     table: "w_ic_small_array_table",
+    dispatch_key: "0x09",
     native_ic: %w[[] []= get set],
     native_only: %w[[] []= get set],
     source_fallback: %w[__enumerable_iteration_mode cap each empty? rotate shuffle size sort]
@@ -68,24 +80,28 @@ RUNTIME_CLASS_CONTRACTS = {
   "IPv4" => {
     path: "core/ipv4.w",
     table: "w_ic_ipv4_table",
+    dispatch_key: "0xE5",
     native_ic: %w[inspect],
     source_fallback: %w[[] a b broadcast broadcast? c cidr? contains? d global? include? link_local? loopback? mask multicast? netmask network octet octets prefix private? reserved? to_i to_s unspecified? with_prefix]
   },
   "IPv6" => {
     path: "core/ipv6.w",
     table: "w_ic_ipv6_table",
+    dispatch_key: "0x86",
     native_ic: %w[inspect],
     source_fallback: %w[[] byte bytes cidr? contains? global? include? link_local? loopback? multicast? network prefix private? to_s unique_local? unspecified? with_prefix]
   },
   "MAC" => {
     path: "core/mac.w",
     table: "w_ic_mac_table",
+    dispatch_key: "0x85",
     native_ic: %w[inspect],
     source_fallback: %w[[] broadcast? byte bytes local? multicast? to_s unicast? universal?]
   },
   "Hash" => {
     path: "core/hash.w",
     table: "w_ic_hash_table",
+    dispatch_key: "0x05",
     native_ic: %w[[] []= delete each get has_key? keys merge! set values],
     native_only: %w[[] []= delete each get has_key? keys set values],
     source_fallback: %w[__enumerable_each __enumerable_iteration_mode __enumerable_yields_pair? each_pair fetch include? invert key? merge size transform_keys transform_values update]
@@ -93,12 +109,15 @@ RUNTIME_CLASS_CONTRACTS = {
   "StringBuffer" => {
     path: "core/string_buffer.w",
     table: "w_ic_strbuf_table",
+    dispatch_key: "0x0B",
     native_ic: %w[<< [] append byte_size clear empty? include? length size starts_with? to_s],
-    source_fallback: %w[new]
+    native_declaration: %w[new],
+    source_fallback: []
   },
   "Regex" => {
     path: "core/regex.w",
     table: "w_ic_regex_table",
+    dispatch_key: "0x07",
     native_ic: %w[=== =~ match? to_s],
     native_only: %w[=== =~ to_s],
     dual_dispatch: %w[match?],
@@ -117,23 +136,66 @@ RUNTIME_CLASS_CONTRACTS = {
     path: "core/numeric/big_int.w",
     table: nil,
     retired_table: "w_ic_bigint_table",
+    dispatch_key: "0x02",
     native_ic: [],
     source_fallback: %w[% & * + - / << >> ^ abs abs! even? gcd isqrt lcm neg! negative? odd? positive? prime? to_f to_i to_s zero? |]
   },
   "Float" => {
     path: "core/numeric/float.w",
     table: "w_ic_float_table",
+    dispatch_key: "0xFF",
     native_ic: %w[sqrt to_i to_s],
     native_only: %w[to_i to_s],
     dual_dispatch: %w[sqrt],
+    autoload_guard: "float_source_method_unresolved",
     source_fallback: %w[abs ceil finite? floor infinite? nan? round sq sqrt to_f truncate]
+  },
+  "Decimal" => {
+    path: "core/numeric/decimal.w",
+    table: "w_ic_decimal_table",
+    dispatch_key: "0xFD",
+    native_ic: %w[abs ceil floor round sq sqrt to_d to_f to_i],
+    autoload_guard: "decimal_source_method_unresolved",
+    source_fallback: %w[arccos arccosh arcsin arcsinh arctan arctanh cos cosh inv normalize reciprocal sin sinh tan tanh to_s]
   }
 }.freeze
+
+def instance_method_bodies(class_body)
+  lines = class_body.lines
+  methods = Hash.new { |hash, key| hash[key] = [] }
+
+  lines.each_with_index do |line, index|
+    match = line.match(/^  ->\s+(?!\.)([^\s(]+)/)
+    next if match.nil?
+
+    name = match[1]
+    name = name.sub(%r{/.*\z}, "") unless name == "/"
+    has_body = false
+    cursor = index + 1
+    while cursor < lines.size
+      candidate = lines[cursor]
+      stripped = candidate.strip
+      if stripped.empty? || stripped.start_with?("#")
+        cursor += 1
+        next
+      end
+      has_body = candidate.start_with?("    ")
+      break
+    end
+    methods[name] << has_body
+  end
+
+  methods
+end
 
 runtime = File.read(RUNTIME_PATH, encoding: "utf-8")
 quantity = File.read(QUANTITY_PATH, encoding: "utf-8")
 lowering = File.read(LOWERING_PATH, encoding: "utf-8")
+loader = File.read(LOADER_PATH, encoding: "utf-8")
+types = File.read(TYPES_PATH, encoding: "utf-8")
 errors = []
+
+dispatch_keys = types.scan(/^\s*"([^"]+)"\s*=>\s*(0x[0-9A-Fa-f]+)/).to_h
 
 method_names = {}
 runtime.scan(/^#define\s+(WN_\w+)\s+W_M\d+\("([^"]+)"\)/) do |constant, name|
@@ -209,21 +271,25 @@ end
 
 RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   source = File.read(File.join(ROOT, contract[:path]), encoding: "utf-8")
+  actual_dispatch_key = dispatch_keys[class_name]
+  if contract[:dispatch_key] && actual_dispatch_key != contract[:dispatch_key]
+    errors << "#{class_name}: compiler dispatch key #{actual_dispatch_key.inspect}, expected #{contract[:dispatch_key]}"
+  end
   body = source[/^\+ #{Regexp.escape(class_name)}(?:\s+<[^\n]+)?\s*$\n(?<body>.*?)(?=^\+ |\z)/m, :body]
   if body.nil?
     errors << "#{class_name}: missing class declaration in #{contract[:path]}"
     next
   end
 
-  source_methods = body.scan(/^  ->\s+(?!\.)([^\s(]+)/).flatten.map do |name|
-    name == "/" ? name : name.sub(%r{/.*\z}, "")
-  end.uniq.sort
+  method_bodies = instance_method_bodies(body)
+  source_methods = method_bodies.keys.sort
   native_methods = contract[:native_ic].uniq.sort
   native_only = contract.fetch(:native_only, []).uniq.sort
+  native_declarations = contract.fetch(:native_declaration, []).uniq.sort
   fallback_methods = contract[:source_fallback].uniq.sort
   dual_dispatch = contract.fetch(:dual_dispatch, []).uniq.sort
   declared_native = native_methods - native_only
-  classified = (declared_native + fallback_methods).uniq.sort
+  classified = (declared_native + native_declarations + fallback_methods).uniq.sort
   overlap = native_methods & fallback_methods
   unexpected_overlap = overlap - dual_dispatch
   missing_overlap = dual_dispatch - overlap
@@ -238,10 +304,31 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   declared_native_only = native_only & source_methods
   errors << "#{class_name}: native-only methods also have source declarations: #{declared_native_only.join(', ')}" unless declared_native_only.empty?
 
+  unbacked_bodyless = method_bodies.filter_map do |name, bodies|
+    name if bodies.include?(false) && !(native_methods + native_declarations).include?(name)
+  end.sort
+  unless unbacked_bodyless.empty?
+    errors << "#{class_name}: bodyless declarations lack a native contract: #{unbacked_bodyless.join(', ')}"
+  end
+
   unclassified = source_methods - classified
   stale = classified - source_methods
   errors << "#{class_name}: unclassified source methods: #{unclassified.join(', ')}" unless unclassified.empty?
   errors << "#{class_name}: classifications not declared in #{contract[:path]}: #{stale.join(', ')}" unless stale.empty?
+
+  if contract[:autoload_guard]
+    guard = Regexp.escape(contract[:autoload_guard])
+    trigger = loader.match(/if\s+@#{guard}[^\n]*call_name in \((?<names>[^\n]+)\)\n\s*consider_autoload_name\("#{Regexp.escape(class_name)}"/)
+    if trigger.nil?
+      errors << "#{class_name}: missing loader trigger for @#{contract[:autoload_guard]}"
+    else
+      trigger_methods = trigger[:names].scan(/"([^"]+)"/).flatten.uniq.sort
+      missing_trigger = fallback_methods - trigger_methods
+      stale_trigger = trigger_methods - fallback_methods
+      errors << "#{class_name}: source fallbacks missing loader triggers: #{missing_trigger.join(', ')}" unless missing_trigger.empty?
+      errors << "#{class_name}: loader triggers without source fallbacks: #{stale_trigger.join(', ')}" unless stale_trigger.empty?
+    end
+  end
 
   if contract[:table] == nil
     retired_table = contract[:retired_table]
@@ -256,6 +343,14 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   stale_ic = actual_ic - native_methods
   errors << "#{class_name}: native IC classification missing runtime rows: #{missing_ic.join(', ')}" unless missing_ic.empty?
   errors << "#{class_name}: runtime IC rows not classified native: #{stale_ic.join(', ')}" unless stale_ic.empty?
+  if contract[:table] && contract[:dispatch_key]
+    table_case = /case\s+#{Regexp.escape(contract[:dispatch_key])}:\s*table\s*=\s*#{Regexp.escape(contract[:table])};/
+    errors << "#{class_name}: runtime dispatch key #{contract[:dispatch_key]} does not select #{contract[:table]}" unless runtime.match?(table_case)
+  end
+end
+
+unless dispatch_keys["Quantity"] == "0xC1" && runtime.include?("case 0xC1: table = w_ic_quantity_table;")
+  errors << "Quantity: compiler/runtime semantic dispatch key must be 0xC1"
 end
 
 if errors.empty?

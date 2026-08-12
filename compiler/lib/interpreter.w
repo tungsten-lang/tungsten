@@ -3438,6 +3438,16 @@ use target
             native_name = name == "\[]" ? "[]" : "" + name
             return ccall("w_method_call", recv, native_name, args)
           m = nil
+      # Decimal's bodyless conversion/rounding declarations are native IC
+      # methods. Several names are also generic interpreter builtins (`to_i`,
+      # `floor`, ...), whose host-oriented behavior stringifies or coerces the
+      # receiver and is not Decimal's exact runtime contract. Delegate these
+      # declarations before the generic bodyless fallthrough so the tree
+      # walker and compiled engine use the same handlers.
+      if m != nil && primitive_class[:name] == "Decimal"
+        method_body = m[:body]
+        if (method_body == nil || method_body.size() == 0) && name in ("abs" "to_f" "to_i" "to_d" "floor" "ceil" "round" "sqrt" "sq")
+          return ccall("w_method_call", recv, "" + name, args)
       # A bodyless `-> name` on a runtime-backed receiver is a native/
       # abstract DECLARATION, never a nil-returning empty body — the
       # compiled engine dispatches these to the runtime's handlers. Fall

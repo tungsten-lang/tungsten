@@ -188,6 +188,70 @@ run_interpreter_spec() {
   record_result "$name" "$output" "$status"
 }
 
+# Expected runtime failures pin invalid public shapes that used to create
+# malformed values. Both engines must reject with the same useful diagnostic;
+# a signal or a successful nil result is always a failure.
+run_compiled_reject_spec() {
+  local path="$1"
+  local name="$(basename "${path%.w}")"
+  local out="$TMP_ROOT/$name"
+  local output
+  local status
+  local needle
+
+  case "$name" in
+    decimal_invalid_constructor) needle='Decimal.new: no constructor accepts 1 argument' ;;
+    *) record_failure_note "$name" "missing expected compiled rejection diagnostic"; return ;;
+  esac
+
+  echo "compile+reject $path"
+  if ! "$TUNGSTEN" compile "$path" --out "$out" >/dev/null; then
+    record_failure_note "$name" "compile failed before runtime rejection"
+    return
+  fi
+  set +e
+  output="$("$out" 2>&1)"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    record_failure_note "$name" "invalid program unexpectedly succeeded"
+  elif [[ "$status" -gt 128 ]]; then
+    record_result "$name" "$output" 1
+  elif ! grep -Fq "$needle" <<<"$output"; then
+    record_result "$name" "$output" 1
+  else
+    record_result "$name" "PASS $name" 0
+  fi
+}
+
+run_interpreter_reject_spec() {
+  local path="$1"
+  local name="$(basename "${path%.w}")"
+  local output
+  local status
+  local needle
+
+  case "$name" in
+    decimal_invalid_constructor) needle='Decimal.new: no constructor accepts 1 argument' ;;
+    *) record_failure_note "$name" "missing expected interpreted rejection diagnostic"; return ;;
+  esac
+
+  echo "run+reject $path"
+  set +e
+  output="$(TUNGSTEN_INTERPRETED_SPEC=1 "$TUNGSTEN" run "$path" 2>&1)"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    record_failure_note "$name" "invalid program unexpectedly succeeded"
+  elif [[ "$status" -gt 128 ]]; then
+    record_result "$name" "$output" 1
+  elif ! grep -Fq "$needle" <<<"$output"; then
+    record_result "$name" "$output" 1
+  else
+    record_result "$name" "PASS $name" 0
+  fi
+}
+
 run_wassat_spec() {
   local path="$1"
   local wassat_bin="$2"
@@ -498,6 +562,8 @@ if [[ "${1:-}" == --job-* ]]; then
   case "$1" in
     --job-compiled) run_compiled_spec "$2" ;;
     --job-interp)   run_interpreter_spec "$2" ;;
+    --job-compiled-reject) run_compiled_reject_spec "$2" ;;
+    --job-interp-reject) run_interpreter_reject_spec "$2" ;;
     --job-cuda)     run_cuda_emit_spec "$2" ;;
     --job-wgsl)     run_wgsl_emit_spec "$2" ;;
     --job-cuda-reject) run_cuda_reject_spec "$2" ;;
@@ -509,6 +575,7 @@ fi
 
 compiled_specs=(
   compiler/test/regex_features.w
+  spec/compiler/decimal_dynamic_receiver_spec.w
   spec/compiler/float_dynamic_receiver_spec.w
   spec/compiler/ast_body_native_spec.w
   spec/compiler/ast_typed_sidecar_spec.w
@@ -681,6 +748,7 @@ compiled_specs=(
   spec/numeric/bigint_view_field_write_spec.w
   spec/compiler/hash_free_escape_spec.w
   spec/numeric/bit_ops_spec.w
+  spec/numeric/big_decimal_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/fp_math_mode_spec.w
   spec/numeric/gcd_spec.w
@@ -710,6 +778,7 @@ cuda_reject_specs=(
 interpreter_specs=(
   compiler/test/regex_features.w
   benchmarks/runtime_ports/bigint_predicate_relaxed_autoload.w
+  spec/compiler/decimal_dynamic_receiver_spec.w
   spec/compiler/float_dynamic_receiver_spec.w
   # Engine-parity pins: these compiler specs assert values that must hold
   # identically interpreted (compiled-only verification has missed clobbered
@@ -790,6 +859,7 @@ interpreter_specs=(
   spec/numeric/bigint_view_field_write_spec.w
   spec/compiler/hash_free_escape_spec.w
   spec/numeric/bit_ops_spec.w
+  spec/numeric/big_decimal_spec.w
   spec/numeric/rational_spec.w
   spec/interpreter/slab_decl_spec.w
   spec/interpreter/string_buffer_size_revisit_spec.w
@@ -833,6 +903,14 @@ interpreter_specs=(
   benchmarks/runtime_ports/identity_leaf_interpreter.w
   benchmarks/runtime_ports/small_big_array_interpreter.w
   benchmarks/runtime_ports/sync_wrapper_revisit_interpreter.w
+)
+
+compiled_reject_specs=(
+  spec/compiler/decimal_invalid_constructor.w
+)
+
+interpreter_reject_specs=(
+  spec/compiler/decimal_invalid_constructor.w
 )
 
 core_specs=(
@@ -982,6 +1060,7 @@ if [[ "${FAST:-0}" == "1" ]]; then
 fi
 
 run_parallel compiled "${compiled_specs[@]}"
+run_parallel compiled-reject "${compiled_reject_specs[@]}"
 
 run_cache_lifecycle_test
 
@@ -990,6 +1069,7 @@ run_parallel wgsl "${wgsl_emit_specs[@]}"
 run_parallel cuda-reject "${cuda_reject_specs[@]}"
 
 run_parallel interp "${interpreter_specs[@]}"
+run_parallel interp-reject "${interpreter_reject_specs[@]}"
 
 if [[ "${RUN_CORE_SPECS:-0}" == "1" ]]; then
   # High-bit words pin the SIGNED view encodings (as_i32/as_i64 vs as_u32):

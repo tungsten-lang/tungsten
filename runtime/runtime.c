@@ -43542,6 +43542,80 @@ static int64_t w_stat_mtime_ns(const struct stat *st) {
 #endif
 }
 
+static int64_t w_stat_atime_ns(const struct stat *st) {
+#ifdef __APPLE__
+    return ((int64_t)st->st_atimespec.tv_sec * 1000000000LL) + (int64_t)st->st_atimespec.tv_nsec;
+#elif defined(__linux__)
+    return ((int64_t)st->st_atim.tv_sec * 1000000000LL) + (int64_t)st->st_atim.tv_nsec;
+#else
+    return ((int64_t)st->st_atime * 1000000000LL);
+#endif
+}
+
+static int64_t w_stat_ctime_ns(const struct stat *st) {
+#ifdef __APPLE__
+    return ((int64_t)st->st_ctimespec.tv_sec * 1000000000LL) + (int64_t)st->st_ctimespec.tv_nsec;
+#elif defined(__linux__)
+    return ((int64_t)st->st_ctim.tv_sec * 1000000000LL) + (int64_t)st->st_ctim.tv_nsec;
+#else
+    return ((int64_t)st->st_ctime * 1000000000LL);
+#endif
+}
+
+static WValue w_stat_birthtime_ns(const struct stat *st) {
+#ifdef __APPLE__
+    int64_t ns = ((int64_t)st->st_birthtimespec.tv_sec * 1000000000LL) +
+                 (int64_t)st->st_birthtimespec.tv_nsec;
+    return w_int(ns);
+#else
+    (void)st;
+    return W_NIL;
+#endif
+}
+
+static const char *w_stat_type_name(mode_t mode) {
+    if (S_ISREG(mode)) return "file";
+    if (S_ISDIR(mode)) return "directory";
+    if (S_ISLNK(mode)) return "symlink";
+    if (S_ISCHR(mode)) return "character";
+    if (S_ISBLK(mode)) return "block";
+    if (S_ISFIFO(mode)) return "fifo";
+#ifdef S_ISSOCK
+    if (S_ISSOCK(mode)) return "socket";
+#endif
+    return "unknown";
+}
+
+/* Stable, cross-host metadata payload used by core/file.w's FileStat facade.
+ * `follow` selects stat(2) vs lstat(2); a missing/inaccessible path returns
+ * nil, matching the existing File.size/mtime_ns predicate-style boundary.
+ * Times are integer nanoseconds so no host Time object leaks into Core. */
+WValue __w_file_stat_data(WValue path_val, WValue follow_val) {
+    const char *path = as_str(path_val);
+    if (w_sandbox_stub("file_stat", path)) return W_NIL;
+    struct stat st;
+    int rc = w_truthy(follow_val) ? stat(path, &st) : lstat(path, &st);
+    if (rc != 0) return W_NIL;
+
+    WValue result = w_array_new_empty();
+    w_array_push(result, w_u64((uint64_t)st.st_dev));
+    w_array_push(result, w_u64((uint64_t)st.st_ino));
+    w_array_push(result, w_u64((uint64_t)st.st_mode));
+    w_array_push(result, w_u64((uint64_t)st.st_nlink));
+    w_array_push(result, w_u64((uint64_t)st.st_uid));
+    w_array_push(result, w_u64((uint64_t)st.st_gid));
+    w_array_push(result, w_u64((uint64_t)st.st_rdev));
+    w_array_push(result, w_int((int64_t)st.st_size));
+    w_array_push(result, w_int((int64_t)st.st_blksize));
+    w_array_push(result, w_int((int64_t)st.st_blocks));
+    w_array_push(result, w_int(w_stat_atime_ns(&st)));
+    w_array_push(result, w_int(w_stat_mtime_ns(&st)));
+    w_array_push(result, w_int(w_stat_ctime_ns(&st)));
+    w_array_push(result, w_stat_birthtime_ns(&st));
+    w_array_push(result, w_string(w_stat_type_name(st.st_mode)));
+    return result;
+}
+
 WValue __w_file_mtime_ns(WValue path_val) {
     const char *path = as_str(path_val);
     if (w_sandbox_stub("file_mtime_ns", path)) return W_NIL;
@@ -43815,6 +43889,36 @@ WValue __w_temp_file_for(WValue destination_val) {
     int fd = mkstemp(path);
     if (fd < 0) return W_NIL;
     if (close(fd) != 0) {
+        unlink(path);
+        return W_NIL;
+    }
+    return w_string(path);
+}
+
+/* Atomically reserve a mode-0600 temporary file and return its path. The
+ * caller owns unlinking it; core/Tempfile.create provides the ensure-backed
+ * scoped cleanup form. Prefix is a filename component, never a path. */
+WValue __w_tempfile_create(WValue prefix_val, WValue directory_val) {
+    const char *prefix = as_str(prefix_val);
+    if (!prefix || !*prefix || strchr(prefix, '/')) return W_NIL;
+
+    const char *directory = NULL;
+    if (directory_val != W_NIL) directory = as_str(directory_val);
+    if (!directory || !*directory) directory = getenv("TMPDIR");
+    if (!directory || !*directory) directory = "/tmp";
+    w_sandbox_gate("tempfile_create", directory);
+
+    char path[4096];
+    size_t n = strlen(directory);
+    int sep = n > 0 && directory[n - 1] == '/' ? 0 : 1;
+    int wrote = snprintf(path, sizeof path, "%s%s%s-XXXXXX",
+                         directory, sep ? "/" : "", prefix);
+    if (wrote < 0 || (size_t)wrote >= sizeof path) return W_NIL;
+    int fd = mkstemp(path);
+    if (fd < 0) return W_NIL;
+    int ok = fchmod(fd, S_IRUSR | S_IWUSR) == 0;
+    if (close(fd) != 0) ok = 0;
+    if (!ok) {
         unlink(path);
         return W_NIL;
     }

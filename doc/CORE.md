@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(508 total), grouped by area, with its declaration, a one-line
+(511 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -39,6 +39,8 @@ summary from the source header, and a link to the source.
 | `Env` | `+ Env` | Env — the current process environment. | [`core/env.w`](../core/env.w) |
 | `Error` | `+ Error` | Error — base error class | [`core/error.w`](../core/error.w) |
 | `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
+| `File` | — | — | [`core/file.w`](../core/file.w) |
+| `FileStat` | — | — | [`core/file.w`](../core/file.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
@@ -53,6 +55,7 @@ summary from the source header, and a link to the source.
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
 | `Stats` | — | Stats — distributions, descriptive stats, sampling. | [`core/stats.w`](../core/stats.w) |
 | `Tensor` | — | core/tensor.w — N-dimensional dense Tensor (language type). | [`core/tensor.w`](../core/tensor.w) |
+| `Tempfile` | — | — | [`core/file.w`](../core/file.w) |
 | `Expression` | — | Expression — canonical symbolic real expressions. | [`core/expression.w`](../core/expression.w) |
 | `Calculus` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
 | `CertifiedRealInterval` | — | Exact rational enclosures for elementary transcendental values. | [`core/calculus/certified_transcendentals.w`](../core/calculus/certified_transcendentals.w) |

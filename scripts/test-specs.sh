@@ -551,6 +551,7 @@ compiled_specs=(
   spec/core/global_sleep_spec.w
   spec/core/system_cpu_count_spec.w
   spec/core/sandbox_spec.w
+  spec/core/file_stat_tempfile_spec.w
   spec/core/clock_ms_spec.w
   spec/core/json_parse_spec.w
   spec/core/string_to_i_bignum_spec.w
@@ -659,6 +660,7 @@ interpreter_specs=(
   spec/core/env_spec.w
   spec/core/integer_tower_spec.w
   spec/core/url_spec.w
+  spec/core/file_stat_tempfile_spec.w
   # JSON.parse was compiled-only until the interpreter learned to resolve bare
   # calls to sibling class methods; pin the interpreted side.
   spec/core/json_parse_spec.w

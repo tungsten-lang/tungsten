@@ -277,12 +277,37 @@ module Tungsten
 
       def self.file_type_value(path)
         stat = File.lstat(path_string(path))
+        stat_type_value(stat)
+      rescue Errno::ENOENT, Errno::ENOTDIR, Errno::EACCES
+        nil
+      end
+
+      def self.stat_type_value(stat)
         case stat.ftype
         when "link" then "symlink"
         when "characterSpecial" then "character"
         when "blockSpecial" then "block"
         else stat.ftype
         end
+      end
+
+      def self.time_ns(time)
+        (time.to_i * 1_000_000_000) + time.nsec
+      end
+
+      def self.file_stat_data(path, follow)
+        stat = follow ? File.stat(path_string(path)) : File.lstat(path_string(path))
+        birthtime = begin
+          time_ns(stat.birthtime)
+        rescue NotImplementedError, NoMethodError
+          nil
+        end
+        [
+          stat.dev, stat.ino, stat.mode, stat.nlink, stat.uid, stat.gid,
+          stat.rdev, stat.size, stat.blksize, stat.blocks,
+          time_ns(stat.atime), time_ns(stat.mtime), time_ns(stat.ctime),
+          birthtime, stat_type_value(stat)
+        ]
       rescue Errno::ENOENT, Errno::ENOTDIR, Errno::EACCES
         nil
       end
@@ -379,6 +404,43 @@ module Tungsten
           File.size(path_string(args[0]))
         rescue Errno::ENOENT, Errno::ENOTDIR, Errno::EACCES
           nil
+        end
+
+        interpreter.define_builtin("file_stat_data") do |_recv, args, _block|
+          file_stat_data(args[0], args[1] != false)
+        end
+
+        interpreter.define_builtin("tempfile_create") do |_recv, args, _block|
+          begin
+            require "securerandom"
+            require "tmpdir"
+
+            prefix = args[0].to_s
+            directory = args[1].nil? ? Dir.tmpdir : path_string(args[1])
+            next nil if prefix.empty? || prefix.include?(File::SEPARATOR)
+
+            path = nil
+            128.times do
+              candidate = File.join(directory, "#{prefix}-#{SecureRandom.hex(12)}")
+              begin
+                File.open(candidate, File::WRONLY | File::CREAT | File::EXCL, 0o600) {}
+                path = candidate
+                break
+              rescue Errno::EEXIST
+                next
+              end
+            end
+            path
+          rescue SystemCallError
+            nil
+          end
+        end
+
+        interpreter.define_builtin("file_unlink") do |_recv, args, _block|
+          File.unlink(path_string(args[0]))
+          true
+        rescue Errno::ENOENT
+          true
         end
 
         interpreter.define_builtin("file_mtime") do |_recv, args, _block|

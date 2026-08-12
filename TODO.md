@@ -412,6 +412,9 @@ projects stay unchecked until their stated acceptance criteria are met.
   mutation, point-in-time snapshots, String/NUL validation, and sandbox gates.
 - [ ] Add `File.stat` and `Tempfile`, including typed metadata, secure atomic
   creation, cleanup/close behavior, symlink policy, and Windows parity.
+  - [x] POSIX `stat`/`lstat`, portable `FileStat` metadata, atomic mode-0600
+    creation, explicit non-block ownership, and ensure-backed block cleanup.
+  - [ ] Implement and exercise the same contract on the Windows runtime port.
 - [ ] Add `core/timer.w` with monotonic deadlines, one-shot/repeating timers,
   cancellation, event-loop integration, and no callback after successful cancel.
 - [ ] Add regex capture groups with consistent numbered/named captures,

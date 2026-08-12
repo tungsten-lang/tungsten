@@ -11796,6 +11796,31 @@
       ]
     },
     {
+      "symbol": "__w_file_stat_data",
+      "native": {
+        "symbol": "__w_file_stat_data",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "__w_fsync_parent",
       "native": {
         "symbol": "__w_fsync_parent",
@@ -12143,6 +12168,31 @@
       ]
     },
     {
+      "symbol": "__w_tempfile_create",
+      "native": {
+        "symbol": "__w_tempfile_create",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "__w_trap_interrupts",
       "native": {
         "symbol": "__w_trap_interrupts",
@@ -12173,7 +12223,7 @@
           }
         ],
         "arity": 1,
-        "source": "runtime/runtime.c"
+        "source": "runtime/runtime.h"
       },
       "call_modes": [
         "ccall"

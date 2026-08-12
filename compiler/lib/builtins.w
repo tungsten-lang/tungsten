@@ -29,12 +29,42 @@
   when "read_file"
     read_file(args[0])
 
+  when "read_file_bytes"
+    read_file_bytes(args[0])
+
   when "file?"
     content = read_file(args[0])
     content != nil
 
+  when "file_exists?"
+    file_exists?(args[0])
+
+  when "file_directory?"
+    file_directory?(args[0])
+
+  when "read_dir"
+    read_dir(args[0])
+
+  when "file_size"
+    file_size(args[0])
+
   when "file_mtime_ns"
     file_mtime_ns(args[0])
+
+  when "write_file"
+    write_file(args[0], args[1])
+
+  when "write_file_bytes"
+    write_file_bytes(args[0], args[1])
+
+  when "file_stat_data"
+    ccall("__w_file_stat_data", args[0], args[1])
+
+  when "tempfile_create"
+    ccall("__w_tempfile_create", args[0], args[1])
+
+  when "file_unlink"
+    ccall("__w_unlink", args[0])
 
   when "cache_read"
     cache_read(args[0])
@@ -435,7 +465,9 @@
 
 # List of builtin names
 builtin_names = [
-  "puts", "print", "read_file", "file?", "file_mtime_ns", "cache_read", "cache_write",
+  "puts", "print", "read_file", "read_file_bytes", "file?", "file_exists?", "file_directory?", "read_dir",
+  "file_size", "file_mtime_ns", "write_file", "write_file_bytes", "file_stat_data", "tempfile_create", "file_unlink",
+  "cache_read", "cache_write",
   "exit", "type", "to_s", "to_i", "class",
   "length", "size", "chars", "split", "strip", "ltrim", "rtrim", "ascii?", "valid_utf8?", "replace", "starts_with?",
   "ends_with?", "upcase", "downcase", "swapcase", "capitalize", "include?", "index", "rindex", "gsub", "concat",

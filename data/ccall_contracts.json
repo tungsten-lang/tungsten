@@ -193,6 +193,47 @@
       }
     },
     {
+      "symbol": "__w_file_chmod",
+      "compiler": {
+        "symbol": "__w_file_chmod",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "compiler/lib/emitter.w:685"
+      },
+      "runtime": {
+        "symbol": "__w_file_chmod",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/runtime.h"
+      }
+    },
+    {
       "symbol": "__w_file_exists",
       "compiler": {
         "symbol": "__w_file_exists",
@@ -267,6 +308,47 @@
       }
     },
     {
+      "symbol": "__w_file_link",
+      "compiler": {
+        "symbol": "__w_file_link",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "compiler/lib/emitter.w:684"
+      },
+      "runtime": {
+        "symbol": "__w_file_link",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/runtime.h"
+      }
+    },
+    {
       "symbol": "__w_file_mmap",
       "compiler": {
         "symbol": "__w_file_mmap",
@@ -318,6 +400,105 @@
       },
       "runtime": {
         "symbol": "__w_file_read_dir",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      }
+    },
+    {
+      "symbol": "__w_file_unlink_strict",
+      "compiler": {
+        "symbol": "__w_file_unlink_strict",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "compiler/lib/emitter.w:691"
+      },
+      "runtime": {
+        "symbol": "__w_file_unlink_strict",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      }
+    },
+    {
+      "symbol": "__w_fsync_parent",
+      "compiler": {
+        "symbol": "__w_fsync_parent",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "compiler/lib/emitter.w:689"
+      },
+      "runtime": {
+        "symbol": "__w_fsync_parent",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      }
+    },
+    {
+      "symbol": "__w_fsync_path",
+      "compiler": {
+        "symbol": "__w_fsync_path",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "compiler/lib/emitter.w:688"
+      },
+      "runtime": {
+        "symbol": "__w_fsync_path",
         "return": {
           "llvm": "i64",
           "abi": "value"
@@ -727,6 +908,47 @@
       }
     },
     {
+      "symbol": "__w_rename",
+      "compiler": {
+        "symbol": "__w_rename",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "compiler/lib/emitter.w:686"
+      },
+      "runtime": {
+        "symbol": "__w_rename",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/runtime.h"
+      }
+    },
+    {
       "symbol": "__w_sleep_ms",
       "compiler": {
         "symbol": "__w_sleep_ms",
@@ -793,6 +1015,39 @@
       }
     },
     {
+      "symbol": "__w_temp_file_for",
+      "compiler": {
+        "symbol": "__w_temp_file_for",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "compiler/lib/emitter.w:687"
+      },
+      "runtime": {
+        "symbol": "__w_temp_file_for",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      }
+    },
+    {
       "symbol": "__w_type",
       "compiler": {
         "symbol": "__w_type",
@@ -823,6 +1078,39 @@
         ],
         "arity": 1,
         "source": "runtime/runtime.c"
+      }
+    },
+    {
+      "symbol": "__w_unlink",
+      "compiler": {
+        "symbol": "__w_unlink",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "compiler/lib/emitter.w:690"
+      },
+      "runtime": {
+        "symbol": "__w_unlink",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
       }
     },
     {
@@ -12628,6 +12916,31 @@
       ]
     },
     {
+      "symbol": "__w_file_chmod",
+      "native": {
+        "symbol": "__w_file_chmod",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "__w_file_expand_path",
       "native": {
         "symbol": "__w_file_expand_path",
@@ -12720,6 +13033,31 @@
       ]
     },
     {
+      "symbol": "__w_file_link",
+      "native": {
+        "symbol": "__w_file_link",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 2,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "__w_file_mmap",
       "native": {
         "symbol": "__w_file_mmap",
@@ -12787,6 +13125,27 @@
       ]
     },
     {
+      "symbol": "__w_file_unlink_strict",
+      "native": {
+        "symbol": "__w_file_unlink_strict",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 1,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "__w_fsync_parent",
       "native": {
         "symbol": "__w_fsync_parent",
@@ -12801,7 +13160,7 @@
           }
         ],
         "arity": 1,
-        "source": "runtime/runtime.c"
+        "source": "runtime/runtime.h"
       },
       "call_modes": [
         "ccall"
@@ -12822,7 +13181,7 @@
           }
         ],
         "arity": 1,
-        "source": "runtime/runtime.c"
+        "source": "runtime/runtime.h"
       },
       "call_modes": [
         "ccall"
@@ -13064,7 +13423,7 @@
           }
         ],
         "arity": 2,
-        "source": "runtime/runtime.c"
+        "source": "runtime/runtime.h"
       },
       "call_modes": [
         "ccall"
@@ -13148,7 +13507,7 @@
           }
         ],
         "arity": 1,
-        "source": "runtime/runtime.c"
+        "source": "runtime/runtime.h"
       },
       "call_modes": [
         "ccall"

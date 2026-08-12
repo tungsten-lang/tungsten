@@ -175,7 +175,8 @@ use core/mmap
 
   # Depth-first traversal. lstat deliberately prevents a symbolic link to a
   # directory from becoming a recursive edge (and therefore prevents cycles).
-  -> .walk(path = ".", block)
+  -> .walk(path = ".", block = nil)
+    raise "File.walk requires a visitor" if block == nil
     pending = [path]
     while pending.size > 0
       current = pending.pop()
@@ -217,16 +218,22 @@ use core/mmap
     file_rm(path, *opts)
 
   -> .delete(path)
-    file_rm(path)
+    ok = file_unlink_strict(path)
+    raise "File.delete failed: " + path unless ok
+    true
 
   -> .unlink(path)
-    file_rm(path)
+    ok = file_unlink_strict(path)
+    raise "File.unlink failed: " + path unless ok
+    true
 
   -> .mv(source, dest, *opts)
     file_mv(source, dest, *opts)
 
   -> .rename(source, dest)
-    file_mv(source, dest)
+    ok = file_rename(source, dest)
+    raise "File.rename failed: " + source + " -> " + dest unless ok
+    true
 
   -> .cp(source, dest, *opts)
     file_cp(source, dest, *opts)
@@ -241,7 +248,52 @@ use core/mmap
     file_symlink(target, link_name)
 
   -> .link(target, link_name)
-    file_link(target, link_name)
+    ok = file_link(target, link_name)
+    raise "File.link failed: " + target + " -> " + link_name unless ok
+    true
+
+  -> .chmod(path, mode)
+    if mode < 0 || mode > 0o7777
+      raise "File.chmod mode must be between 0o0000 and 0o7777"
+    ok = file_chmod(path, mode)
+    raise "File.chmod failed: " + path unless ok
+    true
+
+  # Atomically replace destination with an already-written source on the same
+  # filesystem, then make the directory entry durable. A failure after rename
+  # means the replacement is visible but its crash durability is uncertain.
+  -> .atomic_replace(source, destination)
+    ok = file_rename(source, destination)
+    raise "File.atomic_replace failed: " + source + " -> " + destination unless ok
+    durable = file_fsync_parent(destination)
+    raise "File.atomic_replace directory sync failed: " + destination unless durable
+    true
+
+  # Write beside the destination, flush the file, atomically rename it over the
+  # destination, then flush the parent directory. Existing permissions are
+  # preserved; a new file starts mode 0600. The temp path is always cleaned up
+  # if publication does not consume it.
+  -> .atomic_write(path, data)
+    temporary = file_temp_for(path)
+    raise "File.atomic_write could not create a sibling temporary file: " + path if temporary == nil
+    published = false
+    begin
+      existing = File.stat(path)
+      if existing != nil
+        ok = file_chmod(temporary, existing.permissions)
+        raise "File.atomic_write could not preserve permissions: " + path unless ok
+      ok = write_file(temporary, data)
+      raise "File.atomic_write failed while writing: " + path unless ok
+      ok = file_fsync(temporary)
+      raise "File.atomic_write failed while syncing: " + path unless ok
+      ok = file_rename(temporary, path)
+      raise "File.atomic_write failed while publishing: " + path unless ok
+      published = true
+      ok = file_fsync_parent(path)
+      raise "File.atomic_write failed while syncing the parent: " + path unless ok
+    ensure
+      file_unlink(temporary) unless published
+    data.size
 
   -> .readlink(path)
     file_readlink(path)

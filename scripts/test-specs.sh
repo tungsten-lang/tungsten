@@ -693,6 +693,7 @@ compiled_specs=(
   spec/core/system_cpu_count_spec.w
   spec/core/sandbox_spec.w
   spec/core/file_stat_tempfile_spec.w
+  spec/core/filesystem_mutation_spec.w
   spec/core/filesystem_walk_spec.w
   spec/core/clock_ms_spec.w
   spec/core/csv_stream_spec.w
@@ -827,6 +828,7 @@ interpreter_specs=(
   spec/core/http_spec.w
   spec/core/filesystem_walk_spec.w
   spec/core/file_stat_tempfile_spec.w
+  spec/core/filesystem_mutation_spec.w
   spec/compiler/splat_parameter_parity_spec.w
   # JSON.parse was compiled-only until the interpreter learned to resolve bare
   # calls to sibling class methods; pin the interpreted side.

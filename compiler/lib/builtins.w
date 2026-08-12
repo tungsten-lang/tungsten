@@ -75,6 +75,27 @@
   when "file_unlink"
     ccall("__w_unlink", args[0])
 
+  when "file_unlink_strict"
+    ccall("__w_file_unlink_strict", args[0])
+
+  when "file_link"
+    ccall("__w_file_link", args[0], args[1])
+
+  when "file_chmod"
+    ccall("__w_file_chmod", args[0], args[1])
+
+  when "file_rename"
+    ccall("__w_rename", args[0], args[1])
+
+  when "file_temp_for"
+    ccall("__w_temp_file_for", args[0])
+
+  when "file_fsync"
+    ccall("__w_fsync_path", args[0])
+
+  when "file_fsync_parent"
+    ccall("__w_fsync_parent", args[0])
+
   when "cache_read"
     cache_read(args[0])
 
@@ -480,7 +501,8 @@
 # List of builtin names
 builtin_names = [
   "puts", "print", "read_file", "read_file_bytes", "file?", "file_exists?", "file_directory?", "read_dir",
-  "file_size", "file_mtime_ns", "file_expand_path", "file_expand_path_base", "file_join", "write_file", "write_file_bytes", "file_stat_data", "tempfile_create", "file_unlink",
+  "file_size", "file_mtime_ns", "file_expand_path", "file_expand_path_base", "file_join", "write_file", "write_file_bytes", "file_stat_data", "tempfile_create", "file_unlink", "file_unlink_strict",
+  "file_link", "file_chmod", "file_rename", "file_temp_for", "file_fsync", "file_fsync_parent",
   "cache_read", "cache_write",
   "exit", "type", "to_s", "to_i", "class",
   "length", "size", "chars", "split", "strip", "ltrim", "rtrim", "ascii?", "valid_utf8?", "replace", "starts_with?",

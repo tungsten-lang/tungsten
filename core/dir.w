@@ -43,7 +43,7 @@
     read_dir(path).each -> (entry)
       yield entry
 
-  -> .walk(path = ".", block)
+  -> .walk(path = ".", block = nil)
     File.walk(path, block)
 
   -> .exist?(path)

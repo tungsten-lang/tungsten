@@ -45543,6 +45543,27 @@ WValue __w_file_mtime_ns(WValue path_val) {
     return w_int(w_stat_mtime_ns(&st));
 }
 
+/* Portable mutation primitives used by core/file.w. Keep path arguments
+ * stable across as_str() calls: inline strings use a thread-local buffer ring. */
+WValue __w_file_link(WValue target_val, WValue link_val) {
+    const char *target_source = as_str(target_val);
+    char *target = strdup(target_source);
+    if (!target) return W_FALSE;
+    const char *link_path = as_str(link_val);
+    w_sandbox_gate("file_link", link_path);
+    int ok = link(target, link_path) == 0;
+    free(target);
+    return ok ? W_TRUE : W_FALSE;
+}
+
+WValue __w_file_chmod(WValue path_val, WValue mode_val) {
+    const char *path = as_str(path_val);
+    int64_t raw_mode = w_to_i64(mode_val);
+    if (raw_mode < 0 || raw_mode > 07777) return W_FALSE;
+    w_sandbox_gate("file_chmod", path);
+    return chmod(path, (mode_t)raw_mode) == 0 ? W_TRUE : W_FALSE;
+}
+
 WValue __w_digest_bytes64(WValue bytes_val) {
     if (w_is_bytes(bytes_val)) {
         WArray *a = (WArray *)w_as_ptr(bytes_val);
@@ -45881,6 +45902,11 @@ WValue __w_fsync_parent(WValue path_val) {
 WValue __w_unlink(WValue path_val) {
     w_sandbox_gate("unlink", as_str(path_val));
     return unlink(as_str(path_val)) == 0 || errno == ENOENT ? W_TRUE : W_FALSE;
+}
+
+WValue __w_file_unlink_strict(WValue path_val) {
+    w_sandbox_gate("file_unlink", as_str(path_val));
+    return unlink(as_str(path_val)) == 0 ? W_TRUE : W_FALSE;
 }
 
 WValue __w_rmdir(WValue path_val) {

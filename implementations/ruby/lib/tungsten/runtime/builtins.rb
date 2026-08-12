@@ -443,6 +443,62 @@ module Tungsten
           true
         end
 
+        interpreter.define_builtin("file_unlink_strict") do |_recv, args, _block|
+          File.unlink(path_string(args[0]))
+          true
+        rescue SystemCallError
+          false
+        end
+
+        interpreter.define_builtin("file_chmod") do |_recv, args, _block|
+          File.chmod(Integer(args[1]), path_string(args[0]))
+          true
+        rescue SystemCallError, ArgumentError, TypeError
+          false
+        end
+
+        interpreter.define_builtin("file_rename") do |_recv, args, _block|
+          File.rename(path_string(args[0]), path_string(args[1]))
+          true
+        rescue SystemCallError
+          false
+        end
+
+        interpreter.define_builtin("file_temp_for") do |_recv, args, _block|
+          require "securerandom"
+
+          destination = path_string(args[0])
+          path = nil
+          128.times do
+            candidate = "#{destination}.tmp.#{SecureRandom.hex(12)}"
+            begin
+              File.open(candidate, File::WRONLY | File::CREAT | File::EXCL, 0o600) {}
+              path = candidate
+              break
+            rescue Errno::EEXIST
+              next
+            end
+          end
+          path
+        rescue SystemCallError
+          nil
+        end
+
+        interpreter.define_builtin("file_fsync") do |_recv, args, _block|
+          File.open(path_string(args[0]), "rb", &:fsync)
+          true
+        rescue SystemCallError
+          false
+        end
+
+        interpreter.define_builtin("file_fsync_parent") do |_recv, args, _block|
+          parent = File.dirname(path_string(args[0]))
+          File.open(parent, "rb", &:fsync)
+          true
+        rescue SystemCallError
+          false
+        end
+
         interpreter.define_builtin("file_mtime") do |_recv, args, _block|
           File.mtime(path_string(args[0]))
         rescue Errno::ENOENT, Errno::ENOTDIR, Errno::EACCES
@@ -569,6 +625,8 @@ module Tungsten
         interpreter.define_builtin("file_link") do |_recv, args, _block|
           File.link(path_string(args[0]), path_string(args[1]))
           true
+        rescue SystemCallError
+          false
         end
 
         interpreter.define_builtin("file_readlink") do |_recv, args, _block|

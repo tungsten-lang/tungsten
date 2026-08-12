@@ -681,6 +681,14 @@ use naming
   out << declare_fn("w_cleanup_push", "void", wv_ptr)
   out << declare_fn("w_cleanup_pop", "void", "")
   out << declare_fn("w_array_copy_range", wv, wv4)
+  out << declare_fn("__w_file_link", wv, wv2)
+  out << declare_fn("__w_file_chmod", wv, wv2)
+  out << declare_fn("__w_rename", wv, wv2)
+  out << declare_fn("__w_temp_file_for", wv, wv)
+  out << declare_fn("__w_fsync_path", wv, wv)
+  out << declare_fn("__w_fsync_parent", wv, wv)
+  out << declare_fn("__w_unlink", wv, wv)
+  out << declare_fn("__w_file_unlink_strict", wv, wv)
 
   out.to_s()
 

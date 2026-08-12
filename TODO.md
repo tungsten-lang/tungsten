@@ -457,9 +457,12 @@ projects stay unchecked until their stated acceptance criteria are met.
     errors, SciIO integration, and interpreter/native parity fixtures.
   - [x] Add depth-first File/Directory/Dir traversal without following symlink
     directories, with interpreter/native fixtures.
-  - [ ] Add incremental file-handle reads, compiled link/permission mutation,
-    atomic replace, and platform error parity. Metadata and memory mapping have
-    portable source facades but still need Windows coverage.
+  - [x] Add compiled hard-link and permission mutation plus durable atomic
+    rename/write with same-filesystem sibling temporaries and permission
+    preservation; pin self-hosted interpreter/native and Ruby-host parity.
+  - [ ] Add incremental file-handle reads and platform error parity. Metadata,
+    mutation, atomic replacement, and memory mapping have portable source
+    facades but still need Windows coverage.
 - [ ] Improve FFI declaration, ownership, callbacks, strings/bytes, structs,
   arrays, error translation, and marshalling; specify which side allocates and
   frees every representation.

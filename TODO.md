@@ -88,6 +88,12 @@ repros and workarounds noted at the use sites.
 
 ## BigInt: mutate-if-unique arithmetic (promoted from COW deferral, 2026-08-01)
 
+**Status (2026-08-12): shipped.** The fail-closed ownership proof, shared-bit
+guards, negate/container alias handling, add/sub growth, wide mul/div/mod
+destination reuse, and rotation shapes are implemented. The focused growth
+matrix runs on both engines; `doc/articles/bignum-engine.md` records the matched
+performance campaign and the narrower specialization work that remains.
+
 **What:** add/sub/mul/div mutate the LHS in place when it is provably
 unshared and dead after the statement. Not COW — no limb sharing between
 live values; the uniqueness test is the only overlap with the original COW
@@ -491,11 +497,13 @@ projects stay unchecked until their stated acceptance criteria are met.
   from a 0.40 ms median to 0.11 ms at 200k elements (3.6x, hand-loop parity).
 - [ ] Apply the proven `## i64`/unboxed discipline to the regex VM and measure
   instruction/boxing counts before and after.
-- [ ] Finish BigInt mutate-if-unique `add/sub` first, using the ownership proof
-  at the point an old LHS would be freed; model negate aliases and
-  differential-test against the immutable path before expanding to mul/div.
-- [ ] Add PMULL GHASH on supported Apple Silicon with feature dispatch and
-  standard test vectors; retain constant-time portable fallback.
+- [x] Finish BigInt mutate-if-unique arithmetic. The fail-closed ownership
+  proof covers add/sub, negate and container aliases are marked, and the
+  destination-reuse family has expanded through wide mul/div/mod and rotation
+  shapes with interpreted/compiled immutable-path parity coverage.
+- [x] Add PMULL GHASH on supported Apple Silicon with feature dispatch,
+  differential coverage against the software oracle, standard AES-GCM vectors,
+  and the portable fallback retained on unsupported CPUs.
 - [ ] Make small matrix multiplication competitive with C across tiny fixed
   shapes. Benchmark call/shape-check/allocation overhead separately from the
   arithmetic and generate specialized kernels where it wins.

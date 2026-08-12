@@ -256,8 +256,11 @@ projects stay unchecked until their stated acceptance criteria are met.
     WGSL-incompatible i64 workgroup storage.
   - [x] Reject literal out-of-bounds accesses to workgroup arrays with known
     static extents in every selected dialect.
-  - [ ] Add static address-space, aggregate workgroup-memory-limit, and
-    bounds validation for parameter buffers and computed indices.
+  - [x] Reject Metal helper calls that pass thread/private/constant arrays to
+    parameters whose current contract requires device memory.
+  - [ ] Add explicit source-level address-space annotations, aggregate
+    workgroup-memory limits, and bounds validation for parameter buffers and
+    computed indices.
 - [ ] Make `compiler2` packed/slab nodes use generated `node.field` accessors
   instead of mixed `ast_get`/index access, then delete the compatibility path.
 - [ ] Enforce generic constraints when definitions are checked, including

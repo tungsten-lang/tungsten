@@ -46,7 +46,7 @@ use ast
   while i < kernels.size()
     rt = gpu_fn_return_type(kernels[i])
     if rt != nil
-      gpu_fns["" + kernels[i].name.to_s()] = rt
+      gpu_fns["" + kernels[i].name.to_s()] = gpu_fn_signature(kernels[i])
     i += 1
   i = 0
   while i < kernels.size()
@@ -77,6 +77,21 @@ use ast
   if hints.has_key?("ret")
     return hints["ret"]
   nil
+
+-> gpu_fn_signature(node)
+  hints = node.type_hints
+  if hints == nil
+    hints = {}
+  names = []
+  types = []
+  params = node.params
+  i = 0
+  while i < params.size()
+    name = "" + params[i].name
+    names.push(name)
+    types.push(hints[name])
+    i += 1
+  {ret: gpu_fn_return_type(node), param_names: names, param_types: types}
 
 # True when a kernel body references any gpu.wmma_* op — those have no MSL
 # mapping (Metal's equivalent is the simdgroup_* surface), so the .metal
@@ -973,7 +988,8 @@ use ast
     tables: [],
     renames: {},
     unroll: {},
-    array_bounds: {}
+    array_bounds: {},
+    address_spaces: gpu_param_address_spaces(param_names, param_types)
   }
   body = node.body
   n = body.size()
@@ -1120,7 +1136,8 @@ use ast
     tables: [],
     renames: {},
     unroll: {},
-    array_bounds: {}
+    array_bounds: {},
+    address_spaces: gpu_param_address_spaces(param_names, param_types)
   }
   body = node.body
   body_out = StringBuffer(512)
@@ -1500,6 +1517,7 @@ use ast
     ctx[:renames] = {}
   ctx[:renames][vname] = gpu_const_table_name(ctx, vname)
   ctx[:var_types][vname] = type_hint
+  ctx[:address_spaces][vname] = "constant"
   if ctx[:declared] != nil
     ctx[:declared][vname] = true
   nil
@@ -1575,6 +1593,35 @@ use ast
     gpu_kernel_error(ctx[:node], "array `" + name + "` literal index " + value.to_s() + " is outside 0..." + bound.to_s())
   nil
 
+-> gpu_param_address_spaces(param_names, param_types)
+  spaces = {}
+  i = 0
+  while i < param_names.size()
+    if msl_array_elt_type(param_types[param_names[i]]) != nil
+      spaces[param_names[i]] = "device"
+    i += 1
+  spaces
+
+-> gpu_validate_device_call(ctx, name, args)
+  signature = ctx[:gpu_fns][name]
+  expected = signature[:param_types]
+  actual_size = args == nil ? 0 : args.size()
+  if actual_size != expected.size()
+    gpu_kernel_error(ctx[:node], "device fn `" + name + "` expects " + expected.size().to_s() + " args (got " + actual_size.to_s() + ")")
+  if ctx[:dialect] == "cuda"
+    return nil
+  spaces = ctx[:address_spaces]
+  i = 0
+  while i < expected.size()
+    if msl_array_elt_type(expected[i]) != nil && ast_kind(args[i]) == :var
+      arg_name = "" + args[i].name
+      actual_space = spaces[arg_name]
+      if actual_space != nil && actual_space != "device"
+        param_name = signature[:param_names][i]
+        gpu_kernel_error(ctx[:node], "device fn `" + name + "` parameter `" + param_name + "` expects device memory, but `" + arg_name + "` is " + actual_space + " memory")
+    i += 1
+  nil
+
 -> emit_assign(out, ctx, node)
   target = node.target
   value = node.value
@@ -1619,6 +1666,7 @@ use ast
         atype = "i64\[]".to_sym()
       ctx[:var_types][sname] = atype
       ctx[:array_bounds][sname] = shared_size
+      ctx[:address_spaces][sname] = "threadgroup"
       emit_indent(out, ctx)
       if ctx[:dialect] == "cuda"
         out << "__shared__ "
@@ -1648,6 +1696,7 @@ use ast
       if esc == nil
         gpu_kernel_error(ctx[:node], "unsupported local array element type `" + elt.to_s() + "`")
       ctx[:var_types][vname] = ("" + elt.to_s() + "\[]").to_sym()
+      ctx[:address_spaces][vname] = "thread"
       gpu_declare_local(out, ctx, vname, esc + " " + vname + "\[" + emit_expr(ctx, ast_get(value, :size)) + "]", nil)
     elsif gpu_local_declared?(ctx, vname)
       # Already declared in this function. A local is function-scoped, so a
@@ -2016,6 +2065,7 @@ use ast
     # hint. Emitted as a device function earlier; here a call to one just
     # passes through as `name(args…)`.
     if ctx[:gpu_fns] != nil && ctx[:gpu_fns].has_key?("" + name.to_s())
+      gpu_validate_device_call(ctx, "" + name.to_s(), args)
       return name.to_s() + "(" + gpu_arglist(ctx, args) + ")"
     # Vector constructors: vec2/vec3/vec4 → float2/float3/float4.
     if name in ("vec2" "vec3" "vec4")
@@ -2262,7 +2312,7 @@ use ast
     :f32
   # Calls to user device helper functions return their declared type.
   elsif t == :call && node.receiver == nil && ctx[:gpu_fns] != nil && ctx[:gpu_fns].has_key?("" + node.name.to_s())
-    ctx[:gpu_fns]["" + node.name.to_s()]
+    ctx[:gpu_fns]["" + node.name.to_s()][:ret]
   # Vector-preserving intrinsics return the type of their first vector arg.
   elsif t == :call && node.receiver == nil && gpu_vec_preserving?(node.name)
     gpu_infer_first_arg_type(ctx, node.args)
@@ -2349,7 +2399,7 @@ use ast
     return cuda_type_name(scalar) + " " + pname
   "/* unsupported type: " + type_hint.to_s() + " */ void *" + pname
 
--> emit_kernel_cuda(node)
+-> emit_kernel_cuda(node, gpu_fns)
   name = node.name
   params = node.params
   type_hints = node.type_hints
@@ -2399,12 +2449,14 @@ use ast
     params: param_names,
     indent: 1,
     dialect: "cuda",
+    gpu_fns: gpu_fns,
     declared: {},
     hoist: [],
     tables: [],
     renames: {},
     unroll: {},
-    array_bounds: {}
+    array_bounds: {},
+    address_spaces: gpu_param_address_spaces(param_names, param_types)
   }
   body = node.body
   body_out = StringBuffer(512)
@@ -2472,7 +2524,8 @@ use ast
     tables: [],
     renames: {},
     unroll: {},
-    array_bounds: {}
+    array_bounds: {},
+    address_spaces: gpu_param_address_spaces(param_names, param_types)
   }
   body = node.body
   body_out = StringBuffer(256)
@@ -2502,7 +2555,7 @@ use ast
   while i < kernels.size()
     rt = gpu_fn_return_type(kernels[i])
     if rt != nil
-      gpu_fns["" + kernels[i].name.to_s()] = rt
+      gpu_fns["" + kernels[i].name.to_s()] = gpu_fn_signature(kernels[i])
     i += 1
   # Device helpers first so kernels can call them.
   i = 0
@@ -2514,7 +2567,7 @@ use ast
   i = 0
   while i < kernels.size()
     if gpu_fn_return_type(kernels[i]) == nil && (only_index == nil || only_index == i)
-      out << emit_kernel_cuda(kernels[i])
+      out << emit_kernel_cuda(kernels[i], gpu_fns)
       out << "\n"
     i += 1
   # Host-side launch helper stub (optional include for hand-written hosts).

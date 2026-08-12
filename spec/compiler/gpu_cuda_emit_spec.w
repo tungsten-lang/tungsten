@@ -38,6 +38,18 @@
 @gpu fn low_precision_scalar(scale)
   value = 1 ## i32
 
+# Device-address array arguments remain valid through helper signatures; the
+# preflight address-space check only rejects incompatible local/shared arrays.
+## f32[]: values
+## f32: ret
+@gpu fn first_value(values)
+  values[0]
+
+## f32[]: x
+## f32[]: y
+@gpu fn helper_call(x, y)
+  y[0] = first_value(x)
+
 cu = read_file("spec/compiler/gpu_cuda_emit_spec.cu")
 
 -> expect_marker(text, label, needle)
@@ -73,5 +85,7 @@ expect_marker(cu, "logic.and", "((i > 0) && (i < n))")
 expect_marker(cu, "logic.or", "((i < 0) || (i >= n))")
 expect_marker(cu, "logic.not", "(!(i < n))")
 expect_marker(cu, "sig.bf16", "__nv_bfloat16 scale")
+expect_marker(cu, "helper.signature", "__device__ float first_value(float *values)")
+expect_marker(cu, "helper.call", "first_value(x)")
 
 << "gpu_cuda_emit_spec: all checks passed"

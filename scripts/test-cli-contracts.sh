@@ -15,6 +15,7 @@ UNSUPPORTED_CUDA_TYPE="$ROOT/spec/cli/gpu_check_cuda_type.w"
 UNSUPPORTED_WGSL_TYPE="$ROOT/spec/cli/gpu_check_wgsl_type.w"
 INVALID_SHARED_SHAPE="$ROOT/spec/cli/gpu_check_shared_shape.w"
 INVALID_SHARED_BOUNDS="$ROOT/spec/cli/gpu_check_shared_bounds.w"
+INVALID_GPU_ADDRESS_SPACE="$ROOT/spec/cli/gpu_check_address_space.w"
 UNSUPPORTED_WGSL_SHARED="$ROOT/spec/cli/gpu_check_wgsl_shared_type.w"
 VALID_GPU="$ROOT/spec/compiler/gpu_wgsl_emit_spec.w"
 CUDA_GPU="$ROOT/spec/compiler/gpu_cuda_tg_reduce_reject_spec.w"
@@ -142,6 +143,17 @@ grep -q 'array `tile` literal index 4 is outside 0...4' "$TMP/check-gpu-shared-b
 grep -q 'gpu_check_shared_bounds.w:5:1' "$TMP/check-gpu-shared-bounds-error.out"
 [[ ! -e "${INVALID_SHARED_BOUNDS%.w}.metal" ]]
 [[ ! -e "${INVALID_SHARED_BOUNDS%.w}.cu" ]]
+
+if "$TUNGSTEN" -c "$INVALID_GPU_ADDRESS_SPACE" \
+    >"$TMP/check-gpu-address-space-error.out" 2>&1; then
+  printf 'tungsten -c accepted a mismatched GPU helper address space\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-address-space-error.out"
+grep -q 'expects device memory, but `tile` is threadgroup memory' "$TMP/check-gpu-address-space-error.out"
+grep -q 'gpu_check_address_space.w:10:1' "$TMP/check-gpu-address-space-error.out"
+[[ ! -e "${INVALID_GPU_ADDRESS_SPACE%.w}.metal" ]]
+[[ ! -e "${INVALID_GPU_ADDRESS_SPACE%.w}.cu" ]]
 
 if TUNGSTEN_GPU_DIALECTS=wgsl "$TUNGSTEN" -c "$UNSUPPORTED_WGSL_SHARED" \
     >"$TMP/check-gpu-wgsl-shared-error.out" 2>&1; then

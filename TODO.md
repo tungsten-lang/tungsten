@@ -258,9 +258,14 @@ projects stay unchecked until their stated acceptance criteria are met.
     static extents in every selected dialect.
   - [x] Reject Metal helper calls that pass thread/private/constant arrays to
     parameters whose current contract requires device memory.
-  - [ ] Add explicit source-level address-space annotations, aggregate
-    workgroup-memory limits, and bounds validation for parameter buffers and
-    computed indices.
+  - [x] Add explicit source-level `device`/`constant`/`threadgroup`/`thread`
+    parameter annotations and validate device-helper calls against them.
+  - [x] Enforce aggregate workgroup-memory limits per selected dialect,
+    including implicit reduction scratch.
+  - [x] Accept fixed-extent parameter-buffer contracts and reject literal or
+    constant-computed indices proven outside them.
+  - [ ] Extend bounds checking to inferred dynamic-index ranges and require an
+    explicit guard when safety cannot be proven.
 - [ ] Make `compiler2` packed/slab nodes use generated `node.field` accessors
   instead of mixed `ast_get`/index access, then delete the compatibility path.
 - [x] Enforce generic constraints when definitions are checked, including

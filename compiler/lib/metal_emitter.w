@@ -91,7 +91,7 @@ use ast
     names.push(name)
     types.push(hints[name])
     i += 1
-  {ret: gpu_fn_return_type(node), param_names: names, param_types: types}
+  {ret: gpu_fn_return_type(node), param_names: names, param_types: types, param_spaces: gpu_param_address_spaces(node, names, hints, false)}
 
 # True when a kernel body references any gpu.wmma_* op — those have no MSL
 # mapping (Metal's equivalent is the simdgroup_* surface), so the .metal
@@ -963,7 +963,8 @@ use ast
     pt = param_types[pname]
     arr_elt = msl_array_elt_type(pt)
     if arr_elt != nil
-      out << "device "
+      out << gpu_param_address_space(node, pname, pt, false)
+      out << " "
       out << arr_elt
       out << " *"
       out << pname
@@ -982,14 +983,16 @@ use ast
     var_types: dup_hash(param_types),
     params: param_names,
     indent: 1,
+    dialect: "metal",
     gpu_fns: gpu_fns,
     declared: {},
     hoist: [],
     tables: [],
     renames: {},
     unroll: {},
-    array_bounds: {},
-    address_spaces: gpu_param_address_spaces(param_names, param_types)
+    array_bounds: gpu_param_array_bounds(param_names, param_types),
+    address_spaces: gpu_param_address_spaces(node, param_names, param_types, false),
+    shared_bytes: 0
   }
   body = node.body
   n = body.size()
@@ -1086,7 +1089,7 @@ use ast
     if pi > 0
       out << ",\n"
     out << "  "
-    out << msl_param_decl(param_types[pname], pname, buf_index)
+    out << msl_param_decl(node, param_types[pname], pname, buf_index)
     buf_index = buf_index + 1
     pi += 1
   # Emit all the thread/group/simdgroup IDs the kernel might reference
@@ -1130,14 +1133,16 @@ use ast
     var_types: dup_hash(param_types),
     params: param_names,
     indent: 1,
+    dialect: "metal",
     gpu_fns: gpu_fns,
     declared: {},
     hoist: [],
     tables: [],
     renames: {},
     unroll: {},
-    array_bounds: {},
-    address_spaces: gpu_param_address_spaces(param_names, param_types)
+    array_bounds: gpu_param_array_bounds(param_names, param_types),
+    address_spaces: gpu_param_address_spaces(node, param_names, param_types, true),
+    shared_bytes: gpu_uses_tg_reduce?(node) ? 256 : 0
   }
   body = node.body
   body_out = StringBuffer(512)
@@ -1186,6 +1191,7 @@ use ast
 # ---- Type mapping: Tungsten type-hint symbol → MSL type text ----
 
 -> msl_scalar_type(t)
+  t = gpu_hint_type(t)
   # Compare symbol-to-symbol. Tungsten's Symbol#to_s keeps the symbol
   # tag so `sym.to_s() == "literal"` can return false even when they
   # print identically; forcing symbol form sidesteps that.
@@ -1275,20 +1281,44 @@ use ast
     nil
 
 -> msl_array_elt_type(t)
+  info = gpu_array_type_info(t)
+  if info == nil
+    return nil
+  info[:elt]
+
+-> gpu_array_type_info(t)
   if t == nil
     return nil
+  t = gpu_hint_type(t)
   s = t.to_s()
   bytes = s.bytes()
   n = bytes.size()
-  if n < 2
+  if n < 3 || bytes[n - 1] != 93
     return nil
-  if bytes[n - 2] == 91 && bytes[n - 1] == 93
-    elt_name = s.slice(0, n - 2)
-    mapped = msl_scalar_type(elt_name.to_sym())
-    if mapped == nil
-      return "UNMAPPED_" + elt_name
-    return mapped
-  nil
+  open = s.index("\[")
+  if open == nil || open == 0
+    return nil
+  elt_name = s.slice(0, open)
+  mapped = msl_scalar_type(elt_name.to_sym())
+  if mapped == nil
+    mapped = "UNMAPPED_" + elt_name
+  extent_text = s.slice(open + 1, n - open - 2)
+  bound = nil
+  if extent_text != ""
+    extent_bytes = extent_text.bytes()
+    i = 0
+    while i < extent_bytes.size()
+      if extent_bytes[i] < 48 || extent_bytes[i] > 57
+        return {elt: "UNMAPPED_" + s, bound: nil}
+      i += 1
+    bound = extent_text.to_i()
+    if bound <= 0
+      return {elt: "UNMAPPED_" + s, bound: nil}
+  {elt: mapped, bound: bound}
+
+-> gpu_array_bound(type_hint)
+  info = gpu_array_type_info(type_hint)
+  info == nil ? nil : info[:bound]
 
 -> gpu_param_type_supported?(type_hint)
   arr_elt = msl_array_elt_type(type_hint)
@@ -1296,12 +1326,11 @@ use ast
     return !arr_elt.starts_with?("UNMAPPED_")
   msl_scalar_type(type_hint) != nil
 
--> msl_param_decl(type_hint, pname, buf_index)
+-> msl_param_decl(node, type_hint, pname, buf_index)
   arr_elt = msl_array_elt_type(type_hint)
   if arr_elt != nil
-    # Output buffers are mutable device pointers; the restriction is
-    # loosened when `in`/`out` annotations are added.
-    return "device " + arr_elt + " *" + pname + " \[\[buffer(" + buf_index.to_s() + ")]]"
+    space = gpu_param_address_space(node, pname, type_hint, true)
+    return space + " " + arr_elt + " *" + pname + " \[\[buffer(" + buf_index.to_s() + ")]]"
   scalar = msl_scalar_type(type_hint)
   if scalar != nil
     return "constant " + scalar + " &" + pname + " \[\[buffer(" + buf_index.to_s() + ")]]"
@@ -1394,11 +1423,10 @@ use ast
 -> gpu_hint_words(hint)
   if hint == nil
     return nil
-  if type(hint) != "String"
+  text = "" + hint.to_s()
+  if text.index(" ") == nil
     return nil
-  if hint.index(" ") == nil
-    return nil
-  parts = hint.split(" ")
+  parts = text.split(" ")
   words = []
   i = 0
   while i < parts.size()
@@ -1413,7 +1441,7 @@ use ast
   words = gpu_hint_words(hint)
   if words == nil || words.size() == 0
     return hint
-  words[0]
+  words[0].to_sym()
 
 -> gpu_hint_flagged?(hint, flag)
   words = gpu_hint_words(hint)
@@ -1518,6 +1546,7 @@ use ast
   ctx[:renames][vname] = gpu_const_table_name(ctx, vname)
   ctx[:var_types][vname] = type_hint
   ctx[:address_spaces][vname] = "constant"
+  ctx[:array_bounds][vname] = elems.size()
   if ctx[:declared] != nil
     ctx[:declared][vname] = true
   nil
@@ -1580,25 +1609,113 @@ use ast
     gpu_kernel_error(kernel_node, "gpu.shared_i64 is not supported by the WGSL dialect")
   size
 
+-> gpu_shared_limit(dialect)
+  if dialect == "wgsl"
+    return 16384
+  if dialect == "cuda"
+    return 49152
+  32768
+
+-> gpu_record_shared_allocation(ctx, name, size)
+  bytes_per_element = name == "shared_i64" ? 8 : 4
+  previous = ctx[:shared_bytes]
+  if previous == nil
+    previous = 0
+  total = previous + size * bytes_per_element
+  limit = gpu_shared_limit(ctx[:dialect])
+  if total > limit
+    gpu_kernel_error(ctx[:node], "aggregate workgroup memory " + total.to_s() + " bytes exceeds the " + ctx[:dialect] + " limit of " + limit.to_s() + " bytes")
+  ctx[:shared_bytes] = total
+  nil
+
+-> gpu_static_index_value(node)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  kind = ast_kind(node)
+  if kind == :int
+    return node.value
+  if kind == :unary_op && node.op == :MINUS
+    operand = gpu_static_index_value(node.operand)
+    return operand == nil ? nil : 0 - operand
+  if kind != :binary_op
+    return nil
+  left = gpu_static_index_value(node.left)
+  right = gpu_static_index_value(node.right)
+  if left == nil || right == nil
+    return nil
+  if node.op == :PLUS
+    return left + right
+  if node.op == :MINUS
+    return left - right
+  if node.op == :STAR
+    return left * right
+  if node.op == :PERCENT && right != 0
+    return left % right
+  if node.op == :LSHIFT && right >= 0 && right < 63
+    return left << right
+  if node.op == :RSHIFT && right >= 0 && right < 63
+    return left >> right
+  nil
+
 -> gpu_check_literal_bound(ctx, receiver, index)
   bounds = ctx[:array_bounds]
-  if bounds == nil || receiver == nil || ast_kind(receiver) != :var || ast_kind(index) != :int
+  if bounds == nil || receiver == nil || ast_kind(receiver) != :var
     return nil
   name = "" + receiver.name
   bound = bounds[name]
   if bound == nil
     return nil
-  value = index.value
+  value = gpu_static_index_value(index)
+  if value == nil
+    return nil
   if value < 0 || value >= bound
-    gpu_kernel_error(ctx[:node], "array `" + name + "` literal index " + value.to_s() + " is outside 0..." + bound.to_s())
+    shape = ast_kind(index) == :int ? "literal" : "constant-computed"
+    gpu_kernel_error(ctx[:node], "array `" + name + "` " + shape + " index " + value.to_s() + " is outside 0..." + bound.to_s())
   nil
 
--> gpu_param_address_spaces(param_names, param_types)
+-> gpu_param_array_bounds(param_names, param_types)
+  bounds = {}
+  i = 0
+  while i < param_names.size()
+    pname = param_names[i]
+    bound = gpu_array_bound(param_types[pname])
+    if bound != nil
+      bounds[pname] = bound
+    i += 1
+  bounds
+
+-> gpu_param_address_space(node, pname, type_hint, entry_kernel)
+  words = gpu_hint_words(type_hint)
+  address_space = nil
+  if words != nil
+    i = 1
+    while i < words.size()
+      word = words[i]
+      if !(word in ("device" "constant" "threadgroup" "thread"))
+        gpu_kernel_error(node, "parameter `" + pname + "` has unsupported address-space annotation `" + word + "`")
+      if address_space != nil
+        gpu_kernel_error(node, "parameter `" + pname + "` has multiple address-space annotations")
+      address_space = word
+      i += 1
+  is_array = msl_array_elt_type(type_hint) != nil
+  if !is_array
+    if address_space != nil
+      gpu_kernel_error(node, "scalar parameter `" + pname + "` cannot use the `" + address_space + "` address space")
+    return nil
+  if address_space == nil
+    address_space = "device"
+  if entry_kernel && address_space in ("threadgroup" "thread")
+    gpu_kernel_error(node, "entry parameter `" + pname + "` cannot use the `" + address_space + "` address space; allocate it inside the kernel or pass it to a device helper")
+  address_space
+
+-> gpu_param_address_spaces(node, param_names, param_types, entry_kernel)
   spaces = {}
   i = 0
   while i < param_names.size()
-    if msl_array_elt_type(param_types[param_names[i]]) != nil
-      spaces[param_names[i]] = "device"
+    pname = param_names[i]
+    space = gpu_param_address_space(node, pname, param_types[pname], entry_kernel)
+    if space != nil
+      spaces[pname] = space
     i += 1
   spaces
 
@@ -1608,17 +1725,17 @@ use ast
   actual_size = args == nil ? 0 : args.size()
   if actual_size != expected.size()
     gpu_kernel_error(ctx[:node], "device fn `" + name + "` expects " + expected.size().to_s() + " args (got " + actual_size.to_s() + ")")
-  if ctx[:dialect] == "cuda"
-    return nil
   spaces = ctx[:address_spaces]
+  expected_spaces = signature[:param_spaces]
   i = 0
   while i < expected.size()
     if msl_array_elt_type(expected[i]) != nil && ast_kind(args[i]) == :var
       arg_name = "" + args[i].name
       actual_space = spaces[arg_name]
-      if actual_space != nil && actual_space != "device"
-        param_name = signature[:param_names][i]
-        gpu_kernel_error(ctx[:node], "device fn `" + name + "` parameter `" + param_name + "` expects device memory, but `" + arg_name + "` is " + actual_space + " memory")
+      param_name = signature[:param_names][i]
+      expected_space = expected_spaces == nil ? "device" : expected_spaces[param_name]
+      if actual_space != nil && expected_space != nil && actual_space != expected_space
+        gpu_kernel_error(ctx[:node], "device fn `" + name + "` parameter `" + param_name + "` expects " + expected_space + " memory, but `" + arg_name + "` is " + actual_space + " memory")
     i += 1
   nil
 
@@ -1655,6 +1772,7 @@ use ast
       return nil
     if vrecv != nil && is_ast_node?(vrecv) && ast_kind(vrecv) == :var && vrecv.name == "gpu" && (vname == "shared_f32" || vname == "shared_i32" || vname == "shared_i64")
       shared_size = gpu_shared_size(ctx[:node], value, ctx[:dialect])
+      gpu_record_shared_allocation(ctx, vname, shared_size)
       sname = target.name
       elt = "int"
       atype = "i32\[]".to_sym()
@@ -1697,6 +1815,8 @@ use ast
         gpu_kernel_error(ctx[:node], "unsupported local array element type `" + elt.to_s() + "`")
       ctx[:var_types][vname] = ("" + elt.to_s() + "\[]").to_sym()
       ctx[:address_spaces][vname] = "thread"
+      if ast_kind(ast_get(value, :size)) == :int
+        ctx[:array_bounds][vname] = ast_get(value, :size).value
       gpu_declare_local(out, ctx, vname, esc + " " + vname + "\[" + emit_expr(ctx, ast_get(value, :size)) + "]", nil)
     elsif gpu_local_declared?(ctx, vname)
       # Already declared in this function. A local is function-scoped, so a
@@ -2390,10 +2510,12 @@ use ast
   scalar = msl_scalar_type(type_hint)
   scalar != nil && cuda_type_name(scalar) != nil
 
--> cuda_param_decl(type_hint, pname)
+-> cuda_param_decl(node, type_hint, pname, entry_kernel)
   arr_elt = msl_array_elt_type(type_hint)
   if arr_elt != nil
-    return cuda_type_name(arr_elt) + " *" + pname
+    space = gpu_param_address_space(node, pname, type_hint, entry_kernel)
+    prefix = space == "constant" ? "const " : ""
+    return prefix + cuda_type_name(arr_elt) + " *" + pname
   scalar = msl_scalar_type(type_hint)
   if scalar != nil
     return cuda_type_name(scalar) + " " + pname
@@ -2432,7 +2554,7 @@ use ast
     if pi > 0
       out << ",\n"
     out << "  "
-    out << cuda_param_decl(param_types[pname], pname)
+    out << cuda_param_decl(node, param_types[pname], pname, true)
     pi += 1
   out << "\n) {\n"
   out << "  const uint3 __tid = make_uint3(blockIdx.x * blockDim.x + threadIdx.x, blockIdx.y * blockDim.y + threadIdx.y, blockIdx.z * blockDim.z + threadIdx.z);\n"
@@ -2455,8 +2577,9 @@ use ast
     tables: [],
     renames: {},
     unroll: {},
-    array_bounds: {},
-    address_spaces: gpu_param_address_spaces(param_names, param_types)
+    array_bounds: gpu_param_array_bounds(param_names, param_types),
+    address_spaces: gpu_param_address_spaces(node, param_names, param_types, true),
+    shared_bytes: 0
   }
   body = node.body
   body_out = StringBuffer(512)
@@ -2509,7 +2632,7 @@ use ast
     param_names.push(pname)
     if pi > 0
       out << ", "
-    out << cuda_param_decl(ptype, pname)
+    out << cuda_param_decl(node, ptype, pname, false)
     pi += 1
   out << ") {\n"
   ctx = {
@@ -2524,8 +2647,9 @@ use ast
     tables: [],
     renames: {},
     unroll: {},
-    array_bounds: {},
-    address_spaces: gpu_param_address_spaces(param_names, param_types)
+    array_bounds: gpu_param_array_bounds(param_names, param_types),
+    address_spaces: gpu_param_address_spaces(node, param_names, param_types, false),
+    shared_bytes: 0
   }
   body = node.body
   body_out = StringBuffer(256)
@@ -2596,7 +2720,7 @@ use ast
 -> wgsl_scalar(type_hint)
   if type_hint == nil
     return nil
-  name = type_hint.to_s()
+  name = gpu_hint_type(type_hint).to_s()
   if name == "i32"
     return "i32"
   if name == "u32"
@@ -2787,6 +2911,7 @@ use ast
       shared_name = "" + shared_call.name.to_s()
       if shared_recv != nil && ast_kind(shared_recv) == :var && shared_recv.name == "gpu" && shared_name in ("shared_f32" "shared_i32" "shared_i64")
         shared_size = gpu_shared_size(ctx[:node], shared_call, "wgsl")
+        gpu_record_shared_allocation(ctx, shared_name, shared_size)
         source_name = "" + target.name
         global_name = "tungsten_internal_wg_" + ctx[:kernel_name] + "_" + source_name
         elt = shared_name == "shared_f32" ? "f32" : "i32"
@@ -2980,6 +3105,7 @@ use ast
     binding_name = "tungsten_internal_bind_" + name + "_" + pname
     param_renames[pname] = binding_name
     ptype = type_hints[pname]
+    space = gpu_param_address_space(node, pname, ptype, true)
     pnames.push(pname)
     arr_elt = msl_array_elt_type(ptype)
     out << "@group(0) @binding("
@@ -2989,7 +3115,10 @@ use ast
       wgsl_elt = wgsl_elt_name(arr_elt)
       if !(wgsl_elt in ("f32" "i32" "u32"))
         gpu_kernel_error(node, "storage parameter `" + pname + "` type `" + ptype.to_s() + "` is not supported by the WGSL dialect")
-      out << "var<storage, read_write> "
+      if space == "constant"
+        out << "var<storage, read> "
+      else
+        out << "var<storage, read_write> "
       out << binding_name
       out << " : array<"
       if atomic_buffers[pname] == true
@@ -3016,7 +3145,7 @@ use ast
   out << "(@builtin(global_invocation_id) tungsten_internal_tid : vec3<u32>,\n"
   out << "   @builtin(local_invocation_id) tungsten_internal_tid_local : vec3<u32>,\n"
   out << "   @builtin(workgroup_id) tungsten_internal_group_id : vec3<u32>) {\n"
-  ctx = {node: node, kernel_name: name, var_types: {}, params: pnames, indent: 1, renames: param_renames, shared_decls: StringBuffer(128), array_bounds: {}}
+  ctx = {node: node, kernel_name: name, var_types: {}, params: pnames, indent: 1, dialect: "wgsl", renames: param_renames, shared_decls: StringBuffer(128), array_bounds: gpu_param_array_bounds(pnames, type_hints), address_spaces: gpu_param_address_spaces(node, pnames, type_hints, true), shared_bytes: 0}
   declared = {}
   body_out = StringBuffer(256)
   bi = 0

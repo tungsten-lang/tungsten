@@ -16,6 +16,12 @@ UNSUPPORTED_WGSL_TYPE="$ROOT/spec/cli/gpu_check_wgsl_type.w"
 INVALID_SHARED_SHAPE="$ROOT/spec/cli/gpu_check_shared_shape.w"
 INVALID_SHARED_BOUNDS="$ROOT/spec/cli/gpu_check_shared_bounds.w"
 INVALID_GPU_ADDRESS_SPACE="$ROOT/spec/cli/gpu_check_address_space.w"
+VALID_GPU_ADDRESS_SPACE="$ROOT/spec/cli/gpu_check_address_space_valid.w"
+INVALID_GPU_ENTRY_ADDRESS_SPACE="$ROOT/spec/cli/gpu_check_entry_address_space.w"
+INVALID_SHARED_TOTAL="$ROOT/spec/cli/gpu_check_shared_total.w"
+INVALID_WGSL_SHARED_TOTAL="$ROOT/spec/cli/gpu_check_wgsl_shared_total.w"
+INVALID_CUDA_SHARED_TOTAL="$ROOT/spec/cli/gpu_check_cuda_shared_total.w"
+INVALID_GPU_PARAMETER_BOUNDS="$ROOT/spec/cli/gpu_check_parameter_bounds.w"
 UNSUPPORTED_WGSL_SHARED="$ROOT/spec/cli/gpu_check_wgsl_shared_type.w"
 VALID_GPU="$ROOT/spec/compiler/gpu_wgsl_emit_spec.w"
 CUDA_GPU="$ROOT/spec/compiler/gpu_cuda_tg_reduce_reject_spec.w"
@@ -154,6 +160,57 @@ grep -q 'expects device memory, but `tile` is threadgroup memory' "$TMP/check-gp
 grep -q 'gpu_check_address_space.w:10:1' "$TMP/check-gpu-address-space-error.out"
 [[ ! -e "${INVALID_GPU_ADDRESS_SPACE%.w}.metal" ]]
 [[ ! -e "${INVALID_GPU_ADDRESS_SPACE%.w}.cu" ]]
+
+"$TUNGSTEN" -c "$VALID_GPU_ADDRESS_SPACE" >"$TMP/check-gpu-address-space-valid.out"
+grep -qx '200 OK' "$TMP/check-gpu-address-space-valid.out"
+[[ ! -e "${VALID_GPU_ADDRESS_SPACE%.w}.metal" ]]
+[[ ! -e "${VALID_GPU_ADDRESS_SPACE%.w}.cu" ]]
+cp "$VALID_GPU_ADDRESS_SPACE" "$TMP/gpu-address-space-valid.w"
+TUNGSTEN_GPU_DIALECTS=cuda "$TUNGSTEN" compile "$TMP/gpu-address-space-valid.w" \
+  --out "$TMP/gpu-address-space-valid" >"$TMP/gpu-address-space-build.out"
+grep -q 'threadgroup float \*values' "$TMP/gpu-address-space-valid.metal"
+grep -q 'thread int \*values' "$TMP/gpu-address-space-valid.metal"
+grep -q 'constant uint \*values' "$TMP/gpu-address-space-valid.metal"
+grep -q 'const unsigned int \*values' "$TMP/gpu-address-space-valid.cu"
+
+if "$TUNGSTEN" -c "$INVALID_GPU_ENTRY_ADDRESS_SPACE" \
+    >"$TMP/check-gpu-entry-address-space-error.out" 2>&1; then
+  printf 'tungsten -c accepted a threadgroup entry parameter\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-entry-address-space-error.out"
+grep -q 'entry parameter `values` cannot use the `threadgroup` address space' "$TMP/check-gpu-entry-address-space-error.out"
+
+if "$TUNGSTEN" -c "$INVALID_SHARED_TOTAL" \
+    >"$TMP/check-gpu-shared-total-error.out" 2>&1; then
+  printf 'tungsten -c accepted excessive aggregate GPU workgroup memory\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-shared-total-error.out"
+grep -q 'aggregate workgroup memory 36000 bytes exceeds the metal limit of 32768 bytes' "$TMP/check-gpu-shared-total-error.out"
+[[ ! -e "${INVALID_SHARED_TOTAL%.w}.metal" ]]
+[[ ! -e "${INVALID_SHARED_TOTAL%.w}.cu" ]]
+
+if TUNGSTEN_GPU_DIALECTS=wgsl "$TUNGSTEN" -c "$INVALID_WGSL_SHARED_TOTAL" \
+    >"$TMP/check-gpu-wgsl-shared-total-error.out" 2>&1; then
+  printf 'tungsten -c accepted excessive WGSL workgroup memory\n' >&2
+  exit 1
+fi
+grep -q 'aggregate workgroup memory 20000 bytes exceeds the wgsl limit of 16384 bytes' "$TMP/check-gpu-wgsl-shared-total-error.out"
+
+if TUNGSTEN_GPU_DIALECTS=cuda "$TUNGSTEN" -c "$INVALID_CUDA_SHARED_TOTAL" \
+    >"$TMP/check-gpu-cuda-shared-total-error.out" 2>&1; then
+  printf 'tungsten -c accepted excessive CUDA workgroup memory\n' >&2
+  exit 1
+fi
+grep -q 'aggregate workgroup memory 52000 bytes exceeds the cuda limit of 49152 bytes' "$TMP/check-gpu-cuda-shared-total-error.out"
+
+if "$TUNGSTEN" -c "$INVALID_GPU_PARAMETER_BOUNDS" \
+    >"$TMP/check-gpu-parameter-bounds-error.out" 2>&1; then
+  printf 'tungsten -c accepted a proven out-of-bounds GPU parameter access\n' >&2
+  exit 1
+fi
+grep -q 'array `values` constant-computed index 4 is outside 0...4' "$TMP/check-gpu-parameter-bounds-error.out"
 
 if TUNGSTEN_GPU_DIALECTS=wgsl "$TUNGSTEN" -c "$UNSUPPORTED_WGSL_SHARED" \
     >"$TMP/check-gpu-wgsl-shared-error.out" 2>&1; then

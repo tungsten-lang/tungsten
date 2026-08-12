@@ -54,6 +54,26 @@ Supported in both Metal and CUDA:
 - `gpu.shared_f32(N)` / `gpu.shared_i32(N)` → `__shared__` / `threadgroup`
 - Device helpers: `@gpu fn name(...)` with `## TYPE: ret`
 
+Array parameters default to `device` memory. Device helpers can state the
+required address space in the existing type-hint line, for example
+`## f32[] threadgroup: tile` or `## u32[] constant: table`; accepted spaces are
+`device`, `constant`, `threadgroup`, and `thread`. Entry kernels accept
+`device` and `constant` buffers—the host ABI does not yet expose dynamic
+threadgroup arguments, so shared storage must be allocated with
+`gpu.shared_*` inside the kernel. Check-time preflight verifies helper calls
+against these contracts.
+
+Workgroup allocations are checked in aggregate, including implicit reduction
+scratch: 32 KiB for Metal, 48 KiB for CUDA, and 16 KiB for the portable WGSL
+baseline. A kernel exceeding the selected dialect's limit fails at
+`bin/tungsten --check`, before an external shader compiler runs.
+
+Buffer parameters may replace `[]` with a positive fixed extent, such as
+`## f32[256]: values`. The emitted ABI remains a pointer/binding, while
+preflight uses the extent to reject literal and constant-computed out-of-bounds
+indices. Dynamic index range proofs remain conservative: an index whose range
+cannot yet be proven is left to an explicit source guard.
+
 CUDA-only (no MSL mapping):
 
 - `gpu.wmma_*` tensor-core fragments (`wmma::fragment` / MMA)

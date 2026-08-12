@@ -195,6 +195,7 @@ namespace :test do
   task :tungsten do
     run_command "make", "specs", env: { "RUN_CORE_SPECS" => "1" }
     run_command "bash", File.join(ROOT, "scripts/test-bit-count-intrinsics.sh")
+    run_command "bash", File.join(ROOT, "scripts/test-native-arm-crypto-features.sh")
     run_command "bash", File.join(ROOT, "scripts/test-raw-static-machine-return-wire.sh")
     run_command "bash", File.join(ROOT, "scripts/test-small-array-wide-element-boxing-wire.sh")
   end

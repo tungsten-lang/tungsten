@@ -322,9 +322,9 @@ projects stay unchecked until their stated acceptance criteria are met.
   publish native packages for macOS/Linux ARM64 baselines and x86-64-v2/v3.
 - [ ] Make the release workflow exercise `--dry-run` and package validation in
   pull requests without creating tags or releases.
-- [ ] Repair `-march=native` on Apple Silicon so release/native never suppresses
-  crypto extensions. Stamp the explicit detected feature set and pin it with IR
-  and hardware tests.
+- [x] Repair `-march=native` on Apple Silicon so release/native never suppresses
+  crypto extensions. Stamp the explicit detected feature set and pin it with an
+  ARM64 release/native IR contract plus the default hardware crypto vectors.
 
 ### CLI, package manager, and developer tools
 
@@ -363,9 +363,11 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [x] Implement `block?` in the self-hosted compiler and replace Core uses of
   `block_given?`; retain a documented compatibility alias only if external code
   requires it.
-- [ ] Complete interpreter/native parity for `SmallArray` and
+- [x] Complete interpreter/native parity for `SmallArray` and
   `Array.new(n, fill)`, including zero size, mutable fill aliasing, typed fills,
-  bounds, stack promotion, and calls through dynamically typed receivers.
+  bounds, stack promotion, and calls through dynamically typed receivers. Keep
+  constructor parity, dirty-stack zero initialization, and wide-element boxing
+  in the default gate.
 - [ ] Eliminate remaining interpreter/compiled divergence systematically: bare
   sibling class-method calls, array literals passed to class methods, packed
   AST containers, reverse-operand dispatch, Hash keys/equality, and constructor

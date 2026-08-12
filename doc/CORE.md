@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(527 total), grouped by area, with its declaration, a one-line
+(528 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -162,6 +162,7 @@ summary from the source header, and a link to the source.
 | `Random` | `+ Random` | — | [`core/random.w`](../core/random.w) |
 | `Range` | `+ Range` | — | [`core/range.w`](../core/range.w) |
 | `Regex` | `+ Regex` | Regex — a homegrown regular-expression engine, written in Tungsten. | [`core/regex.w`](../core/regex.w) |
+| `RegexMatch` | `+ RegexMatch` | RegexMatch — structured numbered/named captures and codepoint spans. | [`core/regex.w`](../core/regex.w) |
 | `Sandbox` | `+ Sandbox` | Sandboxed execution — the runtime's gate over everything outside the | [`core/sandbox.w`](../core/sandbox.w) |
 | `SmallArray` | `+ SmallArray` | Frozen, stack-allocatable, packed array. Up to 255 elements. | [`core/small_array.w`](../core/small_array.w) |
 | `Socket` | `+ Socket` | Socket — nonblocking TCP sockets integrated with Tungsten's event loop. | [`core/socket.w`](../core/socket.w) |

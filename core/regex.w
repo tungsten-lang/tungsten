@@ -13,10 +13,15 @@
 # single Unicode-correct mask test. Keeping the payload below 2^46 also prevents
 # typed-array reads from promoting tagged Char words to BigInt in the hot loop.
 #
-#   r = Regex.new("(\\d+)-(\\d+)")
-#   r.match("call 12-34 now")   => ["12-34", "12", "34"]   (group 0 + captures)
+#   r = Regex.new("(?<major>\\d+)-(?<minor>\\d+)")
+#   r.match("call 12-34 now")   => ["12-34", "12", "34"]   (compatibility API)
+#   m = r.match_data("call 12-34 now")
+#   m[0]                        => "12-34"
+#   m["major"]                  => "12"
+#   m.offset("minor")           => [8, 10] (Unicode codepoint offsets)
 #   r.match?("nope")            => false
 #
+# Regex — a homegrown regular-expression engine, written in Tungsten.
 + Regex
   # ── instruction opcodes ──
   OP_CHAR  = 1   # a = literal lexint to match
@@ -57,6 +62,7 @@
     @a = []
     @b = i64[0]
     @ngroup = 1                 # group 0 is the whole match
+    @group_names = {}           # String name -> numbered capture index
     @nguard = 0                 # progress-guard slots for nullable-body loops
     @nl = clex("\n")            # the newline Char, for . ^ $
     ast = parse_pattern(@source)
@@ -213,7 +219,21 @@
     cap = -1
     if peek() == "?"
       advance()
-      advance()                  # consume the ?: (assume non-capturing form)
+      form = advance()
+      if form == "<"
+        name = ""
+        while !at_end?() && peek() != ">"
+          name = name + advance()
+        if peek() != ">" || !valid_group_name?(name)
+          raise "invalid named regex capture"
+        advance()
+        if @group_names.has_key?(name)
+          raise "duplicate named regex capture: " + name
+        cap = @ngroup
+        @ngroup = @ngroup + 1
+        @group_names[name] = cap
+      elsif form != ":"
+        raise "unsupported regex group form: ?" + form
     else
       cap = @ngroup
       @ngroup = @ngroup + 1
@@ -221,6 +241,22 @@
     if peek() == ")"
       advance()
     {k: :group, child: child, cap: cap}
+
+  -> valid_group_name?(name)
+    if name.size() == 0
+      return false
+    chars = name.chars()
+    first = chars[0]
+    if !((first >= "a" && first <= "z") || (first >= "A" && first <= "Z") || first == "_")
+      return false
+    i = 1
+    while i < chars.size()
+      c = chars[i]
+      if !((c >= "a" && c <= "z") || (c >= "A" && c <= "Z") ||
+           (c >= "0" && c <= "9") || c == "_")
+        return false
+      i = i + 1
+    true
 
   # \d \w \s \D \W \S \b \B \n \t \r and escaped literals.
   -> parse_escape
@@ -655,7 +691,7 @@
       i = i + 1
     decoded
 
-  -> match(subject)
+  -> find_saved(subject)
     # Decode cache: codepoint-decode the subject only when it changed. Repeated
     # matches against the same string (scan, multi-pattern, re-match) reuse the
     # array. The key compare is an O(1) bit-equality for the same object
@@ -678,9 +714,24 @@
       saved = make_saved()
       e = run(0, start, saved)
       if e >= 0
-        return build_result(saved)
+        return saved
       start = start + 1
     nil
+
+  # Compatibility API: group 0 followed by numbered captures.
+  -> match(subject)
+    saved = find_saved(subject)
+    if saved == nil
+      return nil
+    build_result(saved)
+
+  # Structured capture API. Numbered and named lookup share the same saved
+  # slots, and every reported offset is a half-open Unicode codepoint span.
+  -> match_data(subject)
+    saved = find_saved(subject)
+    if saved == nil
+      return nil
+    RegexMatch.new(build_result(saved), build_offsets(saved), @group_names)
 
   -> match?(subject)
     match(subject) != nil
@@ -704,6 +755,20 @@
       b = saved[g * 2 + 1]
       if a >= 0 && b >= 0
         out.push(span_str(a, b))
+      else
+        out.push(nil)
+      g = g + 1
+    out
+
+  -> build_offsets(saved)
+    saved = saved ## i64[]
+    out = []
+    g = 0 ## i64
+    while g < @ncap
+      a = saved[g * 2]
+      b = saved[g * 2 + 1]
+      if a >= 0 && b >= 0
+        out.push([a, b])
       else
         out.push(nil)
       g = g + 1
@@ -910,3 +975,78 @@
     if s == "S"
       return (lx & FLAG_S) == 0
     false
+
+# RegexMatch — structured numbered/named captures and codepoint spans.
++ RegexMatch
+  -> new(@groups, @offsets, @name_to_group)
+
+  -> group_index(key)
+    kind = key.class_name
+    if kind == "Int" || kind == "Integer" || kind == "BigInt"
+      return key
+    if kind == "String" || kind == "Symbol"
+      return @name_to_group[key.to_s]
+    nil
+
+  # Numbered groups use 0 for the whole match. Named groups accept either a
+  # String or Symbol. An unknown group and an unmatched optional group both
+  # return nil; `offset` distinguishes a matched empty string ([n, n]) from an
+  # unmatched group (nil).
+  -> [](key)
+    index = group_index(key)
+    if index == nil
+      return nil
+    @groups[index]
+
+  -> offset(key)
+    index = group_index(key)
+    if index == nil
+      return nil
+    @offsets[index]
+
+  -> begin_offset(key = 0)
+    span = offset(key)
+    if span == nil
+      return nil
+    span[0]
+
+  -> end_offset(key = 0)
+    span = offset(key)
+    if span == nil
+      return nil
+    span[1]
+
+  -> match
+    @groups[0]
+
+  -> size
+    @groups.size()
+
+  -> captures
+    out = []
+    i = 1
+    while i < @groups.size()
+      out.push(@groups[i])
+      i = i + 1
+    out
+
+  -> names
+    @name_to_group.keys()
+
+  -> named_captures
+    out = {}
+    @name_to_group.each -> (name, index)
+      out[name] = @groups[index]
+    out
+
+  -> named_offsets
+    out = {}
+    @name_to_group.each -> (name, index)
+      out[name] = @offsets[index]
+    out
+
+  -> to_a
+    @groups.copy()
+
+  -> to_s
+    match()

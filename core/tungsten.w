@@ -150,6 +150,7 @@
   auto :Random,       "random"
   auto :Range,        "range"
   auto :Regex,        "regex"
+  auto :RegexMatch,   "regex"
   auto :Sandbox,      "sandbox"
   auto :SmallArray,   "small_array"
   auto :Socket,       "socket"

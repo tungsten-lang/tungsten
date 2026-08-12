@@ -138,7 +138,7 @@ and offering a capture-free `match?` execution path are the next likely levers.
 
 The engine is a backtracking VM, so it is **correct** but shares the standard
 backtracking failure mode. Correctness is locked down by
-`compiler/test/regex_features.w` (56 checks: the full feature matrix plus
+`compiler/test/regex_features.w` (68 checks: the full feature matrix plus
 zero-width/empty edge cases and nullable-loop termination).
 
 - **Empty-match loops are guarded.** A quantifier over a nullable body

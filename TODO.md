@@ -557,6 +557,14 @@ projects stay unchecked until their stated acceptance criteria are met.
   the event loop while preserving the cancellation gate and `wait` semantics.
 - [ ] Add regex capture groups with consistent numbered/named captures,
   unmatched-group behavior, offsets, Unicode semantics, and engine parity.
+  - [x] The self-hosted `Regex` VM supports numbered and `(?<name>...)`
+    captures through `match_data`, including String/Symbol lookup, nil for an
+    unmatched optional group, distinct `[n, n]` spans for matched empty
+    groups, and half-open Unicode codepoint offsets. The compatibility
+    `match` array remains unchanged and retains its measured hot-path speed.
+  - [ ] Give regex literals the same `RegexMatch` API on the native and Ruby
+    hosts, lift the native `$1`...`$9` storage limit, expose named groups, and
+    make the POSIX fallback reject or implement syntax it cannot preserve.
 - [ ] Complete Hash on every host: insertion order, symbol/table separation,
   char keys, structural equality/hash agreement, deletion/tombstones, and
   mutation-during-iteration behavior.

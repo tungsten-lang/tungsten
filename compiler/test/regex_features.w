@@ -87,6 +87,26 @@ ok = check("prefix-scan", m("(\\d+)-(\\d+)", "the order id is 4521-9837 today"),
 ok = check("decimal", m("\\d+\\.\\d+", "v 3.14 x"), ["3.14"]) && ok
 ok = check("no-match", m("\\d+", "no digits here"), nil) && ok
 
+# ── structured numbered/named captures + codepoint offsets ──────────────
+named = Regex.new("(?<major>\\d+)-(?<minor>\\d+)")
+md = named.match_data("v 12-345!")
+ok = check("match-data-whole", md[0], "12-345") && ok
+ok = check("match-data-numbered", md[2], "345") && ok
+ok = check("match-data-name-string", md["major"], "12") && ok
+ok = check("match-data-name-symbol", md[:minor], "345") && ok
+ok = check("match-data-captures", md.captures(), ["12", "345"]) && ok
+ok = check("match-data-offset", md.offset("minor"), [5, 8]) && ok
+ok = check("match-data-bounds", [md.begin_offset(), md.end_offset()], [2, 8]) && ok
+ok = check("match-data-unknown", md["missing"], nil) && ok
+
+optional_md = Regex.new("(a)?(b)").match_data("b")
+ok = check("match-data-unmatched-group", optional_md[1], nil) && ok
+ok = check("match-data-unmatched-offset", optional_md.offset(1), nil) && ok
+empty_md = Regex.new("(a*)").match_data("b")
+ok = check("match-data-empty-offset", empty_md.offset(1), [0, 0]) && ok
+unicode_md = Regex.new("(?<word>\\w+)").match_data("é猫!")
+ok = check("match-data-codepoint-offset", unicode_md.offset(:word), [0, 2]) && ok
+
 # ── unicode (codepoint-ordered ranges + \w on non-ASCII) ────────────────
 ok = check("unicode-word", m("\\w+", "héllo"), ["héllo"]) && ok
 ok = check("greek-range", m("\[α-ω]+", "αβγ!"), ["αβγ"]) && ok
@@ -116,7 +136,7 @@ ok = check("greedy-dot", m("<.*>", "<a><b>"), ["<a><b>"]) && ok
 ok = check("lazy-dot", m("<.*?>", "<a><b>"), ["<a>"]) && ok
 
 if ok
-  << "regex_features: all 56 checks passed"
+  << "regex_features: all 68 checks passed"
 else
   << "regex_features: FAILURES (see above)"
   exit 1

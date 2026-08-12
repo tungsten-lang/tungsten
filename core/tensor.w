@@ -804,6 +804,15 @@ TENSOR_EW = {}
   # well in chained pipelines).
   -> add(other)
     self.elementwise(other, 0)
+  -> add_mut(other)
+    total = self.size
+    fi = 0
+    while fi < total
+      ocoord = Tensor.unravel(fi, shape)
+      val = self.at(ocoord) + (type(other) == "Tensor" ? other.at(ocoord) : other)
+      self.set(ocoord, val)
+      fi = fi + 1
+    self
   -> sub(other)
     self.elementwise(other, 1)
   -> mul(other)

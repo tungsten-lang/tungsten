@@ -31,16 +31,16 @@ summary from the source header, and a link to the source.
 | `Closure` | `+ Closure` | — | [`core/closure.w`](../core/closure.w) |
 | `CIDR` | `+ CIDR` | — | [`core/cidr.w`](../core/cidr.w) |
 | `Color` | `+ Color` | — | [`core/color.w`](../core/color.w) |
-| `Crypto` | — | Crypto - secure random bytes and digest algorithms. | [`core/crypto.w`](../core/crypto.w) |
+| `Crypto` | `+ Crypto` | — | [`core/crypto.w`](../core/crypto.w) |
 | `Currency` | `+ Currency` | Currency — monetary value with currency symbol (tag 0xFFFD) | [`core/currency.w`](../core/currency.w) |
 | `Date` | `+ Date` | — | [`core/date.w`](../core/date.w) |
-| `Digest` | — | Digest - hash convenience facade. | [`core/digest.w`](../core/digest.w) |
+| `Digest` | `+ Digest` | — | [`core/digest.w`](../core/digest.w) |
 | `Duration` | `+ Duration` | Duration — time span (tag 0xFFFF). Two-component representation: | [`core/duration.w`](../core/duration.w) |
 | `Env` | `+ Env` | Env — the current process environment. | [`core/env.w`](../core/env.w) |
 | `Error` | `+ Error` | Error — base error class | [`core/error.w`](../core/error.w) |
 | `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
-| `File` | — | — | [`core/file.w`](../core/file.w) |
-| `FileStat` | — | — | [`core/file.w`](../core/file.w) |
+| `File` | `+ File` | File — whole-file I/O, metadata, paths, and filesystem operations. | [`core/file.w`](../core/file.w) |
+| `FileStat` | `+ FileStat` | FileStat — portable POSIX file metadata with nanosecond timestamps. | [`core/file.w`](../core/file.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
@@ -48,94 +48,94 @@ summary from the source header, and a link to the source.
 | `Integer` | `+ Integer < Int` | Integer — the concrete 48-bit NaN-boxed representation of an Int. | [`core/integer.w`](../core/integer.w) |
 | `JSON` | `+ JSON` | JSON encoder/decoder — interface and default implementation. | [`core/json.w`](../core/json.w) |
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |
-| `Matrix` | `+ Matrix<T> < Number` | Matrix — generic M×N matrices over a scalar type T. Storage is | [`core/matrix.w`](../core/matrix.w) |
-| `Mmap` | `+ File` | Mmap — borrowed read-only file bytes returned by File.mmap. | [`core/mmap.w`](../core/mmap.w) |
+| `Matrix` | — | — | [`core/matrix.w`](../core/matrix.w) |
+| `Mmap` | `+ Mmap` | — | [`core/mmap.w`](../core/mmap.w) |
 | `LinAlg` | `+ LinAlg` | LinAlg — dense linear algebra over nested lists / flat f64 storage. | [`core/linalg.w`](../core/linalg.w) |
 | `FFT` | `+ FFT` | FFT — discrete Fourier transform (native Cooley–Tukey radix-2). | [`core/fft.w`](../core/fft.w) |
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
-| `Stats` | — | Stats — distributions, descriptive stats, sampling. | [`core/stats.w`](../core/stats.w) |
-| `Tensor` | — | core/tensor.w — N-dimensional dense Tensor (language type). | [`core/tensor.w`](../core/tensor.w) |
-| `Tempfile` | — | — | [`core/file.w`](../core/file.w) |
-| `Expression` | — | Expression — canonical symbolic real expressions. | [`core/expression.w`](../core/expression.w) |
-| `Calculus` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
-| `CertifiedRealInterval` | — | Exact rational enclosures for elementary transcendental values. | [`core/calculus/certified_transcendentals.w`](../core/calculus/certified_transcendentals.w) |
-| `CertifiedTranscendentalValue` | — | Exact rational enclosures for elementary transcendental values. | [`core/calculus/certified_transcendentals.w`](../core/calculus/certified_transcendentals.w) |
-| `CertifiedTranscendentals` | — | Exact rational enclosures for elementary transcendental values. | [`core/calculus/certified_transcendentals.w`](../core/calculus/certified_transcendentals.w) |
-| `FormalPowerSeries` | — | FormalPowerSeries — exact truncated Taylor algebra. | [`core/calculus/series.w`](../core/calculus/series.w) |
-| `FormalLaurentSeries` | — | FormalLaurentSeries — exact truncated meromorphic local algebra. | [`core/calculus/laurent.w`](../core/calculus/laurent.w) |
-| `FormalPuiseuxSeries` | — | FormalPuiseuxSeries — exact rational-power local algebra. | [`core/calculus/puiseux.w`](../core/calculus/puiseux.w) |
-| `TaylorJet` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
-| `Differential` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
-| `QuadratureResult` | — | Calculus — differentiation, Taylor expansion, and numerical integration. | [`core/calculus.w`](../core/calculus.w) |
-| `RadialMellinTransform` | — | Radial Mellin/Fourier identities used in high-dimensional sphere-packing | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
-| `CohnElkiesAsymptotics` | — | Radial Mellin/Fourier identities used in high-dimensional sphere-packing | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
-| `Combinatorics` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
-| `FiniteSimpleGraph` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
-| `GraphDegeneracyCertificate` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
-| `CompleteGraphEdgeColoring` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
-| `TriangleRamseyAudit` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
-| `Krawtchouk` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
-| `BinaryBlockCode` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
-| `BinaryCodeDistanceCertificate` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
-| `ConstantNormCode` | — | Exact finite combinatorics. | [`core/combinatorics.w`](../core/combinatorics.w) |
-| `Geometry` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `EuclideanMeasure` | — | Euclidean ball and sphere measures in arbitrary integer dimension.  The | [`core/geometry/measure.w`](../core/geometry/measure.w) |
-| `Chart` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `TensorIndex` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `TensorField` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `MetricSignature` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `Metric` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `LeviCivitaConnection` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `RiemannCurvature` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `GeodesicSystem` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `GeodesicTrajectory` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `WarpedConeSurface` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `Horizon` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `HorizonSet` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `SchwarzschildSpacetime` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `Schwarzschild` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `PerturbativeStabilityCertificate` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `ReggeWheelerPotential` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `BulkNullReturnCertificate` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `BraneBulkChord` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `RandallSundrumSpacetime` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `RandallSundrum` | — | Differential geometry over symbolic coordinate fields. | [`core/geometry.w`](../core/geometry.w) |
-| `Physics` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
-| `IdealGas` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
-| `EulerSystem` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
-| `CompressibleEuler` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
-| `IsothermalEuler` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
-| `LaxFriedrichs` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
-| `Minmod` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
-| `FiniteVolume` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
-| `EulerSimulation` | — | Physics — physical constants, ideal-gas thermodynamics, Euler systems of | [`core/physics.w`](../core/physics.w) |
-| `Dynamics` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `Flow` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `MapSystem` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `HamiltonianSystem` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `Lorenz` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `Rossler` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `VanDerPol` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `Duffing` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `DoublePendulum` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `HarmonicOscillator` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `LogisticMap` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `Henon` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
-| `StandardMap` | — | Dynamics — dynamical systems: flows and maps, trajectory integration | [`core/dynamics.w`](../core/dynamics.w) |
+| `Stats` | `+ Stats` | — | [`core/stats.w`](../core/stats.w) |
+| `Tensor` | `+ Tensor` | — | [`core/tensor.w`](../core/tensor.w) |
+| `Tempfile` | `+ Tempfile` | Tempfile — a securely-created, path-owning temporary file. | [`core/file.w`](../core/file.w) |
+| `Expression` | `+ Expression` | — | [`core/expression.w`](../core/expression.w) |
+| `Calculus` | `+ Calculus` | — | [`core/calculus.w`](../core/calculus.w) |
+| `CertifiedRealInterval` | `+ CertifiedRealInterval` | — | [`core/calculus/certified_transcendentals.w`](../core/calculus/certified_transcendentals.w) |
+| `CertifiedTranscendentalValue` | `+ CertifiedTranscendentalValue` | — | [`core/calculus/certified_transcendentals.w`](../core/calculus/certified_transcendentals.w) |
+| `CertifiedTranscendentals` | `+ CertifiedTranscendentals` | — | [`core/calculus/certified_transcendentals.w`](../core/calculus/certified_transcendentals.w) |
+| `FormalPowerSeries` | `+ FormalPowerSeries` | — | [`core/calculus/series.w`](../core/calculus/series.w) |
+| `FormalLaurentSeries` | `+ FormalLaurentSeries` | — | [`core/calculus/laurent.w`](../core/calculus/laurent.w) |
+| `FormalPuiseuxSeries` | `+ FormalPuiseuxSeries` | — | [`core/calculus/puiseux.w`](../core/calculus/puiseux.w) |
+| `TaylorJet` | — | — | [`core/calculus.w`](../core/calculus.w) |
+| `Differential` | — | — | [`core/calculus.w`](../core/calculus.w) |
+| `QuadratureResult` | — | — | [`core/calculus.w`](../core/calculus.w) |
+| `RadialMellinTransform` | `+ RadialMellinTransform` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
+| `CohnElkiesAsymptotics` | `+ CohnElkiesAsymptotics` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
+| `Combinatorics` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `FiniteSimpleGraph` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `GraphDegeneracyCertificate` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `CompleteGraphEdgeColoring` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `TriangleRamseyAudit` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `Krawtchouk` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `BinaryBlockCode` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `BinaryCodeDistanceCertificate` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `ConstantNormCode` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `Geometry` | `+ Geometry` | — | [`core/geometry.w`](../core/geometry.w) |
+| `EuclideanMeasure` | `+ EuclideanMeasure` | — | [`core/geometry/measure.w`](../core/geometry/measure.w) |
+| `Chart` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `TensorIndex` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `TensorField` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `MetricSignature` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `Metric` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `LeviCivitaConnection` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `RiemannCurvature` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `GeodesicSystem` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `GeodesicTrajectory` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `WarpedConeSurface` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `Horizon` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `HorizonSet` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `SchwarzschildSpacetime` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `Schwarzschild` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `PerturbativeStabilityCertificate` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `ReggeWheelerPotential` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `BulkNullReturnCertificate` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `BraneBulkChord` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `RandallSundrumSpacetime` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `RandallSundrum` | — | — | [`core/geometry.w`](../core/geometry.w) |
+| `Physics` | — | — | [`core/physics.w`](../core/physics.w) |
+| `IdealGas` | — | — | [`core/physics.w`](../core/physics.w) |
+| `EulerSystem` | — | — | [`core/physics.w`](../core/physics.w) |
+| `CompressibleEuler` | — | — | [`core/physics.w`](../core/physics.w) |
+| `IsothermalEuler` | — | — | [`core/physics.w`](../core/physics.w) |
+| `LaxFriedrichs` | — | — | [`core/physics.w`](../core/physics.w) |
+| `Minmod` | — | — | [`core/physics.w`](../core/physics.w) |
+| `FiniteVolume` | — | — | [`core/physics.w`](../core/physics.w) |
+| `EulerSimulation` | — | — | [`core/physics.w`](../core/physics.w) |
+| `Dynamics` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `Flow` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `MapSystem` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `HamiltonianSystem` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `Lorenz` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `Rossler` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `VanDerPol` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `Duffing` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `DoublePendulum` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `HarmonicOscillator` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `LogisticMap` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `Henon` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
+| `StandardMap` | — | — | [`core/dynamics.w`](../core/dynamics.w) |
 | `Dual` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
-| `Tape` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
-| `Autodiff` | `+ Dual` | Autodiff — forward-mode dual numbers + reverse-mode tape (v0). | [`core/autodiff.w`](../core/autodiff.w) |
+| `Tape` | `+ Tape` | Reverse-mode: very small tape of (op, a, b, out) nodes. | [`core/autodiff.w`](../core/autodiff.w) |
+| `Autodiff` | `+ Autodiff` | — | [`core/autodiff.w`](../core/autodiff.w) |
 | `Solve` | `+ Solve` | Solve — initial-value ODE solvers (SciPy solve_ivp analogue). | [`core/solve.w`](../core/solve.w) |
-| `DenseSolution` | `+ Solve` | Solve — initial-value ODE solvers (SciPy solve_ivp analogue). | [`core/solve.w`](../core/solve.w) |
+| `DenseSolution` | `+ DenseSolution` | Continuous DP5(4) solution. Each accepted step keeps its size and the | [`core/solve.w`](../core/solve.w) |
 | `Optim` | `+ Optim` | Optim — scalar / vector optimization and root-finding (v0). | [`core/optim.w`](../core/optim.w) |
 | `Interpolate` | `+ Interpolate` | Interpolate — interpolation and numerical quadrature. | [`core/interpolate.w`](../core/interpolate.w) |
 | `SciIO` | `+ SciIO` | SciIO — scientific data interchange (no system libhdf5/netcdf/arrow). | [`core/io.w`](../core/io.w) |
 | `Plot` | `+ Plot` | Plot — terminal sparklines / heatmaps (zero-dep). | [`core/plot.w`](../core/plot.w) |
 | `Plot3D` | `+ Plot3D` | Plot3D — interactive 3D visualization export for grid simulations. | [`core/plot3d.w`](../core/plot3d.w) |
-| `ProofArtifacts` | — | Hash-bound external proof artifacts. | [`core/proof_artifact.w`](../core/proof_artifact.w) |
-| `ProofArtifactBundle` | — | Hash-bound external proof artifacts. | [`core/proof_artifact.w`](../core/proof_artifact.w) |
-| `Sparse` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
-| `SparseMatrix` | — | Sparse — sparse **matrix** algebra (not a sparse multi-D tensor). | [`core/sparse.w`](../core/sparse.w) |
+| `ProofArtifacts` | `+ ProofArtifacts` | — | [`core/proof_artifact.w`](../core/proof_artifact.w) |
+| `ProofArtifactBundle` | `+ ProofArtifactBundle` | — | [`core/proof_artifact.w`](../core/proof_artifact.w) |
+| `Sparse` | `+ Sparse` | Module-level alias so `Sparse.eye` still works as a short name. | [`core/sparse.w`](../core/sparse.w) |
+| `SparseMatrix` | `+ SparseMatrix` | — | [`core/sparse.w`](../core/sparse.w) |
 | `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
 | `MAC` | `+ MAC` | MAC — heap-backed 48-bit link-layer address with native byte predicates. | [`core/mac.w`](../core/mac.w) |
 | `Module` | `+ Module` | — | [`core/module.w`](../core/module.w) |
@@ -156,331 +156,331 @@ summary from the source header, and a link to the source.
 | `Symbol` | `+ Symbol` | — | [`core/symbol.w`](../core/symbol.w) |
 | `System` | `+ System` | — | [`core/system.w`](../core/system.w) |
 | `Thread` | `+ Thread` | Thread — a native OS thread (pthread). | [`core/thread.w`](../core/thread.w) |
-| `Token` | — | Token — lexical token, a W_TAG_CHAR value with subtype 00. | [`core/token.w`](../core/token.w) |
+| `Token` | `+ Token` | — | [`core/token.w`](../core/token.w) |
 | `Tuple` | `+ Tuple` | Tuple — a heterogeneous, fixed, dynamically-indexable value grouping. | [`core/tuple.w`](../core/tuple.w) |
 | `UUID` | `+ UUID` | — | [`core/uuid.w`](../core/uuid.w) |
 | `Value` | `+ Value` | — | [`core/value.w`](../core/value.w) |
 | `URL` | `+ URL` | URL — strict absolute-URL parsing and canonical reconstruction. | [`core/url.w`](../core/url.w) |
-| `Vector` | `+ Vector<T> < Number` | Vector — generic real-valued N-dimensional vectors. Distinct from | [`core/vector.w`](../core/vector.w) |
-| `FlatTorusOrbit` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
+| `Vector` | — | — | [`core/vector.w`](../core/vector.w) |
+| `FlatTorusOrbit` | `+ FlatTorusOrbit` | — | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitExtremum` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
-| `FlatTorusOrbitStraightening` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
-| `Algebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ArithmeticCircuitNode` | — | Exact finite arithmetic-circuit DAGs. | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
-| `ArithmeticCircuit` | — | Exact finite arithmetic-circuit DAGs. | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
-| `ArithmeticCircuitEvaluationCertificate` | — | Exact finite arithmetic-circuit DAGs. | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
-| `LatticeSimplex` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
-| `LatticePolygon` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
-| `CenteredEhrhartSimplex` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
-| `DiagonalShellPolytope` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
-| `LaurentJetFiltration` | — | Exact lattice-polytope models used by Ehrhart, Newton-polygon, and shell | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
-| `LatticePolytope` | — | Exact low-dimensional lattice polytopes, Newton polytopes, and their | [`core/algebra/toric_polytope.w`](../core/algebra/toric_polytope.w) |
-| `NewtonPolytope` | — | Exact low-dimensional lattice polytopes, Newton polytopes, and their | [`core/algebra/toric_polytope.w`](../core/algebra/toric_polytope.w) |
-| `HomogenizedCone` | — | Exact low-dimensional lattice polytopes, Newton polytopes, and their | [`core/algebra/toric_polytope.w`](../core/algebra/toric_polytope.w) |
-| `ToricHypersurfacePeriod` | — | Exact low-dimensional lattice polytopes, Newton polytopes, and their | [`core/algebra/toric_polytope.w`](../core/algebra/toric_polytope.w) |
-| `ParityLiftLattice` | — | Exact Construction-A parity lift for affine binary systems.  A consistent | [`core/algebra/parity_lattice.w`](../core/algebra/parity_lattice.w) |
-| `ParityLiftCertificate` | — | Exact Construction-A parity lift for affine binary systems.  A consistent | [`core/algebra/parity_lattice.w`](../core/algebra/parity_lattice.w) |
-| `DividedSquareSpace` | — | Exact degree-two divided powers over F2 and the associated binary-carry | [`core/algebra/divided_power.w`](../core/algebra/divided_power.w) |
-| `DividedSquareActionCertificate` | — | Exact degree-two divided powers over F2 and the associated binary-carry | [`core/algebra/divided_power.w`](../core/algebra/divided_power.w) |
-| `BinaryCarryGroup` | — | Exact degree-two divided powers over F2 and the associated binary-carry | [`core/algebra/divided_power.w`](../core/algebra/divided_power.w) |
-| `Field` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `RationalField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `FiniteField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `FiniteFieldModulusCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `FiniteFieldMinimalPolynomialCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `SimpleExtensionField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `SimpleExtensionElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `SimpleExtensionModulusCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleAlgebraElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleAlgebraCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleAlgebraDecompositionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `IntegralGeneratorTransformCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MonogenicOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MonogenicOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `DedekindIndexCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MonogenicOrderMaximalityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductOrderElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ExactRationalLinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PrimeLinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraOrderLattice` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraOrderIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraOrderIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PMaximalOrderStepCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PMaximalOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PMaximalOrderComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MaximalOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MaximalOrderComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductMaximalOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductMaximalOrderComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PrimeVectorQuotient` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `OrderResidueAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `OrderResidueAlgebraCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `OrderResidueFieldMap` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `OrderResidueFieldMapCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraPrimeIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraPrimeIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraPrimeDecomposition` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraPrimeDecompositionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldPrimeIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldPrimeIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldPrimeDecomposition` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductPrimeIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductPrimeIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductPrimeDecomposition` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductPrimeDecompositionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductSPrimeData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductSPrimeDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `IntegerLinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `IntegerHermiteNormalForm` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `IntegerHermiteNormalFormCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraIdealOperationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraIdealComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ExactIntegerArithmetic` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraPrimeValuationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraPrimeValuationComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraIdealFactorizationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraIdealFactorization` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldIdealFactorization` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraFractionalIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraFractionalIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraPrincipalFractionalIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraPrincipalFractionalIdealComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldFractionalIdealCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldFractionalIdeal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberField` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldElement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldMinimalPolynomialCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldRealEmbedding` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldModularIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldModularDegreeIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldRelativeModularIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldTowerIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldIsomorphicModelIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ExactGramLatticeReduction` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ExactGramLatticeReductionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldArchimedeanPlace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldArchimedeanData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldArchimedeanDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductArchimedeanPlace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductArchimedeanData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductArchimedeanDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldQuadraticResidueCharacter` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldSUnitSquareClassBasis` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldSUnitSquareClassBasisCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldMinkowskiFactorBase` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldMinkowskiFactorBaseCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldPrincipalClassRelation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldSClassTwoTorsionProof` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldSClassTwoTorsionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldSClassTwoTorsionSearch` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldL2SCoordinates` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldL2SCoordinatesCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldIsomorphicL2SCoordinates` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldIsomorphicL2SCoordinatesCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldIdealGeneratorSearch` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldIdealGeneratorCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NumberFieldIdealGeneratorBounds` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductSClassTwoTorsionProof` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EtaleProductSClassTwoTorsionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MonomialOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PolynomialRing` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Polynomial` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `IntegerPolynomial` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PolynomialFactorization` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PolynomialFactorizationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraicRealRoot` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraicRealComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AlgebraicRealOperationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `RootIsolationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `RealRootIsolation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Poly` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MacaulayResultant` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PartialDixmierOhnoInvariants` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `GeometricAutomorphismGroup` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticAutomorphismCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `GroebnerBasis` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CertifiedGroebnerBasis` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `GroebnerBasisCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PolynomialReductionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PolynomialIdealMembershipCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Ideal` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `F2LinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `F2LinearSystem` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `F2LinearSystemCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `F2LinearSolution` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PrimeFieldSubspace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PrimeFieldSubspaceCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ProjectivePoint` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ProjectiveSpace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ProjectiveHomogeneousMap` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ProjectiveHomogeneousMapCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ProjectiveHeightDefectBound` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ProjectiveHeightDefectCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ProjectiveCanonicalHeightEnclosure` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ProjectiveCanonicalHeightCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MordellWeilHeightIndexBound` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MordellWeilHeightIndexCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `AffineChart` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Curve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbCurveModel` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbCurveModelCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbRiemannRochSpace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbRiemannRochSpaceCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbFunctionSubspace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbFunctionSubspaceCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbEvaluationKernel` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbEvaluationKernelCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbMultiplierPreimage` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbMultiplierPreimageCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbEffectivePointDivisor` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbEffectivePointDivisorCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbDivisorSpace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbDivisorSpaceCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiRepresentative` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiRepresentativeCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiProduct` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiProductCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiZero` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiZeroCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiAffineZero` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiAffineZeroCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiAddFlip` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiAddFlipCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiDifference` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiDifferenceCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiPlaceDifference` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiPlaceDifferenceCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiArithmetic` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiSum` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiSumCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiZeroTest` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiZeroTestCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiEquality` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiEqualityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiScalarMultiple` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiScalarMultipleCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiOrder` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiOrderCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiNondivisibility` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbKhuriMakdisiNondivisibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbEffectivePlaceDivisor` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbEffectivePlaceDivisorCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbPlaceEvaluationKernel` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbPlaceEvaluationKernelCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbPlaceDivisorSpace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CAbPlaceDivisorSpaceCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ClosedPlaceReduction` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ClosedPlaceReductionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NewtonPolygon` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NewtonPolygonEdge` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `NewtonPolygonCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `LocalPlaneBranch` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `LocalPlaneBranchCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `RecursiveLocalPlaneBranchCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `LocalPlaneParametrization` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `LocalPlaneParametrizationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneProjectionSheetCoverCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalNormalization` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalNormalizationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalDiscriminantCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalPolarCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalDeltaInvariant` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalDeltaCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `LocalPlaneParametrizationIntersection` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `LocalPlaneParametrizationIntersectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalIntersection` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalIntersectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneTangentDirection` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalSingularity` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneCurveLocalSingularityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `OrdinaryPlanePointDeltaCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CurveZetaFunction` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Line` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Place` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ClosedPlace` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ClosedPlaceResidueCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Divisor` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `LineIntersection` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `LineIntersectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `DivisorPrincipalityResult` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `SelmerConstraintBlock` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `SelmerConstraintSystem` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ExplicitSelmerIntersectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `SmoothPlaneQuarticCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `SmoothPlaneQuarticBitangentCountCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `RationalHyperflexCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBitangentChart` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `BitangentChartCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `BitangentEtaleComponentCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `BitangentProjectionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticTwoDescentSetup` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBitangentSchemeCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBitangentContactComponentCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBitangentContactComponent` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBPSTrueDivisorComponentCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBPSTrueDivisorComponent` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBPSFunctionComponentCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBPSFunctionComponent` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBPSFunctionDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `PlaneQuarticBPSFunctionData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `DescentRequirement` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MonotoneQuarticPointSearch` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Jacobian` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticPoint` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticCurve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticJacobian` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `WeierstrassInvariantsCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `IntegralWeierstrassModel` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `IntegralWeierstrassTransformationCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `IntegralWeierstrassTransformation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticLocalMinimalModelCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticLocalMinimalModelComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticMinimalModelCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticMinimalModelComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticTateAlgorithm` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticTateLocalDataCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticTateLocalData` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticLocalReductionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticLocalReduction` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticConductorCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `EllipticConductorComputation` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `FreyCurveCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `FreyCurve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ModularFormsArithmetic` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Gamma0InvariantsCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Gamma0` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ModularCurveX0` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ModularFormSpaceDimensionCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `CuspForms` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ModularForms` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `SturmBoundCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `SturmBound` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `QExpansion` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ClassicalModularForms` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ClassicalModularFormCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ClassicalModularForm` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ModularSymbolsLinearAlgebra` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Gamma0ProjectiveLine` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Gamma0ProjectiveLineCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `Gamma0Cusp` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ManinSymbol` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `WeightTwoModularSymbols` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `WeightTwoModularSymbolsCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `HyperellipticCurve` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `MumfordDivisor` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `HyperellipticJacobian` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `GaloisGroup` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `WeilSexticGaloisGroup` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `WeilSexticGaloisCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `ModularIrreducibilityCertificate` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
-| `WeilCubic` | — | Exact algebraic structures. | [`core/algebra.w`](../core/algebra.w) |
+| `FlatTorusOrbitStraightening` | `+ FlatTorusOrbitStraightening` | An exact GL(n,Z) coordinate change which sends an integer torus direction | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
+| `Algebra` | `+ Algebra` | — | [`core/algebra.w`](../core/algebra.w) |
+| `ArithmeticCircuitNode` | `+ ArithmeticCircuitNode` | — | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
+| `ArithmeticCircuit` | `+ ArithmeticCircuit` | — | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
+| `ArithmeticCircuitEvaluationCertificate` | `+ ArithmeticCircuitEvaluationCertificate` | — | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
+| `LatticeSimplex` | `+ LatticeSimplex` | — | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `LatticePolygon` | `+ LatticePolygon` | — | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `CenteredEhrhartSimplex` | `+ CenteredEhrhartSimplex` | — | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `DiagonalShellPolytope` | `+ DiagonalShellPolytope` | — | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `LaurentJetFiltration` | `+ LaurentJetFiltration` | — | [`core/algebra/lattice_polytope.w`](../core/algebra/lattice_polytope.w) |
+| `LatticePolytope` | `+ LatticePolytope` | — | [`core/algebra/toric_polytope.w`](../core/algebra/toric_polytope.w) |
+| `NewtonPolytope` | `+ NewtonPolytope` | — | [`core/algebra/toric_polytope.w`](../core/algebra/toric_polytope.w) |
+| `HomogenizedCone` | `+ HomogenizedCone` | — | [`core/algebra/toric_polytope.w`](../core/algebra/toric_polytope.w) |
+| `ToricHypersurfacePeriod` | `+ ToricHypersurfacePeriod` | Fundamental constant-term period attached to a Laurent polynomial obtained | [`core/algebra/toric_polytope.w`](../core/algebra/toric_polytope.w) |
+| `ParityLiftLattice` | `+ ParityLiftLattice` | — | [`core/algebra/parity_lattice.w`](../core/algebra/parity_lattice.w) |
+| `ParityLiftCertificate` | `+ ParityLiftCertificate` | — | [`core/algebra/parity_lattice.w`](../core/algebra/parity_lattice.w) |
+| `DividedSquareSpace` | `+ DividedSquareSpace` | — | [`core/algebra/divided_power.w`](../core/algebra/divided_power.w) |
+| `DividedSquareActionCertificate` | `+ DividedSquareActionCertificate` | — | [`core/algebra/divided_power.w`](../core/algebra/divided_power.w) |
+| `BinaryCarryGroup` | `+ BinaryCarryGroup` | — | [`core/algebra/divided_power.w`](../core/algebra/divided_power.w) |
+| `Field` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `RationalField` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `FiniteField` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `FiniteFieldModulusCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `FiniteFieldMinimalPolynomialCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `SimpleExtensionField` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `SimpleExtensionElement` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `SimpleExtensionModulusCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleAlgebra` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleAlgebraElement` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleAlgebraCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleAlgebraDecompositionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `IntegralGeneratorTransformCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MonogenicOrder` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MonogenicOrderCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `DedekindIndexCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MonogenicOrderMaximalityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductOrder` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductOrderElement` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductOrderCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ExactRationalLinearAlgebra` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PrimeLinearAlgebra` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrderLattice` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrder` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrderCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrderIdeal` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraOrderIdealCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PMaximalOrderStepCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PMaximalOrderCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PMaximalOrderComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MaximalOrderCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MaximalOrderComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductMaximalOrderCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductMaximalOrderComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PrimeVectorQuotient` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `OrderResidueAlgebra` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `OrderResidueAlgebraCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `OrderResidueFieldMap` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `OrderResidueFieldMapCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeIdeal` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeIdealCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeDecomposition` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeDecompositionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldPrimeIdeal` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldPrimeIdealCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldPrimeDecomposition` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductPrimeIdeal` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductPrimeIdealCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductPrimeDecomposition` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductPrimeDecompositionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductSPrimeData` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductSPrimeDataCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `IntegerLinearAlgebra` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `IntegerHermiteNormalForm` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `IntegerHermiteNormalFormCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraIdealOperationCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraIdealComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ExactIntegerArithmetic` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeValuationCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrimeValuationComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraIdealFactorizationCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraIdealFactorization` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdeal` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealFactorization` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraFractionalIdealCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraFractionalIdeal` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrincipalFractionalIdealCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraPrincipalFractionalIdealComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldFractionalIdealCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldFractionalIdeal` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberField` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldElement` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldMinimalPolynomialCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldRealEmbedding` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldModularIrreducibilityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldModularDegreeIrreducibilityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldRelativeModularIrreducibilityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldTowerIrreducibilityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIsomorphicModelIrreducibilityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ExactGramLatticeReduction` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ExactGramLatticeReductionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldArchimedeanPlace` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldArchimedeanData` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldArchimedeanDataCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductArchimedeanPlace` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductArchimedeanData` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductArchimedeanDataCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldQuadraticResidueCharacter` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldSUnitSquareClassBasis` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldSUnitSquareClassBasisCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldMinkowskiFactorBase` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldMinkowskiFactorBaseCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldPrincipalClassRelation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldSClassTwoTorsionProof` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldSClassTwoTorsionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldSClassTwoTorsionSearch` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldL2SCoordinates` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldL2SCoordinatesCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIsomorphicL2SCoordinates` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIsomorphicL2SCoordinatesCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealGeneratorSearch` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealGeneratorCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NumberFieldIdealGeneratorBounds` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductSClassTwoTorsionProof` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EtaleProductSClassTwoTorsionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MonomialOrder` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PolynomialRing` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Polynomial` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `IntegerPolynomial` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PolynomialFactorization` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PolynomialFactorizationCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraicRealRoot` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraicRealComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AlgebraicRealOperationCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `RootIsolationCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `RealRootIsolation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Poly` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MacaulayResultant` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PartialDixmierOhnoInvariants` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `GeometricAutomorphismGroup` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticAutomorphismCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `GroebnerBasis` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CertifiedGroebnerBasis` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `GroebnerBasisCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PolynomialReductionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PolynomialIdealMembershipCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Ideal` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `F2LinearAlgebra` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `F2LinearSystem` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `F2LinearSystemCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `F2LinearSolution` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PrimeFieldSubspace` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PrimeFieldSubspaceCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectivePoint` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectiveSpace` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectiveHomogeneousMap` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectiveHomogeneousMapCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectiveHeightDefectBound` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectiveHeightDefectCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectiveCanonicalHeightEnclosure` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ProjectiveCanonicalHeightCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MordellWeilHeightIndexBound` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MordellWeilHeightIndexCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `AffineChart` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Curve` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbCurveModel` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbCurveModelCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbRiemannRochSpace` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbRiemannRochSpaceCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbFunctionSubspace` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbFunctionSubspaceCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbEvaluationKernel` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbEvaluationKernelCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbMultiplierPreimage` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbMultiplierPreimageCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbEffectivePointDivisor` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbEffectivePointDivisorCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbDivisorSpace` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbDivisorSpaceCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiRepresentative` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiRepresentativeCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiProduct` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiProductCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiZero` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiZeroCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiAffineZero` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiAffineZeroCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiAddFlip` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiAddFlipCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiDifference` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiDifferenceCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiPlaceDifference` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiPlaceDifferenceCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiArithmetic` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiSum` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiSumCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiZeroTest` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiZeroTestCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiEquality` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiEqualityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiScalarMultiple` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiScalarMultipleCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiOrder` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiOrderCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiNondivisibility` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbKhuriMakdisiNondivisibilityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbEffectivePlaceDivisor` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbEffectivePlaceDivisorCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbPlaceEvaluationKernel` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbPlaceEvaluationKernelCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbPlaceDivisorSpace` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CAbPlaceDivisorSpaceCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ClosedPlaceReduction` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ClosedPlaceReductionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NewtonPolygon` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NewtonPolygonEdge` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `NewtonPolygonCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `LocalPlaneBranch` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `LocalPlaneBranchCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `RecursiveLocalPlaneBranchCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `LocalPlaneParametrization` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `LocalPlaneParametrizationCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneProjectionSheetCoverCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalNormalization` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalNormalizationCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalDiscriminantCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalPolarCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalDeltaInvariant` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalDeltaCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `LocalPlaneParametrizationIntersection` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `LocalPlaneParametrizationIntersectionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalIntersection` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalIntersectionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneTangentDirection` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalSingularity` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneCurveLocalSingularityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `OrdinaryPlanePointDeltaCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CurveZetaFunction` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Line` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Place` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ClosedPlace` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ClosedPlaceResidueCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Divisor` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `LineIntersection` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `LineIntersectionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `DivisorPrincipalityResult` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `SelmerConstraintBlock` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `SelmerConstraintSystem` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ExplicitSelmerIntersectionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `SmoothPlaneQuarticCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `SmoothPlaneQuarticBitangentCountCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `RationalHyperflexCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBitangentChart` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `BitangentChartCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `BitangentEtaleComponentCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `BitangentProjectionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticTwoDescentSetup` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBitangentSchemeCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBitangentContactComponentCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBitangentContactComponent` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBPSTrueDivisorComponentCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBPSTrueDivisorComponent` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBPSFunctionComponentCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBPSFunctionComponent` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBPSFunctionDataCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PlaneQuarticBPSFunctionData` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `DescentRequirement` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MonotoneQuarticPointSearch` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Jacobian` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticPoint` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticCurve` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticJacobian` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `WeierstrassInvariantsCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `IntegralWeierstrassModel` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `IntegralWeierstrassTransformationCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `IntegralWeierstrassTransformation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticLocalMinimalModelCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticLocalMinimalModelComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticMinimalModelCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticMinimalModelComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticTateAlgorithm` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticTateLocalDataCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticTateLocalData` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticLocalReductionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticLocalReduction` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticConductorCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `EllipticConductorComputation` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `FreyCurveCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `FreyCurve` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ModularFormsArithmetic` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Gamma0InvariantsCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Gamma0` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ModularCurveX0` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ModularFormSpaceDimensionCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `CuspForms` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ModularForms` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `SturmBoundCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `SturmBound` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `QExpansion` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ClassicalModularForms` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ClassicalModularFormCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ClassicalModularForm` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ModularSymbolsLinearAlgebra` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Gamma0ProjectiveLine` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Gamma0ProjectiveLineCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `Gamma0Cusp` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ManinSymbol` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `WeightTwoModularSymbols` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `WeightTwoModularSymbolsCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `HyperellipticCurve` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `MumfordDivisor` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `HyperellipticJacobian` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `GaloisGroup` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `WeilSexticGaloisGroup` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `WeilSexticGaloisCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `ModularIrreducibilityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `WeilCubic` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `ArgumentError` | `+ ArgumentError < Error` | ArgumentError — raised when an argument's value is unacceptable, | [`core/argument_error.w`](../core/argument_error.w) |
 | `RangeError` | `+ RangeError < Error` | RangeError — raised when a value falls outside the range an | [`core/range_error.w`](../core/range_error.w) |
 | `TypeError` | `+ TypeError < Error` | TypeError — raised when a value of the wrong type reaches an | [`core/type_error.w`](../core/type_error.w) |
@@ -489,33 +489,33 @@ summary from the source header, and a link to the source.
 
 | Class | Defined as | Summary | Source |
 |-------|-----------|---------|--------|
-| `Hypercomplex` | `+ Hypercomplex<T> < Number` | Hypercomplex — the Cayley–Dickson algebras above the reals: | [`core/numeric/hypercomplex.w`](../core/numeric/hypercomplex.w) |
+| `Hypercomplex` | — | — | [`core/numeric/hypercomplex.w`](../core/numeric/hypercomplex.w) |
 | `Interval` | `+ Interval` | Interval — rigorous interval arithmetic over Float endpoints. | [`core/numeric/interval.w`](../core/numeric/interval.w) |
 | `IntervalF64` | `+ IntervalF64 < Interval` | — | [`core/numeric/intervalf64.w`](../core/numeric/intervalf64.w) |
 | `BF16` | `+ BF16 < Float` | Brain float 16 | [`core/numeric/bfloat16.w`](../core/numeric/bfloat16.w) |
 | `BigComplex` | `+ BigComplex < Complex` | — | [`core/numeric/big_complex.w`](../core/numeric/big_complex.w) |
 | `BigDecimal` | `+ BigDecimal < Decimal` | — | [`core/numeric/big_decimal.w`](../core/numeric/big_decimal.w) |
-| `BigInt` | — | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
+| `BigInt` | `+ BigInt < Int` | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
 | `Int` | `+ Int < Real` | Int — the exact, arbitrary-precision integer family. | [`core/numeric/int.w`](../core/numeric/int.w) |
-| `IntegerFactorization` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
+| `IntegerFactorization` | `+ IntegerFactorization` | — | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
 | `PrimePower` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
-| `Centumduodetrigintanion` | `+ Centumduodetrigintanion<T> < Hypercomplex<T>` | Centumduodetrigintanion — dimension-128 hypercomplex algebra. | [`core/numeric/hypercomplex/centumduodetrigintanion.w`](../core/numeric/hypercomplex/centumduodetrigintanion.w) |
-| `Complex` | `+ Complex<T> < Hypercomplex<T>` | Complex — dimension-2 hypercomplex (basis: 1, i). | [`core/numeric/hypercomplex/complex.w`](../core/numeric/hypercomplex/complex.w) |
+| `Centumduodetrigintanion` | — | — | [`core/numeric/hypercomplex/centumduodetrigintanion.w`](../core/numeric/hypercomplex/centumduodetrigintanion.w) |
+| `Complex` | `+ Complex < Number` | Bare Complex — the lightweight wvalue scalar (Erik 8/8: "Complex.new for | [`core/numeric/hypercomplex/complex.w`](../core/numeric/hypercomplex/complex.w) |
 | `ComplexArray` | `+ ComplexArray` | ComplexArray — N complex numbers in one contiguous interleaved f64 buffer: | [`core/numeric/complex_array.w`](../core/numeric/complex_array.w) |
-| `Ducentiquinquagintasexion` | `+ Ducentiquinquagintasexion<T> < Hypercomplex<T>` | Ducentiquinquagintasexion — dimension-256 hypercomplex algebra. | [`core/numeric/hypercomplex/ducentiquinquagintasexion.w`](../core/numeric/hypercomplex/ducentiquinquagintasexion.w) |
-| `Octonion` | `+ Octonion<T> < Hypercomplex<T>` | Octonion — dimension-8 hypercomplex algebra (basis: 1, e1…e7). | [`core/numeric/hypercomplex/octonion.w`](../core/numeric/hypercomplex/octonion.w) |
-| `Quaternion` | `+ Quaternion<T> < Hypercomplex<T>` | Quaternion — dimension-4 hypercomplex algebra (basis: 1, i, j, k). | [`core/numeric/hypercomplex/quaternion.w`](../core/numeric/hypercomplex/quaternion.w) |
-| `QuaternionMetal` | `+ QuaternionMetal<T> < Hypercomplex<T>` | QuaternionMetal — Metal-aligned counterpart of Quaternion<T>. Same | [`core/numeric/hypercomplex/quaternion_metal.w`](../core/numeric/hypercomplex/quaternion_metal.w) |
-| `Sedenion` | `+ Sedenion<T> < Hypercomplex<T>` | Sedenion — dimension-16 hypercomplex algebra (basis: 1, e1…e15). | [`core/numeric/hypercomplex/sedenion.w`](../core/numeric/hypercomplex/sedenion.w) |
-| `Sexagintaquatronion` | `+ Sexagintaquatronion<T> < Hypercomplex<T>` | Sexagintaquatronion — dimension-64 hypercomplex algebra. Cayley–Dickson | [`core/numeric/hypercomplex/sexagintaquatronion.w`](../core/numeric/hypercomplex/sexagintaquatronion.w) |
-| `Trigintaduonion` | `+ Trigintaduonion<T> < Hypercomplex<T>` | Trigintaduonion — dimension-32 hypercomplex algebra. Cayley–Dickson | [`core/numeric/hypercomplex/trigintaduonion.w`](../core/numeric/hypercomplex/trigintaduonion.w) |
-| `Vec2` | `+ Vec2<T> < Vector<T>` | Vec2 — 2-component vector. Maps to Metal's float2 / half2 / int2 etc. | [`core/numeric/vec2.w`](../core/numeric/vec2.w) |
-| `Vec3` | `+ Vec3<T> < Vector<T>` | Vec3 — 3-component vector. Maps to Metal's float3 / half3 / int3 etc. | [`core/numeric/vec3.w`](../core/numeric/vec3.w) |
-| `Vec4` | `+ Vec4<T> < Vector<T>` | Vec4 — 4-component vector. Maps to Metal's float4 / half4 / int4 etc. | [`core/numeric/vec4.w`](../core/numeric/vec4.w) |
-| `Mat` | `+ Mat<T, M, N> < Matrix<T>` | Mat — rectangular M×N matrix, parametric in shape. For square fixed | [`core/numeric/mat.w`](../core/numeric/mat.w) |
-| `Mat2` | `+ Mat2<T> < Matrix<T>` | Mat2 — 2×2 matrix. Column-major storage matching Metal's float2x2. | [`core/numeric/mat2.w`](../core/numeric/mat2.w) |
-| `Mat3` | `+ Mat3<T> < Matrix<T>` | Mat3 — 3×3 matrix. Column-major storage matching Metal's float3x3. | [`core/numeric/mat3.w`](../core/numeric/mat3.w) |
-| `Mat4` | `+ Mat4<T> < Matrix<T>` | Mat4 — 4×4 matrix. Column-major storage matching Metal's float4x4 — | [`core/numeric/mat4.w`](../core/numeric/mat4.w) |
+| `Ducentiquinquagintasexion` | — | — | [`core/numeric/hypercomplex/ducentiquinquagintasexion.w`](../core/numeric/hypercomplex/ducentiquinquagintasexion.w) |
+| `Octonion` | — | — | [`core/numeric/hypercomplex/octonion.w`](../core/numeric/hypercomplex/octonion.w) |
+| `Quaternion` | — | — | [`core/numeric/hypercomplex/quaternion.w`](../core/numeric/hypercomplex/quaternion.w) |
+| `QuaternionMetal` | — | — | [`core/numeric/hypercomplex/quaternion_metal.w`](../core/numeric/hypercomplex/quaternion_metal.w) |
+| `Sedenion` | — | — | [`core/numeric/hypercomplex/sedenion.w`](../core/numeric/hypercomplex/sedenion.w) |
+| `Sexagintaquatronion` | — | — | [`core/numeric/hypercomplex/sexagintaquatronion.w`](../core/numeric/hypercomplex/sexagintaquatronion.w) |
+| `Trigintaduonion` | — | — | [`core/numeric/hypercomplex/trigintaduonion.w`](../core/numeric/hypercomplex/trigintaduonion.w) |
+| `Vec2` | — | — | [`core/numeric/vec2.w`](../core/numeric/vec2.w) |
+| `Vec3` | — | — | [`core/numeric/vec3.w`](../core/numeric/vec3.w) |
+| `Vec4` | — | — | [`core/numeric/vec4.w`](../core/numeric/vec4.w) |
+| `Mat` | — | — | [`core/numeric/mat.w`](../core/numeric/mat.w) |
+| `Mat2` | — | — | [`core/numeric/mat2.w`](../core/numeric/mat2.w) |
+| `Mat3` | — | — | [`core/numeric/mat3.w`](../core/numeric/mat3.w) |
+| `Mat4` | — | — | [`core/numeric/mat4.w`](../core/numeric/mat4.w) |
 | `Decimal` | `+ Decimal < Real` | — | [`core/numeric/decimal.w`](../core/numeric/decimal.w) |
 | `Decimal32` | `+ Decimal32 < Decimal` | The IEEE 754-2008 standard specifies decimal32 as having: | [`core/numeric/decimal32.w`](../core/numeric/decimal32.w) |
 | `Decimal64` | `+ Decimal64 < Decimal` | The IEEE 754-2008 standard specifies decimal64 as having: | [`core/numeric/decimal64.w`](../core/numeric/decimal64.w) |

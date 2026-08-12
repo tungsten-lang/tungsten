@@ -28,23 +28,20 @@ abort "no auto entries found in #{MANIFEST}" if entries.empty?
 def describe(file, name)
   return ["", "—"] unless File.exist?(file)
 
-  decl = nil
+  lines = File.readlines(file, chomp: true)
+  escaped_name = Regexp.escape(name)
+  declaration_index = lines.index do |line|
+    line.match?(/^\s*(?:\+\s+|trait\s+)#{escaped_name}(?:\s|$)/)
+  end
+  return ["", "—"] unless declaration_index
+
+  decl = lines[declaration_index].strip
   comments = []
-  saw_code = false
-  File.foreach(file) do |raw|
-    line = raw.rstrip
-    next if line.empty? && !saw_code && comments.empty?
-    if line.lstrip.start_with?("#") && !saw_code
-      comments << line.lstrip.sub(/\A(#+\s*)+/, "") # strip nested '# # ' headers too
-      next
-    end
-    if (m = line.match(/^\s*(\+\s+\S.*|trait\s+\S.*)$/))
-      decl = m[1].strip
-      saw_code = true
-      break
-    end
-    # First non-comment, non-decl code line — stop collecting the header block.
-    break unless line.empty?
+  index = declaration_index - 1
+  index -= 1 while index >= 0 && lines[index].strip.empty?
+  while index >= 0 && lines[index].lstrip.start_with?("#")
+    comments.unshift(lines[index].lstrip.sub(/\A(#+\s*)+/, ""))
+    index -= 1
   end
 
   # A line is a usable summary unless it's metadata, a URL, an ASCII-art tree
@@ -59,7 +56,7 @@ def describe(file, name)
       s.casecmp("#{name} trait") != 0   # "Foo trait" header
   end
   summary = summary.to_s.strip
-  summary = "#{summary[0, 117]}…" if summary.length > 118
+  summary = "#{summary[0, 117]}…" if summary.size > 118
   [decl.to_s, summary.empty? ? "—" : summary]
 end
 

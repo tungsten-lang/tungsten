@@ -408,6 +408,9 @@ when "build"
 when "fmt"
   run_command_w("bin/commands/fmt.w", tool_argv_after_command("fmt"))
 
+when "lint"
+  run_command_w_status("bin/commands/lint.w", tool_argv_after_command("lint"))
+
 when "sandbox"
   run_command_w_status("bin/commands/sandbox.w", tool_argv_after_command("sandbox"))
 

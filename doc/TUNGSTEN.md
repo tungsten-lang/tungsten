@@ -59,6 +59,9 @@ COMMANDS
     doctor               Check your toolchain (clang, make, lld, zstd, compiler)
                          Implemented in bash — works without a built compiler.
     fmt FILE             Format .w source
+    lint PATH            Run compiler checks and deterministic source linting
+                         without modifying files. Supports text/JSON output and
+                         per-code off/warning/error severity overrides.
     explain CODE         Explain a stable compiler/runtime error code
     bit ...              The Bit package manager (install, new, search, ...)
     ai / symbolicate / forge / flame
@@ -86,6 +89,8 @@ EXAMPLES
     tungsten gpu-bench --elements 1048576 --runs 50
     tungsten debug app.w -- --example argument
     tungsten debug --run app.w -- --debug-build-smoke
+    tungsten lint --warnings-as-errors core/
+    tungsten lint --json --severity LINT_TAB_INDENT=off app.w
     tungsten console
     wit
 

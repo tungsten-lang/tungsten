@@ -99,6 +99,7 @@ runtime/tests/*.dSYM
 
 # On-demand compiled CLI tool binaries (bin/commands/*.w → bin/commands/<name>)
 bin/commands/fmt
+bin/commands/lint
 bin/commands/ai
 bin/commands/symbolicate
 bin/commands/forge

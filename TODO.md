@@ -338,7 +338,7 @@ projects stay unchecked until their stated acceptance criteria are met.
   under compiled regression coverage, including the no-source fallback.
 - [ ] Port `implementations/ruby/lib/tungsten/formatter.rb` to the self-hosted
   `bin/tungsten fmt`; require idempotence and AST equivalence over the corpus.
-- [ ] Add `bin/tungsten lint` with stable diagnostic codes, machine-readable
+- [x] Add `bin/tungsten lint` with stable diagnostic codes, machine-readable
   output, configurable severities, and no source mutation.
 - [x] Add `bin/tungsten debug` for build/run with symbols, frame pointers,
   sidemap validation, LLDB/GDB selection, build-only automation, cached

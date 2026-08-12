@@ -100,7 +100,7 @@ A `use` path could not be resolved to a `.w` file.
 **Fix:** Check the path relative to the project, install deps with `bit install`
 (looks under `vendor/bits`), or set `BIT_HOME` for monorepo bits.
 
-## E_GPU_UNSUPPORTED
+## E_GPU_KERNEL_UNSUPPORTED
 
 An `@gpu fn` feature is not available for the selected GPU dialect
 (Metal / CUDA / WGSL).
@@ -118,3 +118,33 @@ including `metal` is explicit but does not change the artifact set.
 
 **Fix:** Use a unique comma-separated list such as `cuda,wgsl`, use `none` by
 itself to suppress extra sidecars, or unset the variable for the default.
+
+## LINT_USAGE
+
+The `tungsten lint` command received a missing path, unknown option, invalid
+format, unknown lint code, or invalid severity override.
+
+**Fix:** Run `tungsten lint --help`. Severity overrides use
+`--severity CODE=off|warning|error`.
+
+## LINT_TAB_INDENT
+
+A source line uses a tab in its leading indentation. Tabs inside strings and
+comments after source text are not flagged.
+
+**Fix:** Replace indentation tabs with spaces, or configure this rule with
+`--severity LINT_TAB_INDENT=off|warning|error`.
+
+## LINT_TRAILING_WHITESPACE
+
+A source line ends with one or more spaces or tabs.
+
+**Fix:** Remove the trailing whitespace, or configure this rule with
+`--severity LINT_TRAILING_WHITESPACE=off|warning|error`.
+
+## LINT_FINAL_NEWLINE
+
+A non-empty source file does not end with a newline.
+
+**Fix:** Add one final newline, or configure this rule with
+`--severity LINT_FINAL_NEWLINE=off|warning|error`.

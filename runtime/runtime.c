@@ -7070,7 +7070,10 @@ static void bn_toom_point_set_init(WToomPointSet *set, int32_t n,
                         thread_limit : BN_TOOM_PAR_THREADS;
     if (set->thread_limit < 1) set->thread_limit = 1;
     set->sequential_scratch = sequential_scratch;
-    if (!enable_parallel || bn_toom_parallel_depth)
+    /* no_spin marks a serial-heavy recursion (sqrt, hgcd): dispatching
+     * point sets there pays a wake/park syscall pair per nested product
+     * with parked workers contributing nothing — run them inline. */
+    if (!enable_parallel || bn_toom_parallel_depth || bn_toom_no_spin)
         return;
     set->scratch_need = square ? bn_sqr_scratch_need(n) : bn_scratch_need(n);
     set->operand_limbs = (size_t)(square ? capacity : 2 * capacity) * n;
@@ -7140,7 +7143,7 @@ static void bn_toom_product_set_init(WToomPointSet *set, int capacity,
                         thread_limit : BN_TOOM_PAR_THREADS;
     if (set->thread_limit < 1) set->thread_limit = 1;
     set->spin_budget = bn_toom_no_spin ? 0 : BN_TOOM_POOL_SPIN;
-    if (bn_toom_parallel_depth) return;
+    if (bn_toom_parallel_depth || bn_toom_no_spin) return;
 #if BN_TOOM_POINT_TLS_MEMORY
     set->memory = bn_toom_point_memory_get((size_t)capacity);
 #else
@@ -14952,6 +14955,13 @@ WValue bigint_isqrt_any(WValue a) {
         r->size = 1;
         return bigint_box(r);
     }
+    /* Sub-2048-limb roots: the recursion's interior products (half and
+     * quarter width) fall right at the parallel thresholds, and dispatch
+     * churn inside the serial spine measured isqrt@512 at 1.49x GMP with
+     * the lowered pool cutoffs vs 0.93x sequential.  At >= 2048 operand
+     * limbs the products are large enough that parallel dispatch pays. */
+    int isqrt_seq = alen < 2048;
+    if (isqrt_seq) bn_toom_no_spin++;
     /* Normalize into the workspace: 2m limbs, top limb >= 2^62. */
     int32_t m = (alen + 1) >> 1;
     int32_t wide = 2 * m;
@@ -15018,6 +15028,7 @@ WValue bigint_isqrt_any(WValue a) {
     /* Root of a 2m-limb normalized value stays >= B^(m-1) after the shift
      * back, so the top limb is nonzero and no i48 demotion applies (m>=2). */
     res->size = m;
+    if (isqrt_seq) bn_toom_no_spin--;
     return bigint_box(res);
 }
 
@@ -51482,8 +51493,10 @@ static WValue w_ic_bigint_succ(WValue r, WValue *a, int c) { (void)a; (void)c; r
 
 /* Retained native synchronization wrappers. */
 static WValue w_ic_channel_send(WValue r, WValue *a, int c) {
-    if (c < 1) die("channel.send requires 1 argument");
-    return w_chan_send(r, a[0]);
+    if (c == 1) return w_chan_send(r, a[0]);
+    if (c == 2) return w_chan_send_timeout(r, a[0], a[1]);
+    die("channel.send requires 1 or 2 arguments");
+    return W_NIL;
 }
 static WValue w_ic_channel_close(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -60700,6 +60713,136 @@ static int w_chan_grow_unbounded(WChan *ch) {
     return 1;
 }
 
+enum {
+    W_CHAN_RESULT_CLOSED = -1,
+    W_CHAN_RESULT_UNAVAILABLE = 0,
+    W_CHAN_RESULT_RECEIVED = 1
+};
+
+static void w_chan_pause(void) {
+    if (g_current) {
+        w_goroutine_yield();
+    } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
+        /* drove a goroutine cooperatively */
+    } else {
+        struct timespec ts = {0, 100000};  /* 100us */
+        nanosleep(&ts, NULL);
+    }
+}
+
+static void w_chan_receiver_wait_cleanup(void *arg) {
+    WChan *ch = (WChan *)arg;
+    pthread_mutex_lock(&ch->lock);
+    if (ch->recv_waiters > 0) ch->recv_waiters--;
+    pthread_mutex_unlock(&ch->lock);
+}
+
+/* Advertise an unbuffered receiver only for one cancellable scheduler pause.
+ * pthread cleanup prevents a killed native receiver from leaving stale
+ * readiness behind and making try_send lose a value. */
+static void w_chan_receiver_pause(WChan *ch) {
+    if (ch->cap != 0) {
+        w_chan_pause();
+        return;
+    }
+    pthread_mutex_lock(&ch->lock);
+    ch->recv_waiters++;
+    pthread_mutex_unlock(&ch->lock);
+    pthread_cleanup_push(w_chan_receiver_wait_cleanup, ch);
+    w_chan_pause();
+    pthread_cleanup_pop(1);
+}
+
+static int64_t w_chan_timeout_deadline(WValue milliseconds) {
+    if (!w_is_int(milliseconds) || w_as_int(milliseconds) < 0) {
+        w_raise(w_string("Channel timeout must be a non-negative Integer in milliseconds"));
+    }
+    int64_t ms = w_as_int(milliseconds);
+    int64_t now = __w_clock_ns_raw();
+    if (ms > (INT64_MAX - now) / 1000000LL) return INT64_MAX;
+    return now + ms * 1000000LL;
+}
+
+static int w_chan_deadline_expired(int64_t deadline) {
+    return __w_clock_ns_raw() >= deadline;
+}
+
+static WValue w_chan_status_result(WValue value, int status) {
+    WValue result = w_array_new_empty();
+    w_array_push(result, value);
+    w_array_push(result, w_int(status));
+    return result;
+}
+
+/* Caller holds ch->lock. */
+static int w_chan_take_locked(WChan *ch, WValue *value) {
+    if (ch->count <= 0) return 0;
+    *value = ch->buffer[ch->head];
+    if (ch->cap == 0) {
+        ch->count = 0;
+        ch->received_seq = ch->handoff_seq;
+        ch->handoff_committed = 0;
+    } else {
+        ch->head = (ch->head + 1) % ch->cap;
+        ch->count--;
+    }
+    return 1;
+}
+
+WValue w_chan_try_send(WValue channel, WValue val) {
+    WChan *ch = as_chan(channel);
+    pthread_mutex_lock(&ch->lock);
+
+    if (ch->closed) {
+        pthread_mutex_unlock(&ch->lock);
+        w_raise(w_string("send on closed channel"));
+    }
+
+    if (ch->unbounded) {
+        if (ch->count == ch->cap && !w_chan_grow_unbounded(ch)) {
+            pthread_mutex_unlock(&ch->lock);
+            w_raise(w_string("Channel buffer allocation failed"));
+        }
+        ch->buffer[ch->tail] = val;
+        ch->tail = (ch->tail + 1) % ch->cap;
+        ch->count++;
+        pthread_mutex_unlock(&ch->lock);
+        return W_TRUE;
+    }
+
+    if (ch->cap == 0) {
+        if (ch->recv_waiters <= 0 || ch->count != 0) {
+            pthread_mutex_unlock(&ch->lock);
+            return W_FALSE;
+        }
+        ch->buffer[0] = val;
+        ch->count = 1;
+        ch->handoff_seq++;
+        ch->handoff_committed = 1;
+        pthread_mutex_unlock(&ch->lock);
+        return W_TRUE;
+    }
+
+    if (ch->count >= ch->cap) {
+        pthread_mutex_unlock(&ch->lock);
+        return W_FALSE;
+    }
+    ch->buffer[ch->tail] = val;
+    ch->tail = (ch->tail + 1) % ch->cap;
+    ch->count++;
+    pthread_mutex_unlock(&ch->lock);
+    return W_TRUE;
+}
+
+WValue w_chan_send_timeout(WValue channel, WValue val, WValue milliseconds) {
+    int64_t deadline = w_chan_timeout_deadline(milliseconds);
+    while (1) {
+        if (w_chan_try_send(channel, val) == W_TRUE) return W_TRUE;
+        if (w_chan_deadline_expired(deadline)) return W_FALSE;
+        w_chan_pause();
+    }
+}
+
 WValue w_chan_send(WValue channel, WValue val) {
     WChan *ch = as_chan(channel);
     pthread_mutex_lock(&ch->lock);
@@ -60731,19 +60874,13 @@ WValue w_chan_send(WValue channel, WValue val) {
             if (ch->count == 0) {
                 ch->buffer[0] = val;
                 ch->count = 1;
+                ch->handoff_committed = 0;
                 ticket = ++ch->handoff_seq;
                 pthread_mutex_unlock(&ch->lock);
                 break;
             }
             pthread_mutex_unlock(&ch->lock);
-            if (g_current) {
-                w_goroutine_yield();
-            } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
-                /* drove a goroutine cooperatively */
-            } else {
-                struct timespec ts = {0, 100000};
-                nanosleep(&ts, NULL);
-            }
+            w_chan_pause();
             pthread_mutex_lock(&ch->lock);
         }
 
@@ -60758,14 +60895,7 @@ WValue w_chan_send(WValue channel, WValue val) {
                 w_raise(w_string("send on closed channel"));
             }
             pthread_mutex_unlock(&ch->lock);
-            if (g_current) {
-                w_goroutine_yield();
-            } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
-                /* drove a goroutine cooperatively */
-            } else {
-                struct timespec ts = {0, 100000};
-                nanosleep(&ts, NULL);
-            }
+            w_chan_pause();
         }
     }
 
@@ -60797,16 +60927,7 @@ WValue w_chan_send(WValue channel, WValue val) {
         }
         pthread_mutex_unlock(&ch->lock);
         /* Yield to other goroutines or sleep briefly */
-        if (g_current) {
-            w_goroutine_yield();
-        } else {
-            if (!g_mp_scheduler_active && w_scheduler_run_one()) {
-                /* drove a goroutine cooperatively */
-            } else {
-                struct timespec ts = {0, 100000};  /* 100µs */
-                nanosleep(&ts, NULL);
-            }
-        }
+        w_chan_pause();
     }
 }
 
@@ -60815,15 +60936,8 @@ static WValue w_chan_recv_value(WValue channel, int *received) {
 
     while (1) {
         pthread_mutex_lock(&ch->lock);
-        if (ch->count > 0) {
-            WValue val = ch->buffer[ch->head];
-            if (ch->cap == 0) {
-                ch->count = 0;
-                ch->received_seq = ch->handoff_seq;
-            } else {
-                ch->head = (ch->head + 1) % ch->cap;
-                ch->count--;
-            }
+        WValue val = W_NIL;
+        if (w_chan_take_locked(ch, &val)) {
             pthread_mutex_unlock(&ch->lock);
             *received = 1;
             return val;
@@ -60834,17 +60948,7 @@ static WValue w_chan_recv_value(WValue channel, int *received) {
             return W_NIL;
         }
         pthread_mutex_unlock(&ch->lock);
-        /* Yield or sleep */
-        if (g_current) {
-            w_goroutine_yield();
-        } else {
-            if (!g_mp_scheduler_active && w_scheduler_run_one()) {
-                /* drove a goroutine cooperatively */
-            } else {
-                struct timespec ts = {0, 100000};
-                nanosleep(&ts, NULL);
-            }
-        }
+        w_chan_receiver_pause(ch);
     }
 }
 
@@ -60862,11 +60966,48 @@ WValue w_chan_recv_result(WValue channel) {
     return result;
 }
 
+WValue w_chan_try_recv_result(WValue channel) {
+    WChan *ch = as_chan(channel);
+    pthread_mutex_lock(&ch->lock);
+    WValue value = W_NIL;
+    if (w_chan_take_locked(ch, &value)) {
+        pthread_mutex_unlock(&ch->lock);
+        return w_chan_status_result(value, W_CHAN_RESULT_RECEIVED);
+    }
+    int status = ch->closed ? W_CHAN_RESULT_CLOSED : W_CHAN_RESULT_UNAVAILABLE;
+    pthread_mutex_unlock(&ch->lock);
+    return w_chan_status_result(W_NIL, status);
+}
+
+WValue w_chan_recv_timeout_result(WValue channel, WValue milliseconds) {
+    WChan *ch = as_chan(channel);
+    int64_t deadline = w_chan_timeout_deadline(milliseconds);
+
+    while (1) {
+        pthread_mutex_lock(&ch->lock);
+        WValue value = W_NIL;
+        if (w_chan_take_locked(ch, &value)) {
+            pthread_mutex_unlock(&ch->lock);
+            return w_chan_status_result(value, W_CHAN_RESULT_RECEIVED);
+        }
+        if (ch->closed) {
+            pthread_mutex_unlock(&ch->lock);
+            return w_chan_status_result(W_NIL, W_CHAN_RESULT_CLOSED);
+        }
+        if (w_chan_deadline_expired(deadline)) {
+            pthread_mutex_unlock(&ch->lock);
+            return w_chan_status_result(W_NIL, W_CHAN_RESULT_UNAVAILABLE);
+        }
+        pthread_mutex_unlock(&ch->lock);
+        w_chan_receiver_pause(ch);
+    }
+}
+
 WValue w_chan_close(WValue channel) {
     WChan *ch = as_chan(channel);
     pthread_mutex_lock(&ch->lock);
     ch->closed = 1;
-    if (ch->cap == 0) ch->count = 0;
+    if (ch->cap == 0 && !ch->handoff_committed) ch->count = 0;
     pthread_mutex_unlock(&ch->lock);
     return W_NIL;
 }

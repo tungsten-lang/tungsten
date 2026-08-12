@@ -79,6 +79,13 @@ RUNTIME_CLASS_CONTRACTS = {
     table: "w_ic_mac_table",
     native_ic: %w[inspect],
     source_fallback: %w[[] broadcast? byte bytes local? multicast? to_s unicast? universal?]
+  },
+  "Hash" => {
+    path: "core/hash.w",
+    table: "w_ic_hash_table",
+    native_ic: %w[[] []= delete each get has_key? keys merge! set values],
+    native_only: %w[[] []= delete each get has_key? keys set values],
+    source_fallback: %w[__enumerable_each __enumerable_iteration_mode __enumerable_yields_pair? each_pair fetch include? invert key? merge size transform_keys transform_values update]
   }
 }.freeze
 

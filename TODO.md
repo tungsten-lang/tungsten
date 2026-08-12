@@ -274,9 +274,9 @@ projects stay unchecked until their stated acceptance criteria are met.
     `build:tungsten` gate. Dynamic Quantity receivers now cover roles,
     metadata, equivalence, and the `equivalent_to` alias.
   - [x] Classify Mmap, Atomic, Socket, Thread, Channel, BigArray, SmallArray,
-    IPv4, IPv6, and MAC methods as native-IC, native-only, or deliberate source
-    fallbacks; the gate also caught and restored Socket#serve_http's missing
-    Core declaration.
+    Hash, IPv4, IPv6, and MAC methods as native-IC, native-only, or deliberate
+    source fallbacks; the gate also caught and restored Socket#serve_http's
+    missing Core declaration.
   - [ ] Classify the remaining runtime-backed Core classes exhaustively so a
     newly added source method must declare its native-IC or autoload fallback.
 - [x] Reject ASCII `camelCase` identifiers lexically. Uppercase ASCII after a
@@ -428,6 +428,9 @@ projects stay unchecked until their stated acceptance criteria are met.
   sibling class-method calls, array literals passed to class methods, packed
   AST containers, reverse-operand dispatch, Hash keys/equality, and constructor
   defaults all need paired fixtures.
+  - [x] Route the public `freeze_slab()` alias through the interpreter's safe
+    slab-freeze bridge; the compiled/interpreted Hash frozen-key contract now
+    reaches the same irreversible representation state.
 - [ ] Define cancellation and close semantics shared by `Thread`, `Channel`,
   `Future`, and `Promise`: blocked send/receive wakeup, timeout races,
   cancellation propagation, cleanup, and uncaught worker errors.

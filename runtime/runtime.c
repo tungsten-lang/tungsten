@@ -14830,6 +14830,17 @@ static int bn_dc_sqrt_only(uint64_t *np, uint64_t *sp, uint64_t *qp,
         (void)bn_dc_sqrtrem(np, sp, n);
         return 1;
     }
+#ifndef BN_ISQRT_FULL_REM_ROOT_4096
+#define BN_ISQRT_FULL_REM_ROOT_4096 1
+#endif
+    /* At this exact root width the full recurrence's balanced 4096/2048
+     * division lands on a substantially better B-Z shape than the guarded
+     * quotient-only top level.  Keep the exception exact: the neighboring
+     * 4095/4097 widths do not share the win. */
+    if (__builtin_expect(BN_ISQRT_FULL_REM_ROOT_4096 && n == 4096, 0)) {
+        (void)bn_dc_sqrtrem(np, sp, n);
+        return 1;
+    }
     int32_t l = n >> 1, h = n - l;              /* h == l or l + 1 */
     uint64_t q = bn_dc_sqrtrem(np + 2 * l, sp + l, h);
     /* Fold r' strictly below s' (r' <= 2s': at most two subtractions,

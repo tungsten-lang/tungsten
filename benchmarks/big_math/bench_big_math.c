@@ -1178,6 +1178,14 @@ static WValue bench_bigint_abs_bang_c_ref(WValue r, WValue *a, int c) {
     return r;
 }
 
+/* Mirror the retired BigInt IC leaf directly: positive values preserve the
+ * identity return, while negative values use w_neg's shared tag-sign alias. */
+static inline __attribute__((always_inline))
+WValue bench_bigint_abs_value(WValue value) {
+    if (__builtin_expect(!w_bigint_effective_negative(value), 1)) return value;
+    return w_neg(value);
+}
+
 /* a^BENCH_BOXED_POW_EXP for the pow lane (mpz_pow_ui / a**5 elsewhere). */
 #define BENCH_BOXED_POW_EXP 5
 /* Third-operand seed for the powmod modulus; the Python driver mirrors it. */
@@ -1253,10 +1261,10 @@ static void fuzz_tag_sign_case(size_t oi, int32_t limbs) {
                     dief("tag-sign neg involution broke limbs=%d sa=%d",
                          limbs, sa);
             } else if (op == BENCH_BOXED_ABS) {
-                WValue rt = w_ic_bigint_abs(ta, NULL, 0);
+                WValue rt = bench_bigint_abs_value(ta);
                 if (w_is_bigint(rt) && w_bigint_effective_negative(rt))
                     dief("tag-sign abs negative limbs=%d sa=%d", limbs, sa);
-                WValue rc = w_ic_bigint_abs(ca, NULL, 0);
+                WValue rc = bench_bigint_abs_value(ca);
                 if (bigint_compare(rt, rc) != 0)
                     dief("tag-sign abs mismatch limbs=%d sa=%d", limbs, sa);
             } else {
@@ -1757,7 +1765,7 @@ DEFINE_BENCH_LANE(gcd, bigint_gcd_any(a, b))
 #endif
 #if BENCH_TAG_SIGN_OVERLAY
 DEFINE_BENCH_LANE(neg, w_neg(a))
-DEFINE_BENCH_LANE(abs, w_ic_bigint_abs(a, NULL, 0))
+DEFINE_BENCH_LANE(abs, bench_bigint_abs_value(a))
 #else
 DEFINE_BENCH_LANE(neg, bigint_copy_signed(w_as_bigint(a), 1))
 DEFINE_BENCH_LANE(abs, bigint_copy_signed(w_as_bigint(a), 0))
@@ -4547,7 +4555,7 @@ static void check_boxed_op_against_gmp(int op, int32_t limbs) {
         break;
     }
     case BENCH_BOXED_ABS: {
-        WValue got = w_ic_bigint_abs(a, NULL, 0);
+        WValue got = bench_bigint_abs_value(a);
         mpz_abs(zg, za);
         if (!value_matches_mpz(got, zg)) die("boxed abs mismatch vs GMP");
         if (got != a && got != b) bench_free_value(got);

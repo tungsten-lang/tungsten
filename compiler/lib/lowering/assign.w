@@ -868,16 +868,23 @@
   val = lower_expression(ctx, node.value)
   if hint_array_etype == "f64" || hint_array_etype == "f32"
     if target_type == typed_array_etype_to_sym(hint_array_etype)
-      source = ensure_i64_value(wfn, val)
-      converted = next_temp(wfn)
-      helper = hint_array_etype == "f32" ? "w_array_to_f32" : "w_array_to_f64"
-      emit_instruction(wfn, {op: :call_direct_i64, temp: converted, name: helper, args: [source]})
-      val = typed_value(target_type, converted)
+      if val[:type] != target_type
+        source = ensure_i64_value(wfn, val)
+        converted = next_temp(wfn)
+        helper = hint_array_etype == "f32" ? "w_array_to_f32" : "w_array_to_f64"
+        emit_instruction(wfn, {op: :call_direct_i64, temp: converted, name: helper, args: [source]})
+        val = typed_value(target_type, converted)
   if mut_target_set
     ctx[:mut_accum_target] = nil
   inferred = nil
   if node.type_hint == nil
     inferred = infer_type(node.value, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    # Some lowering paths carry a stronger representation fact than the shared
+    # AST inference can express. In particular, lower_ivar knows a constructor-
+    # declared typed-array ivar from mod[:ivar_types], while infer_type has no
+    # class context. Keep that proven array type on a register alias.
+    if inferred == nil && is_array_type?(val[:type])
+      inferred = val[:type]
     machine_type = canonical_machine_int_type(inferred)
     typed_raw_machine_value = false
     raw_int_candidate = true

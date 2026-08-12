@@ -672,15 +672,30 @@
     return nil
   params = method_ast.params
   ptypes = method_ast.param_types
-  if params == nil || ptypes == nil
+  phints = method_ast.type_hints
+  if params == nil || (ptypes == nil && phints == nil)
     return nil
+  if ptypes == nil
+    ptypes = []
   pi = 0
   while pi < params.size()
     p = params[pi]
-    if is_ast_node?(p) && p.ivar_assign == true && pi < ptypes.size()
-      decl = ptypes[pi]
+    if is_ast_node?(p) && p.ivar_assign == true
+      decl = nil
+      if pi < ptypes.size()
+        decl = ptypes[pi]
+      # Method-level parameter hints are another declaration source:
+      # `## f64[9]: elements` followed by `-> new(@elements)`.
+      if decl == nil && phints != nil
+        decl = phints[p.name]
       if decl != nil
-        itype = normalize_type_symbol(decl)
+        # Preserve the representation, not merely the surface spelling.
+        # Fixed-size declarations such as `f64[9]` and open declarations such
+        # as `i64[]` both live in the corresponding typed-array storage class.
+        # Recording `:"f64[9]"` here makes lower_ivar lose that fact again as
+        # soon as the ivar is copied to a local.
+        array_etype = array_hint_element_type(decl)
+        itype = array_etype == nil ? normalize_type_symbol(decl) : typed_array_etype_to_sym(array_etype)
         if itype != nil
           iname = "@" + p.name
           existing = ivar_types[cname][iname]
@@ -1356,6 +1371,15 @@
       if new_str != old_str
         hints[k] = new_str.to_sym()
       ki += 1
+  ptypes = node.param_types
+  if ptypes != nil && type(ptypes) == "Array"
+    new_ptypes = []
+    pi = 0
+    while pi < ptypes.size()
+      old_ptype = ptypes[pi]
+      new_ptypes.push(substitute_type_param_in_string(old_ptype.to_s(), mapping))
+      pi += 1
+    node.param_types = new_ptypes
   inner_args = node.type_args
   if inner_args != nil && type(inner_args) == "Array"
     # Child-list arrays are immutable once frozen (:type_args is a
@@ -1580,7 +1604,13 @@
             raise compile_error_for_node(:E_LOWER_GENERIC_CONSTRAINT, "type '" + actual.to_s() + "' not allowed for parameter " + pname + " of " + template_name + " (must be one of: " + allowed.join(", ") + ")", nil, template)
         ci += 1
       pi += 1
+  spec_name = mangle_generic_class_name(template_name, type_args)
   mapping = {}
+  # A bare reference to the enclosing generic class inside its own body means
+  # this specialization. In `Mat3<T>`, for example, `*/1(Mat3)` accepts the
+  # same concrete Mat3 type, not an erased family member. This also lets the
+  # lowering prove the argument's data-accessor representation.
+  mapping[template_name] = spec_name
   int_map = {}
   i = 0
   while i < type_params.size()
@@ -1617,7 +1647,6 @@
           fj += 1
         ast_set(stmt, :count, {struct_name: layout[:struct_name], fields: new_fields})
     ci += 1
-  spec_name = mangle_generic_class_name(template_name, type_args)
   spec_super = template.superclass
   parent_type_args = template.parent_type_args
   if parent_type_args != nil && template.superclass != nil

@@ -938,7 +938,7 @@ use parser
       return "Mmap"
     # Exact WArray-producing runtime entry points. Keep this a return-type map,
     # not a prefix match: w_array_size/w_array_get/etc. return other types.
-    if name in ("w_array_new_empty" "w_array_new" "w_array_new_filled" "w_array_new_uninit" "w_array_new_uninit_sized" "w_array_new_aligned" "w_array_zeros" "w_array_view_raw" "w_array_view" "w_array_view_range" "w_array_reinterpret" "w_array_copy_range" "w_array_reuse_or_new_empty" "w_bytes_new" "w_bool_array_new")
+    if name in ("w_array_new_empty" "w_array_new" "w_array_new_filled" "w_array_new_uninit" "w_array_new_uninit_sized" "w_array_new_inline_uninit_sized" "w_array_new_aligned" "w_array_zeros" "w_array_view_raw" "w_array_view" "w_array_view_range" "w_array_reinterpret" "w_array_copy_range" "w_array_reuse_or_new_empty" "w_bytes_new" "w_bool_array_new")
       return "Array"
     nil
 

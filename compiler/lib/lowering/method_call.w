@@ -912,6 +912,8 @@
   recv_type = nil
   if recv_node != nil && ast_kind(recv_node) == :var
     recv_type = ctx[:var_types][recv_node.name]
+  elsif recv_node != nil && ast_kind(recv_node) == :parg
+    recv_type = ctx[:var_types]["__arg" + recv_node.index.to_s()]
   elsif recv_node != nil && ast_kind(recv_node) == :self_ref
     # Transitive composition. Inside a specialized method, __self
     # carries the variant type so self.foo() inside re-specializes foo.
@@ -1951,4 +1953,17 @@
     src_line: node.line,
     src_col: node.col
   })
+  # A generated `- data` array accessor has a representation-preserving
+  # contract. The send remains overridable, so verify the returned storage
+  # width once before carrying that declared type into `b = @1.elements;
+  # b[i]`; this keeps subclasses safe without paying dispatch per element.
+  if recv_type != nil && node.args.size() == 0 && ctx[:mod][:view_layouts] != nil
+    recv_layout = ctx[:mod][:view_layouts][recv_type.to_s()]
+    if recv_layout != nil
+      recv_field = recv_layout[method_name]
+      if recv_field != nil && recv_field[:type] != nil
+        recv_array_etype = array_hint_element_type(recv_field[:type])
+        if recv_array_etype == "f32" || recv_array_etype == "f64"
+          checked = guard_typed_array_arg(ctx, temp, recv_field[:type], nil, recv_type.to_s() + "#" + method_name, 0)
+          return typed_value(typed_array_etype_to_sym(recv_array_etype), checked)
   typed_value(:i64, temp)

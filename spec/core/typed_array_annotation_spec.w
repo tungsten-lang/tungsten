@@ -28,3 +28,14 @@ f[0] = 2.5
 g = f64[512] ## f64[]
 g[511] = 9.25
 << "f64big " + g[511].to_s() + " " + g.size().to_s()
+
+# Boxed literal ascriptions lower directly to one inline typed allocation.
+# Growing promotes the inline payload to standalone storage without changing
+# Array semantics or corrupting the header allocation.
+lit64 = [1, 2.5] ## f64[2]
+lit64.push(3.75)
+<< "f64lit " + lit64[0].to_s() + " " + lit64[2].to_s() + " " + lit64.size().to_s()
+
+lit32 = [1, 2.5] ## f32[2]
+lit32[1] = 4.25
+<< "f32lit " + lit32[0].to_s() + " " + lit32[1].to_s() + " " + lit32.size().to_s()

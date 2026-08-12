@@ -246,6 +246,7 @@ namespace :test do
     run_command "bash", File.join(ROOT, "scripts/test-native-arm-crypto-features.sh")
     run_command "bash", File.join(ROOT, "scripts/test-raw-static-machine-return-wire.sh")
     run_command "bash", File.join(ROOT, "scripts/test-small-array-wide-element-boxing-wire.sh")
+    run_command "bash", File.join(ROOT, "scripts/test-small-matrix-wire.sh")
   end
 end
 

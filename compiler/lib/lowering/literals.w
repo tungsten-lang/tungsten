@@ -349,6 +349,32 @@
     i += 1
   typed_value(:i64, arr)
 
+# Lower a boxed array literal immediately as a typed float buffer. A
+# `[...] ## f64[N]` result previously allocated a 65-bit WValue array, boxed
+# every element into it, then allocated and filled a second f64 array through
+# w_array_to_f64. The ascription already fixes the final representation, so
+# construct that representation once and store each coerced raw float in place.
+-> lower_float_typed_array_literal(ctx, node, array_etype)
+  wfn = ctx[:func]
+  target_type = typed_array_etype_to_sym(array_etype)
+  element_bits = array_etype == "f32" ? "-32" : "-64"
+  store_bits = array_etype == "f32" ? 32 : 64
+  arr = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_inline_uninit_sized", args: [element_bits, node.elements.size().to_s()]})
+  i = 0
+  while i < node.elements.size()
+    val = lower_expression(ctx, node.elements[i])
+    val_bits = raw_float_bits_i64(wfn, val, target_type)
+    scratch = []
+    si = 0
+    while si < 10
+      scratch.push(next_temp(wfn))
+      si += 1
+    stored = next_temp(wfn)
+    emit_instruction(wfn, {op: :typed_array_set_inline, temp: stored, arr: arr, idx: i.to_s(), idx_raw: true, value: val_bits, s: scratch, bits: store_bits, signed: true})
+    i += 1
+  typed_value(target_type, arr)
+
 -> lower_hash_literal(ctx, node)
   wfn = ctx[:func]
   hash_reg = next_temp(wfn)

@@ -2325,6 +2325,23 @@
     if field_type != nil && field_type == :int
       raw = nanunbox_int_emit(wfn, temp)
       return typed_value(:raw_int, raw)
+    # Array fields keep a boxed WArray handle in ivar storage, so preserving
+    # the declared element representation changes only element access—not the
+    # value ABI. This is safe for both `T elements[9]` after generic
+    # specialization and concrete declarations such as `f64 values[2]`.
+    if field_type in (:typed_array_f32 :typed_array_f64)
+      return typed_value(field_type, temp)
+    # Constructor and assignment analysis also records container types in
+    # mod[:ivar_types]. Preserve that fact when an ivar is copied to a local:
+    # `a = @elements; a[i]` must retain the same typed-array access path as
+    # `@elements[i]`. Previously lower_ivar returned a generic WValue even when
+    # the declared ivar was f64[], so the alias silently reintroduced boxed
+    # arithmetic in fixed-size matrix kernels.
+    class_ivars = ctx[:mod][:ivar_types][ctx[:class_name]]
+    if class_ivars != nil
+      declared_type = class_ivars[ivar_name]
+      if declared_type != nil
+        return typed_value(declared_type, temp)
     return typed_value(:i64, temp)
 
   # Fallback: string-based lookup
@@ -2360,6 +2377,9 @@
     return nil
   if ftype_str == "int"
     return :int
+  array_etype = array_hint_element_type(ftype_str)
+  if array_etype != nil
+    return typed_array_etype_to_sym(array_etype)
   nil
 
 -> lower_ivar_set_expr(ctx, ivar_name, val_tv)

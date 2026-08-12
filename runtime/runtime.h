@@ -290,6 +290,9 @@ WValue w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
  * WObject and W_HASH_FLAG_FROZEN on WHash. Set by `w_freeze`; checked by
  * mutating ops (push, set, fill, …). */
 #define W_FLAG_FROZEN       (1u << 5)
+/* Header and slots share one allocation. Used by tiny fixed typed literals
+ * to avoid a second malloc; growth promotes slots to a standalone buffer. */
+#define W_FLAG_INLINE       (1u << 6)
 
 /* WArray subsumes the old WTypedArray — same struct, same subtag
  * (W_SUBTAG_ARRAY = 0xA). The `ebits` byte discriminates the tier:
@@ -1641,6 +1644,7 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap);
 /* Fused elementwise lowering (compiler): uninit buffer with size = cap = n —
  * the fused loop writes every element. */
 WValue w_array_new_uninit_sized(int64_t element_bits, int64_t n);
+WValue w_array_new_inline_uninit_sized(int64_t element_bits, int64_t n);
 /* Fused elementwise lowering: rhs/lhs size-parity guard, same raise text as
  * array_elementwise_into. */
 WValue w_elementwise_size_check(WValue lhs, WValue rhs);

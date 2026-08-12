@@ -51,6 +51,21 @@ check("typed.at_mid", s.at(5), "15")
 check("typed.at_zero", s.at(0), "0")
 check("typed.at_last", s.at(7), "21")
 
+# A fixed-size declaration must keep its typed storage when the ivar is first
+# copied to a local. This is the access pattern used by tiny matrix kernels.
+floats = f64[2]
+floats[0] = 1.25
+floats[1] = 2.75
++ FloatAlias
+  - data
+    f64 values[2]
+  -> new(@values)
+  -> aliased_sum
+    values = @values
+    values[0] + values[1]
+fa = FloatAlias.new(floats)
+check("fixed.alias", fa.aliased_sum == 4.0, "true")
+
 # Writes through the typed ivar land, and are visible on the shared array.
 + Writer
   -> new(@buf) (i64[])

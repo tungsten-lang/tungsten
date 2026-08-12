@@ -40985,6 +40985,9 @@ WValue w_array_recycle_or_new_empty(void) {
 void w_array_recycle_public(WValue v) {
     if (!w_is_array(v)) return;
     WArray *arr = (WArray *)w_as_ptr(v);
+    /* Inline payload lifetime is tied to this header; pool reset paths may
+     * retag or resize buffers independently, so keep inline arrays out. */
+    if (arr->flags & W_FLAG_INLINE) return;
     if (arr->flags & W_POOL_FLAG_POOLED) return;
     if (g_array_pool_count < ARRAY_POOL_MAX) {
         arr->flags |= W_POOL_FLAG_POOLED;
@@ -41068,6 +41071,7 @@ WValue w_array_recycle_or_new(int64_t element_bits, int64_t cap) {
 void w_array_recycle(WValue v) {
     if (!w_is_array(v)) return;
     WArray *a = (WArray *)w_as_ptr(v);
+    if (a->flags & W_FLAG_INLINE) return;
     if (a->flags & W_POOL_FLAG_POOLED) return;
     int bucket = bits_to_bucket(a->ebits);
     if (bucket < 0) return;
@@ -55396,6 +55400,29 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
     return w_box_ptr(a, W_SUBTAG_ARRAY);
 }
 
+/* One-allocation variant for small, fixed typed literals. The WArray header
+ * remains 16-byte aligned for pointer tagging and the inline slot payload is
+ * independently aligned to 16 bytes. If a caller later grows the array, the
+ * regular growth path promotes slots to a standalone allocation and clears
+ * W_FLAG_INLINE; semantics are otherwise identical to w_array_new_uninit. */
+WValue w_array_new_inline_uninit_sized(int64_t element_bits, int64_t n) {
+    if (n < 0 || n > INT32_MAX) {
+        w_raise(w_string("typed array: size exceeds INT32_MAX — use BigArray for >2^31 elements"));
+    }
+    int64_t cap = n > 0 ? n : 8;
+    size_t payload = (size_t)array_byte_size(element_bits, cap);
+    size_t slot_offset = (sizeof(WArray) + 15u) & ~(size_t)15u;
+    WArray *a = malloc(slot_offset + payload);
+    memset(a, 0, sizeof(WArray));
+    a->flags = W_FLAG_OWNED | W_FLAG_INLINE;
+    a->ebits = (int8_t)element_bits;
+    a->start = 0;
+    a->size = (int32_t)n;
+    a->cap = (int32_t)cap;
+    a->slots = (WValue *)((uint8_t *)a + slot_offset);
+    return w_box_ptr(a, W_SUBTAG_ARRAY);
+}
+
 /* Typed-array parameter guard for the native-fn boundary.
  *
  * A top-level fn declared `-> f(a) (i64[]) i64` compiles its body against an
@@ -55576,6 +55603,7 @@ WValue w_array_push(WValue arr, WValue val) {
             memcpy(new_data, a->slots, array_byte_size(a->ebits, a->size));
             WValue *old_slots = a->slots;
             a->slots = (WValue *)new_data;
+            a->flags &= (uint8_t)~W_FLAG_INLINE;
             a->cap = new_cap;
             /* Views registered against this parent point into the old
              * buffer; rebase each view's slots into the new one before
@@ -56624,6 +56652,7 @@ WValue w_array_unshift(WValue arr, WValue val) {
         a->slots = old_data;  // restore so we can free/replace cleanly below
     }
     a->slots = (WValue *)new_data;
+    a->flags &= (uint8_t)~W_FLAG_INLINE;
     a->cap = new_cap;
     a->start = 0;
     if (array_is_wvalue(a)) {
@@ -62473,7 +62502,7 @@ void w_value_free(WValue v) {
         WArray *arr = (WArray *)w_as_ptr(v);
         uint8_t fl = arr->flags;
         if (fl & (W_FLAG_POOLED | W_FLAG_BIG)) return;
-        if ((fl & W_FLAG_OWNED) && !(fl & (W_FLAG_VIEW | W_FLAG_PAGE_ALIGNED))) {
+        if ((fl & W_FLAG_OWNED) && !(fl & (W_FLAG_VIEW | W_FLAG_PAGE_ALIGNED | W_FLAG_INLINE))) {
             free(arr->slots);
         }
         free(arr);

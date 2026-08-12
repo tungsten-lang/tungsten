@@ -3359,6 +3359,13 @@ use target
             return call_w_method(recv, m, [inst], block, env)
         return call_w_method(recv, m, args, block, env)
 
+    # Builtin Object#hash is supplied by the runtime after ordinary class
+    # lookup, so explicit user overrides above still win. Delegate primitive
+    # values and containers to the same structural/identity split used by the
+    # compiled dispatcher instead of executing a bodyless Core declaration.
+    if name == "hash" && args.size() == 0
+      return ccall("w_method_call", recv, "hash", [])
+
     # String/Symbol#to_sym remains a native String IC. Mirror it directly:
     # routing through w_method_call would manufacture and recycle an argument
     # Array inside the interpreter and has a mixed-ABI failure in self-hosts.

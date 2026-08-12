@@ -575,9 +575,14 @@ projects stay unchecked until their stated acceptance criteria are met.
   - [x] Hash iteration permits overwriting and deletion but rejects new keys;
     the native guard unwinds on exceptions and non-local returns, matching the
     Ruby host instead of extending/rebuilding a table under its live cursor.
+  - [x] Define public structural `hash` values for built-in Arrays and Hashes,
+    including order-independent Hash combination, typed-array elements,
+    recursive containers, and exact-numeric equality. Table probing retains
+    identity hashing for mutable container keys so mutation cannot strand one.
   - [ ] Run the same focused contract through the legacy Ruby interpreter in
-    CI (the current local Ruby bundle is incomplete), and define a public
-    structural `Hash#hash` contract before declaring full host parity.
+    CI (the current local Ruby bundle is incomplete), and pin how user-defined
+    `==`/`hash` overrides compose inside nested built-in containers before
+    declaring full host parity.
 - [ ] Finish HDF5 and the multi-dimensional SciIO contract described above,
   with h5py/`h5dump` golden fixtures and shapes that are not silently flattened.
 - [ ] Design unit conversion contexts as described above: versioned CODATA,

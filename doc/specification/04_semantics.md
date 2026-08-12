@@ -64,6 +64,8 @@ Equivalently, at the language level:
 
 Identity versus structural equality for collections is defined by the classes involved; a strictly conforming program **must not** assume pointer identity for immutable immediates that the runtime may intern or tag.
 
+Arrays and hashes compare structurally. Hash equality is independent of insertion order, and structurally equal built-in collections return equal values from the public `hash` method, including recursive collections. Mutable arrays and hashes used *as hash-table keys* remain identity-keyed so mutating their contents cannot make an existing key unreachable; public structural hashing does not change that table-key rule.
+
 ### 4.2.3 Hash iteration order
 
 Hashes iterate in **insertion order**, on every conforming engine. This is a guaranteed language semantic, not an implementation detail:
@@ -73,6 +75,7 @@ Hashes iterate in **insertion order**, on every conforming engine. This is a gua
 * Overwriting an existing key's value keeps the key's original position.
 * Deleting a key removes it without disturbing the relative order of the others.
 * Inserting a key that is not present — including re-inserting a previously deleted key — appends it at the end.
+* During an active `each`, overwriting a live value and deleting an entry are allowed. Inserting a new key raises an error; this prevents growth or compaction from invalidating the live traversal.
 
 Programs may rely on this order; conversely, programs must not rely on any relationship between iteration order and key hash values.
 

@@ -13,6 +13,12 @@
     << "FAIL " + name + " got " + got.to_s() + " want " + want.to_s()
     exit 1
 
++ HashOverrideProbe
+  -> hash
+    17
+
+check("ceq.hash.user_override", HashOverrideProbe.new().hash(), 17)
+
 # -- Arrays: same contents equal, regardless of allocation --
 a1 = [1, 2, 3]
 a2 = [1, 2, 3]
@@ -23,6 +29,7 @@ check("ceq.arr.empty", [] == [], true)
 check("ceq.arr.strings", ["ab", "cd"] == ["ab", "cd"], true)
 check("ceq.arr.mixed", [1, "two", :three] == [1, "two", :three], true)
 check("ceq.arr.bang", (a1 != a2), false)
+check("ceq.arr.hash_agrees", a1.hash() == a2.hash(), true)
 
 # -- Built element-by-element (exercises boxed/typed tier crossing) --
 b = []
@@ -30,6 +37,17 @@ b.push(1)
 b.push(2)
 b.push(3)
 check("ceq.arr.built", a1 == b, true)
+
+# -- Typed arrays decode their stored elements for equality and hashing --
+t1 = i64[3]
+t2 = i64[3]
+ti = 0
+while ti < 3
+  t1[ti] = ti + 1
+  t2[ti] = ti + 1
+  ti = ti + 1
+check("ceq.arr.typed", t1 == t2, true)
+check("ceq.arr.typed_hash_agrees", t1.hash() == t2.hash(), true)
 
 # -- Nested arrays recurse --
 n1 = [[1, 2], [3, [4]]]
@@ -49,6 +67,7 @@ check("ceq.hash.neq_missing", h1 == {a: 1, b: 2}, false)
 check("ceq.hash.neq_extra", {a: 1, b: 2} == h1, false)
 check("ceq.hash.empty", {} == {}, true)
 check("ceq.hash.bang", (h1 != h2), false)
+check("ceq.hash.hash_agrees_any_order", h1.hash() == h2.hash(), true)
 
 # -- Deleted keys don't count --
 h3 = {a: 1, b: 2, c: 3, d: 9}
@@ -60,6 +79,7 @@ deep1 = {list: [1, {x: 2}], name: "n"}
 deep2 = {name: "n", list: [1, {x: 2}]}
 check("ceq.deep.eq", deep1 == deep2, true)
 check("ceq.deep.neq", deep1 == {name: "n", list: [1, {x: 3}]}, false)
+check("ceq.deep.hash_agrees", deep1.hash() == deep2.hash(), true)
 
 # -- include? on arrays of arrays rides == --
 outer = [[1, 2], [3, 4]]
@@ -77,5 +97,10 @@ c2 = []
 c2.push(c2)
 check("ceq.cycle.self", c1 == c1, true)
 check("ceq.cycle.pair", c1 == c2, true)
+check("ceq.cycle.hash_agrees", c1.hash() == c2.hash(), true)
+
+# -- Exact numeric values that compare equal expose equal public hashes --
+check("ceq.hash.int_decimal", 2.hash() == (2.0).hash(), true)
+check("ceq.hash.int_rational", 2.hash() == (4/2).hash(), true)
 
 << "container equality: all green"

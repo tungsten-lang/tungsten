@@ -35134,6 +35134,63 @@ static WArray *as_array(WValue v) {
 static WValue array_slot_load_decoded(WArray *a, int64_t i);
 static inline int64_t w_hash_probe(WHash *hash, WValue key);
 
+/* Public Object#hash for builtin values. Hash-table probing deliberately uses
+ * w_hash_value (identity for mutable container keys); this separate surface
+ * follows public structural equality for Array/Hash values without making a
+ * mutated container key disappear from its table. Hash entry combination is
+ * commutative because Hash#== is insertion-order independent. */
+static uint64_t w_public_hash_u64(WValue v) {
+    #define W_PUBLIC_HASH_DEPTH_MAX 64
+    static __thread WValue stack[W_PUBLIC_HASH_DEPTH_MAX];
+    static __thread int depth = 0;
+
+    if (!w_is_array(v) && !w_is_hash(v)) return w_hash_value(v);
+    for (int i = 0; i < depth; i++) {
+        if (stack[i] == v) return UINT64_C(0x6a09e667f3bcc909);
+    }
+    if (depth >= W_PUBLIC_HASH_DEPTH_MAX)
+        return UINT64_C(0xbb67ae8584caa73b);
+
+    stack[depth++] = v;
+    uint64_t result;
+    if (w_is_array(v)) {
+        WArray *array = (WArray *)w_as_ptr(v);
+        uint64_t acc = w_hash_splitmix64((uint64_t)array->size ^
+                                         UINT64_C(0x243f6a8885a308d3));
+        for (int32_t i = 0; i < array->size; i++) {
+            uint64_t element = w_public_hash_u64(array_slot_load_decoded(array, i));
+            acc = w_hash_splitmix64(acc ^ element ^
+                                    ((uint64_t)i * UINT64_C(0x9e3779b97f4a7c15)));
+        }
+        result = acc;
+    } else {
+        WHash *hash = (WHash *)w_as_ptr(v);
+        uint64_t sum = 0;
+        uint64_t xors = 0;
+        for (uint32_t i = 0; i < hash->used; i++) {
+            if (hash->keys[i] == W_MEMO_MISS) continue;
+            uint64_t kh = w_hash_value(hash->keys[i]);
+            uint64_t vh = w_public_hash_u64(hash->values[i]);
+            uint64_t pair = w_hash_splitmix64(kh ^ ((vh << 1) | (vh >> 63)) ^
+                                              UINT64_C(0x13198a2e03707344));
+            unsigned rotation = (unsigned)(pair & 31);
+            sum += pair;
+            xors ^= (pair << rotation) | (pair >> ((64 - rotation) & 63));
+        }
+        result = w_hash_splitmix64(sum ^ xors ^ (uint64_t)hash->count ^
+                                   UINT64_C(0xa4093822299f31d0));
+    }
+    depth--;
+    return result;
+    #undef W_PUBLIC_HASH_DEPTH_MAX
+}
+
+static WValue w_public_hash(WValue v) {
+    /* Keep public hash codes in the inline Int tier: the contract is equality,
+     * not exposure of every internal 64-bit table-hash bit. */
+    return w_int((int64_t)(w_public_hash_u64(v) & UINT64_C(0x7fffffffffff)));
+}
+
 static double as_float(WValue v) {
     return w_as_double(v);
 }
@@ -46474,6 +46531,7 @@ WValue __w_prime_aks(WValue n) {
 #define WN_kill    W_M4("kill")
 #define WN_file_q  W_M5("file?")
 #define WN_clear   W_M5("clear")
+#define WN_hash    W_M4("hash")
 
 /* >5 byte method names — interned at first use via w_string() */
 static WValue WN_empty_q = 0, WN_include_q = 0, WN_has_q = 0, WN_reverse = 0;
@@ -53782,6 +53840,11 @@ invoke_static_method:
 
     /* Universal to_s fallback for any type */
     if (name == WN_to_s) return w_to_s(recv);
+
+    /* Universal public hash fallback. User-defined `hash` methods and typed
+     * source methods win through normal lookup above; builtin containers use
+     * the structural algorithm while hash-table keys keep identity hashing. */
+    if (name == WN_hash && args->size == 0) return w_public_hash(recv);
 
     /* Global builtins callable from any context (bootstrapping fallback) */
     if ((w_hash_key_eq(name, WN_file_exists_q) || w_hash_key_eq(name, WN_file_q)) && args->size >= 1)

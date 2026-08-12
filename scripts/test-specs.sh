@@ -823,6 +823,7 @@ core_specs=(
   spec/core/crypto_accel_spec.w
   spec/core/crypto_hmac_scram_spec.w
   spec/core/channel_spec.w
+  spec/core/channel_unbuffered_spec.w
   spec/core/env_spec.w
   spec/core/integer_tower_spec.w
   spec/core/url_spec.w

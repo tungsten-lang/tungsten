@@ -1221,6 +1221,8 @@ typedef struct WChan {
     int64_t count;
     int64_t head;
     int64_t tail;
+    uint64_t handoff_seq; /* unbuffered send ticket */
+    uint64_t received_seq;
     WChanWaiter *send_waitq;
     WChanWaiter *recv_waitq;
     pthread_mutex_t lock;

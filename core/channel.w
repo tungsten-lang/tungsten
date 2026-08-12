@@ -1,6 +1,7 @@
 # Channel — a thread-safe FIFO for goroutine communication.
 #
-# Channel.new creates a bounded queue with a positive capacity;
+# Channel.new(0) creates an unbuffered rendezvous and a positive capacity
+# creates a bounded queue;
 # Channel.unbounded grows as needed. Closing is idempotent; queued values remain
 # receivable after close, then receive/recv returns nil. Use receive_result when
 # nil is a valid payload or closed-and-drained state must be distinguished.

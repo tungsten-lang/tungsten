@@ -60116,7 +60116,8 @@ static WValue w_chan_allocate(int64_t cap, int unbounded) {
     ch->send_waitq = NULL;
     ch->recv_waitq = NULL;
     pthread_mutex_init(&ch->lock, NULL);
-    ch->buffer = calloc((size_t)cap, sizeof(WValue));
+    size_t slots = cap > 0 ? (size_t)cap : 1;
+    ch->buffer = calloc(slots, sizeof(WValue));
     if (!ch->buffer) {
         pthread_mutex_destroy(&ch->lock);
         free(ch);
@@ -60130,8 +60131,8 @@ WValue w_chan_new(WValue capacity_wv) {
         w_raise(w_string("Channel capacity must be an Integer"));
     }
     int64_t cap = w_as_int(capacity_wv);
-    if (cap <= 0) {
-        w_raise(w_string("Channel capacity must be positive; unbuffered channels are not implemented"));
+    if (cap < 0) {
+        w_raise(w_string("Channel capacity must be non-negative"));
     }
     return w_chan_allocate(cap, 0);
 }
@@ -60179,6 +60180,54 @@ WValue w_chan_send(WValue channel, WValue val) {
         return W_NIL;
     }
 
+    if (ch->cap == 0) {
+        uint64_t ticket = 0;
+        while (ticket == 0) {
+            if (ch->closed) {
+                pthread_mutex_unlock(&ch->lock);
+                w_raise(w_string("send on closed channel"));
+            }
+            if (ch->count == 0) {
+                ch->buffer[0] = val;
+                ch->count = 1;
+                ticket = ++ch->handoff_seq;
+                pthread_mutex_unlock(&ch->lock);
+                break;
+            }
+            pthread_mutex_unlock(&ch->lock);
+            if (g_current) {
+                w_goroutine_yield();
+            } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
+                /* drove a goroutine cooperatively */
+            } else {
+                struct timespec ts = {0, 100000};
+                nanosleep(&ts, NULL);
+            }
+            pthread_mutex_lock(&ch->lock);
+        }
+
+        while (1) {
+            pthread_mutex_lock(&ch->lock);
+            if (ch->received_seq >= ticket) {
+                pthread_mutex_unlock(&ch->lock);
+                return W_NIL;
+            }
+            if (ch->closed) {
+                pthread_mutex_unlock(&ch->lock);
+                w_raise(w_string("send on closed channel"));
+            }
+            pthread_mutex_unlock(&ch->lock);
+            if (g_current) {
+                w_goroutine_yield();
+            } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
+                /* drove a goroutine cooperatively */
+            } else {
+                struct timespec ts = {0, 100000};
+                nanosleep(&ts, NULL);
+            }
+        }
+    }
+
     if (ch->cap > 0 && ch->count < ch->cap) {
         /* Buffered: room available */
         ch->buffer[ch->tail] = val;
@@ -60188,7 +60237,7 @@ WValue w_chan_send(WValue channel, WValue val) {
         return W_NIL;
     }
 
-    /* Unbuffered or buffer full: park sender (cooperative yield) */
+    /* Buffer full: park sender (cooperative yield) */
     /* For now, just block with a spin + yield */
     pthread_mutex_unlock(&ch->lock);
 
@@ -60227,8 +60276,13 @@ static WValue w_chan_recv_value(WValue channel, int *received) {
         pthread_mutex_lock(&ch->lock);
         if (ch->count > 0) {
             WValue val = ch->buffer[ch->head];
-            ch->head = (ch->head + 1) % ch->cap;
-            ch->count--;
+            if (ch->cap == 0) {
+                ch->count = 0;
+                ch->received_seq = ch->handoff_seq;
+            } else {
+                ch->head = (ch->head + 1) % ch->cap;
+                ch->count--;
+            }
             pthread_mutex_unlock(&ch->lock);
             *received = 1;
             return val;
@@ -60271,6 +60325,7 @@ WValue w_chan_close(WValue channel) {
     WChan *ch = as_chan(channel);
     pthread_mutex_lock(&ch->lock);
     ch->closed = 1;
+    if (ch->cap == 0) ch->count = 0;
     pthread_mutex_unlock(&ch->lock);
     return W_NIL;
 }

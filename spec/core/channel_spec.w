@@ -67,18 +67,15 @@ rescue error
   closed_send_failed = error.to_s.include?("send on closed channel")
 check("channel.close.rejects_send", closed_send_failed)
 
-zero_failed = false
-begin
-  Channel.new(0)
-rescue error
-  zero_failed = error.to_s.include?("capacity must be positive")
-check("channel.zero_capacity", zero_failed)
+zero_channel = Channel.new(0)
+zero_channel.close()
+check("channel.zero_capacity", zero_channel.receive_result().closed?())
 
 negative_failed = false
 begin
   Channel.new(-1)
 rescue error
-  negative_failed = error.to_s.include?("capacity must be positive")
+  negative_failed = error.to_s.include?("capacity must be non-negative")
 check("channel.negative_capacity", negative_failed)
 
 << "channel_spec: all checks passed"

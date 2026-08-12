@@ -1433,3 +1433,35 @@ and every later destination is loop-minted and alias-free by the
 isolation proof. Battery pins: adv.rot_add_prealias_slack,
 adv.fibdown_prealias, adv.rot_escape_hash in
 spec/compiler/bigint_mutate_grow_spec.w.
+
+## Two-slot hot ring — re-tested post packed-word slot, REJECTION RE-CONFIRMED (2026-08-12)
+
+Re-run of the 8/01 rejection ("index bookkeeping costs more than the
+latency it hides") at bc1e8be8, per the landscape-changed rule.  The
+original mechanism is GONE — the packed self-describing hot word admits
+a stateless two-word pair with take +0 instructions on the hit path and
+release +1 cmp + 1 never-taken branch (disasm-verified) — yet the ring
+still loses, for successor reasons: (a) a pair-load release's 16-byte
+ldp spans the take's pending 8-byte xzr store — the non-forwardable
+partial-overlap hazard (sub1@1 +15.8%); (b) structurally, hot churn is
+depth-1 by construction — the immutable lane parks exactly one buffer
+while one is live, so word 1 NEVER fills, and stateless probing cannot
+alternate the exchange address (both sides prefer word 0): GMP's
+store-forward-alternation premise cannot materialize without
+reintroducing the index the 8/01 verdict already priced.  The
+forwarding-clean split-load form still lost (sub1@1 +21.9%, abs@1
+broke its 0.80 gate, the mul1@2/@4 wins erased).  All correctness
+gates passed — the rejection is purely economic.  Condition to
+revisit: measured mixed-capacity-class hot churn at depth 2, or an
+indexed form with provably zero marginal fast-path instructions.
+
+## Word-first dispatch — re-tested post seam-latch/direct-lowering, REJECTION RE-CONFIRMED AND STRONGER (2026-08-12)
+
+The 8/04 rejection's mechanism (extra predicates on the equal-width
+path) is fully intact — sub@4 reproduces at +28% ABBA — while the
+BENEFIT side has shrunk to near zero: the matrix word cells call the
+word entries directly, and statically-typed traffic is lowered around
+the polymorphic entries entirely, leaving only dynamic w_add/w_sub-
+entry word traffic (1.3-7.7% of a ~4ns entry) as the upside.  Dispatch
+order remains a zero-sum resource, and the side that benefits no
+longer shops here.

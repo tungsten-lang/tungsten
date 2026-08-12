@@ -1548,6 +1548,18 @@ use ast
   else
     gpu_kernel_error(ctx[:node], "unsupported statement node `" + t.to_s() + "`")
 
+-> gpu_shared_size(kernel_node, call, dialect)
+  name = "" + call.name.to_s()
+  args = call.args
+  if args == nil || args.size() != 1 || ast_kind(args[0]) != :int
+    gpu_kernel_error(kernel_node, "gpu." + name + " takes one positive integer-literal size")
+  size = args[0].value
+  if size <= 0
+    gpu_kernel_error(kernel_node, "gpu." + name + " size must be positive (got " + size.to_s() + ")")
+  if dialect == "wgsl" && name == "shared_i64"
+    gpu_kernel_error(kernel_node, "gpu.shared_i64 is not supported by the WGSL dialect")
+  size
+
 -> emit_assign(out, ctx, node)
   target = node.target
   value = node.value
@@ -1580,9 +1592,7 @@ use ast
       out << ";\n"
       return nil
     if vrecv != nil && is_ast_node?(vrecv) && ast_kind(vrecv) == :var && vrecv.name == "gpu" && (vname == "shared_f32" || vname == "shared_i32" || vname == "shared_i64")
-      vargs = value.args
-      if vargs == nil || vargs.size() != 1 || ast_kind(vargs[0]) != :int
-        gpu_kernel_error(ctx[:node], "gpu." + vname + " takes one integer-literal size")
+      shared_size = gpu_shared_size(ctx[:node], value, ctx[:dialect])
       sname = target.name
       elt = "int"
       atype = "i32\[]".to_sym()
@@ -1602,7 +1612,7 @@ use ast
       out << " "
       out << sname
       out << "\["
-      out << vargs[0].value.to_s()
+      out << shared_size.to_s()
       out << "];\n"
       return nil
   if ast_kind(target) == :var
@@ -2701,14 +2711,12 @@ use ast
       shared_recv = shared_call.receiver
       shared_name = "" + shared_call.name.to_s()
       if shared_recv != nil && ast_kind(shared_recv) == :var && shared_recv.name == "gpu" && shared_name in ("shared_f32" "shared_i32" "shared_i64")
-        shared_args = shared_call.args
-        if shared_args == nil || shared_args.size() != 1 || ast_kind(shared_args[0]) != :int || shared_name == "shared_i64"
-          return false
+        shared_size = gpu_shared_size(ctx[:node], shared_call, "wgsl")
         source_name = "" + target.name
         global_name = "tungsten_internal_wg_" + ctx[:kernel_name] + "_" + source_name
         elt = shared_name == "shared_f32" ? "f32" : "i32"
         ctx[:renames][source_name] = global_name
-        ctx[:shared_decls] << "var<workgroup> " + global_name + " : array<" + elt + ", " + shared_args[0].value.to_s() + ">;\n"
+        ctx[:shared_decls] << "var<workgroup> " + global_name + " : array<" + elt + ", " + shared_size.to_s() + ">;\n"
         declared[source_name] = true
         return true
     value = wgsl_expr(ctx, node.value)

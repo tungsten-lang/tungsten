@@ -13,6 +13,8 @@ MULTI_INVALID_GPU="$ROOT/spec/cli/gpu_check_multiple_errors.w"
 UNSUPPORTED_GPU_TYPE="$ROOT/spec/cli/gpu_check_unsupported_type.w"
 UNSUPPORTED_CUDA_TYPE="$ROOT/spec/cli/gpu_check_cuda_type.w"
 UNSUPPORTED_WGSL_TYPE="$ROOT/spec/cli/gpu_check_wgsl_type.w"
+INVALID_SHARED_SHAPE="$ROOT/spec/cli/gpu_check_shared_shape.w"
+UNSUPPORTED_WGSL_SHARED="$ROOT/spec/cli/gpu_check_wgsl_shared_type.w"
 VALID_GPU="$ROOT/spec/compiler/gpu_wgsl_emit_spec.w"
 CUDA_GPU="$ROOT/spec/compiler/gpu_cuda_tg_reduce_reject_spec.w"
 EXIT_7="$ROOT/spec/cli/exit_7.w"
@@ -117,6 +119,28 @@ grep -q 'f16\[\].*not supported by the WGSL dialect' "$TMP/check-gpu-wgsl-type-e
 grep -q 'gpu_check_wgsl_type.w:5:1' "$TMP/check-gpu-wgsl-type-error.out"
 [[ ! -e "${UNSUPPORTED_WGSL_TYPE%.w}.metal" ]]
 [[ ! -e "${UNSUPPORTED_WGSL_TYPE%.w}.wgsl" ]]
+
+if "$TUNGSTEN" -c "$INVALID_SHARED_SHAPE" \
+    >"$TMP/check-gpu-shared-shape-error.out" 2>&1; then
+  printf 'tungsten -c accepted a zero-sized GPU workgroup array\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-shared-shape-error.out"
+grep -q 'gpu.shared_f32 size must be positive (got 0)' "$TMP/check-gpu-shared-shape-error.out"
+grep -q 'gpu_check_shared_shape.w:4:1' "$TMP/check-gpu-shared-shape-error.out"
+[[ ! -e "${INVALID_SHARED_SHAPE%.w}.metal" ]]
+[[ ! -e "${INVALID_SHARED_SHAPE%.w}.cu" ]]
+
+if TUNGSTEN_GPU_DIALECTS=wgsl "$TUNGSTEN" -c "$UNSUPPORTED_WGSL_SHARED" \
+    >"$TMP/check-gpu-wgsl-shared-error.out" 2>&1; then
+  printf 'tungsten -c accepted i64 WGSL workgroup storage\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-wgsl-shared-error.out"
+grep -q 'gpu.shared_i64 is not supported by the WGSL dialect' "$TMP/check-gpu-wgsl-shared-error.out"
+grep -q 'gpu_check_wgsl_shared_type.w:4:1' "$TMP/check-gpu-wgsl-shared-error.out"
+[[ ! -e "${UNSUPPORTED_WGSL_SHARED%.w}.metal" ]]
+[[ ! -e "${UNSUPPORTED_WGSL_SHARED%.w}.wgsl" ]]
 
 for spelling in _camelCase @camelCase @@camelCase '$camelCase'; do
   if "$TUNGSTEN" --check -e "$spelling = 1" >"$TMP/check-camel-variant.out" 2>&1; then

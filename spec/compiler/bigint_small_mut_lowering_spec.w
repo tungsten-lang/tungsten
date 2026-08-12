@@ -79,6 +79,55 @@
   r -= 1
   r == 0
 
+# Exercise the AArch64 eight-limb carry/borrow chunks at an exact multiple and
+# across a scalar tail.  The first crossing reserves spare capacity; the next
+# three crossings must reuse the unique receiver and preserve both signs for
+# raw magnitudes one and two.
+-> ripple_chunks_16
+  positive = (1 << 1024) - 1
+  r = positive + 0
+  r += 1
+  r -= 1
+  r += 2
+  r -= 2
+  negative = 0 - positive
+  s = negative + 0
+  s -= 1
+  s += 1
+  s -= 2
+  s += 2
+  r == positive && s == negative
+
+-> ripple_chunks_64
+  positive = (1 << 4096) - 1
+  r = positive + 0
+  r += 1
+  r -= 1
+  r += 2
+  r -= 2
+  negative = 0 - positive
+  s = negative + 0
+  s -= 1
+  s += 1
+  s -= 2
+  s += 2
+  r == positive && s == negative
+
+-> ripple_chunks_65
+  positive = (1 << 4160) - 1
+  r = positive + 0
+  r += 1
+  r -= 1
+  r += 2
+  r -= 2
+  negative = 0 - positive
+  s = negative + 0
+  s -= 1
+  s += 1
+  s -= 2
+  s += 2
+  r == positive && s == negative
+
 -> alias_disqualifies_small
   r = (1 << 256) + 17
   snapshot = r
@@ -114,6 +163,9 @@ check("small_mut.negative_sub_two", negative_sub_two())
 check("small_mut.demote_at_i48_edge", demote_at_i48_edge())
 check("small_mut.preserve_negative_i48_edge_value", preserve_negative_i48_edge_value())
 check("small_mut.canonical_zero", canonical_zero())
+check("small_mut.ripple_chunks_16", ripple_chunks_16())
+check("small_mut.ripple_chunks_64", ripple_chunks_64())
+check("small_mut.ripple_chunks_65", ripple_chunks_65())
 check("small_mut.alias_disqualifies_small", alias_disqualifies_small())
 check("small_mut.parameter_disqualifies_small", parameter_disqualifies_small())
 check("small_mut.indexed_disqualifies_small", indexed_disqualifies_small())

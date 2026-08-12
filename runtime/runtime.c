@@ -41378,6 +41378,55 @@ bigint_small_mut_fallback(
     return subtract ? w_bigint_sub_mut(a, b) : w_bigint_add_mut(a, b);
 }
 
+#if defined(__aarch64__)
+/* Long carry/borrow ripples are made of uniform limbs.  Fold eight of those
+ * tests into one branch while keeping the stores volatile: this path is only
+ * entered after the receiver is proven unique and capacity-safe, and the
+ * volatile writes prevent Clang from outlining them into memset (which would
+ * put a call frame on every small-delta entry). */
+static inline __attribute__((always_inline)) uint32_t
+bigint_small_mut_clear_max_chunks(
+    volatile uint64_t *limbs, uint32_t i, uint32_t n) {
+    while (i + 8 <= n) {
+        uint64_t all = limbs[i] & limbs[i + 1] & limbs[i + 2] & limbs[i + 3]
+                     & limbs[i + 4] & limbs[i + 5] & limbs[i + 6]
+                     & limbs[i + 7];
+        if (all != UINT64_MAX) break;
+        limbs[i] = 0;
+        limbs[i + 1] = 0;
+        limbs[i + 2] = 0;
+        limbs[i + 3] = 0;
+        limbs[i + 4] = 0;
+        limbs[i + 5] = 0;
+        limbs[i + 6] = 0;
+        limbs[i + 7] = 0;
+        i += 8;
+    }
+    return i;
+}
+
+static inline __attribute__((always_inline)) uint32_t
+bigint_small_mut_fill_zero_chunks(
+    volatile uint64_t *limbs, uint32_t i, uint32_t n) {
+    while (i + 8 <= n) {
+        uint64_t any = limbs[i] | limbs[i + 1] | limbs[i + 2] | limbs[i + 3]
+                     | limbs[i + 4] | limbs[i + 5] | limbs[i + 6]
+                     | limbs[i + 7];
+        if (any != 0) break;
+        limbs[i] = UINT64_MAX;
+        limbs[i + 1] = UINT64_MAX;
+        limbs[i + 2] = UINT64_MAX;
+        limbs[i + 3] = UINT64_MAX;
+        limbs[i + 4] = UINT64_MAX;
+        limbs[i + 5] = UINT64_MAX;
+        limbs[i + 6] = UINT64_MAX;
+        limbs[i + 7] = UINT64_MAX;
+        i += 8;
+    }
+    return i;
+}
+#endif
+
 static inline __attribute__((always_inline)) WValue bigint_addsub_small_mut(
     WValue a, uint64_t magnitude, int subtract) {
     if ((magnitude != 1 && magnitude != 2) ||
@@ -41430,6 +41479,9 @@ static inline __attribute__((always_inline)) WValue bigint_addsub_small_mut(
             volatile uint64_t *commit_limbs = ba->limbs;
             commit_limbs[0] = result;
             uint32_t i = 1;
+#if defined(__aarch64__)
+            i = bigint_small_mut_clear_max_chunks(commit_limbs, i, n);
+#endif
             while (i < n) {
                 uint64_t limb = commit_limbs[i];
                 if (limb != UINT64_MAX) {
@@ -41501,6 +41553,9 @@ static inline __attribute__((always_inline)) WValue bigint_addsub_small_mut(
     volatile uint64_t *commit_limbs = ba->limbs;
     commit_limbs[0] = result;
     uint32_t i = 1;
+#if defined(__aarch64__)
+    i = bigint_small_mut_fill_zero_chunks(commit_limbs, i, n);
+#endif
     for (;;) {
         uint64_t limb = commit_limbs[i];
         if (limb != 0) {

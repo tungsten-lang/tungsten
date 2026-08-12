@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(522 total), grouped by area, with its declaration, a one-line
+(524 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -28,6 +28,8 @@ summary from the source header, and a link to the source.
 | `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
 | `Channel` | `+ Channel` | — | [`core/channel.w`](../core/channel.w) |
 | `ChannelReceiveResult` | `+ ChannelReceiveResult` | Channel — a thread-safe FIFO for goroutine communication. | [`core/channel.w`](../core/channel.w) |
+| `ChannelTryReceiveResult` | `+ ChannelTryReceiveResult` | ChannelTryReceiveResult — nonblocking/timed receive outcome with three states. | [`core/channel.w`](../core/channel.w) |
+| `ChannelSelection` | `+ ChannelSelection` | ChannelSelection — the ready channel, result, and original input index. | [`core/channel.w`](../core/channel.w) |
 | `CSV` | `+ CSV` | CSV facade — whole-string convenience and chunk-stream adapters. | [`core/csv.w`](../core/csv.w) |
 | `CSVParser` | `+ CSVParser` | CSV — incremental comma-separated value parsing. | [`core/csv.w`](../core/csv.w) |
 | `Class` | `+ Class` | — | [`core/class.w`](../core/class.w) |

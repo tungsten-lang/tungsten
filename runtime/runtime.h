@@ -1220,6 +1220,7 @@ typedef struct WChan {
                           * dispatch reads the discriminator at byte 0 */
     uint8_t closed;
     uint8_t unbounded;
+    uint8_t handoff_committed; /* try/timed unbuffered send already succeeded */
     WValue *buffer;
     int64_t cap;         /* allocated slots */
     int64_t count;
@@ -1227,6 +1228,7 @@ typedef struct WChan {
     int64_t tail;
     uint64_t handoff_seq; /* unbuffered send ticket */
     uint64_t received_seq;
+    int64_t recv_waiters;  /* receivers currently waiting on an empty channel */
     WChanWaiter *send_waitq;
     WChanWaiter *recv_waitq;
     pthread_mutex_t lock;
@@ -1251,8 +1253,12 @@ WValue w_mutex_locked(WValue mutex);
 WValue w_chan_new(WValue capacity_wv);
 WValue w_chan_new_unbounded(void);
 WValue w_chan_send(WValue ch, WValue val);
+WValue w_chan_try_send(WValue ch, WValue val);
+WValue w_chan_send_timeout(WValue ch, WValue val, WValue milliseconds);
 WValue w_chan_recv(WValue ch);
 WValue w_chan_recv_result(WValue ch);
+WValue w_chan_try_recv_result(WValue ch);
+WValue w_chan_recv_timeout_result(WValue ch, WValue milliseconds);
 WValue w_chan_close(WValue ch);
 
 /* Private compiler tree-walker discrimination. Public type()/class_name for

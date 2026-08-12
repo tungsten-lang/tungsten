@@ -12,6 +12,8 @@
   auto :Char,         "char"
   auto :Channel,      "channel"
   auto :ChannelReceiveResult, "channel"
+  auto :ChannelTryReceiveResult, "channel"
+  auto :ChannelSelection, "channel"
   auto :CSV,          "csv"
   auto :CSVParser,    "csv"
   auto :Class,        "class"

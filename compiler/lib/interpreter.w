@@ -1371,14 +1371,34 @@ use target
       if args.size() != 2
         raise "w_chan_recv_result expects one receiver"
       return ccall("w_chan_recv_result", args[1])
+    when "w_chan_try_recv_result"
+      if args.size() != 2
+        raise "w_chan_try_recv_result expects one receiver"
+      return ccall("w_chan_try_recv_result", args[1])
+    when "w_chan_recv_timeout_result"
+      if args.size() != 3
+        raise "w_chan_recv_timeout_result expects one receiver and timeout"
+      return ccall("w_chan_recv_timeout_result", args[1], args[2])
     when "w_chan_send"
       if args.size() != 3
         raise "w_chan_send expects one receiver and value"
       return ccall("w_chan_send", args[1], args[2])
+    when "w_chan_try_send"
+      if args.size() != 3
+        raise "w_chan_try_send expects one receiver and value"
+      return ccall("w_chan_try_send", args[1], args[2])
+    when "w_chan_send_timeout"
+      if args.size() != 4
+        raise "w_chan_send_timeout expects one receiver, value, and timeout"
+      return ccall("w_chan_send_timeout", args[1], args[2], args[3])
     when "w_chan_close"
       if args.size() != 2
         raise "w_chan_close expects one receiver"
       return ccall("w_chan_close", args[1])
+    when "__w_sleep"
+      if args.size() != 2
+        raise "__w_sleep expects one duration"
+      return ccall("__w_sleep", args[1])
     when "w_thread_alive"
       if args.size() != 2
         raise "w_thread_alive expects one receiver"

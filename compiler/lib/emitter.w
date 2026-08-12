@@ -544,8 +544,12 @@ use naming
   out << declare_fn("w_chan_new", wv, wv)
   out << declare_fn("w_chan_new_unbounded", wv, "")
   out << declare_fn("w_chan_send", wv, wv2)
+  out << declare_fn("w_chan_try_send", wv, wv2)
+  out << declare_fn("w_chan_send_timeout", wv, wv3)
   out << declare_fn("w_chan_recv", wv, wv)
   out << declare_fn("w_chan_recv_result", wv, wv)
+  out << declare_fn("w_chan_try_recv_result", wv, wv)
+  out << declare_fn("w_chan_recv_timeout_result", wv, wv2)
   out << declare_fn("w_chan_close", wv, wv)
 
   # Argv / clock / primality

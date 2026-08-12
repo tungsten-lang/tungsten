@@ -725,6 +725,7 @@ interpreter_specs=(
   spec/core/clock_ms_spec.w
   spec/core/csv_stream_spec.w
   spec/core/channel_spec.w
+  spec/core/channel_timeout_spec.w
   spec/core/atomic_spec.w
   spec/core/mutex_spec.w
   spec/core/timer_validation_spec.w
@@ -830,6 +831,8 @@ core_specs=(
   spec/core/crypto_hmac_scram_spec.w
   spec/core/channel_spec.w
   spec/core/channel_unbuffered_spec.w
+  spec/core/channel_timeout_spec.w
+  spec/core/channel_timeout_thread_spec.w
   spec/core/mutex_spec.w
   spec/core/mutex_thread_spec.w
   spec/core/timer_spec.w

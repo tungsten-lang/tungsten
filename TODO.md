@@ -393,8 +393,11 @@ projects stay unchecked until their stated acceptance criteria are met.
   `receive_result` distinguishes a received `nil` from closed-and-drained
   state and powers close-aware iteration. `Channel.unbounded` grows its FIFO
   geometrically, while `Channel.new(0)` performs a sender/receiver rendezvous.
-  Timeout/nonblocking operations and select remain open. The unbuffered
-  concurrency fixture covers close waking blocked senders/receivers and is
+  Nonblocking and millisecond-timeout send/receive operations use a three-state
+  result so nil, timeout, and closed remain distinct. Receive-side select uses
+  rotating probes with an optional timeout; mixed send/receive select arms and
+  event-loop-backed parking remain open. The unbuffered concurrency fixtures
+  cover close and cancellation waking or removing blocked participants and are
   compiled-only until interpreted `go` is asynchronous.
 - [x] Flesh out `core/mutex.w` with lock/try_lock/unlock/synchronize, ownership
   errors, an explicit non-reentrant/non-poisoning policy, ensure-based release,

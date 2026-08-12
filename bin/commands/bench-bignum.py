@@ -140,6 +140,7 @@ LANE_LABELS = {
     "rust": "Rust",
     "odin": "Odin",
 }
+DEFAULT_EXTERNAL_CELL_TIMEOUT_SECONDS = 30.0
 
 
 def parse_csv(value: str, *, integers: bool = False) -> list[Any]:
@@ -339,6 +340,7 @@ def run_checked(
     *,
     capture: bool = True,
     env: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> str:
     completed = subprocess.run(
         command,
@@ -347,6 +349,7 @@ def run_checked(
         capture_output=capture,
         check=False,
         env=env,
+        timeout=timeout,
     )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
@@ -430,42 +433,59 @@ def external_sweep(
     sizes: list[int],
     runs: int,
     target_ms: float,
+    cell_timeout_seconds: float,
 ) -> dict[int, dict[str, Any]]:
     binary = EXTERNAL_BINARIES[language]
-    command = [
-        str(binary),
-        "--sweep",
-        operation,
-        ",".join(str(size) for size in sizes),
-        str(runs),
-        f"{target_ms:g}",
-    ]
-    output = run_checked(command)
     rows: dict[int, dict[str, Any]] = {}
-    for line in output.splitlines():
-        fields = line.split("\t")
+    timeout = cell_timeout_seconds if cell_timeout_seconds > 0 else None
+    # One process per size makes the deadline a real operation/size-cell
+    # boundary. Process startup is outside the harness's timed region, and a
+    # pathological cell can be killed without losing the remaining matrix.
+    for limbs in sizes:
+        command = [
+            str(binary),
+            "--sweep",
+            operation,
+            str(limbs),
+            str(runs),
+            f"{target_ms:g}",
+        ]
+        try:
+            output = run_checked(command, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            rows[limbs] = {
+                "status": "timeout",
+                "timeout_seconds": cell_timeout_seconds,
+            }
+            print(
+                f"tungsten bench bignum: {language}/{operation}/{limbs} "
+                f"timed out after {cell_timeout_seconds:g}s; continuing",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+        lines = output.splitlines()
+        if len(lines) != 1:
+            raise RuntimeError(
+                f"unexpected {language} benchmark output for "
+                f"{operation}/{limbs}: {output!r}"
+            )
+        fields = lines[0].split("\t")
         if (
             len(fields) != 6
             or fields[0] != "external"
             or fields[1] != language
             or fields[2] != operation
+            or int(fields[3]) != limbs
         ):
             raise RuntimeError(
-                f"unexpected {language} benchmark output: {line}"
+                f"unexpected {language} benchmark output: {lines[0]}"
             )
-        limbs = int(fields[3])
         rows[limbs] = {
+            "status": "ok",
             "iterations": int(fields[4]),
             "ns": float(fields[5]),
         }
-    if not rows and sizes:
-        raise RuntimeError(f"{language} benchmark returned no rows")
-    missing = sorted(set(sizes) - set(rows))
-    if missing:
-        raise RuntimeError(
-            f"{language} benchmark omitted limb sizes: "
-            + ",".join(map(str, missing))
-        )
     return rows
 
 
@@ -474,6 +494,7 @@ def add_external_lanes(
     languages: list[str],
     runs: int,
     target_ms: float,
+    cell_timeout_seconds: float,
 ) -> None:
     if not rows:
         return
@@ -482,15 +503,25 @@ def add_external_lanes(
     # the asymmetric rows; skip ops they don't implement rather than
     # erroring the whole run.
     if operation in ("add1", "sub1", "mul1", "div1"):
+        for row in rows:
+            for language in languages:
+                row[f"{language}_status"] = "unsupported"
         return
     sizes = [row["limbs"] for row in rows]
     by_size = {row["limbs"]: row for row in rows}
     for language in languages:
         external = external_sweep(
-            language, operation, sizes, runs, target_ms
+            language, operation, sizes, runs, target_ms,
+            cell_timeout_seconds,
         )
         for limbs, measurement in external.items():
             row = by_size[limbs]
+            row[f"{language}_status"] = measurement["status"]
+            if measurement["status"] == "timeout":
+                row[f"{language}_timeout_seconds"] = measurement[
+                    "timeout_seconds"
+                ]
+                continue
             row[f"{language}_iterations"] = measurement["iterations"]
             row[f"{language}_ns"] = measurement["ns"]
             row[f"tungsten_over_{language}"] = (
@@ -523,13 +554,27 @@ def aggregate_results(
     competitors = lanes[1:]
     overall: dict[str, Any] = {}
     for lane in competitors:
-        ratios = [row[f"tungsten_over_{lane}"] for row in results]
+        ratios = [
+            row[f"tungsten_over_{lane}"]
+            for row in results
+            if f"tungsten_over_{lane}" in row
+        ]
         overall[lane] = {
             "cases": len(ratios),
+            "matrix_cases": len(results),
+            "timeouts": sum(
+                row.get(f"{lane}_status") == "timeout" for row in results
+            ),
+            "unsupported": sum(
+                row.get(f"{lane}_status") == "unsupported"
+                for row in results
+            ),
             "tungsten_wins": sum(ratio < 1.0 for ratio in ratios),
             "tungsten_ties": sum(ratio == 1.0 for ratio in ratios),
             "tungsten_losses": sum(ratio > 1.0 for ratio in ratios),
-            "tungsten_over_peer_geomean": geometric_mean(ratios),
+            "tungsten_over_peer_geomean": (
+                geometric_mean(ratios) if ratios else None
+            ),
         }
     operations = []
     for operation in OPERATIONS:
@@ -541,8 +586,17 @@ def aggregate_results(
             "cases": len(selected),
         }
         for lane in competitors:
-            item[f"tungsten_over_{lane}_geomean"] = geometric_mean(
-                [row[f"tungsten_over_{lane}"] for row in selected]
+            ratios = [
+                row[f"tungsten_over_{lane}"]
+                for row in selected
+                if f"tungsten_over_{lane}" in row
+            ]
+            item[f"{lane}_cases"] = len(ratios)
+            item[f"{lane}_timeouts"] = sum(
+                row.get(f"{lane}_status") == "timeout" for row in selected
+            )
+            item[f"tungsten_over_{lane}_geomean"] = (
+                geometric_mean(ratios) if ratios else None
             )
         operations.append(item)
     return {"overall": overall, "operations": operations}
@@ -992,6 +1046,12 @@ def print_results_header(metadata: dict[str, Any]) -> None:
         "Immutable lanes keep the previous result live while computing the "
         f"next; {mutable} alternate two mutable destinations."
     )
+    if metadata.get("external_cell_timeout_seconds", 0) > 0:
+        print(
+            "Optional Rust/Odin cells have a "
+            f"{metadata['external_cell_timeout_seconds']:g}s deadline; "
+            "TIMEOUT cells remain in JSON and are excluded from ratios."
+        )
     print()
     lanes = metadata["lanes"]
     columns = f"{'op':<8} {'limbs':>6} {'bits':>8} {'N iters':>9}"
@@ -1009,9 +1069,16 @@ def print_result_row(row: dict[str, Any], lanes: list[str]) -> None:
         f"{row['native_iterations']:>9}"
     )
     for lane in lanes:
-        line += f" {format_time(row[f'{lane}_ns']):>11}"
+        timing = row.get(f"{lane}_ns")
+        if timing is not None and timing > 0:
+            value = format_time(timing)
+        else:
+            status = row.get(f"{lane}_status", "missing")
+            value = "N/A" if status == "unsupported" else status.upper()
+        line += f" {value:>11}"
     for lane in lanes[1:]:
-        line += f" {row[f'tungsten_over_{lane}']:>8.2f}"
+        ratio = row.get(f"tungsten_over_{lane}")
+        line += f" {ratio:>8.2f}" if ratio is not None else f" {'-':>8}"
     line += f" {row['fastest']:>10}"
     print(line, flush=True)
 
@@ -1025,15 +1092,21 @@ def print_results_summary(
     pieces = []
     for lane in lanes[1:]:
         stats = aggregate["overall"][lane]
-        pieces.append(
-            f"{LANE_LABELS[lane]} {stats['tungsten_wins']}/{stats['cases']}"
-        )
+        piece = f"{LANE_LABELS[lane]} {stats['tungsten_wins']}/{stats['cases']}"
+        if stats.get("timeouts"):
+            piece += f" ({stats['timeouts']} timed out)"
+        if stats.get("unsupported"):
+            piece += f" ({stats['unsupported']} unsupported)"
+        pieces.append(piece)
     print("Tungsten faster than: " + "; ".join(pieces) + ".")
-    ratios = "; ".join(
-        f"T/{LANE_LABELS[lane]} "
-        f"{aggregate['overall'][lane]['tungsten_over_peer_geomean']:.3f}"
-        for lane in lanes[1:]
-    )
+    ratio_parts = []
+    for lane in lanes[1:]:
+        geomean = aggregate["overall"][lane][
+            "tungsten_over_peer_geomean"
+        ]
+        value = f"{geomean:.3f}" if geomean is not None else "n/a"
+        ratio_parts.append(f"T/{LANE_LABELS[lane]} {value}")
+    ratios = "; ".join(ratio_parts)
     print("Overall geometric-mean ratios (lower is better): " + ratios + ".")
     print(verdict_line(results, aggregate), flush=True)
 
@@ -1197,6 +1270,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="also time Odin core:math/big (optimized native build)",
     )
     parser.add_argument(
+        "--external-cell-timeout",
+        "--cell-timeout",
+        dest="external_cell_timeout",
+        type=float,
+        default=DEFAULT_EXTERNAL_CELL_TIMEOUT_SECONDS,
+        metavar="SECONDS",
+        help=(
+            "deadline for each optional Rust/Odin operation/size cell "
+            f"(default: {DEFAULT_EXTERNAL_CELL_TIMEOUT_SECONDS:g}; 0 disables)"
+        ),
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         help="enable the Python, Rust, and Odin lanes",
@@ -1305,6 +1390,8 @@ def main() -> int:
         parser.error("--runs must be positive")
     if args.target_ms is not None and args.target_ms <= 0:
         parser.error("--target-ms must be positive")
+    if args.external_cell_timeout < 0:
+        parser.error("--external-cell-timeout must be nonnegative")
     if args.capacity_max <= 0 or args.capacity_max > 16384:
         parser.error("--capacity-max must be in 1..16384")
     if args.no_capacity and args.capacity_only:
@@ -1474,6 +1561,7 @@ def main() -> int:
         "rust_digit_bits": 64,
         "odin_version": odin_version,
         "odin_digit_bits": 63,
+        "external_cell_timeout_seconds": args.external_cell_timeout,
         "platform": platform.platform(),
         "limb_bits": 64,
         "operations": operations,
@@ -1500,6 +1588,11 @@ def main() -> int:
             "odin": (
                 "two alternating mutable core:math/big destinations retain "
                 "capacity, matching the library's idiomatic API"
+            ),
+            "external_cell_deadline": (
+                "Rust and Odin run in one subprocess per operation/size cell; "
+                "a timed-out cell is killed, retained as TIMEOUT in JSON, "
+                "excluded from ratio aggregates, and later cells continue"
             ),
             "division_shape": "2N-limb positive dividend by N-limb positive divisor",
             "isqrt_shape": "2N-limb positive operand, N-limb root",
@@ -1618,6 +1711,7 @@ def main() -> int:
                     external_languages,
                     args.runs,
                     target_ms,
+                    args.external_cell_timeout,
                 )
                 for row in operation_rows:
                     update_fastest(row, lanes)

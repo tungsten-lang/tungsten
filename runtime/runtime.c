@@ -747,6 +747,13 @@ static void bigint_release(WBigint *b) {
 #ifndef BN_BIGINT_RELEASE_INLINE_HANDOFF
 #define BN_BIGINT_RELEASE_INLINE_HANDOFF 1
 #endif
+/* Swap-form inline handoff: the churn release parks its buffer with an
+ * unconditional store and rescues a displaced occupant on the cold path,
+ * instead of branching on an occupancy load that, in result churn, reads
+ * back the zero the same iteration's take just stored. */
+#ifndef BN_BIGINT_RELEASE_DISPLACE
+#define BN_BIGINT_RELEASE_DISPLACE 1
+#endif
 /* Fused release-side header read: `type` (offset 0), `shared` (offset 1)
  * and `cap` (offset 8) all sit in the leading 16 bytes, so one 16-byte load
  * (two u64s via memcpy — a single ldp on aarch64, no aliasing violation)
@@ -784,6 +791,16 @@ void bigint_release_if_live(WBigint *b) {
     _Static_assert(offsetof(WBigint, cap) == 8, "cap at 8");
     uint64_t head01[2];
     memcpy(head01, b, sizeof head01);   /* one ldp; no aliasing violation */
+    /* Keep the first header word a full 64-bit load.  Once the swallow
+     * decrement moved onto its own volatile byte reload (c7a2ded), the
+     * only remaining uses of head01[0] fit in bytes 0-1 and clang narrows
+     * the load to an ldrh — a different fast-path instruction stream from
+     * the ldr+and+cmp shape the release path was tuned as, costing sub1@1
+     * ~5% in the boxed churn cell.  Pinning the loaded word opaque
+     * restores the wide-load fast path; the decrement below stays on the
+     * volatile byte, so the abs@1 store-forward dodge is unchanged (the
+     * wide load still feeds only predicted branches). */
+    __asm__("" : "+r"(head01[0]));
     if (__builtin_expect((uint16_t)head01[0] != (uint16_t)W_TYPE_BIGINT, 0)) {
         if ((uint8_t)head01[0] != W_TYPE_BIGINT) return;
         /* Alias swallow: a tag-sign producer (-x, abs of a negative)
@@ -832,6 +849,34 @@ void bigint_release_if_live(WBigint *b) {
 #else
     uint32_t cap = b->cap;
 #endif
+#if BN_BIGINT_RELEASE_DISPLACE
+    /* A live BigInt allocation always has at least one limb of capacity. */
+    if (__builtin_expect(cap <= BN_BIGINT_POOL_MAX_CAP, 1)) {
+        /* Swap-form handoff: park unconditionally, and rescue whatever the
+         * store displaced on the cold path.  The park store is no longer
+         * control-dependent on the occupancy load — in result churn that
+         * load reads back the zero the same iteration's take just stored,
+         * a store->load hop that existed only to guard the occupied case.
+         * The occupied case still cannot leak: the displaced buffer routes
+         * to its size-class bucket, exactly where the old fall-through sent
+         * the incoming buffer (the parked/bucketed roles swap, both legal).
+         * A duplicate release of the parked buffer itself displaces the
+         * buffer BY the buffer (prev == b): re-storing the identical word
+         * is harmless and the rescue must swallow it, mirroring the pointer
+         * guard in bigint_release. */
+        WBigintPool *pool = &bigint_pool_state;
+        uint64_t displaced = pool->hot_word;
+#if !BN_BIGINT_HOT_LIVE_HEADER
+        b->type = 0;
+#endif
+        pool->hot_word = bigint_hot_encode(b, cap);
+        if (__builtin_expect(displaced != 0, 0)) {
+            WBigint *prev = bigint_hot_ptr(displaced);
+            if (__builtin_expect(prev != b, 1)) bigint_release_cold(prev);
+        }
+        return;
+    }
+#else
     /* A live BigInt allocation always has at least one limb of capacity. */
     if (__builtin_expect(cap <= BN_BIGINT_POOL_MAX_CAP, 1)) {
         WBigintPool *pool = &bigint_pool_state;
@@ -843,6 +888,7 @@ void bigint_release_if_live(WBigint *b) {
             return;
         }
     }
+#endif
 #endif
     bigint_release(b);
 }
@@ -1051,11 +1097,34 @@ WBigint *bigint_alloc_raw_hot(int32_t cap) {
  * capacity class.  On their hot-slot hit, avoid recomputing the smallest-fit
  * range check.  The fallback still goes through the general pool/malloc path.
  */
+#ifndef BN_BIGINT_HOT_TAKE_XOR
+#define BN_BIGINT_HOT_TAKE_XOR 1
+#endif
 static inline __attribute__((always_inline))
 WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
 #if BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
     WBigintPool *pool = &bigint_pool_state;
     uint64_t hot_word = pool->hot_word;
+#if BN_BIGINT_HOT_TAKE_XOR
+    /* exact_cap >= 1 always, and the empty word decodes as capacity 0, so
+     * the capacity equality alone also proves occupancy.  XOR-ing the
+     * expected capacity field fuses that hit test with the pointer decode:
+     * on a hit the high field cancels to zero and the residue IS the
+     * pointer (bits 48+ are clear by the encode invariant bigint_hot_encode
+     * asserts), so the separate low-bits mask disappears; on any other slot
+     * state (empty, or a different capacity class) the surviving high bits
+     * fail the zero test.  All callers pass a constant class, so the XOR is
+     * a single logical-immediate instruction. */
+    uint64_t decoded = hot_word ^ ((uint64_t)exact_cap << 48);
+    if (__builtin_expect((decoded >> 48) == 0, 1)) {
+        pool->hot_word = 0;
+        WBigint *hot = (WBigint *)(uintptr_t)decoded;
+#if !BN_BIGINT_HOT_LIVE_HEADER
+        hot->type = W_TYPE_BIGINT;
+#endif
+        return hot;
+    }
+#else
     /* exact_cap >= 1 always, and the empty word decodes as capacity 0, so
      * the capacity equality alone also proves occupancy. */
     if (__builtin_expect(bigint_hot_capacity(hot_word) == exact_cap, 1)) {
@@ -1066,6 +1135,7 @@ WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
 #endif
         return hot;
     }
+#endif
 #endif
     return bigint_alloc_raw((int32_t)exact_cap);
 }
@@ -1415,6 +1485,24 @@ WValue bigint_finish_one_limb(uint64_t magnitude, int negative) {
     return bigint_box(result);
 }
 
+/* Variant of the one-limb finisher for callers that computed the magnitude
+ * with a flag-setting subtract: taking the signed size (+1/-1) as data lets
+ * the flags consumer (cneg/csinc) issue while the subtract's flags are still
+ * live, instead of clang re-comparing the operands after the hot-slot take's
+ * capacity compare clobbers them.  A zero magnitude folds into the i48
+ * demote arm (-0 boxes as 0), so the separate zero test is dropped too. */
+static inline __attribute__((always_inline))
+WValue bigint_finish_one_limb_sized(uint64_t magnitude, int32_t signed_size) {
+    if (magnitude <= (uint64_t)W_INT48_MAX) {
+        int64_t value = (int64_t)magnitude;
+        return w_box_int(signed_size < 0 ? -value : value);
+    }
+    WBigint *result = bigint_alloc_raw_hot_exact(1U);
+    result->limbs[0] = magnitude;
+    result->size = signed_size;
+    return bigint_box(result);
+}
+
 /* One-word division has already trimmed its quotient.  Keep its common
  * multi-limb finish in the boxed fast arm instead of calling the shared
  * magnitude finisher; only zero/one-limb results need demotion work. */
@@ -1480,11 +1568,15 @@ WValue bigint_add_one_limb_magnitudes(
     /* Mixed signs: |a| - |b| with the winner's sign, branch-free.  The
      * wrap-and-negate pair compiles to subs+cneg+csel, replacing the
      * three-way compare ladder — on a ~1.5ns cell the two spare branch
-     * slots are measurable, and the zero case folds into the finisher. */
+     * slots are measurable, and the zero case folds into the finisher.
+     * The signed size is materialized here, next to the flag-setting
+     * subtract, so the sized finisher never re-compares the operands. */
     uint64_t diff = a - b;
     int lt = a < b;
     uint64_t magnitude = lt ? 0 - diff : diff;
-    return bigint_finish_one_limb(magnitude, lt ? b_negative : a_negative);
+    int negative = lt ? b_negative : a_negative;
+    int32_t signed_size = negative ? -1 : 1;
+    return bigint_finish_one_limb_sized(magnitude, signed_size);
 }
 
 #ifndef BN_ADDSUB_22_FAST

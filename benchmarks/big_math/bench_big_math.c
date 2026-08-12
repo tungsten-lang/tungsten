@@ -4237,6 +4237,101 @@ static void fuzz_word_ui_against_gmp(int cases, int32_t max_limbs) {
            cases, cases, max_limbs);
 }
 
+/* Duplicate release is only DEFINED for buffers still resident in the
+ * pool (parked in the hot slot, or bucketed with a cleared header): a
+ * release that overflowed its bucket handed the memory back to the
+ * allocator, and touching that pointer again is caller undefined behavior
+ * in both handoff designs (verified symmetric under ASAN 2026-08-12, both
+ * with and without BN_BIGINT_RELEASE_DISPLACE).  The fuzz below therefore
+ * only injects duplicates whose target it can prove resident. */
+static int fuzz_buffer_pool_resident(WBigint *b) {
+    WBigintPool *pool = &bigint_pool_state;
+#if BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+    if (bigint_hot_ptr(pool->hot_word) == b) return 1;
+#endif
+    for (int bucket = 0; bucket < BN_BIGINT_POOL_BUCKETS; bucket++)
+        for (int i = 0; i < pool->count[bucket]; i++)
+            if (pool->slot[bucket][i] == b) return 1;
+    return 0;
+}
+
+/* Displaced-slot fuzz: exercises the swap-form hot handoff in
+ * bigint_release_if_live.  Each case builds K live heap bigints, releases
+ * them in a shuffled order — every release after the first finds the hot
+ * slot occupied, so the park must displace the occupant and rescue it to
+ * its size-class bucket — and sprinkles duplicate releases in both flavors
+ * (still parked: caught by the prev == b guard; already bucketed: caught
+ * by the cleared header type).  It then re-allocates K buffers and checks
+ * they are pairwise distinct with intact headers and limbs: a buffer live
+ * in two places (leaked slot state, double-entered bucket) gets handed out
+ * twice and fails the distinctness or clobbers the content check. */
+static void fuzz_displaced_slot(int cases) {
+    uint64_t state = UINT64_C(0x243f6a8885a308d3);
+    enum { K_MAX = 6 };
+    for (int t = 0; t < cases; t++) {
+        int k = 2 + (int)(bench_rng(&state) % (K_MAX - 1)); /* 2..6 */
+        WValue vals[K_MAX];
+        WBigint *raw[K_MAX];
+        int32_t widths[K_MAX];
+        for (int i = 0; i < k; i++) {
+            /* Bias to width 1 (the sub1@1 churn class) with mixed widths so
+             * displacement also crosses capacity classes. */
+            uint64_t r = bench_rng(&state);
+            widths[i] = (r & 3) ? 1 : (int32_t)(1 + (r >> 2) % 9);
+            vals[i] = bench_bigint(widths[i], bench_rng(&state));
+            raw[i] = w_as_bigint(vals[i]);
+        }
+        int order[K_MAX];
+        for (int i = 0; i < k; i++) order[i] = i;
+        for (int i = k - 1; i > 0; i--) {
+            int j = (int)(bench_rng(&state) % (uint64_t)(i + 1));
+            int tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+        }
+        for (int i = 0; i < k; i++) {
+            bigint_release_if_live(raw[order[i]]);
+            /* Immediate duplicate: only when the buffer stayed resident
+             * (it may have been backing_freed by a full bucket). */
+            if ((bench_rng(&state) & 1) &&
+                fuzz_buffer_pool_resident(raw[order[i]]))
+                bigint_release_if_live(raw[order[i]]);
+            /* Delayed duplicate of an earlier release: usually bucketed by
+             * a later displacement, sometimes still parked. */
+            if (i > 0 && (bench_rng(&state) & 3) == 0) {
+                WBigint *dup = raw[order[(int)(bench_rng(&state) % (uint64_t)i)]];
+                if (fuzz_buffer_pool_resident(dup))
+                    bigint_release_if_live(dup);
+            }
+        }
+        WValue out[K_MAX];
+        for (int i = 0; i < k; i++)
+            out[i] = bench_bigint(
+                widths[i], (uint64_t)(t + 1) * UINT64_C(0x9e3779b9) + (uint64_t)i);
+        for (int i = 0; i < k; i++)
+            for (int j = i + 1; j < k; j++)
+                if (w_as_bigint(out[i]) == w_as_bigint(out[j]))
+                    dief("displaced-slot: buffer handed out twice case=%d "
+                         "(i=%d j=%d width=%d)", t, i, j, widths[i]);
+        for (int i = 0; i < k; i++) {
+            WBigint *b = w_as_bigint(out[i]);
+            if (b->type != W_TYPE_BIGINT || b->shared != 0 ||
+                b->size != widths[i])
+                dief("displaced-slot: corrupt header case=%d i=%d", t, i);
+            uint64_t s = (uint64_t)(t + 1) * UINT64_C(0x9e3779b9) + (uint64_t)i;
+            for (int32_t l = 0; l < widths[i]; l++) {
+                uint64_t expect = bench_rng(&s);
+                if (l == 0) expect |= 1ULL;
+                if (l == widths[i] - 1) expect |= 1ULL << 63;
+                if (b->limbs[l] != expect)
+                    dief("displaced-slot: clobbered limb case=%d i=%d l=%d",
+                         t, i, (int)l);
+            }
+        }
+        for (int i = 0; i < k; i++) bench_free_value(out[i]);
+    }
+    bigint_pool_release_thread();
+    printf("displaced-slot handoff fuzz: %d cases OK\n", cases);
+}
+
 static void gmp_import_value(mpz_t z, WValue v) {
     uint64_t scratch;
     int32_t len;
@@ -7496,6 +7591,13 @@ int main(int argc, char **argv) {
 #else
         die("boxed mul1 fuzz requires GMP");
 #endif
+    }
+    if ((argc == 2 || argc == 3) && strcmp(argv[1], "--fuzz-displace") == 0) {
+        int cases = argc == 3 ? atoi(argv[2]) : 200000;
+        if (cases <= 0)
+            die("displaced-slot fuzz expects positive cases");
+        fuzz_displaced_slot(cases);
+        return 0;
     }
     if (argc == 4 && strcmp(argv[1], "--fuzz-word-ui") == 0) {
         int cases = atoi(argv[2]);

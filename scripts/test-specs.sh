@@ -580,6 +580,7 @@ compiled_specs=(
   spec/compiler/strbuf_bytes_spec.w
   spec/compiler/string_buffer_dynamic_append_spec.w
   spec/compiler/quantity_control_flow_parity_spec.w
+  spec/core/quantity_dispatch_spec.w
   spec/compiler/static_method_block_dispatch_spec.w
   spec/compiler/static_method_overload_spec.w
   spec/compiler/splat_parameter_parity_spec.w
@@ -718,6 +719,7 @@ interpreter_specs=(
   spec/compiler/top_level_method_name_hygiene_spec.w
   spec/compiler/string_buffer_dynamic_append_spec.w
   spec/compiler/quantity_control_flow_parity_spec.w
+  spec/core/quantity_dispatch_spec.w
   spec/compiler/static_method_block_dispatch_spec.w
   spec/compiler/static_method_overload_spec.w
   # clock_ms had to be registered in BOTH lowering.w and builtins.w; pin the

@@ -47,7 +47,7 @@ end
 
 namespace :build do
   desc "Build the Tungsten compiler"
-  task :tungsten do
+  task tungsten: "check:dispatch_contracts" do
     # bootstrap works on a cold checkout (no compiler yet) and chains into
     # the full `tungsten build` pipeline; build alone requires a compiler.
     Bundler.with_unbundled_env do
@@ -58,7 +58,12 @@ end
 
 namespace :check do
   desc "Run generated-data and layout consistency checks in parallel"
-  multitask all: %i[units layouts core_doc claims ast_schema]
+  multitask all: %i[units layouts core_doc claims ast_schema dispatch_contracts]
+
+  desc "Verify runtime-backed Core dispatch tables and compiler whitelists"
+  task :dispatch_contracts do
+    run_command "ruby", File.join(ROOT, "scripts/check-core-dispatch-contracts.rb")
+  end
 
   desc "Verify generated slab-AST ABI tables match compiler/lib/ast.w"
   task :ast_schema do

@@ -1274,6 +1274,33 @@ use target
     if args.size() == 0
       raise "ccall requires a runtime function name"
     cname = "" + args[0]
+    # Keep the role/equivalence family ahead of the large case dispatch. Its
+    # current compiled string-switch lowering does not reach these added arms;
+    # ordinary String equality remains exact and is pinned by the parity spec.
+    if cname == "w_quantity_point"
+      if args.size() != 3
+        raise "w_quantity_point expects a quantity and origin"
+      return ccall("w_quantity_point", args[1], args[2])
+    if cname == "w_quantity_delta"
+      if args.size() != 3
+        raise "w_quantity_delta expects a quantity and origin"
+      return ccall("w_quantity_delta", args[1], args[2])
+    if cname == "w_quantity_point_p"
+      if args.size() != 2
+        raise "w_quantity_point_p expects one argument"
+      return ccall("w_quantity_point_p", args[1])
+    if cname == "w_quantity_delta_p"
+      if args.size() != 2
+        raise "w_quantity_delta_p expects one argument"
+      return ccall("w_quantity_delta_p", args[1])
+    if cname == "w_quantity_origin"
+      if args.size() != 2
+        raise "w_quantity_origin expects one argument"
+      return ccall("w_quantity_origin", args[1])
+    if cname == "w_quantity_equivalent"
+      if args.size() != 4
+        raise "w_quantity_equivalent expects a quantity, target unit, and bridge"
+      return ccall("w_quantity_equivalent", args[1], args[2], args[3])
     case cname
     when "w_atomic_new"
       if args.size() != 2

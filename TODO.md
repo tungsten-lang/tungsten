@@ -248,6 +248,12 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Add a compiler consistency audit: every Core method requiring dynamic
   dispatch has the needed IC row and static-whitelist entry. Make missing wires
   a build error, not a release checklist item.
+  - [x] Validate every native IC initializer structurally and make Quantity's
+    full source/static-lowering/native-IC method surface an exhaustive root and
+    `build:tungsten` gate. Dynamic Quantity receivers now cover roles,
+    metadata, equivalence, and the `equivalent_to` alias.
+  - [ ] Classify the remaining runtime-backed Core classes exhaustively so a
+    newly added source method must declare its native-IC or autoload fallback.
 - [x] Reject ASCII `camelCase` identifiers lexically. Uppercase ASCII after a
   lowercase start is neither a variable, `ClassName`, nor `CONSTANT`. The
   packed, reference self-hosted, Ruby regex/codepoint, and direct C lexers all

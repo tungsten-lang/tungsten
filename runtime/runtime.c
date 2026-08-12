@@ -46256,6 +46256,8 @@ WValue __w_prime_aks(WValue n) {
 #define WN_close   W_M5("close")
 #define WN_write   W_M5("write")
 #define WN_send    W_M4("send")
+#define WN_point   W_M5("point")
+#define WN_delta   W_M5("delta")
 #define WN_cas     W_M3("cas")
 #define WN_plus    W_M1("+")
 #define WN_lshift  W_M2("<<")
@@ -46279,6 +46281,8 @@ static WValue WN_prime_30k_q = 0;
 static WValue WN_isqrt = 0;
 static WValue WN_strftime = 0;
 static WValue WN_unit_name = 0;
+static WValue WN_point_q = 0, WN_delta_q = 0, WN_origin = 0;
+static WValue WN_equivalent = 0, WN_equivalent_to = 0;
 #define WN_value W_M5("value")
 static WValue WN_downcase = 0, WN_upcase = 0, WN_swapcase = 0, WN_capitalize = 0;
 static WValue WN_ascii_q = 0, WN_valid_utf8_q = 0;
@@ -46463,6 +46467,11 @@ static void w_init_method_names(void) {
     WN_prime_30k_q   = w_string("prime_30k?");
     WN_strftime      = w_string("strftime");
     WN_unit_name     = w_string("unit_name");
+    WN_point_q       = w_string("point?");
+    WN_delta_q       = w_string("delta?");
+    WN_origin        = w_string("origin");
+    WN_equivalent    = w_string("equivalent");
+    WN_equivalent_to = w_string("equivalent_to");
     WN_isqrt         = w_string("isqrt");
     WN_ends_with_q  = w_string("ends_with?");
     WN_replace      = w_string("replace");
@@ -52391,16 +52400,69 @@ static WICEntry w_ic_float_table[] = {
     {0, NULL}
 };
 
-/* Quantity metadata accessors (0xFFFD tag with a unit; heap-domain form
- * shares the key). Backs core/quantity.w#value/#unit_name for receivers
- * whose static type the compiler cannot prove. */
-static WValue w_ic_quantity_value_fn(WValue r, WValue *a, int c) { (void)a; (void)c; return w_quantity_value(r); }
-static WValue w_ic_quantity_unit_name_fn(WValue r, WValue *a, int c) { (void)a; (void)c; return w_quantity_unit_name(r); }
-static WValue w_ic_quantity_to_f_fn(WValue r, WValue *a, int c) { (void)a; (void)c; return w_quantity_to_f(r); }
+/* Quantity methods (0xFFFD tag with a unit; heap-domain form shares the key).
+ * Every public method in core/quantity.w needs a row because an Array lookup,
+ * native return, or untyped parameter erases the compiler's static Quantity
+ * proof. Keep this table aligned with the direct-call whitelist in
+ * lowering/method_call.w; scripts/check-core-dispatch-contracts.rb enforces
+ * the three-way contract. */
+static WValue w_ic_quantity_point_fn(WValue r, WValue *a, int c) {
+    if (c == 0) return w_quantity_point(r, w_symbol("default"));
+    if (c == 1) return w_quantity_point(r, a[0]);
+    die("Quantity#point expects 0 or 1 arguments");
+    return W_NIL;
+}
+static WValue w_ic_quantity_delta_fn(WValue r, WValue *a, int c) {
+    if (c == 0) return w_quantity_delta(r, W_NIL);
+    if (c == 1) return w_quantity_delta(r, a[0]);
+    die("Quantity#delta expects 0 or 1 arguments");
+    return W_NIL;
+}
+static WValue w_ic_quantity_point_q_fn(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0) die("Quantity#point? expects no arguments");
+    return w_quantity_point_p(r);
+}
+static WValue w_ic_quantity_delta_q_fn(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0) die("Quantity#delta? expects no arguments");
+    return w_quantity_delta_p(r);
+}
+static WValue w_ic_quantity_origin_fn(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0) die("Quantity#origin expects no arguments");
+    return w_quantity_origin(r);
+}
+static WValue w_ic_quantity_value_fn(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0) die("Quantity#value expects no arguments");
+    return w_quantity_value(r);
+}
+static WValue w_ic_quantity_unit_name_fn(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0) die("Quantity#unit_name expects no arguments");
+    return w_quantity_unit_name(r);
+}
+static WValue w_ic_quantity_to_f_fn(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0) die("Quantity#to_f expects no arguments");
+    return w_quantity_to_f(r);
+}
+static WValue w_ic_quantity_equivalent_fn(WValue r, WValue *a, int c) {
+    if (c != 2) die("Quantity#equivalent expects 2 arguments");
+    return w_quantity_equivalent(r, a[0], a[1]);
+}
 static WICEntry w_ic_quantity_table[] = {
+    {0, w_ic_quantity_point_fn},
+    {0, w_ic_quantity_delta_fn},
+    {0, w_ic_quantity_point_q_fn},
+    {0, w_ic_quantity_delta_q_fn},
+    {0, w_ic_quantity_origin_fn},
     {0, w_ic_quantity_value_fn},
     {0, w_ic_quantity_unit_name_fn},
     {0, w_ic_quantity_to_f_fn},
+    {0, w_ic_quantity_equivalent_fn},
+    {0, w_ic_quantity_equivalent_fn},
     {0, NULL}
 };
 
@@ -52646,9 +52708,16 @@ static void w_init_ic_tables(void) {
     w_ic_ipv6_table[0].name = w_string("inspect");
     w_ic_mac_table[0].name = w_string("inspect");
 
-    w_ic_quantity_table[0].name = WN_value;
-    w_ic_quantity_table[1].name = WN_unit_name;
-    w_ic_quantity_table[2].name = WN_to_f;
+    w_ic_quantity_table[0].name = WN_point;
+    w_ic_quantity_table[1].name = WN_delta;
+    w_ic_quantity_table[2].name = WN_point_q;
+    w_ic_quantity_table[3].name = WN_delta_q;
+    w_ic_quantity_table[4].name = WN_origin;
+    w_ic_quantity_table[5].name = WN_value;
+    w_ic_quantity_table[6].name = WN_unit_name;
+    w_ic_quantity_table[7].name = WN_to_f;
+    w_ic_quantity_table[8].name = WN_equivalent;
+    w_ic_quantity_table[9].name = WN_equivalent_to;
 
     w_ic_date_table[0].name = WN_to_s;
     w_ic_date_table[1].name = WN_strftime;

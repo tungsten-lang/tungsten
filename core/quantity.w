@@ -34,3 +34,5 @@
   # invokes physical constants implicitly.
   -> equivalent(target_unit, using)
     ccall("w_quantity_equivalent", self, target_unit, using)
+
+  alias_method :equivalent_to/2, :equivalent/2

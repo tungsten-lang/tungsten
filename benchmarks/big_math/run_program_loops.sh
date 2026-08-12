@@ -119,6 +119,34 @@ for lane in "divp2chain:64 512 4096" "modp2chain:64 512 4096" \
     order=$((order + 1))
   done
 done
+# Gap-closure lanes (E4 stage 4): growth, multi-limb multiplier chain,
+# multi-limb modulus chain, descending-Fibonacci subtract rotation.
+for workload in growaccum bigmulchain fibdown; do
+  pair=$(run_pair "$workload" "$order")
+  set -- $pair
+  t_ns=$1; t_iqr=$2; t_check=$3
+  g_ns=$4; g_iqr=$5; g_check=$6
+  if [ "$t_check" != "$g_check" ]; then
+    echo "CHECKSUM MISMATCH on $workload: tungsten=$t_check gmp=$g_check" >&2
+    exit 1
+  fi
+  ratio=$(printf '%s %s\n' "$t_ns" "$g_ns" | awk '{printf "%.2f", $1 / $2}')
+  printf '%-12s %14s %12s %14s %12s %8s\n' \
+    "$workload" "$t_ns" "$t_iqr" "$g_ns" "$g_iqr" "$ratio"
+  order=$((order + 1))
+done
+pair=$(run_pair modwide "$order" 65)
+set -- $pair
+t_ns=$1; t_iqr=$2; t_check=$3
+g_ns=$4; g_iqr=$5; g_check=$6
+if [ "$t_check" != "$g_check" ]; then
+  echo "CHECKSUM MISMATCH on modwide65: tungsten=$t_check gmp=$g_check" >&2
+  exit 1
+fi
+ratio=$(printf '%s %s\n' "$t_ns" "$g_ns" | awk '{printf "%.2f", $1 / $2}')
+printf '%-12s %14s %12s %14s %12s %8s\n' \
+  "modwide65" "$t_ns" "$t_iqr" "$g_ns" "$g_iqr" "$ratio"
+order=$((order + 1))
 # Word-overwrite lanes (E4 stage 3) at the mul1@2/4/32 parity widths.
 for workload in wordadd wordsub wordmul wordchain; do
   for limbs in 2 4 32; do

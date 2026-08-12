@@ -41154,6 +41154,109 @@ static WValue w_bigint_mut_fallback(WValue a, WValue b, int negate_b) {
     return r;
 }
 
+/* ==== Growth arms (E4 stage 4) ====
+ *
+ * Stage 1 refused |b| > |a| and carry-past-capacity outright.  Both
+ * refusals dropped a proven-dead unique buffer on the floor — a bounded
+ * leak per refusal, and for the post-reduction accumulator shape
+ * (two-limb residue += wide bump) an UNBOUNDED leak, one dying receiver
+ * per pass — and broke the amortized-O(1) contract exactly when the
+ * accumulator grows.  This arm keeps the operation inside the entry:
+ *   - compute IN PLACE when the receiver's class already has room for
+ *     the result (|b| > |a| into a wide receiver is the common
+ *     post-reduction shape);
+ *   - otherwise allocate the next class, compute into it, and release
+ *     the dying buffer AFTER its limbs' last read.  Pool classes are
+ *     immutable sizes, so growth is allocate+release, never realloc;
+ *     the released class feeds the pool for the loop's other churn.
+ * Uniqueness (shared == 0, overlay clear) was established by the caller;
+ * b may alias a (r += r reaches here when the doubling needs the carry
+ * limb) — both operand reads complete before the single release.
+ * ba stays live until that release, so no allocation in between can
+ * hand its buffer back. */
+#ifndef BN_ADDSUB_MUT_GROW
+#define BN_ADDSUB_MUT_GROW 1
+#endif
+#if BN_ADDSUB_MUT_GROW
+static __attribute__((noinline)) WValue w_bigint_addsub_mut_grow(
+    WValue a, WBigint *ba, int a_neg, int32_t amag,
+    const uint64_t *bl, int b_neg, int32_t bmag) {
+    if (a_neg == b_neg) {
+        /* magnitude add: |a| + |b|, sign unchanged */
+        int32_t lo = amag < bmag ? amag : bmag;
+        int32_t hi = amag < bmag ? bmag : amag;
+        const uint64_t *lop = amag < bmag ? ba->limbs : bl;
+        const uint64_t *hip = amag < bmag ? bl : ba->limbs;
+        if (hi + 1 <= (int32_t)ba->cap) {
+            /* In place; mirrors w_bigint_add_dest's low-window /
+             * tail-move / ripple ordering (dest aliases the SHORTER
+             * operand here, so the tail move reads bl, not dest). */
+            uint64_t carry = bn_add_n(ba->limbs, lop, hip, lo);
+            if (hip != ba->limbs && lo < hi)
+                memmove(ba->limbs + lo, hip + lo,
+                        (size_t)(hi - lo) * sizeof(uint64_t));
+            int32_t i = lo;
+            while (carry && i < hi) {
+                ba->limbs[i]++;
+                carry = ba->limbs[i] == 0;
+                i++;
+            }
+            if (carry) {
+                ba->limbs[hi] = 1;
+                hi++;
+            }
+            ba->size = a_neg ? -hi : hi;
+            return a;
+        }
+        WBigint *nb = bigint_alloc_raw(hi + 1);
+        uint64_t carry = bn_add_n(nb->limbs, lop, hip, lo);
+        if (lo < hi)
+            memcpy(nb->limbs + lo, hip + lo,
+                   (size_t)(hi - lo) * sizeof(uint64_t));
+        int32_t i = lo;
+        while (carry && i < hi) {
+            nb->limbs[i]++;
+            carry = nb->limbs[i] == 0;
+            i++;
+        }
+        if (carry) {
+            nb->limbs[hi] = 1;
+            hi++;
+        }
+        nb->size = a_neg ? -hi : hi;
+        bigint_release(ba);
+        return bigint_finish_mag_add(nb);
+    }
+
+    /* Opposite signs, |b| > |a| strictly (the equal-magnitude tie stayed
+     * in the caller): result = |b| - |a| with b's sign. */
+    int32_t n = bmag;
+    if (n <= (int32_t)ba->cap) {
+        uint64_t borrow = bn_sub_n(ba->limbs, bl, ba->limbs, amag);
+        for (int32_t i = amag; i < n; i++) {
+            uint64_t before = bl[i];
+            ba->limbs[i] = before - borrow;
+            borrow = before < borrow;
+        }
+        /* |b| > |a| forbids a final borrow. */
+        while (n > 0 && ba->limbs[n - 1] == 0) n--;
+        ba->size = b_neg ? -n : n;
+        return bigint_normalize(ba);
+    }
+    WBigint *nb = bigint_alloc_raw(n);
+    uint64_t borrow = bn_sub_n(nb->limbs, bl, ba->limbs, amag);
+    for (int32_t i = amag; i < n; i++) {
+        uint64_t before = bl[i];
+        nb->limbs[i] = before - borrow;
+        borrow = before < borrow;
+    }
+    while (n > 0 && nb->limbs[n - 1] == 0) n--;
+    nb->size = b_neg ? -n : n;
+    bigint_release(ba);
+    return bigint_finish_mag_sub(nb);
+}
+#endif
+
 static WValue w_bigint_addsub_mut(WValue a, WValue b, int negate_b) {
     if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
         return w_bigint_mut_fallback(a, b, negate_b);
@@ -41188,13 +41291,24 @@ static WValue w_bigint_addsub_mut(WValue a, WValue b, int negate_b) {
         return w_bigint_mut_fallback(a, b, negate_b);
     }
     if (negate_b) b_neg = !b_neg;
-    if (bmag > amag)
+    if (bmag > amag) {
+#if BN_ADDSUB_MUT_GROW
+        return w_bigint_addsub_mut_grow(a, ba, a_neg, amag, bl, b_neg, bmag);
+#else
         return w_bigint_mut_fallback(a, b, negate_b);
+#endif
+    }
 
     if (a_neg == b_neg) {
         /* magnitude add; require a spare limb for the possible carry */
-        if (amag + 1 > (int32_t)ba->cap)
+        if (amag + 1 > (int32_t)ba->cap) {
+#if BN_ADDSUB_MUT_GROW
+            return w_bigint_addsub_mut_grow(a, ba, a_neg, amag, bl, b_neg,
+                                            bmag);
+#else
             return w_bigint_mut_fallback(a, b, negate_b);
+#endif
+        }
         uint64_t carry = bn_add_n(ba->limbs, ba->limbs, bl, bmag);
         int32_t i = bmag;
         while (carry && i < amag) {
@@ -41262,6 +41376,82 @@ static WValue w_bigint_mul_mut_fallback(WValue a, WValue b) {
     return r;
 }
 
+/* Multi-limb multiplier over a proven-dead receiver (E4 stage 4).  A full
+ * in-place multiply is open research and NOT attempted; instead the dying
+ * buffer is recycled as the product's DESTINATION:
+ *   - when the receiver's class fits the product, its limbs move to
+ *     retained TLS scratch (GMP's own aliased-mpz_mul copy, O(n) against
+ *     an O(n*m) product) and the full multiply ladder writes into the
+ *     buffer they vacated — bn_linear_word_ws is documented free of
+ *     multiply-dispatch reentrancy, unlike bn_ws;
+ *   - when the product outgrew the class, it computes into a fresh
+ *     allocation and the dead buffer is released for the loop's other
+ *     churn.  Release-before-alloc is safe here (the allocation's
+ *     capacity class strictly exceeds the dead buffer's, so no take can
+ *     hand it back while its limbs are still being read) and measurable
+ *     against release-after via BN_MUL_MUT_RELEASE_BEFORE.
+ * b == a (r *= r) routes through the squaring ladder; b's buffer being
+ * a's without b == a is the tag-flip alias, excluded by the caller's
+ * shared/overlay guards. */
+#ifndef BN_MUL_MUT_WIDE
+#define BN_MUL_MUT_WIDE 1
+#endif
+#ifndef BN_MUL_MUT_RELEASE_BEFORE
+#define BN_MUL_MUT_RELEASE_BEFORE 0
+#endif
+#if BN_MUL_MUT_WIDE
+static __attribute__((noinline)) WValue w_bigint_mul_mut_wide(
+    WValue a, WBigint *ba, int a_neg, int32_t amag, WValue b,
+    WBigint *bb, int32_t bs) {
+    int b_neg = bs < 0;
+    int32_t bmag = b_neg ? -bs : bs;
+    if (bmag == 0)                       /* degenerate synthetic zero */
+        return w_bigint_mul_mut_fallback(a, b);
+    int result_neg = a_neg != b_neg;
+    int32_t cap = amag + bmag;
+    int32_t lo = amag < bmag ? amag : bmag;
+    int32_t hi = amag < bmag ? bmag : amag;
+    /* Mirror bigint_mul_any_generic's NTT layout margin. */
+    if (lo > BN_KARA_THRESHOLD && hi <= 2 * lo && hi >= BN_NTT_THRESHOLD)
+        cap = 2 * hi + 2;
+    int self = bb == ba;
+    if ((int32_t)ba->cap >= cap) {
+        uint64_t *moved = bn_linear_word_ws_get((size_t)amag);
+        if (moved) {
+            memcpy(moved, ba->limbs, (size_t)amag * sizeof(uint64_t));
+            if (self)
+                bigint_sqr_dispatch_cap(ba->limbs, (int32_t)ba->cap,
+                                        moved, amag);
+            else
+                bigint_mul_dispatch_cap(ba->limbs, (int32_t)ba->cap,
+                                        moved, amag, bb->limbs, bmag);
+            int32_t size = amag + bmag;
+            while (size > 0 && ba->limbs[size - 1] == 0) size--;
+            ba->size = result_neg ? -size : size;
+            /* >= 2-limb by >= 2-limb magnitudes never demote. */
+            return a;
+        }
+        /* scratch OOM: fall through to the fresh-destination arm */
+    }
+#if BN_MUL_MUT_RELEASE_BEFORE
+    bigint_release(ba);
+#endif
+    WBigint *nb = bigint_alloc_raw(cap);
+    if (self)
+        bigint_sqr_dispatch_cap(nb->limbs, (int32_t)nb->cap, ba->limbs, amag);
+    else
+        bigint_mul_dispatch_cap(nb->limbs, (int32_t)nb->cap, ba->limbs, amag,
+                                bb->limbs, bmag);
+    int32_t size = amag + bmag;
+    while (size > 0 && nb->limbs[size - 1] == 0) size--;
+    nb->size = result_neg ? -size : size;
+#if !BN_MUL_MUT_RELEASE_BEFORE
+    bigint_release(ba);
+#endif
+    return bigint_box(nb);
+}
+#endif
+
 __attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b) {
     if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
         return w_bigint_mul_mut_fallback(a, b);
@@ -41284,8 +41474,13 @@ __attribute__((preserve_most)) WValue w_bigint_mul_mut(WValue a, WValue b) {
     } else if (w_is_bigint(b)) {
         int32_t bs;
         WBigint *bb = w_bigint_view(b, &bs);
-        if (bs != 1 && bs != -1)
+        if (bs != 1 && bs != -1) {
+#if BN_MUL_MUT_WIDE
+            return w_bigint_mul_mut_wide(a, ba, a_neg, amag, b, bb, bs);
+#else
             return w_bigint_mul_mut_fallback(a, b);
+#endif
+        }
         b_neg = bs < 0;
         w = bb->limbs[0];
     } else {
@@ -41313,6 +41508,56 @@ static WValue w_bigint_div_mut_fallback(WValue a, WValue b) {
     return r;
 }
 
+/* Multi-limb divisor over a proven-dead receiver (E4 stage 4): run the
+ * ordinary magnitude dispatcher — the 4/2 and 6/3 direct forms, the
+ * cached reciprocal, B-Z, Knuth — exactly as the immutable entry would,
+ * then release the dying buffer after its limbs' last read (it stays
+ * live across the dispatch, so no interior allocation can hand it back).
+ * The |a| < |b| identities keep GMP parity without touching a kernel:
+ * a zero quotient retires the receiver outright, and a short remainder
+ * IS the receiver — ownership transfers, no alias is minted.  The
+ * divisor aliasing the receiver's buffer stays with the fallback. */
+#ifndef BN_DIVMOD_MUT_WIDE
+#define BN_DIVMOD_MUT_WIDE 1
+#endif
+#if BN_DIVMOD_MUT_WIDE
+static WValue w_bigint_mod_mut_fallback(WValue a, WValue b);
+static __attribute__((noinline)) WValue w_bigint_div_mut_wide(
+    WValue a, WBigint *ba, int a_neg, int32_t amag, WValue b,
+    WBigint *bb, int32_t bs) {
+    int b_neg = bs < 0;
+    int32_t bmag = b_neg ? -bs : bs;
+    if (bmag == 0)
+        return w_bigint_div_mut_fallback(a, b);   /* synthetic zero raises */
+    if (amag < bmag ||
+        (amag == bmag && mag_cmp(ba->limbs, amag, bb->limbs, bmag) < 0)) {
+        bigint_release(ba);              /* truncated quotient is zero */
+        return w_box_int(0);
+    }
+    WBigint *q;
+    mag_divmod(ba->limbs, amag, bb->limbs, bmag, &q, NULL);
+    if ((a_neg != b_neg) && q->size > 0) q->size = -q->size;
+    bigint_release(ba);
+    return bigint_finish_mag_sub(q);
+}
+
+static __attribute__((noinline)) WValue w_bigint_mod_mut_wide(
+    WValue a, WBigint *ba, int a_neg, int32_t amag, WValue b,
+    WBigint *bb, int32_t bs) {
+    int32_t bmag = bs < 0 ? -bs : bs;
+    if (bmag == 0)
+        return w_bigint_mod_mut_fallback(a, b);   /* synthetic zero raises */
+    if (amag < bmag ||
+        (amag == bmag && mag_cmp(ba->limbs, amag, bb->limbs, bmag) < 0))
+        return a;                        /* remainder IS the receiver */
+    WBigint *r;
+    mag_divmod(ba->limbs, amag, bb->limbs, bmag, NULL, &r);
+    if (a_neg && r->size > 0) r->size = -r->size;
+    bigint_release(ba);
+    return bigint_finish_mag_sub(r);
+}
+#endif
+
 __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b) {
     if (!w_is_bigint(a) || (a & W_BIGINT_SIGN_BIT) != 0)
         return w_bigint_div_mut_fallback(a, b);
@@ -41334,8 +41579,13 @@ __attribute__((preserve_most)) WValue w_bigint_div_mut(WValue a, WValue b) {
     } else if (w_is_bigint(b)) {
         int32_t bs;
         WBigint *bb = w_bigint_view(b, &bs);
-        if (bs != 1 && bs != -1)
+        if (bs != 1 && bs != -1) {
+#if BN_DIVMOD_MUT_WIDE
+            if (bb != ba)
+                return w_bigint_div_mut_wide(a, ba, a_neg, amag, b, bb, bs);
+#endif
             return w_bigint_div_mut_fallback(a, b);
+        }
         b_neg = bs < 0;
         d = bb->limbs[0];
         if (__builtin_expect(d == 0, 0)) die("division by zero");
@@ -41382,8 +41632,13 @@ __attribute__((preserve_most)) WValue w_bigint_mod_mut(WValue a, WValue b) {
     } else if (w_is_bigint(b)) {
         int32_t bs;
         WBigint *bb = w_bigint_view(b, &bs);
-        if (bs != 1 && bs != -1)
+        if (bs != 1 && bs != -1) {
+#if BN_DIVMOD_MUT_WIDE
+            if (bb != ba)
+                return w_bigint_mod_mut_wide(a, ba, a_neg, amag, b, bb, bs);
+#endif
             return w_bigint_mod_mut_fallback(a, b);
+        }
         d = bb->limbs[0];
         if (__builtin_expect(d == 0, 0)) die("modulo by zero");
     } else {
@@ -42054,6 +42309,70 @@ WValue w_bigint_add_dest(WValue dest, WValue x, WValue y) {
         bd->size = hi;
     }
     return dest;
+}
+
+/* Subtract-into-dying-destination (E4 stage 4): the MINUS mirror of the
+ * rotation entry above, emitted for the descending triple
+ *     t = a - b;  a = b;  b = t
+ * (strict left orientation: only the dying var — the one overwritten by
+ * the following slot copy — may be the minuend, so dest aliases x in the
+ * emitted shape). Guard ladder mirrors w_bigint_add_dest. Raw-sign
+ * discipline: only effective-positive operands with |x| >= |y| take the
+ * in-place kernel; equal lengths — adjacent-Fibonacci's common case —
+ * resolve via a top-down scan that also shrinks the subtract window to
+ * the first differing limb. A sign flip, the exact-zero edge retiring
+ * the buffer, or any coercion surprise falls back to the allocating
+ * subtract (bigint_sub_equal_fast's domain stays with that entry). */
+WValue w_bigint_sub_dest(WValue dest, WValue x, WValue y) {
+    if (!w_is_bigint(dest) || (dest & W_BIGINT_SIGN_BIT) != 0)
+        return bigint_sub_any(x, y);
+    WBigint *bd = w_as_bigint(dest);
+    if (bd->shared != 0)
+        return bigint_sub_any(x, y);
+    /* y survives the rotation; a dynamic buffer share must not mutate. */
+    if (w_is_bigint(y) && w_as_bigint(y) == bd)
+        return bigint_sub_any(x, y);
+    uint64_t xs_scratch, ys_scratch;
+    int32_t xl, yl;
+    const uint64_t *xp = integer_limbs(x, &xs_scratch, &xl);
+    const uint64_t *yp = integer_limbs(y, &ys_scratch, &yl);
+    if (xl <= 0 || yl <= 0 || xl < yl)
+        return bigint_sub_any(x, y);
+    int32_t n = xl;
+    if (xl == yl) {
+        int32_t j = xl - 1;
+        while (j >= 0 && xp[j] == yp[j]) j--;
+        if (j < 0) {                    /* exact zero: the dying buffer retires */
+            bd->size = 0;
+            return bigint_normalize(bd);
+        }
+        if (xp[j] < yp[j])              /* sign flip: not this entry's domain */
+            return bigint_sub_any(x, y);
+        n = j + 1;                      /* higher limbs are equal: zero out */
+    }
+    if (n > (int32_t)bd->cap)
+        return bigint_sub_any(x, y);
+#if BN_EQ_PAGE_HAZARD_GUARD
+    /* Same self-healing refusal as the add rotation: a rehomed fallback
+     * result enters the rotation un-aliased. */
+    if ((bd->limbs != xp && bn_addsub_page_hazard(bd->limbs, xp)) ||
+        (bd->limbs != yp && bn_addsub_page_hazard(bd->limbs, yp)))
+        return bigint_sub_any(x, y);
+#endif
+    int32_t lo = yl < n ? yl : n;
+    uint64_t borrow = bn_sub_n(bd->limbs, xp, yp, lo);
+    for (int32_t i = lo; i < n; i++) {
+        /* x's tail minus the ripple borrow; dest may alias x (it does in
+         * the emitted rotation), making this an in-place decrement. */
+        uint64_t before = xp[i];
+        bd->limbs[i] = before - borrow;
+        borrow = before < borrow;
+    }
+    /* xl > yl (or the trimmed window with x's top limb larger) forbids a
+     * final borrow. */
+    while (n > 0 && bd->limbs[n - 1] == 0) n--;
+    bd->size = n;
+    return bigint_normalize(bd);
 }
 
 /* ==== Word-overwrite destination entries (E4 stage 3) ====

@@ -426,11 +426,30 @@
   sc = sum_chunk_var(node, ctx[:mut_accumulators], ctx[:var_types], ctx[:mod])
   if sc != nil
     return lower_while_sum_chunked(ctx, node, sc)
-  # Rotation shape (E4 stage 2): t = a + b; a = b; b = t with the triple
-  # isolated — the sum computes into old-a's dying buffer
-  # (w_bigint_add_dest), so the steady state allocates nothing.
+  # Rotation shape (E4 stage 2; MINUS mirror stage 4): t = a ± b; a = b;
+  # b = t with the triple isolated — the result computes into old-a's
+  # dying buffer (w_bigint_add_dest / w_bigint_sub_dest), so the steady
+  # state allocates nothing.
   rot = env("TUNGSTEN_BIGINT_MUTATE_UNIQUE") == "0" ? nil : rotation_shape_spec(node)
   if rot != nil
+    # Fresh-or-MARKED at the loop boundary: pre-loop plain copies (y = a)
+    # and other pre-loop escapes mint aliases of the SEED values with no
+    # runtime mark, and the first two rotations consume exactly those two
+    # seed values as destinations — a slack-capacity seed then let the
+    # dest entry clobber the alias (reachable on the PLUS rotation too,
+    # not just the subtract mirror that exposed it). Mark both source
+    # seeds once per loop entry: the first two dest calls refuse and fall
+    # back immutably, and every later destination is a loop-minted fresh
+    # value the isolation proof keeps alias-free. Inline seeds no-op.
+    wfn_rot = ctx[:func]
+    seed_a_tv = lower_expression(ctx, Tungsten:AST:Var.new(rot[:a]))
+    seed_a_reg = ensure_i64_value(wfn_rot, seed_a_tv)
+    mark_a = next_temp(wfn_rot)
+    emit_instruction(wfn_rot, {op: :call_direct_i64, temp: mark_a, name: "w_bigint_mark_shared_value", args: [seed_a_reg]})
+    seed_b_tv = lower_expression(ctx, Tungsten:AST:Var.new(rot[:b]))
+    seed_b_reg = ensure_i64_value(wfn_rot, seed_b_tv)
+    mark_b = next_temp(wfn_rot)
+    emit_instruction(wfn_rot, {op: :call_direct_i64, temp: mark_b, name: "w_bigint_mark_shared_value", args: [seed_b_reg]})
     prev_rot = ctx[:rotation_shape]
     ctx[:rotation_shape] = rot
     lower_while_core(ctx, node)

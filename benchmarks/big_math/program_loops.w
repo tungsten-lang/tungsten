@@ -118,6 +118,80 @@
 # word-dest entries reuse the dying previous result the same way. The
 # limbs argument sets the base width (the mul1@2/4/32 parity cells).
 
+-> bench_growaccum(n)
+  # Gap-2 lane: accumulator AND addend both grow, so `r += x` crosses a
+  # capacity class every 64 iterations (grow-once, then stay mut) while
+  # `x += x` is the self-alias doubling shape at the same widths.
+  r = (1 << 63) + 29 ## big
+  x = (1 << 62) + 11 ## big
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r += x
+    x += x
+    i += 1
+  t1 = clock()
+  c = r % 1000000007
+  << "growaccum\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
+-> bench_bigmulchain(n)
+  # Gap-3 lane: multi-limb multiplier chain. The product cannot be formed
+  # in place; the dying receiver is recycled as the product's destination
+  # (or released before the product allocates, once it can no longer fit).
+  r = (1 << 80) + 17 ## big
+  m = (1 << 100) + 12345
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r *= m
+    i += 1
+  t1 = clock()
+  c = r % 1000000007
+  << "bigmulchain\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
+-> bench_modwide(n, limbs)
+  # Gaps 1+4 lane: after a multi-limb `%=` leaves a two-limb residue, the
+  # next `+=` sees |b| > |a| every pass (the old immutable fallback leaked
+  # the dying receiver here), and the reduction itself runs the multi-limb
+  # divisor path on a proven-dead receiver.
+  r = (1 << 8191) + 123456789 ## big
+  bits = limbs * 64 - 1
+  bump = (1 << bits) + 987654321
+  divisor = (1 << 127) + 987654321987654321
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r += bump
+    r %= divisor
+    i += 1
+  t1 = clock()
+  c = r % 1000000007
+  << "modwide" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
+-> bench_fibdown(n)
+  # Gap-5 lane: descending Fibonacci — the subtract rotation
+  # t = b - a; b = a; a = t computes the difference into old-b's dying
+  # buffer (w_bigint_sub_dest), the mirror of addchain's rotation.
+  a = 0 ## big
+  b = 1 ## big
+  j = 0 ## i64
+  seed = n + 30
+  while j < seed
+    t = a + b
+    a = b
+    b = t
+    j = j + 1
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    t = b - a
+    b = a
+    a = t
+    i = i + 1
+  t1 = clock()
+  c = (a + b) % 1000000007
+  << "fibdown\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
 -> bench_wordadd(n, limbs)
   a = ((1 << (limbs * 64 - 8)) + 987654321) ## big
   r = 0 ## big
@@ -275,6 +349,14 @@ if workload == "modchain" || workload == "all"
   bench_modchain(n > 0 ? n : 2000000, limbs)
 if workload == "sqrchain" || workload == "all"
   bench_sqrchain(n > 0 ? n : 2000000, limbs)
+if workload == "growaccum" || workload == "all"
+  bench_growaccum(n > 0 ? n : 30000)
+if workload == "bigmulchain" || workload == "all"
+  bench_bigmulchain(n > 0 ? n : 4000)
+if workload == "modwide" || workload == "all"
+  bench_modwide(n > 0 ? n : 500000, limbs)
+if workload == "fibdown" || workload == "all"
+  bench_fibdown(n > 0 ? n : 100000)
 if workload == "wordadd" || workload == "all"
   bench_wordadd(n > 0 ? n : 2000000, limbs)
 if workload == "wordsub" || workload == "all"

@@ -496,11 +496,12 @@
   if ctx[:tag_facts] != nil && target != nil && is_ast_node?(target) && ast_kind(target) == :var
     ctx[:tag_facts][target.name] = nil
 
-  # Rotation shape (E4 stage 2): the triple's FIRST statement computes
-  # the sum into old-a's dying buffer; the two slot-copy statements that
-  # follow lower ordinarily. The vars live in slots (the isolation proof
-  # admits no bindings-only uses), and add_dest's runtime guards degrade
-  # any dynamic surprise to the allocating add.
+  # Rotation shape (E4 stage 2, MINUS mirror stage 4): the triple's FIRST
+  # statement computes the sum — or, for the descending triple, the
+  # difference — into old-a's dying buffer; the two slot-copy statements
+  # that follow lower ordinarily. The vars live in slots (the isolation
+  # proof admits no bindings-only uses), and the dest entries' runtime
+  # guards degrade any dynamic surprise to the allocating op.
   rot = ctx[:rotation_shape]
   if rot != nil && ast_kind(target) == :var && target.name == rot[:t]
     # Boxed accumulators only: raw-i64-promoted vars keep their documented
@@ -517,14 +518,17 @@
     if is_machine_int_type(ttty) || ttty in (:raw_int :raw_i64 :raw_u64) || (ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][rot[:t]] != nil)
       rot_boxed = false
     v = node.value
-    if rot_boxed && v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op == :PLUS
+    if rot_boxed && v != nil && is_ast_node?(v) && ast_kind(v) == :binary_op && v.op == rot[:op] && v.op in (:PLUS :MINUS)
       wfn2 = ctx[:func]
       a_tv = lower_expression(ctx, Tungsten:AST:Var.new(rot[:a]))
       b_tv = lower_expression(ctx, Tungsten:AST:Var.new(rot[:b]))
       a_reg = ensure_i64_value(wfn2, a_tv)
       b_reg = ensure_i64_value(wfn2, b_tv)
       dest_temp = next_temp(wfn2)
-      emit_instruction(wfn2, {op: :call_direct_i64, temp: dest_temp, name: "w_bigint_add_dest", args: [a_reg, a_reg, b_reg]})
+      # dest = old rot[:a] value; for MINUS the walker pinned rot[:a] as
+      # the minuend, so the (dest, x, y) argument shape is identical.
+      rot_entry = rot[:op] == :MINUS ? "w_bigint_sub_dest" : "w_bigint_add_dest"
+      emit_instruction(wfn2, {op: :call_direct_i64, temp: dest_temp, name: rot_entry, args: [a_reg, a_reg, b_reg]})
       range_binding_invalidate(ctx, rot[:t])
       ctx[:bindings][rot[:t]] = nil
       t_slot = ensure_var_slot(wfn2, rot[:t])

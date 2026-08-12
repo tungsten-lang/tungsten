@@ -2393,9 +2393,14 @@
   b_name = s3.target.name
   if t_name == a_name || t_name == b_name || a_name == b_name
     return nil
-  # s1: t = a + b (either operand order)
+  # s1: t = a + b (either operand order), or t = a - b (E4 stage 4 —
+  # strict left orientation: the dying var, s2's target, must be the
+  # MINUEND, because the subtract entry computes x - y into old-a's
+  # buffer and only the x side may alias that dying destination)
   v1 = s1.value
-  if v1 == nil || !is_ast_node?(v1) || ast_kind(v1) != :binary_op || v1.op != :PLUS
+  if v1 == nil || !is_ast_node?(v1) || ast_kind(v1) != :binary_op
+    return nil
+  if !(v1.op == :PLUS || (v1.op == :MINUS && env("TUNGSTEN_BIGINT_SUB_DEST") != "0"))
     return nil
   if v1.left == nil || v1.right == nil || !is_ast_node?(v1.left) || !is_ast_node?(v1.right)
     return nil
@@ -2403,15 +2408,19 @@
     return nil
   n1 = v1.left.name
   n2 = v1.right.name
-  if !((n1 == a_name && n2 == b_name) || (n1 == b_name && n2 == a_name))
-    return nil
+  if v1.op == :PLUS
+    if !((n1 == a_name && n2 == b_name) || (n1 == b_name && n2 == a_name))
+      return nil
+  else
+    if !(n1 == a_name && n2 == b_name)
+      return nil
   # s2: a = b
   if s2.value == nil || !is_ast_node?(s2.value) || ast_kind(s2.value) != :var || s2.value.name != b_name
     return nil
   # s3: b = t
   if s3.value == nil || !is_ast_node?(s3.value) || ast_kind(s3.value) != :var || s3.value.name != t_name
     return nil
-  {t: t_name, a: a_name, b: b_name, index: i}
+  {t: t_name, a: a_name, b: b_name, index: i, op: v1.op}
 
 -> rotation_shape_spec(node)
   if node.body == nil

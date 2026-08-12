@@ -1223,3 +1223,32 @@ and 64 limbs, parity at 8). Negatives kept on the ledger:
   remaining constant is the boxed entry + guard walk per pass, which
   mpz_addmul does not pay. Condition: an emitted direct-call shape that
   skips the one-limb word parse when factors are statically multi-limb.
+
+## Mut-wide release-BEFORE-alloc ordering — NOT taken (2026-08-11)
+
+For `a *= multi-limb b` when the product outgrows the dying receiver's
+class (`w_bigint_mul_mut_wide`'s fresh-destination arm), releasing the
+dead buffer BEFORE the product allocation is memory-safe (the product's
+capacity class strictly exceeds the dead buffer's, so no take can hand it
+back while its limbs are still read) and was hypothesized to let the hot
+slot serve the loop's other churn one step earlier. Measured on the E3
+bigmulchain lane (8x ABBA, n=4000, 2-limb multiplier): release-after
+6544 ns/iter vs release-before 6557 ns/iter — indistinguishable (IQR
+~15 ns). The arm is the minority path (the cap-fit dest recycle covers
+most passes), and the released class is dead weight for the very next
+allocation either way. Default stays release-after (the simpler "operand
+buffers stay live until their last read" invariant); the A/B knob is
+`BN_MUL_MUT_RELEASE_BEFORE`.
+
+The same campaign's soundness note, recorded here because it bounds every
+future dest-entry: the rotation transform's dying destination is the
+PRE-LOOP SEED VALUE on the first two passes, and pre-loop aliases of the
+seeds (plain `y = a` slot copies, container stores, call escapes) carry
+no shared mark — a slack-capacity seed then let `w_bigint_add_dest`
+clobber the alias (exact-class seeds only survived behind the carry-limb
+capacity refusal). Fixed at lowering: the rotation arm marks both source
+seeds once per loop entry, so the first two dest calls refuse immutably
+and every later destination is loop-minted and alias-free by the
+isolation proof. Battery pins: adv.rot_add_prealias_slack,
+adv.fibdown_prealias, adv.rot_escape_hash in
+spec/compiler/bigint_mutate_grow_spec.w.

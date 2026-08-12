@@ -757,6 +757,9 @@ WValue w_bigint_submul_any(WValue a, WValue x, WValue y);
 /* Rotation-shape add into a dying destination buffer (E4 stage 2);
  * called unconditionally in the emitted shape, so plain CC. */
 WValue w_bigint_add_dest(WValue dest, WValue x, WValue y);
+/* Rotation-shape subtract mirror (E4 stage 4): x - y into the dying
+ * destination for the descending triple; same contract as add_dest. */
+WValue w_bigint_sub_dest(WValue dest, WValue x, WValue y);
 /* Word-overwrite destination entries (E4 stage 3): `r = a op w` whose
  * dying old r arrives as `dead`. Guards inside; fail-open to the
  * polymorphic op with the dead buffer released. */

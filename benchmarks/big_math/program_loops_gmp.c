@@ -139,6 +139,96 @@ static void bench_sqrchain(long n, unsigned long limbs) {
     mpz_clears(r, bump, divisor, NULL);
 }
 
+/* Gap-closure lane twins (E4 stage 4): growth, multi-limb multiplier,
+ * multi-limb modulus, and the descending-Fibonacci subtract rotation —
+ * all with retained mpz destinations. */
+static void bench_growaccum(long n) {
+    mpz_t r, x;
+    mpz_inits(r, x, NULL);
+    mpz_set_ui(r, 1);
+    mpz_mul_2exp(r, r, 63);
+    mpz_add_ui(r, r, 29UL);
+    mpz_set_ui(x, 1);
+    mpz_mul_2exp(x, x, 62);
+    mpz_add_ui(x, x, 11UL);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) {
+        mpz_add(r, r, x);
+        mpz_add(x, x, x);
+    }
+    double t1 = now_sec();
+    printf("growaccum\t%ld\t%.1f\t%lu\n", n, (t1 - t0) * 1e9 / (double)n,
+           checksum(r));
+    mpz_clears(r, x, NULL);
+}
+
+static void bench_bigmulchain(long n) {
+    mpz_t r, m;
+    mpz_inits(r, m, NULL);
+    mpz_set_ui(r, 1);
+    mpz_mul_2exp(r, r, 80);
+    mpz_add_ui(r, r, 17UL);
+    mpz_set_ui(m, 1);
+    mpz_mul_2exp(m, m, 100);
+    mpz_add_ui(m, m, 12345UL);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) mpz_mul(r, r, m);
+    double t1 = now_sec();
+    printf("bigmulchain\t%ld\t%.1f\t%lu\n", n, (t1 - t0) * 1e9 / (double)n,
+           checksum(r));
+    mpz_clears(r, m, NULL);
+}
+
+static void bench_modwide(long n, unsigned long limbs) {
+    mpz_t r, bump, divisor;
+    mpz_inits(r, bump, divisor, NULL);
+    mpz_set_ui(r, 1);
+    mpz_mul_2exp(r, r, 8191UL);
+    mpz_add_ui(r, r, 123456789UL);
+    mpz_set_ui(bump, 1);
+    mpz_mul_2exp(bump, bump, limbs * 64UL - 1UL);
+    mpz_add_ui(bump, bump, 987654321UL);
+    mpz_set_ui(divisor, 1);
+    mpz_mul_2exp(divisor, divisor, 127);
+    {
+        mpz_t w;
+        mpz_init_set_str(w, "987654321987654321", 10);
+        mpz_add(divisor, divisor, w);
+        mpz_clear(w);
+    }
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) {
+        mpz_add(r, r, bump);
+        mpz_tdiv_r(r, r, divisor);
+    }
+    double t1 = now_sec();
+    printf("modwide%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n, checksum(r));
+    mpz_clears(r, bump, divisor, NULL);
+}
+
+static void bench_fibdown(long n) {
+    mpz_t a, b, t;
+    mpz_init_set_ui(a, 0);
+    mpz_init_set_ui(b, 1);
+    mpz_init(t);
+    long seed = n + 30;
+    for (long j = 0; j < seed; j++) {
+        mpz_add(a, a, b);   /* (a,b) = (F(j+1), F(j+2)) after swap */
+        mpz_swap(a, b);
+    }
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) {
+        mpz_sub(b, b, a);   /* b := F(k-1) */
+        mpz_swap(a, b);     /* (a,b) = (F(k-1), F(k)) */
+    }
+    double t1 = now_sec();
+    mpz_add(t, a, b);
+    printf("fibdown\t%ld\t%.1f\t%lu\n", n, (t1 - t0) * 1e9 / (double)n,
+           checksum(t));
+    mpz_clears(a, b, t, NULL);
+}
+
 /* Word-overwrite lanes (E4 stage 3 twin): a retained base times/plus/minus
  * one word, written into a retained destination every pass — idiomatic
  * mpz_*_ui. Matches program_loops.w's wordadd/wordsub/wordmul/wordchain. */
@@ -297,6 +387,14 @@ int main(int argc, char **argv) {
         bench_modchain(n > 0 ? n : 2000000, limbs);
     if (!strcmp(workload, "sqrchain") || !strcmp(workload, "all"))
         bench_sqrchain(n > 0 ? n : 2000000, limbs);
+    if (!strcmp(workload, "growaccum") || !strcmp(workload, "all"))
+        bench_growaccum(n > 0 ? n : 30000);
+    if (!strcmp(workload, "bigmulchain") || !strcmp(workload, "all"))
+        bench_bigmulchain(n > 0 ? n : 4000);
+    if (!strcmp(workload, "modwide") || !strcmp(workload, "all"))
+        bench_modwide(n > 0 ? n : 500000, limbs);
+    if (!strcmp(workload, "fibdown") || !strcmp(workload, "all"))
+        bench_fibdown(n > 0 ? n : 100000);
     if (!strcmp(workload, "wordadd") || !strcmp(workload, "all"))
         bench_wordadd(n > 0 ? n : 2000000, limbs);
     if (!strcmp(workload, "wordsub") || !strcmp(workload, "all"))

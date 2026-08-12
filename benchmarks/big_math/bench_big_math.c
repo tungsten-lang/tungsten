@@ -6182,6 +6182,348 @@ int main(int argc, char **argv) {
                     dief("fuzz-mut carry growth wrong l=%d", l);
                 mpz_clears(zo, zg2, NULL);
             }
+            /* carry past an EXACT class (E4 stage 4): all-ones in a
+             * cap == l buffer (power-of-two widths land exactly) must
+             * allocate the next class and release the dying receiver. */
+            {
+                WBigint *ones = bigint_alloc(l);
+                if ((int32_t)ones->cap == l) {
+                    for (int32_t i = 0; i < l; i++) ones->limbs[i] = ~0ULL;
+                    ones->size = l;
+                    WValue got =
+                        w_bigint_add_mut(bigint_box(ones), w_box_int(1));
+                    mpz_t zo, zg2;
+                    mpz_inits(zo, zg2, NULL);
+                    mpz_set_ui(zo, 1);
+                    mpz_mul_2exp(zg2, zo, (mp_bitcnt_t)(64 * l));
+                    if (!value_matches_mpz(got, zg2))
+                        dief("fuzz-mut exact-class carry wrong l=%d", l);
+                    mpz_clears(zo, zg2, NULL);
+                } else {
+                    bigint_release(ones);
+                }
+            }
+            /* growth arms (E4 stage 4): wide b across all four sign pairs.
+             * wl = l+1 lands inside the receiver's class slack at most
+             * widths (in-place |b| > |a|); wl = 2l+2 always exceeds it
+             * (allocate + release). The live operand must survive. */
+            {
+                for (int wide = 0; wide < 2; wide++) {
+                    int32_t wl = wide ? 2 * l + 2 : l + 1;
+                    for (int sa = 0; sa < 2; sa++) {
+                        for (int sb = 0; sb < 2; sb++) {
+                            for (int sub = 0; sub < 2; sub++) {
+                                WValue a0, b0, m0, w0, w1, wm;
+                                bench_boxed_operands(BENCH_BOXED_ADD, l,
+                                                     &a0, &b0, &m0);
+                                bench_boxed_operands(BENCH_BOXED_ADD, wl,
+                                                     &w0, &w1, &wm);
+                                WValue a_ref = bench_clone_integer(a0);
+                                WValue b_use = bench_clone_integer(w0);
+                                if (sa) w_as_bigint(a_ref)->size *= -1;
+                                if (sb) w_as_bigint(b_use)->size *= -1;
+                                WValue b_backup = bench_clone_integer(b_use);
+                                WValue want = sub
+                                    ? bigint_sub_any(a_ref, b_use)
+                                    : bigint_add_any(a_ref, b_use);
+                                WValue a_mut = bench_clone_integer(a0);
+                                if (sa) w_as_bigint(a_mut)->size *= -1;
+                                WValue got = sub
+                                    ? w_bigint_sub_mut(a_mut, b_use)
+                                    : w_bigint_add_mut(a_mut, b_use);
+                                if (bigint_compare(got, want) != 0)
+                                    dief("fuzz-mut grow %s mismatch l=%d wl=%d sa=%d sb=%d",
+                                         sub ? "sub" : "add", l, wl, sa, sb);
+                                if (bigint_compare(b_use, b_backup) != 0)
+                                    dief("fuzz-mut grow corrupted live operand l=%d wl=%d",
+                                         l, wl);
+                                mpz_t za, zb, zg;
+                                mpz_inits(za, zb, zg, NULL);
+                                gmp_import_value(za, a_ref);
+                                gmp_import_value(zb, b_use);
+                                if (sub) mpz_sub(zg, za, zb);
+                                else mpz_add(zg, za, zb);
+                                if (!value_matches_mpz(got, zg))
+                                    dief("fuzz-mut grow %s GMP mismatch l=%d wl=%d sa=%d sb=%d",
+                                         sub ? "sub" : "add", l, wl, sa, sb);
+                                mpz_clears(za, zb, zg, NULL);
+                            }
+                        }
+                    }
+                }
+                /* shared / overlay receivers refuse the grow arms too */
+                WValue a0, b0, m0, w0, w1, wm;
+                bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                bench_boxed_operands(BENCH_BOXED_ADD, 2 * l + 2,
+                                     &w0, &w1, &wm);
+                WValue shared = bench_clone_integer(a0);
+                w_bigint_mark_shared(w_as_bigint(shared));
+                WValue got = w_bigint_add_mut(shared, w0);
+                if (got == shared || bigint_compare(shared, a0) != 0)
+                    dief("fuzz-mut grow shared receiver corrupted l=%d", l);
+                WValue flipped = w_neg(bench_clone_integer(a0));
+                WValue flipped_before = bench_clone_integer(flipped);
+                WValue got2 = w_bigint_sub_mut(flipped, w0);
+                if (got2 == flipped ||
+                    bigint_compare(flipped, flipped_before) != 0)
+                    dief("fuzz-mut grow overlay receiver corrupted l=%d", l);
+            }
+            /* multi-limb multiplier (E4 stage 4): dest recycle when the
+             * class fits, fresh-dest otherwise; sign pairs; self-square;
+             * live-operand survival; shared/overlay refusal. */
+            {
+                static const int32_t bws[] = {2, 3, 5};
+                for (size_t bi = 0; bi < sizeof(bws) / sizeof(bws[0]); bi++) {
+                    int32_t wl = bws[bi];
+                    for (int sa = 0; sa < 2; sa++) {
+                        for (int sb = 0; sb < 2; sb++) {
+                            WValue a0, b0, m0, w0, w1, wm;
+                            bench_boxed_operands(BENCH_BOXED_ADD, l,
+                                                 &a0, &b0, &m0);
+                            bench_boxed_operands(BENCH_BOXED_ADD, wl,
+                                                 &w0, &w1, &wm);
+                            WValue a_ref = bench_clone_integer(a0);
+                            WValue b_use = bench_clone_integer(w0);
+                            if (sa) w_as_bigint(a_ref)->size *= -1;
+                            if (sb) w_as_bigint(b_use)->size *= -1;
+                            WValue b_backup = bench_clone_integer(b_use);
+                            WValue want = bigint_mul_any(a_ref, b_use);
+                            WValue a_mut = bench_clone_integer(a0);
+                            if (sa) w_as_bigint(a_mut)->size *= -1;
+                            WValue got = w_bigint_mul_mut(a_mut, b_use);
+                            if (bigint_compare(got, want) != 0)
+                                dief("fuzz-mut mul-wide mismatch l=%d wl=%d sa=%d sb=%d",
+                                     l, wl, sa, sb);
+                            if (bigint_compare(b_use, b_backup) != 0)
+                                dief("fuzz-mut mul-wide corrupted operand l=%d wl=%d",
+                                     l, wl);
+                            mpz_t za, zb, zg;
+                            mpz_inits(za, zb, zg, NULL);
+                            gmp_import_value(za, a_ref);
+                            gmp_import_value(zb, b_use);
+                            mpz_mul(zg, za, zb);
+                            if (!value_matches_mpz(got, zg))
+                                dief("fuzz-mut mul-wide GMP mismatch l=%d wl=%d sa=%d sb=%d",
+                                     l, wl, sa, sb);
+                            mpz_clears(za, zb, zg, NULL);
+                        }
+                    }
+                }
+                /* capacity-fit recycle keeps the receiver's own box */
+                {
+                    WValue fit = bench_bigint_with_capacity(
+                        l, 2 * l + 8,
+                        UINT64_C(0x5851f42d4c957f2d) + (uint64_t)l);
+                    WValue w0, w1, wm;
+                    bench_boxed_operands(BENCH_BOXED_ADD, 2, &w0, &w1, &wm);
+                    WValue want = bigint_mul_any(bench_clone_integer(fit),
+                                                 bench_clone_integer(w0));
+                    WValue got = w_bigint_mul_mut(fit, w0);
+                    if (got != fit)
+                        dief("fuzz-mut mul-wide fit did not recycle l=%d", l);
+                    if (bigint_compare(got, want) != 0)
+                        dief("fuzz-mut mul-wide fit mismatch l=%d", l);
+                }
+                /* self-square through the wide arm (r *= r, multi-limb) */
+                if (l >= 2) {
+                    WValue a0, b0, m0;
+                    bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                    WValue want = bigint_mul_any(bench_clone_integer(a0),
+                                                 bench_clone_integer(a0));
+                    WValue x = bench_clone_integer(a0);
+                    WValue got = w_bigint_mul_mut(x, x);
+                    if (bigint_compare(got, want) != 0)
+                        dief("fuzz-mut mul-wide self-square mismatch l=%d", l);
+                }
+                /* refusals leave a shared/overlay receiver intact */
+                {
+                    WValue a0, b0, m0, w0, w1, wm;
+                    bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                    bench_boxed_operands(BENCH_BOXED_ADD, 3, &w0, &w1, &wm);
+                    WValue shared = bench_clone_integer(a0);
+                    w_bigint_mark_shared(w_as_bigint(shared));
+                    WValue got = w_bigint_mul_mut(shared, w0);
+                    if (got == shared || bigint_compare(shared, a0) != 0)
+                        dief("fuzz-mut mul-wide shared corrupted l=%d", l);
+                    WValue flipped = w_neg(bench_clone_integer(a0));
+                    WValue before = bench_clone_integer(flipped);
+                    WValue got2 = w_bigint_mul_mut(flipped, w0);
+                    if (got2 == flipped ||
+                        bigint_compare(flipped, before) != 0)
+                        dief("fuzz-mut mul-wide overlay corrupted l=%d", l);
+                }
+            }
+            /* multi-limb divisor div/mod (E4 stage 4): every divisor band
+             * incl. |a| < |b| identities, sign pairs, divisor survival,
+             * divisor-aliasing-receiver fallback, refusals. */
+            {
+                static const int32_t dws[] = {2, 3, 6};
+                for (size_t di = 0; di < sizeof(dws) / sizeof(dws[0]); di++) {
+                    int32_t wl = dws[di];
+                    for (int sa = 0; sa < 2; sa++) {
+                        for (int sb = 0; sb < 2; sb++) {
+                            WValue a0, b0, m0, w0, w1, wm;
+                            bench_boxed_operands(BENCH_BOXED_ADD, l,
+                                                 &a0, &b0, &m0);
+                            bench_boxed_operands(BENCH_BOXED_ADD, wl,
+                                                 &w0, &w1, &wm);
+                            WValue d_use = bench_clone_integer(w0);
+                            if (sb) w_as_bigint(d_use)->size *= -1;
+                            WValue d_backup = bench_clone_integer(d_use);
+                            WValue a_ref = bench_clone_integer(a0);
+                            if (sa) w_as_bigint(a_ref)->size *= -1;
+                            WValue want_q = bigint_div_any(
+                                bench_clone_integer(a_ref), d_use);
+                            WValue want_r = bigint_mod_any(
+                                bench_clone_integer(a_ref), d_use);
+                            WValue a_mut = bench_clone_integer(a0);
+                            if (sa) w_as_bigint(a_mut)->size *= -1;
+                            WValue got_q = w_bigint_div_mut(a_mut, d_use);
+                            if (bigint_compare(got_q, want_q) != 0)
+                                dief("fuzz-mut div-wide mismatch l=%d wl=%d sa=%d sb=%d",
+                                     l, wl, sa, sb);
+                            WValue a_mut2 = bench_clone_integer(a0);
+                            if (sa) w_as_bigint(a_mut2)->size *= -1;
+                            WValue got_r = w_bigint_mod_mut(a_mut2, d_use);
+                            if (bigint_compare(got_r, want_r) != 0)
+                                dief("fuzz-mut mod-wide mismatch l=%d wl=%d sa=%d sb=%d",
+                                     l, wl, sa, sb);
+                            if (bigint_compare(d_use, d_backup) != 0)
+                                dief("fuzz-mut divmod-wide corrupted divisor l=%d wl=%d",
+                                     l, wl);
+                            mpz_t za, zd, zq, zr;
+                            mpz_inits(za, zd, zq, zr, NULL);
+                            gmp_import_value(za, a_ref);
+                            gmp_import_value(zd, d_use);
+                            mpz_tdiv_q(zq, za, zd);
+                            mpz_tdiv_r(zr, za, zd);
+                            if (!value_matches_mpz(got_q, zq) ||
+                                !value_matches_mpz(got_r, zr))
+                                dief("fuzz-mut divmod-wide GMP mismatch l=%d wl=%d sa=%d sb=%d",
+                                     l, wl, sa, sb);
+                            mpz_clears(za, zd, zq, zr, NULL);
+                        }
+                    }
+                }
+                /* |a| < |b|: mod returns the receiver's own box; div zero */
+                if (l >= 2) {
+                    WValue a0, b0, m0, w0, w1, wm;
+                    bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                    bench_boxed_operands(BENCH_BOXED_ADD, l + 2,
+                                         &w0, &w1, &wm);
+                    WValue a_mut = bench_clone_integer(a0);
+                    WValue got_r = w_bigint_mod_mut(a_mut, w0);
+                    if (got_r != a_mut)
+                        dief("fuzz-mut mod-wide identity moved l=%d", l);
+                    if (bigint_compare(got_r, a0) != 0)
+                        dief("fuzz-mut mod-wide identity wrong l=%d", l);
+                    WValue a_mut2 = bench_clone_integer(a0);
+                    WValue got_q = w_bigint_div_mut(a_mut2, w0);
+                    if (!w_is_int(got_q) || w_as_int(got_q) != 0)
+                        dief("fuzz-mut div-wide short nonzero l=%d", l);
+                }
+                /* divisor aliasing the receiver falls back to identities */
+                if (l >= 2) {
+                    WValue a0, b0, m0;
+                    bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                    WValue x = bench_clone_integer(a0);
+                    WValue gq = w_bigint_div_mut(x, x);
+                    if (!w_is_int(gq) || w_as_int(gq) != 1)
+                        dief("fuzz-mut div-wide self not one l=%d", l);
+                    WValue x2 = bench_clone_integer(a0);
+                    WValue gr = w_bigint_mod_mut(x2, x2);
+                    if (!w_is_int(gr) || w_as_int(gr) != 0)
+                        dief("fuzz-mut mod-wide self nonzero l=%d", l);
+                }
+                /* refusals leave a shared/overlay receiver intact */
+                if (l >= 2) {
+                    WValue a0, b0, m0, w0, w1, wm;
+                    bench_boxed_operands(BENCH_BOXED_ADD, l, &a0, &b0, &m0);
+                    bench_boxed_operands(BENCH_BOXED_ADD, 2, &w0, &w1, &wm);
+                    WValue shared = bench_clone_integer(a0);
+                    w_bigint_mark_shared(w_as_bigint(shared));
+                    WValue got = w_bigint_mod_mut(shared, w0);
+                    if (got == shared || bigint_compare(shared, a0) != 0)
+                        dief("fuzz-mut mod-wide shared corrupted l=%d", l);
+                    WValue flipped = w_neg(bench_clone_integer(a0));
+                    WValue before = bench_clone_integer(flipped);
+                    WValue got2 = w_bigint_div_mut(flipped, w0);
+                    if (got2 == flipped ||
+                        bigint_compare(flipped, before) != 0)
+                        dief("fuzz-mut div-wide overlay corrupted l=%d", l);
+                }
+            }
+            /* subtract rotation entry (E4 stage 4): dest aliasing x,
+             * equal-length window trim, exact zero, sign-flip fallback,
+             * y-alias refusal, shared-dest refusal, separate dest. */
+            {
+                WValue x0, y0, m0;
+                bench_boxed_operands(BENCH_BOXED_ADD, l, &x0, &y0, &m0);
+                WValue y_small = w_bit_shr(bench_clone_integer(x0),
+                                           w_box_int(1));
+                WValue y_backup = bench_clone_integer(y_small);
+                /* dest == x (the emitted rotation shape) */
+                WValue want = bigint_sub_any(bench_clone_integer(x0),
+                                             y_small);
+                WValue dest = bench_clone_integer(x0);
+                WValue got = w_bigint_sub_dest(dest, dest, y_small);
+                if (bigint_compare(got, want) != 0)
+                    dief("fuzz-mut sub-dest mismatch l=%d", l);
+                if (bigint_compare(y_small, y_backup) != 0)
+                    dief("fuzz-mut sub-dest corrupted y l=%d", l);
+                mpz_t zx, zy, zg;
+                mpz_inits(zx, zy, zg, NULL);
+                gmp_import_value(zx, x0);
+                gmp_import_value(zy, y_small);
+                mpz_sub(zg, zx, zy);
+                if (!value_matches_mpz(got, zg))
+                    dief("fuzz-mut sub-dest GMP mismatch l=%d", l);
+                mpz_clears(zx, zy, zg, NULL);
+                /* near-equal demotes through normalize */
+                WValue y_near = bigint_sub_any(bench_clone_integer(x0),
+                                               w_box_int(1));
+                WValue dest2 = bench_clone_integer(x0);
+                WValue got2 = w_bigint_sub_dest(dest2, dest2, y_near);
+                if (!w_is_int(got2) || w_as_int(got2) != 1)
+                    dief("fuzz-mut sub-dest near-equal wrong l=%d", l);
+                /* exact zero retires the dying buffer */
+                WValue dest3 = bench_clone_integer(x0);
+                WValue y_eq = bench_clone_integer(x0);
+                WValue got3 = w_bigint_sub_dest(dest3, dest3, y_eq);
+                if (!w_is_int(got3) || w_as_int(got3) != 0)
+                    dief("fuzz-mut sub-dest zero wrong l=%d", l);
+                /* |x| < |y|: sign flip stays with the allocating entry */
+                WValue y_big = bigint_add_any(bench_clone_integer(x0),
+                                              w_box_int(12345));
+                WValue dest4 = bench_clone_integer(x0);
+                WValue want4 = bigint_sub_any(bench_clone_integer(x0),
+                                              bench_clone_integer(y_big));
+                WValue got4 = w_bigint_sub_dest(dest4, dest4, y_big);
+                if (bigint_compare(got4, want4) != 0)
+                    dief("fuzz-mut sub-dest flip mismatch l=%d", l);
+                /* y aliasing dest refuses and leaves y intact */
+                WValue x_live = bench_clone_integer(x0);
+                WValue y_alias = bench_clone_integer(y_small);
+                WValue y_alias_backup = bench_clone_integer(y_alias);
+                WValue got5 = w_bigint_sub_dest(y_alias, x_live, y_alias);
+                if (bigint_compare(got5, want) != 0 ||
+                    bigint_compare(y_alias, y_alias_backup) != 0)
+                    dief("fuzz-mut sub-dest y-alias corrupted l=%d", l);
+                /* shared dest refuses; x operand (same buffer) intact */
+                WValue dest6 = bench_clone_integer(x0);
+                w_bigint_mark_shared(w_as_bigint(dest6));
+                WValue got6 = w_bigint_sub_dest(dest6, dest6, y_small);
+                if (bigint_compare(got6, want) != 0 ||
+                    bigint_compare(dest6, x0) != 0)
+                    dief("fuzz-mut sub-dest shared corrupted l=%d", l);
+                /* separate dying dest (neither operand's buffer) */
+                WValue dest7 = bench_bigint_with_capacity(
+                    l, l + 2, UINT64_C(0x9e3779b97f4a7c15) + (uint64_t)l);
+                WValue got7 = w_bigint_sub_dest(
+                    dest7, bench_clone_integer(x0), y_small);
+                if (bigint_compare(got7, want) != 0)
+                    dief("fuzz-mut sub-dest separate mismatch l=%d", l);
+            }
         }
         printf("mutate-if-unique differential: CLEAN (1..%d limbs)\n",
                max_limbs);

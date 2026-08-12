@@ -55,6 +55,25 @@ COMMANDS
     bit open <name>         Open a dependency's source in $EDITOR
     bit viz                 Visualize the dependency graph
 
+INSTALL STORAGE
+
+    bit install writes immutable package versions beneath:
+
+        $BIT_HOME/<name>/<version>/
+
+    BIT_HOME defaults to $TUNGSTEN_HOME/bits, and TUNGSTEN_HOME defaults to
+    ~/.tungsten. Bitfile.lock selects the exact version in both interpreted
+    and compiled programs. A current symlink supports standalone programs
+    without a project lockfile.
+
+    Use --dir DIR for another user-owned root. System-wide installation is
+    explicit: --system uses /usr/local/lib/tungsten/bits, and
+    --system --prefix DIR selects another shared root.
+
+    Remote lock entries require SHA256 metadata. Archives are verified before
+    unpacking, unsafe member paths are rejected, and optional SSH signatures
+    are verified when their metadata is present.
+
 PROJECT STRUCTURE
 
     bit new pg

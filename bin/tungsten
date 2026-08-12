@@ -62,6 +62,13 @@ CUSTOM_RUBY="$ROOT/src/patched/ruby/ruby"
 . "$ROOT/bin/commands/config.sh"
 tungsten_load_build_config
 
+# User package storage is distinct from this source checkout's bundled bits.
+# Internal tool builds pass $ROOT/bits explicitly; ordinary package lookup and
+# `bit install` use the stable per-user defaults unless the caller overrides
+# them.
+export TUNGSTEN_HOME="${TUNGSTEN_HOME:-${HOME:-$ROOT}/.tungsten}"
+export BIT_HOME="${BIT_HOME:-$TUNGSTEN_HOME/bits}"
+
 # Single-source the version from the repo-root VERSION file, so children (the
 # compiled CLI, the REPL banner) read it from the environment instead of
 # re-hardcoding it.
@@ -556,7 +563,7 @@ if [ -x "$COMPILER" ]; then
   # rebuilds $COMPILER, so comparing against it captures the dependency
   # transitively for one stat call.
   if [ ! -x "$WC" ] || [ "$ROOT/bin/tungsten.w" -nt "$WC" ] || [ "$COMPILER" -nt "$WC" ]; then
-    BIT_HOME="${BIT_HOME:-$ROOT/bits}" \
+    BIT_HOME="$ROOT/bits" \
       "$COMPILER" compile "$ROOT/bin/tungsten.w" --out "$WC" --no-lto >/dev/null 2>&1 \
       || exec "$RUBY" "$RUBY_CLI" "$@"
     # Ad-hoc codesign on macOS so a freshly linked CLI is launchable.

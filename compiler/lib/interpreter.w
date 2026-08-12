@@ -5062,18 +5062,26 @@ use target
     # Same order as loader.w: vendor/bits (bit install) → BIT_HOME → bits/
     project_root = find_use_project_root(base_dir)
     if project_root != ""
-      found = resolve_use_bit(bit_name, sub_path, project_root + "/vendor/bits")
+      found = resolve_use_bit(bit_name, sub_path, project_root + "/vendor/bits", project_root)
       if found != nil
         return found
 
     bit_home = env("BIT_HOME")
-    if bit_home != nil
-      found = resolve_use_bit(bit_name, sub_path, bit_home)
+    if bit_home == nil || bit_home == ""
+      tungsten_home = env("TUNGSTEN_HOME")
+      if tungsten_home == nil || tungsten_home == ""
+        home = env("HOME")
+        if home != nil && home != ""
+          tungsten_home = home + "/.tungsten"
+      if tungsten_home != nil && tungsten_home != ""
+        bit_home = tungsten_home + "/bits"
+    if bit_home != nil && bit_home != ""
+      found = resolve_use_bit(bit_name, sub_path, bit_home, project_root)
       if found != nil
         return found
 
     if project_root != ""
-      found = resolve_use_bit(bit_name, sub_path, project_root + "/bits")
+      found = resolve_use_bit(bit_name, sub_path, project_root + "/bits", project_root)
       if found != nil
         return found
 
@@ -5105,23 +5113,100 @@ use target
 
     path
 
-  -> resolve_use_bit(bit_name, sub_path, bit_home)
+  -> use_bit_lock_fields(line)
+    fields = []
+    tail = line
+    while fields.size() < 2
+      first = tail.index("\"")
+      if first == nil
+        return fields
+      tail = tail.slice(first + 1, tail.size() - first - 1)
+      finish = tail.index("\"")
+      if finish == nil
+        return fields
+      fields.push(tail.slice(0, finish))
+      tail = tail.slice(finish + 1, tail.size() - finish - 1)
+    fields
+
+  -> locked_use_bit_version(bit_name, project_root)
+    if project_root == nil || project_root == ""
+      return nil
+    source = read_file(project_root + "/Bitfile.lock")
+    if source == nil
+      return nil
+    lines = source.split("\n")
+    i = 0
+    while i < lines.size()
+      line = lines[i].strip()
+      if line.starts_with?("bit ") || line.starts_with?("dependency ")
+        fields = use_bit_lock_fields(line)
+        if fields.size() == 2
+          locked_name = fields[0]
+          if locked_name == bit_name || locked_name == "tungsten-" + bit_name
+            version = fields[1]
+            if version != "" && version.index("/") == nil && version != "." && version != ".."
+              return version
+      i += 1
+    nil
+
+  -> resolve_use_bit_package(package_dir, bit_name, sub_path, entry_file)
+    candidate = package_dir + "/lib/" + entry_file
+    if read_file(candidate) != nil
+      return candidate
+    if sub_path != ""
+      namespace = bit_name.replace("tungsten-", "")
+      candidate = package_dir + "/lib/" + namespace + "/" + sub_path + ".w"
+      if read_file(candidate) != nil
+        return candidate
+    nil
+
+  -> resolve_use_bit(bit_name, sub_path, bit_home, project_root = "")
     if sub_path == ""
       entry_file = bit_name.replace("tungsten-", "") + ".w"
     else
       entry_file = sub_path + ".w"
 
+    locked_version = locked_use_bit_version(bit_name, project_root)
+    package_names = [bit_name]
+    if !bit_name.starts_with?("tungsten-")
+      package_names.push("tungsten-" + bit_name)
+    i = 0
+    while i < package_names.size()
+      package_root = bit_home + "/" + package_names[i]
+      if locked_version != nil
+        found = resolve_use_bit_package(package_root + "/" + locked_version, bit_name, sub_path, entry_file)
+        if found != nil
+          return found
+      found = resolve_use_bit_package(package_root + "/current", bit_name, sub_path, entry_file)
+      if found != nil
+        return found
+      i += 1
+
     if bit_name.starts_with?("tungsten-")
       candidate = bit_home + "/" + bit_name + "/lib/" + entry_file
       if read_file(candidate) != nil
         return candidate
+      if sub_path != ""
+        namespace = bit_name.replace("tungsten-", "")
+        candidate = bit_home + "/" + bit_name + "/lib/" + namespace + "/" + sub_path + ".w"
+        if read_file(candidate) != nil
+          return candidate
 
     exact = bit_home + "/" + bit_name + "/lib/" + entry_file
     if read_file(exact) != nil
       return exact
+    if sub_path != ""
+      namespace = bit_name.replace("tungsten-", "")
+      namespaced = bit_home + "/" + bit_name + "/lib/" + namespace + "/" + sub_path + ".w"
+      if read_file(namespaced) != nil
+        return namespaced
     prefixed = bit_home + "/tungsten-" + bit_name + "/lib/" + entry_file
     if read_file(prefixed) != nil
       return prefixed
+    if sub_path != ""
+      namespaced = bit_home + "/tungsten-" + bit_name + "/lib/" + bit_name + "/" + sub_path + ".w"
+      if read_file(namespaced) != nil
+        return namespaced
     nil
 
   # Anchored on core/tungsten.w (the stdlib marker) rather than a Bitfile, and

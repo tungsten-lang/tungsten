@@ -345,7 +345,7 @@ projects stay unchecked until their stated acceptance criteria are met.
   artifacts, and a direct-run mode with faithful child exit status.
 - [x] Finish the self-hosted REPL migration (`repl.rb` to `repl.w`) and remove
   Ruby as an interactive runtime dependency after PTY/history/error parity.
-- [ ] Make `bit install` resolve a lockfile, verify checksums, and install to
+- [x] Make `bit install` resolve a lockfile, verify checksums, and install to
   `$BIT_HOME/<name>/<version>/`; default `BIT_HOME` to
   `$TUNGSTEN_HOME/bits`, and `TUNGSTEN_HOME` to `~/.tungsten`. Support an
   explicit system-wide prefix without requiring it for ordinary installs.

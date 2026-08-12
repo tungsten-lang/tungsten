@@ -86,14 +86,26 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       out = out + part.capitalize()
   out
 
+-> tungsten_home
+  configured = env("TUNGSTEN_HOME")
+  if configured != nil && configured.strip != ""
+    return configured.strip
+  home = env("HOME")
+  if home == nil || home.strip == ""
+    return ".tungsten"
+  File.join(home.strip, ".tungsten")
+
 -> bit_home
-  env("BIT_HOME") || "bits"
+  configured = env("BIT_HOME")
+  if configured != nil && configured.strip != ""
+    return configured.strip
+  File.join(tungsten_home(), "bits")
 
 -> default_bit_source
-  if env("BIT_HOME") != nil
-    bit_home()
-  else
-    DEFAULT_REGISTRY
+  configured = env("BIT_REGISTRY")
+  if configured != nil && configured.strip != ""
+    return configured.strip
+  DEFAULT_REGISTRY
 
 -> executable_file?(path)
   system("test -x " + shell_quote(path))
@@ -135,6 +147,12 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   return false if value.starts_with?("/")
   return false if value == ".." || value.starts_with?("../")
   return false if value.index("/../") != nil || value.ends_with?("/..")
+  true
+
+-> safe_install_component?(value)
+  component = value.to_s.strip()
+  return false if component == "" || component == "." || component == ".."
+  return false if component.index("/") != nil || component.index("\\") != nil
   true
 
 -> path_parent(path)
@@ -457,8 +475,9 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     return []
   out.strip().split("\n")
 
--> installed_bitfiles
-  bitfile_paths_under("vendor/bits")
+-> installed_bitfiles(root = nil)
+  base = root || bit_home()
+  bitfile_paths_under(base)
 
 -> bitfiles_to_bits(paths)
   bits = []
@@ -468,11 +487,11 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       bits.push(bitfile)
   bits
 
--> installed_bits
-  bitfiles_to_bits(installed_bitfiles())
+-> installed_bits(root = nil)
+  bitfiles_to_bits(installed_bitfiles(root))
 
--> installed_bit_named(name)
-  bits = installed_bits()
+-> installed_bit_named(name, root = nil)
+  bits = installed_bits(root)
   i = 0
   while i < bits.size()
     if bits[i].name == name
@@ -702,10 +721,14 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       "unknown"
 
   -> installed?
-    Dir.exists?(install_path)
+    installed_at?(bit_home())
 
-  -> install_path
-    "vendor/bits/" + @name
+  -> installed_at?(root)
+    Dir.exists?(install_path(root))
+
+  -> install_path(root = nil)
+    base = root || bit_home()
+    File.join(File.join(base, @name), @version)
 
   -> resolved?(version, path, summary)
     BitDependency.new(@name, version, @options, path, summary, @sha256, @signature, @public_key, @security_status, @security_risk, @release_type, @published_at)
@@ -926,6 +949,8 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
           dep_options[:git] = dep_git
         if option_bool(line, "trusted")
           dep_options[:trusted] = true
+        if option_bool(line, "local")
+          dep_options[:local] = true
         if option_value(line, "cooldown") != nil
           dep_options[:cooldown] = option_value(line, "cooldown")
         @dependencies.push(BitDependency.new(dep_name, dep_version, dep_options, dep_path))
@@ -1072,7 +1097,7 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     source_url = source_url_for(@bitfile, bit)
 
     if locked != nil && version_satisfies?(locked.version, requested)
-      if locked.path != nil && Dir.exists?(locked.path)
+      if locked.path != nil && (remote_url?(locked.path) || Dir.exists?(locked.path))
         local = locked
       if local == nil
         local = find_allowed(bit.name, "= " + locked.version, true, policy, source_url)
@@ -1081,6 +1106,20 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 
     path = bit.path
     summary = bit.summary
+    if path == nil && bit.options != nil && bit.options[:local] == true
+      local_path = File.join(File.join(@bitfile.dir(), "bits"), bit.name)
+      if Dir.exists?(local_path)
+        path = local_path
+      else
+        tungsten_root = env("TUNGSTEN_ROOT")
+        if tungsten_root != nil && tungsten_root.strip != ""
+          local_path = File.join(File.join(tungsten_root.strip, "bits"), bit.name)
+          if Dir.exists?(local_path)
+            path = local_path
+      if path == nil
+        local_path = File.join(bit_home(), bit.name)
+        if Dir.exists?(local_path)
+          path = local_path
     if path == nil
       if local == nil
         local = find_allowed(bit.name, requested, @allow_prerelease, policy, source_url)
@@ -1088,6 +1127,14 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
         path = local.path
         summary = local.summary
         version = local.version
+
+    if path != nil && !remote_url?(path) && File.exists?(File.join(path, "Bitfile"))
+      source_bitfile = Bitfile.load(File.join(path, "Bitfile"))
+      if source_bitfile != nil
+        if !version_satisfies?(source_bitfile.version, requested)
+          return bit.resolved?(requested, nil, summary)
+        version = source_bitfile.version
+        summary = source_bitfile.summary
 
     if local != nil
       return BitDependency.new(bit.name, version, local.options, path, summary, local.sha256, local.signature, local.public_key, local.security_status, local.security_risk, local.release_type, local.published_at)
@@ -1121,13 +1168,28 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   -> install
     if @bit.path == nil
       return false
+    if !safe_install_component?(@bit.name) || !safe_install_component?(@bit.version)
+      return false
 
-    FileUtils.mkdir_p("vendor/bits")
-    dest = @bit.install_path
+    root = @options[:install_root] || bit_home()
+    FileUtils.mkdir_p(File.join(root, @bit.name))
+    dest = @bit.install_path(root)
     if Dir.exists?(dest)
-      return true
+      if @options[:force] != true
+        if !remote_url?(@bit.path)
+          if valid_installed_bit?(dest)
+            update_current_link(root, @bit.name, @bit.version)
+            return true
+        marker = File.join(dest, ".bit-sha256")
+        if @bit.sha256 != nil && @bit.sha256 != "" && File.exists?(marker) && File.read(marker).strip == @bit.sha256
+          if valid_installed_bit?(dest)
+            update_current_link(root, @bit.name, @bit.version)
+            return true
+      FileUtils.rm_rf(dest)
 
     if remote_url?(@bit.path)
+      if @bit.sha256 == nil || @bit.sha256 == ""
+        return false
       FileUtils.mkdir_p(dest)
       tmp = capture("mktemp -t tungsten-bit.XXXXXX").strip()
       ok = system("curl -fsSL -o " + shell_quote(tmp) + " " + shell_quote(@bit.path))
@@ -1142,15 +1204,56 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
         FileUtils.rm_rf(dest)
         system("rm -f " + shell_quote(tmp))
         return false
+      members = capture("tar -tf " + shell_quote(tmp) + " 2>/dev/null").split("\n")
+      i = 0
+      while i < members.size()
+        member = members[i]
+        if member != "" && !safe_package_path?(member)
+          FileUtils.rm_rf(dest)
+          system("rm -f " + shell_quote(tmp))
+          return false
+        i += 1
+      member_types = capture("tar -tvf " + shell_quote(tmp) + " 2>/dev/null | awk '{print substr($1,1,1)}'").split("\n")
+      i = 0
+      while i < member_types.size()
+        if member_types[i] != "" && member_types[i] != "-" && member_types[i] != "d"
+          FileUtils.rm_rf(dest)
+          system("rm -f " + shell_quote(tmp))
+          return false
+        i += 1
       ok = system("tar -xf " + shell_quote(tmp) + " -C " + shell_quote(dest))
       system("rm -f " + shell_quote(tmp))
       if !ok
         FileUtils.rm_rf(dest)
         return false
-      return File.exists?(File.join(dest, "Bitfile"))
+      if !valid_installed_bit?(dest)
+        FileUtils.rm_rf(dest)
+        return false
+      File.write(File.join(dest, ".bit-sha256"), @bit.sha256 + "\n")
+      update_current_link(root, @bit.name, @bit.version)
+      return true
 
     FileUtils.cp_r(@bit.path, dest)
-    Dir.exists?(dest)
+    if !valid_installed_bit?(dest)
+      FileUtils.rm_rf(dest)
+      return false
+    update_current_link(root, @bit.name, @bit.version)
+    true
+
+  -> valid_installed_bit?(dest)
+    bitfile_path = File.join(dest, "Bitfile")
+    if !File.exists?(bitfile_path)
+      return false
+    installed = Bitfile.load(bitfile_path)
+    installed != nil && installed.name == @bit.name && installed.version == @bit.version
+
+  -> update_current_link(root, name, version)
+    package_root = File.join(root, name)
+    current = File.join(package_root, "current")
+    if system("test -L " + shell_quote(current))
+      system("rm -f " + shell_quote(current))
+    if !File.exists?(current)
+      system("ln -s " + shell_quote(version) + " " + shell_quote(current) + " 2>/dev/null")
 
 + BuildConfig
   ro :output

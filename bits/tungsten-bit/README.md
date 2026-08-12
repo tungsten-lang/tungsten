@@ -68,6 +68,14 @@ Install:
 bit install
 ```
 
+Dependencies are installed to
+`$BIT_HOME/<name>/<version>/`. `BIT_HOME` defaults to
+`$TUNGSTEN_HOME/bits`, and `TUNGSTEN_HOME` defaults to `~/.tungsten`.
+`Bitfile.lock` selects the exact version for both interpreted and compiled
+programs; a `current` symlink supports standalone programs without a lockfile.
+Use `--dir DIR` for another user-owned root, or `--system --prefix DIR` for an
+explicit shared root (default `/usr/local/lib/tungsten/bits`).
+
 Ship:
 
 ```sh
@@ -239,10 +247,13 @@ order. Archives preserve common single- and dual-license files such as
 bit "tungsten-json", "0.1.5", source: "remote", path: "https://bits.tungsten-lang.org/api/v1/downloads/tungsten-json-0.1.5.bit", sha256: "...", signature: "...", public_key: "...", release_type: "feature", published_at: "1782990000"
 ```
 
-The lockfile pins the exact version used by `bit install`. Remote entries also
-carry SHA256 and signing metadata; remote installs verify SHA256, and verify SSH
-signatures when signature metadata is present, before unpacking. Older
-two-column lock entries like `tungsten-json 0.1.5` are still accepted.
+The lockfile pins the exact version used by `bit install` and by Tungsten's
+interpreted and compiled import resolvers. Remote entries must carry SHA256;
+remote installs verify the archive and reject unsafe member paths before
+unpacking. SSH signatures are also verified when signature metadata is
+present. Older two-column lock entries like `tungsten-json 0.1.5` are still
+accepted for local sources, but a remote install needs a checksum-bearing lock
+entry.
 
 ## Version constraints
 

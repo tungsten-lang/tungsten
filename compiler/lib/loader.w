@@ -1179,18 +1179,26 @@ use parser
     #   3. project_root/bits        — in-tree bits layout
     project_root = find_project_root(base_dir)
     if project_root != ""
-      found = resolve_bit(bit_name, sub_path, project_root + "/vendor/bits")
+      found = resolve_bit(bit_name, sub_path, project_root + "/vendor/bits", project_root)
       if found != nil
         return found
 
     bit_home = env("BIT_HOME")
-    if bit_home != nil
-      found = resolve_bit(bit_name, sub_path, bit_home)
+    if bit_home == nil || bit_home == ""
+      tungsten_home = env("TUNGSTEN_HOME")
+      if tungsten_home == nil || tungsten_home == ""
+        home = env("HOME")
+        if home != nil && home != ""
+          tungsten_home = home + "/.tungsten"
+      if tungsten_home != nil && tungsten_home != ""
+        bit_home = tungsten_home + "/bits"
+    if bit_home != nil && bit_home != ""
+      found = resolve_bit(bit_name, sub_path, bit_home, project_root)
       if found != nil
         return found
 
     if project_root != ""
-      found = resolve_bit(bit_name, sub_path, project_root + "/bits")
+      found = resolve_bit(bit_name, sub_path, project_root + "/bits", project_root)
       if found != nil
         return found
 
@@ -1254,11 +1262,78 @@ use parser
       return "/" + normalized
     normalized
 
-  -> resolve_bit(bit_name, sub_path, bit_home)
+  -> bit_lock_fields(line)
+    fields = []
+    tail = line
+    while fields.size() < 2
+      first = tail.index("\"")
+      if first == nil
+        return fields
+      tail = tail.slice(first + 1, tail.size() - first - 1)
+      finish = tail.index("\"")
+      if finish == nil
+        return fields
+      fields.push(tail.slice(0, finish))
+      tail = tail.slice(finish + 1, tail.size() - finish - 1)
+    fields
+
+  -> locked_bit_version(bit_name, project_root)
+    if project_root == nil || project_root == ""
+      return nil
+    lock_path = project_root + "/Bitfile.lock"
+    if !file?(lock_path)
+      return nil
+    lines = read_file(lock_path).split("\n")
+    i = 0
+    while i < lines.size()
+      line = lines[i].strip()
+      if line.starts_with?("bit ") || line.starts_with?("dependency ")
+        fields = bit_lock_fields(line)
+        if fields.size() == 2
+          locked_name = fields[0]
+          if locked_name == bit_name || locked_name == "tungsten-" + bit_name
+            version = fields[1]
+            if version != "" && version.index("/") == nil && version != "." && version != ".."
+              return version
+      i += 1
+    nil
+
+  -> resolve_bit_package(package_dir, bit_name, sub_path, entry_file)
+    candidate = package_dir + "/lib/" + entry_file
+    if file?(candidate)
+      return candidate
+    if sub_path != ""
+      namespace = bit_name.replace("tungsten-", "")
+      candidate = package_dir + "/lib/" + namespace + "/" + sub_path + ".w"
+      if file?(candidate)
+        return candidate
+    nil
+
+  -> resolve_bit(bit_name, sub_path, bit_home, project_root = "")
     if sub_path == ""
       entry_file = bit_name.replace("tungsten-", "") + ".w"
     else
       entry_file = sub_path + ".w"
+
+    # Global installs are immutable and versioned:
+    #   $BIT_HOME/<package>/<version>/
+    # A project lock selects the exact directory. Without a project lock,
+    # `bit install` maintains a `current` symlink for standalone scripts.
+    locked_version = locked_bit_version(bit_name, project_root)
+    package_names = [bit_name]
+    if !bit_name.starts_with?("tungsten-")
+      package_names.push("tungsten-" + bit_name)
+    i = 0
+    while i < package_names.size()
+      package_root = bit_home + "/" + package_names[i]
+      if locked_version != nil
+        found = resolve_bit_package(package_root + "/" + locked_version, bit_name, sub_path, entry_file)
+        if found != nil
+          return found
+      found = resolve_bit_package(package_root + "/current", bit_name, sub_path, entry_file)
+      if found != nil
+        return found
+      i += 1
 
     if bit_name.starts_with?("tungsten-")
       candidate = bit_home + "/" + bit_name + "/lib/" + entry_file

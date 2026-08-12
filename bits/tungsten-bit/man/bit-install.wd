@@ -30,7 +30,8 @@ bit-install(1) -- Install bits
 -f, --force           # Skip dependency checks
     --local           # Do not connect to bits.tungsten-lang.org
     --pre             # Allow prerelease versions
-    --system          # Installs to system location, overrides --dir
+    --system          # Install under a system prefix; cannot combine with --dir
+    --prefix DIR      # Root for --system (default: /usr/local/lib/tungsten/bits)
 
     --[no-]binstubs   # Generate binstubs
     --[no-]docs       # Generate docs
@@ -42,13 +43,18 @@ Install bits
 
 ## DESCRIPTION
 
-Install the bits listed in your Bitfile(5) into a local directory.
+Install the bits listed in your Bitfile(5) into immutable, versioned
+directories. The default root is `$BIT_HOME`, which defaults to
+`$TUNGSTEN_HOME/bits`; `$TUNGSTEN_HOME` defaults to `~/.tungsten`. A package is
+stored at `$BIT_HOME/<name>/<version>/`, and a `current` symlink selects the
+most recently installed version for programs without a project lockfile.
 
 If Bitfile.lock exists, and your Bitfile(5) is the same, the Bitfile.lock versions are used.
 
-Remote lock entries with SHA256 metadata are verified before unpacking. If a
-remote lock entry also includes SSH signature and public-key metadata, `bit
-install` verifies the signature before unpacking the archive.
+Every remote lock entry must carry SHA256 metadata. `bit install` verifies the
+archive before unpacking it and rejects archive members that would escape the
+version directory. If a remote lock entry also includes SSH signature and
+public-key metadata, the signature is verified before unpacking as well.
 
 If Bitfile.lock exists, and your Bitfile(5) has changed, the Bitfile.lock versions are used for bits without changes,
 and dependencies are recalculated for the bits with changes.
@@ -57,15 +63,22 @@ Installing an executable bit will generate a wrapper file, or _binstub_, in TUNG
 
 ## DEFAULTS
 
---binstubs --docs --rc --suggest --jobs <cpu_count> --dir BIT_HOME --bin BIT_BINDIR
+--binstubs --docs --rc --suggest --jobs <cpu_count> --dir `$BIT_HOME` --bin BIT_BINDIR
 
 ## DESCRIPTIONS
 
 --dir=<DIR>
 
-  The directory for installing the specified bits. Defaults to BIT_HOME. Bits installed directly, _e.g._ `bit install <name>`,
+  The root for versioned installs. Defaults to `$BIT_HOME`. Bits installed directly, _e.g._ `bit install <name>`,
   are placed here as well. Therefore, bits installed without `--dir` will show up by calling `bit list`. Likewise, bits
   installed to other locations are not listed.
+
+--system
+
+  Install to a system-wide root. The default is
+  `/usr/local/lib/tungsten/bits`; use `--system --prefix DIR` to choose a
+  different root. `--prefix` is rejected without `--system`, and `--system`
+  cannot be combined with `--dir`.
 
 ## DEPLOY MODE
 
@@ -77,16 +90,17 @@ modified.
 
 2. The Bitfile.lock must be up to date.
 
-3. Bits are installed to `vendor/cache` instead of BIT_HOME.
+3. Dependencies are installed to the selected versioned root; deploy mode
+   does not silently select a different destination.
 
 ## SUDO USAGE
 
-By default, bits are installed to the system location.
+By default, bits are installed for the current user under `$BIT_HOME`. Use
+`--system` only when a shared installation is intentional. Bit does not invoke
+`sudo`; the selected system prefix must already be writable by the caller.
 
-If the system location is not writable by your user, bit will stage everything in a temporary directory, then ask
-for your sudo password in order to copy the bits to the system location.
-
-You should never use `sudo bit install`. Several steps in `bit install` must be performed as the current user.
+Do not run the entire command through `sudo`: doing so changes the home and
+configuration used for lockfile, registry, and SSH operations.
 
 * Updating your Bitfile.lock
 
@@ -104,7 +118,7 @@ While the `--without` option will skip **installing** the bits in the specified 
 those bits and use them to resolve the dependencies of every bit in your Bitfile(5).
 
 This is so that installing a different set of groups on another machine (such as a production server) will not
-change the bits and versions tha tyou have already developed and tested against.
+change the bits and versions that you have already developed and tested against.
 
 `Bit guarantees that you will deploy the same bit versions you used for development and testing.`
 

@@ -109,6 +109,21 @@ MANPAGE = manpage_lines.join("\n")
 -> command_env_prefix
   "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " "
 
+-> user_tungsten_home
+  configured = env("TUNGSTEN_HOME")
+  if configured != nil && configured.strip != ""
+    return configured.strip
+  home = env("HOME")
+  if home == nil || home.strip == ""
+    return ROOT
+  home.strip + "/.tungsten"
+
+-> user_bit_home
+  configured = env("BIT_HOME")
+  if configured != nil && configured.strip != ""
+    return configured.strip
+  user_tungsten_home() + "/bits"
+
 -> run_command_w(rel_path, tool_args)
   out_bin = ensure_command_binary(rel_path)
   cmd = command_env_prefix + sh_quote(out_bin)
@@ -151,7 +166,10 @@ MANPAGE = manpage_lines.join("\n")
   need = true
   if system("test -x " + sh_quote(out_bin))
     if system("test " + sh_quote(src) + " -ot " + sh_quote(out_bin))
-      need = false
+      bit_root = ROOT + "/bits/" + bit_pkg
+      newer = "find " + sh_quote(bit_root) + " -type f -name '*.w' -newer " + sh_quote(out_bin) + " -print -quit | grep -q ."
+      if !system(newer)
+        need = false
   if need
     system("mkdir -p " + sh_quote(bin_dir))
     cmd = "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(COMPILER) + " compile " + sh_quote(src) + " --out " + sh_quote(out_bin) + " --no-lto"
@@ -165,7 +183,7 @@ MANPAGE = manpage_lines.join("\n")
 
 -> run_bit_binary(bit_pkg, entry_name, tool_args)
   out_bin = ensure_bit_binary(bit_pkg, entry_name)
-  cmd = "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(out_bin)
+  cmd = "BIT_HOME=" + sh_quote(user_bit_home()) + " TUNGSTEN_HOME=" + sh_quote(user_tungsten_home()) + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(out_bin)
   i = 0
   while i < tool_args.size
     cmd = cmd + " " + sh_quote(tool_args[i])

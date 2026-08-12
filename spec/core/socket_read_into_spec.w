@@ -18,6 +18,12 @@ l = Socket.listen("127.0.0.1", port)
 c = Socket.connect("127.0.0.1", port)
 s = l.accept
 
+# --- source facade defaults still route to the native Socket IC
+check("write String", c.write("ok"), 2)
+check("read default size", s.read().include?("ok"), true)
+check("set_timeout return", s.set_timeout(1000), nil)
+check("plain ALPN", s.alpn_protocol(), nil)
+
 # --- read_into lands at the offset, count returned, sentinels untouched
 payload = u8[10]
 i = 0

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(515 total), grouped by area, with its declaration, a one-line
+(516 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -155,6 +155,7 @@ summary from the source header, and a link to the source.
 | `Regex` | `+ Regex` | Regex — a homegrown regular-expression engine, written in Tungsten. | [`core/regex.w`](../core/regex.w) |
 | `Sandbox` | `+ Sandbox` | Sandboxed execution — the runtime's gate over everything outside the | [`core/sandbox.w`](../core/sandbox.w) |
 | `SmallArray` | `+ SmallArray` | Frozen, stack-allocatable, packed array. Up to 255 elements. | [`core/small_array.w`](../core/small_array.w) |
+| `Socket` | `+ Socket` | Socket — nonblocking TCP sockets integrated with Tungsten's event loop. | [`core/socket.w`](../core/socket.w) |
 | `String` | `+ String` | Native String methods that are safe to express over the WValue itself. | [`core/string_native.w`](../core/string_native.w) |
 | `StringBuffer` | `+ StringBuffer` | string_buffer - mutable UTF-8 string builder | [`core/string_buffer.w`](../core/string_buffer.w) |
 | `Symbol` | `+ Symbol` | — | [`core/symbol.w`](../core/symbol.w) |

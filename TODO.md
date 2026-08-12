@@ -413,9 +413,11 @@ projects stay unchecked until their stated acceptance criteria are met.
 
 - [x] Add `core/url.w` with strict absolute `URL.parse/1`, canonical
   reconstruction, userinfo/IPv6/port handling, and malformed-input rejection.
-- [ ] Add `core/socket.w` and `core/http.w`. HTTP needs streaming bodies,
-  redirects, timeouts, cancellation, TLS verification, proxy behavior, and
-  typed transport/status errors.
+- [x] Define the `core/socket.w` facade for event-loop-backed TCP listen,
+  connect, accept, String/ByteArray I/O, deadlines, shutdown, ALPN, and close.
+- [ ] Add `core/http.w`. HTTP needs streaming bodies, redirects, timeouts,
+  cancellation, TLS verification, proxy behavior, and typed transport/status
+  errors.
 - [ ] Replace curl subprocess TLS with an in-process transport. Reuse the native
   HTTP/2/HTTP/3 work, avoid `system(3)` global signal/mutex hazards, and test
   certificate validation plus concurrent requests on macOS and Linux.

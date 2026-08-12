@@ -799,7 +799,20 @@ void bigint_release_if_live(WBigint *b) {
      * ~5% in the boxed churn cell.  Pinning the loaded word opaque
      * restores the wide-load fast path; the decrement below stays on the
      * volatile byte, so the abs@1 store-forward dodge is unchanged (the
-     * wide load still feeds only predicted branches). */
+     * wide load still feeds only predicted branches).
+     *
+     * The cap word (head01[1]) is deliberately NOT pinned.  Clang sinks
+     * its load below the live-check branch, emitting ldr [b] + ldr [b, #8]
+     * instead of the single ldp this comment block once promised — and the
+     * 8/12 width-pin audit measured that split as load-bearing: pinning
+     * both words re-forms the ldp, but the 16-byte pair then spans the
+     * size word (offset 4) that the churn's own publish stored one
+     * iteration earlier, and unlike head01[0] the pair feeds the hot-word
+     * encode as DATA, so the failed store-forward replays the load instead
+     * of hiding behind a predicted branch (mul1@2 +4.5-5.3%, add1@1 +1.6%
+     * ABBA; sub1@1 neutral).  The sunk cap load reads bytes 8-15 only —
+     * no pending store — which is exactly why the split shape wins.  Do
+     * not re-fuse. */
     __asm__("" : "+r"(head01[0]));
     if (__builtin_expect((uint16_t)head01[0] != (uint16_t)W_TYPE_BIGINT, 0)) {
         if ((uint8_t)head01[0] != W_TYPE_BIGINT) return;
@@ -1140,29 +1153,55 @@ WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
     return bigint_alloc_raw((int32_t)exact_cap);
 }
 
-/* The sub1@1 boxed leaf is an instruction-floor cell.  Capacity occupies
- * packed hot-word bits 48..63, and under the hybrid policy capacity one is
- * the only valid odd class (powers of two through 32, then multiples of
- * 32).  Bit 48 therefore answers both occupancy and exact-cap-one with one
- * test; a clear bit proves the generic decoded-capacity comparison cannot
- * recover a hit.  The displaced release handoff preserves this reading:
- * every hot_word store is either zero (takes) or bigint_hot_encode(b,
- * b->cap) with a class-valid capacity, displaced or not.  Keep this
- * leaf-local so unrelated exact-cap callers retain their established code
- * layout. */
-#ifndef BN_SUB1_HOT_EXACT1_BIT
-#define BN_SUB1_HOT_EXACT1_BIT 1
+/* Unique-bit exact takes (the sub1@1 boxed leaf proved the shape, commit
+ * c18b5a94; this generalizes it across the word band).  Capacity occupies
+ * packed hot-word bits 48..63, and under the hybrid policy each capacity
+ * in {1, 2, 4, 8, 16} is the ONLY valid class with its low bit set: among
+ * powers of two only 2^k has bit k, and the quantum multiples beyond
+ * BN_BIGINT_HYBRID_P2_LIMIT keep bits 0..4 clear because both quanta are
+ * multiples of 32.  A single-bit test on the packed word therefore answers
+ * both occupancy and exact class (tbnz + pointer mask, replacing the XOR
+ * take's eor + shifted compare); a clear bit proves the generic
+ * decoded-capacity comparison could not recover a hit either.  The
+ * displaced release handoff preserves this reading: every hot_word store
+ * is either zero (takes) or bigint_hot_encode(b, b->cap) with a
+ * class-valid capacity, displaced or not.  Callers must pass a constant
+ * class from the unique-bit band {1,2,4,8,16} (or a runtime select
+ * between such classes); every other capacity keeps the XOR take.  Grid
+ * experiments that break the uniqueness claim (a quantum not divisible by
+ * 32) must set BN_HOT_EXACT_UNIQUE_BIT=0 — the _Static_assert below makes
+ * a silently false single-bit hit impossible to ship. */
+#ifndef BN_HOT_EXACT_UNIQUE_BIT
+#define BN_HOT_EXACT_UNIQUE_BIT 1
+#endif
+#if BN_HOT_EXACT_UNIQUE_BIT && BN_BIGINT_HYBRID_CAP && \
+    BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+#define BN_HOT_EXACT_UNIQUE_BIT_ACTIVE 1
+/* The uniqueness claim, spelled out against bigint_alloc_capacity's grid:
+ * requests of 1..P2_LIMIT round to powers of two (so 1,2,4,8,16 all exist
+ * as classes and no other power of two shares their bit) and larger
+ * requests round to multiples of the quanta (bits 0..4 clear iff both
+ * quanta are multiples of 32). */
+_Static_assert(BN_BIGINT_HYBRID_P2_LIMIT >= 16 &&
+               BN_BIGINT_HYBRID_QUANTUM % 32 == 0 &&
+               BN_BIGINT_HYBRID_QUANTUM2 % 32 == 0,
+               "unique-bit exact take: caps 1,2,4,8,16 must each own packed "
+               "hot-word bit 48+log2(cap) exclusively; set "
+               "BN_HOT_EXACT_UNIQUE_BIT=0 for grids that break this");
+#else
+#define BN_HOT_EXACT_UNIQUE_BIT_ACTIVE 0
 #endif
 static inline __attribute__((always_inline))
-WBigint *bigint_alloc_raw_hot_sub1_exact_one(void) {
-#if BN_SUB1_HOT_EXACT1_BIT && BN_BIGINT_HYBRID_CAP && \
-    BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
+WBigint *bigint_alloc_raw_hot_exact_bit(uint32_t exact_cap) {
+#if BN_HOT_EXACT_UNIQUE_BIT_ACTIVE
     WBigintPool *pool = &bigint_pool_state;
     uint64_t hot_word = pool->hot_word;
     if (__builtin_expect(
-            (hot_word & (UINT64_C(1) << 48)) != 0, 1)) {
+            (hot_word & ((uint64_t)exact_cap << 48)) != 0, 1)) {
 #ifndef NDEBUG
-        assert(bigint_hot_capacity(hot_word) == 1U);
+        assert(exact_cap == 1U || exact_cap == 2U || exact_cap == 4U ||
+               exact_cap == 8U || exact_cap == 16U);
+        assert(bigint_hot_capacity(hot_word) == exact_cap);
 #endif
         pool->hot_word = 0;
         WBigint *hot = bigint_hot_ptr(hot_word);
@@ -1174,9 +1213,9 @@ WBigint *bigint_alloc_raw_hot_sub1_exact_one(void) {
     /* Miss: same fallback as the generic exact take's miss arm —
      * bigint_alloc_raw probes the hot slot and buckets via
      * bigint_pool_take before touching the arena or malloc. */
-    return bigint_alloc_raw(1);
+    return bigint_alloc_raw((int32_t)exact_cap);
 #else
-    return bigint_alloc_raw_hot_exact(1U);
+    return bigint_alloc_raw_hot_exact(exact_cap);
 #endif
 }
 
@@ -1543,17 +1582,18 @@ WValue bigint_finish_one_limb_sized(uint64_t magnitude, int32_t signed_size) {
     return bigint_box(result);
 }
 
-/* Sub1-only clone of the sized finisher whose boxed arm takes through the
- * bit-48 exact-one test instead of the XOR class compare.  Sign stays data
- * (signed_size computed beside the flag-setting subtract in the leaf). */
+/* Word-op clone of the sized finisher whose boxed arm takes through the
+ * unique-bit cap-1 test instead of the XOR class compare (sub1@1 proved
+ * the shape; the add1@1 no-carry arm shares it).  Sign stays data
+ * (signed_size computed beside the flag-setting op in the leaf). */
 static inline __attribute__((always_inline))
-WValue bigint_finish_sub1_one_limb_sized(
+WValue bigint_finish_word1_one_limb_sized(
     uint64_t magnitude, int32_t signed_size) {
     if (magnitude <= (uint64_t)W_INT48_MAX) {
         int64_t value = (int64_t)magnitude;
         return w_box_int(signed_size < 0 ? -value : value);
     }
-    WBigint *result = bigint_alloc_raw_hot_sub1_exact_one();
+    WBigint *result = bigint_alloc_raw_hot_exact_bit(1U);
     result->limbs[0] = magnitude;
     result->size = signed_size;
     return bigint_box(result);
@@ -1569,27 +1609,57 @@ WValue bigint_sub1_positive_one_limb(uint64_t a, uint64_t word) {
     int lt = a < word;
     uint64_t magnitude = lt ? 0 - diff : diff;
     int32_t signed_size = lt ? -1 : 1;
-    return bigint_finish_sub1_one_limb_sized(magnitude, signed_size);
+    return bigint_finish_word1_one_limb_sized(magnitude, signed_size);
 }
 
-/* One-word division has already trimmed its quotient.  Keep its common
- * multi-limb finish in the boxed fast arm instead of calling the shared
- * magnitude finisher; only zero/one-limb results need demotion work. */
+/* Positive plus word, one limb: the add1@1 twin of the sub1 leaf above.
+ * The no-carry sum stays one limb, so the shared sized finisher applies
+ * unchanged — its i48 demote arm is cold here (a normalized one-limb
+ * magnitude already exceeds W_INT48_MAX and a positive word only grows
+ * it) yet kept, so a denormal operand still finishes exactly as the
+ * generic leaf would.  The old routing through
+ * bigint_add_one_limb_magnitudes with both signs constant paid a dead
+ * zero test and the XOR class take. */
 static inline __attribute__((always_inline))
-WValue bigint_finish_div1(WBigint *b) {
-    int32_t abs_len = b->size < 0 ? -b->size : b->size;
-    if (__builtin_expect(abs_len > 1, 1)) return bigint_box(b);
+WValue bigint_add1_positive_one_limb(uint64_t a, uint64_t word) {
+    uint64_t sum = a + word;
+    /* No static carry hint: += small-word (the dominant real shape)
+     * rarely carries, but same-magnitude operands carry every time —
+     * leave the layout choice to the compiler as the old routing did. */
+    if (sum >= word)
+        return bigint_finish_word1_one_limb_sized(sum, 1);
+    /* Carried into a second limb: [sum, 1]. */
+    WBigint *result = bigint_alloc_raw_hot_exact_bit(2U);
+    result->limbs[0] = sum;
+    result->limbs[1] = 1;
+    result->size = 2;
+    return bigint_box(result);
+}
+
+/* One-word division has already trimmed its quotient, and the magnitude
+ * kernels publish a NON-NEGATIVE size.  Take that size and the composed
+ * sign as data: the callers' old `if (neg) q->size = -q->size` store
+ * followed by this finisher's header reload re-derived both through a
+ * store->load->cneg chain the caller had already resolved in registers. */
+static inline __attribute__((always_inline))
+WValue bigint_finish_div1_signed(WBigint *b, int negative) {
+    int32_t abs_len = b->size;
+    if (__builtin_expect(abs_len > 1, 1)) {
+        if (negative) b->size = -abs_len;
+        return bigint_box(b);
+    }
     if (abs_len == 0) {
         bigint_release(b);
         return w_box_int(0);
     }
     uint64_t magnitude = b->limbs[0];
     if (magnitude <= (uint64_t)W_INT48_MAX) {
-        int64_t value = b->size < 0 ? -(int64_t)magnitude
-                                    : (int64_t)magnitude;
+        int64_t value = negative ? -(int64_t)magnitude
+                                 : (int64_t)magnitude;
         bigint_release(b);
         return w_box_int(value);
     }
+    if (negative) b->size = -1;
     return bigint_box(b);
 }
 
@@ -1664,7 +1734,7 @@ WValue bigint_add_two_limb_magnitudes(
         carry_high |= high < high_sum;
         /* A three-limb request lands in the power-of-two class of four
          * either way; the exact-class take is one compare cheaper. */
-        WBigint *result = bigint_alloc_raw_hot_exact(4U);
+        WBigint *result = bigint_alloc_raw_hot_exact_bit(4U);
         result->limbs[0] = low;
         result->limbs[1] = high;
         result->limbs[2] = carry_high;
@@ -2028,13 +2098,25 @@ WValue bigint_sub_word_into(
     if (i < alen)
         bn_copy_tail(r->limbs + i, al + i, alen - i);
     }
-    int32_t rlen = alen - (r->limbs[alen - 1] == 0);
-    r->size = a_neg ? -rlen : rlen;
-    if (__builtin_expect(rlen < alen, 0)) {
-        /* Shrank by one limb (only when the top limb was 1 and the borrow
-         * consumed it); an alen == 2 result may demote to inline i48. */
-        return bigint_finish_mag_sub(r);
+    /* The top limb shrinks only when it was exactly 1 and the borrow
+     * consumed it (top result = a_top - borrow_in with borrow_in in
+     * {0,1}, and a normalized top limb is nonzero), so a_top != 1 proves
+     * the published size without touching the just-stored result limb.
+     * This keeps the store->load of r->limbs[alen - 1] off the common
+     * finish: the operand-limb load is independent of the kernel's
+     * stores, where the old rescan chained str -> ldr -> size store
+     * through the forwarding latency every call. */
+    if (__builtin_expect(al[alen - 1] == 1, 0)) {
+        int32_t rlen = alen - (r->limbs[alen - 1] == 0);
+        r->size = a_neg ? -rlen : rlen;
+        if (rlen < alen) {
+            /* Shrank by one limb; an alen == 2 result may demote to
+             * inline i48. */
+            return bigint_finish_mag_sub(r);
+        }
+        return bigint_box(r);
     }
+    r->size = a_neg ? -alen : alen;
     return bigint_box(r);
 }
 
@@ -2147,8 +2229,7 @@ WValue bigint_add_ui_any(WValue a, uint64_t word) {
         /* Keep the one-limb leaf after the wide return so the streamed hot
          * path does not acquire another predicate or a larger live block. */
         if (n == 1)
-            return bigint_add_one_limb_magnitudes(
-                ba->limbs[0], 0, word, 0);
+            return bigint_add1_positive_one_limb(ba->limbs[0], word);
 #endif
     }
 #endif
@@ -10552,7 +10633,7 @@ WValue bigint_mul_positive_11(WBigint *a, WBigint *b) {
     uint64_t low = (uint64_t)product;
     uint64_t high = (uint64_t)(product >> 64);
     if (high == 0) return bigint_finish_one_limb(low, 0);
-    WBigint *r = bigint_alloc_raw_hot_exact(2U);
+    WBigint *r = bigint_alloc_raw_hot_exact_bit(2U);
     r->limbs[0] = low;
     r->limbs[1] = high;
     r->size = 2;
@@ -10694,7 +10775,10 @@ WValue bigint_mul_n1_tiny(const uint64_t *al, int32_t n, uint64_t w,
      * straight-line __builtin_addcll chain compiles to adds/adcs (the
      * loop-carried-flag weakness does not apply to straight-line code).
      * The serial 128-bit MAC form this replaces re-entered the carry into
-     * each product add: two flag ops per limb on the critical path. */
+     * each product add: two flag ops per limb on the critical path.
+     * Take note: the unique-bit take was tried here (8/12) and measured
+     * +4-6% on mul1@2 across two independent layouts; the XOR take
+     * stays. */
     WBigint *r = bigint_alloc_raw_hot_exact(n <= 3 ? 4U : 8U);
     __uint128_t p0 = (__uint128_t)al[0] * w;
     __uint128_t p1 = (__uint128_t)al[1] * w;
@@ -10732,7 +10816,7 @@ WValue bigint_mul_n1_tiny(const uint64_t *al, int32_t n, uint64_t w,
  * cell whose whole budget is ~12 cycles. */
 static inline __attribute__((always_inline))
 WValue bigint_mul_n1_tiny8(const uint64_t *al, uint64_t w, int negative) {
-    WBigint *r = bigint_alloc_raw_hot_exact(16U);
+    WBigint *r = bigint_alloc_raw_hot_exact_bit(16U);
     __uint128_t p0 = (__uint128_t)al[0] * w;
     __uint128_t p1 = (__uint128_t)al[1] * w;
     __uint128_t p2 = (__uint128_t)al[2] * w;
@@ -11017,7 +11101,7 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
             uint64_t low = (uint64_t)product;
             uint64_t high = (uint64_t)(product >> 64);
             if (high == 0) return bigint_finish_one_limb(low, 0);
-            WBigint *r = bigint_alloc_raw_hot_exact(2U);
+            WBigint *r = bigint_alloc_raw_hot_exact_bit(2U);
             r->limbs[0] = low;
             r->limbs[1] = high;
             r->size = 2;
@@ -11116,7 +11200,7 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
         uint64_t low = (uint64_t)product;
         uint64_t high = (uint64_t)(product >> 64);
         if (high == 0) return bigint_finish_one_limb(low, negative);
-        WBigint *r = bigint_alloc_raw_hot_exact(2U);
+        WBigint *r = bigint_alloc_raw_hot_exact_bit(2U);
         r->limbs[0] = low;
         r->limbs[1] = high;
         r->size = negative ? -2 : 2;
@@ -13812,6 +13896,12 @@ static int mag_divmod_reciprocal_certified(
              * (never displace the most recently proven divisor). */
             cache = other;
         }
+        /* Miss-only by design, and NOT a displace-form candidate: the
+         * steady-state hit performs no store at all, and the mru load
+         * above is address generation — hoisting this store out of the
+         * miss branch removes no dependent load (8/12 displace audit:
+         * unconditional-store probe measured div@256/512 and mod@256 at
+         * +0.05..0.24%, pure noise). */
         bn_div_recip_cache_mru = (int)(cache - bn_div_recip_caches);
     }
     _Static_assert(BN_DIV_RECIP_CACHE_ENTRIES == 2,
@@ -14454,8 +14544,7 @@ WValue bigint_div_any(WValue a, WValue b) {
             else
 #endif
                 q = mag_div_single(aa->limbs, alen, d, &remainder);
-            if (neg) q->size = -q->size;
-            return bigint_finish_div1(q);
+            return bigint_finish_div1_signed(q, neg);
         }
 #endif
 #if BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST
@@ -14540,8 +14629,7 @@ WValue bigint_div_ui_any(WValue a, uint64_t divisor) {
     else
 #endif
         q = mag_div_single(al, n, divisor, &remainder);
-    if (negative) q->size = -q->size;
-    return bigint_finish_div1(q);
+    return bigint_finish_div1_signed(q, negative);
 }
 
 static inline __attribute__((always_inline))
@@ -17402,15 +17490,24 @@ int bigint_compare_c(WValue a, WValue b) {
      * integers, so a non-inline integer is a WBigint.  Keep the overwhelmingly
      * common boxed/boxed, positive, equal-width path out of integer_limbs.
      * Heap integers carry W_TAG_BIGINT (v4) while inline i48 values carry
-     * W_TAG_INT, so one combined tag test identifies the boxed pair (bit 47,
-     * the tag-sign overlay, sits below the mask and does not disturb it);
-     * signed size then composes via w_bigint_view. */
+     * W_TAG_INT, so one combined test identifies the boxed pair.  Widening
+     * the mask by one bit to include the tag-sign overlay (bit 47) also
+     * proves both overlays are CLEAR, so the raw header size IS the
+     * composed signed size — the fast arms below then need no per-operand
+     * w_bigint_view sign composition (two tst+cneg pairs on the previous
+     * fast path).  Values with a set overlay (tag-flip negation) fall to
+     * the general path, exactly where composed-negative operands already
+     * went: the only routing change is the rare double-flip shape
+     * (overlay set, header negative), which stays correct through
+     * bigint_compare_slow's full composition. */
     if (__builtin_expect(
-            (((a ^ W_TAG_BIGINT) | (b ^ W_TAG_BIGINT)) & W_TAG_MASK) == 0,
+            (((a ^ W_TAG_BIGINT) | (b ^ W_TAG_BIGINT)) &
+             (W_TAG_MASK | W_BIGINT_SIGN_BIT)) == 0,
             1)) {
-        int32_t as, bs;
-        WBigint *aa = w_bigint_view(a, &as);
-        WBigint *bb = w_bigint_view(b, &bs);
+        WBigint *aa = w_as_bigint(a);
+        WBigint *bb = w_as_bigint(b);
+        int32_t as = aa->size;
+        int32_t bs = bb->size;
         if (__builtin_expect(as > 0 && as == bs, 1)) {
             if (__builtin_expect(as == 1, 0)) {
                 uint64_t av = aa->limbs[0];
@@ -17789,6 +17886,12 @@ static const uint64_t *w_p10c_mid_get(uint64_t m, int32_t *n_out) {
     }
     while (n > 0 && f[n - 1] == 0) n--;
     if (slot < 0) {
+        /* Already displace-form (8/12 displace audit): the round-robin
+         * store is unconditional and the rescue of the displaced occupant
+         * (free, NULL-safe) is unconditional too — no occupancy
+         * load-test-store chain exists to remove, and this path runs once
+         * per shape per thread while the steady-state scan above never
+         * stores. */
         slot = w_p10c_mid_next;
         w_p10c_mid_next = (slot + 1) % W_FROM_S_MID_SLOTS;
         free(w_p10c_mid[slot]);
@@ -17975,6 +18078,47 @@ static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t 
     return hd + D;
 }
 
+/* ---- Parked small-string reuse (decimal formatting) --------------------
+ * One-limb decimal formatting is ~4ns of digit writing wrapped in ~12ns of
+ * string-object lifecycle: post-freeze w_string_n pays wyhash plus a
+ * guaranteed intern-table miss (~2.5ns) and then a malloc whose matching
+ * w_value_free costs ~10ns for the pair (decomposition:
+ * benchmarks/big_math probe).  Boost's std::string SSO pays neither, which
+ * is the whole tostr@1 gap.  Instead of free()ing a small heap string,
+ * w_value_free PARKS the block in a one-slot thread-local cache; the
+ * numeric formatters take it back and skip hash, probe, and malloc.
+ *
+ * Soundness: every mode-7 heap string is a private malloc block with
+ * usable payload >= len+1 (all w_box_heap_str producers allocate at least
+ * sizeof(WString)+len+1; the socket reader allocates more).  cap records
+ * the payload the parked block PROVABLY holds — its len at park time — so
+ * a take for any len <= cap stays in bounds no matter which constructor
+ * minted the block.  A parked block is exactly as dead as a freed one;
+ * parking only defers the free().  At most one block per thread is parked
+ * (<= ~50 bytes), reclaimed by the OS at thread exit. */
+#define W_STR_PARK_MAX 44
+static __thread WString *w_str_park = NULL;
+static __thread uint32_t w_str_park_cap = 0;
+
+/* Fresh-string constructor for dynamically formatted numbers: inline box
+ * when it fits, otherwise parked block or exact-size malloc.  Deliberately
+ * skips the frozen-slab intern probe — a formatted number gains nothing
+ * from canonicalizing with static literals (equality and hashing are
+ * structural), and the probe is a guaranteed-miss tax on every to_s. */
+static inline WValue w_string_small_fresh(const char *s, size_t len) {
+    if (len <= 5) return w_box_inline_str(s, len);
+    WString *ws = w_str_park;
+    if (ws != NULL && len <= (size_t)w_str_park_cap) {
+        w_str_park = NULL;
+    } else {
+        ws = (WString *)malloc(sizeof(WString) + len + 1);
+    }
+    ws->len = (uint32_t)len;
+    memcpy(ws->data, s, len);
+    ws->data[len] = '\0';
+    return w_box_heap_str(ws);
+}
+
 /* A normalized one-limb BigInt is a full unsigned 64-bit magnitude plus a
  * separate sign, so it cannot use the signed-int formatter.  Format it
  * directly from the stack instead of routing through w_dec_write, which
@@ -17985,8 +18129,8 @@ static inline WValue bigint_limb_to_s(uint64_t u, int neg) {
     char *end = buf + sizeof(buf);
     char *p = end;
 
-    /* Write backwards two digits at a time.  w_string_n receives the exact
-     * length and owns/copies the result before this stack frame returns. */
+    /* Write backwards two digits at a time.  The constructor receives the
+     * exact length and owns/copies the result before this frame returns. */
     while (u >= 100) {
         unsigned r = (unsigned)(u % 100);
         u /= 100;
@@ -18000,7 +18144,7 @@ static inline WValue bigint_limb_to_s(uint64_t u, int neg) {
         *--p = (char)('0' + u);
     }
     if (neg) *--p = '-';
-    return w_string_n(p, (size_t)(end - p));
+    return w_string_small_fresh(p, (size_t)(end - p));
 }
 
 /* signed_size composes the header sign with the tag-sign overlay; callers
@@ -18017,7 +18161,7 @@ static WValue bigint_to_s_impl(WBigint *b, int32_t signed_size) {
         int32_t pos = 0;
         if (neg) buf[pos++] = '-';
         pos += w_dec_chunks_write(b->limbs, 2, buf + pos, 0);
-        return w_string_n(buf, (size_t)pos);
+        return w_string_small_fresh(buf, (size_t)pos);
     }
     /* digits ≤ limbs·64·log10(2) + 1 < limbs·20 */
     size_t cap = (size_t)abs_len * 20 + 4;
@@ -40154,7 +40298,7 @@ static inline WValue w_int_to_str(int64_t n) {
 
     size_t len = (size_t)(buf + 20 - p);
     if (len <= 5) return w_box_inline_str(p, len);
-    return w_string_n(p, len);
+    return w_string_small_fresh(p, len);
 }
 
 /* Format duration from nanoseconds into buf. Returns pointer past last char. */
@@ -62954,6 +63098,15 @@ WValue w_freeze(WValue obj) {
 void w_value_free(WValue v) {
     if (w_is_heap_str(v)) {
         WString *ws = w_as_heap_str(v);
+        /* Park small blocks for the decimal formatters instead of freeing:
+         * see w_string_small_fresh.  One slot per thread; an occupied slot
+         * means a plain free, so this is at most a TLS load + two compares
+         * on the non-parking path. */
+        if (w_str_park == NULL && ws->len <= W_STR_PARK_MAX) {
+            w_str_park = ws;
+            w_str_park_cap = ws->len;
+            return;
+        }
         free(ws);
         return;
     }

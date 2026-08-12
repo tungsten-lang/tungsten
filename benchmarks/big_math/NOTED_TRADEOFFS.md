@@ -4,6 +4,58 @@ Wins in one area that cost another get recorded here instead of shipped:
 the measured win, the measured loss, and the condition that would make the
 trade worth it. (Bignum campaign ground rule, 2026-08-02.)
 
+## Re-fusing the release-header ldp (width-pin audit) — REJECTED (2026-08-12)
+
+The width-pin audit (the c7a2ded lesson generalized) disassembled every
+memcpy/fused multi-field site in the bignum region of the shipped harness.
+The one live finding: `bigint_release_if_live`'s 16-byte header read —
+written as one memcpy and commented "one ldp" — is actually emitted SPLIT:
+`ldr x, [b]` (the pinned type/shared word) + `ldr x, [b, #8]` (the cap
+word, sunk below the live-check branch onto the recycle path).  Pinning
+head01[1] with a second empty-asm operand re-forms the intended single
+`ldp x, x, [b]` (verified in disassembly; one instruction saved on the
+recycle path), but ABBA quartets (A,B,B,A x4, tungsten-only sweep, medians,
+reproduced twice) measured it as a net LOSS:
+
+    mul1@2  +4.5% / +5.3%     add1@1  +1.6% / +1.6%
+    sub1@1  -0.7% / +0.4%     add@2 +1.4%   sub@2 +0.5%
+    abs@1   "-14.5%/-13%" — bimodal (~1.16 vs ~1.40 states) in BOTH
+            binaries; the win is state-occupancy luck, not a property
+
+Mechanism: churn cells publish the result's size word (offset 4) every
+iteration, and one iteration later the release's 16-byte pair spans that
+still-draining store.  Unlike the pinned first word — whose failed
+store-forward hides behind predicted branches — the fused pair feeds the
+hot-word encode as DATA (the cap), so the failed forward replays the load
+on the critical path.  The baseline's sunk cap load reads bytes 8-15
+only, never spanning the size store: the split shape clang chose is
+load-bearing.  The site comment now says so.
+
+**Condition to revisit:** a layout where `size` no longer shares the
+16-byte header window with `cap` (or a cell mix that stops publishing
+size per iteration); any retry must re-run mul1@2/add1@1/sub1@1 plus the
+abs@1 swallow control and treat bimodal cells as unresolved, not won.
+
+## Unconditional MRU store in the reciprocal cache (displace audit) — REJECTED as NEUTRAL (2026-08-12)
+
+The displace-form audit asked whether the BN_BIGINT_RELEASE_DISPLACE
+pattern (unconditional store + cold rescue, removing load-test-store
+control dependence) transfers to the two-entry `bn_div_recip_caches` MRU
+update.  Structural answer: no — the steady-state repeated-divisor hit
+performs NO store at all (the MRU store is miss-only, control-dependent
+on memcmp verdicts, not on an occupancy load), and the mru load is
+address generation that no store form can remove.  The probe
+(hoisting the store out of the miss branch, idempotent on hits) measured
+exactly that: div@256 +0.12%, mod@256 +0.24%, div@512 +0.05% — noise.
+The midpoint-power cache (`w_p10c_mid_*`) is ALREADY displace-form:
+unconditional round-robin store, unconditional NULL-safe free of the
+displaced occupant, store path runs once per shape per thread.  Both
+sites now carry audit comments; no code shape changed.
+
+**Condition to revisit:** a cache whose hit path stores (true MRU
+rotation) or whose store is guarded by an occupancy load the same
+iteration wrote — neither exists in the bignum region today.
+
 ## Branch-form word add/sub for the copying fixed kernels (3-8 limbs) — REJECTED in BOTH regimes (2026-08-12)
 
 Hypothesis: the 3..8-limb `bn_{add,sub}_word_a64_fixed` full flag chains

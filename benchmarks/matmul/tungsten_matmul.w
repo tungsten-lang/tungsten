@@ -12,7 +12,7 @@
 
 use core/blas
 
--> fill(arr, n) (f64[])
+-> fill(arr, n) (f64[] i64)
   v = ~0.5
   i = 0
   while i < n
@@ -57,7 +57,7 @@ use core/blas
   0 ## i64
 
 # Schoolbook NxN, ikj order (cache-friendly, FMA-shaped).
--> matmul_school(a, b, c, n) (f64[] f64[] f64[])
+-> matmul_school(a, b, c, n) (f64[] f64[] f64[] i64)
   i = 0
   while i < n * n
     c[i] = ~0.0

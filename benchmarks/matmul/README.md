@@ -60,10 +60,12 @@ Current same-flags C, Apple M5 Max, Homebrew clang 22.1.8, 2026-08-12:
 | 256 | 17.2 | 20.7 | 411 |
 | 512 | 17.3 | **22.8** | 443 |
 
-The current Tungsten hand-written `f64[]` schoolbook loop reaches only
-**~0.99 GFLOP/s** at N=512, while warmed `dgemm` reaches **~443 GFLOP/s**.
-The old near-C result below has regressed; it is retained as useful compiler
-history, not presented as current performance.
+The current Tungsten hand-written `f64[]` schoolbook loop reaches
+**~17.7 GFLOP/s** at N=512, matching same-loop C at ~17.3 GFLOP/s; warmed
+`dgemm` reaches **~443 GFLOP/s**. The matrix dimension is explicitly `i64` in
+the benchmark signature. Omitting that contract leaves `n` boxed, routes loop
+comparisons and index arithmetic through runtime dispatch, and collapses the
+same kernel to ~0.99 GFLOP/s.
 
 Historical progress: 0.10 → 0.27 → 4.0 → 17 GFLOP/s across four compiler fixes:
 1. `f64[n]` typed array + `:f64` float-path in `lower_assign_expr` / `lower_binary_op`
@@ -83,9 +85,9 @@ Three math modes (compiler flag):
 - `--strict-math`: bare `fmul`/`fadd`, strict IEEE 754 two-rounding semantics
 - `--fast-math`: `fast` flag — all transforms: reassoc + nnan + ninf + arcp + afn
 
-Remaining ~6% gap: the `n` matrix-dimension parameter is a boxed WValue — each
-`ii*n` and `kk*n` in the outer loops still nanunboxes `n` (two shifts). Unboxing
-function parameters before use would close this final gap.
+The current WIRE gate pins `n` as a native `i64` and rejects boxed fast-helper
+calls in the schoolbook worker. Its loop control and indexing are plain
+`icmp`/`mul`/`add`, while element arithmetic remains native FMA.
 
 ## Verdict
 

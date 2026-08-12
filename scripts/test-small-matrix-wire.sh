@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten-compiler}"
 TMP_ROOT="${TMPDIR:-/tmp}/tungsten-small-matrix-wire.$$"
 WIRE="$TMP_ROOT/matrix.wire"
+BENCH_WIRE="$TMP_ROOT/matmul-bench.wire"
 
 cleanup() {
   rm -rf "$TMP_ROOT"
@@ -13,6 +14,7 @@ trap cleanup EXIT
 mkdir -p "$TMP_ROOT"
 
 "$TUNGSTEN" compile "$ROOT/spec/numeric/matrix_spec.w" --emit-wire > "$WIRE"
+"$TUNGSTEN" compile "$ROOT/benchmarks/matmul/tungsten_matmul.w" --emit-wire > "$BENCH_WIRE"
 
 matrix_body() {
   local class_name="$1"
@@ -52,5 +54,27 @@ require_count Mat4 'typed_array_set_inline' 16
 require_count Mat4 '@w_array_new_inline_uninit_sized' 1
 require_absent Mat4 '@__w_mul_fast|@__w_add_fast'
 require_absent Mat4 '@__w_array_lit_store|@w_array_to_f64'
+
+school_body() {
+  sed -n '/^function __w_matmul_school/,/^$/p' "$BENCH_WIRE"
+}
+
+school_require_count() {
+  local pattern="$1"
+  local expected="$2"
+  local count
+  count="$(school_body | grep -Ec "$pattern" || true)"
+  if [[ "$count" -ne "$expected" ]]; then
+    echo "WIRE check failed: matmul_school has $count /$pattern/, expected $expected" >&2
+    school_body >&2
+    exit 1
+  fi
+}
+
+# A missing `i64` dimension annotation turns all four loop conditions and
+# index expressions back into boxed runtime sends (~18x regression at N=512).
+school_require_count 'icmp_i64' 4
+school_require_count 'mul_i64' 4
+school_require_count '@__w_(lt|mul|add|int)_fast' 0
 
 echo "PASS small matrix WIRE"

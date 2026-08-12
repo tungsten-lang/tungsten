@@ -517,11 +517,12 @@ projects stay unchecked until their stated acceptance criteria are met.
   24/27 ns and raw kernels at 17/21 ns versus same-flags C at 2.1/2.6 ns.
   Finish with fixed-storage escape/stack promotion and eliminate remaining
   object/accessor dispatch so the common API closes the final 29-34x gap.
-- [ ] Restore general `f64[]` schoolbook matmul throughput. The 2026-08-12
-  release/native benchmark reaches only ~0.99 GFLOP/s at N=512 versus current
-  same-flags C at ~17.3 GFLOP/s; the prior documented Tungsten result was
-  ~17 GFLOP/s. Profile the regression in header-load hoisting, integer index
-  lowering, and vectorization before making any new large-matrix claims.
+- [x] Restore general `f64[]` schoolbook matmul throughput. Profiling traced
+  the ~0.99 GFLOP/s regression to an untyped matrix-dimension parameter, which
+  boxed every loop comparison and index expression. Declaring `n` as `i64`
+  restores native `icmp`/`mul`/`add` WIRE and ~17.7 GFLOP/s at N=512 versus
+  current same-flags C at ~17.3 GFLOP/s; the structural gate rejects a return
+  to boxed fast-helper calls.
 - [ ] Add shape-safe linear algebra: checked dimensions by default, compile-time
   shapes when known, overflow-safe allocation math, and one explicit unsafe
   escape hatch. Measure checks so small matrices do not regress.

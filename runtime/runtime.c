@@ -52834,6 +52834,21 @@ static WMethod *w_cacheable_type_class_method(WValue recv, WValue name,
 static __thread WMethod *g_generic_ctor_selected;
 static __thread WValue g_generic_ctor_recv;
 
+/* These class methods are implemented by the dispatcher's builtin branches
+ * before source static-method lookup. Their source declarations are API
+ * facades with empty bodies, so publishing those bodies into the call-site IC
+ * would make the first call use the builtin and every later call return nil.
+ * Constructors already have a separate non-publishing path below. */
+static int w_builtin_static_precedes_source(WValue recv, WValue name) {
+    if (!w_is_class(recv)) return 0;
+    WClass *klass = as_class(recv);
+    if (strcmp(klass->name, "Socket") == 0)
+        return w_hash_key_eq(name, WN_listen) || w_hash_key_eq(name, WN_connect);
+    if (strcmp(klass->name, "TLS") == 0)
+        return w_hash_key_eq(name, WN_init) || w_hash_key_eq(name, WN_load_cert);
+    return 0;
+}
+
 /* Out-of-line slow path: cache miss → full dispatch + populate IC.
  * Only runs on first call per call site (or on type-change); the hot
  * fast path lives in w_method_call_cached below and is inlined into
@@ -52887,7 +52902,8 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         if (m && m->splat_index_plus_one == 0) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract self */);
         }
-    } else if (w_is_class(recv) && !w_hash_key_eq(name, WN_new)) {
+    } else if (w_is_class(recv) && !w_hash_key_eq(name, WN_new) &&
+               !w_builtin_static_precedes_source(recv, name)) {
         /* Cache user-defined static methods. Constructors allocate before dispatch. */
         WClass *klass = (WClass *)w_as_ptr(recv);
         WMethod *m = w_static_method_lookup_arity(klass, name, argc + 1);

@@ -22,6 +22,11 @@ TUNGSTEN_GPU_DIALECTS=cuda,wgsl bin/tungsten compile kernels.w --out /tmp/kernel
 TUNGSTEN_GPU_DIALECTS=none     bin/tungsten compile kernels.w --out /tmp/kernels
 ```
 
+The default spec gate validates compiler-emitted WGSL with a pinned Naga CLI
+on Linux CI. For the same semantic validation locally, install `naga-cli`
+30.0.0 and either put `naga` on `PATH` or set `NAGA_BIN` before running
+`scripts/test-specs.sh --job-wgsl spec/compiler/gpu_wgsl_emit_spec.w`.
+
 ## Surface (v0+)
 
 Supported in both Metal and CUDA:

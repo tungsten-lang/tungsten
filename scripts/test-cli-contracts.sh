@@ -59,4 +59,12 @@ if "$TUNGSTEN" explain NO_SUCH_CODE >"$TMP/explain-missing.out" 2>&1; then
   exit 1
 fi
 
-printf 'CLI check, explain, and exit-status contracts: ok\n'
+"$TUNGSTEN" gpu-bench --help >"$TMP/gpu-bench-help.out"
+grep -q '^Usage: tungsten gpu-bench' "$TMP/gpu-bench-help.out"
+if "$TUNGSTEN" gpu-bench --backend bogus >"$TMP/gpu-bench-error.out" 2>&1; then
+  printf 'tungsten gpu-bench accepted an unknown backend\n' >&2
+  exit 1
+fi
+grep -q "unsupported backend 'bogus'" "$TMP/gpu-bench-error.out"
+
+printf 'CLI check, explain, gpu-bench, and exit-status contracts: ok\n'

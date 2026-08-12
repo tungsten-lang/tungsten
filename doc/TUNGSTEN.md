@@ -50,6 +50,9 @@ COMMANDS
                          rather than rebuilding runtime and stage 1.
     release [VERSION]    Run the root gate, tag, and push a native GitHub
                          release matrix.
+    gpu-bench            Emit, compile, dispatch, verify, and time the baseline
+                         Metal kernel. Stores artifacts and JSON provenance in
+                         build/cache/gpu-bench.
     doctor               Check your toolchain (clang, make, lld, zstd, compiler)
                          Implemented in bash — works without a built compiler.
     fmt FILE             Format .w source
@@ -77,6 +80,7 @@ EXAMPLES
     tungsten sandbox --log attempts.jsonl untrusted.w
     tungsten bootstrap
     tungsten build
+    tungsten gpu-bench --elements 1048576 --runs 50
     tungsten console
     wit
 
@@ -253,6 +257,10 @@ ENVIRONMENT
         Comma list of extra GPU dialect sidecars to emit for @gpu fn
         (e.g. cuda,wgsl). Metal is always emitted when kernels are present;
         CUDA is also emitted by default on non-Darwin hosts.
+    TUNGSTEN_CARRY_UNROLL
+        LLVM unroll count for loops containing addcarry/subborrow. The default
+        is 8; values from 1 through 64 select a count, and 0 disables the hint.
+        Invalid values are rejected with E_LOWER_CARRY_UNROLL.
     TUNGSTEN_METAL_PATH
         Override the emitted Metal sidecar path for an @gpu native build.
         Build systems use this to place generated MSL beside an output binary

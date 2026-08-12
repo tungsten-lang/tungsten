@@ -2601,11 +2601,11 @@ use ast
     if nm in ("x" "y" "z") && recv != nil && is_ast_node?(recv) && ast_kind(recv) == :call && recv.receiver != nil && ast_kind(recv.receiver) == :var && recv.receiver.name == "gpu"
       builtin = "" + recv.name.to_s()
       if builtin == "thread_position_in_grid"
-        return "i32(__tid." + nm + ")"
+        return "i32(tungsten_internal_tid." + nm + ")"
       if builtin == "thread_position_in_threadgroup"
-        return "i32(__tid_local." + nm + ")"
+        return "i32(tungsten_internal_tid_local." + nm + ")"
       if builtin == "threadgroup_position_in_grid"
-        return "i32(__group_id." + nm + ")"
+        return "i32(tungsten_internal_group_id." + nm + ")"
     # Array element read: receiver[idx] arrives as a `[]` call.
     if nm == "\[]" && recv != nil
       cargs = node.args
@@ -2666,7 +2666,7 @@ use ast
         if shared_args == nil || shared_args.size() != 1 || ast_kind(shared_args[0]) != :int || shared_name == "shared_i64"
           return false
         source_name = "" + target.name
-        global_name = "__wg_" + ctx[:kernel_name] + "_" + source_name
+        global_name = "tungsten_internal_wg_" + ctx[:kernel_name] + "_" + source_name
         elt = shared_name == "shared_f32" ? "f32" : "i32"
         ctx[:renames][source_name] = global_name
         ctx[:shared_decls] << "var<workgroup> " + global_name + " : array<" + elt + ", " + shared_args[0].value.to_s() + ">;\n"
@@ -2852,7 +2852,7 @@ use ast
   while pi < params.size()
     p = params[pi]
     pname = p.name
-    binding_name = "__bind_" + name + "_" + pname
+    binding_name = "tungsten_internal_bind_" + name + "_" + pname
     param_renames[pname] = binding_name
     ptype = type_hints[pname]
     pnames.push(pname)
@@ -2888,9 +2888,9 @@ use ast
   out << "@compute @workgroup_size(256)\n"
   out << "fn "
   out << name
-  out << "(@builtin(global_invocation_id) __tid : vec3<u32>,\n"
-  out << "   @builtin(local_invocation_id) __tid_local : vec3<u32>,\n"
-  out << "   @builtin(workgroup_id) __group_id : vec3<u32>) {\n"
+  out << "(@builtin(global_invocation_id) tungsten_internal_tid : vec3<u32>,\n"
+  out << "   @builtin(local_invocation_id) tungsten_internal_tid_local : vec3<u32>,\n"
+  out << "   @builtin(workgroup_id) tungsten_internal_group_id : vec3<u32>) {\n"
   ctx = {node: node, kernel_name: name, var_types: {}, params: pnames, indent: 1, renames: param_renames, shared_decls: StringBuffer(128)}
   declared = {}
   body_out = StringBuffer(256)

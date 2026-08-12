@@ -82,11 +82,13 @@ jobs:
             metal_specs: "1"
             repl_specs: "1"
             api_specs: "0"
+            wgsl_validator: ""
           - name: Linux x86_64
             runner: ubuntu-latest
             metal_specs: "0"
             repl_specs: "0"
             api_specs: "1"
+            wgsl_validator: build/cache/tools/naga-30.0.0/bin/naga
 
     steps:
       - uses: actions/checkout@v4
@@ -111,6 +113,26 @@ jobs:
           ruby-version: "4.0.5"
           bundler-cache: true
 
+      - name: Cache pinned WGSL validator
+        if: runner.os == 'Linux'
+        id: naga-cache
+        uses: actions/cache@v4
+        with:
+          path: build/cache/tools/naga-30.0.0
+          key: naga-cli-30.0.0-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install pinned WGSL validator
+        if: runner.os == 'Linux' && steps.naga-cache.outputs.cache-hit != 'true'
+        run: >-
+          cargo install naga-cli
+          --version '=30.0.0'
+          --locked
+          --root build/cache/tools/naga-30.0.0
+
+      - name: Verify WGSL validator
+        if: runner.os == 'Linux'
+        run: build/cache/tools/naga-30.0.0/bin/naga --version
+
       - name: Install reference-interpreter gems
         working-directory: implementations/ruby
         run: bundle install
@@ -128,4 +150,5 @@ jobs:
           RUN_METAL_SPECS: ${{ matrix.metal_specs }}
           RUN_REPL_SPECS: ${{ matrix.repl_specs }}
           RUN_API_SPECS: ${{ matrix.api_specs }}
+          NAGA_BIN: ${{ matrix.wgsl_validator }}
         run: bundle exec rake

@@ -456,14 +456,14 @@ projects stay unchecked until their stated acceptance criteria are met.
   `simdgroup_*` matrix intrinsics during dialect emission. Invalid MSL names
   never reach a `.cu` sidecar; emit-only expected-failure fixtures keep the
   diagnostics explicit until native CUDA equivalents are implemented.
-- [ ] Broaden WGSL beyond assignments/calls/if: while-as-loop, return,
+- [x] Broaden WGSL beyond assignments/calls/if: while-as-loop, return,
   workgroup memory, barriers, and atomics, with emitted WGSL validated by a real
   tool in CI.
   - [x] Emit while/if/else, return/break/continue, compound assignment,
     workgroup arrays, invocation/workgroup IDs, barriers, and i32 storage
     atomics; keep an emit-only sidecar regression in the default spec gate.
-  - [ ] Pin a real WGSL validator in CI and reject invalid sidecars instead of
-    relying only on source markers.
+  - [x] Pin naga-cli 30.0.0 in the Linux CI cache and validate the emitted
+    sidecar semantically in addition to the source-marker assertions.
 - [ ] Make multi-dialect GPU sidecars deliberate and stable by default. Invalid
   dialect combinations must be diagnostics, not skipped comments or silent
   fallback; keep explicit opt-out for users who only want one backend.
@@ -472,6 +472,12 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Make carry-chain unroll count a source/env tuning hint rather than a
   hardcoded 8, and add `bin/tungsten gpu-bench` to emit, compile, dispatch, and
   time reproducible kernels with device/compiler metadata.
+  - [x] Add `TUNGSTEN_CARRY_UNROLL=0..64`, retain 8 as the default, include it
+    in incremental-cache identity, and verify emitted LLVM metadata.
+  - [x] Add a reproducible Metal `bin/tungsten gpu-bench` harness with
+    synchronous and batched timing, correctness checks, cached artifacts, and
+    device/compiler/source provenance.
+  - [ ] Add an equivalent standardized CUDA timing host to `gpu-bench`.
 - [ ] Add MinGW and a Windows-native event loop, filesystem/process/socket
   parity, path/encoding rules, and x64/ARM64 CI. Use a temporary native host or
   Spot runner only where GitHub runners cannot exercise the required kernel API.

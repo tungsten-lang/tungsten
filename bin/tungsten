@@ -111,6 +111,10 @@ case "$1" in
     shift
     exec bash "$ROOT/bin/commands/release.sh" "$@"
     ;;
+  gpu-bench)
+    shift
+    exec bash "$ROOT/bin/commands/gpu-bench.sh" "$@"
+    ;;
   # build: the Tungsten orchestrator (bin/commands/build.w), compiled on
   # demand like tungsten.wc. Needs an existing compiler — a fresh clone
   # bootstraps first. --ruby/--spinel remain developer options inside it.

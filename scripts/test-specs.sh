@@ -319,8 +319,9 @@ run_cuda_emit_spec() {
   rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path"
 }
 
-# Emit-only WGSL dialect check. The binary validates the generated source; no
-# browser, WebGPU implementation, shader compiler, or GPU is required.
+# WGSL dialect check. The binary pins expected source markers; when NAGA_BIN is
+# set (CI pins naga-cli), Naga also parses and semantically validates the actual
+# emitted sidecar. No browser, WebGPU implementation, or GPU is required.
 run_wgsl_emit_spec() {
   local path="$1"
   local name
@@ -331,6 +332,7 @@ run_wgsl_emit_spec() {
   local wgsl_path
   local output
   local status
+  local validator
 
   name="$(basename "${path%.w}")"
   out="$TMP_ROOT/$name"
@@ -345,6 +347,27 @@ run_wgsl_emit_spec() {
     record_failure_note "$name" "compile failed"
     rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path" "$wgsl_path"
     return
+  fi
+
+  validator="${NAGA_BIN:-}"
+  if [[ -z "$validator" ]] && command -v naga >/dev/null 2>&1; then
+    validator="$(command -v naga)"
+  fi
+  if [[ -n "$validator" ]]; then
+    if [[ ! -x "$validator" ]]; then
+      record_failure_note "$name" "NAGA_BIN is not executable: $validator"
+      rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path" "$wgsl_path"
+      return
+    fi
+    set +e
+    output="$("$validator" "$wgsl_path" 2>&1)"
+    status=$?
+    set -e
+    if [[ "$status" -ne 0 ]]; then
+      record_result "$name" "$output" "$status"
+      rm -f "$ll_path" "$ll_path.done" "$metal_path" "$cuda_path" "$wgsl_path"
+      return
+    fi
   fi
 
   set +e
@@ -950,6 +973,19 @@ if [[ "${RUN_METAL_SPECS:-0}" == "1" ]]; then
   for spec in "${metal_specs[@]}"; do
     run_metal_spec "$spec"
   done
+  echo "bin/tungsten gpu-bench (hardware smoke)"
+  set +e
+  output="$("$TUNGSTEN" gpu-bench --elements 65536 --runs 3 --warmup 1 \
+    --output "$TMP_ROOT/gpu-bench.json" 2>&1)"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]] && ! ruby -rjson -e \
+      'r = JSON.parse(File.read(ARGV.fetch(0))); exit(r.dig("verification", "passed") ? 0 : 1)' \
+      "$TMP_ROOT/gpu-bench.json"; then
+    output="${output}${output:+$'\n'}FAIL: gpu-bench result did not verify"
+    status=1
+  fi
+  record_result "gpu-bench" "$output" "$status"
 else
   echo "skip Metal specs (set RUN_METAL_SPECS=1 to run)"
 fi

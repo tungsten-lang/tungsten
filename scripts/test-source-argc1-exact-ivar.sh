@@ -25,8 +25,13 @@ check_count() {
 }
 
 check_count spec/compiler/source_argc1_exact_ivar_spec.w 1
+# Unknown, compound, destructuring, accessor, reopened, and inherited writes
+# must all stay generic. Assignment-hint compatibility has its own executable
+# fixture below and is intentionally not mixed into this zero-count corpus.
 check_count spec/compiler/source_argc1_exact_ivar_soundness_spec.w 0
-check_count spec/compiler/source_argc1_constructor_exclusion_spec.w 0
+# The ordinary source-class holder is the single positive control; every
+# runtime-backed constructor in the same fixture must remain excluded.
+check_count spec/compiler/source_argc1_constructor_exclusion_spec.w 1
 check_count spec/compiler/source_argc1_namespaced_reopen_spec.w 0
 check_count spec/compiler/source_argc1_hint_compat_spec.w 1
 

@@ -82,13 +82,3 @@
 + DescendantWriteHolder < BaseExactHolder
   -> replace(value)
     @receiver = value
-
-+ HintedWriteHolder
-  -> new
-    @receiver = ProofTarget.new()
-
-  -> replace(value)
-    @receiver = value ## ProofTarget
-
-  -> call(value)
-    @receiver.argc1(value)

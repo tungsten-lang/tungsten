@@ -97,6 +97,21 @@ automatically and retains files for seven days by default. To exercise the
 retention contract directly, run `rake test:cache_gc`; do not commit cache or
 build products.
 
+## Continuous integration
+
+Linux CI and release builds use pinned Blacksmith Ubuntu 24.04 runners; macOS
+Intel coverage remains on GitHub-hosted hardware. The repository's Blacksmith
+GitHub integration must be enabled before changing a job to a `blacksmith-*`
+label, or GitHub will leave that job queued without a matching runner.
+
+CI persists `build/cache/` and the content-addressed C VM cache with the
+upstream `actions/cache` action. Blacksmith redirects that action to its
+co-located cache automatically. The outer key separates operating systems and
+architectures and hashes build inputs; its rolling restore prefix deliberately
+allows older entries through because Tungsten validates every restored artifact
+against its own complete content/toolchain identity before reuse. Avoid adding
+a second cache action for a subdirectory of `build/cache/`.
+
 ## Pull requests
 
 A pull request should explain the user-visible problem, the root cause, the

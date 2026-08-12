@@ -23,7 +23,7 @@ jobs:
   validate:
     name: Validate release preflight and package
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,17 +74,17 @@ jobs:
             cpu: x86-64-v3
             artifact_dir: x86_64-apple-macos/x86-64-v3
           - label: linux-arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-2vcpu-ubuntu-2404-arm
             target: aarch64-unknown-linux-gnu
             cpu: ""
             artifact_dir: aarch64-unknown-linux-gnu/default
           - label: linux-x86_64-v2
-            runner: ubuntu-24.04
+            runner: blacksmith-2vcpu-ubuntu-2404
             target: x86_64-unknown-linux-gnu
             cpu: x86-64-v2
             artifact_dir: x86_64-unknown-linux-gnu/x86-64-v2
           - label: linux-x86_64-v3
-            runner: ubuntu-24.04
+            runner: blacksmith-2vcpu-ubuntu-2404
             target: x86_64-unknown-linux-gnu
             cpu: x86-64-v3
             artifact_dir: x86_64-unknown-linux-gnu/x86-64-v3

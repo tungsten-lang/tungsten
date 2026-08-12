@@ -25,7 +25,7 @@ jobs:
             runner: macos-15
             full_self_host: "0"
           - name: Linux x86_64
-            runner: ubuntu-24.04
+            runner: blacksmith-2vcpu-ubuntu-2404
             full_self_host: "1"
 
     steps:
@@ -84,7 +84,7 @@ jobs:
             api_specs: "0"
             wgsl_validator: ""
           - name: Linux x86_64
-            runner: ubuntu-latest
+            runner: blacksmith-2vcpu-ubuntu-2404
             metal_specs: "0"
             repl_specs: "0"
             api_specs: "1"
@@ -92,6 +92,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Build artifacts are internally content-addressed. The outer key keeps
+      # incompatible host ABIs apart; the rolling restore key lets unchanged
+      # runtime/compiler objects survive an ordinary source commit.
+      - name: Restore Tungsten build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            build/cache
+            implementations/c/build/cache-*
+          key: tungsten-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('VERSION', 'Bitfile', 'bin/commands/build.w', 'bin/commands/bootstrap*.sh', 'bin/commands/config.sh', 'compiler/**', 'core/**', 'data/units.tsv', 'implementations/c/Makefile', 'implementations/c/include/**', 'implementations/c/src/**', 'languages/tungsten/**', 'runtime/**') }}
+          restore-keys: |
+            tungsten-build-v3-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install Linux toolchain
         if: runner.os == 'Linux'
@@ -113,21 +126,15 @@ jobs:
           ruby-version: "4.0.5"
           bundler-cache: true
 
-      - name: Cache pinned WGSL validator
-        if: runner.os == 'Linux'
-        id: naga-cache
-        uses: actions/cache@v4
-        with:
-          path: build/cache/tools/naga-30.0.0
-          key: naga-cli-30.0.0-${{ runner.os }}-${{ runner.arch }}
-
       - name: Install pinned WGSL validator
-        if: runner.os == 'Linux' && steps.naga-cache.outputs.cache-hit != 'true'
-        run: >-
-          cargo install naga-cli
-          --version '=30.0.0'
-          --locked
-          --root build/cache/tools/naga-30.0.0
+        if: runner.os == 'Linux'
+        run: |
+          if [[ ! -x build/cache/tools/naga-30.0.0/bin/naga ]]; then
+            cargo install naga-cli \
+              --version '=30.0.0' \
+              --locked \
+              --root build/cache/tools/naga-30.0.0
+          fi
 
       - name: Verify WGSL validator
         if: runner.os == 'Linux'

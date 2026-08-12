@@ -256,7 +256,8 @@ ENVIRONMENT
     TUNGSTEN_GPU_DIALECTS
         Comma list of extra GPU dialect sidecars to emit for @gpu fn
         (e.g. cuda,wgsl). Metal is always emitted when kernels are present;
-        CUDA is also emitted by default on non-Darwin hosts.
+        CUDA is emitted by default. Accepted entries are metal, cuda, wgsl,
+        and none; none must be used alone. Invalid lists fail before emission.
     TUNGSTEN_CARRY_UNROLL
         LLVM unroll count for loops containing addcarry/subborrow. The default
         is 8; values from 1 through 64 select a count, and 0 disables the hint.

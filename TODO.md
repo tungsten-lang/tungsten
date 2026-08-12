@@ -467,6 +467,10 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Make multi-dialect GPU sidecars deliberate and stable by default. Invalid
   dialect combinations must be diagnostics, not skipped comments or silent
   fallback; keep explicit opt-out for users who only want one backend.
+  - [x] Reject unknown, duplicate, empty-entry, and `none`-combined dialect lists
+    with E_GPU_DIALECTS before writing any sidecar.
+  - [ ] Default WGSL emission once every default kernel either emits valid
+    portable WGSL or receives an explicit dialect diagnostic.
 - [ ] Verify GPU kernel shapes and intrinsic legality before emission, including
   SELF shapes, addcarry/asm restrictions, workgroup sizes, and buffer bounds.
 - [ ] Make carry-chain unroll count a source/env tuning hint rather than a

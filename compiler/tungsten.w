@@ -640,6 +640,46 @@ driver_homebrew_prefix_memo = {}
   z = system("rmdir " + dev_runtime_shell_quote(parts.join("/")) + " 2>/dev/null")
   ok
 
+-> gpu_dialect_selection(raw, file_path, node)
+  if raw == nil
+    return {cuda: true, wgsl: false}
+  if raw == ""
+    return {cuda: false, wgsl: false}
+  if raw.starts_with?(",") || raw.ends_with?(",") || raw.include?(",,")
+    raise compile_error_for_node(
+      :E_GPU_DIALECTS,
+      "empty GPU dialect in TUNGSTEN_GPU_DIALECTS value '" + raw + "'",
+      file_path,
+      node)
+
+  requested = raw.split(",")
+  seen = {}
+  i = 0
+  while i < requested.size()
+    name = requested[i].strip()
+    if name == "" || !(name in ("metal" "cuda" "wgsl" "none"))
+      raise compile_error_for_node(
+        :E_GPU_DIALECTS,
+        "invalid TUNGSTEN_GPU_DIALECTS value '" + raw + "' (expected a comma list of metal, cuda, wgsl, or none)",
+        file_path,
+        node)
+    if seen[name] == true
+      raise compile_error_for_node(
+        :E_GPU_DIALECTS,
+        "duplicate GPU dialect '" + name + "' in TUNGSTEN_GPU_DIALECTS",
+        file_path,
+        node)
+    seen[name] = true
+    i += 1
+
+  if seen["none"] == true && requested.size() != 1
+    raise compile_error_for_node(
+      :E_GPU_DIALECTS,
+      "GPU dialect 'none' cannot be combined with another dialect",
+      file_path,
+      node)
+  {cuda: seen["cuda"] == true, wgsl: seen["wgsl"] == true}
+
 -> emit_ir(file_path, emit_wire, verbose, intern_algo, sidemap_path = nil, emit_ll_only_arg = false, build_defines = nil, no_static_slab = false)
   # Emit LLVM IR (or WIRE text) for a single file, return ll_path or nil
   loader = Loader.new(verbose)
@@ -742,6 +782,7 @@ driver_homebrew_prefix_memo = {}
   # .metal file is the artifact we verify: source → MSL → dispatch.
   kernels = collect_gpu_kernels(ast)
   if kernels.size() > 0
+    dialect_selection = gpu_dialect_selection(env("TUNGSTEN_GPU_DIALECTS"), file_path, kernels[0])
     metal_text = emit_gpu_kernels_metal(kernels)
     # Emit the .metal (and the opt-in .cu/.wgsl sidecars) next to the SOURCE,
     # not next to the .ll. For `-o` the .ll lands in a temp build dir, but the
@@ -757,20 +798,13 @@ driver_homebrew_prefix_memo = {}
     if verbose
       << "Wrote " + metal_path + " (" + kernels.size().to_s() + " @gpu fn)"
     # Additional GPU dialects: CUDA C and WGSL sidecars.
-    # TUNGSTEN_GPU_DIALECTS is a comma list, e.g. "cuda,wgsl" or "none".
+    # TUNGSTEN_GPU_DIALECTS is a validated comma list, e.g. "cuda,wgsl" or
+    # "none". Invalid/contradictory lists fail before any sidecar is written.
     # Default: emit CUDA always (cross-platform kernel source). WGSL stays
     # opt-in. Set TUNGSTEN_GPU_DIALECTS=none to suppress extras; Metal is
     # always written when kernels are present.
-    dialects = env("TUNGSTEN_GPU_DIALECTS")
-    emit_cuda = true
-    emit_wgsl = false
-    if dialects != nil
-      if dialects == "none" || dialects == ""
-        emit_cuda = false
-        emit_wgsl = false
-      else
-        emit_cuda = dialects.include?("cuda")
-        emit_wgsl = dialects.include?("wgsl")
+    emit_cuda = dialect_selection[:cuda]
+    emit_wgsl = dialect_selection[:wgsl]
     if emit_cuda
       cuda_text = emit_gpu_kernels_cuda(kernels)
       if cuda_text != nil

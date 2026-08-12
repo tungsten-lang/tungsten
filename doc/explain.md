@@ -108,3 +108,13 @@ An `@gpu fn` feature is not available for the selected GPU dialect
 **Fix:** Use portable GPU surface (`gpu.thread_position_in_grid`, shared
 arrays, simple control flow), or set `TUNGSTEN_GPU_DIALECTS` appropriately.
 See `doc/gpu-cuda.md`.
+
+## E_GPU_DIALECTS
+
+`TUNGSTEN_GPU_DIALECTS` contained an unknown, duplicate, or contradictory
+dialect selection. Accepted names are `metal`, `cuda`, `wgsl`, and `none`;
+`none` must appear by itself. Metal source is always emitted for `@gpu fn`, so
+including `metal` is explicit but does not change the artifact set.
+
+**Fix:** Use a unique comma-separated list such as `cuda,wgsl`, use `none` by
+itself to suppress extra sidecars, or unset the variable for the default.

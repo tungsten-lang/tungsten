@@ -22,6 +22,11 @@ TUNGSTEN_GPU_DIALECTS=cuda,wgsl bin/tungsten compile kernels.w --out /tmp/kernel
 TUNGSTEN_GPU_DIALECTS=none     bin/tungsten compile kernels.w --out /tmp/kernels
 ```
 
+Accepted entries are `metal`, `cuda`, `wgsl`, and `none`. Names are
+case-sensitive and may not be repeated; `none` must be used alone. Invalid
+lists fail before any GPU sidecar is written. Metal is always emitted, so an
+explicit `metal` entry documents intent but does not change the artifact set.
+
 The default spec gate validates compiler-emitted WGSL with a pinned Naga CLI
 on Linux CI. For the same semantic validation locally, install `naga-cli`
 30.0.0 and either put `naga` on `PATH` or set `NAGA_BIN` before running

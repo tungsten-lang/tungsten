@@ -81,6 +81,11 @@
   when "cache_write"
     cache_write(args[0], args[1])
 
+  when "freeze_slab"
+    if args.size() != 0
+      raise "freeze_slab expects no arguments"
+    ccall("w_slab_freeze_safe")
+
   when "exit"
     if args.empty?()
       exit 0
@@ -486,7 +491,7 @@ builtin_names = [
   "reject", "reduce", "each_with_index", "map_with_index", "zip", "any?", "all?",
   "find", "count", "sum", "times", "keys", "values", "has_key?", "abs", "max", "min",
   "respond_to?", "is_a?", "freeze", "argv", "clock", "clock_ms", "runtime_identity", "digest_string64",
-  "capture", "system", "env", "ljust", "rjust", "round", "gets"
+  "capture", "system", "env", "ljust", "rjust", "round", "gets", "freeze_slab"
 ]
 
 -> is_builtin?(name)

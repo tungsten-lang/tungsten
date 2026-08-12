@@ -56,7 +56,7 @@ if [[ ! "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}([.-][0-9A-Za-z]+)*$ ]]; then
   printf 'tungsten release: invalid version %s\n' "$VERSION" >&2
   exit 1
 fi
-if [[ "$(git branch --show-current)" != "main" ]]; then
+if [[ "$DRY_RUN" -eq 0 && "$(git branch --show-current)" != "main" ]]; then
   printf 'tungsten release: releases must be cut from main\n' >&2
   exit 1
 fi

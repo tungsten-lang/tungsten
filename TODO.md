@@ -320,7 +320,7 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [x] Implement `bin/tungsten release`: validate a clean `main`, run root `rake`,
   create/push an annotated version tag, then build, smoke, checksum, attest, and
   publish native packages for macOS/Linux ARM64 baselines and x86-64-v2/v3.
-- [ ] Make the release workflow exercise `--dry-run` and package validation in
+- [x] Make the release workflow exercise `--dry-run` and package validation in
   pull requests without creating tags or releases.
 - [x] Repair `-march=native` on Apple Silicon so release/native never suppresses
   crypto extensions. Stamp the explicit detected feature set and pin it with an

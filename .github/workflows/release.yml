@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - VERSION
+      - bin/commands/release.sh
+      - scripts/package-release.sh
+      - scripts/validate-release-package.sh
 
 concurrency:
   group: release-${{ github.ref }}
@@ -13,8 +20,34 @@ permissions:
   contents: read
 
 jobs:
+  validate:
+    name: Validate release preflight and package
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Exercise release dry run
+        run: bin/tungsten release --dry-run
+
+      - name: Build package fixture
+        run: |
+          mkdir -p build/cache/release-validation build/packages
+          cp "$(command -v true)" build/cache/release-validation/tungsten-compiler
+          scripts/package-release.sh \
+            build/cache/release-validation/tungsten-compiler \
+            validation-linux-x86_64 build/packages
+
+      - name: Validate package fixture
+        run: |
+          package="tungsten-$(tr -d '[:space:]' < VERSION)-validation-linux-x86_64.tar.gz"
+          scripts/validate-release-package.sh "build/packages/$package" validation-linux-x86_64
+
   build:
     name: ${{ matrix.label }}
+    if: github.event_name == 'push'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
@@ -99,6 +132,13 @@ jobs:
             "build/releases/$ARTIFACT_DIR/tungsten-compiler" \
             "$TARGET_LABEL" build/packages
 
+      - name: Validate release package
+        env:
+          TARGET_LABEL: ${{ matrix.label }}
+        run: |
+          package="tungsten-$(tr -d '[:space:]' < VERSION)-$TARGET_LABEL.tar.gz"
+          scripts/validate-release-package.sh "build/packages/$package" "$TARGET_LABEL"
+
       - name: Smoke packaged compiler
         env:
           TARGET_LABEL: ${{ matrix.label }}
@@ -122,6 +162,7 @@ jobs:
 
   publish:
     name: Publish GitHub release
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-24.04
     permissions:

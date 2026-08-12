@@ -218,6 +218,10 @@
 
 + Autodiff
   # Forward-mode derivative of f at x (f takes Dual, returns Dual).
+  -> .grad(f, x)
+    d = f(Dual.var(x))
+    d.eps
+
   -> .grad_forward(f, x)
     d = f(Dual.var(x))
     d.eps

@@ -929,6 +929,8 @@ use ast
     ptype = type_hints[pname]
     if ptype == nil
       gpu_kernel_error(node, "device fn `" + name + "` param `" + pname + "` needs a ## type hint")
+    if !gpu_param_type_supported?(ptype)
+      gpu_kernel_error(node, "device fn `" + name + "` param `" + pname + "` has unsupported type `" + ptype.to_s() + "`")
     param_types[pname] = ptype
     param_names.push(pname)
     pi += 1
@@ -1045,6 +1047,8 @@ use ast
     ptype = type_hints[pname]
     if ptype == nil
       gpu_kernel_error(node, "parameter `" + pname + "` needs a ## type hint (f32[] / i32 / etc)")
+    if !gpu_param_type_supported?(ptype)
+      gpu_kernel_error(node, "parameter `" + pname + "` has unsupported type `" + ptype.to_s() + "`")
     param_types[pname] = ptype
     param_names.push(pname)
     pi += 1
@@ -1266,6 +1270,12 @@ use ast
       return "UNMAPPED_" + elt_name
     return mapped
   nil
+
+-> gpu_param_type_supported?(type_hint)
+  arr_elt = msl_array_elt_type(type_hint)
+  if arr_elt != nil
+    return !arr_elt.starts_with?("UNMAPPED_")
+  msl_scalar_type(type_hint) != nil
 
 -> msl_param_decl(type_hint, pname, buf_index)
   arr_elt = msl_array_elt_type(type_hint)
@@ -2307,6 +2317,8 @@ use ast
     ptype = type_hints[pname]
     if ptype == nil
       gpu_kernel_error(node, "parameter `" + pname + "` needs a ## type hint (f32[] / i32 / etc)")
+    if !gpu_param_type_supported?(ptype)
+      gpu_kernel_error(node, "parameter `" + pname + "` has unsupported type `" + ptype.to_s() + "`")
     param_types[pname] = ptype
     param_names.push(pname)
     pi += 1
@@ -2385,6 +2397,8 @@ use ast
     ptype = type_hints[pname]
     if ptype == nil
       gpu_kernel_error(node, "device fn `" + name + "` param `" + pname + "` needs a ## type hint")
+    if !gpu_param_type_supported?(ptype)
+      gpu_kernel_error(node, "device fn `" + name + "` param `" + pname + "` has unsupported type `" + ptype.to_s() + "`")
     param_types[pname] = ptype
     param_names.push(pname)
     if pi > 0
@@ -2458,7 +2472,7 @@ use ast
 # WGSL is not C: buffers are module-scope bindings, locals declare with
 # `var`, and there's no pointer syntax. The supported portable subset covers
 # scalar control flow, storage/workgroup arrays, barriers, and i32 atomics;
-# kernels using dialect-only features are skipped with a comment.
+# kernels using dialect-only features fail preflight with a source diagnostic.
 
 -> wgsl_elt_name(msl_name)
   if msl_name == "float"
@@ -2863,13 +2877,13 @@ use ast
     if arr_elt != nil
       wgsl_elt = wgsl_elt_name(arr_elt)
       if !(wgsl_elt in ("f32" "i32" "u32"))
-        return "// kernel `" + name + "` skipped: unsupported storage element type for WGSL\n"
+        gpu_kernel_error(node, "storage parameter `" + pname + "` type `" + ptype.to_s() + "` is not supported by the WGSL dialect")
       out << "var<storage, read_write> "
       out << binding_name
       out << " : array<"
       if atomic_buffers[pname] == true
         if wgsl_elt != "i32"
-          return "// kernel `" + name + "` skipped: WGSL atomics require an i32[] buffer\n"
+          gpu_kernel_error(node, "WGSL atomics require an i32[] buffer (parameter `" + pname + "` is `" + ptype.to_s() + "`)")
         out << "atomic<i32>"
       else
         out << wgsl_elt
@@ -2877,7 +2891,7 @@ use ast
     else
       sc = wgsl_scalar(ptype)
       if sc == nil
-        return "// kernel `" + name + "` skipped: unsupported param type for WGSL\n"
+        gpu_kernel_error(node, "parameter `" + pname + "` type `" + ptype.to_s() + "` is not supported by the WGSL dialect")
       out << "var<uniform> "
       out << binding_name
       out << " : "
@@ -2897,7 +2911,7 @@ use ast
   bi = 0
   while bi < body.size()
     if !wgsl_stmt(body_out, ctx, body[bi], declared)
-      return "// kernel `" + name + "` skipped: outside the portable WGSL subset (stmt " + ast_kind(body[bi]).to_s() + ")\n"
+      gpu_kernel_error(node, "statement `" + ast_kind(body[bi]).to_s() + "` is outside the portable WGSL subset")
     bi += 1
   if ctx[:shared_decls].size() > 0
     with_shared = StringBuffer(out.size() + ctx[:shared_decls].size() + body_out.size() + 8)

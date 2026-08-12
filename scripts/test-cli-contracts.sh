@@ -10,6 +10,8 @@ INVALID_CAMEL="$ROOT/spec/cli/camel_case_invalid.w"
 INVALID_STR_TYPE="$ROOT/spec/cli/str_type_invalid.w"
 INVALID_GPU="$ROOT/spec/cli/gpu_check_missing_hint.w"
 MULTI_INVALID_GPU="$ROOT/spec/cli/gpu_check_multiple_errors.w"
+UNSUPPORTED_GPU_TYPE="$ROOT/spec/cli/gpu_check_unsupported_type.w"
+UNSUPPORTED_WGSL_TYPE="$ROOT/spec/cli/gpu_check_wgsl_type.w"
 VALID_GPU="$ROOT/spec/compiler/gpu_wgsl_emit_spec.w"
 CUDA_GPU="$ROOT/spec/compiler/gpu_cuda_tg_reduce_reject_spec.w"
 EXIT_7="$ROOT/spec/cli/exit_7.w"
@@ -82,6 +84,27 @@ grep -q '`unsupported_expression` \[metal\]' "$TMP/check-gpu-multiple-error.out"
 grep -q '`cuda_reduction_error` \[cuda\]' "$TMP/check-gpu-multiple-error.out"
 [[ ! -e "${MULTI_INVALID_GPU%.w}.metal" ]]
 [[ ! -e "${MULTI_INVALID_GPU%.w}.cu" ]]
+
+if "$TUNGSTEN" -c "$UNSUPPORTED_GPU_TYPE" >"$TMP/check-gpu-type-error.out" 2>&1; then
+  printf 'tungsten -c accepted an unsupported GPU parameter type\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-type-error.out"
+grep -q 'parameter `input` has unsupported type `string`' "$TMP/check-gpu-type-error.out"
+grep -q 'gpu_check_unsupported_type.w:4:1' "$TMP/check-gpu-type-error.out"
+[[ ! -e "${UNSUPPORTED_GPU_TYPE%.w}.metal" ]]
+[[ ! -e "${UNSUPPORTED_GPU_TYPE%.w}.cu" ]]
+
+if TUNGSTEN_GPU_DIALECTS=wgsl "$TUNGSTEN" -c "$UNSUPPORTED_WGSL_TYPE" \
+    >"$TMP/check-gpu-wgsl-type-error.out" 2>&1; then
+  printf 'tungsten -c silently skipped an unsupported WGSL parameter type\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-wgsl-type-error.out"
+grep -q 'f16\[\].*not supported by the WGSL dialect' "$TMP/check-gpu-wgsl-type-error.out"
+grep -q 'gpu_check_wgsl_type.w:5:1' "$TMP/check-gpu-wgsl-type-error.out"
+[[ ! -e "${UNSUPPORTED_WGSL_TYPE%.w}.metal" ]]
+[[ ! -e "${UNSUPPORTED_WGSL_TYPE%.w}.wgsl" ]]
 
 for spelling in _camelCase @camelCase @@camelCase '$camelCase'; do
   if "$TUNGSTEN" --check -e "$spelling = 1" >"$TMP/check-camel-variant.out" 2>&1; then

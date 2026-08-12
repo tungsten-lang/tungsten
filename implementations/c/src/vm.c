@@ -2176,7 +2176,6 @@ void tc_value_print(TcValue value, FILE *out) {
       fwrite(tc_str_bytes_only(value), 1, tc_str_len(value), out);
       break;
     case TC_VAL_SYMBOL:
-      fputc(':', out);
       fwrite(tc_str_bytes_only(value), 1, tc_str_len(value), out);
       break;
     case TC_VAL_ARRAY:

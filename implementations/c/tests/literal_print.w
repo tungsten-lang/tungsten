@@ -1,0 +1,5 @@
+<< "hello"
+<< true
+<< false
+<< nil
+<< :ok

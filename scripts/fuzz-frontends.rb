@@ -157,6 +157,14 @@ def ruby_ast_wire(node)
     {node: :ivar, name: node.name}
   when Tungsten::AST::Int
     {node: :int, value: node.value, format: nil, raw: node.value.to_s}
+  when Tungsten::AST::StringLiteral
+    {node: :string, value: node.value}
+  when Tungsten::AST::Boolean
+    {node: :bool, value: node.value}
+  when Tungsten::AST::Nil
+    {node: :nil_lit}
+  when Tungsten::AST::Symbol
+    {node: :symbol, value: node.value}
   when Tungsten::AST::BinaryOp
     operator = RUBY_BINARY_OPS.fetch(node.operator.to_s)
     {node: :binary_op, left: ruby_ast_wire(node.left), op: operator, right: ruby_ast_wire(node.right)}
@@ -192,6 +200,8 @@ def ruby_ast_wire(node)
     {node: :trait_def, name: node.name, body: ruby_body_wire(node.body)}
   when Tungsten::AST::Is
     {node: :trait_include, name: node.trait_name}
+  when Tungsten::AST::Block
+    {node: :block, params: node.args.map(&:name), body: ruby_body_wire(node.body)}
   when Tungsten::AST::Call
     {
       node: :call,
@@ -282,7 +292,7 @@ def valid_source(rng, index)
   name = "value_#{index}"
   other = "other_#{index}"
 
-  case index % 8
+  case index % 11
   when 0
     <<~W
       #{name} = #{left}
@@ -350,7 +360,7 @@ def valid_source(rng, index)
           #{right}
       << #{class_name}.new().value()
     W
-  else
+  when 7
     trait_name = "Trait_#{index}"
     class_name = "Host_#{index}"
     <<~W
@@ -365,6 +375,32 @@ def valid_source(rng, index)
           #{right}
       << #{class_name}.new().value()
       << #{class_name}.new().overridden()
+    W
+  when 8
+    values = "values_#{index}"
+    total = "total_#{index}"
+    <<~W
+      #{values} = [#{left}, #{right}, #{factor}]
+      #{total} = 0
+      #{values}.each -> (item)
+        #{total} += item
+      << #{total}
+    W
+  when 9
+    total = "total_#{index}"
+    <<~W
+      #{total} = #{left}
+      #{factor}.times -> (item)
+        #{total} += item
+      << #{total}
+    W
+  else
+    <<~W
+      << "text_#{index}"
+      << true
+      << false
+      << nil
+      << :item_#{index}
     W
   end
 end

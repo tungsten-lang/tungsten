@@ -101,6 +101,8 @@ test: $(BIN)
 		diff -u tests/class_reopening.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/trait_dispatch.w | \
 		diff -u tests/trait_dispatch.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/literal_print.w | \
+		diff -u tests/literal_print.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/bit_count_intrinsics.w | \
 		diff -u tests/bit_count_intrinsics.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/compound_assignment_ops.w | \

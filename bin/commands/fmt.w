@@ -13,7 +13,7 @@ while i < args.size
   if a == "-w"
     write_in_place = true
   elsif a == "-h" || a == "--help"
-    << "Usage: tungsten fmt [-w] <file.w ...>"
+    << "Usage: tungsten fmt \[-w\] <file.w ...>"
     << ""
     << "  -w   write result back to each file (default: print to stdout)"
     exit(0)
@@ -22,7 +22,7 @@ while i < args.size
   i = i + 1
 
 if files.size == 0
-  << "Usage: tungsten fmt [-w] <file.w ...>"
+  << "Usage: tungsten fmt \[-w\] <file.w ...>"
   exit(1)
 
 fi = 0

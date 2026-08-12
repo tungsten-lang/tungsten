@@ -9,6 +9,15 @@ UNSUPPORTED="$ROOT/spec/cli/fmt_unsupported.w"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-fmt.XXXXXX")"
 trap 'rc=$?; rm -rf "$TMP"; exit $rc' EXIT INT TERM
 
+"$TUNGSTEN" fmt --help >"$TMP/help.out"
+grep -q '^Usage: tungsten fmt \[-w\] <file\.w \.\.\.>$' "$TMP/help.out"
+
+if "$TUNGSTEN" fmt >"$TMP/no-files.out" 2>&1; then
+  printf 'tungsten fmt accepted an empty file list\n' >&2
+  exit 1
+fi
+grep -q '^Usage: tungsten fmt \[-w\] <file\.w \.\.\.>$' "$TMP/no-files.out"
+
 "$TUNGSTEN" fmt "$INPUT" >"$TMP/once.w"
 cmp "$EXPECTED" "$TMP/once.w"
 

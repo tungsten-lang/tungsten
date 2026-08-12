@@ -71,28 +71,12 @@
 
   -> to_s(base = 10)
 
-  # Promote to Float via `self + 0.0` (not `self * 1.0` — multiplying integer
-  # zero by a float literal silently stays boxed Int 0 instead of promoting
-  # to Float 0.0, dying later with "expected numeric type" on first use in a
-  # division; addition promotes zero correctly).
-  #
-  # KNOWN GAP (compiled binaries only): calling `.to_f` on a runtime Int in a
-  # COMPILED (`-o`) program does not reach this body or the correct C
-  # intrinsic (`w_ic_int_to_f` in runtime.c, which IS implemented correctly —
-  # `w_box_double((double)w_as_int(r))`). It silently returns the receiver
-  # unconverted instead of erroring, unlike a genuinely undefined method
-  # (`.even?` on a runtime Int correctly raises "undefined method"). Likely a
-  # calling-convention/boxing mismatch between how compiled code invokes the
-  # `w_ic_int_table` intrinsics and how the interpreter does — needs deeper
-  # investigation in the compiled call-dispatch path (not found in
-  # compiler/lib/wire.w or lowering/calls.w after an initial search; the
-  # `w_ic_int_table` registration in runtime.c has zero referencing call
-  # sites anywhere under compiler/, so the actual compiled invocation
-  # mechanism is elsewhere). Interpreted (`bin/tungsten file.w`, no `-o`)
-  # correctly uses `w_ic_int_to_f`. Workaround for compiled code until fixed:
-  # write `self + 0.0` inline at the call site rather than call `.to_f`.
+  # Convert through the shared numeric boundary. A bare `0.0` is an exact
+  # Decimal in Tungsten, so implementing this as `self + 0.0` would return the
+  # wrong class under the source interpreter even though native IC dispatch
+  # correctly produces a machine Float.
   -> to_f
-    self + 0.0
+    ccall("w_num_to_float", self)
 
   ## Parity / divisibility.
 

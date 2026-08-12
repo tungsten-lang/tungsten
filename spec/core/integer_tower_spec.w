@@ -51,4 +51,14 @@ check("overload.integer_subclass",
 check("overload.bigint_subclass",
       probe.classify(IntegerTowerUserBigInt.new) == "bigint")
 
+-> opaque_to_f(value)
+  value.to_f
+
+small_float = opaque_to_f(7)
+zero_float = opaque_to_f(0)
+check("to_f.small.type", type(small_float) == "Float")
+check("to_f.small.value", small_float == ~7.0)
+check("to_f.zero.type", type(zero_float) == "Float")
+check("to_f.zero.value", zero_float == ~0.0)
+
 << "integer_tower_spec: all checks passed"

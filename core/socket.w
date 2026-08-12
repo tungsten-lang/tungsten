@@ -19,4 +19,9 @@
   -> set_timeout(milliseconds)
   -> shutdown(how = 2)
   -> alpn_protocol
+
+  # Serve accepted HTTP requests on native workers. workers=0 selects the
+  # runtime's CPU-based default; the block receives each parsed request.
+  -> serve_http(workers = 0, &)
+
   -> close

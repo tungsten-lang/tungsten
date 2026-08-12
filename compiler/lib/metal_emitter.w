@@ -972,7 +972,8 @@ use ast
     hoist: [],
     tables: [],
     renames: {},
-    unroll: {}
+    unroll: {},
+    array_bounds: {}
   }
   body = node.body
   n = body.size()
@@ -1118,7 +1119,8 @@ use ast
     hoist: [],
     tables: [],
     renames: {},
-    unroll: {}
+    unroll: {},
+    array_bounds: {}
   }
   body = node.body
   body_out = StringBuffer(512)
@@ -1560,6 +1562,19 @@ use ast
     gpu_kernel_error(kernel_node, "gpu.shared_i64 is not supported by the WGSL dialect")
   size
 
+-> gpu_check_literal_bound(ctx, receiver, index)
+  bounds = ctx[:array_bounds]
+  if bounds == nil || receiver == nil || ast_kind(receiver) != :var || ast_kind(index) != :int
+    return nil
+  name = "" + receiver.name
+  bound = bounds[name]
+  if bound == nil
+    return nil
+  value = index.value
+  if value < 0 || value >= bound
+    gpu_kernel_error(ctx[:node], "array `" + name + "` literal index " + value.to_s() + " is outside 0..." + bound.to_s())
+  nil
+
 -> emit_assign(out, ctx, node)
   target = node.target
   value = node.value
@@ -1603,6 +1618,7 @@ use ast
         elt = "long"
         atype = "i64\[]".to_sym()
       ctx[:var_types][sname] = atype
+      ctx[:array_bounds][sname] = shared_size
       emit_indent(out, ctx)
       if ctx[:dialect] == "cuda"
         out << "__shared__ "
@@ -1879,10 +1895,12 @@ use ast
   if name == "\[]"
     if args == nil || args.size() != 1
       gpu_kernel_error(ctx[:node], "unsupported array-get arity")
+    gpu_check_literal_bound(ctx, recv, args[0])
     # `"\["` avoids triggering Tungsten's own string-interp tokenizer
     # inside this source file; the emitted text is just `[`.
     return emit_expr(ctx, recv) + "\[" + emit_expr(ctx, args[0]) + "]"
   if name == "\[]=" && args != nil && args.size() == 2
+    gpu_check_literal_bound(ctx, recv, args[0])
     return emit_expr(ctx, recv) + "\[" + emit_expr(ctx, args[0]) + "] = " + emit_expr(ctx, args[1])
 
   # gpu.* namespaced primitives.
@@ -2385,7 +2403,8 @@ use ast
     hoist: [],
     tables: [],
     renames: {},
-    unroll: {}
+    unroll: {},
+    array_bounds: {}
   }
   body = node.body
   body_out = StringBuffer(512)
@@ -2452,7 +2471,8 @@ use ast
     hoist: [],
     tables: [],
     renames: {},
-    unroll: {}
+    unroll: {},
+    array_bounds: {}
   }
   body = node.body
   body_out = StringBuffer(256)
@@ -2659,6 +2679,7 @@ use ast
     if nm == "\[]" && recv != nil
       cargs = node.args
       if cargs != nil && cargs.size() == 1
+        gpu_check_literal_bound(ctx, recv, cargs[0])
         base = wgsl_expr(ctx, recv)
         idx = wgsl_expr(ctx, cargs[0])
         if base != nil && idx != nil
@@ -2692,6 +2713,7 @@ use ast
       return "workgroupBarrier()"
     return nil
   if t == :index
+    gpu_check_literal_bound(ctx, node.receiver, ast_get(node, :index))
     base = wgsl_expr(ctx, node.receiver)
     idx = wgsl_expr(ctx, ast_get(node, :index))
     if base == nil || idx == nil
@@ -2716,6 +2738,7 @@ use ast
         global_name = "tungsten_internal_wg_" + ctx[:kernel_name] + "_" + source_name
         elt = shared_name == "shared_f32" ? "f32" : "i32"
         ctx[:renames][source_name] = global_name
+        ctx[:array_bounds][source_name] = shared_size
         ctx[:shared_decls] << "var<workgroup> " + global_name + " : array<" + elt + ", " + shared_size.to_s() + ">;\n"
         declared[source_name] = true
         return true
@@ -2738,6 +2761,7 @@ use ast
       out << ";\n"
       return true
     if tk == :index
+      gpu_check_literal_bound(ctx, target.receiver, ast_get(target, :index))
       lhs = wgsl_expr(ctx, target)
       if lhs == nil
         return false
@@ -2765,6 +2789,7 @@ use ast
     cargs = node.args
     if recv == nil || cargs == nil || cargs.size() != 2
       return false
+    gpu_check_literal_bound(ctx, recv, cargs[0])
     base = wgsl_expr(ctx, recv)
     idx = wgsl_expr(ctx, cargs[0])
     value = wgsl_expr(ctx, cargs[1])
@@ -2938,7 +2963,7 @@ use ast
   out << "(@builtin(global_invocation_id) tungsten_internal_tid : vec3<u32>,\n"
   out << "   @builtin(local_invocation_id) tungsten_internal_tid_local : vec3<u32>,\n"
   out << "   @builtin(workgroup_id) tungsten_internal_group_id : vec3<u32>) {\n"
-  ctx = {node: node, kernel_name: name, var_types: {}, params: pnames, indent: 1, renames: param_renames, shared_decls: StringBuffer(128)}
+  ctx = {node: node, kernel_name: name, var_types: {}, params: pnames, indent: 1, renames: param_renames, shared_decls: StringBuffer(128), array_bounds: {}}
   declared = {}
   body_out = StringBuffer(256)
   bi = 0

@@ -254,8 +254,10 @@ projects stay unchecked until their stated acceptance criteria are met.
     rather than invalid or successful `// skipped` sidecars.
   - [x] Require positive integer-literal workgroup-array shapes and reject
     WGSL-incompatible i64 workgroup storage.
+  - [x] Reject literal out-of-bounds accesses to workgroup arrays with known
+    static extents in every selected dialect.
   - [ ] Add static address-space, aggregate workgroup-memory-limit, and
-    buffer-bound validation.
+    bounds validation for parameter buffers and computed indices.
 - [ ] Make `compiler2` packed/slab nodes use generated `node.field` accessors
   instead of mixed `ast_get`/index access, then delete the compatibility path.
 - [ ] Enforce generic constraints when definitions are checked, including

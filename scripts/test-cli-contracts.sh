@@ -14,6 +14,7 @@ UNSUPPORTED_GPU_TYPE="$ROOT/spec/cli/gpu_check_unsupported_type.w"
 UNSUPPORTED_CUDA_TYPE="$ROOT/spec/cli/gpu_check_cuda_type.w"
 UNSUPPORTED_WGSL_TYPE="$ROOT/spec/cli/gpu_check_wgsl_type.w"
 INVALID_SHARED_SHAPE="$ROOT/spec/cli/gpu_check_shared_shape.w"
+INVALID_SHARED_BOUNDS="$ROOT/spec/cli/gpu_check_shared_bounds.w"
 UNSUPPORTED_WGSL_SHARED="$ROOT/spec/cli/gpu_check_wgsl_shared_type.w"
 VALID_GPU="$ROOT/spec/compiler/gpu_wgsl_emit_spec.w"
 CUDA_GPU="$ROOT/spec/compiler/gpu_cuda_tg_reduce_reject_spec.w"
@@ -130,6 +131,17 @@ grep -q 'gpu.shared_f32 size must be positive (got 0)' "$TMP/check-gpu-shared-sh
 grep -q 'gpu_check_shared_shape.w:4:1' "$TMP/check-gpu-shared-shape-error.out"
 [[ ! -e "${INVALID_SHARED_SHAPE%.w}.metal" ]]
 [[ ! -e "${INVALID_SHARED_SHAPE%.w}.cu" ]]
+
+if "$TUNGSTEN" -c "$INVALID_SHARED_BOUNDS" \
+    >"$TMP/check-gpu-shared-bounds-error.out" 2>&1; then
+  printf 'tungsten -c accepted an out-of-bounds GPU workgroup access\n' >&2
+  exit 1
+fi
+grep -q 'E_GPU_KERNEL_UNSUPPORTED' "$TMP/check-gpu-shared-bounds-error.out"
+grep -q 'array `tile` literal index 4 is outside 0...4' "$TMP/check-gpu-shared-bounds-error.out"
+grep -q 'gpu_check_shared_bounds.w:5:1' "$TMP/check-gpu-shared-bounds-error.out"
+[[ ! -e "${INVALID_SHARED_BOUNDS%.w}.metal" ]]
+[[ ! -e "${INVALID_SHARED_BOUNDS%.w}.cu" ]]
 
 if TUNGSTEN_GPU_DIALECTS=wgsl "$TUNGSTEN" -c "$UNSUPPORTED_WGSL_SHARED" \
     >"$TMP/check-gpu-wgsl-shared-error.out" 2>&1; then

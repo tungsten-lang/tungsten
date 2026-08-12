@@ -5799,6 +5799,233 @@ int main(int argc, char **argv) {
      * results — plus GMP triangulation, self-alias shapes (x+=x, x-=x,
      * x+=0), guard-refusal shapes (shared/overlay receivers must fall back
      * and leave the receiver intact), and carry/borrow edges. */
+    /* All-ones ripple torture for the in-place mut entries (add/sub/mul):
+     * forced carry/borrow ripple depths 0..12 plus the full and near-full
+     * widths, both signs, inline-word and one-limb-bigint RHS, tight and
+     * slack capacities (a tight capacity at the carry-off-the-top shapes
+     * drives the grow-on-carry replacement buffer), the top-limb borrow
+     * shrink, self-aliased receivers, and shared-receiver refusal across
+     * the growth shape.  Every case is bit-exact against GMP. */
+    if ((argc == 2 || argc == 3) && strcmp(argv[1], "--fuzz-mut-ripple") == 0) {
+        int32_t max_limbs = argc == 3 ? (int32_t)atoi(argv[2]) : 64;
+        if (max_limbs <= 0) die("fuzz-mut-ripple expects positive max limbs");
+        uint64_t cases = 0;
+        for (int32_t widx = 0; widx <= max_limbs; widx++) {
+            int32_t l = widx < max_limbs ? widx + 1 : 1024;
+            int32_t depths[16];
+            int nd = 0;
+            for (int32_t d = 0; d <= 12 && d <= l; d++) depths[nd++] = d;
+            if (l > 13) depths[nd++] = l - 1;
+            if (l > 12) depths[nd++] = l;
+            for (int di = 0; di < nd; di++) {
+                int32_t depth = depths[di];
+                for (int slack = 0; slack < 2; slack++) {
+                    for (int ones = 0; ones < 2; ones++) {
+                        if (!ones && depth >= l) continue; /* zero magnitude */
+                        for (int sa = 0; sa < 2; sa++)
+                        for (int sb = 0; sb < 2; sb++)
+                        for (int sub = 0; sub < 2; sub++)
+                        for (int bigb = 0; bigb < 2; bigb++) {
+                            WBigint *ra = bigint_alloc_raw(l + slack);
+                            for (int32_t i = 0; i < l; i++)
+                                ra->limbs[i] = i < depth
+                                    ? (ones ? UINT64_MAX : 0)
+                                    : (UINT64_C(0x0123456789ABCDEF) ^
+                                       ((uint64_t)i *
+                                        UINT64_C(0x9E3779B97F4A7C15)));
+                            if (l > depth && ra->limbs[l - 1] == 0)
+                                ra->limbs[l - 1] = 1;
+                            ra->size = sa ? -l : l;
+                            WValue a = bigint_box(ra);
+                            uint64_t wmag = bigb ? UINT64_MAX : UINT64_C(3);
+                            WValue b;
+                            if (bigb) {
+                                WBigint *rb = bigint_alloc_raw(1);
+                                rb->limbs[0] = wmag;
+                                rb->size = sb ? -1 : 1;
+                                b = bigint_box(rb);
+                            } else {
+                                b = w_box_int(sb ? -(int64_t)wmag
+                                                 : (int64_t)wmag);
+                            }
+                            mpz_t za, zb, zr;
+                            mpz_inits(za, zb, zr, NULL);
+                            gmp_import_value(za, a);
+                            gmp_import_value(zb, b);
+                            if (sub) mpz_sub(zr, za, zb);
+                            else mpz_add(zr, za, zb);
+                            WValue got = sub ? w_bigint_sub_mut(a, b)
+                                             : w_bigint_add_mut(a, b);
+                            if (!value_matches_mpz(got, zr))
+                                dief("fuzz-mut-ripple addsub mismatch l=%d "
+                                     "depth=%d slack=%d ones=%d sa=%d sb=%d "
+                                     "sub=%d bigb=%d",
+                                     l, depth, slack, ones, sa, sb, sub, bigb);
+                            mpz_clears(za, zb, zr, NULL);
+                            if (got != b) bench_free_value(got);
+                            if (bigb && got != b) bench_free_value(b);
+                            cases++;
+                        }
+                    }
+                }
+            }
+            /* top-limb-1 borrow shrink: [0 x (l-1), 1] - w drops a limb
+             * (and demotes at l == 2) */
+            if (l >= 2) {
+                for (int slack = 0; slack < 2; slack++)
+                for (int sa = 0; sa < 2; sa++)
+                for (int bigb = 0; bigb < 2; bigb++) {
+                    WBigint *ra = bigint_alloc_raw(l + slack);
+                    memset(ra->limbs, 0, (size_t)l * sizeof(uint64_t));
+                    ra->limbs[l - 1] = 1;
+                    ra->size = sa ? -l : l;
+                    WValue a = bigint_box(ra);
+                    WValue b;
+                    if (bigb) {
+                        WBigint *rb = bigint_alloc_raw(1);
+                        rb->limbs[0] = 7;
+                        rb->size = sa ? -1 : 1;   /* same sign: the sub leg */
+                        b = bigint_box(rb);
+                    } else {
+                        b = w_box_int(sa ? -7 : 7);
+                    }
+                    mpz_t za, zb, zr;
+                    mpz_inits(za, zb, zr, NULL);
+                    gmp_import_value(za, a);
+                    gmp_import_value(zb, b);
+                    mpz_sub(zr, za, zb);
+                    WValue got = w_bigint_sub_mut(a, b);
+                    if (!value_matches_mpz(got, zr))
+                        dief("fuzz-mut-ripple shrink mismatch l=%d slack=%d "
+                             "sa=%d bigb=%d", l, slack, sa, bigb);
+                    mpz_clears(za, zb, zr, NULL);
+                    if (got != b) bench_free_value(got);
+                    if (bigb && got != b) bench_free_value(b);
+                    cases++;
+                }
+            }
+            /* self-alias: all-ones doubling carries off the top through an
+             * aliased operand; x - x demotes to exact inline zero */
+            for (int slack = 0; slack < 2; slack++)
+            for (int sa = 0; sa < 2; sa++) {
+                WBigint *ra = bigint_alloc_raw(l + slack);
+                for (int32_t i = 0; i < l; i++) ra->limbs[i] = UINT64_MAX;
+                ra->size = sa ? -l : l;
+                WValue a = bigint_box(ra);
+                mpz_t za, zr;
+                mpz_inits(za, zr, NULL);
+                gmp_import_value(za, a);
+                mpz_add(zr, za, za);
+                WValue got = w_bigint_add_mut(a, a);
+                if (!value_matches_mpz(got, zr))
+                    dief("fuzz-mut-ripple self-add mismatch l=%d slack=%d "
+                         "sa=%d", l, slack, sa);
+                mpz_clears(za, zr, NULL);
+                bench_free_value(got);
+                WBigint *rc = bigint_alloc_raw(l + slack);
+                for (int32_t i = 0; i < l; i++)
+                    rc->limbs[i] = UINT64_C(0x0123456789ABCDEF) ^
+                                   ((uint64_t)i *
+                                    UINT64_C(0x9E3779B97F4A7C15));
+                if (rc->limbs[l - 1] == 0) rc->limbs[l - 1] = 1;
+                rc->size = sa ? -l : l;
+                WValue c = bigint_box(rc);
+                WValue gz = w_bigint_sub_mut(c, c);
+                if (!w_is_int(gz) || w_as_int(gz) != 0)
+                    dief("fuzz-mut-ripple x-x nonzero l=%d slack=%d sa=%d",
+                         l, slack, sa);
+                cases += 2;
+            }
+            /* mul: all-ones x w pushes a carry limb every time; the tight
+             * capacity drives the growth buffer, and the wide self-square
+             * exercises the consume fallback (b aliases the receiver) */
+            {
+                static const uint64_t mul_words[] = {
+                    2, 3, UINT64_C(0x7FFFFFFFFFFF), UINT64_MAX};
+                for (size_t mi = 0; mi < 4; mi++)
+                for (int slack = 0; slack < 2; slack++)
+                for (int sa = 0; sa < 2; sa++)
+                for (int sb = 0; sb < 2; sb++) {
+                    int bigb = mul_words[mi] > (uint64_t)W_INT48_MAX;
+                    WBigint *ra = bigint_alloc_raw(l + slack);
+                    for (int32_t i = 0; i < l; i++)
+                        ra->limbs[i] = UINT64_MAX;
+                    ra->size = sa ? -l : l;
+                    WValue a = bigint_box(ra);
+                    WValue b;
+                    if (bigb) {
+                        WBigint *rb = bigint_alloc_raw(1);
+                        rb->limbs[0] = mul_words[mi];
+                        rb->size = sb ? -1 : 1;
+                        b = bigint_box(rb);
+                    } else {
+                        b = w_box_int(sb ? -(int64_t)mul_words[mi]
+                                         : (int64_t)mul_words[mi]);
+                    }
+                    mpz_t za, zb, zr;
+                    mpz_inits(za, zb, zr, NULL);
+                    gmp_import_value(za, a);
+                    gmp_import_value(zb, b);
+                    mpz_mul(zr, za, zb);
+                    WValue got = w_bigint_mul_mut(a, b);
+                    if (!value_matches_mpz(got, zr))
+                        dief("fuzz-mut-ripple mul mismatch l=%d slack=%d "
+                             "sa=%d sb=%d w=%llu", l, slack, sa, sb,
+                             (unsigned long long)mul_words[mi]);
+                    mpz_clears(za, zb, zr, NULL);
+                    if (got != b) bench_free_value(got);
+                    if (bigb && got != b) bench_free_value(b);
+                    cases++;
+                }
+                if (l >= 2) {
+                    WBigint *ra = bigint_alloc_raw(l);
+                    for (int32_t i = 0; i < l; i++)
+                        ra->limbs[i] = UINT64_C(0x0123456789ABCDEF) ^
+                                       ((uint64_t)i *
+                                        UINT64_C(0x9E3779B97F4A7C15));
+                    if (ra->limbs[l - 1] == 0) ra->limbs[l - 1] = 1;
+                    ra->size = l;
+                    WValue a = bigint_box(ra);
+                    mpz_t za, zr;
+                    mpz_inits(za, zr, NULL);
+                    gmp_import_value(za, a);
+                    mpz_mul(zr, za, za);
+                    WValue got = w_bigint_mul_mut(a, a);
+                    if (!value_matches_mpz(got, zr))
+                        dief("fuzz-mut-ripple self-square mismatch l=%d", l);
+                    mpz_clears(za, zr, NULL);
+                    bench_free_value(got);
+                    cases++;
+                }
+            }
+            /* shared receivers refuse the growth shape and stay intact */
+            {
+                WBigint *ra = bigint_alloc_raw(l);
+                for (int32_t i = 0; i < l; i++) ra->limbs[i] = UINT64_MAX;
+                ra->size = l;
+                WValue a = bigint_box(ra);
+                w_bigint_mark_shared(ra);
+                mpz_t za, zr;
+                mpz_inits(za, zr, NULL);
+                gmp_import_value(za, a);
+                mpz_add_ui(zr, za, 3UL);
+                WValue got = w_bigint_add_mut(a, w_box_int(3));
+                if (got == a)
+                    dief("fuzz-mut-ripple mutated a SHARED receiver l=%d", l);
+                if (!value_matches_mpz(got, zr))
+                    dief("fuzz-mut-ripple shared-fallback mismatch l=%d", l);
+                if (!value_matches_mpz(a, za))
+                    dief("fuzz-mut-ripple shared receiver corrupted l=%d", l);
+                mpz_clears(za, zr, NULL);
+                bench_free_value(got);
+                bench_free_value(a);
+                cases += 1;
+            }
+        }
+        printf("fuzz-mut-ripple OK (%llu cases)\n",
+               (unsigned long long)cases);
+        return 0;
+    }
     if ((argc == 2 || argc == 3) && strcmp(argv[1], "--fuzz-mut") == 0) {
         int32_t max_limbs = argc == 3 ? (int32_t)atoi(argv[2]) : 64;
         if (max_limbs <= 0) die("fuzz-mut expects positive max limbs");

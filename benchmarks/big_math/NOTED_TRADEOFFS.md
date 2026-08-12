@@ -4,6 +4,50 @@ Wins in one area that cost another get recorded here instead of shipped:
 the measured win, the measured loss, and the condition that would make the
 trade worth it. (Bignum campaign ground rule, 2026-08-02.)
 
+## Branch-form word add/sub for the copying fixed kernels (3-8 limbs) — REJECTED in BOTH regimes (2026-08-12)
+
+Hypothesis: the 3..8-limb `bn_{add,sub}_word_a64_fixed` full flag chains
+(~1 cycle/limb serial) should lose to the carry-death branch form (2-limb
+head, rare ripple, carry-independent tail copy — the shape the C path
+already uses above 8 limbs) once per-call LATENCY is the critical path,
+per the split-carry-chain mul_1 precedent's fine print ("condition to
+enable: a workload where the boxed lane is latency-exposed").
+
+The knob (`BN_ADDSUB_WORD_BRANCH_FORM`, default 0, above
+`bigint_add_word_into`) routes 3..8 limbs through the existing generic
+carry-death + `bn_copy_tail` path.  The latency instrument is the new
+`program_loops.w` dependent lanes: `wordchain` is a serial dependent
+chain through the word-dest entries (each op's input is the previous
+op's output), and `depadd`/`depsub` at 4/8/32/256 limbs pin the mut
+path.  ABBA quartets, 2M iters/run, checksum-locked:
+
+    wordchain@4  branch/fixed = 1.034      wordchain@8  = 1.056
+    wordchain@2  (code-identical) = 1.000  wordchain@32 (identical) = 0.992
+    depadd@4/@8 placebo (mut path, kernels untouched) = 0.96-0.97
+
+The branch form is 3-6% SLOWER in the latency regime it was built for,
+while the code-identical cells bound layout noise at ±4%.  Boxed
+throughput controls (add1/sub1@2/4/8, neg@4, 3 ABBA quartets, 20M iters)
+sit at 0.96-1.00 — the fixed chains keep both regimes.  Mechanism: the
+dependent lanes cost ~11-12.5 ns/iter INDEPENDENT of width 4 vs 256, so
+the per-call wrapper (guards, boxed loop bookkeeping, preserve_most
+calls), not the <=8-cycle carry chain, is the critical path — and
+back-to-back word chains still overlap in the out-of-order window even
+when data-dependent through memory, exactly the mul_1 split-chain
+finding.
+
+Probe hygiene: `TUNGSTEN_BIGINT_MUTATE_UNIQUE=0` is NOT a valid
+latency-probe compile for accumulator shapes — with the proof disabled,
+lowering emits no free for the dead accumulator (the mut entry IS the
+free), so the loop leaks its receiver every pass and measures arena
+growth + page faults, not kernels.  `wordchain` (dest entries, correct
+recycling) is the copying-path latency instrument.
+
+**Condition to revisit:** shrink the dependent-lane wrapper cost several
+fold first; the kernel chain only becomes visible once the ~11 ns/iter
+floor approaches the ~2-8 cycle chain-length difference, and any retry
+must re-run the wordchain ABBA plus the boxed add1/sub1 controls.
+
 ## Toom-6 enablement (B3a) — NOT taken (2026-08-02)
 
 Forced-kernel sweep (`run_kernel_crossover.sh mul`, GMP-verified operands):

@@ -54,7 +54,14 @@ Classes and traits may declare type parameters (`+ Matrix<T>`, `+ Mat<T, M, N>`)
         ...
       )
 
-Monomorphization and compile-time checking of these parameters are performed by the compiler for compiled code. Type arguments may be identifiers or integer shape parameters (as with fixed-size matrices).
+Monomorphization and compile-time checking of these parameters are performed by
+the compiler for compiled code. Constraint declarations are checked even when
+the generic is never instantiated: the named parameter must exist, each
+parameter may have only one non-empty constraint, and a parametric superclass
+must receive the correct number of compatible arguments. A child parameter
+inherits its parent's bound when it does not declare one, or may narrow that
+bound to a subset. Type arguments may be identifiers or integer shape
+parameters (as with fixed-size matrices).
 
 ### 5.2.4 The `Class` object
 

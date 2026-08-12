@@ -1194,7 +1194,6 @@
 #   - No type inference: callers MUST write `Name<f32>.new(...)`
 #     explicitly; bare `Name.new(...)` falls through to runtime
 #     dispatch on the bare template name (which won't resolve).
-#   - No constraint validation against `with T in (...)`.
 # ============================================================================
 
 -> mangle_generic_class_name(template_name, type_args)
@@ -1570,6 +1569,149 @@
   return true if allowed == actual
   allowed == "FiniteField" && finite_field_generic_tag?(actual)
 
+-> generic_constraint_for_param(template, param_name)
+  constraints = template.type_constraints
+  if constraints == nil
+    return nil
+  i = 0
+  while i < constraints.size()
+    if constraints[i][0] == param_name
+      return constraints[i][1]
+    i += 1
+  nil
+
+-> validate_generic_constraint_declaration(template)
+  params = template.type_params
+  constraints = template.type_constraints
+  if params == nil || constraints == nil
+    return nil
+  seen = {}
+  i = 0
+  while i < constraints.size()
+    pair = constraints[i]
+    param_name = pair[0]
+    allowed = pair[1]
+    if !params.include?(param_name)
+      raise compile_error_for_node(:E_LOWER_GENERIC_CONSTRAINT,
+        "constraint names unknown parameter " + param_name + " of " + template.name,
+        nil, template)
+    if seen[param_name] == true
+      raise compile_error_for_node(:E_LOWER_GENERIC_CONSTRAINT,
+        "duplicate constraint for parameter " + param_name + " of " + template.name,
+        nil, template)
+    if allowed == nil || allowed.size() == 0
+      raise compile_error_for_node(:E_LOWER_GENERIC_CONSTRAINT,
+        "constraint for parameter " + param_name + " of " + template.name + " has no allowed types",
+        nil, template)
+    allowed_seen = {}
+    j = 0
+    while j < allowed.size()
+      value = allowed[j]
+      if allowed_seen[value] == true
+        raise compile_error_for_node(:E_LOWER_GENERIC_CONSTRAINT,
+          "constraint for parameter " + param_name + " of " + template.name +
+          " repeats type '" + value.to_s() + "'",
+          nil, template)
+      allowed_seen[value] = true
+      j += 1
+    seen[param_name] = true
+    i += 1
+  nil
+
+# Validate a generic definition before any use site asks for specialization.
+# A child parameter passed into a constrained parent either narrows that bound
+# or inherits it. This makes `Vec4<T> < Vector<T>` reject Vec4<String> directly
+# while avoiding duplicate `with T ...` lists throughout the concrete tower.
+-> validate_generic_template_definition(template, mod, visiting, validated)
+  if validated[template.name] == true
+    return nil
+  if visiting[template.name] == true
+    raise compile_error_for_node(:E_LOWER_GENERIC_CONSTRAINT,
+      "cyclic generic parent chain involving " + template.name, nil, template)
+  visiting[template.name] = true
+  validate_generic_constraint_declaration(template)
+
+  parent = nil
+  if template.superclass != nil
+    parent = mod[:generic_class_templates][template.superclass]
+  if parent != nil
+    validate_generic_template_definition(parent, mod, visiting, validated)
+    parent_params = parent.type_params
+    parent_args = template.parent_type_args
+    if parent_args == nil
+      raise compile_error_for_node(:E_LOWER_GENERIC_ARITY,
+        "generic parent " + parent.name + " of " + template.name + " requires " +
+        parent_params.size().to_s() + " type args",
+        nil, template)
+    if parent_args.size() != parent_params.size()
+      raise compile_error_for_node(:E_LOWER_GENERIC_ARITY,
+        "generic parent " + parent.name + " of " + template.name + " expects " +
+        parent_params.size().to_s() + " type args, got " + parent_args.size().to_s(),
+        nil, template)
+
+    inherited = []
+    pi = 0
+    while pi < parent_params.size()
+      parent_allowed = generic_constraint_for_param(parent, parent_params[pi])
+      if parent_allowed != nil
+        actual = parent_args[pi]
+        if template.type_params.include?(actual)
+          child_allowed = generic_constraint_for_param(template, actual)
+          if child_allowed == nil
+            inherited.push([actual, parent_allowed])
+          else
+            ai = 0
+            while ai < child_allowed.size()
+              match = false
+              pai = 0
+              while pai < parent_allowed.size()
+                if generic_constraint_type_matches?(parent_allowed[pai], child_allowed[ai])
+                  match = true
+                pai += 1
+              if !match
+                raise compile_error_for_node(:E_LOWER_GENERIC_CONSTRAINT,
+                  "constraint type '" + child_allowed[ai].to_s() + "' for parameter " +
+                  actual + " of " + template.name + " is not allowed by parent " +
+                  parent.name + " (must be one of: " + parent_allowed.join(", ") + ")",
+                  nil, template)
+              ai += 1
+          end
+        else
+          match = false
+          pai = 0
+          while pai < parent_allowed.size()
+            if generic_constraint_type_matches?(parent_allowed[pai], actual)
+              match = true
+            pai += 1
+          if !match
+            raise compile_error_for_node(:E_LOWER_GENERIC_CONSTRAINT,
+              "parent type argument '" + actual.to_s() + "' for " + template.name +
+              " is not allowed for parameter " + parent_params[pi] + " of " +
+              parent.name + " (must be one of: " + parent_allowed.join(", ") + ")",
+              nil, template)
+      pi += 1
+    if inherited.size() > 0
+      combined = []
+      if template.type_constraints != nil
+        ci = 0
+        while ci < template.type_constraints.size()
+          combined.push(template.type_constraints[ci])
+          ci += 1
+      ii = 0
+      while ii < inherited.size()
+        combined.push(inherited[ii])
+        ii += 1
+      template.type_constraints = combined
+  elsif template.parent_type_args != nil
+    raise compile_error_for_node(:E_LOWER_GENERIC_CONSTRAINT,
+      "parent " + template.superclass.to_s() + " of " + template.name +
+      " is not a generic template",
+      nil, template)
+
+  visiting.delete(template.name)
+  validated[template.name] = true
+  nil
+
 -> specialize_generic_class(template_name, type_args, mod)
   template = mod[:generic_class_templates][template_name]
   if template == nil
@@ -1756,13 +1898,33 @@
 -> monomorphize_generics(ast, mod)
   if mod[:generic_class_templates] == nil
     mod[:generic_class_templates] = {}
-  # Register templates first so discovery can identify them.
+  # Register templates first so definition checks and discovery see forward
+  # parent references in the same module.
   i = 0
   while i < ast.expressions.size()
     expr = ast.expressions[i]
     if ast_kind(expr) == :class_def && expr.type_params != nil
       mod[:generic_class_templates][expr.name] = expr
     i += 1
+
+  # Constraint declarations are definitions, not use-site hints. Validate all
+  # generic classes (including parent arity/compatibility) and generic traits
+  # even when the file never instantiates them.
+  validated = {}
+  visiting = {}
+  template_names = mod[:generic_class_templates].keys()
+  ti = 0
+  while ti < template_names.size()
+    validate_generic_template_definition(
+      mod[:generic_class_templates][template_names[ti]], mod, visiting, validated)
+    ti += 1
+  i = 0
+  while i < ast.expressions.size()
+    expr = ast.expressions[i]
+    if ast_kind(expr) == :trait_def && expr.type_params != nil
+      validate_generic_constraint_declaration(expr)
+    i += 1
+
   if mod[:generic_class_templates].keys().size() == 0
     return nil
   instantiations = {}

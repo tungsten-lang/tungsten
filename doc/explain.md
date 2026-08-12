@@ -94,6 +94,27 @@ and an unset variable uses the measured default of 8.
 **Fix:** Unset the variable, or set it to a decimal integer in the accepted
 range. Benchmark with `--release`; do not compare unoptimized builds.
 
+## E_LOWER_GENERIC_ARITY
+
+A generic class or parametric superclass received the wrong number of type
+arguments. This is checked when the generic is defined as well as when it is
+specialized.
+
+**Fix:** Supply exactly one type argument per declared parameter. For example,
+`Pair<T, U>` must be used as `Pair<Key, Value>`, including in a parent clause
+such as `Child<T> < Pair<T, i32>`.
+
+## E_LOWER_GENERIC_CONSTRAINT
+
+A generic constraint is malformed or a type argument violates it. Constraint
+parameters must exist, cannot be declared twice, and must contain at least one
+allowed type. A child generic may inherit or narrow a parent's constraint but
+cannot widen it.
+
+**Fix:** Correct the `with T in (...)` declaration or use an allowed type. For
+parametric inheritance, ensure every concrete or child parameter passed to the
+parent satisfies the parent's bound.
+
 ## E_TYPE_MISMATCH
 
 A value’s type is not compatible with the expected type at this site

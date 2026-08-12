@@ -263,9 +263,12 @@ projects stay unchecked until their stated acceptance criteria are met.
     computed indices.
 - [ ] Make `compiler2` packed/slab nodes use generated `node.field` accessors
   instead of mixed `ast_get`/index access, then delete the compatibility path.
-- [ ] Enforce generic constraints when definitions are checked, including
+- [x] Enforce generic constraints when definitions are checked, including
   parent constraints such as `Class<T> < Parent`, instead of deferring them to
-  runtime dispatch failures.
+  runtime dispatch failures. Reject unknown/duplicate/empty declarations and
+  parent arity or compatibility errors without requiring an instantiation;
+  inherit parent bounds into unconstrained child parameters and allow only
+  valid narrowing.
 - [x] Add a compiler consistency audit: every Core method requiring dynamic
   dispatch has the needed IC row and static-whitelist entry. Make missing wires
   a build error, not a release checklist item.

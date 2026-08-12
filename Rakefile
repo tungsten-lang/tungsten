@@ -105,7 +105,7 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compile_profiles fmt http_tls lint repl_contracts bit_install cache_gc cache_location performance_ci frontend_fuzz fast_parse_parity]
+  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location performance_ci frontend_fuzz fast_parse_parity]
 
   desc "Verify generated C-call ABI contracts and the WIRE consistency guard"
   task :ccall_contracts do
@@ -133,6 +133,11 @@ namespace :test do
   desc "Run self-hosted formatter snapshot, idempotence, and AST contracts"
   task :fmt do
     run_command "bash", File.join(ROOT, "scripts/test-fmt.sh")
+  end
+
+  desc "Validate generic constraints at definition and specialization time"
+  task :generic_constraints do
+    run_command "bash", File.join(ROOT, "scripts/test-generic-constraints.sh")
   end
 
   desc "Run verified in-process HTTPS client contracts against local OpenSSL"

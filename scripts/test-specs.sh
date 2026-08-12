@@ -684,6 +684,7 @@ interpreter_specs=(
   # tag-table rule; pin the interpreted side so a compiled-only change
   # cannot drift the copy.
   spec/compiler/overload_exact_tag_parity_spec.w
+  spec/compiler/typed_overload_spec.w
   # Host-parity pin: the implicit-self (bare sibling call) route must run
   # typed-overload selection like the explicit-receiver route — it
   # silently took the last-registered arm before args were threaded

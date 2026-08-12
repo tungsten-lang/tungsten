@@ -17,6 +17,11 @@ use target
     @env = Environment.new()
     @classes = {}
     @traits = {}
+    # Top-level methods share the same overload rules as class methods, but
+    # their legacy name lookup lives in Environment. Keep the complete
+    # definition groups here so typed siblings are not collapsed to the last
+    # `__method__NAME` binding before a call can inspect its arguments.
+    @function_overloads = {}
     @self_stack = [nil]
     @method_stack = [nil]
     @signal = {type: nil, value: nil}
@@ -180,10 +185,14 @@ use target
     classes_copy = {}
     @classes.keys().each -> (k)
       classes_copy[k] = @classes[k]
+    function_overloads_copy = {}
+    @function_overloads.keys().each -> (k)
+      overloads = @function_overloads[k]
+      function_overloads_copy[k] = overloads.copy(0, overloads.size())
     stack_copy = @self_stack.copy(0, @self_stack.size())
     method_stack_copy = @method_stack.copy(0, @method_stack.size())
     files_copy = @loaded_files.copy(0, @loaded_files.size())
-    {env: @env, classes: classes_copy, signal_type: @signal[:type], signal_value: @signal[:value], self_stack: stack_copy, method_stack: method_stack_copy, loaded_files: files_copy, current_file: @current_file}
+    {env: @env, classes: classes_copy, function_overloads: function_overloads_copy, signal_type: @signal[:type], signal_value: @signal[:value], self_stack: stack_copy, method_stack: method_stack_copy, loaded_files: files_copy, current_file: @current_file}
 
   -> restore_state(snapshot)
     # save_state stores this exact source instance through a Hash boundary;
@@ -191,6 +200,7 @@ use target
     # interpreter's hot Environment receiver without changing semantics.
     @env = snapshot[:env] ## Environment
     @classes = snapshot[:classes]
+    @function_overloads = snapshot[:function_overloads]
     @signal[:type] = snapshot[:signal_type]
     @signal[:value] = snapshot[:signal_value]
     @self_stack = snapshot[:self_stack]
@@ -3088,7 +3098,12 @@ use target
     # Global method
     method_key = "__method__" + name
     if @env.defined?(method_key)
-      m = @env.get(method_key)
+      m = nil
+      overloads = @function_overloads[name]
+      if overloads != nil
+        m = select_typed_overload(overloads, args.size(), block != nil, args)
+      if m == nil
+        m = @env.get(method_key)
       return call_w_method(current_self(), m, args, block, env)
 
     # Builtins — dispatched on the current self (e.g. a bare `map(...)` inside
@@ -3755,14 +3770,31 @@ use target
       if j >= args.size()
         return false
       tn = "" + pts[j].to_s()
-      exact_hi16 = exact_tag_overload_hi16(tn)
-      if exact_hi16 != nil
-        if ((wvalue_bits(args[j]) >> 48) & 65535) != exact_hi16
+      if machine_integer_overload_type?(tn)
+        if !(type(args[j]) in ("Integer" "BigInt"))
           return false
-      elsif !is_a_class?(args[j], tn)
-        return false
+      elsif machine_float_overload_type?(tn)
+        if type(args[j]) != "Float"
+          return false
+      else
+        exact_hi16 = exact_tag_overload_hi16(tn)
+        if exact_hi16 != nil
+          if ((wvalue_bits(args[j]) >> 48) & 65535) != exact_hi16
+            return false
+        elsif !is_a_class?(args[j], tn)
+          return false
       j += 1
     true
+
+  # Raw scalar type information is erased once a value enters the tree
+  # walker: every machine integer is represented by Integer/BigInt and every
+  # machine float by Float. Preserve the category boundary used by compiled
+  # typed-overload resolution so `(i64)` and `(f64)` arms remain distinct.
+  -> machine_integer_overload_type?(tn)
+    tn in ("i1" "i4" "i8" "i16" "i32" "i64" "i128" "u1" "u4" "u8" "u16" "u32" "u64" "u128")
+
+  -> machine_float_overload_type?(tn)
+    tn in ("f16" "bf16" "f32" "f64")
 
   # HAND-COPIED mirror of lowering's exact-tag overload rule — see
   # overload_exact_tag_test in lowering/types.w. No shared module exists
@@ -4424,6 +4456,29 @@ use target
       i += 1
     true
 
+  # Register a top-level `->`/`fn` without discarding typed siblings. The
+  # Environment binding intentionally remains last-definition-wins for legacy
+  # untyped lookup; dispatch_bare_call consults this side table first only when
+  # a typed signature matches the evaluated arguments.
+  -> register_global_method(w_method)
+    method_name = w_method[:name]
+    overloads = @function_overloads[method_name]
+    if overloads == nil
+      overloads = []
+      @function_overloads[method_name] = overloads
+    replaced = false
+    i = 0
+    while i < overloads.size()
+      if overloads[i][:params].size() == w_method[:params].size() && same_param_types?(overloads[i][:param_types], w_method[:param_types])
+        overloads[i] = w_method
+        replaced = true
+        break
+      i += 1
+    if !replaced
+      overloads.push(w_method)
+    @env.define("__method__" + method_name, w_method)
+    w_method
+
   -> eval_class_def(node, env)
     # Class re-open: if a class with this name already exists, merge the
     # new methods into the existing class table with last-wins semantics
@@ -4653,19 +4708,19 @@ use target
   -> eval_method_def(node, env)
     s = current_self()
     if s != nil && type(s) == "Hash" && s.has_key?(:rt) && s[:rt] == :object
-      w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body), w_class: s[:w_class]}
+      w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body), w_class: s[:w_class], param_types: ast_get(node, :param_types)}
       register_instance_method(s[:w_class], w_method)
     else
-      w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body)}
-      @env.define("__method__" + ast_get(node, :name), w_method)
+      w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body), param_types: ast_get(node, :param_types)}
+      register_global_method(w_method)
     ast_get(node, :name)
 
   # `fn name(args) ...` — pure/memoized at compile time; the tree-walker
   # registers the same global method table entry as `-> name` without memo
   # tables (correct results; memo is an optimization, not a semantic require).
   -> eval_fn_def(node, env)
-    w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body)}
-    @env.define("__method__" + ast_get(node, :name), w_method)
+    w_method = {rt: :method, name: ast_get(node, :name), params: ast_get(node, :params), body: ast_get(node, :body), param_types: ast_get(node, :param_types)}
+    register_global_method(w_method)
     ast_get(node, :name)
 
   # `with i in 1..3` / `parallel_with` — bind each range (or array) element and

@@ -1,4 +1,4 @@
-# Dogfood for TOP-LEVEL typed function overloads (gap 4).
+# Cross-engine dogfood for TOP-LEVEL typed function overloads (gap 4).
 #
 # Declaring the same function name+arity more than once, distinguished by a
 # parameter type, used to HANG the compiler: both definitions collapsed onto
@@ -8,7 +8,9 @@
 # loop. Now each overload gets a distinct signature-mangled symbol and the
 # call site resolves by inferred argument type.
 #
-# Run: `bin/tungsten -o /tmp/to spec/compiler/typed_overload_spec.w && /tmp/to`.
+# Run interpreted or compiled:
+#   bin/tungsten run spec/compiler/typed_overload_spec.w
+#   bin/tungsten -o /tmp/to spec/compiler/typed_overload_spec.w && /tmp/to
 
 -> describe/1(i64)
   "int"
@@ -25,6 +27,12 @@
 -> kind/2(f64 f64)
   "two-floats"
 
+fn pure_kind(value) (i64)
+  "fn-int"
+
+fn pure_kind(value) (f64)
+  "fn-float"
+
 -> check(name, got, want)
   if got == want
     << "PASS " + name
@@ -39,3 +47,7 @@ check("ovl.string", describe("hi"), "string")
 # Dispatch across a 2-arg overload set (distinct signatures, same arity).
 check("ovl.two_ints", kind(1, 2), "two-ints")
 check("ovl.two_floats", kind(~1.0, ~2.0), "two-floats")
+
+# `fn` definitions use the same overload registry as top-level `->` methods.
+check("ovl.fn_int", pure_kind(7), "fn-int")
+check("ovl.fn_float", pure_kind(~7.0), "fn-float")

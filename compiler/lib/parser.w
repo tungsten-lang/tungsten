@@ -3240,13 +3240,10 @@ use ../../core/token
         result.return_type = return_type
       return result
 
-    # Top-level fn: produce a regular fn_def with both annotations
-    # attached. Note: setting :param_types triggers typed-overload
-    # name mangling in function_name_for_def. Call-site resolution
-    # for typed overloads is still incomplete, so this only works
-    # cleanly when there's exactly one definition for a given name
-    # (the common case). For now keep param_types attached so the
-    # body benefits from typed parameter unboxing inside the fn.
+    # Top-level fn: produce a regular fn_def with both annotations attached.
+    # Setting :param_types drives signature-mangled compiled functions and the
+    # interpreter's runtime overload table, so same-name typed siblings remain
+    # distinct in both engines.
     result = Tungsten:AST:FnDef.new(name, params, body, type_hints)
     result.loc = make_loc_offset(fn_off)
     result.loc_end = make_end_loc()

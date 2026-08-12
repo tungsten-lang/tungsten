@@ -360,7 +360,9 @@ projects stay unchecked until their stated acceptance criteria are met.
   when composing it with a user module. Benchmark cold miss, warm hit, and RSS.
 - [ ] Add file/use dependency tracking for incremental recompilation. Rebuild
   only invalidated files and downstream users, while retaining stage-1/stage-2
-  byte identity as the bootstrap invariant.
+  byte identity as the bootstrap invariant. Use
+  `doc/design/incremental-lowering.md` as the starting contract and update it
+  when implementation decisions diverge from the design.
 - [ ] Make codegen parallelism adaptive. Gate LLVM partitioning on module size,
   available memory/cores, architecture, and measured benefit; fall back to one
   TU on small modules or any split failure. Record the tradeoff: parallel jobs
@@ -491,6 +493,13 @@ projects stay unchecked until their stated acceptance criteria are met.
   - [x] Route the public `freeze_slab()` alias through the interpreter's safe
     slab-freeze bridge; the compiled/interpreted Hash frozen-key contract now
     reaches the same irreversible representation state.
+- [ ] Complete the standard-library method surface systematically. Generate an
+  executable inventory across Core declarations, self-hosted implementations,
+  interpreter built-ins, native IC rows, and static lowering; implement or
+  explicitly reject every bodyless/host-only gap, including the remaining
+  `core/string.w` scaffold and reverse-operand dispatch. Keep the dedicated
+  Array, Hash, regex, concurrency, filesystem, HTTP, and numerical projects
+  below as acceptance gates rather than counting an inventory row as support.
 - [ ] Define cancellation and close semantics shared by `Thread`, `Channel`,
   `Future`, and `Promise`: blocked send/receive wakeup, timeout races,
   cancellation propagation, cleanup, and uncaught worker errors.

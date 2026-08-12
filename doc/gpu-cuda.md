@@ -22,7 +22,7 @@ TUNGSTEN_GPU_DIALECTS=cuda,wgsl bin/tungsten compile kernels.w --out /tmp/kernel
 TUNGSTEN_GPU_DIALECTS=none     bin/tungsten compile kernels.w --out /tmp/kernels
 ```
 
-Accepted entries are `metal`, `cuda`, `wgsl`, and `none`. Names are
+Accepted entries are `metal`, `cuda`, `wgsl`, `spirv`, and `none`. Names are
 case-sensitive and may not be repeated; `none` must be used alone. Invalid
 lists fail before any GPU sidecar is written. Metal is always emitted, so an
 explicit `metal` entry documents intent but does not change the artifact set.

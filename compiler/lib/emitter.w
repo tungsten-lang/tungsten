@@ -87,6 +87,12 @@ use naming
   wvalues = {}  # string_id → i64 WValue (or nil for large strings)
   next_slot = 1  # slot 0 is reserved sentinel
   slab_entries = []  # [{id, text, slot_index, nslots}, ...]
+  # Parser/loader strings can carry distinct mode-6 identities despite equal
+  # bytes. Hashing those WValues directly lets the module registry admit a
+  # duplicate, which violates the slab identity invariant used by optimized
+  # string equality. Key buckets by a content digest and resolve the (rare)
+  # collision by raw content comparison before assigning final slots.
+  canonical_by_digest = {}
 
   i = 0
   while i < strings.size()
@@ -96,14 +102,32 @@ use naming
       # SSO-5: inline WValue constant
       wvalues[s[:id]] = sso5_wvalue(s[:text])
     elsif byte_len <= 61 && !no_slab
-      nslots = 1
-      if byte_len > 29
-        nslots = 2
-      slot_index = next_slot
-      next_slot = next_slot + nslots
-      wv = w_tag_stringsym + 12 + slot_index * 16
-      wvalues[s[:id]] = wv
-      slab_entries.push({id: s[:id], text: s[:text], slot: slot_index, nslots: nslots, byte_len: byte_len})
+      digest = wyhash64_hex_string(s[:text])
+      bucket = canonical_by_digest[digest]
+      existing = nil
+      if bucket != nil
+        bi = 0
+        while bi < bucket.size()
+          candidate = bucket[bi]
+          if ccall("w_string_content_equal", candidate[:text], s[:text])
+            existing = candidate
+            break
+          bi += 1
+      if existing != nil
+        wvalues[s[:id]] = existing[:wvalue]
+      else
+        nslots = 1
+        if byte_len > 29
+          nslots = 2
+        slot_index = next_slot
+        next_slot = next_slot + nslots
+        wv = w_tag_stringsym + 12 + slot_index * 16
+        wvalues[s[:id]] = wv
+        slab_entries.push({id: s[:id], text: s[:text], slot: slot_index, nslots: nslots, byte_len: byte_len})
+        if bucket == nil
+          bucket = []
+          canonical_by_digest[digest] = bucket
+        bucket.push({text: s[:text], wvalue: wv})
     i += 1
 
   {wvalues: wvalues, slab_entries: slab_entries, total_slots: next_slot}
@@ -237,6 +261,7 @@ use naming
   out << declare_fn_attrs("w_bool", wv, "i64", "nounwind willreturn memory(none) speculatable")
   out << declare_fn_attrs("w_nil", wv, "", "nounwind willreturn memory(none) speculatable")
   out << declare_fn("w_string", wv, "ptr")
+  out << declare_fn("w_string_content_equal", wv, wv2)
   out << declare_fn("w_str_to_sym", wv, wv)
   out << declare_fn("w_regex_new", wv, wv2)
   out << declare_fn("w_regex_match", wv, wv2)

@@ -465,6 +465,7 @@ unsigned __int128 w_to_u128(WValue v);
 WValue w_bool(int64_t v);
 WValue w_nil(void);
 WValue w_string(const char *s);
+WValue w_string_content_equal(WValue a, WValue b);
 WValue w_symbol(const char *s);
 WValue w_float(double v);
 WValue w_num_to_float(WValue v);

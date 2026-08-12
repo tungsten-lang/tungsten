@@ -483,9 +483,12 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Start Array-to-native Tier A: instrument hot Array paths, move typed
   storage/arithmetic to unboxed native buffers, retain WValue fallback, and pin
   aliasing/GC/exception semantics. Matmul is the primary acceptance workload.
-- [ ] Close the integer pipeline-fusion dispatch gap and compose it with loop
-  versioning, stack promotion, and typed storage; compare fused/unfused output
-  and performance.
+- [x] Close the integer elementwise-fusion dispatch gap for fixed-width typed
+  storage. i8/u8/i16/u16/i32/u32/i64/u64 chains now lower directly to one raw
+  loop (subsuming boxed loop-versioning and intermediate stack-promotion at
+  these sites), preserve per-node narrowing, and match unfused output across
+  arithmetic/bitwise/shift/division cases. The release i64 benchmark improved
+  from a 0.40 ms median to 0.11 ms at 200k elements (3.6x, hand-loop parity).
 - [ ] Apply the proven `## i64`/unboxed discipline to the regex VM and measure
   instruction/boxing counts before and after.
 - [ ] Finish BigInt mutate-if-unique `add/sub` first, using the ownership proof

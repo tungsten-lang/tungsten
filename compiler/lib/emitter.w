@@ -4268,6 +4268,64 @@ ewscope_md_state = {ids: {}}
     parts << t + ".st = sext i32 " + t + ".st32 to i64\n  "
     parts << t + " = getelementptr float, ptr " + t + ".slots, i64 " + t + ".st"
     parts.to_s()
+  # Fixed-width integer sibling of the float element-pointer decoders. The
+  # signedness lives on loads, not pointer arithmetic; :type is i8/i16/i32/i64.
+  when :ta_int_elems_ptr
+    t = inst[:temp]
+    v = inst[:value]
+    ty = inst[:type]
+    parts = StringBuffer(420)
+    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
+    parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
+    parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8" + tbaa_header_suffix() + "\n  "
+    parts << t + ".stp = getelementptr i8, ptr " + t + ".hp, i64 4\n  "
+    parts << t + ".st32 = load i32, ptr " + t + ".stp, align 4" + tbaa_header_suffix() + "\n  "
+    parts << t + ".st = sext i32 " + t + ".st32 to i64\n  "
+    parts << t + " = getelementptr " + ty + ", ptr " + t + ".slots, i64 " + t + ".st"
+    parts.to_s()
+  when :load_int_at
+    t = inst[:temp]
+    ty = inst[:type]
+    align = "8"
+    if ty == "i8"
+      align = "1"
+    elsif ty == "i16"
+      align = "2"
+    elsif ty == "i32"
+      align = "4"
+    parts = StringBuffer(220)
+    parts << t + ".p = getelementptr " + ty + ", ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  "
+    if ty == "i64"
+      parts << t + " = load i64, ptr " + t + ".p, align " + align + tbaa_elem_suffix() + ewscope_load_suffix(inst)
+    else
+      parts << t + ".n = load " + ty + ", ptr " + t + ".p, align " + align + tbaa_elem_suffix() + ewscope_load_suffix(inst) + "\n  "
+      ext = inst[:kind] == :signed ? "sext" : "zext"
+      parts << t + " = " + ext + " " + ty + " " + t + ".n to i64"
+    parts.to_s()
+  when :narrow_i64
+    t = inst[:temp]
+    ty = inst[:type]
+    ext = inst[:kind] == :signed ? "sext" : "zext"
+    t + ".tr = trunc i64 " + inst[:value] + " to " + ty + "\n  " + t + " = " + ext + " " + ty + " " + t + ".tr to i64"
+  when :store_int_at
+    t = inst[:temp]
+    ty = inst[:type]
+    align = "8"
+    if ty == "i8"
+      align = "1"
+    elsif ty == "i16"
+      align = "2"
+    elsif ty == "i32"
+      align = "4"
+    parts = StringBuffer(220)
+    stored = inst[:value]
+    if ty != "i64"
+      parts << t + ".tr = trunc i64 " + stored + " to " + ty + "\n  "
+      stored = t + ".tr"
+    parts << t + " = getelementptr " + ty + ", ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  "
+    parts << "store " + ty + " " + stored + ", ptr " + t + ", align " + align + tbaa_elem_suffix() + ewscope_store_suffix(inst)
+    parts.to_s()
   when :inttoptr_i64
     inst[:temp] + " = inttoptr i64 " + inst[:value] + " to ptr"
   # Address of a module function as raw i64 — passed to the runtime fused

@@ -35,9 +35,18 @@ y = (x .* a .+ b).sin() .+ c
 `load double → fmul → fadd → call @sin → fadd → store double`. No
 temporaries, no boxing (guarded by
 `spec/compiler/elementwise_fusion_spec.w`). Kernel semantics are
-preserved exactly: lhs must be array-valued, rhs arrays must match the
-lhs size (same raise), scalars broadcast; f32/int arrays and single
-bare DOT ops keep the runtime kernels.
+preserved: lhs must be array-valued, rhs arrays must match the lhs size
+(same raise), and scalars broadcast. f32 arrays use the same fused path;
+single bare DOT ops keep the already-vectorized runtime kernels.
+
+Fixed-width integer trees over i8/u8/i16/u16/i32/u32/i64/u64 are fused
+as well, including arithmetic, bitwise, and shift operators. Computation
+uses raw i64 values, but every tree node narrows back to its lhs dtype before
+the parent consumes it. That detail preserves the wrapping and sign-extension
+that separate runtime kernels would have observed. Division keeps Tungsten's
+zero-divisor result, and shifts mask the count to make the native target's
+register-shift behavior explicit instead of exposing LLVM poison. Packed
+i4/u4 and mixed float/integer trees still use the runtime path.
 
 On macOS the loop is then vectorized by LLVM with
 `-fveclib=Darwin_libsystem_m` — the scalar `@sin` becomes libsystem_m's
@@ -62,7 +71,7 @@ pthreads):
 Env overrides: `TUNGSTEN_FUSED_MT_MIN`, `TUNGSTEN_FUSED_T8_MIN`,
 `TUNGSTEN_FUSED_THREADS` (≤1 disables threading). Results are
 bit-identical across tiers — threads compute disjoint ranges of the
-same f64 loop.
+same typed loop.
 
 Fusion also covers f32 (and mixed f32/f64) trees with kernel-exact
 dtype semantics: a DOT op inherits its lhs dtype, and the array
@@ -143,6 +152,7 @@ Notes:
 | `tungsten_gpu_batch` | same kernel, all iterations in one command buffer |
 | `tungsten_typed` | hand-written loop over `f64[]` buffers — the Numba peer |
 | `tungsten_boxed` | growable boxed array via `push` — shows boxing cost |
+| `integer_fusion_bench.w` | fused i64 chain versus the equivalent hand-written raw loop |
 | Python list loops | baseline |
 | NumPy ufuncs | vectorized C |
 | Numba `@njit` | LLVM JIT |
@@ -150,6 +160,14 @@ Notes:
 
 Run: `benchmarks/fusion/run.sh` (the GPU block is darwin-only and
 skips gracefully without Metal).
+
+For the integer-only A/B, build `integer_fusion_bench.w` with the compiler
+revision under test and run it with `TUNGSTEN_FUSED_THREADS=1`. On an Apple M5
+Max (macOS 26.6.1, Apple clang 21, `--release`), three same-source samples at
+200k elements measured a 0.40 ms median before integer fusion and 0.11 ms
+after, a 3.6x speedup; the hand-written raw loop also measured 0.11 ms. The
+checksum and the separate fused-versus-unfused parity spec are outside the
+timed region.
 
 Representative numbers (M-series, avg ms/iter). `fused` is the plain
 array expression — auto-selection picks its backend:

@@ -2899,13 +2899,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # ---------------------------------------------------------------------------
 # Fused elementwise lowering with automatic backend selection.
 #
-# A tree of float elementwise ops — `(x .* a .+ b).sin() .+ c` — historically
-# lowered to one runtime kernel call per node, each allocating a full
-# temporary array. When every array leaf is statically f64[] (or f32[], all
-# one type) and every scalar leaf is a float/int, the whole tree collapses
-# into ONE loop: load leaves, apply raw fadd/fmul/…/libm ops, store. No
-# temporaries, no boxing, and the loop body is plain scalar IR that LLVM's
-# vectorizer can work on (-fveclib turns the sin into _simd_sin_d2).
+# A tree of typed elementwise ops — `(x .* a .+ b).sin() .+ c` or
+# `(xi .* 3 .+ 17) .- 5` — historically lowered to one runtime kernel call
+# per node, each allocating a full temporary array. Float trees compute as
+# f64 (with f32 loads/stores where required); fixed-width integer trees
+# compute as wrapping i64 and truncate to the lhs dtype on store. The whole
+# tree collapses into ONE loop: load leaves, apply raw ops, store. No
+# temporaries, no boxing, and the loop body is plain scalar IR for LLVM's
+# vectorizer (-fveclib turns float libm calls into vector calls).
 #
 # The loop body is ALSO outlined into a worker function
 #     i64 __w_fuse_worker_N(i64 blk, i64 lo, i64 hi)
@@ -2919,8 +2920,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # Anything outside the fusable shape returns nil and falls back to the
 # kernel path, so kernel semantics are preserved exactly: lhs must be
 # array-valued, rhs arrays must match the lhs size (same raise text via
-# w_elementwise_size_check), scalars broadcast, int/mixed-dtype arrays keep
-# kernels.
+# w_elementwise_size_check), and scalars broadcast. Mixed float/integer trees,
+# packed 4-bit arrays, and unsupported shapes keep the runtime kernels.
 #
 # Fusion triggers only when it wins: a libm node in the tree (vector sin
 # beats a scalar kernel loop) or ≥2 elementwise ops (temporaries saved).
@@ -2929,8 +2930,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # Classify `node` into a fusion spec tree, or nil if not fusable.
 #   {cls: :dot,    op:, left:, right:, odt:, ops:, libm:}
 #   {cls: :libm,   name:, recv:, odt:, ops:, libm:}
-#   {cls: :arr,    node:, etype:, odt:}   — f64[] / f32[] leaf
-#   {cls: :scalar, node:}                 — float/int scalar leaf
+#   {cls: :arr,    node:, etype:, odt:}   — typed-array leaf
+#   {cls: :scalar, node:, stype:}         — numeric scalar leaf
 # odt is the node's OUTPUT dtype under kernel semantics: a DOT op inherits
 # its lhs dtype (array_elementwise_into: out ebits = lhs ebits), and the
 # libm array methods always produce f64 (array_map_f64 allocates -64
@@ -2939,7 +2940,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # store are dtype-specific.
 -> fuse_ew_analyze(ctx, node)
   k = ast_kind(node)
-  if k == :binary_op && node.op in (:DOT_PLUS :DOT_MINUS :DOT_STAR :DOT_SLASH)
+  if k == :binary_op && node.op in (:DOT_PLUS :DOT_MINUS :DOT_STAR :DOT_SLASH :DOT_PIPE :DOT_AMP :DOT_CARET :DOT_LSHIFT :DOT_RSHIFT)
     l = fuse_ew_analyze(ctx, node.left)
     # Kernel semantics: the lhs of a DOT op must be array-valued.
     if l == nil || l[:cls] == :scalar
@@ -2947,7 +2948,21 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     r = fuse_ew_analyze(ctx, node.right)
     if r == nil
       return nil
-    return {cls: :dot, op: node.op, left: l, right: r, odt: l[:odt], ops: l[:ops] + r[:ops] + 1, libm: l[:libm] + r[:libm]}
+    mode = l[:mode]
+    if mode == :float
+      if !(node.op in (:DOT_PLUS :DOT_MINUS :DOT_STAR :DOT_SLASH))
+        return nil
+      if r[:cls] != :scalar && r[:mode] != :float
+        return nil
+    elsif mode == :int
+      if r[:cls] == :scalar
+        if r[:smode] != :int
+          return nil
+      elsif r[:mode] != :int
+        return nil
+    else
+      return nil
+    return {cls: :dot, op: node.op, left: l, right: r, odt: l[:odt], mode: mode, ops: l[:ops] + r[:ops] + 1, libm: l[:libm] + r[:libm]}
   if k == :call && node.receiver != nil && node.name != nil && node.name in ("sin" "cos" "sqrt" "exp" "log" "tan")
     argc = 0
     if node.args != nil
@@ -2955,36 +2970,96 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if argc == 0
       rcv = fuse_ew_analyze(ctx, node.receiver)
       # Scalar receivers (Float#sin etc.) keep normal dispatch.
-      if rcv != nil && rcv[:cls] != :scalar
-        return {cls: :libm, name: node.name, recv: rcv, odt: :f64, ops: rcv[:ops], libm: rcv[:libm] + 1}
+      if rcv != nil && rcv[:cls] != :scalar && rcv[:mode] == :float
+        return {cls: :libm, name: node.name, recv: rcv, odt: :f64, mode: :float, ops: rcv[:ops], libm: rcv[:libm] + 1}
     return nil
   t = infer_type(node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   if t == :typed_array_f64
-    return {cls: :arr, node: node, etype: :f64, odt: :f64, ops: 0, libm: 0}
+    return {cls: :arr, node: node, etype: :f64, odt: :f64, mode: :float, ops: 0, libm: 0}
   if t == :typed_array_f32
-    return {cls: :arr, node: node, etype: :f32, odt: :f32, ops: 0, libm: 0}
-  if t == :float || t == :f64 || is_integer_like_type(t)
-    return {cls: :scalar, node: node, ops: 0, libm: 0}
+    return {cls: :arr, node: node, etype: :f32, odt: :f32, mode: :float, ops: 0, libm: 0}
+  if t in (:typed_array_i8 :typed_array_u8 :typed_array_i16 :typed_array_u16 :typed_array_i32 :typed_array_u32 :typed_array_i64 :typed_array_u64)
+    et = typed_array_element_value_type(t)
+    return {cls: :arr, node: node, etype: et, odt: et, mode: :int, ops: 0, libm: 0}
+  if t == :float || t == :f64 || t == :f32
+    return {cls: :scalar, node: node, stype: t, smode: :float, ops: 0, libm: 0}
+  if is_integer_like_type(t)
+    return {cls: :scalar, node: node, stype: t, smode: :int, ops: 0, libm: 0}
   nil
 
 # Per-element-type op/constant tables.
 -> fuse_ew_elems_ptr_op(etype)
-  etype == :f32 ? :ta_f32_elems_ptr : :ta_f64_elems_ptr
+  if etype == :f32
+    return :ta_f32_elems_ptr
+  if etype == :f64
+    return :ta_f64_elems_ptr
+  :ta_int_elems_ptr
 
 -> fuse_ew_load_op(etype)
-  etype == :f32 ? :load_f32_at : :load_f64_at
+  if etype == :f32
+    return :load_f32_at
+  if etype == :f64
+    return :load_f64_at
+  :load_int_at
 
 -> fuse_ew_store_op(etype)
-  etype == :f32 ? :store_f32_at : :store_f64_at
+  if etype == :f32
+    return :store_f32_at
+  if etype == :f64
+    return :store_f64_at
+  :store_int_at
 
 -> fuse_ew_alloc_bits(etype)
-  etype == :f32 ? "-32" : "-64"
+  case etype
+  when :f32 then "-32"
+  when :f64 then "-64"
+  when :u8 then "8"
+  when :i8 then "108"
+  when :u16 then "16"
+  when :i16 then "116"
+  when :u32 then "32"
+  when :i32 then "33"
+  when :u64 then "64"
+  when :i64 then "66"
+  else nil
+
+-> fuse_ew_ir_type(etype)
+  if etype in (:i8 :u8)
+    return "i8"
+  if etype in (:i16 :u16)
+    return "i16"
+  if etype in (:i32 :u32)
+    return "i32"
+  "i64"
+
+-> fuse_ew_int_kind(etype)
+  etype in (:i8 :i16 :i32 :i64) ? :signed : :unsigned
+
+-> fuse_ew_inst(op, temp, etype)
+  inst = {op: op, temp: temp}
+  if etype != :f32 && etype != :f64
+    inst[:type] = fuse_ew_ir_type(etype)
+    inst[:kind] = fuse_ew_int_kind(etype)
+  inst
+
+# Each unfused integer kernel stores its output before the parent kernel reads
+# it. Preserve that observable fixed-width wrap/sign-extension at every tree
+# node (not just at the final store); division and shifts do not commute with
+# a deferred truncation.
+-> fuse_ew_narrow_int(wfn, value, etype)
+  if etype in (:i64 :u64)
+    return value
+  narrowed = next_temp(wfn)
+  ni = fuse_ew_inst(:narrow_i64, narrowed, etype)
+  ni[:value] = value
+  emit_instruction(wfn, ni)
+  narrowed
 
 # Lower the tree's leaves once, in source (DFS in-order) evaluation order —
 # the same order the unfused kernel path would evaluate them. Array leaves
 # get their boxed reg stashed on the spec and are collected into `arrs`;
-# scalar leaves are hoisted to a raw f64 and collected into `scls`.
--> fuse_ew_lower_leaves(ctx, spec, arrs, scls)
+# scalar leaves are hoisted to raw f64/i64 and collected into `scls`.
+-> fuse_ew_lower_leaves(ctx, spec, arrs, scls, mode)
   wfn = ctx[:func]
   cls = spec[:cls]
   if cls == :arr
@@ -2995,15 +3070,19 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return nil
   if cls == :scalar
     tv = lower_expression(ctx, spec[:node])
-    spec[:raw] = ensure_raw_f64(wfn, tv)
+    if mode == :int
+      spec[:raw] = ensure_raw_i64(wfn, tv, spec[:stype])
+    else
+      spec[:raw] = ensure_raw_f64(wfn, tv)
     spec[:sj] = scls.size()
+    spec[:compute] = mode
     scls.push(spec)
     return nil
   if cls == :libm
-    fuse_ew_lower_leaves(ctx, spec[:recv], arrs, scls)
+    fuse_ew_lower_leaves(ctx, spec[:recv], arrs, scls, mode)
     return nil
-  fuse_ew_lower_leaves(ctx, spec[:left], arrs, scls)
-  fuse_ew_lower_leaves(ctx, spec[:right], arrs, scls)
+  fuse_ew_lower_leaves(ctx, spec[:left], arrs, scls, mode)
+  fuse_ew_lower_leaves(ctx, spec[:right], arrs, scls, mode)
   nil
 
 # Emit the per-element scalar computation for one loop iteration.
@@ -3021,6 +3100,50 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return temp
   l = fuse_ew_emit_scalar(ctx, spec[:left])
   r = fuse_ew_emit_scalar(ctx, spec[:right])
+  if spec[:mode] == :int
+    iop = :add_i64
+    if spec[:op] == :DOT_MINUS
+      iop = :sub_i64
+    elsif spec[:op] == :DOT_STAR
+      iop = :mul_i64
+    elsif spec[:op] == :DOT_PIPE
+      iop = :or_i64
+    elsif spec[:op] == :DOT_AMP
+      iop = :and_i64
+    elsif spec[:op] == :DOT_CARET
+      iop = :xor_i64
+    elsif spec[:op] == :DOT_LSHIFT || spec[:op] == :DOT_RSHIFT
+      # LLVM shifts poison the result for counts >= 64, while the runtime's
+      # native targets mask register shift counts. Make that behavior defined.
+      sh = next_temp(wfn)
+      emit_instruction(wfn, {op: :and_i64, temp: sh, lhs: r, rhs: "63"})
+      iop = spec[:op] == :DOT_LSHIFT ? :shl_i64 : :ashr_i64
+      r = sh
+    elsif spec[:op] == :DOT_SLASH
+      # Keep the runtime's zero-divisor result (0) without executing an LLVM
+      # sdiv-by-zero. Define the two's-complement INT64_MIN/-1 case too.
+      is_zero = next_temp(wfn)
+      emit_instruction(wfn, {op: :icmp_i64, temp: is_zero, pred: "eq", lhs: r, rhs: "0"})
+      is_min = next_temp(wfn)
+      emit_instruction(wfn, {op: :icmp_i64, temp: is_min, pred: "eq", lhs: l, rhs: "-9223372036854775808"})
+      is_neg_one = next_temp(wfn)
+      emit_instruction(wfn, {op: :icmp_i64, temp: is_neg_one, pred: "eq", lhs: r, rhs: "-1"})
+      is_overflow = next_temp(wfn)
+      emit_instruction(wfn, {op: :and_i1, temp: is_overflow, lhs: is_min, rhs: is_neg_one})
+      unsafe = next_temp(wfn)
+      emit_instruction(wfn, {op: :or_i1, temp: unsafe, lhs: is_zero, rhs: is_overflow})
+      safe_r = next_temp(wfn)
+      emit_instruction(wfn, {op: :select_i64, temp: safe_r, cond: unsafe, then_val: "1", else_val: r})
+      quot = next_temp(wfn)
+      emit_instruction(wfn, {op: :sdiv_i64, temp: quot, lhs: l, rhs: safe_r})
+      overflow_result = next_temp(wfn)
+      emit_instruction(wfn, {op: :select_i64, temp: overflow_result, cond: is_overflow, then_val: "-9223372036854775808", else_val: quot})
+      result = next_temp(wfn)
+      emit_instruction(wfn, {op: :select_i64, temp: result, cond: is_zero, then_val: "0", else_val: overflow_result})
+      return fuse_ew_narrow_int(wfn, result, spec[:odt])
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: iop, temp: temp, lhs: l, rhs: r})
+    return fuse_ew_narrow_int(wfn, temp, spec[:odt])
   fop = :fadd_f64
   if spec[:op] == :DOT_MINUS
     fop = :fsub_f64
@@ -3067,12 +3190,21 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   ai = 0
   while ai < arrs.size()
     cur = next_temp(wfn)
-    emit_instruction(wfn, {op: fuse_ew_load_op(arrs[ai][:etype]), temp: cur, ptr: arrs[ai][:base], index: bi_v, ewscope: ewsid})
+    li = fuse_ew_inst(fuse_ew_load_op(arrs[ai][:etype]), cur, arrs[ai][:etype])
+    li[:ptr] = arrs[ai][:base]
+    li[:index] = bi_v
+    li[:ewscope] = ewsid
+    emit_instruction(wfn, li)
     arrs[ai][:cur] = cur
     ai += 1
   result_raw = fuse_ew_emit_scalar(ctx, spec)
   stw = next_temp(wfn)
-  emit_instruction(wfn, {op: fuse_ew_store_op(odt), temp: stw, ptr: out_base, index: bi_v, value: result_raw, ewscope: ewsid})
+  si = fuse_ew_inst(fuse_ew_store_op(odt), stw, odt)
+  si[:ptr] = out_base
+  si[:index] = bi_v
+  si[:value] = result_raw
+  si[:ewscope] = ewsid
+  emit_instruction(wfn, si)
   nxt = next_temp(wfn)
   emit_instruction(wfn, {op: :add_i64, temp: nxt, lhs: bi_v, rhs: "1"})
   emit_instruction(wfn, {op: :store_i64, value: nxt, ptr: i_slot})
@@ -3145,7 +3277,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # bindings ([:base]/[:raw]) are temporarily rebound to worker-local temps
 # (loaded from the arg block) and restored afterwards so the site's inline
 # path still sees its own temps.
--> fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid, ewsid = nil)
+-> fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid, mode, ewsid = nil)
   mod = ctx[:mod]
   wname = "__w_fuse_worker_" + sid.to_s()
   wfn2 = build_function(wname, ["__fw_blk", "__fw_lo", "__fw_hi"], "i64", false, [])
@@ -3175,17 +3307,22 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     wv = next_temp(wfn2)
     emit_instruction(wfn2, {op: :load_i64_at, temp: wv, ptr: blk_ptr, index: (1 + ai).to_s()})
     base = next_temp(wfn2)
-    emit_instruction(wfn2, {op: fuse_ew_elems_ptr_op(arrs[ai][:etype]), temp: base, value: wv})
+    pi = fuse_ew_inst(fuse_ew_elems_ptr_op(arrs[ai][:etype]), base, arrs[ai][:etype])
+    pi[:value] = wv
+    emit_instruction(wfn2, pi)
     arrs[ai][:base] = base
     ai += 1
   sj = 0
   while sj < scls.size()
     raw = next_temp(wfn2)
-    emit_instruction(wfn2, {op: :load_f64_at, temp: raw, ptr: blk_ptr, index: (1 + arrs.size() + sj).to_s()})
+    scalar_load = mode == :int ? :load_i64_at : :load_f64_at
+    emit_instruction(wfn2, {op: scalar_load, temp: raw, ptr: blk_ptr, index: (1 + arrs.size() + sj).to_s()})
     scls[sj][:raw] = raw
     sj += 1
   out_base = next_temp(wfn2)
-  emit_instruction(wfn2, {op: fuse_ew_elems_ptr_op(odt), temp: out_base, value: out_wv})
+  opi = fuse_ew_inst(fuse_ew_elems_ptr_op(odt), out_base, odt)
+  opi[:value] = out_wv
+  emit_instruction(wfn2, opi)
 
   saved_func = ctx[:func]
   ctx[:func] = wfn2
@@ -3221,7 +3358,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   wfn = ctx[:func]
   arrs = []
   scls = []
-  fuse_ew_lower_leaves(ctx, spec, arrs, scls)
+  fuse_ew_lower_leaves(ctx, spec, arrs, scls, spec[:mode])
   if arrs.size() == 0
     return nil
   arr0 = arrs[0]
@@ -3254,7 +3391,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   ewsid = nil
   if ast_get(node, :reuse_safe) != true
     ewsid = sid
-  worker_name = fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid, ewsid)
+  worker_name = fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid, spec[:mode], ewsid)
 
   mt_label = next_label(wfn, "fuse.mt")
   st_label = next_label(wfn, "fuse.st")
@@ -3276,8 +3413,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     ai += 1
   sj = 0
   while sj < scls.size()
-    bits = next_temp(wfn)
-    emit_instruction(wfn, {op: :bitcast_f64_i64, temp: bits, value: scls[sj][:raw]})
+    bits = scls[sj][:raw]
+    if spec[:mode] != :int
+      bits = next_temp(wfn)
+      emit_instruction(wfn, {op: :bitcast_f64_i64, temp: bits, value: scls[sj][:raw]})
     fuse_ew_block_store(wfn, blk_reg, (1 + arrs.size() + sj).to_s(), bits)
     sj += 1
   blk_addr = next_temp(wfn)
@@ -3300,11 +3439,15 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   start_block(wfn, st_label)
   out_base = next_temp(wfn)
-  emit_instruction(wfn, {op: fuse_ew_elems_ptr_op(odt), temp: out_base, value: out_reg})
+  opi = fuse_ew_inst(fuse_ew_elems_ptr_op(odt), out_base, odt)
+  opi[:value] = out_reg
+  emit_instruction(wfn, opi)
   ai = 0
   while ai < arrs.size()
     base = next_temp(wfn)
-    emit_instruction(wfn, {op: fuse_ew_elems_ptr_op(arrs[ai][:etype]), temp: base, value: arrs[ai][:reg]})
+    pi = fuse_ew_inst(fuse_ew_elems_ptr_op(arrs[ai][:etype]), base, arrs[ai][:etype])
+    pi[:value] = arrs[ai][:reg]
+    emit_instruction(wfn, pi)
     arrs[ai][:base] = base
     ai += 1
   fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "0", size_reg, odt, ewsid)

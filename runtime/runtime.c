@@ -53432,6 +53432,27 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             return w_bool_array_new(len);
         }
 
+        /* Packed Date/Decimal values cannot be represented by the generic
+         * WObject allocator below. A stale bodyless Date constructor (and an
+         * implicit zero-arg Decimal constructor) produced ordinary objects
+         * whose scalar methods then decoded pointer bits as value fields.
+         * Reject every arity until these classes define a real scalar
+         * constructor contract. */
+        if ((strcmp(klass->name, "Date") == 0 ||
+             strcmp(klass->name, "Decimal") == 0) &&
+            w_hash_key_eq(name, WN_new)) {
+            char cbuf[128];
+            if (strcmp(klass->name, "Date") == 0)
+                snprintf(cbuf, sizeof cbuf,
+                         "Date.new is not a supported scalar constructor; "
+                         "use a date literal or Date.parse");
+            else
+                snprintf(cbuf, sizeof cbuf,
+                         "Decimal.new is not a supported scalar constructor; "
+                         "use a decimal literal or String#to_d");
+            w_raise(w_string(cbuf));
+        }
+
         /* Rational.new(numerator, denominator = 1) returns the packed scalar,
          * not an allocated WObject instance. */
         if (strcmp(klass->name, "Rational") == 0 && w_hash_key_eq(name, WN_new)) {

@@ -10,22 +10,13 @@
   FORMATS = {ctime: "%a %b %e 00:00:00 %Y", http: "%a, %d, %b, %Y 00:00:00 GMT", iso8601: "%Y-%m-%d", rfc3339: "%Y-%m-%dT00:00:00+00:00", rfc2822: "%a, %-d %b %Y 00:00:00 +0000", rfc822: "%a, %-d %b %Y 00:00:00 +0000"}
 
   -> .parse(string)
-
-  -> new
-  -> julian/1
-  -> ordinal(year, num)
-  -> commercial(year, week, day)
-
-  -> today
-  -> tomorrow
+    ccall("w_date_parse", string)
 
   # Date is packed directly into a WValue. `$value` exposes the raw bits to
   # compiled Tungsten, keeping these leaf accessors and calendar calculations
   # allocation-free and equivalent to their former runtime.c IC handlers.
   -> day
     ($value >> 24) & 0x1F
-
-  -> week
 
   -> month
     ($value >> 29) & 0xF
@@ -53,13 +44,11 @@
       quarters -= 0x80
     quarters * 15
 
-  -> decade
-  -> century
-  -> millenium
+  -> asctime
+    self.ctime()
 
-  alias_mistake :asctime, :ctime
   -> ctime
-    strftime FORMATS[:ctime]
+    self.strftime(FORMATS[:ctime])
 
   -> cwday
     y = (($value >> 33) & 0xFFF) ## i64
@@ -163,19 +152,16 @@
     DAY_NAMES[day_of_week]
 
   -> month_abbr
-    MONTHS[month]
+    MONTHS[month - 1]
 
   -> month_name
-    MONTH_NAMES[month]
+    MONTH_NAMES[month - 1]
 
   -> quarter_abbr
     "Q[quarter]"
 
   -> year_with_quarter
     "[year]Q[quarter]"
-
-  -> decade_abbr
-    "[decade]s"
 
   -> day_of_week
     y = (($value >> 33) & 0xFFF) ## i64
@@ -193,6 +179,21 @@
     ($value >> 24) & 0x1F
 
   -> day_of_quarter
+    month_in_quarter = (month - 1) % 3
+    result = day
+    if month_in_quarter >= 1
+      first_month = month - month_in_quarter
+      if first_month == 2
+        result += leap? ? 29 : 28
+      else
+        result += 31 - ((0xA50 >> first_month) & 1)
+    if month_in_quarter >= 2
+      second_month = month - 1
+      if second_month == 2
+        result += leap? ? 29 : 28
+      else
+        result += 31 - ((0xA50 >> second_month) & 1)
+    result
 
   -> day_of_year
     y = (($value >> 33) & 0xFFF) ## i64
@@ -274,22 +275,6 @@
       y -= 0x1000
     leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
     leap ? 366 : 365
-
-  -> first_of_week
-  -> first_of_month
-  -> first_of_quarter
-  -> first_of_year
-  -> first_of_decade
-  -> first_of_century
-  -> first_of_millenium
-
-  -> last_of_week
-  -> last_of_month
-  -> last_of_quarter
-  -> last_of_year
-  -> last_of_decade
-  -> last_of_century
-  -> last_of_millenium
 
   -> leap_year?
     y = (($value >> 33) & 0xFFF) ## i64

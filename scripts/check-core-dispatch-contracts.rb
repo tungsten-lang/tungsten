@@ -157,6 +157,19 @@ RUNTIME_CLASS_CONTRACTS = {
     native_ic: %w[abs ceil floor round sq sqrt to_d to_f to_i],
     autoload_guard: "decimal_source_method_unresolved",
     source_fallback: %w[arccos arccosh arcsin arcsinh arctan arctanh cos cosh inv normalize reciprocal sin sinh tan tanh to_s]
+  },
+  "Date" => {
+    path: "core/date.w",
+    table: "w_ic_date_table",
+    dispatch_key: "0xE4",
+    native_ic: %w[inspect strftime to_s],
+    native_only: %w[inspect],
+    source_fallback: %w[
+      asctime ctime cwday cweek cwyear day day_abbr day_name day_of_month day_of_quarter
+      day_of_week day_of_year days_in_month days_in_year hour jd leap? leap_year?
+      minute month month_abbr month_name quarter quarter_abbr second tz
+      wday yday year year_with_quarter
+    ]
   }
 }.freeze
 

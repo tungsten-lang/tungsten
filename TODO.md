@@ -286,9 +286,18 @@ projects stay unchecked until their stated acceptance criteria are met.
       constructor/rational-field/currency placeholders are removed. Invalid
       construction is a clean cross-engine error rather than a malformed
       value, and Decimal/Quantity/Currency have distinct cache identities.
-    - [ ] Add erased-receiver interpreter/native parity fixtures for Decimal
-      and Date, then for the overlapping Array, String, and Int/Integer
-      surfaces. Cover ordinary values and representation boundaries.
+    - [x] Add erased-receiver interpreter/native parity fixtures for Decimal
+      and Date, covering packed/heap Decimal representations, Date source
+      leaves, native formatting, and scalar-constructor rejection.
+    - [ ] Add erased-receiver interpreter/native parity fixtures for the
+      overlapping Array, String, and Int/Integer surfaces. Cover ordinary
+      values and representation boundaries.
+    - [ ] Implement and specify Date's deferred factory/calendar surface:
+      `new`, `julian`, `ordinal`, `commercial`, `today`, `tomorrow`, `week`,
+      `decade`/`decade_abbr`, `century`, `millenium`, and first/last period
+      helpers. These used to be bodyless declarations that silently returned
+      malformed values or `nil`; they are intentionally absent until semantics
+      exist.
     - [x] Teach the audit to distinguish an implemented source fallback from
       a bodyless declaration. A placeholder cannot satisfy the gate merely by
       being listed as `source_fallback`.

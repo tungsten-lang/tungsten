@@ -200,7 +200,8 @@ run_compiled_reject_spec() {
   local needle
 
   case "$name" in
-    decimal_invalid_constructor) needle='Decimal.new: no constructor accepts 1 argument' ;;
+    date_invalid_constructor) needle='Date.new is not a supported scalar constructor' ;;
+    decimal_invalid_constructor|decimal_invalid_zero_constructor) needle='Decimal.new is not a supported scalar constructor' ;;
     *) record_failure_note "$name" "missing expected compiled rejection diagnostic"; return ;;
   esac
 
@@ -232,7 +233,8 @@ run_interpreter_reject_spec() {
   local needle
 
   case "$name" in
-    decimal_invalid_constructor) needle='Decimal.new: no constructor accepts 1 argument' ;;
+    date_invalid_constructor) needle='Date.new is not a supported scalar constructor' ;;
+    decimal_invalid_constructor|decimal_invalid_zero_constructor) needle='Decimal.new is not a supported scalar constructor' ;;
     *) record_failure_note "$name" "missing expected interpreted rejection diagnostic"; return ;;
   esac
 
@@ -575,6 +577,7 @@ fi
 
 compiled_specs=(
   compiler/test/regex_features.w
+  spec/compiler/date_dynamic_receiver_spec.w
   spec/compiler/decimal_dynamic_receiver_spec.w
   spec/compiler/float_dynamic_receiver_spec.w
   spec/compiler/ast_body_native_spec.w
@@ -759,6 +762,7 @@ compiled_specs=(
   spec/numeric/operator_overload_spec.w
   spec/numeric/rational_spec.w
   spec/numeric/vector_spec.w
+  spec/core/date_native_spec.w
 )
 
 # Emit-only GPU dialect specs (no hardware). Run always with make specs.
@@ -778,6 +782,7 @@ cuda_reject_specs=(
 interpreter_specs=(
   compiler/test/regex_features.w
   benchmarks/runtime_ports/bigint_predicate_relaxed_autoload.w
+  spec/compiler/date_dynamic_receiver_spec.w
   spec/compiler/decimal_dynamic_receiver_spec.w
   spec/compiler/float_dynamic_receiver_spec.w
   # Engine-parity pins: these compiler specs assert values that must hold
@@ -891,6 +896,7 @@ interpreter_specs=(
   spec/core/formal_series_spec.w
   spec/core/formal_series_autoload_spec.w
   spec/core/enumerable_native_spec.w
+  spec/core/date_native_spec.w
   spec/core/system_spec.w
   spec/numeric/complex_spec.w
   spec/numeric/hypercomplex_mul_spec.w
@@ -906,11 +912,15 @@ interpreter_specs=(
 )
 
 compiled_reject_specs=(
+  spec/compiler/date_invalid_constructor.w
   spec/compiler/decimal_invalid_constructor.w
+  spec/compiler/decimal_invalid_zero_constructor.w
 )
 
 interpreter_reject_specs=(
+  spec/compiler/date_invalid_constructor.w
   spec/compiler/decimal_invalid_constructor.w
+  spec/compiler/decimal_invalid_zero_constructor.w
 )
 
 core_specs=(

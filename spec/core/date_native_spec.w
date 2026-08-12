@@ -42,7 +42,7 @@ next_iso_year = 2018-12-31
 check("next iso year week", next_iso_year.cweek, 1)
 check("next iso year", next_iso_year.cwyear, 2019)
 
-negative_year = ccall("w_date", -2048, 1, 1, 0, 0, 0, 0)
+negative_year = Date.parse("-2048-01-01")
 check("signed year minimum", negative_year.year, -2048)
 
 << "date_native_spec: all checks passed"

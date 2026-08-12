@@ -157,6 +157,33 @@ use parser
     i += 1
   "<" + rendered.join(", ") + ">"
 
+# Platform predicates use their own small grammar. The precedence values here
+# mirror parser.w: `!` binds tighter than `&&`, which binds tighter than `||`.
+-> formatter_target(node, parent_precedence = 0)
+  kind = ast_kind(node)
+  precedence = 4
+  if kind == :target_or
+    precedence = 1
+  elsif kind == :target_and
+    precedence = 2
+  elsif kind == :target_not
+    precedence = 3
+
+  if kind == :target_designator
+    out = node.name.to_s()
+  elsif kind == :target_not
+    out = "!" + formatter_target(node.expression, precedence)
+  elsif kind == :target_and
+    out = formatter_target(node.left, precedence) + " && " + formatter_target(node.right, precedence)
+  elsif kind == :target_or
+    out = formatter_target(node.left, precedence) + " || " + formatter_target(node.right, precedence)
+  else
+    raise "tungsten fmt: unsupported target node :" + kind.to_s()
+
+  if precedence < parent_precedence
+    return "(" + out + ")"
+  out
+
 -> formatter_block(node, depth)
   params = formatter_params(node.params, depth)
   header = "->"
@@ -492,6 +519,14 @@ use parser
     formatter_if(node, depth)
   when :while
     prefix + "while " + formatter_expr(node.condition, depth) + "\n" + formatter_sequence(node.body, depth + 1)
+  when :on_guard
+    header = prefix + "on " + formatter_target(node.predicate)
+    i = 0
+    while i < node.capabilities.size
+      header += " with " + node.capabilities[i].to_s()
+      i += 1
+    body = formatter_sequence(node.body, depth + 1)
+    body == "" ? header : header + "\n" + body
   when :with
     bindings = []
     i = 0

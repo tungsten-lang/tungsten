@@ -5,7 +5,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TUNGSTEN="$ROOT/bin/tungsten"
 INPUT="$ROOT/spec/cli/fmt_input.w"
 EXPECTED="$ROOT/spec/cli/fmt_expected.w"
-UNSUPPORTED="$ROOT/spec/cli/fmt_unsupported.w"
+ON_GUARD_INPUT="$ROOT/spec/cli/fmt_on_guard_input.w"
+ON_GUARD_EXPECTED="$ROOT/spec/cli/fmt_on_guard_expected.w"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-fmt.XXXXXX")"
 trap 'rc=$?; rm -rf "$TMP"; exit $rc' EXIT INT TERM
 
@@ -33,11 +34,13 @@ cp "$INPUT" "$TMP/in-place.w"
 cmp "$EXPECTED" "$TMP/in-place.w"
 grep -q '^formatted ' "$TMP/in-place.out"
 
-if "$TUNGSTEN" fmt "$UNSUPPORTED" >"$TMP/unsupported.out" 2>"$TMP/unsupported.err"; then
-  printf 'tungsten fmt accepted an unsupported AST node\n' >&2
-  exit 1
-fi
-grep -q 'unsupported expression node :on_guard' "$TMP/unsupported.err"
+"$TUNGSTEN" fmt "$ON_GUARD_INPUT" >"$TMP/on-guard.out"
+cmp "$ON_GUARD_EXPECTED" "$TMP/on-guard.out"
+"$TUNGSTEN" fmt "$TMP/on-guard.out" >"$TMP/on-guard-twice.out"
+cmp "$TMP/on-guard.out" "$TMP/on-guard-twice.out"
+"$TUNGSTEN" --canonical-ast "$ON_GUARD_INPUT" >"$TMP/on-guard.in.ast"
+"$TUNGSTEN" --canonical-ast "$TMP/on-guard.out" >"$TMP/on-guard.out.ast"
+cmp "$TMP/on-guard.in.ast" "$TMP/on-guard.out.ast"
 
 printf '# retained comment   \nvalue=1   \n\n' >"$TMP/commented.w"
 "$TUNGSTEN" fmt "$TMP/commented.w" >"$TMP/commented.out"
@@ -56,9 +59,8 @@ cmp "$ROOT/spec/cli/fmt_generic_expected.w" "$TMP/generic-class.out"
 cmp "$TMP/generic-class.in.ast" "$TMP/generic-class.out.ast"
 
 # Exercise the compact frontend fixture corpus. Known-invalid parser fixtures
-# and the two intentionally unsupported formatter fixtures are classified
-# explicitly; every other file must format idempotently and preserve its
-# canonical AST.
+# are classified explicitly; every other file must format idempotently and
+# preserve its canonical AST.
 fixture_count=0
 for fixture in "$ROOT"/compiler/test/fixtures/*.w "$ROOT"/spec/cli/*.w; do
   rel="${fixture#"$ROOT"/}"
@@ -66,8 +68,7 @@ for fixture in "$ROOT"/compiler/test/fixtures/*.w "$ROOT"/spec/cli/*.w; do
     compiler/test/fixtures/frontend_fuzz_20add648ea927d31.w|\
     compiler/test/fixtures/frontend_fuzz_62f1c679cc3ef149.w|\
     spec/cli/camel_case_invalid.w|\
-    spec/cli/str_type_invalid.w|\
-    spec/cli/fmt_unsupported.w)
+    spec/cli/str_type_invalid.w)
       continue
       ;;
   esac

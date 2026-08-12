@@ -80,6 +80,17 @@ use core/blas
 m3a = Mat3<f64>.new([~1.0, ~2.0, ~3.0, ~4.0, ~5.0, ~6.0, ~7.0, ~8.0, ~9.0] ## f64[9])
 m3b = Mat3<f64>.new([~9.0, ~8.0, ~7.0, ~6.0, ~5.0, ~4.0, ~3.0, ~2.0, ~1.0] ## f64[9])
 iters = 3000000
+m3shared = m3a.elements
+t0 = clock()
+acc = ~0.0
+i = 0
+while i < iters
+  c = Mat3<f64>.new(m3shared)
+  acc = acc + c.at(0, 0)
+  i += 1
+t1 = clock()
+<< "Mat3 ctor: " + ((t1 - t0) / (iters ## f64) * ~1.0e9).to_s() + " ns/op   (acc=" + acc.to_s() + ")"
+
 t0 = clock()
 acc = ~0.0
 i = 0
@@ -116,6 +127,17 @@ t1 = clock()
 
 m4a = Mat4<f64>.new([~1.0,~2.0,~3.0,~4.0,~5.0,~6.0,~7.0,~8.0,~9.0,~1.0,~2.0,~3.0,~4.0,~5.0,~6.0,~7.0] ## f64[16])
 m4b = Mat4<f64>.new([~7.0,~6.0,~5.0,~4.0,~3.0,~2.0,~1.0,~9.0,~8.0,~7.0,~6.0,~5.0,~4.0,~3.0,~2.0,~1.0] ## f64[16])
+m4shared = m4a.elements
+t0 = clock()
+acc4 = ~0.0
+i = 0
+while i < iters
+  c = Mat4<f64>.new(m4shared)
+  acc4 = acc4 + c.at(0, 0)
+  i += 1
+t1 = clock()
+<< "Mat4 ctor: " + ((t1 - t0) / (iters ## f64) * ~1.0e9).to_s() + " ns/op   (acc=" + acc4.to_s() + ")"
+
 t0 = clock()
 acc4 = ~0.0
 i = 0

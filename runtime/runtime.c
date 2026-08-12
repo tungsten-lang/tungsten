@@ -53026,9 +53026,12 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
         if (m && m->splat_index_plus_one == 0) {
             w_ic_publish(cache, key, m->fn_ptr, m->arity - 1 /* subtract self */);
         }
-    } else if (w_is_class(recv) && !w_hash_key_eq(name, WN_new) &&
+    } else if (w_is_class(recv) &&
+               (!w_hash_key_eq(name, WN_new) ||
+                w_static_method_lookup_arity(as_class(recv), name, argc + 1) != NULL) &&
                !w_builtin_static_precedes_source(recv, name)) {
-        /* Cache user-defined static methods. Constructors allocate before dispatch. */
+        /* Cache user-defined static methods, including static `.new`
+         * factories. Generic constructors take the following branch. */
         WClass *klass = (WClass *)w_as_ptr(recv);
         WMethod *m = w_static_method_lookup_arity(klass, name, argc + 1);
         if (!m) m = w_static_method_lookup(klass, name);
@@ -53599,7 +53602,17 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             return w_rational_new(args->slots[0], denominator);
         }
 
+        /* A source static `.new` is a representation-level factory. Direct
+         * class calls and the interpreter already give it priority over the
+         * generic allocate-then-initialize protocol; preserve that ordering
+         * when the class receiver has been erased too. Builtin class
+         * primitives above retain their documented precedence. */
+        WMethod *sm = NULL;
         if (w_hash_key_eq(name, WN_new)) {
+            sm = w_static_method_lookup_arity(klass, name, args->size + 1);
+            if (!sm) sm = w_static_method_lookup(klass, name);
+            if (sm) goto invoke_static_method;
+
             WValue obj = w_object_new(recv);
             WMethod *m = w_method_lookup_arity(klass, WN_new, args->size + 1);
             if (!m) m = w_method_lookup(klass, WN_new);
@@ -53676,8 +53689,9 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
         /* User-defined class (static) methods.
          * Arity includes __self (the class object), so user-visible param count = arity - 1.
          * Pass recv (the class WValue) as the first argument. */
-        WMethod *sm = w_static_method_lookup_arity(klass, name, args->size + 1);
+        sm = w_static_method_lookup_arity(klass, name, args->size + 1);
         if (!sm) sm = w_static_method_lookup(klass, name);
+invoke_static_method:
         if (sm) {
             int expected = sm->arity - 1;  /* subtract self */
             WValue a[8];

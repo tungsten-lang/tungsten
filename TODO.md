@@ -589,9 +589,13 @@ projects stay unchecked until their stated acceptance criteria are met.
   22/25 ns and raw kernels at 18/21 ns versus same-flags C at 2.1/2.6 ns.
   A second tranche teaches typed parameters to devirtualize generated data
   accessors through a class-id guard; the observed `mul_into` medians improved
-  from 25.1/27.7 ns to 21.8/25.3 ns. Finish with fixed-storage escape/stack
-  promotion and eliminate remaining object construction/allocation so the
-  value-semantic API closes the final 30-34x gap.
+  from 25.1/27.7 ns to 21.8/25.3 ns. A third tranche directly allocates and
+  invokes plain `class.new` initializers behind an exact-class guard, preserves
+  subclass/static-factory fallbacks, and brings the measured operators to
+  69.6/73.2 ns; shared-buffer construction alone is still about 31/29 ns.
+  Finish with fixed-storage escape/stack promotion and eliminate remaining
+  object/array allocation so the value-semantic API closes the final 28-33x
+  gap.
 - [x] Restore general `f64[]` schoolbook matmul throughput. Profiling traced
   the ~0.99 GFLOP/s regression to an untyped matrix-dimension parameter, which
   boxed every loop comparison and index expression. Declaring `n` as `i64`

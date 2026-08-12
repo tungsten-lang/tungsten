@@ -28,21 +28,27 @@ Tungsten runs.
 
 | kernel | Tungsten `*` | Tungsten `mul_into` | raw Tungsten kernel | C schoolbook | `*` gap |
 |---|---:|---:|---:|---:|---:|
-| Mat3 (27 mul) | 72.0 ns/op | 21.8 ns/op | 17.6 ns/op | 2.10 ns/op | **34.3×** |
-| Mat4 (64 mul) | 79.7 ns/op | 25.3 ns/op | 21.0 ns/op | 2.62 ns/op | **30.4×** |
+| Mat3 (27 mul) | 69.6 ns/op | 21.5 ns/op | 17.5 ns/op | 2.10 ns/op | **33.1×** |
+| Mat4 (64 mul) | 73.2 ns/op | 24.4 ns/op | 20.9 ns/op | 2.62 ns/op | **27.9×** |
 
 The compiler now preserves both matrix operands as typed float storage, lowers
 the arithmetic to native fmul/fadd/FMA, and constructs `[...] ## f64[N]`
 directly in one typed buffer rather than boxing into a temporary Array and
 copy-converting it. That cuts the value-semantic operators from the old
-2837/3267 ns baseline to 72/76 ns (**39×/43× faster**). Tiny typed
+2837/3267 ns baseline to 70/73 ns (**41×/45× faster**). Tiny typed
 literals also keep their WArray header and element payload in one allocation,
 removing the second malloc while retaining normal grow/free behavior.
 Typed matrix parameters now devirtualize generated `- data` accessors through
 the existing class-id guard. Against the fresh same-session baseline, the
 observed `mul_into` medians moved from 25.1 to 21.8 ns for Mat3 and 27.7 to
 25.3 ns for Mat4; the raw-kernel control moved by about 3%, and the allocating
-`*` path showed no clear additional win.
+`*` path showed no clear additional win. A guarded constructor path now
+allocates and invokes a plain `class.new` initializer directly when the runtime
+class is exact, while retaining the constructor IC for subclasses and static
+`.new` factories. Against its immediate same-session baseline, Mat3 `*` moved
+from 70.0 to 69.6 ns (within noise) and Mat4 `*` from 75.5 to 73.2 ns. The
+shared-buffer constructor controls remain about 31/29 ns, confirming that
+object allocation—not constructor lookup—is the larger remaining cost.
 
 `mul_into(other, out)` separates allocation from arithmetic for hot loops.
 The raw-kernel row additionally removes the three matrix method sends and is

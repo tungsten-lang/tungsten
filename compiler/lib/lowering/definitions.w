@@ -1602,8 +1602,16 @@
       if pp.default != nil || pp.keyword == true || pp.splat == true || pp.block_param == true
         plain = false
       ppi += 1
-  if plain && mname != "new"
-    mod[:class_method_fn_names][cname + "." + mname + "/" + pcount.to_s()] = mfn_name
+  if plain
+    if mname == "new"
+      # Initializers cannot share the ordinary devirtualization registry:
+      # directly calling `new` on an existing instance would initialize that
+      # instance instead of allocating a fresh one.  Keep a constructor-only
+      # index for guarded `class.new(...)` sites; their direct arm allocates
+      # first, then invokes this worker.
+      mod[:class_constructor_fn_names][cname + ".new/" + pcount.to_s()] = mfn_name
+    else
+      mod[:class_method_fn_names][cname + "." + mname + "/" + pcount.to_s()] = mfn_name
 
 -> static_method_raw_abi?(node)
   # Both class methods (`-> .name`) and typed instance methods (`->`,
@@ -1640,6 +1648,11 @@
 
 -> register_static_method(main_fn, mod, cname, node)
   mname = node.name
+  if mname == "new"
+    # Any static `.new` shadows allocate-then-initialize dispatch, regardless
+    # of arity or declaration order. Keep this separate from the mixed
+    # known_static_methods registry, which also indexes typed instance calls.
+    mod[:class_static_new][cname] = true
   arity = method_runtime_arity(node)
   min_arity = method_min_runtime_arity(node)
   mfn_name = class_method_function_name(cname, node)

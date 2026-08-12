@@ -1728,12 +1728,16 @@ ewscope_md_state = {ids: {}}
       ["w_string", "w_ivar_set_wv"]
 
   when :call_method_i64
+    runtime_fns = []
     if inst[:args].size() == 0
-      ["w_method_call_cached_0"]
+      runtime_fns.push("w_method_call_cached_0")
     elsif scalar_source_one_call?(inst)
-      ["w_method_call_cached_1"]
+      runtime_fns.push("w_method_call_cached_1")
     else
-      ["w_method_call_cached"]
+      runtime_fns.push("w_method_call_cached")
+    if inst[:construct_fn] != nil
+      runtime_fns.push("w_object_new")
+    runtime_fns
   when :closure_new
     ["w_closure_new_a"]
   when :free_value
@@ -3015,7 +3019,7 @@ ewscope_md_state = {ids: {}}
   # their return address is addressable via blockaddress(@fn, %cs.N.ret).
   # A devirtualized site additionally merges its direct and IC arms in a
   # dv.N.done block, which is then the real exit regardless of src_line.
-  if op == :call_method_i64 && inst[:devirt_fn] != nil
+  if op == :call_method_i64 && (inst[:devirt_fn] != nil || inst[:construct_fn] != nil)
     return "dv." + inst[:ic_id].to_s() + ".done"
   if op == :call_method_i64 && inst[:src_line] != nil
     return "cs." + inst[:ic_id].to_s() + ".ret"
@@ -5056,6 +5060,23 @@ ewscope_md_state = {ids: {}}
       parts << "br label %" + lbl + ".done\n"
       parts << lbl + ".s:\n  "
       dv_temp = t + ".sv"
+    elsif inst[:construct_fn] != nil
+      t = inst[:temp]
+      lbl = "dv." + ic_id
+      parts << t + ".cw = load i64, ptr @class." + llvm_safe_name(inst[:construct_class].gsub(":", "__")) + "\n  "
+      parts << t + ".same = icmp eq i64 " + inst[:receiver] + ", " + t + ".cw\n  "
+      parts << "br i1 " + t + ".same, label %" + lbl + ".d, label %" + lbl + ".s\n"
+      parts << lbl + ".d:\n  "
+      parts << t + ".dv = call i64 @w_object_new(i64 " + inst[:receiver] + ")\n  "
+      parts << t + ".init = call i64 @" + inst[:construct_fn] + "(i64 " + t + ".dv"
+      di = 0
+      while di < argc
+        parts << ", i64 " + inst[:args][di]
+        di += 1
+      parts << ")\n  "
+      parts << "br label %" + lbl + ".done\n"
+      parts << lbl + ".s:\n  "
+      dv_temp = t + ".sv"
     # `notail` prevents LLVM from collapsing the call+ret pair into a tail
     # call when we need a real return address for the call-site lookup.
     # Without this, -O3 converts `call + br + ret` into a `b` (unconditional
@@ -5087,7 +5108,7 @@ ewscope_md_state = {ids: {}}
       parts << "\n"
       parts << ret_lbl
       parts << ":"
-    if inst[:devirt_fn] != nil
+    if inst[:devirt_fn] != nil || inst[:construct_fn] != nil
       t = inst[:temp]
       lbl = "dv." + ic_id
       # The slow arm's value is defined in whichever block the IC render

@@ -81,3 +81,54 @@ check("devirt.ivar_receiver", h.ask, "generic")
 d = Deft.new
 check("devirt.default_param_excluded", d.add(1), 11)
 check("devirt.default_param_both", d.add(1, 2), 3)
+
+# `class.new` can allocate and invoke a plain initializer directly only when
+# the runtime class is exactly the method's owner. Inherited calls on a
+# subclass must take the constructor IC fallback and preserve that subclass.
++ FactoryBase
+  -> new(@label)
+    self
+  -> duplicate
+    class.new(@label)
+  -> kind
+    "base"
+
++ FactoryChild < FactoryBase
+  -> new(@label)
+    self
+  -> kind
+    "child"
+
+fb = FactoryBase.new("b")
+check("construct.exact_class", fb.duplicate.kind, "base")
+fc = FactoryChild.new("c")
+check("construct.subclass_fallback", fc.duplicate.kind, "child")
+
+# A static `.new` shadows allocate-then-initialize dispatch. Its presence must
+# disable guarded constructor lowering even when an instance initializer with
+# the same source name also exists.
++ StaticNewShadow
+  -> new(@value)
+    self
+  -> .new(value)
+    "static " + value
+  -> .build(value)
+    class.new(value)
+
+check("construct.static_new_shadow", StaticNewShadow.build("ok"), "static ok")
+check("construct.static_new_shadow_cached", StaticNewShadow.build("again"), "static again")
+
+# The static factory can be inherited even when the subclass declares its own
+# instance initializer. Scan the whole hierarchy before selecting a direct
+# constructor worker.
++ InheritedStaticNew
+  -> .new(value)
+    "inherited " + value
+
++ InheritedStaticNewChild < InheritedStaticNew
+  -> new(@value)
+    self
+  -> .build(value)
+    class.new(value)
+
+check("construct.inherited_static_new", InheritedStaticNewChild.build("ok"), "inherited ok")

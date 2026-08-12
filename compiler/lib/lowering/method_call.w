@@ -1924,6 +1924,8 @@
   # through the IC exactly as before.
   devirt_fn = nil
   devirt_class = nil
+  construct_fn = nil
+  construct_class = nil
   if node.block == nil && recv_node != nil && is_ast_node?(recv_node)
     exact_cls = nil
     rk2 = ast_kind(recv_node)
@@ -1968,6 +1970,33 @@
         devirt_fn = dfn
         devirt_class = exact_cls
 
+    # `class.new(...)` inside a source method preserves subclasses by using
+    # the receiver's runtime class.  For the overwhelmingly common exact-class
+    # case, guard that class value against the current source class, allocate
+    # directly, and call a plain initializer worker.  A subclass receiver, a
+    # static `.new` override, an inherited non-plain initializer, or any stale
+    # compiler fact retains the ordinary constructor IC path.
+    if method_name == "new" && rk2 == :var && recv_node.name == "class" && ctx[:class_name] != nil && normal_source_instance_class?(ctx[:mod], ctx[:class_name])
+      static_new = false
+      scan_class = ctx[:class_name]
+      guard = 0
+      while scan_class != nil && guard < 64
+        if ctx[:mod][:class_static_new][scan_class] == true
+          static_new = true
+          break
+        scan_class = ctx[:mod][:class_super_names][scan_class]
+        guard += 1
+      ctor_owner = ctx[:class_name]
+      guard = 0
+      while !static_new && ctor_owner != nil && guard < 64
+        ctor_fn = ctx[:mod][:class_constructor_fn_names][ctor_owner + ".new/" + node.args.size().to_s()]
+        if ctor_fn != nil
+          construct_fn = ctor_fn
+          construct_class = ctx[:class_name]
+          break
+        ctor_owner = ctx[:mod][:class_super_names][ctor_owner]
+        guard += 1
+
   emit_instruction(wfn, {
     op: :call_method_i64,
     temp: temp,
@@ -1978,6 +2007,8 @@
     scalar_source_argc1: scalar_source_argc1,
     devirt_fn: devirt_fn,
     devirt_class: devirt_class,
+    construct_fn: construct_fn,
+    construct_class: construct_class,
     ic_id: ic_id,
     src_line: node.line,
     src_col: node.col

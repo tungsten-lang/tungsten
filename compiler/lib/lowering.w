@@ -154,6 +154,8 @@ use lowering/definitions
   #   as a private LLVM global; lowering ptrtoint's them at the load site.
   mod[:class_method_asts] = {}
   mod[:class_method_fn_names] = {}
+  mod[:class_constructor_fn_names] = {}
+  mod[:class_static_new] = {}
   mod[:specialized_methods] = {}
   mod[:small_array_consts] = []
   # The class-registration prepass expands traits/accessors/typed overloads
@@ -904,6 +906,9 @@ use lowering/definitions
         if inst[:devirt_fn] != nil
           out = out + " devirt=@" + inst[:devirt_fn]
           out = out + " class=" + inst[:devirt_class]
+        if inst[:construct_fn] != nil
+          out = out + " construct=@" + inst[:construct_fn]
+          out = out + " class=" + inst[:construct_class]
         if inst[:value] != nil
           out = out + " " + inst[:value].to_s()
         if inst[:label] != nil

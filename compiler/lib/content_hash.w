@@ -226,6 +226,11 @@ content_hash_codegen_fields = [
       buf << inst[:devirt_fn]
       buf << ":"
       buf << inst[:devirt_class]
+    if inst[:construct_fn] != nil
+      buf << "ctor:"
+      buf << inst[:construct_fn]
+      buf << ":"
+      buf << inst[:construct_class]
 
     buf << ";"
     return nil
@@ -573,6 +578,10 @@ content_hash_codegen_fields = [
           replacement = rename_map_get(rename_map, inst[:devirt_fn])
           if replacement != nil
             inst[:devirt_fn] = replacement
+        if op == :call_method_i64 && inst[:construct_fn] != nil
+          replacement = rename_map_get(rename_map, inst[:construct_fn])
+          if replacement != nil
+            inst[:construct_fn] = replacement
         # Fused-loop worker address (ptrtoint ptr @name) — the referenced
         # worker gets compact-symbol renamed like any function.
         if op == :fn_addr_i64

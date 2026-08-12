@@ -25,18 +25,19 @@ the *match* is timed, in a tight loop. POSIX uses the equivalent ERE
 
 ## Results (M-series mac)
 
-| Engine                         | ns/match | relative |
-|--------------------------------|----------|----------|
-| **mine** — pure Tungsten       | ~930     | 1× (≈ POSIX) |
-| POSIX `regcomp` (libc C)       | ~908     | ~1.0× (par) |
-| **oniguruma** (via Ruby)       | ~153     | **6× faster** |
+| Engine                         | ns/match | relative to Tungsten |
+|--------------------------------|----------|----------------------|
+| **mine** — pure Tungsten       | ~350     | 1× |
+| POSIX `regcomp` (libc C)       | ~961     | 2.7× slower |
+| **oniguruma** (via Ruby)       | ~158     | 2.2× faster |
 
-So the homegrown engine now **matches POSIX `regcomp`** and is **~6× slower than
-oniguruma** — for a backtracking VM written in a high-level, self-hosted language
-with zero dependencies.
+So the homegrown engine is now about **2.7× faster than POSIX `regcomp`** on
+this capture-heavy workload and **~2.2× slower than oniguruma** — for a
+backtracking VM written in a high-level, self-hosted language with zero
+dependencies.
 
-The engine started at ~5470 ns/match; a sequence of optimizations took it to ~930
-(**~5.9× faster**):
+The engine started at ~5470 ns/match; the full sequence of optimizations took it
+to ~350 (**~15.6× faster**):
 
 1. **Raw 64-bit Char compare** — `w_eq`/`w_lt`/… now short-circuit char-vs-char
    to a single tagged-WValue integer compare (the codepoint lives in the high
@@ -98,43 +99,40 @@ The engine started at ~5470 ns/match; a sequence of optimizations took it to ~93
    ~1 ns/position. The 15-char lead on the benchmark went ~194 → ~15 ns; headline
    ~1061 → ~930 ns, reaching POSIX parity. (Codepoint-int args, not Char
    WValues — those mangle across the ccall boundary.)
+11. **Untagged `i64[]` VM characters** — the VM used to retain full 64-bit Char
+    WValues. Once the decoded subject moved through an ivar, typed-array access
+    lost its static view; the high tag bits made each read promote to BigInt and
+    each flag mask allocate again. The VM now strips only tag/subtype bits once
+    when the subject cache changes, retaining the 46-bit codepoint/metadata
+    payload in an `i64[]`, and uses typed `@op`, `@b`, guard, capture, prefix,
+    and subject views in the matcher. On the current compiler this removed a
+    severe regression from 45,575 to 350 ns/match (**130×** on the raw median;
+    historical pre-regression builds were ~930 ns/match).
 
 ## Representation: the Char tag (codepoints + class flags)
 
-The engine matches on **Char WValues** (`String#codes`), not 1-char strings. The
-Char tag was redesigned to carry the **codepoint in the high bits** — so a raw `==`
-and `<` order by codepoint (`[a-z]`/`[5-z]`/`[α-ω]` sort correctly across Unicode
-categories) — and the **`\d`/`\w`/`\s` class flags at the LSB**, so `char & 1/2/4`
-is a single Unicode-correct branchless test (`中` is a `\w`). The VM compares Chars
-directly and masks the flags. This replaced an earlier 1-char-string
-representation (and a plain-int "lexint" stepping stone): it's correct on UTF-8 and
-uses one canonical char representation.
-
-Earlier a Char-WValue compare was measurably slower than a plain-int compare in
-the Tungsten VM because char `==`/`<` didn't lower to a raw 64-bit compare;
-optimization #1 above closed that gap, so char comparison is now as cheap as int
-comparison.
+`String#codes` provides canonical **Char WValues**, not 1-char strings. A Char
+carries the **codepoint in bits 25-45** — so raw `==` and `<` order by codepoint
+(`[a-z]`/`[5-z]`/`[α-ω]` sort correctly across Unicode categories) — and the
+**`\d`/`\w`/`\s` class flags at the LSB**, so `char & 1/2/4` is a Unicode-correct
+branchless test (`中` is a `\w`). Regex strips the outer WValue tag/subtype bits
+and stores the unchanged 46-bit payload privately. Span materialization still
+reads the codepoint from bits 25-45, so the internal form preserves the canonical
+Char semantics without exposing a second public character representation.
 
 ## Where the time goes (and what's left)
 
-The remaining overhead is Tungsten-level, not algorithmic or comparison-bound:
+The before/after profile confirms this was an allocation-path win rather than a
+smaller VM. `Regex#run` is 1,649 ARM64 instructions before and 1,645 after, but
+its dynamic `_bit_binop` call site is gone. A five-second sample of the regressed
+build found 454 of 471 samples in `bigint_arena_take`; a five-second sample of
+the unboxed build found zero BigInt frames in 4,049 main-thread samples.
 
-1. **Per-match decode** — `match()` calls `subject.codes()` (one O(n) allocation
-   of Char WValues per call). Unavoidable when the subject changes; for repeated
-   matches against the same subject it could be cached. Measured at ~3.6% — small.
-2. **Recursive backtracking** — `run()` recurses on every `OP_SPLIT` (each greedy
-   `+`/`*` step and each backtrack point is a Tungsten function call). De-recursing
-   into an explicit backtrack-stack loop is the **next big lever**: the benchmark's
-   two `\d+` groups alone spend ~8 recursive `run()` calls per match.
-3. **Pattern optimization** — onig (and to a lesser extent POSIX) do first-char/
-   prefix scanning and DFA caching. The first-char prefix scan (#4 above) is now
-   done; still missing are a multi-char literal-prefix `memmem` scan and a
-   Thompson-NFA (non-backtracking) mode for capture-light patterns, which would
-   bound pathological backtracking.
-
-The flat encoding, `OP_FLAG`, and the first-char prefix scan are done; de-recursing
-`run()` (#2) — replacing the per-`SPLIT` recursive call with an explicit
-backtrack-stack loop — is the next big perf lever.
+The remaining overhead is Tungsten-level: `run()` still recurses at each real
+backtrack point, each successful benchmark match materializes three result
+strings plus its capture array, and most opcode comparisons/counter updates are
+still boxed inline-i48 operations. De-recursing into an explicit backtrack stack
+and offering a capture-free `match?` execution path are the next likely levers.
 
 ## Correctness and limitations
 
@@ -164,4 +162,7 @@ zero-width/empty edge cases and nullable-loop termination).
 bash benchmarks/regex/run.sh
 ```
 
-Needs `ruby` (for the onig number) and `clang` (for the POSIX harness).
+The script explicitly uses a Tungsten `--release` build. It needs `ruby` (for
+the onig number) and `clang` (for the POSIX harness). Results above are medians
+of three runs on 2026-08-12: Apple M5 Max, macOS 26.6.1, Apple clang 21.0.0,
+Ruby 4.0.6.

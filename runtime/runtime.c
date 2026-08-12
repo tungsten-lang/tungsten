@@ -40245,12 +40245,10 @@ WValue w_string_from_codepoint(WValue cp_v) {
     return w_string_n(buf, (size_t)len);
 }
 
-/* Materialize a UTF-8 string from a window [start, start+len) of a Char-WValue
- * array (as produced by String#codes — a 64-bit typed array whose slots hold
- * Char WValues, codepoint in bits 25..45). One allocation, O(len) encode — the
- * fast replacement for building a substring with per-codepoint concatenation
- * (which is O(len^2) and allocates a string per char). Used by the regex
- * engine to build match/capture spans from the decoded codepoint window. */
+/* Materialize a UTF-8 string from a window [start, start+len) of 64-bit Char
+ * words. The tag may be present (String#codes) or stripped (Regex's private
+ * i64[] payload); both retain the codepoint in bits 25..45. One allocation,
+ * O(len) encode — the fast replacement for O(len^2) concatenation. */
 WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
     int64_t start = w_to_i64(start_v);
     int64_t len = w_to_i64(len_v);
@@ -40285,9 +40283,9 @@ WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
     return w_string_take(buf, pos);
 }
 
-/* Regex prefilter scans over the decoded Char array (String#codes — a 64-bit
- * typed array of Char WValues). Find the first index in [start, n) whose Char
- * equals `ch` (scan_char) or has any of the `flag` class bits set (scan_flag);
+/* Regex prefilter scans over its decoded i64[] Char payloads (tag/subtype bits
+ * stripped, codepoint and class flags retained). Find the first index in
+ * [start, n) whose Char equals `ch` (scan_char) or has any `flag` bits set;
  * return n if none. Raw int64 array access in C replaces the hot per-position
  * Tungsten loop, whose boxed @subj[i] access dominated (~13 ns/position). */
 WValue w_regex_scan_char(WValue subj, WValue start_v, WValue n_v, WValue cp_v) {

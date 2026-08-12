@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 echo "== regex match throughput: (\\d+)-(\\d+) on a 31-char string =="
-bin/tungsten -o /tmp/bench_mine benchmarks/regex/bench_mine.w >/dev/null 2>&1
+bin/tungsten compile --release --out /tmp/bench_mine benchmarks/regex/bench_mine.w >/dev/null 2>&1
 /tmp/bench_mine
 clang -O2 benchmarks/regex/bench_posix.c -o /tmp/bench_posix && /tmp/bench_posix
 ruby -e 's="the order id is 4521-9837 today"; r=/(\d+)-(\d+)/; n=5_000_000; r.match(s)

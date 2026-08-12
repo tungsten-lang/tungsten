@@ -6,12 +6,12 @@
 # Matching: the Virtual Machine Approach"). SPLIT gives backtracking; SAVE
 # records capture-group boundaries.
 #
-# UTF-8 / codepoints: the subject and pattern are decoded to Char WValues
-# (String#codes). A Char carries the codepoint in its HIGH bits — so a raw `==`
-# and `<` order by codepoint, and `[a-z]`/`[5-z]`/`[α-ω]` ranges sort correctly
-# across Unicode categories — and the \d (bit0), \w (bit1), \s (bit2) class flags
-# at the LSB, so `char & 1/2/4` is a single, Unicode-correct, branchless test.
-# The VM compares Chars directly and masks the flags; the codepoint is `>> 25`.
+# UTF-8 / codepoints: String#codes decodes each character to a tagged Char word.
+# The regex VM strips only the tag/subtype bits and keeps its 46-bit payload in
+# an i64[]: the codepoint remains in bits 25-45, so raw `==` and `<` order by
+# codepoint, while the \d (bit0), \w (bit1), and \s (bit2) class flags remain a
+# single Unicode-correct mask test. Keeping the payload below 2^46 also prevents
+# typed-array reads from promoting tagged Char words to BigInt in the hot loop.
 #
 #   r = Regex.new("(\\d+)-(\\d+)")
 #   r.match("call 12-34 now")   => ["12-34", "12", "34"]   (group 0 + captures)
@@ -44,17 +44,18 @@
   FLAG_D = 1     # \d
   FLAG_W = 2     # \w
   FLAG_S = 4     # \s
+  CHAR_PAYLOAD_MASK = 70368744177663 # (1 << 46) - 1; strip WValue tag/subtype
 
   # Special characters that .escape backslash-protects.
   SPECIALS = "\\.^$|?*+()\[]{}"
 
   -> new(@source, @opts = nil, @lang = nil)
     # Flat parallel program arrays (faster than an array of [op,a,b] tuples):
-    # @op[pc] opcode, @a[pc] first operand (literal Char / class / target / slot),
+    # @op[pc] opcode, @a[pc] first operand (Char payload / class / target / slot),
     # @b[pc] second operand (the SPLIT alternate target).
-    @op = []
+    @op = i64[0]
     @a = []
-    @b = []
+    @b = i64[0]
     @ngroup = 1                 # group 0 is the whole match
     @nguard = 0                 # progress-guard slots for nullable-body loops
     @nl = clex("\n")            # the newline Char, for . ^ $
@@ -70,10 +71,11 @@
   -> source
     @source
 
-  # The Char WValue of a single-character string. Char has the codepoint in the
-  # high bits (so == and < order by codepoint) and \d\w\s at the LSB.
+  # The untagged payload of a single Char: codepoint in bits 25-45 and \d\w\s
+  # flags at the LSB. It fits in an inline i64 rather than promoting to BigInt.
   -> clex(ch)
-    ch.codes()[0]
+    codes = ch.codes() ## i64[]
+    codes[0] & CHAR_PAYLOAD_MASK
 
   # ── escaping (used by String#to_regex) ──
   -> .escape(str)
@@ -488,17 +490,18 @@
   # (consecutive OP_CHARs, following through the zero-width SAVE/MARK/GUARD that
   # group boundaries emit). [] if the pattern doesn't start with a literal.
   -> literal_prefix
-    lit = []
-    pc = 0
-    while pc < @op.size()
-      op = @op[pc]
+    lit = i64[0]
+    ops = @op ## i64[]
+    pc = 0 ## i64
+    while pc < ops.size()
+      op = ops[pc]
       if op == OP_CHAR
         lit.push(@a[pc])
         pc = pc + 1
       elsif op == OP_SAVE || op == OP_MARK || op == OP_GUARD
         pc = pc + 1
       else
-        pc = @op.size()
+        pc = ops.size()
     lit
 
   # Sunday quick-search bad-character skip table: for the char that sits one
@@ -517,8 +520,8 @@
     @pf_kind = 0
     @pf_char = 0
     @pf_flag = 0
-    @pf_set = []
-    @pf_lit = []
+    @pf_set = i64[0]
+    @pf_lit = i64[0]
     @pf_skip = nil
     # A literal prefix of 4+ chars is the strongest prefilter (Boyer-Moore /
     # Sunday skip): big jumps amortize the per-candidate compare + skip-table
@@ -559,25 +562,28 @@
   # can't enumerate — and flags @cf_empty if a MATCH is reachable with no
   # consuming op (the pattern can match empty, so every position is a candidate).
   -> collect_first(pc, seen)
+    ops = @op ## i64[]
+    branches = @b ## i64[]
+    pc = pc ## i64
     if seen[pc]
       return
     seen[pc] = true
-    op = @op[pc]
+    op = ops[pc]
     if op == OP_SAVE || op == OP_MARK || op == OP_GUARD || op == OP_BOL || op == OP_WORDB
       collect_first(pc + 1, seen)
     elsif op == OP_JMP
       collect_first(@a[pc], seen)
     elsif op == OP_SPLIT
       collect_first(@a[pc], seen)
-      collect_first(@b[pc], seen)
+      collect_first(branches[pc], seen)
     elsif op == OP_REP_G || op == OP_REP_L
       collect_first(@a[pc], seen)    # the loop body (a start char)
-      collect_first(@b[pc], seen)    # the continuation (zero-iteration case)
+      collect_first(branches[pc], seen)    # the continuation (zero-iteration case)
     elsif op == OP_CHAR
       @pf_set.push(@a[pc])
     elsif op == OP_FLAG
-      if @b[pc] == 0
-        @pf_flag = @pf_flag | @a[pc]
+      if branches[pc] == 0
+        @pf_flag = @pf_flag | (@a[pc] ## i64)
       else
         @cf_ok = false               # negated \D\W\S — enumerating is infeasible
     elsif op == OP_MATCH
@@ -587,24 +593,29 @@
 
   # Does this Char satisfy the prefilter set (membership or a flag bit)?
   -> pf_set_match(ch)
+    pf_set = @pf_set ## i64[]
+    ch = ch ## i64
     if @pf_flag != 0 && (ch & @pf_flag) != 0
       return true
-    i = 0
-    while i < @pf_set.size()
-      if @pf_set[i] == ch
+    i = 0 ## i64
+    while i < pf_set.size()
+      if pf_set[i] == ch
         return true
       i = i + 1
     false
 
   # Advance `start` to the next subject position that could begin a match.
   -> pf_advance(start, n)
-    k = @pf_kind
+    subj = @subj ## i64[]
+    start = start ## i64
+    n = n ## i64
+    k = @pf_kind ## i64
     if k == 1
-      return ccall("w_regex_scan_char", @subj, start, n, (@pf_char >> 25) & 2097151)
+      return ccall("w_regex_scan_char", subj, start, n, (@pf_char >> 25) & 2097151)
     elsif k == 2
-      return ccall("w_regex_scan_flag", @subj, start, n, @pf_char)
+      return ccall("w_regex_scan_flag", subj, start, n, @pf_char)
     elsif k == 3
-      while start < n && !pf_set_match(@subj[start])
+      while start < n && !pf_set_match(subj[start])
         start = start + 1
     elsif k == 4
       return pf_bm_search(start, n)
@@ -614,40 +625,52 @@
   # jump by skip[char one past the window] (len+1 when that char isn't in the
   # prefix). Returns the next candidate position, or n if none remain.
   -> pf_bm_search(start, n)
-    lit = @pf_lit
-    llen = lit.size()
-    i = start
+    subj = @subj ## i64[]
+    lit = @pf_lit ## i64[]
+    llen = lit.size() ## i64
+    i = start ## i64
+    n = n ## i64
     while i + llen <= n
       j = 0
-      while j < llen && @subj[i + j] == lit[j]
+      while j < llen && subj[i + j] == lit[j]
         j = j + 1
       if j == llen
         return i
       nxt = i + llen
       if nxt >= n
         return n
-      sk = @pf_skip[(@subj[nxt] >> 25) & 2097151]
+      sk = @pf_skip[(subj[nxt] >> 25) & 2097151]
       if sk == nil
         sk = llen + 1
       i = i + sk
     n
 
   # Returns [whole, cap1, cap2, …] for the leftmost match, or nil.
+  -> decode_subject(subject)
+    chars = subject.codes() ## i64[]
+    decoded = i64[chars.size()]
+    i = 0 ## i64
+    while i < chars.size()
+      decoded[i] = chars[i] & CHAR_PAYLOAD_MASK
+      i = i + 1
+    decoded
+
   -> match(subject)
     # Decode cache: codepoint-decode the subject only when it changed. Repeated
     # matches against the same string (scan, multi-pattern, re-match) reuse the
     # array. The key compare is an O(1) bit-equality for the same object
     # (w_eq short-circuits a==b), so the common case pays nothing.
     if subject != @subj_key
-      @subj = subject.codes()
+      @subj = decode_subject(subject)
       @subj_key = subject
-    n = @subj.size()
-    @guard = []                 # entry sp per nullable-loop guard slot
-    i = 0
+    subj = @subj ## i64[]
+    n = subj.size() ## i64
+    @guard = i64[0]             # entry sp per nullable-loop guard slot
+    i = 0 ## i64
     while i < @nguard
       @guard.push(-1)
       i = i + 1
-    start = 0
+    start = 0 ## i64
     while start <= n
       start = pf_advance(start, n)
       if @pf_kind != 0 && start >= n
@@ -663,18 +686,19 @@
     match(subject) != nil
 
   -> make_saved
-    s = []
-    i = 0
+    s = i64[0]
+    i = 0 ## i64
     while i < @ncap * 2
       s.push(-1)
       i = i + 1
     s
 
-  # Build each group's text from the matched lexint span (codepoint = lx >> 8),
+  # Build each group's text from the matched payload span (codepoint = lx >> 25),
   # so we never re-decode the whole subject.
   -> build_result(saved)
+    saved = saved ## i64[]
     out = []
-    g = 0
+    g = 0 ## i64
     while g < @ncap
       a = saved[g * 2]
       b = saved[g * 2 + 1]
@@ -687,25 +711,35 @@
 
   # Materialize the match span [a, b) — a window into the decoded codepoint
   # array — as a UTF-8 string in one allocation. The runtime walks the Char
-  # WValues directly (codepoint in bits 25-45), so this is O(b-a) with a single
+  # payloads directly (codepoint in bits 25-45), so this is O(b-a) with a single
   # buffer instead of the old O(n^2) per-codepoint concatenation.
   -> span_str(a, b)
-    ccall("w_string_from_codes", @subj, a, b - a)
+    subj = @subj ## i64[]
+    ccall("w_string_from_codes", subj, a, b - a)
 
   # Backtracking VM: returns the end position on success, or -1.
   -> run(pc, sp, saved)
-    n = @subj.size()
+    subj = @subj ## i64[]
+    ops = @op ## i64[]
+    branches = @b ## i64[]
+    guard = @guard ## i64[]
+    saved = saved ## i64[]
+    pc = pc ## i64
+    sp = sp ## i64
+    n = subj.size() ## i64
     while true
-      op = @op[pc]
+      op = ops[pc]
       if op == OP_CHAR
-        if sp < n && @subj[sp] == @a[pc]
+        want = @a[pc] ## i64
+        if sp < n && subj[sp] == want
           pc = pc + 1
           sp = sp + 1
         else
           return -1
       elsif op == OP_FLAG
-        hit = sp < n && (@subj[sp] & @a[pc]) != 0
-        if @b[pc] == 1
+        mask = @a[pc] ## i64
+        hit = sp < n && (subj[sp] & mask) != 0
+        if branches[pc] == 1
           hit = sp < n && !hit
         if hit
           pc = pc + 1
@@ -713,13 +747,13 @@
         else
           return -1
       elsif op == OP_ANY
-        if sp < n && @subj[sp] != @nl
+        if sp < n && subj[sp] != (@nl ## i64)
           pc = pc + 1
           sp = sp + 1
         else
           return -1
       elsif op == OP_CLASS
-        if sp < n && class_match?(@a[pc], @subj[sp])
+        if sp < n && class_match?(@a[pc], subj[sp])
           pc = pc + 1
           sp = sp + 1
         else
@@ -728,11 +762,11 @@
         # Greedy X*: consume every match in a tight loop, then try the
         # continuation from the longest match down — depth-1, not one recursive
         # frame per repetition. @a = body template pc, @b = continuation pc.
-        tpc = @a[pc]
+        tpc = @a[pc] ## i64
         e = sp
-        while e < n && consume_at?(tpc, @subj[e])
+        while e < n && consume_at?(tpc, subj[e])
           e = e + 1
-        cont = @b[pc]
+        cont = branches[pc]
         pos = e
         while pos >= sp
           r = run(cont, pos, saved)
@@ -742,11 +776,11 @@
         return -1
       elsif op == OP_REP_L
         # Lazy X*: shortest match first.
-        tpc = @a[pc]
+        tpc = @a[pc] ## i64
         e = sp
-        while e < n && consume_at?(tpc, @subj[e])
+        while e < n && consume_at?(tpc, subj[e])
           e = e + 1
-        cont = @b[pc]
+        cont = branches[pc]
         pos = sp
         while pos <= e
           r = run(cont, pos, saved)
@@ -757,14 +791,14 @@
       elsif op == OP_MATCH
         return sp
       elsif op == OP_JMP
-        pc = @a[pc]
+        pc = @a[pc] ## i64
       elsif op == OP_SPLIT
-        r = run(@a[pc], sp, saved)
+        r = run(@a[pc] ## i64, sp, saved)
         if r >= 0
           return r
-        pc = @b[pc]
+        pc = branches[pc]
       elsif op == OP_SAVE
-        slot = @a[pc]
+        slot = @a[pc] ## i64
         old = saved[slot]
         saved[slot] = sp
         r = run(pc + 1, sp, saved)
@@ -773,64 +807,75 @@
         saved[slot] = old
         return -1
       elsif op == OP_MARK
-        g = @a[pc]
-        old = @guard[g]
-        @guard[g] = sp
+        g = @a[pc] ## i64
+        old = guard[g]
+        guard[g] = sp
         r = run(pc + 1, sp, saved)
         if r >= 0
           return r
-        @guard[g] = old
+        guard[g] = old
         return -1
       elsif op == OP_GUARD
-        if sp == @guard[@a[pc]]
+        g = @a[pc] ## i64
+        if sp == guard[g]
           return -1
         pc = pc + 1
       elsif op == OP_BOL
-        if sp == 0 || @subj[sp - 1] == @nl
+        if sp == 0 || subj[sp - 1] == (@nl ## i64)
           pc = pc + 1
         else
           return -1
       elsif op == OP_EOL
-        if sp == n || @subj[sp] == @nl
+        if sp == n || subj[sp] == (@nl ## i64)
           pc = pc + 1
         else
           return -1
       elsif op == OP_WORDB
-        b = at_word_boundary?(sp)
-        want = @a[pc] == 1
-        if b == want
-          pc = pc + 1
-        else
+        # Spell this without a Bool local: the current local type pass can
+        # otherwise merge that Bool with the raw-i64 VM temporaries.
+        if at_word_boundary?(sp)
+          if @a[pc] != 1
+            return -1
+        elsif @a[pc] == 1
           return -1
+        pc = pc + 1
       else
         return -1
 
   -> at_word_boundary?(sp)
-    before = sp > 0 && word_lex?(@subj[sp - 1])
-    after = sp < @subj.size() && word_lex?(@subj[sp])
+    subj = @subj ## i64[]
+    sp = sp ## i64
+    before = sp > 0 && word_lex?(subj[sp - 1])
+    after = sp < subj.size() && word_lex?(subj[sp])
     before != after
 
   -> word_lex?(lx)
+    lx = lx ## i64
     (lx & FLAG_W) != 0
 
   # Apply a single consuming opcode (the body of a fused OP_REP) as a match
   # test against one Char, without advancing — mirrors run()'s consuming cases.
   -> consume_at?(pc, ch)
-    op = @op[pc]
+    ops = @op ## i64[]
+    branches = @b ## i64[]
+    pc = pc ## i64
+    ch = ch ## i64
+    op = ops[pc]
     if op == OP_CHAR
-      return ch == @a[pc]
+      return ch == (@a[pc] ## i64)
     if op == OP_FLAG
-      hit = (ch & @a[pc]) != 0
-      if @b[pc] == 1
+      hit = (ch & (@a[pc] ## i64)) != 0
+      if branches[pc] == 1
         return !hit
       return hit
     if op == OP_ANY
-      return ch != @nl
+      return ch != (@nl ## i64)
     if op == OP_CLASS
       return class_match?(@a[pc], ch)
     false
 
   -> class_match?(cls, lx)
+    lx = lx ## i64
     # Membership is a disjunction over ranges and shorthand sets, so the answer
     # is known on the FIRST hit — return immediately instead of scanning the
     # rest. `neg` flips the verdict once: a member of [^…] is a non-match.
@@ -851,6 +896,7 @@
 
   # \d \w \s and their negations — a single flag-bit test on the lexint.
   -> set_match?(s, lx)
+    lx = lx ## i64
     if s == "d"
       return (lx & FLAG_D) != 0
     if s == "D"

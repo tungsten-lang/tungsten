@@ -495,8 +495,12 @@ projects stay unchecked until their stated acceptance criteria are met.
   these sites), preserve per-node narrowing, and match unfused output across
   arithmetic/bitwise/shift/division cases. The release i64 benchmark improved
   from a 0.40 ms median to 0.11 ms at 200k elements (3.6x, hand-loop parity).
-- [ ] Apply the proven `## i64`/unboxed discipline to the regex VM and measure
-  instruction/boxing counts before and after.
+- [x] Apply the proven `## i64`/unboxed discipline to the regex VM. Its private
+  Char payload, opcode, branch, guard, capture, and prefix arrays now retain
+  typed i64 views. The release benchmark improved from 45,575 to 350 ns/match;
+  `Regex#run` changed from 1,649 to 1,645 ARM64 instructions while the dynamic
+  bitwise call site disappeared and sampled BigInt-allocation frames fell from
+  454/471 to 0/4,049.
 - [x] Finish BigInt mutate-if-unique arithmetic. The fail-closed ownership
   proof covers add/sub, negate and container aliases are marked, and the
   destination-reuse family has expanded through wide mul/div/mod and rotation

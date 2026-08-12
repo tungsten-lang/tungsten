@@ -1,9 +1,9 @@
 # Regression coverage for the pure-Tungsten regex engine (core/regex.w).
 #
-# COMPILED-ONLY + SELF-CONTAINED. The engine matches on String#codes (Char
-# WValues + raw bit ops), a runtime primitive that does not run under the
-# tree-walk interpreter — so this is neither a parity fixture nor a `use
-# assert` test (assert.w is interpreter-only). Run it compiled:
+# COMPILED-ONLY + SELF-CONTAINED. The engine derives its private untagged i64[]
+# character payloads from String#codes, a runtime primitive that does not run
+# under the tree-walk interpreter — so this is neither a parity fixture nor a
+# `use assert` test (assert.w is interpreter-only). Run it compiled:
 #
 #   bin/tungsten -o /tmp/rxf compiler/test/regex_features.w && /tmp/rxf
 #

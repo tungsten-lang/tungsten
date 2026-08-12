@@ -51731,16 +51731,52 @@ static WValue w_ic_strbuf_to_s(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_strbuf_to_s(r);
 }
-static WValue w_ic_strbuf_include(WValue r, WValue *a, int c) {
-    if (c < 1) die("include? requires 1 argument");
+static WValue w_ic_strbuf_append(WValue r, WValue *a, int c) {
+    if (c != 1) die("StringBuffer#append expects 1 argument");
+    return w_strbuf_append(r, w_to_s(a[0]));
+}
+static WValue w_ic_strbuf_size(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0) die("StringBuffer#size expects no arguments");
+    return w_int(((WStrBuf *)w_as_ptr(r))->size);
+}
+static WValue w_ic_strbuf_idx(WValue r, WValue *a, int c) {
+    if (c != 1) die("StringBuffer#[] expects 1 argument");
     WStrBuf *sb = (WStrBuf *)w_as_ptr(r);
-    return strstr(sb->data, as_str(a[0])) != NULL ? W_TRUE : W_FALSE;
+    int64_t idx = w_as_int(a[0]);
+    if (idx < 0) idx += sb->size;
+    if (idx < 0 || idx >= sb->size) return W_NIL;
+    return w_string_n(sb->data + idx, 1);
+}
+static WValue w_ic_strbuf_clear(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0) die("StringBuffer#clear expects no arguments");
+    WStrBuf *sb = (WStrBuf *)w_as_ptr(r);
+    sb->size = 0;
+    sb->data[0] = '\0';
+    return r;
+}
+static WValue w_ic_strbuf_empty_q(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0) die("StringBuffer#empty? expects no arguments");
+    return ((WStrBuf *)w_as_ptr(r))->size == 0 ? W_TRUE : W_FALSE;
+}
+static WValue w_ic_strbuf_include(WValue r, WValue *a, int c) {
+    if (c != 1) die("StringBuffer#include? expects 1 argument");
+    WStrBuf *sb = (WStrBuf *)w_as_ptr(r);
+    char inline_buf[6]; const char *needle; size_t needle_size;
+    w_str_data(a[0], inline_buf, &needle, &needle_size);
+    if (needle_size == 0) return W_TRUE;
+    if ((int64_t)needle_size > sb->size) return W_FALSE;
+    for (int64_t i = 0; i <= sb->size - (int64_t)needle_size; i++)
+        if (memcmp(sb->data + i, needle, needle_size) == 0) return W_TRUE;
+    return W_FALSE;
 }
 static WValue w_ic_strbuf_starts_with(WValue r, WValue *a, int c) {
-    if (c < 1) die("starts_with? requires 1 argument");
+    if (c != 1) die("StringBuffer#starts_with? expects 1 argument");
     WStrBuf *sb = (WStrBuf *)w_as_ptr(r);
-    const char *prefix = as_str(a[0]);
-    size_t plen = strlen(prefix);
+    char inline_buf[6]; const char *prefix; size_t plen;
+    w_str_data(a[0], inline_buf, &prefix, &plen);
     return (sb->size >= (int64_t)plen && memcmp(sb->data, prefix, plen) == 0) ? W_TRUE : W_FALSE;
 }
 
@@ -52072,6 +52108,14 @@ static WICEntry w_ic_strbuf_table[] = {
     {0, w_ic_strbuf_to_s},
     {0, w_ic_strbuf_include},
     {0, w_ic_strbuf_starts_with},
+    {0, w_ic_strbuf_append},
+    {0, w_ic_strbuf_append},
+    {0, w_ic_strbuf_size},
+    {0, w_ic_strbuf_size},
+    {0, w_ic_strbuf_size},
+    {0, w_ic_strbuf_idx},
+    {0, w_ic_strbuf_clear},
+    {0, w_ic_strbuf_empty_q},
     {0, NULL}
 };
 
@@ -52674,6 +52718,14 @@ static void w_init_ic_tables(void) {
     w_ic_strbuf_table[0].name  = WN_to_s;
     w_ic_strbuf_table[1].name  = WN_include_q;
     w_ic_strbuf_table[2].name  = WN_starts_with_q;
+    w_ic_strbuf_table[3].name  = WN_append;
+    w_ic_strbuf_table[4].name  = WN_lshift;
+    w_ic_strbuf_table[5].name  = WN_length;
+    w_ic_strbuf_table[6].name  = WN_size;
+    w_ic_strbuf_table[7].name  = w_string("byte_size");
+    w_ic_strbuf_table[8].name  = WN_idx;
+    w_ic_strbuf_table[9].name  = WN_clear;
+    w_ic_strbuf_table[10].name = WN_empty_q;
     /* Bigint */
     /* Slot 0 (to_s) is retired: BigInt#to_s in core/numeric/big_int.w is
      * a source shim over the exported w_bigint_to_s boundary. The static
@@ -53560,9 +53612,9 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
         }
     }
 
-    /* ---- StringBuffer methods ---- */
-    /* Retained StringBuffer primitives (to_s, include?,
-     * starts_with?) live in w_ic_strbuf_table; size is source-defined. */
+    /* StringBuffer primitives live in w_ic_strbuf_table. Source lowering can
+     * still specialize known receivers, while erased receivers use the same
+     * byte-exact operations through the inline cache. */
 
     /* Universal to_s fallback for any type */
     if (name == WN_to_s) return w_to_s(recv);

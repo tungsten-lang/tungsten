@@ -3417,6 +3417,9 @@ use target
             return recv
           if name == "to_s" && args.size() == 0
             return ccall("w_strbuf_to_s", recv)
+          if name in ("length" "byte_size" "\[]" "[]" "clear" "empty?" "include?" "starts_with?")
+            native_name = name == "\[]" ? "[]" : "" + name
+            return ccall("w_method_call", recv, native_name, args)
           m = nil
       # A bodyless `-> name` on a runtime-backed receiver is a native/
       # abstract DECLARATION, never a nil-returning empty body — the

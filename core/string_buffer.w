@@ -42,3 +42,5 @@
   -> [](index)
   -> clear
   -> empty?
+  -> include?(value)
+  -> starts_with?(prefix)

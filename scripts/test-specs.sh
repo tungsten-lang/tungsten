@@ -579,6 +579,7 @@ compiled_specs=(
   spec/compiler/global_demotion_scopes_spec.w
   spec/compiler/strbuf_bytes_spec.w
   spec/compiler/string_buffer_dynamic_append_spec.w
+  spec/compiler/string_buffer_dynamic_receiver_spec.w
   spec/compiler/quantity_control_flow_parity_spec.w
   spec/core/quantity_dispatch_spec.w
   spec/compiler/static_method_block_dispatch_spec.w
@@ -718,6 +719,7 @@ interpreter_specs=(
   spec/compiler/llvm_name_mangling_injective_spec.w
   spec/compiler/top_level_method_name_hygiene_spec.w
   spec/compiler/string_buffer_dynamic_append_spec.w
+  spec/compiler/string_buffer_dynamic_receiver_spec.w
   spec/compiler/quantity_control_flow_parity_spec.w
   spec/core/quantity_dispatch_spec.w
   spec/compiler/static_method_block_dispatch_spec.w

@@ -86,6 +86,12 @@ RUNTIME_CLASS_CONTRACTS = {
     native_ic: %w[[] []= delete each get has_key? keys merge! set values],
     native_only: %w[[] []= delete each get has_key? keys set values],
     source_fallback: %w[__enumerable_each __enumerable_iteration_mode __enumerable_yields_pair? each_pair fetch include? invert key? merge size transform_keys transform_values update]
+  },
+  "StringBuffer" => {
+    path: "core/string_buffer.w",
+    table: "w_ic_strbuf_table",
+    native_ic: %w[<< [] append byte_size clear empty? include? length size starts_with? to_s],
+    source_fallback: %w[new]
   }
 }.freeze
 

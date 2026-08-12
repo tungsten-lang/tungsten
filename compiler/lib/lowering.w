@@ -698,7 +698,14 @@ use lowering/definitions
                 vdf = 0
                 while vdf < vd_layout[:fields].size()
                   vfname = vd_layout[:fields][vdf][:name]
+                  # Data getters are synthesized later by lower_class_def.
+                  # Keep their ASTs out of class_method_asts (that registry
+                  # feeds exact-ivar write analysis), but record the same
+                  # plain ABI symbol in the independent devirtualization
+                  # index so exact-class call sites can guard and call it.
                   register_class_method(main_fn, mod, cname, vfname, 1)
+                  vgetter = Tungsten:AST:MethodDef.new(vfname, [], [])
+                  mod[:class_method_fn_names][cname + "." + vfname + "/0"] = class_method_function_name(cname, vgetter)
                   vdf += 1
           mi2 += 1
     ci += 1
@@ -894,6 +901,9 @@ use lowering/definitions
           out = out + " " + inst[:temp]
         if inst[:name] != nil
           out = out + " @" + inst[:name]
+        if inst[:devirt_fn] != nil
+          out = out + " devirt=@" + inst[:devirt_fn]
+          out = out + " class=" + inst[:devirt_class]
         if inst[:value] != nil
           out = out + " " + inst[:value].to_s()
         if inst[:label] != nil

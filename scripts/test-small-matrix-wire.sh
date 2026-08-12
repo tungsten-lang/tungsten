@@ -46,12 +46,14 @@ require_absent() {
 require_count Mat3 'typed_array_get_inline' 54
 require_count Mat3 'typed_array_set_inline' 9
 require_count Mat3 '@w_array_new_inline_uninit_sized' 1
+require_count Mat3 'call_method_i64.*devirt=@__w_Mat3\$f64_elements__a1 class=Mat3\$f64' 1
 require_absent Mat3 '@__w_mul_fast|@__w_add_fast'
 require_absent Mat3 '@__w_array_lit_store|@w_array_to_f64'
 
 require_count Mat4 'typed_array_get_inline' 128
 require_count Mat4 'typed_array_set_inline' 16
 require_count Mat4 '@w_array_new_inline_uninit_sized' 1
+require_count Mat4 'call_method_i64.*devirt=@__w_Mat4\$f64_elements__a1 class=Mat4\$f64' 1
 require_absent Mat4 '@__w_mul_fast|@__w_add_fast'
 require_absent Mat4 '@__w_array_lit_store|@w_array_to_f64'
 

@@ -23,13 +23,13 @@ codegen for a general matmul (minus the array-access tax measured separately).
 
 ### Fixed small — current `Mat3`/`Mat4` vs ideal
 
-Apple M5 Max, Homebrew clang 22.1.8, 2026-08-12; median of three warmed
+Apple M5 Max, Homebrew clang 22.1.8, 2026-08-12; median of five warmed
 Tungsten runs.
 
 | kernel | Tungsten `*` | Tungsten `mul_into` | raw Tungsten kernel | C schoolbook | `*` gap |
 |---|---:|---:|---:|---:|---:|
-| Mat3 (27 mul) | 71.9 ns/op | 23.7 ns/op | 17.4 ns/op | 2.10 ns/op | **34.3×** |
-| Mat4 (64 mul) | 75.7 ns/op | 26.6 ns/op | 20.5 ns/op | 2.62 ns/op | **28.9×** |
+| Mat3 (27 mul) | 72.0 ns/op | 21.8 ns/op | 17.6 ns/op | 2.10 ns/op | **34.3×** |
+| Mat4 (64 mul) | 79.7 ns/op | 25.3 ns/op | 21.0 ns/op | 2.62 ns/op | **30.4×** |
 
 The compiler now preserves both matrix operands as typed float storage, lowers
 the arithmetic to native fmul/fadd/FMA, and constructs `[...] ## f64[N]`
@@ -38,13 +38,18 @@ copy-converting it. That cuts the value-semantic operators from the old
 2837/3267 ns baseline to 72/76 ns (**39×/43× faster**). Tiny typed
 literals also keep their WArray header and element payload in one allocation,
 removing the second malloc while retaining normal grow/free behavior.
+Typed matrix parameters now devirtualize generated `- data` accessors through
+the existing class-id guard. Against the fresh same-session baseline, the
+observed `mul_into` medians moved from 25.1 to 21.8 ns for Mat3 and 27.7 to
+25.3 ns for Mat4; the raw-kernel control moved by about 3%, and the allocating
+`*` path showed no clear additional win.
 
 `mul_into(other, out)` separates allocation from arithmetic for hot loops.
 The raw-kernel row additionally removes the three matrix method sends and is
 the compiler/codegen floor. C still has stack-resident fixed arrays and no
 WArray header loads, so 2–3 ns is not yet a like-for-like API target. The
 remaining Tungsten gap is fixed-storage escape/stack promotion, object
-dispatch/allocation, and WArray access—not the schoolbook arithmetic.
+construction/allocation, and WArray access—not the schoolbook arithmetic.
 
 ### NxN sweep — GFLOP/s
 

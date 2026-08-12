@@ -1927,8 +1927,37 @@
   if node.block == nil && recv_node != nil && is_ast_node?(recv_node)
     exact_cls = nil
     rk2 = ast_kind(recv_node)
-    if rk2 == :var && ctx[:exact_local_classes] != nil
-      exact_cls = ctx[:exact_local_classes][recv_node.name]
+    if rk2 == :var
+      if ctx[:exact_local_classes] != nil
+        exact_cls = ctx[:exact_local_classes][recv_node.name]
+    if rk2 in (:var :parg)
+      # A declared source-class parameter is also a useful speculative exact
+      # class.  The direct arm below remains guarded by the receiver's runtime
+      # class id, so an untyped caller, a subclass, or a deliberately widened
+      # value simply takes the ordinary IC fallback.  This matters for small
+      # fixed numeric types: inside `*/1(Mat3)`, `@1.elements` used to pay a
+      # cached method send even though the overload signature already named
+      # Mat3.  The guarded accessor can inline to one indexed ivar load.
+      if exact_cls == nil && ctx[:var_types] != nil
+        declared_key = recv_node.name
+        if rk2 == :parg
+          declared_key = "__arg" + recv_node.index.to_s()
+        declared_cls = ctx[:var_types][declared_key]
+        if declared_cls != nil
+          # Force a plain String: Symbol#to_s values do not compare/hash like
+          # literal strings in the self-hosted runtime (the same boundary
+          # normalize_type_symbol documents), while known_classes is keyed by
+          # ordinary source-name strings.
+          declared_name = "" + declared_cls.to_s()
+          # Generic method signatures retain their source spelling (`Mat3`)
+          # after the owning class is specialized (`Mat3$f64`).  Use the
+          # current specialization as the guarded candidate; a differently
+          # specialized argument fails the class-id test and dispatches
+          # normally.
+          if ctx[:class_name] != nil && ctx[:class_name].starts_with?(declared_name + "$")
+            declared_name = ctx[:class_name]
+          if normal_source_instance_class?(ctx[:mod], declared_name)
+            exact_cls = declared_name
     elsif rk2 == :ivar && ctx[:class_name] != nil
       exact_ivars2 = ctx[:mod][:exact_source_ivar_types][ctx[:class_name]]
       if exact_ivars2 != nil

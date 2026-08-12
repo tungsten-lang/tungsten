@@ -585,10 +585,13 @@ projects stay unchecked until their stated acceptance criteria are met.
   arithmetic, construct typed result literals directly with one allocation,
   and expose allocation-free `mul_into`; the benchmark separates value
   semantics, caller-owned output, and raw-kernel floors. On M5 Max this moved
-  Mat3/Mat4 `*` from 2837/3267 ns to 72/76 ns (39x/43x), with `mul_into` at
-  24/27 ns and raw kernels at 17/21 ns versus same-flags C at 2.1/2.6 ns.
-  Finish with fixed-storage escape/stack promotion and eliminate remaining
-  object/accessor dispatch so the common API closes the final 29-34x gap.
+  Mat3/Mat4 `*` from 2837/3267 ns to roughly 72/80 ns, with `mul_into` at
+  22/25 ns and raw kernels at 18/21 ns versus same-flags C at 2.1/2.6 ns.
+  A second tranche teaches typed parameters to devirtualize generated data
+  accessors through a class-id guard; the observed `mul_into` medians improved
+  from 25.1/27.7 ns to 21.8/25.3 ns. Finish with fixed-storage escape/stack
+  promotion and eliminate remaining object construction/allocation so the
+  value-semantic API closes the final 30-34x gap.
 - [x] Restore general `f64[]` schoolbook matmul throughput. Profiling traced
   the ~0.99 GFLOP/s regression to an untyped matrix-dimension parameter, which
   boxed every loop comparison and index expression. Declaring `n` as `i64`

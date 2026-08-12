@@ -1,8 +1,9 @@
-# Channel — a bounded, thread-safe FIFO for goroutine communication.
+# Channel — a thread-safe FIFO for goroutine communication.
 #
-# Capacity must be positive. Closing is idempotent; buffered values remain
+# Channel.new creates a bounded queue with a positive capacity;
+# Channel.unbounded grows as needed. Closing is idempotent; queued values remain
 # receivable after close, then receive/recv returns nil. Use receive_result when
-# nil is a valid payload or when closed-and-drained state must be distinguished.
+# nil is a valid payload or closed-and-drained state must be distinguished.
 
 + ChannelReceiveResult
   -> new(@value, @received)
@@ -21,6 +22,9 @@
 
 + Channel
   is Enumerable
+
+  -> .unbounded
+    ccall("w_chan_new_unbounded")
 
   -> send(value)
     ccall("w_chan_send", self, value)

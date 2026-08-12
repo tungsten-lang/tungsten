@@ -1214,8 +1214,8 @@ typedef struct WChanWaiter {
 typedef struct WChan {
     uint8_t type;        /* W_TYPE_CHANNEL — MUST stay first: generic-object
                           * dispatch reads the discriminator at byte 0 */
-    uint8_t closed;      /* shares type's slot — the old `int closed` between
-                          * tail and send_waitq cost 8 B of padding */
+    uint8_t closed;
+    uint8_t unbounded;
     WValue *buffer;
     int64_t cap;         /* allocated slots */
     int64_t count;
@@ -1227,6 +1227,7 @@ typedef struct WChan {
 } WChan;
 
 WValue w_chan_new(WValue capacity_wv);
+WValue w_chan_new_unbounded(void);
 WValue w_chan_send(WValue ch, WValue val);
 WValue w_chan_recv(WValue ch);
 WValue w_chan_recv_result(WValue ch);

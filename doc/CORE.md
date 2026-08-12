@@ -27,7 +27,7 @@ summary from the source header, and a link to the source.
 | `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. The dedicated | [`core/byte_array.w`](../core/byte_array.w) |
 | `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
 | `Channel` | `+ Channel` | — | [`core/channel.w`](../core/channel.w) |
-| `ChannelReceiveResult` | `+ ChannelReceiveResult` | Channel — a bounded, thread-safe FIFO for goroutine communication. | [`core/channel.w`](../core/channel.w) |
+| `ChannelReceiveResult` | `+ ChannelReceiveResult` | Channel — a thread-safe FIFO for goroutine communication. | [`core/channel.w`](../core/channel.w) |
 | `CSV` | `+ CSV` | CSV facade — whole-string convenience and chunk-stream adapters. | [`core/csv.w`](../core/csv.w) |
 | `CSVParser` | `+ CSVParser` | CSV — incremental comma-separated value parsing. | [`core/csv.w`](../core/csv.w) |
 | `Class` | `+ Class` | — | [`core/class.w`](../core/class.w) |

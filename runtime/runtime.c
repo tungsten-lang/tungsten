@@ -60101,14 +60101,7 @@ static WChan *as_chan(WValue v) {
     return (WChan *)w_as_ptr(v);
 }
 
-WValue w_chan_new(WValue capacity_wv) {
-    if (!w_is_int(capacity_wv)) {
-        w_raise(w_string("Channel capacity must be an Integer"));
-    }
-    int64_t cap = w_as_int(capacity_wv);
-    if (cap <= 0) {
-        w_raise(w_string("Channel capacity must be positive; unbuffered channels are not implemented"));
-    }
+static WValue w_chan_allocate(int64_t cap, int unbounded) {
     WChan *ch = calloc(1, sizeof(WChan));
     if (!ch) {
         w_raise(w_string("Channel allocation failed"));
@@ -60119,6 +60112,7 @@ WValue w_chan_new(WValue capacity_wv) {
     ch->head = 0;
     ch->tail = 0;
     ch->closed = 0;
+    ch->unbounded = unbounded ? 1 : 0;
     ch->send_waitq = NULL;
     ch->recv_waitq = NULL;
     pthread_mutex_init(&ch->lock, NULL);
@@ -60131,6 +60125,39 @@ WValue w_chan_new(WValue capacity_wv) {
     return w_box_ptr(ch, W_SUBTAG_GENERIC);
 }
 
+WValue w_chan_new(WValue capacity_wv) {
+    if (!w_is_int(capacity_wv)) {
+        w_raise(w_string("Channel capacity must be an Integer"));
+    }
+    int64_t cap = w_as_int(capacity_wv);
+    if (cap <= 0) {
+        w_raise(w_string("Channel capacity must be positive; unbuffered channels are not implemented"));
+    }
+    return w_chan_allocate(cap, 0);
+}
+
+WValue w_chan_new_unbounded(void) {
+    return w_chan_allocate(8, 1);
+}
+
+static int w_chan_grow_unbounded(WChan *ch) {
+    if (ch->cap > INT64_MAX / 2 || (uint64_t)ch->cap > SIZE_MAX / (2 * sizeof(WValue))) {
+        return 0;
+    }
+    int64_t new_cap = ch->cap * 2;
+    WValue *buffer = calloc((size_t)new_cap, sizeof(WValue));
+    if (!buffer) return 0;
+    for (int64_t i = 0; i < ch->count; i++) {
+        buffer[i] = ch->buffer[(ch->head + i) % ch->cap];
+    }
+    free(ch->buffer);
+    ch->buffer = buffer;
+    ch->cap = new_cap;
+    ch->head = 0;
+    ch->tail = ch->count;
+    return 1;
+}
+
 WValue w_chan_send(WValue channel, WValue val) {
     WChan *ch = as_chan(channel);
     pthread_mutex_lock(&ch->lock);
@@ -60138,6 +60165,18 @@ WValue w_chan_send(WValue channel, WValue val) {
     if (ch->closed) {
         pthread_mutex_unlock(&ch->lock);
         w_raise(w_string("send on closed channel"));
+    }
+
+    if (ch->unbounded) {
+        if (ch->count == ch->cap && !w_chan_grow_unbounded(ch)) {
+            pthread_mutex_unlock(&ch->lock);
+            w_raise(w_string("Channel buffer allocation failed"));
+        }
+        ch->buffer[ch->tail] = val;
+        ch->tail = (ch->tail + 1) % ch->cap;
+        ch->count++;
+        pthread_mutex_unlock(&ch->lock);
+        return W_NIL;
     }
 
     if (ch->cap > 0 && ch->count < ch->cap) {

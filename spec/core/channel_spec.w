@@ -42,6 +42,24 @@ returned = each_channel.each -> (value)
 check("channel.each.nil_payload", seen == ["first", nil, "third"])
 check("channel.each.returns_self", returned == each_channel)
 
+unbounded = Channel.unbounded()
+i = 0
+while i < 40
+  unbounded.send(i)
+  i += 1
+unbounded.close()
+i = 0
+unbounded_received = true
+unbounded_fifo = true
+while i < 40
+  result = unbounded.receive_result()
+  unbounded_received = false if !result.received?()
+  unbounded_fifo = false if result.value() != i
+  i += 1
+check("channel.unbounded.received", unbounded_received)
+check("channel.unbounded.fifo", unbounded_fifo)
+check("channel.unbounded.closed", unbounded.receive_result().closed?())
+
 closed_send_failed = false
 begin
   channel.send(9)

@@ -11,7 +11,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:544"
+        "source": "compiler/lib/emitter.w:545"
       },
       "runtime": {
         "symbol": "__w_argv",
@@ -39,7 +39,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:617"
+        "source": "compiler/lib/emitter.w:618"
       },
       "runtime": {
         "symbol": "__w_argv_at",
@@ -67,7 +67,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:616"
+        "source": "compiler/lib/emitter.w:617"
       },
       "runtime": {
         "symbol": "__w_argv_count",
@@ -95,7 +95,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:615"
+        "source": "compiler/lib/emitter.w:616"
       },
       "runtime": {
         "symbol": "__w_capture",
@@ -123,7 +123,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:620"
+        "source": "compiler/lib/emitter.w:621"
       },
       "runtime": {
         "symbol": "__w_clock",
@@ -146,7 +146,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:618"
+        "source": "compiler/lib/emitter.w:619"
       },
       "runtime": {
         "symbol": "__w_clock_ms",
@@ -174,7 +174,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:543"
+        "source": "compiler/lib/emitter.w:544"
       },
       "runtime": {
         "symbol": "__w_exit",
@@ -207,7 +207,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:550"
+        "source": "compiler/lib/emitter.w:551"
       },
       "runtime": {
         "symbol": "__w_file_exists",
@@ -240,7 +240,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:552"
+        "source": "compiler/lib/emitter.w:553"
       },
       "runtime": {
         "symbol": "__w_file_mmap",
@@ -424,7 +424,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:556"
+        "source": "compiler/lib/emitter.w:557"
       },
       "runtime": {
         "symbol": "__w_mmap_as_typed",
@@ -465,7 +465,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:554"
+        "source": "compiler/lib/emitter.w:555"
       },
       "runtime": {
         "symbol": "__w_mmap_byte_at",
@@ -502,7 +502,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:555"
+        "source": "compiler/lib/emitter.w:556"
       },
       "runtime": {
         "symbol": "__w_mmap_close",
@@ -535,7 +535,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:553"
+        "source": "compiler/lib/emitter.w:554"
       },
       "runtime": {
         "symbol": "__w_mmap_length",
@@ -568,7 +568,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:621"
+        "source": "compiler/lib/emitter.w:622"
       },
       "runtime": {
         "symbol": "__w_prime_aks",
@@ -601,7 +601,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:548"
+        "source": "compiler/lib/emitter.w:549"
       },
       "runtime": {
         "symbol": "__w_read_file",
@@ -634,7 +634,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:549"
+        "source": "compiler/lib/emitter.w:550"
       },
       "runtime": {
         "symbol": "__w_read_file_bytes",
@@ -667,7 +667,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:619"
+        "source": "compiler/lib/emitter.w:620"
       },
       "runtime": {
         "symbol": "__w_sleep_ms",
@@ -700,7 +700,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:614"
+        "source": "compiler/lib/emitter.w:615"
       },
       "runtime": {
         "symbol": "__w_system",
@@ -733,7 +733,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:542"
+        "source": "compiler/lib/emitter.w:543"
       },
       "runtime": {
         "symbol": "__w_type",
@@ -770,7 +770,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:551"
+        "source": "compiler/lib/emitter.w:552"
       },
       "runtime": {
         "symbol": "__w_write_file",
@@ -852,7 +852,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:541"
+        "source": "compiler/lib/emitter.w:542"
       },
       "runtime": {
         "symbol": "w_argv_init",
@@ -1098,7 +1098,7 @@
           }
         ],
         "arity": 4,
-        "source": "compiler/lib/emitter.w:639"
+        "source": "compiler/lib/emitter.w:640"
       },
       "runtime": {
         "symbol": "w_array_copy_range",
@@ -2061,7 +2061,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:635"
+        "source": "compiler/lib/emitter.w:636"
       },
       "runtime": {
         "symbol": "w_array_recycle",
@@ -2098,7 +2098,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:630"
+        "source": "compiler/lib/emitter.w:631"
       },
       "runtime": {
         "symbol": "w_array_recycle_or_new",
@@ -2130,7 +2130,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:627"
+        "source": "compiler/lib/emitter.w:628"
       },
       "runtime": {
         "symbol": "w_array_recycle_or_new_empty",
@@ -2158,7 +2158,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:633"
+        "source": "compiler/lib/emitter.w:634"
       },
       "runtime": {
         "symbol": "w_array_recycle_public",
@@ -2240,7 +2240,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:631"
+        "source": "compiler/lib/emitter.w:632"
       },
       "runtime": {
         "symbol": "w_array_reuse_or_new_empty",
@@ -5093,7 +5093,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:538"
+        "source": "compiler/lib/emitter.w:539"
       },
       "runtime": {
         "symbol": "w_chan_close",
@@ -5145,6 +5145,29 @@
       }
     },
     {
+      "symbol": "w_chan_new_unbounded",
+      "compiler": {
+        "symbol": "w_chan_new_unbounded",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "compiler/lib/emitter.w:535"
+      },
+      "runtime": {
+        "symbol": "w_chan_new_unbounded",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
+        "source": "runtime/runtime.h"
+      }
+    },
+    {
       "symbol": "w_chan_recv",
       "compiler": {
         "symbol": "w_chan_recv",
@@ -5159,7 +5182,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:536"
+        "source": "compiler/lib/emitter.w:537"
       },
       "runtime": {
         "symbol": "w_chan_recv",
@@ -5192,7 +5215,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:537"
+        "source": "compiler/lib/emitter.w:538"
       },
       "runtime": {
         "symbol": "w_chan_recv_result",
@@ -5229,7 +5252,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:535"
+        "source": "compiler/lib/emitter.w:536"
       },
       "runtime": {
         "symbol": "w_chan_send",
@@ -5929,7 +5952,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:638"
+        "source": "compiler/lib/emitter.w:639"
       },
       "runtime": {
         "symbol": "w_cleanup_pop",
@@ -5961,7 +5984,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:637"
+        "source": "compiler/lib/emitter.w:638"
       },
       "runtime": {
         "symbol": "w_cleanup_push",
@@ -6788,7 +6811,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:546"
+        "source": "compiler/lib/emitter.w:547"
       },
       "runtime": {
         "symbol": "w_executable_dir",
@@ -6811,7 +6834,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:545"
+        "source": "compiler/lib/emitter.w:546"
       },
       "runtime": {
         "symbol": "w_executable_path",
@@ -6872,7 +6895,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:610"
+        "source": "compiler/lib/emitter.w:611"
       },
       "runtime": {
         "symbol": "w_float_from_u32_bits",
@@ -6905,7 +6928,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:612"
+        "source": "compiler/lib/emitter.w:613"
       },
       "runtime": {
         "symbol": "w_float_from_u64_bits",
@@ -6938,7 +6961,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:611"
+        "source": "compiler/lib/emitter.w:612"
       },
       "runtime": {
         "symbol": "w_float_to_u32_bits",
@@ -6971,7 +6994,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:613"
+        "source": "compiler/lib/emitter.w:614"
       },
       "runtime": {
         "symbol": "w_float_to_u64_bits",
@@ -7370,7 +7393,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:634"
+        "source": "compiler/lib/emitter.w:635"
       },
       "runtime": {
         "symbol": "w_hash_recycle",
@@ -7398,7 +7421,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:628"
+        "source": "compiler/lib/emitter.w:629"
       },
       "runtime": {
         "symbol": "w_hash_recycle_or_new",
@@ -7426,7 +7449,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:629"
+        "source": "compiler/lib/emitter.w:630"
       },
       "runtime": {
         "symbol": "w_hash_reuse_and_drain_or_new",
@@ -8311,7 +8334,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:574"
+        "source": "compiler/lib/emitter.w:575"
       },
       "runtime": {
         "symbol": "w_math_abs",
@@ -8344,7 +8367,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:567"
+        "source": "compiler/lib/emitter.w:568"
       },
       "runtime": {
         "symbol": "w_math_acos",
@@ -8377,7 +8400,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:566"
+        "source": "compiler/lib/emitter.w:567"
       },
       "runtime": {
         "symbol": "w_math_asin",
@@ -8410,7 +8433,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:568"
+        "source": "compiler/lib/emitter.w:569"
       },
       "runtime": {
         "symbol": "w_math_atan",
@@ -8447,7 +8470,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:577"
+        "source": "compiler/lib/emitter.w:578"
       },
       "runtime": {
         "symbol": "w_math_atan2",
@@ -8484,7 +8507,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:569"
+        "source": "compiler/lib/emitter.w:570"
       },
       "runtime": {
         "symbol": "w_math_cbrt",
@@ -8517,7 +8540,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:572"
+        "source": "compiler/lib/emitter.w:573"
       },
       "runtime": {
         "symbol": "w_math_ceil",
@@ -8550,7 +8573,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:564"
+        "source": "compiler/lib/emitter.w:565"
       },
       "runtime": {
         "symbol": "w_math_cos",
@@ -8583,7 +8606,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:559"
+        "source": "compiler/lib/emitter.w:560"
       },
       "runtime": {
         "symbol": "w_math_exp",
@@ -8616,7 +8639,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:561"
+        "source": "compiler/lib/emitter.w:562"
       },
       "runtime": {
         "symbol": "w_math_expm1",
@@ -8649,7 +8672,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:571"
+        "source": "compiler/lib/emitter.w:572"
       },
       "runtime": {
         "symbol": "w_math_floor",
@@ -8690,7 +8713,7 @@
           }
         ],
         "arity": 3,
-        "source": "compiler/lib/emitter.w:579"
+        "source": "compiler/lib/emitter.w:580"
       },
       "runtime": {
         "symbol": "w_math_fma",
@@ -8735,7 +8758,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:578"
+        "source": "compiler/lib/emitter.w:579"
       },
       "runtime": {
         "symbol": "w_math_hypot",
@@ -8776,7 +8799,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:576"
+        "source": "compiler/lib/emitter.w:577"
       },
       "runtime": {
         "symbol": "w_math_ldexp",
@@ -8813,7 +8836,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:560"
+        "source": "compiler/lib/emitter.w:561"
       },
       "runtime": {
         "symbol": "w_math_log",
@@ -8846,7 +8869,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:562"
+        "source": "compiler/lib/emitter.w:563"
       },
       "runtime": {
         "symbol": "w_math_log1p",
@@ -8883,7 +8906,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:575"
+        "source": "compiler/lib/emitter.w:576"
       },
       "runtime": {
         "symbol": "w_math_pow",
@@ -8920,7 +8943,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:573"
+        "source": "compiler/lib/emitter.w:574"
       },
       "runtime": {
         "symbol": "w_math_round",
@@ -8953,7 +8976,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:563"
+        "source": "compiler/lib/emitter.w:564"
       },
       "runtime": {
         "symbol": "w_math_sin",
@@ -8986,7 +9009,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:570"
+        "source": "compiler/lib/emitter.w:571"
       },
       "runtime": {
         "symbol": "w_math_sqrt",
@@ -9019,7 +9042,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:565"
+        "source": "compiler/lib/emitter.w:566"
       },
       "runtime": {
         "symbol": "w_math_tan",
@@ -10544,7 +10567,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:624"
+        "source": "compiler/lib/emitter.w:625"
       },
       "runtime": {
         "symbol": "w_response_new_wv",
@@ -10576,7 +10599,7 @@
         },
         "args": [],
         "arity": 0,
-        "source": "compiler/lib/emitter.w:547"
+        "source": "compiler/lib/emitter.w:548"
       },
       "runtime": {
         "symbol": "w_runtime_dir",
@@ -10765,7 +10788,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:625"
+        "source": "compiler/lib/emitter.w:626"
       },
       "runtime": {
         "symbol": "w_strbuf_new",
@@ -10798,7 +10821,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:636"
+        "source": "compiler/lib/emitter.w:637"
       },
       "runtime": {
         "symbol": "w_strbuf_recycle",
@@ -10831,7 +10854,7 @@
           }
         ],
         "arity": 1,
-        "source": "compiler/lib/emitter.w:632"
+        "source": "compiler/lib/emitter.w:633"
       },
       "runtime": {
         "symbol": "w_strbuf_recycle_or_new",
@@ -10868,7 +10891,7 @@
           }
         ],
         "arity": 2,
-        "source": "compiler/lib/emitter.w:626"
+        "source": "compiler/lib/emitter.w:627"
       },
       "runtime": {
         "symbol": "w_strbuf_reuse_or_new",
@@ -15439,6 +15462,22 @@
           }
         ],
         "arity": 1,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
+      "symbol": "w_chan_new_unbounded",
+      "native": {
+        "symbol": "w_chan_new_unbounded",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [],
+        "arity": 0,
         "source": "runtime/runtime.h"
       },
       "call_modes": [

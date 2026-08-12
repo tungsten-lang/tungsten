@@ -532,6 +532,7 @@ use naming
 
   # Channels
   out << declare_fn("w_chan_new", wv, wv)
+  out << declare_fn("w_chan_new_unbounded", wv, "")
   out << declare_fn("w_chan_send", wv, wv2)
   out << declare_fn("w_chan_recv", wv, wv)
   out << declare_fn("w_chan_recv_result", wv, wv)

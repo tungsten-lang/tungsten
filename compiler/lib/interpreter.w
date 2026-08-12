@@ -1331,6 +1331,10 @@ use target
       if args.size() != 2
         raise "w_chan_new expects one capacity"
       return ccall("w_chan_new", args[1])
+    when "w_chan_new_unbounded"
+      if args.size() != 1
+        raise "w_chan_new_unbounded expects no arguments"
+      return ccall("w_chan_new_unbounded")
     when "w_chan_recv"
       if args.size() != 2
         raise "w_chan_recv expects one receiver"

@@ -15,29 +15,6 @@ use parser
     i += 1
   false
 
-# Generic type arguments are currently stored as parser side metadata that the
-# canonical AST serializer and ordinary ClassRef accessors do not expose
-# reliably. Formatting such a file from the visible AST would turn
-# `Tensor<f64, m/s>` into `Tensor`, changing the program while still appearing
-# AST-equivalent. Keep these files on the lossless path until that metadata is
-# part of the formatter input contract.
--> formatter_has_generic_class_syntax?(source)
-  chars = source.chars()
-  i = 1
-  while i < chars.size
-    if chars[i] == "<"
-      j = i - 1
-      while j >= 0
-        ch = chars[j]
-        name_char = (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_"
-        break unless name_char
-        j -= 1
-      start = j + 1
-      if start < i && chars[start] >= "A" && chars[start] <= "Z"
-        return true
-    i += 1
-  false
-
 # Until comments are represented in the AST, retain their exact placement and
 # apply only lossless whitespace cleanup. This makes `fmt -w` safe on ordinary
 # documented source while the comment-attaching formatter pass is developed.
@@ -170,6 +147,16 @@ use parser
     i += 1
   parts.join(", ")
 
+-> formatter_type_args(values)
+  if values == nil || values.empty?()
+    return ""
+  rendered = []
+  i = 0
+  while i < values.size
+    rendered.push(values[i].to_s())
+    i += 1
+  "<" + rendered.join(", ") + ">"
+
 -> formatter_block(node, depth)
   params = formatter_params(node.params, depth)
   header = "->"
@@ -188,6 +175,7 @@ use parser
     out = formatter_expr(receiver, depth)
     if ast_kind(receiver) == :range || ast_kind(receiver) == :quantity
       out = "(" + out + ")"
+    out += formatter_type_args(node.type_args)
     if name == "\[\]"
       out += "\[" + formatter_join_nodes(node.args, ", ", depth) + "\]"
     elsif name == "\[\]="
@@ -201,7 +189,7 @@ use parser
       out += safe ? "&." : "."
       out += name
   else
-    out = name
+    out = name + formatter_type_args(node.type_args)
   if name != "\[\]" && name != "\[\]=" && node.args != nil && !node.args.empty?()
     out += "(" + formatter_join_nodes(node.args, ", ", depth) + ")"
   elsif receiver == nil && node.args != nil && node.args.empty?()
@@ -301,16 +289,7 @@ use parser
   when :var, :ivar, :cvar, :gvar
     node.name.to_s()
   when :class_ref
-    name = node.name.to_s()
-    type_args = node.type_args
-    if type_args != nil && !type_args.empty?()
-      rendered = []
-      i = 0
-      while i < type_args.size
-        rendered.push(type_args[i].to_s())
-        i += 1
-      name += "<" + rendered.join(", ") + ">"
-    name
+    node.name.to_s() + formatter_type_args(node.type_args)
   when :self_ref
     "self"
   when :binary_op
@@ -416,6 +395,34 @@ use parser
     out += formatter_sequence(node.else_body, depth + 1)
   out
 
+-> formatter_generic_body(node, depth)
+  out = StringBuffer(64)
+  constraints = node.type_constraints
+  skip_nils = 0
+  wrote = false
+  if constraints != nil
+    i = 0
+    while i < constraints.size
+      constraint = constraints[i]
+      out << formatter_indent(depth) << "with " << constraint[0].to_s() << " in (" << constraint[1].join(" ") << ")"
+      wrote = true
+      skip_nils += 1
+      i += 1
+      if i < constraints.size
+        out << "\n"
+  i = 0
+  while i < node.body.size
+    child = node.body[i]
+    if skip_nils > 0 && ast_kind(child) == :nil_lit
+      skip_nils -= 1
+    else
+      if wrote
+        out << "\n"
+      out << formatter_statement(child, depth)
+      wrote = true
+    i += 1
+  out.to_s()
+
 -> formatter_statement(node, depth = 0)
   kind = ast_kind(node)
   prefix = formatter_indent(depth)
@@ -437,21 +444,21 @@ use parser
   when :fn_def
     formatter_definition(node, depth, "fn")
   when :class_def
-    header = prefix + "+ " + node.name.to_s()
+    header = prefix + "+ " + node.name.to_s() + formatter_type_args(node.type_params)
     if node.class_role != nil
       header += " \[" + node.class_role.to_s() + "\]"
     if node.superclass != nil
-      header += " < " + node.superclass.to_s()
-    body = formatter_sequence(node.body, depth + 1)
+      header += " < " + node.superclass.to_s() + formatter_type_args(node.parent_type_args)
+    body = formatter_generic_body(node, depth + 1)
     body == "" ? header : header + "\n" + body
   when :module_def
     body = formatter_sequence(node.body, depth + 1)
     prefix + "module " + node.name.to_s() + (body == "" ? "" : "\n" + body)
   when :trait_def
-    body = formatter_sequence(node.body, depth + 1)
-    prefix + "trait " + node.name.to_s() + (body == "" ? "" : "\n" + body)
+    body = formatter_generic_body(node, depth + 1)
+    prefix + "trait " + node.name.to_s() + formatter_type_args(node.type_params) + (body == "" ? "" : "\n" + body)
   when :trait_include
-    prefix + "is " + node.name.to_s()
+    prefix + "is " + node.name.to_s() + formatter_type_args(node.trait_type_args)
   when :namespace_decl
     prefix + "in " + node.namespace.to_s()
   when :if
@@ -503,6 +510,6 @@ use parser
   token_count = lexer.tokenize()
   parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
   ast = parser.parse()
-  if formatter_has_comment_lines?(source) || formatter_has_generic_class_syntax?(source)
+  if formatter_has_comment_lines?(source)
     return formatter_lossless_whitespace(source)
   formatter_sequence(ast.expressions, 0).rtrim() + "\n"

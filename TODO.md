@@ -349,9 +349,12 @@ projects stay unchecked until their stated acceptance criteria are met.
     zero-argument calls, reject unsupported nodes, and gate snapshot,
     idempotence, in-place, and canonical-AST parity across the frontend fixture
     corpus.
-  - [ ] Attach comments and expose generic-type parser metadata to the
-    formatter, then replace their lossless-whitespace safety path; cover the
-    remaining GPU/domain nodes before widening parity to every tracked `.w`.
+  - [x] Preserve generic call/class/parent/trait arguments, constraints, and
+    attached type hints; pin their normalized source because canonical AST
+    output intentionally omits some sparse parser metadata.
+  - [ ] Attach comments and replace their lossless-whitespace safety path;
+    cover the remaining GPU/domain nodes before widening parity to every
+    tracked `.w`.
 - [x] Add `bin/tungsten lint` with stable diagnostic codes, machine-readable
   output, configurable severities, and no source mutation.
 - [x] Add `bin/tungsten debug` for build/run with symbols, frame pointers,

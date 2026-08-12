@@ -37,8 +37,14 @@ cmp "$TMP/commented.expected" "$TMP/commented.out"
 
 printf 'value=Tensor<f64, m/s>.zeros([1])   \n' >"$TMP/generic.w"
 "$TUNGSTEN" fmt "$TMP/generic.w" >"$TMP/generic.out"
-printf 'value=Tensor<f64, m/s>.zeros([1])\n' >"$TMP/generic.expected"
+printf 'value = Tensor<f64, m/s>.zeros([1])\n' >"$TMP/generic.expected"
 cmp "$TMP/generic.expected" "$TMP/generic.out"
+
+"$TUNGSTEN" fmt "$ROOT/spec/cli/fmt_generic_input.w" >"$TMP/generic-class.out"
+cmp "$ROOT/spec/cli/fmt_generic_expected.w" "$TMP/generic-class.out"
+"$TUNGSTEN" --canonical-ast "$ROOT/spec/cli/fmt_generic_input.w" >"$TMP/generic-class.in.ast"
+"$TUNGSTEN" --canonical-ast "$TMP/generic-class.out" >"$TMP/generic-class.out.ast"
+cmp "$TMP/generic-class.in.ast" "$TMP/generic-class.out.ast"
 
 # Exercise the compact frontend fixture corpus. Known-invalid parser fixtures
 # and the two intentionally unsupported formatter fixtures are classified

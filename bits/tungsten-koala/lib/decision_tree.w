@@ -200,7 +200,7 @@
     out = DecisionTree.missing?(value)
     if !out
       kind = type(value)
-      out = kind == "Integer" || kind == "Float"
+      out = kind == "Int" || kind == "Float"
       out = value.to_f - value.to_f == 0.to_f if out
     out
 
@@ -228,7 +228,7 @@
             has_missing = true if valid
             if !valid
               kind = type(value)
-              valid = kind == "Integer"
+              valid = kind == "Int"
               if kind == "Float"
                 if value != value
                   valid = true
@@ -259,7 +259,7 @@
             valid = value == nil
             if !valid
               kind = type(value)
-              valid = kind == "Integer"
+              valid = kind == "Int"
               if kind == "Float"
                 valid = value != value || value - value == 0.to_f
             ok = false if !valid
@@ -273,7 +273,7 @@
         ok = false if missing
         if !missing
           kind = type(value)
-          ok = false if kind != "Integer" && kind != "Float"
+          ok = false if kind != "Int" && kind != "Float"
           ok = false if kind == "Float" && value - value != 0.to_f
     ok
 

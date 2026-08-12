@@ -194,7 +194,7 @@
     v = node.value
     # Raw :wvalue payloads exceed i48 and read back as BigInt under the
     # compiled engine's exact type() split; both are integers here.
-    if type(v) in ("Integer" "BigInt")
+    if type(v) in ("Int" "BigInt")
       return v
     return nil
   if k == :unary_op && node.op == :MINUS

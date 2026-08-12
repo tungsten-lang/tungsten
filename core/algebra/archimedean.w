@@ -33,8 +33,7 @@
 
   -> verified?
     return false if @field.class_name != "NumberField"
-    integer_index = @index.class_name == "Integer"
-    integer_index = true if @index.class_name == "Int"
+    integer_index = @index.class_name == "Int"
     integer_index = true if @index.class_name == "BigInt"
     return false if !integer_index
     return false if @index < 0
@@ -258,12 +257,10 @@
   -> verified?
     return false if @order.class_name != "EtaleProductOrder"
     component_class = @component_index.class_name
-    integer_component = component_class == "Integer"
-    integer_component = true if component_class == "Int"
+    integer_component = component_class == "Int"
     integer_component = true if component_class == "BigInt"
     index_class = @index.class_name
-    integer_index = index_class == "Integer"
-    integer_index = true if index_class == "Int"
+    integer_index = index_class == "Int"
     integer_index = true if index_class == "BigInt"
     return false if !integer_component || !integer_index
     return false if @component_index < 0
@@ -274,7 +271,6 @@
     return false if !real?
     root_class = @root.class_name
     rational_root = root_class == "Rational"
-    rational_root = true if root_class == "Integer"
     rational_root = true if root_class == "Int"
     rational_root = true if root_class == "BigInt"
     if rational_root

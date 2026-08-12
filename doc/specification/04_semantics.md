@@ -227,25 +227,27 @@ Suffix `expr while c` repeats evaluation of `expr` while `c` remains truthy.
 
 ### 4.7.1 Inline integers
 
-`Int` is the exact integer family exposed by unannotated literals and ordinary
-integer arithmetic. It has two concrete runtime representations:
+`Integer` is the generic, representation-independent exact-integer family.
+`Int` is Tungsten's default implementation, exposed by unannotated literals
+and ordinary integer arithmetic. It has two runtime representations:
 
-* `Integer` is a tagged immediate in the signed 48-bit WValue range.
-* `BigInt` is heap-backed and arbitrary precision.
+* inline `Int` is a tagged immediate in the signed 48-bit WValue range;
+* `BigInt` is the heap-backed continuation beyond that range.
 
-Both are `Int`, `Real`, and `Number` values. They remain distinct concrete
-types: an `Integer` is not a `BigInt`, and a `BigInt` is not an `Integer`.
-Algorithms defined on `Int` must be representation-independent; methods on a
-concrete child may use that representation's invariants.
+Both are `Integer`, `Real`, and `Number` values. `BigInt` is also an `Int`, but
+it remains a distinct concrete runtime type. Algorithms defined on generic
+`Integer` must be representation-independent; `Int` methods may rely on the
+default exact-promotion policy, and representation-specific methods must guard
+or delegate when a result crosses the inline boundary.
 
-Arithmetic on values that remain inside the `Integer` range stays on the fast
+Arithmetic on values that remain inside the inline `Int` range stays on the fast
 path.
 
 ### 4.7.2 Overflow and BigInt
 
 Values and intermediate results that exceed the inline range become
 heap-allocated `BigInt` objects. Exact results that fit the inline range are
-canonicalized back to `Integer`. A conforming implementation **must**:
+canonicalized back to inline `Int`. A conforming implementation **must**:
 
 * accept integer literals of any magnitude permitted by available memory
 * produce a mathematically correct integer result for standard arithmetic when using the language's default integer policy, either by promoting to `BigInt` or by an explicitly selected overflow mode
@@ -256,8 +258,8 @@ Lexical overflow modes may be selected with scoped forms such as:
 * `Math.trap -> …` — trap / abort on overflow
 * `Math.wrap -> …` — wrap with native modular arithmetic
 
-Tungsten's default mode is promotion: mixed `Integer`/`BigInt` operations and
-overflowing `Integer` operations preserve the exact mathematical result.
+Tungsten's default `Int` mode is promotion: mixed inline-`Int`/`BigInt`
+operations and overflowing inline operations preserve the exact result.
 Explicit fixed-width hints such as `## i64` select machine-width behavior for
 code that requires it. An implementation with another compilation mode must
 make that selection explicit rather than silently changing `Int` semantics.

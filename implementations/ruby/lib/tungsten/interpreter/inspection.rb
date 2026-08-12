@@ -2024,7 +2024,7 @@ module Tungsten
       case value
       when NilClass then "Nil"
       when TrueClass, FalseClass then "Boolean"
-      when Integer then "Integer"
+      when Integer then "Int"
       when Float then "Float"
       when String then "String"
       when Symbol then "Symbol"

@@ -14,9 +14,10 @@ NaN-boxed 48-bit range (no heap). Cross that range — or do enough arithmetic
 that intermediates overflow the small-int box — and every op becomes a heap
 bignum helper.
 
-In the type hierarchy, `Int` names that exact auto-promoting family;
-`Integer` is the inline concrete representation and `BigInt` is the heap
-representation. Use `is_a?(Int)` when either representation is acceptable.
+In the type hierarchy, `Integer` is the generic exact-integer family, `Int`
+selects Tungsten's auto-promoting policy, and `BigInt` is its heap
+continuation. Use `is_a?(Integer)` for generic integer algorithms and
+`is_a?(Int)` when the default promotion contract is required.
 
 In a tight loop this shows up as:
 

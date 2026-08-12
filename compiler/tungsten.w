@@ -1,4 +1,5 @@
 use core/integer
+use core/numeric/int
 use core/numeric/float
 use core/numeric/big_int
 # String/Symbol#size and #length are source methods on the shared 0xF9 facade.

@@ -610,6 +610,7 @@ compiled_specs=(
   spec/compiler/function_replacement_index_spec.w
   benchmarks/runtime_ports/float_remaining_no_use_literal.w
   spec/compiler/indexed_compound_assignment_parameter_spec.w
+  spec/compiler/int_integer_dynamic_receiver_spec.w
   spec/compiler/int_to_i_autoload_spec.w
   spec/compiler/ivar_typed_return_spec.w
   spec/compiler/lambda_puts_body_spec.w
@@ -660,6 +661,7 @@ compiled_specs=(
   spec/compiler/static_method_overload_spec.w
   spec/compiler/splat_parameter_parity_spec.w
   spec/compiler/int_bigint_promotion_spec.w
+  spec/compiler/int_integer_dynamic_receiver_spec.w
   spec/compiler/bigint_literal_cache_spec.w
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w

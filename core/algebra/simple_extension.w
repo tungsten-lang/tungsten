@@ -492,8 +492,7 @@
 
   -> power(value, exponent)
     exponent_class = exponent.class_name
-    integer_exponent = exponent_class == "Integer"
-    integer_exponent = integer_exponent || exponent_class == "Int"
+    integer_exponent = exponent_class == "Int"
     integer_exponent = integer_exponent || exponent_class == "BigInt"
     if !integer_exponent
       raise "simple-extension exponent must be an integer"

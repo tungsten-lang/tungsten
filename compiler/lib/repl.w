@@ -2030,7 +2030,7 @@ INSP_RESULT_VALUE_LIMIT = 240
     if value == false
       return MAGENTA + "false" + RESET
     t = type(value)
-    if t == "Integer"
+    if t == "Int"
       return MAGENTA + value.to_s() + RESET
     if t == "Float"
       return CYAN + value.to_s() + RESET
@@ -2146,7 +2146,7 @@ INSP_RESULT_VALUE_LIMIT = 240
     true
 
   -> ic_prefix(cls)
-    if cls == "Integer"
+    if cls == "Int"
       return "int"
     if cls == "StringBuffer"
       return "strbuf"

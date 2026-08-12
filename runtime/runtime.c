@@ -44297,7 +44297,7 @@ WValue w_switch_canonical(WValue v) {
 
 /* Cached type-name WValues. type() is called constantly by the compiler's
  * slab-AST walkers, and w_string() on a name >= 6 bytes ("String",
- * "Integer", "Symbol", "Unknown", …) re-interns it — a wyhash + slab probe
+ * "StringBuffer", "Symbol", "Unknown", …) re-interns it — a wyhash + slab probe
  * — every call. These names are constant, so intern each once and return the
  * cached WValue thereafter. Lazily filled on first __w_type call (the slab
  * must be up); the sentinel is g_typenames_ready, since a valid WValue can
@@ -44312,7 +44312,7 @@ static WValue g_tn_nil, g_tn_bool, g_tn_int, g_tn_bigint, g_tn_float,
 
 static void w_typenames_init(void) {
     g_tn_nil = w_string("Nil");            g_tn_bool = w_string("Boolean");
-    g_tn_int = w_string("Integer");        g_tn_bigint = w_string("BigInt");
+    g_tn_int = w_string("Int");            g_tn_bigint = w_string("BigInt");
     g_tn_float = w_string("Float");        g_tn_string = w_string("String");
     g_tn_strbuf = w_string("StringBuffer");g_tn_symbol = w_string("Symbol");
     g_tn_char = w_string("Char");          g_tn_big_array = w_string("BigArray");
@@ -46367,14 +46367,15 @@ static int w_primitive_is_a_type_name(WValue recv, const char *tn, size_t tn_len
     if (w_is_mac(recv))
         return w_type_name_eq_lit(tn, tn_len, "MAC");
     if (w_is_int(recv)) {
-        return w_type_name_eq_lit(tn, tn_len, "Integer") ||
-               w_type_name_eq_lit(tn, tn_len, "Int") ||
+        return w_type_name_eq_lit(tn, tn_len, "Int") ||
+               w_type_name_eq_lit(tn, tn_len, "Integer") ||
                w_type_name_eq_lit(tn, tn_len, "Real") ||
                w_type_name_eq_lit(tn, tn_len, "Number");
     }
     if (w_is_bigint(recv)) {
         return w_type_name_eq_lit(tn, tn_len, "BigInt") ||
                w_type_name_eq_lit(tn, tn_len, "Int") ||
+               w_type_name_eq_lit(tn, tn_len, "Integer") ||
                w_type_name_eq_lit(tn, tn_len, "Real") ||
                w_type_name_eq_lit(tn, tn_len, "Number");
     }
@@ -46408,7 +46409,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
         }
         if (w_is_class(recv)) return w_bool(0);
         const char *pn =
-            w_is_int(recv) ? "Integer" :
+            w_is_int(recv) ? "Int" :
             w_is_double(recv) ? "Float" :
             w_is_string(recv) ? "String" :
             w_is_symbol(recv) ? "Symbol" :
@@ -46437,7 +46438,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
         if (w_is_class(recv))
             return w_bool(w_typename_base_eq(((WClass *)w_as_ptr(recv))->name, tn, tn_len));
         const char *pn =
-            w_is_int(recv) ? "Integer" :
+            w_is_int(recv) ? "Int" :
             w_is_double(recv) ? "Float" :
             w_is_string(recv) ? "String" :
             w_is_symbol(recv) ? "Symbol" :
@@ -46766,7 +46767,7 @@ void w_type_class_register_wv(int32_t dispatch_key, WValue klass) {
  *   4. On a cold cache miss, accept g_type_class only if its class name agrees
  *      with __w_type(v), then cache that exact public result.
  *   5. Fallback: find a registered class whose name matches __w_type(v).
- *      Lets `4.class` return @class.Integer even when Integer hasn't
+ *      Lets `4.class` return @class.Int even when Int hasn't
  *      (yet) registered a dispatch key. */
 /* Lazy singleton for the "Class" class — what .class returns when the
  * receiver is itself a class. Created on first call so we don't pay
@@ -52627,18 +52628,18 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[36].name = WN_length;
     w_ic_string_table[37].name = WN_to_d;
     /* Int */
-    /* Slot 0 (to_s, both arities) retired to core/integer.w. */
+    /* Slot 0 (to_s, both arities) retired to core/numeric/int.w. */
     w_ic_int_table[1].name    = WN_abs;
     w_ic_int_table[2].name    = WN_to_f;
-    /* Slot 3 (chr) retired to core/integer.w. */
-    /* Slot 4 (gcd) retired to core/integer.w; bigint receivers keep theirs. */
+    /* Slot 3 (chr) retired to core/numeric/int.w. */
+    /* Slot 4 (gcd) retired to core/numeric/int.w; bigint receivers keep theirs. */
     w_ic_int_table[5].name    = WN_times;     /* added below */
     w_ic_int_table[6].name    = WN_sqrt;
     w_ic_int_table[7].name    = WN_each;      /* each ≡ times for ints */
     w_ic_int_table[8].name    = WN_prime_q;
     w_ic_int_table[9].name    = WN_prime_12k_q;
     w_ic_int_table[10].name   = WN_prime_30k_q;
-    /* Slot 11 (lcm) retired to core/integer.w; bigint receivers keep theirs. */
+    /* Slot 11 (lcm) retired to core/numeric/int.w; bigint receivers keep theirs. */
     w_ic_int_table[12].name   = WN_isqrt;
     w_ic_int_table[13].name   = WN_to_d;
     /* BigArray */
@@ -53628,7 +53629,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
     }
 
     const char *type_name =
-        w_is_int(recv) ? "Integer" :
+        w_is_int(recv) ? "Int" :
         w_is_double(recv) ? "Float" :
         w_is_string(recv) ? "String" :
         w_is_symbol(recv) ? "Symbol" :

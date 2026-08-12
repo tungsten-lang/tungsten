@@ -289,7 +289,7 @@ projects stay unchecked until their stated acceptance criteria are met.
     - [x] Add erased-receiver interpreter/native parity fixtures for Decimal
       and Date, covering packed/heap Decimal representations, Date source
       leaves, native formatting, and scalar-constructor rejection.
-    - [ ] Add erased-receiver interpreter/native parity fixtures for the
+    - [x] Add erased-receiver interpreter/native parity fixtures for the
       overlapping Array, String, and Int/Integer surfaces. Cover ordinary
       values and representation boundaries.
       - [x] Classify String's 31 native rows and 18 executable source methods;
@@ -299,6 +299,10 @@ projects stay unchecked until their stated acceptance criteria are met.
       - [x] Classify Array's 45 active native selectors and 47 source method
         names, including the deliberate `each`/`sort`/`stable_sort` overlap;
         pin erased ordinary, typed, bit-packed, and shifted-storage dispatch.
+      - [x] Classify Integer's 27 generic methods, Int's 23 policy-specific
+        methods, and Int's 10 active native rows; pin inline/heap erased
+        dispatch, promotion boundaries, subtype membership, and overload
+        specificity in both engines.
     - [ ] Implement and specify Date's deferred factory/calendar surface:
       `new`, `julian`, `ordinal`, `commercial`, `today`, `tomorrow`, `week`,
       `decade`/`decade_abbr`, `century`, `millenium`, and first/last period
@@ -326,10 +330,10 @@ projects stay unchecked until their stated acceptance criteria are met.
   returns `nil`. Native and interpreted coverage includes `if`, `elsif`, nested
   conditionals, and an untaken explicit-return arm.
 - [x] Preserve the intended integer tower instead of merging names by accident:
-  `Int` is the exact auto-promoting family; concrete inline `Integer` and heap
-  `BigInt` representations inherit from it. Promotion/demotion and subtype /
-  overload parity are executable contracts, and BigInt no longer claims the
-  distinct concrete `Integer` type.
+  `Integer` is the generic, representation-independent family; `Int` supplies
+  Tungsten's exact auto-promoting implementation and `BigInt` continues it on
+  the heap. Promotion/demotion and generic/implementation/concrete overload
+  parity are executable contracts.
 
 ### Frontend and compilation performance
 

@@ -1,245 +1,18 @@
-# Integer — the concrete 48-bit NaN-boxed representation of an Int.
+# Integer — the generic, representation-independent integer family.
 #
-# Int is the exact, auto-promoting integer family. Arithmetic that leaves this
-# inline representation becomes a BigInt; results that fit again canonicalize
-# back to Integer. Methods here may rely on an inline-i48 receiver and must
-# delegate overflow or BigInt operands to the promoting runtime operators.
-+ Integer < Int
-
-  -> to_i
-    self
-
-  -> prev
-    payload = ($value & 0xFFFFFFFFFFFF) ## i64
-    if payload == 0x800000000000
-      return self - 1
-    tag = ($value & -281474976710656) ## i64
-    mask = 0xFFFFFFFFFFFF ## i64
-    next_payload = ((payload - 1) & mask) ## i64
-    bits = (tag | next_payload) ## i64
-    wvalue_from_bits(bits)
-
-  -> succ
-    payload = ($value & 0xFFFFFFFFFFFF) ## i64
-    if payload == 0x7FFFFFFFFFFF
-      return self + 1
-    tag = ($value & -281474976710656) ## i64
-    mask = 0xFFFFFFFFFFFF ## i64
-    next_payload = ((payload + 1) & mask) ## i64
-    bits = (tag | next_payload) ## i64
-    wvalue_from_bits(bits)
-
-  -> next
-    payload = ($value & 0xFFFFFFFFFFFF) ## i64
-    if payload == 0x7FFFFFFFFFFF
-      return self + 1
-    tag = ($value & -281474976710656) ## i64
-    mask = 0xFFFFFFFFFFFF ## i64
-    next_payload = ((payload + 1) & mask) ## i64
-    bits = (tag | next_payload) ## i64
-    wvalue_from_bits(bits)
-
-  # `$value` is the raw NaN-boxed word in compiled methods. The payload's
-  # low bit and sign bit make the Integer overrides single native bit tests;
-  # Number and Real keep the generic definitions for other numeric classes.
-  -> even?
-    ($value & 1) == 0
-
-  -> odd?
-    ($value & 1) != 0
-
-  -> zero?
-    ($value & 0xFFFFFFFFFFFF) == 0
-
-  -> negative?
-    ($value & 0x800000000000) != 0
-
-  -> positive?
-    payload = ($value & 0xFFFFFFFFFFFF) ## i64
-    payload != 0 && (payload & 0x800000000000) == 0
-
-  -> sq
-    self * self
-
-  # UTF-8 encode of the receiver's codepoint. The result is at most four
-  # bytes, so it is BUILT IN REGISTERS as an inline-mode String (length in
-  # bits 1..3, byte i at bits 4+8i) — no allocation at all, where the
-  # former C handler malloc'd via w_string. Its w_string(strlen) quirks are
-  # kept exactly: chr(0), and any negative whose low byte is zero, yield ""
-  # (the NUL lead byte read as an empty C string), and out-of-range lead
-  # bytes truncate to 8 bits like the C char store did.
-  -> chr
-    ch_c = ($value & 0xFFFFFFFFFFFF) ## i64
-    if (ch_c & 0x800000000000) != 0
-      ch_c -= 281_474_976_710_656
-    ch_tag = -1_970_324_836_974_592 ## i64  # 0xFFF9000000000000
-    if ch_c < 128
-      ch_b = ch_c & 0xFF
-      if ch_b == 0
-        return ""
-      return wvalue_from_bits((ch_tag | 2 | (ch_b << 4)) ## i64)
-    if ch_c < 2048
-      ch_b0 = 192 | (ch_c >> 6)
-      ch_b1 = 128 | (ch_c & 63)
-      return wvalue_from_bits((ch_tag | 4 | (ch_b0 << 4) | (ch_b1 << 12)) ## i64)
-    if ch_c < 65536
-      ch_b0 = 224 | (ch_c >> 12)
-      ch_b1 = 128 | ((ch_c >> 6) & 63)
-      ch_b2 = 128 | (ch_c & 63)
-      return wvalue_from_bits((ch_tag | 6 | (ch_b0 << 4) | (ch_b1 << 12) | (ch_b2 << 20)) ## i64)
-    ch_b0 = (240 | (ch_c >> 18)) & 0xFF
-    ch_b1 = 128 | ((ch_c >> 12) & 63)
-    ch_b2 = 128 | ((ch_c >> 6) & 63)
-    ch_b3 = 128 | (ch_c & 63)
-    wvalue_from_bits((ch_tag | 8 | (ch_b0 << 4) | (ch_b1 << 12) | (ch_b2 << 20) | (ch_b3 << 28)) ## i64)
-
-  # Decimal digits. Results of up to five characters (all |n| < 100_000
-  # positives, |n| < 10_000 negatives) build inline in registers with no
-  # allocation; anything longer writes one u8 buffer whose storage the
-  # result String steals. BigInt receivers keep their own IC handler.
-  -> to_s
-    ts_n = ($value & 0xFFFFFFFFFFFF) ## i64
-    if (ts_n & 0x800000000000) != 0
-      ts_n -= 281_474_976_710_656
-    ts_tag = -1_970_324_836_974_592 ## i64  # 0xFFF9000000000000
-    if ts_n >= 0 && ts_n < 100_000
-      ts_len = 1
-      if ts_n >= 10
-        ts_len += 1
-      if ts_n >= 100
-        ts_len += 1
-      if ts_n >= 1000
-        ts_len += 1
-      if ts_n >= 10_000
-        ts_len += 1
-      ts_v = (ts_tag | (ts_len << 1)) ## i64
-      ts_m = ts_n
-      ts_i = ts_len - 1
-      while ts_i >= 0
-        ts_v = ts_v | ((ts_m % 10 + 48) << (4 + 8 * ts_i))
-        ts_m = ts_m / 10
-        ts_i -= 1
-      return wvalue_from_bits(ts_v)
-    if ts_n < 0 && ts_n > (0 - 10_000)
-      ts_a = 0 - ts_n
-      ts_len = 2
-      if ts_a >= 10
-        ts_len += 1
-      if ts_a >= 100
-        ts_len += 1
-      if ts_a >= 1000
-        ts_len += 1
-      ts_v = (ts_tag | (ts_len << 1) | (45 << 4)) ## i64
-      ts_i = ts_len - 1
-      while ts_i >= 1
-        ts_v = ts_v | ((ts_a % 10 + 48) << (4 + 8 * ts_i))
-        ts_a = ts_a / 10
-        ts_i -= 1
-      return wvalue_from_bits(ts_v)
-    # Longer results (6..15 digits): format on a C stack buffer and intern
-    # once, exactly as the former IC handler's w_int_to_str did — cheaper
-    # than allocating a Tungsten u8 buffer to steal.
-    ccall("w_int_to_str_boxed", self)
-
-  # Base-N digits, 2..36, lowercase letters past 9 — the former C handler's
-  # exact loop (including its argument validation message). Base 10 shares
-  # the buffer path rather than duplicating the inline fast case: explicit
-  # to_s(10) is rare.
-  # Base-N digits, 2..36. The digit loop and stack-buffer formatting stay in
-  # C (w_int_to_str_base_boxed) — base conversion is rare and the native loop
-  # is already allocation-lean — but the arity-2 dispatch and validation live
-  # here in the class, so the method is source-defined like its siblings.
-  -> to_s(base)
-    if base < 2 || base > 36
-      raise "to_s base must be between 2 and 36"
-    ccall("w_int_to_str_base_boxed", self, base)
-
-  # Greatest common divisor — iterative Euclidean, exact for negatives. An
-  # Integer receiver is always a NaN-boxed immediate (BigInt is its own
-  # class), so when the argument is one too the loop runs on raw i64 at the
-  # former C handler's cost. gcd(a, b) <= max(|a|, |b|), so the immediate
-  # payload boxing of the result is exact. A BigInt argument falls through
-  # to the generic promoting loop below.
-  -> gcd(other)
-    if ((other$value >> 48) & 0xFFFF) == 0xFFFA
-      a = ($value & 0xFFFFFFFFFFFF) ## i64
-      if (a & 0x800000000000) != 0
-        a -= 281_474_976_710_656
-      if a < 0
-        a = 0 - a
-      b = (other$value & 0xFFFFFFFFFFFF) ## i64
-      if (b & 0x800000000000) != 0
-        b -= 281_474_976_710_656
-      if b < 0
-        b = 0 - b
-      while b > 0
-        t = b
-        b = a % b
-        a = t
-      tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
-      return wvalue_from_bits((tag | a) ## i64)
-    ga = self < 0 ? 0 - self : self
-    gb = other < 0 ? 0 - other : other
-    while gb > 0
-      gt = gb
-      gb = ga % gb
-      ga = gt
-    ga
-
-  # Least common multiple: |a/g * b| with g = gcd(a, b). When both operands
-  # are immediates AND the product provably fits the immediate payload, the
-  # whole computation runs on raw i64 (the gcd loop inlined — a dispatched
-  # gcd call would cost more than the rest of the method). Anything bigger
-  # falls through to the generic promoting path, so results beyond the
-  # 48-bit payload still become exact BigInts. By convention any lcm with
-  # zero is zero, including lcm(0, 0).
-  -> lcm(other)
-    if ((other$value >> 48) & 0xFFFF) == 0xFFFA
-      aa = ($value & 0xFFFFFFFFFFFF) ## i64
-      if (aa & 0x800000000000) != 0
-        aa -= 281_474_976_710_656
-      if aa < 0
-        aa = 0 - aa
-      bb = (other$value & 0xFFFFFFFFFFFF) ## i64
-      if (bb & 0x800000000000) != 0
-        bb -= 281_474_976_710_656
-      if bb < 0
-        bb = 0 - bb
-      if aa == 0 || bb == 0
-        return 0
-      ga = aa
-      gb = bb
-      while gb > 0
-        gt = gb
-        gb = ga % gb
-        ga = gt
-      qa = aa / ga
-      # lcm = qa * bb, both positive. Guard the raw multiply against the
-      # signed-48 immediate ceiling; oversized results take the boxed path.
-      if bb <= 140_737_488_355_327 / qa
-        tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
-        return wvalue_from_bits((tag | (qa * bb)) ## i64)
-    return 0 if self == 0 || other == 0
-    r = (self / gcd(other)) * other
-    r < 0 ? 0 - r : r
-
-  # Modular exponentiation: (self ** exp) mod modulus. Routed to the runtime
-  # intrinsic `bigint_powmod_any` (runtime/runtime.c): sliding-window
-  # square-and-multiply through the Montgomery/Barrett modular-multiplication
-  # machinery, walking the exponent's bits straight off its limbs — exact for
-  # BigInt bases, exponents, and moduli, with the result in [0, |modulus|).
-  # (The naive `(self ** exp) % modulus` would materialize the full power —
-  # astronomically large for RSA / Diffie-Hellman / Miller-Rabin exponents.)
-  # Under the Ruby tree-walker the ccall body raises and dispatch falls back
-  # to Ruby's own Integer#pow, which has the same modular semantics.
-  -> pow(exp, modulus)
-    if exp < 0
-      raise "Integer#pow: negative exponent needs a modular inverse (unsupported)"
-    ccall("bigint_powmod_any", self, exp, modulus)
+# Int is Tungsten's auto-promoting inline implementation and BigInt is its
+# heap-backed continuation. Algorithms here are shared by both and must not
+# depend on either representation or on Int's promotion policy.
++ Integer < Real
+  # @todo other operators. NB: the bodyless `-> +/1` arity-suffix form does
+  # NOT parse for an operator name (only `-> name/N` on identifiers does), so
+  # it silently failed to load this whole file in the past. Use the param form.
+  -> +(other)
 
   # Base-10 digits, least-significant first (Ruby Integer#digits): 1234 ->
-  # [4, 3, 2, 1], 0 -> [0]. Rides the promoting % / / so it is exact for
-  # BigInt receivers. Negative receivers raise (Ruby does too).
+  # [4,3,2,1], 0 -> [0]. The former `to_s.split` returned nil (split needs a
+  # separator). Rides the promoting % / / so it is exact for BigInt (Int is
+  # BigInt's base), which now reaches this after the dispatch fix.
   -> digits
     if self < 0
       raise "Integer#digits: negative receiver"
@@ -252,7 +25,6 @@
       dg_n = dg_n / 10
     dg_out
 
-  # Digits in an arbitrary base, least-significant first.
   -> digits(base)
     if self < 0
       raise "Integer#digits: negative receiver"
@@ -265,47 +37,115 @@
       db_n = db_n / base
     db_out
 
-  # Integer square root: the largest k with k*k <= self (Ruby Integer#isqrt).
-  # Newton's method from an overestimate (10^ceil(digits/2) >= sqrt), so it
-  # descends monotonically to the floor; exact for BigInt via the promoting
-  # / and ** operators.
-  -> isqrt
-    if self < 0
-      raise "Integer#isqrt: negative receiver"
-    if self < 2
-      return self
-    sq_x = 10 ** ((self.to_s.size + 1) / 2)
-    sq_y = (sq_x + self / sq_x) / 2
-    while sq_y < sq_x
-      sq_x = sq_y
-      sq_y = (sq_x + self / sq_x) / 2
-    sq_x
+  # Yield each base-10 digit (least-significant first), returning self.
+  -> each_digit(&block)
+    digits.each -> (d)
+      block(d)
+    self
 
-  # n! — product of 1..n; 0! == 1. Uses reduce (not a `while` loop) so the
-  # accumulator keeps promoting to BigInt past the inline range — a while-loop
-  # accumulator becomes an unboxed i64 loop var and silently wraps (25! then
-  # comes out mod 2^64). Small ints dispatch through concrete Integer before
-  # its Int parent, so this specialized body must live here for `5.factorial`.
+  ## Small-integer predicates. Universal `zero?` and `one?` live on Number;
+  ## these are integer-only because they're only meaningful for discrete
+  ## values (no float-rounding surprises).
+
+  -> two?
+    self == 2
+
+  -> three?
+    self == 3
+
+  -> four?
+    self == 4
+
+  -> prev
+    self - 1
+
+  -> succ
+    self + 1
+
+  # Alias of succ with a direct body: a bare `succ` call would cost a second
+  # dynamic dispatch on every `.next`, which the BigInt runtime-to-core port
+  # measured as a 6-8% public regression.
+  -> next
+    self + 1
+
+  -> to_s(base = 10)
+
+  # Convert through the shared numeric boundary. A bare `0.0` is an exact
+  # Decimal in Tungsten, so implementing this as `self + 0.0` would return the
+  # wrong class under the source interpreter even though native IC dispatch
+  # correctly produces a machine Float.
+  -> to_f
+    ccall("w_num_to_float", self)
+
+  ## Parity / divisibility.
+
+  -> even?
+    self % 2 == 0
+
+  -> odd?
+    self % 2 != 0
+
+  -> divisible_by?/1
+    self % @1 == 0
+
+  ## Number-theoretic.
+
+  # n! — product of 1..n. 0! = 1! = 1. Keep the accumulator in the
+  # ordinary reduce block form so both bootstrap parsers lower this method
+  # identically and multiplication can promote through Int into BigInt.
   -> factorial
     if self < 0
       raise "Integer#factorial: negative receiver"
-    (2..self).reduce(1) -> (acc, it) acc * it
+    (2..self).reduce(1) -> (acc, item)
+      acc * item
 
-  # Exact prime-power factorization. The returned value is enumerable and
-  # exposes `primes` for the distinct-prime projection used by algebra scripts.
+  # Mirrors Integer#factor for heap BigInt values (BigInt < Int). Keeping the
+  # implementation in the shared value object gives both integer towers the
+  # same exact semantics and presentation.
   -> factor
     IntegerFactorization.new(self)
 
-  # Ruby-style alias: modpow(e, m) == pow(e, m). Gives small ints the same
-  # name Int/BigInt use, so `n.modpow(e, m)` works for any integer.
-  -> modpow(e, m)
-    pow(e, m)
+  # Greatest common divisor — iterative Euclidean.
+  -> gcd/1
+    a = abs
+    b = @1.abs
+    while b > 0
+      t = b
+      b = a % b
+      a = t
+    a
 
-  # Modular inverse: x with (self * x) ≡ 1 (mod modulus). Extended Euclidean,
-  # so it works for any modulus coprime to self — not only primes (Fermat
-  # a^(p-2) would restrict to prime moduli and waste a full modpow). Raises
-  # when gcd(|self|, |modulus|) ≠ 1. Result is in [0, |modulus|).
-  # Promoting % / * keep the path exact for BigInt moduli.
+  # Least common multiple. Divide out the gcd before multiplying so common
+  # factors do not create a needlessly large intermediate. By convention any
+  # lcm with zero is zero, including lcm(0, 0).
+  -> lcm/1
+    return 0 if self == 0 || @1 == 0
+    ((self / gcd(@1)) * @1).abs
+
+  # Modular exponentiation: (self ** e) mod m — the inner operation of
+  # Fermat/PRP screening and Proth proofs. Routed to the runtime intrinsic
+  # `bigint_powmod_any` (runtime/runtime.c): sliding-window square-and-multiply
+  # through the Montgomery/Barrett modular-multiplication machinery, walking
+  # e's bits straight off its limbs. Result is in [0, |m|). A negative
+  # exponent keeps the former .w loop's behavior exactly: the ladder never
+  # ran, so the result is 1 (after the `self % m` step, preserving its
+  # division error for m == 0).
+  -> modpow(e, m)
+    if e < 0
+      mp_b = self % m
+      return 1
+    ccall("bigint_powmod_any", self, e, m)
+
+  # Ruby-style Integer#pow: pow(e) == self ** e; pow(e, m) == modpow(e, m).
+  # Matches Integer#pow on small ints so `n.pow(e, m)` works for any integer.
+  -> pow(e)
+    self ** e
+
+  -> pow(e, m)
+    modpow(e, m)
+
+  # Modular inverse via extended Euclidean. Mirrors Integer#invmod so the
+  # same call works on any integer class. Raises when not invertible.
   -> invmod(modulus)
     if modulus == 0
       raise "Integer#invmod: modulus must be nonzero"
@@ -333,10 +173,7 @@
       t = t + m
     t
 
-  # Legendre symbol (a/p) for odd prime p: 0 if p|a, +1 if a is a nonzero
-  # quadratic residue mod p, −1 if a is a nonresidue. Uses Euler's criterion
-  # a^((p-1)/2) ≡ (a/p) (mod p). Not Jacobi: p must be an odd prime (caller
-  # responsibility; an invalid p that still yields {0,1,p-1} is accepted).
+  # Legendre symbol (self/p). Mirrors Integer#legendre.
   -> legendre(p)
     if p <= 2 || p.even?
       raise "Integer#legendre: p must be an odd prime"
@@ -353,9 +190,8 @@
     raise "Integer#legendre: Euler criterion returned an invalid value"
 
   # Number of bits in the two's-complement representation, excluding sign
-  # (Ruby Integer#bit_length): 0.bit_length == 0, 255 -> 8, 256 -> 9,
-  # -256 -> 8. Halving `/ 2` (not `>>`, which is i64-only) keeps it exact for
-  # BigInt. `bl` only counts bits so it never overflows i64.
+  # (Ruby Integer#bit_length): 0 -> 0, 255 -> 8, 256 -> 9, -256 -> 8. Halving
+  # `/ 2` (not `>>`, which is i64-only) keeps it exact for BigInt receivers.
   -> bit_length
     bl_n = self < 0 ? self.abs - 1 : self
     bl = 0
@@ -363,3 +199,44 @@
       bl_n = bl_n / 2
       bl += 1
     bl
+
+  # Integer square root: largest k with k*k <= self (Ruby Integer#isqrt).
+  # Newton's method from a digit-count overestimate; exact for BigInt via the
+  # promoting / and ** operators. Mirrors Integer#isqrt so it works for any
+  # integer (Int and BigInt are the two built-in representations).
+  -> isqrt
+    if self < 0
+      raise "Integer#isqrt: negative receiver"
+    if self < 2
+      return self
+    # 2^ceil(b/2) >= sqrt(self) for b = bit_length: a tight overestimate that
+    # costs one shift.  (The former 10^(digits/2) guess paid a full decimal
+    # conversion just to count digits.)
+    sq_x = 1 << ((self.bit_length + 1) / 2)
+    sq_y = (sq_x + self / sq_x) / 2
+    while sq_y < sq_x
+      sq_x = sq_y
+      sq_y = (sq_x + self / sq_x) / 2
+    sq_x
+
+  # Is this a prime number? Tiered by magnitude in the runtime intrinsic
+  # `w_ic_int_prime_q` (runtime/runtime.c): a small-prime screen for tiny n,
+  # prime trial division for moderate n, deterministic Miller-Rabin for
+  # large n, and an exact Lucas-Lehmer proof for Mersenne numbers 2^p-1.
+  # Bodyless because integer literals are NaN-boxed primitives with no class
+  # pointer — they dispatch C intrinsics, not .w method bodies, the same way
+  # `gcd`/`sqrt` do.
+  -> prime?
+
+  # Like `prime?` but assumes the receiver is coprime to 6 (a 12m+{1,5,7,11}
+  # wheel candidate); it skips the redundant ÷2/÷3 screen, then runs the shared
+  # inner test (division-free prime-factor scan for n ≤ 1e6, Montgomery Miller-Rabin
+  # above). ONLY valid for coprime-to-6 inputs — a multiple of 2 or 3 would be
+  # misreported prime. u64-only. Same NaN-boxed-intrinsic story as `prime?`.
+  -> prime_12k?
+
+  # Like `prime_12k?` but assumes coprimality to 30 (a mod-30 wheel candidate:
+  # residues 1,7,11,13,17,19,23,29); skips the ÷2/÷3/÷5 screen, then the shared
+  # inner test. ONLY valid for such inputs — a multiple of 2, 3, or 5 would be
+  # misreported. u64.
+  -> prime_30k?

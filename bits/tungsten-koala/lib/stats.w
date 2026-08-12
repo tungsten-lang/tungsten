@@ -61,7 +61,7 @@
     n = s.size
     out = nil
     valid_p = p != nil
-    valid_p = type(p) == "Integer" if valid_p
+    valid_p = type(p) == "Int" if valid_p
     valid_p = p >= 0 && p <= 100 if valid_p
     if n > 0 && valid_p
       span = p * (n - 1)
@@ -84,7 +84,7 @@
         if v != nil
           seen = true
           t = type(v)
-          numeric = false if t != "Integer" && t != "Float"
+          numeric = false if t != "Int" && t != "Float"
     numeric && seen
 
   # Most frequent non-nil value; ties break to the first seen. Works

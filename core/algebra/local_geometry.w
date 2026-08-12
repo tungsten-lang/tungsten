@@ -12,7 +12,7 @@ use core/calculus/puiseux
 + PlaneLocalGeometry
   -> .variable_index(polynomial, variable)
     index = (
-      variable.class_name == "Integer" ?
+      variable.class_name == "Int" ?
       variable : polynomial.ring.index_of(variable))
     if index == nil || index < 0 || index >= polynomial.ring.arity
       raise "unknown local-geometry variable"

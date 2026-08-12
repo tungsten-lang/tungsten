@@ -42,7 +42,7 @@ use koala
   while i < features.size
     cell = features[i]
     kind = type(cell)
-    valid = cell == nil || kind == "Integer" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
+    valid = cell == nil || kind == "Int" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
     return nil if !valid
     i += 1
   totals = []
@@ -103,7 +103,7 @@ COMPACT_FOREST_PROBABILITY_1 = [~0.0, ~1.0, ~0.0, ~1.0, ~0.25, ~1.0]
   while i < features.size
     cell = features[i]
     kind = type(cell)
-    valid = cell == nil || kind == "Integer" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
+    valid = cell == nil || kind == "Int" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
     return nil if !valid
     i += 1
   totals = []
@@ -181,7 +181,7 @@ COMPACT_FOREST_PROBABILITY_1 = [~0.0, ~1.0, ~0.0, ~1.0, ~0.25, ~1.0]
   while i < features.size
     cell = features[i]
     kind = type(cell)
-    valid = cell == nil || kind == "Integer" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
+    valid = cell == nil || kind == "Int" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
     return nil if !valid
     i += 1
   total = 0.to_f

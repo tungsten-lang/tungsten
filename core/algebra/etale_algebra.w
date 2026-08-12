@@ -516,8 +516,7 @@
 
   -> power(value, exponent)
     exponent_class = exponent.class_name
-    integer_exponent = exponent_class == "Integer"
-    integer_exponent = integer_exponent || exponent_class == "Int"
+    integer_exponent = exponent_class == "Int"
     integer_exponent = integer_exponent || exponent_class == "BigInt"
     raise "etale-algebra exponent must be an integer" if !integer_exponent
     return power(inverse(value), 0 - exponent) if exponent < 0

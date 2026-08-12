@@ -15,7 +15,6 @@
 + PadicPlaneCurveCellArithmetic
   -> .integer?(value)
     kind = value.class_name
-    return true if kind == "Integer"
     return true if kind == "Int"
     kind == "BigInt"
 

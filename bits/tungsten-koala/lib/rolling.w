@@ -25,7 +25,7 @@
     width = @window
     needed = @min_periods
     return nil if width == nil || needed == nil
-    return nil if type(width) != "Integer" || type(needed) != "Integer"
+    return nil if type(width) != "Int" || type(needed) != "Int"
     return nil if width < 1 || needed < 1 || needed > width
     out = []
     values.size.times -> (i)

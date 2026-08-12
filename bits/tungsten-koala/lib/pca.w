@@ -460,7 +460,7 @@
   -> .numeric_cell?(v)
     t = type(v)
     out = false
-    out = true if t == "Integer"
+    out = true if t == "Int"
     out = true if t == "Float"
     out
 

@@ -3,7 +3,7 @@
 
 + Polynomial
   -> coefficient_in(variable, exponent)
-    index = variable.class_name == "Integer" ? variable : @ring.index_of(variable)
+    index = variable.class_name == "Int" ? variable : @ring.index_of(variable)
     raise "unknown polynomial variable" if index == nil
     out = []
     @terms.each -> (term)

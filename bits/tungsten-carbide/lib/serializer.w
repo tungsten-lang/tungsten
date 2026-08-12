@@ -33,7 +33,7 @@
         out = "true"
       else
         out = "false"
-    elsif t == "Integer" || t == "Float" || t == "Decimal"
+    elsif t == "Int" || t == "Float" || t == "Decimal"
       out = value.to_s
     elsif t == "String"
       out = Serializer.encode_string(value)

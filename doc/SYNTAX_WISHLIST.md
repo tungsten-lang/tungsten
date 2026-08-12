@@ -74,7 +74,7 @@ but it can quietly lose performance. Separate spellings would make both the
 runtime-check cost and the unsafe trust boundary explicit in review.
 
 Numeric result types also need to distinguish an exact machine integer from a
-boxed `Int` union that may be either an inline Integer or a heap BigInt.
+boxed `Int` union that may be either an inline Int or a heap BigInt.
 For example, `to_i` is mathematically integral but is not proof that its result
 can be NaN-unboxed: BigInt identity preserves the heap object. A surface type
 for this representation union, carried precisely through assignments and CFG
@@ -107,7 +107,7 @@ would make low-level core code easier to audit.
 ## Checked raw-integer boxing
 
 Core code sometimes has a machine `i64` but must return Tungsten's exact
-Int representation: an inline Integer when possible and a canonical
+Int representation: an inline Int when possible and a canonical
 BigInt otherwise. Today an optimized source body must either call `w_int`
 unconditionally or hand-spell NaN-box tag constants and the signed range
 check. A first-class checked boxing operation—distinct from a reinterpret

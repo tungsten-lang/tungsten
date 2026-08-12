@@ -39,7 +39,7 @@ DEFAULT_WARMUP = 1_000_000
 
 -> check_integer_result(method, index, path, got, expected)
   if !integer_value?(got)
-    fail_check(method, index, "[path] type", got, "Integer")
+    fail_check(method, index, "[path] type", got, "Int")
   if got != expected
     fail_check(method, index, path, got, expected)
 

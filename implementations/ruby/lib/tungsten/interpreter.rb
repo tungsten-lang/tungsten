@@ -142,7 +142,7 @@ module Tungsten
     private_class_method :body_has_control_signal?
 
     BUILTIN_TYPES = %w[
-      String Integer Float Boolean Nil
+      String Integer Int Float Boolean Nil
       Array SmallArray Hash Symbol Range Decimal Rational Tuple
       Class Tungsten
     ].freeze
@@ -623,7 +623,7 @@ module Tungsten
     # class_name_subtype? Number fallback philosophy).
     TYPED_OVERLOAD_TOWER = {
       "BigInt" => %w[Int Integer Real Number].freeze,
-      "Int" => %w[Real Number].freeze,
+      "Int" => %w[Integer Real Number].freeze,
       "Integer" => %w[Real Number].freeze,
       "Float" => %w[Real Number].freeze,
       "Decimal" => %w[Real Number].freeze
@@ -5428,7 +5428,7 @@ module Tungsten
         when ::String then "String"
         when ::Symbol then "Symbol"
         when Tungsten::CharValue then "Char"
-        when ::Integer then "Integer"
+        when ::Integer then "Int"
         when ::Float then "Float"
         when TrueClass, FalseClass then "Bool"
         when NilClass then "Nil"

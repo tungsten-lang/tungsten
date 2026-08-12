@@ -67,8 +67,8 @@
     ok = model.fitted? if ok
     ok = model.respond_to?("supervised?") if ok
     ok = model.respond_to?("score") if ok
-    ok = type(n_repeats) == "Integer" && n_repeats > 0 if ok
-    ok = type(seed) == "Integer" if ok
+    ok = type(n_repeats) == "Int" && n_repeats > 0 if ok
+    ok = type(seed) == "Int" if ok
 
     frame = nil
     frame = Estimator.frame(x) if ok

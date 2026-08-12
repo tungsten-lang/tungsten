@@ -465,13 +465,13 @@
     msg
 
   # nil (valid) or a bare message suffix. A nil value is skipped (see above).
-  # "Integer"/"Decimal" are the type() names for whole and fractional numbers.
+  # "Int"/"Decimal" are the type() names for whole and fractional numbers.
   -> numericality_suffix(value, v)
     msg = nil
     if value != nil
-      if type(value) != "Integer" && type(value) != "Decimal"
+      if type(value) != "Int" && type(value) != "Decimal"
         msg = "is not a number"
-      elsif v[:only_integer] != nil && type(value) != "Integer"
+      elsif v[:only_integer] != nil && type(value) != "Int"
         msg = "must be an integer"
       elsif v[:greater_than] != nil && value <= v[:greater_than]
         msg = "must be greater than " + v[:greater_than].to_s

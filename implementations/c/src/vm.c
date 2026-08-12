@@ -1668,9 +1668,9 @@ static const char *value_type_name(TcValue value) {
     case TC_VAL_NIL: return "NilClass";
     case TC_VAL_WVALUE:
       if (tc_as_wvalue(value) == W_TRUE || tc_as_wvalue(value) == W_FALSE) return "Boolean";
-      if (w_is_int(tc_as_wvalue(value))) return "Integer";
+      if (w_is_int(tc_as_wvalue(value))) return "Int";
       return "WValue";
-    case TC_VAL_INT: return "Integer";
+    case TC_VAL_INT: return "Int";
     case TC_VAL_STRING: return "String";
     case TC_VAL_SYMBOL: return "Symbol";
     case TC_VAL_ARRAY: return "Array";
@@ -1681,7 +1681,7 @@ static const char *value_type_name(TcValue value) {
       if (tc_as_ast_ptr(&value)->kind == TC_AST_HASH) return "Hash";
       if (tc_as_ast_ptr(&value)->kind == TC_AST_STRING) return "String";
       if (tc_as_ast_ptr(&value)->kind == TC_AST_SYMBOL) return "Symbol";
-      if (tc_as_ast_ptr(&value)->kind == TC_AST_INT) return "Integer";
+      if (tc_as_ast_ptr(&value)->kind == TC_AST_INT) return "Int";
       if (tc_as_ast_ptr(&value)->kind == TC_AST_BOOL) return "Boolean";
       return "NilClass";
   }

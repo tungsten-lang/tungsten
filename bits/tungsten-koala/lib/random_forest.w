@@ -219,7 +219,7 @@
       m = nf
       m = RandomForest.isqrt(nf) if !regression
     else
-      if type(setting) == "Integer"
+      if type(setting) == "Int"
         m = setting
         m = 1 if m < 1
         m = nf if m > nf

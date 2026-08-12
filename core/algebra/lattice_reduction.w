@@ -328,8 +328,7 @@
 
   -> integer_value?(value)
     name = value.class_name
-    integer = name == "Integer"
-    integer = true if name == "Int"
+    integer = name == "Int"
     integer = true if name == "BigInt"
     integer
 

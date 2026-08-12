@@ -4,7 +4,7 @@
 # B3: generate the exact-tag overload-gate table in compiler/lib/lowering/types.w
 # from the RUNTIME relation `w_value_is_a`, never from w_dispatch_key (a different
 # many-to-one relation that can match perfectly and still be wrong — `Int`
-# accepts both inline Integer and heap BigInt values).
+# and generic `Integer` both accept inline and heap BigInt values).
 #
 # Method: compile and run a probe program that, for a battery of representative
 # values of every constructible runtime shape, prints the value's NaN-box tag
@@ -23,9 +23,9 @@
 #   ruby scripts/gen_tag_table.rb --check   # verify types.w block is current (CI)
 #   ruby scripts/gen_tag_table.rb --write   # regenerate the block in place
 #
-# Expected result (asserted below): BigInt and Integer exact top-tag entries.
-# If the battery ever admits an ancestor name (Int, Number, ...) or drops a
-# concrete integer class, the script aborts rather than writing a wrong table.
+# Expected result (asserted below): exactly {BigInt => top_tag 0xFFF8}. If the
+# battery ever admits an ancestor name (Int, Integer, Number, ...) or drops
+# BigInt, the script aborts rather than writing a wrong table.
 
 require "tmpdir"
 
@@ -44,15 +44,15 @@ CANDIDATE_NAMES = %w[
 # ancestry path until someone proves the equivalence holds for shapes the
 # battery cannot construct AND a beneficiary exists. Empirical match is
 # necessary, never sufficient.
-MAY_ADMIT = %w[BigInt Integer].freeze
+MAY_ADMIT = %w[BigInt].freeze
 
 # Names that must NEVER pass even the empirical filter — each has a verified
 # counterexample IN THE BATTERY (multi-arm membership in
-# w_primitive_is_a_type_name, or tower ancestry: a BigInt is_a? Int/
+# w_primitive_is_a_type_name, or tower ancestry: a BigInt is_a? Int/Integer/
 # Real/Number, a Symbol is not a String yet shares its tag, ...). If one of
 # these is empirically admitted, the battery has rotted and the run must fail
 # loudly instead of shipping a wrong table.
-MUST_EXCLUDE = %w[Int Real Number Float Decimal String Symbol Boolean].freeze
+MUST_EXCLUDE = %w[Int Integer Real Number Float Decimal String Symbol Boolean].freeze
 
 # Excluded a priori, no in-battery counterexample possible: `Array` is also
 # true for SmallArray (subtag 9) and packed body arrays, but neither shape is
@@ -62,7 +62,7 @@ MUST_EXCLUDE = %w[Int Real Number Float Decimal String Symbol Boolean].freeze
 # can never ship.
 UNFALSIFIABLE = %w[Array].freeze
 
-MUST_ADMIT = %w[BigInt Integer].freeze
+MUST_ADMIT = %w[BigInt].freeze
 
 PROBE = <<~WPROBE
   -> probe(label, v)
@@ -215,10 +215,10 @@ text, existing = current_block(TYPES_W)
 # The interpreter mirror is a deliberate hand-copy (no shared module); verify
 # its literals still match the generated entries so the copies cannot drift
 # silently.
-if entries.key?("BigInt") && entries.key?("Integer")
+if entries.key?("BigInt")
   interp = File.read(INTERP_W)
-  unless interp.include?("expected = 65528") && interp.include?("expected = 65530")
-    abort("gen_tag_table: interpreter.w hand-copied integer tag literals not found — mirror has drifted")
+  unless interp.include?("expected = 65528")
+    abort("gen_tag_table: interpreter.w hand-copied BigInt tag literal not found — mirror has drifted")
   end
 end
 

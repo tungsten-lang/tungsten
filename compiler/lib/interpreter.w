@@ -71,7 +71,7 @@ use target
   # See [[project_const_ref_node_kind]] for the parser-level fix that
   # would eliminate this backstop.
   -> seed_primitive_class_stubs
-    names = ["Integer", "Float", "String", "Boolean", "Bool", "Nil", "Array", "Hash", "Symbol", "Range", "Regex", "Class"]
+    names = ["Integer", "Int", "Float", "String", "Boolean", "Bool", "Nil", "Array", "Hash", "Symbol", "Range", "Regex", "Class"]
     i = 0
     while i < names.size()
       name = names[i]
@@ -1046,7 +1046,7 @@ use target
     if value == false
       return "false"
     t = type(value)
-    if t == "Integer"
+    if t == "Int"
       return value.to_s()
     if t == "String"
       return value
@@ -1469,7 +1469,7 @@ use target
       # A compiled source method uses w_int only to turn a raw signed i64 into
       # its canonical immediate/BigInt WValue. Integers are already arbitrary
       # precision values in the tree walker, so the exact mirror is identity.
-      if args.size() != 2 || !(type(args[1]) in ("Integer" "BigInt"))
+      if args.size() != 2 || !(type(args[1]) in ("Int" "BigInt"))
         raise "w_int expects one Integer argument"
       return args[1]
     when "w_u64"
@@ -1477,7 +1477,7 @@ use target
       # Integer values are arbitrary precision already. Keep the explicit
       # boundary so source methods can share their native boxing decision with
       # eval mode, including values above signed i64 max.
-      if args.size() != 2 || !(type(args[1]) in ("Integer" "BigInt"))
+      if args.size() != 2 || !(type(args[1]) in ("Int" "BigInt"))
         raise "w_u64 expects one Integer argument"
       return args[1]
     when "w_num_to_float"
@@ -2479,7 +2479,7 @@ use target
         # map elementwise — all inside w_quantity_pipe, mirroring the
         # compiled path which routes every unit-target pipe through it.
         tn = w_type_name(left)
-        if tn == "Quantity" || tn == "Array" || tn == "Decimal" || tn == "Integer"
+        if tn == "Quantity" || tn == "Array" || tn == "Decimal" || tn == "Int"
           return ccall("w_quantity_pipe", left, "" + pu[:name], pu[:digits])
     if node_op == :STAR && current_self() == nil
       # Script-level multiplication operands that are undefined bare
@@ -2734,13 +2734,13 @@ use target
         if element_type == "f32"
           return ccall("w_array_to_f32", value)
     if hint == "f64" || hint == "f32"
-      if value_type in ("Integer" "BigInt" "Float" "Decimal" "Rational")
+      if value_type in ("Int" "BigInt" "Float" "Decimal" "Rational")
         return ccall("w_num_to_float", value)
       return value
     if value_type == "Float" && hint in ("u64" "i64" "u128" "i128")
       value = value.to_i()
       value_type = type(value)
-    if !(value_type in ("Integer" "BigInt"))
+    if !(value_type in ("Int" "BigInt"))
       return value
     if hint == "u64"
       return wrap_unsigned_bits(value, 64)
@@ -3515,9 +3515,9 @@ use target
       # Gated on the runtime class specifically (not just "not Integer")
       # so non-numeric bounds — a Char range's `:-A..:-Z`, say — pass
       # through unchanged; only Decimal is a confirmed-broken case.
-      if from != nil && type(from) != "Integer" && ccall("w_class_name", from) == "Decimal"
+      if from != nil && type(from) != "Int" && ccall("w_class_name", from) == "Decimal"
         from = ccall("w_range_bound_i64_w", from)
-      if to != nil && type(to) != "Integer" && ccall("w_class_name", to) == "Decimal"
+      if to != nil && type(to) != "Int" && ccall("w_class_name", to) == "Decimal"
         to = ccall("w_range_bound_i64_w", to)
       excl = recv[:exclusive]
       unbounded = to == nil
@@ -3630,7 +3630,7 @@ use target
             out.push(recv[k]) if k >= 0
             k += 1
           return out
-        if type(idx) == "Integer" && idx < 0
+        if type(idx) == "Int" && idx < 0
           nidx = idx + recv.size()
           return nil if nidx < 0
           return recv[nidx]
@@ -3644,7 +3644,7 @@ use target
 
     # Parity is lowered inline on the compiled path; the runtime IC has no
     # handler, so compute it here so `n.even?` / `n.odd?` work under -e/--wit.
-    if type(recv) == "Integer" && args.size() == 0
+    if type(recv) == "Int" && args.size() == 0
       if name == "even?"
         return (recv % 2) == 0
       if name == "odd?"
@@ -3666,7 +3666,7 @@ use target
       # runtime dispatcher exits instead of raising.
       if args.size() == 0 && name == "to_d"
         tdn = w_type_name(recv)
-        if tdn == "String" || tdn == "Decimal" || tdn == "Integer"
+        if tdn == "String" || tdn == "Decimal" || tdn == "Int"
           return ccall("w_method_call", recv, "" + name, [])
       if args.size() == 1 && name == "gcd"
         return ccall("w_method_call", recv, "" + name, args)
@@ -3692,8 +3692,11 @@ use target
       class_name = "Array"
     elsif t == "String"
       class_name = "String"
-    elsif t == "Integer"
-      class_name = "Integer"
+    elsif t == "Int"
+      # Host integers use the generic host type name, but Tungsten method
+      # dispatch belongs to the auto-promoting Int facade. Int inherits the
+      # representation-independent Integer algorithms.
+      class_name = "Int"
     elsif t == "Hash"
       class_name = "Hash"
     elsif t == "Float"
@@ -3895,7 +3898,7 @@ use target
         return false
       tn = "" + pts[j].to_s()
       if machine_integer_overload_type?(tn)
-        if !(type(args[j]) in ("Integer" "BigInt"))
+        if !(type(args[j]) in ("Int" "BigInt"))
           return false
       elsif machine_float_overload_type?(tn)
         if type(args[j]) != "Float"
@@ -3935,8 +3938,6 @@ use target
     expected = nil
     if tn == "BigInt"
       expected = 65528  # 0xFFF8
-    elsif tn == "Integer"
-      expected = 65530  # 0xFFFA
     if expected == nil
       return nil
     ks = @classes.keys()

@@ -712,7 +712,7 @@ in Tungsten:AST
     return "y" + text.size().to_s() + ":" + text
   if value_type == "Boolean"
     return value ? "b1;" : "b0;"
-  if value_type == "Integer"
+  if value_type == "Int"
     return "i" + value.to_s() + ";"
   text = value.to_s()
   "o" + value_type.size().to_s() + ":" + value_type + text.size().to_s() + ":" + text

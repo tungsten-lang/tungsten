@@ -217,7 +217,7 @@
     if @ring.arity != 2
       raise "coefficient_polynomials_in currently requires two variables"
     index = (
-      variable.class_name == "Integer" ?
+      variable.class_name == "Int" ?
       variable : @ring.index_of(variable))
     if index == nil || index < 0 || index >= 2
       raise "unknown bivariate coefficient variable"
@@ -289,7 +289,7 @@
     if @ring.arity != 2
       raise "bivariate_resultant requires a two-variable ring"
     index = (
-      variable.class_name == "Integer" ?
+      variable.class_name == "Int" ?
       variable : @ring.index_of(variable))
     if index == nil || index < 0 || index >= 2
       raise "unknown bivariate resultant variable"

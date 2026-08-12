@@ -320,7 +320,7 @@
       lines.push("  while i < features.size")
       lines.push("    cell = features\[i\]")
       lines.push("    kind = type(cell)")
-      lines.push("    valid = cell == nil || kind == \"Integer\" || (kind == \"Float\" && (cell != cell || cell - cell == 0.to_f))")
+      lines.push("    valid = cell == nil || kind == \"Int\" || (kind == \"Float\" && (cell != cell || cell - cell == 0.to_f))")
       lines.push("    return nil if !valid")
       lines.push("    i += 1")
       rendered = DecisionTreeExport.render_node(model.tree, count, "  ", lines)

@@ -158,7 +158,7 @@
     lines.push(indent + "while i < features.size")
     lines.push(indent + "  cell = features\[i\]")
     lines.push(indent + "  kind = type(cell)")
-    lines.push(indent + "  valid = cell == nil || kind == \"Integer\" || (kind == \"Float\" && (cell != cell || cell - cell == 0.to_f))")
+    lines.push(indent + "  valid = cell == nil || kind == \"Int\" || (kind == \"Float\" && (cell != cell || cell - cell == 0.to_f))")
     lines.push(indent + "  return nil if !valid")
     lines.push(indent + "  i += 1")
 

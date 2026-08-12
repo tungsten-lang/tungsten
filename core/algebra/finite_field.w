@@ -686,8 +686,7 @@
 
   -> verified?
     characteristic_class = @characteristic.class_name
-    integer_characteristic = characteristic_class == "Integer"
-    integer_characteristic = integer_characteristic || characteristic_class == "Int"
+    integer_characteristic = characteristic_class == "Int"
     integer_characteristic = integer_characteristic || characteristic_class == "BigInt"
     return false if !integer_characteristic
     return false if @characteristic < 2 || !@characteristic.prime?

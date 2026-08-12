@@ -76,7 +76,7 @@ zeta_check("zeta.F5.counts", z5.counts.to_s, "\[8, 34, 122\]")
 zeta_check("zeta.F5.numerator",
   z5.numerator.coefficients.to_s, "\[1, 2, 6, 8, 30, 50, 125\]")
 zeta_check("zeta.F5.jacobian_order", z5.numerator.at(1), 222)
-zeta_check("zeta.F5.integer_value", z5.numerator.at(1).class_name, "Integer")
+zeta_check("zeta.F5.integer_value", z5.numerator.at(1).class_name, "Int")
 zeta_check("weil.F5", c5.weil_cubic.coefficients.to_s,
   "\[-12/1, -9/1, 2/1, 1/1\]")
 

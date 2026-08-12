@@ -396,7 +396,7 @@
   # accepted as shorthand for a one-element exponent array.
   -> coeff(exponents)
     powers = exponents
-    powers = [exponents] if exponents.class_name == "Integer" && @ring.arity == 1
+    powers = [exponents] if exponents.class_name == "Int" && @ring.arity == 1
     raise "monomial exponents must be an Array" if powers.class_name != "Array"
     raise "wrong monomial arity" if powers.size != @ring.arity
     i = 0
@@ -537,7 +537,7 @@
     result
 
   -> degree_in(variable)
-    index = variable.class_name == "Integer" ? variable : @ring.index_of(variable)
+    index = variable.class_name == "Int" ? variable : @ring.index_of(variable)
     raise "unknown polynomial variable" if index == nil
     result = 0
     i = 0
@@ -563,7 +563,7 @@
     self
 
   -> derivative(variable)
-    index = variable.class_name == "Integer" ? variable : @ring.index_of(variable)
+    index = variable.class_name == "Int" ? variable : @ring.index_of(variable)
     raise "unknown polynomial variable" if index == nil
     out = []
     @terms.each -> (term)
@@ -586,7 +586,7 @@
     if variable == nil
       raise "antiderivative needs a variable for multivariate polynomials" if @ring.arity != 1
       variable = 0
-    index = variable.class_name == "Integer" ? variable : @ring.index_of(variable)
+    index = variable.class_name == "Int" ? variable : @ring.index_of(variable)
     raise "unknown polynomial variable" if index == nil
     out = []
     @terms.each -> (term)
@@ -599,7 +599,7 @@
     Polynomial.new(@ring, out)
 
   -> substitution_index(variable)
-    index = variable.class_name == "Integer" ? variable : @ring.index_of(variable)
+    index = variable.class_name == "Int" ? variable : @ring.index_of(variable)
     raise "unknown polynomial variable" if index == nil
     index
 
@@ -696,7 +696,7 @@
 
   -> homogenize(variable = nil)
     index = variable == nil ? @ring.arity - 1 : @ring.index_of(variable)
-    index = variable if variable != nil && variable.class_name == "Integer"
+    index = variable if variable != nil && variable.class_name == "Int"
     raise "unknown homogenizing variable" if index == nil || index < 0 || index >= @ring.arity
     target_degree = degree
     out = []
@@ -707,7 +707,7 @@
     Polynomial.new(@ring, out)
 
   -> dehomogenize(variable)
-    index = variable.class_name == "Integer" ? variable : @ring.index_of(variable)
+    index = variable.class_name == "Int" ? variable : @ring.index_of(variable)
     raise "unknown dehomogenizing variable" if index == nil || index < 0 || index >= @ring.arity
     out = []
     @terms.each -> (term)

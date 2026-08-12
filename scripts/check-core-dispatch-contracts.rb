@@ -22,9 +22,9 @@ TYPES_PATH = File.join(ROOT, "compiler", "lib", "lowering", "types.w")
 # implementations (packed regex literals versus Regex objects, or Float#sqrt,
 # for example). `native_declaration` is reserved for constructor/lowering
 # contracts that do not use an instance IC row. A bodyless method may only be
-# native-backed; listing it as a source fallback is never enough. Adding a
-# source method or IC row without choosing one of those contracts is a gate
-# failure.
+# native-backed or an explicit abstract protocol declaration; listing it as a
+# source fallback is never enough. Adding a source method or IC row without
+# choosing one of those contracts is a gate failure.
 RUNTIME_CLASS_CONTRACTS = {
   "Mmap" => {
     path: "core/mmap.w",
@@ -138,7 +138,7 @@ RUNTIME_CLASS_CONTRACTS = {
     retired_table: "w_ic_bigint_table",
     dispatch_key: "0x02",
     native_ic: [],
-    source_fallback: %w[% & * + - / << >> ^ abs abs! even? gcd isqrt lcm neg! negative? odd? positive? prime? to_f to_i to_s zero? |]
+    source_fallback: %w[% & * + - / << >> ^ abs abs! even? gcd isqrt lcm neg! negative? next odd? positive? prev prime? succ to_f to_i to_s zero? |]
   },
   "Float" => {
     path: "core/numeric/float.w",
@@ -218,6 +218,29 @@ RUNTIME_CLASS_CONTRACTS = {
       norm normalize pythagorean reverse rotate rotate! shuffle shuffle! size
       skasort sort sort! stable_sort stdev take to_a to_f32 to_f64 transpose
       tsort uniq variance wolfsort
+    ]
+  },
+  "Integer" => {
+    path: "core/integer.w",
+    table: nil,
+    native_ic: [],
+    abstract_declaration: %w[+ prime? prime_12k? prime_30k? to_s],
+    source_fallback: %w[
+      bit_length digits divisible_by? each_digit even? factor factorial four?
+      gcd invmod isqrt lcm legendre modpow next odd? pow prev succ three? to_f
+      two?
+    ]
+  },
+  "Int" => {
+    path: "core/numeric/int.w",
+    table: "w_ic_int_table",
+    dispatch_key: "0xFA",
+    native_ic: %w[abs each isqrt prime? prime_12k? prime_30k? sqrt times to_d to_f],
+    native_only: %w[abs each prime? prime_12k? prime_30k? sqrt times to_d to_f],
+    dual_dispatch: %w[isqrt],
+    source_fallback: %w[
+      bit_length chr digits even? factor factorial gcd invmod isqrt lcm legendre
+      modpow negative? next odd? positive? pow prev sq succ to_i to_s zero?
     ]
   }
 }.freeze
@@ -348,10 +371,11 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   native_methods = contract[:native_ic].uniq.sort
   native_only = contract.fetch(:native_only, []).uniq.sort
   native_declarations = contract.fetch(:native_declaration, []).uniq.sort
+  abstract_declarations = contract.fetch(:abstract_declaration, []).uniq.sort
   fallback_methods = contract[:source_fallback].uniq.sort
   dual_dispatch = contract.fetch(:dual_dispatch, []).uniq.sort
   declared_native = native_methods - native_only
-  classified = (declared_native + native_declarations + fallback_methods).uniq.sort
+  classified = (declared_native + native_declarations + abstract_declarations + fallback_methods).uniq.sort
   overlap = native_methods & fallback_methods
   unexpected_overlap = overlap - dual_dispatch
   missing_overlap = dual_dispatch - overlap
@@ -367,7 +391,7 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   errors << "#{class_name}: native-only methods also have source declarations: #{declared_native_only.join(', ')}" unless declared_native_only.empty?
 
   unbacked_bodyless = method_bodies.filter_map do |name, bodies|
-    name if bodies.include?(false) && !(native_methods + native_declarations).include?(name)
+    name if bodies.include?(false) && !(native_methods + native_declarations + abstract_declarations).include?(name)
   end.sort
   unless unbacked_bodyless.empty?
     errors << "#{class_name}: bodyless declarations lack a native contract: #{unbacked_bodyless.join(', ')}"

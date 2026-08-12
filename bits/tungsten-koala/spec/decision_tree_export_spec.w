@@ -29,7 +29,7 @@ use support
   while i < features.size
     cell = features[i]
     kind = type(cell)
-    valid = cell == nil || kind == "Integer" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
+    valid = cell == nil || kind == "Int" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
     return nil if !valid
     i += 1
   if features[0] != nil && (type(features[0]) != "Float" || features[0] == features[0]) && features[0].to_f <= ~0.5
@@ -52,7 +52,7 @@ use support
   while i < features.size
     cell = features[i]
     kind = type(cell)
-    valid = cell == nil || kind == "Integer" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
+    valid = cell == nil || kind == "Int" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
     return nil if !valid
     i += 1
   if features[0] != nil && (type(features[0]) != "Float" || features[0] == features[0]) && features[0].to_f <= ~0.73809523809523803
@@ -67,7 +67,7 @@ use support
   while i < features.size
     cell = features[i]
     kind = type(cell)
-    valid = cell == nil || kind == "Integer" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
+    valid = cell == nil || kind == "Int" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
     return nil if !valid
     i += 1
   if features[0] == nil || (type(features[0]) == "Float" && features[0] != features[0]) || features[0].to_f <= ~4.5
@@ -82,7 +82,7 @@ use support
   while i < features.size
     cell = features[i]
     kind = type(cell)
-    valid = cell == nil || kind == "Integer" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
+    valid = cell == nil || kind == "Int" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
     return nil if !valid
     i += 1
   if features[0] != nil && (type(features[0]) != "Float" || features[0] == features[0]) && features[0].to_f <= ~4.5
@@ -99,7 +99,7 @@ use support
   while i < features.size
     cell = features[i]
     kind = type(cell)
-    valid = cell == nil || kind == "Integer" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
+    valid = cell == nil || kind == "Int" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
     return nil if !valid
     i += 1
   if features[0] != nil && (type(features[0]) != "Float" || features[0] == features[0]) && features[0].to_f <= ~0.5
@@ -152,7 +152,7 @@ describe "DecisionTreeExport standalone Tungsten source" ->
       "  while i < features.size",
       "    cell = features\[i\]",
       "    kind = type(cell)",
-      "    valid = cell == nil || kind == \"Integer\" || (kind == \"Float\" && (cell != cell || cell - cell == 0.to_f))",
+      "    valid = cell == nil || kind == \"Int\" || (kind == \"Float\" && (cell != cell || cell - cell == 0.to_f))",
       "    return nil if !valid",
       "    i += 1",
       "  if features\[0\] != nil && (type(features\[0\]) != \"Float\" || features\[0\] == features\[0\]) && features\[0\].to_f <= ~0.5",

@@ -750,22 +750,23 @@ Unsigned literals are described by the following lexical definitions:
 | Int128  | ✓       | 128  | −2¹²⁷     | 2¹²⁷ − 1  |
 | Int128U |         | 128  | 0         | 2¹²⁸ − 1  |
 |         |         |      |           |           |
+| Integer | ✓       | ∞    | −∞        | ∞         |
 | Int     | ✓       | ∞    | −∞        | ∞         |
-| Integer | ✓       | 48   | −2⁴⁷      | 2⁴⁷ − 1   |
 | BigInt  | ✓       | ∞    | −∞        | ∞         |
 
-An unannotated integer literal has `Int` semantics: exact arithmetic with
-automatic representation changes. Values in the signed 48-bit WValue range
-use the concrete `Integer` class; larger values use `BigInt`:
+`Integer` is the generic, representation-independent integer family. An
+unannotated literal uses its `Int` implementation: exact arithmetic with an
+inline signed 48-bit fast path and automatic continuation as `BigInt`:
 
     wit> 1.class_name
-    Integer
+    Int
 
     wit> (1 << 100).class_name
     BigInt
 
-`Integer` and `BigInt` are concrete children of `Int`, not interchangeable
-names. Fixed-width integer behavior is opt-in through type hints such as
+`Int < Integer` and `BigInt < Int`; the names are not interchangeable.
+Algorithms on generic `Integer` cannot assume the default promotion policy,
+while `Int` methods may. Fixed-width behavior is opt-in through hints such as
 `## i64` and `## u64`.
 
 Unsigned integers are input and output using the `0x` prefix and hexadecimal (base 16) digits `0–9a–f` (the capitalized digits `A–F` also work). The size of the unsigned value is determined by the number of hex digits used:

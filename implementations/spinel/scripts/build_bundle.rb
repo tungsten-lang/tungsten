@@ -4659,7 +4659,7 @@ def stage0_real_interpreter_compat(body)
     def stage0_type_name(value)
       return "Nil" if value.nil?
       return "Boolean" if value == true || value == false
-      return "Integer" if value.is_a?(Integer)
+      return "Int" if value.is_a?(Integer)
       return "Float" if value.is_a?(Float)
       return "String" if value.is_a?(String)
       return "Symbol" if value.is_a?(Symbol)

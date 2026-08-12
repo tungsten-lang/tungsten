@@ -19,7 +19,7 @@
   while i < features.size
     cell = features[i]
     kind = type(cell)
-    valid = cell == nil || kind == "Integer" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
+    valid = cell == nil || kind == "Int" || (kind == "Float" && (cell != cell || cell - cell == 0.to_f))
     return nil if !valid
     i += 1
   if features[1] != nil && (type(features[1]) != "Float" || features[1] == features[1]) && features[1].to_f <= ~110.0

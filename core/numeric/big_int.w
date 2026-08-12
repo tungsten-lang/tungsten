@@ -190,6 +190,19 @@
     # own semantic bounds check against |$size| (or $capacity for writes).
     u64[] limbs
 
+  # Int's neighboring-value methods operate directly on the inline i48
+  # payload. BigInt is Int's heap continuation, so override those methods at
+  # the representation boundary and let the exact arithmetic operators either
+  # retain a BigInt or canonicalize the crossover result back to Int.
+  -> prev
+    self - 1
+
+  -> succ
+    self + 1
+
+  -> next
+    self + 1
+
   # Portable raw-limb funnel for positive sub-limb left shifts. Fresh and
   # recycled buffers can occupy page offsets that make a fixed walk direction
   # false-conflict in the load/store unit, so select the direction from the

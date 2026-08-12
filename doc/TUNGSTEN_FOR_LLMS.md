@@ -221,8 +221,9 @@ ensure
 - **Decimal**: `3.14` — bare fractional literals are **exact decimals**
   (`0.1 + 0.2 == 0.3` is `true`)
 - **Float**: `~3.14` — machine floats are opt-in with `~`
-- **Int**: `42`, `0xFF`, `0b1010` — exact and auto-promoting; concrete
-  values report `Integer` while inline and `BigInt` when heap-backed
+- **Integer**: generic, representation-independent exact-integer family
+- **Int**: `42`, `0xFF`, `0b1010` — the default exact, auto-promoting
+  implementation; values report `Int` inline and `BigInt` on the heap
 - **String**: `"hello"`, with `[expr]` interpolation
 - **Bool**: `true`, `false`
 - **Nil**: `nil`

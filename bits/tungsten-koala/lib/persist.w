@@ -243,7 +243,7 @@
       flag = "T" if value
       lines.push(flag)
       out = true
-    if kind == "Integer"
+    if kind == "Int"
       lines.push("i " + value.to_s)
       out = true
     if kind == "Float"

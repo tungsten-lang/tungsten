@@ -233,8 +233,7 @@
     @free_digits = []
     free_digits.each -> (digit)
       digit_class = digit.class_name
-      integer_digit = digit_class == "Integer"
-      integer_digit = true if digit_class == "Int"
+      integer_digit = digit_class == "Int"
       integer_digit = true if digit_class == "BigInt"
       if (!integer_digit || digit < 0 ||
           digit >= @residue_disk.prime)

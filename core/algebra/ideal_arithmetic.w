@@ -25,8 +25,7 @@
 
   -> .integer_value?(value)
     name = value.class_name
-    integer = name == "Integer"
-    integer = true if name == "Int"
+    integer = name == "Int"
     integer = true if name == "BigInt"
     integer
 
@@ -731,8 +730,7 @@
       @verified_cache = true
       return true
     value = @computation.value
-    integer_value = value.class_name == "Integer"
-    integer_value = true if value.class_name == "Int"
+    integer_value = value.class_name == "Int"
     integer_value = true if value.class_name == "BigInt"
     if !integer_value
       raise "finite prime valuation is not an integer"

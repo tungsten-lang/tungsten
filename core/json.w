@@ -47,7 +47,7 @@
         return "true"
       return "false"
 
-    if t == "Integer" || t == "Fixnum"
+    if t == "Int" || t == "Fixnum"
       return value.to_s
 
     if t == "Float"

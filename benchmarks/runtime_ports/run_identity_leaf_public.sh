@@ -105,6 +105,7 @@ if bigint_text.count("\n  -> to_i\n") != 1:
 
 compiler_text = (cand / "compiler/tungsten.w").read_text()
 compiler_prefix = """use core/integer
+use core/numeric/int
 use core/numeric/float
 use core/numeric/big_int
 """
@@ -124,11 +125,11 @@ for block, label in (
      '        @float_source_method_unresolved = false\n',
      "Float source-method autoload gate"),
     ('      if call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq")\n'
-     '        consider_autoload_name("Integer", defined, registry, seen, pending)\n'
+     '        consider_autoload_name("Int", defined, registry, seen, pending)\n'
      '        if call_name == "to_i" && @bigint_to_i_unresolved\n'
      '          consider_autoload_name("BigInt", defined, registry, seen, pending)\n'
      '          @bigint_to_i_unresolved = false\n',
-     "Integer/BigInt nested autoload gate"),
+     "Int/BigInt nested autoload gate"),
     ('    "loader-ast-v16"\n', "loader cache epoch"),
 ):
     require_once(loader_text, block, label)

@@ -662,7 +662,7 @@ use parser
         consider_autoload_name("BigArray", defined, registry, seen, pending)
         @mmap_typed_view_unresolved = false
 
-      # Integer/Number leaf methods commonly receive literals or locals, which
+      # Int/Integer leaf methods commonly receive literals or locals, which
       # carry no explicit class reference. The to_i spelling is shared with
       # source-only BigInt identity, so schedule that tiny class once as well.
       # The bitwise/divmod spellings require an explicit receiver: a
@@ -671,7 +671,7 @@ use parser
       # (including the compiler itself, which broke stage identity).
       bitwise_op_send = call_receiver != nil && call_name in ("&" "|" "^" "/" "%")
       if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "digits" "isqrt" "bit_length" "to_s" "to_f" "abs" "prime?" "+" "-" "*")
-        consider_autoload_name("Integer", defined, registry, seen, pending)
+        consider_autoload_name("Int", defined, registry, seen, pending)
         if call_name == "to_i" && @bigint_to_i_unresolved
           consider_autoload_name("BigInt", defined, registry, seen, pending)
           @bigint_to_i_unresolved = false

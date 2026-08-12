@@ -174,7 +174,7 @@
           ok = false if row.size != width
           row.each -> (value)
             kind = type(value)
-            ok = false if kind != "Integer" && kind != "Float"
+            ok = false if kind != "Int" && kind != "Float"
     ok
 
   # Numerically stable softmax for one row: subtracting the largest logit
@@ -241,9 +241,9 @@
     ok = LogisticRegression.numeric_rows?(rows) if ok
     if ok
       rate_kind = type(@learning_rate)
-      ok = false if rate_kind != "Integer" && rate_kind != "Float"
+      ok = false if rate_kind != "Int" && rate_kind != "Float"
       ok = false if @learning_rate.to_f <= 0.to_f
-      ok = false if type(@epochs) != "Integer" || @epochs < 1
+      ok = false if type(@epochs) != "Int" || @epochs < 1
     wts = nil
     wts = Estimator.weight_values(sample_weight, rows.size) if ok && sample_weight != nil
     ok = false if sample_weight != nil && wts == nil

@@ -517,7 +517,7 @@
         if type(row) == "Array"
           row.each -> (value)
             kind = type(value)
-            ok = false if kind != "Integer" && kind != "Float"
+            ok = false if kind != "Int" && kind != "Float"
         class_index = 0 - 1
         c = 0
         while c < classes.size
@@ -527,7 +527,7 @@
         if ok
           p = row[class_index]
           kind = type(p)
-          ok = false if kind != "Integer" && kind != "Float"
+          ok = false if kind != "Int" && kind != "Float"
           if ok
             clipped = p.to_f
             clipped = eps if clipped < eps

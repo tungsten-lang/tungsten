@@ -60,7 +60,7 @@
     ok = frame != nil
     ok = frame.respond_to?("valid?") if ok
     ok = frame.valid? if ok
-    ok = type(@degree) == "Integer" if ok
+    ok = type(@degree) == "Int" if ok
     ok = @degree >= 1 if ok
     ok = frame.row_count > 0 && frame.col_count > 0 if ok
     names = []
@@ -186,7 +186,7 @@
 
   -> .numeric_cell?(value)
     kind = type(value)
-    kind == "Integer" || kind == "Float"
+    kind == "Int" || kind == "Float"
 
   -> .compatible_frame?(frame, feature_names)
     ok = frame != nil

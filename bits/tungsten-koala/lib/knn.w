@@ -109,7 +109,7 @@
     ok = rows != nil && labels != nil
     ok = rows.size > 0 && rows.size == labels.size if ok
     ok = KNNClassifier.numeric_rows?(rows) if ok
-    ok = type(@k) == "Integer" if ok
+    ok = type(@k) == "Int" if ok
     ok = @k > 0 if ok
     ok = @weight_kind == :uniform || @weight_kind == :distance if ok
     classes = []
@@ -143,7 +143,7 @@
           ok = false if row.size != width
           row.each -> (value)
             kind = type(value)
-            ok = false if kind != "Integer" && kind != "Float"
+            ok = false if kind != "Int" && kind != "Float"
     ok
 
   # Squared Euclidean distance between two equal-width rows (float).
@@ -315,7 +315,7 @@
     ok = st != nil && type(st) == "Hash"
     ok = st[:k] != nil if ok
     ok = st[:train_rows] != nil && st[:train_labels] != nil if ok
-    ok = type(st[:k]) == "Integer" && st[:k] > 0 if ok
+    ok = type(st[:k]) == "Int" && st[:k] > 0 if ok
     kind = st[:weight_kind]
     kind = :uniform if kind == nil
     ok = kind == :uniform || kind == :distance if ok

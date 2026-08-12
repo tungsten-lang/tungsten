@@ -37,7 +37,7 @@
 + SupportVectorMachine
   -> .number?(value)
     kind = type(value)
-    kind == "Integer" || kind == "Float"
+    kind == "Int" || kind == "Float"
 
   -> .copy_array(values)
     out = []
@@ -468,10 +468,10 @@
     ok = SupportVectorMachine.number?(@c) && @c.to_f > 0.to_f
     name = @kernel.to_s if @kernel != nil
     ok = name == "linear" || name == "rbf" || name == "poly" if ok
-    ok = type(@degree) == "Integer" && @degree >= 1 if ok
+    ok = type(@degree) == "Int" && @degree >= 1 if ok
     ok = SupportVectorMachine.number?(@coef0) if ok
     ok = SupportVectorMachine.number?(@tol) && @tol.to_f > 0.to_f if ok
-    ok = type(@max_iter) == "Integer" && @max_iter >= 1 if ok
+    ok = type(@max_iter) == "Int" && @max_iter >= 1 if ok
     ok
 
   -> fit(x, y, sample_weight = nil)

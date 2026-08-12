@@ -36,7 +36,7 @@
 + GradientBoosting
   -> .number?(value)
     kind = type(value)
-    kind == "Integer" || kind == "Float"
+    kind == "Int" || kind == "Float"
 
   -> .numeric_targets?(values)
     ok = values != nil && values.size > 0
@@ -46,11 +46,11 @@
     ok
 
   -> .params_ok?(n_estimators, learning_rate, max_depth, min_samples_leaf)
-    ok = type(n_estimators) == "Integer" && n_estimators > 0
+    ok = type(n_estimators) == "Int" && n_estimators > 0
     ok = GradientBoosting.number?(learning_rate) && learning_rate.to_f > 0.to_f if ok
     if ok && max_depth != nil
-      ok = type(max_depth) == "Integer" && max_depth >= 0
-    ok = type(min_samples_leaf) == "Integer" && min_samples_leaf >= 1 if ok
+      ok = type(max_depth) == "Int" && max_depth >= 0
+    ok = type(min_samples_leaf) == "Int" && min_samples_leaf >= 1 if ok
     ok
 
   # Fit one deterministic regression tree and return its plain root hash.

@@ -1,7 +1,6 @@
-# BigInt#prev/succ/next — served by Int's source bodies through type-class
-# dispatch since the C IC rows were retired (runtime-to-core port). Pins
-# value semantics across widths, signs, and the i48 demotion crossover on
-# both engines.
+# BigInt#prev/succ/next — explicit heap-representation overrides since Int's
+# source bodies operate on inline i48 payloads. Pins value semantics across
+# widths, signs, and the i48 demotion crossover on both engines.
 
 -> check(name, got, want)
   if got == want

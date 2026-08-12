@@ -257,19 +257,20 @@ BlankSlate
         │     └── TypeError
         └── Number
               ├── Real
-              │     ├── Int
-              │     │     ├── Integer (inline signed i48)
-              │     │     └── BigInt (heap arbitrary precision)
+              │     ├── Integer (generic exact integers)
+              │     │     └── Int (default exact-promotion policy)
+              │     │           └── BigInt (heap arbitrary precision)
               │     ├── Decimal … BigDecimal
               │     ├── Float …
               │     └── Vector / Matrix / …
               └── Hypercomplex …
 ```
 
-`Int` is the representation-independent, exact integer family. Runtime
-introspection reports the concrete representation (`Integer` or `BigInt`),
-while subtype checks and typed overloads may target `Int` to accept both.
-Concrete overloads remain disjoint.
+`Integer` is the representation-independent exact family. `Int` supplies the
+default promotion policy and `BigInt` continues it on the heap. Runtime
+introspection reports `Int` while inline and `BigInt` on the heap; typed
+overloads may target generic `Integer`, policy-specific `Int`, or concrete
+`BigInt`, with the most specific matching arm selected.
 
 Traits such as `Comparable` and `Enumerable` are mixed into classes with `is` and appear in the standard library autoload table (`core/tungsten.w`). A class or trait is not part of the default global namespace until registered for autoload or otherwise loaded.
 

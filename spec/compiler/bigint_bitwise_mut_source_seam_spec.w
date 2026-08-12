@@ -57,12 +57,12 @@
 -> consumed_and_one_limb
   r = (1 << 63) + 15
   r &= (1 << 62) + 15
-  r == 15 && type(r) == "Integer"
+  r == 15 && type(r) == "Int"
 
 -> consumed_xor_one_limb
   r = (1 << 63) + 31
   r ^= (1 << 63) + 16
-  r == 15 && type(r) == "Integer"
+  r == 15 && type(r) == "Int"
 
 # An opaque rhs leaves compound lowering unable to prove its dynamic type.
 # Floats retain the public runtime's truncating bitwise coercion; invalid text

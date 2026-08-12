@@ -81,13 +81,13 @@
     mode = strategy.to_s
     ok = probs != nil && labels != nil
     ok = probs.size == labels.size && probs.size > 0 if ok
-    ok = type(n_bins) == "Integer" && n_bins > 0 if ok
+    ok = type(n_bins) == "Int" && n_bins > 0 if ok
     ok = mode == "uniform" || mode == "quantile" if ok
     if ok
       probs.each -> (p)
         kind = type(p)
-        ok = false if kind != "Integer" && kind != "Float"
-        if kind == "Integer" || kind == "Float"
+        ok = false if kind != "Int" && kind != "Float"
+        if kind == "Int" || kind == "Float"
           v = p.to_f
           ok = false if v < 0.to_f || v > 1.to_f
     wts = nil
@@ -175,7 +175,7 @@
     if ok
       values.each -> (value)
         kind = type(value)
-        ok = false if kind != "Integer" && kind != "Float"
+        ok = false if kind != "Int" && kind != "Float"
     ok
 
   # A fitted classifier's class order, including a classifier behind a
@@ -216,8 +216,8 @@
           matrix = []
           response.each -> (value)
             kind = type(value)
-            ok = false if kind != "Integer" && kind != "Float"
-            if kind == "Integer" || kind == "Float"
+            ok = false if kind != "Int" && kind != "Float"
+            if kind == "Int" || kind == "Float"
               positive = value.to_f
               if !same_positive
                 if decision
@@ -239,8 +239,8 @@
             positions.each -> (pos)
               value = row[pos]
               kind = type(value)
-              ok = false if kind != "Integer" && kind != "Float"
-              reordered.push(value.to_f) if kind == "Integer" || kind == "Float"
+              ok = false if kind != "Int" && kind != "Float"
+              reordered.push(value.to_f) if kind == "Int" || kind == "Float"
           matrix.push(reordered)
         out = matrix if ok
     out
@@ -438,8 +438,8 @@
     if ok && kind == "sigmoid"
       slope_kind = type(state[:slope])
       intercept_kind = type(state[:intercept])
-      ok = false if slope_kind != "Integer" && slope_kind != "Float"
-      ok = false if intercept_kind != "Integer" && intercept_kind != "Float"
+      ok = false if slope_kind != "Int" && slope_kind != "Float"
+      ok = false if intercept_kind != "Int" && intercept_kind != "Float"
     if ok && kind == "isotonic"
       xs = state[:x_thresholds]
       ys = state[:y_thresholds]
@@ -450,9 +450,9 @@
         while i < xs.size
           x_kind = type(xs[i])
           y_kind = type(ys[i])
-          ok = false if x_kind != "Integer" && x_kind != "Float"
-          ok = false if y_kind != "Integer" && y_kind != "Float"
-          if y_kind == "Integer" || y_kind == "Float"
+          ok = false if x_kind != "Int" && x_kind != "Float"
+          ok = false if y_kind != "Int" && y_kind != "Float"
+          if y_kind == "Int" || y_kind == "Float"
             ok = false if ys[i].to_f < 0.to_f || ys[i].to_f > 1.to_f
           previous_x_kind = nil
           previous_y_kind = nil
@@ -460,10 +460,10 @@
             previous_x_kind = type(xs[i - 1])
             previous_y_kind = type(ys[i - 1])
           numeric_pair = i > 0
-          numeric_pair = false if x_kind != "Integer" && x_kind != "Float"
-          numeric_pair = false if y_kind != "Integer" && y_kind != "Float"
-          numeric_pair = false if previous_x_kind != "Integer" && previous_x_kind != "Float"
-          numeric_pair = false if previous_y_kind != "Integer" && previous_y_kind != "Float"
+          numeric_pair = false if x_kind != "Int" && x_kind != "Float"
+          numeric_pair = false if y_kind != "Int" && y_kind != "Float"
+          numeric_pair = false if previous_x_kind != "Int" && previous_x_kind != "Float"
+          numeric_pair = false if previous_y_kind != "Int" && previous_y_kind != "Float"
           if numeric_pair
             ok = false if xs[i].to_f < xs[i - 1].to_f
             ok = false if ys[i].to_f < ys[i - 1].to_f
@@ -562,7 +562,7 @@
       if cv.respond_to?("folds")
         out = cv
       else
-        out = StratifiedKFold.new(cv) if type(cv) == "Integer"
+        out = StratifiedKFold.new(cv) if type(cv) == "Int"
     out
 
   # Cross-fit one base model + one calibrator set per validation fold.
@@ -754,7 +754,7 @@
   # future unfitted clones through with_params.
   -> to_state
     stored_cv = @effective_cv
-    stored_cv = @cv if type(@cv) == "Integer"
+    stored_cv = @cv if type(@cv) == "Int"
     {
       method: @method,
       cv: stored_cv,
@@ -772,7 +772,7 @@
       classes = st[:classes]
       models = st[:calibrated_models]
       ok = method == "sigmoid" || method == "isotonic"
-      ok = type(st[:cv]) == "Integer" && st[:cv] >= 2 if ok
+      ok = type(st[:cv]) == "Int" && st[:cv] >= 2 if ok
       ok = type(classes) == "Array" && classes.size >= 2 if ok
       ok = type(models) == "Array" && models.size > 0 if ok
       if ok

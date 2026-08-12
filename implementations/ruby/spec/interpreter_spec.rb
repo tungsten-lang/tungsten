@@ -1144,12 +1144,12 @@ RSpec.describe Tungsten::Interpreter do
   end
 
   it "calls class on primitives (returns the auto-stub WClass)" do
-    expect(run("4.class").name).to eq("Integer")
+    expect(run("4.class").name).to eq("Int")
     expect(run('"hi".class').name).to eq("String")
   end
 
   it "calls class_name on primitives" do
-    expect(run("4.class_name")).to eq("Integer")
+    expect(run("4.class_name")).to eq("Int")
     expect(run('"hi".class_name')).to eq("String")
   end
 
@@ -1318,7 +1318,7 @@ RSpec.describe Tungsten::Interpreter do
   end
 
   it "type returns type name" do
-    expect(run('42.type')).to eq("Integer")
+    expect(run('42.type')).to eq("Int")
     expect(run('"hi".type')).to eq("String")
     expect(run('[1].type')).to eq("Array")
     expect(run('true.type')).to eq("Boolean")

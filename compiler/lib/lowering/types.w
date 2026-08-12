@@ -99,7 +99,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Decimal"       => 0xFD
     "Quantity"      => 0xC1
     "String"        => 0xF9
-    "Integer"       => 0xFA
+    "Int"           => 0xFA
     "Instant"       => 0xFB
     # W_TAG_CHAR subtypes — runtime's w_dispatch_key returns 0xD0|subtype
     # when v >> 48 == 0xFFFC so each lexical kind can register its own
@@ -978,14 +978,13 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 # so the call is an optimization barrier) and which later passes use to
 # prove operand tags inside the selected overload body.
 #
-# Equivalence, not tag-injectivity, is the admission rule: inline `Integer`
-# values map to 0xFFFA, but their `Int` parent also accepts BigInt, so an exact
-# `Int` compare would silently drop heap integers. A name is admitted only
-# when `w_value_is_a(v, name)` agrees with
+# Equivalence, not tag-injectivity, is the admission rule: inline `Int`
+# values map to 0xFFFA, but both `Int` and its generic `Integer` parent also
+# accept BigInt, so an exact compare would silently drop heap integers. A name
+# is admitted only when `w_value_is_a(v, name)` agrees with
 # the tag test for ALL v — which excludes every name appearing in more
 # than one arm of `w_primitive_is_a_type_name` (runtime.c) and every
-# ancestor in the numeric/string/array towers, leaving the concrete Integer
-# and BigInt representations.
+# ancestor in the numeric/string/array towers, leaving essentially BigInt.
 #
 # THE TABLE BETWEEN THE MARKERS IS GENERATED — do not hand-edit it. It is
 # derived from the runtime relation by scripts/gen_tag_table.rb, which
@@ -1008,8 +1007,6 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   # (a top-level tag and 0xFFFF000000000000).
   if name == "BigInt"
     return {shape: :top_tag, tag: "-2251799813685248", mask: "-281474976710656"}
-  if name == "Integer"
-    return {shape: :top_tag, tag: "-1688849860263936", mask: "-281474976710656"}
   nil
 # --- END GENERATED TAG TABLE ---
 

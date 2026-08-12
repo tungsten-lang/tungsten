@@ -62,7 +62,7 @@
     if ok
       targets.each -> (target)
         ok = false if target == nil
-    ok = type(@k) == "Integer" if ok
+    ok = type(@k) == "Int" if ok
     ok = @k > 0 if ok
     ok = false if sample_weight != nil
     kind = @weight_kind
@@ -181,7 +181,7 @@
     ok = st != nil && type(st) == "Hash"
     ok = st[:k] != nil && st[:weight_kind] != nil if ok
     ok = st[:train_rows] != nil && st[:train_targets] != nil if ok
-    ok = type(st[:k]) == "Integer" && st[:k] > 0 if ok
+    ok = type(st[:k]) == "Int" && st[:k] > 0 if ok
     ok = st[:weight_kind] == :uniform || st[:weight_kind] == :distance if ok
     ok = KNNClassifier.numeric_rows?(st[:train_rows]) if ok
     ok = type(st[:train_targets]) == "Array" && Stats.numeric?(st[:train_targets]) if ok

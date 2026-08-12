@@ -1431,7 +1431,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       # Values outside the inline i48 payload live as BigInts in compiler
       # arithmetic (the tag constants themselves do) — both spellings of
       # integer are table-valid.
-      if cv != nil && type(cv) in ("Integer" "BigInt")
+      if cv != nil && type(cv) in ("Int" "BigInt")
         return {known: 0 - 1, bits: cv, fact: false}
     return nil
   if k == :call && node.name == "wvalue_bits" && node.receiver == nil && node.args != nil && node.args.size() == 1

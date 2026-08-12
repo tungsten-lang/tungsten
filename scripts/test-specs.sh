@@ -507,6 +507,7 @@ if [[ "${1:-}" == --job-* ]]; then
 fi
 
 compiled_specs=(
+  compiler/test/regex_features.w
   spec/compiler/ast_body_native_spec.w
   spec/compiler/ast_typed_sidecar_spec.w
   spec/compiler/ast_typed_visitor_spec.w
@@ -705,6 +706,7 @@ cuda_reject_specs=(
 )
 
 interpreter_specs=(
+  compiler/test/regex_features.w
   # Engine-parity pins: these compiler specs assert values that must hold
   # identically interpreted (compiled-only verification has missed clobbered
   # interpreter.w hunks before).

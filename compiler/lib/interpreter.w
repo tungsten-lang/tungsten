@@ -608,8 +608,13 @@ use target
       expanded = expand_constant_alias(name)
       if expanded != nil
         name = expanded
-    if !@classes.has_key?(name)
-      try_autoload_class(name)
+    # Primitive class stubs make `.class` available before Core loads, but a
+    # stub must not suppress the real class when source names it directly.
+    # Regex exposed this: the seeded empty class made `Regex.new(pattern)`
+    # skip core/regex.w and report that no constructor existed. Autoload is
+    # idempotent (`@loaded_files` guards it), so registered classes can always
+    # be hydrated here before returning the class object.
+    try_autoload_class(name)
     if @classes.has_key?(name)
       return @classes[name]
     hint = foreign_name_hint(name)
@@ -1619,6 +1624,18 @@ use target
       return ccall("w_string_take_byte_array", args[1], args[2])
     when "w_string_reverse"
       return ccall("w_string_reverse", args[1])
+    when "w_regex_scan_char"
+      if args.size() != 5
+        raise "w_regex_scan_char expects subject, start, length, and codepoint"
+      return ccall("w_regex_scan_char", args[1], args[2], args[3], args[4])
+    when "w_regex_scan_flag"
+      if args.size() != 5
+        raise "w_regex_scan_flag expects subject, start, length, and flag"
+      return ccall("w_regex_scan_flag", args[1], args[2], args[3], args[4])
+    when "w_string_from_codes"
+      if args.size() != 4
+        raise "w_string_from_codes expects codes, start, and length"
+      return ccall("w_string_from_codes", args[1], args[2], args[3])
     when "w_int_to_str_boxed"
       return ccall("w_int_to_str_boxed", args[1])
     when "w_int_to_str_base_boxed"
@@ -3627,7 +3644,7 @@ use target
     # instead of raising). Block-taking intrinsics (times/each) are excluded —
     # w_method_call can't carry the block.
     if type(recv) != "Hash"
-      if args.size() == 0 && name in ("to_f" "to_i" "floor" "ceil" "round" "chr" "ord" "prime?" "prime_12k?" "prime_30k?" "abs" "to_s" "sqrt" "sq" "succ" "prev" "negative?")
+      if args.size() == 0 && name in ("to_f" "to_i" "floor" "ceil" "round" "chr" "ord" "codes" "prime?" "prime_12k?" "prime_30k?" "abs" "to_s" "sqrt" "sq" "succ" "prev" "negative?")
         return ccall("w_method_call", recv, "" + name, [])
       # `to_d` is receiver-gated: only String (exact-Decimal parse), Decimal
       # (identity), and Integer (scale-0 convert) have runtime IC handlers.

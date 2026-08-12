@@ -378,6 +378,9 @@ projects stay unchecked until their stated acceptance criteria are met.
   cancellation propagation, cleanup, and uncaught worker errors.
 - [ ] Expand `core/channel.w` with bounded/unbounded send, receive, close,
   iteration, timeout/nonblocking operations, and select semantics.
+  Bounded `send`, `receive`/`recv`, close/drain behavior, and invalid
+  capacity rejection are source-defined and covered across both engines;
+  unbuffered/unbounded operation and result-bearing receive remain open.
 - [ ] Flesh out `core/mutex.w` with lock/try_lock/unlock/synchronize, ownership
   errors, non-reentrancy policy, poisoning policy, and cancellation safety.
 - [x] Flesh out `core/atomic.w` with signed-i64 load/store/exchange/CAS/fetch

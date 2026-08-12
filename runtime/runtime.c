@@ -58644,8 +58644,17 @@ static WChan *as_chan(WValue v) {
 }
 
 WValue w_chan_new(WValue capacity_wv) {
+    if (!w_is_int(capacity_wv)) {
+        w_raise(w_string("Channel capacity must be an Integer"));
+    }
     int64_t cap = w_as_int(capacity_wv);
+    if (cap <= 0) {
+        w_raise(w_string("Channel capacity must be positive; unbuffered channels are not implemented"));
+    }
     WChan *ch = calloc(1, sizeof(WChan));
+    if (!ch) {
+        w_raise(w_string("Channel allocation failed"));
+    }
     ch->type = W_TYPE_CHANNEL;
     ch->cap = cap;
     ch->count = 0;
@@ -58655,10 +58664,11 @@ WValue w_chan_new(WValue capacity_wv) {
     ch->send_waitq = NULL;
     ch->recv_waitq = NULL;
     pthread_mutex_init(&ch->lock, NULL);
-    if (cap > 0) {
-        ch->buffer = calloc(1, sizeof(WValue) * cap);
-    } else {
-        ch->buffer = NULL;
+    ch->buffer = calloc((size_t)cap, sizeof(WValue));
+    if (!ch->buffer) {
+        pthread_mutex_destroy(&ch->lock);
+        free(ch);
+        w_raise(w_string("Channel buffer allocation failed"));
     }
     return w_box_ptr(ch, W_SUBTAG_GENERIC);
 }

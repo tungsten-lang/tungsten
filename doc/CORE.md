@@ -26,7 +26,7 @@ summary from the source header, and a link to the source.
 | `BoolArray` | `+ BoolArray` | Bit-packed boolean array. The dedicated WBoolArray struct was folded | [`core/bool_array.w`](../core/bool_array.w) |
 | `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. The dedicated | [`core/byte_array.w`](../core/byte_array.w) |
 | `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
-| `Channel` | `+ Channel` | — | [`core/channel.w`](../core/channel.w) |
+| `Channel` | `+ Channel` | Channel — a bounded, thread-safe FIFO for goroutine communication. | [`core/channel.w`](../core/channel.w) |
 | `Class` | `+ Class` | — | [`core/class.w`](../core/class.w) |
 | `Closure` | `+ Closure` | — | [`core/closure.w`](../core/closure.w) |
 | `CIDR` | `+ CIDR` | — | [`core/cidr.w`](../core/cidr.w) |

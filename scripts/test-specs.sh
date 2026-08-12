@@ -727,6 +727,7 @@ interpreter_specs=(
   spec/core/channel_spec.w
   spec/core/atomic_spec.w
   spec/core/mutex_spec.w
+  spec/core/timer_validation_spec.w
   spec/core/env_spec.w
   spec/core/integer_tower_spec.w
   spec/core/url_spec.w
@@ -830,6 +831,8 @@ core_specs=(
   spec/core/channel_unbuffered_spec.w
   spec/core/mutex_spec.w
   spec/core/mutex_thread_spec.w
+  spec/core/timer_spec.w
+  spec/core/timer_validation_spec.w
   spec/core/env_spec.w
   spec/core/integer_tower_spec.w
   spec/core/url_spec.w

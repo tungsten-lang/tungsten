@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(518 total), grouped by area, with its declaration, a one-line
+(519 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -163,6 +163,7 @@ summary from the source header, and a link to the source.
 | `Symbol` | `+ Symbol` | — | [`core/symbol.w`](../core/symbol.w) |
 | `System` | `+ System` | — | [`core/system.w`](../core/system.w) |
 | `Thread` | `+ Thread` | Thread — a native OS thread (pthread). | [`core/thread.w`](../core/thread.w) |
+| `Timer` | `+ Timer` | Timer — monotonic one-shot and fixed-rate timers. | [`core/timer.w`](../core/timer.w) |
 | `Token` | `+ Token` | — | [`core/token.w`](../core/token.w) |
 | `Tuple` | `+ Tuple` | Tuple — a heterogeneous, fixed, dynamically-indexable value grouping. | [`core/tuple.w`](../core/tuple.w) |
 | `UUID` | `+ UUID` | — | [`core/uuid.w`](../core/uuid.w) |

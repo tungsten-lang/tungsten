@@ -154,6 +154,7 @@
   auto :Symbol,       "symbol"
   auto :System,       "system"
   auto :Thread,       "thread"
+  auto :Timer,        "timer"
   auto :Token,        "token"
   auto :Tuple,        "tuple"
   auto :UUID,         "uuid"

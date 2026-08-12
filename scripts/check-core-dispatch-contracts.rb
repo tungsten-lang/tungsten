@@ -61,6 +61,24 @@ RUNTIME_CLASS_CONTRACTS = {
     native_ic: %w[[] []= get set],
     native_only: %w[[] []= get set],
     source_fallback: %w[__enumerable_iteration_mode cap each empty? rotate shuffle size sort]
+  },
+  "IPv4" => {
+    path: "core/ipv4.w",
+    table: "w_ic_ipv4_table",
+    native_ic: %w[inspect],
+    source_fallback: %w[[] a b broadcast broadcast? c cidr? contains? d global? include? link_local? loopback? mask multicast? netmask network octet octets prefix private? reserved? to_i to_s unspecified? with_prefix]
+  },
+  "IPv6" => {
+    path: "core/ipv6.w",
+    table: "w_ic_ipv6_table",
+    native_ic: %w[inspect],
+    source_fallback: %w[[] byte bytes cidr? contains? global? include? link_local? loopback? multicast? network prefix private? to_s unique_local? unspecified? with_prefix]
+  },
+  "MAC" => {
+    path: "core/mac.w",
+    table: "w_ic_mac_table",
+    native_ic: %w[inspect],
+    source_fallback: %w[[] broadcast? byte bytes local? multicast? to_s unicast? universal?]
   }
 }.freeze
 

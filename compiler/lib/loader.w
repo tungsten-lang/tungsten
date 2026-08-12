@@ -991,10 +991,13 @@ use parser
     override = env("TUNGSTEN_CACHE_DIR")
     if override != nil && override != ""
       return override
-    home = env("HOME")
-    if home == nil || home == ""
-      return nil
-    home + "/.tungsten/cache"
+    project_root = find_project_root("")
+    if project_root != ""
+      return project_root + "/build/cache"
+    root = env("TUNGSTEN_ROOT")
+    if root != nil && root != ""
+      return root + "/build/cache"
+    nil
 
   -> cache_key(resolved)
     bit_home = env("BIT_HOME")

@@ -296,10 +296,10 @@ projects stay unchecked until their stated acceptance criteria are met.
   `-O3` application/runtime code while retaining checks, symbols, and source
   metadata; explicit `--dev` selects `-O0`, and benchmark guidance continues
   to require the full release profile.
-- [ ] Move the remaining reusable runtime archive and incremental artifacts out
-  of `/tmp`/implicit home caches into the selected content-addressed cache, and
-  include tool contents, generated tables, runtime sources, ambient SDK paths,
-  flags, target, and optional features in their identities.
+- [x] Move the remaining reusable runtime archive, loader AST, and incremental
+  binary artifacts out of `/tmp`/implicit home caches into the selected
+  `build/cache/`. Identities cover compiler/archive tools, generated/runtime
+  inputs, ambient SDK/include/library paths, flags, target, and optional TLS.
 
 ### Build, cache, CI, and release
 

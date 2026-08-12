@@ -1344,6 +1344,28 @@ driver_homebrew_prefix_memo = {}
 -> dev_runtime_shell_quote(text)
   "'" + text.gsub("'", "'\\''") + "'"
 
+# One selected content-addressed cache for runtime archives, loader artifacts,
+# and incremental binaries. An explicit override wins. Otherwise a project
+# checkout owns its build/cache; installed compilers fall back to their
+# TUNGSTEN_ROOT rather than leaking artifacts into /tmp or an implicit home
+# directory.
+-> compiler_cache_dir
+  override = env("TUNGSTEN_CACHE_DIR")
+  if override != nil && override != ""
+    return override
+  if file?("Bitfile")
+    cwd = capture("pwd -P 2>/dev/null").strip()
+    if cwd != ""
+      return cwd + "/build/cache"
+  root = env("TUNGSTEN_ROOT")
+  if root != nil && root != ""
+    return root + "/build/cache"
+  runtime_dir = resolve_runtime_dir
+  parent = capture("cd " + dev_runtime_shell_quote(runtime_dir + "/..") + " && pwd -P 2>/dev/null").strip()
+  if parent != ""
+    return parent + "/build/cache"
+  nil
+
 # Canonicalize the selected runtime root without making direct C-VM execution
 # depend on File.expand_path (the C VM intentionally implements only the small
 # bootstrap builtin set). Standard staged bootstrap passes --runtime and never
@@ -1509,9 +1531,9 @@ driver_homebrew_prefix_memo = {}
     bases.push("generated/bigint_thresholds.h")
   bases
 
--> dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds, tls_source)
+-> dev_runtime_archive_path(cache_dir, runtime_root, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds, tls_source)
   config = StringBuffer(0)
-  config << "dev-runtime-archive-v4\n"
+  config << "dev-runtime-archive-v5\n"
   config << runtime_root
   config << "\ncc="
   config << cc_identity
@@ -1537,7 +1559,7 @@ driver_homebrew_prefix_memo = {}
   dev_runtime_append_env(config, "LIBRARY_PATH")
   dev_runtime_append_env(config, "PKG_CONFIG_PATH")
   dev_runtime_append_env(config, "PKG_CONFIG_LIBDIR")
-  "/tmp/tungsten-runtime-native-" + wyhash64_hex_string(config.to_s()) + ".a"
+  cache_dir + "/runtime-native-" + wyhash64_hex_string(config.to_s()) + ".a"
 
 -> dev_runtime_archive(verbose = false)
   runtime_dir = resolve_runtime_dir
@@ -1550,6 +1572,9 @@ driver_homebrew_prefix_memo = {}
   ar_identity = dev_runtime_ar_identity(ar_command, runtime_kind)
   if cc_identity == nil || ar_identity == nil
     return nil
+  cache_dir = compiler_cache_dir()
+  if cache_dir == nil || system("mkdir -p " + dev_runtime_shell_quote(cache_dir)) != true
+    return nil
   compile_flags = profile_opt_flag() + " " + debug_compile_flag() + " " + march_flags()
   tcf = tls_cflags
   if tcf != ""
@@ -1559,7 +1584,7 @@ driver_homebrew_prefix_memo = {}
   if file?(thresholds_path)
     generated_thresholds = "present"
   tls_source = tls_runtime_source()
-  archive = dev_runtime_archive_path(runtime_root, cc_identity, ar_identity, compile_flags, ev, generated_thresholds, tls_source)
+  archive = dev_runtime_archive_path(cache_dir, runtime_root, cc_identity, ar_identity, compile_flags, ev, generated_thresholds, tls_source)
   evo = ev.replace(".c", ".o")
 
   # Freshness: reuse the cached archive iff it is newer than every base source.
@@ -1960,12 +1985,9 @@ driver_homebrew_prefix_memo = {}
   pwd + "/" + p
 
 -> incremental_cache_slot(file_path, out_path, identity)
-  dir = env("TUNGSTEN_CACHE_DIR")
-  if dir == nil || dir == ""
-    home = env("HOME")
-    if home == nil || home == ""
-      return nil
-    dir = home + "/.tungsten/cache"
+  dir = compiler_cache_dir()
+  if dir == nil
+    return nil
   if system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
     return nil
   # Hash ABSOLUTE paths AND the full identity into the slot name: verbatim
@@ -1978,14 +2000,19 @@ driver_homebrew_prefix_memo = {}
   key = incremental_abs_path(file_path) + "__" + incremental_abs_path(out_path) + "|" + identity
   dir + "/irbin-" + wyhash64_hex_string(key)
 
-# Freshness is mtime-based end to end: tools that preserve timestamps
-# (cp -p, rsync -t) defeat it, and ambient toolchain upgrades (Xcode/clang)
-# are not keyed — the exe mtime covers compiler rebuilds only. Accepted
-# dev-cache tradeoffs; `tungsten --clear-cache` is the escape hatch.
+# Freshness is mtime-based for source manifests, while the identity covers the
+# compiler/linker executables, target flags, optional features, and ambient SDK
+# paths. `tungsten --clear-cache` remains the escape hatch for a tool that lies
+# about both its contents and filesystem identity.
 -> incremental_identity(file_path, out_path)
   exe = ccall("w_executable_path")
   em = file_mtime_ns(exe)
   if em == nil
+    return nil
+  runtime_kind = runtime_identity()
+  cc_identity = dev_runtime_cc_identity(host_c_compiler(), runtime_kind)
+  ar_identity = dev_runtime_ar_identity(archive_tool(), runtime_kind)
+  if cc_identity == nil || ar_identity == nil
     return nil
   defs = ""
   # Sorted deliberately (NOT an iteration-order workaround): -D flags may
@@ -2001,7 +2028,7 @@ driver_homebrew_prefix_memo = {}
   if ra != ""
     ramv = file_mtime_ns(ra)
     ram = ramv == nil ? "missing" : ramv.to_s()
-  ["irbin-v4", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
+  ["irbin-v5", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), cc_identity, ar_identity, release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("SDKROOT"), incremental_env_s("MACOSX_DEPLOYMENT_TARGET"), incremental_env_s("CPATH"), incremental_env_s("C_INCLUDE_PATH"), incremental_env_s("CPLUS_INCLUDE_PATH"), incremental_env_s("LIBRARY_PATH"), incremental_env_s("PKG_CONFIG_PATH"), incremental_env_s("PKG_CONFIG_LIBDIR"), incremental_env_s("TLS"), incremental_env_s("TUNGSTEN_TLS"), incremental_env_s("TUNGSTEN_TLS_CFLAGS"), incremental_env_s("TUNGSTEN_TLS_LDFLAGS"), incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_AR"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
 
 # Valid cached binary for this identity? Reads the manifest, revalidates
 # every recorded (path, mtime_ns), and on success installs the cached

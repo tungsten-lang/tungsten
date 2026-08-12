@@ -435,7 +435,7 @@ parser = OptionParser.new do |opts|
 
   opts.on "--clear-cache", "Clear all .memo and incremental binary (irbin-*) cache files" do
     cache_dir = ENV["TUNGSTEN_CACHE_DIR"]
-    cache_dir = File.join(Dir.home, ".tungsten", "cache") if cache_dir.nil? || cache_dir.empty?
+    cache_dir = File.join(ROOT, "build", "cache") if cache_dir.nil? || cache_dir.empty?
     files = (Dir.glob(File.join(cache_dir, "*.memo")) + Dir.glob(File.join(cache_dir, "irbin-*")))
             .select { |f| File.file?(f) }
     files.each { |f| File.delete(f) }
@@ -447,7 +447,9 @@ parser = OptionParser.new do |opts|
     path = if File.exist?(f)
              f
            else
-             File.join(Dir.home, ".tungsten", "cache", "#{f}.memo")
+             cache_dir = ENV["TUNGSTEN_CACHE_DIR"]
+             cache_dir = File.join(ROOT, "build", "cache") if cache_dir.nil? || cache_dir.empty?
+             File.join(cache_dir, "#{f}.memo")
            end
     unless File.exist?(path)
       $stderr.puts "Cache file not found: #{path}"

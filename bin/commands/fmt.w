@@ -1,10 +1,8 @@
-# tungsten fmt — light source normalizer (Tungsten-native)
+# tungsten fmt — AST source formatter (Tungsten-native)
 #
 # Usage: tungsten fmt [-w] <file.w ...>
 #
-# Normalizes trailing whitespace and final newlines. Full AST pretty-print
-# (the Ruby Formatter) is not yet ported; this keeps the command available
-# without a Ruby dependency.
+use ../../compiler/lib/formatter
 
 args = argv()
 write_in_place = false
@@ -27,28 +25,6 @@ if files.size == 0
   << "Usage: tungsten fmt [-w] <file.w ...>"
   exit(1)
 
--> format_source(source)
-  lines = source.split("\n")
-  out = StringBuffer(source.size + 16)
-  li = 0
-  # Drop trailing empty lines, then re-add a single final newline
-  end = lines.size
-  while end > 0 && lines[end - 1].strip == ""
-    end = end - 1
-  while li < end
-    line = lines[li]
-    # rstrip trailing spaces/tabs
-    while line.size > 0
-      last = line.slice(line.size - 1, 1)
-      if last == " " || last == "\t"
-        line = line.slice(0, line.size - 1)
-      else
-        break
-    out << line
-    out << "\n"
-    li = li + 1
-  out.to_s
-
 fi = 0
 while fi < files.size
   f = files[fi]
@@ -56,7 +32,7 @@ while fi < files.size
     << "tungsten fmt: not found: " + f
     exit(1)
   source = read_file(f)
-  formatted = format_source(source)
+  formatted = format_tungsten_source(source, f)
   if write_in_place
     if formatted != source
       write_file(f, formatted)

@@ -344,6 +344,14 @@ projects stay unchecked until their stated acceptance criteria are met.
   under compiled regression coverage, including the no-source fallback.
 - [ ] Port `implementations/ruby/lib/tungsten/formatter.rb` to the self-hosted
   `bin/tungsten fmt`; require idempotence and AST equivalence over the corpus.
+  - [x] Add the self-hosted AST emitter for the Ruby formatter's common
+    definitions/control-flow/literal/call surface, preserve precedence and bare
+    zero-argument calls, reject unsupported nodes, and gate snapshot,
+    idempotence, in-place, and canonical-AST parity across the frontend fixture
+    corpus.
+  - [ ] Attach comments and expose generic-type parser metadata to the
+    formatter, then replace their lossless-whitespace safety path; cover the
+    remaining GPU/domain nodes before widening parity to every tracked `.w`.
 - [x] Add `bin/tungsten lint` with stable diagnostic codes, machine-readable
   output, configurable severities, and no source mutation.
 - [x] Add `bin/tungsten debug` for build/run with symbols, frame pointers,

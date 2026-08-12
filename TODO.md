@@ -568,6 +568,16 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Complete Hash on every host: insertion order, symbol/table separation,
   char keys, structural equality/hash agreement, deletion/tombstones, and
   mutation-during-iteration behavior.
+  - [x] Native and self-hosted execution preserve insertion order, distinct
+    String/Symbol keys, ASCII/Unicode Char keys, order-independent structural
+    container equality, and delete/tombstone churn; focused specs cover each
+    contract in compiled and interpreted lanes.
+  - [x] Hash iteration permits overwriting and deletion but rejects new keys;
+    the native guard unwinds on exceptions and non-local returns, matching the
+    Ruby host instead of extending/rebuilding a table under its live cursor.
+  - [ ] Run the same focused contract through the legacy Ruby interpreter in
+    CI (the current local Ruby bundle is incomplete), and define a public
+    structural `Hash#hash` contract before declaring full host parity.
 - [ ] Finish HDF5 and the multi-dimensional SciIO contract described above,
   with h5py/`h5dump` golden fixtures and shapes that are not silently flattened.
 - [ ] Design unit conversion contexts as described above: versioned CODATA,

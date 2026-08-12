@@ -384,7 +384,8 @@ typedef struct {
     uint32_t count;     /* live entries */
     uint32_t cap;       /* index-table slots (power of 2) */
     uint8_t flags;
-    uint8_t pad[3];
+    uint8_t iter_depth; /* active each traversals; additions are forbidden */
+    uint8_t pad[2];
     uint32_t used;      /* dense entries consumed: live + holes */
     WValue *keys;       /* dense, insertion-ordered; W_MEMO_MISS = hole */
     WValue *values;     /* dense, parallel to keys */

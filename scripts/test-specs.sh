@@ -704,6 +704,7 @@ compiled_specs=(
   spec/core/classes_spec.w
   spec/core/arrays_hashes_spec.w
   spec/core/hash_insertion_order_spec.w
+  spec/core/hash_mutation_spec.w
   spec/core/container_equality_spec.w
   spec/core/calculus_spec.w
   spec/core/calculus_complex_spec.w
@@ -829,6 +830,7 @@ interpreter_specs=(
   spec/core/filesystem_walk_spec.w
   spec/core/file_stat_tempfile_spec.w
   spec/core/filesystem_mutation_spec.w
+  spec/core/hash_mutation_spec.w
   spec/compiler/splat_parameter_parity_spec.w
   # JSON.parse was compiled-only until the interpreter learned to resolve bare
   # calls to sibling class methods; pin the interpreted side.

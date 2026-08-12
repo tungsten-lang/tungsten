@@ -43317,6 +43317,7 @@ static inline void w_hash_reset(WHash *hash) {
     memset(hash->index, 0xFF, sizeof(int32_t) * hash->cap);
     hash->count = 0;
     hash->used = 0;
+    hash->iter_depth = 0;
     hash->flags &= ~W_HASH_FLAG_KWARGS;
 }
 
@@ -43375,6 +43376,20 @@ WValue w_hash_reuse_and_drain_or_new(WValue *slot) {
 
 WValue w_hash_set(WValue hash_val, WValue key, WValue val) {
     WHash *hash = as_hash(hash_val);
+    /* Match the language/Ruby-host mutation contract: values on live keys may
+     * change during iteration, but a new key would extend/rebuild the dense
+     * table under the traversal. Check the existing-key case before
+     * w_hash_prepare_set so an overwrite cannot compact holes and disturb the
+     * active cursor. */
+    if (hash->iter_depth > 0) {
+        int64_t existing = w_hash_probe(hash, key);
+        if (existing >= 0) {
+            hash->values[existing] = val;
+            return val;
+        }
+        w_raise(w_string("can't add a new key into hash during iteration"));
+        return W_NIL;
+    }
     w_hash_prepare_set(hash);
     int64_t dense = -1;
     int64_t slot = w_hash_find_slot(hash, key, &dense);
@@ -51939,14 +51954,29 @@ static WValue w_ic_hash_merge_bang(WValue r, WValue *a, int c) {
     }
     return r;
 }
+static void w_hash_each_leave(WValue hash_val) {
+    if (!w_is_hash(hash_val)) return;
+    WHash *hash = (WHash *)w_as_ptr(hash_val);
+    if (hash->iter_depth > 0) hash->iter_depth--;
+}
 static WValue w_ic_hash_each(WValue r, WValue *a, int c) {
     if (c < 1 || !w_is_closure(a[c - 1])) die("each requires a block");
     WHash *hash = as_hash(r);
     WValue cl_v = a[c - 1];
+    if (hash->iter_depth == UINT8_MAX) {
+        w_raise(w_string("hash iteration nesting is too deep"));
+        return W_NIL;
+    }
+    hash->iter_depth++;
+    /* A user block can raise or non-locally return. The shared unwind stack
+     * makes the guard exception-safe without installing a setjmp per each. */
+    w_cleanup_push(r, w_hash_each_leave);
     for (uint32_t i = 0; i < hash->used; i++) {
         if (hash->keys[i] != W_MEMO_MISS)
             w_closure_call_2(cl_v, hash->keys[i], hash->values[i]);
     }
+    w_cleanup_pop();
+    w_hash_each_leave(r);
     return r;
 }
 static WValue w_ic_hash_delete(WValue r, WValue *a, int c) {

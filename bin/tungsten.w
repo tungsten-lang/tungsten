@@ -95,8 +95,15 @@ MANPAGE = manpage_lines.join("\n")
   out_bin = entry.replace(".w", "")
   need = true
   if system("test -x " + sh_quote(out_bin))
-    if system("test " + sh_quote(entry) + " -ot " + sh_quote(out_bin))
-      need = false
+    if system("test " + sh_quote(entry) + " -ot " + sh_quote(out_bin)) && system("test " + sh_quote(COMPILER) + " -ot " + sh_quote(out_bin))
+      # This is deliberately conservative until the loader exposes a complete
+      # `use` dependency graph. Command tools commonly import compiler/lib and
+      # Core source directly; checking only the entry file served stale fmt,
+      # lint, and build binaries after a dependency changed.
+      roots = sh_quote(ROOT + "/compiler/lib") + " " + sh_quote(ROOT + "/core") + " " + sh_quote(ROOT + "/bin/commands")
+      newer = "find " + roots + " -type f -name '*.w' -newer " + sh_quote(out_bin) + " -print -quit | grep -q ."
+      if !system(newer)
+        need = false
   if need
     cmd = "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(COMPILER) + " compile " + sh_quote(entry) + " --out " + sh_quote(out_bin) + " --no-lto"
     if !system(cmd + " >/dev/null 2>&1")

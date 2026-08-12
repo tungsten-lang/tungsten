@@ -289,6 +289,17 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_metal_batch_barrier_resources"] = true
   m["w_metal_buffer_write_from_mmap"] = true
 
+  # Atomics are observable synchronization operations. Loads cannot be folded
+  # or reordered as pure calls, and writes/RMWs must never be eliminated.
+  m["w_atomic_get"] = true
+  m["w_atomic_set"] = true
+  m["w_atomic_exchange"] = true
+  m["w_atomic_add"] = true
+  m["w_atomic_fetch_sub"] = true
+  m["w_atomic_cas"] = true
+  m["w_atomic_increment"] = true
+  m["w_atomic_decrement"] = true
+
   # ---- Crypto / UUID helpers that allocate mutable data or use entropy/time ----
   m["w_crypto_random_bytes"] = true
   m["w_crypto_md5_bytes"] = true

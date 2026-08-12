@@ -138,6 +138,24 @@ RSpec.describe Tungsten::Interpreter do
     expect { run("SmallArray.new(:i32, 256)") }.to raise_error(Tungsten::Error, /0\.\.255/)
   end
 
+  it "implements the signed-i64 Atomic contract" do
+    result = run(<<~W)
+      use core/atomic
+      cell = Atomic.new(10)
+      old = cell.fetch_add(5)
+      exchanged = cell.exchange(20)
+      swapped = cell.compare_exchange(20, 30)
+      wide = Atomic.new(1152921504606846976)
+      [old, exchanged, swapped, cell.load(), wide.load()]
+    W
+
+    expect(result).to eq([10, 15, true, 30, 1_152_921_504_606_846_976])
+    expect { run("use core/atomic\nAtomic.new(\"1\")") }
+      .to raise_error(Tungsten::Error, /Integer/)
+    expect { run("use core/atomic\nAtomic.new(9223372036854775808)") }
+      .to raise_error(Tungsten::Error, /range for i64/)
+  end
+
   it "evaluates parenthesized expressions" do
     expect(run("(1 + 2) * 3")).to eq(9)
   end

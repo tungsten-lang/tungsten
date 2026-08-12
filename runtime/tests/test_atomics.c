@@ -7,7 +7,8 @@
  *   3. Stress: 1000 threads × atomic add(1) → final value 1000
  *   4. Atomic CAS (compare-and-swap)
  *   5. Atomic increment/decrement
- *   6. CAS contention: multiple threads CAS-incrementing
+ *   6. Exchange/fetch-sub and wide signed-i64 values
+ *   7. CAS contention: multiple threads CAS-incrementing
  */
 
 #include "../runtime.h"
@@ -152,8 +153,32 @@ static void test_atomic_inc_dec(void) {
     printf("  Increment/decrement: OK\n\n");
 }
 
+static void test_atomic_exchange_sub_wide(void) {
+    printf("Test 6: Atomic exchange/fetch-sub and wide i64\n");
+
+    const int64_t wide = INT64_C(1) << 60;
+    WValue a = w_atomic_new(w_int(wide));
+    ASSERT(w_to_i64(w_atomic_get(a)) == wide, "wide initial value round-trips");
+
+    WValue old = w_atomic_exchange(a, w_int(12));
+    ASSERT(w_to_i64(old) == wide, "exchange returns old wide value");
+    ASSERT(w_to_i64(w_atomic_get(a)) == 12, "exchange stores new value");
+
+    old = w_atomic_fetch_sub(a, w_int(5));
+    ASSERT(w_to_i64(old) == 12, "fetch_sub returns old value");
+    ASSERT(w_to_i64(w_atomic_get(a)) == 7, "fetch_sub stores difference");
+
+    w_atomic_set(a, w_int(INT64_MAX));
+    ASSERT(w_to_i64(w_atomic_increment(a)) == INT64_MIN,
+           "increment wraps from INT64_MAX to INT64_MIN");
+    ASSERT(w_to_i64(w_atomic_decrement(a)) == INT64_MAX,
+           "decrement wraps from INT64_MIN to INT64_MAX");
+
+    printf("  Exchange/fetch-sub/wide: OK\n\n");
+}
+
 static void test_atomic_cas_contention(void) {
-    printf("Test 6: CAS contention — 100 threads × 100 CAS increments\n");
+    printf("Test 7: CAS contention — 100 threads × 100 CAS increments\n");
 
     #define CAS_THREADS 100
     #define CAS_OPS 100
@@ -197,6 +222,7 @@ int main(void) {
     test_atomic_stress();
     test_atomic_cas();
     test_atomic_inc_dec();
+    test_atomic_exchange_sub_wide();
     test_atomic_cas_contention();
 
     printf("=== Results: %d/%d passed ===\n", tests_passed, tests_run);

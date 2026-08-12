@@ -604,6 +604,7 @@ interpreter_specs=(
   # clock_ms had to be registered in BOTH lowering.w and builtins.w; pin the
   # interpreted side so a compiled-only fix cannot pass again.
   spec/core/clock_ms_spec.w
+  spec/core/atomic_spec.w
   # JSON.parse was compiled-only until the interpreter learned to resolve bare
   # calls to sibling class methods; pin the interpreted side.
   spec/core/json_parse_spec.w
@@ -692,6 +693,7 @@ interpreter_specs=(
 )
 
 core_specs=(
+  spec/core/atomic_spec.w
   spec/core/byte_array_equality_spec.w
   spec/core/crypto_accel_spec.w
   spec/core/crypto_hmac_scram_spec.w

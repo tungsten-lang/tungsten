@@ -1277,6 +1277,30 @@ use target
       if args.size() != 2
         raise "w_atomic_decrement expects one receiver"
       return ccall("w_atomic_decrement", args[1])
+    when "w_atomic_get"
+      if args.size() != 2
+        raise "w_atomic_get expects one receiver"
+      return ccall("w_atomic_get", args[1])
+    when "w_atomic_set"
+      if args.size() != 3
+        raise "w_atomic_set expects one receiver and one value"
+      return ccall("w_atomic_set", args[1], args[2])
+    when "w_atomic_exchange"
+      if args.size() != 3
+        raise "w_atomic_exchange expects one receiver and one value"
+      return ccall("w_atomic_exchange", args[1], args[2])
+    when "w_atomic_add"
+      if args.size() != 3
+        raise "w_atomic_add expects one receiver and one delta"
+      return ccall("w_atomic_add", args[1], args[2])
+    when "w_atomic_fetch_sub"
+      if args.size() != 3
+        raise "w_atomic_fetch_sub expects one receiver and one delta"
+      return ccall("w_atomic_fetch_sub", args[1], args[2])
+    when "w_atomic_cas"
+      if args.size() != 4
+        raise "w_atomic_cas expects one receiver, expected, and desired"
+      return ccall("w_atomic_cas", args[1], args[2], args[3])
     when "w_chan_new"
       if args.size() != 2
         raise "w_chan_new expects one capacity"

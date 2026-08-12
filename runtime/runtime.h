@@ -1008,7 +1008,9 @@ typedef struct WAtomic {
 WValue w_atomic_new(WValue initial);
 WValue w_atomic_get(WValue a);
 WValue w_atomic_set(WValue a, WValue val);
+WValue w_atomic_exchange(WValue a, WValue val);
 WValue w_atomic_add(WValue a, WValue delta);
+WValue w_atomic_fetch_sub(WValue a, WValue delta);
 WValue w_atomic_add_raw(WValue a, int64_t delta);
 WValue w_atomic_cas(WValue a, WValue expected, WValue desired);
 WValue w_atomic_increment(WValue a);

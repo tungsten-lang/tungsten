@@ -1793,6 +1793,10 @@ module Tungsten
               construct_array(evaluate_args(node.args), block, node)
             elsif recv.name == "SmallArray"
               construct_small_array(evaluate_args(node.args), block, node)
+            elsif recv.name == "Atomic"
+              args = evaluate_args(node.args)
+              runtime_error("Atomic.new expects one argument", node: node) unless args.size == 1
+              Tungsten::Atomic.new(args[0])
             else
               instantiate_from_nodes(recv, node.args)
             end
@@ -5391,6 +5395,7 @@ module Tungsten
 
     def tungsten_class_name(recv)
       case recv
+      when Tungsten::Atomic       then "Atomic"
       when Tungsten::SmallArrayValue then "SmallArray"
       when Tungsten::ByteArray    then "ByteArray"
       when Tungsten::CharValue    then "Char"
@@ -5409,6 +5414,7 @@ module Tungsten
     def primitive_runtime_class(recv)
       name =
         case recv
+        when Tungsten::Atomic then "Atomic"
         when Tungsten::SmallArrayValue then "SmallArray"
         when ::Array then "Array"
         when ::Hash then "Hash"

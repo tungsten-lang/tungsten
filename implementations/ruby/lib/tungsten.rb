@@ -67,6 +67,7 @@ module Tungsten
   autoload :Visitor,             "tungsten/visitor"
 
   # Literals
+  autoload :Atomic,              "tungsten/support/atomic"
   autoload :ByteArray,           "tungsten/literals/byte_array"
   autoload :CharValue,           "tungsten/literals/char_value"
   autoload :CIDR,                "tungsten/literals/cidr4"

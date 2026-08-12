@@ -52213,27 +52213,48 @@ static WAtomic *as_atomic(WValue v) {
 }
 
 WValue w_atomic_new(WValue initial) {
+    if (!w_is_integer_any(initial))
+        w_raise(w_string("Atomic.new expects an Integer"));
+    int64_t val = w_numeric_to_i64(initial);
     WAtomic *a = calloc(1, sizeof(WAtomic));
     /* type field gone — WAtomic now lives at W_SUBTAG_ATOMIC */
-    int64_t val = w_is_int(initial) ? w_as_int(initial) : 0;
     atomic_store(&a->value, val);
     return w_box_ptr(a, W_SUBTAG_ATOMIC);
 }
 
 WValue w_atomic_get(WValue a) {
-    return w_box_int(atomic_load(&as_atomic(a)->value));
+    return w_int(atomic_load(&as_atomic(a)->value));
 }
 
 WValue w_atomic_set(WValue a, WValue val) {
-    int64_t v = w_as_int(val);
+    if (!w_is_integer_any(val))
+        w_raise(w_string("Atomic.store expects an Integer"));
+    int64_t v = w_numeric_to_i64(val);
     atomic_store(&as_atomic(a)->value, v);
     return val;
 }
 
+WValue w_atomic_exchange(WValue a, WValue val) {
+    if (!w_is_integer_any(val))
+        w_raise(w_string("Atomic.exchange expects an Integer"));
+    int64_t v = w_numeric_to_i64(val);
+    return w_int(atomic_exchange(&as_atomic(a)->value, v));
+}
+
 WValue w_atomic_add(WValue a, WValue delta) {
-    int64_t d = w_as_int(delta);
+    if (!w_is_integer_any(delta))
+        w_raise(w_string("Atomic.fetch_add expects an Integer"));
+    int64_t d = w_numeric_to_i64(delta);
     int64_t old = atomic_fetch_add(&as_atomic(a)->value, d);
-    return w_box_int(old);
+    return w_int(old);
+}
+
+WValue w_atomic_fetch_sub(WValue a, WValue delta) {
+    if (!w_is_integer_any(delta))
+        w_raise(w_string("Atomic.fetch_sub expects an Integer"));
+    int64_t d = w_numeric_to_i64(delta);
+    int64_t old = atomic_fetch_sub(&as_atomic(a)->value, d);
+    return w_int(old);
 }
 
 WValue w_atomic_add_raw(WValue a, int64_t delta) {
@@ -52242,8 +52263,10 @@ WValue w_atomic_add_raw(WValue a, int64_t delta) {
 }
 
 WValue w_atomic_cas(WValue a, WValue expected, WValue desired) {
-    int64_t exp = w_as_int(expected);
-    int64_t des = w_as_int(desired);
+    if (!w_is_integer_any(expected) || !w_is_integer_any(desired))
+        w_raise(w_string("Atomic.compare_exchange expects Integer values"));
+    int64_t exp = w_numeric_to_i64(expected);
+    int64_t des = w_numeric_to_i64(desired);
     int ok = atomic_compare_exchange_strong(&as_atomic(a)->value, &exp, des);
     return ok ? W_TRUE : W_FALSE;
 }
@@ -52312,12 +52335,12 @@ WValue __w_arr_try_inc_below(WValue arr_val, WValue idx_val,
 
 WValue w_atomic_increment(WValue a) {
     int64_t old = atomic_fetch_add(&as_atomic(a)->value, 1);
-    return w_box_int(old + 1);
+    return w_int((int64_t)((uint64_t)old + UINT64_C(1)));
 }
 
 WValue w_atomic_decrement(WValue a) {
     int64_t old = atomic_fetch_sub(&as_atomic(a)->value, 1);
-    return w_box_int(old - 1);
+    return w_int((int64_t)((uint64_t)old - UINT64_C(1)));
 }
 
 /* ---- TCP Sockets ---- */

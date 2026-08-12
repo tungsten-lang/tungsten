@@ -14,6 +14,10 @@ NaN-boxed 48-bit range (no heap). Cross that range — or do enough arithmetic
 that intermediates overflow the small-int box — and every op becomes a heap
 bignum helper.
 
+In the type hierarchy, `Int` names that exact auto-promoting family;
+`Integer` is the inline concrete representation and `BigInt` is the heap
+representation. Use `is_a?(Int)` when either representation is acceptable.
+
 In a tight loop this shows up as:
 
 - Sudden multi‑MB/s RSS growth (escaping bignum intermediates)

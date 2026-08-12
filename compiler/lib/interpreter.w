@@ -3740,18 +3740,16 @@ use target
   # Every declared param type must be satisfied by the corresponding arg's
   # runtime type — is_a? over the class ancestry for most names, an exact
   # NaN-box tag compare for the few names the compiled gate also tests by
-  # tag (see exact_tag_overload_name? below).
+  # tag (see exact_tag_overload_hi16 below).
   -> overload_matches_args?(pts, args)
     j = 0
     while j < pts.size()
       if j >= args.size()
         return false
       tn = "" + pts[j].to_s()
-      if exact_tag_overload_name?(tn)
-        # 65528 == 0xFFF8, the BigInt top tag — the one generated-table
-        # entry. Keep these literals in step with the table in
-        # lowering/types.w when it regenerates.
-        if ((wvalue_bits(args[j]) >> 48) & 65535) != 65528
+      exact_hi16 = exact_tag_overload_hi16(tn)
+      if exact_hi16 != nil
+        if ((wvalue_bits(args[j]) >> 48) & 65535) != exact_hi16
           return false
       elsif !is_a_class?(args[j], tn)
         return false
@@ -3769,9 +3767,14 @@ use target
   # carrying no primitive tag, and ancestry is what routes it to the arm
   # the program wrote for it. The walk is cheap and only runs for
   # table-name arms (explicit sends through typed-overload groups).
-  -> exact_tag_overload_name?(tn)
-    if tn != "BigInt"
-      return false
+  -> exact_tag_overload_hi16(tn)
+    expected = nil
+    if tn == "BigInt"
+      expected = 65528  # 0xFFF8
+    elsif tn == "Integer"
+      expected = 65530  # 0xFFFA
+    if expected == nil
+      return nil
     ks = @classes.keys()
     i = 0
     while i < ks.size()
@@ -3779,11 +3782,11 @@ use target
       guard = 0
       while sup != nil && guard < 64
         if sup[:name] == tn
-          return false
+          return nil
         sup = sup[:superclass]
         guard += 1
       i += 1
-    true
+    expected
 
   # `a` is at least as specific as `b` when each declared type is the same as,
   # or a subclass of, `b`'s — so `(Vector)` beats `(Number)` for a Vec3

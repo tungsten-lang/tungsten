@@ -43,7 +43,7 @@ summary from the source header, and a link to the source.
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
 | `Instant` | `+ Instant` | Instant — millisecond-precision timestamp (tag 0xFFFB). | [`core/instant.w`](../core/instant.w) |
-| `Integer` | `+ Integer < Real` | Integer — 48-bit NaN-boxed signed integer with exact BigInt promotion. | [`core/integer.w`](../core/integer.w) |
+| `Integer` | `+ Integer < Int` | Integer — the concrete 48-bit NaN-boxed representation of an Int. | [`core/integer.w`](../core/integer.w) |
 | `JSON` | `+ JSON` | JSON encoder/decoder — interface and default implementation. | [`core/json.w`](../core/json.w) |
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |
 | `Matrix` | `+ Matrix<T> < Number` | Matrix — generic M×N matrices over a scalar type T. Storage is | [`core/matrix.w`](../core/matrix.w) |
@@ -493,7 +493,7 @@ summary from the source header, and a link to the source.
 | `BigComplex` | `+ BigComplex < Complex` | — | [`core/numeric/big_complex.w`](../core/numeric/big_complex.w) |
 | `BigDecimal` | `+ BigDecimal < Decimal` | — | [`core/numeric/big_decimal.w`](../core/numeric/big_decimal.w) |
 | `BigInt` | — | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
-| `Int` | `+ Int < Real` | — | [`core/numeric/int.w`](../core/numeric/int.w) |
+| `Int` | `+ Int < Real` | Int — the exact, arbitrary-precision integer family. | [`core/numeric/int.w`](../core/numeric/int.w) |
 | `IntegerFactorization` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
 | `PrimePower` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
 | `Centumduodetrigintanion` | `+ Centumduodetrigintanion<T> < Hypercomplex<T>` | Centumduodetrigintanion — dimension-128 hypercomplex algebra. | [`core/numeric/hypercomplex/centumduodetrigintanion.w`](../core/numeric/hypercomplex/centumduodetrigintanion.w) |

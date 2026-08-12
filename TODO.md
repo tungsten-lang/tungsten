@@ -257,10 +257,11 @@ projects stay unchecked until their stated acceptance criteria are met.
   its bare value, while every path that reaches the end without producing one
   returns `nil`. Native and interpreted coverage includes `if`, `elsif`, nested
   conditionals, and an untaken explicit-return arm.
-- [ ] Preserve the intended numeric tower instead of merging names by accident:
-  document which of `Integer` and `Int` is generic/specialized, where promotion
-  to `BigInt` occurs, and why `BigInt` currently satisfies both runtime subtype
-  checks. Share only algorithms whose semantics are proven identical.
+- [x] Preserve the intended integer tower instead of merging names by accident:
+  `Int` is the exact auto-promoting family; concrete inline `Integer` and heap
+  `BigInt` representations inherit from it. Promotion/demotion and subtype /
+  overload parity are executable contracts, and BigInt no longer claims the
+  distinct concrete `Integer` type.
 
 ### Frontend and compilation performance
 

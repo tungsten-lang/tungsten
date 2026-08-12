@@ -44478,7 +44478,6 @@ static int w_primitive_is_a_type_name(WValue recv, const char *tn, size_t tn_len
     }
     if (w_is_bigint(recv)) {
         return w_type_name_eq_lit(tn, tn_len, "BigInt") ||
-               w_type_name_eq_lit(tn, tn_len, "Integer") ||
                w_type_name_eq_lit(tn, tn_len, "Int") ||
                w_type_name_eq_lit(tn, tn_len, "Real") ||
                w_type_name_eq_lit(tn, tn_len, "Number");

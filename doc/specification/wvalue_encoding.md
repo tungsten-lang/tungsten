@@ -29,7 +29,7 @@ typedef uint64_t WValue;
 2. [Singletons and Object Space (0x0000)](#2-singletons-and-object-space-0x0000)
 3. [Biased Doubles](#3-biased-doubles)
 4. [String / Symbol (0xFFF9)](#4-string--symbol-0xfff9)
-5. [Int (0xFFFA)](#5-int-0xfffa)
+5. [Integer / inline Int (0xFFFA)](#5-integer--inline-int-0xfffa)
 6. [Instant (0xFFFB)](#6-instant-0xfffb)
 7. [Lexical + Char (0xFFFC)](#7-lexical--char-0xfffc)
 8. [Numeric (0xFFFD)](#8-numeric-0xfffd)
@@ -247,7 +247,7 @@ Symbols share the exact same mode encoding as strings; only bit 0 differs:
 
 ---
 
-## 5. Int (0xFFFA)
+## 5. Integer / inline Int (0xFFFA)
 
 48-bit signed two's complement integer.
 
@@ -265,6 +265,11 @@ bits 47-0:  signed integer value
 On ARM64 this compiles to a single `sbfx` instruction.
 
 Values exceeding this range overflow to heap BigInt objects (top-level tag 0xFFF8 since v4; payload bit 47 is the tag-sign overlay — effective sign = header XOR bit 47, making negate a zero-copy tag flip).
+
+The public concrete class for this tag is `Integer`. It and heap-backed
+`BigInt` are the two representations of the exact `Int` family. The class
+names are intentionally distinct even though ordinary arithmetic promotes and
+canonicalizes between them.
 
 ---
 

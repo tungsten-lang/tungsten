@@ -750,12 +750,23 @@ Unsigned literals are described by the following lexical definitions:
 | Int128  | ✓       | 128  | −2¹²⁷     | 2¹²⁷ − 1  |
 | Int128U |         | 128  | 0         | 2¹²⁸ − 1  |
 |         |         |      |           |           |
+| Int     | ✓       | ∞    | −∞        | ∞         |
+| Integer | ✓       | 48   | −2⁴⁷      | 2⁴⁷ − 1   |
 | BigInt  | ✓       | ∞    | −∞        | ∞         |
 
-The default type for an integer literal is 64-bits:
+An unannotated integer literal has `Int` semantics: exact arithmetic with
+automatic representation changes. Values in the signed 48-bit WValue range
+use the concrete `Integer` class; larger values use `BigInt`:
 
-    wit> 1.class
-    Int64
+    wit> 1.class_name
+    Integer
+
+    wit> (1 << 100).class_name
+    BigInt
+
+`Integer` and `BigInt` are concrete children of `Int`, not interchangeable
+names. Fixed-width integer behavior is opt-in through type hints such as
+`## i64` and `## u64`.
 
 Unsigned integers are input and output using the `0x` prefix and hexadecimal (base 16) digits `0–9a–f` (the capitalized digits `A–F` also work). The size of the unsigned value is determined by the number of hex digits used:
 

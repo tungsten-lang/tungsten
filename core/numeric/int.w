@@ -1,3 +1,8 @@
+# Int — the exact, arbitrary-precision integer family.
+#
+# Integer is its inline-i48 representation and BigInt is its heap-backed
+# representation. Public arithmetic may move between those concrete classes;
+# shared algorithms here must therefore remain representation-independent.
 + Int < Real
   # @todo other operators. NB: the bodyless `-> +/1` arity-suffix form does
   # NOT parse for an operator name (only `-> name/N` on identifiers does), so
@@ -210,7 +215,7 @@
   # Integer square root: largest k with k*k <= self (Ruby Integer#isqrt).
   # Newton's method from a digit-count overestimate; exact for BigInt via the
   # promoting / and ** operators. Mirrors Integer#isqrt so it works for any
-  # integer (Integer < Real and Int are separate classes).
+  # integer (Integer and BigInt are the two concrete Int representations).
   -> isqrt
     if self < 0
       raise "Int#isqrt: negative receiver"

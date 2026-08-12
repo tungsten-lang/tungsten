@@ -256,12 +256,20 @@ BlankSlate
         │     ├── RangeError
         │     └── TypeError
         └── Number
-              ├── Integer / Int … BigInt
-              ├── Decimal … BigDecimal
-              ├── Float …
-              ├── Vector / Matrix / …
+              ├── Real
+              │     ├── Int
+              │     │     ├── Integer (inline signed i48)
+              │     │     └── BigInt (heap arbitrary precision)
+              │     ├── Decimal … BigDecimal
+              │     ├── Float …
+              │     └── Vector / Matrix / …
               └── Hypercomplex …
 ```
+
+`Int` is the representation-independent, exact integer family. Runtime
+introspection reports the concrete representation (`Integer` or `BigInt`),
+while subtype checks and typed overloads may target `Int` to accept both.
+Concrete overloads remain disjoint.
 
 Traits such as `Comparable` and `Enumerable` are mixed into classes with `is` and appear in the standard library autoload table (`core/tungsten.w`). A class or trait is not part of the default global namespace until registered for autoload or otherwise loaded.
 

@@ -971,13 +971,14 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 # so the call is an optimization barrier) and which later passes use to
 # prove operand tags inside the selected overload body.
 #
-# Equivalence, not tag-injectivity, is the admission rule: `Int` maps to
-# exactly one tag (0xFFFA) yet `is_a?(v, "Int")` is also true for BigInt,
-# Signed and Unsigned values, so an exact compare would silently drop
-# them. A name is admitted only when `w_value_is_a(v, name)` agrees with
+# Equivalence, not tag-injectivity, is the admission rule: inline `Integer`
+# values map to 0xFFFA, but their `Int` parent also accepts BigInt, so an exact
+# `Int` compare would silently drop heap integers. A name is admitted only
+# when `w_value_is_a(v, name)` agrees with
 # the tag test for ALL v — which excludes every name appearing in more
 # than one arm of `w_primitive_is_a_type_name` (runtime.c) and every
-# ancestor in the numeric/string/array towers, leaving essentially BigInt.
+# ancestor in the numeric/string/array towers, leaving the concrete Integer
+# and BigInt representations.
 #
 # THE TABLE BETWEEN THE MARKERS IS GENERATED — do not hand-edit it. It is
 # derived from the runtime relation by scripts/gen_tag_table.rb, which
@@ -997,9 +998,11 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
 # --- BEGIN GENERATED TAG TABLE (scripts/gen_tag_table.rb) ---
 -> overload_exact_tag_entry(name)
   # tag/mask are the signed-i64 spellings of the uint64 bit patterns
-  # (0xFFF8000000000000 and 0xFFFF000000000000).
+  # (a top-level tag and 0xFFFF000000000000).
   if name == "BigInt"
     return {shape: :top_tag, tag: "-2251799813685248", mask: "-281474976710656"}
+  if name == "Integer"
+    return {shape: :top_tag, tag: "-1688849860263936", mask: "-281474976710656"}
   nil
 # --- END GENERATED TAG TABLE ---
 

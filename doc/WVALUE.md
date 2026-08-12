@@ -118,7 +118,7 @@ Symbol:
 
 ---
 
-## Int (0xFFFA)
+## Integer — inline Int representation (0xFFFA)
 
 ```
 63              48 47                                            0
@@ -129,6 +129,9 @@ Symbol:
 Range: ±140,737,488,355,328 (±2^47)
 Unbox: ((int64_t)(v << 16)) >> 16
 ```
+
+This tag is the concrete `Integer` class. `Int` is the exact semantic parent
+shared with heap-backed `BigInt`; it is not a third WValue representation.
 
 ---
 

@@ -1,7 +1,10 @@
-# Integer — 48-bit NaN-boxed signed integer with exact BigInt promotion.
-# Arithmetic that leaves the inline range promotes transparently in runtime
-# operators, so these methods stay exact at both i48 boundaries.
-+ Integer < Real
+# Integer — the concrete 48-bit NaN-boxed representation of an Int.
+#
+# Int is the exact, auto-promoting integer family. Arithmetic that leaves this
+# inline representation becomes a BigInt; results that fit again canonicalize
+# back to Integer. Methods here may rely on an inline-i48 receiver and must
+# delegate overflow or BigInt operands to the promoting runtime operators.
++ Integer < Int
 
   -> to_i
     self
@@ -281,8 +284,8 @@
   # n! — product of 1..n; 0! == 1. Uses reduce (not a `while` loop) so the
   # accumulator keeps promoting to BigInt past the inline range — a while-loop
   # accumulator becomes an unboxed i64 loop var and silently wraps (25! then
-  # comes out mod 2^64). Small ints are class Integer (separate from Int,
-  # which has its own factorial), so this must live here for `5.factorial`.
+  # comes out mod 2^64). Small ints dispatch through concrete Integer before
+  # its Int parent, so this specialized body must live here for `5.factorial`.
   -> factorial
     if self < 0
       raise "Integer#factorial: negative receiver"

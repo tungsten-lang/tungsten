@@ -608,6 +608,7 @@ interpreter_specs=(
   spec/core/clock_ms_spec.w
   spec/core/atomic_spec.w
   spec/core/env_spec.w
+  spec/core/integer_tower_spec.w
   spec/core/url_spec.w
   # JSON.parse was compiled-only until the interpreter learned to resolve bare
   # calls to sibling class methods; pin the interpreted side.
@@ -702,6 +703,7 @@ core_specs=(
   spec/core/crypto_accel_spec.w
   spec/core/crypto_hmac_scram_spec.w
   spec/core/env_spec.w
+  spec/core/integer_tower_spec.w
   spec/core/url_spec.w
   spec/core/socket_read_into_spec.w
   spec/core/byte_array_slice_spec.w

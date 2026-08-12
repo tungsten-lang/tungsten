@@ -1051,6 +1051,143 @@ error bound ERR(n) <= 2*ERR(m)+1 proven in comments) but unused.
 **Condition to take it:** single-core targets (no pool asymmetry), or a
 cheap wraparound residual via mulmod B^m +/- 1 that dodges the
 cancellation.  isqrt@4096/@8192 stand at 0.92/0.90 vs GMP without it.
+## Near-threshold equal 20/21/23 difference-form routes — 20/23 TAKEN, 21 and the interior band NOT (2026-08-11)
+
+The forced sweep has long said 24x24 t2diff beats schoolbook ~14%, and the
+top-level dispatcher already banked that at exactly 22/24
+(BN_MUL_TOP_DIFF_22/24).  This experiment covered the rest of the
+near-threshold family: top-level equal 20/21/23 (the shapes without a
+fixed generic-ladder schoolbook leaf — 21 HAS one, eq21) and an interior
+band routing bn_mul_eq's equal 20-24 leaves to the difference form
+(BN_MUL_EQ_SMALL_T2_MIN, with bn_scratch_need mirroring the band).
+
+The combined 9 x 110 ms battery over mul/mod at
+16/20/21/22/23/24/32/40/48/64 split the family: mul@23 0.905 and mul@20
+0.979, but mul@21 1.076 — the fixed eq21 schoolbook leaf beats the odd
+difference split, so the combined candidate failed acceptance.  The
+ship-config replication (BN_MUL_TOP_DIFF_20/23 only) confirmed:
+mul@23 0.893 (GMP 1.136 -> 1.016), mul@20 0.982 (1.086 -> 1.061), controls
+16/21/22/24/32 within 1.6%, no regression above 5%; both defaults are now
+1.  BN_MUL_TOP_DIFF_21 stays 0 (rejection measured above), and
+BN_MUL_EQ_SMALL_T2_MIN stays 25/off: the fixed even diff chains
+(40 -> eq20, 48 -> diff24, 64 -> diff32) bypass generic bn_mul_eq leaves at
+matrix widths, so the band had no attributable boxed exposure — no
+regression anywhere, but nothing bankable either.  The 400-432 / 448-520 /
+536-544 magic bands moved to BN_MUL_EQ_T2DIFF_BAND{1,2,3}_{LO,HI} macros
+(values unchanged) so the generated threshold header can retune them.
+
+Gates: ~120k optimized GMP-differential cases (exact 20-24, 40/48/64, 448;
+random through 100 limbs; boxed mul/sqr through 96) plus the all-knobs
+ASAN/UBSAN battery.  Artifacts:
+`baselines/mul-eq-t2min20-topdiff-combined-d6828ec0-m5max-20260811.json` and
+`baselines/mul-topdiff-2023-confirm-d6828ec0-m5max-20260811.json`.
+
+**Condition to revisit the interior band:** a workload or divisor geometry
+whose recursion demonstrably lands on generic 20-24-limb bn_mul_eq leaves
+(odd/irregular parents), measured there rather than at the fixed-chain
+matrix widths.
+
+## Toom eval/interp funnel-form shift passes — TAKEN (2026-08-11)
+
+The Toom-3/4/6 eval and interpolation shift helpers (bn_shl_copy by
+1/2/4/6 bits at kp1 = 129-151 limbs in eval and w = 258-302 in interp;
+in-place bn_shr1/bn_shrk over w) were written as carry-recurrence loops,
+which LLVM compiles to SCALAR code — unlike the boxed shift lanes' funnel
+loops, which the vectorizer turns into 8-limb/iteration NEON walks (see
+the hand-NEON rejection below).  Rewriting the three helpers in funnel
+(index-reread) form, semantics identical, lets the same autovectorizer in
+(probe: 0 -> 8-11 vector ops per function).  BN_TOOM_SHIFT_FUNNEL now
+defaults to 1; the carry-recurrence forms remain selectable at 0 for
+byte-identical A/Bs.
+
+The 15 x 200 ms replication won EVERY affected cell with no >5%
+regression: mul@384 0.9375 (Toom-3), mul@1024/2048/4096/8192
+0.974/0.985/0.984/0.979 (Toom-4), sqr@4096/8192 0.989/0.986 (toom4_sq);
+affected geomean 0.976, all-cell 0.991, controls (toom2_diff/kara_sq/
+NTT-free widths 256/448/512, kara_sq 384-2048 sqr) within +-1.6%.  The
+initial 9 x 110 ms run agreed in direction on every affected cell
+(affected 0.938) under a heavily loaded host.  mul@384's GMP ratio moved
+0.798 -> 0.747.
+
+The carry-bearing eval/interp passes stay scalar by structure: NEON has
+no 64-bit carry, the two-pass generate/propagate hybrid only pays at
+>= 288 limbs, and the eval adds run at kp1 = 129-151.  Their interp
+siblings at w = 288-302 are a possible follow-up, but the measured
+whole-op headroom there is bounded by the passes' few percent share.
+
+Gates: 36k optimized GMP-differential cases (random through 700 limbs,
+exact 384/1024, squares through 3000) plus the all-knobs ASAN/UBSAN
+battery; forced-kernel crossover checks every toom2/3/4/6 (and _sq)
+result against mpn_mul_n with the funnel forms enabled.  Artifacts:
+`baselines/toom-shift-funnel-acceptance-d6828ec0-m5max-20260811.json` and
+`baselines/toom-shift-funnel-replication-d6828ec0-m5max-20260811.json`.
+
+## Value-equality squaring prefilter — REJECTED again (2026-08-11)
+
+BN_MUL_VALUE_EQUAL_SQR's original memcmp form was rejected for taxing every
+equal-length multiply.  This retest made the =1 variant as cheap as it can
+get: equal-length pairs pay the memcmp only when their FIRST and TOP limbs
+already match (two loads + two compares on the miss path), then route to
+the squaring ladder on a full match.  A new fixture
+(`BENCH_MUL_EQUAL_VALUES`, bench_big_math.c) makes `mul`'s b operand an
+equal-valued but separately allocated clone.
+
+The win is real where the filter fires: the equal-values fixture measured
+0.863 affected geomean over 48..1024 limbs — 0.91 at 48-512 and 0.653 at
+1024 (routing to sqr, GMP ratio 0.640 -> 0.427).  The 16/24-limb cells
+were exactly 1.00: positive equal pairs at or below 40 limbs take the
+pair-fast entries before the generic path, so the filter cannot reach
+them.
+
+Ordinary multiplication did not hold: the 9 x 110 ms filter-cost run over
+twelve widths measured 1.0249 affected geomean (48..4096), a consistent
++1-3% at 48-256, and mul@512 at 1.091.  Ship policy was declared in
+advance — ordinary mul must hold — so the default stays 0.  The prefilter
+form REPLACES the plain-memcmp form under the existing off-by-default
+knob (default builds compile it out), and the fixture stays in the
+harness.  Gates: 40k optimized GMP-differential cases (incl. tag-sign's
+equal-magnitude negated copies, which exercise the filter's sign paths)
+plus ASAN/UBSAN clean.  Artifacts:
+`baselines/mul-value-equal-sqr-filter-cost-d6828ec0-m5max-20260811.json` and
+`baselines/mul-value-equal-sqr-fixture-d6828ec0-m5max-20260811.json`.
+
+**Condition to take:** a call-site signal that equal-value-distinct-buffer
+multiplies are common (e.g. a compiler hint when both operands are the
+same SSA value reloaded, or a workload profile showing them), so the
+filter can be gated to those sites instead of taxing every equal-length
+pair; or a free slot in the header (a value hash) that makes the
+prefilter one compare against already-loaded metadata.
+
+## Hand-NEON non-aligned shift walks (16-256 limbs) — REJECTED (2026-08-11)
+
+The hypothesis was that non-aligned ((k & 63) != 0) shl/shr run scalar
+64-bit loops outside the fixed 16/24/32/40 rungs, leaving NEON headroom at
+40-256 limbs.  A generic-length one-load-per-pair vext walk (the fixed
+rungs' pattern: ext + vshl +/-k + orr, page-delta direction choice kept)
+was added behind BN_SHL_NEON_EXT_MAX / BN_SHR_NEON_EXT_MAX and measured at
+acceptance grade (9 x 110 ms, shl/shr at 16/24/32/40/48/64/128/256/384/512,
+shift = 13).
+
+It lost every affected cell: affected geomean 1.461, worst shr@128 2.260x
+and shr@40 1.843x; several green cells (base 0.73-0.87x GMP) went to or
+past parity.  Instant reject.  Artifact:
+`baselines/shift-neon-ext-acceptance-d6828ec0-m5max-20260811.json`.
+
+The premise is false at the machine level: LLVM 22 at -O3 -mcpu=apple-m5
+already auto-vectorizes the "scalar" funnel loops (both direction-selected
+small walks and bignum_shl_generic's ascending walk) as first-order
+recurrences — paired `ldp q` loads, `ext`/`ushl`/`orr`, EIGHT limbs per
+iteration — twice the width of the hand loop's one q-register pair.  The
+tuned-scalar-source kernels that beat GMP (shl/shr geomean ~0.80) are
+already NEON in the shipped binary.  The fixed rungs win at exact sizes
+for a different reason: full unrolling removes loop control, not because
+the generic path is scalar.
+
+**Condition to revisit:** a compiler/uarch where the funnel-recurrence
+autovectorization regresses (check the disassembly first — a probe compile
+of the loop is enough), or SVE2 with wider vectors than the autovectorizer
+exploits.
+
 ## mulhigh wired: certified-reciprocal division (2026-08-11 addendum)
 
 DRAFT addendum to the "mulhigh (Mulders short product)" entry — for

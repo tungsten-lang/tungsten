@@ -3294,6 +3294,26 @@ WValue bigint_sub_any(WValue a, WValue b) {
 #ifndef BN_MUL_TOP_DIFF_24
 #define BN_MUL_TOP_DIFF_24 1
 #endif
+/* Near-threshold equal shapes without a fixed schoolbook leaf (20/23) also
+ * route to the top-level difference form: the ship-config 9 x 110 ms A/B won
+ * mul@23 0.893 (1.136 -> 1.016 vs GMP) and mul@20 0.982 with clean
+ * 16/21/22/24/32 controls (see NOTED_TRADEOFFS).  21 stays schoolbook: its
+ * fixed eq21 leaf beat the difference form by 7.6% in the same battery. */
+#ifndef BN_MUL_TOP_DIFF_20
+#define BN_MUL_TOP_DIFF_20 1
+#endif
+#ifndef BN_MUL_TOP_DIFF_21
+#define BN_MUL_TOP_DIFF_21 0
+#endif
+#ifndef BN_MUL_TOP_DIFF_23
+#define BN_MUL_TOP_DIFF_23 1
+#endif
+/* Interior equal-length leaves n in [BN_MUL_EQ_SMALL_T2_MIN, BN_KARA_THRESHOLD]
+ * route to the difference form instead of schoolbook when the band is
+ * enabled (default off: 25 > 24).  bn_scratch_need mirrors this band. */
+#ifndef BN_MUL_EQ_SMALL_T2_MIN
+#define BN_MUL_EQ_SMALL_T2_MIN 25
+#endif
 #ifndef BN_MUL_EQ12
 #define BN_MUL_EQ12 1
 #endif
@@ -3368,6 +3388,28 @@ static int bn_bench_runtime_div_recip_diff28;
 #endif
 #ifndef BN_TOOM6_THRESHOLD
 #define BN_TOOM6_THRESHOLD INT32_MAX
+#endif
+/* Equal-length difference-form override bands inside the Toom-3/4 region of
+ * bn_mul_eq (sweep-measured on Apple M: the generic difference form beats the
+ * ladder's Toom-3/Toom-4 pick in these windows).  Kept as macros so the
+ * generated threshold header can retune them; set LO > HI to disable a band. */
+#ifndef BN_MUL_EQ_T2DIFF_BAND1_LO
+#define BN_MUL_EQ_T2DIFF_BAND1_LO 400
+#endif
+#ifndef BN_MUL_EQ_T2DIFF_BAND1_HI
+#define BN_MUL_EQ_T2DIFF_BAND1_HI 432
+#endif
+#ifndef BN_MUL_EQ_T2DIFF_BAND2_LO
+#define BN_MUL_EQ_T2DIFF_BAND2_LO 448
+#endif
+#ifndef BN_MUL_EQ_T2DIFF_BAND2_HI
+#define BN_MUL_EQ_T2DIFF_BAND2_HI 520
+#endif
+#ifndef BN_MUL_EQ_T2DIFF_BAND3_LO
+#define BN_MUL_EQ_T2DIFF_BAND3_LO 536
+#endif
+#ifndef BN_MUL_EQ_T2DIFF_BAND3_HI
+#define BN_MUL_EQ_T2DIFF_BAND3_HI 544
 #endif
 #ifndef BN_TOOM_PAR_THRESHOLD
 #define BN_TOOM_PAR_THRESHOLD 576
@@ -3557,9 +3599,14 @@ static int bn_bench_runtime_div_recip_diff28;
 #ifndef BN_PAR_TOOM_LIMIT
 #define BN_PAR_TOOM_LIMIT 16384
 #endif
-/* >= : Goldilocks single-prime NTT (the O(n log n) top rung).  Measured C
- * crossover after twiddle/workspace caching: NTT beats Toom-4 from ~2048 limbs.
- * That covers the range where a Toom-6 rung would otherwise be considered. */
+/* >= : Goldilocks single-prime NTT MAY be considered (the O(n log n) top
+ * rung).  This is only the gate into bn_top_choice: the dispatcher keeps
+ * Toom below BN_PAR_TOOM_LIMIT outright (parallel seven-way Toom-4 measured
+ * ahead through ~14K limbs), and in the reachable >= 16384 band the
+ * calibrated model picks SSA — the forced sweep at 16384..131073 never has
+ * NTT winning (see the ntt_cost_est comment).  The original "NTT beats
+ * Toom-4 from ~2048" claim predates the parallel point scheduler and the
+ * recalibration; it described the serial-Toom crossover only. */
 #ifndef BN_NTT_THRESHOLD
 #define BN_NTT_THRESHOLD 2048
 #endif
@@ -6481,37 +6528,72 @@ static void bn_dbl(uint64_t *r, const uint64_t *a, int32_t m) {
 
 /* r = a << sh for 1 <= sh < 64, returning the carry limb.  Forward traversal
  * is in-place safe. */
+/* Toom eval/interp shift passes.  The funnel (index-reread) forms carry no
+ * cross-iteration scalar recurrence, so LLVM's loop vectorizer emits the
+ * same 8-limb/iteration NEON ext/ushl/orr walk it already produces for the
+ * boxed shift lanes; the carry-recurrence forms compile to scalar loops.
+ * All bn_shl_copy callers pass disjoint r/a (audited 2026-08-11), and no
+ * caller consumes m == 0.  Default 1: the 15 x 200 ms boxed replication won
+ * every affected Toom-3/4 mul/sqr cell (affected geomean 0.976, no >5%
+ * regression; see NOTED_TRADEOFFS "Toom eval/interp funnel-form shift
+ * passes").  0 restores the carry-recurrence forms for byte-identical A/Bs. */
+#ifndef BN_TOOM_SHIFT_FUNNEL
+#define BN_TOOM_SHIFT_FUNNEL 1
+#endif
+
 static uint64_t bn_shl_copy(uint64_t *r, const uint64_t *a,
                             int32_t m, int sh) {
-    uint64_t carry = 0;
     int rsh = 64 - sh;
+#if BN_TOOM_SHIFT_FUNNEL
+    if (m <= 0) return 0;
+    r[0] = a[0] << sh;
+    for (int32_t i = 1; i < m; i++)
+        r[i] = (a[i] << sh) | (a[i - 1] >> rsh);
+    return a[m - 1] >> rsh;
+#else
+    uint64_t carry = 0;
     for (int32_t i = 0; i < m; i++) {
         uint64_t value = a[i];
         r[i] = (value << sh) | carry;
         carry = value >> rsh;
     }
     return carry;
+#endif
 }
 
 /* logical shift-right by 1 of an m-limb magnitude (in place) */
 static void bn_shr1(uint64_t *w, int32_t m) {
+#if BN_TOOM_SHIFT_FUNNEL
+    if (m <= 0) return;
+    for (int32_t i = 0; i + 1 < m; i++)
+        w[i] = (w[i] >> 1) | (w[i + 1] << 63);
+    w[m - 1] >>= 1;
+#else
     uint64_t carry = 0;
     for (int32_t i = m - 1; i >= 0; i--) {
         uint64_t v = w[i];
         w[i] = (v >> 1) | carry;
         carry = v << 63;
     }
+#endif
 }
 
 /* logical shift-right by sh bits (1..63) of an m-limb magnitude (in place) */
 static void bn_shrk(uint64_t *w, int32_t m, int sh) {
-    uint64_t carry = 0;
     int losh = 64 - sh;
+#if BN_TOOM_SHIFT_FUNNEL
+    if (m <= 0) return;
+    for (int32_t i = 0; i + 1 < m; i++)
+        w[i] = (w[i] >> sh) | (w[i + 1] << losh);
+    w[m - 1] >>= sh;
+#else
+    uint64_t carry = 0;
     for (int32_t i = m - 1; i >= 0; i--) {
         uint64_t v = w[i];
         w[i] = (v >> sh) | carry;
         carry = v << losh;
     }
+#endif
 }
 
 /* Exact division of an m-limb magnitude by a small odd constant c (in place).
@@ -8127,10 +8209,19 @@ static void bn_toom6(uint64_t *out, const uint64_t *a, const uint64_t *b,
 /* Recursive equal-length dispatcher (the `mul_t3` rung of the ladder). */
 static void bn_mul_eq(uint64_t *out, const uint64_t *a, const uint64_t *b,
                       int32_t n, uint64_t *scratch) {
-    if (n <= BN_KARA_THRESHOLD)      bigint_mul_schoolbook_into(out, a, n, b, n);
-    else if ((n >= 400 && n <= 432) ||
-             (n >= 448 && n <= 520) ||
-             (n >= 536 && n <= 544)) bn_toom2_diff(out, a, b, n, scratch);
+    if (n <= BN_KARA_THRESHOLD) {
+#if BN_MUL_EQ_SMALL_T2_MIN <= BN_KARA_THRESHOLD
+        if (n >= BN_MUL_EQ_SMALL_T2_MIN) {
+            bn_toom2_diff(out, a, b, n, scratch);
+            return;
+        }
+#endif
+        bigint_mul_schoolbook_into(out, a, n, b, n);
+    }
+    else if ((n >= BN_MUL_EQ_T2DIFF_BAND1_LO && n <= BN_MUL_EQ_T2DIFF_BAND1_HI) ||
+             (n >= BN_MUL_EQ_T2DIFF_BAND2_LO && n <= BN_MUL_EQ_T2DIFF_BAND2_HI) ||
+             (n >= BN_MUL_EQ_T2DIFF_BAND3_LO && n <= BN_MUL_EQ_T2DIFF_BAND3_HI))
+                                     bn_toom2_diff(out, a, b, n, scratch);
     else if (n < BN_TOOM3_THRESHOLD) bn_toom2(out, a, b, n, scratch);
     else if (n < BN_TOOM4_THRESHOLD) bn_toom3(out, a, b, n, scratch);
     else if (n < BN_TOOM6_THRESHOLD) bn_toom4(out, a, b, n, scratch);
@@ -8143,7 +8234,13 @@ static void bn_mul_eq(uint64_t *out, const uint64_t *a, const uint64_t *b,
  * walking the recursion conservatively. */
 static size_t bn_scratch_need(int32_t n) {
     size_t total = 0;
-    while (n > BN_KARA_THRESHOLD) {
+    while (n > BN_KARA_THRESHOLD
+#if BN_MUL_EQ_SMALL_T2_MIN <= BN_KARA_THRESHOLD
+           /* Mirror bn_mul_eq's small difference-form band: those leaves
+            * consume a Toom-2 frame instead of ending at schoolbook. */
+           || n >= BN_MUL_EQ_SMALL_T2_MIN
+#endif
+           ) {
         int32_t k, kp1, w, frame, child;
         if (n < BN_TOOM3_THRESHOLD) {
             /* The sum frame is the larger of the two Toom-2 forms. */
@@ -8191,10 +8288,15 @@ static size_t bn_scratch_need(int32_t n) {
  *
  * Plain C is used (not inline asm): clang's codegen for the radix-2 butterfly
  * does not spill the way LLVM did for the wide radix-4/8 butterflies, and the
- * plain-C transform already beats Toom-4 by 1.2-3x across the NTT band, so the
- * hand-asm gold stage is unnecessary here.  Correctness was cross-checked vs
- * schoolbook (DIF-forward * DIF-forward == DIT-inverse of the convolution, a
- * true convolution homomorphism — not merely a round-trip).
+ * plain-C transform beat SERIAL Toom-4 by 1.2-3x when this rung was measured
+ * in, so the hand-asm gold stage is unnecessary here.  The parallel point
+ * scheduler has since moved that goalpost: forced NTT loses to seven-way
+ * Toom-4 and to SSA everywhere in the reachable >= BN_PAR_TOOM_LIMIT band
+ * (see ntt_cost_est), so this rung survives as the top-choice model's
+ * fallback option rather than the expected winner.  Correctness was
+ * cross-checked vs schoolbook (DIF-forward * DIF-forward == DIT-inverse of
+ * the convolution, a true convolution homomorphism — not merely a
+ * round-trip).
  * ==================================================================== */
 #define GOLD_P  0xFFFFFFFF00000001ULL    /* 2^64 - 2^32 + 1 */
 #define GOLD_EP 0xFFFFFFFFULL            /* 2^32 - 1 */
@@ -9961,7 +10063,10 @@ static void bigint_mul_dispatch_core(uint64_t *out,
      * Karatsuba floor). */
     if (lo <= BN_KARA_THRESHOLD) {
         if (na == nb &&
-            ((BN_MUL_TOP_DIFF_22 && na == 22) ||
+            ((BN_MUL_TOP_DIFF_20 && na == 20) ||
+             (BN_MUL_TOP_DIFF_21 && na == 21) ||
+             (BN_MUL_TOP_DIFF_22 && na == 22) ||
+             (BN_MUL_TOP_DIFF_23 && na == 23) ||
              (BN_MUL_TOP_DIFF_24 && na == 24))) {
             bn_mul_top_diff_small(out, a, b, na);
             return;
@@ -10853,14 +10958,18 @@ WValue bigint_mul_any_generic(WValue a, WValue b) {
      * multiplication merely to detect separately allocated equal values;
      * those remain correct through the multiply ladder.  The common x*x form
      * naturally shares its limb pointer; result_neg remains authoritative for
-     * every sign combination. */
+     * every sign combination.
+     * BN_MUL_VALUE_EQUAL_SQR=1 re-tests that trade with a cheap prefilter:
+     * only equal-length pairs whose FIRST and TOP limbs already match pay the
+     * memcmp, so ordinary random pairs cost two loads and two compares. */
 #ifndef BN_MUL_VALUE_EQUAL_SQR
 #define BN_MUL_VALUE_EQUAL_SQR 0
 #endif
     if (a_abs == b_abs &&
         (al == bl
 #if BN_MUL_VALUE_EQUAL_SQR
-         || memcmp(al, bl, (size_t)a_abs * sizeof(uint64_t)) == 0
+         || (al[0] == bl[0] && al[a_abs - 1] == bl[a_abs - 1] &&
+             memcmp(al, bl, (size_t)a_abs * sizeof(uint64_t)) == 0)
 #endif
         )) {
         bigint_sqr_dispatch_cap(r->limbs + rz, (int32_t)r->cap - rz,

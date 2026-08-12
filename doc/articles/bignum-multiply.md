@@ -7,15 +7,18 @@ effort hit a ceiling, why, and what that says about the language's codegen.
 
 ## The result
 
-Best single-threaded CPU multiply is a **Goldilocks single-prime NTT** (one 64-bit
-word per coefficient, canonical radix-4 butterflies with a `2⁴⁸` shift-twiddle, a
-whole-pass hand-asm stage, amortized twiddle tables), dispatched by a benchmark-swept
-ladder:
+Best single-threaded CPU multiply during this campaign was a **Goldilocks
+single-prime NTT** (one 64-bit word per coefficient, canonical radix-4
+butterflies with a `2⁴⁸` shift-twiddle, a whole-pass hand-asm stage, amortized
+twiddle tables), dispatched by a benchmark-swept ladder:
 
 ```
 schoolbook ≤32 limbs → Karatsuba 48–256 → Toom-3 90–300 → Toom-4 300–5000
   → Toom-6 ≥5000 → gold NTT (one-shot ≥16384 limbs; amortized ≥2048; squaring ≥1024)
 ```
+
+(That was the standalone experiment's ladder. The production runtime ladder
+that grew out of it is different — see Status at the end.)
 
 Measured best-of-stack vs GMP 6.3 (µs/op, same machine, warmed, back-to-back):
 
@@ -101,9 +104,50 @@ builtins (scalar Goldilocks and 4-lane NEON).
 - Keep field values in `u64[]` arrays — scalar `u64` locals/params for >2⁴⁸ values can
   NaN-box; identifiers split at uppercase letters; `go`/`mul` are reserved.
 
-## Status
+## Status (updated 2026-08-11)
 
-The CPU multiply is consolidated into one swept, validated ladder. It is **not yet wired
-into Tungsten's core big-int path** (`runtime/runtime.c`'s `bigint_mul_any` is still the
-naive O(n²) schoolbook) — that integration is the natural next step so normal Tungsten
-bignum code gets the fast path automatically.
+The integration this article once listed as "the natural next step" happened,
+and then a full tuning campaign rebuilt it. `runtime/runtime.c`'s BigInt
+multiply is **no longer schoolbook** — it is a swept, boxed-A/B-validated
+dispatch tree that as of this update measures **483/485 boxed cells at or
+ahead of GMP 6.3** on an M5 Max (see
+`benchmarks/big_math/NOTED_TRADEOFFS.md` for the residual ledger):
+
+```
+equal-length ladder (bn_mul_eq):
+  schoolbook ≤24 limbs (fixed leaves at 12/15/16/17/21/24; top-level
+    difference-form Toom-2 at exactly 22/24)
+  → Toom-2 25–340 (sum form <25, difference form ≥25, fixed even shapes
+    24/32/40/48/64/…/480; measured hole at 28)
+  → Toom-3 341–451 → Toom-4 452+ …
+  with difference-form override bands at 400–432, 448–520, 536–544
+  (BN_MUL_EQ_T2DIFF_BAND* — retunable via the generated threshold header)
+
+top choice (≥2048 limbs may consider transforms, bn_top_choice):
+  parallel seven-way Toom-4 through ~14K limbs (BN_PAR_TOOM_LIMIT 16384)
+  → SSA (Schönhage–Strassen, √2 half-exponent rings, parallel transform)
+    from ~16K up — the measured in-band winner
+  → gold NTT survives as the model's fallback; the forced sweep at
+    16384..131073 limbs never has it winning (runtime.c, ntt_cost_est)
+```
+
+Squaring has its own ladder (`bn_sqr_eq`: kara_sq to 2559, toom4_sq from
+2560, transforms above), division rides certified reciprocals with Mulders
+short products in the sequential band, and unbalanced shapes split into
+rectangles ahead of the balanced ladder.
+
+Two claims from the original text did not survive the campaign and are
+corrected here for the record: the gold NTT's "beats Toom-4 from ~2048
+limbs" crossover was measured against *serial* Toom-4 — the parallel point
+scheduler moved that goalpost, and forced NTT now loses to seven-way Toom-4
+and SSA everywhere in its reachable band; and SSA, dismissed above as
+"~1.8–2.0× slower than our own gold NTT" in its serial form, became the
+in-band winner once its transform passes were parallelized. The
+representation argument in this article was about single-threaded constant
+factors, and it still holds there; the pool changed the economics.
+
+Threshold values are reproducible via `make -C runtime tune-bigint`, which
+records a best-of-9 forced sweep and emits
+`runtime/generated/bigint_thresholds.h` — every non-default value must pass
+its boxed affected-cell A/B first (see
+`benchmarks/big_math/generate_bigint_thresholds.py`).

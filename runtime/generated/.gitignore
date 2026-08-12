@@ -1,2 +1,4 @@
 *
 !.gitignore
+!bigint_thresholds.h
+!bigint_thresholds.provenance.json

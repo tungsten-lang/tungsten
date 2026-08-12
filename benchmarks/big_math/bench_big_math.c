@@ -1333,6 +1333,12 @@ static int32_t bench_boxed_a_limbs(int op, int32_t limbs) {
 #ifndef BENCH_ADDSUB_ZERO_PREFIX
 #define BENCH_ADDSUB_ZERO_PREFIX 0
 #endif
+/* mul with b an equal-valued but SEPARATELY ALLOCATED copy of a: the fixture
+ * for the value-equality squaring filter (BN_MUL_VALUE_EQUAL_SQR).  Default
+ * off; ordinary mul keeps independent random operands. */
+#ifndef BENCH_MUL_EQUAL_VALUES
+#define BENCH_MUL_EQUAL_VALUES 0
+#endif
 
 /*
  * Operand contract shared by the correctness check, the Tungsten lane, and
@@ -1362,6 +1368,10 @@ static void bench_boxed_operands(int op, int32_t limbs,
 #else
 #error "BENCH_CMP_SHAPE must be 0 (low), 1 (high), or 2 (equal)"
 #endif
+    } else if (BENCH_MUL_EQUAL_VALUES && op == BENCH_BOXED_MUL) {
+        /* Equal-by-value, separately allocated: exercises the squaring
+         * value-equality filter without pointer-identical operands. */
+        b = bench_clone_integer(a);
     } else {
         int32_t b_limbs =
             (op == BENCH_BOXED_ADD1 || op == BENCH_BOXED_SUB1 ||

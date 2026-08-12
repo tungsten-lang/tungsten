@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-08-12T02:30:18.313868+00:00",
+  "commit": "d6828ec0",
+  "cpu": "Apple M5 Max",
+  "sweep_log": "/Users/erik/tungsten/.claude/worktrees/agent-a5c72d800ec6f3f10/runtime/generated/bigint_thresholds.last.txt",
+  "margin": 0.08,
+  "run": 3,
+  "rounds": 9,
+  "target_ms": 110.0,
+  "decisions": {
+    "BN_KARA_THRESHOLD": {
+      "default": 24,
+      "value": 24,
+      "proposal": 16,
+      "proposal_reason": "stable challenger run from n=24",
+      "status": "default (proposal FAILED boxed A/B)",
+      "artifact": "/Users/erik/tungsten/.claude/worktrees/agent-a5c72d800ec6f3f10/runtime/generated/threshold-bn_kara_threshold-16.json"
+    },
+    "BN_TOOM3_THRESHOLD": {
+      "default": 341,
+      "value": 341,
+      "proposal": 341,
+      "proposal_reason": "no stable challenger run",
+      "status": "default (no proposal)"
+    },
+    "BN_TOOM4_THRESHOLD": {
+      "default": 452,
+      "value": 452,
+      "proposal": 3328,
+      "proposal_reason": "stable challenger run from n=3328",
+      "status": "default (proposal FAILED boxed A/B)",
+      "artifact": "/Users/erik/tungsten/.claude/worktrees/agent-a5c72d800ec6f3f10/runtime/generated/threshold-bn_toom4_threshold-3328.json"
+    },
+    "BN_SQR_KARA_THRESHOLD": {
+      "default": 56,
+      "value": 56,
+      "proposal": 40,
+      "proposal_reason": "stable challenger run from n=48",
+      "status": "default (proposal FAILED boxed A/B)",
+      "artifact": "/Users/erik/tungsten/.claude/worktrees/agent-a5c72d800ec6f3f10/runtime/generated/threshold-bn_sqr_kara_threshold-40.json"
+    },
+    "BN_SQR_TOOM4_THRESHOLD": {
+      "default": 2560,
+      "value": 2560,
+      "proposal": 768,
+      "proposal_reason": "stable challenger run from n=768",
+      "status": "default (proposal FAILED boxed A/B)",
+      "artifact": "/Users/erik/tungsten/.claude/worktrees/agent-a5c72d800ec6f3f10/runtime/generated/threshold-bn_sqr_toom4_threshold-768.json"
+    }
+  }
+}

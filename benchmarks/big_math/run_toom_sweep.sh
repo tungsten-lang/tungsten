@@ -7,7 +7,17 @@ RUNTIME="$ROOT/runtime"
 CC=${CC:-clang}
 OUT="$DIR/toom_sweep"
 
-CFLAGS="-O3 -mcpu=native -Wno-deprecated-declarations"
+# Match run.sh's CPU resolution: clang's `native` lags new silicon (an M5
+# resolves to apple-m4), so name the chip when the compiler knows it.
+MCPU=native
+if [ "$(uname -s)" = "Darwin" ] && sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -q "M5"; then
+  if "$CC" -mcpu=apple-m5 -fsyntax-only -x c /dev/null >/dev/null 2>&1; then
+    MCPU=apple-m5
+  else
+    MCPU="apple-m4+sme2p1+sme-f16f16+sme-b16b16+cssc+wfxt+hbc"
+  fi
+fi
+CFLAGS="-O3 -mcpu=$MCPU -Wno-deprecated-declarations"
 ONIG_CFLAGS=$(pkg-config --cflags oniguruma 2>/dev/null || true)
 ONIG_LDFLAGS=$(pkg-config --libs oniguruma 2>/dev/null || true)
 

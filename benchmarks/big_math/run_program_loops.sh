@@ -100,6 +100,25 @@ for workload in accumulate mulchain addchain subchain divchain; do
     "$workload" "$t_ns" "$t_iqr" "$g_ns" "$g_iqr" "$ratio"
   order=$((order + 1))
 done
+# pow2 strength-reduction, sign-test, and fused multiply-accumulate lanes.
+for lane in "divp2chain:64 512 4096" "modp2chain:64 512 4096" \
+            "sgnchain:2 64 4096" "addmulchain:2 8 64"; do
+  workload=${lane%%:*}
+  for limbs in ${lane#*:}; do
+    pair=$(run_pair "$workload" "$order" "$limbs")
+    set -- $pair
+    t_ns=$1; t_iqr=$2; t_check=$3
+    g_ns=$4; g_iqr=$5; g_check=$6
+    if [ "$t_check" != "$g_check" ]; then
+      echo "CHECKSUM MISMATCH on $workload$limbs: tungsten=$t_check gmp=$g_check" >&2
+      exit 1
+    fi
+    ratio=$(printf '%s %s\n' "$t_ns" "$g_ns" | awk '{printf "%.2f", $1 / $2}')
+    printf '%-14s %14s %12s %14s %12s %8s\n' \
+      "$workload$limbs" "$t_ns" "$t_iqr" "$g_ns" "$g_iqr" "$ratio"
+    order=$((order + 1))
+  done
+done
 # Word-overwrite lanes (E4 stage 3) at the mul1@2/4/32 parity widths.
 for workload in wordadd wordsub wordmul wordchain; do
   for limbs in 2 4 32; do

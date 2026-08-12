@@ -36107,6 +36107,101 @@ __attribute__((preserve_most)) WValue w_bigint_mod_pow2_mut(
     return bigint_mod_pow2_impl(a, bits, 1);
 }
 
+/* Exact truncated quotient by 2^bits: |a| >> bits with a's sign preserved.
+ * Truncated division and the sign-magnitude shift agree — trunc(a / 2^k) is
+ * -(|a| >> k) for negative a — which is NOT the `>>` operator: arithmetic
+ * shift floors negatives toward -infinity while `/` truncates toward zero.
+ * The compiler emits this only for a literal `1 << k` divisor on a
+ * statically BigInt dividend; the guarded fallback keeps stale type facts
+ * semantics-preserving (non-integers see ordinary `/` dispatch with the
+ * same materialized divisor). */
+static inline __attribute__((always_inline))
+WValue bignum_shr(WValue a, int64_t k);
+
+static WValue bigint_div_pow2_fallback(WValue a, WValue bits) {
+    WValue divisor = w_bit_shl(w_box_int(1), bits);
+    return w_div(a, divisor);
+}
+
+static WValue bigint_div_pow2_impl(WValue a, WValue bits, int consume) {
+    if (!w_is_int(bits) || !w_is_integer_any(a))
+        return bigint_div_pow2_fallback(a, bits);
+
+    int64_t k = w_as_int(bits);
+    if (__builtin_expect(k < 0, 0))
+        return bigint_div_pow2_fallback(a, bits);
+
+    if (w_is_int(a)) {
+        /* Every inline integer has magnitude below 2^47. */
+        if (k >= 47) return w_box_int(0);
+        return w_box_int(w_as_int(a) /
+                         (int64_t)(UINT64_C(1) << (unsigned)k));
+    }
+
+    int32_t as;
+    WBigint *ba = w_bigint_view(a, &as);
+    int32_t n = as < 0 ? -as : as;
+    int can_consume = consume && (a & W_BIGINT_SIGN_BIT) == 0 &&
+                      ba->shared == 0 && ba->size != 0;
+
+    if (k == 0) {
+        /* a / 1 == a. An immutable return publishes another alias; a
+         * consumed return merely transfers the dying binding (mod_pow2's
+         * identity discipline). */
+        if (can_consume) return a;
+        return w_bigint_mark_shared_value(a);
+    }
+
+    if ((uint64_t)k >= (uint64_t)(uint32_t)n * 64u) {
+        /* |a| < 2^k: truncation discards the whole magnitude. */
+        if (can_consume) bigint_release_if_live(ba);
+        return w_box_int(0);
+    }
+
+    if (can_consume) {
+        /* In-place magnitude shift; the overlay is clear on this path, so
+         * the header sign IS the effective sign and is preserved as-is. */
+        uint64_t limb_shift = (uint64_t)k >> 6;
+        unsigned bit_shift = (unsigned)k & 63u;
+        uint64_t *l = ba->limbs;
+        int32_t outn = n - (int32_t)limb_shift;
+        if (bit_shift == 0) {
+            memmove(l, l + limb_shift, (size_t)outn * sizeof(uint64_t));
+        } else {
+            const uint64_t *src = l + limb_shift;
+            for (int32_t j = 0; j + 1 < outn; j++)
+                l[j] = (src[j] >> bit_shift) |
+                       (src[j + 1] << (64u - bit_shift));
+            l[outn - 1] = src[outn - 1] >> bit_shift;
+        }
+        while (outn > 0 && l[outn - 1] == 0) outn--;
+        ba->size = ba->size < 0 ? -outn : outn;
+        return bigint_finish_mag_sub(ba);
+    }
+
+    /* Immutable: a nonnegative dividend truncates exactly like floor, so
+     * bignum_shr's tuned kernels apply directly. A negative one shifts its
+     * positive view — same buffer, effective sign flipped through the
+     * overlay bit, no allocation — then negates the result. k > 0 and a
+     * surviving magnitude guarantee bignum_shr returned a fresh buffer (or
+     * an inline int), so flipping the fresh header sign publishes no alias. */
+    if (as >= 0) return bignum_shr(a, k);
+    WValue q = bignum_shr(a ^ W_BIGINT_SIGN_BIT, k);
+    if (w_is_int(q)) return w_box_int(-w_as_int(q));
+    WBigint *bq = w_as_bigint(q);
+    bq->size = -bq->size;
+    return q;
+}
+
+WValue w_bigint_div_pow2(WValue a, WValue bits) {
+    return bigint_div_pow2_impl(a, bits, 0);
+}
+
+__attribute__((preserve_most)) WValue w_bigint_div_pow2_mut(
+    WValue a, WValue bits) {
+    return bigint_div_pow2_impl(a, bits, 1);
+}
+
 static WValue bigint_add_mod_pow2_mut_fallback(
     WValue a, WValue b, WValue bits) {
     WValue sum = w_bigint_add_mut(a, b);
@@ -41061,6 +41156,160 @@ static WValue w_bigint_linear_word_mut_fallback(
     return result;
 }
 
+/* A/B and kill switches for the multi-limb fused leg below. Resolved once
+ * from the environment, g_bigint_src_ops-style: ADDMUL_ANY=0 pins the
+ * original two-operator fallback (same-binary before/after benching);
+ * ADDMUL_ROWS=1 accumulates addmul_1 rows directly onto the receiver in the
+ * same-sign non-aliased case instead of forming the product in scratch. */
+static int bn_linear_multi_off_mode = -1;
+static int bn_linear_multi_off(void) {
+    int mode = bn_linear_multi_off_mode;
+    if (__builtin_expect(mode < 0, 0)) {
+        const char *e = getenv("TUNGSTEN_BIGINT_ADDMUL_ANY");
+        mode = (e && e[0] == '0' && e[1] == 0) ? 1 : 0;
+        bn_linear_multi_off_mode = mode;
+    }
+    return mode;
+}
+/* Rows-vs-scratch policy: measured ABBA crossover on M5 Max (addmulchain,
+ * REPS-alternated) puts row accumulation ahead below ~16 product limbs
+ * (7.9 vs 9.9 ns at 4, 11.0 vs 13.2 at 8, 23.9 vs 25.5 at 16) and the
+ * dispatch_core scratch product ahead from 24 up (43.4 vs 44.5 at 24,
+ * 134.7 vs 168.8 at 48 — the tuned kernels pull away). Default is the
+ * hybrid; ROWS=1/0 pins either leg for A/B. */
+#ifndef BN_LINEAR_MULTI_ROWS_MAX
+#define BN_LINEAR_MULTI_ROWS_MAX 16
+#endif
+static int bn_linear_multi_rows_mode = -2; /* -2 unresolved; -1 hybrid */
+static int bn_linear_multi_rows(void) {
+    int mode = bn_linear_multi_rows_mode;
+    if (__builtin_expect(mode == -2, 0)) {
+        const char *e = getenv("TUNGSTEN_BIGINT_ADDMUL_ROWS");
+        if (e && e[0] == '1' && e[1] == 0) mode = 1;
+        else if (e && e[0] == '0' && e[1] == 0) mode = 0;
+        else mode = -1;
+        bn_linear_multi_rows_mode = mode;
+    }
+    return mode;
+}
+
+static WValue w_bigint_linear_word_mut_fallback(
+    WValue a, WValue x, WValue word, int subtract);
+
+/* Multi-limb extension of the fused linear entry: a ±= x * y where BOTH
+ * factors may be arbitrarily wide integers.  The caller (the one-limb entry
+ * below) has already admitted a — a unique, overlay-clear, nonzero heap
+ * bigint — and parsed x's composed-sign limb view.  The product is formed
+ * in the retained per-thread linear-word scratch (never a boxed
+ * allocation) and folded into a's storage in place; capacity or workspace
+ * refusal falls back to the exact two-operator sequence.  The scratch
+ * product is computed BEFORE a's limbs are touched, so x or y aliasing a
+ * (r += r * b and its overlay-negated spellings) stays correct; the
+ * rows variant refuses aliased shapes instead. */
+static WValue w_bigint_linear_multi_mut(
+    WValue a, WValue x, WValue y, int subtract,
+    const uint64_t *xl, int32_t xmag, int xneg) {
+    if (bn_linear_multi_off())
+        return w_bigint_linear_word_mut_fallback(a, x, y, subtract);
+    WBigint *ba = w_as_bigint(a);
+    int32_t ys;
+    WBigint *by = w_bigint_view(y, &ys);
+    int yneg = ys < 0;
+    int32_t ymag = yneg ? -ys : ys;
+    if (ymag == 0) return a;
+    const uint64_t *yl = by->limbs;
+
+    int32_t asize = ba->size;
+    int aneg = asize < 0;
+    int32_t amag = aneg ? -asize : asize;
+    int term_neg = xneg != yneg;
+    if (subtract) term_neg = !term_neg;
+
+    uint64_t pmax64 = (uint64_t)(uint32_t)xmag + (uint64_t)(uint32_t)ymag;
+    if (pmax64 > INT32_MAX)
+        return w_bigint_linear_word_mut_fallback(a, x, y, subtract);
+    int32_t pmax = (int32_t)pmax64;
+    int32_t hi = amag > pmax ? amag : pmax;
+    int same_sign = aneg == term_neg;
+    /* Same-sign growth can carry one limb past max(|a|, |x·y|); the
+     * opposite-sign result never exceeds the wider magnitude. */
+    if (hi + (same_sign ? 1 : 0) > (int32_t)ba->cap)
+        return w_bigint_linear_word_mut_fallback(a, x, y, subtract);
+
+    int rows_mode = bn_linear_multi_rows();
+    if (same_sign && rows_mode != 0 &&
+        (rows_mode == 1 || pmax <= BN_LINEAR_MULTI_ROWS_MAX) &&
+        xl != ba->limbs && yl != ba->limbs) {
+        /* Row accumulation straight onto the receiver: no product pass.
+         * Zero-extend to the full window first; each row's carry ripples
+         * inside it (the window bounds the true sum, so it cannot escape). */
+        uint64_t *l = ba->limbs;
+        for (int32_t i = amag; i <= hi; i++) l[i] = 0;
+        for (int32_t i = 0; i < ymag; i++) {
+            uint64_t carry = bn_addmul_1(l + i, xl, xmag, yl[i]);
+            int32_t j = i + xmag;
+            while (carry && j <= hi) {
+                uint64_t before = l[j];
+                l[j] = before + carry;
+                carry = l[j] < before;
+                j++;
+            }
+        }
+        int32_t outn = hi + 1;
+        while (outn > 0 && l[outn - 1] == 0) outn--;
+        ba->size = aneg ? -outn : outn;
+        return a;
+    }
+
+    uint64_t *product = bn_linear_word_ws_get((size_t)pmax);
+    if (!product)
+        return w_bigint_linear_word_mut_fallback(a, x, y, subtract);
+    bigint_mul_dispatch_core(product, xl, xmag, yl, ymag);
+    int32_t pmag = pmax;
+    while (pmag > 0 && product[pmag - 1] == 0) pmag--;
+
+    if (same_sign) {
+        uint64_t *l = ba->limbs;
+        for (int32_t i = amag; i <= hi; i++) l[i] = 0;
+        bn_addto(l, hi + 1, product, pmag);
+        int32_t outn = hi + 1;
+        while (outn > 0 && l[outn - 1] == 0) outn--;
+        ba->size = aneg ? -outn : outn;
+        return a;
+    }
+
+    int compare = mag_cmp(ba->limbs, amag, product, pmag);
+    if (compare == 0) {
+        ba->size = 0;
+        return bigint_normalize(ba);
+    }
+    if (compare > 0) {
+        uint64_t borrow = bn_sub_n(ba->limbs, ba->limbs, product, pmag);
+        int32_t i = pmag;
+        while (borrow && i < amag) {
+            uint64_t before = ba->limbs[i];
+            ba->limbs[i] = before - borrow;
+            borrow = before < borrow;
+            i++;
+        }
+        while (amag > 0 && ba->limbs[amag - 1] == 0) amag--;
+        ba->size = aneg ? -amag : amag;
+        return bigint_normalize(ba);
+    }
+
+    uint64_t borrow = bn_sub_n(ba->limbs, product, ba->limbs, amag);
+    int32_t i = amag;
+    while (i < pmag) {
+        uint64_t before = product[i];
+        ba->limbs[i] = before - borrow;
+        borrow = before < borrow;
+        i++;
+    }
+    while (pmag > 0 && ba->limbs[pmag - 1] == 0) pmag--;
+    ba->size = term_neg ? -pmag : pmag;
+    return bigint_normalize(ba);
+}
+
 /* One boxed operation for `a +/-= x * word` when the compiler proved that
  * a's old value dies at the assignment.  The runtime guard is deliberately
  * fail-closed: only integer x, a one-limb integer word, an overlay-clear
@@ -41101,7 +41350,8 @@ static WValue w_bigint_linear_word_mut(
         int32_t wsize;
         WBigint *bw = w_bigint_view(word, &wsize);
         if (wsize != 1 && wsize != -1)
-            return w_bigint_linear_word_mut_fallback(a, x, word, subtract);
+            return w_bigint_linear_multi_mut(
+                a, x, word, subtract, xl, xmag, xneg);
         wneg = wsize < 0;
         wmag = bw->limbs[0];
         if (wmag == 0) return a;
@@ -41183,6 +41433,19 @@ __attribute__((preserve_most)) WValue w_bigint_addmul_mut(
 __attribute__((preserve_most)) WValue w_bigint_submul_mut(
     WValue a, WValue x, WValue word) {
     return w_bigint_linear_word_mut(a, x, word, 1);
+}
+
+/* Any-width spellings of the fused linear entries (multi-limb factors
+ * included), for benches, tests, and direct callers. Production compiled
+ * sites reach the identical body through w_bigint_addmul_mut /
+ * w_bigint_submul_mut — the one-limb word path is untouched and wider
+ * words continue into w_bigint_linear_multi_mut. */
+WValue w_bigint_addmul_any(WValue a, WValue x, WValue y) {
+    return w_bigint_linear_word_mut(a, x, y, 0);
+}
+
+WValue w_bigint_submul_any(WValue a, WValue x, WValue y) {
+    return w_bigint_linear_word_mut(a, x, y, 1);
 }
 
 /* Add-into-dying-destination (E4 stage 2, the rotation shape). The

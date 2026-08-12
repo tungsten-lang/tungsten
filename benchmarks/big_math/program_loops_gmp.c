@@ -200,6 +200,85 @@ static void bench_wordchain(long n, unsigned long limbs) {
     mpz_clears(a, r, sum, NULL);
 }
 
+/* pow2 strength-reduction twins: truncating quotient/remainder by 2^2048
+ * into a retained destination. Matches bench_divp2chain/bench_modp2chain. */
+static void pow2_operand_init(mpz_t x, unsigned long limbs) {
+    mpz_set_ui(x, 1);
+    mpz_mul_2exp(x, x, limbs * 64UL - 1UL);
+    mpz_add_ui(x, x, 987654321UL);
+}
+
+static void bench_divp2chain(long n, unsigned long limbs) {
+    mpz_t x, q;
+    mpz_inits(x, q, NULL);
+    pow2_operand_init(x, limbs);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++)
+        mpz_tdiv_q_2exp(q, x, 2048UL);
+    double t1 = now_sec();
+    printf("divp2chain%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n, checksum(q));
+    mpz_clears(x, q, NULL);
+}
+
+static void bench_modp2chain(long n, unsigned long limbs) {
+    mpz_t x, q;
+    mpz_inits(x, q, NULL);
+    pow2_operand_init(x, limbs);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++)
+        mpz_tdiv_r_2exp(q, x, 2048UL);
+    double t1 = now_sec();
+    printf("modp2chain%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n, checksum(q));
+    mpz_clears(x, q, NULL);
+}
+
+/* zero/sign-compare twin: three mpz_sgn tests per pass over an in-place
+ * negated operand (GMP's O(1) negate). Matches bench_sgnchain. */
+static void bench_sgnchain(long n, unsigned long limbs) {
+    mpz_t x;
+    mpz_init(x);
+    pow2_operand_init(x, limbs);
+    long acc = 0;
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++) {
+        if (mpz_sgn(x) > 0) acc += 1;
+        if (mpz_sgn(x) < 0) acc += 2;
+        if (mpz_sgn(x) == 0) acc += 4;
+        mpz_neg(x, x);
+    }
+    double t1 = now_sec();
+    printf("sgnchain%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n,
+           (unsigned long)(acc % 1000000007L));
+    mpz_clear(x);
+}
+
+/* fused multiply-accumulate twin: mpz_addmul into a retained wide
+ * accumulator. Matches bench_addmulchain (6000-bit seed, half-width
+ * factors). */
+static void bench_addmulchain(long n, unsigned long limbs) {
+    mpz_t r, a, b;
+    mpz_inits(r, a, b, NULL);
+    mpz_set_ui(a, 1);
+    mpz_mul_2exp(a, a, limbs * 32UL - 5UL);
+    mpz_add_ui(a, a, 111111111UL);
+    mpz_set_ui(b, 1);
+    mpz_mul_2exp(b, b, limbs * 32UL - 5UL);
+    mpz_add_ui(b, b, 222222222UL);
+    mpz_set_ui(r, 1);
+    mpz_mul_2exp(r, r, 6000UL);
+    mpz_add_ui(r, r, 3UL);
+    double t0 = now_sec();
+    for (long i = 0; i < n; i++)
+        mpz_addmul(r, a, b);
+    double t1 = now_sec();
+    printf("addmulchain%lu\t%ld\t%.1f\t%lu\n", limbs, n,
+           (t1 - t0) * 1e9 / (double)n, checksum(r));
+    mpz_clears(r, a, b, NULL);
+}
+
 int main(int argc, char **argv) {
     const char *workload = argc > 1 ? argv[1] : "all";
     long n = argc > 2 ? atol(argv[2]) : 0;
@@ -226,5 +305,13 @@ int main(int argc, char **argv) {
         bench_wordmul(n > 0 ? n : 2000000, limbs);
     if (!strcmp(workload, "wordchain") || !strcmp(workload, "all"))
         bench_wordchain(n > 0 ? n : 2000000, limbs);
+    if (!strcmp(workload, "divp2chain") || !strcmp(workload, "all"))
+        bench_divp2chain(n > 0 ? n : 20000, limbs);
+    if (!strcmp(workload, "modp2chain") || !strcmp(workload, "all"))
+        bench_modp2chain(n > 0 ? n : 200000, limbs);
+    if (!strcmp(workload, "sgnchain") || !strcmp(workload, "all"))
+        bench_sgnchain(n > 0 ? n : 2000000, limbs);
+    if (!strcmp(workload, "addmulchain") || !strcmp(workload, "all"))
+        bench_addmulchain(n > 0 ? n : 200000, limbs);
     return 0;
 }

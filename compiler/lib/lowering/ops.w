@@ -885,14 +885,21 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   # A literal power-of-two modulus carries its complete arithmetic context in
   # the syntax. Avoid materializing `1 << k` and route BigInt `%=` directly to
-  # the low-limb truncation entry. Only the liveness-proved form may consume
-  # the receiver; ordinary compound assignment keeps the immutable entry.
-  pow2_bits = node.op == :PERCENT ? bigint_pow2_modulus_bits(node.value) : nil
-  if pow2_bits != nil && env("TUNGSTEN_BIGINT_MOD_POW2") != "0" && ctx[:var_types][name] == :bigint
+  # the low-limb truncation entry — and `/=` to the truncated magnitude-shift
+  # entry (w_bigint_div_pow2, NOT `>>`: shifts floor negatives, `/`
+  # truncates). Only the liveness-proved form may consume the receiver;
+  # ordinary compound assignment keeps the immutable entries.
+  pow2_bits = node.op in (:PERCENT :SLASH) ? bigint_pow2_modulus_bits(node.value) : nil
+  pow2_env_on = node.op == :PERCENT ? env("TUNGSTEN_BIGINT_MOD_POW2") != "0" : env("TUNGSTEN_BIGINT_DIV_POW2") != "0"
+  if pow2_bits != nil && pow2_env_on && ctx[:var_types][name] == :bigint
     bits_tv = typed_value(:raw_int, pow2_bits.to_s())
     bits_reg = ensure_i64_value(wfn, bits_tv)
     can_mutate = ctx[:mut_accumulators] != nil && ctx[:mut_accumulators][name] == true
-    rt_name = can_mutate ? "w_bigint_mod_pow2_mut" : "w_bigint_mod_pow2"
+    rt_name = nil
+    if node.op == :PERCENT
+      rt_name = can_mutate ? "w_bigint_mod_pow2_mut" : "w_bigint_mod_pow2"
+    else
+      rt_name = can_mutate ? "w_bigint_div_pow2_mut" : "w_bigint_div_pow2"
     rt_cc = can_mutate ? "preserve_mostcc" : nil
     result_temp = next_temp(wfn)
     emit_instruction(wfn, {
@@ -1661,6 +1668,80 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       args: [lhs_reg, bits_reg], call_conv: rt_cc
     })
     return typed_value(:i64, temp)
+
+  # Compile-time power-of-two divisor: `big / (1 << k)` needs neither the
+  # divisor's construction nor general division — truncated `/` on a
+  # sign-magnitude value is exactly a magnitude shift with the dividend's
+  # sign, which w_bigint_div_pow2 implements (deliberately NOT the `>>`
+  # operator: arithmetic shift floors negatives, `/` truncates). Same
+  # type-directed gate and mutate-if-unique consume rule as the `%` arm
+  # above; the runtime entry's guarded fallback keeps stale facts on the
+  # ordinary `/` dispatch.
+  div_pow2_bits = op == :SLASH ? bigint_pow2_modulus_bits(node.right) : nil
+  if div_pow2_bits != nil && env("TUNGSTEN_BIGINT_DIV_POW2") != "0" && is_bigint_type(lt)
+    lhs_tv = lower_expression(ctx, node.left)
+    lhs_reg = ensure_i64_value(wfn, lhs_tv)
+    bits_reg = ensure_i64_value(wfn, typed_value(:raw_int, div_pow2_bits.to_s()))
+    can_mutate = ctx[:mut_accum_target] != nil && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :var && node.left.name == ctx[:mut_accum_target]
+    rt_name = can_mutate ? "w_bigint_div_pow2_mut" : "w_bigint_div_pow2"
+    rt_cc = can_mutate ? "preserve_mostcc" : nil
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {
+      op: :call_direct_i64, temp: temp, name: rt_name,
+      args: [lhs_reg, bits_reg], call_conv: rt_cc
+    })
+    return typed_value(:i64, temp)
+
+  # O(1) zero/sign compares for statically-BigInt operands: any boxed
+  # integer's sign lives entirely in the tag (inline payload sign) or the
+  # header signed size composed with the tag-sign overlay, which the
+  # __w_*0_big_fast helpers read directly (emitter
+  # bigint_zero_cmp_fast_helper_ir). Non-integer shapes tail-call the
+  # ordinary comparison inside the helper, so stale facts keep full
+  # dispatch semantics. Only a literal-0 operand qualifies — any other
+  # literal needs magnitude — and inline-int statics keep their existing
+  # __w_*_fast route (this arm requires a :bigint side).
+  if op in (:EQ :NEQ :LT :GT :LTE :GTE) && env("TUNGSTEN_BIGINT_CMP0") != "0"
+    z_left = node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int && node.left.value == 0
+    z_right = node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && node.right.value == 0
+    cmp0_operand = nil
+    cmp0_zero = nil
+    cmp0_op = op
+    if z_right && !z_left && is_bigint_type(lt)
+      cmp0_operand = node.left
+      cmp0_zero = node.right
+    elsif z_left && !z_right && is_bigint_type(rt)
+      # Mirror the relation onto the non-literal side: `0 < x` is `x > 0`.
+      cmp0_operand = node.right
+      cmp0_zero = node.left
+      if op == :LT
+        cmp0_op = :GT
+      elsif op == :GT
+        cmp0_op = :LT
+      elsif op == :LTE
+        cmp0_op = :GTE
+      elsif op == :GTE
+        cmp0_op = :LTE
+    if cmp0_operand != nil
+      cmp0_helper = "__w_eq0_big_fast"
+      if cmp0_op == :LT
+        cmp0_helper = "__w_lt0_big_fast"
+      elsif cmp0_op == :GT
+        cmp0_helper = "__w_gt0_big_fast"
+      elsif cmp0_op == :LTE
+        cmp0_helper = "__w_lte0_big_fast"
+      elsif cmp0_op == :GTE
+        cmp0_helper = "__w_gte0_big_fast"
+      cmp0_x_tv = lower_expression(ctx, cmp0_operand)
+      cmp0_x_reg = ensure_i64_value(wfn, cmp0_x_tv)
+      cmp0_z_tv = lower_expression(ctx, cmp0_zero)
+      cmp0_z_reg = ensure_i64_value(wfn, cmp0_z_tv)
+      cmp0_call = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: cmp0_call, name: cmp0_helper, args: [cmp0_x_reg, cmp0_z_reg]})
+      cmp0_pred = cmp0_op == :NEQ ? "ne" : "eq"
+      cmp0_res = next_temp(wfn)
+      emit_instruction(wfn, {op: :icmp_i64, temp: cmp0_res, pred: cmp0_pred, lhs: cmp0_call, rhs: w_true.to_s()})
+      return typed_value(:i1, cmp0_res)
 
   # Var-var string == / != under a :string type fact on either side: route
   # through __w_streq2_fast — bits equal -> true, BOTH canonical stringy

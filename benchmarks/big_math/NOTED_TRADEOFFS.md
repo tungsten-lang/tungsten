@@ -1194,3 +1194,32 @@ every hybrid class (static assert).
 sub-nanosecond alloc-branch cost dominates measured end-to-end time;
 BN_BIGINT_HYBRID_CAP=0 restores pure power-of-two caps with no other
 change.
+
+## pow2 lowering trio (divp2 / cmp0 / addmul-any): measured negatives (2026-08-11)
+
+Shipped: `big / (1 << k)` strength reduction (w_bigint_div_pow2, truncated
+magnitude shift; 14.6x/35.2x/47.3x over materialize+w_div at 64/512/4096
+limbs on divp2chain), O(1) header-sign zero compares for statically-BigInt
+operands (~9x over the generic compare route on sgnchain, width-flat, GMP
+mpz_sgn parity), and the multi-limb fused `r += a * b` leg (scratch product
+into the receiver; 2.6x at 64-limb products, 284x at 8-limb where the old
+fallback also leaked the dying receiver each pass; beats mpz_addmul at 2
+and 64 limbs, parity at 8). Negatives kept on the ledger:
+
+- **divp2chain vs GMP stays 5.6-16x behind** (62 vs 3.8 ns @64 limbs, 1565
+  vs 280 ns @4096) — not the divide: the remaining gap is per-pass result
+  allocation against mpz_tdiv_q_2exp's retained destination.
+  **Condition to take:** a div_pow2 word-dest-style entry that writes the
+  quotient into the dying previous result's buffer (E4 stage 3 shape), or
+  ropeless in-place `/=` consume in loops (the consume leg exists but the
+  lane's `q = x / (1 << 2048)` shape mints a fresh q per pass by design).
+- **Row accumulation loses to the scratch product above ~16 product
+  limbs** (168.8 vs 134.7 ns at 48): bn_addmul_1 rows are schoolbook-only
+  while bigint_mul_dispatch_core brings the tuned fixed-width and Toom
+  kernels. Shipped as a hybrid (rows <= 16 product limbs, scratch above;
+  TUNGSTEN_BIGINT_ADDMUL_ROWS pins either). Condition to widen the rows
+  band: fixed-width row kernels (bn_addmul_1_f*) fused over the receiver.
+- **addmulchain@8 vs GMP is parity, not a win** (13.0-13.5 ns both): the
+  remaining constant is the boxed entry + guard walk per pass, which
+  mpz_addmul does not pay. Condition: an emitted direct-call shape that
+  skips the one-limb word parse when factors are statically multi-limb.

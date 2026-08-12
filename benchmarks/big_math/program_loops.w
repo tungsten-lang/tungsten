@@ -175,6 +175,87 @@
   c = (a + r) % 1000000007
   << "wordchain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
 
+# -- pow2 strength-reduction lanes: `x / (1 << k)` and `x % (1 << k)` with a
+# literal exponent lower to w_bigint_div_pow2 / w_bigint_mod_pow2 (truncated
+# magnitude shift / low-limb truncation) instead of materializing the
+# divisor and running general division. GMP twins: mpz_tdiv_q_2exp /
+# mpz_tdiv_r_2exp into a retained destination. limbs must exceed 32 so the
+# 2048-bit literal shift stays interior. TUNGSTEN_BIGINT_DIV_POW2=0 /
+# TUNGSTEN_BIGINT_MOD_POW2=0 rebuilds measure the old generic-divide path.
+
+-> bench_divp2chain(n, limbs)
+  bits = limbs * 64 - 1
+  x = ((1 << bits) + 987654321) ## big
+  q = 0 ## big
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    q = x / (1 << 2048)
+    i += 1
+  t1 = clock()
+  c = q % 1000000007
+  << "divp2chain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
+-> bench_modp2chain(n, limbs)
+  bits = limbs * 64 - 1
+  x = ((1 << bits) + 987654321) ## big
+  q = 0 ## big
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    q = x % (1 << 2048)
+    i += 1
+  t1 = clock()
+  c = q % 1000000007
+  << "modp2chain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
+# -- zero/sign-compare lane: statically-BigInt `x > 0` / `x < 0` / `x == 0`
+# compile to the O(1) header-sign helpers (__w_*0_big_fast). The per-pass
+# negate is the O(1) overlay flip, so the whole body should be width-flat;
+# the GMP twin answers the same tests with mpz_sgn on an in-place-negated
+# operand. TUNGSTEN_BIGINT_CMP0=0 rebuilds measure the generic-compare path.
+
+-> bench_sgnchain(n, limbs)
+  bits = limbs * 64 - 1
+  x = ((1 << bits) + 987654321) ## big
+  acc = 0 ## i64
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    if x > 0
+      acc += 1
+    if x < 0
+      acc += 2
+    if x == 0
+      acc += 4
+    x = -x ## big
+    i += 1
+  t1 = clock()
+  << "sgnchain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + (acc % 1000000007).to_s()
+
+# -- fused multiply-accumulate lane: `r += a * b` with MULTI-LIMB factors
+# routes through w_bigint_addmul_mut into the multi-limb leg — product in
+# retained scratch folded into the proven-dead receiver, no boxed product
+# per pass. GMP twin: mpz_addmul. The literal 6000-bit seed keeps the
+# uniqueness proof valid and leaves pool headroom (94 limbs in a 128-limb
+# bucket) over every swept factor width. Same-binary A/B:
+# TUNGSTEN_BIGINT_ADDMUL_ANY=0 restores the boxed-product fallback,
+# TUNGSTEN_BIGINT_ADDMUL_ROWS=1 accumulates addmul_1 rows directly.
+
+-> bench_addmulchain(n, limbs)
+  fbits = limbs * 32 - 5
+  a = ((1 << fbits) + 111111111) ## big
+  b = ((1 << fbits) + 222222222) ## big
+  r = ((1 << 6000) + 3) ## big
+  i = 0 ## i64
+  t0 = clock()
+  while i < n
+    r += a * b
+    i += 1
+  t1 = clock()
+  c = r % 1000000007
+  << "addmulchain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
+
 args = argv()
 workload = args.size() > 0 ? args[0] : "all"
 n = args.size() > 1 ? args[1].to_i() : 0
@@ -202,3 +283,11 @@ if workload == "wordmul" || workload == "all"
   bench_wordmul(n > 0 ? n : 2000000, limbs)
 if workload == "wordchain" || workload == "all"
   bench_wordchain(n > 0 ? n : 2000000, limbs)
+if workload == "divp2chain" || workload == "all"
+  bench_divp2chain(n > 0 ? n : 20000, limbs)
+if workload == "modp2chain" || workload == "all"
+  bench_modp2chain(n > 0 ? n : 200000, limbs)
+if workload == "sgnchain" || workload == "all"
+  bench_sgnchain(n > 0 ? n : 2000000, limbs)
+if workload == "addmulchain" || workload == "all"
+  bench_addmulchain(n > 0 ? n : 200000, limbs)

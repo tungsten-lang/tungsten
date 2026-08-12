@@ -290,6 +290,7 @@ use naming
   out << declare_fn_attrs("w_bigint_shl_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_shr_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_mod_pow2_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_div_pow2_mut", "preserve_mostcc " + wv, wv2, "nounwind cold")
   out << declare_fn_attrs("w_bigint_add_mod_pow2_mut", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn_attrs("w_bigint_addmul_mut", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn_attrs("w_bigint_submul_mut", "preserve_mostcc " + wv, wv3, "nounwind cold")
@@ -305,6 +306,7 @@ use naming
   out << declare_fn("w_div", wv, wv2)
   out << declare_fn("w_mod", wv, wv2)
   out << declare_fn("w_bigint_mod_pow2", wv, wv2)
+  out << declare_fn("w_bigint_div_pow2", wv, wv2)
   # NOTE: the bigint operator seams (__w_bigint_{plus,minus}_src) are
   # deliberately NOT declared here. A module that compiles BigInt#+/#-
   # DEFINES them, and LLVM rejects a declare alongside a define; modules
@@ -914,6 +916,52 @@ use naming
 #      non-object x never reaches user == dispatch)
 #   anything else (mode-7 heap/rope strings, ints, objects, ...) -> w_eq,
 #      preserving content compares and user-defined == exactly.
+# `big <op> 0` fast path for statically-BigInt operands (lowering's zero-
+# compare arm; %zero is always the boxed literal 0). The sign of any boxed
+# integer is answered without touching magnitude limbs:
+#   inline Int (tag 0xFFFA)  -> sign of the sign-extended i48 payload
+#   heap BigInt (tag 0xFFF8) -> header signed size COMPOSED with the
+#      tag-sign overlay (bit 47) — w_bigint_view's exact rule; a raw header
+#      read would answer wrong for negate's overlay-flipped aliases, and a
+#      zero magnitude stays non-negative whatever the overlay says because
+#      negating size 0 is still 0.
+#   anything else -> the ordinary comparison entry, so stale type facts
+#      (non-integer values in a :bigint slot) keep full dispatch semantics.
+-> bigint_zero_cmp_fast_helper_ir(fast_name, slow_name, pred)
+  out = StringBuffer(1200)
+  out << "define private i64 @" + fast_name + "(i64 %x, i64 %zero) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %t = lshr i64 %x, 48\n"
+  out << "  %isint = icmp eq i64 %t, 65530\n"
+  out << "  br i1 %isint, label %int, label %ckbig, !prof !31411\n"
+  out << "int:\n"
+  out << "  %s = shl i64 %x, 16\n"
+  out << "  %p = ashr i64 %s, 16\n"
+  out << "  %ci = icmp " + pred + " i64 %p, 0\n"
+  out << "  %ri = select i1 %ci, i64 2, i64 1\n"
+  out << "  ret i64 %ri\n"
+  out << "ckbig:\n"
+  out << "  %isbig = icmp eq i64 %t, 65528\n"
+  out << "  br i1 %isbig, label %big, label %slow, !prof !31411\n"
+  out << "big:\n"
+  out << "  %pi = and i64 %x, 140737488355327\n"
+  out << "  %bp = inttoptr i64 %pi to ptr\n"
+  out << "  %szp = getelementptr inbounds i8, ptr %bp, i64 4\n"
+  out << "  %sz = load i32, ptr %szp, align 4\n"
+  out << "  %sz64 = sext i32 %sz to i64\n"
+  out << "  %ov = and i64 %x, 140737488355328\n"
+  out << "  %negd = icmp ne i64 %ov, 0\n"
+  out << "  %nsz = sub i64 0, %sz64\n"
+  out << "  %eff = select i1 %negd, i64 %nsz, i64 %sz64\n"
+  out << "  %cb = icmp " + pred + " i64 %eff, 0\n"
+  out << "  %rb = select i1 %cb, i64 2, i64 1\n"
+  out << "  ret i64 %rb\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @" + slow_name + "(i64 %x, i64 %zero)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
 -> streq_fast_helper_ir()
   out = StringBuffer(700)
   out << "define private i64 @__w_streq_fast(i64 %x, i64 %lit) alwaysinline nounwind {\n"
@@ -1481,7 +1529,7 @@ ewscope_md_state = {ids: {}}
   direct_range_metadata_suffix("i64", w_tag_char + subtype_span * 3, w_tag_char + subtype_span * 4)
 
 -> wvalue_bool_call?(name)
-  name in ("w_bool" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_streq_fast" "__w_streq2_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
+  name in ("w_bool" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_eq0_big_fast" "__w_lt0_big_fast" "__w_gt0_big_fast" "__w_lte0_big_fast" "__w_gte0_big_fast" "__w_streq_fast" "__w_streq2_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
 
 -> known_call_range_metadata_suffix(inst, llvm_type)
   suffix = range_metadata_suffix(inst, llvm_type)
@@ -2742,6 +2790,24 @@ ewscope_md_state = {ids: {}}
         decls_out = decls_out + "declare i64 @" + cf[1] + "(i64, i64) nounwind\n"
       decls_out = decls_out + cmp_fast_helper_ir(cf[0], cf[1], cf[2], cf[3]) + "\n"
     cfi += 1
+
+  # BigInt zero/sign compare fast paths (lowering's `big <op> 0` arm) —
+  # same injection scheme, one helper per relation actually used.
+  zero_cmp_specs = [
+    ["__w_eq0_big_fast", "w_eq", "eq"],
+    ["__w_lt0_big_fast", "w_lt", "slt"],
+    ["__w_gt0_big_fast", "w_gt", "sgt"],
+    ["__w_lte0_big_fast", "w_lte", "sle"],
+    ["__w_gte0_big_fast", "w_gte", "sge"]
+  ]
+  zci = 0
+  while zci < zero_cmp_specs.size()
+    zc = zero_cmp_specs[zci]
+    if ccall_needed.has_key?(zc[0])
+      if decls_out.index("@" + zc[1] + "(") == nil
+        decls_out = decls_out + "declare i64 @" + zc[1] + "(i64, i64) nounwind\n"
+      decls_out = decls_out + bigint_zero_cmp_fast_helper_ir(zc[0], zc[1], zc[2]) + "\n"
+    zci += 1
 
   # Literal string/symbol == fast path (lowering's :EQ/:NEQ literal arm calls
   # __w_streq_fast with the canonical constant as %lit).

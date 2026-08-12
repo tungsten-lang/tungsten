@@ -599,6 +599,7 @@ WValue w_pow(WValue base, WValue exp);
 WValue w_div(WValue a, WValue b);
 WValue w_mod(WValue a, WValue b);
 WValue w_bigint_mod_pow2(WValue a, WValue bits);
+WValue w_bigint_div_pow2(WValue a, WValue bits);
 WValue w_bigint_gcd(WValue a, WValue b);
 WValue w_bigint_lcm(WValue a, WValue b);
 WValue w_bigint_compare_c(WValue a, WValue b);
@@ -747,6 +748,12 @@ __attribute__((preserve_most)) WValue w_bigint_addmul_mut(
     WValue a, WValue x, WValue word);
 __attribute__((preserve_most)) WValue w_bigint_submul_mut(
     WValue a, WValue x, WValue word);
+__attribute__((preserve_most)) WValue w_bigint_div_pow2_mut(
+    WValue a, WValue bits);
+/* Any-width fused linear entries (multi-limb factors included); plain CC
+ * spellings of the same body for benches, tests, and direct callers. */
+WValue w_bigint_addmul_any(WValue a, WValue x, WValue y);
+WValue w_bigint_submul_any(WValue a, WValue x, WValue y);
 /* Rotation-shape add into a dying destination buffer (E4 stage 2);
  * called unconditionally in the emitted shape, so plain CC. */
 WValue w_bigint_add_dest(WValue dest, WValue x, WValue y);

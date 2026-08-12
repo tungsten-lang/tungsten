@@ -43,6 +43,9 @@
     read_dir(path).each -> (entry)
       yield entry
 
+  -> .walk(path = ".", block)
+    File.walk(path, block)
+
   -> .exist?(path)
     file_directory?(path)
 

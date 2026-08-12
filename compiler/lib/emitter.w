@@ -559,6 +559,8 @@ use naming
   out << declare_fn("__w_read_file", wv, wv)
   out << declare_fn("__w_read_file_bytes", wv, wv)
   out << declare_fn("__w_file_exists", wv, wv)
+  out << declare_fn("__w_file_read_dir", wv, wv)
+  out << declare_fn("__w_file_join", wv, wv2)
   out << declare_fn("__w_write_file", wv, wv2)
   out << declare_fn("__w_file_mmap", wv, wv)
   out << declare_fn("__w_mmap_length", wv, wv)

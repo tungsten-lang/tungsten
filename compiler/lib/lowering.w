@@ -204,6 +204,7 @@ use lowering/definitions
   mod[:known_calls]["file_size"] = "__w_file_size"
   mod[:known_calls]["file_expand_path"] = "__w_file_expand_path"
   mod[:known_calls]["file_expand_path_base"] = "__w_file_expand_path_base"
+  mod[:known_calls]["file_join"] = "__w_file_join"
   mod[:known_calls]["read_dir"] = "__w_file_read_dir"
   mod[:known_calls]["write_file"] = "__w_write_file"
   mod[:known_calls]["write_file_bytes"] = "__w_write_file"

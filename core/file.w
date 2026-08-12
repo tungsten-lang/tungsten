@@ -160,7 +160,7 @@ use core/mmap
     read_dir(path)
 
   -> .read_dir(path = ".")
-    read_dir(path)
+    ccall("__w_file_read_dir", path)
 
   -> .ls(path = ".")
     read_dir(path)
@@ -172,6 +172,19 @@ use core/mmap
   -> .each_child(path = ".", &)
     read_dir(path).each -> (entry)
       yield entry
+
+  # Depth-first traversal. lstat deliberately prevents a symbolic link to a
+  # directory from becoming a recursive edge (and therefore prevents cycles).
+  -> .walk(path = ".", block)
+    pending = [path]
+    while pending.size > 0
+      current = pending.pop()
+      block(current)
+      metadata = File.lstat(current)
+      if metadata != nil && metadata.directory?()
+        read_dir(current).each -> (entry)
+          pending.push(File.join(current, entry))
+    path
 
   # Filesystem mutation
   -> .chdir(dir)
@@ -243,7 +256,13 @@ use core/mmap
       file_expand_path(path)
 
   -> .join(*parts)
-    file_join(*parts)
+    return "" if parts.size == 0
+    joined = parts[0]
+    i = 1
+    while i < parts.size
+      joined = file_join(joined, parts[i])
+      i += 1
+    joined
 
   -> .basename(path)
     file_basename(path)

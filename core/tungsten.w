@@ -22,6 +22,8 @@
   auto :Currency,     "currency"
   auto :Date,         "date"
   auto :Digest,       "digest"
+  auto :Dir,          "dir"
+  auto :Directory,    "directory"
   auto :Duration,     "duration"
   auto :Env,          "env"
   auto :Error,        "error"

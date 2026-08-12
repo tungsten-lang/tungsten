@@ -630,15 +630,20 @@
         emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_expand_path", args: [path_reg]})
         return typed_value(:i64, temp)
       if method_name == "join"
-        arg_regs = []
-        i = 0
+        if args.size() == 0
+          empty = Tungsten:AST:String.new("")
+          return lower_expression(ctx, empty)
+        first = lower_expression(ctx, args[0])
+        joined_reg = ensure_i64_value(wfn, first)
+        i = 1
         while i < args.size()
           val = lower_expression(ctx, args[i])
-          arg_regs.push(ensure_i64_value(wfn, val))
+          next_reg = ensure_i64_value(wfn, val)
+          temp = next_temp(wfn)
+          emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_join", args: [joined_reg, next_reg]})
+          joined_reg = temp
           i += 1
-        temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_join", args: arg_regs})
-        return typed_value(:i64, temp)
+        return typed_value(:i64, joined_reg)
       if method_name == "mmap" && args.size() == 1
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)

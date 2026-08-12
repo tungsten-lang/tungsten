@@ -1877,6 +1877,7 @@ WValue __w_file_size(WValue path_val);
 WValue __w_file_mtime_ns(WValue path_val);
 WValue __w_file_expand_path(WValue path_val);
 WValue __w_file_expand_path_base(WValue path_val, WValue base_val);
+WValue __w_file_join(WValue left, WValue right);
 WValue __w_file_stat_data(WValue path_val, WValue follow_val);
 WValue __w_tempfile_create(WValue prefix_val, WValue directory_val);
 WValue __w_unlink(WValue path_val);

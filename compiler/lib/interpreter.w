@@ -1327,6 +1327,14 @@ use target
       if args.size() != 1
         raise "w_env_to_h expects no arguments"
       return ccall("w_env_to_h")
+    when "__w_file_join"
+      if args.size() != 3
+        raise "__w_file_join expects two path components"
+      return ccall("__w_file_join", args[1], args[2])
+    when "__w_file_read_dir"
+      if args.size() != 2
+        raise "__w_file_read_dir expects one path"
+      return ccall("__w_file_read_dir", args[1])
     when "w_chan_new"
       if args.size() != 2
         raise "w_chan_new expects one capacity"

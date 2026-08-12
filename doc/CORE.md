@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(516 total), grouped by area, with its declaration, a one-line
+(518 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -38,6 +38,8 @@ summary from the source header, and a link to the source.
 | `Currency` | `+ Currency` | Currency — monetary value with currency symbol (tag 0xFFFD) | [`core/currency.w`](../core/currency.w) |
 | `Date` | `+ Date` | — | [`core/date.w`](../core/date.w) |
 | `Digest` | `+ Digest` | — | [`core/digest.w`](../core/digest.w) |
+| `Dir` | `+ Dir` | — | [`core/dir.w`](../core/dir.w) |
+| `Directory` | `+ Directory` | — | [`core/directory.w`](../core/directory.w) |
 | `Duration` | `+ Duration` | Duration — time span (tag 0xFFFF). Two-component representation: | [`core/duration.w`](../core/duration.w) |
 | `Env` | `+ Env` | Env — the current process environment. | [`core/env.w`](../core/env.w) |
 | `Error` | `+ Error` | Error — base error class | [`core/error.w`](../core/error.w) |

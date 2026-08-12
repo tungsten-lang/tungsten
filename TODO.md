@@ -353,9 +353,11 @@ projects stay unchecked until their stated acceptance criteria are met.
   - [x] Add a chunk-fed CSV state machine with quoted multiline fields,
     escaped quotes, CRLF boundary handling, eager row delivery, strict parse
     errors, SciIO integration, and interpreter/native parity fixtures.
-  - [ ] Add incremental file-handle reads, directory traversal, links,
-    permissions, metadata, atomic replace, memory mapping, and platform error
-    parity.
+  - [x] Add depth-first File/Directory/Dir traversal without following symlink
+    directories, with interpreter/native fixtures.
+  - [ ] Add incremental file-handle reads, compiled link/permission mutation,
+    atomic replace, and platform error parity. Metadata and memory mapping have
+    portable source facades but still need Windows coverage.
 - [ ] Improve FFI declaration, ownership, callbacks, strings/bytes, structs,
   arrays, error translation, and marshalling; specify which side allocates and
   frees every representation.

@@ -41459,16 +41459,47 @@ static inline __attribute__((always_inline)) WValue bigint_addsub_small_mut(
         }
 
         if (n < ba->cap) {
+#if defined(__aarch64__)
+            /* Keep the streamed 1<->2-limb iterator boundary ahead of the
+             * generic chunk machinery.  A low-word carry from one published
+             * limb necessarily appends exactly one; spare capacity was
+             * established before either store. */
+            if (n == 1) {
+                ba->limbs[0] = result;
+                ba->limbs[1] = 1;
+                ba->size = negative ? -2 : 2;
+                return a;
+            }
+            if (n < 8) {
+                volatile uint64_t *short_limbs = ba->limbs;
+                short_limbs[0] = result;
+                uint32_t i = 1;
+                while (i < n) {
+                    uint64_t limb = short_limbs[i];
+                    if (limb != UINT64_MAX) {
+                        short_limbs[i] = limb + 1;
+                        return a;
+                    }
+                    short_limbs[i] = 0;
+                    i++;
+                }
+                short_limbs[n] = 1;
+                n++;
+                ba->size = negative ? -(int32_t)n : (int32_t)n;
+                return a;
+            }
+#endif
 #if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
-            /* The forced 8->9 boundary is common enough to justify the
-             * existing straight-line carry chain.  Spare capacity makes the
-             * possible ninth limb safe before the in-place asm writes. */
+            /* The 8->9 boundary uses the existing straight-line carry chain.
+             * Spare capacity makes the possible appended limb safe before
+             * the in-place asm writes. */
             if (n == 8) {
                 uint64_t carry = bn_add_word_a64_fixed(
                     ba->limbs, ba->limbs, 8, magnitude);
                 if (carry) {
-                    ba->limbs[8] = 1;
-                    ba->size = negative ? -9 : 9;
+                    ba->limbs[n] = 1;
+                    n++;
+                    ba->size = negative ? -(int32_t)n : (int32_t)n;
                 }
                 return a;
             }
@@ -41526,10 +41557,43 @@ static inline __attribute__((always_inline)) WValue bigint_addsub_small_mut(
     if (n == 1)
         return bigint_small_mut_fallback(a, magnitude, subtract);
 
+#if defined(__aarch64__)
+    /* The matching 2->1 borrow has one known terminator.  Completing it
+     * directly avoids entering the long-ripple chunk selector at the
+     * hottest iterator width. */
+    if (n == 2) {
+        uint64_t top = ba->limbs[1];
+        if (top == 0)
+            return bigint_small_mut_fallback(a, magnitude, subtract);
+        ba->limbs[0] = result;
+        ba->limbs[1] = top - 1;
+        if (top == 1) ba->size = negative ? -1 : 1;
+        return a;
+    }
+#endif
+
 #if defined(__aarch64__) && BN_ADDSUB_WORD_A64_FIXED
-    /* The matching forced 9->8 boundary subtracts through the first eight
-     * limbs in one straight-line chain.  Guard the canonical top before the
-     * asm commits; afterwards no edge may fall back. */
+    if (n < 9) {
+        volatile uint64_t *short_limbs = ba->limbs;
+        short_limbs[0] = result;
+        uint32_t i = 1;
+        for (;;) {
+            uint64_t limb = short_limbs[i];
+            if (limb != 0) {
+                short_limbs[i] = limb - 1;
+                if (i == n - 1 && limb == 1) {
+                    n--;
+                    ba->size = negative ? -(int32_t)n : (int32_t)n;
+                }
+                return a;
+            }
+            short_limbs[i] = UINT64_MAX;
+            i++;
+        }
+    }
+
+    /* Complete the 9->8 boundary with the existing straight-line kernel.
+     * The canonical top limb guarantees no borrow-out. */
     if (n == 9) {
         uint64_t top = ba->limbs[8];
         if (top == 0)

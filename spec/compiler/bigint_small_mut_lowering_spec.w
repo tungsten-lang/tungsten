@@ -98,6 +98,21 @@
   s += 2
   r == positive && s == negative
 
+-> ripple_small_boundary
+  positive = (1 << 64) - 1
+  r = positive + 0
+  r += 1
+  r -= 1
+  r += 2
+  r -= 2
+  negative = 0 - positive
+  s = negative + 0
+  s -= 1
+  s += 1
+  s -= 2
+  s += 2
+  r == positive && s == negative
+
 -> ripple_chunks_64
   positive = (1 << 4096) - 1
   r = positive + 0
@@ -163,6 +178,7 @@ check("small_mut.negative_sub_two", negative_sub_two())
 check("small_mut.demote_at_i48_edge", demote_at_i48_edge())
 check("small_mut.preserve_negative_i48_edge_value", preserve_negative_i48_edge_value())
 check("small_mut.canonical_zero", canonical_zero())
+check("small_mut.ripple_small_boundary", ripple_small_boundary())
 check("small_mut.ripple_chunks_16", ripple_chunks_16())
 check("small_mut.ripple_chunks_64", ripple_chunks_64())
 check("small_mut.ripple_chunks_65", ripple_chunks_65())

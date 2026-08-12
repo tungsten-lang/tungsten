@@ -6648,6 +6648,13 @@ __attribute__((BN_HOT_SECTION, aligned(64)))
 static void bn_toom2_sum(uint64_t *out,
                          const uint64_t *a, const uint64_t *b,
                          int32_t n, uint64_t *scratch);
+static _Thread_local int bn_toom_no_spin;
+/* Inside a serial-heavy recursion (sqrt, hgcd), parallel dispatch of
+ * SMALL products is pure churn (wake/park pairs, generic point-set shape
+ * instead of the fixed serial kernels) — but big spine products still
+ * win from workers.  768 is the pre-campaign floor those recursions were
+ * tuned against. */
+#define BN_NOSPIN_SUPPRESS(w) (bn_toom_no_spin && (w) < 448)
 static void bn_toom2_parallel_products(
     uint64_t *z0, uint64_t *z2, uint64_t *z1,
     const uint64_t *a0, const uint64_t *b0,
@@ -6856,7 +6863,7 @@ static void bn_toom2_diff(uint64_t *out,
     int db_neg = bn_abs_split_diff(db, b, half, b + half, hin);
     int products_done = 0;
 
-    if (!(n & 1) && n >= BN_TOOM2_PAR_THRESHOLD &&
+    if (!BN_NOSPIN_SUPPRESS(n) && !(n & 1) && n >= BN_TOOM2_PAR_THRESHOLD &&
         n <= BN_PAR_TOOM_LIMIT) {
         bn_toom2_parallel_products(
             out, out + 2 * half, z1,
@@ -7035,7 +7042,6 @@ typedef struct {
 } WToomPointJob;
 
 static _Thread_local int bn_toom_parallel_depth;
-static _Thread_local int bn_toom_no_spin;
 #ifndef BN_TOOM_POINT_TLS_MEMORY
 #define BN_TOOM_POINT_TLS_MEMORY 1
 #endif
@@ -7073,7 +7079,7 @@ static void bn_toom_point_set_init(WToomPointSet *set, int32_t n,
     /* no_spin marks a serial-heavy recursion (sqrt, hgcd): dispatching
      * point sets there pays a wake/park syscall pair per nested product
      * with parked workers contributing nothing — run them inline. */
-    if (!enable_parallel || bn_toom_parallel_depth || bn_toom_no_spin)
+    if (!enable_parallel || bn_toom_parallel_depth || BN_NOSPIN_SUPPRESS(n))
         return;
     set->scratch_need = square ? bn_sqr_scratch_need(n) : bn_scratch_need(n);
     set->operand_limbs = (size_t)(square ? capacity : 2 * capacity) * n;
@@ -7143,7 +7149,7 @@ static void bn_toom_product_set_init(WToomPointSet *set, int capacity,
                         thread_limit : BN_TOOM_PAR_THREADS;
     if (set->thread_limit < 1) set->thread_limit = 1;
     set->spin_budget = bn_toom_no_spin ? 0 : BN_TOOM_POOL_SPIN;
-    if (bn_toom_parallel_depth || bn_toom_no_spin) return;
+    if (bn_toom_parallel_depth || BN_NOSPIN_SUPPRESS(capacity)) return;
 #if BN_TOOM_POINT_TLS_MEMORY
     set->memory = bn_toom_point_memory_get((size_t)capacity);
 #else
@@ -9410,7 +9416,7 @@ static void bn_kara_sq(uint64_t *out, const uint64_t *a, int32_t n, uint64_t *sc
         int32_t half = n >> 1, hin = n - half;
         uint64_t *da = scratch, *z1 = da + hin, *next = z1 + 2 * hin + 1;
         (void)bn_abs_split_diff(da, a, half, a + half, hin);
-        if (!(n & 1) && n >= BN_KARA_SQ_PAR_THRESHOLD &&
+        if (!BN_NOSPIN_SUPPRESS(n) && !(n & 1) && n >= BN_KARA_SQ_PAR_THRESHOLD &&
             n <= BN_PAR_TOOM_LIMIT) {
             WToomPointSet points;
             bn_toom_point_set_init(
@@ -14960,7 +14966,10 @@ WValue bigint_isqrt_any(WValue a) {
      * churn inside the serial spine measured isqrt@512 at 1.49x GMP with
      * the lowered pool cutoffs vs 0.93x sequential.  At >= 2048 operand
      * limbs the products are large enough that parallel dispatch pays. */
-    int isqrt_seq = alen < 2048;
+#ifndef BN_ISQRT_SEQ_MAX
+#define BN_ISQRT_SEQ_MAX INT32_MAX
+#endif
+    int isqrt_seq = alen < BN_ISQRT_SEQ_MAX;
     if (isqrt_seq) bn_toom_no_spin++;
     /* Normalize into the workspace: 2m limbs, top limb >= 2^62. */
     int32_t m = (alen + 1) >> 1;
@@ -38921,6 +38930,20 @@ static inline int w_string_compare(WValue a, WValue b) {
     free(heap_b);
 
     return c ? c : (int)((la > lb) - (la < lb));
+}
+
+/* Content equality that deliberately ignores slab identity. The compiler's
+ * static-slab builder uses this only to collapse duplicate source strings
+ * before assigning final slab slots; ordinary language equality keeps the
+ * canonical-WValue fast path in w_eq. */
+WValue w_string_content_equal(WValue a, WValue b) {
+    int a_symbol = w_is_symbol(a);
+    int b_symbol = w_is_symbol(b);
+    if (a_symbol != b_symbol) return W_FALSE;
+    if ((!w_is_string(a) && !w_is_rope(a) && !a_symbol) ||
+        (!w_is_string(b) && !w_is_rope(b) && !b_symbol))
+        return W_FALSE;
+    return w_bool(w_string_compare(a, b) == 0);
 }
 
 WValue w_eq(WValue a, WValue b) {

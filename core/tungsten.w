@@ -11,6 +11,7 @@
   auto :ByteArray,    "byte_array"
   auto :Char,         "char"
   auto :Channel,      "channel"
+  auto :ChannelReceiveResult, "channel"
   auto :CSV,          "csv"
   auto :CSVParser,    "csv"
   auto :Class,        "class"

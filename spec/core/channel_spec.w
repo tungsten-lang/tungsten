@@ -20,6 +20,28 @@ check("channel.close.idempotent", channel.close() == nil)
 check("channel.close.drains", channel.receive() == 42)
 check("channel.close.empty", channel.receive() == nil)
 
+nil_channel = Channel.new(2)
+nil_channel.send(nil)
+nil_channel.close()
+nil_result = nil_channel.receive_result()
+check("channel.result.nil.received", nil_result.received?())
+check("channel.result.nil.value", nil_result.value() == nil)
+check("channel.result.to_a", nil_result.to_a() == [nil, true])
+closed_result = nil_channel.receive_result()
+check("channel.result.closed", closed_result.closed?())
+check("channel.result.closed.value", closed_result.value() == nil)
+
+each_channel = Channel.new(3)
+each_channel.send("first")
+each_channel.send(nil)
+each_channel.send("third")
+each_channel.close()
+seen = []
+returned = each_channel.each -> (value)
+  seen.push(value)
+check("channel.each.nil_payload", seen == ["first", nil, "third"])
+check("channel.each.returns_self", returned == each_channel)
+
 closed_send_failed = false
 begin
   channel.send(9)

@@ -1229,6 +1229,7 @@ typedef struct WChan {
 WValue w_chan_new(WValue capacity_wv);
 WValue w_chan_send(WValue ch, WValue val);
 WValue w_chan_recv(WValue ch);
+WValue w_chan_recv_result(WValue ch);
 WValue w_chan_close(WValue ch);
 
 /* Private compiler tree-walker discrimination. Public type()/class_name for

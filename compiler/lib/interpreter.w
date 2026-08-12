@@ -1335,6 +1335,10 @@ use target
       if args.size() != 2
         raise "w_chan_recv expects one receiver"
       return ccall("w_chan_recv", args[1])
+    when "w_chan_recv_result"
+      if args.size() != 2
+        raise "w_chan_recv_result expects one receiver"
+      return ccall("w_chan_recv_result", args[1])
     when "w_chan_send"
       if args.size() != 3
         raise "w_chan_send expects one receiver and value"

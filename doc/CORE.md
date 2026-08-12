@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(513 total), grouped by area, with its declaration, a one-line
+(514 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -26,7 +26,8 @@ summary from the source header, and a link to the source.
 | `BoolArray` | `+ BoolArray` | Bit-packed boolean array. The dedicated WBoolArray struct was folded | [`core/bool_array.w`](../core/bool_array.w) |
 | `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. The dedicated | [`core/byte_array.w`](../core/byte_array.w) |
 | `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
-| `Channel` | `+ Channel` | Channel — a bounded, thread-safe FIFO for goroutine communication. | [`core/channel.w`](../core/channel.w) |
+| `Channel` | `+ Channel` | — | [`core/channel.w`](../core/channel.w) |
+| `ChannelReceiveResult` | `+ ChannelReceiveResult` | Channel — a bounded, thread-safe FIFO for goroutine communication. | [`core/channel.w`](../core/channel.w) |
 | `CSV` | `+ CSV` | CSV facade — whole-string convenience and chunk-stream adapters. | [`core/csv.w`](../core/csv.w) |
 | `CSVParser` | `+ CSVParser` | CSV — incremental comma-separated value parsing. | [`core/csv.w`](../core/csv.w) |
 | `Class` | `+ Class` | — | [`core/class.w`](../core/class.w) |

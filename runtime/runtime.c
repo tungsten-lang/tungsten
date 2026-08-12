@@ -60181,7 +60181,7 @@ WValue w_chan_send(WValue channel, WValue val) {
     }
 }
 
-WValue w_chan_recv(WValue channel) {
+static WValue w_chan_recv_value(WValue channel, int *received) {
     WChan *ch = as_chan(channel);
 
     while (1) {
@@ -60191,10 +60191,12 @@ WValue w_chan_recv(WValue channel) {
             ch->head = (ch->head + 1) % ch->cap;
             ch->count--;
             pthread_mutex_unlock(&ch->lock);
+            *received = 1;
             return val;
         }
         if (ch->closed) {
             pthread_mutex_unlock(&ch->lock);
+            *received = 0;
             return W_NIL;
         }
         pthread_mutex_unlock(&ch->lock);
@@ -60210,6 +60212,20 @@ WValue w_chan_recv(WValue channel) {
             }
         }
     }
+}
+
+WValue w_chan_recv(WValue channel) {
+    int received = 0;
+    return w_chan_recv_value(channel, &received);
+}
+
+WValue w_chan_recv_result(WValue channel) {
+    int received = 0;
+    WValue value = w_chan_recv_value(channel, &received);
+    WValue result = w_array_new_empty();
+    w_array_push(result, value);
+    w_array_push(result, received ? W_TRUE : W_FALSE);
+    return result;
 }
 
 WValue w_chan_close(WValue channel) {

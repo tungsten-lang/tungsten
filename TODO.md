@@ -387,8 +387,10 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [ ] Expand `core/channel.w` with bounded/unbounded send, receive, close,
   iteration, timeout/nonblocking operations, and select semantics.
   Bounded `send`, `receive`/`recv`, close/drain behavior, and invalid
-  capacity rejection are source-defined and covered across both engines;
-  unbuffered/unbounded operation and result-bearing receive remain open.
+  capacity rejection are source-defined and covered across both engines.
+  `receive_result` distinguishes a received `nil` from closed-and-drained
+  state and powers close-aware iteration; unbuffered/unbounded operation,
+  timeout/nonblocking operations, and select remain open.
 - [ ] Flesh out `core/mutex.w` with lock/try_lock/unlock/synchronize, ownership
   errors, non-reentrancy policy, poisoning policy, and cancellation safety.
 - [x] Flesh out `core/atomic.w` with signed-i64 load/store/exchange/CAS/fetch

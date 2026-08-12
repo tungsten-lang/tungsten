@@ -274,8 +274,8 @@ projects stay unchecked until their stated acceptance criteria are met.
     `build:tungsten` gate. Dynamic Quantity receivers now cover roles,
     metadata, equivalence, and the `equivalent_to` alias.
   - [x] Classify Mmap, Atomic, Socket, Thread, Channel, BigArray, SmallArray,
-    Hash, StringBuffer, Regex, BigInt, IPv4, IPv6, and MAC methods as native-IC,
-    native-only, representation-specific, or deliberate source fallbacks; the
+    Hash, StringBuffer, Regex, BigInt, Float, IPv4, IPv6, and MAC methods as
+    native-IC, native-only, dual-dispatch, or deliberate source fallbacks; the
     gate also caught and restored Socket#serve_http's missing Core declaration.
   - [ ] Classify the remaining runtime-backed Core classes exhaustively so a
     newly added source method must declare its native-IC or autoload fallback.

@@ -67,6 +67,8 @@
 
   # True iff finite (not NaN, not ±∞).
   -> finite?
+    magnitude = (((($value ## i64) - (0x0001000000000000 ## i64)) ## i64) & (0x7FFFFFFFFFFFFFFF ## i64)) ## i64
+    magnitude < (0x7FF0000000000000 ## i64)
 
   ## Format metadata — concrete subclasses supply concrete values.
 

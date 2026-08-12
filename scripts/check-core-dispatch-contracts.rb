@@ -15,11 +15,11 @@ LOWERING_PATH = File.join(ROOT, "compiler", "lib", "lowering", "method_call.w")
 # Every instance method on these runtime-backed classes must be classified.
 # `native_ic` methods are intercepted by the runtime table even when the
 # receiver's concrete type is erased. `source_fallback` methods deliberately
-# dispatch through the loaded Core class. `representation_specific` names the
-# intentional overlap where one representation uses an IC and another uses
-# source (packed regex literals versus Regex objects, for example). Adding a
-# source method or IC row without choosing one of those contracts is a gate
-# failure.
+# dispatch through the loaded Core class. `dual_dispatch` names an intentional
+# overlap where static/source dispatch and erased/native dispatch use different
+# implementations (packed regex literals versus Regex objects, or Float#sqrt,
+# for example). Adding a source method or IC row without choosing one of those
+# contracts is a gate failure.
 RUNTIME_CLASS_CONTRACTS = {
   "Mmap" => {
     path: "core/mmap.w",
@@ -101,7 +101,7 @@ RUNTIME_CLASS_CONTRACTS = {
     table: "w_ic_regex_table",
     native_ic: %w[=== =~ match? to_s],
     native_only: %w[=== =~ to_s],
-    representation_specific: %w[match?],
+    dual_dispatch: %w[match?],
     source_fallback: %w[
       advance at_end? at_word_boundary? build_result build_skip class_escape_char
       class_match? clex collect_first compile_alt compile_node compile_opt
@@ -119,6 +119,14 @@ RUNTIME_CLASS_CONTRACTS = {
     retired_table: "w_ic_bigint_table",
     native_ic: [],
     source_fallback: %w[% & * + - / << >> ^ abs abs! even? gcd isqrt lcm neg! negative? odd? positive? prime? to_f to_i to_s zero? |]
+  },
+  "Float" => {
+    path: "core/numeric/float.w",
+    table: "w_ic_float_table",
+    native_ic: %w[sqrt to_i to_s],
+    native_only: %w[to_i to_s],
+    dual_dispatch: %w[sqrt],
+    source_fallback: %w[abs ceil finite? floor infinite? nan? round sq sqrt to_f truncate]
   }
 }.freeze
 
@@ -213,17 +221,17 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   native_methods = contract[:native_ic].uniq.sort
   native_only = contract.fetch(:native_only, []).uniq.sort
   fallback_methods = contract[:source_fallback].uniq.sort
-  representation_specific = contract.fetch(:representation_specific, []).uniq.sort
+  dual_dispatch = contract.fetch(:dual_dispatch, []).uniq.sort
   declared_native = native_methods - native_only
   classified = (declared_native + fallback_methods).uniq.sort
   overlap = native_methods & fallback_methods
-  unexpected_overlap = overlap - representation_specific
-  missing_overlap = representation_specific - overlap
+  unexpected_overlap = overlap - dual_dispatch
+  missing_overlap = dual_dispatch - overlap
   unless unexpected_overlap.empty?
-    errors << "#{class_name}: methods classified as both native IC and source fallback without a representation-specific contract: #{unexpected_overlap.join(', ')}"
+    errors << "#{class_name}: methods classified as both native IC and source fallback without a dual-dispatch contract: #{unexpected_overlap.join(', ')}"
   end
   unless missing_overlap.empty?
-    errors << "#{class_name}: representation-specific methods do not overlap native IC and source fallback: #{missing_overlap.join(', ')}"
+    errors << "#{class_name}: dual-dispatch methods do not overlap native IC and source fallback: #{missing_overlap.join(', ')}"
   end
   invalid_native_only = native_only - native_methods
   errors << "#{class_name}: native-only methods without IC classification: #{invalid_native_only.join(', ')}" unless invalid_native_only.empty?

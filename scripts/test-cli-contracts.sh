@@ -7,6 +7,7 @@ VALID="$ROOT/spec/compiler/string_buffer_dynamic_append_spec.w"
 TYPED_SIGNATURE_VALID="$ROOT/spec/compiler/small_array_stack_escape_spec.w"
 INVALID="$ROOT/spec/cli/check_type_error.w"
 INVALID_CAMEL="$ROOT/spec/cli/camel_case_invalid.w"
+INVALID_STR_TYPE="$ROOT/spec/cli/str_type_invalid.w"
 INVALID_GPU="$ROOT/spec/cli/gpu_check_missing_hint.w"
 MULTI_INVALID_GPU="$ROOT/spec/cli/gpu_check_multiple_errors.w"
 VALID_GPU="$ROOT/spec/compiler/gpu_wgsl_emit_spec.w"
@@ -36,6 +37,15 @@ if "$TUNGSTEN" --check "$INVALID_CAMEL" >"$TMP/check-camel-error.out" 2>&1; then
 fi
 grep -q 'E_LEX_INVALID_IDENTIFIER' "$TMP/check-camel-error.out"
 grep -q "uppercase ASCII is not valid in identifiers: 'camelCase'" "$TMP/check-camel-error.out"
+
+if "$TUNGSTEN" --check "$INVALID_STR_TYPE" >"$TMP/check-str-type-error.out" 2>&1; then
+  printf 'tungsten --check accepted str as a type name\n' >&2
+  exit 1
+fi
+grep -q 'E_PARSE_INVALID_TYPE_NAME' "$TMP/check-str-type-error.out"
+grep -q "unknown type 'str'.*type is 'string'" "$TMP/check-str-type-error.out"
+"$TUNGSTEN" --check -e 'value = "text" ## string' >"$TMP/check-string-type.out"
+grep -qx '200 OK' "$TMP/check-string-type.out"
 
 if "$TUNGSTEN" -c "$INVALID_GPU" >"$TMP/check-gpu-error.out" 2>&1; then
   printf 'tungsten -c accepted an invalid @gpu fn\n' >&2

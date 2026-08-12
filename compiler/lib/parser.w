@@ -614,6 +614,7 @@ use ../../core/token
   -> skip_newlines
     while parser_tok_type(@current_packed) in (T_NEWLINE T_TYPE_HINT)
       if at_type?(T_TYPE_HINT)
+        validate_type_hint_spelling(current_value())
         @pending_type_hints.push(current_value())
       advance()
 
@@ -624,6 +625,7 @@ use ../../core/token
   -> skip_statement_end
     while parser_tok_type(@current_packed) in (T_NEWLINE T_SEMICOLON T_TYPE_HINT)
       if at_type?(T_TYPE_HINT)
+        validate_type_hint_spelling(current_value())
         @pending_type_hints.push(current_value())
       advance()
 
@@ -1071,6 +1073,7 @@ use ../../core/token
         if comment_pos != nil
           hint = hint.slice(0, comment_pos)
         hint = hint.strip()
+        validate_type_hint_spelling(hint)
         advance()
         # Memory hints attach to the RHS allocation node, not to the assign
         # as a type annotation. Lowering reads :reuse_safe from the literal.
@@ -1245,6 +1248,7 @@ use ../../core/token
       # `cond ? 1 ## T : 0 ## T`). v0 doesn't apply the hint;
       # lowering still infers from the underlying expression.
       while at_type?(T_TYPE_HINT)
+        validate_type_hint_spelling(current_value())
         advance()
       expect_type(T_COLON)
       false_val = parse_expression(false)
@@ -2677,8 +2681,25 @@ use ../../core/token
     comment_pos = hint.index("#")
     if comment_pos != nil
       hint = hint.slice(0, comment_pos)
+    validate_type_hint_spelling(hint)
     advance()
     Tungsten:AST:TypeAscription.new(expr, hint.strip())
+
+  # `str` is a common Python/Ruby translation slip, but it has never been a
+  # Tungsten type. Reject it where the source still has a precise span instead
+  # of letting lowering intern :str as an unknown pseudo-type. Internal
+  # interpolation tuples use :str as a storage tag; they never enter here.
+  -> validate_type_hint_spelling(hint)
+    text = hint.to_s().strip()
+    colon = text.index(":")
+    if colon != nil
+      text = text.slice(0, colon).strip()
+    else
+      parts = text.split(" ")
+      if parts.size() > 0
+        text = parts[0].strip()
+    if text == "str" || text.starts_with?("str\[")
+      raise compile_error_at(:E_PARSE_INVALID_TYPE_NAME, "unknown type 'str'; Tungsten's text type is 'string'")
 
   # `recase` / `recase expr` — re-run the enclosing case. Bare form (nil value)
   # re-evaluates the original subject; the expr form dispatches on expr. Same
@@ -3146,6 +3167,7 @@ use ../../core/token
   # normalization picks it up unchanged. Shared by the param-type list
   # and both return-type slots so every position accepts one spelling.
   -> parse_type_name_with_array_suffix
+    validate_type_hint_spelling(current_value())
     name = advance_value()
     if at_type?(T_LBRACKET) && peek_type() == T_RBRACKET
       advance()
@@ -3412,6 +3434,7 @@ use ../../core/token
     # monomorphization specializes via the class-level :type_params chain
     # and the type hint is informational for now.
     if at_type?(T_TYPE_HINT)
+      validate_type_hint_spelling(current_value())
       advance()
 
     Tungsten:AST:Param.new(param_name, default, ivar_assign)
@@ -3430,6 +3453,7 @@ use ../../core/token
       raise compile_error_at(:E_PARSE_EXPECTED_DATA_FIELD_TYPE, "Expected data field type, got [current_desc()]")
 
     ftype = advance_value()
+    validate_type_hint_spelling(ftype)
     skip_spaces()
 
     # Array-style bracket-after-type: `u8[2] _pad`, `u8[] slots`.
@@ -4091,6 +4115,7 @@ use ../../core/token
         comment_pos = hint.index("#")
         if comment_pos != nil
           hint = hint.slice(0, comment_pos)
+        validate_type_hint_spelling(hint)
         elem = Tungsten:AST:TypeAscription.new(elem, hint.strip())
         advance()
       elements.push(elem)

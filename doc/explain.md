@@ -26,6 +26,15 @@ later by a lowercase letter) parse as `class_ref` and cannot be assigned.
 Use `snake_case` (`wit_keys`) or `SCREAMING_SNAKE` (`WIT_KEYS`, `GOOD_7`)
 for variables and constants.
 
+## E_PARSE_INVALID_TYPE_NAME
+
+The parser recognized a type annotation spelling that is not a Tungsten type.
+In particular, `str` is not an alias: Tungsten's text type is `string`.
+
+**Fix:** Replace `## str` with `## string` (and `str[]` with `string[]`).
+This diagnostic concerns source type names; the compiler's internal `:str`
+interpolation marker is unrelated.
+
 ## E_LEX_UNEXPECTED_CHAR
 
 The lexer hit a character that does not start any token.

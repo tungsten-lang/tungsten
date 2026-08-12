@@ -362,6 +362,9 @@ projects stay unchecked until their stated acceptance criteria are met.
 
 ### Core semantics and concurrency
 
+- [x] Enforce `string` as the text type spelling. Reject `str`/`str[]` at the
+  source annotation with `E_PARSE_INVALID_TYPE_NAME`; keep internal `:str`
+  interpolation tags private to the AST representation.
 - [x] Give `Enumerable` real producer-side early termination. Indexed sources
   return directly; generic/pair-yielding sources use an identity-checked private
   unwind signal so infinite streams stop, `ensure` runs, and user exceptions

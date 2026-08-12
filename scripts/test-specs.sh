@@ -614,6 +614,7 @@ compiled_specs=(
   spec/core/sandbox_spec.w
   spec/core/file_stat_tempfile_spec.w
   spec/core/clock_ms_spec.w
+  spec/core/csv_stream_spec.w
   spec/core/json_parse_spec.w
   spec/core/string_to_i_bignum_spec.w
   spec/core/string_native_spec.w
@@ -720,6 +721,7 @@ interpreter_specs=(
   # clock_ms had to be registered in BOTH lowering.w and builtins.w; pin the
   # interpreted side so a compiled-only fix cannot pass again.
   spec/core/clock_ms_spec.w
+  spec/core/csv_stream_spec.w
   spec/core/channel_spec.w
   spec/core/atomic_spec.w
   spec/core/env_spec.w

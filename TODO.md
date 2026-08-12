@@ -349,9 +349,13 @@ projects stay unchecked until their stated acceptance criteria are met.
   `$BIT_HOME/<name>/<version>/`; default `BIT_HOME` to
   `$TUNGSTEN_HOME/bits`, and `TUNGSTEN_HOME` to `~/.tungsten`. Support an
   explicit system-wide prefix without requiring it for ordinary installs.
-- [ ] Add streaming CSV and broaden filesystem coverage (directory traversal,
-  links, permissions, metadata, atomic replace, memory mapping, and platform
-  error parity).
+- [ ] Add streaming CSV and broaden filesystem coverage:
+  - [x] Add a chunk-fed CSV state machine with quoted multiline fields,
+    escaped quotes, CRLF boundary handling, eager row delivery, strict parse
+    errors, SciIO integration, and interpreter/native parity fixtures.
+  - [ ] Add incremental file-handle reads, directory traversal, links,
+    permissions, metadata, atomic replace, memory mapping, and platform error
+    parity.
 - [ ] Improve FFI declaration, ownership, callbacks, strings/bytes, structs,
   arrays, error translation, and marshalling; specify which side allocates and
   frees every representation.

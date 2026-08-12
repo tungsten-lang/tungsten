@@ -112,55 +112,14 @@
   # ---- CSV (always pure) ----
 
   -> .parse_csv(text, sep = ",")
-    rows = []
-    line = ""
-    i = 0
-    n = text.size()
-    while i < n
-      ch = text[i]
-      if ch == "\n"
-        rows = rows.push(SciIO.parse_csv_line(line, sep))
-        line = ""
-      elsif ch == "\r"
-        if i + 1 < n && text[i + 1] == "\n"
-          i = i + 1
-        rows = rows.push(SciIO.parse_csv_line(line, sep))
-        line = ""
-      else
-        line = line + ch
-      i = i + 1
-    if line.size() > 0
-      rows = rows.push(SciIO.parse_csv_line(line, sep))
-    rows
+    CSV.parse(text, sep)
 
   -> .parse_csv_line(line, sep)
-    fields = []
-    field = ""
-    in_q = false
-    i = 0
-    n = line.size()
-    while i < n
-      ch = line[i]
-      if in_q
-        if ch == "\""
-          if i + 1 < n && line[i + 1] == "\""
-            field = field + "\""
-            i = i + 1
-          else
-            in_q = false
-        else
-          field = field + ch
-      else
-        if ch == "\""
-          in_q = true
-        elsif ch == sep
-          fields = fields.push(field)
-          field = ""
-        else
-          field = field + ch
-      i = i + 1
-    fields = fields.push(field)
-    fields
+    rows = CSV.parse(line, sep)
+    if rows.size == 0
+      [""]
+    else
+      rows[0]
 
   -> .csv_to_floats(rows, skip_header = true)
     start = 0

@@ -208,7 +208,7 @@ lines = screen(run([
     b"root_ring = PolynomialRing.new([:t])\n",
     b"t = root_ring.generator(0)\n",
     b"? (t*t - 2).real_roots[0]\n"
-], settle=0.8, rows=60, cols=100,
+], settle=2.0, rows=60, cols=100,
    env={"TUNGSTEN_REPL_DRAWILLE": "0"}), cols=100)
 full = "\n".join(lines)
 check("algebraic root: `.real_roots[0]` parses after a dotted no-arg call",

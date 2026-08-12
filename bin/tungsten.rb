@@ -46,10 +46,8 @@ when "symbolicate" then ARGV.shift; load File.join(COMMANDS_DIR, "symbolicate.rb
 when "forge" then ARGV.shift; load File.join(COMMANDS_DIR, "forge.rb")
 when "flame", "fire" then ARGV.shift; load File.join(COMMANDS_DIR, "flame.rb")
 when "console"
-  ARGV.shift
-  repl_source = File.join(ROOT, "compiler/lib/repl.w")
-  ENV["BUNDLE_GEMFILE"] = File.join(ROOT, "implementations/ruby/Gemfile")
-  exec "ruby", File.join(ROOT, "implementations/ruby/exe/ruby-tungsten"), repl_source
+  warn "tungsten console is self-hosted — run bin/tungsten bootstrap first, then bin/tungsten console"
+  exit 1
 else
   load File.join(COMMANDS_DIR, "compile.rb")
 end

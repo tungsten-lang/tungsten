@@ -100,7 +100,7 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts lint cache_gc frontend_fuzz fast_parse_parity]
+  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts lint repl_contracts cache_gc frontend_fuzz fast_parse_parity]
 
   desc "Verify generated C-call ABI contracts and the WIRE consistency guard"
   task :ccall_contracts do
@@ -123,6 +123,11 @@ namespace :test do
   desc "Run self-hosted lint diagnostic and no-mutation contracts"
   task :lint do
     run_command "bash", File.join(ROOT, "scripts/test-lint.sh")
+  end
+
+  desc "Run self-hosted REPL launcher, history, and error-recovery contracts"
+  task :repl_contracts do
+    run_command "python3", File.join(ROOT, "spec/repl/core_pty_spec.py")
   end
 
   desc "Run build/cache garbage-collection retention contracts"

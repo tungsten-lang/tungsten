@@ -94,9 +94,10 @@ case "$1" in
     shift
     if [ -x "$COMPILER" ]; then
       exec "$COMPILER" --repl "$@"
-    else
-      exec "$RUBY" "$RUBY_CLI" console "$@"
     fi
+    echo "tungsten console: no self-hosted compiler at $COMPILER" >&2
+    echo "run bin/tungsten bootstrap, then retry" >&2
+    exit 1
     ;;
   # doctor + bootstrap are pure bash — work on a fresh clone with no compiler.
   doctor)

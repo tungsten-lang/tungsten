@@ -14,22 +14,17 @@ while [ -L "$SELF" ]; do
 done
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 COMPILER="$ROOT/bin/tungsten-compiler"
-RUBY_CLI="$ROOT/bin/tungsten.rb"
-
-if [ -x "$ROOT/src/patched/ruby/ruby" ]; then
-  RUBY="$ROOT/src/patched/ruby/ruby"
-else
-  RUBY=ruby
-fi
 
 export TUNGSTEN_VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
 export TUNGSTEN_ROOT="$ROOT"
 
-if [ -x "$COMPILER" ]; then
-  # Compiler's internal --repl flag starts the pure-Tungsten REPL.
-  # Public entry points are only `wit` and `tungsten console`.
-  exec "$COMPILER" --repl "$@"
+if [ ! -x "$COMPILER" ]; then
+  echo "wit: no self-hosted compiler at $COMPILER" >&2
+  echo "run bin/tungsten bootstrap, then retry" >&2
+  exit 1
 fi
 
-# Fresh clone without a compiler: Ruby-driven REPL via the console path.
-exec "$RUBY" "$RUBY_CLI" console "$@"
+# The public REPL is always compiler/lib/repl.w embedded in the self-hosted
+# compiler. A cold checkout bootstraps first; it never substitutes the Ruby
+# tree walker and silently changes interactive semantics.
+exec "$COMPILER" --repl "$@"

@@ -343,7 +343,7 @@ projects stay unchecked until their stated acceptance criteria are met.
 - [x] Add `bin/tungsten debug` for build/run with symbols, frame pointers,
   sidemap validation, LLDB/GDB selection, build-only automation, cached
   artifacts, and a direct-run mode with faithful child exit status.
-- [ ] Finish the self-hosted REPL migration (`repl.rb` to `repl.w`) and remove
+- [x] Finish the self-hosted REPL migration (`repl.rb` to `repl.w`) and remove
   Ruby as an interactive runtime dependency after PTY/history/error parity.
 - [ ] Make `bit install` resolve a lockfile, verify checksums, and install to
   `$BIT_HOME/<name>/<version>/`; default `BIT_HOME` to

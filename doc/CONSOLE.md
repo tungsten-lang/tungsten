@@ -6,6 +6,12 @@ Start the interactive console from the repository root:
 bin/wit
 ```
 
+The console is the self-hosted `compiler/lib/repl.w` embedded in
+`bin/tungsten-compiler`; `bin/tungsten console` is equivalent. A fresh clone
+must run `bin/tungsten bootstrap` first. There is intentionally no Ruby REPL
+fallback, so interactive parsing, errors, history, and execution cannot drift
+between hosts.
+
 Type a bare `?` for the shortcut list. `? EXPR` evaluates `EXPR` once, reports
 its semantic Tungsten value and type, and asks `tungsten-drawille` for a bounded
 terminal visualization when the value has a useful visual interpretation.

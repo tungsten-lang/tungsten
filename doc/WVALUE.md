@@ -18,7 +18,11 @@ Reference implementation: `stages/tungsten/runtime/wvalue.h` (standalone C heade
 0x0000_0000_0000_00x0+                      heap objects (16-byte aligned ptr | 4-bit sub-tag)
 0x0001_0000_0000_0000 .. 0xFFF1_0000_0000_0000  biased IEEE 754 doubles
 0xFFF1_(payload > 0)                        reserved (payload 0 = biased -inf)
-0xFFF2 .. 0xFFF7                            free tag slots (v4)
+0xFFF2_xxxx_xxxx_xxxx                       simd2d  (Vec2f, Point2D, Vec2i — half2/short2 w/ subtags)
+0xFFF3_xxxx_xxxx_xxxx                       simd3d  (Vec3f — half3 48-bit layout)
+0xFFF4 .. 0xFFF5                            free tag slots (v4)
+0xFFF6_xxxx_xxxx_xxxx                       sockaddr (32-bit IPv4 + 16-bit Port endpoint)
+0xFFF7                                      free tag slot (v4)
 0xFFF8_xxxx_xxxx_xxxx                       bigint (WBigint*, 47-bit pointer;
                                             bit 47 reserved for tag-sign)
 0xFFF9_xxxx_xxxx_xxxx                       string / symbol (SSO-5)
@@ -65,6 +69,51 @@ Sub-tag extraction: `v & 0xF`
  (0xFFF0_0000_0000_0000) the largest boxable raw pattern, so biased
  doubles end at 0xFFF1_0000_0000_0000 and the seven prefixes above it
  (0xFFF2..0xFFF8) are tag space. Check: (v - bias) <= 0xFFF0_0000_0000_0000.
+```
+
+---
+
+## SIMD 2D Vectors & Points (0xFFF2)
+
+```
+63              48 47    44 43              32 31              16 15               0
+┌────────────────┬─────────┬──────────────────┬──────────────────┬──────────────────┐
+│     0xFFF2     │ Sub-Tag │   Unused (0x0)   │  y (half/short)  │  x (half/short)  │
+└────────────────┴─────────┴──────────────────┴──────────────────┴──────────────────┘
+
+Sub-tags (bits 47..44):
+  0x0: Vec2f    (two 16-bit IEEE half floats x, y — maps directly to Metal half2)
+  0x2: Point2D  (two 16-bit IEEE half coordinates x, y with point geometry semantics)
+  0x3: Vec2i    (two 16-bit signed integers x, y — maps directly to Metal short2)
+```
+
+---
+
+## SIMD 3D Vector (0xFFF3)
+
+```
+63              48 47              32 31              16 15               0
+┌────────────────┬──────────────────┬──────────────────┬──────────────────┐
+│     0xFFF3     │  z (metal::half) │  y (metal::half) │  x (metal::half) │
+└────────────────┴──────────────────┴──────────────────┴──────────────────┘
+
+Dedicated 48-bit payload: three 16-bit IEEE half floats (x, y, z).
+Maps 1:1 with Metal shading language `half3` and `simd_half3`.
+```
+
+---
+
+## Network Socket Endpoint / SockAddr (0xFFF6)
+
+```
+63              48 47              32 31                             0
+┌────────────────┬──────────────────┬────────────────────────────────┐
+│     0xFFF6     │  port (16 bits)  │      IPv4 Address (32 bits)    │
+└────────────────┴──────────────────┴────────────────────────────────┘
+
+Dedicated 48-bit payload: 16-bit TCP/UDP port number (0..65535) + 32-bit IPv4 address (A.B.C.D).
+Maps bit-for-bit with POSIX `sockaddr_in` (sin_port | sin_addr.s_addr).
+Frees subtype 100 in Packed types (0xFFFE).
 ```
 
 ---

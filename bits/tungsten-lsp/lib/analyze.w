@@ -392,11 +392,11 @@ project_index = {}
     parser = Parser.new(token_count, lexer.packed_tokens, text, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
     parser.parse()
   rescue err
-    d = diagnostic_from_error(err)
+    d = diagnostic_from_error(err, text, uri)
     diagnostics.push(d) if d != nil
   diagnostics
 
--> diagnostic_from_error(err)
+-> diagnostic_from_error(err, text = nil, uri = nil)
   # Compiler rows/cols are 1-based; LSP positions are 0-based.
   line0 = 0
   char0 = 0
@@ -412,6 +412,7 @@ project_index = {}
   line0 = 0 if line0 < 0
   char0 = 0 if char0 < 0
   span = 1 if span < 1
+
   out = {
     "range": {
       "start": {"line": line0, "character": char0},
@@ -423,6 +424,39 @@ project_index = {}
   }
   if type(err) == "Hash" && err[:code] != nil
     out["code"] = err[:code].to_s
+
+  # Build human-centric code frame and agent-centric payload if text is available
+  if text != nil
+    lines = text.split("\n")
+    if line0 < lines.size
+      src_line = lines[line0]
+      caret_pad = ""
+      k = 0
+      while k < char0 && k < src_line.size
+        caret_pad += (src_line.chars[k] == "\t" ? "\t" : " ")
+        k += 1
+      caret_len = span
+      caret_len = src_line.size - char0 if char0 + caret_len > src_line.size
+      caret_len = 1 if caret_len < 1
+      carets = ""
+      cidx = 0
+      while cidx < caret_len
+        carets += "^"
+        cidx += 1
+
+      line_num_str = (line0 + 1).to_s
+      code_frame = line_num_str + " | " + src_line + "\n" + (" " * line_num_str.size) + " | " + caret_pad + carets
+      out["code_frame"] = code_frame
+      out["agent_payload"] = {
+        "uri": uri,
+        "line": line0 + 1,
+        "column": char0 + 1,
+        "span": span,
+        "message": msg,
+        "frame": code_frame,
+        "code": type(err) == "Hash" && err[:code] != nil ? err[:code].to_s : "E_SYNTAX"
+      }
+
   out
 
 # -- Cross-file helpers --

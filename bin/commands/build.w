@@ -1446,6 +1446,7 @@ compiler_source_paths.push(compiler_dir_name + "/lib")
 compiler_source_paths.push("core")
 compiler_source_paths.push("languages/tungsten/lexers")
 compiler_source_paths.push("data/unit_names.txt")
+compiler_source_paths.push("data/units.tsv")
 
 if !bit_only
   stage1 = build_scratch_dir + "/tungsten.wc"

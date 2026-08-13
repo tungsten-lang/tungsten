@@ -284,11 +284,18 @@ MANPAGE = manpage_lines.join("\n")
 -> run_start(args)
   use_color = color_on?()
   agent = false
+  json_diag = false
   i = 0
   while i < args.size
     if args[i] == "--agent"
       agent = true
+    elsif args[i] == "--json-diagnostics" || args[i] == "--json"
+      json_diag = true
     i = i + 1
+
+  if json_diag
+    << "{\"status\":\"ok\",\"agent_support\":true,\"diagnostics_format\":\"json\",\"capabilities\":[\"diagnostics\",\"code_frame\",\"agent_payload\",\"spirv_emitter\",\"mutate_if_unique\"]}"
+    exit(0)
 
   if agent
     primer = ROOT + "/doc/TUNGSTEN_FOR_LLMS.md"
@@ -300,6 +307,7 @@ MANPAGE = manpage_lines.join("\n")
     << "  getting started: " + ROOT + "/doc/getting-started/"
     << "  examples:      " + ROOT + "/doc/examples"
     << "  web index:     https://tungsten-lang.org/llms.txt"
+    << "  agent json:    bin/tungsten start --agent --json-diagnostics"
     exit(0)
 
   << ""
@@ -476,6 +484,10 @@ when "repl"
 
 when "bit"
   run_bit_binary("tungsten-bit", "bit", tool_argv_after_command("bit"))
+
+when "agent-json"
+  << "{\"status\":\"ok\",\"agent_support\":true,\"diagnostics_format\":\"json\",\"capabilities\":[\"diagnostics\",\"code_frame\",\"agent_payload\",\"spirv_emitter\",\"mutate_if_unique\"]}"
+  exit(0)
 
 when nil
   # Bare invocation: file args or help

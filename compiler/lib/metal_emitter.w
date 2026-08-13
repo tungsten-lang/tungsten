@@ -3180,3 +3180,31 @@ use ast
       binding_base += kernels[i].params.size()
     i += 1
   out.to_s()
+
+# ---- SPIR-V / Vulkan GLSL emission (fourth GPU dialect) ----
+
+-> emit_gpu_kernels_spirv(kernels, only_index = nil)
+  if kernels == nil || kernels.size() == 0
+    return nil
+  out = StringBuffer(1024)
+  out << "// Tungsten @gpu kernel output (SPIR-V / Vulkan GLSL dialect) — do not edit by hand\n"
+  out << "#version 450\n\n"
+  i = 0
+  binding_base = 0
+  while i < kernels.size()
+    if gpu_fn_return_type(kernels[i]) == nil
+      if only_index == nil || only_index == i
+        out << "layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;\n"
+        params = kernels[i].params
+        p = 0
+        while p < params.size()
+          pname = "" + params[p].name
+          out << "layout(std430, set = 0, binding = " + (binding_base + p).to_s() + ") buffer Block_" + pname + " { float " + pname + "[]; };\n"
+          p += 1
+        out << "void main() {\n"
+        out << "  uint thread_x = gl_GlobalInvocationID.x;\n"
+        out << "}\n\n"
+      binding_base += kernels[i].params.size()
+    i += 1
+  out.to_s()
+

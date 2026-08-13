@@ -100,7 +100,10 @@ in Tungsten:Bit:Commands
   -> install_root
     directory = option(:dir) || option(:d)
     prefix = option(:prefix)
+    vendor_install = flag?(:vendor)
     system_install = flag?(:system)
+    if vendor_install
+      return option(:vendor_dir, "vendor/bits")
     if system_install && directory != nil
       abort "--system and --dir cannot be combined"
     if prefix != nil && !system_install

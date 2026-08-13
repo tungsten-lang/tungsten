@@ -18,6 +18,16 @@ SUPPORTED_OPERATIONS :: [?]string {
 	"add", "sub", "mul", "sqr", "div", "mod", "gcd",
 	"and", "or", "xor", "shl", "shr", "cmp", "neg", "abs",
 	"pow", "powmod", "lcm", "isqrt", "tostr", "fromstr",
+	"add1", "sub1", "mul1", "div1",
+}
+
+// Asymmetric "big op small" rows: the second operand is one 64-bit limb.
+// The value lives in [2^63, 2^64), which does not fit core:math/big's
+// DIGIT, so the honest Odin form is the ordinary Int/Int procedure with a
+// one-limb operand rather than the *_digit entries.
+is_word_row :: proc(operation: string) -> bool {
+	return operation == "add1" || operation == "sub1" ||
+	       operation == "mul1" || operation == "div1"
 }
 
 bench_sink: u64
@@ -76,17 +86,17 @@ touch :: #force_inline proc(value: ^big.Int, salt: u64) {
 run_int_result :: proc(operation: string, a, b, modulus, r0, r1: ^big.Int, iterations: int) -> f64 {
 	start := time.now()
 	switch operation {
-	case "add":
+	case "add", "add1":
 		for i in 0..<iterations {
 			r := r0 if i & 1 == 0 else r1
 			must(big.add(r, a, b)); touch(r, u64(i))
 		}
-	case "sub":
+	case "sub", "sub1":
 		for i in 0..<iterations {
 			r := r0 if i & 1 == 0 else r1
 			must(big.sub(r, a, b)); touch(r, u64(i))
 		}
-	case "mul":
+	case "mul", "mul1":
 		for i in 0..<iterations {
 			r := r0 if i & 1 == 0 else r1
 			must(big.mul(r, a, b)); touch(r, u64(i))
@@ -96,7 +106,7 @@ run_int_result :: proc(operation: string, a, b, modulus, r0, r1: ^big.Int, itera
 			r := r0 if i & 1 == 0 else r1
 			must(big.sqr(r, a)); touch(r, u64(i))
 		}
-	case "div":
+	case "div", "div1":
 		for i in 0..<iterations {
 			r := r0 if i & 1 == 0 else r1
 			must(big.div(r, a, b)); touch(r, u64(i))
@@ -254,7 +264,8 @@ measure :: proc(operation: string, limbs, iterations: int) -> f64 {
 		must(big.int_from_bytes_little(&b, bytes))
 		delete(bytes)
 	} else {
-		set_operand(&b, limbs, 0x13198a2e03707344 ~ u64(limbs))
+		b_limbs := 1 if is_word_row(operation) else limbs
+		set_operand(&b, b_limbs, 0x13198a2e03707344 ~ u64(limbs))
 	}
 	must(big.set(&modulus, 0))
 	if operation == "powmod" {

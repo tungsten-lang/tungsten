@@ -38,6 +38,10 @@ enum Operation {
     Isqrt,
     Tostr,
     Fromstr,
+    Add1,
+    Sub1,
+    Mul1,
+    Div1,
 }
 
 impl Operation {
@@ -64,8 +68,18 @@ impl Operation {
             "isqrt" => Ok(Self::Isqrt),
             "tostr" => Ok(Self::Tostr),
             "fromstr" => Ok(Self::Fromstr),
+            "add1" => Ok(Self::Add1),
+            "sub1" => Ok(Self::Sub1),
+            "mul1" => Ok(Self::Mul1),
+            "div1" => Ok(Self::Div1),
             _ => Err(format!("unknown operation: {name}")),
         }
+    }
+
+    /// Asymmetric "big op small" rows: the second operand is one limb, and
+    /// the lane times num-bigint's u64 scalar operators.
+    fn is_word_row(self) -> bool {
+        matches!(self, Self::Add1 | Self::Sub1 | Self::Mul1 | Self::Div1)
     }
 }
 
@@ -73,6 +87,7 @@ struct Operands {
     row_limbs: usize,
     a: BigInt,
     b: BigInt,
+    word: u64,
     modulus: BigInt,
     decimal: String,
 }
@@ -105,9 +120,12 @@ fn operands(operation: Operation, limbs: usize) -> Operands {
     let mut a = operand(a_limbs, 0x243f_6a88_85a3_08d3 ^ limbs as u64);
     let b = if operation == Operation::Cmp {
         &a ^ BigInt::from(1_u8)
+    } else if operation.is_word_row() {
+        operand(1, 0x1319_8a2e_0370_7344 ^ limbs as u64)
     } else {
         operand(limbs, 0x1319_8a2e_0370_7344 ^ limbs as u64)
     };
+    let word = low_u64(&b);
     if operation == Operation::Abs {
         a = -a;
     }
@@ -125,6 +143,7 @@ fn operands(operation: Operation, limbs: usize) -> Operands {
         row_limbs: limbs,
         a,
         b,
+        word,
         modulus,
         decimal,
     }
@@ -142,7 +161,7 @@ fn low_u64(value: &BigInt) -> u64 {
 #[inline(never)]
 fn bench_bigint<F>(input: &Operands, iterations: usize, apply: F) -> (Duration, u64)
 where
-    F: Fn(&BigInt, &BigInt, &BigInt, &str) -> BigInt,
+    F: Fn(&BigInt, &BigInt, &BigInt, &str, u64) -> BigInt,
 {
     let mut previous: Option<BigInt> = None;
     let mut sink = 0_u64;
@@ -153,6 +172,7 @@ where
             black_box(&input.b),
             black_box(&input.modulus),
             black_box(input.decimal.as_str()),
+            black_box(input.word),
         );
         // This use occurs after `apply`, so the prior allocation cannot be
         // released early and reused while the next result is being formed.
@@ -202,31 +222,35 @@ fn bench_tostr(input: &Operands, iterations: usize) -> (Duration, u64) {
 
 fn measure(operation: Operation, input: &Operands, iterations: usize) -> (Duration, u64) {
     match operation {
-        Operation::Add => bench_bigint(input, iterations, |a, b, _, _| a + b),
-        Operation::Sub => bench_bigint(input, iterations, |a, b, _, _| a - b),
-        Operation::Mul => bench_bigint(input, iterations, |a, b, _, _| a * b),
-        Operation::Sqr => bench_bigint(input, iterations, |a, _, _, _| a * a),
-        Operation::Div => bench_bigint(input, iterations, |a, b, _, _| a / b),
-        Operation::Mod => bench_bigint(input, iterations, |a, b, _, _| a % b),
-        Operation::Gcd => bench_bigint(input, iterations, |a, b, _, _| a.gcd(b)),
-        Operation::And => bench_bigint(input, iterations, |a, b, _, _| a & b),
-        Operation::Or => bench_bigint(input, iterations, |a, b, _, _| a | b),
-        Operation::Xor => bench_bigint(input, iterations, |a, b, _, _| a ^ b),
-        Operation::Shl => bench_bigint(input, iterations, |a, _, _, _| a << 13_usize),
-        Operation::Shr => bench_bigint(input, iterations, |a, _, _, _| a >> 13_usize),
+        Operation::Add => bench_bigint(input, iterations, |a, b, _, _, _| a + b),
+        Operation::Sub => bench_bigint(input, iterations, |a, b, _, _, _| a - b),
+        Operation::Mul => bench_bigint(input, iterations, |a, b, _, _, _| a * b),
+        Operation::Sqr => bench_bigint(input, iterations, |a, _, _, _, _| a * a),
+        Operation::Div => bench_bigint(input, iterations, |a, b, _, _, _| a / b),
+        Operation::Mod => bench_bigint(input, iterations, |a, b, _, _, _| a % b),
+        Operation::Gcd => bench_bigint(input, iterations, |a, b, _, _, _| a.gcd(b)),
+        Operation::And => bench_bigint(input, iterations, |a, b, _, _, _| a & b),
+        Operation::Or => bench_bigint(input, iterations, |a, b, _, _, _| a | b),
+        Operation::Xor => bench_bigint(input, iterations, |a, b, _, _, _| a ^ b),
+        Operation::Shl => bench_bigint(input, iterations, |a, _, _, _, _| a << 13_usize),
+        Operation::Shr => bench_bigint(input, iterations, |a, _, _, _, _| a >> 13_usize),
         Operation::Cmp => bench_cmp(input, iterations),
-        Operation::Neg => bench_bigint(input, iterations, |a, _, _, _| -a),
-        Operation::Abs => bench_bigint(input, iterations, |a, _, _, _| a.abs()),
-        Operation::Pow => bench_bigint(input, iterations, |a, _, _, _| a.pow(POW_EXPONENT)),
+        Operation::Neg => bench_bigint(input, iterations, |a, _, _, _, _| -a),
+        Operation::Abs => bench_bigint(input, iterations, |a, _, _, _, _| a.abs()),
+        Operation::Pow => bench_bigint(input, iterations, |a, _, _, _, _| a.pow(POW_EXPONENT)),
         Operation::Powmod => {
-            bench_bigint(input, iterations, |a, b, modulus, _| a.modpow(b, modulus))
+            bench_bigint(input, iterations, |a, b, modulus, _, _| a.modpow(b, modulus))
         }
-        Operation::Lcm => bench_bigint(input, iterations, |a, b, _, _| a.lcm(b)),
-        Operation::Isqrt => bench_bigint(input, iterations, |a, _, _, _| a.sqrt()),
+        Operation::Lcm => bench_bigint(input, iterations, |a, b, _, _, _| a.lcm(b)),
+        Operation::Isqrt => bench_bigint(input, iterations, |a, _, _, _, _| a.sqrt()),
         Operation::Tostr => bench_tostr(input, iterations),
-        Operation::Fromstr => bench_bigint(input, iterations, |_, _, _, decimal| {
+        Operation::Fromstr => bench_bigint(input, iterations, |_, _, _, decimal, _| {
             BigInt::parse_bytes(decimal.as_bytes(), 10).expect("valid benchmark decimal")
         }),
+        Operation::Add1 => bench_bigint(input, iterations, |a, _, _, _, word| a + word),
+        Operation::Sub1 => bench_bigint(input, iterations, |a, _, _, _, word| a - word),
+        Operation::Mul1 => bench_bigint(input, iterations, |a, _, _, _, word| a * word),
+        Operation::Div1 => bench_bigint(input, iterations, |a, _, _, _, word| a / word),
     }
 }
 
@@ -241,12 +265,15 @@ fn validate_case(operation: Operation, input: &Operands, limbs: usize) -> Result
             input.a.bits()
         ));
     }
-    if input.b.bits() as usize != 64 * limbs {
+    let expected_b_bits = if operation.is_word_row() { 64 } else { 64 * limbs };
+    if input.b.bits() as usize != expected_b_bits {
         return Err(format!(
-            "second operand width mismatch: expected {} bits, got {}",
-            64 * limbs,
+            "second operand width mismatch: expected {expected_b_bits} bits, got {}",
             input.b.bits()
         ));
+    }
+    if operation.is_word_row() && BigInt::from(input.word) != input.b {
+        return Err("hoisted word does not match the one-limb operand".to_owned());
     }
 
     let invalid = |detail: &str| Err(format!("{operation:?} validation failed: {detail}"));
@@ -379,6 +406,34 @@ fn validate_case(operation: Operation, input: &Operands, limbs: usize) -> Result
         Operation::Fromstr => {
             if BigInt::parse_bytes(input.decimal.as_bytes(), 10).as_ref() != Some(&input.a) {
                 return invalid("decimal input does not round-trip");
+            }
+        }
+        Operation::Add1 => {
+            let result = &input.a + input.word;
+            if result - input.word != input.a {
+                return invalid("(a + w) - w != a");
+            }
+        }
+        Operation::Sub1 => {
+            let result = &input.a - input.word;
+            if result + input.word != input.a {
+                return invalid("(a - w) + w != a");
+            }
+        }
+        Operation::Mul1 => {
+            let result = &input.a * input.word;
+            if &result / input.word != input.a || &result % input.word != BigInt::zero() {
+                return invalid("product quotient/remainder invariant");
+            }
+        }
+        Operation::Div1 => {
+            let quotient = &input.a / input.word;
+            let remainder = &input.a % input.word;
+            if quotient * input.word + &remainder != input.a
+                || remainder.is_negative()
+                || remainder >= BigInt::from(input.word)
+            {
+                return invalid("a != (a / w) * w + (a % w)");
             }
         }
     }
@@ -516,7 +571,8 @@ mod tests {
     fn every_operation_validates_and_executes() {
         let names = [
             "add", "sub", "mul", "sqr", "div", "mod", "gcd", "and", "or", "xor", "shl", "shr",
-            "cmp", "neg", "abs", "pow", "powmod", "lcm", "isqrt", "tostr", "fromstr",
+            "cmp", "neg", "abs", "pow", "powmod", "lcm", "isqrt", "tostr", "fromstr", "add1",
+            "sub1", "mul1", "div1",
         ];
         for name in names {
             let operation = Operation::parse(name).unwrap();

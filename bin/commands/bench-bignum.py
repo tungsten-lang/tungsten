@@ -139,6 +139,15 @@ LANE_LABELS = {
     "python": "Python",
     "rust": "Rust",
     "odin": "Odin",
+    "go": "Go",
+    "node": "Node",
+    "boost": "Boost",
+}
+# The V8 lane is limited to operations V8 ships as BigInt builtins: a
+# hand-written JS gcd/lcm/isqrt/powmod would measure the harness author's
+# algorithm rather than V8's, so those cells are reported unsupported.
+EXTERNAL_UNSUPPORTED = {
+    "node": frozenset({"gcd", "lcm", "isqrt", "powmod"}),
 }
 DEFAULT_EXTERNAL_CELL_TIMEOUT_SECONDS = 30.0
 
@@ -435,7 +444,6 @@ def external_sweep(
     target_ms: float,
     cell_timeout_seconds: float,
 ) -> dict[int, dict[str, Any]]:
-    binary = EXTERNAL_BINARIES[language]
     rows: dict[int, dict[str, Any]] = {}
     timeout = cell_timeout_seconds if cell_timeout_seconds > 0 else None
     # One process per size makes the deadline a real operation/size-cell
@@ -443,7 +451,7 @@ def external_sweep(
     # pathological cell can be killed without losing the remaining matrix.
     for limbs in sizes:
         command = [
-            str(binary),
+            *external_command(language),
             "--sweep",
             operation,
             str(limbs),
@@ -499,17 +507,15 @@ def add_external_lanes(
     if not rows:
         return
     operation = rows[0]["operation"]
-    # The external harnesses (Rust num-bigint, Odin core:math/big) predate
-    # the asymmetric rows; skip ops they don't implement rather than
-    # erroring the whole run.
-    if operation in ("add1", "sub1", "mul1", "div1"):
-        for row in rows:
-            for language in languages:
-                row[f"{language}_status"] = "unsupported"
-        return
     sizes = [row["limbs"] for row in rows]
     by_size = {row["limbs"]: row for row in rows}
     for language in languages:
+        # Skip operations a lane doesn't implement rather than erroring the
+        # whole run (see EXTERNAL_UNSUPPORTED).
+        if operation in EXTERNAL_UNSUPPORTED.get(language, ()):
+            for row in rows:
+                row[f"{language}_status"] = "unsupported"
+            continue
         external = external_sweep(
             language, operation, sizes, runs, target_ms,
             cell_timeout_seconds,
@@ -741,7 +747,22 @@ def harness_is_stale() -> bool:
     return any(p.exists() and p.stat().st_mtime > built for p in sources)
 
 
+def external_command(language: str) -> list[str]:
+    binary = EXTERNAL_BINARIES[language]
+    if language == "node":
+        # Run the script through the interpreter instead of relying on its
+        # shebang so a lost executable bit cannot break the lane.
+        return ["node", str(binary)]
+    return [str(binary)]
+
+
 def external_harness_is_stale(language: str) -> bool:
+    if language == "node":
+        # No compile step: the stamp records that the current script passed
+        # its self-test under an installed node runtime.
+        if shutil.which("node") is None or not NODE_STAMP.exists():
+            return True
+        return NODE_SCRIPT.stat().st_mtime > NODE_STAMP.stat().st_mtime
     binary = EXTERNAL_BINARIES[language]
     if not binary.exists():
         return True
@@ -751,9 +772,33 @@ def external_harness_is_stale(language: str) -> bool:
             RUST_DIR / "Cargo.toml",
             RUST_DIR / "Cargo.lock",
         ]
+    elif language == "go":
+        sources = list(GO_DIR.rglob("*.go")) + [GO_DIR / "go.mod"]
+    elif language == "boost":
+        sources = list(BOOST_DIR.rglob("*.cpp"))
     else:
         sources = list(ODIN_DIR.rglob("*.odin"))
     return any(path.exists() and path.stat().st_mtime > built for path in sources)
+
+
+def boost_include_dir() -> Path | None:
+    override = os.environ.get("TUNGSTEN_BOOST_INCLUDE")
+    candidates = [Path(override)] if override else []
+    if shutil.which("brew") is not None:
+        try:
+            prefix = run_checked(["brew", "--prefix", "boost"]).strip()
+            candidates.append(Path(prefix) / "include")
+        except RuntimeError:
+            pass
+    candidates += [
+        Path("/opt/homebrew/opt/boost/include"),
+        Path("/usr/local/include"),
+        Path("/usr/include"),
+    ]
+    for candidate in candidates:
+        if (candidate / "boost" / "multiprecision" / "cpp_int.hpp").exists():
+            return candidate
+    return None
 
 
 def build_external_harness(language: str) -> None:
@@ -777,6 +822,50 @@ def build_external_harness(language: str) -> None:
             ],
             env=env,
         )
+        return
+    if language == "go":
+        if shutil.which("go") is None:
+            raise RuntimeError("--go requested, but go is not installed")
+        run_checked(
+            ["go", "build", "-C", str(GO_DIR), "-o", str(GO_BINARY), "."]
+        )
+        run_checked([str(GO_BINARY), "--self-test"])
+        return
+    if language == "node":
+        if shutil.which("node") is None:
+            raise RuntimeError("--node requested, but node is not installed")
+        run_checked(["node", str(NODE_SCRIPT), "--self-test"])
+        NODE_STAMP.touch()
+        return
+    if language == "boost":
+        if shutil.which("clang++") is None:
+            raise RuntimeError(
+                "--boost requested, but clang++ is not installed"
+            )
+        include = boost_include_dir()
+        if include is None:
+            raise RuntimeError(
+                "--boost requested, but the Boost headers were not found "
+                "(brew install boost, or set TUNGSTEN_BOOST_INCLUDE)"
+            )
+        native_flag = (
+            "-mcpu=native"
+            if platform.machine() in ("arm64", "aarch64")
+            else "-march=native"
+        )
+        run_checked(
+            [
+                "clang++",
+                "-O3",
+                "-std=c++17",
+                native_flag,
+                f"-I{include}",
+                "-o",
+                str(BOOST_BINARY),
+                str(BOOST_DIR / "main.cpp"),
+            ]
+        )
+        run_checked([str(BOOST_BINARY), "--self-test"])
         return
     if shutil.which("odin") is None:
         raise RuntimeError("--odin requested, but odin is not installed")
@@ -1022,6 +1111,12 @@ def print_results_header(metadata: dict[str, Any]) -> None:
         labels.append(f"Rust num-bigint {metadata['rust_bigint_version']}")
     if metadata.get("odin_lane"):
         labels.append(f"Odin core:math/big ({metadata['odin_version']})")
+    if metadata.get("go_lane"):
+        labels.append(f"Go math/big ({metadata['go_version']})")
+    if metadata.get("node_lane"):
+        labels.append(f"JS V8 BigInt (node {metadata['node_version']})")
+    if metadata.get("boost_lane"):
+        labels.append(f"Boost cpp_int ({metadata['boost_version']})")
     print(" vs ".join(labels))
     has_fft_band = any(
         limbs > FFT_BAND_LIMBS
@@ -1039,16 +1134,24 @@ def print_results_header(metadata: dict[str, Any]) -> None:
         "Lower is better. " + statistic
         + "; operands are deterministic positive 64-bit limbs."
     )
-    mutable = "GMP"
+    mutable_lanes = ["GMP"]
     if metadata.get("odin_lane"):
-        mutable += " and Odin"
+        mutable_lanes.append("Odin")
+    if metadata.get("go_lane"):
+        mutable_lanes.append("Go")
+    if len(mutable_lanes) > 2:
+        mutable = ", ".join(mutable_lanes[:-1]) + ", and " + mutable_lanes[-1]
+    elif len(mutable_lanes) == 2:
+        mutable = " and ".join(mutable_lanes)
+    else:
+        mutable = mutable_lanes[0]
     print(
         "Immutable lanes keep the previous result live while computing the "
         f"next; {mutable} alternate two mutable destinations."
     )
     if metadata.get("external_cell_timeout_seconds", 0) > 0:
         print(
-            "Optional Rust/Odin cells have a "
+            "Optional external-lane cells have a "
             f"{metadata['external_cell_timeout_seconds']:g}s deadline; "
             "TIMEOUT cells remain in JSON and are excluded from ratios."
         )
@@ -1203,7 +1306,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="tungsten bench bignum",
         description=(
             "Compare boxed immutable bignum operations across Tungsten, GMP, "
-            "Python, Rust num-bigint, and Odin core:math/big, then test "
+            "Python, Rust num-bigint, Odin core:math/big, Go math/big, "
+            "JavaScript (V8 BigInt), and Boost cpp_int, then test "
             "reusable-buffer capacity policies."
         ),
     )
@@ -1270,6 +1374,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="also time Odin core:math/big (optimized native build)",
     )
     parser.add_argument(
+        "--go",
+        action="store_true",
+        help="also time Go math/big (optimized native build)",
+    )
+    parser.add_argument(
+        "--node",
+        action="store_true",
+        help=(
+            "also time JavaScript BigInt under Node's V8; operations "
+            "without a BigInt builtin (gcd, lcm, isqrt, powmod) are "
+            "reported unsupported"
+        ),
+    )
+    parser.add_argument(
+        "--boost",
+        action="store_true",
+        help="also time Boost.Multiprecision cpp_int (optimized native build)",
+    )
+    parser.add_argument(
         "--external-cell-timeout",
         "--cell-timeout",
         dest="external_cell_timeout",
@@ -1284,7 +1407,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="enable the Python, Rust, and Odin lanes",
+        help="enable the Python, Rust, Odin, Go, Node, and Boost lanes",
     )
     parser.add_argument(
         "--accurate",
@@ -1346,7 +1469,20 @@ RUST_DIR = ROOT / "benchmarks" / "big_math" / "rust"
 RUST_BINARY = RUST_DIR / "target" / "release" / "tungsten-bignum-rust-bench"
 ODIN_DIR = ROOT / "benchmarks" / "big_math" / "odin"
 ODIN_BINARY = ROOT / "benchmarks" / "big_math" / "bench_big_math_odin"
-EXTERNAL_BINARIES = {"rust": RUST_BINARY, "odin": ODIN_BINARY}
+GO_DIR = ROOT / "benchmarks" / "big_math" / "go"
+GO_BINARY = ROOT / "benchmarks" / "big_math" / "bench_big_math_go"
+NODE_DIR = ROOT / "benchmarks" / "big_math" / "node"
+NODE_SCRIPT = NODE_DIR / "main.mjs"
+NODE_STAMP = NODE_DIR / ".self-test-stamp"
+BOOST_DIR = ROOT / "benchmarks" / "big_math" / "boost"
+BOOST_BINARY = ROOT / "benchmarks" / "big_math" / "bench_big_math_boost"
+EXTERNAL_BINARIES = {
+    "rust": RUST_BINARY,
+    "odin": ODIN_BINARY,
+    "go": GO_BINARY,
+    "node": NODE_SCRIPT,
+    "boost": BOOST_BINARY,
+}
 
 
 def main() -> int:
@@ -1358,7 +1494,10 @@ def main() -> int:
         parser.error("--worker-sweep and --quick cannot be combined")
     if args.worker_sweep and args.capacity_only:
         parser.error("--worker-sweep and --capacity-only cannot be combined")
-    if args.worker_sweep and (args.python or args.rust or args.odin or args.all):
+    if args.worker_sweep and (
+        args.python or args.rust or args.odin or args.go or args.node
+        or args.boost or args.all
+    ):
         parser.error("--worker-sweep measures native Tungsten/GMP only; external lanes are unsupported")
     if args.full and args.capacity_only:
         parser.error("--full and --capacity-only cannot be combined")
@@ -1377,9 +1516,18 @@ def main() -> int:
         args.python = True
         args.rust = True
         args.odin = True
+        args.go = True
+        args.node = True
+        args.boost = True
     external_languages = [
         language
-        for language, enabled in (("rust", args.rust), ("odin", args.odin))
+        for language, enabled in (
+            ("rust", args.rust),
+            ("odin", args.odin),
+            ("go", args.go),
+            ("node", args.node),
+            ("boost", args.boost),
+        )
         if enabled
     ]
     lanes = ["tungsten", "gmp"]
@@ -1488,7 +1636,10 @@ def main() -> int:
             "128},reserve-1.5x,power-of-two,p2<=32+q32,p2<=64+q64,"
             "p2<=128+q32,lad32/512/128,lad32/256/96,lad3step"
         )
-        print("optional lanes: python,rust-num-bigint-0.5.1,odin-core-math-big")
+        print(
+            "optional lanes: python,rust-num-bigint-0.5.1,odin-core-math-big,"
+            "go-math-big,node-v8-bigint,boost-cpp-int"
+        )
         return 0
 
     if not args.worker_sweep and harness_is_stale():
@@ -1541,6 +1692,19 @@ def main() -> int:
                 odin_version = odin_version.split(" version ", 1)[1]
         except (RuntimeError, FileNotFoundError):
             odin_version = "unknown"
+    go_version = ""
+    if args.go:
+        go_version = command_output(["go", "version"])
+        if go_version.startswith("go version "):
+            go_version = go_version[len("go version "):]
+    node_version = ""
+    if args.node:
+        node_version = command_output(["node", "--version"])
+    boost_version = ""
+    if args.boost:
+        # The harness embeds BOOST_LIB_VERSION at compile time, so it names
+        # the headers actually measured rather than whatever is installed.
+        boost_version = command_output([str(BOOST_BINARY), "--version"])
     commit = command_output(["git", "rev-parse", "HEAD"])
     dirty = bool(command_output(
         ["git", "status", "--porcelain", "--untracked-files=no"], ""
@@ -1561,6 +1725,9 @@ def main() -> int:
         "python_lane": bool(args.python),
         "rust_lane": bool(args.rust),
         "odin_lane": bool(args.odin),
+        "go_lane": bool(args.go),
+        "node_lane": bool(args.node),
+        "boost_lane": bool(args.boost),
         "lanes": lanes,
         "target_ms": target_ms,
         "python_version": platform.python_version(),
@@ -1570,6 +1737,12 @@ def main() -> int:
         "rust_digit_bits": 64,
         "odin_version": odin_version,
         "odin_digit_bits": 63,
+        "go_version": go_version,
+        "go_digit_bits": 64,
+        "node_version": node_version,
+        "node_digit_bits": 64,
+        "boost_version": boost_version,
+        "boost_digit_bits": 64,
         "external_cell_timeout_seconds": args.external_cell_timeout,
         "platform": platform.platform(),
         "limb_bits": 64,
@@ -1587,7 +1760,10 @@ def main() -> int:
             "gmp": "two alternating mpz result destinations retain capacity",
             "native_word_rows": (
                 "Tungsten and GMP hoist the positive one-limb rhs and call "
-                "their unsigned-word add/sub/mul/div entries"
+                "their unsigned-word add/sub/mul/div entries; Rust and "
+                "Boost use their u64 operator overloads; Odin, Go, and "
+                "Node pass a one-limb bignum operand (no word entry, or a "
+                "63-bit digit too narrow for a 2^63..2^64 word)"
             ),
             "python": "ordinary immutable Python integer expressions",
             "rust": (
@@ -1598,10 +1774,29 @@ def main() -> int:
                 "two alternating mutable core:math/big destinations retain "
                 "capacity, matching the library's idiomatic API"
             ),
+            "go": (
+                "two alternating mutable math/big destinations retain "
+                "capacity, matching the library's idiomatic API; the stdlib "
+                "has no LCM, so that lane times the composed "
+                "(a / gcd(a, b)) * b"
+            ),
+            "node": (
+                "ordinary immutable V8 BigInt expressions; operands rotate "
+                "between value-equal distinct objects and results escape "
+                "through a global store, defeating TurboFan's hoisting and "
+                "allocation sinking; gcd/lcm/isqrt/powmod have no BigInt "
+                "builtin and are reported unsupported"
+            ),
+            "boost": (
+                "ordinary immutable cpp_int results; the previous result "
+                "stays live until the next is computed; operand pointers "
+                "are laundered per iteration against LICM"
+            ),
             "external_cell_deadline": (
-                "Rust and Odin run in one subprocess per operation/size cell; "
-                "a timed-out cell is killed, retained as TIMEOUT in JSON, "
-                "excluded from ratio aggregates, and later cells continue"
+                "external lanes run in one subprocess per operation/size "
+                "cell; a timed-out cell is killed, retained as TIMEOUT in "
+                "JSON, excluded from ratio aggregates, and later cells "
+                "continue"
             ),
             "division_shape": "2N-limb positive dividend by N-limb positive divisor",
             "isqrt_shape": "2N-limb positive operand, N-limb root",
@@ -1613,7 +1808,8 @@ def main() -> int:
                 "Tungsten uses bigint_powmod_any's Montgomery/Barrett window "
                 "implementation (also validated against an independent naive "
                 "mirror); Rust uses num-bigint modpow; Odin uses its shipped "
-                "internal Montgomery/window implementation; odd modulus"
+                "internal Montgomery/window implementation; Go uses math/big "
+                "Exp; Boost uses powm; V8 has no builtin; odd modulus"
             ),
             "size_caps": SIZE_CAPS,
             "shift_bits": 13,
@@ -1629,7 +1825,7 @@ def main() -> int:
             "calibration": (
                 "the shared native iteration count is derived from the "
                 "faster Tungsten/GMP pilot so both lanes reach the requested "
-                "window; Python, Rust, and Odin are calibrated independently; "
+                "window; every optional lane is calibrated independently; "
                 "native harness warms both implementations before timing"
             ),
             "capacity_trace": (

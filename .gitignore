@@ -56,6 +56,9 @@ benchmarks/**/build/**/*
 # Compiled big_math benchmark binaries (built from the tracked *.c sources).
 benchmarks/big_math/bench_big_math
 benchmarks/big_math/bench_big_math.profile
+benchmarks/big_math/bench_big_math_go
+benchmarks/big_math/bench_big_math_boost
+benchmarks/big_math/node/.self-test-stamp
 benchmarks/big_math/toom_sweep
 benchmarks/big_math/toom_gmp_compare
 benchmarks/big_math/kernel_crossover

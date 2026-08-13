@@ -92,5 +92,83 @@ printf 'external\\todin\\t%s\\t%s\\t17\\t3.5\\n' "$operation" "$limbs"
         self.assertIn("TIMEOUT", output.getvalue())
 
 
+class ExternalUnsupportedOperationTest(unittest.TestCase):
+    """Per-language unsupported operations must not invoke the harness."""
+
+    def setUp(self) -> None:
+        self.original = BENCH.EXTERNAL_BINARIES["node"]
+        # Any attempt to execute the lane fails loudly.
+        BENCH.EXTERNAL_BINARIES["node"] = Path("/nonexistent-node-harness")
+
+    def tearDown(self) -> None:
+        BENCH.EXTERNAL_BINARIES["node"] = self.original
+
+    @staticmethod
+    def make_rows(operation: str) -> list[dict]:
+        return [
+            {
+                "operation": operation,
+                "limbs": limbs,
+                "bits": limbs * 64,
+                "native_iterations": 17,
+                "tungsten_ns": 2.0,
+                "gmp_ns": 2.5,
+                "tungsten_over_gmp": 0.8,
+                "fastest": "tungsten",
+            }
+            for limbs in (1, 2)
+        ]
+
+    def test_node_gcd_is_marked_unsupported_without_running(self) -> None:
+        for operation in sorted(BENCH.EXTERNAL_UNSUPPORTED["node"]):
+            rows = self.make_rows(operation)
+            BENCH.add_external_lanes(rows, ["node"], 1, 1.0, 0.0)
+            for row in rows:
+                self.assertEqual(row["node_status"], "unsupported")
+                self.assertNotIn("node_ns", row)
+
+    def test_asymmetric_rows_run_on_supporting_lanes(self) -> None:
+        # Every external harness implements the one-limb word rows; the
+        # fixture stands in for the odin binary and must be invoked.
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary) / "fake-external"
+            fixture.write_text(
+                "#!/bin/sh\n"
+                "printf 'external\\todin\\t%s\\t%s\\t17\\t3.5\\n' \"$2\" \"$3\"\n"
+            )
+            fixture.chmod(fixture.stat().st_mode | stat.S_IXUSR)
+            original = BENCH.EXTERNAL_BINARIES["odin"]
+            BENCH.EXTERNAL_BINARIES["odin"] = fixture
+            try:
+                rows = self.make_rows("add1")
+                BENCH.add_external_lanes(rows, ["odin"], 1, 1.0, 0.0)
+            finally:
+                BENCH.EXTERNAL_BINARIES["odin"] = original
+        for row in rows:
+            self.assertEqual(row["odin_status"], "ok")
+            self.assertEqual(row["odin_ns"], 3.5)
+
+    def test_unsupported_cells_are_printed_as_na(self) -> None:
+        rows = self.make_rows("gcd")
+        BENCH.add_external_lanes(rows, ["node"], 1, 1.0, 0.0)
+        BENCH.update_fastest(rows[0], ["tungsten", "gmp", "node"])
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            BENCH.print_result_row(rows[0], ["tungsten", "gmp", "node"])
+        self.assertIn("N/A", output.getvalue())
+
+
+class ExternalCommandTest(unittest.TestCase):
+    def test_node_lane_runs_through_the_interpreter(self) -> None:
+        command = BENCH.external_command("node")
+        self.assertEqual(command[0], "node")
+        self.assertEqual(Path(command[1]).name, "main.mjs")
+
+    def test_native_lanes_execute_their_binary(self) -> None:
+        for language in ("rust", "odin", "go", "boost"):
+            command = BENCH.external_command(language)
+            self.assertEqual(len(command), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

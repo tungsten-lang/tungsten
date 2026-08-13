@@ -558,6 +558,30 @@ WValue w_uuid_v6(void);
 WValue w_uuid_v7(void);
 WValue w_uuid_v8(WValue custom);
 
+/* ---- SIMD Vector primitives (0xFFF2 simd2d / 0xFFF3 simd3d tags) ---- */
+#define WVALUE_TAG_SIMD2D 0xFFF2000000000000ULL
+#define WVALUE_TAG_SIMD3D 0xFFF3000000000000ULL
+
+WValue w_vec2f(double x, double y);
+WValue w_point2d(double x, double y);
+WValue w_vec2i(int16_t x, int16_t y);
+WValue w_vec3f(double x, double y, double z);
+
+WValue w_vec2f_w(WValue xv, WValue yv);
+WValue w_point2d_w(WValue xv, WValue yv);
+WValue w_vec3f_w(WValue xv, WValue yv, WValue zv);
+
+bool w_is_simd2d(WValue v);
+bool w_is_simd3d(WValue v);
+uint8_t w_simd2d_subtag(WValue v);
+
+WValue w_is_simd2d_w(WValue v);
+WValue w_is_simd3d_w(WValue v);
+WValue w_simd2d_subtag_w(WValue v);
+
+void w_vec2f_unpack(WValue v, double *x, double *y);
+void w_vec3f_unpack(WValue v, double *x, double *y, double *z);
+
 /* ---- Packed types (0xFFFE tag) ---- */
 WValue w_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 WValue w_date(int year, int month, int day, int hour, int min, int sec, int tz);

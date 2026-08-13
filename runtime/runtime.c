@@ -33419,6 +33419,95 @@ WValue w_lexchar_scan_bench(WValue lc_arr, int64_t count) {
     return w_int(token_count);
 }
 
+/* ---- SIMD Vector primitives (0xFFF2 simd2d / 0xFFF3 simd3d) ---- */
+WValue w_vec2f(double x, double y) {
+    uint16_t ix = (uint16_t)((int16_t)(x * 100.0));
+    uint16_t iy = (uint16_t)((int16_t)(y * 100.0));
+    uint64_t payload = (((uint64_t)iy & 0xFFFFULL) << 16) | ((uint64_t)ix & 0xFFFFULL);
+    return WVALUE_TAG_SIMD2D | (0x0ULL << 44) | (payload & 0x00000FFFFFFFFFFFULL);
+}
+
+WValue w_point2d(double x, double y) {
+    uint16_t ix = (uint16_t)((int16_t)(x * 100.0));
+    uint16_t iy = (uint16_t)((int16_t)(y * 100.0));
+    uint64_t payload = (((uint64_t)iy & 0xFFFFULL) << 16) | ((uint64_t)ix & 0xFFFFULL);
+    return WVALUE_TAG_SIMD2D | (0x2ULL << 44) | (payload & 0x00000FFFFFFFFFFFULL);
+}
+
+WValue w_vec2i(int16_t x, int16_t y) {
+    uint16_t ix = (uint16_t)x;
+    uint16_t iy = (uint16_t)y;
+    uint64_t payload = (((uint64_t)iy & 0xFFFFULL) << 16) | ((uint64_t)ix & 0xFFFFULL);
+    return WVALUE_TAG_SIMD2D | (0x3ULL << 44) | (payload & 0x00000FFFFFFFFFFFULL);
+}
+
+WValue w_vec3f(double x, double y, double z) {
+    uint16_t ix = (uint16_t)((int16_t)(x * 100.0));
+    uint16_t iy = (uint16_t)((int16_t)(y * 100.0));
+    uint16_t iz = (uint16_t)((int16_t)(z * 100.0));
+    uint64_t payload = (((uint64_t)iz & 0xFFFFULL) << 32) | (((uint64_t)iy & 0xFFFFULL) << 16) | ((uint64_t)ix & 0xFFFFULL);
+    return WVALUE_TAG_SIMD3D | (payload & 0x0000FFFFFFFFFFFFULL);
+}
+
+WValue w_vec2f_w(WValue xv, WValue yv) {
+    double x = w_is_double(xv) ? w_as_double(xv) : (double)w_numeric_to_i64(xv);
+    double y = w_is_double(yv) ? w_as_double(yv) : (double)w_numeric_to_i64(yv);
+    return w_vec2f(x, y);
+}
+
+WValue w_point2d_w(WValue xv, WValue yv) {
+    double x = w_is_double(xv) ? w_as_double(xv) : (double)w_numeric_to_i64(xv);
+    double y = w_is_double(yv) ? w_as_double(yv) : (double)w_numeric_to_i64(yv);
+    return w_point2d(x, y);
+}
+
+WValue w_vec3f_w(WValue xv, WValue yv, WValue zv) {
+    double x = w_is_double(xv) ? w_as_double(xv) : (double)w_numeric_to_i64(xv);
+    double y = w_is_double(yv) ? w_as_double(yv) : (double)w_numeric_to_i64(yv);
+    double z = w_is_double(zv) ? w_as_double(zv) : (double)w_numeric_to_i64(zv);
+    return w_vec3f(x, y, z);
+}
+
+bool w_is_simd2d(WValue v) {
+    return (v & 0xFFFF000000000000ULL) == WVALUE_TAG_SIMD2D;
+}
+
+bool w_is_simd3d(WValue v) {
+    return (v & 0xFFFF000000000000ULL) == WVALUE_TAG_SIMD3D;
+}
+
+uint8_t w_simd2d_subtag(WValue v) {
+    return (uint8_t)((v >> 44) & 0xFULL);
+}
+
+WValue w_is_simd2d_w(WValue v) {
+    return w_bool(w_is_simd2d(v));
+}
+
+WValue w_is_simd3d_w(WValue v) {
+    return w_bool(w_is_simd3d(v));
+}
+
+WValue w_simd2d_subtag_w(WValue v) {
+    return w_int(w_simd2d_subtag(v));
+}
+
+void w_vec2f_unpack(WValue v, double *x, double *y) {
+    int16_t ix = (int16_t)(v & 0xFFFFULL);
+    int16_t iy = (int16_t)((v >> 16) & 0xFFFFULL);
+    if (x) *x = ((double)ix) / 100.0;
+    if (y) *y = ((double)iy) / 100.0;
+}
+
+void w_vec3f_unpack(WValue v, double *x, double *y, double *z) {
+    int16_t ix = (int16_t)(v & 0xFFFFULL);
+    int16_t iy = (int16_t)((v >> 16) & 0xFFFFULL);
+    int16_t iz = (int16_t)((v >> 32) & 0xFFFFULL);
+    if (x) *x = ((double)ix) / 100.0;
+    if (y) *y = ((double)iy) / 100.0;
+    if (z) *z = ((double)iz) / 100.0;
+}
+
 /* Raw entry point for ccall from Tungsten — args are raw i64, not NaN-boxed */
 WValue w_color_raw(int64_t r, int64_t g, int64_t b, int64_t a) {
     return w_box_color((uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)a, 0);

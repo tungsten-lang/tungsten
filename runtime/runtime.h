@@ -579,6 +579,20 @@ WValue w_is_simd2d_w(WValue v);
 WValue w_is_simd3d_w(WValue v);
 WValue w_simd2d_subtag_w(WValue v);
 
+/* ---- Network Socket Endpoint (0xFFF6 sockaddr tag) ---- */
+#define WVALUE_TAG_SOCKADDR 0xFFF6000000000000ULL
+
+WValue w_sockaddr(uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint16_t port);
+WValue w_sockaddr_w(WValue av, WValue bv, WValue cv, WValue dv, WValue port_v);
+
+bool w_is_sockaddr(WValue v);
+WValue w_is_sockaddr_w(WValue v);
+
+uint16_t w_sockaddr_port(WValue v);
+WValue w_sockaddr_port_w(WValue v);
+
+void w_sockaddr_ip(WValue v, uint8_t *a, uint8_t *b, uint8_t *c, uint8_t *d);
+
 void w_vec2f_unpack(WValue v, double *x, double *y);
 void w_vec3f_unpack(WValue v, double *x, double *y, double *z);
 

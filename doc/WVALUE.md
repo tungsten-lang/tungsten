@@ -20,7 +20,9 @@ Reference implementation: `stages/tungsten/runtime/wvalue.h` (standalone C heade
 0xFFF1_(payload > 0)                        reserved (payload 0 = biased -inf)
 0xFFF2_xxxx_xxxx_xxxx                       simd2d  (Vec2f, Point2D, Vec2i — half2/short2 w/ subtags)
 0xFFF3_xxxx_xxxx_xxxx                       simd3d  (Vec3f — half3 48-bit layout)
-0xFFF4 .. 0xFFF7                            free tag slots (v4)
+0xFFF4 .. 0xFFF5                            free tag slots (v4)
+0xFFF6_xxxx_xxxx_xxxx                       sockaddr (32-bit IPv4 + 16-bit Port endpoint)
+0xFFF7                                      free tag slot (v4)
 0xFFF8_xxxx_xxxx_xxxx                       bigint (WBigint*, 47-bit pointer;
                                             bit 47 reserved for tag-sign)
 0xFFF9_xxxx_xxxx_xxxx                       string / symbol (SSO-5)
@@ -97,6 +99,21 @@ Sub-tags (bits 47..44):
 
 Dedicated 48-bit payload: three 16-bit IEEE half floats (x, y, z).
 Maps 1:1 with Metal shading language `half3` and `simd_half3`.
+```
+
+---
+
+## Network Socket Endpoint / SockAddr (0xFFF6)
+
+```
+63              48 47              32 31                             0
+┌────────────────┬──────────────────┬────────────────────────────────┐
+│     0xFFF6     │  port (16 bits)  │      IPv4 Address (32 bits)    │
+└────────────────┴──────────────────┴────────────────────────────────┘
+
+Dedicated 48-bit payload: 16-bit TCP/UDP port number (0..65535) + 32-bit IPv4 address (A.B.C.D).
+Maps bit-for-bit with POSIX `sockaddr_in` (sin_port | sin_addr.s_addr).
+Frees subtype 100 in Packed types (0xFFFE).
 ```
 
 ---

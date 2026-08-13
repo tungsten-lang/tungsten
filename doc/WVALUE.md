@@ -397,7 +397,15 @@ here — reconstructed lazily from a per-file newline-offset table built
 once and binary-searched, avoiding the 18-bit line / 11-bit col
 ceiling that File mode has on generated or minified sources.
 
-Mode 11 is reserved.
+Range mode (bits 44:43 = 11):
+63        48 47 45 44 43 42          29 28               14 13       0
+┌──────────┬─────┬──┬──┬──────────────┬───────────────────┬──────────┐
+│  0xFFFE  │ 111 │1 │1 │  file_id     │  start_offset     │  length  │
+│          │     │  │  │   14b        │     15b           │   14b    │
+└──────────┴─────┴──┴──┴──────────────┴───────────────────┴──────────┘
+
+Range mode covers: 16,384 files, 32,768 byte start offset, 16,384 byte length range.
+Encodes an AST node location range (file + byte span) directly inside a single 64-bit Location WValue.
 ```
 
 ---

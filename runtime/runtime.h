@@ -628,6 +628,8 @@ WValue w_complex(int16_t real_sig, int real_scale, int16_t imag_sig, int imag_sc
 WValue w_location_point(int32_t x, int32_t y);
 WValue w_location_file(int file_id, int line, int col);
 WValue w_location_file_offset(int file_id, int offset);
+WValue w_location_range(int file_id, int start_offset, int length);
+WValue w_location_range_w(WValue fid_v, WValue start_v, WValue len_v);
 int64_t w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr);
 int64_t w_loc_line_for_offset(int64_t file_id, int64_t offset);
 int64_t w_loc_col_for_offset(int64_t file_id, int64_t offset);

@@ -34511,6 +34511,22 @@ WValue w_location_file_offset(int file_id, int offset) {
     return w_box_location_file_offset(file_id, (uint32_t)offset);
 }
 
+WValue w_location_range(int file_id, int start_offset, int length) {
+    uint64_t fid = (uint64_t)(file_id & 0x3FFF);
+    uint64_t start = (uint64_t)(start_offset & 0x7FFF);
+    uint64_t len = (uint64_t)(length & 0x3FFF);
+    uint64_t payload = (fid << 29) | (start << 14) | len;
+    /* Location tag: 0xFFFE | Subtype 111 | Mode 11 (bits 44:43 = 3) */
+    return 0xFFFE600000000000ULL | (payload & 0x000007FFFFFFFFFFULL);
+}
+
+WValue w_location_range_w(WValue fid_v, WValue start_v, WValue len_v) {
+    int fid = (int)w_numeric_to_i64(fid_v);
+    int start = (int)w_numeric_to_i64(start_v);
+    int len = (int)w_numeric_to_i64(len_v);
+    return w_location_range(fid, start, len);
+}
+
 /* Extern wrappers around the static-inline unboxers in wvalue.h. The
  * compiled Tungsten IR emits calls to these via ccall_nobox("w_unbox_
  * location_*", raw); the linker needs an exported symbol because

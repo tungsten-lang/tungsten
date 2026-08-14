@@ -1268,7 +1268,7 @@ def print_capacity(results: list[dict[str, Any]]) -> None:
     print("Mixed-size result-buffer capacity policies")
     print(
         "Production pool shape: power-of-two reserve, 15 logarithmic buckets, "
-        "two buffers/bucket plus one hot handoff slot, one previous result live."
+        "four buffers/bucket plus one hot handoff slot, one previous result live."
     )
     print(
         "Trace mixes ascending/descending sweeps, uniform and logarithmic "

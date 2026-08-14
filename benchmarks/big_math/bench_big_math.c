@@ -5136,10 +5136,11 @@ typedef struct BenchCapacityBuffer {
     uint64_t limbs[];
 } BenchCapacityBuffer;
 
+#define BENCH_CAP_MAX_PER_BUCKET 64
 typedef struct {
     BenchCapacityBuffer *hot;
     BenchCapacityBuffer
-        *slot[BN_BIGINT_POOL_BUCKETS][BN_BIGINT_POOL_PER_BUCKET];
+        *slot[BN_BIGINT_POOL_BUCKETS][BENCH_CAP_MAX_PER_BUCKET];
     uint8_t count[BN_BIGINT_POOL_BUCKETS];
 } BenchCapacityPool;
 
@@ -5307,15 +5308,17 @@ static BenchCapacityBuffer *bench_capacity_take(
 
 static void bench_capacity_release(
     BenchCapacityPool *pool, BenchCapacityBuffer *buffer,
-    uint64_t *resident_limbs, uint64_t *frees) {
+    uint64_t *resident_limbs, uint64_t *frees, uint32_t per_bucket) {
     if (!pool->hot) {
         pool->hot = buffer;
         return;
     }
     int bucket = bigint_pool_bucket(buffer->cap);
     int count = pool->count[bucket];
+    uint32_t limit = per_bucket ? per_bucket : BN_BIGINT_POOL_PER_BUCKET;
+    if (limit > BENCH_CAP_MAX_PER_BUCKET) limit = BENCH_CAP_MAX_PER_BUCKET;
     if (buffer->cap > BN_BIGINT_POOL_MAX_CAP ||
-        count >= BN_BIGINT_POOL_PER_BUCKET) {
+        count >= (int)limit) {
         *resident_limbs -= buffer->cap;
         (*frees)++;
         free(buffer);
@@ -5403,19 +5406,19 @@ static uint32_t *bench_capacity_trace(uint32_t max_limbs, uint32_t requests) {
 static BenchCapacityStats bench_capacity_policy_grid(
     int policy, const uint32_t *trace, uint32_t requests,
     uint32_t max_limbs, uint32_t live_depth,
-    uint32_t p2_override, uint32_t q_override);
+    uint32_t p2_override, uint32_t q_override, uint32_t per_bucket);
 
 static BenchCapacityStats bench_capacity_policy(
     int policy, const uint32_t *trace, uint32_t requests,
     uint32_t max_limbs, uint32_t live_depth) {
     return bench_capacity_policy_grid(policy, trace, requests, max_limbs,
-                                      live_depth, 0, 0);
+                                      live_depth, 0, 0, 0);
 }
 
 static BenchCapacityStats bench_capacity_policy_grid(
     int policy, const uint32_t *trace, uint32_t requests,
     uint32_t max_limbs, uint32_t live_depth,
-    uint32_t p2_override, uint32_t q_override) {
+    uint32_t p2_override, uint32_t q_override, uint32_t per_bucket) {
     BenchCapacityPool pool;
     memset(&pool, 0, sizeof(pool));
     BenchCapacityBuffer *live[BENCH_CAP_MAX_LIVE] = {0};
@@ -5459,12 +5462,12 @@ static BenchCapacityStats bench_capacity_policy_grid(
         uint32_t slot = i % live_depth;
         if (live[slot])
             bench_capacity_release(
-                &pool, live[slot], &resident_limbs, &frees);
+                &pool, live[slot], &resident_limbs, &frees, per_bucket);
         live[slot] = next;
     }
     for (uint32_t s = 0; s < live_depth; s++)
         if (live[s])
-            bench_capacity_release(&pool, live[s], &resident_limbs, &frees);
+            bench_capacity_release(&pool, live[s], &resident_limbs, &frees, per_bucket);
     double elapsed = bench_now() - start;
 
     BenchCapacityStats stats;
@@ -5754,7 +5757,7 @@ int main(int argc, char **argv) {
                     for (int run = 0; run < runs; run++) {
                         BenchCapacityStats cur = bench_capacity_policy_grid(
                             0, trace, requests, max_limbs, depths[di],
-                            p2s[pi], qs[qi]);
+                            p2s[pi], qs[qi], 0);
                         if (cur.ns_per_request < best.ns_per_request)
                             best = cur;
                     }
@@ -5768,6 +5771,42 @@ int main(int argc, char **argv) {
                            (double)best.retained_limbs * 8.0 / 1024.0);
                     fflush(stdout);
                 }
+            }
+        }
+        free(trace);
+        return 0;
+    }
+    if (argc == 5 && strcmp(argv[1], "--bench-capacity-slots") == 0) {
+        uint32_t max_limbs = (uint32_t)strtoul(argv[2], NULL, 10);
+        uint32_t requests = (uint32_t)strtoul(argv[3], NULL, 10);
+        int runs = atoi(argv[4]);
+        if (max_limbs == 0 || max_limbs > BN_BIGINT_POOL_MAX_CAP ||
+            requests < 1000 || runs <= 0)
+            die("slots benchmark expects max limbs 1..16384,"
+                " at least 1000 requests, and positive runs");
+        uint32_t *trace = bench_capacity_trace(max_limbs, requests);
+        static const uint32_t slots[] = {2, 3, 4, 5, 6, 7};
+        static const uint32_t live_depths[] = {1, 4, 8};
+        printf("slots\tslot_cap\tlive\tns/req\thit%%\tallocs\tslack\tpeak_KiB\tretained_KiB\n");
+        for (size_t si = 0; si < sizeof(slots) / sizeof(slots[0]); si++) {
+            uint32_t slot_cap = slots[si];
+            for (size_t di = 0; di < sizeof(live_depths) / sizeof(live_depths[0]); di++) {
+                uint32_t depth = live_depths[di];
+                BenchCapacityStats best = {0};
+                best.ns_per_request = 1e300;
+                for (int run = 0; run < runs; run++) {
+                    BenchCapacityStats current = bench_capacity_policy_grid(
+                        BENCH_CAP_P2_32_Q32, trace, requests,
+                        max_limbs, depth, 0, 0, slot_cap);
+                    if (current.ns_per_request < best.ns_per_request)
+                        best = current;
+                }
+                printf("slots\t%u\t\t%u\t%.3f\t%.3f\t%llu\t%.1f\t%.1f\t\t%.1f\n",
+                       slot_cap, depth, best.ns_per_request, best.hit_percent,
+                       (unsigned long long)best.allocations, best.average_slack,
+                       (double)best.peak_limbs * 8.0 / 1024.0,
+                       (double)best.retained_limbs * 8.0 / 1024.0);
+                fflush(stdout);
             }
         }
         free(trace);

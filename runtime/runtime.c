@@ -404,7 +404,7 @@ int64_t __w_bigint_compare_src(WValue a, WValue b);
 #define BN_BIGINT_RECYCLE 1
 #endif
 #define BN_BIGINT_POOL_BUCKETS 15
-#define BN_BIGINT_POOL_PER_BUCKET 2
+#define BN_BIGINT_POOL_PER_BUCKET 4
 #define BN_BIGINT_POOL_MAX_CAP (1U << (BN_BIGINT_POOL_BUCKETS - 1))
 #ifndef BN_BIGINT_POWER2_CAP
 #define BN_BIGINT_POWER2_CAP 1

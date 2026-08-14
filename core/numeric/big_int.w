@@ -175,7 +175,7 @@
 
 + BigInt < Int
   - data
-    # BigInt rides a dedicated top-level NaN-box tag (0xFFF8, v4), but WBigint retains its C header
+    # BigInt rides a dedicated top-level NaN-box tag (0xFFFB), but WBigint retains its C header
     # byte as the live/parked recycler marker. Keep it explicit so
     # size/capacity/limbs land at offsets 4/8/16 respectively.
     u8 _type
@@ -1264,7 +1264,7 @@
   # pairs retain the Lehmer/HGCD specialization tree behind the existing
   # runtime boundary.
   -> gcd(other)
-    if ((other$value >> 48) & 0xFFFF) == 0xFFF8
+    if ((other$value >> 48) & 0xFFFF) == 0xFFFB
       big_other = other ## BigInt
       an = $size ## i64
       bn = big_other$size ## i64
@@ -1286,7 +1286,7 @@
   # division, and u128 multiplication, then box once. Mixed and multi-limb
   # pairs retain the fused exact-division runtime boundary.
   -> lcm(other)
-    if ((other$value >> 48) & 0xFFFF) == 0xFFF8
+    if ((other$value >> 48) & 0xFFFF) == 0xFFFB
       big_other = other ## BigInt
       an = $size ## i64
       bn = big_other$size ## i64

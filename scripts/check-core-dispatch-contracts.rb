@@ -118,19 +118,27 @@ RUNTIME_CLASS_CONTRACTS = {
     path: "core/regex.w",
     table: "w_ic_regex_table",
     dispatch_key: "0x07",
-    native_ic: %w[=== =~ match? to_s],
+    native_ic: %w[=== =~ match? match_data to_s],
     native_only: %w[=== =~ to_s],
-    dual_dispatch: %w[match?],
+    dual_dispatch: %w[match? match_data],
     source_fallback: %w[
-      advance at_end? at_word_boundary? build_result build_skip class_escape_char
+      advance at_end? at_word_boundary? build_offsets build_result build_skip class_escape_char
       class_match? clex collect_first compile_alt compile_node compile_opt
       compile_plus compile_rep compile_star compute_prefilter consume_at?
-      decode_subject emit lazy? literal_prefix lone_flag_class make_saved match
-      match? new nullable? parse_alt parse_atom parse_brace parse_class
+      decode_subject emit find_saved lazy? literal_prefix lone_flag_class make_saved match
+      match? match_data new nullable? parse_alt parse_atom parse_brace parse_class
       parse_escape parse_group parse_int parse_pattern parse_repeat parse_seq peek
       pf_advance pf_bm_search pf_set_match run set_match? set_split
-      single_consuming? source span_str word_lex?
+      single_consuming? source span_str valid_group_name? word_lex?
     ]
+  },
+  "RegexMatch" => {
+    path: "core/regex.w",
+    table: "w_ic_regex_match_table",
+    native_ic: %w[[] begin_offset captures end_offset match named_captures named_offsets names offset size to_a to_s],
+    native_declaration: %w[new],
+    dual_dispatch: %w[[] begin_offset captures end_offset match named_captures named_offsets names offset size to_a to_s],
+    source_fallback: %w[[] begin_offset captures end_offset group_index match named_captures named_offsets names offset size to_a to_s]
   },
   "BigInt" => {
     path: "core/numeric/big_int.w",

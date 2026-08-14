@@ -1780,7 +1780,7 @@ module Tungsten
       payload = bits & W_PAYLOAD_MASK
       ms = sign_extend(payload, 48)
       lines = [
-        inspection_field_line("tag", "bits 63..48", "0xFFFB", "instant"),
+        inspection_field_line("tag", "bits 63..48", "0xFFF8", "instant"),
         inspection_field_line("payload", "bits 47..0", format("0x%012X", payload), "signed Unix milliseconds"),
         inspection_field_line("decoded", nil, nil, "#{ms} ms since Unix epoch")
       ]

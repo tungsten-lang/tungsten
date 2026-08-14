@@ -513,15 +513,16 @@ int main() {
            - or be a NaN that gets canonicalized first (v4: the exact
              ceiling — the largest boxable raw pattern is -inf)
            Check that no valid (non-NaN) double biases into 0xFFF2-0xFFFF.
-           Whole-prefix bands 0xFFF2..0xFFF7 are free tag slots; 0xFFF8 is
-           bigint; the nonzero payloads of 0xFFF1 are also unreachable. */
+           Whole-prefix bands 0xFFF2..0xFFF7 include SIMD, Array, SockAddr and free slots;
+           0xFFF8 is instant; 0xFFFB is bigint; the nonzero payloads of 0xFFF1 are also unreachable. */
         uint64_t tag_prefixes[] = {
             0xFFF2000000000000ULL, 0xFFF3000000000000ULL,
             0xFFF4000000000000ULL, 0xFFF5000000000000ULL,
             0xFFF6000000000000ULL, 0xFFF7000000000000ULL,
-            0xFFF8000000000000ULL, /* W_TAG_BIGINT */
+            0xFFF8000000000000ULL, /* W_TAG_INSTANT */
             0xFFF9000000000000ULL, 0xFFFA000000000000ULL,
-            0xFFFB000000000000ULL, 0xFFFC000000000000ULL,
+            0xFFFB000000000000ULL, /* W_TAG_BIGINT */
+            0xFFFC000000000000ULL,
             0xFFFD000000000000ULL, 0xFFFE000000000000ULL,
             0xFFFF000000000000ULL,
         };
@@ -980,16 +981,33 @@ int main() {
         printf("  negative int comparison: OK\n");
     }
 
-    /* Instant separate tag */
+    /* Instant separate tag (0xFFF8) and Integer adjacency with BigInt (0xFFFB) */
     {
         WValue inst = w_box_instant(42);
         WValue intv = w_int(42);
+        WValue bigv = bigint_dec("18446744073709551617");
         assert(w_is_instant(inst));
         assert(!w_is_int(inst));
+        assert(!w_is_bigint(inst));
+        assert(!w_is_integer_any(inst));
+        assert((inst & W_TAG_MASK) == 0xFFF8000000000000ULL);
+        assert(w_dispatch_key(inst) == 0xF8);
+
         assert(w_is_int(intv));
         assert(!w_is_instant(intv));
+        assert(w_is_integer_any(intv));
+        assert((intv & W_TAG_MASK) == 0xFFFA000000000000ULL);
+        assert(w_dispatch_key(intv) == 0xFA);
+
+        assert(w_is_bigint(bigv));
+        assert(!w_is_instant(bigv));
+        assert(!w_is_int(bigv));
+        assert(w_is_integer_any(bigv));
+        assert((bigv & W_TAG_MASK) == 0xFFFB000000000000ULL);
+        assert(w_dispatch_key(bigv) == W_SUBTAG_BIGINT);
+
         assert(w_unbox_instant(inst) == 42);
-        printf("  instant separate tag: OK\n");
+        printf("  instant (0xFFF8) & bigint (0xFFFB) tags & is_integer_any mask: OK\n");
     }
 
     /* Char subtype check */

@@ -458,10 +458,11 @@ RSpec.shared_examples "a Tungsten lexer" do
   ]
 
   it "lexes regex captures after a regex literal on the same line" do
-    lexer = described_class.new("/(.)/ => $1.to_sym")
+    lexer = described_class.new("/(.)/ => [$1.to_sym, $10]")
     tokens = lexer.tokens.map { |token| [token.type, token.value] }
 
     expect(tokens).to include([:REGEX_CAPTURE, "1"])
+    expect(tokens).to include([:REGEX_CAPTURE, "10"])
   end
 
   # no double__underscores

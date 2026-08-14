@@ -9,6 +9,78 @@ module Tungsten
   NEXT_SIGNAL   = :w_next
   RETURN_SIGNAL = :w_return
 
+  # Ruby-host adapter for the structured Core RegexMatch contract. Keep this
+  # separate from ::MatchData so embedding Tungsten does not monkeypatch Ruby's
+  # global regular-expression classes.
+  class RegexMatchValue
+    def initialize(match_data)
+      @match_data = match_data
+    end
+
+    def [](key)
+      @match_data[normalize_key(key)]
+    rescue IndexError, TypeError
+      nil
+    end
+
+    def offset(key)
+      span = @match_data.offset(normalize_key(key))
+      span[0].nil? ? nil : span
+    rescue IndexError, TypeError
+      nil
+    end
+
+    def begin_offset(key = 0)
+      offset(key)&.[](0)
+    end
+
+    def end_offset(key = 0)
+      offset(key)&.[](1)
+    end
+
+    def match
+      @match_data[0]
+    end
+
+    def size
+      @match_data.size
+    end
+
+    def captures
+      @match_data.captures
+    end
+
+    def names
+      @match_data.names
+    end
+
+    def named_captures
+      @match_data.named_captures
+    end
+
+    def named_offsets
+      @match_data.names.to_h { |name| [name, offset(name)] }
+    end
+
+    def to_a
+      @match_data.to_a
+    end
+
+    def to_s
+      match
+    end
+
+    def class_name
+      "RegexMatch"
+    end
+
+    private
+
+    def normalize_key(key)
+      key.is_a?(Symbol) ? key.to_s : key
+    end
+  end
+
   class Interpreter < Visitor
     W_NIL           = 0x0000_0000_0000_0000
     W_FALSE         = 0x0000_0000_0000_0001
@@ -18,9 +90,10 @@ module Tungsten
 
     W_DOUBLE_BIAS   = 0x0001_0000_0000_0000
 
+    W_TAG_INSTANT   = 0xFFF8_0000_0000_0000
     W_TAG_STRINGSYM = 0xFFF9_0000_0000_0000
     W_TAG_INT       = 0xFFFA_0000_0000_0000
-    W_TAG_INSTANT   = 0xFFFB_0000_0000_0000
+    W_TAG_BIGINT    = 0xFFFB_0000_0000_0000
     W_TAG_CHAR      = 0xFFFC_0000_0000_0000
     W_TAG_DECIMAL   = 0xFFFD_0000_0000_0000
     W_TAG_PACKED    = 0xFFFE_0000_0000_0000
@@ -29,9 +102,8 @@ module Tungsten
     W_PAYLOAD_MASK  = 0x0000_FFFF_FFFF_FFFF
     # v4: exact ceiling — NaNs canonicalize to qNaN before biasing, so the
     # largest boxable raw double is -inf and biased doubles end at
-    # 0xFFF1_0000_0000_0000. 0xFFF2..0xFFF7 free tags; 0xFFF8 = bigint.
+    # 0xFFF1_0000_0000_0000.
     W_DOUBLE_MAX    = 0xFFF1_0000_0000_0000
-    W_TAG_BIGINT    = 0xFFF8_0000_0000_0000
     W_TAG_MASK      = 0xFFFF_0000_0000_0000
 
     W_INT48_MAX = (1 << 47) - 1
@@ -4970,6 +5042,11 @@ module Tungsten
       len = small_arg_length_without_splat(arg_nodes)
       return NO_DIRECT_CALL unless len
 
+      if recv.is_a?(Regexp) && name == "match_data" && len == 1 && !block
+        match_data = recv.match(evaluate(arg_nodes[0]).to_s)
+        return match_data ? RegexMatchValue.new(match_data) : nil
+      end
+
       case len
       when 0
         block ? recv.public_send(name) { |*bargs| invoke_block(block, bargs) } : recv.public_send(name)
@@ -5403,6 +5480,7 @@ module Tungsten
     def tungsten_class_name(recv)
       case recv
       when Tungsten::Atomic       then "Atomic"
+      when Tungsten::RegexMatchValue then "RegexMatch"
       when Tungsten::SmallArrayValue then "SmallArray"
       when Tungsten::ByteArray    then "ByteArray"
       when Tungsten::CharValue    then "Char"

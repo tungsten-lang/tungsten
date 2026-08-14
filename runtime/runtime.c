@@ -35275,10 +35275,10 @@ static const char *w_type_label(WValue v) {
     }
     if (tag < 0xFFF2000000000000ULL) return "double";
     switch (tag >> 48) {
-        case 0xFFF8: return "bigint";
+        case 0xFFF8: return "instant";
         case 0xFFF9: return (v & 1) ? "symbol" : "string";
         case 0xFFFA: return "int";
-        case 0xFFFB: return "instant";
+        case 0xFFFB: return "bigint";
         case 0xFFFC: return "char";
         case 0xFFFD: return "numeric";
         case 0xFFFE: return "packed";
@@ -47540,8 +47540,9 @@ uint64_t w_dispatch_key(WValue v) {
     if (hi == 0xFFF3) return 0xB4u;
     if (hi == 0xFFF4) return W_SUBTAG_ARRAY;
     if (hi == 0xFFF6) return 0xB6u;
-    if (hi == 0xFFF8) return W_SUBTAG_BIGINT;
+    if (hi == 0xFFF8) return 0xF8u;                     /* instant */
     if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF5, 0xFFF7 free) */
+    if (hi == 0xFFFB) return W_SUBTAG_BIGINT;           /* bigint */
     if (hi == 0xFFFD) {
         if (is_currency_any(v)) return 0xC0u;
         if (is_quantity_any(v)) return 0xC1u;
@@ -53179,9 +53180,9 @@ WValue w_value_fields(WValue vv) {
         return w_string(buf);
     }
     unsigned tag = (unsigned)((bits >> 48) & 0xFFFF);
-    if (tag == 0xFFF8) {        /* bigint (v4 top-level tag) */
+    if (tag == 0xFFFB) {        /* bigint (0xFFFB top-level tag) */
         uint64_t pl = bits & 0x00007FFFFFFFFFFFULL;
-        w_fld(&p, e, "tag", "bits 63..48", "0xFFF8", "bigint");
+        w_fld(&p, e, "tag", "bits 63..48", "0xFFFB", "bigint");
         snprintf(raw, sizeof raw, "0x%012llX", (unsigned long long)pl);
         w_fld(&p, e, "pointer", "bits 46..0", raw, "WBigint*");
         w_fld(&p, e, "sign bit", "bit 47",

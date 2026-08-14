@@ -71,8 +71,8 @@ i64_ir = render_instruction(i64_inst, nil, {}, nil, "")
 u64_ir = render_instruction(u64_inst, nil, {}, nil, "")
 
 # 140737488355312 = 0x00007FFF_FFFF_FFF0: strips the subtag nibble AND the
-# top-17 tag/sign bits, because BigInt receivers ride the 0xFFF8 top-level
-# tag (v4) rather than object space.
+# top-17 tag/sign bits, because BigInt receivers ride the 0xFFFB top-level
+# tag rather than object space.
 check("store masks the NaN-box tag and subtag", i32_ir.include?("%signed.ptr = and i64 %self, 140737488355312"))
 check("signed i32 exact gep", i32_ir.include?("getelementptr i8, ptr %signed.bp, i64 4"))
 check("signed i32 truncates", i32_ir.include?("%signed.w = trunc i64 %next to i32"))

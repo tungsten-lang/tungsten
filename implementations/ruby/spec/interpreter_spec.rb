@@ -896,6 +896,39 @@ RSpec.describe Tungsten::Interpreter do
     expect(run(code)).to eq([:name, "value"])
   end
 
+  it "exposes structured named regex captures without patching MatchData" do
+    code = <<~W
+      match_data = /(?<word>é)(?<tail>猫)?(?<empty>)/.match_data("xé")
+      [
+        match_data.class_name,
+        match_data[0],
+        match_data["word"],
+        match_data[:tail],
+        match_data["empty"],
+        match_data.offset("word"),
+        match_data.offset(:tail),
+        match_data.offset("empty"),
+        match_data.begin_offset(),
+        match_data.end_offset(),
+        match_data.names(),
+        match_data.named_captures(),
+        match_data.named_offsets(),
+        match_data.to_a(),
+        match_data.to_s()
+      ]
+    W
+
+    expect(run(code)).to eq([
+      "RegexMatch", "é", "é", nil, "", [1, 2], nil, [2, 2], 1, 2,
+      %w[word tail empty],
+      { "word" => "é", "tail" => nil, "empty" => "" },
+      { "word" => [1, 2], "tail" => nil, "empty" => [2, 2] },
+      ["é", "é", nil, ""], "é"
+    ])
+    expect(run('/a/.match_data("no")')).to be_nil
+    expect(Regexp.instance_methods).not_to include(:match_data)
+  end
+
   it "caches literal receiver case lookups on the ast node" do
     ast = Tungsten::Parser.parse("x = :b\ncase x\nwhen :a, :b\n  20\nelse\n  30")
     case_node = ast[1]

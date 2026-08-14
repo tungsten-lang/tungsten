@@ -967,7 +967,7 @@ use naming
 # compare arm; %zero is always the boxed literal 0). The sign of any boxed
 # integer is answered without touching magnitude limbs:
 #   inline Int (tag 0xFFFA)  -> sign of the sign-extended i48 payload
-#   heap BigInt (tag 0xFFF8) -> header signed size COMPOSED with the
+#   heap BigInt (tag 0xFFFB) -> header signed size COMPOSED with the
 #      tag-sign overlay (bit 47) — w_bigint_view's exact rule; a raw header
 #      read would answer wrong for negate's overlay-flipped aliases, and a
 #      zero magnitude stays non-negative whatever the overlay says because
@@ -4562,7 +4562,7 @@ ewscope_md_state = {ids: {}}
   # The receiver mask for EVERY view op is 140737488355312
   # (0x00007FFF_FFFF_FFF0): it strips the low subtag nibble like the old
   # -16 AND the top-17 tag/sign bits, because BigInt receivers now ride a
-  # top-level tag (0xFFF8, bit 47 reserved for tag-sign) rather than the
+  # top-level tag (0xFFFB, bit 47 reserved for tag-sign) rather than the
   # object space. Object-space receivers have zero top bits, so the wider
   # mask is a no-op for them. The array/hash/strbuf header derefs elsewhere
   # in this file keep -16: they sit behind subtag guards a bigint cannot

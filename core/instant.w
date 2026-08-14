@@ -1,4 +1,4 @@
-# Instant — millisecond-precision timestamp (tag 0xFFFB).
+# Instant — millisecond-precision timestamp (tag 0xFFF8).
 #
 # A point in absolute time (UTC), independent of any calendar or clock
 # face. Useful for log entries, event sourcing, monotonic ordering, and

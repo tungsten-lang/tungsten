@@ -25,11 +25,11 @@ Reference implementation: `stages/tungsten/runtime/wvalue.h` (standalone C heade
 0xFFF5                                      free tag slot (v4)
 0xFFF6_xxxx_xxxx_xxxx                       sockaddr (32-bit IPv4 + 16-bit Port endpoint)
 0xFFF7                                      free tag slot (v4)
-0xFFF8_xxxx_xxxx_xxxx                       bigint (WBigint*, 47-bit pointer;
-                                            bit 47 reserved for tag-sign)
+0xFFF8_xxxx_xxxx_xxxx                       instant (Unix ms since epoch)
 0xFFF9_xxxx_xxxx_xxxx                       string / symbol (SSO-5)
 0xFFFA_xxxx_xxxx_xxxx                       int     (i48)
-0xFFFB_xxxx_xxxx_xxxx                       instant (Unix ms since epoch)
+0xFFFB_xxxx_xxxx_xxxx                       bigint (WBigint*, 47-bit pointer;
+                                            bit 47 reserved for tag-sign)
 0xFFFC_xxxx_xxxx_xxxx                       lexical (token, lexchar, slice, char)
 0xFFFD_xxxx_xxxx_xxxx                       numeric (decimal, currency, quantity)
 0xFFFE_xxxx_xxxx_xxxx                       packed  (color, complex, rational, node, date, ipv4, body, location/range)
@@ -142,17 +142,17 @@ Frees subtype 100 in Packed types (0xFFFE).
 
 ---
 
-## BigInt (0xFFF8)
+## BigInt (0xFFFB)
 
 ```
 63              48 47 46                                            0
 +----------------+--+-----------------------------------------------+
-|   0xFFF8       |S |      47-bit WBigint* (16-byte aligned)        |
+|   0xFFFB       |S |      47-bit WBigint* (16-byte aligned)        |
 +----------------+--+-----------------------------------------------+
 ```
 
-v4: BigInt left object space for its own top-level tag — `w_is_bigint` is
-one tag compare with no pointer dereference, and subtag 2 is freed. Bit 47
+BigInt rides its own top-level tag (0xFFFB) adjacent to Int (0xFFFA), allowing
+a single 15-bit mask to test `w_is_integer_any` branchlessly. Bit 47
 (`S`) is the ACTIVE tag-sign overlay: the value's effective sign is the
 header sign XOR `S`, so `-x` and `abs` hand out the SAME buffer with `S`
 flipped — O(1), zero allocation, at every width. Every sign read from a
@@ -209,12 +209,12 @@ representation-independent parent; overflow continues as heap `BigInt`.
 
 ---
 
-## Instant (0xFFFB)
+## Instant (0xFFF8)
 
 ```
 63              48 47                                            0
 ┌────────────────┬────────────────────────────────────────────────┐
-│   0xFFFB       │   48-bit signed milliseconds from Unix epoch   │
+│   0xFFF8       │   48-bit signed milliseconds from Unix epoch   │
 └────────────────┴────────────────────────────────────────────────┘
 
 Range: ~2491 BC to ~6431 AD, 1ms precision, always UTC.

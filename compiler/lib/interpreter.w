@@ -3090,7 +3090,7 @@ use target
       # BigInt#abs flips the tag-sign overlay directly on the raw WValue.
       # Rebox through the checked BigInt-only bridge, mirroring the String
       # arm; native lowering is still an instruction-free identity.
-      if ((bits >> 48) & 0xFFFF) == 0xFFF8
+      if ((bits >> 48) & 0xFFFF) == 0xFFFB
         return ccall("w_bigint_from_bits", bits)
       # Decode packed IPv4 through the existing interpreter ccall allowlist;
       # native code remains a zero-call i64 bit cast.
@@ -3953,7 +3953,7 @@ use target
   -> exact_tag_overload_hi16(tn)
     expected = nil
     if tn == "BigInt"
-      expected = 65528  # 0xFFF8
+      expected = 65531  # 0xFFFB
     if expected == nil
       return nil
     ks = @classes.keys()

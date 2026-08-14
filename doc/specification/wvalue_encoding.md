@@ -62,10 +62,10 @@ regions ordered from low to high:
  0xFFF3_xxxx_xxxx_xxxx                      simd3d  (Vec3f)
  0xFFF4_xxxx_xxxx_xxxx                      array   (WArray*, 16-byte aligned; bit 47 + low nibble reserved flags; v5)
  0xFFF6_xxxx_xxxx_xxxx                      sockaddr (IPv4 + port endpoint)
- 0xFFF8_xxxx_xxxx_xxxx                      bigint  (WBigint*; bit 47 = tag-sign; v4)
+ 0xFFF8_xxxx_xxxx_xxxx                      instant (48-bit signed Unix ms)
  0xFFF9_xxxx_xxxx_xxxx                      string / symbol
  0xFFFA_xxxx_xxxx_xxxx                      int     (48-bit signed)
- 0xFFFB_xxxx_xxxx_xxxx                      instant (48-bit signed Unix ms)
+ 0xFFFB_xxxx_xxxx_xxxx                      bigint  (WBigint*; bit 47 = tag-sign)
  0xFFFC_xxxx_xxxx_xxxx                      lexical (token, lexchar, slice, char)
  0xFFFD_xxxx_xxxx_xxxx                      numeric (decimal, currency, quantity)
  0xFFFE_xxxx_xxxx_xxxx                      packed  (color, complex, rational, node, date, ipv4, body, location/range)
@@ -273,7 +273,7 @@ bits 47-0:  signed integer value
 
 On ARM64 this compiles to a single `sbfx` instruction.
 
-Values exceeding this range overflow to heap BigInt objects (top-level tag 0xFFF8 since v4; payload bit 47 is the tag-sign overlay — effective sign = header XOR bit 47, making negate a zero-copy tag flip).
+Values exceeding this range overflow to heap BigInt objects (top-level tag 0xFFFB; payload bit 47 is the tag-sign overlay — effective sign = header XOR bit 47, making negate a zero-copy tag flip). Because Int (0xFFFA) and BigInt (0xFFFB) are power-of-2 adjacent, they share bits 63..49 for a single-instruction branchless `w_is_integer_any` check.
 
 The public class for this tag is `Int`, the default exact-promotion
 implementation of generic `Integer`. Heap-backed `BigInt` is its continuation;
@@ -281,12 +281,12 @@ ordinary arithmetic promotes and canonicalizes between the two runtime forms.
 
 ---
 
-## 6. Instant (0xFFFB)
+## 6. Instant (0xFFF8)
 
 48-bit signed milliseconds from the Unix epoch (1970-01-01T00:00:00Z).
 
 ```
-bits 63-48: 0xFFFB (tag)
+bits 63-48: 0xFFF8 (tag)
 bits 47-0:  signed milliseconds
 ```
 
@@ -760,9 +760,10 @@ Type checks are designed for minimal instruction count:
 #define W_BIASED_NAN    0x7FF9000000000000ULL
 
 // Tags (high 16 bits)
+#define W_TAG_INSTANT   0xFFF8000000000000ULL
 #define W_TAG_STRINGSYM 0xFFF9000000000000ULL
 #define W_TAG_INT       0xFFFA000000000000ULL
-#define W_TAG_INSTANT   0xFFFB000000000000ULL
+#define W_TAG_BIGINT    0xFFFB000000000000ULL
 #define W_TAG_CHAR      0xFFFC000000000000ULL  // also token, lexchar, slice
 #define W_TAG_DECIMAL   0xFFFD000000000000ULL  // also currency, quantity
 #define W_TAG_PACKED    0xFFFE000000000000ULL

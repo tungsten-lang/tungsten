@@ -273,7 +273,7 @@
 # bindings. Beyond the original bare :int / :wvalue literals (KIND_PROGRAM
 # = 60, AST_NIL = u0xFFFE...), it folds unary minus and the closed integer
 # ops over constant operands, so a named tag constant can be CONSTRUCTED
-# readably — `W_BI_TAG = ((0xFFF8 - 0x10000) << 48) ## i64` — and still
+# readably — `W_BI_TAG = ((0xFFFB - 0x10000) << 48) ## i64` — and still
 # emit as an LLVM `constant` whose loads fold to the immediate.
 #
 # Every intermediate is range-guarded to |v| < 2^62: this pre-pass runs on

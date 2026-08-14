@@ -2046,12 +2046,15 @@ static inline int w_is_encoded(WValue v) {
            ((WEncodedValue *)w_as_ptr(v))->type == W_TYPE_ENCODED;
 }
 static inline int w_is_bigint(WValue v) {
-    /* v4: dedicated top-level tag — one compare, no object-range test. */
+    /* Dedicated top-level tag 0xFFFB — one compare, no object-range test. */
     return (v & W_TAG_MASK) == W_TAG_BIGINT;
 }
-/* True if v is an inline i48 int OR a heap-allocated BigInt. Kept beside the
- * other runtime object predicates for one shared integer-classification path. */
-static inline int w_is_integer_any(WValue v) { return w_is_int(v) || w_is_bigint(v); }
+/* True if v is an inline i48 int OR a heap-allocated BigInt.
+ * Because W_TAG_INT (0xFFFA) and W_TAG_BIGINT (0xFFFB) are power-of-2 adjacent,
+ * bits 63..49 are identical. A single 15-bit mask classifies all integers branchlessly. */
+static inline int w_is_integer_any(WValue v) {
+    return (v & 0xFFFE000000000000ULL) == 0xFFFA000000000000ULL;
+}
 
 /* ---- StringBuffer (mutable growable byte buffer) ----
  * Promoted to W_SUBTAG_STRBUF (subtag 0xB). Type byte removed

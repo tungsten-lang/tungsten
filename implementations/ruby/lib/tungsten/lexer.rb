@@ -372,7 +372,7 @@ module Tungsten
       elsif (text = scan(MONTH))
         token :MONTH, text
 
-      elsif @regex_capture_scope && (text = scan(/\$[1-9](?![0-9])(?!(?:\.\d))/))
+      elsif @regex_capture_scope && (text = scan(/\$[1-9][0-9]*(?!(?:\.\d))/))
         token :REGEX_CAPTURE, text.delete_prefix("$")
       elsif scan(CURRENCY)
         case self[:suffix]

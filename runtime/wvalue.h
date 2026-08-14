@@ -7,9 +7,10 @@
  *   nil, false, true, undef  — singletons in 0x0000 space
  *   heap objects              — 0x0000 space, 16-byte aligned ptr + 4-bit sub-tag
  *   IEEE 754 doubles          — biased (bias = 0x0001) to sit above objects
+ *   instants                  — 0xFFF8 tag, 48-bit signed Unix ms
  *   string / symbol           — 0xFFF9 tag, inline (≤5 bytes) or heap WString*
  *   48-bit signed integers    — 0xFFFA tag, no bias, sign-extended
- *   instants                  — 0xFFFB tag, 48-bit signed Unix ms
+ *   bigint                    — 0xFFFB tag, WBigint* pointer + sign overlay
  *   codepoint                 — 0xFFFC tag, 21-bit Unicode codepoint + metadata
  *   numeric (4 subtypes)      — 0xFFFD tag: decimal, currency, (reserved), quantity
  *   packed types              — 0xFFFE tag: color, complex, rational, date, ipv4, location
@@ -75,11 +76,11 @@
    0xFFF5                                      free tag slot (v4)
    0xFFF6_xxxx_xxxx_xxxx                       sockaddr (32-bit IPv4 + 16-bit Port endpoint)
    0xFFF7                                      free tag slot (v4)
-   0xFFF8_xxxx_xxxx_xxxx                       bigint  (WBigint*, 47-bit ptr;
-                                                bit 47 reserved for tag-sign)
+   0xFFF8_xxxx_xxxx_xxxx                       instant (48-bit signed Unix ms)
    0xFFF9_xxxx_xxxx_xxxx                       string / symbol
    0xFFFA_xxxx_xxxx_xxxx                       int     (48-bit signed, no bias)
-   0xFFFB_xxxx_xxxx_xxxx                       instant (48-bit signed Unix ms)
+   0xFFFB_xxxx_xxxx_xxxx                       bigint  (WBigint*, 47-bit ptr;
+                                                bit 47 reserved for tag-sign)
    0xFFFC_xxxx_xxxx_xxxx                       char    (21-bit cp + metadata)
    0xFFFD_xxxx_xxxx_xxxx                       numeric (2-bit subtype + payload)
    0xFFFE_xxxx_xxxx_xxxx                       packed  (3-bit subtype + payload)
@@ -164,10 +165,10 @@ typedef uint64_t WValue;
 /* 0xFFF5 free tag slot */
 #define W_TAG_SOCKADDR  0xFFF6000000000000ULL
 /* 0xFFF7 free tag slot */
-#define W_TAG_BIGINT    0xFFF8000000000000ULL
+#define W_TAG_INSTANT   0xFFF8000000000000ULL
 #define W_TAG_STRINGSYM 0xFFF9000000000000ULL
 #define W_TAG_INT       0xFFFA000000000000ULL
-#define W_TAG_INSTANT   0xFFFB000000000000ULL
+#define W_TAG_BIGINT    0xFFFB000000000000ULL
 #define W_TAG_CHAR      0xFFFC000000000000ULL
 #define W_TAG_DECIMAL   0xFFFD000000000000ULL  /* also used for currency, quantity */
 #define W_TAG_PACKED    0xFFFE000000000000ULL
@@ -189,9 +190,9 @@ typedef uint64_t WValue;
  * measurable; slot 3 remains free for a future promotion. */
 #define W_SUBTAG_GENERIC     0   /* type discriminator in struct header byte */
 #define W_SUBTAG_ATOMIC      1   /* was IPV6 (demoted to W_TYPE_IPV6 = 6) */
-/* slot 2 free (v4: was BIGINT — promoted to the top-level W_TAG_BIGINT).
+/* slot 2 free (was BIGINT — promoted to top-level W_TAG_BIGINT 0xFFFB).
  * W_SUBTAG_BIGINT survives ONLY as BigInt's stable dispatch key (0x02):
- * w_dispatch_key maps the 0xFFF8 tag back to it so inline caches, the
+ * w_dispatch_key maps the 0xFFFB tag back to it so inline caches, the
  * g_type_class table, and the compiler's type_dispatch_key stay valid. */
 #define W_SUBTAG_BIGINT      2
 /* slot 3 free (was ENCODED; demoted to W_TYPE_ENCODED = 8) */
@@ -575,7 +576,7 @@ static inline int  w_bigint_is_shared(const WBigint *b) { return b->shared != 0;
 #define W_BIGINT_SIGN_BIT 0x0000800000000000ULL
 
 static inline WBigint *w_as_bigint(WValue v) {
-    /* v4: BigInt rides its own top-level tag (0xFFF8). Bits 0-46 carry the
+    /* BigInt rides its own top-level tag (0xFFFB). Bits 0-46 carry the
      * pointer (user-space pointers stay under 2^47 on every supported
      * platform); bit 47 is the tag-sign overlay, masked off here. */
     return (WBigint *)((void *)(uintptr_t)(v & 0x00007FFFFFFFFFFFULL));

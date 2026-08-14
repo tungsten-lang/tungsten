@@ -23,7 +23,7 @@
 #   ruby scripts/gen_tag_table.rb --check   # verify types.w block is current (CI)
 #   ruby scripts/gen_tag_table.rb --write   # regenerate the block in place
 #
-# Expected result (asserted below): exactly {BigInt => top_tag 0xFFF8}. If the
+# Expected result (asserted below): exactly {BigInt => top_tag 0xFFFB}. If the
 # battery ever admits an ancestor name (Int, Integer, Number, ...) or drops
 # BigInt, the script aborts rather than writing a wrong table.
 
@@ -217,7 +217,7 @@ text, existing = current_block(TYPES_W)
 # silently.
 if entries.key?("BigInt")
   interp = File.read(INTERP_W)
-  unless interp.include?("expected = 65528")
+  unless interp.include?("expected = 65531")
     abort("gen_tag_table: interpreter.w hand-copied BigInt tag literal not found — mirror has drifted")
   end
 end

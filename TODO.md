@@ -198,6 +198,70 @@ is the one door that design closes, and this note is where the key is.
 `~/.gstack/projects/companygardener-math/ceo-plans/2026-07-22-wassat-portfolio.md`.
 Effort: XL human / L with CC. Priority: P3.
 
+## Constant-time annotation: variable-time exclusion check (design settled 2026-08-12)
+
+A minimal, sound timing-hygiene posture for the language.  The do-nothing
+baseline provides no constant/variable-time signal of any kind; full CT
+verification (taint analysis + CT codegen + per-build asm audit) is a
+large campaign.  The settled first increment is deliberately smaller:
+
+- `@variable_time` on a function is a free, unverified DECLARATION of a
+  known timing hazard (data-dependent short-circuiting).  Accepted on
+  faith by design: the failure mode of a warning label is ignoring it,
+  not trusting it — an unverified warning can only produce spurious
+  caution, never a missed leak.  Candidates to annotate first: the
+  bignum short-circuit surface (mag_cmp early-outs, carry/borrow-death
+  ripples, trailing-zero stripping, Barrett certificate fast path,
+  x+0 identity folds, hot-slot hit/miss).
+- `@ct` on a function REQUESTS the check: its transitive call tree must
+  contain no `@variable_time` method.  Non-empty intersection is a
+  compile error.  The check must be a fixpoint over the whole reachable
+  call graph, with indirect calls (closures, dynamic dispatch, IC
+  methods) treated conservatively — an unresolvable callee inside `@ct`
+  is an error unless itself `@ct`.
+- Honest contract, stated in the docs: this catches DECLARED leaks in
+  places declared as not wanting them.  It does not prove constant
+  time — unannotated ops pass silently (coverage grows monotonically
+  with annotation effort), and compiler-introduced timing (csel-vs-
+  branch conversion, variable-latency division, the M5 data-dependent
+  prefetcher) is invisible at source level.
+- Asymmetry principle (the design's spine): declarations of danger are
+  free; declarations of safety are claims against a verifier.  So
+  unannotated code defaults to assumed-variable-time (sound, zero
+  burden on the existing engine), and any future `@ct_trusted` escape
+  hatch for hand-written csel asm must be loud, greppable, and rare —
+  it is the one place unverified trust enters.
+- Prior art to draw on (each maps to a tier of this design):
+  - **Rust `subtle` crate** — the no-language-support tier: library CT
+    discipline (`Choice`, `ConstantTimeEq`, `conditional_select`) with
+    optimization-barrier tricks, and an honest README caveat that it
+    cannot bind the compiler.  This is what our `@variable_time`-only
+    world looks like: convention plus documentation, no enforcement.
+  - **FaCT (Flexible and Constant-Time, PLDI 2019)** — the taint-type
+    tier: `secret`/`public` labels drive the type system and the
+    compiler auto-transforms non-CT idioms (secret-dependent branches,
+    early returns) into CT form.  The model for the full `secret`-taint
+    campaign; our `@ct` exclusion check is its lint-grade precursor.
+  - **Jasmin (+ EasyCrypt, libjade)** — the gold-standard tier: CT
+    proven at source and preserved by a verified compiler down to asm.
+    What "declarations of safety are claims against a verifier" looks
+    like fully realized; also the argument that hand-written CT kernels
+    (our future csel asm set) want machine-checked proofs, not review.
+  - **LLVM constant-time support (2025+): `__builtin_ct_expr(expr)` /
+    `__builtin_ct(op)`** — the backend hook that changes our cost
+    calculus: Tungsten lowers through LLVM IR via clang, so `@ct`
+    codegen should EMIT these rather than invent homegrown barriers,
+    and the per-build asm audit shrinks to spot-checking that LLVM
+    honored its own contract (plus the uarch tail LLVM does not cover:
+    variable-latency division, the M5 data-dependent prefetcher / DIT).
+    Track toolchain availability — the harness pins Homebrew LLVM, so
+    adoption is gated on the pinned clang major.
+- Future (separate campaign, do not conflate): true CT kernel set
+  (Montgomery ladder modexp, csel-only compare/select, fixed iteration
+  counts) with per-build asm-level verification gated like stage
+  identity — the c7a2ded width-narrowing showed source-preserving edits
+  can silently change emitted code, so one-shot certification decays.
+
 ## Engineering roadmap (2026-08-11)
 
 This is the execution checklist for the compiler/runtime review. A checked item
@@ -564,16 +628,19 @@ projects stay unchecked until their stated acceptance criteria are met.
   successful cancel.
 - [ ] Move Timer's interruptible waits from one native thread per timer onto
   the event loop while preserving the cancellation gate and `wait` semantics.
-- [ ] Add regex capture groups with consistent numbered/named captures,
+- [x] Add regex capture groups with consistent numbered/named captures,
   unmatched-group behavior, offsets, Unicode semantics, and engine parity.
   - [x] The self-hosted `Regex` VM supports numbered and `(?<name>...)`
     captures through `match_data`, including String/Symbol lookup, nil for an
     unmatched optional group, distinct `[n, n]` spans for matched empty
     groups, and half-open Unicode codepoint offsets. The compatibility
     `match` array remains unchanged and retains its measured hot-path speed.
-  - [ ] Give regex literals the same `RegexMatch` API on the native and Ruby
-    hosts, lift the native `$1`...`$9` storage limit, expose named groups, and
-    make the POSIX fallback reject or implement syntax it cannot preserve.
+  - [x] Give regex literals the same `RegexMatch` API on the native and Ruby
+    hosts, lift the native `$1`...`$9` storage limit, and expose named groups
+    when compiled with Oniguruma. The POSIX fallback preserves arbitrary
+    numbered captures and explicitly rejects unsupported named-group syntax;
+    runtime contracts cover both paths, Unicode codepoint offsets, unmatched
+    vs empty groups, failed-match clearing, and `$10`/`$11` lexing.
 - [ ] Complete Hash on every host: insertion order, symbol/table separation,
   char keys, structural equality/hash agreement, deletion/tombstones, and
   mutation-during-iteration behavior.

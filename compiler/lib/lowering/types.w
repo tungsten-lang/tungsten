@@ -82,7 +82,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Mmap"          => 0x91 # 0x80 | W_TYPE_MMAP (17)
     "SmallArray"    => 0x09 # own subtag (W_SUBTAG_SMALL_ARRAY); no type byte
     "BigInt"        => 0x02 # historical dispatch key; the VALUE now rides
-                            # the top-level 0xFFF8 tag (v4) and
+                            # the top-level 0xFFFB tag and
                             # w_dispatch_key maps it back to 0x02, keeping
                             # this table, every IC, and
                             # class_uses_implicit_type_byte? (key < 0x80)
@@ -100,7 +100,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Quantity"      => 0xC1
     "String"        => 0xF9
     "Int"           => 0xFA
-    "Instant"       => 0xFB
+    "Instant"       => 0xF8
     # W_TAG_CHAR subtypes — runtime's w_dispatch_key returns 0xD0|subtype
     # when v >> 48 == 0xFFFC so each lexical kind can register its own
     # class. The Token + Slice slots back the source-driven AST migration;
@@ -1006,7 +1006,7 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   # tag/mask are the signed-i64 spellings of the uint64 bit patterns
   # (a top-level tag and 0xFFFF000000000000).
   if name == "BigInt"
-    return {shape: :top_tag, tag: "-2251799813685248", mask: "-281474976710656"}
+    return {shape: :top_tag, tag: "-1407374883553280", mask: "-281474976710656"}
   nil
 # --- END GENERATED TAG TABLE ---
 

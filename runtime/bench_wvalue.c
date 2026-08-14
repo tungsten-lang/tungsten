@@ -310,6 +310,14 @@ static void bench_codepoint_walk(int64_t n) {
     }
 }
 
+static void bench_slab_str_len(int64_t n) {
+    WValue s = w_box_slab_str_len(1234, 25);
+    volatile int64_t acc = 0;
+    for (int64_t i = 0; i < n; i++) {
+        acc += w_string_byte_length((int64_t)s);
+    }
+}
+
 /* ---- 20. Decimal accumulator (running total of 1000 adds) ---- */
 static void bench_decimal_accumulate(int64_t n) {
     /* Simulate adding line items: $19.99 × 1000 */
@@ -462,6 +470,35 @@ static void bench_heavy_branching(int64_t n) {
     }
 }
 
+/* ---- 24. is_integer_any: 2-branch vs single 15-bit mask ---- */
+
+__attribute__((noinline))
+static int w_is_integer_any_twobranch_fn(WValue v) {
+    return w_is_int(v) || w_is_bigint(v);
+}
+
+static void bench_is_integer_any_twobranch(int64_t n) {
+    volatile int64_t acc = 0;
+    for (int64_t iter = 0; iter < n; iter++) {
+        int64_t t = 0;
+        for (int i = 0; i < HEAVY_LEN; i++) {
+            t += w_is_integer_any_twobranch_fn(heavy_values[i]);
+        }
+        acc = t;
+    }
+}
+
+static void bench_is_integer_any_singlemask(int64_t n) {
+    volatile int64_t acc = 0;
+    for (int64_t iter = 0; iter < n; iter++) {
+        int64_t t = 0;
+        for (int i = 0; i < HEAVY_LEN; i++) {
+            t += w_is_integer_any(heavy_values[i]);
+        }
+        acc = t;
+    }
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -499,6 +536,7 @@ int main(void) {
     bench("string upcase (1000ch)", bench_string_upcase,   100000);
     bench("string downcase (1000ch)", bench_string_downcase, 100000);
     bench("10K codepoint walk",     bench_codepoint_walk,  10000);
+    bench("slab string length",     bench_slab_str_len,    FAST);
 
     printf("\n  --- Instant ---\n");
     bench("instant boxing",         bench_instant_box,     FAST);
@@ -509,6 +547,10 @@ int main(void) {
     bench("4K scan: v > 1",        bench_heavy_truthy,          100000);
     bench("4K scan: tag-checked",  bench_heavy_truthy_tagcheck, 100000);
     bench("8-arg branch chain",    bench_heavy_branching,       FAST);
+
+    printf("\n  --- Integer classification (mixed types) ---\n");
+    bench("4K scan: 2-branch is_int || is_bigint", bench_is_integer_any_twobranch,  100000);
+    bench("4K scan: 1-mask is_integer_any (0xFFFA|0xFFFB)", bench_is_integer_any_singlemask, 100000);
 
     printf("\n  Done.\n\n");
     return 0;

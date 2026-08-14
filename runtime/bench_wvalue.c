@@ -587,6 +587,15 @@ static void bench_inline_string_eq(int64_t n) {
     }
 }
 
+static void bench_inline_string_neq(int64_t n) {
+    WValue s1 = w_string("hello");
+    WValue s2 = w_string("world");
+    volatile WValue acc = W_FALSE;
+    for (int64_t i = 0; i < n; i++) {
+        acc = w_eq(s1, s2);
+    }
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -647,7 +656,8 @@ int main(void) {
     bench("3. 4K w_dispatch_key scan",       bench_dispatch_key_scan,    100000);
     bench("4a. Small Hash get (4 keys)",     bench_small_hash_4keys,     SLOW);
     bench("4b. Small Hash get (8 keys)",     bench_small_hash_8keys,     SLOW);
-    bench("5. w_eq inline string",           bench_inline_string_eq,     FAST);
+    bench("5a. w_eq inline str (equal)",     bench_inline_string_eq,     FAST);
+    bench("5b. w_eq inline str (diff)",      bench_inline_string_neq,    FAST);
 
     printf("\n  Done.\n\n");
     return 0;

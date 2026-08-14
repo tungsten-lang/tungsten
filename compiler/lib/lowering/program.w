@@ -117,6 +117,91 @@
     ki += 1
   nil
 
+# Recursive nested-assignment scan for constant eligibility: any
+# :assign / :compound_assign targeting a var below statement level marks
+# it multiply-assigned (true) in assign_count — a block or loop body can
+# mutate a top-level var, and folding such a var to an LLVM `constant`
+# makes its loads fold to the stale literal. fn/method/class bodies are
+# SKIPPED: an assignment there shadows the module-scope var and never
+# writes the global. Field probes mirror loader.w's
+# collect_autoload_refs — the proven stage-0-safe generic walk (no
+# block-passing calls: the C VM cannot dispatch them during bootstrap).
+-> const_disqualify_nested(node, assign_count)
+  if !is_ast_node?(node) || ast_kind(node) == nil
+    return nil
+  t = ast_kind(node)
+  if t in (:fn_def :method_def :class_def)
+    return nil
+  if t in (:assign :compound_assign)
+    tgt = node.target
+    if tgt != nil && is_ast_node?(tgt) && ast_kind(tgt) == :var
+      assign_count[tgt.name] = true
+  if t in (:fastmath_block :strictmath_block :overflow_block)
+    mb = node[:body]
+    if mb != nil
+      mbi = 0
+      while mbi < mb.size()
+        const_disqualify_nested(mb[mbi], assign_count)
+        mbi += 1
+    return nil
+  if t == :puts && node.value != nil
+    vals = node.value
+    vi = 0
+    while vi < vals.size()
+      const_disqualify_nested(vals[vi], assign_count)
+      vi += 1
+  elsif node.value != nil && is_ast_node?(node.value)
+    const_disqualify_nested(node.value, assign_count)
+  if t == :array && node.elements != nil
+    els = node.elements
+    ei = 0
+    while ei < els.size()
+      const_disqualify_nested(els[ei], assign_count)
+      ei += 1
+  if node.left != nil && is_ast_node?(node.left)
+    const_disqualify_nested(node.left, assign_count)
+  if node.right != nil && is_ast_node?(node.right)
+    const_disqualify_nested(node.right, assign_count)
+  if node.condition != nil && is_ast_node?(node.condition)
+    const_disqualify_nested(node.condition, assign_count)
+  if node.receiver != nil && is_ast_node?(node.receiver)
+    const_disqualify_nested(node.receiver, assign_count)
+  if t != :assign && t != :compound_assign && node.target != nil && is_ast_node?(node.target)
+    const_disqualify_nested(node.target, assign_count)
+  if node.source != nil && is_ast_node?(node.source)
+    const_disqualify_nested(node.source, assign_count)
+  if node.func != nil && is_ast_node?(node.func)
+    const_disqualify_nested(node.func, assign_count)
+  if node.block != nil && is_ast_node?(node.block)
+    const_disqualify_nested(node.block, assign_count)
+  if node.args != nil
+    ai = 0
+    while ai < node.args.size()
+      const_disqualify_nested(node.args[ai], assign_count)
+      ai += 1
+  if node.body != nil
+    const_disqualify_nested_seq(node.body, assign_count)
+  if node.then_body != nil
+    const_disqualify_nested_seq(node.then_body, assign_count)
+  if node.else_body != nil
+    const_disqualify_nested_seq(node.else_body, assign_count)
+  if node.rescue_body != nil
+    const_disqualify_nested_seq(node.rescue_body, assign_count)
+  if node.ensure_body != nil
+    const_disqualify_nested_seq(node.ensure_body, assign_count)
+  if node.fallback != nil
+    const_disqualify_nested_seq(node.fallback, assign_count)
+  if node.expressions != nil
+    const_disqualify_nested_seq(node.expressions, assign_count)
+  nil
+
+-> const_disqualify_nested_seq(seq, assign_count)
+  i = 0
+  while i < seq.size()
+    const_disqualify_nested(seq[i], assign_count)
+    i += 1
+  nil
+
 -> collect_top_level_static_types(mod, expressions)
   if mod[:top_level_static_types] == nil
     mod[:top_level_static_types] = {}
@@ -126,6 +211,13 @@
   # First pass: count top-level :assign targets per name. A var assigned
   # exactly once at module scope is eligible for `constant` emission.
   # `assign_count[nm]` is nil → 1, true → "already saw more than one".
+  #
+  # NESTED assignments disqualify too: `acc ## i64 = 0` followed by
+  # `(1..n).each -> (k) acc = acc + k` mutates acc from inside a block —
+  # folding acc to an LLVM `constant` would make its loads fold to the
+  # literal and the loop's writes skip the (illegal) global store. Any
+  # :assign / :compound_assign to the name anywhere below statement level
+  # marks it multiply-assigned outright.
   assign_count = {}
   i = 0
   while i < expressions.size()
@@ -139,6 +231,9 @@
           assign_count[nm] = 1
         else
           assign_count[nm] = true
+      const_disqualify_nested(ast_get(expr, :value), assign_count)
+    elsif expr != nil && is_ast_node?(expr)
+      const_disqualify_nested(expr, assign_count)
     i += 1
 
   i = 0

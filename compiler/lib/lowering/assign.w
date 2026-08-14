@@ -914,7 +914,15 @@
       raw_int_candidate = false
       machine_type = nil
       inferred = :bigint
-    if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128) && !value_is_int_literal
+    # The raw-typed arm honors the candidate gate exactly like the
+    # :raw_int arm below: a var analysis pinned (notably a plain-ccall
+    # argument, which the ccall ABI forwards RAW with no box at the call
+    # site) must keep boxed WValue storage even when its RHS derives
+    # from machine-typed sources (`lo = i % 1000` with a promoted loop
+    # var). Before this gate, such a local silently became a raw slot
+    # and crossed the ccall boundary as raw bits where the C function
+    # expected a WValue.
+    if val[:type] in (:raw_i64 :raw_u64 :raw_i128 :raw_u128) && !value_is_int_literal && raw_int_candidate
       value_machine_type = raw_value_machine_type(val[:type])
       if machine_type == nil
         machine_type = value_machine_type

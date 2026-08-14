@@ -963,10 +963,25 @@
     # visit_promote_node's else branch and bulk-escape (closures capture
     # environment slots, which raw stack slots are invisible to), and
     # the explicit node.block below stays a hard escape.
+    #
+    # EXCEPTION — plain `ccall`: its lowering forwards raw-typed args RAW
+    # (no box at the call site; both directions of that ABI are
+    # load-bearing, see calls.w). The "boxed at the call site"
+    # justification above therefore does not hold, and a promoted local
+    # crossing a plain-ccall boundary would arrive as raw bits where the
+    # C function expects a WValue. Restore the documented contract
+    # (calls.w: "analysis.w deliberately keeps ccall out of its
+    # raw-intrinsic exemption list"): plain-ccall args ESCAPE, so untyped
+    # candidates stay boxed. Declared `## i64` locals are not promotion
+    # candidates and keep the raw path (`ccall("w_int", n)` idiom).
+    is_plain_ccall = name == "ccall" && node.receiver == nil
     if node.args != nil
       i = 0
       while i < node.args.size()
-        visit_promote_node(node.args[i], records, declared_types, mod)
+        if is_plain_ccall
+          mark_subtree_escape(node.args[i], records)
+        else
+          visit_promote_node(node.args[i], records, declared_types, mod)
         i += 1
     if node.block != nil
       inl = inlined_iterator_elem_type(node, declared_types)

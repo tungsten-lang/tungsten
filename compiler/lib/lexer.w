@@ -593,6 +593,15 @@ use ../../languages/tungsten/lexers/known_units
               if th_brk == 0 && paren_depth > 0
                 break
               th_brk--
+            # A `=` ends the hint at ANY depth: `x ## i64 = 0` is a typed
+            # ASSIGNMENT — hint on the target; the `=` and initializer lex
+            # normally and the parser folds them into Assign#type_hint. No
+            # legitimate hint text contains `=` (before this rule the
+            # whole-line scan swallowed `= 0` into the hint text, leaving
+            # the var undeclared — silent nil reads compiled, "Undefined
+            # variable" interpreted).
+            elsif cp_here == :-=
+              break
             # When inside a paren list (`paren_depth > 0`), stop at the
             # structural followers `)` / `,` / `;` / `:` / `?` so inline
             # ascriptions like `(@components ## T[4])` and ternary forms

@@ -424,6 +424,11 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
           } else if (c2 == ']') {
             if (type_bracket_depth == 0 && paren_depth > 0) break;
             type_bracket_depth--;
+          } else if (c2 == '=') {
+            /* `x ## i64 = 0` is a typed assignment: the hint ends at `=`
+             * (any depth) so the initializer lexes normally. Mirrors the
+             * self-hosted lexer's rule. */
+            break;
           } else if (paren_depth > 0 &&
                      (c2 == ')' || c2 == ',' || c2 == ';' || c2 == ':' || c2 == '?')) {
             break;

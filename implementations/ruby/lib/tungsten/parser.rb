@@ -361,6 +361,14 @@ module Tungsten
           next_token
           exp = TypeHint.new(exp, hint).at(exp)
         when :"="
+          # Typed-target assignment: `x ## i64 = 0`. The lexer ends the hint
+          # at "=", so the target arrives wrapped in TypeHint; fold the hint
+          # into Assign below so both spellings build identical AST.
+          target_hint = nil
+          if exp.is_a?(TypeHint) && exp.value.is_a?(Var)
+            target_hint = exp.hint
+            exp = exp.value
+          end
           if exp.is_a?(Call) && exp.name == "[]"
             next_token_skip_whitespace
 
@@ -417,7 +425,7 @@ module Tungsten
               end
             end
 
-            exp = Assign.new(exp, value, hint)
+            exp = Assign.new(exp, value, hint || target_hint)
           end
         else
           break unless @token.assignment_operator?

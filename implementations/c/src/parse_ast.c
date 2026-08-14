@@ -2723,7 +2723,26 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
      * type_ascription). Without this, `x = -1 ## i64  # tag` stored the
      * whole "i64  # tag" text, no lowering rule matched, and the local
      * silently fell back to boxed ops. */
-    TcAstValue target = parse_expr_span_ast(p, start, assign_pos, err);
+    /* Typed-target assignment `x ## i64 = 0`: the lexer ends the hint at
+     * `=`, so the hint token sits at the END of the target span. Strip it
+     * and fold it into the assign's type_hint below, so the prefix
+     * spelling builds the same node as `x = 0 ## i64`. */
+    size_t target_end = assign_pos;
+    TcAstValue target_hint = tc_ast_nil();
+    if (target_end > start + 1 &&
+        p->tokens->items[target_end - 1].kind == TC_K_TYPE_HINT) {
+      char *thint = NULL;
+      size_t thint_len = 0;
+      if (!token_text_at_ast(p, target_end - 1, &thint, &thint_len, err)) {
+        return tc_ast_nil();
+      }
+      size_t ths = 0, thl = 0;
+      clean_type_hint_text(thint, thint_len, &ths, &thl);
+      target_hint = tc_ast_string_copy(thint + ths, thl, err);
+      free(thint);
+      target_end--;
+    }
+    TcAstValue target = parse_expr_span_ast(p, start, target_end, err);
     size_t value_end = end;
     TcAstValue type_hint = tc_ast_nil();
     size_t hint_pos = 0;
@@ -2733,6 +2752,7 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
       size_t hint_len = 0;
       if (!token_text_at_ast(p, hint_pos, &hint, &hint_len, err)) {
         tc_ast_free(target);
+        tc_ast_free(target_hint);
         return tc_ast_nil();
       }
       size_t hs = 0, hl = 0;
@@ -2745,6 +2765,7 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
       tc_ast_free(target);
       tc_ast_free(value);
       tc_ast_free(type_hint);
+      tc_ast_free(target_hint);
       return tc_ast_nil();
     }
     if (type_hint.kind == TC_AST_STRING && value.kind == TC_AST_HASH) {
@@ -2766,6 +2787,12 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
         tc_ast_free(type_hint);
         type_hint = tc_ast_nil();
       }
+    }
+    /* A trailing RHS hint wins; otherwise the target-side hint applies. */
+    if (type_hint.kind == TC_AST_NIL) {
+      type_hint = target_hint;
+    } else {
+      tc_ast_free(target_hint);
     }
     if (ast_node_is(target, "call")) {
       TcAstValue *name = hash_value_ast(target, "name");

@@ -1151,7 +1151,9 @@ module Tungsten
         @pos = after_hashes + spaces
         @col += 2 + spaces
         hint_start = @pos
-        advance until eof? || newline_byte?(byte)
+        # A "=" ends the hint: "x ## i64 = 0" is a typed assignment — the
+        # initializer lexes normally (mirrors the self-hosted lexer's rule).
+        advance until eof? || newline_byte?(byte) || byte == 0x3D
         hint = slice(hint_start).strip
         return set_token(:TYPE_HINT, hint, @row, start_col) unless hint.empty?
       end
@@ -1511,10 +1513,11 @@ module Tungsten
     end
 
     def regex_capture_start?
-      @regex_capture_scope &&
-        digit_byte?(byte(1)) && byte(1) != 48 &&
-        !digit_byte?(byte(2)) &&
-        !(byte(2) == 46 && digit_byte?(byte(3)))
+      return false unless @regex_capture_scope && digit_byte?(byte(1)) && byte(1) != 48
+
+      i = 2
+      i += 1 while digit_byte?(byte(i))
+      !(byte(i) == 46 && digit_byte?(byte(i + 1)))
     end
 
     def scan_prefixed_name(type, prefix_len)

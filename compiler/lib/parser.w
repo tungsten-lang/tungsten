@@ -1058,6 +1058,23 @@ use ../../core/token
       @pos = saved_pos
       sync_current()
 
+    # Typed-target assignment: `x ## i64 = 0`. The lexer ends the hint at
+    # `=`, so the shape arrives as target, TYPE_HINT("i64"), ASSIGN, value.
+    # Normalize to the SAME Assign(+type_hint) node the postfix form
+    # (`x = 0 ## i64`) builds, so lowering, both interpreters, and the GPU
+    # emitter see one canonical shape.
+    if at_type?(T_TYPE_HINT) && peek_type() == T_ASSIGN && valid_assign_target?(left)
+      hint = current_value()
+      comment_pos = hint.index("#")
+      if comment_pos != nil
+        hint = hint.slice(0, comment_pos)
+      hint = hint.strip()
+      validate_type_hint_spelling(hint)
+      advance()
+      advance()
+      value = parse_assignment()
+      return Tungsten:AST:Assign.new(to_assign_target(left), value, hint)
+
     if at_type?(T_ASSIGN)
       advance()
       value = parse_assignment()

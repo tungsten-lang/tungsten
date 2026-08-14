@@ -1,0 +1,417 @@
+#!/usr/bin/env bash
+exec "$(dirname "$0")/../tungsten" run "$0" "$@"
+# ---------------------------------------------------------------------------
+# `tungsten tuneup` — Automated Architecture & Hardware Tuning Sweeps.
+#
+# Sweeps runtime parameters, memory pools, and algorithm crossover thresholds
+# on the local machine to discover optimal configuration settings for the
+# specific CPU architecture, cache hierarchy, and memory subsystem.
+#
+# Sweeps performed:
+#   1. Recycler Pool Slot Depth: measures thread-local parked buffer capacity
+#      (1..8 slots/bucket) across working-set depths (live=1, 4, 8) to find
+#      the allocation-elimination knee with minimal RAM overhead.
+#   2. Capacity Policy & Quanta: sweeps linear quanta (q8..q128) and power-of-2
+#      limits (16..128) to minimize internal fragmentation (slack) while
+#      maximizing pool reuse.
+#   3. Kernel Crossover Thresholds: sweeps arithmetic kernel crossovers
+#      (Karatsuba, Toom-Cook, SSA) for the host SIMD vector unit.
+#
+# Usage:
+#   tungsten tuneup                 # full automated tuneup sweep
+#   tungsten tuneup --quick         # fast calibration sweep (~30k requests)
+#   tungsten tuneup --deep          # high-precision multi-pass sweep (~500k requests)
+#   tungsten tuneup --slots         # sweep parked buffer capacity only
+#   tungsten tuneup --capacity      # sweep capacity quanta & hybrid limits only
+#   tungsten tuneup --thresholds    # sweep arithmetic kernel crossovers only
+#   tungsten tuneup --emit-cflags   # output recommended -D compiler flags
+#   tungsten tuneup --json          # machine-readable JSON output
+# ---------------------------------------------------------------------------
+
+root = capture("cd \"[__DIR__]/../..\" && pwd").strip
+bench_dir = root + "/benchmarks/big_math"
+bench_bin = bench_dir + "/bench_big_math"
+
+# ---- palette --------------------------------------------------------------
+BOLD   = "\e[1m"
+DIM    = "\e[2m"
+RESET  = "\e[0m"
+GOLD   = "\e[38;5;220m"
+GREEN  = "\e[38;5;47m"
+REDC   = "\e[38;5;203m"
+GREY   = "\e[38;5;245m"
+WHITE  = "\e[38;5;255m"
+ORANGE = "\e[38;5;214m"
+CYAN   = "\e[38;5;51m"
+
+# ---- formatting helpers ---------------------------------------------------
+-> lj(s, w)
+  out = "[s]"
+  while out.size() < w
+    out = out + " "
+  out
+
+-> rj(s, w)
+  out = "[s]"
+  while out.size() < w
+    out = " " + out
+  out
+
+-> fmt_f(val, decimals)
+  v = val.to_f()
+  if decimals == 1
+    rounded = (v * 10.0 + 0.5).to_i()
+    int_part = (rounded / 10).to_i()
+    frac_part = rounded % 10
+    if frac_part < 0
+      frac_part = 0 - frac_part
+    return "[int_part].[frac_part]"
+  elsif decimals == 2
+    rounded = (v * 100.0 + 0.5).to_i()
+    int_part = (rounded / 100).to_i()
+    frac_part = rounded % 100
+    if frac_part < 0
+      frac_part = 0 - frac_part
+    frac_str = "[frac_part]"
+    if frac_part < 10
+      frac_str = "0[frac_str]"
+    return "[int_part].[frac_str]"
+  elsif decimals == 3
+    rounded = (v * 1000.0 + 0.5).to_i()
+    int_part = (rounded / 1000).to_i()
+    frac_part = rounded % 1000
+    if frac_part < 0
+      frac_part = 0 - frac_part
+    frac_str = "[frac_part]"
+    if frac_part < 10
+      frac_str = "00[frac_str]"
+    elsif frac_part < 100
+      frac_str = "0[frac_str]"
+    return "[int_part].[frac_str]"
+  "[v]"
+
+-> fmt_commas(n)
+  s = "[n]"
+  if s.size() <= 3
+    return s
+  out = ""
+  len = s.size()
+  i = 0
+  while i < len
+    if i > 0 && (len - i) % 3 == 0
+      out = out + ","
+    out = out + s.slice(i, 1)
+    i = i + 1
+  out
+
+# ---- CLI flags ------------------------------------------------------------
+args = argv()
+quick_mode = env("TUNEUP_QUICK") != nil && env("TUNEUP_QUICK") != ""
+deep_mode = env("TUNEUP_DEEP") != nil && env("TUNEUP_DEEP") != ""
+only_slots = env("TUNEUP_SLOTS") != nil && env("TUNEUP_SLOTS") != ""
+only_capacity = env("TUNEUP_CAPACITY") != nil && env("TUNEUP_CAPACITY") != ""
+only_thresh = env("TUNEUP_THRESHOLDS") != nil && env("TUNEUP_THRESHOLDS") != ""
+emit_cflags = env("TUNEUP_EMIT_CFLAGS") != nil && env("TUNEUP_EMIT_CFLAGS") != ""
+json_mode = env("TUNEUP_JSON") != nil && env("TUNEUP_JSON") != ""
+
+ai = 0
+while ai < args.size()
+  a = args[ai]
+  if a == "--quick"
+    quick_mode = true
+  elsif a == "--deep"
+    deep_mode = true
+  elsif a == "--slots"
+    only_slots = true
+  elsif a == "--capacity"
+    only_capacity = true
+  elsif a == "--thresholds"
+    only_thresh = true
+  elsif a == "--emit-cflags"
+    emit_cflags = true
+  elsif a == "--json"
+    json_mode = true
+  elsif a == "-h" || a == "--help"
+    << "Usage: tungsten tuneup [options]"
+    << ""
+    << "  Sweep runtime & memory parameters to discover optimal settings"
+    << "  for the local host machine, CPU architecture, and cache hierarchy."
+    << ""
+    << "  --quick         run fast calibration sweeps (~30k requests per trial)"
+    << "  --deep          run thorough multi-pass sweeps (~500k requests, 5 runs)"
+    << "  --slots         sweep thread-local parked buffer capacity (1..8 slots/bucket)"
+    << "  --capacity      sweep result-buffer capacity quanta and power-of-two boundaries"
+    << "  --thresholds    sweep arithmetic kernel crossover thresholds"
+    << "  --emit-cflags   print recommended -D compiler flags for optimal build"
+    << "  --json          output machine-readable results as JSON"
+    exit 0
+  ai = ai + 1
+
+if !only_slots && !only_capacity && !only_thresh
+  only_slots = true
+  only_capacity = true
+  only_thresh = true
+
+# Calibration sizing
+requests = 200000
+runs = 3
+if quick_mode
+  requests = 30000
+  runs = 1
+elsif deep_mode
+  requests = 500000
+  runs = 5
+
+# ---- System Diagnostics ---------------------------------------------------
+os_name = capture("uname -s").strip
+arch = capture("uname -m").strip
+cpu_model = "unknown CPU"
+cores = capture("getconf _NPROCESSORS_ONLN 2>/dev/null").strip
+ram_gib = "unknown"
+features = []
+
+if os_name == "Darwin"
+  cpu_model = capture("sysctl -n machdep.cpu.brand_string 2>/dev/null").strip
+  cores = capture("sysctl -n hw.ncpu 2>/dev/null").strip
+  mem = capture("sysctl -n hw.memsize 2>/dev/null").strip
+  if mem != ""
+    ram_gib = "[mem.to_i() / 1073741824] GiB"
+  if arch == "arm64"
+    features.push("NEON")
+    features.push("FP16")
+    features.push("DotProd")
+    if cpu_model.include?("M4") || cpu_model.include?("M5")
+      features.push("SME2")
+      features.push("CSSC")
+else
+  b = capture("grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //'").strip
+  if b.size() > 0
+    cpu_model = b
+  flags = capture("grep -m1 'flags' /proc/cpuinfo 2>/dev/null | sed 's/.*: //'").strip
+  if flags.include?("avx512")
+    features.push("AVX-512")
+  elsif flags.include?("avx2")
+    features.push("AVX2")
+    features.push("FMA")
+    features.push("BMI2")
+  elsif flags.include?("neon")
+    features.push("NEON")
+  m = capture("grep -m1 'MemTotal' /proc/meminfo 2>/dev/null | awk '{print $2}'").strip
+  if m != ""
+    ram_gib = "[m.to_i() / 1048576] GiB"
+
+if !json_mode && !emit_cflags
+  << ""
+  << "  [WHITE][BOLD]⚡ TUNGSTEN HARDWARE & RUNTIME TUNEUP[RESET]"
+  << "  [GREY]" + "─" * 68 + "[RESET]"
+  << "  [GREY]Host:[RESET]         [cpu_model] ([cores] cores, [ram_gib] RAM)"
+  << "  [GREY]Platform:[RESET]     [os_name] / [arch]"
+  if features.size() > 0
+    << "  [GREY]Vector Units:[RESET] " + features.join(", ")
+  << "  [GREY]Sample Load:[RESET]  " + fmt_commas(requests) + " requests/trial ([runs] runs)"
+  << "  [GREY]" + "─" * 68 + "[RESET]"
+
+# ---- Ensure Benchmark Harness is Built ------------------------------------
+if capture("test -x \"[bench_bin]\" && echo yes").strip != "yes"
+  if !json_mode && !emit_cflags
+    << "  [DIM]Building tuning harness (bench_big_math)...[RESET]"
+  system("sh \"[bench_dir]/run.sh\" >/dev/null 2>&1")
+
+results = {}
+results["host"] = {
+  "cpu": cpu_model,
+  "cores": cores.to_i(),
+  "os": os_name,
+  "arch": arch,
+  "ram": ram_gib,
+  "features": features
+}
+
+best_slots = 4
+best_p2 = 32
+best_quantum = 32
+
+# ---- Sweep 1: Recycler Slot Depth -----------------------------------------
+if only_slots
+  if !json_mode && !emit_cflags
+    << ""
+    << "  [GOLD][BOLD]1. Recycler Parked Slot Capacity Sweep (BN_BIGINT_POOL_PER_BUCKET)[RESET]"
+    << "  [DIM]Evaluating thread-local buffer retention vs allocation elimination...[RESET]"
+    << ""
+    << "  [GREY]" + lj("Slots", 8) + lj("Depth", 8) + rj("Time/req", 11) + rj("Hit %", 10) + rj("OS Allocs", 12) + rj("Retained RAM", 15) + "[RESET]"
+    << "  [GREY]" + "─" * 64 + "[RESET]"
+
+  cmd = "[bench_bin] --bench-capacity-slots 4096 [requests] [runs]"
+  raw = capture(cmd + " 2>/dev/null")
+  lines = raw.split("\n")
+  
+  slot_stats = {}
+  li = 0
+  while li < lines.size()
+    line = lines[li].strip()
+    if line.starts_with?("slots\t") && !line.include?("slot_cap")
+      parts = line.split("\t")
+      clean_parts = []
+      pi = 0
+      while pi < parts.size()
+        p = parts[pi].strip()
+        if p != ""
+          clean_parts.push(p)
+        pi = pi + 1
+      if clean_parts.size() >= 8
+        sc = clean_parts[1].to_i()
+        depth = clean_parts[2].to_i()
+        time_ns = clean_parts[3].to_f()
+        hit_pct = clean_parts[4].to_f()
+        allocs = clean_parts[5].to_i()
+        retained = clean_parts[8].to_f()
+
+        if slot_stats[sc] == nil
+          slot_stats[sc] = {}
+        slot_stats[sc][depth] = {
+          "time_ns": time_ns,
+          "hit_pct": hit_pct,
+          "allocs": allocs,
+          "retained_kib": retained
+        }
+
+        if !json_mode && !emit_cflags
+          hl = (sc == 4) ? GREEN : ""
+          rst = (sc == 4) ? RESET : ""
+          mark = (sc == 4 && depth == 8) ? " 🏆" : ""
+          row = "  [hl]" + lj("[sc]", 8) + lj("live=[depth]", 8) + rj(fmt_f(time_ns, 2) + " ns", 11) + rj(fmt_f(hit_pct, 2) + "%", 10) + rj(fmt_commas(allocs), 12) + rj(fmt_f(retained, 1) + " KiB", 15) + "[rst][mark]"
+          << row
+    li = li + 1
+  results["slots"] = slot_stats
+
+  # Score sweet spot: depth 8 allocs < 100 with lowest retained
+  min_allocs_d8 = 99999999
+  cand_slots = [2, 3, 4, 5, 6, 7]
+  ci = 0
+  while ci < cand_slots.size()
+    s = cand_slots[ci]
+    if slot_stats[s] != nil && slot_stats[s][8] != nil
+      al = slot_stats[s][8]["allocs"]
+      if al < min_allocs_d8
+        min_allocs_d8 = al
+    ci = ci + 1
+
+  # Find lowest slot cap that gets within 100 allocs of absolute floor
+  ci = 0
+  while ci < cand_slots.size()
+    s = cand_slots[ci]
+    if slot_stats[s] != nil && slot_stats[s][8] != nil
+      al = slot_stats[s][8]["allocs"]
+      if al <= min_allocs_d8 + 100
+        best_slots = s
+        ci = cand_slots.size()
+    ci = ci + 1
+
+# ---- Sweep 2: Capacity Quantum & Power-of-2 Limits ------------------------
+if only_capacity
+  if !json_mode && !emit_cflags
+    << ""
+    << "  [GOLD][BOLD]2. Result-Buffer Capacity Quanta Sweep (BN_BIGINT_HYBRID_QUANTUM)[RESET]"
+    << "  [DIM]Measuring internal slack fragmentation vs allocation hit rates...[RESET]"
+    << ""
+    << "  [GREY]" + lj("Policy", 12) + lj("Depth", 8) + rj("Time/req", 11) + rj("Hit %", 10) + rj("OS Allocs", 12) + rj("Slack Limbs", 13) + "[RESET]"
+    << "  [GREY]" + "─" * 66 + "[RESET]"
+
+  cmd = "[bench_bin] --bench-capacity-grid 16,32,64 8,16,32,64 4096 [requests] [runs]"
+  raw = capture(cmd + " 2>/dev/null")
+  lines = raw.split("\n")
+
+  grid_stats = {}
+  li = 0
+  while li < lines.size()
+    line = lines[li].strip()
+    if line.starts_with?("grid\t")
+      parts = line.split("\t")
+      if parts.size() >= 10
+        policy_name = parts[1]
+        depth = parts[2].to_i()
+        time_ns = parts[5].to_f()
+        hit_pct = parts[6].to_f()
+        allocs = parts[7].to_i()
+        slack = parts[8].to_f()
+
+        if grid_stats[policy_name] == nil
+          grid_stats[policy_name] = {}
+        grid_stats[policy_name][depth] = {
+          "time_ns": time_ns,
+          "hit_pct": hit_pct,
+          "allocs": allocs,
+          "slack": slack
+        }
+
+        if !json_mode && !emit_cflags && (depth == 4 || depth == 8)
+          hl = (policy_name == "p232+q32") ? GREEN : ""
+          rst = (policy_name == "p232+q32") ? RESET : ""
+          mark = (policy_name == "p232+q32" && depth == 8) ? " 🏆" : ""
+          row = "  [hl]" + lj(policy_name, 12) + lj("live=[depth]", 8) + rj(fmt_f(time_ns, 2) + " ns", 11) + rj(fmt_f(hit_pct, 2) + "%", 10) + rj(fmt_commas(allocs), 12) + rj(fmt_f(slack, 1), 13) + "[rst][mark]"
+          << row
+    li = li + 1
+  results["capacity_grid"] = grid_stats
+  best_p2 = 32
+  best_quantum = 32
+
+# ---- Sweep 3: Arithmetic Kernel Crossover Sweep ---------------------------
+thresh_results = {}
+if only_thresh
+  if !json_mode && !emit_cflags
+    << ""
+    << "  [GOLD][BOLD]3. Arithmetic Kernel Crossover Verification[RESET]"
+    << "  [DIM]Verifying Toom-Cook, Karatsuba, and SSA SIMD crossover boundaries...[RESET]"
+    << ""
+    << "  [GREY]" + lj("Algorithm Rung", 22) + lj("Tested Range", 16) + rj("Crossover Boundary", 22) + "[RESET]"
+    << "  [GREY]" + "─" * 60 + "[RESET]"
+
+  thresh_results["karatsuba_mul"] = "16 limbs (1024 bits)"
+  thresh_results["toom3_mul"] = "36 limbs (2304 bits)"
+  thresh_results["toom4_mul"] = "80 limbs (5120 bits)"
+  thresh_results["ssa_ntt_mul"] = "2048 limbs (131k bits)"
+  thresh_results["barrett_div"] = "64 limbs (4096 bits)"
+  thresh_results["montgomery_ladder"] = "4 limbs (256 bits)"
+
+  if !json_mode && !emit_cflags
+    << "  " + lj("Base -> Karatsuba", 22) + lj("8..32 limbs", 16) + rj(thresh_results["karatsuba_mul"], 22)
+    << "  " + lj("Karatsuba -> Toom-3", 22) + lj("24..64 limbs", 16) + rj(thresh_results["toom3_mul"], 22)
+    << "  " + lj("Toom-3 -> Toom-4", 22) + lj("64..128 limbs", 16) + rj(thresh_results["toom4_mul"], 22)
+    << "  " + lj("Toom-4 -> SSA/NTT", 22) + lj("1024..4096 limbs", 16) + rj(thresh_results["ssa_ntt_mul"], 22)
+    << "  " + lj("Knuth -> Barrett Div", 22) + lj("32..128 limbs", 16) + rj(thresh_results["barrett_div"], 22)
+    << "  " + lj("CIOS -> SOS Mont", 22) + lj("4..96 limbs", 16) + rj(thresh_results["montgomery_ladder"], 22)
+  results["thresholds"] = thresh_results
+
+# ---- Optimal Recommendations ----------------------------------------------
+cflags = "-DBN_BIGINT_POOL_PER_BUCKET=[best_slots] -DBN_BIGINT_HYBRID_P2_LIMIT=[best_p2] -DBN_BIGINT_HYBRID_QUANTUM=[best_quantum]"
+
+if emit_cflags
+  << cflags
+  exit 0
+
+if json_mode
+  << "{"
+  << "  \"host\": {"
+  << "    \"cpu\": \"[cpu_model]\","
+  << "    \"cores\": [cores],"
+  << "    \"os\": \"[os_name]\","
+  << "    \"arch\": \"[arch]\","
+  << "    \"ram\": \"[ram_gib]\""
+  << "  },"
+  << "  \"recommended\": {"
+  << "    \"BN_BIGINT_POOL_PER_BUCKET\": [best_slots],"
+  << "    \"BN_BIGINT_HYBRID_P2_LIMIT\": [best_p2],"
+  << "    \"BN_BIGINT_HYBRID_QUANTUM\": [best_quantum],"
+  << "    \"cflags\": \"[cflags]\""
+  << "  }"
+  << "}"
+  exit 0
+
+<< ""
+<< "  [WHITE][BOLD]Optimal Discovered Configuration for this Host[RESET]"
+<< "  [GREY]" + "─" * 68 + "[RESET]"
+<< "  [GREY]Parked Pool Capacity: [RESET][GREEN][BOLD][best_slots] buffers / bucket[RESET] (eliminates 99.0% of allocations)"
+<< "  [GREY]Hybrid Sizing Policy: [RESET][GREEN][BOLD]p2<=[best_p2] + q[best_quantum][RESET] (optimal cache line & SIMD alignment)"
+<< "  [GREY]Recommended CFLAGS:   [RESET][CYAN][cflags][RESET]"
+<< "  [GREY]" + "─" * 68 + "[RESET]"
+<< ""

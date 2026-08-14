@@ -207,6 +207,43 @@ case "$1" in
     done
     exec "$COMPILER" run "$bench_cmd" "${bench_args[@]}"
     ;;
+  tuneup)
+    shift
+    if [ ! -x "$COMPILER" ]; then
+      echo "tungsten tuneup: build the compiler first — bin/tungsten build" >&2
+      exit 1
+    fi
+    tuneup_cmd="$ROOT/bin/commands/tuneup.w"
+    tuneup_args=()
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --quick)      export TUNEUP_QUICK=1 ;;
+        --deep)       export TUNEUP_DEEP=1 ;;
+        --slots)      export TUNEUP_SLOTS=1 ;;
+        --capacity)   export TUNEUP_CAPACITY=1 ;;
+        --thresholds) export TUNEUP_THRESHOLDS=1 ;;
+        --emit-cflags) export TUNEUP_EMIT_CFLAGS=1 ;;
+        --json)       export TUNEUP_JSON=1 ;;
+        -h|--help)
+          echo "Usage: tungsten tuneup [--quick] [--deep] [--slots] [--capacity] [--thresholds] [--emit-cflags] [--json]"
+          echo
+          echo "  Sweep runtime & memory parameters to discover optimal settings"
+          echo "  for the local host machine, CPU architecture, and cache hierarchy."
+          echo
+          echo "  --quick         run fast calibration sweeps (~30k requests per trial)"
+          echo "  --deep          run thorough multi-pass sweeps (~500k requests, 5 runs)"
+          echo "  --slots         sweep thread-local parked buffer capacity (1..8 slots/bucket)"
+          echo "  --capacity      sweep result-buffer capacity quanta and power-of-two boundaries"
+          echo "  --thresholds    sweep arithmetic kernel crossover thresholds"
+          echo "  --emit-cflags   print recommended -D compiler flags for optimal build"
+          echo "  --json          output machine-readable results as JSON"
+          exit 0 ;;
+        *)            tuneup_args+=("$1") ;;
+      esac
+      shift
+    done
+    exec "$COMPILER" run "$tuneup_cmd" "${tuneup_args[@]}"
+    ;;
 esac
 
 # --fast-math / --no-fast-math: compile-time choice for `if FAST_MATH`

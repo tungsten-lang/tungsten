@@ -441,37 +441,26 @@ static inline int w_is_double(WValue v) {
 static inline int w_is_nan(WValue v)       { return v == W_BIASED_NAN; }
 
 static inline int w_is_int(WValue v)       { return (v & W_TAG_MASK) == W_TAG_INT; }
+static inline int w_both_ints(WValue a, WValue b) {
+    return (((a ^ W_TAG_INT) | (b ^ W_TAG_INT)) & W_TAG_MASK) == 0;
+}
 static inline int w_is_instant(WValue v)   { return (v & W_TAG_MASK) == W_TAG_INSTANT; }
 static inline int w_is_simd2d(WValue v)    { return (v & W_TAG_MASK) == W_TAG_SIMD2D; }
 static inline int w_is_simd3d(WValue v)    { return (v & W_TAG_MASK) == W_TAG_SIMD3D; }
 static inline int w_is_sockaddr(WValue v)  { return (v & W_TAG_MASK) == W_TAG_SOCKADDR; }
 static inline uint8_t w_simd2d_subtag(WValue v) { return (uint8_t)((v >> 44) & 0xFULL); }
-static inline int w_is_char(WValue v) {
-    return (v & W_TAG_MASK) == W_TAG_CHAR && ((v >> 46) & 0x3) == 3;  /* CHAR subtype */
-}
-static inline int w_is_token(WValue v) {
-    return (v & W_TAG_MASK) == W_TAG_CHAR && ((v >> 46) & 0x3) == 0;  /* TOKEN subtype */
-}
-static inline int w_is_lexchar(WValue v) {
-    return (v & W_TAG_MASK) == W_TAG_CHAR && ((v >> 46) & 0x3) == 1;  /* LEXCHAR subtype */
-}
-static inline int w_is_slice(WValue v) {
-    return (v & W_TAG_MASK) == W_TAG_CHAR && ((v >> 46) & 0x3) == 2;  /* SLICE subtype */
-}
+static inline int w_is_char(WValue v)      { return (v & 0xFFFFC00000000000ULL) == (W_TAG_CHAR | (3ULL << 46)); }
+static inline int w_is_token(WValue v)     { return (v & 0xFFFFC00000000000ULL) == (W_TAG_CHAR | (0ULL << 46)); }
+static inline int w_is_lexchar(WValue v)   { return (v & 0xFFFFC00000000000ULL) == (W_TAG_CHAR | (1ULL << 46)); }
+static inline int w_is_slice(WValue v)     { return (v & 0xFFFFC00000000000ULL) == (W_TAG_CHAR | (2ULL << 46)); }
 
 /* Numeric tag (0xFFFD) — holds decimal, currency, quantity via 2-bit subtype */
 static inline int w_is_numeric_tag(WValue v) { return (v & W_TAG_MASK) == W_TAG_DECIMAL; }
 static inline int w_numeric_subtype(WValue v) { return (int)((v >> 46) & 0x3); }
 
-static inline int w_is_decimal(WValue v) {
-    return w_is_numeric_tag(v) && w_numeric_subtype(v) == W_NUMERIC_DECIMAL;
-}
-static inline int w_is_currency(WValue v) {
-    return w_is_numeric_tag(v) && w_numeric_subtype(v) == W_NUMERIC_CURRENCY;
-}
-static inline int w_is_quantity(WValue v) {
-    return w_is_numeric_tag(v) && w_numeric_subtype(v) == W_NUMERIC_QUANTITY;
-}
+static inline int w_is_decimal(WValue v)   { return (v & 0xFFFFC00000000000ULL) == (W_TAG_DECIMAL | ((uint64_t)W_NUMERIC_DECIMAL << 46)); }
+static inline int w_is_currency(WValue v)  { return (v & 0xFFFFC00000000000ULL) == (W_TAG_DECIMAL | ((uint64_t)W_NUMERIC_CURRENCY << 46)); }
+static inline int w_is_quantity(WValue v)  { return (v & 0xFFFFC00000000000ULL) == (W_TAG_DECIMAL | ((uint64_t)W_NUMERIC_QUANTITY << 46)); }
 
 /* Duration (0xFFFF) */
 static inline int w_is_duration(WValue v) { return (v & W_TAG_MASK) == W_TAG_DURATION; }
@@ -481,34 +470,34 @@ static inline int w_duration_mode(WValue v) { return (int)((v >> 47) & 1); }
 static inline int w_is_packed(WValue v)      { return (v & W_TAG_MASK) == W_TAG_PACKED; }
 static inline int w_packed_subtype(WValue v) { return (int)((v >> 45) & 0x7); }
 
-static inline int w_is_color(WValue v)       { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_COLOR; }
-static inline int w_is_complex(WValue v)     { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_COMPLEX; }
-static inline int w_is_rational(WValue v)    { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_RATIONAL; }
-static inline int w_is_node(WValue v)        { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_NODE; }
-static inline int w_is_date(WValue v)        { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_DATE; }
-static inline int w_is_ipv4(WValue v)        { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_IPV4; }
+static inline int w_is_color(WValue v)       { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_COLOR << 45)); }
+static inline int w_is_complex(WValue v)     { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_COMPLEX << 45)); }
+static inline int w_is_rational(WValue v)    { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_RATIONAL << 45)); }
+static inline int w_is_node(WValue v)        { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_NODE << 45)); }
+static inline int w_is_date(WValue v)        { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_DATE << 45)); }
+static inline int w_is_ipv4(WValue v)        { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_IPV4 << 45)); }
 /* Location excludes mode 11: that mode hosts the immediate Range encoding
  * (see the Range section below w_unbox_location_offset), which must never
  * satisfy Location dispatch. */
-static inline int w_is_location(WValue v)    { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_LOCATION && ((v >> 43) & 0x3) != 0x3; }
-static inline int w_is_body(WValue v)        { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_BODY; }
+static inline int w_is_location(WValue v)    { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_LOCATION << 45)) && ((v >> 43) & 0x3) != 0x3; }
+static inline int w_is_body(WValue v)        { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_BODY << 45)); }
 
 /* String/symbol: both under 0xFFF9 tag, distinguished by bit 0 */
 static inline int w_is_stringy(WValue v)     { return (v & W_TAG_MASK) == W_TAG_STRINGSYM; }
-static inline int w_is_string(WValue v)      { return (v & W_TAG_MASK) == W_TAG_STRINGSYM && !(v & 1); }
-static inline int w_is_symbol(WValue v)      { return (v & W_TAG_MASK) == W_TAG_STRINGSYM && (v & 1); }
+static inline int w_is_string(WValue v)      { return (v & (W_TAG_MASK | 1)) == W_TAG_STRINGSYM; }
+static inline int w_is_symbol(WValue v)      { return (v & (W_TAG_MASK | 1)) == (W_TAG_STRINGSYM | 1); }
 
 static inline int w_is_inline(WValue v)      { return w_is_stringy(v) && ((v >> 1) & 7) <= 5; }
-static inline int w_is_slab(WValue v)        { return w_is_stringy(v) && ((v >> 1) & 7) == 6; }
+static inline int w_is_slab(WValue v)        { return (v & (W_TAG_MASK | 0xEULL)) == (W_TAG_STRINGSYM | (6 << 1)); }
 
 static inline int w_is_inline_str(WValue v)  { return w_is_string(v) && ((v >> 1) & 7) <= 5; }
 static inline int w_is_inline_sym(WValue v)  { return w_is_symbol(v) && ((v >> 1) & 7) <= 5; }
 
-static inline int w_is_slab_str(WValue v)    { return w_is_string(v) && ((v >> 1) & 7) == 6; }
-static inline int w_is_slab_sym(WValue v)    { return w_is_symbol(v) && ((v >> 1) & 7) == 6; }
+static inline int w_is_slab_str(WValue v)    { return (v & (W_TAG_MASK | 0xFULL)) == (W_TAG_STRINGSYM | (6 << 1)); }
+static inline int w_is_slab_sym(WValue v)    { return (v & (W_TAG_MASK | 0xFULL)) == (W_TAG_STRINGSYM | (6 << 1) | 1); }
 
-static inline int w_is_heap_str(WValue v)    { return w_is_string(v) && ((v >> 1) & 7) == 7; }
-static inline int w_is_heap_sym(WValue v)    { return w_is_symbol(v) && ((v >> 1) & 7) == 7; }
+static inline int w_is_heap_str(WValue v)    { return (v & (W_TAG_MASK | 0xFULL)) == (W_TAG_STRINGSYM | (7 << 1)); }
+static inline int w_is_heap_sym(WValue v)    { return (v & (W_TAG_MASK | 0xFULL)) == (W_TAG_STRINGSYM | (7 << 1) | 1); }
 
 /* Object space: heap pointers with sub-tags in low nibble.
    Excludes singletons (0-3) and sentinels (4-0xF). */

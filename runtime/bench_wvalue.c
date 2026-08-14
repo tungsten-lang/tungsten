@@ -499,6 +499,85 @@ static void bench_is_integer_any_singlemask(int64_t n) {
     }
 }
 
+/* ---- 5 Optimization Benchmark Targets ---- */
+
+/* 1. Binary arithmetic w_add on integers */
+static void bench_w_add_integers(int64_t n) {
+    WValue a = w_box_int(12345);
+    WValue b = w_box_int(67890);
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) {
+        acc = w_add(a, b);
+    }
+}
+
+/* 2. Subtype classification 4K scan */
+static void bench_subtype_checks(int64_t n) {
+    volatile int64_t acc = 0;
+    for (int64_t iter = 0; iter < n; iter++) {
+        int64_t t = 0;
+        for (int i = 0; i < HEAVY_LEN; i++) {
+            WValue v = heavy_values[i];
+            t += w_is_string(v) + w_is_decimal(v) + w_is_char(v) + w_is_rational(v);
+        }
+        acc = t;
+    }
+}
+
+/* 3. w_dispatch_key scan across tags */
+static void bench_dispatch_key_scan(int64_t n) {
+    volatile uint64_t acc = 0;
+    for (int64_t iter = 0; iter < n; iter++) {
+        uint64_t t = 0;
+        for (int i = 0; i < HEAVY_LEN; i++) {
+            t += w_dispatch_key(heavy_values[i]);
+        }
+        acc = t;
+    }
+}
+
+/* 4. Small hash lookup (4-key & 8-key kwargs) */
+static void bench_small_hash_4keys(int64_t n) {
+    WValue h = w_hash_new();
+    WValue k1 = w_symbol("foo");
+    WValue k2 = w_symbol("bar");
+    WValue k3 = w_symbol("baz");
+    WValue k4 = w_symbol("qux");
+    w_hash_set(h, k1, w_box_int(1));
+    w_hash_set(h, k2, w_box_int(2));
+    w_hash_set(h, k3, w_box_int(3));
+    w_hash_set(h, k4, w_box_int(4));
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) {
+        acc = w_hash_get(h, k3);
+    }
+}
+
+static void bench_small_hash_8keys(int64_t n) {
+    WValue h = w_hash_new();
+    WValue keys[8];
+    char buf[16];
+    for (int i = 0; i < 8; i++) {
+        snprintf(buf, sizeof(buf), "key_%d", i);
+        keys[i] = w_symbol(buf);
+        w_hash_set(h, keys[i], w_box_int(i * 10));
+    }
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) {
+        acc = w_hash_get(h, keys[6]);
+    }
+}
+
+/* 5. Inline string equality */
+static void bench_inline_string_eq(int64_t n) {
+    WValue s1 = w_string("hello");
+    WValue s2 = w_string("hello");
+    volatile WValue acc = W_FALSE;
+    for (int64_t i = 0; i < n; i++) {
+        acc = w_eq(s1, s2);
+    }
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -551,6 +630,14 @@ int main(void) {
     printf("\n  --- Integer classification (mixed types) ---\n");
     bench("4K scan: 2-branch is_int || is_bigint", bench_is_integer_any_twobranch,  100000);
     bench("4K scan: 1-mask is_integer_any (0xFFFA|0xFFFB)", bench_is_integer_any_singlemask, 100000);
+
+    printf("\n  --- Optimization Targets (Before/After) ---\n");
+    bench("1. w_add(int, int)",              bench_w_add_integers,       FAST);
+    bench("2. 4K subtype checks scan",       bench_subtype_checks,       100000);
+    bench("3. 4K w_dispatch_key scan",       bench_dispatch_key_scan,    100000);
+    bench("4a. Small Hash get (4 keys)",     bench_small_hash_4keys,     SLOW);
+    bench("4b. Small Hash get (8 keys)",     bench_small_hash_8keys,     SLOW);
+    bench("5. w_eq inline string",           bench_inline_string_eq,     FAST);
 
     printf("\n  Done.\n\n");
     return 0;

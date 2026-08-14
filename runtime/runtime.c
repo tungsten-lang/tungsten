@@ -36646,9 +36646,9 @@ WValue w_add(WValue a, WValue b) {
      * classes, so hoisting the int arms past arrays/strbuf cannot change
      * which arm fires; arrays and strbuf pay two extra compares against
      * operations orders of magnitude heavier. */
-    if (w_is_int(a) && w_is_int(b))
+    if (w_both_ints(a, b))
         return w_box_int_checked(w_as_int(a) + w_as_int(b));
-    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+    if (w_both_integers_any(a, b)) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1) && bigint_src_shape(a, b, 0))
@@ -36774,9 +36774,9 @@ WValue w_sub(WValue a, WValue b) {
      * dates). Every earlier arm requires a non-integer tag on a side
      * these tests require integer, so hoisting cannot change which arm
      * fires. */
-    if (w_is_int(a) && w_is_int(b))
+    if (w_both_ints(a, b))
         return w_box_int_checked(w_as_int(a) - w_as_int(b));
-    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+    if (w_both_integers_any(a, b)) {
         /* Weak-linkage source routing, exactly like w_add's `+` arm. */
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
@@ -36871,13 +36871,13 @@ WValue w_mul(WValue a, WValue b) {
     /* E2(a): integer arms lead, mirroring w_add/w_sub. Every earlier arm
      * of the historical order requires a non-integer tag on a side these
      * tests require integer, so hoisting cannot change which arm fires. */
-    if (w_is_int(a) && w_is_int(b)) {
+    if (w_both_ints(a, b)) {
         __int128 r = (__int128)w_as_int(a) * w_as_int(b);
         if (r >= W_INT48_MIN && r <= W_INT48_MAX)
             return w_box_int((int64_t)r);
         return bigint_from_i128(r);
     }
-    if (w_is_integer_any(a) && w_is_integer_any(b))
+    if (w_both_integers_any(a, b))
     {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
@@ -37384,12 +37384,12 @@ WValue w_div(WValue a, WValue b) {
         if (bv == 0.0) die("division by zero");
         return w_float(as_numeric_double(a) / bv);
     }
-    if (w_is_int(a) && w_is_int(b)) {
+    if (w_both_ints(a, b)) {
         int64_t bv = w_as_int(b);
         if (bv == 0) die("division by zero");
         return w_box_int_checked(w_as_int(a) / bv);
     }
-    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+    if (w_both_integers_any(a, b)) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1) && bigint_divmod_src_shape(a, b))
@@ -37476,12 +37476,12 @@ WValue w_mod(WValue a, WValue b) {
         if (bv == 0.0) die("modulo by zero");
         return w_float(fmod(as_numeric_double(a), bv));
     }
-    if (w_is_int(a) && w_is_int(b)) {
+    if (w_both_ints(a, b)) {
         int64_t bv = w_as_int(b);
         if (bv == 0) die("modulo by zero");
         return w_box_int_checked(w_as_int(a) % bv);
     }
-    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+    if (w_both_integers_any(a, b)) {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
         if (__builtin_expect(src_off == 0, 1) && bigint_divmod_src_shape(a, b))
@@ -39770,7 +39770,7 @@ WValue w_eq(WValue a, WValue b) {
         return W_FALSE;
 
     /* Bigint equality */
-    if (w_is_integer_any(a) && w_is_integer_any(b))
+    if (w_both_integers_any(a, b))
         return w_bool(bigint_compare(a, b) == 0);
 
     /* Decimal comparison (different normalizations may have same value) */
@@ -40000,7 +40000,7 @@ static int numeric_lit_exact_double(WValue v, double *out) {
 }
 
 WValue w_eq_lit(WValue a, WValue b) {
-    if (w_is_int(a) && w_is_int(b)) return w_bool(a == b);
+    if (w_both_ints(a, b)) return w_bool(a == b);
     double d;
     if (w_is_double(a) && numeric_lit_exact_double(b, &d))
         return w_bool(w_as_double(a) == d);
@@ -40130,13 +40130,13 @@ static int decimal_mixed_compare(WValue a, WValue b, int *supported) {
 }
 
 WValue w_lt(WValue a, WValue b) {
-    if (w_is_int(a) && w_is_int(b))
+    if (w_both_ints(a, b))
         return w_bool(w_as_int(a) < w_as_int(b));
 
     /* Chars: codepoint-ordered raw compare (same tag, codepoint in high bits). */
     if (w_is_char(a) && w_is_char(b)) return w_bool(a < b);
 
-    if (w_is_integer_any(a) && w_is_integer_any(b))
+    if (w_both_integers_any(a, b))
         return w_bool(bigint_compare(a, b) < 0);
 
     if (w_is_instant(a) && w_is_instant(b))
@@ -40195,13 +40195,13 @@ static int w_array_lex_compare(WValue a, WValue b);
  * Wired as a universal method in w_method_dispatch, so it works for
  * Integer/BigInt/Float/Decimal/Char/Instant/String without a per-type IC. */
 WValue w_spaceship(WValue a, WValue b) {
-    if (w_is_int(a) && w_is_int(b)) {
+    if (w_both_ints(a, b)) {
         int64_t x = w_as_int(a), y = w_as_int(b);
         return w_int(x < y ? -1 : (x > y ? 1 : 0));
     }
     if (w_is_char(a) && w_is_char(b))
         return w_int(a < b ? -1 : (a > b ? 1 : 0));
-    if (w_is_integer_any(a) && w_is_integer_any(b)) {
+    if (w_both_integers_any(a, b)) {
         int c = bigint_compare(a, b);
         return w_int(c < 0 ? -1 : (c > 0 ? 1 : 0));
     }
@@ -40254,12 +40254,12 @@ WValue w_spaceship(WValue a, WValue b) {
 }
 
 WValue w_gt(WValue a, WValue b) {
-    if (w_is_int(a) && w_is_int(b))
+    if (w_both_ints(a, b))
         return w_bool(w_as_int(a) > w_as_int(b));
 
     if (w_is_char(a) && w_is_char(b)) return w_bool(a > b);
 
-    if (w_is_integer_any(a) && w_is_integer_any(b))
+    if (w_both_integers_any(a, b))
         return w_bool(bigint_compare(a, b) > 0);
 
     if (w_is_instant(a) && w_is_instant(b))
@@ -40305,12 +40305,12 @@ WValue w_gt(WValue a, WValue b) {
 }
 
 WValue w_lte(WValue a, WValue b) {
-    if (w_is_int(a) && w_is_int(b))
+    if (w_both_ints(a, b))
         return w_bool(w_as_int(a) <= w_as_int(b));
 
     if (w_is_char(a) && w_is_char(b)) return w_bool(a <= b);
 
-    if (w_is_integer_any(a) && w_is_integer_any(b))
+    if (w_both_integers_any(a, b))
         return w_bool(bigint_compare(a, b) <= 0);
 
     if (w_is_instant(a) && w_is_instant(b))
@@ -40356,12 +40356,12 @@ WValue w_lte(WValue a, WValue b) {
 }
 
 WValue w_gte(WValue a, WValue b) {
-    if (w_is_int(a) && w_is_int(b))
+    if (w_both_ints(a, b))
         return w_bool(w_as_int(a) >= w_as_int(b));
 
     if (w_is_char(a) && w_is_char(b)) return w_bool(a >= b);
 
-    if (w_is_integer_any(a) && w_is_integer_any(b))
+    if (w_both_integers_any(a, b))
         return w_bool(bigint_compare(a, b) >= 0);
 
     if (w_is_instant(a) && w_is_instant(b))
@@ -43904,9 +43904,9 @@ static inline int64_t w_hash_probe(WHash *hash, WValue key) {
     for (uint32_t probes = 0; probes < hash->cap; probes++) {
         int32_t d = hash->index[idx];
         if (d == W_HASH_SLOT_EMPTY) return -1;
-        if (d != W_HASH_SLOT_TOMB) {
+        if (__builtin_expect(d >= 0, 1)) {
             WValue slot_key = hash->keys[d];
-            if ((slot_key == key && key >= 0x10) || w_hash_key_eq(slot_key, key))
+            if (__builtin_expect(slot_key == key && key >= 0x10, 1) || w_hash_key_eq(slot_key, key))
                 return (int64_t)d;
         }
         idx = (idx + 1) & mask;
@@ -47533,56 +47533,40 @@ uint64_t w_dispatch_key(WValue v) {
     }
     /* BigInt's top-level tag (v4) keeps its historical dispatch key so
      * every IC, registration table, and the compiler's type_dispatch_key
-     * stay valid across the encoding move. Tested before the double
-     * catch-all: a bigint classified as 0xFF would hit the Float table.
-     * Array (v5) follows the same convention on 0xFFF4 → 0x0A. */
-    if (hi == 0xFFF2) return 0xB0u | (uint64_t)w_simd2d_subtag(v);
-    if (hi == 0xFFF3) return 0xB4u;
-    if (hi == 0xFFF4) return W_SUBTAG_ARRAY;
-    if (hi == 0xFFF6) return 0xB6u;
-    if (hi == 0xFFF8) return 0xF8u;                     /* instant */
-    if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF5, 0xFFF7 free) */
-    if (hi == 0xFFFB) return W_SUBTAG_BIGINT;           /* bigint */
-    if (hi == 0xFFFD) {
-        if (is_currency_any(v)) return 0xC0u;
-        if (is_quantity_any(v)) return 0xC1u;
-        return 0xFDu;
-    }
-    /* W_TAG_PACKED (hi=0xFFFE) holds 8 packed-value subtypes (color,
-     * complex, rational, NODE, date, ipv4, …) that need distinct
-     * dispatch keys so each can register its own class. Map subtype
-     * N → 0xE0 | N (range 0xE0..0xE7 — currently unused by other
-     * type tags, which sit at 0xF9..0xFC). */
-    if (hi == 0xFFFE) {
-        uint64_t subtype = (v >> 45) & 0x7;
-        /* W_PACKED_NODE (subtype 3): dispatch per-AST-kind so each kind
-         * routes to its own specialized class (Call, Var, …) rather than
-         * collapsing every node to a single Node class. The kind subtag
-         * (bits 36-43) is folded into a wide key in the 0x4_0000_0000
-         * range — distinct from instances (0x1…), classes (0x2…), and the
-         * flat 8-bit tag/subtag keys — so the inline cache distinguishes
-         * Call from Var. The node-kind dispatch path resolves this key
-         * via g_node_kind_class[kind] (see w_method_dispatch). */
-        if (subtype == W_PACKED_NODE) {
-            return 0x400000000ULL | (uint64_t)w_node_kind(v);
+     * stay valid across the encoding move.
+     * Array (v5) follows the same convention on 0xFFF4 → 0x0A.
+     * Structured switch over 0xFFF0..0xFFFF compiles directly to a jump table. */
+    switch (hi) {
+        case 0xFFF2: return 0xB0u | (uint64_t)w_simd2d_subtag(v);
+        case 0xFFF3: return 0xB4u;
+        case 0xFFF4: return W_SUBTAG_ARRAY;
+        case 0xFFF6: return 0xB6u;
+        case 0xFFF8: return 0xF8u;                     /* instant */
+        case 0xFFF9: return 0xF9u;                     /* string / symbol */
+        case 0xFFFA: return 0xFAu;                     /* int */
+        case 0xFFFB: return W_SUBTAG_BIGINT;           /* bigint */
+        case 0xFFFC: return 0xD0u | (uint64_t)((v >> 46) & 0x3); /* lexical / char subtypes */
+        case 0xFFFD:
+            if (is_currency_any(v)) return 0xC0u;
+            if (is_quantity_any(v)) return 0xC1u;
+            return 0xFDu;
+        case 0xFFFE: {
+            uint64_t subtype = (v >> 45) & 0x7;
+            if (subtype == W_PACKED_NODE)
+                return 0x400000000ULL | (uint64_t)w_node_kind(v);
+            if (subtype == W_PACKED_LOCATION && ((v >> 43) & 0x3) == 0x3)
+                return W_SUBTAG_RANGE;
+            return 0xE0u | subtype;
         }
-        /* Immediate Range rides Location's mode space (mode 11) but
-         * dispatches as Range (W_SUBTAG_RANGE), never as Location —
-         * the BigInt precedent: the value's encoding moved, its
-         * dispatch key stays the type's own. */
-        if (subtype == W_PACKED_LOCATION && ((v >> 43) & 0x3) == 0x3)
-            return W_SUBTAG_RANGE;
-        return 0xE0u | subtype;
+        case 0xFFFF: return 0xFFu;                     /* duration */
+        case 0xFFF0:
+        case 0xFFF1:
+        case 0xFFF5:
+        case 0xFFF7: return 0xFFu;                     /* double */
+        default: break;
     }
-    /* W_TAG_CHAR (hi=0xFFFC) holds 4 lexical subtypes (Token, LexChar,
-     * Slice, Char) that need distinct dispatch keys for the same reason.
-     * Map subtype N (bits 47..46) → 0xD0 | N (range 0xD0..0xD3 — free
-     * range, no overlap with the 0xE0..0xE7 packed range or the
-     * 0xF9..0xFF tagged range). */
-    if (hi == 0xFFFC) {
-        return 0xD0u | (uint64_t)((v >> 46) & 0x3);
-    }
-    return (uint64_t)(hi & 0xFF);                       /* tagged: int=0xFA, string=0xF9 */
+    if (hi < 0xFFF0) return 0xFFu;                     /* double */
+    return (uint64_t)(hi & 0xFF);                      /* fallback */
 }
 
 /* ---- Type class table: dispatch key → class_id for Tungsten-defined methods ---- */

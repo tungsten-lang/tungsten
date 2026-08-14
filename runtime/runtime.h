@@ -2055,6 +2055,9 @@ static inline int w_is_bigint(WValue v) {
 static inline int w_is_integer_any(WValue v) {
     return (v & 0xFFFE000000000000ULL) == 0xFFFA000000000000ULL;
 }
+static inline int w_both_integers_any(WValue a, WValue b) {
+    return (((a ^ W_TAG_INT) | (b ^ W_TAG_INT)) & 0xFFFE000000000000ULL) == 0;
+}
 
 /* ---- StringBuffer (mutable growable byte buffer) ----
  * Promoted to W_SUBTAG_STRBUF (subtag 0xB). Type byte removed

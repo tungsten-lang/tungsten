@@ -47533,40 +47533,44 @@ uint64_t w_dispatch_key(WValue v) {
     }
     /* BigInt's top-level tag (v4) keeps its historical dispatch key so
      * every IC, registration table, and the compiler's type_dispatch_key
-     * stay valid across the encoding move.
-     * Array (v5) follows the same convention on 0xFFF4 → 0x0A.
-     * Structured switch over 0xFFF0..0xFFFF compiles directly to a jump table. */
-    switch (hi) {
-        case 0xFFF2: return 0xB0u | (uint64_t)w_simd2d_subtag(v);
-        case 0xFFF3: return 0xB4u;
-        case 0xFFF4: return W_SUBTAG_ARRAY;
-        case 0xFFF6: return 0xB6u;
-        case 0xFFF8: return 0xF8u;                     /* instant */
-        case 0xFFF9: return 0xF9u;                     /* string / symbol */
-        case 0xFFFA: return 0xFAu;                     /* int */
-        case 0xFFFB: return W_SUBTAG_BIGINT;           /* bigint */
-        case 0xFFFC: return 0xD0u | (uint64_t)((v >> 46) & 0x3); /* lexical / char subtypes */
-        case 0xFFFD:
-            if (is_currency_any(v)) return 0xC0u;
-            if (is_quantity_any(v)) return 0xC1u;
-            return 0xFDu;
-        case 0xFFFE: {
-            uint64_t subtype = (v >> 45) & 0x7;
-            if (subtype == W_PACKED_NODE)
-                return 0x400000000ULL | (uint64_t)w_node_kind(v);
-            if (subtype == W_PACKED_LOCATION && ((v >> 43) & 0x3) == 0x3)
-                return W_SUBTAG_RANGE;
-            return 0xE0u | subtype;
-        }
-        case 0xFFFF: return 0xFFu;                     /* duration */
-        case 0xFFF0:
-        case 0xFFF1:
-        case 0xFFF5:
-        case 0xFFF7: return 0xFFu;                     /* double */
-        default: break;
+     * stay valid across the encoding move. Tested before the double
+     * catch-all: a bigint classified as 0xFF would hit the Float table.
+     * Array (v5) follows the same convention on 0xFFF4 → 0x0A. */
+    if (hi == 0xFFF2) return 0xB0u | (uint64_t)w_simd2d_subtag(v);
+    if (hi == 0xFFF3) return 0xB4u;
+    if (hi == 0xFFF4) return W_SUBTAG_ARRAY;
+    if (hi == 0xFFF6) return 0xB6u;
+    if (hi == 0xFFF8) return 0xF8u;                     /* instant */
+    if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF5, 0xFFF7 free) */
+    if (hi == 0xFFFB) return W_SUBTAG_BIGINT;           /* bigint */
+    if (hi == 0xFFFD) {
+        if (is_currency_any(v)) return 0xC0u;
+        if (is_quantity_any(v)) return 0xC1u;
+        return 0xFDu;
     }
-    if (hi < 0xFFF0) return 0xFFu;                     /* double */
-    return (uint64_t)(hi & 0xFF);                      /* fallback */
+    /* W_TAG_PACKED (hi=0xFFFE) holds 8 packed-value subtypes (color,
+     * complex, rational, NODE, date, ipv4, …) that need distinct
+     * dispatch keys so each can register its own class. Map subtype
+     * N → 0xE0 | N (range 0xE0..0xE7 — currently unused by other
+     * type tags, which sit at 0xF9..0xFC). */
+    if (hi == 0xFFFE) {
+        uint64_t subtype = (v >> 45) & 0x7;
+        if (subtype == W_PACKED_NODE) {
+            return 0x400000000ULL | (uint64_t)w_node_kind(v);
+        }
+        if (subtype == W_PACKED_LOCATION && ((v >> 43) & 0x3) == 0x3)
+            return W_SUBTAG_RANGE;
+        return 0xE0u | subtype;
+    }
+    /* W_TAG_CHAR (hi=0xFFFC) holds 4 lexical subtypes (Token, LexChar,
+     * Slice, Char) that need distinct dispatch keys for the same reason.
+     * Map subtype N (bits 47..46) → 0xD0 | N (range 0xD0..0xD3 — free
+     * range, no overlap with the 0xE0..0xE7 packed range or the
+     * 0xF9..0xFF tagged range). */
+    if (hi == 0xFFFC) {
+        return 0xD0u | (uint64_t)((v >> 46) & 0x3);
+    }
+    return (uint64_t)(hi & 0xFF);                       /* tagged: int=0xFA, string=0xF9 */
 }
 
 /* ---- Type class table: dispatch key → class_id for Tungsten-defined methods ---- */

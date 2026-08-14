@@ -511,6 +511,15 @@ static void bench_w_add_integers(int64_t n) {
     }
 }
 
+static void bench_w_add_fast_integers(int64_t n) {
+    WValue a = w_box_int(12345);
+    WValue b = w_box_int(67890);
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) {
+        acc = w_add_fast(a, b);
+    }
+}
+
 /* 2. Subtype classification 4K scan */
 static void bench_subtype_checks(int64_t n) {
     volatile int64_t acc = 0;
@@ -632,7 +641,8 @@ int main(void) {
     bench("4K scan: 1-mask is_integer_any (0xFFFA|0xFFFB)", bench_is_integer_any_singlemask, 100000);
 
     printf("\n  --- Optimization Targets (Before/After) ---\n");
-    bench("1. w_add(int, int)",              bench_w_add_integers,       FAST);
+    bench("1a. w_add(int, int)",             bench_w_add_integers,       FAST);
+    bench("1b. w_add_fast(int, int) inline", bench_w_add_fast_integers,  FAST);
     bench("2. 4K subtype checks scan",       bench_subtype_checks,       100000);
     bench("3. 4K w_dispatch_key scan",       bench_dispatch_key_scan,    100000);
     bench("4a. Small Hash get (4 keys)",     bench_small_hash_4keys,     SLOW);

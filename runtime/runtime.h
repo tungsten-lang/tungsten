@@ -664,6 +664,30 @@ WValue w_instant_now(void);
 WValue w_add(WValue a, WValue b);
 WValue w_sub(WValue a, WValue b);
 WValue w_mul(WValue a, WValue b);
+
+static inline WValue w_add_fast(WValue a, WValue b) {
+    if (w_both_ints(a, b)) {
+        int64_t sum = w_as_int(a) + w_as_int(b);
+        if (sum >= W_INT48_MIN && sum <= W_INT48_MAX) return w_box_int(sum);
+    }
+    return w_add(a, b);
+}
+
+static inline WValue w_sub_fast(WValue a, WValue b) {
+    if (w_both_ints(a, b)) {
+        int64_t diff = w_as_int(a) - w_as_int(b);
+        if (diff >= W_INT48_MIN && diff <= W_INT48_MAX) return w_box_int(diff);
+    }
+    return w_sub(a, b);
+}
+
+static inline WValue w_mul_fast(WValue a, WValue b) {
+    if (w_both_ints(a, b)) {
+        __int128 prod = (__int128)w_as_int(a) * w_as_int(b);
+        if (prod >= W_INT48_MIN && prod <= W_INT48_MAX) return w_box_int((int64_t)prod);
+    }
+    return w_mul(a, b);
+}
 WValue w_pow(WValue base, WValue exp);
 WValue w_div(WValue a, WValue b);
 WValue w_mod(WValue a, WValue b);

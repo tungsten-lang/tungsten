@@ -433,7 +433,7 @@ typedef WValue TcValue;
 #define TC_TAG_HEAP_INT 0xBU  // stage-0-private object nibble for any int
                               // that overflows W_TAG_INT's 48-bit payload.
                               // (Historically 'matched the bigint nibble';
-                              // the runtime's bigint now rides the 0xFFF8
+                              // the runtime's bigint now rides the 0xFFFB
                               // top-level tag and 0xB is W_SUBTAG_STRBUF —
                               // stage-0 values never reach the runtime, so
                               // no collision either way.)

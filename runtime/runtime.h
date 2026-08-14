@@ -657,7 +657,7 @@ int64_t w_loc_col_for_offset(int64_t file_id, int64_t offset);
 int64_t w_unbox_location_file_id_extern(WValue value);
 int64_t w_unbox_location_offset_extern(WValue value);
 
-/* ---- Instant (dedicated 0xFFFB tag) ---- */
+/* ---- Instant (dedicated 0xFFF8 tag) ---- */
 WValue w_instant_now(void);
 
 /* ---- Arithmetic ---- */

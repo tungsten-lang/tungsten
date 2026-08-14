@@ -55,7 +55,7 @@ summary from the source header, and a link to the source.
 | `HTTPResponse` | `+ HTTPResponse` | HTTPResponse — immutable buffered HTTP response. | [`core/http.w`](../core/http.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
-| `Instant` | `+ Instant` | Instant — millisecond-precision timestamp (tag 0xFFFB). | [`core/instant.w`](../core/instant.w) |
+| `Instant` | `+ Instant` | Instant — millisecond-precision timestamp (tag 0xFFF8). | [`core/instant.w`](../core/instant.w) |
 | `Integer` | `+ Integer < Real` | Integer — the generic, representation-independent integer family. | [`core/integer.w`](../core/integer.w) |
 | `JSON` | `+ JSON` | JSON encoder/decoder — interface and default implementation. | [`core/json.w`](../core/json.w) |
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |

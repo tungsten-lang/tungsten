@@ -5122,7 +5122,7 @@ static double bench_gmp_boxed_mul_rect_churn(
 
 /*
  * Capacity-policy experiment for the immutable-result recycler.  It uses the
- * production pool shape (15 logarithmic buckets, two buffers per bucket,
+ * production pool shape (15 logarithmic buckets, four buffers per bucket,
  * smallest sufficient fit) and the same ownership overlap as BigInt
  * operations: allocate the next result while the previous result is still
  * live, then give the previous buffer back.

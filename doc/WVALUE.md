@@ -49,7 +49,7 @@ Truthiness: `v > 1` (unsigned). Only nil and false are falsey.
 └────────────────┴────────────────────────────────────────┴───────┘
 ```
 
-Sub-tags: 0=generic 1=atomic 2=free(was bigint, now tag 0xFFF8) 4=struct
+Sub-tags: 0=generic 1=atomic 2=free(was bigint, now tag 0xFFFB) 4=struct
 5=hash 6=closure 7=regex 8=range 9=small-array A=socket B=string-buffer C=class D=uuid
 E=regex-match F=domain
 

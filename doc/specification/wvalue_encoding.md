@@ -30,7 +30,7 @@ typedef uint64_t WValue;
 3. [Biased Doubles](#3-biased-doubles)
 4. [String / Symbol (0xFFF9)](#4-string--symbol-0xfff9)
 5. [Int (0xFFFA)](#5-int-0xfffa)
-6. [Instant (0xFFFB)](#6-instant-0xfffb)
+6. [Instant (0xFFF8)](#6-instant-0xfff8)
 7. [Lexical + Char (0xFFFC)](#7-lexical--char-0xfffc)
 8. [Numeric (0xFFFD)](#8-numeric-0xfffd)
 9. [Packed Types (0xFFFE)](#9-packed-types-0xfffe)
@@ -109,7 +109,7 @@ All heap-allocated objects use 16-byte-aligned pointers. The low 4 bits
 | 0x1 (ptr=0) | false | (singleton, not a pointer) |
 | 0x1 (ptr≠0) | atomic | atomic integer object |
 | 0x2 (ptr=0) | true | (singleton, not a pointer) |
-| 0x2 (ptr≠0) | free | bigint moved to top-level tag `0xFFF8` in v4 |
+| 0x2 (ptr≠0) | free | bigint moved to top-level tag `0xFFFB` in v4 |
 | 0x3 (ptr=0) | undef | (singleton, not a pointer) |
 | 0x3 (ptr≠0) | free | encoded values moved to the generic bucket |
 | 0x4 | instance | user-defined class instance |
@@ -119,7 +119,7 @@ All heap-allocated objects use 16-byte-aligned pointers. The low 4 bits
 | 0x8 | range | range object |
 | 0x9 | small array | fixed-capacity inline array |
 | 0xA | socket | network socket handle (WSocket*) |
-| 0xB | string buffer | mutable string builder (bigint moved to top-level tag 0xFFF8 in v4) |
+| 0xB | string buffer | mutable string builder (bigint moved to top-level tag 0xFFFB in v4) |
 | 0xC | class | class metaobject |
 | 0xD | uuid | 128-bit UUID |
 | 0xE | regex match | immutable structured capture snapshot |
@@ -807,7 +807,7 @@ Type checks are designed for minimal instruction count:
 // Object sub-tags
 #define W_SUBTAG_GENERIC  0
 #define W_SUBTAG_ATOMIC   1
-#define W_SUBTAG_BIGINT   2   /* v4: dispatch key only; the value rides top-level tag 0xFFF8 */
+#define W_SUBTAG_BIGINT   2   /* v4: dispatch key only; the value rides top-level tag 0xFFFB */
 #define W_SUBTAG_INSTANCE 4
 #define W_SUBTAG_HASH     5
 #define W_SUBTAG_CLOSURE  6

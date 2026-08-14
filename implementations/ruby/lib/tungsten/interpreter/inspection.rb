@@ -6,7 +6,7 @@ module Tungsten
     WOBJECT_COLLECTION_PREVIEW_LIMIT = 6
     WOBJECT_FIELD_VALUE_LIMIT = 120
 
-    # v4: subtag 2 freed (BigInt promoted to the top-level 0xFFF8 tag).
+    # v4: subtag 2 freed (BigInt promoted to the top-level 0xFFFB tag).
     W_SUBTAG_NAMES = {
       0x0 => "generic object",
       0x1 => "atomic",

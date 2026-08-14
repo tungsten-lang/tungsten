@@ -39,9 +39,8 @@ object.
 ### The v4 heap encoding: sign in the box, magnitude on the heap
 
 Heap bigints originally kept sign in the heap header. The **v4 redesign**
-(2026-08-02) moved it into the box: BigInt owns the top-level tag **0xFFF8**
-(freed by tightening the biased-double ceiling to the exact −inf+bias — NaNs
-canonicalize before biasing, so 0xFFF2–0xFFF8 were recoverable tag slack), and
+(2026-08-02) moved it into the box: BigInt owns the top-level tag **0xFFFB**
+(adjacent to `W_TAG_INT 0xFFFA`, enabling single-instruction branchless `w_is_integer_any` masking), and
 **bit 47 of the payload is a sign overlay**. The effective sign of a value is
 the heap header's sign XOR the overlay bit.
 
@@ -53,7 +52,7 @@ Consequences, all load-bearing:
   result must allocate; `mpz_neg` writes into a retained destination); the
   overlay closed that structural wall outright: abs runs 1.2 ns flat at every
   width — 0.49× GMP at 1 limb, 0.02× at 1024.
-- One-compare type tests: `(v >> 47) == (0xFFF8... >> 47)` answers "heap
+- One-compare type tests: `(v >> 47) == (0xFFFB000000000000ULL >> 47)` answers "heap
   bigint AND positive" in a single comparison (the tag-and-sign gate the word
   entries use).
 - Dispatch stayed cheap: the IC dispatch key remained 0x02 via `w_dispatch_key`,

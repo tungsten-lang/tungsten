@@ -136,20 +136,64 @@ const char *w_symbol_name(uint64_t id) {
 
 /* ---- Regex ---- */
 
-#define W_REGEX_MAX_CAPTURES 10
+typedef struct {
+    WValue *captures;
+    int *starts;
+    int *ends;
+    int count;
+    int capacity;
+    int registered;
+} WRegexCaptureState;
 
-static __thread WValue g_regex_captures[W_REGEX_MAX_CAPTURES];
-static __thread int g_regex_capture_count = 0;
+static __thread WRegexCaptureState g_regex_capture_state;
+static pthread_key_t g_regex_capture_key;
+static pthread_once_t g_regex_capture_key_once = PTHREAD_ONCE_INIT;
 
-static void w_regex_clear_captures(void) {
-    g_regex_capture_count = 0;
-    for (int i = 0; i < W_REGEX_MAX_CAPTURES; i++) g_regex_captures[i] = W_NIL;
+static void w_regex_capture_state_destroy(void *opaque) {
+    WRegexCaptureState *state = (WRegexCaptureState *)opaque;
+    if (!state) return;
+    free(state->captures);
+    free(state->starts);
+    free(state->ends);
+    memset(state, 0, sizeof(*state));
+}
+
+static void w_regex_capture_key_init(void) {
+    if (pthread_key_create(&g_regex_capture_key, w_regex_capture_state_destroy) != 0)
+        die("failed to create regex capture TLS key");
+}
+
+static void w_regex_prepare_captures(int count) {
+    WRegexCaptureState *state = &g_regex_capture_state;
+    if (!state->registered) {
+        pthread_once(&g_regex_capture_key_once, w_regex_capture_key_init);
+        if (pthread_setspecific(g_regex_capture_key, state) != 0)
+            die("failed to register regex capture TLS");
+        state->registered = 1;
+    }
+    if (count < 0) count = 0;
+    if (count > state->capacity) {
+        int next = state->capacity > 0 ? state->capacity : 16;
+        while (next < count) next *= 2;
+        state->captures = realloc(state->captures, sizeof(WValue) * (size_t)next);
+        state->starts = realloc(state->starts, sizeof(int) * (size_t)next);
+        state->ends = realloc(state->ends, sizeof(int) * (size_t)next);
+        state->capacity = next;
+    }
+    for (int i = 0; i < count; i++) {
+        state->captures[i] = W_NIL;
+        state->starts[i] = -1;
+        state->ends[i] = -1;
+    }
+    state->count = count;
 }
 
 static void w_regex_store_capture(int idx, const char *subject, int start, int end) {
-    if (idx < 0 || idx >= W_REGEX_MAX_CAPTURES || start < 0 || end < start) return;
-    g_regex_captures[idx] = w_string_n(subject + start, (size_t)(end - start));
-    if (idx + 1 > g_regex_capture_count) g_regex_capture_count = idx + 1;
+    WRegexCaptureState *state = &g_regex_capture_state;
+    if (idx < 0 || idx >= state->count || start < 0 || end < start) return;
+    state->captures[idx] = w_string_n(subject + start, (size_t)(end - start));
+    state->starts[idx] = start;
+    state->ends[idx] = end;
 }
 
 #ifdef TUNGSTEN_ONIG
@@ -219,7 +263,7 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
     if (!w_is_regex(regex_val)) die("regex match requires a regex");
     WRegex *rx = (WRegex *)w_as_ptr(regex_val);
     const char *subject = as_str(subject_val);
-    w_regex_clear_captures();
+    w_regex_prepare_captures(0);
 #ifdef TUNGSTEN_ONIG
     OnigRegex reg = (OnigRegex)rx->compiled;
     const OnigUChar *start = (const OnigUChar *)subject;
@@ -227,7 +271,8 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
     OnigRegion *region = onig_region_new();
     int rc = onig_search(reg, start, end, start, end, region, ONIG_OPTION_NONE);
     if (rc >= 0) {
-        int cap_count = region->num_regs < W_REGEX_MAX_CAPTURES ? region->num_regs : W_REGEX_MAX_CAPTURES;
+        int cap_count = region->num_regs;
+        w_regex_prepare_captures(cap_count);
         for (int i = 0; i < cap_count; i++) {
             w_regex_store_capture(i, subject, region->beg[i], region->end[i]);
         }
@@ -241,16 +286,23 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
     dief("regex match failed for /%s/: %s", rx->pattern, (const char *)msg);
 #else
     regex_t *reg = (regex_t *)rx->compiled;
-    regmatch_t matches[W_REGEX_MAX_CAPTURES];
-    int rc = regexec(reg, subject, W_REGEX_MAX_CAPTURES, matches, 0);
+    size_t cap_count = reg->re_nsub + 1;
+    regmatch_t *matches = calloc(cap_count, sizeof(regmatch_t));
+    int rc = regexec(reg, subject, cap_count, matches, 0);
     if (rc == 0) {
-        for (int i = 0; i < W_REGEX_MAX_CAPTURES; i++) {
-            if (matches[i].rm_so < 0) break;
-            w_regex_store_capture(i, subject, (int)matches[i].rm_so, (int)matches[i].rm_eo);
+        w_regex_prepare_captures((int)cap_count);
+        for (size_t i = 0; i < cap_count; i++) {
+            if (matches[i].rm_so >= 0)
+                w_regex_store_capture((int)i, subject, (int)matches[i].rm_so, (int)matches[i].rm_eo);
         }
+        free(matches);
         return W_TRUE;
     }
-    if (rc == REG_NOMATCH) return W_FALSE;
+    free(matches);
+    if (rc == REG_NOMATCH) {
+        w_regex_prepare_captures(0);
+        return W_FALSE;
+    }
     char msg[128];
     regerror(rc, reg, msg, sizeof(msg));
     dief("regex match failed for /%s/: %s", rx->pattern, msg);
@@ -258,10 +310,68 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
     return W_FALSE;
 }
 
+static int w_utf8_codepoint_offset(const char *subject, int byte_offset) {
+    int codepoints = 0;
+    for (int i = 0; i < byte_offset; i++) {
+        if (((unsigned char)subject[i] & 0xC0u) != 0x80u) codepoints++;
+    }
+    return codepoints;
+}
+
+#ifdef TUNGSTEN_ONIG
+static int w_regex_collect_name(const OnigUChar *name, const OnigUChar *name_end,
+                                int group_count, int *groups, OnigRegex regex,
+                                void *arg) {
+    (void)regex;
+    if (group_count <= 0) return 0;
+    WValue map = *(WValue *)arg;
+    WValue key = w_string_n((const char *)name, (size_t)(name_end - name));
+    /* Oniguruma lists duplicate-name groups in definition order; MatchData's
+     * name lookup selects the last numbered arm. The self-hosted parser
+     * rejects duplicates, but preserving Oniguruma's selection is less
+     * surprising for a native literal compiled by that engine. */
+    w_hash_set(map, key, w_int(groups[group_count - 1]));
+    return 0;
+}
+#endif
+
+WValue w_regex_match_data(WValue regex_val, WValue subject_val) {
+    if (w_regex_match(regex_val, subject_val) != W_TRUE) return W_NIL;
+
+    WRegexCaptureState *state = &g_regex_capture_state;
+    const char *subject = as_str(subject_val);
+    WValue groups = w_array_new_empty();
+    WValue offsets = w_array_new_empty();
+    for (int i = 0; i < state->count; i++) {
+        w_array_push(groups, state->captures[i]);
+        if (state->starts[i] < 0) {
+            w_array_push(offsets, W_NIL);
+            continue;
+        }
+        WValue span = w_array_new_empty();
+        w_array_push(span, w_int(w_utf8_codepoint_offset(subject, state->starts[i])));
+        w_array_push(span, w_int(w_utf8_codepoint_offset(subject, state->ends[i])));
+        w_array_push(offsets, span);
+    }
+
+    WValue names = w_hash_new();
+#ifdef TUNGSTEN_ONIG
+    WRegex *rx = (WRegex *)w_as_ptr(regex_val);
+    onig_foreach_name((OnigRegex)rx->compiled, w_regex_collect_name, &names);
+#endif
+
+    WRegexMatch *match = calloc(1, sizeof(WRegexMatch));
+    match->groups = groups;
+    match->offsets = offsets;
+    match->name_to_group = names;
+    return w_box_ptr(match, W_SUBTAG_REGEX_MATCH);
+}
+
 WValue w_regex_capture(WValue index_val) {
     int64_t idx = w_to_i64(index_val);
-    if (idx < 0 || idx >= g_regex_capture_count || idx >= W_REGEX_MAX_CAPTURES) return W_NIL;
-    return g_regex_captures[idx];
+    WRegexCaptureState *state = &g_regex_capture_state;
+    if (idx < 0 || idx >= state->count) return W_NIL;
+    return state->captures[idx];
 }
 
 /* Forward declarations */
@@ -1153,55 +1263,26 @@ WBigint *bigint_alloc_raw_hot_exact(uint32_t exact_cap) {
     return bigint_alloc_raw((int32_t)exact_cap);
 }
 
-/* Unique-bit exact takes (the sub1@1 boxed leaf proved the shape, commit
- * c18b5a94; this generalizes it across the word band).  Capacity occupies
- * packed hot-word bits 48..63, and under the hybrid policy each capacity
- * in {1, 2, 4, 8, 16} is the ONLY valid class with its low bit set: among
- * powers of two only 2^k has bit k, and the quantum multiples beyond
- * BN_BIGINT_HYBRID_P2_LIMIT keep bits 0..4 clear because both quanta are
- * multiples of 32.  A single-bit test on the packed word therefore answers
- * both occupancy and exact class (tbnz + pointer mask, replacing the XOR
- * take's eor + shifted compare); a clear bit proves the generic
- * decoded-capacity comparison could not recover a hit either.  The
- * displaced release handoff preserves this reading: every hot_word store
- * is either zero (takes) or bigint_hot_encode(b, b->cap) with a
- * class-valid capacity, displaced or not.  Callers must pass a constant
- * class from the unique-bit band {1,2,4,8,16} (or a runtime select
- * between such classes); every other capacity keeps the XOR take.  Grid
- * experiments that break the uniqueness claim (a quantum not divisible by
- * 32) must set BN_HOT_EXACT_UNIQUE_BIT=0 — the _Static_assert below makes
- * a silently false single-bit hit impossible to ship. */
-#ifndef BN_HOT_EXACT_UNIQUE_BIT
-#define BN_HOT_EXACT_UNIQUE_BIT 1
-#endif
-#if BN_HOT_EXACT_UNIQUE_BIT && BN_BIGINT_HYBRID_CAP && \
-    BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
-#define BN_HOT_EXACT_UNIQUE_BIT_ACTIVE 1
-/* The uniqueness claim, spelled out against bigint_alloc_capacity's grid:
- * requests of 1..P2_LIMIT round to powers of two (so 1,2,4,8,16 all exist
- * as classes and no other power of two shares their bit) and larger
- * requests round to multiples of the quanta (bits 0..4 clear iff both
- * quanta are multiples of 32). */
-_Static_assert(BN_BIGINT_HYBRID_P2_LIMIT >= 16 &&
-               BN_BIGINT_HYBRID_QUANTUM % 32 == 0 &&
-               BN_BIGINT_HYBRID_QUANTUM2 % 32 == 0,
-               "unique-bit exact take: caps 1,2,4,8,16 must each own packed "
-               "hot-word bit 48+log2(cap) exclusively; set "
-               "BN_HOT_EXACT_UNIQUE_BIT=0 for grids that break this");
-#else
-#define BN_HOT_EXACT_UNIQUE_BIT_ACTIVE 0
+/* The sub1@1 boxed leaf is an instruction-floor cell.  Capacity occupies
+ * packed hot-word bits 48..63, and under the hybrid policy capacity one is
+ * the only valid odd class (powers of two through 32, then multiples of
+ * 32).  Bit 48 therefore answers both occupancy and exact-cap-one with one
+ * test; a clear bit proves the generic decoded-capacity comparison cannot
+ * recover a hit.  Keep this leaf-local so unrelated exact-cap callers retain
+ * their established code layout. */
+#ifndef BN_SUB1_HOT_EXACT1_BIT
+#define BN_SUB1_HOT_EXACT1_BIT 1
 #endif
 static inline __attribute__((always_inline))
-WBigint *bigint_alloc_raw_hot_exact_bit(uint32_t exact_cap) {
-#if BN_HOT_EXACT_UNIQUE_BIT_ACTIVE
+WBigint *bigint_alloc_raw_hot_sub1_exact_one(void) {
+#if BN_SUB1_HOT_EXACT1_BIT && BN_BIGINT_HYBRID_CAP && \
+    BN_BIGINT_RECYCLE && BN_BIGINT_HOT_SLOT && BN_BIGINT_POWER2_CAP
     WBigintPool *pool = &bigint_pool_state;
     uint64_t hot_word = pool->hot_word;
     if (__builtin_expect(
-            (hot_word & ((uint64_t)exact_cap << 48)) != 0, 1)) {
+            (hot_word & (UINT64_C(1) << 48)) != 0, 1)) {
 #ifndef NDEBUG
-        assert(exact_cap == 1U || exact_cap == 2U || exact_cap == 4U ||
-               exact_cap == 8U || exact_cap == 16U);
-        assert(bigint_hot_capacity(hot_word) == exact_cap);
+        assert(bigint_hot_capacity(hot_word) == 1U);
 #endif
         pool->hot_word = 0;
         WBigint *hot = bigint_hot_ptr(hot_word);
@@ -1210,12 +1291,9 @@ WBigint *bigint_alloc_raw_hot_exact_bit(uint32_t exact_cap) {
 #endif
         return hot;
     }
-    /* Miss: same fallback as the generic exact take's miss arm —
-     * bigint_alloc_raw probes the hot slot and buckets via
-     * bigint_pool_take before touching the arena or malloc. */
-    return bigint_alloc_raw((int32_t)exact_cap);
+    return bigint_alloc_raw(1);
 #else
-    return bigint_alloc_raw_hot_exact(exact_cap);
+    return bigint_alloc_raw_hot_exact(1U);
 #endif
 }
 
@@ -1582,84 +1660,47 @@ WValue bigint_finish_one_limb_sized(uint64_t magnitude, int32_t signed_size) {
     return bigint_box(result);
 }
 
-/* Word-op clone of the sized finisher whose boxed arm takes through the
- * unique-bit cap-1 test instead of the XOR class compare (sub1@1 proved
- * the shape; the add1@1 no-carry arm shares it).  Sign stays data
- * (signed_size computed beside the flag-setting op in the leaf). */
 static inline __attribute__((always_inline))
-WValue bigint_finish_word1_one_limb_sized(
+WValue bigint_finish_sub1_positive_one_limb_sized(
     uint64_t magnitude, int32_t signed_size) {
     if (magnitude <= (uint64_t)W_INT48_MAX) {
         int64_t value = (int64_t)magnitude;
         return w_box_int(signed_size < 0 ? -value : value);
     }
-    WBigint *result = bigint_alloc_raw_hot_exact_bit(1U);
+    WBigint *result = bigint_alloc_raw_hot_sub1_exact_one();
     result->limbs[0] = magnitude;
     result->size = signed_size;
     return bigint_box(result);
 }
 
-/* Positive minus word, one limb: the wrap-and-negate pair mirrors the
- * mixed-sign arm of bigint_add_one_limb_magnitudes with both signs known,
- * and materializes signed_size beside the flag-setting subtract so the
- * sized finisher never re-compares the operands. */
 static inline __attribute__((always_inline))
 WValue bigint_sub1_positive_one_limb(uint64_t a, uint64_t word) {
     uint64_t diff = a - word;
     int lt = a < word;
     uint64_t magnitude = lt ? 0 - diff : diff;
     int32_t signed_size = lt ? -1 : 1;
-    return bigint_finish_word1_one_limb_sized(magnitude, signed_size);
+    return bigint_finish_sub1_positive_one_limb_sized(
+        magnitude, signed_size);
 }
 
-/* Positive plus word, one limb: the add1@1 twin of the sub1 leaf above.
- * The no-carry sum stays one limb, so the shared sized finisher applies
- * unchanged — its i48 demote arm is cold here (a normalized one-limb
- * magnitude already exceeds W_INT48_MAX and a positive word only grows
- * it) yet kept, so a denormal operand still finishes exactly as the
- * generic leaf would.  The old routing through
- * bigint_add_one_limb_magnitudes with both signs constant paid a dead
- * zero test and the XOR class take. */
+/* One-word division has already trimmed its quotient.  Keep its common
+ * multi-limb finish in the boxed fast arm instead of calling the shared
+ * magnitude finisher; only zero/one-limb results need demotion work. */
 static inline __attribute__((always_inline))
-WValue bigint_add1_positive_one_limb(uint64_t a, uint64_t word) {
-    uint64_t sum = a + word;
-    /* No static carry hint: += small-word (the dominant real shape)
-     * rarely carries, but same-magnitude operands carry every time —
-     * leave the layout choice to the compiler as the old routing did. */
-    if (sum >= word)
-        return bigint_finish_word1_one_limb_sized(sum, 1);
-    /* Carried into a second limb: [sum, 1]. */
-    WBigint *result = bigint_alloc_raw_hot_exact_bit(2U);
-    result->limbs[0] = sum;
-    result->limbs[1] = 1;
-    result->size = 2;
-    return bigint_box(result);
-}
-
-/* One-word division has already trimmed its quotient, and the magnitude
- * kernels publish a NON-NEGATIVE size.  Take that size and the composed
- * sign as data: the callers' old `if (neg) q->size = -q->size` store
- * followed by this finisher's header reload re-derived both through a
- * store->load->cneg chain the caller had already resolved in registers. */
-static inline __attribute__((always_inline))
-WValue bigint_finish_div1_signed(WBigint *b, int negative) {
-    int32_t abs_len = b->size;
-    if (__builtin_expect(abs_len > 1, 1)) {
-        if (negative) b->size = -abs_len;
-        return bigint_box(b);
-    }
+WValue bigint_finish_div1(WBigint *b) {
+    int32_t abs_len = b->size < 0 ? -b->size : b->size;
+    if (__builtin_expect(abs_len > 1, 1)) return bigint_box(b);
     if (abs_len == 0) {
         bigint_release(b);
         return w_box_int(0);
     }
     uint64_t magnitude = b->limbs[0];
     if (magnitude <= (uint64_t)W_INT48_MAX) {
-        int64_t value = negative ? -(int64_t)magnitude
-                                 : (int64_t)magnitude;
+        int64_t value = b->size < 0 ? -(int64_t)magnitude
+                                    : (int64_t)magnitude;
         bigint_release(b);
         return w_box_int(value);
     }
-    if (negative) b->size = -1;
     return bigint_box(b);
 }
 
@@ -1734,7 +1775,7 @@ WValue bigint_add_two_limb_magnitudes(
         carry_high |= high < high_sum;
         /* A three-limb request lands in the power-of-two class of four
          * either way; the exact-class take is one compare cheaper. */
-        WBigint *result = bigint_alloc_raw_hot_exact_bit(4U);
+        WBigint *result = bigint_alloc_raw_hot_exact(4U);
         result->limbs[0] = low;
         result->limbs[1] = high;
         result->limbs[2] = carry_high;
@@ -2098,25 +2139,13 @@ WValue bigint_sub_word_into(
     if (i < alen)
         bn_copy_tail(r->limbs + i, al + i, alen - i);
     }
-    /* The top limb shrinks only when it was exactly 1 and the borrow
-     * consumed it (top result = a_top - borrow_in with borrow_in in
-     * {0,1}, and a normalized top limb is nonzero), so a_top != 1 proves
-     * the published size without touching the just-stored result limb.
-     * This keeps the store->load of r->limbs[alen - 1] off the common
-     * finish: the operand-limb load is independent of the kernel's
-     * stores, where the old rescan chained str -> ldr -> size store
-     * through the forwarding latency every call. */
-    if (__builtin_expect(al[alen - 1] == 1, 0)) {
-        int32_t rlen = alen - (r->limbs[alen - 1] == 0);
-        r->size = a_neg ? -rlen : rlen;
-        if (rlen < alen) {
-            /* Shrank by one limb; an alen == 2 result may demote to
-             * inline i48. */
-            return bigint_finish_mag_sub(r);
-        }
-        return bigint_box(r);
+    int32_t rlen = alen - (r->limbs[alen - 1] == 0);
+    r->size = a_neg ? -rlen : rlen;
+    if (__builtin_expect(rlen < alen, 0)) {
+        /* Shrank by one limb (only when the top limb was 1 and the borrow
+         * consumed it); an alen == 2 result may demote to inline i48. */
+        return bigint_finish_mag_sub(r);
     }
-    r->size = a_neg ? -alen : alen;
     return bigint_box(r);
 }
 
@@ -2229,7 +2258,8 @@ WValue bigint_add_ui_any(WValue a, uint64_t word) {
         /* Keep the one-limb leaf after the wide return so the streamed hot
          * path does not acquire another predicate or a larger live block. */
         if (n == 1)
-            return bigint_add1_positive_one_limb(ba->limbs[0], word);
+            return bigint_add_one_limb_magnitudes(
+                ba->limbs[0], 0, word, 0);
 #endif
     }
 #endif
@@ -10633,7 +10663,7 @@ WValue bigint_mul_positive_11(WBigint *a, WBigint *b) {
     uint64_t low = (uint64_t)product;
     uint64_t high = (uint64_t)(product >> 64);
     if (high == 0) return bigint_finish_one_limb(low, 0);
-    WBigint *r = bigint_alloc_raw_hot_exact_bit(2U);
+    WBigint *r = bigint_alloc_raw_hot_exact(2U);
     r->limbs[0] = low;
     r->limbs[1] = high;
     r->size = 2;
@@ -10775,10 +10805,7 @@ WValue bigint_mul_n1_tiny(const uint64_t *al, int32_t n, uint64_t w,
      * straight-line __builtin_addcll chain compiles to adds/adcs (the
      * loop-carried-flag weakness does not apply to straight-line code).
      * The serial 128-bit MAC form this replaces re-entered the carry into
-     * each product add: two flag ops per limb on the critical path.
-     * Take note: the unique-bit take was tried here (8/12) and measured
-     * +4-6% on mul1@2 across two independent layouts; the XOR take
-     * stays. */
+     * each product add: two flag ops per limb on the critical path. */
     WBigint *r = bigint_alloc_raw_hot_exact(n <= 3 ? 4U : 8U);
     __uint128_t p0 = (__uint128_t)al[0] * w;
     __uint128_t p1 = (__uint128_t)al[1] * w;
@@ -10816,7 +10843,7 @@ WValue bigint_mul_n1_tiny(const uint64_t *al, int32_t n, uint64_t w,
  * cell whose whole budget is ~12 cycles. */
 static inline __attribute__((always_inline))
 WValue bigint_mul_n1_tiny8(const uint64_t *al, uint64_t w, int negative) {
-    WBigint *r = bigint_alloc_raw_hot_exact_bit(16U);
+    WBigint *r = bigint_alloc_raw_hot_exact(16U);
     __uint128_t p0 = (__uint128_t)al[0] * w;
     __uint128_t p1 = (__uint128_t)al[1] * w;
     __uint128_t p2 = (__uint128_t)al[2] * w;
@@ -11101,7 +11128,7 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
             uint64_t low = (uint64_t)product;
             uint64_t high = (uint64_t)(product >> 64);
             if (high == 0) return bigint_finish_one_limb(low, 0);
-            WBigint *r = bigint_alloc_raw_hot_exact_bit(2U);
+            WBigint *r = bigint_alloc_raw_hot_exact(2U);
             r->limbs[0] = low;
             r->limbs[1] = high;
             r->size = 2;
@@ -11200,7 +11227,7 @@ WValue bigint_mul_ui_any(WValue a, uint64_t word) {
         uint64_t low = (uint64_t)product;
         uint64_t high = (uint64_t)(product >> 64);
         if (high == 0) return bigint_finish_one_limb(low, negative);
-        WBigint *r = bigint_alloc_raw_hot_exact_bit(2U);
+        WBigint *r = bigint_alloc_raw_hot_exact(2U);
         r->limbs[0] = low;
         r->limbs[1] = high;
         r->size = negative ? -2 : 2;
@@ -14544,7 +14571,8 @@ WValue bigint_div_any(WValue a, WValue b) {
             else
 #endif
                 q = mag_div_single(aa->limbs, alen, d, &remainder);
-            return bigint_finish_div1_signed(q, neg);
+            if (neg) q->size = -q->size;
+            return bigint_finish_div1(q);
         }
 #endif
 #if BN_DIVMOD_42 && BN_DIVMOD_42_BOXED_FAST
@@ -14629,7 +14657,8 @@ WValue bigint_div_ui_any(WValue a, uint64_t divisor) {
     else
 #endif
         q = mag_div_single(al, n, divisor, &remainder);
-    return bigint_finish_div1_signed(q, negative);
+    if (negative) q->size = -q->size;
+    return bigint_finish_div1(q);
 }
 
 static inline __attribute__((always_inline))
@@ -19432,7 +19461,7 @@ WValue w_ast_body_builder_finish(WValue storage, int64_t size) {
 WValue w_ast_freeze_if_array(WValue v) {
     if (w_is_body(v)) return v;              /* already frozen */
     if (!w_is_array(v)) return v;
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     if (a->ebits != 65) return v;            /* typed arrays keep heap semantics
                                               * (views, GPU registries) */
     int32_t n = a->size;
@@ -19741,7 +19770,7 @@ static WValue w_slab_lookup_existing(const char *s, size_t len, uint64_t h) {
     while (g_intern.indices[pos] != 0) {
         if (g_intern.hashes[pos] == h &&
             w_slab_equals_bytes(g_intern.indices[pos], s, len))
-            return w_box_slab_str(g_intern.indices[pos]);
+            return w_box_slab_str_len(g_intern.indices[pos], len);
         pos = (pos + 1) & mask;
     }
     return W_UNDEF;
@@ -19760,7 +19789,7 @@ static WValue w_slab_intern(const char *s, size_t len, uint64_t h) {
         if (g_intern.hashes[pos] == h) {
             /* Hash match — verify content (astronomically rare collision) */
             if (w_slab_equals_bytes(g_intern.indices[pos], s, len))
-                return w_box_slab_str(g_intern.indices[pos]);
+                return w_box_slab_str_len(g_intern.indices[pos], len);
         }
         pos = (pos + 1) & mask;
     }
@@ -19776,7 +19805,7 @@ static WValue w_slab_intern(const char *s, size_t len, uint64_t h) {
     g_intern.hashes[pos] = h;
     g_intern.indices[pos] = idx;
     g_intern.count++;
-    return w_box_slab_str(idx);
+    return w_box_slab_str_len(idx, len);
 }
 
 /* Skips mutex when no goroutines have been spawned (single-threaded fast path). */
@@ -19887,7 +19916,13 @@ void w_str_data(WValue v, char buf[6], const char **out, size_t *len) {
     } else if (slen == 6) {
         /* Mode 6: slab string */
         uint32_t idx = (uint32_t)((v >> 4) & 0xFFFFFF);
-        *out = w_slab_read(idx, len);
+        size_t cached = (size_t)((v >> 28) & 0x3F);
+        if (__builtin_expect(cached != 0, 1) && g_string_slab.base) {
+            *len = cached;
+            *out = (const char *)(g_string_slab.base + ((size_t)idx * W_SLAB_SLOT_SIZE) + W_SLAB_DATA_OFFSET);
+        } else {
+            *out = w_slab_read(idx, len);
+        }
     } else {
         /* Mode 7: heap string */
         WString *ws = w_as_heap_str(v);
@@ -28266,7 +28301,7 @@ WValue w_quantity_pipe(WValue q, WValue unit_name_v, WValue digits_v) {
      * attach the unit, quantities convert. Boxed arrays only; a typed
      * buffer has no per-element WValues to rebuild as quantities. */
     if (w_is_array(q)) {
-        WArray *a = (WArray *)w_as_ptr(q);
+        WArray *a = w_as_array(q);
         if (a->ebits != 65)
             dief("| unit conversion: expected a boxed array, not a typed buffer");
         WValue *slots = (WValue *)a->slots;
@@ -28605,7 +28640,7 @@ WValue w_crypto_random_bytes(WValue length_v) {
     }
     WValue out = w_bytes_new(length);
     if (length > 0) {
-        WArray *a = (WArray *)w_as_ptr(out);
+        WArray *a = w_as_array(out);
         w_secure_random_fill((uint8_t *)a->slots, (size_t)length);
     }
     return out;
@@ -28613,7 +28648,7 @@ WValue w_crypto_random_bytes(WValue length_v) {
 
 static void w_crypto_input_data(WValue data, const uint8_t **out, size_t *len, char inline_buf[6]) {
     if (w_is_bytes(data)) {
-        WArray *a = (WArray *)w_as_ptr(data);
+        WArray *a = w_as_array(data);
         *out = ((const uint8_t *)a->slots) + a->start;
         *len = (size_t)a->size;
         return;
@@ -30736,7 +30771,7 @@ WValue w_crypto_shake_bytes(WValue data, WValue bits_v, WValue outlen_v) {
     w_crypto_input_data(data, &input, &len, inline_buf);
     WValue out = w_bytes_new(outlen);
     if (outlen > 0) {
-        WArray *a = (WArray *)w_as_ptr(out);
+        WArray *a = w_as_array(out);
         w_shake_digest(input, len, bits == 256 ? 1 : 0, (uint8_t *)a->slots, (size_t)outlen);
     }
     return out;
@@ -30785,7 +30820,7 @@ WValue w_crypto_aes_gcm_seal(WValue key_v, WValue nonce_v, WValue pt_v, WValue a
     if (keylen != 16 && keylen != 32) w_raise(w_string("Crypto:AES.gcm: key must be 16 or 32 bytes"));
     if (noncelen != 12) w_raise(w_string("Crypto:AES.gcm: nonce must be 12 bytes"));
     WValue out = w_bytes_new((int64_t)(ptlen + 16));
-    WArray *a = (WArray *)w_as_ptr(out);
+    WArray *a = w_as_array(out);
     if (!w_aes_gcm_seal_core(key, keylen, nonce, pt, ptlen, aad, aadlen, (uint8_t *)a->slots))
         w_raise(w_string("Crypto:AES.gcm: seal failed"));
     return out;
@@ -30803,7 +30838,7 @@ WValue w_crypto_aes_gcm_open(WValue key_v, WValue nonce_v, WValue sealed_v, WVal
     if (noncelen != 12) w_raise(w_string("Crypto:AES.gcm: nonce must be 12 bytes"));
     if (slen < 16) w_raise(w_string("Crypto:AES.gcm: ciphertext too short for tag"));
     WValue out = w_bytes_new((int64_t)(slen - 16));
-    WArray *a = (WArray *)w_as_ptr(out);
+    WArray *a = w_as_array(out);
     if (!w_aes_gcm_open_core(key, keylen, nonce, sealed, slen, aad, aadlen, (uint8_t *)a->slots))
         w_raise(w_string("Crypto:AES.gcm: authentication failed"));
     return out;
@@ -31129,7 +31164,7 @@ static int w_uuid_node_from_value(WValue value, uint8_t node[6]) {
         return 1;
     }
     if (w_is_bytes(value)) {
-        WArray *a = (WArray *)w_as_ptr(value);
+        WArray *a = w_as_array(value);
         if (a->size != 6) {
             w_raise(w_string("UUID.v1/v2: MAC byte array must be exactly 6 bytes"));
             return 0;
@@ -31138,7 +31173,7 @@ static int w_uuid_node_from_value(WValue value, uint8_t node[6]) {
         return 1;
     }
     if (w_is_array(value)) {
-        WArray *a = (WArray *)w_as_ptr(value);
+        WArray *a = w_as_array(value);
         if (a->size != 6) {
             w_raise(w_string("UUID.v1/v2: MAC array must be exactly 6 bytes"));
             return 0;
@@ -31409,7 +31444,7 @@ WValue w_uuid_v8(WValue custom) {
     if (custom == W_NIL) {
         w_secure_random_fill(bytes, sizeof(bytes));
     } else if (w_is_bytes(custom)) {
-        WArray *a = (WArray *)w_as_ptr(custom);
+        WArray *a = w_as_array(custom);
         if (a->size != 16) {
             w_raise(w_string("UUID.v8: custom bytes must be exactly 16 bytes"));
             return W_NIL;
@@ -31614,7 +31649,7 @@ static WValue w_string_to_lexchars_lang(const char *str, size_t str_len, const u
     if (!w_lexchar_tables(&lc_blocks, &lc_index))
         w_raise(w_string("lexchars: lexer tables not linked (program does not reference .lexchars)"));
     WValue result = w_array_new(64, str_len + LEX_SENTINEL_PAD);
-    WArray *ta = (WArray *)w_as_ptr(result);
+    WArray *ta = w_as_array(result);
     int64_t *data = (int64_t *)ta->slots;
 
     const unsigned char *p = (const unsigned char *)str;
@@ -31661,7 +31696,7 @@ static WValue w_string_to_lexchars_lang(const char *str, size_t str_len, const u
 static WValue w_string_to_lex32_lang(const char *str, size_t str_len,
                                      const uint8_t *lex32_flags) {
     WValue result = w_array_new(32, (int64_t)str_len + LEX_SENTINEL_PAD);
-    WArray *ta = (WArray *)w_as_ptr(result);
+    WArray *ta = w_as_array(result);
     uint32_t *data = (uint32_t *)ta->slots;
 
     const unsigned char *p = (const unsigned char *)str;
@@ -31708,7 +31743,7 @@ static WValue w_string_to_lex16_lang(const char *str, size_t str_len,
                                      const uint8_t *lex16_flags,
                                      const uint8_t *lex64_flags) {
     WValue result = w_array_new(16, (int64_t)str_len + LEX_SENTINEL_PAD);
-    WArray *ta = (WArray *)w_as_ptr(result);
+    WArray *ta = w_as_array(result);
     uint16_t *data = (uint16_t *)ta->slots;
 
     const unsigned char *p = (const unsigned char *)str;
@@ -31770,7 +31805,7 @@ static WValue w_string_to_lex16_lang(const char *str, size_t str_len,
  * for the duration of tokenization. Skips the per-call WArray unbox
  * that the helpers used to do internally. */
 int64_t w_array_data_ptr(int64_t arr_wval) {
-    WArray *a = (WArray *)w_as_ptr((WValue)arr_wval);
+    WArray *a = w_as_array((WValue)arr_wval);
     return (int64_t)(uintptr_t)a->slots;
 }
 
@@ -31786,7 +31821,7 @@ int64_t w_u8_live_data_ptr(int64_t arr_wval) {
     WValue value = (WValue)arr_wval;
     if (!w_is_bytes(value))
         w_raise(w_string("u8 data pointer: expected u8[]"));
-    WArray *a = (WArray *)w_as_ptr(value);
+    WArray *a = w_as_array(value);
     /* A zero-length borrowed view may legally carry NULL storage. Return it
      * unchanged; source loops are size-guarded and never dereference it. */
     if (a->size == 0)
@@ -33412,12 +33447,20 @@ int64_t w_string_byte_ptr(int64_t str_wval) {
 int64_t w_string_byte_length(int64_t str_wval) {
     WValue v = (WValue)str_wval;
     if (w_is_rope(v)) v = w_rope_flatten(v);
-    char buf[6];
-    const char *s;
-    size_t len;
-    w_str_data(v, buf, &s, &len);
-    (void)s;
-    return (int64_t)len;
+    if (!w_is_stringy(v)) return 0;
+    size_t mode = (v >> 1) & 7;
+    if (mode <= 5) return (int64_t)mode;
+    if (mode == 6) {
+        size_t cached = (size_t)((v >> 28) & 0x3F);
+        if (__builtin_expect(cached != 0, 1)) return (int64_t)cached;
+        if (g_string_slab.base) {
+            uint32_t idx = (uint32_t)((v >> 4) & 0xFFFFFF);
+            return (int64_t)g_string_slab.base[(idx * W_SLAB_SLOT_SIZE) + 1];
+        }
+        return 0;
+    }
+    WString *ws = w_as_heap_str(v);
+    return ws ? (int64_t)ws->len : 0;
 }
 
 static inline int w_ascii_space_byte(uint8_t c) {
@@ -33642,7 +33685,7 @@ static WValue w_string_to_lexchars(const char *str, size_t str_len) {
      * inner loops (IS_ID_CONTINUE, IS_WHITESPACE, IS_HEX) self-terminate
      * without bounds checking. ta->size still reports the real count. */
     WValue result = w_array_new(64, str_len + 1);
-    WArray *ta = (WArray *)w_as_ptr(result);
+    WArray *ta = w_as_array(result);
     int64_t *data = (int64_t *)ta->slots;
 
     const unsigned char *p = (const unsigned char *)str;
@@ -33683,7 +33726,7 @@ static WValue w_string_to_lexchars(const char *str, size_t str_len) {
    Returns pointer packed into the lower 48 bits of an i64 NaN-boxed int.
    Safe for pointers < 2^47 (256 TB virtual address space). */
 WValue w_i64_array_ptr(WValue arr) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     uintptr_t base = (uintptr_t)((uint8_t *)a->slots + a->start * 8);
     /* Use unsigned box to avoid sign-extension issues with high bit 47 */
     return W_TAG_INT | (base & 0xFFFFFFFFFFFFULL);
@@ -33691,7 +33734,7 @@ WValue w_i64_array_ptr(WValue arr) {
 
 /* Return NaN-boxed pointer to WArray data. */
 WValue w_array_raw_ptr(WValue arr) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     uintptr_t base = (uintptr_t)((uint8_t *)a->slots + a->start);
     return W_TAG_INT | (base & 0xFFFFFFFFFFFFULL);
 }
@@ -33714,7 +33757,7 @@ WValue w_ptr_store(WValue ptr_val, WValue index_val, WValue value) {
 
 /* Unchecked read from WValue typed array by index. */
 WValue w_array_get_unchecked(WValue arr, int64_t index) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     return w_int(((int64_t *)(a->slots))[a->start + index]);
 }
 
@@ -33722,7 +33765,7 @@ WValue w_array_get_unchecked(WValue arr, int64_t index) {
    Returns count. Uses raw pointer access internally. */
 WValue w_lexchar_scan_bench(WValue lc_arr, int64_t count) {
     /* lc_arr is a regular WArray of NaN-boxed integers (not a typed array) */
-    WArray *arr = (WArray *)w_as_ptr(lc_arr);
+    WArray *arr = w_as_array(lc_arr);
     WValue *data = arr->slots + arr->start;
 
     /* WValue layout: 0xFFFA | packed_lexchar.
@@ -33810,18 +33853,6 @@ WValue w_vec3f_w(WValue xv, WValue yv, WValue zv) {
     return w_vec3f(x, y, z);
 }
 
-bool w_is_simd2d(WValue v) {
-    return (v & 0xFFFF000000000000ULL) == WVALUE_TAG_SIMD2D;
-}
-
-bool w_is_simd3d(WValue v) {
-    return (v & 0xFFFF000000000000ULL) == WVALUE_TAG_SIMD3D;
-}
-
-uint8_t w_simd2d_subtag(WValue v) {
-    return (uint8_t)((v >> 44) & 0xFULL);
-}
-
 WValue w_is_simd2d_w(WValue v) {
     return w_bool(w_is_simd2d(v));
 }
@@ -33848,10 +33879,6 @@ WValue w_sockaddr_w(WValue av, WValue bv, WValue cv, WValue dv, WValue port_v) {
     uint8_t d = (uint8_t)w_numeric_to_i64(dv);
     uint16_t port = (uint16_t)w_numeric_to_i64(port_v);
     return w_sockaddr(a, b, c, d, port);
-}
-
-bool w_is_sockaddr(WValue v) {
-    return (v & 0xFFFF000000000000ULL) == WVALUE_TAG_SOCKADDR;
 }
 
 WValue w_is_sockaddr_w(WValue v) {
@@ -34400,12 +34427,6 @@ static void rational_parts(WValue rational, WValue *numerator, WValue *denominat
 
 WValue w_rational(int32_t num, uint32_t den) {
     return rational_reduce((__int128)num, (__int128)den);
-}
-
-WValue w_rational_new(WValue numerator, WValue denominator) {
-    if (!w_is_integer_any(numerator) || !w_is_integer_any(denominator))
-        die("Rational.new expects Integer numerator and denominator");
-    return rational_from_parts(numerator, denominator);
 }
 
 WValue w_rational_numerator(WValue rational) {
@@ -35612,7 +35633,7 @@ int64_t w_stringy_c_length(WValue v) {
 
 static WArray *as_array(WValue v) {
     if (!w_is_array(v)) die("expected array");
-    return (WArray *)w_as_ptr(v);
+    return w_as_array(v);
 }
 
 /* Forward decl: typed-array-aware element load. Defined later in the file
@@ -35641,7 +35662,7 @@ static uint64_t w_public_hash_u64(WValue v) {
     stack[depth++] = v;
     uint64_t result;
     if (w_is_array(v)) {
-        WArray *array = (WArray *)w_as_ptr(v);
+        WArray *array = w_as_array(v);
         uint64_t acc = w_hash_splitmix64((uint64_t)array->size ^
                                          UINT64_C(0x243f6a8885a308d3));
         for (int32_t i = 0; i < array->size; i++) {
@@ -35840,8 +35861,8 @@ static WValue rational_from_parts(WValue numerator, WValue denominator) {
     if (w_is_int(numerator) && w_is_int(denominator)) {
         int64_t num = w_as_int(numerator);
         int64_t den = w_as_int(denominator);
-        if (num >= -2097152 && num <= 2097151 &&
-            den > 0 && den <= 4194303)
+        if (num >= W_RATIONAL_NUM_MIN && num <= W_RATIONAL_NUM_MAX &&
+            den > 0 && den <= W_RATIONAL_DEN_MAX)
             return w_box_rational((int32_t)num, (uint32_t)den);
     }
 
@@ -35854,6 +35875,72 @@ static WValue rational_from_parts(WValue numerator, WValue denominator) {
 
 static WValue rational_reduce(__int128 num, __int128 den) {
     return rational_from_parts(bigint_from_i128(num), bigint_from_i128(den));
+}
+
+static void numeric_to_rational_parts(WValue v, WValue *out_num, WValue *out_den) {
+    if (w_is_integer_any(v)) {
+        *out_num = v;
+        *out_den = w_int(1);
+        return;
+    }
+    if (is_decimal_any(v)) {
+        if (decimal_is_bigsig(v)) {
+            WValue bsig; int64_t bscale;
+            decimal_extract_boxed(v, &bsig, &bscale);
+            if (bscale >= 0) {
+                *out_num = w_mul(bsig, decimal_pow10_boxed(bscale));
+                *out_den = w_int(1);
+            } else {
+                *out_num = bsig;
+                *out_den = decimal_pow10_boxed(-bscale);
+            }
+        } else {
+            int64_t sig; int scale;
+            decimal_extract(v, &sig, &scale);
+            if (scale >= 0) {
+                *out_num = exact_pow10_scaled(sig, scale);
+                *out_den = w_int(1);
+            } else {
+                *out_num = w_box_int_checked(sig);
+                *out_den = exact_pow10_scaled(1, -scale);
+            }
+        }
+        return;
+    }
+    if (w_is_rational_any(v)) {
+        rational_parts(v, out_num, out_den);
+        return;
+    }
+    if (w_is_double(v)) {
+        double d = w_as_double(v);
+        if (isnan(d) || isinf(d)) {
+            die("cannot convert NaN or Infinity to Rational");
+        }
+        int exp;
+        double frac = frexp(d, &exp);
+        int64_t mantissa = (int64_t)(frac * (double)(1ULL << 53));
+        exp -= 53;
+        WValue mant = w_box_int_checked(mantissa);
+        if (exp >= 0) {
+            WValue two_pow = w_bigint_shl(w_int(1), w_int(exp));
+            *out_num = bigint_mul_any(mant, two_pow);
+            *out_den = w_int(1);
+        } else {
+            *out_num = mant;
+            *out_den = w_bigint_shl(w_int(1), w_int(-exp));
+        }
+        return;
+    }
+    die("Rational.new expects Numeric numerator and denominator");
+}
+
+WValue w_rational_new(WValue numerator, WValue denominator) {
+    WValue n1, d1, n2, d2;
+    numeric_to_rational_parts(numerator, &n1, &d1);
+    numeric_to_rational_parts(denominator, &n2, &d2);
+    WValue final_num = bigint_mul_any(n1, d2);
+    WValue final_den = bigint_mul_any(d1, n2);
+    return rational_from_parts(final_num, final_den);
 }
 
 /* Exact comparison across both Rational tiers and the full Integer tower. */
@@ -36358,6 +36445,30 @@ int64_t w_range_bound_i64(WValue v) {
 
 WValue w_range_bound_i64_w(WValue v) {
     return w_int(w_range_bound_i64(v));
+}
+
+/* ccall entry for the immediate-Range constructor funnel: packed
+ * Location-mode-11 value when (lo, hi, excl) fits either sub-mode,
+ * W_NIL when the caller must take the heap path. Bounds must be inline
+ * ints — bigint bounds are by definition a funnel miss. */
+WValue w_range_imm_try_w(WValue lo, WValue hi, WValue excl) {
+    if (!w_is_int(lo) || !w_is_int(hi)) return W_NIL;
+    return w_range_imm_try(w_as_int(lo), w_as_int(hi), w_truthy(excl) ? 1 : 0);
+}
+
+/* Range constructor behind lower_range: the immediate Location-mode-11
+ * value when the bounds fit its sub-modes, otherwise the historical
+ * escaped-range representation — an eager Array of boxed ints (what
+ * lower_range used to emit as an IR push loop). Bounds arrive raw. */
+WValue w_range_make(int64_t from, int64_t to, int64_t exclusive) {
+    WValue imm = w_range_imm_try(from, to, exclusive ? 1 : 0);
+    if (imm != W_NIL) return imm;
+    WValue arr = w_array_new_empty();
+    int64_t hi = exclusive ? to - 1 : to;
+    for (int64_t i = from; i <= hi; i++) {
+        w_array_push(arr, w_box_int(i));
+    }
+    return arr;
 }
 
 /* ---- Source-routed bigint `+` (weak-linkage arm) ----
@@ -39711,8 +39822,8 @@ WValue w_eq(WValue a, WValue b) {
     /* ByteArray equality: same size and identical bytes. WArray.start
      * is a logical shift for slicing, so add it when reading. */
     if (w_is_bytes(a) && w_is_bytes(b)) {
-        WArray *aa = (WArray *)w_as_ptr(a);
-        WArray *bb = (WArray *)w_as_ptr(b);
+        WArray *aa = w_as_array(a);
+        WArray *bb = w_as_array(b);
         if (aa->size != bb->size) return W_FALSE;
         if (aa->size == 0) return W_TRUE;
         return w_bool(memcmp((uint8_t *)aa->slots + aa->start,
@@ -39756,8 +39867,8 @@ WValue w_eq(WValue a, WValue b) {
         eq_pair_depth++;
         WValue result = W_TRUE;
         if (w_is_array(a)) {
-            WArray *aa = (WArray *)w_as_ptr(a);
-            WArray *bb = (WArray *)w_as_ptr(b);
+            WArray *aa = w_as_array(a);
+            WArray *bb = w_as_array(b);
             if (aa->size != bb->size) {
                 result = W_FALSE;
             } else {
@@ -40598,6 +40709,8 @@ WValue w_to_s(WValue v) {
     if (w_is_string(v)) return v;
     if (w_is_symbol(v)) return v & ~(WValue)1;
     if (w_is_regex(v))  return w_string(((WRegex *)w_as_ptr(v))->pattern);
+    if (w_is_regex_match(v))
+        return w_array_get(((WRegexMatch *)w_as_ptr(v))->groups, w_int(0));
     if (w_is_strbuf(v)) return w_strbuf_to_s(v);
     if (w_is_rope(v))   return w_rope_flatten(v);
     if (w_is_int(v))    return w_int_to_str(w_as_int(v));
@@ -40639,7 +40752,7 @@ WValue w_to_s(WValue v) {
     }
 
     if (w_is_bytes(v)) {
-        WArray *a = (WArray *)w_as_ptr(v);
+        WArray *a = w_as_array(v);
         char buf2[64];
         int n = snprintf(buf2, sizeof(buf2), "#<ByteArray length=%d>", (int)a->size);
         return w_string_n(buf2, n);
@@ -40731,6 +40844,11 @@ WValue w_to_s(WValue v) {
             else if (loc_mode == 2)
                 n = snprintf(buf, sizeof(buf), "%d:+%u",
                              w_unbox_location_file_id(v), w_unbox_location_offset(v));
+            else if (loc_mode == 3)
+                n = snprintf(buf, sizeof(buf), "%lld%s%lld",
+                             (long long)w_range_imm_start(v),
+                             w_range_imm_excl(v) ? "..." : "..",
+                             (long long)w_range_imm_end(v));
             else
                 n = snprintf(buf, sizeof(buf), "%d:%d:%d",
                              w_unbox_location_file_id(v),
@@ -40768,7 +40886,7 @@ WValue w_to_s(WValue v) {
         return w_strbuf_to_s(sb);
     }
     if (w_is_array(v)) {
-        WArray *arr = (WArray *)w_as_ptr(v);
+        WArray *arr = w_as_array(v);
         WValue sb = w_strbuf_new(w_box_int(128));
         w_strbuf_append(sb, w_string("["));
         for (int32_t i = 0; i < arr->size; i++) {
@@ -40936,7 +41054,7 @@ WValue w_string_from_codepoint(WValue cp_v) {
 WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
     int64_t start = w_to_i64(start_v);
     int64_t len = w_to_i64(len_v);
-    WArray *ta = (WArray *)w_as_ptr(arr_v);
+    WArray *ta = w_as_array(arr_v);
     int64_t n = ta->size;
     if (start < 0) start = 0;
     if (start >= n || len <= 0) return w_string("");
@@ -40973,7 +41091,7 @@ WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v) {
  * return n if none. Raw int64 array access in C replaces the hot per-position
  * Tungsten loop, whose boxed @subj[i] access dominated (~13 ns/position). */
 WValue w_regex_scan_char(WValue subj, WValue start_v, WValue n_v, WValue cp_v) {
-    WArray *ta = (WArray *)w_as_ptr(subj);
+    WArray *ta = w_as_array(subj);
     const uint64_t *data = (const uint64_t *)ta->slots;
     int64_t start = w_to_i64(start_v);
     int64_t n = w_to_i64(n_v);
@@ -40983,7 +41101,7 @@ WValue w_regex_scan_char(WValue subj, WValue start_v, WValue n_v, WValue cp_v) {
 }
 
 WValue w_regex_scan_flag(WValue subj, WValue start_v, WValue n_v, WValue flag_v) {
-    WArray *ta = (WArray *)w_as_ptr(subj);
+    WArray *ta = w_as_array(subj);
     const uint64_t *data = (const uint64_t *)ta->slots;
     int64_t start = w_to_i64(start_v);
     int64_t n = w_to_i64(n_v);
@@ -41517,7 +41635,7 @@ WValue w_array_new_empty(void) {
     /* Try recycled array first — zero allocation */
     if (g_array_pool_count > 0) {
         WValue v = g_array_pool[--g_array_pool_count];
-        WArray *arr = (WArray *)w_as_ptr(v);
+        WArray *arr = w_as_array(v);
         arr->start = 0;
         arr->size = 0;
         arr->flags = W_FLAG_OWNED;  /* typed-style w_array_push checks this */
@@ -41533,7 +41651,7 @@ WValue w_array_new_empty(void) {
     arr->_pad[0] = 0;             /* typed-array machinery can drive their reads through */
     arr->_pad[1] = 0;             /* the same `slots` ptr without a struct re-cast. */
     arr->slots = malloc(sizeof(WValue) * arr->cap);
-    return w_box_ptr(arr, W_SUBTAG_ARRAY);
+    return w_box_array(arr);
 }
 
 /* `array + array` → concatenation. Builds a fresh polymorphic array and
@@ -41541,8 +41659,8 @@ WValue w_array_new_empty(void) {
  * w_array_get so mixed element tiers (i64[] + f64[] + boxed) concatenate
  * correctly; the result is boxed. Neither operand is mutated. */
 WValue w_array_concat(WValue lhs, WValue rhs) {
-    WArray *la = (WArray *)w_as_ptr(lhs);
-    WArray *ra = (WArray *)w_as_ptr(rhs);
+    WArray *la = w_as_array(lhs);
+    WArray *ra = w_as_array(rhs);
     int64_t ln = la->size;
     int64_t rn = ra->size;
     WValue out = w_array_new_empty();
@@ -41668,7 +41786,7 @@ WValue w_array_recycle_or_new_empty(void) {
 }
 void w_array_recycle_public(WValue v) {
     if (!w_is_array(v)) return;
-    WArray *arr = (WArray *)w_as_ptr(v);
+    WArray *arr = w_as_array(v);
     /* Inline payload lifetime is tied to this header; pool reset paths may
      * retag or resize buffers independently, so keep inline arrays out. */
     if (arr->flags & W_FLAG_INLINE) return;
@@ -41737,7 +41855,7 @@ WValue w_array_recycle_or_new(int64_t element_bits, int64_t cap) {
     if (bucket >= 0 && g_array_typed_pool_count[bucket] > 0) {
         int idx = g_array_typed_pool_count[bucket] - 1;
         WValue v = g_array_typed_pool[bucket][idx];
-        WArray *a = (WArray *)w_as_ptr(v);
+        WArray *a = w_as_array(v);
         if (a->cap >= cap) {
             g_array_typed_pool_count[bucket]--;
             a->flags = 0;
@@ -41754,7 +41872,7 @@ WValue w_array_recycle_or_new(int64_t element_bits, int64_t cap) {
 
 void w_array_recycle(WValue v) {
     if (!w_is_array(v)) return;
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     if (a->flags & W_FLAG_INLINE) return;
     if (a->flags & W_POOL_FLAG_POOLED) return;
     int bucket = bits_to_bucket(a->ebits);
@@ -41816,7 +41934,7 @@ void w_strbuf_recycle(WValue v) {
 WValue w_array_reuse_or_new_empty(WValue *slot) {
     WValue v = *slot;
     if (v != W_NIL) {
-        WArray *arr = (WArray *)w_as_ptr(v);
+        WArray *arr = w_as_array(v);
         arr->start = 0;
         arr->size = 0;
         return v;
@@ -41897,7 +42015,7 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
     const char *name = as_str(name_v);
 
     if (w_is_array(recv)) {
-        WArray *a = (WArray *)w_as_ptr(recv);
+        WArray *a = w_as_array(recv);
         if (strcmp(name, "flags") == 0) return w_int(a->flags);
         if (strcmp(name, "ebits") == 0) return w_int(a->ebits);
         if (strcmp(name, "start") == 0) return w_int(a->start);
@@ -43897,7 +44015,7 @@ WValue w_hash_reuse_and_drain_or_new(WValue *slot) {
                 /* Subtag merge — discriminate poly (ebits=65) vs
                  * typed (ebits ∈ {4,8,16,32,64,-32,-64}) by ebits to route
                  * each to its correct pool. */
-                WArray *a = (WArray *)w_as_ptr(val);
+                WArray *a = w_as_array(val);
                 if (a->ebits == 65) {
                     w_array_recycle_public(val);
                 } else {
@@ -44645,7 +44763,7 @@ static void w_bind_method_args(WMethod *m, WValue *source, int argc,
     int rest_count = argc - expected + 1;
     if (rest_count < 0) rest_count = 0;
     WValue rest = w_array_new_uninit_sized(65, rest_count);
-    WArray *rest_array = (WArray *)w_as_ptr(rest);
+    WArray *rest_array = w_as_array(rest);
     for (int i = 0; i < rest_count; i++)
         ((WValue *)rest_array->slots)[i] = source[splat + i];
     if (splat < capacity) out[splat] = rest;
@@ -44864,7 +44982,7 @@ WValue w_closure_new_a(void *fn, WValue *captures, int count, int arity) {
  * end); a non-array value goes to param 0 verbatim, nil beyond. */
 WValue w_destructure_index(WValue v, int64_t i) {
     if (w_is_array(v)) {
-        WArray *a = (WArray *)w_as_ptr(v);
+        WArray *a = w_as_array(v);
         if (i < a->size) return w_array_get(v, w_int(i));
         return W_NIL;
     }
@@ -44996,9 +45114,11 @@ static int g_typenames_ready = 0;
 static WValue g_tn_nil, g_tn_bool, g_tn_int, g_tn_bigint, g_tn_float,
     g_tn_string, g_tn_strbuf, g_tn_symbol, g_tn_char, g_tn_big_array,
     g_tn_small_array, g_tn_array, g_tn_hash, g_tn_range, g_tn_regex,
+    g_tn_regex_match,
     g_tn_decimal, g_tn_bigdecimal, g_tn_currency, g_tn_quantity, g_tn_duration, g_tn_date,
     g_tn_complex, g_tn_rational, g_tn_color, g_tn_ipv4, g_tn_ipv6, g_tn_mac,
-    g_tn_uuid, g_tn_mmap, g_tn_object, g_tn_class, g_tn_unknown;
+    g_tn_uuid, g_tn_mmap, g_tn_socket, g_tn_vec2f, g_tn_point2d, g_tn_vec2i, g_tn_vec3f,
+    g_tn_sockaddr, g_tn_object, g_tn_class, g_tn_unknown;
 
 static void w_typenames_init(void) {
     g_tn_nil = w_string("Nil");            g_tn_bool = w_string("Boolean");
@@ -45008,7 +45128,8 @@ static void w_typenames_init(void) {
     g_tn_char = w_string("Char");          g_tn_big_array = w_string("BigArray");
     g_tn_small_array = w_string("SmallArray"); g_tn_array = w_string("Array");
     g_tn_hash = w_string("Hash");          g_tn_range = w_string("Range");
-    g_tn_regex = w_string("Regex");        g_tn_decimal = w_string("Decimal");
+    g_tn_regex = w_string("Regex");        g_tn_regex_match = w_string("RegexMatch");
+    g_tn_decimal = w_string("Decimal");
     g_tn_bigdecimal = w_string("BigDecimal");
     g_tn_currency = w_string("Currency");  g_tn_quantity = w_string("Quantity");
     g_tn_duration = w_string("Duration");  g_tn_date = w_string("Date");
@@ -45016,6 +45137,10 @@ static void w_typenames_init(void) {
     g_tn_color = w_string("Color");        g_tn_ipv4 = w_string("IPv4");
     g_tn_ipv6 = w_string("IPv6");          g_tn_mac = w_string("MAC");
     g_tn_uuid = w_string("UUID");          g_tn_mmap = w_string("Mmap");
+    g_tn_socket = w_string("Socket");
+    g_tn_vec2f = w_string("Vec2f");        g_tn_point2d = w_string("Point2D");
+    g_tn_vec2i = w_string("Vec2i");        g_tn_vec3f = w_string("Vec3f");
+    g_tn_sockaddr = w_string("SockAddr");
     g_tn_object = w_string("Object");      g_tn_class = w_string("Class");
     g_tn_unknown = w_string("Unknown");
     g_typenames_ready = 1;
@@ -45037,7 +45162,9 @@ WValue __w_type(WValue v) {
     if (w_is_array(v) || w_is_body(v)) return g_tn_array;
     if (w_is_hash(v))   return g_tn_hash;
     if (w_is_range(v))  return g_tn_range;
+    if (w_is_range_imm(v)) return g_tn_range;
     if (w_is_regex(v))  return g_tn_regex;
+    if (w_is_regex_match(v)) return g_tn_regex_match;
     if (w_is_decimal(v))  return g_tn_decimal;
     if (w_is_currency(v)) return g_tn_currency;
     if (w_is_quantity(v)) return g_tn_quantity;
@@ -45049,6 +45176,16 @@ WValue __w_type(WValue v) {
     if (w_is_ipv4(v))     return g_tn_ipv4;
     if (w_is_ipv6(v))     return g_tn_ipv6;
     if (w_is_mac(v))      return g_tn_mac;
+    if (w_is_socket(v))   return g_tn_socket;
+    if (w_is_simd2d(v)) {
+        uint8_t st = w_simd2d_subtag(v);
+        if (st == 0) return g_tn_vec2f;
+        if (st == 2) return g_tn_point2d;
+        if (st == 3) return g_tn_vec2i;
+        return g_tn_vec2f;
+    }
+    if (w_is_simd3d(v))   return g_tn_vec3f;
+    if (w_is_sockaddr(v)) return g_tn_sockaddr;
     if (w_is_obj(v) && w_subtag(v) == W_SUBTAG_UUID) return g_tn_uuid;
     if (w_is_mmap(v))     return g_tn_mmap;
     if (w_is_domain_obj(v)) {
@@ -45181,7 +45318,7 @@ static WValue w_read_file_bytes_path(const char *path) {
 
     int64_t len = (int64_t)st.st_size;
     WValue bytes = w_bytes_new(len);
-    WArray *a = (WArray *)w_as_ptr(bytes);
+    WArray *a = w_as_array(bytes);
     uint8_t *dst = (uint8_t *)a->slots;
     int64_t off = 0;
     while (off < len) {
@@ -45209,7 +45346,7 @@ WValue __w_read_file_bytes(WValue path_val) {
 WValue __w_read_file(WValue path_val) {
     WValue bytes = __w_read_file_bytes(path_val);
     if (bytes == W_NIL) return W_NIL;
-    WArray *a = (WArray *)w_as_ptr(bytes);
+    WArray *a = w_as_array(bytes);
     const char *data = (const char *)a->slots + a->start;
     WValue result = w_string_n(data, (size_t)a->size);
     w_value_free(bytes);
@@ -45928,7 +46065,7 @@ static WValue w_write_file_mode(WValue path_val, WValue content_val, const char 
     if (!f) return W_FALSE;
     size_t want = 0, wrote = 0;
     if (w_is_bytes(content_val)) {
-        WArray *a = (WArray *)w_as_ptr(content_val);
+        WArray *a = w_as_array(content_val);
         uint8_t *data = (uint8_t *)a->slots + a->start;
         want = (size_t)a->size;
         if (want > 0) wrote = fwrite(data, 1, want, f);
@@ -46125,7 +46262,7 @@ WValue __w_file_chmod(WValue path_val, WValue mode_val) {
 
 WValue __w_digest_bytes64(WValue bytes_val) {
     if (w_is_bytes(bytes_val)) {
-        WArray *a = (WArray *)w_as_ptr(bytes_val);
+        WArray *a = w_as_array(bytes_val);
         const uint8_t *data = ((const uint8_t *)a->slots) + a->start;
         return w_u64(w_hash_wyhash(data, (size_t)a->size));
     }
@@ -46251,7 +46388,7 @@ WValue __w_system(WValue cmd_val) {
  * pid, or -errno style negative on failure. */
 WValue __w_proc_spawn(WValue argv_val) {
     w_sandbox_gate("proc_spawn", "");
-    WArray *arr = (WArray *)w_as_ptr(argv_val);
+    WArray *arr = w_as_array(argv_val);
     int argc = (int)arr->size;
     if (argc < 1) return w_int(-1);
     char **argv = (char **)malloc(sizeof(char *) * (argc + 1));
@@ -46781,10 +46918,10 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
     char inline_buf[6];
     const char *tx; size_t tlen;
     w_str_data(text_val, inline_buf, &tx, &tlen);
-    WArray *la = (WArray *)w_as_ptr(lits_val);
-    WArray *oa = (WArray *)w_as_ptr(offs_val);
-    WArray *na = (WArray *)w_as_ptr(lens_val);
-    WArray *ha = (WArray *)w_as_ptr(hdr_val);
+    WArray *la = w_as_array(lits_val);
+    WArray *oa = w_as_array(offs_val);
+    WArray *na = w_as_array(lens_val);
+    WArray *ha = w_as_array(hdr_val);
     int64_t *lits = (int64_t *)la->slots + la->start;
     int64_t *offs = (int64_t *)oa->slots + oa->start;
     int64_t *lens = (int64_t *)na->slots + na->start;
@@ -47327,8 +47464,8 @@ static int w_value_compare(const void *ap, const void *bp) {
  * w_value_compare per element; arrays being sorted are small (decorated
  * pairs), so the per-element w_int index boxing is negligible. */
 static int w_array_lex_compare(WValue a, WValue b) {
-    int64_t na = (int64_t)((WArray *)w_as_ptr(a))->size;
-    int64_t nb = (int64_t)((WArray *)w_as_ptr(b))->size;
+    int64_t na = (int64_t)(w_as_array(a))->size;
+    int64_t nb = (int64_t)(w_as_array(b))->size;
     int64_t n = na < nb ? na : nb;
     for (int64_t i = 0; i < n; i++) {
         WValue ea = w_array_get(a, w_int(i));
@@ -47359,7 +47496,7 @@ WValue w_method_call_fast(WValue recv, WValue name, WValue *args_ptr, int argc) 
 
 /* ---- Monomorphic inline cache ---- */
 
-static inline uint64_t w_dispatch_key(WValue v) {
+uint64_t w_dispatch_key(WValue v) {
     if (__builtin_expect(v < 0x10, 0)) return 0;
     uint64_t hi = v >> 48;
     if (hi == 0) {
@@ -47371,6 +47508,9 @@ static inline uint64_t w_dispatch_key(WValue v) {
         if (subtag == W_SUBTAG_CLASS) {
             WClass *klass = (WClass *)w_as_ptr(v);
             return 0x200000000ULL | (uint64_t)klass->class_id;
+        }
+        if (subtag == W_SUBTAG_SOCKET) {
+            return 0x80u | W_TYPE_SOCKET;
         }
         if (subtag == W_SUBTAG_GENERIC) {
             uint8_t type = *(uint8_t *)w_as_ptr(v);
@@ -47394,9 +47534,14 @@ static inline uint64_t w_dispatch_key(WValue v) {
     /* BigInt's top-level tag (v4) keeps its historical dispatch key so
      * every IC, registration table, and the compiler's type_dispatch_key
      * stay valid across the encoding move. Tested before the double
-     * catch-all: a bigint classified as 0xFF would hit the Float table. */
+     * catch-all: a bigint classified as 0xFF would hit the Float table.
+     * Array (v5) follows the same convention on 0xFFF4 → 0x0A. */
+    if (hi == 0xFFF2) return 0xB0u | (uint64_t)w_simd2d_subtag(v);
+    if (hi == 0xFFF3) return 0xB4u;
+    if (hi == 0xFFF4) return W_SUBTAG_ARRAY;
+    if (hi == 0xFFF6) return 0xB6u;
     if (hi == 0xFFF8) return W_SUBTAG_BIGINT;
-    if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF2..0xFFF7 free) */
+    if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF5, 0xFFF7 free) */
     if (hi == 0xFFFD) {
         if (is_currency_any(v)) return 0xC0u;
         if (is_quantity_any(v)) return 0xC1u;
@@ -47420,6 +47565,12 @@ static inline uint64_t w_dispatch_key(WValue v) {
         if (subtype == W_PACKED_NODE) {
             return 0x400000000ULL | (uint64_t)w_node_kind(v);
         }
+        /* Immediate Range rides Location's mode space (mode 11) but
+         * dispatches as Range (W_SUBTAG_RANGE), never as Location —
+         * the BigInt precedent: the value's encoding moved, its
+         * dispatch key stays the type's own. */
+        if (subtype == W_PACKED_LOCATION && ((v >> 43) & 0x3) == 0x3)
+            return W_SUBTAG_RANGE;
         return 0xE0u | subtype;
     }
     /* W_TAG_CHAR (hi=0xFFFC) holds 4 lexical subtypes (Token, LexChar,
@@ -47705,7 +47856,7 @@ static WValue w_ic_array_idxset(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_array_clear(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     arr->start = 0;
     arr->size = 0;
     return r;
@@ -47777,12 +47928,12 @@ static WValue w_ic_array_slice_view(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_array_data(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     return w_int((int64_t)(uintptr_t)arr->slots);
 }
 static WValue w_ic_array_raw_ptr(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     int64_t abs_bits = array_storage_bits(arr->ebits);
     uintptr_t base = (abs_bits == 4)
         ? (uintptr_t)((uint8_t *)arr->slots + (int64_t)arr->start / 2)
@@ -47794,7 +47945,7 @@ static WValue w_ic_array_raw_ptr(WValue r, WValue *a, int c) {
  * reducer rather than allocating decoded BigInts. */
 static WValue w_ic_array_min(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     if (arr->ebits == 65) {
         if (arr->size == 0) return W_NIL;
         WValue best = array_slot_load_decoded(arr, 0);
@@ -47810,7 +47961,7 @@ static WValue w_ic_array_min(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_array_max(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     if (arr->ebits == 65) {
         if (arr->size == 0) return W_NIL;
         WValue best = array_slot_load_decoded(arr, 0);
@@ -47829,7 +47980,7 @@ static WValue w_ic_array_sum(WValue r, WValue *a, int c) {
      * (Ruby Enumerable#sum(init)); previously the arg was discarded, so
      * sum(10) == sum() and [].sum(5) == 0. */
     WValue init = (c >= 1) ? a[0] : w_box_int(0);
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     if (arr->ebits == 65) {
         /* Polymorphic WValue storage may contain ints, floats, decimals, or a
          * mix, so accumulate through w_add. Packed u64 (ebits=64) uses the
@@ -47852,7 +48003,7 @@ static WValue w_ic_array_sum(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_array_fastsum(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     if (arr->ebits == 65) {
         /* Same hazard as w_ic_array_sum above: polymorphic WValue storage is
          * neither float nor signed-int, so the unsigned reducer would
@@ -47868,12 +48019,12 @@ static WValue w_ic_array_fastsum(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_array_sumsq(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     return array_is_float(arr) ? w_array_sumsq_float(r) : W_NIL;
 }
 static WValue w_ic_array_dot(WValue r, WValue *a, int c) {
     if (c < 1) die("dot requires 1 argument");
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     return array_is_byte_int_array(arr) ? w_array_dot_i8(r, a[0])
                                          : w_array_dot_float(r, a[0]);
 }
@@ -47891,42 +48042,42 @@ static WValue w_ic_array_scale_bang(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_array_cos(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     return array_is_float(arr) ? w_array_cos_float(r)
          : array_is_signed_int(arr) ? w_array_cos_signed(r)
                                      : w_array_cos_unsigned(r);
 }
 static WValue w_ic_array_sin(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     return array_is_float(arr) ? w_array_sin_float(r)
          : array_is_signed_int(arr) ? w_array_sin_signed(r)
                                      : w_array_sin_unsigned(r);
 }
 static WValue w_ic_array_sqrt(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     return array_is_float(arr) ? w_array_sqrt_float(r)
          : array_is_signed_int(arr) ? w_array_sqrt_signed(r)
                                      : w_array_sqrt_unsigned(r);
 }
 static WValue w_ic_array_exp(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     return array_is_float(arr) ? w_array_exp_float(r)
          : array_is_signed_int(arr) ? w_array_exp_signed(r)
                                      : w_array_exp_unsigned(r);
 }
 static WValue w_ic_array_log(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     return array_is_float(arr) ? w_array_log_float(r)
          : array_is_signed_int(arr) ? w_array_log_signed(r)
                                      : w_array_log_unsigned(r);
 }
 static WValue w_ic_array_tan(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    WArray *arr = (WArray *)w_as_ptr(r);
+    WArray *arr = w_as_array(r);
     return array_is_float(arr) ? w_array_tan_float(r)
          : array_is_signed_int(arr) ? w_array_tan_signed(r)
                                      : w_array_tan_unsigned(r);
@@ -48429,7 +48580,7 @@ static WValue w_ic_string_codes(WValue r, WValue *a, int c) {
         count++;
     }
     WValue result = w_array_new(64, (int64_t)count);
-    WArray *ta = (WArray *)w_as_ptr(result);
+    WArray *ta = w_as_array(result);
     ta->size = (int64_t)count;
     int64_t *data = (int64_t *)ta->slots;
     const unsigned char *p = (const unsigned char *)str;
@@ -52303,9 +52454,109 @@ static WValue w_ic_regex_match(WValue r, WValue *a, int c) {
     if (c < 1) die("regex match requires 1 argument");
     return w_regex_match(r, a[0]);
 }
+static WValue w_ic_regex_match_data(WValue r, WValue *a, int c) {
+    if (c < 1) die("regex match_data requires 1 argument");
+    return w_regex_match_data(r, a[0]);
+}
 static WValue w_ic_regex_to_s(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_to_s(r);
+}
+
+static WRegexMatch *as_regex_match(WValue v) {
+    if (!w_is_regex_match(v)) die("expected RegexMatch");
+    return (WRegexMatch *)w_as_ptr(v);
+}
+static WValue w_regex_match_array_at(WValue array_val, int64_t index) {
+    WArray *array = w_as_array(array_val);
+    if (index < 0) index += array->size;
+    if (index < 0 || index >= array->size) return W_NIL;
+    return array_slot_load_decoded(array, index);
+}
+static int64_t w_regex_match_group_index(WRegexMatch *match, WValue key) {
+    if (w_is_integer_any(key)) return w_to_i64(key);
+    if (!w_is_stringy(key)) return INT64_MIN;
+    WValue name = w_is_symbol(key) ? w_string(as_str(key)) : key;
+    if (w_hash_has_key(match->name_to_group, name) != W_TRUE) return INT64_MIN;
+    return w_to_i64(w_hash_get(match->name_to_group, name));
+}
+static WValue w_ic_regex_match_idx(WValue r, WValue *a, int c) {
+    if (c < 1) die("RegexMatch#[] requires 1 argument");
+    WRegexMatch *match = as_regex_match(r);
+    int64_t index = w_regex_match_group_index(match, a[0]);
+    if (index == INT64_MIN) return W_NIL;
+    return w_regex_match_array_at(match->groups, index);
+}
+static WValue w_ic_regex_match_offset(WValue r, WValue *a, int c) {
+    if (c < 1) die("RegexMatch#offset requires 1 argument");
+    WRegexMatch *match = as_regex_match(r);
+    int64_t index = w_regex_match_group_index(match, a[0]);
+    if (index == INT64_MIN) return W_NIL;
+    return w_regex_match_array_at(match->offsets, index);
+}
+static WValue w_ic_regex_match_begin_offset(WValue r, WValue *a, int c) {
+    WValue key = c > 0 ? a[0] : w_int(0);
+    WValue span_args[1] = {key};
+    WValue span = w_ic_regex_match_offset(r, span_args, 1);
+    if (span == W_NIL) return W_NIL;
+    return w_regex_match_array_at(span, 0);
+}
+static WValue w_ic_regex_match_end_offset(WValue r, WValue *a, int c) {
+    WValue key = c > 0 ? a[0] : w_int(0);
+    WValue span_args[1] = {key};
+    WValue span = w_ic_regex_match_offset(r, span_args, 1);
+    if (span == W_NIL) return W_NIL;
+    return w_regex_match_array_at(span, 1);
+}
+static WValue w_ic_regex_match_match(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_regex_match_array_at(as_regex_match(r)->groups, 0);
+}
+static WValue w_ic_regex_match_size(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_int((w_as_array(as_regex_match(r)->groups))->size);
+}
+static WValue w_regex_match_copy_from(WValue source, int32_t first) {
+    WArray *array = w_as_array(source);
+    WValue out = w_array_new_empty();
+    for (int32_t i = first; i < array->size; i++)
+        w_array_push(out, array_slot_load_decoded(array, i));
+    return out;
+}
+static WValue w_ic_regex_match_captures(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_regex_match_copy_from(as_regex_match(r)->groups, 1);
+}
+static WValue w_ic_regex_match_names(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_hash_keys(as_regex_match(r)->name_to_group);
+}
+static WValue w_regex_match_named_values(WRegexMatch *match, WValue source) {
+    WHash *names = (WHash *)w_as_ptr(match->name_to_group);
+    WValue out = w_hash_new();
+    for (uint32_t i = 0; i < names->used; i++) {
+        if (names->keys[i] == W_MEMO_MISS) continue;
+        int64_t index = w_to_i64(names->values[i]);
+        w_hash_set(out, names->keys[i], w_regex_match_array_at(source, index));
+    }
+    return out;
+}
+static WValue w_ic_regex_match_named_captures(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    WRegexMatch *match = as_regex_match(r);
+    return w_regex_match_named_values(match, match->groups);
+}
+static WValue w_ic_regex_match_named_offsets(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    WRegexMatch *match = as_regex_match(r);
+    return w_regex_match_named_values(match, match->offsets);
+}
+static WValue w_ic_regex_match_to_a(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_regex_match_copy_from(as_regex_match(r)->groups, 0);
+}
+static WValue w_ic_regex_match_to_s(WValue r, WValue *a, int c) {
+    return w_ic_regex_match_match(r, a, c);
 }
 
 static WValue w_ic_thread_join(WValue r, WValue *a, int c) {
@@ -52783,6 +53034,23 @@ static WICEntry w_ic_regex_table[] = {
     {0, w_ic_regex_match},  /* WN_matchop */
     {0, w_ic_regex_match},  /* WN_match_q */
     {0, w_ic_regex_to_s},
+    {0, w_ic_regex_match_data},
+    {0, NULL}
+};
+
+static WICEntry w_ic_regex_match_table[] = {
+    {0, w_ic_regex_match_idx},
+    {0, w_ic_regex_match_offset},
+    {0, w_ic_regex_match_begin_offset},
+    {0, w_ic_regex_match_end_offset},
+    {0, w_ic_regex_match_match},
+    {0, w_ic_regex_match_size},
+    {0, w_ic_regex_match_captures},
+    {0, w_ic_regex_match_names},
+    {0, w_ic_regex_match_named_captures},
+    {0, w_ic_regex_match_named_offsets},
+    {0, w_ic_regex_match_to_a},
+    {0, w_ic_regex_match_to_s},
     {0, NULL}
 };
 
@@ -53391,6 +53659,20 @@ static void w_init_ic_tables(void) {
     w_ic_regex_table[1].name  = WN_matchop;
     w_ic_regex_table[2].name  = WN_match_q;
     w_ic_regex_table[3].name  = WN_to_s;
+    w_ic_regex_table[4].name  = w_string("match_data");
+    /* RegexMatch */
+    w_ic_regex_match_table[0].name  = WN_idx;
+    w_ic_regex_match_table[1].name  = w_string("offset");
+    w_ic_regex_match_table[2].name  = w_string("begin_offset");
+    w_ic_regex_match_table[3].name  = w_string("end_offset");
+    w_ic_regex_match_table[4].name  = w_string("match");
+    w_ic_regex_match_table[5].name  = WN_size;
+    w_ic_regex_match_table[6].name  = w_string("captures");
+    w_ic_regex_match_table[7].name  = w_string("names");
+    w_ic_regex_match_table[8].name  = w_string("named_captures");
+    w_ic_regex_match_table[9].name  = w_string("named_offsets");
+    w_ic_regex_match_table[10].name = w_string("to_a");
+    w_ic_regex_match_table[11].name = WN_to_s;
     /* Thread */
     w_ic_thread_table[0].name = WN_join;
     w_ic_thread_table[1].name = WN_kill;
@@ -53493,6 +53775,7 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
         case 0x84: table = w_ic_channel_table; break;  /* 0x80 | W_TYPE_CHANNEL=4 */
         case 0x0B: table = w_ic_strbuf_table;  break;  /* W_SUBTAG_STRBUF */
         case 0x07: table = w_ic_regex_table;   break;  /* W_SUBTAG_REGEX */
+        case 0x0E: table = w_ic_regex_match_table; break; /* W_SUBTAG_REGEX_MATCH */
         case 0x81: table = w_ic_thread_table;  break;  /* 0x80 | W_TYPE_THREAD=1 */
         case 0x83: table = w_ic_socket_table;  break;  /* 0x80 | W_TYPE_SOCKET=3 */
         case 0x91: table = w_ic_mmap_table;    break;  /* 0x80 | W_TYPE_MMAP=17 */
@@ -54657,13 +54940,16 @@ WValue w_inspect_s(WValue v) {
         const char *s = as_str(v);
         snprintf(buf, sizeof(buf), "[0x%016llX] string(\"%.*s\")",
                  (unsigned long long)v, 40, s);
+    } else if (w_is_array(v)) {
+        snprintf(buf, sizeof(buf), "[0x%016llX] array(%p)",
+                 (unsigned long long)v, (void *)w_as_array(v));
     } else if (w_is_obj(v)) {
         void *ptr = w_as_ptr(v);
         const char *kind = "generic";
         switch (w_subtag(v)) {
-            case W_SUBTAG_ARRAY:   kind = "array";   break;
             case W_SUBTAG_HASH:    kind = "hash";    break;
             case W_SUBTAG_CLOSURE: kind = "closure"; break;
+            case W_SUBTAG_REGEX_MATCH: kind = "regex-match"; break;
             case W_SUBTAG_INSTANCE:  kind = "instance";  break;
             case W_SUBTAG_CLASS:   kind = "class";   break;
         }
@@ -55134,7 +55420,7 @@ WValue w_atomic_cas(WValue a, WValue expected, WValue desired) {
  * so the C11 atomic builtins apply directly. */
 
 static inline _Atomic int64_t *w_i64_slot_atomic(WValue arr_val, WValue idx_val) {
-    WArray *a = (WArray *)w_as_ptr(arr_val);
+    WArray *a = w_as_array(arr_val);
     int64_t idx = w_as_int(idx_val);
     return (_Atomic int64_t *)((int64_t *)a->slots + a->start + idx);
 }
@@ -55465,7 +55751,7 @@ WValue w_socket_tcp_listen(const char *host, int port, int backlog) {
     s->listening = 1;
     s->closed = 0;
     s->ssl = NULL;
-    return w_box_ptr(s, W_SUBTAG_GENERIC);
+    return w_box_ptr(s, W_SUBTAG_SOCKET);
 }
 
 WValue w_socket_accept(WValue listener) {
@@ -55495,7 +55781,7 @@ WValue w_socket_accept(WValue listener) {
             conn->listening = 0;
             conn->closed = 0;
             conn->ssl = NULL;
-            return w_box_ptr(conn, W_SUBTAG_GENERIC);
+            return w_box_ptr(conn, W_SUBTAG_SOCKET);
         }
 
         if (errno == EINTR) continue;
@@ -55762,12 +56048,12 @@ WValue w_socket_alpn_protocol(WValue sock) {
 
 static WArray *as_bytes_arr(WValue v) {
     if (!w_is_bytes(v)) die("expected ByteArray (WArray<u8>)");
-    return (WArray *)w_as_ptr(v);
+    return w_as_array(v);
 }
 
 WValue w_bytes_new(int64_t length) {
     WValue arr = w_array_new(8, length > 0 ? length : 1);
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     a->size = (int32_t)length;  /* size==length, payload zero-init by w_array_new */
     return arr;
 }
@@ -55775,7 +56061,7 @@ WValue w_bytes_new(int64_t length) {
 WValue w_bytes_from_data(const uint8_t *data, int64_t length) {
     WValue arr = w_bytes_new(length);
     if (length > 0) {
-        WArray *a = (WArray *)w_as_ptr(arr);
+        WArray *a = w_as_array(arr);
         memcpy(a->slots, data, (size_t)length);
     }
     return arr;
@@ -55817,7 +56103,7 @@ WValue w_bytes_concat(WValue a_val, WValue b_val) {
     WArray *bb = as_bytes_arr(b_val);
     int64_t total = (int64_t)aa->size + bb->size;
     WValue out = w_bytes_new(total);
-    WArray *out_a = (WArray *)w_as_ptr(out);
+    WArray *out_a = w_as_array(out);
     if (aa->size > 0) memcpy(out_a->slots, aa->slots, (size_t)aa->size);
     if (bb->size > 0) memcpy(((uint8_t *)out_a->slots) + aa->size, bb->slots, (size_t)bb->size);
     return out;
@@ -55838,7 +56124,7 @@ WValue w_bool_array_new(int64_t cap) {
 }
 
 WValue w_bool_array_get(WValue arr, WValue index) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     int64_t i = w_as_int(index);
     if (i < 0 || i >= a->size) return W_FALSE;
     int64_t abs_i = a->start + i;
@@ -55847,7 +56133,7 @@ WValue w_bool_array_get(WValue arr, WValue index) {
 }
 
 WValue w_bool_array_set(WValue arr, WValue index, WValue val) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     int64_t i = w_as_int(index);
     if (i < 0 || i >= a->size) return val;
     /* Tungsten truthiness: only W_NIL and W_FALSE are falsy. */
@@ -55861,7 +56147,7 @@ WValue w_bool_array_set(WValue arr, WValue index, WValue val) {
 }
 
 WValue w_bool_array_size(WValue arr) {
-    return w_int(((WArray *)w_as_ptr(arr))->size);
+    return w_int((w_as_array(arr))->size);
 }
 
 /* ---- Typed Array — packed integer array or float array ----
@@ -56140,7 +56426,7 @@ WValue w_array_new(int64_t element_bits, int64_t cap) {
     a->size = 0;
     a->cap = (int32_t)(cap > 0 ? cap : 8);
     a->slots = calloc(1, array_byte_size(element_bits, a->cap));
-    return w_box_ptr(a, W_SUBTAG_ARRAY);
+    return w_box_array(a);
 }
 
 /* Like w_array_new but leaves `slots` UNINITIALIZED (malloc, not calloc).
@@ -56160,7 +56446,7 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
     a->size = 0;
     a->cap = (int32_t)(cap > 0 ? cap : 8);
     a->slots = malloc(array_byte_size(element_bits, a->cap));
-    return w_box_ptr(a, W_SUBTAG_ARRAY);
+    return w_box_array(a);
 }
 
 /* One-allocation variant for small, fixed typed literals. The WArray header
@@ -56183,7 +56469,7 @@ WValue w_array_new_inline_uninit_sized(int64_t element_bits, int64_t n) {
     a->size = (int32_t)n;
     a->cap = (int32_t)cap;
     a->slots = (WValue *)((uint8_t *)a + slot_offset);
-    return w_box_ptr(a, W_SUBTAG_ARRAY);
+    return w_box_array(a);
 }
 
 /* Typed-array parameter guard for the native-fn boundary.
@@ -56213,7 +56499,7 @@ WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
                            WValue site_v) {
     int64_t got_ebits;
     if (w_is_array(arr)) {
-        got_ebits = (int64_t)((WArray *)w_as_ptr(arr))->ebits;
+        got_ebits = (int64_t)(w_as_array(arr))->ebits;
     } else if (w_is_small_array(arr)) {
         got_ebits = (int64_t)((WSmallArray *)w_as_ptr(arr))->ebits;
     } else if (w_is_big_array(arr)) {
@@ -56289,7 +56575,7 @@ WValue w_array_new_aligned(WValue element_bits_v, WValue size_v) {
     a->size = (int32_t)size;
     a->cap = (int32_t)size;
     a->slots = (WValue *)base;
-    return w_box_ptr(a, W_SUBTAG_ARRAY);
+    return w_box_array(a);
 }
 
 
@@ -56311,7 +56597,7 @@ WValue w_array_view_raw(uint8_t *data, int64_t element_bits, int64_t length) {
     a->size = (int32_t)length;
     a->cap = (int32_t)length;
     a->slots = (WValue *)data;
-    return w_box_ptr(a, W_SUBTAG_ARRAY);
+    return w_box_array(a);
 }
 
 /* Call-site reuse typed-array allocation. Reuses cached buffer if
@@ -56321,7 +56607,7 @@ WValue w_array_view_raw(uint8_t *data, int64_t element_bits, int64_t length) {
 WValue w_array_reuse_or_new(WValue *slot, int64_t element_bits, int64_t cap) {
     WValue v = *slot;
     if (v != W_NIL) {
-        WArray *a = (WArray *)w_as_ptr(v);
+        WArray *a = w_as_array(v);
         if (a->ebits == (int8_t)element_bits && a->cap >= cap) {
             a->start = 0;
             a->size = 0;
@@ -56337,7 +56623,7 @@ WValue w_array_push(WValue arr, WValue val) {
     if (w_is_body(arr)) {
         w_raise(w_string("push: cannot mutate an AST body reference (immutable once frozen)"));
     }
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if ((a->flags & W_FLAG_OWNED) == 0) {
         w_raise(w_string("typed array push: cannot grow a borrowed view"));
     }
@@ -56713,7 +56999,7 @@ static int array_elementwise_float_fast(WArray *la, WArray *ra, WArray *out,
  * have matching ebits and capacity >= la->size; the reuse wrapper guarantees
  * this. */
 static WValue array_elementwise_into(WValue out_v, WValue lhs, WValue rhs, EltOp op) {
-    WArray *la = (WArray *)w_as_ptr(lhs);
+    WArray *la = w_as_array(lhs);
     int8_t eb = la->ebits;
     int32_t n = la->size;
     if (out_v == W_NIL) {
@@ -56724,13 +57010,13 @@ static WValue array_elementwise_into(WValue out_v, WValue lhs, WValue rhs, EltOp
         int64_t out_sbits = array_storage_bits(eb);
         out_v = (out_sbits >= 8) ? w_array_new_uninit(eb, n) : w_array_new(eb, n);
     }
-    WArray *out = (WArray *)w_as_ptr(out_v);
+    WArray *out = w_as_array(out_v);
     out->start = 0;
     out->size = n;
     int rhs_is_array = w_is_array(rhs);
     WArray *ra = NULL;
     if (rhs_is_array) {
-        ra = (WArray *)w_as_ptr(rhs);
+        ra = w_as_array(rhs);
         if (ra->size != n) {
             w_raise(w_string("elementwise op: lhs.size != rhs.size"));
             return W_NIL;
@@ -56806,7 +57092,7 @@ static WValue array_elementwise(WValue lhs, WValue rhs, EltOp op) {
 
 WValue w_array_new_uninit_sized(int64_t element_bits, int64_t n) {
     WValue v = w_array_new_uninit(element_bits, n);
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     a->size = (int32_t)n;
     return v;
 }
@@ -56816,10 +57102,10 @@ WValue w_array_new_uninit_sized(int64_t element_bits, int64_t n) {
  * through as_numeric_double, so ints, decimals, and raw floats all land. */
 static WValue array_to_float_typed(WValue arr, int64_t element_bits) {
     if (!w_is_array(arr)) dief("to_f32/to_f64 expects an array");
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     int64_t n = a->size;
     WValue out = w_array_new(element_bits, n > 0 ? n : 8);
-    WArray *o = (WArray *)w_as_ptr(out);
+    WArray *o = w_as_array(out);
     for (int64_t i = 0; i < n; i++) {
         double d;
         if (a->ebits == 65) d = as_numeric_double(((WValue *)a->slots)[a->start + i]);
@@ -56835,8 +57121,8 @@ WValue w_array_to_f64(WValue arr) { return array_to_float_typed(arr, -64); }
 WValue w_array_to_f32(WValue arr) { return array_to_float_typed(arr, -32); }
 
 WValue w_elementwise_size_check(WValue lhs, WValue rhs) {
-    WArray *la = (WArray *)w_as_ptr(lhs);
-    WArray *ra = (WArray *)w_as_ptr(rhs);
+    WArray *la = w_as_array(lhs);
+    WArray *ra = w_as_array(rhs);
     if (ra->size != la->size) {
         w_raise(w_string("elementwise op: lhs.size != rhs.size"));
     }
@@ -56889,7 +57175,7 @@ static void w_fused_init_thresholds(void) {
 WValue w_fused_out_reuse_or_new(WValue *slot, int64_t element_bits, int64_t n) {
     WValue v = *slot;
     if (v != W_NIL) {
-        WArray *a = (WArray *)w_as_ptr(v);
+        WArray *a = w_as_array(v);
         if (a->ebits == (int8_t)element_bits && a->cap >= n) {
             a->start = 0;
             a->size = (int32_t)n;
@@ -56956,11 +57242,11 @@ int64_t w_fused_parallel_run(int64_t fn_addr, int64_t blk, int64_t n) {
  * `c` is dead. NOTE: only sound when the prior `c` is not aliased by another
  * live binding — the lowering must gate on that (see assignment lowering). */
 static WValue array_elementwise_reuse(WValue *slot, WValue lhs, WValue rhs, EltOp op) {
-    WArray *la = (WArray *)w_as_ptr(lhs);
+    WArray *la = w_as_array(lhs);
     WValue dst = *slot;
     WValue out;
     if (dst != W_NIL && w_is_array(dst)) {
-        WArray *d = (WArray *)w_as_ptr(dst);
+        WArray *d = w_as_array(dst);
         if ((d->flags & W_FLAG_OWNED) && d->ebits == la->ebits && d->cap >= la->size) {
             out = array_elementwise_into(dst, lhs, rhs, op);  /* in place */
             *slot = out;
@@ -57009,7 +57295,7 @@ WValue w_array_view_range(WValue arr, WValue from_v, WValue to_v, WValue exclusi
     if (w_is_big_array(arr)) {
         return w_big_array_view_range(arr, from_v, to_v, exclusive_v);
     }
-    WArray *src = (WArray *)w_as_ptr(arr);
+    WArray *src = w_as_array(arr);
     int64_t from = w_as_int(from_v);
     int     excl = (exclusive_v == W_TRUE);
     int64_t to;
@@ -57118,14 +57404,14 @@ static WValue w_view_find_root(WValue maybe_view) {
 void w_register_view(WValue parent, WValue view) {
     /* If `parent` is itself a view, flatten: attach the new view to the
      * original owner so we never build deep view chains. */
-    WArray *parent_arr = (WArray *)w_as_ptr(parent);
+    WArray *parent_arr = w_as_array(parent);
     if (parent_arr->flags & W_FLAG_VIEW) {
         WValue root = w_view_find_root(parent);
         if (root != W_NIL) parent = root;
     }
 
-    WArray *p = (WArray *)w_as_ptr(parent);
-    WArray *v = (WArray *)w_as_ptr(view);
+    WArray *p = w_as_array(parent);
+    WArray *v = w_as_array(view);
     WViewNode *n = w_view_find_or_create(parent);
     if (n->count == n->cap) {
         n->cap *= 2;
@@ -57147,7 +57433,7 @@ void w_views_after_realloc(WValue parent, WValue *old_slots, WValue *new_slots) 
     if (!n) return;
     for (int32_t i = 0; i < n->count; i++) {
         WValue   view_val = n->entries[i].view;
-        WArray  *view     = (WArray *)w_as_ptr(view_val);
+        WArray  *view     = w_as_array(view_val);
         WValue  *view_old = view->slots;
         WValue  *view_new = (WValue *)((uint8_t *)new_slots + n->entries[i].offset_bytes);
         view->slots = view_new;
@@ -57171,7 +57457,7 @@ void w_views_after_realloc(WValue parent, WValue *old_slots, WValue *new_slots) 
  * the user can already call today.
  */
 WValue w_array_view(WValue arr, WValue lo_v, WValue len_v) {
-    WArray *src = (WArray *)w_as_ptr(arr);
+    WArray *src = w_as_array(arr);
     int64_t lo  = w_as_int(lo_v);
     int64_t len = w_as_int(len_v);
     if (lo < 0) lo = src->size + lo;
@@ -57214,7 +57500,7 @@ WValue w_array_reinterpret(WValue arr, int64_t target_ebits) {
     if (!w_is_array(arr)) {
         w_raise(w_string("arr.view: receiver must be an array"));
     }
-    WArray *src = (WArray *)w_as_ptr(arr);
+    WArray *src = w_as_array(arr);
     int8_t src_ebits = src->ebits;
     int64_t src_abs  = array_storage_bits(src_ebits);
     int64_t tgt_abs  = array_storage_bits(target_ebits);
@@ -57266,7 +57552,7 @@ WValue w_array_zeros(int64_t element_bits, int64_t length) {
         w_raise(w_string("typed array zeros: length exceeds INT32_MAX — use BigArray for >2^31 elements"));
     }
     WValue v = w_array_new(element_bits, length);
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     a->size = (int32_t)(length > 0 ? length : 0);
     return v;
 }
@@ -57278,7 +57564,7 @@ WValue w_array_zeros(int64_t element_bits, int64_t length) {
  * raises if called on a borrowed view (would mutate caller-owned bytes
  * the view doesn't own). */
 WValue w_array_fill(WValue arr, WValue val) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if ((a->flags & W_FLAG_OWNED) == 0) {
         w_raise(w_string("typed array fill: cannot mutate a borrowed view"));
     }
@@ -57338,14 +57624,14 @@ WValue w_array_new_filled(WValue size_v, WValue fill) {
 }
 
 WValue w_array_pop(WValue arr) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (a->size == 0) return W_NIL;
     a->size--;
     return array_slot_load_decoded(a, a->size);
 }
 
 WValue w_array_shift(WValue arr) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (a->size == 0) return W_NIL;
     WValue result = array_slot_load_decoded(a, 0);
     a->start++;
@@ -57356,7 +57642,7 @@ WValue w_array_shift(WValue arr) {
 WValue w_array_unshift(WValue arr, WValue val) {
     // Same three-case deque model as w_array_unshift. Typed arrays
     // add int-vs-float branching and byte-sized storage math.
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     int64_t bits = array_storage_bits(a->ebits);
     // Case 1: O(1) — slot exists before start.
     if (a->start > 0) {
@@ -57443,7 +57729,7 @@ WValue w_array_get(WValue arr, WValue index) {
         if (i < 0 || (uint32_t)i >= len) return W_NIL;
         return w_body_arena_get(w_unbox_body_offset(arr), (uint32_t)i);
     }
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     int64_t i = w_as_int(index);
     if (i < 0) i += a->size;
     if (i < 0 || i >= a->size) return W_NIL;
@@ -57469,7 +57755,7 @@ static WValue w_index_fused_dispatch(WValue recv, WValue idx) {
 
 static int w_index_fused_raw(WValue recv, WValue idx, int64_t *out) {
     if (!w_is_body(recv) && w_is_array(recv)) {
-        WArray *a = (WArray *)w_as_ptr(recv);
+        WArray *a = w_as_array(recv);
         if (!array_is_wvalue(a) && !array_is_float(a) && a->ebits != 1) {
             int64_t i = w_as_int(idx);
             if (i < 0) i += a->size;
@@ -57512,7 +57798,7 @@ static void w_index_set_fused_dispatch(WValue recv, WValue idx, WValue val) {
 
 static int w_index_set_fused_raw(WValue recv, WValue idx, int64_t raw) {
     if (!w_is_body(recv) && w_is_array(recv)) {
-        WArray *a = (WArray *)w_as_ptr(recv);
+        WArray *a = w_as_array(recv);
         if (!array_is_wvalue(a) && !array_is_float(a) && a->ebits != 1) {
             int64_t i = w_as_int(idx);
             if (i < 0) i += a->size;
@@ -57554,7 +57840,7 @@ WValue w_array_get_i64(WValue arr, int64_t i) {
         if (i < 0 || (uint32_t)i >= len) return W_NIL;
         return w_body_arena_get(w_unbox_body_offset(arr), (uint32_t)i);
     }
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (i < 0) i += a->size;
     if (i < 0 || i >= a->size) return W_NIL;
     return array_slot_load_decoded(a, i);
@@ -57616,7 +57902,7 @@ WValue w_array_set(WValue arr, WValue index, WValue val) {
     if (w_is_body(arr)) {
         w_raise(w_string("[]=: cannot mutate an AST body reference (immutable once frozen)"));
     }
-    return w_array_write_at((WArray *)w_as_ptr(arr), w_as_int(index), val);
+    return w_array_write_at(w_as_array(arr), w_as_int(index), val);
 }
 
 /* Raw-index twin of w_array_set: the compiler emits this for `self[i] = v`
@@ -57624,13 +57910,13 @@ WValue w_array_set(WValue arr, WValue index, WValue val) {
  * is always a real WArray (never a packed body ref), so the body check and
  * the w_as_int unbox both drop out. Saves the w_int box at the call site too. */
 WValue w_array_set_i64(WValue arr, int64_t i, WValue val) {
-    return w_array_write_at((WArray *)w_as_ptr(arr), i, val);
+    return w_array_write_at(w_as_array(arr), i, val);
 }
 
 /* Unchecked WN_idx / WN_idxset for Array tier. No negative-
  * index normalization, no bounds check. Caller proves bounds. */
 WValue w_array_idx(WValue arr, WValue index) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     int64_t i = w_as_int(index);
     return array_slot_load_decoded(a, i);
 }
@@ -57639,12 +57925,12 @@ WValue w_array_idx(WValue arr, WValue index) {
  * already a raw machine int, saving a w_int box + w_as_int unbox per element
  * in hot array loops (core/array.w method bodies). */
 WValue w_array_idx_i64(WValue arr, int64_t i) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     return array_slot_load_decoded(a, i);
 }
 
 WValue w_array_idxset(WValue arr, WValue index, WValue val) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     int64_t i = w_as_int(index);
     if (array_is_wvalue(a)) {
         array_write(a, a->start + i, (uint64_t)val);
@@ -57679,7 +57965,7 @@ WValue w_array_idxset(WValue arr, WValue index, WValue val) {
  * For float ebits, raw_val carries the IEEE-754 bit pattern (caller
  * reinterprets from double to int64 before the call). */
 void w_array_set_unchecked(WValue arr, int64_t i, int64_t raw_val) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (array_is_float(a)) {
         double d;
         memcpy(&d, &raw_val, sizeof(double));
@@ -57691,7 +57977,7 @@ void w_array_set_unchecked(WValue arr, int64_t i, int64_t raw_val) {
 }
 
 int64_t w_array_get_unchecked_raw(WValue arr, int64_t i) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (array_is_float(a)) {
         double d = array_read_float(a, a->start + i);
         int64_t bits;
@@ -57708,7 +57994,7 @@ WValue w_array_size(WValue arr) {
      * Tungsten:AST:Body type class instead. Handled here too in case that
      * ever changes, matching w_array_get's defensive symmetry. */
     if (w_is_body(arr)) return w_int(w_unbox_body_length(arr));
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     return w_int(a->size);
 }
 
@@ -58251,7 +58537,7 @@ static inline double array_read_numeric(WArray *a, int64_t i, int signed_values)
 }
 
 static WValue array_minmax_int(WValue arr, int signed_values, int want_max) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (a->size == 0) return W_NIL;
     int64_t start = a->start;
     int64_t end = start + a->size;
@@ -58546,7 +58832,7 @@ static double array_float_reduce(WArray *a, WArray *b, WFloatReduceKind kind) {
 }
 
 static WValue array_minmax_float(WValue arr, int want_max) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (a->size == 0) return W_NIL;
     double best = array_read_float(a, a->start);
     if (isnan(best)) return w_float(best);
@@ -58614,7 +58900,7 @@ WValue w_array_max_unsigned(WValue arr) { return array_minmax_int(arr, 0, 1); }
 WValue w_array_max_float(WValue arr) { return array_minmax_float(arr, 1); }
 
 WValue w_array_sum_signed(WValue arr) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     __int128 acc = 0;
     int64_t end = a->start + a->size;
     for (int64_t i = a->start; i < end; i++) acc += (__int128)array_read_signed(a, i);
@@ -58622,7 +58908,7 @@ WValue w_array_sum_signed(WValue arr) {
 }
 
 WValue w_array_sum_unsigned(WValue arr) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     unsigned __int128 acc = 0;
     int64_t end = a->start + a->size;
     for (int64_t i = a->start; i < end; i++) acc += (unsigned __int128)array_read(a, i);
@@ -58630,7 +58916,7 @@ WValue w_array_sum_unsigned(WValue arr) {
 }
 
 WValue w_array_sum_float(WValue arr) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     double acc = 0.0;
     int64_t end = a->start + a->size;
     for (int64_t i = a->start; i < end; i++) acc += array_read_float(a, i);
@@ -58638,7 +58924,7 @@ WValue w_array_sum_float(WValue arr) {
 }
 
 WValue w_array_fastsum_float(WValue arr) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (!array_is_float(a)) {
         w_raise(w_string("fastsum: requires f32[], f64[], bf16[], or f16[]"));
         return W_NIL;
@@ -58647,7 +58933,7 @@ WValue w_array_fastsum_float(WValue arr) {
 }
 
 WValue w_array_sumsq_float(WValue arr) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (!array_is_float(a)) {
         w_raise(w_string("sumsq: requires f32[], f64[], bf16[], or f16[]"));
         return W_NIL;
@@ -58660,8 +58946,8 @@ WValue w_array_dot_i8(WValue lhs, WValue rhs) {
         w_raise(w_string("dot: requires two i8[]/u8[] arrays"));
         return W_NIL;
     }
-    WArray *a = (WArray *)w_as_ptr(lhs);
-    WArray *b = (WArray *)w_as_ptr(rhs);
+    WArray *a = w_as_array(lhs);
+    WArray *b = w_as_array(rhs);
     if (!array_is_byte_int_array(a) || !array_is_byte_int_array(b)) {
         w_raise(w_string("dot: requires i8[]/u8[] arrays"));
         return W_NIL;
@@ -58679,8 +58965,8 @@ WValue w_array_dot_float(WValue lhs, WValue rhs) {
         w_raise(w_string("dot: requires two float arrays"));
         return W_NIL;
     }
-    WArray *a = (WArray *)w_as_ptr(lhs);
-    WArray *b = (WArray *)w_as_ptr(rhs);
+    WArray *a = w_as_array(lhs);
+    WArray *b = w_as_array(rhs);
     if (!array_is_float(a) || !array_is_float(b)) {
         w_raise(w_string("dot: requires f32[], f64[], bf16[], or f16[]"));
         return W_NIL;
@@ -58697,8 +58983,8 @@ WValue w_array_matvec_i8(WValue weights_v, WValue x_v, WValue rows_v, WValue col
         w_raise(w_string("matvec_i8: requires i8[]/u8[] matrix and vector"));
         return W_NIL;
     }
-    WArray *weights = (WArray *)w_as_ptr(weights_v);
-    WArray *x = (WArray *)w_as_ptr(x_v);
+    WArray *weights = w_as_array(weights_v);
+    WArray *x = w_as_array(x_v);
     if (!array_is_byte_int_array(weights) || !array_is_byte_int_array(x)) {
         w_raise(w_string("matvec_i8: requires i8[]/u8[] matrix and vector"));
         return W_NIL;
@@ -58714,7 +59000,7 @@ WValue w_array_matvec_i8(WValue weights_v, WValue x_v, WValue rows_v, WValue col
         return W_NIL;
     }
     WValue out_v = w_array_new(32, rows);
-    WArray *out = (WArray *)w_as_ptr(out_v);
+    WArray *out = w_as_array(out_v);
     out->size = (int32_t)rows;
     const uint8_t *base = (const uint8_t *)weights->slots + weights->start;
     const uint8_t *xp = (const uint8_t *)x->slots + x->start;
@@ -58730,8 +59016,8 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
         w_raise(w_string("matmul_i8: requires i8[]/u8[] matrices"));
         return W_NIL;
     }
-    WArray *a = (WArray *)w_as_ptr(lhs_v);
-    WArray *b = (WArray *)w_as_ptr(rhs_v);
+    WArray *a = w_as_array(lhs_v);
+    WArray *b = w_as_array(rhs_v);
     if (!array_is_byte_int_array(a) || !array_is_byte_int_array(b)) {
         w_raise(w_string("matmul_i8: requires i8[]/u8[] matrices"));
         return W_NIL;
@@ -58748,7 +59034,7 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
         return W_NIL;
     }
     WValue out_v = w_array_new(32, m * n);
-    WArray *out = (WArray *)w_as_ptr(out_v);
+    WArray *out = w_as_array(out_v);
     out->size = (int32_t)(m * n);
 
     int64_t r = 0;
@@ -58919,8 +59205,8 @@ WValue w_array_cross_float(WValue lhs, WValue rhs) {
         w_raise(w_string("cross: requires two float arrays"));
         return W_NIL;
     }
-    WArray *a = (WArray *)w_as_ptr(lhs);
-    WArray *b = (WArray *)w_as_ptr(rhs);
+    WArray *a = w_as_array(lhs);
+    WArray *b = w_as_array(rhs);
     if (!array_is_float(a) || !array_is_float(b)) {
         w_raise(w_string("cross: requires f32[], f64[], bf16[], or f16[]"));
         return W_NIL;
@@ -58938,7 +59224,7 @@ WValue w_array_cross_float(WValue lhs, WValue rhs) {
     double bz = array_read_float(b, b->start + 2);
 
     WValue out_v = w_array_new(a->ebits, 3);
-    WArray *out = (WArray *)w_as_ptr(out_v);
+    WArray *out = w_as_array(out_v);
     out->size = 3;
     array_write_float(out, 0, ay * bz - az * by);
     array_write_float(out, 1, az * bx - ax * bz);
@@ -58947,13 +59233,13 @@ WValue w_array_cross_float(WValue lhs, WValue rhs) {
 }
 
 WValue w_array_scale_float(WValue arr, WValue scalar) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (!array_is_float(a)) {
         w_raise(w_string("scale: requires f32[], f64[], bf16[], or f16[]"));
         return W_NIL;
     }
     WValue out_v = w_array_new(a->ebits, a->size);
-    WArray *out = (WArray *)w_as_ptr(out_v);
+    WArray *out = w_as_array(out_v);
     out->size = a->size;
     double s = as_numeric_double(scalar);
     if (!array_elementwise_float_fast(a, NULL, out, 0, s, ELT_OP_MUL)) {
@@ -58965,7 +59251,7 @@ WValue w_array_scale_float(WValue arr, WValue scalar) {
 }
 
 WValue w_array_scale_float_bang(WValue arr, WValue scalar) {
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     if (!array_is_float(a)) {
         w_raise(w_string("scale!: requires f32[], f64[], bf16[], or f16[]"));
         return W_NIL;
@@ -59027,7 +59313,7 @@ WValue w_array_scale_float_bang(WValue arr, WValue scalar) {
 
 static WArray *carr_pair_arg(WValue v, const char *who) {
     if (!w_is_array(v)) w_raise(w_string("complex array kernel: expected f64[] backing"));
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     if (a->ebits != -64) w_raise(w_string("complex array kernel: backing must be f64[]"));
     if (a->size & 1) w_raise(w_string("complex array kernel: odd backing length"));
     (void)who;
@@ -59040,7 +59326,7 @@ WValue w_carr_mul_f64(WValue a_v, WValue b_v) {
     if (a->size != b->size) w_raise(w_string("complex array mul: size mismatch"));
     int64_t n2 = a->size;
     WValue out_v = w_array_new(-64, n2);
-    WArray *out = (WArray *)w_as_ptr(out_v);
+    WArray *out = w_as_array(out_v);
     out->size = (int32_t)n2;
     const double *ap = (const double *)a->slots + a->start;
     const double *bp = (const double *)b->slots + b->start;
@@ -59089,7 +59375,7 @@ WValue w_carr_conj_dot_f64(WValue a_v, WValue b_v) {
         acc_im += ar * bi - ai * br;
     }
     WValue out_v = w_array_new(-64, 2);
-    WArray *out = (WArray *)w_as_ptr(out_v);
+    WArray *out = w_as_array(out_v);
     out->size = 2;
     double *op = (double *)out->slots + out->start;
     op[0] = acc_re;
@@ -59103,7 +59389,7 @@ WValue w_carr_scale_f64(WValue a_v, WValue re_v, WValue im_v) {
     double si = w_math_to_double(im_v);
     int64_t n2 = a->size;
     WValue out_v = w_array_new(-64, n2);
-    WArray *out = (WArray *)w_as_ptr(out_v);
+    WArray *out = w_as_array(out_v);
     out->size = (int32_t)n2;
     const double *ap = (const double *)a->slots + a->start;
     double *op = (double *)out->slots + out->start;
@@ -59328,9 +59614,9 @@ __attribute__((weak)) WValue w_cuda_launch(WValue name, WValue gx, WValue gy, WV
  * --------------------------------------------------------------------- */
 #ifdef __aarch64__
 WValue w_mat4_mul_f32(WValue a_wval, WValue b_wval, WValue c_wval) {
-    WArray *a = (WArray *)w_as_ptr(a_wval);
-    WArray *b = (WArray *)w_as_ptr(b_wval);
-    WArray *c = (WArray *)w_as_ptr(c_wval);
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
     const float *Ap = (const float *)a->slots + a->start;
     const float *Bp = (const float *)b->slots + b->start;
     float *Cp = (float *)c->slots + c->start;
@@ -59356,9 +59642,9 @@ WValue w_mat4_mul_f32(WValue a_wval, WValue b_wval, WValue c_wval) {
 /* Vec4 helpers — single-instruction componentwise ops for callers who
  * want the SIMD path explicitly. */
 WValue w_vec4_add_f32(WValue a_wval, WValue b_wval, WValue out_wval) {
-    WArray *a = (WArray *)w_as_ptr(a_wval);
-    WArray *b = (WArray *)w_as_ptr(b_wval);
-    WArray *o = (WArray *)w_as_ptr(out_wval);
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *o = w_as_array(out_wval);
     float32x4_t va = vld1q_f32((const float *)a->slots + a->start);
     float32x4_t vb = vld1q_f32((const float *)b->slots + b->start);
     vst1q_f32((float *)o->slots + o->start, vaddq_f32(va, vb));
@@ -59366,9 +59652,9 @@ WValue w_vec4_add_f32(WValue a_wval, WValue b_wval, WValue out_wval) {
 }
 
 WValue w_vec4_mul_f32(WValue a_wval, WValue b_wval, WValue out_wval) {
-    WArray *a = (WArray *)w_as_ptr(a_wval);
-    WArray *b = (WArray *)w_as_ptr(b_wval);
-    WArray *o = (WArray *)w_as_ptr(out_wval);
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *o = w_as_array(out_wval);
     float32x4_t va = vld1q_f32((const float *)a->slots + a->start);
     float32x4_t vb = vld1q_f32((const float *)b->slots + b->start);
     vst1q_f32((float *)o->slots + o->start, vmulq_f32(va, vb));
@@ -59376,8 +59662,8 @@ WValue w_vec4_mul_f32(WValue a_wval, WValue b_wval, WValue out_wval) {
 }
 
 WValue w_vec4_dot_f32(WValue a_wval, WValue b_wval) {
-    WArray *a = (WArray *)w_as_ptr(a_wval);
-    WArray *b = (WArray *)w_as_ptr(b_wval);
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
     float32x4_t va = vld1q_f32((const float *)a->slots + a->start);
     float32x4_t vb = vld1q_f32((const float *)b->slots + b->start);
     float32x4_t prod = vmulq_f32(va, vb);
@@ -59408,9 +59694,9 @@ WValue w_vec4_dot_f32(WValue a, WValue b) {
 #endif
 
 static WValue array_map_f64(WValue arr, int signed_values, double (*fn)(double)) {
-    WArray *src = (WArray *)w_as_ptr(arr);
+    WArray *src = w_as_array(arr);
     WValue result = w_array_new(-64, src->size);
-    WArray *dst = (WArray *)w_as_ptr(result);
+    WArray *dst = w_as_array(result);
     dst->size = src->size;
     double *out = (double *)dst->slots;
     int64_t src_end = src->start + src->size;
@@ -59592,9 +59878,9 @@ static void w_stable_merge_wvalues(WValue *a, int64_t n) {
 }
 
 static WValue w_array_sort_impl(WValue arr, int stable) {
-    WArray *src = (WArray *)w_as_ptr(arr);
+    WArray *src = w_as_array(arr);
     WValue result = w_array_new(src->ebits, src->size);
-    WArray *dst = (WArray *)w_as_ptr(result);
+    WArray *dst = w_as_array(result);
     int64_t nbytes = array_byte_size(src->ebits, src->size);
     int64_t src_off = array_byte_size(src->ebits, src->start);
     memcpy(dst->slots, (uint8_t *)src->slots + src_off, nbytes);
@@ -59709,12 +59995,12 @@ WValue w_array_stable_sort(WValue arr) { return w_array_sort_impl(arr, 1); }
  * radix crossover. w64, float, and 4-bit arrays fall back to w_array_sort,
  * which owns those tiers. */
 WValue w_array_ipnsort(WValue arr) {
-    WArray *src = (WArray *)w_as_ptr(arr);
+    WArray *src = w_as_array(arr);
     if (src->ebits == 65 || array_is_float(src) || array_storage_bits(src->ebits) == 4) {
         return w_array_sort(arr);
     }
     WValue result = w_array_new(src->ebits, src->size);
-    WArray *dst = (WArray *)w_as_ptr(result);
+    WArray *dst = w_as_array(result);
     int64_t nbytes = array_byte_size(src->ebits, src->size);
     int64_t src_off = array_byte_size(src->ebits, src->start);
     memcpy(dst->slots, (uint8_t *)src->slots + src_off, nbytes);
@@ -59739,11 +60025,11 @@ WValue w_array_ipnsort(WValue arr) {
  * Falls back to w_array_sort for float/non-int arrays, out-of-range values
  * (explicit range), or a range too large to be worth the counts array. */
 static WValue w_array_csort_impl(WValue arr, int64_t lo, int64_t hi, int auto_range) {
-    WArray *src = (WArray *)w_as_ptr(arr);
+    WArray *src = w_as_array(arr);
     if (array_is_float(src)) return w_array_sort(arr);
     int64_t n = src->size;
     WValue result = w_array_new(src->ebits, n);
-    WArray *dst = (WArray *)w_as_ptr(result);
+    WArray *dst = w_as_array(result);
     dst->size = n;
     int is_w64 = (dst->ebits == 65);
     if (n <= 1) {
@@ -59865,10 +60151,10 @@ WValue w_array_csort_range(WValue arr, WValue lo, WValue hi) {
 
 #define DEFINE_ARRAY_ALGO_SORT(fname, algo)                                     \
 WValue fname(WValue arr) {                                                       \
-    WArray *src = (WArray *)w_as_ptr(arr);                                       \
+    WArray *src = w_as_array(arr);                                       \
     if (array_is_float(src) || src->ebits == 65) return w_array_sort(arr);       \
     WValue result = w_array_new(src->ebits, src->size);                          \
-    WArray *dst = (WArray *)w_as_ptr(result);                                    \
+    WArray *dst = w_as_array(result);                                    \
     int64_t nbytes = array_byte_size(src->ebits, src->size);                     \
     int64_t src_off = array_byte_size(src->ebits, src->start);                   \
     memcpy(dst->slots, (uint8_t *)src->slots + src_off, nbytes);                 \
@@ -59926,10 +60212,10 @@ static int w_sort_block_sign(WValue block, WValue x, WValue y) {
  * receivers (u8[], f64[], …) sort into typed results. Twin of the Ruby
  * engine's Runtime::Builtins.array_mergesort_copy. */
 WValue w_array_sort_block(WValue arr, WValue block) {
-    WArray *sa = (WArray *)w_as_ptr(arr);
+    WArray *sa = w_as_array(arr);
     int64_t n = sa->size;
     WValue result = w_array_new(sa->ebits, n);
-    WArray *da = (WArray *)w_as_ptr(result);
+    WArray *da = w_as_array(result);
     da->size = sa->size;
     if (n == 0) return result;
     WValue *src = malloc((size_t)n * sizeof(WValue));
@@ -59979,10 +60265,10 @@ static uint64_t w_secure_uniform(uint64_t limit) {
  * NO seeded variant: the `random:` custom-RNG option the Ruby builtin accepts
  * is not honored on this path (documented in core/array.w). */
 WValue w_array_shuffle(WValue arr) {
-    WArray *sa = (WArray *)w_as_ptr(arr);
+    WArray *sa = w_as_array(arr);
     int64_t n = sa->size;
     WValue result = w_array_new(sa->ebits, n);
-    WArray *da = (WArray *)w_as_ptr(result);
+    WArray *da = w_as_array(result);
     da->size = sa->size;
     if (n == 0) return result;
     WValue *buf = malloc((size_t)n * sizeof(WValue));
@@ -60273,7 +60559,7 @@ WValue w_socket_tcp_connect(const char *host, int port) {
     s->listening = 0;
     s->closed = 0;
     s->ssl = NULL;
-    return w_box_ptr(s, W_SUBTAG_GENERIC);
+    return w_box_ptr(s, W_SUBTAG_SOCKET);
 }
 
 WValue w_socket_connect_raw(WValue host, int64_t port) {
@@ -63187,6 +63473,25 @@ static void freeze_mark_visited(void *ptr) {
 static void freeze_recursive(WValue v);
 
 static void freeze_recursive(WValue v) {
+    /* Arrays left object space (v5: W_TAG_ARRAY) — handle them before
+     * the object-space gate below or their elements never freeze. */
+    if (w_is_array(v)) {
+        WArray *arr = w_as_array(v);
+        if (!arr) return;
+        if (freeze_is_visited(arr)) return;
+        freeze_mark_visited(arr);
+        /* #62: only polymorphic w64 arrays carry WValues that can be frozen.
+         * Typed arrays store raw scalar bit patterns—even u64 at the same
+         * physical width—so there is no nested object to recurse into and
+         * reading arr->slots[i] as WValue would be a type-confused load. */
+        if (arr->ebits == 65) {
+            for (int32_t i = 0; i < arr->size; i++) {
+                freeze_recursive(arr->slots[arr->start + i]);
+            }
+        }
+        return;
+    }
+
     /* Value types are always frozen */
     if (!w_is_obj(v)) return;
 
@@ -63203,17 +63508,6 @@ static void freeze_recursive(WValue v) {
         /* Recursively freeze ivars */
         for (int i = 0; i < obj->ivar_count; i++) {
             freeze_recursive(obj->ivars[i]);
-        }
-    } else if (subtag == W_SUBTAG_ARRAY) {
-        WArray *arr = (WArray *)ptr;
-        /* #62: only polymorphic w64 arrays carry WValues that can be frozen.
-         * Typed arrays store raw scalar bit patterns—even u64 at the same
-         * physical width—so there is no nested object to recurse into and
-         * reading arr->slots[i] as WValue would be a type-confused load. */
-        if (arr->ebits == 65) {
-            for (int32_t i = 0; i < arr->size; i++) {
-                freeze_recursive(arr->slots[arr->start + i]);
-            }
         }
     } else if (subtag == W_SUBTAG_CLOSURE) {
         WClosure *cl = (WClosure *)ptr;
@@ -63271,7 +63565,7 @@ void w_value_free(WValue v) {
      * So: bail on POOLED/BIG; free slots only when OWNED and neither VIEW nor
      * PAGE_ALIGNED; then free the (always-heap) WArray header. */
     if (w_is_array(v)) {
-        WArray *arr = (WArray *)w_as_ptr(v);
+        WArray *arr = w_as_array(v);
         uint8_t fl = arr->flags;
         if (fl & (W_FLAG_POOLED | W_FLAG_BIG)) return;
         if ((fl & W_FLAG_OWNED) && !(fl & (W_FLAG_VIEW | W_FLAG_PAGE_ALIGNED | W_FLAG_INLINE))) {
@@ -63321,6 +63615,17 @@ void w_value_free(WValue v) {
         WClosure *cl = (WClosure *)w_as_ptr(v);
         if (cl->capture_count > 0) free(cl->captures);
         free(cl);
+        return;
+    }
+    /* RegexMatch owns its three private top-level containers. Releasing those
+     * headers/storage is safe because w_value_free never recurses into their
+     * elements: a span or captured String returned earlier remains live. */
+    if (w_is_regex_match(v)) {
+        WRegexMatch *match = (WRegexMatch *)w_as_ptr(v);
+        w_value_free(match->groups);
+        w_value_free(match->offsets);
+        w_value_free(match->name_to_group);
+        free(match);
         return;
     }
 }

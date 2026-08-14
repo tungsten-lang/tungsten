@@ -30,6 +30,13 @@ typedef struct {
     void *compiled;
 } WRegex;
 
+/* Immutable snapshot returned by Regex#match_data (subtag 0xE). */
+typedef struct {
+    WValue groups;        /* group 0 followed by numbered captures */
+    WValue offsets;       /* nil or [codepoint_begin, codepoint_end] */
+    WValue name_to_group; /* String name -> numbered capture index */
+} WRegexMatch;
+
 /* Mutable append — declared in runtime.c */
 WValue w_str_append(WValue str, WValue suffix);
 
@@ -314,6 +321,21 @@ typedef struct {
     WValue *slots;        /* base allocation pointer */
 } WArray;
 
+/* v5: arrays ride the top-level W_TAG_ARRAY (see wvalue.h). Bits 46-4
+ * carry the 16-byte-aligned pointer; bit 47 and the low nibble are
+ * reserved flag bits, masked off here. These are the ONLY legal
+ * box/unbox paths for a WArray value. */
+static inline WArray *w_as_array(WValue v) {
+    return (WArray *)(uintptr_t)(v & W_ARRAY_PTR_MASK);
+}
+static inline WValue w_box_array(WArray *arr) {
+#ifndef NDEBUG
+    assert(((uintptr_t)arr & 0xF) == 0 && "w_box_array: pointer must be 16-byte aligned");
+    assert(((uintptr_t)arr >> 47) == 0 && "w_box_array: pointer must fit 47 bits");
+#endif
+    return W_TAG_ARRAY | (uint64_t)(uintptr_t)arr;
+}
+
 /* ---- Multi-D dense tensor header (CPU / shared-memory face) ----
  *
  * WArray is 1-D: size/cap/start over a flat element buffer.
@@ -460,6 +482,8 @@ int64_t w_to_i64(WValue v);
 int64_t w_numeric_to_i64(WValue v);
 int64_t w_range_bound_i64(WValue v);
 WValue w_range_bound_i64_w(WValue v);
+WValue w_range_imm_try_w(WValue lo, WValue hi, WValue excl);
+WValue w_range_make(int64_t from, int64_t to, int64_t exclusive);
 WValue w_u64(uint64_t v);
 uint64_t w_to_u64(WValue v);
 WValue w_i128(__int128 v);
@@ -480,6 +504,7 @@ WValue w_string_from_bits(WValue bits);
 WValue w_bigint_from_bits(WValue bits);
 WValue w_regex_new(WValue pattern_val, WValue options_val);
 WValue w_regex_match(WValue regex_val, WValue subject_val);
+WValue w_regex_match_data(WValue regex_val, WValue subject_val);
 WValue w_regex_capture(WValue index_val);
 
 /* ---- Char boxing (requires lookup table) ---- */
@@ -560,8 +585,8 @@ WValue w_uuid_v7(void);
 WValue w_uuid_v8(WValue custom);
 
 /* ---- SIMD Vector primitives (0xFFF2 simd2d / 0xFFF3 simd3d tags) ---- */
-#define WVALUE_TAG_SIMD2D 0xFFF2000000000000ULL
-#define WVALUE_TAG_SIMD3D 0xFFF3000000000000ULL
+#define WVALUE_TAG_SIMD2D W_TAG_SIMD2D
+#define WVALUE_TAG_SIMD3D W_TAG_SIMD3D
 
 WValue w_vec2f(double x, double y);
 WValue w_point2d(double x, double y);
@@ -572,21 +597,16 @@ WValue w_vec2f_w(WValue xv, WValue yv);
 WValue w_point2d_w(WValue xv, WValue yv);
 WValue w_vec3f_w(WValue xv, WValue yv, WValue zv);
 
-bool w_is_simd2d(WValue v);
-bool w_is_simd3d(WValue v);
-uint8_t w_simd2d_subtag(WValue v);
-
 WValue w_is_simd2d_w(WValue v);
 WValue w_is_simd3d_w(WValue v);
 WValue w_simd2d_subtag_w(WValue v);
 
 /* ---- Network Socket Endpoint (0xFFF6 sockaddr tag) ---- */
-#define WVALUE_TAG_SOCKADDR 0xFFF6000000000000ULL
+#define WVALUE_TAG_SOCKADDR W_TAG_SOCKADDR
 
 WValue w_sockaddr(uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint16_t port);
 WValue w_sockaddr_w(WValue av, WValue bv, WValue cv, WValue dv, WValue port_v);
 
-bool w_is_sockaddr(WValue v);
 WValue w_is_sockaddr_w(WValue v);
 
 uint16_t w_sockaddr_port(WValue v);
@@ -624,6 +644,7 @@ WValue w_rational(int32_t num, uint32_t den);
 WValue w_rational_new(WValue numerator, WValue denominator);
 WValue w_rational_numerator(WValue rational);
 WValue w_rational_denominator(WValue rational);
+uint64_t w_dispatch_key(WValue v);
 WValue w_complex(int16_t real_sig, int real_scale, int16_t imag_sig, int imag_scale);
 WValue w_location_point(int32_t x, int32_t y);
 WValue w_location_file(int file_id, int line, int col);
@@ -697,6 +718,7 @@ WValue w_str_concat(WValue a, WValue b);
 WValue w_string_slice_raw(WValue str, int64_t start, int64_t len);
 WValue w_to_s(WValue v);
 int64_t w_stringy_c_length(WValue v);
+int64_t w_string_byte_length(int64_t str_wval);
 void w_str_data(WValue v, char buf[6], const char **out, size_t *len);
 WValue w_algebra_rewrite_source(WValue source);
 WValue w_string_from_codepoint(WValue cp_v);
@@ -1972,10 +1994,6 @@ static inline int w_is_thread(WValue v) {
 static inline int w_is_atomic(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_ATOMIC;
 }
-static inline int w_is_socket(WValue v) {
-    return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
-           ((WSocket *)w_as_ptr(v))->type == W_TYPE_SOCKET;
-}
 static inline int w_is_channel(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
            ((WChan *)w_as_ptr(v))->type == W_TYPE_CHANNEL;
@@ -1987,8 +2005,7 @@ static inline int w_is_mutex(WValue v) {
 /* ByteArray (was Bytes) is now a WArray with ebits=8.
  * Same predicate as `w_is_array && ebits == 8`. */
 static inline int w_is_bytes(WValue v) {
-    return w_is_obj(v) && w_subtag(v) == W_SUBTAG_ARRAY &&
-           ((WArray *)w_as_ptr(v))->ebits == 8;
+    return w_is_array(v) && w_as_array(v)->ebits == 8;
 }
 static inline int w_is_response(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&
@@ -1996,8 +2013,7 @@ static inline int w_is_response(WValue v) {
 }
 /* BoolArray is now a WArray with ebits=1 (bit-packed). */
 static inline int w_is_bool_array(WValue v) {
-    return w_is_obj(v) && w_subtag(v) == W_SUBTAG_ARRAY &&
-           ((WArray *)w_as_ptr(v))->ebits == 1;
+    return w_is_array(v) && w_as_array(v)->ebits == 1;
 }
 /* BigArray lives on W_SUBTAG_GENERIC because the 4-bit subtag
  * space was exhausted at the time; it's distinguished by the type byte at

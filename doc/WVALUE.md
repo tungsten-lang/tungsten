@@ -20,7 +20,9 @@ Reference implementation: `stages/tungsten/runtime/wvalue.h` (standalone C heade
 0xFFF1_(payload > 0)                        reserved (payload 0 = biased -inf)
 0xFFF2_xxxx_xxxx_xxxx                       simd2d  (Vec2f, Point2D, Vec2i — half2/short2 w/ subtags)
 0xFFF3_xxxx_xxxx_xxxx                       simd3d  (Vec3f — half3 48-bit layout)
-0xFFF4 .. 0xFFF5                            free tag slots (v4)
+0xFFF4_xxxx_xxxx_xxxx                       array (WArray*, 16-byte aligned;
+                                            bit 47 + low nibble reserved flags)
+0xFFF5                                      free tag slot (v4)
 0xFFF6_xxxx_xxxx_xxxx                       sockaddr (32-bit IPv4 + 16-bit Port endpoint)
 0xFFF7                                      free tag slot (v4)
 0xFFF8_xxxx_xxxx_xxxx                       bigint (WBigint*, 47-bit pointer;
@@ -30,7 +32,7 @@ Reference implementation: `stages/tungsten/runtime/wvalue.h` (standalone C heade
 0xFFFB_xxxx_xxxx_xxxx                       instant (Unix ms since epoch)
 0xFFFC_xxxx_xxxx_xxxx                       lexical (token, lexchar, slice, char)
 0xFFFD_xxxx_xxxx_xxxx                       numeric (decimal, currency, quantity)
-0xFFFE_xxxx_xxxx_xxxx                       packed  (color, complex, rational, date, ipv4, location)
+0xFFFE_xxxx_xxxx_xxxx                       packed  (color, complex, rational, node, date, ipv4, body, location/range)
 0xFFFF_xxxx_xxxx_xxxx                       duration
 ```
 
@@ -48,8 +50,30 @@ Truthiness: `v > 1` (unsigned). Only nil and false are falsey.
 ```
 
 Sub-tags: 0=generic 1=atomic 2=free(was bigint, now tag 0xFFF8) 4=struct
-5=hash 6=closure 7=regex 8=range 9=small-array A=array B=string-buffer
-C=class D=uuid E=free F=domain
+5=hash 6=closure 7=regex 8=range 9=small-array A=socket B=string-buffer C=class D=uuid
+E=regex-match F=domain
+
+## Array (0xFFF4)
+
+```
+63              48 47 46                                        4 3    0
++----------------+--+------------------------------------------+------+
+|   0xFFF4       |F |     WArray* bits 46-4 (16-byte aligned)  |flags |
++----------------+--+------------------------------------------+------+
+```
+
+v5: Array left object space for its own top-level tag — `w_is_array` is
+one tag compare, and the emitter's inline fast paths (get/set/guard)
+drop the five-instruction object-space + subtag test for a single
+`lshr 48; icmp eq 0xFFF4`. Bit 47 (`F`) and the low nibble are RESERVED
+value-level flag bits (candidates: arena-vs-heap, small-vs-full —
+boxing-time facts identical on every reference; per-object state like
+frozen stays in the header flags byte). Pointer extraction:
+`v & 0x0000_7FFF_FFFF_FFF0` (W_ARRAY_PTR_MASK). The dispatch key stays
+the historical `0x0A` (w_dispatch_key maps the tag back), so inline
+caches, g_type_class, and the compiler's type_dispatch_key are unchanged
+— the BigInt v4 playbook. SmallArray (subtag 9), BigArray (generic
+type 18), and packed Body (0xFFE6 facade) are unaffected.
 
 Pointer extraction: `v & ~0xF`
 Sub-tag extraction: `v & 0xF`
@@ -330,10 +354,10 @@ Six subtypes via bits 47-45:
 ### Rational (subtype 010)
 
 ```
-63        48 47  45 44                  23 22                        1
+63        48 47  45 44                  20 19                        0
 ┌──────────┬──────┬──────────────────────┬────────────────────────────┐
 │  0xFFFE  │ 010  │ numerator (signed)   │  denominator (unsigned)    │
-│          │      │    22b (±2,097,151)  │    22b (0…4,194,303)       │
+│          │      │    25b (±16,777,215) │    20b (1…1,048,575)       │
 └──────────┴──────┴──────────────────────┴────────────────────────────┘
 ```
 
@@ -397,15 +421,35 @@ here — reconstructed lazily from a per-file newline-offset table built
 once and binary-searched, avoiding the 18-bit line / 11-bit col
 ceiling that File mode has on generated or minified sources.
 
-Range mode (bits 44:43 = 11):
-63        48 47 45 44 43 42          29 28               14 13       0
-┌──────────┬─────┬──┬──┬──────────────┬───────────────────┬──────────┐
-│  0xFFFE  │ 111 │1 │1 │  file_id     │  start_offset     │  length  │
-│          │     │  │  │   14b        │     15b           │   14b    │
-└──────────┴─────┴──┴──┴──────────────┴───────────────────┴──────────┘
+Range mode (bits 44:43 = 11) — immediate integer Range, NOT a
+Location (w_is_location excludes mode 11). A sub-mode bit at 42
+splits the payload; the exclusive bit sits at LSB in both:
 
-Range mode covers: 16,384 files, 32,768 byte start offset, 16,384 byte length range.
-Encodes an AST node location range (file + byte span) directly inside a single 64-bit Location WValue.
+Loop shape (bit 42 = 0):
+63        48 47 45 44 43 42 41 40                                  1  0
+┌──────────┬─────┬──┬──┬──┬──┬──────────────────────────────────────┬──┐
+│  0xFFFE  │ 111 │1 │1 │0 │s │      end (40b, unsigned)             │ex│
+└──────────┴─────┴──┴──┴──┴──┴──────────────────────────────────────┴──┘
+
+s = start (0 or 1). Covers 0..n and 1..n for n < 2^40 — the dominant
+loop/iteration shape.
+
+Span shape (bit 42 = 1):
+63        48 47 45 44 43 42 41              22 21                  1  0
+┌──────────┬─────┬──┬──┬──┬──────────────────┬──────────────────────┬──┐
+│  0xFFFE  │ 111 │1 │1 │1 │ start (20b, sgn) │   end (21b, signed)  │ex│
+└──────────┴─────┴──┴──┴──┴──────────────────┴──────────────────────┴──┘
+
+Covers a..b with start in ±2^19, end in ±2^20 — small literals and
+slices, including negative-index slices (0..-1) and empty ranges
+(5..2, iterates zero times).
+
+Construction goes through the w_range_imm_try funnel: packed value
+when the range fits (loop shape tried first), W_NIL when it must fall
+back to the heap Range (subtag 8) — same inline/heap discipline as
+Int→BigInt. Heap keeps: other starts, end ≥ 2^40, stepped ranges
+(a..b/n), BigInt bounds.
+>>>>>>> Stashed changes
 ```
 
 ---

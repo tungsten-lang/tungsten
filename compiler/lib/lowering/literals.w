@@ -466,56 +466,46 @@
 -> lower_range(ctx, node)
   wfn = ctx[:func]
 
+  # Escaped range value: one call into the runtime constructor, which
+  # mints the immediate Location-mode-11 Range when the bounds fit its
+  # sub-modes and falls back to the historical eager boxed-int Array
+  # otherwise. Replaces the emitted per-element push loop — an escaped
+  # `lo..hi` is now O(1) for every immediate-encodable range. Pipeline
+  # fusion and range-elision still intercept non-escaping ranges before
+  # this point.
+
   # Lower bounds and unbox to raw i64
   from_tv = lower_expression(ctx, node.from)
   from_reg = ensure_i64_value(wfn, from_tv)
   to_tv = lower_expression(ctx, node.to)
   to_reg = ensure_i64_value(wfn, to_tv)
 
-  from_raw = next_temp(wfn)
-  emit_instruction(wfn, {op: :nanunbox_int, temp: from_raw, temp_shl: from_raw + ".shl", boxed: from_reg})
-  to_raw = next_temp(wfn)
-  emit_instruction(wfn, {op: :nanunbox_int, temp: to_raw, temp_shl: to_raw + ".shl", boxed: to_reg})
+  # Same guard as the range.each fast path: nanunbox_int is raw bit
+  # extraction, correct only for genuinely inline-boxed ints. A bound
+  # that is statically known non-int (e.g. a Decimal literal like 1e10)
+  # routes through w_range_bound_i64 (type check + coercion, catchable
+  # TypeError) instead of silently reinterpreting its bits.
+  from_static_type = infer_type(node.from, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+  to_static_type = infer_type(node.to, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+  if from_static_type != nil && !is_integer_like_type(from_static_type)
+    from_raw = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: from_raw, name: "w_range_bound_i64", args: [from_reg]})
+  else
+    from_raw = next_temp(wfn)
+    emit_instruction(wfn, {op: :nanunbox_int, temp: from_raw, temp_shl: from_raw + ".shl", boxed: from_reg})
+  if to_static_type != nil && !is_integer_like_type(to_static_type)
+    to_raw = next_temp(wfn)
+    emit_instruction(wfn, {op: :call_direct_i64, temp: to_raw, name: "w_range_bound_i64", args: [to_reg]})
+  else
+    to_raw = next_temp(wfn)
+    emit_instruction(wfn, {op: :nanunbox_int, temp: to_raw, temp_shl: to_raw + ".shl", boxed: to_reg})
 
-  # Create empty array
-  arr = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_empty", args: []})
-
-  # Loop: phi counter from start to end, push each
-  pre_label = next_label(wfn, "range.pre")
-  header_label = next_label(wfn, "range.hdr")
-  body_label = next_label(wfn, "range.body")
-  exit_label = next_label(wfn, "range.exit")
-
-  emit_instruction(wfn, {op: :br, label: pre_label})
-  start_block(wfn, pre_label)
-  emit_instruction(wfn, {op: :br, label: header_label})
-
-  start_block(wfn, header_label)
-  phi_reg = next_temp(wfn)
-  inc_reg = next_temp(wfn)
-  emit_instruction(wfn, {op: :phi_i64, temp: phi_reg, a_value: from_raw, a_label: pre_label, b_value: inc_reg, b_label: body_label})
-
-  # Bound check
-  cmp_op = "sle"
+  excl = "0"
   if node.exclusive == true
-    cmp_op = "slt"
-  cmp_reg = next_temp(wfn)
-  emit_instruction(wfn, {op: :icmp_i64, temp: cmp_reg, pred: cmp_op, lhs: phi_reg, rhs: to_raw})
-  emit_instruction(wfn, {op: :cond_br, cond: cmp_reg, then_label: body_label, else_label: exit_label})
-
-  # Body: nanbox counter, push to array, increment
-  start_block(wfn, body_label)
-  boxed = next_temp(wfn)
-  emit_instruction(wfn, {op: :nanbox_int, temp: boxed, temp_masked: boxed + ".m", raw: phi_reg})
-  push_tmp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: push_tmp, name: "w_array_push", args: [arr, boxed]})
-  emit_instruction(wfn, {op: :add_i64, temp: inc_reg, lhs: phi_reg, rhs: "1"})
-  emit_instruction(wfn, {op: :br, label: header_label})
-
-  # Exit
-  start_block(wfn, exit_label)
-  typed_value(:i64, arr)
+    excl = "1"
+  temp = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_range_make", args: [from_raw, to_raw, excl]})
+  typed_value(:i64, temp)
 
 
 

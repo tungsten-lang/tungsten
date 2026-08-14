@@ -795,16 +795,14 @@ use naming
   out = StringBuffer(2200)
   out << "define private i64 @__w_array_get_i64_fast(i64 %arr, i64 %i) alwaysinline nounwind {\n"
   out << "entry:\n"
+  # v5: arrays ride W_TAG_ARRAY (0xFFF4) — the five-instruction object-
+  # space + subtag guard collapses to one tag compare (65524 = 0xFFF4).
   out << "  %hi = lshr i64 %arr, 48\n"
-  out << "  %lo0 = icmp eq i64 %hi, 0\n"
-  out << "  %ge16 = icmp uge i64 %arr, 16\n"
-  out << "  %obj = and i1 %lo0, %ge16\n"
-  out << "  %sub = and i64 %arr, 15\n"
-  out << "  %isarr = icmp eq i64 %sub, 10\n"
-  out << "  %objarr = and i1 %obj, %isarr\n"
+  out << "  %objarr = icmp eq i64 %hi, 65524\n"
   out << "  br i1 %objarr, label %hdr, label %slow\n"
   out << "hdr:\n"
-  out << "  %base = and i64 %arr, -16\n"
+  # W_ARRAY_PTR_MASK: strip tag + reserved flag bits (47, 3-0).
+  out << "  %base = and i64 %arr, 140737488355312\n"
   out << "  %p = inttoptr i64 %base to ptr\n"
   out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
   out << "  %eb = load i8, ptr %ebp, align 1" + invariant_load_suffix() + "\n"
@@ -839,16 +837,14 @@ use naming
   out << "}\n"
   out << "define private i64 @__w_array_idx_i64_fast(i64 %arr, i64 %i) alwaysinline nounwind {\n"
   out << "entry:\n"
+  # v5: arrays ride W_TAG_ARRAY (0xFFF4) — the five-instruction object-
+  # space + subtag guard collapses to one tag compare (65524 = 0xFFF4).
   out << "  %hi = lshr i64 %arr, 48\n"
-  out << "  %lo0 = icmp eq i64 %hi, 0\n"
-  out << "  %ge16 = icmp uge i64 %arr, 16\n"
-  out << "  %obj = and i1 %lo0, %ge16\n"
-  out << "  %sub = and i64 %arr, 15\n"
-  out << "  %isarr = icmp eq i64 %sub, 10\n"
-  out << "  %objarr = and i1 %obj, %isarr\n"
+  out << "  %objarr = icmp eq i64 %hi, 65524\n"
   out << "  br i1 %objarr, label %hdr, label %slow\n"
   out << "hdr:\n"
-  out << "  %base = and i64 %arr, -16\n"
+  # W_ARRAY_PTR_MASK: strip tag + reserved flag bits (47, 3-0).
+  out << "  %base = and i64 %arr, 140737488355312\n"
   out << "  %p = inttoptr i64 %base to ptr\n"
   out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
   out << "  %eb = load i8, ptr %ebp, align 1" + invariant_load_suffix() + "\n"
@@ -881,16 +877,14 @@ use naming
   out = StringBuffer(1400)
   out << "define private i64 @__w_array_set_i64_fast(i64 %arr, i64 %i, i64 %val) alwaysinline nounwind {\n"
   out << "entry:\n"
+  # v5: arrays ride W_TAG_ARRAY (0xFFF4) — the five-instruction object-
+  # space + subtag guard collapses to one tag compare (65524 = 0xFFF4).
   out << "  %hi = lshr i64 %arr, 48\n"
-  out << "  %lo0 = icmp eq i64 %hi, 0\n"
-  out << "  %ge16 = icmp uge i64 %arr, 16\n"
-  out << "  %obj = and i1 %lo0, %ge16\n"
-  out << "  %sub = and i64 %arr, 15\n"
-  out << "  %isarr = icmp eq i64 %sub, 10\n"
-  out << "  %objarr = and i1 %obj, %isarr\n"
+  out << "  %objarr = icmp eq i64 %hi, 65524\n"
   out << "  br i1 %objarr, label %hdr, label %slow\n"
   out << "hdr:\n"
-  out << "  %base = and i64 %arr, -16\n"
+  # W_ARRAY_PTR_MASK: strip tag + reserved flag bits (47, 3-0).
+  out << "  %base = and i64 %arr, 140737488355312\n"
   out << "  %p = inttoptr i64 %base to ptr\n"
   out << "  %ebp = getelementptr i8, ptr %p, i64 1\n"
   out << "  %eb = load i8, ptr %ebp, align 1" + invariant_load_suffix() + "\n"
@@ -1257,7 +1251,7 @@ use naming
   out = StringBuffer(480)
   out << "define private i64 @__w_array_lit_store(i64 %arr, i64 %i, i64 %val) alwaysinline nounwind {\n"
   out << "entry:\n"
-  out << "  %m = and i64 %arr, -16\n"
+  out << "  %m = and i64 %arr, 140737488355312\n"
   out << "  %ap = inttoptr i64 %m to ptr\n"
   out << "  %sp = getelementptr inbounds i8, ptr %ap, i64 16\n"
   out << "  %slots = load ptr, ptr %sp\n"
@@ -3459,7 +3453,7 @@ ewscope_md_state = {ids: {}}
   when :arr_data_ptr
     # raw data-base pointer (as i64) of a u64[]: header tag-mask, +16, load ptr.
     t = inst[:temp]
-    t + ".ar = and i64 " + inst[:arr] + ", -16\n  " + t + ".bp = inttoptr i64 " + t + ".ar to ptr\n  " + t + ".gp = getelementptr i8, ptr " + t + ".bp, i64 16\n  " + t + ".pp = load ptr, ptr " + t + ".gp\n  " + t + " = ptrtoint ptr " + t + ".pp to i64"
+    t + ".ar = and i64 " + inst[:arr] + ", 140737488355312\n  " + t + ".bp = inttoptr i64 " + t + ".ar to ptr\n  " + t + ".gp = getelementptr i8, ptr " + t + ".bp, i64 16\n  " + t + ".pp = load ptr, ptr " + t + ".gp\n  " + t + " = ptrtoint ptr " + t + ".pp to i64"
   when :asm_add_n
     # Flag-threaded adc loop: out[i]=a[i]+b[i] over n limbs, carry kept
     # in the flag across iterations (sub/cbnz don't clobber C). Returns final carry.
@@ -4138,7 +4132,7 @@ ewscope_md_state = {ids: {}}
     t = inst[:temp]
     v = inst[:value]
     parts = StringBuffer(420)
-    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
     parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8" + tbaa_header_suffix() + "\n  "
@@ -4151,7 +4145,7 @@ ewscope_md_state = {ids: {}}
     t = inst[:temp]
     v = inst[:value]
     parts = StringBuffer(240)
-    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".szp = getelementptr i8, ptr " + t + ".hp, i64 8\n  "
     parts << t + ".sz32 = load i32, ptr " + t + ".szp, align 4" + tbaa_header_suffix() + "\n  "
@@ -4178,7 +4172,7 @@ ewscope_md_state = {ids: {}}
     parts << t + ".bl = and i64 " + v + ", 2097151\n  "
     parts << "br label %" + lbl + ".done\n"
     parts << lbl + ".arr:\n  "
-    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".szp = getelementptr i8, ptr " + t + ".hp, i64 8\n  "
     parts << t + ".sz32 = load i32, ptr " + t + ".szp, align 4" + tbaa_header_suffix() + "\n  "
@@ -4198,18 +4192,15 @@ ewscope_md_state = {ids: {}}
     v = inst[:value]
     lbl = "pag." + t.slice(1, t.size() - 1)
     parts = StringBuffer(560)
+    # v5: W_TAG_ARRAY (0xFFF4 = 65524) — the object-space + subtag pair
+    # collapses to one tag compare; ebits load stays behind the branch.
     parts << t + ".hi = lshr i64 " + v + ", 48\n  "
-    parts << t + ".lo0 = icmp eq i64 " + t + ".hi, 0\n  "
-    parts << t + ".ge16 = icmp uge i64 " + v + ", 16\n  "
-    parts << t + ".o1 = and i1 " + t + ".lo0, " + t + ".ge16\n  "
-    parts << t + ".sub = and i64 " + v + ", 15\n  "
-    parts << t + ".isa = icmp eq i64 " + t + ".sub, 10\n  "
-    parts << t + ".o2 = and i1 " + t + ".o1, " + t + ".isa\n  "
+    parts << t + ".o2 = icmp eq i64 " + t + ".hi, 65524\n  "
     parts << "br i1 " + t + ".o2, label %" + lbl + ".hdr, label %" + lbl + ".no\n"
     parts << lbl + ".no:\n  "
     parts << "br label %" + lbl + ".out\n"
     parts << lbl + ".hdr:\n  "
-    parts << t + ".base = and i64 " + v + ", -16\n  "
+    parts << t + ".base = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".p = inttoptr i64 " + t + ".base to ptr\n  "
     parts << t + ".ebp = getelementptr i8, ptr " + t + ".p, i64 1\n  "
     parts << t + ".eb = load i8, ptr " + t + ".ebp, align 1" + invariant_load_suffix() + "\n  "
@@ -4223,7 +4214,7 @@ ewscope_md_state = {ids: {}}
     t = inst[:temp]
     v = inst[:value]
     parts = StringBuffer(240)
-    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".cpp = getelementptr i8, ptr " + t + ".hp, i64 12\n  "
     parts << t + ".cp32 = load i32, ptr " + t + ".cpp, align 4" + tbaa_header_suffix() + "\n  "
@@ -4256,7 +4247,7 @@ ewscope_md_state = {ids: {}}
     t = inst[:temp]
     v = inst[:value]
     parts = StringBuffer(400)
-    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
     parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8" + tbaa_header_suffix() + "\n  "
@@ -4271,7 +4262,7 @@ ewscope_md_state = {ids: {}}
     t = inst[:temp]
     v = inst[:value]
     parts = StringBuffer(420)
-    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
     parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8" + tbaa_header_suffix() + "\n  "
@@ -4287,7 +4278,7 @@ ewscope_md_state = {ids: {}}
     v = inst[:value]
     ty = inst[:type]
     parts = StringBuffer(420)
-    parts << t + ".hdr = and i64 " + v + ", -16\n  "
+    parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
     parts << t + ".slp = getelementptr i8, ptr " + t + ".hp, i64 16\n  "
     parts << t + ".slots = load ptr, ptr " + t + ".slp, align 8" + tbaa_header_suffix() + "\n  "
@@ -4373,7 +4364,7 @@ ewscope_md_state = {ids: {}}
     byte = t + ".byte"
     ext = t + ".ext"
     out = StringBuffer(256)
-    out << ap + " = and i64 " + arr + ", -16\n  "
+    out << ap + " = and i64 " + arr + ", 140737488355312\n  "
     out << ap_p + " = inttoptr i64 " + ap + " to ptr\n  "
     out << dg + " = getelementptr i8, ptr " + ap_p + ", i64 8\n  "
     out << dp + " = load ptr, ptr " + dg + "\n  "
@@ -4397,7 +4388,7 @@ ewscope_md_state = {ids: {}}
     sub = t + ".sub"
     byte_val = t + ".bv"
     out = StringBuffer(256)
-    out << ap + " = and i64 " + arr + ", -16\n  "
+    out << ap + " = and i64 " + arr + ", 140737488355312\n  "
     out << ap_p + " = inttoptr i64 " + ap + " to ptr\n  "
     out << dg + " = getelementptr i8, ptr " + ap_p + ", i64 8\n  "
     out << dp + " = load ptr, ptr " + dg + "\n  "
@@ -4433,7 +4424,7 @@ ewscope_md_state = {ids: {}}
     masked = t + ".masked"
     is_set = t + ".is_set"
     out = StringBuffer(384)
-    out << ap + " = and i64 " + arr + ", -16\n  "
+    out << ap + " = and i64 " + arr + ", 140737488355312\n  "
     out << ap_p + " = inttoptr i64 " + ap + " to ptr\n  "
     out << dg + " = getelementptr i8, ptr " + ap_p + ", i64 16\n  "
     out << dp + " = load ptr, ptr " + dg + ", align 8" + tbaa_header_suffix() + "\n  "
@@ -4490,7 +4481,7 @@ ewscope_md_state = {ids: {}}
     with_bit = t + ".wbit"
     new_byte = t + ".nb"
     out = StringBuffer(416)
-    out << ap + " = and i64 " + arr + ", -16\n  "
+    out << ap + " = and i64 " + arr + ", 140737488355312\n  "
     out << ap_p + " = inttoptr i64 " + ap + " to ptr\n  "
     out << dg + " = getelementptr i8, ptr " + ap_p + ", i64 16\n  "
     out << dp + " = load ptr, ptr " + dg + ", align 8" + tbaa_header_suffix() + "\n  "
@@ -5360,7 +5351,7 @@ ewscope_md_state = {ids: {}}
     if signed == nil
       signed = true
     parts = StringBuffer(700)
-    parts << s[0] + " = and i64 " + arr + ", -16\n  "               # unmask
+    parts << s[0] + " = and i64 " + arr + ", 140737488355312\n  "   # unmask (W_ARRAY_PTR_MASK)
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "      # struct ptr
     parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots
     parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it, so NOT invariant. TBAA=header lets LICM hoist it when no realloc is in the loop.
@@ -5441,7 +5432,7 @@ ewscope_md_state = {ids: {}}
     if bits == nil
       bits = 64
     parts = StringBuffer(700)
-    parts << s[0] + " = and i64 " + arr + ", -16\n  "
+    parts << s[0] + " = and i64 " + arr + ", 140737488355312\n  "
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
     parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots (i32 demote: was 32)
     parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it. TBAA=header lets LICM hoist it when no realloc is in the loop.
@@ -5550,7 +5541,7 @@ ewscope_md_state = {ids: {}}
       else
         llvm_op = "lshr"
     parts = StringBuffer(700)
-    parts << s[0] + " = and i64 " + arr + ", -16\n  "
+    parts << s[0] + " = and i64 " + arr + ", 140737488355312\n  "
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
     parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "
     parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "
@@ -5891,7 +5882,7 @@ ewscope_md_state = {ids: {}}
     arr = inst[:arr]
     idx = inst[:idx]
     parts = StringBuffer(500)
-    parts << s[0] + " = and i64 " + arr + ", -16\n  "               # unmask
+    parts << s[0] + " = and i64 " + arr + ", 140737488355312\n  "   # unmask (W_ARRAY_PTR_MASK)
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "      # struct ptr
     parts << s[2] + ".field = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots
     parts << s[2] + " = load ptr, ptr " + s[2] + ".field, align 8" + tbaa_header_suffix() + "\n  "   # slots ptr — TBAA=header lets LICM hoist when no realloc call is in the loop

@@ -68,7 +68,13 @@
      makes unrepresentable — reclaimed as seven tag slots (v4).
    ── tagged values ─────────────────────────────────────────
    0xFFF1_(payload>0)                          reserved (payload 0 is biased -inf)
-   0xFFF2 - 0xFFF7                             free tag slots (v4)
+   0xFFF2_xxxx_xxxx_xxxx                       simd2d  (Vec2f, Point2D, Vec2i — half2/short2 w/ subtags)
+   0xFFF3_xxxx_xxxx_xxxx                       simd3d  (Vec3f — half3)
+   0xFFF4_xxxx_xxxx_xxxx                       array   (WArray*, 16-byte aligned;
+                                                bit 47 + low nibble reserved flags)
+   0xFFF5                                      free tag slot (v4)
+   0xFFF6_xxxx_xxxx_xxxx                       sockaddr (32-bit IPv4 + 16-bit Port endpoint)
+   0xFFF7                                      free tag slot (v4)
    0xFFF8_xxxx_xxxx_xxxx                       bigint  (WBigint*, 47-bit ptr;
                                                 bit 47 reserved for tag-sign)
    0xFFF9_xxxx_xxxx_xxxx                       string / symbol
@@ -93,7 +99,7 @@
    nibble 7             →  regex
    nibble 8             →  range
    nibble 9             →  small array
-   nibble A             →  array
+   nibble A             →  socket (was array; promoted to W_TAG_ARRAY in v5)
    nibble B             →  string buffer
    nibble C             →  class
    nibble D             →  uuid
@@ -107,7 +113,7 @@
 
    bits 1-3 = mode:
      0-5: SSO inline (≤5 bytes at bits 4-43) (length in bits 1-3, 0-5)
-     6:   slab (24-bit index at bits 4-27, interned SSO-61 string/symbol)
+     6:   slab (24-bit index at bits 4-27, 6-bit cached length at bits 28-33)
      7:   heap (transient/large, bits 4-47 = masked pointer to WString* / WSymbol*)
 
    ---- Numeric (0xFFFD) — 2-bit subtype in payload bits 47-46 ----
@@ -119,12 +125,12 @@
    ---- Packed (0xFFFE) — 3-bit subtype in payload bits 47-45 ----
    000: color      [8R][8G][8B][8A][12 colorspace/flags]
    001: complex    [16 real sig][6 real scale][16 imag sig][6 imag scale]
-   010: rational   [22 numerator (signed)][22 denominator (unsigned)]
+   010: rational   [25 numerator (signed)][20 denominator (unsigned)]
    011: (reserved)
    100: date       [12 year][4 month][5 day][5 hour][6 min][6 sec][6 tz]
    101: ipv4       [32 address][6 CIDR][6 flags]
    110: body       [24 arena offset][21 element count]
-   111: location   [1 mode][43 payload]
+   111: location   [2 mode][43 payload; mode 11 = immediate Range]
 
    ---- Duration (0xFFFF) — 1-bit mode in payload bit 47 ----
    mode 0: [47-bit signed ns] (±19.5 hours, for benchmarks/timing)
@@ -151,7 +157,13 @@ typedef uint64_t WValue;
 #define W_BIASED_NAN    0x7FF9000000000000ULL
 
 /* ---- Tag constants (high 16 bits) ---- */
-/* 0xFFF1 reserved (payload 0 is biased -inf); 0xFFF2-0xFFF7 free (v4). */
+#define W_TAG_SIMD2D    0xFFF2000000000000ULL
+#define W_TAG_SIMD3D    0xFFF3000000000000ULL
+#define W_TAG_ARRAY     0xFFF4000000000000ULL
+#define W_ARRAY_PTR_MASK 0x00007FFFFFFFFFF0ULL
+/* 0xFFF5 free tag slot */
+#define W_TAG_SOCKADDR  0xFFF6000000000000ULL
+/* 0xFFF7 free tag slot */
 #define W_TAG_BIGINT    0xFFF8000000000000ULL
 #define W_TAG_STRINGSYM 0xFFF9000000000000ULL
 #define W_TAG_INT       0xFFFA000000000000ULL
@@ -174,7 +186,7 @@ typedef uint64_t WValue;
    Objects: value >= 0x10 with top 16 bits == 0. */
 /* Subtag layout. BigInt reclaims one of the freed slots because
  * arithmetic dispatch is hot enough that the generic-bucket header load is
- * measurable; slots 3 and 0xE remain free for future promotions. */
+ * measurable; slot 3 remains free for a future promotion. */
 #define W_SUBTAG_GENERIC     0   /* type discriminator in struct header byte */
 #define W_SUBTAG_ATOMIC      1   /* was IPV6 (demoted to W_TYPE_IPV6 = 6) */
 /* slot 2 free (v4: was BIGINT — promoted to the top-level W_TAG_BIGINT).
@@ -189,11 +201,12 @@ typedef uint64_t WValue;
 #define W_SUBTAG_REGEX       7
 #define W_SUBTAG_RANGE       8
 #define W_SUBTAG_SMALL_ARRAY 9   /* own subtag, no type byte */
-#define W_SUBTAG_ARRAY       0xA /* WArray; ebits=65 (w64) for polymorphic, else typed */
+#define W_SUBTAG_SOCKET      0xA /* claimed Array's former slot */
+#define W_SUBTAG_ARRAY       0xA /* Array's stable dispatch key (0x0A) */
 #define W_SUBTAG_STRBUF      0xB /* claimed BigInt's former slot */
 #define W_SUBTAG_CLASS       0xC
 #define W_SUBTAG_UUID        0xD
-/* slot E free (was ERROR; never used a constructor — no demote needed) */
+#define W_SUBTAG_REGEX_MATCH 0xE
 #define W_SUBTAG_DOMAIN      0xF /* heap-overflow domain types */
 
 /* ---- Domain heap type discriminators (for W_SUBTAG_DOMAIN overflow objects) ---- */
@@ -428,6 +441,10 @@ static inline int w_is_nan(WValue v)       { return v == W_BIASED_NAN; }
 
 static inline int w_is_int(WValue v)       { return (v & W_TAG_MASK) == W_TAG_INT; }
 static inline int w_is_instant(WValue v)   { return (v & W_TAG_MASK) == W_TAG_INSTANT; }
+static inline int w_is_simd2d(WValue v)    { return (v & W_TAG_MASK) == W_TAG_SIMD2D; }
+static inline int w_is_simd3d(WValue v)    { return (v & W_TAG_MASK) == W_TAG_SIMD3D; }
+static inline int w_is_sockaddr(WValue v)  { return (v & W_TAG_MASK) == W_TAG_SOCKADDR; }
+static inline uint8_t w_simd2d_subtag(WValue v) { return (uint8_t)((v >> 44) & 0xFULL); }
 static inline int w_is_char(WValue v) {
     return (v & W_TAG_MASK) == W_TAG_CHAR && ((v >> 46) & 0x3) == 3;  /* CHAR subtype */
 }
@@ -469,7 +486,10 @@ static inline int w_is_rational(WValue v)    { return w_is_packed(v) && w_packed
 static inline int w_is_node(WValue v)        { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_NODE; }
 static inline int w_is_date(WValue v)        { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_DATE; }
 static inline int w_is_ipv4(WValue v)        { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_IPV4; }
-static inline int w_is_location(WValue v)    { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_LOCATION; }
+/* Location excludes mode 11: that mode hosts the immediate Range encoding
+ * (see the Range section below w_unbox_location_offset), which must never
+ * satisfy Location dispatch. */
+static inline int w_is_location(WValue v)    { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_LOCATION && ((v >> 43) & 0x3) != 0x3; }
 static inline int w_is_body(WValue v)        { return w_is_packed(v) && w_packed_subtype(v) == W_PACKED_BODY; }
 
 /* String/symbol: both under 0xFFF9 tag, distinguished by bit 0 */
@@ -497,10 +517,13 @@ static inline int w_is_obj(WValue v) {
 
 /* Object sub-tag checks */
 static inline int w_subtag(WValue v)       { return (int)(v & 0xFULL); }
-static inline int w_is_array(WValue v)     { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_ARRAY; }
+/* v5: one tag compare — arrays ride W_TAG_ARRAY, not object space. */
+static inline int w_is_array(WValue v)     { return (v & W_TAG_MASK) == W_TAG_ARRAY; }
+static inline int w_is_socket(WValue v)    { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_SOCKET; }
 static inline int w_is_hash(WValue v)      { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_HASH; }
 static inline int w_is_closure(WValue v)   { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_CLOSURE; }
 static inline int w_is_regex(WValue v)     { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_REGEX; }
+static inline int w_is_regex_match(WValue v) { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_REGEX_MATCH; }
 static inline int w_is_instance(WValue v)  { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_INSTANCE; }
 static inline int w_is_class(WValue v)     { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_CLASS; }
 static inline int w_is_range(WValue v)     { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_RANGE; }
@@ -622,17 +645,30 @@ static inline WValue w_box_inline_sym(const void *data, size_t len) {
     return w_box_inline_str(data, len) | 1;
 }
 
-/* ---- Mode 6: Slab strings and symbols (24-bit index, 6-61 byte SSO) ---- */
+/* ---- Mode 6: Slab strings and symbols (24-bit index, 6-bit cached length, 6-61 byte SSO) ---- */
+static inline WValue w_box_slab_str_len(uint32_t index, size_t len) {
+    return W_TAG_STRINGSYM | (6ULL << 1) | (((uint64_t)index & 0xFFFFFF) << 4) |
+           (((uint64_t)len & 0x3FULL) << 28);
+}
+
 static inline WValue w_box_slab_str(uint32_t index) {
-    return W_TAG_STRINGSYM | (6ULL << 1) | (((uint64_t)index & 0xFFFFFF) << 4);
+    return w_box_slab_str_len(index, 0);
+}
+
+static inline WValue w_box_slab_sym_len(uint32_t index, size_t len) {
+    return w_box_slab_str_len(index, len) | 1;
 }
 
 static inline WValue w_box_slab_sym(uint32_t index) {
-    return W_TAG_STRINGSYM | (6ULL << 1) | (((uint64_t)index & 0xFFFFFF) << 4) | 1;
+    return w_box_slab_sym_len(index, 0);
 }
 
 static inline uint32_t w_as_slab_index(WValue v) {
     return (uint32_t)((v >> 4) & 0xFFFFFF);
+}
+
+static inline size_t w_slab_cached_len(WValue v) {
+    return (size_t)((v >> 28) & 0x3F);
 }
 
 /* ---- Mode 7: Heap string (WString pointer, transient/large) ---- */
@@ -772,15 +808,19 @@ static inline int w_unbox_complex_real_scale(WValue v) { return ((int8_t)(((v >>
 static inline int16_t w_unbox_complex_imag_sig(WValue v) { return (int16_t)((v >> 6) & 0xFFFF); }
 static inline int w_unbox_complex_imag_scale(WValue v) { return ((int8_t)((v & 0x3F) << 2)) >> 2; }
 
-/* Rational: [22 numerator (signed)][22 denominator (unsigned)] in bits 44-0 */
+/* Rational: [25 numerator (signed)][20 denominator (unsigned)] in bits 44-0 */
+#define W_RATIONAL_NUM_MAX  ((int32_t)((1 << 24) - 1))   /* +16,777,215 */
+#define W_RATIONAL_NUM_MIN  ((int32_t)(-(1 << 24)))       /* -16,777,216 */
+#define W_RATIONAL_DEN_MAX  ((uint32_t)((1 << 20) - 1))   /* 1,048,575 */
+
 static inline WValue w_box_rational(int32_t num, uint32_t den) {
     return W_TAG_PACKED | ((uint64_t)W_PACKED_RATIONAL << 45) |
-           (((uint64_t)num & 0x3FFFFF) << 22) | ((uint64_t)den & 0x3FFFFF);
+           (((uint64_t)num & 0x1FFFFFFULL) << 20) | ((uint64_t)den & 0xFFFFFULL);
 }
 static inline int32_t w_unbox_rational_num(WValue v) {
-    return ((int32_t)(((v >> 22) & 0x3FFFFF) << 10)) >> 10;
+    return ((int32_t)(((v >> 20) & 0x1FFFFFFULL) << 7)) >> 7;
 }
-static inline uint32_t w_unbox_rational_den(WValue v) { return (uint32_t)(v & 0x3FFFFF); }
+static inline uint32_t w_unbox_rational_den(WValue v) { return (uint32_t)(v & 0xFFFFFULL); }
 
 /* Date: [12 year][4 month][5 day][5 hour][6 min][6 sec][7 tz] in bits 44-0.
    tz is stored as signed quarter-hours (15-minute units, range -32:00..
@@ -829,7 +869,8 @@ static inline int w_unbox_ipv4_flags(WValue v) { return (int)(v & 0x3F); }
  *   Mode 00 (Point):       [21 x (signed)][22 y (signed)]
  *   Mode 01 (File):        [14 file_id][18 line][11 col]
  *   Mode 10 (FileOffset):  [14 file_id][29 byte offset]
- *   Mode 11: reserved
+ *   Mode 11 (Range):       immediate integer Range (its own section below;
+ *                          NOT a Location — w_is_location excludes it)
  *
  * FileOffset is a single-point byte offset into a file's source text —
  * the low-level payload underneath byte-offset AST spans (:loc/:loc_end
@@ -867,6 +908,100 @@ static inline int w_unbox_location_col(WValue v) { return (int)(v & 0x7FF); }
 /* FileOffset mode shares file_id's bit position with File mode, so
  * w_unbox_location_file_id works on either — no separate accessor. */
 static inline uint32_t w_unbox_location_offset(WValue v) { return (uint32_t)(v & 0x1FFFFFFF); }
+
+/* ---- Range (Location mode 11): immediate integer range ----
+ *
+ * Allocation-free encoding for the hot Range shapes. Anything that does
+ * not fit falls back to the heap Range (W_SUBTAG_RANGE) via the
+ * w_range_imm_try funnel below — the same constructor-time inline/heap
+ * discipline as Int→BigInt and decimal→domain overflow. The
+ * representation itself is the discriminator; no flag bits are spent on
+ * the value, and W_NIL (never a valid range) signals the funnel miss.
+ *
+ * Tag (0xFFFE) + subtype (111) + mode (11) are contiguous at bits
+ * 63-43, so the type check is one shift + compare.
+ *
+ * A sub-mode bit at 42 splits the 43-bit payload two ways; the
+ * exclusive bit sits at LSB in both (single-bit test, file convention):
+ *
+ *   sub-mode 0 (loop shape):  [bit 41: start, 0 or 1]
+ *                             [bits 40-1: end, 40-bit unsigned]
+ *     0..n and 1..n for n < 2^40 — the dominant loop/iteration shape.
+ *
+ *   sub-mode 1 (span shape):  [bits 41-22: start, 20-bit signed]
+ *                             [bits 21-1: end, 21-bit signed]
+ *     a..b with start in ±2^19, end in ±2^20 — small literals, slices.
+ *     Negative-index slices (0..-1) land here via the funnel cascade;
+ *     empty ranges (5..2) encode naturally and iterate zero times.
+ *
+ * The fallback keeps the tail: start outside {0,1}∪±2^19, end ≥ 2^40
+ * (or outside ±2^20 with a non-loop start), stepped ranges (a..b/n),
+ * and BigInt bounds. Fully wired: w_dispatch_key maps this encoding to
+ * W_SUBTAG_RANGE (core/range.w methods decode $value directly),
+ * __w_type reports "Range", and lower_range mints these via
+ * w_range_make (runtime.c) — non-encodable bounds take the historical
+ * eager boxed-int Array fallback there. */
+#define W_RANGE_IMM_BASE (W_TAG_PACKED | ((uint64_t)W_PACKED_LOCATION << 45) \
+                          | (3ULL << 43))
+
+#define W_RANGE_IMM_END0_MAX   ((int64_t)((1ULL << 40) - 1))
+#define W_RANGE_IMM_START1_MIN ((int64_t)(-(1LL << 19)))
+#define W_RANGE_IMM_START1_MAX ((int64_t)((1LL << 19) - 1))
+#define W_RANGE_IMM_END1_MIN   ((int64_t)(-(1LL << 20)))
+#define W_RANGE_IMM_END1_MAX   ((int64_t)((1LL << 20) - 1))
+
+static inline int w_is_range_imm(WValue v) {
+    return (v >> 43) == (W_RANGE_IMM_BASE >> 43);
+}
+
+static inline WValue w_box_range_loop(int start01, uint64_t end, int excl) {
+    /* sub-mode bit 42 implicitly 0 */
+    return W_RANGE_IMM_BASE
+         | (((uint64_t)start01 & 1) << 41)
+         | ((end & 0xFFFFFFFFFFULL) << 1)
+         | ((uint64_t)excl & 1);
+}
+
+static inline WValue w_box_range_span(int32_t start, int32_t end, int excl) {
+    return W_RANGE_IMM_BASE | (1ULL << 42)
+         | (((uint64_t)start & 0xFFFFF) << 22)
+         | (((uint64_t)end & 0x1FFFFF) << 1)
+         | ((uint64_t)excl & 1);
+}
+
+static inline int w_range_imm_submode(WValue v) { return (int)((v >> 42) & 1); }
+static inline int w_range_imm_excl(WValue v)    { return (int)(v & 1); }
+
+static inline int64_t w_range_imm_start(WValue v) {
+    if ((v >> 42) & 1) {
+        /* 20-bit signed at bits 41-22. Unsigned shift, cast after —
+         * same UB avoidance as w_unbox_decimal_sig. */
+        return ((int64_t)((((v >> 22) & 0xFFFFF)) << 44)) >> 44;
+    }
+    return (int64_t)((v >> 41) & 1);
+}
+
+static inline int64_t w_range_imm_end(WValue v) {
+    if ((v >> 42) & 1) {
+        /* 21-bit signed at bits 21-1 */
+        return ((int64_t)((((v >> 1) & 0x1FFFFF)) << 43)) >> 43;
+    }
+    return (int64_t)((v >> 1) & 0xFFFFFFFFFFULL);
+}
+
+/* Constructor funnel: packed value when the range fits, W_NIL when it
+ * must go heap. Loop shape is tried first so 0..n never burns span
+ * bits; a loop-shaped start with a negative end (0..-1 slices) falls
+ * through to the span check. */
+static inline WValue w_range_imm_try(int64_t start, int64_t end, int excl) {
+    if ((start == 0 || start == 1) &&
+        (uint64_t)end <= (uint64_t)W_RANGE_IMM_END0_MAX)
+        return w_box_range_loop((int)start, (uint64_t)end, excl);
+    if (start >= W_RANGE_IMM_START1_MIN && start <= W_RANGE_IMM_START1_MAX &&
+        end >= W_RANGE_IMM_END1_MIN && end <= W_RANGE_IMM_END1_MAX)
+        return w_box_range_span((int32_t)start, (int32_t)end, excl);
+    return W_NIL;
+}
 
 /* ---- Body (subtype 6): AST child-list reference ----
  *

@@ -608,6 +608,7 @@ compiled_specs=(
   spec/compiler/elementwise_fusion_spec.w
   spec/compiler/forward_typed_raw_call_spec.w
   spec/compiler/poly_ranged_sum_big_bounds_spec.w
+  spec/compiler/range_immediate_spec.w
   spec/compiler/function_replacement_index_spec.w
   benchmarks/runtime_ports/float_remaining_no_use_literal.w
   spec/compiler/indexed_compound_assignment_parameter_spec.w
@@ -683,6 +684,7 @@ compiled_specs=(
   spec/compiler/autoload_walker_fields_spec.w
   spec/compiler/view_field_var_spec.w
   spec/compiler/zero_arg_cached_dispatch_spec.w
+  spec/compiler/regex_capture_storage_spec.w
   spec/interpreter/hash_size_view_field_spec.w
   spec/interpreter/float_leaf_native_spec.w
   spec/interpreter/implicit_block_param_shadow_spec.w

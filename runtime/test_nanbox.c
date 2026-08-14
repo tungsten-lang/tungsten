@@ -8,6 +8,7 @@
 
 /* Helper: run a function in a child process, return 1 if it exited non-zero */
 static int expect_crash(void (*fn)(void)) {
+    fflush(NULL);
     pid_t pid = fork();
     if (pid == 0) {
         /* Child: suppress stderr, run function */
@@ -24,6 +25,11 @@ static int expect_crash(void (*fn)(void)) {
 static void overflow_fn(void) { w_int((1LL << 47)); }
 static void underflow_fn(void) { w_int(-(1LL << 47) - 1); }
 static void add_overflow_fn(void) { w_add(w_box_int((1LL << 47) - 1), w_box_int(1)); }
+#ifndef TUNGSTEN_ONIG
+static void unsupported_named_regex_fn(void) {
+    (void)w_regex_new(w_string("(?<word>a)"), w_string(""));
+}
+#endif
 #ifndef NDEBUG
 static void ast_bad_field_fn(void) {
     w_node_arena_reset();
@@ -38,6 +44,7 @@ static void ast_bad_body_fn(void) {
 
 /* Internal constructor exercised here so subtraction cases can span limbs. */
 extern WValue w_bigint_from_dec_str(WValue str);
+extern WValue __w_type(WValue value);
 extern int64_t w_prime_test_i64(int64_t n);
 extern int64_t w_prime_test_i64_12k(int64_t n);
 extern int64_t w_prime_test_i64_30k(int64_t n);
@@ -79,6 +86,53 @@ int main() {
         assert(!w_truthy(v));
         printf("  nil: OK\n");
     }
+
+    /* Regex capture storage is dynamically sized and RegexMatch snapshots it
+     * before a later match can replace the thread-local capture state. */
+    {
+        WValue rx = w_regex_new(
+            w_string("(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)"), w_string(""));
+        assert(w_regex_match(rx, w_string("abcdefghijk")) == W_TRUE);
+        assert(strcmp(str_val(w_regex_capture(w_int(10))), "j") == 0);
+        assert(strcmp(str_val(w_regex_capture(w_int(11))), "k") == 0);
+        assert(w_regex_match(rx, w_string("no match")) == W_FALSE);
+        assert(w_regex_capture(w_int(1)) == W_NIL);
+
+        WValue structured = w_regex_match_data(
+            w_regex_new(w_string("(é)(猫)?()"), w_string("")), w_string("xé"));
+        assert(w_is_regex_match(structured));
+        assert(strcmp(str_val(__w_type(structured)), "RegexMatch") == 0);
+        WValue group = w_int(1);
+        assert(strcmp(str_val(w_method_call_fast(
+            structured, w_string("[]"), &group, 1)), "é") == 0);
+        WValue span = w_method_call_fast(
+            structured, w_string("offset"), &group, 1);
+        assert(w_as_int(w_array_get(span, w_int(0))) == 1);
+        assert(w_as_int(w_array_get(span, w_int(1))) == 2);
+        assert(strcmp(str_val(w_to_s(structured)), "é") == 0);
+        printf("  regex dynamic captures: OK\n");
+    }
+
+#ifdef TUNGSTEN_ONIG
+    {
+        WValue rx = w_regex_new(
+            w_string("(?<word>é)(?<tail>猫)?"), w_string(""));
+        WValue structured = w_regex_match_data(rx, w_string("xé"));
+        WValue word = w_string("word");
+        WValue tail = w_symbol("tail");
+        assert(strcmp(str_val(w_method_call_fast(
+            structured, w_string("[]"), &word, 1)), "é") == 0);
+        assert(w_method_call_fast(
+            structured, w_string("offset"), &tail, 1) == W_NIL);
+        WValue names = w_method_call_fast(
+            structured, w_string("names"), NULL, 0);
+        assert(w_array_size(names) == 2);
+        printf("  regex named captures: OK\n");
+    }
+#else
+    assert(expect_crash(unsupported_named_regex_fn));
+    printf("  regex named capture fallback rejection: OK\n");
+#endif
 
     /* Test false */
     {
@@ -192,7 +246,13 @@ int main() {
     {
         WValue arr = w_array_new_empty();
         assert(w_is_array(arr));
-        assert(w_is_obj(arr));
+        /* v5: Array rides its own top-level tag — no longer object space.
+         * Same shape as BigInt's v4 move; dispatch key stays 0x0A. */
+        assert(!w_is_obj(arr));
+        assert((arr & W_TAG_MASK) == W_TAG_ARRAY);
+        assert((arr & (1ULL << 47)) == 0);   /* flag bit reserved, clear */
+        assert((arr & 0xFULL) == 0);         /* flag nibble reserved, clear */
+        assert(!w_is_double(arr));
         w_array_push(arr, w_int(10));
         w_array_push(arr, w_int(20));
         w_array_push(arr, w_int(30));
@@ -372,6 +432,7 @@ int main() {
                         w_is_undef(vals[i]) +
                         w_is_int(vals[i]) + w_is_double(vals[i]) +
                         w_is_string(vals[i]) + w_is_obj(vals[i]) +
+                        w_is_array(vals[i]) +   /* v5: own tag, not obj space */
                         w_is_symbol(vals[i]) +
                         w_is_decimal(vals[i]) + w_is_char(vals[i]) +
                         w_is_instant(vals[i]);
@@ -861,16 +922,23 @@ int main() {
         printf("  bigint dedicated tag: OK\n");
     }
 
-    /* Pointer alignment: w_as_ptr strips sub-tag correctly */
+    /* Pointer alignment: w_as_ptr strips sub-tag correctly (obj space),
+     * and w_as_array strips tag + reserved flag bits (v5 array tag). */
     {
         /* Simulate a 16-byte aligned pointer */
         uintptr_t fake_ptr = 0x0000000012345670ULL; /* low 4 bits = 0 */
-        WValue v = (fake_ptr & ~0xFULL) | W_SUBTAG_ARRAY;
-        assert(w_is_array(v));
+        WValue v = (fake_ptr & ~0xFULL) | W_SUBTAG_HASH;
+        assert(w_is_hash(v));
         void *out = w_as_ptr(v);
         assert((uintptr_t)out == fake_ptr);
         /* Verify sub-tag didn't corrupt the pointer */
         assert(((uintptr_t)out & 0xF) == 0);
+
+        WValue av = w_box_array((WArray *)fake_ptr);
+        assert(w_is_array(av));
+        assert((uintptr_t)w_as_array(av) == fake_ptr);
+        /* Reserved flag bits (47 and 3-0) must strip in extraction. */
+        assert((uintptr_t)w_as_array(av | (1ULL << 47) | 0x5ULL) == fake_ptr);
         printf("  pointer alignment: OK\n");
     }
 
@@ -1381,6 +1449,76 @@ int main() {
         printf("  domain heap decimal comparison: OK\n");
     }
 
+    /* Immediate Range (Location mode 11): two sub-modes + heap-fallback funnel */
+    {
+        /* Loop shape (sub-mode 0): 0..n / 1..n, end up to 2^40-1 */
+        WValue v = w_range_imm_try(0, 999999999999LL, 0);
+        assert(v != W_NIL);
+        assert(w_is_range_imm(v));
+        assert(!w_is_location(v));   /* mode 11 must not satisfy Location */
+        assert(w_is_packed(v) && w_packed_subtype(v) == W_PACKED_LOCATION);
+        assert(w_range_imm_submode(v) == 0);
+        assert(w_range_imm_start(v) == 0);
+        assert(w_range_imm_end(v) == 999999999999LL);
+        assert(!w_range_imm_excl(v));
+
+        WValue x = w_range_imm_try(1, W_RANGE_IMM_END0_MAX, 1);
+        assert(x != W_NIL && w_range_imm_submode(x) == 0);
+        assert(w_range_imm_start(x) == 1);
+        assert(w_range_imm_end(x) == W_RANGE_IMM_END0_MAX);
+        assert(w_range_imm_excl(x));
+
+        /* Span shape (sub-mode 1): signed bounds; 0..-1 slices arrive via
+         * the funnel cascade (loop start, negative end) */
+        WValue s = w_range_imm_try(-5, 5, 0);
+        assert(s != W_NIL && w_range_imm_submode(s) == 1);
+        assert(w_range_imm_start(s) == -5 && w_range_imm_end(s) == 5);
+        WValue neg = w_range_imm_try(0, -1, 0);
+        assert(neg != W_NIL && w_range_imm_submode(neg) == 1);
+        assert(w_range_imm_start(neg) == 0 && w_range_imm_end(neg) == -1);
+        WValue lim = w_range_imm_try(W_RANGE_IMM_START1_MIN, W_RANGE_IMM_END1_MAX, 1);
+        assert(lim != W_NIL && w_range_imm_submode(lim) == 1);
+        assert(w_range_imm_start(lim) == W_RANGE_IMM_START1_MIN);
+        assert(w_range_imm_end(lim) == W_RANGE_IMM_END1_MAX);
+        assert(w_range_imm_excl(lim));
+        /* Empty span encodes naturally */
+        WValue empty = w_range_imm_try(5, 2, 0);
+        assert(empty != W_NIL);
+        assert(w_range_imm_start(empty) == 5 && w_range_imm_end(empty) == 2);
+
+        /* Funnel misses → W_NIL → caller allocates the heap Range */
+        assert(w_range_imm_try(2, 1 << 21, 0) == W_NIL);          /* start>1, end past span */
+        assert(w_range_imm_try(0, 1LL << 40, 0) == W_NIL);        /* end past loop max */
+        assert(w_range_imm_try(W_RANGE_IMM_START1_MIN - 1, 0, 0) == W_NIL);
+
+        /* Display */
+        assert(strcmp(str_val(w_to_s(w_range_imm_try(0, 9, 0))), "0..9") == 0);
+        assert(strcmp(str_val(w_to_s(w_range_imm_try(-3, 3, 1))), "-3...3") == 0);
+
+        /* Type identity: mode 11 reports Range, not Location */
+        assert(strcmp(str_val(__w_type(w_range_imm_try(0, 9, 0))), "Range") == 0);
+
+        /* Equality: canonical encoding means bit equality IS value
+         * equality; distinct ranges and range-vs-array compare false. */
+        assert(w_eq(w_range_imm_try(0, 9, 0), w_range_imm_try(0, 9, 0)) == W_TRUE);
+        assert(w_eq(w_range_imm_try(0, 9, 0), w_range_imm_try(0, 9, 1)) == W_FALSE);
+        assert(w_eq(w_range_imm_try(0, 9, 0), w_range_imm_try(1, 9, 0)) == W_FALSE);
+        assert(w_eq(w_range_imm_try(-5, 5, 0), w_range_imm_try(-5, 5, 0)) == W_TRUE);
+        {
+            WValue arr01 = w_array_new_empty();
+            w_array_push(arr01, w_int(0));
+            w_array_push(arr01, w_int(1));
+            assert(w_eq(w_range_imm_try(0, 1, 0), arr01) == W_FALSE);
+        }
+
+        /* ccall wrapper: boxed in, packed (or nil) out */
+        assert(w_range_imm_try_w(w_int(0), w_int(9), W_FALSE) ==
+               w_range_imm_try(0, 9, 0));
+        assert(w_range_imm_try_w(w_int(2), w_int(1 << 21), W_FALSE) == W_NIL);
+
+        printf("  immediate range (location mode 11): OK\n");
+    }
+
     /* Arena-owned singleton caches must be invalidated with the arena. A
      * retained handle can otherwise alias the first node in the next compile. */
     {
@@ -1434,6 +1572,105 @@ int main() {
         w_node_arena_reset();
 
         printf("  AST cached bool reset: OK\n");
+    }
+
+    /* Rational 25/20 bit packing & Decimal / Float Rational.new support */
+    {
+        /* 25-bit signed numerator limits: -16777216 to 16777215 */
+        /* 20-bit unsigned denominator limits: 1 to 1048575 */
+        WValue max_inline = w_box_rational(16777215, 1048575);
+        assert(w_is_rational(max_inline));
+        assert(w_unbox_rational_num(max_inline) == 16777215);
+        assert(w_unbox_rational_den(max_inline) == 1048575);
+
+        WValue min_inline = w_box_rational(-16777216, 1048575);
+        assert(w_is_rational(min_inline));
+        assert(w_unbox_rational_num(min_inline) == -16777216);
+        assert(w_unbox_rational_den(min_inline) == 1048575);
+
+        /* Decimal inputs to Rational.new, e.g. Rational.new(1e10, 1e20) */
+        WValue d1 = w_decimal(1, 10);   /* 1e10 */
+        WValue d2 = w_decimal(1, 20);   /* 1e20 */
+        WValue r_dec = w_rational_new(d1, d2);
+        assert(w_is_rational_any(r_dec));
+        WValue num = w_rational_numerator(r_dec);
+        WValue den = w_rational_denominator(r_dec);
+        assert(w_eq(num, w_int(1)) == W_TRUE);
+        assert(w_eq(den, bigint_dec("10000000000")) == W_TRUE);
+        assert(strcmp(str_val(w_to_s(r_dec)), "1/10000000000") == 0);
+
+        /* Float inputs */
+        WValue rf = w_rational_new(w_float(0.5), w_float(2.0));
+        assert(w_is_rational(rf));
+        assert(w_unbox_rational_num(rf) == 1);
+        assert(w_unbox_rational_den(rf) == 4);
+
+        printf("  rational 25/20 limits & Decimal/Float constructor: OK\n");
+    }
+
+    /* SIMD2D, SIMD3D, SockAddr tags and dispatch keys */
+    {
+        WValue v2f = w_vec2f(1.5, -2.5);
+        assert(w_is_simd2d(v2f));
+        double x2, y2;
+        w_vec2f_unpack(v2f, &x2, &y2);
+        assert(x2 == 1.5 && y2 == -2.5);
+        assert(w_simd2d_subtag(v2f) == 0);
+        assert(strcmp(str_val(__w_type(v2f)), "Vec2f") == 0);
+        assert(w_dispatch_key(v2f) == 0xB0);
+
+        WValue pt2d = w_point2d(10.0, 20.0);
+        assert(w_is_simd2d(pt2d));
+        assert(w_simd2d_subtag(pt2d) == 2);
+        assert(strcmp(str_val(__w_type(pt2d)), "Point2D") == 0);
+        assert(w_dispatch_key(pt2d) == 0xB2); /* 0xB0 | 2 */
+
+        WValue v3f = w_vec3f(1.0, 2.0, 3.0);
+        assert(w_is_simd3d(v3f));
+        double x3, y3, z3;
+        w_vec3f_unpack(v3f, &x3, &y3, &z3);
+        assert(x3 == 1.0 && y3 == 2.0 && z3 == 3.0);
+        assert(strcmp(str_val(__w_type(v3f)), "Vec3f") == 0);
+        assert(w_dispatch_key(v3f) == 0xB4);
+
+        WValue sa = w_sockaddr(127, 0, 0, 1, 8080);
+        assert(w_is_sockaddr(sa));
+        uint8_t a, b, c, d;
+        w_sockaddr_ip(sa, &a, &b, &c, &d);
+        assert(a == 127 && b == 0 && c == 0 && d == 1);
+        assert(w_sockaddr_port(sa) == 8080);
+        assert(strcmp(str_val(__w_type(sa)), "SockAddr") == 0);
+        assert(w_dispatch_key(sa) == 0xB6);
+
+        printf("  SIMD & SockAddr tags and dispatch keys: OK\n");
+    }
+
+    /* Socket subtag 0xA and dispatch */
+    {
+        WSocket test_sock;
+        memset(&test_sock, 0, sizeof(test_sock));
+        test_sock.type = W_TYPE_SOCKET;
+        test_sock.fd = 42;
+        WValue sock_val = w_box_ptr(&test_sock, W_SUBTAG_SOCKET);
+        assert(w_is_socket(sock_val));
+        assert(w_subtag(sock_val) == W_SUBTAG_SOCKET);
+        assert(w_subtag(sock_val) == 0xA);
+        assert(strcmp(str_val(__w_type(sock_val)), "Socket") == 0);
+        assert(w_dispatch_key(sock_val) == (0x80u | W_TYPE_SOCKET));
+
+        printf("  socket subtag 0xA & dispatch: OK\n");
+    }
+
+    /* Slab string length caching */
+    {
+        WValue slab_val = w_box_slab_str_len(1234, 15);
+        assert(w_is_string(slab_val));
+        assert(w_is_slab_str(slab_val));
+        assert(w_as_slab_index(slab_val) == 1234);
+        assert(w_slab_cached_len(slab_val) == 15);
+        assert(w_string_byte_length((int64_t)slab_val) == 15);
+
+        printf("  slab string length caching: OK\n");
     }
 
 #ifndef NDEBUG

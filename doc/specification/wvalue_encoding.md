@@ -57,13 +57,18 @@ regions ordered from low to high:
  0x0000_0000_0000_0004                      memo miss (internal sentinel)
  0x0000_0000_0000_0005 - 0x0000_0000_0000_000F  reserved sentinels
  0x0000_0000_0000_00x0+                     heap objects (ptr | sub-tag)
- 0x0001_0000_0000_0000 - 0xFFF1_0000_0000_0000  biased IEEE 754 doubles (v4 exact ceiling; 0xFFF2-0xFFF7 free, 0xFFF8 bigint)
+ 0x0001_0000_0000_0000 - 0xFFF1_0000_0000_0000  biased IEEE 754 doubles (v4 exact ceiling)
+ 0xFFF2_xxxx_xxxx_xxxx                      simd2d  (Vec2f, Point2D, Vec2i)
+ 0xFFF3_xxxx_xxxx_xxxx                      simd3d  (Vec3f)
+ 0xFFF4_xxxx_xxxx_xxxx                      array   (WArray*, 16-byte aligned; bit 47 + low nibble reserved flags; v5)
+ 0xFFF6_xxxx_xxxx_xxxx                      sockaddr (IPv4 + port endpoint)
+ 0xFFF8_xxxx_xxxx_xxxx                      bigint  (WBigint*; bit 47 = tag-sign; v4)
  0xFFF9_xxxx_xxxx_xxxx                      string / symbol
  0xFFFA_xxxx_xxxx_xxxx                      int     (48-bit signed)
  0xFFFB_xxxx_xxxx_xxxx                      instant (48-bit signed Unix ms)
  0xFFFC_xxxx_xxxx_xxxx                      lexical (token, lexchar, slice, char)
  0xFFFD_xxxx_xxxx_xxxx                      numeric (decimal, currency, quantity)
- 0xFFFE_xxxx_xxxx_xxxx                      packed  (color, complex, rational, date, ipv4, location)
+ 0xFFFE_xxxx_xxxx_xxxx                      packed  (color, complex, rational, node, date, ipv4, body, location/range)
  0xFFFF_xxxx_xxxx_xxxx                      duration (ns or months+ms)
  ──────────────────────────────────────────────────────────────
 ```
@@ -101,20 +106,23 @@ All heap-allocated objects use 16-byte-aligned pointers. The low 4 bits
 |--------|------|-------------|
 | 0x0 (ptr=0) | nil | (singleton, not a pointer) |
 | 0x0 (ptr≠0) | generic | type discriminator in struct header byte |
-| 0x1 | false | (singleton, not a pointer) |
-| 0x2 | true | (singleton, not a pointer) |
-| 0x3 | undef | (singleton, not a pointer) |
-| 0x4 | struct | user-defined class instance |
+| 0x1 (ptr=0) | false | (singleton, not a pointer) |
+| 0x1 (ptr≠0) | atomic | atomic integer object |
+| 0x2 (ptr=0) | true | (singleton, not a pointer) |
+| 0x2 (ptr≠0) | free | bigint moved to top-level tag `0xFFF8` in v4 |
+| 0x3 (ptr=0) | undef | (singleton, not a pointer) |
+| 0x3 (ptr≠0) | free | encoded values moved to the generic bucket |
+| 0x4 | instance | user-defined class instance |
 | 0x5 | hash | hash table |
 | 0x6 | closure | function closure |
 | 0x7 | regex | compiled regex |
 | 0x8 | range | range object |
-| 0x9 | module | module |
-| 0xA | array | dynamic array |
+| 0x9 | small array | fixed-capacity inline array |
+| 0xA | socket | network socket handle (WSocket*) |
 | 0xB | string buffer | mutable string builder (bigint moved to top-level tag 0xFFF8 in v4) |
 | 0xC | class | class metaobject |
 | 0xD | uuid | 128-bit UUID |
-| 0xE | error | error object |
+| 0xE | regex match | immutable structured capture snapshot |
 | 0xF | domain | heap-overflow domain type (see §11) |
 
 **Boxing:** `(uint64_t)(uintptr_t)ptr | subtag`
@@ -200,10 +208,11 @@ indicates a heap string or symbol.
 ### 4.2 Slab Interned Strings (SSO-61)
 
 Strings and symbols of 6-61 bytes can live in the permanent string slab. The
-`WValue` stores only a 24-bit slab index:
+`WValue` stores a 24-bit slab index and caches the 6-bit string length:
 
 ```
-bits 47-28: 0
+bits 47-34: 0
+bits 33-28: cached byte length (6 bits, 0-61)
 bits 27-4:  slab index (24 bits)
 bits 3-1:   6 (slab mode)
 bit  0:     0 = string, 1 = symbol
@@ -498,7 +507,7 @@ subtype.
 
 ## 9. Packed Types (0xFFFE)
 
-The `0xFFFE` tag holds six structured value types via a 3-bit subtype in
+The `0xFFFE` tag holds eight structured value types via a 3-bit subtype in
 bits 47-45. All fields are packed into the remaining 45 bits.
 
 ### 9.1 Color (subtype 000)
@@ -533,11 +542,16 @@ Value = `(real_sig × 10^real_scale) + (imag_sig × 10^imag_scale)i`
 
 ```
 bits 47-45: 010 (subtype)
-bits 44-23: numerator (22 bits, signed, ±2,097,151)
-bits 22-1:  denominator (22 bits, unsigned, 0-4,194,303)
+bits 44-20: numerator (25 bits, signed, ±16,777,215)
+bits 19-0:  denominator (20 bits, unsigned, 1-1,048,575)
 ```
 
-### 9.4 Subtype 011 (Reserved)
+### 9.4 Node (subtype 011)
+
+AST slab-node reference (kind + offset into the node arena). See the
+`W_PACKED_NODE` section of `runtime/wvalue.h` for the two-tier bit
+layout (full tier: 8-bit kind + 32-bit word offset; compact tier
+reserved).
 
 ### 9.5 Date (subtype 100)
 
@@ -563,28 +577,89 @@ bits 12-7:  CIDR prefix (6 bits, 0-32)
 bits 6-1:   flags (6 bits, reserved)
 ```
 
-### 9.7 Subtype 110 (Reserved)
+### 9.7 Body (subtype 110)
+
+AST child-list reference — a value-not-pointer slice of the flat body
+arena:
+
+```
+bits 47-45: 110 (subtype)
+bits 44-21: arena offset (24 bits, in slots)
+bits 20-0:  element count (21 bits)
+```
+
+Public introspection presents these values as Arrays; they are
+immutable once frozen. See the `W_PACKED_BODY` section of
+`runtime/wvalue.h`.
 
 ### 9.8 Location (subtype 111)
 
-Two modes selected by bit 43:
+Four modes selected by bits 44:43 (the mode was originally the single
+bit 43; bit 44 was always clear in Point and File values, so widening
+the field preserved both legacy encodings):
 
-**Mode 0 — 2D point:**
+**Mode 00 — 2D point:**
 ```
 bits 47-45: 111 (subtype)
-bit  43:    0 (point mode)
+bits 44-43: 00 (point mode)
 bits 42-22: x (21 bits, signed, ±1,048,575)
 bits 21-0:  y (22 bits, signed, ±2,097,151)
 ```
 
-**Mode 1 — Source file location:**
+**Mode 01 — Source file location:**
 ```
 bits 47-45: 111 (subtype)
-bit  43:    1 (file mode)
+bits 44-43: 01 (file mode)
 bits 42-29: file_id (14 bits, 0-16,383)
 bits 28-11: line (18 bits, 0-262,143)
 bits 10-0:  column (11 bits, 0-2,047)
 ```
+
+**Mode 10 — File byte offset:**
+```
+bits 47-45: 111 (subtype)
+bits 44-43: 10 (file-offset mode)
+bits 42-29: file_id (14 bits, 0-16,383)
+bits 28-0:  byte offset (29 bits, files up to 512 MiB)
+```
+
+A single point; an AST span is a pair of these in a node's
+:loc/:loc_end slots. Line/col are reconstructed lazily from a
+per-file newline-offset table.
+
+**Mode 11 — Immediate Range:**
+
+An allocation-free integer Range, hosted in Location's mode space but
+NOT a Location (`w_is_location` excludes mode 11; the type check
+`w_is_range_imm` is one shift + compare since tag, subtype, and mode
+are contiguous at bits 63-43). A sub-mode bit at 42 splits the
+payload; the exclusive-bound flag sits at bit 0 in both sub-modes:
+
+```
+Loop shape (bit 42 = 0):
+bits 47-43: 11111 (subtype + mode)
+bit  42:    0 (loop sub-mode)
+bit  41:    start (0 or 1)
+bits 40-1:  end (40 bits, unsigned, < 2^40)
+bit  0:     exclusive
+
+Span shape (bit 42 = 1):
+bits 47-43: 11111 (subtype + mode)
+bit  42:    1 (span sub-mode)
+bits 41-22: start (20 bits, signed, ±524,287)
+bits 21-1:  end (21 bits, signed, ±1,048,575)
+bit  0:     exclusive
+```
+
+Construction goes through the `w_range_imm_try` funnel: it returns the
+packed value when the range fits (loop shape tried first, so `0..n`
+never consumes span bits and `0..-1`-style slices cascade into span),
+or `W_NIL` — never a valid range — when the caller must allocate the
+heap Range (object sub-tag 8) instead. This is the same
+inline-or-heap constructor discipline as Int→BigInt and
+decimal→domain overflow (§11). The heap form keeps: starts outside
+{0,1} ∪ ±2^19, ends past the sub-mode ceilings, stepped ranges
+(`a..b/n`), and BigInt bounds.
 
 ---
 
@@ -730,17 +805,19 @@ Type checks are designed for minimal instruction count:
 
 // Object sub-tags
 #define W_SUBTAG_GENERIC  0
-#define W_SUBTAG_STRUCT   4
+#define W_SUBTAG_ATOMIC   1
+#define W_SUBTAG_BIGINT   2   /* v4: dispatch key only; the value rides top-level tag 0xFFF8 */
+#define W_SUBTAG_INSTANCE 4
 #define W_SUBTAG_HASH     5
 #define W_SUBTAG_CLOSURE  6
 #define W_SUBTAG_REGEX    7
 #define W_SUBTAG_RANGE    8
-#define W_SUBTAG_MODULE   9
+#define W_SUBTAG_SMALL_ARRAY 9
 #define W_SUBTAG_ARRAY    0xA
-#define W_SUBTAG_BIGINT   2   /* v4: dispatch key only; the value rides top-level tag 0xFFF8 */
+#define W_SUBTAG_STRBUF   0xB
 #define W_SUBTAG_CLASS    0xC
 #define W_SUBTAG_UUID     0xD
-#define W_SUBTAG_ERROR    0xE
+#define W_SUBTAG_REGEX_MATCH 0xE
 #define W_SUBTAG_DOMAIN   0xF
 
 // Numeric subtypes

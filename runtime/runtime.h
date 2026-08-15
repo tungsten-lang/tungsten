@@ -128,6 +128,27 @@ typedef struct WNodeArena {
     uint32_t  cap;        /* allocated WValue words */
 } WNodeArena;
 
+/* Packed WIRE instructions use a separate exact-lifetime word arena. Each
+ * record is header + inline (field-symbol, value) pairs; the instruction kind
+ * is carried by the handle, so :op never occupies an arena word. */
+typedef struct WWireArena {
+    WValue   *base;
+    uint32_t  cursor;
+    uint32_t  cap;
+    uint32_t  generation;
+} WWireArena;
+
+extern WWireArena g_wire_arena;
+WValue  w_wire_alloc(int64_t kind, int64_t field_count);
+WValue  w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fields);
+WValue  w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value);
+WValue  w_wire_field_load(WValue wire, WValue sym);
+WValue  w_wire_field_store(WValue wire, WValue sym, WValue value);
+int64_t w_wire_kind_extern(WValue wire);
+int64_t w_is_wire_extern(WValue value);
+int64_t w_wire_store_reset(int64_t reserved);
+WValue  w_wire_clone(WValue wire);
+
 typedef struct WAstSparseRecord {
     int64_t  sym;
     uint32_t next;

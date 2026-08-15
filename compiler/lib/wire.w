@@ -1,12 +1,69 @@
 # WIRE — Tungsten IR data model and function builder
 # WIRE is a non-SSA IR using named variable slots with load/store,
 # plus SSA-like temps for intermediates. Functions have basic blocks;
-# blocks have instruction lists. Instructions are hashes with an :op key.
+# blocks have instruction lists. Instructions are one-word packed handles:
+# the kind is embedded in the handle and fields live as symbol/value pairs in
+# a resettable bump arena. `[]`/`[]=` remain source-compatible during the
+# migration, so CFG/ownership/emission can move independently of lowerers.
+
+use wire_schema
+
+-> wire_kind_id(op)
+  wire_schema_kind_id(op)
+
+-> wire_kind(instruction)
+  if ccall_nobox("w_is_wire_extern", instruction) == 1
+    id = ccall_nobox("w_wire_kind_extern", instruction)
+    return wire_schema_kind_symbol(id)
+  instruction[:op]
+
+-> wire_instruction(instruction)
+  if instruction == nil
+    return nil
+  if ccall_nobox("w_is_wire_extern", instruction) == 1
+    return instruction
+  if type(instruction) != "Hash"
+    return instruction
+  op = instruction[:op]
+  if op == nil
+    return instruction
+  keys = instruction.keys()
+  kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
+  field_count = ccall_nobox("w_numeric_to_i64", keys.size())
+  handle = ccall_nobox("w_wire_alloc", kind_id, field_count)
+  i = 0
+  while i < keys.size()
+    key = keys[i]
+    ccall_nobox("w_wire_field_store_at", handle, i, key, instruction[key])
+    i += 1
+  wvalue_from_bits(handle)
+
+-> wire_clone_instruction(instruction)
+  if ccall_nobox("w_is_wire_extern", instruction) == 1
+    clone_bits = ccall_nobox("w_wire_clone", instruction)
+    return wvalue_from_bits(clone_bits)
+  instruction
+
+-> wire_record(kind, fields, spare_fields = 2)
+  keys = fields.keys()
+  kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(kind))
+  field_count = ccall_nobox("w_numeric_to_i64", keys.size())
+  spare_count = ccall_nobox("w_numeric_to_i64", spare_fields)
+  handle = ccall_nobox("w_wire_alloc_reserve", kind_id, field_count, spare_count)
+  i = 0
+  while i < keys.size()
+    key = keys[i]
+    ccall_nobox("w_wire_field_store_at", handle, i, key, fields[key])
+    i += 1
+  wvalue_from_bits(handle)
 
 # -- Module --
 
 -> wire_module(source_path)
-  {
+  # One WIRE generation lives through lower -> destructive mid-end -> emit.
+  # compile-batch starts the next module only after emission has finished.
+  ccall_nobox("w_wire_store_reset", 0)
+  wire_record(:wire_module, {
     source_path:      source_path,
     functions:        [],
     strings:          [],
@@ -78,7 +135,7 @@
     # IDs 256..4095 are generated from the Ruby reference unit registry.
     # User-defined/unknown units live above that range and are heap-boxed.
     next_custom_unit_id: 4096
-  }
+  }, 128)
 
 -> next_call_site_id(mod)
   id = mod[:next_call_site]
@@ -99,7 +156,7 @@
 # -- Function builder --
 
 -> build_function(name, params, return_type, is_toplevel, extra_params)
-  result = {
+  result = wire_record(:wire_function, {
     name:         name,
     original_name: name,
     params:       params,
@@ -142,7 +199,7 @@
     is_memoized:  false,
     exit_label:   nil,
     result_slot:  nil
-  }
+  }, 96)
 
   start_block(result, "__entry")
   result
@@ -181,13 +238,13 @@
 # -- Basic blocks --
 
 -> start_block(f, label)
-  f[:blocks].push({label: label, instructions: []})
+  f[:blocks].push(wire_record(:wire_block, {label: label, instructions: []}, 16))
 
 -> current_block(f)
   f[:blocks][f[:blocks].size() - 1]
 
 -> emit_instruction(f, instruction)
-  current_block(f)[:instructions].push(instruction)
+  current_block(f)[:instructions].push(wire_instruction(instruction))
 
 # The most recently emitted instruction of the current block, or nil for an
 # empty block. Lets a lowerer inspect what an operand's lowering actually
@@ -523,8 +580,8 @@
           ri = recycle_count - 1
           while ri >= 0
             entry = fnbody[ri]
-            new_instrs.push({op: :cleanup_pop})
-            new_instrs.push({op: recycle_op_for_kind(entry[:kind]), value: entry[:temp]})
+            new_instrs.push(wire_instruction({op: :cleanup_pop}))
+            new_instrs.push(wire_instruction({op: recycle_op_for_kind(entry[:kind]), value: entry[:temp]}))
             ri -= 1
       new_instrs.push(inst)
       ii += 1
@@ -668,6 +725,9 @@
 # Clones lazily only if a substitution is actually needed.
 
 -> clone_inst(inst)
+  if ccall_nobox("w_is_wire_extern", inst) == 1
+    clone_bits = ccall_nobox("w_wire_clone", inst)
+    return wvalue_from_bits(clone_bits)
   result = {}
   keys = inst.keys()
   k = 0

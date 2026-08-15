@@ -340,9 +340,9 @@ typedef uint64_t WValue;
  *   bits 32..33  reserved (2 bits — future flags: monomorph, has-sparse, …)
  *   bits  0..31  offset   (32-bit WValue-word index into AST:Store)
  *
- * Compact tier (prefix 1) — future, no kinds populated yet:
- *   bits 39..43  kind (5 bits, IDs 0..31)
- *   bits  0..38  per-kind 39-bit payload
+ * Compact tier (prefix 1):
+ *   compact AST: bits 39..43 kind, bits 0..38 payload
+ *   WIRE: bit 38 marker, bits 29..37 instruction kind, bits 0..28 offset
  *
  * Offsets index into one exact-width word arena that grows by realloc-
  * doubling. Because offsets (not pointers) are
@@ -380,8 +380,20 @@ _Static_assert(W_NODE_OFFSET_BITS + W_NODE_RESERVED_BITS + W_NODE_SCLASS_BITS
 #define W_NODE_COMPACT_KIND_BITS    5
 #define W_NODE_COMPACT_KIND_SHIFT   39
 #define W_NODE_COMPACT_KIND_MASK    ((1ULL << W_NODE_COMPACT_KIND_BITS) - 1)
-#define W_NODE_COMPACT_PAYLOAD_BITS 39
+#define W_NODE_COMPACT_PAYLOAD_BITS 38
 #define W_NODE_COMPACT_PAYLOAD_MASK ((1ULL << W_NODE_COMPACT_PAYLOAD_BITS) - 1)
+
+/* WIRE instruction handles occupy the marked half of the compact tier. The
+ * packed subtype space is already full, so this preserves one-word handles
+ * without changing the public top-level NaN-boxing tags. Compact AST values
+ * have marker=0; WIRE has marker=1 and a 29-bit word-arena offset. */
+#define W_WIRE_MARKER_BIT       38
+#define W_WIRE_MARKER_MASK      (1ULL << W_WIRE_MARKER_BIT)
+#define W_WIRE_KIND_BITS        9
+#define W_WIRE_KIND_SHIFT       29
+#define W_WIRE_KIND_MASK        ((1ULL << W_WIRE_KIND_BITS) - 1)
+#define W_WIRE_OFFSET_BITS      29
+#define W_WIRE_OFFSET_MASK      ((1ULL << W_WIRE_OFFSET_BITS) - 1)
 
 static inline WValue w_box_node(int kind, int sclass, uint64_t off) {
     /* Full-tier slab node. Prefix bit (44) is implicitly 0. */
@@ -415,6 +427,21 @@ static inline WValue w_box_node_compact(int kind, uint64_t payload) {
 }
 static inline uint64_t w_node_compact_payload(WValue v) {
     return v & W_NODE_COMPACT_PAYLOAD_MASK;
+}
+
+static inline WValue w_box_wire(int kind, uint64_t off) {
+    return W_TAG_PACKED
+         | ((uint64_t)W_PACKED_NODE << 45)
+         | W_NODE_PREFIX_MASK
+         | W_WIRE_MARKER_MASK
+         | ((uint64_t)(kind & W_WIRE_KIND_MASK) << W_WIRE_KIND_SHIFT)
+         | (off & W_WIRE_OFFSET_MASK);
+}
+static inline int w_wire_kind(WValue v) {
+    return (int)((v >> W_WIRE_KIND_SHIFT) & W_WIRE_KIND_MASK);
+}
+static inline uint64_t w_wire_offset(WValue v) {
+    return v & W_WIRE_OFFSET_MASK;
 }
 
 /* ==== Type checks ==== */
@@ -473,7 +500,16 @@ static inline int w_packed_subtype(WValue v) { return (int)((v >> 45) & 0x7); }
 static inline int w_is_color(WValue v)       { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_COLOR << 45)); }
 static inline int w_is_complex(WValue v)     { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_COMPLEX << 45)); }
 static inline int w_is_rational(WValue v)    { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_RATIONAL << 45)); }
-static inline int w_is_node(WValue v)        { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_NODE << 45)); }
+static inline int w_is_wire(WValue v)        {
+    return (v & (0xFFFFE00000000000ULL | W_NODE_PREFIX_MASK | W_WIRE_MARKER_MASK)) ==
+           (W_TAG_PACKED | ((uint64_t)W_PACKED_NODE << 45) |
+            W_NODE_PREFIX_MASK | W_WIRE_MARKER_MASK);
+}
+static inline int w_is_node(WValue v)        {
+    return (v & 0xFFFFE00000000000ULL) ==
+               (W_TAG_PACKED | ((uint64_t)W_PACKED_NODE << 45)) &&
+           !w_is_wire(v);
+}
 static inline int w_is_date(WValue v)        { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_DATE << 45)); }
 static inline int w_is_ipv4(WValue v)        { return (v & 0xFFFFE00000000000ULL) == (W_TAG_PACKED | ((uint64_t)W_PACKED_IPV4 << 45)); }
 /* Location excludes mode 11: that mode hosts the immediate Range encoding

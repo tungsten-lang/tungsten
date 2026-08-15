@@ -626,7 +626,7 @@ use wire
           incoming = phi_incoming[bi][ptr]
         # Always emit phi if there are incoming values
         if incoming.size() > 0
-          phi_instrs.push({op: :phi_ssa, temp: temp, incoming: incoming})
+          phi_instrs.push(wire_instruction({op: :phi_ssa, temp: temp, incoming: incoming}))
         ppi += 1
       # Prepend phi instructions before existing block instructions
       old_instrs = blocks[bi][:instructions]

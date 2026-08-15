@@ -275,7 +275,7 @@ use runtime_types
           while li < locals.size()
             temp = locals[li]
             if escaped[temp] != true && producers[temp] != nil
-              new_instrs.push({op: :free_value, value: temp})
+              new_instrs.push(wire_instruction({op: :free_value, value: temp}))
             li += 1
       # Function-body scope: free non-escaped entry-block producers right
       # before each return. The entry block dominates every ret, so these
@@ -287,7 +287,7 @@ use runtime_types
         while fi < func_scope.size()
           temp = func_scope[fi]
           if escaped[temp] != true && producers[temp] != nil
-            new_instrs.push({op: :free_value, value: temp})
+            new_instrs.push(wire_instruction({op: :free_value, value: temp}))
           fi += 1
       new_instrs.push(inst)
       ii += 1

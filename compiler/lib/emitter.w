@@ -520,6 +520,17 @@ use naming
   out << declare_fn("w_ast_body_builder_finish", wv, join_arg_types2(wv, "i64"))
   out << declare_fn("w_node_arena_reset", "void", "")
   out << declare_fn("w_ast_schema_hash_compute", "i64", "")
+  # Packed WIRE instruction arena. The handle carries :op as an 8-bit kind;
+  # record fields are inline symbol/value pairs in a resettable word arena.
+  out << declare_fn("w_wire_alloc", wv, "i64, i64")
+  out << declare_fn("w_wire_alloc_reserve", wv, "i64, i64, i64")
+  out << declare_fn("w_wire_field_store_at", wv, join_arg_types4(wv, "i64", wv, wv))
+  out << declare_fn("w_wire_field_load", wv, wv2)
+  out << declare_fn("w_wire_field_store", wv, wv3)
+  out << declare_fn("w_wire_kind_extern", "i64", wv)
+  out << declare_fn("w_is_wire_extern", "i64", wv)
+  out << declare_fn("w_wire_store_reset", "i64", "i64")
+  out << declare_fn("w_wire_clone", wv, wv)
   out << declare_fn("w_class_add_ivar", "i32", wv_ptr)
   out << declare_fn("w_class_add_ivar_wv", "i32", wv2)
 

@@ -729,7 +729,7 @@ use lowering/definitions
       unit_id = mod[:custom_units][unit_name]
       str_id = module_string_constant(mod, unit_name)
       byte_len = utf8_byte_length(unit_name) + 1
-      reg_instructions.push({op: :register_unit, unit_id: unit_id, str_id: str_id, byte_len: byte_len})
+      reg_instructions.push(wire_instruction({op: :register_unit, unit_id: unit_id, str_id: str_id, byte_len: byte_len}))
       cui += 1
     # Prepend into the entry block, same shape as prepend_memo_table_initializers.
     cu_entry = main_fn[:blocks][0]

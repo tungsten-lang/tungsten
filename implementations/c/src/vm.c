@@ -18,6 +18,15 @@ WValue w_node_alloc(int64_t kind, int64_t sc);
 WValue w_ast_bool_cached(int64_t truthy_01);
 WValue w_node_field_load(WValue wnode, int64_t ivar_offset);
 void   w_node_field_store(WValue wnode, int64_t ivar_offset, WValue value);
+WValue w_wire_alloc(int64_t kind, int64_t field_count);
+WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fields);
+WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value);
+WValue w_wire_field_load(WValue wire, WValue sym);
+WValue w_wire_field_store(WValue wire, WValue sym, WValue value);
+int64_t w_wire_kind_extern(WValue wire);
+int64_t w_is_wire_extern(WValue value);
+int64_t w_wire_store_reset(int64_t reserved);
+WValue w_wire_clone(WValue wire);
 
 /* PR #3: sparse-store helpers (defined in runtime.c, linked into the
  * C VM). Mirror the prototype shape ccall_nobox dispatch in
@@ -2528,6 +2537,14 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         vm.sp -= 2;
         TcValue out;
         switch (tc_kind(receiver)) {
+          case TC_VAL_WVALUE:
+            if (w_is_wire(receiver)) {
+              out = w_wire_field_load(receiver, arg);
+              if (out == W_UNDEF) out = tc_box_nil();
+            } else {
+              out = tc_box_nil();
+            }
+            break;
           case TC_VAL_AST: {
             if (tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH) {
               if (!ast_hash_lookup(*tc_as_ast_ptr(&receiver), arg, &out, err)) goto cleanup_fail;
@@ -2666,6 +2683,14 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         TcValue arg = vm.locals[idx_slot];
         TcValue out;
         switch (tc_kind(receiver)) {
+          case TC_VAL_WVALUE:
+            if (w_is_wire(receiver)) {
+              out = w_wire_field_load(receiver, arg);
+              if (out == W_UNDEF) out = tc_box_nil();
+            } else {
+              out = tc_box_nil();
+            }
+            break;
           case TC_VAL_AST: {
             if (tc_as_ast_ptr(&receiver)->kind == TC_AST_HASH) {
               if (!ast_hash_lookup(*tc_as_ast_ptr(&receiver), arg, &out, err)) goto cleanup_fail;

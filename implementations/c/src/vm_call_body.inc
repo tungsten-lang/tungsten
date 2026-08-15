@@ -193,6 +193,30 @@
               result = args[1];
             } else if (fn_len == 25 && memcmp(fn, "w_ast_body_builder_finish", 25) == 0 && argc == 3) {
               result = args[1];
+            } else if (fn_len == 12 && memcmp(fn, "w_wire_alloc", 12) == 0 && argc == 3) {
+              int64_t kind = value_is_int(args[1]) ? value_as_int(args[1]) : (int64_t)args[1];
+              int64_t fields = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
+              result = w_wire_alloc(kind, fields);
+            } else if (fn_len == 20 && memcmp(fn, "w_wire_alloc_reserve", 20) == 0 && argc == 4) {
+              int64_t kind = value_is_int(args[1]) ? value_as_int(args[1]) : (int64_t)args[1];
+              int64_t fields = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
+              int64_t spare = value_is_int(args[3]) ? value_as_int(args[3]) : (int64_t)args[3];
+              result = w_wire_alloc_reserve(kind, fields, spare);
+            } else if (fn_len == 21 && memcmp(fn, "w_wire_field_store_at", 21) == 0 && argc == 5) {
+              int64_t index = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
+              result = w_wire_field_store_at(args[1], index, args[3], args[4]);
+            } else if (fn_len == 17 && memcmp(fn, "w_wire_field_load", 17) == 0 && argc == 3) {
+              result = w_wire_field_load(args[1], args[2]);
+            } else if (fn_len == 18 && memcmp(fn, "w_wire_field_store", 18) == 0 && argc == 4) {
+              result = w_wire_field_store(args[1], args[2], args[3]);
+            } else if (fn_len == 18 && memcmp(fn, "w_wire_kind_extern", 18) == 0 && argc == 2) {
+              result = int_value(w_wire_kind_extern(args[1]));
+            } else if (fn_len == 16 && memcmp(fn, "w_is_wire_extern", 16) == 0 && argc == 2) {
+              result = int_value(w_is_wire_extern(args[1]));
+            } else if (fn_len == 18 && memcmp(fn, "w_wire_store_reset", 18) == 0 && argc == 2) {
+              result = int_value(w_wire_store_reset(0));
+            } else if (fn_len == 12 && memcmp(fn, "w_wire_clone", 12) == 0 && argc == 2) {
+              result = w_wire_clone(args[1]);
             } else if (fn_len == 18 && memcmp(fn, "w_node_kind_extern", 18) == 0 && argc == 2) {
               // Extract the 11-bit kind field from a W_PACKED_NODE
               // WValue. Used by ast_kind on bare W_PACKED_NODE input
@@ -1051,7 +1075,9 @@
             goto cleanup_fail;
           }
           TcValue out = args[1];
-          if (tc_kind(receiver) == TC_VAL_ARRAY && tc_as_array(receiver) && value_is_int(args[0])) {
+          if (w_is_wire(receiver)) {
+            out = w_wire_field_store(receiver, args[0], args[1]);
+          } else if (tc_kind(receiver) == TC_VAL_ARRAY && tc_as_array(receiver) && value_is_int(args[0])) {
             int64_t idx = value_as_int(args[0]);
             if (idx >= 0) {
               size_t uidx = (size_t)idx;
@@ -1704,6 +1730,20 @@
             }
             FREE_ARGS();
             if (!push(&vm, prog, err)) goto cleanup_fail;
+            CNEXT();
+          }
+        }
+        if (has_receiver && w_is_wire(receiver)) {
+          TcValue out = W_UNDEF;
+          if (name_len == 2 && memcmp(name, "[]", 2) == 0 && argc == 1) {
+            out = w_wire_field_load(receiver, args[0]);
+            if (out == W_UNDEF) out = W_NIL;
+          } else if (name_len == 3 && memcmp(name, "[]=", 3) == 0 && argc == 2) {
+            out = w_wire_field_store(receiver, args[0], args[1]);
+          }
+          if (out != W_UNDEF) {
+            FREE_ARGS();
+            if (!push(&vm, out, err)) goto cleanup_fail;
             CNEXT();
           }
         }

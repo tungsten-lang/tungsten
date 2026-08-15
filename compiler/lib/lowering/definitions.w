@@ -221,8 +221,8 @@
     global_name = mod[:fn_memo_tables][memo_keys[mi]]
     if global_name != nil
       init_temp = next_temp(main_fn)
-      init_instructions.push({op: :memo_init, temp: init_temp})
-      init_instructions.push({op: :store_memo_ptr, value: init_temp, global: global_name})
+      init_instructions.push(wire_instruction({op: :memo_init, temp: init_temp}))
+      init_instructions.push(wire_instruction({op: :store_memo_ptr, value: init_temp, global: global_name}))
     mi += 1
 
   if init_instructions.size() == 0

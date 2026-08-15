@@ -11,6 +11,8 @@
  *      allocations continue from the correct offset.
  *   5. w_node_arena_reset() invalidates the generation, rewinds the cursor,
  *      and retains the high-water allocation for reuse.
+ *   6. Packed WIRE handles use their reserved compact-tier marker, preserve
+ *      symbol/value fields, clone independently, and reuse arena capacity.
  */
 
 #include <stdio.h>
@@ -104,6 +106,38 @@ static void test_reuse_after_reset(void) {
     w_node_arena_reset();
 }
 
+static void test_wire_arena(void) {
+    WValue key_op = w_box_int(11);
+    WValue key_arg = w_box_int(12);
+    WValue original = w_wire_alloc(/*stable opcode kind=*/37, 2);
+
+    CHECK(w_is_wire(original), "WIRE allocation returns a packed WIRE handle");
+    CHECK(!w_is_node(original), "WIRE handle is not classified as an AST node");
+    CHECK(w_wire_kind(original) == 37, "WIRE opcode kind round-trips");
+    CHECK(w_wire_offset(original) == 1, "first WIRE record starts after offset zero");
+
+    w_wire_field_store_at(original, 0, key_op, w_box_int(37));
+    w_wire_field_store_at(original, 1, key_arg, w_box_int(99));
+    CHECK(w_as_int(w_wire_field_load(original, key_arg)) == 99,
+          "WIRE field lookup round-trips");
+    CHECK(w_wire_field_load(original, w_box_int(404)) == W_UNDEF,
+          "missing WIRE field returns W_UNDEF");
+
+    WValue clone = w_wire_clone(original);
+    w_wire_field_store(clone, key_arg, w_box_int(100));
+    CHECK(w_as_int(w_wire_field_load(original, key_arg)) == 99,
+          "WIRE clone does not mutate original record");
+    CHECK(w_as_int(w_wire_field_load(clone, key_arg)) == 100,
+          "WIRE clone accepts in-place field rewrite");
+
+    WValue *retained_base = g_wire_arena.base;
+    uint32_t retained_cap = g_wire_arena.cap;
+    w_wire_store_reset(0);
+    CHECK(g_wire_arena.base == retained_base, "WIRE reset retains high-water buffer");
+    CHECK(g_wire_arena.cursor == 1, "WIRE reset rewinds to first valid offset");
+    CHECK(g_wire_arena.cap == retained_cap, "WIRE reset retains capacity");
+}
+
 int main(void) {
     test_init_state();
     test_alloc_roundtrip();
@@ -111,6 +145,7 @@ int main(void) {
     test_realloc_doubling();
     test_reset();
     test_reuse_after_reset();
+    test_wire_arena();
 
     if (failures) {
         fprintf(stderr, "%d test(s) failed\n", failures);

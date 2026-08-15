@@ -20,7 +20,7 @@
 #     `ast_get(...).each` chain lower as a machine-int receiver and
 #     corrupt the WValue.
 -> ccall_nobox_returns_wvalue?(fn_name)
-  fn_name in ("w_node_alloc" "w_node_field_load" "w_node_singleton" "w_ast_bool_cached" "w_node_inline_payload" "w_make_token_extern" "w_location_file" "w_location_file_offset" "w_ast_sparse_set" "w_ast_sparse_get" "w_ast_sparse_copy" "w_ast_analysis_set" "w_ast_analysis_get" "w_ast_ivar_offsets_set" "w_ast_ivar_offsets_get" "w_ast_ivar_count_set" "w_ast_ivar_count_get" "w_ast_intern_node" "w_ast_intern_str_of" "w_ast_freeze_if_array" "w_ast_body_builder_new" "w_ast_body_builder_push" "w_ast_body_builder_finish" "w_body_arena_get")
+  fn_name in ("w_node_alloc" "w_node_field_load" "w_node_singleton" "w_ast_bool_cached" "w_node_inline_payload" "w_make_token_extern" "w_location_file" "w_location_file_offset" "w_ast_sparse_set" "w_ast_sparse_get" "w_ast_sparse_copy" "w_ast_analysis_set" "w_ast_analysis_get" "w_ast_ivar_offsets_set" "w_ast_ivar_offsets_get" "w_ast_ivar_count_set" "w_ast_ivar_count_get" "w_ast_intern_node" "w_ast_intern_str_of" "w_ast_freeze_if_array" "w_ast_body_builder_new" "w_ast_body_builder_push" "w_ast_body_builder_finish" "w_body_arena_get" "w_wire_alloc" "w_wire_alloc_reserve" "w_wire_field_store_at" "w_wire_field_load" "w_wire_field_store" "w_wire_clone")
 
 # -- Operator maps --
 

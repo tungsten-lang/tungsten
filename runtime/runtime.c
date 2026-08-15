@@ -18712,6 +18712,150 @@ void w_node_arena_init(void) {
      * previously emitted modules whose main still calls it. */
 }
 
+/* ---- Packed WIRE instruction arena ----
+ *
+ * Record layout (WValue words):
+ *   [0] raw header: low32=count, high32=capacity
+ *   [1] field symbol, [2] field value, ...
+ *
+ * Two spare pairs absorb the small amount of metadata attached after initial
+ * emission (source locations, recycle counts) without relocating the handle.
+ * Existing-field rewrites are in-place; reset retains the high-water buffer.
+ */
+WWireArena g_wire_arena = { .generation = 1 };
+static const uint32_t g_wire_initial_cap_words = 262144;
+
+static inline uint32_t w_wire_record_count(uint64_t off) {
+    return (uint32_t)g_wire_arena.base[off];
+}
+static inline uint32_t w_wire_record_capacity(uint64_t off) {
+    return (uint32_t)(g_wire_arena.base[off] >> 32);
+}
+static inline void w_wire_record_header(uint64_t off, uint32_t count, uint32_t cap) {
+    g_wire_arena.base[off] = (WValue)(((uint64_t)cap << 32) | count);
+}
+
+WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fields) {
+    if (kind <= 0 || kind > 511 || field_count < 0 || field_count > 1024 ||
+        spare_fields < 0 || spare_fields > 1024)
+        die("w_wire_alloc: invalid kind or field count");
+    uint32_t count = (uint32_t)field_count;
+    uint32_t capacity = count + (uint32_t)spare_fields;
+    if (capacity < 2) capacity = 2;
+    uint64_t words = 1u + (uint64_t)capacity * 2u;
+    if (g_wire_arena.cursor == 0) g_wire_arena.cursor = 1;
+    uint64_t required = (uint64_t)g_wire_arena.cursor + words;
+    if (required > W_WIRE_OFFSET_MASK)
+        die("w_wire_alloc: 29-bit arena offset exhausted");
+    if (required > g_wire_arena.cap) {
+        uint32_t new_cap = g_wire_arena.cap ? g_wire_arena.cap * 2 : g_wire_initial_cap_words;
+        while ((uint64_t)new_cap < required) new_cap *= 2;
+        WValue *new_base = (WValue *)realloc(g_wire_arena.base,
+                                             (size_t)new_cap * sizeof(WValue));
+        if (!new_base) die("w_wire_alloc: realloc failed");
+        g_wire_arena.base = new_base;
+        g_wire_arena.cap = new_cap;
+    }
+    uint32_t off = g_wire_arena.cursor;
+    g_wire_arena.cursor += (uint32_t)words;
+    w_wire_record_header(off, 0, capacity);
+    for (uint32_t i = 0; i < capacity; i++) {
+        g_wire_arena.base[off + 1 + i * 2] = W_NIL;
+        g_wire_arena.base[off + 2 + i * 2] = W_NIL;
+    }
+    return w_box_wire((int)kind, off);
+}
+
+WValue w_wire_alloc(int64_t kind, int64_t field_count) {
+    return w_wire_alloc_reserve(kind, field_count, 2);
+}
+
+static uint64_t w_wire_checked_offset(WValue wire) {
+    if (!w_is_wire(wire)) die("WIRE field access: value is not a WIRE handle");
+    uint64_t off = w_wire_offset(wire);
+    if (off == 0 || off >= g_wire_arena.cursor)
+        die("WIRE field access: handle is outside the active generation");
+    uint32_t cap = w_wire_record_capacity(off);
+    if (off + 1u + (uint64_t)cap * 2u > g_wire_arena.cursor)
+        die("WIRE field access: corrupt record bounds");
+    return off;
+}
+
+WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value) {
+    uint64_t off = w_wire_checked_offset(wire);
+    uint32_t cap = w_wire_record_capacity(off);
+    if (index < 0 || (uint64_t)index >= cap)
+        die("w_wire_field_store_at: index exceeds record capacity");
+    uint32_t idx = (uint32_t)index;
+    g_wire_arena.base[off + 1 + idx * 2] = sym;
+    g_wire_arena.base[off + 2 + idx * 2] = value;
+    uint32_t count = w_wire_record_count(off);
+    if (idx >= count) w_wire_record_header(off, idx + 1, cap);
+    return wire;
+}
+
+WValue w_wire_field_load(WValue wire, WValue sym) {
+    uint64_t off = w_wire_checked_offset(wire);
+    uint32_t count = w_wire_record_count(off);
+    for (uint32_t i = 0; i < count; i++) {
+        if (g_wire_arena.base[off + 1 + i * 2] == sym)
+            return g_wire_arena.base[off + 2 + i * 2];
+    }
+    return W_UNDEF;
+}
+
+WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
+    uint64_t off = w_wire_checked_offset(wire);
+    uint32_t count = w_wire_record_count(off);
+    uint32_t cap = w_wire_record_capacity(off);
+    for (uint32_t i = 0; i < count; i++) {
+        if (g_wire_arena.base[off + 1 + i * 2] == sym) {
+            g_wire_arena.base[off + 2 + i * 2] = value;
+            return value;
+        }
+    }
+    if (count >= cap)
+        die("w_wire_field_store: instruction exhausted spare field slots");
+    g_wire_arena.base[off + 1 + count * 2] = sym;
+    g_wire_arena.base[off + 2 + count * 2] = value;
+    w_wire_record_header(off, count + 1, cap);
+    return value;
+}
+
+int64_t w_wire_kind_extern(WValue wire) {
+    if (!w_is_wire(wire)) return 0;
+    return (int64_t)w_wire_kind(wire);
+}
+
+int64_t w_is_wire_extern(WValue value) { return w_is_wire(value) ? 1 : 0; }
+
+int64_t w_wire_store_reset(int64_t reserved) {
+    (void)reserved;
+#ifndef NDEBUG
+    if (g_wire_arena.base && g_wire_arena.cursor > 1) {
+        for (uint32_t i = 1; i < g_wire_arena.cursor; i++)
+            g_wire_arena.base[i] = W_UNDEF;
+    }
+#endif
+    g_wire_arena.cursor = 1;
+    g_wire_arena.generation++;
+    if (g_wire_arena.generation == 0) g_wire_arena.generation = 1;
+    return 0;
+}
+
+WValue w_wire_clone(WValue wire) {
+    uint64_t src = w_wire_checked_offset(wire);
+    uint32_t count = w_wire_record_count(src);
+    uint32_t capacity = w_wire_record_capacity(src);
+    WValue clone = w_wire_alloc_reserve(w_wire_kind(wire), count, capacity - count);
+    for (uint32_t i = 0; i < count; i++) {
+        w_wire_field_store_at(clone, i,
+            g_wire_arena.base[src + 1 + i * 2],
+            g_wire_arena.base[src + 2 + i * 2]);
+    }
+    return clone;
+}
+
 /* Tag-only singleton encoding for ast.w. Returns the W_PACKED_NODE
  * bit pattern with sc=0 + offset=0 — used by ast_nil, ast_break,
  * ast_next, ast_self, ast_view_base, ast_view_value. Called once
@@ -18805,7 +18949,7 @@ int64_t w_is_ast_node_full(WValue x, WValue node_sym) {
     /* Fast path: W_PACKED_NODE tag + subtype 3 in one mask compare.
      * (x >> 45) == 0x7FFF3 packs the W_TAG_PACKED bits (0xFFFE) and
      * W_PACKED_NODE subtype (3) into a single immediate compare. */
-    if (((uint64_t)x >> 45) == 0x7FFF3ULL) return 1;
+    if (w_is_node(x)) return 1;
     /* Hash path: hand-built `{node: :foo, ...}` literals in
      * lowering.w. Rare. */
     if (w_is_hash(x)) {
@@ -47973,6 +48117,7 @@ uint64_t w_dispatch_key(WValue v) {
     if (__builtin_expect(hi == 0xFFFE, 1)) {
         uint64_t subtype = (v >> 45) & 0x7;
         if (subtype == W_PACKED_NODE) {
+            if (w_is_wire(v)) return 0xE8u;
             return 0x400000000ULL | (uint64_t)w_node_kind(v);
         }
         if (subtype == W_PACKED_LOCATION && ((v >> 43) & 0x3) == 0x3)
@@ -54815,6 +54960,20 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
     (void)args_arr;
     if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
         w_dispatch_init();
+
+    /* Packed WIRE records preserve the compiler's hash-style field API while
+     * storing the instruction itself in the bump arena. Keep this ahead of
+     * generic type-class dispatch: []/[]= are representation primitives, not
+     * user-overridable language methods. */
+    if (w_is_wire(recv)) {
+        if (name == WN_idx && args->size == 1) {
+            WValue value = w_wire_field_load(recv, args->slots[args->start]);
+            return value == W_UNDEF ? W_NIL : value;
+        }
+        if (name == WN_idxset && args->size == 2)
+            return w_wire_field_store(recv, args->slots[args->start],
+                                      args->slots[args->start + 1]);
+    }
 
     /* Rope: flatten and dispatch as string */
     if (w_is_rope(recv)) recv = w_rope_flatten(recv);

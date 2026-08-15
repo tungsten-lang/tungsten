@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 exec "$(dirname "$0")/../tungsten" run "$0" "$@"
 # ---------------------------------------------------------------------------
-# `tungsten tuneup` — Automated Architecture & Hardware Tuning Sweeps.
+# `tungsten autotune` — Automated Architecture & Hardware Tuning Sweeps.
 #
 # Sweeps runtime parameters, memory pools, and algorithm crossover thresholds
 # on the local machine to discover optimal configuration settings for the
@@ -18,14 +18,14 @@ exec "$(dirname "$0")/../tungsten" run "$0" "$@"
 #      (Karatsuba, Toom-Cook, SSA) for the host SIMD vector unit.
 #
 # Usage:
-#   tungsten tuneup                 # full automated tuneup sweep
-#   tungsten tuneup --quick         # fast calibration sweep (~30k requests)
-#   tungsten tuneup --deep          # high-precision multi-pass sweep (~500k requests)
-#   tungsten tuneup --slots         # sweep parked buffer capacity only
-#   tungsten tuneup --capacity      # sweep capacity quanta & hybrid limits only
-#   tungsten tuneup --thresholds    # sweep arithmetic kernel crossovers only
-#   tungsten tuneup --emit-cflags   # output recommended -D compiler flags
-#   tungsten tuneup --json          # machine-readable JSON output
+#   tungsten autotune                 # full automated tuning sweep
+#   tungsten autotune --quick         # fast calibration sweep (~30k requests)
+#   tungsten autotune --deep          # high-precision multi-pass sweep (~500k requests)
+#   tungsten autotune --slots         # sweep parked buffer capacity only
+#   tungsten autotune --capacity      # sweep capacity quanta & hybrid limits only
+#   tungsten autotune --thresholds    # sweep arithmetic kernel crossovers only
+#   tungsten autotune --emit-cflags   # output recommended -D compiler flags
+#   tungsten autotune --json          # machine-readable JSON output
 # ---------------------------------------------------------------------------
 
 root = capture("cd \"[__DIR__]/../..\" && pwd").strip
@@ -104,15 +104,45 @@ CYAN   = "\e[38;5;51m"
     i = i + 1
   out
 
+-> shell_status(output)
+  marker = "__TUNGSTEN_AUTOTUNE_STATUS__"
+  lines = output.split("\n")
+  status = 127
+  i = 0
+  while i < lines.size()
+    line = lines[i].strip()
+    if line.starts_with?(marker)
+      status = line.slice(marker.size(), line.size() - marker.size()).to_i()
+    i += 1
+  status
+
+-> threshold_value(header, name)
+  prefix = "#define " + name + " "
+  lines = header.split("\n")
+  i = 0
+  while i < lines.size()
+    line = lines[i].strip()
+    if line.starts_with?(prefix)
+      return line.slice(prefix.size(), line.size() - prefix.size()).strip()
+    i += 1
+  nil
+
+-> append_cflag(flags, flag)
+  if flags.size() == 0
+    return flag
+  flags + " " + flag
+
 # ---- CLI flags ------------------------------------------------------------
-args = argv()
-quick_mode = env("TUNEUP_QUICK") != nil && env("TUNEUP_QUICK") != ""
-deep_mode = env("TUNEUP_DEEP") != nil && env("TUNEUP_DEEP") != ""
-only_slots = env("TUNEUP_SLOTS") != nil && env("TUNEUP_SLOTS") != ""
-only_capacity = env("TUNEUP_CAPACITY") != nil && env("TUNEUP_CAPACITY") != ""
-only_thresh = env("TUNEUP_THRESHOLDS") != nil && env("TUNEUP_THRESHOLDS") != ""
-emit_cflags = env("TUNEUP_EMIT_CFLAGS") != nil && env("TUNEUP_EMIT_CFLAGS") != ""
-json_mode = env("TUNEUP_JSON") != nil && env("TUNEUP_JSON") != ""
+args = []
+if env("AUTOTUNE_WRAPPER") == nil
+  args = argv()
+quick_mode = env("AUTOTUNE_QUICK") != nil && env("AUTOTUNE_QUICK") != ""
+deep_mode = env("AUTOTUNE_DEEP") != nil && env("AUTOTUNE_DEEP") != ""
+only_slots = env("AUTOTUNE_SLOTS") != nil && env("AUTOTUNE_SLOTS") != ""
+only_capacity = env("AUTOTUNE_CAPACITY") != nil && env("AUTOTUNE_CAPACITY") != ""
+only_thresh = env("AUTOTUNE_THRESHOLDS") != nil && env("AUTOTUNE_THRESHOLDS") != ""
+emit_cflags = env("AUTOTUNE_EMIT_CFLAGS") != nil && env("AUTOTUNE_EMIT_CFLAGS") != ""
+json_mode = env("AUTOTUNE_JSON") != nil && env("AUTOTUNE_JSON") != ""
 
 ai = 0
 while ai < args.size()
@@ -132,7 +162,7 @@ while ai < args.size()
   elsif a == "--json"
     json_mode = true
   elsif a == "-h" || a == "--help"
-    << "Usage: tungsten tuneup [options]"
+    << "Usage: tungsten autotune [options]"
     << ""
     << "  Sweep runtime & memory parameters to discover optimal settings"
     << "  for the local host machine, CPU architecture, and cache hierarchy."
@@ -202,7 +232,7 @@ else
 
 if !json_mode && !emit_cflags
   << ""
-  << "  [WHITE][BOLD]⚡ TUNGSTEN HARDWARE & RUNTIME TUNEUP[RESET]"
+  << "  [WHITE][BOLD]⚡ TUNGSTEN HARDWARE & RUNTIME AUTOTUNE[RESET]"
   << "  [GREY]" + "─" * 68 + "[RESET]"
   << "  [GREY]Host:[RESET]         [cpu_model] ([cores] cores, [ram_gib] RAM)"
   << "  [GREY]Platform:[RESET]     [os_name] / [arch]"
@@ -366,30 +396,108 @@ if only_thresh
     << "  [GREY]" + lj("Algorithm Rung", 22) + lj("Tested Range", 16) + rj("Crossover Boundary", 22) + "[RESET]"
     << "  [GREY]" + "─" * 60 + "[RESET]"
 
-  thresh_results["karatsuba_mul"] = "16 limbs (1024 bits)"
-  thresh_results["toom3_mul"] = "36 limbs (2304 bits)"
-  thresh_results["toom4_mul"] = "80 limbs (5120 bits)"
-  thresh_results["ssa_ntt_mul"] = "2048 limbs (131k bits)"
-  thresh_results["barrett_div"] = "64 limbs (4096 bits)"
-  thresh_results["montgomery_ladder"] = "4 limbs (256 bits)"
+  autotune_cache = root + "/build/cache/autotune"
+  system("mkdir -p \"[autotune_cache]\"")
+  sweep_log = autotune_cache + "/bigint-thresholds-[arch].txt"
+  threshold_header = autotune_cache + "/bigint-thresholds-[arch].h"
+
+  # A quick run is a real forced-kernel sweep, but deliberately cannot change
+  # a production cutoff: one noisy pass is evidence for neither a crossover
+  # nor a release configuration. Normal/deep runs retain the generator's
+  # boxed affected-cell validation before accepting any proposal.
+  threshold_reps = 9
+  threshold_rounds = 9
+  threshold_target_ms = 110
+  threshold_ranges = "8:512:8 640:4096:128"
+  threshold_extra = ""
+  if quick_mode
+    threshold_reps = 1
+    threshold_rounds = 1
+    threshold_target_ms = 30
+    threshold_ranges = "8:128:8 256:1024:256"
+    threshold_extra = " --skip-validation"
+  elsif deep_mode
+    threshold_reps = 15
+    threshold_rounds = 15
+    threshold_target_ms = 200
+
+  sweep_cmd = "cd \"[root]\" && LOG=\"[sweep_log]\" REPS=[threshold_reps] RANGES='[threshold_ranges]' SQR_RANGES='[threshold_ranges]' GENERATE=0 sh benchmarks/big_math/tune_bigint_thresholds.sh"
+  # The sweep already writes its full report to sweep_log. Do not copy that
+  # potentially large report through the tree-walker's String/Array parser
+  # merely to recover `$?`; keep the captured control channel tiny.
+  sweep_output = capture(sweep_cmd + " >/dev/null 2>&1; printf '__TUNGSTEN_AUTOTUNE_STATUS__%s\n' $?")
+  if shell_status(sweep_output) != 0
+    << "tungsten autotune: threshold sweep failed"
+    << read_file(sweep_log)
+    exit 1
+
+  generate_cmd = "cd \"[root]\" && python3 benchmarks/big_math/generate_bigint_thresholds.py --sweep-log \"[sweep_log]\" --rounds [threshold_rounds] --target-ms [threshold_target_ms] --output \"[threshold_header]\"[threshold_extra]"
+  generate_output = capture(generate_cmd + " 2>&1; printf '\n__TUNGSTEN_AUTOTUNE_STATUS__%s\n' $?")
+  if shell_status(generate_output) != 0
+    << "tungsten autotune: threshold validation failed"
+    << generate_output
+    exit 1
+
+  generated = read_file(threshold_header)
+  threshold_names = [
+    "BN_KARA_THRESHOLD",
+    "BN_TOOM3_THRESHOLD",
+    "BN_TOOM4_THRESHOLD",
+    "BN_SQR_KARA_THRESHOLD",
+    "BN_SQR_TOOM4_THRESHOLD",
+    "BN_NTT_THRESHOLD"
+  ]
+  ti = 0
+  while ti < threshold_names.size()
+    tname = threshold_names[ti]
+    tvalue = threshold_value(generated, tname)
+    if tvalue == nil
+      << "tungsten autotune: generated threshold header is missing [tname]"
+      exit 1
+    thresh_results[tname] = tvalue
+    ti += 1
+  thresh_results["artifact"] = threshold_header
 
   if !json_mode && !emit_cflags
-    << "  " + lj("Base -> Karatsuba", 22) + lj("8..32 limbs", 16) + rj(thresh_results["karatsuba_mul"], 22)
-    << "  " + lj("Karatsuba -> Toom-3", 22) + lj("24..64 limbs", 16) + rj(thresh_results["toom3_mul"], 22)
-    << "  " + lj("Toom-3 -> Toom-4", 22) + lj("64..128 limbs", 16) + rj(thresh_results["toom4_mul"], 22)
-    << "  " + lj("Toom-4 -> SSA/NTT", 22) + lj("1024..4096 limbs", 16) + rj(thresh_results["ssa_ntt_mul"], 22)
-    << "  " + lj("Knuth -> Barrett Div", 22) + lj("32..128 limbs", 16) + rj(thresh_results["barrett_div"], 22)
-    << "  " + lj("CIOS -> SOS Mont", 22) + lj("4..96 limbs", 16) + rj(thresh_results["montgomery_ladder"], 22)
+    << "  " + lj("Base -> Karatsuba", 22) + lj("8..4096 limbs", 16) + rj(thresh_results["BN_KARA_THRESHOLD"], 22)
+    << "  " + lj("Karatsuba -> Toom-3", 22) + lj("8..4096 limbs", 16) + rj(thresh_results["BN_TOOM3_THRESHOLD"], 22)
+    << "  " + lj("Toom-3 -> Toom-4", 22) + lj("8..4096 limbs", 16) + rj(thresh_results["BN_TOOM4_THRESHOLD"], 22)
+    << "  " + lj("Square -> Karatsuba", 22) + lj("8..4096 limbs", 16) + rj(thresh_results["BN_SQR_KARA_THRESHOLD"], 22)
+    << "  " + lj("Square -> Toom-4", 22) + lj("8..4096 limbs", 16) + rj(thresh_results["BN_SQR_TOOM4_THRESHOLD"], 22)
+    << "  " + lj("Toom-4 -> SSA/NTT", 22) + lj("carried boxed gate", 16) + rj(thresh_results["BN_NTT_THRESHOLD"], 22)
+    << "  [DIM]Measured artifacts: [threshold_header][RESET]"
   results["thresholds"] = thresh_results
 
 # ---- Optimal Recommendations ----------------------------------------------
-cflags = "-DBN_BIGINT_POOL_PER_BUCKET=[best_slots] -DBN_BIGINT_HYBRID_P2_LIMIT=[best_p2] -DBN_BIGINT_HYBRID_QUANTUM=[best_quantum]"
+cflags = ""
+if only_slots
+  cflags = append_cflag(cflags, "-DBN_BIGINT_POOL_PER_BUCKET=[best_slots]")
+if only_capacity
+  cflags = append_cflag(cflags, "-DBN_BIGINT_HYBRID_P2_LIMIT=[best_p2]")
+  cflags = append_cflag(cflags, "-DBN_BIGINT_HYBRID_QUANTUM=[best_quantum]")
+if only_thresh
+  threshold_flag_names = ["BN_KARA_THRESHOLD", "BN_TOOM3_THRESHOLD", "BN_TOOM4_THRESHOLD", "BN_SQR_KARA_THRESHOLD", "BN_SQR_TOOM4_THRESHOLD", "BN_NTT_THRESHOLD"]
+  fi = 0
+  while fi < threshold_flag_names.size()
+    flag_name = threshold_flag_names[fi]
+    cflags = append_cflag(cflags, "-D[flag_name]=[thresh_results[flag_name]]")
+    fi += 1
 
 if emit_cflags
   << cflags
   exit 0
 
+kara_threshold = only_thresh ? thresh_results["BN_KARA_THRESHOLD"] : "null"
+toom3_threshold = only_thresh ? thresh_results["BN_TOOM3_THRESHOLD"] : "null"
+toom4_threshold = only_thresh ? thresh_results["BN_TOOM4_THRESHOLD"] : "null"
+sqr_kara_threshold = only_thresh ? thresh_results["BN_SQR_KARA_THRESHOLD"] : "null"
+sqr_toom4_threshold = only_thresh ? thresh_results["BN_SQR_TOOM4_THRESHOLD"] : "null"
+ntt_threshold = only_thresh ? thresh_results["BN_NTT_THRESHOLD"] : "null"
+
 if json_mode
+  slots_json = only_slots ? best_slots.to_s() : "null"
+  p2_json = only_capacity ? best_p2.to_s() : "null"
+  quantum_json = only_capacity ? best_quantum.to_s() : "null"
   << "{"
   << "  \"host\": {"
   << "    \"cpu\": \"[cpu_model]\","
@@ -399,9 +507,16 @@ if json_mode
   << "    \"ram\": \"[ram_gib]\""
   << "  },"
   << "  \"recommended\": {"
-  << "    \"BN_BIGINT_POOL_PER_BUCKET\": [best_slots],"
-  << "    \"BN_BIGINT_HYBRID_P2_LIMIT\": [best_p2],"
-  << "    \"BN_BIGINT_HYBRID_QUANTUM\": [best_quantum],"
+  << "    \"BN_BIGINT_POOL_PER_BUCKET\": [slots_json],"
+  << "    \"BN_BIGINT_HYBRID_P2_LIMIT\": [p2_json],"
+  << "    \"BN_BIGINT_HYBRID_QUANTUM\": [quantum_json],"
+  if only_thresh
+    << "    \"BN_KARA_THRESHOLD\": [kara_threshold],"
+    << "    \"BN_TOOM3_THRESHOLD\": [toom3_threshold],"
+    << "    \"BN_TOOM4_THRESHOLD\": [toom4_threshold],"
+    << "    \"BN_SQR_KARA_THRESHOLD\": [sqr_kara_threshold],"
+    << "    \"BN_SQR_TOOM4_THRESHOLD\": [sqr_toom4_threshold],"
+    << "    \"BN_NTT_THRESHOLD\": [ntt_threshold],"
   << "    \"cflags\": \"[cflags]\""
   << "  }"
   << "}"
@@ -410,8 +525,13 @@ if json_mode
 << ""
 << "  [WHITE][BOLD]Optimal Discovered Configuration for this Host[RESET]"
 << "  [GREY]" + "─" * 68 + "[RESET]"
-<< "  [GREY]Parked Pool Capacity: [RESET][GREEN][BOLD][best_slots] buffers / bucket[RESET] (eliminates 99.0% of allocations)"
-<< "  [GREY]Hybrid Sizing Policy: [RESET][GREEN][BOLD]p2<=[best_p2] + q[best_quantum][RESET] (optimal cache line & SIMD alignment)"
+if only_slots
+  << "  [GREY]Parked Pool Capacity: [RESET][GREEN][BOLD][best_slots] buffers / bucket[RESET]"
+if only_capacity
+  << "  [GREY]Hybrid Sizing Policy: [RESET][GREEN][BOLD]p2<=[best_p2] + q[best_quantum][RESET]"
+if only_thresh
+  << "  [GREY]Karatsuba / Toom:     [RESET][GREEN][BOLD][kara_threshold] / [toom3_threshold] / [toom4_threshold] limbs[RESET]"
+  << "  [GREY]Square Karatsuba/Toom: [RESET][GREEN][BOLD][sqr_kara_threshold] / [sqr_toom4_threshold] limbs[RESET]"
 << "  [GREY]Recommended CFLAGS:   [RESET][CYAN][cflags][RESET]"
 << "  [GREY]" + "─" * 68 + "[RESET]"
 << ""

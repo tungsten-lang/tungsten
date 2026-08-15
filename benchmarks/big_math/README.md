@@ -24,17 +24,29 @@ bin/tungsten bench bignum --full --output results/bignum-full.json
 bin/tungsten bench bignum --worker-sweep --output results/bignum-workers.json
 ```
 
-The default lanes are Tungsten and GMP. `--python`, `--rust`, `--odin`,
-`--go`, `--node`, and `--boost` enable CPython `int`, Rust `num-bigint`
-0.5.1, Odin `core:math/big`, Go `math/big`, JavaScript `BigInt` under
-Node's V8, and Boost.Multiprecision `cpp_int`; `--all` enables all six.
-The external harnesses are persistent sources in `rust/`, `odin/`, `go/`,
-`node/`, and `boost/`, built with release optimization and the native CPU
-target only when selected (the Node lane has no compile step; its script is
-self-tested once per change instead). Dependencies and compiler versions are
-recorded in JSON metadata. The V8 lane reports gcd/lcm/isqrt/powmod as
-unsupported: V8 ships no BigInt builtin for them, and a hand-written JS
-algorithm would measure the harness author rather than the engine.
+The default lanes are the direct Tungsten C/runtime harness, compiled Tungsten
+source, and GMP. The source lane lives in `tungsten/`, builds with
+`--release --native --fast`, and times ordinary Tungsten operators and methods;
+Core reaches retained C kernels through its production `ccall` seams. After
+declaring the harness, it executes `Tungsten.PROTECT_THE_CORE!` and
+`Tungsten.LOCK_THE_DOORS!`, so the measured program has validated Core
+provenance and irreversibly locked instance/static method tables. The table's
+`C/src` and `C/GMP` ratios remain anchored to the established direct C lane.
+The gcd, lcm, and integer-square-root timed bodies call their retained runtime
+kernel boundaries explicitly with `ccall`; the arithmetic, bitwise, shift,
+comparison, sign, power, and conversion rows use their ordinary source forms.
+
+`--python`, `--rust`, `--odin`, `--go`, `--node`, and `--boost` additionally
+enable CPython `int`, Rust `num-bigint` 0.5.1, Odin `core:math/big`, Go
+`math/big`, JavaScript `BigInt` under Node's V8, and Boost.Multiprecision
+`cpp_int`; `--all` enables all six optional lanes. Their persistent harnesses
+live in `rust/`, `odin/`, `go/`, `node/`, and `boost/`, built with release
+optimization and the native CPU target only when selected (the Node lane has
+no compile step; its script is self-tested once per change instead).
+Dependencies and compiler versions are recorded in JSON metadata. The V8 lane
+reports gcd/lcm/isqrt/powmod as unsupported: V8 ships no BigInt builtin for
+them, and a hand-written JS algorithm would measure the harness author rather
+than the engine.
 
 The default matrix remains the fast 1..8192-limb development sweep. `--full`
 is the reproducible threshold/FFT-band preset: it implies `--accurate` and
@@ -134,11 +146,13 @@ timing window.
 The `add1`, `sub1`, `mul1`, and `div1` rows are deliberately API-shaped
 unsigned-word operations, not ordinary balanced boxed/boxed calls. Each lane
 uses the fastest form its API offers for a hoisted one-limb operand: Tungsten
-uses its decoded-word entries, GMP uses `mpz_*_ui`, and Rust and Boost use
-their `u64`/builtin-integer operator overloads. Odin, Go, and Node have no
-unsigned-word entry that fits the full `2^63..2^64` word (Odin's digit is 63
-bits; math/big and BigInt expose no scalar API), so those lanes pass a
-pre-built one-limb bignum operand through the ordinary two-operand call. The
+direct C uses its decoded-word entries, the compiled Tungsten source lane uses
+its ordinary operator with a pre-built one-limb BigInt, GMP uses `mpz_*_ui`,
+and Rust and Boost use their `u64`/builtin-integer operator overloads. Odin, Go,
+and Node have no unsigned-word entry that fits the full `2^63..2^64` word
+(Odin's digit is 63 bits; math/big and BigInt expose no scalar API), so those
+lanes pass a pre-built one-limb bignum operand through the ordinary two-operand
+call. The
 ordinary `add`, `sub`, `mul`, and `div` rows continue to measure their generic
 two-BigInt dispatch.
 

@@ -58,7 +58,10 @@ while IFS= read -r -d '' path; do
   removed=$((removed + 1))
 done < "$list"
 
-find "$CACHE" -depth -type d ! -path "$CACHE" ! -path "$LOCK" -empty -delete
+# *.lock directories are live mkdir-mutexes (compiled `run` serializes cache
+# builds through them); a crashed holder's lock is stolen by the next run,
+# never swept here.
+find "$CACHE" -depth -type d ! -path "$CACHE" ! -path "$LOCK" ! -name '*.lock' -empty -delete
 rm -f "$list"
 touch "$STAMP"
 

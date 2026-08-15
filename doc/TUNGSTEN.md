@@ -33,7 +33,7 @@ COMMANDS
     check FILE           Parse and lower a .w file without emitting code
                          (also: tungsten -c FILE / --check FILE). Validates
                          every selected @gpu fn dialect without sidecars.
-    run FILE             Interpret a .w file
+    run FILE             Lower through WIRE, compile, and run a .w file
     sandbox FILE         Compile FILE, then run it with the sandbox gate
                          latched: file IO, sockets, process control, and
                          environment access are blocked or stubbed, and every
@@ -56,6 +56,10 @@ COMMANDS
                          build/cache/gpu-bench.
     debug FILE           Build with symbols/frame pointers and a validated
                          sidemap, then launch LLDB or GDB.
+    cleanup              Force a build-cache sweep now (build, bootstrap, and
+                         run kick the same GC daily). Prunes incremental slots,
+                         run-cache binaries, and eval sources older than
+                         TUNGSTEN_CACHE_MAX_AGE_DAYS (default 7).
     doctor               Check your toolchain (clang, make, lld, zstd, compiler)
                          Implemented in bash — works without a built compiler.
     fmt FILE             Format .w source

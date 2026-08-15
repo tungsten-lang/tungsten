@@ -323,11 +323,12 @@ parser = OptionParser.new do |opts|
 
     Commands:
       compile FILE   Compile a .w file to a native binary (-o FILE)
-      run FILE       Interpret a .w file
+      run FILE       Compile and run a .w file through WIRE
       repl           Interactive REPL (alias: console)
       start          First-run welcome: what Tungsten is + your next step
       new NAME       Scaffold a new project
       build          Bootstrap the self-hosted compiler
+      cleanup        Force a build-cache sweep (GC also runs daily)
       doctor         Check your toolchain
       fmt FILE       Format .w source
       bit ...        The Bit package manager
@@ -732,18 +733,14 @@ when ".w"
     Tungsten::Interpreter.new(argv: [script] + args).run(source, file_path: PRINT_IR)
     exit 0
   elsif HAVE_COMPILER && !out_path
-    load_gem!
-    source = File.read(script)
-    Tungsten::Interpreter.new(argv: args).run(source, file_path: script)
-    exit 0
+    # Product execution follows the same lexer → parser → WIRE → LLVM path as
+    # `compile`. The Ruby tree-walker remains available explicitly as --ruby.
+    cmd = [COMPILER, "run", script, "--intern", intern_algo] + MATH_MODE_FLAGS + BACKEND_FLAGS + ["--", *args]
+    exec(*cmd)
   elsif HAVE_COMPILER
     # Fast path: delegate to compiled binary
     cmd = [COMPILER]
-    if out_path
-      cmd += ["compile", script, "--out", out_path, "--intern", intern_algo] + MATH_MODE_FLAGS + BACKEND_FLAGS
-    else
-      cmd += ["run", script, *args]
-    end
+    cmd += ["compile", script, "--out", out_path, "--intern", intern_algo] + MATH_MODE_FLAGS + BACKEND_FLAGS
     exec(*cmd)
   else
     if intern_algo != "raw"

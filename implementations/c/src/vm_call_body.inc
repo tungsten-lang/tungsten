@@ -634,6 +634,50 @@
           if (!push(&vm, result, err)) goto cleanup_fail;
           CNEXT();
         }
+        /* Foreground child for `run` / `-e` under the stage-0 VM (native
+         * stages call runtime.c's __w_run_argv). Same contract: argv array
+         * of strings, direct exec (no shell), everything inherited; returns
+         * the exit code, 256+signal, or a negative value on spawn failure. */
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 &&
+            argc == 2 && tc_kind(args[0]) == TC_VAL_STRING &&
+            tc_str_len(args[0]) == 10 &&
+            memcmp(tc_str_bytes_only(args[0]), "w_run_argv", 10) == 0 &&
+            tc_kind(args[1]) == TC_VAL_ARRAY && tc_as_array(args[1])) {
+          size_t run_argc = tc_as_array(args[1])->size;
+          int64_t run_status = -1;
+          char **run_argv = run_argc >= 1
+                                ? (char **)calloc(run_argc + 1, sizeof(char *))
+                                : NULL;
+          if (run_argv) {
+            int args_ok = 1;
+            for (size_t ai = 0; ai < run_argc; ai++) {
+              TcValue av = tc_as_array(args[1])->slots[ai];
+              if (tc_kind(av) != TC_VAL_STRING ||
+                  !(run_argv[ai] = strdup(tc_str_bytes_only(av)))) {
+                args_ok = 0;
+                break;
+              }
+            }
+            if (args_ok) {
+              pid_t run_pid = -1;
+              int spawn_error = posix_spawnp(&run_pid, run_argv[0], NULL, NULL,
+                                             run_argv, environ);
+              if (spawn_error != 0) {
+                run_status = -(int64_t)spawn_error;
+              } else {
+                int wstatus = 0;
+                while (waitpid(run_pid, &wstatus, 0) == -1 && errno == EINTR) {}
+                if (WIFEXITED(wstatus)) run_status = (int64_t)WEXITSTATUS(wstatus);
+                else if (WIFSIGNALED(wstatus)) run_status = 256 + (int64_t)WTERMSIG(wstatus);
+              }
+            }
+            for (size_t ai = 0; ai < run_argc; ai++) free(run_argv[ai]);
+            free(run_argv);
+          }
+          FREE_ARGS();
+          if (!push(&vm, int_value(run_status), err)) goto cleanup_fail;
+          CNEXT();
+        }
         if (!has_receiver && name == NAME_FILE_Q && argc == 1 && tc_kind(args[0]) == TC_VAL_STRING) {
           FILE *file = fopen(tc_str_bytes_only(args[0]), "rb");
           int exists = file != NULL;

@@ -119,6 +119,13 @@ case "$1" in
     shift
     exec bash "$ROOT/bin/commands/release.sh" "$@"
     ;;
+  # cleanup: force a build-cache sweep now (the same GC that build/bootstrap
+  # and `run` kick daily). Prunes stale incremental slots, run-cache binaries,
+  # and eval sources older than TUNGSTEN_CACHE_MAX_AGE_DAYS (default 7).
+  cleanup)
+    shift
+    exec env TUNGSTEN_CACHE_GC_FORCE=1 bash "$ROOT/bin/commands/cache_gc.sh" "$@"
+    ;;
   gpu-bench)
     shift
     exec bash "$ROOT/bin/commands/gpu-bench.sh" "$@"

@@ -153,10 +153,13 @@ done
 echo ""
 echo "Results: $PASS pass, $FAIL fail, $SKIP skip (${#SUPPORTED[@]} total)"
 
-# Step 4: the same fixtures through the compiled TREE-WALK INTERPRETER
-# (`tungsten run`), diffed against the same expected output. Known gaps are
-# listed in INTERP_SKIP — a failure outside that list gates, so interpreter/
-# compiler divergence can only shrink.
+# Step 4: the same fixtures through the SELF-HOSTED TREE-WALK INTERPRETER
+# (`tungsten run --interpret` → compiler/lib/interpreter.w), diffed against
+# the same expected output — which step 1 generated with the RUBY tree-walker
+# (`run --ruby`), so this leg is a real cross-engine gate, not the compiled
+# engine compared with itself. Known gaps are listed in INTERP_SKIP — a
+# failure outside that list gates, so interpreter/compiler divergence can
+# only shrink.
 INTERP_SKIP=(
   argv_clock          # argv differs under `run`
   goroutine_basic     # go is queued/drained; re-verify channel fixtures next
@@ -174,7 +177,7 @@ interp_skipped() {
 }
 
 echo ""
-echo "==> Interpreter leg (tungsten run)..."
+echo "==> Interpreter leg (tungsten run --interpret)..."
 IPASS=0
 IFAIL=0
 ISKIP=0
@@ -189,7 +192,7 @@ for name in "${SUPPORTED[@]}"; do
     continue
   fi
   iactual="$TMP/${name}.iactual"
-  if ! perl -e 'alarm shift; exec @ARGV' 10 "$TUNGSTEN" run "$fixture" > "$iactual" 2>&1; then
+  if ! perl -e 'alarm shift; exec @ARGV' 10 "$TUNGSTEN" run --interpret "$fixture" > "$iactual" 2>&1; then
     echo "iFAIL $name (interpreter error)"
     ERRORS="${ERRORS}\n--- $name (interp) ---\n$(head -3 "$iactual")"
     IFAIL=$((IFAIL + 1))

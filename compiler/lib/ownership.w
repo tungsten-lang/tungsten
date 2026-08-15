@@ -26,8 +26,8 @@ use runtime_types
 # Runtime calls that only READ their arguments: no argument pointer is
 # stored anywhere, so passing a value to one of these must not pin it as
 # escaped. Grown case-by-case, each name verified against the C body:
-#   w_string_byte_length — reads the length (flattens a rope in place,
-#     which allocates INTO the rope; the argument itself is not retained)
+#   w_string_byte_length — reads an inline mode or a slab/heap/rope length;
+#     the argument is not retained
 #   w_hash_get — probes by hash + eq; the key is compared, never stored
 #   w_eq / w_neq / cmp fast helpers — pure comparisons
 #   w_string_index / w_string_rindex / w_string_count — read-only scans

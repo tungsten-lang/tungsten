@@ -1,7 +1,8 @@
 # Typed-receiver direct routes for the string-allocation hot path
 # (lowering/method_call.w + ops.w + infer_type in lowering.w):
 #   int-typed  .to_s()      → w_to_s          (skips the IC dispatcher)
-#   :string    .size()      → w_string_byte_length (raw i64, rope-safe)
+#   :string    .size()      → __w_string_byte_length_fast (raw i64, read-only)
+#   :string    .[](i)       → __w_string_idx_fast (raw index, pure SSO leaf)
 #   :string + :string       → w_str_concat    (skips w_add's re-coercion)
 #   .to_s() results infer :string; String#size infers :i64
 # Pins the fast arms AND the soundness backstops: w_to_s dispatches on the
@@ -45,6 +46,20 @@ heap7 = n7.to_s()
 check("size.heap_runtime", heap7.size(), "7")
 check("size.utf8_bytes", "héllo".size(), "6")
 
+# --- one-argument String#[] direct route (byte-indexed) ---
+idx_src = "abcde"
+idx = 2 ## i64
+check("index.inline.machine", idx_src[idx], "c")
+check("index.inline.first", idx_src[0], "a")
+check("index.inline.last", idx_src[-1], "e")
+check("index.inline.too_negative", idx_src[-6] == nil, "true")
+check("index.inline.past_end", idx_src[5] == nil, "true")
+check("index.inline.empty", ""[0] == nil, "true")
+check("index.slab", "abcdef"[5], "f")
+nul_idx = 1 ## i64
+check("index.inline.embedded_nul_size", "a\0b"[nul_idx].size(), "1")
+check("index.inline.embedded_nul", "a\0b"[nul_idx] == "\0", "true")
+
 # --- string + string direct concat ---
 pre = "n="
 joined = pre + heap7.to_s()
@@ -54,8 +69,8 @@ check("plus.eq_literal", joined == "n=1234567", "true")
 two = "abc" + "def"
 check("plus.inline_inline", two, "abcdef")
 
-# Rope path: concat past 61 bytes builds a rope; size must flatten-read it
-# and a further + must accept a rope LHS.
+# Rope path: concat past 61 bytes builds a rope; size reads its cached total
+# without flattening, and a further + must accept a rope LHS.
 half = "0123456789012345678901234567890123456789"
 big = half + half
 check("plus.rope_size", big.size(), "80")

@@ -449,6 +449,14 @@ use naming
   out << declare_fn_attrs("w_bool_array_size", wv, wv, "nounwind willreturn memory(read)")
 
   # String builtins
+  # Index/slice/first-byte deliberately stay nounwind-only. Their SSO arms are
+  # register-only, but slab/heap inputs read storage and rope inputs flatten,
+  # allocate, and cache a result. A whole-function memory(none) or memory(read)
+  # contract would therefore let LLVM miscompile valid rope calls. Byte length
+  # is the exception: it reads a rope's cached total_len without flattening.
+  out << declare_fn("w_string_idx_raw", wv, join_arg_types2(wv, "i64"))
+  out << declare_fn("w_string_slice_raw", wv, join_arg_types3(wv, "i64", "i64"))
+  out << declare_fn_attrs("w_string_byte_length", "i64", "i64", "nounwind willreturn memory(read)")
   out << declare_fn("w_string_index", wv, wv3)
   out << declare_fn("w_string_rindex", wv, wv3)
   out << declare_fn("w_string_repeat", wv, wv2)
@@ -1029,6 +1037,79 @@ use naming
   out << "  ret i64 1\n"
   out << "s:\n"
   out << "  %sv = call i64 @w_eq(i64 %x, i64 %lit)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+# String byte subscript under a :string type fact. The public runtime entry
+# remains conservative because its slab/heap/rope fallback accesses memory.
+# Keep the SSO-5 calculation in its own fully pure leaf: after the wrapper is
+# inlined, LLVM can CSE/hoist/fold this arm without being told that the slow
+# arm is pure too.
+-> string_idx_fast_helper_ir()
+  out = StringBuffer(1250)
+  out << "define private i64 @__w_sso_idx(i64 %str, i64 %idx) alwaysinline nounwind willreturn memory(none) speculatable {\n"
+  out << "entry:\n"
+  out << "  %mode.raw = lshr i64 %str, 1\n"
+  out << "  %len = and i64 %mode.raw, 7\n"
+  out << "  %negative = icmp slt i64 %idx, 0\n"
+  out << "  %from.end = add i64 %idx, %len\n"
+  out << "  %effective = select i1 %negative, i64 %from.end, i64 %idx\n"
+  out << "  %in.bounds = icmp ult i64 %effective, %len\n"
+  out << "  br i1 %in.bounds, label %byte, label %oob\n"
+  out << "byte:\n"
+  out << "  %shift = shl i64 %effective, 3\n"
+  out << "  %lane.raw = lshr i64 %str, %shift\n"
+  out << "  %lane = and i64 %lane.raw, 4080\n"
+  out << "  %result = or i64 %lane, -1970324836974590\n"
+  out << "  ret i64 %result\n"
+  out << "oob:\n"
+  out << "  ret i64 0\n"
+  out << "}\n"
+  out << "define private i64 @__w_string_idx_fast(i64 %str, i64 %idx) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %tag = lshr i64 %str, 48\n"
+  out << "  %is.stringy = icmp eq i64 %tag, 65529\n"
+  out << "  %mode.raw = lshr i64 %str, 1\n"
+  out << "  %mode = and i64 %mode.raw, 7\n"
+  out << "  %is.inline = icmp ule i64 %mode, 5\n"
+  out << "  %is.sso = and i1 %is.stringy, %is.inline\n"
+  out << "  br i1 %is.sso, label %fast, label %slow, !prof !31411\n"
+  out << "fast:\n"
+  out << "  %fv = call i64 @__w_sso_idx(i64 %str, i64 %idx)\n"
+  out << "  ret i64 %fv\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @w_string_idx_raw(i64 %str, i64 %idx)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+# String byte length under a :string type fact. The pure SSO leaf only
+# extracts the mode bits. The wrapper is read-only for every storage mode:
+# its fallback reads slab/heap headers or a rope's existing total_len and
+# never flattens the rope.
+-> string_size_fast_helper_ir()
+  out = StringBuffer(700)
+  out << "define private i64 @__w_sso_size(i64 %str) alwaysinline nounwind willreturn memory(none) speculatable {\n"
+  out << "entry:\n"
+  out << "  %mode.raw = lshr i64 %str, 1\n"
+  out << "  %len = and i64 %mode.raw, 7\n"
+  out << "  ret i64 %len\n"
+  out << "}\n"
+  out << "define private i64 @__w_string_byte_length_fast(i64 %str) alwaysinline nounwind willreturn memory(read) {\n"
+  out << "entry:\n"
+  out << "  %tag = lshr i64 %str, 48\n"
+  out << "  %is.stringy = icmp eq i64 %tag, 65529\n"
+  out << "  %mode.raw = lshr i64 %str, 1\n"
+  out << "  %mode = and i64 %mode.raw, 7\n"
+  out << "  %is.inline = icmp ule i64 %mode, 5\n"
+  out << "  %is.sso = and i1 %is.stringy, %is.inline\n"
+  out << "  br i1 %is.sso, label %fast, label %slow, !prof !31411\n"
+  out << "fast:\n"
+  out << "  %fv = call i64 @__w_sso_size(i64 %str)\n"
+  out << "  ret i64 %fv\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @w_string_byte_length(i64 %str)\n"
   out << "  ret i64 %sv\n"
   out << "}\n"
   out.to_s()
@@ -2874,6 +2955,22 @@ ewscope_md_state = {ids: {}}
     if decls_out.index("@w_eq(") == nil
       decls_out = decls_out + "declare i64 @w_eq(i64, i64) nounwind\n"
     decls_out = decls_out + streq2_fast_helper_ir() + "\n"
+
+  # Typed String#[]: the private wrapper guards the memory(none) SSO leaf;
+  # only its slab/heap/rope fallback calls the conservatively-declared runtime
+  # entry. Never transfer the leaf's attributes to w_string_idx_raw itself.
+  if ccall_needed.has_key?("__w_string_idx_fast")
+    if decls_out.index("@w_string_idx_raw(") == nil
+      decls_out = decls_out + "declare i64 @w_string_idx_raw(i64, i64) nounwind\n"
+    decls_out = decls_out + string_idx_fast_helper_ir() + "\n"
+
+  # Typed String#size: unlike subscript, the slow path is itself read-only,
+  # so the wrapper may honestly carry memory(read) while its SSO leaf carries
+  # the stronger memory(none) contract.
+  if ccall_needed.has_key?("__w_string_byte_length_fast")
+    if decls_out.index("@w_string_byte_length(") == nil
+      decls_out = decls_out + "declare i64 @w_string_byte_length(i64) nounwind willreturn memory(read)\n"
+    decls_out = decls_out + string_size_fast_helper_ir() + "\n"
 
   # Boxed +/- fast paths (op map routes :PLUS/:MINUS to these helpers).
   arith_fast_specs = [

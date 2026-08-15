@@ -960,14 +960,31 @@
     return typed_value(:i64, temp)
 
   # String byte length: mirror the :array size route — raw i64 result so a
-  # consuming machine op (`chk ^ s.size()`) never boxes. w_string_byte_length
-  # flattens ropes and reads all three storage modes.
+  # consuming machine op (`chk ^ s.size()`) never boxes. The emitted helper
+  # extracts SSO-5 length with a memory(none) leaf; its read-only fallback
+  # reads slab/heap/rope lengths without flattening ropes.
   if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && method_name == "size" && recv_type == :string
     receiver_val = lower_expression(ctx, recv_node)
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_string_byte_length", args: [receiver_reg]})
+    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_string_byte_length_fast", args: [receiver_reg]})
     return typed_value(:raw_i64, temp)
+
+  # String byte subscript with an integer-like index: pass the index as raw
+  # i64 and skip the method IC plus boxed argument scratch. The emitted helper
+  # selects SSO-5 bytes with a memory(none) register-only leaf, then retains
+  # slab/heap/rope, negative-index, and out-of-range semantics through the
+  # runtime fallback.
+  if recv_node != nil && node.block == nil && method_name == "\[]" && recv_type == :string && node.args.size() == 1
+    index_type = infer_type(node.args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    index_machine = is_integer_like_type(index_type) && !(index_type in (:u64 :raw_u64))
+    if index_machine
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      index_raw = ensure_raw_machine_int(wfn, lower_expression(ctx, node.args[0]), :i64, index_type)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_string_idx_fast", args: [receiver_reg, index_raw]})
+      return typed_value(:i64, temp)
 
   # Hash subscripts: a :hash-typed receiver reaches w_hash_get / w_hash_set
   # directly. The IC handlers (w_ic_hash_get/set) are literal one-line

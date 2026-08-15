@@ -739,10 +739,11 @@ WValue w_gte(WValue a, WValue b);
 
 /* ---- String ---- */
 WValue w_str_concat(WValue a, WValue b);
+WValue w_string_idx_raw(WValue str, int64_t index);
 WValue w_string_slice_raw(WValue str, int64_t start, int64_t len);
 WValue w_to_s(WValue v);
 int64_t w_stringy_c_length(WValue v);
-int64_t w_string_byte_length(int64_t str_wval);
+int64_t w_string_byte_length(int64_t str_wval) __attribute__((pure));
 void w_str_data(WValue v, char buf[6], const char **out, size_t *len);
 WValue w_algebra_rewrite_source(WValue source);
 WValue w_string_from_codepoint(WValue cp_v);

@@ -956,6 +956,42 @@ int main() {
         printf("  inline string round-trip: OK\n");
     }
 
+    /* String#[] raw-index leaf: SSO bytes stay in-register, while negative,
+     * out-of-range, slab, and embedded-NUL behavior remains byte-exact. */
+    {
+        WValue inline_s = w_string("abcde");
+        assert(w_eq(w_string_idx_raw(inline_s, 2), w_string("c")) == W_TRUE);
+        assert(w_eq(w_string_idx_raw(inline_s, -1), w_string("e")) == W_TRUE);
+        assert(w_string_idx_raw(inline_s, 5) == W_NIL);
+        assert(w_string_idx_raw(inline_s, -6) == W_NIL);
+
+        static const char with_nul[] = {'a', '\0', 'b'};
+        WValue nul_s = w_box_inline_str(with_nul, sizeof(with_nul));
+        WValue nul_byte = w_string_idx_raw(nul_s, 1);
+        char nul_buf[6];
+        const char *nul_data;
+        size_t nul_len;
+        w_str_data(nul_byte, nul_buf, &nul_data, &nul_len);
+        assert(nul_len == 1 && nul_data[0] == '\0');
+
+        assert(w_eq(w_string_idx_raw(w_string("abcdef"), 5), w_string("f")) == W_TRUE);
+        printf("  string raw index: OK\n");
+    }
+
+    /* String byte length is read-only for every storage mode. In particular,
+     * asking a rope's size must read total_len without allocating or filling
+     * the rope's flat cache; this is the invariant behind LLVM memory(read). */
+    {
+        WValue half = w_string("0123456789012345678901234567890123456789");
+        WValue rope = w_str_concat(half, half);
+        assert(w_is_rope(rope));
+        WRope *rp = (WRope *)w_as_ptr(rope);
+        assert(rp->flat == W_NIL);
+        assert(w_string_byte_length((int64_t)rope) == 80);
+        assert(rp->flat == W_NIL);
+        printf("  string byte length read-only: OK\n");
+    }
+
     /* Slab string round-trip (6-61 bytes go to slab) */
     {
         WValue v = w_string("hello world");

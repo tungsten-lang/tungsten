@@ -33446,7 +33446,10 @@ int64_t w_string_byte_ptr(int64_t str_wval) {
 
 int64_t w_string_byte_length(int64_t str_wval) {
     WValue v = (WValue)str_wval;
-    if (w_is_rope(v)) v = w_rope_flatten(v);
+    /* A rope already carries its byte length. Reading that header preserves
+     * the function's pure/read-only contract and avoids materializing and
+     * caching a flat String merely to answer `.size()`. */
+    if (w_is_rope(v)) return (int64_t)((WRope *)w_as_ptr(v))->total_len;
     if (!w_is_stringy(v)) return 0;
     size_t mode = (v >> 1) & 7;
     if (mode <= 5) return (int64_t)mode;
@@ -48393,15 +48396,42 @@ static WValue w_ic_array_slice(WValue r, WValue *a, int c) {
 
 /* String builtin wrappers */
 /* String case-conversion and predicate methods. */
-static WValue w_ic_string_idx(WValue r, WValue *a, int c) {
-    if (c < 1) die("[] requires 1 argument");
-    char buf[6]; const char *s; size_t len;
+/* Register-only SSO-5 subscript leaf.  `const` is the C spelling of LLVM's
+ * memory(none): the result depends only on its two scalar arguments, and the
+ * helper cannot observe or modify memory.  Keep the storage-mode guard in the
+ * caller; slab/heap/rope values belong on w_string_idx_raw's slow arm. */
+static inline __attribute__((always_inline, const))
+WValue w_sso_idx(WValue r, int64_t idx) {
+    int64_t len = (int64_t)((r >> 1) & 7);
+    if (idx < 0) idx += len;
+    if ((uint64_t)idx >= (uint64_t)len) return W_NIL;
+    WValue lane = (r >> ((uint64_t)idx * 8)) & UINT64_C(0xFF0);
+    return W_TAG_STRINGSYM | UINT64_C(2) | lane;
+}
+
+WValue w_string_idx_raw(WValue r, int64_t idx) {
+    /* Inline Strings carry their byte length in the mode and all five bytes
+     * in the WValue itself. Select the requested lane in-register and box the
+     * known one-byte result directly: no w_str_data buffer and no strlen. */
+    if (w_is_stringy(r)) {
+        int64_t len = (int64_t)((r >> 1) & 7);
+        if (len <= 5) return w_sso_idx(r, idx);
+    }
+
+    /* Slab, heap, and rope storage retain the shared byte-view boundary.
+     * Length-aware boxing preserves an embedded NUL as a one-byte String. */
+    char buf[6];
+    const char *s;
+    size_t len;
     w_str_data(r, buf, &s, &len);
-    int64_t idx = w_as_int(a[0]);
     if (idx < 0) idx += (int64_t)len;
     if (idx < 0 || idx >= (int64_t)len) return W_NIL;
-    char ch[2] = {s[idx], '\0'};
-    return w_string(ch);
+    return w_box_inline_str(s + idx, 1);
+}
+
+static WValue w_ic_string_idx(WValue r, WValue *a, int c) {
+    if (c < 1) die("[] requires 1 argument");
+    return w_string_idx_raw(r, w_as_int(a[0]));
 }
 static WValue w_ic_string_upcase(WValue r, WValue *a, int c) {
     (void)a; (void)c;

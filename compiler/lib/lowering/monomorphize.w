@@ -1811,6 +1811,11 @@
         if parent_spec != nil
           mod[:generic_specialization_order].push(parent_spec)
   spec_class = Tungsten:AST:ClassDef.new(spec_name, spec_super, cloned_body, nil)
+  # A specialization inherits the template's ownership. A Core template
+  # instantiated by program use is consequently visible to the stable-Core
+  # contract, which conservatively falls back until specialization artifacts
+  # can live in the per-program partition.
+  spec_class.source_path = ast_get(template, :source_path)
   spec_class
 
 # Rewrite a bare `Foo<T>` class_ref into its mangled specialization

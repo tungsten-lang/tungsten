@@ -13,6 +13,7 @@ use wire
 use target
 use naming
 use error_formatter
+use hashing
 # Cross-tower dependencies the workers reference through the flat
 # namespace: unit superscripts (ops.w's quantity desugar) live in the
 # lexer's unit registry, and the return-type fixed point calls
@@ -26,6 +27,7 @@ use lowering/signatures
 use lowering/types
 use lowering/inference
 use lowering/analysis
+use lowering/core_abi
 use lowering/elision
 use lowering/program
 use lowering/monomorphize
@@ -819,24 +821,51 @@ use lowering/definitions
   # rewritten. Must precede the stack-promote / escape analysis so it sees the
   # canonical constructor.
   rewrite_smallarray_generic_ctors(ast)
-  inferable_methods = register_top_level_defs(mod, ast.expressions, source_path)
-  infer_return_types_fixed_point(mod, inferable_methods)
+
+  # PROTECT_THE_CORE turns Core ownership into an optimization boundary. Core
+  # registration and SCC return inference run before user declarations exist,
+  # then user inference may consume the frozen Core facts in the forward
+  # direction. This prevents a declared or inferred user return from changing
+  # how a Core caller lowers while retaining Core facts for user code.
+  core_expressions = nil
+  user_expressions = nil
+  if mod[:protect_core] == true
+    partition = stable_core_partition_expressions(ast.expressions)
+    core_expressions = partition[:core]
+    user_expressions = partition[:user]
+    prepare_stable_core_contract(mod, core_expressions, user_expressions, partition[:missing])
+
+    core_inferable = register_top_level_defs(mod, core_expressions, source_path)
+    infer_return_types_fixed_point(mod, core_inferable)
+    user_inferable = register_top_level_defs(mod, user_expressions, source_path)
+    infer_return_types_fixed_point(mod, user_inferable)
+  else
+    inferable_methods = register_top_level_defs(mod, ast.expressions, source_path)
+    infer_return_types_fixed_point(mod, inferable_methods)
 
   # Freeze every top-level function's boxed-vs-raw ABI before any body is
   # lowered.  Forward typed calls must use the same ABI as callees declared
   # earlier; discovering raw-callable functions incrementally made source
   # order silently change the meaning of identical LLVM i64 parameters.
-  preregister_top_level_raw_abis(mod, ast.expressions)
-
-  collect_top_level_static_types(mod, ast.expressions)
+  if core_expressions != nil
+    preregister_top_level_raw_abis(mod, core_expressions)
+    preregister_top_level_raw_abis(mod, user_expressions)
+    collect_top_level_static_types(mod, core_expressions)
+    mod[:core_top_level_static_types] = copy_core_abi_map(mod[:top_level_static_types])
+    collect_top_level_static_types(mod, user_expressions)
+  else
+    preregister_top_level_raw_abis(mod, ast.expressions)
+    collect_top_level_static_types(mod, ast.expressions)
   collect_extern_var_refs(mod, ast.expressions)
+  if core_expressions != nil
+    mark_stable_core_global_exports(mod, core_expressions)
 
   # Tier-a call-site parameter type inference: seed unannotated top-level
   # fn params from the unanimous concrete type seen across all call sites
   # (typed arrays / floats only, no ABI change, no clone). Needs the
   # top-level static types just collected; consumed in
   # populate_definition_var_types when each body is lowered below.
-  collect_param_type_observations(mod, ast.expressions)
+  collect_param_type_observations(mod, ast.expressions, core_expressions, mod[:core_top_level_static_types])
 
   # ARGV use is discovered by the combined runtime-use walk below. Build the
   # function first, then attach argc/argv before emission if that walk finds a
@@ -947,6 +976,8 @@ use lowering/definitions
     emit_instruction(main_fn, {op: :call_direct_void, name: "w_scheduler_run", args: []})
 
   finalize_function(main_fn)
+  if core_expressions != nil
+    finalize_stable_core_abi(mod, core_expressions)
   mod
 
 # -- Emit WIRE flag: dump WIRE as text --
@@ -956,6 +987,12 @@ use lowering/definitions
   out = out + "source: " + mod[:source_path] + "\n"
   out = out + "strings: " + mod[:strings].size().to_s() + "\n"
   out = out + "functions: " + mod[:functions].size().to_s() + "\n\n"
+  if mod[:core_abi_hash] != nil
+    out = out + "core abi: " + mod[:core_abi_hash] + " (" + mod[:core_abi_function_count].to_s() + " functions, " + mod[:core_abi_class_count].to_s() + " classes, " + mod[:core_abi_global_count].to_s() + " globals)\n"
+    if mod[:core_reuse_contract] == :stable
+      out = out + "core reuse: stable\n\n"
+    else
+      out = out + "core reuse: monolithic fallback (" + mod[:core_reuse_fallback_reason] + ")\n\n"
 
   i = 0
   while i < mod[:functions].size()

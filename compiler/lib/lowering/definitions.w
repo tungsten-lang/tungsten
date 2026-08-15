@@ -578,7 +578,13 @@
   # observed across every call site. Never overrides an explicit annotation
   # (guarded on child_var_types[pname] == nil). Skips params with a
   # default/keyword/splat/block. Bailed callees are excluded upstream.
-  if mod != nil && node.param_types == nil && node.name != nil && mod[:observed_param_types] != nil && !definition_from_core?(node)
+  observation_owner_ok = !definition_from_core?(node)
+  if mod != nil && mod[:protect_core] == true
+    # The collector exposes only Core call sites to Core candidates under the
+    # protected partition. Those observations are stable prelude facts and may
+    # recover the same raw ABI optimization user functions already receive.
+    observation_owner_ok = true
+  if mod != nil && node.param_types == nil && node.name != nil && mod[:observed_param_types] != nil && observation_owner_ok
     if mod[:param_infer_bailed] == nil || mod[:param_infer_bailed][node.name] != true
       obs = mod[:observed_param_types][node.name]
       if obs != nil && node.params != nil
@@ -732,6 +738,9 @@
 -> lower_method_def(ctx, node)
   mod = ctx[:mod]
   name = node.name
+  definition_path = ast_get(node, :source_path)
+  if definition_path == nil
+    definition_path = ctx[:source_path]
   if ctx[:verbose]
     <- "."
   params = node.params
@@ -776,7 +785,7 @@
   new_fn[:source_kind] = ast_kind(node)
   new_fn[:source_method] = name
   new_fn[:source_class] = ctx[:class_name]
-  new_fn[:source_path] = ctx[:source_path]
+  new_fn[:source_path] = definition_path
   new_fn[:source_line] = node.line
   mod[:functions].push(new_fn)
 
@@ -789,7 +798,7 @@
       embed_types = {}
       populate_definition_var_types(node, embed_types, mod)
       mod[:raw_callable_fns][call_key] = fn_name
-      mod[:raw_fn_param_kinds][call_key] = embedded_param_kinds(node, embed_types, ctx[:source_path], embedded[0])
+      mod[:raw_fn_param_kinds][call_key] = embedded_param_kinds(node, embed_types, definition_path, embedded[0])
       if mod[:fn_return_types][call_key] == nil
         mod[:fn_return_types][call_key] = :i64
       new_fn[:raw_i64_signature] = true
@@ -812,7 +821,7 @@
     func: new_fn,
     var_types: child_var_types,
     class_name: ctx[:class_name],
-    source_path: ctx[:source_path],
+    source_path: definition_path,
     method_name: name,
     bindings: {},
     unboxed_vars: {},
@@ -1412,6 +1421,14 @@
   body = node.body
   if body == nil
     return nil
+  # The flattened program context carries the entry file, but synthetic class
+  # workers (ro/rw accessors, data-field getters, trailing @param accessors)
+  # belong to the declaring class. Temporarily scope the context to that file
+  # so every generated worker participates in the correct Core ABI partition.
+  old_source_path = ctx[:source_path]
+  class_source_path = ast_get(node, :source_path)
+  if class_source_path != nil
+    ctx[:source_path] = class_source_path
   prepared_body = nil
   if mod[:prepared_class_bodies] != nil
     prepared_body = mod[:prepared_class_bodies][node]
@@ -1497,6 +1514,7 @@
       lower_assign_expr(ctx, expr)
     i += 1
   ctx[:raw_int_candidates] = old_raw_int_candidates
+  ctx[:source_path] = old_source_path
   nil
 
 # Collect all ivar names from a class body (ro/rw fields, @param assigns, @ivar in method bodies)
@@ -1845,7 +1863,10 @@
   wrapper_fn[:source_kind] = :static_wrapper
   wrapper_fn[:source_method] = node.name
   wrapper_fn[:source_class] = class_name
-  wrapper_fn[:source_path] = ctx[:source_path]
+  wrapper_path = ast_get(node, :source_path)
+  if wrapper_path == nil
+    wrapper_path = ctx[:source_path]
+  wrapper_fn[:source_path] = wrapper_path
   wrapper_fn[:source_line] = node.line
   replace_or_append_function(mod, wrapper_fn)
 
@@ -1878,6 +1899,9 @@
 -> lower_class_method(ctx, class_name, node, override = nil)
   mod = ctx[:mod]
   name = node.name
+  definition_path = ast_get(node, :source_path)
+  if definition_path == nil
+    definition_path = ctx[:source_path]
   if ctx[:verbose]
     <- "."
   params = node.params
@@ -1908,11 +1932,11 @@
       kernel_fn[:source_kind] = :method
       kernel_fn[:source_method] = name
       kernel_fn[:source_class] = class_name
-      kernel_fn[:source_path] = ctx[:source_path]
+      kernel_fn[:source_path] = definition_path
       kernel_fn[:source_line] = node.line
       replace_or_append_function(mod, kernel_fn)
       call_key = method_call_key_for_def(node)
-      kernel_kinds = embedded_param_kinds(node, embed_types, ctx[:source_path], embedded[0])
+      kernel_kinds = embedded_param_kinds(node, embed_types, definition_path, embedded[0])
       mod[:known_calls][call_key] = fn_name
       mod[:known_fn_param_counts][call_key] = kernel_params.size()
       mod[:raw_callable_fns][call_key] = fn_name
@@ -1981,7 +2005,7 @@
     new_fn[:source_kind] = :method
   new_fn[:source_method] = name
   new_fn[:source_class] = class_name
-  new_fn[:source_path] = ctx[:source_path]
+  new_fn[:source_path] = definition_path
   new_fn[:source_line] = node.line
   if ast_get(node, :overload_dispatcher) == true
     new_fn[:overload_dispatcher] = true
@@ -2018,7 +2042,7 @@
     func: new_fn,
     var_types: child_var_types,
     class_name: class_name,
-    source_path: ctx[:source_path],
+    source_path: definition_path,
     method_name: name,
     bindings: {},
     unboxed_vars: {},

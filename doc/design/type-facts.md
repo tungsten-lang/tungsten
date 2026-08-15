@@ -80,11 +80,33 @@ joins therefore remain conservative.
 
 ## Core ABI boundary
 
-The parser records each definition's source path. Call-site parameter
-observations are whole-program optimization hints, so definitions loaded from
-the canonical `core/` tree never consume them. Core annotations and inferred
-facts may influence callers; user call sites cannot specialize a core
-function's calling convention.
+The parser records source ownership for definitions and occurrence-local
+top-level statements. With `PROTECT_THE_CORE!`, lowering partitions that stream
+before registration: Core overload grouping and SCC return inference complete
+before user declarations exist, then user inference may consume the frozen
+Core results. Top-level Core bindings are always exported rather than letting a
+user read decide whether Core emits a global mirror.
+
+Call-site parameter observations are also directional. Core functions may
+consume unanimous facts from Core call sites, recovering the same typed-array
+and float fast paths available to user functions. User sites cannot contribute
+to those observations or change a Core calling convention. Without the
+protection contract, Core remains ineligible for call-site specialization.
+
+After WIRE lowering, the compiler emits a deterministic Core ABI fingerprint
+covering Core worker signatures, raw-return modes, class inheritance and ivar
+layouts, exported globals, and the method-table contract. Programs with the
+same loaded Core closure and contract therefore expose the same compatibility
+key even when their user functions differ.
+
+Some valid programs still require monolithic lowering. The WIRE report names a
+fallback reason for user subclasses of Core classes, user-dependent Core
+generic specializations, Core-global shadowing, missing provenance, and program
+`constant_alias` declarations. These are cache restrictions, not language
+restrictions. Fast/precise math, static-slab mode, build defines, and the method
+lock are deterministic compatibility-key fields instead: each exact variant
+may have its own reusable Core, but variants can never alias one another.
 
 This boundary is required before a lowered core prelude can be cached and
-reused across unrelated programs.
+reused across unrelated programs. It does not itself reuse WIRE yet; that is
+the next incremental-lowering stage.

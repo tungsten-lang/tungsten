@@ -633,7 +633,29 @@ use ../../core/token
     exprs = Tungsten:AST:BodyBuilder.new()
     while !at_type?(T_EOF) && !at_type?(T_DEDENT)
       expr = parse_expression()
-      exprs.push(finish_statement_expression(expr))
+      expr = finish_statement_expression(expr)
+      # Loader flattens every `use`d program into one top-level expression
+      # stream.  Preserve the declaring file on *all* top-level statements,
+      # not only definitions: stable-Core partitioning also needs to own
+      # global initializers, aliases, and other executable prelude setup.
+      # source_path is a sparse AST sidecar, so this does not enlarge packed
+      # slab nodes or change the generated schema ABI. Do not attach it to an
+      # interned/inline/singleton leaf: those handles are shared by value (a
+      # top-level `nil` in two files is literally the same node), so metadata
+      # there would alias provenance. Such unusual standalone leaves make the
+      # reuse contract conservatively fall back instead.
+      kind = ast_kind(expr)
+      kind_id = kind_id_table[kind]
+      schema_keys = nil
+      if kind_id != nil
+        schema_keys = slab_keys_table[kind_id]
+      occurrence_local = schema_keys != nil && schema_keys.size() > 0 && kind != :bool
+      if occurrence_local
+        first_offset = slab_offset_for(kind, schema_keys[0])
+        occurrence_local = first_offset == nil || first_offset < 256
+      if occurrence_local && ast_get(expr, :source_path) == nil
+        ast_set(expr, :source_path, @file)
+      exprs.push(expr)
     exprs.finish()
 
   -> parse_body

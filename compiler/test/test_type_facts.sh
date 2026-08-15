@@ -34,6 +34,28 @@ grep -q 'add_i64' <<<"$main_scc"
 TUNGSTEN_PARAM_INFER=1 run_compiler run "$root/compiler/test/core_abi_boundary.w" > "$tmp/core-boundary.out"
 grep -q 'core ABI boundary: PASS' "$tmp/core-boundary.out"
 
+run_compiler --emit-wire "$root/compiler/test/fixtures/core_abi_stable_a.w" > "$tmp/core-abi-a.wire"
+run_compiler --emit-wire "$root/compiler/test/fixtures/core_abi_stable_b.w" > "$tmp/core-abi-b.wire"
+grep -q '^core reuse: stable$' "$tmp/core-abi-a.wire"
+grep -q '^core reuse: stable$' "$tmp/core-abi-b.wire"
+core_abi_a="$(awk '/^core abi:/{print $3}' "$tmp/core-abi-a.wire")"
+core_abi_b="$(awk '/^core abi:/{print $3}' "$tmp/core-abi-b.wire")"
+if [[ -z "$core_abi_a" || "$core_abi_a" != "$core_abi_b" ]]; then
+  echo "protected programs with the same Core closure produced different ABI fingerprints" >&2
+  exit 1
+fi
+
+run_compiler --fast --emit-wire "$root/compiler/test/fixtures/core_abi_stable_a.w" > "$tmp/core-abi-fast.wire"
+grep -q '^core reuse: stable$' "$tmp/core-abi-fast.wire"
+core_abi_fast="$(awk '/^core abi:/{print $3}' "$tmp/core-abi-fast.wire")"
+if [[ -z "$core_abi_fast" || "$core_abi_fast" == "$core_abi_a" ]]; then
+  echo "fast and precise Core variants shared an ABI compatibility fingerprint" >&2
+  exit 1
+fi
+
+run_compiler --emit-wire "$root/compiler/test/fixtures/core_abi_subclass_fallback.w" > "$tmp/core-abi-subclass.wire"
+grep -q '^core reuse: monolithic fallback (program class CoreAbiArrayChild subclasses Core class Array)$' "$tmp/core-abi-subclass.wire"
+
 run_compiler --emit-wire "$root/compiler/test/fixtures/open_world_dispatch.w" > "$tmp/open.wire"
 run_compiler --emit-wire "$root/compiler/test/fixtures/closed_world_dispatch.w" > "$tmp/closed.wire"
 open_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/open.wire")"

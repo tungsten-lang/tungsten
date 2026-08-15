@@ -78,8 +78,18 @@ lowering independent of user code, behind a flag, by contract:
 - `exact_tag_subclassed`/`prepared_class_bodies` recomputed per program
   (cheap) rather than snapshotted.
 Program-context triggers that force monolithic fallback: subclassing or
-reopening a core class, generics instantiating core templates, build
-defines / math mode divergence.
+reopening a core class and generics instantiating core templates. Lowering
+options such as fast/precise math, slab mode, method locking, and build defines
+are exact compatibility-key variants rather than structural fallbacks.
+
+`Tungsten.PROTECT_THE_CORE!` now implements the Stage-1 ownership boundary in
+the type-facts branch. It partitions registration and SCC inference, permits
+only Core-to-Core parameter observation, exports Core globals independently of
+user reads, attaches declaring-file provenance to generated WIRE workers, and
+emits a deterministic Core ABI fingerprint. Unsupported program contexts are
+reported as explicit monolithic fallbacks. This establishes compatibility and
+correctness metadata; it intentionally does **not** claim a compile-time win
+until Stage 2 reuses the lowered partition.
 
 **Stage 2 — in-process reuse:** with Stage 1's contract, warm a curated
 core union once per process; per program: append user expressions, run

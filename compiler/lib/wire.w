@@ -46,6 +46,12 @@
     # method-registration barrier.
     protect_core:     false,
     method_tables_locked: false,
+    # Filled only for PROTECT_THE_CORE programs. The fingerprint describes
+    # the Core-facing WIRE ABI; the reuse contract says whether this program
+    # is safe to pair with a warmed Core partition.
+    core_reuse_contract: nil,
+    core_reuse_fallback_reason: nil,
+    core_abi_hash: nil,
     cvar_globals:     {},
     fn_memo_tables:   {},
     used_memo_tables: {},

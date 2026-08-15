@@ -1456,18 +1456,7 @@
 -> definition_from_core?(node)
   if node == nil
     return false
-  path = ast_get(node, :source_path)
-  if path == nil
-    return false
-  text = "" + path
-  root = env("TUNGSTEN_ROOT")
-  if root != nil
-    prefix = root + "/core/"
-    if text.size() >= prefix.size() && text.slice(0, prefix.size()) == prefix
-      return true
-  if text.size() >= 5 && text.slice(0, 5) == "core/"
-    return true
-  false
+  core_source_path?(ast_get(node, :source_path))
 
 # Count writes to lexical locals across control flow and nested blocks, while
 # stopping at nested method/type definitions (fresh scopes). LOCK_THE_DOORS
@@ -1600,7 +1589,7 @@
   last = args[args.size() - 1]
   last != nil && is_ast_node?(last) && ast_kind(last) == :hash_literal && last.from_kwargs == true
 
--> collect_param_type_observations(mod, expressions)
+-> collect_param_type_observations(mod, expressions, core_expressions = nil, core_top_local = nil)
   if !param_infer_enabled?
     return nil
   mod[:observed_param_types] = {}
@@ -1611,17 +1600,33 @@
   # (1) Candidate untyped top-level functions. A name defined more than once
   # at top level is ambiguous → bail it outright.
   candidates = {}
+  core_candidates = {}
+  user_candidates = {}
+  core_set = {}
+  if core_expressions != nil
+    csi = 0
+    while csi < core_expressions.size()
+      core_set[core_expressions[csi]] = true
+      csi += 1
   seen = {}
   i = 0
   while i < expressions.size()
     expr = expressions[i]
     if expr != nil && is_ast_node?(expr) && ast_kind(expr) in (:fn_def :method_def)
-      if expr.is_class_method != true && expr.param_types == nil && expr.name != nil && !definition_from_core?(expr)
+      eligible_owner = !definition_from_core?(expr) || core_expressions != nil
+      if expr.is_class_method != true && expr.param_types == nil && expr.name != nil && eligible_owner
         nm = expr.name
         if seen[nm] == nil
           seen[nm] = true
           candidates[nm] = expr
+          if core_set[expr] == true
+            core_candidates[nm] = expr
+          else
+            user_candidates[nm] = expr
         else
+          # Observation storage is name-keyed today. A cross-boundary
+          # same-name overload therefore stays boxed rather than allowing one
+          # partition's evidence to specialize the other's parameters.
           mod[:param_infer_bailed][nm] = true
     i += 1
 
@@ -1632,7 +1637,16 @@
     top_local = {}
   ci = 0
   while ci < expressions.size()
-    pi_walk(expressions[ci], top_local, candidates, mod)
+    visible_candidates = candidates
+    visible_local = top_local
+    if core_expressions != nil
+      if core_set[expressions[ci]] == true
+        visible_candidates = core_candidates
+        if core_top_local != nil
+          visible_local = core_top_local
+      else
+        visible_candidates = user_candidates
+    pi_walk(expressions[ci], visible_local, visible_candidates, mod)
     ci += 1
   nil
 

@@ -34,4 +34,28 @@ populate_definition_var_types(user_fn, user_types, mod)
 if user_types["x"] != :f64
   raise "user function did not consume call-site observation"
 
+# Under the executable-owned protection contract, Core may recover facts from
+# Core call sites, but the same user call must remain invisible across the
+# boundary.
+core_call = Tungsten:AST:Call.new(nil, "core_probe", [Tungsten:AST:Float.new(1.25)], nil)
+core_call.source_path = env("TUNGSTEN_ROOT") + "/core/probe.w"
+user_call = Tungsten:AST:Call.new(nil, "core_probe", [Tungsten:AST:Float.new(2.5)], nil)
+user_call.source_path = env("TUNGSTEN_ROOT") + "/compiler/test/user_probe.w"
+
+protected_user_only = wire_module("core-abi-user-only")
+protected_user_only[:protect_core] = true
+collect_param_type_observations(protected_user_only, [core_fn, user_call], [core_fn], {})
+user_only_types = {}
+populate_definition_var_types(core_fn, user_only_types, protected_user_only)
+if user_only_types["x"] != nil
+  raise "user observation crossed the protected Core boundary"
+
+protected_core_call = wire_module("core-abi-core-call")
+protected_core_call[:protect_core] = true
+collect_param_type_observations(protected_core_call, [core_fn, core_call, user_call], [core_fn, core_call], {})
+core_call_types = {}
+populate_definition_var_types(core_fn, core_call_types, protected_core_call)
+if core_call_types["x"] != :f64
+  raise "Core-to-Core observation did not recover a stable parameter fact"
+
 << "core ABI boundary: PASS"

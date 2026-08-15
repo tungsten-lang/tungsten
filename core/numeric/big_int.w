@@ -203,116 +203,117 @@
   -> next
     self + 1
 
-  # Portable raw-limb funnel for positive sub-limb left shifts. Fresh and
-  # recycled buffers can occupy page offsets that make a fixed walk direction
-  # false-conflict in the load/store unit, so select the direction from the
-  # source/destination delta. Each iteration carries the overlapping source
-  # limb in SSA and performs one new load and one store.
-  fn __bigint_shl_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
-    ll <<~IR
-      entry:
-        %rq = inttoptr i64 %rp to ptr
-        %sq = inttoptr i64 %sp to ptr
-        %right = sub i64 64, %k
-        %last = sub i64 %n, 1
-        %base = load i64, ptr %sq, align 8
-        %low = shl i64 %base, %k
-        store i64 %low, ptr %rq, align 8
-        %delta.raw = sub i64 %sp, %rp
-        %delta = and i64 %delta.raw, 4095
-        %descend = icmp ult i64 %delta, 2048
-        br i1 %descend, label %desc.pre, label %asc.pre
-      desc.pre:
-        %dtop.g = getelementptr inbounds i64, ptr %sq, i64 %last
-        %dtop = load i64, ptr %dtop.g, align 8
-        br label %desc
-      desc:
-        %di = phi i64 [ %last, %desc.pre ], [ %dprev, %desc ]
-        %dcurrent = phi i64 [ %dtop, %desc.pre ], [ %dlower, %desc ]
-        %dprev = sub i64 %di, 1
-        %dsrc.g = getelementptr inbounds i64, ptr %sq, i64 %dprev
-        %ddst.g = getelementptr inbounds i64, ptr %rq, i64 %di
-        %dlower = load i64, ptr %dsrc.g, align 8
-        %dhi = shl i64 %dcurrent, %k
-        %dlo = lshr i64 %dlower, %right
-        %dvalue = or i64 %dhi, %dlo
-        store i64 %dvalue, ptr %ddst.g, align 8
-        %ddone = icmp eq i64 %di, 1
-        br i1 %ddone, label %exit, label %desc
-      asc.pre:
-        br label %asc
-      asc:
-        %ai = phi i64 [ 1, %asc.pre ], [ %anext, %asc ]
-        %aprevious = phi i64 [ %base, %asc.pre ], [ %acurrent, %asc ]
-        %asrc.g = getelementptr inbounds i64, ptr %sq, i64 %ai
-        %adst.g = getelementptr inbounds i64, ptr %rq, i64 %ai
-        %acurrent = load i64, ptr %asrc.g, align 8
-        %ahi = shl i64 %acurrent, %k
-        %alo = lshr i64 %aprevious, %right
-        %avalue = or i64 %ahi, %alo
-        store i64 %avalue, ptr %adst.g, align 8
-        %adone = icmp eq i64 %ai, %last
-        %anext = add i64 %ai, 1
-        br i1 %adone, label %exit, label %asc
-      exit:
-        ret i64 0
-    IR
+# Portable raw-limb funnel for positive sub-limb left shifts. Fresh and
+# recycled buffers can occupy page offsets that make a fixed walk direction
+# false-conflict in the load/store unit, so select the direction from the
+# source/destination delta. Each iteration carries the overlapping source
+# limb in SSA and performs one new load and one store.
+fn __bigint_shl_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
+  ll <<~IR
+    entry:
+      %rq = inttoptr i64 %rp to ptr
+      %sq = inttoptr i64 %sp to ptr
+      %right = sub i64 64, %k
+      %last = sub i64 %n, 1
+      %base = load i64, ptr %sq, align 8
+      %low = shl i64 %base, %k
+      store i64 %low, ptr %rq, align 8
+      %delta.raw = sub i64 %sp, %rp
+      %delta = and i64 %delta.raw, 4095
+      %descend = icmp ult i64 %delta, 2048
+      br i1 %descend, label %desc.pre, label %asc.pre
+    desc.pre:
+      %dtop.g = getelementptr inbounds i64, ptr %sq, i64 %last
+      %dtop = load i64, ptr %dtop.g, align 8
+      br label %desc
+    desc:
+      %di = phi i64 [ %last, %desc.pre ], [ %dprev, %desc ]
+      %dcurrent = phi i64 [ %dtop, %desc.pre ], [ %dlower, %desc ]
+      %dprev = sub i64 %di, 1
+      %dsrc.g = getelementptr inbounds i64, ptr %sq, i64 %dprev
+      %ddst.g = getelementptr inbounds i64, ptr %rq, i64 %di
+      %dlower = load i64, ptr %dsrc.g, align 8
+      %dhi = shl i64 %dcurrent, %k
+      %dlo = lshr i64 %dlower, %right
+      %dvalue = or i64 %dhi, %dlo
+      store i64 %dvalue, ptr %ddst.g, align 8
+      %ddone = icmp eq i64 %di, 1
+      br i1 %ddone, label %exit, label %desc
+    asc.pre:
+      br label %asc
+    asc:
+      %ai = phi i64 [ 1, %asc.pre ], [ %anext, %asc ]
+      %aprevious = phi i64 [ %base, %asc.pre ], [ %acurrent, %asc ]
+      %asrc.g = getelementptr inbounds i64, ptr %sq, i64 %ai
+      %adst.g = getelementptr inbounds i64, ptr %rq, i64 %ai
+      %acurrent = load i64, ptr %asrc.g, align 8
+      %ahi = shl i64 %acurrent, %k
+      %alo = lshr i64 %aprevious, %right
+      %avalue = or i64 %ahi, %alo
+      store i64 %avalue, ptr %adst.g, align 8
+      %adone = icmp eq i64 %ai, %last
+      %anext = add i64 %ai, 1
+      br i1 %adone, label %exit, label %asc
+    exit:
+      ret i64 0
+  IR
 
-  # Portable raw-limb funnel for positive sub-limb right shifts. The result
-  # buffer is fresh, but its recycled address can share a 4 KiB offset with the
-  # receiver. Choose the walk direction from that offset so trailing stores do
-  # not false-conflict with subsequent loads on Apple M-class cores. Every
-  # iteration carries the overlapping source limb in SSA and performs one new
-  # load, one store, and the two complementary shifts.
-  fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
-    ll <<~IR
-      entry:
-        %rq = inttoptr i64 %rp to ptr
-        %sq = inttoptr i64 %sp to ptr
-        %left = sub i64 64, %k
-        %last = sub i64 %n, 1
-        %delta.raw = sub i64 %sp, %rp
-        %delta = and i64 %delta.raw, 4095
-        %descend = icmp ult i64 %delta, 2048
-        br i1 %descend, label %desc.pre, label %asc.pre
-      desc.pre:
-        %dtop.g = getelementptr inbounds i64, ptr %sq, i64 %last
-        %dtop = load i64, ptr %dtop.g, align 8
-        %dstart = sub i64 %n, 2
-        br label %desc
-      desc:
-        %di = phi i64 [ %dstart, %desc.pre ], [ %dprev, %desc ]
-        %dcurrent = phi i64 [ %dtop, %desc.pre ], [ %dlower, %desc ]
-        %dsrc.g = getelementptr inbounds i64, ptr %sq, i64 %di
-        %ddst.g = getelementptr inbounds i64, ptr %rq, i64 %di
-        %dlower = load i64, ptr %dsrc.g, align 8
-        %dlo = lshr i64 %dlower, %k
-        %dhi = shl i64 %dcurrent, %left
-        %dvalue = or i64 %dlo, %dhi
-        store i64 %dvalue, ptr %ddst.g, align 8
-        %ddone = icmp eq i64 %di, 0
-        %dprev = sub i64 %di, 1
-        br i1 %ddone, label %exit, label %desc
-      asc.pre:
-        %abase = load i64, ptr %sq, align 8
-        br label %asc
-      asc:
-        %ai = phi i64 [ 0, %asc.pre ], [ %anext, %asc ]
-        %acurrent = phi i64 [ %abase, %asc.pre ], [ %ahigher, %asc ]
-        %anext = add i64 %ai, 1
-        %asrc.g = getelementptr inbounds i64, ptr %sq, i64 %anext
-        %adst.g = getelementptr inbounds i64, ptr %rq, i64 %ai
-        %ahigher = load i64, ptr %asrc.g, align 8
-        %alo = lshr i64 %acurrent, %k
-        %ahi = shl i64 %ahigher, %left
-        %avalue = or i64 %alo, %ahi
-        store i64 %avalue, ptr %adst.g, align 8
-        %adone = icmp eq i64 %anext, %last
-        br i1 %adone, label %exit, label %asc
-      exit:
-        ret i64 0
-    IR
+# Portable raw-limb funnel for positive sub-limb right shifts. The result
+# buffer is fresh, but its recycled address can share a 4 KiB offset with the
+# receiver. Choose the walk direction from that offset so trailing stores do
+# not false-conflict with subsequent loads on Apple M-class cores. Every
+# iteration carries the overlapping source limb in SSA and performs one new
+# load, one store, and the two complementary shifts.
+fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
+  ll <<~IR
+    entry:
+      %rq = inttoptr i64 %rp to ptr
+      %sq = inttoptr i64 %sp to ptr
+      %left = sub i64 64, %k
+      %last = sub i64 %n, 1
+      %delta.raw = sub i64 %sp, %rp
+      %delta = and i64 %delta.raw, 4095
+      %descend = icmp ult i64 %delta, 2048
+      br i1 %descend, label %desc.pre, label %asc.pre
+    desc.pre:
+      %dtop.g = getelementptr inbounds i64, ptr %sq, i64 %last
+      %dtop = load i64, ptr %dtop.g, align 8
+      %dstart = sub i64 %n, 2
+      br label %desc
+    desc:
+      %di = phi i64 [ %dstart, %desc.pre ], [ %dprev, %desc ]
+      %dcurrent = phi i64 [ %dtop, %desc.pre ], [ %dlower, %desc ]
+      %dsrc.g = getelementptr inbounds i64, ptr %sq, i64 %di
+      %ddst.g = getelementptr inbounds i64, ptr %rq, i64 %di
+      %dlower = load i64, ptr %dsrc.g, align 8
+      %dlo = lshr i64 %dlower, %k
+      %dhi = shl i64 %dcurrent, %left
+      %dvalue = or i64 %dlo, %dhi
+      store i64 %dvalue, ptr %ddst.g, align 8
+      %ddone = icmp eq i64 %di, 0
+      %dprev = sub i64 %di, 1
+      br i1 %ddone, label %exit, label %desc
+    asc.pre:
+      %abase = load i64, ptr %sq, align 8
+      br label %asc
+    asc:
+      %ai = phi i64 [ 0, %asc.pre ], [ %anext, %asc ]
+      %acurrent = phi i64 [ %abase, %asc.pre ], [ %ahigher, %asc ]
+      %anext = add i64 %ai, 1
+      %asrc.g = getelementptr inbounds i64, ptr %sq, i64 %anext
+      %adst.g = getelementptr inbounds i64, ptr %rq, i64 %ai
+      %ahigher = load i64, ptr %asrc.g, align 8
+      %alo = lshr i64 %acurrent, %k
+      %ahi = shl i64 %ahigher, %left
+      %avalue = or i64 %alo, %ahi
+      store i64 %avalue, ptr %adst.g, align 8
+      %adone = icmp eq i64 %anext, %last
+      br i1 %adone, label %exit, label %asc
+    exit:
+      ret i64 0
+  IR
 
++ BigInt
   -> zero?
     $size == 0
 
@@ -1123,14 +1124,16 @@
     # retained only through the same-binary-measured 65..224-limb band.
     if n > 64 && n <= 224 && k > 0 && k < 64
       carry = __bigint_shr_u64($limbs[n - 1] ## u64, 64 - k) ## u64
-      outn = n
+      outn = n ## i64
       if carry != 0
-        outn += 1
-      result = ccall("w_bigint_alloc_hot", outn) ## BigInt
-      mask = 140737488355312
-      sp = ($value & mask) + 16
-      rp = (result$value & mask) + 16
-      __bigint_shl_positive_funnel(rp ## i64, sp ## i64, n ## i64, k ## i64)
+        outn = outn + 1 ## i64
+      result = ccall_rawargs("w_bigint_alloc_hot", outn) ## BigInt
+      mask = 140737488355312 ## i64
+      sp = (($value & mask) + 16) ## i64
+      rp = ((result$value & mask) + 16) ## i64
+      __bigint_shl_positive_funnel(
+        rp ## i64, sp ## i64, n ## i64, k ## i64
+      )
       if carry != 0
         result$limbs[n] = carry
       result$size = outn
@@ -1171,14 +1174,16 @@
     # vanishes, the preceding funnel limb necessarily receives nonzero bits.
     if n > 32 && n <= 96 && k > 0 && k < 64
       top = __bigint_shr_u64($limbs[n - 1] ## u64, k) ## u64
-      outn = n
+      outn = n ## i64
       if top == 0
-        outn -= 1
-      result = ccall("w_bigint_alloc_hot", outn) ## BigInt
-      mask = 140737488355312
-      sp = ($value & mask) + 16
-      rp = (result$value & mask) + 16
-      __bigint_shr_positive_funnel(rp ## i64, sp ## i64, n ## i64, k ## i64)
+        outn = outn - 1 ## i64
+      result = ccall_rawargs("w_bigint_alloc_hot", outn) ## BigInt
+      mask = 140737488355312 ## i64
+      sp = (($value & mask) + 16) ## i64
+      rp = ((result$value & mask) + 16) ## i64
+      __bigint_shr_positive_funnel(
+        rp ## i64, sp ## i64, n ## i64, k ## i64
+      )
       if outn == n
         result$limbs[n - 1] = top
       result$size = outn

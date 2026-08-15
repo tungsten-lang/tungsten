@@ -27,6 +27,7 @@ use lowering/signatures
 use lowering/types
 use lowering/inference
 use lowering/analysis
+use lowering/class_sets
 use lowering/core_abi
 use lowering/elision
 use lowering/program

@@ -35,48 +35,65 @@ rejected if it tries to impose either contract on its caller.
 `PROTECT_THE_CORE!` checks the fully loaded source graph and rejects user
 reopens or replacements of definitions owned by the canonical `core/` tree.
 It is the provenance boundary required for a reusable lowered Core: user call
-sites cannot change a Core ABI, and the program promises it did not patch the
-implementation behind that ABI. By itself this is a checked source assertion;
-pair it with the method-table lock to exclude later native registration too.
+sites cannot change a Core ABI, and the executable owner promises that the
+canonical Core implementation will remain unmodified for the lifetime of the
+program. Its textual position is not a temporal barrier: the loader discovers
+the declaration before choosing a Core artifact, then validates the complete
+loaded source graph. By itself this is a checked source assertion; pair it with
+the method-table lock to exclude later native registration too.
 
 `LOCK_THE_DOORS!` must appear after every type and method definition. The AOT
 startup registers that complete set and then irreversibly closes both instance
 and static runtime method tables before user statements run. Any later native
 or interpreted registration raises an error.
 
-Once the doors are locked, a constructor-derived `exact` receiver whose only
-write is a straight-line assignment dominating the call selects a permanent
-method implementation. The same proof now covers a fresh constructor
-expression and a chain of such local copies. Assignments nested in a branch or
-loop remain guarded even when they are the binding's only lexical write; a
-single write does not prove the assignment executes. Lowering emits a plain
-direct call with no class guard, inline cache, method-name materialization, or
-generic fallback.
+Once the doors are locked, constructor-derived exact facts participate in a
+bounded flow-sensitive analysis. A singleton receiver set selects a permanent
+method implementation. Multiple possible classes that inherit the same worker
+also collapse to that one direct call. Two to four distinct workers become an
+exhaustive class decision with direct-call arms. None of those shapes emits an
+inline cache, method-name materialization, or generic fallback. Larger sets
+widen to their nearest common source superclass when possible, otherwise to
+unknown.
+
+The analysis follows branch joins and iterates ordinary while loops to a fixed
+point. A variable assigned `Dog.new` and `Cat.new` on the two arms therefore
+has exact set `{Dog, Cat}` after the join; a sequential reassignment has the
+singleton fact of its latest value. Loops containing `break`, `next`, or
+`redo` currently suppress class-set rewrites inside the loop and invalidate
+written locals at exit until those transfers acquire edge-specific facts.
+`with` and `parallel_with` regions are likewise conservative until their
+iteration and capture edges participate in the fixed point.
 
 `self` is a sound `compatible` fact rather than an unchecked source hint: the
 runtime entered the method through the defining class or one of its subclasses.
 Under the lock, lowering may call a `self` helper directly when every known
 descendant resolves that selector and arity to the same plain worker. A known
-subclass override keeps the guarded dynamic call. Other compatible facts and
-reassigned exact facts also keep their guards; exact ivar facts do so until
-definite initialization is modeled.
+subclass override keeps the guarded dynamic call. Unchecked compatible facts
+and exact ivar facts also keep their guards until their respective runtime
+provenance and definite initialization are modeled.
 
-## Exact and compatible locals
+## Exact sets and compatible locals
 
-Local source-class knowledge is represented as a fact with a class and a
-certainty:
+Local source-class knowledge is an optimizer lattice:
 
-* a constructor result is `exact`;
+* a constructor result is an exact singleton;
+* control-flow joins union exact sets, up to four classes;
 * a source-class annotation and `self` are `compatible`;
 * copying a local preserves its certainty;
 * an unknown assignment clears the fact.
 
-Before the method-table barrier, source-method fast paths retain their runtime
-class guard and generic fallback. After it, exact facts can call directly;
-compatible facts retain dynamic dispatch.
+The pass runs only for programs that declare `LOCK_THE_DOORS!`; open-world
+programs pay no analysis cost and preserve their existing guarded fast paths.
+After the barrier, exact sets use direct or exhaustive dispatch. A compatible
+fact calls directly only when every known descendant resolves the selector and
+arity to the same plain worker; otherwise it retains dynamic dispatch.
 
-This is a lowering fact, not yet a surface type or an SSA lattice. Control-flow
-joins therefore remain conservative.
+This remains an internal lowering analysis, not a user-visible algebraic type
+system. It runs before WIRE construction so successful proofs avoid creating
+dead IC state in the first place. Return class-set summaries across function
+and method SCCs are not yet part of this pass, so unknown call results still
+widen their destination.
 
 ## Core ABI boundary
 

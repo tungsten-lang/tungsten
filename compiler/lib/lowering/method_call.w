@@ -96,6 +96,120 @@
     ci += 1
   target
 
+# Resolve a bounded exact class set to its permanent plain-ABI workers. Nil
+# means at least one class has no direct-call-safe implementation and the site
+# must retain normal dispatch. Multiple classes may intentionally name the
+# same worker through inheritance; callers collapse that case to one call.
+-> locked_class_set_targets(mod, fact, method_name, arg_count)
+  if fact == nil
+    return nil
+  if fact[:certainty] == :compatible
+    fn_name = locked_compatible_method_fn(mod, fact[:class_name], method_name, arg_count)
+    if fn_name == nil
+      return nil
+    return [{class_name: fact[:class_name], fn_name: fn_name}]
+  if fact[:certainty] != :exact
+    return nil
+  classes = class_set_fact_classes(fact)
+  if classes.size() == 0
+    return nil
+  targets = []
+  i = 0
+  while i < classes.size()
+    fn_name = locked_direct_method_fn(mod, classes[i], method_name, arg_count)
+    if fn_name == nil
+      return nil
+    targets.push({class_name: classes[i], fn_name: fn_name})
+    i += 1
+  targets
+
+-> locked_targets_share_fn?(targets)
+  if targets == nil || targets.size() == 0
+    return false
+  fn_name = targets[0][:fn_name]
+  i = 1
+  while i < targets.size()
+    if targets[i][:fn_name] != fn_name
+      return false
+    i += 1
+  true
+
+-> emit_locked_direct_method_call(ctx, node, receiver_reg, arg_regs, fn_name)
+  args = [receiver_reg]
+  i = 0
+  while i < arg_regs.size()
+    args.push(arg_regs[i])
+    i += 1
+  site_id = nil
+  if node.line != nil
+    site_id = next_call_site_id(ctx[:mod])
+  temp = next_temp(ctx[:func])
+  emit_instruction(ctx[:func], {
+    op: :call_direct_i64, temp: temp, name: fn_name, args: args,
+    src_line: node.line, src_col: node.col, loc_site_id: site_id
+  })
+  typed_value(:i64, temp)
+
+# Emit an exhaustive closed-world class decision with direct-call arms. The
+# fact proves the receiver is one of these exact classes; the explicit failure
+# block is still unreachable rather than silently choosing an arm if a future
+# analysis bug violates that invariant.
+-> emit_locked_class_set_call(ctx, node, receiver_reg, arg_regs, targets)
+  wfn = ctx[:func]
+  class_value = next_temp(wfn)
+  emit_instruction(wfn, {op: :call_direct_i64, temp: class_value, name: "w_class_of", args: [receiver_reg]})
+
+  arm_labels = []
+  i = 0
+  while i < targets.size()
+    arm_labels.push(next_label(wfn, "classset.arm"))
+    i += 1
+  fail_label = next_label(wfn, "classset.fail")
+  done_label = next_label(wfn, "classset.done")
+
+  i = 0
+  while i < targets.size()
+    class_temp = next_temp(wfn)
+    emit_instruction(wfn, {op: :load_class, temp: class_temp, class_name: targets[i][:class_name]})
+    same = next_temp(wfn)
+    emit_instruction(wfn, {op: :icmp_i64, temp: same, pred: "eq", lhs: class_value, rhs: class_temp})
+    next_check = fail_label
+    if i + 1 < targets.size()
+      next_check = next_label(wfn, "classset.check")
+    emit_instruction(wfn, {op: :cond_br, cond: same, then_label: arm_labels[i], else_label: next_check})
+    if next_check != fail_label
+      start_block(wfn, next_check)
+    i += 1
+
+  incoming = []
+  i = 0
+  while i < targets.size()
+    start_block(wfn, arm_labels[i])
+    args = [receiver_reg]
+    ai = 0
+    while ai < arg_regs.size()
+      args.push(arg_regs[ai])
+      ai += 1
+    site_id = nil
+    if node.line != nil
+      site_id = next_call_site_id(ctx[:mod])
+    arm_temp = next_temp(wfn)
+    emit_instruction(wfn, {
+      op: :call_direct_i64, temp: arm_temp, name: targets[i][:fn_name], args: args,
+      src_line: node.line, src_col: node.col, loc_site_id: site_id
+    })
+    incoming.push(arm_temp)
+    incoming.push(arm_labels[i])
+    emit_instruction(wfn, {op: :br, label: done_label})
+    i += 1
+
+  start_block(wfn, fail_label)
+  emit_instruction(wfn, {op: :unreachable})
+  start_block(wfn, done_label)
+  result = next_temp(wfn)
+  emit_instruction(wfn, {op: :phi_ssa, temp: result, incoming: incoming})
+  typed_value(:i64, result)
+
 -> lower_method_call(ctx, node)
   wfn = ctx[:func]
   method_name = node.name
@@ -2021,29 +2135,23 @@
     closure_reg = ensure_i64_value(wfn, closure_tv)
     arg_regs.push(closure_reg)
 
-  # Once runtime method registration is closed, a stable exact receiver fact
-  # is a permanent dispatch proof. Stable compatible `self` facts are also a
-  # proof when every known descendant resolves this selector to the same
-  # worker. Call that worker directly: no class-id guard, inline-cache slot,
-  # method-name materialization, or generic fallback remains. Unchecked type
-  # hints and compatible hierarchies with an override keep dynamic dispatch.
+  # Once runtime method registration is closed, flow-sensitive exact receiver
+  # sets are permanent dispatch proofs. A singleton or a set whose classes all
+  # inherit the same worker becomes one direct call. Two-to-four distinct
+  # targets become an exhaustive class decision with direct-call arms. Stable
+  # compatible `self` facts retain the hierarchy-wide same-target proof.
+  # Unknown/widened incompatible facts keep ordinary IC dispatch.
   if ctx[:mod][:method_tables_locked] == true && node.block == nil
-    locked_fact = receiver_source_class_fact(ctx, recv_node)
+    locked_fact = receiver_flow_class_fact(ctx, node)
+    if locked_fact == nil
+      locked_fact = receiver_source_class_fact(ctx, recv_node)
     if locked_fact != nil && locked_fact[:stable] == true
-      locked_fn = nil
-      if locked_fact[:certainty] == :exact
-        locked_fn = locked_direct_method_fn(ctx[:mod], locked_fact[:class_name], method_name, node.args.size())
-      elsif locked_fact[:certainty] == :compatible
-        locked_fn = locked_compatible_method_fn(ctx[:mod], locked_fact[:class_name], method_name, node.args.size())
-      if locked_fn != nil
-        locked_args = [receiver_reg]
-        lai = 0
-        while lai < arg_regs.size()
-          locked_args.push(arg_regs[lai])
-          lai += 1
-        locked_temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: locked_temp, name: locked_fn, args: locked_args, src_line: node.line, src_col: node.col})
-        return typed_value(:i64, locked_temp)
+      targets = locked_class_set_targets(ctx[:mod], locked_fact, method_name, node.args.size())
+      if targets != nil && targets.size() > 0
+        if targets.size() == 1 || locked_targets_share_fn?(targets)
+          return emit_locked_direct_method_call(ctx, node, receiver_reg, arg_regs, targets[0][:fn_name])
+        if locked_fact[:certainty] == :exact
+          return emit_locked_class_set_call(ctx, node, receiver_reg, arg_regs, targets)
 
   method_name_tv = lower_string(ctx, Tungsten:AST:String.new(method_name))
   method_name_val = ensure_i64_value(wfn, method_name_tv)

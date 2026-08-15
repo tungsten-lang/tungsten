@@ -19,6 +19,7 @@
 # -- Program --
 
 -> lower_program(ctx, statements)
+  prepare_class_set_analysis(ctx, statements)
   prev_stmts = ctx[:enclosing_stmts]
   ctx[:enclosing_stmts] = statements
   i = 0

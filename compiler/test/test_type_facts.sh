@@ -70,7 +70,48 @@ fi
 
 run_compiler --emit-wire "$root/compiler/test/fixtures/locked_reassigned_receiver.w" > "$tmp/reassigned.wire"
 reassigned_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/reassigned.wire")"
-grep -q 'call_method_i64.*devirt=@__w_SecondReceiver_value__a1' <<<"$reassigned_main"
+grep -q 'call_direct_i64.*__w_SecondReceiver_value__a1' <<<"$reassigned_main"
+if grep -q 'call_method_i64.*SecondReceiver_value' <<<"$reassigned_main"; then
+  echo "locked flow-singleton reassignment retained inline-cache dispatch" >&2
+  exit 1
+fi
+
+run_compiler --emit-wire "$root/compiler/test/fixtures/locked_class_set_receiver.w" > "$tmp/class-set.wire"
+class_set_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/class-set.wire")"
+grep -q 'call_direct_i64.*__w_SharedSetBase_value__a1' <<<"$class_set_main"
+grep -q 'call_direct_i64.*__w_DistinctSetDog_value__a1' <<<"$class_set_main"
+grep -q 'call_direct_i64.*__w_DistinctSetCat_value__a1' <<<"$class_set_main"
+grep -q 'call_direct_i64.*w_class_of' <<<"$class_set_main"
+if grep -q 'call_method_i64.*\(SharedSet\|DistinctSet\).*value' <<<"$class_set_main"; then
+  echo "locked bounded class set retained inline-cache dispatch" >&2
+  exit 1
+fi
+run_compiler --emit-wire "$root/compiler/test/fixtures/locked_class_set_widen.w" > "$tmp/class-set-widen.wire"
+class_set_widen_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/class-set-widen.wire")"
+grep -q 'call_method_i64' <<<"$class_set_widen_main"
+if grep -q 'call_direct_i64.*__w_WidenSet.*_value__a1' <<<"$class_set_widen_main"; then
+  echo "class set above the exact-set cap emitted exhaustive direct dispatch" >&2
+  exit 1
+fi
+run_compiler --emit-wire "$root/compiler/test/fixtures/locked_class_set_with.w" > "$tmp/class-set-with.wire"
+class_set_with_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/class-set-with.wire")"
+grep -q 'call_method_i64.*WithSetFirst_value' <<<"$class_set_with_main"
+if grep -q 'call_direct_i64.*__w_WithSetFirst_value__a1' <<<"$class_set_with_main"; then
+  echo "iterative with body retained a first-pass direct-call fact" >&2
+  exit 1
+fi
+run_compiler run "$root/compiler/test/fixtures/locked_class_set_receiver.w" > "$tmp/class-set-cat.out"
+run_compiler run "$root/compiler/test/fixtures/locked_class_set_receiver.w" dog > "$tmp/class-set-dog.out"
+printf '40\n42\n41\n' > "$tmp/class-set-cat.expected"
+printf '40\n41\n41\n' > "$tmp/class-set-dog.expected"
+cmp "$tmp/class-set-cat.expected" "$tmp/class-set-cat.out"
+cmp "$tmp/class-set-dog.expected" "$tmp/class-set-dog.out"
+if [[ "${TUNGSTEN_TEST_COMPILER_DIRECT:-0}" == "1" ]]; then
+  run_compiler run --interpret "$root/compiler/test/fixtures/locked_class_set_receiver.w" > "$tmp/class-set-cat.interpret.out"
+  run_compiler run --interpret "$root/compiler/test/fixtures/locked_class_set_receiver.w" dog > "$tmp/class-set-dog.interpret.out"
+  cmp "$tmp/class-set-cat.expected" "$tmp/class-set-cat.interpret.out"
+  cmp "$tmp/class-set-dog.expected" "$tmp/class-set-dog.interpret.out"
+fi
 
 run_compiler --emit-wire "$root/compiler/test/fixtures/locked_conditional_receiver.w" > "$tmp/conditional.wire"
 conditional_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/conditional.wire")"

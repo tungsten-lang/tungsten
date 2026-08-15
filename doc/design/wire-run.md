@@ -21,3 +21,19 @@ This change deliberately does not delete `compiler/lib/interpreter.w`: the C
 bootstrap, Ruby fallback, REPL, and differential tests still need it. The
 parity suite names that leg explicitly so an ordinary `run` test does not
 silently compare the compiled engine with itself.
+
+## Benchmarking the transition
+
+Use a compiler built from the branch and compare the two product entry points
+on one deterministic source:
+
+```sh
+scripts/bench-wire-run.rb --compiler /path/to/tungsten-compiler
+```
+
+The harness first uses a different source to prime the native runtime archive.
+It then reports this program's uncached WIRE lower/link time separately from
+cache-hit `run`, checks exact stdout parity with `--interpret`, and collects at
+least nine alternating warm samples per mode. This avoids presenting compiler
+startup, first-ever runtime construction, and steady-state execution as one
+number.

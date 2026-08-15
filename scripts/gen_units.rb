@@ -3,7 +3,7 @@
 
 # Generates unit lookup tables from the stable legacy IDs in data/units.tsv
 # plus the language-neutral data/unit_registry.json for:
-#   1. compiler/lib/lowering/literals.w  (Tungsten case/when)
+#   1. compiler/lib/lowering/literal_units/*.w (sharded Tungsten case/when)
 #   2. runtime/runtime.c (C initializer)
 #   3. data/unit_names.txt (lexer membership, one spelling per line)
 #
@@ -167,6 +167,86 @@ def generate_tungsten(registry)
   lines << ""
 
   lines.join("\n")
+end
+
+# Keep the generated registries inside the same worker-size contract as the
+# handwritten compiler. The public wrapper is stable; three ID shards and
+# three signature shards own the generated switch arms.
+def generate_tungsten_files(registry)
+  aliases = registry.aliases.sort
+  chunk_size = (aliases.size.to_f / 3).ceil
+  chunks = aliases.each_slice(chunk_size).to_a
+  chunks << [] while chunks.size < 3
+
+  canonical_by_id = registry.units.to_h { |unit| [unit.id, unit.name] }
+  signature_by_id = canonical_by_id.transform_values do |name|
+    dimension = if name == "%"
+                  TungstenUnitRegistry::Dimension.new(*Array.new(8, 0), {"%" => 1})
+                else
+                  registry.source.resolve(name).dimension
+                end
+    base = %i[length mass time current temperature substance luminosity information].map do |field|
+      dimension.public_send(field)
+    end
+    custom = dimension.customs.sort.map { |tag, exponent| "#{tag}:#{exponent}" }.join(";")
+    (base + [custom]).join(",")
+  end
+
+  names = %w[a b c]
+  files = {}
+  names.each_with_index do |name, index|
+    id_lines = ["# Generated unit-id shard #{name}.",
+                "-> lookup_unit_id_generated_#{name}(unit)", "  case unit"]
+    chunks[index].each { |unit_name, id| id_lines << "    \"#{unit_name}\" => #{id}" }
+    id_lines << "    => nil"
+    files[File.join(TUNGSTEN_SHARD_DIR, "unit_ids_#{name}.w")] = id_lines.join("\n") + "\n"
+
+    sig_lines = ["# Generated unit-signature shard #{name}.",
+                 "-> lookup_unit_signature_generated_#{name}(unit)", "  case unit"]
+    chunks[index].each do |unit_name, id|
+      sig_lines << "    \"#{unit_name}\" => \"#{signature_by_id.fetch(id)}\""
+    end
+    sig_lines << "    => nil"
+    files[File.join(TUNGSTEN_SHARD_DIR, "signatures_#{name}.w")] = sig_lines.join("\n") + "\n"
+  end
+
+  wrapper = <<~TUNGSTEN
+    # --- BEGIN GENERATED: unit registries ---
+    use literal_units/unit_ids_a
+    use literal_units/unit_ids_b
+    use literal_units/unit_ids_c
+    use literal_units/signatures_a
+    use literal_units/signatures_b
+    use literal_units/signatures_c
+
+    -> lookup_unit_id(ctx, raw_unit, node)
+      # Materialize lexer slices before the generated switch keys are compared.
+      unit = "" + raw_unit
+      found = lookup_unit_id_generated_a(unit)
+      if found != nil
+        return found
+      found = lookup_unit_id_generated_b(unit)
+      if found != nil
+        return found
+      found = lookup_unit_id_generated_c(unit)
+      if found != nil
+        return found
+      assign_custom_unit(ctx, unit, node)
+
+    -> lookup_unit_static_signature(raw_unit)
+      unit = "" + raw_unit
+      found = lookup_unit_signature_generated_a(unit)
+      if found != nil
+        return found
+      found = lookup_unit_signature_generated_b(unit)
+      if found != nil
+        return found
+      lookup_unit_signature_generated_c(unit)
+
+    # --- END GENERATED: unit registries ---
+  TUNGSTEN
+  files[TUNGSTEN_FILE] = wrapper
+  files
 end
 
 def generate_c(registry)
@@ -341,9 +421,8 @@ end
 
 # -- Markers for in-place replacement --
 
-TUNGSTEN_FILE = File.join(ROOT, "compiler/lib/lowering/literals.w")
-TUNGSTEN_START = "# --- BEGIN GENERATED: lookup_unit_id ---"
-TUNGSTEN_END   = "# --- END GENERATED: lookup_unit_id ---"
+TUNGSTEN_FILE = File.join(ROOT, "compiler/lib/lowering/literal_units.w")
+TUNGSTEN_SHARD_DIR = File.join(ROOT, "compiler/lib/lowering/literal_units")
 
 C_FILE = File.join(ROOT, "runtime/runtime.c")
 C_START = "/* --- BEGIN GENERATED: unit_names --- */"
@@ -418,14 +497,14 @@ when "--manifest"
     puts [name, id, canonical_by_id.fetch(id)].join("\t")
   end
 when "--write"
-  tungsten_code = generate_tungsten(registry)
+  tungsten_files = generate_tungsten_files(registry)
   c_code = generate_c(registry)
   c_info_code = generate_c_info(registry)
   unit_names = generate_unit_names(registry)
   c_lexer_mixed_unit_names = generate_c_lexer_mixed_unit_names(registry)
 
-  if replace_between(TUNGSTEN_FILE, TUNGSTEN_START, TUNGSTEN_END, tungsten_code)
-    puts "Updated #{TUNGSTEN_FILE}"
+  tungsten_files.each do |path, content|
+    puts "Updated #{path}" if write_if_changed(path, content)
   end
 
   if write_if_changed(UNIT_NAMES_PATH, unit_names)
@@ -444,14 +523,16 @@ when "--write"
     puts "Updated #{C_FILE} (unit_info)"
   end
 when "--check"
-  tungsten_code = generate_tungsten(registry)
+  tungsten_files = generate_tungsten_files(registry)
   c_code = generate_c(registry)
   c_info_code = generate_c_info(registry)
   unit_names = generate_unit_names(registry)
   c_lexer_mixed_unit_names = generate_c_lexer_mixed_unit_names(registry)
 
   ok = true
-  ok = check_between(TUNGSTEN_FILE, TUNGSTEN_START, TUNGSTEN_END, tungsten_code) && ok
+  tungsten_files.each do |path, content|
+    ok = check_file(path, content) && ok
+  end
   ok = check_file(UNIT_NAMES_PATH, unit_names) && ok
   ok = check_file(C_LEXER_MIXED_UNIT_NAMES_PATH, c_lexer_mixed_unit_names) && ok
   ok = check_between(C_FILE, C_START, C_END, c_code) && ok

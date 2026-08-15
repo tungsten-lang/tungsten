@@ -8,7 +8,11 @@ def source(path)
 end
 
 launcher = source("compiler/tungsten.w")
-driver = source("compiler/tungsten_driver.w")
+driver_paths = ["compiler/tungsten_driver.w"] +
+               Dir.glob(File.join(ROOT, "compiler/lib/driver/*.w")).sort.map do |path|
+                 path.delete_prefix(ROOT + "/")
+               end
+driver = driver_paths.map { |path| source(path) }.join("\n")
 repl = source("compiler/repl.w")
 metal = source("compiler/tungsten_metal.w")
 gpu_base = source("compiler/lib/compiler_gpu_emitter.w")

@@ -12,6 +12,7 @@ use naming
 
 use emitter/primitives
 use emitter/analysis
+use emitter/artifact_bigint
 use emitter/artifact
 use emitter/numeric_instructions
 use emitter/runtime_instructions

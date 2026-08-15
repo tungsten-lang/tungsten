@@ -135,7 +135,7 @@ WORKER_SWEEP_SIZES = (
 )
 LANE_LABELS = {
     "tungsten": "Tungsten C",
-    "tungsten_source": "Tungsten src",
+    "tungsten_native": "Tungsten",
     "gmp": "GMP",
     "python": "Python",
     "rust": "Rust",
@@ -145,7 +145,7 @@ LANE_LABELS = {
     "boost": "Boost",
 }
 RATIO_LABELS = {
-    "tungsten_source": "C/src",
+    "tungsten_native": "C/native",
     "gmp": "C/GMP",
 }
 # The V8 lane is limited to operations V8 ships as BigInt builtins: a
@@ -772,9 +772,9 @@ def external_harness_is_stale(language: str) -> bool:
     if not binary.exists():
         return True
     built = binary.stat().st_mtime
-    if language == "tungsten_source":
-        sources = list(TUNGSTEN_SOURCE_DIR.rglob("*.w")) + list(
-            TUNGSTEN_SOURCE_DIR.rglob("*.c")
+    if language == "tungsten_native":
+        sources = list(TUNGSTEN_NATIVE_DIR.rglob("*.w")) + list(
+            TUNGSTEN_NATIVE_DIR.rglob("*.c")
         )
         sources += [
             ROOT / "bin" / "tungsten",
@@ -822,29 +822,29 @@ def boost_include_dir() -> Path | None:
 
 
 def build_external_harness(language: str) -> None:
-    if language == "tungsten_source":
+    if language == "tungsten_native":
         compiler = ROOT / "bin" / "tungsten-compiler"
         if not compiler.exists():
             raise RuntimeError(
-                "compiled Tungsten source lane requires bin/tungsten-compiler; "
+                "Tungsten native lane requires bin/tungsten-compiler; "
                 "run bin/tungsten bootstrap first"
             )
         env = os.environ.copy()
-        env["TUNGSTEN_C_INCLUDES"] = str(TUNGSTEN_SOURCE_REF)
+        env["TUNGSTEN_C_INCLUDES"] = str(TUNGSTEN_NATIVE_REF)
         run_checked(
             [
                 str(ROOT / "bin" / "tungsten"),
                 "compile",
-                str(TUNGSTEN_SOURCE_SOURCE),
+                str(TUNGSTEN_NATIVE_SOURCE),
                 "--release",
                 "--native",
                 "--fast",
                 "--out",
-                str(TUNGSTEN_SOURCE_BINARY),
+                str(TUNGSTEN_NATIVE_BINARY),
             ],
             env=env,
         )
-        run_checked([str(TUNGSTEN_SOURCE_BINARY), "--self-test"])
+        run_checked([str(TUNGSTEN_NATIVE_BINARY), "--self-test"])
         return
     if language == "rust":
         if shutil.which("cargo") is None:
@@ -1149,8 +1149,8 @@ def format_time(value: float) -> str:
 
 def print_results_header(metadata: dict[str, Any]) -> None:
     labels = ["Tungsten C/runtime"]
-    if metadata.get("tungsten_source_lane"):
-        labels.append("compiled Tungsten source")
+    if metadata.get("tungsten_native_lane"):
+        labels.append("Tungsten native")
     labels.append(f"GMP {metadata['gmp_version']}")
     if metadata.get("python_lane"):
         labels.append(f"Python {metadata['python_version']}")
@@ -1198,7 +1198,7 @@ def print_results_header(metadata: dict[str, Any]) -> None:
     )
     if metadata.get("external_cell_timeout_seconds", 0) > 0:
         print(
-            "Compiled-source and optional external-lane cells have a "
+            "Tungsten-native and optional external-lane cells have a "
             f"{metadata['external_cell_timeout_seconds']:g}s deadline; "
             "TIMEOUT cells remain in JSON and are excluded from ratios."
         )
@@ -1230,11 +1230,10 @@ def print_result_row(row: dict[str, Any], lanes: list[str]) -> None:
     for lane in lanes[1:]:
         ratio = row.get(f"tungsten_over_{lane}")
         line += f" {ratio:>8.2f}" if ratio is not None else f" {'-':>8}"
-    fastest = (
-        "source"
-        if row["fastest"] == "tungsten_source"
-        else row["fastest"]
-    )
+    fastest = {
+        "tungsten": "C",
+        "tungsten_native": "Tungsten",
+    }.get(row["fastest"], row["fastest"])
     line += f" {fastest:>10}"
     print(line, flush=True)
 
@@ -1531,14 +1530,14 @@ NODE_SCRIPT = NODE_DIR / "main.mjs"
 NODE_STAMP = NODE_DIR / ".self-test-stamp"
 BOOST_DIR = ROOT / "benchmarks" / "big_math" / "boost"
 BOOST_BINARY = ROOT / "benchmarks" / "big_math" / "bench_big_math_boost"
-TUNGSTEN_SOURCE_DIR = ROOT / "benchmarks" / "big_math" / "tungsten"
-TUNGSTEN_SOURCE_SOURCE = TUNGSTEN_SOURCE_DIR / "source_lane.w"
-TUNGSTEN_SOURCE_REF = TUNGSTEN_SOURCE_DIR / "source_lane_ref.c"
-TUNGSTEN_SOURCE_BINARY = (
-    ROOT / "benchmarks" / "big_math" / "bench_big_math_tungsten_source"
+TUNGSTEN_NATIVE_DIR = ROOT / "benchmarks" / "big_math" / "tungsten"
+TUNGSTEN_NATIVE_SOURCE = TUNGSTEN_NATIVE_DIR / "native_lane.w"
+TUNGSTEN_NATIVE_REF = TUNGSTEN_NATIVE_DIR / "native_lane_ref.c"
+TUNGSTEN_NATIVE_BINARY = (
+    ROOT / "benchmarks" / "big_math" / "bench_big_math_tungsten_native"
 )
 EXTERNAL_BINARIES = {
-    "tungsten_source": TUNGSTEN_SOURCE_BINARY,
+    "tungsten_native": TUNGSTEN_NATIVE_BINARY,
     "rust": RUST_BINARY,
     "odin": ODIN_BINARY,
     "go": GO_BINARY,
@@ -1581,7 +1580,7 @@ def main() -> int:
         args.go = True
         args.node = True
         args.boost = True
-    external_languages = ([] if args.worker_sweep else ["tungsten_source"]) + [
+    external_languages = ([] if args.worker_sweep else ["tungsten_native"]) + [
         language
         for language, enabled in (
             ("rust", args.rust),
@@ -1594,13 +1593,13 @@ def main() -> int:
     ]
     lanes = ["tungsten"]
     if not args.worker_sweep:
-        lanes.append("tungsten_source")
+        lanes.append("tungsten_native")
     lanes.append("gmp")
     if args.python:
         lanes.append("python")
     lanes.extend(
         language for language in external_languages
-        if language != "tungsten_source"
+        if language != "tungsten_native"
     )
     if args.runs <= 0:
         parser.error("--runs must be positive")
@@ -1705,7 +1704,7 @@ def main() -> int:
             "p2<=128+q32,lad32/512/128,lad32/256/96,lad3step"
         )
         print(
-            "default lanes: tungsten-c-runtime,tungsten-compiled-source,gmp"
+            "default lanes: tungsten-c-runtime,tungsten-native,gmp"
         )
         print(
             "optional lanes: python,rust-num-bigint-0.5.1,odin-core-math-big,"
@@ -1728,8 +1727,8 @@ def main() -> int:
             print(
                 "Building optimized native "
                 + (
-                    "compiled Tungsten source"
-                    if language == "tungsten_source"
+                    "Tungsten"
+                    if language == "tungsten_native"
                     else language.title()
                 )
                 + " harness...",
@@ -1738,9 +1737,9 @@ def main() -> int:
             try:
                 build_external_harness(language)
             except RuntimeError as error:
-                if language == "tungsten_source":
+                if language == "tungsten_native":
                     print(
-                        "tungsten bench bignum: compiled Tungsten source "
+                        "tungsten bench bignum: Tungsten native "
                         f"lane failed to build: {error}",
                         file=sys.stderr,
                     )
@@ -1807,7 +1806,7 @@ def main() -> int:
         "machine": machine_metadata(),
         "runs": args.runs,
         "python_lane": bool(args.python),
-        "tungsten_source_lane": "tungsten_source" in lanes,
+        "tungsten_native_lane": "tungsten_native" in lanes,
         "rust_lane": bool(args.rust),
         "odin_lane": bool(args.odin),
         "go_lane": bool(args.go),
@@ -1842,8 +1841,8 @@ def main() -> int:
                 "dead result capacity returned to a thread-local "
                 "power-of-two reserve pool"
             ),
-            "tungsten_source": (
-                "compiled Tungsten source under PROTECT_THE_CORE! and "
+            "tungsten_native": (
+                "native-compiled Tungsten under PROTECT_THE_CORE! and "
                 "LOCK_THE_DOORS!; arithmetic, bitwise, shift, comparison, "
                 "sign, power, and conversion rows use ordinary source "
                 "operators and methods; gcd, lcm, and isqrt call retained C "
@@ -1855,7 +1854,7 @@ def main() -> int:
             "native_word_rows": (
                 "Tungsten and GMP hoist the positive one-limb rhs and call "
                 "their unsigned-word add/sub/mul/div entries; the compiled "
-                "Tungsten source lane uses ordinary operators with a hoisted "
+                "Tungsten native lane uses ordinary operators with a hoisted "
                 "one-limb BigInt rhs; Rust and "
                 "Boost use their u64 operator overloads; Odin, Go, and "
                 "Node pass a one-limb bignum operand (no word entry, or a "

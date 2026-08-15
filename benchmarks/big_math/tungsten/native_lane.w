@@ -1,8 +1,8 @@
-# Source-language Tungsten lane for `bin/tungsten bench bignum`.
+# Tungsten native lane for `bin/tungsten bench bignum`.
 #
 # Operand construction, timing, and the one-shot C oracle are benchmark
 # support ccalls. Timed arithmetic, bitwise, shift, comparison, sign, power,
-# and conversion bodies are ordinary compiled Tungsten source; gcd, lcm, and
+# and conversion bodies are ordinary native-compiled Tungsten; gcd, lcm, and
 # isqrt deliberately call their retained C kernel boundaries directly. The
 # executable closes the Core and method-table world after all definitions so
 # direct dispatch is both sound and representative of a deliberately locked
@@ -14,20 +14,20 @@ WARM_NS = 500_000
 SHIFT_BITS = 13
 POW_EXPONENT = 5
 
--> source_operand(operation, limbs, which)
-  ccall("w_bench_tungsten_source_operand", operation, limbs, which)
+-> native_operand(operation, limbs, which)
+  ccall("w_bench_tungsten_native_operand", operation, limbs, which)
 
 -> thread_cpu_ns
-  ccall("w_bench_tungsten_source_thread_cpu_ns")
+  ccall("w_bench_tungsten_native_thread_cpu_ns")
 
 -> release_value(value)
-  ccall("w_bench_tungsten_source_release", value)
+  ccall("w_bench_tungsten_native_release", value)
 
--> source_reference(operation, a, b, modulus, decimal)
-  ccall("w_bench_tungsten_source_reference", operation, a, b, modulus, decimal)
+-> native_reference(operation, a, b, modulus, decimal)
+  ccall("w_bench_tungsten_native_reference", operation, a, b, modulus, decimal)
 
--> assert_source_equal(operation, got, expected)
-  ccall("w_bench_tungsten_source_assert_equal", operation, got, expected)
+-> assert_native_equal(operation, got, expected)
+  ccall("w_bench_tungsten_native_assert_equal", operation, got, expected)
 
 -> finish_sample(started, iterations, result, checksum)
   elapsed = thread_cpu_ns() - started
@@ -409,9 +409,9 @@ POW_EXPONENT = 5
   raise "unknown bignum benchmark operation: " + operation
 
 -> build_operands(operation, limbs)
-  a = source_operand(operation, limbs, 0)
-  b = source_operand(operation, limbs, 1)
-  modulus = source_operand(operation, limbs, 2)
+  a = native_operand(operation, limbs, 0)
+  b = native_operand(operation, limbs, 1)
+  modulus = native_operand(operation, limbs, 2)
   decimal = operation == "fromstr" ? a.to_s() : ""
   [a, b, modulus, decimal]
 
@@ -426,14 +426,32 @@ POW_EXPONENT = 5
     operation = operations[i]
     values = build_operands(operation, 2)
     got = apply_once(operation, values[0], values[1], values[2], values[3])
-    expected = source_reference(
+    expected = native_reference(
       operation, values[0], values[1], values[2], values[3]
     )
-    assert_source_equal(operation, got, expected)
+    assert_native_equal(operation, got, expected)
     release_value(got)
     release_value(expected)
     i += 1
-  << "compiled Tungsten bignum source lane: self-test passed"
+
+  # These are the first widths admitted by the source allocation/funnel
+  # paths. Keep their raw allocator ABI crossings covered rather than testing
+  # only the small-width C fallbacks above.
+  shift_operations = ["shl", "shr"]
+  shift_limbs = [65, 33]
+  i = 0
+  while i < shift_operations.size
+    operation = shift_operations[i]
+    values = build_operands(operation, shift_limbs[i])
+    got = apply_once(operation, values[0], values[1], values[2], values[3])
+    expected = native_reference(
+      operation, values[0], values[1], values[2], values[3]
+    )
+    assert_native_equal(operation, got, expected)
+    release_value(got)
+    release_value(expected)
+    i += 1
+  << "Tungsten native bignum lane: self-test passed"
 
 -> run_sweep(operation, limbs, runs, target_ms)
   if limbs < 1 || limbs > 1_048_576 || runs < 1 || target_ms <= 0
@@ -444,8 +462,8 @@ POW_EXPONENT = 5
   modulus = values[2]
   decimal = values[3]
   got = apply_once(operation, a, b, modulus, decimal)
-  expected = source_reference(operation, a, b, modulus, decimal)
-  assert_source_equal(operation, got, expected)
+  expected = native_reference(operation, a, b, modulus, decimal)
+  assert_native_equal(operation, got, expected)
   release_value(got)
   release_value(expected)
 
@@ -462,7 +480,7 @@ POW_EXPONENT = 5
     if best == nil || sample < best
       best = sample
     run += 1
-  << "external\ttungsten_source\t" + operation + "\t" + limbs.to_s() + "\t" + iterations.to_s() + "\t" + best.to_s()
+  << "external\ttungsten_native\t" + operation + "\t" + limbs.to_s() + "\t" + iterations.to_s() + "\t" + best.to_s()
 
 Tungsten.PROTECT_THE_CORE!
 Tungsten.LOCK_THE_DOORS!
@@ -472,6 +490,6 @@ if args.size == 1 && args[0] == "--self-test"
   run_self_test()
   exit(0)
 if args.size != 5 || args[0] != "--sweep"
-  << "usage: bench_big_math_tungsten_source --self-test | --sweep OP LIMBS RUNS TARGET_MS"
+  << "usage: bench_big_math_tungsten_native --self-test | --sweep OP LIMBS RUNS TARGET_MS"
   exit(2)
 run_sweep(args[1], args[2].to_i, args[3].to_i, args[4].to_f)

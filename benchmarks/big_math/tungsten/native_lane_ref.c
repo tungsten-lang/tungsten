@@ -20,7 +20,7 @@ WValue bigint_isqrt_any(WValue a);
 WValue bigint_powmod_any(WValue base, WValue exponent, WValue modulus);
 WValue w_bigint_from_dec_str(WValue text);
 
-static int source_operation_is(WValue value, const char *expected) {
+static int native_operation_is(WValue value, const char *expected) {
     char inline_buffer[6];
     const char *data = NULL;
     size_t length = 0;
@@ -30,7 +30,7 @@ static int source_operation_is(WValue value, const char *expected) {
            memcmp(data, expected, expected_length) == 0;
 }
 
-static uint64_t source_rng(uint64_t *state) {
+static uint64_t native_rng(uint64_t *state) {
     uint64_t x = *state;
     x ^= x >> 12;
     x ^= x << 25;
@@ -39,19 +39,19 @@ static uint64_t source_rng(uint64_t *state) {
     return x * UINT64_C(2685821657736338717);
 }
 
-static WValue source_bigint(int32_t limbs, uint64_t seed) {
+static WValue native_bigint(int32_t limbs, uint64_t seed) {
     WValue value = w_bigint_alloc_boxed(w_int(limbs));
     WBigint *big = w_as_bigint(value);
     uint64_t state = seed;
     for (int32_t index = 0; index < limbs; index++)
-        big->limbs[index] = source_rng(&state);
+        big->limbs[index] = native_rng(&state);
     big->limbs[0] |= UINT64_C(1);
     big->limbs[limbs - 1] |= UINT64_C(1) << 63;
     big->size = limbs;
     return value;
 }
 
-WValue w_bench_tungsten_source_operand(
+WValue w_bench_tungsten_native_operand(
     WValue operation_value, WValue row_limbs_value, WValue which_value
 ) {
     int64_t row_limbs_i64 = w_to_i64(row_limbs_value);
@@ -61,8 +61,8 @@ WValue w_bench_tungsten_source_operand(
     int32_t row_limbs = (int32_t)row_limbs_i64;
 
     if (which == 2) {
-        if (!source_operation_is(operation_value, "powmod")) return W_NIL;
-        return source_bigint(
+        if (!native_operation_is(operation_value, "powmod")) return W_NIL;
+        return native_bigint(
             row_limbs,
             UINT64_C(0xa4093822299f31d0) ^ (uint64_t)row_limbs
         );
@@ -72,31 +72,31 @@ WValue w_bench_tungsten_source_operand(
     int32_t limbs = row_limbs;
     uint64_t seed;
     if (which == 0) {
-        if (source_operation_is(operation_value, "div") ||
-            source_operation_is(operation_value, "mod") ||
-            source_operation_is(operation_value, "isqrt"))
+        if (native_operation_is(operation_value, "div") ||
+            native_operation_is(operation_value, "mod") ||
+            native_operation_is(operation_value, "isqrt"))
             limbs *= 2;
         seed = UINT64_C(0x243f6a8885a308d3) ^ (uint64_t)row_limbs;
     } else {
-        if (source_operation_is(operation_value, "add1") ||
-            source_operation_is(operation_value, "sub1") ||
-            source_operation_is(operation_value, "mul1") ||
-            source_operation_is(operation_value, "div1"))
+        if (native_operation_is(operation_value, "add1") ||
+            native_operation_is(operation_value, "sub1") ||
+            native_operation_is(operation_value, "mul1") ||
+            native_operation_is(operation_value, "div1"))
             limbs = 1;
         seed = UINT64_C(0x13198a2e03707344) ^ (uint64_t)row_limbs;
-        if (source_operation_is(operation_value, "cmp"))
+        if (native_operation_is(operation_value, "cmp"))
             seed = UINT64_C(0x243f6a8885a308d3) ^ (uint64_t)row_limbs;
     }
 
-    WValue value = source_bigint(limbs, seed);
-    if (which == 1 && source_operation_is(operation_value, "cmp"))
+    WValue value = native_bigint(limbs, seed);
+    if (which == 1 && native_operation_is(operation_value, "cmp"))
         w_as_bigint(value)->limbs[0] ^= UINT64_C(1);
-    if (which == 0 && source_operation_is(operation_value, "abs"))
+    if (which == 0 && native_operation_is(operation_value, "abs"))
         w_as_bigint(value)->size = -w_as_bigint(value)->size;
     return value;
 }
 
-WValue w_bench_tungsten_source_thread_cpu_ns(void) {
+WValue w_bench_tungsten_native_thread_cpu_ns(void) {
     struct timespec timestamp;
     if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &timestamp) != 0) abort();
     uint64_t nanoseconds =
@@ -105,12 +105,12 @@ WValue w_bench_tungsten_source_thread_cpu_ns(void) {
     return w_u64(nanoseconds);
 }
 
-WValue w_bench_tungsten_source_release(WValue value) {
+WValue w_bench_tungsten_native_release(WValue value) {
     w_value_free(value);
     return W_NIL;
 }
 
-WValue w_bench_tungsten_source_assert_equal(
+WValue w_bench_tungsten_native_assert_equal(
     WValue operation, WValue got, WValue expected
 ) {
     if (w_eq(got, expected) != W_TRUE) {
@@ -118,61 +118,61 @@ WValue w_bench_tungsten_source_assert_equal(
         const char *data = NULL;
         size_t length = 0;
         w_str_data(operation, inline_buffer, &data, &length);
-        fprintf(stderr, "compiled Tungsten source/C mismatch for %.*s\n",
+        fprintf(stderr, "Tungsten native/C mismatch for %.*s\n",
                 (int)length, data);
         abort();
     }
     return W_TRUE;
 }
 
-WValue w_bench_tungsten_source_reference(
+WValue w_bench_tungsten_native_reference(
     WValue operation, WValue a, WValue b, WValue modulus, WValue decimal
 ) {
-    if (source_operation_is(operation, "add") ||
-        source_operation_is(operation, "add1"))
+    if (native_operation_is(operation, "add") ||
+        native_operation_is(operation, "add1"))
         return w_bigint_add(a, b);
-    if (source_operation_is(operation, "sub") ||
-        source_operation_is(operation, "sub1"))
+    if (native_operation_is(operation, "sub") ||
+        native_operation_is(operation, "sub1"))
         return w_bigint_sub(a, b);
-    if (source_operation_is(operation, "mul") ||
-        source_operation_is(operation, "mul1"))
+    if (native_operation_is(operation, "mul") ||
+        native_operation_is(operation, "mul1"))
         return w_mul(a, b);
-    if (source_operation_is(operation, "sqr"))
+    if (native_operation_is(operation, "sqr"))
         return w_mul(a, a);
-    if (source_operation_is(operation, "div") ||
-        source_operation_is(operation, "div1"))
+    if (native_operation_is(operation, "div") ||
+        native_operation_is(operation, "div1"))
         return w_bigint_div(a, b);
-    if (source_operation_is(operation, "mod"))
+    if (native_operation_is(operation, "mod"))
         return w_bigint_mod(a, b);
-    if (source_operation_is(operation, "gcd"))
+    if (native_operation_is(operation, "gcd"))
         return w_bigint_gcd(a, b);
-    if (source_operation_is(operation, "and"))
+    if (native_operation_is(operation, "and"))
         return w_bigint_and_c(a, b);
-    if (source_operation_is(operation, "or"))
+    if (native_operation_is(operation, "or"))
         return w_bigint_or_c(a, b);
-    if (source_operation_is(operation, "xor"))
+    if (native_operation_is(operation, "xor"))
         return w_bigint_xor_c(a, b);
-    if (source_operation_is(operation, "shl"))
+    if (native_operation_is(operation, "shl"))
         return w_bigint_shl(a, w_int(13));
-    if (source_operation_is(operation, "shr"))
+    if (native_operation_is(operation, "shr"))
         return w_bigint_shr(a, w_int(13));
-    if (source_operation_is(operation, "cmp"))
+    if (native_operation_is(operation, "cmp"))
         return w_bigint_compare_c(a, b);
-    if (source_operation_is(operation, "neg"))
+    if (native_operation_is(operation, "neg"))
         return w_neg(a);
-    if (source_operation_is(operation, "abs"))
+    if (native_operation_is(operation, "abs"))
         return w_neg(a);
-    if (source_operation_is(operation, "pow"))
+    if (native_operation_is(operation, "pow"))
         return w_pow(a, w_int(5));
-    if (source_operation_is(operation, "powmod"))
+    if (native_operation_is(operation, "powmod"))
         return bigint_powmod_any(a, b, modulus);
-    if (source_operation_is(operation, "lcm"))
+    if (native_operation_is(operation, "lcm"))
         return w_bigint_lcm(a, b);
-    if (source_operation_is(operation, "isqrt"))
+    if (native_operation_is(operation, "isqrt"))
         return bigint_isqrt_any(a);
-    if (source_operation_is(operation, "tostr"))
+    if (native_operation_is(operation, "tostr"))
         return w_bigint_to_s(a, w_int(10));
-    if (source_operation_is(operation, "fromstr"))
+    if (native_operation_is(operation, "fromstr"))
         return w_bigint_from_dec_str(decimal);
     abort();
 }

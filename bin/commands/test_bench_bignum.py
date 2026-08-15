@@ -165,48 +165,56 @@ class ExternalCommandTest(unittest.TestCase):
         self.assertEqual(Path(command[1]).name, "main.mjs")
 
     def test_native_lanes_execute_their_binary(self) -> None:
-        for language in ("tungsten_source", "rust", "odin", "go", "boost"):
+        for language in ("tungsten_native", "rust", "odin", "go", "boost"):
             command = BENCH.external_command(language)
             self.assertEqual(len(command), 1)
 
 
-class TungstenSourceLaneTest(unittest.TestCase):
+class TungstenNativeLaneTest(unittest.TestCase):
     def test_closed_world_contracts_follow_all_definitions(self) -> None:
-        source = BENCH.TUNGSTEN_SOURCE_SOURCE.read_text()
-        protect = source.index("Tungsten.PROTECT_THE_CORE!")
-        lock = source.index("Tungsten.LOCK_THE_DOORS!")
+        program = BENCH.TUNGSTEN_NATIVE_SOURCE.read_text()
+        protect = program.index("Tungsten.PROTECT_THE_CORE!")
+        lock = program.index("Tungsten.LOCK_THE_DOORS!")
 
         self.assertLess(protect, lock)
-        self.assertLess(source.rindex("-> ", 0, protect), protect)
-        self.assertNotIn("-> ", source[lock:])
+        self.assertLess(program.rindex("-> ", 0, protect), protect)
+        self.assertNotIn("-> ", program[lock:])
 
-    def test_source_lane_is_distinct_from_the_c_runtime_lane(self) -> None:
+    def test_native_lane_is_distinct_from_the_c_runtime_lane(self) -> None:
         self.assertEqual(BENCH.LANE_LABELS["tungsten"], "Tungsten C")
         self.assertEqual(
-            BENCH.LANE_LABELS["tungsten_source"], "Tungsten src"
+            BENCH.LANE_LABELS["tungsten_native"], "Tungsten"
         )
-        self.assertEqual(BENCH.RATIO_LABELS["tungsten_source"], "C/src")
+        self.assertEqual(BENCH.RATIO_LABELS["tungsten_native"], "C/native")
 
-    def test_source_fastest_label_is_compact_in_the_table(self) -> None:
+    def test_native_fastest_label_is_clear_in_the_table(self) -> None:
         row = {
             "operation": "gcd",
             "limbs": 1,
             "bits": 64,
             "native_iterations": 7,
             "tungsten_ns": 2.0,
-            "tungsten_source_ns": 1.0,
+            "tungsten_native_ns": 1.0,
             "gmp_ns": 3.0,
-            "tungsten_over_tungsten_source": 2.0,
+            "tungsten_over_tungsten_native": 2.0,
             "tungsten_over_gmp": 2.0 / 3.0,
-            "fastest": "tungsten_source",
+            "fastest": "tungsten_native",
         }
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             BENCH.print_result_row(
-                row, ["tungsten", "tungsten_source", "gmp"]
+                row, ["tungsten", "tungsten_native", "gmp"]
             )
-        self.assertIn("source", output.getvalue())
-        self.assertNotIn("tungsten_source", output.getvalue())
+        self.assertIn("Tungsten", output.getvalue())
+        self.assertNotIn("tungsten_native", output.getvalue())
+
+        row["fastest"] = "tungsten"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            BENCH.print_result_row(
+                row, ["tungsten", "tungsten_native", "gmp"]
+            )
+        self.assertTrue(output.getvalue().rstrip().endswith("C"))
 
 
 if __name__ == "__main__":

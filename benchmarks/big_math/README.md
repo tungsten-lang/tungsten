@@ -24,14 +24,14 @@ bin/tungsten bench bignum --full --output results/bignum-full.json
 bin/tungsten bench bignum --worker-sweep --output results/bignum-workers.json
 ```
 
-The default lanes are the direct Tungsten C/runtime harness, compiled Tungsten
-source, and GMP. The source lane lives in `tungsten/`, builds with
+The default lanes are the direct Tungsten C/runtime harness, Tungsten native,
+and GMP. The Tungsten native lane lives in `tungsten/`, builds with
 `--release --native --fast`, and times ordinary Tungsten operators and methods;
 Core reaches retained C kernels through its production `ccall` seams. After
 declaring the harness, it executes `Tungsten.PROTECT_THE_CORE!` and
 `Tungsten.LOCK_THE_DOORS!`, so the measured program has validated Core
 provenance and irreversibly locked instance/static method tables. The table's
-`C/src` and `C/GMP` ratios remain anchored to the established direct C lane.
+`C/native` and `C/GMP` ratios remain anchored to the established direct C lane.
 The gcd, lcm, and integer-square-root timed bodies call their retained runtime
 kernel boundaries explicitly with `ccall`; the arithmetic, bitwise, shift,
 comparison, sign, power, and conversion rows use their ordinary source forms.
@@ -146,7 +146,7 @@ timing window.
 The `add1`, `sub1`, `mul1`, and `div1` rows are deliberately API-shaped
 unsigned-word operations, not ordinary balanced boxed/boxed calls. Each lane
 uses the fastest form its API offers for a hoisted one-limb operand: Tungsten
-direct C uses its decoded-word entries, the compiled Tungsten source lane uses
+direct C uses its decoded-word entries, the Tungsten native lane uses
 its ordinary operator with a pre-built one-limb BigInt, GMP uses `mpz_*_ui`,
 and Rust and Boost use their `u64`/builtin-integer operator overloads. Odin, Go,
 and Node have no unsigned-word entry that fits the full `2^63..2^64` word

@@ -93,10 +93,18 @@
 # -- Path shortening --
 # Strip $PWD prefix so paths show as relative to where the user
 # invoked the compiler.
+#
+# eval_source_alias: when the driver materializes `-e CODE` into a cache
+# file, that physical path is noise — the user wrote "(eval)". The driver
+# assigns the materialized path here and every formatted diagnostic renders
+# the alias instead.
+eval_source_alias = nil
 
 -> shorten_path(path)
   if path == nil
     return nil
+  if eval_source_alias != nil && path == eval_source_alias
+    return "(eval)"
   cwd = env("PWD")
   if cwd == nil
     return path

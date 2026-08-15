@@ -3,9 +3,14 @@
 #include "w_lexchar_cache.c"
 
 #include <ctype.h>
+#include <errno.h>
+#include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
+
+extern char **environ;
 
 /* Forward declarations from node_arena.c — the C VM-side slab-AST
  * helpers that ccall_nobox dispatches to in vm_call_body.inc. */

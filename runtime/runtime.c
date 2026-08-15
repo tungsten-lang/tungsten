@@ -35188,12 +35188,27 @@ static int w_resolve_innermost_loc(const char **file_out,
 /* Read the source file at `file` and print a ±2-line window around `line`
  * with a gutter matching the compile-error `-->` style the rest of
  * Tungsten uses. Caret under `col` (1-indexed; skipped when col <= 0).
- * ANSI colors when stderr is a tty. Silently skips when the file can't
- * be read — runtime errors are still useful without the snippet. */
+ * ANSI colors when stderr is a tty. When the file can't be read (e.g. the
+ * "(eval)" alias), the location header still prints; only the excerpt is
+ * skipped. */
 static void w_print_source_context(const char *file, int line, int col) {
     if (!file || line <= 0) return;
     FILE *f = fopen(file, "r");
-    if (!f) return;
+    if (!f) {
+        /* Unreadable source (e.g. the "(eval)" alias for `-e` snippets):
+         * still print the location header — only the excerpt is skipped. */
+        int hdr_tty = isatty(2);
+        const char *hdr_dim = hdr_tty ? "\x1b[2m" : "";
+        const char *hdr_reset = hdr_tty ? "\x1b[0m" : "";
+        fputc('\n', stderr);
+        if (col > 0) {
+            fprintf(stderr, "%s  --> %s:%d:%d%s\n", hdr_dim, file, line, col, hdr_reset);
+        } else {
+            fprintf(stderr, "%s  --> %s:%d%s\n", hdr_dim, file, line, hdr_reset);
+        }
+        fputc('\n', stderr);
+        return;
+    }
 
     int start = line - 2;
     if (start < 1) start = 1;
@@ -46707,6 +46722,44 @@ WValue __w_proc_alive(WValue pid_val) {
     pid_t pid = (pid_t)w_as_int(pid_val);
     if (pid <= 1) return W_FALSE;
     return kill(pid, 0) == 0 ? W_TRUE : W_FALSE;
+}
+
+/* Foreground child for the compiler driver's `run` / `-e`: exec argv
+ * directly (no shell) with everything inherited — process group included,
+ * so terminal signals reach parent and child together, matching the old
+ * in-process interpreter. Returns the raw disposition: the exit code,
+ * 256+signal for a signal death, or -errno when the spawn itself fails.
+ * Plain (un-prefixed) name: this is a ccall target, and ccall links the
+ * literal symbol (see w_eputs). */
+WValue w_run_argv(WValue argv_val) {
+    w_sandbox_gate("proc_spawn", "");
+    WArray *arr = w_as_array(argv_val);
+    int argc = (int)arr->size;
+    if (argc < 1) return w_int(-1);
+    char **argv = (char **)malloc(sizeof(char *) * (argc + 1));
+    if (!argv) return w_int(-1);
+    memset(argv, 0, sizeof(char *) * (argc + 1));
+    for (int i = 0; i < argc; i++) {
+        /* Own every argument before the next as_str() call — the inline-string
+         * ring buffer hazard documented at __w_proc_spawn. */
+        const char *text = as_str(arr->slots[arr->start + i]);
+        argv[i] = strdup(text);
+        if (!argv[i]) {
+            for (int j = 0; j < i; j++) free(argv[j]);
+            free(argv);
+            return w_int(-1);
+        }
+    }
+    pid_t pid = -1;
+    int spawn_error = posix_spawnp(&pid, argv[0], NULL, NULL, argv, environ);
+    for (int i = 0; i < argc; i++) free(argv[i]);
+    free(argv);
+    if (spawn_error != 0) return w_int(-(int64_t)spawn_error);
+    int status = 0;
+    while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {}
+    if (WIFEXITED(status)) return w_int((int64_t)WEXITSTATUS(status));
+    if (WIFSIGNALED(status)) return w_int(256 + (int64_t)WTERMSIG(status));
+    return w_int(-1);
 }
 
 /* rename(2) from two WValue strings, for atomic publish of temp files

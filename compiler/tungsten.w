@@ -71,6 +71,7 @@ wit_mode       = false
 jit_mode       = false
 hot_mode       = false
 interpret_mode = false
+eval_source_alias = nil
 no_lto         = false
 explicit_lto   = false
 frame_pointers = false
@@ -842,6 +843,14 @@ driver_homebrew_prefix_memo = {}
 
   {kernels: kernels, metal: metal_text, cuda: cuda_text, wgsl: wgsl_text}
 
+# `-e` compiles a materialized cache file, but users wrote "(eval)". The
+# loader keeps the real path (it must read the file); only the path handed
+# to lowering — and therefore embedded in runtime diagnostics — is aliased.
+-> display_source_path(p)
+  if eval_source_alias != nil && p == eval_source_alias
+    return "(eval)"
+  p
+
 -> emit_ir(file_path, emit_wire, verbose, intern_algo, sidemap_path = nil, emit_ll_only_arg = false, build_defines = nil, no_static_slab = false)
   # Emit LLVM IR (or WIRE text) for a single file, return ll_path or nil
   loader = Loader.new(verbose)
@@ -885,7 +894,7 @@ driver_homebrew_prefix_memo = {}
 
   if emit_wire
     wire_started_at = clock
-    mod = compile_to_wire(ast, file_path, verbose, fast_mode, math_mode)
+    mod = compile_to_wire(ast, display_source_path(file_path), verbose, fast_mode, math_mode)
 
     if verbose
       << fmt_elapsed(phase_elapsed(wire_started_at)) + " lower to wire"
@@ -911,7 +920,7 @@ driver_homebrew_prefix_memo = {}
     << fmt_elapsed(t_load) + " load+parse"
 
   strip_runtime_metadata = release_mode && !debug_enabled
-  ir = compile(ast, file_path, verbose, frame_pointers, sidemap_path, strip_runtime_metadata, fast_mode, build_defines, math_mode, no_static_slab)
+  ir = compile(ast, display_source_path(file_path), verbose, frame_pointers, sidemap_path, strip_runtime_metadata, fast_mode, build_defines, math_mode, no_static_slab)
   if intern_algo == "zstd"
     ir = rewrite_ir_static_slab_zstd(ir)
 
@@ -1212,13 +1221,21 @@ driver_homebrew_prefix_memo = {}
       clang_cmd << zcf
       clang_cmd << " "
 
-  # -I the runtime dir on BOTH paths: the native archive omits the .c sources,
-  # but the gated companions (ssmr/metal/…) and any bit C includes below still
-  # #include runtime.h and need the header search path.
+  # -I the runtime dir whenever this invocation compiles any C/ObjC source:
+  # the gated companions (ssmr/metal/…) and any bit C includes below still
+  # #include runtime.h and need the header search path. A pure link against
+  # the native archive compiles nothing, and clang warns on the unused -I.
   runtime_dir = resolve_runtime_dir
-  clang_cmd << "-I"
-  clang_cmd << runtime_dir
-  clang_cmd << " "
+  target_os = detect_target()[:os]
+  compiles_c = runtime_objs == nil || prime_needed || lexchars_needed || sci_io_needed || wtensor_needed || extra_c_includes.size() > 0
+  if target_os == "macos" && (blas_needed || sparse_needed || bridges_needed)
+    compiles_c = true
+  if target_os == "linux" && blas_needed
+    compiles_c = true
+  if compiles_c
+    clang_cmd << "-I"
+    clang_cmd << runtime_dir
+    clang_cmd << " "
   if runtime_objs != nil
     clang_cmd << runtime_objs
     clang_cmd << " "
@@ -2049,10 +2066,9 @@ driver_homebrew_prefix_memo = {}
     ram = ramv == nil ? "missing" : ramv.to_s()
   ["irbin-v5", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), cc_identity, ar_identity, release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("SDKROOT"), incremental_env_s("MACOSX_DEPLOYMENT_TARGET"), incremental_env_s("CPATH"), incremental_env_s("C_INCLUDE_PATH"), incremental_env_s("CPLUS_INCLUDE_PATH"), incremental_env_s("LIBRARY_PATH"), incremental_env_s("PKG_CONFIG_PATH"), incremental_env_s("PKG_CONFIG_LIBDIR"), incremental_env_s("TLS"), incremental_env_s("TUNGSTEN_TLS"), incremental_env_s("TUNGSTEN_TLS_CFLAGS"), incremental_env_s("TUNGSTEN_TLS_LDFLAGS"), incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_AR"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
 
-# Valid cached binary for this identity? Reads the manifest, revalidates
-# every recorded (path, mtime_ns), and on success installs the cached
-# binary + sidemap at out_path. Any surprise → miss (rebuild).
--> incremental_try_reuse(slot, identity, out_path, verbose)
+# Valid cached slot for this identity? Reads the manifest and revalidates
+# every recorded (path, mtime_ns). Any surprise → miss (rebuild).
+-> incremental_manifest_valid?(slot, identity)
   manifest = read_file(slot + ".manifest")
   if manifest == nil
     return false
@@ -2076,8 +2092,20 @@ driver_homebrew_prefix_memo = {}
     i += 1
   if !file?(slot + ".bin")
     return false
+  true
+
+# Manifest check plus install: on success the cached binary + sidemap land
+# at out_path.
+-> incremental_try_reuse(slot, identity, out_path, verbose)
+  if !incremental_manifest_valid?(slot, identity)
+    return false
+  # Install via a unique temp + rename: an out_path that is currently
+  # EXECUTING keeps its inode (an in-place cp truncates it — on macOS the
+  # running process dies SIGKILL from code-sign invalidation). $$ stays
+  # outside the quoting so the shell expands its own pid.
   q_out = dev_runtime_shell_quote(out_path)
-  if system("cp -p " + dev_runtime_shell_quote(slot + ".bin") + " " + q_out) != true
+  q_tmp = dev_runtime_shell_quote(out_path + ".install.") + "$$"
+  if system("cp -p " + dev_runtime_shell_quote(slot + ".bin") + " " + q_tmp + " && mv -f " + q_tmp + " " + q_out) != true
     return false
   if file?(slot + ".sidemap")
     system("cp -p " + dev_runtime_shell_quote(slot + ".sidemap") + " " + dev_runtime_shell_quote(out_path + ".sidemap"))
@@ -2191,34 +2219,119 @@ driver_homebrew_prefix_memo = {}
   identity = incremental_abs_path(source_path)
   compiled_run_dir() + "/" + wyhash64_hex_string(identity) + ".wc"
 
+# The eval file is content-addressed, so every writer writes identical bytes;
+# the temp + rename only guarantees a concurrent reader never sees a
+# truncated file mid-write.
 -> materialize_eval_source(code)
   dir = compiled_run_dir()
   path = dir + "/eval-" + wyhash64_hex_string(code) + ".w"
   if !file?(path) || read_file(path) != code
-    write_file(path, code)
+    tmp = path + ".tmp." + clock.to_s()
+    write_file(tmp, code)
+    system("mv -f " + dev_runtime_shell_quote(tmp) + " " + dev_runtime_shell_quote(path))
   path
 
-# Returns the child's exact exit code (or 128+signal as reported by the shell).
-# Arguments are individually quoted; they never become shell syntax.
+# Serialize concurrent builds of one cache binary. mkdir is the portable
+# atomic lock primitive (same as cache_gc.sh). A lock left behind by a
+# crashed process is stolen after ~60s of waiting; after ~90s total we give
+# up and proceed unlocked — a duplicate compile beats a deadlock.
+-> acquire_run_lock(lock_path)
+  attempts = 0
+  while system("mkdir " + dev_runtime_shell_quote(lock_path) + " 2>/dev/null") != true
+    attempts += 1
+    if attempts == 600
+      system("rmdir " + dev_runtime_shell_quote(lock_path) + " 2>/dev/null")
+    if attempts > 900
+      return false
+    system("sleep 0.1")
+  true
+
+-> release_run_lock(lock_path)
+  system("rmdir " + dev_runtime_shell_quote(lock_path) + " 2>/dev/null")
+  nil
+
+# The shared cache GC (bin/commands/cache_gc.sh) self-throttles to one sweep
+# per day, so this background kick is almost always a no-op. It keeps
+# run-cache binaries and eval sources bounded for users who only ever `run`.
+-> kick_run_cache_gc
+  script = resolve_runtime_dir + "../bin/commands/cache_gc.sh"
+  if file?(script)
+    system("(bash " + dev_runtime_shell_quote(script) + " " + dev_runtime_shell_quote(compiler_cache_dir()) + " >/dev/null 2>&1 &)")
+  nil
+
+# Warm-run fast path: when the incremental manifest says the slot is
+# current AND that exact identity is what was last published onto the run
+# binary, skip every copy and rename and exec the existing inode. macOS
+# validates a binary's code signature on the first exec of fresh file
+# content (~200ms); re-executing an already-validated inode costs ~4ms, so
+# a warm run must not rewrite the published file at all.
+-> run_cache_current?(source_path, stage, binary)
+  if keep_ll || incremental_env_s("TUNGSTEN_LL_PATH") != "" || incremental_env_s("TUNGSTEN_LL_DONE_MARKER") != "" || !incremental_cache_enabled?
+    return false
+  id = incremental_identity(source_path, stage)
+  if id == nil
+    return false
+  slot = incremental_cache_slot(source_path, stage, id)
+  if slot == nil
+    return false
+  if !incremental_manifest_valid?(slot, id)
+    return false
+  if !file?(binary)
+    return false
+  read_file(binary + ".id") == id
+
+-> publish_run_binary(source_path, stage, binary)
+  if system("mv -f " + dev_runtime_shell_quote(stage) + " " + dev_runtime_shell_quote(binary)) != true
+    return false
+  system("mv -f " + dev_runtime_shell_quote(stage + ".sidemap") + " " + dev_runtime_shell_quote(binary + ".sidemap") + " 2>/dev/null")
+  # Same guard as the compile_one probe: identity needs ccalls the stage-0
+  # VM does not provide, and without the cache the .id stamp is useless.
+  if incremental_cache_enabled?
+    id = incremental_identity(source_path, stage)
+    if id != nil
+      write_file(binary + ".id", id)
+  true
+
+# Returns the child's exact exit code, or 128+signal for a signal death.
+# Builds land in a sibling .stage file under the lock and are renamed onto
+# the final name, so an already-running instance keeps its old inode — a
+# concurrent `run` of the same script can never truncate a binary that is
+# executing. The child is spawned directly from argv: no shell, no quoting,
+# no job-control chatter on stderr.
 -> run_compiled_program(source_path, run_args)
   binary = compiled_run_output_path(source_path)
-  if !compile_one(source_path, binary, false, verbose, intern_algo, false, true)
+  stage = binary + ".stage"
+  lock_path = binary + ".lock"
+  locked = acquire_run_lock(lock_path)
+  ok = false
+  begin
+    if run_cache_current?(source_path, stage, binary)
+      ok = true
+    else
+      ok = compile_one(source_path, stage, false, verbose, intern_algo, false, true)
+      if ok
+        ok = publish_run_binary(source_path, stage, binary)
+  rescue err
+    if locked
+      release_run_lock(lock_path)
+    raise err
+  if locked
+    release_run_lock(lock_path)
+  if !ok
     return 1
+  kick_run_cache_gc()
 
-  status_path = binary + ".status." + clock.to_s()
-  command_text = dev_runtime_shell_quote(binary)
+  child_argv = [binary]
   i = 0
   while i < run_args.size()
-    command_text = command_text + " " + dev_runtime_shell_quote(run_args[i])
+    child_argv.push(run_args[i])
     i += 1
-  command_text = command_text + "; tungsten_run_status=$?; printf '%s' \"$tungsten_run_status\" > " + dev_runtime_shell_quote(status_path) + "; exit 0"
-  shell_ok = system(command_text)
-  status = 1
-  if shell_ok && file?(status_path)
-    text = read_file(status_path)
-    if text != nil && text != ""
-      status = text.to_i()
-  system("rm -f " + dev_runtime_shell_quote(status_path))
+  status = ccall("w_run_argv", child_argv)
+  if status >= 256
+    return 128 + (status - 256)
+  if status < 0
+    ccall("w_eputs", "run: could not execute [binary]")
+    return 1
   status
 
 # Parse the complete program and run lowering/type inference, but deliberately
@@ -2298,11 +2411,15 @@ if eval_code != nil
       interp.run(eval_code, "(eval)")
     else
       eval_path = materialize_eval_source(eval_code)
+      eval_source_alias = eval_path
       eval_status = run_compiled_program(eval_path, script_args)
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
       ccall("w_flush")
-      ccall("w_eputs", emit_compile_error(err))
+      msg = emit_compile_error(err)
+      if eval_source_alias != nil
+        msg = msg.replace(eval_source_alias, "(eval)")
+      ccall("w_eputs", msg)
       exit 1
     if type(err) == "String"
       ccall("w_flush")

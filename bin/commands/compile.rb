@@ -328,6 +328,7 @@ parser = OptionParser.new do |opts|
       start          First-run welcome: what Tungsten is + your next step
       new NAME       Scaffold a new project
       build          Bootstrap the self-hosted compiler
+      cleanup        Force a build-cache sweep (GC also runs daily)
       doctor         Check your toolchain
       fmt FILE       Format .w source
       bit ...        The Bit package manager

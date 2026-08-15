@@ -345,59 +345,50 @@ use lowering/definitions
     ei += 1
   inferable_methods
 
-# Return-type inference runs as a fixed-point pass. Each
-# iteration re-runs infer_return_type on every method/fn; if the
-# iteration changes any return type, we loop. This handles mutually
-# recursive methods where method A's return type depends on method B
-# (and vice versa): iteration 1 fills in whichever resolves without
-# dependencies, iteration 2 uses iteration 1's results to resolve
-# the next layer, and so on.
-#
-# Max 3 iterations per full sweep. Most call graphs converge in 1-2
-# passes because real dependency chains are shallow. If we hit 3 and
-# still have changes, bail out — the unresolved methods keep their
-# last-inferred type and a warning is emitted. Users can resolve by
-# annotating explicit return types on one method in the cycle.
-#
-# Explicit `:return_type` annotations (from inline signatures)
-# are LOCKED IN on iteration 0 and never overwritten. Only inferred
-# (nil-annotated) methods get updated per iteration.
+# Infer return types over the condensed call graph. Callee SCCs are processed
+# before callers, so an arbitrarily deep acyclic chain needs one pass instead
+# of one whole-program sweep per edge. Recursive SCCs iterate only their own
+# members and use explicit/base-case evidence to seed mutual recursion.
 -> infer_return_types_fixed_point(mod, inferable_methods)
-  iter = 0
-  max_iter = 3
-  still_changing = true
-  while still_changing && iter < max_iter
-    still_changing = false
-    im = 0
-    while im < inferable_methods.size()
-      m = inferable_methods[im]
-      call_key = method_call_key_for_def(m)
-      old_rt = mod[:fn_return_types][call_key]
-      # Seed inference with declared param types (canonical spelling) and
-      # `## i64`-style body hints. With an empty map, a typed fn whose tail
-      # expression flows through hinted locals inferred nil — its callers
-      # then fell off the native machine-int path, boxing every arithmetic
-      # op that consumed the call result (w_int + w_add per index expression
-      # in the flip-graph walkers).
-      pmap = {}
-      if m.param_types != nil && m.params != nil
-        pts2 = m.param_types
-        pi2 = 0
-        while pi2 < pts2.size() && pi2 < m.params.size()
-          pmap[param_runtime_name(m.params[pi2])] = canonical_signature_type(pts2[pi2])
-          pi2 += 1
-      new_rt = infer_return_type(m, enrich_int_locals(m.body, pmap), mod[:fn_return_types], lowering_infer_maps)
-      if new_rt != nil && new_rt != old_rt
-        mod[:fn_return_types][call_key] = normalize_type_symbol(new_rt)
-        still_changing = true
-      im += 1
-    iter += 1
-  if still_changing
-    # Didn't converge in max_iter passes. Emit a one-line warning to
-    # stderr naming the unresolved methods so the user can annotate.
-    # Not a hard error: inference bail-out just means those methods
-    # get their current best-effort type (may be nil).
-    << "warning: return-type inference didn't converge in [max_iter] passes; consider adding explicit return type annotations on recursive methods"
+  plan = return_inference_sccs(inferable_methods)
+  components = plan[:components]
+  defs = plan[:definitions]
+  ci = 0
+  while ci < components.size()
+    component = components[ci]
+    iter = 0
+    max_iter = component.size() + 2
+    changed = true
+    while changed && iter < max_iter
+      changed = false
+      im = 0
+      while im < component.size()
+        m = defs[component[im]]
+        call_key = method_call_key_for_def(m)
+        old_rt = mod[:fn_return_types][call_key]
+        # Seed inference with declared param types (canonical spelling) and
+        # `## i64`-style body hints. With an empty map, a typed fn whose tail
+        # expression flows through hinted locals inferred nil — its callers
+        # then fell off the native machine-int path, boxing every arithmetic
+        # op that consumed the call result (w_int + w_add per index expression
+        # in the flip-graph walkers).
+        pmap = {}
+        if m.param_types != nil && m.params != nil
+          pts2 = m.param_types
+          pi2 = 0
+          while pi2 < pts2.size() && pi2 < m.params.size()
+            pmap[param_runtime_name(m.params[pi2])] = canonical_signature_type(pts2[pi2])
+            pi2 += 1
+        enriched = enrich_int_locals(m.body, pmap)
+        new_rt = infer_return_type(m, enriched, mod[:fn_return_types], lowering_infer_maps)
+        if new_rt == nil
+          new_rt = infer_return_type_evidence(m, enriched, mod[:fn_return_types], lowering_infer_maps)
+        if new_rt != nil && new_rt != old_rt
+          mod[:fn_return_types][call_key] = normalize_type_symbol(new_rt)
+          changed = true
+        im += 1
+      iter += 1
+    ci += 1
   nil
 
 # Emit startup init calls for the built-in runtime classes a program
@@ -605,6 +596,7 @@ use lowering/definitions
         while mi2 < class_body.size()
           mnode = class_body[mi2]
           if ast_kind(mnode) == :method_def
+            validate_and_register_final_method(mod, cname, mnode, ast_get(mnode, :source_path))
             # Record class methods that take a block (declare `&` or use
             # `yield`) in the global block-method name set, exactly as the
             # top-level fn-def walk does. Without this, a trailing block on
@@ -658,25 +650,40 @@ use lowering/definitions
               # (which has class-method-only side effects). `fn`-defined
               # methods (mnode.from_fn == true) also get a memo table
               # — same caching behavior as top-level fn defs.
-              if mnode.return_type != nil
-                static_rt = normalize_type_symbol(mnode.return_type)
+              if mnode.return_type != nil || ast_get(mnode, :final_method) == true
+                static_rt = nil
+                if mnode.return_type != nil
+                  static_rt = normalize_type_symbol(mnode.return_type)
                 static_key = cname + "." + mnode.name
                 inst_fn_name = class_method_function_name(cname, mnode)
                 inst_raw_abi = static_method_raw_abi?(mnode)
-                mod[:fn_return_types][static_key] = static_rt
-                info = {
-                  fn_name: inst_fn_name,
-                  method_fn_name: inst_fn_name,
-                  arity: method_runtime_arity(mnode),
-                  return_type: static_rt,
-                  param_types: normalized_static_param_types(mnode),
-                  raw_abi: inst_raw_abi,
-                  from_fn: mnode.from_fn == true,
-                  param_count: mnode.params.size(),
-                  splat_index: method_splat_index(mnode),
-                  block_param_index: method_block_param_index(mnode)
-                }
-                register_known_static_method_info(mod, static_key, info, mnode.params.size(), mnode.params.size())
+                if static_rt != nil
+                  mod[:fn_return_types][static_key] = static_rt
+                direct_eligible = mnode.return_type != nil
+                if ast_get(mnode, :final_method) == true
+                  direct_eligible = method_lowering_analysis(mnode)[:yield_block_name] == nil
+                  fpi = 0
+                  while direct_eligible && fpi < mnode.params.size()
+                    fp = mnode.params[fpi]
+                    if fp.default != nil || fp.keyword == true || fp.splat == true || fp.block_param == true
+                      direct_eligible = false
+                    fpi += 1
+                if direct_eligible
+                  info = {
+                    fn_name: inst_fn_name,
+                    method_fn_name: inst_fn_name,
+                    arity: method_runtime_arity(mnode),
+                    return_type: static_rt,
+                    param_types: normalized_static_param_types(mnode),
+                    raw_abi: inst_raw_abi,
+                    from_fn: mnode.from_fn == true,
+                    is_final: ast_get(mnode, :final_method) == true,
+                    accepts_block: false,
+                    param_count: mnode.params.size(),
+                    splat_index: method_splat_index(mnode),
+                    block_param_index: method_block_param_index(mnode)
+                  }
+                  register_known_static_method_info(mod, static_key, info, mnode.params.size(), mnode.params.size())
                 if mnode.from_fn == true
                   impure_ccall = fn_body_calls_impure_ccall?(mnode.body)
                   mnode.calls_impure_ccall = impure_ccall

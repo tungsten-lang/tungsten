@@ -1448,6 +1448,27 @@
 -> param_infer_enabled?
   env("TUNGSTEN_PARAM_INFER") != "0"
 
+# Call-site observations are a whole-program optimization input, not an ABI
+# declaration. Definitions parsed from the canonical prelude therefore form a
+# hard boundary: user calls may consume their ABI facts but never rewrite them.
+# Parser-attached source_path is stable across autoload flattening, unlike
+# expression order (which is demand-driven).
+-> definition_from_core?(node)
+  if node == nil
+    return false
+  path = ast_get(node, :source_path)
+  if path == nil
+    return false
+  text = "" + path
+  root = env("TUNGSTEN_ROOT")
+  if root != nil
+    prefix = root + "/core/"
+    if text.size() >= prefix.size() && text.slice(0, prefix.size()) == prefix
+      return true
+  if text.size() >= 5 && text.slice(0, 5) == "core/"
+    return true
+  false
+
 # Eligible seed type, or nil. Typed arrays pass through unchanged; floats
 # normalize to :f64 to match the proven param-type-list annotation path.
 -> param_infer_whitelist_type(t)
@@ -1494,7 +1515,7 @@
   while i < expressions.size()
     expr = expressions[i]
     if expr != nil && is_ast_node?(expr) && ast_kind(expr) in (:fn_def :method_def)
-      if expr.is_class_method != true && expr.param_types == nil && expr.name != nil
+      if expr.is_class_method != true && expr.param_types == nil && expr.name != nil && !definition_from_core?(expr)
         nm = expr.name
         if seen[nm] == nil
           seen[nm] = true

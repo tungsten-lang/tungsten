@@ -41,6 +41,10 @@
     known_pure_calls: {},
     fn_return_types:  {},
     class_methods:    {},
+    # class.method/arity -> declaring class for non-virtual @final methods.
+    # Kept separate from runtime method tables so override validation and
+    # direct-call eligibility are explicit compiler facts.
+    final_methods:    {},
     cvar_globals:     {},
     fn_memo_tables:   {},
     used_memo_tables: {},

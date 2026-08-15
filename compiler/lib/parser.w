@@ -739,6 +739,16 @@ use ../../core/token
     out
 
   -> parse_expression(allow_passthrough = true)
+    # Non-virtual instance method. Using an attribute token avoids reserving a
+    # new global keyword and keeps ordinary identifiers named `final` valid.
+    # The lowering registry rejects overrides and may direct-call this method
+    # from exact/compatible source-class facts.
+    if at_typed?(T_IVAR, "@final") && peek_type() == T_ARROW
+      advance()
+      result = parse_method_def()
+      result.final_method = true
+      return result
+
     if at_kw?("trait")
       return parse_trait_def()
 
@@ -3116,6 +3126,7 @@ use ../../core/token
       result.param_types = param_types
     if return_type != nil
       result.return_type = return_type
+    result.source_path = @file
     result
 
   # Lookahead: is the current LPAREN the start of a param-type
@@ -3270,6 +3281,7 @@ use ../../core/token
         result.param_types = param_types
       if return_type != nil
         result.return_type = return_type
+      result.source_path = @file
       return result
 
     # Top-level fn: produce a regular fn_def with both annotations attached.
@@ -3283,6 +3295,7 @@ use ../../core/token
       result.param_types = param_types
     if return_type != nil
       result.return_type = return_type
+    result.source_path = @file
     result
 
   # Parse `@gpu fn NAME(ARGS)` kernel definition. Body accepts the same

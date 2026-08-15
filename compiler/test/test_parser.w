@@ -340,4 +340,11 @@ expr = first_expr("case kind\n  :a, :b => \"hit\"")
 assert_eq expr[:node], :case_value
 assert_eq expr[:arms].size(), 2
 
+test "parses final instance methods"
+expr = first_expr("+ Counter\n  @final -> step(x)\n    x + 1")
+method = expr[:body][0]
+assert_eq method[:node], :method_def
+assert_eq method[:name], "step"
+assert_eq method[:final_method], true
+
 report()

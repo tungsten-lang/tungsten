@@ -12,6 +12,44 @@
 # moved to lowering/ops.w so lower_call (calls.w, earlier in the worker
 # chain) can reach them for `use math/globals` alias calls.
 
+-> receiver_source_class_fact(ctx, recv_node)
+  if recv_node == nil || !is_ast_node?(recv_node)
+    return nil
+  kind = ast_kind(recv_node)
+  if kind == :self_ref && ctx[:class_name] != nil && normal_source_instance_class?(ctx[:mod], ctx[:class_name])
+    return {class_name: ctx[:class_name], certainty: :compatible}
+  if kind == :var && ctx[:local_class_facts] != nil
+    fact = ctx[:local_class_facts][recv_node.name]
+    if fact != nil
+      return fact
+  if kind in (:var :parg)
+    key = recv_node.name
+    if kind == :parg
+      key = "__arg" + recv_node.index.to_s()
+    declared = ctx[:var_types][key]
+    if declared != nil
+      cname = "" + declared.to_s()
+      if ctx[:class_name] != nil && ctx[:class_name].starts_with?(cname + "$")
+        cname = ctx[:class_name]
+      if normal_source_instance_class?(ctx[:mod], cname)
+        return {class_name: cname, certainty: :compatible}
+  if kind == :ivar && ctx[:class_name] != nil
+    exact_ivars = ctx[:mod][:exact_source_ivar_types][ctx[:class_name]]
+    if exact_ivars != nil && exact_ivars[recv_node.name] != nil
+      return {class_name: exact_ivars[recv_node.name], certainty: :exact}
+  nil
+
+-> final_method_info_for_class(mod, class_name, method_name, arg_count)
+  current = class_name
+  guard = 0
+  while current != nil && guard < 64
+    info = known_static_method_for(mod, current + "." + method_name, arg_count)
+    if info != nil && info[:is_final] == true
+      return info
+    current = mod[:class_super_names][current]
+    guard += 1
+  nil
+
 -> lower_method_call(ctx, node)
   wfn = ctx[:func]
   method_name = node.name
@@ -185,6 +223,17 @@
     recv_node = ctx[:range_bindings][recv_node.name]
 
   recv_type = receiver_static_type(ctx, recv_node)
+
+  # A final method cannot be replaced by a subclass or reopen. Therefore a
+  # compatible source-class fact is sufficient for a plain direct call; exact
+  # constructor facts use the same path. Use the ordinary static-call helper
+  # so annotated raw ABIs, argument evaluation, defaults, and return typing
+  # remain identical to existing direct self calls.
+  source_fact = receiver_source_class_fact(ctx, recv_node)
+  if node.block == nil && source_fact != nil
+    final_info = final_method_info_for_class(ctx[:mod], source_fact[:class_name], method_name, node.args.size())
+    if final_info != nil
+      return lower_direct_static_method_call(ctx, final_info, recv_node, node.args, nil)
 
   # Raw-f64 scalar libm fast path: `(float expr).sqrt / .sin / .cos / .tan /
   # .exp / .log` on a statically-float receiver calls libm directly on the
@@ -1970,9 +2019,9 @@
   if node.block == nil && recv_node != nil && is_ast_node?(recv_node)
     exact_cls = nil
     rk2 = ast_kind(recv_node)
-    if rk2 == :var
-      if ctx[:exact_local_classes] != nil
-        exact_cls = ctx[:exact_local_classes][recv_node.name]
+    class_fact = receiver_source_class_fact(ctx, recv_node)
+    if class_fact != nil
+      exact_cls = class_fact[:class_name]
     if rk2 in (:var :parg)
       # A declared source-class parameter is also a useful speculative exact
       # class.  The direct arm below remains guarded by the receiver's runtime

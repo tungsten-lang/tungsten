@@ -37,28 +37,26 @@ and parameter types. This is particularly important for numeric containers,
 where `Matrix < Number` scalar operations and matrix-to-matrix operations can
 otherwise shadow each other.
 
-## Non-virtual internal methods
+## Private internal methods
 
-There is no declaration-level way to say that a helper is private to a class
-and cannot be overridden. Calls such as `at_type?(...)` inside `Parser`
-therefore use the same inline-cache dispatch as an open public method, even
-though direct self-dispatch would be both safe and substantially cheaper.
+There is still no declaration-level way to say that a helper is private to a
+class. `@final -> helper(...)` now prevents overriding and lets lowering use a
+direct call when the receiver has a source-class fact, but it deliberately does
+not add access control.
 
-A `private`/`final` (or otherwise explicitly non-virtual) method form should
-let lowering emit a direct call while preserving ordinary open dispatch for
-public methods. Hot parser helpers currently have to move to top-level
-functions to obtain that code shape, which sacrifices encapsulation for
-performance and makes access to instance state awkward. The lexer has the
-same issue for its pure token-symbol mapping: `emit`/`emit_at` cannot request
-a direct call while leaving the public compatibility method virtual.
+A private method form should make the visibility boundary explicit while
+preserving ordinary open dispatch for public methods. Hot parser helpers that
+must be inaccessible from outside the parser cannot express that constraint
+yet.
 
 ## Exact and immutable local type facts
 
 There is no surface distinction between “this binding is exactly an instance
 of this source class” and “this value currently appears to have this class.”
-Constructor-derived facts can therefore enable a guarded source-method fast
-path, but ordinary reassignment and branch merging must retain a compatibility
-fallback because the local is mutable and type tracking is conservative.
+Lowering now records constructor-derived facts as exact and annotations as
+compatible. Unknown reassignment clears the fact; branch merging must still
+retain a compatibility fallback because the local is mutable and type tracking
+is conservative.
 
 An immutable local declaration, or an explicit exact-class assertion distinct
 from a coercing cast, would let lowering preserve the fact through SSA and use

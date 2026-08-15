@@ -641,21 +641,26 @@
     ctx[:quantity_dimensions] = {}
   ctx[:quantity_dimensions][name] = static_quantity_signature(ctx, node.value)
 
-  # Devirtualization fact: `x = C.new(...)` records C so a later `x.m(...)`
-  # can emit a class-id-GUARDED direct call to C's method instead of IC
-  # dispatch (lower_method_call). Any other assignment clears the fact. The
-  # runtime guard is the soundness backstop — a stale fact (e.g. the var
-  # reassigned inside a closure this walk can't see) just fails the guard
-  # and takes the IC path, so this map only has to be a good heuristic.
-  if ctx[:exact_local_classes] == nil
-    ctx[:exact_local_classes] = {}
-  ctx[:exact_local_classes][name] = nil
+  # Source-class facts distinguish an exact constructor result from a merely
+  # compatible declaration. Exact facts enable guarded devirtualization;
+  # compatible facts become direct-callable only for @final methods. Copying a
+  # local preserves its certainty, while any unproved reassignment clears it.
+  if ctx[:local_class_facts] == nil
+    ctx[:local_class_facts] = {}
+  fact = nil
   if node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :call && node.value.name == "new" && node.value.receiver != nil && is_ast_node?(node.value.receiver)
     ctor_cls = ast_get(node.value.receiver, :name)
-    if ctor_cls != nil
-      cls_node = ctx[:mod][:known_classes][ctor_cls]
-      if cls_node != nil && is_ast_node?(cls_node) && ast_kind(cls_node) == :class_def
-        ctx[:exact_local_classes][name] = ctor_cls
+    if normal_source_instance_class?(ctx[:mod], ctor_cls)
+      fact = {class_name: ctor_cls, certainty: :exact}
+  elsif node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :var
+    source_fact = ctx[:local_class_facts][node.value.name]
+    if source_fact != nil
+      fact = {class_name: source_fact[:class_name], certainty: source_fact[:certainty]}
+  if fact == nil && node.type_hint != nil
+    hinted_class = "" + node.type_hint.to_s()
+    if normal_source_instance_class?(ctx[:mod], hinted_class)
+      fact = {class_name: hinted_class, certainty: :compatible}
+  ctx[:local_class_facts][name] = fact
 
   # Range-elision (#49): stash range-literal RHS so a later `r.each ...`
   # substitutes the range expression at the call site and routes through

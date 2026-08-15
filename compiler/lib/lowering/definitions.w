@@ -578,7 +578,7 @@
   # observed across every call site. Never overrides an explicit annotation
   # (guarded on child_var_types[pname] == nil). Skips params with a
   # default/keyword/splat/block. Bailed callees are excluded upstream.
-  if mod != nil && node.param_types == nil && node.name != nil && mod[:observed_param_types] != nil
+  if mod != nil && node.param_types == nil && node.name != nil && mod[:observed_param_types] != nil && !definition_from_core?(node)
     if mod[:param_infer_bailed] == nil || mod[:param_infer_bailed][node.name] != true
       obs = mod[:observed_param_types][node.name]
       if obs != nil && node.params != nil
@@ -1565,6 +1565,37 @@
   if node.is_class_method == true
     return "__w_" + llvm_safe_name(cname.gsub(":", "__")) + "_S_" + mangle_method_name(node.name) + method_arity_suffix(node)
   prefix + mangle_method_name(node.name) + method_arity_suffix(node)
+
+-> final_method_key(cname, node)
+  cname + "." + node.name + "/" + node.params.size().to_s()
+
+-> inherited_final_method_owner(mod, cname, node)
+  current = mod[:class_super_names][cname]
+  guard = 0
+  suffix = "." + node.name + "/" + node.params.size().to_s()
+  while current != nil && guard < 64
+    owner = mod[:final_methods][current + suffix]
+    if owner != nil
+      return owner
+    current = mod[:class_super_names][current]
+    guard += 1
+  nil
+
+-> validate_and_register_final_method(mod, cname, node, source_path)
+  if node.is_class_method == true
+    if ast_get(node, :final_method) == true
+      raise compile_error_for_node(:E_LOWER_FINAL_STATIC, "@final applies to instance methods; class methods already lower through direct static dispatch", source_path, node)
+    return nil
+  inherited_owner = inherited_final_method_owner(mod, cname, node)
+  if inherited_owner != nil
+    raise compile_error_for_node(:E_LOWER_FINAL_OVERRIDE, "cannot override final method '" + node.name + "' from " + inherited_owner, source_path, node)
+  key = final_method_key(cname, node)
+  existing_owner = mod[:final_methods][key]
+  if existing_owner != nil
+    raise compile_error_for_node(:E_LOWER_FINAL_OVERRIDE, "cannot redefine final method '" + node.name + "' in " + cname, source_path, node)
+  if ast_get(node, :final_method) == true
+    mod[:final_methods][key] = cname
+  nil
 
 -> register_class_method_def(main_fn, mod, cname, node)
   mname = node.name

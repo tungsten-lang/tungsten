@@ -330,6 +330,9 @@
   c = r % 1000000007
   << "addmulchain" + limbs.to_s() + "\t" + n.to_s() + "\t" + ((t1 - t0) * ~1000000000.0 / n.to_f()).to_s() + "\t" + c.to_s()
 
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!
+
 args = argv()
 workload = args.size() > 0 ? args[0] : "all"
 n = args.size() > 1 ? args[1].to_i() : 0

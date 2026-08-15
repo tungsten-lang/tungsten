@@ -2413,6 +2413,7 @@ if eval_code != nil
       eval_path = materialize_eval_source(eval_code)
       eval_source_alias = eval_path
       eval_status = run_compiled_program(eval_path, script_args)
+      system("rm -f " + dev_runtime_shell_quote(eval_path))
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
       ccall("w_flush")

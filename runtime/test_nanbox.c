@@ -39,6 +39,18 @@ static void static_method_table_mutation_after_lock_fn(void) {
     w_method_tables_lock_safe();
     w_class_add_static_method(klass, "too_late", (void *)cached_two_arg_fn, 3);
 }
+static void splat_method_table_mutation_after_lock_fn(void) {
+    WValue klass = w_class_new("LockedSplatMutation", W_NIL);
+    WValue name = w_string("too_late");
+    w_method_tables_lock_safe();
+    w_class_add_method_splat_wv(klass, name, (void *)cached_two_arg_fn, 3, 1, 0);
+}
+static void static_splat_method_table_mutation_after_lock_fn(void) {
+    WValue klass = w_class_new("LockedStaticSplatMutation", W_NIL);
+    WValue name = w_string("too_late");
+    w_method_tables_lock_safe();
+    w_class_add_static_method_splat_wv(klass, name, (void *)cached_two_arg_fn, 3, 1, 0);
+}
 #ifndef TUNGSTEN_ONIG
 static void unsupported_named_regex_fn(void) {
     (void)w_regex_new(w_string("(?<word>a)"), w_string(""));
@@ -492,6 +504,8 @@ int main() {
     {
         assert(expect_crash(method_table_mutation_after_lock_fn));
         assert(expect_crash(static_method_table_mutation_after_lock_fn));
+        assert(expect_crash(splat_method_table_mutation_after_lock_fn));
+        assert(expect_crash(static_splat_method_table_mutation_after_lock_fn));
         assert(!w_method_tables_are_locked());
         printf("  method table lock barrier: OK\n");
     }

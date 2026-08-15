@@ -664,15 +664,20 @@
     ctor_cls = ast_get(node.value.receiver, :name)
     if normal_source_instance_class?(ctx[:mod], ctor_cls)
       stable = false
-      if ctx[:local_assignment_counts] != nil && ctx[:local_assignment_counts][name] == 1 && source_constructor_returns_exact_class?(ctx[:mod], ctor_cls)
+      if ctx[:local_assignment_counts] != nil && ctx[:local_assignment_counts][name] == 1 && ctx[:straight_line_local_assignments] != nil && ctx[:straight_line_local_assignments][name] == true && source_constructor_returns_exact_class?(ctx[:mod], ctor_cls)
         stable = true
       fact = {class_name: ctor_cls, certainty: :exact, stable: stable}
   elsif node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :var
     source_fact = ctx[:local_class_facts][node.value.name]
     if source_fact != nil
-      # A copied reference can be exact, but it is a second mutable binding;
-      # keep the speculative guard until a future SSA fact proves both stable.
-      fact = {class_name: source_fact[:class_name], certainty: source_fact[:certainty], stable: false}
+      # Copying a proven exact reference preserves the object's class. The
+      # destination may drop its guard only when both bindings are immutable
+      # within this lexical scope; otherwise the older guarded fast path keeps
+      # a stale flow fact semantically harmless.
+      copy_stable = false
+      if source_fact[:certainty] == :exact && source_fact[:stable] == true && ctx[:local_assignment_counts] != nil && ctx[:local_assignment_counts][name] == 1 && ctx[:straight_line_local_assignments] != nil && ctx[:straight_line_local_assignments][name] == true
+        copy_stable = true
+      fact = {class_name: source_fact[:class_name], certainty: source_fact[:certainty], stable: copy_stable}
   if fact == nil && node.type_hint != nil
     hinted_class = "" + node.type_hint.to_s()
     if normal_source_instance_class?(ctx[:mod], hinted_class)

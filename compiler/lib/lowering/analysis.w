@@ -1472,7 +1472,8 @@
 # Count writes to lexical locals across control flow and nested blocks, while
 # stopping at nested method/type definitions (fresh scopes). LOCK_THE_DOORS
 # may remove a receiver-class guard only when the constructor binding has one
-# write in its complete scope; the old speculative exact fact deliberately
+# write in its complete scope AND straight_line_local_assignments proves that
+# write is not conditional; the old speculative exact fact deliberately
 # tolerated stale closure/control-flow facts because its runtime guard caught
 # them.
 -> count_local_assignments(node, counts)
@@ -1544,6 +1545,25 @@
     count_local_assignments(kids[i], counts)
     i += 1
   nil
+
+# A single lexical write is not necessarily a dominating write: `if cond;
+# x = C.new; end; x.m()` contains one assignment but can reach the call with x
+# unset. Stable exact facts therefore admit only assignments that are direct
+# members of the current function/block statement list. This deliberately
+# leaves branch/loop joins guarded until WIRE has a real dataflow lattice.
+-> straight_line_local_assignments(body)
+  result = {}
+  if body == nil || type(body) != "Array"
+    return result
+  i = 0
+  while i < body.size()
+    node = body[i]
+    if node != nil && is_ast_node?(node) && ast_kind(node) == :assign
+      target = node.target
+      if target != nil && is_ast_node?(target) && ast_kind(target) == :var
+        result[target.name] = true
+    i += 1
+  result
 
 -> local_assignment_counts(body)
   counts = {}

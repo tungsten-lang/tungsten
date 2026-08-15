@@ -50,6 +50,14 @@ run_compiler --emit-wire "$root/compiler/test/fixtures/locked_reassigned_receive
 reassigned_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/reassigned.wire")"
 grep -q 'call_method_i64.*devirt=@__w_SecondReceiver_value__a1' <<<"$reassigned_main"
 
+run_compiler --emit-wire "$root/compiler/test/fixtures/locked_conditional_receiver.w" > "$tmp/conditional.wire"
+conditional_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/conditional.wire")"
+grep -q 'call_method_i64.*devirt=@__w_ConditionalReceiver_value__a1' <<<"$conditional_main"
+if grep -q 'call_direct_i64.*__w_ConditionalReceiver_value__a1' <<<"$conditional_main"; then
+  echo "conditional constructor assignment was treated as dominating" >&2
+  exit 1
+fi
+
 run_compiler --emit-wire "$root/compiler/test/fixtures/locked_static_new_receiver.w" > "$tmp/static-new.wire"
 static_new_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/static-new.wire")"
 grep -q 'call_method_i64' <<<"$static_new_main"
@@ -57,6 +65,28 @@ if grep -q 'call_direct_i64.*__w_ClaimedReceiver_value__a1' <<<"$static_new_main
   echo "static .new result was treated as the nominal receiver class" >&2
   exit 1
 fi
+
+run_compiler --emit-wire "$root/compiler/test/fixtures/locked_extended_dispatch.w" > "$tmp/extended.wire"
+extended_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/extended.wire")"
+shared_self="$(awk '/function __w_SharedDispatchBase_through_self__a2/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/extended.wire")"
+override_self="$(awk '/function __w_OverrideDispatchBase_through_self__a2/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/extended.wire")"
+if [[ "$(grep -c 'call_direct_i64.*__w_FreshDispatchReceiver_value__a1' <<<"$extended_main")" -lt 2 ]]; then
+  echo "locked copied/fresh exact receivers retained dispatch" >&2
+  exit 1
+fi
+grep -q 'call_direct_i64.*__w_SharedDispatchBase_step__a2' <<<"$shared_self"
+if grep -q 'call_method_i64' <<<"$shared_self"; then
+  echo "locked self call with an override-free hierarchy retained dispatch" >&2
+  exit 1
+fi
+grep -q 'call_method_i64' <<<"$override_self"
+if grep -q 'call_direct_i64.*__w_OverrideDispatchBase_step__a2' <<<"$override_self"; then
+  echo "locked self call ignored a known subclass override" >&2
+  exit 1
+fi
+run_compiler run "$root/compiler/test/fixtures/locked_extended_dispatch.w" > "$tmp/extended.out"
+printf '42\n42\n41\n42\n' > "$tmp/extended.expected"
+cmp "$tmp/extended.expected" "$tmp/extended.out"
 
 if run_compiler check "$root/compiler/test/fixtures/protected_core_reopen.w" > "$tmp/core-reopen.out" 2>&1; then
   echo "protected Core reopen unexpectedly compiled" >&2

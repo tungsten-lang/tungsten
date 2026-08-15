@@ -17,7 +17,12 @@
     return nil
   kind = ast_kind(recv_node)
   if kind == :self_ref && ctx[:class_name] != nil && normal_source_instance_class?(ctx[:mod], ctx[:class_name])
-    return {class_name: ctx[:class_name], certainty: :compatible}
+    # `self` is permanently compatible with the method's defining class. It
+    # may be an already-defined subclass, but unlike a user type hint this
+    # relationship is established by runtime method lookup rather than an
+    # unchecked optimizer promise. LOCK_THE_DOORS can therefore consume it
+    # after proving every known descendant resolves the selector identically.
+    return {class_name: ctx[:class_name], certainty: :compatible, stable: true}
   if kind == :var && ctx[:local_class_facts] != nil
     fact = ctx[:local_class_facts][recv_node.name]
     if fact != nil
@@ -37,6 +42,12 @@
     exact_ivars = ctx[:mod][:exact_source_ivar_types][ctx[:class_name]]
     if exact_ivars != nil && exact_ivars[recv_node.name] != nil
       return {class_name: exact_ivars[recv_node.name], certainty: :exact}
+  if kind == :call && recv_node.name == "new" && recv_node.block == nil && recv_node.receiver != nil && is_ast_node?(recv_node.receiver)
+    ctor_recv = recv_node.receiver
+    if ast_kind(ctor_recv) in (:var :class_ref)
+      ctor_class = resolve_exact_source_class_name(ctx[:mod], ctx[:class_name], ctor_recv.name)
+      if ctor_class != nil && source_constructor_returns_exact_class?(ctx[:mod], ctor_class)
+        return {class_name: ctor_class, certainty: :exact, stable: true}
   nil
 
 # Resolve the exact implementation ordinary runtime lookup would select for a
@@ -54,6 +65,36 @@
     current = mod[:class_super_names][current]
     guard += 1
   nil
+
+# A locked table makes `self` devirtualizable without pretending its runtime
+# class is exact. New subclasses created after the barrier cannot install an
+# override, and every source subclass that already exists is in
+# class_super_names. Direct dispatch is sound only when the base and every
+# known descendant resolve to the SAME plain-ABI worker.
+-> locked_compatible_method_fn(mod, class_name, method_name, arg_count)
+  target = locked_direct_method_fn(mod, class_name, method_name, arg_count)
+  if target == nil
+    return nil
+  class_names = mod[:known_classes].keys()
+  ci = 0
+  while ci < class_names.size()
+    candidate = class_names[ci]
+    if candidate != class_name
+      current = candidate
+      descendant = false
+      guard = 0
+      while current != nil && guard < 64
+        current = mod[:class_super_names][current]
+        if current == class_name
+          descendant = true
+          break
+        guard += 1
+      if descendant
+        candidate_target = locked_direct_method_fn(mod, candidate, method_name, arg_count)
+        if candidate_target != target
+          return nil
+    ci += 1
+  target
 
 -> lower_method_call(ctx, node)
   wfn = ctx[:func]
@@ -1980,15 +2021,20 @@
     closure_reg = ensure_i64_value(wfn, closure_tv)
     arg_regs.push(closure_reg)
 
-  # Once runtime method registration is closed, an exact receiver fact is a
-  # permanent dispatch proof. Call the selected source worker directly: no
-  # class-id guard, inline-cache slot, method-name materialization, or generic
-  # fallback remains in the generated code. Compatible facts still dispatch;
-  # a subclass may select a different already-registered implementation.
+  # Once runtime method registration is closed, a stable exact receiver fact
+  # is a permanent dispatch proof. Stable compatible `self` facts are also a
+  # proof when every known descendant resolves this selector to the same
+  # worker. Call that worker directly: no class-id guard, inline-cache slot,
+  # method-name materialization, or generic fallback remains. Unchecked type
+  # hints and compatible hierarchies with an override keep dynamic dispatch.
   if ctx[:mod][:method_tables_locked] == true && node.block == nil
     locked_fact = receiver_source_class_fact(ctx, recv_node)
-    if locked_fact != nil && locked_fact[:certainty] == :exact && locked_fact[:stable] == true
-      locked_fn = locked_direct_method_fn(ctx[:mod], locked_fact[:class_name], method_name, node.args.size())
+    if locked_fact != nil && locked_fact[:stable] == true
+      locked_fn = nil
+      if locked_fact[:certainty] == :exact
+        locked_fn = locked_direct_method_fn(ctx[:mod], locked_fact[:class_name], method_name, node.args.size())
+      elsif locked_fact[:certainty] == :compatible
+        locked_fn = locked_compatible_method_fn(ctx[:mod], locked_fact[:class_name], method_name, node.args.size())
       if locked_fn != nil
         locked_args = [receiver_reg]
         lai = 0

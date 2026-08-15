@@ -44,13 +44,22 @@ startup registers that complete set and then irreversibly closes both instance
 and static runtime method tables before user statements run. Any later native
 or interpreted registration raises an error.
 
-Once the doors are locked, a constructor-derived `exact` receiver with exactly
-one assignment in its complete lexical scope selects a permanent method
-implementation. Lowering emits a plain direct call with no class guard, inline
-cache, method-name materialization, or generic fallback. Reassigned exact facts
-keep the guard because the value fact itself may be stale; a `compatible` fact
-still dispatches dynamically because an already-defined subclass may select a
-different implementation.
+Once the doors are locked, a constructor-derived `exact` receiver whose only
+write is a straight-line assignment dominating the call selects a permanent
+method implementation. The same proof now covers a fresh constructor
+expression and a chain of such local copies. Assignments nested in a branch or
+loop remain guarded even when they are the binding's only lexical write; a
+single write does not prove the assignment executes. Lowering emits a plain
+direct call with no class guard, inline cache, method-name materialization, or
+generic fallback.
+
+`self` is a sound `compatible` fact rather than an unchecked source hint: the
+runtime entered the method through the defining class or one of its subclasses.
+Under the lock, lowering may call a `self` helper directly when every known
+descendant resolves that selector and arity to the same plain worker. A known
+subclass override keeps the guarded dynamic call. Other compatible facts and
+reassigned exact facts also keep their guards; exact ivar facts do so until
+definite initialization is modeled.
 
 ## Exact and compatible locals
 

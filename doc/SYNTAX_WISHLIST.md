@@ -61,9 +61,11 @@ is conservative.
 
 An immutable local declaration, or an explicit exact-class assertion distinct
 from a coercing cast, would let lowering preserve the fact through SSA and use
-a direct source-method call when the method is also final. Mutable declarations
-should instead widen at control-flow joins, making the loss of exactness visible
-rather than leaving it implicit in function-wide inference.
+a direct source-method call after the executable has called
+`Tungsten.LOCK_THE_DOORS!`. Mutable declarations should instead widen at
+control-flow joins, making the loss of exactness visible rather than leaving it
+implicit in function-wide inference. Tungsten deliberately does not use a
+library-owned `final` promise as an optimization guarantee.
 
 The surface should also distinguish a checked class assertion from an
 unchecked optimizer promise. `## Class` is currently treated as a trusted

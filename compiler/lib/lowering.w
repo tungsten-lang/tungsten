@@ -856,6 +856,7 @@ use lowering/definitions
     bindings: {},
     unboxed_vars: {},
     local_assignment_counts: local_assignment_counts(ast.expressions),
+    straight_line_local_assignments: straight_line_local_assignments(ast.expressions),
     raw_int_candidates: raw_int_candidate_map(ast.expressions, var_types, mod),
     mut_accumulators: mut_accumulator_candidates(ast.expressions),
     method_name: nil,

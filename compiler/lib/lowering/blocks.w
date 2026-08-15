@@ -712,6 +712,7 @@
     bindings: {},
     unboxed_vars: {},
     local_assignment_counts: local_assignment_counts(block.body),
+    straight_line_local_assignments: straight_line_local_assignments(block.body),
     verbose: ctx[:verbose],
     is_class_method: ctx[:is_class_method],
     is_block: true,

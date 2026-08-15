@@ -31,7 +31,7 @@
     return :typed_array_u16
   if bits == 32
     return :typed_array_u32
-  :typed_array_i64
+  :typed_array_w64
 
 -> machine_int_result_type(lt, rt)
   if is_u128_type(lt) || is_u128_type(rt)

@@ -9,6 +9,13 @@
     exit(1)
   << "PASS lexchar storage " + name
 
+# Exercise the compiler's inferred return type for the ordinary RegexLexer
+# path. An explicit `## w64[]` annotation would hide a stale lchs inference
+# contract by correcting the array type at the use site.
+-> inferred_tag_at(source, index)
+  chars = source.lchs()
+  wvalue_bits(chars[index])
+
 + LexCharStorageProbe
   -> new(source)
     set_lexchars(source.lchs("tungsten"))
@@ -27,6 +34,7 @@ chars = "F0z".lchs("tungsten") ## w64[]
 probe = LexCharStorageProbe.new("F0z")
 
 check("tag preserved", (wvalue_bits(probe.tagged_at(0)) >> 48) & 0xFFFF, 0xFFFC)
+check("inferred tag preserved", (inferred_tag_at("F0z", 0) >> 48) & 0xFFFF, 0xFFFC)
 check("hex flag", wvalue_bits(probe.tagged_at(0)) & 8, 8)
 check("digit codepoint", (wvalue_bits(probe.tagged_at(1)) >> 18) & 0x1FFFFF, 48)
 check("raw reinterpret", probe.raw_matches_tagged?(2), true)

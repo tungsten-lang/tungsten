@@ -110,3 +110,36 @@ which is what stage identity requires (stage 0 has no threads).
   aggregation is deterministic and lane-collision-safe.
 - Phase timing instrumentation exists (`--verbose`), and the per-spec
   cost model above is reproducible from it.
+- Stage 0 is implemented: emission resets loop/alias metadata per module,
+  `compile-batch` uses correct scratch/runtime archive paths, and
+  `scripts/batch_vs_solo_oracle.sh` compares fresh-process and batch `.ll`.
+
+## Stable Core ABI contract
+
+`Tungsten.PROTECT_THE_CORE!` is the Stage-1 boundary. It is a prospective,
+program-wide declaration: the complete source graph promises not to replace or
+reopen canonical Core definitions. The parser already records declaring-file
+provenance in its sparse AST metadata, so the earlier experimental Loader-owned
+origin sidecar and `TUNGSTEN_INCREMENTAL_LOWERING` switch are obsolete.
+
+Protected lowering partitions Core from program expressions, reaches Core
+return facts before analyzing the program, prevents program call sites from
+specializing Core parameters, and publishes every Core global that a cached
+artifact may expose. It then emits `core_abi_hash`, a deterministic fingerprint
+covering callable signatures, class layouts, exported globals, math/fast/slab
+variants, build defines, and the type/method closure contracts.
+
+The fingerprint is the cache compatibility key, not file provenance itself.
+Source content, compiler/runtime identity, target, and dependency mtimes remain
+manifest inputs. On a cache lookup, all of those inputs must match and the
+cached artifact's ABI fingerprint must equal the program's requested Core ABI.
+Unsupported shapes retain ordinary semantics by selecting an explicit
+monolithic fallback, including user subclasses of Core classes, Core generic
+specialization, global collisions, and `constant_alias` coupling.
+
+`scripts/test-incremental-lowering-contract.sh` verifies that two different
+programs with the same protected Core produce the same canonical ABI and hash,
+that a lowering-mode variant changes the key, and that a structurally coupled
+program falls back. This still does **not** claim a compile-time win: Stage 2
+must persist or retain the lowered Core WIRE and avoid running the destructive
+whole-module passes over shared state.

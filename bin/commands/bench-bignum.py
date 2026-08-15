@@ -1210,7 +1210,7 @@ def print_results_header(metadata: dict[str, Any]) -> None:
     for lane in lanes[1:]:
         label = RATIO_LABELS.get(lane, "C/" + LANE_LABELS[lane])
         columns += f" {label:>8}"
-    columns += f" {'fastest':>10}"
+    columns += f" {'fastest':>15}"
     print(columns)
 
 
@@ -1231,10 +1231,10 @@ def print_result_row(row: dict[str, Any], lanes: list[str]) -> None:
         ratio = row.get(f"tungsten_over_{lane}")
         line += f" {ratio:>8.2f}" if ratio is not None else f" {'-':>8}"
     fastest = {
-        "tungsten": "C",
-        "tungsten_native": "Tungsten",
+        "tungsten": "tungsten",
+        "tungsten_native": "tungsten-native",
     }.get(row["fastest"], row["fastest"])
-    line += f" {fastest:>10}"
+    line += f" {fastest:>15}"
     print(line, flush=True)
 
 

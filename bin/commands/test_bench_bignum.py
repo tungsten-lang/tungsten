@@ -205,7 +205,9 @@ class TungstenNativeLaneTest(unittest.TestCase):
             BENCH.print_result_row(
                 row, ["tungsten", "tungsten_native", "gmp"]
             )
-        self.assertIn("Tungsten", output.getvalue())
+        self.assertTrue(
+            output.getvalue().rstrip().endswith("tungsten-native")
+        )
         self.assertNotIn("tungsten_native", output.getvalue())
 
         row["fastest"] = "tungsten"
@@ -214,7 +216,7 @@ class TungstenNativeLaneTest(unittest.TestCase):
             BENCH.print_result_row(
                 row, ["tungsten", "tungsten_native", "gmp"]
             )
-        self.assertTrue(output.getvalue().rstrip().endswith("C"))
+        self.assertTrue(output.getvalue().rstrip().endswith("tungsten"))
 
 
 if __name__ == "__main__":

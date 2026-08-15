@@ -986,6 +986,25 @@
       emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_string_idx_fast", args: [receiver_reg, index_raw]})
       return typed_value(:i64, temp)
 
+  # Two-argument String#slice is a literal wrapper over
+  # w_string_slice_raw. When both indices are statically machine integers,
+  # pass them raw and skip the method IC plus args scratch array. Keep the
+  # generic route for unknown/BigInt arguments so its existing validation is
+  # unchanged.
+  if recv_node != nil && node.block == nil && method_name == "slice" && recv_type == :string && node.args.size() == 2
+    start_type = infer_type(node.args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    len_type = infer_type(node.args[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    start_machine = is_integer_like_type(start_type) && !(start_type in (:u64 :raw_u64))
+    len_machine = is_integer_like_type(len_type) && !(len_type in (:u64 :raw_u64))
+    if start_machine && len_machine
+      receiver_val = lower_expression(ctx, recv_node)
+      receiver_reg = ensure_i64_value(wfn, receiver_val)
+      start_raw = ensure_raw_machine_int(wfn, lower_expression(ctx, node.args[0]), :i64, start_type)
+      len_raw = ensure_raw_machine_int(wfn, lower_expression(ctx, node.args[1]), :i64, len_type)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_string_slice_raw", args: [receiver_reg, start_raw, len_raw]})
+      return typed_value(:string, temp)
+
   # Hash subscripts: a :hash-typed receiver reaches w_hash_get / w_hash_set
   # directly. The IC handlers (w_ic_hash_get/set) are literal one-line
   # wrappers over the same functions, so missing-key nil, default values,
@@ -1920,15 +1939,20 @@
   ctx[:mod][:next_ic] = ic_id + 1
 
   scalar_source_argc1 = false
-  if arg_regs.size() == 1 && recv_node != nil && ast_kind(recv_node) == :ivar && ctx[:class_name] != nil
+  scalar_source_argc2 = false
+  scalar_source_arity = arg_regs.size()
+  if (scalar_source_arity == 1 || scalar_source_arity == 2) && recv_node != nil && ast_kind(recv_node) == :ivar && ctx[:class_name] != nil
     exact_ivars = ctx[:mod][:exact_source_ivar_types][ctx[:class_name]]
     source_class_name = nil
     if exact_ivars != nil
       source_class_name = exact_ivars[recv_node.name]
     source_class = ctx[:mod][:known_classes][source_class_name]
     if source_class != nil && is_ast_node?(source_class) && ast_kind(source_class) == :class_def
-      own_method = ctx[:mod][:class_method_asts][source_class_name + "." + method_name + "/1"]
-      scalar_source_argc1 = own_method != nil
+      own_method = ctx[:mod][:class_method_asts][source_class_name + "." + method_name + "/" + scalar_source_arity.to_s()]
+      if scalar_source_arity == 1
+        scalar_source_argc1 = own_method != nil
+      else
+        scalar_source_argc2 = own_method != nil
 
   # Guarded devirtualization: when the receiver's exact class is statically
   # known (a local assigned `C.new(...)`, or an ivar with a conflict-free
@@ -2022,6 +2046,7 @@
     method_name_val: method_name_val,
     args: arg_regs,
     scalar_source_argc1: scalar_source_argc1,
+    scalar_source_argc2: scalar_source_argc2,
     devirt_fn: devirt_fn,
     devirt_class: devirt_class,
     construct_fn: construct_fn,

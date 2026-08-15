@@ -1,5 +1,5 @@
 # LLVM memory-effect contracts for SSO String helpers. The SSO-5 leaf is
-# scalar-only; public helpers remain conservative when a rope fallback can
+# scalar-only; public helpers remain conservative because rope fallback can
 # allocate and write the rope's cached flattened value.
 
 use ../../compiler/lib/emitter
@@ -24,11 +24,13 @@ lines = decls.split("\n")
 
 idx_decl = declaration_for(lines, "w_string_idx_raw")
 size_decl = declaration_for(lines, "w_string_byte_length")
+first_decl = declaration_for(lines, "w_string_first_byte")
 slice_decl = declaration_for(lines, "w_string_slice_raw")
 
 check("generic index declared", idx_decl != nil)
 check("generic index is conservative", idx_decl == "declare i64 @w_string_idx_raw(i64, i64) nounwind")
 check("generic size is read-only", size_decl == "declare i64 @w_string_byte_length(i64) nounwind willreturn memory(read)")
+check("generic first-byte is conservative", first_decl == "declare i64 @w_string_first_byte(i64) nounwind")
 check("generic slice is conservative", slice_decl == "declare i64 @w_string_slice_raw(i64, i64, i64) nounwind")
 
 ir = string_idx_fast_helper_ir()

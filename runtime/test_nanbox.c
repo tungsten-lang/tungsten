@@ -25,6 +25,10 @@ static int expect_crash(void (*fn)(void)) {
 static void overflow_fn(void) { w_int((1LL << 47)); }
 static void underflow_fn(void) { w_int(-(1LL << 47) - 1); }
 static void add_overflow_fn(void) { w_add(w_box_int((1LL << 47) - 1), w_box_int(1)); }
+static WValue cached_two_arg_fn(WValue receiver, WValue left, WValue right) {
+    (void)receiver;
+    return w_add(left, right);
+}
 #ifndef TUNGSTEN_ONIG
 static void unsupported_named_regex_fn(void) {
     (void)w_regex_new(w_string("(?<word>a)"), w_string(""));
@@ -102,9 +106,14 @@ int main() {
             w_regex_new(w_string("(é)(猫)?()"), w_string("")), w_string("xé"));
         assert(w_is_regex_match(structured));
         assert(strcmp(str_val(__w_type(structured)), "RegexMatch") == 0);
+        WRegexMatch *raw_match = (WRegexMatch *)w_as_ptr(structured);
+        assert(w_is_slice(w_as_array(raw_match->groups)->slots[0]));
+        assert(w_is_slice(w_as_array(raw_match->groups)->slots[1]));
+        assert(w_is_slice(w_as_array(raw_match->offsets)->slots[1]));
         WValue group = w_int(1);
         assert(strcmp(str_val(w_method_call_fast(
             structured, w_string("[]"), &group, 1)), "é") == 0);
+        assert(!w_is_slice(w_as_array(raw_match->groups)->slots[1]));
         WValue span = w_method_call_fast(
             structured, w_string("offset"), &group, 1);
         assert(w_as_int(w_array_get(span, w_int(0))) == 1);
@@ -118,6 +127,8 @@ int main() {
         WValue rx = w_regex_new(
             w_string("(?<word>é)(?<tail>猫)?"), w_string(""));
         WValue structured = w_regex_match_data(rx, w_string("xé"));
+        assert(((WRegexMatch *)w_as_ptr(structured))->name_to_group ==
+               ((WRegex *)w_as_ptr(rx))->name_to_group);
         WValue word = w_string("word");
         WValue tail = w_symbol("tail");
         assert(strcmp(str_val(w_method_call_fast(
@@ -263,6 +274,73 @@ int main() {
         printf("  array: OK\n");
     }
 
+    /* Exact-size inline results, growth ownership, view rebasing, sub-byte
+     * compaction, and page-backed promotion. */
+    {
+        WValue parent = w_array_new_inline(65, 3);
+        WArray *pa = w_as_array(parent);
+        pa->slots[0] = w_int(10);
+        pa->slots[1] = w_int(20);
+        pa->slots[2] = w_int(30);
+        WValue view = w_array_view(parent, w_int(1), w_int(2));
+        w_array_push(parent, w_int(40));
+        assert((pa->flags & W_FLAG_INLINE) == 0);
+        assert(w_as_int(w_array_get(view, w_int(0))) == 20);
+        assert(w_as_int(w_array_get(view, w_int(1))) == 30);
+
+        WValue bits = w_array_new(1, 8);
+        for (int i = 0; i < 8; i++) w_array_push(bits, (i & 1) ? W_FALSE : W_TRUE);
+        for (int i = 0; i < 3; i++) (void)w_array_shift(bits);
+        w_array_push(bits, W_FALSE); /* compacts a non-byte-aligned prefix */
+        assert(w_as_array(bits)->start == 0);
+        assert(w_array_get(bits, w_int(0)) == W_FALSE);
+        assert(w_array_get(bits, w_int(5)) == W_FALSE);
+
+        WValue front = w_array_new(1, 2);
+        w_array_push(front, W_TRUE);
+        w_array_push(front, W_FALSE);
+        w_array_unshift(front, W_TRUE);
+        assert(w_array_get(front, w_int(0)) == W_TRUE);
+        assert(w_array_get(front, w_int(1)) == W_TRUE);
+        assert(w_array_get(front, w_int(2)) == W_FALSE);
+
+        WValue aligned = w_array_new_aligned(w_int(8), w_int(2));
+        w_array_push(aligned, w_int(7));
+        assert((w_as_array(aligned)->flags & W_FLAG_PAGE_ALIGNED) == 0);
+        assert(w_as_int(w_array_get(aligned, w_int(2))) == 7);
+
+        WValue tail = w_array_new_inline(65, 2);
+        w_as_array(tail)->slots[0] = w_int(50);
+        w_as_array(tail)->slots[1] = w_int(60);
+        WValue joined = w_array_concat(parent, tail);
+        assert(w_as_array(joined)->size == 6);
+        assert(w_as_int(w_array_get(joined, w_int(5))) == 60);
+        WValue range = w_array_copy_range(joined, w_int(1), w_int(3), W_FALSE);
+        assert(w_as_array(range)->size == 3);
+        assert(w_as_int(w_array_get(range, w_int(0))) == 20);
+        assert(w_as_int(w_array_get(range, w_int(2))) == 40);
+
+        WValue grown = w_array_new_empty();
+        for (int i = 0; i < 257; i++) w_array_push(grown, w_int(i));
+        assert(w_as_array(grown)->cap == 512);
+        assert(w_as_int(w_array_get(grown, w_int(256))) == 256);
+
+        WValue large_grown = w_array_new_empty();
+        for (int i = 0; i < 16385; i++) w_array_push(large_grown, w_int(i));
+        assert(w_as_array(large_grown)->cap == 20480);
+        assert(w_as_int(w_array_get(large_grown, w_int(16384))) == 16384);
+
+        WValue front_grown = w_array_new(65, 256);
+        w_as_array(front_grown)->size = 256;
+        for (int i = 0; i < 256; i++)
+            w_as_array(front_grown)->slots[i] = w_int(i);
+        w_array_unshift(front_grown, w_int(-1));
+        assert(w_as_array(front_grown)->cap == 512);
+        assert(w_as_int(w_array_get(front_grown, w_int(0))) == -1);
+        assert(w_as_int(w_array_get(front_grown, w_int(256))) == 255);
+        printf("  array allocation and growth: OK\n");
+    }
+
     /* Test arithmetic */
     {
         WValue a = w_int(7), b = w_int(3);
@@ -271,6 +349,9 @@ int main() {
         assert(w_as_int(w_mul(a, b)) == 21);
         assert(w_as_int(w_div(a, b)) == 2);
         assert(w_as_int(w_mod(a, b)) == 1);
+        assert(w_as_int(w_div_fast(a, b)) == 2);
+        assert(w_as_int(w_mod_fast(a, b)) == 1);
+        assert(w_is_bigint(w_div_fast(w_box_int(W_INT48_MIN), w_box_int(-1))));
         assert(w_as_int(w_neg(a)) == -7);
         printf("  int arithmetic: OK\n");
     }
@@ -282,6 +363,45 @@ int main() {
         assert(w_as_double(w_sub(a, b)) == 2.0);
         assert(w_as_double(w_mul(a, b)) == 5.25);
         printf("  float arithmetic: OK\n");
+    }
+
+    /* Large array transcendentals take the vector bridge; i8 matmul packs
+     * RHS columns once and reuses the packed storage for all output rows. */
+    {
+        WValue values = w_array_new(-64, 128);
+        for (int i = 0; i < 128; i++)
+            w_array_push(values, w_float((double)i / 32.0));
+        WValue sine = w_array_sin_float(values);
+        for (int i = 0; i < 128; i++) {
+            double got = w_as_double(w_array_get(sine, w_int(i)));
+            assert(fabs(got - sin((double)i / 32.0)) < 1.0e-12);
+        }
+
+        enum { M = 16, K = 16, N = 4 };
+        for (int mode = 0; mode < 3; mode++) {
+            int a_bits = mode == 1 ? 8 : 108;
+            int b_bits = mode == 0 ? 108 : 8;
+            WValue a = w_array_new(a_bits, M * K);
+            WValue b = w_array_new(b_bits, K * N);
+            for (int r = 0; r < M; r++)
+                for (int kk = 0; kk < K; kk++)
+                    w_array_push(a, w_int((r + kk) % 7));
+            for (int kk = 0; kk < K; kk++)
+                for (int c = 0; c < N; c++)
+                    w_array_push(b, w_int((kk + c) % 5));
+            WValue product = w_array_matmul_i8(
+                a, b, w_int(M), w_int(K), w_int(N));
+            for (int r = 0; r < M; r++) {
+                for (int c = 0; c < N; c++) {
+                    int64_t expected = 0;
+                    for (int kk = 0; kk < K; kk++)
+                        expected += ((r + kk) % 7) * ((kk + c) % 5);
+                    assert(w_as_int(w_array_get(product, w_int(r * N + c))) ==
+                           expected);
+                }
+            }
+        }
+        printf("  vector transcendentals and packed i8 matmul: OK\n");
     }
 
     /* Int#prime? trial-division/FJ boundary. The wheel variants share the
@@ -354,6 +474,25 @@ int main() {
         assert(w_is_string(name));
         assert(strcmp(str_val(name), "Rex") == 0);
         printf("  class/object: OK\n");
+    }
+
+    /* Exact two-argument cached dispatch agrees with the generic cache path,
+     * including its warmed steady-state lookup. */
+    {
+        WValue klass = w_class_new("CachedPair", W_NIL);
+        WValue name = w_string("combine");
+        WValue object = w_object_new(klass);
+        WValue args[2] = {w_int(11), w_int(31)};
+        WInlineCache generic_cache = {0};
+        WInlineCache exact_cache = {0};
+        w_class_add_method_wv(klass, name, (void *)cached_two_arg_fn, 3);
+        assert(w_as_int(w_method_call_cached(
+            object, name, args, 2, &generic_cache)) == 42);
+        assert(w_as_int(w_method_call_cached_2(
+            object, name, args[0], args[1], &exact_cache)) == 42);
+        assert(w_as_int(w_method_call_cached_2(
+            object, name, args[0], args[1], &exact_cache)) == 42);
+        printf("  cached two-argument dispatch: OK\n");
     }
 
     /* Test closure */
@@ -1004,7 +1143,36 @@ int main() {
         assert(w_is_slab(vmax));
         assert(!w_is_inline(vmax));
         assert(strcmp(str_val(vmax), "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789") == 0);
+        /* Mode-6 aliases can differ only in their cached-length bits. */
+        WValue uncached = w_box_slab_str(w_as_slab_index(v));
+        assert(uncached != v);
+        assert(w_eq(uncached, v) == W_TRUE);
         printf("  slab string round-trip: OK\n");
+    }
+
+    /* Equal text must remain the same Hash key across storage modes. Numeric
+     * formatters deliberately produce fresh mode-7 strings even when a slab
+     * literal with the same bytes exists. */
+    {
+        static const char text[] = "-987654321";
+        WValue slab = w_string(text);
+        WString *fresh = malloc(sizeof(WString) + sizeof(text));
+        fresh->len = (uint32_t)(sizeof(text) - 1);
+        memcpy(fresh->data, text, sizeof(text));
+        WValue heap = w_box_heap_str(fresh);
+        assert(w_is_slab_str(slab));
+        assert(w_is_heap_str(heap));
+        assert(w_eq(slab, heap) == W_TRUE);
+
+        WValue heap_first = w_hash_new();
+        w_hash_set(heap_first, heap, w_int(71));
+        assert(w_hash_get(heap_first, slab) == w_int(71));
+
+        WValue slab_first = w_hash_new();
+        w_hash_set(slab_first, slab, w_int(72));
+        assert(w_hash_get(slab_first, heap) == w_int(72));
+
+        printf("  cross-storage string hash: OK\n");
     }
 
     /* Negative int comparison regression */
@@ -1723,6 +1891,11 @@ int main() {
         assert(w_as_slab_index(slab_val) == 1234);
         assert(w_slab_cached_len(slab_val) == 15);
         assert(w_string_byte_length((int64_t)slab_val) == 15);
+
+        WValue switch_name = w_string("has_key?");
+        assert(w_is_slab_str(switch_name));
+        assert(w_switch_canonical(switch_name) ==
+               w_box_slab_str(w_as_slab_index(switch_name)));
 
         printf("  slab string length caching: OK\n");
     }

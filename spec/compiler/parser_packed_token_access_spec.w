@@ -1,9 +1,10 @@
 # Parser-hot packed-token access and equality must decode values after Array
-# storage and retrieval. Untagged packed values fit in Integer; the signed
-# W_TAG_CHAR form exceeds i48 and materializes as BigInt, matching the real
-# lexer/parser path. Equality deliberately extracts length and offset from one
-# normalized raw value; the high-bit checks guard that shared conversion. The
-# public accessor checks also cover their top-level direct-helper wrappers.
+# storage and retrieval. Production descriptors are tagless and fit in
+# Integer; the signed W_TAG_CHAR form additionally exercises exact BigInt
+# decoding for genuine Token values. Equality deliberately extracts length
+# and offset from one normalized raw value; the high-bit checks guard that
+# shared conversion. The public accessor checks also cover their top-level
+# direct-helper wrappers.
 
 use ../../compiler/lib/parser
 
@@ -36,9 +37,9 @@ small_length = 3
 small_bits = small_type * type_scale + small_length * length_scale + small_offset * 4
 small_token = after_array(small_bits)
 
-# Keep the equality fields small while retaining the real token tag/high type
-# bits, so tok_equal? exercises its single BigInt-to-i64 normalization before
-# decoding both length and offset.
+# Keep the equality fields small while retaining the Token tag/high type
+# type bits, so tok_equal? exercises its single BigInt-to-i64 normalization
+# before decoding both length and offset.
 equal_high_bits = tag + type_id * type_scale + small_length * length_scale + small_offset * 4
 equal_high_token = after_array(equal_high_bits)
 
@@ -62,5 +63,15 @@ check("small length mismatch", parser.tok_equal?(tokens[1], "ignored", "ab"), fa
 check("high-bit equality", parser.tok_equal?(tokens[2], "ignored", "abc"), true)
 check("high-bit inequality", parser.tok_equal?(tokens[2], "ignored", "abd"), false)
 check("high-bit length mismatch", parser.tok_equal?(tokens[2], "ignored", "ab"), false)
+
+# Six-byte keywords take the same allocation-free helper as short inline
+# strings. The leading multibyte character proves the packed token offset is
+# still a codepoint index rather than a UTF-8 byte index.
+keyword_bits = small_type * type_scale + 6 * length_scale + 1 * 4
+parser.set_chars(["é", "r", "e", "s", "c", "u", "e", "!"])
+check("six-byte keyword after unicode", parser.tok_equal?(keyword_bits, "ignored", "rescue"), true)
+check("six-byte keyword mismatch", parser.tok_equal?(keyword_bits, "ignored", "ensure"), false)
+parser.set_chars(["x", "u", "n", "l", "e", "s", "s", "!"])
+check("unless keyword", parser.tok_equal?(keyword_bits, "ignored", "unless"), true)
 
 << "PASS parser packed token access"

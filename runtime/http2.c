@@ -226,7 +226,7 @@ handle_request: ;
     WExceptionFrame exc_frame;
     w_exception_frame_push(&exc_frame);
 
-    if (_setjmp(exc_frame.buf) == 0) {
+    if (W_FAST_SETJMP(exc_frame.buf) == 0) {
         response = ((WValue (*)(WValue *, WValue))h2s->handler->fn_ptr)(h2s->handler->captures, req_val);
         w_exception_stack = prev_stack;
 

@@ -144,7 +144,8 @@
       # with the i48 payload. No w_int() helper exists at compile time — the
       # runtime symbol is C-only. Mirrors lower_build_define_string's SSO-5
       # construction, just with the int tag instead of the string tag.
-      return typed_value(:i64, wvalue_literal_text(w_tag_int + define_val.to_i()))
+      bits = (w_tag_int + define_val.to_i()) ## i64
+      return typed_value(:i64, wvalue_literal_text(machine_i64_box(bits)))
     # String: strip optional surrounding quotes (shell may or may not have
     # stripped them, depending on how the user quoted on the CLI).
     str_val = define_val

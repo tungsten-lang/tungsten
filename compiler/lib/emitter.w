@@ -34,22 +34,8 @@ use naming
   result.to_s()
 
 -> llvm_wvalue_literal(value)
-  u = value.to_i()
-  if u < 0
-    wrap = 1
-    i = 0
-    while i < 64
-      wrap = wrap * 2
-      i += 1
-    u = u + wrap
-  hex_chars = "0123456789ABCDEF"
-  out = StringBuffer(19)
-  out << "u0x"
-  shift = 60
-  while shift >= 0
-    out << hex_chars.slice((u >> shift) & 15, 1)
-    shift -= 4
-  out.to_s()
+  bits = value.to_i() ## u64
+  "u0x" + ccall("w_int_to_hex_str", bits)
 
 -> append_llvm_hex_byte(out, byte)
   b = byte ## u64
@@ -121,7 +107,11 @@ use naming
           nslots = 2
         slot_index = next_slot
         next_slot = next_slot + nslots
-        wv = w_tag_stringsym + 12 + slot_index * 16
+        # Static literals use the canonical slab identity (tag/mode/index).
+        # Runtime-created aliases may additionally cache the byte length in
+        # bits 28..33; equality and hashing deliberately ignore those bits.
+        wv_bits = (w_tag_stringsym + 12 + slot_index * 16) ## i64
+        wv = machine_i64_box(wv_bits)
         wvalues[s[:id]] = wv
         slab_entries.push({id: s[:id], text: s[:text], slot: slot_index, nslots: nslots, byte_len: byte_len})
         if bucket == nil
@@ -457,6 +447,7 @@ use naming
   out << declare_fn("w_string_idx_raw", wv, join_arg_types2(wv, "i64"))
   out << declare_fn("w_string_slice_raw", wv, join_arg_types3(wv, "i64", "i64"))
   out << declare_fn_attrs("w_string_byte_length", "i64", "i64", "nounwind willreturn memory(read)")
+  out << declare_fn("w_string_first_byte", "i64", wv)
   out << declare_fn("w_string_index", wv, wv3)
   out << declare_fn("w_string_rindex", wv, wv3)
   out << declare_fn("w_string_repeat", wv, wv2)
@@ -478,6 +469,7 @@ use naming
   out << declare_fn("w_method_call_cached", wv, join_arg_types5(wv, wv, "ptr", "i32", "ptr"))
   out << declare_fn("w_method_call_cached_0", wv, join_arg_types3(wv, wv, "ptr"))
   out << declare_fn("w_method_call_cached_1", wv, join_arg_types4(wv, wv, wv, "ptr"))
+  out << declare_fn("w_method_call_cached_2", wv, join_arg_types5(wv, wv, wv, wv, "ptr"))
   out << declare_fn("w_value_is_a", wv, wv2)
 
   # Classes / objects
@@ -553,6 +545,7 @@ use naming
   out << declare_fn("w_block_return_value", wv, "ptr")
   out << declare_fn_noreturn("w_block_return_signal", "void", i64_wv)
   out << declare_fn_attrs("setjmp", "i32", "ptr", "nounwind returns_twice")
+  out << declare_fn_attrs("_setjmp", "i32", "ptr", "nounwind returns_twice")
 
   # Memoization
   out << declare_fn("w_memo_init", "ptr", "ptr")
@@ -817,24 +810,20 @@ use naming
   out << "  %is65 = icmp eq i8 %eb, 65\n"
   out << "  br i1 %is65, label %rng, label %slow, !prof !31411\n"
   out << "rng:\n"
-  # start/slots load HERE (before the bounds branch), not in `fast:` — the
-  # header fields exist once the kind check passed, so the loads are
-  # unconditional and speculatable, letting LICM hoist them out of loops
-  # whose bounds branch varies per iteration (~6% on generic sum loops).
   out << "  %szp = getelementptr i8, ptr %p, i64 8\n"
   out << "  %sz32 = load i32, ptr %szp, align 4" + tbaa_header_suffix() + "\n"
   out << "  %sz = sext i32 %sz32 to i64\n"
-  out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
-  out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
-  out << "  %st = sext i32 %st32 to i64\n"
-  out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
-  out << "  %slots = load ptr, ptr %slp, align 8" + tbaa_header_suffix() + "\n"
   out << "  %neg = icmp slt i64 %i, 0\n"
   out << "  %iw = add i64 %i, %sz\n"
   out << "  %ix = select i1 %neg, i64 %iw, i64 %i\n"
   out << "  %inb = icmp ult i64 %ix, %sz\n"
   out << "  br i1 %inb, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
+  out << "  %stp = getelementptr i8, ptr %p, i64 4\n"
+  out << "  %st32 = load i32, ptr %stp, align 4" + tbaa_header_suffix() + "\n"
+  out << "  %st = sext i32 %st32 to i64\n"
+  out << "  %slp = getelementptr i8, ptr %p, i64 16\n"
+  out << "  %slots = load ptr, ptr %slp, align 8" + tbaa_header_suffix() + "\n"
   out << "  %eff = add i64 %st, %ix\n"
   out << "  %ep = getelementptr i64, ptr %slots, i64 %eff\n"
   out << "  %v = load i64, ptr %ep, align 8" + tbaa_elem_suffix() + "\n"
@@ -933,15 +922,20 @@ use naming
 # which owns the full type ladder. eq/neq compare full bits (equal tags
 # make payload equality bit equality); ordered compares sign-extend the
 # 48-bit payloads first.
--> cmp_fast_helper_ir(fast_name, slow_name, pred, sext_payload)
-  out = StringBuffer(760)
-  out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
-  out << "entry:\n"
+-> int_pair_test_ir()
+  out = StringBuffer(220)
   out << "  %ta = lshr i64 %a, 48\n"
   out << "  %ia = icmp eq i64 %ta, 65530\n"
   out << "  %tb = lshr i64 %b, 48\n"
   out << "  %ib = icmp eq i64 %tb, 65530\n"
   out << "  %both = and i1 %ia, %ib\n"
+  out.to_s()
+
+-> cmp_fast_helper_ir(fast_name, slow_name, pred, sext_payload)
+  out = StringBuffer(760)
+  out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << int_pair_test_ir()
   out << "  br i1 %both, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   if sext_payload
@@ -966,9 +960,9 @@ use naming
 # alwaysinline + constant folding each site is a bit-compare plus a
 # canonicality test. Faithful specialization of w_eq's own ladder:
 #   bits equal                      -> W_TRUE  (w_eq's a == b arm)
-#   x stringy (tag 0xFFF9) mode 0-6 -> W_FALSE (canonical-by-bit-pattern arm;
-#      cross-mode pairs are length-disjoint; strings never equal symbols;
-#      non-object x never reaches user == dispatch)
+#   x stringy (tag 0xFFF9) mode 0-5 -> W_FALSE (inline values are canonical
+#      by bit pattern; mode-6 aliases can differ in cached-length bits, while
+#      mode-7 text starts at six bytes)
 #   anything else (mode-7 heap/rope strings, ints, objects, ...) -> w_eq,
 #      preserving content compares and user-defined == exactly.
 # `big <op> 0` fast path for statically-BigInt operands (lowering's zero-
@@ -996,7 +990,7 @@ use naming
   out << "  %ri = select i1 %ci, i64 2, i64 1\n"
   out << "  ret i64 %ri\n"
   out << "ckbig:\n"
-  out << "  %isbig = icmp eq i64 %t, 65528\n"
+  out << "  %isbig = icmp eq i64 %t, 65531\n"
   out << "  br i1 %isbig, label %big, label %slow, !prof !31411\n"
   out << "big:\n"
   out << "  %pi = and i64 %x, 140737488355327\n"
@@ -1030,7 +1024,7 @@ use naming
   out << "  %iss = icmp eq i64 %hi, 65529\n"
   out << "  %md = lshr i64 %x, 1\n"
   out << "  %md3 = and i64 %md, 7\n"
-  out << "  %nh = icmp ne i64 %md3, 7\n"
+  out << "  %nh = icmp ule i64 %md3, 5\n"
   out << "  %canon = and i1 %iss, %nh\n"
   out << "  br i1 %canon, label %f, label %s\n"
   out << "f:\n"
@@ -1116,10 +1110,10 @@ use naming
 
 # Var-var `a == b` under a :string type fact. Faithful w_eq specialization:
 #   bits equal                          -> W_TRUE  (w_eq's a == b arm)
-#   BOTH canonical stringy (mode 0-6)   -> W_FALSE (equal canonical content
-#      interns to one WValue, so differing bits prove inequality; symbol
+#   BOTH inline stringy (mode 0-5)      -> W_FALSE (equal inline content
+#      has identical bit representation, so differing bits prove inequality; symbol
 #      bit 0 rides in the bits so strings never fold equal to symbols)
-#   anything else -> w_eq. One canonical side alone is NOT enough: the other
+#   anything else -> w_eq. One inline side alone is NOT enough: the other
 #   side could be a short rope with equal content, which only w_eq resolves.
 -> streq2_fast_helper_ir()
   out = StringBuffer(760)
@@ -1134,13 +1128,13 @@ use naming
   out << "  %sa = icmp eq i64 %ha, 65529\n"
   out << "  %ma = lshr i64 %a, 1\n"
   out << "  %ma3 = and i64 %ma, 7\n"
-  out << "  %na = icmp ne i64 %ma3, 7\n"
+  out << "  %na = icmp ule i64 %ma3, 5\n"
   out << "  %ca = and i1 %sa, %na\n"
   out << "  %hb = lshr i64 %b, 48\n"
   out << "  %sb = icmp eq i64 %hb, 65529\n"
   out << "  %mb = lshr i64 %b, 1\n"
   out << "  %mb3 = and i64 %mb, 7\n"
-  out << "  %nb = icmp ne i64 %mb3, 7\n"
+  out << "  %nb = icmp ule i64 %mb3, 5\n"
   out << "  %cb = and i1 %sb, %nb\n"
   out << "  %canon = and i1 %ca, %cb\n"
   out << "  br i1 %canon, label %f, label %s\n"
@@ -1161,11 +1155,7 @@ use naming
   out = StringBuffer(760)
   out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
   out << "entry:\n"
-  out << "  %ta = lshr i64 %a, 48\n"
-  out << "  %ia = icmp eq i64 %ta, 65530\n"
-  out << "  %tb = lshr i64 %b, 48\n"
-  out << "  %ib = icmp eq i64 %tb, 65530\n"
-  out << "  %both = and i1 %ia, %ib\n"
+  out << int_pair_test_ir()
   out << "  br i1 %both, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %sa = shl i64 %a, 16\n"
@@ -1197,11 +1187,7 @@ use naming
   out = StringBuffer(600)
   out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
   out << "entry:\n"
-  out << "  %ta = lshr i64 %a, 48\n"
-  out << "  %ia = icmp eq i64 %ta, 65530\n"
-  out << "  %tb = lshr i64 %b, 48\n"
-  out << "  %ib = icmp eq i64 %tb, 65530\n"
-  out << "  %both = and i1 %ia, %ib\n"
+  out << int_pair_test_ir()
   out << "  br i1 %both, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   if llvm_op == "xor"
@@ -1224,11 +1210,7 @@ use naming
   out = StringBuffer(760)
   out << "define private i64 @__w_mul_fast(i64 %a, i64 %b) alwaysinline nounwind {\n"
   out << "entry:\n"
-  out << "  %ta = lshr i64 %a, 48\n"
-  out << "  %ia = icmp eq i64 %ta, 65530\n"
-  out << "  %tb = lshr i64 %b, 48\n"
-  out << "  %ib = icmp eq i64 %tb, 65530\n"
-  out << "  %both = and i1 %ia, %ib\n"
+  out << int_pair_test_ir()
   out << "  br i1 %both, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %sa = shl i64 %a, 16\n"
@@ -1254,6 +1236,39 @@ use naming
   out << "}\n"
   out.to_s()
 
+# Boxed / and % fast paths. Both-inline-Int division is safe in i64 because
+# the payload is only i48; the sole promoted quotient (INT48_MIN / -1) fails
+# the common i48 fit check and falls back to w_div. A zero divisor also takes
+# the slow path so the runtime remains the authority for the exact error.
+-> divmod_fast_helper_ir(fast_name, slow_name, llvm_op)
+  out = StringBuffer(820)
+  out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << int_pair_test_ir()
+  out << "  br i1 %both, label %ints, label %slow, !prof !31411\n"
+  out << "ints:\n"
+  out << "  %sb = shl i64 %b, 16\n"
+  out << "  %pb = ashr i64 %sb, 16\n"
+  out << "  %nz = icmp ne i64 %pb, 0\n"
+  out << "  br i1 %nz, label %fast, label %slow, !prof !31411\n"
+  out << "fast:\n"
+  out << "  %sa = shl i64 %a, 16\n"
+  out << "  %pa = ashr i64 %sa, 16\n"
+  out << "  %r = " + llvm_op + " i64 %pa, %pb\n"
+  out << "  %rs = shl i64 %r, 16\n"
+  out << "  %rb = ashr i64 %rs, 16\n"
+  out << "  %fit = icmp eq i64 %rb, %r\n"
+  out << "  br i1 %fit, label %box, label %slow, !prof !31411\n"
+  out << "box:\n"
+  out << "  %m = and i64 %r, 281474976710655\n"
+  out << "  %v = or i64 %m, -1688849860263936\n"
+  out << "  ret i64 %v\n"
+  out << "slow:\n"
+  out << "  %sv = call i64 @" + slow_name + "(i64 %a, i64 %b)\n"
+  out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
 # Boxed << / >> fast paths. `<<` is polymorphic (strbuf/string/array append)
 # — the both-int tag check routes every non-int LHS to the runtime op
 # untouched. shl needs a shift-back equality check (i64 wrap) plus the i48
@@ -1264,11 +1279,7 @@ use naming
   out = StringBuffer(860)
   out << "define private i64 @" + fast_name + "(i64 %a, i64 %b) alwaysinline nounwind {\n"
   out << "entry:\n"
-  out << "  %ta = lshr i64 %a, 48\n"
-  out << "  %ia = icmp eq i64 %ta, 65530\n"
-  out << "  %tb = lshr i64 %b, 48\n"
-  out << "  %ib = icmp eq i64 %tb, 65530\n"
-  out << "  %both = and i1 %ia, %ib\n"
+  out << int_pair_test_ir()
   out << "  br i1 %both, label %cnt, label %slow, !prof !31411\n"
   out << "cnt:\n"
   out << "  %sb = shl i64 %b, 16\n"
@@ -1648,7 +1659,9 @@ ewscope_md_state = {ids: {}}
   ", !range !{" + llvm_type + " " + low.to_s() + ", " + llvm_type + " " + high.to_s() + "}"
 
 -> wvalue_int_range_metadata_suffix(low, high)
-  direct_range_metadata_suffix("i64", w_tag_int + low, w_tag_int + high)
+  low_bits = (w_tag_int + low) ## i64
+  high_bits = (w_tag_int + high) ## i64
+  direct_range_metadata_suffix("i64", machine_i64_box(low_bits), machine_i64_box(high_bits))
 
 -> wvalue_bool_range_metadata_suffix()
   direct_range_metadata_suffix("i64", w_false, w_true + 1)
@@ -1656,7 +1669,9 @@ ewscope_md_state = {ids: {}}
 -> wvalue_char_range_metadata_suffix()
   # Char WValues are the 0xFFFC tag with subtype 11 (bits 47..46).
   subtype_span = 70368744177664
-  direct_range_metadata_suffix("i64", w_tag_char + subtype_span * 3, w_tag_char + subtype_span * 4)
+  low_bits = (w_tag_char + subtype_span * 3) ## i64
+  high_bits = (w_tag_char + subtype_span * 4) ## i64
+  direct_range_metadata_suffix("i64", machine_i64_box(low_bits), machine_i64_box(high_bits))
 
 -> wvalue_bool_call?(name)
   name in ("w_bool" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "__w_eq0_big_fast" "__w_lt0_big_fast" "__w_gt0_big_fast" "__w_lte0_big_fast" "__w_gte0_big_fast" "__w_streq_fast" "__w_streq2_fast" "w_hash_has_key" "__w_file_exists" "__w_write_file" "w_ipv4_in_cidr")
@@ -1683,6 +1698,12 @@ ewscope_md_state = {ids: {}}
 # retain the established pointer-plus-count dispatch ABI.
 -> scalar_source_one_call?(inst)
   inst[:op] == :call_method_i64 && inst[:args] != nil && inst[:args].size() == 1 && inst[:scalar_source_argc1] == true
+
+-> scalar_source_two_call?(inst)
+  inst[:op] == :call_method_i64 && inst[:args] != nil && inst[:args].size() == 2 && inst[:scalar_source_argc2] == true
+
+-> scalar_source_call?(inst)
+  scalar_source_one_call?(inst) || scalar_source_two_call?(inst)
 
 # Return the runtime function names that an instruction will reference when rendered.
 -> runtime_fns_for_inst(inst, string_wvs = nil)
@@ -1812,10 +1833,15 @@ ewscope_md_state = {ids: {}}
 
   when :call_method_i64
     runtime_fns = []
-    if inst[:args].size() == 0
+    argc = 0
+    if inst[:args] != nil
+      argc = inst[:args].size()
+    if argc == 0
       runtime_fns.push("w_method_call_cached_0")
     elsif scalar_source_one_call?(inst)
       runtime_fns.push("w_method_call_cached_1")
+    elsif scalar_source_two_call?(inst)
+      runtime_fns.push("w_method_call_cached_2")
     else
       runtime_fns.push("w_method_call_cached")
     if inst[:construct_fn] != nil
@@ -1836,7 +1862,10 @@ ewscope_md_state = {ids: {}}
     ["__w_memo_call2_i64"]
 
   when :setjmp
-    ["setjmp"]
+    # POSIX uses _setjmp (matching the runtime's _longjmp) while Windows uses
+    # setjmp. Keep both declarations through filtering; render_instruction
+    # selects the target-correct symbol.
+    ["setjmp", "_setjmp"]
 
   when :const_decimal
     ["w_decimal"]
@@ -2573,7 +2602,7 @@ ewscope_md_state = {ids: {}}
   i = 0
   while i < mod[:functions].size()
     mod[:functions][i][:fp_flags] = fp_flags
-    fn_out << emit_function(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, emit_target_is_arm64(mod))
+    fn_out << emit_function(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, emit_target_is_arm64(mod), emit_target_is_windows(mod))
     fn_out << "\n"
     i += 1
 
@@ -2791,7 +2820,7 @@ ewscope_md_state = {ids: {}}
         if bitwise_raw[:call_conv] != nil && bitwise_raw[:call_conv] != ""
           br_cc = bitwise_raw[:call_conv] + " "
         fn_out << "  %a.tag = and i64 %a, -281474976710656\n"
-        fn_out << "  %a.is_bigint = icmp eq i64 %a.tag, -2251799813685248\n"
+        fn_out << "  %a.is_bigint = icmp eq i64 %a.tag, -1407374883553280\n"
         fn_out << "  br i1 %a.is_bigint, label %reopened, label %raw\n"
         fn_out << "reopened:\n"
         fn_out << "  %r.reopened = tail call " + bp_cc + "i64 @" + bigop[:name] + "(i64 %a, i64 %b)\n"
@@ -3006,6 +3035,18 @@ ewscope_md_state = {ids: {}}
       decls_out = decls_out + "declare i64 @w_mul(i64, i64) nounwind\n"
     decls_out = decls_out + "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)\n"
     decls_out = decls_out + mul_fast_helper_ir() + "\n"
+  divmod_fast_specs = [
+    ["__w_div_fast", "w_div", "sdiv"],
+    ["__w_mod_fast", "w_mod", "srem"]
+  ]
+  dfi = 0
+  while dfi < divmod_fast_specs.size()
+    df = divmod_fast_specs[dfi]
+    if ccall_needed.has_key?(df[0])
+      if decls_out.index("@" + df[1] + "(") == nil
+        decls_out = decls_out + "declare i64 @" + df[1] + "(i64, i64) nounwind\n"
+      decls_out = decls_out + divmod_fast_helper_ir(df[0], df[1], df[2]) + "\n"
+    dfi += 1
   if ccall_needed.has_key?("__w_shl_fast")
     if decls_out.index("@w_bit_shl(") == nil
       decls_out = decls_out + "declare i64 @w_bit_shl(i64, i64) nounwind\n"
@@ -3211,7 +3252,13 @@ ewscope_md_state = {ids: {}}
     return true
   triple.index("arm64") != nil || triple.index("aarch64") != nil
 
--> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true)
+-> emit_target_is_windows(mod)
+  triple = mod[:llvm_triple]
+  if triple == nil
+    return false
+  triple.index("windows") != nil || triple.index("mingw") != nil || triple.index("msvc") != nil
+
+-> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true, windows_target = false)
   if f[:embedded_ll] != nil
     return emit_embedded_ll_function(f)
   if f[:embedded_asm] != nil
@@ -3255,7 +3302,7 @@ ewscope_md_state = {ids: {}}
       inst = blk[:instructions][ji]
       if inst[:op] == :call_method_i64 && inst[:args] != nil
         argc = inst[:args].size()
-        needs_scratch = argc > 0 && !scalar_source_one_call?(inst)
+        needs_scratch = argc > 0 && !scalar_source_call?(inst)
         if needs_scratch && argc > max_mcall_argc
           max_mcall_argc = argc
       ji += 1
@@ -3320,7 +3367,7 @@ ewscope_md_state = {ids: {}}
     j = 0
     while j < blk[:instructions].size()
       out << "  "
-      out << render_instruction(blk[:instructions][j], string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target)
+      out << render_instruction(blk[:instructions][j], string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target)
       out << "\n"
       j += 1
     i += 1
@@ -3365,10 +3412,10 @@ ewscope_md_state = {ids: {}}
   boxed = t + ".fast"
   slow = t + ".slow"
   out = StringBuffer(768)
-  out << ltag + " = and i64 " + inst[:lhs] + ", " + w_tag_mask.to_s() + "\n  "
-  out << lis_int + " = icmp eq i64 " + ltag + ", " + w_tag_int.to_s() + "\n  "
-  out << rtag + " = and i64 " + inst[:rhs] + ", " + w_tag_mask.to_s() + "\n  "
-  out << ris_int + " = icmp eq i64 " + rtag + ", " + w_tag_int.to_s() + "\n  "
+  out << ltag + " = and i64 " + inst[:lhs] + ", " + machine_i64_text(w_tag_mask) + "\n  "
+  out << lis_int + " = icmp eq i64 " + ltag + ", " + machine_i64_text(w_tag_int) + "\n  "
+  out << rtag + " = and i64 " + inst[:rhs] + ", " + machine_i64_text(w_tag_mask) + "\n  "
+  out << ris_int + " = icmp eq i64 " + rtag + ", " + machine_i64_text(w_tag_int) + "\n  "
   out << both_int + " = and i1 " + lis_int + ", " + ris_int + "\n  "
   out << "br i1 " + both_int + ", label %g.ok." + bid + ", label %g.rt." + bid + ", !prof !31411\n"
   out << "g.ok." + bid + ":\n  "
@@ -3402,8 +3449,8 @@ ewscope_md_state = {ids: {}}
   # weights by listing the likely count second.
   out << "br i1 " + ovf + ", label %g.rt." + bid + ", label %g.box." + bid + ", !prof !31412\n"
   out << "g.box." + bid + ":\n  "
-  out << masked + " = and i64 " + raw + ", " + w_payload_mask.to_s() + "\n  "
-  out << boxed + " = or i64 " + masked + ", " + w_tag_int.to_s() + "\n  "
+  out << masked + " = and i64 " + raw + ", " + machine_i64_text(w_payload_mask) + "\n  "
+  out << boxed + " = or i64 " + masked + ", " + machine_i64_text(w_tag_int) + "\n  "
   out << "br label %g.done." + bid + "\n"
   out << "g.rt." + bid + ":\n  "
   # `Math.trap` mode: the slow (overflow / non-int-operand) path aborts via
@@ -3432,7 +3479,7 @@ ewscope_md_state = {ids: {}}
     out << t + " = phi i64 \[" + boxed + ", %g.box." + bid + "], \[" + slow + ", %g.rt." + bid + "]"
   out.to_s()
 
--> render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true)
+-> render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false)
   op = inst[:op]
 
   case op
@@ -4112,22 +4159,22 @@ ewscope_md_state = {ids: {}}
 
   # NaN-boxing
   when :nanbox_int
-    raw = inst[:raw]
-    ch = raw.slice(0, 1)
+    raw_str = inst[:raw].to_s()
+    ch = raw_str.slice(0, 1)
     if ch != nil && (ch == "-" || (ch >= "0" && ch <= "9"))
-      wval = (raw.to_i() & 281474976710655) | -1688849860263936
+      wval = (raw_str.to_i() & 281474976710655) | -1688849860263936
       lit = llvm_wvalue_literal(wval)
       inst[:temp_masked] + " = or i64 0, " + lit + "\n  " + inst[:temp] + " = or i64 0, " + lit
     else
-      inst[:temp_masked] + " = and i64 " + raw + ", " + w_payload_mask.to_s() + "\n  " + inst[:temp] + " = or i64 " + inst[:temp_masked] + ", " + w_tag_int.to_s()
+      inst[:temp_masked] + " = and i64 " + raw_str + ", " + machine_i64_text(w_payload_mask) + "\n  " + inst[:temp] + " = or i64 " + inst[:temp_masked] + ", " + machine_i64_text(w_tag_int)
   when :nanunbox_int
     inst[:temp_shl] + " = shl i64 " + inst[:boxed] + ", 16\n  " + inst[:temp] + " = ashr i64 " + inst[:temp_shl] + ", 16"
   when :nanbox_bool
     inst[:temp] + " = select i1 " + inst[:value] + ", i64 " + w_true.to_s() + ", i64 " + w_false.to_s()
   when :nanunbox_float
-    inst[:temp_bits] + " = sub i64 " + inst[:boxed] + ", " + w_double_bias.to_s() + "\n  " + inst[:temp] + " = bitcast i64 " + inst[:temp_bits] + " to double"
+    inst[:temp_bits] + " = sub i64 " + inst[:boxed] + ", " + machine_i64_text(w_double_bias) + "\n  " + inst[:temp] + " = bitcast i64 " + inst[:temp_bits] + " to double"
   when :nanbox_float
-    inst[:temp_bits] + " = bitcast double " + inst[:raw] + " to i64\n  " + inst[:temp] + " = add i64 " + inst[:temp_bits] + ", " + w_double_bias.to_s()
+    inst[:temp_bits] + " = bitcast double " + inst[:raw] + " to i64\n  " + inst[:temp] + " = add i64 " + inst[:temp_bits] + ", " + machine_i64_text(w_double_bias)
 
   # Raw float value plumbing
   when :fpext_f32_f64
@@ -4614,7 +4661,7 @@ ewscope_md_state = {ids: {}}
   # Float
   when :const_float
     bits_temp = inst[:temp] + ".bits"
-    bits_temp + " = bitcast double " + inst[:value] + " to i64\n  " + inst[:temp] + " = add i64 " + bits_temp + ", " + w_double_bias.to_s()
+    bits_temp + " = bitcast double " + inst[:value] + " to i64\n  " + inst[:temp] + " = add i64 " + bits_temp + ", " + machine_i64_text(w_double_bias)
   when :const_decimal
     inst[:temp] + " = call i64 @w_decimal(i64 " + inst[:sig].to_s() + ", i32 " + inst[:scale].to_s() + ")"
   when :const_currency
@@ -5100,7 +5147,8 @@ ewscope_md_state = {ids: {}}
 
   # Exception handling
   when :setjmp
-    inst[:temp] + " = call i32 @setjmp(ptr " + inst[:buf] + ")"
+    jump_name = windows_target ? "setjmp" : "_setjmp"
+    inst[:temp] + " = call i32 @" + jump_name + "(ptr " + inst[:buf] + ")"
   when :icmp_eq_i32
     inst[:temp] + " = icmp eq i32 " + inst[:lhs] + ", " + inst[:rhs]
 
@@ -5185,6 +5233,8 @@ ewscope_md_state = {ids: {}}
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + inst[:receiver] + ", i64 " + name_val + ic_arg + ")"
     elsif scalar_source_one_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + inst[:receiver] + ", i64 " + name_val + ", i64 " + inst[:args][0] + ic_arg + ")"
+    elsif scalar_source_two_call?(inst)
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_2(i64 " + inst[:receiver] + ", i64 " + name_val + ", i64 " + inst[:args][0] + ", i64 " + inst[:args][1] + ic_arg + ")"
     else
       stack_arr = "%__mcall_args"
       i = 0
@@ -5282,9 +5332,9 @@ ewscope_md_state = {ids: {}}
     out << "  ]"
     out.to_s()
   when :ret_i64
-    "ret i64 " + inst[:value]
+    "ret i64 " + (inst[:value] == nil ? "0" : inst[:value].to_s())
   when :ret_i32
-    "ret i32 " + inst[:value]
+    "ret i32 " + (inst[:value] == nil ? "0" : inst[:value].to_s())
   when :ret_void
     "ret void"
   when :unreachable

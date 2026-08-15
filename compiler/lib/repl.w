@@ -55,7 +55,7 @@ INSP_RESULT_VALUE_LIMIT = 240
     @history = []
     @jit_counter = 0
     @hot_defs = {}
-    @hot_stmts = []
+    @hot_vars = []
     @last_scrub_src = ""
     @scrub_lines = 0
     @ins_buf = nil
@@ -373,10 +373,8 @@ INSP_RESULT_VALUE_LIMIT = 240
       cands.push(dk[j])
       j = j + 1
     s = 0
-    while s < @hot_stmts.size()
-      nm = hot_assign_name(@hot_stmts[s].strip())
-      if nm != nil
-        cands.push(nm)
+    while s < @hot_vars.size()
+      cands.push(@hot_vars[s])
       s = s + 1
     cands
 
@@ -1970,8 +1968,16 @@ INSP_RESULT_VALUE_LIMIT = 240
 
     aname = hot_assign_name(s)
     if aname != nil
-      @hot_stmts.push(input)
-      << DIM + "  set " + RESET + CYAN + aname + RESET
+      is_new = !@hot_vars.include?(aname)
+      if is_new
+        @hot_vars.push(aname)
+      r = hot_run(s)
+      if r == nil
+        if is_new
+          @hot_vars.delete(aname)
+        << BRIGHT_RED + "  hot: compile failed" + RESET
+      else
+        << DIM + "  set " + RESET + CYAN + aname + RESET + DIM + " = " + RESET + format_value(r[0])
       return
 
     begin
@@ -1986,9 +1992,10 @@ INSP_RESULT_VALUE_LIMIT = 240
   -> hot_run(expr)
     @jit_counter = @jit_counter + 1
     base = "/tmp/wit_hot_" + @jit_counter.to_s()
-    # Definitions stay top-level (fns need no startup init). Assignments are
-    # replayed as LOCAL statements inside jit_line — a snippet dylib's top-level
-    # code lives in main(), which we never call, so it must run in the fn we do.
+    # Definitions stay top-level. Session variables live in the host runtime:
+    # each snippet loads them into locals, evaluates once, then writes mutated
+    # locals back. Replaying assignment source reset `i` before every expression
+    # and discarded `0..n -> i++` when jit_line returned.
     # Dedup defs by their actual fn name (last wins) before emitting: a
     # duplicate definition in the generated source HANGS the compiler, and
     # accumulated/garbled keys can collide, so re-key here as a hard safety net.
@@ -2010,10 +2017,17 @@ INSP_RESULT_VALUE_LIMIT = 240
       o = o + 1
     src = src + "-> jit_line\n"
     j = 0
-    while j < @hot_stmts.size()
-      src = src + "  " + @hot_stmts[j].strip() + "\n"
+    while j < @hot_vars.size()
+      var_name = @hot_vars[j]
+      src = src + "  " + var_name + " = ccall(\"w_repl_state_get\", \"" + var_name + "\")\n"
       j = j + 1
-    src = src + "  " + expr + "\n"
+    src = src + "  __wit_result = (" + expr + ")\n"
+    j = 0
+    while j < @hot_vars.size()
+      var_name = @hot_vars[j]
+      src = src + "  ccall(\"w_repl_state_set\", \"" + var_name + "\", " + var_name + ")\n"
+      j = j + 1
+    src = src + "  __wit_result\n"
     write_file(base + ".w", src)
     ll = emit_ir(base + ".w", false, false, "raw", nil, false, nil, true)
     if ll == nil

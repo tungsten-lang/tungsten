@@ -30,7 +30,7 @@ static void record_cleanup(WValue value) {
 static void raise_across_nested_blocks(void) {
     void *outer = w_block_return_push();
     abandoned_outer = outer;
-    if (_setjmp(*(jmp_buf *)outer) == 0) {
+    if (W_FAST_SETJMP(*(jmp_buf *)outer) == 0) {
         /* Put a younger exception frame between the two blocks, then pop it
          * before raising to the caller's handler. The inner block's saved
          * exception-stack pointer must still be recognized as descending
@@ -38,7 +38,7 @@ static void raise_across_nested_blocks(void) {
         (void)w_exception_push();
         void *inner = w_block_return_push();
         abandoned_inner = inner;
-        if (_setjmp(*(jmp_buf *)inner) == 0) {
+        if (W_FAST_SETJMP(*(jmp_buf *)inner) == 0) {
             w_exception_pop();
             w_raise(w_string("crossed block frames"));
         }
@@ -49,7 +49,7 @@ static void raise_across_nested_blocks(void) {
 static void require_inactive_block(void *block) {
     WExceptionFrame handler;
     w_exception_frame_push(&handler);
-    if (_setjmp(handler.buf) == 0) {
+    if (W_FAST_SETJMP(handler.buf) == 0) {
         w_block_return_signal((uint64_t)(uintptr_t)block, w_box_int(99));
         fail("signal to abandoned block returned normally");
     }
@@ -65,7 +65,7 @@ static void test_stack_frame_cleanup_snapshot(void) {
 
     WExceptionFrame handler;
     w_exception_frame_push(&handler);
-    if (_setjmp(handler.buf) == 0) {
+    if (W_FAST_SETJMP(handler.buf) == 0) {
         w_cleanup_push(w_box_int(20), record_cleanup);
         w_cleanup_push(w_box_int(30), record_cleanup);
         w_raise(w_string("cleanup"));
@@ -85,7 +85,7 @@ static void test_exception_abandons_block_frames(void) {
     abandoned_inner = NULL;
     WExceptionFrame handler;
     w_exception_frame_push(&handler);
-    if (_setjmp(handler.buf) == 0) {
+    if (W_FAST_SETJMP(handler.buf) == 0) {
         raise_across_nested_blocks();
     }
 
@@ -103,10 +103,10 @@ static void test_exception_abandons_block_frames(void) {
 
 static void test_inner_handler_preserves_enclosing_block(void) {
     void *block = w_block_return_push();
-    if (_setjmp(*(jmp_buf *)block) == 0) {
+    if (W_FAST_SETJMP(*(jmp_buf *)block) == 0) {
         WExceptionFrame handler;
         w_exception_frame_push(&handler);
-        if (_setjmp(handler.buf) == 0) {
+        if (W_FAST_SETJMP(handler.buf) == 0) {
             w_raise(w_string("handled inside block"));
         }
 

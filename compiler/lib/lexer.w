@@ -3,7 +3,12 @@
 # This is the fast token stream used by the compiler lexer rewrite. It avoids
 # token hashes and value string copies: tokens are packed as:
 #
-#   W_TAG_CHAR | (type_id << 38) | (length << 26) | (offset << 2) | line_start_flag
+#   (type_id << 38) | (length << 26) | (offset << 2) | line_start_flag
+#
+# These are raw numeric descriptors in an i64[] scratch buffer, not boxed
+# Token WValues. Token.make adds W_TAG_CHAR when a first-class Token is needed;
+# the compiler lexer keeps the descriptors tagless so they remain inline Ints
+# after materialization into @packed_tokens.
 #
 # The 12-bit length field wraps mod 4096 (`& 0xFFF` at every pack site):
 # an unmasked length would OR its high bits into the type-id field and
@@ -38,43 +43,42 @@ use ../../languages/tungsten/lexers/known_units
   indent_top = 0
   indents[0] = 0
 
-  tag = 0xFFFC << 48
   cp_mask = 0x1FFFFF
   f_line_start = 0x1
 
-  t_id           = tag | (0x01 << 38)
-  t_name         = tag | (0x02 << 38)
-  t_int          = tag | (0x03 << 38)
-  t_decimal      = tag | (0x04 << 38)
-  t_string       = tag | (0x05 << 38)
-  t_symbol       = tag | (0x06 << 38)
-  t_type_hint    = tag | (0x07 << 38)
-  t_newline      = tag | (0x08 << 38)
-  t_indent       = tag | (0x09 << 38)
-  t_dedent       = tag | (0x0A << 38)
-  t_op           = tag | (0x0B << 38)
-  t_ivar         = tag | (0x0C << 38)
-  t_cvar         = tag | (0x0D << 38)
-  t_parg         = tag | (0x0E << 38)
-  t_byte_array   = tag | (0x0F << 38)
-  t_key          = tag | (0x10 << 38)
-  t_color        = tag | (0x11 << 38)
-  t_char         = tag | (0x12 << 38)
-  t_codepoint    = tag | (0x13 << 38)
-  t_word_array   = tag | (0x14 << 38)
-  t_symbol_array = tag | (0x15 << 38)
-  t_magic        = tag | (0x16 << 38)
-  t_eof          = tag | (0x17 << 38)
-  t_path         = tag | (0x18 << 38)
-  t_sp           = tag | (0x19 << 38)
+  t_id           = 0x01 << 38
+  t_name         = 0x02 << 38
+  t_int          = 0x03 << 38
+  t_decimal      = 0x04 << 38
+  t_string       = 0x05 << 38
+  t_symbol       = 0x06 << 38
+  t_type_hint    = 0x07 << 38
+  t_newline      = 0x08 << 38
+  t_indent       = 0x09 << 38
+  t_dedent       = 0x0A << 38
+  t_op           = 0x0B << 38
+  t_ivar         = 0x0C << 38
+  t_cvar         = 0x0D << 38
+  t_parg         = 0x0E << 38
+  t_byte_array   = 0x0F << 38
+  t_key          = 0x10 << 38
+  t_color        = 0x11 << 38
+  t_char         = 0x12 << 38
+  t_codepoint    = 0x13 << 38
+  t_word_array   = 0x14 << 38
+  t_symbol_array = 0x15 << 38
+  t_magic        = 0x16 << 38
+  t_eof          = 0x17 << 38
+  t_path         = 0x18 << 38
+  t_sp           = 0x19 << 38
   # SCREAMING_SNAKE_CASE identifier: starts uppercase, no lowercase
   # ASCII letters. Distinguished from t_name (PascalCase) inline in
   # the chunker by tracking `has_lower` as identifier-extend bytes
   # are consumed.
-  t_constant     = tag | (0x1A << 38)
-  t_hyper_array  = tag | (0x1B << 38)
-  t_decimal_array = tag | (0x1C << 38)
-  t_float_array  = tag | (0x1D << 38)
+  t_constant     = 0x1A << 38
+  t_hyper_array  = 0x1B << 38
+  t_decimal_array = 0x1C << 38
+  t_float_array  = 0x1D << 38
 
   loop
     if pos >= count
@@ -1216,7 +1220,10 @@ use ../../languages/tungsten/lexers/known_units
   -> new(source, @file = nil)
     @source = strip_bash_shebang(source)
     @chars = @source.chars()
-    @lc = @source.lchs()
+    # LexChars are tagged WValues stored in physical 64-bit slots. Keep the
+    # ivar as w64[] so ordinary reads return those bits unchanged; treating the
+    # slots as numeric i64[] boxes the negative 0xFFFC... word as a BigInt.
+    set_lexchars(@source.lchs("tungsten"))
     @char_count = @chars.size()
     @pos = 0
     @line = 1
@@ -1234,9 +1241,10 @@ use ../../languages/tungsten/lexers/known_units
     @paren_lambda_stack = []
     @after_lambda_params = false
     @regex_capture_scope = false
-    # Canonical i64 packed token stream (W_LEXICAL_TOKEN per slot).
-    # Parser sites read via tok_type/tok_off/tok_len helpers; no
-    # hashes are built.
+    # Canonical tagless packed-token stream. The native scanner stages numeric
+    # descriptors in i64[] before these values cross into the boxed Array.
+    # Parser sites read them via tok_type/tok_off/tok_len helpers; no hashes
+    # are built.
     @packed_tokens = []
     # Parallel values array — the pre-parsed value field. Nil for
     # tokens with no semantic value (operators, brackets, indentation).
@@ -1247,6 +1255,11 @@ use ../../languages/tungsten/lexers/known_units
     # token's metadata with its source packed value without per-helper
     # threading.
     @current_packed_tok = 0
+
+  # The typed @-parameter is the compiler's ordinary-object ivar contract.
+  # It keeps @lc in raw WValue-slot representation at every read site.
+  -> set_lexchars(@lc) (w64[])
+    self
 
   -> push_token(type_sym, value)
     @packed_tokens.push(@current_packed_tok)
@@ -1575,7 +1588,7 @@ use ../../languages/tungsten/lexers/known_units
     emit(:WVALUE, num)
 
   -> is_hex_char?(lc)
-    (lc & 8) != 0
+    (wvalue_bits(lc) & 8) != 0
 
   -> is_ipv6_hex?(c)
     # RFC 5952 §4.3: a canonical IPv6 address uses *lowercase* hex digits.
@@ -1780,7 +1793,7 @@ use ../../languages/tungsten/lexers/known_units
   # in the shared registry.
   -> unit_alpha_at?(pos)
     return false if pos < 0 || pos >= @chars.size()
-    cp = (@lc[pos] >> 18) & 2097151
+    cp = lc_cp(@lc[pos])
     is_alpha?(@lc[pos]) || cp >= 128
 
   # Longest registered phrase after a number and a space. This covers Ruby's
@@ -2792,23 +2805,18 @@ use ../../languages/tungsten/lexers/known_units
     @sup_skip_to = 0
     build_line_index()
 
-    lc = @source.lchs("tungsten")
+    # The native scanner performs raw masks/shifts over the tagged words, so
+    # reinterpret the w64[] storage as machine integers only for this call.
+    lc = @lc ## i64[]
     packed = i64[lc.size() + 2048]
     indents = i64[1024]
     count = tungsten_tokenize_fast64(lc, lc.size(), packed, indents)
 
     i = 0
     while i < count
-      # Strip the W_LEXICAL_TOKEN tag (0xFFFC<<48) at the boundary: every
-      # field lives in bits 0-45 (flag 0, offset 2-25, len 26-37, type
-      # 38-45), so the low 46 bits carry the whole token and fit the
-      # 47-bit inline-int payload. With the tag on, boxing the argument
-      # allocated a BigInt PER TOKEN, and every downstream bit-op
-      # (materialize, emit's repack, the parser's per-peek decodes) ran
-      # bignum limb walks. Untagged, the stream is plain inline ints end
-      # to end. No compiler-path consumer dispatches Token methods on the
-      # tag (parser reads via mask helpers); token streams are identical.
-      materialize_packed_token(packed[i] & 0x3FFFFFFFFFFF)
+      # Every field lives in bits 0-45, so descriptors remain inline Ints
+      # after crossing from the raw staging buffer into @packed_tokens.
+      materialize_packed_token(packed[i])
       i += 1
 
     @token_count
@@ -2853,8 +2861,14 @@ use ../../languages/tungsten/lexers/known_units
 
   -> reset_scan_position(off)
     @pos = off
-    @line = @line_at[off]
-    @col = @col_at[off]
+    if @line_at != nil && off < @line_at.size() && @line_at[off] != nil
+      @line = @line_at[off]
+    else
+      @line = 1
+    if @col_at != nil && off < @col_at.size() && @col_at[off] != nil
+      @col = @col_at[off]
+    else
+      @col = 1
 
   # Map a token symbol (`:KEYWORD`, `:LPAREN`, …) to its T_X integer id
   # from core/token.w. Used by emit_at to refine the packed token's
@@ -3043,7 +3057,9 @@ use ../../languages/tungsten/lexers/known_units
     push_token(type, value)
 
   -> raise_unexpected_character(raw, off)
-    raise compile_error_with_span(:E_LEX_UNEXPECTED_CHAR, "Unexpected character '[raw]'", @file, @line_at[off], @col_at[off], raw.size())
+    line = (@line_at != nil && off < @line_at.size() && @line_at[off] != nil) ? @line_at[off] : 1
+    col = (@col_at != nil && off < @col_at.size() && @col_at[off] != nil) ? @col_at[off] : 1
+    raise compile_error_with_span(:E_LEX_UNEXPECTED_CHAR, "Unexpected character '" + raw.to_s() + "'", @file, line, col, raw.size())
 
   # Map a Unicode superscript-digit codepoint to its value, or -1.
   -> superscript_digit(c)
@@ -3069,16 +3085,16 @@ use ../../languages/tungsten/lexers/known_units
       return 9
     0 - 1
 
-  ## i64: tok
   -> materialize_packed_token(tok)
-    # Inline the bit-extractions instead of routing through packed_*
-    # helpers — the type ascription on this method propagates so the
-    # shifts lower to raw machine ops. Calling out via packed_type_id
-    # boxed the value at the call boundary in stage 1 compiled code.
-    @current_packed_tok = tok
-    type_id = (tok >> 38) & 0xFF
-    off = (tok >> 2) & 0xFFFFFF
-    len = (tok >> 26) & 0xFFF
+    # This is a dynamically dispatched Lexer method, so its argument crosses
+    # the method boundary as a boxed Int even though the staging buffer is an
+    # i64[]. Normalize once before the hot shifts. Declaring `tok` as raw i64
+    # made the callee reinterpret W_TAG_INT bits as token bits.
+    bits = ccall_nobox("w_numeric_to_i64", tok)
+    @current_packed_tok = bits
+    type_id = (bits >> 38) & 0xFF
+    off = (bits >> 2) & 0xFFFFFF
+    len = (bits >> 26) & 0xFFF
     # Skip packed op tokens already consumed by a superscript run (each
     # superscript char is a separate native token; materialize_op scans
     # the whole run at once and sets @sup_skip_to past it).
@@ -3259,6 +3275,7 @@ use ../../languages/tungsten/lexers/known_units
     if raw.starts_with?("<<~")
       reset_scan_position(off)
       scan_heredoc()
+      @sup_skip_to = @pos
       return nil
     if raw.size() > 0 && raw[0] == "/"
       materialize_regex(raw, off)
@@ -3268,6 +3285,7 @@ use ../../languages/tungsten/lexers/known_units
       return nil
     reset_scan_position(off + 1)
     scan_string()
+    @sup_skip_to = @pos
 
   -> materialize_regex(raw, off)
     pattern = StringBuffer(raw.size())

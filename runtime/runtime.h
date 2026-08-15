@@ -17,7 +17,9 @@
 #include <pthread.h>
 #include <unistd.h>
 
-/* ---- Heap string (mode 7: transient/large strings, freeable) ---- */
+/* ---- Heap string (mode 7: freeable, >=6 bytes) -------------------------
+ * Length alone does not distinguish mode 6 from mode 7 in the 6..61-byte
+ * overlap. Mode 6 means interned in the slab; mode 7 means heap-backed. */
 typedef struct WString {
     uint32_t len;
     char data[];  /* UTF-8 bytes, null-terminated */
@@ -28,13 +30,15 @@ typedef struct {
     char *pattern;
     char *options;
     void *compiled;
+    WValue name_to_group; /* compiled once; immutable and shared by matches */
 } WRegex;
 
 /* Immutable snapshot returned by Regex#match_data (subtag 0xE). */
 typedef struct {
+    WValue subject;       /* backing UTF-8 string for lazy Slice captures */
     WValue groups;        /* group 0 followed by numbered captures */
     WValue offsets;       /* nil or [codepoint_begin, codepoint_end] */
-    WValue name_to_group; /* String name -> numbered capture index */
+    WValue name_to_group; /* borrowed immutable Regex name map */
 } WRegexMatch;
 
 /* Mutable append — declared in runtime.c */
@@ -84,7 +88,7 @@ typedef struct {
     uint32_t next_slot;     /* bump pointer — next free index (starts at 1) */
     uint32_t page_hwm;     /* highest mprotect'd byte offset from base */
     pthread_mutex_t lock;   /* thread safety for concurrent interning */
-    int frozen;             /* 1 = no new slab entries, all strings go mode 7 */
+    int frozen;             /* 1 = no new slab entries; existing entries remain discoverable */
 } WStringSlab;
 
 typedef struct {
@@ -664,6 +668,8 @@ WValue w_instant_now(void);
 WValue w_add(WValue a, WValue b);
 WValue w_sub(WValue a, WValue b);
 WValue w_mul(WValue a, WValue b);
+WValue w_div(WValue a, WValue b);
+WValue w_mod(WValue a, WValue b);
 
 static inline WValue w_add_fast(WValue a, WValue b) {
     if (w_both_ints(a, b)) {
@@ -688,9 +694,27 @@ static inline WValue w_mul_fast(WValue a, WValue b) {
     }
     return w_mul(a, b);
 }
+
+static inline WValue w_div_fast(WValue a, WValue b) {
+    if (w_both_ints(a, b)) {
+        int64_t divisor = w_as_int(b);
+        if (divisor != 0) {
+            int64_t quotient = w_as_int(a) / divisor;
+            if (quotient >= W_INT48_MIN && quotient <= W_INT48_MAX)
+                return w_box_int(quotient);
+        }
+    }
+    return w_div(a, b);
+}
+
+static inline WValue w_mod_fast(WValue a, WValue b) {
+    if (w_both_ints(a, b)) {
+        int64_t divisor = w_as_int(b);
+        if (divisor != 0) return w_box_int(w_as_int(a) % divisor);
+    }
+    return w_mod(a, b);
+}
 WValue w_pow(WValue base, WValue exp);
-WValue w_div(WValue a, WValue b);
-WValue w_mod(WValue a, WValue b);
 WValue w_bigint_mod_pow2(WValue a, WValue bits);
 WValue w_bigint_div_pow2(WValue a, WValue bits);
 WValue w_bigint_gcd(WValue a, WValue b);
@@ -741,9 +765,11 @@ WValue w_gte(WValue a, WValue b);
 WValue w_str_concat(WValue a, WValue b);
 WValue w_string_idx_raw(WValue str, int64_t index);
 WValue w_string_slice_raw(WValue str, int64_t start, int64_t len);
+int64_t w_parser_chars_equal_ascii(WValue chars, int64_t off, int64_t len, WValue lit);
 WValue w_to_s(WValue v);
 int64_t w_stringy_c_length(WValue v);
 int64_t w_string_byte_length(int64_t str_wval) __attribute__((pure));
+int64_t w_string_first_byte(WValue value);
 void w_str_data(WValue v, char buf[6], const char **out, size_t *len);
 WValue w_algebra_rewrite_source(WValue source);
 WValue w_string_from_codepoint(WValue cp_v);
@@ -781,6 +807,10 @@ WValue w_dlclose(WValue handle);
 WValue w_dlcall_i64(WValue fn);
 WValue w_dlcall(WValue fn);
 WValue w_dlfind_fn(WValue handle, WValue name);
+/* Native REPL snippets are separate objects but share the host runtime. Keep
+ * session bindings here so compiled lines can preserve mutations. */
+WValue w_repl_state_get(WValue name);
+WValue w_repl_state_set(WValue name, WValue value);
 
 /* In-memory JIT (macOS/arm64): load a relocatable Mach-O object directly into
  * executable memory and resolve a Tungsten fn by source name — no dlopen, so it
@@ -871,6 +901,7 @@ __attribute__((preserve_most)) WValue w_bigint_mul_word_dest(
 
 /* ---- Hash ---- */
 WValue w_hash_new(void);
+WValue w_hash_clear_reuse(WValue hash);
 WValue w_hash_reuse_or_new(WValue *slot);
 WValue w_hash_reuse_and_drain_or_new(WValue *slot);
 WValue w_hash_recycle_or_new(void);
@@ -982,6 +1013,18 @@ WValue w_closure_call_4(WValue closure_val, WValue arg1, WValue arg2, WValue arg
 /* ---- Exceptions ---- */
 #include <setjmp.h>
 
+/* Keep each platform's save/restore pair matched. POSIX exposes the explicit
+ * signal-mask-free _setjmp/_longjmp pair. MSVC's fast form is the ordinary
+ * setjmp/longjmp pair from <setjmp.h> (the SEH-aware form comes from
+ * <setjmpex.h>), and MinGW follows that portable spelling. */
+#if defined(_WIN32)
+#define W_FAST_SETJMP(env) setjmp(env)
+#define W_FAST_LONGJMP(env, value) longjmp((env), (value))
+#else
+#define W_FAST_SETJMP(env) _setjmp(env)
+#define W_FAST_LONGJMP(env, value) _longjmp((env), (value))
+#endif
+
 typedef struct WExceptionFrame {
     jmp_buf buf;
     struct WExceptionFrame *prev;
@@ -1063,6 +1106,8 @@ static inline void w_ic_publish(WInlineCache *cache, uint64_t key, void *fn, int
 WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc, WInlineCache *cache);
 WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache);
 WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg, WInlineCache *cache);
+WValue w_method_call_cached_2(WValue recv, WValue name, WValue arg0, WValue arg1, WInlineCache *cache);
+WValue w_string_chars(WValue r);
 WValue w_value_is_a(WValue recv, WValue target);
 
 /* ---- Memoization ---- */
@@ -1735,6 +1780,7 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap);
 /* Fused elementwise lowering (compiler): uninit buffer with size = cap = n —
  * the fused loop writes every element. */
 WValue w_array_new_uninit_sized(int64_t element_bits, int64_t n);
+WValue w_array_new_inline(int64_t element_bits, int64_t n);
 WValue w_array_new_inline_uninit_sized(int64_t element_bits, int64_t n);
 /* Fused elementwise lowering: rhs/lhs size-parity guard, same raise text as
  * array_elementwise_into. */
@@ -1778,6 +1824,7 @@ WValue w_array_add_elem(WValue lhs, WValue rhs);
 /* `array + array` is CONCATENATION (elementwise pairwise ops are the `.op`
  * forms). Returns a fresh boxed array holding lhs's elements then rhs's. */
 WValue w_array_concat(WValue lhs, WValue rhs);
+WValue w_array_copy_range(WValue arr, WValue from, WValue to, WValue exclusive);
 WValue w_array_sub_elem(WValue lhs, WValue rhs);
 WValue w_array_mul_elem(WValue lhs, WValue rhs);
 WValue w_array_div_elem(WValue lhs, WValue rhs);
@@ -1845,6 +1892,12 @@ WValue w_array_log_float(WValue arr);
 WValue w_array_tan_signed(WValue arr);
 WValue w_array_tan_unsigned(WValue arr);
 WValue w_array_tan_float(WValue arr);
+WValue w_blas_vsin_f64(WValue input, WValue output, WValue size);
+WValue w_blas_vcos_f64(WValue input, WValue output, WValue size);
+WValue w_blas_vexp_f64(WValue input, WValue output, WValue size);
+WValue w_blas_vlog_f64(WValue input, WValue output, WValue size);
+WValue w_blas_vsqrt_f64(WValue input, WValue output, WValue size);
+WValue w_blas_vtan_f64(WValue input, WValue output, WValue size);
 WValue w_socket_read_exact(WValue sock, WValue n);
 WValue w_socket_write_bytes(WValue sock, WValue bytes);
 WValue w_socket_read_into(WValue sock, WValue buf, WValue offset, WValue n);

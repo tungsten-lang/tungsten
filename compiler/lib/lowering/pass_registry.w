@@ -249,6 +249,9 @@
     if is_machine_int_type(hint) && ast_kind(node.expression) == :if && node.expression.else_body != nil && node.expression.else_body.size() > 0
       materialize_bindings(ctx)
       return lower_if_expr(ctx, node.expression, hint)
+    if is_machine_int_type(hint)
+      raw = lower_machine_int_expression(ctx, node.expression, hint)
+      return typed_value(raw_machine_value_type(hint), raw)
     array_etype = array_hint_element_type(node.type_hint)
     if array_etype == "f64" || array_etype == "f32"
       if ast_kind(node.expression) == :array
@@ -269,10 +272,6 @@
       if hint in (:f32 :raw_f32)
         return typed_value(:raw_f32, ensure_raw_f32(ctx[:func], value))
       return typed_value(:raw_f64, ensure_raw_f64(ctx[:func], value))
-    if is_machine_int_type(hint)
-      inferred = infer_type(node.expression, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
-      raw = ensure_raw_machine_int(ctx[:func], value, hint, inferred)
-      return typed_value(raw_machine_value_type(hint), raw)
     return value
   # @fastmath / @strictmath blocks in expression position (e.g. a method whose
   # entire body is the block, or the block as an if/case arm) — return the

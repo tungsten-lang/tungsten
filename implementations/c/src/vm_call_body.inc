@@ -37,6 +37,19 @@
         const char *name = tc_str_bytes_only(chunk->consts[name_id]);
         size_t name_len = tc_str_len(chunk->consts[name_id]);
 
+        /* The stage-0 VM represents wide integer payloads with TcHeapInt, so
+         * their numeric value already is the raw bit pattern requested by
+         * wvalue_bits. This bridge is required by the self-hosted LexChar
+         * helpers; compiled stages lower the same call to a no-op bit view. */
+        if (!has_receiver && name_len == 11 &&
+            memcmp(name, "wvalue_bits", 11) == 0 && argc == 1 &&
+            value_is_int(args[0])) {
+          TcValue out = args[0];
+          FREE_ARGS();
+          if (!push(&vm, out, err)) goto cleanup_fail;
+          CNEXT();
+        }
+
         if (!has_receiver && name == NAME_ARGV) {
           FREE_ARGS();
           if (!push(&vm, tc_box_array(vm.argv), err)) {
@@ -218,6 +231,42 @@
                * helper before shifts; stage 0 must mirror that ccall_nobox. */
               int64_t raw = value_is_int(args[1]) ? value_as_int(args[1]) : (int64_t)args[1];
               result = int_value(raw);
+            } else if (fn_len == 26 &&
+                       memcmp(fn, "w_parser_chars_equal_ascii", 26) == 0 && argc == 5) {
+              int equal = 0;
+              if (tc_kind(args[1]) == TC_VAL_ARRAY && tc_as_array(args[1]) &&
+                  value_is_int(args[2]) && value_is_int(args[3]) &&
+                  tc_kind(args[4]) == TC_VAL_STRING) {
+                TcRuntimeArray *chars = tc_as_array(args[1]);
+                int64_t off = value_as_int(args[2]);
+                int64_t len = value_as_int(args[3]);
+                if (off >= 0 && len >= 0 && off <= chars->size &&
+                    len <= (int64_t)chars->size - off &&
+                    (size_t)len == tc_str_len(args[4])) {
+                  equal = 1;
+                  const unsigned char *lit =
+                      (const unsigned char *)tc_str_bytes_only(args[4]);
+                  for (int64_t i = 0; i < len; i++) {
+                    TcValue ch = chars->slots[chars->start + off + i];
+                    if (lit[i] >= 0x80 || tc_kind(ch) != TC_VAL_STRING ||
+                        tc_str_len(ch) != 1 ||
+                        (unsigned char)tc_str_bytes_only(ch)[0] != lit[i]) {
+                      equal = 0;
+                      break;
+                    }
+                  }
+                }
+              }
+              result = int_value(equal);
+            } else if (fn_len == 19 &&
+                       memcmp(fn, "w_string_first_byte", 19) == 0 && argc == 2) {
+              int64_t first = -2;
+              if (tc_kind(args[1]) == TC_VAL_STRING) {
+                first = tc_str_len(args[1]) == 0
+                            ? -1
+                            : (int64_t)(unsigned char)tc_str_bytes_only(args[1])[0];
+              }
+              result = int_value(first);
             } else if (fn_len == sizeof("__w_bit_ctpop_u32") - 1 &&
                        memcmp(fn, "__w_bit_ctpop_u32", sizeof("__w_bit_ctpop_u32") - 1) == 0 &&
                        argc == 2) {
@@ -372,19 +421,55 @@
           }
           CNEXT();
         }
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 2
+            && tc_kind(args[0]) == TC_VAL_STRING
+            && tc_str_len(args[0]) == 20
+            && memcmp(tc_str_bytes_only(args[0]), "w_node_offset_extern", 20) == 0) {
+          TcValue res = int_value((int64_t)w_node_offset(args[1]));
+          FREE_ARGS();
+          if (!push(&vm, res, err)) {
+            goto cleanup_fail;
+          }
+          CNEXT();
+        }
         // Raw unsigned-word boxing used by source BigInt finish paths. The
         // stage-0 VM already represents every bootstrap-reachable machine
         // integer as an Integer value, so its exact boxing mirror is identity.
         if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 2
             && tc_kind(args[0]) == TC_VAL_STRING
             && tc_str_len(args[0]) == 5
-            && memcmp(tc_str_bytes_only(args[0]), "w_u64", 5) == 0
+            && (memcmp(tc_str_bytes_only(args[0]), "w_u64", 5) == 0 ||
+                memcmp(tc_str_bytes_only(args[0]), "w_int", 5) == 0)
             && value_is_int(args[1])) {
           TcValue out = args[1];
           FREE_ARGS();
           if (!push(&vm, out, err)) {
             goto cleanup_fail;
           }
+          CNEXT();
+        }
+        /* Raw i64 formatting used by the self-hosted LLVM emitter. Keep the
+         * conversion allocation-free apart from the returned 16-byte string;
+         * rebuilding 2^64 through BigInt arithmetic made bootstrap quadratic. */
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 2
+            && tc_kind(args[0]) == TC_VAL_STRING
+            && tc_str_len(args[0]) == 16
+            && memcmp(tc_str_bytes_only(args[0]), "w_int_to_hex_str", 16) == 0
+            && value_is_int(args[1])) {
+          uint64_t bits = (uint64_t)value_as_int(args[1]);
+          char hex_buf[16];
+          static const char hex_digits[] = "0123456789abcdef";
+          for (int hi = 15; hi >= 0; hi--) {
+            hex_buf[hi] = hex_digits[bits & 0xFULL];
+            bits >>= 4;
+          }
+          TcValue out;
+          if (!make_string_value(hex_buf, sizeof(hex_buf), &out, err)) {
+            FREE_ARGS();
+            goto cleanup_fail;
+          }
+          FREE_ARGS();
+          if (!push(&vm, out, err)) goto cleanup_fail;
           CNEXT();
         }
         // Boxed numeric-to-f64 coercion for the interpreter's expression-local
@@ -527,6 +612,26 @@
               goto cleanup_fail;
             }
           }
+          CNEXT();
+        }
+        /* The compiler driver records its resolved target/CPU flags in the
+         * environment before lowering. Stage 0 must mirror the native
+         * ccall("w_setenv", name, value) bridge or a fresh C-VM bootstrap
+         * stops before it can emit stage 1. */
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 &&
+            argc == 3 && tc_kind(args[0]) == TC_VAL_STRING &&
+            tc_str_len(args[0]) == 8 &&
+            memcmp(tc_str_bytes_only(args[0]), "w_setenv", 8) == 0 &&
+            tc_kind(args[1]) == TC_VAL_STRING &&
+            tc_kind(args[2]) == TC_VAL_STRING) {
+          if (setenv(tc_str_bytes_only(args[1]), tc_str_bytes_only(args[2]), 1) != 0) {
+            FREE_ARGS();
+            tc_error_set(err, "w_setenv failed");
+            goto cleanup_fail;
+          }
+          TcValue result = args[2];
+          FREE_ARGS();
+          if (!push(&vm, result, err)) goto cleanup_fail;
           CNEXT();
         }
         if (!has_receiver && name == NAME_FILE_Q && argc == 1 && tc_kind(args[0]) == TC_VAL_STRING) {

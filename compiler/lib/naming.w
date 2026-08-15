@@ -123,13 +123,13 @@ use runtime_types
 # Compute SSO-5 WValue for a string ≤5 bytes.
 -> sso5_wvalue(text)
   byte_len = utf8_byte_length(text)
-  v = w_tag_stringsym + byte_len * 2
+  v = (w_tag_stringsym + byte_len * 2) ## i64
   bytes = text.bytes()
   i = 0
   while i < byte_len
-    v = v + bytes[i] * (1 << (4 + 8 * i))
+    v = (v + bytes[i] * (1 << (4 + 8 * i))) ## i64
     i += 1
-  v
+  machine_i64_box(v)
 
 # Build a static slab map: string_id → pre-computed WValue.
 # SSO-5 strings (≤5 bytes) become inline i64 constants.

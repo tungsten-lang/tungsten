@@ -70,13 +70,13 @@ use lowering/definitions
   byte_len = utf8_byte_length(s)
   # SSO-5: strings ≤5 bytes encode as an i64 constant — no global needed.
   if byte_len <= 5
-    v = w_tag_stringsym + byte_len * 2
+    v = (w_tag_stringsym + byte_len * 2) ## i64
     bytes = s.bytes()
     i = 0
     while i < byte_len
-      v = v + bytes[i] * (1 << (4 + 8 * i))
+      v = (v + bytes[i] * (1 << (4 + 8 * i))) ## i64
       i += 1
-    return typed_value(:i64, wvalue_literal_text(v))
+    return typed_value(:i64, wvalue_literal_text(machine_i64_box(v)))
   str_id = module_string_constant(ctx[:mod], s)
   temp_ptr = next_temp(ctx[:func])
   temp = next_temp(ctx[:func])

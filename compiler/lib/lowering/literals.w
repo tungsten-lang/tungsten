@@ -183,13 +183,13 @@
   byte_len = utf8_byte_length(s)
   # SSO-5: strings ≤5 bytes are encoded directly as an i64 constant — no global, no w_string call
   if byte_len <= 5
-    v = w_tag_stringsym + byte_len * 2
+    v = (w_tag_stringsym + byte_len * 2) ## i64
     bytes = s.bytes()
     i = 0
     while i < byte_len
-      v = v + bytes[i] * (1 << (4 + 8 * i))
+      v = (v + bytes[i] * (1 << (4 + 8 * i))) ## i64
       i += 1
-    return typed_value(:i64, wvalue_literal_text(v))
+    return typed_value(:i64, wvalue_literal_text(machine_i64_box(v)))
   str_id = module_string_constant(ctx[:mod], s)
   temp_ptr = next_temp(ctx[:func])
   temp = next_temp(ctx[:func])
@@ -360,7 +360,7 @@
   element_bits = array_etype == "f32" ? "-32" : "-64"
   store_bits = array_etype == "f32" ? 32 : 64
   arr = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_inline_uninit_sized", args: [element_bits, node.elements.size().to_s()]})
+  emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_inline", args: [element_bits, node.elements.size().to_s()]})
   i = 0
   while i < node.elements.size()
     val = lower_expression(ctx, node.elements[i])

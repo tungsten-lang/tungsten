@@ -38,8 +38,8 @@
   m[:MINUS]     = "__w_sub_fast"
   m[:STAR]      = "__w_mul_fast"
   m[:POW]       = "w_pow"
-  m[:SLASH]     = "w_div"
-  m[:PERCENT]   = "w_mod"
+  m[:SLASH]     = "__w_div_fast"
+  m[:PERCENT]   = "__w_mod_fast"
   # Comparisons route through private alwaysinline IR wrappers (emitter.w
   # cmp_fast_helper_ir): the both-immediate-Int case folds to an inline
   # icmp at every call site, everything else tail-calls the runtime op.

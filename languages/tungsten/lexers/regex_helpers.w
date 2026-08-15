@@ -2,8 +2,9 @@
 #
 # Source is converted to LexChar values (0xFFFC tag, subtype 01):
 #   bits 38-18: codepoint (21 bits)
-#   bits 10-7:  digit_value (4 bits, 0xF = not a digit)
-#   bits 6-0:   lex_flags (7 bits at LSB for single-instruction test)
+# The default LexChar layout carries digit_value in bits 10-7. Language-
+# specific `lchs("tungsten")` replaces the low byte with Tungsten flags, so
+# digit recognition uses the codepoint and works with both layouts.
 #
 # LexChar flag bits (at LSB):
 #   bit 6: IS_ID_START    (a-z, _)
@@ -13,11 +14,13 @@
 
 # Extract codepoint from LexChar value
 -> lc_cp(lc)
-  (lc >> 18) & 2097151
+  bits = wvalue_bits(lc) ## i64
+  (bits >> 18) & 2097151
 
 # LexChar predicates — test packed flag bits
 -> is_digit?(lc)
-  ((lc >> 7) & 15) != 15
+  cp = lc_cp(lc)
+  cp >= 48 && cp <= 57
 
 -> is_lower?(lc)
   lc_cp(lc) >= 97 && lc_cp(lc) <= 122
@@ -29,13 +32,13 @@
   is_lower?(lc) || is_upper?(lc)
 
 -> is_ident_start?(lc)
-  (lc & 64) != 0
+  (wvalue_bits(lc) & 64) != 0
 
 -> is_ident_char?(lc)
-  (lc & 32) != 0
+  (wvalue_bits(lc) & 32) != 0
 
 -> is_name_char?(lc)
-  (lc & 32) != 0 || is_upper?(lc)
+  (wvalue_bits(lc) & 32) != 0 || is_upper?(lc)
 
 -> is_keyword?(word)
   word == "begin" || word == "break" || word == "case" || word == "else" || word == "elsif" || word == "ensure" || word == "exit" || word == "extern" || word == "false" || word == "fn" || word == "go" || word == "if" || word == "in" || word == "is" || word == "loop" || word == "module" || word == "nil" || word == "next" || word == "on" || word == "parallel" || word == "raise" || word == "recase" || word == "rescue" || word == "return" || word == "self" || word == "super" || word == "then" || word == "trait" || word == "true" || word == "unless" || word == "until" || word == "use" || word == "when" || word == "while" || word == "with" || word == "yield"

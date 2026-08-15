@@ -503,8 +503,8 @@ static void bench_is_integer_any_singlemask(int64_t n) {
 
 /* 1. Binary arithmetic w_add on integers */
 static void bench_w_add_integers(int64_t n) {
-    WValue a = w_box_int(12345);
-    WValue b = w_box_int(67890);
+    volatile WValue a = w_box_int(12345);
+    volatile WValue b = w_box_int(67890);
     volatile WValue acc = W_NIL;
     for (int64_t i = 0; i < n; i++) {
         acc = w_add(a, b);
@@ -512,12 +512,40 @@ static void bench_w_add_integers(int64_t n) {
 }
 
 static void bench_w_add_fast_integers(int64_t n) {
-    WValue a = w_box_int(12345);
-    WValue b = w_box_int(67890);
+    volatile WValue a = w_box_int(12345);
+    volatile WValue b = w_box_int(67890);
     volatile WValue acc = W_NIL;
     for (int64_t i = 0; i < n; i++) {
         acc = w_add_fast(a, b);
     }
+}
+
+static void bench_w_sub_integers(int64_t n) {
+    volatile WValue a = w_box_int(67890);
+    volatile WValue b = w_box_int(12345);
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) acc = w_sub(a, b);
+}
+
+static void bench_w_sub_fast_integers(int64_t n) {
+    volatile WValue a = w_box_int(67890);
+    volatile WValue b = w_box_int(12345);
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) acc = w_sub_fast(a, b);
+}
+
+static void bench_w_mul_integers(int64_t n) {
+    volatile WValue a = w_box_int(12345);
+    volatile WValue b = w_box_int(67);
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) acc = w_mul(a, b);
+}
+
+static void bench_w_mul_fast_integers(int64_t n) {
+    volatile WValue a = w_box_int(12345);
+    volatile WValue b = w_box_int(67);
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) acc = w_mul_fast(a, b);
 }
 
 /* 2. Subtype classification 4K scan */
@@ -569,6 +597,38 @@ static void bench_small_hash_8keys(int64_t n) {
     for (int i = 0; i < 8; i++) {
         snprintf(buf, sizeof(buf), "key_%d", i);
         keys[i] = w_symbol(buf);
+        w_hash_set(h, keys[i], w_box_int(i * 10));
+    }
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) {
+        acc = w_hash_get(h, keys[6]);
+    }
+}
+
+/* Slab keys exercise the representation-independent text hash. The shorter
+ * Hash cases above are all canonical inline symbols and intentionally retain
+ * their bit-pattern fast path. */
+static void bench_slab_hash_1key(int64_t n) {
+    WValue h = w_hash_new();
+    WValue key = w_symbol("compiler_keyword_single");
+    w_hash_set(h, key, w_box_int(10));
+    volatile WValue acc = W_NIL;
+    for (int64_t i = 0; i < n; i++) {
+        acc = w_hash_get(h, key);
+    }
+}
+
+static void bench_slab_hash_8keys(int64_t n) {
+    static const char *names[8] = {
+        "compiler_keyword_0", "compiler_keyword_1",
+        "compiler_keyword_2", "compiler_keyword_3",
+        "compiler_keyword_4", "compiler_keyword_5",
+        "compiler_keyword_6", "compiler_keyword_7",
+    };
+    WValue h = w_hash_new();
+    WValue keys[8];
+    for (int i = 0; i < 8; i++) {
+        keys[i] = w_symbol(names[i]);
         w_hash_set(h, keys[i], w_box_int(i * 10));
     }
     volatile WValue acc = W_NIL;
@@ -652,10 +712,16 @@ int main(void) {
     printf("\n  --- Optimization Targets (Before/After) ---\n");
     bench("1a. w_add(int, int)",             bench_w_add_integers,       FAST);
     bench("1b. w_add_fast(int, int) inline", bench_w_add_fast_integers,  FAST);
+    bench("1c. w_sub(int, int)",             bench_w_sub_integers,       FAST);
+    bench("1d. w_sub_fast(int, int) inline", bench_w_sub_fast_integers,  FAST);
+    bench("1e. w_mul(int, int)",             bench_w_mul_integers,       FAST);
+    bench("1f. w_mul_fast(int, int) inline", bench_w_mul_fast_integers,  FAST);
     bench("2. 4K subtype checks scan",       bench_subtype_checks,       100000);
     bench("3. 4K w_dispatch_key scan",       bench_dispatch_key_scan,    100000);
     bench("4a. Small Hash get (4 keys)",     bench_small_hash_4keys,     SLOW);
     bench("4b. Small Hash get (8 keys)",     bench_small_hash_8keys,     SLOW);
+    bench("4c. Slab Hash get (1 key)",       bench_slab_hash_1key,       SLOW);
+    bench("4d. Slab Hash get (8 keys)",      bench_slab_hash_8keys,      SLOW);
     bench("5a. w_eq inline str (equal)",     bench_inline_string_eq,     FAST);
     bench("5b. w_eq inline str (diff)",      bench_inline_string_neq,    FAST);
 

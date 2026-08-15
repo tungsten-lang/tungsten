@@ -694,7 +694,7 @@ use target
     while i < arr.size()
       elem = arr[i]
       if func_is_block
-        result = call_block([env, func], [elem])
+        result = call_block1([env, func], elem)
       else
         result = apply_pipeline_func(elem, func_name, func_args_nodes, env)
       if kind == :map
@@ -788,7 +788,7 @@ use target
             acc0 = 0
             i0 = 0
             while i0 < arr0.size()
-              acc0 = acc0 + call_block([env, mfunc], [arr0[i0]])
+              acc0 = acc0 + call_block1([env, mfunc], arr0[i0])
               i0 += 1
             return acc0
     src_val = evaluate(ast_get(node, :source), env)
@@ -853,13 +853,13 @@ use target
   # behave like `-> (x) x.prime?`. A symbol or string arg both work via to_s.
   -> apply_iteratee(block, args, elem)
     if block != nil
-      return call_block(block, [elem])
+      return call_block1(block, elem)
     if args != nil && args.size() >= 1
       # A closure argument is the iteratee itself (paren-lambda spelling);
       # anything else is a method name to send (symbol-to-proc).
       cand = args[0]
       if type(cand) == "Array" && cand.size() == 2 && is_ast_node?(cand[1]) && ast_kind(cand[1]) == :block
-        return call_block(cand, [elem])
+        return call_block1(cand, elem)
       return dispatch_method(elem, "" + args[0].to_s(), [], nil, @env)
     raise "expected a block or a method symbol"
 
@@ -1614,6 +1614,10 @@ use target
       return ccall("w_hash_set", args[1], args[2], args[3])
     when "w_string_bytes_view"
       return ccall("w_string_bytes_view", args[1])
+    when "w_string_chars"
+      if args.size() != 2
+        raise "w_string_chars expects one argument"
+      return ccall("w_string_chars", args[1])
     when "w_base64_encode_input"
       return ccall("w_base64_encode_input", args[1])
     when "w_base64_decode_input"
@@ -1895,6 +1899,12 @@ use target
       # the interpreter's value model receives an Integer rather than treating
       # the raw bits as an already-tagged WValue.
       return ccall("w_int", ccall_nobox("w_numeric_to_i64", args[1]))
+    when "w_parser_chars_equal_ascii"
+      if args.size() != 5
+        raise "w_parser_chars_equal_ascii expects four arguments"
+      off = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      len = ccall_nobox("w_numeric_to_i64", args[3]) ## i64
+      return ccall("w_int", ccall_nobox("w_parser_chars_equal_ascii", args[1], off, len, args[4]))
     when "w_to_i64"
       if args.size() != 2
         raise "w_to_i64 expects one argument"
@@ -1927,6 +1937,10 @@ use target
       # Raw byte pointer of a slab/heap String, reboxed like the u8 data-ptr
       # case above; raw_load/store convert it back explicitly.
       return ccall("w_int", ccall_nobox("w_string_data_ptr", args[1]))
+    when "w_string_first_byte"
+      if args.size() != 2
+        raise "w_string_first_byte expects one argument"
+      return ccall("w_int", ccall_nobox("w_string_first_byte", args[1]))
     when "__w_bit_ctpop_u32"
       if args.size() != 2
         raise "__w_bit_ctpop_u32 expects one argument"
@@ -3104,7 +3118,7 @@ use target
                      (address >> 8) & 0xFF,
                      address & 0xFF,
                      prefix)
-      raise "wvalue_from_bits: unsupported packed WValue"
+      raise "wvalue_from_bits: unsupported packed WValue: " + bits.to_s()
 
     # Tree-walker mirrors of the compiler's inline raw byte intrinsics. Pointer
     # values are ordinary interpreter Integers here, so unbox all operands at
@@ -3150,7 +3164,7 @@ use target
       acc = 0
       x = lo
       while x <= hi
-        acc = acc + call_block(f, [x])
+        acc = acc + call_block1(f, x)
         x += 1
       return acc
     if name == "Σ" && args.size() == 1
@@ -3175,13 +3189,13 @@ use target
         flip = 0 - 1
       n = 256
       h = (b - a) / n
-      acc = call_block(f, [a]) + call_block(f, [b])
+      acc = call_block1(f, a) + call_block1(f, b)
       i = 1
       while i < n
         w = 2
         if i % 2 == 1
           w = 4
-        acc = acc + w * call_block(f, [a + h * i])
+        acc = acc + w * call_block1(f, a + h * i)
         i += 1
       return flip * acc * h / 3
     if name == "∫" && args.size() == 1
@@ -3327,7 +3341,7 @@ use target
       if recv[:name] == "Thread"
         if block == nil
           raise "Thread.new requires a block"
-        result = call_block(block, [])
+        result = call_block0(block)
         return {rt: :object, w_class: recv, ivars: {"@__thread_result" => result, "@__thread_alive" => false, "@__thread_killed" => false}}
       return instantiate(recv, args, env)
 
@@ -3519,6 +3533,12 @@ use target
         return ccall("w_method_call", recv, "" + name, args)
       if primitive_class[:name] == "Thread" && name in ("join" "kill")
         return ccall("w_method_call", recv, "" + name, args)
+      # String#lchs is a native lexer primitive rather than a Core source
+      # method. Keep the tree walker on the same WValue-preserving runtime
+      # path as compiled code so compiler-facing storage specs exercise both
+      # engines.
+      if primitive_class[:name] == "String" && name == "lchs"
+        return ccall("w_method_call", recv, "lchs", args)
 
     # Range methods
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :range
@@ -3542,27 +3562,18 @@ use target
         limit = 0
         if !unbounded
           limit = excl ? to : to + 1
-        while unbounded || i < limit
-          begin
-            call_block(block, [i])
-          rescue err
-            if err == "__SIGNAL__" && @signal[:type] == :break
-              @signal[:type] = nil
-              break
-            elsif err == "__SIGNAL__" && @signal[:type] == :next
-              @signal[:type] = nil
-            else
-              raise err
-          i = i + 1
-        return nil
-      if name == "step" && args.size() == 1
-        raise "cannot call .step on unbounded range" if unbounded
-        if block != nil
-          i = from
-          limit = excl ? to : to + 1
-          while i < limit
+          linear = range_block_linear_update(block)
+          if linear != nil && type(from) == "Int" && type(limit) == "Int"
+            iterations = limit - from
+            if iterations < 0
+              iterations = 0
+            linear[0].set(linear[1], linear[0].get(linear[1]) + linear[2] * iterations)
+            return nil
+        reuse_env = reusable_block_environment(block)
+        if block_can_break?(block)
+          while unbounded || i < limit
             begin
-              call_block(block, [i])
+              call_block1(block, i, reuse_env)
             rescue err
               if err == "__SIGNAL__" && @signal[:type] == :break
                 @signal[:type] = nil
@@ -3571,7 +3582,37 @@ use target
                 @signal[:type] = nil
               else
                 raise err
-            i += args[0]
+            i = i + 1
+        else
+          # call_block1 owns `next`; without a syntactic non-local break this
+          # second handler only rethrows ordinary errors, so omit it entirely.
+          while unbounded || i < limit
+            call_block1(block, i, reuse_env)
+            i = i + 1
+        return nil
+      if name == "step" && args.size() == 1
+        raise "cannot call .step on unbounded range" if unbounded
+        if block != nil
+          i = from
+          limit = excl ? to : to + 1
+          reuse_env = reusable_block_environment(block)
+          if block_can_break?(block)
+            while i < limit
+              begin
+                call_block1(block, i, reuse_env)
+              rescue err
+                if err == "__SIGNAL__" && @signal[:type] == :break
+                  @signal[:type] = nil
+                  break
+                elsif err == "__SIGNAL__" && @signal[:type] == :next
+                  @signal[:type] = nil
+                else
+                  raise err
+              i += args[0]
+          else
+            while i < limit
+              call_block1(block, i, reuse_env)
+              i += args[0]
           return nil
         return eval_range_step(recv, args[0])
       if name == "map" && block != nil
@@ -3579,8 +3620,9 @@ use target
         result = []
         i = from
         limit = excl ? to : to + 1
+        reuse_env = reusable_block_environment(block)
         while i < limit
-          result.push(call_block(block, [i]))
+          result.push(call_block1(block, i, reuse_env))
           i = i + 1
         return result
       if name == "to_a"
@@ -4398,6 +4440,173 @@ use target
     # by walking only Hash/Array slot values.
     ast_children(node).each -> (c)
       collect_free_vars(c, vars, seen)
+    nil
+
+  -> ast_contains_kind?(node, wanted)
+    if node == nil
+      return false
+    if type(node) == "Array"
+      i = 0
+      while i < node.size()
+        if ast_contains_kind?(node[i], wanted)
+          return true
+        i += 1
+      return false
+    if !is_ast_node?(node) || ast_kind(node) == nil
+      return false
+    if ast_kind(node) == wanted
+      return true
+    children = ast_children(node)
+    i = 0
+    while i < children.size()
+      if ast_contains_kind?(children[i], wanted)
+        return true
+      i += 1
+    false
+
+  # A nested block may escape with this invocation Environment as its captured
+  # parent. Reusing that Environment would make closures from earlier
+  # iterations observe later bindings, so only closure-free bodies qualify.
+  -> reusable_block_environment(block_data)
+    if type(block_data) != "Array" || block_data.size() < 2
+      return nil
+    blk_node = block_data[1]
+    reusable = ast_get(blk_node, :_environment_reusable)
+    if reusable == nil
+      reusable = !ast_contains_kind?(ast_get(blk_node, :body), :block)
+      ast_set(blk_node, :_environment_reusable, reusable)
+    if !reusable
+      return nil
+    Environment.new(block_data[0])
+
+  -> block_can_break?(block_data)
+    if type(block_data) != "Array" || block_data.size() < 2
+      return true
+    blk_node = block_data[1]
+    can_break = ast_get(blk_node, :_can_break)
+    if can_break == nil
+      can_break = ast_contains_kind?(ast_get(blk_node, :body), :break)
+      ast_set(blk_node, :_can_break, can_break)
+    can_break
+
+  # Exact fold for the common interactive hot loop `range -> counter++` (and
+  # its `+= constant` / decrement mirrors). The block has no parameter and no
+  # observable work besides updating an already-captured binding, so applying
+  # delta * iteration_count is semantically identical to invoking it N times,
+  # including Int-to-BigInt promotion. Return [environment, name, delta], or
+  # nil for every body with another possible effect.
+  -> range_block_linear_update(block_data)
+    if type(block_data) != "Array" || block_data.size() < 2
+      return nil
+    blk_env = block_data[0]
+    blk_node = block_data[1]
+    params = ast_get(blk_node, :params)
+    body = ast_get(blk_node, :body)
+    if params == nil || params.size() != 0 || body == nil || body.size() != 1
+      return nil
+    stmt = body[0]
+    if ast_kind(stmt) != :compound_assign
+      return nil
+    target = ast_get(stmt, :target)
+    value = ast_get(stmt, :value)
+    if ast_kind(target) != :var || ast_kind(value) != :int
+      return nil
+    name = ast_get(target, :name)
+    if !blk_env.defined_locally_or_in_scope?(name)
+      return nil
+    delta = ast_get(value, :value)
+    op = ast_get(stmt, :op)
+    if op == :MINUS
+      delta = 0 - delta
+    elsif op != :PLUS
+      return nil
+    [blk_env, name, delta]
+
+  -> call_block0(block_data)
+    if type(block_data) == "Array"
+      blk_env = block_data[0]
+      blk_node = block_data[1]
+      block_env = Environment.new(blk_env)
+      params = ast_get(blk_node, :params)
+      i = 0
+      while i < params.size()
+        block_env.define(params[i], nil)
+        i += 1
+      captured_self = current_self()
+      if blk_env.defined?("__block_self__")
+        captured_self = blk_env.get("__block_self__")
+      @self_stack.push(captured_self)
+      result = nil
+      pending_error = nil
+      begin
+        result = evaluate_body(ast_get(blk_node, :body), block_env)
+      rescue err
+        if err == "__SIGNAL__" && @signal[:type] == :next
+          @signal[:type] = nil
+        else
+          pending_error = err
+      ensure
+        @self_stack.pop()
+      if pending_error != nil
+        raise pending_error
+      return result
+    nil
+
+  # Scalar one-argument block invocation. This preserves call_block's implicit
+  # parameter and destructuring rules without allocating an `[arg]` Array.
+  # Range passes a reusable Environment only after the escape check above.
+  -> call_block1(block_data, arg, reuse_env = nil)
+    if type(block_data) == "Array"
+      blk_env = block_data[0]
+      blk_node = block_data[1]
+      block_env = reuse_env
+      if block_env == nil
+        block_env = Environment.new(blk_env)
+      else
+        block_env.clear_bindings()
+      params = ast_get(blk_node, :params)
+      if params.size() == 0
+        if ast_get(blk_node, :_free_vars) == nil
+          vars = []
+          collect_free_vars(ast_get(blk_node, :body), vars, {})
+          ast_set(blk_node, :_free_vars, vars)
+        free_vars = ast_get(blk_node, :_free_vars)
+        i = 0
+        bound = false
+        while i < free_vars.size() && !bound
+          candidate = free_vars[i]
+          if !blk_env.defined_locally_or_in_scope?(candidate)
+            block_env.define(candidate, arg)
+            bound = true
+          i += 1
+      elsif params.size() > 1 && type(arg) == "Array"
+        i = 0
+        while i < params.size()
+          block_env.define(params[i], i < arg.size() ? arg[i] : nil)
+          i += 1
+      else
+        i = 0
+        while i < params.size()
+          block_env.define(params[i], i == 0 ? arg : nil)
+          i += 1
+      captured_self = current_self()
+      if blk_env.defined?("__block_self__")
+        captured_self = blk_env.get("__block_self__")
+      @self_stack.push(captured_self)
+      result = nil
+      pending_error = nil
+      begin
+        result = evaluate_body(ast_get(blk_node, :body), block_env)
+      rescue err
+        if err == "__SIGNAL__" && @signal[:type] == :next
+          @signal[:type] = nil
+        else
+          pending_error = err
+      ensure
+        @self_stack.pop()
+      if pending_error != nil
+        raise pending_error
+      return result
     nil
 
   -> call_block(block_data, args)

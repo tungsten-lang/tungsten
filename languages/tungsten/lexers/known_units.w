@@ -9,6 +9,8 @@
     rooted = root + "/data/unit_names.txt"
     if file?(rooted)
       return rooted
+  if file?("data/unit_names.txt")
+    return "data/unit_names.txt"
   # `bin/tungsten` exports TUNGSTEN_ROOT, but tungsten-compiler is also a
   # public executable and must remain relocatable when invoked directly.
   # Its installed layout is <root>/bin/tungsten-compiler, so the executable
@@ -18,8 +20,6 @@
     installed = executable_dir + "/../data/unit_names.txt"
     if file?(installed)
       return installed
-  if file?("data/unit_names.txt")
-    return "data/unit_names.txt"
   nil
 
 -> load_known_unit_names

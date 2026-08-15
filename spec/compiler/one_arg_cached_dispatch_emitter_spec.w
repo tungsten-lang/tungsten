@@ -1,7 +1,7 @@
-# Structural coverage for production one-argument dispatch lowering. These
-# checks cover the source-proof bit set by lowering: selected argc-one calls
-# use the scalar helper and need no scratch, while an otherwise-identical
-# unproven call and every larger arity retain the generic ABI.
+# Structural coverage for production scalar dispatch lowering. These checks
+# cover the exact-source proof bits set by lowering: selected argc-one and
+# argc-two calls use scalar helpers and need no scratch, while otherwise-
+# identical unproven calls retain the generic ABI.
 
 use ../../compiler/lib/emitter
 
@@ -53,7 +53,20 @@ two_inst = {
   receiver: "%recv",
   method_name_val: "%name",
   args: ["%arg0", "%arg1"],
+  scalar_source_argc2: true,
   ic_id: 12,
+  src_line: nil,
+  src_col: nil
+}
+generic_two_inst = {
+  op: :call_method_i64,
+  temp: "%generic.two",
+  temp_args_val: "%generic.two.args",
+  receiver: "%recv",
+  method_name_val: "%name",
+  args: ["%arg0", "%arg1"],
+  scalar_source_argc2: false,
+  ic_id: 15,
   src_line: nil,
   src_col: nil
 }
@@ -61,10 +74,19 @@ two_inst = {
 decls = declare_runtime()
 check("runtime declaration",
       decls.include?("declare i64 @w_method_call_cached_1(i64, i64, i64, ptr)"))
+check("argc-two runtime declaration",
+      decls.include?("declare i64 @w_method_call_cached_2(i64, i64, i64, i64, ptr)"))
+
+# Static slab WValues carry only identity. Runtime aliases may cache length,
+# and the runtime masks that optional field for equality and hashing.
+slab = build_string_wvalues([{id: 1, text: "has_key?"}])
+expected_slab_wvalue = w_tag_stringsym + 12 + 16
+check("static slab identity", slab[:wvalues][1] == expected_slab_wvalue)
 
 zero_fns = runtime_fns_for_inst(zero_inst)
 one_fns = runtime_fns_for_inst(one_inst)
 two_fns = runtime_fns_for_inst(two_inst)
+generic_two_fns = runtime_fns_for_inst(generic_two_inst)
 generic_one_fns = runtime_fns_for_inst(generic_one_inst)
 check("zero declaration selection",
       zero_fns.size() == 1 && zero_fns[0] == "w_method_call_cached_0")
@@ -73,7 +95,9 @@ check("one declaration selection",
 check("unproven argc-one declaration stays generic",
       generic_one_fns.size() == 1 && generic_one_fns[0] == "w_method_call_cached")
 check("two declaration selection",
-      two_fns.size() == 1 && two_fns[0] == "w_method_call_cached")
+      two_fns.size() == 1 && two_fns[0] == "w_method_call_cached_2")
+check("unproven argc-two declaration stays generic",
+      generic_two_fns.size() == 1 && generic_two_fns[0] == "w_method_call_cached")
 
 one_ir = render_instruction(one_inst, nil, {}, nil, "")
 check("argc-one helper call", one_ir.include?("@w_method_call_cached_1("))
@@ -89,11 +113,17 @@ check("unproven argc-one omits helper", !generic_one_ir.include?("@w_method_call
 check("unproven argc-one retains store", generic_one_ir.include?("store i64 %arg"))
 
 two_ir = render_instruction(two_inst, nil, {}, nil, "")
-check("argc-two stays generic", two_ir.include?("@w_method_call_cached("))
-check("argc-two omits one helper", !two_ir.include?("@w_method_call_cached_1("))
-check("argc-two first store retained",
-      two_ir.include?("store i64 %arg0, ptr %__mcall_args, align 8"))
-check("argc-two second store retained", two_ir.include?("store i64 %arg1"))
+check("argc-two helper call", two_ir.include?("@w_method_call_cached_2("))
+check("argc-two generic count zero", !two_ir.include?("@w_method_call_cached("))
+check("argc-two direct first argument", two_ir.include?(", i64 %arg0, i64 %arg1, ptr %two.ic)"))
+check("argc-two stores zero", !two_ir.include?("store i64"))
+check("argc-two scratch reference zero", !two_ir.include?("%__mcall_args"))
+
+generic_two_ir = render_instruction(generic_two_inst, nil, {}, nil, "")
+check("unproven argc-two stays generic", generic_two_ir.include?("@w_method_call_cached("))
+check("unproven argc-two omits helper", !generic_two_ir.include?("@w_method_call_cached_2("))
+check("unproven argc-two first store retained", generic_two_ir.include?("store i64 %arg0"))
+check("unproven argc-two second store retained", generic_two_ir.include?("store i64 %arg1"))
 
 one_function = {
   name: "one_only",
@@ -136,10 +166,10 @@ two_function = {
   fp_flags: ""
 }
 two_function_ir = emit_function(two_function, nil, nil, {}, false, "", nil)
-check("arity-two scratch alloca retained exactly once",
-      two_function_ir.split("%__mcall_args = alloca i64").size() == 2)
-check("arity-two scratch alloca remains exact",
-      two_function_ir.include?("%__mcall_args = alloca i64, i32 2, align 8"))
+check("arity-two helper emitted exactly once",
+      two_function_ir.split("@w_method_call_cached_2(").size() == 2)
+check("arity-two scratch alloca count zero",
+      two_function_ir.split("%__mcall_args = alloca i64").size() == 1)
 
 located_one = {
   op: :call_method_i64,

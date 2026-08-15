@@ -110,6 +110,58 @@ bench-prime-sweep: bench_prime_sweep
 bench_prime_sweep: ../benchmarks/primes/prime_sweep.c $(RUNTIME_DEPS) w_char_table.c
 	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) ../benchmarks/primes/prime_sweep.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_prime_sweep
 
+# Compare WArray capacity policies against the host allocator and probe
+# whether moved/freed small buffers are immediately recycled by size class.
+bench-array-growth: bench_array_growth
+	./bench_array_growth
+
+bench_array_growth: bench_array_growth.c
+	$(CLANG) $(BENCH_FLAGS) $(WARN_FLAGS) bench_array_growth.c -o bench_array_growth
+
+# Matched A/B using the production WArray path. The macros change only the
+# growth threshold/policy; all other runtime/compiler flags stay identical.
+bench-array-push-ab: bench_array_push_double bench_array_push_eighth_1k bench_array_push_eighth_4k bench_array_push_quarter_8k bench_array_push_quarter_16k bench_array_push_half_8k
+	./bench_array_push_double "2x baseline"
+	./bench_array_push_eighth_1k "2x < 1024, then 1.125x"
+	./bench_array_push_eighth_4k "2x < 4096, then 1.125x"
+	./bench_array_push_quarter_8k "2x < 8192, then 1.25x"
+	./bench_array_push_quarter_16k "2x < 16384, then 1.25x"
+	./bench_array_push_half_8k "2x < 8192, then 1.5x"
+
+bench_array_push_double: bench_array_push.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) -DW_ARRAY_QUARTER_GROWTH=0 $(RUNTIME_CFLAGS) $(RUNTIME_SRCS) bench_array_push.c $(RUNTIME_LDFLAGS) -o bench_array_push_double
+
+bench_array_push_eighth_1k: bench_array_push.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) -DW_ARRAY_QUARTER_GROWTH=1 -DW_ARRAY_QUARTER_GROWTH_THRESHOLD=1024 -DW_ARRAY_GROWTH_NUMERATOR=9 -DW_ARRAY_GROWTH_DENOMINATOR=8 $(RUNTIME_CFLAGS) $(RUNTIME_SRCS) bench_array_push.c $(RUNTIME_LDFLAGS) -o bench_array_push_eighth_1k
+
+bench_array_push_eighth_4k: bench_array_push.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) -DW_ARRAY_QUARTER_GROWTH=1 -DW_ARRAY_QUARTER_GROWTH_THRESHOLD=4096 -DW_ARRAY_GROWTH_NUMERATOR=9 -DW_ARRAY_GROWTH_DENOMINATOR=8 $(RUNTIME_CFLAGS) $(RUNTIME_SRCS) bench_array_push.c $(RUNTIME_LDFLAGS) -o bench_array_push_eighth_4k
+
+bench_array_push_quarter_8k: bench_array_push.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) -DW_ARRAY_QUARTER_GROWTH=1 -DW_ARRAY_QUARTER_GROWTH_THRESHOLD=8192 -DW_ARRAY_GROWTH_NUMERATOR=5 -DW_ARRAY_GROWTH_DENOMINATOR=4 $(RUNTIME_CFLAGS) $(RUNTIME_SRCS) bench_array_push.c $(RUNTIME_LDFLAGS) -o bench_array_push_quarter_8k
+
+bench_array_push_quarter_16k: bench_array_push.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) -DW_ARRAY_QUARTER_GROWTH=1 -DW_ARRAY_QUARTER_GROWTH_THRESHOLD=16384 -DW_ARRAY_GROWTH_NUMERATOR=5 -DW_ARRAY_GROWTH_DENOMINATOR=4 $(RUNTIME_CFLAGS) $(RUNTIME_SRCS) bench_array_push.c $(RUNTIME_LDFLAGS) -o bench_array_push_quarter_16k
+
+bench_array_push_half_8k: bench_array_push.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) -DW_ARRAY_QUARTER_GROWTH=1 -DW_ARRAY_QUARTER_GROWTH_THRESHOLD=8192 -DW_ARRAY_GROWTH_NUMERATOR=3 -DW_ARRAY_GROWTH_DENOMINATOR=2 $(RUNTIME_CFLAGS) $(RUNTIME_SRCS) bench_array_push.c $(RUNTIME_LDFLAGS) -o bench_array_push_half_8k
+
+# Matched same-binary A/B for runtime hot paths. The source includes
+# runtime.c directly to reach private reference kernels, like bench_bigint.
+bench-runtime-hotpaths: bench_runtime_hotpaths
+	./bench_runtime_hotpaths
+
+bench_runtime_hotpaths: bench_runtime_hotpaths.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_runtime_hotpaths.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_runtime_hotpaths
+
+# Compare today's dynamic slab/heap String construction with a hypothetical
+# exact-seven-character printable-ASCII immediate encoding.
+bench-string-encoding: bench_string_encoding
+	./bench_string_encoding
+
+bench_string_encoding: bench_string_encoding.c $(RUNTIME_DEPS) w_char_table.c
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_string_encoding.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_string_encoding
+
 tune-bigint:
 	../benchmarks/big_math/tune_bigint_thresholds.sh
 
@@ -258,7 +310,7 @@ tests/test_exception_frames: tests/test_exception_frames.c $(RUNTIME_DEPS)
 test-all: test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-hash-tombstone test-string-slab test-ivars test-node-arena test-exception-frames
 
 clean:
-	rm -f runtime.o terminal_input.o test_nanbox bench_wvalue bench_bigint bench_prime_sweep bench_node bench_location bench_slab_init bench_before bench_http bench_http_before
+	rm -f runtime.o terminal_input.o test_nanbox bench_wvalue bench_bigint bench_prime_sweep bench_array_growth bench_array_push_double bench_array_push_quarter bench_array_push_quarter_4k bench_array_push_eighth_1k bench_array_push_eighth_4k bench_array_push_quarter_8k bench_array_push_quarter_16k bench_array_push_half_8k bench_runtime_hotpaths bench_string_encoding bench_node bench_location bench_slab_init bench_before bench_http bench_http_before
 	rm -f tests/test_goroutine_arena tests/test_threads tests/test_atomics tests/test_sockets tests/test_goroutines tests/test_event_loop tests/test_integration tests/test_hash tests/test_hash_tombstone tests/test_string_slab tests/test_ivars tests/test_node_arena tests/test_exception_frames
 
-.PHONY: compile runtime-objects clean test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-hash-tombstone test-string-slab test-ivars test-node-arena test-exception-frames test-all bench bench-bigint bench-prime-sweep bench-node bench-location bench-slab-init bench-before bench-compare
+.PHONY: compile runtime-objects clean test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-hash-tombstone test-string-slab test-ivars test-node-arena test-exception-frames test-all bench bench-bigint bench-prime-sweep bench-array-growth bench-array-push-ab bench-runtime-hotpaths bench-string-encoding bench-node bench-location bench-slab-init bench-before bench-compare

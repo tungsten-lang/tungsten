@@ -76,6 +76,7 @@ static WValue echo_server_fn(WValue *captures) {
 
     WValue conn = w_socket_accept(listener);
     WValue data = w_socket_read(conn, w_box_int(256));
+    int short_read_was_inline = data != W_NIL && w_is_inline_str(data);
     if (data != W_NIL) {
         /* Echo back with prefix */
         const char *str = str_val(data);
@@ -84,7 +85,7 @@ static WValue echo_server_fn(WValue *captures) {
         w_socket_write(conn, w_string(reply));
     }
     w_socket_close(conn);
-    return W_TRUE;
+    return short_read_was_inline ? W_TRUE : W_FALSE;
 }
 
 /* HTTP server closure: accept one request, respond with 200 OK */
@@ -169,7 +170,7 @@ static void test_tcp_echo(void) {
     WValue client = w_thread_spawn(w_box_ptr(ccl, W_SUBTAG_CLOSURE));
 
     WValue response = w_thread_join(client);
-    w_thread_join(server);
+    WValue server_result = w_thread_join(server);
     w_socket_close(listener);
 
     ASSERT(w_is_string(response) || w_is_symbol(response),
@@ -177,6 +178,8 @@ static void test_tcp_echo(void) {
     const char *resp_str = str_val(response);
     ASSERT(strcmp(resp_str, "echo:hello") == 0,
            "server echoed back 'echo:hello'");
+    ASSERT(server_result == W_TRUE,
+           "five-byte Socket#read result stayed inline");
 
     printf("  TCP echo: OK\n\n");
 }

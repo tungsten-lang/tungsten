@@ -423,7 +423,7 @@ in Tungsten:AST
       # NODE's offset bits. OFFSET_INTERN = 257: offset bits hold a dense
       # id into the C-side string-intern table.
       if offset == 256
-        return ccall_nobox("w_node_offset_extern", node)
+        return ccall("w_node_offset_extern", node)
       if offset == 257
         return ccall_nobox("w_ast_intern_str_of", node)
       return ccall_nobox("w_node_field_load", node, offset)

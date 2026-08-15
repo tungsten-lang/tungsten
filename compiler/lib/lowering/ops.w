@@ -329,22 +329,8 @@
   val.to_s()
 
 -> wvalue_literal_text(value)
-  u = value.to_i()
-  if u < 0
-    wrap = 1
-    i = 0
-    while i < 64
-      wrap = wrap * 2
-      i += 1
-    u = u + wrap
-  hex_chars = "0123456789ABCDEF"
-  out = StringBuffer(19)
-  out << "u0x"
-  shift = 60
-  while shift >= 0
-    out << hex_chars.slice((u >> shift) & 15, 1)
-    shift -= 4
-  out.to_s()
+  bits = value.to_i() ## u64
+  "u0x" + ccall("w_int_to_hex_str", bits)
 
 -> lower_machine_int_expression(ctx, node, type)
   # An assignment hint belongs to the target, so a conditional RHS reaches
@@ -359,6 +345,34 @@
   # fold them into `cmp Wn, #imm` without going through nanbox/unbox.
   if ast_kind(node) == :char
     return node.value.to_s()
+  # Negative literals are represented as unary MINUS over an Int node. Keep
+  # that operand in the same raw context too; otherwise a large tag constant
+  # is first materialized as a heap BigInt on every execution of the compiled
+  # function, then unboxed. Array#size alone made that mistake millions of
+  # times while the compiler encoded its metadata.
+  if ast_kind(node) == :unary_op && node.op == :MINUS
+    wfn = ctx[:func]
+    operand = lower_machine_int_expression(ctx, node.operand, type)
+    temp = next_temp(wfn)
+    emit_instruction(wfn, {op: machine_int_op(type, :MINUS), temp: temp, lhs: "0", rhs: operand})
+    return temp
+  # An explicit machine-int context applies to the WHOLE expression tree,
+  # not only its outermost result.  Falling through to lower_expression here
+  # let a nested arm box an intermediate before the final unbox.  For raw
+  # WValue construction this is catastrophic: e.g. `(string_tag | flags |
+  # payload) ## i64` boxed `string_tag | flags` as an Int, promoted it to a
+  # BigInt, then treated the BigInt pointer as the requested raw bits.
+  # Recurse under the target type so every arithmetic/bitwise link stays in
+  # the declared machine representation.
+  if ast_kind(node) == :binary_op
+    int_op = machine_int_op(type, node.op)
+    if int_op != nil
+      wfn = ctx[:func]
+      lhs = lower_machine_int_expression(ctx, node.left, type)
+      rhs = lower_machine_int_expression(ctx, node.right, type)
+      temp = next_temp(wfn)
+      emit_instruction(wfn, {op: int_op, temp: temp, lhs: lhs, rhs: rhs})
+      return temp
   # Carry-primitive intrinsic: `mulhi(a, b)` = high 64 bits of the unsigned
   # 64x64->128 product. Lowers to a single UMULH (arm64) / MULX (x86). It's a
   # builtin because the surface language can't express the high half of a wide
@@ -1639,10 +1653,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   # String/symbol-LITERAL fast path: `x == "when"` / `x != :sym` is three
   # inline instructions in the common case instead of a w_eq call. Sound by
-  # the canonical-representation invariants (wvalue.h): modes 0-5 pack the
-  # content in the box (length = mode, 0-5 bytes), mode 6 is the interned
-  # slab (6-61 bytes) — length-disjoint, so equal content in a canonical
-  # mode ⇒ equal bits, and different bits + canonical lhs ⇒ not equal.
+  # the representation invariants (wvalue.h): modes 0-5 pack the content in
+  # the box (length = mode, 0-5 bytes), while modes 6 and 7 both start at six
+  # bytes. Only modes 0-5 are canonical by full bit pattern; mode-6 aliases
+  # may differ in cached-length bits and mode 7 can equal slab content.
   # Everything else (mode-7 heap/rope strings, non-strings, user objects
   # with == overloads) falls to the runtime call, preserving dispatch. Only
   # literals that lowered to a compile-time constant qualify (>61-byte
@@ -1767,8 +1781,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       return typed_value(:i1, cmp0_res)
 
   # Var-var string == / != under a :string type fact on either side: route
-  # through __w_streq2_fast — bits equal -> true, BOTH canonical stringy
-  # (tag 0xFFF9, mode 0-6) -> false, anything else (mode-7 heap, ropes,
+  # through __w_streq2_fast — bits equal -> true, BOTH inline stringy
+  # (tag 0xFFF9, mode 0-5) -> false, anything else (slab/heap, ropes,
   # stale facts, non-strings) -> w_eq. Semantics-preserving for every
   # value, so a stale/wrong fact only costs the two inline checks; the
   # fact just picks the sites where the fold PAYS (w_eq was the compiler

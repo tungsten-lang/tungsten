@@ -22,6 +22,13 @@
   -> define(name, value)
     @bindings[name] = value
 
+  # Reuse one invocation scope when the interpreter has proved that no nested
+  # closure can retain it. The runtime reset preserves the table allocation,
+  # while making block locals fresh exactly as Environment.new would.
+  -> clear_bindings
+    ccall("w_hash_clear_reuse", @bindings)
+    self
+
   -> defined?(name)
     if @bindings.has_key?(name)
       return true

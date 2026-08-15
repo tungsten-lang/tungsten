@@ -11,7 +11,7 @@ fn __bigint_compare_raw(a, b) (i64 i64) i64
 
     a.kind:
       %atag = and i64 %a, -281474976710656
-      %aisbig = icmp eq i64 %atag, -2251799813685248
+      %aisbig = icmp eq i64 %atag, -1407374883553280
       br i1 %aisbig, label %a.big, label %a.int
     a.big:
       %apbits = and i64 %a, 140737488355327
@@ -46,7 +46,7 @@ fn __bigint_compare_raw(a, b) (i64 i64) i64
       %amag = phi i64 [ 0, %a.big ], [ %aimag, %a.int ]
       %al = phi ptr [ %alimbp, %a.big ], [ null, %a.int ]
       %btag = and i64 %b, -281474976710656
-      %bisbig = icmp eq i64 %btag, -2251799813685248
+      %bisbig = icmp eq i64 %btag, -1407374883553280
       br i1 %bisbig, label %b.big, label %b.int
     b.big:
       %bpbits = and i64 %b, 140737488355327

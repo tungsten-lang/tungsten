@@ -30,7 +30,7 @@ use ../../core/token
     # to resolve an unqualified superclass via the Ruby-style
     # walk-up (current namespace → parent → … → top).
     @declared_classes = {}
-    # @current_packed is the W_LEXICAL_TOKEN i64 for the current
+    # @current_packed is the tagless packed-token i64 for the current
     # position, populated by sync_current from @packed_tokens[@pos].
     # @source is the raw source buffer — tok_equal? and at_kw? /
     # expect_kw? helpers slice into it on demand.
@@ -61,10 +61,9 @@ use ../../core/token
   -> struct_name?(name)
     @struct_names[name] == true
 
-  # Raw accessors for packed Tokens. The token stream's signed W_TAG_CHAR bit
-  # pattern materializes as a BigInt when it crosses from i64[] into Array.
-  # Normalize that Int/BigInt value once, then keep shifts and masks unboxed;
-  # shifting the numeric object directly enters the allocating BigInt path.
+  # Raw accessors for packed token descriptors. Production values fit the
+  # inline-Int payload. Normalize once so the helpers also accept tagged Token
+  # fixtures, then keep shifts and masks unboxed.
   -> tok_type(p)
     parser_tok_type(p)
 
@@ -103,13 +102,7 @@ use ../../core/token
     # after any multi-byte UTF-8 char earlier in the file. Keywords and
     # operators are ASCII, so a per-codepoint string compare is exact.
     off = (bits >> 2) & 0xFFFFFF
-    lit_cps = lit.chars()
-    i = 0
-    while i < len
-      if @chars[off + i] != lit_cps[i]
-        return false
-      i += 1
-    true
+    ccall_nobox("w_parser_chars_equal_ascii", @chars, off, len, lit) == 1
 
   -> sync_current
     # Transparently skip :SP tokens so existing parser sites don't see

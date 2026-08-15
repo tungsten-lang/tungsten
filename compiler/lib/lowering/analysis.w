@@ -677,7 +677,7 @@
       args_list = node.args
       if args_list != nil && args_list.size() >= 1 && ast_kind(args_list[0]) == :string
         fname = args_list[0].value
-        if fname == "w_node_alloc" || fname == "w_node_field_load"
+        if ccall_nobox_returns_wvalue?(fname)
           return false
       return true
     if name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8")

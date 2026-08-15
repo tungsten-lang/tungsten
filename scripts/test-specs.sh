@@ -623,7 +623,9 @@ compiled_specs=(
   spec/compiler/one_arg_cached_dispatch_emitter_spec.w
   spec/compiler/ownership_phi_escape_spec.w
   spec/compiler/parser_packed_token_access_spec.w
+  spec/compiler/lexer_lexchar_storage_spec.w
   spec/compiler/raw_int_candidate_map_spec.w
+  spec/compiler/raw_machine_expression_context_spec.w
   spec/compiler/raw_machine_helper_control_flow_spec.w
   spec/compiler/raw_static_machine_return_spec.w
   spec/compiler/recase_spec.w

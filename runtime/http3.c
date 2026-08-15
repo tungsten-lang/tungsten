@@ -330,7 +330,7 @@ static int h3_end_stream_cb(nghttp3_conn *conn, int64_t stream_id,
     WExceptionFrame exc_frame;
     w_exception_frame_push(&exc_frame);
 
-    if (_setjmp(exc_frame.buf) == 0) {
+    if (W_FAST_SETJMP(exc_frame.buf) == 0) {
         response = ((WValue (*)(WValue *, WValue))qc->handler->fn_ptr)(qc->handler->captures, req_val);
         w_exception_stack = prev_stack;
 

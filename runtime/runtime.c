@@ -137,12 +137,28 @@ const char *w_symbol_name(uint64_t id) {
 /* ---- Regex ---- */
 
 typedef struct {
+    int byte_offset;
+    int capture_index;
+    uint8_t is_end;
+} WRegexBoundary;
+
+typedef struct {
     WValue *captures;
     int *starts;
     int *ends;
+    int *codepoint_starts;
+    int *codepoint_ends;
+    WRegexBoundary *boundaries;
+    WValue subject;
     int count;
     int capacity;
     int registered;
+#ifdef TUNGSTEN_ONIG
+    OnigRegion *region;
+#else
+    regmatch_t *matches;
+    size_t matches_capacity;
+#endif
 } WRegexCaptureState;
 
 static __thread WRegexCaptureState g_regex_capture_state;
@@ -155,6 +171,14 @@ static void w_regex_capture_state_destroy(void *opaque) {
     free(state->captures);
     free(state->starts);
     free(state->ends);
+    free(state->codepoint_starts);
+    free(state->codepoint_ends);
+    free(state->boundaries);
+#ifdef TUNGSTEN_ONIG
+    if (state->region) onig_region_free(state->region, 1);
+#else
+    free(state->matches);
+#endif
     memset(state, 0, sizeof(*state));
 }
 
@@ -178,20 +202,37 @@ static void w_regex_prepare_captures(int count) {
         state->captures = realloc(state->captures, sizeof(WValue) * (size_t)next);
         state->starts = realloc(state->starts, sizeof(int) * (size_t)next);
         state->ends = realloc(state->ends, sizeof(int) * (size_t)next);
+        state->codepoint_starts = realloc(state->codepoint_starts,
+                                          sizeof(int) * (size_t)next);
+        state->codepoint_ends = realloc(state->codepoint_ends,
+                                        sizeof(int) * (size_t)next);
+        state->boundaries = realloc(state->boundaries,
+                                    sizeof(WRegexBoundary) * (size_t)next * 2);
         state->capacity = next;
     }
     for (int i = 0; i < count; i++) {
         state->captures[i] = W_NIL;
         state->starts[i] = -1;
         state->ends[i] = -1;
+        state->codepoint_starts[i] = -1;
+        state->codepoint_ends[i] = -1;
     }
     state->count = count;
+    if (count == 0) state->subject = W_NIL;
 }
 
 static void w_regex_store_capture(int idx, const char *subject, int start, int end) {
     WRegexCaptureState *state = &g_regex_capture_state;
     if (idx < 0 || idx >= state->count || start < 0 || end < start) return;
-    state->captures[idx] = w_string_n(subject + start, (size_t)(end - start));
+    int length = end - start;
+    if (start <= 0xFFFFFF && length <= 0x3FFF) {
+        state->captures[idx] = w_box_slice(length, start);
+    } else {
+        /* Slice's compact encoding deliberately caps offsets at 16 MiB and
+         * lengths at 16 KiB. Preserve correctness for larger captures with
+         * the old eager representation; normal captures remain zero-copy. */
+        state->captures[idx] = w_string_n(subject + start, (size_t)length);
+    }
     state->starts[idx] = start;
     state->ends[idx] = end;
 }
@@ -203,6 +244,10 @@ static void w_onig_init_once(void) {
     OnigEncoding encs[] = { ONIG_ENCODING_UTF8 };
     onig_initialize(encs, 1);
 }
+
+static int w_regex_collect_name(const OnigUChar *name,
+                                const OnigUChar *name_end, int group_count,
+                                int *groups, OnigRegex regex, void *arg);
 #endif
 
 static unsigned int w_regex_compile_options(const char *options) {
@@ -229,6 +274,7 @@ WValue w_regex_new(WValue pattern_val, WValue options_val) {
     WRegex *rx = calloc(1, sizeof(WRegex));
     rx->pattern = strdup(pattern);
     rx->options = strdup(options);
+    rx->name_to_group = w_hash_new();
 
 #ifdef TUNGSTEN_ONIG
     pthread_once(&g_onig_once, w_onig_init_once);
@@ -245,6 +291,7 @@ WValue w_regex_new(WValue pattern_val, WValue options_val) {
         dief("invalid regex /%s/: %s", pattern, (const char *)msg);
     }
     rx->compiled = (void *)reg;
+    onig_foreach_name(reg, w_regex_collect_name, &rx->name_to_group);
 #else
     regex_t *reg = calloc(1, sizeof(regex_t));
     int cflags = REG_EXTENDED | (int)w_regex_compile_options(options);
@@ -262,24 +309,27 @@ WValue w_regex_new(WValue pattern_val, WValue options_val) {
 WValue w_regex_match(WValue regex_val, WValue subject_val) {
     if (!w_is_regex(regex_val)) die("regex match requires a regex");
     WRegex *rx = (WRegex *)w_as_ptr(regex_val);
+    if (w_is_rope(subject_val)) subject_val = w_rope_flatten(subject_val);
     const char *subject = as_str(subject_val);
     w_regex_prepare_captures(0);
 #ifdef TUNGSTEN_ONIG
     OnigRegex reg = (OnigRegex)rx->compiled;
     const OnigUChar *start = (const OnigUChar *)subject;
     const OnigUChar *end = start + strlen(subject);
-    OnigRegion *region = onig_region_new();
+    WRegexCaptureState *state = &g_regex_capture_state;
+    if (!state->region) state->region = onig_region_new();
+    OnigRegion *region = state->region;
+    onig_region_clear(region);
     int rc = onig_search(reg, start, end, start, end, region, ONIG_OPTION_NONE);
     if (rc >= 0) {
         int cap_count = region->num_regs;
         w_regex_prepare_captures(cap_count);
+        state->subject = subject_val;
         for (int i = 0; i < cap_count; i++) {
             w_regex_store_capture(i, subject, region->beg[i], region->end[i]);
         }
-        onig_region_free(region, 1);
         return W_TRUE;
     }
-    onig_region_free(region, 1);
     if (rc == ONIG_MISMATCH) return W_FALSE;
     OnigUChar msg[ONIG_MAX_ERROR_MESSAGE_LEN];
     onig_error_code_to_str(msg, rc);
@@ -287,18 +337,23 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
 #else
     regex_t *reg = (regex_t *)rx->compiled;
     size_t cap_count = reg->re_nsub + 1;
-    regmatch_t *matches = calloc(cap_count, sizeof(regmatch_t));
+    WRegexCaptureState *state = &g_regex_capture_state;
+    if (cap_count > state->matches_capacity) {
+        state->matches = realloc(state->matches,
+                                 cap_count * sizeof(regmatch_t));
+        state->matches_capacity = cap_count;
+    }
+    regmatch_t *matches = state->matches;
     int rc = regexec(reg, subject, cap_count, matches, 0);
     if (rc == 0) {
         w_regex_prepare_captures((int)cap_count);
+        state->subject = subject_val;
         for (size_t i = 0; i < cap_count; i++) {
             if (matches[i].rm_so >= 0)
                 w_regex_store_capture((int)i, subject, (int)matches[i].rm_so, (int)matches[i].rm_eo);
         }
-        free(matches);
         return W_TRUE;
     }
-    free(matches);
     if (rc == REG_NOMATCH) {
         w_regex_prepare_captures(0);
         return W_FALSE;
@@ -310,12 +365,57 @@ WValue w_regex_match(WValue regex_val, WValue subject_val) {
     return W_FALSE;
 }
 
-static int w_utf8_codepoint_offset(const char *subject, int byte_offset) {
-    int codepoints = 0;
-    for (int i = 0; i < byte_offset; i++) {
-        if (((unsigned char)subject[i] & 0xC0u) != 0x80u) codepoints++;
+static int w_regex_boundary_compare(const void *lhs, const void *rhs) {
+    const WRegexBoundary *a = lhs;
+    const WRegexBoundary *b = rhs;
+    if (a->byte_offset < b->byte_offset) return -1;
+    if (a->byte_offset > b->byte_offset) return 1;
+    return (int)a->is_end - (int)b->is_end;
+}
+
+/* Translate every capture boundary from byte to codepoint offsets with one
+ * forward UTF-8 scan. The old code rescanned the subject prefix twice per
+ * group, making match_data O(subject_size * capture_count). */
+static void w_regex_compute_codepoint_offsets(WRegexCaptureState *state,
+                                              const char *subject) {
+    int boundary_count = 0;
+    for (int i = 0; i < state->count; i++) {
+        if (state->starts[i] < 0) continue;
+        state->boundaries[boundary_count++] =
+            (WRegexBoundary){state->starts[i], i, 0};
+        state->boundaries[boundary_count++] =
+            (WRegexBoundary){state->ends[i], i, 1};
     }
-    return codepoints;
+    qsort(state->boundaries, (size_t)boundary_count,
+          sizeof(WRegexBoundary), w_regex_boundary_compare);
+
+    int byte_offset = 0;
+    int codepoint_offset = 0;
+    for (int i = 0; i < boundary_count; i++) {
+        WRegexBoundary boundary = state->boundaries[i];
+        while (byte_offset < boundary.byte_offset) {
+            if (((unsigned char)subject[byte_offset] & 0xC0u) != 0x80u)
+                codepoint_offset++;
+            byte_offset++;
+        }
+        if (boundary.is_end)
+            state->codepoint_ends[boundary.capture_index] = codepoint_offset;
+        else
+            state->codepoint_starts[boundary.capture_index] = codepoint_offset;
+    }
+}
+
+static WValue w_regex_materialize_slice(WValue subject, WValue value) {
+    if (!w_is_slice(value)) return value;
+    char inline_bytes[6];
+    const char *bytes;
+    size_t byte_size;
+    w_str_data(subject, inline_bytes, &bytes, &byte_size);
+    int offset = w_unbox_slice_offset(value);
+    int length = w_unbox_slice_length(value);
+    if ((size_t)offset > byte_size || (size_t)length > byte_size - (size_t)offset)
+        return W_NIL;
+    return w_string_n(bytes + offset, (size_t)length);
 }
 
 #ifdef TUNGSTEN_ONIG
@@ -335,43 +435,61 @@ static int w_regex_collect_name(const OnigUChar *name, const OnigUChar *name_end
 }
 #endif
 
-WValue w_regex_match_data(WValue regex_val, WValue subject_val) {
-    if (w_regex_match(regex_val, subject_val) != W_TRUE) return W_NIL;
-
+/* Build MatchData from the successful match already resident in the thread's
+ * capture state. Kept separate from the public match+build entry so the two
+ * costs can be profiled independently. */
+static WValue w_regex_match_data_from_state(WValue regex_val) {
     WRegexCaptureState *state = &g_regex_capture_state;
-    const char *subject = as_str(subject_val);
-    WValue groups = w_array_new_empty();
-    WValue offsets = w_array_new_empty();
+    const char *subject = as_str(state->subject);
+    w_regex_compute_codepoint_offsets(state, subject);
+    WValue groups = w_array_new_inline(65, state->count);
+    WValue offsets = w_array_new_inline(65, state->count);
+    WArray *group_array = w_as_array(groups);
+    WArray *offset_array = w_as_array(offsets);
     for (int i = 0; i < state->count; i++) {
-        w_array_push(groups, state->captures[i]);
+        group_array->slots[i] = state->captures[i];
         if (state->starts[i] < 0) {
-            w_array_push(offsets, W_NIL);
+            offset_array->slots[i] = W_NIL;
             continue;
         }
-        WValue span = w_array_new_empty();
-        w_array_push(span, w_int(w_utf8_codepoint_offset(subject, state->starts[i])));
-        w_array_push(span, w_int(w_utf8_codepoint_offset(subject, state->ends[i])));
-        w_array_push(offsets, span);
+        int start = state->codepoint_starts[i];
+        int end = state->codepoint_ends[i];
+        int length = end - start;
+        if (start <= 0xFFFFFF && length <= 0x3FFF) {
+            offset_array->slots[i] = w_box_slice(length, start);
+        } else {
+            WValue span = w_array_new_inline(65, 2);
+            WArray *span_array = w_as_array(span);
+            span_array->slots[0] = w_int(start);
+            span_array->slots[1] = w_int(end);
+            offset_array->slots[i] = span;
+        }
     }
 
-    WValue names = w_hash_new();
-#ifdef TUNGSTEN_ONIG
     WRegex *rx = (WRegex *)w_as_ptr(regex_val);
-    onig_foreach_name((OnigRegex)rx->compiled, w_regex_collect_name, &names);
-#endif
-
     WRegexMatch *match = calloc(1, sizeof(WRegexMatch));
+    match->subject = state->subject;
     match->groups = groups;
     match->offsets = offsets;
-    match->name_to_group = names;
+    match->name_to_group = rx->name_to_group;
     return w_box_ptr(match, W_SUBTAG_REGEX_MATCH);
+}
+
+WValue w_regex_match_data(WValue regex_val, WValue subject_val) {
+    if (w_regex_match(regex_val, subject_val) != W_TRUE) return W_NIL;
+    return w_regex_match_data_from_state(regex_val);
 }
 
 WValue w_regex_capture(WValue index_val) {
     int64_t idx = w_to_i64(index_val);
     WRegexCaptureState *state = &g_regex_capture_state;
     if (idx < 0 || idx >= state->count) return W_NIL;
-    return state->captures[idx];
+    WValue value = state->captures[idx];
+    if (w_is_slice(value)) {
+        value = w_regex_materialize_slice(state->subject, value);
+        state->captures[idx] = value;
+    }
+    return value;
 }
 
 /* Forward declarations */
@@ -18109,8 +18227,9 @@ static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t 
 
 /* ---- Parked small-string reuse (decimal formatting) --------------------
  * One-limb decimal formatting is ~4ns of digit writing wrapped in ~12ns of
- * string-object lifecycle: post-freeze w_string_n pays wyhash plus a
- * guaranteed intern-table miss (~2.5ns) and then a malloc whose matching
+ * string-object lifecycle: post-freeze w_string_n pays wyhash plus an
+ * intern-table lookup (usually a miss for formatted numbers, ~2.5ns) and
+ * then a malloc whose matching
  * w_value_free costs ~10ns for the pair (decomposition:
  * benchmarks/big_math probe).  Boost's std::string SSO pays neither, which
  * is the whole tostr@1 gap.  Instead of free()ing a small heap string,
@@ -18123,17 +18242,19 @@ static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t 
  * the payload the parked block PROVABLY holds — its len at park time — so
  * a take for any len <= cap stays in bounds no matter which constructor
  * minted the block.  A parked block is exactly as dead as a freed one;
- * parking only defers the free().  At most one block per thread is parked
- * (<= ~50 bytes), reclaimed by the OS at thread exit. */
+ * parking only defers the free(). At most one block per thread is parked
+ * (<= ~50 bytes), reclaimed by the OS at thread exit. W_STR_PARK_MAX is
+ * solely a recycler policy; it is not a String representation boundary. */
 #define W_STR_PARK_MAX 44
 static __thread WString *w_str_park = NULL;
 static __thread uint32_t w_str_park_cap = 0;
 
 /* Fresh-string constructor for dynamically formatted numbers: inline box
- * when it fits, otherwise parked block or exact-size malloc.  Deliberately
- * skips the frozen-slab intern probe — a formatted number gains nothing
- * from canonicalizing with static literals (equality and hashing are
- * structural), and the probe is a guaranteed-miss tax on every to_s. */
+ * when it fits, otherwise parked block or exact-size malloc. Deliberately
+ * skips w_string_n's post-freeze intern-table lookup. A formatted value can
+ * match a slab literal ("123456" is the obvious case), but String equality
+ * and hashing are representation-independent, so canonical slab identity is
+ * not required. Avoiding the hash/lookup favors the much more common miss. */
 static inline WValue w_string_small_fresh(const char *s, size_t len) {
     if (len <= 5) return w_box_inline_str(s, len);
     WString *ws = w_str_park;
@@ -18522,14 +18643,32 @@ WValue w_nil(void) {
  *   Mode 6   (slab):   interned, permanent, identity by 24-bit index.
  *   Mode 7   (heap):   transient/large, freeable WString*, no identity.
  *
- * The slab is an mmap'd arena of 32-byte slots. Strings ≤22 bytes fit in one
- * slot; 23-54 bytes span 2 contiguous slots. Strings >54 bytes go mode 7.
+ * The slab is an mmap'd arena of 32-byte slots. Strings 6-29 bytes fit in one
+ * slot; 30-61 bytes span 2 contiguous slots. Strings >61 bytes go mode 7.
  *
- * After w_slab_freeze(), all new strings go mode 7. The intern table stays
- * alive so frozen lookups can still recover canonical slab entries. */
+ * After w_slab_freeze(), no new slab entries are created. Normal constructors
+ * still recover an existing mode-6 value through the intern table; otherwise
+ * 6+ byte results use mode 7. Numeric fresh-string construction intentionally
+ * bypasses that lookup. */
 
 WStringSlab g_string_slab = {0};
 WInternTable g_intern = {0};
+
+/* Content hash per primary slab slot. This is a 128 MiB virtual mapping at
+ * maximum slab capacity, but anonymous pages are committed only for slots
+ * actually populated. Keeping the cache outside the 32-byte slab format
+ * preserves the serialized ABI and makes structural String hashing a load
+ * instead of re-reading up to 61 bytes on every Hash probe. */
+static uint64_t *g_slab_content_hashes = NULL;
+
+static void w_slab_hash_cache_init(void) {
+    if (g_slab_content_hashes) return;
+    size_t bytes = (size_t)W_SLAB_MAX_SLOTS * sizeof(uint64_t);
+    g_slab_content_hashes = mmap(NULL, bytes, PROT_READ | PROT_WRITE,
+                                 MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (g_slab_content_hashes == MAP_FAILED)
+        die("string slab: hash cache mmap failed");
+}
 
 /* ---- AST node arenas (PR #2: slab-AST migration) ---- */
 
@@ -18610,9 +18749,9 @@ int64_t w_node_inline_payload(int64_t kind, int64_t payload) {
 
 /* Read the 32-bit offset field of a W_PACKED_NODE — used by
  * ast_get to recover an inline-encoded payload for the kinds
- * above. Returns int64_t so the Tungsten side can box as Int. */
-int64_t w_node_offset_extern(WValue v) {
-    return (int64_t)w_node_offset(v);
+ * above. This crosses back into generic Tungsten code, so return a boxed Int. */
+WValue w_node_offset_extern(WValue v) {
+    return w_int((int64_t)w_node_offset(v));
 }
 
 /* Read the 2-bit size_class field of a W_PACKED_NODE — needed by
@@ -19577,6 +19716,7 @@ int64_t w_token_length_extern(WValue v) { return (int64_t)w_unbox_token_length(v
 
 void w_slab_init(void) {
     if (g_string_slab.base) return;
+    w_slab_hash_cache_init();
     g_string_slab.base = mmap(NULL, W_SLAB_TOTAL_SIZE,
                               PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (g_string_slab.base == MAP_FAILED) die("string slab: mmap failed");
@@ -19594,6 +19734,7 @@ static void w_slab_intern_grow(void);
 void w_slab_init_static(const uint8_t *data, uint32_t total_slots) {
     if (g_string_slab.base) return;
 
+    w_slab_hash_cache_init();
     size_t data_size = (size_t)total_slots * W_SLAB_SLOT_SIZE;
     g_string_slab.base = mmap(NULL, W_SLAB_TOTAL_SIZE,
                               PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -19707,6 +19848,7 @@ static int w_slab_equals_bytes(uint32_t index, const char *s, size_t len) {
 }
 
 void w_slab_rebuild_intern(uint32_t total_slots) {
+    w_slab_hash_cache_init();
     uint32_t idx = 1;
     while (idx < total_slots) {
         uint8_t *slot = w_slab_slot(idx);
@@ -19721,6 +19863,7 @@ void w_slab_rebuild_intern(uint32_t total_slots) {
             w_slab_intern_grow();
         }
         uint64_t h = w_slab_hash_index(idx, len);
+        g_slab_content_hashes[idx] = h;
         int64_t mask = g_intern.cap - 1;
         int64_t pos = (int64_t)(h & (uint64_t)mask);
         while (g_intern.indices[pos] != 0) pos = (pos + 1) & mask;
@@ -19776,8 +19919,9 @@ static WValue w_slab_lookup_existing(const char *s, size_t len, uint64_t h) {
     return W_UNDEF;
 }
 
-/* Intern a string. Returns WValue with mode 6 (slab) encoding.
- * If slab is frozen or exhausted, falls back to mode 7 (heap). */
+/* Intern a string while the slab is mutable. Returns mode 6, or mode 7 if
+ * the arena is exhausted. Frozen lookup/fallback is handled by w_string_n
+ * before this function is called. */
 static WValue w_slab_intern(const char *s, size_t len, uint64_t h) {
     /* Check for existing entry */
     if (g_intern.cap == 0 ||
@@ -19802,6 +19946,7 @@ static WValue w_slab_intern(const char *s, size_t len, uint64_t h) {
         memcpy(ws->data, s, len + 1);
         return w_box_heap_str(ws);
     }
+    g_slab_content_hashes[idx] = h;
     g_intern.hashes[pos] = h;
     g_intern.indices[pos] = idx;
     g_intern.count++;
@@ -31648,7 +31793,8 @@ static WValue w_string_to_lexchars_lang(const char *str, size_t str_len, const u
     const uint64_t (*lc_blocks)[256]; const uint16_t *lc_index;
     if (!w_lexchar_tables(&lc_blocks, &lc_index))
         w_raise(w_string("lexchars: lexer tables not linked (program does not reference .lexchars)"));
-    WValue result = w_array_new(64, str_len + LEX_SENTINEL_PAD);
+    /* Slots contain complete tagged LexChar WValues, not numeric i64s. */
+    WValue result = w_array_new(65, str_len + LEX_SENTINEL_PAD);
     WArray *ta = w_as_array(result);
     int64_t *data = (int64_t *)ta->slots;
 
@@ -33466,6 +33612,19 @@ int64_t w_string_byte_length(int64_t str_wval) {
     return ws ? (int64_t)ws->len : 0;
 }
 
+/* First byte of a String, without allocating a one-byte slice. -1 denotes
+ * an empty String; -2 denotes a non-String so callers can preserve a generic
+ * to_s fallback. Symbols deliberately take the latter path. */
+int64_t w_string_first_byte(WValue value) {
+    if (w_is_rope(value)) value = w_rope_flatten(value);
+    if (!w_is_string(value) || w_is_symbol(value)) return -2;
+    char inline_buf[6];
+    const char *bytes;
+    size_t len;
+    w_str_data(value, inline_buf, &bytes, &len);
+    return len == 0 ? -1 : (int64_t)(unsigned char)bytes[0];
+}
+
 static inline int w_ascii_space_byte(uint8_t c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
@@ -33674,8 +33833,9 @@ WValue w_string_slice_raw(WValue str, int64_t start, int64_t len) {
     return w_string_take(result, (size_t)len);
 }
 
-/* Convert source string to typed i64 array of NaN-boxed LexChar values.
- * Returns a WArray (i64[]) for zero-overhead indexed access.
+/* Convert source string to typed w64 array of NaN-boxed LexChar values.
+ * Returns a WArray (w64[]) so ordinary access preserves each WValue tag;
+ * scanners may explicitly reinterpret the same 64-bit slots as i64[].
  *
  * Pipelined: ASCII fast path processes 8 bytes at a time without
  * branching. The CPU can prefetch table entries while decoding. */
@@ -33687,7 +33847,7 @@ static WValue w_string_to_lexchars(const char *str, size_t str_len) {
      * The sentinel (0xFFFC000000000000) has no flags set, so flag-based
      * inner loops (IS_ID_CONTINUE, IS_WHITESPACE, IS_HEX) self-terminate
      * without bounds checking. ta->size still reports the real count. */
-    WValue result = w_array_new(64, str_len + 1);
+    WValue result = w_array_new(65, str_len + 1);
     WArray *ta = w_as_array(result);
     int64_t *data = (int64_t *)ta->slots;
 
@@ -35440,6 +35600,24 @@ static int exact_tower_eq(WValue a, WValue b) {
     return bigint_compare(bigint_mul_any(dn, od), bigint_mul_any(on, dd)) == 0;
 }
 
+/* Hash text by value, independent of its inline/slab/heap/rope storage.
+ * Equality is structural across those representations, so representation-
+ * identity hashes would violate Hash's equal-keys contract.  Preserve the
+ * old, very cheap inline hash for values up to five bytes by reconstructing
+ * their canonical inline box; longer values use the same byte hash in every
+ * representation. */
+static inline uint64_t w_hash_text_bytes(const uint8_t *data, size_t len,
+                                         int symbol) {
+    if (len <= 5) {
+        WValue canonical = symbol ? w_box_inline_sym(data, len)
+                                  : w_box_inline_str(data, len);
+        return w_hash_splitmix64(canonical);
+    }
+    uint64_t h = w_hash_wyhash(data, len);
+    if (symbol) h ^= 0x9e3779b97f4a7c15ULL;
+    return h;
+}
+
 static uint64_t w_hash_value(WValue v) {
     if (w_is_rope(v)) {
         uint32_t len = w_rope_len(v);
@@ -35447,32 +35625,27 @@ static uint64_t w_hash_value(WValue v) {
             char stack_buf[256];
             uint32_t pos = 0;
             w_rope_write(v, stack_buf, &pos);
-            return w_hash_wyhash((const uint8_t *)stack_buf, len);
+            return w_hash_text_bytes((const uint8_t *)stack_buf, len, 0);
         }
         char *heap_buf = malloc(len);
         uint32_t pos = 0;
         w_rope_write(v, heap_buf, &pos);
-        uint64_t h = w_hash_wyhash((const uint8_t *)heap_buf, len);
+        uint64_t h = w_hash_text_bytes((const uint8_t *)heap_buf, len, 0);
         free(heap_buf);
         return h;
     }
     if (w_is_stringy(v)) {
-        /* Inline (mode 0-5) and slab (mode 6) strings/symbols are canonical
-         * by bit pattern: equal content interns to one WValue, so the bits
-         * alone determine the value — including symbol-ness in bit 0. Hash
-         * them directly with splitmix64 instead of reading the bytes and
-         * running wyhash; this is the compiler's hottest hashing path (keys
-         * are interned method names / AST field symbols) and skips both the
-         * w_str_data copy/slab-read and the wyhash. Mode-7 heap strings are
-         * NOT canonical (two allocations can share content), so they must
-         * content-hash to stay consistent with w_hash_key_eq. */
-        if (((v >> 1) & 7) <= 6)
+        size_t mode = (v >> 1) & 7;
+        if (mode <= 5)
             return w_hash_splitmix64(v);
+        if (mode == 6 && g_slab_content_hashes) {
+            uint64_t h = g_slab_content_hashes[w_as_slab_index(v)];
+            if (w_is_symbol(v)) h ^= 0x9e3779b97f4a7c15ULL;
+            return h;
+        }
         char buf[6]; const char *s; size_t len;
         w_str_data(v, buf, &s, &len);
-        uint64_t h = w_hash_wyhash((const uint8_t *)s, len);
-        if (w_is_symbol(v)) h ^= 0x9e3779b97f4a7c15ULL;
-        return h;
+        return w_hash_text_bytes((const uint8_t *)s, len, w_is_symbol(v));
     }
     if (w_is_double(v)) {
         uint64_t bits = v - W_DOUBLE_BIAS;
@@ -35566,16 +35739,19 @@ static int w_hash_key_eq(WValue a, WValue b) {
     if (a == b) return 1;
     if ((w_is_rope(a) || w_is_stringy(a)) && (w_is_rope(b) || w_is_stringy(b))) {
         if (w_is_symbol(a) != w_is_symbol(b)) return 0;
-        /* The three non-rope storage modes hold disjoint byte-length ranges
-         * (inline 0-5, slab 6-61, heap 62+) and inline/slab are canonical by
-         * bit pattern, so two DISTINCT non-rope strings/symbols can be equal
-         * only when both are heap (mode 7). Everything else is unequal with
-         * no content compare — the payoff case for the compiler, whose
-         * colliding hash keys are interned method names / AST field symbols
-         * that were each paying a full memcmp per probe step to conclude
-         * "different". Ropes fall through to the content comparator. */
+        /* Slab aliases can differ only in their optional cached-length bits.
+         * Equal slab content has one interned index, so retain that fast path.
+         * Heap strings are deliberately allowed to equal slab literals (for
+         * example numeric to_s results), so mixed storage modes fall through
+         * to the structural comparison. */
         if (!w_is_rope(a) && !w_is_rope(b)) {
-            if (((a >> 1) & 7) != 7 || ((b >> 1) & 7) != 7) return 0;
+            size_t amode = (a >> 1) & 7;
+            size_t bmode = (b >> 1) & 7;
+            if (amode == 6 && bmode == 6)
+                return w_as_slab_index(a) == w_as_slab_index(b);
+            if (amode <= 5 && bmode <= 5) return 0;
+            if ((amode <= 5 && bmode == 6) ||
+                (bmode <= 5 && amode == 6)) return 0;
         }
         return w_string_compare(a, b) == 0;
     }
@@ -35643,6 +35819,7 @@ static WArray *as_array(WValue v) {
  * once array_storage_bits / array_read are visible. Used here so to_s,
  * push-from-view, freeze_recursive can decode packed slots correctly. */
 static WValue array_slot_load_decoded(WArray *a, int64_t i);
+static WValue w_regex_match_group_at(WRegexMatch *match, int64_t index);
 static inline int64_t w_hash_probe(WHash *hash, WValue key);
 
 /* Public Object#hash for builtin values. Hash-table probing deliberately uses
@@ -39763,14 +39940,13 @@ WValue w_eq(WValue a, WValue b) {
     if (w_is_char(a) && w_is_char(b))
         return W_FALSE;
 
-    /* Inline and slab strings/symbols are canonical by bit pattern.
-     * If a != b (checked above), they are different values.
-     * strings are not equal to symbosls, even if they have the same content. */
-
-    /* AGENTS: you will think this is incorrect, but it is actually correct and important for performance.
-     * Don't change it without fully understanding the NaN-boxing scheme. */
-    if ((w_is_inline(a) && w_is_inline(b)) || (w_is_slab(a) && w_is_slab(b)))
-        return W_FALSE;
+    /* Inline strings/symbols are canonical by bit pattern (modes 0-5).
+     * Every runtime constructor must keep <=5-byte text inline, while slab
+     * and heap text start at six bytes, so differing representations cannot
+     * compare equal here. Slab values are not themselves bit-canonical
+     * because an alias may carry a cached length. */
+    if (w_is_inline(a) && w_is_stringy(b)) return W_FALSE;
+    if (w_is_inline(b) && w_is_stringy(a)) return W_FALSE;
 
     /* Bigint equality */
     if (w_both_integers_any(a, b))
@@ -39800,19 +39976,14 @@ WValue w_eq(WValue a, WValue b) {
 
     /* Strings and symbols compare by content, but only within the same type.
      * Ropes are string values, so compare them directly without flattening.
-     * Past the inline/slab canonical early-out above, two distinct non-rope
-     * strings/symbols can be equal only when both are heap (mode 7) — the
-     * storage modes hold disjoint byte-length ranges (0-5 / 6-61 / 62+), so a
-     * cross-mode pair never matches. Skip the content compare otherwise. */
+     * Slab and heap lengths overlap: numeric formatters deliberately mint
+     * fresh mode-7 strings above five bytes to avoid an intern-table probe,
+     * and those values must still equal mode-6 literals with the same bytes. */
     if ((w_is_rope(a) || w_is_string(a)) && (w_is_rope(b) || w_is_string(b))) {
-        if (!w_is_rope(a) && !w_is_rope(b) && (((a >> 1) & 7) != 7 || ((b >> 1) & 7) != 7))
-            return W_FALSE;
         return w_bool(w_string_compare(a, b) == 0);
     }
 
     if (w_is_symbol(a) && w_is_symbol(b)) {
-        if (((a >> 1) & 7) != 7 || ((b >> 1) & 7) != 7)
-            return W_FALSE;
         return w_bool(w_string_compare(a, b) == 0);
     }
 
@@ -40713,7 +40884,7 @@ WValue w_to_s(WValue v) {
     if (w_is_symbol(v)) return v & ~(WValue)1;
     if (w_is_regex(v))  return w_string(((WRegex *)w_as_ptr(v))->pattern);
     if (w_is_regex_match(v))
-        return w_array_get(((WRegexMatch *)w_as_ptr(v))->groups, w_int(0));
+        return w_regex_match_group_at((WRegexMatch *)w_as_ptr(v), 0);
     if (w_is_strbuf(v)) return w_strbuf_to_s(v);
     if (w_is_rope(v))   return w_rope_flatten(v);
     if (w_is_int(v))    return w_int_to_str(w_as_int(v));
@@ -41343,6 +41514,22 @@ WValue w_dlcall(WValue fn_val) {
     return fn();
 }
 
+/* Persistent native REPL bindings. A session executes snippets on one host
+ * thread; separately loaded objects resolve these symbols from that host, so
+ * values survive object unload/reload without replaying their initializers. */
+static __thread WValue w_repl_state = W_NIL;
+
+WValue w_repl_state_get(WValue name) {
+    if (w_repl_state == W_NIL) return W_NIL;
+    return w_hash_get(w_repl_state, name);
+}
+
+WValue w_repl_state_set(WValue name, WValue value) {
+    if (w_repl_state == W_NIL) w_repl_state = w_hash_new();
+    w_hash_set(w_repl_state, name, value);
+    return value;
+}
+
 /* Resolve a Tungsten fn by its SOURCE name inside a loaded snippet dylib.
  * Tungsten fns get internal linkage + a hashed symbol (@__wy_…), so they can't
  * be dlsym'd directly — but the compiler emits __w_fn_meta (kept by llvm.used,
@@ -41657,21 +41844,29 @@ WValue w_array_new_empty(void) {
     return w_box_array(arr);
 }
 
-/* `array + array` → concatenation. Builds a fresh polymorphic array and
- * copies lhs's elements then rhs's, reading each through the polymorphic
- * w_array_get so mixed element tiers (i64[] + f64[] + boxed) concatenate
- * correctly; the result is boxed. Neither operand is mutated. */
+/* `array + array` → concatenation. The result size is exact, so allocate its
+ * header and payload once and fill directly. Polymorphic inputs bulk-copy;
+ * typed inputs still decode each element to preserve mixed-tier semantics. */
 WValue w_array_concat(WValue lhs, WValue rhs) {
     WArray *la = w_as_array(lhs);
     WArray *ra = w_as_array(rhs);
     int64_t ln = la->size;
     int64_t rn = ra->size;
-    WValue out = w_array_new_empty();
-    for (int64_t i = 0; i < ln; i++) {
-        w_array_push(out, w_array_get(lhs, w_int(i)));
+    int64_t total = ln + rn;
+    if (total > INT32_MAX)
+        w_raise(w_string("array concat result exceeds INT32_MAX — use BigArray"));
+    WValue out = w_array_new_inline(65, total);
+    WArray *oa = w_as_array(out);
+    WValue *dst = oa->slots;
+    if (la->ebits == 65) {
+        memcpy(dst, la->slots + la->start, (size_t)ln * sizeof(WValue));
+    } else {
+        for (int64_t i = 0; i < ln; i++) dst[i] = array_slot_load_decoded(la, i);
     }
-    for (int64_t i = 0; i < rn; i++) {
-        w_array_push(out, w_array_get(rhs, w_int(i)));
+    if (ra->ebits == 65) {
+        memcpy(dst + ln, ra->slots + ra->start, (size_t)rn * sizeof(WValue));
+    } else {
+        for (int64_t i = 0; i < rn; i++) dst[ln + i] = array_slot_load_decoded(ra, i);
     }
     return out;
 }
@@ -41961,10 +42156,16 @@ WValue w_array_copy_range(WValue arr_val, WValue from_val, WValue to_val, WValue
     if (from < 0) from = 0;
     if (!excl) to += 1; /* inclusive → exclusive end */
     if (to > arr->size) to = arr->size;
-    WValue result = w_array_new_empty();
-    for (int64_t i = from; i < to; i++) {
-        /* #62: decode-aware load for typed arrays. */
-        w_array_push(result, array_slot_load_decoded(arr, i));
+    if (from > arr->size) from = arr->size;
+    int64_t count = to > from ? to - from : 0;
+    WValue result = w_array_new_inline(65, count);
+    WArray *out = w_as_array(result);
+    if (arr->ebits == 65) {
+        memcpy(out->slots, arr->slots + arr->start + from,
+               (size_t)count * sizeof(WValue));
+    } else {
+        for (int64_t i = 0; i < count; i++)
+            out->slots[i] = array_slot_load_decoded(arr, from + i);
     }
     return result;
 }
@@ -43852,13 +44053,20 @@ static void w_hash_allocate_storage(WHash *hash, int64_t cap) {
     memset(hash->index, 0xFF, sizeof(int32_t) * cap);  /* all W_HASH_SLOT_EMPTY */
 }
 
-/* Hash with the dominant key kinds inlined: canonical strings/symbols
- * (storage modes 0-6) and inline ints hash by their bits alone. Results
+/* Hash with the dominant key kinds inlined: inline strings/symbols and
+ * inline ints avoid the generic path. Results
  * are bit-identical to w_hash_value's for every input — this only skips
  * the call and its branch prelude on the hot kinds. */
 static inline uint64_t w_hash_value_fast(WValue key) {
-    if (w_is_stringy(key) && ((key >> 1) & 7) <= 6)
-        return w_hash_splitmix64(key);
+    if (w_is_stringy(key)) {
+        size_t mode = (key >> 1) & 7;
+        if (mode <= 5) return w_hash_splitmix64(key);
+        if (mode == 6 && g_slab_content_hashes) {
+            uint64_t h = g_slab_content_hashes[w_as_slab_index(key)];
+            if (w_is_symbol(key)) h ^= 0x9e3779b97f4a7c15ULL;
+            return h;
+        }
+    }
     if (w_is_int(key))
         return w_hash_splitmix64(key);
     return w_hash_value(key);
@@ -43984,6 +44192,20 @@ static inline void w_hash_reset(WHash *hash) {
     hash->used = 0;
     hash->iter_depth = 0;
     hash->flags &= ~W_HASH_FLAG_KWARGS;
+}
+
+/* Empty a private scratch hash without releasing its storage. This is kept
+ * separate from language-level Hash mutation: compiler/interpreter scratch
+ * environments use it only when they have proved the hash cannot escape or
+ * be observed during iteration. */
+WValue w_hash_clear_reuse(WValue hash_val) {
+    WHash *hash = as_hash(hash_val);
+    if (hash->iter_depth > 0) {
+        w_raise(w_string("can't clear hash during iteration"));
+        return W_NIL;
+    }
+    w_hash_reset(hash);
+    return hash_val;
 }
 
 /* Call-site reuse hash allocation. See w_array_reuse_or_new. */
@@ -44337,7 +44559,10 @@ static WMethod *w_method_table_probe(WMethod *table, int cap, WValue name, uint6
     uint64_t mask = (uint64_t)cap - 1;
     uint64_t idx = hash & mask;
     while (table[idx].name != 0) {
-        if (w_hash_key_eq(table[idx].name, name)) return &table[idx];
+        if (table[idx].name == name ||
+            (table[idx].name_hash == hash &&
+             w_hash_key_eq(table[idx].name, name)))
+            return &table[idx];
         idx = (idx + 1) & mask;
     }
     return NULL;
@@ -44348,7 +44573,11 @@ static WMethod *w_method_table_probe_arity(WMethod *table, int cap, WValue name,
     uint64_t mask = (uint64_t)cap - 1;
     uint64_t idx = hash & mask;
     while (table[idx].name != 0) {
-        if (table[idx].arity == arity && w_hash_key_eq(table[idx].name, name)) return &table[idx];
+        if (table[idx].arity == arity &&
+            (table[idx].name == name ||
+             (table[idx].name_hash == hash &&
+              w_hash_key_eq(table[idx].name, name))))
+            return &table[idx];
         idx = (idx + 1) & mask;
     }
     return NULL;
@@ -44367,7 +44596,9 @@ static WMethod *w_method_table_probe_call_arity(WMethod *table, int cap,
     uint64_t idx = hash & mask;
     WMethod *compatible = NULL;
     while (table[idx].name != 0) {
-        if (w_hash_key_eq(table[idx].name, name)) {
+        if (table[idx].name == name ||
+            (table[idx].name_hash == hash &&
+             w_hash_key_eq(table[idx].name, name))) {
             if (table[idx].arity == arity) return &table[idx];
             if (!compatible && arity >= table[idx].min_arity &&
                 (table[idx].splat_index_plus_one != 0 || arity <= table[idx].arity))
@@ -44878,7 +45109,7 @@ void w_raise(WValue msg) {
      * exceptions don't leak them. */
     w_cleanup_unwind_to(w_exception_stack->cleanup_depth);
     w_exception_stack->error = msg;
-    _longjmp(w_exception_stack->buf, 1);
+    W_FAST_LONGJMP(w_exception_stack->buf, 1);
 }
 
 void *w_block_return_push(void) {
@@ -44936,7 +45167,7 @@ void w_block_return_signal(uint64_t buf_bits, WValue value) {
      * compile-time temps dominate this transfer. */
     w_cleanup_unwind_to(target->cleanup_depth);
     target->value = value;
-    _longjmp(target->buf, 1);
+    W_FAST_LONGJMP(target->buf, 1);
 }
 
 /* ---- Closures ---- */
@@ -45088,7 +45319,8 @@ WValue __w_argv_program(void) {
  * content of 5 bytes or fewer re-packs to inline SSO bits — slab/heap/slice
  * variants of SHORT content otherwise never equal the SSO literal keys the
  * compiler bakes into the switch (the :PIPE-vs-slab-symbol bug class).
- * Longer content passes through: slab ids already match compiled keys. */
+ * Longer slab content strips the optional cached-length bits so its identity
+ * matches the compiler's static tag/mode/index key. */
 WValue w_switch_canonical(WValue v) {
     if (!w_is_stringy(v)) return v;
     uint64_t mode = (v >> 1) & 0x7;
@@ -45099,7 +45331,10 @@ WValue w_switch_canonical(WValue v) {
     const char *s;
     size_t len;
     w_str_data(v, tmp, &s, &len);
-    if (len > 5) return v;
+    if (len > 5) {
+        if (((v >> 1) & 0x7) == 6) return v & ~(0x3FULL << 28);
+        return v;
+    }
     WValue out = w_box_inline_str(s, len);
     return is_sym ? (out | 1) : out;
 }
@@ -47979,11 +48214,12 @@ static WValue w_ic_array_sum(WValue r, WValue *a, int c) {
          * faster unsigned __int128 reducer below; WArray's INT32_MAX capacity
          * bounds its maximum possible u64 sum below 2^95. The old
          * `total += w_as_int(elem)` read float/decimal WValue bits as an int
-         * and returned garbage (e.g. [1.0,2.0,3.0].sum -> 768). w_add starts
-         * from `init` (a small int 0 with no arg) and widens as needed. */
+         * and returned garbage (e.g. [1.0,2.0,3.0].sum -> 768). The inline
+         * fast entry keeps the common all-Int loop out of polymorphic
+         * dispatch and falls through to w_add for mixed values or overflow. */
         WValue acc = init;
         for (int32_t i = 0; i < arr->size; i++)
-            acc = w_add(acc, array_slot_load_decoded(arr, i));
+            acc = w_add_fast(acc, array_slot_load_decoded(arr, i));
         return acc;
     }
     WValue total = array_is_float(arr) ? w_array_sum_float(r)
@@ -47991,7 +48227,7 @@ static WValue w_ic_array_sum(WValue r, WValue *a, int c) {
                                             : w_array_sum_unsigned(r);
     /* Fold in the seed for the typed fast paths too; keep the no-arg path
      * byte-identical (return the raw total) to avoid perturbing the hot case. */
-    return (c >= 1) ? w_add(init, total) : total;
+    return (c >= 1) ? w_add_fast(init, total) : total;
 }
 static WValue w_ic_array_fastsum(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -47999,10 +48235,11 @@ static WValue w_ic_array_fastsum(WValue r, WValue *a, int c) {
     if (arr->ebits == 65) {
         /* Same hazard as w_ic_array_sum above: polymorphic WValue storage is
          * neither float nor signed-int, so the unsigned reducer would
-         * accumulate raw NaN-box bit patterns. Accumulate through w_add. */
+         * accumulate raw NaN-box bit patterns. The fast entry preserves
+         * generic fallback while specializing the common Int case. */
         WValue acc = w_box_int(0);
         for (int32_t i = 0; i < arr->size; i++)
-            acc = w_add(acc, array_slot_load_decoded(arr, i));
+            acc = w_add_fast(acc, array_slot_load_decoded(arr, i));
         return acc;
     }
     return array_is_float(arr) ? w_array_fastsum_float(r)
@@ -48413,9 +48650,11 @@ WValue w_string_idx_raw(WValue r, int64_t idx) {
     /* Inline Strings carry their byte length in the mode and all five bytes
      * in the WValue itself. Select the requested lane in-register and box the
      * known one-byte result directly: no w_str_data buffer and no strlen. */
-    if (w_is_stringy(r)) {
+    if (!w_is_rope(r) && w_is_stringy(r)) {
         int64_t len = (int64_t)((r >> 1) & 7);
-        if (len <= 5) return w_sso_idx(r, idx);
+        if (len <= 5) {
+            return w_sso_idx(r, idx);
+        }
     }
 
     /* Slab, heap, and rope storage retain the shared byte-view boundary.
@@ -48521,8 +48760,7 @@ static WValue w_ic_string_matchop(WValue r, WValue *a, int c) {
     return w_regex_match(a[0], r);
 }
 /* String UTF-8 / parse / mutate / convert. */
-static WValue w_ic_string_chars(WValue r, WValue *a, int c) {
-    (void)a; (void)c;
+WValue w_string_chars(WValue r) {
     char buf[6]; const char *str; size_t str_len;
     w_str_data(r, buf, &str, &str_len);
     WValue result = w_array_new_empty();
@@ -48542,6 +48780,57 @@ static WValue w_ic_string_chars(WValue r, WValue *a, int c) {
         remaining -= clen;
     }
     return result;
+}
+
+/* Parser keyword/operator comparison. Lexer offsets are codepoint based, so
+ * Parser keeps source.chars() beside the byte string. Compare that array to
+ * an ASCII grammar literal in one C call: this avoids allocating lit.chars()
+ * at every at_kw? probe while preserving offsets after multibyte source text.
+ * Fast-tokenizer callers may supply LexChar slots; the ordinary lexer uses
+ * one-codepoint String slots. */
+int64_t w_parser_chars_equal_ascii(WValue chars, int64_t off, int64_t len,
+                                   WValue lit) {
+    if (!w_is_array(chars) || !w_is_stringy(lit) || off < 0 || len < 0)
+        return 0;
+
+    WArray *array = w_as_array(chars);
+    if (array->ebits != 65 || off > array->size || len > array->size - off)
+        return 0;
+
+    char lit_buf[6];
+    const char *lit_bytes;
+    size_t lit_len;
+    w_str_data(lit, lit_buf, &lit_bytes, &lit_len);
+    if (lit_len != (size_t)len) return 0;
+
+    for (int64_t i = 0; i < len; i++) {
+        unsigned char expected = (unsigned char)lit_bytes[i];
+        if (expected >= 0x80) return 0;
+
+        WValue ch = array_slot_load_decoded(array, off + i);
+        if (w_is_lexchar(ch)) {
+            if (w_lexchar_codepoint(ch) != expected) return 0;
+            continue;
+        }
+        if (w_is_char(ch)) {
+            if (w_char_codepoint(ch) != expected) return 0;
+            continue;
+        }
+        if (w_is_stringy(ch)) {
+            char ch_buf[6];
+            const char *ch_bytes;
+            size_t ch_len;
+            w_str_data(ch, ch_buf, &ch_bytes, &ch_len);
+            if (ch_len == 1 && (unsigned char)ch_bytes[0] == expected)
+                continue;
+        }
+        return 0;
+    }
+    return 1;
+}
+static WValue w_ic_string_chars(WValue r, WValue *a, int c) {
+    (void)a; (void)c;
+    return w_string_chars(r);
 }
 
 /* Reverse by codepoint, not by byte — a byte-reverse would scramble every
@@ -52486,12 +52775,48 @@ static WRegexMatch *as_regex_match(WValue v) {
     if (!w_is_regex_match(v)) die("expected RegexMatch");
     return (WRegexMatch *)w_as_ptr(v);
 }
+
+static int64_t w_regex_match_normalize_index(WArray *array, int64_t index) {
+    if (index < 0) index += array->size;
+    return index;
+}
+
 static WValue w_regex_match_array_at(WValue array_val, int64_t index) {
     WArray *array = w_as_array(array_val);
-    if (index < 0) index += array->size;
+    index = w_regex_match_normalize_index(array, index);
     if (index < 0 || index >= array->size) return W_NIL;
     return array_slot_load_decoded(array, index);
 }
+
+WValue w_regex_match_group_at(WRegexMatch *match, int64_t index) {
+    WArray *groups = w_as_array(match->groups);
+    index = w_regex_match_normalize_index(groups, index);
+    if (index < 0 || index >= groups->size) return W_NIL;
+    WValue value = groups->slots[index];
+    if (w_is_slice(value)) {
+        value = w_regex_materialize_slice(match->subject, value);
+        groups->slots[index] = value;
+    }
+    return value;
+}
+
+static WValue w_regex_match_offset_at(WRegexMatch *match, int64_t index) {
+    WArray *offsets = w_as_array(match->offsets);
+    index = w_regex_match_normalize_index(offsets, index);
+    if (index < 0 || index >= offsets->size) return W_NIL;
+    WValue value = offsets->slots[index];
+    if (w_is_slice(value)) {
+        int start = w_unbox_slice_offset(value);
+        int end = start + w_unbox_slice_length(value);
+        value = w_array_new_inline(65, 2);
+        WArray *span = w_as_array(value);
+        span->slots[0] = w_int(start);
+        span->slots[1] = w_int(end);
+        offsets->slots[index] = value;
+    }
+    return value;
+}
+
 static int64_t w_regex_match_group_index(WRegexMatch *match, WValue key) {
     if (w_is_integer_any(key)) return w_to_i64(key);
     if (!w_is_stringy(key)) return INT64_MIN;
@@ -52504,14 +52829,14 @@ static WValue w_ic_regex_match_idx(WValue r, WValue *a, int c) {
     WRegexMatch *match = as_regex_match(r);
     int64_t index = w_regex_match_group_index(match, a[0]);
     if (index == INT64_MIN) return W_NIL;
-    return w_regex_match_array_at(match->groups, index);
+    return w_regex_match_group_at(match, index);
 }
 static WValue w_ic_regex_match_offset(WValue r, WValue *a, int c) {
     if (c < 1) die("RegexMatch#offset requires 1 argument");
     WRegexMatch *match = as_regex_match(r);
     int64_t index = w_regex_match_group_index(match, a[0]);
     if (index == INT64_MIN) return W_NIL;
-    return w_regex_match_array_at(match->offsets, index);
+    return w_regex_match_offset_at(match, index);
 }
 static WValue w_ic_regex_match_begin_offset(WValue r, WValue *a, int c) {
     WValue key = c > 0 ? a[0] : w_int(0);
@@ -52529,50 +52854,55 @@ static WValue w_ic_regex_match_end_offset(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_regex_match_match(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    return w_regex_match_array_at(as_regex_match(r)->groups, 0);
+    return w_regex_match_group_at(as_regex_match(r), 0);
 }
 static WValue w_ic_regex_match_size(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_int((w_as_array(as_regex_match(r)->groups))->size);
 }
-static WValue w_regex_match_copy_from(WValue source, int32_t first) {
-    WArray *array = w_as_array(source);
-    WValue out = w_array_new_empty();
-    for (int32_t i = first; i < array->size; i++)
-        w_array_push(out, array_slot_load_decoded(array, i));
+static WValue w_regex_match_copy_groups(WRegexMatch *match, int32_t first) {
+    WArray *groups = w_as_array(match->groups);
+    int32_t count = groups->size - first;
+    if (count < 0) count = 0;
+    WValue out = w_array_new_inline(65, count);
+    WArray *array = w_as_array(out);
+    for (int32_t i = 0; i < count; i++)
+        array->slots[i] = w_regex_match_group_at(match, first + i);
     return out;
 }
 static WValue w_ic_regex_match_captures(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    return w_regex_match_copy_from(as_regex_match(r)->groups, 1);
+    return w_regex_match_copy_groups(as_regex_match(r), 1);
 }
 static WValue w_ic_regex_match_names(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     return w_hash_keys(as_regex_match(r)->name_to_group);
 }
-static WValue w_regex_match_named_values(WRegexMatch *match, WValue source) {
+static WValue w_regex_match_named_values(WRegexMatch *match, int offsets) {
     WHash *names = (WHash *)w_as_ptr(match->name_to_group);
     WValue out = w_hash_new();
     for (uint32_t i = 0; i < names->used; i++) {
         if (names->keys[i] == W_MEMO_MISS) continue;
         int64_t index = w_to_i64(names->values[i]);
-        w_hash_set(out, names->keys[i], w_regex_match_array_at(source, index));
+        WValue value = offsets ? w_regex_match_offset_at(match, index)
+                               : w_regex_match_group_at(match, index);
+        w_hash_set(out, names->keys[i], value);
     }
     return out;
 }
 static WValue w_ic_regex_match_named_captures(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WRegexMatch *match = as_regex_match(r);
-    return w_regex_match_named_values(match, match->groups);
+    return w_regex_match_named_values(match, 0);
 }
 static WValue w_ic_regex_match_named_offsets(WValue r, WValue *a, int c) {
     (void)a; (void)c;
     WRegexMatch *match = as_regex_match(r);
-    return w_regex_match_named_values(match, match->offsets);
+    return w_regex_match_named_values(match, 1);
 }
 static WValue w_ic_regex_match_to_a(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    return w_regex_match_copy_from(as_regex_match(r)->groups, 0);
+    return w_regex_match_copy_groups(as_regex_match(r), 0);
 }
 static WValue w_ic_regex_match_to_s(WValue r, WValue *a, int c) {
     return w_ic_regex_match_match(r, a, c);
@@ -53806,8 +54136,11 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
         case 0x86: table = w_ic_ipv6_table;        break;  /* 0x80 | W_TYPE_IPV6=6 */
         default: return NULL;
     }
-    for (int i = 0; table[i].fn; i++)
-        if (table[i].name == name) return table[i].fn;
+    for (int i = 0; table[i].fn; i++) {
+        WValue tn = table[i].name;
+        if (tn == name || w_hash_key_eq(tn, name))
+            return table[i].fn;
+    }
     return NULL;
 }
 
@@ -54123,6 +54456,38 @@ WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg,
         }
     }
     return w_method_call_cached_1_compat(recv, name, arg, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_method_call_cached_2_compat(
+        WValue recv, WValue name, WValue arg0, WValue arg1,
+        WInlineCache *cache) {
+    WValue args[2] = {arg0, arg1};
+    return w_method_call_cached(recv, name, args, 2, cache);
+}
+
+/* Two-argument twin of w_method_call_cached_1. Lowering selects this only
+ * when it has the same exact-source-class ownership proof, so the steady
+ * state avoids both the generic dispatch-key classifier and the caller's
+ * argument scratch array. */
+inline
+WValue w_method_call_cached_2(WValue recv, WValue name, WValue arg0,
+                              WValue arg1, WInlineCache *cache) {
+    if (__builtin_expect(w_is_instance(recv), 1)) {
+        WObject *obj = (WObject *)w_as_ptr(recv);
+        uint64_t key = 0x100000000ULL | (uint64_t)obj->class_id;
+        uint64_t tk = atomic_load_explicit(&cache->type_key,
+                                           memory_order_acquire);
+        void *fn = cache->fn_ptr;
+        int32_t car = cache->arity;
+        if (__builtin_expect(key == tk && fn != NULL && car == 2 &&
+                key == atomic_load_explicit(&cache->type_key,
+                                            memory_order_acquire), 1)) {
+            return ((WValue(*)(WValue, WValue, WValue))fn)(recv, arg0,
+                                                           arg1);
+        }
+    }
+    return w_method_call_cached_2_compat(recv, name, arg0, arg1, cache);
 }
 
 /* Direct-call string builtins (bypass method dispatch) */
@@ -55822,6 +56187,21 @@ extern ssize_t w_tls_read(WSocket *s, char *buf, size_t len);
 extern ssize_t w_tls_write(WSocket *s, const char *buf, size_t len);
 #endif
 
+/* Socket reads reserve a large owned WString before the kernel tells us the
+ * actual byte count. Preserve the global String representation invariant at
+ * that boundary: a short read belongs entirely in the WValue, not in the
+ * oversized buffer we happened to reserve for it. */
+static inline WValue w_socket_read_string(WString *ws, size_t bytes) {
+    ws->len = (uint32_t)bytes;
+    ws->data[bytes] = '\0';
+    if (bytes <= 5) {
+        WValue value = w_box_inline_str(ws->data, bytes);
+        free(ws);
+        return value;
+    }
+    return w_box_heap_str(ws);
+}
+
 WValue w_socket_read(WValue sock, WValue buf_size) {
     WSocket *s = as_socket(sock);
     if (s->closed) return W_NIL;
@@ -55842,9 +56222,7 @@ WValue w_socket_read(WValue sock, WValue buf_size) {
     if (s->ssl) {
         ssize_t bytes = w_tls_read(s, ws->data, n);
         if (bytes > 0) {
-            ws->len = (uint32_t)bytes;
-            ws->data[bytes] = '\0';
-            return w_box_heap_str(ws);
+            return w_socket_read_string(ws, (size_t)bytes);
         }
         free(ws);
         return W_NIL;
@@ -55855,9 +56233,7 @@ WValue w_socket_read(WValue sock, WValue buf_size) {
         ssize_t bytes = read(s->fd, ws->data, n);
 
         if (bytes > 0) {
-            ws->len = (uint32_t)bytes;
-            ws->data[bytes] = '\0';
-            return w_box_heap_str(ws);
+            return w_socket_read_string(ws, (size_t)bytes);
         }
         if (bytes == 0) {
             free(ws);
@@ -56264,6 +56640,67 @@ static inline int64_t array_byte_size(int64_t bits, int64_t count) {
     return count * (bits / 8);
 }
 
+/* Capacity policy for append/unshift growth. Arrays below 16K elements double
+ * so compiler-sized and ordinary application arrays keep their low allocation
+ * count. Beyond that, 1.25x substantially reduces retained slack for arrays
+ * whose final size is not a power of two. The 16K knee came from the full
+ * threshold sweep in bench_array_growth plus the production-path A/B; the
+ * benchmark override keeps the alternatives reproducible via
+ * `make -C runtime bench-array-push-ab`. */
+#ifndef W_ARRAY_QUARTER_GROWTH
+#define W_ARRAY_QUARTER_GROWTH 1
+#endif
+#ifndef W_ARRAY_QUARTER_GROWTH_THRESHOLD
+#define W_ARRAY_QUARTER_GROWTH_THRESHOLD 16384
+#endif
+#ifndef W_ARRAY_GROWTH_NUMERATOR
+#define W_ARRAY_GROWTH_NUMERATOR 5
+#endif
+#ifndef W_ARRAY_GROWTH_DENOMINATOR
+#define W_ARRAY_GROWTH_DENOMINATOR 4
+#endif
+static inline int32_t array_next_capacity(int32_t cap) {
+    if (cap <= 0) return 8;
+    if (cap >= INT32_MAX)
+        w_raise(w_string("typed array capacity exceeds INT32_MAX — use BigArray"));
+    int64_t next;
+#if W_ARRAY_QUARTER_GROWTH
+    if (cap < W_ARRAY_QUARTER_GROWTH_THRESHOLD)
+        next = (int64_t)cap * 2;
+    else {
+        int64_t extra_numerator =
+            W_ARRAY_GROWTH_NUMERATOR - W_ARRAY_GROWTH_DENOMINATOR;
+        next = (int64_t)cap +
+               ((int64_t)cap * extra_numerator +
+                W_ARRAY_GROWTH_DENOMINATOR - 1) /
+               W_ARRAY_GROWTH_DENOMINATOR;
+    }
+#else
+    next = (int64_t)cap * 2;
+#endif
+    if (next > INT32_MAX) next = INT32_MAX;
+    return (int32_t)next;
+}
+
+static size_t array_page_allocation_size(int64_t bits, int64_t count) {
+    long page = sysconf(_SC_PAGESIZE);
+    if (page <= 0) page = 4096;
+    size_t bytes = (size_t)array_byte_size(bits, count);
+    return (bytes + (size_t)page - 1) & ~((size_t)page - 1);
+}
+
+static void array_release_slots(WValue *slots, int64_t bits, int64_t cap,
+                                uint8_t flags) {
+    if (slots == NULL || (flags & W_FLAG_OWNED) == 0 ||
+        (flags & (W_FLAG_VIEW | W_FLAG_INLINE)))
+        return;
+    if (flags & W_FLAG_PAGE_ALIGNED) {
+        munmap(slots, array_page_allocation_size(bits, cap));
+    } else {
+        free(slots);
+    }
+}
+
 static inline uint64_t array_read(WArray *a, int64_t i) {
     uint8_t *bytes = (uint8_t *)a->slots;
     switch (array_storage_bits(a->ebits)) {
@@ -56434,6 +56871,18 @@ static inline void array_write_float(WArray *a, int64_t i, double val) {
     ((double *)bytes)[i] = val;
 }
 
+static inline void array_write_boxed(WArray *a, int64_t i, WValue val) {
+    if (array_is_wvalue(a)) {
+        array_write(a, i, (uint64_t)val);
+    } else if (array_is_float(a)) {
+        array_write_float(a, i, as_numeric_double(val));
+    } else if (a->ebits == 1) {
+        array_write(a, i, (val == W_NIL || val == W_FALSE) ? 0 : 1);
+    } else {
+        array_write(a, i, (uint64_t)w_to_i64(val));
+    }
+}
+
 WValue w_array_new(int64_t element_bits, int64_t cap) {
     if (cap > INT32_MAX) {
         w_raise(w_string("typed array: cap exceeds INT32_MAX — use BigArray for >2^31 elements"));
@@ -56473,12 +56922,29 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
  * independently aligned to 16 bytes. If a caller later grows the array, the
  * regular growth path promotes slots to a standalone allocation and clears
  * W_FLAG_INLINE; semantics are otherwise identical to w_array_new_uninit. */
-WValue w_array_new_inline_uninit_sized(int64_t element_bits, int64_t n) {
+WValue w_array_new_inline(int64_t element_bits, int64_t n) {
     if (n < 0 || n > INT32_MAX) {
         w_raise(w_string("typed array: size exceeds INT32_MAX — use BigArray for >2^31 elements"));
     }
     int64_t cap = n > 0 ? n : 8;
     size_t payload = (size_t)array_byte_size(element_bits, cap);
+    /* Darwin's allocator makes the combined 32 KiB allocation materially
+     * slower to allocate/free than separate fixed header + payload blocks;
+     * matched size sweeps retain the one-allocation win through 16 KiB.
+     * Keep this constructor's exact-size semantics while falling back to the
+     * two-allocation uninitialized representation above that crossover. */
+#ifndef W_ARRAY_INLINE_MAX_PAYLOAD
+#if defined(__APPLE__)
+#define W_ARRAY_INLINE_MAX_PAYLOAD (16u * 1024u)
+#else
+#define W_ARRAY_INLINE_MAX_PAYLOAD SIZE_MAX
+#endif
+#endif
+    if (payload > W_ARRAY_INLINE_MAX_PAYLOAD) {
+        WValue value = w_array_new_uninit(element_bits, cap);
+        w_as_array(value)->size = (int32_t)n;
+        return value;
+    }
     size_t slot_offset = (sizeof(WArray) + 15u) & ~(size_t)15u;
     WArray *a = malloc(slot_offset + payload);
     memset(a, 0, sizeof(WArray));
@@ -56489,6 +56955,13 @@ WValue w_array_new_inline_uninit_sized(int64_t element_bits, int64_t n) {
     a->cap = (int32_t)cap;
     a->slots = (WValue *)((uint8_t *)a + slot_offset);
     return w_box_array(a);
+}
+
+/* One-generation bootstrap ABI: an already-built stage compiler still emits
+ * the former internal spelling while it compiles the stage containing the
+ * shorter name. New lowering never references this wrapper. */
+WValue w_array_new_inline_uninit_sized(int64_t element_bits, int64_t n) {
+    return w_array_new_inline(element_bits, n);
 }
 
 /* Typed-array parameter guard for the native-fn boundary.
@@ -56638,6 +57111,8 @@ WValue w_array_reuse_or_new(WValue *slot, int64_t element_bits, int64_t cap) {
     return v;
 }
 
+static int w_array_has_views(WValue parent);
+
 WValue w_array_push(WValue arr, WValue val) {
     if (w_is_body(arr)) {
         w_raise(w_string("push: cannot mutate an AST body reference (immutable once frozen)"));
@@ -56648,51 +57123,50 @@ WValue w_array_push(WValue arr, WValue val) {
     }
     int64_t bits = array_storage_bits(a->ebits);
     if (a->start + a->size >= a->cap) {
-        /* Compact: shift live data to front before growing */
-        if (a->start > 0 && bits >= 8) {
-            int64_t live_bytes = array_byte_size(a->ebits, a->size);
-            int64_t start_bytes = array_byte_size(a->ebits, a->start);
-            memmove(a->slots, (uint8_t *)a->slots + start_bytes, live_bytes);
-            a->start = 0;
-        } else if (a->start > 0 && bits == 4) {
-            for (int64_t j = 0; j < a->size; j++) {
-                if (array_is_float(a)) {
-                    array_write_float(a, j, array_read_float(a, a->start + j));
-                } else {
-                    uint64_t v = array_read(a, a->start + j);
-                    array_write(a, j, v);
+        int has_views = w_array_has_views(arr);
+        /* Compaction changes storage offsets. Keep them stable while a
+         * zero-copy view exists; otherwise reclaim the deque prefix first. */
+        if (a->start > 0 && !has_views) {
+            if (bits >= 8) {
+                int64_t live_bytes = array_byte_size(a->ebits, a->size);
+                int64_t start_bytes = array_byte_size(a->ebits, a->start);
+                memmove(a->slots, (uint8_t *)a->slots + start_bytes,
+                        (size_t)live_bytes);
+            } else {
+                for (int64_t j = 0; j < a->size; j++) {
+                    uint64_t value = array_read(a, a->start + j);
+                    array_write(a, j, value);
                 }
             }
             a->start = 0;
         }
-        if (a->size >= a->cap) {
-            int64_t new_cap = a->cap * 2;
-            uint8_t *new_data = calloc(1, array_byte_size(a->ebits, new_cap));
-            memcpy(new_data, a->slots, array_byte_size(a->ebits, a->size));
+        if (a->start + a->size >= a->cap) {
+            int64_t new_cap = array_next_capacity(a->cap);
+            size_t new_bytes = (size_t)array_byte_size(a->ebits, new_cap);
             WValue *old_slots = a->slots;
+            int32_t old_cap = a->cap;
+            uint8_t old_flags = a->flags;
+            uint8_t *new_data;
+
+            if (!has_views && !(old_flags & (W_FLAG_INLINE | W_FLAG_PAGE_ALIGNED))) {
+                new_data = realloc(old_slots, new_bytes);
+                if (!new_data) die("typed array realloc failed");
+            } else {
+                new_data = malloc(new_bytes);
+                if (!new_data) die("typed array allocation failed");
+                int64_t copy_count = has_views ? old_cap : a->size;
+                memcpy(new_data, old_slots,
+                       (size_t)array_byte_size(a->ebits, copy_count));
+                a->slots = (WValue *)new_data;
+                w_views_after_realloc(arr, old_slots, (WValue *)new_data);
+                array_release_slots(old_slots, a->ebits, old_cap, old_flags);
+            }
             a->slots = (WValue *)new_data;
-            a->flags &= (uint8_t)~W_FLAG_INLINE;
-            a->cap = new_cap;
-            /* Views registered against this parent point into the old
-             * buffer; rebase each view's slots into the new one before
-             * the old buffer's bytes become unreachable. */
-            w_views_after_realloc(arr, old_slots, (WValue *)new_data);
+            a->flags &= (uint8_t)~(W_FLAG_INLINE | W_FLAG_PAGE_ALIGNED);
+            a->cap = (int32_t)new_cap;
         }
     }
-    if (array_is_wvalue(a)) {
-        array_write(a, a->start + a->size, (uint64_t)val);
-    } else if (array_is_float(a)) {
-        array_write_float(a, a->start + a->size, as_numeric_double(val));
-    } else if (a->ebits == 1) {
-        /* bool array: w_as_int(W_TRUE) is 2 and w_as_int(W_FALSE) is 1, so
-         * truncating to a 1-bit value would store the inverse. Use Tungsten
-         * truthiness (W_NIL/W_FALSE → 0, everything else → 1) to match
-         * w_bool_array_set's storage convention. */
-        int bit = (val == W_NIL || val == W_FALSE) ? 0 : 1;
-        array_write(a, a->start + a->size, (uint64_t)bit);
-    } else {
-        array_write(a, a->start + a->size, (uint64_t)w_to_i64(val));
-    }
+    array_write_boxed(a, a->start + a->size, val);
     a->size++;
     return arr;
 }
@@ -57063,9 +57537,9 @@ static WValue array_elementwise_into(WValue out_v, WValue lhs, WValue rhs, EltOp
             WValue b = rhs_is_array ? (WValue)array_read(ra, ra->start + i) : rhs;
             WValue r;
             switch (op) {
-                case ELT_OP_ADD:  r = w_add(a, b); break;
-                case ELT_OP_SUB:  r = w_sub(a, b); break;
-                case ELT_OP_MUL:  r = w_mul(a, b); break;
+                case ELT_OP_ADD:  r = w_add_fast(a, b); break;
+                case ELT_OP_SUB:  r = w_sub_fast(a, b); break;
+                case ELT_OP_MUL:  r = w_mul_fast(a, b); break;
                 case ELT_OP_DIV:  r = w_div(a, b); break;
                 case ELT_OP_BOR:  r = w_bit_or(a, b); break;
                 case ELT_OP_BAND: r = w_bit_and(a, b); break;
@@ -57392,6 +57866,11 @@ static WViewNode *w_view_find(WValue parent) {
     return NULL;
 }
 
+static int w_array_has_views(WValue parent) {
+    WViewNode *node = w_view_find(parent);
+    return node != NULL && node->count > 0;
+}
+
 static WViewNode *w_view_find_or_create(WValue parent) {
     WViewNode *n = w_view_find(parent);
     if (n) return n;
@@ -57662,17 +58141,14 @@ WValue w_array_unshift(WValue arr, WValue val) {
     // Same three-case deque model as w_array_unshift. Typed arrays
     // add int-vs-float branching and byte-sized storage math.
     WArray *a = w_as_array(arr);
+    if ((a->flags & W_FLAG_OWNED) == 0) {
+        w_raise(w_string("typed array unshift: cannot grow a borrowed view"));
+    }
     int64_t bits = array_storage_bits(a->ebits);
     // Case 1: O(1) — slot exists before start.
     if (a->start > 0) {
         a->start--;
-        if (array_is_wvalue(a)) {
-            array_write(a, a->start, (uint64_t)val);
-        } else if (array_is_float(a)) {
-            array_write_float(a, a->start, as_numeric_double(val));
-        } else {
-            array_write(a, a->start, (uint64_t)w_to_i64(val));
-        }
+        array_write_boxed(a, a->start, val);
         a->size++;
         return arr;
     }
@@ -57689,27 +58165,24 @@ WValue w_array_unshift(WValue arr, WValue val) {
                 array_write(a, j + 1, v);
             }
         }
-        if (array_is_wvalue(a)) {
-            array_write(a, 0, (uint64_t)val);
-        } else if (array_is_float(a)) {
-            array_write_float(a, 0, as_numeric_double(val));
-        } else {
-            array_write(a, 0, (uint64_t)w_to_i64(val));
-        }
+        array_write_boxed(a, 0, val);
         a->size++;
         return arr;
     }
     // Case 3: grow, copy elements to positions 1..N, write val at 0.
-    int64_t new_cap = a->cap * 2;
-    if (new_cap < 8) new_cap = 8;
-    uint8_t *new_data = calloc(1, array_byte_size(a->ebits, new_cap));
+    int64_t new_cap = array_next_capacity(a->cap);
+    uint8_t *new_data = malloc((size_t)array_byte_size(a->ebits, new_cap));
+    if (!new_data) die("typed array allocation failed");
+    WValue *old_slots = a->slots;
+    int32_t old_cap = a->cap;
+    uint8_t old_flags = a->flags;
     if (bits >= 8) {
         int64_t elt_bytes = array_byte_size(a->ebits, 1);
         int64_t live_bytes = array_byte_size(a->ebits, a->size);
         memcpy(new_data + elt_bytes, (uint8_t *)a->slots + array_byte_size(a->ebits, a->start), live_bytes);
     } else {
         // 4-bit: copy element-by-element, offset by 1 in the destination.
-        WValue *old_data = a->slots;
+        WValue *old_data = old_slots;
         int64_t old_start = a->start;
         for (int64_t j = 0; j < a->size; j++) {
             a->slots = old_data;
@@ -57720,16 +58193,12 @@ WValue w_array_unshift(WValue arr, WValue val) {
         a->slots = old_data;  // restore so we can free/replace cleanly below
     }
     a->slots = (WValue *)new_data;
-    a->flags &= (uint8_t)~W_FLAG_INLINE;
-    a->cap = new_cap;
+    w_views_after_realloc(arr, old_slots, (WValue *)new_data);
+    array_release_slots(old_slots, a->ebits, old_cap, old_flags);
+    a->flags &= (uint8_t)~(W_FLAG_INLINE | W_FLAG_PAGE_ALIGNED);
+    a->cap = (int32_t)new_cap;
     a->start = 0;
-    if (array_is_wvalue(a)) {
-        array_write(a, 0, (uint64_t)val);
-    } else if (array_is_float(a)) {
-        array_write_float(a, 0, as_numeric_double(val));
-    } else {
-        array_write(a, 0, (uint64_t)w_to_i64(val));
-    }
+    array_write_boxed(a, 0, val);
     a->size++;
     return arr;
 }
@@ -58549,6 +59018,42 @@ static int64_t array_matmul_i8_cell_scalar(WArray *a, WArray *b,
     return acc;
 }
 
+static __thread uint8_t *g_i8_matmul_rhs_pack;
+static __thread size_t g_i8_matmul_rhs_pack_capacity;
+
+/* Transpose row-major KxN RHS storage to N contiguous K-byte columns once.
+ * The old I8MM loop gathered those bytes for every 2x2 output tile, repeating
+ * the same strided loads for every pair of lhs rows. */
+static const uint8_t *array_matmul_i8_pack_rhs(WArray *b, int64_t k,
+                                               int64_t n) {
+    size_t needed = (size_t)k * (size_t)n;
+    if (needed > g_i8_matmul_rhs_pack_capacity) {
+        size_t next = g_i8_matmul_rhs_pack_capacity > 0
+                    ? g_i8_matmul_rhs_pack_capacity : 4096;
+        while (next < needed) next *= 2;
+        uint8_t *grown = realloc(g_i8_matmul_rhs_pack, next);
+        if (!grown) die("i8 matmul RHS pack allocation failed");
+        g_i8_matmul_rhs_pack = grown;
+        g_i8_matmul_rhs_pack_capacity = next;
+    }
+    const uint8_t *src = (const uint8_t *)b->slots + b->start;
+    for (int64_t col = 0; col < n; col++) {
+        uint8_t *dst = g_i8_matmul_rhs_pack + col * k;
+        for (int64_t row = 0; row < k; row++) dst[row] = src[row * n + col];
+    }
+    return g_i8_matmul_rhs_pack;
+}
+
+static int64_t array_matmul_i8_cell(WArray *a, WArray *b,
+                                    const uint8_t *packed_b, int64_t row,
+                                    int64_t col, int64_t k, int64_t ncols) {
+    if (!packed_b)
+        return array_matmul_i8_cell_scalar(a, b, row, col, k, ncols);
+    const uint8_t *ap = (const uint8_t *)a->slots + a->start + row * k;
+    return array_dot_i8_ptr(ap, packed_b + col * k, k,
+                            array_is_signed_int(a), array_is_signed_int(b));
+}
+
 static inline double array_read_numeric(WArray *a, int64_t i, int signed_values) {
     if (array_is_float(a)) return array_read_float(a, i);
     if (signed_values) return (double)array_read_signed(a, i);
@@ -59030,7 +59535,14 @@ WValue w_array_matvec_i8(WValue weights_v, WValue x_v, WValue rows_v, WValue col
     return out_v;
 }
 
-WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WValue n_v) {
+/* pack_mode is private to the implementation/benchmark translation unit:
+ *   0 = retain the historical strided/gathered RHS path
+ *   1 = production threshold policy
+ *   2 = force one RHS transpose before the output loops
+ * The public entry always selects mode 1. Keeping the alternatives behind
+ * one implementation makes the threshold sweep compare identical kernels. */
+static WValue array_matmul_i8_impl(WValue lhs_v, WValue rhs_v, WValue m_v,
+                                   WValue k_v, WValue n_v, int pack_mode) {
     if (!w_is_array(lhs_v) || !w_is_array(rhs_v)) {
         w_raise(w_string("matmul_i8: requires i8[]/u8[] matrices"));
         return W_NIL;
@@ -59052,9 +59564,16 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
         w_raise(w_string("matmul_i8: dimensions exceed input sizes"));
         return W_NIL;
     }
-    WValue out_v = w_array_new(32, m * n);
+    WValue out_v = w_array_new_inline(32, m * n);
     WArray *out = w_as_array(out_v);
-    out->size = (int32_t)(m * n);
+    const uint8_t *packed_b = NULL;
+    /* Packing pays one KxN transpose to replace every output tile's strided
+     * RHS gathers. The ARM64 grid crosses over reliably at 16 lhs rows and
+     * K>=16 (1.07-1.36x at 16 rows, 1.89x at 32x128x32); eight-row shapes
+     * remain 0.83-0.94x. A single output column has no gather pair to save. */
+    if (pack_mode == 2 ||
+        (pack_mode == 1 && m >= 16 && n >= 2 && k >= 16))
+        packed_b = array_matmul_i8_pack_rhs(b, k, n);
 
     int64_t r = 0;
 #if defined(__aarch64__) && defined(__ARM_FEATURE_MATMUL_INT8)
@@ -59071,9 +59590,14 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
                     int8_t bblock[16];
                     memcpy(ablock, ap + r * k + kk, 8);
                     memcpy(ablock + 8, ap + (r + 1) * k + kk, 8);
-                    for (int t = 0; t < 8; t++) {
-                        bblock[t] = bp[(kk + t) * n + c];
-                        bblock[8 + t] = bp[(kk + t) * n + c + 1];
+                    if (packed_b) {
+                        memcpy(bblock, packed_b + c * k + kk, 8);
+                        memcpy(bblock + 8, packed_b + (c + 1) * k + kk, 8);
+                    } else {
+                        for (int t = 0; t < 8; t++) {
+                            bblock[t] = bp[(kk + t) * n + c];
+                            bblock[8 + t] = bp[(kk + t) * n + c + 1];
+                        }
                     }
                     vacc = vmmlaq_s32(vacc, vld1q_s8(ablock), vld1q_s8(bblock));
                 }
@@ -59096,8 +59620,8 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
                 array_write(out, (r + 1) * n + c + 1, (uint32_t)(int32_t)c11);
             }
             for (; c < n; c++) {
-                int64_t acc0 = array_matmul_i8_cell_scalar(a, b, r, c, k, n);
-                int64_t acc1 = array_matmul_i8_cell_scalar(a, b, r + 1, c, k, n);
+                int64_t acc0 = array_matmul_i8_cell(a, b, packed_b, r, c, k, n);
+                int64_t acc1 = array_matmul_i8_cell(a, b, packed_b, r + 1, c, k, n);
                 array_write(out, r * n + c, (uint32_t)(int32_t)acc0);
                 array_write(out, (r + 1) * n + c, (uint32_t)(int32_t)acc1);
             }
@@ -59117,9 +59641,14 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
                     uint8_t bblock[16];
                     memcpy(ablock, ap + r * k + kk, 8);
                     memcpy(ablock + 8, ap + (r + 1) * k + kk, 8);
-                    for (int t = 0; t < 8; t++) {
-                        bblock[t] = bp[(kk + t) * n + c];
-                        bblock[8 + t] = bp[(kk + t) * n + c + 1];
+                    if (packed_b) {
+                        memcpy(bblock, packed_b + c * k + kk, 8);
+                        memcpy(bblock + 8, packed_b + (c + 1) * k + kk, 8);
+                    } else {
+                        for (int t = 0; t < 8; t++) {
+                            bblock[t] = bp[(kk + t) * n + c];
+                            bblock[8 + t] = bp[(kk + t) * n + c + 1];
+                        }
                     }
                     vacc = vmmlaq_u32(vacc, vld1q_u8(ablock), vld1q_u8(bblock));
                 }
@@ -59143,8 +59672,8 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
                 array_write(out, (r + 1) * n + c + 1, (uint32_t)(int32_t)c11);
             }
             for (; c < n; c++) {
-                int64_t acc0 = array_matmul_i8_cell_scalar(a, b, r, c, k, n);
-                int64_t acc1 = array_matmul_i8_cell_scalar(a, b, r + 1, c, k, n);
+                int64_t acc0 = array_matmul_i8_cell(a, b, packed_b, r, c, k, n);
+                int64_t acc1 = array_matmul_i8_cell(a, b, packed_b, r + 1, c, k, n);
                 array_write(out, r * n + c, (uint32_t)(int32_t)acc0);
                 array_write(out, (r + 1) * n + c, (uint32_t)(int32_t)acc1);
             }
@@ -59167,9 +59696,14 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
                     uint8_t bcols[16];
                     memcpy(arows, ap + r * k + kk, 8);
                     memcpy(arows + 8, ap + (r + 1) * k + kk, 8);
-                    for (int t = 0; t < 8; t++) {
-                        bcols[t] = bp[(kk + t) * n + c];
-                        bcols[8 + t] = bp[(kk + t) * n + c + 1];
+                    if (packed_b) {
+                        memcpy(bcols, packed_b + c * k + kk, 8);
+                        memcpy(bcols + 8, packed_b + (c + 1) * k + kk, 8);
+                    } else {
+                        for (int t = 0; t < 8; t++) {
+                            bcols[t] = bp[(kk + t) * n + c];
+                            bcols[8 + t] = bp[(kk + t) * n + c + 1];
+                        }
                     }
                     if (a_signed)
                         vacc = vusmmlaq_s32(vacc, vld1q_u8(bcols),
@@ -59202,8 +59736,8 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
                 array_write(out, (r + 1) * n + c + 1, (uint32_t)(int32_t)c11);
             }
             for (; c < n; c++) {
-                int64_t acc0 = array_matmul_i8_cell_scalar(a, b, r, c, k, n);
-                int64_t acc1 = array_matmul_i8_cell_scalar(a, b, r + 1, c, k, n);
+                int64_t acc0 = array_matmul_i8_cell(a, b, packed_b, r, c, k, n);
+                int64_t acc1 = array_matmul_i8_cell(a, b, packed_b, r + 1, c, k, n);
                 array_write(out, r * n + c, (uint32_t)(int32_t)acc0);
                 array_write(out, (r + 1) * n + c, (uint32_t)(int32_t)acc1);
             }
@@ -59212,11 +59746,16 @@ WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v, WValue k_v, WVa
 #endif
     for (; r < m; r++) {
         for (int64_t c = 0; c < n; c++) {
-            int64_t acc = array_matmul_i8_cell_scalar(a, b, r, c, k, n);
+            int64_t acc = array_matmul_i8_cell(a, b, packed_b, r, c, k, n);
             array_write(out, r * n + c, (uint32_t)(int32_t)acc);
         }
     }
     return out_v;
+}
+
+WValue w_array_matmul_i8(WValue lhs_v, WValue rhs_v, WValue m_v,
+                         WValue k_v, WValue n_v) {
+    return array_matmul_i8_impl(lhs_v, rhs_v, m_v, k_v, n_v, 1);
 }
 
 WValue w_array_cross_float(WValue lhs, WValue rhs) {
@@ -59487,6 +60026,24 @@ __attribute__((weak)) WValue w_blas_vlog_f32(WValue a, WValue o, WValue n) {
 __attribute__((weak)) WValue w_blas_vsqrt_f32(WValue a, WValue o, WValue n) {
     (void)a; (void)o; (void)n; w_raise(w_string("blas_vsqrt: BLAS bridge not linked")); return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_vsin_f64(WValue a, WValue o, WValue n) {
+    (void)a; (void)o; (void)n; w_raise(w_string("blas_vsin_f64: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vcos_f64(WValue a, WValue o, WValue n) {
+    (void)a; (void)o; (void)n; w_raise(w_string("blas_vcos_f64: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vexp_f64(WValue a, WValue o, WValue n) {
+    (void)a; (void)o; (void)n; w_raise(w_string("blas_vexp_f64: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vlog_f64(WValue a, WValue o, WValue n) {
+    (void)a; (void)o; (void)n; w_raise(w_string("blas_vlog_f64: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vsqrt_f64(WValue a, WValue o, WValue n) {
+    (void)a; (void)o; (void)n; w_raise(w_string("blas_vsqrt_f64: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_vtan_f64(WValue a, WValue o, WValue n) {
+    (void)a; (void)o; (void)n; w_raise(w_string("blas_vtan_f64: BLAS bridge not linked")); return W_NIL;
+}
 __attribute__((weak)) WValue w_blas_saxpy(WValue a, WValue x, WValue y, WValue n) {
     (void)a; (void)x; (void)y; (void)n; w_raise(w_string("saxpy: BLAS bridge not linked")); return W_NIL;
 }
@@ -59712,38 +60269,82 @@ WValue w_vec4_dot_f32(WValue a, WValue b) {
 }
 #endif
 
-static WValue array_map_f64(WValue arr, int signed_values, double (*fn)(double)) {
+typedef enum {
+    ARRAY_MAP_COS,
+    ARRAY_MAP_SIN,
+    ARRAY_MAP_SQRT,
+    ARRAY_MAP_EXP,
+    ARRAY_MAP_LOG,
+    ARRAY_MAP_TAN
+} ArrayMapOp;
+
+static WValue array_map_f64(WValue arr, int signed_values, ArrayMapOp op) {
     WArray *src = w_as_array(arr);
-    WValue result = w_array_new(-64, src->size);
+    WValue result = w_array_new_inline(-64, src->size);
     WArray *dst = w_as_array(result);
-    dst->size = src->size;
     double *out = (double *)dst->slots;
+
+#if defined(__APPLE__)
+    /* vForce amortizes its call overhead by roughly 32 elements on current
+     * Apple Silicon. Feed f64 input directly; other numeric tiers convert
+     * once into the result buffer and then transform it in place. */
+    if (src->size >= 32) {
+        WValue input = arr;
+        if (src->ebits != -64) {
+            for (int32_t i = 0; i < src->size; i++)
+                out[i] = array_read_numeric(src, src->start + i,
+                                            signed_values);
+            input = result;
+        }
+        WValue size = w_int(src->size);
+        switch (op) {
+            case ARRAY_MAP_COS:  return w_blas_vcos_f64(input, result, size);
+            case ARRAY_MAP_SIN:  return w_blas_vsin_f64(input, result, size);
+            case ARRAY_MAP_SQRT: return w_blas_vsqrt_f64(input, result, size);
+            case ARRAY_MAP_EXP:  return w_blas_vexp_f64(input, result, size);
+            case ARRAY_MAP_LOG:  return w_blas_vlog_f64(input, result, size);
+            case ARRAY_MAP_TAN:  return w_blas_vtan_f64(input, result, size);
+        }
+    }
+#endif
+
     int64_t src_end = src->start + src->size;
     int64_t j = 0;
-    for (int64_t i = src->start; i < src_end; i++) {
-        out[j++] = fn(array_read_numeric(src, i, signed_values));
+#define W_ARRAY_MAP_LOOP(fn)                                                   \
+    do {                                                                       \
+        for (int64_t i = src->start; i < src_end; i++)                         \
+            out[j++] = fn(array_read_numeric(src, i, signed_values));           \
+    } while (0)
+    switch (op) {
+        case ARRAY_MAP_COS:  W_ARRAY_MAP_LOOP(cos); break;
+        case ARRAY_MAP_SIN:  W_ARRAY_MAP_LOOP(sin); break;
+        case ARRAY_MAP_SQRT: W_ARRAY_MAP_LOOP(sqrt); break;
+        case ARRAY_MAP_EXP:  W_ARRAY_MAP_LOOP(exp); break;
+        case ARRAY_MAP_LOG:  W_ARRAY_MAP_LOOP(log); break;
+        case ARRAY_MAP_TAN:  W_ARRAY_MAP_LOOP(tan); break;
     }
+#undef W_ARRAY_MAP_LOOP
     return result;
 }
 
-WValue w_array_cos_signed(WValue arr) { return array_map_f64(arr, 1, cos); }
-WValue w_array_cos_unsigned(WValue arr) { return array_map_f64(arr, 0, cos); }
-WValue w_array_cos_float(WValue arr) { return array_map_f64(arr, 0, cos); }
-WValue w_array_sin_signed(WValue arr) { return array_map_f64(arr, 1, sin); }
-WValue w_array_sin_unsigned(WValue arr) { return array_map_f64(arr, 0, sin); }
-WValue w_array_sin_float(WValue arr) { return array_map_f64(arr, 0, sin); }
-WValue w_array_sqrt_signed(WValue arr) { return array_map_f64(arr, 1, sqrt); }
-WValue w_array_sqrt_unsigned(WValue arr) { return array_map_f64(arr, 0, sqrt); }
-WValue w_array_sqrt_float(WValue arr) { return array_map_f64(arr, 0, sqrt); }
-WValue w_array_exp_signed(WValue arr) { return array_map_f64(arr, 1, exp); }
-WValue w_array_exp_unsigned(WValue arr) { return array_map_f64(arr, 0, exp); }
-WValue w_array_exp_float(WValue arr) { return array_map_f64(arr, 0, exp); }
-WValue w_array_log_signed(WValue arr) { return array_map_f64(arr, 1, log); }
-WValue w_array_log_unsigned(WValue arr) { return array_map_f64(arr, 0, log); }
-WValue w_array_log_float(WValue arr) { return array_map_f64(arr, 0, log); }
-WValue w_array_tan_signed(WValue arr) { return array_map_f64(arr, 1, tan); }
-WValue w_array_tan_unsigned(WValue arr) { return array_map_f64(arr, 0, tan); }
-WValue w_array_tan_float(WValue arr) { return array_map_f64(arr, 0, tan); }
+WValue w_array_cos_signed(WValue arr) { return array_map_f64(arr, 1, ARRAY_MAP_COS); }
+WValue w_array_cos_unsigned(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_COS); }
+WValue w_array_cos_float(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_COS); }
+WValue w_array_sin_signed(WValue arr) { return array_map_f64(arr, 1, ARRAY_MAP_SIN); }
+WValue w_array_sin_unsigned(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_SIN); }
+WValue w_array_sin_float(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_SIN); }
+WValue w_array_sqrt_signed(WValue arr) { return array_map_f64(arr, 1, ARRAY_MAP_SQRT); }
+WValue w_array_sqrt_unsigned(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_SQRT); }
+WValue w_array_sqrt_float(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_SQRT); }
+WValue w_array_exp_signed(WValue arr) { return array_map_f64(arr, 1, ARRAY_MAP_EXP); }
+WValue w_array_exp_unsigned(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_EXP); }
+WValue w_array_exp_float(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_EXP); }
+WValue w_array_log_signed(WValue arr) { return array_map_f64(arr, 1, ARRAY_MAP_LOG); }
+WValue w_array_log_unsigned(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_LOG); }
+WValue w_array_log_float(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_LOG); }
+WValue w_array_tan_signed(WValue arr) { return array_map_f64(arr, 1, ARRAY_MAP_TAN); }
+WValue w_array_tan_unsigned(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_TAN); }
+WValue w_array_tan_float(WValue arr) { return array_map_f64(arr, 0, ARRAY_MAP_TAN); }
 
 /* pdqsort — pattern-defeating quicksort, type-specialized for integer typed
  * arrays. Replaces the old qsort-with-callback path: inlined comparisons +
@@ -62799,7 +63400,7 @@ static void w_http1_connection_loop(WSocket *conn, WClosure *handler) {
         w_exception_frame_push(&frame);
         volatile int handler_error = 0;
 
-        if (_setjmp(frame.buf) != 0) {
+        if (W_FAST_SETJMP(frame.buf) != 0) {
             /* Handler raised an exception — send 500 for current request */
             handler_error = 1;
         }
@@ -63094,7 +63695,7 @@ static WValue http_conn_goroutine_fn(WValue *captures, WValue arg) {
         WExceptionFrame exc_frame;
         w_exception_frame_push(&exc_frame);
 
-        if (_setjmp(exc_frame.buf) == 0) {
+        if (W_FAST_SETJMP(exc_frame.buf) == 0) {
             WValue sock_val = w_box_ptr(a->conn, W_SUBTAG_GENERIC);
             w_tls_wrap(sock_val);
             w_exception_stack = prev_stack;
@@ -63581,15 +64182,13 @@ void w_value_free(WValue v) {
      *   - W_FLAG_BIG          → BigArray-tier layout; different lifetime/struct
      *   - W_FLAG_POOLED       → the array is live in a recycle pool (g_array_*);
      *                           freeing it would corrupt the pool. Skip entirely.
-     * So: bail on POOLED/BIG; free slots only when OWNED and neither VIEW nor
-     * PAGE_ALIGNED; then free the (always-heap) WArray header. */
+     * So: bail on POOLED/BIG; release owned standalone slots with free or
+     * munmap according to their allocation flag, then free the header. */
     if (w_is_array(v)) {
         WArray *arr = w_as_array(v);
         uint8_t fl = arr->flags;
         if (fl & (W_FLAG_POOLED | W_FLAG_BIG)) return;
-        if ((fl & W_FLAG_OWNED) && !(fl & (W_FLAG_VIEW | W_FLAG_PAGE_ALIGNED | W_FLAG_INLINE))) {
-            free(arr->slots);
-        }
+        array_release_slots(arr->slots, arr->ebits, arr->cap, fl);
         free(arr);
         return;
     }
@@ -63636,14 +64235,13 @@ void w_value_free(WValue v) {
         free(cl);
         return;
     }
-    /* RegexMatch owns its three private top-level containers. Releasing those
-     * headers/storage is safe because w_value_free never recurses into their
-     * elements: a span or captured String returned earlier remains live. */
+    /* RegexMatch owns its private group/offset containers. The immutable name
+     * map is compiled once and borrowed from WRegex, while subject storage is
+     * retained by ordinary escaping ownership and is never freed recursively. */
     if (w_is_regex_match(v)) {
         WRegexMatch *match = (WRegexMatch *)w_as_ptr(v);
         w_value_free(match->groups);
         w_value_free(match->offsets);
-        w_value_free(match->name_to_group);
         free(match);
         return;
     }

@@ -3,6 +3,7 @@
 #   int-typed  .to_s()      → w_to_s          (skips the IC dispatcher)
 #   :string    .size()      → __w_string_byte_length_fast (raw i64, read-only)
 #   :string    .[](i)       → __w_string_idx_fast (raw index, pure SSO leaf)
+#   :string    .slice(i, n) → w_string_slice_raw (raw indices, skips IC)
 #   :string + :string       → w_str_concat    (skips w_add's re-coercion)
 #   .to_s() results infer :string; String#size infers :i64
 # Pins the fast arms AND the soundness backstops: w_to_s dispatches on the
@@ -60,6 +61,19 @@ nul_idx = 1 ## i64
 check("index.inline.embedded_nul_size", "a\0b"[nul_idx].size(), "1")
 check("index.inline.embedded_nul", "a\0b"[nul_idx] == "\0", "true")
 
+# --- two-argument String#slice direct route (byte-indexed) ---
+slice_src = "aébcdef"
+slice_start = 3 ## i64
+slice_len = 2 ## i64
+check("slice.machine_indices", slice_src.slice(slice_start, slice_len), "bc")
+check("slice.negative_start", slice_src.slice(-3, 2), "de")
+check("slice.too_negative_clamps", slice_src.slice(-99, 1), "a")
+check("slice.past_end", slice_src.slice(99, 2), "")
+check("slice.overlong", slice_src.slice(3, 99), "bcdef")
+check("slice.zero_len", slice_src.slice(1, 0), "")
+check("slice.negative_len", slice_src.slice(1, -2), "")
+check("slice.utf8_bytes", slice_src.slice(1, 2), "é")
+
 # --- string + string direct concat ---
 pre = "n="
 joined = pre + heap7.to_s()
@@ -113,3 +127,16 @@ check("hash.loop_sum", hk, "6048")
 # runtime-built key content-equals a literal-built key
 rk = "al" + "pha"
 check("hash.cross_builder_key", h[rk], "10")
+
+# A numeric formatter deliberately returns a fresh mode-7 heap String even
+# when the same bytes exist as a mode-6 slab literal. Equality and hashing
+# must both be representation-independent, in either insertion order.
+heap_key = neg.to_s()
+slab_key = "-987654321"
+check("hash.heap_equals_slab", heap_key == slab_key, "true")
+cross_heap_first = {}
+cross_heap_first[heap_key] = 71
+check("hash.heap_insert_slab_get", cross_heap_first[slab_key], "71")
+cross_slab_first = {}
+cross_slab_first[slab_key] = 72
+check("hash.slab_insert_heap_get", cross_slab_first[heap_key], "72")

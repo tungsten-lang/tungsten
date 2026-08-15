@@ -175,11 +175,15 @@ use parser
       defined = collect_defined_names(expressions)
       pending = collect_unresolved_autoload_names(expressions, walked, defined, registry)
       walked = expressions.size()
+      if env("DEBUG_AUTOLOAD") == "1"
+        ccall("w_eputs", "autoload iter " + iteration.to_s() + " pending=" + pending.size().to_s() + " exprs=" + expressions.size().to_s())
       if pending.size() == 0
         break
       pi = 0
       while pi < pending.size()
         name = pending[pi]
+        if env("DEBUG_AUTOLOAD") == "1"
+          ccall("w_eputs", "  pending name=" + name.to_s())
         if @autoload_loaded[name] != true
           @autoload_loaded[name] = true
           path = registry[name]
@@ -882,12 +886,12 @@ use parser
       return "Mmap"
     # Exact WArray-producing runtime entry points. Keep this a return-type map,
     # not a prefix match: w_array_size/w_array_get/etc. return other types.
-    if name in ("w_array_new_empty" "w_array_new" "w_array_new_filled" "w_array_new_uninit" "w_array_new_uninit_sized" "w_array_new_inline_uninit_sized" "w_array_new_aligned" "w_array_zeros" "w_array_view_raw" "w_array_view" "w_array_view_range" "w_array_reinterpret" "w_array_copy_range" "w_array_reuse_or_new_empty" "w_bytes_new" "w_bool_array_new")
+    if name in ("w_array_new_empty" "w_array_new" "w_array_new_filled" "w_array_new_uninit" "w_array_new_uninit_sized" "w_array_new_inline" "w_array_new_aligned" "w_array_zeros" "w_array_view_raw" "w_array_view" "w_array_view_range" "w_array_reinterpret" "w_array_copy_range" "w_array_reuse_or_new_empty" "w_bytes_new" "w_bool_array_new")
       return "Array"
     nil
 
   -> consider_autoload_name(name, defined, registry, seen, pending, force = false)
-    if name == nil
+    if name == nil || name == 0 || type(name) != "String" || name == ""
       return nil
     if defined[name] == true && !force
       return nil

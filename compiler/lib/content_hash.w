@@ -65,6 +65,20 @@ use hashing
   if val == nil
     buf << "_"
     return nil
+  # WIRE operands are overwhelmingly already register-name/literal Strings.
+  # Avoid identity to_s plus a one-byte slice in that hot case. The helper
+  # returns -2 for non-Strings, so custom values retain the original to_s
+  # contract (including a user value whose text begins with "%").
+  first_byte = ccall_nobox("w_string_first_byte", val) ## i64
+  if first_byte >= -1
+    if first_byte == 37
+      buf << "t"
+      buf << norm_temp(val, temp_map).to_s()
+    else
+      buf << "l"
+      buf << val
+    buf << ","
+    return nil
   text = val.to_s()
   if text.size() > 0 && text.slice(0, 1) == "%"
     buf << "t"
@@ -164,7 +178,7 @@ content_hash_codegen_fields = [
   :ivar_str_id, :kind, :kind_id, :lhs_boxed, :line, :method_byte_len,
   :method_str_id, :min_arity, :n, :name_byte_len, :name_str_id,
   :node, :novec, :range_high, :range_low, :rhs_boxed, :rt_fallback,
-  :scalar_source_argc1, :shift, :slot, :slot_id, :slot_type, :splat_index,
+  :scalar_source_argc1, :scalar_source_argc2, :shift, :slot, :slot_id, :slot_type, :splat_index,
   :super_reg, :table, :total_bytes, :trap, :type, :unroll_count, :val
 ]
 -> encode_codegen_metadata(inst, buf, temp_map)

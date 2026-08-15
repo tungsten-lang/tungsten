@@ -116,6 +116,38 @@ WValue w_blas_vsqrt_f32(WValue a_wval, WValue out_wval, WValue n_wval) {
     vvsqrtf(o, a, &n); return out_wval;
 }
 
+static int64_t blas_pair_f64_n(WValue a_wval, WValue out_wval,
+                               WValue n_wval, double **a_out,
+                               double **out_out) {
+    WArray *a = w_as_array(a_wval);
+    WArray *out = w_as_array(out_wval);
+    int64_t la = a->size;
+    int64_t lo = out->size;
+    *a_out = (double *)a->slots + a->start;
+    *out_out = (double *)out->slots + out->start;
+    int64_t n = w_as_int(n_wval);
+    int64_t mn = la < lo ? la : lo;
+    if (n <= 0 || n > mn) n = mn;
+    return n;
+}
+
+#define W_BLAS_F64_UNARY(name, function)                                      \
+WValue name(WValue a_wval, WValue out_wval, WValue n_wval) {                 \
+    double *a, *o;                                                             \
+    int n = (int)blas_pair_f64_n(a_wval, out_wval, n_wval, &a, &o);           \
+    function(o, a, &n);                                                        \
+    return out_wval;                                                           \
+}
+
+W_BLAS_F64_UNARY(w_blas_vsin_f64, vvsin)
+W_BLAS_F64_UNARY(w_blas_vcos_f64, vvcos)
+W_BLAS_F64_UNARY(w_blas_vexp_f64, vvexp)
+W_BLAS_F64_UNARY(w_blas_vlog_f64, vvlog)
+W_BLAS_F64_UNARY(w_blas_vsqrt_f64, vvsqrt)
+W_BLAS_F64_UNARY(w_blas_vtan_f64, vvtan)
+
+#undef W_BLAS_F64_UNARY
+
 /* ---- BLAS 1 / 2 + vDSP vector arithmetic (f32 typed arrays) ---- */
 
 WValue w_blas_saxpy(WValue a_wval, WValue x_wval, WValue y_wval, WValue n_wval) {

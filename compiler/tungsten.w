@@ -402,7 +402,19 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
 # pull the GUI/GPU frameworks, and a plain program should not pull
 # Accelerate. Real impls in runtime/blas_bridge.c override the weak stubs.
 -> ll_needs_blas(text)
-  ll_text_has(text, "@w_blas_")
+  if ll_text_has(text, "@w_blas_")
+    return true
+  if ll_text_has(text, "@w_array_cos_")
+    return true
+  if ll_text_has(text, "@w_array_sin_")
+    return true
+  if ll_text_has(text, "@w_array_sqrt_")
+    return true
+  if ll_text_has(text, "@w_array_exp_")
+    return true
+  if ll_text_has(text, "@w_array_log_")
+    return true
+  ll_text_has(text, "@w_array_tan_")
 
 -> ll_needs_sparse(text)
   ll_text_has(text, "@w_sparse_")
@@ -1797,7 +1809,7 @@ driver_homebrew_prefix_memo = {}
     g_ast_stats_same_kind[k][:total] = g_ast_stats_same_kind[k][:total] + 1
     if k1 == k2
       g_ast_stats_same_kind[k][:same] = g_ast_stats_same_kind[k][:same] + 1
-  parent_offset = ccall_nobox("w_node_offset_extern", node)
+  parent_offset = ccall("w_node_offset_extern", node)
   parent_sclass = ccall_nobox("w_node_size_class_extern", node)
   i = 0
   while i < kids.size()
@@ -1807,7 +1819,7 @@ driver_homebrew_prefix_memo = {}
       g_ast_stats_meta[:child_inline] = g_ast_stats_meta[:child_inline] + 1
     else
       kid_sclass = ccall_nobox("w_node_size_class_extern", kid)
-      kid_offset = ccall_nobox("w_node_offset_extern", kid)
+      kid_offset = ccall("w_node_offset_extern", kid)
       delta = parent_offset - kid_offset
       if kid_sclass != parent_sclass
         g_ast_stats_meta[:cross_arena] = g_ast_stats_meta[:cross_arena] + 1

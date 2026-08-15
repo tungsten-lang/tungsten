@@ -33,7 +33,7 @@ fn __bigint_bw_kernel(rp, a, b, as, bs, op) (i64 i64 i64 i64 i64 i64) i64
       %aimag = sub i64 %aix, %aimask
       store i64 %aimag, ptr %aslot, align 8
       %atag = and i64 %a, -281474976710656
-      %aisbig = icmp eq i64 %atag, -2251799813685248
+      %aisbig = icmp eq i64 %atag, -1407374883553280
       %apbits = and i64 %a, 140737488355327
       %alimbbits = add i64 %apbits, 16
       %apheap = inttoptr i64 %alimbbits to ptr
@@ -47,7 +47,7 @@ fn __bigint_bw_kernel(rp, a, b, as, bs, op) (i64 i64 i64 i64 i64 i64) i64
       %bimag = sub i64 %bix, %bimask
       store i64 %bimag, ptr %bslot, align 8
       %btag = and i64 %b, -281474976710656
-      %bisbig = icmp eq i64 %btag, -2251799813685248
+      %bisbig = icmp eq i64 %btag, -1407374883553280
       %bpbits = and i64 %b, 140737488355327
       %blimbbits = add i64 %bpbits, 16
       %bpheap = inttoptr i64 %blimbbits to ptr
@@ -370,7 +370,7 @@ fn __bigint_bw_kernel(rp, a, b, as, bs, op) (i64 i64 i64 i64 i64 i64) i64
 # Decode the effective signed limb count.  Heap sign is the signed header
 # composed with the tag overlay; inline integers have zero or one limb.
 fn __bigint_bw_signed_size(value) (i64) i64
-  if (value & -281474976710656) == -2251799813685248
+  if (value & -281474976710656) == -1407374883553280
     ptr = value & 140737488355327 ## i64
     raw = raw_load_u32(ptr, 4) ## i64
     signed = (raw << 32) >> 32 ## i64
@@ -382,7 +382,7 @@ fn __bigint_bw_signed_size(value) (i64) i64
   if inline == 0
     return 0
   if inline < 0
-    return -1
+    return 0 - 1
   1
 
 fn __bigint_bw_inline_and(a, b) (i64 i64) i64
@@ -442,8 +442,8 @@ fn __bigint_and_raw(a, b) (i64 i64) i64
   if b == negative_one
     return ccall_nobox("w_bigint_mark_shared_value", a)
 
-  aisbig = (a & -281474976710656) == -2251799813685248
-  bisbig = (b & -281474976710656) == -2251799813685248
+  aisbig = (a & -281474976710656) == -1407374883553280
+  bisbig = (b & -281474976710656) == -1407374883553280
   if !aisbig && !bisbig
     return __bigint_bw_inline_and(a, b)
 
@@ -492,8 +492,8 @@ fn __bigint_or_raw(a, b) (i64 i64) i64
   if a == negative_one || b == negative_one
     return negative_one
 
-  aisbig = (a & -281474976710656) == -2251799813685248
-  bisbig = (b & -281474976710656) == -2251799813685248
+  aisbig = (a & -281474976710656) == -1407374883553280
+  bisbig = (b & -281474976710656) == -1407374883553280
   if !aisbig && !bisbig
     return __bigint_bw_inline_or(a, b)
 
@@ -528,8 +528,8 @@ fn __bigint_xor_raw(a, b) (i64 i64) i64
   if b == zero
     return ccall_nobox("w_bigint_mark_shared_value", a)
 
-  aisbig = (a & -281474976710656) == -2251799813685248
-  bisbig = (b & -281474976710656) == -2251799813685248
+  aisbig = (a & -281474976710656) == -1407374883553280
+  bisbig = (b & -281474976710656) == -1407374883553280
   if !aisbig && !bisbig
     return __bigint_bw_inline_xor(a, b)
 
@@ -560,7 +560,7 @@ fn __bigint_bw_is_integer(value) (i64) i64
   tag = value & -281474976710656 ## i64
   if tag == -1688849860263936
     return 1
-  if tag == -2251799813685248
+  if tag == -1407374883553280
     return 1
   0
 
@@ -569,11 +569,11 @@ fn __bigint_bw_is_integer(value) (i64) i64
 # heap BigInt of exactly the same width.  Zero means "use immutable fallback";
 # canonical live BigInts never have a positive zero-limb width.
 fn __bigint_bw_mut_width(a, b) (i64 i64) i64
-  if (a & -281474976710656) != -2251799813685248
+  if (a & -281474976710656) != -1407374883553280
     return 0
   if (a & 140737488355328) != 0
     return 0
-  if (b & -281474976710656) != -2251799813685248
+  if (b & -281474976710656) != -1407374883553280
     return 0
 
   ap = a & 140737488355327 ## i64

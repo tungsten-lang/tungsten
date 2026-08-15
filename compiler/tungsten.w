@@ -19,13 +19,14 @@ use lib/error_formatter
 use lib/return_inference
 use lib/metal_emitter
 use lib/repl
+use lib/hashing
 
 args = argv()
 if args.size() == 0
   << "Usage: tungsten (run|check|compile) <file.w>"
   << ""
   << "Commands:"
-  << "  run              Interpret a .w file"
+  << "  run              Compile and run a .w file through WIRE"
   << "  check            Parse and lower a .w file without emitting code"
   << "  compile          Compile a .w file to a native binary"
   << "  compile-batch    Compile multiple .w files"
@@ -51,6 +52,7 @@ if args.size() == 0
   << "  --lex            Print tokens and exit"
   << "  --tags           Print the dispatch report and exit"
   << "  -e CODE          Evaluate a string of code"
+  << "  --interpret      Use the legacy tree-walker for run / -e"
   << "  -v, --verbose    Verbose output / print version"
   << "  --help           Show this help"
   exit 0
@@ -68,6 +70,7 @@ show_lex       = false
 wit_mode       = false
 jit_mode       = false
 hot_mode       = false
+interpret_mode = false
 no_lto         = false
 explicit_lto   = false
 frame_pointers = false
@@ -116,7 +119,7 @@ while i < args.size()
     << "Usage: tungsten (run|check|compile) <file.w>"
     << ""
     << "Commands:"
-    << "  run              Interpret a .w file"
+    << "  run              Compile and run a .w file through WIRE"
     << "  check            Parse and lower a .w file without emitting code"
     << "  compile          Compile a .w file to a native binary"
     << "  compile-batch    Compile multiple .w files"
@@ -144,6 +147,7 @@ while i < args.size()
     << "  --canonical-ast  Print a stable machine-readable AST and exit"
     << "  --lex            Print tokens and exit"
     << "  -e CODE          Evaluate a string of code"
+    << "  --interpret      Use the legacy tree-walker for run / -e"
     << "  -v, --verbose    Verbose output / print version"
     << "  --help           Show this help"
     exit 0
@@ -242,6 +246,8 @@ while i < args.size()
   elsif arg == "--hot"
     wit_mode = true
     hot_mode = true
+  elsif arg == "--interpret"
+    interpret_mode = true
   elsif arg == "-e"
     i += 1
     eval_code = args[i]
@@ -2127,7 +2133,7 @@ driver_homebrew_prefix_memo = {}
     system("rm -f " + dev_runtime_shell_quote(mtmp))
   nil
 
--> compile_one(file_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only_arg = false)
+-> compile_one(file_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only_arg = false, quiet = false)
   if out_path == nil
     out_path = file_path.replace(".w", ".wc")
 
@@ -2142,8 +2148,9 @@ driver_homebrew_prefix_memo = {}
       incr_slot = incremental_cache_slot(file_path, out_path, incr_id)
     if incr_slot != nil && incr_id != nil
       if incremental_try_reuse(incr_slot, incr_id, out_path, verbose)
-        << ""
-        << "Built [out_path] (cache)"
+        if !quiet
+          << ""
+          << "Built [out_path] (cache)"
         return true
 
   implicit_ll = uses_implicit_ll_path() ## bool
@@ -2163,12 +2170,56 @@ driver_homebrew_prefix_memo = {}
     ok = false
 
   if ok
-    << ""
-    << "Built [out_path]"
+    if !quiet
+      << ""
+      << "Built [out_path]"
     if incr_slot != nil && incr_id != nil
       incremental_store(incr_slot, incr_id, out_path, sidemap_path, file_path)
 
   ok
+
+# `run` and `-e` use the ordinary lowering/WIRE/LLVM path. Stable per-source
+# output names let the existing incremental binary cache make repeated runs
+# cheap; only the tiny exit-status sidecar is invocation-specific.
+-> compiled_run_dir
+  dir = compiler_cache_dir() + "/run"
+  if system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
+    raise "could not create compiled-run cache directory: [dir]"
+  dir
+
+-> compiled_run_output_path(source_path)
+  identity = incremental_abs_path(source_path)
+  compiled_run_dir() + "/" + wyhash64_hex_string(identity) + ".wc"
+
+-> materialize_eval_source(code)
+  dir = compiled_run_dir()
+  path = dir + "/eval-" + wyhash64_hex_string(code) + ".w"
+  if !file?(path) || read_file(path) != code
+    write_file(path, code)
+  path
+
+# Returns the child's exact exit code (or 128+signal as reported by the shell).
+# Arguments are individually quoted; they never become shell syntax.
+-> run_compiled_program(source_path, run_args)
+  binary = compiled_run_output_path(source_path)
+  if !compile_one(source_path, binary, false, verbose, intern_algo, false, true)
+    return 1
+
+  status_path = binary + ".status." + clock.to_s()
+  command_text = dev_runtime_shell_quote(binary)
+  i = 0
+  while i < run_args.size()
+    command_text = command_text + " " + dev_runtime_shell_quote(run_args[i])
+    i += 1
+  command_text = command_text + "; tungsten_run_status=$?; printf '%s' \"$tungsten_run_status\" > " + dev_runtime_shell_quote(status_path) + "; exit 0"
+  shell_ok = system(command_text)
+  status = 1
+  if shell_ok && file?(status_path)
+    text = read_file(status_path)
+    if text != nil && text != ""
+      status = text.to_i()
+  system("rm -f " + dev_runtime_shell_quote(status_path))
+  status
 
 # Parse the complete program and run lowering/type inference, but deliberately
 # stop before CFG construction, ownership, LLVM emission, runtime compilation,
@@ -2240,9 +2291,14 @@ if eval_code != nil
       raise err
     exit 0
 
+  eval_status = 0
   begin
-    interp = Interpreter.new(script_args)
-    interp.run(eval_code, "(eval)")
+    if interpret_mode
+      interp = Interpreter.new(script_args)
+      interp.run(eval_code, "(eval)")
+    else
+      eval_path = materialize_eval_source(eval_code)
+      eval_status = run_compiled_program(eval_path, script_args)
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
       ccall("w_flush")
@@ -2256,7 +2312,7 @@ if eval_code != nil
   # exit AFTER the begin/rescue, not as the last stmt inside `begin`: an in-block
   # exit leaves the begin body with no fall-through edge to the rescue merge,
   # which miscompiles on the Linux self-host backend (silent stage-2 SIGSEGV).
-  exit 0
+  exit eval_status
 
 if file_path == nil && command != "compile-batch"
   << "Missing input file"
@@ -2304,10 +2360,14 @@ if show_ast || show_canonical_ast
   exit 0
 
 if command == "run"
+  run_status = 0
   begin
-    source = read_file(file_path)
-    interp = Interpreter.new(script_args)
-    interp.run(source, file_path)
+    if interpret_mode
+      source = read_file(file_path)
+      interp = Interpreter.new(script_args)
+      interp.run(source, file_path)
+    else
+      run_status = run_compiled_program(file_path, script_args)
   rescue err
     if type(err) == "Hash" && err[:rt] == :compile_error
       ccall("w_flush")
@@ -2318,6 +2378,8 @@ if command == "run"
       ccall("w_eputs", format_runtime_error(err, file_path))
       exit 1
     raise err
+  if !interpret_mode
+    exit run_status
 
 elsif command == "check"
   begin

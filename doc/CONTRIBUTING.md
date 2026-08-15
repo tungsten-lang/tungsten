@@ -55,9 +55,12 @@ build, and runs the Ruby, C, interpreted, compiled, parity, CLI, cache, and bit
 test suites. Hardware-specific checks may also need an appropriate Metal or
 CUDA host.
 
-Every semantic fix should have a focused regression. When behavior exists in
-both the interpreter and compiled runtime, exercise both. Keep platform-specific
-expectations explicit instead of silently skipping an otherwise portable test.
+Every semantic fix should have a focused regression. `run` and `-e` exercise
+the compiled WIRE semantics. When a change also touches the legacy bootstrap
+interpreter, exercise that path explicitly with `--ruby`; do not duplicate an
+ordinary product-runtime test just to retest the same WIRE path. Keep
+platform-specific expectations explicit instead of silently skipping an
+otherwise portable test.
 
 ## Style and generated files
 

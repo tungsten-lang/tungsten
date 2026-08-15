@@ -33,7 +33,7 @@ COMMANDS
     check FILE           Parse and lower a .w file without emitting code
                          (also: tungsten -c FILE / --check FILE). Validates
                          every selected @gpu fn dialect without sidecars.
-    run FILE             Interpret a .w file
+    run FILE             Lower through WIRE, compile, and run a .w file
     sandbox FILE         Compile FILE, then run it with the sandbox gate
                          latched: file IO, sockets, process control, and
                          environment access are blocked or stubbed, and every

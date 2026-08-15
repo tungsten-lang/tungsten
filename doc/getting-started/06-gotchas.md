@@ -47,18 +47,17 @@ RNGs, checksums, and compilers — type the width.
 
 ---
 
-## 2. Two engines: quick run vs compile
+## 2. One product engine, two workflows
 
 | Path | Command | Strength |
 | ---- | ------- | -------- |
-| Quick run / interpreter | `bin/tungsten file.w` | Fast edit cycle; great for tutorials |
+| Cached WIRE run | `bin/tungsten file.w` | Full language with a cached output binary |
 | Native compile | `bin/tungsten -o out file.w` | Full language; production path |
 | Ruby interpreter | `bin/tungsten --ruby file.w` | Bootstrap / fallback tree-walk |
 
-Most everyday language surface now works under **quick run** as well as
-compile (`fn`, `with`, duration literals, `@@` class vars, standalone
-`ro`/`rw`, `StringBuffer.append`, `@1`/`@2` arity args). Remaining
-interpreter gaps are smaller:
+Quick run and native compile now share lexer, parser, lowering, WIRE, codegen,
+and runtime semantics. Use `--ruby` only when debugging or changing the legacy
+bootstrap interpreter; its remaining gaps do not define product behavior:
 
 | Construct | Notes |
 | --------- | ----- |

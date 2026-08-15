@@ -5,7 +5,7 @@ semantics and Python-like syntax density.
 
 Two ways to run code (see **Engines** at the bottom):
 
-- `bin/tungsten file.w` — quick run (interpreter)
+- `bin/tungsten file.w` — compile through WIRE and run from the build cache
 - `bin/tungsten -o app file.w && ./app` — compile to a native binary
 
 ## Basics
@@ -269,17 +269,18 @@ ensure
 
 ## Engines
 
-Both engines share the same surface for everyday code:
+Product execution has one semantic path. The tree-walker remains an explicit
+bootstrap/debug aid:
 
 | Path | Command |
 | ---- | ------- |
-| Quick run (tree-walk) | `bin/tungsten file.w` or `bin/tungsten -e '…'` |
+| Cached WIRE run | `bin/tungsten file.w` or `bin/tungsten -e '…'` |
 | Native compile | `bin/tungsten -o out file.w && ./out` |
+| Legacy tree-walk | `bin/tungsten --ruby file.w` |
 
-Supported under quick run: `fn`, `with`, duration literals, `@@` class vars,
-standalone `ro`/`rw`, `StringBuffer.append`, `@1`/`@2`, classes, traits (local
-bodies), pipelines, units, currency. Prefer compile for `@gpu fn`, full channel
-/`go` concurrency edge cases, and maximum performance.
+Because quick run and native compile both consume WIRE, language features,
+exceptions, math modes, and concurrency no longer require a second product
+implementation.
 
 `implementations/c` and `implementations/ruby` are **bootstrap hosts only** —
 they build the self-hosted compiler; they are not the product runtime.

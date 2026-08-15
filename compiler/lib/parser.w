@@ -739,16 +739,6 @@ use ../../core/token
     out
 
   -> parse_expression(allow_passthrough = true)
-    # Non-virtual instance method. Using an attribute token avoids reserving a
-    # new global keyword and keeps ordinary identifiers named `final` valid.
-    # The lowering registry rejects overrides and may direct-call this method
-    # from exact/compatible source-class facts.
-    if at_typed?(T_IVAR, "@final") && peek_type() == T_ARROW
-      advance()
-      result = parse_method_def()
-      result.final_method = true
-      return result
-
     if at_kw?("trait")
       return parse_trait_def()
 
@@ -1602,6 +1592,13 @@ use ../../core/token
           name = "&"
         else
           name = expect_method_name_value()
+          # SCREAMING_SNAKE identifiers tokenize as CONSTANT followed by a
+          # separate bang, unlike lowercase `sort!` whose bang stays in the ID
+          # token. Accept the same method-name suffix for class-level contract
+          # spellings such as Tungsten.LOCK_THE_DOORS!.
+          if at_type?(T_BANG) && !@sp_before
+            advance()
+            name = name + "!"
         result = parse_call_args_and_block(true, name_line, name_col, name, dot_name_fused)
         args = result[0]
         block = result[1]
@@ -1609,6 +1606,12 @@ use ../../core/token
           args = []
         receiver = expr
         expr = Tungsten:AST:Call.new(receiver, name, args, block)
+        # These two compiler contracts are legal only in the entry program.
+        # Preserve their file provenance across Loader's flattened `use` graph
+        # so it can reject a dependency that tries to impose either contract
+        # on its caller.
+        if ast_kind(receiver) == :class_ref && receiver.name == "Tungsten" && name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+          expr.source_path = @file
         # ClassRef nodes are interned by name, so sparse generic metadata must
         # live on this distinct call node. Otherwise parsing `Mat<T, m, n>` in
         # one source file can overwrite a user's later `Mat<f64, 2, 3>` (or
@@ -3611,6 +3614,7 @@ use ../../core/token
 
     @declared_classes[name] = true
     result = Tungsten:AST:ClassDef.new(name, superclass, body, class_role)
+    result.source_path = @file
     # Generic-class side channel (parser-only for v0). Sparse-meta
     # storage; monomorphization later reads these to specialize.
     if type_params != nil
@@ -3630,7 +3634,9 @@ use ../../core/token
       body = parse_body()
     else
       body = []
-    Tungsten:AST:ModuleDef.new(name, body)
+    result = Tungsten:AST:ModuleDef.new(name, body)
+    result.source_path = @file
+    result
 
   -> parse_trait_def
     expect_kw("trait")
@@ -3656,6 +3662,7 @@ use ../../core/token
     collected_constraints = @pending_class_constraints
     @pending_class_constraints = prev_constraints
     result = Tungsten:AST:TraitDef.new(name, body)
+    result.source_path = @file
     if type_params != nil
       result.type_params = type_params
     if collected_constraints != nil && collected_constraints.size() > 0

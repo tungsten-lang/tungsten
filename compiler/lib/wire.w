@@ -41,10 +41,11 @@
     known_pure_calls: {},
     fn_return_types:  {},
     class_methods:    {},
-    # class.method/arity -> declaring class for non-virtual @final methods.
-    # Kept separate from runtime method tables so override validation and
-    # direct-call eligibility are explicit compiler facts.
-    final_methods:    {},
+    # Entry-program closed-world contracts. PROTECT_THE_CORE is a validated
+    # provenance assertion; LOCK_THE_DOORS is also enforced by the runtime
+    # method-registration barrier.
+    protect_core:     false,
+    method_tables_locked: false,
     cvar_globals:     {},
     fn_memo_tables:   {},
     used_memo_tables: {},

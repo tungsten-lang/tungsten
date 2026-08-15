@@ -40,9 +40,10 @@ otherwise shadow each other.
 ## Private internal methods
 
 There is still no declaration-level way to say that a helper is private to a
-class. `@final -> helper(...)` now prevents overriding and lets lowering use a
-direct call when the receiver has a source-class fact, but it deliberately does
-not add access control.
+class. The executable-level `Tungsten.LOCK_THE_DOORS!` contract can make an
+exact receiver call direct after all definitions are complete, but it
+deliberately does not add access control or let a dependency impose
+non-overridability on its caller.
 
 A private method form should make the visibility boundary explicit while
 preserving ordinary open dispatch for public methods. Hot parser helpers that

@@ -39,13 +39,18 @@
       return {class_name: exact_ivars[recv_node.name], certainty: :exact}
   nil
 
--> final_method_info_for_class(mod, class_name, method_name, arg_count)
+# Resolve the exact implementation ordinary runtime lookup would select for a
+# plain source method. Encountering a non-plain override is a hard stop: it owns
+# the selector but cannot use the simple (receiver, args...) direct-call ABI.
+-> locked_direct_method_fn(mod, class_name, method_name, arg_count)
   current = class_name
+  suffix = "." + method_name + "/" + arg_count.to_s()
   guard = 0
   while current != nil && guard < 64
-    info = known_static_method_for(mod, current + "." + method_name, arg_count)
-    if info != nil && info[:is_final] == true
-      return info
+    key = current + suffix
+    method_ast = mod[:class_method_asts][key]
+    if method_ast != nil
+      return mod[:class_method_fn_names][key]
     current = mod[:class_super_names][current]
     guard += 1
   nil
@@ -55,6 +60,14 @@
   method_name = node.name
 
   recv_node = node.receiver
+
+  # Closed-world declarations are compile-time contracts, not dispatchable
+  # Core methods. Loader/lower_ast already validated and recorded them; their
+  # expression value is nil and they generate no call site or inline cache.
+  if recv_node != nil && is_ast_node?(recv_node) && ast_kind(recv_node) == :class_ref && recv_node.name == "Tungsten" && method_name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+    if ast_get(node, :validated_program_contract) != true
+      raise compile_error_for_node(:E_CONTRACT_TOP_LEVEL, "Tungsten." + method_name + " must be a top-level entry-program declaration", ctx[:source_path], node)
+    return typed_value(:i64, w_nil.to_s())
 
   # Unit-carrying tensor factory syntax is intentionally a type-level spelling
   # even though Tensor's implementation stores dtype/unit as runtime metadata:
@@ -223,17 +236,6 @@
     recv_node = ctx[:range_bindings][recv_node.name]
 
   recv_type = receiver_static_type(ctx, recv_node)
-
-  # A final method cannot be replaced by a subclass or reopen. Therefore a
-  # compatible source-class fact is sufficient for a plain direct call; exact
-  # constructor facts use the same path. Use the ordinary static-call helper
-  # so annotated raw ABIs, argument evaluation, defaults, and return typing
-  # remain identical to existing direct self calls.
-  source_fact = receiver_source_class_fact(ctx, recv_node)
-  if node.block == nil && source_fact != nil
-    final_info = final_method_info_for_class(ctx[:mod], source_fact[:class_name], method_name, node.args.size())
-    if final_info != nil
-      return lower_direct_static_method_call(ctx, final_info, recv_node, node.args, nil)
 
   # Raw-f64 scalar libm fast path: `(float expr).sqrt / .sin / .cos / .tan /
   # .exp / .log` on a statically-float receiver calls libm directly on the
@@ -1977,6 +1979,25 @@
     closure_tv = lower_block_closure(ctx, blk, iterator_block_param_types(recv_type, method_name))
     closure_reg = ensure_i64_value(wfn, closure_tv)
     arg_regs.push(closure_reg)
+
+  # Once runtime method registration is closed, an exact receiver fact is a
+  # permanent dispatch proof. Call the selected source worker directly: no
+  # class-id guard, inline-cache slot, method-name materialization, or generic
+  # fallback remains in the generated code. Compatible facts still dispatch;
+  # a subclass may select a different already-registered implementation.
+  if ctx[:mod][:method_tables_locked] == true && node.block == nil
+    locked_fact = receiver_source_class_fact(ctx, recv_node)
+    if locked_fact != nil && locked_fact[:certainty] == :exact && locked_fact[:stable] == true
+      locked_fn = locked_direct_method_fn(ctx[:mod], locked_fact[:class_name], method_name, node.args.size())
+      if locked_fn != nil
+        locked_args = [receiver_reg]
+        lai = 0
+        while lai < arg_regs.size()
+          locked_args.push(arg_regs[lai])
+          lai += 1
+        locked_temp = next_temp(wfn)
+        emit_instruction(wfn, {op: :call_direct_i64, temp: locked_temp, name: locked_fn, args: locked_args, src_line: node.line, src_col: node.col})
+        return typed_value(:i64, locked_temp)
 
   method_name_tv = lower_string(ctx, Tungsten:AST:String.new(method_name))
   method_name_val = ensure_i64_value(wfn, method_name_tv)

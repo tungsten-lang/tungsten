@@ -5,6 +5,18 @@
 # This file deliberately has no `use` directives — see pass_registry.w
 # for the rationale (path resolution from compiler/lib/lowering/).
 
+-> source_constructor_returns_exact_class?(mod, class_name)
+  current = class_name
+  guard = 0
+  while current != nil && guard < 64
+    # A static `.new` may return any value. Ordinary instance `new` methods are
+    # initializers invoked only after the runtime allocates the requested class.
+    if mod[:class_static_new][current] == true
+      return false
+    current = mod[:class_super_names][current]
+    guard += 1
+  true
+
 # -- Variables --
 
 # Ruby-style namespace walk-up for an unqualified class reference.
@@ -642,24 +654,29 @@
   ctx[:quantity_dimensions][name] = static_quantity_signature(ctx, node.value)
 
   # Source-class facts distinguish an exact constructor result from a merely
-  # compatible declaration. Exact facts enable guarded devirtualization;
-  # compatible facts become direct-callable only for @final methods. Copying a
-  # local preserves its certainty, while any unproved reassignment clears it.
+  # compatible declaration. Exact facts enable guarded devirtualization and,
+  # once method tables are locked, unconditional direct calls. Copying a local
+  # preserves its certainty, while any unproved reassignment clears it.
   if ctx[:local_class_facts] == nil
     ctx[:local_class_facts] = {}
   fact = nil
   if node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :call && node.value.name == "new" && node.value.receiver != nil && is_ast_node?(node.value.receiver)
     ctor_cls = ast_get(node.value.receiver, :name)
     if normal_source_instance_class?(ctx[:mod], ctor_cls)
-      fact = {class_name: ctor_cls, certainty: :exact}
+      stable = false
+      if ctx[:local_assignment_counts] != nil && ctx[:local_assignment_counts][name] == 1 && source_constructor_returns_exact_class?(ctx[:mod], ctor_cls)
+        stable = true
+      fact = {class_name: ctor_cls, certainty: :exact, stable: stable}
   elsif node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :var
     source_fact = ctx[:local_class_facts][node.value.name]
     if source_fact != nil
-      fact = {class_name: source_fact[:class_name], certainty: source_fact[:certainty]}
+      # A copied reference can be exact, but it is a second mutable binding;
+      # keep the speculative guard until a future SSA fact proves both stable.
+      fact = {class_name: source_fact[:class_name], certainty: source_fact[:certainty], stable: false}
   if fact == nil && node.type_hint != nil
     hinted_class = "" + node.type_hint.to_s()
     if normal_source_instance_class?(ctx[:mod], hinted_class)
-      fact = {class_name: hinted_class, certainty: :compatible}
+      fact = {class_name: hinted_class, certainty: :compatible, stable: false}
   ctx[:local_class_facts][name] = fact
 
   # Range-elision (#49): stash range-literal RHS so a later `r.each ...`

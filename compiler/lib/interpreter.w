@@ -28,6 +28,9 @@ use target
     @loaded_files = []
     @current_file = nil
     @autoload_registry = nil
+    @entry_file = nil
+    @core_protected = false
+    @method_tables_locked = false
     if argv_values == nil
       argv_values = interpreter_process_argv()
     if argv_values == nil
@@ -162,10 +165,76 @@ use target
   -> run(source, file_path = nil)
     if file_path != nil
       @current_file = file_path
+      @entry_file = file_path
     ast = parse_source(source)
+    prepare_interpreter_contracts(ast, file_path)
     result = execute_program(ast)
     drain_goroutines()
     result
+
+  -> interpreter_contract_name(node)
+    if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+      return nil
+    recv = ast_get(node, :receiver)
+    if recv == nil || !is_ast_node?(recv) || ast_kind(recv) != :class_ref || ast_get(recv, :name) != "Tungsten"
+      return nil
+    name = ast_get(node, :name)
+    if name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+      return name
+    nil
+
+  -> interpreter_definition?(node)
+    ast_kind(node) in (:class_def :module_def :trait_def :fn_def :method_def)
+
+  -> interpreter_core_file?(path)
+    if path == nil
+      return false
+    text = "" + path
+    prefix = core_dir() + "/core/"
+    if text.size() >= prefix.size() && text.slice(0, prefix.size()) == prefix
+      return true
+    root = env("TUNGSTEN_ROOT")
+    if root != nil
+      prefix = root + "/core/"
+      if text.size() >= prefix.size() && text.slice(0, prefix.size()) == prefix
+        return true
+    text.size() >= 5 && text.slice(0, 5) == "core/"
+
+  -> prepare_interpreter_contracts(program, file_path)
+    expressions = ast_get(program, :expressions)
+    protect = false
+    lock_seen = false
+    i = 0
+    while i < expressions.size()
+      node = expressions[i]
+      contract = interpreter_contract_name(node)
+      if contract != nil
+        args = ast_get(node, :args)
+        if args == nil || args.size() != 0 || ast_get(node, :block) != nil
+          raise "Tungsten." + contract + " takes no arguments or block"
+        if contract == "PROTECT_THE_CORE!"
+          protect = true
+        else
+          lock_seen = true
+        ast_set(node, :validated_program_contract, true)
+      elsif lock_seen && interpreter_definition?(node)
+        raise "method and type definitions must appear before Tungsten.LOCK_THE_DOORS!"
+      i += 1
+
+    # Apply Core protection before evaluation so a `use` preceding the marker
+    # cannot mutate Core and then retroactively claim the protected contract.
+    if protect
+      @core_protected = true
+      registry = autoload_registry()
+      i = 0
+      while i < expressions.size()
+        node = expressions[i]
+        if ast_kind(node) in (:class_def :module_def :trait_def)
+          name = ast_get(node, :name)
+          if name == "Tungsten" || registry[name] != nil
+            raise "Tungsten.PROTECT_THE_CORE! forbids replacing or reopening Core definition '" + name + "'"
+        i += 1
+    nil
 
   # Run every queued goroutine body to completion, in spawn order. A goroutine
   # may spawn more, so loop until the queue stays empty (mirrors the compiled
@@ -2971,6 +3040,17 @@ use target
   # -- Method calls --
 
   -> eval_call(node, env)
+    contract = interpreter_contract_name(node)
+    if contract != nil
+      if ast_get(node, :validated_program_contract) != true
+        raise "Tungsten." + contract + " must be a top-level entry-program declaration"
+      if @entry_file != nil && @current_file != @entry_file
+        raise "Tungsten." + contract + " may only be declared by the entry program"
+      if contract == "PROTECT_THE_CORE!"
+        @core_protected = true
+      else
+        @method_tables_locked = true
+      return nil
     block = nil
     if ast_get(node, :block) != nil
       block = evaluate(ast_get(node, :block), env)
@@ -4721,6 +4801,8 @@ use target
   # order fallback. Reopening the same arity replaces its old slot so neither
   # dynamic definitions nor generated accessors leave a stale overload.
   -> register_instance_method(w_class, w_method)
+    if @method_tables_locked
+      raise "method tables are locked by Tungsten.LOCK_THE_DOORS!"
     method_name = w_method[:name]
     if w_class[:method_overloads] == nil
       w_class[:method_overloads] = {}
@@ -4768,6 +4850,8 @@ use target
     w_method
 
   -> register_interpreted_class_method(w_class, w_method)
+    if @method_tables_locked
+      raise "method tables are locked by Tungsten.LOCK_THE_DOORS!"
     method_name = w_method[:name]
     if w_class[:class_method_overloads] == nil
       w_class[:class_method_overloads] = {}
@@ -4811,6 +4895,8 @@ use target
   # untyped lookup; dispatch_bare_call consults this side table first only when
   # a typed signature matches the evaluated arguments.
   -> register_global_method(w_method)
+    if @method_tables_locked
+      raise "method tables are locked by Tungsten.LOCK_THE_DOORS!"
     method_name = w_method[:name]
     overloads = @function_overloads[method_name]
     if overloads == nil
@@ -4838,6 +4924,8 @@ use target
     # autoload a core file while evaluating that same file's class definition.
     class_name = ast_get(node, :name)
     registry = autoload_registry()
+    if @core_protected && !interpreter_core_file?(@current_file) && (class_name == "Tungsten" || registry[class_name] != nil)
+      raise "Tungsten.PROTECT_THE_CORE! forbids replacing or reopening Core definition '" + class_name + "'"
     core_path = nil
     if registry[class_name] != nil
       core_path = core_dir() + "/core/" + registry[class_name] + ".w"

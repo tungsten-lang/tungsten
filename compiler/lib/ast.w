@@ -116,6 +116,8 @@ in Tungsten:AST
     ast_set(self, :expressions, value)
   -> type_hint=(value)
     ast_set(self, :type_hint, value)
+  -> source_path=(value)
+    ast_set(self, :source_path, value)
   -> lowering_analysis
     ccall_nobox("w_ast_analysis_get", self)
   -> lowering_analysis=(value)
@@ -318,6 +320,8 @@ in Tungsten:AST
     ast_get(self, :size)
   -> source
     ast_get(self, :source)
+  -> source_path
+    ast_get(self, :source_path)
   -> splat
     ast_get(self, :splat)
   -> subject

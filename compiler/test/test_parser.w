@@ -325,6 +325,14 @@ test "parses puts operator"
 expr = first_expr("<< 42")
 assert_eq expr[:node], :puts
 
+test "parses closed-world contracts as class calls"
+expr = first_expr("Tungsten.LOCK_THE_DOORS!")
+assert_eq expr[:node], :call
+assert_eq expr[:receiver][:node], :class_ref
+assert_eq expr[:receiver][:name], "Tungsten"
+assert_eq expr[:name], "LOCK_THE_DOORS!"
+assert_eq expr[:args].size(), 0
+
 test "parses case/when"
 expr = first_expr("case\nwhen x == 1\n  42")
 assert_eq expr[:node], :case
@@ -339,12 +347,5 @@ test "parses comma-separated arrow case patterns"
 expr = first_expr("case kind\n  :a, :b => \"hit\"")
 assert_eq expr[:node], :case_value
 assert_eq expr[:arms].size(), 2
-
-test "parses final instance methods"
-expr = first_expr("+ Counter\n  @final -> step(x)\n    x + 1")
-method = expr[:body][0]
-assert_eq method[:node], :method_def
-assert_eq method[:name], "step"
-assert_eq method[:final_method], true
 
 report()

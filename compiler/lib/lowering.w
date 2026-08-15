@@ -596,7 +596,6 @@ use lowering/definitions
         while mi2 < class_body.size()
           mnode = class_body[mi2]
           if ast_kind(mnode) == :method_def
-            validate_and_register_final_method(mod, cname, mnode, ast_get(mnode, :source_path))
             # Record class methods that take a block (declare `&` or use
             # `yield`) in the global block-method name set, exactly as the
             # top-level fn-def walk does. Without this, a trailing block on
@@ -650,40 +649,26 @@ use lowering/definitions
               # (which has class-method-only side effects). `fn`-defined
               # methods (mnode.from_fn == true) also get a memo table
               # — same caching behavior as top-level fn defs.
-              if mnode.return_type != nil || ast_get(mnode, :final_method) == true
-                static_rt = nil
-                if mnode.return_type != nil
-                  static_rt = normalize_type_symbol(mnode.return_type)
+              if mnode.return_type != nil
+                static_rt = normalize_type_symbol(mnode.return_type)
                 static_key = cname + "." + mnode.name
                 inst_fn_name = class_method_function_name(cname, mnode)
                 inst_raw_abi = static_method_raw_abi?(mnode)
-                if static_rt != nil
-                  mod[:fn_return_types][static_key] = static_rt
-                direct_eligible = mnode.return_type != nil
-                if ast_get(mnode, :final_method) == true
-                  direct_eligible = method_lowering_analysis(mnode)[:yield_block_name] == nil
-                  fpi = 0
-                  while direct_eligible && fpi < mnode.params.size()
-                    fp = mnode.params[fpi]
-                    if fp.default != nil || fp.keyword == true || fp.splat == true || fp.block_param == true
-                      direct_eligible = false
-                    fpi += 1
-                if direct_eligible
-                  info = {
-                    fn_name: inst_fn_name,
-                    method_fn_name: inst_fn_name,
-                    arity: method_runtime_arity(mnode),
-                    return_type: static_rt,
-                    param_types: normalized_static_param_types(mnode),
-                    raw_abi: inst_raw_abi,
-                    from_fn: mnode.from_fn == true,
-                    is_final: ast_get(mnode, :final_method) == true,
-                    accepts_block: false,
-                    param_count: mnode.params.size(),
-                    splat_index: method_splat_index(mnode),
-                    block_param_index: method_block_param_index(mnode)
-                  }
-                  register_known_static_method_info(mod, static_key, info, mnode.params.size(), mnode.params.size())
+                mod[:fn_return_types][static_key] = static_rt
+                info = {
+                  fn_name: inst_fn_name,
+                  method_fn_name: inst_fn_name,
+                  arity: method_runtime_arity(mnode),
+                  return_type: static_rt,
+                  param_types: normalized_static_param_types(mnode),
+                  raw_abi: inst_raw_abi,
+                  from_fn: mnode.from_fn == true,
+                  accepts_block: false,
+                  param_count: mnode.params.size(),
+                  splat_index: method_splat_index(mnode),
+                  block_param_index: method_block_param_index(mnode)
+                }
+                register_known_static_method_info(mod, static_key, info, mnode.params.size(), mnode.params.size())
                 if mnode.from_fn == true
                   impure_ccall = fn_body_calls_impure_ccall?(mnode.body)
                   mnode.calls_impure_ccall = impure_ccall
@@ -757,8 +742,73 @@ use lowering/definitions
     cu_entry[:instructions] = cu_new
   nil
 
+-> lowering_contract_name(node)
+  if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+    return nil
+  receiver = node.receiver
+  if receiver == nil || !is_ast_node?(receiver) || ast_kind(receiver) != :class_ref || receiver.name != "Tungsten"
+    return nil
+  if node.name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+    return node.name
+  nil
+
+-> lowering_definition_key(node)
+  kind = ast_kind(node)
+  if kind in (:class_def :module_def :trait_def)
+    return "type:" + node.name
+  if kind in (:fn_def :method_def)
+    arity = 0
+    if node.params != nil
+      arity = node.params.size()
+    return "fn:" + node.name + "/" + arity.to_s()
+  nil
+
+# Record the contracts before any analysis consumes closed-world facts. Loader
+# performs the full autoload-registry validation; this duplicate structural
+# check keeps compile_to_wire safe for tests/tools that hand it an AST directly.
+-> collect_lowering_contracts(mod, expressions, source_path)
+  lock_seen = false
+  core_keys = {}
+  i = 0
+  while i < expressions.size()
+    node = expressions[i]
+    contract = lowering_contract_name(node)
+    if contract != nil
+      if node.args == nil || node.args.size() != 0 || node.block != nil
+        raise compile_error_for_node(:E_CONTRACT_ARITY, "Tungsten." + contract + " takes no arguments or block", source_path, node)
+      if contract == "PROTECT_THE_CORE!"
+        mod[:protect_core] = true
+      else
+        mod[:method_tables_locked] = true
+        lock_seen = true
+      ast_set(node, :validated_program_contract, true)
+    else
+      key = lowering_definition_key(node)
+      if lock_seen && key != nil
+        path = ast_get(node, :source_path)
+        if path == nil
+          path = source_path
+        raise compile_error_for_node(:E_CONTRACT_LOCK_ORDER, "method and type definitions must appear before Tungsten.LOCK_THE_DOORS!", path, node)
+      if key != nil && definition_from_core?(node)
+        core_keys[key] = true
+    i += 1
+
+  if mod[:protect_core] == true
+    i = 0
+    while i < expressions.size()
+      node = expressions[i]
+      key = lowering_definition_key(node)
+      if key != nil && !definition_from_core?(node) && core_keys[key] == true
+        path = ast_get(node, :source_path)
+        if path == nil
+          path = source_path
+        raise compile_error_for_node(:E_CONTRACT_CORE_MUTATION, "Tungsten.PROTECT_THE_CORE! forbids replacing or reopening Core definition '" + node.name + "'", path, node)
+      i += 1
+  nil
+
 -> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false)
   mod = init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines)
+  collect_lowering_contracts(mod, ast.expressions, source_path)
 
   # Generic class monomorphization runs BEFORE the main expressions walk
   # so specialized classes are visible to every downstream pass.
@@ -805,6 +855,7 @@ use lowering/definitions
     source_path: source_path,
     bindings: {},
     unboxed_vars: {},
+    local_assignment_counts: local_assignment_counts(ast.expressions),
     raw_int_candidates: raw_int_candidate_map(ast.expressions, var_types, mod),
     mut_accumulators: mut_accumulator_candidates(ast.expressions),
     method_name: nil,
@@ -823,6 +874,14 @@ use lowering/definitions
   emit_builtin_class_inits(main_fn, mod)
   ordered_class_exprs = order_class_exprs(mod, ast.expressions)
   register_classes(main_fn, mod, ordered_class_exprs)
+
+  # All source definitions preceding LOCK_THE_DOORS have now been emitted as
+  # startup registrations. Close both instance and static method tables before
+  # any user statement executes. The runtime owns enforcement so native/FFI
+  # registration paths cannot invalidate the compiler's direct-call proof.
+  if mod[:method_tables_locked] == true
+    method_lock_tmp = next_temp(main_fn)
+    emit_instruction(main_fn, {op: :call_direct_i64, temp: method_lock_tmp, name: "w_method_tables_lock_safe", args: []})
 
   # Freeze the string slab once startup registration is fully emitted (every
   # class/method-name intern above precedes this point in main). The compiled

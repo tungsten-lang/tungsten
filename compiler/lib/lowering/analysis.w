@@ -1469,6 +1469,87 @@
     return true
   false
 
+# Count writes to lexical locals across control flow and nested blocks, while
+# stopping at nested method/type definitions (fresh scopes). LOCK_THE_DOORS
+# may remove a receiver-class guard only when the constructor binding has one
+# write in its complete scope; the old speculative exact fact deliberately
+# tolerated stale closure/control-flow facts because its runtime guard caught
+# them.
+-> count_local_assignments(node, counts)
+  if node == nil
+    return nil
+  if type(node) == "Array"
+    i = 0
+    while i < node.size()
+      count_local_assignments(node[i], counts)
+      i += 1
+    return nil
+  if !is_ast_node?(node)
+    return nil
+  kind = ast_kind(node)
+  if kind in (:fn_def :method_def :class_def :module_def :trait_def :gpu_kernel_def)
+    return nil
+  if kind == :assign
+    target = node.target
+    if target != nil && is_ast_node?(target) && ast_kind(target) == :var
+      old = counts[target.name]
+      if old == nil
+        old = 0
+      counts[target.name] = old + 1
+    count_local_assignments(node.value, counts)
+    return nil
+  if kind == :compound_assign
+    target = node.target
+    if target != nil && is_ast_node?(target) && ast_kind(target) == :var
+      old = counts[target.name]
+      if old == nil
+        old = 0
+      counts[target.name] = old + 1
+    count_local_assignments(node.value, counts)
+    return nil
+  if kind == :multi_assign
+    targets = node.targets
+    if targets != nil
+      i = 0
+      while i < targets.size()
+        target = targets[i]
+        if target != nil && is_ast_node?(target) && ast_kind(target) == :var
+          old = counts[target.name]
+          if old == nil
+            old = 0
+          counts[target.name] = old + 1
+        i += 1
+    count_local_assignments(node.value, counts)
+    return nil
+
+  # These fields contain arrays-of-arrays; ast_children intentionally visits
+  # only one array level, so recurse through their raw structure explicitly.
+  if kind == :if
+    count_local_assignments(node.condition, counts)
+    count_local_assignments(node.then_body, counts)
+    count_local_assignments(node.elsif_clauses, counts)
+    count_local_assignments(node.else_body, counts)
+    return nil
+  if kind == :with || kind == :parallel_with
+    count_local_assignments(node.bindings, counts)
+    count_local_assignments(node.body, counts)
+    return nil
+  if kind == :hash_literal
+    count_local_assignments(node.entries, counts)
+    return nil
+
+  kids = ast_children(node)
+  i = 0
+  while i < kids.size()
+    count_local_assignments(kids[i], counts)
+    i += 1
+  nil
+
+-> local_assignment_counts(body)
+  counts = {}
+  count_local_assignments(body, counts)
+  counts
+
 # Eligible seed type, or nil. Typed arrays pass through unchanged; floats
 # normalize to :f64 to match the proven param-type-list annotation path.
 -> param_infer_whitelist_type(t)

@@ -10,6 +10,8 @@ use parser
     @service_bindings = parse_service_bindings(env("TUNGSTEN_SERVICE_BINDINGS"))
     @service_bindings_id = canonical_service_bindings(@service_bindings)
     @autoload_registry = nil
+    @contract_core_registry = nil
+    @core_root = nil
     @autoload_loaded = {}
     @manifest_poisoned = false
     @manifest_wanted = false
@@ -63,6 +65,11 @@ use parser
 
       cached = read_ast_cache(resolved)
       if cached != nil
+        # Cached programs have already been flattened/autoloaded, but contract
+        # validation is deliberately not cached: its guarantees must survive a
+        # compiler upgrade that tightens the closed-world checks.
+        autoload_registry(resolved)
+        validate_program_contracts(cached.expressions, resolved)
         return cached
 
     if @loaded_files.include?(resolved)
@@ -81,6 +88,7 @@ use parser
     token_count = lexer.tokenize()
     parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
     ast = parser.parse()
+    validate_contract_locations(ast.expressions, resolved, from_file)
 
     expressions = []
     i = 0
@@ -121,8 +129,140 @@ use parser
         expressions = with_support
         ast = Tungsten:AST:Program.new(expressions)
       ast = autoload_pass(ast, resolved)
+      validate_program_contracts(ast.expressions, resolved)
       write_ast_cache(resolved, ast)
     ast
+
+  -> tungsten_contract_name(node)
+    if node == nil || !is_ast_node?(node) || ast_kind(node) != :call
+      return nil
+    receiver = node.receiver
+    if receiver == nil || !is_ast_node?(receiver) || ast_kind(receiver) != :class_ref || receiver.name != "Tungsten"
+      return nil
+    if node.name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+      return node.name
+    nil
+
+  # Contracts belong to the executable that owns the process. A dependency
+  # may document that it works under a closed world, but it cannot silently
+  # close its caller's method tables or opt the caller into Core assumptions.
+  -> validate_contract_locations(expressions, resolved, from_file)
+    i = 0
+    while i < expressions.size()
+      node = expressions[i]
+      contract = tungsten_contract_name(node)
+      if contract != nil
+        if node.args == nil || node.args.size() != 0 || node.block != nil
+          raise compile_error_for_node(:E_CONTRACT_ARITY, "Tungsten." + contract + " takes no arguments or block", resolved, node)
+        if from_file != nil
+          raise compile_error_for_node(:E_CONTRACT_DEPENDENCY, "Tungsten." + contract + " may only be declared by the entry program", resolved, node)
+      i += 1
+    nil
+
+  -> loader_core_source?(node)
+    path = ast_get(node, :source_path)
+    if path == nil
+      return false
+    text = "" + path
+    if @core_root != nil
+      prefix = @core_root + "/core/"
+      if text.size() >= prefix.size() && text.slice(0, prefix.size()) == prefix
+        return true
+    root = env("TUNGSTEN_ROOT")
+    if root != nil
+      prefix = root + "/core/"
+      if text.size() >= prefix.size() && text.slice(0, prefix.size()) == prefix
+        return true
+    text.size() >= 5 && text.slice(0, 5) == "core/"
+
+  -> definition_contract_key(node)
+    kind = ast_kind(node)
+    if kind in (:class_def :module_def :trait_def)
+      return "type:" + node.name
+    if kind in (:fn_def :method_def)
+      arity = 0
+      if node.params != nil
+        arity = node.params.size()
+      return "fn:" + node.name + "/" + arity.to_s()
+    nil
+
+  # PROTECT_THE_CORE! is a checked assertion, not an advisory hint. Reject a
+  # user reopen/replacement before lowering can consume a stable Core fact.
+  # LOCK_THE_DOORS! is a source barrier: definitions must precede it. The AOT
+  # compiler can then register that complete set and close the runtime tables
+  # once, before executing user statements.
+  -> validate_program_contracts(expressions, resolved)
+    protect_core = false
+    lock_seen = false
+    core_keys = {}
+    i = 0
+    while i < expressions.size()
+      node = expressions[i]
+      contract = tungsten_contract_name(node)
+      if contract == "PROTECT_THE_CORE!"
+        protect_core = true
+      elsif contract == "LOCK_THE_DOORS!"
+        lock_seen = true
+      elsif lock_seen
+        key = definition_contract_key(node)
+        if key != nil
+          path = ast_get(node, :source_path)
+          if path == nil
+            path = resolved
+          raise compile_error_for_node(:E_CONTRACT_LOCK_ORDER, "method and type definitions must appear before Tungsten.LOCK_THE_DOORS!", path, node)
+      key = definition_contract_key(node)
+      if key != nil && loader_core_source?(node)
+        core_keys[key] = true
+      i += 1
+
+    if !protect_core
+      return nil
+
+    registry = @autoload_registry
+    if registry == nil || registry.size() == 0
+      registry = contract_core_registry(resolved)
+    i = 0
+    while i < expressions.size()
+      node = expressions[i]
+      key = definition_contract_key(node)
+      if key != nil && !loader_core_source?(node)
+        core_owned = core_keys[key] == true
+        kind = ast_kind(node)
+        if kind in (:class_def :module_def :trait_def)
+          core_owned = core_owned || registry[node.name] != nil || node.name == "Tungsten"
+        if core_owned
+          path = ast_get(node, :source_path)
+          if path == nil
+            path = resolved
+          raise compile_error_for_node(:E_CONTRACT_CORE_MUTATION, "Tungsten.PROTECT_THE_CORE! forbids replacing or reopening Core definition '" + node.name + "'", path, node)
+      i += 1
+    nil
+
+  # Read Core ownership names even when the entry program explicitly `use`s
+  # core/tungsten.w. The ordinary autoloader intentionally returns an empty
+  # registry in that case, but PROTECT_THE_CORE still must recognize an
+  # unloaded Core name as Core-owned.
+  -> contract_core_registry(base_resolved)
+    if @contract_core_registry != nil
+      return @contract_core_registry
+    if @core_root == nil
+      parts = base_resolved.split("/")
+      parts.pop()
+      @core_root = find_core_root(parts.join("/"))
+    registry = {}
+    if @core_root == nil || @core_root == ""
+      @contract_core_registry = registry
+      return registry
+    registry_path = @core_root + "/core/tungsten.w"
+    source = read_file(registry_path)
+    if source != nil
+      lexer = Lexer.new(source, registry_path)
+      token_count = lexer.tokenize()
+      parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
+      parsed = parser.parse()
+      extract_autoload_entries(parsed.expressions, registry)
+    @contract_core_registry = registry
+    registry
 
   # Lazy iterative autoload. After the entry-file's recursive `:use` walk
   # produces `ast`, scan for unresolved class/trait references whose names
@@ -248,6 +388,7 @@ use parser
     project_root = find_core_root(base_dir)
     if project_root == ""
       return nil
+    @core_root = project_root
     registry_path = project_root + "/core/tungsten.w"
     if !file?(registry_path)
       return nil
@@ -906,8 +1047,10 @@ use parser
     nil
 
   -> cache_version
-    # v24: the full executable String source facade uses one name gate.
-    "loader-ast-v24"
+    # v25: definitions and closed-world contract calls carry source provenance
+    # in sparse AST metadata. Older cache entries cannot validate Core ownership
+    # or dependency-owned barriers soundly.
+    "loader-ast-v25"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")

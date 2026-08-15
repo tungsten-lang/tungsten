@@ -44797,6 +44797,41 @@ WValue w_class_new_wv(WValue name, WValue superclass) {
     return w_class_new(as_str(name), superclass);
 }
 
+/*
+ * Process-wide method-definition barrier. Registration is startup-only in a
+ * closed-world executable, so a mutex here costs nothing on the hot dispatch
+ * path while making the transition firm even if native code races it. Once
+ * set, the flag is intentionally irreversible for the life of the process.
+ */
+static pthread_mutex_t g_method_table_barrier_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int g_method_tables_locked = 0;
+
+WValue w_method_tables_lock_safe(void) {
+    pthread_mutex_lock(&g_method_table_barrier_mutex);
+    g_method_tables_locked = 1;
+    pthread_mutex_unlock(&g_method_table_barrier_mutex);
+    return W_NIL;
+}
+
+int64_t w_method_tables_are_locked(void) {
+    pthread_mutex_lock(&g_method_table_barrier_mutex);
+    int locked = g_method_tables_locked;
+    pthread_mutex_unlock(&g_method_table_barrier_mutex);
+    return locked;
+}
+
+static void w_method_table_mutation_begin(void) {
+    pthread_mutex_lock(&g_method_table_barrier_mutex);
+    if (g_method_tables_locked) {
+        pthread_mutex_unlock(&g_method_table_barrier_mutex);
+        w_raise(w_string("method tables are locked by Tungsten.LOCK_THE_DOORS!"));
+    }
+}
+
+static void w_method_table_mutation_end(void) {
+    pthread_mutex_unlock(&g_method_table_barrier_mutex);
+}
+
 void w_class_add_method(WValue klass_val, const char *name, void *fn_ptr, int arity) {
     w_class_add_method_wv(klass_val, w_string(name), fn_ptr, arity);
 }
@@ -44808,21 +44843,25 @@ void w_class_add_method_wv(WValue klass_val, WValue name, void *fn_ptr, int arit
 void w_class_add_method_range_wv(WValue klass_val, WValue name, void *fn_ptr,
                                  int arity, int min_arity) {
     WClass *klass = as_class(klass_val);
+    w_method_table_mutation_begin();
     WMethod *m = w_method_table_upsert_slot_arity(&klass->methods, &klass->method_count, &klass->method_capacity, name, arity);
     m->fn_ptr = fn_ptr;
     m->arity = arity;
     m->min_arity = min_arity;
     m->splat_index_plus_one = 0;
+    w_method_table_mutation_end();
 }
 
 void w_class_add_method_splat_wv(WValue klass_val, WValue name, void *fn_ptr,
                                  int arity, int min_arity, int splat_index) {
     WClass *klass = as_class(klass_val);
+    w_method_table_mutation_begin();
     WMethod *m = w_method_table_upsert_slot_arity(&klass->methods, &klass->method_count, &klass->method_capacity, name, arity);
     m->fn_ptr = fn_ptr;
     m->arity = arity;
     m->min_arity = min_arity;
     m->splat_index_plus_one = splat_index + 1;
+    w_method_table_mutation_end();
 }
 
 void w_class_add_static_method(WValue klass_val, const char *name, void *fn_ptr, int arity) {
@@ -44837,22 +44876,26 @@ void w_class_add_static_method_range_wv(WValue klass_val, WValue name,
                                         void *fn_ptr, int arity,
                                         int min_arity) {
     WClass *klass = as_class(klass_val);
+    w_method_table_mutation_begin();
     WMethod *m = w_method_table_upsert_slot_arity(&klass->static_methods, &klass->static_method_count, &klass->static_method_capacity, name, arity);
     m->fn_ptr = fn_ptr;
     m->arity = arity;
     m->min_arity = min_arity;
     m->splat_index_plus_one = 0;
+    w_method_table_mutation_end();
 }
 
 void w_class_add_static_method_splat_wv(WValue klass_val, WValue name,
                                         void *fn_ptr, int arity,
                                         int min_arity, int splat_index) {
     WClass *klass = as_class(klass_val);
+    w_method_table_mutation_begin();
     WMethod *m = w_method_table_upsert_slot_arity(&klass->static_methods, &klass->static_method_count, &klass->static_method_capacity, name, arity);
     m->fn_ptr = fn_ptr;
     m->arity = arity;
     m->min_arity = min_arity;
     m->splat_index_plus_one = splat_index + 1;
+    w_method_table_mutation_end();
 }
 
 int w_class_add_ivar(WValue klass_val, const char *name) {

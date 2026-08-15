@@ -968,6 +968,8 @@ extern uint16_t g_next_class_id;
 
 WValue w_class_new(const char *name, WValue superclass);
 WValue w_class_new_wv(WValue name, WValue superclass);
+WValue w_method_tables_lock_safe(void);
+int64_t w_method_tables_are_locked(void);
 void   w_class_add_method(WValue klass, const char *name, void *fn_ptr, int arity);
 void   w_class_add_method_wv(WValue klass, WValue name, void *fn_ptr, int arity);
 void   w_class_add_method_range_wv(WValue klass, WValue name, void *fn_ptr,

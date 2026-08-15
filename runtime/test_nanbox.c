@@ -29,6 +29,16 @@ static WValue cached_two_arg_fn(WValue receiver, WValue left, WValue right) {
     (void)receiver;
     return w_add(left, right);
 }
+static void method_table_mutation_after_lock_fn(void) {
+    WValue klass = w_class_new("LockedMutation", W_NIL);
+    w_method_tables_lock_safe();
+    w_class_add_method(klass, "too_late", (void *)cached_two_arg_fn, 3);
+}
+static void static_method_table_mutation_after_lock_fn(void) {
+    WValue klass = w_class_new("LockedStaticMutation", W_NIL);
+    w_method_tables_lock_safe();
+    w_class_add_static_method(klass, "too_late", (void *)cached_two_arg_fn, 3);
+}
 #ifndef TUNGSTEN_ONIG
 static void unsupported_named_regex_fn(void) {
     (void)w_regex_new(w_string("(?<word>a)"), w_string(""));
@@ -474,6 +484,16 @@ int main() {
         assert(w_is_string(name));
         assert(strcmp(str_val(name), "Rex") == 0);
         printf("  class/object: OK\n");
+    }
+
+    /* LOCK_THE_DOORS is an irreversible runtime barrier, not only a compiler
+     * promise. Exercise it in a child so the remaining registration tests in
+     * this process can continue to build their private fixture classes. */
+    {
+        assert(expect_crash(method_table_mutation_after_lock_fn));
+        assert(expect_crash(static_method_table_mutation_after_lock_fn));
+        assert(!w_method_tables_are_locked());
+        printf("  method table lock barrier: OK\n");
     }
 
     /* Exact two-argument cached dispatch agrees with the generic cache path,

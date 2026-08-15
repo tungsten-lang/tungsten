@@ -711,6 +711,7 @@
     method_name: ctx[:method_name],
     bindings: {},
     unboxed_vars: {},
+    local_assignment_counts: local_assignment_counts(block.body),
     verbose: ctx[:verbose],
     is_class_method: ctx[:is_class_method],
     is_block: true,

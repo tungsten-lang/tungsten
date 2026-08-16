@@ -12888,18 +12888,18 @@ WBigint *mag_mod_63(const uint64_t *u, const uint64_t *v) {
         if (r0 > d1 || (r0 == d1 && n0 >= d0)) {
             uint64_t b0 = un[3] < dl;
             un[3] -= dl;
-            __uint128_t lhs = ((__uint128_t)r0 << 64) | n0;
-            __uint128_t rhs =
-                ((((__uint128_t)d1 << 64) | d0)) + b0;
-            if (__builtin_expect(lhs < rhs, 0)) {
+            uint64_t sub0 = d0 + b0;
+            uint64_t b1 = (sub0 < d0) | (n0 < sub0);
+            uint64_t sub1 = d1 + b1;
+            uint64_t b2 = (sub1 < d1) | (r0 < sub1);
+            if (__builtin_expect(b2 != 0, 0)) {
                 /* prefix tie, low limb fell short: digit is 0, undo */
                 un[3] += dl;
                 r1 = r0;
                 r0 = n0;
             } else {
-                lhs -= rhs;
-                r1 = (uint64_t)(lhs >> 64);
-                r0 = (uint64_t)lhs;
+                r1 = r0 - sub1;
+                r0 = n0 - sub0;
             }
         } else {
             r1 = r0;

@@ -63,6 +63,21 @@ check("small_mod", b % a, b)
 check("int_arg_div", a / 7, (a - a % 7) / 7)
 check("int_arg_mod", a % 7, 1)
 
+# Fixed 6-by-3 remainder: the normalized all-ones divisor makes the leading
+# conditional subtract carry out of its two-limb prefix.  The low-limb borrow
+# must not be lost when that prefix is 2^128-1.
+base = 1 << 64
+mod63_divisor = base * base * base - 1
+mod63_quotient = mod63_divisor
+mod63_remainder = 27411205776890304732
+mod63_dividend = mod63_quotient * mod63_divisor + mod63_remainder
+check("mod63_prefix_carry_div", mod63_dividend / mod63_divisor, mod63_quotient)
+check("mod63_prefix_carry_mod", mod63_dividend % mod63_divisor, mod63_remainder)
+check("mod63_prefix_carry_roundtrip",
+      (mod63_dividend / mod63_divisor) * mod63_divisor +
+      (mod63_dividend % mod63_divisor),
+      mod63_dividend)
+
 # Explicit operator sends
 check("explicit_div", a./(b), q_want)
 check("explicit_mod", a.%(b), r_want)

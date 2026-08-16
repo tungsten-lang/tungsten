@@ -252,6 +252,19 @@ honest 2.4% C win.  The untouched 4/2 control remained green at 0.969; signed
 6/3 stays on C.  Raw evidence:
 `bigint_mod_63_native_finish_results.txt`.
 
+EXACT 6-BY-3-LIMB QUOTIENT CHECKPOINT: the positive
+`mag_div_q_63_certified` arm is now mechanically ported before native-only
+tuning.  Its generated AArch64 body is the Clang 22.1.8
+`-O3 -mcpu=apple-m5` schedule for the existing C arithmetic: identical
+normalization, reciprocal table, four fixed quotient digits, saturated and
+add-back paths, triangular certificate, capacity-four allocation, failure
+release, and fallback into the unchanged C division tree.  The arithmetic
+leaf has a 48-byte frame and no calls.  The same 1,232-case public q/r corpus
+is green.  As required for an exact-first migration, the initial loss is
+retained rather than hidden: a 12-pair matched run measured native/C at 1.165
+(105.002 ns versus 90.226 ns median); 4/2 and signed controls remained green.
+Raw evidence: `bigint_div_63_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

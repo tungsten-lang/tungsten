@@ -716,6 +716,582 @@ fn __bigint_mod_42_exact(rp, up, vp) (i64 i64 i64) i64
       .short 0x40e, 0x40c, 0x40a, 0x408, 0x406, 0x404, 0x402, 0x400
   ASM
 
+# Exact arithmetic/certificate body for mag_div_q_63_certified.  This is the
+# Clang 22.1.8 -O3 -mcpu=apple-m5 schedule generated from the C leaf after
+# splitting only its capacity-four allocation/finalization into the wrapper.
+on macos && arm64
+  fn __bigint_div_63_exact(rp, up, vp) (i64 i64 i64) i64
+    asm <<~ASM
+      .arch_extension cssc
+      sub	sp, sp, #48
+      stp	x20, x19, [sp, #32]
+      mov	x9, x2
+      ldr	x8, [x9, #16]!
+      clz	x12, x8
+      cbz	x12, Ldivq63_2
+      lsl	x8, x8, x12
+      add	x10, sp, #8
+      ldp	x13, x11, [x2]
+      lsr	x9, x11, #1
+      mvn	w14, w12
+      lsr	x15, x9, x14
+      add	x9, x10, #16
+      lsl	x16, x11, x12
+      add	x11, x10, #8
+      lsr	x10, x13, #1
+      orr	x8, x8, x15
+      lsr	x10, x10, x14
+      orr	x10, x16, x10
+      lsl	x13, x13, x12
+      stp	x10, x8, [sp, #16]
+      str	x13, [sp, #8]
+      ldp	x15, x13, [x1, #32]
+      lsl	x16, x13, x12
+      lsr	x17, x15, #1
+      lsr	x17, x17, x14
+      orr	x3, x16, x17
+      lsl	x15, x15, x12
+      ldp	x2, x16, [x1, #16]
+      lsr	x17, x16, #1
+      lsr	x17, x17, x14
+      orr	x17, x15, x17
+      lsl	x15, x16, x12
+      lsr	x16, x2, #1
+      lsr	x16, x16, x14
+      orr	x16, x15, x16
+      lsl	x15, x2, x12
+      ldp	x1, x2, [x1]
+      lsr	x4, x2, #1
+      lsr	x4, x4, x14
+      orr	x15, x15, x4
+      neg	x4, x12
+      lsl	x12, x2, x12
+      lsr	x1, x1, #1
+      lsr	x14, x1, x14
+      orr	x12, x12, x14
+      add	x2, sp, #8
+      lsr	x14, x13, x4
+      b	Ldivq63_3
+      Ldivq63_2:
+      mov	x14, #0
+      sub	x11, x9, #8
+      ldp	x17, x3, [x1, #32]
+      ldp	x15, x16, [x1, #16]
+      ldr	x12, [x1, #8]
+      ldr	x10, [x11]
+      Ldivq63_3:
+      lsr	x13, x8, #55
+      adr x1, 90f
+      add	x13, x1, x13, lsl #1
+      sub	x13, x13, #512
+      ldrh	w13, [x13]
+      lsr	x1, x8, #24
+      add	x1, x1, #1
+      mul	x4, x1, x13
+      mul	x4, x4, x13
+      mvn	x4, x4, lsr #40
+      add	x13, x4, x13, lsl #11
+      mov	x4, #1152921504606846976
+      msub	x1, x13, x1, x4
+      mul	x1, x1, x13
+      lsr	x1, x1, #47
+      add	x13, x1, x13, lsl #13
+      sbfx	x1, x8, #0, #1
+      and	x4, x8, #0x1
+      add	x4, x4, x8, lsr #1
+      and	x1, x1, x13, lsr #1
+      msub	x1, x13, x4, x1
+      lsl	x4, x13, #31
+      umulh	x13, x1, x13
+      add	x13, x4, x13, lsr #1
+      adds	x1, x13, #1
+      cset	w4, hs
+      umulh	x1, x1, x8
+      madd	x1, x4, x8, x1
+      sub	x13, x13, x8
+      sub	x1, x13, x1
+      mul	x13, x1, x8
+      adds	x13, x13, x10
+      b.lo	Ldivq63_5
+      cmp	x13, x8
+      csel	x4, x8, xzr, hs
+      cset	w5, hs
+      mvn	x5, x5
+      add	x1, x5, x1
+      sub	x13, x13, x8
+      sub	x13, x13, x4
+      Ldivq63_5:
+      umulh	x4, x1, x10
+      adds	x4, x13, x4
+      b.lo	Ldivq63_41
+      sub	x13, x1, #1
+      cmp	x4, x8
+      b.lo	Ldivq63_8
+      mul	x5, x1, x10
+      sub	x1, x1, #2
+      cmp	x4, x8
+      ccmp	x10, x5, #0, ls
+      csel	x13, x13, x1, hi
+      Ldivq63_8:
+      cbz	x14, Ldivq63_42
+      Ldivq63_9:
+      cmp	x14, x8
+      b.lo	Ldivq63_12
+      b.hi	Ldivq63_69
+      cmp	x3, x10
+      b.hs	Ldivq63_69
+      Ldivq63_12:
+      umulh	x1, x14, x13
+      mul	x4, x14, x13
+      adds	x4, x3, x4
+      adc	x14, x14, x1
+      msub	x1, x8, x14, x3
+      umulh	x3, x14, x10
+      mul	x5, x14, x10
+      adds	x5, x10, x5
+      adc	x3, x8, x3
+      subs	x17, x17, x5
+      ngc	x3, x3
+      add	x3, x3, x1
+      cmp	x3, x4
+      cset	w1, hs
+      csel	x4, x8, xzr, hs
+      csel	x5, x10, xzr, hs
+      sub	x14, x14, x1
+      add	x1, x14, #1
+      adds	x17, x17, x5
+      adc	x14, x4, x3
+      cmp	x17, x10
+      sbcs	xzr, x14, x8
+      b.hs	Ldivq63_61
+      Ldivq63_13:
+      ldr	x4, [x2]
+      umulh	x3, x4, x1
+      mul	x5, x4, x1
+      subs	x16, x16, x5
+      cinc	x3, x3, lo
+      subs	x17, x17, x3
+      cset	w3, lo
+      subs	x3, x14, x3
+      b.lo	Ldivq63_62
+      mov	x14, #0
+      Ldivq63_15:
+      str	x1, [x0, #24]
+      cmp	x3, x8
+      b.lo	Ldivq63_18
+      b.hi	Ldivq63_63
+      cmp	x17, x10
+      b.hs	Ldivq63_63
+      Ldivq63_18:
+      umulh	x1, x3, x13
+      mul	x4, x3, x13
+      adds	x4, x17, x4
+      adc	x1, x3, x1
+      msub	x17, x8, x1, x17
+      umulh	x3, x1, x10
+      mul	x5, x1, x10
+      adds	x5, x10, x5
+      adc	x3, x8, x3
+      subs	x16, x16, x5
+      ngc	x3, x3
+      add	x17, x3, x17
+      cmp	x17, x4
+      cset	w3, hs
+      csel	x4, x8, xzr, hs
+      csel	x5, x10, xzr, hs
+      sub	x1, x1, x3
+      add	x1, x1, #1
+      adds	x16, x16, x5
+      adc	x17, x4, x17
+      cmp	x16, x10
+      sbcs	xzr, x17, x8
+      b.hs	Ldivq63_56
+      Ldivq63_19:
+      ldr	x3, [x2]
+      umulh	x5, x3, x1
+      mul	x4, x3, x1
+      subs	x4, x15, x4
+      cinc	x15, x5, lo
+      subs	x16, x16, x15
+      cset	w15, lo
+      subs	x17, x17, x15
+      b.lo	Ldivq63_57
+      mov	x15, #0
+      Ldivq63_21:
+      str	x1, [x0, #16]
+      cmp	x17, x8
+      b.lo	Ldivq63_24
+      b.hi	Ldivq63_65
+      cmp	x16, x10
+      b.hs	Ldivq63_65
+      Ldivq63_24:
+      umulh	x1, x17, x13
+      mul	x3, x17, x13
+      adds	x3, x16, x3
+      adc	x17, x17, x1
+      msub	x16, x8, x17, x16
+      umulh	x1, x17, x10
+      mul	x5, x17, x10
+      adds	x5, x10, x5
+      adc	x1, x8, x1
+      subs	x4, x4, x5
+      ngc	x1, x1
+      add	x16, x1, x16
+      cmp	x16, x3
+      cset	w1, hs
+      csel	x5, x8, xzr, hs
+      csel	x6, x10, xzr, hs
+      sub	x17, x17, x1
+      add	x3, x17, #1
+      adds	x1, x4, x6
+      adc	x17, x5, x16
+      cmp	x1, x10
+      sbcs	xzr, x17, x8
+      b.hs	Ldivq63_58
+      Ldivq63_25:
+      ldr	x4, [x2]
+      umulh	x2, x4, x3
+      mul	x16, x4, x3
+      subs	x16, x12, x16
+      cinc	x12, x2, lo
+      subs	x1, x1, x12
+      cset	w12, lo
+      subs	x2, x17, x12
+      b.lo	Ldivq63_59
+      mov	x12, #0
+      Ldivq63_27:
+      str	x3, [x0, #8]
+      cmp	x2, x8
+      b.lo	Ldivq63_30
+      b.hi	Ldivq63_67
+      cmp	x1, x10
+      b.hs	Ldivq63_67
+      Ldivq63_30:
+      umulh	x11, x2, x13
+      mul	x13, x2, x13
+      adds	x13, x1, x13
+      adc	x11, x2, x11
+      msub	x17, x8, x11, x1
+      umulh	x1, x11, x10
+      mul	x2, x11, x10
+      adds	x2, x10, x2
+      adc	x1, x8, x1
+      subs	x16, x16, x2
+      ngc	x1, x1
+      add	x1, x1, x17
+      cmp	x1, x13
+      cset	w13, hs
+      csel	x2, x8, xzr, hs
+      csel	x17, x10, xzr, hs
+      sub	x11, x11, x13
+      add	x13, x11, #1
+      adds	x17, x16, x17
+      adc	x11, x2, x1
+      cmp	x17, x10
+      sbcs	xzr, x11, x8
+      b.hs	Ldivq63_60
+      mov	x16, #0
+      Ldivq63_32:
+      str	x13, [x0]
+      mov	x8, #-1
+      cbnz	x14, Ldivq63_40
+      cbnz	x15, Ldivq63_40
+      cbnz	x12, Ldivq63_40
+      cbnz	x16, Ldivq63_40
+      cbz	x11, Ldivq63_40
+      ldr	x8, [x9]
+      cmp	x11, x8
+      b.hs	Ldivq63_48
+      ldr	x8, [x0, #24]
+      cbz	x8, Ldivq63_51
+      mov	w8, #4
+      Ldivq63_40:
+      mov	x0, x8
+      ldp	x20, x19, [sp, #32]
+      add	sp, sp, #48
+      ret
+      Ldivq63_41:
+      mov	x13, x1
+      cbnz	x14, Ldivq63_9
+      Ldivq63_42:
+      cmp	x3, x8
+      b.hi	Ldivq63_45
+      mov	x14, #0
+      b.ne	Ldivq63_50
+      cmp	x17, x10
+      b.lo	Ldivq63_50
+      Ldivq63_45:
+      ldr	x6, [x2]
+      subs	x5, x16, x6
+      cset	w14, lo
+      adds	x14, x10, x14
+      cset	w1, hs
+      subs	x17, x17, x14
+      csinc	w14, w1, wzr, hs
+      adds	x14, x8, x14
+      sub	x4, x3, x14
+      b.hs	Ldivq63_49
+      cmp	x3, x14
+      b.lo	Ldivq63_49
+      mov	x14, #0
+      mov	w1, #1
+      mov	x3, x4
+      mov	x16, x5
+      b	Ldivq63_15
+      Ldivq63_48:
+      mov	x8, #-1
+      mov	x0, x8
+      ldp	x20, x19, [sp, #32]
+      add	sp, sp, #48
+      ret
+      Ldivq63_49:
+      mov	x14, #0
+      mov	x1, #0
+      cmp	x16, x6
+      cset	w3, lo
+      adds	x17, x17, x3
+      cset	w3, hs
+      adds	x17, x17, x10
+      adc	x3, x4, x3
+      add	x3, x3, x8
+      b	Ldivq63_15
+      Ldivq63_50:
+      mov	x1, x14
+      b	Ldivq63_15
+      Ldivq63_51:
+      ldr	x8, [x0, #16]
+      cbz	x8, Ldivq63_53
+      mov	w8, #3
+      mov	x0, x8
+      ldp	x20, x19, [sp, #32]
+      add	sp, sp, #48
+      ret
+      Ldivq63_53:
+      ldr	x8, [x0, #8]
+      cbz	x8, Ldivq63_55
+      mov	w8, #2
+      mov	x0, x8
+      ldp	x20, x19, [sp, #32]
+      add	sp, sp, #48
+      ret
+      Ldivq63_55:
+      umin	x8, x13, #1
+      mov	x0, x8
+      ldp	x20, x19, [sp, #32]
+      add	sp, sp, #48
+      ret
+      Ldivq63_56:
+      add	x1, x1, #1
+      subs	x16, x16, x10
+      sbc	x17, x17, x8
+      b	Ldivq63_19
+      Ldivq63_57:
+      mov	x15, #0
+      sub	x1, x1, #1
+      adds	x4, x4, x3
+      ldr	x3, [x11]
+      adcs	x16, x16, x3
+      ldr	x3, [x9]
+      adc	x17, x3, x17
+      b	Ldivq63_21
+      Ldivq63_58:
+      add	x3, x3, #1
+      subs	x1, x1, x10
+      sbc	x17, x17, x8
+      b	Ldivq63_25
+      Ldivq63_59:
+      mov	x12, #0
+      sub	x3, x3, #1
+      adds	x16, x16, x4
+      ldr	x17, [x11]
+      adcs	x1, x1, x17
+      ldr	x17, [x9]
+      adc	x2, x17, x2
+      b	Ldivq63_27
+      Ldivq63_60:
+      mov	x16, #0
+      add	x13, x13, #1
+      cmp	x17, x10
+      sbc	x11, x11, x8
+      b	Ldivq63_32
+      Ldivq63_61:
+      add	x1, x1, #1
+      subs	x17, x17, x10
+      sbc	x14, x14, x8
+      b	Ldivq63_13
+      Ldivq63_62:
+      mov	x14, #0
+      sub	x1, x1, #1
+      adds	x16, x16, x4
+      ldr	x4, [x11]
+      adcs	x17, x17, x4
+      ldr	x4, [x9]
+      adc	x3, x4, x3
+      b	Ldivq63_15
+      Ldivq63_63:
+      ldr	x5, [x2]
+      mov	x1, #-1
+      umulh	x4, x5, x1
+      neg	x6, x5
+      cmp	x15, x6
+      cinc	x4, x4, lo
+      ldr	x6, [x11]
+      neg	x7, x6
+      adds	x19, x4, x7
+      subs	x16, x16, x19
+      cset	w19, lo
+      cmn	x4, x7
+      umulh	x4, x6, x1
+      adc	x4, x19, x4
+      ldr	x7, [x9]
+      neg	x19, x7
+      adds	x20, x4, x19
+      subs	x17, x17, x20
+      cset	w20, lo
+      cmn	x4, x19
+      add	x4, x15, x5
+      umulh	x15, x7, x1
+      adc	x15, x20, x15
+      subs	x15, x3, x15
+      b.hs	Ldivq63_21
+      adds	x4, x4, x5
+      adcs	x16, x16, xzr
+      cset	w1, hs
+      adds	x16, x16, x6
+      adcs	x17, x17, x1
+      cset	w1, hs
+      adds	x17, x17, x7
+      adc	x15, x15, x1
+      mov	x1, #-2
+      b	Ldivq63_21
+      Ldivq63_65:
+      ldr	x5, [x2]
+      mov	x3, #-1
+      umulh	x1, x5, x3
+      neg	x2, x5
+      cmp	x12, x2
+      cinc	x2, x1, lo
+      ldr	x6, [x11]
+      neg	x7, x6
+      adds	x1, x2, x7
+      subs	x1, x4, x1
+      cset	w4, lo
+      cmn	x2, x7
+      umulh	x2, x6, x3
+      adc	x7, x4, x2
+      ldr	x4, [x9]
+      neg	x19, x4
+      adds	x2, x7, x19
+      subs	x2, x16, x2
+      cset	w20, lo
+      cmn	x7, x19
+      add	x16, x12, x5
+      umulh	x12, x4, x3
+      adc	x12, x20, x12
+      subs	x12, x17, x12
+      b.hs	Ldivq63_27
+      adds	x16, x16, x5
+      adcs	x17, x1, xzr
+      cset	w3, hs
+      adds	x1, x17, x6
+      adcs	x17, x2, x3
+      cset	w3, hs
+      adds	x2, x17, x4
+      adc	x12, x12, x3
+      mov	x3, #-2
+      b	Ldivq63_27
+      Ldivq63_67:
+      mov	x13, #-1
+      ldp	x8, x17, [x11]
+      umulh	x11, x8, x13
+      neg	x10, x8
+      subs	x10, x16, x10
+      cinc	x16, x11, lo
+      neg	x3, x17
+      adds	x11, x16, x3
+      subs	x11, x1, x11
+      cset	w1, lo
+      cmn	x16, x3
+      umulh	x16, x17, x13
+      adc	x16, x1, x16
+      subs	x16, x2, x16
+      b.hs	Ldivq63_32
+      cmn	x10, x8
+      ldr	x8, [x9]
+      adcs	x11, x11, x8
+      cinc	x16, x16, hs
+      mov	x13, #-2
+      b	Ldivq63_32
+      Ldivq63_69:
+      ldr	x4, [x2]
+      mov	x1, #-1
+      umulh	x5, x4, x1
+      neg	x6, x4
+      cmp	x16, x6
+      cinc	x5, x5, lo
+      neg	x6, x10
+      adds	x7, x5, x6
+      subs	x17, x17, x7
+      cset	w7, lo
+      cmn	x5, x6
+      umulh	x5, x10, x1
+      adc	x5, x7, x5
+      neg	x6, x8
+      adds	x7, x5, x6
+      subs	x3, x3, x7
+      cset	w7, lo
+      cmn	x5, x6
+      add	x16, x16, x4
+      umulh	x5, x8, x1
+      adc	x5, x7, x5
+      subs	x14, x14, x5
+      b.hs	Ldivq63_15
+      adds	x16, x16, x4
+      adcs	x17, x17, xzr
+      cset	w1, hs
+      adds	x17, x17, x10
+      adcs	x1, x3, x1
+      cset	w4, hs
+      adds	x3, x1, x8
+      adc	x14, x14, x4
+      mov	x1, #-2
+      b	Ldivq63_15
+    90:
+      .short 0x7fd, 0x7f5, 0x7ed, 0x7e5, 0x7dd, 0x7d5, 0x7ce, 0x7c6
+      .short 0x7bf, 0x7b7, 0x7b0, 0x7a8, 0x7a1, 0x79a, 0x792, 0x78b
+      .short 0x784, 0x77d, 0x776, 0x76f, 0x768, 0x761, 0x75b, 0x754
+      .short 0x74d, 0x747, 0x740, 0x739, 0x733, 0x72c, 0x726, 0x720
+      .short 0x719, 0x713, 0x70d, 0x707, 0x700, 0x6fa, 0x6f4, 0x6ee
+      .short 0x6e8, 0x6e2, 0x6dc, 0x6d6, 0x6d1, 0x6cb, 0x6c5, 0x6bf
+      .short 0x6ba, 0x6b4, 0x6ae, 0x6a9, 0x6a3, 0x69e, 0x698, 0x693
+      .short 0x68d, 0x688, 0x683, 0x67d, 0x678, 0x673, 0x66e, 0x669
+      .short 0x664, 0x65e, 0x659, 0x654, 0x64f, 0x64a, 0x645, 0x640
+      .short 0x63c, 0x637, 0x632, 0x62d, 0x628, 0x624, 0x61f, 0x61a
+      .short 0x616, 0x611, 0x60c, 0x608, 0x603, 0x5ff, 0x5fa, 0x5f6
+      .short 0x5f1, 0x5ed, 0x5e9, 0x5e4, 0x5e0, 0x5dc, 0x5d7, 0x5d3
+      .short 0x5cf, 0x5cb, 0x5c6, 0x5c2, 0x5be, 0x5ba, 0x5b6, 0x5b2
+      .short 0x5ae, 0x5aa, 0x5a6, 0x5a2, 0x59e, 0x59a, 0x596, 0x592
+      .short 0x58e, 0x58a, 0x586, 0x583, 0x57f, 0x57b, 0x577, 0x574
+      .short 0x570, 0x56c, 0x568, 0x565, 0x561, 0x55e, 0x55a, 0x556
+      .short 0x553, 0x54f, 0x54c, 0x548, 0x545, 0x541, 0x53e, 0x53a
+      .short 0x537, 0x534, 0x530, 0x52d, 0x52a, 0x526, 0x523, 0x520
+      .short 0x51c, 0x519, 0x516, 0x513, 0x50f, 0x50c, 0x509, 0x506
+      .short 0x503, 0x500, 0x4fc, 0x4f9, 0x4f6, 0x4f3, 0x4f0, 0x4ed
+      .short 0x4ea, 0x4e7, 0x4e4, 0x4e1, 0x4de, 0x4db, 0x4d8, 0x4d5
+      .short 0x4d2, 0x4cf, 0x4cc, 0x4ca, 0x4c7, 0x4c4, 0x4c1, 0x4be
+      .short 0x4bb, 0x4b9, 0x4b6, 0x4b3, 0x4b0, 0x4ad, 0x4ab, 0x4a8
+      .short 0x4a5, 0x4a3, 0x4a0, 0x49d, 0x49b, 0x498, 0x495, 0x493
+      .short 0x490, 0x48d, 0x48b, 0x488, 0x486, 0x483, 0x481, 0x47e
+      .short 0x47c, 0x479, 0x477, 0x474, 0x472, 0x46f, 0x46d, 0x46a
+      .short 0x468, 0x465, 0x463, 0x461, 0x45e, 0x45c, 0x459, 0x457
+      .short 0x455, 0x452, 0x450, 0x44e, 0x44b, 0x449, 0x447, 0x444
+      .short 0x442, 0x440, 0x43e, 0x43b, 0x439, 0x437, 0x435, 0x432
+      .short 0x430, 0x42e, 0x42c, 0x42a, 0x428, 0x425, 0x423, 0x421
+      .short 0x41f, 0x41d, 0x41b, 0x419, 0x417, 0x414, 0x412, 0x410
+      .short 0x40e, 0x40c, 0x40a, 0x408, 0x406, 0x404, 0x402, 0x400
+    ASM
+
+
 # Exact AArch64/macOS port of runtime.c's corrected fixed 6-by-3-limb
 # remainder leaf.  This is the Clang 22.1.8 -O3 -mcpu=apple-m5 schedule for
 # mag_mod_63: the same normalization, Moller--Granlund reciprocal, four
@@ -1074,6 +1650,17 @@ fn __bigint_mod_42_raw(a, b) (i64 i64) i64
     outn = 2
   elsif raw_load_u64(rp, 0) != 0
     outn = 1
+  ccall_nobox("w_bigint_finish_sub_raw", result, outn)
+
+fn __bigint_div_63_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+  rp = (result & 140737488355327) + 16 ## i64
+  ap = (a & 140737488355327) + 16 ## i64
+  bp = (b & 140737488355327) + 16 ## i64
+  outn = __bigint_div_63_exact(rp, ap, bp) ## i64
+  if outn < 0
+    ccall_nobox("w_bigint_release_unfinished_raw", result)
+    return ccall_nobox("w_bigint_div", a, b)
   ccall_nobox("w_bigint_finish_sub_raw", result, outn)
 
 
@@ -2207,6 +2794,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       if am == 4 && bm == 2 && asign42 == 0 && bsign42 == 0
         return wvalue_from_bits(
           __bigint_div_42_raw($value ## i64, other$value ## i64)
+        )
+      if am == 6 && bm == 3 && asign42 == 0 && bsign42 == 0
+        return wvalue_from_bits(
+          __bigint_div_63_raw($value ## i64, other$value ## i64)
         )
     ccall("w_bigint_div", self, other)
 

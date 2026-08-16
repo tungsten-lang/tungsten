@@ -53554,6 +53554,13 @@ WValue w_bigint_alloc_hot(int64_t cap) {
     if (c > (int64_t)INT32_MAX / 8) die("w_bigint_alloc_hot: capacity too large");
     return bigint_box(bigint_alloc_raw_hot((int32_t)c));
 }
+WValue w_bigint_alloc_hot4_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot_exact(4U));
+}
+WValue w_bigint_release_unfinished_raw(WValue v) {
+    bigint_release(w_as_bigint(v));
+    return W_NIL;
+}
 WValue w_bigint_finish_add(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)w_to_i64(signed_size);

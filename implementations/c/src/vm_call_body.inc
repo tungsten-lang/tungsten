@@ -207,6 +207,8 @@
               result = w_wire_field_store_at(args[1], index, args[3], args[4]);
             } else if (fn_len == 17 && memcmp(fn, "w_wire_field_load", 17) == 0 && argc == 3) {
               result = w_wire_field_load(args[1], args[2]);
+            } else if (fn_len == 21 && memcmp(fn, "w_wire_field_load_nil", 21) == 0 && argc == 3) {
+              result = w_wire_field_load_nil(args[1], args[2]);
             } else if (fn_len == 18 && memcmp(fn, "w_wire_field_store", 18) == 0 && argc == 4) {
               result = w_wire_field_store(args[1], args[2], args[3]);
             } else if (fn_len == 18 && memcmp(fn, "w_wire_kind_extern", 18) == 0 && argc == 2) {

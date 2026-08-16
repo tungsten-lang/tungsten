@@ -1052,8 +1052,8 @@
         pi = 0
         while pi < hdr_block[:instructions].size()
           inst = hdr_block[:instructions][pi]
-          if inst[:op] == :phi_i64 && inst[:b_label] == body_label
-            inst[:b_label] = back_label
+          if wire_kind(inst) == :phi_i64 && wire_get(inst, :b_label) == body_label
+            wire_set(inst, :b_label, back_label)
           pi += 1
 
     start_block(wfn, exit_label)

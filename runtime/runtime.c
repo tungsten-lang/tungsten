@@ -18725,6 +18725,22 @@ void w_node_arena_init(void) {
 WWireArena g_wire_arena = { .generation = 1 };
 static const uint32_t g_wire_initial_cap_words = 262144;
 
+#define W_WIRE_FIELD_CACHE_SIZE 8192u
+typedef struct {
+    uint32_t off;
+    uint16_t index;
+    uint16_t reserved;
+    WValue sym;
+} WWireFieldCacheEntry;
+static WWireFieldCacheEntry g_wire_field_cache[W_WIRE_FIELD_CACHE_SIZE];
+
+static inline WWireFieldCacheEntry *w_wire_field_cache_entry(uint32_t off,
+                                                              WValue sym) {
+    uint64_t mixed = (uint64_t)off * 2654435761u;
+    mixed ^= (uint64_t)sym ^ ((uint64_t)sym >> 32);
+    return &g_wire_field_cache[mixed & (W_WIRE_FIELD_CACHE_SIZE - 1u)];
+}
+
 static inline uint32_t w_wire_record_count(uint64_t off) {
     return (uint32_t)g_wire_arena.base[off];
 }
@@ -18759,15 +18775,17 @@ WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fie
     uint32_t off = g_wire_arena.cursor;
     g_wire_arena.cursor += (uint32_t)words;
     w_wire_record_header(off, 0, capacity);
-    for (uint32_t i = 0; i < capacity; i++) {
-        g_wire_arena.base[off + 1 + i * 2] = W_NIL;
-        g_wire_arena.base[off + 2 + i * 2] = W_NIL;
-    }
+    /* count=0 makes every pair unreachable. Callers fill the live prefix via
+     * store_at, so clearing capacity (including spare late-pass fields) only
+     * burns bandwidth on the compiler's hottest allocation path. */
     return w_box_wire((int)kind, off);
 }
 
 WValue w_wire_alloc(int64_t kind, int64_t field_count) {
-    return w_wire_alloc_reserve(kind, field_count, 2);
+    /* Source location (line/column/site), pass metadata, and call-convention
+     * facts can all be attached after initial emission. Six slots cover the
+     * current worst case without relocating the one-word handle. */
+    return w_wire_alloc_reserve(kind, field_count, 6);
 }
 
 static uint64_t w_wire_checked_offset(WValue wire) {
@@ -18791,26 +18809,55 @@ WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue valu
     g_wire_arena.base[off + 2 + idx * 2] = value;
     uint32_t count = w_wire_record_count(off);
     if (idx >= count) w_wire_record_header(off, idx + 1, cap);
+    WWireFieldCacheEntry *cached = w_wire_field_cache_entry((uint32_t)off, sym);
+    cached->off = (uint32_t)off;
+    cached->index = (uint16_t)idx;
+    cached->sym = sym;
     return wire;
 }
 
 WValue w_wire_field_load(WValue wire, WValue sym) {
     uint64_t off = w_wire_checked_offset(wire);
     uint32_t count = w_wire_record_count(off);
+    WWireFieldCacheEntry *cached = w_wire_field_cache_entry((uint32_t)off, sym);
+    if (cached->off == (uint32_t)off && cached->sym == sym &&
+        cached->index < count &&
+        g_wire_arena.base[off + 1 + (uint32_t)cached->index * 2] == sym) {
+        return g_wire_arena.base[off + 2 + (uint32_t)cached->index * 2];
+    }
     for (uint32_t i = 0; i < count; i++) {
-        if (g_wire_arena.base[off + 1 + i * 2] == sym)
+        if (g_wire_arena.base[off + 1 + i * 2] == sym) {
+            cached->off = (uint32_t)off;
+            cached->index = (uint16_t)i;
+            cached->sym = sym;
             return g_wire_arena.base[off + 2 + i * 2];
+        }
     }
     return W_UNDEF;
+}
+
+WValue w_wire_field_load_nil(WValue wire, WValue sym) {
+    WValue value = w_wire_field_load(wire, sym);
+    return value == W_UNDEF ? W_NIL : value;
 }
 
 WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
     uint32_t count = w_wire_record_count(off);
     uint32_t cap = w_wire_record_capacity(off);
+    WWireFieldCacheEntry *cached = w_wire_field_cache_entry((uint32_t)off, sym);
+    if (cached->off == (uint32_t)off && cached->sym == sym &&
+        cached->index < count &&
+        g_wire_arena.base[off + 1 + (uint32_t)cached->index * 2] == sym) {
+        g_wire_arena.base[off + 2 + (uint32_t)cached->index * 2] = value;
+        return value;
+    }
     for (uint32_t i = 0; i < count; i++) {
         if (g_wire_arena.base[off + 1 + i * 2] == sym) {
             g_wire_arena.base[off + 2 + i * 2] = value;
+            cached->off = (uint32_t)off;
+            cached->index = (uint16_t)i;
+            cached->sym = sym;
             return value;
         }
     }
@@ -18819,6 +18866,9 @@ WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     g_wire_arena.base[off + 1 + count * 2] = sym;
     g_wire_arena.base[off + 2 + count * 2] = value;
     w_wire_record_header(off, count + 1, cap);
+    cached->off = (uint32_t)off;
+    cached->index = (uint16_t)count;
+    cached->sym = sym;
     return value;
 }
 
@@ -18840,6 +18890,7 @@ int64_t w_wire_store_reset(int64_t reserved) {
     g_wire_arena.cursor = 1;
     g_wire_arena.generation++;
     if (g_wire_arena.generation == 0) g_wire_arena.generation = 1;
+    memset(g_wire_field_cache, 0, sizeof(g_wire_field_cache));
     return 0;
 }
 

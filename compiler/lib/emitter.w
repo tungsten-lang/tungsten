@@ -526,6 +526,7 @@ use naming
   out << declare_fn("w_wire_alloc_reserve", wv, "i64, i64, i64")
   out << declare_fn("w_wire_field_store_at", wv, join_arg_types4(wv, "i64", wv, wv))
   out << declare_fn("w_wire_field_load", wv, wv2)
+  out << declare_fn("w_wire_field_load_nil", wv, wv2)
   out << declare_fn("w_wire_field_store", wv, wv3)
   out << declare_fn("w_wire_kind_extern", "i64", wv)
   out << declare_fn("w_is_wire_extern", "i64", wv)
@@ -1493,16 +1494,16 @@ use naming
 
 -> call_prefix(inst)
   prefix = "call"
-  if inst[:src_line] != nil
+  if wire_get(inst, :src_line) != nil
     prefix = "notail call"
-  cc = inst[:call_conv]
+  cc = wire_get(inst, :call_conv)
   if cc != nil && cc != ""
     prefix = prefix + " " + cc
   prefix
 
 -> range_metadata_suffix(inst, llvm_type)
-  low = inst[:range_low]
-  high = inst[:range_high]
+  low = wire_get(inst, :range_low)
+  high = wire_get(inst, :range_high)
   if low == nil || high == nil
     return ""
   ", !range !{" + llvm_type + " " + low.to_s() + ", " + llvm_type + " " + high.to_s() + "}"
@@ -1646,14 +1647,14 @@ ewscope_md_state = {ids: {}}
   list_id
 
 -> ewscope_store_suffix(inst)
-  if inst[:ewscope] == nil
+  if wire_get(inst, :ewscope) == nil
     return ""
-  ", !alias.scope !" + ewscope_list_id(inst[:ewscope])
+  ", !alias.scope !" + ewscope_list_id(wire_get(inst, :ewscope))
 
 -> ewscope_load_suffix(inst)
-  if inst[:ewscope] == nil
+  if wire_get(inst, :ewscope) == nil
     return ""
-  ", !noalias !" + ewscope_list_id(inst[:ewscope])
+  ", !noalias !" + ewscope_list_id(wire_get(inst, :ewscope))
 
 -> ewscope_md_defs()
   n = ewscope_md_state[:ids].size()
@@ -1696,7 +1697,7 @@ ewscope_md_state = {ids: {}}
   if suffix != ""
     return suffix
   if llvm_type == "i64"
-    name = inst[:name]
+    name = wire_get(inst, :name)
     if name == "w_truthy"
       return direct_range_metadata_suffix("i64", 0, 2)
     if name == "w_box_char"
@@ -1712,35 +1713,35 @@ ewscope_md_state = {ids: {}}
 # method table contains the one-argument target. Native and unknown receivers
 # retain the established pointer-plus-count dispatch ABI.
 -> scalar_source_one_call?(inst)
-  inst[:op] == :call_method_i64 && inst[:args] != nil && inst[:args].size() == 1 && inst[:scalar_source_argc1] == true
+  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_get(inst, :args).size() == 1 && wire_get(inst, :scalar_source_argc1) == true
 
 -> scalar_source_two_call?(inst)
-  inst[:op] == :call_method_i64 && inst[:args] != nil && inst[:args].size() == 2 && inst[:scalar_source_argc2] == true
+  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_get(inst, :args).size() == 2 && wire_get(inst, :scalar_source_argc2) == true
 
 -> scalar_source_call?(inst)
   scalar_source_one_call?(inst) || scalar_source_two_call?(inst)
 
 # Return the runtime function names that an instruction will reference when rendered.
 -> runtime_fns_for_inst(inst, string_wvs = nil)
-  case inst[:op]
+  case wire_kind(inst)
   when :call_direct_i64, :call_direct_i128, :call_direct_void, :call_direct_ptr
     # w_node_field_store renders as inline slab IR when the offset is a
     # literal, and that IR calls the array-freeze helper directly — the
     # helper never appears as an instruction, so declare it alongside.
-    if inst[:name] == "w_node_field_store"
+    if wire_get(inst, :name) == "w_node_field_store"
       return ["w_node_field_store", "w_ast_freeze_if_array"]
-    [inst[:name]]
+    [wire_get(inst, :name)]
   when :slab_alloc_init
     # The intrinsic's emitted IR calls w_node_alloc (cap-exhausted slow
     # path) and w_ast_freeze_if_array (field freeze pre-pass) as raw
     # strings — neither appears as a :call_direct instruction.
     ["w_node_alloc", "w_ast_freeze_if_array"]
   when :call_direct_i64_ptr1, :call_direct_void_ptr1
-    [inst[:name]]
+    [wire_get(inst, :name)]
   when :bigint_literal_i64
     ["w_bigint_literal_cached"]
   when :call_libm_f64
-    [inst[:name]]
+    [wire_get(inst, :name)]
   when :call_num_to_f64
     ["w_num_to_f64"]
   when :call_loc_set_col
@@ -1803,45 +1804,45 @@ ewscope_md_state = {ids: {}}
     # inserts boxing only when the value crosses a WValue boundary.
     []
   when :register_unit
-    if string_wvs != nil && string_wvs[inst[:str_id]] != nil
+    if string_wvs != nil && string_wvs[wire_get(inst, :str_id)] != nil
       ["w_register_unit_wv"]
     else
       ["w_string", "w_register_unit_wv"]
 
   when :class_new, :builtin_class_init
-    if string_wvs != nil && string_wvs[inst[:name_str_id]] != nil
+    if string_wvs != nil && string_wvs[wire_get(inst, :name_str_id)] != nil
       ["w_class_new_wv"]
     else
       ["w_string", "w_class_new_wv"]
   when :class_add_method
-    splat_method = inst[:splat_index] != nil && inst[:splat_index] >= 0
-    range_method = inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+    splat_method = wire_get(inst, :splat_index) != nil && wire_get(inst, :splat_index) >= 0
+    range_method = wire_get(inst, :min_arity) != nil && wire_get(inst, :min_arity) < wire_get(inst, :arity)
     add_name = splat_method ? "w_class_add_method_splat_wv" : (range_method ? "w_class_add_method_range_wv" : "w_class_add_method_wv")
-    if string_wvs != nil && string_wvs[inst[:method_str_id]] != nil
+    if string_wvs != nil && string_wvs[wire_get(inst, :method_str_id)] != nil
       [add_name]
     else
       ["w_string", add_name]
   when :class_add_static_method
-    splat_method = inst[:splat_index] != nil && inst[:splat_index] >= 0
-    range_method = inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+    splat_method = wire_get(inst, :splat_index) != nil && wire_get(inst, :splat_index) >= 0
+    range_method = wire_get(inst, :min_arity) != nil && wire_get(inst, :min_arity) < wire_get(inst, :arity)
     add_name = splat_method ? "w_class_add_static_method_splat_wv" : (range_method ? "w_class_add_static_method_range_wv" : "w_class_add_static_method_wv")
-    if string_wvs != nil && string_wvs[inst[:method_str_id]] != nil
+    if string_wvs != nil && string_wvs[wire_get(inst, :method_str_id)] != nil
       [add_name]
     else
       ["w_string", add_name]
   when :class_add_ivar
-    if string_wvs != nil && string_wvs[inst[:ivar_str_id]] != nil
+    if string_wvs != nil && string_wvs[wire_get(inst, :ivar_str_id)] != nil
       ["w_class_add_ivar_wv"]
     else
       ["w_string", "w_class_add_ivar_wv"]
 
   when :ivar_get
-    if string_wvs != nil && string_wvs[inst[:str_id]] != nil
+    if string_wvs != nil && string_wvs[wire_get(inst, :str_id)] != nil
       ["w_ivar_get_wv"]
     else
       ["w_string", "w_ivar_get_wv"]
   when :ivar_set
-    if string_wvs != nil && string_wvs[inst[:str_id]] != nil
+    if string_wvs != nil && string_wvs[wire_get(inst, :str_id)] != nil
       ["w_ivar_set_wv"]
     else
       ["w_string", "w_ivar_set_wv"]
@@ -1849,8 +1850,8 @@ ewscope_md_state = {ids: {}}
   when :call_method_i64
     runtime_fns = []
     argc = 0
-    if inst[:args] != nil
-      argc = inst[:args].size()
+    if wire_get(inst, :args) != nil
+      argc = wire_get(inst, :args).size()
     if argc == 0
       runtime_fns.push("w_method_call_cached_0")
     elsif scalar_source_one_call?(inst)
@@ -1859,7 +1860,7 @@ ewscope_md_state = {ids: {}}
       runtime_fns.push("w_method_call_cached_2")
     else
       runtime_fns.push("w_method_call_cached")
-    if inst[:construct_fn] != nil
+    if wire_get(inst, :construct_fn) != nil
       runtime_fns.push("w_object_new")
     runtime_fns
   when :closure_new
@@ -1912,9 +1913,9 @@ ewscope_md_state = {ids: {}}
     ["w_node_kind_class_register_wv"]
 
   when :add_i48_checked, :sub_i48_checked, :mul_i48_checked
-    [inst[:rt_fallback]]
+    [wire_get(inst, :rt_fallback)]
   when :add_i48_guarded, :sub_i48_guarded, :mul_i48_guarded
-    [inst[:rt_fallback]]
+    [wire_get(inst, :rt_fallback)]
   else
     nil
 
@@ -1946,26 +1947,26 @@ ewscope_md_state = {ids: {}}
       ii = 0
       while ii < blk[:instructions].size()
         inst = blk[:instructions][ii]
-        if inst[:src_line] != nil
+        if wire_get(inst, :src_line) != nil
           ret_label = nil
-          if inst[:op] == :call_method_i64
-            ret_label = "cs." + inst[:ic_id].to_s() + ".ret"
-          elsif inst[:op] in (:call_direct_void :call_direct_i64) && inst[:loc_site_id] != nil
-            ret_label = "csd." + inst[:loc_site_id].to_s() + ".ret"
+          if wire_kind(inst) == :call_method_i64
+            ret_label = "cs." + wire_get(inst, :ic_id).to_s() + ".ret"
+          elsif wire_kind(inst) in (:call_direct_void :call_direct_i64) && wire_get(inst, :loc_site_id) != nil
+            ret_label = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
           if ret_label != nil
             file_id = files[fn_path]
             if file_id == nil
               file_id = next_file_id
               files[fn_path] = file_id
               next_file_id = next_file_id + 1
-            col_val = inst[:src_col]
+            col_val = wire_get(inst, :src_col)
             if col_val == nil
               col_val = 0
             sites.push({
               fn_name: f[:name],
               ret_label: ret_label,
               file_id: file_id,
-              line: inst[:src_line],
+              line: wire_get(inst, :src_line),
               col: col_val
             })
         ii += 1
@@ -2175,11 +2176,11 @@ ewscope_md_state = {ids: {}}
   "@llvm.used = appending global \[4 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_call_site, ptr @__w_call_site_count], section \"llvm.metadata\"\n\n"
 
 -> address_taken_function_for_inst(inst)
-  op = inst[:op]
+  op = wire_kind(inst)
   if op in (:class_add_method :class_add_static_method :closure_new)
-    return inst[:fn_name]
+    return wire_get(inst, :fn_name)
   if op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
-    return inst[:fn_name]
+    return wire_get(inst, :fn_name)
   nil
 
 -> collect_address_taken_functions(mod)
@@ -2240,8 +2241,8 @@ ewscope_md_state = {ids: {}}
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
-        if fastcc_direct_call_op?(inst[:op]) && fastcc_names[inst[:name]] == true
-          inst[:call_conv] = "fastcc"
+        if fastcc_direct_call_op?(wire_kind(inst)) && fastcc_names[wire_get(inst, :name)] == true
+          wire_set(inst, :call_conv, "fastcc")
         ii += 1
       bi += 1
     fi += 1
@@ -2256,7 +2257,7 @@ ewscope_md_state = {ids: {}}
 # mismatch survived lowering and failed only in LLVM (or linked with a wrong C
 # ABI when the declaration lived in another translation unit).
 -> wire_direct_call_contract(inst)
-  op = inst[:op]
+  op = wire_kind(inst)
   return_type = nil
   arg_types = []
   if op == :call_direct_i64
@@ -2274,10 +2275,10 @@ ewscope_md_state = {ids: {}}
   else
     return nil
 
-  args = inst[:args]
+  args = wire_get(inst, :args)
   if args == nil
     args = []
-  declared_types = inst[:arg_types]
+  declared_types = wire_get(inst, :arg_types)
   i = 0
   while i < args.size()
     arg_type = nil
@@ -2340,25 +2341,25 @@ ewscope_md_state = {ids: {}}
       while ii < instructions.size()
         inst = instructions[ii]
         contract = wire_direct_call_contract(inst)
-        if contract != nil && inst[:name] != nil
-          prior = contracts[inst[:name]]
+        if contract != nil && wire_get(inst, :name) != nil
+          prior = contracts[wire_get(inst, :name)]
           if prior != nil && prior[:contract] != contract
             prior_name = prior[:function]
             current_name = func[:original_name]
             if current_name == nil
               current_name = func[:name]
-            target_detail = target_details[inst[:name]]
+            target_detail = target_details[wire_get(inst, :name)]
             if target_detail == nil
               target_detail = "external"
-            origins = wire_symbol_origins(mod, inst[:name])
+            origins = wire_symbol_origins(mod, wire_get(inst, :name))
             origin_detail = ""
             if origins.size() > 0
               origin_detail = "; origins " + origins.join(", ")
-            return "WIRE call contract mismatch for @" + inst[:name] + " (" + target_detail + origin_detail + "): " + prior[:contract] + " in @" + prior_name + " vs " + contract + " in @" + current_name
+            return "WIRE call contract mismatch for @" + wire_get(inst, :name) + " (" + target_detail + origin_detail + "): " + prior[:contract] + " in @" + prior_name + " vs " + contract + " in @" + current_name
           current_name = func[:original_name]
           if current_name == nil
             current_name = func[:name]
-          contracts[inst[:name]] = {contract: contract, function: current_name}
+          contracts[wire_get(inst, :name)] = {contract: contract, function: current_name}
         ii += 1
       bi += 1
     fi += 1
@@ -2418,11 +2419,11 @@ ewscope_md_state = {ids: {}}
       ii = 0
       while ii < blk[:instructions].size()
         inst = blk[:instructions][ii]
-        if inst[:op] == :call_direct_i64 && inst[:name] != nil
-          iname = inst[:name]
+        if wire_kind(inst) == :call_direct_i64 && wire_get(inst, :name) != nil
+          iname = wire_get(inst, :name)
           if !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
-            ccall_needed[iname] = inst[:args].size()
-        if inst[:op] == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
+            ccall_needed[iname] = wire_get(inst, :args).size()
+        if wire_kind(inst) == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
           ccall_needed["__w_num_to_f64_fast"] = 1
         fns = runtime_fns_for_inst(inst, mod[:string_wvalues])
         if fns != nil
@@ -3155,33 +3156,33 @@ ewscope_md_state = {ids: {}}
 # -- Emit a single function --
 
 -> hidden_exit_label_for_inst(inst, arm64_target = true)
-  op = inst[:op]
+  op = wire_kind(inst)
   # Portable (non-arm64) lowering of the asm-backed carry ops renders a
   # real IR loop whose final block is the instruction's exit.
   if op == :asm_add_no && !arm64_target
-    return "ano.exit." + inst[:temp].slice(1, inst[:temp].size() - 1)
+    return "ano.exit." + wire_get(inst, :temp).slice(1, wire_get(inst, :temp).size() - 1)
   if op == :asm_sub_no && !arm64_target
-    return "sno.exit." + inst[:temp].slice(1, inst[:temp].size() - 1)
+    return "sno.exit." + wire_get(inst, :temp).slice(1, wire_get(inst, :temp).size() - 1)
   if op == :asm_add_uneq && !arm64_target
-    return "aue.x." + inst[:temp].slice(1, inst[:temp].size() - 1)
+    return "aue.x." + wire_get(inst, :temp).slice(1, wire_get(inst, :temp).size() - 1)
   if op == :asm_sub_uneq && !arm64_target
-    return "sue.x." + inst[:temp].slice(1, inst[:temp].size() - 1)
+    return "sue.x." + wire_get(inst, :temp).slice(1, wire_get(inst, :temp).size() - 1)
   if op in (:add_i48_checked :sub_i48_checked :mul_i48_checked)
-    return "ovf.merge." + inst[:block_id].to_s()
+    return "ovf.merge." + wire_get(inst, :block_id).to_s()
   if op in (:add_i48_guarded :sub_i48_guarded :mul_i48_guarded)
-    return "g.done." + inst[:block_id].to_s()
+    return "g.done." + wire_get(inst, :block_id).to_s()
   # Method-dispatch call sites carrying source-loc info split the block so
   # their return address is addressable via blockaddress(@fn, %cs.N.ret).
   # A devirtualized site additionally merges its direct and IC arms in a
   # dv.N.done block, which is then the real exit regardless of src_line.
-  if op == :call_method_i64 && (inst[:devirt_fn] != nil || inst[:construct_fn] != nil)
-    return "dv." + inst[:ic_id].to_s() + ".done"
-  if op == :call_method_i64 && inst[:src_line] != nil
-    return "cs." + inst[:ic_id].to_s() + ".ret"
+  if op == :call_method_i64 && (wire_get(inst, :devirt_fn) != nil || wire_get(inst, :construct_fn) != nil)
+    return "dv." + wire_get(inst, :ic_id).to_s() + ".done"
+  if op == :call_method_i64 && wire_get(inst, :src_line) != nil
+    return "cs." + wire_get(inst, :ic_id).to_s() + ".ret"
   # Direct-call fallible sites (w_raise, w_array_get, w_array_set) use the
   # loc_site_id namespace since they don't have an ic_id.
-  if op in (:call_direct_void :call_direct_i64) && inst[:src_line] != nil && inst[:loc_site_id] != nil
-    return "csd." + inst[:loc_site_id].to_s() + ".ret"
+  if op in (:call_direct_void :call_direct_i64) && wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
+    return "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
   nil
 
 -> build_phi_label_redirects(f, arm64_target = true)
@@ -3315,8 +3316,8 @@ ewscope_md_state = {ids: {}}
     ji = 0
     while ji < blk[:instructions].size()
       inst = blk[:instructions][ji]
-      if inst[:op] == :call_method_i64 && inst[:args] != nil
-        argc = inst[:args].size()
+      if wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil
+        argc = wire_get(inst, :args).size()
         needs_scratch = argc > 0 && !scalar_source_call?(inst)
         if needs_scratch && argc > max_mcall_argc
           max_mcall_argc = argc
@@ -3408,8 +3409,8 @@ ewscope_md_state = {ids: {}}
 # -- Instruction rendering --
 
 -> render_guarded_i48(inst)
-  bid = inst[:block_id].to_s()
-  t = inst[:temp]
+  bid = wire_get(inst, :block_id).to_s()
+  t = wire_get(inst, :temp)
   ltag = t + ".ltag"
   lis_int = t + ".lisint"
   rtag = t + ".rtag"
@@ -3427,19 +3428,19 @@ ewscope_md_state = {ids: {}}
   boxed = t + ".fast"
   slow = t + ".slow"
   out = StringBuffer(768)
-  out << ltag + " = and i64 " + inst[:lhs] + ", " + machine_i64_text(w_tag_mask) + "\n  "
+  out << ltag + " = and i64 " + wire_get(inst, :lhs) + ", " + machine_i64_text(w_tag_mask) + "\n  "
   out << lis_int + " = icmp eq i64 " + ltag + ", " + machine_i64_text(w_tag_int) + "\n  "
-  out << rtag + " = and i64 " + inst[:rhs] + ", " + machine_i64_text(w_tag_mask) + "\n  "
+  out << rtag + " = and i64 " + wire_get(inst, :rhs) + ", " + machine_i64_text(w_tag_mask) + "\n  "
   out << ris_int + " = icmp eq i64 " + rtag + ", " + machine_i64_text(w_tag_int) + "\n  "
   out << both_int + " = and i1 " + lis_int + ", " + ris_int + "\n  "
   out << "br i1 " + both_int + ", label %g.ok." + bid + ", label %g.rt." + bid + ", !prof !31411\n"
   out << "g.ok." + bid + ":\n  "
-  out << lhs_shl + " = shl i64 " + inst[:lhs] + ", 16\n  "
+  out << lhs_shl + " = shl i64 " + wire_get(inst, :lhs) + ", 16\n  "
   out << lhs_raw + " = ashr i64 " + lhs_shl + ", 16\n  "
-  out << rhs_shl + " = shl i64 " + inst[:rhs] + ", 16\n  "
+  out << rhs_shl + " = shl i64 " + wire_get(inst, :rhs) + ", 16\n  "
   out << rhs_raw + " = ashr i64 " + rhs_shl + ", 16\n  "
 
-  op = inst[:op]
+  op = wire_kind(inst)
   if op in (:add_i48_guarded :sub_i48_guarded)
     arith_op = "add"
     if op == :sub_i48_guarded
@@ -3472,7 +3473,7 @@ ewscope_md_state = {ids: {}}
   # the LLVM trap intrinsic instead of calling the BigInt-promoting runtime.
   # g.rt terminates with `unreachable`, so g.done has the single g.box
   # predecessor and its phi has one incoming value.
-  if inst[:trap] == true
+  if wire_get(inst, :trap) == true
     out << "call void @llvm.trap()\n  "
     out << "unreachable\n"
     out << "g.done." + bid + ":\n  "
@@ -3486,98 +3487,98 @@ ewscope_md_state = {ids: {}}
     # a declaration/callsite mismatch is UB. Their C definitions carry
     # __attribute__((preserve_most)) to match.
     cc = ""
-    if inst[:rt_fallback] in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "w_bigint_and_mut" "w_bigint_or_mut" "w_bigint_xor_mut" "w_bigint_shl_mut" "w_bigint_shr_mut")
+    if wire_get(inst, :rt_fallback) in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "w_bigint_and_mut" "w_bigint_or_mut" "w_bigint_xor_mut" "w_bigint_shl_mut" "w_bigint_shr_mut")
       cc = "preserve_mostcc "
-    out << slow + " = call " + cc + "i64 @" + inst[:rt_fallback] + "(i64 " + inst[:lhs] + ", i64 " + inst[:rhs] + ") cold\n  "
+    out << slow + " = call " + cc + "i64 @" + wire_get(inst, :rt_fallback) + "(i64 " + wire_get(inst, :lhs) + ", i64 " + wire_get(inst, :rhs) + ") cold\n  "
     out << "br label %g.done." + bid + "\n"
     out << "g.done." + bid + ":\n  "
     out << t + " = phi i64 \[" + boxed + ", %g.box." + bid + "], \[" + slow + ", %g.rt." + bid + "]"
   out.to_s()
 
 -> render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false)
-  op = inst[:op]
+  op = wire_kind(inst)
 
   case op
   # Memory
   when :alloca_i64
-    inst[:ptr] + " = alloca i64, align 8"
+    wire_get(inst, :ptr) + " = alloca i64, align 8"
   when :alloca_i128
-    inst[:ptr] + " = alloca i128, align 16"
+    wire_get(inst, :ptr) + " = alloca i128, align 16"
   when :store_i64
-    "store i64 " + inst[:value] + ", ptr " + inst[:ptr] + ", align 8"
+    "store i64 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 8"
   when :store_i128
-    "store i128 " + inst[:value] + ", ptr " + inst[:ptr] + ", align 16"
+    "store i128 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 16"
   when :store_float
-    "store float " + inst[:value] + ", ptr " + inst[:ptr] + ", align 4"
+    "store float " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 4"
   when :store_double
-    "store double " + inst[:value] + ", ptr " + inst[:ptr] + ", align 8"
+    "store double " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :ptr) + ", align 8"
   when :load_i64
-    inst[:temp] + " = load i64, ptr " + inst[:ptr] + ", align 8" + range_metadata_suffix(inst, "i64")
+    wire_get(inst, :temp) + " = load i64, ptr " + wire_get(inst, :ptr) + ", align 8" + range_metadata_suffix(inst, "i64")
   when :load_float
-    inst[:temp] + " = load float, ptr " + inst[:ptr] + ", align 4"
+    wire_get(inst, :temp) + " = load float, ptr " + wire_get(inst, :ptr) + ", align 4"
   when :load_double
-    inst[:temp] + " = load double, ptr " + inst[:ptr] + ", align 8"
+    wire_get(inst, :temp) + " = load double, ptr " + wire_get(inst, :ptr) + ", align 8"
   when :load_u8_ptr
-    p = inst[:temp] + ".p"
-    ep = inst[:temp] + ".ep"
-    b = inst[:temp] + ".b"
-    p + " = inttoptr i64 " + inst[:ptr] + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + inst[:index] + "\n  " + b + " = load i8, ptr " + ep + ", align 1" + range_metadata_suffix(inst, "i8") + "\n  " + inst[:temp] + " = zext i8 " + b + " to i64"
+    p = wire_get(inst, :temp) + ".p"
+    ep = wire_get(inst, :temp) + ".ep"
+    b = wire_get(inst, :temp) + ".b"
+    p + " = inttoptr i64 " + wire_get(inst, :ptr) + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + wire_get(inst, :index) + "\n  " + b + " = load i8, ptr " + ep + ", align 1" + range_metadata_suffix(inst, "i8") + "\n  " + wire_get(inst, :temp) + " = zext i8 " + b + " to i64"
   when :store_u8_ptr
-    p = inst[:temp] + ".p"
-    ep = inst[:temp] + ".ep"
-    b = inst[:temp] + ".b"
-    p + " = inttoptr i64 " + inst[:ptr] + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + inst[:index] + "\n  " + b + " = trunc i64 " + inst[:value] + " to i8\n  store i8 " + b + ", ptr " + ep + ", align 1\n  " + inst[:temp] + " = zext i8 " + b + " to i64"
+    p = wire_get(inst, :temp) + ".p"
+    ep = wire_get(inst, :temp) + ".ep"
+    b = wire_get(inst, :temp) + ".b"
+    p + " = inttoptr i64 " + wire_get(inst, :ptr) + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + wire_get(inst, :index) + "\n  " + b + " = trunc i64 " + wire_get(inst, :value) + " to i8\n  store i8 " + b + ", ptr " + ep + ", align 1\n  " + wire_get(inst, :temp) + " = zext i8 " + b + " to i64"
   when :load_u32_ptr
-    p = inst[:temp] + ".p"
-    ep = inst[:temp] + ".ep"
-    w = inst[:temp] + ".w"
-    p + " = inttoptr i64 " + inst[:ptr] + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + inst[:index] + "\n  " + w + " = load i32, ptr " + ep + ", align 1" + range_metadata_suffix(inst, "i32") + "\n  " + inst[:temp] + " = zext i32 " + w + " to i64"
+    p = wire_get(inst, :temp) + ".p"
+    ep = wire_get(inst, :temp) + ".ep"
+    w = wire_get(inst, :temp) + ".w"
+    p + " = inttoptr i64 " + wire_get(inst, :ptr) + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + wire_get(inst, :index) + "\n  " + w + " = load i32, ptr " + ep + ", align 1" + range_metadata_suffix(inst, "i32") + "\n  " + wire_get(inst, :temp) + " = zext i32 " + w + " to i64"
   when :load_u64_ptr
-    p = inst[:temp] + ".p"
-    ep = inst[:temp] + ".ep"
-    p + " = inttoptr i64 " + inst[:ptr] + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + inst[:index] + "\n  " + inst[:temp] + " = load i64, ptr " + ep + ", align 1" + range_metadata_suffix(inst, "i64")
+    p = wire_get(inst, :temp) + ".p"
+    ep = wire_get(inst, :temp) + ".ep"
+    p + " = inttoptr i64 " + wire_get(inst, :ptr) + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + wire_get(inst, :index) + "\n  " + wire_get(inst, :temp) + " = load i64, ptr " + ep + ", align 1" + range_metadata_suffix(inst, "i64")
   when :ptr_slot_get
-    p = inst[:temp] + ".p"
-    ep = inst[:temp] + ".ep"
-    slot_type = inst[:slot_type]
+    p = wire_get(inst, :temp) + ".p"
+    ep = wire_get(inst, :temp) + ".ep"
+    slot_type = wire_get(inst, :slot_type)
     if slot_type == "w64" || slot_type == "i64" || slot_type == "u64"
-      p + " = inttoptr i64 " + inst[:ptr] + " to ptr\n  " + ep + " = getelementptr i64, ptr " + p + ", i64 " + inst[:index] + "\n  " + inst[:temp] + " = load i64, ptr " + ep + ", align 8"
+      p + " = inttoptr i64 " + wire_get(inst, :ptr) + " to ptr\n  " + ep + " = getelementptr i64, ptr " + p + ", i64 " + wire_get(inst, :index) + "\n  " + wire_get(inst, :temp) + " = load i64, ptr " + ep + ", align 8"
     elsif slot_type == "u8" || slot_type == "i8"
-      b = inst[:temp] + ".b"
-      p + " = inttoptr i64 " + inst[:ptr] + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + inst[:index] + "\n  " + b + " = load i8, ptr " + ep + ", align 1\n  " + inst[:temp] + " = zext i8 " + b + " to i64"
+      b = wire_get(inst, :temp) + ".b"
+      p + " = inttoptr i64 " + wire_get(inst, :ptr) + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + wire_get(inst, :index) + "\n  " + b + " = load i8, ptr " + ep + ", align 1\n  " + wire_get(inst, :temp) + " = zext i8 " + b + " to i64"
     else
-      p + " = inttoptr i64 " + inst[:ptr] + " to ptr\n  " + ep + " = getelementptr i64, ptr " + p + ", i64 " + inst[:index] + "\n  " + inst[:temp] + " = load i64, ptr " + ep + ", align 8"
+      p + " = inttoptr i64 " + wire_get(inst, :ptr) + " to ptr\n  " + ep + " = getelementptr i64, ptr " + p + ", i64 " + wire_get(inst, :index) + "\n  " + wire_get(inst, :temp) + " = load i64, ptr " + ep + ", align 8"
   when :load_i128
-    inst[:temp] + " = load i128, ptr " + inst[:ptr] + ", align 16" + range_metadata_suffix(inst, "i128")
+    wire_get(inst, :temp) + " = load i128, ptr " + wire_get(inst, :ptr) + ", align 16" + range_metadata_suffix(inst, "i128")
 
   # Integer arithmetic
   when :add_i64
-    inst[:temp] + " = add i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = add i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :sub_i64
-    inst[:temp] + " = sub i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = sub i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :mul_i64
-    inst[:temp] + " = mul i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = mul i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :sdiv_i64
-    inst[:temp] + " = sdiv i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = sdiv i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :udiv_i64
-    inst[:temp] + " = udiv i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = udiv i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :srem_i64
-    inst[:temp] + " = srem i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = srem i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :urem_i64
-    inst[:temp] + " = urem i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = urem i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :add_i128
-    inst[:temp] + " = add i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = add i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :sub_i128
-    inst[:temp] + " = sub i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = sub i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :mul_i128
-    inst[:temp] + " = mul i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = mul i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :mulhi_u64
     # high 64 bits of the unsigned 64x64->128 product. LLVM lowers this to a
     # single UMULH on arm64 / MULX on x86 — the carry-primitive `mulhi`.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     o = StringBuffer(192)
-    o << t + ".az = zext i64 " + inst[:lhs] + " to i128\n  "
-    o << t + ".bz = zext i64 " + inst[:rhs] + " to i128\n  "
+    o << t + ".az = zext i64 " + wire_get(inst, :lhs) + " to i128\n  "
+    o << t + ".bz = zext i64 " + wire_get(inst, :rhs) + " to i128\n  "
     o << t + ".pp = mul i128 " + t + ".az, " + t + ".bz\n  "
     o << t + ".hs = lshr i128 " + t + ".pp, 64\n  "
     o << t + " = trunc i128 " + t + ".hs to i64"
@@ -3586,10 +3587,10 @@ ewscope_md_state = {ids: {}}
     # carry-out (0/1) of a + b via i128 widening: ((zext a + zext b) >> 64).
     # LLVM keeps the carry in the flag and chains these as ADDS/ADCS instead of
     # materialising it with CMP/CSET. Carry-primitive `addcarry`.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     o = StringBuffer(192)
-    o << t + ".az = zext i64 " + inst[:lhs] + " to i128\n  "
-    o << t + ".bz = zext i64 " + inst[:rhs] + " to i128\n  "
+    o << t + ".az = zext i64 " + wire_get(inst, :lhs) + " to i128\n  "
+    o << t + ".bz = zext i64 " + wire_get(inst, :rhs) + " to i128\n  "
     o << t + ".sm = add i128 " + t + ".az, " + t + ".bz\n  "
     o << t + ".hs = lshr i128 " + t + ".sm, 64\n  "
     o << t + " = trunc i128 " + t + ".hs to i64"
@@ -3598,67 +3599,67 @@ ewscope_md_state = {ids: {}}
     # borrow-out (0/1) of a - b via i128: ((zext a - zext b) >> 127). When a<b the
     # i128 difference is negative (sign bit set) -> 1, else 0. LLVM chains these as
     # SUBS/SBCS. Carry-primitive `subborrow`.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     o = StringBuffer(192)
-    o << t + ".az = zext i64 " + inst[:lhs] + " to i128\n  "
-    o << t + ".bz = zext i64 " + inst[:rhs] + " to i128\n  "
+    o << t + ".az = zext i64 " + wire_get(inst, :lhs) + " to i128\n  "
+    o << t + ".bz = zext i64 " + wire_get(inst, :rhs) + " to i128\n  "
     o << t + ".df = sub i128 " + t + ".az, " + t + ".bz\n  "
     o << t + ".hs = lshr i128 " + t + ".df, 127\n  "
     o << t + " = trunc i128 " + t + ".hs to i64"
     o.to_s()
   when :asm_add_test
     # POC: prove LLVM inline asm emits/links/runs. a+b via an aarch64 ADD.
-    inst[:temp] + " = call i64 asm sideeffect \"add ${0:x}, ${1:x}, ${2:x}\", \"=r,r,r\"(i64 " + inst[:lhs] + ", i64 " + inst[:rhs] + ")"
+    wire_get(inst, :temp) + " = call i64 asm sideeffect \"add ${0:x}, ${1:x}, ${2:x}\", \"=r,r,r\"(i64 " + wire_get(inst, :lhs) + ", i64 " + wire_get(inst, :rhs) + ")"
   when :arr_data_ptr
     # raw data-base pointer (as i64) of a u64[]: header tag-mask, +16, load ptr.
-    t = inst[:temp]
-    t + ".ar = and i64 " + inst[:arr] + ", 140737488355312\n  " + t + ".bp = inttoptr i64 " + t + ".ar to ptr\n  " + t + ".gp = getelementptr i8, ptr " + t + ".bp, i64 16\n  " + t + ".pp = load ptr, ptr " + t + ".gp\n  " + t + " = ptrtoint ptr " + t + ".pp to i64"
+    t = wire_get(inst, :temp)
+    t + ".ar = and i64 " + wire_get(inst, :arr) + ", 140737488355312\n  " + t + ".bp = inttoptr i64 " + t + ".ar to ptr\n  " + t + ".gp = getelementptr i8, ptr " + t + ".bp, i64 16\n  " + t + ".pp = load ptr, ptr " + t + ".gp\n  " + t + " = ptrtoint ptr " + t + ".pp to i64"
   when :asm_add_n
     # Flag-threaded adc loop: out[i]=a[i]+b[i] over n limbs, carry kept
     # in the flag across iterations (sub/cbnz don't clobber C). Returns final carry.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x13, ${1:x}\\0Amov x14, ${2:x}\\0Amov x15, ${3:x}\\0Amov x9, ${4:x}\\0Acmn xzr, xzr\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Aadcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Acset ${0:x}, cs"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + inst[:ap] + ", i64 " + inst[:bp] + ", i64 " + inst[:outp] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :n) + ")"
   when :asm_neon_umull
     # POC: NEON 2-lane umull loop. out[2i,2i+1] = a[i].lanes * b[i].lanes (u32->u64).
     # All via memory + GPR pointer operands; NEON work internal (v-reg clobbers).
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x13, ${1:x}\\0Amov x14, ${2:x}\\0Amov x15, ${3:x}\\0Amov x9, ${4:x}\\0A1:\\0Ald1 {v1.2s}, \[x13], #8\\0Ald1 {v2.2s}, \[x14], #8\\0Aumull v0.2d, v1.2s, v2.2s\\0Ast1 {v0.2d}, \[x15], #16\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{memory},~{cc}\"(i64 " + inst[:ap] + ", i64 " + inst[:bp] + ", i64 " + inst[:outp] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{memory},~{cc}\"(i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :n) + ")"
   when :asm_neon_redc
     # NEON 2-lane Montgomery REDC: out[i] = REDC(a[i]*b[i]) mod p=998244353, R=2^32.
     # ninv=998244351. t=a*b; m=(t mod R)*ninv mod R; t=(t+m*p)>>32; if t>=p t-=p.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x13, ${1:x}\\0Amov x14, ${2:x}\\0Amov x15, ${3:x}\\0Amov x9, ${4:x}\\0Amov w10, #1\\0Amovk w10, #15232, lsl #16\\0Adup v5.2s, w10\\0Auxtl v7.2d, v5.2s\\0Amov w11, #65535\\0Amovk w11, #15231, lsl #16\\0Adup v6.2s, w11\\0A1:\\0Ald1 {v1.2s}, \[x13], #8\\0Ald1 {v2.2s}, \[x14], #8\\0Aumull v0.2d, v1.2s, v2.2s\\0Axtn v3.2s, v0.2d\\0Amul v3.2s, v3.2s, v6.2s\\0Aumull v4.2d, v3.2s, v5.2s\\0Aadd v0.2d, v0.2d, v4.2d\\0Aushr v0.2d, v0.2d, #32\\0Asub v8.2d, v0.2d, v7.2d\\0Acmhs v16.2d, v0.2d, v7.2d\\0Abit v0.16b, v8.16b, v16.16b\\0Axtn v0.2s, v0.2d\\0Ast1 {v0.2s}, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x11},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{v16},~{memory},~{cc}\"(i64 " + inst[:ap] + ", i64 " + inst[:bp] + ", i64 " + inst[:outp] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x11},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{v16},~{memory},~{cc}\"(i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :n) + ")"
   when :asm_neon_redc4
     # NEON 4-lane Montgomery REDC: out lanes = REDC(a*b) mod p=998244353, R=2^32.
     # Processes 4 u32 lanes (= 2 u64 elements) per iter via umull+umull2. n = #pairs.
     # ninv=998244351. t=a*b; m=(t&mask)*ninv&mask; t=(t+m*p)>>32; if t>=p t-=p.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x13, ${1:x}\\0Amov x14, ${2:x}\\0Amov x15, ${3:x}\\0Amov x9, ${4:x}\\0Amov w10, #1\\0Amovk w10, #15232, lsl #16\\0Adup v5.4s, w10\\0Auxtl v7.2d, v5.2s\\0Amov w11, #65535\\0Amovk w11, #15231, lsl #16\\0Adup v6.4s, w11\\0A1:\\0Ald1 {v1.4s}, \[x13], #16\\0Ald1 {v2.4s}, \[x14], #16\\0Aumull v0.2d, v1.2s, v2.2s\\0Aumull2 v17.2d, v1.4s, v2.4s\\0Axtn v3.2s, v0.2d\\0Amul v3.2s, v3.2s, v6.2s\\0Aumull v4.2d, v3.2s, v5.2s\\0Aadd v0.2d, v0.2d, v4.2d\\0Aushr v0.2d, v0.2d, #32\\0Asub v8.2d, v0.2d, v7.2d\\0Acmhs v16.2d, v0.2d, v7.2d\\0Abit v0.16b, v8.16b, v16.16b\\0Axtn v18.2s, v17.2d\\0Amul v18.2s, v18.2s, v6.2s\\0Aumull v19.2d, v18.2s, v5.2s\\0Aadd v17.2d, v17.2d, v19.2d\\0Aushr v17.2d, v17.2d, #32\\0Asub v20.2d, v17.2d, v7.2d\\0Acmhs v21.2d, v17.2d, v7.2d\\0Abit v17.16b, v20.16b, v21.16b\\0Axtn v0.2s, v0.2d\\0Axtn2 v0.4s, v17.2d\\0Ast1 {v0.4s}, \[x15], #16\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x11},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{v16},~{v17},~{v18},~{v19},~{v20},~{v21},~{memory},~{cc}\"(i64 " + inst[:ap] + ", i64 " + inst[:bp] + ", i64 " + inst[:outp] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x11},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{v16},~{v17},~{v18},~{v19},~{v20},~{v21},~{memory},~{cc}\"(i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :n) + ")"
   when :asm_neon_madd4
     # NEON 4-lane modular add mod p=998244353: out=a+b; if out>=p out-=p. 4 u32/iter.
     # inputs < p, sum < 2p < 2^31 so 32-bit lane add cannot overflow. n = #pairs.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x13, ${1:x}\\0Amov x14, ${2:x}\\0Amov x15, ${3:x}\\0Amov x9, ${4:x}\\0Amov w10, #1\\0Amovk w10, #15232, lsl #16\\0Ains v5.s\[0], w10\\0Ains v5.s\[1], w10\\0Ains v5.s\[2], w10\\0Ains v5.s\[3], w10\\0A1:\\0Ald1 {v1.4s}, \[x13], #16\\0Ald1 {v2.4s}, \[x14], #16\\0Aadd v0.4s, v1.4s, v2.4s\\0Acmhs v4.4s, v0.4s, v5.4s\\0Aand v6.16b, v4.16b, v5.16b\\0Asub v0.4s, v0.4s, v6.4s\\0Ast1 {v0.4s}, \[x15], #16\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v4},~{v5},~{v6},~{memory},~{cc}\"(i64 " + inst[:ap] + ", i64 " + inst[:bp] + ", i64 " + inst[:outp] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v4},~{v5},~{v6},~{memory},~{cc}\"(i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :n) + ")"
   when :asm_neon_msub4
     # NEON 4-lane modular sub mod p=998244353: r=a-b; if a<b r+=p. 4 u32/iter.
     # use: d=a-b (u32 wrap); if a<b (cmhi b>a) add p. n = #pairs.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x13, ${1:x}\\0Amov x14, ${2:x}\\0Amov x15, ${3:x}\\0Amov x9, ${4:x}\\0Amov w10, #1\\0Amovk w10, #15232, lsl #16\\0Adup v5.4s, w10\\0A1:\\0Ald1 {v1.4s}, \[x13], #16\\0Ald1 {v2.4s}, \[x14], #16\\0Asub v0.4s, v1.4s, v2.4s\\0Acmhi v4.4s, v2.4s, v1.4s\\0Aand v6.16b, v4.16b, v5.16b\\0Aadd v0.4s, v0.4s, v6.4s\\0Ast1 {v0.4s}, \[x15], #16\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v4},~{v5},~{v6},~{memory},~{cc}\"(i64 " + inst[:ap] + ", i64 " + inst[:bp] + ", i64 " + inst[:outp] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v4},~{v5},~{v6},~{memory},~{cc}\"(i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :n) + ")"
   when :asm_neon_ntt_stage
     # Whole-butterfly NEON DIT NTT stage, mod p=998244353, Montgomery, R=2^32.
     # v = coeffs as 4xu32/16B; stw = per-stage twiddles (u32, len=half). For each of
     # nblocks blocks: a=block base, b=a+half; for halfq groups of 4: t=REDC(b,w);
     # store a+t at a, a-t at b. ALL in vector regs (load->modmul->add/sub->store).
     # operands: ${1}=v ${2}=stw ${3}=nblocks ${4}=halfq.  half_bytes=halfq*16.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x13, ${1:x}\\0Amov x14, ${2:x}\\0Amov x9, ${3:x}\\0Amov x10, ${4:x}\\0Alsl x11, x10, #4\\0Amov w12, #1\\0Amovk w12, #15232, lsl #16\\0Adup v5.4s, w12\\0Auxtl v7.2d, v5.2s\\0Amov w12, #65535\\0Amovk w12, #15231, lsl #16\\0Adup v6.4s, w12\\0A2:\\0Amov x15, x13\\0Aadd x16, x13, x11\\0Amov x17, x14\\0Amov x8, x10\\0A3:\\0Ald1 {v1.4s}, \[x15]\\0Ald1 {v2.4s}, \[x16]\\0Ald1 {v9.4s}, \[x17], #16\\0Aumull v0.2d, v2.2s, v9.2s\\0Aumull2 v10.2d, v2.4s, v9.4s\\0Axtn v3.2s, v0.2d\\0Amul v3.2s, v3.2s, v6.2s\\0Aumull v4.2d, v3.2s, v5.2s\\0Aadd v0.2d, v0.2d, v4.2d\\0Aushr v0.2d, v0.2d, #32\\0Asub v8.2d, v0.2d, v7.2d\\0Acmhs v11.2d, v0.2d, v7.2d\\0Abit v0.16b, v8.16b, v11.16b\\0Axtn v12.2s, v10.2d\\0Amul v12.2s, v12.2s, v6.2s\\0Aumull v13.2d, v12.2s, v5.2s\\0Aadd v10.2d, v10.2d, v13.2d\\0Aushr v10.2d, v10.2d, #32\\0Asub v14.2d, v10.2d, v7.2d\\0Acmhs v15.2d, v10.2d, v7.2d\\0Abit v10.16b, v14.16b, v15.16b\\0Axtn v0.2s, v0.2d\\0Axtn2 v0.4s, v10.2d\\0Aadd v16.4s, v1.4s, v0.4s\\0Acmhs v17.4s, v16.4s, v5.4s\\0Aand v18.16b, v17.16b, v5.16b\\0Asub v16.4s, v16.4s, v18.4s\\0Asub v19.4s, v1.4s, v0.4s\\0Acmhi v20.4s, v0.4s, v1.4s\\0Aand v21.16b, v20.16b, v5.16b\\0Aadd v19.4s, v19.4s, v21.4s\\0Ast1 {v16.4s}, \[x15], #16\\0Ast1 {v19.4s}, \[x16], #16\\0Asub x8, x8, #1\\0Acbnz x8, 3b\\0Aadd x13, x13, x11, lsl #1\\0Asub x9, x9, #1\\0Acbnz x9, 2b\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{v9},~{v10},~{v11},~{v12},~{v13},~{v14},~{v15},~{v16},~{v17},~{v18},~{v19},~{v20},~{v21},~{memory},~{cc}\"(i64 " + inst[:vp] + ", i64 " + inst[:twp] + ", i64 " + inst[:nb] + ", i64 " + inst[:hq] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{v9},~{v10},~{v11},~{v12},~{v13},~{v14},~{v15},~{v16},~{v17},~{v18},~{v19},~{v20},~{v21},~{memory},~{cc}\"(i64 " + wire_get(inst, :vp) + ", i64 " + wire_get(inst, :twp) + ", i64 " + wire_get(inst, :nb) + ", i64 " + wire_get(inst, :hq) + ")"
   when :asm_gold_stage
     # Scalar Goldilocks radix-4 DIF NTT stage. P=2^64-2^32+1, ep=2^32-1.
     # ${1}=v ${2}=stw ${3}=nblocks ${4}=q.  block = 4*q coeffs = q*32 bytes.
@@ -3668,9 +3669,9 @@ ewscope_md_state = {ids: {}}
     #  x12=ep, x13=pp(=P); coeffs/y in x14..x17; t0=x19 t1=x20 t2=x21 d=x22
     #  t3=x23; scratch x24,x25,x26 (x26 also holds w/prod in mul phase).
     # i1..i3 via indexed addressing [x8,x6]/[x8,x9]/[x8,x10].
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x1, ${1:x}\\0Amov x3, ${2:x}\\0Amov x4, ${3:x}\\0Amov x5, ${4:x}\\0Alsl x6, x5, #3\\0Alsl x9, x5, #4\\0Aadd x10, x9, x6\\0Amovz x12, #65535\\0Amovk x12, #65535, lsl #16\\0Amovz x13, #1\\0Amovk x13, #65535, lsl #32\\0Amovk x13, #65535, lsl #48\\0A2:\\0Amov x8, x1\\0Amov x2, x3\\0Amov x7, x5\\0A3:\\0Aldr x14, \[x8]\\0Aldr x15, \[x8, x6]\\0Aldr x16, \[x8, x9]\\0Aldr x17, \[x8, x10]\\0Aadds x19, x14, x16\\0Acsel x24, x12, xzr, cs\\0Aadd x19, x19, x24\\0Asubs x24, x19, x13\\0Acsel x19, x24, x19, hs\\0Asubs x20, x14, x16\\0Acsel x24, x13, xzr, cc\\0Aadd x20, x20, x24\\0Aadds x21, x15, x17\\0Acsel x24, x12, xzr, cs\\0Aadd x21, x21, x24\\0Asubs x24, x21, x13\\0Acsel x21, x24, x21, hs\\0Asubs x22, x15, x17\\0Acsel x24, x13, xzr, cc\\0Aadd x22, x22, x24\\0Alsl x24, x22, #48\\0Aubfx x25, x22, #16, #48\\0Alsr x26, x25, #32\\0Aand x25, x25, x12\\0Asubs x23, x24, x26\\0Acsel x24, x12, xzr, cc\\0Asub x23, x23, x24\\0Alsl x24, x25, #32\\0Asub x24, x24, x25\\0Aadds x23, x23, x24\\0Acsel x24, x12, xzr, cs\\0Aadd x23, x23, x24\\0Asubs x24, x23, x13\\0Acsel x23, x24, x23, hs\\0Aadds x14, x19, x21\\0Acsel x24, x12, xzr, cs\\0Aadd x14, x14, x24\\0Asubs x24, x14, x13\\0Acsel x14, x24, x14, hs\\0Aadds x15, x20, x23\\0Acsel x24, x12, xzr, cs\\0Aadd x15, x15, x24\\0Asubs x24, x15, x13\\0Acsel x15, x24, x15, hs\\0Asubs x16, x19, x21\\0Acsel x24, x13, xzr, cc\\0Aadd x16, x16, x24\\0Asubs x17, x20, x23\\0Acsel x24, x13, xzr, cc\\0Aadd x17, x17, x24\\0Astr x14, \[x8]\\0Aldr x26, \[x2]\\0Amul x25, x15, x26\\0Aumulh x26, x15, x26\\0Alsr x24, x26, #32\\0Aand x26, x26, x12\\0Asubs x25, x25, x24\\0Acsel x24, x12, xzr, cc\\0Asub x25, x25, x24\\0Alsl x24, x26, #32\\0Asub x24, x24, x26\\0Aadds x25, x25, x24\\0Acsel x24, x12, xzr, cs\\0Aadd x25, x25, x24\\0Asubs x24, x25, x13\\0Acsel x25, x24, x25, hs\\0Astr x25, \[x8, x6]\\0Aldr x26, \[x2, #8]\\0Amul x25, x16, x26\\0Aumulh x26, x16, x26\\0Alsr x24, x26, #32\\0Aand x26, x26, x12\\0Asubs x25, x25, x24\\0Acsel x24, x12, xzr, cc\\0Asub x25, x25, x24\\0Alsl x24, x26, #32\\0Asub x24, x24, x26\\0Aadds x25, x25, x24\\0Acsel x24, x12, xzr, cs\\0Aadd x25, x25, x24\\0Asubs x24, x25, x13\\0Acsel x25, x24, x25, hs\\0Astr x25, \[x8, x9]\\0Aldr x26, \[x2, #16]\\0Amul x25, x17, x26\\0Aumulh x26, x17, x26\\0Alsr x24, x26, #32\\0Aand x26, x26, x12\\0Asubs x25, x25, x24\\0Acsel x24, x12, xzr, cc\\0Asub x25, x25, x24\\0Alsl x24, x26, #32\\0Asub x24, x24, x26\\0Aadds x25, x25, x24\\0Acsel x24, x12, xzr, cs\\0Aadd x25, x25, x24\\0Asubs x24, x25, x13\\0Acsel x25, x24, x25, hs\\0Astr x25, \[x8, x10]\\0Aadd x8, x8, #8\\0Aadd x2, x2, #24\\0Asubs x7, x7, #1\\0Acbnz x7, 3b\\0Aadd x1, x1, x6, lsl #2\\0Asubs x4, x4, #1\\0Acbnz x4, 2b\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x1},~{x2},~{x3},~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{x19},~{x20},~{x21},~{x22},~{x23},~{x24},~{x25},~{x26},~{memory},~{cc}\"(i64 " + inst[:vp] + ", i64 " + inst[:twp] + ", i64 " + inst[:nb] + ", i64 " + inst[:hq] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x1},~{x2},~{x3},~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{x19},~{x20},~{x21},~{x22},~{x23},~{x24},~{x25},~{x26},~{memory},~{cc}\"(i64 " + wire_get(inst, :vp) + ", i64 " + wire_get(inst, :twp) + ", i64 " + wire_get(inst, :nb) + ", i64 " + wire_get(inst, :hq) + ")"
   when :asm_gold_stage_inv
     # Scalar Goldilocks radix-4 DIT (inverse) NTT stage. P=2^64-2^32+1, ep=2^32-1.
     # ${1}=v ${2}=stw ${3}=iv ${4}=nblocks ${5}=q.  block = 4*q coeffs.
@@ -3678,38 +3679,38 @@ ewscope_md_state = {ids: {}}
     #  x7=group ctr, x8=i0 ptr, x9=2*qbytes, x10=3*qbytes, x11=iinv,
     #  x12=ep, x13=pp; coeffs a0..a3 in x14..x17; t0=x19 t1=x20 t2=x21 d=x22
     #  t3=x23; scratch x24,x25,x26.  Twiddle FIRST (in place), then combine.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x1, ${1:x}\\0Amov x3, ${2:x}\\0Aldr x11, \[${3:x}]\\0Amov x4, ${4:x}\\0Alsl x6, ${5:x}, #3\\0Alsl x9, x6, #1\\0Aadd x10, x9, x6\\0Amovz x12, #65535\\0Amovk x12, #65535, lsl #16\\0Amovz x13, #1\\0Amovk x13, #65535, lsl #32\\0Amovk x13, #65535, lsl #48\\0A2:\\0Amov x8, x1\\0Amov x2, x3\\0Alsr x7, x6, #3\\0A3:\\0Aldr x14, \[x8]\\0Aldr x15, \[x8, x6]\\0Aldr x16, \[x8, x9]\\0Aldr x17, \[x8, x10]\\0Aldr x26, \[x2]\\0Amul x25, x15, x26\\0Aumulh x26, x15, x26\\0Alsr x24, x26, #32\\0Aand x26, x26, x12\\0Asubs x25, x25, x24\\0Acsel x24, x12, xzr, cc\\0Asub x25, x25, x24\\0Alsl x24, x26, #32\\0Asub x24, x24, x26\\0Aadds x15, x25, x24\\0Acsel x24, x12, xzr, cs\\0Aadd x15, x15, x24\\0Asubs x24, x15, x13\\0Acsel x15, x24, x15, hs\\0Aldr x26, \[x2, #8]\\0Amul x25, x16, x26\\0Aumulh x26, x16, x26\\0Alsr x24, x26, #32\\0Aand x26, x26, x12\\0Asubs x25, x25, x24\\0Acsel x24, x12, xzr, cc\\0Asub x25, x25, x24\\0Alsl x24, x26, #32\\0Asub x24, x24, x26\\0Aadds x16, x25, x24\\0Acsel x24, x12, xzr, cs\\0Aadd x16, x16, x24\\0Asubs x24, x16, x13\\0Acsel x16, x24, x16, hs\\0Aldr x26, \[x2, #16]\\0Amul x25, x17, x26\\0Aumulh x26, x17, x26\\0Alsr x24, x26, #32\\0Aand x26, x26, x12\\0Asubs x25, x25, x24\\0Acsel x24, x12, xzr, cc\\0Asub x25, x25, x24\\0Alsl x24, x26, #32\\0Asub x24, x24, x26\\0Aadds x17, x25, x24\\0Acsel x24, x12, xzr, cs\\0Aadd x17, x17, x24\\0Asubs x24, x17, x13\\0Acsel x17, x24, x17, hs\\0Aadds x19, x14, x16\\0Acsel x24, x12, xzr, cs\\0Aadd x19, x19, x24\\0Asubs x24, x19, x13\\0Acsel x19, x24, x19, hs\\0Asubs x20, x14, x16\\0Acsel x24, x13, xzr, cc\\0Aadd x20, x20, x24\\0Aadds x21, x15, x17\\0Acsel x24, x12, xzr, cs\\0Aadd x21, x21, x24\\0Asubs x24, x21, x13\\0Acsel x21, x24, x21, hs\\0Asubs x22, x15, x17\\0Acsel x24, x13, xzr, cc\\0Aadd x22, x22, x24\\0Amul x25, x22, x11\\0Aumulh x26, x22, x11\\0Alsr x24, x26, #32\\0Aand x26, x26, x12\\0Asubs x25, x25, x24\\0Acsel x24, x12, xzr, cc\\0Asub x25, x25, x24\\0Alsl x24, x26, #32\\0Asub x24, x24, x26\\0Aadds x23, x25, x24\\0Acsel x24, x12, xzr, cs\\0Aadd x23, x23, x24\\0Asubs x24, x23, x13\\0Acsel x23, x24, x23, hs\\0Aadds x14, x19, x21\\0Acsel x24, x12, xzr, cs\\0Aadd x14, x14, x24\\0Asubs x24, x14, x13\\0Acsel x14, x24, x14, hs\\0Astr x14, \[x8]\\0Aadds x15, x20, x23\\0Acsel x24, x12, xzr, cs\\0Aadd x15, x15, x24\\0Asubs x24, x15, x13\\0Acsel x15, x24, x15, hs\\0Astr x15, \[x8, x6]\\0Asubs x16, x19, x21\\0Acsel x24, x13, xzr, cc\\0Aadd x16, x16, x24\\0Astr x16, \[x8, x9]\\0Asubs x17, x20, x23\\0Acsel x24, x13, xzr, cc\\0Aadd x17, x17, x24\\0Astr x17, \[x8, x10]\\0Aadd x8, x8, #8\\0Aadd x2, x2, #24\\0Asubs x7, x7, #1\\0Acbnz x7, 3b\\0Aadd x1, x1, x6, lsl #2\\0Asubs x4, x4, #1\\0Acbnz x4, 2b\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,~{x1},~{x2},~{x3},~{x4},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{x19},~{x20},~{x21},~{x22},~{x23},~{x24},~{x25},~{x26},~{memory},~{cc}\"(i64 " + inst[:vp] + ", i64 " + inst[:twp] + ", i64 " + inst[:ivp] + ", i64 " + inst[:nb] + ", i64 " + inst[:hq] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,~{x1},~{x2},~{x3},~{x4},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{x19},~{x20},~{x21},~{x22},~{x23},~{x24},~{x25},~{x26},~{memory},~{cc}\"(i64 " + wire_get(inst, :vp) + ", i64 " + wire_get(inst, :twp) + ", i64 " + wire_get(inst, :ivp) + ", i64 " + wire_get(inst, :nb) + ", i64 " + wire_get(inst, :hq) + ")"
   when :asm_neon_gadd2
     # NEON 2-lane Goldilocks add: out[i] lanes = gadd(a,b) mod P=2^64-2^32+1.
     # r=a+b; if r<a (overflow) r+=ep(0xFFFFFFFF); if r>=pp(2^64-ep) r-=pp. 2 u64/op.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     asmt = "mov x13, ${1:x}\\0Amov x14, ${2:x}\\0Amov x15, ${3:x}\\0Amov x9, ${4:x}\\0Amovz w10, #65535\\0Amovk w10, #65535, lsl #16\\0Adup v7.2d, x10\\0Amovz x11, #1\\0Amovk x11, #65535, lsl #32\\0Amovk x11, #65535, lsl #48\\0Adup v6.2d, x11\\0A1:\\0Ald1 {v1.2d}, \[x13], #16\\0Ald1 {v2.2d}, \[x14], #16\\0Aadd v0.2d, v1.2d, v2.2d\\0Acmhi v3.2d, v1.2d, v0.2d\\0Aand v4.16b, v3.16b, v7.16b\\0Aadd v0.2d, v0.2d, v4.2d\\0Acmhs v5.2d, v0.2d, v6.2d\\0Aand v8.16b, v5.16b, v6.16b\\0Asub v0.2d, v0.2d, v8.2d\\0Ast1 {v0.2d}, \[x15], #16\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x11},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{memory},~{cc}\"(i64 " + inst[:ap] + ", i64 " + inst[:bp] + ", i64 " + inst[:outp] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,~{x9},~{x10},~{x11},~{x13},~{x14},~{x15},~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7},~{v8},~{memory},~{cc}\"(i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :n) + ")"
   when :asm_add_no
     # offset add_n: out[oo..]=a[ao..]+b[bo..] over n limbs; ptr = base + off<<3 in
     # asm. Flag-threaded adc returns carry. (basecase for the Toom ladder)
     # Non-arm64 targets get a portable i128-carry IR loop with identical
     # semantics (the arch-gated-kernel contract: WIRE op is the portable
     # boundary, the emitter target-selects the body).
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     if !arm64_target
       bid = t.slice(1, t.size() - 1)
       po = StringBuffer(1024)
-      po << t + ".oo3 = shl i64 " + inst[:ooff] + ", 3\n  "
-      po << t + ".ob = add i64 " + inst[:outp] + ", " + t + ".oo3\n  "
-      po << t + ".ao3 = shl i64 " + inst[:aoff] + ", 3\n  "
-      po << t + ".ab = add i64 " + inst[:ap] + ", " + t + ".ao3\n  "
-      po << t + ".bo3 = shl i64 " + inst[:boff] + ", 3\n  "
-      po << t + ".bb = add i64 " + inst[:bp] + ", " + t + ".bo3\n  "
+      po << t + ".oo3 = shl i64 " + wire_get(inst, :ooff) + ", 3\n  "
+      po << t + ".ob = add i64 " + wire_get(inst, :outp) + ", " + t + ".oo3\n  "
+      po << t + ".ao3 = shl i64 " + wire_get(inst, :aoff) + ", 3\n  "
+      po << t + ".ab = add i64 " + wire_get(inst, :ap) + ", " + t + ".ao3\n  "
+      po << t + ".bo3 = shl i64 " + wire_get(inst, :boff) + ", 3\n  "
+      po << t + ".bb = add i64 " + wire_get(inst, :bp) + ", " + t + ".bo3\n  "
       po << "br label %ano.pre." + bid + "\n"
       po << "ano.pre." + bid + ":\n  "
       po << "br label %ano.head." + bid + "\n"
       po << "ano.head." + bid + ":\n  "
       po << t + ".i = phi i64 \[ 0, %ano.pre." + bid + " ], \[ " + t + ".i2, %ano.body." + bid + " ]\n  "
       po << t + ".c = phi i64 \[ 0, %ano.pre." + bid + " ], \[ " + t + ".c2, %ano.body." + bid + " ]\n  "
-      po << t + ".done = icmp sge i64 " + t + ".i, " + inst[:n] + "\n  "
+      po << t + ".done = icmp sge i64 " + t + ".i, " + wire_get(inst, :n) + "\n  "
       po << "br i1 " + t + ".done, label %ano.exit." + bid + ", label %ano.body." + bid + "\n"
       po << "ano.body." + bid + ":\n  "
       po << t + ".i8 = shl i64 " + t + ".i, 3\n  "
@@ -3741,7 +3742,7 @@ ewscope_md_state = {ids: {}}
     # never touch flags, so the carry threads across quads, across the
     # loop back-edge, and into the 1x remainder untouched.
     asmt = "add x15, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Aadd x14, ${5:x}, ${6:x}, lsl #3\\0Amov x9, ${7:x}\\0Acmn xzr, xzr\\0Alsr x8, x9, #2\\0Aand x9, x9, #3\\0Acbz x8, 2f\\0A1:\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x14], #16\\0Aadcs x12, x10, x16\\0Aadcs x16, x11, x17\\0Astp x12, x16, \[x15], #16\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x14], #16\\0Aadcs x12, x10, x16\\0Aadcs x16, x11, x17\\0Astp x12, x16, \[x15], #16\\0Asub x8, x8, #1\\0Acbnz x8, 1b\\0A2:\\0Acbz x9, 4f\\0A3:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Aadcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 3b\\0A4:\\0Acset ${0:x}, cs"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :ooff) + ", i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :aoff) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :boff) + ", i64 " + wire_get(inst, :n) + ")"
   when :asm_sub_no
     # offset sub_n: out[oo..]=a[ao..]-b[bo..]; flag-threaded sbcs returns borrow.
     # 4x-unrolled quad loop mirroring asm_add_no's: ldp/sbcs/stp pairs with a
@@ -3749,23 +3750,23 @@ ewscope_md_state = {ids: {}}
     # (carry-clear) threads across quads, the back-edge, and the remainder.
     # `subs xzr, xzr, xzr` seeds C=1 (no borrow). Non-arm64 targets get a
     # portable i128 borrow loop with identical semantics.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     if !arm64_target
       bid = t.slice(1, t.size() - 1)
       po = StringBuffer(1024)
-      po << t + ".oo3 = shl i64 " + inst[:ooff] + ", 3\n  "
-      po << t + ".ob = add i64 " + inst[:outp] + ", " + t + ".oo3\n  "
-      po << t + ".ao3 = shl i64 " + inst[:aoff] + ", 3\n  "
-      po << t + ".ab = add i64 " + inst[:ap] + ", " + t + ".ao3\n  "
-      po << t + ".bo3 = shl i64 " + inst[:boff] + ", 3\n  "
-      po << t + ".bb = add i64 " + inst[:bp] + ", " + t + ".bo3\n  "
+      po << t + ".oo3 = shl i64 " + wire_get(inst, :ooff) + ", 3\n  "
+      po << t + ".ob = add i64 " + wire_get(inst, :outp) + ", " + t + ".oo3\n  "
+      po << t + ".ao3 = shl i64 " + wire_get(inst, :aoff) + ", 3\n  "
+      po << t + ".ab = add i64 " + wire_get(inst, :ap) + ", " + t + ".ao3\n  "
+      po << t + ".bo3 = shl i64 " + wire_get(inst, :boff) + ", 3\n  "
+      po << t + ".bb = add i64 " + wire_get(inst, :bp) + ", " + t + ".bo3\n  "
       po << "br label %sno.pre." + bid + "\n"
       po << "sno.pre." + bid + ":\n  "
       po << "br label %sno.head." + bid + "\n"
       po << "sno.head." + bid + ":\n  "
       po << t + ".i = phi i64 \[ 0, %sno.pre." + bid + " ], \[ " + t + ".i2, %sno.body." + bid + " ]\n  "
       po << t + ".w = phi i64 \[ 0, %sno.pre." + bid + " ], \[ " + t + ".w2, %sno.body." + bid + " ]\n  "
-      po << t + ".done = icmp sge i64 " + t + ".i, " + inst[:n] + "\n  "
+      po << t + ".done = icmp sge i64 " + t + ".i, " + wire_get(inst, :n) + "\n  "
       po << "br i1 " + t + ".done, label %sno.exit." + bid + ", label %sno.body." + bid + "\n"
       po << "sno.body." + bid + ":\n  "
       po << t + ".i8 = shl i64 " + t + ".i, 3\n  "
@@ -3792,7 +3793,7 @@ ewscope_md_state = {ids: {}}
       po << t + " = add i64 " + t + ".w, 0"
       return po.to_s()
     asmt = "add x15, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Aadd x14, ${5:x}, ${6:x}, lsl #3\\0Amov x9, ${7:x}\\0Asubs xzr, xzr, xzr\\0Alsr x8, x9, #2\\0Aand x9, x9, #3\\0Acbz x8, 2f\\0A1:\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x14], #16\\0Asbcs x12, x10, x16\\0Asbcs x16, x11, x17\\0Astp x12, x16, \[x15], #16\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x14], #16\\0Asbcs x12, x10, x16\\0Asbcs x16, x11, x17\\0Astp x12, x16, \[x15], #16\\0Asub x8, x8, #1\\0Acbnz x8, 1b\\0A2:\\0Acbz x9, 4f\\0A3:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Asbcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 3b\\0A4:\\0Acset ${0:x}, cc"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :ooff) + ", i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :aoff) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :boff) + ", i64 " + wire_get(inst, :n) + ")"
   # Fused UNEQUAL-length add: adcs over the shorter operand, then propagate
   # the carry across the longer operand's remaining limbs — one pass, one
   # call. This exists because a source-level tail loop over those remaining
@@ -3801,18 +3802,18 @@ ewscope_md_state = {ids: {}}
   # ${5}=blen; returns carry-out. `sub` is flag-neutral, so the carry
   # threads from the adcs loop through the propagate loop untouched.
   when :asm_add_uneq
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     if !arm64_target
       bid = t.slice(1, t.size() - 1)
       po = StringBuffer(1400)
-      po << t + ".op = inttoptr i64 " + inst[:outp] + " to ptr\n  "
-      po << t + ".apx = inttoptr i64 " + inst[:ap] + " to ptr\n  "
-      po << t + ".bpx = inttoptr i64 " + inst[:bp] + " to ptr\n  "
+      po << t + ".op = inttoptr i64 " + wire_get(inst, :outp) + " to ptr\n  "
+      po << t + ".apx = inttoptr i64 " + wire_get(inst, :ap) + " to ptr\n  "
+      po << t + ".bpx = inttoptr i64 " + wire_get(inst, :bp) + " to ptr\n  "
       po << "br label %aue.h1." + bid + "\n"
       po << "aue.h1." + bid + ":\n  "
-      po << t + ".i = phi i64 \[ 0, %" + inst[:entry_label] + " ], \[ " + t + ".i2, %aue.b1." + bid + " ]\n  "
-      po << t + ".c = phi i64 \[ 0, %" + inst[:entry_label] + " ], \[ " + t + ".c2, %aue.b1." + bid + " ]\n  "
-      po << t + ".d1 = icmp sge i64 " + t + ".i, " + inst[:nb] + "\n  "
+      po << t + ".i = phi i64 \[ 0, %" + wire_get(inst, :entry_label) + " ], \[ " + t + ".i2, %aue.b1." + bid + " ]\n  "
+      po << t + ".c = phi i64 \[ 0, %" + wire_get(inst, :entry_label) + " ], \[ " + t + ".c2, %aue.b1." + bid + " ]\n  "
+      po << t + ".d1 = icmp sge i64 " + t + ".i, " + wire_get(inst, :nb) + "\n  "
       po << "br i1 " + t + ".d1, label %aue.h2." + bid + ", label %aue.b1." + bid + "\n"
       po << "aue.b1." + bid + ":\n  "
       po << t + ".ag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".i\n  "
@@ -3834,7 +3835,7 @@ ewscope_md_state = {ids: {}}
       po << "aue.h2." + bid + ":\n  "
       po << t + ".j = phi i64 \[ " + t + ".i, %aue.h1." + bid + " ], \[ " + t + ".j2, %aue.b2." + bid + " ]\n  "
       po << t + ".tc = phi i64 \[ " + t + ".c, %aue.h1." + bid + " ], \[ " + t + ".tc2, %aue.b2." + bid + " ]\n  "
-      po << t + ".d2 = icmp sge i64 " + t + ".j, " + inst[:na] + "\n  "
+      po << t + ".d2 = icmp sge i64 " + t + ".j, " + wire_get(inst, :na) + "\n  "
       po << "br i1 " + t + ".d2, label %aue.x." + bid + ", label %aue.b2." + bid + "\n"
       po << "aue.b2." + bid + ":\n  "
       po << t + ".tag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".j\n  "
@@ -3850,24 +3851,24 @@ ewscope_md_state = {ids: {}}
       po << t + " = add i64 " + t + ".tc, 0"
       return po.to_s()
     asmt = "mov x15, ${1:x}\\0Amov x13, ${2:x}\\0Amov x14, ${4:x}\\0Amov x9, ${5:x}\\0Amov x8, ${3:x}\\0Asub x8, x8, x9\\0Acmn xzr, xzr\\0Acbz x9, 2f\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Aadcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0A2:\\0Acbz x8, 3f\\0A4:\\0Aldr x10, \[x13], #8\\0Aadcs x12, x10, xzr\\0Astr x12, \[x15], #8\\0Asub x8, x8, #1\\0Acbz x8, 3f\\0Ab.cc 5f\\0Ab 4b\\0A5:\\0Acmp x8, #4\\0Ab.lt 6f\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x13], #16\\0Astp x10, x11, \[x15], #16\\0Astp x16, x17, \[x15], #16\\0Asub x8, x8, #4\\0Acbnz x8, 5b\\0Ab 7f\\0A6:\\0Aldr x10, \[x13], #8\\0Astr x10, \[x15], #8\\0Asub x8, x8, #1\\0Acbnz x8, 6b\\0A7:\\0Amov ${0:x}, #0\\0Ab 8f\\0A3:\\0Acset ${0:x}, cs\\0A8:"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ap] + ", i64 " + inst[:na] + ", i64 " + inst[:bp] + ", i64 " + inst[:nb] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :na) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :nb) + ")"
 
   # Fused UNEQUAL-length subtract: sbcs over the shorter operand, then
   # propagate the borrow across the longer operand's remaining limbs.
   # `subs xzr, xzr, xzr` seeds C=1 (no borrow).
   when :asm_sub_uneq
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     if !arm64_target
       bid = t.slice(1, t.size() - 1)
       po = StringBuffer(1400)
-      po << t + ".op = inttoptr i64 " + inst[:outp] + " to ptr\n  "
-      po << t + ".apx = inttoptr i64 " + inst[:ap] + " to ptr\n  "
-      po << t + ".bpx = inttoptr i64 " + inst[:bp] + " to ptr\n  "
+      po << t + ".op = inttoptr i64 " + wire_get(inst, :outp) + " to ptr\n  "
+      po << t + ".apx = inttoptr i64 " + wire_get(inst, :ap) + " to ptr\n  "
+      po << t + ".bpx = inttoptr i64 " + wire_get(inst, :bp) + " to ptr\n  "
       po << "br label %sue.h1." + bid + "\n"
       po << "sue.h1." + bid + ":\n  "
-      po << t + ".i = phi i64 \[ 0, %" + inst[:entry_label] + " ], \[ " + t + ".i2, %sue.b1." + bid + " ]\n  "
-      po << t + ".w = phi i64 \[ 0, %" + inst[:entry_label] + " ], \[ " + t + ".w2, %sue.b1." + bid + " ]\n  "
-      po << t + ".d1 = icmp sge i64 " + t + ".i, " + inst[:nb] + "\n  "
+      po << t + ".i = phi i64 \[ 0, %" + wire_get(inst, :entry_label) + " ], \[ " + t + ".i2, %sue.b1." + bid + " ]\n  "
+      po << t + ".w = phi i64 \[ 0, %" + wire_get(inst, :entry_label) + " ], \[ " + t + ".w2, %sue.b1." + bid + " ]\n  "
+      po << t + ".d1 = icmp sge i64 " + t + ".i, " + wire_get(inst, :nb) + "\n  "
       po << "br i1 " + t + ".d1, label %sue.h2." + bid + ", label %sue.b1." + bid + "\n"
       po << "sue.b1." + bid + ":\n  "
       po << t + ".ag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".i\n  "
@@ -3889,7 +3890,7 @@ ewscope_md_state = {ids: {}}
       po << "sue.h2." + bid + ":\n  "
       po << t + ".j = phi i64 \[ " + t + ".i, %sue.h1." + bid + " ], \[ " + t + ".j2, %sue.b2." + bid + " ]\n  "
       po << t + ".tw = phi i64 \[ " + t + ".w, %sue.h1." + bid + " ], \[ " + t + ".tw2, %sue.b2." + bid + " ]\n  "
-      po << t + ".d2 = icmp sge i64 " + t + ".j, " + inst[:na] + "\n  "
+      po << t + ".d2 = icmp sge i64 " + t + ".j, " + wire_get(inst, :na) + "\n  "
       po << "br i1 " + t + ".d2, label %sue.x." + bid + ", label %sue.b2." + bid + "\n"
       po << "sue.b2." + bid + ":\n  "
       po << t + ".tag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".j\n  "
@@ -3905,19 +3906,19 @@ ewscope_md_state = {ids: {}}
       po << t + " = add i64 " + t + ".tw, 0"
       return po.to_s()
     asmt = "mov x15, ${1:x}\\0Amov x13, ${2:x}\\0Amov x14, ${4:x}\\0Amov x9, ${5:x}\\0Amov x8, ${3:x}\\0Asub x8, x8, x9\\0Asubs xzr, xzr, xzr\\0Acbz x9, 2f\\0A1:\\0Aldr x10, \[x13], #8\\0Aldr x11, \[x14], #8\\0Asbcs x12, x10, x11\\0Astr x12, \[x15], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0A2:\\0Acbz x8, 3f\\0A4:\\0Aldr x10, \[x13], #8\\0Asbcs x12, x10, xzr\\0Astr x12, \[x15], #8\\0Asub x8, x8, #1\\0Acbz x8, 3f\\0Ab.cs 5f\\0Ab 4b\\0A5:\\0Acmp x8, #4\\0Ab.lt 6f\\0Aldp x10, x11, \[x13], #16\\0Aldp x16, x17, \[x13], #16\\0Astp x10, x11, \[x15], #16\\0Astp x16, x17, \[x15], #16\\0Asub x8, x8, #4\\0Acbnz x8, 5b\\0Ab 7f\\0A6:\\0Aldr x10, \[x13], #8\\0Astr x10, \[x15], #8\\0Asub x8, x8, #1\\0Acbnz x8, 6b\\0A7:\\0Amov ${0:x}, #0\\0Ab 8f\\0A3:\\0Acset ${0:x}, cc\\0A8:"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ap] + ", i64 " + inst[:na] + ", i64 " + inst[:bp] + ", i64 " + inst[:nb] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :na) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :nb) + ")"
 
   when :asm_addmul1
     # offset addmul_1: out[oo..] += a[ao..]*bsc; returns carry.
     # x14=out ptr, x13=a ptr, x3=bsc, x9=n, x15=carry.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     if !arm64_target
       bid = t.slice(1, t.size() - 1)
       po = StringBuffer(1200)
-      po << t + ".oo3 = shl i64 " + inst[:ooff] + ", 3\n  "
-      po << t + ".ob = add i64 " + inst[:outp] + ", " + t + ".oo3\n  "
-      po << t + ".ao3 = shl i64 " + inst[:aoff] + ", 3\n  "
-      po << t + ".ab = add i64 " + inst[:ap] + ", " + t + ".ao3\n  "
+      po << t + ".oo3 = shl i64 " + wire_get(inst, :ooff) + ", 3\n  "
+      po << t + ".ob = add i64 " + wire_get(inst, :outp) + ", " + t + ".oo3\n  "
+      po << t + ".ao3 = shl i64 " + wire_get(inst, :aoff) + ", 3\n  "
+      po << t + ".ab = add i64 " + wire_get(inst, :ap) + ", " + t + ".ao3\n  "
       po << t + ".op = inttoptr i64 " + t + ".ob to ptr\n  "
       po << t + ".apx = inttoptr i64 " + t + ".ab to ptr\n  "
       po << "br label %am1.pre." + bid + "\n"
@@ -3926,7 +3927,7 @@ ewscope_md_state = {ids: {}}
       po << "am1.head." + bid + ":\n  "
       po << t + ".i = phi i64 \[ 0, %am1.pre." + bid + " ], \[ " + t + ".i2, %am1.body." + bid + " ]\n  "
       po << t + ".c = phi i64 \[ 0, %am1.pre." + bid + " ], \[ " + t + ".c2, %am1.body." + bid + " ]\n  "
-      po << t + ".done = icmp sge i64 " + t + ".i, " + inst[:n] + "\n  "
+      po << t + ".done = icmp sge i64 " + t + ".i, " + wire_get(inst, :n) + "\n  "
       po << "br i1 " + t + ".done, label %am1.exit." + bid + ", label %am1.body." + bid + "\n"
       po << "am1.body." + bid + ":\n  "
       po << t + ".ag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".i\n  "
@@ -3934,7 +3935,7 @@ ewscope_md_state = {ids: {}}
       po << t + ".og = getelementptr i64, ptr " + t + ".op, i64 " + t + ".i\n  "
       po << t + ".ov = load i64, ptr " + t + ".og, align 8\n  "
       po << t + ".az = zext i64 " + t + ".av to i128\n  "
-      po << t + ".bz = zext i64 " + inst[:bsc] + " to i128\n  "
+      po << t + ".bz = zext i64 " + wire_get(inst, :bsc) + " to i128\n  "
       po << t + ".oz = zext i64 " + t + ".ov to i128\n  "
       po << t + ".cz = zext i64 " + t + ".c to i128\n  "
       po << t + ".prod = mul i128 " + t + ".az, " + t + ".bz\n  "
@@ -3950,25 +3951,25 @@ ewscope_md_state = {ids: {}}
       po << t + " = add i64 " + t + ".c, 0"
       return po.to_s()
     asmt = "add x14, ${1:x}, ${2:x}, lsl #3\\0Aadd x13, ${3:x}, ${4:x}, lsl #3\\0Amov x3, ${5:x}\\0Amov x9, ${6:x}\\0Amov x15, #0\\0A1:\\0Aldr x4, \[x13], #8\\0Amul x8, x4, x3\\0Aumulh x12, x4, x3\\0Aadds x8, x8, x15\\0Aadc x12, x12, xzr\\0Aldr x5, \[x14]\\0Aadds x8, x5, x8\\0Aadc x15, x12, xzr\\0Astr x8, \[x14], #8\\0Asub x9, x9, #1\\0Acbnz x9, 1b\\0Amov ${0:x}, x15"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,~{x3},~{x4},~{x5},~{x8},~{x9},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bsc] + ", i64 " + inst[:n] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,~{x3},~{x4},~{x5},~{x8},~{x9},~{x12},~{x13},~{x14},~{x15},~{memory},~{cc}\"(i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :ooff) + ", i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :aoff) + ", i64 " + wire_get(inst, :bsc) + ", i64 " + wire_get(inst, :n) + ")"
   when :asm_mulbase
     # Schoolbook multiplication as ONE asm block: out[oo..oo+na+nb) = a[ao..]*b[bo..].
     # row 0 = mul_1, rows 1..na-1 = addmul_1. One call/basecase (no per-row spill).
     # x16=out base, x17=a ptr, x7=b base; inner: x2=b ptr,x4=out ptr,x5=nb,x15=carry.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     if !arm64_target
       bid = t.slice(1, t.size() - 1)
       po = StringBuffer(2400)
-      po << t + ".oo3 = shl i64 " + inst[:ooff] + ", 3\n  "
-      po << t + ".ob = add i64 " + inst[:outp] + ", " + t + ".oo3\n  "
-      po << t + ".ao3 = shl i64 " + inst[:aoff] + ", 3\n  "
-      po << t + ".ab = add i64 " + inst[:ap] + ", " + t + ".ao3\n  "
-      po << t + ".bo3 = shl i64 " + inst[:boff] + ", 3\n  "
-      po << t + ".bb = add i64 " + inst[:bp] + ", " + t + ".bo3\n  "
+      po << t + ".oo3 = shl i64 " + wire_get(inst, :ooff) + ", 3\n  "
+      po << t + ".ob = add i64 " + wire_get(inst, :outp) + ", " + t + ".oo3\n  "
+      po << t + ".ao3 = shl i64 " + wire_get(inst, :aoff) + ", 3\n  "
+      po << t + ".ab = add i64 " + wire_get(inst, :ap) + ", " + t + ".ao3\n  "
+      po << t + ".bo3 = shl i64 " + wire_get(inst, :boff) + ", 3\n  "
+      po << t + ".bb = add i64 " + wire_get(inst, :bp) + ", " + t + ".bo3\n  "
       po << t + ".op = inttoptr i64 " + t + ".ob to ptr\n  "
       po << t + ".apx = inttoptr i64 " + t + ".ab to ptr\n  "
       po << t + ".bpx = inttoptr i64 " + t + ".bb to ptr\n  "
-      po << t + ".total = add i64 " + inst[:na] + ", " + inst[:nb] + "\n  "
+      po << t + ".total = add i64 " + wire_get(inst, :na) + ", " + wire_get(inst, :nb) + "\n  "
       po << "br label %mb.zero.pre." + bid + "\n"
       po << "mb.zero.pre." + bid + ":\n  "
       po << "br label %mb.zero.head." + bid + "\n"
@@ -3985,7 +3986,7 @@ ewscope_md_state = {ids: {}}
       po << "br label %mb.outer.head." + bid + "\n"
       po << "mb.outer.head." + bid + ":\n  "
       po << t + ".i = phi i64 \[ 0, %mb.outer.pre." + bid + " ], \[ " + t + ".i2, %mb.row.done." + bid + " ]\n  "
-      po << t + ".odone = icmp sge i64 " + t + ".i, " + inst[:na] + "\n  "
+      po << t + ".odone = icmp sge i64 " + t + ".i, " + wire_get(inst, :na) + "\n  "
       po << "br i1 " + t + ".odone, label %mb.exit." + bid + ", label %mb.row.pre." + bid + "\n"
       po << "mb.row.pre." + bid + ":\n  "
       po << t + ".ag = getelementptr i64, ptr " + t + ".apx, i64 " + t + ".i\n  "
@@ -3995,7 +3996,7 @@ ewscope_md_state = {ids: {}}
       po << "mb.inner.head." + bid + ":\n  "
       po << t + ".j = phi i64 \[ 0, %mb.row.pre." + bid + " ], \[ " + t + ".j2, %mb.inner.body." + bid + " ]\n  "
       po << t + ".c = phi i64 \[ 0, %mb.row.pre." + bid + " ], \[ " + t + ".c2, %mb.inner.body." + bid + " ]\n  "
-      po << t + ".idone = icmp sge i64 " + t + ".j, " + inst[:nb] + "\n  "
+      po << t + ".idone = icmp sge i64 " + t + ".j, " + wire_get(inst, :nb) + "\n  "
       po << "br i1 " + t + ".idone, label %mb.row.done." + bid + ", label %mb.inner.body." + bid + "\n"
       po << "mb.inner.body." + bid + ":\n  "
       po << t + ".bg = getelementptr i64, ptr " + t + ".bpx, i64 " + t + ".j\n  "
@@ -4016,7 +4017,7 @@ ewscope_md_state = {ids: {}}
       po << t + ".j2 = add i64 " + t + ".j, 1\n  "
       po << "br label %mb.inner.head." + bid + "\n"
       po << "mb.row.done." + bid + ":\n  "
-      po << t + ".ci = add i64 " + t + ".i, " + inst[:nb] + "\n  "
+      po << t + ".ci = add i64 " + t + ".i, " + wire_get(inst, :nb) + "\n  "
       po << t + ".cg = getelementptr i64, ptr " + t + ".op, i64 " + t + ".ci\n  "
       po << "store i64 " + t + ".c, ptr " + t + ".cg, align 8\n  "
       po << t + ".i2 = add i64 " + t + ".i, 1\n  "
@@ -4025,23 +4026,23 @@ ewscope_md_state = {ids: {}}
       po << t + " = add i64 0, 0"
       return po.to_s()
     asmt = "add x16, ${1:x}, ${2:x}, lsl #3\\0Aadd x17, ${3:x}, ${4:x}, lsl #3\\0Aadd x7, ${5:x}, ${6:x}, lsl #3\\0Aldr x6, \[x17], #8\\0Amov x2, x7\\0Amov x4, x16\\0Amov x5, ${8:x}\\0Amov x15, #0\\0A1:\\0Aldr x10, \[x2], #8\\0Amul x8, x10, x6\\0Aumulh x12, x10, x6\\0Aadds x8, x8, x15\\0Aadc x15, x12, xzr\\0Astr x8, \[x4], #8\\0Asubs x5, x5, #1\\0Abne 1b\\0Astr x15, \[x4]\\0Asubs x3, ${7:x}, #1\\0Amov x14, x16\\0A2:\\0Acbz x3, 3f\\0Aadd x14, x14, #8\\0Aldr x6, \[x17], #8\\0Amov x2, x7\\0Amov x4, x14\\0Amov x5, ${8:x}\\0Amov x15, #0\\0A4:\\0Aldr x10, \[x2], #8\\0Amul x8, x10, x6\\0Aumulh x12, x10, x6\\0Aadds x8, x8, x15\\0Aadc x12, x12, xzr\\0Aldr x9, \[x4]\\0Aadds x8, x9, x8\\0Aadc x15, x12, xzr\\0Astr x8, \[x4], #8\\0Asubs x5, x5, #1\\0Abne 4b\\0Astr x15, \[x4]\\0Asub x3, x3, #1\\0Ab 2b\\0A3:\\0Amov ${0:x}, #0"
-    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,r,~{x2},~{x3},~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x12},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + inst[:outp] + ", i64 " + inst[:ooff] + ", i64 " + inst[:ap] + ", i64 " + inst[:aoff] + ", i64 " + inst[:bp] + ", i64 " + inst[:boff] + ", i64 " + inst[:na] + ", i64 " + inst[:nb] + ")"
+    t + " = call i64 asm sideeffect \"" + asmt + "\", \"=r,r,r,r,r,r,r,r,r,~{x2},~{x3},~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x12},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}\"(i64 " + wire_get(inst, :outp) + ", i64 " + wire_get(inst, :ooff) + ", i64 " + wire_get(inst, :ap) + ", i64 " + wire_get(inst, :aoff) + ", i64 " + wire_get(inst, :bp) + ", i64 " + wire_get(inst, :boff) + ", i64 " + wire_get(inst, :na) + ", i64 " + wire_get(inst, :nb) + ")"
   when :sdiv_i128
-    inst[:temp] + " = sdiv i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = sdiv i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :udiv_i128
-    inst[:temp] + " = udiv i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = udiv i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :srem_i128
-    inst[:temp] + " = srem i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = srem i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :urem_i128
-    inst[:temp] + " = urem i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = urem i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
 
   # Checked i48 arithmetic with overflow branch to bigint
   when :add_i48_checked, :sub_i48_checked
     intrinsic = "llvm.sadd.with.overflow.i64"
     if op == :sub_i48_checked
       intrinsic = "llvm.ssub.with.overflow.i64"
-    bid = inst[:block_id].to_s()
-    t = inst[:temp]
+    bid = wire_get(inst, :block_id).to_s()
+    t = wire_get(inst, :temp)
     pair = t + ".pair"
     raw = t + ".raw"
     i64ovf = t + ".i64ovf"
@@ -4053,7 +4054,7 @@ ewscope_md_state = {ids: {}}
     boxed = t + ".fast"
     slow = t + ".slow"
     out = StringBuffer(384)
-    out << pair + " = call {i64, i1} @" + intrinsic + "(i64 " + inst[:lhs] + ", i64 " + inst[:rhs] + ")\n  "
+    out << pair + " = call {i64, i1} @" + intrinsic + "(i64 " + wire_get(inst, :lhs) + ", i64 " + wire_get(inst, :rhs) + ")\n  "
     out << raw + " = extractvalue {i64, i1} " + pair + ", 0\n  "
     out << i64ovf + " = extractvalue {i64, i1} " + pair + ", 1\n  "
     out << over + " = icmp sgt i64 " + raw + ", 140737488355327\n  "
@@ -4066,15 +4067,15 @@ ewscope_md_state = {ids: {}}
     out << boxed + " = or i64 " + masked + ", -1688849860263936\n  "
     out << "br label %ovf.merge." + bid + "\n"
     out << "ovf.slow." + bid + ":\n  "
-    out << slow + " = call i64 @" + inst[:rt_fallback] + "(i64 " + inst[:lhs_boxed] + ", i64 " + inst[:rhs_boxed] + ")\n  "
+    out << slow + " = call i64 @" + wire_get(inst, :rt_fallback) + "(i64 " + wire_get(inst, :lhs_boxed) + ", i64 " + wire_get(inst, :rhs_boxed) + ")\n  "
     out << "br label %ovf.merge." + bid + "\n"
     out << "ovf.merge." + bid + ":\n  "
     out << t + " = phi i64 \[" + boxed + ", %ovf.fast." + bid + "], \[" + slow + ", %ovf.slow." + bid + "]"
     out.to_s()
 
   when :mul_i48_checked
-    bid = inst[:block_id].to_s()
-    t = inst[:temp]
+    bid = wire_get(inst, :block_id).to_s()
+    t = wire_get(inst, :temp)
     pair = t + ".pair"
     raw = t + ".raw"
     i64ovf = t + ".i64ovf"
@@ -4086,7 +4087,7 @@ ewscope_md_state = {ids: {}}
     boxed = t + ".fast"
     slow = t + ".slow"
     out = StringBuffer(384)
-    out << pair + " = call {i64, i1} @llvm.smul.with.overflow.i64(i64 " + inst[:lhs] + ", i64 " + inst[:rhs] + ")\n  "
+    out << pair + " = call {i64, i1} @llvm.smul.with.overflow.i64(i64 " + wire_get(inst, :lhs) + ", i64 " + wire_get(inst, :rhs) + ")\n  "
     out << raw + " = extractvalue {i64, i1} " + pair + ", 0\n  "
     out << i64ovf + " = extractvalue {i64, i1} " + pair + ", 1\n  "
     out << over + " = icmp sgt i64 " + raw + ", 140737488355327\n  "
@@ -4099,7 +4100,7 @@ ewscope_md_state = {ids: {}}
     out << boxed + " = or i64 " + masked + ", -1688849860263936\n  "
     out << "br label %ovf.merge." + bid + "\n"
     out << "ovf.slow." + bid + ":\n  "
-    out << slow + " = call i64 @" + inst[:rt_fallback] + "(i64 " + inst[:lhs_boxed] + ", i64 " + inst[:rhs_boxed] + ")\n  "
+    out << slow + " = call i64 @" + wire_get(inst, :rt_fallback) + "(i64 " + wire_get(inst, :lhs_boxed) + ", i64 " + wire_get(inst, :rhs_boxed) + ")\n  "
     out << "br label %ovf.merge." + bid + "\n"
     out << "ovf.merge." + bid + ":\n  "
     out << t + " = phi i64 \[" + boxed + ", %ovf.fast." + bid + "], \[" + slow + ", %ovf.slow." + bid + "]"
@@ -4111,143 +4112,143 @@ ewscope_md_state = {ids: {}}
 
   # Bitwise
   when :and_i64
-    inst[:temp] + " = and i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = and i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :or_i64
-    inst[:temp] + " = or i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = or i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :xor_i64
-    inst[:temp] + " = xor i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = xor i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :shl_i64
-    inst[:temp] + " = shl i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = shl i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :ashr_i64
-    inst[:temp] + " = ashr i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = ashr i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :lshr_i64
-    inst[:temp] + " = lshr i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = lshr i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :and_i128
-    inst[:temp] + " = and i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = and i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :or_i128
-    inst[:temp] + " = or i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = or i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :xor_i128
-    inst[:temp] + " = xor i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = xor i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :shl_i128
-    inst[:temp] + " = shl i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = shl i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :ashr_i128
-    inst[:temp] + " = ashr i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = ashr i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :lshr_i128
-    if inst[:lhs] != nil
-      inst[:temp] + " = lshr i128 " + inst[:lhs] + ", " + inst[:rhs]
-    elsif inst[:shift] != nil
-      inst[:temp] + " = lshr i128 " + inst[:value] + ", " + inst[:shift].to_s()
+    if wire_get(inst, :lhs) != nil
+      wire_get(inst, :temp) + " = lshr i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
+    elsif wire_get(inst, :shift) != nil
+      wire_get(inst, :temp) + " = lshr i128 " + wire_get(inst, :value) + ", " + wire_get(inst, :shift).to_s()
     else
       "; UNKNOWN WIRE OP: " + op.to_s()
 
   # Comparison
   when :icmp_i64
-    inst[:temp] + " = icmp " + inst[:pred] + " i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = icmp " + wire_get(inst, :pred) + " i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :truthy_inline
-    inst[:temp] + " = icmp ugt i64 " + inst[:value] + ", 1"
+    wire_get(inst, :temp) + " = icmp ugt i64 " + wire_get(inst, :value) + ", 1"
   when :icmp_ne_zero
-    inst[:temp] + " = icmp ne i64 " + inst[:value] + ", 0"
+    wire_get(inst, :temp) + " = icmp ne i64 " + wire_get(inst, :value) + ", 0"
   when :icmp_ne_i64
-    inst[:temp] + " = icmp ne i64 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = icmp ne i64 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :icmp_i128
-    inst[:temp] + " = icmp " + inst[:pred] + " i128 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = icmp " + wire_get(inst, :pred) + " i128 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
 
   # Boolean
   when :and_i1
-    inst[:temp] + " = and i1 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = and i1 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :or_i1
-    inst[:temp] + " = or i1 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = or i1 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :not_i1
-    inst[:temp] + " = xor i1 " + inst[:value] + ", true"
+    wire_get(inst, :temp) + " = xor i1 " + wire_get(inst, :value) + ", true"
 
   # Cast
   when :zext_i1_i64
-    inst[:temp] + " = zext i1 " + inst[:value] + " to i64"
+    wire_get(inst, :temp) + " = zext i1 " + wire_get(inst, :value) + " to i64"
   when :trunc_i64_i32
-    inst[:temp] + " = trunc i64 " + inst[:value] + " to i32"
+    wire_get(inst, :temp) + " = trunc i64 " + wire_get(inst, :value) + " to i32"
   when :sext_i64_i128
-    inst[:temp] + " = sext i64 " + inst[:value] + " to i128"
+    wire_get(inst, :temp) + " = sext i64 " + wire_get(inst, :value) + " to i128"
   when :zext_i32_i64
-    inst[:temp] + " = zext i32 " + inst[:value] + " to i64"
+    wire_get(inst, :temp) + " = zext i32 " + wire_get(inst, :value) + " to i64"
   when :select_i64
-    inst[:temp] + " = select i1 " + inst[:cond] + ", i64 " + inst[:then_val] + ", i64 " + inst[:else_val]
+    wire_get(inst, :temp) + " = select i1 " + wire_get(inst, :cond) + ", i64 " + wire_get(inst, :then_val) + ", i64 " + wire_get(inst, :else_val)
 
   # NaN-boxing
   when :nanbox_int
-    raw_str = inst[:raw].to_s()
+    raw_str = wire_get(inst, :raw).to_s()
     ch = raw_str.slice(0, 1)
     if ch != nil && (ch == "-" || (ch >= "0" && ch <= "9"))
       wval = (raw_str.to_i() & 281474976710655) | -1688849860263936
       lit = llvm_wvalue_literal(wval)
-      inst[:temp_masked] + " = or i64 0, " + lit + "\n  " + inst[:temp] + " = or i64 0, " + lit
+      wire_get(inst, :temp_masked) + " = or i64 0, " + lit + "\n  " + wire_get(inst, :temp) + " = or i64 0, " + lit
     else
-      inst[:temp_masked] + " = and i64 " + raw_str + ", " + machine_i64_text(w_payload_mask) + "\n  " + inst[:temp] + " = or i64 " + inst[:temp_masked] + ", " + machine_i64_text(w_tag_int)
+      wire_get(inst, :temp_masked) + " = and i64 " + raw_str + ", " + machine_i64_text(w_payload_mask) + "\n  " + wire_get(inst, :temp) + " = or i64 " + wire_get(inst, :temp_masked) + ", " + machine_i64_text(w_tag_int)
   when :nanunbox_int
-    inst[:temp_shl] + " = shl i64 " + inst[:boxed] + ", 16\n  " + inst[:temp] + " = ashr i64 " + inst[:temp_shl] + ", 16"
+    wire_get(inst, :temp_shl) + " = shl i64 " + wire_get(inst, :boxed) + ", 16\n  " + wire_get(inst, :temp) + " = ashr i64 " + wire_get(inst, :temp_shl) + ", 16"
   when :nanbox_bool
-    inst[:temp] + " = select i1 " + inst[:value] + ", i64 " + w_true.to_s() + ", i64 " + w_false.to_s()
+    wire_get(inst, :temp) + " = select i1 " + wire_get(inst, :value) + ", i64 " + w_true.to_s() + ", i64 " + w_false.to_s()
   when :nanunbox_float
-    inst[:temp_bits] + " = sub i64 " + inst[:boxed] + ", " + machine_i64_text(w_double_bias) + "\n  " + inst[:temp] + " = bitcast i64 " + inst[:temp_bits] + " to double"
+    wire_get(inst, :temp_bits) + " = sub i64 " + wire_get(inst, :boxed) + ", " + machine_i64_text(w_double_bias) + "\n  " + wire_get(inst, :temp) + " = bitcast i64 " + wire_get(inst, :temp_bits) + " to double"
   when :nanbox_float
-    inst[:temp_bits] + " = bitcast double " + inst[:raw] + " to i64\n  " + inst[:temp] + " = add i64 " + inst[:temp_bits] + ", " + machine_i64_text(w_double_bias)
+    wire_get(inst, :temp_bits) + " = bitcast double " + wire_get(inst, :raw) + " to i64\n  " + wire_get(inst, :temp) + " = add i64 " + wire_get(inst, :temp_bits) + ", " + machine_i64_text(w_double_bias)
 
   # Raw float value plumbing
   when :fpext_f32_f64
-    inst[:temp] + " = fpext float " + inst[:value] + " to double"
+    wire_get(inst, :temp) + " = fpext float " + wire_get(inst, :value) + " to double"
   when :fptrunc_f64_f32
-    inst[:temp] + " = fptrunc double " + inst[:value] + " to float"
+    wire_get(inst, :temp) + " = fptrunc double " + wire_get(inst, :value) + " to float"
   when :fptosi_f64_i64
-    inst[:temp] + " = fptosi double " + inst[:value] + " to i64"
+    wire_get(inst, :temp) + " = fptosi double " + wire_get(inst, :value) + " to i64"
   when :fptoui_f64_i64
-    inst[:temp] + " = fptoui double " + inst[:value] + " to i64"
+    wire_get(inst, :temp) + " = fptoui double " + wire_get(inst, :value) + " to i64"
   when :fptosi_f64_i128
-    inst[:temp] + " = fptosi double " + inst[:value] + " to i128"
+    wire_get(inst, :temp) + " = fptosi double " + wire_get(inst, :value) + " to i128"
   when :fptoui_f64_i128
-    inst[:temp] + " = fptoui double " + inst[:value] + " to i128"
+    wire_get(inst, :temp) + " = fptoui double " + wire_get(inst, :value) + " to i128"
   when :bitcast_i64_f64
-    inst[:temp] + " = bitcast i64 " + inst[:value] + " to double"
+    wire_get(inst, :temp) + " = bitcast i64 " + wire_get(inst, :value) + " to double"
   when :bitcast_f64_i64
-    inst[:temp] + " = bitcast double " + inst[:value] + " to i64"
+    wire_get(inst, :temp) + " = bitcast double " + wire_get(inst, :value) + " to i64"
   when :bitcast_i32_f32
-    inst[:temp] + " = bitcast i32 " + inst[:value] + " to float"
+    wire_get(inst, :temp) + " = bitcast i32 " + wire_get(inst, :value) + " to float"
   when :bitcast_f32_i32
-    inst[:temp] + " = bitcast float " + inst[:value] + " to i32"
+    wire_get(inst, :temp) + " = bitcast float " + wire_get(inst, :value) + " to i32"
 
   # IEEE-half (f16) element conversion. Storage is i16; arithmetic is f32.
   # fptrunc/fpext lower to single fcvt instructions on AArch64.
   when :fptrunc_f32_f16
-    inst[:temp] + " = fptrunc float " + inst[:value] + " to half"
+    wire_get(inst, :temp) + " = fptrunc float " + wire_get(inst, :value) + " to half"
   when :fpext_f16_f32
-    inst[:temp] + " = fpext half " + inst[:value] + " to float"
+    wire_get(inst, :temp) + " = fpext half " + wire_get(inst, :value) + " to float"
   when :bitcast_f16_i16
-    inst[:temp] + " = bitcast half " + inst[:value] + " to i16"
+    wire_get(inst, :temp) + " = bitcast half " + wire_get(inst, :value) + " to i16"
   when :bitcast_i16_f16
-    inst[:temp] + " = bitcast i16 " + inst[:value] + " to half"
+    wire_get(inst, :temp) + " = bitcast i16 " + wire_get(inst, :value) + " to half"
   when :zext_i16_i64
-    inst[:temp] + " = zext i16 " + inst[:value] + " to i64"
+    wire_get(inst, :temp) + " = zext i16 " + wire_get(inst, :value) + " to i64"
   when :trunc_i64_i16
-    inst[:temp] + " = trunc i64 " + inst[:value] + " to i16"
+    wire_get(inst, :temp) + " = trunc i64 " + wire_get(inst, :value) + " to i16"
 
-  # Float arithmetic — inst[:fp_flags] overrides the function-level default for
+  # Float arithmetic — wire_get(inst, :fp_flags) overrides the function-level default for
   # @fastmath / @strictmath block scopes; nil means use the function default.
   when :fadd_f64
-    f = inst[:fp_flags]
+    f = wire_get(inst, :fp_flags)
     f = fp_flags if f == nil
-    inst[:temp] + " = fadd " + f + "double " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = fadd " + f + "double " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :fsub_f64
-    f = inst[:fp_flags]
+    f = wire_get(inst, :fp_flags)
     f = fp_flags if f == nil
-    inst[:temp] + " = fsub " + f + "double " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = fsub " + f + "double " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :fmul_f64
-    f = inst[:fp_flags]
+    f = wire_get(inst, :fp_flags)
     f = fp_flags if f == nil
-    inst[:temp] + " = fmul " + f + "double " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = fmul " + f + "double " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :fdiv_f64
-    f = inst[:fp_flags]
+    f = wire_get(inst, :fp_flags)
     f = fp_flags if f == nil
-    inst[:temp] + " = fdiv " + f + "double " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = fdiv " + f + "double " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
   when :frem_f64
-    inst[:temp] + " = frem double " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = frem double " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
 
   # FMA peephole: emitted by lowering/ops.w for a*b+c / a*b-c in precise mode.
   # This is the llvm.fmuladd intrinsic: "fuse if target supports it" — always
@@ -4257,21 +4258,21 @@ ewscope_md_state = {ids: {}}
   # would make the mul/add operands invisible to those operand-walkers, so a
   # promoted-away load would leave the fmuladd referencing a deleted temp.
   when :fmuladd_f64
-    inst[:temp] + " = call double @llvm.fmuladd.f64(double " + inst[:lhs] + ", double " + inst[:rhs] + ", double " + inst[:value] + ")"
+    wire_get(inst, :temp) + " = call double @llvm.fmuladd.f64(double " + wire_get(inst, :lhs) + ", double " + wire_get(inst, :rhs) + ", double " + wire_get(inst, :value) + ")"
   # Explicit `fma(a,b,c)` — llvm.fma.f64 is ALWAYS a true fused multiply-add
   # (single rounding), unlike fmuladd's "contract if profitable". Same
   # lhs/rhs/value operand fields for mem2reg/content-hash safety.
   when :fma_f64
-    inst[:temp] + " = call double @llvm.fma.f64(double " + inst[:lhs] + ", double " + inst[:rhs] + ", double " + inst[:value] + ")"
+    wire_get(inst, :temp) + " = call double @llvm.fma.f64(double " + wire_get(inst, :lhs) + ", double " + wire_get(inst, :rhs) + ", double " + wire_get(inst, :value) + ")"
   # Raw libm call — Math.* fast path on unboxed operands (lowering/
   # method_call.w). Unary rides on :value, binary (pow/atan2) on :lhs/:rhs —
   # all three field names are walked by apply_subst and content_hash, so
   # mem2reg promotion of the operand loads stays correct (see :fmuladd_f64).
   when :call_libm_f64
-    if inst[:value] != nil
-      inst[:temp] + " = call double @" + inst[:name] + "(double " + inst[:value] + ")"
+    if wire_get(inst, :value) != nil
+      wire_get(inst, :temp) + " = call double @" + wire_get(inst, :name) + "(double " + wire_get(inst, :value) + ")"
     else
-      inst[:temp] + " = call double @" + inst[:name] + "(double " + inst[:lhs] + ", double " + inst[:rhs] + ")"
+      wire_get(inst, :temp) + " = call double @" + wire_get(inst, :name) + "(double " + wire_get(inst, :lhs) + ", double " + wire_get(inst, :rhs) + ")"
 
   # Numeric->raw-double coercion of a boxed WValue (ensure_raw_f64 fallback):
   # takes an i64 WValue (boxed double / Decimal / Int), returns a raw double.
@@ -4279,7 +4280,7 @@ ewscope_md_state = {ids: {}}
   # param arriving as a WValue, nbody's `dt`) folds to sub+bitcast inline
   # instead of an out-of-line w_num_to_f64 call per use site.
   when :call_num_to_f64
-    inst[:temp] + " = call double @__w_num_to_f64_fast(i64 " + inst[:value] + ")"
+    wire_get(inst, :temp) + " = call double @__w_num_to_f64_fast(i64 " + wire_get(inst, :value) + ")"
 
   # Fused-elementwise loop ops (lowering/ops.w try_fuse_elementwise). The
   # header decode is hoisted out of the fused loop deliberately: the loop
@@ -4288,8 +4289,8 @@ ewscope_md_state = {ids: {}}
   # must re-read them per access. Operands ride on :value/:ptr/:index only
   # (fields apply_subst and content_hash already walk).
   when :ta_f64_elems_ptr
-    t = inst[:temp]
-    v = inst[:value]
+    t = wire_get(inst, :temp)
+    v = wire_get(inst, :value)
     parts = StringBuffer(420)
     parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
@@ -4301,8 +4302,8 @@ ewscope_md_state = {ids: {}}
     parts << t + " = getelementptr double, ptr " + t + ".slots, i64 " + t + ".st"
     parts.to_s()
   when :ta_size_raw
-    t = inst[:temp]
-    v = inst[:value]
+    t = wire_get(inst, :temp)
+    v = wire_get(inst, :value)
     parts = StringBuffer(240)
     parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
@@ -4320,8 +4321,8 @@ ewscope_md_state = {ids: {}}
   # box's low 21 bits, so both paths stay inline and call-free — the whole
   # diamond is pure and LICM-hoistable, preserving the fill-loop win.
   when :array_size_raw
-    t = inst[:temp]
-    v = inst[:value]
+    t = wire_get(inst, :temp)
+    v = wire_get(inst, :value)
     lbl = "asz." + t.slice(1, t.size() - 1)
     parts = StringBuffer(480)
     parts << t + ".tg = lshr i64 " + v + ", 45\n  "
@@ -4347,8 +4348,8 @@ ewscope_md_state = {ids: {}}
   # the whole test is safe on ANY WValue. Internal labels keep the phi's
   # predecessors self-contained (same trick as :array_size_raw).
   when :poly_array_guard
-    t = inst[:temp]
-    v = inst[:value]
+    t = wire_get(inst, :temp)
+    v = wire_get(inst, :value)
     lbl = "pag." + t.slice(1, t.size() - 1)
     parts = StringBuffer(560)
     # v5: W_TAG_ARRAY (0xFFF4 = 65524) — the object-space + subtag pair
@@ -4370,8 +4371,8 @@ ewscope_md_state = {ids: {}}
     parts.to_s()
   # WArray.cap (i32 header field at +12) — same shape/soundness as :ta_size_raw.
   when :ta_cap_raw
-    t = inst[:temp]
-    v = inst[:value]
+    t = wire_get(inst, :temp)
+    v = wire_get(inst, :value)
     parts = StringBuffer(240)
     parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
@@ -4383,28 +4384,28 @@ ewscope_md_state = {ids: {}}
   # accesses) plus per-fusion-site scoped no-alias metadata when lowering
   # stamped ewscope (see ewscope_md_defs above).
   when :load_f64_at
-    t = inst[:temp]
-    t + ".p = getelementptr double, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + " = load double, ptr " + t + ".p, align 8" + tbaa_elem_suffix() + ewscope_load_suffix(inst)
+    t = wire_get(inst, :temp)
+    t + ".p = getelementptr double, ptr " + wire_get(inst, :ptr) + ", i64 " + wire_get(inst, :index) + "\n  " + t + " = load double, ptr " + t + ".p, align 8" + tbaa_elem_suffix() + ewscope_load_suffix(inst)
   when :store_f64_at
-    t = inst[:temp]
-    t + " = getelementptr double, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  store double " + inst[:value] + ", ptr " + t + ", align 8" + tbaa_elem_suffix() + ewscope_store_suffix(inst)
+    t = wire_get(inst, :temp)
+    t + " = getelementptr double, ptr " + wire_get(inst, :ptr) + ", i64 " + wire_get(inst, :index) + "\n  store double " + wire_get(inst, :value) + ", ptr " + t + ", align 8" + tbaa_elem_suffix() + ewscope_store_suffix(inst)
   # f32 variants: 4-byte stride, fpext on load / fptrunc on store so the
   # fused per-element computation stays in f64 (matching the CPU kernels,
   # which read f32 elements into doubles).
   when :load_f32_at
-    t = inst[:temp]
-    t + ".p = getelementptr float, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + ".f32 = load float, ptr " + t + ".p, align 4" + tbaa_elem_suffix() + ewscope_load_suffix(inst) + "\n  " + t + " = fpext float " + t + ".f32 to double"
+    t = wire_get(inst, :temp)
+    t + ".p = getelementptr float, ptr " + wire_get(inst, :ptr) + ", i64 " + wire_get(inst, :index) + "\n  " + t + ".f32 = load float, ptr " + t + ".p, align 4" + tbaa_elem_suffix() + ewscope_load_suffix(inst) + "\n  " + t + " = fpext float " + t + ".f32 to double"
   when :store_f32_at
-    t = inst[:temp]
-    t + ".tr = fptrunc double " + inst[:value] + " to float\n  " + t + " = getelementptr float, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  store float " + t + ".tr, ptr " + t + ", align 4" + tbaa_elem_suffix() + ewscope_store_suffix(inst)
+    t = wire_get(inst, :temp)
+    t + ".tr = fptrunc double " + wire_get(inst, :value) + " to float\n  " + t + " = getelementptr float, ptr " + wire_get(inst, :ptr) + ", i64 " + wire_get(inst, :index) + "\n  store float " + t + ".tr, ptr " + t + ", align 4" + tbaa_elem_suffix() + ewscope_store_suffix(inst)
   when :load_i64_at
-    t = inst[:temp]
-    t + ".p = getelementptr i64, ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  " + t + " = load i64, ptr " + t + ".p, align 8" + tbaa_elem_suffix() + ewscope_load_suffix(inst)
+    t = wire_get(inst, :temp)
+    t + ".p = getelementptr i64, ptr " + wire_get(inst, :ptr) + ", i64 " + wire_get(inst, :index) + "\n  " + t + " = load i64, ptr " + t + ".p, align 8" + tbaa_elem_suffix() + ewscope_load_suffix(inst)
   # Element-0 address of a typed array as a raw i64 — the arg block handed
   # to w_fused_parallel_run / w_fused_gpu_run. 8-byte stride (i64 blocks).
   when :ta_data_addr
-    t = inst[:temp]
-    v = inst[:value]
+    t = wire_get(inst, :temp)
+    v = wire_get(inst, :value)
     parts = StringBuffer(400)
     parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
@@ -4418,8 +4419,8 @@ ewscope_md_state = {ids: {}}
     parts.to_s()
   # f32 element-pointer decode (float stride) — sibling of :ta_f64_elems_ptr.
   when :ta_f32_elems_ptr
-    t = inst[:temp]
-    v = inst[:value]
+    t = wire_get(inst, :temp)
+    v = wire_get(inst, :value)
     parts = StringBuffer(420)
     parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
@@ -4433,9 +4434,9 @@ ewscope_md_state = {ids: {}}
   # Fixed-width integer sibling of the float element-pointer decoders. The
   # signedness lives on loads, not pointer arithmetic; :type is i8/i16/i32/i64.
   when :ta_int_elems_ptr
-    t = inst[:temp]
-    v = inst[:value]
-    ty = inst[:type]
+    t = wire_get(inst, :temp)
+    v = wire_get(inst, :value)
+    ty = wire_get(inst, :type)
     parts = StringBuffer(420)
     parts << t + ".hdr = and i64 " + v + ", 140737488355312\n  "
     parts << t + ".hp = inttoptr i64 " + t + ".hdr to ptr\n  "
@@ -4447,8 +4448,8 @@ ewscope_md_state = {ids: {}}
     parts << t + " = getelementptr " + ty + ", ptr " + t + ".slots, i64 " + t + ".st"
     parts.to_s()
   when :load_int_at
-    t = inst[:temp]
-    ty = inst[:type]
+    t = wire_get(inst, :temp)
+    ty = wire_get(inst, :type)
     align = "8"
     if ty == "i8"
       align = "1"
@@ -4457,22 +4458,22 @@ ewscope_md_state = {ids: {}}
     elsif ty == "i32"
       align = "4"
     parts = StringBuffer(220)
-    parts << t + ".p = getelementptr " + ty + ", ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  "
+    parts << t + ".p = getelementptr " + ty + ", ptr " + wire_get(inst, :ptr) + ", i64 " + wire_get(inst, :index) + "\n  "
     if ty == "i64"
       parts << t + " = load i64, ptr " + t + ".p, align " + align + tbaa_elem_suffix() + ewscope_load_suffix(inst)
     else
       parts << t + ".n = load " + ty + ", ptr " + t + ".p, align " + align + tbaa_elem_suffix() + ewscope_load_suffix(inst) + "\n  "
-      ext = inst[:kind] == :signed ? "sext" : "zext"
+      ext = wire_get(inst, :kind) == :signed ? "sext" : "zext"
       parts << t + " = " + ext + " " + ty + " " + t + ".n to i64"
     parts.to_s()
   when :narrow_i64
-    t = inst[:temp]
-    ty = inst[:type]
-    ext = inst[:kind] == :signed ? "sext" : "zext"
-    t + ".tr = trunc i64 " + inst[:value] + " to " + ty + "\n  " + t + " = " + ext + " " + ty + " " + t + ".tr to i64"
+    t = wire_get(inst, :temp)
+    ty = wire_get(inst, :type)
+    ext = wire_get(inst, :kind) == :signed ? "sext" : "zext"
+    t + ".tr = trunc i64 " + wire_get(inst, :value) + " to " + ty + "\n  " + t + " = " + ext + " " + ty + " " + t + ".tr to i64"
   when :store_int_at
-    t = inst[:temp]
-    ty = inst[:type]
+    t = wire_get(inst, :temp)
+    ty = wire_get(inst, :type)
     align = "8"
     if ty == "i8"
       align = "1"
@@ -4481,40 +4482,40 @@ ewscope_md_state = {ids: {}}
     elsif ty == "i32"
       align = "4"
     parts = StringBuffer(220)
-    stored = inst[:value]
+    stored = wire_get(inst, :value)
     if ty != "i64"
       parts << t + ".tr = trunc i64 " + stored + " to " + ty + "\n  "
       stored = t + ".tr"
-    parts << t + " = getelementptr " + ty + ", ptr " + inst[:ptr] + ", i64 " + inst[:index] + "\n  "
+    parts << t + " = getelementptr " + ty + ", ptr " + wire_get(inst, :ptr) + ", i64 " + wire_get(inst, :index) + "\n  "
     parts << "store " + ty + " " + stored + ", ptr " + t + ", align " + align + tbaa_elem_suffix() + ewscope_store_suffix(inst)
     parts.to_s()
   when :inttoptr_i64
-    inst[:temp] + " = inttoptr i64 " + inst[:value] + " to ptr"
+    wire_get(inst, :temp) + " = inttoptr i64 " + wire_get(inst, :value) + " to ptr"
   # Address of a module function as raw i64 — passed to the runtime fused
   # partitioner, which calls it back as int64_t(*)(int64_t,int64_t,int64_t).
   when :fn_addr_i64
-    inst[:temp] + " = ptrtoint ptr @" + inst[:name] + " to i64"
+    wire_get(inst, :temp) + " = ptrtoint ptr @" + wire_get(inst, :name) + " to i64"
   when :fneg_f64
-    inst[:temp] + " = fneg double " + inst[:value]
+    wire_get(inst, :temp) + " = fneg double " + wire_get(inst, :value)
 
   # Float comparison — fp_flags only applies for fast mode (nnan changes predicate semantics)
   when :fcmp_f64
-    f = inst[:fp_flags]
+    f = wire_get(inst, :fp_flags)
     f = fp_flags if f == nil
     cmp_flags = f == "fast " ? "fast " : ""
-    inst[:temp] + " = fcmp " + cmp_flags + inst[:pred] + " double " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = fcmp " + cmp_flags + wire_get(inst, :pred) + " double " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
 
   # i128 operations
   when :zext_i64_i128
-    inst[:temp] + " = zext i64 " + inst[:value] + " to i128"
+    wire_get(inst, :temp) + " = zext i64 " + wire_get(inst, :value) + " to i128"
   when :trunc_i128_i64
-    inst[:temp] + " = trunc i128 " + inst[:value] + " to i64"
+    wire_get(inst, :temp) + " = trunc i128 " + wire_get(inst, :value) + " to i64"
 
   # Inline bool array get: load byte, add 1 -> W_FALSE(1) or W_TRUE(2)
   when :bool_array_get_byte_inline
-    t = inst[:temp]
-    arr = inst[:arr]
-    idx = inst[:idx]
+    t = wire_get(inst, :temp)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
     ap = t + ".ap"
     ap_p = t + ".app"
     dg = t + ".dg"
@@ -4535,10 +4536,10 @@ ewscope_md_state = {ids: {}}
 
   # Inline bool array set: store (val - 1) as byte. W_TRUE(2)->1, W_FALSE(1)->0
   when :bool_array_set_byte_inline
-    t = inst[:temp]
-    arr = inst[:arr]
-    idx = inst[:idx]
-    val = inst[:val]
+    t = wire_get(inst, :temp)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
+    val = wire_get(inst, :val)
     ap = t + ".ap"
     ap_p = t + ".app"
     dg = t + ".dg"
@@ -4563,9 +4564,9 @@ ewscope_md_state = {ids: {}}
   # offset 4 (matching typed_array_get_inline). Pre-merge this read from
   # offset 8, which now points at size/cap and produces a garbage pointer.
   when :bool_array_get_inline
-    t = inst[:temp]
-    arr = inst[:arr]
-    idx = inst[:idx]
+    t = wire_get(inst, :temp)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
     ap = t + ".ap"
     ap_p = t + ".app"
     dg = t + ".dg"
@@ -4605,7 +4606,7 @@ ewscope_md_state = {ids: {}}
     # when it knows the caller wants a boolean (truthy-elision); other
     # call sites get the WValue form and ensure_i64_value re-boxes if
     # needed.
-    if inst[:as_i1] == true
+    if wire_get(inst, :as_i1) == true
       out << t + " = icmp ne i8 " + masked + ", 0"
     else
       out << is_set + " = icmp ne i8 " + masked + ", 0\n  "
@@ -4616,10 +4617,10 @@ ewscope_md_state = {ids: {}}
   # Same offset fix as bool_array_get_inline above (slots ptr at offset 16,
   # start i32 at offset 4 — WArray-merge layout).
   when :bool_array_set_inline
-    t = inst[:temp]
-    arr = inst[:arr]
-    idx = inst[:idx]
-    val = inst[:val]
+    t = wire_get(inst, :temp)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
+    val = wire_get(inst, :val)
     ap = t + ".ap"
     ap_p = t + ".app"
     dg = t + ".dg"
@@ -4665,57 +4666,57 @@ ewscope_md_state = {ids: {}}
 
   # Int to float conversion
   when :sitofp_i64_f64
-    inst[:temp] + " = sitofp i64 " + inst[:value] + " to double"
+    wire_get(inst, :temp) + " = sitofp i64 " + wire_get(inst, :value) + " to double"
   when :uitofp_i64_f64
-    inst[:temp] + " = uitofp i64 " + inst[:value] + " to double"
+    wire_get(inst, :temp) + " = uitofp i64 " + wire_get(inst, :value) + " to double"
   when :sitofp_i128_f64
-    inst[:temp] + " = sitofp i128 " + inst[:value] + " to double"
+    wire_get(inst, :temp) + " = sitofp i128 " + wire_get(inst, :value) + " to double"
   when :uitofp_i128_f64
-    inst[:temp] + " = uitofp i128 " + inst[:value] + " to double"
+    wire_get(inst, :temp) + " = uitofp i128 " + wire_get(inst, :value) + " to double"
 
   # Float
   when :const_float
-    bits_temp = inst[:temp] + ".bits"
-    bits_temp + " = bitcast double " + inst[:value] + " to i64\n  " + inst[:temp] + " = add i64 " + bits_temp + ", " + machine_i64_text(w_double_bias)
+    bits_temp = wire_get(inst, :temp) + ".bits"
+    bits_temp + " = bitcast double " + wire_get(inst, :value) + " to i64\n  " + wire_get(inst, :temp) + " = add i64 " + bits_temp + ", " + machine_i64_text(w_double_bias)
   when :const_decimal
-    inst[:temp] + " = call i64 @w_decimal(i64 " + inst[:sig].to_s() + ", i32 " + inst[:scale].to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_decimal(i64 " + wire_get(inst, :sig).to_s() + ", i32 " + wire_get(inst, :scale).to_s() + ")"
   when :const_currency
-    inst[:temp] + " = call i64 @w_currency(i32 " + inst[:symbol_id].to_s() + ", i64 " + inst[:sig].to_s() + ", i32 " + inst[:scale].to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_currency(i32 " + wire_get(inst, :symbol_id).to_s() + ", i64 " + wire_get(inst, :sig).to_s() + ", i32 " + wire_get(inst, :scale).to_s() + ")"
   when :const_quantity
-    inst[:temp] + " = call i64 @w_quantity(i32 " + inst[:unit_id].to_s() + ", i64 " + inst[:sig].to_s() + ", i32 " + inst[:scale].to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_quantity(i32 " + wire_get(inst, :unit_id).to_s() + ", i64 " + wire_get(inst, :sig).to_s() + ", i32 " + wire_get(inst, :scale).to_s() + ")"
   when :const_duration_ns
-    inst[:temp] + " = call i64 @w_duration_ns(i64 " + inst[:ns].to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_duration_ns(i64 " + wire_get(inst, :ns).to_s() + ")"
   when :const_duration_months_ms
-    inst[:temp] + " = call i64 @w_duration_months_ms(i32 " + inst[:months].to_s() + ", i32 " + inst[:ms].to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_duration_months_ms(i32 " + wire_get(inst, :months).to_s() + ", i32 " + wire_get(inst, :ms).to_s() + ")"
 
   when :const_uuid
-    used_ptr_ids[inst[:string_id]] = true
+    used_ptr_ids[wire_get(inst, :string_id)] = true
     lbr = "\["
     rbr = "]"
-    bl = inst[:byte_len].to_s()
-    inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:string_id].to_s() + ", i32 0, i32 0\n  " + inst[:temp] + " = call i64 @w_uuid_from_hex(ptr " + inst[:temp_ptr] + ")"
+    bl = wire_get(inst, :byte_len).to_s()
+    wire_get(inst, :temp_ptr) + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :string_id).to_s() + ", i32 0, i32 0\n  " + wire_get(inst, :temp) + " = call i64 @w_uuid_from_hex(ptr " + wire_get(inst, :temp_ptr) + ")"
 
   when :const_date
-    inst[:temp] + " = call i64 @w_date(i32 " + inst[:year].to_s() + ", i32 " + inst[:month].to_s() + ", i32 " + inst[:day].to_s() + ", i32 " + inst[:hour].to_s() + ", i32 " + inst[:min].to_s() + ", i32 " + inst[:sec].to_s() + ", i32 " + inst[:tz].to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_date(i32 " + wire_get(inst, :year).to_s() + ", i32 " + wire_get(inst, :month).to_s() + ", i32 " + wire_get(inst, :day).to_s() + ", i32 " + wire_get(inst, :hour).to_s() + ", i32 " + wire_get(inst, :min).to_s() + ", i32 " + wire_get(inst, :sec).to_s() + ", i32 " + wire_get(inst, :tz).to_s() + ")"
 
   when :const_ipv4
-    inst[:temp] + " = call i64 @w_ipv4(i32 " + inst[:a].to_s() + ", i32 " + inst[:b].to_s() + ", i32 " + inst[:c].to_s() + ", i32 " + inst[:d].to_s() + ", i32 " + inst[:cidr].to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_ipv4(i32 " + wire_get(inst, :a).to_s() + ", i32 " + wire_get(inst, :b).to_s() + ", i32 " + wire_get(inst, :c).to_s() + ", i32 " + wire_get(inst, :d).to_s() + ", i32 " + wire_get(inst, :cidr).to_s() + ")"
 
   when :const_ipv6
-    used_ptr_ids[inst[:string_id]] = true
+    used_ptr_ids[wire_get(inst, :string_id)] = true
     lbr = "\["
     rbr = "]"
-    bl = inst[:byte_len].to_s()
-    inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:string_id].to_s() + ", i32 0, i32 0\n  " + inst[:temp] + " = call i64 @w_ipv6_from_string(ptr " + inst[:temp_ptr] + ", i32 " + inst[:cidr].to_s() + ")"
+    bl = wire_get(inst, :byte_len).to_s()
+    wire_get(inst, :temp_ptr) + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :string_id).to_s() + ", i32 0, i32 0\n  " + wire_get(inst, :temp) + " = call i64 @w_ipv6_from_string(ptr " + wire_get(inst, :temp_ptr) + ", i32 " + wire_get(inst, :cidr).to_s() + ")"
 
   when :const_rational
-    inst[:temp] + " = call i64 @w_rational(i32 " + inst[:num].to_s() + ", i32 " + inst[:den].to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_rational(i32 " + wire_get(inst, :num).to_s() + ", i32 " + wire_get(inst, :den).to_s() + ")"
 
   when :const_char
-    inst[:temp] + " = call i64 @w_box_char(i32 " + inst[:codepoint].to_s() + ")" + wvalue_char_range_metadata_suffix()
+    wire_get(inst, :temp) + " = call i64 @w_box_char(i32 " + wire_get(inst, :codepoint).to_s() + ")" + wvalue_char_range_metadata_suffix()
 
   when :const_color
-    inst[:temp] + " = call i64 @w_color(i32 " + inst[:r].to_s() + ", i32 " + inst[:g].to_s() + ", i32 " + inst[:b].to_s() + ", i32 " + inst[:a].to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_color(i32 " + wire_get(inst, :r).to_s() + ", i32 " + wire_get(inst, :g).to_s() + ", i32 " + wire_get(inst, :b).to_s() + ", i32 " + wire_get(inst, :a).to_s() + ")"
 
   # View access: load byte from raw object pointer.
   # The receiver mask for EVERY view op is 140737488355312
@@ -4727,18 +4728,18 @@ ewscope_md_state = {ids: {}}
   # in this file keep -16: they sit behind subtag guards a bigint cannot
   # pass.
   when :view_load_byte
-    ptr_raw = inst[:temp] + ".ptr"
-    byte_ptr = inst[:temp] + ".bp"
-    byte_val = inst[:temp] + ".b"
-    ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:index] + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + ".zext = zext i8 " + byte_val + " to i64\n  " + w_int_call_with_range(inst[:temp], inst[:temp] + ".zext", 0, 256)
+    ptr_raw = wire_get(inst, :temp) + ".ptr"
+    byte_ptr = wire_get(inst, :temp) + ".bp"
+    byte_val = wire_get(inst, :temp) + ".b"
+    ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + wire_get(inst, :index) + "\n  " + byte_val + " = load i8, ptr " + wire_get(inst, :temp) + ".gep\n  " + wire_get(inst, :temp) + ".zext = zext i8 " + byte_val + " to i64\n  " + w_int_call_with_range(wire_get(inst, :temp), wire_get(inst, :temp) + ".zext", 0, 256)
 
   # Fixed inline u8[N] field: load at the statically known field offset plus
   # the caller-checked dynamic index. No hidden bounds branch is emitted.
   when :view_load_inline_byte
-    ptr_raw = inst[:temp] + ".ptr"
-    byte_ptr = inst[:temp] + ".bp"
-    byte_val = inst[:temp] + ".b"
-    ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:offset].to_s() + "\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + inst[:temp] + ".base, i64 " + inst[:index] + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + " = zext i8 " + byte_val + " to i64"
+    ptr_raw = wire_get(inst, :temp) + ".ptr"
+    byte_ptr = wire_get(inst, :temp) + ".bp"
+    byte_val = wire_get(inst, :temp) + ".b"
+    ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + wire_get(inst, :offset).to_s() + "\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + wire_get(inst, :temp) + ".base, i64 " + wire_get(inst, :index) + "\n  " + byte_val + " = load i8, ptr " + wire_get(inst, :temp) + ".gep\n  " + wire_get(inst, :temp) + " = zext i8 " + byte_val + " to i64"
 
   # Widened inline array element (`u64[] limbs` and friends): strided load at
   # field offset + index * element size. i-prefixed elements sign-extend,
@@ -4746,161 +4747,161 @@ ewscope_md_state = {ids: {}}
   # residue of the field offset, which every element shares. Like the byte
   # form, no hidden bounds branch is emitted — the method owns the check.
   when :view_load_inline_elem
-    ptr_raw = inst[:temp] + ".ptr"
-    byte_ptr = inst[:temp] + ".bp"
-    bits = (inst[:size] * 8).to_s()
-    elem_align = (inst[:offset] % inst[:size]) == 0 ? inst[:size].to_s() : "1"
-    head = ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:offset].to_s() + "\n  " + inst[:temp] + ".gep = getelementptr i" + bits + ", ptr " + inst[:temp] + ".base, i64 " + inst[:index] + "\n  "
-    if inst[:size] == 8
-      head + inst[:temp] + " = load i64, ptr " + inst[:temp] + ".gep, align " + elem_align
+    ptr_raw = wire_get(inst, :temp) + ".ptr"
+    byte_ptr = wire_get(inst, :temp) + ".bp"
+    bits = (wire_get(inst, :size) * 8).to_s()
+    elem_align = (wire_get(inst, :offset) % wire_get(inst, :size)) == 0 ? wire_get(inst, :size).to_s() : "1"
+    head = ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + wire_get(inst, :offset).to_s() + "\n  " + wire_get(inst, :temp) + ".gep = getelementptr i" + bits + ", ptr " + wire_get(inst, :temp) + ".base, i64 " + wire_get(inst, :index) + "\n  "
+    if wire_get(inst, :size) == 8
+      head + wire_get(inst, :temp) + " = load i64, ptr " + wire_get(inst, :temp) + ".gep, align " + elem_align
     else
-      extension = inst[:elem].starts_with?("i") ? "sext" : "zext"
-      head + inst[:temp] + ".w = load i" + bits + ", ptr " + inst[:temp] + ".gep, align " + elem_align + "\n  " + inst[:temp] + " = " + extension + " i" + bits + " " + inst[:temp] + ".w to i64"
+      extension = wire_get(inst, :elem).starts_with?("i") ? "sext" : "zext"
+      head + wire_get(inst, :temp) + ".w = load i" + bits + ", ptr " + wire_get(inst, :temp) + ".gep, align " + elem_align + "\n  " + wire_get(inst, :temp) + " = " + extension + " i" + bits + " " + wire_get(inst, :temp) + ".w to i64"
 
   # Store twin: truncate the raw value to the element width and store at the
   # same strided address; the instruction's temp carries the raw value
   # through so `$f[i] = v` keeps ordinary assignment-expression semantics.
   when :view_store_inline_elem
-    ptr_raw = inst[:temp] + ".ptr"
-    byte_ptr = inst[:temp] + ".bp"
-    bits = (inst[:size] * 8).to_s()
-    elem_align = (inst[:offset] % inst[:size]) == 0 ? inst[:size].to_s() : "1"
-    head = ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + inst[:offset].to_s() + "\n  " + inst[:temp] + ".gep = getelementptr i" + bits + ", ptr " + inst[:temp] + ".base, i64 " + inst[:index] + "\n  "
-    if inst[:size] == 8
-      head + "store i64 " + inst[:value] + ", ptr " + inst[:temp] + ".gep, align " + elem_align + "\n  " + inst[:temp] + " = add i64 " + inst[:value] + ", 0"
+    ptr_raw = wire_get(inst, :temp) + ".ptr"
+    byte_ptr = wire_get(inst, :temp) + ".bp"
+    bits = (wire_get(inst, :size) * 8).to_s()
+    elem_align = (wire_get(inst, :offset) % wire_get(inst, :size)) == 0 ? wire_get(inst, :size).to_s() : "1"
+    head = ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".base = getelementptr i8, ptr " + byte_ptr + ", i64 " + wire_get(inst, :offset).to_s() + "\n  " + wire_get(inst, :temp) + ".gep = getelementptr i" + bits + ", ptr " + wire_get(inst, :temp) + ".base, i64 " + wire_get(inst, :index) + "\n  "
+    if wire_get(inst, :size) == 8
+      head + "store i64 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :temp) + ".gep, align " + elem_align + "\n  " + wire_get(inst, :temp) + " = add i64 " + wire_get(inst, :value) + ", 0"
     else
-      head + inst[:temp] + ".t = trunc i64 " + inst[:value] + " to i" + bits + "\n  store i" + bits + " " + inst[:temp] + ".t, ptr " + inst[:temp] + ".gep, align " + elem_align + "\n  " + inst[:temp] + " = add i64 " + inst[:value] + ", 0"
+      head + wire_get(inst, :temp) + ".t = trunc i64 " + wire_get(inst, :value) + " to i" + bits + "\n  store i" + bits + " " + wire_get(inst, :temp) + ".t, ptr " + wire_get(inst, :temp) + ".gep, align " + elem_align + "\n  " + wire_get(inst, :temp) + " = add i64 " + wire_get(inst, :value) + ", 0"
 
   # View access: load bit from raw object pointer
   when :view_load_bit
-    ptr_raw = inst[:temp] + ".ptr"
-    byte_ptr = inst[:temp] + ".bp"
-    byte_idx = inst[:temp] + ".bidx"
-    bit_idx = inst[:temp] + ".bitidx"
-    byte_val = inst[:temp] + ".b"
-    shifted = inst[:temp] + ".sh"
-    masked = inst[:temp] + ".m"
-    ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + byte_idx + " = lshr i64 " + inst[:index] + ", 3\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + byte_idx + "\n  " + byte_val + " = load i8, ptr " + inst[:temp] + ".gep\n  " + bit_idx + " = and i64 " + inst[:index] + ", 7\n  " + bit_idx + ".trunc = trunc i64 " + bit_idx + " to i8\n  " + shifted + " = lshr i8 " + byte_val + ", " + bit_idx + ".trunc\n  " + masked + " = and i8 " + shifted + ", 1\n  " + inst[:temp] + ".zext = zext i8 " + masked + " to i64\n  " + w_int_call_with_range(inst[:temp], inst[:temp] + ".zext", 0, 2)
+    ptr_raw = wire_get(inst, :temp) + ".ptr"
+    byte_ptr = wire_get(inst, :temp) + ".bp"
+    byte_idx = wire_get(inst, :temp) + ".bidx"
+    bit_idx = wire_get(inst, :temp) + ".bitidx"
+    byte_val = wire_get(inst, :temp) + ".b"
+    shifted = wire_get(inst, :temp) + ".sh"
+    masked = wire_get(inst, :temp) + ".m"
+    ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + byte_idx + " = lshr i64 " + wire_get(inst, :index) + ", 3\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + byte_idx + "\n  " + byte_val + " = load i8, ptr " + wire_get(inst, :temp) + ".gep\n  " + bit_idx + " = and i64 " + wire_get(inst, :index) + ", 7\n  " + bit_idx + ".trunc = trunc i64 " + bit_idx + " to i8\n  " + shifted + " = lshr i8 " + byte_val + ", " + bit_idx + ".trunc\n  " + masked + " = and i8 " + shifted + ", 1\n  " + wire_get(inst, :temp) + ".zext = zext i8 " + masked + " to i64\n  " + w_int_call_with_range(wire_get(inst, :temp), wire_get(inst, :temp) + ".zext", 0, 2)
 
   # View field: load a named field at known offset/size from raw object pointer
   when :view_load_field
-    ptr_raw = inst[:temp] + ".ptr"
-    byte_ptr = inst[:temp] + ".bp"
-    ftype = inst[:field_type]
-    offset = inst[:offset].to_s()
-    size = inst[:size]
+    ptr_raw = wire_get(inst, :temp) + ".ptr"
+    byte_ptr = wire_get(inst, :temp) + ".bp"
+    ftype = wire_get(inst, :field_type)
+    offset = wire_get(inst, :offset).to_s()
+    size = wire_get(inst, :size)
     extension = ftype.starts_with?("i") ? "sext" : "zext"
     if ftype.starts_with?("*")
       # Pointer field: load ptr, then ptrtoint
-      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".p = load ptr, ptr " + inst[:temp] + ".gep\n  " + inst[:temp] + " = ptrtoint ptr " + inst[:temp] + ".p to i64"
+      ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + wire_get(inst, :temp) + ".p = load ptr, ptr " + wire_get(inst, :temp) + ".gep\n  " + wire_get(inst, :temp) + " = ptrtoint ptr " + wire_get(inst, :temp) + ".p to i64"
     elsif ftype == "f32"
-      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load float, ptr " + inst[:temp] + ".gep, align 1"
+      ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + wire_get(inst, :temp) + " = load float, ptr " + wire_get(inst, :temp) + ".gep, align 1"
     elsif ftype == "f64"
-      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load double, ptr " + inst[:temp] + ".gep, align 1"
+      ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + wire_get(inst, :temp) + " = load double, ptr " + wire_get(inst, :temp) + ".gep, align 1"
     elsif size == 1
-      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".b = load i8, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i8 " + inst[:temp] + ".b to i64"
+      ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + wire_get(inst, :temp) + ".b = load i8, ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = " + extension + " i8 " + wire_get(inst, :temp) + ".b to i64"
     elsif size == 2
-      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".h = load i16, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i16 " + inst[:temp] + ".h to i64"
+      ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + wire_get(inst, :temp) + ".h = load i16, ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = " + extension + " i16 " + wire_get(inst, :temp) + ".h to i64"
     elsif size == 4
-      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + ".w = load i32, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i32 " + inst[:temp] + ".w to i64"
+      ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + wire_get(inst, :temp) + ".w = load i32, ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = " + extension + " i32 " + wire_get(inst, :temp) + ".w to i64"
     else
       # 8 bytes (i64)
-      ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + inst[:temp] + " = load i64, ptr " + inst[:temp] + ".gep"
+      ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  " + wire_get(inst, :temp) + " = load i64, ptr " + wire_get(inst, :temp) + ".gep"
 
   # View field: store a scalar at a known native-data offset and return the
   # value converted to the field's declared width. Native layouts can be
   # packed, so every field store deliberately uses align 1 like field loads.
   when :view_store_field
-    ptr_raw = inst[:temp] + ".ptr"
-    byte_ptr = inst[:temp] + ".bp"
-    ftype = inst[:field_type]
-    offset = inst[:offset].to_s()
-    size = inst[:size]
+    ptr_raw = wire_get(inst, :temp) + ".ptr"
+    byte_ptr = wire_get(inst, :temp) + ".bp"
+    ftype = wire_get(inst, :field_type)
+    offset = wire_get(inst, :offset).to_s()
+    size = wire_get(inst, :size)
     if size > 8
       raise "view_store_field cannot store fields wider than 64 bits"
     extension = ftype.starts_with?("i") ? "sext" : "zext"
-    prefix = ptr_raw + " = and i64 " + inst[:ptr] + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + inst[:temp] + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  "
+    prefix = ptr_raw + " = and i64 " + wire_get(inst, :ptr) + ", 140737488355312\n  " + byte_ptr + " = inttoptr i64 " + ptr_raw + " to ptr\n  " + wire_get(inst, :temp) + ".gep = getelementptr i8, ptr " + byte_ptr + ", i64 " + offset + "\n  "
     if ftype.starts_with?("*")
-      prefix + inst[:temp] + ".p = inttoptr i64 " + inst[:value] + " to ptr\n  store ptr " + inst[:temp] + ".p, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = or i64 " + inst[:value] + ", 0"
+      prefix + wire_get(inst, :temp) + ".p = inttoptr i64 " + wire_get(inst, :value) + " to ptr\n  store ptr " + wire_get(inst, :temp) + ".p, ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = or i64 " + wire_get(inst, :value) + ", 0"
     elsif ftype == "f32"
-      prefix + "store float " + inst[:value] + ", ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = select i1 true, float " + inst[:value] + ", float " + inst[:value]
+      prefix + "store float " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = select i1 true, float " + wire_get(inst, :value) + ", float " + wire_get(inst, :value)
     elsif ftype == "f64"
-      prefix + "store double " + inst[:value] + ", ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = select i1 true, double " + inst[:value] + ", double " + inst[:value]
+      prefix + "store double " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = select i1 true, double " + wire_get(inst, :value) + ", double " + wire_get(inst, :value)
     elsif size == 1
-      prefix + inst[:temp] + ".b = trunc i64 " + inst[:value] + " to i8\n  store i8 " + inst[:temp] + ".b, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i8 " + inst[:temp] + ".b to i64"
+      prefix + wire_get(inst, :temp) + ".b = trunc i64 " + wire_get(inst, :value) + " to i8\n  store i8 " + wire_get(inst, :temp) + ".b, ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = " + extension + " i8 " + wire_get(inst, :temp) + ".b to i64"
     elsif size == 2
-      prefix + inst[:temp] + ".h = trunc i64 " + inst[:value] + " to i16\n  store i16 " + inst[:temp] + ".h, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i16 " + inst[:temp] + ".h to i64"
+      prefix + wire_get(inst, :temp) + ".h = trunc i64 " + wire_get(inst, :value) + " to i16\n  store i16 " + wire_get(inst, :temp) + ".h, ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = " + extension + " i16 " + wire_get(inst, :temp) + ".h to i64"
     elsif size == 4
-      prefix + inst[:temp] + ".w = trunc i64 " + inst[:value] + " to i32\n  store i32 " + inst[:temp] + ".w, ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = " + extension + " i32 " + inst[:temp] + ".w to i64"
+      prefix + wire_get(inst, :temp) + ".w = trunc i64 " + wire_get(inst, :value) + " to i32\n  store i32 " + wire_get(inst, :temp) + ".w, ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = " + extension + " i32 " + wire_get(inst, :temp) + ".w to i64"
     else
-      prefix + "store i64 " + inst[:value] + ", ptr " + inst[:temp] + ".gep, align 1\n  " + inst[:temp] + " = or i64 " + inst[:value] + ", 0"
+      prefix + "store i64 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :temp) + ".gep, align 1\n  " + wire_get(inst, :temp) + " = or i64 " + wire_get(inst, :value) + ", 0"
 
   # View base: extract raw pointer from object
   when :view_base_ptr
-    inst[:temp] + " = and i64 " + inst[:value] + ", -16"
+    wire_get(inst, :temp) + " = and i64 " + wire_get(inst, :value) + ", -16"
 
   # Register custom unit: call w_register_unit(i32 id, ptr name)
   when :register_unit
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:str_id]]
+      swv = string_wvs[wire_get(inst, :str_id)]
     if swv != nil
-      "call void @w_register_unit_wv(i32 " + inst[:unit_id].to_s() + ", i64 " + llvm_wvalue_literal(swv) + ")"
+      "call void @w_register_unit_wv(i32 " + wire_get(inst, :unit_id).to_s() + ", i64 " + llvm_wvalue_literal(swv) + ")"
     else
-      used_ptr_ids[inst[:str_id]] = true
+      used_ptr_ids[wire_get(inst, :str_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:byte_len].to_s()
-      tmp = "%reg.unit." + inst[:unit_id].to_s()
-      tmp + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:str_id].to_s() + ", i32 0, i32 0\n  " + tmp + ".wv = call i64 @w_string(ptr " + tmp + ")\n  call void @w_register_unit_wv(i32 " + inst[:unit_id].to_s() + ", i64 " + tmp + ".wv)"
+      bl = wire_get(inst, :byte_len).to_s()
+      tmp = "%reg.unit." + wire_get(inst, :unit_id).to_s()
+      tmp + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :str_id).to_s() + ", i32 0, i32 0\n  " + tmp + ".wv = call i64 @w_string(ptr " + tmp + ")\n  call void @w_register_unit_wv(i32 " + wire_get(inst, :unit_id).to_s() + ", i64 " + tmp + ".wv)"
 
   # String
   when :string_i64
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:string_id]]
+      swv = string_wvs[wire_get(inst, :string_id)]
     if swv != nil
-      inst[:temp] + " = or i64 0, " + llvm_wvalue_literal(swv)
+      wire_get(inst, :temp) + " = or i64 0, " + llvm_wvalue_literal(swv)
     else
-      used_ptr_ids[inst[:string_id]] = true
+      used_ptr_ids[wire_get(inst, :string_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:byte_len].to_s()
-      inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:string_id].to_s() + ", i32 0, i32 0\n  " + inst[:temp] + " = call i64 @w_string(ptr " + inst[:temp_ptr] + ")"
+      bl = wire_get(inst, :byte_len).to_s()
+      wire_get(inst, :temp_ptr) + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :string_id).to_s() + ", i32 0, i32 0\n  " + wire_get(inst, :temp) + " = call i64 @w_string(ptr " + wire_get(inst, :temp_ptr) + ")"
 
   # BigInt source literal: pass the executable's constant decimal bytes and
   # its module-local publication slot directly to the runtime.  The steady
   # state is one atomic load plus a recycler-backed copy of the pinned
   # template, preserving explicit alias-visible BigInt bang semantics.
   when :bigint_literal_i64
-    used_ptr_ids[inst[:string_id]] = true
+    used_ptr_ids[wire_get(inst, :string_id)] = true
     lbr = "\["
     rbr = "]"
-    bl = inst[:byte_len].to_s()
-    inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:string_id].to_s() + ", i32 0, i32 0\n  " + inst[:temp] + " = call i64 @w_bigint_literal_cached(ptr " + inst[:temp_ptr] + ", ptr @.bigint.literal." + inst[:slot_id].to_s() + ")"
+    bl = wire_get(inst, :byte_len).to_s()
+    wire_get(inst, :temp_ptr) + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :string_id).to_s() + ", i32 0, i32 0\n  " + wire_get(inst, :temp) + " = call i64 @w_bigint_literal_cached(ptr " + wire_get(inst, :temp_ptr) + ", ptr @.bigint.literal." + wire_get(inst, :slot_id).to_s() + ")"
 
   # Symbol: string WValue with bit 0 set
   when :symbol_i64
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:string_id]]
+      swv = string_wvs[wire_get(inst, :string_id)]
     if swv != nil
-      inst[:temp] + " = or i64 " + llvm_wvalue_literal(swv) + ", 1"
+      wire_get(inst, :temp) + " = or i64 " + llvm_wvalue_literal(swv) + ", 1"
     else
-      used_ptr_ids[inst[:string_id]] = true
+      used_ptr_ids[wire_get(inst, :string_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:byte_len].to_s()
-      inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:string_id].to_s() + ", i32 0, i32 0\n  " + inst[:temp] + ".s = call i64 @w_string(ptr " + inst[:temp_ptr] + ")\n  " + inst[:temp] + " = call i64 @w_str_to_sym(i64 " + inst[:temp] + ".s)"
+      bl = wire_get(inst, :byte_len).to_s()
+      wire_get(inst, :temp_ptr) + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :string_id).to_s() + ", i32 0, i32 0\n  " + wire_get(inst, :temp) + ".s = call i64 @w_string(ptr " + wire_get(inst, :temp_ptr) + ")\n  " + wire_get(inst, :temp) + " = call i64 @w_str_to_sym(i64 " + wire_get(inst, :temp) + ".s)"
 
   # Slab-AST constructor fusion (fix #3). Inline bump + N field stores
   # against the same slot address — no per-field re-derivation of the
   # slot pointer from the W_PACKED_NODE encoding.
   when :slab_alloc_init
-    t = inst[:temp]
-    kind = inst[:kind]
-    sc = inst[:sc]
-    fields = inst[:fields]
+    t = wire_get(inst, :temp)
+    kind = wire_get(inst, :kind)
+    sc = wire_get(inst, :sc)
+    fields = wire_get(inst, :fields)
     nf = fields.size()
     lbr = "\["
     label_fast = "sai_" + t.slice(1, t.size() - 1) + "_fast"
@@ -4980,9 +4981,9 @@ ewscope_md_state = {ids: {}}
     # val.to_s()) without emitting an instruction.
     # Slab-AST intrinsic: decode the full-tier 8-bit kind or compact-tier
     # 5-bit kind according to prefix bit 44.
-    if inst[:name] == "w_node_kind_extern" && inst[:args].size() == 1
-      t = inst[:temp]
-      v = inst[:args][0]
+    if wire_get(inst, :name) == "w_node_kind_extern" && wire_get(inst, :args).size() == 1
+      t = wire_get(inst, :temp)
+      v = wire_get(inst, :args)[0]
       parts = StringBuffer(260)
       parts << t + ".prefix_sh = lshr i64 " + v + ", 44\n  "
       parts << t + ".prefix = and i64 " + t + ".prefix_sh, 1\n  "
@@ -4996,18 +4997,18 @@ ewscope_md_state = {ids: {}}
     # Slab-AST intrinsic: w_is_node_extern(v) → 1 if v is a W_PACKED_NODE
     # (W_TAG_PACKED with subtype 3), 0 otherwise. (v >> 45) == 0x7FFF3
     # exploits the contiguous tag+subtype layout: 0xFFFE << 3 | 3.
-    if inst[:name] == "w_is_node_extern" && inst[:args].size() == 1
-      t = inst[:temp]
-      v = inst[:args][0]
+    if wire_get(inst, :name) == "w_is_node_extern" && wire_get(inst, :args).size() == 1
+      t = wire_get(inst, :temp)
+      v = wire_get(inst, :args)[0]
       parts = StringBuffer(180)
       parts << t + ".upper = lshr i64 " + v + ", 45\n  "
       parts << t + ".is_node = icmp eq i64 " + t + ".upper, 524275\n  "
       parts << t + " = zext i1 " + t + ".is_node to i64"
       return parts.to_s()
-    if inst[:name] == "w_node_alloc" && inst[:args].size() == 2
-      t = inst[:temp]
-      kind_in = inst[:args][0]
-      sc_in = inst[:args][1]
+    if wire_get(inst, :name) == "w_node_alloc" && wire_get(inst, :args).size() == 2
+      t = wire_get(inst, :temp)
+      kind_in = wire_get(inst, :args)[0]
+      sc_in = wire_get(inst, :args)[1]
       parts = StringBuffer(240)
       # Defensive unbox: kind/sc here may carry the raw_int nanbox tag
       # (0xFFFA…) when they come from a runtime expression rather than a
@@ -5022,42 +5023,42 @@ ewscope_md_state = {ids: {}}
       parts << t + " = call i64 @w_node_alloc(i64 " + kind + ", i64 " + sc + ")"
       return parts.to_s()
     slab_intrinsic = false
-    if inst[:name] == "w_node_field_load" || inst[:name] == "w_node_field_store"
-      if inst[:args].size() >= 2
-        first_char = inst[:args][1][0]
+    if wire_get(inst, :name) == "w_node_field_load" || wire_get(inst, :name) == "w_node_field_store"
+      if wire_get(inst, :args).size() >= 2
+        first_char = wire_get(inst, :args)[1][0]
         if first_char != "%"
           slab_intrinsic = true
     if slab_intrinsic
-      t = inst[:temp]
-      n = inst[:args][0]
-      ivar_word = inst[:args][1].to_i().to_s()
+      t = wire_get(inst, :temp)
+      n = wire_get(inst, :args)[0]
+      ivar_word = wire_get(inst, :args)[1].to_i().to_s()
       parts = StringBuffer(460)
       parts << t + ".off = and i64 " + n + ", 4294967295\n  "
       parts << t + ".full = add i64 " + t + ".off, " + ivar_word + "\n  "
       parts << t + ".base_p = getelementptr inbounds { ptr, i32, i32 }, ptr @g_ast_store, i32 0, i32 0\n  "
       parts << t + ".base = load ptr, ptr " + t + ".base_p, align 8\n  "
       parts << t + ".gep = getelementptr i64, ptr " + t + ".base, i64 " + t + ".full"
-      if inst[:name] == "w_node_field_load"
+      if wire_get(inst, :name) == "w_node_field_load"
         parts << "\n  " + t + " = load i64, ptr " + t + ".gep, align 8"
       else
         # Freeze array values into the AST extra arena on the inline
         # store path too — mirrors the C-side w_node_field_store hook.
-        parts << "\n  " + t + ".fz = call i64 @w_ast_freeze_if_array(i64 " + inst[:args][2] + ")"
+        parts << "\n  " + t + ".fz = call i64 @w_ast_freeze_if_array(i64 " + wire_get(inst, :args)[2] + ")"
         parts << "\n  store i64 " + t + ".fz, ptr " + t + ".gep, align 8"
         parts << "\n  " + t + " = add i64 " + t + ".fz, 0"
       return parts.to_s()
-    args_str = render_call_args(inst[:args], inst[:arg_types])
-    base = inst[:temp] + " = " + call_prefix(inst) + " i64 @" + inst[:name] + "(" + args_str + ")" + known_call_range_metadata_suffix(inst, "i64")
-    if inst[:src_line] != nil && inst[:loc_site_id] != nil
-      ret_lbl = "csd." + inst[:loc_site_id].to_s() + ".ret"
+    args_str = render_call_args(wire_get(inst, :args), wire_get(inst, :arg_types))
+    base = wire_get(inst, :temp) + " = " + call_prefix(inst) + " i64 @" + wire_get(inst, :name) + "(" + args_str + ")" + known_call_range_metadata_suffix(inst, "i64")
+    if wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
+      ret_lbl = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
       base + "\n  br label %" + ret_lbl + "\n" + ret_lbl + ":"
     else
       base
   when :call_direct_i128
-    args_str = render_call_args(inst[:args], inst[:arg_types])
-    inst[:temp] + " = " + call_prefix(inst) + " i128 @" + inst[:name] + "(" + args_str + ")"
+    args_str = render_call_args(wire_get(inst, :args), wire_get(inst, :arg_types))
+    wire_get(inst, :temp) + " = " + call_prefix(inst) + " i128 @" + wire_get(inst, :name) + "(" + args_str + ")"
   when :call_direct_i64_ptr1
-    inst[:temp] + " = " + call_prefix(inst) + " i64 @" + inst[:name] + "(ptr " + inst[:arg] + ")"
+    wire_get(inst, :temp) + " = " + call_prefix(inst) + " i64 @" + wire_get(inst, :name) + "(ptr " + wire_get(inst, :arg) + ")"
 
   # Load a compile-time SmallArray constant.
   # The named global is a private LLVM constant emitted at module scope
@@ -5066,7 +5067,7 @@ ewscope_md_state = {ids: {}}
   # 16-byte aligned the low nibble is already zero and a plain `or 9`
   # suffices.
   when :small_array_const_load
-    inst[:temp] + ".raw = ptrtoint ptr " + inst[:const_name] + " to i64\n  " + inst[:temp] + " = or i64 " + inst[:temp] + ".raw, 9"
+    wire_get(inst, :temp) + ".raw = ptrtoint ptr " + wire_get(inst, :const_name) + " to i64\n  " + wire_get(inst, :temp) + " = or i64 " + wire_get(inst, :temp) + ".raw, 9"
 
   # Allocate a SmallArray on the stack via
   # LLVM `alloca`. `total_bytes` is the WSmallArray header (2) + payload
@@ -5084,13 +5085,13 @@ ewscope_md_state = {ids: {}}
   # the store into a single llvm.memset of total_bytes; the stack path is
   # still the cheaper half of calloc (no malloc, no free).
   when :small_array_alloca
-    bytes = inst[:total_bytes].to_s()
-    inst[:temp_ptr] + " = alloca \[" + bytes + " x i8\], align 16\n  store \[" + bytes + " x i8\] zeroinitializer, ptr " + inst[:temp_ptr] + ", align 16"
+    bytes = wire_get(inst, :total_bytes).to_s()
+    wire_get(inst, :temp_ptr) + " = alloca \[" + bytes + " x i8\], align 16\n  store \[" + bytes + " x i8\] zeroinitializer, ptr " + wire_get(inst, :temp_ptr) + ", align 16"
   when :call_direct_void
-    args_str = render_call_args(inst[:args], inst[:arg_types])
-    base = call_prefix(inst) + " void @" + inst[:name] + "(" + args_str + ")"
-    if inst[:src_line] != nil && inst[:loc_site_id] != nil
-      ret_lbl = "csd." + inst[:loc_site_id].to_s() + ".ret"
+    args_str = render_call_args(wire_get(inst, :args), wire_get(inst, :arg_types))
+    base = call_prefix(inst) + " void @" + wire_get(inst, :name) + "(" + args_str + ")"
+    if wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
+      ret_lbl = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
       base + "\n  br label %" + ret_lbl + "\n" + ret_lbl + ":"
     else
       base
@@ -5099,85 +5100,85 @@ ewscope_md_state = {ids: {}}
   # Writes (file, line, col) to thread-locals so the error formatter
   # recovers precise location even when the side-table misses.
   when :call_loc_set_col
-    used_ptr_ids[inst[:file_str_id]] = true
+    used_ptr_ids[wire_get(inst, :file_str_id)] = true
     lbr = "\["
     rbr = "]"
-    bl = inst[:file_byte_len].to_s()
-    inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:file_str_id].to_s() + ", i32 0, i32 0\n  call void @__w_loc_set_col(ptr " + inst[:temp_ptr] + ", i32 " + inst[:line].to_s() + ", i32 " + inst[:col].to_s() + ")"
+    bl = wire_get(inst, :file_byte_len).to_s()
+    wire_get(inst, :temp_ptr) + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :file_str_id).to_s() + ", i32 0, i32 0\n  call void @__w_loc_set_col(ptr " + wire_get(inst, :temp_ptr) + ", i32 " + wire_get(inst, :line).to_s() + ", i32 " + wire_get(inst, :col).to_s() + ")"
   when :call_direct_void_ptr1
-    call_prefix(inst) + " void @" + inst[:name] + "(ptr " + inst[:arg] + ")"
+    call_prefix(inst) + " void @" + wire_get(inst, :name) + "(ptr " + wire_get(inst, :arg) + ")"
   when :call_direct_ptr
-    args_str = render_call_args(inst[:args], inst[:arg_types])
-    inst[:temp] + " = " + call_prefix(inst) + " ptr @" + inst[:name] + "(" + args_str + ")"
+    args_str = render_call_args(wire_get(inst, :args), wire_get(inst, :arg_types))
+    wire_get(inst, :temp) + " = " + call_prefix(inst) + " ptr @" + wire_get(inst, :name) + "(" + args_str + ")"
 
   # Call-site reuse allocation — per-site thread-local slot, reused across
   # calls. First call allocates and stores in the slot; subsequent calls
   # reset length and return the cached buffer. Zero malloc steady-state.
   when :call_reuse_or_new_array
-    inst[:temp] + " = call i64 @w_array_reuse_or_new_empty(ptr @" + inst[:slot] + ")"
+    wire_get(inst, :temp) + " = call i64 @w_array_reuse_or_new_empty(ptr @" + wire_get(inst, :slot) + ")"
   when :call_reuse_or_new_hash
-    inst[:temp] + " = call i64 @w_hash_reuse_or_new(ptr @" + inst[:slot] + ")"
+    wire_get(inst, :temp) + " = call i64 @w_hash_reuse_or_new(ptr @" + wire_get(inst, :slot) + ")"
   when :call_reuse_or_new_typed
-    inst[:temp] + " = call i64 @w_array_reuse_or_new(ptr @" + inst[:slot] + ", i64 " + inst[:bits].to_s() + ", i64 " + inst[:cap] + ")"
+    wire_get(inst, :temp) + " = call i64 @w_array_reuse_or_new(ptr @" + wire_get(inst, :slot) + ", i64 " + wire_get(inst, :bits).to_s() + ", i64 " + wire_get(inst, :cap) + ")"
   when :call_fused_out_reuse
-    inst[:temp] + " = call i64 @w_fused_out_reuse_or_new(ptr @" + inst[:slot] + ", i64 " + inst[:bits].to_s() + ", i64 " + inst[:cap] + ")"
+    wire_get(inst, :temp) + " = call i64 @w_fused_out_reuse_or_new(ptr @" + wire_get(inst, :slot) + ", i64 " + wire_get(inst, :bits).to_s() + ", i64 " + wire_get(inst, :cap) + ")"
   when :call_reuse_or_new_strbuf
-    inst[:temp] + " = call i64 @w_strbuf_reuse_or_new(ptr @" + inst[:slot] + ", i64 " + inst[:cap] + ")"
+    wire_get(inst, :temp) + " = call i64 @w_strbuf_reuse_or_new(ptr @" + wire_get(inst, :slot) + ", i64 " + wire_get(inst, :cap) + ")"
   when :call_reuse_and_drain_or_new_hash
-    inst[:temp] + " = call i64 @w_hash_reuse_and_drain_or_new(ptr @" + inst[:slot] + ")"
+    wire_get(inst, :temp) + " = call i64 @w_hash_reuse_and_drain_or_new(ptr @" + wire_get(inst, :slot) + ")"
 
   # Recycle pool allocation (## recycle): pop from thread-local pool or alloc.
   when :call_recycle_or_new_array
-    inst[:temp] + " = call i64 @w_array_recycle_or_new_empty()"
+    wire_get(inst, :temp) + " = call i64 @w_array_recycle_or_new_empty()"
   when :call_recycle_or_new_hash
-    inst[:temp] + " = call i64 @w_hash_recycle_or_new()"
+    wire_get(inst, :temp) + " = call i64 @w_hash_recycle_or_new()"
   when :call_recycle_or_new_typed
-    inst[:temp] + " = call i64 @w_array_recycle_or_new(i64 " + inst[:bits].to_s() + ", i64 " + inst[:cap] + ")"
+    wire_get(inst, :temp) + " = call i64 @w_array_recycle_or_new(i64 " + wire_get(inst, :bits).to_s() + ", i64 " + wire_get(inst, :cap) + ")"
   when :call_recycle_or_new_strbuf
-    inst[:temp] + " = call i64 @w_strbuf_recycle_or_new(i64 " + inst[:cap] + ")"
+    wire_get(inst, :temp) + " = call i64 @w_strbuf_recycle_or_new(i64 " + wire_get(inst, :cap) + ")"
 
   # Recycle return-to-pool (emitted at scope exit for ## recycle vars).
   when :call_recycle_array
-    "call void @w_array_recycle_public(i64 " + inst[:value] + ")"
+    "call void @w_array_recycle_public(i64 " + wire_get(inst, :value) + ")"
   when :call_recycle_hash
-    "call void @w_hash_recycle(i64 " + inst[:value] + ")"
+    "call void @w_hash_recycle(i64 " + wire_get(inst, :value) + ")"
   when :call_recycle_typed
-    "call void @w_array_recycle(i64 " + inst[:value] + ")"
+    "call void @w_array_recycle(i64 " + wire_get(inst, :value) + ")"
   when :call_recycle_strbuf
-    "call void @w_strbuf_recycle(i64 " + inst[:value] + ")"
+    "call void @w_strbuf_recycle(i64 " + wire_get(inst, :value) + ")"
 
   # Cleanup stack push/pop for exception-safe recycle. Push after alloc,
   # pop just before the normal-path recycle fires. On w_raise, any entries
   # above the enclosing exception frame's saved cleanup_depth are invoked.
   when :cleanup_push_array
-    "call void @w_cleanup_push(i64 " + inst[:value] + ", ptr @w_array_recycle_public)"
+    "call void @w_cleanup_push(i64 " + wire_get(inst, :value) + ", ptr @w_array_recycle_public)"
   when :cleanup_push_hash
-    "call void @w_cleanup_push(i64 " + inst[:value] + ", ptr @w_hash_recycle)"
+    "call void @w_cleanup_push(i64 " + wire_get(inst, :value) + ", ptr @w_hash_recycle)"
   when :cleanup_push_typed
-    "call void @w_cleanup_push(i64 " + inst[:value] + ", ptr @w_array_recycle)"
+    "call void @w_cleanup_push(i64 " + wire_get(inst, :value) + ", ptr @w_array_recycle)"
   when :cleanup_push_strbuf
-    "call void @w_cleanup_push(i64 " + inst[:value] + ", ptr @w_strbuf_recycle)"
+    "call void @w_cleanup_push(i64 " + wire_get(inst, :value) + ", ptr @w_strbuf_recycle)"
   when :cleanup_pop
     "call void @w_cleanup_pop()"
 
   # Exception handling
   when :setjmp
     jump_name = windows_target ? "setjmp" : "_setjmp"
-    inst[:temp] + " = call i32 @" + jump_name + "(ptr " + inst[:buf] + ")"
+    wire_get(inst, :temp) + " = call i32 @" + jump_name + "(ptr " + wire_get(inst, :buf) + ")"
   when :icmp_eq_i32
-    inst[:temp] + " = icmp eq i32 " + inst[:lhs] + ", " + inst[:rhs]
+    wire_get(inst, :temp) + " = icmp eq i32 " + wire_get(inst, :lhs) + ", " + wire_get(inst, :rhs)
 
   # Method dispatch (dynamic) — inline-cached via w_method_call_cached.
   # When the call carries source-loc info, split the basic block so the
   # return address is addressable via blockaddress(@fn, %cs.N.ret). Same
   # pattern the overflow-check ops use (see :add_i48_checked).
   when :call_method_i64
-    argc = inst[:args].size()
-    ic_ptr = inst[:temp] + ".ic"
-    ic_id = inst[:ic_id].to_s()
+    argc = wire_get(inst, :args).size()
+    ic_ptr = wire_get(inst, :temp) + ".ic"
+    ic_id = wire_get(inst, :ic_id).to_s()
     ic_gep = ic_ptr + " = getelementptr inbounds \[24 x i8], ptr @.ic, i64 " + ic_id + "\n  "
     ic_arg = ", ptr " + ic_ptr
-    name_val = inst[:method_name_val]
+    name_val = wire_get(inst, :method_name_val)
     parts = StringBuffer(128 + argc * 64)
     parts << ic_gep
     # Guarded devirtualization (lowering attaches devirt_fn/devirt_class when
@@ -5186,23 +5187,23 @@ ewscope_md_state = {ids: {}}
     # class_id (u16 at +16 in WClass) -> direct call to the method's function
     # symbol; anything else -> the ordinary IC dispatch below. The direct arm
     # skips dispatch entirely and lets LLVM inline small method bodies.
-    dv_temp = inst[:temp]
-    if inst[:devirt_fn] != nil
-      t = inst[:temp]
+    dv_temp = wire_get(inst, :temp)
+    if wire_get(inst, :devirt_fn) != nil
+      t = wire_get(inst, :temp)
       lbl = "dv." + ic_id
-      parts << t + ".hi = lshr i64 " + inst[:receiver] + ", 48\n  "
+      parts << t + ".hi = lshr i64 " + wire_get(inst, :receiver) + ", 48\n  "
       parts << t + ".z = icmp eq i64 " + t + ".hi, 0\n  "
-      parts << t + ".ge = icmp uge i64 " + inst[:receiver] + ", 16\n  "
+      parts << t + ".ge = icmp uge i64 " + wire_get(inst, :receiver) + ", 16\n  "
       parts << t + ".o = and i1 " + t + ".z, " + t + ".ge\n  "
-      parts << t + ".sb = and i64 " + inst[:receiver] + ", 15\n  "
+      parts << t + ".sb = and i64 " + wire_get(inst, :receiver) + ", 15\n  "
       parts << t + ".isi = icmp eq i64 " + t + ".sb, 4\n  "
       parts << t + ".oi = and i1 " + t + ".o, " + t + ".isi\n  "
       parts << "br i1 " + t + ".oi, label %" + lbl + ".ck, label %" + lbl + ".s\n"
       parts << lbl + ".ck:\n  "
-      parts << t + ".om = and i64 " + inst[:receiver] + ", -16\n  "
+      parts << t + ".om = and i64 " + wire_get(inst, :receiver) + ", -16\n  "
       parts << t + ".op = inttoptr i64 " + t + ".om to ptr\n  "
       parts << t + ".oc = load i16, ptr " + t + ".op, align 2\n  "
-      parts << t + ".cw = load i64, ptr @class." + llvm_safe_name(inst[:devirt_class].gsub(":", "__")) + "\n  "
+      parts << t + ".cw = load i64, ptr @class." + llvm_safe_name(wire_get(inst, :devirt_class).gsub(":", "__")) + "\n  "
       parts << t + ".cm = and i64 " + t + ".cw, -16\n  "
       parts << t + ".cp = inttoptr i64 " + t + ".cm to ptr\n  "
       parts << t + ".cip = getelementptr i8, ptr " + t + ".cp, i64 16\n  "
@@ -5210,27 +5211,27 @@ ewscope_md_state = {ids: {}}
       parts << t + ".same = icmp eq i16 " + t + ".oc, " + t + ".cc\n  "
       parts << "br i1 " + t + ".same, label %" + lbl + ".d, label %" + lbl + ".s\n"
       parts << lbl + ".d:\n  "
-      parts << t + ".dv = call i64 @" + inst[:devirt_fn] + "(i64 " + inst[:receiver]
+      parts << t + ".dv = call i64 @" + wire_get(inst, :devirt_fn) + "(i64 " + wire_get(inst, :receiver)
       di = 0
       while di < argc
-        parts << ", i64 " + inst[:args][di]
+        parts << ", i64 " + wire_get(inst, :args)[di]
         di += 1
       parts << ")\n  "
       parts << "br label %" + lbl + ".done\n"
       parts << lbl + ".s:\n  "
       dv_temp = t + ".sv"
-    elsif inst[:construct_fn] != nil
-      t = inst[:temp]
+    elsif wire_get(inst, :construct_fn) != nil
+      t = wire_get(inst, :temp)
       lbl = "dv." + ic_id
-      parts << t + ".cw = load i64, ptr @class." + llvm_safe_name(inst[:construct_class].gsub(":", "__")) + "\n  "
-      parts << t + ".same = icmp eq i64 " + inst[:receiver] + ", " + t + ".cw\n  "
+      parts << t + ".cw = load i64, ptr @class." + llvm_safe_name(wire_get(inst, :construct_class).gsub(":", "__")) + "\n  "
+      parts << t + ".same = icmp eq i64 " + wire_get(inst, :receiver) + ", " + t + ".cw\n  "
       parts << "br i1 " + t + ".same, label %" + lbl + ".d, label %" + lbl + ".s\n"
       parts << lbl + ".d:\n  "
-      parts << t + ".dv = call i64 @w_object_new(i64 " + inst[:receiver] + ")\n  "
-      parts << t + ".init = call i64 @" + inst[:construct_fn] + "(i64 " + t + ".dv"
+      parts << t + ".dv = call i64 @w_object_new(i64 " + wire_get(inst, :receiver) + ")\n  "
+      parts << t + ".init = call i64 @" + wire_get(inst, :construct_fn) + "(i64 " + t + ".dv"
       di = 0
       while di < argc
-        parts << ", i64 " + inst[:args][di]
+        parts << ", i64 " + wire_get(inst, :args)[di]
         di += 1
       parts << ")\n  "
       parts << "br label %" + lbl + ".done\n"
@@ -5242,14 +5243,14 @@ ewscope_md_state = {ids: {}}
     # branch) and the block-address we emit into @__w_call_site never matches
     # any PC captured by `backtrace()`.
     call_keyword = "call"
-    if inst[:src_line] != nil
+    if wire_get(inst, :src_line) != nil
       call_keyword = "notail call"
     if argc == 0
-      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + inst[:receiver] + ", i64 " + name_val + ic_arg + ")"
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ic_arg + ")"
     elsif scalar_source_one_call?(inst)
-      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + inst[:receiver] + ", i64 " + name_val + ", i64 " + inst[:args][0] + ic_arg + ")"
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_get(inst, :args)[0] + ic_arg + ")"
     elsif scalar_source_two_call?(inst)
-      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_2(i64 " + inst[:receiver] + ", i64 " + name_val + ", i64 " + inst[:args][0] + ", i64 " + inst[:args][1] + ic_arg + ")"
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_2(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_get(inst, :args)[0] + ", i64 " + wire_get(inst, :args)[1] + ic_arg + ")"
     else
       stack_arr = "%__mcall_args"
       i = 0
@@ -5257,26 +5258,26 @@ ewscope_md_state = {ids: {}}
         if i == 0
           slot = stack_arr
         else
-          slot = inst[:temp_args_val] + "." + i.to_s()
+          slot = wire_get(inst, :temp_args_val) + "." + i.to_s()
           parts << slot + " = getelementptr inbounds i64, ptr " + stack_arr + ", i32 " + i.to_s() + "\n  "
-        parts << "store i64 " + inst[:args][i] + ", ptr " + slot + ", align 8\n  "
+        parts << "store i64 " + wire_get(inst, :args)[i] + ", ptr " + slot + ", align 8\n  "
         i += 1
-      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached(i64 " + inst[:receiver] + ", i64 " + name_val + ", ptr " + stack_arr + ", i32 " + argc.to_s() + ic_arg + ")"
-    if inst[:src_line] != nil
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", ptr " + stack_arr + ", i32 " + argc.to_s() + ic_arg + ")"
+    if wire_get(inst, :src_line) != nil
       ret_lbl = "cs." + ic_id + ".ret"
       parts << "\n  br label %"
       parts << ret_lbl
       parts << "\n"
       parts << ret_lbl
       parts << ":"
-    if inst[:devirt_fn] != nil || inst[:construct_fn] != nil
-      t = inst[:temp]
+    if wire_get(inst, :devirt_fn) != nil || wire_get(inst, :construct_fn) != nil
+      t = wire_get(inst, :temp)
       lbl = "dv." + ic_id
       # The slow arm's value is defined in whichever block the IC render
       # left us in: the cs.N.ret continuation when a call-site table entry
       # was emitted, else the dv.N.s block itself.
       slow_pred = lbl + ".s"
-      if inst[:src_line] != nil
+      if wire_get(inst, :src_line) != nil
         slow_pred = "cs." + ic_id + ".ret"
       parts << "\n  br label %" + lbl + ".done\n"
       parts << lbl + ".done:\n  "
@@ -5285,34 +5286,34 @@ ewscope_md_state = {ids: {}}
 
   # Control flow
   when :br
-    unroll_count = inst[:unroll_count]
-    if inst[:novec] == true && unroll_count != nil && unroll_count > 0
-      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:both, unroll_count)
-    elsif inst[:novec] == true
-      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:novec)
+    unroll_count = wire_get(inst, :unroll_count)
+    if wire_get(inst, :novec) == true && unroll_count != nil && unroll_count > 0
+      "br label %" + wire_get(inst, :label) + ", !llvm.loop !" + latch_loop_md_ref(:both, unroll_count)
+    elsif wire_get(inst, :novec) == true
+      "br label %" + wire_get(inst, :label) + ", !llvm.loop !" + latch_loop_md_ref(:novec)
     elsif unroll_count != nil && unroll_count > 0
-      "br label %" + inst[:label] + ", !llvm.loop !" + latch_loop_md_ref(:unroll, unroll_count)
+      "br label %" + wire_get(inst, :label) + ", !llvm.loop !" + latch_loop_md_ref(:unroll, unroll_count)
     else
-      "br label %" + inst[:label]
+      "br label %" + wire_get(inst, :label)
   when :cond_br
     prof = ""
-    if inst[:prof] == :likely
+    if wire_get(inst, :prof) == :likely
       prof = ", !prof !31411"
-    elsif inst[:prof] == :unlikely
+    elsif wire_get(inst, :prof) == :unlikely
       prof = ", !prof !31412"
-    "br i1 " + inst[:cond] + ", label %" + inst[:then_label] + ", label %" + inst[:else_label] + prof
+    "br i1 " + wire_get(inst, :cond) + ", label %" + wire_get(inst, :then_label) + ", label %" + wire_get(inst, :else_label) + prof
 
   # i64 add with an overflow flag: temp = sum, temp.ovf = i1. Feeds the
   # sum-chunk accumulator's flush branch; lhs/rhs ride the substituted
   # fields so SSA renames reach them.
   when :sadd_with_overflow
-    t = inst[:temp]
-    t + ".pair = call {i64, i1} @llvm.sadd.with.overflow.i64(i64 " + inst[:lhs] + ", i64 " + inst[:rhs] + ")\n  " + t + " = extractvalue {i64, i1} " + t + ".pair, 0\n  " + t + ".ovf = extractvalue {i64, i1} " + t + ".pair, 1"
+    t = wire_get(inst, :temp)
+    t + ".pair = call {i64, i1} @llvm.sadd.with.overflow.i64(i64 " + wire_get(inst, :lhs) + ", i64 " + wire_get(inst, :rhs) + ")\n  " + t + " = extractvalue {i64, i1} " + t + ".pair, 0\n  " + t + ".ovf = extractvalue {i64, i1} " + t + ".pair, 1"
   when :switch_i64
-    cases = inst[:cases]
-    is_symbol = inst[:is_symbol]
+    cases = wire_get(inst, :cases)
+    is_symbol = wire_get(inst, :is_symbol)
     out = StringBuffer(96 + cases.size() * 48)
-    out << "switch i64 " + inst[:value] + ", label %" + inst[:default_label] + " \[\n"
+    out << "switch i64 " + wire_get(inst, :value) + ", label %" + wire_get(inst, :default_label) + " \[\n"
     i = 0
     while i < cases.size()
       c = cases[i]
@@ -5347,9 +5348,9 @@ ewscope_md_state = {ids: {}}
     out << "  ]"
     out.to_s()
   when :ret_i64
-    "ret i64 " + (inst[:value] == nil ? "0" : inst[:value].to_s())
+    "ret i64 " + (wire_get(inst, :value) == nil ? "0" : wire_get(inst, :value).to_s())
   when :ret_i32
-    "ret i32 " + (inst[:value] == nil ? "0" : inst[:value].to_s())
+    "ret i32 " + (wire_get(inst, :value) == nil ? "0" : wire_get(inst, :value).to_s())
   when :ret_void
     "ret void"
   when :unreachable
@@ -5359,15 +5360,15 @@ ewscope_md_state = {ids: {}}
   when :phi_i1
     lbr = "\["
     rbr = "]"
-    a_label = redirect_phi_label(inst[:a_label], phi_label_redirects)
-    b_label = redirect_phi_label(inst[:b_label], phi_label_redirects)
-    inst[:temp] + " = phi i1 " + lbr + " " + inst[:a_value] + ", %" + a_label + " " + rbr + ", " + lbr + " " + inst[:b_value] + ", %" + b_label + " " + rbr
+    a_label = redirect_phi_label(wire_get(inst, :a_label), phi_label_redirects)
+    b_label = redirect_phi_label(wire_get(inst, :b_label), phi_label_redirects)
+    wire_get(inst, :temp) + " = phi i1 " + lbr + " " + wire_get(inst, :a_value) + ", %" + a_label + " " + rbr + ", " + lbr + " " + wire_get(inst, :b_value) + ", %" + b_label + " " + rbr
   when :phi_i64
     lbr = "\["
     rbr = "]"
-    a_label = redirect_phi_label(inst[:a_label], phi_label_redirects)
-    b_label = redirect_phi_label(inst[:b_label], phi_label_redirects)
-    inst[:temp] + " = phi i64 " + lbr + " " + inst[:a_value] + ", %" + a_label + " " + rbr + ", " + lbr + " " + inst[:b_value] + ", %" + b_label + " " + rbr
+    a_label = redirect_phi_label(wire_get(inst, :a_label), phi_label_redirects)
+    b_label = redirect_phi_label(wire_get(inst, :b_label), phi_label_redirects)
+    wire_get(inst, :temp) + " = phi i64 " + lbr + " " + wire_get(inst, :a_value) + ", %" + a_label + " " + rbr + ", " + lbr + " " + wire_get(inst, :b_value) + ", %" + b_label + " " + rbr
 
   # Argv init (main preamble)
   when :argv_init
@@ -5375,141 +5376,141 @@ ewscope_md_state = {ids: {}}
 
   # I/O
   when :puts_i64
-    if inst[:temp] != nil
-      inst[:temp] + " = call i64 @w_puts(i64 " + inst[:value] + ")"
+    if wire_get(inst, :temp) != nil
+      wire_get(inst, :temp) + " = call i64 @w_puts(i64 " + wire_get(inst, :value) + ")"
     else
-      "call i64 @w_puts(i64 " + inst[:value] + ")"
+      "call i64 @w_puts(i64 " + wire_get(inst, :value) + ")"
   when :print_i64
-    if inst[:temp] != nil
-      inst[:temp] + " = call i64 @w_print(i64 " + inst[:value] + ")"
+    if wire_get(inst, :temp) != nil
+      wire_get(inst, :temp) + " = call i64 @w_print(i64 " + wire_get(inst, :value) + ")"
     else
-      "call i64 @w_print(i64 " + inst[:value] + ")"
+      "call i64 @w_print(i64 " + wire_get(inst, :value) + ")"
 
   # Memoization
   when :memo_init
-    inst[:temp] + " = call ptr @w_memo_init(ptr null)"
+    wire_get(inst, :temp) + " = call ptr @w_memo_init(ptr null)"
   when :store_memo_ptr
-    "store ptr " + inst[:value] + ", ptr @" + inst[:global]
+    "store ptr " + wire_get(inst, :value) + ", ptr @" + wire_get(inst, :global)
   when :load_memo_ptr
-    inst[:temp] + " = load ptr, ptr @" + inst[:global]
+    wire_get(inst, :temp) + " = load ptr, ptr @" + wire_get(inst, :global)
   when :memo_call0_i64
-    inst[:temp] + " = call i64 @__w_memo_call0_i64(ptr " + inst[:table] + ", ptr @" + inst[:fn_name] + ")"
+    wire_get(inst, :temp) + " = call i64 @__w_memo_call0_i64(ptr " + wire_get(inst, :table) + ", ptr @" + wire_get(inst, :fn_name) + ")"
   when :memo_call1_i64
-    inst[:temp] + " = call i64 @__w_memo_call1_i64(ptr " + inst[:table] + ", ptr @" + inst[:fn_name] + ", i64 " + inst[:args][0] + ")"
+    wire_get(inst, :temp) + " = call i64 @__w_memo_call1_i64(ptr " + wire_get(inst, :table) + ", ptr @" + wire_get(inst, :fn_name) + ", i64 " + wire_get(inst, :args)[0] + ")"
   when :memo_call2_i64
-    inst[:temp] + " = call i64 @__w_memo_call2_i64(ptr " + inst[:table] + ", ptr @" + inst[:fn_name] + ", i64 " + inst[:args][0] + ", i64 " + inst[:args][1] + ")"
+    wire_get(inst, :temp) + " = call i64 @__w_memo_call2_i64(ptr " + wire_get(inst, :table) + ", ptr @" + wire_get(inst, :fn_name) + ", i64 " + wire_get(inst, :args)[0] + ", i64 " + wire_get(inst, :args)[1] + ")"
 
   # Classes
   when :class_new
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:name_str_id]]
+      swv = string_wvs[wire_get(inst, :name_str_id)]
     if swv != nil
       super_arg = nil
-      if inst[:super_reg] != nil
-        super_arg = inst[:super_reg]
+      if wire_get(inst, :super_reg) != nil
+        super_arg = wire_get(inst, :super_reg)
       else
         super_arg = w_nil.to_s()
-      inst[:temp] + " = call i64 @w_class_new_wv(i64 " + llvm_wvalue_literal(swv) + ", i64 " + super_arg + ")"
+      wire_get(inst, :temp) + " = call i64 @w_class_new_wv(i64 " + llvm_wvalue_literal(swv) + ", i64 " + super_arg + ")"
     else
-      used_ptr_ids[inst[:name_str_id]] = true
+      used_ptr_ids[wire_get(inst, :name_str_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:name_byte_len].to_s()
+      bl = wire_get(inst, :name_byte_len).to_s()
       parts = StringBuffer(160)
-      parts << inst[:temp] + ".ptr = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:name_str_id].to_s() + ", i32 0, i32 0\n  "
-      parts << inst[:temp] + ".name = call i64 @w_string(ptr " + inst[:temp] + ".ptr)\n  "
+      parts << wire_get(inst, :temp) + ".ptr = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :name_str_id).to_s() + ", i32 0, i32 0\n  "
+      parts << wire_get(inst, :temp) + ".name = call i64 @w_string(ptr " + wire_get(inst, :temp) + ".ptr)\n  "
       super_arg = nil
-      if inst[:super_reg] != nil
-        super_arg = inst[:super_reg]
+      if wire_get(inst, :super_reg) != nil
+        super_arg = wire_get(inst, :super_reg)
       else
         super_arg = w_nil.to_s()
-      parts << inst[:temp] + " = call i64 @w_class_new_wv(i64 " + inst[:temp] + ".name, i64 " + super_arg + ")"
+      parts << wire_get(inst, :temp) + " = call i64 @w_class_new_wv(i64 " + wire_get(inst, :temp) + ".name, i64 " + super_arg + ")"
       parts.to_s()
   when :class_store
-    "store i64 " + inst[:value] + ", ptr @class." + llvm_safe_name(inst[:class_name].gsub(":", "__"))
+    "store i64 " + wire_get(inst, :value) + ", ptr @class." + llvm_safe_name(wire_get(inst, :class_name).gsub(":", "__"))
   when :type_class_register
-    "call void @w_type_class_register_wv(i32 " + inst[:dispatch_key].to_s() + ", i64 " + inst[:class_temp] + ")"
+    "call void @w_type_class_register_wv(i32 " + wire_get(inst, :dispatch_key).to_s() + ", i64 " + wire_get(inst, :class_temp) + ")"
   when :node_kind_class_register
-    "call void @w_node_kind_class_register_wv(i32 " + inst[:kind_id].to_s() + ", i64 " + inst[:class_temp] + ")"
+    "call void @w_node_kind_class_register_wv(i32 " + wire_get(inst, :kind_id).to_s() + ", i64 " + wire_get(inst, :class_temp) + ")"
   when :class_add_method
     add_fn = "w_class_add_method_wv"
-    add_args = ", i32 " + inst[:arity].to_s()
-    if inst[:splat_index] != nil && inst[:splat_index] >= 0
+    add_args = ", i32 " + wire_get(inst, :arity).to_s()
+    if wire_get(inst, :splat_index) != nil && wire_get(inst, :splat_index) >= 0
       add_fn = "w_class_add_method_splat_wv"
-      add_args += ", i32 " + inst[:min_arity].to_s() + ", i32 " + inst[:splat_index].to_s()
-    elsif inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+      add_args += ", i32 " + wire_get(inst, :min_arity).to_s() + ", i32 " + wire_get(inst, :splat_index).to_s()
+    elsif wire_get(inst, :min_arity) != nil && wire_get(inst, :min_arity) < wire_get(inst, :arity)
       add_fn = "w_class_add_method_range_wv"
-      add_args += ", i32 " + inst[:min_arity].to_s()
+      add_args += ", i32 " + wire_get(inst, :min_arity).to_s()
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:method_str_id]]
+      swv = string_wvs[wire_get(inst, :method_str_id)]
     if swv != nil
-      "call void @" + add_fn + "(i64 " + inst[:class_temp] + ", i64 " + llvm_wvalue_literal(swv) + ", ptr @" + inst[:fn_name] + add_args + ")"
+      "call void @" + add_fn + "(i64 " + wire_get(inst, :class_temp) + ", i64 " + llvm_wvalue_literal(swv) + ", ptr @" + wire_get(inst, :fn_name) + add_args + ")"
     else
-      used_ptr_ids[inst[:method_str_id]] = true
+      used_ptr_ids[wire_get(inst, :method_str_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:method_byte_len].to_s()
+      bl = wire_get(inst, :method_byte_len).to_s()
       parts = StringBuffer(160)
-      parts << inst[:class_temp] + ".mname = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:method_str_id].to_s() + ", i32 0, i32 0\n  "
-      parts << inst[:class_temp] + ".mname.wv = call i64 @w_string(ptr " + inst[:class_temp] + ".mname)\n  "
-      parts << "call void @" + add_fn + "(i64 " + inst[:class_temp] + ", i64 " + inst[:class_temp] + ".mname.wv, ptr @" + inst[:fn_name] + add_args + ")"
+      parts << wire_get(inst, :class_temp) + ".mname = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :method_str_id).to_s() + ", i32 0, i32 0\n  "
+      parts << wire_get(inst, :class_temp) + ".mname.wv = call i64 @w_string(ptr " + wire_get(inst, :class_temp) + ".mname)\n  "
+      parts << "call void @" + add_fn + "(i64 " + wire_get(inst, :class_temp) + ", i64 " + wire_get(inst, :class_temp) + ".mname.wv, ptr @" + wire_get(inst, :fn_name) + add_args + ")"
       parts.to_s()
   when :class_add_static_method
     add_fn = "w_class_add_static_method_wv"
-    add_args = ", i32 " + inst[:arity].to_s()
-    if inst[:splat_index] != nil && inst[:splat_index] >= 0
+    add_args = ", i32 " + wire_get(inst, :arity).to_s()
+    if wire_get(inst, :splat_index) != nil && wire_get(inst, :splat_index) >= 0
       add_fn = "w_class_add_static_method_splat_wv"
-      add_args += ", i32 " + inst[:min_arity].to_s() + ", i32 " + inst[:splat_index].to_s()
-    elsif inst[:min_arity] != nil && inst[:min_arity] < inst[:arity]
+      add_args += ", i32 " + wire_get(inst, :min_arity).to_s() + ", i32 " + wire_get(inst, :splat_index).to_s()
+    elsif wire_get(inst, :min_arity) != nil && wire_get(inst, :min_arity) < wire_get(inst, :arity)
       add_fn = "w_class_add_static_method_range_wv"
-      add_args += ", i32 " + inst[:min_arity].to_s()
+      add_args += ", i32 " + wire_get(inst, :min_arity).to_s()
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:method_str_id]]
+      swv = string_wvs[wire_get(inst, :method_str_id)]
     if swv != nil
-      "call void @" + add_fn + "(i64 " + inst[:class_temp] + ", i64 " + llvm_wvalue_literal(swv) + ", ptr @" + inst[:fn_name] + add_args + ")"
+      "call void @" + add_fn + "(i64 " + wire_get(inst, :class_temp) + ", i64 " + llvm_wvalue_literal(swv) + ", ptr @" + wire_get(inst, :fn_name) + add_args + ")"
     else
-      used_ptr_ids[inst[:method_str_id]] = true
+      used_ptr_ids[wire_get(inst, :method_str_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:method_byte_len].to_s()
+      bl = wire_get(inst, :method_byte_len).to_s()
       parts = StringBuffer(160)
-      parts << inst[:class_temp] + ".smname = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:method_str_id].to_s() + ", i32 0, i32 0\n  "
-      parts << inst[:class_temp] + ".smname.wv = call i64 @w_string(ptr " + inst[:class_temp] + ".smname)\n  "
-      parts << "call void @" + add_fn + "(i64 " + inst[:class_temp] + ", i64 " + inst[:class_temp] + ".smname.wv, ptr @" + inst[:fn_name] + add_args + ")"
+      parts << wire_get(inst, :class_temp) + ".smname = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :method_str_id).to_s() + ", i32 0, i32 0\n  "
+      parts << wire_get(inst, :class_temp) + ".smname.wv = call i64 @w_string(ptr " + wire_get(inst, :class_temp) + ".smname)\n  "
+      parts << "call void @" + add_fn + "(i64 " + wire_get(inst, :class_temp) + ", i64 " + wire_get(inst, :class_temp) + ".smname.wv, ptr @" + wire_get(inst, :fn_name) + add_args + ")"
       parts.to_s()
   when :load_class
-    inst[:temp] + " = load i64, ptr @class." + llvm_safe_name(inst[:class_name].gsub(":", "__"))
+    wire_get(inst, :temp) + " = load i64, ptr @class." + llvm_safe_name(wire_get(inst, :class_name).gsub(":", "__"))
   when :store_global
-    t = inst[:type]
+    t = wire_get(inst, :type)
     if t == nil
       t = "i64"
-    "store " + t + " " + inst[:value] + ", ptr @global." + llvm_safe_name(inst[:name])
+    "store " + t + " " + wire_get(inst, :value) + ", ptr @global." + llvm_safe_name(wire_get(inst, :name))
   when :load_global
-    t = inst[:type]
+    t = wire_get(inst, :type)
     if t == nil
       t = "i64"
-    inst[:temp] + " = load " + t + ", ptr @global." + llvm_safe_name(inst[:name])
+    wire_get(inst, :temp) + " = load " + t + ", ptr @global." + llvm_safe_name(wire_get(inst, :name))
   when :store_cvar
-    "store i64 " + inst[:value] + ", ptr @cvar." + llvm_safe_name(inst[:cvar_key].gsub(":", "__"))
+    "store i64 " + wire_get(inst, :value) + ", ptr @cvar." + llvm_safe_name(wire_get(inst, :cvar_key).gsub(":", "__"))
   when :load_cvar
-    inst[:temp] + " = load i64, ptr @cvar." + llvm_safe_name(inst[:cvar_key].gsub(":", "__"))
+    wire_get(inst, :temp) + " = load i64, ptr @cvar." + llvm_safe_name(wire_get(inst, :cvar_key).gsub(":", "__"))
   when :typed_array_get_inline
     # Inline typed array read: unmask → slots ptr (off 16) → start i32 (off 4) → GEP → load → ext
     # The i32 demote moved offsets: slots 32→16, start 8→4. Start is now
     # i32 and gets sign-extended before being added to the unboxed index.
     # Offsets locked by _Static_assert in runtime.h.
-    t = inst[:temp]
-    s = inst[:s]
-    arr = inst[:arr]
-    idx = inst[:idx]
-    idx_raw = inst[:idx_raw]
-    bits = inst[:bits]
+    t = wire_get(inst, :temp)
+    s = wire_get(inst, :s)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
+    idx_raw = wire_get(inst, :idx_raw)
+    bits = wire_get(inst, :bits)
     if bits == nil
       bits = 64
-    signed = inst[:signed]
+    signed = wire_get(inst, :signed)
     if signed == nil
       signed = true
     parts = StringBuffer(700)
@@ -5584,13 +5585,13 @@ ewscope_md_state = {ids: {}}
     parts.to_s()
   when :typed_array_set_inline
     # Inline typed array write: same i32-offset shift as get.
-    t = inst[:temp]
-    s = inst[:s]
-    arr = inst[:arr]
-    idx = inst[:idx]
-    idx_raw = inst[:idx_raw]
-    val = inst[:value]
-    bits = inst[:bits]
+    t = wire_get(inst, :temp)
+    s = wire_get(inst, :s)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
+    idx_raw = wire_get(inst, :idx_raw)
+    val = wire_get(inst, :value)
+    bits = wire_get(inst, :bits)
     if bits == nil
       bits = 64
     parts = StringBuffer(700)
@@ -5668,17 +5669,17 @@ ewscope_md_state = {ids: {}}
   # in the slot's native width. Lifted from typed_array_set_inline; only
   # emitted for integer typed-arrays in widths 8/16/32/64.
   when :typed_array_compound_op_inline
-    t = inst[:temp]
-    s = inst[:s]
-    arr = inst[:arr]
-    idx = inst[:idx]
-    idx_raw = inst[:idx_raw]
-    val = inst[:value]
-    compound_op = inst[:compound_op]
-    bits = inst[:bits]
+    t = wire_get(inst, :temp)
+    s = wire_get(inst, :s)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
+    idx_raw = wire_get(inst, :idx_raw)
+    val = wire_get(inst, :value)
+    compound_op = wire_get(inst, :compound_op)
+    bits = wire_get(inst, :bits)
     if bits == nil
       bits = 64
-    signed = inst[:signed]
+    signed = wire_get(inst, :signed)
     if signed == nil
       signed = false
     llvm_op = nil
@@ -5767,15 +5768,15 @@ ewscope_md_state = {ids: {}}
   # start/size/cap fields, and slots at offset 32. No bounds check here:
   # this is the unchecked `[]` path, and lowered each supplies in-range indices.
   when :big_array_get_inline
-    t = inst[:temp]
-    s = inst[:s]
-    arr = inst[:arr]
-    idx = inst[:idx]
-    idx_raw = inst[:idx_raw]
-    bits = inst[:bits]
+    t = wire_get(inst, :temp)
+    s = wire_get(inst, :s)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
+    idx_raw = wire_get(inst, :idx_raw)
+    bits = wire_get(inst, :bits)
     if bits == nil
       bits = 64
-    signed = inst[:signed]
+    signed = wire_get(inst, :signed)
     if signed == nil
       signed = true
     parts = StringBuffer(700)
@@ -5852,15 +5853,15 @@ ewscope_md_state = {ids: {}}
   # index 128..255 to a NEGATIVE offset (signed i8 wrap), addressing
   # BEFORE the struct. No bounds check — caller proved [0, size).
   when :small_array_get_inline
-    t = inst[:temp]
-    s = inst[:s]
-    arr = inst[:arr]
-    idx = inst[:idx]
-    idx_raw = inst[:idx_raw]
-    bits = inst[:bits]
+    t = wire_get(inst, :temp)
+    s = wire_get(inst, :s)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
+    idx_raw = wire_get(inst, :idx_raw)
+    bits = wire_get(inst, :bits)
     if bits == nil
       bits = 8
-    signed = inst[:signed]
+    signed = wire_get(inst, :signed)
     if signed == nil
       signed = false
     # Element alignment. The HEADERFUL WSmallArray has a 2-byte header, so
@@ -5869,7 +5870,7 @@ ewscope_md_state = {ids: {}}
     # naturally aligned; telling LLVM the true alignment is what lets it
     # vectorize a reduction over the buffer (align 1 blocks it).
     ealign = "align 1"
-    if inst[:headerless] == true
+    if wire_get(inst, :headerless) == true
       if bits == 64
         ealign = "align 8"
       elsif bits == 32
@@ -5877,7 +5878,7 @@ ewscope_md_state = {ids: {}}
       elsif bits == 16
         ealign = "align 2"
     parts = StringBuffer(400)
-    if inst[:headerless] == true
+    if wire_get(inst, :headerless) == true
       # Headerless stack SmallArray: arr IS the raw [payload x i8] alloca ptr —
       # slots start at offset 0 (no 2-byte ebits/size header) and there is no
       # box to unmask. The offset-0 GEP just rebinds arr as the slots base so
@@ -5950,19 +5951,19 @@ ewscope_md_state = {ids: {}}
   # the struct for indices 128..255). No size update (SmallArray is
   # fixed-size by construction).
   when :small_array_set_inline
-    t = inst[:temp]
-    s = inst[:s]
-    arr = inst[:arr]
-    idx = inst[:idx]
-    idx_raw = inst[:idx_raw]
-    val = inst[:value]
-    bits = inst[:bits]
+    t = wire_get(inst, :temp)
+    s = wire_get(inst, :s)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
+    idx_raw = wire_get(inst, :idx_raw)
+    val = wire_get(inst, :value)
+    bits = wire_get(inst, :bits)
     if bits == nil
       bits = 8
     # Element alignment — natural for the headerless (no-header) form, byte for
     # the headerful WSmallArray. See :small_array_get_inline for the rationale.
     ealign = "align 1"
-    if inst[:headerless] == true
+    if wire_get(inst, :headerless) == true
       if bits == 64
         ealign = "align 8"
       elsif bits == 32
@@ -5970,7 +5971,7 @@ ewscope_md_state = {ids: {}}
       elsif bits == 16
         ealign = "align 2"
     parts = StringBuffer(400)
-    if inst[:headerless] == true
+    if wire_get(inst, :headerless) == true
       # Headerless stack SmallArray write: arr is the raw alloca ptr, slots at
       # offset 0, no unmask. See :small_array_get_inline for the rationale.
       parts << s[2] + " = getelementptr i8, ptr " + arr + ", i64 0\n  "
@@ -6039,10 +6040,10 @@ ewscope_md_state = {ids: {}}
   when :array_get_inline
     # Inline WArray read: unmask → slots (off 16) → start i32 (off 4) → unbox idx → GEP → load
     # Offsets locked by _Static_assert in runtime.h (items renamed to slots).
-    t = inst[:temp]
-    s = inst[:s]
-    arr = inst[:arr]
-    idx = inst[:idx]
+    t = wire_get(inst, :temp)
+    s = wire_get(inst, :s)
+    arr = wire_get(inst, :arr)
+    idx = wire_get(inst, :idx)
     parts = StringBuffer(500)
     parts << s[0] + " = and i64 " + arr + ", 140737488355312\n  "   # unmask (W_ARRAY_PTR_MASK)
     parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "      # struct ptr
@@ -6060,21 +6061,21 @@ ewscope_md_state = {ids: {}}
   when :builtin_class_init
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:name_str_id]]
+      swv = string_wvs[wire_get(inst, :name_str_id)]
     if swv != nil
-      cn = llvm_safe_name(inst[:class_name].gsub(":", "__"))
+      cn = llvm_safe_name(wire_get(inst, :class_name).gsub(":", "__"))
       parts = StringBuffer(128)
       parts << "%" + cn + ".cls = call i64 @w_class_new_wv(i64 " + llvm_wvalue_literal(swv) + ", i64 " + w_nil.to_s() + ")\n  "
       parts << "store i64 %" + cn + ".cls, ptr @class." + cn
       parts.to_s()
     else
-      used_ptr_ids[inst[:name_str_id]] = true
+      used_ptr_ids[wire_get(inst, :name_str_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:name_byte_len].to_s()
-      cn = llvm_safe_name(inst[:class_name].gsub(":", "__"))
+      bl = wire_get(inst, :name_byte_len).to_s()
+      cn = llvm_safe_name(wire_get(inst, :class_name).gsub(":", "__"))
       parts = StringBuffer(192)
-      parts << "%" + cn + ".ptr = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:name_str_id].to_s() + ", i32 0, i32 0\n  "
+      parts << "%" + cn + ".ptr = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :name_str_id).to_s() + ", i32 0, i32 0\n  "
       parts << "%" + cn + ".name = call i64 @w_string(ptr %" + cn + ".ptr)\n  "
       parts << "%" + cn + ".cls = call i64 @w_class_new_wv(i64 %" + cn + ".name, i64 " + w_nil.to_s() + ")\n  "
       parts << "store i64 %" + cn + ".cls, ptr @class." + cn
@@ -6084,39 +6085,39 @@ ewscope_md_state = {ids: {}}
   when :ivar_get
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:str_id]]
+      swv = string_wvs[wire_get(inst, :str_id)]
     if swv != nil
-      inst[:temp] + " = call i64 @w_ivar_get_wv(i64 " + inst[:self_reg] + ", i64 " + llvm_wvalue_literal(swv) + ")"
+      wire_get(inst, :temp) + " = call i64 @w_ivar_get_wv(i64 " + wire_get(inst, :self_reg) + ", i64 " + llvm_wvalue_literal(swv) + ")"
     else
-      used_ptr_ids[inst[:str_id]] = true
+      used_ptr_ids[wire_get(inst, :str_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:byte_len].to_s()
+      bl = wire_get(inst, :byte_len).to_s()
       parts = StringBuffer(160)
-      parts << inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:str_id].to_s() + ", i32 0, i32 0\n  "
-      parts << inst[:temp_ptr] + ".wv = call i64 @w_string(ptr " + inst[:temp_ptr] + ")\n  "
-      parts << inst[:temp] + " = call i64 @w_ivar_get_wv(i64 " + inst[:self_reg] + ", i64 " + inst[:temp_ptr] + ".wv)"
+      parts << wire_get(inst, :temp_ptr) + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :str_id).to_s() + ", i32 0, i32 0\n  "
+      parts << wire_get(inst, :temp_ptr) + ".wv = call i64 @w_string(ptr " + wire_get(inst, :temp_ptr) + ")\n  "
+      parts << wire_get(inst, :temp) + " = call i64 @w_ivar_get_wv(i64 " + wire_get(inst, :self_reg) + ", i64 " + wire_get(inst, :temp_ptr) + ".wv)"
       parts.to_s()
   when :ivar_set
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:str_id]]
+      swv = string_wvs[wire_get(inst, :str_id)]
     if swv != nil
-      inst[:temp] + " = call i64 @w_ivar_set_wv(i64 " + inst[:self_reg] + ", i64 " + llvm_wvalue_literal(swv) + ", i64 " + inst[:value] + ")"
+      wire_get(inst, :temp) + " = call i64 @w_ivar_set_wv(i64 " + wire_get(inst, :self_reg) + ", i64 " + llvm_wvalue_literal(swv) + ", i64 " + wire_get(inst, :value) + ")"
     else
-      used_ptr_ids[inst[:str_id]] = true
+      used_ptr_ids[wire_get(inst, :str_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:byte_len].to_s()
+      bl = wire_get(inst, :byte_len).to_s()
       parts = StringBuffer(160)
-      parts << inst[:temp_ptr] + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:str_id].to_s() + ", i32 0, i32 0\n  "
-      parts << inst[:temp_ptr] + ".wv = call i64 @w_string(ptr " + inst[:temp_ptr] + ")\n  "
-      parts << inst[:temp] + " = call i64 @w_ivar_set_wv(i64 " + inst[:self_reg] + ", i64 " + inst[:temp_ptr] + ".wv, i64 " + inst[:value] + ")"
+      parts << wire_get(inst, :temp_ptr) + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :str_id).to_s() + ", i32 0, i32 0\n  "
+      parts << wire_get(inst, :temp_ptr) + ".wv = call i64 @w_string(ptr " + wire_get(inst, :temp_ptr) + ")\n  "
+      parts << wire_get(inst, :temp) + " = call i64 @w_ivar_set_wv(i64 " + wire_get(inst, :self_reg) + ", i64 " + wire_get(inst, :temp_ptr) + ".wv, i64 " + wire_get(inst, :value) + ")"
       parts.to_s()
   when :ivar_get_idx
-    byte_offset = (8 + inst[:offset] * 8).to_s
-    t = inst[:temp]
-    sr = inst[:self_reg]
+    byte_offset = (8 + wire_get(inst, :offset) * 8).to_s
+    t = wire_get(inst, :temp)
+    sr = wire_get(inst, :self_reg)
     parts = StringBuffer(160)
     parts << t + ".raw = and i64 " + sr + ", -16\n  "
     parts << t + ".ptr = inttoptr i64 " + t + ".raw to ptr\n  "
@@ -6126,74 +6127,74 @@ ewscope_md_state = {ids: {}}
   when :slab_node_get_idx
     # PR #2: read one slab slot from an AST node.
     # Unused — the active slab field path is the :call_direct_i64
-    # branch above that special-cases inst[:name] == "w_node_field_load".
-    inst[:temp] + " = call i64 @w_node_field_load(i64 " + inst[:node] + ", i64 " + inst[:offset].to_s() + ")"
+    # branch above that special-cases wire_get(inst, :name) == "w_node_field_load".
+    wire_get(inst, :temp) + " = call i64 @w_node_field_load(i64 " + wire_get(inst, :node) + ", i64 " + wire_get(inst, :offset).to_s() + ")"
   when :slab_node_set_idx
     # PR #2: write one slab slot. Unused; see :slab_node_get_idx
     # note above.
-    t = inst[:temp]
+    t = wire_get(inst, :temp)
     parts = StringBuffer(192)
-    parts << "call void @w_node_field_store(i64 " + inst[:node] + ", i64 " + inst[:offset].to_s() + ", i64 " + inst[:value] + ")\n  "
-    parts << t + " = add i64 " + inst[:value] + ", 0"
+    parts << "call void @w_node_field_store(i64 " + wire_get(inst, :node) + ", i64 " + wire_get(inst, :offset).to_s() + ", i64 " + wire_get(inst, :value) + ")\n  "
+    parts << t + " = add i64 " + wire_get(inst, :value) + ", 0"
     parts.to_s()
   when :ivar_set_idx
-    byte_offset = (8 + inst[:offset] * 8).to_s()
-    t = inst[:temp]
-    sr = inst[:self_reg]
+    byte_offset = (8 + wire_get(inst, :offset) * 8).to_s()
+    t = wire_get(inst, :temp)
+    sr = wire_get(inst, :self_reg)
     parts = StringBuffer(192)
     parts << t + ".raw = and i64 " + sr + ", -16\n  "
     parts << t + ".ptr = inttoptr i64 " + t + ".raw to ptr\n  "
     parts << t + ".gep = getelementptr i8, ptr " + t + ".ptr, i64 " + byte_offset + "\n  "
-    parts << "store i64 " + inst[:value] + ", ptr " + t + ".gep, align 8" + tbaa_ivar_suffix() + "\n  "
-    parts << t + " = add i64 " + inst[:value] + ", 0"
+    parts << "store i64 " + wire_get(inst, :value) + ", ptr " + t + ".gep, align 8" + tbaa_ivar_suffix() + "\n  "
+    parts << t + " = add i64 " + wire_get(inst, :value) + ", 0"
     parts.to_s()
   when :class_add_ivar
     swv = nil
     if string_wvs != nil
-      swv = string_wvs[inst[:ivar_str_id]]
+      swv = string_wvs[wire_get(inst, :ivar_str_id)]
     if swv != nil
-      "call i32 @w_class_add_ivar_wv(i64 " + inst[:class_temp] + ", i64 " + llvm_wvalue_literal(swv) + ")"
+      "call i32 @w_class_add_ivar_wv(i64 " + wire_get(inst, :class_temp) + ", i64 " + llvm_wvalue_literal(swv) + ")"
     else
-      used_ptr_ids[inst[:ivar_str_id]] = true
+      used_ptr_ids[wire_get(inst, :ivar_str_id)] = true
       lbr = "\["
       rbr = "]"
-      bl = inst[:ivar_byte_len].to_s()
-      ivar_ptr = inst[:class_temp] + ".ivar_name"
+      bl = wire_get(inst, :ivar_byte_len).to_s()
+      ivar_ptr = wire_get(inst, :class_temp) + ".ivar_name"
       parts = StringBuffer(160)
-      parts << ivar_ptr + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + inst[:ivar_str_id].to_s() + ", i32 0, i32 0\n  "
+      parts << ivar_ptr + " = getelementptr inbounds " + lbr + bl + " x i8" + rbr + ", ptr @.str." + wire_get(inst, :ivar_str_id).to_s() + ", i32 0, i32 0\n  "
       parts << ivar_ptr + ".wv = call i64 @w_string(ptr " + ivar_ptr + ")\n  "
-      parts << "call i32 @w_class_add_ivar_wv(i64 " + inst[:class_temp] + ", i64 " + ivar_ptr + ".wv)"
+      parts << "call i32 @w_class_add_ivar_wv(i64 " + wire_get(inst, :class_temp) + ", i64 " + ivar_ptr + ".wv)"
       parts.to_s()
 
   # Closures
   when :null_ptr
-    inst[:temp] + " = inttoptr i64 0 to ptr"
+    wire_get(inst, :temp) + " = inttoptr i64 0 to ptr"
   when :ptr_to_i64
-    inst[:temp] + " = ptrtoint ptr " + inst[:value] + " to i64"
+    wire_get(inst, :temp) + " = ptrtoint ptr " + wire_get(inst, :value) + " to i64"
   when :i64_to_ptr
-    inst[:temp] + " = inttoptr i64 " + inst[:value] + " to ptr"
+    wire_get(inst, :temp) + " = inttoptr i64 " + wire_get(inst, :value) + " to ptr"
   when :closure_new
-    inst[:temp] + " = call i64 @w_closure_new_a(ptr @" + inst[:fn_name] + ", ptr " + inst[:captures_ptr] + ", i32 " + inst[:capture_count].to_s() + ", i32 " + (inst[:block_arity] == nil ? 0 : inst[:block_arity]).to_s() + ")"
+    wire_get(inst, :temp) + " = call i64 @w_closure_new_a(ptr @" + wire_get(inst, :fn_name) + ", ptr " + wire_get(inst, :captures_ptr) + ", i32 " + wire_get(inst, :capture_count).to_s() + ", i32 " + (wire_get(inst, :block_arity) == nil ? 0 : wire_get(inst, :block_arity)).to_s() + ")"
   when :alloca_array
     lbr = "\["
     rbr = "]"
-    inst[:ptr] + " = alloca " + lbr + inst[:count].to_s() + " x i64" + rbr + ", align 8"
+    wire_get(inst, :ptr) + " = alloca " + lbr + wire_get(inst, :count).to_s() + " x i64" + rbr + ", align 8"
   when :gep_array
     lbr = "\["
     rbr = "]"
-    inst[:temp] + " = getelementptr inbounds " + lbr + inst[:count].to_s() + " x i64" + rbr + ", ptr " + inst[:base] + ", i32 0, i32 " + inst[:index].to_s()
+    wire_get(inst, :temp) + " = getelementptr inbounds " + lbr + wire_get(inst, :count).to_s() + " x i64" + rbr + ", ptr " + wire_get(inst, :base) + ", i32 0, i32 " + wire_get(inst, :index).to_s()
   when :store_ptr
-    "store i64 " + inst[:value] + ", ptr " + inst[:dest] + ", align 8"
+    "store i64 " + wire_get(inst, :value) + ", ptr " + wire_get(inst, :dest) + ", align 8"
   when :load_ptr
-    inst[:temp] + " = load i64, ptr " + inst[:ptr] + ", align 8"
+    wire_get(inst, :temp) + " = load i64, ptr " + wire_get(inst, :ptr) + ", align 8"
 
   # SSA phi with N inputs (from mem2reg)
   when :phi_ssa
     lbr = "\["
     rbr = "]"
-    incoming = inst[:incoming]
+    incoming = wire_get(inst, :incoming)
     parts = StringBuffer(incoming.size() * 32 + 24)
-    parts << inst[:temp] + " = phi i64 "
+    parts << wire_get(inst, :temp) + " = phi i64 "
     ii = 0
     while ii < incoming.size()
       if ii > 0
@@ -6205,7 +6206,7 @@ ewscope_md_state = {ids: {}}
 
   # Free a non-escaped heap value at scope exit
   when :free_value
-    "call void @w_value_free(i64 " + inst[:value] + ")"
+    "call void @w_value_free(i64 " + wire_get(inst, :value) + ")"
 
   # Scope markers — pseudo-instructions for ownership analysis, no codegen
   when :scope_push, :scope_pop
@@ -6228,13 +6229,13 @@ ewscope_md_state = {ids: {}}
   parts.join(", ")
 
 -> render_method_call_args_setup(inst)
-  args = inst[:args]
+  args = wire_get(inst, :args)
   if args.size() == 0
-    return inst[:temp_args_val] + " = call i64 @w_array_new_empty()\n  "
+    return wire_get(inst, :temp_args_val) + " = call i64 @w_array_new_empty()\n  "
   out = StringBuffer(args.size() * 48 + 32)
-  out << inst[:temp_args_val] + " = call i64 @w_array_new_empty()\n  "
+  out << wire_get(inst, :temp_args_val) + " = call i64 @w_array_new_empty()\n  "
   i = 0
   while i < args.size()
-    out << "call i64 @w_array_push(i64 " + inst[:temp_args_val] + ", i64 " + args[i] + ")\n  "
+    out << "call i64 @w_array_push(i64 " + wire_get(inst, :temp_args_val) + ", i64 " + args[i] + ")\n  "
     i += 1
   out.to_s()

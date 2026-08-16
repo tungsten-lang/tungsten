@@ -7,15 +7,24 @@ is the append-only opcode/kind registry.
 
 The arena stores an inline count/capacity header followed by symbol/value
 pairs. Modules, functions, and blocks reserve space for analysis fields that
-are attached after construction. Instructions reserve two fields. Existing
-fields are rewritten in place, while `w_wire_clone` provides the copy-on-write
-primitive needed by incremental lowering.
+are attached after construction. Instructions reserve six late-pass fields
+(source location plus mid-end/emitter metadata). Existing fields are rewritten
+in place, while `w_wire_clone` provides the copy-on-write primitive needed by
+incremental lowering.
+
+Allocation writes only the count/capacity header. Words beyond `count` are
+unobservable and are filled by `store_at` before publication, so the arena
+does not clear live or reserved pairs on every bump allocation.
 
 `[]` and `[]=` intentionally remain representation primitives in both the
 native runtime and the C VM. That keeps lowering, CFG, ownership, content hash,
 and emission source-compatible while the migration is staged. Packed WIRE
 values are explicitly excluded from the packed-AST predicate even though both
 use the otherwise-full packed-node NaN-box subtype.
+
+Mid-end and emitter opcode tests use `wire_kind`, which reads the kind directly
+from the handle instead of routing the hottest field through hash-compatible
+`[]` dispatch.
 
 ## Current boundary
 

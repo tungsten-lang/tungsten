@@ -1030,22 +1030,22 @@ use lowering/definitions
       k = 0
       while k < blk[:instructions].size()
         inst = blk[:instructions][k]
-        out = out + "    " + inst[:op].to_s()
+        out = out + "    " + wire_kind(inst).to_s()
         # Print key fields
-        if inst[:temp] != nil
-          out = out + " " + inst[:temp]
-        if inst[:name] != nil
-          out = out + " @" + inst[:name]
-        if inst[:devirt_fn] != nil
-          out = out + " devirt=@" + inst[:devirt_fn]
-          out = out + " class=" + inst[:devirt_class]
-        if inst[:construct_fn] != nil
-          out = out + " construct=@" + inst[:construct_fn]
-          out = out + " class=" + inst[:construct_class]
-        if inst[:value] != nil
-          out = out + " " + inst[:value].to_s()
-        if inst[:label] != nil
-          out = out + " %" + inst[:label]
+        if wire_get(inst, :temp) != nil
+          out = out + " " + wire_get(inst, :temp)
+        if wire_get(inst, :name) != nil
+          out = out + " @" + wire_get(inst, :name)
+        if wire_get(inst, :devirt_fn) != nil
+          out = out + " devirt=@" + wire_get(inst, :devirt_fn)
+          out = out + " class=" + wire_get(inst, :devirt_class)
+        if wire_get(inst, :construct_fn) != nil
+          out = out + " construct=@" + wire_get(inst, :construct_fn)
+          out = out + " class=" + wire_get(inst, :construct_class)
+        if wire_get(inst, :value) != nil
+          out = out + " " + wire_get(inst, :value).to_s()
+        if wire_get(inst, :label) != nil
+          out = out + " %" + wire_get(inst, :label)
         out = out + "\n"
         k += 1
       j += 1

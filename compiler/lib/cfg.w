@@ -278,22 +278,22 @@ use wire
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      op = inst[:op]
+      op = wire_kind(inst)
       # store_i64 and load_i64 are OK — skip them
       if op != :store_i64 && op != :load_i64
         # Check if any slot pointer appears in any field of this instruction
-        if op == :store_ptr && promotable[inst[:dest]] == true
-          promotable[inst[:dest]] = false
-        if op == :load_ptr && promotable[inst[:ptr]] == true
-          promotable[inst[:ptr]] = false
-        if op == :ptr_to_i64 && promotable[inst[:value]] == true
-          promotable[inst[:value]] = false
+        if op == :store_ptr && promotable[wire_get(inst, :dest)] == true
+          promotable[wire_get(inst, :dest)] = false
+        if op == :load_ptr && promotable[wire_get(inst, :ptr)] == true
+          promotable[wire_get(inst, :ptr)] = false
+        if op == :ptr_to_i64 && promotable[wire_get(inst, :value)] == true
+          promotable[wire_get(inst, :value)] = false
         # Call args: if a slot pointer is passed, it's address-taken
-        if inst[:args] != nil
+        if wire_get(inst, :args) != nil
           ai = 0
-          while ai < inst[:args].size()
-            if promotable[inst[:args][ai]] == true
-              promotable[inst[:args][ai]] = false
+          while ai < wire_get(inst, :args).size()
+            if promotable[wire_get(inst, :args)[ai]] == true
+              promotable[wire_get(inst, :args)[ai]] = false
             ai += 1
       ii += 1
     bi += 1
@@ -319,9 +319,9 @@ use wire
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if inst[:op] == :store_i64
-        if promotable[inst[:ptr]] != nil
-          ptr = inst[:ptr]
+      if wire_kind(inst) == :store_i64
+        if promotable[wire_get(inst, :ptr)] != nil
+          ptr = wire_get(inst, :ptr)
           if defs[ptr] == nil
             defs[ptr] = []
           defs[ptr].push(bi)
@@ -508,25 +508,25 @@ use wire
       # Apply pending substitutions to this instruction
       if subst_count > 0
         inst = apply_subst(inst, subst, subst_count)
-      op = inst[:op]
+      op = wire_kind(inst)
 
-      if op == :store_i64 && promotable[inst[:ptr]] != nil
+      if op == :store_i64 && promotable[wire_get(inst, :ptr)] != nil
         # Store to promotable var: push new definition, skip instruction
-        ptr = inst[:ptr]
-        current_def[ptr].push(inst[:value])
+        ptr = wire_get(inst, :ptr)
+        current_def[ptr].push(wire_get(inst, :value))
         push_count = pushes[ptr]
         if push_count == nil
           pushes[ptr] = 1
         else
           pushes[ptr] = push_count + 1
-      elsif op == :load_i64 && promotable[inst[:ptr]] != nil
+      elsif op == :load_i64 && promotable[wire_get(inst, :ptr)] != nil
         # Load from promotable var: substitute directly, skip instruction
-        ptr = inst[:ptr]
+        ptr = wire_get(inst, :ptr)
         def_stack = current_def[ptr]
         if def_stack.size() > 0
-          subst[inst[:temp]] = def_stack[def_stack.size() - 1]
+          subst[wire_get(inst, :temp)] = def_stack[def_stack.size() - 1]
         else
-          subst[inst[:temp]] = w_nil.to_s()
+          subst[wire_get(inst, :temp)] = w_nil.to_s()
         subst_count += 1
       else
         new_instrs.push(inst)
@@ -592,14 +592,14 @@ use wire
         inst = instrs[ii]
         if u_subst_count > 0
           inst = apply_subst(inst, u_subst, u_subst_count)
-        op = inst[:op]
-        if op == :store_i64 && promotable[inst[:ptr]] != nil
-          local_defs[inst[:ptr]] = inst[:value]
-        elsif op == :load_i64 && promotable[inst[:ptr]] != nil
-          val = local_defs[inst[:ptr]]
+        op = wire_kind(inst)
+        if op == :store_i64 && promotable[wire_get(inst, :ptr)] != nil
+          local_defs[wire_get(inst, :ptr)] = wire_get(inst, :value)
+        elsif op == :load_i64 && promotable[wire_get(inst, :ptr)] != nil
+          val = local_defs[wire_get(inst, :ptr)]
           if val == nil
             val = w_nil.to_s()
-          u_subst[inst[:temp]] = val
+          u_subst[wire_get(inst, :temp)] = val
           u_subst_count += 1
         else
           new_instrs.push(inst)

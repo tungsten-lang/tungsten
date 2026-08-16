@@ -12,10 +12,16 @@ use wire_schema
   wire_schema_kind_id(op)
 
 -> wire_kind(instruction)
-  if ccall_nobox("w_is_wire_extern", instruction) == 1
-    id = ccall_nobox("w_wire_kind_extern", instruction)
+  id = ccall_nobox("w_wire_kind_extern", instruction)
+  if id != 0
     return wire_schema_kind_symbol(id)
   instruction[:op]
+
+-> wire_get(instruction, field)
+  ccall_rawargs("w_wire_field_load_nil", instruction, field)
+
+-> wire_set(instruction, field, value)
+  ccall_rawargs("w_wire_field_store", instruction, field, value)
 
 -> wire_instruction(instruction)
   if instruction == nil
@@ -30,18 +36,17 @@ use wire_schema
   keys = instruction.keys()
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
   field_count = ccall_nobox("w_numeric_to_i64", keys.size())
-  handle = ccall_nobox("w_wire_alloc", kind_id, field_count)
+  handle = ccall_rawargs("w_wire_alloc", kind_id, field_count)
   i = 0
   while i < keys.size()
     key = keys[i]
     ccall_nobox("w_wire_field_store_at", handle, i, key, instruction[key])
     i += 1
-  wvalue_from_bits(handle)
+  handle
 
 -> wire_clone_instruction(instruction)
   if ccall_nobox("w_is_wire_extern", instruction) == 1
-    clone_bits = ccall_nobox("w_wire_clone", instruction)
-    return wvalue_from_bits(clone_bits)
+    return ccall_rawargs("w_wire_clone", instruction)
   instruction
 
 -> wire_record(kind, fields, spare_fields = 2)
@@ -49,13 +54,13 @@ use wire_schema
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(kind))
   field_count = ccall_nobox("w_numeric_to_i64", keys.size())
   spare_count = ccall_nobox("w_numeric_to_i64", spare_fields)
-  handle = ccall_nobox("w_wire_alloc_reserve", kind_id, field_count, spare_count)
+  handle = ccall_rawargs("w_wire_alloc_reserve", kind_id, field_count, spare_count)
   i = 0
   while i < keys.size()
     key = keys[i]
     ccall_nobox("w_wire_field_store_at", handle, i, key, fields[key])
     i += 1
-  wvalue_from_bits(handle)
+  handle
 
 # -- Module --
 
@@ -394,19 +399,19 @@ use wire_schema
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if inst[:label] != nil && redirect[inst[:label]] != nil
-        inst[:label] = redirect[inst[:label]]
-      if inst[:then_label] != nil && redirect[inst[:then_label]] != nil
-        inst[:then_label] = redirect[inst[:then_label]]
-      if inst[:else_label] != nil && redirect[inst[:else_label]] != nil
-        inst[:else_label] = redirect[inst[:else_label]]
+      if wire_get(inst, :label) != nil && redirect[wire_get(inst, :label)] != nil
+        wire_set(inst, :label, redirect[wire_get(inst, :label)])
+      if wire_get(inst, :then_label) != nil && redirect[wire_get(inst, :then_label)] != nil
+        wire_set(inst, :then_label, redirect[wire_get(inst, :then_label)])
+      if wire_get(inst, :else_label) != nil && redirect[wire_get(inst, :else_label)] != nil
+        wire_set(inst, :else_label, redirect[wire_get(inst, :else_label)])
       # Phi incoming labels
-      if inst[:incoming] != nil
+      if wire_get(inst, :incoming) != nil
         pi = 0
-        while pi < inst[:incoming].size()
-          lbl = inst[:incoming][pi + 1]
+        while pi < wire_get(inst, :incoming).size()
+          lbl = wire_get(inst, :incoming)[pi + 1]
           if redirect[lbl] != nil
-            inst[:incoming][pi + 1] = redirect[lbl]
+            wire_get(inst, :incoming)[pi + 1] = redirect[lbl]
           pi += 2
       ii += 1
     bi += 1
@@ -570,9 +575,9 @@ use wire_schema
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if inst[:op] == :ret_i64 || inst[:op] == :ret_i32 || inst[:op] == :ret_void
+      if wire_kind(inst) == :ret_i64 || wire_kind(inst) == :ret_i32 || wire_kind(inst) == :ret_void
         fnbody = stack[0]
-        recycle_count = inst[:function_recycle_count]
+        recycle_count = wire_get(inst, :function_recycle_count)
         if recycle_count == nil
           recycle_count = fnbody.size()
         # LIFO order, matching emit_recycles_for_current_scope.
@@ -683,34 +688,34 @@ use wire_schema
   while i < instrs.size()
     inst = apply_subst(instrs[i], subst, subst_count)
 
-    if inst[:op] in (:store_i64 :store_i128 :store_float :store_double)
-      if escaped[inst[:ptr]] != true
-        known[inst[:ptr]] = inst[:value]
+    if wire_kind(inst) in (:store_i64 :store_i128 :store_float :store_double)
+      if escaped[wire_get(inst, :ptr)] != true
+        known[wire_get(inst, :ptr)] = wire_get(inst, :value)
       else
-        known[inst[:ptr]] = nil
+        known[wire_get(inst, :ptr)] = nil
       new_instrs.push(inst)
-    elsif inst[:op] in (:load_i64 :load_i128 :load_float :load_double)
-      kv = known[inst[:ptr]]
+    elsif wire_kind(inst) in (:load_i64 :load_i128 :load_float :load_double)
+      kv = known[wire_get(inst, :ptr)]
       if kv != nil
         # Value is known — record substitution, skip the load
-        subst[inst[:temp]] = kv
+        subst[wire_get(inst, :temp)] = kv
         subst_count += 1
         # Also record function-wide so cross-block uses of this temp
         # (which cse_block's local subst never reaches) get rewritten in
         # optimize_function's reapply pass.
         if global_subst != nil
-          global_subst[inst[:temp]] = kv
+          global_subst[wire_get(inst, :temp)] = kv
       else
         new_instrs.push(inst)
-    elsif inst[:op] == :ptr_to_i64
+    elsif wire_kind(inst) == :ptr_to_i64
       # Address-of escape: any pointer whose address is taken can be
       # mutated through aliasing (closures, callee, indirect store). Mark
       # the slot as escaped and drop all known values so subsequent loads
       # always re-fetch from memory.
-      escaped[inst[:value]] = true
+      escaped[wire_get(inst, :value)] = true
       known = {}
       new_instrs.push(inst)
-    elsif inst[:op] in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_method_i64 :call_indirect_i64 :memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :call_reuse_or_new_array :call_reuse_or_new_hash :call_reuse_or_new_typed :call_reuse_or_new_strbuf :call_reuse_and_drain_or_new_hash :call_recycle_or_new_array :call_recycle_or_new_hash :call_recycle_or_new_typed :call_recycle_or_new_strbuf :call_recycle_array :call_recycle_hash :call_recycle_typed :call_recycle_strbuf)
+    elsif wire_kind(inst) in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_method_i64 :call_indirect_i64 :memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :call_reuse_or_new_array :call_reuse_or_new_hash :call_reuse_or_new_typed :call_reuse_or_new_strbuf :call_reuse_and_drain_or_new_hash :call_recycle_or_new_array :call_recycle_or_new_hash :call_recycle_or_new_typed :call_recycle_or_new_strbuf :call_recycle_array :call_recycle_hash :call_recycle_typed :call_recycle_strbuf)
       # Calls may mutate any escaped slot. Drop known values so subsequent
       # loads observe writes performed by the callee or its closures.
       known = {}
@@ -726,8 +731,7 @@ use wire_schema
 
 -> clone_inst(inst)
   if ccall_nobox("w_is_wire_extern", inst) == 1
-    clone_bits = ccall_nobox("w_wire_clone", inst)
-    return wvalue_from_bits(clone_bits)
+    return ccall_rawargs("w_wire_clone", inst)
   result = {}
   keys = inst.keys()
   k = 0
@@ -743,7 +747,7 @@ use wire_schema
     return inst
   result = inst
   cloned = false
-  val = inst[:value]
+  val = wire_get(inst, :value)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -751,7 +755,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:value] = rep
-  val = inst[:lhs]
+  val = wire_get(inst, :lhs)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -759,7 +763,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:lhs] = rep
-  val = inst[:rhs]
+  val = wire_get(inst, :rhs)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -767,7 +771,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:rhs] = rep
-  val = inst[:ptr]
+  val = wire_get(inst, :ptr)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -775,7 +779,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:ptr] = rep
-  val = inst[:index]
+  val = wire_get(inst, :index)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -783,7 +787,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:index] = rep
-  val = inst[:raw]
+  val = wire_get(inst, :raw)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -791,7 +795,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:raw] = rep
-  val = inst[:boxed]
+  val = wire_get(inst, :boxed)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -799,7 +803,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:boxed] = rep
-  val = inst[:lhs_boxed]
+  val = wire_get(inst, :lhs_boxed)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -807,7 +811,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:lhs_boxed] = rep
-  val = inst[:rhs_boxed]
+  val = wire_get(inst, :rhs_boxed)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -815,7 +819,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:rhs_boxed] = rep
-  val = inst[:cond]
+  val = wire_get(inst, :cond)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -823,7 +827,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:cond] = rep
-  val = inst[:then_val]
+  val = wire_get(inst, :then_val)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -831,7 +835,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:then_val] = rep
-  val = inst[:else_val]
+  val = wire_get(inst, :else_val)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -839,7 +843,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:else_val] = rep
-  val = inst[:self_reg]
+  val = wire_get(inst, :self_reg)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -847,7 +851,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:self_reg] = rep
-  val = inst[:receiver]
+  val = wire_get(inst, :receiver)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -855,7 +859,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:receiver] = rep
-  val = inst[:super_reg]
+  val = wire_get(inst, :super_reg)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -863,7 +867,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:super_reg] = rep
-  val = inst[:a_value]
+  val = wire_get(inst, :a_value)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -871,7 +875,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:a_value] = rep
-  val = inst[:b_value]
+  val = wire_get(inst, :b_value)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -879,7 +883,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:b_value] = rep
-  val = inst[:captures_ptr]
+  val = wire_get(inst, :captures_ptr)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -887,7 +891,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:captures_ptr] = rep
-  val = inst[:buf]
+  val = wire_get(inst, :buf)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -895,7 +899,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:buf] = rep
-  val = inst[:class_temp]
+  val = wire_get(inst, :class_temp)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -903,7 +907,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:class_temp] = rep
-  val = inst[:table]
+  val = wire_get(inst, :table)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -912,7 +916,7 @@ use wire_schema
         cloned = true
       result[:table] = rep
   # Inline GEP fields: arr, idx
-  val = inst[:arr]
+  val = wire_get(inst, :arr)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -920,7 +924,7 @@ use wire_schema
         result = clone_inst(inst)
         cloned = true
       result[:arr] = rep
-  val = inst[:idx]
+  val = wire_get(inst, :idx)
   if val != nil
     rep = subst[val]
     if rep != nil
@@ -929,7 +933,7 @@ use wire_schema
         cloned = true
       result[:idx] = rep
   # Substitute within s[] scratch array
-  sarr = inst[:s]
+  sarr = wire_get(inst, :s)
   if sarr != nil
     new_sarr = nil
     si = 0
@@ -958,7 +962,7 @@ use wire_schema
   # CSE-forwarded machine-int local passed as an asm-builtin operand (e.g.
   # asm_add_no's n) kept referencing the eliminated load's temp — clang
   # rejected the IR with `use of undefined value %tN`.
-  if inst[:op] in (:asm_add_n :asm_add_no :asm_sub_no :asm_addmul1 :asm_mulbase :asm_neon_umull :asm_neon_redc :asm_neon_redc4 :asm_neon_madd4 :asm_neon_msub4 :asm_neon_gadd2 :asm_neon_ntt_stage :asm_gold_stage :asm_gold_stage_inv :asm_add_uneq :asm_sub_uneq)
+  if wire_kind(inst) in (:asm_add_n :asm_add_no :asm_sub_no :asm_addmul1 :asm_mulbase :asm_neon_umull :asm_neon_redc :asm_neon_redc4 :asm_neon_madd4 :asm_neon_msub4 :asm_neon_gadd2 :asm_neon_ntt_stage :asm_gold_stage :asm_gold_stage_inv :asm_add_uneq :asm_sub_uneq)
     asm_fields = [:outp, :ap, :bp, :vp, :twp, :ivp, :n, :ooff, :aoff, :boff, :bsc, :na, :nb, :hq]
     fi = 0
     while fi < asm_fields.size()
@@ -973,7 +977,7 @@ use wire_schema
           result[fk] = rep
       fi += 1
   # Substitute within args array only if needed
-  args = inst[:args]
+  args = wire_get(inst, :args)
   if args != nil
     new_args = nil
     ai = 0
@@ -1015,17 +1019,17 @@ use wire_schema
   instrs = block[:instructions]
   while i < instrs.size()
     inst = instrs[i]
-    if inst[:op] in (:store_i64 :store_i128 :store_float :store_double)
-      prev = prev_store[inst[:ptr]]
-      if prev != nil && escaped[inst[:ptr]] != true
+    if wire_kind(inst) in (:store_i64 :store_i128 :store_float :store_double)
+      prev = prev_store[wire_get(inst, :ptr)]
+      if prev != nil && escaped[wire_get(inst, :ptr)] != true
         dead_set[prev] = true
-      prev_store[inst[:ptr]] = i
-    elsif inst[:op] in (:load_i64 :load_i128 :load_float :load_double)
+      prev_store[wire_get(inst, :ptr)] = i
+    elsif wire_kind(inst) in (:load_i64 :load_i128 :load_float :load_double)
       # Load makes the previous store to this slot live
-      prev_store[inst[:ptr]] = nil
-    elsif inst[:op] == :ptr_to_i64
-      escaped[inst[:value]] = true
-      prev_store[inst[:value]] = nil
+      prev_store[wire_get(inst, :ptr)] = nil
+    elsif wire_kind(inst) == :ptr_to_i64
+      escaped[wire_get(inst, :value)] = true
+      prev_store[wire_get(inst, :value)] = nil
     i += 1
 
   if dead_set.keys().size() == 0
@@ -1052,10 +1056,10 @@ use wire_schema
     j = 0
     while j < blk[:instructions].size()
       inst = blk[:instructions][j]
-      if inst[:op] in (:load_i64 :load_i128 :load_float :load_double)
-        loaded[inst[:ptr]] = true
-      elsif inst[:op] == :ptr_to_i64
-        loaded[inst[:value]] = true
+      if wire_kind(inst) in (:load_i64 :load_i128 :load_float :load_double)
+        loaded[wire_get(inst, :ptr)] = true
+      elsif wire_kind(inst) == :ptr_to_i64
+        loaded[wire_get(inst, :value)] = true
       j += 1
     i += 1
 
@@ -1094,7 +1098,7 @@ use wire_schema
     j = 0
     while j < blk[:instructions].size()
       inst = blk[:instructions][j]
-      if ((inst[:op] != :store_i64 && inst[:op] != :store_i128 && inst[:op] != :store_float && inst[:op] != :store_double) || dead[inst[:ptr]] != true)
+      if ((wire_kind(inst) != :store_i64 && wire_kind(inst) != :store_i128 && wire_kind(inst) != :store_float && wire_kind(inst) != :store_double) || dead[wire_get(inst, :ptr)] != true)
         new_instrs.push(inst)
       j += 1
     blk[:instructions] = new_instrs

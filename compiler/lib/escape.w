@@ -92,17 +92,17 @@
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      op = inst[:op]
+      op = wire_kind(inst)
 
       # Phi: if any incoming is from a param, the phi result is from that param
       if op == :phi_ssa
-        incoming = inst[:incoming]
+        incoming = wire_get(inst, :incoming)
         if incoming != nil
           pi = 0
           while pi < incoming.size()
             src_param = temp_from_param[incoming[pi]]
             if src_param != nil
-              temp_from_param[inst[:temp]] = src_param
+              temp_from_param[wire_get(inst, :temp)] = src_param
             # Also check if incoming value is a param register directly
             pname = incoming[pi]
             if pname != nil && type(pname) == "String" && pname.size() > 1
@@ -111,18 +111,18 @@
                 bare = pname.slice(1, pname.size() - 1)
               pidx = param_idx[bare]
               if pidx != nil
-                temp_from_param[inst[:temp]] = pidx
+                temp_from_param[wire_get(inst, :temp)] = pidx
             pi += 2
 
       # Check if instruction uses a param value
       # For call args: if an arg is a param (or derived from param), mark it escaped
       if op in (:call_direct_i64 :call_direct_void)
-        call_name = inst[:name]
+        call_name = wire_get(inst, :name)
         # Pure builtins: args don't escape
         if !is_pure_builtin(call_name)
           # Check callee escape summary if available
           callee_escs = fn_escs[call_name]
-          args = inst[:args]
+          args = wire_get(inst, :args)
           if args != nil
             ai = 0
             while ai < args.size()
@@ -154,7 +154,7 @@
       elsif op == :call_method_i64
         # Dynamic dispatch: all param-derived args escape, and it's impure
         has_side_effects = true
-        args = inst[:args]
+        args = wire_get(inst, :args)
         if args != nil
           ai = 0
           while ai < args.size()
@@ -163,31 +163,31 @@
               param_escaped[src] = true
             ai += 1
         # Receiver too
-        if inst[:receiver] != nil
-          src = temp_from_param[inst[:receiver]]
+        if wire_get(inst, :receiver) != nil
+          src = temp_from_param[wire_get(inst, :receiver)]
           if src != nil
             param_escaped[src] = true
 
       elsif op == :ret_i64
         # Returned value: if derived from param, that param escapes
-        src = temp_from_param[inst[:value]]
+        src = temp_from_param[wire_get(inst, :value)]
         if src != nil
           param_escaped[src] = true
 
       elsif op == :ivar_set
         has_side_effects = true
-        src = temp_from_param[inst[:value]]
+        src = temp_from_param[wire_get(inst, :value)]
         if src != nil
           param_escaped[src] = true
 
       elsif op == :store_global
         has_side_effects = true
-        src = temp_from_param[inst[:value]]
+        src = temp_from_param[wire_get(inst, :value)]
         if src != nil
           param_escaped[src] = true
 
       elsif op == :store_ptr
-        src = temp_from_param[inst[:value]]
+        src = temp_from_param[wire_get(inst, :value)]
         if src != nil
           param_escaped[src] = true
 
@@ -226,16 +226,16 @@
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
-        if inst[:op] in (:call_direct_i64 :call_direct_void)
-          if fn_map[inst[:name]] != nil
+        if wire_kind(inst) in (:call_direct_i64 :call_direct_void)
+          if fn_map[wire_get(inst, :name)] != nil
             found = false
             ei = 0
             while ei < edges.size()
-              if edges[ei] == inst[:name]
+              if edges[ei] == wire_get(inst, :name)
                 found = true
               ei += 1
             if !found
-              edges.push(inst[:name])
+              edges.push(wire_get(inst, :name))
         ii += 1
       bi += 1
     calls_to[func[:name]] = edges

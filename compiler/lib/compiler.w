@@ -45,10 +45,10 @@ use target
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
-        if inst[:op] != :call_loc_set_col
-          inst[:src_line] = nil
-          inst[:src_col] = nil
-          inst[:loc_site_id] = nil
+        if wire_kind(inst) != :call_loc_set_col
+          wire_set(inst, :src_line, nil)
+          wire_set(inst, :src_col, nil)
+          wire_set(inst, :loc_site_id, nil)
           new_instrs.push(inst)
         ii += 1
       block[:instructions] = new_instrs
@@ -312,14 +312,14 @@ use target
             ii = 0
             while ii < instrs.size()
               inst = instrs[ii]
-              if inst[:string_id] != nil
-                live_ids[inst[:string_id]] = true
-              if inst[:str_id] != nil
-                live_ids[inst[:str_id]] = true
-              if inst[:name_str_id] != nil
-                live_ids[inst[:name_str_id]] = true
-              if inst[:method_str_id] != nil
-                live_ids[inst[:method_str_id]] = true
+              if wire_get(inst, :string_id) != nil
+                live_ids[wire_get(inst, :string_id)] = true
+              if wire_get(inst, :str_id) != nil
+                live_ids[wire_get(inst, :str_id)] = true
+              if wire_get(inst, :name_str_id) != nil
+                live_ids[wire_get(inst, :name_str_id)] = true
+              if wire_get(inst, :method_str_id) != nil
+                live_ids[wire_get(inst, :method_str_id)] = true
               ii += 1
             bi += 1
           fi += 1

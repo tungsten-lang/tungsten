@@ -189,18 +189,18 @@ content_hash_codegen_fields = [
 
 # Encode one instruction into the canonical string buffer.
 -> encode_inst(inst, buf, temp_map, label_map, fn_hashes, mod, self_name, op_codes)
-  op = inst[:op]
+  op = wire_kind(inst)
   buf << "o"
   buf << canonical_op_code(op, op_codes).to_s()
 
   # Register temp output
-  if inst[:temp] != nil
-    norm_temp(inst[:temp], temp_map)
+  if wire_get(inst, :temp) != nil
+    norm_temp(wire_get(inst, :temp), temp_map)
 
   encode_codegen_metadata(inst, buf, temp_map)
 
   if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
-    callee = inst[:name]
+    callee = wire_get(inst, :name)
 
     if callee == self_name
       buf << "@R"
@@ -211,7 +211,7 @@ content_hash_codegen_fields = [
       buf << "@"
       buf << callee
 
-    args = inst[:args]
+    args = wire_get(inst, :args)
 
     if args != nil
       ai = 0
@@ -223,9 +223,9 @@ content_hash_codegen_fields = [
     return nil
 
   if op == :call_method_i64
-    encode_val(buf, inst[:receiver], temp_map)
-    encode_val(buf, inst[:method_name_val], temp_map)
-    args = inst[:args]
+    encode_val(buf, wire_get(inst, :receiver), temp_map)
+    encode_val(buf, wire_get(inst, :method_name_val), temp_map)
+    args = wire_get(inst, :args)
 
     if args != nil
       ai = 0
@@ -235,22 +235,22 @@ content_hash_codegen_fields = [
 
     # Devirtualized target: two otherwise-identical bodies whose call sites
     # devirtualize to DIFFERENT methods must not content-collapse.
-    if inst[:devirt_fn] != nil
+    if wire_get(inst, :devirt_fn) != nil
       buf << "dv:"
-      buf << inst[:devirt_fn]
+      buf << wire_get(inst, :devirt_fn)
       buf << ":"
-      buf << inst[:devirt_class]
-    if inst[:construct_fn] != nil
+      buf << wire_get(inst, :devirt_class)
+    if wire_get(inst, :construct_fn) != nil
       buf << "ctor:"
-      buf << inst[:construct_fn]
+      buf << wire_get(inst, :construct_fn)
       buf << ":"
-      buf << inst[:construct_class]
+      buf << wire_get(inst, :construct_class)
 
     buf << ";"
     return nil
 
   if op == :closure_new
-    callee = inst[:fn_name]
+    callee = wire_get(inst, :fn_name)
     if fn_hash_get(fn_hashes, callee) != nil
       buf << "@"
       buf << fn_hash_get(fn_hashes, callee)
@@ -258,14 +258,14 @@ content_hash_codegen_fields = [
       buf << "@"
       buf << callee
     buf << "c"
-    buf << inst[:capture_count].to_s()
+    buf << wire_get(inst, :capture_count).to_s()
     buf << ";"
     return nil
 
   if op in (:string_i64 :symbol_i64)
     str_idx = mod[:string_index]
     if str_idx != nil
-      text = str_idx[inst[:string_id]]
+      text = str_idx[wire_get(inst, :string_id)]
       if text != nil
         buf << "\""
         buf << text
@@ -274,7 +274,7 @@ content_hash_codegen_fields = [
     return nil
 
   if op == :br
-    idx = label_map[inst[:label]]
+    idx = label_map[wire_get(inst, :label)]
     if idx != nil
       buf << ">"
       buf << idx.to_s()
@@ -282,9 +282,9 @@ content_hash_codegen_fields = [
     return nil
 
   if op == :cond_br
-    encode_val(buf, inst[:cond], temp_map)
-    idx1 = label_map[inst[:then_label]]
-    idx2 = label_map[inst[:else_label]]
+    encode_val(buf, wire_get(inst, :cond), temp_map)
+    idx1 = label_map[wire_get(inst, :then_label)]
+    idx2 = label_map[wire_get(inst, :else_label)]
     if idx1 != nil
       buf << ">"
       buf << idx1.to_s()
@@ -295,12 +295,12 @@ content_hash_codegen_fields = [
     return nil
 
   if op in (:ret_i64 :ret_i32)
-    encode_val(buf, inst[:value], temp_map)
+    encode_val(buf, wire_get(inst, :value), temp_map)
     buf << ";"
     return nil
 
   if op == :phi_ssa
-    incoming = inst[:incoming]
+    incoming = wire_get(inst, :incoming)
     if incoming != nil
       i = 0
       while i < incoming.size()
@@ -316,71 +316,71 @@ content_hash_codegen_fields = [
     return nil
 
   # Generic: encode known operand fields
-  if inst[:value] != nil
-    encode_val(buf, inst[:value], temp_map)
-  if inst[:lhs] != nil
-    encode_val(buf, inst[:lhs], temp_map)
-  if inst[:rhs] != nil
-    encode_val(buf, inst[:rhs], temp_map)
-  if inst[:ptr] != nil
+  if wire_get(inst, :value) != nil
+    encode_val(buf, wire_get(inst, :value), temp_map)
+  if wire_get(inst, :lhs) != nil
+    encode_val(buf, wire_get(inst, :lhs), temp_map)
+  if wire_get(inst, :rhs) != nil
+    encode_val(buf, wire_get(inst, :rhs), temp_map)
+  if wire_get(inst, :ptr) != nil
     buf << "p"
-    buf << inst[:ptr]
-  if inst[:index] != nil
+    buf << wire_get(inst, :ptr)
+  if wire_get(inst, :index) != nil
     buf << "I"
-    encode_val(buf, inst[:index].to_s(), temp_map)
-  if inst[:raw] != nil
+    encode_val(buf, wire_get(inst, :index).to_s(), temp_map)
+  if wire_get(inst, :raw) != nil
     buf << "r"
-    buf << inst[:raw].to_s()
-  if inst[:pred] != nil
+    buf << wire_get(inst, :raw).to_s()
+  if wire_get(inst, :pred) != nil
     buf << "P"
-    buf << inst[:pred]
-  if inst[:self_reg] != nil
-    encode_val(buf, inst[:self_reg], temp_map)
-  if inst[:cond] != nil
-    encode_val(buf, inst[:cond], temp_map)
-  if inst[:then_val] != nil
-    encode_val(buf, inst[:then_val], temp_map)
-  if inst[:else_val] != nil
-    encode_val(buf, inst[:else_val], temp_map)
-  if inst[:offset] != nil
+    buf << wire_get(inst, :pred)
+  if wire_get(inst, :self_reg) != nil
+    encode_val(buf, wire_get(inst, :self_reg), temp_map)
+  if wire_get(inst, :cond) != nil
+    encode_val(buf, wire_get(inst, :cond), temp_map)
+  if wire_get(inst, :then_val) != nil
+    encode_val(buf, wire_get(inst, :then_val), temp_map)
+  if wire_get(inst, :else_val) != nil
+    encode_val(buf, wire_get(inst, :else_val), temp_map)
+  if wire_get(inst, :offset) != nil
     buf << "O"
-    buf << inst[:offset].to_s()
-  if inst[:str_id] != nil
+    buf << wire_get(inst, :offset).to_s()
+  if wire_get(inst, :str_id) != nil
     buf << "S"
-    buf << inst[:str_id].to_s()
-  if inst[:byte_len] != nil
+    buf << wire_get(inst, :str_id).to_s()
+  if wire_get(inst, :byte_len) != nil
     buf << "B"
-    buf << inst[:byte_len].to_s()
-  if inst[:arity] != nil
+    buf << wire_get(inst, :byte_len).to_s()
+  if wire_get(inst, :arity) != nil
     buf << "A"
-    buf << inst[:arity].to_s()
-  if inst[:class_name] != nil
+    buf << wire_get(inst, :arity).to_s()
+  if wire_get(inst, :class_name) != nil
     buf << "C"
-    buf << inst[:class_name]
-  if inst[:name] != nil && op != :call_direct_i64 && op != :call_direct_void && op != :call_direct_ptr
+    buf << wire_get(inst, :class_name)
+  if wire_get(inst, :name) != nil && op != :call_direct_i64 && op != :call_direct_void && op != :call_direct_ptr
     buf << "N"
-    buf << inst[:name]
-  if inst[:cvar_key] != nil
+    buf << wire_get(inst, :name)
+  if wire_get(inst, :cvar_key) != nil
     buf << "V"
-    buf << inst[:cvar_key]
-  if inst[:offset] != nil
+    buf << wire_get(inst, :cvar_key)
+  if wire_get(inst, :offset) != nil
     buf << "O"
-    buf << inst[:offset].to_s()
-  if inst[:bits] != nil
+    buf << wire_get(inst, :offset).to_s()
+  if wire_get(inst, :bits) != nil
     buf << "W"
-    buf << inst[:bits].to_s()
+    buf << wire_get(inst, :bits).to_s()
   # Native view-field width and signedness determine the emitted load/store
   # instruction. `u8 field@0` and `u32 field@0` have the same op, pointer and
   # offset but are not interchangeable; omitting these fields previously
   # merged Packet#tag into Hash#size and made the former read four bytes.
-  if inst[:size] != nil
+  if wire_get(inst, :size) != nil
     buf << "Z"
-    buf << inst[:size].to_s()
-  if inst[:field_type] != nil
+    buf << wire_get(inst, :size).to_s()
+  if wire_get(inst, :field_type) != nil
     buf << "F"
-    buf << inst[:field_type].to_s()
-  if inst[:signed] != nil
-    if inst[:signed] == true
+    buf << wire_get(inst, :field_type).to_s()
+  if wire_get(inst, :signed) != nil
+    if wire_get(inst, :signed) == true
       buf << "Gs"
     else
       buf << "Gu"
@@ -390,83 +390,83 @@ content_hash_codegen_fields = [
   # differing only in such a constant hash identically and get wrongly
   # merged — e.g. every class method returning a quantity literal
   # collapsed to the first one (`100 m/s` == `5 Pa` == `3 kg`).
-  if inst[:sig] != nil
+  if wire_get(inst, :sig) != nil
     buf << "q"
-    buf << inst[:sig].to_s()
-  if inst[:scale] != nil
+    buf << wire_get(inst, :sig).to_s()
+  if wire_get(inst, :scale) != nil
     buf << "e"
-    buf << inst[:scale].to_s()
-  if inst[:unit_id] != nil
+    buf << wire_get(inst, :scale).to_s()
+  if wire_get(inst, :unit_id) != nil
     buf << "u"
-    buf << inst[:unit_id].to_s()
-  if inst[:symbol_id] != nil
+    buf << wire_get(inst, :unit_id).to_s()
+  if wire_get(inst, :symbol_id) != nil
     buf << "cy"
-    buf << inst[:symbol_id].to_s()
-  if inst[:ns] != nil
+    buf << wire_get(inst, :symbol_id).to_s()
+  if wire_get(inst, :ns) != nil
     buf << "ns"
-    buf << inst[:ns].to_s()
-  if inst[:months] != nil
+    buf << wire_get(inst, :ns).to_s()
+  if wire_get(inst, :months) != nil
     buf << "mo"
-    buf << inst[:months].to_s()
-  if inst[:ms] != nil
+    buf << wire_get(inst, :months).to_s()
+  if wire_get(inst, :ms) != nil
     buf << "ms"
-    buf << inst[:ms].to_s()
-  if inst[:year] != nil
+    buf << wire_get(inst, :ms).to_s()
+  if wire_get(inst, :year) != nil
     buf << "dt"
-    buf << inst[:year].to_s()
+    buf << wire_get(inst, :year).to_s()
     buf << "-"
-    buf << inst[:month].to_s()
+    buf << wire_get(inst, :month).to_s()
     buf << "-"
-    buf << inst[:day].to_s()
+    buf << wire_get(inst, :day).to_s()
     buf << "T"
-    buf << inst[:hour].to_s()
+    buf << wire_get(inst, :hour).to_s()
     buf << ":"
-    buf << inst[:min].to_s()
+    buf << wire_get(inst, :min).to_s()
     buf << ":"
-    buf << inst[:sec].to_s()
+    buf << wire_get(inst, :sec).to_s()
     buf << "z"
-    buf << inst[:tz].to_s()
-  if inst[:cidr] != nil
+    buf << wire_get(inst, :tz).to_s()
+  if wire_get(inst, :cidr) != nil
     buf << "ip"
-    buf << inst[:a].to_s()
+    buf << wire_get(inst, :a).to_s()
     buf << "."
-    buf << inst[:b].to_s()
+    buf << wire_get(inst, :b).to_s()
     buf << "."
-    buf << inst[:c].to_s()
+    buf << wire_get(inst, :c).to_s()
     buf << "."
-    buf << inst[:d].to_s()
+    buf << wire_get(inst, :d).to_s()
     buf << "/"
-    buf << inst[:cidr].to_s()
-  if inst[:num] != nil
+    buf << wire_get(inst, :cidr).to_s()
+  if wire_get(inst, :num) != nil
     buf << "rn"
-    buf << inst[:num].to_s()
-  if inst[:den] != nil
+    buf << wire_get(inst, :num).to_s()
+  if wire_get(inst, :den) != nil
     buf << "rd"
-    buf << inst[:den].to_s()
-  if inst[:r] != nil
+    buf << wire_get(inst, :den).to_s()
+  if wire_get(inst, :r) != nil
     buf << "col"
-    buf << inst[:r].to_s()
+    buf << wire_get(inst, :r).to_s()
     buf << ","
-    buf << inst[:g].to_s()
+    buf << wire_get(inst, :g).to_s()
     buf << ","
-    buf << inst[:b].to_s()
+    buf << wire_get(inst, :b).to_s()
     buf << ","
-    buf << inst[:a].to_s()
-  if inst[:string_id] != nil
+    buf << wire_get(inst, :a).to_s()
+  if wire_get(inst, :string_id) != nil
     buf << "sid"
-    buf << inst[:string_id].to_s()
+    buf << wire_get(inst, :string_id).to_s()
   # Inline typed-array load/store operands (big_array_get_inline / set): the
   # array and index temps distinguish reads of DIFFERENT arrays/positions.
   # Without these, two such functions hash identically and get wrongly merged
   # by function dedup, so one reads the wrong array at runtime.
-  if inst[:arr] != nil
+  if wire_get(inst, :arr) != nil
     buf << "ar"
-    encode_val(buf, inst[:arr], temp_map)
-  if inst[:idx] != nil
+    encode_val(buf, wire_get(inst, :arr), temp_map)
+  if wire_get(inst, :idx) != nil
     buf << "ix"
-    encode_val(buf, inst[:idx], temp_map)
-  if inst[:idx_raw] != nil
-    if inst[:idx_raw] == true
+    encode_val(buf, wire_get(inst, :idx), temp_map)
+  if wire_get(inst, :idx_raw) != nil
+    if wire_get(inst, :idx_raw) == true
       buf << "ir1"
     else
       buf << "ir0"
@@ -537,7 +537,7 @@ content_hash_codegen_fields = [
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if inst[:op] != :scope_push && inst[:op] != :scope_pop
+      if wire_kind(inst) != :scope_push && wire_kind(inst) != :scope_pop
         encode_inst(inst, buf, temp_map, label_map, fn_hashes, mod, func[:name], op_codes)
       ii += 1
     bi += 1
@@ -576,40 +576,40 @@ content_hash_codegen_fields = [
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
-        op = inst[:op]
+        op = wire_kind(inst)
         # Rewrite callee names
         if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
-          replacement = rename_map_get(rename_map, inst[:name])
+          replacement = rename_map_get(rename_map, wire_get(inst, :name))
           if replacement != nil
-            inst[:name] = replacement
+            wire_set(inst, :name, replacement)
         if op == :closure_new
-          replacement = rename_map_get(rename_map, inst[:fn_name])
+          replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
           if replacement != nil
-            inst[:fn_name] = replacement
+            wire_set(inst, :fn_name, replacement)
         # Devirtualized direct-call target on an IC dispatch site — the
         # method function gets compact-symbol renamed like any function.
-        if op == :call_method_i64 && inst[:devirt_fn] != nil
-          replacement = rename_map_get(rename_map, inst[:devirt_fn])
+        if op == :call_method_i64 && wire_get(inst, :devirt_fn) != nil
+          replacement = rename_map_get(rename_map, wire_get(inst, :devirt_fn))
           if replacement != nil
-            inst[:devirt_fn] = replacement
-        if op == :call_method_i64 && inst[:construct_fn] != nil
-          replacement = rename_map_get(rename_map, inst[:construct_fn])
+            wire_set(inst, :devirt_fn, replacement)
+        if op == :call_method_i64 && wire_get(inst, :construct_fn) != nil
+          replacement = rename_map_get(rename_map, wire_get(inst, :construct_fn))
           if replacement != nil
-            inst[:construct_fn] = replacement
+            wire_set(inst, :construct_fn, replacement)
         # Fused-loop worker address (ptrtoint ptr @name) — the referenced
         # worker gets compact-symbol renamed like any function.
         if op == :fn_addr_i64
-          replacement = rename_map_get(rename_map, inst[:name])
+          replacement = rename_map_get(rename_map, wire_get(inst, :name))
           if replacement != nil
-            inst[:name] = replacement
+            wire_set(inst, :name, replacement)
         if op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
-          replacement = rename_map_get(rename_map, inst[:fn_name])
+          replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
           if replacement != nil
-            inst[:fn_name] = replacement
+            wire_set(inst, :fn_name, replacement)
         if op in (:class_add_method :class_add_static_method)
-          replacement = rename_map_get(rename_map, inst[:fn_name])
+          replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
           if replacement != nil
-            inst[:fn_name] = replacement
+            wire_set(inst, :fn_name, replacement)
         ii += 1
       bi += 1
     fi += 1
@@ -646,10 +646,10 @@ content_hash_codegen_fields = [
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
-        if inst[:global] != nil
-          replacement = global_rename[inst[:global]]
+        if wire_get(inst, :global) != nil
+          replacement = global_rename[wire_get(inst, :global)]
           if replacement != nil
-            inst[:global] = replacement
+            wire_set(inst, :global, replacement)
         ii += 1
       bi += 1
     fi += 1
@@ -936,27 +936,27 @@ content_hash_codegen_fields = [
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      op = inst[:op]
+      op = wire_kind(inst)
       if op != :scope_push && op != :scope_pop
         line = "      " + op.to_s()
-        if inst[:temp] != nil
-          line = line + " " + inst[:temp]
+        if wire_get(inst, :temp) != nil
+          line = line + " " + wire_get(inst, :temp)
         if op in (:call_direct_i64 :call_direct_void)
-          line = line + " @" + inst[:name]
-          if inst[:args] != nil
-            line = line + "(" + inst[:args].size().to_s() + " args)"
+          line = line + " @" + wire_get(inst, :name)
+          if wire_get(inst, :args) != nil
+            line = line + "(" + wire_get(inst, :args).size().to_s() + " args)"
         elsif op == :call_method_i64
           line = line + " method"
         elsif op == :ret_i64
-          line = line + " " + inst[:value].to_s()
+          line = line + " " + wire_get(inst, :value).to_s()
         elsif op == :br
-          line = line + " -> " + inst[:label]
+          line = line + " -> " + wire_get(inst, :label)
         elsif op == :cond_br
-          line = line + " -> " + inst[:then_label] + " / " + inst[:else_label]
+          line = line + " -> " + wire_get(inst, :then_label) + " / " + wire_get(inst, :else_label)
         elsif op == :string_i64
           str_idx = mod[:string_index]
           if str_idx != nil
-            text = str_idx[inst[:string_id]]
+            text = str_idx[wire_get(inst, :string_id)]
             if text != nil
               if text.size() > 30
                 line = line + " \"" + text.slice(0, 30) + "...\""
@@ -1002,10 +1002,10 @@ content_hash_codegen_fields = [
       while ii < instrs.size()
         inst = instrs[ii]
         callee = nil
-        if inst[:op] in (:call_direct_i64 :call_direct_void)
-          callee = inst[:name]
-        elsif inst[:op] == :closure_new
-          callee = inst[:fn_name]
+        if wire_kind(inst) in (:call_direct_i64 :call_direct_void)
+          callee = wire_get(inst, :name)
+        elsif wire_kind(inst) == :closure_new
+          callee = wire_get(inst, :fn_name)
         if callee != nil && fn_set[callee] == true && callee != func[:name]
           edges.push(callee)
         ii += 1
@@ -1197,10 +1197,10 @@ content_hash_codegen_fields = [
           ii = 0
           while ii < instrs.size()
             inst = instrs[ii]
-            if inst[:global] != nil
-              replacement = global_rename[inst[:global]]
+            if wire_get(inst, :global) != nil
+              replacement = global_rename[wire_get(inst, :global)]
               if replacement != nil
-                inst[:global] = replacement
+                wire_set(inst, :global, replacement)
             ii += 1
           bi += 1
         fi += 1

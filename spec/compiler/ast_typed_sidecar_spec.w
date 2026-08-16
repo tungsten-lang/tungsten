@@ -31,9 +31,13 @@ check("ivar count generic set", ast_ivar_count_get(klass), 3)
 # Deep cloning copies typed and generic sparse metadata through the same
 # ownership boundary.
 method.recycle_safe = true
+method.from_fn = true
 method_clone = ast_deep_clone(method)
 check("clone analysis", ast_analysis_get(method_clone), analysis)
 check("clone generic", ast_get(method_clone, :recycle_safe), true)
+check("materialized recycle getter", method.recycle_safe, true)
+check("materialized from_fn getter", method.from_fn, true)
+check("clone materialized from_fn getter", method_clone.from_fn, true)
 
 klass_clone = ast_deep_clone(klass)
 check("clone ivar offsets", ast_ivar_offsets_get(klass_clone), offsets)

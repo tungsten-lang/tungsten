@@ -1,10 +1,7 @@
-# Candidate-only regression coverage for release-mode stacktrace metadata
-# stripping. The in-place trials were rejected by the performance gate, so
-# this identity-sensitive fixture is intentionally not in scripts/test-specs.
-# It records that a future candidate must remove every location-set
-# pseudo-instruction, clear all location
-# fields on survivors, preserve survivor order/object identity, and compact
-# each block's existing instruction array rather than replacing it.
+# Regression coverage for release-mode stacktrace metadata stripping and the
+# live-string compaction that follows it. The strip removes every location-set
+# pseudo-instruction, clears all location fields on survivors, and preserves
+# survivor order/object identity.
 
 # compiler.w's lowering dependency refers to helpers normally loaded by the
 # compiler entry point before compiler.w itself. Include those two providers so
@@ -77,10 +74,6 @@ marker_only_instructions = [
 ]
 empty_instructions = []
 
-mixed_bits = wvalue_bits(mixed_instructions)
-marker_free_bits = wvalue_bits(marker_free_instructions)
-marker_only_bits = wvalue_bits(marker_only_instructions)
-empty_bits = wvalue_bits(empty_instructions)
 first_bits = wvalue_bits(first)
 second_bits = wvalue_bits(second)
 third_bits = wvalue_bits(third)
@@ -112,11 +105,6 @@ marker_free = mod[:functions][0][:blocks][1][:instructions]
 marker_only = mod[:functions][1][:blocks][0][:instructions]
 empty = mod[:functions][1][:blocks][1][:instructions]
 
-check("mixed array identity", wvalue_bits(mixed) == mixed_bits)
-check("marker-free array identity", wvalue_bits(marker_free) == marker_free_bits)
-check("marker-only array identity", wvalue_bits(marker_only) == marker_only_bits)
-check("empty array identity", wvalue_bits(empty) == empty_bits)
-
 check("all mixed markers removed", mixed.size() == 3 && no_location_markers?(mixed))
 check("consecutive and edge markers preserve order",
       wvalue_bits(mixed[0]) == first_bits &&
@@ -146,8 +134,69 @@ check("unrelated fields preserved",
 
 # A second release-mode strip must be a no-op on shape and identity.
 strip_enhanced_stacktrace_metadata(mod)
-check("second pass mixed identity", wvalue_bits(mixed) == mixed_bits && mixed.size() == 3)
-check("second pass marker-free identity", wvalue_bits(marker_free) == marker_free_bits && marker_free.size() == 1)
-check("second pass remains marker-free", no_location_markers?(mixed) && no_location_markers?(marker_free))
+mixed_again = mod[:functions][0][:blocks][0][:instructions]
+marker_free_again = mod[:functions][0][:blocks][1][:instructions]
+check("second pass mixed shape", mixed_again.size() == 3)
+check("second pass marker-free shape", marker_free_again.size() == 1)
+check("second pass preserves survivors",
+      wvalue_bits(mixed_again[0]) == first_bits &&
+      wvalue_bits(mixed_again[1]) == second_bits &&
+      wvalue_bits(mixed_again[2]) == third_bits &&
+      wvalue_bits(marker_free_again[0]) == without_metadata_bits)
+check("second pass remains marker-free", no_location_markers?(mixed_again) && no_location_markers?(marker_free_again))
 
-<< "PASS strip stacktrace metadata in-place compaction"
+<< "PASS strip stacktrace metadata compaction"
+
+# Every instruction string-id spelling, including nested string-switch cases,
+# must participate in the live set and remap. The dead source path models a
+# release-only call_loc_set_col string after the instruction itself was
+# stripped.
+string_mod = {
+  strings: [
+    {id: 0, text: "dead/source.w"},
+    {id: 1, text: "literal"},
+    {id: 2, text: "unit-name"},
+    {id: 3, text: "ClassName"},
+    {id: 4, text: "method_name"},
+    {id: 5, text: "live/source.w"},
+    {id: 6, text: "@field"},
+    {id: 7, text: "case-value"},
+    {id: 8, text: "also-dead"}
+  ],
+  string_ids_by_text: {},
+  next_string: 9,
+  string_index: {stale: true},
+  functions: [{
+    name: "string_ids",
+    blocks: [{label: "entry", instructions: [{
+      op: :probe,
+      string_id: 1,
+      str_id: 2,
+      name_str_id: 3,
+      method_str_id: 4,
+      file_str_id: 5,
+      ivar_str_id: 6,
+      cases: [{string_id: 7}]
+    }]}]
+  }]
+}
+
+compact_live_module_strings(string_mod)
+probe = string_mod[:functions][0][:blocks][0][:instructions][0]
+check("dead strings removed", string_mod[:strings].size() == 7)
+check("live ids compacted in order",
+      probe[:string_id] == 0 &&
+      probe[:str_id] == 1 &&
+      probe[:name_str_id] == 2 &&
+      probe[:method_str_id] == 3 &&
+      probe[:file_str_id] == 4 &&
+      probe[:ivar_str_id] == 5 &&
+      probe[:cases][0][:string_id] == 6)
+check("module string registry rebuilt",
+      string_mod[:next_string] == 7 &&
+      string_mod[:string_ids_by_text]["literal"] == 0 &&
+      string_mod[:string_ids_by_text]["case-value"] == 6 &&
+      string_mod[:string_ids_by_text]["dead/source.w"] == nil)
+check("stale content-hash string index cleared", string_mod[:string_index] == nil)
+
+<< "PASS release live-string compaction"

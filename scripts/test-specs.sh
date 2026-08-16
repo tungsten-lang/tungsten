@@ -583,6 +583,7 @@ compiled_specs=(
   spec/compiler/float_dynamic_receiver_spec.w
   spec/compiler/ast_body_native_spec.w
   spec/compiler/ast_typed_sidecar_spec.w
+  spec/compiler/strip_stacktrace_metadata_spec.w
   spec/compiler/ast_typed_visitor_spec.w
   spec/compiler/array_compact_autoload_spec.w
   spec/compiler/array_constructor_parity_spec.w

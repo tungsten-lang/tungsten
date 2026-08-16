@@ -1494,14 +1494,20 @@ if !bit_only
     << ""
     << BOLD + "==> Stage 1: implementations/c VM compiles tungsten.w" + RESET
     stage1_started = clock_ms()
-    # The fast C parser is byte-identical at the stage-1 IR boundary; the
-    # focused fast-parse parity gate compares it against the canonical path.
+    # The fast C parser is covered by focused parity fixtures, but it is not
+    # the canonical parser used for the stage fixed-point proof.
     s1_keys = probe_keys + []
     s1_vals = probe_vals + []
     s1_keys.push("TUNGSTEN_C_FAST_PARSE")
     stage1_fast_parse = env_or_empty("TUNGSTEN_C_FAST_PARSE")
     if stage1_fast_parse == ""
-      stage1_fast_parse = "1"
+      # The C fast parser is a bootstrap accelerator, not the canonical
+      # language parser.  Stage identity compares C-produced stage 1 with
+      # native-produced stage 2, so both sides must parse through parser.w.
+      # Keep the accelerator available as an explicit opt-in for local
+      # bootstrap work, but never make a reproducible build depend on its
+      # intentionally looser AST contract.
+      stage1_fast_parse = "0"
     s1_vals.push(stage1_fast_parse)
     s1_keys.push("TUNGSTEN_CLANG_OPT")
     s1_vals.push("-O0")

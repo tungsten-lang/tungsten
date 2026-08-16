@@ -125,6 +125,39 @@ in Tungsten:AST
   -> calls_impure_ccall=(value)
     ast_set(self, :calls_impure_ccall, value)
 
+  # Sparse and optional fields need materialized getters as well as setters.
+  # The stage-0 VM historically routed an unknown packed-node property through
+  # method_missing, while compiled method dispatch does not. Depending on that
+  # host-only fallback made stage 1 lose parser/lowering flags and broke the
+  # stage-1/stage-2 fixed point. Keep every compiler-read optional field on the
+  # same explicit ast_get path as ordinary schema fields.
+  -> type_params
+    ast_get(self, :type_params)
+  -> type_constraints
+    ast_get(self, :type_constraints)
+  -> type_args
+    ast_get(self, :type_args)
+  -> parent_type_args
+    ast_get(self, :parent_type_args)
+  -> trait_type_args
+    ast_get(self, :trait_type_args)
+  -> from_fn
+    ast_get(self, :from_fn)
+  -> from_kwargs
+    ast_get(self, :from_kwargs)
+  -> axis_name
+    ast_get(self, :axis_name)
+  -> reuse_safe
+    ast_get(self, :reuse_safe)
+  -> recycle_safe
+    ast_get(self, :recycle_safe)
+  -> drain_safe
+    ast_get(self, :drain_safe)
+  -> stack_safe
+    ast_get(self, :stack_safe)
+  -> calls_impure_ccall
+    ast_get(self, :calls_impure_ccall)
+
   # Source location — `:loc` is a fully tagged W_PACKED_LOCATION
   # WValue in FileOffset mode: file_id + a byte-into-@chars offset
   # (see the Location class below for why line/col need a per-file

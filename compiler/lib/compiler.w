@@ -55,6 +55,104 @@ use target
       bi += 1
     fi += 1
 
+# Release metadata stripping can make source-file strings (and occasionally
+# other diagnostic-only literals) dead after lowering has already assigned
+# module string ids. Leaving those entries in the static slab is not just
+# bloat: stage 0 and the native compiler can discover diagnostic locations at
+# different moments, shifting every later slab slot and breaking the
+# stage-1/stage-2 byte fixed point even though the live WIRE is identical.
+# Compact and remap the six instruction fields that carry module string ids.
+# Debug builds deliberately skip this pass so their location/backtrace data is
+# retained exactly as lowered.
+-> compact_live_module_strings(mod)
+  live = {}
+  fi = 0
+  while fi < mod[:functions].size()
+    func = mod[:functions][fi]
+    bi = 0
+    while bi < func[:blocks].size()
+      instrs = func[:blocks][bi][:instructions]
+      ii = 0
+      while ii < instrs.size()
+        inst = instrs[ii]
+        if inst[:string_id] != nil
+          live[inst[:string_id]] = true
+        if inst[:str_id] != nil
+          live[inst[:str_id]] = true
+        if inst[:name_str_id] != nil
+          live[inst[:name_str_id]] = true
+        if inst[:method_str_id] != nil
+          live[inst[:method_str_id]] = true
+        if inst[:file_str_id] != nil
+          live[inst[:file_str_id]] = true
+        if inst[:ivar_str_id] != nil
+          live[inst[:ivar_str_id]] = true
+        cases = inst[:cases]
+        if cases != nil
+          ci = 0
+          while ci < cases.size()
+            if cases[ci][:string_id] != nil
+              live[cases[ci][:string_id]] = true
+            ci += 1
+        ii += 1
+      bi += 1
+    fi += 1
+
+  remap = {}
+  compact = []
+  by_text = {}
+  strings = mod[:strings]
+  si = 0
+  while si < strings.size()
+    entry = strings[si]
+    old_id = entry[:id]
+    if live[old_id] == true
+      new_id = compact.size()
+      remap[old_id] = new_id
+      compact.push({id: new_id, text: entry[:text]})
+      by_text[entry[:text]] = new_id
+    si += 1
+
+  fi = 0
+  while fi < mod[:functions].size()
+    func = mod[:functions][fi]
+    bi = 0
+    while bi < func[:blocks].size()
+      instrs = func[:blocks][bi][:instructions]
+      ii = 0
+      while ii < instrs.size()
+        inst = instrs[ii]
+        if inst[:string_id] != nil
+          inst[:string_id] = remap[inst[:string_id]]
+        if inst[:str_id] != nil
+          inst[:str_id] = remap[inst[:str_id]]
+        if inst[:name_str_id] != nil
+          inst[:name_str_id] = remap[inst[:name_str_id]]
+        if inst[:method_str_id] != nil
+          inst[:method_str_id] = remap[inst[:method_str_id]]
+        if inst[:file_str_id] != nil
+          inst[:file_str_id] = remap[inst[:file_str_id]]
+        if inst[:ivar_str_id] != nil
+          inst[:ivar_str_id] = remap[inst[:ivar_str_id]]
+        cases = inst[:cases]
+        if cases != nil
+          ci = 0
+          while ci < cases.size()
+            if cases[ci][:string_id] != nil
+              cases[ci][:string_id] = remap[cases[ci][:string_id]]
+            ci += 1
+        ii += 1
+      bi += 1
+    fi += 1
+
+  mod[:strings] = compact
+  mod[:string_ids_by_text] = by_text
+  mod[:next_string] = compact.size()
+  # content_hash_pass has already consumed its semantic string index; do not
+  # leave the old-id view available to later tooling.
+  mod[:string_index] = nil
+  nil
+
 -> compile(ast, source_path, verbose = false, frame_pointers = false, sidemap_path = nil, release_mode = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false)
   compile_started_at = clock()
 
@@ -113,6 +211,7 @@ use target
   mod[:enhanced_stacktraces] = true
   if release_mode
     strip_enhanced_stacktrace_metadata(mod)
+    compact_live_module_strings(mod)
     mod[:enhanced_stacktraces] = false
 
   target_started_at = clock()

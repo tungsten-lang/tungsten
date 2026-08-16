@@ -301,6 +301,12 @@ if dev_mode && release_mode
   ccall("w_eputs", "--dev and --release are mutually exclusive")
   exit 1
 debug_enabled = debug_requested || (!no_debug_requested && !release_mode)
+# Symbolized Tungsten metadata is only useful when the native unwinder can
+# reliably walk the machine stack. A debug-enabled build therefore implies
+# physical frame pointers as well as keeping fn/call-site metadata. Release
+# builds remain free to omit them unless the user asks for --frame-pointers.
+if debug_enabled
+  frame_pointers = true
 if native_mode && cpu_name != "native"
   ccall("w_eputs", "--native conflicts with --cpu " + cpu_name)
   exit 1

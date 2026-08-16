@@ -1406,13 +1406,13 @@ use naming
 # Fixed-width bit-count helpers used by core/bit_ops.w. Keep these as private
 # always-inline wrappers instead of ordinary runtime calls: the public source
 # methods remain interpreter/C-VM compatible through ccall_nobox, while native
-# builds expose the exact LLVM operations even at -O0. For cttz, false is the
-# is_zero_poison flag, so zero has the source-level result 32/64.
--> bit_count_intrinsic_helper_ir(helper_name, intrinsic_name, width, trailing)
+# builds expose the exact LLVM operations even at -O0. For ctlz/cttz, false is
+# the is_zero_poison flag, so zero has the source-level result 32/64.
+-> bit_count_intrinsic_helper_ir(helper_name, intrinsic_name, width, zero_poison_arg)
   llvm_type = "i" + width.to_s()
   out = StringBuffer(420)
   out << "declare " + llvm_type + " @llvm." + intrinsic_name + "." + llvm_type + "(" + llvm_type
-  if trailing
+  if zero_poison_arg
     out << ", i1 immarg"
   out << ")\n"
   out << "define private i64 @" + helper_name + "(i64 %v) alwaysinline nounwind willreturn memory(none) {\n"
@@ -1422,7 +1422,7 @@ use naming
     out << "  %v32 = trunc i64 %v to i32\n"
     value = "%v32"
   out << "  %count = call " + llvm_type + " @llvm." + intrinsic_name + "." + llvm_type + "(" + llvm_type + " " + value
-  if trailing
+  if zero_poison_arg
     out << ", i1 false"
   out << ")\n"
   if width == 32
@@ -2862,6 +2862,32 @@ ewscope_md_state = {ids: {}}
       # runtime's weak C-kernel default, or to whichever object defines it).
       seam_decls << "declare i64 @" + big_op_wrappers[bop] + "(i64, i64) nounwind\n"
 
+  # Unary BigInt#isqrt has the same stable source/weak-C seam contract as the
+  # binary operators above. Its source body owns the one- and two-limb leaves
+  # and retains the C divide-and-conquer boundary for wider values.
+  bigint_isqrt_fn = nil
+  bisfi = 0
+  while bisfi < mod[:functions].size()
+    bisff = mod[:functions][bisfi]
+    if bisff[:source_class] == "BigInt" && bisff[:source_kind] == :method && bisff[:source_method] == "isqrt" && bisff[:overload_dispatcher] != true
+      # Definitions are in source order. Match ordinary method-table
+      # replacement semantics by selecting the last plain body; protected
+      # Core programs reject a reopen earlier during contract validation.
+      bigint_isqrt_fn = bisff
+    bisfi += 1
+  if bigint_isqrt_fn != nil
+    bis_cc = ""
+    if bigint_isqrt_fn[:call_conv] != nil && bigint_isqrt_fn[:call_conv] != ""
+      bis_cc = bigint_isqrt_fn[:call_conv] + " "
+    fn_out << "define i64 @__w_bigint_isqrt_src(i64 %a) nounwind {\n"
+    fn_out << "  %r = tail call " + bis_cc + "i64 @" + bigint_isqrt_fn[:name] + "(i64 %a)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_isqrt_src"] = false
+    known_fns["__w_bigint_isqrt_src"] = true
+  elsif used_runtime_fns["__w_bigint_isqrt_src"] == true
+    seam_decls << "declare i64 @__w_bigint_isqrt_src(i64) nounwind\n"
+
   # Full BigInt/integer comparison is a raw top-level Tungsten helper rather
   # than a boxed public method. Give its content-hash-renamed body one stable
   # strong symbol so every runtime comparison entry can call it directly.
@@ -3092,6 +3118,8 @@ ewscope_md_state = {ids: {}}
   bit_count_intrinsic_specs = [
     ["__w_bit_ctpop_u32", "ctpop", 32, false],
     ["__w_bit_ctpop_u64", "ctpop", 64, false],
+    ["__w_bit_ctlz_u32", "ctlz", 32, true],
+    ["__w_bit_ctlz_u64", "ctlz", 64, true],
     ["__w_bit_cttz_u32", "cttz", 32, true],
     ["__w_bit_cttz_u64", "cttz", 64, true]
   ]

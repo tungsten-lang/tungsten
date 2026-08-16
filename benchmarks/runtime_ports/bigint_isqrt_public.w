@@ -3,7 +3,8 @@
 # boundary. Both pay source dispatch, isolating the square-root implementation.
 #
 # Strata by receiver width: one/one-high/one-square (1-limb; inline result),
-# four, sixteen, sixtyfour (D&C kernel, heap results consumed/freed).
+# two/two-low/two-square (the u128 base case), then four, sixteen, sixtyfour
+# (D&C kernel, heap results consumed/freed).
 # Results are always fresh (never alias the receiver).
 
 + BigInt
@@ -27,6 +28,12 @@ CORPUS_MASK = CORPUS_SIZE - 1
   if got != expected
     fail_check(name, "got=[got] expected=[expected]")
 
+-> is_bigint(value)
+  ccall("w_leafpub_is_bigint", value)
+
+-> bigint_size(value)
+  ccall("w_leafpub_bigint_size", value)
+
 -> stratum_base(stratum)
   if stratum == "one"
     return 1125899906842624
@@ -34,6 +41,13 @@ CORPUS_MASK = CORPUS_SIZE - 1
     return "18446744073708551615".to_i
   if stratum == "one-square"
     root = 4294967279
+    return root * root - 4
+  if stratum == "two"
+    return (1 << 127) + 123456789
+  if stratum == "two-low"
+    return (1 << 64) + 123456789
+  if stratum == "two-square"
+    root = "18446744073709551557".to_i
     return root * root - 4
   if stratum == "four"
     return 10 ** 76 + 3
@@ -54,7 +68,11 @@ CORPUS_MASK = CORPUS_SIZE - 1
   values
 
 -> run_correctness
-  strata = ["one", "one-high", "one-square", "four", "sixteen", "sixtyfour"]
+  strata = [
+    "one", "one-high", "one-square",
+    "two", "two-low", "two-square",
+    "four", "sixteen", "sixtyfour"
+  ]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -67,12 +85,46 @@ CORPUS_MASK = CORPUS_SIZE - 1
       check_value("lower [stratum]/[i]", r * r <= v, true)
       check_value("upper [stratum]/[i]", (r + 1) * (r + 1) > v, true)
       check_value("nonneg [stratum]/[i]", r >= 0, true)
+      if stratum == "two" || stratum == "two-square"
+        c_result = v.__c_isqrt_oracle
+        check_value("heap result [stratum]/[i]", is_bigint(r), true)
+        check_value("C heap result [stratum]/[i]", is_bigint(c_result), true)
+        check_value("one result limb [stratum]/[i]", bigint_size(r), 1)
+        check_value("C one result limb [stratum]/[i]", bigint_size(c_result), 1)
+      elsif stratum == "two-low"
+        check_value("inline result [stratum]/[i]", is_bigint(r), false)
+        check_value("C inline result [stratum]/[i]", is_bigint(v.__c_isqrt_oracle), false)
       i += 1
     s += 1
   # Exact perfect-square edge at a limb boundary
   root = 10 ** 154
   check_value("perfect.square", (root * root).isqrt.to_s(), root.to_s())
   check_value("perfect.minus_one", (root * root - 1).isqrt.to_s(), (root - 1).to_s())
+  # Deterministic u128 boundaries supplement the randomized differential:
+  # minimum/tall two-limb values, maximum u128, and both sides of a large
+  # perfect square exercise normalization and each exact-correction outcome.
+  edge_root = "18446744073709551557".to_i
+  edge_square = edge_root * edge_root
+  u128_edges = [
+    1 << 64,
+    1 << 127,
+    (1 << 128) - 1,
+    edge_square - 1,
+    edge_square,
+    edge_square + 1
+  ]
+  u128_edge_checks = 0
+  while u128_edge_checks < u128_edges.size
+    edge = u128_edges[u128_edge_checks]
+    edge_result = edge.isqrt
+    check_value(
+      "u128 edge C differential [u128_edge_checks]",
+      edge_result.to_s(),
+      ccall("bigint_isqrt_any", edge).to_s()
+    )
+    check_value("u128 edge lower [u128_edge_checks]", edge_result * edge_result <= edge, true)
+    check_value("u128 edge upper [u128_edge_checks]", (edge_result + 1) * (edge_result + 1) > edge, true)
+    u128_edge_checks += 1
   # Deterministic full-word differential sweep. Force bit 63 so every value
   # is a normalized one-limb BigInt and exercises the native source arm.
   state = 88172645463325252 ## u64
@@ -86,7 +138,26 @@ CORPUS_MASK = CORPUS_SIZE - 1
     value = ccall("w_u64", magnitude)
     check_value("random C differential [random_checks]", value.isqrt.to_s(), value.__c_isqrt_oracle.to_s())
     random_checks += 1
-  << "correctness: ok ([strata.size * CORPUS_SIZE + random_checks] C differentials + root-bracketing checks; 1-64 limbs)"
+
+  random_u128_checks = 0
+  while random_u128_checks < 4096
+    state = state ^ (state >> 12) ## u64
+    state = state ^ (state << 25) ## u64
+    state = state ^ (state >> 27) ## u64
+    high = (state * 2685821657736338717) | 1 ## u64
+    state = state ^ (state >> 12) ## u64
+    state = state ^ (state << 25) ## u64
+    state = state ^ (state >> 27) ## u64
+    low = state * 2685821657736338717 ## u64
+    value = (ccall("w_u64", high) << 64) | ccall("w_u64", low)
+    check_value(
+      "random u128 C differential [random_u128_checks]",
+      value.isqrt.to_s(),
+      value.__c_isqrt_oracle.to_s()
+    )
+    random_u128_checks += 1
+  total_checks = strata.size * CORPUS_SIZE + u128_edge_checks + random_checks + random_u128_checks
+  << "correctness: ok ([total_checks] C differentials + root-bracketing checks; 1-64 limbs)"
 
 -> time_isqrt_w(values, iters)
   checksum = 0

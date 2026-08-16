@@ -600,6 +600,7 @@ compiled_specs=(
   spec/compiler/bigint_bitwise_mut_source_seam_spec.w
   spec/compiler/bigint_bitwise_native_support_spec.w
   spec/compiler/bigint_bitwise_reopen_source_seam_spec.w
+  spec/compiler/bigint_isqrt_reopen_source_seam_spec.w
   spec/compiler/bigint_small_mut_lowering_spec.w
   spec/compiler/bigint_to_i_autoload_spec.w
   spec/compiler/block_passthrough_spec.w

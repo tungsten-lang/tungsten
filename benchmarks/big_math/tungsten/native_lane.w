@@ -2,8 +2,11 @@
 #
 # Operand construction, timing, and the one-shot C oracle are benchmark
 # support ccalls. Timed arithmetic, bitwise, shift, comparison, sign, power,
-# and conversion bodies are ordinary native-compiled Tungsten; gcd, lcm, and
-# isqrt deliberately call their retained C kernel boundaries directly. The
+# and conversion bodies are ordinary native-compiled Tungsten; gcd and lcm
+# deliberately call their retained C kernel boundaries directly. Integer
+# square root uses BigInt#isqrt's stable source seam, whose one- and two-limb
+# leaves are native and whose wider divide-and-conquer path retains the C
+# kernel boundary. The
 # executable closes the Core and method-table world after all definitions so
 # direct dispatch is both sound and representative of a deliberately locked
 # production program.
@@ -273,7 +276,7 @@ POW_EXPONENT = 5
   i = 0 ## i64
   started = thread_cpu_ns()
   while i < iterations
-    next_result = ccall("bigint_isqrt_any", a)
+    next_result = ccall("__w_bigint_isqrt_src", a)
     checksum += (wvalue_bits(next_result) & 255) + i
     release_value(result)
     result = next_result
@@ -403,7 +406,7 @@ POW_EXPONENT = 5
   return a ** POW_EXPONENT if operation == "pow"
   return a.pow(b, modulus) if operation == "powmod"
   return ccall("w_bigint_lcm", a, b) if operation == "lcm"
-  return ccall("bigint_isqrt_any", a) if operation == "isqrt"
+  return ccall("__w_bigint_isqrt_src", a) if operation == "isqrt"
   return a.to_s() if operation == "tostr"
   return decimal.to_i if operation == "fromstr"
   raise "unknown bignum benchmark operation: " + operation

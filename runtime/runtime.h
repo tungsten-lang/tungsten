@@ -745,6 +745,7 @@ WValue w_bigint_mod_pow2(WValue a, WValue bits);
 WValue w_bigint_div_pow2(WValue a, WValue bits);
 WValue w_bigint_gcd(WValue a, WValue b);
 WValue w_bigint_lcm(WValue a, WValue b);
+WValue __w_bigint_isqrt_src(WValue a);
 WValue w_bigint_compare_c(WValue a, WValue b);
 WValue w_bigint_compare_source(WValue a, WValue b);
 WValue w_bigint_and_c(WValue a, WValue b);

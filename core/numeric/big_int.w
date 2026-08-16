@@ -41,6 +41,98 @@
     square = root * root ## u64
   root
 
+# Exact floor square root for a normalized two-limb magnitude. Normalize by an
+# even shift so the top limb reaches bit 62, extend its exact 32-bit root with
+# one 64/64 quotient, then correct the resulting 64-bit root in integer space.
+# The quotient seed is within three of the exact root (Zimmermann's sqrtrem2
+# base case), so the correction loops remain bounded.
+fn __bigint_isqrt_u128(lo, hi, shift) (i64 i64 i64) i64
+  ll <<~IR
+    entry:
+      %hi.wide = zext i64 %hi to i128
+      %hi.word = shl i128 %hi.wide, 64
+      %lo.wide = zext i64 %lo to i128
+      %input = or i128 %hi.word, %lo.wide
+      %shift.wide = zext i64 %shift to i128
+      %normalized = shl i128 %input, %shift.wide
+      %nlo = trunc i128 %normalized to i64
+      %nhi.wide = lshr i128 %normalized, 64
+      %nhi = trunc i128 %nhi.wide to i64
+      br label %seed
+    seed:
+      %hi.f64 = uitofp i64 %nhi to double
+      %sqrt.f64 = call double @sqrt(double %hi.f64)
+      %high.raw = fptoui double %sqrt.f64 to i64
+      %high.over = icmp ugt i64 %high.raw, 4294967295
+      %high.seed = select i1 %high.over, i64 4294967295, i64 %high.raw
+      %high.square = mul i64 %high.seed, %high.seed
+      %high.rem.seed = sub i64 %nhi, %high.square
+      br label %high.correct.down
+    high.correct.down:
+      %high.root.down = phi i64 [ %high.seed, %seed ], [ %high.root.dec, %high.correct.down.more ]
+      %high.rem.down = phi i64 [ %high.rem.seed, %seed ], [ %high.rem.inc, %high.correct.down.more ]
+      %high.negative = icmp slt i64 %high.rem.down, 0
+      br i1 %high.negative, label %high.correct.down.more, label %high.correct.up
+    high.correct.down.more:
+      %high.twice.down = shl i64 %high.root.down, 1
+      %high.delta.down = sub i64 %high.twice.down, 1
+      %high.rem.inc = add i64 %high.rem.down, %high.delta.down
+      %high.root.dec = sub i64 %high.root.down, 1
+      br label %high.correct.down
+    high.correct.up:
+      %high.root.up = phi i64 [ %high.root.down, %high.correct.down ], [ %high.root.inc, %high.correct.up.more ]
+      %high.rem.up = phi i64 [ %high.rem.down, %high.correct.down ], [ %high.rem.dec, %high.correct.up.more ]
+      %high.twice.up = shl i64 %high.root.up, 1
+      %high.too.small = icmp ugt i64 %high.rem.up, %high.twice.up
+      br i1 %high.too.small, label %high.correct.up.more, label %extend
+    high.correct.up.more:
+      %high.delta.up = add i64 %high.twice.up, 1
+      %high.rem.dec = sub i64 %high.rem.up, %high.delta.up
+      %high.root.inc = add i64 %high.root.up, 1
+      br label %high.correct.up
+    extend:
+      %rem.top = shl i64 %high.rem.up, 31
+      %lo.top = lshr i64 %nlo, 33
+      %numerator = or i64 %rem.top, %lo.top
+      %quotient.raw = udiv i64 %numerator, %high.root.up
+      %quotient.over = icmp ugt i64 %quotient.raw, 4294967295
+      %quotient = select i1 %quotient.over, i64 4294967295, i64 %quotient.raw
+      %high.word = shl i64 %high.root.up, 32
+      %root.seed = or i64 %high.word, %quotient
+      %root.seed.wide = zext i64 %root.seed to i128
+      %square.seed = mul i128 %root.seed.wide, %root.seed.wide
+      %rem.seed = sub i128 %normalized, %square.seed
+      br label %correct.down
+    correct.down:
+      %root.down = phi i64 [ %root.seed, %extend ], [ %root.decremented, %correct.down.more ]
+      %rem.down = phi i128 [ %rem.seed, %extend ], [ %rem.incremented, %correct.down.more ]
+      %too.large = icmp slt i128 %rem.down, 0
+      br i1 %too.large, label %correct.down.more, label %correct.up
+    correct.down.more:
+      %root.down.wide = zext i64 %root.down to i128
+      %twice.down = shl i128 %root.down.wide, 1
+      %delta.down = sub i128 %twice.down, 1
+      %rem.incremented = add i128 %rem.down, %delta.down
+      %root.decremented = sub i64 %root.down, 1
+      br label %correct.down
+    correct.up:
+      %root.up = phi i64 [ %root.down, %correct.down ], [ %root.incremented, %correct.up.more ]
+      %rem.up = phi i128 [ %rem.down, %correct.down ], [ %rem.decremented, %correct.up.more ]
+      %root.up.wide = zext i64 %root.up to i128
+      %twice.root = shl i128 %root.up.wide, 1
+      %too.small = icmp ugt i128 %rem.up, %twice.root
+      br i1 %too.small, label %correct.up.more, label %exit
+    correct.up.more:
+      %delta.up = add i128 %twice.root, 1
+      %rem.decremented = sub i128 %rem.up, %delta.up
+      %root.incremented = add i64 %root.up, 1
+      br label %correct.up
+    exit:
+      %half.shift = lshr i64 %shift, 1
+      %root = lshr i64 %root.up, %half.shift
+      ret i64 %root
+  IR
+
 # Montgomery multiplication modulo an odd machine-word modulus. The reduction
 # keeps the low-limb carry explicit so it remains exact when the modulus has its
 # high bit set and the conceptual 128-bit sum overflows by one bit.
@@ -1329,10 +1421,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       return false
     ccall("w_bigint_prime_q", self)
 
-  # Integer square root. Positive one-limb magnitudes use a native raw-u64
-  # seed-and-correct kernel and always return an inline 32-bit root. Negative
-  # and wider receivers retain the workspace-managed divide-and-conquer
-  # sqrtrem kernel behind the runtime boundary.
+  # Integer square root. Positive one- and two-limb magnitudes use native
+  # seed-and-correct kernels. Negative and wider receivers retain the
+  # workspace-managed divide-and-conquer sqrtrem kernel behind the runtime
+  # boundary.
   -> isqrt
     n = $size ## i64
     if (($value >> 47) & 1) == 1
@@ -1340,6 +1432,24 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     if n == 1
       root = __bigint_isqrt_u64($limbs[0] ## u64) ## u64
       return wvalue_from_bits((-1688849860263936 | root) ## i64)
+    if n == 2
+      # A normalized two-limb BigInt has a nonzero high word, so ctlz is in
+      # 0..63. Masking with 62 is therefore exactly C's `ctlz & ~1`, while
+      # also making the 0..62 range explicit to LLVM's i128 shift lowering.
+      shift = ccall_nobox("__w_bit_ctlz_u64", $limbs[1] ## u64) & 62 ## i64
+      root = __bigint_isqrt_u128(
+        $limbs[0] ## i64,
+        $limbs[1] ## i64,
+        shift ## i64
+      ) ## u64
+      if root <= 140737488355327
+        return wvalue_from_bits((-1688849860263936 | root) ## i64)
+      # Match bigint_isqrt_any's one-limb result construction exactly: take
+      # the hot result slot, publish the only limb, then publish size last.
+      result = ccall_rawargs("w_bigint_alloc_hot", 1) ## BigInt
+      result$limbs[0] = root
+      result$size = 1
+      return result
     ccall("bigint_isqrt_any", self)
 
   # Non-mutating absolute value. Effective-positive receivers (including

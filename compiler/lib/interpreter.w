@@ -2042,6 +2042,28 @@ use target
         x = x & (x - 1)
         count += 1
       return count
+    when "__w_bit_ctlz_u32"
+      if args.size() != 2
+        raise "__w_bit_ctlz_u32 expects one argument"
+      x = args[1] & 0xFFFFFFFF
+      return 32 if x == 0
+      count = 0
+      bit = 0x80000000
+      while (x & bit) == 0
+        bit = bit >> 1
+        count += 1
+      return count
+    when "__w_bit_ctlz_u64"
+      if args.size() != 2
+        raise "__w_bit_ctlz_u64 expects one argument"
+      x = args[1] & ((0xFFFFFFFF << 32) | 0xFFFFFFFF)
+      return 64 if x == 0
+      count = 0
+      bit = 0x80000000 << 32
+      while (x & bit) == 0
+        bit = bit >> 1
+        count += 1
+      return count
     when "__w_bit_cttz_u32"
       if args.size() != 2
         raise "__w_bit_cttz_u32 expects one argument"
@@ -3533,6 +3555,12 @@ use target
           return ccall("w_mod", recv, args[0])
         return ccall("w_bigint_sub", recv, args[0])
       m = lookup_method(primitive_class, name, args.size(), block != nil, args)
+      # BigInt#isqrt's one/two-limb native leaf is an embedded LLVM function,
+      # which the tree walker cannot execute. Delegate only the Core-owned
+      # body to its exact retained C boundary; a user reopen has another file
+      # and continues through ordinary last-definition method dispatch.
+      if primitive_class[:name] == "BigInt" && name == "isqrt" && args.empty?() && block == nil && m != nil && m[:file] != nil && m[:file].ends_with?("core/numeric/big_int.w")
+        return ccall("bigint_isqrt_any", recv)
       # For names the interpreter implements as builtins, a TRAIT DEFAULT
       # must not preempt the builtin: the builtins mirror the compiled
       # engine's native IC rows and proven host semantics (Enumerable's

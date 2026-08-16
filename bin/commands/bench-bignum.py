@@ -844,6 +844,20 @@ def build_external_harness(language: str) -> None:
             ],
             env=env,
         )
+        nm_output = run_checked(["nm", "-g", str(TUNGSTEN_NATIVE_BINARY)])
+        seam_type = ""
+        for line in nm_output.splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and fields[-1] in (
+                "__w_bigint_isqrt_src", "___w_bigint_isqrt_src"
+            ):
+                seam_type = fields[-2]
+        if seam_type not in ("T", "t"):
+            raise RuntimeError(
+                "Tungsten native lane did not bind the strong "
+                "__w_bigint_isqrt_src seam "
+                f"(nm type: {seam_type or 'missing'})"
+            )
         run_checked([str(TUNGSTEN_NATIVE_BINARY), "--self-test"])
         return
     if language == "rust":

@@ -10,7 +10,7 @@ TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 PAIRS="${PAIRS:-8}"
 LABEL="${LABEL:-current}"
 OUT="${OUT:-/tmp/tungsten-bigint-isqrt-${LABEL}.txt}"
-ROWS="${ROWS:-one:5000000 one-high:5000000 one-square:5000000 four:2000000 sixteen:200000 sixtyfour:20000}"
+ROWS="${ROWS:-one:5000000 one-high:5000000 one-square:5000000 two:3000000 two-low:3000000 two-square:3000000 four:2000000 sixteen:200000 sixtyfour:20000}"
 
 case "$PAIRS" in ''|*[!0-9]*|0) echo "PAIRS must be positive" >&2; exit 2 ;; esac
 

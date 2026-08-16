@@ -15546,6 +15546,13 @@ WValue bigint_isqrt_any(WValue a) {
     return bigint_box(res);
 }
 
+/* Stable source seam for BigInt#isqrt. A compiler that lowers the Core
+ * method emits a strong wrapper around its source worker; stage-0 and thin
+ * binaries retain this weak, exact-C default. */
+__attribute__((weak)) WValue __w_bigint_isqrt_src(WValue a) {
+    return bigint_isqrt_any(a);
+}
+
 /* ---- GCD: u64 fast path + Lehmer batching for multi-limb operands ----
  *
  * The previous implementation was one-limb-quotient Euclid: one 128/64

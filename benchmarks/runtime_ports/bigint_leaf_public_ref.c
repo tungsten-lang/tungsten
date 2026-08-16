@@ -46,6 +46,11 @@ WValue w_leafpub_is_bigint(WValue value) {
     return w_bool(w_is_bigint(value));
 }
 
+WValue w_leafpub_bigint_size(WValue value) {
+    if (!w_is_bigint(value)) return W_NIL;
+    return w_int(w_as_bigint(value)->size);
+}
+
 WValue w_leafpub_thread_cpu_ns(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) abort();

@@ -444,6 +444,10 @@ projects stay unchecked until their stated acceptance criteria are met.
   monolithic for optimization, and fails closed for arbitrary C include
   graphs; no-LTO builds stay opt-in because cold bookkeeping outweighs their
   already-cheap links.
+- [x] Split the LLVM emitter into a thin orchestrator and bounded declaration,
+  analysis, artifact, numeric-op, and runtime-op workers. Preserve exact
+  release/debug LLVM and keep the split neutral in matched self-compile
+  measurements; `doc/design/emitter-structure.md` records the boundaries.
 - [x] Resolve the `-O0` performance inversion. Ordinary `-o` builds now use
   `-O3` application/runtime code while retaining checks, symbols, and source
   metadata; explicit `--dev` selects `-O0`, and benchmark guidance continues

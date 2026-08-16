@@ -234,8 +234,8 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
 
     if args != nil
       ai = 0
-      while ai < args.size()
-        encode_val(buf, args[ai], temp_map)
+      while ai < wire_sequence_size(args)
+        encode_val(buf, wire_sequence_get(args, ai), temp_map)
         ai += 1
 
     buf << ";"
@@ -248,8 +248,8 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
 
     if args != nil
       ai = 0
-      while ai < args.size()
-        encode_val(buf, args[ai], temp_map)
+      while ai < wire_sequence_size(args)
+        encode_val(buf, wire_sequence_get(args, ai), temp_map)
         ai += 1
 
     # Devirtualized target: two otherwise-identical bodies whose call sites
@@ -322,9 +322,9 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     incoming = wire_get(inst, :incoming)
     if incoming != nil
       i = 0
-      while i < incoming.size()
-        encode_val(buf, incoming[i], temp_map)
-        idx = label_map[incoming[i + 1]]
+      while i < wire_sequence_size(incoming)
+        encode_val(buf, wire_sequence_get(incoming, i), temp_map)
+        idx = label_map[wire_sequence_get(incoming, i + 1)]
 
         if idx != nil
           buf << ">"
@@ -970,7 +970,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
         if op in (:call_direct_i64 :call_direct_void)
           line = line + " @" + wire_get(inst, :name)
           if wire_get(inst, :args) != nil
-            line = line + "(" + wire_get(inst, :args).size().to_s() + " args)"
+            line = line + "(" + wire_sequence_size(wire_get(inst, :args)).to_s() + " args)"
         elsif op == :call_method_i64
           line = line + " method"
         elsif op == :ret_i64

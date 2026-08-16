@@ -21,4 +21,22 @@ dynamic = wire_make_dynamic_3(:add_i64, :lhs, "%a", :rhs, "%b", :temp, "%c")
 if wire_kind(dynamic) != :add_i64 || wire_field_count(dynamic) != 3
   raise "dynamic fixed-layout WIRE constructor did not round-trip"
 
+call = wire_make_call_direct_ptr(["%x", "%y"], "w_demo", "%out")
+call_args = wire_get(call, :args)
+if ccall_nobox("w_is_wire_extern", call_args) != 1 || wire_sequence_size(call_args) != 2
+  raise "static WIRE constructor did not pack variable-width args"
+if wire_sequence_get(call_args, 0) != "%x" || wire_sequence_get(call_args, 1) != "%y"
+  raise "packed WIRE args did not preserve order"
+wire_sequence_set(call_args, 1, "%z")
+if wire_sequence_get(call_args, 1) != "%z"
+  raise "packed WIRE args did not support mid-end mutation"
+
+dynamic_call = wire_make_dynamic_3(:call_direct_ptr,
+  :args, ["%dynamic"], :name, "w_demo", :temp, "%dynamic_out")
+dynamic_args = wire_get(dynamic_call, :args)
+if ccall_nobox("w_is_wire_extern", dynamic_args) != 1 || wire_sequence_size(dynamic_args) != 1
+  raise "dynamic WIRE constructor did not pack variable-width args"
+if wire_sequence_get(dynamic_args, 0) != "%dynamic"
+  raise "dynamic packed WIRE args did not round-trip"
+
 << "wire-fixed-layout: ok"

@@ -18751,14 +18751,7 @@ static inline void w_wire_record_header(uint64_t off, uint32_t count, uint32_t c
     g_wire_arena.base[off] = (WValue)(((uint64_t)cap << 32) | count);
 }
 
-WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fields) {
-    if (kind <= 0 || kind > 511 || field_count < 0 || field_count > 1024 ||
-        spare_fields < 0 || spare_fields > 1024)
-        die("w_wire_alloc: invalid kind or field count");
-    uint32_t count = (uint32_t)field_count;
-    uint32_t capacity = count + (uint32_t)spare_fields;
-    if (capacity < 2) capacity = 2;
-    uint64_t words = 1u + (uint64_t)capacity * 2u;
+static uint32_t w_wire_arena_alloc_words(uint64_t words) {
     if (g_wire_arena.cursor == 0) g_wire_arena.cursor = 1;
     uint64_t required = (uint64_t)g_wire_arena.cursor + words;
     if (required > W_WIRE_OFFSET_MASK)
@@ -18774,6 +18767,19 @@ WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fie
     }
     uint32_t off = g_wire_arena.cursor;
     g_wire_arena.cursor += (uint32_t)words;
+    return off;
+}
+
+WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fields) {
+    if (kind <= 0 || kind > 511 || kind == W_WIRE_SEQUENCE_KIND ||
+        field_count < 0 || field_count > 1024 ||
+        spare_fields < 0 || spare_fields > 1024)
+        die("w_wire_alloc: invalid kind or field count");
+    uint32_t count = (uint32_t)field_count;
+    uint32_t capacity = count + (uint32_t)spare_fields;
+    if (capacity < 2) capacity = 2;
+    uint64_t words = 1u + (uint64_t)capacity * 2u;
+    uint32_t off = w_wire_arena_alloc_words(words);
     w_wire_record_header(off, 0, capacity);
     /* count=0 makes every pair unreachable. Callers fill the live prefix via
      * store_at, so clearing capacity (including spare late-pass fields) only
@@ -18789,7 +18795,8 @@ WValue w_wire_alloc(int64_t kind, int64_t field_count) {
 }
 
 static uint64_t w_wire_checked_offset(WValue wire) {
-    if (!w_is_wire(wire)) die("WIRE field access: value is not a WIRE handle");
+    if (!w_is_wire(wire) || w_is_wire_sequence(wire))
+        die("WIRE field access: value is not a WIRE record handle");
     uint64_t off = w_wire_offset(wire);
     if (off == 0 || off >= g_wire_arena.cursor)
         die("WIRE field access: handle is outside the active generation");
@@ -18799,11 +18806,110 @@ static uint64_t w_wire_checked_offset(WValue wire) {
     return off;
 }
 
+static WValue w_wire_sequence_alloc(uint32_t count) {
+    if (count == 0) return w_box_wire(W_WIRE_SEQUENCE_KIND, 0);
+    uint32_t off = w_wire_arena_alloc_words(1u + (uint64_t)count);
+    w_wire_record_header(off, count, count);
+    return w_box_wire(W_WIRE_SEQUENCE_KIND, off);
+}
+
+static uint64_t w_wire_sequence_checked_offset(WValue sequence) {
+    if (!w_is_wire_sequence(sequence))
+        die("WIRE sequence access: value is not a sequence handle");
+    uint64_t off = w_wire_offset(sequence);
+    if (off == 0) return 0;
+    if (off >= g_wire_arena.cursor)
+        die("WIRE sequence access: handle is outside the active generation");
+    uint32_t count = w_wire_record_count(off);
+    uint32_t capacity = w_wire_record_capacity(off);
+    if (count > capacity || off + 1u + (uint64_t)capacity > g_wire_arena.cursor)
+        die("WIRE sequence access: corrupt sequence bounds");
+    return off;
+}
+
+WValue w_wire_sequence_from_array(WValue value) {
+    if (value == W_NIL || w_is_wire_sequence(value)) return value;
+    if (!w_is_array(value))
+        die("w_wire_sequence_from_array: expected a WValue Array");
+    WArray *array = w_as_array(value);
+    if (array->ebits != 65 || array->size < 0)
+        die("w_wire_sequence_from_array: expected a polymorphic Array");
+    uint32_t count = (uint32_t)array->size;
+    WValue sequence = w_wire_sequence_alloc(count);
+    if (count > 0) {
+        uint64_t off = w_wire_offset(sequence);
+        memcpy(g_wire_arena.base + off + 1,
+               array->slots + array->start,
+               (size_t)count * sizeof(WValue));
+    }
+    return sequence;
+}
+
+int64_t w_wire_sequence_size(WValue sequence) {
+    uint64_t off = w_wire_sequence_checked_offset(sequence);
+    return off == 0 ? 0 : (int64_t)w_wire_record_count(off);
+}
+
+WValue w_wire_sequence_get(WValue sequence, int64_t index) {
+    uint64_t off = w_wire_sequence_checked_offset(sequence);
+    uint32_t count = off == 0 ? 0 : w_wire_record_count(off);
+    if (index < 0) index += (int64_t)count;
+    if (index < 0 || (uint64_t)index >= count) return W_NIL;
+    return g_wire_arena.base[off + 1u + (uint32_t)index];
+}
+
+WValue w_wire_sequence_set(WValue sequence, int64_t index, WValue value) {
+    uint64_t off = w_wire_sequence_checked_offset(sequence);
+    uint32_t count = off == 0 ? 0 : w_wire_record_count(off);
+    if (index < 0) index += (int64_t)count;
+    if (index < 0 || (uint64_t)index >= count)
+        die("w_wire_sequence_set: index exceeds sequence bounds");
+    g_wire_arena.base[off + 1u + (uint32_t)index] = value;
+    return value;
+}
+
+static int w_wire_sequence_field_symbol(WValue sym) {
+    if (!w_is_symbol(sym)) return 0;
+    char inline_buf[6];
+    const char *name = NULL;
+    size_t len = 0;
+    w_str_data(sym, inline_buf, &name, &len);
+    switch (len) {
+        case 1:
+            return name[0] == 's';
+        case 4:
+            return memcmp(name, "args", 4) == 0;
+        case 5:
+            return memcmp(name, "cases", 5) == 0;
+        case 6:
+            return memcmp(name, "fields", 6) == 0;
+        case 8:
+            return memcmp(name, "incoming", 8) == 0;
+        case 9:
+            return memcmp(name, "arg_types", 9) == 0;
+        default:
+            return 0;
+    }
+}
+
+static WValue w_wire_canonical_field_value(WValue wire, WValue sym,
+                                            WValue value) {
+    /* Generated constructors pack these fields before storing them. Keep the
+     * arena boundary authoritative too: destructive mid-end rewrites and
+     * compatibility adapters must not be able to reintroduce heap Arrays. */
+    if (w_wire_kind(wire) < 264 && w_is_array(value) &&
+        w_wire_sequence_field_symbol(sym)) {
+        return w_wire_sequence_from_array(value);
+    }
+    return value;
+}
+
 WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
     uint32_t cap = w_wire_record_capacity(off);
     if (index < 0 || (uint64_t)index >= cap)
         die("w_wire_field_store_at: index exceeds record capacity");
+    value = w_wire_canonical_field_value(wire, sym, value);
     uint32_t idx = (uint32_t)index;
     g_wire_arena.base[off + 1 + idx * 2] = sym;
     g_wire_arena.base[off + 2 + idx * 2] = value;
@@ -18864,6 +18970,7 @@ WValue w_wire_field_value_at(WValue wire, int64_t index) {
 
 WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
+    value = w_wire_canonical_field_value(wire, sym, value);
     uint32_t count = w_wire_record_count(off);
     uint32_t cap = w_wire_record_capacity(off);
     WWireFieldCacheEntry *cached = w_wire_field_cache_entry((uint32_t)off, sym);
@@ -18922,6 +19029,16 @@ int64_t w_wire_store_mark(void) {
 }
 
 WValue w_wire_clone(WValue wire) {
+    if (w_is_wire_sequence(wire)) {
+        uint64_t src = w_wire_sequence_checked_offset(wire);
+        uint32_t count = src == 0 ? 0 : w_wire_record_count(src);
+        WValue clone = w_wire_sequence_alloc(count);
+        if (count > 0)
+            memcpy(g_wire_arena.base + w_wire_offset(clone) + 1,
+                   g_wire_arena.base + src + 1,
+                   (size_t)count * sizeof(WValue));
+        return clone;
+    }
     uint64_t src = w_wire_checked_offset(wire);
     uint32_t count = w_wire_record_count(src);
     uint32_t capacity = w_wire_record_capacity(src);
@@ -45769,7 +45886,7 @@ WValue __w_type(WValue v) {
     if (w_is_char(v))   return g_tn_char;
     if (w_is_big_array(v)) return g_tn_big_array;
     if (w_is_small_array(v)) return g_tn_small_array;
-    if (w_is_array(v) || w_is_body(v)) return g_tn_array;
+    if (w_is_array(v) || w_is_body(v) || w_is_wire_sequence(v)) return g_tn_array;
     if (w_is_hash(v))   return g_tn_hash;
     if (w_is_range(v))  return g_tn_range;
     if (w_is_range_imm(v)) return g_tn_range;
@@ -46935,7 +47052,8 @@ enum WCoreGraphTag {
     W_CORE_GRAPH_ARRAY = 3,
     W_CORE_GRAPH_HASH = 4,
     W_CORE_GRAPH_WIRE = 5,
-    W_CORE_GRAPH_BACKREF = 6
+    W_CORE_GRAPH_BACKREF = 6,
+    W_CORE_GRAPH_WIRE_SEQUENCE = 7
 };
 
 enum WCoreGraphRefKind {
@@ -47206,6 +47324,23 @@ static void w_core_graph_write_value(WCoreGraphWriter *w, WValue value,
             return;
         }
 
+        if (w_is_wire_sequence(value)) {
+            uint64_t off = w_wire_sequence_checked_offset(value);
+            uint32_t count = off == 0 ? 0 : w_wire_record_count(off);
+            w_core_graph_put_u8(w, W_CORE_GRAPH_WIRE_SEQUENCE);
+            w_core_graph_put_u32(w, id);
+            w_core_graph_put_u32(w, count);
+            for (uint32_t i = 0; i < count; i++) {
+                w_core_graph_write_value(w, g_wire_arena.base[off + 1 + i], depth + 1);
+                if (w->failed) {
+                    if (getenv("TUNGSTEN_CORE_CACHE_DEBUG"))
+                        fprintf(stderr, "  through WIRE sequence[%u]\n", i);
+                    return;
+                }
+            }
+            return;
+        }
+
         uint64_t off = w_wire_checked_offset(value);
         uint32_t count = w_wire_record_count(off);
         uint32_t capacity = w_wire_record_capacity(off);
@@ -47415,6 +47550,23 @@ static WValue w_core_graph_read_value(WCoreGraphReader *r, unsigned depth) {
             WValue item = w_core_graph_read_value(r, depth + 1);
             if (r->failed) return W_NIL;
             w_hash_set(value, key, item);
+        }
+        return value;
+    }
+    if (tag == W_CORE_GRAPH_WIRE_SEQUENCE) {
+        uint32_t count = w_core_graph_get_u32(r);
+        if (r->failed || count > W_CORE_GRAPH_MAX_CONTAINER_ITEMS ||
+            r->off > r->size || (size_t)count > r->size - r->off) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        WValue value = w_wire_sequence_alloc(count);
+        if (!w_core_graph_define_ref(r, id, value)) return W_NIL;
+        uint64_t off = w_wire_offset(value);
+        for (uint32_t i = 0; i < count; i++) {
+            WValue item = w_core_graph_read_value(r, depth + 1);
+            if (r->failed) return W_NIL;
+            g_wire_arena.base[off + 1 + i] = item;
         }
         return value;
     }
@@ -48537,7 +48689,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
             w_is_double(recv) ? "Float" :
             w_is_string(recv) ? "String" :
             w_is_symbol(recv) ? "Symbol" :
-            (w_is_array(recv) || w_is_body(recv)) ? "Array" :
+            (w_is_array(recv) || w_is_body(recv) || w_is_wire_sequence(recv)) ? "Array" :
             w_is_bool(recv) ? "Boolean" : NULL;
         return w_bool((pn && strcmp(pn, tc->name) == 0) ||
                       w_primitive_is_a_type_name(recv, tc->name, strlen(tc->name)));
@@ -48566,7 +48718,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
             w_is_double(recv) ? "Float" :
             w_is_string(recv) ? "String" :
             w_is_symbol(recv) ? "Symbol" :
-            (w_is_array(recv) || w_is_body(recv)) ? "Array" :
+            (w_is_array(recv) || w_is_body(recv) || w_is_wire_sequence(recv)) ? "Array" :
             w_is_bool(recv) ? "Boolean" : NULL;
         return w_bool((pn && w_typename_base_eq(pn, tn, tn_len)) ||
                       w_primitive_is_a_type_name(recv, tn, tn_len));
@@ -48935,7 +49087,7 @@ WValue w_class_of(WValue v) {
      * treated AST child lists as Arrays (see __w_type above). Skip the Body
      * type-class registration here so `.class` follows that Array facade too.
      * Method dispatch still uses the 0xE6 key in w_method_dispatch. */
-    int cacheable = !w_is_body(v) && key < 256;
+    int cacheable = !w_is_body(v) && !w_is_wire(v) && key < 256;
     unsigned public_slot = 0;
     if (cacheable) {
         public_slot = (unsigned)key | ((unsigned)(v & 1u) << 8);
@@ -49122,6 +49274,32 @@ static WValue w_ic_array_idx(WValue r, WValue *a, int c) {
 static WValue w_ic_array_idxset(WValue r, WValue *a, int c) {
     (void)c;
     return w_array_set(r, a[0], a[1]);
+}
+/* Packed WIRE sequences deliberately keep the private WIRE dispatch key.
+ * Exposing them as Array through __w_type is useful for diagnostics, but
+ * dispatching source Array#size would read a WArray header from arena words.
+ * These three representation primitives are the complete sequence API. */
+static WValue w_ic_wire_idx(WValue r, WValue *a, int c) {
+    if (c != 1) return W_NIL;
+    if (w_is_wire_sequence(r)) {
+        if (!w_is_int(a[0])) return W_NIL;
+        return w_wire_sequence_get(r, w_as_int(a[0]));
+    }
+    WValue value = w_wire_field_load(r, a[0]);
+    return value == W_UNDEF ? W_NIL : value;
+}
+static WValue w_ic_wire_idxset(WValue r, WValue *a, int c) {
+    if (c != 2) die("WIRE []= requires 2 arguments");
+    if (w_is_wire_sequence(r)) {
+        if (!w_is_int(a[0])) die("WIRE sequence index must be an Int");
+        return w_wire_sequence_set(r, w_as_int(a[0]), a[1]);
+    }
+    return w_wire_field_store(r, a[0], a[1]);
+}
+static WValue w_ic_wire_size(WValue r, WValue *a, int c) {
+    (void)a;
+    if (c != 0 || !w_is_wire_sequence(r)) return W_UNDEF;
+    return w_int(w_wire_sequence_size(r));
 }
 static WValue w_ic_array_clear(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -54284,6 +54462,13 @@ static WValue w_ic_date_to_s(WValue r, WValue *a, int c) {
 /* Resolution tables — WValue keys for O(1) integer compare */
 typedef struct { WValue name; WValue (*fn)(WValue, WValue*, int); } WICEntry;
 
+static WICEntry w_ic_wire_table[] = {
+    {0, w_ic_wire_idx},
+    {0, w_ic_wire_idxset},
+    {0, w_ic_wire_size},
+    {0, NULL}
+};
+
 static WICEntry w_ic_array_table[] = {
     {0, w_ic_array_push},     /* WN_push — patched at init */
     {0, w_ic_array_pop},
@@ -54929,6 +55114,10 @@ static WICEntry w_ic_mac_table[] = {
 };
 
 static void w_init_ic_tables(void) {
+    /* Private WIRE records/sequences. */
+    w_ic_wire_table[0].name = WN_idx;
+    w_ic_wire_table[1].name = WN_idxset;
+    w_ic_wire_table[2].name = WN_size;
     /* Array */
     w_ic_array_table[0].name  = WN_push;
     w_ic_array_table[1].name  = WN_pop;
@@ -55155,6 +55344,7 @@ static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WV
     (void)recv;
     const WICEntry *table = NULL;
     switch (key) {
+        case 0xE8: table = w_ic_wire_table;    break;
         case 0x0A: table = w_ic_array_table;   break;
         case 0xF9: table = w_ic_string_table;  break;
         case 0xFA: table = w_ic_int_table;     break;
@@ -55667,12 +55857,26 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
      * user-overridable language methods. */
     if (w_is_wire(recv)) {
         if (name == WN_idx && args->size == 1) {
-            WValue value = w_wire_field_load(recv, args->slots[args->start]);
+            WValue key = args->slots[args->start];
+            if (w_is_wire_sequence(recv)) {
+                if (!w_is_int(key)) return W_NIL;
+                return w_wire_sequence_get(recv, w_as_int(key));
+            }
+            WValue value = w_wire_field_load(recv, key);
             return value == W_UNDEF ? W_NIL : value;
         }
-        if (name == WN_idxset && args->size == 2)
+        if (name == WN_idxset && args->size == 2) {
+            if (w_is_wire_sequence(recv)) {
+                WValue key = args->slots[args->start];
+                if (!w_is_int(key)) die("WIRE sequence index must be an Int");
+                return w_wire_sequence_set(recv, w_as_int(key),
+                                           args->slots[args->start + 1]);
+            }
             return w_wire_field_store(recv, args->slots[args->start],
                                       args->slots[args->start + 1]);
+        }
+        if (name == WN_size && args->size == 0 && w_is_wire_sequence(recv))
+            return w_int(w_wire_sequence_size(recv));
     }
 
     /* Rope: flatten and dispatch as string */
@@ -59266,6 +59470,8 @@ WValue w_array_get(WValue arr, WValue index) {
      * packed AST body reference transparently — every `node.body[i]`
      * across the compiler reaches here without going through any
      * type-aware dispatch. */
+    if (w_is_wire_sequence(arr))
+        return w_wire_sequence_get(arr, w_as_int(index));
     if (w_is_body(arr)) {
         uint32_t len = w_unbox_body_length(arr);
         int64_t i = w_as_int(index);
@@ -59378,6 +59584,7 @@ int64_t w_index_raw_u64(WValue recv, WValue idx) {
 /* Raw-index twin of w_array_get, same negative-wrap and nil-on-OOB
  * semantics — emitted when the index is already a raw machine int. */
 WValue w_array_get_i64(WValue arr, int64_t i) {
+    if (w_is_wire_sequence(arr)) return w_wire_sequence_get(arr, i);
     if (w_is_body(arr)) {
         uint32_t len = w_unbox_body_length(arr);
         if (i < 0) i += len;
@@ -59443,6 +59650,8 @@ WValue w_array_set(WValue arr, WValue index, WValue val) {
      * once frozen (a rewrite constructs a new list, same discipline as
      * node-kind changes), so raise rather than corrupt if this is ever
      * hit; the audited call sites never do. */
+    if (w_is_wire_sequence(arr))
+        return w_wire_sequence_set(arr, w_as_int(index), val);
     if (w_is_body(arr)) {
         w_raise(w_string("[]=: cannot mutate an AST body reference (immutable once frozen)"));
     }
@@ -59454,12 +59663,15 @@ WValue w_array_set(WValue arr, WValue index, WValue val) {
  * is always a real WArray (never a packed body ref), so the body check and
  * the w_as_int unbox both drop out. Saves the w_int box at the call site too. */
 WValue w_array_set_i64(WValue arr, int64_t i, WValue val) {
+    if (w_is_wire_sequence(arr)) return w_wire_sequence_set(arr, i, val);
     return w_array_write_at(w_as_array(arr), i, val);
 }
 
 /* Unchecked WN_idx / WN_idxset for Array tier. No negative-
  * index normalization, no bounds check. Caller proves bounds. */
 WValue w_array_idx(WValue arr, WValue index) {
+    if (w_is_wire_sequence(arr))
+        return w_wire_sequence_get(arr, w_as_int(index));
     WArray *a = w_as_array(arr);
     int64_t i = w_as_int(index);
     return array_slot_load_decoded(a, i);
@@ -59469,11 +59681,14 @@ WValue w_array_idx(WValue arr, WValue index) {
  * already a raw machine int, saving a w_int box + w_as_int unbox per element
  * in hot array loops (core/array.w method bodies). */
 WValue w_array_idx_i64(WValue arr, int64_t i) {
+    if (w_is_wire_sequence(arr)) return w_wire_sequence_get(arr, i);
     WArray *a = w_as_array(arr);
     return array_slot_load_decoded(a, i);
 }
 
 WValue w_array_idxset(WValue arr, WValue index, WValue val) {
+    if (w_is_wire_sequence(arr))
+        return w_wire_sequence_set(arr, w_as_int(index), val);
     WArray *a = w_as_array(arr);
     int64_t i = w_as_int(index);
     if (array_is_wvalue(a)) {
@@ -59537,6 +59752,7 @@ WValue w_array_size(WValue arr) {
      * fields never infer that way today, so they fall through to the
      * Tungsten:AST:Body type class instead. Handled here too in case that
      * ever changes, matching w_array_get's defensive symmetry. */
+    if (w_is_wire_sequence(arr)) return w_int(w_wire_sequence_size(arr));
     if (w_is_body(arr)) return w_int(w_unbox_body_length(arr));
     WArray *a = w_as_array(arr);
     return w_int(a->size);

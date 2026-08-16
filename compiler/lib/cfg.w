@@ -69,10 +69,10 @@ use wire
         if default_idx != nil
           succs[i].push(default_idx)
           preds[default_idx].push(i)
-        cases = last[:cases]
+        cases = wire_get(last, :cases)
         ci = 0
-        while ci < cases.size()
-          target_idx = label_map[cases[ci][:label]]
+        while ci < wire_sequence_size(cases)
+          target_idx = label_map[wire_sequence_get(cases, ci)[:label]]
           if target_idx != nil
             succs[i].push(target_idx)
             preds[target_idx].push(i)
@@ -291,9 +291,11 @@ use wire
         # Call args: if a slot pointer is passed, it's address-taken
         if wire_get(inst, :args) != nil
           ai = 0
-          while ai < wire_get(inst, :args).size()
-            if promotable[wire_get(inst, :args)[ai]] == true
-              promotable[wire_get(inst, :args)[ai]] = false
+          args = wire_get(inst, :args)
+          while ai < wire_sequence_size(args)
+            arg = wire_sequence_get(args, ai)
+            if promotable[arg] == true
+              promotable[arg] = false
             ai += 1
       ii += 1
     bi += 1

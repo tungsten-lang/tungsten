@@ -270,7 +270,8 @@ wire_kind_symbols = [
   :zext_i1_i64,
   :wire_module,
   :wire_function,
-  :wire_block
+  :wire_block,
+  :wire_sequence
 ]
 
 wire_kind_ids = {}

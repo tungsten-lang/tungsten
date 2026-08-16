@@ -158,6 +158,44 @@ static void test_wire_arena(void) {
     CHECK(g_wire_arena.cap == retained_cap, "WIRE reset retains capacity");
 }
 
+static void test_wire_sequence(void) {
+    WValue source = w_array_new_inline(65, 3);
+    w_as_array(source)->slots[0] = w_box_int(11);
+    w_as_array(source)->slots[1] = w_box_int(22);
+    w_as_array(source)->slots[2] = w_box_int(33);
+    WValue sequence = w_wire_sequence_from_array(source);
+
+    CHECK(w_is_wire(sequence), "WIRE sequence is a packed WIRE handle");
+    CHECK(w_is_wire_sequence(sequence), "WIRE sequence has its dedicated kind");
+    CHECK(w_wire_kind(sequence) == W_WIRE_SEQUENCE_KIND,
+          "WIRE sequence kind round-trips");
+    CHECK(w_wire_sequence_size(sequence) == 3,
+          "WIRE sequence size round-trips");
+    CHECK(w_as_int(w_wire_sequence_get(sequence, 0)) == 11 &&
+          w_as_int(w_wire_sequence_get(sequence, -1)) == 33,
+          "WIRE sequence supports positive and negative indexing");
+    CHECK(w_wire_sequence_get(sequence, 3) == W_NIL,
+          "WIRE sequence out-of-bounds read returns nil");
+    w_wire_sequence_set(sequence, 1, w_box_int(44));
+    CHECK(w_as_int(w_wire_sequence_get(sequence, 1)) == 44,
+          "WIRE sequence supports in-place updates");
+
+    WValue clone = w_wire_clone(sequence);
+    w_wire_sequence_set(clone, 1, w_box_int(55));
+    CHECK(w_as_int(w_wire_sequence_get(sequence, 1)) == 44 &&
+          w_as_int(w_wire_sequence_get(clone, 1)) == 55,
+          "WIRE sequence clone has independent dense storage");
+
+    WValue empty_source = w_array_new_inline(65, 0);
+    WValue empty = w_wire_sequence_from_array(empty_source);
+    CHECK(w_is_wire_sequence(empty) && w_wire_offset(empty) == 0,
+          "empty WIRE sequence uses the offset-zero singleton");
+    CHECK(w_wire_sequence_size(empty) == 0 &&
+          w_wire_sequence_get(empty, 0) == W_NIL,
+          "empty WIRE sequence is readable without arena allocation");
+    w_wire_store_reset(0);
+}
+
 static WValue canonical_symbol(const char *name) {
     WValue symbol = w_symbol(name);
     if (w_is_slab_sym(symbol))
@@ -177,6 +215,12 @@ static void test_core_graph_snapshot(void) {
     WValue wire = w_wire_alloc_reserve(265, 2, 3);
     w_wire_field_store_at(wire, 0, canonical_symbol("name"), w_string("worker"));
     w_wire_field_store_at(wire, 1, field, w_string("original"));
+
+    WValue sequence_source = w_array_new_inline(65, 2);
+    w_as_array(sequence_source)->slots[0] = w_string("left");
+    w_as_array(sequence_source)->slots[1] = w_string("right");
+    WValue sequence = w_wire_sequence_from_array(sequence_source);
+    w_wire_field_store(wire, canonical_symbol("args"), sequence);
 
     WValue shared = w_array_new_inline(65, 2);
     w_as_array(shared)->slots[0] = wire;
@@ -205,6 +249,16 @@ static void test_core_graph_snapshot(void) {
         CHECK(w_string_content_equal(w_wire_field_load(first, field),
                                      w_string("original")) == W_TRUE,
               "restored canonical slab symbol addresses its WIRE field");
+        WValue restored_sequence = w_wire_field_load(first,
+                                                      canonical_symbol("args"));
+        CHECK(w_is_wire_sequence(restored_sequence) &&
+              w_wire_sequence_size(restored_sequence) == 2,
+              "compiler graph snapshot restores dense WIRE sequences");
+        CHECK(w_string_content_equal(w_wire_sequence_get(restored_sequence, 0),
+                                     w_string("left")) == W_TRUE &&
+              w_string_content_equal(w_wire_sequence_get(restored_sequence, 1),
+                                     w_string("right")) == W_TRUE,
+              "restored WIRE sequence preserves canonical element order");
     }
 
     FILE *corrupt = fopen(path, "wb");
@@ -226,6 +280,7 @@ int main(void) {
     test_reset();
     test_reuse_after_reset();
     test_wire_arena();
+    test_wire_sequence();
     test_core_graph_snapshot();
 
     if (failures) {

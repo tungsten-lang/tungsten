@@ -143,12 +143,13 @@ use target
           live[inst[:file_str_id]] = true
         if inst[:ivar_str_id] != nil
           live[inst[:ivar_str_id]] = true
-        cases = inst[:cases]
+        cases = wire_get(inst, :cases)
         if cases != nil
           ci = 0
-          while ci < cases.size()
-            if cases[ci][:string_id] != nil
-              live[cases[ci][:string_id]] = true
+          while ci < wire_sequence_size(cases)
+            case_item = wire_sequence_get(cases, ci)
+            if case_item[:string_id] != nil
+              live[case_item[:string_id]] = true
             ci += 1
         ii += 1
       bi += 1
@@ -190,12 +191,13 @@ use target
           inst[:file_str_id] = remap[inst[:file_str_id]]
         if inst[:ivar_str_id] != nil && remap[inst[:ivar_str_id]] != inst[:ivar_str_id]
           inst[:ivar_str_id] = remap[inst[:ivar_str_id]]
-        cases = inst[:cases]
+        cases = wire_get(inst, :cases)
         if cases != nil
           ci = 0
-          while ci < cases.size()
-            if cases[ci][:string_id] != nil && remap[cases[ci][:string_id]] != cases[ci][:string_id]
-              cases[ci][:string_id] = remap[cases[ci][:string_id]]
+          while ci < wire_sequence_size(cases)
+            case_item = wire_sequence_get(cases, ci)
+            if case_item[:string_id] != nil && remap[case_item[:string_id]] != case_item[:string_id]
+              case_item[:string_id] = remap[case_item[:string_id]]
             ci += 1
         ii += 1
       bi += 1

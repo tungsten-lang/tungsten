@@ -35,6 +35,31 @@ use wire_constructors
   raw_index = ccall_nobox("w_numeric_to_i64", index)
   ccall_rawargs("w_wire_field_value_at", instruction, raw_index)
 
+# Dense, variable-width instruction operands share the WIRE generation with
+# their parent records. nil remains nil; an already-packed sequence passes
+# through in the runtime helper. Ordinary Arrays are copied once into the
+# bump arena and can then be reclaimed by the compiler's ownership pass.
+-> wire_sequence(value)
+  if value == nil
+    return nil
+  ccall_rawargs("w_wire_sequence_from_array", value)
+
+-> wire_sequence_size(value)
+  if value == nil
+    return 0
+  ccall_nobox("w_wire_sequence_size", value)
+
+-> wire_sequence_get(value, index)
+  raw_index = ccall_nobox("w_numeric_to_i64", index)
+  ccall_rawargs("w_wire_sequence_get", value, raw_index)
+
+-> wire_sequence_set(value, index, item)
+  raw_index = ccall_nobox("w_numeric_to_i64", index)
+  ccall_rawargs("w_wire_sequence_set", value, raw_index, item)
+
+-> wire_sequence_field?(field)
+  field in (:arg_types :args :cases :fields :incoming :s)
+
 -> wire_instruction(instruction)
   if instruction == nil
     return nil
@@ -54,7 +79,10 @@ use wire_constructors
   i = 0
   while i < keys.size()
     key = keys[i]
-    ccall_nobox("w_wire_field_store_at", handle, i, key, instruction[key])
+    value = instruction[key]
+    if wire_sequence_field?(key)
+      value = wire_sequence(value)
+    ccall_nobox("w_wire_field_store_at", handle, i, key, value)
     i += 1
   handle
 
@@ -476,12 +504,13 @@ use wire_constructors
       if wire_get(inst, :else_label) != nil && redirect[wire_get(inst, :else_label)] != nil
         wire_set(inst, :else_label, redirect[wire_get(inst, :else_label)])
       # Phi incoming labels
-      if wire_get(inst, :incoming) != nil
+      incoming = wire_get(inst, :incoming)
+      if incoming != nil
         pi = 0
-        while pi < wire_get(inst, :incoming).size()
-          lbl = wire_get(inst, :incoming)[pi + 1]
+        while pi < wire_sequence_size(incoming)
+          lbl = wire_sequence_get(incoming, pi + 1)
           if redirect[lbl] != nil
-            wire_get(inst, :incoming)[pi + 1] = redirect[lbl]
+            wire_sequence_set(incoming, pi + 1, redirect[lbl])
           pi += 2
       ii += 1
     bi += 1
@@ -1007,8 +1036,8 @@ use wire_constructors
   if sarr != nil
     new_sarr = nil
     si = 0
-    while si < sarr.size()
-      sv = sarr[si]
+    while si < wire_sequence_size(sarr)
+      sv = wire_sequence_get(sarr, si)
       rep = subst[sv]
       if rep != nil
         if cloned == false
@@ -1018,14 +1047,14 @@ use wire_constructors
           new_sarr = []
           ci = 0
           while ci < si
-            new_sarr.push(sarr[ci])
+            new_sarr.push(wire_sequence_get(sarr, ci))
             ci += 1
         new_sarr.push(rep)
       elsif new_sarr != nil
         new_sarr.push(sv)
       si += 1
     if new_sarr != nil
-      result[:s] = new_sarr
+      wire_set(result, :s, wire_sequence(new_sarr))
   # Inline-asm builtin operands live in op-specific fields (outp/ap/bp/n/
   # ooff/aoff/boff/bsc/na/nb/vp/twp/ivp/hq — see calls.w's asm_* lowerings).
   # Gate the sweep on the op so the common path stays flat. Without this, a
@@ -1051,8 +1080,8 @@ use wire_constructors
   if args != nil
     new_args = nil
     ai = 0
-    while ai < args.size()
-      arg = args[ai]
+    while ai < wire_sequence_size(args)
+      arg = wire_sequence_get(args, ai)
       rep = subst[arg]
       if rep != nil
         if cloned == false
@@ -1062,14 +1091,14 @@ use wire_constructors
           new_args = []
           ci = 0
           while ci < ai
-            new_args.push(args[ci])
+            new_args.push(wire_sequence_get(args, ci))
             ci += 1
         new_args.push(rep)
       elsif new_args != nil
         new_args.push(arg)
       ai += 1
     if new_args != nil
-      result[:args] = new_args
+      wire_set(result, :args, wire_sequence(new_args))
   result
 
 # -- Pass 2: Dead store elimination --

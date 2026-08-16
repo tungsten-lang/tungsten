@@ -35,7 +35,7 @@ use runtime_types
 # node past 61 bytes), w_str_append (may realloc its receiver's buffer
 # into the result), w_hash_set / w_array_push (store the value).
 -> is_nonretaining_consumer(name)
-  name in ("w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "__w_streq_fast" "__w_streq2_fast" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count")
+  name in ("w_string_byte_length" "w_hash_get" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "__w_streq_fast" "__w_streq2_fast" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_string_index" "w_string_rindex" "w_string_count" "w_wire_sequence_from_array")
 
 # Mark temps that escape through this instruction.
 -> mark_escapes(inst, escaped)
@@ -50,8 +50,8 @@ use runtime_types
     args = wire_get(inst, :args)
     if args != nil
       i = 0
-      while i < args.size()
-        escaped[args[i]] = true
+      while i < wire_sequence_size(args)
+        escaped[wire_sequence_get(args, i)] = true
         i += 1
     return nil
 
@@ -62,8 +62,8 @@ use runtime_types
     args = wire_get(inst, :args)
     if args != nil
       i = 0
-      while i < args.size()
-        escaped[args[i]] = true
+      while i < wire_sequence_size(args)
+        escaped[wire_sequence_get(args, i)] = true
         i += 1
     return nil
 
@@ -115,8 +115,8 @@ use runtime_types
     args = wire_get(inst, :args)
     if args != nil
       i = 0
-      while i < args.size()
-        escaped[args[i]] = true
+      while i < wire_sequence_size(args)
+        escaped[wire_sequence_get(args, i)] = true
         i += 1
     return nil
 
@@ -161,8 +161,8 @@ use runtime_types
     args = wire_get(inst, :args)
     if args != nil
       i = 0
-      while i < args.size()
-        escaped[args[i]] = true
+      while i < wire_sequence_size(args)
+        escaped[wire_sequence_get(args, i)] = true
         i += 1
     return nil
 
@@ -206,8 +206,8 @@ use runtime_types
         if incoming != nil
           escaped[wire_get(inst, :temp)] = true
           pi = 0
-          while pi < incoming.size()
-            v = incoming[pi]
+          while pi < wire_sequence_size(incoming)
+            v = wire_sequence_get(incoming, pi)
             escaped[v] = true
             pi += 2
       else

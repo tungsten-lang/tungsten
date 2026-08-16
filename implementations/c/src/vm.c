@@ -29,6 +29,10 @@ WValue w_wire_field_value_at(WValue wire, int64_t index);
 WValue w_wire_field_store(WValue wire, WValue sym, WValue value);
 int64_t w_wire_kind_extern(WValue wire);
 int64_t w_is_wire_extern(WValue value);
+WValue w_wire_sequence_alloc(int64_t count);
+int64_t w_wire_sequence_size(WValue sequence);
+WValue w_wire_sequence_get(WValue sequence, int64_t index);
+WValue w_wire_sequence_set(WValue sequence, int64_t index, WValue value);
 int64_t w_wire_store_reset(int64_t reserved);
 int64_t w_wire_store_mark(void);
 WValue w_wire_clone(WValue wire);
@@ -2543,7 +2547,9 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         TcValue out;
         switch (tc_kind(receiver)) {
           case TC_VAL_WVALUE:
-            if (w_is_wire(receiver)) {
+            if (w_is_wire_sequence(receiver) && value_is_int(arg)) {
+              out = w_wire_sequence_get(receiver, value_as_int(arg));
+            } else if (w_is_wire(receiver)) {
               out = w_wire_field_load(receiver, arg);
               if (out == W_UNDEF) out = tc_box_nil();
             } else {
@@ -2650,6 +2656,10 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         TcValue receiver = tos;
         int64_t size = 0;
         switch (tc_kind(receiver)) {
+          case TC_VAL_WVALUE:
+            if (w_is_wire_sequence(receiver))
+              size = w_wire_sequence_size(receiver);
+            break;
           case TC_VAL_STRING: size = (int64_t)tc_str_len(receiver); break;
           case TC_VAL_ARRAY:  size = tc_as_array(receiver) ? (int64_t)tc_as_array(receiver)->size : 0; break;
           case TC_VAL_HASH:   size = tc_as_hash(receiver) ? (int64_t)tc_as_hash(receiver)->count : 0; break;
@@ -2689,7 +2699,9 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         TcValue out;
         switch (tc_kind(receiver)) {
           case TC_VAL_WVALUE:
-            if (w_is_wire(receiver)) {
+            if (w_is_wire_sequence(receiver) && value_is_int(arg)) {
+              out = w_wire_sequence_get(receiver, value_as_int(arg));
+            } else if (w_is_wire(receiver)) {
               out = w_wire_field_load(receiver, arg);
               if (out == W_UNDEF) out = tc_box_nil();
             } else {
@@ -2796,6 +2808,10 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         TcValue receiver = vm.locals[slot];
         int64_t size = 0;
         switch (tc_kind(receiver)) {
+          case TC_VAL_WVALUE:
+            if (w_is_wire_sequence(receiver))
+              size = w_wire_sequence_size(receiver);
+            break;
           case TC_VAL_STRING: size = (int64_t)tc_str_len(receiver); break;
           case TC_VAL_ARRAY:  size = tc_as_array(receiver) ? (int64_t)tc_as_array(receiver)->size : 0; break;
           case TC_VAL_HASH:   size = tc_as_hash(receiver) ? (int64_t)tc_as_hash(receiver)->count : 0; break;

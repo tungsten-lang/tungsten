@@ -394,6 +394,11 @@ _Static_assert(W_NODE_OFFSET_BITS + W_NODE_RESERVED_BITS + W_NODE_SCLASS_BITS
 #define W_WIRE_KIND_MASK        ((1ULL << W_WIRE_KIND_BITS) - 1)
 #define W_WIRE_OFFSET_BITS      29
 #define W_WIRE_OFFSET_MASK      ((1ULL << W_WIRE_OFFSET_BITS) - 1)
+/* Append-only compiler/lib/wire_schema.w id. This kind is not an
+ * instruction record: its arena payload is one header followed by a dense
+ * WValue sequence. Keeping it inside the WIRE handle family avoids spending
+ * a public NaN-box tag on compiler-internal variable-width operands. */
+#define W_WIRE_SEQUENCE_KIND    267
 
 static inline WValue w_box_node(int kind, int sclass, uint64_t off) {
     /* Full-tier slab node. Prefix bit (44) is implicitly 0. */
@@ -504,6 +509,9 @@ static inline int w_is_wire(WValue v)        {
     return (v & (0xFFFFE00000000000ULL | W_NODE_PREFIX_MASK | W_WIRE_MARKER_MASK)) ==
            (W_TAG_PACKED | ((uint64_t)W_PACKED_NODE << 45) |
             W_NODE_PREFIX_MASK | W_WIRE_MARKER_MASK);
+}
+static inline int w_is_wire_sequence(WValue v) {
+    return w_is_wire(v) && w_wire_kind(v) == W_WIRE_SEQUENCE_KIND;
 }
 static inline int w_is_node(WValue v)        {
     return (v & 0xFFFFE00000000000ULL) ==

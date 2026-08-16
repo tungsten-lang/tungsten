@@ -2,6 +2,7 @@
 # Takes a WIRE module (from lowering) and produces a complete .ll file.
 
 use runtime_types
+use wire
 use hashing
 # LLVM name transliteration (llvm_safe_name) — shared with lowering via
 # its own module so `use lib/emitter` STANDALONE (the emitter unit specs)
@@ -533,6 +534,13 @@ use naming
   out << declare_fn("w_wire_store_reset", "i64", "i64")
   out << declare_fn("w_wire_store_mark", "i64", "")
   out << declare_fn("w_wire_clone", wv, wv)
+  out << declare_fn("w_wire_sequence_from_array", wv, wv)
+  out << declare_fn_attrs("w_wire_sequence_size", "i64", wv,
+                          "nounwind willreturn memory(read)")
+  out << declare_fn_attrs("w_wire_sequence_get", wv, join_arg_types2(wv, "i64"),
+                          "nounwind willreturn memory(read)")
+  out << declare_fn_attrs("w_wire_sequence_set", wv, join_arg_types3(wv, "i64", wv),
+                          "nounwind willreturn memory(readwrite)")
   out << declare_fn("w_class_add_ivar", "i32", wv_ptr)
   out << declare_fn("w_class_add_ivar_wv", "i32", wv2)
 
@@ -1820,10 +1828,10 @@ function_emit_cache_state = {
 # method table contains the one-argument target. Native and unknown receivers
 # retain the established pointer-plus-count dispatch ABI.
 -> scalar_source_one_call?(inst)
-  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_get(inst, :args).size() == 1 && wire_get(inst, :scalar_source_argc1) == true
+  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_sequence_size(wire_get(inst, :args)) == 1 && wire_get(inst, :scalar_source_argc1) == true
 
 -> scalar_source_two_call?(inst)
-  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_get(inst, :args).size() == 2 && wire_get(inst, :scalar_source_argc2) == true
+  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_sequence_size(wire_get(inst, :args)) == 2 && wire_get(inst, :scalar_source_argc2) == true
 
 -> scalar_source_call?(inst)
   scalar_source_one_call?(inst) || scalar_source_two_call?(inst)
@@ -1958,7 +1966,7 @@ function_emit_cache_state = {
     runtime_fns = []
     argc = 0
     if wire_get(inst, :args) != nil
-      argc = wire_get(inst, :args).size()
+      argc = wire_sequence_size(wire_get(inst, :args))
     if argc == 0
       runtime_fns.push("w_method_call_cached_0")
     elsif scalar_source_one_call?(inst)
@@ -2385,14 +2393,12 @@ function_emit_cache_state = {
     return nil
 
   args = wire_get(inst, :args)
-  if args == nil
-    args = []
   declared_types = wire_get(inst, :arg_types)
   i = 0
-  while i < args.size()
+  while i < wire_sequence_size(args)
     arg_type = nil
-    if declared_types != nil && i < declared_types.size()
-      arg_type = declared_types[i]
+    if declared_types != nil && i < wire_sequence_size(declared_types)
+      arg_type = wire_sequence_get(declared_types, i)
     if arg_type == nil || arg_type == ""
       arg_type = "i64"
     arg_types.push(arg_type)
@@ -2531,7 +2537,7 @@ function_emit_cache_state = {
         if wire_kind(inst) == :call_direct_i64 && wire_get(inst, :name) != nil
           iname = wire_get(inst, :name)
           if !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
-            ccall_needed[iname] = wire_get(inst, :args).size()
+            ccall_needed[iname] = wire_sequence_size(wire_get(inst, :args))
         if wire_kind(inst) == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
           ccall_needed["__w_num_to_f64_fast"] = 1
         fns = runtime_fns_for_inst(inst, mod[:string_wvalues])
@@ -3440,7 +3446,7 @@ function_emit_cache_state = {
     while ji < blk[:instructions].size()
       inst = blk[:instructions][ji]
       if wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil
-        argc = wire_get(inst, :args).size()
+        argc = wire_sequence_size(wire_get(inst, :args))
         needs_scratch = argc > 0 && !scalar_source_call?(inst)
         if needs_scratch && argc > max_mcall_argc
           max_mcall_argc = argc
@@ -5025,7 +5031,7 @@ function_emit_cache_state = {
     kind = wire_get(inst, :kind)
     sc = wire_get(inst, :sc)
     fields = wire_get(inst, :fields)
-    nf = fields.size()
+    nf = wire_sequence_size(fields)
     lbr = "\["
     label_fast = "sai_" + t.slice(1, t.size() - 1) + "_fast"
     label_slow = "sai_" + t.slice(1, t.size() - 1) + "_slow"
@@ -5037,7 +5043,7 @@ function_emit_cache_state = {
     # block so the frozen temps dominate both the fast and slow stores.
     fi = 0
     while fi < nf
-      parts << t + ".fz" + fi.to_s() + " = call i64 @w_ast_freeze_if_array(i64 " + fields[fi] + ")\n  "
+      parts << t + ".fz" + fi.to_s() + " = call i64 @w_ast_freeze_if_array(i64 " + wire_sequence_get(fields, fi) + ")\n  "
       fi += 1
     parts << t + ".cursor_p = getelementptr inbounds { ptr, i32, i32 }, ptr @g_ast_store, i32 0, i32 1\n  "
     parts << t + ".cursor = load i32, ptr " + t + ".cursor_p, align 4\n  "
@@ -5104,9 +5110,10 @@ function_emit_cache_state = {
     # val.to_s()) without emitting an instruction.
     # Slab-AST intrinsic: decode the full-tier 8-bit kind or compact-tier
     # 5-bit kind according to prefix bit 44.
-    if wire_get(inst, :name) == "w_node_kind_extern" && wire_get(inst, :args).size() == 1
+    args = wire_get(inst, :args)
+    if wire_get(inst, :name) == "w_node_kind_extern" && wire_sequence_size(args) == 1
       t = wire_get(inst, :temp)
-      v = wire_get(inst, :args)[0]
+      v = wire_sequence_get(args, 0)
       parts = StringBuffer(260)
       parts << t + ".prefix_sh = lshr i64 " + v + ", 44\n  "
       parts << t + ".prefix = and i64 " + t + ".prefix_sh, 1\n  "
@@ -5120,18 +5127,18 @@ function_emit_cache_state = {
     # Slab-AST intrinsic: w_is_node_extern(v) → 1 if v is a W_PACKED_NODE
     # (W_TAG_PACKED with subtype 3), 0 otherwise. (v >> 45) == 0x7FFF3
     # exploits the contiguous tag+subtype layout: 0xFFFE << 3 | 3.
-    if wire_get(inst, :name) == "w_is_node_extern" && wire_get(inst, :args).size() == 1
+    if wire_get(inst, :name) == "w_is_node_extern" && wire_sequence_size(args) == 1
       t = wire_get(inst, :temp)
-      v = wire_get(inst, :args)[0]
+      v = wire_sequence_get(args, 0)
       parts = StringBuffer(180)
       parts << t + ".upper = lshr i64 " + v + ", 45\n  "
       parts << t + ".is_node = icmp eq i64 " + t + ".upper, 524275\n  "
       parts << t + " = zext i1 " + t + ".is_node to i64"
       return parts.to_s()
-    if wire_get(inst, :name) == "w_node_alloc" && wire_get(inst, :args).size() == 2
+    if wire_get(inst, :name) == "w_node_alloc" && wire_sequence_size(args) == 2
       t = wire_get(inst, :temp)
-      kind_in = wire_get(inst, :args)[0]
-      sc_in = wire_get(inst, :args)[1]
+      kind_in = wire_sequence_get(args, 0)
+      sc_in = wire_sequence_get(args, 1)
       parts = StringBuffer(240)
       # Defensive unbox: kind/sc here may carry the raw_int nanbox tag
       # (0xFFFA…) when they come from a runtime expression rather than a
@@ -5147,14 +5154,14 @@ function_emit_cache_state = {
       return parts.to_s()
     slab_intrinsic = false
     if wire_get(inst, :name) == "w_node_field_load" || wire_get(inst, :name) == "w_node_field_store"
-      if wire_get(inst, :args).size() >= 2
-        first_char = wire_get(inst, :args)[1][0]
+      if wire_sequence_size(args) >= 2
+        first_char = wire_sequence_get(args, 1)[0]
         if first_char != "%"
           slab_intrinsic = true
     if slab_intrinsic
       t = wire_get(inst, :temp)
-      n = wire_get(inst, :args)[0]
-      ivar_word = wire_get(inst, :args)[1].to_i().to_s()
+      n = wire_sequence_get(args, 0)
+      ivar_word = wire_sequence_get(args, 1).to_i().to_s()
       parts = StringBuffer(460)
       parts << t + ".off = and i64 " + n + ", 4294967295\n  "
       parts << t + ".full = add i64 " + t + ".off, " + ivar_word + "\n  "
@@ -5166,7 +5173,7 @@ function_emit_cache_state = {
       else
         # Freeze array values into the AST extra arena on the inline
         # store path too — mirrors the C-side w_node_field_store hook.
-        parts << "\n  " + t + ".fz = call i64 @w_ast_freeze_if_array(i64 " + wire_get(inst, :args)[2] + ")"
+        parts << "\n  " + t + ".fz = call i64 @w_ast_freeze_if_array(i64 " + wire_sequence_get(args, 2) + ")"
         parts << "\n  store i64 " + t + ".fz, ptr " + t + ".gep, align 8"
         parts << "\n  " + t + " = add i64 " + t + ".fz, 0"
       return parts.to_s()
@@ -5296,7 +5303,8 @@ function_emit_cache_state = {
   # return address is addressable via blockaddress(@fn, %cs.N.ret). Same
   # pattern the overflow-check ops use (see :add_i48_checked).
   when :call_method_i64
-    argc = wire_get(inst, :args).size()
+    args = wire_get(inst, :args)
+    argc = wire_sequence_size(args)
     ic_ptr = wire_get(inst, :temp) + ".ic"
     ic_id = wire_get(inst, :ic_id).to_s()
     ic_gep = ic_ptr + " = getelementptr inbounds \[24 x i8], ptr @.ic, i64 " + ic_id + "\n  "
@@ -5337,7 +5345,7 @@ function_emit_cache_state = {
       parts << t + ".dv = call i64 @" + wire_get(inst, :devirt_fn) + "(i64 " + wire_get(inst, :receiver)
       di = 0
       while di < argc
-        parts << ", i64 " + wire_get(inst, :args)[di]
+        parts << ", i64 " + wire_sequence_get(args, di)
         di += 1
       parts << ")\n  "
       parts << "br label %" + lbl + ".done\n"
@@ -5354,7 +5362,7 @@ function_emit_cache_state = {
       parts << t + ".init = call i64 @" + wire_get(inst, :construct_fn) + "(i64 " + t + ".dv"
       di = 0
       while di < argc
-        parts << ", i64 " + wire_get(inst, :args)[di]
+        parts << ", i64 " + wire_sequence_get(args, di)
         di += 1
       parts << ")\n  "
       parts << "br label %" + lbl + ".done\n"
@@ -5371,9 +5379,9 @@ function_emit_cache_state = {
     if argc == 0
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ic_arg + ")"
     elsif scalar_source_one_call?(inst)
-      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_get(inst, :args)[0] + ic_arg + ")"
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
     elsif scalar_source_two_call?(inst)
-      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_2(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_get(inst, :args)[0] + ", i64 " + wire_get(inst, :args)[1] + ic_arg + ")"
+      parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_2(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ic_arg + ")"
     else
       stack_arr = "%__mcall_args"
       i = 0
@@ -5383,7 +5391,7 @@ function_emit_cache_state = {
         else
           slot = wire_get(inst, :temp_args_val) + "." + i.to_s()
           parts << slot + " = getelementptr inbounds i64, ptr " + stack_arr + ", i32 " + i.to_s() + "\n  "
-        parts << "store i64 " + wire_get(inst, :args)[i] + ", ptr " + slot + ", align 8\n  "
+        parts << "store i64 " + wire_sequence_get(args, i) + ", ptr " + slot + ", align 8\n  "
         i += 1
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", ptr " + stack_arr + ", i32 " + argc.to_s() + ic_arg + ")"
     if wire_get(inst, :src_line) != nil
@@ -5435,11 +5443,11 @@ function_emit_cache_state = {
   when :switch_i64
     cases = wire_get(inst, :cases)
     is_symbol = wire_get(inst, :is_symbol)
-    out = StringBuffer(96 + cases.size() * 48)
+    out = StringBuffer(96 + wire_sequence_size(cases) * 48)
     out << "switch i64 " + wire_get(inst, :value) + ", label %" + wire_get(inst, :default_label) + " \[\n"
     i = 0
-    while i < cases.size()
-      c = cases[i]
+    while i < wire_sequence_size(cases)
+      c = wire_sequence_get(cases, i)
       # Case key resolution: cases with :string_id are medium-length
       # (6-61 byte) symbol or string arms whose slab WValue isn't
       # known until build_string_wvalues assigns the slot. Resolve
@@ -5519,9 +5527,9 @@ function_emit_cache_state = {
   when :memo_call0_i64
     wire_get(inst, :temp) + " = call i64 @__w_memo_call0_i64(ptr " + wire_get(inst, :table) + ", ptr @" + wire_get(inst, :fn_name) + ")"
   when :memo_call1_i64
-    wire_get(inst, :temp) + " = call i64 @__w_memo_call1_i64(ptr " + wire_get(inst, :table) + ", ptr @" + wire_get(inst, :fn_name) + ", i64 " + wire_get(inst, :args)[0] + ")"
+    wire_get(inst, :temp) + " = call i64 @__w_memo_call1_i64(ptr " + wire_get(inst, :table) + ", ptr @" + wire_get(inst, :fn_name) + ", i64 " + wire_sequence_get(wire_get(inst, :args), 0) + ")"
   when :memo_call2_i64
-    wire_get(inst, :temp) + " = call i64 @__w_memo_call2_i64(ptr " + wire_get(inst, :table) + ", ptr @" + wire_get(inst, :fn_name) + ", i64 " + wire_get(inst, :args)[0] + ", i64 " + wire_get(inst, :args)[1] + ")"
+    wire_get(inst, :temp) + " = call i64 @__w_memo_call2_i64(ptr " + wire_get(inst, :table) + ", ptr @" + wire_get(inst, :fn_name) + ", i64 " + wire_sequence_get(wire_get(inst, :args), 0) + ", i64 " + wire_sequence_get(wire_get(inst, :args), 1) + ")"
 
   # Classes
   when :class_new
@@ -5627,6 +5635,16 @@ function_emit_cache_state = {
     # Offsets locked by _Static_assert in runtime.h.
     t = wire_get(inst, :temp)
     s = wire_get(inst, :s)
+    s0 = wire_sequence_get(s, 0)
+    s1 = wire_sequence_get(s, 1)
+    s2 = wire_sequence_get(s, 2)
+    s3 = wire_sequence_get(s, 3)
+    s4 = wire_sequence_get(s, 4)
+    s5 = wire_sequence_get(s, 5)
+    s6 = wire_sequence_get(s, 6)
+    s7 = wire_sequence_get(s, 7)
+    s8 = wire_sequence_get(s, 8)
+    s9 = wire_sequence_get(s, 9)
     arr = wire_get(inst, :arr)
     idx = wire_get(inst, :idx)
     idx_raw = wire_get(inst, :idx_raw)
@@ -5637,45 +5655,45 @@ function_emit_cache_state = {
     if signed == nil
       signed = true
     parts = StringBuffer(700)
-    parts << s[0] + " = and i64 " + arr + ", 140737488355312\n  "   # unmask (W_ARRAY_PTR_MASK)
-    parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "      # struct ptr
-    parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots
-    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it, so NOT invariant. TBAA=header lets LICM hoist it when no realloc is in the loop.
-    parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "  # &start
-    parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4" + tbaa_header_suffix() + "\n  "  # start (i32) — re-read: shift/unshift move it. TBAA=header, same rationale.
-    parts << s[5] + " = sext i32 " + s[5] + ".raw32 to i64\n  "    # start (i64 for GEP arithmetic)
+    parts << s0 + " = and i64 " + arr + ", 140737488355312\n  "   # unmask (W_ARRAY_PTR_MASK)
+    parts << s1 + " = inttoptr i64 " + s0 + " to ptr\n  "      # struct ptr
+    parts << s2 + " = getelementptr i8, ptr " + s1 + ", i64 16\n  "  # &slots
+    parts << s3 + " = load ptr, ptr " + s2 + ", align 8" + tbaa_header_suffix() + "\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it, so NOT invariant. TBAA=header lets LICM hoist it when no realloc is in the loop.
+    parts << s4 + " = getelementptr i8, ptr " + s1 + ", i64 4\n  "  # &start
+    parts << s5 + ".raw32 = load i32, ptr " + s4 + ", align 4" + tbaa_header_suffix() + "\n  "  # start (i32) — re-read: shift/unshift move it. TBAA=header, same rationale.
+    parts << s5 + " = sext i32 " + s5 + ".raw32 to i64\n  "    # start (i64 for GEP arithmetic)
     if idx_raw == true
       # Raw index — use directly, fill unused scratch with dummy values
-      parts << s[6] + " = add i64 0, 0\n  "
-      parts << s[7] + " = add i64 0, 0\n  "
-      parts << s[8] + " = add i64 " + s[5] + ", " + idx + "\n  "
+      parts << s6 + " = add i64 0, 0\n  "
+      parts << s7 + " = add i64 0, 0\n  "
+      parts << s8 + " = add i64 " + s5 + ", " + idx + "\n  "
     else
-      parts << s[6] + " = shl i64 " + idx + ", 16\n  "
-      parts << s[7] + " = ashr i64 " + s[6] + ", 16\n  "
-      parts << s[8] + " = add i64 " + s[5] + ", " + s[7] + "\n  "
+      parts << s6 + " = shl i64 " + idx + ", 16\n  "
+      parts << s7 + " = ashr i64 " + s6 + ", 16\n  "
+      parts << s8 + " = add i64 " + s5 + ", " + s7 + "\n  "
     if bits == 64
-      parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + " = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix()
+      parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
+      parts << t + " = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix()
     elsif bits == 32
-      parts << s[9] + " = getelementptr i32, ptr " + s[3] + ", i64 " + s[8] + "\n  "
+      parts << s9 + " = getelementptr i32, ptr " + s3 + ", i64 " + s8 + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i32, ptr " + s[9] + ", align 4" + tbaa_elem_suffix() + "\n  "
+      parts << raw + " = load i32, ptr " + s9 + ", align 4" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i32 " + raw + " to i64"
       else
         parts << t + " = zext i32 " + raw + " to i64"
     elsif bits == 16
-      parts << s[9] + " = getelementptr i16, ptr " + s[3] + ", i64 " + s[8] + "\n  "
+      parts << s9 + " = getelementptr i16, ptr " + s3 + ", i64 " + s8 + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i16, ptr " + s[9] + ", align 2" + tbaa_elem_suffix() + "\n  "
+      parts << raw + " = load i16, ptr " + s9 + ", align 2" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i16 " + raw + " to i64"
       else
         parts << t + " = zext i16 " + raw + " to i64"
     elsif bits == 8
-      parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + s[8] + "\n  "
+      parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + s8 + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << raw + " = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i8 " + raw + " to i64"
       else
@@ -5688,11 +5706,11 @@ function_emit_cache_state = {
       shift = t + ".shift"
       shifted = t + ".shifted"
       nibble = t + ".nibble"
-      parts << byte_idx + " = lshr i64 " + s[8] + ", 1\n  "
-      parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << byte_idx + " = lshr i64 " + s8 + ", 1\n  "
+      parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + byte_idx + "\n  "
+      parts << raw8 + " = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
-      parts << slot + " = and i64 " + s[8] + ", 1\n  "
+      parts << slot + " = and i64 " + s8 + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
       parts << shifted + " = lshr i64 " + raw64 + ", " + shift + "\n  "
       parts << nibble + " = and i64 " + shifted + ", 15\n  "
@@ -5703,13 +5721,23 @@ function_emit_cache_state = {
       else
         parts << t + " = add i64 " + nibble + ", 0"
     else
-      parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + " = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix()
+      parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
+      parts << t + " = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix()
     parts.to_s()
   when :typed_array_set_inline
     # Inline typed array write: same i32-offset shift as get.
     t = wire_get(inst, :temp)
     s = wire_get(inst, :s)
+    s0 = wire_sequence_get(s, 0)
+    s1 = wire_sequence_get(s, 1)
+    s2 = wire_sequence_get(s, 2)
+    s3 = wire_sequence_get(s, 3)
+    s4 = wire_sequence_get(s, 4)
+    s5 = wire_sequence_get(s, 5)
+    s6 = wire_sequence_get(s, 6)
+    s7 = wire_sequence_get(s, 7)
+    s8 = wire_sequence_get(s, 8)
+    s9 = wire_sequence_get(s, 9)
     arr = wire_get(inst, :arr)
     idx = wire_get(inst, :idx)
     idx_raw = wire_get(inst, :idx_raw)
@@ -5718,39 +5746,39 @@ function_emit_cache_state = {
     if bits == nil
       bits = 64
     parts = StringBuffer(700)
-    parts << s[0] + " = and i64 " + arr + ", 140737488355312\n  "
-    parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
-    parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots (i32 demote: was 32)
-    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it. TBAA=header lets LICM hoist it when no realloc is in the loop.
-    parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "   # &start (i32 demote: was 8)
-    parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4" + tbaa_header_suffix() + "\n  "   # start (i32) — re-read: shift/unshift move it. TBAA=header, same rationale.
-    parts << s[5] + " = sext i32 " + s[5] + ".raw32 to i64\n  "
+    parts << s0 + " = and i64 " + arr + ", 140737488355312\n  "
+    parts << s1 + " = inttoptr i64 " + s0 + " to ptr\n  "
+    parts << s2 + " = getelementptr i8, ptr " + s1 + ", i64 16\n  "  # &slots (i32 demote: was 32)
+    parts << s3 + " = load ptr, ptr " + s2 + ", align 8" + tbaa_header_suffix() + "\n  "    # slots ptr — re-read each access: realloc (push/unshift past cap, clear) moves it. TBAA=header lets LICM hoist it when no realloc is in the loop.
+    parts << s4 + " = getelementptr i8, ptr " + s1 + ", i64 4\n  "   # &start (i32 demote: was 8)
+    parts << s5 + ".raw32 = load i32, ptr " + s4 + ", align 4" + tbaa_header_suffix() + "\n  "   # start (i32) — re-read: shift/unshift move it. TBAA=header, same rationale.
+    parts << s5 + " = sext i32 " + s5 + ".raw32 to i64\n  "
     if idx_raw == true
-      parts << s[6] + " = add i64 0, 0\n  "
-      parts << s[7] + " = add i64 " + idx + ", 0\n  "
-      parts << s[8] + " = add i64 " + s[5] + ", " + idx + "\n  "
+      parts << s6 + " = add i64 0, 0\n  "
+      parts << s7 + " = add i64 " + idx + ", 0\n  "
+      parts << s8 + " = add i64 " + s5 + ", " + idx + "\n  "
     else
-      parts << s[6] + " = shl i64 " + idx + ", 16\n  "
-      parts << s[7] + " = ashr i64 " + s[6] + ", 16\n  "
-      parts << s[8] + " = add i64 " + s[5] + ", " + s[7] + "\n  "
+      parts << s6 + " = shl i64 " + idx + ", 16\n  "
+      parts << s7 + " = ashr i64 " + s6 + ", 16\n  "
+      parts << s8 + " = add i64 " + s5 + ", " + s7 + "\n  "
     if bits == 64
-      parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
+      parts << "store i64 " + val + ", ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
     elsif bits == 32
-      parts << s[9] + " = getelementptr i32, ptr " + s[3] + ", i64 " + s[8] + "\n  "
+      parts << s9 + " = getelementptr i32, ptr " + s3 + ", i64 " + s8 + "\n  "
       tr = t + ".trunc"
       parts << tr + " = trunc i64 " + val + " to i32\n  "
-      parts << "store i32 " + tr + ", ptr " + s[9] + ", align 4" + tbaa_elem_suffix() + "\n  "
+      parts << "store i32 " + tr + ", ptr " + s9 + ", align 4" + tbaa_elem_suffix() + "\n  "
     elsif bits == 16
-      parts << s[9] + " = getelementptr i16, ptr " + s[3] + ", i64 " + s[8] + "\n  "
+      parts << s9 + " = getelementptr i16, ptr " + s3 + ", i64 " + s8 + "\n  "
       tr = t + ".trunc"
       parts << tr + " = trunc i64 " + val + " to i16\n  "
-      parts << "store i16 " + tr + ", ptr " + s[9] + ", align 2" + tbaa_elem_suffix() + "\n  "
+      parts << "store i16 " + tr + ", ptr " + s9 + ", align 2" + tbaa_elem_suffix() + "\n  "
     elsif bits == 8
-      parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + s[8] + "\n  "
+      parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + s8 + "\n  "
       tr = t + ".trunc"
       parts << tr + " = trunc i64 " + val + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i8 " + tr + ", ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
     elsif bits == 4
       byte_idx = t + ".byteidx"
       raw8 = t + ".raw8"
@@ -5764,11 +5792,11 @@ function_emit_cache_state = {
       shifted = t + ".shifted"
       merged = t + ".merged"
       tr = t + ".trunc"
-      parts << byte_idx + " = lshr i64 " + s[8] + ", 1\n  "
-      parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << byte_idx + " = lshr i64 " + s8 + ", 1\n  "
+      parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + byte_idx + "\n  "
+      parts << raw8 + " = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
-      parts << slot + " = and i64 " + s[8] + ", 1\n  "
+      parts << slot + " = and i64 " + s8 + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
       parts << mask + " = shl i64 15, " + shift + "\n  "
       parts << clear_mask + " = xor i64 " + mask + ", 255\n  "
@@ -5777,10 +5805,10 @@ function_emit_cache_state = {
       parts << shifted + " = shl i64 " + nibble + ", " + shift + "\n  "
       parts << merged + " = or i64 " + cleared + ", " + shifted + "\n  "
       parts << tr + " = trunc i64 " + merged + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i8 " + tr + ", ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
     else
-      parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
+      parts << "store i64 " + val + ", ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
     # No size-grow update: T[N] / Array.new constructors set size == cap
     # at allocation, and the inline `[]=` path is only emitted when the
     # store stays within that preallocated range.
@@ -5794,6 +5822,16 @@ function_emit_cache_state = {
   when :typed_array_compound_op_inline
     t = wire_get(inst, :temp)
     s = wire_get(inst, :s)
+    s0 = wire_sequence_get(s, 0)
+    s1 = wire_sequence_get(s, 1)
+    s2 = wire_sequence_get(s, 2)
+    s3 = wire_sequence_get(s, 3)
+    s4 = wire_sequence_get(s, 4)
+    s5 = wire_sequence_get(s, 5)
+    s6 = wire_sequence_get(s, 6)
+    s7 = wire_sequence_get(s, 7)
+    s8 = wire_sequence_get(s, 8)
+    s9 = wire_sequence_get(s, 9)
     arr = wire_get(inst, :arr)
     idx = wire_get(inst, :idx)
     idx_raw = wire_get(inst, :idx_raw)
@@ -5827,62 +5865,62 @@ function_emit_cache_state = {
       else
         llvm_op = "lshr"
     parts = StringBuffer(700)
-    parts << s[0] + " = and i64 " + arr + ", 140737488355312\n  "
-    parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
-    parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 16\n  "
-    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "
-    parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "
-    parts << s[5] + ".raw32 = load i32, ptr " + s[4] + ", align 4" + tbaa_header_suffix() + "\n  "
-    parts << s[5] + " = sext i32 " + s[5] + ".raw32 to i64\n  "
+    parts << s0 + " = and i64 " + arr + ", 140737488355312\n  "
+    parts << s1 + " = inttoptr i64 " + s0 + " to ptr\n  "
+    parts << s2 + " = getelementptr i8, ptr " + s1 + ", i64 16\n  "
+    parts << s3 + " = load ptr, ptr " + s2 + ", align 8" + tbaa_header_suffix() + "\n  "
+    parts << s4 + " = getelementptr i8, ptr " + s1 + ", i64 4\n  "
+    parts << s5 + ".raw32 = load i32, ptr " + s4 + ", align 4" + tbaa_header_suffix() + "\n  "
+    parts << s5 + " = sext i32 " + s5 + ".raw32 to i64\n  "
     if idx_raw == true
-      parts << s[6] + " = add i64 0, 0\n  "
-      parts << s[7] + " = add i64 0, 0\n  "
-      parts << s[8] + " = add i64 " + s[5] + ", " + idx + "\n  "
+      parts << s6 + " = add i64 0, 0\n  "
+      parts << s7 + " = add i64 0, 0\n  "
+      parts << s8 + " = add i64 " + s5 + ", " + idx + "\n  "
     else
-      parts << s[6] + " = shl i64 " + idx + ", 16\n  "
-      parts << s[7] + " = ashr i64 " + s[6] + ", 16\n  "
-      parts << s[8] + " = add i64 " + s[5] + ", " + s[7] + "\n  "
+      parts << s6 + " = shl i64 " + idx + ", 16\n  "
+      parts << s7 + " = ashr i64 " + s6 + ", 16\n  "
+      parts << s8 + " = add i64 " + s5 + ", " + s7 + "\n  "
     if bits == 64
-      parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
+      parts << t + ".loaded = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
       parts << t + ".res = " + llvm_op + " i64 " + t + ".loaded, " + val + "\n  "
-      parts << "store i64 " + t + ".res, ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << "store i64 " + t + ".res, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
       parts << t + " = add i64 " + t + ".res, 0"
     elsif bits == 32
-      parts << s[9] + " = getelementptr i32, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i32, ptr " + s[9] + ", align 4" + tbaa_elem_suffix() + "\n  "
+      parts << s9 + " = getelementptr i32, ptr " + s3 + ", i64 " + s8 + "\n  "
+      parts << t + ".loaded = load i32, ptr " + s9 + ", align 4" + tbaa_elem_suffix() + "\n  "
       parts << t + ".v32 = trunc i64 " + val + " to i32\n  "
       parts << t + ".res32 = " + llvm_op + " i32 " + t + ".loaded, " + t + ".v32\n  "
-      parts << "store i32 " + t + ".res32, ptr " + s[9] + ", align 4" + tbaa_elem_suffix() + "\n  "
+      parts << "store i32 " + t + ".res32, ptr " + s9 + ", align 4" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i32 " + t + ".res32 to i64"
       else
         parts << t + " = zext i32 " + t + ".res32 to i64"
     elsif bits == 16
-      parts << s[9] + " = getelementptr i16, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i16, ptr " + s[9] + ", align 2" + tbaa_elem_suffix() + "\n  "
+      parts << s9 + " = getelementptr i16, ptr " + s3 + ", i64 " + s8 + "\n  "
+      parts << t + ".loaded = load i16, ptr " + s9 + ", align 2" + tbaa_elem_suffix() + "\n  "
       parts << t + ".v16 = trunc i64 " + val + " to i16\n  "
       parts << t + ".res16 = " + llvm_op + " i16 " + t + ".loaded, " + t + ".v16\n  "
-      parts << "store i16 " + t + ".res16, ptr " + s[9] + ", align 2" + tbaa_elem_suffix() + "\n  "
+      parts << "store i16 " + t + ".res16, ptr " + s9 + ", align 2" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i16 " + t + ".res16 to i64"
       else
         parts << t + " = zext i16 " + t + ".res16 to i64"
     elsif bits == 8
-      parts << s[9] + " = getelementptr i8, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + s8 + "\n  "
+      parts << t + ".loaded = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << t + ".v8 = trunc i64 " + val + " to i8\n  "
       parts << t + ".res8 = " + llvm_op + " i8 " + t + ".loaded, " + t + ".v8\n  "
-      parts << "store i8 " + t + ".res8, ptr " + s[9] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i8 " + t + ".res8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i8 " + t + ".res8 to i64"
       else
         parts << t + " = zext i8 " + t + ".res8 to i64"
     else
-      parts << s[9] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[8] + "\n  "
-      parts << t + ".loaded = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
+      parts << t + ".loaded = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
       parts << t + ".res = " + llvm_op + " i64 " + t + ".loaded, " + val + "\n  "
-      parts << "store i64 " + t + ".res, ptr " + s[9] + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << "store i64 " + t + ".res, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
       parts << t + " = add i64 " + t + ".res, 0"
     parts.to_s()
 
@@ -5893,6 +5931,14 @@ function_emit_cache_state = {
   when :big_array_get_inline
     t = wire_get(inst, :temp)
     s = wire_get(inst, :s)
+    s0 = wire_sequence_get(s, 0)
+    s1 = wire_sequence_get(s, 1)
+    s2 = wire_sequence_get(s, 2)
+    s3 = wire_sequence_get(s, 3)
+    s4 = wire_sequence_get(s, 4)
+    s5 = wire_sequence_get(s, 5)
+    s6 = wire_sequence_get(s, 6)
+    s7 = wire_sequence_get(s, 7)
     arr = wire_get(inst, :arr)
     idx = wire_get(inst, :idx)
     idx_raw = wire_get(inst, :idx_raw)
@@ -5903,41 +5949,41 @@ function_emit_cache_state = {
     if signed == nil
       signed = true
     parts = StringBuffer(700)
-    parts << s[0] + " = and i64 " + arr + ", -16\n  "                # unmask
-    parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "       # WBigArray*
-    parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 32\n  "
-    parts << s[3] + " = load ptr, ptr " + s[2] + ", align 8" + tbaa_header_suffix() + "\n  "     # slots
-    parts << s[4] + " = getelementptr i8, ptr " + s[1] + ", i64 8\n  "
-    parts << s[5] + " = load i64, ptr " + s[4] + ", align 8" + tbaa_header_suffix() + "\n  "     # start
+    parts << s0 + " = and i64 " + arr + ", -16\n  "                # unmask
+    parts << s1 + " = inttoptr i64 " + s0 + " to ptr\n  "       # WBigArray*
+    parts << s2 + " = getelementptr i8, ptr " + s1 + ", i64 32\n  "
+    parts << s3 + " = load ptr, ptr " + s2 + ", align 8" + tbaa_header_suffix() + "\n  "     # slots
+    parts << s4 + " = getelementptr i8, ptr " + s1 + ", i64 8\n  "
+    parts << s5 + " = load i64, ptr " + s4 + ", align 8" + tbaa_header_suffix() + "\n  "     # start
     if idx_raw == true
-      parts << s[6] + " = add i64 " + s[5] + ", " + idx + "\n  "
+      parts << s6 + " = add i64 " + s5 + ", " + idx + "\n  "
     else
-      parts << s[6] + ".sl = shl i64 " + idx + ", 16\n  "
-      parts << s[6] + ".as = ashr i64 " + s[6] + ".sl, 16\n  "
-      parts << s[6] + " = add i64 " + s[5] + ", " + s[6] + ".as\n  "
+      parts << s6 + ".sl = shl i64 " + idx + ", 16\n  "
+      parts << s6 + ".as = ashr i64 " + s6 + ".sl, 16\n  "
+      parts << s6 + " = add i64 " + s5 + ", " + s6 + ".as\n  "
     if bits == 64
-      parts << s[7] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[6] + "\n  "
-      parts << t + " = load i64, ptr " + s[7] + ", align 8" + tbaa_elem_suffix()
+      parts << s7 + " = getelementptr i64, ptr " + s3 + ", i64 " + s6 + "\n  "
+      parts << t + " = load i64, ptr " + s7 + ", align 8" + tbaa_elem_suffix()
     elsif bits == 32
-      parts << s[7] + " = getelementptr i32, ptr " + s[3] + ", i64 " + s[6] + "\n  "
+      parts << s7 + " = getelementptr i32, ptr " + s3 + ", i64 " + s6 + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i32, ptr " + s[7] + ", align 4" + tbaa_elem_suffix() + "\n  "
+      parts << raw + " = load i32, ptr " + s7 + ", align 4" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i32 " + raw + " to i64"
       else
         parts << t + " = zext i32 " + raw + " to i64"
     elsif bits == 16
-      parts << s[7] + " = getelementptr i16, ptr " + s[3] + ", i64 " + s[6] + "\n  "
+      parts << s7 + " = getelementptr i16, ptr " + s3 + ", i64 " + s6 + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i16, ptr " + s[7] + ", align 2" + tbaa_elem_suffix() + "\n  "
+      parts << raw + " = load i16, ptr " + s7 + ", align 2" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i16 " + raw + " to i64"
       else
         parts << t + " = zext i16 " + raw + " to i64"
     elsif bits == 8
-      parts << s[7] + " = getelementptr i8, ptr " + s[3] + ", i64 " + s[6] + "\n  "
+      parts << s7 + " = getelementptr i8, ptr " + s3 + ", i64 " + s6 + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i8, ptr " + s[7] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << raw + " = load i8, ptr " + s7 + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i8 " + raw + " to i64"
       else
@@ -5950,11 +5996,11 @@ function_emit_cache_state = {
       shift = t + ".shift"
       shifted = t + ".shifted"
       nibble = t + ".nibble"
-      parts << byte_idx + " = lshr i64 " + s[6] + ", 1\n  "
-      parts << s[7] + " = getelementptr i8, ptr " + s[3] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[7] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << byte_idx + " = lshr i64 " + s6 + ", 1\n  "
+      parts << s7 + " = getelementptr i8, ptr " + s3 + ", i64 " + byte_idx + "\n  "
+      parts << raw8 + " = load i8, ptr " + s7 + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
-      parts << slot + " = and i64 " + s[6] + ", 1\n  "
+      parts << slot + " = and i64 " + s6 + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
       parts << shifted + " = lshr i64 " + raw64 + ", " + shift + "\n  "
       parts << nibble + " = and i64 " + shifted + ", 15\n  "
@@ -5965,8 +6011,8 @@ function_emit_cache_state = {
       else
         parts << t + " = add i64 " + nibble + ", 0"
     else
-      parts << s[7] + " = getelementptr i64, ptr " + s[3] + ", i64 " + s[6] + "\n  "
-      parts << t + " = load i64, ptr " + s[7] + ", align 8" + tbaa_elem_suffix()
+      parts << s7 + " = getelementptr i64, ptr " + s3 + ", i64 " + s6 + "\n  "
+      parts << t + " = load i64, ptr " + s7 + ", align 8" + tbaa_elem_suffix()
     parts.to_s()
 
   # SmallArray inline read. Layout differs
@@ -5978,6 +6024,11 @@ function_emit_cache_state = {
   when :small_array_get_inline
     t = wire_get(inst, :temp)
     s = wire_get(inst, :s)
+    s0 = wire_sequence_get(s, 0)
+    s1 = wire_sequence_get(s, 1)
+    s2 = wire_sequence_get(s, 2)
+    s3 = wire_sequence_get(s, 3)
+    s4 = wire_sequence_get(s, 4)
     arr = wire_get(inst, :arr)
     idx = wire_get(inst, :idx)
     idx_raw = wire_get(inst, :idx_raw)
@@ -6007,36 +6058,36 @@ function_emit_cache_state = {
       # box to unmask. The offset-0 GEP just rebinds arr as the slots base so
       # the per-width element GEPs below are unchanged. Keeping arr a raw ptr
       # (never ptrtoint'd) is what lets LLVM SROA promote the alloca.
-      parts << s[2] + " = getelementptr i8, ptr " + arr + ", i64 0\n  "
+      parts << s2 + " = getelementptr i8, ptr " + arr + ", i64 0\n  "
     else
-      parts << s[0] + " = and i64 " + arr + ", -16\n  "                  # unmask
-      parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "          # struct ptr
-      parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 2\n  " # &slots[0]
+      parts << s0 + " = and i64 " + arr + ", -16\n  "                  # unmask
+      parts << s1 + " = inttoptr i64 " + s0 + " to ptr\n  "          # struct ptr
+      parts << s2 + " = getelementptr i8, ptr " + s1 + ", i64 2\n  " # &slots[0]
     if idx_raw == true
-      parts << s[3] + " = add i64 " + idx + ", 0\n  "                  # raw index (i64)
+      parts << s3 + " = add i64 " + idx + ", 0\n  "                  # raw index (i64)
     else
-      parts << s[3] + ".sl = shl i64 " + idx + ", 16\n  "
-      parts << s[3] + " = ashr i64 " + s[3] + ".sl, 16\n  "            # unbox → i64
+      parts << s3 + ".sl = shl i64 " + idx + ", 16\n  "
+      parts << s3 + " = ashr i64 " + s3 + ".sl, 16\n  "            # unbox → i64
     if bits == 64
-      parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + " = load i64, ptr " + s[4] + ", " + ealign + tbaa_elem_suffix()
+      parts << s4 + " = getelementptr i64, ptr " + s2 + ", i64 " + s3 + "\n  "
+      parts << t + " = load i64, ptr " + s4 + ", " + ealign + tbaa_elem_suffix()
     elsif bits == 32
-      parts << s[4] + " = getelementptr i32, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + ".raw = load i32, ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
+      parts << s4 + " = getelementptr i32, ptr " + s2 + ", i64 " + s3 + "\n  "
+      parts << t + ".raw = load i32, ptr " + s4 + ", " + ealign + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i32 " + t + ".raw to i64"
       else
         parts << t + " = zext i32 " + t + ".raw to i64"
     elsif bits == 16
-      parts << s[4] + " = getelementptr i16, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + ".raw = load i16, ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
+      parts << s4 + " = getelementptr i16, ptr " + s2 + ", i64 " + s3 + "\n  "
+      parts << t + ".raw = load i16, ptr " + s4 + ", " + ealign + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i16 " + t + ".raw to i64"
       else
         parts << t + " = zext i16 " + t + ".raw to i64"
     elsif bits == 8
-      parts << s[4] + " = getelementptr i8, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + ".raw = load i8, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << s4 + " = getelementptr i8, ptr " + s2 + ", i64 " + s3 + "\n  "
+      parts << t + ".raw = load i8, ptr " + s4 + ", align 1" + tbaa_elem_suffix() + "\n  "
       if signed == true
         parts << t + " = sext i8 " + t + ".raw to i64"
       else
@@ -6050,11 +6101,11 @@ function_emit_cache_state = {
       shift = t + ".shift"
       shifted = t + ".shifted"
       nibble = t + ".nibble"
-      parts << byte_idx + " = lshr i64 " + s[3] + ", 1\n  "
-      parts << s[4] + " = getelementptr i8, ptr " + s[2] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << byte_idx + " = lshr i64 " + s3 + ", 1\n  "
+      parts << s4 + " = getelementptr i8, ptr " + s2 + ", i64 " + byte_idx + "\n  "
+      parts << raw8 + " = load i8, ptr " + s4 + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
-      parts << slot + " = and i64 " + s[3] + ", 1\n  "
+      parts << slot + " = and i64 " + s3 + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
       parts << shifted + " = lshr i64 " + raw64 + ", " + shift + "\n  "
       parts << nibble + " = and i64 " + shifted + ", 15\n  "
@@ -6065,8 +6116,8 @@ function_emit_cache_state = {
       else
         parts << t + " = add i64 " + nibble + ", 0"
     else
-      parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << t + " = load i64, ptr " + s[4] + ", " + ealign + tbaa_elem_suffix()
+      parts << s4 + " = getelementptr i64, ptr " + s2 + ", i64 " + s3 + "\n  "
+      parts << t + " = load i64, ptr " + s4 + ", " + ealign + tbaa_elem_suffix()
     parts.to_s()
 
   # SmallArray inline write — same layout shortcuts as get.
@@ -6076,6 +6127,11 @@ function_emit_cache_state = {
   when :small_array_set_inline
     t = wire_get(inst, :temp)
     s = wire_get(inst, :s)
+    s0 = wire_sequence_get(s, 0)
+    s1 = wire_sequence_get(s, 1)
+    s2 = wire_sequence_get(s, 2)
+    s3 = wire_sequence_get(s, 3)
+    s4 = wire_sequence_get(s, 4)
     arr = wire_get(inst, :arr)
     idx = wire_get(inst, :idx)
     idx_raw = wire_get(inst, :idx_raw)
@@ -6097,34 +6153,34 @@ function_emit_cache_state = {
     if wire_get(inst, :headerless) == true
       # Headerless stack SmallArray write: arr is the raw alloca ptr, slots at
       # offset 0, no unmask. See :small_array_get_inline for the rationale.
-      parts << s[2] + " = getelementptr i8, ptr " + arr + ", i64 0\n  "
+      parts << s2 + " = getelementptr i8, ptr " + arr + ", i64 0\n  "
     else
-      parts << s[0] + " = and i64 " + arr + ", -16\n  "
-      parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "
-      parts << s[2] + " = getelementptr i8, ptr " + s[1] + ", i64 2\n  "
+      parts << s0 + " = and i64 " + arr + ", -16\n  "
+      parts << s1 + " = inttoptr i64 " + s0 + " to ptr\n  "
+      parts << s2 + " = getelementptr i8, ptr " + s1 + ", i64 2\n  "
     if idx_raw == true
-      parts << s[3] + " = add i64 " + idx + ", 0\n  "
+      parts << s3 + " = add i64 " + idx + ", 0\n  "
     else
-      parts << s[3] + ".sl = shl i64 " + idx + ", 16\n  "
-      parts << s[3] + " = ashr i64 " + s[3] + ".sl, 16\n  "
+      parts << s3 + ".sl = shl i64 " + idx + ", 16\n  "
+      parts << s3 + " = ashr i64 " + s3 + ".sl, 16\n  "
     if bits == 64
-      parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[3] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
+      parts << s4 + " = getelementptr i64, ptr " + s2 + ", i64 " + s3 + "\n  "
+      parts << "store i64 " + val + ", ptr " + s4 + ", " + ealign + tbaa_elem_suffix() + "\n  "
     elsif bits == 32
       tr = t + ".tr"
-      parts << s[4] + " = getelementptr i32, ptr " + s[2] + ", i64 " + s[3] + "\n  "
+      parts << s4 + " = getelementptr i32, ptr " + s2 + ", i64 " + s3 + "\n  "
       parts << tr + " = trunc i64 " + val + " to i32\n  "
-      parts << "store i32 " + tr + ", ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
+      parts << "store i32 " + tr + ", ptr " + s4 + ", " + ealign + tbaa_elem_suffix() + "\n  "
     elsif bits == 16
       tr = t + ".tr"
-      parts << s[4] + " = getelementptr i16, ptr " + s[2] + ", i64 " + s[3] + "\n  "
+      parts << s4 + " = getelementptr i16, ptr " + s2 + ", i64 " + s3 + "\n  "
       parts << tr + " = trunc i64 " + val + " to i16\n  "
-      parts << "store i16 " + tr + ", ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
+      parts << "store i16 " + tr + ", ptr " + s4 + ", " + ealign + tbaa_elem_suffix() + "\n  "
     elsif bits == 8
       tr = t + ".tr"
-      parts << s[4] + " = getelementptr i8, ptr " + s[2] + ", i64 " + s[3] + "\n  "
+      parts << s4 + " = getelementptr i8, ptr " + s2 + ", i64 " + s3 + "\n  "
       parts << tr + " = trunc i64 " + val + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i8 " + tr + ", ptr " + s4 + ", align 1" + tbaa_elem_suffix() + "\n  "
     elsif bits == 4
       # 4-bit pack: read-modify-write of the nibble at slot bit 0/1.
       byte_idx = t + ".byteidx"
@@ -6139,11 +6195,11 @@ function_emit_cache_state = {
       shifted = t + ".shifted"
       merged = t + ".merged"
       tr = t + ".tr"
-      parts << byte_idx + " = lshr i64 " + s[3] + ", 1\n  "
-      parts << s[4] + " = getelementptr i8, ptr " + s[2] + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << byte_idx + " = lshr i64 " + s3 + ", 1\n  "
+      parts << s4 + " = getelementptr i8, ptr " + s2 + ", i64 " + byte_idx + "\n  "
+      parts << raw8 + " = load i8, ptr " + s4 + ", align 1" + tbaa_elem_suffix() + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
-      parts << slot + " = and i64 " + s[3] + ", 1\n  "
+      parts << slot + " = and i64 " + s3 + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
       parts << mask + " = shl i64 15, " + shift + "\n  "
       parts << clear_mask + " = xor i64 " + mask + ", 255\n  "
@@ -6152,10 +6208,10 @@ function_emit_cache_state = {
       parts << shifted + " = shl i64 " + nibble + ", " + shift + "\n  "
       parts << merged + " = or i64 " + cleared + ", " + shifted + "\n  "
       parts << tr + " = trunc i64 " + merged + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s[4] + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i8 " + tr + ", ptr " + s4 + ", align 1" + tbaa_elem_suffix() + "\n  "
     else
-      parts << s[4] + " = getelementptr i64, ptr " + s[2] + ", i8 " + s[3] + "\n  "
-      parts << "store i64 " + val + ", ptr " + s[4] + ", " + ealign + tbaa_elem_suffix() + "\n  "
+      parts << s4 + " = getelementptr i64, ptr " + s2 + ", i8 " + s3 + "\n  "
+      parts << "store i64 " + val + ", ptr " + s4 + ", " + ealign + tbaa_elem_suffix() + "\n  "
     # Define result so SSA refs to t are valid.
     parts << t + " = add i64 " + val + ", 0"
     parts.to_s()
@@ -6165,21 +6221,31 @@ function_emit_cache_state = {
     # Offsets locked by _Static_assert in runtime.h (items renamed to slots).
     t = wire_get(inst, :temp)
     s = wire_get(inst, :s)
+    s0 = wire_sequence_get(s, 0)
+    s1 = wire_sequence_get(s, 1)
+    s2 = wire_sequence_get(s, 2)
+    s3 = wire_sequence_get(s, 3)
+    s4 = wire_sequence_get(s, 4)
+    s5 = wire_sequence_get(s, 5)
+    s6 = wire_sequence_get(s, 6)
+    s7 = wire_sequence_get(s, 7)
+    s8 = wire_sequence_get(s, 8)
+    s9 = wire_sequence_get(s, 9)
     arr = wire_get(inst, :arr)
     idx = wire_get(inst, :idx)
     parts = StringBuffer(500)
-    parts << s[0] + " = and i64 " + arr + ", 140737488355312\n  "   # unmask (W_ARRAY_PTR_MASK)
-    parts << s[1] + " = inttoptr i64 " + s[0] + " to ptr\n  "      # struct ptr
-    parts << s[2] + ".field = getelementptr i8, ptr " + s[1] + ", i64 16\n  "  # &slots
-    parts << s[2] + " = load ptr, ptr " + s[2] + ".field, align 8" + tbaa_header_suffix() + "\n  "   # slots ptr — TBAA=header lets LICM hoist when no realloc call is in the loop
-    parts << s[3] + " = getelementptr i8, ptr " + s[1] + ", i64 4\n  "  # &start
-    parts << s[4] + " = load i32, ptr " + s[3] + ", align 4" + tbaa_header_suffix() + "\n  "   # start (i32)
-    parts << s[5] + " = sext i32 " + s[4] + " to i64\n  "          # start (i64)
-    parts << s[6] + " = shl i64 " + idx + ", 16\n  "                # unbox idx
-    parts << s[7] + " = ashr i64 " + s[6] + ", 16\n  "              # sign-extend
-    parts << s[8] + " = add i64 " + s[5] + ", " + s[7] + "\n  "   # effective idx
-    parts << s[9] + " = getelementptr i64, ptr " + s[2] + ", i64 " + s[8] + "\n  "  # elem ptr
-    parts << t + " = load i64, ptr " + s[9] + ", align 8" + tbaa_elem_suffix()           # load element
+    parts << s0 + " = and i64 " + arr + ", 140737488355312\n  "   # unmask (W_ARRAY_PTR_MASK)
+    parts << s1 + " = inttoptr i64 " + s0 + " to ptr\n  "      # struct ptr
+    parts << s2 + ".field = getelementptr i8, ptr " + s1 + ", i64 16\n  "  # &slots
+    parts << s2 + " = load ptr, ptr " + s2 + ".field, align 8" + tbaa_header_suffix() + "\n  "   # slots ptr — TBAA=header lets LICM hoist when no realloc call is in the loop
+    parts << s3 + " = getelementptr i8, ptr " + s1 + ", i64 4\n  "  # &start
+    parts << s4 + " = load i32, ptr " + s3 + ", align 4" + tbaa_header_suffix() + "\n  "   # start (i32)
+    parts << s5 + " = sext i32 " + s4 + " to i64\n  "          # start (i64)
+    parts << s6 + " = shl i64 " + idx + ", 16\n  "                # unbox idx
+    parts << s7 + " = ashr i64 " + s6 + ", 16\n  "              # sign-extend
+    parts << s8 + " = add i64 " + s5 + ", " + s7 + "\n  "   # effective idx
+    parts << s9 + " = getelementptr i64, ptr " + s2 + ", i64 " + s8 + "\n  "  # elem ptr
+    parts << t + " = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix()           # load element
     parts.to_s()
   when :builtin_class_init
     swv = nil
@@ -6316,14 +6382,14 @@ function_emit_cache_state = {
     lbr = "\["
     rbr = "]"
     incoming = wire_get(inst, :incoming)
-    parts = StringBuffer(incoming.size() * 32 + 24)
+    parts = StringBuffer(wire_sequence_size(incoming) * 32 + 24)
     parts << wire_get(inst, :temp) + " = phi i64 "
     ii = 0
-    while ii < incoming.size()
+    while ii < wire_sequence_size(incoming)
       if ii > 0
         parts << ", "
-      label = redirect_phi_label(incoming[ii + 1], phi_label_redirects)
-      parts << lbr + " " + incoming[ii] + ", %" + label + " " + rbr
+      label = redirect_phi_label(wire_sequence_get(incoming, ii + 1), phi_label_redirects)
+      parts << lbr + " " + wire_sequence_get(incoming, ii) + ", %" + label + " " + rbr
       ii += 2
     parts.to_s()
 
@@ -6343,22 +6409,22 @@ function_emit_cache_state = {
 -> render_call_args(args, arg_types = nil)
   parts = []
   i = 0
-  while i < args.size()
+  while i < wire_sequence_size(args)
     arg_type = "i64"
-    if arg_types != nil && arg_types[i] != nil
-      arg_type = arg_types[i]
-    parts.push(arg_type + " " + args[i])
+    if arg_types != nil && wire_sequence_get(arg_types, i) != nil
+      arg_type = wire_sequence_get(arg_types, i)
+    parts.push(arg_type + " " + wire_sequence_get(args, i))
     i += 1
   parts.join(", ")
 
 -> render_method_call_args_setup(inst)
   args = wire_get(inst, :args)
-  if args.size() == 0
+  if wire_sequence_size(args) == 0
     return wire_get(inst, :temp_args_val) + " = call i64 @w_array_new_empty()\n  "
-  out = StringBuffer(args.size() * 48 + 32)
+  out = StringBuffer(wire_sequence_size(args) * 48 + 32)
   out << wire_get(inst, :temp_args_val) + " = call i64 @w_array_new_empty()\n  "
   i = 0
-  while i < args.size()
-    out << "call i64 @w_array_push(i64 " + wire_get(inst, :temp_args_val) + ", i64 " + args[i] + ")\n  "
+  while i < wire_sequence_size(args)
+    out << "call i64 @w_array_push(i64 " + wire_get(inst, :temp_args_val) + ", i64 " + wire_sequence_get(args, i) + ")\n  "
     i += 1
   out.to_s()

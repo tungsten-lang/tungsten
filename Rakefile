@@ -111,6 +111,8 @@ namespace :test do
   task :ccall_contracts do
     run_command "ruby", File.join(ROOT, "scripts/verify-ccall-contracts.rb")
     run_command File.join(ROOT, "bin/tungsten-compiler"), "run",
+                File.join(ROOT, "compiler/test/wire_fixed_layout.w")
+    run_command File.join(ROOT, "bin/tungsten-compiler"), "run",
                 File.join(ROOT, "compiler/test/wire_call_contracts.w")
     run_command File.join(ROOT, "bin/tungsten-compiler"), "run",
                 File.join(ROOT, "compiler/test/content_hash_symbol_collision.w")

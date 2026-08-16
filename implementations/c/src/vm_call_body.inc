@@ -204,6 +204,32 @@
               int64_t fields = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
               int64_t spare = value_is_int(args[3]) ? value_as_int(args[3]) : (int64_t)args[3];
               result = w_wire_alloc_reserve(kind, fields, spare);
+            } else if (fn_len == 26 && memcmp(fn, "w_wire_sequence_from_array", 26) == 0 && argc == 2) {
+              if (w_is_wire_sequence(args[1])) {
+                result = args[1];
+              } else if (tc_kind(args[1]) == TC_VAL_ARRAY && tc_as_array(args[1])) {
+                TcRuntimeArray *array = tc_as_array(args[1]);
+                result = w_wire_sequence_alloc(array->size);
+                for (int32_t i = 0; i < array->size; i++)
+                  w_wire_sequence_set(result, i, array->slots[i]);
+              } else {
+                FREE_ARGS();
+                tc_error_set(err, "w_wire_sequence_from_array expects an Array");
+                goto cleanup_fail;
+              }
+            } else if (fn_len == 20 && memcmp(fn, "w_wire_sequence_size", 20) == 0 && argc == 2) {
+              if (!w_is_wire_sequence(args[1])) {
+                FREE_ARGS();
+                tc_error_set(err, "w_wire_sequence_size expects a WIRE sequence");
+                goto cleanup_fail;
+              }
+              result = int_value(w_wire_sequence_size(args[1]));
+            } else if (fn_len == 19 && memcmp(fn, "w_wire_sequence_get", 19) == 0 && argc == 3) {
+              int64_t index = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
+              result = w_wire_sequence_get(args[1], index);
+            } else if (fn_len == 19 && memcmp(fn, "w_wire_sequence_set", 19) == 0 && argc == 4) {
+              int64_t index = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
+              result = w_wire_sequence_set(args[1], index, args[3]);
             } else if (fn_len == 21 && memcmp(fn, "w_wire_field_store_at", 21) == 0 && argc == 5) {
               int64_t index = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
               result = w_wire_field_store_at(args[1], index, args[3], args[4]);
@@ -1058,6 +1084,7 @@
           int known = 1;
           if (tc_kind(receiver) == TC_VAL_STRING) size = (int64_t)tc_str_len(receiver);
           else if (tc_kind(receiver) == TC_VAL_ARRAY && tc_as_array(receiver)) size = (int64_t)tc_as_array(receiver)->size;
+          else if (w_is_wire_sequence(receiver)) size = w_wire_sequence_size(receiver);
           else if (tc_kind(receiver) == TC_VAL_HASH && tc_as_hash(receiver)) size = (int64_t)tc_as_hash(receiver)->count;
           else if (tc_kind(receiver) == TC_VAL_OBJECT && tc_as_object(receiver) &&
                    object_is_class(tc_as_object(receiver), "StringBuffer", 12)) {
@@ -1090,7 +1117,9 @@
             goto cleanup_fail;
           }
           TcValue out = args[1];
-          if (w_is_wire(receiver)) {
+          if (w_is_wire_sequence(receiver) && value_is_int(args[0])) {
+            out = w_wire_sequence_set(receiver, value_as_int(args[0]), args[1]);
+          } else if (w_is_wire(receiver)) {
             out = w_wire_field_store(receiver, args[0], args[1]);
           } else if (tc_kind(receiver) == TC_VAL_ARRAY && tc_as_array(receiver) && value_is_int(args[0])) {
             int64_t idx = value_as_int(args[0]);
@@ -1750,7 +1779,15 @@
         }
         if (has_receiver && w_is_wire(receiver)) {
           TcValue out = W_UNDEF;
-          if (name_len == 2 && memcmp(name, "[]", 2) == 0 && argc == 1) {
+          if (w_is_wire_sequence(receiver) &&
+              name_len == 2 && memcmp(name, "[]", 2) == 0 && argc == 1 &&
+              value_is_int(args[0])) {
+            out = w_wire_sequence_get(receiver, value_as_int(args[0]));
+          } else if (w_is_wire_sequence(receiver) &&
+                     name_len == 3 && memcmp(name, "[]=", 3) == 0 && argc == 2 &&
+                     value_is_int(args[0])) {
+            out = w_wire_sequence_set(receiver, value_as_int(args[0]), args[1]);
+          } else if (name_len == 2 && memcmp(name, "[]", 2) == 0 && argc == 1) {
             out = w_wire_field_load(receiver, args[0]);
             if (out == W_UNDEF) out = W_NIL;
           } else if (name_len == 3 && memcmp(name, "[]=", 3) == 0 && argc == 2) {

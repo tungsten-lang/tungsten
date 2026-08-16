@@ -164,14 +164,7 @@ static inline void wire_header(uint64_t off, uint32_t count, uint32_t cap) {
     g_wire_arena.base[off] = (WValue)(((uint64_t)cap << 32) | count);
 }
 
-WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fields) {
-    if (kind <= 0 || kind > 511 || field_count < 0 || field_count > 1024 ||
-        spare_fields < 0 || spare_fields > 1024)
-        node_arena_fatal("w_wire_alloc: invalid kind or field count");
-    uint32_t count = (uint32_t)field_count;
-    uint32_t cap = count + (uint32_t)spare_fields;
-    if (cap < 2) cap = 2;
-    uint64_t words = 1u + (uint64_t)cap * 2u;
+static uint32_t wire_alloc_words(uint64_t words) {
     if (g_wire_arena.cursor == 0) g_wire_arena.cursor = 1;
     uint64_t required = (uint64_t)g_wire_arena.cursor + words;
     if (required > W_WIRE_OFFSET_MASK)
@@ -187,6 +180,19 @@ WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fie
     }
     uint32_t off = g_wire_arena.cursor;
     g_wire_arena.cursor += (uint32_t)words;
+    return off;
+}
+
+WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fields) {
+    if (kind <= 0 || kind > 511 || kind == W_WIRE_SEQUENCE_KIND ||
+        field_count < 0 || field_count > 1024 ||
+        spare_fields < 0 || spare_fields > 1024)
+        node_arena_fatal("w_wire_alloc: invalid kind or field count");
+    uint32_t count = (uint32_t)field_count;
+    uint32_t cap = count + (uint32_t)spare_fields;
+    if (cap < 2) cap = 2;
+    uint64_t words = 1u + (uint64_t)cap * 2u;
+    uint32_t off = wire_alloc_words(words);
     wire_header(off, 0, cap);
     return w_box_wire((int)kind, off);
 }
@@ -196,7 +202,8 @@ WValue w_wire_alloc(int64_t kind, int64_t field_count) {
 }
 
 static uint64_t wire_checked_offset(WValue wire) {
-    if (!w_is_wire(wire)) node_arena_fatal("WIRE field access: not a WIRE handle");
+    if (!w_is_wire(wire) || w_is_wire_sequence(wire))
+        node_arena_fatal("WIRE field access: not a WIRE record handle");
     uint64_t off = w_wire_offset(wire);
     if (off == 0 || off >= g_wire_arena.cursor)
         node_arena_fatal("WIRE field access: stale handle");
@@ -204,6 +211,51 @@ static uint64_t wire_checked_offset(WValue wire) {
     if (off + 1u + (uint64_t)cap * 2u > g_wire_arena.cursor)
         node_arena_fatal("WIRE field access: corrupt record bounds");
     return off;
+}
+
+WValue w_wire_sequence_alloc(int64_t count) {
+    if (count < 0 || (uint64_t)count > UINT32_MAX)
+        node_arena_fatal("w_wire_sequence_alloc: invalid element count");
+    if (count == 0) return w_box_wire(W_WIRE_SEQUENCE_KIND, 0);
+    uint32_t off = wire_alloc_words(1u + (uint64_t)count);
+    wire_header(off, (uint32_t)count, (uint32_t)count);
+    return w_box_wire(W_WIRE_SEQUENCE_KIND, off);
+}
+
+static uint64_t wire_sequence_checked_offset(WValue sequence) {
+    if (!w_is_wire_sequence(sequence))
+        node_arena_fatal("WIRE sequence access: not a sequence handle");
+    uint64_t off = w_wire_offset(sequence);
+    if (off == 0) return 0;
+    if (off >= g_wire_arena.cursor)
+        node_arena_fatal("WIRE sequence access: stale handle");
+    uint32_t count = wire_count(off), cap = wire_capacity(off);
+    if (count > cap || off + 1u + (uint64_t)cap > g_wire_arena.cursor)
+        node_arena_fatal("WIRE sequence access: corrupt bounds");
+    return off;
+}
+
+int64_t w_wire_sequence_size(WValue sequence) {
+    uint64_t off = wire_sequence_checked_offset(sequence);
+    return off == 0 ? 0 : (int64_t)wire_count(off);
+}
+
+WValue w_wire_sequence_get(WValue sequence, int64_t index) {
+    uint64_t off = wire_sequence_checked_offset(sequence);
+    uint32_t count = off == 0 ? 0 : wire_count(off);
+    if (index < 0) index += (int64_t)count;
+    if (index < 0 || (uint64_t)index >= count) return W_NIL;
+    return g_wire_arena.base[off + 1u + (uint32_t)index];
+}
+
+WValue w_wire_sequence_set(WValue sequence, int64_t index, WValue value) {
+    uint64_t off = wire_sequence_checked_offset(sequence);
+    uint32_t count = off == 0 ? 0 : wire_count(off);
+    if (index < 0) index += (int64_t)count;
+    if (index < 0 || (uint64_t)index >= count)
+        node_arena_fatal("w_wire_sequence_set: index exceeds bounds");
+    g_wire_arena.base[off + 1u + (uint32_t)index] = value;
+    return value;
 }
 
 WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value) {
@@ -327,6 +379,16 @@ int64_t w_wire_store_mark(void) {
 }
 
 WValue w_wire_clone(WValue wire) {
+    if (w_is_wire_sequence(wire)) {
+        uint64_t src = wire_sequence_checked_offset(wire);
+        uint32_t count = src == 0 ? 0 : wire_count(src);
+        WValue clone = w_wire_sequence_alloc(count);
+        if (count > 0)
+            memcpy(g_wire_arena.base + w_wire_offset(clone) + 1,
+                   g_wire_arena.base + src + 1,
+                   (size_t)count * sizeof(WValue));
+        return clone;
+    }
     uint64_t src = wire_checked_offset(wire);
     uint32_t count = wire_count(src);
     uint32_t capacity = wire_capacity(src);

@@ -13,6 +13,11 @@ SOURCE_GLOB = File.join(ROOT, "compiler/lib/**/*.w")
 
 Call = Struct.new(:path, :start, :finish, :callee, :prefix, :entries, :op, :op_expr, keyword_init: true)
 
+# Variable-width instruction operands live as dense WIRE-arena sequences.
+# The field names are schema-wide contracts: every instruction use of one of
+# these names is a WValue list (or nil), never a scalar.
+WIRE_SEQUENCE_FIELDS = %w[arg_types args cases fields incoming s].freeze
+
 def fail_gen(message)
   warn "gen_wire_constructors: #{message}"
   exit 1
@@ -200,7 +205,8 @@ def generate(schema)
     out << "-> wire_make_#{suffix}(#{params})"
     out << "  handle = ccall_rawargs(\"w_wire_alloc\", #{ids.fetch(op)}, #{fields.length})"
     fields.each_with_index do |field, index|
-      out << "  ccall_nobox(\"w_wire_field_store_at\", handle, #{index}, :#{field}, #{field})"
+      value = WIRE_SEQUENCE_FIELDS.include?(field) ? "wire_sequence(#{field})" : field
+      out << "  ccall_nobox(\"w_wire_field_store_at\", handle, #{index}, :#{field}, #{value})"
     end
     out << "  handle"
     out << ""
@@ -222,6 +228,8 @@ def generate(schema)
     out << "  kind_id = ccall_nobox(\"w_numeric_to_i64\", wire_kind_id(op))"
     out << "  handle = ccall_rawargs(\"w_wire_alloc\", kind_id, #{count})"
     (0...count).each do |i|
+      out << "  if wire_sequence_field?(field#{i})"
+      out << "    value#{i} = wire_sequence(value#{i})"
       out << "  ccall_nobox(\"w_wire_field_store_at\", handle, #{i}, field#{i}, value#{i})"
     end
     out << "  handle"

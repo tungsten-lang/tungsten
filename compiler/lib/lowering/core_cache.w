@@ -447,8 +447,9 @@ incremental_core_cache_state = {
   cases = wire_get(inst, :cases)
   if cases != nil
     i = 0
-    while i < cases.size()
-      id = cases[i][:string_id]
+    while i < wire_sequence_size(cases)
+      item = wire_sequence_get(cases, i)
+      id = item[:string_id]
       if id != nil && text_by_id[id] != nil
         texts[text_by_id[id]] = true
       i += 1
@@ -467,10 +468,11 @@ incremental_core_cache_state = {
   cases = wire_get(inst, :cases)
   if cases != nil
     i = 0
-    while i < cases.size()
-      old_id = cases[i][:string_id]
+    while i < wire_sequence_size(cases)
+      item = wire_sequence_get(cases, i)
+      old_id = item[:string_id]
       if old_id != nil && remap[old_id] != nil
-        cases[i][:string_id] = remap[old_id]
+        item[:string_id] = remap[old_id]
       i += 1
   nil
 

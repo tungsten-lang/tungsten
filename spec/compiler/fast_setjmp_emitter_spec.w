@@ -7,7 +7,7 @@ use ../../compiler/lib/emitter
     << "FAIL " + name
     exit 1
 
-inst = {op: :setjmp, temp: "%sj", buf: "%buf"}
+inst = wire_instruction({op: :setjmp, temp: "%sj", buf: "%buf"})
 posix = render_instruction(inst, {}, {}, nil, "", true, false)
 windows = render_instruction(inst, {}, {}, nil, "", false, true)
 

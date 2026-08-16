@@ -11,7 +11,7 @@ use ../../compiler/lib/emitter
     exit(1)
   << "PASS one-argument cached dispatch emitter " + name
 
-zero_inst = {
+zero_inst = wire_instruction({
   op: :call_method_i64,
   temp: "%zero",
   temp_args_val: "%zero.args",
@@ -21,8 +21,8 @@ zero_inst = {
   ic_id: 10,
   src_line: nil,
   src_col: nil
-}
-one_inst = {
+})
+one_inst = wire_instruction({
   op: :call_method_i64,
   temp: "%one",
   temp_args_val: "%one.args",
@@ -33,8 +33,8 @@ one_inst = {
   ic_id: 11,
   src_line: nil,
   src_col: nil
-}
-generic_one_inst = {
+})
+generic_one_inst = wire_instruction({
   op: :call_method_i64,
   temp: "%generic.one",
   temp_args_val: "%generic.one.args",
@@ -45,8 +45,8 @@ generic_one_inst = {
   ic_id: 14,
   src_line: nil,
   src_col: nil
-}
-two_inst = {
+})
+two_inst = wire_instruction({
   op: :call_method_i64,
   temp: "%two",
   temp_args_val: "%two.args",
@@ -57,8 +57,8 @@ two_inst = {
   ic_id: 12,
   src_line: nil,
   src_col: nil
-}
-generic_two_inst = {
+})
+generic_two_inst = wire_instruction({
   op: :call_method_i64,
   temp: "%generic.two",
   temp_args_val: "%generic.two.args",
@@ -69,7 +69,7 @@ generic_two_inst = {
   ic_id: 15,
   src_line: nil,
   src_col: nil
-}
+})
 
 decls = declare_runtime()
 check("runtime declaration",
@@ -132,7 +132,7 @@ one_function = {
   blocks: [
     {
       label: "entry",
-      instructions: [one_inst, {op: :ret_i64, value: "%one"}]
+      instructions: [one_inst, wire_instruction({op: :ret_i64, value: "%one"})]
     }
   ],
   var_slots: nil,
@@ -157,7 +157,7 @@ two_function = {
   blocks: [
     {
       label: "entry",
-      instructions: [two_inst, {op: :ret_i64, value: "%two"}]
+      instructions: [two_inst, wire_instruction({op: :ret_i64, value: "%two"})]
     }
   ],
   var_slots: nil,
@@ -171,7 +171,7 @@ check("arity-two helper emitted exactly once",
 check("arity-two scratch alloca count zero",
       two_function_ir.split("%__mcall_args = alloca i64").size() == 1)
 
-located_one = {
+located_one = wire_instruction({
   op: :call_method_i64,
   temp: "%located",
   temp_args_val: "%located.args",
@@ -182,7 +182,7 @@ located_one = {
   ic_id: 13,
   src_line: 101,
   src_col: 7
-}
+})
 located_ir = render_instruction(located_one, nil, {}, nil, "")
 check("located call remains notail", located_ir.include?("= notail call i64 @w_method_call_cached_1("))
 check("located call retains return label", located_ir.include?("cs.13.ret:"))

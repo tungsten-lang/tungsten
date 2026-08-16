@@ -153,6 +153,16 @@ use wire_constructors
     incremental_core_cache_counter_prefix: nil,
     incremental_core_function_count: 0,
     incremental_core_string_count: 0,
+    # Experimental closed-world emission slice. The complete function graph
+    # remains attached for Core-cache finalization; compiler.w swaps this
+    # filtered view in only while rendering LLVM.
+    core_reachability_status: nil,
+    core_reachability_reason: nil,
+    core_reachability_emit_functions: nil,
+    core_reachability_registration_restore: [],
+    core_reachability_total: 0,
+    core_reachability_kept: 0,
+    core_reachability_pruned: 0,
     cvar_globals:     {},
     fn_memo_tables:   {},
     used_memo_tables: {},
@@ -236,6 +246,13 @@ use wire_constructors
     # Map: var slot name → {kind, temp} for ## recycle vars. Used to detect
     # reassignment and emit recycle of the old value before the new assign.
     recycle_vars: {},
+    # Literal dynamic sends emitted by this body. Closed-world Core
+    # reachability uses these summaries without decoding the boxed method-name
+    # operand back out of WIRE. Each entry stores runtime arity (including
+    # __self), matching the method-table registration ABI.
+    dynamic_method_calls: [],
+    dynamic_method_call_keys: {},
+    reflective_method_access: false,
     is_memoized:  false,
     exit_label:   nil,
     result_slot:  nil
@@ -243,6 +260,19 @@ use wire_constructors
 
   start_block(result, "__entry")
   result
+
+-> wire_record_dynamic_method_call(f, method_name, source_argc)
+  runtime_arity = source_argc + 1
+  key = method_name + "/" + runtime_arity.to_s()
+  if f[:dynamic_method_call_keys][key] != true
+    f[:dynamic_method_call_keys][key] = true
+    f[:dynamic_method_calls].push({name: method_name, arity: runtime_arity})
+  # These methods either invoke an arbitrary name or make the method-table
+  # contents observable. A reachability slice must retain the full table when
+  # any live body uses one of them.
+  if method_name in ("respond_to?" "send" "__send__" "method" "methods" "instance_method" "instance_methods" "public_instance_method" "public_instance_methods" "private_instance_methods" "protected_instance_methods" "method_defined?" "private_method?" "protected_method?" "public_method?" "singleton_methods")
+    f[:reflective_method_access] = true
+  nil
 
 -> next_temp(f)
   n = f[:next_temp]

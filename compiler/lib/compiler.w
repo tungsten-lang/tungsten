@@ -7,6 +7,7 @@ use cfg
 use ownership
 use escape
 use content_hash
+use core_reachability
 use emitter
 use target
 
@@ -264,6 +265,8 @@ use target
   content_hash_pass(mod, verbose)
   t_hash = clock() - hash_started_at
 
+  core_reachability_prepare(mod)
+
   mod[:enhanced_stacktraces] = true
   # Debug executables promise source-level backtrace frames, not merely a
   # walkable physical stack. The emitter pairs frame pointers with noinline
@@ -282,7 +285,13 @@ use target
   mod[:llvm_fn_attrs] = llvm_target[:fn_attrs]
 
   emit_started_at = clock()
+  all_functions = mod[:functions]
+  emit_functions = core_reachability_emission_functions(mod)
+  if emit_functions != nil
+    mod[:functions] = emit_functions
   ir = emit_artifact(mod, frame_pointers)
+  mod[:functions] = all_functions
+  core_reachability_restore_full_graph(mod)
   t_emit = clock() - emit_started_at
 
   # Store only after every destructive pass and the emitter have finished.
@@ -299,6 +308,7 @@ use target
   if verbose
     << ""
     << incremental_core_cache_verbose_text(mod)
+    << core_reachability_verbose_text(mod)
     << fmt_elapsed(t_lower) + " lowering to wire"
     << fmt_elapsed(t_cfg) + " cfg+ssa"
     << fmt_elapsed(t_escape) + " escape"

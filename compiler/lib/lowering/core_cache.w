@@ -44,7 +44,7 @@ incremental_core_cache_state = {
   i = 0
   while i < entry[:functions].size()
     func = entry[:functions][i]
-    if ccall_nobox("w_is_wire_extern", func) != 1 || type(func[:name]) != "String" || type(func[:original_name]) != "String" || type(func[:params]) != "Array" || type(func[:extra_params]) != "Array" || type(func[:return_type]) != "String" || type(func[:blocks]) != "Array"
+    if ccall_nobox("w_is_wire_extern", func) != 1 || type(func[:name]) != "String" || type(func[:original_name]) != "String" || type(func[:params]) != "Array" || type(func[:extra_params]) != "Array" || type(func[:return_type]) != "String" || type(func[:blocks]) != "Array" || type(func[:dynamic_method_calls]) != "Array" || type(func[:dynamic_method_call_keys]) != "Hash"
       return false
     bi = 0
     while bi < func[:blocks].size()
@@ -174,7 +174,9 @@ incremental_core_cache_state = {
     return {enabled: false, retain_mark: retain_mark, reason: "Core closure manifest is unavailable"}
 
   key_text = StringBuffer(rows.size() * 96 + 256)
-  key_text << "lowered-core-v1\n"
+  # v2 adds literal dynamic-send summaries to each persisted function. Older
+  # snapshots cannot safely participate in closed-world Core reachability.
+  key_text << "lowered-core-v2\n"
   i = 0
   while i < rows.size()
     key_text << rows[i]

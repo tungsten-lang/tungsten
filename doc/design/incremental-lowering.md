@@ -208,3 +208,69 @@ cache disabled to 0.360221s with a persistent Core hit: 0.102842s saved,
 closure was 4,568,417 bytes. Cold and warm LLVM were byte-identical. This
 measures compiler front-end/artifact generation for one protected fixture; it
 does not include clang/link work and is not a claim about unprotected programs.
+
+## Cached Core code experiment (not retained)
+
+On 2026-08-16, a follow-on prototype split the 929 stable Core functions into
+a cross-process LLVM bitcode module with hidden, content-derived symbols. The
+per-program module retained the globals and startup code, and both modules
+entered the ordinary release LTO link.
+
+Keeping FullLTO preserved runtime optimization, but eight alternating matched
+build pairs were effectively flat: 11.605832s monolithic versus 11.584335s
+with cached Core bitcode, only 0.19% faster. FullLTO still combines and
+optimizes the complete program, so avoiding one textual parse was not the
+dominant cost.
+
+ThinLTO plus ld64's module cache made the warm link much faster (10.96s to a
+3.74s median in the initial repeated probe), but created a real code-quality
+boundary. Ten alternating runtime pairs regressed the String empty-slice path
+from 3.9519 to 5.1534 ns/op (+30.4%) and its inline-five-byte path from 21.5646
+to 22.5688 ns/op (+4.7%). Bignum multiply/divide and the boolean sieve were
+neutral, demonstrating that a narrow arithmetic screen would have missed the
+regression. Raising ThinLTO's import-instruction budget as high as 250,000 did
+not restore the String fast path.
+
+The bitcode-cache implementation was therefore removed. A useful code cache
+needs either profile-guided boundary selection or a smaller emitted Core
+closure. Function-level Core reachability is the next experiment because it
+reduces FullLTO input without preventing any reachable Core/runtime inlining.
+
+## Closed-world Core reachability
+
+The retained follow-on emits only the Core function closure reachable when a
+program declares both `PROTECT_THE_CORE!` and `LOCK_THE_DOORS!`. Every program
+function is a root. The pass then follows direct calls, closure bodies, function
+addresses, memo workers, constructor/devirtualization targets, and the Core
+method registrations matching literal dynamic sends. It also retains runtime
+language hooks such as arithmetic, indexing, construction, `to_s`, comparison,
+and `method_missing`.
+
+Reachability fails closed. Live reflective method-table access or an opaque
+runtime-dispatch call selects the complete Core cohort. An external C source
+named by `TUNGSTEN_C_INCLUDES` may call runtime dispatch using a computed method
+name, so that boundary conservatively retains every registered Core method.
+Unregistered helpers can still be pruned. Registration pruning is an
+emission-only view: the complete post-pass Core graph is restored before the
+persistent WIRE cache is finalized.
+
+On 2026-08-16, eight alternating forced build pairs compiled the pure Tungsten
+`benchmarks/big_math/program_loops.w` workload with
+`--release --native --fast --no-debug`. Median wall time fell from 11.219948s
+with complete Core emission to 10.388879s with the reachable closure: 0.831069s
+saved, 7.41% faster, or 1.080x throughput. The emitted LLVM shrank from
+1,662,552 to 492,728 bytes (70.36%) and from 992 to 221 definitions; 161 of 929
+Core functions were retained.
+
+Eight alternating runtime pairs had identical checksums. Four principal bignum
+kernels moved between -0.01% and +0.16%, which is neutral at this sample size;
+one sign-chain kernel was 6.25% faster, plausibly from layout, but is not treated
+as a general runtime claim. Longer String screens also avoided the earlier
+ThinLTO regression: empty-slice improved 2.60% over twenty pairs and the
+inline-five-byte path improved 1.84% over fifteen pairs.
+
+The C-assisted native bignum lane deliberately showed no build win: six
+alternating pairs measured 11.170s with full Core and 11.215s with reachability
+(0.40% slower). Its C bridge triggers the conservative external-dispatch rule
+and keeps 909 of 929 Core functions. The retained claim is therefore a
+closed-world pure-Tungsten build improvement, not an FFI-wide speedup.

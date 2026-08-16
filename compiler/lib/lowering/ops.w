@@ -1824,6 +1824,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     temp = next_temp(wfn)
     ic_id = ctx[:mod][:next_ic]
     ctx[:mod][:next_ic] = ic_id + 1
+    wire_record_dynamic_method_call(wfn, method_name, 1)
     emit_wire_call_method_i64(wfn, [rhs_reg], nil, nil, nil, nil, ic_id, method_name_val, lhs_reg, nil, nil, node.col, node.line, temp, temp_args_val)
     return typed_value(:i64, temp)
 

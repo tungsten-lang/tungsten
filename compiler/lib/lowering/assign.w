@@ -97,6 +97,7 @@
   temp = next_temp(wfn)
   ic_id = ctx[:mod][:next_ic]
   ctx[:mod][:next_ic] = ic_id + 1
+  wire_record_dynamic_method_call(wfn, name, 0)
   emit_wire_call_method_i64(wfn, [], nil, nil, nil, nil, ic_id, method_name_val, self_reg, nil, nil, nil, nil, temp, temp_args)
   typed_value(:i64, temp)
 
@@ -1129,6 +1130,7 @@
   ic_id = ctx[:mod][:next_ic]
   ctx[:mod][:next_ic] = ic_id + 1
 
+  wire_record_dynamic_method_call(wfn, method_name, arg_regs.size())
   emit_wire_call_method_i64(wfn, arg_regs, nil, nil, nil, nil, ic_id, method_name_val, recv_reg, nil, nil, nil, nil, call_temp, temp_args_val)
   call_from = wfn[:blocks][wfn[:blocks].size() - 1][:label]
   emit_wire_br(wfn, merge_label, nil, nil)

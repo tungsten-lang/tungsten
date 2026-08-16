@@ -2244,6 +2244,7 @@
         ctor_owner = ctx[:mod][:class_super_names][ctor_owner]
         guard += 1
 
+  wire_record_dynamic_method_call(wfn, method_name, arg_regs.size())
   emit_wire_call_method_i64(wfn, arg_regs, construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver_reg, scalar_source_argc1, scalar_source_argc2, node.col, node.line, temp, temp_args_val)
   # A generated `- data` array accessor has a representation-preserving
   # contract. The send remains overridable, so verify the returned storage

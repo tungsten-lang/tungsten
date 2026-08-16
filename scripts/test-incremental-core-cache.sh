@@ -40,7 +40,7 @@ if [[ "$key_count" != "2" ]]; then
   echo "FAIL: expected two exact Core-closure compatibility keys, got $key_count" >&2
   exit 1
 fi
-if ! grep -l '^lowered-core-v1$' "$TMP"/key.* >/dev/null; then
+if ! grep -l '^lowered-core-v2$' "$TMP"/key.* >/dev/null; then
   echo "FAIL: Core cache key reports are missing their format identity" >&2
   exit 1
 fi

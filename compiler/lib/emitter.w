@@ -1672,6 +1672,112 @@ ewscope_md_state = {ids: {}}
     i += 1
   o.to_s()
 
+# Process-local rendered-function cache. Lowered Core functions attached from
+# the incremental cache are immutable, but release `compile-batch` used to
+# render the same bodies into LLVM text for every entry program. Keep the
+# complete module monolithic for FullLTO and reuse only the per-function text.
+#
+# Functions that allocate render-order metadata ids deliberately bypass this
+# cache: their text depends on the functions emitted before them. Debug builds
+# also bypass it so source backtrace/call-site emission stays on the simplest
+# possible path. Raw string-pointer dependencies are captured on a miss and
+# replayed on a hit before emit_string_constants runs.
+function_emit_cache_state = {
+  entries: {},
+  hits: 0,
+  misses: 0,
+  bypasses: 0
+}
+
+-> function_emit_cache_field(value)
+  text = value == nil ? "" : value.to_s()
+  text.size().to_s() + ":" + text
+
+-> function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
+  out = StringBuffer(256)
+  out << "rendered-core-function-v1"
+  fields = [
+    mod[:incremental_core_cache_key],
+    mod[:llvm_datalayout],
+    mod[:llvm_triple],
+    host_fn_attrs,
+    frame_pointers,
+    arm64_target,
+    windows_target,
+    preserve_debug_frames,
+    mod[:no_static_slab] == true,
+    fp_flags
+  ]
+  i = 0
+  while i < fields.size()
+    out << function_emit_cache_field(fields[i])
+    i += 1
+  out.to_s()
+
+-> function_emit_cache_bucket(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
+  key = function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
+  bucket = function_emit_cache_state[:entries][key]
+  if bucket == nil || bucket[:key] != key
+    bucket = {key: key, functions: {}}
+    function_emit_cache_state[:entries][key] = bucket
+  bucket
+
+-> function_emit_cache_candidate?(f)
+  (f[:incremental_core_frozen] == true || f[:incremental_core_candidate] == true) && f[:name] != "main"
+
+-> function_emit_cache_safe?(f)
+  bi = 0
+  while bi < f[:blocks].size()
+    instrs = f[:blocks][bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      if wire_get(inst, :ewscope) != nil
+        return false
+      if wire_kind(inst) == :br
+        unroll_count = wire_get(inst, :unroll_count)
+        if wire_get(inst, :novec) == true || (unroll_count != nil && unroll_count > 0)
+          return false
+      ii += 1
+    bi += 1
+  true
+
+-> function_emit_cache_merge_ptr_ids(used_ptr_ids, ptr_ids)
+  i = 0
+  while i < ptr_ids.size()
+    used_ptr_ids[ptr_ids[i]] = true
+    i += 1
+  nil
+
+-> emit_function_with_cache(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, cache_bucket)
+  if cache_bucket == nil || !function_emit_cache_candidate?(f)
+    function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + 1
+    return emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames)
+
+  # All ordinary functions in one module use the same attribute text. On a
+  # cache hit emit_function does not get a chance to intern it, so do that
+  # before lookup; the resulting numeric id is identical to an uncached emit.
+  if f[:embedded_ll] == nil && f[:embedded_asm] == nil && attr_groups != nil
+    function_attr_group_id(attr_groups, function_attr_text(frame_pointers, host_fn_attrs, preserve_debug_frames))
+
+  entry = cache_bucket[:functions][f[:name]]
+  if entry != nil && entry[:name] == f[:name]
+    function_emit_cache_merge_ptr_ids(used_ptr_ids, entry[:ptr_ids])
+    function_emit_cache_state[:hits] = function_emit_cache_state[:hits] + 1
+    return entry[:text]
+
+  if !function_emit_cache_safe?(f)
+    function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + 1
+    return emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames)
+
+  local_ptr_ids = {}
+  rendered = emit_function(f, string_wvs, slab_info, local_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames)
+  ptr_ids = local_ptr_ids.keys()
+  function_emit_cache_merge_ptr_ids(used_ptr_ids, ptr_ids)
+  cache_bucket[:functions][f[:name]] = {name: f[:name], text: rendered, ptr_ids: ptr_ids}
+  function_emit_cache_state[:misses] = function_emit_cache_state[:misses] + 1
+  rendered
+
 -> direct_range_metadata_suffix(llvm_type, low, high)
   ", !range !{" + llvm_type + " " + low.to_s() + ", " + llvm_type + " " + high.to_s() + "}"
 
@@ -2605,6 +2711,14 @@ ewscope_md_state = {ids: {}}
   attr_groups = {ids: {}, texts: []}
   fn_out = StringBuffer(4096)
   apply_fastcc_plan(mod)
+  function_emit_hits_start = function_emit_cache_state[:hits]
+  function_emit_misses_start = function_emit_cache_state[:misses]
+  function_emit_bypasses_start = function_emit_cache_state[:bypasses]
+  # Release-only by design. Debug builds retain the direct rendering path so
+  # frame/backtrace metadata remains independent of this optimization.
+  function_emit_cache_enabled = env("TUNGSTEN_FUNCTION_EMIT_CACHE") != "0" && mod[:enhanced_stacktraces] == false
+  arm64_target = emit_target_is_arm64(mod)
+  windows_target = emit_target_is_windows(mod)
 
   # Function-level float fast-math flag string from math_mode.
   # :fast   → "fast " (all fast-math: reassoc, nnan, ninf, nsz, arcp, afn, contract)
@@ -2616,14 +2730,20 @@ ewscope_md_state = {ids: {}}
   fp_flags = ""
   if mod[:math_mode] == :fast
     fp_flags = "fast "
+  function_emit_cache_bucket_value = nil
+  if function_emit_cache_enabled
+    function_emit_cache_bucket_value = function_emit_cache_bucket(mod, frame_pointers, mod[:llvm_fn_attrs], arm64_target, windows_target, mod[:preserve_debug_frames] == true, fp_flags)
 
   # Functions
   i = 0
   while i < mod[:functions].size()
     mod[:functions][i][:fp_flags] = fp_flags
-    fn_out << emit_function(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, emit_target_is_arm64(mod), emit_target_is_windows(mod), mod[:preserve_debug_frames] == true)
+    fn_out << emit_function_with_cache(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, function_emit_cache_bucket_value)
     fn_out << "\n"
     i += 1
+  mod[:function_emit_cache_hits] = function_emit_cache_state[:hits] - function_emit_hits_start
+  mod[:function_emit_cache_misses] = function_emit_cache_state[:misses] - function_emit_misses_start
+  mod[:function_emit_cache_bypasses] = function_emit_cache_state[:bypasses] - function_emit_bypasses_start
 
   # Source-routed operator export: wrap the selected content-hash-renamed
   # source body in a STRONG stable-named symbol. The runtime declares the same

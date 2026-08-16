@@ -309,6 +309,8 @@ use target
     << ""
     << incremental_core_cache_verbose_text(mod)
     << core_reachability_verbose_text(mod)
+    if mod[:function_emit_cache_hits] != nil && (mod[:function_emit_cache_hits] > 0 || mod[:function_emit_cache_misses] > 0)
+      << "  function emit cache: " + mod[:function_emit_cache_hits].to_s() + " hits, " + mod[:function_emit_cache_misses].to_s() + " misses, " + mod[:function_emit_cache_bypasses].to_s() + " bypassed"
     if mod[:content_hash_skipped_count] > 0
       << "  content hash work set: " + mod[:content_hash_function_count].to_s() + "/" + (mod[:content_hash_function_count] + mod[:content_hash_skipped_count]).to_s() + " functions (" + mod[:content_hash_skipped_count].to_s() + " cached)"
     << fmt_elapsed(t_lower) + " lowering to wire"

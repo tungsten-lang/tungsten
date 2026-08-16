@@ -333,3 +333,48 @@ eight-program batch-vs-solo oracle also matched fresh-process LLVM for fusion,
 bignum, typed overload, rational, loop, and math-mode fixtures. A focused
 compiled-runtime test covers stat hits, same-content fingerprint hits, and
 real-content invalidation.
+
+## In-process rendered Core-function cache
+
+Even after Core reachability and parsed-AST reuse, `compile-batch` rendered the
+same immutable Core WIRE bodies into LLVM text for every entry program. The
+emitter now retains each eligible Core function's rendered text in process and
+replays it into the next program's single monolithic LLVM module. This avoids
+repeated emitter work without splitting the module or weakening FullLTO's
+whole-program view. `TUNGSTEN_FUNCTION_EMIT_CACHE=0` restores direct rendering
+for matched comparisons.
+
+The cache is deliberately narrower than "memoize emit_function":
+
+- Its bucket key includes the lowered-Core identity, target layout/triple,
+  host function attributes, frame policy, architecture-dependent selection,
+  static-slab mode, and floating-point mode.
+- A cache entry records every raw string-pointer id discovered while rendering;
+  hits replay those dependencies before string constants are emitted.
+- Functions carrying render-order-numbered loop or fused-elementwise alias
+  metadata bypass reuse. Their metadata ids still come from the ordinary
+  deterministic module-order renderer.
+- Debug modules bypass the cache completely. Frame-pointer debug builds retain
+  `noinline`, disabled tail calls, and unwind-table attributes for source
+  backtraces.
+
+On 2026-08-16, five alternating cache-off/on pairs compiled 150 copies of
+`compiler/test/fixtures/core_abi_stable_b.w` with a prewarmed persistent Core
+snapshot, parsed-AST reuse enabled, and
+`--release --native --fast --no-debug --emit-ll`. Median wall time fell from
+31.568724s to 23.703029s: 7.865695s saved, 24.92% faster, or 1.332x throughput.
+After the first entry populated the render bucket, each subsequent program
+reused 928 Core functions while three context-dependent or program functions
+bypassed it.
+
+A separate 150-program peak-memory pair measured 8,009,416,704 bytes without
+render reuse and 5,934,071,808 bytes with it, saving 2,075,344,896 bytes
+(25.91%). Retaining one canonical copy of each rendered Core body is much
+smaller than repeatedly allocating and discarding those bodies while the
+batch's AST/WIRE arenas remain live.
+
+Cache-off/on LLVM and symbol sidecars were byte-identical for two distinct
+entry programs sharing a Core artifact. A closed-world bignum fixture likewise
+matched exactly while reusing 161 reachable Core functions. The focused test
+also proves that debug emission bypasses reuse and retains its physical-frame
+attributes.

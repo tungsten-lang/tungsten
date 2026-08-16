@@ -28,6 +28,7 @@ use lowering/types
 use lowering/inference
 use lowering/analysis
 use lowering/class_sets
+use lowering/no_raise
 use lowering/core_abi
 use lowering/elision
 use lowering/program
@@ -751,7 +752,7 @@ use lowering/definitions
   receiver = node.receiver
   if receiver == nil || !is_ast_node?(receiver) || ast_kind(receiver) != :class_ref || receiver.name != "Tungsten"
     return nil
-  if node.name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+  if node.name in ("PROTECT_THE_CORE!" "STOP_THE_PRESS!" "LOCK_THE_DOORS!")
     return node.name
   nil
 
@@ -770,7 +771,9 @@ use lowering/definitions
 # performs the full autoload-registry validation; this duplicate structural
 # check keeps compile_to_wire safe for tests/tools that hand it an AST directly.
 -> collect_lowering_contracts(mod, expressions, source_path)
+  stop_seen = false
   lock_seen = false
+  known_types = {}
   core_keys = {}
   i = 0
   while i < expressions.size()
@@ -781,8 +784,13 @@ use lowering/definitions
         raise compile_error_for_node(:E_CONTRACT_ARITY, "Tungsten." + contract + " takes no arguments or block", source_path, node)
       if contract == "PROTECT_THE_CORE!"
         mod[:protect_core] = true
+      elsif contract == "STOP_THE_PRESS!"
+        mod[:type_tables_locked] = true
+        stop_seen = true
       else
+        mod[:type_tables_locked] = true
         mod[:method_tables_locked] = true
+        stop_seen = true
         lock_seen = true
       ast_set(node, :validated_program_contract, true)
     else
@@ -792,8 +800,15 @@ use lowering/definitions
         if path == nil
           path = source_path
         raise compile_error_for_node(:E_CONTRACT_LOCK_ORDER, "method and type definitions must appear before Tungsten.LOCK_THE_DOORS!", path, node)
+      elsif stop_seen && ast_kind(node) in (:class_def :module_def :trait_def) && known_types[node.name] != true
+        path = ast_get(node, :source_path)
+        if path == nil
+          path = source_path
+        raise compile_error_for_node(:E_CONTRACT_TYPE_ORDER, "new type definitions must appear before Tungsten.STOP_THE_PRESS!", path, node)
       if key != nil && definition_from_core?(node)
         core_keys[key] = true
+      if ast_kind(node) in (:class_def :module_def :trait_def)
+        known_types[node.name] = true
     i += 1
 
   if mod[:protect_core] == true
@@ -905,14 +920,20 @@ use lowering/definitions
   emit_builtin_class_inits(main_fn, mod)
   ordered_class_exprs = order_class_exprs(mod, ast.expressions)
   register_classes(main_fn, mod, ordered_class_exprs)
+  infer_return_class_sets_fixed_point(mod, ast.expressions, ordered_class_exprs)
+  infer_no_raise_fixed_point(mod, ast.expressions, ordered_class_exprs)
 
-  # All source definitions preceding LOCK_THE_DOORS have now been emitted as
-  # startup registrations. Close both instance and static method tables before
-  # any user statement executes. The runtime owns enforcement so native/FFI
-  # registration paths cannot invalidate the compiler's direct-call proof.
+  # All source definitions allowed by the selected closed-world contract have
+  # now been emitted as startup registrations. LOCK_THE_DOORS implies the type
+  # barrier; STOP_THE_PRESS alone closes only type construction, so existing
+  # types may still receive methods. Runtime enforcement covers native/FFI
+  # registration paths as well as Tungsten source.
   if mod[:method_tables_locked] == true
     method_lock_tmp = next_temp(main_fn)
     emit_instruction(main_fn, {op: :call_direct_i64, temp: method_lock_tmp, name: "w_method_tables_lock_safe", args: []})
+  elsif mod[:type_tables_locked] == true
+    type_lock_tmp = next_temp(main_fn)
+    emit_instruction(main_fn, {op: :call_direct_i64, temp: type_lock_tmp, name: "w_type_tables_lock_safe", args: []})
 
   # Freeze the string slab once startup registration is fully emitted (every
   # class/method-name intern above precedes this point in main). The compiled

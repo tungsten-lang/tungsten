@@ -1818,8 +1818,35 @@
 # set. Statement position (want_value false) keeps the historical
 # discard-everything behavior. Before 2026-07-22 (round-3 bug 2) value
 # position silently produced nil from BOTH arms.
+-> lower_nonraising_begin(ctx, node, want_value)
+  wfn = ctx[:func]
+  ensure_entry = nil
+  if node.ensure_body != nil
+    ensure_entry = {body: node.ensure_body, eh_base: wfn[:eh_depth]}
+    wfn[:ensure_stack].push(ensure_entry)
+
+  result = typed_value(:i64, w_nil.to_s())
+  if want_value
+    result = lower_body_value(ctx, node.body)
+  else
+    lower_program(ctx, node.body)
+
+  if ensure_entry != nil
+    wfn[:ensure_stack].pop()
+    if !block_terminated(wfn)
+      lower_program(ctx, node.ensure_body)
+      materialize_bindings(ctx)
+  result
+
 -> lower_begin(ctx, node, want_value = false)
   wfn = ctx[:func]
+
+  # A closed-world no-raise proof makes the landing pad unreachable. Keep the
+  # normal body and ensure semantics, but emit no heap/TLS frame, setjmp, or
+  # rescue CFG at all. Unknown operations and integer division retain the
+  # ordinary handler path.
+  if body_cannot_raise?(ctx, node.body)
+    return lower_nonraising_begin(ctx, node, want_value)
 
   result_ptr = nil
   if want_value

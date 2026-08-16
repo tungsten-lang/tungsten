@@ -44740,7 +44740,35 @@ static int w_ivar_lookup(WClass *klass, WValue name) {
     return w_ivar_lookup_by_content(klass, name);
 }
 
+/*
+ * Process-wide type-definition barrier. STOP_THE_PRESS closes the class-id
+ * universe without freezing methods on classes that already exist. Holding
+ * the mutex through publication makes a racing native registration either
+ * complete before the barrier or fail after it; it can never straddle it.
+ */
+static pthread_mutex_t g_type_table_barrier_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int g_type_tables_locked = 0;
+
+WValue w_type_tables_lock_safe(void) {
+    pthread_mutex_lock(&g_type_table_barrier_mutex);
+    g_type_tables_locked = 1;
+    pthread_mutex_unlock(&g_type_table_barrier_mutex);
+    return W_NIL;
+}
+
+int64_t w_type_tables_are_locked(void) {
+    pthread_mutex_lock(&g_type_table_barrier_mutex);
+    int locked = g_type_tables_locked;
+    pthread_mutex_unlock(&g_type_table_barrier_mutex);
+    return locked;
+}
+
 WValue w_class_new(const char *name, WValue superclass) {
+    pthread_mutex_lock(&g_type_table_barrier_mutex);
+    if (g_type_tables_locked) {
+        pthread_mutex_unlock(&g_type_table_barrier_mutex);
+        w_raise(w_string("type tables are locked by Tungsten.STOP_THE_PRESS!"));
+    }
     WClass *klass = calloc(1, sizeof(WClass));
     size_t name_len = strlen(name);
     char *name_copy = malloc(name_len + 1);
@@ -44790,6 +44818,7 @@ WValue w_class_new(const char *name, WValue superclass) {
         w_public_class_cache(0x084, class_value);
         w_public_class_cache(0x184, class_value);
     }
+    pthread_mutex_unlock(&g_type_table_barrier_mutex);
     return class_value;
 }
 
@@ -44807,6 +44836,9 @@ static pthread_mutex_t g_method_table_barrier_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_method_tables_locked = 0;
 
 WValue w_method_tables_lock_safe(void) {
+    /* A permanently closed method universe necessarily has a permanently
+     * closed type universe: a new class would introduce new method tables. */
+    w_type_tables_lock_safe();
     pthread_mutex_lock(&g_method_table_barrier_mutex);
     g_method_tables_locked = 1;
     pthread_mutex_unlock(&g_method_table_barrier_mutex);
@@ -45071,6 +45103,25 @@ static void w_bind_method_args(WMethod *m, WValue *source, int argc,
 
 __thread WExceptionFrame *w_exception_stack = NULL;
 
+/* Compiler-emitted rescue regions are strictly nested and normally reuse one
+ * frame depth repeatedly (loops are the important case). Keep a small TLS
+ * free list so entering a rescue does not calloc forever. Stack frames pushed
+ * by runtime subsystems carry heap_owned=0 and are never put in this pool. */
+#define EXCEPTION_FRAME_POOL_MAX 64
+static __thread WExceptionFrame *w_exception_frame_pool = NULL;
+static __thread int w_exception_frame_pool_count = 0;
+
+static void w_exception_frame_recycle(WExceptionFrame *frame) {
+    frame->heap_owned = 0;
+    if (w_exception_frame_pool_count < EXCEPTION_FRAME_POOL_MAX) {
+        frame->pool_next = w_exception_frame_pool;
+        w_exception_frame_pool = frame;
+        w_exception_frame_pool_count++;
+    } else {
+        free(frame);
+    }
+}
+
 typedef struct WBlockReturnFrame {
     jmp_buf buf;
     struct WBlockReturnFrame *prev;
@@ -45115,12 +45166,22 @@ void w_exception_frame_push(WExceptionFrame *frame) {
     frame->prev = w_exception_stack;
     frame->error = W_NIL;
     frame->cleanup_depth = g_cleanup_top;
+    frame->block_refs = 0;
+    frame->heap_owned = 0;
+    frame->on_stack = 1;
     w_exception_stack = frame;
 }
 
 void *w_exception_push(void) {
-    WExceptionFrame *frame = calloc(1, sizeof(WExceptionFrame));
+    WExceptionFrame *frame = w_exception_frame_pool;
+    if (frame != NULL) {
+        w_exception_frame_pool = frame->pool_next;
+        w_exception_frame_pool_count--;
+    } else {
+        frame = calloc(1, sizeof(WExceptionFrame));
+    }
     w_exception_frame_push(frame);
+    frame->heap_owned = 1;
     return (void *)&frame->buf;
 }
 
@@ -45131,9 +45192,26 @@ WValue w_exception_error(void) {
 
 void w_exception_pop(void) {
     if (w_exception_stack) {
-        w_exception_stack = w_exception_stack->prev;
+        WExceptionFrame *frame = w_exception_stack;
+        w_exception_stack = frame->prev;
+        frame->on_stack = 0;
+        if (frame->heap_owned && frame->block_refs == 0) {
+            w_exception_frame_recycle(frame);
+        } else if (frame->heap_owned) {
+            /* An active block keeps this frame as an ancestry snapshot. It is
+             * uncommon and must remain intact until its last reference dies. */
+        }
     }
 }
+
+static void w_exception_restore(WExceptionFrame *target) {
+    while (w_exception_stack != target) {
+        if (w_exception_stack == NULL) return;
+        w_exception_pop();
+    }
+}
+
+static void w_block_return_deactivate(WBlockReturnFrame *frame);
 
 void w_raise(WValue msg) {
     if (!w_exception_stack) {
@@ -45157,7 +45235,7 @@ void w_raise(WValue msg) {
         WExceptionFrame *saved = w_block_return_stack->exception_stack;
         while (saved && saved != w_exception_stack) saved = saved->prev;
         if (!saved) break;
-        w_block_return_stack->active = 0;
+        w_block_return_deactivate(w_block_return_stack);
         w_block_return_stack = w_block_return_stack->prev;
     }
 
@@ -45174,6 +45252,7 @@ void *w_block_return_push(void) {
     WBlockReturnFrame *frame = calloc(1, sizeof(WBlockReturnFrame));
     frame->prev = w_block_return_stack;
     frame->exception_stack = w_exception_stack;
+    if (frame->exception_stack) frame->exception_stack->block_refs++;
     frame->cleanup_depth = g_cleanup_top;
     frame->value = W_NIL;
     frame->active = 1;
@@ -45181,10 +45260,23 @@ void *w_block_return_push(void) {
     return (void *)&frame->buf;
 }
 
+static void w_block_return_deactivate(WBlockReturnFrame *frame) {
+    if (!frame->active) return;
+    frame->active = 0;
+    WExceptionFrame *exception_frame = frame->exception_stack;
+    if (exception_frame && exception_frame->block_refs > 0) {
+        exception_frame->block_refs--;
+        if (exception_frame->block_refs == 0 &&
+            exception_frame->heap_owned && !exception_frame->on_stack) {
+            w_exception_frame_recycle(exception_frame);
+        }
+    }
+}
+
 void w_block_return_pop(void *buf_ptr) {
     if (!buf_ptr) return;
     WBlockReturnFrame *frame = (WBlockReturnFrame *)buf_ptr;
-    frame->active = 0;
+    w_block_return_deactivate(frame);
     if (w_block_return_stack == frame) {
         w_block_return_stack = frame->prev;
         return;
@@ -45211,14 +45303,14 @@ void w_block_return_signal(uint64_t buf_bits, WValue value) {
     }
 
     while (w_block_return_stack && w_block_return_stack != target) {
-        w_block_return_stack->active = 0;
+        w_block_return_deactivate(w_block_return_stack);
         w_block_return_stack = w_block_return_stack->prev;
     }
     if (w_block_return_stack != target) {
         w_raise(w_string("block return target is no longer active"));
     }
 
-    w_exception_stack = target->exception_stack;
+    w_exception_restore(target->exception_stack);
     /* A non-local return abandons the target function and every intervening
      * block frame. Recycle exactly the values pushed since that function's
      * entry mark; the shared catch/exit block must not guess which conditional

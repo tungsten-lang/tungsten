@@ -40,11 +40,17 @@
     raw_fn_param_kinds: {},
     known_pure_calls: {},
     fn_return_types:  {},
+    # Whole-program, bounded source-class return summaries. Filled for locked
+    # programs after class registration, before any body is lowered.
+    return_class_sets: {},
+    return_class_set_workers: {},
+    no_raise_workers: {},
     class_methods:    {},
     # Entry-program closed-world contracts. PROTECT_THE_CORE is a validated
-    # provenance assertion; LOCK_THE_DOORS is also enforced by the runtime
-    # method-registration barrier.
+    # provenance assertion. STOP_THE_PRESS closes runtime type registration;
+    # LOCK_THE_DOORS implies it and also closes method registration.
     protect_core:     false,
+    type_tables_locked: false,
     method_tables_locked: false,
     # Filled only for PROTECT_THE_CORE programs. The fingerprint describes
     # the Core-facing WIRE ABI; the reuse contract says whether this program

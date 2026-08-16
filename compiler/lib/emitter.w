@@ -354,6 +354,7 @@ use naming
   out << declare_fn("w_str_concat", wv, wv2)
   out << declare_fn("w_str_append", wv, wv2)
   out << declare_fn("w_slab_freeze_safe", wv, "")
+  out << declare_fn("w_type_tables_lock_safe", wv, "")
   out << declare_fn("w_method_tables_lock_safe", wv, "")
   out << "declare void @w_value_free(i64)\n"
   out << "declare void @w_slab_init_static(ptr, i32)\n"
@@ -1433,7 +1434,7 @@ use naming
     i += 1
   out.to_s()
 
--> function_attr_text(frame_pointers, host_fn_attrs)
+-> function_attr_text(frame_pointers, host_fn_attrs, preserve_debug_frames = false)
   out = StringBuffer(160)
   out << "nounwind"
   if host_fn_attrs != nil && host_fn_attrs != ""
@@ -1448,6 +1449,8 @@ use naming
     # forces async unwind tables (matching clang's Linux default) so
     # --frame-pointers yields a full backtrace on both platforms.
     out << " uwtable \"frame-pointer\"=\"all\""
+  if preserve_debug_frames
+    out << " noinline \"disable-tail-calls\"=\"true\""
   out.to_s()
 
 -> function_attr_group_id(attr_groups, attr_text)
@@ -2603,7 +2606,7 @@ ewscope_md_state = {ids: {}}
   i = 0
   while i < mod[:functions].size()
     mod[:functions][i][:fp_flags] = fp_flags
-    fn_out << emit_function(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, emit_target_is_arm64(mod), emit_target_is_windows(mod))
+    fn_out << emit_function(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, emit_target_is_arm64(mod), emit_target_is_windows(mod), mod[:preserve_debug_frames] == true)
     fn_out << "\n"
     i += 1
 
@@ -3259,14 +3262,14 @@ ewscope_md_state = {ids: {}}
     return false
   triple.index("windows") != nil || triple.index("mingw") != nil || triple.index("msvc") != nil
 
--> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true, windows_target = false)
+-> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true, windows_target = false, preserve_debug_frames = false)
   if f[:embedded_ll] != nil
     return emit_embedded_ll_function(f)
   if f[:embedded_asm] != nil
     return emit_embedded_asm_function(f)
   out = StringBuffer(4096)
   ret_ty = f[:return_type]
-  attr_text = function_attr_text(frame_pointers, host_fn_attrs)
+  attr_text = function_attr_text(frame_pointers, host_fn_attrs, preserve_debug_frames)
   attr_id = nil
   if attr_groups != nil
     attr_id = function_attr_group_id(attr_groups, attr_text)

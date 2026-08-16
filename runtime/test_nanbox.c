@@ -51,6 +51,18 @@ static void static_splat_method_table_mutation_after_lock_fn(void) {
     w_method_tables_lock_safe();
     w_class_add_static_method_splat_wv(klass, name, (void *)cached_two_arg_fn, 3, 1, 0);
 }
+static void type_table_mutation_after_stop_fn(void) {
+    WValue klass = w_class_new("ExistingAtTypeStop", W_NIL);
+    w_type_tables_lock_safe();
+    /* STOP_THE_PRESS deliberately permits method additions on existing
+     * classes; reaching the following construction proves that path passed. */
+    w_class_add_method(klass, "still_open", (void *)cached_two_arg_fn, 3);
+    (void)w_class_new("TooLateType", W_NIL);
+}
+static void type_table_mutation_after_method_lock_fn(void) {
+    w_method_tables_lock_safe();
+    (void)w_class_new("TooLateAfterDoors", W_NIL);
+}
 #ifndef TUNGSTEN_ONIG
 static void unsupported_named_regex_fn(void) {
     (void)w_regex_new(w_string("(?<word>a)"), w_string(""));
@@ -508,6 +520,15 @@ int main() {
         assert(expect_crash(static_splat_method_table_mutation_after_lock_fn));
         assert(!w_method_tables_are_locked());
         printf("  method table lock barrier: OK\n");
+    }
+
+    /* STOP_THE_PRESS freezes class construction but leaves existing method
+     * tables open. LOCK_THE_DOORS implies the same class barrier. */
+    {
+        assert(expect_crash(type_table_mutation_after_stop_fn));
+        assert(expect_crash(type_table_mutation_after_method_lock_fn));
+        assert(!w_type_tables_are_locked());
+        printf("  type table lock barrier: OK\n");
     }
 
     /* Exact two-argument cached dispatch agrees with the generic cache path,

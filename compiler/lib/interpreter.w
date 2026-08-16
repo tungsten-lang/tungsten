@@ -30,6 +30,7 @@ use target
     @autoload_registry = nil
     @entry_file = nil
     @core_protected = false
+    @type_tables_locked = false
     @method_tables_locked = false
     if argv_values == nil
       argv_values = interpreter_process_argv()
@@ -179,7 +180,7 @@ use target
     if recv == nil || !is_ast_node?(recv) || ast_kind(recv) != :class_ref || ast_get(recv, :name) != "Tungsten"
       return nil
     name = ast_get(node, :name)
-    if name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+    if name in ("PROTECT_THE_CORE!" "STOP_THE_PRESS!" "LOCK_THE_DOORS!")
       return name
     nil
 
@@ -203,7 +204,9 @@ use target
   -> prepare_interpreter_contracts(program, file_path)
     expressions = ast_get(program, :expressions)
     protect = false
+    stop_seen = false
     lock_seen = false
+    known_types = {}
     i = 0
     while i < expressions.size()
       node = expressions[i]
@@ -214,11 +217,18 @@ use target
           raise "Tungsten." + contract + " takes no arguments or block"
         if contract == "PROTECT_THE_CORE!"
           protect = true
+        elsif contract == "STOP_THE_PRESS!"
+          stop_seen = true
         else
+          stop_seen = true
           lock_seen = true
         ast_set(node, :validated_program_contract, true)
       elsif lock_seen && interpreter_definition?(node)
         raise "method and type definitions must appear before Tungsten.LOCK_THE_DOORS!"
+      elsif stop_seen && ast_kind(node) in (:class_def :module_def :trait_def) && known_types[ast_get(node, :name)] != true
+        raise "new type definitions must appear before Tungsten.STOP_THE_PRESS!"
+      if ast_kind(node) in (:class_def :module_def :trait_def)
+        known_types[ast_get(node, :name)] = true
       i += 1
 
     # Apply Core protection before evaluation so a `use` preceding the marker
@@ -3048,7 +3058,10 @@ use target
         raise "Tungsten." + contract + " may only be declared by the entry program"
       if contract == "PROTECT_THE_CORE!"
         @core_protected = true
+      elsif contract == "STOP_THE_PRESS!"
+        @type_tables_locked = true
       else
+        @type_tables_locked = true
         @method_tables_locked = true
       return nil
     block = nil
@@ -4933,6 +4946,8 @@ use target
       try_autoload_class(class_name)
     w_class = @classes[class_name]
     if w_class == nil
+      if @type_tables_locked
+        raise "type tables are locked by Tungsten.STOP_THE_PRESS!"
       superclass = nil
       if ast_get(node, :superclass) != nil
         # Autoload the parent so a subclass of an autoloaded generic (e.g.

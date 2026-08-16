@@ -22,15 +22,16 @@ unbreakable language guarantee. A caller may intentionally replace library
 behavior. Consequently such an annotation cannot soundly justify deleting
 dynamic dispatch.
 
-The executable owner can instead declare two process contracts:
+The executable owner can instead declare three process contracts:
 
 ```tungsten
 Tungsten.PROTECT_THE_CORE!
+Tungsten.STOP_THE_PRESS!
 Tungsten.LOCK_THE_DOORS!
 ```
 
-Both are zero-argument, top-level entry-program declarations. A dependency is
-rejected if it tries to impose either contract on its caller.
+All are zero-argument, top-level entry-program declarations. A dependency is
+rejected if it tries to impose any contract on its caller.
 
 `PROTECT_THE_CORE!` checks the fully loaded source graph and rejects user
 reopens or replacements of definitions owned by the canonical `core/` tree.
@@ -42,10 +43,20 @@ the declaration before choosing a Core artifact, then validates the complete
 loaded source graph. By itself this is a checked source assertion; pair it with
 the method-table lock to exclude later native registration too.
 
-`LOCK_THE_DOORS!` must appear after every type and method definition. The AOT
+`STOP_THE_PRESS!` closes the type universe. A later source reopen of a class,
+module, or trait already known at the barrier may add methods, and top-level
+functions may still be defined, but a new type name is rejected. AOT startup
+then irreversibly closes runtime class construction before user statements,
+including native/FFI calls to the class-construction API. It does not make
+method targets permanent, so it cannot by itself remove a method inline cache.
+It does make descendant enumeration, exhaustive type tests, and layout/type-id
+assumptions stable for later optimizer passes.
+
+`LOCK_THE_DOORS!` must appear after every type and method definition. It implies
+`STOP_THE_PRESS!`: a new class would itself introduce a new method table. The AOT
 startup registers that complete set and then irreversibly closes both instance
-and static runtime method tables before user statements run. Any later native
-or interpreted registration raises an error.
+and static runtime method tables as well as class construction before user
+statements run. Any later native or interpreted registration raises an error.
 
 Once the doors are locked, constructor-derived exact facts participate in a
 bounded flow-sensitive analysis. A singleton receiver set selects a permanent
@@ -91,9 +102,12 @@ arity to the same plain worker; otherwise it retains dynamic dispatch.
 
 This remains an internal lowering analysis, not a user-visible algebraic type
 system. It runs before WIRE construction so successful proofs avoid creating
-dead IC state in the first place. Return class-set summaries across function
-and method SCCs are not yet part of this pass, so unknown call results still
-widen their destination.
+dead IC state in the first place. A companion whole-program pass summarizes
+exact/compatible return class sets across top-level-function and source-method
+SCCs. Constructor base cases seed recursive components; unknown returned values
+remain conservative. Callers feed a known summary back into the same local
+lattice, so a factory result can select singleton, shared-target, or exhaustive
+direct dispatch without an inline cache.
 
 ## Core ABI boundary
 
@@ -112,7 +126,7 @@ protection contract, Core remains ineligible for call-site specialization.
 
 After WIRE lowering, the compiler emits a deterministic Core ABI fingerprint
 covering Core worker signatures, raw-return modes, class inheritance and ivar
-layouts, exported globals, and the method-table contract. Programs with the
+layouts, exported globals, and the type/method-table contracts. Programs with the
 same loaded Core closure and contract therefore expose the same compatibility
 key even when their user functions differ.
 
@@ -120,9 +134,34 @@ Some valid programs still require monolithic lowering. The WIRE report names a
 fallback reason for user subclasses of Core classes, user-dependent Core
 generic specializations, Core-global shadowing, missing provenance, and program
 `constant_alias` declarations. These are cache restrictions, not language
-restrictions. Fast/precise math, static-slab mode, build defines, and the method
-lock are deterministic compatibility-key fields instead: each exact variant
+restrictions. Fast/precise math, static-slab mode, build defines, and the type
+and method locks are deterministic compatibility-key fields instead: each exact variant
 may have its own reusable Core, but variants can never alias one another.
+
+## No-raise summaries and rescue frames
+
+For a locked executable, lowering also computes a conservative may-raise effect
+over the direct function/method graph. Integer addition, subtraction, and
+multiplication are total (overflow promotes); integer division and remainder
+remain may-raise because their divisor can be zero. Dynamic or unclassified
+calls remain may-raise. Direct-call facts propagate through recursive SCCs.
+
+A definition may opt into the same fact explicitly:
+
+```tungsten
+## no_raise
+fn trusted_native_wrapper(value)
+  value
+```
+
+This is a programmer promise, not a checked algebraic effect annotation. When
+the guarded body of `begin/rescue` is proven no-raise, lowering emits the body
+and any `ensure` directly and omits the unreachable rescue CFG, `setjmp`, and
+exception-frame push/pop. Unknown bodies retain the full handler.
+
+Compiler-created rescue frames that remain are recycled through a bounded
+thread-local pool. Runtime subsystems may still push stack-owned frames; an
+ownership bit keeps those out of the heap-frame pool.
 
 This boundary is required before a lowered core prelude can be cached and
 reused across unrelated programs. It does not itself reuse WIRE yet; that is

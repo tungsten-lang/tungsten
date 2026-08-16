@@ -333,6 +333,12 @@ assert_eq expr[:receiver][:name], "Tungsten"
 assert_eq expr[:name], "LOCK_THE_DOORS!"
 assert_eq expr[:args].size(), 0
 
+expr = first_expr("Tungsten.STOP_THE_PRESS!")
+assert_eq expr[:node], :call
+assert_eq expr[:receiver][:name], "Tungsten"
+assert_eq expr[:name], "STOP_THE_PRESS!"
+assert_eq expr[:args].size(), 0
+
 test "parses case/when"
 expr = first_expr("case\nwhen x == 1\n  42")
 assert_eq expr[:node], :case

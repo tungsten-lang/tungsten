@@ -222,6 +222,8 @@
 -> core_abi_variant_row(mod)
   row = StringBuffer(192)
   row << "X;"
+  row << core_abi_field("types")
+  row << core_abi_field(core_abi_bool(mod[:type_tables_locked]))
   row << core_abi_field("doors")
   row << core_abi_field(core_abi_bool(mod[:method_tables_locked]))
   row << core_abi_field("fast")

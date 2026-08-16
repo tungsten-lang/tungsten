@@ -139,7 +139,7 @@ use parser
     receiver = node.receiver
     if receiver == nil || !is_ast_node?(receiver) || ast_kind(receiver) != :class_ref || receiver.name != "Tungsten"
       return nil
-    if node.name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+    if node.name in ("PROTECT_THE_CORE!" "STOP_THE_PRESS!" "LOCK_THE_DOORS!")
       return node.name
     nil
 
@@ -188,12 +188,16 @@ use parser
 
   # PROTECT_THE_CORE! is a checked assertion, not an advisory hint. Reject a
   # user reopen/replacement before lowering can consume a stable Core fact.
-  # LOCK_THE_DOORS! is a source barrier: definitions must precede it. The AOT
-  # compiler can then register that complete set and close the runtime tables
-  # once, before executing user statements.
+  # STOP_THE_PRESS! is a type-universe barrier: later reopens of an already
+  # known type may add methods, but no new class/module/trait name may appear.
+  # LOCK_THE_DOORS! is the stronger source barrier: every definition must
+  # precede it. The AOT compiler can then register the complete set and close
+  # the runtime tables once, before executing user statements.
   -> validate_program_contracts(expressions, resolved)
     protect_core = false
+    stop_seen = false
     lock_seen = false
+    known_types = {}
     core_keys = {}
     i = 0
     while i < expressions.size()
@@ -201,7 +205,10 @@ use parser
       contract = tungsten_contract_name(node)
       if contract == "PROTECT_THE_CORE!"
         protect_core = true
+      elsif contract == "STOP_THE_PRESS!"
+        stop_seen = true
       elsif contract == "LOCK_THE_DOORS!"
+        stop_seen = true
         lock_seen = true
       elsif lock_seen
         key = definition_contract_key(node)
@@ -210,7 +217,14 @@ use parser
           if path == nil
             path = resolved
           raise compile_error_for_node(:E_CONTRACT_LOCK_ORDER, "method and type definitions must appear before Tungsten.LOCK_THE_DOORS!", path, node)
+      elsif stop_seen && ast_kind(node) in (:class_def :module_def :trait_def) && known_types[node.name] != true
+        path = ast_get(node, :source_path)
+        if path == nil
+          path = resolved
+        raise compile_error_for_node(:E_CONTRACT_TYPE_ORDER, "new type definitions must appear before Tungsten.STOP_THE_PRESS!", path, node)
       key = definition_contract_key(node)
+      if ast_kind(node) in (:class_def :module_def :trait_def)
+        known_types[node.name] = true
       if key != nil && loader_core_source?(node)
         core_keys[key] = true
       i += 1

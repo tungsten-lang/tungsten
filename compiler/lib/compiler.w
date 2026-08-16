@@ -209,6 +209,10 @@ use target
   t_hash = clock() - hash_started_at
 
   mod[:enhanced_stacktraces] = true
+  # Debug executables promise source-level backtrace frames, not merely a
+  # walkable physical stack. The emitter pairs frame pointers with noinline
+  # and disabled sibling-call elimination for this mode.
+  mod[:preserve_debug_frames] = frame_pointers && !release_mode
   if release_mode
     strip_enhanced_stacktrace_metadata(mod)
     compact_live_module_strings(mod)

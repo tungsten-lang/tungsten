@@ -1628,11 +1628,11 @@ use ../../core/token
           args = []
         receiver = expr
         expr = Tungsten:AST:Call.new(receiver, name, args, block)
-        # These two compiler contracts are legal only in the entry program.
+        # Closed-world compiler contracts are legal only in the entry program.
         # Preserve their file provenance across Loader's flattened `use` graph
         # so it can reject a dependency that tries to impose either contract
         # on its caller.
-        if ast_kind(receiver) == :class_ref && receiver.name == "Tungsten" && name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+        if ast_kind(receiver) == :class_ref && receiver.name == "Tungsten" && name in ("PROTECT_THE_CORE!" "STOP_THE_PRESS!" "LOCK_THE_DOORS!")
           expr.source_path = @file
         # ClassRef nodes are interned by name, so sparse generic metadata must
         # live on this distinct call node. Otherwise parsing `Mat<T, m, n>` in
@@ -2952,6 +2952,11 @@ use ../../core/token
           clean = n.strip()
           if clean.size() > 0
             result[clean] = type_name.to_sym()
+      elsif type_name == "no_raise"
+        # Function-level optimizer contract. Keep it in the existing hint
+        # sidecar so the packed MethodDef/FnDef schema does not grow merely
+        # for a rare declaration-level bit.
+        result["__function_no_raise"] = :no_raise
     if result.size() == 0
       return nil
     result

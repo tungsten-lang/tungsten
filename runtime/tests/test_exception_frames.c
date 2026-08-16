@@ -80,6 +80,14 @@ static void test_stack_frame_cleanup_snapshot(void) {
     w_cleanup_pop();
 }
 
+static void test_heap_exception_frame_reuse(void) {
+    void *first = w_exception_push();
+    w_exception_pop();
+    void *second = w_exception_push();
+    require(first == second, "compiler exception frame was not recycled");
+    w_exception_pop();
+}
+
 static void test_exception_abandons_block_frames(void) {
     abandoned_outer = NULL;
     abandoned_inner = NULL;
@@ -122,6 +130,7 @@ static void test_inner_handler_preserves_enclosing_block(void) {
 }
 
 int main(void) {
+    test_heap_exception_frame_reuse();
     test_stack_frame_cleanup_snapshot();
     test_exception_abandons_block_frames();
     test_inner_handler_preserves_enclosing_block();

@@ -176,6 +176,432 @@
     i += 1
   true
 
+# -- Return class-set summaries ------------------------------------------------
+#
+# Scalar return inference answers "which representation?". These summaries
+# answer the orthogonal dispatch question "which source classes can this call
+# return?". Keys are native worker symbols, which makes inherited and reopened
+# methods line up with the exact implementation selected by the locked method
+# tables. Unknown evidence poisons a summary; an unresolved edge within the
+# SCC is temporarily ignored so a concrete base case can seed recursion.
+
+-> return_class_status_known(fact)
+  {kind: :known, fact: fact}
+
+-> return_class_status_unknown
+  {kind: :unknown}
+
+-> return_class_status_cycle
+  {kind: :cycle}
+
+-> return_class_status_join(mod, left, right)
+  if left[:kind] == :unknown || right[:kind] == :unknown
+    return return_class_status_unknown()
+  if left[:kind] == :cycle
+    return right
+  if right[:kind] == :cycle
+    return left
+  return_class_status_known(class_set_join(mod, left[:fact], right[:fact]))
+
+-> return_class_summary_add_definition(defs, workers, worker, node, class_name)
+  if worker == nil || node == nil || node.body == nil || node.body.size() == 0
+    return nil
+  defs[worker] = {key: worker, worker: worker, node: node, class_name: class_name}
+  workers[worker] = worker
+  nil
+
+-> collect_return_class_definitions(mod, expressions, ordered_class_exprs)
+  defs = {}
+  workers = {}
+  i = 0
+  while i < expressions.size()
+    node = expressions[i]
+    if ast_kind(node) in (:fn_def :method_def)
+      return_class_summary_add_definition(defs, workers, function_name_for_def(node), node, nil)
+    i += 1
+
+  i = 0
+  while i < ordered_class_exprs.size()
+    class_node = ordered_class_exprs[i]
+    cname = class_node.name
+    body = mod[:prepared_class_bodies][class_node]
+    if body == nil
+      body = class_node.body
+    if body != nil
+      j = 0
+      while j < body.size()
+        method = body[j]
+        if ast_kind(method) == :method_def
+          worker = class_method_function_name(cname, method)
+          return_class_summary_add_definition(defs, workers, worker, method, cname)
+          if method.is_class_method == true && static_method_raw_abi?(method)
+            workers[static_method_wrapper_name(cname, method)] = worker
+        j += 1
+    i += 1
+  {definitions: defs, workers: workers}
+
+-> return_class_call_worker_keys(mod, node, class_name, receiver_fact)
+  out = []
+  if node == nil || ast_kind(node) != :call || node.block != nil
+    return out
+  argc = node.args == nil ? 0 : node.args.size()
+  recv = node.receiver
+
+  # A bare call in a method prefers implicit-self dispatch when that selector
+  # exists in the hierarchy, matching lower_call. Otherwise it is a top-level
+  # function and known_calls gives its deterministic worker.
+  if recv == nil
+    if class_name != nil && class_has_instance_method?(mod, class_name, node.name)
+      targets = locked_class_set_targets(mod, class_set_compatible(class_name, true), node.name, argc)
+      if targets != nil
+        ti = 0
+        while ti < targets.size()
+          out.push(targets[ti][:fn_name])
+          ti += 1
+        return out
+    worker = mod[:known_calls][node.name]
+    if worker != nil
+      out.push(worker)
+    return out
+
+  # Static source call. Constructors are handled by the expression evaluator,
+  # before this resolver; a user-defined static `new` still reaches this arm.
+  if is_ast_node?(recv) && ast_kind(recv) in (:class_ref :var)
+    static_class = resolve_exact_source_class_name(mod, class_name, recv.name)
+    if static_class != nil
+      info = known_static_method_for(mod, static_class + "." + node.name, argc)
+      if info != nil && info[:is_static] == true
+        out.push(info[:fn_name])
+        if info[:method_fn_name] != nil && info[:method_fn_name] != info[:fn_name]
+          out.push(info[:method_fn_name])
+        return out
+
+  if receiver_fact == nil || class_set_unknown?(receiver_fact)
+    return out
+  targets = locked_class_set_targets(mod, receiver_fact, node.name, argc)
+  if targets != nil
+    ti = 0
+    while ti < targets.size()
+      out.push(targets[ti][:fn_name])
+      ti += 1
+  out
+
+-> return_class_summary_for_workers(mod, workers, component)
+  if workers == nil || workers.size() == 0
+    return return_class_status_unknown()
+  joined = nil
+  i = 0
+  while i < workers.size()
+    summary_key = mod[:return_class_set_workers][workers[i]]
+    if summary_key == nil
+      return return_class_status_unknown()
+    summary = mod[:return_class_sets][summary_key]
+    status = nil
+    if summary != nil
+      status = return_class_status_known(summary)
+    elsif component != nil && component[summary_key] == true
+      status = return_class_status_cycle()
+    else
+      status = return_class_status_unknown()
+    if joined == nil
+      joined = status
+    else
+      joined = return_class_status_join(mod, joined, status)
+    i += 1
+  if joined == nil
+    return return_class_status_unknown()
+  joined
+
+-> return_class_expr_status(mod, node, class_name, env, component)
+  if node == nil || !is_ast_node?(node)
+    return return_class_status_unknown()
+  kind = ast_kind(node)
+  if kind == :var
+    fact = env[node.name]
+    return fact == nil ? return_class_status_unknown() : return_class_status_known(fact)
+  if kind == :self_ref && class_name != nil
+    return return_class_status_known(class_set_compatible(class_name, true))
+  if kind == :assign
+    status = return_class_expr_status(mod, node.value, class_name, env, component)
+    target = node.target
+    if target != nil && ast_kind(target) == :var
+      if status[:kind] == :known
+        env[target.name] = status[:fact]
+      else
+        env.delete(target.name)
+    return status
+  if kind == :type_ascription
+    return return_class_expr_status(mod, node.expression, class_name, env, component)
+  if kind == :call
+    receiver_status = return_class_status_unknown()
+    if node.receiver != nil
+      receiver_status = return_class_expr_status(mod, node.receiver, class_name, env, component)
+    if node.args != nil
+      ai = 0
+      while ai < node.args.size()
+        return_class_expr_status(mod, node.args[ai], class_name, env, component)
+        ai += 1
+    ctor_ctx = {mod: mod, class_name: class_name}
+    ctor = class_set_ctor_name(ctor_ctx, node)
+    if ctor != nil
+      return return_class_status_known(class_set_exact_one(ctor))
+    receiver_fact = receiver_status[:kind] == :known ? receiver_status[:fact] : nil
+    workers = return_class_call_worker_keys(mod, node, class_name, receiver_fact)
+    return return_class_summary_for_workers(mod, workers, component)
+  if kind == :if
+    statuses = []
+    then_env = class_set_copy_env(env)
+    statuses.push(return_class_body_value_status(mod, node.then_body, class_name, then_env, component))
+    if node.elsif_clauses != nil
+      ei = 0
+      while ei < node.elsif_clauses.size()
+        elsif_env = class_set_copy_env(env)
+        statuses.push(return_class_body_value_status(mod, node.elsif_clauses[ei][1], class_name, elsif_env, component))
+        ei += 1
+    if node.else_body != nil && node.else_body.size() > 0
+      else_env = class_set_copy_env(env)
+      statuses.push(return_class_body_value_status(mod, node.else_body, class_name, else_env, component))
+    else
+      statuses.push(return_class_status_unknown())
+    joined = statuses[0]
+    si = 1
+    while si < statuses.size()
+      joined = return_class_status_join(mod, joined, statuses[si])
+      si += 1
+    return joined
+  return_class_status_unknown()
+
+-> return_class_body_value_status(mod, body, class_name, env, component)
+  if body == nil || body.size() == 0
+    return return_class_status_unknown()
+  i = 0
+  status = return_class_status_unknown()
+  while i < body.size()
+    node = body[i]
+    if ast_kind(node) == :return
+      return return_class_expr_status(mod, node.value, class_name, env, component)
+    status = return_class_expr_status(mod, node, class_name, env, component)
+    i += 1
+  status
+
+-> return_class_evidence_add(mod, evidence, status)
+  if status[:kind] == :unknown
+    evidence[:unknown] = true
+  elsif status[:kind] == :known
+    if evidence[:fact] == nil
+      evidence[:fact] = status[:fact]
+    else
+      evidence[:fact] = class_set_join(mod, evidence[:fact], status[:fact])
+  nil
+
+-> collect_return_class_evidence(mod, node, tail, class_name, env, component, evidence)
+  if node == nil || !is_ast_node?(node)
+    if tail
+      evidence[:unknown] = true
+    return nil
+  kind = ast_kind(node)
+  if kind == :return
+    return_class_evidence_add(mod, evidence, return_class_expr_status(mod, node.value, class_name, env, component))
+    return nil
+  if kind == :if
+    return_class_expr_status(mod, node.condition, class_name, env, component)
+    branch_envs = []
+    then_env = class_set_copy_env(env)
+    collect_return_class_body(mod, node.then_body, tail, class_name, then_env, component, evidence)
+    branch_envs.push(then_env)
+    if node.elsif_clauses != nil
+      ei = 0
+      while ei < node.elsif_clauses.size()
+        elsif_env = class_set_copy_env(env)
+        collect_return_class_body(mod, node.elsif_clauses[ei][1], tail, class_name, elsif_env, component, evidence)
+        branch_envs.push(elsif_env)
+        ei += 1
+    if node.else_body != nil && node.else_body.size() > 0
+      else_env = class_set_copy_env(env)
+      collect_return_class_body(mod, node.else_body, tail, class_name, else_env, component, evidence)
+      branch_envs.push(else_env)
+    else
+      branch_envs.push(class_set_copy_env(env))
+      if tail
+        evidence[:unknown] = true
+    joined_env = class_set_join_envs(mod, branch_envs)
+    old_keys = env.keys()
+    oi = 0
+    while oi < old_keys.size()
+      env.delete(old_keys[oi])
+      oi += 1
+    keys = joined_env.keys()
+    ki = 0
+    while ki < keys.size()
+      env[keys[ki]] = joined_env[keys[ki]]
+      ki += 1
+    return nil
+  if kind == :begin
+    collect_return_class_body(mod, node.body, tail, class_name, class_set_copy_env(env), component, evidence)
+    if node.rescue_body != nil && node.rescue_body.size() > 0
+      collect_return_class_body(mod, node.rescue_body, tail, class_name, class_set_copy_env(env), component, evidence)
+    if node.ensure_body != nil
+      collect_return_class_body(mod, node.ensure_body, false, class_name, class_set_copy_env(env), component, evidence)
+    return nil
+  if kind in (:while :with :parallel_with)
+    collect_return_class_body(mod, node.body, false, class_name, class_set_copy_env(env), component, evidence)
+    if tail
+      evidence[:unknown] = true
+    return nil
+  if kind in (:fn_def :method_def :class_def :module_def :trait_def :block)
+    if tail
+      evidence[:unknown] = true
+    return nil
+  status = return_class_expr_status(mod, node, class_name, env, component)
+  if tail
+    return_class_evidence_add(mod, evidence, status)
+  nil
+
+-> collect_return_class_body(mod, body, tail, class_name, env, component, evidence)
+  if body == nil || body.size() == 0
+    if tail
+      evidence[:unknown] = true
+    return nil
+  i = 0
+  while i < body.size()
+    collect_return_class_evidence(mod, body[i], tail && i == body.size() - 1, class_name, env, component, evidence)
+    i += 1
+  nil
+
+-> return_class_seed_env(mod, definition)
+  env = {}
+  node = definition[:node]
+  cname = definition[:class_name]
+  if cname != nil && node.is_class_method != true
+    env["__self"] = class_set_compatible(cname, true)
+  if node.param_types != nil && node.params != nil
+    i = 0
+    while i < node.param_types.size() && i < node.params.size()
+      type_name = resolve_exact_source_class_name(mod, cname, "" + node.param_types[i].to_s())
+      if type_name != nil && normal_source_instance_class?(mod, type_name)
+        env[param_runtime_name(node.params[i])] = class_set_compatible(type_name)
+      i += 1
+  env
+
+-> return_class_collect_dependency_calls(mod, node, class_name, dependencies)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  if ast_kind(node) == :call
+    receiver_fact = nil
+    recv = node.receiver
+    if recv != nil && ast_kind(recv) == :self_ref && class_name != nil
+      receiver_fact = class_set_compatible(class_name, true)
+    elsif recv != nil && ast_kind(recv) == :call
+      ctor_ctx = {mod: mod, class_name: class_name}
+      ctor = class_set_ctor_name(ctor_ctx, recv)
+      if ctor != nil
+        receiver_fact = class_set_exact_one(ctor)
+    workers = return_class_call_worker_keys(mod, node, class_name, receiver_fact)
+    wi = 0
+    while wi < workers.size()
+      key = mod[:return_class_set_workers][workers[wi]]
+      if key != nil
+        dependencies[key] = true
+      wi += 1
+  children = ast_children(node)
+  ci = 0
+  while ci < children.size()
+    return_class_collect_dependency_calls(mod, children[ci], class_name, dependencies)
+    ci += 1
+  nil
+
+-> return_class_scc_plan(mod, definitions)
+  graph = {}
+  reverse = {}
+  keys = definitions.keys()
+  i = 0
+  while i < keys.size()
+    key = keys[i]
+    deps = {}
+    definition = definitions[key]
+    return_class_collect_dependency_calls(mod, definition[:node], definition[:class_name], deps)
+    graph[key] = deps.keys()
+    reverse[key] = []
+    i += 1
+  i = 0
+  while i < keys.size()
+    from = keys[i]
+    edges = graph[from]
+    ei = 0
+    while ei < edges.size()
+      to = edges[ei]
+      if reverse[to] == nil
+        reverse[to] = []
+      reverse[to].push(from)
+      ei += 1
+    i += 1
+  order = []
+  seen = {}
+  i = 0
+  while i < keys.size()
+    return_inference_dfs_order(keys[i], graph, seen, order)
+    i += 1
+  components = []
+  seen = {}
+  oi = order.size() - 1
+  while oi >= 0
+    if seen[order[oi]] != true
+      component = []
+      return_inference_dfs_component(order[oi], reverse, seen, component)
+      components.push(component)
+    oi -= 1
+  out = []
+  ci = components.size() - 1
+  while ci >= 0
+    out.push(components[ci])
+    ci -= 1
+  out
+
+-> infer_return_class_sets_fixed_point(mod, expressions, ordered_class_exprs)
+  if mod[:method_tables_locked] != true
+    return nil
+  collected = collect_return_class_definitions(mod, expressions, ordered_class_exprs)
+  definitions = collected[:definitions]
+  mod[:return_class_set_workers] = collected[:workers]
+  components = return_class_scc_plan(mod, definitions)
+  ci = 0
+  while ci < components.size()
+    component = components[ci]
+    component_set = {}
+    i = 0
+    while i < component.size()
+      component_set[component[i]] = true
+      i += 1
+    changed = true
+    iter = 0
+    max_iter = component.size() + 2
+    while changed && iter < max_iter
+      changed = false
+      i = 0
+      while i < component.size()
+        key = component[i]
+        definition = definitions[key]
+        evidence = {fact: nil, unknown: false}
+        collect_return_class_body(mod, definition[:node].body, true, definition[:class_name], return_class_seed_env(mod, definition), component_set, evidence)
+        next_fact = evidence[:unknown] == true ? nil : evidence[:fact]
+        if class_set_unknown?(next_fact)
+          next_fact = nil
+        old_fact = mod[:return_class_sets][key]
+        if next_fact != nil && (old_fact == nil || !class_set_fact_equal?(old_fact, next_fact))
+          mod[:return_class_sets][key] = next_fact
+          changed = true
+        i += 1
+      iter += 1
+    ci += 1
+  nil
+
+-> return_class_set_call_fact(ctx, node, receiver_fact)
+  workers = return_class_call_worker_keys(ctx[:mod], node, ctx[:class_name], receiver_fact)
+  status = return_class_summary_for_workers(ctx[:mod], workers, nil)
+  if status[:kind] == :known
+    return status[:fact]
+  nil
+
 # Join reachable predecessor environments.  Absence from any predecessor is
 # unknown, not bottom: a variable assigned on just one arm is not exact after
 # the merge.
@@ -302,6 +728,9 @@
     ctor = class_set_ctor_name(ctx, node)
     if ctor != nil
       return class_set_exact_one(ctor)
+    summary = return_class_set_call_fact(ctx, node, recv_fact)
+    if summary != nil
+      return summary
     return class_set_unknown()
   if kind == :if
     state = class_set_analyze_if(ctx, node, env)

@@ -45,6 +45,14 @@ if [[ -z "$core_abi_a" || "$core_abi_a" != "$core_abi_b" ]]; then
   exit 1
 fi
 
+run_compiler --emit-wire "$root/compiler/test/fixtures/core_abi_stable_stop.w" > "$tmp/core-abi-stop.wire"
+grep -q '^core reuse: stable$' "$tmp/core-abi-stop.wire"
+core_abi_stop="$(awk '/^core abi:/{print $3}' "$tmp/core-abi-stop.wire")"
+if [[ -z "$core_abi_stop" || "$core_abi_stop" == "$core_abi_a" ]]; then
+  echo "open and type-frozen Core variants shared an ABI compatibility fingerprint" >&2
+  exit 1
+fi
+
 run_compiler --fast --emit-wire "$root/compiler/test/fixtures/core_abi_stable_a.w" > "$tmp/core-abi-fast.wire"
 grep -q '^core reuse: stable$' "$tmp/core-abi-fast.wire"
 core_abi_fast="$(awk '/^core abi:/{print $3}' "$tmp/core-abi-fast.wire")"
@@ -86,6 +94,43 @@ if grep -q 'call_method_i64.*\(SharedSet\|DistinctSet\).*value' <<<"$class_set_m
   echo "locked bounded class set retained inline-cache dispatch" >&2
   exit 1
 fi
+run_compiler --emit-wire "$root/compiler/test/fixtures/locked_return_class_sets.w" > "$tmp/return-class-sets.wire"
+return_class_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/return-class-sets.wire")"
+if [[ "$(grep -c 'call_direct_i64.*__w_ReturnSetDog_value__a1' <<<"$return_class_main")" -lt 2 ]] || \
+   [[ "$(grep -c 'call_direct_i64.*__w_ReturnSetCat_value__a1' <<<"$return_class_main")" -lt 2 ]]; then
+  echo "function/method SCC return class sets did not produce exhaustive direct dispatch" >&2
+  exit 1
+fi
+if grep -q 'call_method_i64.*ReturnSet.*value' <<<"$return_class_main"; then
+  echo "function/method SCC return class sets retained value inline caches" >&2
+  exit 1
+fi
+run_compiler run "$root/compiler/test/fixtures/locked_return_class_sets.w" > "$tmp/return-class-sets-dog.out"
+run_compiler run "$root/compiler/test/fixtures/locked_return_class_sets.w" one > "$tmp/return-class-sets-cat.out"
+printf '41\n41\n' > "$tmp/return-class-sets-dog.expected"
+printf '42\n42\n' > "$tmp/return-class-sets-cat.expected"
+cmp "$tmp/return-class-sets-dog.expected" "$tmp/return-class-sets-dog.out"
+cmp "$tmp/return-class-sets-cat.expected" "$tmp/return-class-sets-cat.out"
+
+run_compiler --emit-wire "$root/compiler/test/fixtures/locked_no_raise_rescue.w" > "$tmp/no-raise.wire"
+safe_no_raise="$(awk '/function __w_NoRaiseProof_safe_add__a2/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/no-raise.wire")"
+safe_int_no_raise="$(awk '/function __w_NoRaiseProof_safe_int_add__a1/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/no-raise.wire")"
+safe_scc_no_raise="$(awk '/function __w_NoRaiseProof_safe_scc_call__a1/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/no-raise.wire")"
+safe_method_scc_no_raise="$(awk '/function __w_NoRaiseProof_safe_method_scc_call__a2/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/no-raise.wire")"
+risky_no_raise="$(awk '/function __w_NoRaiseProof_risky_div__a3/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/no-raise.wire")"
+risky_transitive_no_raise="$(awk '/function __w_NoRaiseProof_risky_transitive_div__a3/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/no-raise.wire")"
+if grep -q 'w_exception_push' <<<"$safe_no_raise" || \
+   grep -q 'w_exception_push' <<<"$safe_int_no_raise" || \
+   grep -q 'w_exception_push' <<<"$safe_scc_no_raise" || \
+   grep -q 'w_exception_push' <<<"$safe_method_scc_no_raise"; then
+  echo "proven no-raise begin retained exception-frame setup" >&2
+  exit 1
+fi
+grep -q 'w_exception_push' <<<"$risky_no_raise"
+grep -q 'w_exception_push' <<<"$risky_transitive_no_raise"
+run_compiler run "$root/compiler/test/fixtures/locked_no_raise_rescue.w" > "$tmp/no-raise.out"
+printf '42\n42\n40\n42\n42\n42\n' > "$tmp/no-raise.expected"
+cmp "$tmp/no-raise.expected" "$tmp/no-raise.out"
 run_compiler --emit-wire "$root/compiler/test/fixtures/locked_class_set_widen.w" > "$tmp/class-set-widen.wire"
 class_set_widen_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/class-set-widen.wire")"
 grep -q 'call_method_i64' <<<"$class_set_widen_main"
@@ -168,6 +213,27 @@ if run_compiler check "$root/compiler/test/fixtures/locked_definition_after_barr
   exit 1
 fi
 grep -q 'definitions must appear before Tungsten.LOCK_THE_DOORS' "$tmp/lock-order.out"
+
+run_compiler --emit-wire "$root/compiler/test/fixtures/stopped_type_reopen.w" > "$tmp/type-stop.wire"
+type_stop_main="$(awk '/function main/{inside=1; next} inside && /^function /{exit} inside{print}' "$tmp/type-stop.wire")"
+grep -q 'call_direct_i64.*w_type_tables_lock_safe' <<<"$type_stop_main"
+if grep -q 'call_direct_i64.*w_method_tables_lock_safe' <<<"$type_stop_main"; then
+  echo "STOP_THE_PRESS unexpectedly locked existing method tables" >&2
+  exit 1
+fi
+run_compiler run "$root/compiler/test/fixtures/stopped_type_reopen.w" > "$tmp/type-stop.out"
+printf '42\n' > "$tmp/type-stop.expected"
+cmp "$tmp/type-stop.expected" "$tmp/type-stop.out"
+if [[ "${TUNGSTEN_TEST_COMPILER_DIRECT:-0}" == "1" ]]; then
+  run_compiler run --interpret "$root/compiler/test/fixtures/stopped_type_reopen.w" > "$tmp/type-stop.interpret.out"
+  cmp "$tmp/type-stop.expected" "$tmp/type-stop.interpret.out"
+fi
+
+if run_compiler check "$root/compiler/test/fixtures/stopped_new_type_after_barrier.w" > "$tmp/type-stop-order.out" 2>&1; then
+  echo "new type after STOP_THE_PRESS unexpectedly compiled" >&2
+  exit 1
+fi
+grep -q 'new type definitions must appear before Tungsten.STOP_THE_PRESS' "$tmp/type-stop-order.out"
 
 if run_compiler check "$root/compiler/test/fixtures/contract_dependency.w" > "$tmp/dependency.out" 2>&1; then
   echo "dependency-owned closed-world contract unexpectedly compiled" >&2

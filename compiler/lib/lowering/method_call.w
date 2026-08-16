@@ -219,7 +219,7 @@
   # Closed-world declarations are compile-time contracts, not dispatchable
   # Core methods. Loader/lower_ast already validated and recorded them; their
   # expression value is nil and they generate no call site or inline cache.
-  if recv_node != nil && is_ast_node?(recv_node) && ast_kind(recv_node) == :class_ref && recv_node.name == "Tungsten" && method_name in ("PROTECT_THE_CORE!" "LOCK_THE_DOORS!")
+  if recv_node != nil && is_ast_node?(recv_node) && ast_kind(recv_node) == :class_ref && recv_node.name == "Tungsten" && method_name in ("PROTECT_THE_CORE!" "STOP_THE_PRESS!" "LOCK_THE_DOORS!")
     if ast_get(node, :validated_program_contract) != true
       raise compile_error_for_node(:E_CONTRACT_TOP_LEVEL, "Tungsten." + method_name + " must be a top-level entry-program declaration", ctx[:source_path], node)
     return typed_value(:i64, w_nil.to_s())

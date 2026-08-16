@@ -2268,7 +2268,11 @@
       child_ctx[:enclosing_stmt_idx] = body.size() - 1
       last = body[body.size() - 1]
       last_t = ast_kind(last)
-      if last_t in (:puts :print :while :method_def :fn_def :begin :raise)
+      # A tail begin/rescue is a value expression, just as it is for top-level
+      # functions. Treating it as a statement discarded the taken arm and
+      # returned nil (and made no-raise handler elision appear to change the
+      # result even though both paths were already wrong).
+      if last_t in (:puts :print :while :method_def :fn_def :raise)
         lower_statement(child_ctx, last)
       elsif last_t == :return
         lower_statement(child_ctx, last)

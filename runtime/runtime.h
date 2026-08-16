@@ -968,6 +968,8 @@ extern uint16_t g_next_class_id;
 
 WValue w_class_new(const char *name, WValue superclass);
 WValue w_class_new_wv(WValue name, WValue superclass);
+WValue w_type_tables_lock_safe(void);
+int64_t w_type_tables_are_locked(void);
 WValue w_method_tables_lock_safe(void);
 int64_t w_method_tables_are_locked(void);
 void   w_class_add_method(WValue klass, const char *name, void *fn_ptr, int arity);
@@ -1030,8 +1032,12 @@ WValue w_closure_call_4(WValue closure_val, WValue arg1, WValue arg2, WValue arg
 typedef struct WExceptionFrame {
     jmp_buf buf;
     struct WExceptionFrame *prev;
+    struct WExceptionFrame *pool_next;
     WValue error;
     int32_t cleanup_depth;  /* g_cleanup_top at push time — unwind target */
+    uint32_t block_refs;    /* active block-return snapshots of this frame */
+    uint8_t heap_owned;     /* compiler push; eligible for TLS pool reuse */
+    uint8_t on_stack;       /* still linked from w_exception_stack */
 } WExceptionFrame;
 
 extern __thread WExceptionFrame *w_exception_stack;

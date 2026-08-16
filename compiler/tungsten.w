@@ -945,6 +945,9 @@ driver_homebrew_prefix_memo = {}
 
   if verbose
     << ""
+    parse_cache_text = loader.parse_cache_verbose_text()
+    if parse_cache_text != nil
+      << parse_cache_text
     << fmt_elapsed(t_load) + " load+parse"
 
   strip_runtime_metadata = release_mode && !debug_enabled
@@ -2562,6 +2565,7 @@ elsif command == "compile-batch"
     << "compile-batch: no files given"
     exit 1
 
+  loader_enable_parse_cache()
   ll_jobs = []
   needs_zstd_runtime = false
   fail_count = 0

@@ -1,6 +1,23 @@
 use lexer
 use parser
 
+# Process-local parsed-file cache for compile-batch. Entries own pristine,
+# unflattened slab ASTs; each load receives a deep clone before import
+# expansion or lowering can attach analysis. A stat tuple is the cheap hit
+# gate. If metadata changes, the already-required source read is fingerprinted
+# so a touch without a content change can still reuse the parse.
+loader_parse_cache_state = {
+  enabled: false,
+  entries: {},
+  hits: 0,
+  misses: 0,
+  fingerprint_hits: 0
+}
+
+-> loader_enable_parse_cache
+  loader_parse_cache_state[:enabled] = true
+  nil
+
 + Loader
   -> new(@verbose = false)
     @loaded_files = []
@@ -15,6 +32,86 @@ use parser
     @autoload_loaded = {}
     @manifest_poisoned = false
     @manifest_wanted = false
+    @parse_cache_hits_start = loader_parse_cache_state[:hits]
+    @parse_cache_misses_start = loader_parse_cache_state[:misses]
+    @parse_cache_fingerprint_hits_start = loader_parse_cache_state[:fingerprint_hits]
+
+  -> memory_parse_cache_enabled?
+    loader_parse_cache_state[:enabled] == true && env("TUNGSTEN_FRONTEND_PARSE_CACHE") != "0" && @runtime_id == "compiled-runtime"
+
+  -> memory_parse_cache_stat(resolved)
+    stat = File.stat(resolved)
+    if stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
+      return nil
+    {mtime: stat.mtime_ns(), ctime: stat.ctime_ns(), size: stat.size()}
+
+  -> memory_parse_cache_entry(resolved)
+    entry = loader_parse_cache_state[:entries][resolved]
+    if entry == nil || entry[:path] == nil || entry[:path].size() != resolved.size() || entry[:path] != resolved
+      return nil
+    entry
+
+  -> read_memory_parse_cache(resolved)
+    if !memory_parse_cache_enabled?
+      return nil
+    stat = memory_parse_cache_stat(resolved)
+    entry = memory_parse_cache_entry(resolved)
+    if stat == nil || entry == nil
+      loader_parse_cache_state[:misses] = loader_parse_cache_state[:misses] + 1
+      return nil
+    if entry[:mtime] != stat[:mtime] || entry[:ctime] != stat[:ctime] || entry[:size] != stat[:size]
+      loader_parse_cache_state[:misses] = loader_parse_cache_state[:misses] + 1
+      return nil
+    loader_parse_cache_state[:hits] = loader_parse_cache_state[:hits] + 1
+    ast_deep_clone(entry[:ast])
+
+  -> read_memory_parse_cache_fingerprint(resolved, source)
+    if !memory_parse_cache_enabled?
+      return nil
+    entry = memory_parse_cache_entry(resolved)
+    if entry == nil
+      return nil
+    fingerprint = digest_string64(source)
+    if entry[:fingerprint] != fingerprint
+      return nil
+    stat = memory_parse_cache_stat(resolved)
+    if stat == nil
+      return nil
+    entry[:mtime] = stat[:mtime]
+    entry[:ctime] = stat[:ctime]
+    entry[:size] = stat[:size]
+    loader_parse_cache_state[:hits] = loader_parse_cache_state[:hits] + 1
+    loader_parse_cache_state[:fingerprint_hits] = loader_parse_cache_state[:fingerprint_hits] + 1
+    ast_deep_clone(entry[:ast])
+
+  -> write_memory_parse_cache(resolved, source, ast)
+    if !memory_parse_cache_enabled?
+      return ast
+    stat = memory_parse_cache_stat(resolved)
+    if stat == nil
+      return ast
+    loader_parse_cache_state[:entries][resolved] = {
+      path: resolved,
+      mtime: stat[:mtime],
+      ctime: stat[:ctime],
+      size: stat[:size],
+      fingerprint: digest_string64(source),
+      ast: ast_deep_clone(ast)
+    }
+    ast
+
+  -> parse_cache_verbose_text
+    if !memory_parse_cache_enabled?
+      return nil
+    hits = loader_parse_cache_state[:hits] - @parse_cache_hits_start
+    misses = loader_parse_cache_state[:misses] - @parse_cache_misses_start
+    fingerprint_hits = loader_parse_cache_state[:fingerprint_hits] - @parse_cache_fingerprint_hits_start
+    if hits == 0 && misses == 0
+      return nil
+    text = "  frontend parse cache: " + hits.to_s() + " hits, " + misses.to_s() + " misses"
+    if fingerprint_hits > 0
+      text = text + " (" + fingerprint_hits.to_s() + " fingerprint)"
+    text
 
   # Parse the shell-wrapper-exported TUNGSTEN_SERVICE_BINDINGS env var.
   # Format: "name1=bit1,name2=bit2". Missing/empty → empty hash.
@@ -80,14 +177,19 @@ use parser
     if @verbose && env("DEBUG_LOADS") == "1"
       << "  load " + display_path(resolved)
 
-    source = read_file(resolved)
-    if source == nil
-      raise compile_error(:E_LOAD_MISSING_FILE, "Could not load '" + path + "' (resolved to '" + resolved + "')", from_file, 1, 1)
-    source = ccall("w_algebra_rewrite_source", source)
-    lexer = Lexer.new(source, resolved)
-    token_count = lexer.tokenize()
-    parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
-    ast = parser.parse()
+    ast = read_memory_parse_cache(resolved)
+    if ast == nil
+      source = read_file(resolved)
+      if source == nil
+        raise compile_error(:E_LOAD_MISSING_FILE, "Could not load '" + path + "' (resolved to '" + resolved + "')", from_file, 1, 1)
+      source = ccall("w_algebra_rewrite_source", source)
+      ast = read_memory_parse_cache_fingerprint(resolved, source)
+      if ast == nil
+        lexer = Lexer.new(source, resolved)
+        token_count = lexer.tokenize()
+        parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
+        ast = parser.parse()
+        write_memory_parse_cache(resolved, source, ast)
     validate_contract_locations(ast.expressions, resolved, from_file)
 
     expressions = []

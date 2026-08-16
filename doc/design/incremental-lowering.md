@@ -297,3 +297,39 @@ As expected, eight alternating full native-link pairs were flat: 10.399720s
 before and 10.400036s after (a 0.003% difference). The optimization is retained
 as a small, exact-output frontend cleanup; it does not claim a measurable
 whole-build improvement under FullLTO.
+
+## In-process parsed-file cache
+
+`compile-batch` now retains a pristine, unflattened slab AST for each parsed
+source file. A new Loader deep-clones that AST before import expansion and
+lowering, so program-specific analysis cannot mutate the cached template. The
+cheap hit gate compares path, nanosecond mtime, ctime, and size. If metadata
+changes, Loader reads the source as it would on a miss and compares a content
+fingerprint; identical bytes update the stat tuple without lexing or parsing,
+while changed bytes replace the entry. `TUNGSTEN_FRONTEND_PARSE_CACHE=0`
+disables reuse for A/B and diagnosis.
+
+This tranche is intentionally process-local. It accelerates the spec suite's
+single `compile-batch` process without introducing a second persistent AST
+format. A later cross-process cache can reuse the same manifest policy once it
+can reconstruct packed AST nodes, bodies, sparse metadata, and location-file
+state safely.
+
+On 2026-08-16, five alternating pairs compiled 150 copies of
+`compiler/test/fixtures/core_abi_stable_b.w` with
+`--release --native --fast --no-debug --emit-ll`; the persistent Core WIRE
+snapshot was populated before every measured series. Median wall time fell
+from 35.923276s to 32.833317s: 3.089959s saved, 8.60% faster, or 1.094x
+throughput. A separate 150-program peak-memory pair measured 9,927,491,584
+bytes without parse reuse and 8,009,711,616 bytes with it, saving 1,917,779,968
+bytes (19.32%).
+
+The cache is enabled only by `compile-batch`; ordinary single-file compilation
+does not retain a pristine clone. Twenty alternating single-file artifact pairs
+were neutral at 0.296550s before and 0.295843s after (-0.24%, within noise).
+
+Cache-off/on LLVM and symbol sidecars were byte-identical. The broader
+eight-program batch-vs-solo oracle also matched fresh-process LLVM for fusion,
+bignum, typed overload, rational, loop, and math-mode fixtures. A focused
+compiled-runtime test covers stat hits, same-content fingerprint hits, and
+real-content invalidation.

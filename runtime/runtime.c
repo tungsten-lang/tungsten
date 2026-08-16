@@ -37050,6 +37050,11 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
     (void)neg_b;
     int32_t la = sa < 0 ? -sa : sa;
     int32_t lb = sb < 0 ? -sb : sb;
+    /* Exact migrated scalar-word arm.  Keep this before the general
+     * equal-length/one-limb exclusions and make the gate identical to the
+     * source worker's route: addition only, positive 3-limb receiver,
+     * positive 1-limb rhs.  Every other word/sign shape retains C. */
+    if (!neg_b && sa == 3 && sb == 1) return 1;
     /* Exclusion keys on the RAW operand signs, NOT the post-flip effective
      * ones: C's `bigint_add_equal_fast` and `bigint_sub_equal_fast` each
      * specialize equal-length pairs whose own signs match, per operator.
@@ -53644,6 +53649,25 @@ WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)signed_size;
     return bigint_finish_mag_add(b);
+}
+WValue w_bigint_add1_3_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=3:
+         * the fixed source kernel already published [sum, 0, 0]. */
+        if (3U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(4);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0, 2 * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[3] = 1;
+        r->size = 4;
+        return bigint_box(r);
+    }
+    r->size = 3;
+    return bigint_box(r);
 }
 WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);

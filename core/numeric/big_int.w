@@ -2899,6 +2899,25 @@ on macos && arm64
     ASM
 
 
+# Exact AArch64/macOS port of runtime.c's positive three-limb add-word arm.
+# Preserve the C schedule literally: load all three limbs, run the full
+# adds/adcs chain, publish all three result limbs, and return the top carry.
+# The raw finish boundary below retains the C path's vanishingly rare
+# cap-three to cap-four growth instead of changing the allocation policy.
+on macos && arm64
+  fn __bigint_add1_3_exact(rp, ap, word) (i64 i64 i64) i64
+    asm <<~ASM
+      ldp x4, x5, [x1]
+      ldr x6, [x1, #16]
+      adds x4, x4, x2
+      adcs x5, x5, xzr
+      adcs x6, x6, xzr
+      stp x4, x5, [x0]
+      str x6, [x0, #16]
+      cset x0, cs
+      ret
+    ASM
+
 # Exact raw wrappers for the positive 4-by-2-limb C leaf.  Keep WValue and
 # limb addresses as i64 throughout: routing them through typed source fields
 # would box the addresses and re-enter ordinary numeric dispatch.  Allocation,
@@ -2953,6 +2972,16 @@ fn __bigint_div_84_raw(a, b) (i64 i64) i64
     ccall_nobox("w_bigint_release_unfinished_raw", result)
     return ccall_nobox("w_bigint_div_84_after_cert_fail", a, b)
   ccall_nobox("w_bigint_finish_sub_raw", result, outn)
+
+fn __bigint_add1_3_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  word = raw_load_u64(bp, 0) ## i64
+  carry = __bigint_add1_3_exact(rp, ap, word) ## i64
+  ccall_nobox("w_bigint_add1_3_finish_raw", result, carry)
 
 
 # Exact floor square root for one machine-word magnitude. A hardware f64
@@ -3445,6 +3474,16 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     pb = (other$value & mask) + 16
 
     if (an > 0) == (bn > 0)
+      on macos && arm64
+        # Exact scalar-word arm: the direct C lane decodes the positive
+        # one-limb rhs before bigint_add_word_into.  Preserve its n==3 fixed
+        # kernel and rare growth epilogue in native source before entering
+        # the broader equal/unequal BigInt dispatch tree.
+        if an == 3 && bn == 1
+          return wvalue_from_bits(
+            __bigint_add1_3_raw($value ## i64, other$value ## i64)
+          )
+
       # Equal-length same-sign pairs are bigint_add_equal_fast's domain —
       # the dedicated C arm source measured 1.12-1.30 against. Route them
       # through the direct bigint entry (not w_add: both operands are

@@ -343,6 +343,27 @@ with 500 ms legs, the combined cache won 30/31 pairs: candidate/exact was
 C-normalized candidate/exact was 0.98768.  Raw evidence:
 `bigint_mod_84_native_tls_results.txt`.
 
+EXACT POSITIVE ADD1@3 CHECKPOINT: the positive three-limb receiver plus
+positive one-limb BigInt arm now has a literal native Tungsten port of C's
+`BN_WORD_FIXED_CASE(3)` schedule on macOS ARM64: the same `ldp`/`ldr` loads,
+`adds`/`adcs` chain, `stp`/`str` publication, and carry result.  The source
+wrapper also retains `bigint_add_ui_any`'s storage policy rather than hiding
+the hard part behind a larger allocation: it asks the hot allocator for
+exactly three limbs and only the full-carry edge grows to a non-hot cap-four
+buffer, copying/zeroing/releasing exactly like `bigint_add_word_into`.
+Compiled and interpreted focused specs cover no carry, one-limb carry death,
+full three-limb carry, exact header size, round trips, neighboring widths, and
+sign fallbacks; emitted LLVM verifies and the final leaf is the intended nine
+instruction arithmetic/storage body plus `ret`.  The exact checkpoint is not
+yet performance-accepted: a 9x110 ms public `add1@3` run measured native
+source at 6.095 ns versus C at 1.821 ns and GMP at 1.839 ns.  A hardware-
+counter profile attributes 10.2% of cycles to the native leaf and contains no
+`bn_add_word_a64_fixed`, proving this is the admitted source route rather than
+a stale C measurement.  That retained
+gap is the starting point for a separately committed native-only routing and
+boundary optimization, not permission to alter the C algorithm during the
+port.  Evidence: `bigint_add1_3_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

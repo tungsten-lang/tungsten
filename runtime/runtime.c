@@ -12793,11 +12793,16 @@ WBigint *mag_mod_84(const uint64_t *u, const uint64_t *v) {
                 uint64_t carry = bn_add_n(window, window, vn, 4);
                 window[4] += carry;
             }
+            /* The corrected remainder occupies window[0..3]; window[4]
+             * is the cleared borrow/carry limb.  The next quotient digit
+             * consumes window[3:2] as its register pair and brings
+             * window[1] down as n0.  Keeping window[4:3] here shifts the
+             * recurrence by one limb and corrupts consecutive saturated
+             * digits (for example (B^4-1)^2+r mod (B^4-1)). */
             un[j] = window[0];
             un[j + 1] = window[1];
-            un[j + 2] = window[2];
-            r0 = window[3];
-            r1 = window[4];
+            r0 = window[2];
+            r1 = window[3];
         } else {
             qhat = bn_udiv_qr_3by2(
                 r1, r0, un[j + 2], d1, d0, dinv, &r1, &r0);

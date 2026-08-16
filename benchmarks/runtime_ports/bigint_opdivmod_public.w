@@ -12,6 +12,7 @@
 #   intarg   — bigint / inline int (control: C, gate excludes)
 #   fourtwo  — 4-limb / 2-limb (preinverse band)
 #   sixthree — 6-limb / 3-limb (fixed reciprocal band)
+#   eightfour — 8-limb / 4-limb (cached-preinverse modulo band)
 #   eq       — 64-limb / 61-limb near-equal (tiny quotient)
 #   bz       — 256-limb / 128-limb (Burnikel-Ziegler band)
 #   neg      — 4-limb / 2-limb with alternating signs (in-gate; kernel
@@ -159,6 +160,65 @@ CORPUS_MASK = CORPUS_SIZE - 1
     check_value("sixthree roundtrip [i]", (q * y + r).to_s(), x.to_s())
     i += 1
 
+# Algebraically constructed positive 8-by-4-limb cases for mag_mod_84.
+# The four-limb quotient/divisor products stay strictly below B^8, while the
+# independent remainder seed exercises shifted/unshifted normalization and
+# zero through full-width remainders.
+-> run_eightfour_edges
+  b = 18446744073709551616
+  half = 9223372036854775808
+  b2 = b * b
+  b3 = b2 * b
+  b4 = b3 * b
+  divisors = [
+    (half + 1) * b3 + b2 + b + 1,
+    (b - 1) * b3 + 3 * b2 + 5 * b - 1,
+    half * b3 + 17 * b2 + 3,
+    b4 - 1,
+    (b - 1) * b3 + (b - 1) * b2,
+    (half + 123) * b3 + (b - 17) * b2 + 5 * b + 9,
+    81985529216486895 * b3 + 18364758544493064721 * b2 + 7 * b + 11,
+    (half + 1) * b3 + 1229782938247303441 * b2 + 13 * b + 17
+  ]
+  quotients = [
+    (half + 3) * b3 + 1,
+    (b - 1) * b3 + (b - 1),
+    2 * b3 + 3 * b2 + 5 * b + 7,
+    b4 - 1,
+    (b - 1) * b3 + b2 + 11,
+    3 * b3 + 5 * b2 + 9 * b + 13,
+    (b - 1) * b3 + 2459565876494606882 * b + 19,
+    (b - 1) * b3 + 3
+  ]
+  remainder_seeds = [
+    0,
+    1,
+    b - 1,
+    divisors[3] - 1,
+    divisors[4] / 2,
+    b3 + 7,
+    divisors[6] - (b2 + 1),
+    divisors[7] / 3
+  ]
+
+  i = 0
+  while i < 256
+    k = i & 7
+    y = divisors[k]
+    expected_q = quotients[k]
+    expected_r = (remainder_seeds[k] + i * 3202034522624059733) % y
+    x = expected_q * y + expected_r
+    check_value("eightfour dividend width [i]", bigint_size(x), 8)
+    check_value("eightfour divisor width [i]", bigint_size(y), 4)
+    q = x / y
+    r = x % y
+    check_value("eightfour div expected [i]", q.to_s(), expected_q.to_s())
+    check_value("eightfour mod expected [i]", r.to_s(), expected_r.to_s())
+    check_value("eightfour div C differential [i]", q.to_s(), x.__c_div_oracle(y).to_s())
+    check_value("eightfour mod C differential [i]", r.to_s(), x.__c_mod_oracle(y).to_s())
+    check_value("eightfour roundtrip [i]", (q * y + r).to_s(), x.to_s())
+    i += 1
+
 -> one_limb_value(k)
   1125899906842624 + k * 2 + 1
 
@@ -181,6 +241,8 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = 10 ** 76 + 3 + i * 2
     elsif stratum == "sixthree"
       v = 10 ** 114 + 3 + i * 2
+    elsif stratum == "eightfour"
+      v = 10 ** 152 + 3 + i * 2
     elsif stratum == "eq"
       v = 10 ** 1232 + 11 + i * 2
     else
@@ -207,6 +269,8 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = 10 ** 38 + 7 + i * 2
     elsif stratum == "sixthree"
       v = 10 ** 56 + 7 + i * 2
+    elsif stratum == "eightfour"
+      v = 10 ** 75 + 7 + i * 2
     elsif stratum == "eq"
       v = 10 ** 1229 + 17 + i * 2
     else
@@ -218,7 +282,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
   values
 
 -> run_correctness
-  strata = ["one", "one-smallrem", "one-high", "one-lt", "one-nega", "one-negb", "one-negboth", "intarg", "fourtwo", "sixthree", "eq", "bz", "neg"]
+  strata = ["one", "one-smallrem", "one-high", "one-lt", "one-nega", "one-negb", "one-negboth", "intarg", "fourtwo", "sixthree", "eightfour", "eq", "bz", "neg"]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -237,7 +301,8 @@ CORPUS_MASK = CORPUS_SIZE - 1
     s += 1
   run_fourtwo_edges()
   run_sixthree_edges()
-  << "correctness: ok (208 corpus differentials + 512 adversarial 4x2 + 512 adversarial 6x3 differentials, exact q/r and roundtrips)"
+  run_eightfour_edges()
+  << "correctness: ok (224 corpus differentials + 512 adversarial 4x2 + 512 adversarial 6x3 + 512 adversarial 8x4 differentials, exact q/r and roundtrips)"
 
 -> time_div(receivers, args, iters)
   checksum = 0

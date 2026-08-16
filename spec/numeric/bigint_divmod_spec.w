@@ -78,6 +78,20 @@ check("mod63_prefix_carry_roundtrip",
       (mod63_dividend % mod63_divisor),
       mod63_dividend)
 
+# Fixed 8-by-4 remainder: a saturated quotient digit must hand the corrected
+# five-limb window to the next digit as (w3,w2), not the cleared (w4,w3)
+# pair. Consecutive saturated digits in (B^4-1)^2+r expose that recurrence.
+mod84_divisor = base ** 4 - 1
+mod84_quotient = mod84_divisor
+mod84_remainder = 9606103567872179198
+mod84_dividend = mod84_quotient * mod84_divisor + mod84_remainder
+check("mod84_saturated_handoff_div", mod84_dividend / mod84_divisor, mod84_quotient)
+check("mod84_saturated_handoff_mod", mod84_dividend % mod84_divisor, mod84_remainder)
+check("mod84_saturated_handoff_roundtrip",
+      (mod84_dividend / mod84_divisor) * mod84_divisor +
+      (mod84_dividend % mod84_divisor),
+      mod84_dividend)
+
 # Explicit operator sends
 check("explicit_div", a./(b), q_want)
 check("explicit_mod", a.%(b), r_want)

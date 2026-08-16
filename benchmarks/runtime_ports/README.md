@@ -277,6 +277,16 @@ The redundant C certificate disappeared from the counter profile.  A promoted
 signed controls remained green at 0.966 and 0.957.  Raw evidence:
 `bigint_div_63_resume_results.txt`.
 
+8-BY-4 MODULO PORT PREPARATION: the new exact 8/4 stratum and 512-case
+algebraic edge matrix exposed a pre-existing `mag_mod_84` saturated-digit
+handoff bug.  Its corrected five-limb window must advance `(w3,w2)` as the
+next register remainder pair; the old `(w4,w3)` mapping shifted the recurrence
+by one limb.  The generic Knuth path independently confirmed the oracle, and
+`(B^4-1)^2+r` now has a focused spec regression.  Before any native 8/4
+arithmetic was added, a 12-pair source/C baseline measured 1.028 (37.878 ns
+versus 36.859 ns); both lanes still execute the corrected C leaf.  Raw
+evidence: `bigint_mod_84_preport_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

@@ -1703,38 +1703,23 @@ on macos && arm64
         ldr  x23, [sp, #136]
         ldr  x22, [x1, #16]
       Lmod84_3:
-        adrp  x0, _bn_mod84_preinv_d1@TLVPPAGE
-        ldr  x0, [x0, _bn_mod84_preinv_d1@TLVPPAGEOFF]
+        adrp  x0, _bn_mod84_native_preinv_cache@TLVPPAGE
+        ldr  x0, [x0, _bn_mod84_native_preinv_cache@TLVPPAGEOFF]
         ldr  x8, [x0]
         blr  x8
-        mov  x8, x0
-        ldr  x9, [x0]
-        adrp  x0, _bn_mod84_preinv_d0@TLVPPAGE
-        ldr  x0, [x0, _bn_mod84_preinv_d0@TLVPPAGEOFF]
-        ldr  x10, [x0]
-        blr  x10
-        ldr  x10, [x0]
+        mov  x25, x0
+        ldp  x9, x10, [x25]
         cmp  x9, x21
         ccmp  x10, x22, #0, eq
         b.eq  Lmod84_7
-        ldr  x9, [x8, #8]
+        ldp  x9, x10, [x25, #24]
         cmp  x9, x21
+        ccmp  x10, x22, #0, eq
         b.ne  Lmod84_8
-        ldr  x9, [x0, #8]
-        cmp  x9, x22
-        b.ne  Lmod84_8
-        adrp  x0, _bn_mod84_preinv_value@TLVPPAGE
-        ldr  x0, [x0, _bn_mod84_preinv_value@TLVPPAGEOFF]
-        ldr  x8, [x0]
-        blr  x8
-        ldr  x24, [x0, #8]
+        ldr  x24, [x25, #40]
         b  Lmod84_15
       Lmod84_7:
-        adrp  x0, _bn_mod84_preinv_value@TLVPPAGE
-        ldr  x0, [x0, _bn_mod84_preinv_value@TLVPPAGEOFF]
-        ldr  x8, [x0]
-        blr  x8
-        ldr  x24, [x0]
+        ldr  x24, [x25, #16]
         b  Lmod84_15
       Lmod84_8:
         lsr  x9, x21, #55
@@ -1781,7 +1766,6 @@ on macos && arm64
         umulh  x11, x9, x22
         adds  x11, x10, x11
         b.lo  Lmod84_13
-        mov  x10, x0
         sub  x24, x9, #1
         cmp  x11, x21
         b.lo  Lmod84_14
@@ -1792,24 +1776,16 @@ on macos && arm64
         csel  x24, x24, x9, hi
         b  Lmod84_14
       Lmod84_13:
-        mov  x10, x0
         mov  x24, x9
       Lmod84_14:
-        adrp  x0, _bn_mod84_preinv_next@TLVPPAGE
-        ldr  x0, [x0, _bn_mod84_preinv_next@TLVPPAGEOFF]
-        ldr  x9, [x0]
-        blr  x9
-        ldrb  w9, [x0]
+        ldrb  w9, [x25, #48]
         add  w11, w9, #1
-        strb  w11, [x0]
-        ubfiz  x9, x9, #3, #1
-        str  x21, [x8, x9]
-        str  x22, [x10, x9]
-        adrp  x0, _bn_mod84_preinv_value@TLVPPAGE
-        ldr  x0, [x0, _bn_mod84_preinv_value@TLVPPAGEOFF]
-        ldr  x8, [x0]
-        blr  x8
-        str  x24, [x0, x9]
+        strb  w11, [x25, #48]
+        and  x9, x9, #1
+        add  x9, x9, x9, lsl #1
+        add  x9, x25, x9, lsl #3
+        stp  x21, x22, [x9]
+        str  x24, [x9, #16]
       Lmod84_15:
         mov  x27, #0
         add  x26, sp, #80

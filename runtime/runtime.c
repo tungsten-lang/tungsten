@@ -12724,6 +12724,21 @@ __attribute__((visibility("hidden"))) __thread uint64_t
     bn_mod84_preinv_value[2];
 __attribute__((visibility("hidden"))) __thread uint8_t
     bn_mod84_preinv_next;
+
+typedef struct {
+    struct {
+        uint64_t d1;
+        uint64_t d0;
+        uint64_t value;
+    } entry[2];
+    uint8_t next;
+} BnMod84NativePreinvCache;
+
+/* Native follow-up to the exact port: one TLS descriptor lookup exposes the
+ * same two entries and round-robin replacement policy.  The retained C lane
+ * keeps its original independently measured cache layout above. */
+__attribute__((visibility("hidden"))) __thread BnMod84NativePreinvCache
+    bn_mod84_native_preinv_cache;
 #endif
 
 static inline __attribute__((always_inline))

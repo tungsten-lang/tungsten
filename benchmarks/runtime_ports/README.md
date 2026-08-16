@@ -300,6 +300,18 @@ at 0.993 (36.326 ns versus 36.555 ns); the 4/2 control was 0.983 and the
 already-native 6/3 control 1.029.  This is the exact-port checkpoint, not a
 native-only algorithm change.  Raw evidence: `bigint_mod_84_exact_results.txt`.
 
+NATIVE 8-BY-4 CACHE FOLLOW-UP: counters attributed 1.5% of total cycles to
+Mach-O TLS resolution because the exact C layout stores each preinverse field
+behind a separate descriptor.  Native Tungsten now stores the same two
+`(d1,d0,value)` entries and incrementing round-robin selector in one private
+TLS object, reducing a hit from three descriptor resolutions to one.  The
+reciprocal, five quotient digits, correction paths, allocation, and
+normalization are unchanged.  In a direct exact-vs-native 31-pair promotion
+with 500 ms legs, the combined cache won 30/31 pairs: candidate/exact was
+0.98899 with 0.00829 paired IQR (35.934 ns versus 36.312 ns medians);
+C-normalized candidate/exact was 0.98768.  Raw evidence:
+`bigint_mod_84_native_tls_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

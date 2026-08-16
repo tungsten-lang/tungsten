@@ -78,10 +78,11 @@ use wire_constructors
 
 # -- Module --
 
--> wire_module(source_path)
+-> wire_module(source_path, retained_wire_mark = 0)
   # One WIRE generation lives through lower -> destructive mid-end -> emit.
   # compile-batch starts the next module only after emission has finished.
-  ccall_nobox("w_wire_store_reset", 0)
+  retained_wire_mark_raw = ccall_nobox("w_numeric_to_i64", retained_wire_mark)
+  ccall_nobox("w_wire_store_reset", retained_wire_mark_raw)
   wire_record(:wire_module, {
     source_path:      source_path,
     functions:        [],
@@ -134,6 +135,22 @@ use wire_constructors
     core_reuse_contract: nil,
     core_reuse_fallback_reason: nil,
     core_abi_hash: nil,
+    # Process-local immutable Core WIRE reuse. These fields are declared on
+    # the module record up front so cache state never depends on late spare
+    # field insertion or field-cache collisions.
+    incremental_core_cache_probe: nil,
+    incremental_core_cache_key: nil,
+    incremental_core_cache_entry: nil,
+    incremental_core_cache_status: nil,
+    incremental_core_cache_hit: false,
+    incremental_core_cache_closure_files: nil,
+    incremental_core_cache_stored: false,
+    incremental_core_cache_retain_mark: nil,
+    incremental_core_cache_name_map: nil,
+    incremental_core_fn_hashes: nil,
+    incremental_core_cache_counter_prefix: nil,
+    incremental_core_function_count: 0,
+    incremental_core_string_count: 0,
     cvar_globals:     {},
     fn_memo_tables:   {},
     used_memo_tables: {},
@@ -148,6 +165,8 @@ use wire_constructors
     next_block:       0,
     next_ic:          0,
     next_call_site:   0,
+    next_fuse_site:   0,
+    next_inline_block_id: 0,
     reuse_sites:     [],
     next_reuse_site: 0,
     custom_units:    {},

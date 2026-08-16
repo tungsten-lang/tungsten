@@ -226,7 +226,10 @@
             } else if (fn_len == 16 && memcmp(fn, "w_is_wire_extern", 16) == 0 && argc == 2) {
               result = int_value(w_is_wire_extern(args[1]));
             } else if (fn_len == 18 && memcmp(fn, "w_wire_store_reset", 18) == 0 && argc == 2) {
-              result = int_value(w_wire_store_reset(0));
+              int64_t reserved = value_is_int(args[1]) ? value_as_int(args[1]) : (int64_t)args[1];
+              result = int_value(w_wire_store_reset(reserved));
+            } else if (fn_len == 17 && memcmp(fn, "w_wire_store_mark", 17) == 0 && argc == 1) {
+              result = int_value(w_wire_store_mark());
             } else if (fn_len == 12 && memcmp(fn, "w_wire_clone", 12) == 0 && argc == 2) {
               result = w_wire_clone(args[1]);
             } else if (fn_len == 18 && memcmp(fn, "w_node_kind_extern", 18) == 0 && argc == 2) {

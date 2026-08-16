@@ -140,6 +140,16 @@ static void test_wire_arena(void) {
 
     WValue *retained_base = g_wire_arena.base;
     uint32_t retained_cap = g_wire_arena.cap;
+    int64_t retained_mark = w_wire_store_mark();
+    WValue retained = original;
+    w_wire_store_reset(retained_mark);
+    CHECK(g_wire_arena.cursor == (uint32_t)retained_mark,
+          "WIRE reset can preserve an immutable prefix");
+    CHECK(w_as_int(w_wire_field_load(retained, key_arg)) == 99,
+          "WIRE retained-prefix handles remain readable");
+    WValue overlay = w_wire_alloc(38, 1);
+    CHECK(w_wire_offset(overlay) == (uint32_t)retained_mark,
+          "WIRE overlay begins at the retained watermark");
     w_wire_store_reset(0);
     CHECK(g_wire_arena.base == retained_base, "WIRE reset retains high-water buffer");
     CHECK(g_wire_arena.cursor == 1, "WIRE reset rewinds to first valid offset");

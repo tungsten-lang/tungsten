@@ -27,6 +27,13 @@ use hashing
   idx
 
 -> canonical_op_code(op, op_codes)
+  # Packed WIRE gives every opcode a generated, process-independent ordinal.
+  # Using it directly keeps a function hash independent of which unrelated
+  # function happened to introduce that opcode first (critical when cached
+  # Core functions are not re-walked on a batch hit).
+  schema_code = wire_kind_id(op)
+  if schema_code != nil
+    return schema_code
   existing = op_codes[op]
   if existing != nil
     return existing
@@ -751,7 +758,10 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
 -> build_hash_symbols(hash_groups, min_prefix)
   used = {}
   hash_symbols = {}
-  hkeys = hash_groups.keys()
+  # Hash insertion order differs between a cold lowering and a warm Core
+  # cache hit even when the exact same symbol set is present. Assign compact
+  # collision suffixes in a stable order.
+  hkeys = hash_groups.keys().sort()
   hi = 0
   while hi < hkeys.size()
     h = hkeys[hi]
@@ -797,7 +807,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     kind = func[:source_kind]
     if kind != nil
       kind = kind.to_s()
-    info[original] = {
+    entry = {
       symbol: original,
       class: func[:source_class],
       method: func[:source_method],
@@ -806,6 +816,9 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       line: func[:source_line],
       arity: func[:params].size()
     }
+    info[original] = entry
+    if func[:name] != original
+      info[func[:name]] = entry
     fi += 1
   info
 
@@ -865,7 +878,8 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   out << ",\n"
   out << "  \"hashes\": {\n"
 
-  hkeys = hash_groups.keys()
+  # Emit a byte-stable sidecar across cold lowering and warm Core hits.
+  hkeys = hash_groups.keys().sort()
   hi = 0
   while hi < hkeys.size()
     h = hkeys[hi]
@@ -907,7 +921,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   while fi < functions.size()
     func = functions[fi]
     h = fn_hash_get(fn_hashes, func[:name])
-    if h != nil
+    if h != nil && func[:incremental_core_frozen] != true
       compact = hash_symbol_get(hash_symbols, h)
       if compact != nil && compact != func[:name]
         owner = compact_owners[compact]
@@ -982,6 +996,16 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
 -> content_hash_pass(mod, verbose = false)
   functions = mod[:functions]
   fn_hashes = {}
+  cached_core_hashes = mod[:incremental_core_fn_hashes]
+  if cached_core_hashes != nil
+    cached_names = cached_core_hashes.keys()
+    ci = 0
+    while ci < cached_names.size()
+      cached_name = cached_names[ci]
+      cached_hash = fn_hash_get(cached_core_hashes, cached_name)
+      if cached_hash != nil
+        fn_hash_put(fn_hashes, cached_name, cached_hash)
+      ci += 1
   fn_contents = {}
   hash_contents = {}
   op_codes = {next_code: 0}
@@ -1064,24 +1088,31 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   while oi < order.size()
     func = functions[order[oi]]
     # Skip main and empty functions
-    if func[:is_toplevel] != true && func[:blocks].size() > 0
+    if func[:is_toplevel] != true && func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       content = canonical_content(func, mod, fn_hashes, op_codes)
-      h = wyhash64_hex_string(content)
+      hash_content = content
+      if func[:incremental_core_candidate] == true
+        # Compact Core once on the cache miss, but never deduplicate it with
+        # the program delta or another callable Core symbol. The stable source
+        # name keeps each published callable present while LLVM names stay
+        # short on all subsequent hits.
+        hash_content = "cached-core:" + core_abi_field(func[:name]) + content
+      h = wyhash64_hex_string(hash_content)
       salt = 0
       resolved = false
       while !resolved
         prior = hash_contents[h]
         if prior == nil
-          hash_contents[h] = {hash: h, content: content}
+          hash_contents[h] = {hash: h, content: hash_content}
           resolved = true
-        elsif prior[:hash] == h && prior[:content] == content
+        elsif prior[:hash] == h && prior[:content] == hash_content
           resolved = true
         else
           # A real hash collision (or a defensive mismatch returned by a host
           # Hash implementation) gets a deterministic rehash. The full
           # canonical content is still compared below before deduplication.
           salt += 1
-          h = wyhash64_hex_string("collision:" + salt.to_s() + ":" + content)
+          h = wyhash64_hex_string("collision:" + salt.to_s() + ":" + hash_content)
       fn_hash_put(fn_hashes, func[:name], h)
       fn_content_put(fn_contents, func[:name], content)
     oi += 1

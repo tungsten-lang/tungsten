@@ -18901,18 +18901,24 @@ int64_t w_wire_kind_extern(WValue wire) {
 int64_t w_is_wire_extern(WValue value) { return w_is_wire(value) ? 1 : 0; }
 
 int64_t w_wire_store_reset(int64_t reserved) {
-    (void)reserved;
+    uint32_t keep = 1;
+    if (reserved > 1 && (uint64_t)reserved <= g_wire_arena.cursor)
+        keep = (uint32_t)reserved;
 #ifndef NDEBUG
-    if (g_wire_arena.base && g_wire_arena.cursor > 1) {
-        for (uint32_t i = 1; i < g_wire_arena.cursor; i++)
+    if (g_wire_arena.base && g_wire_arena.cursor > keep) {
+        for (uint32_t i = keep; i < g_wire_arena.cursor; i++)
             g_wire_arena.base[i] = W_UNDEF;
     }
 #endif
-    g_wire_arena.cursor = 1;
+    g_wire_arena.cursor = keep;
     g_wire_arena.generation++;
     if (g_wire_arena.generation == 0) g_wire_arena.generation = 1;
     memset(g_wire_field_cache, 0, sizeof(g_wire_field_cache));
     return 0;
+}
+
+int64_t w_wire_store_mark(void) {
+    return (int64_t)(g_wire_arena.cursor ? g_wire_arena.cursor : 1);
 }
 
 WValue w_wire_clone(WValue wire) {

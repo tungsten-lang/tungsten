@@ -741,6 +741,8 @@
   definition_path = ast_get(node, :source_path)
   if definition_path == nil
     definition_path = ctx[:source_path]
+  if incremental_core_cache_skip_definition?(mod, definition_path)
+    return nil
   if ctx[:verbose]
     <- "."
   params = node.params
@@ -1902,6 +1904,8 @@
   definition_path = ast_get(node, :source_path)
   if definition_path == nil
     definition_path = ctx[:source_path]
+  if incremental_core_cache_skip_definition?(mod, definition_path)
+    return nil
   if ctx[:verbose]
     <- "."
   params = node.params

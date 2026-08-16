@@ -91,11 +91,28 @@ reported as explicit monolithic fallbacks. This establishes compatibility and
 correctness metadata; it intentionally does **not** claim a compile-time win
 until Stage 2 reuses the lowered partition.
 
-**Stage 2 — in-process reuse:** with Stage 1's contract, warm a curated
-core union once per process; per program: append user expressions, run
-the (now decoupled) user-side analyses, lower user code only, deep-copy
-or copy-on-write the function list for the destructive passes, emit.
-Oracle: batch-vs-solo byte-identical `.ll` across the whole spec corpus.
+**Stage 2 — in-process reuse:** with Stage 1's contract, retain each exact
+lowered Core closure once per compiler process. A cache miss lowers Core and
+the program normally, completes every destructive mid-end pass, then freezes
+the selected post-pass Core functions below a WIRE-arena watermark. A hit
+rewinds only the fresh overlay, attaches those immutable functions, relowers
+Core top-level startup plus the program, and skips mutation-oriented passes for
+the frozen prefix.
+
+There is deliberately no deep copy or copy-on-write graph. `PROTECT_THE_CORE!`
+is the ownership promise that makes the cached functions immutable; a program
+that cannot satisfy the stable ABI contract takes the monolithic path. Multiple
+exact closures may coexist in one process. The retained high-water mark is
+process-wide, so a new closure currently retains some miss-program overlay
+records along with its Core cohort. That is bounded for the common one-closure
+spec batch, but should become a compact Core-only arena image in Stage 3.
+
+The in-process key is built from the sorted Core manifest. Every file row
+contains path, nanosecond mtime, ctime, size, and a content digest; digests are
+memoized while that stat tuple is unchanged. The key also covers lowering and
+release modes, closed-world contracts, build defines, relevant environment
+options, target selection, and the AST schema. A hit still recomputes and
+checks the Stage-1 Core ABI fingerprint before emission.
 
 **Stage 3 — cross-process and parallel:** stable prelude symbol names
 (skip compaction for the warm set, pin linkage) enable a cached prelude
@@ -111,8 +128,14 @@ which is what stage identity requires (stage 0 has no threads).
 - Phase timing instrumentation exists (`--verbose`), and the per-spec
   cost model above is reproducible from it.
 - Stage 0 is implemented: emission resets loop/alias metadata per module,
-  `compile-batch` uses correct scratch/runtime archive paths, and
+  `compile-batch` uses correct scratch/runtime object paths, and
   `scripts/batch_vs_solo_oracle.sh` compares fresh-process and batch `.ll`.
+- Stage 2 is implemented behind `PROTECT_THE_CORE!`: `compile-batch` retains an
+  immutable post-pass Core WIRE cohort, uses manifest/stat/content identity for
+  invalidation, and preserves cold-vs-warm `.ll` and symbol-sidecar bytes.
+- Release/LTO batches compile the shared runtime once into a private object
+  bundle and pass its objects directly to each link. This avoids macOS `ar`
+  dropping LTO-bitcode members when native bridge objects are also present.
 
 ## Stable Core ABI contract
 
@@ -140,6 +163,23 @@ specialization, global collisions, and `constant_alias` coupling.
 `scripts/test-incremental-lowering-contract.sh` verifies that two different
 programs with the same protected Core produce the same canonical ABI and hash,
 that a lowering-mode variant changes the key, and that a structurally coupled
-program falls back. This still does **not** claim a compile-time win: Stage 2
-must persist or retain the lowered Core WIRE and avoid running the destructive
-whole-module passes over shared state.
+program falls back. `scripts/test-incremental-core-cache.sh` additionally checks
+miss/hit/multi-cohort behavior, exact manifest keys, the disabled path, and
+byte-identical LLVM and symbol sidecars against fresh compiler processes. It
+also links and executes independent release binaries for a miss and a hit.
+
+## Stage-2 benchmark
+
+On 2026-08-16, `scripts/bench-incremental-core-cache.sh` was run as five
+alternating cache-off/cache-on pairs over 150 copies of the protected
+`core_abi_stable_b.w` fixture. Every compile used
+`--release --native --fast --no-debug --emit-ll --ll`; the median wall time was
+47.969s without Core reuse and 35.802s with it: 12.167s saved, 25.36% faster,
+or 1.340x throughput.
+
+One instrumented 150-file pair attributed the change as follows: lowering
+13.680s -> 4.680s, CFG/SSA 1.860s -> 0.011s, free insertion 0.354s -> 0.002s,
+and content hashing 5.377s -> 2.285s. Emission regressed 9.202s -> 13.189s,
+leaving a clear follow-on target even though aggregate compiler time improved
+41.206s -> 29.273s in that profiled pair. These numbers measure a homogeneous
+protected-Core batch, not arbitrary single-file compilation.

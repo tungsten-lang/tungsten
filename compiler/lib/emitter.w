@@ -531,6 +531,7 @@ use naming
   out << declare_fn("w_wire_kind_extern", "i64", wv)
   out << declare_fn("w_is_wire_extern", "i64", wv)
   out << declare_fn("w_wire_store_reset", "i64", "i64")
+  out << declare_fn("w_wire_store_mark", "i64", "")
   out << declare_fn("w_wire_clone", wv, wv)
   out << declare_fn("w_class_add_ivar", "i32", wv_ptr)
   out << declare_fn("w_class_add_ivar_wv", "i32", wv2)
@@ -2202,6 +2203,8 @@ ewscope_md_state = {ids: {}}
   taken
 
 -> internal_fastcc_candidate?(func, address_taken)
+  if func[:incremental_core_candidate] == true || func[:incremental_core_frozen] == true
+    return false
   if func[:llvm_internal] != true
     return false
   if func[:is_toplevel] == true

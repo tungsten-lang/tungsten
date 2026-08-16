@@ -900,7 +900,7 @@ driver_homebrew_prefix_memo = {}
 
   if emit_wire
     wire_started_at = clock
-    mod = compile_to_wire(ast, display_source_path(file_path), verbose, fast_mode, math_mode)
+    mod = compile_to_wire(ast, display_source_path(file_path), verbose, fast_mode, math_mode, loader.manifest_files())
 
     if verbose
       << fmt_elapsed(phase_elapsed(wire_started_at)) + " lower to wire"
@@ -926,7 +926,7 @@ driver_homebrew_prefix_memo = {}
     << fmt_elapsed(t_load) + " load+parse"
 
   strip_runtime_metadata = release_mode && !debug_enabled
-  ir = compile(ast, display_source_path(file_path), verbose, frame_pointers, sidemap_path, strip_runtime_metadata, fast_mode, build_defines, math_mode, no_static_slab)
+  ir = compile(ast, display_source_path(file_path), verbose, frame_pointers, sidemap_path, strip_runtime_metadata, fast_mode, build_defines, math_mode, no_static_slab, loader.manifest_files())
   if intern_algo == "zstd"
     ir = rewrite_ir_static_slab_zstd(ir)
 
@@ -1694,13 +1694,18 @@ driver_homebrew_prefix_memo = {}
   archive
 
 -> compile_runtime_objs(tmp_dir, needs_zstd = false, verbose = false)
-  # Compile all runtime .c files into a single combined .o
-  runtime_dir = resolve_runtime_dir
-  archive = tmp_dir + "/runtime.a"
+  # Compile the shared runtime once into a private object bundle. Do not put
+  # these objects in an archive: Apple clang emits a mixture of LTO bitcode
+  # and native Mach-O for this source set, and Apple ar turns that mixture
+  # into a universal archive whose host slice silently omits the bitcode.
+  # Passing the objects directly lets clang consume both representations and
+  # preserves LTO across the emitted program and the bitcode members.
+  runtime_dir = File.expand_path(resolve_runtime_dir)
+  object_glob = tmp_dir + "/*.o"
 
   cc = StringBuffer(0)
   cc << "cd "
-  cc << runtime_dir
+  cc << dev_runtime_shell_quote(tmp_dir)
   cc << " && "
   cc << host_c_compiler()
   cc << " "
@@ -1735,43 +1740,28 @@ driver_homebrew_prefix_memo = {}
   if frame_pointers
     cc << "-fno-omit-frame-pointer "
 
-  cc << "-c runtime.c terminal_input.c "
-  cc << runtime_event_source
-  cc << " ssmr_witness.c "
-  cc << tls_runtime_source()
-  cc << " aks.c "
+  cc << "-I"
+  cc << dev_runtime_shell_quote(runtime_dir)
+  cc << " -c "
+  cc << dev_runtime_shell_quote(runtime_dir + "/runtime.c")
+  cc << " "
+  cc << dev_runtime_shell_quote(runtime_dir + "/terminal_input.c")
+  cc << " "
+  event_source = runtime_event_source
+  if event_source == "event_*.c"
+    cc << dev_runtime_shell_quote(runtime_dir + "/event_")
+    cc << "*.c"
+  else
+    cc << dev_runtime_shell_quote(runtime_dir + "/" + event_source)
+  cc << " "
+  cc << dev_runtime_shell_quote(runtime_dir + "/" + tls_runtime_source())
+  cc << " "
+  cc << dev_runtime_shell_quote(runtime_dir + "/aks.c")
+  cc << " "
 
   if needs_zstd
-    cc << zstd_runtime_source()
+    cc << dev_runtime_shell_quote(runtime_dir + "/" + zstd_runtime_source())
     cc << " "
-
-  # On macOS, also compile the Obj-C Metal bridge so @gpu fn dispatch
-  # symbols (w_metal_*) resolve at link time, plus the graphics.m
-  # windowing bridge (w_gfx_*). Linux/Windows skip this — those
-  # platforms get the no-Metal stubs in runtime.c.
-  if detect_target()[:os] == "macos"
-    cc << "&& "
-    cc << host_c_compiler()
-    cc << " "
-    cc << cross_compile_flags()
-    cc << profile_opt_flag()
-    cc << " "
-    cc << debug_compile_flag()
-    cc << " "
-    cc << march_flags()
-    cc << " -x objective-c -c metal.m graphics.m hid_bridge.m "
-
-  cc << "&& "
-  cc << archive_tool()
-  cc << " rcs "
-  cc << archive
-  cc << " *.o"
-  if ranlib_tool() != ""
-    cc << " && "
-    cc << ranlib_tool()
-    cc << " "
-    cc << archive
-  cc << " && rm -f *.o"
 
   << "Compiling runtime..."
 
@@ -1782,7 +1772,7 @@ driver_homebrew_prefix_memo = {}
   if result != true
     return nil
 
-  archive
+  object_glob
 
 -> kind_is_inline(k)
   # Kinds whose schema entry maps a field to OFFSET_INLINE (256) — i.e.
@@ -2347,7 +2337,7 @@ driver_homebrew_prefix_memo = {}
 -> check_one(file_path, verbose = false)
   loader = Loader.new(verbose)
   ast = loader.load_program_ast(file_path)
-  compile_to_wire(ast, file_path, verbose, fast_mode, math_mode)
+  compile_to_wire(ast, file_path, verbose, fast_mode, math_mode, loader.manifest_files())
   gpu_preflight(ast, file_path)
   << "200 OK"
   true
@@ -2543,7 +2533,7 @@ elsif command == "compile-batch"
       skip_next = false
     elsif a in ("--out" "-o" "--intern" "-e" "--cpu" "--target" "--sysroot")
       skip_next = true
-    elsif a != "compile-batch" && a != "--emit-wire" && a != "--no-lto" && a != "--frame-pointers" && a != "--release" && a != "--dev" && a != "--native" && a != "--debug" && a != "--no-debug" && a != "--fast" && a != "-fast" && a != "--verbose" && a != "-v" && a != "--ll" && !a.starts_with?("--cpu=")
+    elsif a != "compile-batch" && a != "--emit-wire" && a != "--emit-ll" && a != "--no-lto" && a != "--frame-pointers" && a != "--release" && a != "--dev" && a != "--native" && a != "--debug" && a != "--no-debug" && a != "--fast" && a != "-fast" && a != "--verbose" && a != "-v" && a != "--ll" && !a.starts_with?("--cpu=")
       files.push(a)
 
   if files.size() == 0
@@ -2559,11 +2549,12 @@ elsif command == "compile-batch"
     << "--- Compiling [fp] ---"
     begin
       implicit_ll = uses_implicit_ll_path() ## bool
-      ll_path = emit_ir(fp, emit_wire, verbose, intern_algo, bin + ".sidemap")
+      ll_path = emit_ir(fp, emit_wire, verbose, intern_algo, bin + ".sidemap", emit_ll_only, build_defines, no_static_slab)
       if ll_path != nil
-        ll_jobs.push({ll: ll_path, bin: bin, source: fp, implicit_ll: implicit_ll})
-        if ll_needs_zstd_path(ll_path)
-          needs_zstd_runtime = true
+        if !emit_ll_only
+          ll_jobs.push({ll: ll_path, bin: bin, source: fp, implicit_ll: implicit_ll})
+          if ll_needs_zstd_path(ll_path)
+            needs_zstd_runtime = true
       else
         fail_count += 1
     rescue err

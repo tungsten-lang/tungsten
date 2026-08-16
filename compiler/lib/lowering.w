@@ -30,6 +30,7 @@ use lowering/analysis
 use lowering/class_sets
 use lowering/no_raise
 use lowering/core_abi
+use lowering/core_cache
 use lowering/elision
 use lowering/program
 use lowering/monomorphize
@@ -112,8 +113,8 @@ use lowering/definitions
 # Create and seed the WIRE module: bignum source invariants, build
 # defines, monomorphization registries, builtin-class tables, and the
 # known_calls registry for bare C-runtime bridges.
--> init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines)
-  mod = wire_module(source_path)
+-> init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines, retained_wire_mark = 0)
+  mod = wire_module(source_path, retained_wire_mark)
   # Root loading always injects native BigInt comparison and bitwise support.
   # Carry the invariants to emission so a loader/cache regression cannot
   # silently bind the runtime's weak C bootstrap implementations.
@@ -824,8 +825,10 @@ use lowering/definitions
       i += 1
   nil
 
--> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false)
-  mod = init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines)
+-> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false, source_manifest = nil, release_mode = false)
+  cache_probe = incremental_core_cache_prepare(ast, source_manifest, fast_mode, build_defines, math_mode, no_static_slab, release_mode)
+  mod = init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines, cache_probe[:retain_mark])
+  mod[:incremental_core_cache_probe] = cache_probe
   collect_lowering_contracts(mod, ast.expressions, source_path)
 
   # Generic class monomorphization runs BEFORE the main expressions walk
@@ -850,12 +853,14 @@ use lowering/definitions
     core_expressions = partition[:core]
     user_expressions = partition[:user]
     prepare_stable_core_contract(mod, core_expressions, user_expressions, partition[:missing])
+    incremental_core_cache_activate(mod, cache_probe)
 
     core_inferable = register_top_level_defs(mod, core_expressions, source_path)
     infer_return_types_fixed_point(mod, core_inferable)
     user_inferable = register_top_level_defs(mod, user_expressions, source_path)
     infer_return_types_fixed_point(mod, user_inferable)
   else
+    incremental_core_cache_activate(mod, cache_probe)
     inferable_methods = register_top_level_defs(mod, ast.expressions, source_path)
     infer_return_types_fixed_point(mod, inferable_methods)
 
@@ -972,7 +977,18 @@ use lowering/definitions
 
   if verbose
     << "  lowering..."
-  lower_program(ctx, ast.expressions)
+  incremental_core_cache_attach_functions(mod)
+  if core_expressions != nil && mod[:core_reuse_contract] == :stable && mod[:incremental_core_cache_key] != nil
+    lower_program(ctx, core_expressions)
+    incremental_core_cache_finish_core_partition(mod)
+    lower_program(ctx, user_expressions)
+  else
+    lower_program(ctx, ast.expressions)
+
+  # Give cached Core functions stable module position and stable string ids;
+  # both are independent of the entry-program overlay.
+  incremental_core_cache_order_and_mark_functions(mod)
+  incremental_core_cache_canonicalize_strings(mod)
 
   # Initialize memo tables only for pure fns that are actually called.
   prepend_memo_table_initializers(main_fn, mod)
@@ -1000,6 +1016,7 @@ use lowering/definitions
   finalize_function(main_fn)
   if core_expressions != nil
     finalize_stable_core_abi(mod, core_expressions)
+    incremental_core_cache_validate_hit(mod)
   mod
 
 # -- Emit WIRE flag: dump WIRE as text --

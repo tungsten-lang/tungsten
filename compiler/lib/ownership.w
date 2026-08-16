@@ -243,7 +243,7 @@ use runtime_types
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
-    if func[:blocks].size() > 0
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       ownership_analyze(func, mod)
     fi += 1
 
@@ -299,6 +299,6 @@ use runtime_types
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
-    if func[:blocks].size() > 0
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       insert_frees(func)
     fi += 1

@@ -10,6 +10,48 @@ use content_hash
 use emitter
 use target
 
+# Cached Core symbols cannot depend on a program-wide content-hash pass. Make
+# their original names LLVM-safe once, then replay the exact mapping into each
+# fresh user overlay before that overlay is hashed and compacted.
+-> incremental_core_cache_prepare_names(mod)
+  if mod[:incremental_core_cache_key] == nil
+    return nil
+  rename_map = nil
+  entry = mod[:incremental_core_cache_entry]
+  if entry != nil
+    rename_map = entry[:name_map]
+  if rename_map == nil
+    rename_map = {}
+    i = 0
+    while i < mod[:functions].size()
+      func = mod[:functions][i]
+      if func[:incremental_core_candidate] == true
+        safe = llvm_safe_name(func[:name])
+        if safe != func[:name]
+          rename_map_put(rename_map, func[:name], safe)
+      i += 1
+
+  if rename_map.keys().size() > 0
+    rewrite_references(mod, rename_map)
+    rewrite_known_name_maps(mod, rename_map)
+    rewrite_memo_globals(mod, rename_map)
+    i = 0
+    while i < mod[:functions].size()
+      func = mod[:functions][i]
+      replacement = rename_map_get(rename_map, func[:name])
+      if replacement != nil
+        func[:name] = replacement
+        func[:llvm_internal] = true
+      i += 1
+  i = 0
+  while i < mod[:functions].size()
+    func = mod[:functions][i]
+    if func[:incremental_core_candidate] == true
+      func[:incremental_core_hash_source_name] = func[:name]
+    i += 1
+  mod[:incremental_core_cache_name_map] = rename_map
+  nil
+
 -> fmt_elapsed(seconds)
   # Format as " X.XXXs" right-aligned in 7 chars
   if seconds < ~0.001
@@ -69,6 +111,16 @@ use target
 # retained exactly as lowered.
 -> compact_live_module_strings(mod)
   live = {}
+  # Cached Core instructions retain their canonical prefix ids across batch
+  # members. Keep the complete prefix even when release metadata stripping
+  # makes one of its diagnostic strings dead in this particular module.
+  core_prefix = mod[:incremental_core_string_count]
+  if core_prefix == nil
+    core_prefix = 0
+  prefix_id = 0
+  while prefix_id < core_prefix
+    live[prefix_id] = true
+    prefix_id += 1
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
@@ -125,23 +177,23 @@ use target
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
-        if inst[:string_id] != nil
+        if inst[:string_id] != nil && remap[inst[:string_id]] != inst[:string_id]
           inst[:string_id] = remap[inst[:string_id]]
-        if inst[:str_id] != nil
+        if inst[:str_id] != nil && remap[inst[:str_id]] != inst[:str_id]
           inst[:str_id] = remap[inst[:str_id]]
-        if inst[:name_str_id] != nil
+        if inst[:name_str_id] != nil && remap[inst[:name_str_id]] != inst[:name_str_id]
           inst[:name_str_id] = remap[inst[:name_str_id]]
-        if inst[:method_str_id] != nil
+        if inst[:method_str_id] != nil && remap[inst[:method_str_id]] != inst[:method_str_id]
           inst[:method_str_id] = remap[inst[:method_str_id]]
-        if inst[:file_str_id] != nil
+        if inst[:file_str_id] != nil && remap[inst[:file_str_id]] != inst[:file_str_id]
           inst[:file_str_id] = remap[inst[:file_str_id]]
-        if inst[:ivar_str_id] != nil
+        if inst[:ivar_str_id] != nil && remap[inst[:ivar_str_id]] != inst[:ivar_str_id]
           inst[:ivar_str_id] = remap[inst[:ivar_str_id]]
         cases = inst[:cases]
         if cases != nil
           ci = 0
           while ci < cases.size()
-            if cases[ci][:string_id] != nil
+            if cases[ci][:string_id] != nil && remap[cases[ci][:string_id]] != cases[ci][:string_id]
               cases[ci][:string_id] = remap[cases[ci][:string_id]]
             ci += 1
         ii += 1
@@ -156,11 +208,12 @@ use target
   mod[:string_index] = nil
   nil
 
--> compile(ast, source_path, verbose = false, frame_pointers = false, sidemap_path = nil, release_mode = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false)
+-> compile(ast, source_path, verbose = false, frame_pointers = false, sidemap_path = nil, release_mode = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false, source_manifest = nil)
   compile_started_at = clock()
 
   lower_started_at = clock()
-  mod = lower_ast(ast, source_path, verbose, fast_mode, build_defines, math_mode, no_static_slab)
+  mod = lower_ast(ast, source_path, verbose, fast_mode, build_defines, math_mode, no_static_slab, source_manifest, release_mode)
+  incremental_core_cache_prepare_names(mod)
   t_lower = clock() - lower_started_at
 
   cfg_started_at = clock()
@@ -176,7 +229,7 @@ use target
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
-    if func[:blocks].size() > 0
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       # CFG/dominator/frontier construction exists only for mem2reg. Check
       # the two cheap eligibility conditions first: roughly half of the
       # self-hosted compiler's functions have no promotable slots, so eagerly
@@ -232,6 +285,10 @@ use target
   ir = emit_artifact(mod, frame_pointers)
   t_emit = clock() - emit_started_at
 
+  # Store only after every destructive pass and the emitter have finished.
+  # Cache hits point at this immutable, post-pass representation.
+  incremental_core_cache_finalize(mod)
+
   if sidemap_path != nil
     sidemap_text = mod[:symbol_sidemap_text]
     if sidemap_text != nil
@@ -241,6 +298,7 @@ use target
 
   if verbose
     << ""
+    << incremental_core_cache_verbose_text(mod)
     << fmt_elapsed(t_lower) + " lowering to wire"
     << fmt_elapsed(t_cfg) + " cfg+ssa"
     << fmt_elapsed(t_escape) + " escape"
@@ -339,5 +397,5 @@ use target
 
   ir
 
--> compile_to_wire(ast, source_path, verbose = false, fast_mode = false, math_mode = :precise)
-  lower_ast(ast, source_path, verbose, fast_mode, nil, math_mode)
+-> compile_to_wire(ast, source_path, verbose = false, fast_mode = false, math_mode = :precise, source_manifest = nil)
+  lower_ast(ast, source_path, verbose, fast_mode, nil, math_mode, false, source_manifest, false)

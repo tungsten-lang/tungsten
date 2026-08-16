@@ -174,7 +174,10 @@
 -> core_abi_function_row(wfn)
   row = StringBuffer(192)
   row << "F;"
-  row << core_abi_field(wfn[:name])
+  stable_name = wfn[:original_name]
+  if stable_name == nil
+    stable_name = wfn[:name]
+  row << core_abi_field(stable_name)
   row << core_abi_field(wfn[:source_kind])
   row << core_abi_field(wfn[:source_class])
   row << core_abi_field(wfn[:source_method])

@@ -151,6 +151,7 @@ WValue  w_wire_field_store(WValue wire, WValue sym, WValue value);
 int64_t w_wire_kind_extern(WValue wire);
 int64_t w_is_wire_extern(WValue value);
 int64_t w_wire_store_reset(int64_t reserved);
+int64_t w_wire_store_mark(void);
 WValue  w_wire_clone(WValue wire);
 
 typedef struct WAstSparseRecord {

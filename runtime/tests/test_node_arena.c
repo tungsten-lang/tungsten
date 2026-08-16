@@ -19,6 +19,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <assert.h>
+#include <string.h>
+#include <unistd.h>
 #include "../runtime.h"  /* pulls in wvalue.h transitively */
 #include "../ast_schema_generated.h"
 
@@ -156,6 +158,66 @@ static void test_wire_arena(void) {
     CHECK(g_wire_arena.cap == retained_cap, "WIRE reset retains capacity");
 }
 
+static WValue canonical_symbol(const char *name) {
+    WValue symbol = w_symbol(name);
+    if (w_is_slab_sym(symbol))
+        symbol = w_box_slab_sym(w_as_slab_index(symbol));
+    return symbol;
+}
+
+static void test_core_graph_snapshot(void) {
+    char path[] = "/tmp/tungsten-core-graph.XXXXXX";
+    int fd = mkstemp(path);
+    CHECK(fd >= 0, "snapshot test creates a temporary path");
+    if (fd < 0) return;
+    close(fd);
+    unlink(path);
+
+    WValue field = canonical_symbol("original_name");
+    WValue wire = w_wire_alloc_reserve(265, 2, 3);
+    w_wire_field_store_at(wire, 0, canonical_symbol("name"), w_string("worker"));
+    w_wire_field_store_at(wire, 1, field, w_string("original"));
+
+    WValue shared = w_array_new_inline(65, 2);
+    w_as_array(shared)->slots[0] = wire;
+    w_as_array(shared)->slots[1] = wire;
+    WValue root = w_hash_new();
+    w_hash_set(root, canonical_symbol("items"), shared);
+    w_hash_set(root, canonical_symbol("self"), root);
+
+    WValue path_value = w_string(path);
+    CHECK(w_core_cache_write(path_value, root) == W_TRUE,
+          "compiler graph snapshot writes atomically");
+    w_wire_store_reset(0);
+    WValue restored = w_core_cache_read(path_value);
+    CHECK(w_is_hash(restored), "compiler graph snapshot restores the root Hash");
+    CHECK(w_hash_get(restored, canonical_symbol("self")) == restored,
+          "compiler graph snapshot preserves Hash cycles");
+    WValue restored_items = w_hash_get(restored, canonical_symbol("items"));
+    CHECK(w_is_array(restored_items) && w_as_array(restored_items)->size == 2,
+          "compiler graph snapshot restores polymorphic Arrays");
+    if (w_is_array(restored_items) && w_as_array(restored_items)->size == 2) {
+        WValue first = w_as_array(restored_items)->slots[0];
+        WValue second = w_as_array(restored_items)->slots[1];
+        CHECK(first == second, "compiler graph snapshot preserves shared WIRE handles");
+        CHECK(w_is_wire(first) && w_wire_kind(first) == 265,
+              "compiler graph snapshot restores WIRE kind");
+        CHECK(w_string_content_equal(w_wire_field_load(first, field),
+                                     w_string("original")) == W_TRUE,
+              "restored canonical slab symbol addresses its WIRE field");
+    }
+
+    FILE *corrupt = fopen(path, "wb");
+    CHECK(corrupt != NULL, "snapshot corruption fixture opens");
+    if (corrupt) {
+        fwrite("bad", 1, 3, corrupt);
+        fclose(corrupt);
+    }
+    CHECK(w_core_cache_read(path_value) == W_NIL,
+          "truncated compiler graph snapshot fails closed");
+    unlink(path);
+}
+
 int main(void) {
     test_init_state();
     test_alloc_roundtrip();
@@ -164,6 +226,7 @@ int main(void) {
     test_reset();
     test_reuse_after_reset();
     test_wire_arena();
+    test_core_graph_snapshot();
 
     if (failures) {
         fprintf(stderr, "%d test(s) failed\n", failures);

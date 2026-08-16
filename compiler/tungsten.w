@@ -99,7 +99,7 @@ fast_mode       = false
 math_mode       = :precise
 # Incremental-cache channel out of emit_ir (mutated, never reassigned —
 # fn-body assignment to a top-level var would shadow, not write).
-g_incremental  = {manifest: nil}
+g_incremental  = {manifest: nil, core_cache_context_ready: false}
 intern_algo    = "raw"
 runtime_archive = nil
 # Build-time defines from `-D NAME=VALUE` args. Accumulates across
@@ -857,8 +857,30 @@ driver_homebrew_prefix_memo = {}
     return "(eval)"
   p
 
+# Persistent lowered-Core snapshots are scoped to the exact compiler
+# executable.  Core source contents and lowering flags live in the cache key;
+# path + nanosecond metadata + size keep two compiler builds from exchanging
+# WIRE without hashing the whole executable on every fresh invocation.
+-> configure_persistent_core_cache
+  if g_incremental[:core_cache_context_ready] == true
+    return nil
+  g_incremental[:core_cache_context_ready] = true
+  if runtime_identity() != "compiled-runtime" || env("TUNGSTEN_CORE_DISK_CACHE") == "0"
+    return nil
+  dir = compiler_cache_dir()
+  if dir == nil || system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
+    return nil
+  exe = ccall("w_executable_path")
+  stat = File.stat(exe)
+  if stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
+    return nil
+  identity_text = ["core-wire-executable-v1", exe, stat.mtime_ns().to_s(), stat.ctime_ns().to_s(), stat.size().to_s(), incremental_env_s("TUNGSTEN_VERSION")].join("|")
+  incremental_core_cache_configure_persistent(dir, wyhash64_hex_string(identity_text))
+  nil
+
 -> emit_ir(file_path, emit_wire, verbose, intern_algo, sidemap_path = nil, emit_ll_only_arg = false, build_defines = nil, no_static_slab = false)
   # Emit LLVM IR (or WIRE text) for a single file, return ll_path or nil
+  configure_persistent_core_cache()
   loader = Loader.new(verbose)
   load_started_at = clock
   ast = loader.load_program_ast(file_path)

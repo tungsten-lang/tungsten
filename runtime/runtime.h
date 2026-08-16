@@ -2084,6 +2084,11 @@ WValue __w_digest_file64(WValue path_val);
 WValue __w_digest_string64(WValue string_val);
 WValue __w_cache_read(WValue path_val);
 WValue __w_cache_write(WValue path_val, WValue value);
+/* Compiler-internal persistent graph cache.  Unlike the bootstrap cache
+ * builtins, this format understands packed WIRE records and preserves shared
+ * Array/Hash/WIRE references.  Unsupported heap values fail closed. */
+WValue w_core_cache_read(WValue path_val);
+WValue w_core_cache_write(WValue path_val, WValue value);
 WValue __w_runtime_identity(void);
 
 /* ---- Primality (optional, linked from aks.c) ---- */

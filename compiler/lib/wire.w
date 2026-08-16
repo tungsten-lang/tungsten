@@ -142,6 +142,8 @@ use wire_constructors
     incremental_core_cache_key: nil,
     incremental_core_cache_entry: nil,
     incremental_core_cache_status: nil,
+    incremental_core_cache_persistent_status: nil,
+    incremental_core_cache_persistent_stored: nil,
     incremental_core_cache_hit: false,
     incremental_core_cache_closure_files: nil,
     incremental_core_cache_stored: false,

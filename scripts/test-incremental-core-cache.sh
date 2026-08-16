@@ -7,7 +7,9 @@ TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten-compiler}"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-core-cache-contract.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/src" "$TMP/solo"
+mkdir -p "$TMP/src" "$TMP/solo" "$TMP/cache"
+export TUNGSTEN_CACHE_DIR="$TMP/cache"
+export TUNGSTEN_INCREMENTAL=0
 cp compiler/test/fixtures/core_abi_stable_a.w "$TMP/src/a.w"
 cp compiler/test/fixtures/core_abi_stable_b.w "$TMP/src/b.w"
 cp compiler/test/fixtures/closed_world_dispatch.w "$TMP/src/closed.w"
@@ -47,13 +49,45 @@ if ! grep -l 'core/math.w' "$TMP"/key.* >/dev/null; then
   exit 1
 fi
 
+# A separate compiler process must reconstruct the frozen Core graph from the
+# persistent snapshot and emit the exact same artifact.
+TUNGSTEN_LL_PATH="$TMP/solo/disk-hit.ll" \
+  "$TUNGSTEN" compile "$TMP/src/a.w" --out "$TMP/solo/disk-hit" \
+  "${flags[@]}" -v >"$TMP/solo/disk-hit.log" 2>&1
+if ! grep -E 'core cache: hit .+\(.*disk\)' "$TMP/solo/disk-hit.log" >/dev/null; then
+  echo "FAIL: fresh compiler process did not report a persistent Core hit" >&2
+  cat "$TMP/solo/disk-hit.log" >&2
+  exit 1
+fi
+cmp "$TMP/src/a.ll" "$TMP/solo/disk-hit.ll"
+cmp "$TMP/src/a.wc.sidemap" "$TMP/solo/disk-hit.sidemap"
+
+# A truncated snapshot is a miss, never a partially reconstructed graph. The
+# cold rebuild atomically replaces it and remains byte-identical.
+default_key_report="$(grep -l 'core/math.w' "$TMP"/key.* | head -1)"
+default_key="${default_key_report##*.}"
+cache_file="$(find "$TUNGSTEN_CACHE_DIR" -maxdepth 1 -type f -name "core-wire-*-$default_key.twc" -print -quit)"
+if [[ -z "$cache_file" ]]; then
+  echo "FAIL: persistent Core snapshot was not written" >&2
+  exit 1
+fi
+printf 'truncated' >"$cache_file"
+TUNGSTEN_LL_PATH="$TMP/solo/corrupt-rebuild.ll" \
+  "$TUNGSTEN" compile "$TMP/src/a.w" --out "$TMP/solo/corrupt-rebuild" \
+  "${flags[@]}" -v >"$TMP/solo/corrupt-rebuild.log" 2>&1
+if ! grep -E 'core cache: miss .+disk stored' "$TMP/solo/corrupt-rebuild.log" >/dev/null; then
+  echo "FAIL: corrupt persistent Core snapshot did not fail closed and rebuild" >&2
+  cat "$TMP/solo/corrupt-rebuild.log" >&2
+  exit 1
+fi
+cmp "$TMP/src/a.ll" "$TMP/solo/corrupt-rebuild.ll"
+
 # Lowering toggles are part of compatibility, even for an embedder that
 # changes its environment between calls in one long-lived process.
 TUNGSTEN_BIGINT_CMP0=0 TUNGSTEN_CORE_CACHE_KEY_REPORT="$TMP/tuned-key" \
   TUNGSTEN_LL_PATH="$TMP/solo/tuned.ll" \
   "$TUNGSTEN" compile "$TMP/src/a.w" --out "$TMP/solo/tuned" \
   "${flags[@]}" >"$TMP/tuned.log" 2>&1
-default_key_report="$(grep -l 'core/math.w' "$TMP"/key.* | head -1)"
 tuned_key_report="$(find "$TMP" -maxdepth 1 -type f -name 'tuned-key.*' | head -1)"
 if [[ -z "$tuned_key_report" ]] || cmp -s "$default_key_report" "$tuned_key_report"; then
   echo "FAIL: a Core-lowering environment change reused the default key" >&2

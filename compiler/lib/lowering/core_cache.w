@@ -1,16 +1,64 @@
-# Lowering / in-process Core cache — retain post-mid-end Core WIRE across
-# compile-batch members while every entry program gets a fresh main/user
-# overlay. Cached functions are immutable: programs that do not satisfy the
-# checked stable-Core contract keep the ordinary monolithic path.
+# Lowered Core cache — retain post-mid-end Core WIRE across compile-batch
+# members and reconstruct the same immutable graph in later compiler
+# processes, while every entry program gets a fresh main/user overlay.
+# Programs that do not satisfy the checked stable-Core contract keep the
+# ordinary monolithic path.
 
 incremental_core_cache_state = {
   entries: {},
   digest_memo: {},
   retain_mark: 0,
+  persistent_dir: nil,
+  persistent_identity: nil,
   hits: 0,
   misses: 0,
-  stores: 0
+  stores: 0,
+  disk_hits: 0,
+  disk_misses: 0,
+  disk_stores: 0
 }
+
+-> incremental_core_cache_configure_persistent(dir, identity)
+  incremental_core_cache_state[:persistent_dir] = dir
+  incremental_core_cache_state[:persistent_identity] = identity
+  nil
+
+-> incremental_core_cache_persistent_path(key)
+  dir = incremental_core_cache_state[:persistent_dir]
+  identity = incremental_core_cache_state[:persistent_identity]
+  if dir == nil || identity == nil
+    return nil
+  dir + "/core-wire-" + identity + "-" + key + ".twc"
+
+-> incremental_core_cache_entry_valid?(entry, key)
+  if type(entry) != "Hash" || entry[:key] != key || type(entry[:core_abi_hash]) != "String"
+    return false
+  if type(entry[:functions]) != "Array" || type(entry[:strings]) != "Array" || type(entry[:name_map]) != "Hash" || type(entry[:fn_hashes]) != "Hash" || type(entry[:counter_prefix]) != "Hash"
+    return false
+  i = 0
+  while i < entry[:strings].size()
+    item = entry[:strings][i]
+    if type(item) != "Hash" || item[:id] != i || type(item[:text]) != "String"
+      return false
+    i += 1
+  i = 0
+  while i < entry[:functions].size()
+    func = entry[:functions][i]
+    if ccall_nobox("w_is_wire_extern", func) != 1 || type(func[:name]) != "String" || type(func[:original_name]) != "String" || type(func[:params]) != "Array" || type(func[:extra_params]) != "Array" || type(func[:return_type]) != "String" || type(func[:blocks]) != "Array"
+      return false
+    bi = 0
+    while bi < func[:blocks].size()
+      block = func[:blocks][bi]
+      if ccall_nobox("w_is_wire_extern", block) != 1 || type(block[:label]) != "String" || type(block[:instructions]) != "Array"
+        return false
+      ii = 0
+      while ii < block[:instructions].size()
+        if ccall_nobox("w_is_wire_extern", block[:instructions][ii]) != 1
+          return false
+        ii += 1
+      bi += 1
+    i += 1
+  true
 
 # Keep the cache key independent of loader/autoload traversal order. Use an
 # explicit lexical insertion sort here: the generic Core Array#sort may select
@@ -178,12 +226,29 @@ incremental_core_cache_state = {
   report = env("TUNGSTEN_CORE_CACHE_KEY_REPORT")
   if report != nil && report != ""
     write_file(report + "." + key, key_text.to_s())
+  entry = incremental_core_cache_state[:entries][key]
+  persistent_status = :memory
+  if entry == nil
+    persistent_path = incremental_core_cache_persistent_path(key)
+    if persistent_path != nil
+      loaded = ccall("w_core_cache_read", persistent_path)
+      if incremental_core_cache_entry_valid?(loaded, key)
+        entry = loaded
+        incremental_core_cache_state[:entries][key] = entry
+        retain_mark = ccall("w_int", ccall_nobox("w_wire_store_mark"))
+        incremental_core_cache_state[:retain_mark] = retain_mark
+        incremental_core_cache_state[:disk_hits] = incremental_core_cache_state[:disk_hits] + 1
+        persistent_status = :hit
+      else
+        incremental_core_cache_state[:disk_misses] = incremental_core_cache_state[:disk_misses] + 1
+        persistent_status = :miss
   {
     enabled: true,
     retain_mark: retain_mark,
     key: key,
-    entry: incremental_core_cache_state[:entries][key],
-    closure_files: rows.size()
+    entry: entry,
+    closure_files: rows.size(),
+    persistent_status: persistent_status
   }
 
 -> incremental_core_cache_seed_strings(mod, entry)
@@ -212,6 +277,7 @@ incremental_core_cache_state = {
 
   mod[:incremental_core_cache_key] = probe[:key]
   mod[:incremental_core_cache_closure_files] = probe[:closure_files]
+  mod[:incremental_core_cache_persistent_status] = probe[:persistent_status]
   entry = probe[:entry]
   if entry == nil
     mod[:incremental_core_cache_status] = :miss
@@ -528,6 +594,13 @@ incremental_core_cache_state = {
   mark = ccall("w_int", ccall_nobox("w_wire_store_mark"))
   incremental_core_cache_state[:retain_mark] = mark
   incremental_core_cache_state[:stores] = incremental_core_cache_state[:stores] + 1
+  persistent_path = incremental_core_cache_persistent_path(mod[:incremental_core_cache_key])
+  if persistent_path != nil
+    if ccall("w_core_cache_write", persistent_path, entry) == true
+      incremental_core_cache_state[:disk_stores] = incremental_core_cache_state[:disk_stores] + 1
+      mod[:incremental_core_cache_persistent_stored] = true
+    else
+      mod[:incremental_core_cache_persistent_stored] = false
   mod[:incremental_core_cache_stored] = true
   mod[:incremental_core_cache_retain_mark] = mark
   nil
@@ -538,9 +611,12 @@ incremental_core_cache_state = {
   if function_count == nil || function_count == 0
     function_count = mod[:core_abi_function_count]
   if status == :hit
-    return "  core cache: hit " + mod[:incremental_core_cache_key] + " (" + function_count.to_s() + " functions)"
+    source = mod[:incremental_core_cache_persistent_status] == :hit ? "disk" : "memory"
+    return "  core cache: hit " + mod[:incremental_core_cache_key] + " (" + function_count.to_s() + " functions, " + source + ")"
   if status == :miss
-    return "  core cache: miss " + mod[:incremental_core_cache_key] + " (" + function_count.to_s() + " functions)"
+    stored = mod[:incremental_core_cache_persistent_stored]
+    suffix = stored == true ? ", disk stored" : ""
+    return "  core cache: miss " + mod[:incremental_core_cache_key] + " (" + function_count.to_s() + " functions" + suffix + ")"
   if status == :fallback
     return "  core cache: fallback (" + mod[:core_reuse_fallback_reason] + ")"
   "  core cache: bypass"

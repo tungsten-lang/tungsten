@@ -114,12 +114,22 @@ release modes, closed-world contracts, build defines, relevant environment
 options, target selection, and the AST schema. A hit still recomputes and
 checks the Stage-1 Core ABI fingerprint before emission.
 
-**Stage 3 — cross-process and parallel:** stable prelude symbol names
-(skip compaction for the warm set, pin linkage) enable a cached prelude
-object so clang sees only user code; deterministic pre-assigned ID
-ranges (strings, block ids, IC slots) make method-level lowering
-parallelizable AND order-independent — same bytes serial or parallel,
-which is what stage identity requires (stage 0 has no threads).
+**Stage 3 — cross-process artifacts, then parallel:** persist the immutable
+Stage-2 Core cohort so a fresh compiler process can reconstruct it before
+lowering the entry program. The first implementation is a checksummed logical
+graph snapshot, not a raw arena mmap: current packed WIRE fields still point at
+heap Strings, Arrays and Hashes. The format preserves sharing/cycles among
+those containers, rebuilds WIRE into the arena, rejects every other heap type,
+and publishes with fsync plus same-filesystem rename. It is scoped by exact
+compiler-executable metadata; the ordinary Core key still covers source
+path/mtime/ctime/size/content, lowering modes, target, contracts and schema.
+
+A later fully packed Core template can replace reconstruction with mmap. Stable
+prelude symbol names and a cached bitcode/object partition can then keep Core
+out of user emission and clang. Deterministic pre-assigned ID ranges (strings,
+block ids, IC slots) make method-level lowering parallelizable and
+order-independent — same bytes serial or parallel, which is what stage identity
+requires (stage 0 has no threads).
 
 ## What already landed
 
@@ -133,6 +143,9 @@ which is what stage identity requires (stage 0 has no threads).
 - Stage 2 is implemented behind `PROTECT_THE_CORE!`: `compile-batch` retains an
   immutable post-pass Core WIRE cohort, uses manifest/stat/content identity for
   invalidation, and preserves cold-vs-warm `.ll` and symbol-sidecar bytes.
+- The first Stage-3 artifact is implemented: a fresh native compiler process
+  can load the frozen Core graph from the selected compiler cache. Corrupt,
+  incompatible, or structurally invalid snapshots fail closed and are rebuilt.
 - Release/LTO batches compile the shared runtime once into a private object
   bundle and pass its objects directly to each link. This avoids macOS `ar`
   dropping LTO-bitcode members when native bridge objects are also present.
@@ -183,3 +196,15 @@ and content hashing 5.377s -> 2.285s. Emission regressed 9.202s -> 13.189s,
 leaving a clear follow-on target even though aggregate compiler time improved
 41.206s -> 29.273s in that profiled pair. These numbers measure a homogeneous
 protected-Core batch, not arbitrary single-file compilation.
+
+## Stage-3 persistent-WIRE benchmark
+
+On 2026-08-16, `scripts/bench-persistent-core-cache.sh` ran twelve alternating
+fresh-process pairs over `core_abi_stable_b.w`, using
+`--release --native --fast --no-debug --emit-ll --ll`. The snapshot was warmed
+outside the measured pairs. Median wall time fell from 0.463063s with the disk
+cache disabled to 0.360221s with a persistent Core hit: 0.102842s saved,
+22.21% faster, or 1.285x throughput. The snapshot for this 929-function Core
+closure was 4,568,417 bytes. Cold and warm LLVM were byte-identical. This
+measures compiler front-end/artifact generation for one protected fixture; it
+does not include clang/link work and is not a claim about unprotected programs.

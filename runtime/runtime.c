@@ -46910,6 +46910,628 @@ WValue __w_cache_write(WValue path_val, WValue value) {
     return W_FALSE;
 }
 
+/* ---- Persistent compiler graph snapshots -------------------------------
+ *
+ * A lowered-Core cache entry is not a raw WIRE arena image: record fields
+ * still contain heap-backed Strings, Arrays and Hashes.  This deliberately
+ * small graph format serializes exactly the immutable value vocabulary used
+ * by the compiler cache and reconstructs packed WIRE into the current arena.
+ * It preserves sharing/cycles among Array, Hash and WIRE values.  Any other
+ * pointer-backed value (AST handles, closures, instances, BigInts, ...) makes
+ * the write fail; corrupt or incompatible input is an ordinary cache miss.
+ */
+
+#define W_CORE_GRAPH_VERSION UINT32_C(1)
+#define W_CORE_GRAPH_HEADER_SIZE 32u
+#define W_CORE_GRAPH_MAX_BYTES ((size_t)1024 * 1024 * 1024)
+#define W_CORE_GRAPH_MAX_DEPTH 256u
+#define W_CORE_GRAPH_MAX_STRING_BYTES ((size_t)64 * 1024 * 1024)
+#define W_CORE_GRAPH_MAX_CONTAINER_ITEMS UINT32_C(16777216)
+
+enum WCoreGraphTag {
+    W_CORE_GRAPH_RAW = 0,
+    W_CORE_GRAPH_STRING = 1,
+    W_CORE_GRAPH_SYMBOL = 2,
+    W_CORE_GRAPH_ARRAY = 3,
+    W_CORE_GRAPH_HASH = 4,
+    W_CORE_GRAPH_WIRE = 5,
+    W_CORE_GRAPH_BACKREF = 6
+};
+
+enum WCoreGraphRefKind {
+    W_CORE_REF_ARRAY = 1,
+    W_CORE_REF_HASH = 2,
+    W_CORE_REF_WIRE = 3
+};
+
+typedef struct {
+    uintptr_t identity;
+    uint32_t id;
+    uint8_t kind;
+    uint8_t used;
+} WCoreGraphSeenSlot;
+
+typedef struct {
+    uint8_t *data;
+    size_t size;
+    size_t cap;
+    int failed;
+    WCoreGraphSeenSlot *seen;
+    size_t seen_cap;
+    size_t seen_count;
+    const char *reason;
+} WCoreGraphWriter;
+
+static void w_core_graph_writer_fail(WCoreGraphWriter *w, const char *reason) {
+    w->failed = 1;
+    if (!w->reason) w->reason = reason;
+}
+
+typedef struct {
+    const uint8_t *data;
+    size_t size;
+    size_t off;
+    int failed;
+    WValue *refs;
+    size_t ref_count;
+    size_t ref_cap;
+} WCoreGraphReader;
+
+static uint64_t w_core_graph_mix(uintptr_t identity, uint8_t kind) {
+    uint64_t x = (uint64_t)identity ^ ((uint64_t)kind << 57);
+    x ^= x >> 30;
+    x *= UINT64_C(0xbf58476d1ce4e5b9);
+    x ^= x >> 27;
+    x *= UINT64_C(0x94d049bb133111eb);
+    return x ^ (x >> 31);
+}
+
+static int w_core_graph_writer_reserve(WCoreGraphWriter *w, size_t extra) {
+    if (w->failed) return 0;
+    if (extra > W_CORE_GRAPH_MAX_BYTES || w->size > W_CORE_GRAPH_MAX_BYTES - extra) {
+        w_core_graph_writer_fail(w, "snapshot exceeds size limit");
+        return 0;
+    }
+    size_t need = w->size + extra;
+    if (need <= w->cap) return 1;
+    size_t cap = w->cap ? w->cap : 4096;
+    while (cap < need) {
+        if (cap > W_CORE_GRAPH_MAX_BYTES / 2) {
+            cap = W_CORE_GRAPH_MAX_BYTES;
+            break;
+        }
+        cap *= 2;
+    }
+    uint8_t *next = (uint8_t *)realloc(w->data, cap);
+    if (!next) {
+        w_core_graph_writer_fail(w, "snapshot buffer allocation failed");
+        return 0;
+    }
+    w->data = next;
+    w->cap = cap;
+    return 1;
+}
+
+static void w_core_graph_put_bytes(WCoreGraphWriter *w, const void *src, size_t n) {
+    if (!w_core_graph_writer_reserve(w, n)) return;
+    memcpy(w->data + w->size, src, n);
+    w->size += n;
+}
+
+static void w_core_graph_put_u8(WCoreGraphWriter *w, uint8_t value) {
+    w_core_graph_put_bytes(w, &value, 1);
+}
+
+static void w_core_graph_store_u32(uint8_t *dst, uint32_t value) {
+    dst[0] = (uint8_t)value;
+    dst[1] = (uint8_t)(value >> 8);
+    dst[2] = (uint8_t)(value >> 16);
+    dst[3] = (uint8_t)(value >> 24);
+}
+
+static void w_core_graph_store_u64(uint8_t *dst, uint64_t value) {
+    for (unsigned i = 0; i < 8; i++) dst[i] = (uint8_t)(value >> (i * 8));
+}
+
+static void w_core_graph_put_u16(WCoreGraphWriter *w, uint16_t value) {
+    uint8_t out[2] = {(uint8_t)value, (uint8_t)(value >> 8)};
+    w_core_graph_put_bytes(w, out, sizeof(out));
+}
+
+static void w_core_graph_put_u32(WCoreGraphWriter *w, uint32_t value) {
+    uint8_t out[4];
+    w_core_graph_store_u32(out, value);
+    w_core_graph_put_bytes(w, out, sizeof(out));
+}
+
+static void w_core_graph_put_u64(WCoreGraphWriter *w, uint64_t value) {
+    uint8_t out[8];
+    w_core_graph_store_u64(out, value);
+    w_core_graph_put_bytes(w, out, sizeof(out));
+}
+
+static int w_core_graph_seen_grow(WCoreGraphWriter *w) {
+    size_t next_cap = w->seen_cap ? w->seen_cap * 2 : 1024;
+    WCoreGraphSeenSlot *next = (WCoreGraphSeenSlot *)calloc(next_cap, sizeof(*next));
+    if (!next) {
+        w_core_graph_writer_fail(w, "reference table allocation failed");
+        return 0;
+    }
+    if (w->seen) {
+        for (size_t i = 0; i < w->seen_cap; i++) {
+            WCoreGraphSeenSlot slot = w->seen[i];
+            if (!slot.used) continue;
+            size_t at = (size_t)w_core_graph_mix(slot.identity, slot.kind) & (next_cap - 1);
+            while (next[at].used) at = (at + 1) & (next_cap - 1);
+            next[at] = slot;
+        }
+        free(w->seen);
+    }
+    w->seen = next;
+    w->seen_cap = next_cap;
+    return 1;
+}
+
+/* Returns 1 for a prior reference, 0 for a newly assigned id, and -1 on
+ * allocation failure. */
+static int w_core_graph_seen_id(WCoreGraphWriter *w, uintptr_t identity,
+                                uint8_t kind, uint32_t *id_out) {
+    if (!w->seen_cap || (w->seen_count + 1) * 10 >= w->seen_cap * 7) {
+        if (!w_core_graph_seen_grow(w)) return -1;
+    }
+    size_t at = (size_t)w_core_graph_mix(identity, kind) & (w->seen_cap - 1);
+    while (w->seen[at].used) {
+        if (w->seen[at].identity == identity && w->seen[at].kind == kind) {
+            *id_out = w->seen[at].id;
+            return 1;
+        }
+        at = (at + 1) & (w->seen_cap - 1);
+    }
+    if (w->seen_count >= UINT32_MAX) {
+        w_core_graph_writer_fail(w, "too many shared references");
+        return -1;
+    }
+    uint32_t id = (uint32_t)w->seen_count++;
+    w->seen[at].identity = identity;
+    w->seen[at].kind = kind;
+    w->seen[at].id = id;
+    w->seen[at].used = 1;
+    *id_out = id;
+    return 0;
+}
+
+static void w_core_graph_write_value(WCoreGraphWriter *w, WValue value,
+                                     unsigned depth) {
+    if (w->failed) return;
+    if (depth > W_CORE_GRAPH_MAX_DEPTH) {
+        w_core_graph_writer_fail(w, "snapshot nesting limit exceeded");
+        return;
+    }
+    /* Compiler name construction may leave lazy Ropes in otherwise immutable
+     * records.  Their cache meaning is the flattened String, never Rope
+     * allocation identity. */
+    if (w_is_rope(value)) value = w_rope_flatten(value);
+    if (w_is_stringy(value)) {
+        char inline_buf[6];
+        const char *bytes;
+        size_t len;
+        w_str_data(value, inline_buf, &bytes, &len);
+        if (len > UINT32_MAX || len > W_CORE_GRAPH_MAX_STRING_BYTES) {
+            w_core_graph_writer_fail(w, "string exceeds format limit");
+            return;
+        }
+        w_core_graph_put_u8(w, w_is_symbol(value) ? W_CORE_GRAPH_SYMBOL
+                                                   : W_CORE_GRAPH_STRING);
+        w_core_graph_put_u32(w, (uint32_t)len);
+        w_core_graph_put_bytes(w, bytes, len);
+        return;
+    }
+
+    uint8_t ref_kind = 0;
+    uintptr_t identity = 0;
+    if (w_is_array(value)) {
+        ref_kind = W_CORE_REF_ARRAY;
+        identity = (uintptr_t)w_as_array(value);
+    } else if (w_is_hash(value)) {
+        ref_kind = W_CORE_REF_HASH;
+        identity = (uintptr_t)w_as_ptr(value);
+    } else if (w_is_wire(value)) {
+        ref_kind = W_CORE_REF_WIRE;
+        identity = (uintptr_t)w_wire_offset(value);
+    }
+
+    if (ref_kind) {
+        uint32_t id = 0;
+        int prior = w_core_graph_seen_id(w, identity, ref_kind, &id);
+        if (prior < 0) return;
+        if (prior) {
+            w_core_graph_put_u8(w, W_CORE_GRAPH_BACKREF);
+            w_core_graph_put_u32(w, id);
+            return;
+        }
+
+        if (ref_kind == W_CORE_REF_ARRAY) {
+            WArray *array = w_as_array(value);
+            if (array->ebits != 65 || array->size < 0) {
+                w_core_graph_writer_fail(w, "typed Array in compiler cache graph");
+                return;
+            }
+            w_core_graph_put_u8(w, W_CORE_GRAPH_ARRAY);
+            w_core_graph_put_u32(w, id);
+            w_core_graph_put_u32(w, (uint32_t)array->size);
+            for (int32_t i = 0; i < array->size; i++) {
+                w_core_graph_write_value(w, array->slots[array->start + i], depth + 1);
+                if (w->failed) {
+                    if (getenv("TUNGSTEN_CORE_CACHE_DEBUG"))
+                        fprintf(stderr, "  through Array[%d]\n", i);
+                    return;
+                }
+            }
+            return;
+        }
+
+        if (ref_kind == W_CORE_REF_HASH) {
+            WHash *hash = (WHash *)w_as_ptr(value);
+            w_core_graph_put_u8(w, W_CORE_GRAPH_HASH);
+            w_core_graph_put_u32(w, id);
+            w_core_graph_put_u32(w, hash->count);
+            uint32_t written = 0;
+            for (uint32_t i = 0; i < hash->used; i++) {
+                if (hash->keys[i] == W_MEMO_MISS) continue;
+                w_core_graph_write_value(w, hash->keys[i], depth + 1);
+                if (w->failed) {
+                    if (getenv("TUNGSTEN_CORE_CACHE_DEBUG"))
+                        fprintf(stderr, "  through Hash key at dense index %u\n", i);
+                    return;
+                }
+                w_core_graph_write_value(w, hash->values[i], depth + 1);
+                if (w->failed) {
+                    if (getenv("TUNGSTEN_CORE_CACHE_DEBUG")) {
+                        char key_buf[6];
+                        const char *key_text = NULL;
+                        size_t key_len = 0;
+                        if (w_is_stringy(hash->keys[i]))
+                            w_str_data(hash->keys[i], key_buf, &key_text, &key_len);
+                        if (key_text)
+                            fprintf(stderr, "  through Hash[%.*s]\n", (int)key_len, key_text);
+                        else
+                            fprintf(stderr, "  through Hash value at dense index %u\n", i);
+                    }
+                    return;
+                }
+                written++;
+            }
+            if (written != hash->count)
+                w_core_graph_writer_fail(w, "Hash live-count mismatch");
+            return;
+        }
+
+        uint64_t off = w_wire_checked_offset(value);
+        uint32_t count = w_wire_record_count(off);
+        uint32_t capacity = w_wire_record_capacity(off);
+        if (count > UINT16_MAX || capacity > UINT16_MAX) {
+            w_core_graph_writer_fail(w, "WIRE record exceeds format limit");
+            return;
+        }
+        w_core_graph_put_u8(w, W_CORE_GRAPH_WIRE);
+        w_core_graph_put_u32(w, id);
+        w_core_graph_put_u16(w, (uint16_t)w_wire_kind(value));
+        w_core_graph_put_u16(w, (uint16_t)count);
+        w_core_graph_put_u16(w, (uint16_t)capacity);
+        for (uint32_t i = 0; i < count; i++) {
+            w_core_graph_write_value(w, g_wire_arena.base[off + 1 + i * 2], depth + 1);
+            if (w->failed) {
+                if (getenv("TUNGSTEN_CORE_CACHE_DEBUG"))
+                    fprintf(stderr, "  through WIRE kind %d field-name %u\n",
+                            w_wire_kind(value), i);
+                return;
+            }
+            w_core_graph_write_value(w, g_wire_arena.base[off + 2 + i * 2], depth + 1);
+            if (w->failed) {
+                if (getenv("TUNGSTEN_CORE_CACHE_DEBUG")) {
+                    WValue field = g_wire_arena.base[off + 1 + i * 2];
+                    char field_buf[6];
+                    const char *field_text = NULL;
+                    size_t field_len = 0;
+                    if (w_is_stringy(field))
+                        w_str_data(field, field_buf, &field_text, &field_len);
+                    fprintf(stderr, "  through WIRE kind %d field %.*s\n",
+                            w_wire_kind(value), (int)field_len,
+                            field_text ? field_text : "");
+                }
+                return;
+            }
+        }
+        return;
+    }
+
+    /* AST/body handles and every remaining pointer-backed value are process-
+     * local.  The rest of the NaN-box vocabulary is immediate and can be
+     * restored bit-for-bit. */
+    if (w_is_node(value) || w_is_body(value) || w_is_obj(value) ||
+        w_is_bigint(value)) {
+        if (getenv("TUNGSTEN_CORE_CACHE_DEBUG"))
+            fprintf(stderr,
+                    "core cache unsupported value: 0x%016llx node=%d body=%d obj=%d subtag=%d bigint=%d\n",
+                    (unsigned long long)value, w_is_node(value), w_is_body(value),
+                    w_is_obj(value), w_is_obj(value) ? w_subtag(value) : -1,
+                    w_is_bigint(value));
+        w_core_graph_writer_fail(w, "process-local heap or AST value in compiler cache graph");
+        return;
+    }
+    w_core_graph_put_u8(w, W_CORE_GRAPH_RAW);
+    w_core_graph_put_u64(w, (uint64_t)value);
+}
+
+static int w_core_graph_reader_take(WCoreGraphReader *r, void *dst, size_t n) {
+    if (r->failed || r->off > r->size || n > r->size - r->off) {
+        r->failed = 1;
+        return 0;
+    }
+    memcpy(dst, r->data + r->off, n);
+    r->off += n;
+    return 1;
+}
+
+static uint8_t w_core_graph_get_u8(WCoreGraphReader *r) {
+    uint8_t value = 0;
+    w_core_graph_reader_take(r, &value, 1);
+    return value;
+}
+
+static uint16_t w_core_graph_get_u16(WCoreGraphReader *r) {
+    uint8_t in[2] = {0};
+    if (!w_core_graph_reader_take(r, in, sizeof(in))) return 0;
+    return (uint16_t)in[0] | ((uint16_t)in[1] << 8);
+}
+
+static uint32_t w_core_graph_load_u32(const uint8_t *src) {
+    return (uint32_t)src[0] | ((uint32_t)src[1] << 8) |
+           ((uint32_t)src[2] << 16) | ((uint32_t)src[3] << 24);
+}
+
+static uint64_t w_core_graph_load_u64(const uint8_t *src) {
+    uint64_t value = 0;
+    for (unsigned i = 0; i < 8; i++) value |= (uint64_t)src[i] << (i * 8);
+    return value;
+}
+
+static uint32_t w_core_graph_get_u32(WCoreGraphReader *r) {
+    uint8_t in[4] = {0};
+    if (!w_core_graph_reader_take(r, in, sizeof(in))) return 0;
+    return w_core_graph_load_u32(in);
+}
+
+static uint64_t w_core_graph_get_u64(WCoreGraphReader *r) {
+    uint8_t in[8] = {0};
+    if (!w_core_graph_reader_take(r, in, sizeof(in))) return 0;
+    return w_core_graph_load_u64(in);
+}
+
+static int w_core_graph_define_ref(WCoreGraphReader *r, uint32_t id, WValue value) {
+    /* Writer ids are dense and definitions precede their first backref.  This
+     * prevents a corrupt file from forcing a huge sparse allocation. */
+    if ((size_t)id != r->ref_count) {
+        r->failed = 1;
+        return 0;
+    }
+    if (r->ref_count == r->ref_cap) {
+        size_t cap = r->ref_cap ? r->ref_cap * 2 : 1024;
+        WValue *next = (WValue *)realloc(r->refs, cap * sizeof(*next));
+        if (!next) {
+            r->failed = 1;
+            return 0;
+        }
+        r->refs = next;
+        r->ref_cap = cap;
+    }
+    r->refs[r->ref_count++] = value;
+    return 1;
+}
+
+static WValue w_core_graph_read_value(WCoreGraphReader *r, unsigned depth) {
+    if (r->failed || depth > W_CORE_GRAPH_MAX_DEPTH) {
+        r->failed = 1;
+        return W_NIL;
+    }
+    uint8_t tag = w_core_graph_get_u8(r);
+    if (r->failed) return W_NIL;
+    if (tag == W_CORE_GRAPH_RAW) {
+        WValue value = (WValue)w_core_graph_get_u64(r);
+        if (r->failed || w_is_stringy(value) || w_is_array(value) ||
+            w_is_wire(value) || w_is_node(value) || w_is_body(value) ||
+            w_is_obj(value) || w_is_bigint(value)) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        return value;
+    }
+
+    if (tag == W_CORE_GRAPH_STRING || tag == W_CORE_GRAPH_SYMBOL) {
+        uint32_t len = w_core_graph_get_u32(r);
+        if (r->failed || len > W_CORE_GRAPH_MAX_STRING_BYTES ||
+            r->off > r->size || (size_t)len > r->size - r->off) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        const char *bytes = (const char *)(r->data + r->off);
+        r->off += len;
+        if (tag == W_CORE_GRAPH_STRING) return w_string_n(bytes, len);
+        char *name = (char *)malloc((size_t)len + 1);
+        if (!name) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        memcpy(name, bytes, len);
+        name[len] = '\0';
+        WValue symbol = w_symbol(name);
+        free(name);
+        /* Emitted symbol literals use the slab's canonical identity with the
+         * optional cached-length bits clear.  Runtime construction fills
+         * those bits; Hash equality ignores them, but WIRE field lookup is an
+         * intentional raw-symbol compare.  Normalize restored field/key
+         * symbols to the same process-stable representation. */
+        if (w_is_slab_sym(symbol))
+            symbol = w_box_slab_sym(w_as_slab_index(symbol));
+        return symbol;
+    }
+
+    if (tag == W_CORE_GRAPH_BACKREF) {
+        uint32_t id = w_core_graph_get_u32(r);
+        if (r->failed || (size_t)id >= r->ref_count) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        return r->refs[id];
+    }
+
+    uint32_t id = w_core_graph_get_u32(r);
+    if (r->failed) return W_NIL;
+    if (tag == W_CORE_GRAPH_ARRAY) {
+        uint32_t count = w_core_graph_get_u32(r);
+        if (r->failed || count > W_CORE_GRAPH_MAX_CONTAINER_ITEMS ||
+            r->off > r->size || (size_t)count > r->size - r->off) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        WValue value = w_array_new_inline(65, count);
+        if (!w_core_graph_define_ref(r, id, value)) return W_NIL;
+        WArray *array = w_as_array(value);
+        for (uint32_t i = 0; i < count; i++)
+            array->slots[i] = w_core_graph_read_value(r, depth + 1);
+        return value;
+    }
+    if (tag == W_CORE_GRAPH_HASH) {
+        uint32_t count = w_core_graph_get_u32(r);
+        if (r->failed || count > W_CORE_GRAPH_MAX_CONTAINER_ITEMS ||
+            r->off > r->size || (size_t)count > (r->size - r->off) / 2) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        WValue value = w_hash_new();
+        if (!w_core_graph_define_ref(r, id, value)) return W_NIL;
+        for (uint32_t i = 0; i < count; i++) {
+            WValue key = w_core_graph_read_value(r, depth + 1);
+            WValue item = w_core_graph_read_value(r, depth + 1);
+            if (r->failed) return W_NIL;
+            w_hash_set(value, key, item);
+        }
+        return value;
+    }
+    if (tag == W_CORE_GRAPH_WIRE) {
+        uint16_t kind = w_core_graph_get_u16(r);
+        uint16_t count = w_core_graph_get_u16(r);
+        uint16_t capacity = w_core_graph_get_u16(r);
+        if (r->failed || kind == 0 || kind > 511 || capacity < count ||
+            capacity > 2048 || r->off > r->size ||
+            (size_t)count > (r->size - r->off) / 2) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        WValue value = w_wire_alloc_reserve(kind, count, capacity - count);
+        if (!w_core_graph_define_ref(r, id, value)) return W_NIL;
+        for (uint16_t i = 0; i < count; i++) {
+            WValue symbol = w_core_graph_read_value(r, depth + 1);
+            WValue item = w_core_graph_read_value(r, depth + 1);
+            if (r->failed || !w_is_symbol(symbol)) {
+                r->failed = 1;
+                return W_NIL;
+            }
+            w_wire_field_store_at(value, i, symbol, item);
+        }
+        return value;
+    }
+    r->failed = 1;
+    return W_NIL;
+}
+
+WValue w_core_cache_write(WValue path_val, WValue value) {
+    const char *path = as_str(path_val);
+    w_sandbox_gate("write_file", path);
+    WCoreGraphWriter writer = {0};
+    static const uint8_t magic[8] = {'T','W','C','O','R','E','1','\0'};
+    w_core_graph_put_bytes(&writer, magic, sizeof(magic));
+    w_core_graph_put_u32(&writer, W_CORE_GRAPH_VERSION);
+    w_core_graph_put_u32(&writer, UINT32_C(0x01020304));
+    w_core_graph_put_u64(&writer, 0);
+    w_core_graph_put_u64(&writer, 0);
+    w_core_graph_write_value(&writer, value, 0);
+    if (writer.failed || writer.size < W_CORE_GRAPH_HEADER_SIZE) {
+        if (getenv("TUNGSTEN_CORE_CACHE_DEBUG"))
+            fprintf(stderr, "core cache snapshot write failed: %s\n",
+                    writer.reason ? writer.reason : "unknown format error");
+        free(writer.data);
+        free(writer.seen);
+        return W_FALSE;
+    }
+    uint64_t payload_size = (uint64_t)(writer.size - W_CORE_GRAPH_HEADER_SIZE);
+    uint64_t checksum = w_hash_wyhash(writer.data + W_CORE_GRAPH_HEADER_SIZE,
+                                      (size_t)payload_size);
+    w_core_graph_store_u64(writer.data + 16, payload_size);
+    w_core_graph_store_u64(writer.data + 24, checksum);
+
+    static _Atomic uint64_t temp_sequence = 0;
+    uint64_t sequence = atomic_fetch_add_explicit(&temp_sequence, 1,
+                                                   memory_order_relaxed);
+    size_t path_len = strlen(path);
+    char *tmp = (char *)malloc(path_len + 80);
+    if (!tmp) {
+        free(writer.data);
+        free(writer.seen);
+        return W_FALSE;
+    }
+    snprintf(tmp, path_len + 80, "%s.tmp.%ld.%llu", path, (long)getpid(),
+             (unsigned long long)sequence);
+    FILE *file = fopen(tmp, "wb");
+    int ok = file != NULL;
+    if (ok && fwrite(writer.data, 1, writer.size, file) != writer.size) ok = 0;
+    if (ok && fflush(file) != 0) ok = 0;
+    if (ok && fsync(fileno(file)) != 0) ok = 0;
+    if (file && fclose(file) != 0) ok = 0;
+    if (ok && rename(tmp, path) != 0) ok = 0;
+    if (!ok) unlink(tmp);
+    free(tmp);
+    free(writer.data);
+    free(writer.seen);
+    return ok ? W_TRUE : W_FALSE;
+}
+
+WValue w_core_cache_read(WValue path_val) {
+    const char *path = as_str(path_val);
+    w_sandbox_gate("read_file", path);
+    struct stat statbuf;
+    if (stat(path, &statbuf) != 0 || statbuf.st_size < (off_t)W_CORE_GRAPH_HEADER_SIZE ||
+        (uint64_t)statbuf.st_size > W_CORE_GRAPH_MAX_BYTES)
+        return W_NIL;
+    size_t size = (size_t)statbuf.st_size;
+    uint8_t *data = (uint8_t *)malloc(size);
+    if (!data) return W_NIL;
+    FILE *file = fopen(path, "rb");
+    int ok = file != NULL && fread(data, 1, size, file) == size;
+    if (file) fclose(file);
+    static const uint8_t magic[8] = {'T','W','C','O','R','E','1','\0'};
+    if (!ok || memcmp(data, magic, sizeof(magic)) != 0 ||
+        w_core_graph_load_u32(data + 8) != W_CORE_GRAPH_VERSION ||
+        w_core_graph_load_u32(data + 12) != UINT32_C(0x01020304) ||
+        w_core_graph_load_u64(data + 16) != size - W_CORE_GRAPH_HEADER_SIZE ||
+        w_core_graph_load_u64(data + 24) !=
+            w_hash_wyhash(data + W_CORE_GRAPH_HEADER_SIZE,
+                          size - W_CORE_GRAPH_HEADER_SIZE)) {
+        free(data);
+        return W_NIL;
+    }
+    WCoreGraphReader reader = {
+        .data = data,
+        .size = size,
+        .off = W_CORE_GRAPH_HEADER_SIZE
+    };
+    WValue value = w_core_graph_read_value(&reader, 0);
+    if (reader.failed || reader.off != reader.size) value = W_NIL;
+    free(reader.refs);
+    free(data);
+    return value;
+}
+
 typedef struct {
     pid_t pid;
 } WSystemChild;

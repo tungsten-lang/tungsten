@@ -4479,7 +4479,8 @@ static uint64_t bn_submul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uin
  * chain.  Prefixes of one and two limbs leave the main loop a multiple of four.
  */
 __attribute__((naked, noinline, aligned(64)))
-static uint64_t bn_submul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
+__attribute__((visibility("hidden")))
+uint64_t bn_submul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
     __asm__(
         "adds x15, xzr, xzr\n"
         "tbz w2, #0, 1f\n"
@@ -12711,10 +12712,18 @@ static int bn_bench_runtime_mod84_cache_entries = 2;
 #else
 #define BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() BN_MOD84_PREINV_CACHE_ENTRIES
 #endif
-static __thread uint64_t bn_mod84_preinv_d1[2];
-static __thread uint64_t bn_mod84_preinv_d0[2];
-static __thread uint64_t bn_mod84_preinv_value[2];
-static __thread uint8_t bn_mod84_preinv_next;
+/* The exact native-Tungsten mag_mod_84 port reads the same process-private
+ * cache through Mach-O TLS descriptors.  Hidden linkage keeps these runtime
+ * implementation details out of the public ABI while allowing the embedded
+ * assembly object to share, rather than approximate, the tuned C policy. */
+__attribute__((visibility("hidden"))) __thread uint64_t
+    bn_mod84_preinv_d1[2];
+__attribute__((visibility("hidden"))) __thread uint64_t
+    bn_mod84_preinv_d0[2];
+__attribute__((visibility("hidden"))) __thread uint64_t
+    bn_mod84_preinv_value[2];
+__attribute__((visibility("hidden"))) __thread uint8_t
+    bn_mod84_preinv_next;
 #endif
 
 static inline __attribute__((always_inline))
@@ -53628,6 +53637,19 @@ WValue w_bigint_mod63_finish_raw(
     b->limbs[0] = limb0;
     b->limbs[1] = limb1;
     b->limbs[2] = limb2;
+    b->size = (int32_t)size;
+    return bigint_finish_mag_sub(b);
+}
+WValue w_bigint_mod84_finish_raw(
+    uint64_t limb0, uint64_t limb1, uint64_t limb2, uint64_t limb3,
+    int64_t size) {
+    if ((uint64_t)size > 4)
+        die("w_bigint_mod84_finish_raw: size is outside 0..4");
+    WBigint *b = bigint_alloc_raw_hot(4);
+    b->limbs[0] = limb0;
+    b->limbs[1] = limb1;
+    b->limbs[2] = limb2;
+    b->limbs[3] = limb3;
     b->size = (int32_t)size;
     return bigint_finish_mag_sub(b);
 }

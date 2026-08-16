@@ -1619,6 +1619,578 @@ on macos && arm64
       .short 0x40e, 0x40c, 0x40a, 0x408, 0x406, 0x404, 0x402, 0x400
     ASM
 
+# Exact AArch64/macOS port of runtime.c's corrected fixed 8-by-4-limb
+# remainder leaf.  Keep the C schedule intact: normalization, the shared
+# two-entry TLS preinverse cache, five Moller--Granlund 3-by-2 digits, the
+# saturated/correction arms, and allocation only after the arithmetic.
+# The storage tail is the runtime-owned hot-capacity-4 epilogue, matching the
+# C caller's bigint_finish_mag_sub policy.
+on macos && arm64
+  fn __bigint_mod_84_raw(ap, bp) (i64 i64) i64
+    asm <<~ASM
+      .arch_extension cssc
+        sub  sp, sp, #240
+        stp  x28, x27, [sp, #144]
+        stp  x26, x25, [sp, #160]
+        stp  x24, x23, [sp, #176]
+        stp  x22, x21, [sp, #192]
+        stp  x20, x19, [sp, #208]
+        stp  x29, x30, [sp, #224]
+        add  x29, sp, #224
+        ldr  x21, [x1, #24]
+        clz  x20, x21
+        cbz  x20, Lmod84_2
+        ldp  x8, x9, [x1]
+        lsl  x10, x8, x20
+        lsl  x11, x9, x20
+        lsr  x8, x8, #1
+        mvn  w12, w20
+        lsr  x8, x8, x12
+        orr  x8, x11, x8
+        mov  w11, #64
+        sub  x11, x11, x20
+        stp  x10, x8, [sp, #48]
+        ldr  x8, [x1, #16]
+        lsl  x10, x8, x20
+        lsr  x9, x9, #1
+        lsr  x9, x9, x12
+        orr  x22, x10, x9
+        lsl  x9, x21, x20
+        lsr  x8, x8, #1
+        lsr  x8, x8, x12
+        orr  x21, x9, x8
+        stp  x22, x21, [sp, #64]
+        ldr  x8, [x0]
+        ldr  q0, [x0]
+        lsl  x8, x8, x20
+        str  x8, [sp, #80]
+        dup.2d  v1, x20
+        ldur  q2, [x0, #8]
+        ushl.2d  v2, v2, v1
+        dup.2d  v3, x11
+        neg.2d  v3, v3
+        ushl.2d  v0, v0, v3
+        orr.16b  v0, v2, v0
+        stur  q0, [sp, #88]
+        ldr  q0, [x0, #16]
+        ldur  q2, [x0, #24]
+        ushl.2d  v2, v2, v1
+        ushl.2d  v0, v0, v3
+        orr.16b  v0, v2, v0
+        stur  q0, [sp, #104]
+        ldr  q0, [x0, #32]
+        ldur  q2, [x0, #40]
+        ushl.2d  v1, v2, v1
+        ushl.2d  v0, v0, v3
+        orr.16b  v0, v1, v0
+        stur  q0, [sp, #120]
+        ldp  x8, x9, [x0, #48]
+        lsr  x8, x8, #1
+        lsr  x8, x8, x12
+        lsl  x10, x9, x20
+        orr  x23, x10, x8
+        str  x23, [sp, #136]
+        neg  x8, x20
+        lsr  x19, x9, x8
+        add  x1, sp, #48
+        b  Lmod84_3
+      Lmod84_2:
+        mov  x19, #0
+        ldp  q0, q1, [x0]
+        stp  q0, q1, [sp, #80]
+        ldp  q1, q0, [x0, #32]
+        stp  q1, q0, [sp, #112]
+        ldr  x23, [sp, #136]
+        ldr  x22, [x1, #16]
+      Lmod84_3:
+        adrp  x0, _bn_mod84_preinv_d1@TLVPPAGE
+        ldr  x0, [x0, _bn_mod84_preinv_d1@TLVPPAGEOFF]
+        ldr  x8, [x0]
+        blr  x8
+        mov  x8, x0
+        ldr  x9, [x0]
+        adrp  x0, _bn_mod84_preinv_d0@TLVPPAGE
+        ldr  x0, [x0, _bn_mod84_preinv_d0@TLVPPAGEOFF]
+        ldr  x10, [x0]
+        blr  x10
+        ldr  x10, [x0]
+        cmp  x9, x21
+        ccmp  x10, x22, #0, eq
+        b.eq  Lmod84_7
+        ldr  x9, [x8, #8]
+        cmp  x9, x21
+        b.ne  Lmod84_8
+        ldr  x9, [x0, #8]
+        cmp  x9, x22
+        b.ne  Lmod84_8
+        adrp  x0, _bn_mod84_preinv_value@TLVPPAGE
+        ldr  x0, [x0, _bn_mod84_preinv_value@TLVPPAGEOFF]
+        ldr  x8, [x0]
+        blr  x8
+        ldr  x24, [x0, #8]
+        b  Lmod84_15
+      Lmod84_7:
+        adrp  x0, _bn_mod84_preinv_value@TLVPPAGE
+        ldr  x0, [x0, _bn_mod84_preinv_value@TLVPPAGEOFF]
+        ldr  x8, [x0]
+        blr  x8
+        ldr  x24, [x0]
+        b  Lmod84_15
+      Lmod84_8:
+        lsr  x9, x21, #55
+        adr  x10, 90f
+        add  x9, x10, x9, lsl #1
+        sub  x9, x9, #512
+        ldrh  w9, [x9]
+        lsr  x10, x21, #24
+        add  x10, x10, #1
+        mul  x11, x10, x9
+        mul  x11, x11, x9
+        mvn  x11, x11, lsr #40
+        add  x9, x11, x9, lsl #11
+        mov  x11, #1152921504606846976
+        msub  x10, x9, x10, x11
+        mul  x10, x10, x9
+        lsr  x10, x10, #47
+        add  x9, x10, x9, lsl #13
+        sbfx  x10, x21, #0, #1
+        and  x11, x21, #0x1
+        add  x11, x11, x21, lsr #1
+        and  x10, x10, x9, lsr #1
+        msub  x10, x9, x11, x10
+        lsl  x11, x9, #31
+        umulh  x9, x10, x9
+        add  x9, x11, x9, lsr #1
+        adds  x10, x9, #1
+        cset  w11, hs
+        umulh  x10, x10, x21
+        madd  x10, x11, x21, x10
+        sub  x9, x9, x21
+        sub  x9, x9, x10
+        mul  x10, x9, x21
+        adds  x10, x10, x22
+        b.lo  Lmod84_10
+        cmp  x10, x21
+        csel  x11, x21, xzr, hs
+        cset  w12, hs
+        mvn  x12, x12
+        add  x9, x12, x9
+        sub  x10, x10, x21
+        sub  x10, x10, x11
+      Lmod84_10:
+        umulh  x11, x9, x22
+        adds  x11, x10, x11
+        b.lo  Lmod84_13
+        mov  x10, x0
+        sub  x24, x9, #1
+        cmp  x11, x21
+        b.lo  Lmod84_14
+        mul  x12, x9, x22
+        sub  x9, x9, #2
+        cmp  x11, x21
+        ccmp  x22, x12, #0, ls
+        csel  x24, x24, x9, hi
+        b  Lmod84_14
+      Lmod84_13:
+        mov  x10, x0
+        mov  x24, x9
+      Lmod84_14:
+        adrp  x0, _bn_mod84_preinv_next@TLVPPAGE
+        ldr  x0, [x0, _bn_mod84_preinv_next@TLVPPAGEOFF]
+        ldr  x9, [x0]
+        blr  x9
+        ldrb  w9, [x0]
+        add  w11, w9, #1
+        strb  w11, [x0]
+        ubfiz  x9, x9, #3, #1
+        str  x21, [x8, x9]
+        str  x22, [x10, x9]
+        adrp  x0, _bn_mod84_preinv_value@TLVPPAGE
+        ldr  x0, [x0, _bn_mod84_preinv_value@TLVPPAGEOFF]
+        ldr  x8, [x0]
+        blr  x8
+        str  x24, [x0, x9]
+      Lmod84_15:
+        mov  x27, #0
+        add  x26, sp, #80
+        mov  w30, #2
+        mov  w28, #4
+        mov  x25, #0
+      Lmod84_16:
+        cmp  x19, x21
+        b.lo  Lmod84_19
+        b.hi  Lmod84_24
+        cmp  x23, x22
+        b.hs  Lmod84_24
+      Lmod84_19:
+        add  x8, x26, x25
+        ldr  x9, [x8, #48]
+        umulh  x10, x19, x24
+        mul  x11, x19, x24
+        adds  x11, x23, x11
+        adc  x10, x19, x10
+        msub  x12, x21, x10, x23
+        umulh  x13, x10, x22
+        mul  x14, x10, x22
+        adds  x14, x14, x22
+        adc  x13, x13, x21
+        subs  x14, x27, x14
+        sbc  x12, x12, x13
+        adds  x9, x14, x9
+        cinc  x12, x12, hs
+        cmp  x12, x11
+        csel  x13, x21, x27, hs
+        cset  w11, hs
+        csel  x14, x22, x27, hs
+        sub  x10, x10, x11
+        add  x11, x10, #1
+        adds  x10, x9, x14
+        adc  x9, x13, x12
+        cmp  x10, x22
+        sbcs  xzr, x9, x21
+        b.hs  Lmod84_22
+      Lmod84_20:
+        add  x16, x8, #32
+        ldp  x12, x13, [x1]
+        mul  x14, x12, x11
+        ldr  x15, [x16]
+        umulh  x12, x12, x11
+        subs  x14, x15, x14
+        cinc  x12, x12, lo
+        mul  x15, x13, x11
+        adds  x17, x12, x15
+        ldr  x0, [x8, #40]
+        subs  x17, x0, x17
+        cset  w0, lo
+        cmn  x12, x15
+        str  x14, [x16]
+        str  x17, [x8, #40]
+        umulh  x8, x13, x11
+        adc  x8, x0, x8
+        subs  x23, x10, x8
+        cset  w8, lo
+        subs  x19, x9, x8
+        b.lo  Lmod84_23
+      Lmod84_21:
+        sub  x25, x25, #8
+        cmn  x25, #40
+        b.ne  Lmod84_16
+        b  Lmod84_27
+      Lmod84_22:
+        add  x11, x11, #1
+        subs  x10, x10, x22
+        sbc  x9, x9, x21
+        b  Lmod84_20
+      Lmod84_23:
+        mov  x17, x27
+        mov  x0, x16
+        mov  x2, x1
+        cmn  xzr, xzr
+        tbz  w30, #0, Lmod84_tmp2
+        ldr  x4, [x0], #8
+        ldr  x8, [x2], #8
+        adcs  x12, x4, x8
+        str  x12, [x16], #8
+      Lmod84_tmp2:
+        tbz  w30, #1, Lmod84_tmp3
+        ldp  x4, x5, [x0], #16
+        ldp  x8, x9, [x2], #16
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        stp  x12, x13, [x16], #16
+      Lmod84_tmp3:
+        tbz  w30, #2, Lmod84_tmp4
+        ldp  x4, x5, [x0], #32
+        ldp  x6, x7, [x0, #-16]
+        ldp  x8, x9, [x2], #32
+        ldp  x10, x11, [x2, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+      Lmod84_tmp4:
+        tbz  w30, #3, Lmod84_tmp5
+        ldp  x4, x5, [x0], #32
+        ldp  x6, x7, [x0, #-16]
+        ldp  x8, x9, [x2], #32
+        ldp  x10, x11, [x2, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        ldp  x4, x5, [x0], #32
+        ldp  x6, x7, [x0, #-16]
+        ldp  x8, x9, [x2], #32
+        ldp  x10, x11, [x2, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+      Lmod84_tmp5:
+        cbz  x17, Lmod84_tmp6
+      Lmod84_tmp7:
+        ldp  x4, x5, [x0], #32
+        ldp  x6, x7, [x0, #-16]
+        ldp  x8, x9, [x2], #32
+        ldp  x10, x11, [x2, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        ldp  x4, x5, [x0], #32
+        ldp  x6, x7, [x0, #-16]
+        ldp  x8, x9, [x2], #32
+        ldp  x10, x11, [x2, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        ldp  x4, x5, [x0], #32
+        ldp  x6, x7, [x0, #-16]
+        ldp  x8, x9, [x2], #32
+        ldp  x10, x11, [x2, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        ldp  x4, x5, [x0], #32
+        ldp  x6, x7, [x0, #-16]
+        ldp  x8, x9, [x2], #32
+        ldp  x10, x11, [x2, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        sub  x17, x17, #1
+        cbnz  x17, Lmod84_tmp7
+      Lmod84_tmp6:
+        cset  x3, hs
+        adds  x8, x23, x22
+        cset  w9, hs
+        adds  x23, x8, x3
+        add  x8, x19, x21
+        adc  x19, x8, x9
+        b  Lmod84_21
+      Lmod84_24:
+        add  x8, x26, x25
+        ldr  q0, [x8, #32]
+        str  q0, [sp]
+        ldr  x8, [x8, #48]
+        stp  x8, x23, [sp, #16]
+        str  x19, [sp, #32]
+        mov  x0, sp
+        mov  x19, x1
+        mov  w2, #4
+        mov  x3, #-1
+        bl  _bn_submul_1
+        mov  x1, x19
+        ldr  x8, [sp, #32]
+        subs  x8, x8, x0
+        str  x8, [sp, #32]
+        b.hs  Lmod84_26
+        mov  x16, sp
+        mov  x17, sp
+        mov  x0, x1
+        mov  x2, x27
+        cmn  xzr, xzr
+        tbz  w28, #0, Lmod84_tmp8
+        ldr  x4, [x17], #8
+        ldr  x8, [x0], #8
+        adcs  x12, x4, x8
+        str  x12, [x16], #8
+      Lmod84_tmp8:
+        tbz  w28, #1, Lmod84_tmp9
+        ldp  x4, x5, [x17], #16
+        ldp  x8, x9, [x0], #16
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        stp  x12, x13, [x16], #16
+      Lmod84_tmp9:
+        tbz  w28, #2, Lmod84_tmp1810
+        ldp  x4, x5, [x17], #32
+        ldp  x6, x7, [x17, #-16]
+        ldp  x8, x9, [x0], #32
+        ldp  x10, x11, [x0, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+      Lmod84_tmp1810:
+        tbz  w28, #3, Lmod84_tmp1811
+        ldp  x4, x5, [x17], #32
+        ldp  x6, x7, [x17, #-16]
+        ldp  x8, x9, [x0], #32
+        ldp  x10, x11, [x0, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        ldp  x4, x5, [x17], #32
+        ldp  x6, x7, [x17, #-16]
+        ldp  x8, x9, [x0], #32
+        ldp  x10, x11, [x0, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+      Lmod84_tmp1811:
+        cbz  x2, Lmod84_tmp1812
+      Lmod84_tmp1813:
+        ldp  x4, x5, [x17], #32
+        ldp  x6, x7, [x17, #-16]
+        ldp  x8, x9, [x0], #32
+        ldp  x10, x11, [x0, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        ldp  x4, x5, [x17], #32
+        ldp  x6, x7, [x17, #-16]
+        ldp  x8, x9, [x0], #32
+        ldp  x10, x11, [x0, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        ldp  x4, x5, [x17], #32
+        ldp  x6, x7, [x17, #-16]
+        ldp  x8, x9, [x0], #32
+        ldp  x10, x11, [x0, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        ldp  x4, x5, [x17], #32
+        ldp  x6, x7, [x17, #-16]
+        ldp  x8, x9, [x0], #32
+        ldp  x10, x11, [x0, #-16]
+        adcs  x12, x4, x8
+        adcs  x13, x5, x9
+        adcs  x14, x6, x10
+        adcs  x15, x7, x11
+        stp  x12, x13, [x16], #32
+        stp  x14, x15, [x16, #-16]
+        sub  x2, x2, #1
+        cbnz  x2, Lmod84_tmp1813
+      Lmod84_tmp1812:
+        cset  x3, hs
+        ldr  x8, [sp, #32]
+        add  x8, x8, x3
+        str  x8, [sp, #32]
+      Lmod84_26:
+        ldr  q0, [sp]
+        add  x8, x26, x25
+        str  q0, [x8, #32]
+        ldp  x23, x19, [sp, #16]
+        mov  w30, #2
+        b  Lmod84_21
+      Lmod84_27:
+        ldr x8, [sp, #80]
+        cbz x20, Lmod84_32
+      Lmod84_29:
+        ldr x9, [sp, #88]
+        lsr x8, x8, x20
+        lsl x10, x9, #1
+        mvn w11, w20
+        lsl x10, x10, x11
+        orr x8, x10, x8
+        lsr x9, x9, x20
+        lsl x10, x23, #1
+        lsl x10, x10, x11
+        orr x9, x10, x9
+        lsr x10, x23, x20
+        lsl x12, x19, #1
+        lsl x11, x12, x11
+        orr x23, x11, x10
+        lsr x19, x19, x20
+        b Lmod84_33
+      Lmod84_32:
+        ldr x9, [sp, #88]
+      Lmod84_33:
+        mov x0, x8
+        mov x1, x9
+        mov x2, x23
+        mov x3, x19
+        mov w4, #4
+        cbnz x3, Lmod84_34
+        mov w10, #3
+        mov w11, #2
+        umin x4, x0, #1
+        cmp x1, #0
+        csel w4, w11, w4, ne
+        cmp x2, #0
+        csel w4, w10, w4, ne
+      Lmod84_34:
+        ldp x29, x30, [sp, #224]
+        ldp x20, x19, [sp, #208]
+        ldp x22, x21, [sp, #192]
+        ldp x24, x23, [sp, #176]
+        ldp x26, x25, [sp, #160]
+        ldp x28, x27, [sp, #144]
+        add sp, sp, #240
+        b _w_bigint_mod84_finish_raw
+      90:
+          .short 0x7fd, 0x7f5, 0x7ed, 0x7e5, 0x7dd, 0x7d5, 0x7ce, 0x7c6
+          .short 0x7bf, 0x7b7, 0x7b0, 0x7a8, 0x7a1, 0x79a, 0x792, 0x78b
+          .short 0x784, 0x77d, 0x776, 0x76f, 0x768, 0x761, 0x75b, 0x754
+          .short 0x74d, 0x747, 0x740, 0x739, 0x733, 0x72c, 0x726, 0x720
+          .short 0x719, 0x713, 0x70d, 0x707, 0x700, 0x6fa, 0x6f4, 0x6ee
+          .short 0x6e8, 0x6e2, 0x6dc, 0x6d6, 0x6d1, 0x6cb, 0x6c5, 0x6bf
+          .short 0x6ba, 0x6b4, 0x6ae, 0x6a9, 0x6a3, 0x69e, 0x698, 0x693
+          .short 0x68d, 0x688, 0x683, 0x67d, 0x678, 0x673, 0x66e, 0x669
+          .short 0x664, 0x65e, 0x659, 0x654, 0x64f, 0x64a, 0x645, 0x640
+          .short 0x63c, 0x637, 0x632, 0x62d, 0x628, 0x624, 0x61f, 0x61a
+          .short 0x616, 0x611, 0x60c, 0x608, 0x603, 0x5ff, 0x5fa, 0x5f6
+          .short 0x5f1, 0x5ed, 0x5e9, 0x5e4, 0x5e0, 0x5dc, 0x5d7, 0x5d3
+          .short 0x5cf, 0x5cb, 0x5c6, 0x5c2, 0x5be, 0x5ba, 0x5b6, 0x5b2
+          .short 0x5ae, 0x5aa, 0x5a6, 0x5a2, 0x59e, 0x59a, 0x596, 0x592
+          .short 0x58e, 0x58a, 0x586, 0x583, 0x57f, 0x57b, 0x577, 0x574
+          .short 0x570, 0x56c, 0x568, 0x565, 0x561, 0x55e, 0x55a, 0x556
+          .short 0x553, 0x54f, 0x54c, 0x548, 0x545, 0x541, 0x53e, 0x53a
+          .short 0x537, 0x534, 0x530, 0x52d, 0x52a, 0x526, 0x523, 0x520
+          .short 0x51c, 0x519, 0x516, 0x513, 0x50f, 0x50c, 0x509, 0x506
+          .short 0x503, 0x500, 0x4fc, 0x4f9, 0x4f6, 0x4f3, 0x4f0, 0x4ed
+          .short 0x4ea, 0x4e7, 0x4e4, 0x4e1, 0x4de, 0x4db, 0x4d8, 0x4d5
+          .short 0x4d2, 0x4cf, 0x4cc, 0x4ca, 0x4c7, 0x4c4, 0x4c1, 0x4be
+          .short 0x4bb, 0x4b9, 0x4b6, 0x4b3, 0x4b0, 0x4ad, 0x4ab, 0x4a8
+          .short 0x4a5, 0x4a3, 0x4a0, 0x49d, 0x49b, 0x498, 0x495, 0x493
+          .short 0x490, 0x48d, 0x48b, 0x488, 0x486, 0x483, 0x481, 0x47e
+          .short 0x47c, 0x479, 0x477, 0x474, 0x472, 0x46f, 0x46d, 0x46a
+          .short 0x468, 0x465, 0x463, 0x461, 0x45e, 0x45c, 0x459, 0x457
+          .short 0x455, 0x452, 0x450, 0x44e, 0x44b, 0x449, 0x447, 0x444
+          .short 0x442, 0x440, 0x43e, 0x43b, 0x439, 0x437, 0x435, 0x432
+          .short 0x430, 0x42e, 0x42c, 0x42a, 0x428, 0x425, 0x423, 0x421
+          .short 0x41f, 0x41d, 0x41b, 0x419, 0x417, 0x414, 0x412, 0x410
+          .short 0x40e, 0x40c, 0x40a, 0x408, 0x406, 0x404, 0x402, 0x400
+    ASM
+
+
 # Exact raw wrappers for the positive 4-by-2-limb C leaf.  Keep WValue and
 # limb addresses as i64 throughout: routing them through typed source fields
 # would box the addresses and re-enter ordinary numeric dispatch.  Allocation,
@@ -2840,6 +3412,11 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         return wvalue_from_bits(
           __bigint_mod_63_raw($value ## i64, other$value ## i64)
         )
+      if am == 8 && bm == 4 && asign42 == 0 && bsign42 == 0
+        mask84 = 140737488355327 ## i64
+        ap84 = ($value & mask84) + 16 ## i64
+        bp84 = (other$value & mask84) + 16 ## i64
+        return wvalue_from_bits(__bigint_mod_84_raw(ap84, bp84))
     ccall("w_bigint_mod", self, other)
 
   -> %(other)(Number)

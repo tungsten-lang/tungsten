@@ -287,6 +287,19 @@ arithmetic was added, a 12-pair source/C baseline measured 1.028 (37.878 ns
 versus 36.859 ns); both lanes still execute the corrected C leaf.  Raw
 evidence: `bigint_mod_84_preport_results.txt`.
 
+EXACT 8-BY-4-LIMB MODULO CHECKPOINT: the corrected positive `mag_mod_84`
+arm is now ported before any native-Tungsten redesign.  The embedded AArch64
+body is the Clang 22.1.8 `-O3 -mcpu=apple-m5` schedule for the C leaf:
+identical normalization, shared two-entry TLS preinverse cache, five
+Moller--Granlund 3-by-2 quotient digits, saturated `bn_submul_1` and add-back
+paths, and corrected consecutive-saturated-digit handoff.  Arithmetic finishes
+before the unchanged capacity-four hot allocation and
+`bigint_finish_mag_sub` policy.  The 1,760-case public corpus and focused
+division spec are green.  A promoted 31-pair same-binary run measured native/C
+at 0.993 (36.326 ns versus 36.555 ns); the 4/2 control was 0.983 and the
+already-native 6/3 control 1.029.  This is the exact-port checkpoint, not a
+native-only algorithm change.  Raw evidence: `bigint_mod_84_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

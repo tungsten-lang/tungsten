@@ -53571,6 +53571,13 @@ WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
     b->size = (int32_t)w_to_i64(signed_size);
     return bigint_finish_mag_sub(b);
 }
+WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size) {
+    if (signed_size < INT32_MIN || signed_size > INT32_MAX)
+        die("w_bigint_finish_sub_raw: signed size is outside i32");
+    WBigint *b = w_as_bigint(v);
+    b->size = (int32_t)signed_size;
+    return bigint_finish_mag_sub(b);
+}
 WValue w_bigint_seal(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)w_to_i64(signed_size);

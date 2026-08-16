@@ -767,6 +767,7 @@ WValue w_bigint_alloc_hot(int64_t cap);
 WValue w_bigint_finish_add(WValue v, WValue signed_size);
 WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size);
 WValue w_bigint_finish_sub(WValue v, WValue signed_size);
+WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size);
 WValue w_bigint_seal(WValue v, WValue signed_size);
 WValue w_bigint_seal_raw(WValue v, int64_t signed_size);
 WValue w_native_data_elem(WValue recv, WValue field, WValue idx);

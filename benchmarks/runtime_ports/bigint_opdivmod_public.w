@@ -16,6 +16,8 @@
 #   neg      — 4-limb / 2-limb with alternating signs (in-gate; kernel
 #              owns sign handling)
 
+use core/numeric/big_int
+
 + BigInt
   -> __c_div_oracle(other)
     ccall("w_bigint_div", self, other)
@@ -32,6 +34,9 @@ CORPUS_MASK = CORPUS_SIZE - 1
 -> thread_cpu_ns
   ccall("w_leafpub_thread_cpu_ns")
 
+-> bigint_size(value)
+  ccall("w_leafpub_bigint_size", value)
+
 -> fail_check(name, detail)
   << "FAIL [name]: [detail]"
   exit(1)
@@ -39,6 +44,64 @@ CORPUS_MASK = CORPUS_SIZE - 1
 -> check_value(name, got, expected)
   if got != expected
     fail_check(name, "got=[got] expected=[expected]")
+
+# Algebraically constructed positive 4-by-2-limb cases.  Building x=q*y+r
+# lets this test assert the intended quotient and remainder independently of
+# the C oracle while spanning normalized and shifted divisors, two- and
+# three-limb quotients, and zero/one-/two-limb remainders.  Small deterministic
+# remainder perturbations exercise 256 exact source-leaf calls without making
+# correctness depend on the benchmark's eight steady-state operands.
+-> run_fourtwo_edges
+  b = 18446744073709551616
+  half = 9223372036854775808
+  divisors = [
+    b + 1,
+    3 * b - 1,
+    half * b + 1,
+    b * b - 1,
+    (b - 1) * b,
+    (half + 123) * b + (b - 17),
+    81985529216486895 * b + 18364758544493064721,
+    (half + 1) * b + 1229782938247303441
+  ]
+  quotients = [
+    b * b + 1,
+    b * b + b + 17,
+    2 * b + (b - 1),
+    (b - 1) * b + (b - 1),
+    (b - 1) * b + 7,
+    3 * b + 5,
+    (b - 1) * b + 2459565876494606882,
+    2 * b + 3
+  ]
+  remainder_seeds = [
+    0,
+    1,
+    b - 1,
+    divisors[3] - 1,
+    divisors[4] / 2,
+    b + 7,
+    divisors[6] - (b + 1),
+    divisors[7] / 3
+  ]
+
+  i = 0
+  while i < 256
+    k = i & 7
+    y = divisors[k]
+    expected_q = quotients[k]
+    expected_r = (remainder_seeds[k] + i * 6364136223846793005) % y
+    x = expected_q * y + expected_r
+    check_value("fourtwo dividend width [i]", bigint_size(x), 4)
+    check_value("fourtwo divisor width [i]", bigint_size(y), 2)
+    q = x / y
+    r = x % y
+    check_value("fourtwo div expected [i]", q.to_s(), expected_q.to_s())
+    check_value("fourtwo mod expected [i]", r.to_s(), expected_r.to_s())
+    check_value("fourtwo div C differential [i]", q.to_s(), x.__c_div_oracle(y).to_s())
+    check_value("fourtwo mod C differential [i]", r.to_s(), x.__c_mod_oracle(y).to_s())
+    check_value("fourtwo roundtrip [i]", (q * y + r).to_s(), x.to_s())
+    i += 1
 
 -> one_limb_value(k)
   1125899906842624 + k * 2 + 1
@@ -112,7 +175,8 @@ CORPUS_MASK = CORPUS_SIZE - 1
       check_value("roundtrip [stratum]/[i]", (q * y + r).to_s(), x.to_s())
       i += 1
     s += 1
-  << "correctness: ok (192 exact C differentials + q*y + r == x, 12 strata)"
+  run_fourtwo_edges()
+  << "correctness: ok (192 corpus differentials + 512 adversarial 4x2 differentials, exact q/r and roundtrips)"
 
 -> time_div(receivers, args, iters)
   checksum = 0

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Compile and sample the public bigint `/` and `%` dispatch paths. Same-binary
-# A/B via TUNGSTEN_BIGINT_SRC_OPS (unset = source arm, 0 = C pinned).
+# A/B via TUNGSTEN_BIGINT_SRC_OPS (unset = native Tungsten, 0 = C pinned).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -44,11 +44,11 @@ for line in open(sys.argv[1]):
     leg, _, name, total, iters, _ = line.strip().split("|")
     ns = float(total) / int(iters)
     rows.setdefault(name, {"S": [], "C": []})[leg].append(ns)
-print(f"{'stratum':<16}{'src med':>10}{'c med':>10}{'med-pair-ratio':>16}")
+print(f"{'stratum':<16}{'native med':>12}{'c med':>10}{'med-pair-ratio':>16}")
 for name, d in rows.items():
     s, c = d["S"], d["C"]
     sm = sorted(s)[len(s)//2]; cm = sorted(c)[len(c)//2]
     pairs = sorted(si/ci for si, ci in zip(s, c))
-    print(f"{name:<16}{sm:>10.3f}{cm:>10.3f}{pairs[len(pairs)//2]:>16.3f}")
+    print(f"{name:<16}{sm:>12.3f}{cm:>10.3f}{pairs[len(pairs)//2]:>16.3f}")
 PY
 echo "raw samples: $OUT"

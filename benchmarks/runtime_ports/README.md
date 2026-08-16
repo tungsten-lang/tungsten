@@ -209,7 +209,23 @@ and `urem i64` in the source workers. Raw samples:
 Host/build: Apple M5 Max, arm64 macOS 26.6.1, Homebrew LLVM 22.1.8,
 configured `-mcpu=apple-m5`, `--release --native --fast`.
 
-### Original kernel assessment (2026-08-08, still governing wider kernels)
+EXACT 4-BY-2-LIMB FOLLOW-UP: the positive fixed-width `mag_divmod_42_core`
+leaf is now mechanically ported to native Tungsten on macOS ARM64 before any
+Tungsten-specific tuning.  The embedded assembly preserves the Clang 22.1.8
+`-O3 -mcpu=apple-m5` schedule for the existing C arithmetic leaf: the
+same 256-entry Moller--Granlund reciprocal table, normalization, three 3-by-2
+quotient-digit steps, correction rules, quotient/remainder capacities, and
+`bigint_finish_mag_sub` normalization.  Signed 4/2 pairs and every other width
+remain on the C specialization tree.  The public harness now checks 192
+ordinary corpus differentials plus 512 adversarial 4/2 C differentials with
+independently constructed exact quotients, remainders, and round trips.  A
+12-pair same-binary baseline measured native/C at 0.964 for division and 0.982
+for modulo; one-limb and signed fallback controls remained within 4.5%.
+Retained raw evidence: `bigint_divmod_42_exact_results.txt` and
+`bigint_divmod_42_exact_controls_results.txt`.  Those figures describe the
+exact port baseline, not a redesigned native algorithm.
+
+### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing
 hand-written asm kernel (`asm_add_no`, `asm_sub_no`, `asm_mulbase`), which
@@ -224,13 +240,12 @@ exist as WIRE ops:
 - width-specialized `mag_div_q_63_certified`, `mag_div_triangular_certified`,
   and `mag_mod_{84,63,42}`.
 
-Porting even the schoolbook band therefore means writing and oracle-validating
-a new division kernel from scratch — comparable in size to the entire
-add+sub+mul effort combined, in the region where C's specialization density is
-highest and the measured odds of clearing a 10% gate are lowest. Recommended
-disposition: `/` and `%` stay in C; the arithmetic migration is complete at
-`+`, `-`, `*`. The protocol, harnesses, weak-linkage seams, and shape-gate
-machinery are all in place should that decision change.
+The exact 4-by-2 leaf above is the first deliberate exception to this earlier
+disposition: it ports one already-tuned C specialization rather than inventing
+a replacement kernel.  The recursive, exact-division, and remaining certified
+width bands stay in C until each can be ported and oracle-validated with the
+same discipline.  The protocol, harnesses, weak-linkage seams, and shape-gate
+machinery are in place for that arm-by-arm migration.
 
 Shift profiling note (2026-08-09): the public BigInt benchmark sink now
 releases fresh results through `w_value_free`, matching production's recycler

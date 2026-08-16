@@ -53495,6 +53495,36 @@ WValue w_bigint_sub(WValue a, WValue b) {
 WValue w_bigint_div(WValue a, WValue b) {
     return bigint_div_any(a, b);
 }
+/* Resume the positive 6/3 quotient route immediately after its fixed
+ * certificate has proved inconclusive.  The native source leaf has already
+ * run that exact certificate, so re-entering bigint_div_any would execute it
+ * twice more (boxed fast arm, then mag_divmod).  Preserve the remainder of
+ * mag_divmod's selection tree verbatim. */
+WValue w_bigint_div_63_after_cert_fail(WValue a, WValue b) {
+    WBigint *aa = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *q = NULL;
+#if BN_DIV_RECIP_CACHE
+    if (mag_divmod_reciprocal_certified(
+            aa->limbs, 6, bb->limbs, 3, &q, NULL))
+        return bigint_finish_mag_sub(q);
+#endif
+#if BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_TRIANGULAR_Q_SELECT
+    q = mag_div_q_triangular_certified(aa->limbs, 6, bb->limbs, 3);
+    if (q) {
+        BN_DIV_ROUTE_COUNT(bn_div_route_triangular_hit);
+        return bigint_finish_mag_sub(q);
+    }
+#endif
+    if (3 >= BZ_TOP_THRESHOLD && 3 >= BZ_THRESHOLD) {
+        BN_DIV_ROUTE_COUNT(bn_div_route_bz);
+        mag_divmod_bz(aa->limbs, 6, bb->limbs, 3, &q, NULL);
+    } else {
+        BN_DIV_ROUTE_COUNT(bn_div_route_knuth);
+        mag_divmod_knuth(aa->limbs, 6, bb->limbs, 3, &q, NULL);
+    }
+    return bigint_finish_mag_sub(q);
+}
 WValue w_bigint_mod(WValue a, WValue b) {
     return bigint_mod_any(a, b);
 }

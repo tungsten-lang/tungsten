@@ -758,6 +758,7 @@ WValue w_bigint_prime_q(WValue r);
 WValue w_bigint_add(WValue a, WValue b);
 WValue w_bigint_sub(WValue a, WValue b);
 WValue w_bigint_div(WValue a, WValue b);
+WValue w_bigint_div_63_after_cert_fail(WValue a, WValue b);
 WValue w_bigint_mod(WValue a, WValue b);
 WValue w_bigint_to_f(WValue r);
 WValue w_bigint_to_s(WValue r, WValue base);

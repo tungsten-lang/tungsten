@@ -1660,7 +1660,7 @@ fn __bigint_div_63_raw(a, b) (i64 i64) i64
   outn = __bigint_div_63_exact(rp, ap, bp) ## i64
   if outn < 0
     ccall_nobox("w_bigint_release_unfinished_raw", result)
-    return ccall_nobox("w_bigint_div", a, b)
+    return ccall_nobox("w_bigint_div_63_after_cert_fail", a, b)
   ccall_nobox("w_bigint_finish_sub_raw", result, outn)
 
 

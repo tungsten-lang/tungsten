@@ -265,6 +265,18 @@ retained rather than hidden: a 12-pair matched run measured native/C at 1.165
 (105.002 ns versus 90.226 ns median); 4/2 and signed controls remained green.
 Raw evidence: `bigint_div_63_exact_results.txt`.
 
+NATIVE 6-BY-3 QUOTIENT FOLLOW-UP: counters showed that an inconclusive native
+certificate re-entered `bigint_div_any`, which executed the same fixed 6/3
+certificate in both the boxed arm and `mag_divmod` before reaching the
+reciprocal/triangular/Knuth continuation.  The source failure edge now releases
+its speculative capacity-four result and resumes at that exact continuation;
+the certificate arithmetic and every later selection threshold are unchanged.
+The redundant C certificate disappeared from the counter profile.  A promoted
+31-pair run reduced native from the exact checkpoint's 105.002 ns to
+70.998 ns; native/C is 0.782 versus the checkpoint's 1.165.  The 4/2 and
+signed controls remained green at 0.966 and 0.957.  Raw evidence:
+`bigint_div_63_resume_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

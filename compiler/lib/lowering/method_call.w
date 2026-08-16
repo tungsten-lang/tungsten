@@ -144,10 +144,7 @@
   if node.line != nil
     site_id = next_call_site_id(ctx[:mod])
   temp = next_temp(ctx[:func])
-  emit_instruction(ctx[:func], {
-    op: :call_direct_i64, temp: temp, name: fn_name, args: args,
-    src_line: node.line, src_col: node.col, loc_site_id: site_id
-  })
+  emit_wire_call_direct_i64(ctx[:func], nil, args, nil, site_id, fn_name, node.col, node.line, temp)
   typed_value(:i64, temp)
 
 # Emit an exhaustive closed-world class decision with direct-call arms. The
@@ -157,7 +154,7 @@
 -> emit_locked_class_set_call(ctx, node, receiver_reg, arg_regs, targets)
   wfn = ctx[:func]
   class_value = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: class_value, name: "w_class_of", args: [receiver_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_class_of", nil, nil, class_value)
 
   arm_labels = []
   i = 0
@@ -170,13 +167,13 @@
   i = 0
   while i < targets.size()
     class_temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_class, temp: class_temp, class_name: targets[i][:class_name]})
+    emit_wire_load_class(wfn, targets[i][:class_name], class_temp)
     same = next_temp(wfn)
-    emit_instruction(wfn, {op: :icmp_i64, temp: same, pred: "eq", lhs: class_value, rhs: class_temp})
+    emit_wire_icmp_i64(wfn, class_value, "eq", class_temp, same)
     next_check = fail_label
     if i + 1 < targets.size()
       next_check = next_label(wfn, "classset.check")
-    emit_instruction(wfn, {op: :cond_br, cond: same, then_label: arm_labels[i], else_label: next_check})
+    emit_wire_cond_br(wfn, same, next_check, nil, arm_labels[i])
     if next_check != fail_label
       start_block(wfn, next_check)
     i += 1
@@ -194,20 +191,17 @@
     if node.line != nil
       site_id = next_call_site_id(ctx[:mod])
     arm_temp = next_temp(wfn)
-    emit_instruction(wfn, {
-      op: :call_direct_i64, temp: arm_temp, name: targets[i][:fn_name], args: args,
-      src_line: node.line, src_col: node.col, loc_site_id: site_id
-    })
+    emit_wire_call_direct_i64(wfn, nil, args, nil, site_id, targets[i][:fn_name], node.col, node.line, arm_temp)
     incoming.push(arm_temp)
     incoming.push(arm_labels[i])
-    emit_instruction(wfn, {op: :br, label: done_label})
+    emit_wire_br(wfn, done_label, nil, nil)
     i += 1
 
   start_block(wfn, fail_label)
-  emit_instruction(wfn, {op: :unreachable})
+  emit_wire_unreachable(wfn)
   start_block(wfn, done_label)
   result = next_temp(wfn)
-  emit_instruction(wfn, {op: :phi_ssa, temp: result, incoming: incoming})
+  emit_wire_phi_ssa(wfn, incoming, result)
   typed_value(:i64, result)
 
 -> lower_method_call(ctx, node)

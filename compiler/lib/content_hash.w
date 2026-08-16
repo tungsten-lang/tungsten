@@ -218,7 +218,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
 
   encode_codegen_metadata(inst, buf, temp_map)
 
-  if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
+  if op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr)
     callee = wire_get(inst, :name)
 
     if callee == self_name
@@ -376,7 +376,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   if wire_get(inst, :class_name) != nil
     buf << "C"
     buf << wire_get(inst, :class_name)
-  if wire_get(inst, :name) != nil && op != :call_direct_i64 && op != :call_direct_void && op != :call_direct_ptr
+  if wire_get(inst, :name) != nil && op != :call_direct_i64 && op != :call_direct_i128 && op != :call_direct_void && op != :call_direct_ptr
     buf << "N"
     buf << wire_get(inst, :name)
   if wire_get(inst, :cvar_key) != nil
@@ -597,7 +597,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
         inst = instrs[ii]
         op = wire_kind(inst)
         # Rewrite callee names
-        if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
+        if op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr)
           replacement = rename_map_get(rename_map, wire_get(inst, :name))
           if replacement != nil
             wire_set(inst, :name, replacement)
@@ -967,7 +967,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
         line = "      " + op.to_s()
         if wire_get(inst, :temp) != nil
           line = line + " " + wire_get(inst, :temp)
-        if op in (:call_direct_i64 :call_direct_void)
+        if op in (:call_direct_i64 :call_direct_i128 :call_direct_void)
           line = line + " @" + wire_get(inst, :name)
           if wire_get(inst, :args) != nil
             line = line + "(" + wire_get(inst, :args).size().to_s() + " args)"
@@ -1038,7 +1038,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       while ii < instrs.size()
         inst = instrs[ii]
         callee = nil
-        if wire_kind(inst) in (:call_direct_i64 :call_direct_void)
+        if wire_kind(inst) in (:call_direct_i64 :call_direct_i128 :call_direct_void)
           callee = wire_get(inst, :name)
         elsif wire_kind(inst) == :closure_new
           callee = wire_get(inst, :fn_name)

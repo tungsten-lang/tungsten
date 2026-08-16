@@ -24,6 +24,239 @@
     a = magnitude >> tz ## u64
   a << shift
 
+# Exact whole-function port of runtime.c's AArch64 two-limb GCD leaf. A u128
+# follows AAPCS64 directly: low and high result words leave in x0 and x1.
+# Generic AArch64 keeps the C rbit/clz schedule. CSSC targets select the
+# otherwise-identical single-instruction ctz body used by the native C build.
+on arm64
+  + BigInt
+    fn __bigint_gcd_u128_nonzero(a_hi, a_lo, b_hi, b_lo) (i64 i64 i64 i64) u128
+      asm <<~ASM
+        cbnz x1, 11f
+        rbit x9, x0
+        clz x9, x9
+        add x9, x9, #64
+        b 12f
+      11:
+        rbit x9, x1
+        clz x9, x9
+      12:
+        cbnz x3, 13f
+        rbit x10, x2
+        clz x10, x10
+        add x10, x10, #64
+        b 14f
+      13:
+        rbit x10, x3
+        clz x10, x10
+      14:
+        cmp x9, x10
+        csel x8, x9, x10, lo
+        cmp x9, #64
+        b.lo 15f
+        sub x11, x9, #64
+        lsr x1, x0, x11
+        mov x0, xzr
+        b 16f
+      15:
+        cbz x9, 16f
+        neg x11, x9
+        lsr x1, x1, x9
+        lsl x11, x0, x11
+        orr x1, x1, x11
+        lsr x0, x0, x9
+      16:
+        cmp x10, #64
+        b.lo 17f
+        sub x11, x10, #64
+        lsr x3, x2, x11
+        mov x2, xzr
+        b 18f
+      17:
+        cbz x10, 18f
+        neg x11, x10
+        lsr x3, x3, x10
+        lsl x11, x2, x11
+        orr x3, x3, x11
+        lsr x2, x2, x10
+      18:
+      1:
+        subs x4, x1, x3
+        cbz x4, 4f
+        sbcs x5, x0, x2
+        rbit x6, x4
+        clz x6, x6
+        cneg x4, x4, lo
+        cinv x5, x5, lo
+        csel x3, x3, x1, hs
+        csel x2, x2, x0, hs
+        neg x7, x6
+        lsr x1, x4, x6
+        lsl x7, x5, x7
+        lsr x0, x5, x6
+        orr x1, x1, x7
+        orr x7, x0, x2
+        cbnz x7, 1b
+      2:
+        subs x4, x1, x3
+        b.eq 5f
+        nop
+        nop
+      9:
+        rbit x5, x4
+        clz x5, x5
+        cneg x4, x4, lo
+        csel x1, x3, x1, hs
+        lsr x3, x4, x5
+        subs x4, x1, x3
+        b.ne 9b
+      4:
+        subs x5, x0, x2
+        b.eq 6f
+        cneg x5, x5, lo
+        csel x2, x2, x0, hs
+        rbit x6, x5
+        clz x6, x6
+        lsr x1, x5, x6
+        mov x0, xzr
+        cbnz x2, 1b
+        b 2b
+      5:
+        mov x0, x1
+        mov x1, xzr
+        b 20f
+      6:
+        mov x4, x0
+        mov x0, x1
+        mov x1, x4
+      20:
+        cbz x8, 24f
+        cmp x8, #64
+        b.hs 23f
+        neg x9, x8
+        lsl x1, x1, x8
+        lsr x9, x0, x9
+        orr x1, x1, x9
+        lsl x0, x0, x8
+        b 24f
+      23:
+        sub x8, x8, #64
+        lsl x1, x0, x8
+        mov x0, xzr
+      24:
+        ret
+      ASM
+    on arm64 with cssc
+      fn __bigint_gcd_u128_nonzero(a_hi, a_lo, b_hi, b_lo) (i64 i64 i64 i64) u128
+        asm <<~ASM
+          .arch_extension cssc
+          cbnz x1, 11f
+          ctz x9, x0
+          add x9, x9, #64
+          b 12f
+        11:
+          ctz x9, x1
+        12:
+          cbnz x3, 13f
+          ctz x10, x2
+          add x10, x10, #64
+          b 14f
+        13:
+          ctz x10, x3
+        14:
+          cmp x9, x10
+          csel x8, x9, x10, lo
+          cmp x9, #64
+          b.lo 15f
+          sub x11, x9, #64
+          lsr x1, x0, x11
+          mov x0, xzr
+          b 16f
+        15:
+          cbz x9, 16f
+          neg x11, x9
+          lsr x1, x1, x9
+          lsl x11, x0, x11
+          orr x1, x1, x11
+          lsr x0, x0, x9
+        16:
+          cmp x10, #64
+          b.lo 17f
+          sub x11, x10, #64
+          lsr x3, x2, x11
+          mov x2, xzr
+          b 18f
+        17:
+          cbz x10, 18f
+          neg x11, x10
+          lsr x3, x3, x10
+          lsl x11, x2, x11
+          orr x3, x3, x11
+          lsr x2, x2, x10
+        18:
+        1:
+          subs x4, x1, x3
+          cbz x4, 4f
+          sbcs x5, x0, x2
+          ctz x6, x4
+          cneg x4, x4, lo
+          cinv x5, x5, lo
+          csel x3, x3, x1, hs
+          csel x2, x2, x0, hs
+          neg x7, x6
+          lsr x1, x4, x6
+          lsl x7, x5, x7
+          lsr x0, x5, x6
+          orr x1, x1, x7
+          orr x7, x0, x2
+          cbnz x7, 1b
+        2:
+          subs x4, x1, x3
+          b.eq 5f
+          nop
+          nop
+        9:
+          ctz x5, x4
+          cneg x4, x4, lo
+          csel x1, x3, x1, hs
+          lsr x3, x4, x5
+          subs x4, x1, x3
+          b.ne 9b
+        4:
+          subs x5, x0, x2
+          b.eq 6f
+          cneg x5, x5, lo
+          csel x2, x2, x0, hs
+          ctz x6, x5
+          lsr x1, x5, x6
+          mov x0, xzr
+          cbnz x2, 1b
+          b 2b
+        5:
+          mov x0, x1
+          mov x1, xzr
+          b 20f
+        6:
+          mov x4, x0
+          mov x0, x1
+          mov x1, x4
+        20:
+          cbz x8, 24f
+          cmp x8, #64
+          b.hs 23f
+          neg x9, x8
+          lsl x1, x1, x8
+          lsr x9, x0, x9
+          orr x1, x1, x9
+          lsl x0, x0, x8
+          b 24f
+        23:
+          sub x8, x8, #64
+          lsl x1, x0, x8
+          mov x0, xzr
+        24:
+          ret
+        ASM
 # Exact floor square root for one machine-word magnitude. A hardware f64
 # square root supplies a 32-bit seed; integer correction makes the result
 # exact at perfect-square and binary64-rounding boundaries.
@@ -1378,6 +1611,48 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
           return wvalue_from_bits((-1688849860263936 | magnitude) ## i64)
         return ccall("w_u64", magnitude)
     ccall("w_bigint_gcd", self, other)
+
+  # Match runtime.c's AArch64-only boxed 2x2-limb specialization.  Aliasing
+  # retains the C identity path because it marks/returns the original buffer;
+  # distinct values use the exact register-only magnitude leaf above and the
+  # same raw allocation/normalization contract as bigint_gcd_any_inline.
+  on arm64
+    -> gcd(other)
+      if ((other$value >> 48) & 0xFFFF) == 0xFFFB
+        big_other = other ## BigInt
+        an = $size ## i64
+        bn = big_other$size ## i64
+        amask = an >> 63 ## i64
+        bmask = bn >> 63 ## i64
+        am = (an ^ amask) - amask ## i64
+        bm = (bn ^ bmask) - bmask ## i64
+        if (am | bm) == 1
+          magnitude = __bigint_gcd_u64_nonzero(
+            $limbs[0] ## u64,
+            big_other$limbs[0] ## u64
+          ) ## u64
+          if magnitude <= 140737488355327
+            return wvalue_from_bits((-1688849860263936 | magnitude) ## i64)
+          return ccall("w_u64", magnitude)
+        if am == 2 && bm == 2 && wvalue_bits(self) != wvalue_bits(other)
+          magnitude128 = __bigint_gcd_u128_nonzero(
+            $limbs[1] ## i64,
+            $limbs[0] ## i64,
+            big_other$limbs[1] ## i64,
+            big_other$limbs[0] ## i64
+          ) ## u128
+          low = magnitude128 ## u64
+          high128 = magnitude128 >> 64 ## u128
+          high = high128 ## u64
+          if high == 0
+            return ccall("w_u64", low)
+          boxed_two = wvalue_from_bits((-1688849860263936 | 2) ## i64)
+          result = ccall("w_bigint_alloc_boxed", boxed_two) ## BigInt
+          result$limbs[0] = low
+          result$limbs[1] = high
+          result$size = 2
+          return ccall("w_bigint_seal_raw", result, 2)
+      ccall("w_bigint_gcd", self, other)
 
   # Least common multiple. One-limb BigInt pairs stay raw through GCD, exact
   # division, and u128 multiplication, then box once. Mixed and multi-limb

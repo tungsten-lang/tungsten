@@ -10,7 +10,7 @@ TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 PAIRS="${PAIRS:-8}"
 LABEL="${LABEL:-current}"
 OUT="${OUT:-/tmp/tungsten-bigint-gcd-native-${LABEL}.txt}"
-ROWS="${ROWS:-one-big:2000000 one-int:2000000 near:1000000 skew:500000 big-share:10000}"
+ROWS="${ROWS:-one-big:2000000 one-int:2000000 two:1000000 two-share:1000000 near:1000000 skew:500000 big-share:10000}"
 
 case "$PAIRS" in ''|*[!0-9]*|0) echo "PAIRS must be positive" >&2; exit 2 ;; esac
 

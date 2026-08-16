@@ -173,6 +173,16 @@ module Tungsten::AST
         expect(Tungsten::Target.matches?(pred, ["io_uring"], linux_x86)).to be false
       end
 
+      it "derives cssc from the configured arm64 code-generation target" do
+        saved = ENV["TUNGSTEN_MARCH_ARGS"]
+        ENV["TUNGSTEN_MARCH_ARGS"] = "-mcpu=apple-m5"
+        expect(Tungsten::Target.detect_features("macos", "arm64")).to include("cssc")
+        ENV["TUNGSTEN_MARCH_ARGS"] = "-mcpu=apple-m4"
+        expect(Tungsten::Target.detect_features("macos", "arm64")).not_to include("cssc")
+      ensure
+        ENV["TUNGSTEN_MARCH_ARGS"] = saved
+      end
+
       it "handles complex predicates: !(linux || macos)" do
         pred = TargetNot.new(TargetOr.new(TargetDesignator.new("linux"), TargetDesignator.new("macos")))
         expect(Tungsten::Target.matches?(pred, [], linux_x86)).to be false

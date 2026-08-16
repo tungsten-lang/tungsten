@@ -28,6 +28,16 @@ fn ll_topbit(a) (u64) u64
     ret i64 %r
   IR
 
+# --- ll: u128 return keeps both ABI result words -----------------------
+fn ll_join_u128(lo, hi) (u64 u64) u128
+  ll <<~IR
+    %lo.wide = zext i64 %lo to i128
+    %hi.wide = zext i64 %hi to i128
+    %hi.word = shl i128 %hi.wide, 64
+    %result = or i128 %hi.word, %lo.wide
+    ret i128 %result
+  IR
+
 # --- ll: array data pointer + control flow ------------------------------
 fn ll_sum4(ap) (u64[]) i64
   ll <<~IR
@@ -70,6 +80,13 @@ fn asm_muladd(a, b) (i64 i64) i64
     ret
   ASM
 
+# --- asm: u128 follows AAPCS64 in x0/x1 -------------------------------
+fn asm_join_u128(lo, hi) (u64 u64) u128
+  asm <<~ASM
+    ret
+  ASM
+
+
 # --- asm: the real thing — n-limb add_n with a hardware ADCS chain ------
 # x0=rp x1=ap x2=bp x3=n (n > 0, multiple of 4). Returns carry-out.
 fn asm_add_n4(rp, ap, bp, n) (u64[] u64[] u64[] i64) i64
@@ -95,6 +112,10 @@ fn asm_add_n4(rp, ap, bp, n) (u64[] u64[] u64[] i64) i64
 check("ll.addmul", ll_addmul(10, 4), 42)
 one = 1 ## u64
 check("ll.topbit_unsigned_box", ll_topbit(one).to_s(16), "8000000000000001")
+ll_wide = ll_join_u128(81985529216486895 ## u64, 18364758544493064720 ## u64) ## u128
+check("ll.u128_low", (ll_wide ## u64).to_s(16), "123456789abcdef")
+ll_high = ll_wide >> 64 ## u128
+check("ll.u128_high", (ll_high ## u64).to_s(16), "fedcba9876543210")
 
 xs = u64[4]
 xs[0] = 100
@@ -118,6 +139,10 @@ check("ll.add4_wide_r0", (r4[0] ## u64).to_s(), "0")
 check("ll.add4_wide_r3", (r4[3] ## u64).to_s(), "0")
 
 check("asm.muladd", asm_muladd(6, 7), 49)
+asm_wide = asm_join_u128(81985529216486895 ## u64, 18364758544493064720 ## u64) ## u128
+check("asm.u128_low", (asm_wide ## u64).to_s(16), "123456789abcdef")
+asm_high = asm_wide >> 64 ## u128
+check("asm.u128_high", (asm_high ## u64).to_s(16), "fedcba9876543210")
 
 n = 64 ## i64
 aa = u64[n]

@@ -350,6 +350,11 @@ else
     ccall("w_setenv", "TUNGSTEN_MARCH_ARGS", resolved_cpu_flags)
   configured_march = resolved_cpu_flags
 
+# cpu_flags("native") may probe detect_target before the resolved march is in
+# the environment. Recompute once so feature guards (for example CSSC) match
+# the same target that clang will use for emitted Core and runtime code.
+detect_target_memo.delete(:target)
+
 # Apple cross-architecture builds share the installed macOS SDK. Clang does not
 # infer that sysroot when an explicit --target is supplied, so make portable
 # arm64→x86_64 builds work without forcing users to paste xcrun output.

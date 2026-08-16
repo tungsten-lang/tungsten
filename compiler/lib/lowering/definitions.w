@@ -801,10 +801,13 @@
       populate_definition_var_types(node, embed_types, mod)
       mod[:raw_callable_fns][call_key] = fn_name
       mod[:raw_fn_param_kinds][call_key] = embedded_param_kinds(node, embed_types, definition_path, embedded[0])
-      if mod[:fn_return_types][call_key] == nil
-        mod[:fn_return_types][call_key] = :i64
+      embedded_return = rt == nil ? :i64 : normalize_type_symbol(rt)
+      if !is_machine_int_type(embedded_return)
+        raise compile_error_for_node(:E_LOWER_EMBEDDED_BODY, "fn '" + node.name + "': embedded bodies return only i64/u64/i128/u128 machine integers", definition_path, node)
+      mod[:fn_return_types][call_key] = embedded_return
       new_fn[:raw_i64_signature] = true
-      new_fn[:raw_return_type] = :i64
+      new_fn[:raw_return_type] = embedded_return
+      new_fn[:return_type] = is_machine_int128_type(embedded_return) ? "i128" : "i64"
       if embedded[0] == "ll"
         new_fn[:embedded_ll] = embedded[1]
       else
@@ -1945,8 +1948,10 @@
       mod[:known_fn_param_counts][call_key] = kernel_params.size()
       mod[:raw_callable_fns][call_key] = fn_name
       mod[:raw_fn_param_kinds][call_key] = kernel_kinds
-      if mod[:fn_return_types][call_key] == nil
-        mod[:fn_return_types][call_key] = :i64
+      embedded_return = node.return_type == nil ? :i64 : normalize_type_symbol(node.return_type)
+      if !is_machine_int_type(embedded_return)
+        raise compile_error_for_node(:E_LOWER_EMBEDDED_BODY, "fn '" + node.name + "': embedded bodies return only i64/u64/i128/u128 machine integers", definition_path, node)
+      mod[:fn_return_types][call_key] = embedded_return
       # Also register under the PLAIN name (single-definition kernels), the
       # same courtesy function_name_for_def extends to top-level typed fns:
       # in-class bare calls then skip the implicit-self intercept and reach
@@ -1957,9 +1962,10 @@
         mod[:raw_callable_fns][name] = fn_name
         mod[:raw_fn_param_kinds][name] = kernel_kinds
         if mod[:fn_return_types][name] == nil
-          mod[:fn_return_types][name] = :i64
+          mod[:fn_return_types][name] = embedded_return
       kernel_fn[:raw_i64_signature] = true
-      kernel_fn[:raw_return_type] = :i64
+      kernel_fn[:raw_return_type] = embedded_return
+      kernel_fn[:return_type] = is_machine_int128_type(embedded_return) ? "i128" : "i64"
       if embedded[0] == "ll"
         kernel_fn[:embedded_ll] = embedded[1]
       else

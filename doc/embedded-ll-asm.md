@@ -30,16 +30,18 @@ it). Measured on the 64-limb add kernel (Apple M): portable `addcarry` loop
 ## Contract
 
 - Top-level `fn` with a typed signature only. Parameters must be machine
-  ints (`i64`/`u64`) or typed arrays.
+  ints (`i64`/`u64`) or typed arrays; returns may also be `i128`/`u128`.
 - `ll` bodies: emitted as the function's `define` body. Parameters are
   available by their source names (`%rp`, `%n`, …), all `i64`. Typed-array
   parameters arrive as the start-corrected element-0 data address
-  (`inttoptr` to use). The body owns its control flow and must `ret i64`.
+  (`inttoptr` to use). The body owns its control flow and must return the
+  declared `i64` or `i128` LLVM type.
   Wide types (`i256` loads/adds) are legal and legalize into adds/adcs
   runs — the portable way to get carry chains without assembly.
 - `asm` bodies: emitted as module-level assembly under the function's
   symbol. Parameters per AAPCS64 in `x0..x7` (arrays as data addresses),
-  return in `x0`, body must `ret`. AArch64/Mach-O only today.
+  scalar return in `x0`; `i128`/`u128` follows AAPCS64 in `x0` (low) and
+  `x1` (high). The body must `ret`. AArch64/Mach-O only today.
 - Callers use the raw ABI: no boxing on either side. A declared `u64`
   return boxes unsigned.
 - Compile-only: no interpreter or stage-0 execution (same restriction as

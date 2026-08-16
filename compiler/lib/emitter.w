@@ -3251,7 +3251,9 @@ ewscope_md_state = {ids: {}}
 # the text verbatim.  The body owns its control flow and must `ret`.
 -> emit_embedded_ll_function(f)
   out = StringBuffer(1024 + f[:embedded_ll].size())
-  out << "define internal i64 @"
+  out << "define internal "
+  out << f[:return_type]
+  out << " @"
   out << f[:name]
   out << "("
   out << emit_param_signature(f)
@@ -3279,7 +3281,9 @@ ewscope_md_state = {ids: {}}
     if line.strip().size() > 0
       out << "module asm \"" + escape_llvm_string(line) + "\"\n"
     i += 1
-  out << "declare i64 @"
+  out << "declare "
+  out << f[:return_type]
+  out << " @"
   out << f[:name]
   out << "("
   parts = []

@@ -112,11 +112,11 @@ detect_target_memo = {}
   when "arm64", "aarch64"
     arch = "arm64"
 
-  features = detect_features(os)
+  features = detect_features(os, arch)
   detect_target_memo[:target] = { os: os, arch: arch, features: features }
   detect_target_memo[:target]
 
--> detect_features(os)
+-> detect_features(os, arch)
   features = []
 
   if os == "linux"
@@ -129,6 +129,15 @@ detect_target_memo = {}
   if os == "macos"
     if file?("/System/Library/Frameworks/Metal.framework/Metal")
       features.push("metal")
+
+  # Feature guards describe the configured code-generation target, not just
+  # the host CPU. `--native` resolves M5 explicitly before lowering Core;
+  # explicit +cssc targets use the same capability. A generic `-mcpu=native`
+  # may still resolve to apple-m4 in clang and therefore stays portable.
+  if arch == "arm64"
+    march = env("TUNGSTEN_MARCH_ARGS")
+    if march != nil && (march.index("apple-m5") != nil || march.index("+cssc") != nil)
+      features.push("cssc")
 
   features
 
@@ -234,7 +243,7 @@ detect_target_memo = {}
       if target_matches?(expr.predicate, expr.capabilities, target)
         expr.body.size().times ->
           inner = expr.body[j]
-          if ast_kind(inner) == :method_def
+          if ast_kind(inner) in (:method_def :fn_def)
             name = inner.name
             if guarded_names.has_key?(name)
               raise "ambiguous platform guard: multiple guarded definitions of '" + name + "' match the current target"
@@ -249,7 +258,7 @@ detect_target_memo = {}
         expr.body.size().times ->
           result.push(expr.body[j])
     else
-      if ast_kind(expr) == :method_def && guarded_names.has_key?(expr.name)
+      if ast_kind(expr) in (:method_def :fn_def) && guarded_names.has_key?(expr.name)
         nil
       else
         result.push(expr)

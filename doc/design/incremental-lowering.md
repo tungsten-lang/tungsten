@@ -483,6 +483,46 @@ million operations each) and was 1.33% faster. All checksums matched. Focused
 contracts also verify that a no-LTO C-FFI program links with only `main`
 exported, while an auto-detected JIT host still exports and resolves `w_add`.
 
+## Release frame and inlining experiments (not retained)
+
+Release emission already strips source call-site metadata, omits debug
+`noinline`, and leaves LLVM free to inline and perform sibling-call
+elimination. An explicit tail-position prototype marked 106 direct calls as
+`tail` instead of 14. The normalized machine-code text was nevertheless
+byte-identical: LLVM had already converted every profitable call/return pair
+into the same frame-popping branch. The hinting code was removed.
+
+Forced inlining also lost to LLVM's cost model. Marking the 663 internal
+self-compiler helpers with at most four WIRE instructions `alwaysinline`
+slowed twelve protected-bignum compiler pairs by 0.49% and six self-compile
+pairs by 0.38% (paired medians). Expanding the threshold to eight instructions
+marked 1,121 helpers, slowed four self-compile pairs by 0.63%, and grew the
+compiler from 8,055,776 to 8,118,328 bytes (+0.78%). Outputs remained
+byte-identical, but neither policy is retained.
+
+Debug builds keep the opposite explicit contract: frame pointers, unwind
+tables, `noinline`, and `"disable-tail-calls"="true"`. Thus release code gets
+LLVM's existing frame elimination while `--debug` continues to preserve
+physical Tungsten backtrace frames.
+
+## Embedded LLVM and LLD trial (not retained)
+
+The external driver boundary is not the dominant release cost. On this host a
+warm Homebrew clang process starts in 15.6ms and ld64 in 11.1ms, together about
+0.3% of an 8.9s FullLTO link. Embedding libLLVM while retaining the same linker
+can remove that startup, but not the optimization and code-generation work.
+Replacing the complete clang/FullLTO pipeline in-process would instead assume
+responsibility for target initialization, runtime bitcode composition, SDK
+selection, LTO policy, diagnostics, and every supported cross target.
+
+The available ld64.lld path was tested as the less invasive LLVM-owned linker
+experiment. Four alternating pairs on byte-identical bignum LLVM reduced wall
+time from 8.891723s to 8.696582s (2.20%; 2.71% by paired median), but enlarged
+the text segment by 0.88%, regressed `wordchain4` by 4.93%, and regressed
+`addmulchain4` by 0.86%. It also warns that Tungsten's 128MB `-stack_size`
+contract is unimplemented. LLD is therefore not enabled, and no embedded-LLVM
+integration is retained.
+
 ## Internal fastcc experiment (not enabled by default)
 
 The existing `TUNGSTEN_LLVM_FASTCC=1` planner rewrote 1,634 eligible internal
@@ -521,3 +561,35 @@ byte-identical (SHA-256 `5cd770f8...`), bignum LLVM was byte-identical
 remains an explicit build choice because producing the instrumented and
 optimized compiler adds release-build time; installed target programs do not
 inherit the compiler's profile.
+
+## Content-addressed final-link artifacts
+
+The existing incremental binary cache can skip the entire pipeline when one
+source/output-path manifest is unchanged. A second cache now operates after
+emission: it keys the final executable by the emitted LLVM bytes, compiler and
+linker identities, target/profile flags, runtime mode, optional link flags,
+and runtime source/artifact mtimes. A different `-o` path, an mtime-only edit,
+or a batch entry with identical release IR can therefore reuse the exact
+previous FullLTO result without creating an object or ThinLTO boundary.
+
+Six alternating `benchmarks/big_math/program_loops.w` pairs used explicit LLVM
+paths and distinct output paths so the earlier source/path cache could not
+intervene. With `--release --native --fast --no-debug`, median wall time fell
+from 8.860400s to 0.358592s (-95.95%; -95.98% by paired median). The measured
+clang/link phase fell from 8.5725s to 0.0685s (-99.20%). Emitted LLVM was
+byte-identical (SHA-256 `281e6c71...`), runtime checksums matched, and cached
+outputs are copies of the previously linked executable.
+
+Four alternating cold-miss pairs measured the cost of computing and publishing
+the content identity: 8.827787s without the cache and 8.902434s with it
+(+0.85%; clang phase +0.75%). On already-cheap no-LTO links that bookkeeping
+cost 8.03% across twelve pairs, so the cache is enabled by default only for
+LTO builds. `TUNGSTEN_LINK_CACHE=1` opts a non-LTO workflow in, and
+`TUNGSTEN_LINK_CACHE=0` disables it for diagnosis.
+
+The cache fails closed for `TUNGSTEN_C_INCLUDES` until arbitrary C header
+graphs have depfile tracking. Focused contracts cover changed output paths,
+mtime-only source changes, explicit disable, dynamic-export separation,
+runtime-artifact invalidation, FFI bypass, and executable identity. The shared
+cache GC ages these reproducible `linkbin-*` artifacts like the existing Core,
+AST, runtime, and final-binary entries.

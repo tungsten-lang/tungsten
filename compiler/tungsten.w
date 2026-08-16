@@ -1207,6 +1207,21 @@ driver_homebrew_prefix_memo = {}
     # separately keyed runtime archive uses the same -O0 profile.
     clang_opt = dev_mode ? "-O0" : "-O3"
 
+  # The source/output-path incremental cache runs before lowering. This second
+  # cache sits at the other end of the pipeline: if two builds emit identical
+  # LLVM under the same complete link contract, reuse the already linked
+  # executable without introducing an object/LTO boundary. This catches a new
+  # -o path, comment-only edits, and identical release batch entries. Arbitrary
+  # user C includes are deliberately ineligible because their transitive header
+  # graph is opaque to this driver.
+  link_cache_slot = nil
+  if doing_lto || env("TUNGSTEN_LINK_CACHE") == "1"
+    link_cache_slot = link_artifact_cache_slot(ll_probe_text, runtime_objs, needs_zstd)
+  if link_cache_slot != nil && link_artifact_cache_try_reuse(link_cache_slot, out_path)
+    if verbose
+      << fmt_elapsed(phase_elapsed(link_started_at)) + " clang (link cache)"
+    return true
+
   # Parallel codegen — OPT-IN via TUNGSTEN_PARALLEL_CODEGEN=1. -O3 on one
   # big module is single-threaded and ~90% of a large build's wall; with
   # homebrew LLVM present, llvm-split the module ~14 ways and compile the
@@ -1445,6 +1460,8 @@ driver_homebrew_prefix_memo = {}
   clang_cmd << out_path
   result = system(clang_cmd.to_s())
   log_phase(verbose, "clang", link_started_at)
+  if result == true && link_cache_slot != nil
+    link_artifact_cache_store(link_cache_slot, out_path)
   result == true
 
 # Persistent NATIVE-object runtime archive for fast dev links. Linking against
@@ -2132,6 +2149,90 @@ driver_homebrew_prefix_memo = {}
     ramv = file_mtime_ns(ra)
     ram = ramv == nil ? "missing" : ramv.to_s()
   ["irbin-v5", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), cc_identity, ar_identity, release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("SDKROOT"), incremental_env_s("MACOSX_DEPLOYMENT_TARGET"), incremental_env_s("CPATH"), incremental_env_s("C_INCLUDE_PATH"), incremental_env_s("CPLUS_INCLUDE_PATH"), incremental_env_s("LIBRARY_PATH"), incremental_env_s("PKG_CONFIG_PATH"), incremental_env_s("PKG_CONFIG_LIBDIR"), incremental_env_s("TLS"), incremental_env_s("TUNGSTEN_TLS"), incremental_env_s("TUNGSTEN_TLS_CFLAGS"), incremental_env_s("TUNGSTEN_TLS_LDFLAGS"), incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_CORE_REACHABILITY"), incremental_env_s("TUNGSTEN_LAZY_CONTENT_HASH"), incremental_env_s("TUNGSTEN_DYNAMIC_EXPORTS"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_AR"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
+
+# Content-addressed final-link cache. The early irbin cache deliberately keys
+# source and output paths so it can skip every compiler phase. This cache keys
+# the actual emitted LLVM instead, after lowering/emission have established
+# that two builds are semantically the same link input.
+-> link_artifact_cache_dependency_identity
+  rows = []
+  runtime = incremental_runtime_entries()
+  i = 0
+  while i < runtime.size()
+    rows.push(runtime[i][0] + ":" + runtime[i][1].to_s())
+    i += 1
+
+  # Companions are linked only when referenced, but including every existing
+  # source is a cheap conservative invalidation rule and avoids duplicating the
+  # feature-gating logic here. Missing optional files are represented too.
+  runtime_dir = resolve_runtime_dir()
+  companions = ["ssmr_witness.c", "lexchar_tables.c", "blas_bridge.c",
+                "sparse_bridge.c", "metal.m", "graphics.m", "hid_bridge.m",
+                "sci_io_native.c", "tensor_bridge.c", "openblas_bridge.c",
+                zstd_runtime_source()]
+  i = 0
+  while i < companions.size()
+    path = runtime_dir + companions[i]
+    mt = file_mtime_ns(path)
+    rows.push(path + ":" + (mt == nil ? "missing" : mt.to_s()))
+    i += 1
+  rows.join("|")
+
+-> link_artifact_cache_runtime_identity(runtime_objs)
+  if runtime_objs == nil
+    return "runtime-source"
+  if runtime_objs.index("/*.o") != nil
+    # compile-batch creates this private path afresh. Its selected sources,
+    # compiler, flags, and mtimes are already represented by the identity.
+    return "batch-runtime-objects"
+  mt = file_mtime_ns(runtime_objs)
+  incremental_abs_path(runtime_objs) + ":" + (mt == nil ? "missing" : mt.to_s())
+
+-> link_artifact_cache_slot(ll_text, runtime_objs, needs_zstd)
+  if !incremental_cache_enabled?() || env("TUNGSTEN_LINK_CACHE") == "0"
+    return nil
+  # A path-valued C include can itself include arbitrary headers. Reusing only
+  # from its own mtime would be unsound, so leave FFI builds on the ordinary
+  # linker path until a depfile-backed C graph exists.
+  if extra_c_includes().size() > 0
+    return nil
+  base = incremental_identity("", "")
+  cache_dir = compiler_cache_dir()
+  if base == nil || cache_dir == nil
+    return nil
+  if system("mkdir -p " + dev_runtime_shell_quote(cache_dir)) != true
+    return nil
+
+  flags = [onig_cflags(), onig_ldflags(), tls_cflags(), tls_ldflags(),
+           http2_ldflags(), mimalloc_link_flags()]
+  if needs_zstd
+    flags.push(zstd_cflags())
+    flags.push(zstd_ldflags())
+  identity = ["link-artifact-v1", ll_text.size().to_s(),
+              wyhash64_hex_string(ll_text), base,
+              link_artifact_cache_runtime_identity(runtime_objs),
+              link_artifact_cache_dependency_identity(), flags.join("|")].join("|")
+  cache_dir + "/linkbin-" + wyhash64_hex_string(identity) + ".bin"
+
+-> link_artifact_cache_try_reuse(slot, out_path)
+  if !file?(slot)
+    return false
+  q_out = dev_runtime_shell_quote(out_path)
+  q_tmp = dev_runtime_shell_quote(out_path + ".link-install.") + "$$"
+  if system("cp -p " + dev_runtime_shell_quote(slot) + " " + q_tmp + " && mv -f " + q_tmp + " " + q_out) != true
+    return false
+  # Active content survives the shared seven-day cache GC window.
+  system("touch " + dev_runtime_shell_quote(slot))
+  true
+
+-> link_artifact_cache_store(slot, out_path)
+  nonce = clock.to_s()
+  tmp = slot + ".tmp." + nonce
+  if system("cp -p " + dev_runtime_shell_quote(out_path) + " " + dev_runtime_shell_quote(tmp)) != true
+    return nil
+  if system("mv -f " + dev_runtime_shell_quote(tmp) + " " + dev_runtime_shell_quote(slot)) != true
+    system("rm -f " + dev_runtime_shell_quote(tmp))
+  nil
 
 # Valid cached slot for this identity? Reads the manifest and revalidates
 # every recorded (path, mtime_ns). Any surprise → miss (rebuild).

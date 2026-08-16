@@ -418,7 +418,7 @@ projects stay unchecked until their stated acceptance criteria are met.
   storage, one-pass use-graph
   flattening, avoiding intermediate AST containers, memoized target probes,
   and watermarked rather than repeated whole-tree autoload scans.
-- [ ] Persist a reusable lowered-Core image under `build/cache/`. Its identity
+- [x] Persist a reusable lowered-Core image under `build/cache/`. Its identity
   must cover compiler/schema version, all loaded Core contents, build defines,
   target/mode, service bindings, and lowering configuration; remap IDs safely
   when composing it with a user module. Benchmark cold miss, warm hit, and RSS.
@@ -439,6 +439,11 @@ projects stay unchecked until their stated acceptance criteria are met.
   only `main`, allowing FullLTO to internalize and remove unused runtime entry
   points; JIT/compiler hosts retain dynamic exports automatically, with an
   explicit override for custom embedding hosts.
+- [x] Cache FullLTO results by emitted-LLVM content and complete link/runtime
+  identity. This complements the early source/output manifest, remains
+  monolithic for optimization, and fails closed for arbitrary C include
+  graphs; no-LTO builds stay opt-in because cold bookkeeping outweighs their
+  already-cheap links.
 - [x] Resolve the `-O0` performance inversion. Ordinary `-o` builds now use
   `-O3` application/runtime code while retaining checks, symbols, and source
   metadata; explicit `--dev` selects `-O0`, and benchmark guidance continues

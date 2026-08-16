@@ -364,6 +364,20 @@ gap is the starting point for a separately committed native-only routing and
 boundary optimization, not permission to alter the C algorithm during the
 port.  Evidence: `bigint_add1_3_exact_results.txt`.
 
+NATIVE ADD1@3 FOLLOW-UP: after the literal C port was checkpointed, a separate
+native-only pass removed two surrounding costs without changing the leaf's
+arithmetic, storage, growth, or normalization.  Exact `(BigInt BigInt)` `+`
+facts now select the ordinary guarded source seam, and the positive boxed
+add/add1 harness returns dead results through the same typed BigInt recycler
+contract used by the C lane instead of the general heap-kind dispatcher.  An
+11-pair matched release-boundary A/B won 11/11 (3.679 ns to 2.507 ns,
+candidate/baseline 0.67986), and a 31-run public promotion measured native at
+2.497 ns versus C at 1.779 ns and GMP at 1.721 ns.  Thus native is 59.0%
+faster than the exact checkpoint's 6.095 ns, while the remaining 40.4% gap to
+C is retained honestly.  Broader 2..64-limb controls all improved; attempted
+private pre-entry and header-store shortcuts were rejected because they
+regressed controls.  Evidence: `bigint_add1_3_native_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

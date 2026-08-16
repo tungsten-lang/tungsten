@@ -2983,7 +2983,6 @@ fn __bigint_add1_3_raw(a, b) (i64 i64) i64
   carry = __bigint_add1_3_exact(rp, ap, word) ## i64
   ccall_nobox("w_bigint_add1_3_finish_raw", result, carry)
 
-
 # Exact floor square root for one machine-word magnitude. A hardware f64
 # square root supplies a 32-bit seed; integer correction makes the result
 # exact at perfect-square and binary64-rounding boundaries.
@@ -3463,6 +3462,23 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     an = ((     $value >> 47) & 1) == 1 ? 0 - $size      : $size
     bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
 
+    on macos && arm64
+      # The exact scalar-word gate has already reduced this arm to two signed
+      # header loads.  Complete it before the generic magnitude, range,
+      # pointer, and boxed-Boolean sign machinery; arithmetic/storage remain
+      # byte-for-byte the separately checkpointed C port.
+      if an == 3 && bn == 1
+        return wvalue_from_bits(
+          __bigint_add1_3_raw($value ## i64, other$value ## i64)
+        )
+
+    # The declared-BigInt direct route must not turn the still-C-specialized
+    # one-limb neighbors into the generic source kernel.  Return them to the
+    # direct BigInt tree before any generic magnitude/sign setup; the migrated
+    # positive 3x1 arm above is the sole exception.
+    if an == 1 || an == -1 || bn == 1 || bn == -1
+      return ccall("w_bigint_add", self, other)
+
     am = an < 0 ? 0 - an : an
     bm = bn < 0 ? 0 - bn : bn
 
@@ -3474,16 +3490,6 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     pb = (other$value & mask) + 16
 
     if (an > 0) == (bn > 0)
-      on macos && arm64
-        # Exact scalar-word arm: the direct C lane decodes the positive
-        # one-limb rhs before bigint_add_word_into.  Preserve its n==3 fixed
-        # kernel and rare growth epilogue in native source before entering
-        # the broader equal/unequal BigInt dispatch tree.
-        if an == 3 && bn == 1
-          return wvalue_from_bits(
-            __bigint_add1_3_raw($value ## i64, other$value ## i64)
-          )
-
       # Equal-length same-sign pairs are bigint_add_equal_fast's domain —
       # the dedicated C arm source measured 1.12-1.30 against. Route them
       # through the direct bigint entry (not w_add: both operands are

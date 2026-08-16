@@ -768,6 +768,7 @@ WValue w_bigint_alloc_boxed(WValue cap);
 WValue w_bigint_alloc_hot(int64_t cap);
 WValue w_bigint_alloc_hot4_raw(void);
 WValue w_bigint_release_unfinished_raw(WValue v);
+WValue w_bigint_release_dead_raw(WValue v);
 WValue w_bigint_finish_add(WValue v, WValue signed_size);
 WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size);
 WValue w_bigint_add1_3_finish_raw(WValue v, uint64_t carry);

@@ -53638,6 +53638,16 @@ WValue w_bigint_release_unfinished_raw(WValue v) {
     bigint_release(w_as_bigint(v));
     return W_NIL;
 }
+/* Typed dead-result release for native source kernels.  Its contract is the
+ * exact BigInt subset of w_value_free: nil is the loop's initial sentinel;
+ * every other value must be a boxed BigInt.  Keeping this boundary separate
+ * reaches the same alias-aware hot-slot handoff used by the C lanes without
+ * paying w_value_free's general heap-kind classifier. */
+__attribute__((always_inline))
+WValue w_bigint_release_dead_raw(WValue v) {
+    if (v != W_NIL) bigint_release_if_live(w_as_bigint(v));
+    return W_NIL;
+}
 WValue w_bigint_finish_add(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)w_to_i64(signed_size);

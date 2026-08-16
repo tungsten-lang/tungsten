@@ -2265,16 +2265,24 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # one bigint-inferred operand (typing the other would upgrade it);
   # :polymorphic is everything else reaching the runtime entry. Side
   # data only — never read by hashing or emission.
+  # An exact `(BigInt)` signature retains its class-name symbol rather than
+  # the `## big` local's internal :bigint spelling.  Admit that fact only for
+  # `+`, whose one-limb C-favored shapes now have an immediate in-body return
+  # and whose 3x1 positive arm is actually native.  Broadly treating :BigInt
+  # as :bigint also redirected typed `-`, `*`, and untouched add shapes and
+  # regressed their controls, so those remain polymorphic until their own
+  # specialization arms migrate.
+  declared_bigint_add = op == :PLUS && lt == :BigInt && rt == :BigInt
   if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT)
     bidir_report = :polymorphic
-    if !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
+    if !bidir_mut && ((is_bigint_type(lt) && is_bigint_type(rt)) || declared_bigint_add)
       bidir_report = :static_direct
     elsif !bidir_mut && (is_bigint_type(lt) || is_bigint_type(rt))
       bidir_report = :near_miss
     if ctx[:mod][:tag_report_infix] == nil
       ctx[:mod][:tag_report_infix] = []
     ctx[:mod][:tag_report_infix].push({op: op, route: bidir_report, fname: wfn[:source_method], class_name: ctx[:class_name]})
-  if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT) && !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
+  if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT) && !bidir_mut && ((is_bigint_type(lt) && is_bigint_type(rt)) || declared_bigint_add)
     # Seam symbol per op (strong = the compiled typed worker, weak = the C
     # kernel) and the polymorphic entry for the guard's slow arm. The
     # workers handle every both-heap-bigint shape themselves (in-body

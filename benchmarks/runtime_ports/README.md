@@ -295,6 +295,19 @@ separate native-only follow-up.  Raw evidence:
 `bigint_div_84_exact_results.txt` and
 `bigint_div_84_exact_promotion_results.txt`.
 
+NATIVE 8-BY-4 QUOTIENT FOLLOW-UP: the retained public corpus proves the first
+triangular certificate inconclusive on every operand.  At four divisor limbs
+the reciprocal path's minimum is 256 limbs and the B-Z gates are 24/64, so the
+exact checkpoint's resumed `mag_divmod` can only repeat the same certificate
+and then select Knuth.  The native failure seam now resumes directly at that
+proven Knuth destination; the ported quotient digits, certificate, allocation,
+Knuth kernel, and finalization are unchanged.  A promoted 31-pair run measured
+native/C at 0.70920 (64.358 ns versus 90.832 ns), with 31/31 native wins and
+0.00612 paired-ratio IQR.  This is a routing improvement after the separately
+committed exact checkpoint, not a replacement division algorithm.  Raw
+evidence: `bigint_div_84_resume_results.txt` and
+`bigint_div_84_resume_promotion_results.txt`.
+
 8-BY-4 MODULO PORT PREPARATION: the new exact 8/4 stratum and 512-case
 algebraic edge matrix exposed a pre-existing `mag_mod_84` saturated-digit
 handoff bug.  Its corrected five-limb window must advance `(w3,w2)` as the

@@ -53554,15 +53554,17 @@ WValue w_bigint_div_63_after_cert_fail(WValue a, WValue b) {
     }
     return bigint_finish_mag_sub(q);
 }
-/* The native positive 8/4 source leaf has completed the first triangular
- * certificate attempt from bigint_div_any's balanced boxed arm. Continue at
- * the exact next C routing point: mag_divmod retries its ordinary selection
- * tree (including the second certificate attempt) before Knuth fallback. */
+/* Native-only continuation after the positive 8/4 source leaf has proved the
+ * triangular certificate inconclusive.  At vlen=4 the reciprocal and B-Z
+ * selectors are compile-time below their 256- and 24/64-limb thresholds, so
+ * mag_divmod can only retry the identical certificate and then call Knuth.
+ * Resume directly at that proven destination. */
 WValue w_bigint_div_84_after_cert_fail(WValue a, WValue b) {
     WBigint *aa = w_as_bigint(a);
     WBigint *bb = w_as_bigint(b);
     WBigint *q = NULL;
-    mag_divmod(aa->limbs, 8, bb->limbs, 4, &q, NULL);
+    BN_DIV_ROUTE_COUNT(bn_div_route_knuth);
+    mag_divmod_knuth(aa->limbs, 8, bb->limbs, 4, &q, NULL);
     return bigint_finish_mag_sub(q);
 }
 WValue w_bigint_mod(WValue a, WValue b) {

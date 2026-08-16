@@ -1,0 +1,968 @@
+{
+  "add_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "addcarry_u64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "alloca_array": [
+    "count",
+    "ptr"
+  ],
+  "alloca_i64": [
+    "ptr"
+  ],
+  "and_i1": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "and_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "argv_init": [],
+  "arr_data_ptr": [
+    "arr",
+    "temp"
+  ],
+  "array_get_inline": [
+    "arr",
+    "idx",
+    "s",
+    "temp"
+  ],
+  "array_size_raw": [
+    "temp",
+    "value"
+  ],
+  "asm_add_n": [
+    "ap",
+    "bp",
+    "n",
+    "outp",
+    "temp"
+  ],
+  "asm_add_no": [
+    "aoff",
+    "ap",
+    "boff",
+    "bp",
+    "n",
+    "ooff",
+    "outp",
+    "temp"
+  ],
+  "asm_add_test": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "asm_addmul1": [
+    "aoff",
+    "ap",
+    "bsc",
+    "n",
+    "ooff",
+    "outp",
+    "temp"
+  ],
+  "asm_gold_stage": [
+    "hq",
+    "nb",
+    "temp",
+    "twp",
+    "vp"
+  ],
+  "asm_gold_stage_inv": [
+    "hq",
+    "ivp",
+    "nb",
+    "temp",
+    "twp",
+    "vp"
+  ],
+  "asm_mulbase": [
+    "aoff",
+    "ap",
+    "boff",
+    "bp",
+    "na",
+    "nb",
+    "ooff",
+    "outp",
+    "temp"
+  ],
+  "asm_neon_gadd2": [
+    "ap",
+    "bp",
+    "n",
+    "outp",
+    "temp"
+  ],
+  "asm_neon_ntt_stage": [
+    "hq",
+    "nb",
+    "temp",
+    "twp",
+    "vp"
+  ],
+  "asm_neon_redc": [
+    "ap",
+    "bp",
+    "n",
+    "outp",
+    "temp"
+  ],
+  "asm_neon_umull": [
+    "ap",
+    "bp",
+    "n",
+    "outp",
+    "temp"
+  ],
+  "asm_sub_no": [
+    "aoff",
+    "ap",
+    "boff",
+    "bp",
+    "n",
+    "ooff",
+    "outp",
+    "temp"
+  ],
+  "big_array_get_inline": [
+    "arr",
+    "bits",
+    "idx",
+    "idx_raw",
+    "s",
+    "signed",
+    "temp"
+  ],
+  "bigint_literal_i64": [
+    "byte_len",
+    "slot_id",
+    "string_id",
+    "temp",
+    "temp_ptr"
+  ],
+  "bitcast_f16_i16": [
+    "temp",
+    "value"
+  ],
+  "bitcast_f32_i32": [
+    "temp",
+    "value"
+  ],
+  "bitcast_f64_i64": [
+    "temp",
+    "value"
+  ],
+  "bitcast_i16_f16": [
+    "temp",
+    "value"
+  ],
+  "bitcast_i32_f32": [
+    "temp",
+    "value"
+  ],
+  "bitcast_i64_f64": [
+    "temp",
+    "value"
+  ],
+  "bool_array_get_inline": [
+    "arr",
+    "as_i1",
+    "idx",
+    "temp"
+  ],
+  "bool_array_set_inline": [
+    "arr",
+    "idx",
+    "temp",
+    "val"
+  ],
+  "br": [
+    "label",
+    "novec",
+    "unroll_count"
+  ],
+  "builtin_class_init": [
+    "class_name",
+    "name_byte_len",
+    "name_str_id"
+  ],
+  "call_direct_i64": [
+    "arg_types",
+    "args",
+    "call_conv",
+    "loc_site_id",
+    "name",
+    "src_col",
+    "src_line",
+    "temp"
+  ],
+  "call_direct_i64_ptr1": [
+    "arg",
+    "name",
+    "temp"
+  ],
+  "call_direct_ptr": [
+    "args",
+    "name",
+    "temp"
+  ],
+  "call_direct_void": [
+    "args",
+    "name"
+  ],
+  "call_direct_void_ptr1": [
+    "arg",
+    "name"
+  ],
+  "call_fused_out_reuse": [
+    "bits",
+    "cap",
+    "slot",
+    "temp"
+  ],
+  "call_libm_f64": [
+    "lhs",
+    "name",
+    "rhs",
+    "temp",
+    "value"
+  ],
+  "call_loc_set_col": [
+    "col",
+    "file_byte_len",
+    "file_str_id",
+    "line",
+    "temp_ptr"
+  ],
+  "call_method_i64": [
+    "args",
+    "construct_class",
+    "construct_fn",
+    "devirt_class",
+    "devirt_fn",
+    "ic_id",
+    "method_name_val",
+    "receiver",
+    "scalar_source_argc1",
+    "scalar_source_argc2",
+    "src_col",
+    "src_line",
+    "temp",
+    "temp_args_val"
+  ],
+  "call_num_to_f64": [
+    "temp",
+    "value"
+  ],
+  "call_recycle_or_new_array": [
+    "temp"
+  ],
+  "call_recycle_or_new_hash": [
+    "temp"
+  ],
+  "call_recycle_or_new_strbuf": [
+    "cap",
+    "temp"
+  ],
+  "call_recycle_or_new_typed": [
+    "bits",
+    "cap",
+    "temp"
+  ],
+  "call_reuse_and_drain_or_new_hash": [
+    "slot",
+    "temp"
+  ],
+  "call_reuse_or_new_array": [
+    "slot",
+    "temp"
+  ],
+  "call_reuse_or_new_hash": [
+    "slot",
+    "temp"
+  ],
+  "call_reuse_or_new_strbuf": [
+    "cap",
+    "slot",
+    "temp"
+  ],
+  "call_reuse_or_new_typed": [
+    "bits",
+    "cap",
+    "slot",
+    "temp"
+  ],
+  "class_add_ivar": [
+    "class_temp",
+    "ivar_byte_len",
+    "ivar_str_id"
+  ],
+  "class_add_method": [
+    "arity",
+    "class_temp",
+    "fn_name",
+    "method_byte_len",
+    "method_str_id",
+    "min_arity",
+    "splat_index"
+  ],
+  "class_add_static_method": [
+    "arity",
+    "class_temp",
+    "fn_name",
+    "method_byte_len",
+    "method_str_id",
+    "min_arity",
+    "splat_index"
+  ],
+  "class_new": [
+    "name_byte_len",
+    "name_str_id",
+    "super_reg",
+    "temp"
+  ],
+  "class_store": [
+    "class_name",
+    "value"
+  ],
+  "cleanup_pop": [],
+  "closure_new": [
+    "block_arity",
+    "capture_count",
+    "captures_ptr",
+    "fn_name",
+    "temp"
+  ],
+  "cond_br": [
+    "cond",
+    "else_label",
+    "prof",
+    "then_label"
+  ],
+  "const_char": [
+    "codepoint",
+    "temp"
+  ],
+  "const_color": [
+    "a",
+    "b",
+    "g",
+    "r",
+    "temp"
+  ],
+  "const_currency": [
+    "scale",
+    "sig",
+    "symbol_id",
+    "temp"
+  ],
+  "const_date": [
+    "day",
+    "hour",
+    "min",
+    "month",
+    "sec",
+    "temp",
+    "tz",
+    "year"
+  ],
+  "const_decimal": [
+    "scale",
+    "sig",
+    "temp"
+  ],
+  "const_duration_months_ms": [
+    "months",
+    "ms",
+    "temp"
+  ],
+  "const_duration_ns": [
+    "ns",
+    "temp"
+  ],
+  "const_ipv4": [
+    "a",
+    "b",
+    "c",
+    "cidr",
+    "d",
+    "temp"
+  ],
+  "const_ipv6": [
+    "byte_len",
+    "cidr",
+    "string_id",
+    "temp",
+    "temp_ptr"
+  ],
+  "const_quantity": [
+    "scale",
+    "sig",
+    "temp",
+    "unit_id"
+  ],
+  "const_rational": [
+    "den",
+    "num",
+    "temp"
+  ],
+  "const_uuid": [
+    "byte_len",
+    "string_id",
+    "temp",
+    "temp_ptr"
+  ],
+  "fcmp_f64": [
+    "lhs",
+    "pred",
+    "rhs",
+    "temp"
+  ],
+  "fma_f64": [
+    "lhs",
+    "rhs",
+    "temp",
+    "value"
+  ],
+  "fmuladd_f64": [
+    "lhs",
+    "rhs",
+    "temp",
+    "value"
+  ],
+  "fn_addr_i64": [
+    "name",
+    "temp"
+  ],
+  "fneg_f64": [
+    "temp",
+    "value"
+  ],
+  "fpext_f16_f32": [
+    "temp",
+    "value"
+  ],
+  "fpext_f32_f64": [
+    "temp",
+    "value"
+  ],
+  "fptosi_f64_i64": [
+    "temp",
+    "value"
+  ],
+  "fptrunc_f32_f16": [
+    "temp",
+    "value"
+  ],
+  "fptrunc_f64_f32": [
+    "temp",
+    "value"
+  ],
+  "free_value": [
+    "value"
+  ],
+  "gep_array": [
+    "base",
+    "count",
+    "index",
+    "temp"
+  ],
+  "i64_to_ptr": [
+    "temp",
+    "value"
+  ],
+  "icmp_eq_i32": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "icmp_i64": [
+    "lhs",
+    "pred",
+    "rhs",
+    "temp"
+  ],
+  "icmp_ne_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "icmp_ne_zero": [
+    "temp",
+    "value"
+  ],
+  "inttoptr_i64": [
+    "temp",
+    "value"
+  ],
+  "ivar_get": [
+    "byte_len",
+    "self_reg",
+    "str_id",
+    "temp",
+    "temp_ptr"
+  ],
+  "ivar_get_idx": [
+    "offset",
+    "self_reg",
+    "temp"
+  ],
+  "ivar_set": [
+    "byte_len",
+    "self_reg",
+    "str_id",
+    "temp",
+    "temp_ptr",
+    "value"
+  ],
+  "ivar_set_idx": [
+    "offset",
+    "self_reg",
+    "temp",
+    "value"
+  ],
+  "load_class": [
+    "class_name",
+    "temp"
+  ],
+  "load_cvar": [
+    "cvar_key",
+    "temp"
+  ],
+  "load_global": [
+    "name",
+    "temp",
+    "type"
+  ],
+  "load_i64": [
+    "ptr",
+    "temp"
+  ],
+  "load_i64_at": [
+    "index",
+    "ptr",
+    "temp"
+  ],
+  "load_memo_ptr": [
+    "global",
+    "temp"
+  ],
+  "load_ptr": [
+    "ptr",
+    "temp"
+  ],
+  "load_u32_ptr": [
+    "index",
+    "ptr",
+    "temp"
+  ],
+  "load_u64_ptr": [
+    "index",
+    "ptr",
+    "temp"
+  ],
+  "load_u8_ptr": [
+    "index",
+    "ptr",
+    "temp"
+  ],
+  "lshr_i128": [
+    "shift",
+    "temp",
+    "value"
+  ],
+  "lshr_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "memo_call0_i64": [
+    "fn_name",
+    "table",
+    "temp"
+  ],
+  "memo_call1_i64": [
+    "args",
+    "fn_name",
+    "table",
+    "temp"
+  ],
+  "memo_call2_i64": [
+    "args",
+    "fn_name",
+    "table",
+    "temp"
+  ],
+  "memo_init": [
+    "temp"
+  ],
+  "mul_i128": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "mulhi_u64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "nanbox_bool": [
+    "temp",
+    "value"
+  ],
+  "nanbox_float": [
+    "raw",
+    "temp",
+    "temp_bits"
+  ],
+  "nanbox_int": [
+    "raw",
+    "temp",
+    "temp_masked"
+  ],
+  "nanunbox_float": [
+    "boxed",
+    "temp",
+    "temp_bits"
+  ],
+  "nanunbox_int": [
+    "boxed",
+    "temp",
+    "temp_shl"
+  ],
+  "node_kind_class_register": [
+    "class_temp",
+    "kind_id"
+  ],
+  "not_i1": [
+    "temp",
+    "value"
+  ],
+  "null_ptr": [
+    "temp"
+  ],
+  "or_i1": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "phi_i64": [
+    "a_label",
+    "a_value",
+    "b_label",
+    "b_value",
+    "temp"
+  ],
+  "phi_ssa": [
+    "incoming",
+    "temp"
+  ],
+  "poly_array_guard": [
+    "temp",
+    "value"
+  ],
+  "print_i64": [
+    "temp",
+    "value"
+  ],
+  "ptr_slot_get": [
+    "index",
+    "ptr",
+    "slot_type",
+    "temp"
+  ],
+  "ptr_to_i64": [
+    "temp",
+    "value"
+  ],
+  "puts_i64": [
+    "temp",
+    "value"
+  ],
+  "register_unit": [
+    "byte_len",
+    "str_id",
+    "unit_id"
+  ],
+  "ret_i32": [
+    "value"
+  ],
+  "ret_i64": [
+    "function_recycle_count",
+    "value"
+  ],
+  "ret_void": [],
+  "sadd_with_overflow": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "scope_pop": [
+    "id"
+  ],
+  "scope_push": [
+    "id"
+  ],
+  "sdiv_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "select_i64": [
+    "cond",
+    "else_val",
+    "temp",
+    "then_val"
+  ],
+  "setjmp": [
+    "buf",
+    "temp"
+  ],
+  "shl_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "slab_alloc_init": [
+    "fields",
+    "kind",
+    "sc",
+    "temp"
+  ],
+  "small_array_alloca": [
+    "temp_ptr",
+    "total_bytes"
+  ],
+  "small_array_const_load": [
+    "const_name",
+    "temp"
+  ],
+  "small_array_get_inline": [
+    "arr",
+    "bits",
+    "headerless",
+    "idx",
+    "idx_raw",
+    "s",
+    "signed",
+    "temp"
+  ],
+  "small_array_set_inline": [
+    "arr",
+    "bits",
+    "headerless",
+    "idx",
+    "idx_raw",
+    "s",
+    "signed",
+    "temp",
+    "value"
+  ],
+  "store_cvar": [
+    "cvar_key",
+    "value"
+  ],
+  "store_double": [
+    "ptr",
+    "value"
+  ],
+  "store_float": [
+    "ptr",
+    "value"
+  ],
+  "store_global": [
+    "name",
+    "type",
+    "value"
+  ],
+  "store_i64": [
+    "ptr",
+    "value"
+  ],
+  "store_memo_ptr": [
+    "global",
+    "value"
+  ],
+  "store_ptr": [
+    "dest",
+    "value"
+  ],
+  "store_u8_ptr": [
+    "index",
+    "ptr",
+    "temp",
+    "value"
+  ],
+  "string_i64": [
+    "byte_len",
+    "string_id",
+    "temp",
+    "temp_ptr"
+  ],
+  "sub_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "subborrow_u64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "switch_i64": [
+    "cases",
+    "default_label",
+    "is_symbol",
+    "value"
+  ],
+  "symbol_i64": [
+    "byte_len",
+    "string_id",
+    "temp",
+    "temp_ptr"
+  ],
+  "ta_cap_raw": [
+    "temp",
+    "value"
+  ],
+  "ta_data_addr": [
+    "temp",
+    "value"
+  ],
+  "ta_size_raw": [
+    "temp",
+    "value"
+  ],
+  "trunc_i128_i64": [
+    "temp",
+    "value"
+  ],
+  "trunc_i64_i16": [
+    "temp",
+    "value"
+  ],
+  "trunc_i64_i32": [
+    "temp",
+    "value"
+  ],
+  "truthy_inline": [
+    "temp",
+    "value"
+  ],
+  "type_class_register": [
+    "class_temp",
+    "dispatch_key"
+  ],
+  "typed_array_compound_op_inline": [
+    "arr",
+    "bits",
+    "compound_op",
+    "idx",
+    "idx_raw",
+    "s",
+    "signed",
+    "temp",
+    "value"
+  ],
+  "typed_array_get_inline": [
+    "arr",
+    "bits",
+    "idx",
+    "idx_raw",
+    "s",
+    "signed",
+    "temp"
+  ],
+  "typed_array_set_inline": [
+    "arr",
+    "bits",
+    "idx",
+    "idx_raw",
+    "s",
+    "signed",
+    "temp",
+    "value"
+  ],
+  "unreachable": [],
+  "view_base_ptr": [
+    "temp",
+    "value"
+  ],
+  "view_load_bit": [
+    "index",
+    "ptr",
+    "temp"
+  ],
+  "view_load_byte": [
+    "index",
+    "ptr",
+    "temp"
+  ],
+  "view_load_field": [
+    "field_type",
+    "offset",
+    "ptr",
+    "size",
+    "temp"
+  ],
+  "view_load_inline_byte": [
+    "index",
+    "offset",
+    "ptr",
+    "temp"
+  ],
+  "view_load_inline_elem": [
+    "elem",
+    "index",
+    "offset",
+    "ptr",
+    "size",
+    "temp"
+  ],
+  "view_store_field": [
+    "field_type",
+    "offset",
+    "ptr",
+    "size",
+    "temp",
+    "value"
+  ],
+  "view_store_inline_elem": [
+    "elem",
+    "index",
+    "offset",
+    "ptr",
+    "size",
+    "temp",
+    "value"
+  ],
+  "xor_i64": [
+    "lhs",
+    "rhs",
+    "temp"
+  ],
+  "zext_i16_i64": [
+    "temp",
+    "value"
+  ],
+  "zext_i32_i64": [
+    "temp",
+    "value"
+  ],
+  "zext_i64_i128": [
+    "temp",
+    "value"
+  ]
+}

@@ -113,7 +113,7 @@
 
 -> bind_slot_value(ctx, wfn, name, value_reg)
   ptr = ensure_var_slot(wfn, name)
-  emit_instruction(wfn, {op: :store_i64, value: value_reg, ptr: ptr})
+  emit_wire_store_i64(wfn, ptr, value_reg)
   ctx[:bindings][name] = nil
   ctx[:var_types][name] = nil
   ptr
@@ -226,7 +226,7 @@
       csi += 1
     if cf_ok && cf_empty
       zero = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: zero, name: "w_int", args: ["0"]})
+      emit_wire_call_direct_i64(wfn, nil, ["0"], nil, nil, "w_int", nil, nil, zero)
       return typed_value(:i64, zero)
     if cf_ok && poly_emittable(cf_poly)
       # Bounds unbox via w_range_bound_i64, NOT nanunbox — same hazard the
@@ -238,13 +238,13 @@
       lo_b = ensure_i64_value(wfn, lower_expression(ctx, ast_get(base, :from)))
       hi_b = ensure_i64_value(wfn, lower_expression(ctx, ast_get(base, :to)))
       lo_cf = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: lo_cf, name: "w_range_bound_i64", args: [lo_b]})
+      emit_wire_call_direct_i64(wfn, nil, [lo_b], nil, nil, "w_range_bound_i64", nil, nil, lo_cf)
       hi_cf = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: hi_cf, name: "w_range_bound_i64", args: [hi_b]})
+      emit_wire_call_direct_i64(wfn, nil, [hi_b], nil, nil, "w_range_bound_i64", nil, nil, hi_cf)
       # Exclusive range (1...n) drops the top endpoint.
       if ast_get(base, :exclusive)
         hi_excl = next_temp(wfn)
-        emit_instruction(wfn, {op: :sub_i64, temp: hi_excl, lhs: hi_cf, rhs: "1"})
+        emit_wire_sub_i64(wfn, hi_cf, "1", hi_excl)
         hi_cf = hi_excl
       return emit_poly_ranged_sum(wfn, cf_poly, lo_cf, hi_cf, cf_parity)
 
@@ -274,30 +274,30 @@
       lo_b = ensure_i64_value(wfn, lower_expression(ctx, Tungsten:AST:Int.new(2, nil, "2")))
       hi_b = ensure_i64_value(wfn, lower_expression(ctx, wheel12_hi))
       lo_pc = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: lo_pc, name: "w_range_bound_i64", args: [lo_b]})
+      emit_wire_call_direct_i64(wfn, nil, [lo_b], nil, nil, "w_range_bound_i64", nil, nil, lo_pc)
       hi_pc = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: hi_pc, name: "w_range_bound_i64", args: [hi_b]})
+      emit_wire_call_direct_i64(wfn, nil, [hi_b], nil, nil, "w_range_bound_i64", nil, nil, hi_pc)
     else
       lo_b = ensure_i64_value(wfn, lower_expression(ctx, ast_get(base, :from)))
       hi_b = ensure_i64_value(wfn, lower_expression(ctx, ast_get(base, :to)))
       lo_pc = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: lo_pc, name: "w_range_bound_i64", args: [lo_b]})
+      emit_wire_call_direct_i64(wfn, nil, [lo_b], nil, nil, "w_range_bound_i64", nil, nil, lo_pc)
       hi_pc = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: hi_pc, name: "w_range_bound_i64", args: [hi_b]})
+      emit_wire_call_direct_i64(wfn, nil, [hi_b], nil, nil, "w_range_bound_i64", nil, nil, hi_pc)
       if ast_get(base, :exclusive)
         hi_ex = next_temp(wfn)
-        emit_instruction(wfn, {op: :sub_i64, temp: hi_ex, lhs: hi_pc, rhs: "1"})
+        emit_wire_sub_i64(wfn, hi_pc, "1", hi_ex)
         hi_pc = hi_ex
     cnt_raw = next_temp(wfn)
     if count_pred == "prime?" || wheel12_hi != nil
-      emit_instruction(wfn, {op: :call_direct_i64, temp: cnt_raw, name: "w_prime_count_u64", args: [lo_pc, hi_pc]})
+      emit_wire_call_direct_i64(wfn, nil, [lo_pc, hi_pc], nil, nil, "w_prime_count_u64", nil, nil, cnt_raw)
     else
       want = "0"
       if count_pred == "even?"
         want = "1"
-      emit_instruction(wfn, {op: :call_direct_i64, temp: cnt_raw, name: "w_parity_count_u64", args: [lo_pc, hi_pc, want]})
+      emit_wire_call_direct_i64(wfn, nil, [lo_pc, hi_pc, want], nil, nil, "w_parity_count_u64", nil, nil, cnt_raw)
     cnt_box = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: cnt_box, name: "w_int", args: [cnt_raw]})
+    emit_wire_call_direct_i64(wfn, nil, [cnt_raw], nil, nil, "w_int", nil, nil, cnt_box)
     return typed_value(:i64, cnt_box)
 
   # Does the pipeline contain a select/reject filter? With a filter, the
@@ -331,17 +331,17 @@
     hi_tv = lower_expression(ctx, ast_get(base, :to))
     hi_raw = nanunbox_int_emit(wfn, ensure_i64_value(wfn, hi_tv))
     span = next_temp(wfn)
-    emit_instruction(wfn, {op: :sub_i64, temp: span, lhs: hi_raw, rhs: lo_raw})
+    emit_wire_sub_i64(wfn, hi_raw, lo_raw, span)
     count_raw = next_temp(wfn)
     if ast_get(base, :exclusive)
-      emit_instruction(wfn, {op: :add_i64, temp: count_raw, lhs: span, rhs: "0"})
+      emit_wire_add_i64(wfn, span, "0", count_raw)
     else
-      emit_instruction(wfn, {op: :add_i64, temp: count_raw, lhs: span, rhs: "1"})
+      emit_wire_add_i64(wfn, span, "1", count_raw)
   else
     receiver_val = lower_expression(ctx, base)
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     size_box = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: size_box, name: "w_array_size", args: [receiver_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_array_size", nil, nil, size_box)
     count_raw = nanunbox_int_emit(wfn, size_box)
 
   # Filter-free take(n): clamp the iteration bound to min(count, n). Every
@@ -350,9 +350,9 @@
   # exhaustion cycle. `take(0)` → bound 0 → zero iterations.
   if clamp_take
     take_lt = next_temp(wfn)
-    emit_instruction(wfn, {op: :icmp_i64, temp: take_lt, pred: "slt", lhs: take_clamp_raw, rhs: count_raw})
+    emit_wire_icmp_i64(wfn, take_clamp_raw, "slt", count_raw, take_lt)
     clamped = next_temp(wfn)
-    emit_instruction(wfn, {op: :select_i64, temp: clamped, cond: take_lt, then_val: take_clamp_raw, else_val: count_raw})
+    emit_wire_select_i64(wfn, take_lt, count_raw, clamped, take_clamp_raw)
     count_raw = clamped
 
   # --- terminal state ---
@@ -362,11 +362,11 @@
   if is_reduce || is_detect
     acc_ptr = ensure_var_slot(wfn, acc_name)
     seen_ptr = ensure_var_slot(wfn, seen_name)
-    emit_instruction(wfn, {op: :store_i64, value: w_false.to_s(), ptr: seen_ptr})
-    emit_instruction(wfn, {op: :store_i64, value: w_nil.to_s(), ptr: acc_ptr})
+    emit_wire_store_i64(wfn, seen_ptr, w_false.to_s())
+    emit_wire_store_i64(wfn, acc_ptr, w_nil.to_s())
   else
     out_arr = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: out_arr, name: "w_array_new_empty", args: []})
+    emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_array_new_empty", nil, nil, out_arr)
 
   # take(n) produced-counter — ONLY when a filter is present (otherwise the
   # min(count,n) bound clamp above handles it). `take_remaining` (raw i64)
@@ -376,7 +376,7 @@
     take_tv = lower_expression(ctx, take_node)
     take_raw = nanunbox_int_emit(wfn, ensure_i64_value(wfn, take_tv))
     take_ptr = ensure_var_slot(wfn, take_name)
-    emit_instruction(wfn, {op: :store_i64, value: take_raw, ptr: take_ptr})
+    emit_wire_store_i64(wfn, take_ptr, take_raw)
 
   materialize_bindings(ctx)
 
@@ -386,17 +386,17 @@
   inc = next_label(wfn, "pipe.inc")
   exit_l = next_label(wfn, "pipe.exit")
 
-  emit_instruction(wfn, {op: :br, label: pre})
+  emit_wire_br(wfn, pre, nil, nil)
   start_block(wfn, pre)
-  emit_instruction(wfn, {op: :br, label: hdr})
+  emit_wire_br(wfn, hdr, nil, nil)
 
   start_block(wfn, hdr)
   idx_raw = next_temp(wfn)
   idx_next = next_temp(wfn)
-  emit_instruction(wfn, {op: :phi_i64, temp: idx_raw, a_value: "0", a_label: pre, b_value: idx_next, b_label: inc})
+  emit_wire_phi_i64(wfn, pre, "0", inc, idx_next, idx_raw)
   cmp = next_temp(wfn)
-  emit_instruction(wfn, {op: :icmp_i64, temp: cmp, pred: "slt", lhs: idx_raw, rhs: count_raw})
-  emit_instruction(wfn, {op: :cond_br, cond: cmp, then_label: body, else_label: exit_l})
+  emit_wire_icmp_i64(wfn, idx_raw, "slt", count_raw, cmp)
+  emit_wire_cond_br(wfn, cmp, exit_l, nil, body)
 
   start_block(wfn, body)
   # take(n) with a filter: bail once n elements have been produced.
@@ -404,18 +404,18 @@
   # element work. (Filter-free take uses the clamped bound instead.)
   if use_take_counter
     take_chk = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: take_chk, ptr: take_ptr})
+    emit_wire_load_i64(wfn, take_ptr, take_chk)
     take_ok = next_temp(wfn)
-    emit_instruction(wfn, {op: :icmp_i64, temp: take_ok, pred: "sgt", lhs: take_chk, rhs: "0"})
+    emit_wire_icmp_i64(wfn, take_chk, "sgt", "0", take_ok)
     take_go = next_label(wfn, "pipe.go")
-    emit_instruction(wfn, {op: :cond_br, cond: take_ok, then_label: take_go, else_label: exit_l})
+    emit_wire_cond_br(wfn, take_ok, exit_l, nil, take_go)
     start_block(wfn, take_go)
   elem = next_temp(wfn)
   if is_range
     val_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :add_i64, temp: val_raw, lhs: lo_raw, rhs: idx_raw})
+    emit_wire_add_i64(wfn, lo_raw, idx_raw, val_raw)
     boxed = nanbox_int_emit(wfn, val_raw)
-    emit_instruction(wfn, {op: :store_i64, value: boxed[:value], ptr: ensure_var_slot(wfn, "__pipe_box." + uid)})
+    emit_wire_store_i64(wfn, ensure_var_slot(wfn, "__pipe_box." + uid), boxed[:value])
     elem = boxed[:value]
   else
     idx_boxed = nanbox_int_emit(wfn, idx_raw)
@@ -424,7 +424,7 @@
     while si < 10
       scratch.push(next_temp(wfn))
       si += 1
-    emit_instruction(wfn, {op: :array_get_inline, temp: elem, arr: receiver_reg, idx: idx_boxed[:value], s: scratch})
+    emit_wire_array_get_inline(wfn, receiver_reg, idx_boxed[:value], scratch, elem)
 
   cur_name = "__pipe_cur." + uid
   cur_ptr = bind_slot_value(ctx, wfn, cur_name, elem)
@@ -441,12 +441,12 @@
       pred_val = lower_expression(ctx, pipeline_pred_node(sfunc, cur_name))
       pred_reg = ensure_i64_value(wfn, pred_val)
       pred_bool = next_temp(wfn)
-      emit_instruction(wfn, {op: :truthy_inline, temp: pred_bool, value: pred_reg})
+      emit_wire_truthy_inline(wfn, pred_bool, pred_reg)
       keep = next_label(wfn, "pipe.keep")
       if skind == :select
-        emit_instruction(wfn, {op: :cond_br, cond: pred_bool, then_label: keep, else_label: inc})
+        emit_wire_cond_br(wfn, pred_bool, inc, nil, keep)
       else
-        emit_instruction(wfn, {op: :cond_br, cond: pred_bool, then_label: inc, else_label: keep})
+        emit_wire_cond_br(wfn, pred_bool, keep, nil, inc)
       start_block(wfn, keep)
     elsif ast_kind(sfunc) == :block
       # Inline a `map(-> (x) body)` lambda: bind its param to the current
@@ -472,63 +472,63 @@
 
   if is_detect
     acc_ptr2 = ensure_var_slot(wfn, acc_name)
-    emit_instruction(wfn, {op: :store_i64, value: cur_reg, ptr: acc_ptr2})
-    emit_instruction(wfn, {op: :store_i64, value: w_true.to_s(), ptr: ensure_var_slot(wfn, seen_name)})
-    emit_instruction(wfn, {op: :br, label: exit_l})
+    emit_wire_store_i64(wfn, acc_ptr2, cur_reg)
+    emit_wire_store_i64(wfn, ensure_var_slot(wfn, seen_name), w_true.to_s())
+    emit_wire_br(wfn, exit_l, nil, nil)
   elsif is_reduce
     acc_ptr3 = ensure_var_slot(wfn, acc_name)
     seen_ptr3 = ensure_var_slot(wfn, seen_name)
     seen_box = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: seen_box, ptr: seen_ptr3})
+    emit_wire_load_i64(wfn, seen_ptr3, seen_box)
     seen_bool = next_temp(wfn)
-    emit_instruction(wfn, {op: :truthy_inline, temp: seen_bool, value: seen_box})
+    emit_wire_truthy_inline(wfn, seen_bool, seen_box)
     seed_l = next_label(wfn, "pipe.seed")
     comb_l = next_label(wfn, "pipe.comb")
     after_l = next_label(wfn, "pipe.after")
-    emit_instruction(wfn, {op: :cond_br, cond: seen_bool, then_label: comb_l, else_label: seed_l})
+    emit_wire_cond_br(wfn, seen_bool, seed_l, nil, comb_l)
     start_block(wfn, seed_l)
     if terminal == "count"
       # Seed with the first element's contribution (0 or 1), not the element
       # itself, so the count folds from 0. cur_name is bound to the (mapped)
       # element here.
       seed_val = lower_expression(ctx, Tungsten:AST:If.new(Tungsten:AST:Var.new(cur_name), [Tungsten:AST:Int.new(1)], [], [Tungsten:AST:Int.new(0)]))
-      emit_instruction(wfn, {op: :store_i64, value: ensure_i64_value(wfn, seed_val), ptr: acc_ptr3})
+      emit_wire_store_i64(wfn, acc_ptr3, ensure_i64_value(wfn, seed_val))
     else
-      emit_instruction(wfn, {op: :store_i64, value: cur_reg, ptr: acc_ptr3})
-    emit_instruction(wfn, {op: :store_i64, value: w_true.to_s(), ptr: seen_ptr3})
-    emit_instruction(wfn, {op: :br, label: after_l})
+      emit_wire_store_i64(wfn, acc_ptr3, cur_reg)
+    emit_wire_store_i64(wfn, seen_ptr3, w_true.to_s())
+    emit_wire_br(wfn, after_l, nil, nil)
     start_block(wfn, comb_l)
     ctx[:bindings][acc_name] = nil
     ctx[:var_types][acc_name] = nil
     comb_val = lower_expression(ctx, pipeline_reduce_node(terminal, acc_name, cur_name))
     comb_reg = ensure_i64_value(wfn, comb_val)
-    emit_instruction(wfn, {op: :store_i64, value: comb_reg, ptr: acc_ptr3})
-    emit_instruction(wfn, {op: :br, label: after_l})
+    emit_wire_store_i64(wfn, acc_ptr3, comb_reg)
+    emit_wire_br(wfn, after_l, nil, nil)
     start_block(wfn, after_l)
   else
     push_tmp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: push_tmp, name: "w_array_push", args: [out_arr, cur_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [out_arr, cur_reg], nil, nil, "w_array_push", nil, nil, push_tmp)
     # take(n) with a filter: one more element produced — decrement the
     # counter. Only reached for elements that survived all select/reject
     # stages, so the count is of PRODUCED (not iterated) elements.
     if use_take_counter
       take_cur = next_temp(wfn)
-      emit_instruction(wfn, {op: :load_i64, temp: take_cur, ptr: take_ptr})
+      emit_wire_load_i64(wfn, take_ptr, take_cur)
       take_dec = next_temp(wfn)
-      emit_instruction(wfn, {op: :sub_i64, temp: take_dec, lhs: take_cur, rhs: "1"})
-      emit_instruction(wfn, {op: :store_i64, value: take_dec, ptr: take_ptr})
+      emit_wire_sub_i64(wfn, take_cur, "1", take_dec)
+      emit_wire_store_i64(wfn, take_ptr, take_dec)
 
   pop_loop(wfn)
 
   if !block_terminated(wfn)
-    emit_instruction(wfn, {op: :br, label: inc})
+    emit_wire_br(wfn, inc, nil, nil)
   start_block(wfn, inc)
-  emit_instruction(wfn, {op: :add_i64, temp: idx_next, lhs: idx_raw, rhs: "1"})
-  emit_instruction(wfn, {op: :br, label: hdr})
+  emit_wire_add_i64(wfn, idx_raw, "1", idx_next)
+  emit_wire_br(wfn, hdr, nil, nil)
 
   start_block(wfn, exit_l)
   if is_reduce || is_detect
     result = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: result, ptr: ensure_var_slot(wfn, acc_name)})
+    emit_wire_load_i64(wfn, ensure_var_slot(wfn, acc_name), result)
     return typed_value(:i64, result)
   typed_value(:i64, out_arr)

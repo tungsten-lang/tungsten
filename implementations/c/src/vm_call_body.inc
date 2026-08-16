@@ -76,13 +76,15 @@
           }
           CNEXT();
         }
-        // PR #2 slab-AST migration: dispatch ccall_nobox calls for
+        // PR #2 slab-AST migration: dispatch ccall_nobox/ccall_rawargs calls for
         // the AST-node arena helpers natively via node_arena.c. With
         // these in place the slab side is populated during stage 0
         // interpretation, so ast.w can drop the hash-side fallback
         // entirely. Other ccall_nobox targets (json SIMD helpers, etc.)
         // aren't reachable from the bootstrap chain — they return nil.
-        if (!has_receiver && name_len == 11 && memcmp(name, "ccall_nobox", 11) == 0) {
+        if (!has_receiver &&
+            ((name_len == 11 && memcmp(name, "ccall_nobox", 11) == 0) ||
+             (name_len == 13 && memcmp(name, "ccall_rawargs", 13) == 0))) {
           TcValue result = tc_box_nil();
           if (argc >= 1 && tc_kind(args[0]) == TC_VAL_STRING) {
             const char *fn = tc_str_bytes_only(args[0]);
@@ -209,6 +211,14 @@
               result = w_wire_field_load(args[1], args[2]);
             } else if (fn_len == 21 && memcmp(fn, "w_wire_field_load_nil", 21) == 0 && argc == 3) {
               result = w_wire_field_load_nil(args[1], args[2]);
+            } else if (fn_len == 18 && memcmp(fn, "w_wire_field_count", 18) == 0 && argc == 2) {
+              result = int_value(w_wire_field_count(args[1]));
+            } else if (fn_len == 22 && memcmp(fn, "w_wire_field_symbol_at", 22) == 0 && argc == 3) {
+              int64_t index = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
+              result = w_wire_field_symbol_at(args[1], index);
+            } else if (fn_len == 21 && memcmp(fn, "w_wire_field_value_at", 21) == 0 && argc == 3) {
+              int64_t index = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
+              result = w_wire_field_value_at(args[1], index);
             } else if (fn_len == 18 && memcmp(fn, "w_wire_field_store", 18) == 0 && argc == 4) {
               result = w_wire_field_store(args[1], args[2], args[3]);
             } else if (fn_len == 18 && memcmp(fn, "w_wire_kind_extern", 18) == 0 && argc == 2) {

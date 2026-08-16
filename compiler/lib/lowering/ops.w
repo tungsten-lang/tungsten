@@ -298,11 +298,11 @@
     if is_machine_int128_type(from_type)
       return value
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: machine_int_to_i128_ext_op(from_type), temp: temp, value: value})
+    emit_wire_dynamic_2(wfn, machine_int_to_i128_ext_op(from_type), :temp, temp, :value, value)
     return temp
   if is_machine_int128_type(from_type)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :trunc_i128_i64, temp: temp, value: value})
+    emit_wire_trunc_i128_i64(wfn, temp, value)
     return temp
   value
 
@@ -354,7 +354,7 @@
     wfn = ctx[:func]
     operand = lower_machine_int_expression(ctx, node.operand, type)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: machine_int_op(type, :MINUS), temp: temp, lhs: "0", rhs: operand})
+    emit_wire_dynamic_3(wfn, machine_int_op(type, :MINUS), :lhs, "0", :rhs, operand, :temp, temp)
     return temp
   # An explicit machine-int context applies to the WHOLE expression tree,
   # not only its outermost result.  Falling through to lower_expression here
@@ -371,7 +371,7 @@
       lhs = lower_machine_int_expression(ctx, node.left, type)
       rhs = lower_machine_int_expression(ctx, node.right, type)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: int_op, temp: temp, lhs: lhs, rhs: rhs})
+      emit_wire_dynamic_3(wfn, int_op, :lhs, lhs, :rhs, rhs, :temp, temp)
       return temp
   # Carry-primitive intrinsic: `mulhi(a, b)` = high 64 bits of the unsigned
   # 64x64->128 product. Lowers to a single UMULH (arm64) / MULX (x86). It's a
@@ -382,7 +382,7 @@
     a_raw = lower_machine_int_expression(ctx, node.args[0], type)
     b_raw = lower_machine_int_expression(ctx, node.args[1], type)
     t = next_temp(wfn)
-    emit_instruction(wfn, {op: :mulhi_u64, temp: t, lhs: a_raw, rhs: b_raw})
+    emit_wire_mulhi_u64(wfn, a_raw, b_raw, t)
     return t
   # Carry-primitives addcarry/subborrow (see calls.w) — carry/borrow out of a+b/a-b.
   if ast_kind(node) == :call && node.receiver == nil && node.name == "addcarry" && node.args != nil && node.args.size() == 2
@@ -390,14 +390,14 @@
     a_raw = lower_machine_int_expression(ctx, node.args[0], type)
     b_raw = lower_machine_int_expression(ctx, node.args[1], type)
     t = next_temp(wfn)
-    emit_instruction(wfn, {op: :addcarry_u64, temp: t, lhs: a_raw, rhs: b_raw})
+    emit_wire_addcarry_u64(wfn, a_raw, b_raw, t)
     return t
   if ast_kind(node) == :call && node.receiver == nil && node.name == "subborrow" && node.args != nil && node.args.size() == 2
     wfn = ctx[:func]
     a_raw = lower_machine_int_expression(ctx, node.args[0], type)
     b_raw = lower_machine_int_expression(ctx, node.args[1], type)
     t = next_temp(wfn)
-    emit_instruction(wfn, {op: :subborrow_u64, temp: t, lhs: a_raw, rhs: b_raw})
+    emit_wire_subborrow_u64(wfn, a_raw, b_raw, t)
     return t
   # Fused subscript capture: `x = recv[i] ## i64/u64` on a receiver WITHOUT
   # static typed-array identity would lower to generic dispatch returning a
@@ -428,7 +428,7 @@
       fused_fn = "w_index_raw_i64"
       if type == :u64
         fused_fn = "w_index_raw_u64"
-      emit_instruction(wfn, {op: :call_direct_i64, temp: t, name: fused_fn, args: [recv_reg, idx_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [recv_reg, idx_reg], nil, nil, fused_fn, nil, nil, t)
       return t
   tv = lower_expression(ctx, node)
   inferred = infer_type(node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
@@ -551,7 +551,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   wfn = ctx[:func]
   ptr = wfn[:var_slots][name]
   if ptr != nil
-    emit_instruction(wfn, {op: :store_i64, value: value_reg, ptr: ptr})
+    emit_wire_store_i64(wfn, ptr, value_reg)
   else
     ctx[:bindings][name] = value_reg
   if type_hint != nil
@@ -579,10 +579,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   word_reg = ensure_i64_value(wfn, word_tv)
   result = next_temp(wfn)
   fn_name = subtract ? "w_bigint_submul_mut" : "w_bigint_addmul_mut"
-  emit_instruction(wfn, {
-    op: :call_direct_i64, temp: result, name: fn_name,
-    args: [cur, x_reg, word_reg], call_conv: "preserve_mostcc"
-  })
+  emit_wire_call_direct_i64(wfn, nil, [cur, x_reg, word_reg], "preserve_mostcc", nil, fn_name, nil, nil, result)
   result
 
 -> lower_bigint_linear_word_mut(ctx, name, cur, ptr, shape, subtract)
@@ -594,7 +591,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if ptr == nil && ctx[:bindings][name] == nil
     ptr = ensure_var_slot(wfn, name)
   if ptr != nil
-    emit_instruction(wfn, {op: :store_i64, value: result, ptr: ptr})
+    emit_wire_store_i64(wfn, ptr, result)
   else
     ctx[:bindings][name] = result
   typed_value(:i64, result)
@@ -636,7 +633,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   else
     ptr = ensure_var_slot(wfn, name)
     cur = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: cur, ptr: ptr})
+    emit_wire_load_i64(wfn, ptr, cur)
 
   rhs_tv = lower_expression(ctx, add_node.value)
   rhs_reg = ensure_i64_value(wfn, rhs_tv)
@@ -644,12 +641,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     ptr = ensure_var_slot(wfn, name)
   bits_reg = ensure_i64_value(wfn, typed_value(:raw_int, bits.to_s()))
   result = next_temp(wfn)
-  emit_instruction(wfn, {
-    op: :call_direct_i64, temp: result, name: "w_bigint_add_mod_pow2_mut",
-    args: [cur, rhs_reg, bits_reg], call_conv: "preserve_mostcc"
-  })
+  emit_wire_call_direct_i64(wfn, nil, [cur, rhs_reg, bits_reg], "preserve_mostcc", nil, "w_bigint_add_mod_pow2_mut", nil, nil, result)
   if ptr != nil
-    emit_instruction(wfn, {op: :store_i64, value: result, ptr: ptr})
+    emit_wire_store_i64(wfn, ptr, result)
   else
     ctx[:bindings][name] = result
   true
@@ -723,7 +717,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rt_op = lowering_op_map[op]
     if rt_op != nil
       result = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [cur, rhs_reg], nil, nil, rt_op, nil, nil, result)
       return lower_ivar_set_expr(ctx, target.name, typed_value(:i64, result))
     return typed_value(:i64, cur)
 
@@ -737,7 +731,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rt_op = lowering_op_map[op]
     if rt_op != nil
       result = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [cur, rhs_reg], nil, nil, rt_op, nil, nil, result)
       return lower_cvar_set(ctx, target, typed_value(:i64, result))
     return typed_value(:i64, cur)
 
@@ -754,7 +748,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rt_op = lowering_op_map[op]
     if rt_op != nil
       result = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rhs_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [cur, rhs_reg], nil, nil, rt_op, nil, nil, result)
       return lower_gvar_set(ctx, target.name, typed_value(:i64, result))
     return typed_value(:i64, cur)
 
@@ -772,7 +766,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][name] != nil
     raw_slot = ctx[:unboxed_vars][name]
     cur_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: cur_raw, ptr: raw_slot})
+    emit_wire_load_i64(wfn, raw_slot, cur_raw)
 
     rhs = lower_expression(ctx, node.value)
     rhs_raw = ensure_raw_int(wfn, rhs)
@@ -789,8 +783,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # garbage. :raw_i64 is the safe, correct shape.
     if int_op != nil
       result_raw = next_temp(wfn)
-      emit_instruction(wfn, {op: int_op, temp: result_raw, lhs: cur_raw, rhs: rhs_raw})
-      emit_instruction(wfn, {op: :store_i64, value: result_raw, ptr: raw_slot})
+      emit_wire_dynamic_3(wfn, int_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result_raw)
+      emit_wire_store_i64(wfn, raw_slot, result_raw)
       return typed_value(:raw_i64, result_raw)
 
     # Fallback: rebox, use runtime, unbox result
@@ -799,9 +793,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rt_op = lowering_op_map[op]
     if rt_op != nil
       result = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur_boxed_tv[:value], rhs_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [cur_boxed_tv[:value], rhs_reg], nil, nil, rt_op, nil, nil, result)
       result_raw = nanunbox_int_emit(wfn, result)
-      emit_instruction(wfn, {op: :store_i64, value: result_raw, ptr: raw_slot})
+      emit_wire_store_i64(wfn, raw_slot, result_raw)
       return typed_value(:i64, result)
     return cur_boxed_tv
 
@@ -809,7 +803,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     machine_type = ctx[:var_types][name]
     ptr = ensure_var_slot(wfn, name, machine_slot_type(machine_type))
     cur_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: machine_load_op(machine_type), temp: cur_raw, ptr: ptr})
+    emit_wire_dynamic_2(wfn, machine_load_op(machine_type), :ptr, ptr, :temp, cur_raw)
 
     rhs_raw = lower_machine_int_expression(ctx, node.value, machine_type)
 
@@ -819,8 +813,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
     if int_op != nil
       result_raw = next_temp(wfn)
-      emit_instruction(wfn, {op: int_op, temp: result_raw, lhs: cur_raw, rhs: rhs_raw})
-      emit_instruction(wfn, {op: machine_store_op(machine_type), value: result_raw, ptr: ptr})
+      emit_wire_dynamic_3(wfn, int_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result_raw)
+      emit_wire_dynamic_2(wfn, machine_store_op(machine_type), :ptr, ptr, :value, result_raw)
       return typed_value(raw_machine_value_type(machine_type), result_raw)
 
     cur_boxed = ensure_i64_value(wfn, typed_value(raw_machine_value_type(machine_type), cur_raw))
@@ -828,18 +822,18 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rhs_reg = ensure_i64_value(wfn, rhs)
     if rt_op != nil
       result = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur_boxed, rhs_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [cur_boxed, rhs_reg], nil, nil, rt_op, nil, nil, result)
       result_raw = ensure_raw_machine_int(wfn, typed_value(:i64, result), machine_type, machine_type)
-      emit_instruction(wfn, {op: machine_store_op(machine_type), value: result_raw, ptr: ptr})
+      emit_wire_dynamic_2(wfn, machine_store_op(machine_type), :ptr, ptr, :value, result_raw)
       return typed_value(raw_machine_value_type(machine_type), result_raw)
-    emit_instruction(wfn, {op: machine_store_op(machine_type), value: rhs_raw, ptr: ptr})
+    emit_wire_dynamic_2(wfn, machine_store_op(machine_type), :ptr, ptr, :value, rhs_raw)
     return typed_value(raw_machine_value_type(machine_type), rhs_raw)
 
   if is_machine_float_type(ctx[:var_types][name])
     float_type = ctx[:var_types][name]
     ptr = ensure_var_slot(wfn, name, float_slot_type(float_type))
     cur_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: float_load_op(float_type), temp: cur_raw, ptr: ptr})
+    emit_wire_dynamic_2(wfn, float_load_op(float_type), :ptr, ptr, :temp, cur_raw)
 
     rhs = lower_expression(ctx, node.value)
     # A Decimal RHS (bare `3.5` parses as a Decimal, so `f64var += 3.5`) is
@@ -861,34 +855,34 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       if float_type in (:f32 :raw_f32)
         lhs64 = next_temp(wfn)
         rhs64_wide = next_temp(wfn)
-        emit_instruction(wfn, {op: :fpext_f32_f64, temp: lhs64, value: cur_raw})
-        emit_instruction(wfn, {op: :fpext_f32_f64, temp: rhs64_wide, value: rhs_raw})
+        emit_wire_fpext_f32_f64(wfn, lhs64, cur_raw)
+        emit_wire_fpext_f32_f64(wfn, rhs64_wide, rhs_raw)
         rhs64 = rhs64_wide
       result_raw = next_temp(wfn)
-      emit_instruction(wfn, {op: float_op, temp: result_raw, lhs: lhs64, rhs: rhs64})
+      emit_wire_dynamic_3(wfn, float_op, :lhs, lhs64, :rhs, rhs64, :temp, result_raw)
       store_raw = result_raw
       if float_type in (:f32 :raw_f32)
         store_raw = next_temp(wfn)
-        emit_instruction(wfn, {op: :fptrunc_f64_f32, temp: store_raw, value: result_raw})
-        emit_instruction(wfn, {op: :store_float, value: store_raw, ptr: ptr})
+        emit_wire_fptrunc_f64_f32(wfn, store_raw, result_raw)
+        emit_wire_store_float(wfn, ptr, store_raw)
         return typed_value(:raw_f32, store_raw)
-      emit_instruction(wfn, {op: :store_double, value: store_raw, ptr: ptr})
+      emit_wire_store_double(wfn, ptr, store_raw)
       return typed_value(:raw_f64, store_raw)
 
     cur_boxed = ensure_i64_value(wfn, typed_value(raw_float_value_type(float_type), cur_raw))
     rhs_reg = ensure_i64_value(wfn, rhs)
     if rt_op != nil
       result = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur_boxed, rhs_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [cur_boxed, rhs_reg], nil, nil, rt_op, nil, nil, result)
       result_raw = nil
       if float_type in (:f32 :raw_f32)
         result_raw = ensure_raw_f32(wfn, typed_value(:i64, result))
-        emit_instruction(wfn, {op: :store_float, value: result_raw, ptr: ptr})
+        emit_wire_store_float(wfn, ptr, result_raw)
         return typed_value(:raw_f32, result_raw)
       result_raw = ensure_raw_f64(wfn, typed_value(:i64, result))
-      emit_instruction(wfn, {op: :store_double, value: result_raw, ptr: ptr})
+      emit_wire_store_double(wfn, ptr, result_raw)
       return typed_value(:raw_f64, result_raw)
-    emit_instruction(wfn, {op: float_store_op(float_type), value: rhs_raw, ptr: ptr})
+    emit_wire_dynamic_2(wfn, float_store_op(float_type), :ptr, ptr, :value, rhs_raw)
     return typed_value(raw_float_value_type(float_type), rhs_raw)
 
   # Read current value: check binding first, then var slot
@@ -899,7 +893,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   else
     ptr = ensure_var_slot(wfn, name)
     cur = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: cur, ptr: ptr})
+    emit_wire_load_i64(wfn, ptr, cur)
 
   # A proven-dead boxed accumulator does not need to materialize the
   # intermediate product in `r += x * word` / `r -= x * word`.  The runtime
@@ -930,12 +924,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rt_name = can_mutate ? "w_bigint_div_pow2_mut" : "w_bigint_div_pow2"
     rt_cc = can_mutate ? "preserve_mostcc" : nil
     result_temp = next_temp(wfn)
-    emit_instruction(wfn, {
-      op: :call_direct_i64, temp: result_temp, name: rt_name,
-      args: [cur, bits_reg], call_conv: rt_cc
-    })
+    emit_wire_call_direct_i64(wfn, nil, [cur, bits_reg], rt_cc, nil, rt_name, nil, nil, result_temp)
     if ptr != nil
-      emit_instruction(wfn, {op: :store_i64, value: result_temp, ptr: ptr})
+      emit_wire_store_i64(wfn, ptr, result_temp)
     else
       ctx[:bindings][name] = result_temp
     return typed_value(:i64, result_temp)
@@ -1026,9 +1017,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       if rt_fb in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "__w_bigint_and_mut_src" "__w_bigint_or_mut_src" "__w_bigint_xor_mut_src" "w_bigint_shl_mut" "w_bigint_shr_mut")
         mut_cc = "preserve_mostcc"
     result_temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: result_temp, name: rt_fb, args: [cur, rt_rhs], call_conv: mut_cc})
+    emit_wire_call_direct_i64(wfn, nil, [cur, rt_rhs], mut_cc, nil, rt_fb, nil, nil, result_temp)
     if ptr != nil
-      emit_instruction(wfn, {op: :store_i64, value: result_temp, ptr: ptr})
+      emit_wire_store_i64(wfn, ptr, result_temp)
     else
       ctx[:bindings][name] = result_temp
     return typed_value(:i64, result_temp)
@@ -1037,11 +1028,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     cur_raw = nanunbox_int_emit(wfn, cur)
     rhs_raw = nanunbox_int_emit(wfn, rhs_reg)
     result = next_temp(wfn)
-    emit_instruction(wfn, {op: int_op, temp: result, lhs: cur_raw, rhs: rhs_raw})
+    emit_wire_dynamic_3(wfn, int_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result)
     boxed = nanbox_int_emit(wfn, result)
     boxed_reg = boxed[:value]
     if ptr != nil
-      emit_instruction(wfn, {op: :store_i64, value: boxed_reg, ptr: ptr})
+      emit_wire_store_i64(wfn, ptr, boxed_reg)
     else
       ctx[:bindings][name] = boxed_reg
     return boxed
@@ -1052,12 +1043,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     cur_raw = ensure_raw_f64(wfn, typed_value(:i64, cur))
     rhs_raw = ensure_raw_f64(wfn, rhs)
     result = next_temp(wfn)
-    emit_instruction(wfn, {op: float_op, temp: result, lhs: cur_raw, rhs: rhs_raw})
+    emit_wire_dynamic_3(wfn, float_op, :lhs, cur_raw, :rhs, rhs_raw, :temp, result)
     boxed = typed_value(:raw_f64, result)
     boxed_reg = boxed[:value]
     if ptr != nil
       stored = ensure_i64_value(wfn, boxed)
-      emit_instruction(wfn, {op: :store_i64, value: stored, ptr: ptr})
+      emit_wire_store_i64(wfn, ptr, stored)
     else
       ctx[:bindings][name] = boxed_reg
     return boxed
@@ -1072,9 +1063,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # which concatenates text and raises for everything else.
   if op == :PLUS && lt == :string && vt in (:string :char)
     result = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: "w_str_append", args: [cur, rhs_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [cur, rhs_reg], nil, nil, "w_str_append", nil, nil, result)
     if ptr != nil
-      emit_instruction(wfn, {op: :store_i64, value: result, ptr: ptr})
+      emit_wire_store_i64(wfn, ptr, result)
     else
       ctx[:bindings][name] = result
     ctx[:var_types][name] = :string
@@ -1110,16 +1101,16 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       if rt_op in ("w_bigint_add_mut" "w_bigint_sub_mut" "w_bigint_mul_mut" "w_bigint_div_mut" "w_bigint_mod_mut" "__w_bigint_and_mut_src" "__w_bigint_or_mut_src" "__w_bigint_xor_mut_src" "w_bigint_shl_mut" "w_bigint_shr_mut")
         rt_call_conv = "preserve_mostcc"
     result = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: result, name: rt_op, args: [cur, rt_rhs], call_conv: rt_call_conv})
+    emit_wire_call_direct_i64(wfn, nil, [cur, rt_rhs], rt_call_conv, nil, rt_op, nil, nil, result)
     if ptr != nil
-      emit_instruction(wfn, {op: :store_i64, value: result, ptr: ptr})
+      emit_wire_store_i64(wfn, ptr, result)
     else
       ctx[:bindings][name] = result
     return typed_value(:i64, result)
 
   # Unknown op — just store RHS
   if ptr != nil
-    emit_instruction(wfn, {op: :store_i64, value: rhs_reg, ptr: ptr})
+    emit_wire_store_i64(wfn, ptr, rhs_reg)
   else
     ctx[:bindings][name] = rhs_reg
   typed_value(:i64, rhs_reg)
@@ -1520,7 +1511,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if tfold != nil
       fold_rhs = tfold == :true_const ? "0" : "1"
       tconst = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: tconst, pred: "eq", lhs: "0", rhs: fold_rhs})
+      emit_wire_icmp_i64(wfn, "0", "eq", fold_rhs, tconst)
       return typed_value(:i1, tconst)
 
   # Reject dimensionally impossible additions/subtractions while compiling
@@ -1568,7 +1559,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       dig_tv = lower_expression(ctx, Tungsten:AST:Int.new(pu[:digits]))
       dig_reg = ensure_i64_value(wfn, dig_tv)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_quantity_pipe", args: [lhs_reg, uname_reg, dig_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [lhs_reg, uname_reg, dig_reg], nil, nil, "w_quantity_pipe", nil, nil, temp)
       return typed_value(:i64, temp)
 
   # `2 * x` with an undefined bare name at SCRIPT level mirrors the `2x`
@@ -1620,7 +1611,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     elsif op == :DOT_RSHIFT
       fn_name = "w_array_shr_elem"
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: [lhs_reg, rhs_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, fn_name, nil, nil, temp)
     return typed_value(:i64, temp)
 
   if op == :MATCH
@@ -1648,7 +1639,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       other_reg = ensure_i64_value(wfn, other_val)
       pred = op == :EQ ? "eq" : "ne"
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: temp, pred: pred, lhs: other_reg, rhs: sentinel})
+      emit_wire_icmp_i64(wfn, other_reg, pred, sentinel, temp)
       return typed_value(:i1, temp)
 
   # String/symbol-LITERAL fast path: `x == "when"` / `x != :sym` is three
@@ -1677,10 +1668,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         other_val = lower_expression(ctx, sother)
         other_reg = ensure_i64_value(wfn, other_val)
         sv = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: sv, name: "__w_streq_fast", args: [other_reg, lit_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [other_reg, lit_reg], nil, nil, "__w_streq_fast", nil, nil, sv)
         temp = next_temp(wfn)
         pred = op == :EQ ? "eq" : "ne"
-        emit_instruction(wfn, {op: :icmp_i64, temp: temp, pred: pred, lhs: sv, rhs: w_true.to_s()})
+        emit_wire_icmp_i64(wfn, sv, pred, w_true.to_s(), temp)
         return typed_value(:i1, temp)
 
   # Type-directed: if both sides are int, emit inline LLVM ops
@@ -1700,10 +1691,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rt_name = can_mutate ? "w_bigint_mod_pow2_mut" : "w_bigint_mod_pow2"
     rt_cc = can_mutate ? "preserve_mostcc" : nil
     temp = next_temp(wfn)
-    emit_instruction(wfn, {
-      op: :call_direct_i64, temp: temp, name: rt_name,
-      args: [lhs_reg, bits_reg], call_conv: rt_cc
-    })
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, bits_reg], rt_cc, nil, rt_name, nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Compile-time power-of-two divisor: `big / (1 << k)` needs neither the
@@ -1723,10 +1711,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rt_name = can_mutate ? "w_bigint_div_pow2_mut" : "w_bigint_div_pow2"
     rt_cc = can_mutate ? "preserve_mostcc" : nil
     temp = next_temp(wfn)
-    emit_instruction(wfn, {
-      op: :call_direct_i64, temp: temp, name: rt_name,
-      args: [lhs_reg, bits_reg], call_conv: rt_cc
-    })
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, bits_reg], rt_cc, nil, rt_name, nil, nil, temp)
     return typed_value(:i64, temp)
 
   # O(1) zero/sign compares for statically-BigInt operands: any boxed
@@ -1774,10 +1759,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       cmp0_z_tv = lower_expression(ctx, cmp0_zero)
       cmp0_z_reg = ensure_i64_value(wfn, cmp0_z_tv)
       cmp0_call = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: cmp0_call, name: cmp0_helper, args: [cmp0_x_reg, cmp0_z_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [cmp0_x_reg, cmp0_z_reg], nil, nil, cmp0_helper, nil, nil, cmp0_call)
       cmp0_pred = cmp0_op == :NEQ ? "ne" : "eq"
       cmp0_res = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: cmp0_res, pred: cmp0_pred, lhs: cmp0_call, rhs: w_true.to_s()})
+      emit_wire_icmp_i64(wfn, cmp0_call, cmp0_pred, w_true.to_s(), cmp0_res)
       return typed_value(:i1, cmp0_res)
 
   # Var-var string == / != under a :string type fact on either side: route
@@ -1794,10 +1779,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rhs_tv2 = lower_expression(ctx, node.right)
     rhs_reg2 = ensure_i64_value(wfn, rhs_tv2)
     sv2 = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: sv2, name: "__w_streq2_fast", args: [lhs_reg2, rhs_reg2]})
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg2, rhs_reg2], nil, nil, "__w_streq2_fast", nil, nil, sv2)
     temp2 = next_temp(wfn)
     pred2 = op == :EQ ? "eq" : "ne"
-    emit_instruction(wfn, {op: :icmp_i64, temp: temp2, pred: pred2, lhs: sv2, rhs: w_true.to_s()})
+    emit_wire_icmp_i64(wfn, sv2, pred2, w_true.to_s(), temp2)
     return typed_value(:i1, temp2)
 
   # Unicode vector / matrix products. For known WArray-backed receivers,
@@ -1817,13 +1802,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
     if op == :DOT_PRODUCT && lt in (:typed_array_i8 :typed_array_u8) && rt in (:typed_array_i8 :typed_array_u8)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_dot_i8", args: [lhs_reg, rhs_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_array_dot_i8", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if op in (:DOT_PRODUCT :CROSS_PRODUCT) && (lt == :array || is_typed_array_type?(lt)) && (rt == :array || is_typed_array_type?(rt))
       fn_name = op == :DOT_PRODUCT ? "w_array_dot_float" : "w_array_cross_float"
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: [lhs_reg, rhs_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, fn_name, nil, nil, temp)
       return typed_value(:i64, temp)
 
     method_name = "·"
@@ -1839,17 +1824,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     temp = next_temp(wfn)
     ic_id = ctx[:mod][:next_ic]
     ctx[:mod][:next_ic] = ic_id + 1
-    emit_instruction(wfn, {
-      op: :call_method_i64,
-      temp: temp,
-      temp_args_val: temp_args_val,
-      receiver: lhs_reg,
-      method_name_val: method_name_val,
-      args: [rhs_reg],
-      ic_id: ic_id,
-      src_line: node.line,
-      src_col: node.col
-    })
+    emit_wire_call_method_i64(wfn, [rhs_reg], nil, nil, nil, nil, ic_id, method_name_val, lhs_reg, nil, nil, node.col, node.line, temp, temp_args_val)
     return typed_value(:i64, temp)
 
   # StringBuffer#<<(string): static typed receiver dispatch. This avoids the
@@ -1860,7 +1835,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     lhs_reg = ensure_i64_value(wfn, lhs)
     rhs_reg = ensure_i64_value(wfn, rhs)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_strbuf_append", args: [lhs_reg, rhs_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_strbuf_append", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # String#<< mutates at the language level. Runtime strings are immutable
@@ -1871,7 +1846,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     lhs_reg = ensure_i64_value(wfn, lhs)
     rhs_reg = ensure_i64_value(wfn, rhs)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_str_append", args: [lhs_reg, rhs_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_str_append", nil, nil, temp)
     return rebind_local_i64(ctx, node.left.name, temp, :string)
 
   # String + String: both sides statically text → direct w_str_concat.
@@ -1900,9 +1875,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     cname = "w_str_concat"
     if env("TUNGSTEN_FREE") != "0" && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :call
       li = last_emitted_instruction(wfn)
-      if li != nil && li[:op] == :call_direct_i64 && li[:name] == "w_int_to_s" && li[:temp] == rhs_reg
+      if li != nil && wire_kind(li) == :call_direct_i64 && wire_get(li, :name) == "w_int_to_s" && wire_get(li, :temp) == rhs_reg
         cname = "w_str_concat_free_rhs"
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: cname, args: [lhs_reg, rhs_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, cname, nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Untyped shift-left must keep arbitrary-precision semantics. Integer
@@ -1955,14 +1930,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       lhs_raw = lower_machine_int_expression(ctx, node.left, machine_type)
       rhs_raw = lower_machine_int_expression(ctx, node.right, machine_type)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: int_op, temp: temp, lhs: lhs_raw, rhs: rhs_raw})
+      emit_wire_dynamic_3(wfn, int_op, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
       return typed_value(raw_machine_value_type(machine_type), temp)
 
     if cmp_pred != nil
       lhs_raw = lower_machine_int_expression(ctx, node.left, machine_type)
       rhs_raw = lower_machine_int_expression(ctx, node.right, machine_type)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: machine_cmp_op(machine_type), temp: temp, pred: cmp_pred, lhs: lhs_raw, rhs: rhs_raw})
+      emit_wire_dynamic_4(wfn, machine_cmp_op(machine_type), :lhs, lhs_raw, :pred, cmp_pred, :rhs, rhs_raw, :temp, temp)
       return typed_value(:i1, temp)
 
   lhs_unboxed = node.left != nil && ast_kind(node.left) == :var && ctx[:unboxed_vars][node.left.name] != nil
@@ -2012,9 +1987,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rhs_raw = ensure_raw_int(wfn, rhs)
       temp = next_temp(wfn)
       if int_op != nil
-        emit_instruction(wfn, {op: int_op, temp: temp, lhs: lhs_raw, rhs: rhs_raw})
+        emit_wire_dynamic_3(wfn, int_op, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
         return typed_value(:raw_i64, temp)
-      emit_instruction(wfn, {op: :icmp_i64, temp: temp, pred: cmp_pred, lhs: lhs_raw, rhs: rhs_raw})
+      emit_wire_icmp_i64(wfn, lhs_raw, cmp_pred, rhs_raw, temp)
       return typed_value(:i1, temp)
 
   if is_integer_like_type(lt) && is_integer_like_type(rt)
@@ -2038,7 +2013,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         lhs_raw = ensure_raw_i64(wfn, lhs)
         rhs_raw = ensure_raw_i64(wfn, rhs)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: int_op, temp: temp, lhs: lhs_raw, rhs: rhs_raw})
+        emit_wire_dynamic_3(wfn, int_op, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
         return typed_value(:raw_i64, temp)
       guarded_op = nil
       rt_fn = nil
@@ -2071,13 +2046,17 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       # fallback, which auto-promotes to BigInt. The `:trap` key is added ONLY
       # in trap mode, so the promote/default guarded instruction is byte-
       # identical to before this feature (no codegen drift on the fast path).
-      guarded_inst = {
-        op: guarded_op, temp: temp,
-        lhs: lhs_reg, rhs: rhs_reg,
-        rt_fallback: rt_fn, block_id: block_id
-      }
+      guarded_inst = wire_make_dynamic_6(
+        guarded_op,
+        :block_id, block_id,
+        :lhs, lhs_reg,
+        :rhs, rhs_reg,
+        :rt_fallback, rt_fn,
+        :temp, temp,
+        :trap, nil
+      )
       if ovf_mode == :trap
-        guarded_inst[:trap] = true
+        wire_set(guarded_inst, :trap, true)
       emit_instruction(wfn, guarded_inst)
       return typed_value(:i64, temp)
 
@@ -2105,7 +2084,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       lhs_raw = ensure_raw_int(wfn, lhs)
       rhs_raw = ensure_raw_int(wfn, rhs)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: int_op, temp: temp, lhs: lhs_raw, rhs: rhs_raw})
+      emit_wire_dynamic_3(wfn, int_op, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
       return typed_value(:raw_int, temp)
 
     # Comparisons: inline icmp, return as i1 (avoids box/unbox when used in branch).
@@ -2122,7 +2101,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       lhs_raw = ensure_raw_int(wfn, lhs)
       rhs_raw = ensure_raw_int(wfn, rhs)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: temp, pred: cmp_pred, lhs: lhs_raw, rhs: rhs_raw})
+      emit_wire_icmp_i64(wfn, lhs_raw, cmp_pred, rhs_raw, temp)
       return typed_value(:i1, temp)
 
   # Float arithmetic: inline fadd/fsub/fmul/fdiv
@@ -2164,13 +2143,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
           b_raw = ensure_raw_f64(wfn, b_tv)
           if float_op == :fsub_f64
             neg_c = next_temp(wfn)
-            emit_instruction(wfn, {op: :fneg_f64, temp: neg_c, value: c_raw})
+            emit_wire_fneg_f64(wfn, neg_c, c_raw)
             c_raw = neg_c
           temp = next_temp(wfn)
           # Operands ride on lhs/rhs/value (a*b+c) — the field names apply_subst
           # and content_hash already rewrite, so mem2reg promotion of the a/b/c
           # loads stays correct. See the :fmuladd_f64 emitter case for why.
-          emit_instruction(wfn, {op: :fmuladd_f64, temp: temp, lhs: a_raw, rhs: b_raw, value: c_raw})
+          emit_wire_fmuladd_f64(wfn, a_raw, b_raw, temp, c_raw)
           return typed_value(:raw_f64, temp)
         # Detect rhs = a*b (right-multiply, commuted add only): c + a*b.
         # `both_products` already excluded above, so reaching here means the
@@ -2183,7 +2162,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
           b_tv = lower_expression(ctx, node.right.right)
           b_raw = ensure_raw_f64(wfn, b_tv)
           temp = next_temp(wfn)
-          emit_instruction(wfn, {op: :fmuladd_f64, temp: temp, lhs: a_raw, rhs: b_raw, value: c_raw})
+          emit_wire_fmuladd_f64(wfn, a_raw, b_raw, temp, c_raw)
           return typed_value(:raw_f64, temp)
 
     if float_op != nil
@@ -2193,7 +2172,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rhs_raw = ensure_raw_f64(wfn, rhs)
       temp = next_temp(wfn)
       inst_flags = float_inst_flags(ctx)
-      emit_instruction(wfn, {op: float_op, temp: temp, lhs: lhs_raw, rhs: rhs_raw, fp_flags: inst_flags})
+      emit_wire_dynamic_4(wfn, float_op, :fp_flags, inst_flags, :lhs, lhs_raw, :rhs, rhs_raw, :temp, temp)
       return typed_value(:raw_f64, temp)
 
     if fcmp_pred != nil
@@ -2202,7 +2181,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       lhs_raw = ensure_raw_f64(wfn, lhs)
       rhs_raw = ensure_raw_f64(wfn, rhs)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :fcmp_f64, temp: temp, pred: fcmp_pred, lhs: lhs_raw, rhs: rhs_raw})
+      emit_wire_fcmp_f64(wfn, lhs_raw, fcmp_pred, rhs_raw, temp)
       return typed_value(:i1, temp)
 
   # Mixed int×float: promote int to double, then inline float op.
@@ -2232,24 +2211,24 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       else
         lhs_raw = ensure_raw_machine_int(wfn, lhs, lt, lt)
         lhs_f = next_temp(wfn)
-        emit_instruction(wfn, {op: machine_int_to_f64_op(lt), temp: lhs_f, value: lhs_raw})
+        emit_wire_dynamic_2(wfn, machine_int_to_f64_op(lt), :temp, lhs_f, :value, lhs_raw)
 
       if rt == :float
         rhs_f = ensure_raw_f64(wfn, rhs)
       else
         rhs_raw = ensure_raw_machine_int(wfn, rhs, rt, rt)
         rhs_f = next_temp(wfn)
-        emit_instruction(wfn, {op: machine_int_to_f64_op(rt), temp: rhs_f, value: rhs_raw})
+        emit_wire_dynamic_2(wfn, machine_int_to_f64_op(rt), :temp, rhs_f, :value, rhs_raw)
 
       if float_op != nil
         temp = next_temp(wfn)
         inst_flags = float_inst_flags(ctx)
-        emit_instruction(wfn, {op: float_op, temp: temp, lhs: lhs_f, rhs: rhs_f, fp_flags: inst_flags})
+        emit_wire_dynamic_4(wfn, float_op, :fp_flags, inst_flags, :lhs, lhs_f, :rhs, rhs_f, :temp, temp)
         return typed_value(:raw_f64, temp)
 
       if fcmp_pred != nil
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :fcmp_f64, temp: temp, pred: fcmp_pred, lhs: lhs_f, rhs: rhs_f})
+        emit_wire_fcmp_f64(wfn, lhs_f, fcmp_pred, rhs_f, temp)
         return typed_value(:i1, temp)
 
   # Compile-time type algebra: detect invalid literal type combinations
@@ -2329,33 +2308,33 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # single source the typed-overload gate emission uses.
     bidir_entry = overload_exact_tag_entry("BigInt")
     bm1 = next_temp(wfn)
-    emit_instruction(wfn, {op: :and_i64, temp: bm1, lhs: lhs_reg, rhs: bidir_entry[:mask]})
+    emit_wire_and_i64(wfn, lhs_reg, bidir_entry[:mask], bm1)
     bc1 = next_temp(wfn)
-    emit_instruction(wfn, {op: :icmp_i64, temp: bc1, pred: "eq", lhs: bm1, rhs: bidir_entry[:tag]})
+    emit_wire_icmp_i64(wfn, bm1, "eq", bidir_entry[:tag], bc1)
     bm2 = next_temp(wfn)
-    emit_instruction(wfn, {op: :and_i64, temp: bm2, lhs: rhs_reg, rhs: bidir_entry[:mask]})
+    emit_wire_and_i64(wfn, rhs_reg, bidir_entry[:mask], bm2)
     bc2 = next_temp(wfn)
-    emit_instruction(wfn, {op: :icmp_i64, temp: bc2, pred: "eq", lhs: bm2, rhs: bidir_entry[:tag]})
+    emit_wire_icmp_i64(wfn, bm2, "eq", bidir_entry[:tag], bc2)
     bboth = next_temp(wfn)
-    emit_instruction(wfn, {op: :and_i1, temp: bboth, lhs: bc1, rhs: bc2})
+    emit_wire_and_i1(wfn, bc1, bc2, bboth)
     fast_label = next_label(wfn, "bidir.fast")
     slow_label = next_label(wfn, "bidir.slow")
     done_label = next_label(wfn, "bidir.done")
     bidir_slot = ensure_var_slot(wfn, "__bidir." + done_label)
-    emit_instruction(wfn, {op: :cond_br, cond: bboth, then_label: fast_label, else_label: slow_label})
+    emit_wire_cond_br(wfn, bboth, slow_label, nil, fast_label)
     start_block(wfn, fast_label)
     bfast = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: bfast, name: bidir_fast, args: [lhs_reg, rhs_reg]})
-    emit_instruction(wfn, {op: :store_i64, value: bfast, ptr: bidir_slot})
-    emit_instruction(wfn, {op: :br, label: done_label})
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, bidir_fast, nil, nil, bfast)
+    emit_wire_store_i64(wfn, bidir_slot, bfast)
+    emit_wire_br(wfn, done_label, nil, nil)
     start_block(wfn, slow_label)
     bslow = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: bslow, name: bidir_slow, args: [lhs_reg, rhs_reg]})
-    emit_instruction(wfn, {op: :store_i64, value: bslow, ptr: bidir_slot})
-    emit_instruction(wfn, {op: :br, label: done_label})
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, bidir_slow, nil, nil, bslow)
+    emit_wire_store_i64(wfn, bidir_slot, bslow)
+    emit_wire_br(wfn, done_label, nil, nil)
     start_block(wfn, done_label)
     bres = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: bres, ptr: bidir_slot})
+    emit_wire_load_i64(wfn, bidir_slot, bres)
     return typed_value(:i64, bres)
 
   # Exactness-gated literal adaptation: ==/!= with an int or decimal
@@ -2393,7 +2372,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rt_call_conv = "preserve_mostcc"
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: rt_name, args: [lhs_reg, rt_rhs_reg], call_conv: rt_call_conv})
+  emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rt_rhs_reg], rt_call_conv, nil, rt_name, nil, nil, temp)
   typed_value(:i64, temp)
 
 # Get raw i64 from a typed_value — skip unbox if already raw
@@ -2420,10 +2399,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     raw = tv[:value]
     if tv[:type] == :raw_f32
       extended = next_temp(wfn)
-      emit_instruction(wfn, {op: :fpext_f32_f64, temp: extended, value: raw})
+      emit_wire_fpext_f32_f64(wfn, extended, raw)
       raw = extended
     converted = next_temp(wfn)
-    emit_instruction(wfn, {op: f64_to_machine_int_op(type), temp: converted, value: raw})
+    emit_wire_dynamic_2(wfn, f64_to_machine_int_op(type), :temp, converted, :value, raw)
     return converted
   boxed = ensure_i64_value(wfn, tv)
   # No nanunbox shortcut for `:int`-inferred values: `:int` means "may have
@@ -2433,37 +2412,31 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # of the defined low-64 wrap. The runtime unbox (w_to_i64 family) gives
   # the same value for inline ints and the defined truncation for BigInts.
   temp = next_temp(wfn)
-  emit_instruction(wfn, {
-    op: machine_call_return_op(type),
-    temp: temp,
-    name: machine_unbox_fn(type),
-    args: [boxed],
-    arg_types: ["i64"]
-  })
+  emit_wire_dynamic_4(wfn, machine_call_return_op(type), :arg_types, ["i64"], :args, [boxed], :name, machine_unbox_fn(type), :temp, temp)
   temp
 
 -> nanunbox_int_emit(wfn, boxed_reg)
   temp_shl = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :nanunbox_int, temp: temp, temp_shl: temp_shl, boxed: boxed_reg})
+  emit_wire_nanunbox_int(wfn, boxed_reg, temp, temp_shl)
   temp
 
 -> nanbox_int_emit(wfn, raw_reg)
   temp_masked = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :nanbox_int, temp: temp, temp_masked: temp_masked, raw: raw_reg})
+  emit_wire_nanbox_int(wfn, raw_reg, temp, temp_masked)
   typed_value(:i64, temp)
 
 -> nanunbox_float_emit(wfn, boxed_reg)
   temp_bits = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :nanunbox_float, temp: temp, temp_bits: temp_bits, boxed: boxed_reg})
+  emit_wire_nanunbox_float(wfn, boxed_reg, temp, temp_bits)
   temp
 
 -> nanbox_float_emit(wfn, raw_reg)
   temp_bits = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :nanbox_float, temp: temp, temp_bits: temp_bits, raw: raw_reg})
+  emit_wire_nanbox_float(wfn, raw_reg, temp, temp_bits)
   typed_value(:i64, temp)
 
 -> ensure_raw_f64(wfn, tv)
@@ -2471,12 +2444,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return tv[:value]
   if tv[:type] == :raw_f32
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :fpext_f32_f64, temp: temp, value: tv[:value]})
+    emit_wire_fpext_f32_f64(wfn, temp, tv[:value])
     return temp
   src_type = raw_machine_source_type(tv)
   if src_type != nil && tv[:type] in (:raw_int :raw_i64 :raw_u64 :raw_i128 :raw_u128 :char)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: machine_int_to_f64_op(src_type), temp: temp, value: tv[:value]})
+    emit_wire_dynamic_2(wfn, machine_int_to_f64_op(src_type), :temp, temp, :value, tv[:value])
     return temp
   # Fallback: a boxed WValue (`:i64`) whose concrete numeric kind isn't known at
   # compile time — a boxed double, a Decimal literal (bare `3.5` parses as a
@@ -2488,7 +2461,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # correctly. (`## f64` hot loops keep their accumulator as :raw_f64 and never
   # reach this fallback, so the extra call only lands at boxed-value boundaries.)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_num_to_f64, temp: temp, value: ensure_i64_value(wfn, tv)})
+  emit_wire_call_num_to_f64(wfn, temp, ensure_i64_value(wfn, tv))
   temp
 
 -> ensure_raw_f32(wfn, tv)
@@ -2496,7 +2469,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return tv[:value]
   raw64 = ensure_raw_f64(wfn, tv)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :fptrunc_f64_f32, temp: temp, value: raw64})
+  emit_wire_fptrunc_f64_f32(wfn, temp, raw64)
   temp
 
 -> raw_float_bits_i64(wfn, tv, elem_type)
@@ -2504,8 +2477,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     raw32 = ensure_raw_f32(wfn, tv)
     bits32 = next_temp(wfn)
     bits64 = next_temp(wfn)
-    emit_instruction(wfn, {op: :bitcast_f32_i32, temp: bits32, value: raw32})
-    emit_instruction(wfn, {op: :zext_i32_i64, temp: bits64, value: bits32})
+    emit_wire_bitcast_f32_i32(wfn, bits32, raw32)
+    emit_wire_zext_i32_i64(wfn, bits64, bits32)
     return bits64
   if elem_type == :typed_array_bf16
     raw32 = ensure_raw_f32(wfn, tv)
@@ -2516,13 +2489,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     bias = next_temp(wfn)
     rounded = next_temp(wfn)
     bf16 = next_temp(wfn)
-    emit_instruction(wfn, {op: :bitcast_f32_i32, temp: bits32, value: raw32})
-    emit_instruction(wfn, {op: :zext_i32_i64, temp: bits64, value: bits32})
-    emit_instruction(wfn, {op: :lshr_i64, temp: lsb_shift, lhs: bits64, rhs: "16"})
-    emit_instruction(wfn, {op: :and_i64, temp: lsb, lhs: lsb_shift, rhs: "1"})
-    emit_instruction(wfn, {op: :add_i64, temp: bias, lhs: lsb, rhs: "32767"})
-    emit_instruction(wfn, {op: :add_i64, temp: rounded, lhs: bits64, rhs: bias})
-    emit_instruction(wfn, {op: :lshr_i64, temp: bf16, lhs: rounded, rhs: "16"})
+    emit_wire_bitcast_f32_i32(wfn, bits32, raw32)
+    emit_wire_zext_i32_i64(wfn, bits64, bits32)
+    emit_wire_lshr_i64(wfn, bits64, "16", lsb_shift)
+    emit_wire_and_i64(wfn, lsb_shift, "1", lsb)
+    emit_wire_add_i64(wfn, lsb, "32767", bias)
+    emit_wire_add_i64(wfn, bits64, bias, rounded)
+    emit_wire_lshr_i64(wfn, rounded, "16", bf16)
     return bf16
   if elem_type == :typed_array_f16
     # f32 → half is a real rounding conversion (fcvt), unlike bf16's
@@ -2531,40 +2504,40 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     half = next_temp(wfn)
     bits16 = next_temp(wfn)
     bits64 = next_temp(wfn)
-    emit_instruction(wfn, {op: :fptrunc_f32_f16, temp: half, value: raw32})
-    emit_instruction(wfn, {op: :bitcast_f16_i16, temp: bits16, value: half})
-    emit_instruction(wfn, {op: :zext_i16_i64, temp: bits64, value: bits16})
+    emit_wire_fptrunc_f32_f16(wfn, half, raw32)
+    emit_wire_bitcast_f16_i16(wfn, bits16, half)
+    emit_wire_zext_i16_i64(wfn, bits64, bits16)
     return bits64
   raw64 = ensure_raw_f64(wfn, tv)
   bits = next_temp(wfn)
-  emit_instruction(wfn, {op: :bitcast_f64_i64, temp: bits, value: raw64})
+  emit_wire_bitcast_f64_i64(wfn, bits, raw64)
   bits
 
 -> raw_float_from_bits_i64(wfn, bits, elem_type)
   if elem_type == :typed_array_f32
     bits32 = next_temp(wfn)
     raw32 = next_temp(wfn)
-    emit_instruction(wfn, {op: :trunc_i64_i32, temp: bits32, value: bits})
-    emit_instruction(wfn, {op: :bitcast_i32_f32, temp: raw32, value: bits32})
+    emit_wire_trunc_i64_i32(wfn, bits32, bits)
+    emit_wire_bitcast_i32_f32(wfn, raw32, bits32)
     return typed_value(:raw_f32, raw32)
   if elem_type == :typed_array_bf16
     shifted = next_temp(wfn)
     bits32 = next_temp(wfn)
     raw32 = next_temp(wfn)
-    emit_instruction(wfn, {op: :shl_i64, temp: shifted, lhs: bits, rhs: "16"})
-    emit_instruction(wfn, {op: :trunc_i64_i32, temp: bits32, value: shifted})
-    emit_instruction(wfn, {op: :bitcast_i32_f32, temp: raw32, value: bits32})
+    emit_wire_shl_i64(wfn, bits, "16", shifted)
+    emit_wire_trunc_i64_i32(wfn, bits32, shifted)
+    emit_wire_bitcast_i32_f32(wfn, raw32, bits32)
     return typed_value(:raw_f32, raw32)
   if elem_type == :typed_array_f16
     bits16 = next_temp(wfn)
     half = next_temp(wfn)
     raw32 = next_temp(wfn)
-    emit_instruction(wfn, {op: :trunc_i64_i16, temp: bits16, value: bits})
-    emit_instruction(wfn, {op: :bitcast_i16_f16, temp: half, value: bits16})
-    emit_instruction(wfn, {op: :fpext_f16_f32, temp: raw32, value: half})
+    emit_wire_trunc_i64_i16(wfn, bits16, bits)
+    emit_wire_bitcast_i16_f16(wfn, half, bits16)
+    emit_wire_fpext_f16_f32(wfn, raw32, half)
     return typed_value(:raw_f32, raw32)
   raw64 = next_temp(wfn)
-  emit_instruction(wfn, {op: :bitcast_i64_f64, temp: raw64, value: bits})
+  emit_wire_bitcast_i64_f64(wfn, raw64, bits)
   typed_value(:raw_f64, raw64)
 
 # -- Unary ops --
@@ -2608,7 +2581,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   if node.op == :MINUS
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_neg", args: [operand_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [operand_reg], nil, nil, "w_neg", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Fallback for unknown unary ops
@@ -2750,36 +2723,36 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if lhs[:type] == :i1
     lhs_bool = lhs[:value]
     lhs_reg = next_temp(wfn)
-    emit_instruction(wfn, {op: :nanbox_bool, temp: lhs_reg, value: lhs_bool})
+    emit_wire_nanbox_bool(wfn, lhs_reg, lhs_bool)
   else
     lhs_reg = ensure_i64_value(wfn, lhs)
     lhs_bool = next_temp(wfn)
-    emit_instruction(wfn, {op: :truthy_inline, temp: lhs_bool, value: lhs_reg})
+    emit_wire_truthy_inline(wfn, lhs_bool, lhs_reg)
 
   # Store LHS as default result (used if we short-circuit)
-  emit_instruction(wfn, {op: :store_i64, value: lhs_reg, ptr: result_ptr})
+  emit_wire_store_i64(wfn, result_ptr, lhs_reg)
 
   rhs_label = next_label(wfn, "sc.rhs")
   end_label = next_label(wfn, "sc.end")
 
   if kind == :and
     # AND: truthy LHS → evaluate RHS; falsy → short-circuit with LHS
-    emit_instruction(wfn, {op: :cond_br, cond: lhs_bool, then_label: rhs_label, else_label: end_label})
+    emit_wire_cond_br(wfn, lhs_bool, end_label, nil, rhs_label)
   else
     # OR: truthy LHS → short-circuit with LHS; falsy → evaluate RHS
-    emit_instruction(wfn, {op: :cond_br, cond: lhs_bool, then_label: end_label, else_label: rhs_label})
+    emit_wire_cond_br(wfn, lhs_bool, rhs_label, nil, end_label)
 
   # RHS block: evaluate and overwrite result
   start_block(wfn, rhs_label)
   rhs = lower_expression(ctx, node.right)
   rhs_reg = ensure_i64_value(wfn, rhs)
-  emit_instruction(wfn, {op: :store_i64, value: rhs_reg, ptr: result_ptr})
-  emit_instruction(wfn, {op: :br, label: end_label})
+  emit_wire_store_i64(wfn, result_ptr, rhs_reg)
+  emit_wire_br(wfn, end_label, nil, nil)
 
   # End block: load merged result
   start_block(wfn, end_label)
   result = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_i64, temp: result, ptr: result_ptr})
+  emit_wire_load_i64(wfn, result_ptr, result)
   typed_value(:i64, result)
 
 -> lower_not(ctx, node)
@@ -2793,10 +2766,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   else
     operand_reg = ensure_i64_value(wfn, operand)
     bool_val = next_temp(wfn)
-    emit_instruction(wfn, {op: :truthy_inline, temp: bool_val, value: operand_reg})
+    emit_wire_truthy_inline(wfn, bool_val, operand_reg)
 
   negated = next_temp(wfn)
-  emit_instruction(wfn, {op: :not_i1, temp: negated, value: bool_val})
+  emit_wire_not_i1(wfn, negated, bool_val)
   # Return the i1 directly so consumers that can branch on i1 (if,
   # while, elsif, short-circuit) avoid another round trip. Consumers
   # that need a WValue will nanbox via ensure_i64_value.
@@ -2833,7 +2806,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     # here fit in the signed 48-bit range.
     nanboxed = (c_raw & 281474976710655) | -1688849860263936
     eq = next_temp(wfn)
-    emit_instruction(wfn, {op: :icmp_i64, temp: eq, pred: "eq", lhs: lhs_reg, rhs: nanboxed.to_s()})
+    emit_wire_icmp_i64(wfn, lhs_reg, "eq", nanboxed.to_s(), eq)
     cmp_temps.push(eq)
     i += 1
 
@@ -2842,13 +2815,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   j = 1
   while j < cmp_temps.size()
     new_acc = next_temp(wfn)
-    emit_instruction(wfn, {op: :or_i1, temp: new_acc, lhs: acc, rhs: cmp_temps[j]})
+    emit_wire_or_i1(wfn, acc, cmp_temps[j], new_acc)
     acc = new_acc
     j += 1
 
   # Box the final i1 result to a wvalue bool.
   boxed = next_temp(wfn)
-  emit_instruction(wfn, {op: :nanbox_bool, temp: boxed, value: acc})
+  emit_wire_nanbox_bool(wfn, boxed, acc)
   typed_value(:i64, boxed)
 
 # `lhs in (a b c)` — membership test.
@@ -2888,12 +2861,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       while i < elements.size()
         rhs_raw = lower_machine_int_expression(ctx, elements[i], machine_type)
         cmp = next_temp(ctx[:func])
-        emit_instruction(ctx[:func], {op: machine_cmp_op(machine_type), temp: cmp, pred: "eq", lhs: lhs_raw, rhs: rhs_raw})
+        emit_wire_dynamic_4(ctx[:func], machine_cmp_op(machine_type), :lhs, lhs_raw, :pred, "eq", :rhs, rhs_raw, :temp, cmp)
         if acc == nil
           acc = cmp
         else
           merged = next_temp(ctx[:func])
-          emit_instruction(ctx[:func], {op: :or_i1, temp: merged, lhs: acc, rhs: cmp})
+          emit_wire_or_i1(ctx[:func], acc, cmp, merged)
           acc = merged
         i += 1
       return typed_value(:i1, acc)
@@ -3050,11 +3023,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   etype in (:i8 :i16 :i32 :i64) ? :signed : :unsigned
 
 -> fuse_ew_inst(op, temp, etype)
-  inst = {op: op, temp: temp}
-  if etype != :f32 && etype != :f64
-    inst[:type] = fuse_ew_ir_type(etype)
-    inst[:kind] = fuse_ew_int_kind(etype)
-  inst
+  if etype == :f32 || etype == :f64
+    return wire_make_dynamic_1(op, :temp, temp)
+  wire_make_dynamic_3(
+    op,
+    :kind, fuse_ew_int_kind(etype),
+    :temp, temp,
+    :type, fuse_ew_ir_type(etype)
+  )
 
 # Each unfused integer kernel stores its output before the parent kernel reads
 # it. Preserve that observable fixed-width wrap/sign-extension at every tree
@@ -3110,7 +3086,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   if cls == :libm
     v = fuse_ew_emit_scalar(ctx, spec[:recv])
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: spec[:name], value: v})
+    emit_wire_call_libm_f64(wfn, nil, spec[:name], nil, temp, v)
     return temp
   l = fuse_ew_emit_scalar(ctx, spec[:left])
   r = fuse_ew_emit_scalar(ctx, spec[:right])
@@ -3130,33 +3106,33 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       # LLVM shifts poison the result for counts >= 64, while the runtime's
       # native targets mask register shift counts. Make that behavior defined.
       sh = next_temp(wfn)
-      emit_instruction(wfn, {op: :and_i64, temp: sh, lhs: r, rhs: "63"})
+      emit_wire_and_i64(wfn, r, "63", sh)
       iop = spec[:op] == :DOT_LSHIFT ? :shl_i64 : :ashr_i64
       r = sh
     elsif spec[:op] == :DOT_SLASH
       # Keep the runtime's zero-divisor result (0) without executing an LLVM
       # sdiv-by-zero. Define the two's-complement INT64_MIN/-1 case too.
       is_zero = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: is_zero, pred: "eq", lhs: r, rhs: "0"})
+      emit_wire_icmp_i64(wfn, r, "eq", "0", is_zero)
       is_min = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: is_min, pred: "eq", lhs: l, rhs: "-9223372036854775808"})
+      emit_wire_icmp_i64(wfn, l, "eq", "-9223372036854775808", is_min)
       is_neg_one = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: is_neg_one, pred: "eq", lhs: r, rhs: "-1"})
+      emit_wire_icmp_i64(wfn, r, "eq", "-1", is_neg_one)
       is_overflow = next_temp(wfn)
-      emit_instruction(wfn, {op: :and_i1, temp: is_overflow, lhs: is_min, rhs: is_neg_one})
+      emit_wire_and_i1(wfn, is_min, is_neg_one, is_overflow)
       unsafe = next_temp(wfn)
-      emit_instruction(wfn, {op: :or_i1, temp: unsafe, lhs: is_zero, rhs: is_overflow})
+      emit_wire_or_i1(wfn, is_zero, is_overflow, unsafe)
       safe_r = next_temp(wfn)
-      emit_instruction(wfn, {op: :select_i64, temp: safe_r, cond: unsafe, then_val: "1", else_val: r})
+      emit_wire_select_i64(wfn, unsafe, r, safe_r, "1")
       quot = next_temp(wfn)
-      emit_instruction(wfn, {op: :sdiv_i64, temp: quot, lhs: l, rhs: safe_r})
+      emit_wire_sdiv_i64(wfn, l, safe_r, quot)
       overflow_result = next_temp(wfn)
-      emit_instruction(wfn, {op: :select_i64, temp: overflow_result, cond: is_overflow, then_val: "-9223372036854775808", else_val: quot})
+      emit_wire_select_i64(wfn, is_overflow, quot, overflow_result, "-9223372036854775808")
       result = next_temp(wfn)
-      emit_instruction(wfn, {op: :select_i64, temp: result, cond: is_zero, then_val: "0", else_val: overflow_result})
+      emit_wire_select_i64(wfn, is_zero, overflow_result, result, "0")
       return fuse_ew_narrow_int(wfn, result, spec[:odt])
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: iop, temp: temp, lhs: l, rhs: r})
+    emit_wire_dynamic_3(wfn, iop, :lhs, l, :rhs, r, :temp, temp)
     return fuse_ew_narrow_int(wfn, temp, spec[:odt])
   fop = :fadd_f64
   if spec[:op] == :DOT_MINUS
@@ -3166,7 +3142,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   elsif spec[:op] == :DOT_SLASH
     fop = :fdiv_f64
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: fop, temp: temp, lhs: l, rhs: r, fp_flags: float_inst_flags(ctx)})
+  emit_wire_dynamic_4(wfn, fop, :fp_flags, float_inst_flags(ctx), :lhs, l, :rhs, r, :temp, temp)
   temp
 
 # Emit the [lo, hi) element loop into ctx[:func]. arrs[k][:base] must hold
@@ -3190,17 +3166,17 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   body_label = next_label(wfn, "fuse.body")
   end_label = next_label(wfn, "fuse.end")
   i_slot = ensure_var_slot(wfn, "__fuse_i." + cond_label, "i64")
-  emit_instruction(wfn, {op: :store_i64, value: lo_val, ptr: i_slot})
-  emit_instruction(wfn, {op: :br, label: cond_label})
+  emit_wire_store_i64(wfn, i_slot, lo_val)
+  emit_wire_br(wfn, cond_label, nil, nil)
   start_block(wfn, cond_label)
   iv = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_i64, temp: iv, ptr: i_slot})
+  emit_wire_load_i64(wfn, i_slot, iv)
   cmp = next_temp(wfn)
-  emit_instruction(wfn, {op: :icmp_i64, temp: cmp, pred: "slt", lhs: iv, rhs: hi_val})
-  emit_instruction(wfn, {op: :cond_br, cond: cmp, then_label: body_label, else_label: end_label})
+  emit_wire_icmp_i64(wfn, iv, "slt", hi_val, cmp)
+  emit_wire_cond_br(wfn, cmp, end_label, nil, body_label)
   start_block(wfn, body_label)
   bi_v = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_i64, temp: bi_v, ptr: i_slot})
+  emit_wire_load_i64(wfn, i_slot, bi_v)
   ai = 0
   while ai < arrs.size()
     cur = next_temp(wfn)
@@ -3220,9 +3196,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   si[:ewscope] = ewsid
   emit_instruction(wfn, si)
   nxt = next_temp(wfn)
-  emit_instruction(wfn, {op: :add_i64, temp: nxt, lhs: bi_v, rhs: "1"})
-  emit_instruction(wfn, {op: :store_i64, value: nxt, ptr: i_slot})
-  emit_instruction(wfn, {op: :br, label: cond_label})
+  emit_wire_add_i64(wfn, bi_v, "1", nxt)
+  emit_wire_store_i64(wfn, i_slot, nxt)
+  emit_wire_br(wfn, cond_label, nil, nil)
   start_block(wfn, end_label)
   nil
 
@@ -3234,7 +3210,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     scratch.push(next_temp(wfn))
     si += 1
   stw = next_temp(wfn)
-  emit_instruction(wfn, {op: :typed_array_set_inline, temp: stw, arr: blk_reg, idx: idx_str, idx_raw: true, value: val_reg, s: scratch, bits: 64, signed: true})
+  emit_wire_typed_array_set_inline(wfn, blk_reg, 64, idx_str, true, scratch, true, stw, val_reg)
   nil
 
 # ---- GPU offload (arithmetic-only f32 trees) ----
@@ -3313,13 +3289,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     ai += 1
 
   blk_ptr = next_temp(wfn2)
-  emit_instruction(wfn2, {op: :inttoptr_i64, temp: blk_ptr, value: "%__fw_blk"})
+  emit_wire_inttoptr_i64(wfn2, blk_ptr, "%__fw_blk")
   out_wv = next_temp(wfn2)
-  emit_instruction(wfn2, {op: :load_i64_at, temp: out_wv, ptr: blk_ptr, index: "0"})
+  emit_wire_load_i64_at(wfn2, "0", blk_ptr, out_wv)
   ai = 0
   while ai < arrs.size()
     wv = next_temp(wfn2)
-    emit_instruction(wfn2, {op: :load_i64_at, temp: wv, ptr: blk_ptr, index: (1 + ai).to_s()})
+    emit_wire_load_i64_at(wfn2, (1 + ai).to_s(), blk_ptr, wv)
     base = next_temp(wfn2)
     pi = fuse_ew_inst(fuse_ew_elems_ptr_op(arrs[ai][:etype]), base, arrs[ai][:etype])
     pi[:value] = wv
@@ -3330,7 +3306,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   while sj < scls.size()
     raw = next_temp(wfn2)
     scalar_load = mode == :int ? :load_i64_at : :load_f64_at
-    emit_instruction(wfn2, {op: scalar_load, temp: raw, ptr: blk_ptr, index: (1 + arrs.size() + sj).to_s()})
+    emit_wire_dynamic_3(wfn2, scalar_load, :index, (1 + arrs.size() + sj).to_s(), :ptr, blk_ptr, :temp, raw)
     scls[sj][:raw] = raw
     sj += 1
   out_base = next_temp(wfn2)
@@ -3343,7 +3319,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "%__fw_lo", "%__fw_hi", odt, ewsid)
   ctx[:func] = saved_func
 
-  emit_instruction(wfn2, {op: :ret_i64, value: "0"})
+  emit_wire_ret_i64(wfn2, nil, "0")
   finalize_function(wfn2)
 
   sj = 0
@@ -3377,11 +3353,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     return nil
   arr0 = arrs[0]
   size_reg = next_temp(wfn)
-  emit_instruction(wfn, {op: :ta_size_raw, temp: size_reg, value: arr0[:reg]})
+  emit_wire_ta_size_raw(wfn, size_reg, arr0[:reg])
   ai = 1
   while ai < arrs.size()
     chk = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: chk, name: "w_elementwise_size_check", args: [arr0[:reg], arrs[ai][:reg]]})
+    emit_wire_call_direct_i64(wfn, nil, [arr0[:reg], arrs[ai][:reg]], nil, nil, "w_elementwise_size_check", nil, nil, chk)
     ai += 1
   out_reg = next_temp(wfn)
   # `y = <fused expr> ## reuse` — per-site persistent output buffer (same
@@ -3392,9 +3368,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     ctx[:mod][:next_reuse_site] = rs_id + 1
     rs_name = "reuse.site." + rs_id.to_s()
     ctx[:mod][:reuse_sites].push(rs_name)
-    emit_instruction(wfn, {op: :call_fused_out_reuse, temp: out_reg, slot: rs_name, bits: fuse_ew_alloc_bits(odt), cap: size_reg})
+    emit_wire_call_fused_out_reuse(wfn, fuse_ew_alloc_bits(odt), size_reg, rs_name, out_reg)
   else
-    emit_instruction(wfn, {op: :call_direct_i64, temp: out_reg, name: "w_array_new_uninit_sized", args: [fuse_ew_alloc_bits(odt), size_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [fuse_ew_alloc_bits(odt), size_reg], nil, nil, "w_array_new_uninit_sized", nil, nil, out_reg)
 
   sid = ctx[:mod][:next_fuse_site]
   if sid == nil
@@ -3411,15 +3387,15 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   st_label = next_label(wfn, "fuse.st")
   done_label = next_label(wfn, "fuse.done")
   mt_reg = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: mt_reg, name: "w_fused_should_mt", args: [size_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [size_reg], nil, nil, "w_fused_should_mt", nil, nil, mt_reg)
   mt_cmp = next_temp(wfn)
-  emit_instruction(wfn, {op: :icmp_i64, temp: mt_cmp, pred: "ne", lhs: mt_reg, rhs: "0"})
-  emit_instruction(wfn, {op: :cond_br, cond: mt_cmp, then_label: mt_label, else_label: st_label})
+  emit_wire_icmp_i64(wfn, mt_reg, "ne", "0", mt_cmp)
+  emit_wire_cond_br(wfn, mt_cmp, st_label, nil, mt_label)
 
   start_block(wfn, mt_label)
   nslots = 1 + arrs.size() + scls.size()
   blk_reg = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: blk_reg, name: "w_array_zeros", args: ["64", nslots.to_s()]})
+  emit_wire_call_direct_i64(wfn, nil, ["64", nslots.to_s()], nil, nil, "w_array_zeros", nil, nil, blk_reg)
   fuse_ew_block_store(wfn, blk_reg, "0", out_reg)
   ai = 0
   while ai < arrs.size()
@@ -3430,26 +3406,26 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     bits = scls[sj][:raw]
     if spec[:mode] != :int
       bits = next_temp(wfn)
-      emit_instruction(wfn, {op: :bitcast_f64_i64, temp: bits, value: scls[sj][:raw]})
+      emit_wire_bitcast_f64_i64(wfn, bits, scls[sj][:raw])
     fuse_ew_block_store(wfn, blk_reg, (1 + arrs.size() + sj).to_s(), bits)
     sj += 1
   blk_addr = next_temp(wfn)
-  emit_instruction(wfn, {op: :ta_data_addr, temp: blk_addr, value: blk_reg})
+  emit_wire_ta_data_addr(wfn, blk_addr, blk_reg)
   if fuse_ew_gpu_eligible?(spec, arrs)
     mtcpu_label = next_label(wfn, "fuse.mtcpu")
     msl_tv = lower_string(ctx, Tungsten:AST:String.new(fuse_ew_msl_kernel(spec, arrs.size())))
     msl_reg = ensure_i64_value(wfn, msl_tv)
     gpu_reg = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: gpu_reg, name: "w_fused_gpu_run", args: [sid.to_s(), msl_reg, blk_addr, arrs.size().to_s(), scls.size().to_s(), size_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [sid.to_s(), msl_reg, blk_addr, arrs.size().to_s(), scls.size().to_s(), size_reg], nil, nil, "w_fused_gpu_run", nil, nil, gpu_reg)
     gpu_cmp = next_temp(wfn)
-    emit_instruction(wfn, {op: :icmp_i64, temp: gpu_cmp, pred: "ne", lhs: gpu_reg, rhs: "0"})
-    emit_instruction(wfn, {op: :cond_br, cond: gpu_cmp, then_label: done_label, else_label: mtcpu_label})
+    emit_wire_icmp_i64(wfn, gpu_reg, "ne", "0", gpu_cmp)
+    emit_wire_cond_br(wfn, gpu_cmp, mtcpu_label, nil, done_label)
     start_block(wfn, mtcpu_label)
   fn_addr = next_temp(wfn)
-  emit_instruction(wfn, {op: :fn_addr_i64, temp: fn_addr, name: worker_name})
+  emit_wire_fn_addr_i64(wfn, worker_name, fn_addr)
   run_reg = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: run_reg, name: "w_fused_parallel_run", args: [fn_addr, blk_addr, size_reg]})
-  emit_instruction(wfn, {op: :br, label: done_label})
+  emit_wire_call_direct_i64(wfn, nil, [fn_addr, blk_addr, size_reg], nil, nil, "w_fused_parallel_run", nil, nil, run_reg)
+  emit_wire_br(wfn, done_label, nil, nil)
 
   start_block(wfn, st_label)
   out_base = next_temp(wfn)
@@ -3465,7 +3441,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     arrs[ai][:base] = base
     ai += 1
   fuse_ew_emit_range_loop(ctx, spec, arrs, out_base, "0", size_reg, odt, ewsid)
-  emit_instruction(wfn, {op: :br, label: done_label})
+  emit_wire_br(wfn, done_label, nil, nil)
 
   start_block(wfn, done_label)
   typed_value(:i64, out_reg)
@@ -3537,11 +3513,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         libm_name = "fabs"
       arg_raw = ensure_raw_f64(wfn, arg_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: libm_name, value: arg_raw})
+      emit_wire_call_libm_f64(wfn, nil, libm_name, nil, temp, arg_raw)
       return typed_value(:raw_f64, temp)
     arg_reg = ensure_i64_value(wfn, arg_val)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_runtime, args: [arg_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [arg_reg], nil, nil, math_runtime, nil, nil, temp)
     return typed_value(:i64, temp)
   if args.size() == 2
     a_val = lower_expression(ctx, args[0])
@@ -3555,11 +3531,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         a_raw = ensure_raw_f64(wfn, a_val)
         b_raw = ensure_raw_f64(wfn, b_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_libm_f64, temp: temp, name: method_name, lhs: a_raw, rhs: b_raw})
+        emit_wire_call_libm_f64(wfn, a_raw, method_name, b_raw, temp, nil)
         return typed_value(:raw_f64, temp)
     a_reg = ensure_i64_value(wfn, a_val)
     b_reg = ensure_i64_value(wfn, b_val)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: math_runtime, args: [a_reg, b_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [a_reg, b_reg], nil, nil, math_runtime, nil, nil, temp)
     return typed_value(:i64, temp)
   nil

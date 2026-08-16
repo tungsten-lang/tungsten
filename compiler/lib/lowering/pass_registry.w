@@ -264,7 +264,7 @@
       source = ensure_i64_value(ctx[:func], value)
       converted = next_temp(ctx[:func])
       helper = array_etype == "f32" ? "w_array_to_f32" : "w_array_to_f64"
-      emit_instruction(ctx[:func], {op: :call_direct_i64, temp: converted, name: helper, args: [source]})
+      emit_wire_call_direct_i64(ctx[:func], nil, [source], nil, nil, helper, nil, nil, converted)
       return typed_value(target_type, converted)
     value = lower_expression(ctx, node.expression)
     if node.type_hint == "w64" || node.type_hint in ("big" "bigint" "bignum")
@@ -432,11 +432,11 @@
         ptr = ensure_var_slot(wfn, name, slot_type)
         if is_raw_int_storage_type(ctx[:var_types][name])
           # Binding may already be raw (from ## i64 param unboxing) — store directly
-          emit_instruction(wfn, {op: machine_store_op(ctx[:var_types][name]), value: reg, ptr: ptr})
+          emit_wire_dynamic_2(wfn, machine_store_op(ctx[:var_types][name]), :ptr, ptr, :value, reg)
         elsif is_machine_float_type(ctx[:var_types][name])
-          emit_instruction(wfn, {op: float_store_op(ctx[:var_types][name]), value: reg, ptr: ptr})
+          emit_wire_dynamic_2(wfn, float_store_op(ctx[:var_types][name]), :ptr, ptr, :value, reg)
         else
-          emit_instruction(wfn, {op: :store_i64, value: reg, ptr: ptr})
+          emit_wire_store_i64(wfn, ptr, reg)
     i += 1
   ctx[:bindings] = preserved
 
@@ -475,4 +475,4 @@
     return
   if value_type == nil
     value_type = "i64"
-  emit_instruction(wfn, {op: :store_global, name: name, value: value_reg, type: value_type})
+  emit_wire_store_global(wfn, name, value_type, value_reg)

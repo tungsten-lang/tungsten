@@ -118,20 +118,13 @@
     mod[:next_bigint_literal] = slot_id + 1
     temp_ptr = next_temp(wfn)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {
-      op: :bigint_literal_i64,
-      temp: temp,
-      temp_ptr: temp_ptr,
-      string_id: str_id,
-      byte_len: utf8_byte_length(text) + 1,
-      slot_id: slot_id
-    })
+    emit_wire_bigint_literal_i64(wfn, utf8_byte_length(text) + 1, slot_id, str_id, temp, temp_ptr)
     return typed_value(:i64, temp)
 
   str_tv = lower_string(ctx, Tungsten:AST:String.new(text))
   str_reg = ensure_i64_value(wfn, str_tv)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_bigint_from_dec_str", args: [str_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [str_reg], nil, nil, "w_bigint_from_dec_str", nil, nil, temp)
   typed_value(:i64, temp)
 
 -> lower_wvalue(ctx, node)
@@ -193,7 +186,7 @@
   str_id = module_string_constant(ctx[:mod], s)
   temp_ptr = next_temp(ctx[:func])
   temp = next_temp(ctx[:func])
-  emit_instruction(ctx[:func], {op: :string_i64, temp: temp, temp_ptr: temp_ptr, string_id: str_id, byte_len: byte_len + 1})
+  emit_wire_string_i64(ctx[:func], byte_len + 1, str_id, temp, temp_ptr)
   typed_value(:i64, temp)
 
 -> lower_string_interp(ctx, node)
@@ -211,7 +204,7 @@
       expr_tv = lower_expression(ctx, part[1])
       expr_reg = ensure_i64_value(wfn, expr_tv)
       part_reg = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: part_reg, name: "w_to_s", args: [expr_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [expr_reg], nil, nil, "w_to_s", nil, nil, part_reg)
     if result == nil
       result = part_reg
     else
@@ -223,7 +216,7 @@
       # instead of leaking N-2 strings per evaluation.
       # env gate: TUNGSTEN_FREE=0 must silence every compiler-inserted free.
       cn = i >= 2 && result_is_chain && env("TUNGSTEN_FREE") != "0" ? "w_str_concat_free_lhs" : "w_str_concat"
-      emit_instruction(wfn, {op: :call_direct_i64, temp: concat, name: cn, args: [result, part_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [result, part_reg], nil, nil, cn, nil, nil, concat)
       result = concat
       result_is_chain = true
     i += 1
@@ -298,7 +291,7 @@
       const_id = consts.size()
       name = "@.const_small_array_" + const_id.to_s()
       consts.push({name: name, ebits: cf[:ebits], size: cf[:size], bytes: cf[:bytes]})
-      emit_instruction(wfn, {op: :small_array_const_load, temp: arr, const_name: name})
+      emit_wire_small_array_const_load(wfn, name, arr)
       return typed_value(:i64, arr)
   # ## reuse — empty [] gets a per-site thread-local slot, reused across calls.
   if node.reuse_safe == true && (node.elements == nil || node.elements.size() == 0)
@@ -306,11 +299,11 @@
     ctx[:mod][:next_reuse_site] = site_id + 1
     slot_name = "reuse.site." + site_id.to_s()
     ctx[:mod][:reuse_sites].push(slot_name)
-    emit_instruction(wfn, {op: :call_reuse_or_new_array, temp: arr, slot: slot_name})
+    emit_wire_call_reuse_or_new_array(wfn, slot_name, arr)
     return typed_value(:i64, arr)
   # ## recycle — pop from thread-local pool or allocate. Recycled at scope exit.
   if node.recycle_safe == true && (node.elements == nil || node.elements.size() == 0)
-    emit_instruction(wfn, {op: :call_recycle_or_new_array, temp: arr})
+    emit_wire_call_recycle_or_new_array(wfn, arr)
     track_recycle_temp(wfn, arr, :array)
     return typed_value(:i64, arr)
   # Non-empty literal: allocate at the EXACT final size once and store each
@@ -321,9 +314,9 @@
   # keeps w_array_new_empty for the recycle-pool reuse.
   n_elems = node.elements.size()
   if n_elems > 0
-    emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_uninit_sized", args: ["65", n_elems.to_s()]})
+    emit_wire_call_direct_i64(wfn, nil, ["65", n_elems.to_s()], nil, nil, "w_array_new_uninit_sized", nil, nil, arr)
   else
-    emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_empty", args: []})
+    emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_array_new_empty", nil, nil, arr)
   i = 0
   while i < node.elements.size()
     elem = node.elements[i]
@@ -345,7 +338,7 @@
         val = typed_value(raw_float_value_type(ht), raw)
     val_reg = ensure_i64_value(wfn, val)
     push_temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: push_temp, name: "__w_array_lit_store", args: [arr, i.to_s(), val_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [arr, i.to_s(), val_reg], nil, nil, "__w_array_lit_store", nil, nil, push_temp)
     i += 1
   typed_value(:i64, arr)
 
@@ -360,7 +353,7 @@
   element_bits = array_etype == "f32" ? "-32" : "-64"
   store_bits = array_etype == "f32" ? 32 : 64
   arr = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: arr, name: "w_array_new_inline", args: [element_bits, node.elements.size().to_s()]})
+  emit_wire_call_direct_i64(wfn, nil, [element_bits, node.elements.size().to_s()], nil, nil, "w_array_new_inline", nil, nil, arr)
   i = 0
   while i < node.elements.size()
     val = lower_expression(ctx, node.elements[i])
@@ -371,7 +364,7 @@
       scratch.push(next_temp(wfn))
       si += 1
     stored = next_temp(wfn)
-    emit_instruction(wfn, {op: :typed_array_set_inline, temp: stored, arr: arr, idx: i.to_s(), idx_raw: true, value: val_bits, s: scratch, bits: store_bits, signed: true})
+    emit_wire_typed_array_set_inline(wfn, arr, store_bits, i.to_s(), true, scratch, true, stored, val_bits)
     i += 1
   typed_value(target_type, arr)
 
@@ -384,7 +377,7 @@
     ctx[:mod][:next_reuse_site] = site_id + 1
     slot_name = "reuse.site." + site_id.to_s()
     ctx[:mod][:reuse_sites].push(slot_name)
-    emit_instruction(wfn, {op: :call_reuse_and_drain_or_new_hash, temp: hash_reg, slot: slot_name})
+    emit_wire_call_reuse_and_drain_or_new_hash(wfn, slot_name, hash_reg)
     return typed_value(:i64, hash_reg)
   # ## reuse — empty {} gets a per-site thread-local slot, reused across calls.
   if node.reuse_safe == true && (node.entries == nil || node.entries.size() == 0)
@@ -392,14 +385,14 @@
     ctx[:mod][:next_reuse_site] = site_id + 1
     slot_name = "reuse.site." + site_id.to_s()
     ctx[:mod][:reuse_sites].push(slot_name)
-    emit_instruction(wfn, {op: :call_reuse_or_new_hash, temp: hash_reg, slot: slot_name})
+    emit_wire_call_reuse_or_new_hash(wfn, slot_name, hash_reg)
     return typed_value(:i64, hash_reg)
   # ## recycle — pop from thread-local pool or allocate. Recycled at scope exit.
   if node.recycle_safe == true && (node.entries == nil || node.entries.size() == 0)
-    emit_instruction(wfn, {op: :call_recycle_or_new_hash, temp: hash_reg})
+    emit_wire_call_recycle_or_new_hash(wfn, hash_reg)
     track_recycle_temp(wfn, hash_reg, :hash)
     return typed_value(:i64, hash_reg)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: hash_reg, name: "w_hash_new", args: []})
+  emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_hash_new", nil, nil, hash_reg)
   entries = node.entries
   i = 0
   while i < entries.size()
@@ -409,14 +402,14 @@
     val_val = lower_expression(ctx, entry[1])
     val_reg = ensure_i64_value(wfn, val_val)
     set_temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: set_temp, name: "w_hash_set", args: [hash_reg, key_reg, val_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [hash_reg, key_reg, val_reg], nil, nil, "w_hash_set", nil, nil, set_temp)
     i += 1
   # A call-site kwargs group (`f(a: 1)`) passes as ONE hash argument marked
   # W_HASH_FLAG_KWARGS; keyword-param callees rebind it by name at entry
   # (w_kwargs_remap12 prologue), everyone else receives a plain hash.
   if node.from_kwargs == true
     mark_temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: mark_temp, name: "w_hash_mark_kwargs", args: [hash_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [hash_reg], nil, nil, "w_hash_mark_kwargs", nil, nil, mark_temp)
   typed_value(:i64, hash_reg)
 
 -> lower_symbol(ctx, node)
@@ -442,7 +435,7 @@
   str_id = module_string_constant(ctx[:mod], s)
   temp_ptr = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :symbol_i64, temp: temp, temp_ptr: temp_ptr, string_id: str_id, byte_len: byte_len + 1})
+  emit_wire_symbol_i64(wfn, byte_len + 1, str_id, temp, temp_ptr)
   typed_value(:i64, temp)
 
 -> lower_regex(ctx, node)
@@ -452,7 +445,7 @@
   pattern_reg = ensure_i64_value(wfn, pattern_tv)
   options_reg = ensure_i64_value(wfn, options_tv)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_regex_new", args: [pattern_reg, options_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [pattern_reg, options_reg], nil, nil, "w_regex_new", nil, nil, temp)
   typed_value(:i64, temp)
 
 -> lower_regex_capture(ctx, node)
@@ -460,7 +453,7 @@
   index_tv = lower_int(ctx, Tungsten:AST:Int.new(ast_get(node, :index)))
   index_reg = ensure_i64_value(wfn, index_tv)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_regex_capture", args: [index_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [index_reg], nil, nil, "w_regex_capture", nil, nil, temp)
   typed_value(:i64, temp)
 
 -> lower_range(ctx, node)
@@ -489,22 +482,22 @@
   to_static_type = infer_type(node.to, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   if from_static_type != nil && !is_integer_like_type(from_static_type)
     from_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: from_raw, name: "w_range_bound_i64", args: [from_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [from_reg], nil, nil, "w_range_bound_i64", nil, nil, from_raw)
   else
     from_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :nanunbox_int, temp: from_raw, temp_shl: from_raw + ".shl", boxed: from_reg})
+    emit_wire_nanunbox_int(wfn, from_reg, from_raw, from_raw + ".shl")
   if to_static_type != nil && !is_integer_like_type(to_static_type)
     to_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: to_raw, name: "w_range_bound_i64", args: [to_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [to_reg], nil, nil, "w_range_bound_i64", nil, nil, to_raw)
   else
     to_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :nanunbox_int, temp: to_raw, temp_shl: to_raw + ".shl", boxed: to_reg})
+    emit_wire_nanunbox_int(wfn, to_reg, to_raw, to_raw + ".shl")
 
   excl = "0"
   if node.exclusive == true
     excl = "1"
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_range_make", args: [from_raw, to_raw, excl]})
+  emit_wire_call_direct_i64(wfn, nil, [from_raw, to_raw, excl], nil, nil, "w_range_make", nil, nil, temp)
   typed_value(:i64, temp)
 
 
@@ -568,13 +561,13 @@
     sc_bits = wvalue_literal_text(-1688849860263936 + sc_masked)
     neg_arg = neg ? "2" : "1"
     btemp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: btemp, name: "w_decimal_from_digits", args: [str_reg, sc_bits, neg_arg]})
+    emit_wire_call_direct_i64(wfn, nil, [str_reg, sc_bits, neg_arg], nil, nil, "w_decimal_from_digits", nil, nil, btemp)
     return typed_value(:i64, btemp)
   sig = digits_txt.to_i()
   if neg
     sig = 0 - sig
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_decimal, temp: temp, sig: sig, scale: scale})
+  emit_wire_const_decimal(wfn, scale, sig, temp)
   typed_value(:i64, temp)
 
 -> lower_typed_array_new(ctx, node)
@@ -636,9 +629,9 @@
       temp_ptr = next_temp(wfn)
       temp_int = next_temp(wfn)
       temp_box = next_temp(wfn)
-      emit_instruction(wfn, {op: :small_array_alloca, temp_ptr: temp_ptr, total_bytes: total_bytes})
-      emit_instruction(wfn, {op: :ptr_to_i64, temp: temp_int, value: temp_ptr})
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp_box, name: "w_small_array_init", args: [temp_int, bits.to_s(), size_const.to_s()]})
+      emit_wire_small_array_alloca(wfn, temp_ptr, total_bytes)
+      emit_wire_ptr_to_i64(wfn, temp_int, temp_ptr)
+      emit_wire_call_direct_i64(wfn, nil, [temp_int, bits.to_s(), size_const.to_s()], nil, nil, "w_small_array_init", nil, nil, temp_box)
       return typed_value(:i64, temp_box)
     # ## reuse — per-site thread-local slot reused across calls. Shape is
     # stable (same element_bits) at a given site; capacity grows as needed.
@@ -648,12 +641,12 @@
       slot_name = "reuse.site." + site_id.to_s()
       ctx[:mod][:reuse_sites].push(slot_name)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_reuse_or_new_typed, temp: temp, slot: slot_name, bits: bits, cap: size_raw})
+      emit_wire_call_reuse_or_new_typed(wfn, bits, size_raw, slot_name, temp)
       return typed_value(:i64, temp)
     # ## recycle — pop from shape-keyed pool. Recycled at scope exit.
     if node.recycle_safe == true
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_recycle_or_new_typed, temp: temp, bits: bits, cap: size_raw})
+      emit_wire_call_recycle_or_new_typed(wfn, bits, size_raw, temp)
       track_recycle_temp(wfn, temp, :typed)
       return typed_value(:i64, temp)
     # T[N] semantics: zero-filled buffer with size = cap = N, ready to
@@ -661,7 +654,7 @@
     # (`t = i32[N]; t.push(…)`) is no longer the canonical idiom; the
     # inline `[]=` path assumes size == cap and skips the size update.
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_zeros", args: [bits.to_s(), size_raw]})
+    emit_wire_call_direct_i64(wfn, nil, [bits.to_s(), size_raw], nil, nil, "w_array_zeros", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # The lexer types more names than the runtime has storage for (fp8,
@@ -726,7 +719,7 @@
     scale = scale + currency_suffix_scale_shift(suffix)
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_currency, temp: temp, symbol_id: symbol_id, sig: sig, scale: scale})
+  emit_wire_const_currency(wfn, scale, sig, symbol_id, temp)
   typed_value(:i64, temp)
 
 -> lower_quantity(ctx, node)
@@ -743,7 +736,7 @@
   unit_id = lookup_unit_id(ctx, unit, node)
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_quantity, temp: temp, unit_id: unit_id, sig: sig, scale: scale})
+  emit_wire_const_quantity(wfn, scale, sig, temp, unit_id)
   typed_value(:i64, temp)
 
 # Conservative static quantity inference. It deliberately proves only facts
@@ -786,9 +779,9 @@
 
   temp = next_temp(wfn)
   if parsed[:mode] == 0
-    emit_instruction(wfn, {op: :const_duration_ns, temp: temp, ns: parsed[:ns]})
+    emit_wire_const_duration_ns(wfn, parsed[:ns], temp)
   else
-    emit_instruction(wfn, {op: :const_duration_months_ms, temp: temp, months: parsed[:months], ms: parsed[:ms]})
+    emit_wire_const_duration_months_ms(wfn, parsed[:months], parsed[:ms], temp)
   typed_value(:i64, temp)
 
 -> lower_uuid(ctx, node)
@@ -797,7 +790,7 @@
   byte_len = utf8_byte_length(node.value) + 1
   temp_ptr = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_uuid, temp: temp, temp_ptr: temp_ptr, string_id: str_id, byte_len: byte_len})
+  emit_wire_const_uuid(wfn, byte_len, str_id, temp, temp_ptr)
   typed_value(:i64, temp)
 
 -> lower_date(ctx, node)
@@ -818,7 +811,7 @@
     if day < 1 || day > 366
       raise compile_error_for_node(:E_LOWER_DATE_INVALID_ORDINAL, "Invalid ordinal day in date literal: " + raw, ctx[:source_path], node)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_date, temp: temp, year: year, month: month, day: day, hour: 0, min: 0, sec: 0, tz: 0})
+  emit_wire_const_date(wfn, day, 0, 0, month, 0, temp, 0, year)
   typed_value(:i64, temp)
 
 -> lower_datetime(ctx, node)
@@ -838,7 +831,7 @@
   parsed = parse_time_string(time_part)
   validate_time(parsed[:hour], parsed[:min], parsed[:sec], raw, ctx, node)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_date, temp: temp, year: year, month: month, day: day, hour: parsed[:hour], min: parsed[:min], sec: parsed[:sec], tz: parsed[:tz]})
+  emit_wire_const_date(wfn, day, parsed[:hour], parsed[:min], month, parsed[:sec], temp, parsed[:tz], year)
   typed_value(:i64, temp)
 
 -> lower_time(ctx, node)
@@ -847,7 +840,7 @@
   parsed = parse_time_string(node.value)
   validate_time(parsed[:hour], parsed[:min], parsed[:sec], node.value, ctx, node)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_date, temp: temp, year: 0, month: 0, day: 0, hour: parsed[:hour], min: parsed[:min], sec: parsed[:sec], tz: parsed[:tz]})
+  emit_wire_const_date(wfn, 0, parsed[:hour], parsed[:min], 0, parsed[:sec], temp, parsed[:tz], 0)
   typed_value(:i64, temp)
 
 -> parse_time_string(s)
@@ -960,7 +953,7 @@
   c = parts[2].to_i()
   d = parts[3].to_i()
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_ipv4, temp: temp, a: a, b: b, c: c, d: d, cidr: -1})
+  emit_wire_const_ipv4(wfn, a, b, c, -1, d, temp)
   typed_value(:i64, temp)
 
 -> lower_cidr4(ctx, node)
@@ -976,7 +969,7 @@
   c = parts[2].to_i()
   d = parts[3].to_i()
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_ipv4, temp: temp, a: a, b: b, c: c, d: d, cidr: prefix})
+  emit_wire_const_ipv4(wfn, a, b, c, prefix, d, temp)
   typed_value(:i64, temp)
 
 -> lower_ipv6(ctx, node)
@@ -987,7 +980,7 @@
   byte_len = utf8_byte_length(node.value) + 1
   temp_ptr = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_ipv6, temp: temp, temp_ptr: temp_ptr, string_id: str_id, byte_len: byte_len, cidr: -1})
+  emit_wire_const_ipv6(wfn, byte_len, -1, str_id, temp, temp_ptr)
   typed_value(:i64, temp)
 
 -> lower_cidr6(ctx, node)
@@ -1001,7 +994,7 @@
   byte_len = utf8_byte_length(addr) + 1
   temp_ptr = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_ipv6, temp: temp, temp_ptr: temp_ptr, string_id: str_id, byte_len: byte_len, cidr: prefix})
+  emit_wire_const_ipv6(wfn, byte_len, prefix, str_id, temp, temp_ptr)
   typed_value(:i64, temp)
 
 -> lower_rational(ctx, node)
@@ -1014,7 +1007,7 @@
   if den == 0
     raise compile_error_for_node(:E_LOWER_RATIONAL_ZERO_DENOM, "Rational literal with zero denominator: " + raw, ctx[:source_path], node)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_rational, temp: temp, num: num, den: den})
+  emit_wire_const_rational(wfn, den, num, temp)
   typed_value(:i64, temp)
 
 -> lower_char(ctx, node)
@@ -1032,18 +1025,14 @@
   # need a first-class codepoint value with the 0xFFFC tag.
   wfn = ctx[:func]
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :const_char, temp: temp, codepoint: node.value})
+  emit_wire_const_char(wfn, node.value, temp)
   typed_value(:i64, temp)
 
 -> lower_color(ctx, node)
   wfn = ctx[:func]
   temp = next_temp(wfn)
   packed = node.rgba
-  emit_instruction(wfn, {op: :const_color, temp: temp,
-    r: (packed >> 24) & 0xff,
-    g: (packed >> 16) & 0xff,
-    b: (packed >> 8) & 0xff,
-    a: packed & 0xff})
+  emit_wire_const_color(wfn, packed & 0xff, (packed >> 8) & 0xff, (packed >> 16) & 0xff, (packed >> 24) & 0xff, temp)
   typed_value(:i64, temp)
 
 -> lower_cidr_match(ctx, node)
@@ -1054,7 +1043,7 @@
   subj_reg = ensure_i64_value(wfn, subj_tv)
   cidr_reg = ensure_i64_value(wfn, cidr_tv)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_ipv4_in_cidr", args: [subj_reg, cidr_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [subj_reg, cidr_reg], nil, nil, "w_ipv4_in_cidr", nil, nil, temp)
   typed_value(:i64, temp)
 
 -> lower_regex_match(ctx, node)
@@ -1064,7 +1053,7 @@
   regex_reg = ensure_i64_value(wfn, regex_tv)
   subject_reg = ensure_i64_value(wfn, subject_tv)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_regex_match", args: [regex_reg, subject_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [regex_reg, subject_reg], nil, nil, "w_regex_match", nil, nil, temp)
   typed_value(:i64, temp)
 
 

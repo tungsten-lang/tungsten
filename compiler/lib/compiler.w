@@ -46,9 +46,12 @@ use target
       while ii < instrs.size()
         inst = instrs[ii]
         if wire_kind(inst) != :call_loc_set_col
-          wire_set(inst, :src_line, nil)
-          wire_set(inst, :src_col, nil)
-          wire_set(inst, :loc_site_id, nil)
+          if wire_get(inst, :src_line) != nil
+            wire_set(inst, :src_line, nil)
+          if wire_get(inst, :src_col) != nil
+            wire_set(inst, :src_col, nil)
+          if wire_get(inst, :loc_site_id) != nil
+            wire_set(inst, :loc_site_id, nil)
           new_instrs.push(inst)
         ii += 1
       block[:instructions] = new_instrs

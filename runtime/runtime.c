@@ -18841,6 +18841,27 @@ WValue w_wire_field_load_nil(WValue wire, WValue sym) {
     return value == W_UNDEF ? W_NIL : value;
 }
 
+int64_t w_wire_field_count(WValue wire) {
+    uint64_t off = w_wire_checked_offset(wire);
+    return (int64_t)w_wire_record_count(off);
+}
+
+WValue w_wire_field_symbol_at(WValue wire, int64_t index) {
+    uint64_t off = w_wire_checked_offset(wire);
+    uint32_t count = w_wire_record_count(off);
+    if (index < 0 || (uint64_t)index >= count)
+        die("w_wire_field_symbol_at: index exceeds record count");
+    return g_wire_arena.base[off + 1 + (uint32_t)index * 2];
+}
+
+WValue w_wire_field_value_at(WValue wire, int64_t index) {
+    uint64_t off = w_wire_checked_offset(wire);
+    uint32_t count = w_wire_record_count(off);
+    if (index < 0 || (uint64_t)index >= count)
+        die("w_wire_field_value_at: index exceeds record count");
+    return g_wire_arena.base[off + 2 + (uint32_t)index * 2];
+}
+
 WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
     uint32_t count = w_wire_record_count(off);

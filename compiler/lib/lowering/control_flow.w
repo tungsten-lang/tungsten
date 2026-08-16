@@ -87,7 +87,7 @@
   else
     cond_reg = ensure_i64_value(wfn, cond)
     cond_bool = next_temp(wfn)
-    emit_instruction(wfn, {op: :truthy_inline, temp: cond_bool, value: cond_reg})
+    emit_wire_truthy_inline(wfn, cond_bool, cond_reg)
 
   then_label = next_label(wfn, "if.then")
   else_label = next_label(wfn, "if.else")
@@ -97,9 +97,9 @@
   has_elsif = node.elsif_clauses != nil && node.elsif_clauses.size() > 0
 
   if has_else || has_elsif
-    emit_instruction(wfn, {op: :cond_br, cond: cond_bool, then_label: then_label, else_label: else_label})
+    emit_wire_cond_br(wfn, cond_bool, else_label, nil, then_label)
   else
-    emit_instruction(wfn, {op: :cond_br, cond: cond_bool, then_label: then_label, else_label: end_label})
+    emit_wire_cond_br(wfn, cond_bool, end_label, nil, then_label)
 
   # Then branch.
   #
@@ -117,7 +117,7 @@
   if !block_terminated(wfn)
     materialize_bindings(ctx)
     emit_scope_pop(wfn, then_sid)
-    emit_instruction(wfn, {op: :br, label: end_label})
+    emit_wire_br(wfn, end_label, nil, nil)
   else
     ctx[:bindings] = {}
     restore_recycle_scope_depth(wfn, then_recycle_depth)
@@ -138,7 +138,7 @@
       else
         ec_reg = ensure_i64_value(wfn, ec)
         et = next_temp(wfn)
-        emit_instruction(wfn, {op: :truthy_inline, temp: et, value: ec_reg})
+        emit_wire_truthy_inline(wfn, et, ec_reg)
         eb = et
 
       ethen_label = next_label(wfn, "elsif.then")
@@ -149,7 +149,7 @@
       else
         next_else = end_label
 
-      emit_instruction(wfn, {op: :cond_br, cond: eb, then_label: ethen_label, else_label: next_else})
+      emit_wire_cond_br(wfn, eb, next_else, nil, ethen_label)
 
       start_block(wfn, ethen_label)
       elsif_recycle_depth = wfn[:scope_recycle_stack].size()
@@ -159,7 +159,7 @@
       if !block_terminated(wfn)
         materialize_bindings(ctx)
         emit_scope_pop(wfn, elsif_sid)
-        emit_instruction(wfn, {op: :br, label: end_label})
+        emit_wire_br(wfn, end_label, nil, nil)
       else
         ctx[:bindings] = {}
         restore_recycle_scope_depth(wfn, elsif_recycle_depth)
@@ -177,7 +177,7 @@
       if !block_terminated(wfn)
         materialize_bindings(ctx)
         emit_scope_pop(wfn, else_sid)
-        emit_instruction(wfn, {op: :br, label: end_label})
+        emit_wire_br(wfn, end_label, nil, nil)
       else
         ctx[:bindings] = {}
         restore_recycle_scope_depth(wfn, else_recycle_depth)
@@ -191,7 +191,7 @@
     if !block_terminated(wfn)
       materialize_bindings(ctx)
       emit_scope_pop(wfn, else_sid)
-      emit_instruction(wfn, {op: :br, label: end_label})
+      emit_wire_br(wfn, end_label, nil, nil)
     else
       ctx[:bindings] = {}
       restore_recycle_scope_depth(wfn, else_recycle_depth)
@@ -222,11 +222,11 @@
   result_var = "__if_expr." + next_label(wfn, "ie")
   if result_machine_type != nil
     result_ptr = ensure_var_slot(wfn, result_var, machine_slot_type(result_machine_type))
-    emit_instruction(wfn, {op: machine_store_op(result_machine_type), value: "0", ptr: result_ptr})
+    emit_wire_dynamic_2(wfn, machine_store_op(result_machine_type), :ptr, result_ptr, :value, "0")
   else
     result_ptr = ensure_var_slot(wfn, result_var)
     # Initialize an ordinary value conditional to nil.
-    emit_instruction(wfn, {op: :store_i64, value: w_nil.to_s(), ptr: result_ptr})
+    emit_wire_store_i64(wfn, result_ptr, w_nil.to_s())
 
   cond = lower_expression(ctx, node.condition)
   if cond[:type] == :i1
@@ -234,7 +234,7 @@
   else
     cond_reg = ensure_i64_value(wfn, cond)
     cond_bool = next_temp(wfn)
-    emit_instruction(wfn, {op: :truthy_inline, temp: cond_bool, value: cond_reg})
+    emit_wire_truthy_inline(wfn, cond_bool, cond_reg)
 
   then_label = next_label(wfn, "ie.then")
   else_label = next_label(wfn, "ie.else")
@@ -245,9 +245,9 @@
   end_reachable = false
 
   if has_else || has_elsif
-    emit_instruction(wfn, {op: :cond_br, cond: cond_bool, then_label: then_label, else_label: else_label})
+    emit_wire_cond_br(wfn, cond_bool, else_label, nil, then_label)
   else
-    emit_instruction(wfn, {op: :cond_br, cond: cond_bool, then_label: then_label, else_label: end_label})
+    emit_wire_cond_br(wfn, cond_bool, end_label, nil, then_label)
     end_reachable = true
 
   # Then branch — lower body, store last expression as result
@@ -257,7 +257,7 @@
     lower_if_expr_body(ctx, wfn, then_body, result_ptr, result_machine_type)
   materialize_bindings(ctx)
   if !block_terminated(wfn)
-    emit_instruction(wfn, {op: :br, label: end_label})
+    emit_wire_br(wfn, end_label, nil, nil)
     end_reachable = true
 
   # Elsif branches
@@ -276,7 +276,7 @@
       else
         ec_reg = ensure_i64_value(wfn, ec)
         et = next_temp(wfn)
-        emit_instruction(wfn, {op: :truthy_inline, temp: et, value: ec_reg})
+        emit_wire_truthy_inline(wfn, et, ec_reg)
         eb = et
 
       ethen_label = next_label(wfn, "ie.ethen")
@@ -287,7 +287,7 @@
       else
         next_else = end_label
 
-      emit_instruction(wfn, {op: :cond_br, cond: eb, then_label: ethen_label, else_label: next_else})
+      emit_wire_cond_br(wfn, eb, next_else, nil, ethen_label)
       if next_else == end_label
         end_reachable = true
 
@@ -297,7 +297,7 @@
         lower_if_expr_body(ctx, wfn, clause_body, result_ptr, result_machine_type)
       materialize_bindings(ctx)
       if !block_terminated(wfn)
-        emit_instruction(wfn, {op: :br, label: end_label})
+        emit_wire_br(wfn, end_label, nil, nil)
         end_reachable = true
 
       current_else = next_else
@@ -311,7 +311,7 @@
         lower_if_expr_body(ctx, wfn, else_body, result_ptr, result_machine_type)
       materialize_bindings(ctx)
       if !block_terminated(wfn)
-        emit_instruction(wfn, {op: :br, label: end_label})
+        emit_wire_br(wfn, end_label, nil, nil)
         end_reachable = true
   elsif has_else
     # Simple if/else
@@ -321,7 +321,7 @@
       lower_if_expr_body(ctx, wfn, else_body, result_ptr, result_machine_type)
     materialize_bindings(ctx)
     if !block_terminated(wfn)
-      emit_instruction(wfn, {op: :br, label: end_label})
+      emit_wire_br(wfn, end_label, nil, nil)
       end_reachable = true
 
   if !end_reachable
@@ -330,9 +330,9 @@
   start_block(wfn, end_label)
   result = next_temp(wfn)
   if result_machine_type != nil
-    emit_instruction(wfn, {op: machine_load_op(result_machine_type), temp: result, ptr: result_ptr})
+    emit_wire_dynamic_2(wfn, machine_load_op(result_machine_type), :ptr, result_ptr, :temp, result)
     return typed_value(raw_machine_value_type(result_machine_type), result)
-  emit_instruction(wfn, {op: :load_i64, temp: result, ptr: result_ptr})
+  emit_wire_load_i64(wfn, result_ptr, result)
   typed_value(:i64, result)
 
 -> lower_if_expr_body(ctx, wfn, body, result_ptr, result_machine_type = nil)
@@ -353,12 +353,12 @@
     # above INT64_MAX and then immediately unbox it at the branch merge.
     last_reg = lower_machine_int_expression(ctx, last, result_machine_type)
     if !block_terminated(wfn)
-      emit_instruction(wfn, {op: machine_store_op(result_machine_type), value: last_reg, ptr: result_ptr})
+      emit_wire_dynamic_2(wfn, machine_store_op(result_machine_type), :ptr, result_ptr, :value, last_reg)
   else
     last_tv = lower_expression(ctx, last)
     if !block_terminated(wfn)
       last_reg = ensure_i64_value(wfn, last_tv)
-      emit_instruction(wfn, {op: :store_i64, value: last_reg, ptr: result_ptr})
+      emit_wire_store_i64(wfn, result_ptr, last_reg)
 
 # Returns :true / :false / nil if the AST node is a compile-time boolean.
 # Handles :bool literals, :nil_lit, :int (always truthy in Tungsten),
@@ -445,11 +445,11 @@
     seed_a_tv = lower_expression(ctx, Tungsten:AST:Var.new(rot[:a]))
     seed_a_reg = ensure_i64_value(wfn_rot, seed_a_tv)
     mark_a = next_temp(wfn_rot)
-    emit_instruction(wfn_rot, {op: :call_direct_i64, temp: mark_a, name: "w_bigint_mark_shared_value", args: [seed_a_reg]})
+    emit_wire_call_direct_i64(wfn_rot, nil, [seed_a_reg], nil, nil, "w_bigint_mark_shared_value", nil, nil, mark_a)
     seed_b_tv = lower_expression(ctx, Tungsten:AST:Var.new(rot[:b]))
     seed_b_reg = ensure_i64_value(wfn_rot, seed_b_tv)
     mark_b = next_temp(wfn_rot)
-    emit_instruction(wfn_rot, {op: :call_direct_i64, temp: mark_b, name: "w_bigint_mark_shared_value", args: [seed_b_reg]})
+    emit_wire_call_direct_i64(wfn_rot, nil, [seed_b_reg], nil, nil, "w_bigint_mark_shared_value", nil, nil, mark_b)
     prev_rot = ctx[:rotation_shape]
     ctx[:rotation_shape] = rot
     lower_while_core(ctx, node)
@@ -464,10 +464,10 @@
   binding = ctx[:bindings][name]
   r_slot = ensure_var_slot(wfn, name)
   if binding != nil
-    emit_instruction(wfn, {op: :store_i64, value: binding, ptr: r_slot})
+    emit_wire_store_i64(wfn, r_slot, binding)
     ctx[:bindings][name] = nil
   partial_slot = ensure_var_slot(wfn, "__sumchunk_" + name)
-  emit_instruction(wfn, {op: :store_i64, value: "0", ptr: partial_slot})
+  emit_wire_store_i64(wfn, partial_slot, "0")
   prev_chunk = ctx[:sum_chunk]
   ctx[:sum_chunk] = {var: name, partial: partial_slot, acc: r_slot}
   lower_while_core(ctx, node)
@@ -475,14 +475,14 @@
   # Flush the pending partial once. partial == 0 (zero-trip loop) costs
   # one add_mut identity return.
   pcur = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_i64, temp: pcur, ptr: partial_slot})
+  emit_wire_load_i64(wfn, partial_slot, pcur)
   boxed = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: boxed, name: "w_int", args: [pcur]})
+  emit_wire_call_direct_i64(wfn, nil, [pcur], nil, nil, "w_int", nil, nil, boxed)
   racc = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_i64, temp: racc, ptr: r_slot})
+  emit_wire_load_i64(wfn, r_slot, racc)
   racc2 = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: racc2, name: "w_bigint_add_mut", args: [racc, boxed], call_conv: "preserve_mostcc"})
-  emit_instruction(wfn, {op: :store_i64, value: racc2, ptr: r_slot})
+  emit_wire_call_direct_i64(wfn, nil, [racc, boxed], "preserve_mostcc", nil, "w_bigint_add_mut", nil, nil, racc2)
+  emit_wire_store_i64(wfn, r_slot, racc2)
   range_binding_invalidate(ctx, name)
   nil
 
@@ -497,29 +497,29 @@
   addend_raw = ensure_raw_i64(wfn, addend_tv)
   if op == :MINUS
     neg = next_temp(wfn)
-    emit_instruction(wfn, {op: :sub_i64, temp: neg, lhs: "0", rhs: addend_raw})
+    emit_wire_sub_i64(wfn, "0", addend_raw, neg)
     addend_raw = neg
   pcur = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_i64, temp: pcur, ptr: chunk[:partial]})
+  emit_wire_load_i64(wfn, chunk[:partial], pcur)
   sum = next_temp(wfn)
-  emit_instruction(wfn, {op: :sadd_with_overflow, temp: sum, lhs: pcur, rhs: addend_raw})
+  emit_wire_sadd_with_overflow(wfn, pcur, addend_raw, sum)
   flush_label = next_label(wfn, "sc.flush")
   ok_label = next_label(wfn, "sc.ok")
   done_label = next_label(wfn, "sc.done")
-  emit_instruction(wfn, {op: :cond_br, cond: sum + ".ovf", then_label: flush_label, else_label: ok_label, prof: :unlikely})
+  emit_wire_cond_br(wfn, sum + ".ovf", ok_label, :unlikely, flush_label)
   start_block(wfn, flush_label)
   boxed = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: boxed, name: "w_int", args: [pcur]})
+  emit_wire_call_direct_i64(wfn, nil, [pcur], nil, nil, "w_int", nil, nil, boxed)
   racc = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_i64, temp: racc, ptr: chunk[:acc]})
+  emit_wire_load_i64(wfn, chunk[:acc], racc)
   racc2 = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: racc2, name: "w_bigint_add_mut", args: [racc, boxed], call_conv: "preserve_mostcc"})
-  emit_instruction(wfn, {op: :store_i64, value: racc2, ptr: chunk[:acc]})
-  emit_instruction(wfn, {op: :store_i64, value: addend_raw, ptr: chunk[:partial]})
-  emit_instruction(wfn, {op: :br, label: done_label})
+  emit_wire_call_direct_i64(wfn, nil, [racc, boxed], "preserve_mostcc", nil, "w_bigint_add_mut", nil, nil, racc2)
+  emit_wire_store_i64(wfn, chunk[:acc], racc2)
+  emit_wire_store_i64(wfn, chunk[:partial], addend_raw)
+  emit_wire_br(wfn, done_label, nil, nil)
   start_block(wfn, ok_label)
-  emit_instruction(wfn, {op: :store_i64, value: sum, ptr: chunk[:partial]})
-  emit_instruction(wfn, {op: :br, label: done_label})
+  emit_wire_store_i64(wfn, chunk[:partial], sum)
+  emit_wire_br(wfn, done_label, nil, nil)
   start_block(wfn, done_label)
   typed_value(:i64, w_nil.to_s())
 
@@ -557,28 +557,28 @@
   # Guard 1: receiver is a live polymorphic WArray (obj space, subtag 10,
   # ebits 65) — the exact precondition of the unchecked inline path.
   g = next_temp(wfn)
-  emit_instruction(wfn, {op: :poly_array_guard, temp: g, value: arr_reg})
-  emit_instruction(wfn, {op: :cond_br, cond: g, then_label: chk_label, else_label: slow_label})
+  emit_wire_poly_array_guard(wfn, g, arr_reg)
+  emit_wire_cond_br(wfn, g, slow_label, nil, chk_label)
   start_block(wfn, chk_label)
   # Guard 2: counter starts >= 0 (monotone +step keeps every index in
   # bounds against the loop condition / the checked bound below).
   i0 = lv_raw_int_value(ctx, wfn, ver[:ivar])
   c1 = next_temp(wfn)
-  emit_instruction(wfn, {op: :icmp_i64, temp: c1, pred: "sge", lhs: i0, rhs: "0"})
+  emit_wire_icmp_i64(wfn, i0, "sge", "0", c1)
   if ver[:bound_kind] == :var
     chk2_label = next_label(wfn, "lv.chk2")
-    emit_instruction(wfn, {op: :cond_br, cond: c1, then_label: chk2_label, else_label: slow_label})
+    emit_wire_cond_br(wfn, c1, slow_label, nil, chk2_label)
     start_block(wfn, chk2_label)
     # Guard 3 (var bound): n <= size at entry; n is loop-invariant and the
     # body cannot resize the array (loop_version_spec rejects all calls).
     sz = next_temp(wfn)
-    emit_instruction(wfn, {op: :ta_size_raw, temp: sz, value: arr_reg})
+    emit_wire_ta_size_raw(wfn, sz, arr_reg)
     nraw = lv_raw_int_value(ctx, wfn, ver[:bound_name])
     c2 = next_temp(wfn)
-    emit_instruction(wfn, {op: :icmp_i64, temp: c2, pred: "sle", lhs: nraw, rhs: sz})
-    emit_instruction(wfn, {op: :cond_br, cond: c2, then_label: fast_label, else_label: slow_label})
+    emit_wire_icmp_i64(wfn, nraw, "sle", sz, c2)
+    emit_wire_cond_br(wfn, c2, slow_label, nil, fast_label)
   else
-    emit_instruction(wfn, {op: :cond_br, cond: c1, then_label: fast_label, else_label: slow_label})
+    emit_wire_cond_br(wfn, c1, slow_label, nil, fast_label)
   saved_bindings = lv_bindings_copy(ctx[:bindings])
   start_block(wfn, fast_label)
   saved_vt = ctx[:var_types][arr_name]
@@ -586,13 +586,13 @@
   lower_while_core(ctx, node)
   ctx[:var_types][arr_name] = saved_vt
   if !block_terminated(wfn)
-    emit_instruction(wfn, {op: :br, label: done_label})
+    emit_wire_br(wfn, done_label, nil, nil)
   # The fast arm's register bindings do not dominate the slow arm.
   ctx[:bindings] = lv_bindings_copy(saved_bindings)
   start_block(wfn, slow_label)
   lower_while_core(ctx, node)
   if !block_terminated(wfn)
-    emit_instruction(wfn, {op: :br, label: done_label})
+    emit_wire_br(wfn, done_label, nil, nil)
   start_block(wfn, done_label)
   nil
 
@@ -645,9 +645,9 @@
       raw_slot = ensure_var_slot(wfn, "__raw_" + vname)
       boxed_slot = ensure_var_slot(wfn, vname)
       cur = next_temp(wfn)
-      emit_instruction(wfn, {op: :load_i64, temp: cur, ptr: boxed_slot})
+      emit_wire_load_i64(wfn, boxed_slot, cur)
       raw = nanunbox_int_emit(wfn, cur)
-      emit_instruction(wfn, {op: :store_i64, value: raw, ptr: raw_slot})
+      emit_wire_store_i64(wfn, raw_slot, raw)
       unboxed[vname] = raw_slot
     ui += 1
 
@@ -678,10 +678,10 @@
     # `next` (continue) jumps to body, and the back-edge is the only
     # branch in the loop. After -O3 this is a single `b .Lbody` per
     # iteration — the theoretical minimum for an unbounded loop.
-    emit_instruction(wfn, {op: :br, label: body_label})
+    emit_wire_br(wfn, body_label, nil, nil)
     cont_label = body_label
   else
-    emit_instruction(wfn, {op: :br, label: cond_label})
+    emit_wire_br(wfn, cond_label, nil, nil)
     start_block(wfn, cond_label)
     cond = lower_expression(ctx, node.condition)
     if cond[:type] == :i1
@@ -689,8 +689,8 @@
     else
       cond_reg = ensure_i64_value(wfn, cond)
       cond_bool = next_temp(wfn)
-      emit_instruction(wfn, {op: :truthy_inline, temp: cond_bool, value: cond_reg})
-    emit_instruction(wfn, {op: :cond_br, cond: cond_bool, then_label: body_label, else_label: end_label})
+      emit_wire_truthy_inline(wfn, cond_bool, cond_reg)
+    emit_wire_cond_br(wfn, cond_bool, end_label, nil, body_label)
     cont_label = cond_label
 
   # Body
@@ -704,13 +704,13 @@
   if !block_terminated(wfn)
     emit_scope_pop(wfn, while_sid)
     if loop_novec && loop_unroll_count > 0
-      emit_instruction(wfn, {op: :br, label: cont_label, novec: true, unroll_count: loop_unroll_count})
+      emit_wire_br(wfn, cont_label, true, loop_unroll_count)
     elsif loop_novec
-      emit_instruction(wfn, {op: :br, label: cont_label, novec: true})
+      emit_wire_br(wfn, cont_label, true, nil)
     elsif loop_unroll_count > 0
-      emit_instruction(wfn, {op: :br, label: cont_label, unroll_count: loop_unroll_count})
+      emit_wire_br(wfn, cont_label, nil, loop_unroll_count)
     else
-      emit_instruction(wfn, {op: :br, label: cont_label})
+      emit_wire_br(wfn, cont_label, nil, nil)
   else
     restore_recycle_scope_depth(wfn, while_recycle_depth)
 
@@ -731,11 +731,11 @@
     if already_raw != true
       raw_slot = unboxed[vname]
       raw = next_temp(wfn)
-      emit_instruction(wfn, {op: :load_i64, temp: raw, ptr: raw_slot})
+      emit_wire_load_i64(wfn, raw_slot, raw)
       boxed_temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: boxed_temp, name: "__w_int_fast", args: [raw]})
+      emit_wire_call_direct_i64(wfn, nil, [raw], nil, nil, "__w_int_fast", nil, nil, boxed_temp)
       boxed_slot = wfn[:var_slots][vname]
-      emit_instruction(wfn, {op: :store_i64, value: boxed_temp, ptr: boxed_slot})
+      emit_wire_store_i64(wfn, boxed_slot, boxed_temp)
     ui += 1
 
   # Invalidate bindings for vars ASSIGNED inside the loop — their pre-loop
@@ -794,9 +794,9 @@
     start_reg = ensure_i64_value(wfn, start_tv)
     start_raw = next_temp(wfn)
     if from_type != nil && !is_integer_like_type(from_type)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: start_raw, name: "w_range_bound_i64", args: [start_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [start_reg], nil, nil, "w_range_bound_i64", nil, nil, start_raw)
     else
-      emit_instruction(wfn, {op: :nanunbox_int, temp: start_raw, temp_shl: start_raw + ".shl", boxed: start_reg})
+      emit_wire_nanunbox_int(wfn, start_reg, start_raw, start_raw + ".shl")
 
     unbounded = collection.to == nil
     end_raw = nil
@@ -805,9 +805,9 @@
       end_reg = ensure_i64_value(wfn, end_tv)
       end_raw = next_temp(wfn)
       if to_type != nil && !is_integer_like_type(to_type)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: end_raw, name: "w_range_bound_i64", args: [end_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [end_reg], nil, nil, "w_range_bound_i64", nil, nil, end_raw)
       else
-        emit_instruction(wfn, {op: :nanunbox_int, temp: end_raw, temp_shl: end_raw + ".shl", boxed: end_reg})
+        emit_wire_nanunbox_int(wfn, end_reg, end_raw, end_raw + ".shl")
 
     cmp_op = "sle"
     if collection.exclusive == true
@@ -845,31 +845,31 @@
   while i < binding_info.size()
     info = binding_info[i]
 
-    emit_instruction(wfn, {op: :br, label: info[:pre_label]})
+    emit_wire_br(wfn, info[:pre_label], nil, nil)
     start_block(wfn, info[:pre_label])
-    emit_instruction(wfn, {op: :br, label: info[:header_label]})
+    emit_wire_br(wfn, info[:header_label], nil, nil)
 
     start_block(wfn, info[:header_label])
     phi_reg = next_temp(wfn)
     inc_next = next_temp(wfn)
-    emit_instruction(wfn, {op: :phi_i64, temp: phi_reg, a_value: info[:start_raw], a_label: info[:pre_label], b_value: inc_next, b_label: info[:inc_label]})
+    emit_wire_phi_i64(wfn, info[:pre_label], info[:start_raw], info[:inc_label], inc_next, phi_reg)
 
     # Bound check — skipped for right-unbounded ranges (loop exits only via break).
     if info[:unbounded] == true
-      emit_instruction(wfn, {op: :br, label: info[:body_label]})
+      emit_wire_br(wfn, info[:body_label], nil, nil)
     else
       cmp_reg = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: cmp_reg, pred: info[:cmp_op], lhs: phi_reg, rhs: info[:end_raw]})
-      emit_instruction(wfn, {op: :cond_br, cond: cmp_reg, then_label: info[:body_label], else_label: info[:exit_label]})
+      emit_wire_icmp_i64(wfn, phi_reg, info[:cmp_op], info[:end_raw], cmp_reg)
+      emit_wire_cond_br(wfn, cmp_reg, info[:exit_label], nil, info[:body_label])
 
     # Body entry: store counter to var slot, clear stale binding
     start_block(wfn, info[:body_label])
     slot = wfn[:var_slots][info[:name]]
     if is_machine_int_type(info[:from_type])
-      emit_instruction(wfn, {op: machine_store_op(info[:from_type]), value: phi_reg, ptr: slot})
+      emit_wire_dynamic_2(wfn, machine_store_op(info[:from_type]), :ptr, slot, :value, phi_reg)
     else
       boxed_tv = nanbox_int_emit(wfn, phi_reg)
-      emit_instruction(wfn, {op: :store_i64, value: boxed_tv[:value], ptr: slot})
+      emit_wire_store_i64(wfn, slot, boxed_tv[:value])
     if ctx[:bindings][info[:name]] != nil
       ctx[:bindings][info[:name]] = nil
     # Infer iteration variable type from range bounds
@@ -902,10 +902,10 @@
   while i >= 0
     info = binding_info[i]
     if !block_terminated(wfn)
-      emit_instruction(wfn, {op: :br, label: info[:inc_label]})
+      emit_wire_br(wfn, info[:inc_label], nil, nil)
     start_block(wfn, info[:inc_label])
-    emit_instruction(wfn, {op: :add_i64, temp: info[:inc_next], lhs: info[:phi_reg], rhs: "1"})
-    emit_instruction(wfn, {op: :br, label: info[:header_label]})
+    emit_wire_add_i64(wfn, info[:phi_reg], "1", info[:inc_next])
+    emit_wire_br(wfn, info[:header_label], nil, nil)
     start_block(wfn, info[:exit_label])
     i -= 1
   nil
@@ -929,7 +929,7 @@
     if recycle_depth == nil
       recycle_depth = wfn[:scope_recycle_stack].size()
     emit_recycles_above_depth(wfn, recycle_depth)
-    emit_instruction(wfn, {op: :br, label: loop_info[:break_label]})
+    emit_wire_br(wfn, loop_info[:break_label], nil, nil)
   nil
 
 -> lower_next(ctx)
@@ -946,7 +946,7 @@
     # The finalizer handles the function-body scope before this ret; flush only
     # nested lexical scopes here so no value is recycled twice.
     emit_recycles_above_depth(wfn, 1)
-    emit_return_instruction(wfn, {op: :ret_i64, value: w_nil.to_s()})
+    emit_return_instruction(wfn, wire_make_ret_i64(nil, w_nil.to_s()))
     return nil
   loop_info = current_loop(wfn)
   if loop_info != nil
@@ -965,7 +965,7 @@
     if recycle_depth == nil
       recycle_depth = wfn[:scope_recycle_stack].size()
     emit_recycles_above_depth(wfn, recycle_depth)
-    emit_instruction(wfn, {op: :br, label: loop_info[:next_label]})
+    emit_wire_br(wfn, loop_info[:next_label], nil, nil)
   nil
 
 # `recase [expr]` — re-dispatch the innermost enclosing case. With a value:
@@ -985,13 +985,13 @@
     new_tv = lower_expression(ctx, node.value)
     new_reg = ensure_i64_value(wfn, new_tv)
     materialize_bindings(ctx)
-    emit_instruction(wfn, {op: :store_i64, value: new_reg, ptr: info[:subj_ptr]})
+    emit_wire_store_i64(wfn, info[:subj_ptr], new_reg)
   elsif info[:subject_node] != nil
     # Bare recase on a value-case: re-evaluate the original subject expression.
     new_tv = lower_expression(ctx, info[:subject_node])
     new_reg = ensure_i64_value(wfn, new_tv)
     materialize_bindings(ctx)
-    emit_instruction(wfn, {op: :store_i64, value: new_reg, ptr: info[:subj_ptr]})
+    emit_wire_store_i64(wfn, info[:subj_ptr], new_reg)
   else
     # Bare recase on a subject-less cond-case: just re-test the conditions.
     materialize_bindings(ctx)
@@ -1007,7 +1007,7 @@
   emit_transfer_unwind(ctx, wfn, ensure_base, base_eh)
   if block_terminated(wfn)
     return typed_value(:i64, w_nil.to_s())
-  emit_instruction(wfn, {op: :br, label: info[:redispatch_label]})
+  emit_wire_br(wfn, info[:redispatch_label], nil, nil)
   typed_value(:i64, w_nil.to_s())
 
 # Scan a statement body for a `recase` that targets THIS case. Descends into
@@ -1080,8 +1080,8 @@
     # This longjmp never reaches the block function's ret/finalizer, so clean
     # the function-body entry as well as all nested lexical scopes.
     emit_recycles_above_depth(wfn, 0)
-    emit_instruction(wfn, {op: :call_direct_void, name: "w_block_return_signal", args: [frame_reg, val_reg]})
-    emit_instruction(wfn, {op: :unreachable})
+    emit_wire_call_direct_void(wfn, [frame_reg, val_reg], "w_block_return_signal")
+    emit_wire_unreachable(wfn)
     return nil
 
   if wfn[:exit_label] != nil && wfn[:result_slot] != nil
@@ -1100,8 +1100,8 @@
     # is reached by a runtime unwind, while a normal return must clean the
     # exact compile-time prefix live at this transfer before joining it.
     emit_recycles_above_depth(wfn, 0)
-    emit_instruction(wfn, {op: :store_i64, value: val_reg, ptr: wfn[:result_slot]})
-    emit_instruction(wfn, {op: :br, label: wfn[:exit_label]})
+    emit_wire_store_i64(wfn, wfn[:result_slot], val_reg)
+    emit_wire_br(wfn, wfn[:exit_label], nil, nil)
     return nil
 
   if node.value != nil
@@ -1120,12 +1120,12 @@
   emit_recycles_above_depth(wfn, 1)
 
   if wfn[:return_type] == "i64"
-    emit_return_instruction(wfn, {op: :ret_i64, value: val_reg})
+    emit_return_instruction(wfn, wire_make_ret_i64(nil, val_reg))
   elsif wfn[:return_type] == "i32"
     # Truncate for main
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :trunc_i64_i32, temp: temp, value: val_reg})
-    emit_return_instruction(wfn, {op: :ret_i32, value: temp})
+    emit_wire_trunc_i64_i32(wfn, temp, val_reg)
+    emit_return_instruction(wfn, wire_make_ret_i32(temp))
   nil
 
 -> default_return_value(wfn)
@@ -1360,11 +1360,11 @@
   if !has_recase && subj_type != nil && is_machine_int_type(subj_type)
     # Machine int subject: store raw value directly (no boxing)
     raw_reg = ensure_raw_machine_int(wfn, subj_tv, subj_type, subj_type)
-    emit_instruction(wfn, {op: :store_i64, value: raw_reg, ptr: subj_ptr})
+    emit_wire_store_i64(wfn, subj_ptr, raw_reg)
     ctx[:var_types][subj_var] = subj_type
   else
     subj_reg = ensure_i64_value(wfn, subj_tv)
-    emit_instruction(wfn, {op: :store_i64, value: subj_reg, ptr: subj_ptr})
+    emit_wire_store_i64(wfn, subj_ptr, subj_reg)
     # The slot holds a BOXED value; recording a float type would make the
     # when-arm comparisons read it as a raw f64 (invalid bitcast IR). Only
     # propagate types whose var reads expect boxed storage.
@@ -1376,7 +1376,7 @@
   if has_recase
     redispatch_header = next_label(wfn, "recase.head")
     materialize_bindings(ctx)
-    emit_instruction(wfn, {op: :br, label: redispatch_header})
+    emit_wire_br(wfn, redispatch_header, nil, nil)
     start_block(wfn, redispatch_header)
     push_case(wfn, {subj_ptr: subj_ptr, subject_node: node.subject, redispatch_label: redispatch_header})
 
@@ -1591,7 +1591,7 @@
   wfn = ctx[:func]
   result_var = "__case_switch." + next_label(wfn, "cs")
   result_ptr = ensure_var_slot(wfn, result_var)
-  emit_instruction(wfn, {op: :store_i64, value: w_nil.to_s(), ptr: result_ptr})
+  emit_wire_store_i64(wfn, result_ptr, w_nil.to_s())
 
   subj_tv = lower_expression(ctx, node.subject)
   # Interned (symbol/string) subject: the WValue's raw i64 bits ARE
@@ -1606,7 +1606,7 @@
     # switch; w_switch_canonical repacks ≤5-byte content to SSO bits
     # (longer content already matches by slab id).
     subj_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: subj_raw, name: "w_switch_canonical", args: [subj_boxed]})
+    emit_wire_call_direct_i64(wfn, nil, [subj_boxed], nil, nil, "w_switch_canonical", nil, nil, subj_raw)
   else
     subj_raw = ensure_raw_machine_int(wfn, subj_tv, :i64, subj_type)
   default_label = next_label(wfn, "case.default")
@@ -1621,7 +1621,7 @@
   # bit when resolving medium-length string_id keys. SSO-5 keys
   # already have the bit baked into their literal value, so they
   # don't need this flag.
-  emit_instruction(wfn, {op: :switch_i64, value: subj_raw, default_label: default_label, cases: cases, is_symbol: symbol_switch})
+  emit_wire_switch_i64(wfn, cases, default_label, symbol_switch, subj_raw)
 
   i = 0
   while i < cases.size()
@@ -1632,7 +1632,7 @@
       lower_if_expr_body(ctx, wfn, body, result_ptr)
     materialize_bindings(ctx)
     if !block_terminated(wfn)
-      emit_instruction(wfn, {op: :br, label: end_label})
+      emit_wire_br(wfn, end_label, nil, nil)
     i += 1
 
   start_block(wfn, default_label)
@@ -1640,11 +1640,11 @@
     lower_if_expr_body(ctx, wfn, node.else_body, result_ptr)
   materialize_bindings(ctx)
   if !block_terminated(wfn)
-    emit_instruction(wfn, {op: :br, label: end_label})
+    emit_wire_br(wfn, end_label, nil, nil)
 
   start_block(wfn, end_label)
   result = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_i64, temp: result, ptr: result_ptr})
+  emit_wire_load_i64(wfn, result_ptr, result)
   typed_value(:i64, result)
 
 # True when any when-arm body (or the else body) of a subject-less cond-case
@@ -1674,7 +1674,7 @@
   if has_recase
     redispatch_header = next_label(wfn, "recase.head")
     materialize_bindings(ctx)
-    emit_instruction(wfn, {op: :br, label: redispatch_header})
+    emit_wire_br(wfn, redispatch_header, nil, nil)
     start_block(wfn, redispatch_header)
     push_case(wfn, {subj_ptr: nil, subject_node: nil, redispatch_label: redispatch_header})
 
@@ -1775,7 +1775,7 @@
 -> emit_eh_pops(wfn, count)
   i = 0
   while i < count
-    emit_instruction(wfn, {op: :call_direct_void, name: "w_exception_pop", args: []})
+    emit_wire_call_direct_void(wfn, [], "w_exception_pop")
     i += 1
   nil
 
@@ -1852,25 +1852,25 @@
   if want_value
     result_var = "__begin_expr." + next_label(wfn, "be")
     result_ptr = ensure_var_slot(wfn, result_var)
-    emit_instruction(wfn, {op: :store_i64, value: w_nil.to_s(), ptr: result_ptr})
+    emit_wire_store_i64(wfn, result_ptr, w_nil.to_s())
 
   # Push exception frame: buf = w_exception_push()
   buf = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_ptr, temp: buf, name: "w_exception_push", args: []})
+  emit_wire_call_direct_ptr(wfn, [], "w_exception_push", buf)
 
   # setjmp(buf) → 0 = normal, non-zero = exception
   sj = next_temp(wfn)
-  emit_instruction(wfn, {op: :setjmp, temp: sj, buf: buf})
+  emit_wire_setjmp(wfn, buf, sj)
 
   # Branch: 0 → try, else → rescue
   cmp = next_temp(wfn)
-  emit_instruction(wfn, {op: :icmp_eq_i32, temp: cmp, lhs: sj, rhs: "0"})
+  emit_wire_icmp_eq_i32(wfn, sj, "0", cmp)
 
   try_label = next_label(wfn, "try")
   rescue_label = next_label(wfn, "rescue")
   end_label = next_label(wfn, "begin.end")
 
-  emit_instruction(wfn, {op: :cond_br, cond: cmp, then_label: try_label, else_label: rescue_label})
+  emit_wire_cond_br(wfn, cmp, rescue_label, nil, try_label)
 
   # Try block. The frame is live for exactly the try body's lowering:
   # return/break/next/recase lowered inside it consult eh_depth to pop it.
@@ -1899,12 +1899,12 @@
   if !block_terminated(wfn)
     materialize_bindings(ctx)
     emit_scope_pop(wfn, try_sid)
-    emit_instruction(wfn, {op: :call_direct_void, name: "w_exception_pop", args: []})
+    emit_wire_call_direct_void(wfn, [], "w_exception_pop")
     if node.ensure_body != nil
       lower_program(ctx, node.ensure_body)
       materialize_bindings(ctx)
     if !block_terminated(wfn)
-      emit_instruction(wfn, {op: :br, label: end_label})
+      emit_wire_br(wfn, end_label, nil, nil)
   else
     restore_recycle_scope_depth(wfn, try_recycle_depth)
 
@@ -1912,11 +1912,11 @@
   start_block(wfn, rescue_label)
   rescue_sid = next_scope_id(wfn)
   err = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: err, name: "w_exception_error", args: []})
-  emit_instruction(wfn, {op: :call_direct_void, name: "w_exception_pop", args: []})
+  emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_exception_error", nil, nil, err)
+  emit_wire_call_direct_void(wfn, [], "w_exception_pop")
   if node.rescue_var != nil
     ptr = ensure_var_slot(wfn, node.rescue_var)
-    emit_instruction(wfn, {op: :store_i64, value: err, ptr: ptr})
+    emit_wire_store_i64(wfn, ptr, err)
   rescue_recycle_depth = wfn[:scope_recycle_stack].size()
   emit_scope_push(wfn, rescue_sid)
   if node.rescue_body != nil
@@ -1942,17 +1942,17 @@
         # to run the ensure body. Spec 4.6.5: an unrescued error propagates
         # AFTER ensure — re-raise it instead of falling through (which
         # silently swallowed the exception).
-        emit_instruction(wfn, {op: :call_direct_void, name: "w_raise", args: [err]})
-        emit_instruction(wfn, {op: :unreachable})
+        emit_wire_call_direct_void(wfn, [err], "w_raise")
+        emit_wire_unreachable(wfn)
       else
-        emit_instruction(wfn, {op: :br, label: end_label})
+        emit_wire_br(wfn, end_label, nil, nil)
   else
     restore_recycle_scope_depth(wfn, rescue_recycle_depth)
 
   start_block(wfn, end_label)
   if result_ptr != nil
     result = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: result, ptr: result_ptr})
+    emit_wire_load_i64(wfn, result_ptr, result)
     return typed_value(:i64, result)
   nil
 
@@ -1961,17 +1961,17 @@
 
   # Push exception frame
   buf = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_ptr, temp: buf, name: "w_exception_push", args: []})
+  emit_wire_call_direct_ptr(wfn, [], "w_exception_push", buf)
   sj = next_temp(wfn)
-  emit_instruction(wfn, {op: :setjmp, temp: sj, buf: buf})
+  emit_wire_setjmp(wfn, buf, sj)
   cmp = next_temp(wfn)
-  emit_instruction(wfn, {op: :icmp_eq_i32, temp: cmp, lhs: sj, rhs: "0"})
+  emit_wire_icmp_eq_i32(wfn, sj, "0", cmp)
 
   try_label = next_label(wfn, "rescexpr.try")
   rescue_label = next_label(wfn, "rescexpr.rescue")
   end_label = next_label(wfn, "rescexpr.end")
 
-  emit_instruction(wfn, {op: :cond_br, cond: cmp, then_label: try_label, else_label: rescue_label})
+  emit_wire_cond_br(wfn, cmp, rescue_label, nil, try_label)
 
   # Try block: evaluate body (tracked in eh_depth like lower_begin's try, in
   # case the expression lowers an inline construct containing an early exit)
@@ -1986,23 +1986,23 @@
   # that doesn't dominate it — invalid IR. (try_reg itself is safe: its only
   # cross-block use is the phi below, which reads it on the edge.)
   materialize_bindings(ctx)
-  emit_instruction(wfn, {op: :call_direct_void, name: "w_exception_pop", args: []})
+  emit_wire_call_direct_void(wfn, [], "w_exception_pop")
   try_from = wfn[:blocks][wfn[:blocks].size() - 1][:label]
-  emit_instruction(wfn, {op: :br, label: end_label})
+  emit_wire_br(wfn, end_label, nil, nil)
 
   # Rescue block: evaluate fallback
   start_block(wfn, rescue_label)
-  emit_instruction(wfn, {op: :call_direct_void, name: "w_exception_pop", args: []})
+  emit_wire_call_direct_void(wfn, [], "w_exception_pop")
   rescue_tv = lower_expression(ctx, node.fallback)
   rescue_reg = ensure_i64_value(wfn, rescue_tv)
   materialize_bindings(ctx)
   rescue_from = wfn[:blocks][wfn[:blocks].size() - 1][:label]
-  emit_instruction(wfn, {op: :br, label: end_label})
+  emit_wire_br(wfn, end_label, nil, nil)
 
   # Merge
   start_block(wfn, end_label)
   result = next_temp(wfn)
-  emit_instruction(wfn, {op: :phi_i64, temp: result, a_value: try_reg, a_label: try_from, b_value: rescue_reg, b_label: rescue_from})
+  emit_wire_phi_i64(wfn, try_from, try_reg, rescue_from, rescue_reg, result)
   typed_value(:i64, result)
 
 -> lower_raise(ctx, node)
@@ -2022,14 +2022,7 @@
     if col_val == nil
       col_val = 0
     tp = next_temp(wfn)
-    emit_instruction(wfn, {
-      op: :call_loc_set_col,
-      temp_ptr: tp,
-      file_str_id: file_str_id,
-      file_byte_len: file_byte_len,
-      line: node.line,
-      col: col_val
-    })
-  emit_instruction(wfn, {op: :call_direct_void, name: "w_raise", args: [val_reg]})
-  emit_instruction(wfn, {op: :unreachable})
+    emit_wire_call_loc_set_col(wfn, col_val, file_byte_len, file_str_id, node.line, tp)
+  emit_wire_call_direct_void(wfn, [val_reg], "w_raise")
+  emit_wire_unreachable(wfn)
   nil

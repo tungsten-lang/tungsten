@@ -118,6 +118,14 @@ static void test_wire_arena(void) {
 
     w_wire_field_store_at(original, 0, key_op, w_box_int(37));
     w_wire_field_store_at(original, 1, key_arg, w_box_int(99));
+    CHECK(w_wire_field_count(original) == 2,
+          "WIRE canonical field count round-trips");
+    CHECK(w_wire_field_symbol_at(original, 0) == key_op &&
+          w_wire_field_symbol_at(original, 1) == key_arg,
+          "WIRE canonical field symbols preserve schema order");
+    CHECK(w_as_int(w_wire_field_value_at(original, 0)) == 37 &&
+          w_as_int(w_wire_field_value_at(original, 1)) == 99,
+          "WIRE canonical field values support ordinal walking");
     CHECK(w_as_int(w_wire_field_load(original, key_arg)) == 99,
           "WIRE field lookup round-trips");
     CHECK(w_wire_field_load(original, w_box_int(404)) == W_UNDEF,

@@ -662,11 +662,11 @@
   while ci < captures.size()
     cap_name = captures[ci]
     gep_temp = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :gep_array, temp: gep_temp, base: "%__captures", count: captures.size(), index: ci})
+    emit_wire_gep_array(new_fn, "%__captures", captures.size(), ci, gep_temp)
     load_temp = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :load_ptr, temp: load_temp, ptr: gep_temp})
+    emit_wire_load_ptr(new_fn, gep_temp, load_temp)
     cap_ptr = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :i64_to_ptr, temp: cap_ptr, value: load_temp})
+    emit_wire_i64_to_ptr(new_fn, cap_ptr, load_temp)
     new_fn[:var_slots][cap_name] = cap_ptr
     # Record which frame OWNS this captured name's storage, chaining through
     # nested blocks (a passthrough capture inherits the outer block's origin).
@@ -731,7 +731,7 @@
   while pi < reassigned.size()
     pname = reassigned[pi]
     ptr = ensure_var_slot(new_fn, pname)
-    emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
+    emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
     pi += 1
 
   # Lower block body with implicit return for last expression.
@@ -760,7 +760,7 @@
       else
         result = lower_expression(child_ctx, last)
         result_reg = ensure_i64_value(new_fn, result)
-        emit_instruction(new_fn, {op: :ret_i64, value: result_reg})
+        emit_wire_ret_i64(new_fn, nil, result_reg)
 
   finalize_function(new_fn)
 
@@ -768,7 +768,7 @@
   if captures.size() > 0
     # Allocate capture array on stack
     arr_ptr = next_temp(wfn)
-    emit_instruction(wfn, {op: :alloca_array, ptr: arr_ptr, count: captures.size()})
+    emit_wire_alloca_array(wfn, captures.size(), arr_ptr)
     # Store each captured variable's value into the array
     ci = 0
     while ci < captures.size()
@@ -813,22 +813,22 @@
         slot_type = float_slot_type(raw_type)
       cap_slot = ensure_var_slot(wfn, cap_name, slot_type)
       cap_bits = next_temp(wfn)
-      emit_instruction(wfn, {op: :ptr_to_i64, temp: cap_bits, value: cap_slot})
+      emit_wire_ptr_to_i64(wfn, cap_bits, cap_slot)
       gep_reg = next_temp(wfn)
-      emit_instruction(wfn, {op: :gep_array, temp: gep_reg, base: arr_ptr, count: captures.size(), index: ci})
-      emit_instruction(wfn, {op: :store_ptr, value: cap_bits, dest: gep_reg})
+      emit_wire_gep_array(wfn, arr_ptr, captures.size(), ci, gep_reg)
+      emit_wire_store_ptr(wfn, gep_reg, cap_bits)
       if cap_store != nil
         store_op = :store_i64
         if is_raw_int_storage_type(raw_type)
           store_op = machine_store_op(raw_type)
         elsif is_machine_float_type(raw_type)
           store_op = float_store_op(raw_type)
-        emit_instruction(wfn, {op: store_op, value: cap_store, ptr: cap_slot})
+        emit_wire_dynamic_2(wfn, store_op, :ptr, cap_slot, :value, cap_store)
       ci += 1
     cap_ptr = arr_ptr
   else
     cap_ptr = next_temp(wfn)
-    emit_instruction(wfn, {op: :null_ptr, temp: cap_ptr})
+    emit_wire_null_ptr(wfn, cap_ptr)
 
   closure = next_temp(wfn)
   # block_arity carries the DECLARED param count so single-arg yields can
@@ -836,5 +836,5 @@
   # (w_closure_call_1). Free-var implicit blocks stay arity 0 — implicit
   # binding is first-reference order, never destructuring.
   declared_arity = block.params.size()
-  emit_instruction(wfn, {op: :closure_new, temp: closure, fn_name: fn_name, captures_ptr: cap_ptr, capture_count: captures.size(), block_arity: declared_arity})
+  emit_wire_closure_new(wfn, declared_arity, captures.size(), cap_ptr, fn_name, closure)
   typed_value(:i64, closure)

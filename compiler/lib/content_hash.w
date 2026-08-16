@@ -135,8 +135,7 @@ use hashing
     buf << ":"
     buf << text
 
--> encode_codegen_meta_field(inst, field, buf, temp_map)
-  value = inst[field]
+-> encode_codegen_meta_field(field, value, buf, temp_map)
   if value == nil
     return nil
   # switch_i64 cases retain their source AST arm for the later block-lowering
@@ -181,10 +180,23 @@ content_hash_codegen_fields = [
   :scalar_source_argc1, :scalar_source_argc2, :shift, :slot, :slot_id, :slot_type, :splat_index,
   :super_reg, :table, :total_bytes, :trap, :type, :unroll_count, :val
 ]
+content_hash_codegen_field_set = {}
+content_hash_codegen_field_i = 0
+while content_hash_codegen_field_i < content_hash_codegen_fields.size()
+  content_hash_codegen_field_set[content_hash_codegen_fields[content_hash_codegen_field_i]] = true
+  content_hash_codegen_field_i += 1
+
 -> encode_codegen_metadata(inst, buf, temp_map)
+  # Constructor fields are stored in lexical schema order. Walk the packed
+  # record once instead of probing every possible metadata key through the
+  # Hash-compatibility lookup. Lexical order matches the historical canonical
+  # field list above, preserving content-addressed symbol names byte-for-byte.
   i = 0
-  while i < content_hash_codegen_fields.size()
-    encode_codegen_meta_field(inst, content_hash_codegen_fields[i], buf, temp_map)
+  field_count = wire_field_count(inst)
+  while i < field_count
+    field = wire_field_symbol_at(inst, i)
+    if content_hash_codegen_field_set[field] == true
+      encode_codegen_meta_field(field, wire_field_value_at(inst, i), buf, temp_map)
     i += 1
 
 # Encode one instruction into the canonical string buffer.

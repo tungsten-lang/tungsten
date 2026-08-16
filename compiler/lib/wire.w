@@ -7,6 +7,7 @@
 # migration, so CFG/ownership/emission can move independently of lowerers.
 
 use wire_schema
+use wire_constructors
 
 -> wire_kind_id(op)
   wire_schema_kind_id(op)
@@ -23,6 +24,17 @@ use wire_schema
 -> wire_set(instruction, field, value)
   ccall_rawargs("w_wire_field_store", instruction, field, value)
 
+-> wire_field_count(instruction)
+  ccall_nobox("w_wire_field_count", instruction)
+
+-> wire_field_symbol_at(instruction, index)
+  raw_index = ccall_nobox("w_numeric_to_i64", index)
+  ccall_rawargs("w_wire_field_symbol_at", instruction, raw_index)
+
+-> wire_field_value_at(instruction, index)
+  raw_index = ccall_nobox("w_numeric_to_i64", index)
+  ccall_rawargs("w_wire_field_value_at", instruction, raw_index)
+
 -> wire_instruction(instruction)
   if instruction == nil
     return nil
@@ -33,7 +45,9 @@ use wire_schema
   op = instruction[:op]
   if op == nil
     return instruction
-  keys = instruction.keys()
+  # Compatibility callers still receive the same canonical ordinal contract
+  # as generated constructors, independent of Hash insertion order.
+  keys = instruction.keys().sort()
   kind_id = ccall_nobox("w_numeric_to_i64", wire_kind_id(op))
   field_count = ccall_nobox("w_numeric_to_i64", keys.size())
   handle = ccall_rawargs("w_wire_alloc", kind_id, field_count)
@@ -276,7 +290,10 @@ use wire_schema
     count = stack[0].size()
   # Zero is meaningful: a later sibling allocation must not be attached to
   # this earlier return by the finalizer's ordinary full-list fallback.
-  instruction[:function_recycle_count] = count
+  if ccall_nobox("w_is_wire_extern", instruction) == 1
+    wire_set(instruction, :function_recycle_count, count)
+  else
+    instruction[:function_recycle_count] = count
   emit_instruction(f, instruction)
 
 # -- Scope-aware push/pop with ## recycle tracking --
@@ -284,7 +301,7 @@ use wire_schema
 # scope_pop. The top of scope_recycle_stack is the current scope's list.
 
 -> emit_scope_push(f, id)
-  emit_instruction(f, {op: :scope_push, id: id})
+  emit_wire_scope_push(f, id)
   f[:scope_recycle_stack].push(nil)
 
 # Emit normal-path cleanup for every recycle value in scopes deeper than
@@ -312,8 +329,8 @@ use wire_schema
       ei = entries.size() - 1
       while ei >= 0
         entry = entries[ei]
-        emit_instruction(f, {op: :cleanup_pop})
-        emit_instruction(f, {op: recycle_op_for_kind(entry[:kind]), value: entry[:temp]})
+        emit_wire_cleanup_pop(f)
+        emit_wire_dynamic_1(f, recycle_op_for_kind(entry[:kind]), :value, entry[:temp])
         ei -= 1
     si -= 1
 
@@ -342,7 +359,7 @@ use wire_schema
   emit_recycles_for_current_scope(f)
   if f[:scope_recycle_stack].size() > 0
     f[:scope_recycle_stack].pop()
-  emit_instruction(f, {op: :scope_pop, id: id})
+  emit_wire_scope_pop(f, id)
 
 -> track_recycle_temp(f, temp, kind)
   stack = f[:scope_recycle_stack]
@@ -362,7 +379,7 @@ use wire_schema
     push_op = :cleanup_push_typed
   elsif kind == :strbuf
     push_op = :cleanup_push_strbuf
-  emit_instruction(f, {op: push_op, value: temp})
+  emit_wire_dynamic_1(f, push_op, :value, temp)
   top.push({temp: temp, kind: kind})
 
 -> block_terminated(f)
@@ -371,7 +388,7 @@ use wire_schema
   if instrs.size() == 0
     return false
   last = instrs[instrs.size() - 1]
-  op = last[:op]
+  op = wire_kind(last)
   op in (:ret_i64 :ret_i32 :ret_void :br :cond_br :switch_i64 :unreachable)
 
 # Remove empty blocks (SSA may leave blocks with no instructions).
@@ -479,47 +496,47 @@ use wire_schema
   if tv[:type] == :raw_int
     temp_masked = next_temp(f)
     temp = next_temp(f)
-    emit_instruction(f, {op: :nanbox_int, temp: temp, temp_masked: temp_masked, raw: tv[:value]})
+    emit_wire_nanbox_int(f, tv[:value], temp, temp_masked)
     return temp
   # :char -> i64: nanbox as int (char codepoint fits in i48 trivially).
   # The typed_value's :value is the literal codepoint string, not a temp.
   if tv[:type] == :char
     temp_masked = next_temp(f)
     temp = next_temp(f)
-    emit_instruction(f, {op: :nanbox_int, temp: temp, temp_masked: temp_masked, raw: tv[:value]})
+    emit_wire_nanbox_int(f, tv[:value], temp, temp_masked)
     return temp
   # raw_i64 -> i64: box via the inline-fast wrapper (fitting values box
   # inline; only >i48 values call w_int for BigInt promotion)
   if tv[:type] == :raw_i64
     temp = next_temp(f)
-    emit_instruction(f, {op: :call_direct_i64, temp: temp, name: "__w_int_fast", args: [tv[:value]]})
+    emit_wire_call_direct_i64(f, nil, [tv[:value]], nil, nil, "__w_int_fast", nil, nil, temp)
     return temp
   # raw_u64 -> i64: box via unsigned runtime bridge
   if tv[:type] == :raw_u64
     temp = next_temp(f)
-    emit_instruction(f, {op: :call_direct_i64, temp: temp, name: "w_u64", args: [tv[:value]]})
+    emit_wire_call_direct_i64(f, nil, [tv[:value]], nil, nil, "w_u64", nil, nil, temp)
     return temp
   # raw_i128/raw_u128 -> i64: box via bigint-capable runtime bridges
   if tv[:type] == :raw_i128
     temp = next_temp(f)
-    emit_instruction(f, {op: :call_direct_i64, temp: temp, name: "w_i128", args: [tv[:value]], arg_types: ["i128"]})
+    emit_wire_call_direct_i64(f, ["i128"], [tv[:value]], nil, nil, "w_i128", nil, nil, temp)
     return temp
   if tv[:type] == :raw_u128
     temp = next_temp(f)
-    emit_instruction(f, {op: :call_direct_i64, temp: temp, name: "w_u128", args: [tv[:value]], arg_types: ["i128"]})
+    emit_wire_call_direct_i64(f, ["i128"], [tv[:value]], nil, nil, "w_u128", nil, nil, temp)
     return temp
   # raw_f32/raw_f64 -> i64: box at the Tungsten value boundary.
   if tv[:type] == :raw_f32
     raw64 = next_temp(f)
-    emit_instruction(f, {op: :fpext_f32_f64, temp: raw64, value: tv[:value]})
+    emit_wire_fpext_f32_f64(f, raw64, tv[:value])
     temp_bits = next_temp(f)
     temp = next_temp(f)
-    emit_instruction(f, {op: :nanbox_float, temp: temp, temp_bits: temp_bits, raw: raw64})
+    emit_wire_nanbox_float(f, raw64, temp, temp_bits)
     return temp
   if tv[:type] == :raw_f64
     temp_bits = next_temp(f)
     temp = next_temp(f)
-    emit_instruction(f, {op: :nanbox_float, temp: temp, temp_bits: temp_bits, raw: tv[:value]})
+    emit_wire_nanbox_float(f, tv[:value], temp, temp_bits)
     return temp
   # Aggregate/static receiver types (typed arrays, specialized classes, and
   # similar inference-only symbols) still carry an ordinary boxed i64 WValue.
@@ -529,7 +546,7 @@ use wire_schema
     return tv[:value]
   # i1 -> i64: nanbox bool (select i1 → W_TRUE/W_FALSE)
   temp = next_temp(f)
-  emit_instruction(f, {op: :nanbox_bool, temp: temp, value: tv[:value]})
+  emit_wire_nanbox_bool(f, temp, tv[:value])
   temp
 
 -> ensure_i1_value(f, tv)
@@ -537,7 +554,7 @@ use wire_schema
     return tv[:value]
   # i64 -> i1: icmp ne 0
   temp = next_temp(f)
-  emit_instruction(f, {op: :icmp_ne_zero, temp: temp, value: tv[:value]})
+  emit_wire_icmp_ne_zero(f, temp, tv[:value])
   temp
 
 # -- Finalize --
@@ -585,8 +602,8 @@ use wire_schema
           ri = recycle_count - 1
           while ri >= 0
             entry = fnbody[ri]
-            new_instrs.push(wire_instruction({op: :cleanup_pop}))
-            new_instrs.push(wire_instruction({op: recycle_op_for_kind(entry[:kind]), value: entry[:temp]}))
+            new_instrs.push(wire_make_cleanup_pop())
+            new_instrs.push(wire_make_dynamic_1(recycle_op_for_kind(entry[:kind]), :value, entry[:temp]))
             ri -= 1
       new_instrs.push(inst)
       ii += 1
@@ -596,11 +613,11 @@ use wire_schema
 -> finalize_function(f)
   if !block_terminated(f)
     if f[:return_type] == "i64"
-      emit_instruction(f, {op: :ret_i64, value: w_nil.to_s})
+      emit_wire_ret_i64(f, nil, w_nil.to_s)
     elsif f[:return_type] == "i32"
-      emit_instruction(f, {op: :ret_i32, value: "0"})
+      emit_wire_ret_i32(f, "0")
     else
-      emit_instruction(f, {op: :ret_void})
+      emit_wire_ret_void(f)
   # Per-ret flush of function-body ## recycle vars (fall-through AND explicit
   # returns). Runs before optimize_function, exactly like the old inline
   # fall-through emit did.

@@ -297,9 +297,9 @@
         pr_helper = "w_prime_test_i64_30k"
       pr_raw = ensure_raw_machine_int(wfn, lower_expression(ctx, recv_node), :i64, pr_type)
       pr_res = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: pr_res, name: pr_helper, args: [pr_raw]})
+      emit_wire_call_direct_i64(wfn, nil, [pr_raw], nil, nil, pr_helper, nil, nil, pr_res)
       pr_bit = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: pr_bit, pred: "ne", lhs: pr_res, rhs: "0"})
+      emit_wire_icmp_i64(wfn, pr_res, "ne", "0", pr_bit)
       return typed_value(:i1, pr_bit)
 
   # Symbol-to-proc for Enumerable methods on a collection receiver:
@@ -351,7 +351,7 @@
     closure_tv = lower_block_closure(ctx, node.block, nil, true)
     closure_reg = ensure_i64_value(wfn, closure_tv)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_thread_spawn_slots", args: [closure_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [closure_reg], nil, nil, "w_thread_spawn_slots", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # `self.foo(...)` calls inside a class context dispatch directly when
@@ -403,7 +403,7 @@
     fv = lower_expression(ctx, recv_node)
     fraw = ensure_raw_f64(wfn, fv)
     ftmp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_libm_f64, temp: ftmp, name: method_name, value: fraw})
+    emit_wire_call_libm_f64(wfn, nil, method_name, nil, ftmp, fraw)
     return typed_value(:raw_f64, ftmp)
 
   # Quantity is an immediate/domain runtime value rather than a heap Instance,
@@ -441,7 +441,7 @@
       call_args.push(ensure_i64_value(wfn, lower_expression(ctx, node.args[0])))
       call_args.push(ensure_i64_value(wfn, lower_expression(ctx, node.args[1])))
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: helper, args: call_args})
+    emit_wire_call_direct_i64(wfn, nil, call_args, nil, nil, helper, nil, nil, temp)
     return typed_value(:i64, temp)
 
   # `%f32[…]`/`%f64[…]` literals parse as `[~…].to_f32/to_f64`. When every
@@ -465,12 +465,12 @@
       if pfa_cap < 1
         pfa_cap = 1
       pfa_arr = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: pfa_arr, name: "w_array_new", args: [pfa_bits, pfa_cap.to_s()]})
+      emit_wire_call_direct_i64(wfn, nil, [pfa_bits, pfa_cap.to_s()], nil, nil, "w_array_new", nil, nil, pfa_arr)
       pfa_i = 0
       while pfa_i < pfa_els.size()
         pfa_val = ensure_i64_value(wfn, lower_expression(ctx, pfa_els[pfa_i]))
         pfa_tmp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: pfa_tmp, name: "w_array_push", args: [pfa_arr, pfa_val]})
+        emit_wire_call_direct_i64(wfn, nil, [pfa_arr, pfa_val], nil, nil, "w_array_push", nil, nil, pfa_tmp)
         pfa_i += 1
       return typed_value(:i64, pfa_arr)
 
@@ -586,21 +586,21 @@
       body_val = lower_expression(ctx, node.args[1])
       body_reg = ensure_i64_value(wfn, body_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_response_new_wv", args: [status_reg, body_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [status_reg, body_reg], nil, nil, "w_response_new_wv", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if recv_name == "Atomic" && method_name == "new" && node.args.size() == 1
       init_val = lower_expression(ctx, node.args[0])
       init_reg = ensure_i64_value(wfn, init_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_atomic_new", args: [init_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [init_reg], nil, nil, "w_atomic_new", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if recv_name == "Channel" && method_name == "new" && node.args.size() == 1
       size_val = lower_expression(ctx, node.args[0])
       size_reg = ensure_i64_value(wfn, size_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_chan_new", args: [size_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [size_reg], nil, nil, "w_chan_new", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if recv_name == "Rational" && method_name == "new" && node.args.size() >= 1 && node.args.size() <= 2
@@ -612,9 +612,9 @@
         denominator_reg = ensure_i64_value(wfn, denominator_val)
       else
         denominator_reg = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: denominator_reg, name: "w_int", args: ["1"]})
+        emit_wire_call_direct_i64(wfn, nil, ["1"], nil, nil, "w_int", nil, nil, denominator_reg)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_rational_new", args: [numerator_reg, denominator_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [numerator_reg, denominator_reg], nil, nil, "w_rational_new", nil, nil, temp)
       return typed_value(:i64, temp)
 
     # Array.new(size = 0, fill = nil) creates a sized polymorphic Array.
@@ -625,7 +625,7 @@
     if recv_name == "Array" && method_name == "new" && node.block == nil && node.args.size() <= 2
       if node.args.size() == 0
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_new_empty", args: []})
+        emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_array_new_empty", nil, nil, temp)
         return typed_value(:i64, temp)
       size_val = lower_expression(ctx, node.args[0])
       size_reg = ensure_i64_value(wfn, size_val)
@@ -634,7 +634,7 @@
         fill_val = lower_expression(ctx, node.args[1])
         fill_reg = ensure_i64_value(wfn, fill_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_new_filled", args: [size_reg, fill_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [size_reg, fill_reg], nil, nil, "w_array_new_filled", nil, nil, temp)
       return typed_value(:i64, temp)
 
     # BigArray.new(ebits, capacity) — i64-indexed array tier.
@@ -644,7 +644,7 @@
       cap_val = lower_expression(ctx, node.args[1])
       cap_raw = ensure_raw_machine_int(wfn, cap_val, :i64, infer_type(node.args[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps))
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_big_array_new", args: [ebits_raw, cap_raw]})
+      emit_wire_call_direct_i64(wfn, nil, [ebits_raw, cap_raw], nil, nil, "w_big_array_new", nil, nil, temp)
       return typed_value(:i64, temp)
 
     # SmallArray.new(ebits, size) — frozen ≤255-element packed
@@ -673,15 +673,15 @@
         temp_ptr = next_temp(wfn)
         temp_int = next_temp(wfn)
         temp_box = next_temp(wfn)
-        emit_instruction(wfn, {op: :small_array_alloca, temp_ptr: temp_ptr, total_bytes: total_bytes})
-        emit_instruction(wfn, {op: :ptr_to_i64, temp: temp_int, value: temp_ptr})
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp_box, name: "w_small_array_init", args: [temp_int, ebits_const.to_s(), size_const.to_s()]})
+        emit_wire_small_array_alloca(wfn, temp_ptr, total_bytes)
+        emit_wire_ptr_to_i64(wfn, temp_int, temp_ptr)
+        emit_wire_call_direct_i64(wfn, nil, [temp_int, ebits_const.to_s(), size_const.to_s()], nil, nil, "w_small_array_init", nil, nil, temp_box)
         return typed_value(:i64, temp_box)
       temp = next_temp(wfn)
       if ebits_const != nil
         size_val = lower_expression(ctx, size_arg)
         size_raw = ensure_raw_machine_int(wfn, size_val, :i64, infer_type(size_arg, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps))
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_new", args: [ebits_const.to_s(), size_raw, "0"]})
+        emit_wire_call_direct_i64(wfn, nil, [ebits_const.to_s(), size_raw, "0"], nil, nil, "w_small_array_new", nil, nil, temp)
       else
         # A runtime Symbol is a boxed String/Symbol WValue, not a machine
         # integer. Preserve it across a boxed helper rather than NaN-unboxing
@@ -690,7 +690,7 @@
         ebits_reg = ensure_i64_value(wfn, ebits_val)
         size_val = lower_expression(ctx, size_arg)
         size_reg = ensure_i64_value(wfn, size_val)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_new_value", args: [ebits_reg, size_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [ebits_reg, size_reg], nil, nil, "w_small_array_new_value", nil, nil, temp)
       return typed_value(:i64, temp)
 
     # Direct static dispatch owns the final physical block slot when the class
@@ -783,13 +783,13 @@
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_read_file", args: [path_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_read_file", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name == "read_bytes" && args.size() == 1
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_read_file_bytes", args: [path_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_read_file_bytes", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name == "write" && args.size() == 2
         path_val = lower_expression(ctx, args[0])
@@ -797,43 +797,43 @@
         content_val = lower_expression(ctx, args[1])
         content_reg = ensure_i64_value(wfn, content_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_write_file", args: [path_reg, content_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg, content_reg], nil, nil, "__w_write_file", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name in ("exist?" "exists?") && args.size() == 1
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_exists", args: [path_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_file_exists", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name in ("directory?" "dir?") && args.size() == 1
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_directory", args: [path_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_file_directory", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name in ("entries" "read_dir") && args.size() == 1
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_read_dir", args: [path_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_file_read_dir", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name == "size" && args.size() == 1
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_size", args: [path_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_file_size", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name == "mtime_ns" && args.size() == 1
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_mtime_ns", args: [path_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_file_mtime_ns", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name == "expand_path" && args.size() >= 1
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_expand_path", args: [path_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_file_expand_path", nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name == "join"
         if args.size() == 0
@@ -846,7 +846,7 @@
           val = lower_expression(ctx, args[i])
           next_reg = ensure_i64_value(wfn, val)
           temp = next_temp(wfn)
-          emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_join", args: [joined_reg, next_reg]})
+          emit_wire_call_direct_i64(wfn, nil, [joined_reg, next_reg], nil, nil, "__w_file_join", nil, nil, temp)
           joined_reg = temp
           i += 1
         return typed_value(:i64, joined_reg)
@@ -854,7 +854,7 @@
         path_val = lower_expression(ctx, args[0])
         path_reg = ensure_i64_value(wfn, path_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_file_mmap", args: [path_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg], nil, nil, "__w_file_mmap", nil, nil, temp)
         return typed_value(:i64, temp)
 
     if recv_name == "OS"
@@ -882,7 +882,7 @@
         arg_val = lower_expression(ctx, args[0])
         arg_reg = ensure_i64_value(wfn, arg_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: os_target, args: [arg_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [arg_reg], nil, nil, os_target, nil, nil, temp)
         return typed_value(:i64, temp)
       if method_name == "write_file" && args.size() == 2
         path_val = lower_expression(ctx, args[0])
@@ -890,7 +890,7 @@
         content_val = lower_expression(ctx, args[1])
         content_reg = ensure_i64_value(wfn, content_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_write_file", args: [path_reg, content_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [path_reg, content_reg], nil, nil, "__w_write_file", nil, nil, temp)
         return typed_value(:i64, temp)
 
     if recv_name == "Digest"
@@ -906,7 +906,7 @@
         arg_val = lower_expression(ctx, args[0])
         arg_reg = ensure_i64_value(wfn, arg_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: digest_target, args: [arg_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [arg_reg], nil, nil, digest_target, nil, nil, temp)
         return typed_value(:i64, temp)
 
     # Math.* libm wrappers — shared intrinsic lowering (lowering/ops.w).
@@ -934,7 +934,7 @@
         arg_val = lower_expression(ctx, args[0])
         arg_reg = ensure_i64_value(wfn, arg_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: bitcast_fn, args: [arg_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [arg_reg], nil, nil, bitcast_fn, nil, nil, temp)
         return typed_value(:i64, temp)
 
   # range.each(block) → inline for-loop (no array allocation).
@@ -966,12 +966,12 @@
     to_static_type = infer_type(range_node.to, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     if from_static_type != nil && !is_integer_like_type(from_static_type)
       from_raw = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: from_raw, name: "w_range_bound_i64", args: [from_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [from_reg], nil, nil, "w_range_bound_i64", nil, nil, from_raw)
     else
       from_raw = nanunbox_int_emit(wfn, from_reg)
     if to_static_type != nil && !is_integer_like_type(to_static_type)
       to_raw = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: to_raw, name: "w_range_bound_i64", args: [to_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [to_reg], nil, nil, "w_range_bound_i64", nil, nil, to_raw)
     else
       to_raw = nanunbox_int_emit(wfn, to_reg)
 
@@ -983,26 +983,26 @@
     body_label = next_label(wfn, "each.body")
     exit_label = next_label(wfn, "each.exit")
 
-    emit_instruction(wfn, {op: :br, label: pre_label})
+    emit_wire_br(wfn, pre_label, nil, nil)
     start_block(wfn, pre_label)
-    emit_instruction(wfn, {op: :br, label: header_label})
+    emit_wire_br(wfn, header_label, nil, nil)
 
     start_block(wfn, header_label)
     phi_reg = next_temp(wfn)
     inc_reg = next_temp(wfn)
-    emit_instruction(wfn, {op: :phi_i64, temp: phi_reg, a_value: from_raw, a_label: pre_label, b_value: inc_reg, b_label: body_label})
+    emit_wire_phi_i64(wfn, pre_label, from_raw, body_label, inc_reg, phi_reg)
 
     cmp_op = "sle"
     if range_node.exclusive == true
       cmp_op = "slt"
     cmp_reg = next_temp(wfn)
-    emit_instruction(wfn, {op: :icmp_i64, temp: cmp_reg, pred: cmp_op, lhs: phi_reg, rhs: to_raw})
-    emit_instruction(wfn, {op: :cond_br, cond: cmp_reg, then_label: body_label, else_label: exit_label})
+    emit_wire_icmp_i64(wfn, phi_reg, cmp_op, to_raw, cmp_reg)
+    emit_wire_cond_br(wfn, cmp_reg, exit_label, nil, body_label)
 
     # Body: box counter, bind block param, execute body inline
     start_block(wfn, body_label)
     boxed_i = next_temp(wfn)
-    emit_instruction(wfn, {op: :nanbox_int, temp: boxed_i, temp_masked: boxed_i + ".m", raw: phi_reg})
+    emit_wire_nanbox_int(wfn, phi_reg, boxed_i, boxed_i + ".m")
 
     # Bind the iteration variable (named param or first free var)
     block_params = block.params
@@ -1011,7 +1011,7 @@
     if block_params.size() > 0
       param_name = block_params[0]
       ptr = ensure_var_slot(wfn, param_name)
-      emit_instruction(wfn, {op: :store_i64, value: boxed_i, ptr: ptr})
+      emit_wire_store_i64(wfn, ptr, boxed_i)
       ctx[:var_types][param_name] = :int
 
     # Lower block body inline
@@ -1033,12 +1033,12 @@
       bi2 = 0
       while bi2 < body_instrs.size()
         inst2 = body_instrs[bi2]
-        if inst2[:op] in (:add_i48_checked :sub_i48_checked :mul_i48_checked)
+        if wire_kind(inst2) in (:add_i48_checked :sub_i48_checked :mul_i48_checked)
           back_label = "ovf.merge." + inst2[:block_id].to_s()
         bi2 += 1
 
-      emit_instruction(wfn, {op: :add_i64, temp: inc_reg, lhs: phi_reg, rhs: "1"})
-      emit_instruction(wfn, {op: :br, label: header_label})
+      emit_wire_add_i64(wfn, phi_reg, "1", inc_reg)
+      emit_wire_br(wfn, header_label, nil, nil)
 
       # Patch the phi's back-edge label
       hdr_block = nil
@@ -1081,7 +1081,7 @@
     if range_node.exclusive in (true 2)
       excl_reg = w_true.to_s()
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_view_range", args: [receiver_reg, from_reg, to_reg, excl_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg, from_reg, to_reg, excl_reg], nil, nil, "w_array_view_range", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Range#step(n): same desugar as `range / n` (lower_range_step in ops.w) —
@@ -1102,15 +1102,15 @@
         size = size + 1
       # Emit: create array, push each value in a loop
       arr_temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: arr_temp, name: "w_array_new_empty", args: []})
+      emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_array_new_empty", nil, nil, arr_temp)
       # Use a compile-time unrolled fill if small enough, otherwise emit a loop
       if size <= 256
         i = 0
         while i < size
           val_temp = next_temp(wfn)
-          emit_instruction(wfn, {op: :nanbox_int, temp: val_temp, temp_masked: next_temp(wfn), raw: (from_v + i).to_s()})
+          emit_wire_nanbox_int(wfn, (from_v + i).to_s(), val_temp, next_temp(wfn))
           push_temp = next_temp(wfn)
-          emit_instruction(wfn, {op: :call_direct_i64, temp: push_temp, name: "w_array_push", args: [arr_temp, val_temp]})
+          emit_wire_call_direct_i64(wfn, nil, [arr_temp, val_temp], nil, nil, "w_array_push", nil, nil, push_temp)
           i += 1
         return typed_value(:i64, arr_temp)
 
@@ -1142,14 +1142,14 @@
     receiver_val = lower_expression(ctx, recv_node)
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_class_of", args: [receiver_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_class_of", nil, nil, temp)
     return typed_value(:i64, temp)
 
   if recv_node != nil && method_name == "class_name" && node.args.size() == 0
     receiver_val = lower_expression(ctx, recv_node)
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_class_name", args: [receiver_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_class_name", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Integer to_s: an integer-typed receiver dispatches straight to w_to_s,
@@ -1162,7 +1162,7 @@
     receiver_val = lower_expression(ctx, recv_node)
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_int_to_s", args: [receiver_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_int_to_s", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # String byte length: mirror the :array size route — raw i64 result so a
@@ -1173,7 +1173,7 @@
     receiver_val = lower_expression(ctx, recv_node)
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_string_byte_length_fast", args: [receiver_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "__w_string_byte_length_fast", nil, nil, temp)
     return typed_value(:raw_i64, temp)
 
   # String byte subscript with an integer-like index: pass the index as raw
@@ -1189,7 +1189,7 @@
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       index_raw = ensure_raw_machine_int(wfn, lower_expression(ctx, node.args[0]), :i64, index_type)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_string_idx_fast", args: [receiver_reg, index_raw]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, index_raw], nil, nil, "__w_string_idx_fast", nil, nil, temp)
       return typed_value(:i64, temp)
 
   # Two-argument String#slice is a literal wrapper over
@@ -1208,7 +1208,7 @@
       start_raw = ensure_raw_machine_int(wfn, lower_expression(ctx, node.args[0]), :i64, start_type)
       len_raw = ensure_raw_machine_int(wfn, lower_expression(ctx, node.args[1]), :i64, len_type)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_string_slice_raw", args: [receiver_reg, start_raw, len_raw]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, start_raw, len_raw], nil, nil, "w_string_slice_raw", nil, nil, temp)
       return typed_value(:string, temp)
 
   # Hash subscripts: a :hash-typed receiver reaches w_hash_get / w_hash_set
@@ -1223,7 +1223,7 @@
       key_val = lower_expression(ctx, node.args[0])
       key_reg = ensure_i64_value(wfn, key_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_hash_get", args: [receiver_reg, key_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, key_reg], nil, nil, "w_hash_get", nil, nil, temp)
       return typed_value(:i64, temp)
     if method_name == "\[]=" && node.args.size() == 2
       receiver_val = lower_expression(ctx, recv_node)
@@ -1233,7 +1233,7 @@
       val_val = lower_expression(ctx, node.args[1])
       val_reg = ensure_i64_value(wfn, val_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_hash_set", args: [receiver_reg, key_reg, val_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, key_reg, val_reg], nil, nil, "w_hash_set", nil, nil, temp)
       return typed_value(:i64, temp)
 
   # Direct builtins for StringBuffer operations when receiver type is known.
@@ -1246,17 +1246,17 @@
       arg_reg = ensure_i64_value(wfn, arg_val)
       if arg_type != :string
         string_temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: string_temp, name: "w_to_s", args: [arg_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [arg_reg], nil, nil, "w_to_s", nil, nil, string_temp)
         arg_reg = string_temp
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_strbuf_append", args: [receiver_reg, arg_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, arg_reg], nil, nil, "w_strbuf_append", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if method_name == "to_s" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_strbuf_to_s", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_strbuf_to_s", nil, nil, temp)
       return typed_value(:i64, temp)
 
   # Strings are represented as immutable WValues. Methods that are mutable in
@@ -1269,7 +1269,7 @@
       arg_val = lower_expression(ctx, node.args[0])
       arg_reg = ensure_i64_value(wfn, arg_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_str_append", args: [receiver_reg, arg_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, arg_reg], nil, nil, "w_str_append", nil, nil, temp)
       return rebind_local_i64(ctx, recv_node.name, temp, :string)
 
     if method_name == "prepend" && node.args.size() == 1
@@ -1278,7 +1278,7 @@
       arg_val = lower_expression(ctx, node.args[0])
       arg_reg = ensure_i64_value(wfn, arg_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_str_concat", args: [arg_reg, receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [arg_reg, receiver_reg], nil, nil, "w_str_concat", nil, nil, temp)
       return rebind_local_i64(ctx, recv_node.name, temp, :string)
 
   # Inside an array-tier class method, `self` is known even when its concrete
@@ -1298,7 +1298,7 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: size_helper, args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, size_helper, nil, nil, temp)
       return typed_value(:i64, temp)
     if method_name == "\[]" && node.args.size() == 1
       receiver_val = lower_expression(ctx, recv_node)
@@ -1310,11 +1310,11 @@
       if idx_helper == "w_array_idx" && idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
         idx_raw = ensure_raw_int(wfn, idx_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_array_idx_i64_fast", args: [receiver_reg, idx_raw]})
+        emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_raw], nil, nil, "__w_array_idx_i64_fast", nil, nil, temp)
         return typed_value(:i64, temp)
       idx_reg = ensure_i64_value(wfn, idx_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: idx_helper, args: [receiver_reg, idx_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_reg], nil, nil, idx_helper, nil, nil, temp)
       return typed_value(:i64, temp)
 
     # `self[i] = v` inside an Array class body. Without this it fell through
@@ -1331,11 +1331,11 @@
       if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
         idx_raw = ensure_raw_int(wfn, idx_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_array_set_i64_fast", args: [receiver_reg, idx_raw, val_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_raw, val_reg], nil, nil, "__w_array_set_i64_fast", nil, nil, temp)
         return typed_value(:i64, temp)
       idx_reg = ensure_i64_value(wfn, idx_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_set", args: [receiver_reg, idx_reg, val_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_reg, val_reg], nil, nil, "w_array_set", nil, nil, temp)
       return typed_value(:i64, temp)
 
   # Direct builtins for array operations — only when receiver is known to be an array
@@ -1346,28 +1346,28 @@
       arg_val = lower_expression(ctx, node.args[0])
       arg_reg = ensure_i64_value(wfn, arg_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_push", args: [receiver_reg, arg_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, arg_reg], nil, nil, "w_array_push", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if method_name == "pop" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_pop", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_array_pop", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if method_name == "shift" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_shift", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_array_shift", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if method_name == "cap" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :ta_cap_raw, temp: temp, value: receiver_reg})
+      emit_wire_ta_cap_raw(wfn, temp, receiver_reg)
       return typed_value(:raw_i64, temp)
 
     # `.size` on a statically-proven :array receiver is an inline header
@@ -1384,7 +1384,7 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :array_size_raw, temp: temp, value: receiver_reg})
+      emit_wire_array_size_raw(wfn, temp, receiver_reg)
       return typed_value(:raw_i64, temp)
 
 
@@ -1400,19 +1400,11 @@
       if idx_val[:type] in (:raw_int :raw_i64 :raw_u64)
         idx_raw = ensure_raw_int(wfn, idx_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {
-          op: :call_direct_i64, temp: temp, name: "__w_array_get_i64_fast",
-          args: [receiver_reg, idx_raw],
-          src_line: node.line, src_col: node.col, loc_site_id: cs_id
-        })
+        emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_raw], nil, cs_id, "__w_array_get_i64_fast", node.col, node.line, temp)
         return typed_value(:i64, temp)
       idx_reg = ensure_i64_value(wfn, idx_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {
-        op: :call_direct_i64, temp: temp, name: "w_array_get",
-        args: [receiver_reg, idx_reg],
-        src_line: node.line, src_col: node.col, loc_site_id: cs_id
-      })
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_reg], nil, cs_id, "w_array_get", node.col, node.line, temp)
       return typed_value(:i64, temp)
 
     if method_name == "\[]=" && node.args.size() == 2
@@ -1427,7 +1419,7 @@
         val_expr = lower_expression(ctx, node.args[1])
         val_reg = ensure_i64_value(wfn, val_expr)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_array_set_i64_fast", args: [receiver_reg, idx_raw, val_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_raw, val_reg], nil, nil, "__w_array_set_i64_fast", nil, nil, temp)
         return typed_value(:i64, temp)
       idx_reg = ensure_i64_value(wfn, idx_val)
       val_expr = lower_expression(ctx, node.args[1])
@@ -1436,11 +1428,7 @@
       cs_id = nil
       if node.line != nil
         cs_id = next_call_site_id(ctx[:mod])
-      emit_instruction(wfn, {
-        op: :call_direct_i64, temp: temp, name: "w_array_set",
-        args: [receiver_reg, idx_reg, val_reg],
-        src_line: node.line, src_col: node.col, loc_site_id: cs_id
-      })
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_reg, val_reg], nil, cs_id, "w_array_set", node.col, node.line, temp)
       return typed_value(:i64, temp)
 
   # Direct builtins for bool array operations — inline bit manipulation.
@@ -1461,7 +1449,7 @@
       # Returning :i1 lets `if`/`while`/`!` consumers branch on it
       # directly; ensure_i64_value re-boxes via nanbox_bool when a
       # caller (e.g. assignment, hash insert) wants W_TRUE/W_FALSE.
-      emit_instruction(wfn, {op: :bool_array_get_inline, temp: temp, arr: receiver_reg, idx: idx_raw, as_i1: true})
+      emit_wire_bool_array_get_inline(wfn, receiver_reg, true, idx_raw, temp)
       return typed_value(:i1, temp)
 
     if method_name == "\[]=" && node.args.size() == 2
@@ -1479,14 +1467,14 @@
         val_expr = lower_expression(ctx, val_node)
         val_reg = ensure_i64_value(wfn, val_expr)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :bool_array_set_inline, temp: temp, arr: receiver_reg, idx: idx_raw, val: val_reg})
+      emit_wire_bool_array_set_inline(wfn, receiver_reg, idx_raw, temp, val_reg)
       return typed_value(:i64, temp)
 
     if method_name == "size" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_bool_array_size", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_bool_array_size", nil, nil, temp)
       return typed_value(:i64, temp)
 
   # BigArray direct ops. BigArray has the same packed element semantics as
@@ -1499,7 +1487,7 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_big_array_size", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_big_array_size", nil, nil, temp)
       return typed_value(:i64, temp)
     if method_name == "\[]" && node.args.size() == 1
       receiver_val = lower_expression(ctx, recv_node)
@@ -1513,7 +1501,7 @@
       if !inline_raw_get
         idx_reg = ensure_i64_value(wfn, idx_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_big_array_idx", args: [receiver_reg, idx_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_reg], nil, nil, "w_big_array_idx", nil, nil, temp)
         return typed_value(:i64, temp)
 
       elem_bits = typed_array_element_bits(elem_type)
@@ -1529,7 +1517,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :big_array_get_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, s: scratch, bits: elem_bits, signed: false})
+      emit_wire_big_array_get_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, false, temp)
       if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         return raw_float_from_bits_i64(wfn, temp, elem_type)
       if elem_type == :typed_array_w64
@@ -1543,7 +1531,7 @@
       val_expr = lower_expression(ctx, node.args[1])
       val_reg = ensure_i64_value(wfn, val_expr)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_big_array_idxset", args: [receiver_reg, idx_reg, val_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_reg, val_reg], nil, nil, "w_big_array_idxset", nil, nil, temp)
       return typed_value(:i64, temp)
 
   # SmallArray inline ops. Layout differs from WArray:
@@ -1573,7 +1561,7 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_size", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_small_array_size", nil, nil, temp)
       return typed_value(:i64, temp)
     if method_name == "cap" && node.args.size() == 0
       if sa_hl
@@ -1581,7 +1569,7 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_size", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_small_array_size", nil, nil, temp)
       return typed_value(:i64, temp)
     # `length` is an escape-safe receiver method, so a headerless var can reach
     # it. It has no boxed inline handler (boxed small arrays dispatch through
@@ -1602,14 +1590,14 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       size_temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: size_temp, name: "w_small_array_size", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_small_array_size", nil, nil, size_temp)
       raw_shl = next_temp(wfn)
       raw_size = next_temp(wfn)
-      emit_instruction(wfn, {op: :nanunbox_int, temp: raw_size, temp_shl: raw_shl, boxed: size_temp})
+      emit_wire_nanunbox_int(wfn, size_temp, raw_size, raw_shl)
       cmp = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: cmp, pred: "eq", lhs: raw_size, rhs: "0"})
+      emit_wire_icmp_i64(wfn, raw_size, "eq", "0", cmp)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :select_i64, temp: temp, cond: cmp, then_val: w_true.to_s(), else_val: w_false.to_s()})
+      emit_wire_select_i64(wfn, cmp, w_false.to_s(), temp, w_true.to_s())
       return typed_value(:i64, temp)
     if method_name == "\[]" && node.args.size() == 1
       # Heap-backed SmallArrays use the checked runtime helper. Besides matching
@@ -1621,7 +1609,7 @@
         idx_val = lower_expression(ctx, node.args[0])
         idx_reg = ensure_i64_value(wfn, idx_val)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_get", args: [receiver_reg, idx_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_reg], nil, nil, "w_small_array_get", nil, nil, temp)
         return typed_value(:i64, temp)
 
       # Headerless: the raw alloca ptr comes straight from wfn[:sa_ptr] (the var
@@ -1640,7 +1628,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :small_array_get_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, s: scratch, bits: elem_bits, signed: elem_signed, headerless: sa_hl})
+      emit_wire_small_array_get_inline(wfn, receiver_reg, elem_bits, sa_hl, idx_reg, idx_raw, scratch, elem_signed, temp)
       elem_type = small_array_to_typed_array_type(recv_type)
       if elem_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         return raw_float_from_bits_i64(wfn, temp, elem_type)
@@ -1669,7 +1657,7 @@
         val_expr = lower_expression(ctx, node.args[1])
         val_reg = ensure_i64_value(wfn, val_expr)
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_small_array_set", args: [receiver_reg, idx_reg, val_reg]})
+        emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_reg, val_reg], nil, nil, "w_small_array_set", nil, nil, temp)
         return typed_value(:i64, temp)
 
       receiver_reg = sa_ptr
@@ -1703,7 +1691,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :small_array_set_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, value: val_reg, s: scratch, bits: elem_bits, signed: elem_signed, headerless: sa_hl})
+      emit_wire_small_array_set_inline(wfn, receiver_reg, elem_bits, sa_hl, idx_reg, idx_raw, scratch, elem_signed, temp, val_reg)
       # []= evaluates to its RHS. Preserve the RHS representation instead of
       # relabeling the raw slot-store result as a boxed WValue; callers can box
       # it at an actual value boundary, while statement position stays free.
@@ -1719,19 +1707,19 @@
       arg_val = lower_expression(ctx, node.args[0])
       arg_reg = ensure_i64_value(wfn, arg_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_push", args: [receiver_reg, arg_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, arg_reg], nil, nil, "w_array_push", nil, nil, temp)
       return typed_value(:i64, temp)
     if method_name == "shift" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_shift", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_array_shift", nil, nil, temp)
       return typed_value(:i64, temp)
     if method_name == "pop" && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_pop", args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_array_pop", nil, nil, temp)
       return typed_value(:i64, temp)
     # Inline TBAA'd header load, not a call — see the :array `.size` comment
     # above (11.7x on `while i < a.size` fill loops; LICM + vectorization).
@@ -1739,7 +1727,7 @@
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :ta_size_raw, temp: temp, value: receiver_reg})
+      emit_wire_ta_size_raw(wfn, temp, receiver_reg)
       return typed_value(:raw_i64, temp)
     if method_name in ("min" "max" "sum") && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
@@ -1749,14 +1737,14 @@
       fn_name = "w_array_" + method_name + "_" + suffix
       if method_name == "sum" && suffix == "float" && ctx[:mod][:fast_mode] == true
         fn_name = "w_array_fastsum_float"
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, fn_name, nil, nil, temp)
       return typed_value(:i64, temp)
     if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16) && method_name in ("fastsum" "sumsq") && node.args.size() == 0
       receiver_val = lower_expression(ctx, recv_node)
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
       fn_name = method_name == "fastsum" ? "w_array_fastsum_float" : "w_array_sumsq_float"
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, fn_name, nil, nil, temp)
       return typed_value(:i64, temp)
     if recv_type in (:typed_array_i8 :typed_array_u8) && method_name == "dot" && node.args.size() == 1
       receiver_val = lower_expression(ctx, recv_node)
@@ -1764,7 +1752,7 @@
       arg_val = lower_expression(ctx, node.args[0])
       arg_reg = ensure_i64_value(wfn, arg_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_dot_i8", args: [receiver_reg, arg_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, arg_reg], nil, nil, "w_array_dot_i8", nil, nil, temp)
       return typed_value(:i64, temp)
     if recv_type in (:typed_array_i8 :typed_array_u8) && method_name == "matvec_i8" && node.args.size() == 3
       receiver_val = lower_expression(ctx, recv_node)
@@ -1776,7 +1764,7 @@
       rows_reg = ensure_i64_value(wfn, rows_val)
       cols_reg = ensure_i64_value(wfn, cols_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_matvec_i8", args: [receiver_reg, x_reg, rows_reg, cols_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, x_reg, rows_reg, cols_reg], nil, nil, "w_array_matvec_i8", nil, nil, temp)
       return typed_value(:i64, temp)
     if recv_type in (:typed_array_i8 :typed_array_u8) && method_name == "matmul_i8" && node.args.size() == 4
       receiver_val = lower_expression(ctx, recv_node)
@@ -1790,7 +1778,7 @@
       k_reg = ensure_i64_value(wfn, k_val)
       n_reg = ensure_i64_value(wfn, n_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_matmul_i8", args: [receiver_reg, rhs_reg, m_reg, k_reg, n_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, rhs_reg, m_reg, k_reg, n_reg], nil, nil, "w_array_matmul_i8", nil, nil, temp)
       return typed_value(:i64, temp)
     if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16) && method_name in ("dot" "cross" "scale" "scale!") && node.args.size() == 1
       receiver_val = lower_expression(ctx, recv_node)
@@ -1805,7 +1793,7 @@
         fn_name = "w_array_scale_float"
       elsif method_name == "scale!"
         fn_name = "w_array_scale_float_bang"
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: [receiver_reg, arg_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, arg_reg], nil, nil, fn_name, nil, nil, temp)
       return typed_value(:i64, temp)
     if method_name in ("cos" "sin" "sqrt" "exp" "log" "tan") && node.args.size() == 0
       # f64 receivers fuse into a single raw loop with a scalar libm call
@@ -1817,7 +1805,7 @@
       receiver_reg = ensure_i64_value(wfn, receiver_val)
       temp = next_temp(wfn)
       suffix = typed_array_kernel_suffix(recv_type)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_array_" + method_name + "_" + suffix, args: [receiver_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_array_" + method_name + "_" + suffix, nil, nil, temp)
       return typed_value(:i64, temp)
     if method_name == "\[]" && node.args.size() == 1
       receiver_val = lower_expression(ctx, recv_node)
@@ -1836,7 +1824,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :typed_array_get_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, s: scratch, bits: elem_bits, signed: elem_signed})
+      emit_wire_typed_array_get_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp)
       if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         return raw_float_from_bits_i64(wfn, temp, recv_type)
       # w64 arrays store raw WValue bits. The loaded i64 IS a fully-tagged
@@ -1899,7 +1887,7 @@
           scratch.push(next_temp(wfn))
           si += 1
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :typed_array_compound_op_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, value: rhs_reg, compound_op: fused_op, s: scratch, bits: elem_bits, signed: elem_signed})
+        emit_wire_typed_array_compound_op_inline(wfn, receiver_reg, elem_bits, fused_op, idx_reg, idx_raw, scratch, elem_signed, temp, rhs_reg)
         return typed_value(:i64, temp)
 
     if method_name == "\[]=" && node.args.size() == 2
@@ -1950,7 +1938,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :typed_array_set_inline, temp: temp, arr: receiver_reg, idx: idx_reg, idx_raw: idx_raw, value: val_reg, s: scratch, bits: elem_bits, signed: elem_signed})
+      emit_wire_typed_array_set_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp, val_reg)
       return val_expr
 
   # Direct builtins for string operations — bypass method dispatch
@@ -1966,7 +1954,7 @@
       else
         offset_reg = w_nil.to_s()
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_string_index", args: [receiver_reg, needle_reg, offset_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, needle_reg, offset_reg], nil, nil, "w_string_index", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if method_name == "rindex" && node.args.size() >= 1 && node.args.size() <= 2
@@ -1980,7 +1968,7 @@
       else
         offset_reg = w_nil.to_s()
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_string_rindex", args: [receiver_reg, needle_reg, offset_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, needle_reg, offset_reg], nil, nil, "w_string_rindex", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if method_name == "repeat" && node.args.size() == 1
@@ -1989,7 +1977,7 @@
       count_val = lower_expression(ctx, node.args[0])
       count_reg = ensure_i64_value(wfn, count_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_string_repeat", args: [receiver_reg, count_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, count_reg], nil, nil, "w_string_repeat", nil, nil, temp)
       return typed_value(:i64, temp)
 
     if method_name == "count" && node.args.size() == 1
@@ -1998,7 +1986,7 @@
       needle_val = lower_expression(ctx, node.args[0])
       needle_reg = ensure_i64_value(wfn, needle_val)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_string_count", args: [receiver_reg, needle_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [receiver_reg, needle_reg], nil, nil, "w_string_count", nil, nil, temp)
       return typed_value(:i64, temp)
 
   # Monomorphization. When the receiver has a known typed-array
@@ -2070,7 +2058,7 @@
               si += 1
             # No closure arg — yields are inlined into the body.
             temp = next_temp(wfn)
-            emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: mangled, args: spec_args})
+            emit_wire_call_direct_i64(wfn, nil, spec_args, nil, nil, mangled, nil, nil, temp)
             return typed_value(:i64, temp)
         physical_arg_count = 1 + node.args.size()
         if caller_has_block
@@ -2090,7 +2078,7 @@
             closure_tv = lower_block_closure(ctx, node.block, iterator_block_param_types(recv_type, method_name))
             spec_args.push(ensure_i64_value(wfn, closure_tv))
           temp = next_temp(wfn)
-          emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: mangled, args: spec_args})
+          emit_wire_call_direct_i64(wfn, nil, spec_args, nil, nil, mangled, nil, nil, temp)
           return typed_value(:i64, temp)
 
   # Fused raw subscript WRITE (round-3 bug 4, 2026-07-22 — write-side twin
@@ -2112,7 +2100,7 @@
       fused_fn = "w_index_set_raw_i64"
       if fused_mt == :u64
         fused_fn = "w_index_set_raw_u64"
-      emit_instruction(wfn, {op: :call_direct_i64, temp: fused_t, name: fused_fn, args: [fused_recv_reg, fused_idx_reg, fused_raw]})
+      emit_wire_call_direct_i64(wfn, nil, [fused_recv_reg, fused_idx_reg, fused_raw], nil, nil, fused_fn, nil, nil, fused_t)
       return typed_value(raw_machine_value_type(fused_mt), fused_t)
 
   receiver_val = lower_expression(ctx, recv_node)
@@ -2262,23 +2250,7 @@
         ctor_owner = ctx[:mod][:class_super_names][ctor_owner]
         guard += 1
 
-  emit_instruction(wfn, {
-    op: :call_method_i64,
-    temp: temp,
-    temp_args_val: temp_args_val,
-    receiver: receiver_reg,
-    method_name_val: method_name_val,
-    args: arg_regs,
-    scalar_source_argc1: scalar_source_argc1,
-    scalar_source_argc2: scalar_source_argc2,
-    devirt_fn: devirt_fn,
-    devirt_class: devirt_class,
-    construct_fn: construct_fn,
-    construct_class: construct_class,
-    ic_id: ic_id,
-    src_line: node.line,
-    src_col: node.col
-  })
+  emit_wire_call_method_i64(wfn, arg_regs, construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver_reg, scalar_source_argc1, scalar_source_argc2, node.col, node.line, temp, temp_args_val)
   # A generated `- data` array accessor has a representation-preserving
   # contract. The send remains overridable, so verify the returned storage
   # width once before carrying that declared type into `b = @1.elements;

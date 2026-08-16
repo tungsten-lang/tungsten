@@ -106,12 +106,12 @@
       remap_args.push(w_nil.to_s())
     i += 1
   did = next_temp(new_fn)
-  emit_instruction(new_fn, {op: :call_direct_i64, temp: did, name: "w_kwargs_remap12", args: remap_args})
+  emit_wire_call_direct_i64(new_fn, nil, remap_args, nil, nil, "w_kwargs_remap12", nil, nil, did)
   kw_rebound = {}
   i = 0
   while i < n
     slot_temp = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :call_direct_i64, temp: slot_temp, name: "w_kwargs_slot_" + i.to_s(), args: [did, "%" + llvm_safe_name(arg_slot_names[i])]})
+    emit_wire_call_direct_i64(new_fn, nil, [did, "%" + llvm_safe_name(arg_slot_names[i])], nil, nil, "w_kwargs_slot_" + i.to_s(), nil, nil, slot_temp)
     kw_rebound[arg_slot_names[i]] = slot_temp
     child_ctx[:bindings][arg_slot_names[i]] = slot_temp
     i += 1
@@ -221,8 +221,8 @@
     global_name = mod[:fn_memo_tables][memo_keys[mi]]
     if global_name != nil
       init_temp = next_temp(main_fn)
-      init_instructions.push(wire_instruction({op: :memo_init, temp: init_temp}))
-      init_instructions.push(wire_instruction({op: :store_memo_ptr, value: init_temp, global: global_name}))
+      init_instructions.push(wire_make_memo_init(init_temp))
+      init_instructions.push(wire_make_store_memo_ptr(global_name, init_temp))
     mi += 1
 
   if init_instructions.size() == 0
@@ -836,21 +836,21 @@
   block_return_buf = nil
   if needs_block_return
     block_return_buf = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :alloca_i64, ptr: new_fn[:result_slot]})
-    emit_instruction(new_fn, {op: :call_direct_ptr, temp: block_return_buf, name: "w_block_return_push", args: []})
+    emit_wire_alloca_i64(new_fn, new_fn[:result_slot])
+    emit_wire_call_direct_ptr(new_fn, [], "w_block_return_push", block_return_buf)
     block_return_bits = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :ptr_to_i64, temp: block_return_bits, value: block_return_buf})
+    emit_wire_ptr_to_i64(new_fn, block_return_bits, block_return_buf)
     child_ctx[:block_return_frame] = block_return_bits
     sj = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :setjmp, temp: sj, buf: block_return_buf})
+    emit_wire_setjmp(new_fn, block_return_buf, sj)
     cmp = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :icmp_eq_i32, temp: cmp, lhs: sj, rhs: "0"})
+    emit_wire_icmp_eq_i32(new_fn, sj, "0", cmp)
     body_label = next_label(new_fn, "blockret.body")
     catch_label = next_label(new_fn, "blockret.catch")
-    emit_instruction(new_fn, {op: :cond_br, cond: cmp, then_label: body_label, else_label: catch_label})
+    emit_wire_cond_br(new_fn, cmp, catch_label, nil, body_label)
     start_block(new_fn, body_label)
     block_return_slot = ensure_var_slot(new_fn, "__block_return_frame")
-    emit_instruction(new_fn, {op: :store_i64, value: block_return_bits, ptr: block_return_slot})
+    emit_wire_store_i64(new_fn, block_return_slot, block_return_bits)
 
   # Apply declared parameter/local types through the same helper used by the
   # module-wide raw-ABI prepass.
@@ -928,7 +928,7 @@
         # (49-bit flip-graph masks: dup-scan missed, walk crippled). The
         # runtime w_to_i64/w_to_u64 handles inline and bigint boxes both.
         raw = next_temp(new_fn)
-        emit_instruction(new_fn, {op: :call_direct_i64, temp: raw, name: machine_unbox_fn(pt), args: [kwargs_param_input(child_ctx, pname)], arg_types: ["i64"]})
+        emit_wire_call_direct_i64(new_fn, ["i64"], [kwargs_param_input(child_ctx, pname)], nil, nil, machine_unbox_fn(pt), nil, nil, raw)
         child_ctx[:bindings][pname] = raw
       else
         raw = nanunbox_int_emit(new_fn, kwargs_param_input(child_ctx, pname))
@@ -945,13 +945,13 @@
       param_reg = kwargs_param_input(child_ctx, pname)
       # Check if param is nil (W_NIL = 0)
       is_nil = next_temp(new_fn)
-      emit_instruction(new_fn, {op: :icmp_i64, temp: is_nil, pred: "eq", lhs: param_reg, rhs: w_nil.to_s()})
+      emit_wire_icmp_i64(new_fn, param_reg, "eq", w_nil.to_s(), is_nil)
       # Lower the default expression
       default_val = lower_expression(child_ctx, p.default)
       default_reg = ensure_i64_value(new_fn, default_val)
       # Select: if nil then default else param
       result = next_temp(new_fn)
-      emit_instruction(new_fn, {op: :select_i64, temp: result, cond: is_nil, then_val: default_reg, else_val: param_reg})
+      emit_wire_select_i64(new_fn, is_nil, param_reg, result, default_reg)
       # Bind the result so future references to pname use the defaulted value
       child_ctx[:bindings][pname] = result
     i += 1
@@ -997,15 +997,15 @@
     if child_ctx[:bindings][pname] != nil
       if is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:raw_i64, child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
-        emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
+        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_instruction(new_fn, {op: :store_i64, value: child_ctx[:bindings][pname], ptr: ptr})
+        emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
     else
       if is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
-        emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
+        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
+        emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
     pi += 1
 
   captured_params = find_captured_params_in_body(body, param_names_list)
@@ -1020,14 +1020,14 @@
       if child_ctx[:bindings][pname] != nil
         if is_raw_int_storage_type(child_var_types[pname])
           raw = ensure_raw_machine_int(new_fn, typed_value(:raw_i64, child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
-          emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
+          emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
         else
-          emit_instruction(new_fn, {op: :store_i64, value: child_ctx[:bindings][pname], ptr: ptr})
+          emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
       elsif is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
-        emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
+        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
+        emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
     pi += 1
 
   # Lower body with implicit return for last expression
@@ -1075,30 +1075,30 @@
           result_reg = ensure_i64_value(new_fn, result)
         if new_fn[:exit_label] != nil && new_fn[:result_slot] != nil
           emit_recycles_above_depth(new_fn, 0)
-          emit_instruction(new_fn, {op: :store_i64, value: result_reg, ptr: new_fn[:result_slot]})
-          emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
+          emit_wire_store_i64(new_fn, new_fn[:result_slot], result_reg)
+          emit_wire_br(new_fn, new_fn[:exit_label], nil, nil)
         else
-          emit_instruction(new_fn, {op: :ret_i64, value: result_reg})
+          emit_wire_ret_i64(new_fn, nil, result_reg)
     child_ctx[:enclosing_stmts] = prev_stmts
     child_ctx[:enclosing_stmt_idx] = prev_idx
 
   if needs_block_return
     if !block_terminated(new_fn)
       emit_recycles_above_depth(new_fn, 0)
-      emit_instruction(new_fn, {op: :store_i64, value: w_nil.to_s(), ptr: new_fn[:result_slot]})
-      emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
+      emit_wire_store_i64(new_fn, new_fn[:result_slot], w_nil.to_s())
+      emit_wire_br(new_fn, new_fn[:exit_label], nil, nil)
 
     start_block(new_fn, catch_label)
     caught = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :call_direct_i64_ptr1, temp: caught, name: "w_block_return_value", arg: block_return_buf})
-    emit_instruction(new_fn, {op: :store_i64, value: caught, ptr: new_fn[:result_slot]})
-    emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
+    emit_wire_call_direct_i64_ptr1(new_fn, block_return_buf, "w_block_return_value", caught)
+    emit_wire_store_i64(new_fn, new_fn[:result_slot], caught)
+    emit_wire_br(new_fn, new_fn[:exit_label], nil, nil)
 
     start_block(new_fn, new_fn[:exit_label])
-    emit_instruction(new_fn, {op: :call_direct_void_ptr1, name: "w_block_return_pop", arg: block_return_buf})
+    emit_wire_call_direct_void_ptr1(new_fn, block_return_buf, "w_block_return_pop")
     final_reg = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :load_i64, temp: final_reg, ptr: new_fn[:result_slot]})
-    emit_instruction(new_fn, {op: :ret_i64, value: final_reg, function_recycle_count: 0})
+    emit_wire_load_i64(new_fn, new_fn[:result_slot], final_reg)
+    emit_wire_ret_i64(new_fn, 0, final_reg)
 
   finalize_function(new_fn)
   nil
@@ -1570,8 +1570,8 @@
   mstr_id = module_string_constant(mod, mname)
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
-  emit_instruction(main_fn, {op: :load_class, temp: cls_reload, class_name: cname})
-  emit_instruction(main_fn, {op: :class_add_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: mfn_name, arity: arity})
+  emit_wire_load_class(main_fn, cname, cls_reload)
+  emit_wire_class_add_method(main_fn, arity, cls_reload, mfn_name, mbyte_len, mstr_id, nil, nil)
 
 -> method_arity_suffix(node)
   "__a" + method_runtime_arity(node).to_s()
@@ -1594,8 +1594,8 @@
   mstr_id = module_string_constant(mod, mname)
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
-  emit_instruction(main_fn, {op: :load_class, temp: cls_reload, class_name: cname})
-  emit_instruction(main_fn, {op: :class_add_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: mfn_name, arity: arity, min_arity: min_arity, splat_index: method_splat_index(node)})
+  emit_wire_load_class(main_fn, cname, cls_reload)
+  emit_wire_class_add_method(main_fn, arity, cls_reload, mfn_name, mbyte_len, mstr_id, min_arity, method_splat_index(node))
   # Stash the method-def AST so specialize_method can clone+re-lower
   # it under a child context with `__self` typed to a concrete variant.
   # Also stash an arity-keyed entry so monomorphization of an OVERLOADED method
@@ -1713,8 +1713,8 @@
   mstr_id = module_string_constant(mod, mname)
   mbyte_len = utf8_byte_length(mname) + 1
   cls_reload = next_temp(main_fn)
-  emit_instruction(main_fn, {op: :load_class, temp: cls_reload, class_name: cname})
-  emit_instruction(main_fn, {op: :class_add_static_method, class_temp: cls_reload, method_str_id: mstr_id, method_byte_len: mbyte_len, fn_name: method_fn_name, arity: arity, min_arity: min_arity, splat_index: method_splat_index(node)})
+  emit_wire_load_class(main_fn, cname, cls_reload)
+  emit_wire_class_add_static_method(main_fn, arity, cls_reload, method_fn_name, mbyte_len, mstr_id, min_arity, method_splat_index(node))
 
 # `-> new(@x, @y) ro` — a bare ro/rw as a body statement of an @-binding
 # method marks those params for accessor generation, mirroring a class-body
@@ -1883,16 +1883,16 @@
     i += 1
 
   temp = next_temp(wrapper_fn)
-  emit_instruction(wrapper_fn, {op: :call_direct_i64, temp: temp, name: raw_fn_name, args: call_args})
+  emit_wire_call_direct_i64(wrapper_fn, nil, call_args, nil, nil, raw_fn_name, nil, nil, temp)
 
   ret_type = nil
   if node.return_type != nil
     ret_type = normalize_type_symbol(node.return_type)
   if is_machine_int64_type(ret_type)
     boxed = ensure_i64_value(wrapper_fn, typed_value(raw_machine_value_type(ret_type), temp))
-    emit_instruction(wrapper_fn, {op: :ret_i64, value: boxed})
+    emit_wire_ret_i64(wrapper_fn, nil, boxed)
   else
-    emit_instruction(wrapper_fn, {op: :ret_i64, value: temp})
+    emit_wire_ret_i64(wrapper_fn, nil, temp)
 
   finalize_function(wrapper_fn)
 
@@ -2131,21 +2131,21 @@
   block_return_buf = nil
   if needs_block_return
     block_return_buf = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :alloca_i64, ptr: new_fn[:result_slot]})
-    emit_instruction(new_fn, {op: :call_direct_ptr, temp: block_return_buf, name: "w_block_return_push", args: []})
+    emit_wire_alloca_i64(new_fn, new_fn[:result_slot])
+    emit_wire_call_direct_ptr(new_fn, [], "w_block_return_push", block_return_buf)
     block_return_bits = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :ptr_to_i64, temp: block_return_bits, value: block_return_buf})
+    emit_wire_ptr_to_i64(new_fn, block_return_bits, block_return_buf)
     child_ctx[:block_return_frame] = block_return_bits
     sj = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :setjmp, temp: sj, buf: block_return_buf})
+    emit_wire_setjmp(new_fn, block_return_buf, sj)
     cmp = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :icmp_eq_i32, temp: cmp, lhs: sj, rhs: "0"})
+    emit_wire_icmp_eq_i32(new_fn, sj, "0", cmp)
     body_label = next_label(new_fn, "blockret.body")
     catch_label = next_label(new_fn, "blockret.catch")
-    emit_instruction(new_fn, {op: :cond_br, cond: cmp, then_label: body_label, else_label: catch_label})
+    emit_wire_cond_br(new_fn, cmp, catch_label, nil, body_label)
     start_block(new_fn, body_label)
     block_return_slot = ensure_var_slot(new_fn, "__block_return_frame")
-    emit_instruction(new_fn, {op: :store_i64, value: block_return_bits, ptr: block_return_slot})
+    emit_wire_store_i64(new_fn, block_return_slot, block_return_bits)
 
   # Keyword-param rebind runs first: it must precede unboxing, ivar
   # assignment, and default guards, all of which read the entry values.
@@ -2174,7 +2174,7 @@
         # tokens hit exactly this — stage 2 lexed garbage). w_to_i64/w_to_u64
         # handle inline and bigint boxes both.
         raw = next_temp(new_fn)
-        emit_instruction(new_fn, {op: :call_direct_i64, temp: raw, name: machine_unbox_fn(pt), args: [kwargs_param_input(child_ctx, pname)], arg_types: ["i64"]})
+        emit_wire_call_direct_i64(new_fn, ["i64"], [kwargs_param_input(child_ctx, pname)], nil, nil, machine_unbox_fn(pt), nil, nil, raw)
         child_ctx[:bindings][pname] = raw
       else
         raw = nanunbox_int_emit(new_fn, kwargs_param_input(child_ctx, pname))
@@ -2193,11 +2193,11 @@
     if p.default != nil
       param_reg = kwargs_param_input(child_ctx, pname)
       is_nil = next_temp(new_fn)
-      emit_instruction(new_fn, {op: :icmp_i64, temp: is_nil, pred: "eq", lhs: param_reg, rhs: w_nil.to_s()})
+      emit_wire_icmp_i64(new_fn, param_reg, "eq", w_nil.to_s(), is_nil)
       default_val = lower_expression(child_ctx, p.default)
       default_reg = ensure_i64_value(new_fn, default_val)
       result = next_temp(new_fn)
-      emit_instruction(new_fn, {op: :select_i64, temp: result, cond: is_nil, then_val: default_reg, else_val: param_reg})
+      emit_wire_select_i64(new_fn, is_nil, param_reg, result, default_reg)
       child_ctx[:bindings][pname] = result
     if p.ivar_assign == true
       ivar_value = kwargs_param_input(child_ctx, p.name)
@@ -2218,15 +2218,15 @@
     if child_ctx[:bindings][pname] != nil
       if is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:raw_i64, child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
-        emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
+        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_instruction(new_fn, {op: :store_i64, value: child_ctx[:bindings][pname], ptr: ptr})
+        emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
     else
       if is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
-        emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
+        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
+        emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
     pi += 1
 
   captured_params = find_captured_params_in_body(body, param_names)
@@ -2241,14 +2241,14 @@
       if child_ctx[:bindings][pname] != nil
         if is_raw_int_storage_type(child_var_types[pname])
           raw = ensure_raw_machine_int(new_fn, typed_value(:raw_i64, child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
-          emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
+          emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
         else
-          emit_instruction(new_fn, {op: :store_i64, value: child_ctx[:bindings][pname], ptr: ptr})
+          emit_wire_store_i64(new_fn, ptr, child_ctx[:bindings][pname])
       elsif is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:i64, "%" + llvm_safe_name(pname)), child_var_types[pname], child_var_types[pname])
-        emit_instruction(new_fn, {op: machine_store_op(child_var_types[pname]), value: raw, ptr: ptr})
+        emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)
       else
-        emit_instruction(new_fn, {op: :store_i64, value: "%" + llvm_safe_name(pname), ptr: ptr})
+        emit_wire_store_i64(new_fn, ptr, "%" + llvm_safe_name(pname))
     pi += 1
 
   # Lower body with implicit return for last expression
@@ -2281,30 +2281,30 @@
         result_reg = ensure_return_value(child_ctx, result, last)
         if new_fn[:exit_label] != nil && new_fn[:result_slot] != nil
           emit_recycles_above_depth(new_fn, 0)
-          emit_instruction(new_fn, {op: :store_i64, value: result_reg, ptr: new_fn[:result_slot]})
-          emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
+          emit_wire_store_i64(new_fn, new_fn[:result_slot], result_reg)
+          emit_wire_br(new_fn, new_fn[:exit_label], nil, nil)
         else
-          emit_instruction(new_fn, {op: :ret_i64, value: result_reg})
+          emit_wire_ret_i64(new_fn, nil, result_reg)
     child_ctx[:enclosing_stmts] = prev_stmts
     child_ctx[:enclosing_stmt_idx] = prev_idx
 
   if needs_block_return
     if !block_terminated(new_fn)
       emit_recycles_above_depth(new_fn, 0)
-      emit_instruction(new_fn, {op: :store_i64, value: w_nil.to_s(), ptr: new_fn[:result_slot]})
-      emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
+      emit_wire_store_i64(new_fn, new_fn[:result_slot], w_nil.to_s())
+      emit_wire_br(new_fn, new_fn[:exit_label], nil, nil)
 
     start_block(new_fn, catch_label)
     caught = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :call_direct_i64_ptr1, temp: caught, name: "w_block_return_value", arg: block_return_buf})
-    emit_instruction(new_fn, {op: :store_i64, value: caught, ptr: new_fn[:result_slot]})
-    emit_instruction(new_fn, {op: :br, label: new_fn[:exit_label]})
+    emit_wire_call_direct_i64_ptr1(new_fn, block_return_buf, "w_block_return_value", caught)
+    emit_wire_store_i64(new_fn, new_fn[:result_slot], caught)
+    emit_wire_br(new_fn, new_fn[:exit_label], nil, nil)
 
     start_block(new_fn, new_fn[:exit_label])
-    emit_instruction(new_fn, {op: :call_direct_void_ptr1, name: "w_block_return_pop", arg: block_return_buf})
+    emit_wire_call_direct_void_ptr1(new_fn, block_return_buf, "w_block_return_pop")
     final_reg = next_temp(new_fn)
-    emit_instruction(new_fn, {op: :load_i64, temp: final_reg, ptr: new_fn[:result_slot]})
-    emit_instruction(new_fn, {op: :ret_i64, value: final_reg, function_recycle_count: 0})
+    emit_wire_load_i64(new_fn, new_fn[:result_slot], final_reg)
+    emit_wire_ret_i64(new_fn, 0, final_reg)
 
   finalize_function(new_fn)
   if raw_abi && wrapper_fn_name != nil && wrapper_fn_name != fn_name
@@ -2324,7 +2324,7 @@
   cvar_key = class_name + "." + stripped
   ctx[:mod][:cvar_globals][cvar_key] = true
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_cvar, temp: temp, cvar_key: cvar_key})
+  emit_wire_load_cvar(wfn, cvar_key, temp)
   typed_value(:i64, temp)
 
 -> lower_cvar_set(ctx, target, val_tv)
@@ -2337,7 +2337,7 @@
   stripped = cvar_name.slice(2, cvar_name.size() - 2)
   cvar_key = class_name + "." + stripped
   ctx[:mod][:cvar_globals][cvar_key] = true
-  emit_instruction(wfn, {op: :store_cvar, cvar_key: cvar_key, value: val_reg})
+  emit_wire_store_cvar(wfn, cvar_key, val_reg)
   typed_value(:i64, val_reg)
 
 # -- Instance variables --
@@ -2357,7 +2357,7 @@
 
   if offset != nil
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :ivar_get_idx, temp: temp, self_reg: self_reg, offset: offset})
+    emit_wire_ivar_get_idx(wfn, offset, self_reg, temp)
     # Data-block typed reads: when the class declared the ivar as `int X`
     # (or any integer-like type) in its `- data` block, the polymorphic
     # ivar storage still holds a boxed Integer (w_int(...)) but we know
@@ -2394,7 +2394,7 @@
   byte_len = utf8_byte_length(ivar_name) + 1
   temp_ptr = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :ivar_get, temp: temp, temp_ptr: temp_ptr, self_reg: self_reg, str_id: str_id, byte_len: byte_len})
+  emit_wire_ivar_get(wfn, byte_len, self_reg, str_id, temp, temp_ptr)
   typed_value(:i64, temp)
 
 # Look up an ivar's declared type from the class's `- data` block, if any.
@@ -2441,7 +2441,7 @@
 
   if offset != nil
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :ivar_set_idx, temp: temp, self_reg: self_reg, offset: offset, value: val_reg})
+    emit_wire_ivar_set_idx(wfn, offset, self_reg, temp, val_reg)
     return typed_value(:i64, temp)
 
   # Fallback: string-based lookup
@@ -2449,7 +2449,7 @@
   byte_len = utf8_byte_length(ivar_name) + 1
   temp_ptr = next_temp(wfn)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :ivar_set, temp: temp, temp_ptr: temp_ptr, self_reg: self_reg, str_id: str_id, byte_len: byte_len, value: val_reg})
+  emit_wire_ivar_set(wfn, byte_len, self_reg, str_id, temp, temp_ptr, val_reg)
   typed_value(:i64, temp)
 
 # -- Go (goroutine spawn) --
@@ -2474,7 +2474,7 @@
   closure_reg = ensure_i64_value(wfn, closure_tv)
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_goroutine_spawn", args: [closure_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [closure_reg], nil, nil, "w_goroutine_spawn", nil, nil, temp)
   typed_value(:i64, temp)
 
 # -- Yield --
@@ -2493,7 +2493,7 @@
   slot = wfn[:var_slots][block_name]
   if slot != nil
     block_reg = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: block_reg, ptr: slot})
+    emit_wire_load_i64(wfn, slot, block_reg)
 
   if block_reg == nil
     binding = ctx[:bindings][block_name]
@@ -2521,12 +2521,12 @@
 
   temp = next_temp(wfn)
   if arg_regs.size() == 0
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_closure_call_0", args: [block_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [block_reg], nil, nil, "w_closure_call_0", nil, nil, temp)
   elsif arg_regs.size() == 1
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_closure_call_1", args: [block_reg, arg_regs[0]]})
+    emit_wire_call_direct_i64(wfn, nil, [block_reg, arg_regs[0]], nil, nil, "w_closure_call_1", nil, nil, temp)
   elsif arg_regs.size() == 2
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_closure_call_2", args: [block_reg, arg_regs[0], arg_regs[1]]})
+    emit_wire_call_direct_i64(wfn, nil, [block_reg, arg_regs[0], arg_regs[1]], nil, nil, "w_closure_call_2", nil, nil, temp)
   else
     # Fallback: use call_1 with first arg (best effort)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_closure_call_1", args: [block_reg, arg_regs[0]]})
+    emit_wire_call_direct_i64(wfn, nil, [block_reg, arg_regs[0]], nil, nil, "w_closure_call_1", nil, nil, temp)
   typed_value(:i64, temp)

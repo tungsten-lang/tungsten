@@ -246,22 +246,22 @@
 # w_mul / w_add calls. The result matches the elementwise loop exactly.
 -> emit_poly_ranged_sum(wfn, p, lo_cf, hi_cf, parity)
   acc = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: acc, name: "w_int", args: ["0"]})
+  emit_wire_call_direct_i64(wfn, nil, ["0"], nil, nil, "w_int", nil, nil, acc)
   k = 0
   while k < p.size()
     c = p[k]
     if c != 0
       pk = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: pk, name: "w_range_pow_sum", args: [lo_cf, hi_cf, k.to_s(), parity.to_s()]})
+      emit_wire_call_direct_i64(wfn, nil, [lo_cf, hi_cf, k.to_s(), parity.to_s()], nil, nil, "w_range_pow_sum", nil, nil, pk)
       term = pk
       if c != 1
         cbox = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: cbox, name: "w_int", args: [c.to_s()]})
+        emit_wire_call_direct_i64(wfn, nil, [c.to_s()], nil, nil, "w_int", nil, nil, cbox)
         scaled = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: scaled, name: "w_mul", args: [cbox, term]})
+        emit_wire_call_direct_i64(wfn, nil, [cbox, term], nil, nil, "w_mul", nil, nil, scaled)
         term = scaled
       acc2 = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: acc2, name: "w_add", args: [acc, term]})
+      emit_wire_call_direct_i64(wfn, nil, [acc, term], nil, nil, "w_add", nil, nil, acc2)
       acc = acc2
     k = k + 1
   typed_value(:i64, acc)

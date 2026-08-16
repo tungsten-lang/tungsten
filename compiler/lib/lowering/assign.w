@@ -97,15 +97,7 @@
   temp = next_temp(wfn)
   ic_id = ctx[:mod][:next_ic]
   ctx[:mod][:next_ic] = ic_id + 1
-  emit_instruction(wfn, {
-    op: :call_method_i64,
-    temp: temp,
-    temp_args_val: temp_args,
-    receiver: self_reg,
-    method_name_val: method_name_val,
-    args: [],
-    ic_id: ic_id
-  })
+  emit_wire_call_method_i64(wfn, [], nil, nil, nil, nil, ic_id, method_name_val, self_reg, nil, nil, nil, nil, temp, temp_args)
   typed_value(:i64, temp)
 
 # Materialize all temp bindings to var slots. Called before control flow
@@ -191,7 +183,7 @@
     self_tv = lower_expression(ctx, Tungsten:AST:Var.new("__self"))
     self_reg = ensure_i64_value(wfn, self_tv)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_class_of", args: [self_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [self_reg], nil, nil, "w_class_of", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Bare `$field` inside a class method is a view-field
@@ -230,7 +222,7 @@
   if ctx[:unboxed_vars] != nil && ctx[:unboxed_vars][name] != nil
     raw_slot = ctx[:unboxed_vars][name]
     raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_i64, temp: raw, ptr: raw_slot})
+    emit_wire_load_i64(wfn, raw_slot, raw)
     return typed_value(:raw_i64, raw)
 
 
@@ -244,7 +236,7 @@
       load_op = machine_load_op(raw_type)
     elsif machine_float
       load_op = float_load_op(raw_type)
-    emit_instruction(wfn, {op: load_op, temp: temp, ptr: ptr})
+    emit_wire_dynamic_2(wfn, load_op, :ptr, ptr, :temp, temp)
     if machine_int
       return typed_value(raw_machine_value_type(raw_type), temp)
     if machine_float
@@ -285,13 +277,13 @@
   # Check if it's a built-in runtime class
   if mark_builtin_class_used(ctx[:mod], name)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_class, temp: temp, class_name: name})
+    emit_wire_load_class(wfn, name, temp)
     return typed_value(:i64, temp)
 
   # Check if it's a class name (user-defined)
   if ctx[:mod][:known_classes][name] != nil
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_class, temp: temp, class_name: name})
+    emit_wire_load_class(wfn, name, temp)
     return typed_value(:i64, temp)
 
   # Bit constant alias: a qualified reference whose first segment is a
@@ -302,7 +294,7 @@
     aliased = constant_alias_expand(ctx[:mod], name)
     if aliased != nil && ctx[:mod][:known_classes][aliased] != nil
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :load_class, temp: temp, class_name: aliased})
+      emit_wire_load_class(wfn, aliased, temp)
       return typed_value(:i64, temp)
 
   # Unqualified class reference resolved via the enclosing namespace
@@ -317,13 +309,13 @@
     ns_resolved = resolve_class_in_namespace(ctx[:mod], ctx[:class_name], name)
     if ns_resolved != nil
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :load_class, temp: temp, class_name: ns_resolved})
+      emit_wire_load_class(wfn, ns_resolved, temp)
       return typed_value(:i64, temp)
 
   # Built-in constants
   if name == "ARGV"
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "__w_argv", args: []})
+    emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "__w_argv", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Mathematical constants are ordinary numeric f64 values at the language
@@ -347,7 +339,7 @@
     load_type = "i64"
     if is_machine_int128_type(top_level_raw_type)
       load_type = "i128"
-    emit_instruction(wfn, {op: :load_global, temp: temp, name: name, type: load_type})
+    emit_wire_load_global(wfn, name, temp, load_type)
     if is_raw_int_storage_type(top_level_raw_type)
       return typed_value(raw_machine_value_type(top_level_raw_type), temp)
     if machine_int
@@ -367,9 +359,9 @@
       while call_args.size() < expected
         call_args.push(w_nil.to_s())
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: call_target, args: call_args})
+    emit_wire_call_direct_i64(wfn, nil, call_args, nil, nil, call_target, nil, nil, temp)
     if call_target == "__w_exit"
-      emit_instruction(wfn, {op: :unreachable})
+      emit_wire_unreachable(wfn)
     return typed_value(:i64, temp)
 
   # Implicit self dispatch: inside a class method, bare `foo` resolves as a
@@ -430,7 +422,7 @@
 
   ctx[:mod][:top_level_vars][name] = true
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_global, temp: temp, name: name, type: "i64"})
+  emit_wire_load_global(wfn, name, temp, "i64")
   typed_value(:i64, temp)
 
 # Shared write-back for $name = value and $name += value alike (mirrors
@@ -541,11 +533,11 @@
       # dest = old rot[:a] value; for MINUS the walker pinned rot[:a] as
       # the minuend, so the (dest, x, y) argument shape is identical.
       rot_entry = rot[:op] == :MINUS ? "w_bigint_sub_dest" : "w_bigint_add_dest"
-      emit_instruction(wfn2, {op: :call_direct_i64, temp: dest_temp, name: rot_entry, args: [a_reg, a_reg, b_reg]})
+      emit_wire_call_direct_i64(wfn2, nil, [a_reg, a_reg, b_reg], nil, nil, rot_entry, nil, nil, dest_temp)
       range_binding_invalidate(ctx, rot[:t])
       ctx[:bindings][rot[:t]] = nil
       t_slot = ensure_var_slot(wfn2, rot[:t])
-      emit_instruction(wfn2, {op: :store_i64, value: dest_temp, ptr: t_slot})
+      emit_wire_store_i64(wfn2, t_slot, dest_temp)
       return typed_value(:i64, dest_temp)
 
   # Word-overwrite destination (E4 stage 3): `r = a op w` over a proven-
@@ -566,7 +558,7 @@
       if wd_old == nil
         wd_ptr = ensure_var_slot(wfn3, wd_name)
         wd_old = next_temp(wfn3)
-        emit_instruction(wfn3, {op: :load_i64, temp: wd_old, ptr: wd_ptr})
+        emit_wire_load_i64(wfn3, wd_ptr, wd_old)
       # operands are plain vars/literals (walker leaves), so lowering them
       # cannot materialize bindings or reorder effects
       wd_a_tv = lower_expression(ctx, wd[:a])
@@ -574,12 +566,12 @@
       wd_a_reg = ensure_i64_value(wfn3, wd_a_tv)
       wd_w_reg = ensure_i64_value(wfn3, wd_w_tv)
       wd_temp = next_temp(wfn3)
-      emit_instruction(wfn3, {op: :call_direct_i64, temp: wd_temp, name: wd[:entry], args: [wd_old, wd_a_reg, wd_w_reg], call_conv: "preserve_mostcc"})
+      emit_wire_call_direct_i64(wfn3, nil, [wd_old, wd_a_reg, wd_w_reg], "preserve_mostcc", nil, wd[:entry], nil, nil, wd_temp)
       range_binding_invalidate(ctx, wd_name)
       ctx[:bindings][wd_name] = nil
       if wd_ptr == nil
         wd_ptr = ensure_var_slot(wfn3, wd_name)
-      emit_instruction(wfn3, {op: :store_i64, value: wd_temp, ptr: wd_ptr})
+      emit_wire_store_i64(wfn3, wd_ptr, wd_temp)
       return typed_value(:i64, wd_temp)
 
   # Sum-chunking: inside a qualifying while, this accumulator statement
@@ -745,7 +737,7 @@
       sa_size = ast_get(ta_node, :size).value
       sa_payload = small_array_payload_bytes(sa_bits, sa_size)
       sa_ptr = next_temp(wfn)
-      emit_instruction(wfn, {op: :small_array_alloca, temp_ptr: sa_ptr, total_bytes: sa_payload})
+      emit_wire_small_array_alloca(wfn, sa_ptr, sa_payload)
       # Keep the raw alloca pointer OUT of ctx[:bindings]: materialize_bindings
       # spills bindings to i64 slots (`store i64 <binding>, ptr %vs.N`), which
       # would ptrtoint-and-re-escape the pointer AND is a type error (ptr into an
@@ -805,7 +797,7 @@
     val = lower_expression(ctx, node.value)
     raw_val = ensure_raw_int(wfn, val)
     raw_slot = ctx[:unboxed_vars][name]
-    emit_instruction(wfn, {op: :store_i64, value: raw_val, ptr: raw_slot})
+    emit_wire_store_i64(wfn, raw_slot, raw_val)
     return typed_value(:raw_int, raw_val)
 
   if ctx[:closure_noalloc_bindings] != nil && ctx[:closure_noalloc_bindings][name] == true && node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :block
@@ -836,7 +828,7 @@
     if !hint_retype_safe
       raw_val = lower_machine_int_expression(ctx, node.value, target_type)
       boxed_tmp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: boxed_tmp, name: machine_box_fn(target_type), args: [raw_val]})
+      emit_wire_call_direct_i64(wfn, nil, [raw_val], nil, nil, machine_box_fn(target_type), nil, nil, boxed_tmp)
       # Round-4 fix (2026-07-22): stamp :bigint, NOT :int. boxed_tmp above is
       # machine_box_fn(:u64) = w_u64(...), a real BIGNUM box for values past
       # 2^48. A :int stamp routes later machine-context reads through the
@@ -852,7 +844,7 @@
         ctx[:var_types][name] = :bigint
       hint_ptr = wfn[:var_slots][name]
       if hint_ptr != nil
-        emit_instruction(wfn, {op: :store_i64, value: boxed_tmp, ptr: hint_ptr})
+        emit_wire_store_i64(wfn, hint_ptr, boxed_tmp)
       else
         ctx[:bindings][name] = boxed_tmp
       if wfn[:name] == "main"
@@ -864,7 +856,7 @@
     ctx[:var_types][name] = target_type
     ctx[:bindings][name] = nil
     ptr = ensure_var_slot(wfn, name, machine_slot_type(target_type))
-    emit_instruction(wfn, {op: machine_store_op(target_type), value: raw_val, ptr: ptr})
+    emit_wire_dynamic_2(wfn, machine_store_op(target_type), :ptr, ptr, :value, raw_val)
     if wfn[:name] == "main"
       ctx[:mod][:top_level_vars][name] = true
       ctx[:mod][:top_level_var_types][name] = target_type
@@ -883,7 +875,7 @@
     ctx[:var_types][name] = target_type
     ctx[:bindings][name] = nil
     ptr = ensure_var_slot(wfn, name, float_slot_type(target_type))
-    emit_instruction(wfn, {op: float_store_op(target_type), value: raw_val, ptr: ptr})
+    emit_wire_dynamic_2(wfn, float_store_op(target_type), :ptr, ptr, :value, raw_val)
     if wfn[:name] == "main"
       ctx[:mod][:top_level_vars][name] = true
       ctx[:mod][:top_level_var_types][name] = nil
@@ -900,7 +892,7 @@
         source = ensure_i64_value(wfn, val)
         converted = next_temp(wfn)
         helper = hint_array_etype == "f32" ? "w_array_to_f32" : "w_array_to_f64"
-        emit_instruction(wfn, {op: :call_direct_i64, temp: converted, name: helper, args: [source]})
+        emit_wire_call_direct_i64(wfn, nil, [source], nil, nil, helper, nil, nil, converted)
         val = typed_value(target_type, converted)
   if mut_target_set
     ctx[:mut_accum_target] = nil
@@ -974,7 +966,7 @@
       ctx[:var_types][name] = machine_type
       ctx[:bindings][name] = nil
       ptr = ensure_var_slot(wfn, name, machine_slot_type(machine_type))
-      emit_instruction(wfn, {op: machine_store_op(machine_type), value: raw_val, ptr: ptr})
+      emit_wire_dynamic_2(wfn, machine_store_op(machine_type), :ptr, ptr, :value, raw_val)
       if wfn[:name] == "main"
         ctx[:mod][:top_level_vars][name] = true
         ctx[:mod][:top_level_var_types][name] = machine_type
@@ -988,7 +980,7 @@
       ctx[:var_types][name] = inferred
       ctx[:bindings][name] = nil
       ptr = ensure_var_slot(wfn, name, "double")
-      emit_instruction(wfn, {op: :store_double, value: raw_val, ptr: ptr})
+      emit_wire_store_double(wfn, ptr, raw_val)
       if wfn[:name] == "main"
         ctx[:mod][:top_level_vars][name] = true
         ctx[:mod][:top_level_var_types][name] = nil
@@ -1044,7 +1036,7 @@
   # If variable already has a var slot (was materialized), store to it
   ptr = wfn[:var_slots][name]
   if ptr != nil
-    emit_instruction(wfn, {op: :store_i64, value: val_reg, ptr: ptr})
+    emit_wire_store_i64(wfn, ptr, val_reg)
     # Top-level assignments also store to globals for cross-function access
     if wfn[:name] == "main"
       ctx[:mod][:top_level_vars][name] = true
@@ -1088,11 +1080,11 @@
     idx_tv = lower_int(ctx, Tungsten:AST:Int.new(i))
     idx_reg = ensure_i64_value(wfn, idx_tv)
     elem_temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: elem_temp, name: "w_array_get", args: [val_reg, idx_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [val_reg, idx_reg], nil, nil, "w_array_get", nil, nil, elem_temp)
     # Store to variable
     ensure_var_slot(wfn, name)
     slot = wfn[:var_slots][name]
-    emit_instruction(wfn, {op: :store_i64, value: elem_temp, ptr: slot})
+    emit_wire_store_i64(wfn, slot, elem_temp)
     i += 1
   typed_value(:i64, val_reg)
 
@@ -1104,13 +1096,13 @@
 
   # Check if receiver is nil
   cmp_reg = next_temp(wfn)
-  emit_instruction(wfn, {op: :icmp_ne_i64, temp: cmp_reg, lhs: recv_reg, rhs: w_nil.to_s()})
+  emit_wire_icmp_ne_i64(wfn, recv_reg, w_nil.to_s(), cmp_reg)
 
   not_nil_label = next_label(wfn, "safenav.nn")
   nil_label = next_label(wfn, "safenav.nil")
   merge_label = next_label(wfn, "safenav.mrg")
 
-  emit_instruction(wfn, {op: :cond_br, cond: cmp_reg, then_label: not_nil_label, else_label: nil_label})
+  emit_wire_cond_br(wfn, cmp_reg, nil_label, nil, not_nil_label)
 
   # Not-nil branch: perform method call using the already-evaluated receiver
   start_block(wfn, not_nil_label)
@@ -1137,26 +1129,18 @@
   ic_id = ctx[:mod][:next_ic]
   ctx[:mod][:next_ic] = ic_id + 1
 
-  emit_instruction(wfn, {
-    op: :call_method_i64,
-    temp: call_temp,
-    temp_args_val: temp_args_val,
-    receiver: recv_reg,
-    method_name_val: method_name_val,
-    args: arg_regs,
-    ic_id: ic_id
-  })
+  emit_wire_call_method_i64(wfn, arg_regs, nil, nil, nil, nil, ic_id, method_name_val, recv_reg, nil, nil, nil, nil, call_temp, temp_args_val)
   call_from = wfn[:blocks][wfn[:blocks].size() - 1][:label]
-  emit_instruction(wfn, {op: :br, label: merge_label})
+  emit_wire_br(wfn, merge_label, nil, nil)
 
   # Nil branch: return nil
   start_block(wfn, nil_label)
   nil_reg = w_nil.to_s()
   nil_from = nil_label
-  emit_instruction(wfn, {op: :br, label: merge_label})
+  emit_wire_br(wfn, merge_label, nil, nil)
 
   # Merge with phi
   start_block(wfn, merge_label)
   result = next_temp(wfn)
-  emit_instruction(wfn, {op: :phi_i64, temp: result, a_value: call_temp, a_label: call_from, b_value: nil_reg, b_label: nil_from})
+  emit_wire_phi_i64(wfn, call_from, call_temp, nil_from, nil_reg, result)
   typed_value(:i64, result)

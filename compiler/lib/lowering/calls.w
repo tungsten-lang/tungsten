@@ -39,7 +39,7 @@
   block_tv = lower_var(ctx, Tungsten:AST:Var.new(block_name))
   block_reg = ensure_i64_value(ctx[:func], block_tv)
   present = next_temp(ctx[:func])
-  emit_instruction(ctx[:func], {op: :icmp_i64, temp: present, pred: "ne", lhs: block_reg, rhs: w_nil.to_s()})
+  emit_wire_icmp_i64(ctx[:func], block_reg, "ne", w_nil.to_s(), present)
   typed_value(:i1, present)
 
 -> name_is_local_var?(wfn, ctx, name)
@@ -92,7 +92,7 @@
   site_reg = ensure_i64_value(wfn, site_tv)
   ctx[:mod][:ccall_fns]["w_check_array_ebits"] = 4
   checked = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: checked, name: "w_check_array_ebits", args: [arg_reg, typed_array_element_bits(dt).to_s(), want_poly.to_s(), site_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [arg_reg, typed_array_element_bits(dt).to_s(), want_poly.to_s(), site_reg], nil, nil, "w_check_array_ebits", nil, nil, checked)
   checked
 
 # Pointer operand for asm-backed kernels: a typed array yields its
@@ -109,7 +109,7 @@
     return ensure_raw_machine_int(wfn, tv, :i64, at)
   handle = ensure_i64_value(wfn, tv)
   t = next_temp(wfn)
-  emit_instruction(wfn, {op: :arr_data_ptr, temp: t, arr: handle})
+  emit_wire_arr_data_ptr(wfn, handle, t)
   t
 
 -> lower_call(ctx, node)
@@ -167,16 +167,16 @@
       recv_tv = lower_expression(ctx, args[0])
       recv_reg = ensure_i64_value(wfn, recv_tv)
       masked = next_temp(wfn)
-      emit_instruction(wfn, {op: :and_i64, temp: masked, lhs: recv_reg, rhs: tag_entry[:mask]})
+      emit_wire_and_i64(wfn, recv_reg, tag_entry[:mask], masked)
       cmp = next_temp(wfn)
-      emit_instruction(wfn, {op: :icmp_i64, temp: cmp, pred: "eq", lhs: masked, rhs: tag_entry[:tag]})
+      emit_wire_icmp_i64(wfn, masked, "eq", tag_entry[:tag], cmp)
       return typed_value(:i1, cmp)
     recv_tv = lower_expression(ctx, args[0])
     type_tv = lower_expression(ctx, args[1])
     recv_reg = ensure_i64_value(wfn, recv_tv)
     type_reg = ensure_i64_value(wfn, type_tv)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_value_is_a", args: [recv_reg, type_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [recv_reg, type_reg], nil, nil, "w_value_is_a", nil, nil, temp)
     return typed_value(:i64, temp)
 
   if name == "__compiler_overload_worker" && receiver == nil && args != nil && args.size() >= 2
@@ -192,7 +192,7 @@
       call_args.push(ensure_i64_value(wfn, arg_tv))
       i += 1
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: target, args: call_args})
+    emit_wire_call_direct_i64(wfn, nil, call_args, nil, nil, target, nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Low-level WValue bit casts used by source-defined packed value classes.
@@ -219,7 +219,7 @@
     a_raw = lower_machine_int_expression(ctx, args[0], :u64)
     b_raw = lower_machine_int_expression(ctx, args[1], :u64)
     t = next_temp(wfn)
-    emit_instruction(wfn, {op: :mulhi_u64, temp: t, lhs: a_raw, rhs: b_raw})
+    emit_wire_mulhi_u64(wfn, a_raw, b_raw, t)
     return typed_value(:raw_i64, t)
 
   # Carry-primitives `addcarry(a,b)` / `subborrow(a,b)` = the carry-out / borrow-out
@@ -230,13 +230,13 @@
     a_raw = lower_machine_int_expression(ctx, args[0], :u64)
     b_raw = lower_machine_int_expression(ctx, args[1], :u64)
     t = next_temp(wfn)
-    emit_instruction(wfn, {op: :addcarry_u64, temp: t, lhs: a_raw, rhs: b_raw})
+    emit_wire_addcarry_u64(wfn, a_raw, b_raw, t)
     return typed_value(:raw_i64, t)
   if name == "subborrow" && receiver == nil && args != nil && args.size() == 2
     a_raw = lower_machine_int_expression(ctx, args[0], :u64)
     b_raw = lower_machine_int_expression(ctx, args[1], :u64)
     t = next_temp(wfn)
-    emit_instruction(wfn, {op: :subborrow_u64, temp: t, lhs: a_raw, rhs: b_raw})
+    emit_wire_subborrow_u64(wfn, a_raw, b_raw, t)
     return typed_value(:raw_i64, t)
 
   # POC: inline-asm feasibility — asm_add(a,b) = a+b via an LLVM inline-asm ADD.
@@ -244,14 +244,14 @@
     a_raw = lower_machine_int_expression(ctx, args[0], :u64)
     b_raw = lower_machine_int_expression(ctx, args[1], :u64)
     t = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_add_test, temp: t, lhs: a_raw, rhs: b_raw})
+    emit_wire_asm_add_test(wfn, a_raw, b_raw, t)
     return typed_value(:raw_i64, t)
 
   # arr_data_ptr(u64arr) → raw data-base pointer as i64.
   if name == "arr_data_ptr" && receiver == nil && args != nil && args.size() == 1
     av = lower_expression(ctx, args[0])
     t = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: t, arr: av[:value]})
+    emit_wire_arr_data_ptr(wfn, av[:value], t)
     return typed_value(:raw_i64, t)
 
   # asm_add_n(out, a, b, n): out[0..n) = a[0..n) + b[0..n) via a flag-threaded adc
@@ -264,13 +264,13 @@
     nt = infer_type(args[3], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     nraw = ensure_raw_machine_int(wfn, nv, :i64, nt)
     to = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: to, arr: ov[:value]})
+    emit_wire_arr_data_ptr(wfn, ov[:value], to)
     ta = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ta, arr: av[:value]})
+    emit_wire_arr_data_ptr(wfn, av[:value], ta)
     tb = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tb, arr: bv[:value]})
+    emit_wire_arr_data_ptr(wfn, bv[:value], tb)
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_add_n, temp: tc, outp: to, ap: ta, bp: tb, n: nraw})
+    emit_wire_asm_add_n(wfn, ta, tb, nraw, to, tc)
     return typed_value(:raw_i64, tc)
 
   # POC: NEON SIMD 2-lane umull — asm_neon_umull(out, a, b, npairs): for each i,
@@ -285,13 +285,13 @@
     nt = infer_type(args[3], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     nraw = ensure_raw_machine_int(wfn, nv, :i64, nt)
     to = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: to, arr: ov[:value]})
+    emit_wire_arr_data_ptr(wfn, ov[:value], to)
     ta = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ta, arr: av[:value]})
+    emit_wire_arr_data_ptr(wfn, av[:value], ta)
     tb = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tb, arr: bv[:value]})
+    emit_wire_arr_data_ptr(wfn, bv[:value], tb)
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_neon_umull, temp: tc, outp: to, ap: ta, bp: tb, n: nraw})
+    emit_wire_asm_neon_umull(wfn, ta, tb, nraw, to, tc)
     return typed_value(:raw_i64, tc)
 
   # POC: NEON SIMD 2-lane Montgomery modmul — asm_neon_redc(out, a, b, npairs):
@@ -305,13 +305,13 @@
     nt = infer_type(args[3], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     nraw = ensure_raw_machine_int(wfn, nv, :i64, nt)
     to = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: to, arr: ov[:value]})
+    emit_wire_arr_data_ptr(wfn, ov[:value], to)
     ta = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ta, arr: av[:value]})
+    emit_wire_arr_data_ptr(wfn, av[:value], ta)
     tb = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tb, arr: bv[:value]})
+    emit_wire_arr_data_ptr(wfn, bv[:value], tb)
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_neon_redc, temp: tc, outp: to, ap: ta, bp: tb, n: nraw})
+    emit_wire_asm_neon_redc(wfn, ta, tb, nraw, to, tc)
     return typed_value(:raw_i64, tc)
 
   # NEON SIMD 4-lane Montgomery modmul / modadd / modsub mod p=998244353.
@@ -324,18 +324,18 @@
     nt = infer_type(args[3], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     nraw = ensure_raw_machine_int(wfn, nv, :i64, nt)
     to = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: to, arr: ov[:value]})
+    emit_wire_arr_data_ptr(wfn, ov[:value], to)
     ta = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ta, arr: av[:value]})
+    emit_wire_arr_data_ptr(wfn, av[:value], ta)
     tb = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tb, arr: bv[:value]})
+    emit_wire_arr_data_ptr(wfn, bv[:value], tb)
     tc = next_temp(wfn)
     theop = :asm_neon_redc4
     if name == "asm_neon_madd4"
       theop = :asm_neon_madd4
     if name == "asm_neon_msub4"
       theop = :asm_neon_msub4
-    emit_instruction(wfn, {op: theop, temp: tc, outp: to, ap: ta, bp: tb, n: nraw})
+    emit_wire_dynamic_5(wfn, theop, :ap, ta, :bp, tb, :n, nraw, :outp, to, :temp, tc)
     return typed_value(:raw_i64, tc)
 
   # NEON whole-butterfly DIT NTT stage — asm_neon_ntt_stage(v, stw, nblocks, halfq):
@@ -350,11 +350,11 @@
     hqt = infer_type(args[3], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     hqr = ensure_raw_machine_int(wfn, hqv, :i64, hqt)
     tvp = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tvp, arr: vv[:value]})
+    emit_wire_arr_data_ptr(wfn, vv[:value], tvp)
     ttwp = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ttwp, arr: wv[:value]})
+    emit_wire_arr_data_ptr(wfn, wv[:value], ttwp)
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_neon_ntt_stage, temp: tc, vp: tvp, twp: ttwp, nb: nbr, hq: hqr})
+    emit_wire_asm_neon_ntt_stage(wfn, hqr, nbr, tc, ttwp, tvp)
     return typed_value(:raw_i64, tc)
 
   # Scalar Goldilocks radix-4 DIF NTT stage — asm_gold_stage(v, stw, nblocks, q):
@@ -374,11 +374,11 @@
     qt = infer_type(args[3], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     qr = ensure_raw_machine_int(wfn, qv, :i64, qt)
     tvp = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tvp, arr: vv[:value]})
+    emit_wire_arr_data_ptr(wfn, vv[:value], tvp)
     ttwp = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ttwp, arr: wv[:value]})
+    emit_wire_arr_data_ptr(wfn, wv[:value], ttwp)
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_gold_stage, temp: tc, vp: tvp, twp: ttwp, nb: nbr, hq: qr})
+    emit_wire_asm_gold_stage(wfn, qr, nbr, tc, ttwp, tvp)
     return typed_value(:raw_i64, tc)
 
   # Scalar Goldilocks radix-4 DIT (inverse) NTT stage —
@@ -398,13 +398,13 @@
     qt = infer_type(args[4], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     qr = ensure_raw_machine_int(wfn, qv, :i64, qt)
     tvp = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tvp, arr: vv[:value]})
+    emit_wire_arr_data_ptr(wfn, vv[:value], tvp)
     ttwp = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ttwp, arr: wv[:value]})
+    emit_wire_arr_data_ptr(wfn, wv[:value], ttwp)
     tivp = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tivp, arr: ivv[:value]})
+    emit_wire_arr_data_ptr(wfn, ivv[:value], tivp)
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_gold_stage_inv, temp: tc, vp: tvp, twp: ttwp, ivp: tivp, nb: nbr, hq: qr})
+    emit_wire_asm_gold_stage_inv(wfn, qr, tivp, nbr, tc, ttwp, tvp)
     return typed_value(:raw_i64, tc)
 
   # NEON SIMD 2-lane Goldilocks add — asm_neon_gadd2(out, a, b, npairs):
@@ -417,13 +417,13 @@
     nt = infer_type(args[3], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     nraw = ensure_raw_machine_int(wfn, nv, :i64, nt)
     to = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: to, arr: ov[:value]})
+    emit_wire_arr_data_ptr(wfn, ov[:value], to)
     ta = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ta, arr: av[:value]})
+    emit_wire_arr_data_ptr(wfn, av[:value], ta)
     tb = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: tb, arr: bv[:value]})
+    emit_wire_arr_data_ptr(wfn, bv[:value], tb)
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_neon_gadd2, temp: tc, outp: to, ap: ta, bp: tb, n: nraw})
+    emit_wire_asm_neon_gadd2(wfn, ta, tb, nraw, to, tc)
     return typed_value(:raw_i64, tc)
 
   # asm_add_no(out, oo, a, ao, b, bo, n): offset add_n; adc loop; returns carry.
@@ -439,7 +439,7 @@
     ta = asm_ptr_operand(ctx, args[2])
     tb = asm_ptr_operand(ctx, args[4])
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_add_no, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bp: tb, boff: bor, n: nraw})
+    emit_wire_asm_add_no(wfn, aor, ta, bor, tb, nraw, oor, to, tc)
     return typed_value(:raw_i64, tc)
 
   # asm_{add,sub}_uneq(out, a, alen, b, blen): fused unequal-length kernel —
@@ -454,7 +454,7 @@
     ublen = lower_machine_int_expression(ctx, args[4], :i64)
     ut = next_temp(wfn)
     uop = name == "asm_add_uneq" ? :asm_add_uneq : :asm_sub_uneq
-    emit_instruction(wfn, {op: uop, temp: ut, outp: uo, ap: ua, na: ualen, bp: ub, nb: ublen, entry_label: current_block(wfn)[:label]})
+    emit_wire_dynamic_7(wfn, uop, :ap, ua, :bp, ub, :entry_label, current_block(wfn)[:label], :na, ualen, :nb, ublen, :outp, uo, :temp, ut)
     return typed_value(:raw_i64, ut)
 
   # asm_sub_no(out, oo, a, ao, b, bo, n): offset sub_n; sbcs loop; returns borrow.
@@ -469,7 +469,7 @@
     ta = asm_ptr_operand(ctx, args[2])
     tb = asm_ptr_operand(ctx, args[4])
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_sub_no, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bp: tb, boff: bor, n: nraw})
+    emit_wire_asm_sub_no(wfn, aor, ta, bor, tb, nraw, oor, to, tc)
     return typed_value(:raw_i64, tc)
 
   # asm_addmul1(out, oo, a, ao, bsc, n): offset addmul_1;
@@ -482,11 +482,11 @@
     bsc = lower_machine_int_expression(ctx, args[4], :u64)
     nraw = lower_machine_int_expression(ctx, args[5], :i64)
     to = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: to, arr: ov[:value]})
+    emit_wire_arr_data_ptr(wfn, ov[:value], to)
     ta = next_temp(wfn)
-    emit_instruction(wfn, {op: :arr_data_ptr, temp: ta, arr: av[:value]})
+    emit_wire_arr_data_ptr(wfn, av[:value], ta)
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_addmul1, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bsc: bsc, n: nraw})
+    emit_wire_asm_addmul1(wfn, aor, ta, bsc, nraw, oor, to, tc)
     return typed_value(:raw_i64, tc)
 
   # asm_mulbase(out, oo, a, ao, b, bo, na, nb): schoolbook multiplication in one asm
@@ -501,7 +501,7 @@
     ta = asm_ptr_operand(ctx, args[2])
     tb = asm_ptr_operand(ctx, args[4])
     tc = next_temp(wfn)
-    emit_instruction(wfn, {op: :asm_mulbase, temp: tc, outp: to, ooff: oor, ap: ta, aoff: aor, bp: tb, boff: bor, na: nar, nb: nbr})
+    emit_wire_asm_mulbase(wfn, aor, ta, bor, tb, nar, nbr, oor, to, tc)
     return typed_value(:raw_i64, tc)
 
   # Lazy pipeline: `source.lazy/sq/cube.take(n)`. `.take(n)` on a
@@ -532,7 +532,7 @@
       fma_b = ensure_raw_f64(wfn, lower_expression(ctx, args[1]))
       fma_c = ensure_raw_f64(wfn, lower_expression(ctx, args[2]))
       fma_t = next_temp(wfn)
-      emit_instruction(wfn, {op: :fma_f64, temp: fma_t, lhs: fma_a, rhs: fma_b, value: fma_c})
+      emit_wire_fma_f64(wfn, fma_a, fma_b, fma_t, fma_c)
       return typed_value(:raw_f64, fma_t)
 
   # Rewrite `$bytes[i]` / `$bits[i]` (and any
@@ -558,7 +558,7 @@
       if class_uses_implicit_type_byte?(ctx[:class_name])
         effective_offset += 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :view_load_inline_byte, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw})
+      emit_wire_view_load_inline_byte(wfn, idx_raw, effective_offset, self_reg, temp)
       return typed_value(:raw_int, temp)
     # Widened inline elements (u16..u64 and bare `T[]` tails, e.g. BigInt's
     # `u64[] limbs`): strided raw load at field_offset + index * elem_size.
@@ -573,7 +573,7 @@
         effective_offset += 1
       elem = inline_array_element_type(finfo[:type])
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :view_load_inline_elem, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw, elem: elem, size: type_size(elem)})
+      emit_wire_view_load_inline_elem(wfn, elem, idx_raw, effective_offset, self_reg, type_size(elem), temp)
       return typed_value(:raw_int, temp)
     # Unknown `$view[i]` names retain the older raw-object-relative behavior.
     if finfo == nil
@@ -597,7 +597,7 @@
         effective_offset += 1
       elem = inline_array_element_type(finfo[:type])
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :view_store_inline_elem, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw, value: val_raw, elem: elem, size: type_size(elem)})
+      emit_wire_view_store_inline_elem(wfn, elem, idx_raw, effective_offset, self_reg, type_size(elem), temp, val_raw)
       return typed_value(:raw_int, temp)
 
   # `$<view>.<field>` — explicit access to a named
@@ -624,7 +624,7 @@
       if class_uses_implicit_type_byte?(ctx[:class_name])
         effective_offset += 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :view_load_inline_byte, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw})
+      emit_wire_view_load_inline_byte(wfn, idx_raw, effective_offset, self_reg, temp)
       return typed_value(:raw_int, temp)
     # Widened inline elements (u16..u64 and bare `T[]` tails): strided raw
     # load; the containing method owns the semantic bounds check.
@@ -639,7 +639,7 @@
         effective_offset += 1
       elem = inline_array_element_type(info[:type])
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :view_load_inline_elem, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw, elem: elem, size: type_size(elem)})
+      emit_wire_view_load_inline_elem(wfn, elem, idx_raw, effective_offset, self_reg, type_size(elem), temp)
       return typed_value(:raw_int, temp)
     if info != nil && pointer_array_field?(info[:type])
       ptr_tv = lower_view_field(ctx, receiver)
@@ -648,7 +648,7 @@
       idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
       temp = next_temp(wfn)
       elem_type = pointer_array_element_type(info[:type])
-      emit_instruction(wfn, {op: :ptr_slot_get, temp: temp, ptr: ptr_tv[:value], index: idx_raw, slot_type: elem_type})
+      emit_wire_ptr_slot_get(wfn, idx_raw, ptr_tv[:value], elem_type, temp)
       if elem_type == "w64"
         return typed_value(:i64, temp)
       return typed_value(:raw_int, temp)
@@ -673,7 +673,7 @@
         effective_offset += 1
       elem = inline_array_element_type(info[:type])
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :view_store_inline_elem, temp: temp, ptr: self_reg, offset: effective_offset, index: idx_raw, value: val_raw, elem: elem, size: type_size(elem)})
+      emit_wire_view_store_inline_elem(wfn, elem, idx_raw, effective_offset, self_reg, type_size(elem), temp, val_raw)
       return typed_value(:raw_int, temp)
 
   # `value$bytes[i]` — explicit-receiver fixed inline field access. A named
@@ -695,7 +695,7 @@
         if class_uses_implicit_type_byte?(layout_class)
           effective_offset += 1
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :view_load_inline_byte, temp: temp, ptr: recv_reg, offset: effective_offset, index: idx_raw})
+        emit_wire_view_load_inline_byte(wfn, idx_raw, effective_offset, recv_reg, temp)
         return typed_value(:raw_int, temp)
       # Widened inline elements on an explicit receiver (`other$limbs[i]`):
       # binary numeric methods read the second operand's limbs this way.
@@ -710,7 +710,7 @@
           effective_offset += 1
         elem = inline_array_element_type(info[:type])
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :view_load_inline_elem, temp: temp, ptr: recv_reg, offset: effective_offset, index: idx_raw, elem: elem, size: type_size(elem)})
+        emit_wire_view_load_inline_elem(wfn, elem, idx_raw, effective_offset, recv_reg, type_size(elem), temp)
         return typed_value(:raw_int, temp)
 
   # Store twin of the explicit-receiver element load (`result$limbs[i] = v`):
@@ -735,7 +735,7 @@
           effective_offset += 1
         elem = inline_array_element_type(info[:type])
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :view_store_inline_elem, temp: temp, ptr: recv_reg, offset: effective_offset, index: idx_raw, value: val_raw, elem: elem, size: type_size(elem)})
+        emit_wire_view_store_inline_elem(wfn, elem, idx_raw, effective_offset, recv_reg, type_size(elem), temp, val_raw)
         return typed_value(:raw_int, temp)
 
   # Fast `node.field` access: when the receiver's static type is a
@@ -772,24 +772,24 @@
     # grows on demand; length resets to 0 on each hit.
     if node.reuse_safe == true
       cap_raw = next_temp(wfn)
-      emit_instruction(wfn, {op: :nanunbox_int, temp: cap_raw, temp_shl: cap_raw + ".shl", boxed: cap_reg})
+      emit_wire_nanunbox_int(wfn, cap_reg, cap_raw, cap_raw + ".shl")
       site_id = ctx[:mod][:next_reuse_site]
       ctx[:mod][:next_reuse_site] = site_id + 1
       slot_name = "reuse.site." + site_id.to_s()
       ctx[:mod][:reuse_sites].push(slot_name)
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_reuse_or_new_strbuf, temp: temp, slot: slot_name, cap: cap_raw})
+      emit_wire_call_reuse_or_new_strbuf(wfn, cap_raw, slot_name, temp)
       return typed_value(:i64, temp)
     # ## recycle — pop from pool or allocate; recycled at scope exit.
     if node.recycle_safe == true
       cap_raw = next_temp(wfn)
-      emit_instruction(wfn, {op: :nanunbox_int, temp: cap_raw, temp_shl: cap_raw + ".shl", boxed: cap_reg})
+      emit_wire_nanunbox_int(wfn, cap_reg, cap_raw, cap_raw + ".shl")
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_recycle_or_new_strbuf, temp: temp, cap: cap_raw})
+      emit_wire_call_recycle_or_new_strbuf(wfn, cap_raw, temp)
       track_recycle_temp(wfn, temp, :strbuf)
       return typed_value(:i64, temp)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_strbuf_new", args: [cap_reg]})
+    emit_wire_call_direct_i64(wfn, nil, [cap_reg], nil, nil, "w_strbuf_new", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # raw_load_u8(ptr, offset) → inline LLVM byte load from a raw pointer.
@@ -803,7 +803,7 @@
     ptr_raw = ensure_raw_machine_int(wfn, ptr_tv, :i64, ptr_type)
     idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_u8_ptr, temp: temp, ptr: ptr_raw, index: idx_raw})
+    emit_wire_load_u8_ptr(wfn, idx_raw, ptr_raw, temp)
     return typed_value(:raw_int, temp)
 
   # raw_store_u8(ptr, offset, value) → inline LLVM byte store to a raw
@@ -821,7 +821,7 @@
     idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
     value_raw = ensure_raw_machine_int(wfn, value_tv, :i64, value_type)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :store_u8_ptr, temp: temp, ptr: ptr_raw, index: idx_raw, value: value_raw})
+    emit_wire_store_u8_ptr(wfn, idx_raw, ptr_raw, temp, value_raw)
     return typed_value(:raw_int, temp)
 
   # raw_load_u32(ptr, offset) → inline unaligned little-endian u32 load from
@@ -834,7 +834,7 @@
     ptr_raw = ensure_raw_machine_int(wfn, ptr_tv, :i64, ptr_type)
     idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_u32_ptr, temp: temp, ptr: ptr_raw, index: idx_raw})
+    emit_wire_load_u32_ptr(wfn, idx_raw, ptr_raw, temp)
     return typed_value(:raw_int, temp)
 
   # raw_load_u64(ptr, offset) → inline unaligned u64 load from a raw byte
@@ -847,7 +847,7 @@
     ptr_raw = ensure_raw_machine_int(wfn, ptr_tv, :i64, ptr_type)
     idx_raw = ensure_raw_machine_int(wfn, idx_tv, :i64, idx_type)
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_u64_ptr, temp: temp, ptr: ptr_raw, index: idx_raw})
+    emit_wire_load_u64_ptr(wfn, idx_raw, ptr_raw, temp)
     return typed_value(:raw_i64, temp)
 
   # slab_alloc_init(kind, sc, field0, field1, ...) — slab-AST node
@@ -890,7 +890,7 @@
       i += 1
     ctx[:mod][:ccall_fns]["w_node_alloc"] = 2
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :slab_alloc_init, temp: temp, kind: kind_reg, sc: sc_reg, fields: field_vals})
+    emit_wire_slab_alloc_init(wfn, field_vals, kind_reg, sc_reg, temp)
     return typed_value(:i64, temp)
 
   # ccall("c_function_name", arg1, arg2, ...) → direct call to named C function
@@ -963,7 +963,7 @@
       i += 1
 
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: lowered_args, arg_types: lowered_arg_types})
+    emit_wire_call_direct_i64(wfn, lowered_arg_types, lowered_args, nil, nil, fn_name, nil, nil, temp)
     return typed_value(:i64, temp)
 
   # ccall_nobox("c_function_name", arg1, ...) → C function whose return is
@@ -1009,9 +1009,9 @@
           operand = lower_expression(ctx, math_call.args[0])
           raw_operand = ensure_raw_f64(wfn, operand)
           rounded = next_temp(wfn)
-          emit_instruction(wfn, {op: :call_libm_f64, temp: rounded, name: math_call.name, value: raw_operand})
+          emit_wire_call_libm_f64(wfn, nil, math_call.name, nil, rounded, raw_operand)
           converted = next_temp(wfn)
-          emit_instruction(wfn, {op: :fptosi_f64_i64, temp: converted, value: rounded})
+          emit_wire_fptosi_f64_i64(wfn, converted, rounded)
           return typed_value(:raw_i64, converted)
     lowered_args = []
     lowered_arg_types = []
@@ -1029,7 +1029,7 @@
         lowered_arg_types.push("i64")
       i += 1
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: lowered_args, arg_types: lowered_arg_types})
+    emit_wire_call_direct_i64(wfn, lowered_arg_types, lowered_args, nil, nil, fn_name, nil, nil, temp)
     # Slab-AST exception: w_node_alloc returns a W_PACKED_NODE WValue,
     # not a raw int. w_node_field_load returns a slab slot value
     # (arbitrary WValue). w_node_singleton and w_ast_bool_cached also
@@ -1076,7 +1076,7 @@
         lowered_arg_types.push("i64")
       i += 1
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fn_name, args: lowered_args, arg_types: lowered_arg_types})
+    emit_wire_call_direct_i64(wfn, lowered_arg_types, lowered_args, nil, nil, fn_name, nil, nil, temp)
     return typed_value(:i64, temp)
 
   # Typed overloads: resolve by inferred argument types and emit a direct call
@@ -1105,13 +1105,13 @@
           elsif pkinds != nil && pkinds[i] == :arrptr
             handle = ensure_i64_value(wfn, arg_tv)
             tda = next_temp(wfn)
-            emit_instruction(wfn, {op: :ta_data_addr, temp: tda, value: handle})
+            emit_wire_ta_data_addr(wfn, tda, handle)
             arg_regs.push(tda)
           else
             arg_regs.push(ensure_raw_machine_int(wfn, arg_tv, :i64, arg_types[i]))
           i += 1
         temp = next_temp(wfn)
-        emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: typed_target, args: arg_regs})
+        emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, typed_target, nil, nil, temp)
         if is_u64_type(ctx[:mod][:fn_return_types][typed_key])
           return typed_value(:raw_u64, temp)
         return typed_value(:raw_i64, temp)
@@ -1134,10 +1134,10 @@
         i += 1
 
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: typed_target, args: arg_regs})
+      emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, typed_target, nil, nil, temp)
       fb = 0
       while fb < fresh_boxes.size()
-        emit_instruction(wfn, {op: :free_value, value: fresh_boxes[fb]})
+        emit_wire_free_value(wfn, fresh_boxes[fb])
         fb += 1
       return typed_value(:i64, temp)
 
@@ -1172,13 +1172,13 @@
               elsif pkinds != nil && pkinds[i] == :arrptr
                 handle = guard_typed_array_arg(ctx, ensure_i64_value(wfn, arg_tv), fallback_types[i], arg_types[i], name, i)
                 tda = next_temp(wfn)
-                emit_instruction(wfn, {op: :ta_data_addr, temp: tda, value: handle})
+                emit_wire_ta_data_addr(wfn, tda, handle)
                 arg_regs.push(tda)
               else
                 arg_regs.push(ensure_raw_machine_int(wfn, arg_tv, :i64, fallback_types[i]))
               i += 1
             temp = next_temp(wfn)
-            emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fallback_target, args: arg_regs})
+            emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, fallback_target, nil, nil, temp)
             if is_u64_type(ctx[:mod][:fn_return_types][fallback_key])
               return typed_value(:raw_u64, temp)
             return typed_value(:raw_i64, temp)
@@ -1198,10 +1198,10 @@
             i += 1
 
           temp = next_temp(wfn)
-          emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: fallback_target, args: arg_regs})
+          emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, fallback_target, nil, nil, temp)
           fb = 0
           while fb < fresh_boxes.size()
-            emit_instruction(wfn, {op: :free_value, value: fresh_boxes[fb]})
+            emit_wire_free_value(wfn, fresh_boxes[fb])
             fb += 1
           return typed_value(:i64, temp)
 
@@ -1241,11 +1241,11 @@
       i += 1
     temp = next_temp(wfn)
     if arg_regs.size() == 0
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_closure_call_0", args: [closure_reg]})
+      emit_wire_call_direct_i64(wfn, nil, [closure_reg], nil, nil, "w_closure_call_0", nil, nil, temp)
     elsif arg_regs.size() == 1
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_closure_call_1", args: [closure_reg, arg_regs[0]]})
+      emit_wire_call_direct_i64(wfn, nil, [closure_reg, arg_regs[0]], nil, nil, "w_closure_call_1", nil, nil, temp)
     elsif arg_regs.size() == 2
-      emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: "w_closure_call_2", args: [closure_reg, arg_regs[0], arg_regs[1]]})
+      emit_wire_call_direct_i64(wfn, nil, [closure_reg, arg_regs[0], arg_regs[1]], nil, nil, "w_closure_call_2", nil, nil, temp)
     else
       raise compile_error_for_node(:E_LOWER_CLOSURE_CALL_ARITY, "closure call '" + name + "' supports 0..2 args, got " + arg_regs.size().to_s(), ctx[:source_path], node)
     return typed_value(:i64, temp)
@@ -1274,7 +1274,7 @@
       elsif pkinds != nil && pkinds[i] == :arrptr
         handle = ensure_i64_value(wfn, arg_tv)
         tda = next_temp(wfn)
-        emit_instruction(wfn, {op: :ta_data_addr, temp: tda, value: handle})
+        emit_wire_ta_data_addr(wfn, tda, handle)
         arg_regs.push(tda)
       else
         arg_type = infer_type(args[i], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
@@ -1285,7 +1285,7 @@
       while arg_regs.size() < expected_raw
         arg_regs.push("0")
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: raw_target, args: arg_regs})
+    emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, raw_target, nil, nil, temp)
     # Preserve unsignedness across the raw call boundary: a u64-returning
     # callee's value must later box via w_u64, not the signed int fast path
     # (which prints values >= 2^63 as negative).
@@ -1392,13 +1392,13 @@
     hi_128 = next_temp(wfn)
     hi = next_temp(wfn)
     xor_raw = next_temp(wfn)
-    emit_instruction(wfn, {op: :zext_i64_i128, temp: a_ext, value: arg_regs[0]})
-    emit_instruction(wfn, {op: :zext_i64_i128, temp: b_ext, value: arg_regs[1]})
-    emit_instruction(wfn, {op: :mul_i128, temp: prod, lhs: a_ext, rhs: b_ext})
-    emit_instruction(wfn, {op: :trunc_i128_i64, temp: lo, value: prod})
-    emit_instruction(wfn, {op: :lshr_i128, temp: hi_128, value: prod, shift: 64})
-    emit_instruction(wfn, {op: :trunc_i128_i64, temp: hi, value: hi_128})
-    emit_instruction(wfn, {op: :xor_i64, temp: xor_raw, lhs: lo, rhs: hi})
+    emit_wire_zext_i64_i128(wfn, a_ext, arg_regs[0])
+    emit_wire_zext_i64_i128(wfn, b_ext, arg_regs[1])
+    emit_wire_mul_i128(wfn, a_ext, b_ext, prod)
+    emit_wire_trunc_i128_i64(wfn, lo, prod)
+    emit_wire_lshr_i128(wfn, 64, hi_128, prod)
+    emit_wire_trunc_i128_i64(wfn, hi, hi_128)
+    emit_wire_xor_i64(wfn, lo, hi, xor_raw)
     # NaN-box as i48 integer (mask to payload + tag)
     result_tv = nanbox_int_emit(wfn, xor_raw)
     return result_tv
@@ -1412,20 +1412,20 @@
     memo_global = ctx[:mod][:fn_memo_tables][name]
     mark_memo_table_used(ctx[:mod], name)
     memo_ptr = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_memo_ptr, temp: memo_ptr, global: memo_global})
+    emit_wire_load_memo_ptr(wfn, memo_global, memo_ptr)
     if arg_regs.size() == 0
-      emit_instruction(wfn, {op: :memo_call0_i64, temp: temp, table: memo_ptr, fn_name: target})
+      emit_wire_memo_call0_i64(wfn, target, memo_ptr, temp)
       return typed_value(:i64, temp)
     if arg_regs.size() == 1
-      emit_instruction(wfn, {op: :memo_call1_i64, temp: temp, table: memo_ptr, fn_name: target, args: arg_regs})
+      emit_wire_memo_call1_i64(wfn, arg_regs, target, memo_ptr, temp)
       return typed_value(:i64, temp)
     if arg_regs.size() == 2
-      emit_instruction(wfn, {op: :memo_call2_i64, temp: temp, table: memo_ptr, fn_name: target, args: arg_regs})
+      emit_wire_memo_call2_i64(wfn, arg_regs, target, memo_ptr, temp)
       return typed_value(:i64, temp)
 
-  emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: target, args: arg_regs})
+  emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, target, nil, nil, temp)
   if target == "__w_exit"
-    emit_instruction(wfn, {op: :unreachable})
+    emit_wire_unreachable(wfn)
   typed_value(:i64, temp)
 
 -> static_param_type(static_info, index)
@@ -1461,13 +1461,13 @@
     rest_count = 0
   rest = next_temp(wfn)
   if rest_count == 0
-    emit_instruction(wfn, {op: :call_direct_i64, temp: rest, name: "w_array_new_empty", args: []})
+    emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_array_new_empty", nil, nil, rest)
   else
-    emit_instruction(wfn, {op: :call_direct_i64, temp: rest, name: "w_array_new_uninit_sized", args: ["65", rest_count.to_s()]})
+    emit_wire_call_direct_i64(wfn, nil, ["65", rest_count.to_s()], nil, nil, "w_array_new_uninit_sized", nil, nil, rest)
     ri = 0
     while ri < rest_count
       stored = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: stored, name: "__w_array_lit_store", args: [rest, ri.to_s(), source_regs[splat_index + ri]]})
+      emit_wire_call_direct_i64(wfn, nil, [rest, ri.to_s(), source_regs[splat_index + ri]], nil, nil, "__w_array_lit_store", nil, nil, stored)
       ri += 1
   out.push(rest)
 
@@ -1543,15 +1543,15 @@
     memo_global = ctx[:mod][:fn_memo_tables][static_key]
     mark_memo_table_used(ctx[:mod], static_key)
     memo_ptr = next_temp(wfn)
-    emit_instruction(wfn, {op: :load_memo_ptr, temp: memo_ptr, global: memo_global})
+    emit_wire_load_memo_ptr(wfn, memo_global, memo_ptr)
     if arg_regs.size() == 1
-      emit_instruction(wfn, {op: :memo_call1_i64, temp: temp, table: memo_ptr, fn_name: static_info[:fn_name], args: arg_regs})
+      emit_wire_memo_call1_i64(wfn, arg_regs, static_info[:fn_name], memo_ptr, temp)
     elsif arg_regs.size() == 2
-      emit_instruction(wfn, {op: :memo_call2_i64, temp: temp, table: memo_ptr, fn_name: static_info[:fn_name], args: arg_regs})
+      emit_wire_memo_call2_i64(wfn, arg_regs, static_info[:fn_name], memo_ptr, temp)
     else
-      emit_instruction(wfn, {op: :memo_call0_i64, temp: temp, table: memo_ptr, fn_name: static_info[:fn_name]})
+      emit_wire_memo_call0_i64(wfn, static_info[:fn_name], memo_ptr, temp)
   else
-    emit_instruction(wfn, {op: :call_direct_i64, temp: temp, name: static_info[:fn_name], args: arg_regs})
+    emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, static_info[:fn_name], nil, nil, temp)
 
   static_return_type = static_info[:return_type]
   if static_return_type != nil && is_machine_int64_type(static_return_type)
@@ -1576,7 +1576,7 @@
   receiver_val = lower_expression(ctx, recv_node)
   receiver_reg = ensure_i64_value(wfn, receiver_val)
   size_box = next_temp(wfn)
-  emit_instruction(wfn, {op: :call_direct_i64, temp: size_box, name: "w_array_size", args: [receiver_reg]})
+  emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_array_size", nil, nil, size_box)
   size_raw = nanunbox_int_emit(wfn, size_box)
 
   result_ptr = nil
@@ -1589,7 +1589,7 @@
     default_result = w_true.to_s()
   if method_name != "each"
     result_ptr = ensure_var_slot(wfn, "__array_iter_result." + next_label(wfn, "air"))
-    emit_instruction(wfn, {op: :store_i64, value: default_result, ptr: result_ptr})
+    emit_wire_store_i64(wfn, result_ptr, default_result)
 
   materialize_bindings(ctx)
 
@@ -1634,17 +1634,17 @@
   inc_label = next_label(wfn, "array.iter.inc")
   exit_label = next_label(wfn, "array.iter.exit")
 
-  emit_instruction(wfn, {op: :br, label: pre_label})
+  emit_wire_br(wfn, pre_label, nil, nil)
   start_block(wfn, pre_label)
-  emit_instruction(wfn, {op: :br, label: header_label})
+  emit_wire_br(wfn, header_label, nil, nil)
 
   start_block(wfn, header_label)
   idx_raw = next_temp(wfn)
   idx_next = next_temp(wfn)
-  emit_instruction(wfn, {op: :phi_i64, temp: idx_raw, a_value: "0", a_label: pre_label, b_value: idx_next, b_label: inc_label})
+  emit_wire_phi_i64(wfn, pre_label, "0", inc_label, idx_next, idx_raw)
   cmp = next_temp(wfn)
-  emit_instruction(wfn, {op: :icmp_i64, temp: cmp, pred: "slt", lhs: idx_raw, rhs: size_raw})
-  emit_instruction(wfn, {op: :cond_br, cond: cmp, then_label: body_label, else_label: exit_label})
+  emit_wire_icmp_i64(wfn, idx_raw, "slt", size_raw, cmp)
+  emit_wire_cond_br(wfn, cmp, exit_label, nil, body_label)
 
   start_block(wfn, body_label)
   iterator_recycle_depth = wfn[:scope_recycle_stack].size()
@@ -1657,7 +1657,7 @@
     scratch.push(next_temp(wfn))
     si += 1
   elem = next_temp(wfn)
-  emit_instruction(wfn, {op: :array_get_inline, temp: elem, arr: receiver_reg, idx: idx_boxed[:value], s: scratch})
+  emit_wire_array_get_inline(wfn, receiver_reg, idx_boxed[:value], scratch, elem)
   iter_bparams = block.params
   if iter_bparams != nil && iter_bparams.size() > 1
     # ->(a, b): destructure the yielded element across the declared params
@@ -1668,15 +1668,15 @@
       if is_ast_node?(dp_name)
         dp_name = dp_name.name
       dp_val = next_temp(wfn)
-      emit_instruction(wfn, {op: :call_direct_i64, temp: dp_val, name: "w_destructure_index", args: [elem, dpi.to_s()]})
+      emit_wire_call_direct_i64(wfn, nil, [elem, dpi.to_s()], nil, nil, "w_destructure_index", nil, nil, dp_val)
       dp_ptr = ensure_var_slot(wfn, dp_name)
-      emit_instruction(wfn, {op: :store_i64, value: dp_val, ptr: dp_ptr})
+      emit_wire_store_i64(wfn, dp_ptr, dp_val)
       ctx[:bindings][dp_name] = nil
       ctx[:var_types][dp_name] = nil
       dpi += 1
   elsif param_name != nil
     ptr = ensure_var_slot(wfn, param_name)
-    emit_instruction(wfn, {op: :store_i64, value: elem, ptr: ptr})
+    emit_wire_store_i64(wfn, ptr, elem)
     ctx[:bindings][param_name] = nil
     ctx[:var_types][param_name] = nil
 
@@ -1706,7 +1706,7 @@
         else
           pred_reg = ensure_i64_value(wfn, pred_val)
           pred_bool = next_temp(wfn)
-          emit_instruction(wfn, {op: :truthy_inline, temp: pred_bool, value: pred_reg})
+          emit_wire_truthy_inline(wfn, pred_bool, pred_reg)
 
         # Predicate result and `elem` are now materialized. Recycle this
         # iteration's lexical values once before either the continue or hit
@@ -1714,38 +1714,38 @@
         emit_scope_pop(wfn, iterator_sid)
         hit_label = next_label(wfn, "array.iter.hit")
         if method_name == "all?"
-          emit_instruction(wfn, {op: :cond_br, cond: pred_bool, then_label: inc_label, else_label: hit_label})
+          emit_wire_cond_br(wfn, pred_bool, hit_label, nil, inc_label)
           start_block(wfn, hit_label)
-          emit_instruction(wfn, {op: :store_i64, value: w_false.to_s(), ptr: result_ptr})
-          emit_instruction(wfn, {op: :br, label: exit_label})
+          emit_wire_store_i64(wfn, result_ptr, w_false.to_s())
+          emit_wire_br(wfn, exit_label, nil, nil)
         elsif method_name == "none?"
-          emit_instruction(wfn, {op: :cond_br, cond: pred_bool, then_label: hit_label, else_label: inc_label})
+          emit_wire_cond_br(wfn, pred_bool, inc_label, nil, hit_label)
           start_block(wfn, hit_label)
-          emit_instruction(wfn, {op: :store_i64, value: w_false.to_s(), ptr: result_ptr})
-          emit_instruction(wfn, {op: :br, label: exit_label})
+          emit_wire_store_i64(wfn, result_ptr, w_false.to_s())
+          emit_wire_br(wfn, exit_label, nil, nil)
         elsif method_name == "any?"
-          emit_instruction(wfn, {op: :cond_br, cond: pred_bool, then_label: hit_label, else_label: inc_label})
+          emit_wire_cond_br(wfn, pred_bool, inc_label, nil, hit_label)
           start_block(wfn, hit_label)
-          emit_instruction(wfn, {op: :store_i64, value: w_true.to_s(), ptr: result_ptr})
-          emit_instruction(wfn, {op: :br, label: exit_label})
+          emit_wire_store_i64(wfn, result_ptr, w_true.to_s())
+          emit_wire_br(wfn, exit_label, nil, nil)
         else
-          emit_instruction(wfn, {op: :cond_br, cond: pred_bool, then_label: hit_label, else_label: inc_label})
+          emit_wire_cond_br(wfn, pred_bool, inc_label, nil, hit_label)
           start_block(wfn, hit_label)
-          emit_instruction(wfn, {op: :store_i64, value: elem, ptr: result_ptr})
-          emit_instruction(wfn, {op: :br, label: exit_label})
+          emit_wire_store_i64(wfn, result_ptr, elem)
+          emit_wire_br(wfn, exit_label, nil, nil)
 
   pop_loop(wfn)
 
   if !block_terminated(wfn)
     emit_scope_pop(wfn, iterator_sid)
-    emit_instruction(wfn, {op: :br, label: inc_label})
+    emit_wire_br(wfn, inc_label, nil, nil)
   else
     # break/next/return already emitted runtime cleanup for the abandoned
     # iteration; restore only the lowering stack before building sibling CFG.
     restore_recycle_scope_depth(wfn, iterator_recycle_depth)
   start_block(wfn, inc_label)
-  emit_instruction(wfn, {op: :add_i64, temp: idx_next, lhs: idx_raw, rhs: "1"})
-  emit_instruction(wfn, {op: :br, label: header_label})
+  emit_wire_add_i64(wfn, idx_raw, "1", idx_next)
+  emit_wire_br(wfn, header_label, nil, nil)
 
   start_block(wfn, exit_label)
   if iterator_has_outer_bindings
@@ -1762,7 +1762,7 @@
   if method_name == "each"
     return typed_value(:i64, receiver_reg)
   result = next_temp(wfn)
-  emit_instruction(wfn, {op: :load_i64, temp: result, ptr: result_ptr})
+  emit_wire_load_i64(wfn, result_ptr, result)
   typed_value(:i64, result)
 
 # -- I/O --
@@ -1801,10 +1801,10 @@
     val_reg = ensure_i64_value(wfn, val)
     if produce_value && i == n - 1
       temp = next_temp(wfn)
-      emit_instruction(wfn, {op: :puts_i64, temp: temp, value: val_reg})
+      emit_wire_puts_i64(wfn, temp, val_reg)
       result = typed_value(:i64, temp)
     else
-      emit_instruction(wfn, {op: :puts_i64, value: val_reg})
+      emit_wire_puts_i64(wfn, nil, val_reg)
     i += 1
   result
 
@@ -1814,9 +1814,9 @@
   val_reg = ensure_i64_value(wfn, val)
   if produce_value
     temp = next_temp(wfn)
-    emit_instruction(wfn, {op: :print_i64, temp: temp, value: val_reg})
+    emit_wire_print_i64(wfn, temp, val_reg)
     return typed_value(:i64, temp)
-  emit_instruction(wfn, {op: :print_i64, value: val_reg})
+  emit_wire_print_i64(wfn, nil, val_reg)
   nil
 
 -> inline_block_param_name(block, ctx)

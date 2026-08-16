@@ -23,6 +23,9 @@ WValue w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fie
 WValue w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value);
 WValue w_wire_field_load(WValue wire, WValue sym);
 WValue w_wire_field_load_nil(WValue wire, WValue sym);
+int64_t w_wire_field_count(WValue wire);
+WValue w_wire_field_symbol_at(WValue wire, int64_t index);
+WValue w_wire_field_value_at(WValue wire, int64_t index);
 WValue w_wire_field_store(WValue wire, WValue sym, WValue value);
 int64_t w_wire_kind_extern(WValue wire);
 int64_t w_is_wire_extern(WValue value);

@@ -125,10 +125,7 @@
     effective_offset = info[:offset] + 1
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {
-    op: :view_load_field, temp: temp, ptr: self_reg,
-    offset: effective_offset, size: info[:size], field_type: info[:type]
-  })
+  emit_wire_view_load_field(wfn, info[:type], effective_offset, self_reg, info[:size], temp)
   typed_value(view_field_value_type(info[:type]), temp)
 
 # `$field = value` inside a class method — write a scalar field in that
@@ -176,10 +173,7 @@
     value_reg = ensure_i64_value(wfn, val_tv)
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {
-    op: :view_store_field, temp: temp, ptr: self_reg, value: value_reg,
-    offset: effective_offset, size: info[:size], field_type: field_type
-  })
+  emit_wire_view_store_field(wfn, field_type, effective_offset, self_reg, info[:size], temp, value_reg)
   typed_value(result_type, temp)
 
 # `receiver$field` — the explicit-receiver twin of lower_view_field. The
@@ -217,10 +211,7 @@
     effective_offset = info[:offset] + 1
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {
-    op: :view_load_field, temp: temp, ptr: recv_reg,
-    offset: effective_offset, size: info[:size], field_type: info[:type]
-  })
+  emit_wire_view_load_field(wfn, info[:type], effective_offset, recv_reg, info[:size], temp)
   typed_value(view_field_value_type(info[:type]), temp)
 
 # `receiver$field = value` — explicit-receiver twin of
@@ -267,10 +258,7 @@
     value_reg = ensure_i64_value(wfn, val_tv)
 
   temp = next_temp(wfn)
-  emit_instruction(wfn, {
-    op: :view_store_field, temp: temp, ptr: recv_reg, value: value_reg,
-    offset: effective_offset, size: info[:size], field_type: field_type
-  })
+  emit_wire_view_store_field(wfn, field_type, effective_offset, recv_reg, info[:size], temp, value_reg)
   typed_value(result_type, temp)
 
 # Preserve scalar view fields in their machine representation until a real
@@ -348,11 +336,11 @@
 
   temp = next_temp(wfn)
   if view_name == "bytes"
-    emit_instruction(wfn, {op: :view_load_byte, temp: temp, ptr: self_reg, index: idx_raw})
+    emit_wire_view_load_byte(wfn, idx_raw, self_reg, temp)
   elsif view_name == "bits"
-    emit_instruction(wfn, {op: :view_load_bit, temp: temp, ptr: self_reg, index: idx_raw})
+    emit_wire_view_load_bit(wfn, idx_raw, self_reg, temp)
   else
-    emit_instruction(wfn, {op: :view_load_byte, temp: temp, ptr: self_reg, index: idx_raw})
+    emit_wire_view_load_byte(wfn, idx_raw, self_reg, temp)
   typed_value(:i64, temp)
 
 -> lower_view_base(ctx)
@@ -360,7 +348,7 @@
   self_tv = lower_var(ctx, Tungsten:AST:Var.new("__self"))
   self_reg = ensure_i64_value(wfn, self_tv)
   temp = next_temp(wfn)
-  emit_instruction(wfn, {op: :view_base_ptr, temp: temp, value: self_reg})
+  emit_wire_view_base_ptr(wfn, temp, self_reg)
   typed_value(:i64, temp)
 
 -> lower_view_value(ctx)

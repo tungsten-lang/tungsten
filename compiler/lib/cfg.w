@@ -15,7 +15,7 @@ use wire
     instrs = func[:blocks][bi][:instructions]
     ii = 0
     while ii < instrs.size()
-      op = instrs[ii][:op]
+      op = wire_kind(instrs[ii])
       if op in (:add_i48_checked :sub_i48_checked :mul_i48_checked)
         return true
       ii += 1
@@ -49,7 +49,7 @@ use wire
     instrs = blocks[i][:instructions]
     if instrs.size() > 0
       last = instrs[instrs.size() - 1]
-      op = last[:op]
+      op = wire_kind(last)
       if op == :br
         target = label_map[last[:label]]
         if target != nil
@@ -626,7 +626,7 @@ use wire
           incoming = phi_incoming[bi][ptr]
         # Always emit phi if there are incoming values
         if incoming.size() > 0
-          phi_instrs.push(wire_instruction({op: :phi_ssa, temp: temp, incoming: incoming}))
+          phi_instrs.push(wire_make_phi_ssa(incoming, temp))
         ppi += 1
       # Prepend phi instructions before existing block instructions
       old_instrs = blocks[bi][:instructions]

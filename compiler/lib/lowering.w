@@ -84,7 +84,7 @@ use lowering/definitions
   str_id = module_string_constant(ctx[:mod], s)
   temp_ptr = next_temp(ctx[:func])
   temp = next_temp(ctx[:func])
-  emit_instruction(ctx[:func], {op: :string_i64, temp: temp, temp_ptr: temp_ptr, string_id: str_id, byte_len: byte_len + 1})
+  emit_wire_string_i64(ctx[:func], byte_len + 1, str_id, temp, temp_ptr)
   typed_value(:i64, temp)
 
 -> parse_build_defines_env
@@ -404,7 +404,7 @@ use lowering/definitions
     if mod[:used_builtin_classes][bc_name] == true
       bc_str_id = module_string_constant(mod, bc_name)
       bc_byte_len = utf8_byte_length(bc_name) + 1
-      emit_instruction(main_fn, {op: :builtin_class_init, class_name: bc_name, name_str_id: bc_str_id, name_byte_len: bc_byte_len})
+      emit_wire_builtin_class_init(main_fn, bc_name, bc_byte_len, bc_str_id)
     bci += 1
   nil
 
@@ -504,9 +504,9 @@ use lowering/definitions
         super_reg = nil
         if super_name != nil
           super_reg = next_temp(main_fn)
-          emit_instruction(main_fn, {op: :load_class, temp: super_reg, class_name: super_name})
-        emit_instruction(main_fn, {op: :class_new, temp: cls_temp, name_str_id: name_str_id, name_byte_len: name_byte_len, super_reg: super_reg})
-        emit_instruction(main_fn, {op: :class_store, value: cls_temp, class_name: cname})
+          emit_wire_load_class(main_fn, super_name, super_reg)
+        emit_wire_class_new(main_fn, name_byte_len, name_str_id, super_reg, cls_temp)
+        emit_wire_class_store(main_fn, cname, cls_temp)
 
         # Register type dispatch key if this class maps to a built-in type.
         # ByteArray/BoolArray/TypedArray are Array FACADES (same WArray
@@ -518,7 +518,7 @@ use lowering/definitions
         # Their `.new` is intercepted by name in runtime dispatch instead.
         dkey = type_dispatch_key(cname)
         if dkey != nil && !(cname in ("ByteArray" "BoolArray" "TypedArray"))
-          emit_instruction(main_fn, {op: :type_class_register, dispatch_key: dkey, class_temp: cls_temp})
+          emit_wire_type_class_register(main_fn, cls_temp, dkey)
 
         # Per-kind node dispatch: AST [slab] classes register for their
         # kind id so packed nodes route to the specialized class. The
@@ -527,7 +527,7 @@ use lowering/definitions
         # it into the integer the runtime indexes by.
         ast_kind_sym = mod[:fn_return_types][cname + ".new"]
         if ast_kind_sym != nil && kind_id_table[ast_kind_sym] != nil
-          emit_instruction(main_fn, {op: :node_kind_class_register, kind_id: kind_id_table[ast_kind_sym], class_temp: cls_temp})
+          emit_wire_node_kind_class_register(main_fn, cls_temp, kind_id_table[ast_kind_sym])
 
         # Inherit superclass ivar offsets for this class's fresh layout.
         # Use the namespace-resolved super_name so a cross-file parent's
@@ -581,8 +581,8 @@ use lowering/definitions
           ivar_str_id = module_string_constant(mod, iname)
           ivar_byte_len = utf8_byte_length(iname) + 1
           cls_reload = next_temp(main_fn)
-          emit_instruction(main_fn, {op: :load_class, temp: cls_reload, class_name: cname})
-          emit_instruction(main_fn, {op: :class_add_ivar, class_temp: cls_reload, ivar_str_id: ivar_str_id, ivar_byte_len: ivar_byte_len})
+          emit_wire_load_class(main_fn, cname, cls_reload)
+          emit_wire_class_add_ivar(main_fn, cls_reload, ivar_byte_len, ivar_str_id)
         li += 1
       processed_classes[cname] = {ivar_offsets: ivar_offsets, offset: offset}
 
@@ -729,7 +729,7 @@ use lowering/definitions
       unit_id = mod[:custom_units][unit_name]
       str_id = module_string_constant(mod, unit_name)
       byte_len = utf8_byte_length(unit_name) + 1
-      reg_instructions.push(wire_instruction({op: :register_unit, unit_id: unit_id, str_id: str_id, byte_len: byte_len}))
+      reg_instructions.push(wire_make_register_unit(byte_len, str_id, unit_id))
       cui += 1
     # Prepend into the entry block, same shape as prepend_memo_table_initializers.
     cu_entry = main_fn[:blocks][0]
@@ -915,7 +915,7 @@ use lowering/definitions
   # Initialize argv subsystem only for programs that touch ARGV / argv().
   if mod[:uses_argv]
     main_fn[:extra_params] = [{type: "i32", name: "%argc"}, {type: "ptr", name: "%argv"}]
-    emit_instruction(main_fn, {op: :argv_init})
+    emit_wire_argv_init(main_fn)
 
   emit_builtin_class_inits(main_fn, mod)
   ordered_class_exprs = order_class_exprs(mod, ast.expressions)
@@ -930,10 +930,10 @@ use lowering/definitions
   # registration paths as well as Tungsten source.
   if mod[:method_tables_locked] == true
     method_lock_tmp = next_temp(main_fn)
-    emit_instruction(main_fn, {op: :call_direct_i64, temp: method_lock_tmp, name: "w_method_tables_lock_safe", args: []})
+    emit_wire_call_direct_i64(main_fn, nil, [], nil, nil, "w_method_tables_lock_safe", nil, nil, method_lock_tmp)
   elsif mod[:type_tables_locked] == true
     type_lock_tmp = next_temp(main_fn)
-    emit_instruction(main_fn, {op: :call_direct_i64, temp: type_lock_tmp, name: "w_type_tables_lock_safe", args: []})
+    emit_wire_call_direct_i64(main_fn, nil, [], nil, nil, "w_type_tables_lock_safe", nil, nil, type_lock_tmp)
 
   # Freeze the string slab once startup registration is fully emitted (every
   # class/method-name intern above precedes this point in main). The compiled
@@ -948,7 +948,7 @@ use lowering/definitions
   # point, and must still canonicalize into the slab.
   if mod[:no_static_slab] != true
     slab_freeze_tmp = next_temp(main_fn)
-    emit_instruction(main_fn, {op: :call_direct_i64, temp: slab_freeze_tmp, name: "w_slab_freeze_safe", args: []})
+    emit_wire_call_direct_i64(main_fn, nil, [], nil, nil, "w_slab_freeze_safe", nil, nil, slab_freeze_tmp)
 
   # Pre-pass (gap #2) over class method ASTs to collect ivar
   # types, so dispatch on `self.@arr.method()` can specialize when
@@ -995,7 +995,7 @@ use lowering/definitions
     # appearing in this module's IR, so an IR probe could not gate it safely;
     # (3) it costs ~nothing — the first line of w_scheduler_run returns when
     # no goroutine was ever spawned (two global loads).
-    emit_instruction(main_fn, {op: :call_direct_void, name: "w_scheduler_run", args: []})
+    emit_wire_call_direct_void(main_fn, [], "w_scheduler_run")
 
   finalize_function(main_fn)
   if core_expressions != nil

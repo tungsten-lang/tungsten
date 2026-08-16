@@ -721,12 +721,16 @@ fn __bigint_mod_42_exact(rp, up, vp) (i64 i64 i64) i64
 # mag_mod_63: the same normalization, Moller--Granlund reciprocal, four
 # 3-by-2 quotient digits, saturated/correction arms, and three-limb result.
 on macos && arm64
-  fn __bigint_mod_63_exact(rp, up, vp) (i64 i64 i64) i64
+  fn __bigint_mod_63_raw(a, b) (i64 i64) i64
     asm <<~ASM
       .arch_extension cssc
       sub sp, sp, #96
       stp x22, x21, [sp, #64]
       stp x20, x19, [sp, #80]
+      and x2, x1, #0x7fffffffffff
+      add x2, x2, #16
+      and x1, x0, #0x7fffffffffff
+      add x1, x1, #16
       mov x11, x2
       ldr x9, [x11, #16]!
       clz x8, x9
@@ -985,27 +989,19 @@ on macos && arm64
       csel x8, x9, x10, eq
       csel x9, x15, x11, eq
       csel x10, x14, x12, eq
-      stp x8, x9, [x0]
-      str x10, [x0, #16]
-      cbz x10, 30f
-      mov w0, #3
-      ldp x20, x19, [sp, #80]
-      ldp x22, x21, [sp, #64]
-      add sp, sp, #96
-      ret
+      mov w3, #3
+      cbnz x10, 30f
+      mov w3, #2
+      cbnz x9, 30f
+      umin x3, x8, #1
     30:
-      cbz x9, 32f
-      mov w0, #2
+      mov x0, x8
+      mov x1, x9
+      mov x2, x10
       ldp x20, x19, [sp, #80]
       ldp x22, x21, [sp, #64]
       add sp, sp, #96
-      ret
-    32:
-      umin x0, x8, #1
-      ldp x20, x19, [sp, #80]
-      ldp x22, x21, [sp, #64]
-      add sp, sp, #96
-      ret
+      b _w_bigint_mod63_finish_raw
     33:
       str x3, [sp, #48]
       mov w1, #2
@@ -1078,14 +1074,6 @@ fn __bigint_mod_42_raw(a, b) (i64 i64) i64
     outn = 2
   elsif raw_load_u64(rp, 0) != 0
     outn = 1
-  ccall_nobox("w_bigint_finish_sub_raw", result, outn)
-
-fn __bigint_mod_63_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
-  rp = (result & 140737488355327) + 16 ## i64
-  ap = (a & 140737488355327) + 16 ## i64
-  bp = (b & 140737488355327) + 16 ## i64
-  outn = __bigint_mod_63_exact(rp, ap, bp) ## i64
   ccall_nobox("w_bigint_finish_sub_raw", result, outn)
 
 

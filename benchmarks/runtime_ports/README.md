@@ -239,6 +239,19 @@ not yet a win: native/C was 1.068 (36.763 ns versus 34.384 ns median).  Raw
 evidence: `bigint_mod_63_exact_results.txt`.  This checkpoint is the exact
 port requested before changing the native schedule.
 
+NATIVE 6-BY-3 STORAGE FOLLOW-UP: after the exact checkpoint, the source leaf
+was allowed to optimize only its result handoff.  It now accepts the boxed
+operands directly, computes the same limbs before allocating, and tail-calls
+one shape-specific runtime boundary that performs the capacity-3 hot
+allocation, publishes all three limbs, and applies the unchanged
+`bigint_finish_mag_sub` policy.  The reciprocal arithmetic and every quotient
+correction arm remain byte-for-byte the exact port above.  A 31-pair matched
+run improved native/C from the checkpoint's 1.065 to 1.024 (34.725 ns versus
+34.138 ns median), recovering about 3.9% of total time while remaining an
+honest 2.4% C win.  The untouched 4/2 control remained green at 0.969; signed
+6/3 stays on C.  Raw evidence:
+`bigint_mod_63_native_finish_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

@@ -53578,6 +53578,17 @@ WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size) {
     b->size = (int32_t)signed_size;
     return bigint_finish_mag_sub(b);
 }
+WValue w_bigint_mod63_finish_raw(
+    uint64_t limb0, uint64_t limb1, uint64_t limb2, int64_t size) {
+    if ((uint64_t)size > 3)
+        die("w_bigint_mod63_finish_raw: size is outside 0..3");
+    WBigint *b = bigint_alloc_raw_hot(3);
+    b->limbs[0] = limb0;
+    b->limbs[1] = limb1;
+    b->limbs[2] = limb2;
+    b->size = (int32_t)size;
+    return bigint_finish_mag_sub(b);
+}
 WValue w_bigint_seal(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)w_to_i64(signed_size);

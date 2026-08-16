@@ -768,6 +768,8 @@ WValue w_bigint_finish_add(WValue v, WValue signed_size);
 WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size);
 WValue w_bigint_finish_sub(WValue v, WValue signed_size);
 WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size);
+WValue w_bigint_mod63_finish_raw(
+    uint64_t limb0, uint64_t limb1, uint64_t limb2, int64_t size);
 WValue w_bigint_seal(WValue v, WValue signed_size);
 WValue w_bigint_seal_raw(WValue v, int64_t signed_size);
 WValue w_native_data_elem(WValue recv, WValue field, WValue idx);

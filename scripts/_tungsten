@@ -38,6 +38,8 @@ _tungsten() {
           _arguments \
             '--out[Output path]:file:_files' \
             '--emit-wire[Emit WIRE IR text]' \
+            '--emit-ll[Write LLVM IR and skip native linking]' \
+            '(-j --jobs)'{-j,--jobs}'[Parallel compile-batch workers]:workers:(1 2 4 8)' \
             '--no-lto[Disable link-time optimization]' \
             '--frame-pointers[Keep frame pointers]' \
             '--release[-O3, full LTO, reduced metadata]' \

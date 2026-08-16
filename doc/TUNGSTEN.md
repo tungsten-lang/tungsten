@@ -153,7 +153,8 @@ OPTIONS
         Expand DIR and add to Tungsten.load_paths.
 
     -j, --jobs N
-        Number of parallel jobs to spawn. Defaults to the CPU count.
+        Number of deterministic compile-batch emission workers. Auto mode uses
+        roughly one worker per 16 entries, capped at eight and the CPU count.
 
         --lex
         Lex the input and print the tokens. Does not run the program.

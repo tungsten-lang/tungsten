@@ -22,14 +22,14 @@ done
 flags=(--release --native --fast --no-debug --emit-ll -v)
 
 TUNGSTEN_FRONTEND_PARSE_CACHE=0 TUNGSTEN_LL_DIR="$TMP/off-ll" \
-  "$TUNGSTEN" compile-batch "${files[@]}" "${flags[@]}" \
+  "$TUNGSTEN" compile-batch --jobs 1 "${files[@]}" "${flags[@]}" \
   >"$TMP/off.log" 2>&1
 cp "$TMP/src/program-0.wc.sidemap" "$TMP/off-0.sidemap"
 cp "$TMP/src/program-1.wc.sidemap" "$TMP/off-1.sidemap"
 cp "$TMP/src/program-2.wc.sidemap" "$TMP/off-2.sidemap"
 
 TUNGSTEN_FRONTEND_PARSE_CACHE=1 TUNGSTEN_LL_DIR="$TMP/on-ll" \
-  "$TUNGSTEN" compile-batch "${files[@]}" "${flags[@]}" \
+  "$TUNGSTEN" compile-batch --jobs 1 "${files[@]}" "${flags[@]}" \
   >"$TMP/on.log" 2>&1
 
 if ! grep -E 'frontend parse cache: [1-9][0-9]* hits, [0-9]+ misses' \

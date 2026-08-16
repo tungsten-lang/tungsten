@@ -378,3 +378,51 @@ entry programs sharing a Core artifact. A closed-world bignum fixture likewise
 matched exactly while reusing 161 reachable Core functions. The focused test
 also proves that debug emission bypasses reuse and retains its physical-frame
 attributes.
+
+## Deterministic parallel batch emission
+
+Entry programs are independent after the compiler executable and persistent
+Core artifact are available; functions inside one lowering are not. They share
+module counters, class tables, and the AST/WIRE arenas. `compile-batch` now
+parallelizes at that safe boundary: it assigns contiguous source shards to
+long-lived child compiler processes, each child parses/lowers/emits its shard,
+and the parent retains runtime compilation and source-order linking. This
+preserves the one-runtime-per-batch property and avoids making shared mutable
+lowering state concurrent.
+
+Workers write to parent-assigned private LLVM paths, return only complete files
+with `.done` markers, and keep symbol sidecars at their ordinary source-derived
+paths. The parent waits for every worker, replays stdout/stderr in shard order,
+then scans and links LLVM in original source order. Thus scheduling changes
+wall time, not artifacts or observable ordering. `--jobs N` selects an exact
+worker count; `TUNGSTEN_BATCH_JOBS` supplies the same policy by environment,
+and `TUNGSTEN_BATCH_PARALLEL=0` forces the serial path.
+
+Auto mode uses roughly one worker per 16 entries, capped by the file count,
+logical CPUs, and eight workers. Small batches therefore stay in process. The
+driver also stays serial for stage-0 execution, duplicate source paths,
+`--emit-wire`, AST statistics, caller-owned LLVM/Metal paths, source-adjacent
+`--ll`, and single-file diagnostic reports such as `TUNGSTEN_SSA_REPORT`.
+
+On 2026-08-16, five alternating pairs compiled 150 copies of
+`compiler/test/fixtures/core_abi_stable_b.w` with prewarmed Core WIRE and
+`--release --native --fast --no-debug --emit-ll`. The already-optimized serial
+median was 23.849750s; eight deterministic workers took 3.432063s, saving
+20.417687s (85.61%, 6.949x throughput). Single probes showed the scaling curve:
+23.85s at one worker, 11.74s at two, 6.13s at four, and 3.43s at eight.
+
+Aggregate peak RSS rose from the rendered-cache serial measurement of
+5,934,071,808 bytes to 6,363,103,232 bytes with eight workers: 429,031,424
+bytes, or 7.23%. This is bounded because every worker retains only its shard's
+ASTs; it is not eight copies of the serial batch high-water mark.
+
+A separate three-pair, 32-program standalone-binary lane used
+`--release --native --fast --no-debug --no-lto`. Four workers reduced the
+median from 32.528178s to 29.056358s (10.67%, 1.119x), with source-order linking
+left serial. That smaller whole-build gain identifies the next bottleneck:
+object/link reuse, not more unsafe concurrency inside lowering.
+
+Serial and parallel LLVM plus symbol sidecars are byte-identical in release and
+debug modes. Focused coverage also verifies debug frame attributes, zstd slab
+rewriting, deterministic diagnostics on stderr, and parent-linked standalone
+executables.

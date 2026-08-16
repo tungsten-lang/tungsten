@@ -26,7 +26,7 @@ flags=(--emit-ll --ll --release --native --fast --no-debug)
 # A and B share one Core closure, closed has another, and a_again must still
 # find the first immutable cohort after the intervening miss.
 TUNGSTEN_CORE_CACHE_KEY_REPORT="$TMP/key" \
-  "$TUNGSTEN" compile-batch "${sources[@]}" "${flags[@]}" -v \
+  "$TUNGSTEN" compile-batch --jobs 1 "${sources[@]}" "${flags[@]}" -v \
   >"$TMP/batch.log" 2>&1
 statuses="$(awk '/core cache:/{print $3}' "$TMP/batch.log" | paste -sd ' ' -)"
 if [[ "$statuses" != "miss hit miss hit" ]]; then
@@ -107,7 +107,7 @@ for src in "${sources[@]}"; do
 done
 
 TUNGSTEN_CORE_LOWER_CACHE=0 \
-  "$TUNGSTEN" compile-batch "$TMP/src/a.w" "$TMP/src/b.w" \
+  "$TUNGSTEN" compile-batch --jobs 1 "$TMP/src/a.w" "$TMP/src/b.w" \
   "${flags[@]}" -v >"$TMP/disabled.log" 2>&1
 disabled="$(awk '/core cache:/{print $3}' "$TMP/disabled.log" | paste -sd ' ' -)"
 if [[ "$disabled" != "bypass bypass" ]]; then
@@ -118,7 +118,7 @@ fi
 # The product path emits independent binaries, not merely IR. In release/LTO
 # mode this also guards the batch-local runtime object bundle (notably the
 # mixed LTO/native object case on macOS).
-"$TUNGSTEN" compile-batch "$TMP/src/a.w" "$TMP/src/b.w" \
+"$TUNGSTEN" compile-batch --jobs 1 "$TMP/src/a.w" "$TMP/src/b.w" \
   --release --native --fast --no-debug >"$TMP/link.log" 2>&1
 if [[ ! -x "$TMP/src/a.wc" || ! -x "$TMP/src/b.wc" ]]; then
   echo "FAIL: compile-batch did not produce standalone executables" >&2

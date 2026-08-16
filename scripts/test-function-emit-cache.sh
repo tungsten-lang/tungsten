@@ -23,7 +23,7 @@ TUNGSTEN_LL_PATH="$TMP/warm.ll" \
   >/dev/null
 
 TUNGSTEN_FUNCTION_EMIT_CACHE=0 TUNGSTEN_LL_DIR="$TMP/off-ll" \
-  "$TUNGSTEN" compile-batch "$TMP/src/a.w" "$TMP/src/b.w" \
+  "$TUNGSTEN" compile-batch --jobs 1 "$TMP/src/a.w" "$TMP/src/b.w" \
   "${flags[@]}" -v >"$TMP/off.log" 2>&1
 
 for name in a b; do
@@ -34,7 +34,7 @@ for name in a b; do
 done
 
 TUNGSTEN_FUNCTION_EMIT_CACHE=1 TUNGSTEN_LL_DIR="$TMP/on-ll" \
-  "$TUNGSTEN" compile-batch "$TMP/src/a.w" "$TMP/src/b.w" \
+  "$TUNGSTEN" compile-batch --jobs 1 "$TMP/src/a.w" "$TMP/src/b.w" \
   "${flags[@]}" -v >"$TMP/on.log" 2>&1
 
 for name in a b; do
@@ -54,7 +54,7 @@ rg -q 'function emit cache: [1-9][0-9]* hits, 0 misses, [0-9]+ bypassed' \
 # Debug output deliberately bypasses rendered-body reuse. Keep the explicit
 # physical-frame attributes that source backtraces require.
 TUNGSTEN_FUNCTION_EMIT_CACHE=1 TUNGSTEN_LL_DIR="$TMP/debug-ll" \
-  "$TUNGSTEN" compile-batch "$TMP/src/a.w" "$TMP/src/b.w" \
+  "$TUNGSTEN" compile-batch --jobs 1 "$TMP/src/a.w" "$TMP/src/b.w" \
   --debug --frame-pointers --emit-ll -v >"$TMP/debug.log" 2>&1
 if rg -q 'function emit cache:' "$TMP/debug.log"; then
   echo "FAIL: debug compilation used the release function emit cache" >&2

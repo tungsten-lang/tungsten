@@ -7,7 +7,8 @@ TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten-compiler}"
 PROGRAM="${PROGRAM:-compiler/test/fixtures/core_abi_stable_b.w}"
 COUNT="${COUNT:-150}"
 RUNS="${RUNS:-5}"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-frontend-parse-cache-bench.XXXXXX")"
+JOBS="${JOBS:-8}"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-parallel-batch-bench.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/src" "$TMP/cache" "$TMP/ll"
@@ -22,23 +23,24 @@ done
 
 export TUNGSTEN_CACHE_DIR="$TMP/cache"
 export TUNGSTEN_INCREMENTAL=0
-export TUNGSTEN_LL_DIR="$TMP/ll"
+export TUNGSTEN_FRONTEND_PARSE_CACHE=1
 flags=(--release --native --fast --no-debug --emit-ll)
 
-# Publish the complete persistent Core WIRE snapshot before measuring either
-# parse mode, so a cold Core miss cannot be mistaken for a frontend-cache win.
-"$TUNGSTEN" compile "${sources[0]}" --out "$TMP/warm" "${flags[@]}" \
+TUNGSTEN_LL_PATH="$TMP/warm.ll" \
+  "$TUNGSTEN" compile "${sources[0]}" --out "$TMP/warm" "${flags[@]}" \
   >/dev/null 2>&1
 
-off_times=()
-on_times=()
+serial_times=()
+parallel_times=()
 run_once() {
-  local mode="$1"
+  local jobs="$1"
   local started finished
+  rm -rf "$TMP/ll"
+  mkdir -p "$TMP/ll"
   started="$(ruby -e 'puts Process.clock_gettime(Process::CLOCK_MONOTONIC)')"
-  TUNGSTEN_FRONTEND_PARSE_CACHE="$mode" \
-    "$TUNGSTEN" compile-batch --jobs 1 "${sources[@]}" "${flags[@]}" \
-    >/dev/null 2>&1
+  TUNGSTEN_LL_DIR="$TMP/ll" \
+    "$TUNGSTEN" compile-batch --jobs "$jobs" "${sources[@]}" \
+    "${flags[@]}" >/dev/null 2>&1
   finished="$(ruby -e 'puts Process.clock_gettime(Process::CLOCK_MONOTONIC)')"
   ruby -e 'printf "%.6f", ARGV[1].to_f - ARGV[0].to_f' "$started" "$finished"
 }
@@ -46,15 +48,16 @@ run_once() {
 pair=1
 while [[ $pair -le $RUNS ]]; do
   if (( pair % 2 == 1 )); then
-    off="$(run_once 0)"
-    on="$(run_once 1)"
+    serial="$(run_once 1)"
+    parallel="$(run_once "$JOBS")"
   else
-    on="$(run_once 1)"
-    off="$(run_once 0)"
+    parallel="$(run_once "$JOBS")"
+    serial="$(run_once 1)"
   fi
-  off_times+=("$off")
-  on_times+=("$on")
-  printf 'pair %02d: cache-off=%ss cache-on=%ss\n' "$pair" "$off" "$on"
+  serial_times+=("$serial")
+  parallel_times+=("$parallel")
+  printf 'pair %02d: jobs-1=%ss jobs-%s=%ss\n' \
+    "$pair" "$serial" "$JOBS" "$parallel"
   pair=$((pair + 1))
 done
 
@@ -67,10 +70,13 @@ median() {
     }'
 }
 
-off_median="$(median "${off_times[@]}")"
-on_median="$(median "${on_times[@]}")"
-awk -v off="$off_median" -v on="$on_median" -v count="$COUNT" '
+serial_median="$(median "${serial_times[@]}")"
+parallel_median="$(median "${parallel_times[@]}")"
+awk -v serial="$serial_median" -v parallel="$parallel_median" \
+    -v count="$COUNT" -v jobs="$JOBS" '
   BEGIN {
-    printf "median (%d programs): cache-off=%.6fs cache-on=%.6fs improvement=%.2f%% speedup=%.3fx saved=%.6fs\n",
-      count, off, on, (off - on) * 100.0 / off, off / on, off - on
+    printf "median (%d programs): jobs-1=%.6fs jobs-%d=%.6fs improvement=%.2f%% speedup=%.3fx saved=%.6fs\n",
+      count, serial, jobs, parallel,
+      (serial - parallel) * 100.0 / serial, serial / parallel,
+      serial - parallel
   }'

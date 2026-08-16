@@ -29,7 +29,7 @@ run_once() {
   local started finished elapsed
   started="$(ruby -e 'puts Process.clock_gettime(Process::CLOCK_MONOTONIC)')"
   TUNGSTEN_CORE_LOWER_CACHE="$mode" \
-    "$TUNGSTEN" compile-batch "${sources[@]}" "${flags[@]}" \
+    "$TUNGSTEN" compile-batch --jobs 1 "${sources[@]}" "${flags[@]}" \
     >/dev/null 2>&1
   finished="$(ruby -e 'puts Process.clock_gettime(Process::CLOCK_MONOTONIC)')"
   elapsed="$(ruby -e 'printf "%.3f", ARGV[1].to_f - ARGV[0].to_f' "$started" "$finished")"

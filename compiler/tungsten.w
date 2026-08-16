@@ -47,6 +47,7 @@ if args.size() == 0
   << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
   << "  --ll             Write LLVM IR (.ll) next to the binary"
   << "  --emit-ll        Write LLVM IR and skip native linking"
+  << "  -j, --jobs N     Parallel compile-batch workers (default: auto)"
   << "  --ast            Print the AST and exit"
   << "  --canonical-ast  Print a stable machine-readable AST and exit"
   << "  --lex            Print tokens and exit"
@@ -77,6 +78,8 @@ explicit_lto   = false
 frame_pointers = false
 keep_ll        = false
 emit_ll_only   = false
+batch_jobs     = 0
+batch_worker_dir = nil
 cross_target   = ""
 cross_sysroot  = ""
 ast_stats      = false
@@ -143,6 +146,7 @@ while i < args.size()
     << "  --strict-math    Strict IEEE 754: no FMA, no contraction"
     << "  --ll             Write LLVM IR (.ll) next to the binary"
     << "  --emit-ll        Write LLVM IR and skip native linking"
+    << "  -j, --jobs N     Parallel compile-batch workers (default: auto)"
     << "  --ast-stats      Print slab AST node counts after compiling"
     << "  --ast            Print the AST and exit"
     << "  --canonical-ast  Print a stable machine-readable AST and exit"
@@ -224,6 +228,22 @@ while i < args.size()
     keep_ll = true
   elsif arg == "--emit-ll"
     emit_ll_only = true
+  elsif arg == "--jobs" || arg == "-j"
+    i += 1
+    batch_jobs = args[i].to_i()
+    if batch_jobs < 1
+      << "--jobs requires a positive integer"
+      exit 1
+  elsif arg.starts_with?("--jobs=")
+    batch_jobs = arg.slice(7, arg.size() - 7).to_i()
+    if batch_jobs < 1
+      << "--jobs requires a positive integer"
+      exit 1
+  # Internal compile-batch worker contract. The parent assigns each entry a
+  # deterministic explicit .ll path under this private directory.
+  elsif arg == "--batch-worker-dir"
+    i += 1
+    batch_worker_dir = args[i]
   elsif arg == "--ast-stats"
     ast_stats = true
   elsif arg == "--verbose"
@@ -2380,6 +2400,207 @@ driver_homebrew_prefix_memo = {}
     return true
   false
 
+# Choose deterministic process-level parallelism for compile-batch. Each
+# worker owns a disjoint contiguous source shard and therefore its own parser,
+# AST/WIRE arenas, and emitter metadata counters. The parent alone compiles a
+# runtime (when needed) and links, so parallel lowering does not multiply the
+# runtime build or change final link order.
+-> batch_parallel_job_count(file_count)
+  if file_count < 2 || batch_worker_dir != nil || runtime_identity() != "compiled-runtime"
+    return 1
+  if emit_wire || tags_mode || ast_stats || keep_ll
+    return 1
+  if incremental_env_s("TUNGSTEN_LL_PATH") != "" || incremental_env_s("TUNGSTEN_LL_DONE_MARKER") != "" || incremental_env_s("TUNGSTEN_METAL_PATH") != "" || incremental_env_s("TUNGSTEN_SSA_REPORT") != ""
+    return 1
+  if env("TUNGSTEN_BATCH_PARALLEL") == "0"
+    return 1
+
+  requested = batch_jobs
+  explicit = requested > 0
+  if !explicit
+    configured = env("TUNGSTEN_BATCH_JOBS")
+    if configured != nil && configured != "" && configured != "auto"
+      requested = configured.to_i()
+      explicit = requested > 0
+
+  if !explicit
+    cpus = ccall("w_cpu_count")
+    if cpus < 1
+      cpus = 1
+    # One worker per ~16 entries amortizes compiler startup and preserves the
+    # in-worker parsed-AST/render caches. Eight was the measured knee on the
+    # 150-program suite and bounds aggregate memory on larger hosts.
+    requested = (file_count + 15) / 16
+    if requested > cpus
+      requested = cpus
+    if requested > 8
+      requested = 8
+  if requested < 1
+    requested = 1
+  if requested > file_count
+    requested = file_count
+  if requested > 32
+    requested = 32
+  requested
+
+-> batch_parallel_worker_options
+  options = []
+  if no_lto
+    options.push("--no-lto")
+  if explicit_lto
+    options.push("--lto")
+  if frame_pointers
+    options.push("--frame-pointers")
+  if release_mode
+    options.push("--release")
+  if debug_requested
+    options.push("--debug")
+  if no_debug_requested
+    options.push("--no-debug")
+  if native_mode
+    options.push("--native")
+  elsif cpu_explicit
+    options.push("--cpu")
+    options.push(cpu_name)
+  if cross_target != ""
+    options.push("--target")
+    options.push(cross_target)
+  if cross_sysroot != ""
+    options.push("--sysroot")
+    options.push(cross_sysroot)
+  if dev_mode
+    options.push("--dev")
+  if fast_mode
+    options.push("--fast")
+  if math_mode == :strict
+    options.push("--strict-math")
+  if intern_algo != "raw"
+    options.push("--intern")
+    options.push(intern_algo)
+  if verbose
+    options.push("--verbose")
+  define_keys = build_defines.keys().sort()
+  i = 0
+  while i < define_keys.size()
+    options.push("-D" + define_keys[i] + "=" + build_defines[define_keys[i]])
+    i += 1
+  options
+
+-> batch_parallel_files_unique?(files)
+  seen = {}
+  i = 0
+  while i < files.size()
+    prior = seen[files[i]]
+    if prior != nil && prior == files[i]
+      return false
+    seen[files[i]] = files[i]
+    i += 1
+  true
+
+-> batch_parallel_emit(files, jobs, worker_options)
+  root = capture("mktemp -d " + dev_runtime_shell_quote(implicit_ll_root() + "/batch-emit.XXXXXX") + " 2>/dev/null").strip()
+  if root == ""
+    return {ok: false, root: nil, jobs: [], message: "could not create parallel batch scratch directory"}
+  exe = ccall("w_executable_path")
+  if exe == nil || exe == ""
+    return {ok: false, root: root, jobs: [], message: "compiler executable path is unavailable"}
+
+  workers = []
+  base = files.size() / jobs
+  extra = files.size() % jobs
+  start = 0
+  wi = 0
+  spawn_error = nil
+  while wi < jobs && spawn_error == nil
+    count = base
+    if wi < extra
+      count += 1
+    dir = root + "/worker-" + wi.to_s()
+    out_log = root + "/worker-" + wi.to_s() + ".out"
+    err_log = root + "/worker-" + wi.to_s() + ".err"
+    if system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
+      spawn_error = "could not create worker directory " + dir
+    else
+      argv = [exe, "compile-batch", "--emit-ll", "--jobs", "1", "--batch-worker-dir", dir]
+      oi = 0
+      while oi < worker_options.size()
+        argv.push(worker_options[oi])
+        oi += 1
+      fi = 0
+      while fi < count
+        argv.push(files[start + fi])
+        fi += 1
+      cmd = StringBuffer(256 + count * 64)
+      ai = 0
+      while ai < argv.size()
+        if ai > 0
+          cmd << " "
+        cmd << dev_runtime_shell_quote(argv[ai])
+        ai += 1
+      cmd << " >"
+      cmd << dev_runtime_shell_quote(out_log)
+      cmd << " 2>"
+      cmd << dev_runtime_shell_quote(err_log)
+      begin
+        process = Process.spawn(["/bin/sh", "-c", cmd.to_s()])
+        workers.push({process: process, dir: dir, out_log: out_log, err_log: err_log, start: start, count: count})
+      rescue err
+        spawn_error = err.to_s()
+    start += count
+    wi += 1
+
+  if spawn_error != nil
+    i = 0
+    while i < workers.size()
+      workers[i][:process].kill()
+      workers[i][:process].wait()
+      i += 1
+    return {ok: false, root: root, jobs: [], message: "parallel worker spawn failed: " + spawn_error}
+
+  failed = false
+  i = 0
+  while i < workers.size()
+    status = workers[i][:process].wait()
+    workers[i][:status] = status
+    if status != 0
+      failed = true
+    i += 1
+
+  # Replay worker logs in source-shard order, not completion order.
+  i = 0
+  while i < workers.size()
+    out_log = workers[i][:out_log]
+    if file?(out_log)
+      out_text = read_file(out_log)
+      if out_text != nil && out_text != ""
+        ccall("w_print", out_text)
+      ccall("__w_unlink", out_log)
+    err_log = workers[i][:err_log]
+    if file?(err_log)
+      err_text = read_file(err_log)
+      if err_text != nil && err_text != ""
+        ccall("w_eputs", err_text)
+      ccall("__w_unlink", err_log)
+    i += 1
+
+  emitted = []
+  i = 0
+  while i < workers.size()
+    worker = workers[i]
+    li = 0
+    while li < worker[:count]
+      source = files[worker[:start] + li]
+      ll = worker[:dir] + "/" + li.to_s() + ".ll"
+      if !file?(ll) || !file?(ll + ".done")
+        failed = true
+      emitted.push({ll: ll, bin: source.replace(".w", ".wc"), source: source, implicit_ll: true})
+      li += 1
+    i += 1
+
+  if failed
+    return {ok: false, root: root, jobs: emitted, message: "one or more parallel batch workers failed"}
+  {ok: true, root: root, jobs: emitted, message: nil}
+
 # Handle --wit / --repl (interactive pure-Tungsten REPL)
 if wit_mode
   REPL.new(Interpreter.new([]), jit_mode, hot_mode).start()
@@ -2551,15 +2772,12 @@ elsif command == "compile-batch"
   # Batch compile: loads stage compiler once, compiles runtime once,
   # then emits IR + links each file individually
   files = []
-  skip_next = false
-
-  args -> (a)
-    if skip_next
-      skip_next = false
-    elsif a in ("--out" "-o" "--intern" "-e" "--cpu" "--target" "--sysroot")
-      skip_next = true
-    elsif a != "compile-batch" && a != "--emit-wire" && a != "--emit-ll" && a != "--no-lto" && a != "--frame-pointers" && a != "--release" && a != "--dev" && a != "--native" && a != "--debug" && a != "--no-debug" && a != "--fast" && a != "-fast" && a != "--verbose" && a != "-v" && a != "--ll" && !a.starts_with?("--cpu=")
-      files.push(a)
+  if file_path != nil
+    files.push(file_path)
+  i = 0
+  while i < script_args.size()
+    files.push(script_args[i])
+    i += 1
 
   if files.size() == 0
     << "compile-batch: no files given"
@@ -2569,27 +2787,53 @@ elsif command == "compile-batch"
   ll_jobs = []
   needs_zstd_runtime = false
   fail_count = 0
+  parallel_root = nil
+  parallel_count = batch_parallel_job_count(files.size())
+  if parallel_count > 1 && !batch_parallel_files_unique?(files)
+    parallel_count = 1
+  parallel_result = nil
 
-  files -> (fp)
-    bin = fp.replace(".w", ".wc")
-    << "--- Compiling [fp] ---"
-    begin
-      implicit_ll = uses_implicit_ll_path() ## bool
-      ll_path = emit_ir(fp, emit_wire, verbose, intern_algo, bin + ".sidemap", emit_ll_only, build_defines, no_static_slab)
-      if ll_path != nil
-        if !emit_ll_only
-          ll_jobs.push({ll: ll_path, bin: bin, source: fp, implicit_ll: implicit_ll})
-          if ll_needs_zstd_path(ll_path)
-            needs_zstd_runtime = true
-      else
+  if parallel_count > 1
+    if verbose
+      << "  parallel batch: " + parallel_count.to_s() + " deterministic workers"
+    parallel_result = batch_parallel_emit(files, parallel_count, batch_parallel_worker_options())
+    if parallel_result[:ok] != true
+      << "Parallel batch emission failed: " + parallel_result[:message]
+      exit 1
+    parallel_root = parallel_result[:root]
+    if !emit_ll_only
+      ll_jobs = parallel_result[:jobs]
+      ji = 0
+      while ji < ll_jobs.size()
+        if ll_needs_zstd_path(ll_jobs[ji][:ll])
+          needs_zstd_runtime = true
+        ji += 1
+
+  else
+    batch_file_index = 0
+    files -> (fp)
+      bin = fp.replace(".w", ".wc")
+      << "--- Compiling [fp] ---"
+      begin
+        if batch_worker_dir != nil
+          ccall("w_setenv", "TUNGSTEN_LL_PATH", batch_worker_dir + "/" + batch_file_index.to_s() + ".ll")
+        implicit_ll = uses_implicit_ll_path() ## bool
+        ll_path = emit_ir(fp, emit_wire, verbose, intern_algo, bin + ".sidemap", emit_ll_only, build_defines, no_static_slab)
+        if ll_path != nil
+          if !emit_ll_only
+            ll_jobs.push({ll: ll_path, bin: bin, source: fp, implicit_ll: implicit_ll})
+            if ll_needs_zstd_path(ll_path)
+              needs_zstd_runtime = true
+        else
+          fail_count += 1
+      rescue err
         fail_count += 1
-    rescue err
-      fail_count += 1
-      if type(err) == "Hash" && err[:rt] == :compile_error
-        ccall("w_flush")
-        ccall("w_eputs", emit_compile_error(err))
-      else
-        << "Unhandled exception compiling [fp]: [err]"
+        if type(err) == "Hash" && err[:rt] == :compile_error
+          ccall("w_flush")
+          ccall("w_eputs", emit_compile_error(err))
+        else
+          << "Unhandled exception compiling [fp]: [err]"
+      batch_file_index += 1
 
   runtime_objs = nil
 
@@ -2622,6 +2866,9 @@ elsif command == "compile-batch"
       ok = false
     if !ok
       fail_count += 1
+
+  if parallel_root != nil
+    system("rmdir " + dev_runtime_shell_quote(parallel_root) + " 2>/dev/null")
 
   if fail_count > 0
     << "[fail_count] file(s) failed to compile"

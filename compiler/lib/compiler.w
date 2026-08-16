@@ -309,6 +309,8 @@ use target
     << ""
     << incremental_core_cache_verbose_text(mod)
     << core_reachability_verbose_text(mod)
+    if mod[:content_hash_skipped_count] > 0
+      << "  content hash work set: " + mod[:content_hash_function_count].to_s() + "/" + (mod[:content_hash_function_count] + mod[:content_hash_skipped_count]).to_s() + " functions (" + mod[:content_hash_skipped_count].to_s() + " cached)"
     << fmt_elapsed(t_lower) + " lowering to wire"
     << fmt_elapsed(t_cfg) + " cfg+ssa"
     << fmt_elapsed(t_escape) + " escape"

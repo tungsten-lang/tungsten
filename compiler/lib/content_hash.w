@@ -992,9 +992,23 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       ii += 1
     bi += 1
 
-# Main pass: hash all functions, dedup, rewrite references.
+# Main pass: hash functions without a cached hash, dedup, rewrite references.
 -> content_hash_pass(mod, verbose = false)
   functions = mod[:functions]
+  # Persistent Core functions already carry their canonical hashes. They must
+  # remain in fn_hashes so compact-symbol maps and sidemaps stay byte-identical,
+  # but rebuilding their call graph and topological order is redundant. A cold
+  # cache miss still walks every candidate before publishing the full closure.
+  hash_functions = functions
+  if env("TUNGSTEN_LAZY_CONTENT_HASH") != "0"
+    hash_functions = []
+    fi = 0
+    while fi < functions.size()
+      if functions[fi][:incremental_core_frozen] != true
+        hash_functions.push(functions[fi])
+      fi += 1
+  mod[:content_hash_function_count] = hash_functions.size()
+  mod[:content_hash_skipped_count] = functions.size() - hash_functions.size()
   fn_hashes = {}
   cached_core_hashes = mod[:incremental_core_fn_hashes]
   if cached_core_hashes != nil
@@ -1022,14 +1036,14 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   # Build call graph for topo sort
   fn_set = {}
   fi = 0
-  while fi < functions.size()
-    fn_set[functions[fi][:name]] = true
+  while fi < hash_functions.size()
+    fn_set[hash_functions[fi][:name]] = true
     fi += 1
 
   calls_to = {}
   fi = 0
-  while fi < functions.size()
-    func = functions[fi]
+  while fi < hash_functions.size()
+    func = hash_functions[fi]
     edges = []
     bi = 0
     while bi < func[:blocks].size()
@@ -1052,12 +1066,12 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   # Topo sort (leaf functions first)
   processed = {}
   order = []
-  remaining = functions.size()
+  remaining = hash_functions.size()
   while remaining > 0
     progress = false
     fi = 0
-    while fi < functions.size()
-      fname = functions[fi][:name]
+    while fi < hash_functions.size()
+      fname = hash_functions[fi][:name]
       if processed[fname] != true
         edges = calls_to[fname]
         all_done = true
@@ -1076,17 +1090,17 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     if !progress
       # Cycle: process remaining with __CYCLE__ sentinel
       fi = 0
-      while fi < functions.size()
-        if processed[functions[fi][:name]] != true
+      while fi < hash_functions.size()
+        if processed[hash_functions[fi][:name]] != true
           order.push(fi)
-          processed[functions[fi][:name]] = true
+          processed[hash_functions[fi][:name]] = true
           remaining = remaining - 1
         fi += 1
 
   # Hash each function in topo order
   oi = 0
   while oi < order.size()
-    func = functions[order[oi]]
+    func = hash_functions[order[oi]]
     # Skip main and empty functions
     if func[:is_toplevel] != true && func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       content = canonical_content(func, mod, fn_hashes, op_codes)

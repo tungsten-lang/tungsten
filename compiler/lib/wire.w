@@ -163,6 +163,8 @@ use wire_constructors
     core_reachability_total: 0,
     core_reachability_kept: 0,
     core_reachability_pruned: 0,
+    content_hash_function_count: 0,
+    content_hash_skipped_count: 0,
     cvar_globals:     {},
     fn_memo_tables:   {},
     used_memo_tables: {},

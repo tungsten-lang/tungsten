@@ -274,3 +274,26 @@ alternating pairs measured 11.170s with full Core and 11.215s with reachability
 (0.40% slower). Its C bridge triggers the conservative external-dispatch rule
 and keeps 909 of 929 Core functions. The retained claim is therefore a
 closed-world pure-Tungsten build improvement, not an FFI-wide speedup.
+
+## Cached content-hash work set
+
+A persistent Core hit already supplies canonical hashes for every frozen Core
+function. The content-hash pass now keeps those hashes in its complete symbol
+map, but excludes the frozen bodies from call-graph construction and
+topological ordering. This preserves compact symbols and symbol sidecars
+exactly. A cold miss still hashes the complete Core closure before publishing
+it, and `TUNGSTEN_LAZY_CONTENT_HASH=0` retains the former full-graph path for
+matched comparisons.
+
+On 2026-08-16, twenty alternating artifact-only pairs compiled
+`benchmarks/big_math/program_loops.w` with
+`--release --native --fast --no-debug --emit-ll`. The final self-hosted
+candidate reduced the median from 0.311802s to 0.310317s: 1.485ms saved, 0.48%
+faster, or 1.005x throughput. A phase probe reduced content hashing from 10ms
+to 8ms by shrinking its graph work set from 949 functions to 20. LLVM and the
+symbol sidemap were byte-identical with the optimization disabled and enabled.
+
+As expected, eight alternating full native-link pairs were flat: 10.399720s
+before and 10.400036s after (a 0.003% difference). The optimization is retained
+as a small, exact-output frontend cleanup; it does not claim a measurable
+whole-build improvement under FullLTO.

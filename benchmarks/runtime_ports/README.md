@@ -277,6 +277,24 @@ The redundant C certificate disappeared from the counter profile.  A promoted
 signed controls remained green at 0.966 and 0.957.  Raw evidence:
 `bigint_div_63_resume_results.txt`.
 
+EXACT 8-BY-4-LIMB QUOTIENT CHECKPOINT: the positive 8/4 specialization of
+`mag_div_q_triangular_certified` is now mechanically ported before changing
+the native routing or algorithm.  The embedded AArch64 body preserves the C
+algorithm's normalization, reciprocal table, five register-carried quotient
+digits, lazy-low rows, saturated `bn_submul_1` and add-back paths, sufficient
+certificate, capacity-five allocation, and `bigint_finish_mag_sub` policy.
+On the retained public benchmark corpus the certificate is inconclusive on
+all 64 operands, so the exact source failure seam resumes at `mag_divmod` and
+preserves C's second certificate attempt before Knuth fallback.  The
+1,760-case public differential corpus, focused 39-check division spec, LLVM
+verification, and runtime object build are green.  A 31-pair promotion with
+roughly 500 ms legs measured native/C at 0.97964 (88.782 ns versus 90.609 ns),
+with 31/31 native wins and 0.00710 paired-ratio IQR.  This records the exact
+checkpoint; skipping the known-redundant second certificate is reserved for a
+separate native-only follow-up.  Raw evidence:
+`bigint_div_84_exact_results.txt` and
+`bigint_div_84_exact_promotion_results.txt`.
+
 8-BY-4 MODULO PORT PREPARATION: the new exact 8/4 stratum and 512-case
 algebraic edge matrix exposed a pre-existing `mag_mod_84` saturated-digit
 handoff bug.  Its corrected five-limb window must advance `(w3,w2)` as the

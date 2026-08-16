@@ -1386,8 +1386,8 @@ skip_bits = skip_bits_requested || (!bit_only && (stage0_only || stage1_only || 
   << ""
   << BOLD + "==> PGO: profile-guided optimization" + RESET
   t_pgo_start = clock_ms()
+  pgo_training_version = "compiler-pgo-v2"
   pgo_dir = build_scratch_dir + "/pgo"
-  pgo_profraw = pgo_dir + "/default-%p.profraw"
   pgo_profdata = pgo_dir + "/default.profdata"
   pgo_instrumented = pgo_dir + "/tungsten-instrumented"
   pgo_optimized = pgo_dir + "/tungsten-pgo"
@@ -1399,10 +1399,52 @@ skip_bits = skip_bits_requested || (!bit_only && (stage0_only || stage1_only || 
     eputs(RED + "PGO instrumentation build failed" + RESET)
     exit(1)
   sh_ok("rm -f " + shq(pgo_dir) + "/*.profraw")
-  << "    " + DIM + "profiling..." + RESET
-  profile_env = "LLVM_PROFILE_FILE=" + shq(pgo_profraw) + " TUNGSTEN_INCREMENTAL=0 "
-  if sh("cd " + shq(ROOT) + " && " + profile_env + shq(pgo_instrumented) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(pgo_dir + "/train-out") + STAGE_FLAGS_CMD) != 0
-    eputs(RED + "PGO profiling run failed" + RESET)
+  << "    " + DIM + "profiling " + pgo_training_version + "..." + RESET
+
+  # Train the compiler executable, not clang. `--emit-ll` avoids spending the
+  # PGO build on four irrelevant target links while still exercising the full
+  # frontend, lowering, mid-end, reachability, and emitter paths. Keep this
+  # corpus short and source-controlled: changes are deliberate profile-version
+  # changes, and every input must exist in a release checkout.
+  training_labels = ["self", "numeric", "string", "debug"]
+  training_sources = [TUNGSTEN_W, ROOT + "/compiler/test/fixtures/pgo_protected_numeric.w", ROOT + "/compiler/test/fixtures/pgo_string_slice.w", ROOT + "/compiler/test/fixtures/core_abi_stable_b.w"]
+  training_flags = ["--release --native --fast --no-debug", "--release --native --fast --no-debug", "--release --native --fast --no-debug", "--debug --frame-pointers --native --fast"]
+  i = 0
+  while i < training_sources.size
+    training_ll = pgo_dir + "/train-" + training_labels[i] + ".ll"
+    profile_path = pgo_dir + "/train-" + training_labels[i] + "-%p.profraw"
+    profile_env = "LLVM_PROFILE_FILE=" + shq(profile_path) + " TUNGSTEN_INCREMENTAL=0 TUNGSTEN_LL_PATH=" + shq(training_ll) + " "
+    training_cmd = "cd " + shq(ROOT) + " && " + profile_env + shq(pgo_instrumented) + " compile " + shq(training_sources[i]) + " --out " + shq(pgo_dir + "/train-" + training_labels[i]) + " --emit-ll " + training_flags[i]
+    if sh(training_cmd) != 0
+      eputs(RED + "PGO profiling run failed" + RESET + " (" + training_labels[i] + ")")
+      exit(1)
+    i = i + 1
+
+  # The spec/build workload is batch-shaped. A single-process shard trains the
+  # persistent Core hit, parsed-AST reuse, rendered-function reuse, locked type
+  # facts, no-raise, and serial batch orchestration paths without introducing
+  # scheduler-dependent worker counts into the profile.
+  batch_ll_dir = pgo_dir + "/batch-ll"
+  make_dirs(batch_ll_dir)
+  batch_sources = [
+    ROOT + "/compiler/test/fixtures/core_abi_stable_a.w",
+    ROOT + "/compiler/test/fixtures/core_abi_stable_b.w",
+    ROOT + "/compiler/test/fixtures/core_abi_stable_stop.w",
+    ROOT + "/compiler/test/fixtures/closed_world_dispatch.w",
+    ROOT + "/compiler/test/fixtures/locked_class_set_receiver.w",
+    ROOT + "/compiler/test/fixtures/locked_return_class_sets.w",
+    ROOT + "/compiler/test/fixtures/locked_no_raise_rescue.w",
+    ROOT + "/compiler/test/fixtures/pgo_protected_numeric.w"
+  ]
+  batch_profile = pgo_dir + "/train-batch-%p.profraw"
+  batch_env = "LLVM_PROFILE_FILE=" + shq(batch_profile) + " TUNGSTEN_INCREMENTAL=0 "
+  batch_cmd = "cd " + shq(ROOT) + " && " + batch_env + shq(pgo_instrumented) + " compile-batch --emit-ll --jobs 1 --batch-worker-dir " + shq(batch_ll_dir) + " --release --native --fast --no-debug"
+  i = 0
+  while i < batch_sources.size
+    batch_cmd = batch_cmd + " " + shq(batch_sources[i])
+    i = i + 1
+  if sh(batch_cmd) != 0
+    eputs(RED + "PGO profiling run failed" + RESET + " (batch)")
     exit(1)
   llvm_profdata = capture("xcrun -f llvm-profdata 2>/dev/null").strip
   if llvm_profdata == ""

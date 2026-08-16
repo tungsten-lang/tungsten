@@ -431,8 +431,10 @@ projects stay unchecked until their stated acceptance criteria are met.
   available memory/cores, architecture, and measured benefit; fall back to one
   TU on small modules or any split failure. Record the tradeoff: parallel jobs
   raise peak RSS and can lose whole-module optimization, particularly on ARM64.
-- [ ] Promote compiler PGO from an opt-in experiment to a reproducible cold
-  bootstrap profile, with versioned training inputs and before/after timings.
+- [x] Make compiler PGO a reproducible opt-in release profile. The versioned
+  source-controlled corpus trains self, protected numeric, String, debug-frame,
+  and serial-batch paths without target links; measured before/after results
+  and output-identity gates live in `doc/design/incremental-lowering.md`.
 - [x] Resolve the `-O0` performance inversion. Ordinary `-o` builds now use
   `-O3` application/runtime code while retaining checks, symbols, and source
   metadata; explicit `--dev` selects `-O0`, and benchmark guidance continues

@@ -27,6 +27,14 @@ required_uses = [
   # Carry-loop tuning changes generated LLVM and must invalidate both direct
   # binary caches and compiler-stage caches.
   'env_or_empty("TUNGSTEN_CARRY_UNROLL")',
+  # The opt-in PGO build uses a versioned, source-controlled corpus and avoids
+  # target links while collecting compiler profiles.
+  'pgo_training_version = "compiler-pgo-v2"',
+  'training_labels = ["self", "numeric", "string", "debug"]',
+  'compiler/test/fixtures/pgo_protected_numeric.w',
+  'compiler/test/fixtures/pgo_string_slice.w',
+  'compiler/test/fixtures/locked_no_raise_rescue.w',
+  'compile-batch --emit-ll --jobs 1 --batch-worker-dir',
 ]
 required_uses.each do |source|
   raise "build.w does not use compiler source contract: #{source}" unless build_source.include?(source)

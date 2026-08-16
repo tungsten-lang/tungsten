@@ -426,3 +426,70 @@ Serial and parallel LLVM plus symbol sidecars are byte-identical in release and
 debug modes. Focused coverage also verifies debug frame attributes, zstd slab
 rewriting, deterministic diagnostics on stderr, and parent-linked standalone
 executables.
+
+## Cross-process native Core object experiment (not retained)
+
+Reachability made a native Core object worth retesting: the bignum program now
+emits only 161 of 929 Core functions. A prototype partition kept the 33-function
+program-reachable Core closure in the ordinary LLVM overlay and precompiled the
+remaining 128 cold functions plus 19 private helper dependencies into one
+native object. LLVM verification proved that the hidden-symbol object and
+overlay rejoined correctly, with no duplicated mutable globals.
+
+The build-time result was too small for the code-quality cost. Six alternating
+`--release --native --fast --no-debug` link pairs measured 10.647425s for the
+current all-bitcode FullLTO link and 10.504489s with the cached native Core
+object: 1.34% faster. Fifteen alternating runtime pairs then regressed the
+bignum `wordchain4` lane from 5.6601 to 6.4463 ns/op; the paired median was
+12.65% slower. Checksums remained identical.
+
+An empty unrelated native object reproduced the regression. On the tested
+Apple clang/ld64 FullLTO path, merely mixing a native object into the link made
+the generated program retain calls to `w_bigint_add_word_dest` and
+`w_bigint_sub_word_dest` that the all-bitcode link inlined. The empty-object
+lane was 14.09% slower by paired median. This is a linker-pipeline boundary,
+not a bad Core partition. ld64's `-cache_path_lto` was also flat for FullLTO
+(10.48s cold, 10.55s warm) and produced no reusable incremental entries.
+
+The native-object path is therefore not retained. Release builds remain
+all-bitcode through FullLTO; the persistent WIRE, reachability, rendered-text,
+and final-binary caches provide reuse without weakening runtime optimization.
+
+## Internal fastcc experiment (not enabled by default)
+
+The existing `TUNGSTEN_LLVM_FASTCC=1` planner rewrote 1,634 eligible internal
+compiler functions and 13,695 matching direct calls in the self-hosted
+compiler. Twenty protected bignum artifact pairs were flat (0.144s median
+compiler phase both ways), while eight self-compile pairs improved only 0.56%
+wall and 1.02% compiler phase. That is below a useful acceptance threshold on
+this host, so `fastcc` remains an explicit experiment rather than a default ABI
+choice.
+
+## Reproducible compiler PGO profile
+
+`bin/tungsten build --pgo` now uses the source-controlled
+`compiler-pgo-v2` corpus instead of training only on one compiler rebuild. Four
+individual `--emit-ll` runs cover self-compilation, protected numeric lowering,
+String lowering, and debug/frame-pointer emission. A deterministic eight-file,
+one-worker batch additionally covers persistent Core hits, parsed AST reuse,
+rendered-function reuse, locked class sets, SCC returns, and no-raise lowering.
+Avoiding target links makes this broader training phase cheaper than the old
+single training build.
+
+The retained profile was measured against the same non-PGO release compiler:
+
+- Twenty-four alternating warm protected-bignum artifact pairs fell from
+  0.316792s to 0.288104s wall (-9.06%); measured compiler time fell from
+  0.1710s to 0.1485s (-13.16%).
+- Eight alternating self-compiler artifact pairs fell from 4.047773s to
+  3.194056s wall (-21.09%); measured compiler time fell from 3.4095s to
+  2.6445s (-22.44%).
+- Five alternating 150-file, eight-worker batch pairs fell from 3.661236s to
+  3.196275s (-12.70%).
+
+PGO changes the compiler executable only. Before/after self-compiler LLVM was
+byte-identical (SHA-256 `5cd770f8...`), bignum LLVM was byte-identical
+(`281e6c71...`), and all 150 batch artifacts matched byte for byte. The profile
+remains an explicit build choice because producing the instrumented and
+optimized compiler adds release-build time; installed target programs do not
+inherit the compiler's profile.

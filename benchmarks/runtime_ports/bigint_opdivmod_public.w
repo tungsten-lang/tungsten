@@ -11,6 +11,7 @@
 #   one-nega/one-negb/one-negboth — all truncated-sign combinations
 #   intarg   — bigint / inline int (control: C, gate excludes)
 #   fourtwo  — 4-limb / 2-limb (preinverse band)
+#   sixthree — 6-limb / 3-limb (fixed reciprocal band)
 #   eq       — 64-limb / 61-limb near-equal (tiny quotient)
 #   bz       — 256-limb / 128-limb (Burnikel-Ziegler band)
 #   neg      — 4-limb / 2-limb with alternating signs (in-gate; kernel
@@ -103,6 +104,61 @@ CORPUS_MASK = CORPUS_SIZE - 1
     check_value("fourtwo roundtrip [i]", (q * y + r).to_s(), x.to_s())
     i += 1
 
+# Algebraically constructed positive 6-by-3-limb cases.  This is the exact
+# operand shape owned by runtime.c's mag_mod_63 leaf.  As above, constructing
+# x=q*y+r gives an oracle independent of either implementation.
+-> run_sixthree_edges
+  b = 18446744073709551616
+  half = 9223372036854775808
+  divisors = [
+    b * b + b + 1,
+    (b - 1) * b * b + 3 * b - 1,
+    half * b * b + 17,
+    b * b * b - 1,
+    (b - 1) * b * b + (b - 1) * b,
+    (half + 123) * b * b + (b - 17) * b + 5,
+    81985529216486895 * b * b + 18364758544493064721 * b + 7,
+    (half + 1) * b * b + 1229782938247303441 * b + 11
+  ]
+  quotients = [
+    b * b * b + 1,
+    (b - 1) * b * b + (b - 1),
+    2 * b * b + 3 * b + 5,
+    (b - 1) * b * b + (b - 1) * b + (b - 1),
+    (b - 1) * b * b + b + 7,
+    3 * b * b + 5 * b + 9,
+    (b - 1) * b * b + 2459565876494606882,
+    (b - 1) * b * b + 3
+  ]
+  remainder_seeds = [
+    0,
+    1,
+    b - 1,
+    divisors[3] - 1,
+    divisors[4] / 2,
+    b * b + 7,
+    divisors[6] - (b + 1),
+    divisors[7] / 3
+  ]
+
+  i = 0
+  while i < 256
+    k = i & 7
+    y = divisors[k]
+    expected_q = quotients[k]
+    expected_r = (remainder_seeds[k] + i * 1442695040888963407) % y
+    x = expected_q * y + expected_r
+    check_value("sixthree dividend width [i]", bigint_size(x), 6)
+    check_value("sixthree divisor width [i]", bigint_size(y), 3)
+    q = x / y
+    r = x % y
+    check_value("sixthree div expected [i]", q.to_s(), expected_q.to_s())
+    check_value("sixthree mod expected [i]", r.to_s(), expected_r.to_s())
+    check_value("sixthree div C differential [i]", q.to_s(), x.__c_div_oracle(y).to_s())
+    check_value("sixthree mod C differential [i]", r.to_s(), x.__c_mod_oracle(y).to_s())
+    check_value("sixthree roundtrip [i]", (q * y + r).to_s(), x.to_s())
+    i += 1
+
 -> one_limb_value(k)
   1125899906842624 + k * 2 + 1
 
@@ -123,6 +179,8 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = one_limb_value(i * 3)
     elsif stratum == "fourtwo" || stratum == "neg"
       v = 10 ** 76 + 3 + i * 2
+    elsif stratum == "sixthree"
+      v = 10 ** 114 + 3 + i * 2
     elsif stratum == "eq"
       v = 10 ** 1232 + 11 + i * 2
     else
@@ -147,6 +205,8 @@ CORPUS_MASK = CORPUS_SIZE - 1
       v = 1000003 + i * 2
     elsif stratum == "fourtwo" || stratum == "neg"
       v = 10 ** 38 + 7 + i * 2
+    elsif stratum == "sixthree"
+      v = 10 ** 56 + 7 + i * 2
     elsif stratum == "eq"
       v = 10 ** 1229 + 17 + i * 2
     else
@@ -158,7 +218,7 @@ CORPUS_MASK = CORPUS_SIZE - 1
   values
 
 -> run_correctness
-  strata = ["one", "one-smallrem", "one-high", "one-lt", "one-nega", "one-negb", "one-negboth", "intarg", "fourtwo", "eq", "bz", "neg"]
+  strata = ["one", "one-smallrem", "one-high", "one-lt", "one-nega", "one-negb", "one-negboth", "intarg", "fourtwo", "sixthree", "eq", "bz", "neg"]
   s = 0
   while s < strata.size
     stratum = strata[s]
@@ -176,7 +236,8 @@ CORPUS_MASK = CORPUS_SIZE - 1
       i += 1
     s += 1
   run_fourtwo_edges()
-  << "correctness: ok (192 corpus differentials + 512 adversarial 4x2 differentials, exact q/r and roundtrips)"
+  run_sixthree_edges()
+  << "correctness: ok (208 corpus differentials + 512 adversarial 4x2 + 512 adversarial 6x3 differentials, exact q/r and roundtrips)"
 
 -> time_div(receivers, args, iters)
   checksum = 0

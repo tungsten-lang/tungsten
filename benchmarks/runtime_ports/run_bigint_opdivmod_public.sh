@@ -7,7 +7,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TUNGSTEN="${TUNGSTEN:-$ROOT/bin/tungsten}"
 PAIRS="${PAIRS:-8}"
 OUT="${OUT:-/tmp/tungsten-bigint-opdivmod.txt}"
-ROWS="${ROWS:-div:one:2000000 div:one-smallrem:2000000 div:one-high:2000000 div:one-lt:2000000 div:one-nega:2000000 div:one-negb:2000000 div:one-negboth:2000000 div:intarg:2000000 div:fourtwo:1000000 div:eq:200000 div:bz:20000 div:neg:1000000 mod:one:2000000 mod:one-smallrem:2000000 mod:one-high:2000000 mod:one-lt:2000000 mod:one-nega:2000000 mod:one-negb:2000000 mod:one-negboth:2000000 mod:intarg:2000000 mod:fourtwo:1000000 mod:eq:200000 mod:bz:20000 mod:neg:1000000}"
+ROWS="${ROWS:-div:one:2000000 div:one-smallrem:2000000 div:one-high:2000000 div:one-lt:2000000 div:one-nega:2000000 div:one-negb:2000000 div:one-negboth:2000000 div:intarg:2000000 div:fourtwo:1000000 div:sixthree:1000000 div:eq:200000 div:bz:20000 div:neg:1000000 mod:one:2000000 mod:one-smallrem:2000000 mod:one-high:2000000 mod:one-lt:2000000 mod:one-nega:2000000 mod:one-negb:2000000 mod:one-negboth:2000000 mod:intarg:2000000 mod:fourtwo:1000000 mod:sixthree:1000000 mod:eq:200000 mod:bz:20000 mod:neg:1000000}"
 BIN="${BIN:-}"
 if [ -z "$BIN" ]; then
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-bigint-opdivmod.XXXXXX")"
@@ -17,7 +17,8 @@ fi
 cd "$ROOT"
 if [ -z "${SKIP_COMPILE:-}" ]; then
   echo "Compiling with --release --native --fast..."
-  TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/bigint_leaf_public_ref.c" \
+  TUNGSTEN_CORE_DISK_CACHE=0 TUNGSTEN_CORE_LOWER_CACHE=0 \
+    TUNGSTEN_C_INCLUDES="$SCRIPT_DIR/bigint_leaf_public_ref.c" \
     "$TUNGSTEN" compile "$SCRIPT_DIR/bigint_opdivmod_public.w" \
     --release --native --fast --out "$BIN" >/dev/null
 fi

@@ -225,6 +225,20 @@ Retained raw evidence: `bigint_divmod_42_exact_results.txt` and
 `bigint_divmod_42_exact_controls_results.txt`.  Those figures describe the
 exact port baseline, not a redesigned native algorithm.
 
+EXACT 6-BY-3-LIMB MODULO CHECKPOINT: the positive `mag_mod_63` arm is ported
+with the corrected C algorithm and its Clang 22.1.8 `-O3 -mcpu=apple-m5`
+schedule before native-only tuning.  The source body preserves the 96-byte
+scratch frame, reciprocal table, four quotient-digit steps, capacity-3 hot
+allocation, and `bigint_finish_mag_sub` policy; division and signed 6/3 pairs
+remain in C.  Its algebraic corpus first exposed and fixed a C carry-loss bug
+when the leading low-limb borrow overflowed the two-limb prefix.  The focused
+check now covers 208 ordinary corpus differentials, 512 adversarial 4/2
+differentials, and 512 independently constructed 6/3 differentials.  The
+first 12-pair exact-port baseline is deliberately retained even though it is
+not yet a win: native/C was 1.068 (36.763 ns versus 34.384 ns median).  Raw
+evidence: `bigint_mod_63_exact_results.txt`.  This checkpoint is the exact
+port requested before changing the native schedule.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

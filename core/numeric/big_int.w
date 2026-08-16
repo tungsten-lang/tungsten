@@ -716,6 +716,337 @@ fn __bigint_mod_42_exact(rp, up, vp) (i64 i64 i64) i64
       .short 0x40e, 0x40c, 0x40a, 0x408, 0x406, 0x404, 0x402, 0x400
   ASM
 
+# Exact AArch64/macOS port of runtime.c's corrected fixed 6-by-3-limb
+# remainder leaf.  This is the Clang 22.1.8 -O3 -mcpu=apple-m5 schedule for
+# mag_mod_63: the same normalization, Moller--Granlund reciprocal, four
+# 3-by-2 quotient digits, saturated/correction arms, and three-limb result.
+on macos && arm64
+  fn __bigint_mod_63_exact(rp, up, vp) (i64 i64 i64) i64
+    asm <<~ASM
+      .arch_extension cssc
+      sub sp, sp, #96
+      stp x22, x21, [sp, #64]
+      stp x20, x19, [sp, #80]
+      mov x11, x2
+      ldr x9, [x11, #16]!
+      clz x8, x9
+      cbz x8, 2f
+      lsl x9, x9, x8
+      ldp x11, x10, [x2]
+      lsr x12, x10, #1
+      mvn w13, w8
+      lsr x12, x12, x13
+      orr x9, x9, x12
+      lsl x10, x10, x8
+      lsr x12, x11, #1
+      lsr x12, x12, x13
+      orr x10, x10, x12
+      neg x12, x8
+      ldp x16, x15, [x1, #32]
+      lsr x14, x15, x12
+      lsl x12, x15, x8
+      lsr x15, x16, #1
+      lsr x15, x15, x13
+      orr x17, x12, x15
+      lsl x12, x16, x8
+      ldp x2, x16, [x1, #16]
+      lsr x15, x16, #1
+      lsr x15, x15, x13
+      orr x15, x12, x15
+      mov w12, #64
+      sub x4, x12, x8
+      stp x9, x10, [sp]
+      lsl x12, x11, x8
+      str x12, [sp, #16]
+      ldur q0, [x1, #8]
+      lsl x11, x16, x8
+      lsr x16, x2, #1
+      lsr x13, x16, x13
+      orr x3, x11, x13
+      ldr q1, [x1]
+      ldr x11, [x1]
+      dup.2d v2, x8
+      ushl.2d v0, v0, v2
+      dup.2d v2, x4
+      neg.2d v2, v2
+      ushl.2d v1, v1, v2
+      orr.16b v0, v1, v0
+      lsl x16, x11, x8
+      add x2, sp, #16
+      add x13, sp, #8
+      mov x11, sp
+      b 3f
+    2:
+      mov x14, #0
+      sub x13, x11, #8
+      ldp x15, x17, [x1, #32]
+      ldr x3, [x1, #24]
+      ldur q0, [x1, #8]
+      ldr x16, [x1]
+      ldp x12, x10, [x2]
+    3:
+      stp x3, x15, [sp, #48]
+      stur q0, [sp, #32]
+      str x16, [sp, #24]
+      lsr x16, x9, #55
+      adr x1, 90f
+      add x16, x1, x16, lsl #1
+      sub x16, x16, #512
+      ldrh w16, [x16]
+      lsr x1, x9, #24
+      add x1, x1, #1
+      mul x4, x1, x16
+      mul x4, x4, x16
+      mvn x4, x4, lsr #40
+      add x16, x4, x16, lsl #11
+      mov x4, #1152921504606846976
+      msub x1, x16, x1, x4
+      mul x1, x1, x16
+      lsr x1, x1, #47
+      add x16, x1, x16, lsl #13
+      sbfx x1, x9, #0, #1
+      and x4, x9, #0x1
+      add x4, x4, x9, lsr #1
+      and x1, x1, x16, lsr #1
+      msub x1, x16, x4, x1
+      lsl x4, x16, #31
+      umulh x16, x1, x16
+      add x16, x4, x16, lsr #1
+      adds x1, x16, #1
+      cset w4, hs
+      umulh x1, x1, x9
+      madd x1, x4, x9, x1
+      sub x16, x16, x9
+      sub x1, x16, x1
+      mul x16, x1, x9
+      adds x16, x16, x10
+      b.lo 5f
+      cmp x16, x9
+      csel x4, x9, xzr, hs
+      cset w5, hs
+      mvn x5, x5
+      add x1, x5, x1
+      sub x16, x16, x9
+      sub x16, x16, x4
+    5:
+      umulh x4, x1, x10
+      adds x4, x16, x4
+      b.lo 10f
+      sub x16, x1, #1
+      cmp x4, x9
+      b.lo 8f
+      mul x5, x1, x10
+      sub x1, x1, #2
+      cmp x4, x9
+      ccmp x10, x5, #0, ls
+      csel x16, x16, x1, hi
+    8:
+      cbz x14, 11f
+    9:
+      mov w1, #3
+      mov x15, x17
+      b 18f
+    10:
+      mov x16, x1
+      cbnz x14, 9b
+    11:
+      cmp x17, x9
+      b.hi 14f
+      mov w1, #2
+      b.ne 17f
+      cmp x15, x10
+      b.lo 17f
+    14:
+      subs x14, x3, x12
+      cset w1, lo
+      str x14, [sp, #48]
+      adds x14, x10, x1
+      cset w1, hs
+      subs x4, x15, x14
+      csinc w14, w1, wzr, hs
+      adds x14, x9, x14
+      b.hs 33f
+      subs x14, x17, x14
+      b.lo 33f
+      mov w1, #2
+      mov x15, x4
+      b 18f
+    17:
+      mov x14, x17
+    18:
+      add x17, sp, #24
+      mov x3, #-1
+    19:
+      add x4, x17, x1, lsl #3
+      ldr x4, [x4, #8]
+      cmp x14, x9
+      b.lo 22f
+      b.hi 27f
+      cmp x15, x10
+      b.hs 27f
+    22:
+      umulh x5, x14, x16
+      mul x6, x14, x16
+      adds x6, x15, x6
+      adc x14, x14, x5
+      msub x15, x9, x14, x15
+      umulh x5, x14, x10
+      mul x7, x14, x10
+      adds x7, x7, x10
+      adc x5, x5, x9
+      negs x7, x7
+      sbc x15, x15, x5
+      adds x5, x7, x4
+      cinc x7, x15, hs
+      cmp x7, x6
+      csel x6, x9, xzr, hs
+      cset w15, hs
+      csel x19, x10, xzr, hs
+      sub x14, x14, x15
+      add x4, x14, #1
+      adds x15, x5, x19
+      adc x14, x6, x7
+      cmp x15, x10
+      sbcs xzr, x14, x9
+      b.hs 25f
+    23:
+      mul x5, x4, x12
+      ldr x6, [x17, x1, lsl #3]
+      subs x5, x6, x5
+      str x5, [x17, x1, lsl #3]
+      umulh x4, x4, x12
+      cinc x4, x4, lo
+      subs x15, x15, x4
+      cset w4, lo
+      subs x14, x14, x4
+      b.lo 26f
+    24:
+      cmp x1, #0
+      sub x1, x1, #1
+      b.gt 19b
+      b 28f
+    25:
+      add x4, x4, #1
+      subs x15, x15, x10
+      sbc x14, x14, x9
+      b 23b
+    26:
+      adds x4, x5, x12
+      str x4, [x17, x1, lsl #3]
+      adcs x15, x10, x15
+      adc x14, x14, x9
+      b 24b
+    27:
+      ldr x5, [x17, x1, lsl #3]
+      ldr x6, [x2]
+      umulh x7, x6, x3
+      neg x19, x6
+      cmp x5, x19
+      cinc x7, x7, lo
+      ldr x19, [x13]
+      neg x20, x19
+      adds x21, x7, x20
+      subs x4, x4, x21
+      cset w21, lo
+      cmn x7, x20
+      umulh x7, x19, x3
+      adc x7, x21, x7
+      ldr x20, [x11]
+      neg x21, x20
+      adds x22, x7, x21
+      subs x15, x15, x22
+      cset w22, lo
+      cmn x7, x21
+      umulh x7, x20, x3
+      adc x7, x22, x7
+      add x5, x5, x6
+      adds x6, x5, x6
+      adcs x19, x4, x19
+      adc x20, x20, x15
+      cmp x14, x7
+      csel x14, x15, x20, hs
+      csel x15, x4, x19, hs
+      csel x4, x5, x6, hs
+      str x4, [x17, x1, lsl #3]
+      b 24b
+    28:
+      ldr x9, [sp, #24]
+      lsr x10, x9, x8
+      lsl x11, x15, #1
+      mvn w12, w8
+      lsl x11, x11, x12
+      orr x10, x11, x10
+      lsr x11, x15, x8
+      lsl x13, x14, #1
+      lsl x12, x13, x12
+      orr x11, x12, x11
+      lsr x12, x14, x8
+      cmp x8, #0
+      csel x8, x9, x10, eq
+      csel x9, x15, x11, eq
+      csel x10, x14, x12, eq
+      stp x8, x9, [x0]
+      str x10, [x0, #16]
+      cbz x10, 30f
+      mov w0, #3
+      ldp x20, x19, [sp, #80]
+      ldp x22, x21, [sp, #64]
+      add sp, sp, #96
+      ret
+    30:
+      cbz x9, 32f
+      mov w0, #2
+      ldp x20, x19, [sp, #80]
+      ldp x22, x21, [sp, #64]
+      add sp, sp, #96
+      ret
+    32:
+      umin x0, x8, #1
+      ldp x20, x19, [sp, #80]
+      ldp x22, x21, [sp, #64]
+      add sp, sp, #96
+      ret
+    33:
+      str x3, [sp, #48]
+      mov w1, #2
+      mov x14, x17
+      b 18b
+      .p2align 1
+    90:
+      .short 0x7fd, 0x7f5, 0x7ed, 0x7e5, 0x7dd, 0x7d5, 0x7ce, 0x7c6
+      .short 0x7bf, 0x7b7, 0x7b0, 0x7a8, 0x7a1, 0x79a, 0x792, 0x78b
+      .short 0x784, 0x77d, 0x776, 0x76f, 0x768, 0x761, 0x75b, 0x754
+      .short 0x74d, 0x747, 0x740, 0x739, 0x733, 0x72c, 0x726, 0x720
+      .short 0x719, 0x713, 0x70d, 0x707, 0x700, 0x6fa, 0x6f4, 0x6ee
+      .short 0x6e8, 0x6e2, 0x6dc, 0x6d6, 0x6d1, 0x6cb, 0x6c5, 0x6bf
+      .short 0x6ba, 0x6b4, 0x6ae, 0x6a9, 0x6a3, 0x69e, 0x698, 0x693
+      .short 0x68d, 0x688, 0x683, 0x67d, 0x678, 0x673, 0x66e, 0x669
+      .short 0x664, 0x65e, 0x659, 0x654, 0x64f, 0x64a, 0x645, 0x640
+      .short 0x63c, 0x637, 0x632, 0x62d, 0x628, 0x624, 0x61f, 0x61a
+      .short 0x616, 0x611, 0x60c, 0x608, 0x603, 0x5ff, 0x5fa, 0x5f6
+      .short 0x5f1, 0x5ed, 0x5e9, 0x5e4, 0x5e0, 0x5dc, 0x5d7, 0x5d3
+      .short 0x5cf, 0x5cb, 0x5c6, 0x5c2, 0x5be, 0x5ba, 0x5b6, 0x5b2
+      .short 0x5ae, 0x5aa, 0x5a6, 0x5a2, 0x59e, 0x59a, 0x596, 0x592
+      .short 0x58e, 0x58a, 0x586, 0x583, 0x57f, 0x57b, 0x577, 0x574
+      .short 0x570, 0x56c, 0x568, 0x565, 0x561, 0x55e, 0x55a, 0x556
+      .short 0x553, 0x54f, 0x54c, 0x548, 0x545, 0x541, 0x53e, 0x53a
+      .short 0x537, 0x534, 0x530, 0x52d, 0x52a, 0x526, 0x523, 0x520
+      .short 0x51c, 0x519, 0x516, 0x513, 0x50f, 0x50c, 0x509, 0x506
+      .short 0x503, 0x500, 0x4fc, 0x4f9, 0x4f6, 0x4f3, 0x4f0, 0x4ed
+      .short 0x4ea, 0x4e7, 0x4e4, 0x4e1, 0x4de, 0x4db, 0x4d8, 0x4d5
+      .short 0x4d2, 0x4cf, 0x4cc, 0x4ca, 0x4c7, 0x4c4, 0x4c1, 0x4be
+      .short 0x4bb, 0x4b9, 0x4b6, 0x4b3, 0x4b0, 0x4ad, 0x4ab, 0x4a8
+      .short 0x4a5, 0x4a3, 0x4a0, 0x49d, 0x49b, 0x498, 0x495, 0x493
+      .short 0x490, 0x48d, 0x48b, 0x488, 0x486, 0x483, 0x481, 0x47e
+      .short 0x47c, 0x479, 0x477, 0x474, 0x472, 0x46f, 0x46d, 0x46a
+      .short 0x468, 0x465, 0x463, 0x461, 0x45e, 0x45c, 0x459, 0x457
+      .short 0x455, 0x452, 0x450, 0x44e, 0x44b, 0x449, 0x447, 0x444
+      .short 0x442, 0x440, 0x43e, 0x43b, 0x439, 0x437, 0x435, 0x432
+      .short 0x430, 0x42e, 0x42c, 0x42a, 0x428, 0x425, 0x423, 0x421
+      .short 0x41f, 0x41d, 0x41b, 0x419, 0x417, 0x414, 0x412, 0x410
+      .short 0x40e, 0x40c, 0x40a, 0x408, 0x406, 0x404, 0x402, 0x400
+    ASM
+
 # Exact raw wrappers for the positive 4-by-2-limb C leaf.  Keep WValue and
 # limb addresses as i64 throughout: routing them through typed source fields
 # would box the addresses and re-enter ordinary numeric dispatch.  Allocation,
@@ -747,6 +1078,14 @@ fn __bigint_mod_42_raw(a, b) (i64 i64) i64
     outn = 2
   elsif raw_load_u64(rp, 0) != 0
     outn = 1
+  ccall_nobox("w_bigint_finish_sub_raw", result, outn)
+
+fn __bigint_mod_63_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
+  rp = (result & 140737488355327) + 16 ## i64
+  ap = (a & 140737488355327) + 16 ## i64
+  bp = (b & 140737488355327) + 16 ## i64
+  outn = __bigint_mod_63_exact(rp, ap, bp) ## i64
   ccall_nobox("w_bigint_finish_sub_raw", result, outn)
 
 
@@ -1917,6 +2256,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       if am == 4 && bm == 2 && asign42 == 0 && bsign42 == 0
         return wvalue_from_bits(
           __bigint_mod_42_raw($value ## i64, other$value ## i64)
+        )
+      if am == 6 && bm == 3 && asign42 == 0 && bsign42 == 0
+        return wvalue_from_bits(
+          __bigint_mod_63_raw($value ## i64, other$value ## i64)
         )
     ccall("w_bigint_mod", self, other)
 

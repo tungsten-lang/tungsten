@@ -455,6 +455,34 @@ The native-object path is therefore not retained. Release builds remain
 all-bitcode through FullLTO; the persistent WIRE, reachability, rendered-text,
 and final-binary caches provide reuse without weakening runtime optimization.
 
+## Standalone executable visibility
+
+Ordinary Tungsten executables now publish only `main`. Tungsten functions and
+classes were already emitted with internal linkage, but the link driver still
+passed `-export_dynamic`/`-rdynamic`, which kept roughly 1,100 C runtime entry
+points in the dynamic symbol table and made them externally observable LTO
+roots. The compiler's `--jit`/`--hot` host is the intentional exception: JIT
+snippets omit the runtime and resolve `w_int`, `w_add`, and related symbols from
+the host process. The driver detects that host from its emitted call to
+`w_jit_load_object`; custom embedding hosts can opt in with
+`TUNGSTEN_DYNAMIC_EXPORTS=1`.
+
+Six alternating `benchmarks/big_math/program_loops.w` builds with
+`--release --native --fast --no-debug` measured 12.065963s with the old export
+contract and 9.942978s with hidden standalone visibility, a 17.59% wall-time
+reduction. The clang/FullLTO phase fell from 11.7285s to 9.6090s (-18.07%). A
+representative binary shrank from 2,993,128 to 2,513,448 bytes (-16.03%), and
+its export trie fell from roughly 1,099 runtime symbols to `main` only. The
+input LLVM was byte-identical; this is solely a final-link contract change.
+
+Longer matched runtime screens found no code-quality cost. Paired medians were
+5.06% faster for bignum `wordchain4`, 0.35% slower for `addmul`, and 0.86%
+faster for the five-byte String slice lane. The initially noisy empty-slice
+lane was rerun as 24 drift-cancelling ABBA blocks (48 samples per binary, 50
+million operations each) and was 1.33% faster. All checksums matched. Focused
+contracts also verify that a no-LTO C-FFI program links with only `main`
+exported, while an auto-detected JIT host still exports and resolves `w_add`.
+
 ## Internal fastcc experiment (not enabled by default)
 
 The existing `TUNGSTEN_LLVM_FASTCC=1` planner rewrote 1,634 eligible internal

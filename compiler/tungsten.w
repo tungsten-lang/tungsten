@@ -461,6 +461,18 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
 -> ll_needs_cuda(text)
   ll_text_has(text, "@w_cuda_")
 
+# Standalone executables have no dynamic ABI: Tungsten functions/classes are
+# already internal, and their runtime calls are resolved in the final link.
+# The compiler's --jit/--hot host is the exception. Its snippets deliberately
+# omit the runtime and resolve w_int/w_add/... from the host process, so that
+# executable must publish its runtime symbols. A force-on escape hatch covers
+# custom embedding hosts that use the same contract without calling the built-in
+# object loader directly.
+-> ll_needs_dynamic_exports(text)
+  if env("TUNGSTEN_DYNAMIC_EXPORTS") == "1"
+    return true
+  ll_text_has(text, "@w_jit_load_object(")
+
 # System library flag probes. Each shells out via capture() — fork+exec+pipe
 # is ~10-30ms per call, and we do 9 of them per compile. To skip them on
 # rebuilds, the driver (bin/commands/build.rb) caches the resolved flags in
@@ -1158,6 +1170,7 @@ driver_homebrew_prefix_memo = {}
 
 -> link_binary(ll_path, out_path, runtime_objs, verbose = false)
   ll_probe_text = read_file(ll_path)
+  dynamic_exports_needed = ll_needs_dynamic_exports(ll_probe_text)
   bridges_needed = ll_needs_apple_bridges(ll_probe_text)
   blas_needed = ll_needs_blas(ll_probe_text)
   sparse_needed = ll_needs_sparse(ll_probe_text)
@@ -1233,16 +1246,20 @@ driver_homebrew_prefix_memo = {}
 
   # ld64 (macOS) vs GNU/lld (Linux): -dead_strip and -stack_size are ld64-only;
   # GNU ld also can't read LTO-bitcode archives, so Linux links through lld.
-  # -export_dynamic/-rdynamic: keep the runtime symbols in the dynamic symbol
-  # table so a dlopen'd JIT snippet can resolve w_int/w_add/… from this binary
-  # (the --jit/--hot REPL links tiny snippet dylibs that resolve against the
-  # host instead of relinking the 1.4MB runtime — ~15x faster per line).
+  # -export_dynamic/-rdynamic is restricted to JIT hosts. Ordinary standalone
+  # programs have no dynamic ABI; keeping every runtime symbol visible both
+  # bloats their export table and prevents FullLTO from internalizing dead
+  # runtime entry points. The --jit/--hot compiler host is detected from its
+  # emitted call to w_jit_load_object, and TUNGSTEN_DYNAMIC_EXPORTS=1 is the
+  # explicit embedding-host override.
   if cross_target != ""
     clang_cmd << cross_compile_flags()
   if cross_target != "" && detect_target()[:os] != "macos"
     # Cross-link an ELF target through lld. The sysroot supplies its libc,
     # crt objects, and system libraries.
-    clang_cmd << "-fuse-ld=lld -Wl,--gc-sections -rdynamic "
+    clang_cmd << "-fuse-ld=lld -Wl,--gc-sections "
+    if dynamic_exports_needed
+      clang_cmd << "-rdynamic "
   elsif detect_target()[:os] == "macos"
     # -fveclib: the LLVM loop vectorizer may replace scalar libm calls in
     # vectorizable loops (e.g. the compiler's fused elementwise loops) with
@@ -1251,9 +1268,18 @@ driver_homebrew_prefix_memo = {}
     # libmvec coverage varies by glibc version/arch and a missing _ZGV*
     # symbol would break the link.
     clang_cmd << "-fveclib=Darwin_libsystem_m "
-    clang_cmd << "-Wl,-dead_strip -Wl,-stack_size,0x8000000 -Wl,-export_dynamic "
+    clang_cmd << "-Wl,-dead_strip -Wl,-stack_size,0x8000000 "
+    if dynamic_exports_needed
+      clang_cmd << "-Wl,-export_dynamic "
+    else
+      # Native runtime archives contain ordinary external C symbols. Restrict
+      # the executable's export trie even when there is no LTO internalizer;
+      # this does not change resolution among objects in the final link.
+      clang_cmd << "-Wl,-exported_symbol,_main "
   else
-    clang_cmd << "-fuse-ld=lld -Wl,--gc-sections -rdynamic "
+    clang_cmd << "-fuse-ld=lld -Wl,--gc-sections "
+    if dynamic_exports_needed
+      clang_cmd << "-rdynamic "
 
   ocf = onig_cflags
   if ocf != ""
@@ -2105,7 +2131,7 @@ driver_homebrew_prefix_memo = {}
   if ra != ""
     ramv = file_mtime_ns(ra)
     ram = ramv == nil ? "missing" : ramv.to_s()
-  ["irbin-v5", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), cc_identity, ar_identity, release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("SDKROOT"), incremental_env_s("MACOSX_DEPLOYMENT_TARGET"), incremental_env_s("CPATH"), incremental_env_s("C_INCLUDE_PATH"), incremental_env_s("CPLUS_INCLUDE_PATH"), incremental_env_s("LIBRARY_PATH"), incremental_env_s("PKG_CONFIG_PATH"), incremental_env_s("PKG_CONFIG_LIBDIR"), incremental_env_s("TLS"), incremental_env_s("TUNGSTEN_TLS"), incremental_env_s("TUNGSTEN_TLS_CFLAGS"), incremental_env_s("TUNGSTEN_TLS_LDFLAGS"), incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_CORE_REACHABILITY"), incremental_env_s("TUNGSTEN_LAZY_CONTENT_HASH"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_AR"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
+  ["irbin-v5", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), cc_identity, ar_identity, release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, incremental_env_s("SDKROOT"), incremental_env_s("MACOSX_DEPLOYMENT_TARGET"), incremental_env_s("CPATH"), incremental_env_s("C_INCLUDE_PATH"), incremental_env_s("CPLUS_INCLUDE_PATH"), incremental_env_s("LIBRARY_PATH"), incremental_env_s("PKG_CONFIG_PATH"), incremental_env_s("PKG_CONFIG_LIBDIR"), incremental_env_s("TLS"), incremental_env_s("TUNGSTEN_TLS"), incremental_env_s("TUNGSTEN_TLS_CFLAGS"), incremental_env_s("TUNGSTEN_TLS_LDFLAGS"), incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_CORE_REACHABILITY"), incremental_env_s("TUNGSTEN_LAZY_CONTENT_HASH"), incremental_env_s("TUNGSTEN_DYNAMIC_EXPORTS"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_AR"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
 
 # Valid cached slot for this identity? Reads the manifest and revalidates
 # every recorded (path, mtime_ns). Any surprise → miss (rebuild).

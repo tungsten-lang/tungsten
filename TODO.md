@@ -435,6 +435,10 @@ projects stay unchecked until their stated acceptance criteria are met.
   source-controlled corpus trains self, protected numeric, String, debug-frame,
   and serial-batch paths without target links; measured before/after results
   and output-identity gates live in `doc/design/incremental-lowering.md`.
+- [x] Hide the runtime ABI of standalone executables. Ordinary links export
+  only `main`, allowing FullLTO to internalize and remove unused runtime entry
+  points; JIT/compiler hosts retain dynamic exports automatically, with an
+  explicit override for custom embedding hosts.
 - [x] Resolve the `-O0` performance inversion. Ordinary `-o` builds now use
   `-O3` application/runtime code while retaining checks, symbols, and source
   metadata; explicit `--dev` selects `-O0`, and benchmark guidance continues

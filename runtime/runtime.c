@@ -47830,64 +47830,55 @@ WValue w_method_call_fast(WValue recv, WValue name, WValue *args_ptr, int argc) 
 
 /* ---- Monomorphic inline cache ---- */
 
+__attribute__((noinline, cold))
+static uint64_t w_dispatch_key_obj_nonhash(WValue v, uint64_t subtag) {
+    if (subtag == W_SUBTAG_INSTANCE) {
+        WObject *obj = (WObject *)w_as_ptr(v);
+        return 0x100000000ULL | (uint64_t)obj->class_id;
+    }
+    if (subtag == W_SUBTAG_CLASS) {
+        WClass *klass = (WClass *)w_as_ptr(v);
+        return 0x200000000ULL | (uint64_t)klass->class_id;
+    }
+    if (subtag == W_SUBTAG_GENERIC) {
+        uint8_t type = *(uint8_t *)w_as_ptr(v);
+        return 0x80u | (uint64_t)type;
+    }
+    if (subtag == W_SUBTAG_DOMAIN) {
+        if (w_is_big_rational(v))
+            return 0xE0u | W_PACKED_RATIONAL;
+        /* Heap-domain numerics mirror the semantic keys used by their
+         * packed forms below. Keeping Decimal, Currency, and Quantity
+         * distinct is required for monomorphic caches: all three share
+         * the physical 0xFFFD tag, but their handlers are not
+         * interchangeable. */
+        uint8_t dt = w_as_domain(v)->domain_type;
+        if (dt == W_DOMAIN_DECIMAL) return 0xFDu;
+        if (dt == W_DOMAIN_CURRENCY) return 0xC0u;
+        if (dt == W_DOMAIN_QUANTITY) return 0xC1u;
+    }
+    if (subtag == W_SUBTAG_SOCKET) return 0x80u | W_TYPE_SOCKET;
+    return subtag;
+}
+
 uint64_t w_dispatch_key(WValue v) {
     if (__builtin_expect(v < 0x10, 0)) return 0;
     uint64_t hi = v >> 48;
-    if (hi == 0) {
+    /* A forced self-hosted build is overwhelmingly Array/Hash dispatch
+     * (85% together). Keep those two representation checks at the front;
+     * packed values and String/Symbol account for nearly all the remainder. */
+    if (__builtin_expect(hi == 0xFFF4, 1)) return W_SUBTAG_ARRAY;
+    if (__builtin_expect(hi == 0, 1)) {
         uint64_t subtag = v & 0xF;
-        if (subtag == W_SUBTAG_INSTANCE) {
-            WObject *obj = (WObject *)w_as_ptr(v);
-            return 0x100000000ULL | (uint64_t)obj->class_id;
-        }
-        if (subtag == W_SUBTAG_CLASS) {
-            WClass *klass = (WClass *)w_as_ptr(v);
-            return 0x200000000ULL | (uint64_t)klass->class_id;
-        }
-        if (subtag == W_SUBTAG_SOCKET) {
-            return 0x80u | W_TYPE_SOCKET;
-        }
-        if (subtag == W_SUBTAG_GENERIC) {
-            uint8_t type = *(uint8_t *)w_as_ptr(v);
-            return 0x80u | (uint64_t)type;
-        }
-        if (subtag == W_SUBTAG_DOMAIN) {
-            if (w_is_big_rational(v))
-                return 0xE0u | W_PACKED_RATIONAL;
-            /* Heap-domain numerics mirror the semantic keys used by their
-             * packed forms below. Keeping Decimal, Currency, and Quantity
-             * distinct is required for monomorphic caches: all three share
-             * the physical 0xFFFD tag, but their handlers are not
-             * interchangeable. */
-            uint8_t dt = w_as_domain(v)->domain_type;
-            if (dt == W_DOMAIN_DECIMAL) return 0xFDu;
-            if (dt == W_DOMAIN_CURRENCY) return 0xC0u;
-            if (dt == W_DOMAIN_QUANTITY) return 0xC1u;
-        }
-        return subtag;
-    }
-    /* BigInt's top-level tag (v4) keeps its historical dispatch key so
-     * every IC, registration table, and the compiler's type_dispatch_key
-     * stay valid across the encoding move. Tested before the double
-     * catch-all: a bigint classified as 0xFF would hit the Float table.
-     * Array (v5) follows the same convention on 0xFFF4 → 0x0A. */
-    if (hi == 0xFFF2) return 0xB0u | (uint64_t)w_simd2d_subtag(v);
-    if (hi == 0xFFF3) return 0xB4u;
-    if (hi == 0xFFF4) return W_SUBTAG_ARRAY;
-    if (hi == 0xFFF6) return 0xB6u;
-    if (hi == 0xFFF8) return 0xF8u;                     /* instant */
-    if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF5, 0xFFF7 free) */
-    if (hi == 0xFFFB) return W_SUBTAG_BIGINT;           /* bigint */
-    if (hi == 0xFFFD) {
-        if (is_currency_any(v)) return 0xC0u;
-        if (is_quantity_any(v)) return 0xC1u;
-        return 0xFDu;
+        if (__builtin_expect(subtag == W_SUBTAG_HASH, 1)) return W_SUBTAG_HASH;
+        return w_dispatch_key_obj_nonhash(v, subtag);
     }
     /* W_TAG_PACKED (hi=0xFFFE) holds 8 packed-value subtypes (color,
      * complex, rational, NODE, date, ipv4, …) that need distinct
      * dispatch keys so each can register its own class. Map subtype
      * N → 0xE0 | N (range 0xE0..0xE7 — currently unused by other
      * type tags, which sit at 0xF9..0xFC). */
-    if (hi == 0xFFFE) {
+    if (__builtin_expect(hi == 0xFFFE, 1)) {
         uint64_t subtype = (v >> 45) & 0x7;
         if (subtype == W_PACKED_NODE) {
             return 0x400000000ULL | (uint64_t)w_node_kind(v);
@@ -47896,6 +47887,14 @@ uint64_t w_dispatch_key(WValue v) {
             return W_SUBTAG_RANGE;
         return 0xE0u | subtype;
     }
+    /* Adjacent hot scalar tags share their stable low-byte dispatch key. */
+    if (__builtin_expect(hi - 0xFFF9 <= 1, 1)) return (uint64_t)(hi & 0xFF);
+    /* BigInt's top-level tag (v4) keeps its historical dispatch key so
+     * every IC, registration table, and the compiler's type_dispatch_key
+     * stay valid across the encoding move. Tested before the double
+     * catch-all: a bigint classified as 0xFF would hit the Float table.
+     * Array (v5) follows the same convention on 0xFFF4 → 0x0A. */
+    if (hi == 0xFFFB) return W_SUBTAG_BIGINT;           /* bigint */
     /* W_TAG_CHAR (hi=0xFFFC) holds 4 lexical subtypes (Token, LexChar,
      * Slice, Char) that need distinct dispatch keys for the same reason.
      * Map subtype N (bits 47..46) → 0xD0 | N (range 0xD0..0xD3 — free
@@ -47904,6 +47903,16 @@ uint64_t w_dispatch_key(WValue v) {
     if (hi == 0xFFFC) {
         return 0xD0u | (uint64_t)((v >> 46) & 0x3);
     }
+    if (hi == 0xFFFD) {
+        if (is_currency_any(v)) return 0xC0u;
+        if (is_quantity_any(v)) return 0xC1u;
+        return 0xFDu;
+    }
+    if (hi == 0xFFF2) return 0xB0u | (uint64_t)w_simd2d_subtag(v);
+    if (hi == 0xFFF3) return 0xB4u;
+    if (hi == 0xFFF6) return 0xB6u;
+    if (hi == 0xFFF8) return 0xF8u;                     /* instant */
+    if (hi < 0xFFF9) return 0xFF;                       /* double (<= 0xFFF1; 0xFFF5, 0xFFF7 free) */
     return (uint64_t)(hi & 0xFF);                       /* tagged: int=0xFA, string=0xF9 */
 }
 

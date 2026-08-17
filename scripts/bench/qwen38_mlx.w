@@ -603,7 +603,11 @@ rope_power = ~2.0 / ROT_DIM
     metal_dispatch_groups(queue, scaled_triplet_hoist_pipe,
       [w[0], w[1], input, output, kdim, rows, w[2]], (rows + 3) / 4, 64)
     return
-  use_wide = triplet_variant == "wide" || (kdim == FFN || rows == N_VOCAB)
+  # "legacy" reproduces the pre-hoist default exactly (wide for FFN/vocab, r1
+  # elsewhere) so the fix stays measurable; "wide"/"rowsplit" force one kernel
+  # everywhere, as they always did.
+  legacy_shape = kdim == FFN || rows == N_VOCAB
+  use_wide = triplet_variant == "wide" || (triplet_variant == "legacy" && legacy_shape)
   if use_wide
     metal_dispatch_groups(queue, scaled_triplet_pipe,
       [w[0], w[1], input, output, kdim, rows, w[2]], (rows + 3) / 4, 64)
@@ -621,7 +625,7 @@ rope_power = ~2.0 / ROT_DIM
     metal_dispatch_groups(queue, scaled_triplet_res_hoist_pipe,
       [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + 3) / 4, 64)
     return
-  use_wide_res = triplet_variant == "wide" || kdim == FFN
+  use_wide_res = triplet_variant == "wide" || (triplet_variant == "legacy" && kdim == FFN)
   if use_wide_res
     metal_dispatch_groups(queue, scaled_triplet_res_pipe,
       [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + 3) / 4, 64)
@@ -1312,7 +1316,14 @@ if mtp_enabled
   current = pred
   draft = mtp_step([current, backbone_hidden, pos - 1])
   generated = 0
+  # Per-round timing. Total wall clock is a poor instrument on a contended box
+  # -- a single descheduled round drags the whole run -- whereas the MEDIAN
+  # round rejects those outliers and is what actually changed when a kernel
+  # gets faster. Reported alongside tok/s so a regression can be told apart
+  # from the room.
+  round_ms = []
   while generated < n_generate
+    rt0 = ccall("__w_clock_ms")
     remaining = n_generate - generated
     if remaining == 1
       current = forward(current, pos, true)
@@ -1428,6 +1439,7 @@ if mtp_enabled
         mtp_auto_rounds[arm] = mtp_auto_rounds[arm] + 1
         mtp_auto_tokens[arm] = mtp_auto_tokens[arm] + generated - round_generated_before
         mtp_auto_ms[arm] = mtp_auto_ms[arm] + ccall("__w_clock_ms") - round_t0
+    round_ms.push(ccall("__w_clock_ms") - rt0)
 else
   i = 0
   while i < n_generate
@@ -1437,6 +1449,9 @@ else
     i = i + 1
 elapsed = ccall("__w_clock_ms") - t0
 tokens_per_second = (~0.0 + n_generate) * 1000.0 / elapsed
+if round_ms.size() > 0
+  sorted_rounds = round_ms.sort()
+  << "rounds: " + round_ms.size().to_s + ", median " + sorted_rounds[round_ms.size() / 2].to_s + " ms, min " + sorted_rounds[0].to_s + " ms"
 
 # ROW SCAN: what does one extra verified row actually cost?
 #

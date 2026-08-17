@@ -21,6 +21,13 @@ bin/tungsten run scripts/bench/qwen38_mlx.w mtp 24
 bin/tungsten run scripts/bench/qwen38_mlx.w mtp-auto 48
 ```
 
+Wrap any timed run in the lock so a concurrent agent cannot overlap it --
+two GPU runs at once do not fail, they return plausible wrong numbers:
+
+```sh
+scripts/bench/perf_lock.sh bin/tungsten run scripts/bench/qwen38_mlx.w mtp 64
+```
+
 Two diagnostics share `ARGV[7]`, both of which need a real prose prompt
 (`ARGV[5]` above 5 tokens) to say anything:
 
@@ -395,6 +402,39 @@ Worth generalising: the earlier finding on this kernel family was that
 Here the opposite hoist wins. The reconcilable rule is that hoisting a value
 reused **across output rows** pays, while hoisting one already invariant
 within a row just adds live registers for nothing.
+
+#### What the hoist is worth in tok/s
+
+Honest accounting, because the headline number and the useful number differ.
+
+Total wall clock could not answer this: paired runs gave anything from -1% to
++24%, because a single descheduled round drags a whole run. The bench now
+reports the **median round**, which rejects those outliers, and benchmarks run
+under `scripts/bench/perf_lock.sh` so a neighbouring agent cannot overlap.
+Six interleaved reps, 64-token prose prompt, 64 generated:
+
+| rep | MTP-2 legacy | MTP-2 hoisted | MTP-1 (untouched) |
+|---|---|---|---|
+| 1 | 55 ms | 44 ms | 38 ms |
+| 2 | 56 ms | 48 ms | 39 ms |
+| 3 | 57 ms | 47 ms | 46 ms |
+| 4 | 71 ms | 55 ms | 47 ms |
+| 5 | 82 ms | 61 ms | 48 ms |
+| 6 | 83 ms | 69 ms | 53 ms |
+
+**6/6, median -19% on the round, i.e. about +23% tok/s for MTP-2.** The ratio
+holds steady while absolute times climb 50% with box temperature, which is the
+point of the paired design.
+
+**Overall best-mode tok/s is unchanged.** MTP-1 never calls the triplet kernel,
+so it is untouched, and it was and remains the fastest mode. Per emitted token
+(round / E[tokens], 1.615 for depth-1 and 1.909 for depth-2) the fix moves
+depth-2 from ~20% behind depth-1 to roughly **tied**, trading wins rep to rep.
+
+So the fix is worth +23% on a mode that is not the mode you would run today.
+Its value is that depth-2 stops being a dead end: it is what the `mtp-auto`
+controller's second arm costs, and it is the floor under any wider schedule,
+since every one of them verifies three or more rows.
 
 ### Tree drafting: measured, and it does not pay here
 

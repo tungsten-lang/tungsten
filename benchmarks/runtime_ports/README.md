@@ -531,6 +531,18 @@ separate native follow-up.  Compiled/interpreted checks cover borrow death at
 each depth, full propagation, 3→2 shrink, exact sizes, signs, and neighbors.
 Evidence: `bigint_sub1_3_exact_results.txt`.
 
+EXACT POSITIVE SUB1@4 CHECKPOINT: native source now carries the literal
+four-limb C schedule—two `ldp`s, `subs` plus three `sbcs`, two `stp`s, and
+`cset`—with the same generic cap-four hot allocation and shrink-to-three
+epilogue.  A 21-pair 300 ms promotion won 21/21 at 0.92083 (3.873 ns versus
+4.241 ns); the initial six-cell screen measured 0.90750 at the target.  Every
+control stayed within the 5% gate, including the directionally slower @3 row
+at 1.03951.  Compiled/interpreted checks cover borrow death at each depth,
+full propagation, 4→3 shrink, exact sizes, signs, and neighboring widths.
+No borrow-death, store scheduling, allocator specialization, or direct seam
+is mixed into this exact checkpoint.  Evidence:
+`bigint_sub1_4_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

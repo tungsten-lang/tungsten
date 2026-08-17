@@ -37090,6 +37090,7 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
     if (neg_b && sa == 2 && sb == 1)
         return BN_BIGINT_SUB1_2_SRC_DIRECT ? 3 : 1;
     if (neg_b && sa == 3 && sb == 1) return 1;
+    if (neg_b && sa == 4 && sb == 1) return 1;
     /* Exclusion keys on the RAW operand signs, NOT the post-flip effective
      * ones: C's `bigint_add_equal_fast` and `bigint_sub_equal_fast` each
      * specialize equal-length pairs whose own signs match, per operator.
@@ -53870,6 +53871,14 @@ WValue w_bigint_sub1_3_finish_raw(WValue v) {
     int32_t rlen = 3 - (r->limbs[2] == 0);
     r->size = rlen;
     if (__builtin_expect(rlen < 3, 0))
+        return bigint_finish_mag_sub(r);
+    return bigint_box(r);
+}
+WValue w_bigint_sub1_4_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    int32_t rlen = 4 - (r->limbs[3] == 0);
+    r->size = rlen;
+    if (__builtin_expect(rlen < 4, 0))
         return bigint_finish_mag_sub(r);
     return bigint_box(r);
 }

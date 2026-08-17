@@ -4128,6 +4128,50 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul1_24_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul1_24_src(i64, i64) nounwind\n"
 
+  # Exact positive 32-by-1 multiplication owns C's cap-64 allocation and
+  # fixed scalar kernel behind an independently reversible stable seam.
+  bigint_mul1_32_fn = nil
+  bigint_mul1_32_matches = 0
+  bm32fi = 0
+  while bm32fi < mod[:functions].size()
+    bm32ff = mod[:functions][bm32fi]
+    if bm32ff[:source_class] == nil && bm32ff[:source_method] == "__bigint_mul1_32_raw"
+      bigint_mul1_32_matches += 1
+      bigint_mul1_32_fn = bm32ff
+    bm32fi += 1
+  if bigint_mul1_32_matches > 1
+    << "error: __bigint_mul1_32_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul1_32_src] == true && bigint_mul1_32_fn == nil
+    << "error: required native BigInt mul1@32 helper is missing; __w_bigint_mul1_32_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul1_32_target = bigint_times_reopened_fn
+  if bigint_mul1_32_target == nil
+    bigint_mul1_32_target = bigint_mul1_32_fn
+  if bigint_mul1_32_target != nil
+    bm32_signature_ok = bigint_mul1_32_target[:params] != nil && bigint_mul1_32_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      bm32_signature_ok = bm32_signature_ok && bigint_mul1_32_target[:source_kind] == :fn_def
+      bm32_signature_ok = bm32_signature_ok && bigint_mul1_32_target[:raw_i64_signature] == true
+      bm32_signature_ok = bm32_signature_ok && bigint_mul1_32_target[:raw_return_type] == :i64
+    if !bm32_signature_ok
+      << "error: invalid native BigInt mul1@32 seam target"
+      exit(1)
+    bm32_cc = ""
+    if bigint_mul1_32_target[:call_conv] != nil && bigint_mul1_32_target[:call_conv] != ""
+      bm32_cc = bigint_mul1_32_target[:call_conv] + " "
+    bm32_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      bm32_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul1_32_src(i64 %a, i64 %b)" + bm32_attrs + " {\n"
+    fn_out << "  %r = tail call " + bm32_cc + "i64 @" + bigint_mul1_32_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul1_32_src"] = false
+    known_fns["__w_bigint_mul1_32_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul1_32_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul1_32_src(i64, i64) nounwind\n"
+
   # Unary BigInt#isqrt has the same stable source/weak-C seam contract as the
   # binary operators above. Its source body owns the one- and two-limb leaves
   # and retains the C divide-and-conquer boundary for wider values.

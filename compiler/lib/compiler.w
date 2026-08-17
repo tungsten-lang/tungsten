@@ -341,6 +341,7 @@ use target
   if verbose
     << ""
     << incremental_core_cache_verbose_text(mod)
+    << incremental_library_cache_verbose_text(mod)
     << core_reachability_verbose_text(mod)
     target_cache_text = target_probe_cache_verbose_text()
     if target_cache_text != nil

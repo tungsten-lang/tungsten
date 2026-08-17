@@ -918,6 +918,8 @@ driver_homebrew_prefix_memo = {}
   identity_text = ["core-wire-executable-v1", exe, stat.mtime_ns().to_s(), stat.ctime_ns().to_s(), stat.size().to_s(), incremental_env_s("TUNGSTEN_VERSION")].join("|")
   identity = wyhash64_hex_string(identity_text)
   incremental_core_cache_configure_persistent(dir, identity)
+  if env("TUNGSTEN_LIBRARY_WIRE_DISK_CACHE") != "0"
+    incremental_library_cache_configure_persistent(dir, identity)
   function_emit_cache_configure_persistent(dir, identity)
   nil
 

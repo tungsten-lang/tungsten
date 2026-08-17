@@ -22,9 +22,13 @@
   prepare_class_set_analysis(ctx, statements)
   prev_stmts = ctx[:enclosing_stmts]
   ctx[:enclosing_stmts] = statements
+  library_cache_target = ctx[:incremental_library_cache_statements]
+  library_cache_active = library_cache_target != nil && wvalue_bits(library_cache_target) == wvalue_bits(statements)
   i = 0
   while i < statements.size()
     if block_terminated(ctx[:func])
+      if library_cache_active
+        incremental_library_cache_maybe_finish(ctx, statements, i)
       ctx[:enclosing_stmts] = prev_stmts
       return nil
     ctx[:enclosing_stmt_idx] = i
@@ -33,6 +37,10 @@
     else
       lower_statement(ctx, statements[i])
       i += 1
+    if library_cache_active
+      incremental_library_cache_maybe_finish(ctx, statements, i)
+  if library_cache_active
+    incremental_library_cache_maybe_finish(ctx, statements, i)
   ctx[:enclosing_stmts] = prev_stmts
 
 # -- Statements --

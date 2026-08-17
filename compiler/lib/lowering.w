@@ -32,6 +32,7 @@ use lowering/class_sets
 use lowering/no_raise
 use lowering/core_abi
 use lowering/core_cache
+use lowering/library_cache
 use lowering/elision
 use lowering/program
 use lowering/monomorphize
@@ -987,13 +988,25 @@ use lowering/definitions
   # the heap form. Always on.
   mark_stackable_typed_arrays(ast.expressions)
 
+  # Bind an unchanged imported-library prefix to the exact warmed Core and
+  # whole-program ABI/type-fact context. The raw functions remain in the
+  # ordinary mid-end; only their source body lowering can be restored.
+  if user_expressions != nil
+    incremental_library_cache_prepare(mod, user_expressions, source_manifest)
+
   if verbose
     << "  lowering..."
   incremental_core_cache_attach_functions(mod)
   if core_expressions != nil && mod[:core_reuse_contract] == :stable && mod[:incremental_core_cache_key] != nil
     lower_program(ctx, core_expressions)
     incremental_core_cache_finish_core_partition(mod)
+    incremental_library_cache_begin(mod)
+    if mod[:incremental_library_cache_status] in (:hit :miss)
+      ctx[:incremental_library_cache_statements] = user_expressions
+      ctx[:incremental_library_cache_prefix_count] = mod[:incremental_library_cache_prefix_count]
     lower_program(ctx, user_expressions)
+    ctx[:incremental_library_cache_statements] = nil
+    ctx[:incremental_library_cache_prefix_count] = nil
   else
     lower_program(ctx, ast.expressions)
 

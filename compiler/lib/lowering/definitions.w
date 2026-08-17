@@ -741,7 +741,7 @@
   definition_path = ast_get(node, :source_path)
   if definition_path == nil
     definition_path = ctx[:source_path]
-  if incremental_core_cache_skip_definition?(mod, definition_path)
+  if incremental_core_cache_skip_definition?(mod, definition_path) || incremental_library_cache_skip_definition?(mod, definition_path)
     return nil
   if ctx[:verbose]
     <- "."
@@ -1904,7 +1904,7 @@
   definition_path = ast_get(node, :source_path)
   if definition_path == nil
     definition_path = ctx[:source_path]
-  if incremental_core_cache_skip_definition?(mod, definition_path)
+  if incremental_core_cache_skip_definition?(mod, definition_path) || incremental_library_cache_skip_definition?(mod, definition_path)
     return nil
   if ctx[:verbose]
     <- "."

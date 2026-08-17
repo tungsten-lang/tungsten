@@ -181,6 +181,22 @@ use wire_constructors
     incremental_core_cache_counter_prefix: nil,
     incremental_core_function_count: 0,
     incremental_core_string_count: 0,
+    # Raw, pre-mid-end WIRE reuse for a contiguous non-Core library cohort.
+    incremental_library_cache_key: nil,
+    incremental_library_cache_path: nil,
+    incremental_library_cache_paths: nil,
+    incremental_library_cache_prefix_count: 0,
+    incremental_library_cache_file_count: 0,
+    incremental_library_cache_context_hash: nil,
+    incremental_library_cache_start_hash: nil,
+    incremental_library_cache_start_function_count: 0,
+    incremental_library_cache_entry: nil,
+    incremental_library_cache_status: nil,
+    incremental_library_cache_reason: nil,
+    incremental_library_cache_hit: false,
+    incremental_library_cache_stored: false,
+    incremental_library_cache_finished: false,
+    incremental_library_cache_function_count: 0,
     # Experimental closed-world emission slice. The complete function graph
     # remains attached for Core-cache finalization; compiler.w swaps this
     # filtered view in only while rendering LLVM.

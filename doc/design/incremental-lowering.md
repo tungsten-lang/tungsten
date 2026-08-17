@@ -628,3 +628,27 @@ mtime-only source changes, explicit disable, dynamic-export separation,
 runtime-artifact invalidation, FFI bypass, and executable identity. The shared
 cache GC ages these reproducible `linkbin-*` artifacts like the existing Core,
 AST, runtime, and final-binary entries.
+
+## Non-Core dependency WIRE
+
+The same frozen-Core boundary now supports an all-or-nothing imported-library
+cohort. For a protected program with locked method tables, unchanged non-Core
+expressions before the entry file can restore their raw WIRE functions from a
+checksummed disk graph. Library startup is still lowered into the fresh main;
+definition bodies are skipped, the recorded counter/string/module-state
+boundary is applied, and entry lowering continues normally. The restored
+functions remain inputs to every mid-end and emission pass.
+
+Compatibility is an ABI-and-dependency contract rather than an entry-source
+hash. It combines the stable Core ABI fingerprint, exact library stat/content
+fingerprints, callable and class-layout signatures, whole-program return and
+class-set summaries, no-raise results, raw-call shapes, globals, build modes,
+and the locked method/type universe. A body-only edit in the executable may
+therefore hit when none of those facts changes. Any library edit or relevant
+program fact change selects a different entry. Generic/source-order coupling
+and startup-created closures bypass.
+
+This is intentionally cohort-level first. Per-file frozen WIRE needs explicit
+inter-library ABI edges plus independent string/counter namespaces; without
+those, nominal per-file hits would merely hide deep-copy and renumbering work
+or risk combining incompatible lowering histories.

@@ -1,7 +1,8 @@
 # Compiler performance: next tranches
 
-This branch evaluates ten compiler-throughput changes independently. Each
-tranche must preserve generated LLVM for representative inputs, retain exact
+This branch evaluates ten requested compiler-throughput opportunities plus one
+retained WIRE-builder tranche discovered while pursuing them. Each tranche
+must preserve generated LLVM for representative inputs, retain exact
 self-hosting fixed point where it applies, pass focused checks, and earn its
 place with matched `--release --native --fast` measurements. Release already
 selects the non-debug profile; `--no-debug` is not required. A
@@ -296,3 +297,51 @@ resolution. Focused checks cover 1/2/4/8-worker parity, release-without-
 interaction, and process-parallel batch compilation. Exact self-host fixed
 point held at SHA-256
 `5580cc198e96a292252078380d882eb2afa49236ca55b19966e8f64883b68c41`.
+
+## Persistent non-Core library WIRE
+
+Protected, locked programs can now reuse raw pre-mid-end WIRE for a contiguous
+cohort of unchanged imported non-Core files. The cache begins at the exact
+warmed-Core string/counter boundary, restores the cohort's functions, then
+re-lowers its top-level startup while skipping definition bodies. Entry-file
+definitions and statements lower normally. Restored functions still traverse
+CFG/SSA, ownership, free insertion, content hashing, and emission, so this
+removes source lowering without imposing an optimization or codegen boundary.
+
+Eligibility is deliberately conservative. `PROTECT_THE_CORE!` and
+`LOCK_THE_DOORS!` must both hold, the exact Core WIRE artifact must already be
+warm, imported expressions must form a prefix, and startup must not create
+functions outside definitions. Library generic specialization and ambiguous
+cross-boundary fusion bypass reuse. The all-or-nothing cohort key includes the
+compiler identity, stable Core ABI hash, AST schema, every library path/stat
+tuple/content digest, callable signatures, class layouts, globals, return and
+class-set facts, no-raise facts, raw-call ABIs, and the locked method/type
+universe. Consequently an entry body-only edit may reuse the cohort, while any
+library or relevant ABI/dependency change lowers it again.
+
+Snapshots use the existing checksummed graph format and atomic writer. A bad
+or corrupt entry is an ordinary miss and is repaired. `TUNGSTEN_LIBRARY_WIRE_CACHE=0`
+disables lookup for exact A/B tests; `TUNGSTEN_LIBRARY_WIRE_DISK_CACHE=0`
+disables persistent configuration. This first implementation caches one
+dependency cohort rather than independent per-file units: a change to any
+member relowers the cohort, avoiding cross-file counter, string, and mutable
+lowering-state ambiguity.
+
+Eight alternating `--release --native --fast --emit-ll` pairs used an entry
+that imports the real compiler lexer and its two non-Core dependencies (111
+functions across three files), with Core and unrelated probes warmed outside
+both modes. Median lowering fell from 120.5 ms to 87.0 ms (-27.80%), measured
+compiler time from 212.5 ms to 181.0 ms (-14.82%), and external wall time from
+310 ms to 280 ms (-9.68%). Retired instructions fell 12.67% and peak RSS
+8.37%. Every paired LLVM module and symbol sidemap was byte-identical.
+
+The dormant path was neutral: six alternating unprotected self-compile pairs
+measured 2.6025 s before and 2.6030 s after (+0.02%) inside the compiler, with
+3.205 s versus 3.210 s external wall (+0.16%) and effectively unchanged RSS
+and retired instructions. Every self-compiler LLVM module was byte-identical.
+
+Focused coverage proves cold/store/hit behavior, reuse across two different
+entry bodies with the same ABI, metadata and content invalidation, corruption
+repair, and a linked native cache-hit result. Release is tested without
+`--no-debug`. Exact self-host LLVM fixed point held at SHA-256
+`2562e51f40ebb55e1175b23b1448f2654cbd2ca99011305a143fad657ffe1346`.

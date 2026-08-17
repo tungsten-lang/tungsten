@@ -145,6 +145,9 @@ WValue  w_wire_function_record_new(WValue field_symbols, WValue name,
                                    WValue params, WValue return_type,
                                    WValue is_toplevel, WValue extra_params);
 WValue  w_wire_block_record_new(WValue field_symbols, WValue label);
+WValue  w_content_temp_map_new(WValue temp_count, WValue next_index);
+WValue  w_content_temp_map_seed(WValue state, WValue name, WValue index);
+WValue  w_content_temp_norm(WValue name, WValue state);
 WValue  w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value);
 WValue  w_wire_field_load(WValue wire, WValue sym);
 WValue  w_wire_field_load_nil(WValue wire, WValue sym);

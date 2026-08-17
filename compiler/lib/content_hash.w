@@ -12,20 +12,10 @@ use wire
 -> norm_temp(name, temp_map)
   if name == nil
     return -1
-
-  existing = temp_map[name]
-
-  if existing != nil
-    return existing
-
-  idx = temp_map[:next_idx]
-
-  if idx == nil
-    idx = 0
-
-  temp_map[name] = idx
-  temp_map[:next_idx] = idx + 1
-  idx
+  # WIRE temps are minted densely as %tN. The runtime state indexes those
+  # ordinals directly and keeps only parameter/legacy names in its fallback
+  # Hash, avoiding repeated string hashing in canonical-content walks.
+  ccall("w_content_temp_norm", name, temp_map)
 
 -> canonical_op_code(op, op_codes)
   # Packed WIRE gives every opcode a generated, process-independent ordinal.
@@ -542,11 +532,11 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     label_map[func[:blocks][bi][:label]] = bi
     bi += 1
 
-  # Build temp map
-  temp_map = {next_idx: func[:params].size()}
+  # Build a dense temp table plus a small fallback map for named parameters.
+  temp_map = ccall_rawargs("w_content_temp_map_new", func[:next_temp], func[:params].size())
   pi = 0
   while pi < func[:params].size()
-    temp_map["%" + func[:params][pi]] = pi
+    ccall_nobox("w_content_temp_map_seed", temp_map, "%" + func[:params][pi], pi)
     pi += 1
 
   # Encode all blocks

@@ -232,6 +232,29 @@ static void test_wire_builder_records(void) {
     w_wire_store_reset(0);
 }
 
+static void test_content_temp_map(void) {
+    WValue state = w_content_temp_map_new(w_box_int(4), w_box_int(2));
+    w_content_temp_map_seed(state, w_string("%left"), w_box_int(0));
+    w_content_temp_map_seed(state, w_string("%right"), w_box_int(1));
+
+    CHECK(w_as_int(w_content_temp_norm(w_string("%left"), state)) == 0 &&
+          w_as_int(w_content_temp_norm(w_string("%right"), state)) == 1,
+          "content temp map preserves named parameter ordinals");
+    CHECK(w_as_int(w_content_temp_norm(w_string("%t3"), state)) == 2 &&
+          w_as_int(w_content_temp_norm(w_string("%t3"), state)) == 2,
+          "content temp map memoizes dense WIRE temporaries by ordinal");
+    CHECK(w_as_int(w_content_temp_norm(w_string("%t1"), state)) == 3,
+          "content temp map assigns canonical order rather than raw ordinal");
+    CHECK(w_as_int(w_content_temp_norm(w_string("%tmp"), state)) == 4 &&
+          w_as_int(w_content_temp_norm(w_string("%tmp"), state)) == 4,
+          "content temp map falls back for nonstandard names");
+
+    WValue collision = w_content_temp_map_new(w_box_int(2), w_box_int(1));
+    w_content_temp_map_seed(collision, w_string("%t0"), w_box_int(0));
+    CHECK(w_as_int(w_content_temp_norm(w_string("%t0"), collision)) == 0,
+          "content temp map preserves parameter/temp spelling collisions");
+}
+
 static WValue canonical_symbol(const char *name) {
     WValue symbol = w_symbol(name);
     if (w_is_slab_sym(symbol))
@@ -414,6 +437,7 @@ int main(void) {
     test_wire_arena();
     test_wire_sequence();
     test_wire_builder_records();
+    test_content_temp_map();
     test_core_graph_snapshot();
 
     if (failures) {

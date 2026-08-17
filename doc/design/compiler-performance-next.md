@@ -170,3 +170,24 @@ point held exactly at SHA-256
 `7ba84ea636dd7a033b945d0a65ca59ff32f79fe585003e5e2d259538cc47de80`;
 serial release/debug parity checks also passed with physical debug-frame
 attributes intact.
+
+## Dense content-hash temp table
+
+Canonical function hashing previously assigned stable temporary ordinals
+through a general String-keyed Hash. Lowering already mints ordinary WIRE
+temporaries densely as `%t0`, `%t1`, and so on, so the native compiler runtime
+now indexes those numeric suffixes directly in a per-function Array. Named
+parameters, malformed names, and legacy producers retain a small Hash fallback;
+first-seen canonical numbering and the unusual parameter/temp spelling
+collision remain identical to the old representation.
+
+Eight alternating release/native/fast self-compile pairs reduced median
+content hashing from 299.5 ms to 285.0 ms (-4.84%). The complete measured
+compiler moved only from 3.1925 s to 3.1830 s (-0.30%), and external wall time
+was effectively flat at 3.805 s versus 3.800 s. Retired instructions fell
+0.28% and median peak RSS fell about 3.5 MiB. Generated LLVM was byte-identical
+in every pair. This is retained as a small composable mid-end improvement, not
+claimed as a material standalone end-to-end speedup. Exact self-host fixed
+point held at SHA-256
+`df783b613f8d8d6cade3b968b3f426434f549a6de01baf615b1ddfed3adc76b2`;
+the lazy-content-hash and linear postprocessing parity checks also passed.

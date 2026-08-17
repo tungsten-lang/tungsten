@@ -18842,6 +18842,89 @@ WValue w_wire_block_record_new(WValue field_symbols, WValue label) {
                                    field_symbols, values);
 }
 
+/* Content hashing sees dense lowering temporaries (%t0, %t1, ...), but used
+ * to canonicalize every occurrence through a general String-keyed Hash.
+ * State is an ordinary three-slot Array so its lifetime follows the compiler
+ * function walk: [dense temp ordinals, named fallback Hash, next index]. */
+WValue w_content_temp_map_new(WValue temp_count_value, WValue next_index_value) {
+    int64_t temp_count = w_as_int(temp_count_value);
+    int64_t next_index = w_as_int(next_index_value);
+    if (temp_count < 0 || temp_count > INT32_MAX ||
+        next_index < 0 || next_index > INT32_MAX)
+        die("content temp map: invalid size");
+    WValue state = w_array_new_inline(65, 3);
+    WArray *slots = w_as_array(state);
+    slots->slots[0] = w_array_new_inline(65, temp_count);
+    WArray *dense = w_as_array(slots->slots[0]);
+    if (temp_count > 0)
+        memset(dense->slots, 0, (size_t)temp_count * sizeof(WValue));
+    slots->slots[1] = w_hash_new();
+    slots->slots[2] = w_box_int(next_index);
+    return state;
+}
+
+static WArray *w_content_temp_state(WValue state) {
+    if (!w_is_array(state)) die("content temp map: state is not an Array");
+    WArray *slots = w_as_array(state);
+    if (slots->ebits != 65 || slots->size != 3 || slots->start != 0)
+        die("content temp map: corrupt state");
+    return slots;
+}
+
+static int64_t w_content_temp_ordinal(WValue name) {
+    if (!w_is_string(name)) return -1;
+    char inline_buf[6];
+    const char *text = NULL;
+    size_t len = 0;
+    w_str_data(name, inline_buf, &text, &len);
+    if (len < 3 || text[0] != '%' || text[1] != 't') return -1;
+    uint64_t value = 0;
+    for (size_t i = 2; i < len; i++) {
+        unsigned digit = (unsigned)(text[i] - '0');
+        if (digit > 9 || value > (uint64_t)INT32_MAX / 10u) return -1;
+        value = value * 10u + digit;
+        if (value > INT32_MAX) return -1;
+    }
+    return (int64_t)value;
+}
+
+WValue w_content_temp_map_seed(WValue state, WValue name, WValue index_value) {
+    WArray *slots = w_content_temp_state(state);
+    WArray *dense = w_as_array(slots->slots[0]);
+    int64_t ordinal = w_content_temp_ordinal(name);
+    int64_t index = w_as_int(index_value);
+    WValue boxed = w_box_int(index);
+    /* Preserve the old Hash map's spelling collision semantics for an
+     * unusually named parameter such as `t0`. */
+    if (ordinal >= 0 && ordinal < dense->size)
+        dense->slots[ordinal] = boxed;
+    else
+        w_hash_set(slots->slots[1], name, boxed);
+    return W_NIL;
+}
+
+WValue w_content_temp_norm(WValue name, WValue state) {
+    WArray *slots = w_content_temp_state(state);
+    WValue dense_value = slots->slots[0];
+    WArray *dense = w_as_array(dense_value);
+    int64_t ordinal = w_content_temp_ordinal(name);
+    WValue existing = W_NIL;
+    if (ordinal >= 0 && ordinal < dense->size)
+        existing = dense->slots[ordinal];
+    else
+        existing = w_hash_get(slots->slots[1], name);
+    if (existing != W_NIL) return existing;
+
+    int64_t next = w_as_int(slots->slots[2]);
+    WValue boxed = w_box_int(next);
+    if (ordinal >= 0 && ordinal < dense->size)
+        dense->slots[ordinal] = boxed;
+    else
+        w_hash_set(slots->slots[1], name, boxed);
+    slots->slots[2] = w_box_int(next + 1);
+    return boxed;
+}
+
 static uint64_t w_wire_checked_offset(WValue wire) {
     if (!w_is_wire(wire) || w_is_wire_sequence(wire))
         die("WIRE field access: value is not a WIRE record handle");

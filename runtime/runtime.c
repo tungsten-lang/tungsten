@@ -53736,6 +53736,25 @@ WValue w_bigint_add1_5_finish_raw(WValue v, uint64_t carry) {
     r->size = 5;
     return bigint_box(r);
 }
+WValue w_bigint_add1_6_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=6:
+         * the fixed source kernel already published six zero limbs. */
+        if (6U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(7);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0, 5 * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[6] = 1;
+        r->size = 7;
+        return bigint_box(r);
+    }
+    r->size = 6;
+    return bigint_box(r);
+}
 WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)w_to_i64(signed_size);

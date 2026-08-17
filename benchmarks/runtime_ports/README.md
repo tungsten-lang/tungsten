@@ -429,6 +429,15 @@ arm.  The public row measured 1.743/2.628/2.147 ns for C/native/GMP.  Counters
 attribute 58.4% of cycles to the exact source leaf and no samples to the C
 fixed kernel.  Evidence: `bigint_add1_5_exact_results.txt`.
 
+EXACT POSITIVE ADD1@6 CHECKPOINT: the six-limb arm is likewise C's literal
+three-`ldp`, `adds`/five-`adcs`, three-`stp`, `cset` schedule with the same
+cap-six hot allocation and full-carry grow-to-seven path.  It won all eleven
+target pairs, 3.958 ns to 2.679 ns (0.67691).  The @5 control improved 3.8%;
+the unported @7 control was unresolved at 1.01156 with a wider 0.02253 IQR.
+The public row was 1.751/2.673/2.352 ns for C/native/GMP.  Counters show only
+the source leaf, source operator, and TLS allocator on the hot path, with no C
+word kernel.  Evidence: `bigint_add1_6_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

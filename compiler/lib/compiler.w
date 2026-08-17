@@ -314,6 +314,9 @@ use target
     << ""
     << incremental_core_cache_verbose_text(mod)
     << core_reachability_verbose_text(mod)
+    target_cache_text = target_probe_cache_verbose_text()
+    if target_cache_text != nil
+      << target_cache_text
     if mod[:function_emit_cache_hits] != nil && (mod[:function_emit_cache_hits] > 0 || mod[:function_emit_cache_misses] > 0)
       << "  function emit cache: " + mod[:function_emit_cache_hits].to_s() + " hits, " + mod[:function_emit_cache_misses].to_s() + " misses, " + mod[:function_emit_cache_bypasses].to_s() + " bypassed"
     if mod[:content_hash_skipped_count] > 0

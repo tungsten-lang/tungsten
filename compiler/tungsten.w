@@ -102,7 +102,7 @@ fast_mode       = false
 math_mode       = :precise
 # Incremental-cache channel out of emit_ir (mutated, never reassigned —
 # fn-body assignment to a top-level var would shadow, not write).
-g_incremental  = {manifest: nil, core_cache_context_ready: false}
+g_incremental  = {manifest: nil, core_cache_context_ready: false, target_cache_context_ready: false}
 intern_algo    = "raw"
 runtime_archive = nil
 # Build-time defines from `-D NAME=VALUE` args. Accumulates across
@@ -337,6 +337,9 @@ if cross_sysroot != "" && cross_target == ""
   ccall("w_eputs", "--sysroot requires --target")
   exit 1
 
+# Configure the process/daily target cache before resolving `--native`: the
+# native CPU probe itself may invoke clang to test a newly named Apple CPU.
+configure_target_probe_cache()
 configured_march = env("TUNGSTEN_MARCH_ARGS")
 if cpu_explicit
   cpu_name = normalize_cpu_name(cpu_name)
@@ -910,8 +913,21 @@ driver_homebrew_prefix_memo = {}
   incremental_core_cache_configure_persistent(dir, wyhash64_hex_string(identity_text))
   nil
 
+-> configure_target_probe_cache
+  if g_incremental[:target_cache_context_ready] == true
+    return nil
+  g_incremental[:target_cache_context_ready] = true
+  if runtime_identity() != "compiled-runtime" || env("TUNGSTEN_TARGET_DISK_CACHE") == "0"
+    return nil
+  dir = compiler_cache_dir()
+  if dir == nil || system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
+    return nil
+  target_probe_cache_configure(dir)
+  nil
+
 -> emit_ir(file_path, emit_wire, verbose, intern_algo, sidemap_path = nil, emit_ll_only_arg = false, build_defines = nil, no_static_slab = false)
   # Emit LLVM IR (or WIRE text) for a single file, return ll_path or nil
+  configure_target_probe_cache()
   configure_persistent_core_cache()
   loader = Loader.new(verbose)
   load_started_at = clock

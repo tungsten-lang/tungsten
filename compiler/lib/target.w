@@ -8,6 +8,122 @@
 # (system default) when no newer clang is found, so other machines are unaffected.
 host_cc_memo = {}
 
+# Target layout/attribute probing shells out through clang twice. A compiler
+# process normally targets one exact configuration for many files, so retain
+# that answer in memory. The driver may additionally provide its compiler
+# cache directory; native compilers then persist the checksummed answer for the
+# current local civil day. The short lifetime deliberately bounds staleness
+# for an auto-selected clang without running another subprocess merely to ask
+# clang for its version before consulting the cache.
+target_probe_cache_state = {
+  entries: {},
+  persistent_dir: nil,
+  memory_hits: 0,
+  disk_hits: 0,
+  misses: 0,
+  stores: 0,
+  last_source: :none,
+  native_memory_hits: 0,
+  native_disk_hits: 0,
+  native_misses: 0,
+  native_stores: 0,
+  last_native_source: :none
+}
+
+-> target_probe_cache_configure(dir)
+  target_probe_cache_state[:persistent_dir] = dir
+  nil
+
+-> target_probe_cache_enabled?
+  env("TUNGSTEN_TARGET_CACHE") != "0"
+
+-> target_probe_disk_cache_enabled?
+  target_probe_cache_state[:persistent_dir] != nil && env("TUNGSTEN_TARGET_DISK_CACHE") != "0" && runtime_identity() == "compiled-runtime"
+
+-> target_probe_cache_field(value)
+  text = value == nil ? "" : value.to_s()
+  text.size().to_s() + ":" + text
+
+-> target_probe_cache_key(cc, cross, march)
+  text = StringBuffer(256)
+  text << "target-probe-v1"
+  text << target_probe_cache_field(cc)
+  text << target_probe_cache_field(cross)
+  text << target_probe_cache_field(march)
+  text << target_probe_cache_field(env("TUNGSTEN_CC"))
+  text << target_probe_cache_field(env("TUNGSTEN_TARGET"))
+  text << target_probe_cache_field(env("TUNGSTEN_CPU"))
+  text << target_probe_cache_field(env("TUNGSTEN_MARCH_ARGS"))
+  text.to_s()
+
+-> target_probe_cache_path(key)
+  dir = target_probe_cache_state[:persistent_dir]
+  if dir == nil
+    return nil
+  dir + "/target-probe-v1-" + wyhash64_hex_string(key) + ".twc"
+
+-> target_probe_cache_today
+  # A packed Date is an immediate WValue and is supported by the checksummed
+  # compiler graph serializer. Comparing it directly gives the on-disk cache
+  # a local-calendar-day lifetime without spawning `date` or adding a clock
+  # conversion to the language surface.
+  ccall("w_date_today")
+
+-> target_probe_cache_entry_valid?(entry, key)
+  type(entry) == "Hash" && entry[:version] == "target-probe-v1" && entry[:key] == key && entry[:day] == target_probe_cache_today() && type(entry[:datalayout]) == "String" && entry[:datalayout] != "" && type(entry[:triple]) == "String" && entry[:triple] != "" && type(entry[:fn_attrs]) == "String"
+
+-> target_probe_cache_result(entry)
+  {datalayout: entry[:datalayout], triple: entry[:triple], fn_attrs: entry[:fn_attrs]}
+
+-> target_probe_cache_lookup(key)
+  if !target_probe_cache_enabled?
+    target_probe_cache_state[:last_source] = :disabled
+    return nil
+  entry = target_probe_cache_state[:entries][key]
+  if entry != nil
+    target_probe_cache_state[:memory_hits] = target_probe_cache_state[:memory_hits] + 1
+    target_probe_cache_state[:last_source] = :memory
+    return target_probe_cache_result(entry)
+  if target_probe_disk_cache_enabled?
+    path = target_probe_cache_path(key)
+    loaded = ccall("w_core_cache_read", path)
+    if target_probe_cache_entry_valid?(loaded, key)
+      target_probe_cache_state[:entries][key] = loaded
+      target_probe_cache_state[:disk_hits] = target_probe_cache_state[:disk_hits] + 1
+      target_probe_cache_state[:last_source] = :disk
+      return target_probe_cache_result(loaded)
+  target_probe_cache_state[:misses] = target_probe_cache_state[:misses] + 1
+  target_probe_cache_state[:last_source] = :miss
+  nil
+
+-> target_probe_cache_store(key, result)
+  if !target_probe_cache_enabled? || result[:datalayout] == "" || result[:triple] == ""
+    return result
+  entry = {
+    version: "target-probe-v1",
+    key: key,
+    day: target_probe_cache_today(),
+    datalayout: result[:datalayout],
+    triple: result[:triple],
+    fn_attrs: result[:fn_attrs]
+  }
+  target_probe_cache_state[:entries][key] = entry
+  if target_probe_disk_cache_enabled?
+    path = target_probe_cache_path(key)
+    if ccall("w_core_cache_write", path, entry) == true
+      target_probe_cache_state[:stores] = target_probe_cache_state[:stores] + 1
+  result
+
+-> target_probe_cache_verbose_text
+  source = target_probe_cache_state[:last_source]
+  if source == :none
+    return nil
+  text = "  target probe cache: " + source.to_s() + " (" + target_probe_cache_state[:memory_hits].to_s() + " memory, " + target_probe_cache_state[:disk_hits].to_s() + " disk, " + target_probe_cache_state[:misses].to_s() + " misses)"
+  native_source = target_probe_cache_state[:last_native_source]
+  if native_source != :none
+    text = text + "; native CPU " + native_source.to_s()
+  text
+
 -> target_homebrew_formula_prefix(formula)
   key = ("brew:" + formula).to_sym()
   cached = host_cc_memo[key]
@@ -53,9 +169,57 @@ host_cc_memo = {}
 # plain `-mcpu=native`.
 native_cpu_memo = {}
 
+-> target_native_cpu_cache_key(cc)
+  "native-arm-cpu-v1" + target_probe_cache_field(cc) + target_probe_cache_field(env("TUNGSTEN_CC"))
+
+-> target_native_cpu_cache_path(key)
+  dir = target_probe_cache_state[:persistent_dir]
+  if dir == nil
+    return nil
+  dir + "/native-arm-cpu-v1-" + wyhash64_hex_string(key) + ".twc"
+
+-> target_native_cpu_cache_entry_valid?(entry, key)
+  type(entry) == "Hash" && entry[:version] == "native-arm-cpu-v1" && entry[:key] == key && entry[:day] == target_probe_cache_today() && type(entry[:flags]) == "String" && entry[:flags] != ""
+
+-> target_native_cpu_cache_lookup(key)
+  if !target_probe_cache_enabled?
+    target_probe_cache_state[:last_native_source] = :disabled
+    return nil
+  entry = target_probe_cache_state[:entries][key]
+  if target_native_cpu_cache_entry_valid?(entry, key)
+    target_probe_cache_state[:native_memory_hits] = target_probe_cache_state[:native_memory_hits] + 1
+    target_probe_cache_state[:last_native_source] = :memory
+    return entry[:flags]
+  if target_probe_disk_cache_enabled?
+    loaded = ccall("w_core_cache_read", target_native_cpu_cache_path(key))
+    if target_native_cpu_cache_entry_valid?(loaded, key)
+      target_probe_cache_state[:entries][key] = loaded
+      target_probe_cache_state[:native_disk_hits] = target_probe_cache_state[:native_disk_hits] + 1
+      target_probe_cache_state[:last_native_source] = :disk
+      return loaded[:flags]
+  target_probe_cache_state[:native_misses] = target_probe_cache_state[:native_misses] + 1
+  target_probe_cache_state[:last_native_source] = :miss
+  nil
+
+-> target_native_cpu_cache_store(key, flags)
+  if !target_probe_cache_enabled? || flags == nil || flags == ""
+    return flags
+  entry = {version: "native-arm-cpu-v1", key: key, day: target_probe_cache_today(), flags: flags}
+  target_probe_cache_state[:entries][key] = entry
+  if target_probe_disk_cache_enabled?
+    if ccall("w_core_cache_write", target_native_cpu_cache_path(key), entry) == true
+      target_probe_cache_state[:native_stores] = target_probe_cache_state[:native_stores] + 1
+  flags
+
 -> native_arm_cpu_flags
   cached = native_cpu_memo[:flags]
   if cached != nil
+    return cached
+  cc = host_c_compiler()
+  cache_key = target_native_cpu_cache_key(cc)
+  cached = target_native_cpu_cache_lookup(cache_key)
+  if cached != nil
+    native_cpu_memo[:flags] = cached
     return cached
   flags = "-mcpu=native"
   target = detect_target()
@@ -66,8 +230,8 @@ native_cpu_memo = {}
         flags = "-mcpu=apple-m5"
       else
         flags = "-mcpu=apple-m4+sme2p1+sme-f16f16+sme-b16b16+cssc+wfxt+hbc"
-  native_cpu_memo[:flags] = flags
-  flags
+  native_cpu_memo[:flags] = target_native_cpu_cache_store(cache_key, flags)
+  native_cpu_memo[:flags]
 
 # A clean `-fsyntax-only` run prints nothing; an unknown -mcpu value is an
 # error on both clang ("unsupported argument") and gcc ("unknown value").
@@ -140,6 +304,11 @@ detect_target_memo = {}
   # explicit --cpu accompanies it, the same probe stamps target-cpu/features
   # for that target rather than leaking host attributes.
   cross = env("TUNGSTEN_TARGET")
+  march = target_probe_march(cross)
+  cache_key = target_probe_cache_key(cc, cross, march)
+  cached = target_probe_cache_lookup(cache_key)
+  if cached != nil
+    return cached
   tflag = ""
   if cross != nil && cross != ""
     tflag = " --target=" + cross
@@ -155,9 +324,9 @@ detect_target_memo = {}
   if parts.size() > 1
     triple = parts[1]
 
-  fn_attrs = detect_target_fn_attrs(cross)
+  fn_attrs = detect_target_fn_attrs(cross, march)
 
-  { datalayout: datalayout, triple: triple, fn_attrs: fn_attrs }
+  target_probe_cache_store(cache_key, { datalayout: datalayout, triple: triple, fn_attrs: fn_attrs })
 
 # Ask clang what target-cpu / target-features / tune-cpu it would stamp
 # on C code compiled with -march=native on this host, and return them as
@@ -172,11 +341,7 @@ detect_target_memo = {}
 # BACKEND-EXPANDED feature set (e.g. auto-added +v8.1a…+v8.6a from
 # +v8.6a), which is what the runtime's functions will actually carry.
 # The driver-level `clang -###` output is a subset and won't match.
--> detect_target_fn_attrs(cross = nil)
-  cc = host_c_compiler()
-  awk = "awk '/^attributes #0 / { for(i=1;i<=NF;i++){ "
-  awk = awk + "if($i~/^\"target-cpu\"=/||$i~/^\"target-features\"=/||$i~/^\"tune-cpu\"=/) "
-  awk = awk + "printf \"%s \", $i } print \"\" }'"
+-> target_probe_march(cross = nil)
   # Match the march the binary is actually built with. tungsten.w resolves the
   # profile/target flags into TUNGSTEN_MARCH_ARGS before lowering, so emitted
   # functions and the runtime use the same configured CPU feature set.
@@ -188,6 +353,15 @@ detect_target_memo = {}
         march = "-march=native -mtune=native"
       else
         march = native_arm_cpu_flags()
+  march
+
+-> detect_target_fn_attrs(cross = nil, march = nil)
+  cc = host_c_compiler()
+  awk = "awk '/^attributes #0 / { for(i=1;i<=NF;i++){ "
+  awk = awk + "if($i~/^\"target-cpu\"=/||$i~/^\"target-features\"=/||$i~/^\"tune-cpu\"=/) "
+  awk = awk + "printf \"%s \", $i } print \"\" }'"
+  if march == nil
+    march = target_probe_march(cross)
   target_flag = ""
   if cross != nil && cross != ""
     target_flag = " --target=" + cross

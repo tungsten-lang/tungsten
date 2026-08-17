@@ -3811,6 +3811,51 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul16_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul16_src(i64, i64) nounwind\n"
 
+  # Exact distinct positive seventeen-by-seventeen-limb multiplication keeps
+  # C's fixed bn_mul_eq17 leaf behind the adjacent reserved and open-world
+  # contracts.
+  bigint_mul17_fn = nil
+  bigint_mul17_matches = 0
+  be17fi = 0
+  while be17fi < mod[:functions].size()
+    be17ff = mod[:functions][be17fi]
+    if be17ff[:source_class] == nil && be17ff[:source_method] == "__bigint_mul17_raw"
+      bigint_mul17_matches += 1
+      bigint_mul17_fn = be17ff
+    be17fi += 1
+  if bigint_mul17_matches > 1
+    << "error: __bigint_mul17_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul17_src] == true && bigint_mul17_fn == nil
+    << "error: required native BigInt mul@17 helper is missing; __w_bigint_mul17_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul17_target = bigint_times_reopened_fn
+  if bigint_mul17_target == nil
+    bigint_mul17_target = bigint_mul17_fn
+  if bigint_mul17_target != nil
+    be17_signature_ok = bigint_mul17_target[:params] != nil && bigint_mul17_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      be17_signature_ok = be17_signature_ok && bigint_mul17_target[:source_kind] == :fn_def
+      be17_signature_ok = be17_signature_ok && bigint_mul17_target[:raw_i64_signature] == true
+      be17_signature_ok = be17_signature_ok && bigint_mul17_target[:raw_return_type] == :i64
+    if !be17_signature_ok
+      << "error: invalid native BigInt mul@17 seam target"
+      exit(1)
+    be17_cc = ""
+    if bigint_mul17_target[:call_conv] != nil && bigint_mul17_target[:call_conv] != ""
+      be17_cc = bigint_mul17_target[:call_conv] + " "
+    be17_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      be17_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul17_src(i64 %a, i64 %b)" + be17_attrs + " {\n"
+    fn_out << "  %r = tail call " + be17_cc + "i64 @" + bigint_mul17_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul17_src"] = false
+    known_fns["__w_bigint_mul17_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul17_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul17_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps

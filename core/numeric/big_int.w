@@ -3946,6 +3946,18 @@ fn __bigint_mul16_raw(a, b) (i64 i64) i64
   ccall_nobox("w_bigint_mul16_kernel_raw", rp, bp, ap)
   ccall_nobox("w_bigint_mul16_finish_raw", result)
 
+# Exact distinct positive seventeen-by-seventeen-limb multiplication. Preserve
+# C's fixed bn_mul_eq17 leaf literally; source owns only the same capacity-64
+# allocation, fixed-kernel call, and +33/+34 publication.
+fn __bigint_mul17_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot64_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  ccall_nobox("w_bigint_mul17_kernel_raw", rp, bp, ap)
+  ccall_nobox("w_bigint_mul17_finish_raw", result)
+
 # Exact positive two-limb-by-one-limb scalar-word arm. Preserve receiver
 # order at the operator seam, then orient only the raw magnitudes after the
 # shape gate has proved that exactly one operand has two limbs.

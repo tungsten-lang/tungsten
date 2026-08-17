@@ -3167,6 +3167,36 @@ fn __bigint_add1_8_raw(a, b) (i64 i64) i64
   carry = __bigint_add1_8_exact(rp, ap, word) ## i64
   ccall_nobox("w_bigint_add1_8_finish_raw", result, carry)
 
+# Exact positive one-limb subtract-word leaf.  Arithmetic stays in native
+# source; the raw finisher retains C's i48 demotion and bit-48 exact-cap-one
+# hot-slot policy.
+fn __bigint_sub1_1_magnitude(ap, bp) (i64 i64) i64
+  ll <<~IR
+    entry:
+      %aptr = inttoptr i64 %ap to ptr
+      %bptr = inttoptr i64 %bp to ptr
+      %av = load i64, ptr %aptr, align 8
+      %word = load i64, ptr %bptr, align 8
+      %diff = sub i64 %av, %word
+      %lt = icmp ult i64 %av, %word
+      %neg = sub i64 0, %diff
+      %magnitude = select i1 %lt, i64 %neg, i64 %diff
+      ret i64 %magnitude
+  IR
+
+fn __bigint_sub1_1_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  av = raw_load_u64(ap, 0) ## u64
+  word = raw_load_u64(bp, 0) ## u64
+  lt = av < word
+  magnitude = __bigint_sub1_1_magnitude(ap, bp) ## i64
+  signed_size = lt ? 0 - 1 : 1
+  ccall_nobox(
+    "w_bigint_sub1_1_finish_raw", magnitude, signed_size ## i64
+  )
+
 # Exact floor square root for one machine-word magnitude. A hardware f64
 # square root supplies a 32-bit seed; integer correction makes the result
 # exact at perfect-square and binary64-rounding boundaries.
@@ -3783,6 +3813,13 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
   -> -(other)(BigInt)
     an  = ((     $value >> 47) & 1) == 1 ? 0 - $size      : $size
     bn0 = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
+
+    on macos && arm64
+      if an == 1 && bn0 == 1
+        return wvalue_from_bits(
+          __bigint_sub1_1_raw($value ## i64, other$value ## i64)
+        )
+
     bn = 0 - bn0
 
     am = an < 0 ? 0 - an : an

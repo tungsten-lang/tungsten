@@ -26,9 +26,11 @@ POW_EXPONENT = 5
 -> release_value(value)
   ccall("w_bench_tungsten_native_release", value)
 
-# The add/add1 result type is statically boxed for this positive-magnitude
-# benchmark family.  Match the direct C lane's alias-aware BigInt handoff
-# without crossing the general w_value_free heap-kind dispatcher.
+# The add/add1 result type and this benchmark fixture's subtraction result
+# are statically boxed. Match the direct C lane's alias-aware BigInt handoff
+# without crossing the general w_value_free heap-kind dispatcher. (The
+# subtraction fixtures retain at least one full-width magnitude limb; focused
+# correctness specs cover the source leaf's inline-result cases separately.)
 -> release_bigint_value(value)
   ccall_nobox("w_bigint_release_dead_raw", value)
 
@@ -64,7 +66,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a - b
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_bigint_value(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)

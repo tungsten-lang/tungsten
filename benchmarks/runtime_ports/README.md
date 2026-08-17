@@ -469,6 +469,18 @@ its 3.7% IQR.  The public @7 row became 2.559 ns, just faster than GMP at
 @7 precheck were rejected because they regressed other fixed arms.  Evidence:
 `bigint_add1_7_carry_death_results.txt`.
 
+EXACT POSITIVE SUB1@1 CHECKPOINT: the positive one-limb-by-one-limb word
+subtraction now executes its unsigned subtract, comparison, conditional
+negation, and signed-size selection in native source.  The retained raw
+finisher preserves C's i48 demotion and bit-48 exact-cap-one hot-slot policy;
+all other sizes and sign shapes remain in C.  Eleven matched pairs put the
+accepted source route at 1.0025 of C (3.469 versus 3.475 ns), with sub1@2/@4
+controls at 1.008/1.015 and inside their IQRs.  The public native row remains
+3.460 ns versus C's 1.396 ns, and counters place 73% of cycles in the general
+`w_sub` dispatcher: the exact leaf is checkpointed, while dispatch becomes a
+separate native-only optimization.  Evidence:
+`bigint_sub1_1_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

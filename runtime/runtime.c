@@ -37050,10 +37050,9 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
     (void)neg_b;
     int32_t la = sa < 0 ? -sa : sa;
     int32_t lb = sb < 0 ? -sb : sb;
-    /* Exact migrated scalar-word arm.  Keep this before the general
-     * equal-length/one-limb exclusions and make the gate identical to the
-     * source worker's route: addition only, positive 3-limb receiver,
-     * positive 1-limb rhs.  Every other word/sign shape retains C. */
+    /* Exact migrated scalar-word arms. Keep these before the general
+     * equal-length/one-limb exclusions and make each gate identical to its
+     * source worker's route. Every other word/sign shape retains C. */
     if (!neg_b && sa == 3 && sb == 1) return 1;
     /* Exclusion keys on the RAW operand signs, NOT the post-flip effective
      * ones: C's `bigint_add_equal_fast` and `bigint_sub_equal_fast` each
@@ -37071,7 +37070,13 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
      * equal_fast arm itself (hot-slot alloc + fused epilogue), not gate
      * or guard overhead; migrating this shape means porting that arm,
      * not re-testing this boundary. */
-    if (la == lb && ((sa > 0) == (sb > 0))) return 0;
+    if (la == lb && ((sa > 0) == (sb > 0))) {
+        /* The one positive 1-by-1 subtraction leaf is now exact source.
+         * Reuse this existing equal-length exclusion instead of adding a
+         * predicate to every unequal word-shaped operation. */
+        if (neg_b && sa == 1) return 1;
+        return 0;
+    }
     /* Migrated arm: unequal-length multi-limb pairs, which the source
      * bodies handle with a FUSED kernel (combine + propagate in one asm
      * pass, no strided tail loop). skew rows measure 0.93-1.00 — source
@@ -53792,6 +53797,19 @@ WValue w_bigint_add1_8_finish_raw(WValue v, uint64_t carry) {
     }
     r->size = 8;
     return bigint_box(r);
+}
+WValue w_bigint_sub1_1_finish_raw(
+    uint64_t magnitude, int64_t signed_size) {
+    if (signed_size != -1 && signed_size != 1)
+        die("w_bigint_sub1_1_finish_raw: signed size is not +/-1");
+    if (magnitude <= (uint64_t)W_INT48_MAX) {
+        int64_t value = (int64_t)magnitude;
+        return w_box_int(signed_size < 0 ? -value : value);
+    }
+    WBigint *result = bigint_alloc_raw_hot_sub1_exact_one();
+    result->limbs[0] = magnitude;
+    result->size = (int32_t)signed_size;
+    return bigint_box(result);
 }
 WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);

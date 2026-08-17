@@ -259,6 +259,53 @@ memory without a steady decode benefit. Packed NVFP4 weights stay mmap-backed
 and are decoded in registers on every QMV; no f16 expansion is stored on disk
 or materialized at load.
 
+### Benchmark fixture: the prompt must be real prose (2026-08-17)
+
+`profile_prompt_tokens > 5` used to tile the 5-token parity seed
+`[760, 6511, 314, 9338, 369]` cyclically. A period-5 sequence is trivially
+predictable, so the MTP head accepted essentially every draft — that is the
+source of the 12/12 and 24/24 acceptance recorded above. **Acceptance near
+1.0 is a saturated regime in which no draft-schedule decision has a sign:**
+every depth looks good because a rejected draft never happens, so the
+marginal cost of over-drafting is invisible. The MTP-1-vs-MTP-2 comparison,
+the `mtp-auto` controller and the reported speedups were all decided there.
+
+Long prompts now tokenize a real English passage instead. The 5-token parity
+fixture is untouched (still asserts first token 11751, ` Paris`). With a
+64-token prose prompt the model produces coherent continuation and
+acceptance lands at **0.55**, which is the band those decisions actually
+live in.
+
+Re-measured on that fixture, three alternating pairs, 64-token prompt and 32
+generated tokens:
+
+| arm | accept | tok/s |
+|---|---:|---|
+| MTP-1 | 11/20 = 0.55 | 35.44 / 35.32 / 34.45 |
+| MTP-2 | 16/32 = 0.50 | 32.36 / 32.32 / 31.10 |
+
+**MTP-1 still wins, 3/3, by 9–11%** — the earlier verdict survives contact
+with honest material. The reason is now quantified rather than inferred:
+MTP-2 commits *more* tokens per round (2.0 vs 1.6, +25%) and is still
+slower, because the triplet round costs ~62 ms against the pair's ~45 ms.
+The third verified row costs **+17 ms, +38% of a round**, which matches the
+"~14 ms slower than a pair target" figure measured earlier. For MTP-2 to
+break even at this acceptance the third row's marginal has to drop below
+roughly 11 ms.
+
+Acceptance is also the right instrument on a contended or thermally drifting
+machine: it is deterministic and reproduced byte-for-byte across all three
+repetitions above (0.55000000000000004 and 0.5), while tok/s moved ~3%.
+
+### K/V cache overflow now fails loudly
+
+`MAX_POS` is 128 and the caches are fixed at that size. Exceeding it did not
+fault: it wrapped silently and the model emitted fluent-looking multilingual
+garbage while still reporting a plausible 22.97 tok/s and an acceptance
+figure. A 256-token prompt reproduced this. The runner now refuses
+`prompt + generate > MAX_POS` before loading weights — a benchmark that lies
+quietly is worse than one that stops.
+
 ## Model-specific details
 
 - Newer Ollama NVFP4 tensors use packed U32 weights, E4M3 group scales, and a

@@ -79,6 +79,12 @@ profile_components = ARGV.size() > 4 && ARGV[4] == "profile"
 profile_prompt_tokens = ARGV.size() > 5 ? ARGV[5].to_i() : 5
 legacy_reductions = ARGV.size() > 6 && ARGV[6] == "legacy-reductions"
 if profile_prompt_tokens < 1 then raise "profile prompt length must be positive"
+# The K/V caches are fixed at MAX_POS rows, and overflowing them does NOT
+# fault -- it silently wraps and the model emits fluent-looking garbage while
+# every reported number (tok/s, acceptance) stays plausible. Fail loudly
+# instead: a benchmark that lies quietly is worse than one that stops.
+if profile_prompt_tokens + n_generate > MAX_POS
+  raise "prompt " + profile_prompt_tokens.to_s + " + generate " + n_generate.to_s + " exceeds MAX_POS " + MAX_POS.to_s + "; the K/V cache would wrap and the run would report plausible numbers for garbage output"
 setup_t0 = ccall("__w_clock_ms")
 # Mutable profiling state (closure-local assignment would shadow scalars):
 # phase, decode target ms/count, prefill target ms/count, verify ms/count,
@@ -1191,13 +1197,40 @@ rope_power = ~2.0 / ROT_DIM
       profile_stats[2] = profile_stats[2] + 1
   result
 
-# The raw Ollama prompt tokenization is stable for this tokenizer.
+# The raw Ollama prompt tokenization is stable for this tokenizer. The 5-token
+# form is the parity fixture ("The capital of France is" -> 11751) and is left
+# exactly as it was.
 prompt_seed = [760, 6511, 314, 9338, 369]
+
+# LONGER PROMPTS USE REAL PROSE, NOT A TILED SEED.
+#
+# Tiling a 5-token seed produces a period-5 sequence whose continuation is
+# trivially predictable, so the MTP head accepts essentially every draft
+# (the 12/12 and 24/24 acceptance in the model README). That is a saturated
+# regime, and a saturated fixture cannot discriminate ANY draft-schedule
+# change: at accept ~= 1.0 every depth looks good and the marginal cost of a
+# rejected draft never appears. Measurements of MTP depth policy, the
+# mtp-auto controller, and the MTP-1-vs-MTP-2 comparison are all decided by
+# the acceptance regime, so they need material that actually rejects.
+#
+# Ordinary English prose continuation lands near accept 0.65-0.85, which is
+# the band where those decisions have a sign. Encoding real text costs one
+# tokenizer load and changes nothing about the compute graph.
+prompt_prose = "The naturalist spent the better part of three seasons observing the colony, recording each departure and return in a leather notebook that gradually lost its shape to the damp. What struck him was not the industry of the birds, which every account had prepared him for, but the intervals of apparent idleness between flights, and how unevenly those intervals were distributed across the season. He began to suspect that the pattern he had come to describe was less a property of the animals than of the hours he had chosen to watch them."
+
 prompt = []
 i = 0
-while i < profile_prompt_tokens
-  prompt.push(prompt_seed[i % prompt_seed.size()])
-  i = i + 1
+if profile_prompt_tokens <= prompt_seed.size()
+  while i < profile_prompt_tokens
+    prompt.push(prompt_seed[i % prompt_seed.size()])
+    i = i + 1
+else
+  prompt_tokenizer = Tungsten:Llama:Tokenizer.from_packed_tokenizer(TOKENIZER_BIN)
+  prose_ids = prompt_tokenizer.encode(prompt_prose)
+  if prose_ids.size() < 1 then raise "prose prompt tokenized to nothing"
+  while i < profile_prompt_tokens
+    prompt.push(prose_ids[i % prose_ids.size()])
+    i = i + 1
 setup_elapsed = ccall("__w_clock_ms") - setup_t0
 << "prefill " + prompt.size().to_s + " tokens"
 prefill_t0 = ccall("__w_clock_ms")

@@ -4155,6 +4155,26 @@ fn __bigint_mul1_48_raw(a, b) (i64 i64) i64
   carry = ccall_nobox("w_bigint_mul1_48_kernel_raw", rp, ap, word) ## i64
   ccall_nobox("w_bigint_mul1_48_finish_raw", result, carry)
 
+# Exact positive sixty-four-limb-by-one-limb fixed scalar-word arm. Keep C's
+# cap-128 allocation, unchanged bn_mul_1_f64 kernel, carry store, and exact
+# +64/+65 publication while moving only the outer leaf to Tungsten.
+fn __bigint_mul1_64_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  abase = a & mask
+  bbase = b & mask
+  asize = raw_load_u32(abase, 4) ## i64
+  wide = abase ## i64
+  word_box = bbase ## i64
+  if asize != 64
+    wide = bbase ## i64
+    word_box = abase ## i64
+  result = ccall_nobox("w_bigint_alloc_hot128_raw") ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = wide + 16 ## i64
+  word = raw_load_u64(word_box, 16) ## i64
+  carry = ccall_nobox("w_bigint_mul1_64_kernel_raw", rp, ap, word) ## i64
+  ccall_nobox("w_bigint_mul1_64_finish_raw", result, carry)
+
 # Exact positive two-limb minus positive one-limb C arm.  Allocation, the
 # fixed AArch64 schedule, top-limb shrink, and possible i48 demotion remain
 # separate steps in the same order as bigint_sub_ui_any.
@@ -5142,6 +5162,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         if (an == 48 && bn == 1) || (an == 1 && bn == 48)
           return wvalue_from_bits(
             __bigint_mul1_48_raw($value ## i64, other$value ## i64)
+          )
+        if (an == 64 && bn == 1) || (an == 1 && bn == 64)
+          return wvalue_from_bits(
+            __bigint_mul1_64_raw($value ## i64, other$value ## i64)
           )
       return ccall("w_bigint_mul_builtin_exact", self, other)
     on macos && arm64

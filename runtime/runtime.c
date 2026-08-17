@@ -11625,6 +11625,9 @@ static inline WValue bigint_mul_bigint_word(WValue big, int64_t word) {
 #ifndef BN_BIGINT_MUL1_48_SRC_DIRECT
 #define BN_BIGINT_MUL1_48_SRC_DIRECT BN_MUL_POWER2_FIXED
 #endif
+#ifndef BN_BIGINT_MUL1_64_SRC_DIRECT
+#define BN_BIGINT_MUL1_64_SRC_DIRECT BN_MUL_POWER2_FIXED
+#endif
 #ifndef BN_BENCH_RUNTIME_MUL1_2_SRC_KNOB
 #define BN_BENCH_RUNTIME_MUL1_2_SRC_KNOB 0
 #endif
@@ -11925,6 +11928,21 @@ static inline int bn_bench_runtime_mul1_48_src_enabled(void) {
 #else
 static inline int bn_bench_runtime_mul1_48_src_enabled(void) { return 1; }
 #endif
+#ifndef BN_BENCH_RUNTIME_MUL1_64_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_64_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_64_SRC_KNOB
+static inline int bn_bench_runtime_mul1_64_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_64_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_64_src_enabled(void) { return 1; }
+#endif
 #ifndef BN_BENCH_RUNTIME_SQR16_SRC_KNOB
 #define BN_BENCH_RUNTIME_SQR16_SRC_KNOB 0
 #endif
@@ -11999,6 +12017,8 @@ static inline __attribute__((always_inline))
 WValue bigint_mul1_40_seam(WValue a, WValue b);
 static inline __attribute__((always_inline))
 WValue bigint_mul1_48_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_64_seam(WValue a, WValue b);
 
 static inline __attribute__((always_inline))
 WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
@@ -12273,6 +12293,15 @@ WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
 #else
 #define BN_MUL_N1_POSITIVE_SRC48(NW) do { (void)(NW); } while (0)
 #endif
+#if BN_BIGINT_MUL1_64_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC64(NW) do {                                 \
+    if ((NW) == 64 && __builtin_expect(route_mul1_1 != 0, 1))             \
+        if (bn_bench_runtime_mul1_64_src_enabled())                        \
+            return bigint_mul1_64_seam(a, b);                             \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC64(NW) do { (void)(NW); } while (0)
+#endif
 #define BN_MUL_N1_POSITIVE_RETURN(WIDE, WORD, NW) do {                    \
     BN_MUL_N1_POSITIVE_SRC2(NW);                                          \
     BN_MUL_N1_POSITIVE_SRC3(NW);                                          \
@@ -12286,6 +12315,7 @@ WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
     BN_MUL_N1_POSITIVE_SRC32(NW);                                         \
     BN_MUL_N1_POSITIVE_SRC40(NW);                                         \
     BN_MUL_N1_POSITIVE_SRC48(NW);                                         \
+    BN_MUL_N1_POSITIVE_SRC64(NW);                                         \
     if ((NW) <= BN_MUL_N1_SMALL_MAX)                                      \
         return bigint_mul_n1_small(                                       \
             (WIDE)->limbs, (NW), (WORD)->limbs[0], 0);                    \
@@ -12338,6 +12368,7 @@ WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
 #undef BN_MUL_N1_POSITIVE_SRC32
 #undef BN_MUL_N1_POSITIVE_SRC40
 #undef BN_MUL_N1_POSITIVE_SRC48
+#undef BN_MUL_N1_POSITIVE_SRC64
 #undef BN_MUL_N1_POSITIVE_RETURN
     }
 #endif
@@ -37804,6 +37835,7 @@ static _Atomic int w_bigint_mul1_24_seam_is_c;
 static _Atomic int w_bigint_mul1_32_seam_is_c;
 static _Atomic int w_bigint_mul1_40_seam_is_c;
 static _Atomic int w_bigint_mul1_48_seam_is_c;
+static _Atomic int w_bigint_mul1_64_seam_is_c;
 static _Atomic int w_bigint_times_seam_is_c;
 
 __attribute__((weak)) WValue __w_bigint_plus_src(WValue a, WValue b) {
@@ -38169,6 +38201,27 @@ __attribute__((weak)) WValue __w_bigint_mul1_48_src(WValue a, WValue b) {
                           memory_order_relaxed);
     return bigint_mul1_48_c_fallback(a, b);
 }
+static inline __attribute__((always_inline))
+WValue bigint_mul1_64_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 64 ? ba : bb;
+    WBigint *word = ba->size == 64 ? bb : ba;
+#if BN_MUL_POWER2_FIXED
+    return bigint_mul_n1_fixed64(wide->limbs, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 64, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_64_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_64_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_64_c_fallback(a, b);
+}
 __attribute__((weak)) WValue __w_bigint_times_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_times_seam_is_c, 1, memory_order_relaxed);
     return bigint_mul_any(a, b);
@@ -38414,6 +38467,13 @@ WValue bigint_mul1_48_seam(WValue a, WValue b) {
                                               memory_order_relaxed), 1))
         return bigint_mul1_48_c_fallback(a, b);
     return __w_bigint_mul1_48_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_64_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_64_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_64_c_fallback(a, b);
+    return __w_bigint_mul1_64_src(a, b);
 }
 static inline __attribute__((always_inline))
 WValue bigint_times_seam(WValue a, WValue b) {
@@ -55466,6 +55526,24 @@ WValue w_bigint_mul1_48_finish_raw(WValue v, uint64_t carry) {
     r->size = 48 + (carry != 0);
     return v;
 }
+__attribute__((always_inline))
+uint64_t w_bigint_mul1_64_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word) {
+#if BN_MUL_POWER2_FIXED
+    return bn_mul_1_f64((uint64_t *)(uintptr_t)rp,
+                        (const uint64_t *)(uintptr_t)ap, word);
+#else
+    return bn_mul_1((uint64_t *)(uintptr_t)rp,
+                    (const uint64_t *)(uintptr_t)ap, 64, word);
+#endif
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_64_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    r->limbs[64] = carry;
+    r->size = 64 + (carry != 0);
+    return v;
+}
 WValue w_bigint_alloc_hot4_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(4U));
 }
@@ -55483,6 +55561,10 @@ WValue w_bigint_alloc_hot32_raw(void) {
 __attribute__((always_inline))
 WValue w_bigint_alloc_hot64_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(64U));
+}
+__attribute__((always_inline))
+WValue w_bigint_alloc_hot128_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot_exact(128U));
 }
 WValue w_bigint_release_unfinished_raw(WValue v) {
     bigint_release(w_as_bigint(v));

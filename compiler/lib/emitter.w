@@ -3452,6 +3452,51 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul4_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul4_src(i64, i64) nounwind\n"
 
+  # Exact distinct positive five-by-five-limb multiplication keeps C's tuned
+  # mul_1/addmul_1 row primitives and literal schoolbook row order behind the
+  # same reserved/open-world contract as the adjacent fixed checkpoints.
+  bigint_mul5_fn = nil
+  bigint_mul5_matches = 0
+  be5fi = 0
+  while be5fi < mod[:functions].size()
+    be5ff = mod[:functions][be5fi]
+    if be5ff[:source_class] == nil && be5ff[:source_method] == "__bigint_mul5_raw"
+      bigint_mul5_matches += 1
+      bigint_mul5_fn = be5ff
+    be5fi += 1
+  if bigint_mul5_matches > 1
+    << "error: __bigint_mul5_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul5_src] == true && bigint_mul5_fn == nil
+    << "error: required native BigInt mul@5 helper is missing; __w_bigint_mul5_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul5_target = bigint_times_reopened_fn
+  if bigint_mul5_target == nil
+    bigint_mul5_target = bigint_mul5_fn
+  if bigint_mul5_target != nil
+    be5_signature_ok = bigint_mul5_target[:params] != nil && bigint_mul5_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      be5_signature_ok = be5_signature_ok && bigint_mul5_target[:source_kind] == :fn_def
+      be5_signature_ok = be5_signature_ok && bigint_mul5_target[:raw_i64_signature] == true
+      be5_signature_ok = be5_signature_ok && bigint_mul5_target[:raw_return_type] == :i64
+    if !be5_signature_ok
+      << "error: invalid native BigInt mul@5 seam target"
+      exit(1)
+    be5_cc = ""
+    if bigint_mul5_target[:call_conv] != nil && bigint_mul5_target[:call_conv] != ""
+      be5_cc = bigint_mul5_target[:call_conv] + " "
+    be5_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      be5_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul5_src(i64 %a, i64 %b)" + be5_attrs + " {\n"
+    fn_out << "  %r = tail call " + be5_cc + "i64 @" + bigint_mul5_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul5_src"] = false
+    known_fns["__w_bigint_mul5_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul5_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul5_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps

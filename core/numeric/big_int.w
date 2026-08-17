@@ -2905,6 +2905,16 @@ on macos && arm64
 # boundaries below retain the C path's vanishingly rare grow-after-carry
 # policy instead of changing allocation or result construction.
 on macos && arm64
+  fn __bigint_add1_2_exact(rp, ap, word) (i64 i64 i64) i64
+    asm <<~ASM
+      ldp x4, x5, [x1]
+      adds x4, x4, x2
+      adcs x5, x5, xzr
+      stp x4, x5, [x0]
+      cset x0, cs
+      ret
+    ASM
+
   fn __bigint_add1_3_exact(rp, ap, word) (i64 i64 i64) i64
     asm <<~ASM
       ldp x4, x5, [x1]
@@ -2996,6 +3006,16 @@ fn __bigint_add1_3_raw(a, b) (i64 i64) i64
   word = raw_load_u64(bp, 0) ## i64
   carry = __bigint_add1_3_exact(rp, ap, word) ## i64
   ccall_nobox("w_bigint_add1_3_finish_raw", result, carry)
+
+fn __bigint_add1_2_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  word = raw_load_u64(bp, 0) ## i64
+  carry = __bigint_add1_2_exact(rp, ap, word) ## i64
+  ccall_nobox("w_bigint_add1_2_finish_raw", result, carry)
 
 fn __bigint_add1_4_raw(a, b) (i64 i64) i64
   result = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
@@ -3491,6 +3511,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       # header loads.  Complete it before the generic magnitude, range,
       # pointer, and boxed-Boolean sign machinery; arithmetic/storage remain
       # byte-for-byte the separately checkpointed C port.
+      if an == 2 && bn == 1
+        return wvalue_from_bits(
+          __bigint_add1_2_raw($value ## i64, other$value ## i64)
+        )
       if an == 3 && bn == 1
         return wvalue_from_bits(
           __bigint_add1_3_raw($value ## i64, other$value ## i64)

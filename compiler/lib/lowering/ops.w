@@ -2268,9 +2268,9 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # An exact `(BigInt)` signature retains its class-name symbol rather than
   # the `## big` local's internal :bigint spelling.  Admit that fact only for
   # `+`, whose one-limb C-favored shapes now have an immediate in-body return
-  # and whose 3x1/4x1 positive arms are actually native.  Broadly treating
-  # :BigInt as :bigint also redirected typed `-`, `*`, and untouched add
-  # shapes and regressed their controls, so those remain polymorphic until
+  # and whose 2x1/3x1/4x1 positive arms are actually native.  Broadly
+  # treating :BigInt as :bigint also redirected typed `-`, `*`, and untouched
+  # add shapes and regressed their controls, so those remain polymorphic until
   # their own specialization arms migrate.
   declared_bigint_add = op == :PLUS && lt == :BigInt && rt == :BigInt
   if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT)

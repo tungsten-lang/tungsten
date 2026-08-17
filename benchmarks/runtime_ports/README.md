@@ -393,6 +393,18 @@ profiles move the row from `w_bigint_add`/`bn_add_word_a64_fixed` to the
 leaf-only `__bigint_add1_4_exact`.  Evidence:
 `bigint_add1_4_exact_results.txt`.
 
+EXACT POSITIVE ADD1@2 CHECKPOINT: the two-limb arm is now the literal
+`BN_WORD_FIXED_TWO_FN` schedule in native source (`ldp`, `adds`, `adcs`,
+`stp`, `cset`), with the same hot cap-two allocation and rare grow-to-three
+result construction.  The matched target row won 11/11 pairs, 3.601 ns to
+2.506 ns (candidate/baseline 0.69495), and counters moved from
+`w_bigint_add` to the leaf-only `__bigint_add1_2_exact`.  As an exact-first
+checkpoint it also records rather than conceals code-layout fallout: before
+the separate dispatch follow-up, @1 and @4 controls regressed about 3% while
+@3 improved and @5 was neutral.  Compiled/interpreted checks cover no carry,
+carry death, full 2→3 growth, exact header sizes, round trips, signs, and
+neighbors.  Evidence: `bigint_add1_2_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

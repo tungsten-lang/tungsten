@@ -53660,6 +53660,25 @@ WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size) {
     b->size = (int32_t)signed_size;
     return bigint_finish_mag_add(b);
 }
+WValue w_bigint_add1_2_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=2:
+         * the fixed source kernel already published [sum, 0]. */
+        if (2U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(3);
+            grown->limbs[0] = r->limbs[0];
+            grown->limbs[1] = 0;
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[2] = 1;
+        r->size = 3;
+        return bigint_box(r);
+    }
+    r->size = 2;
+    return bigint_box(r);
+}
 WValue w_bigint_add1_3_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);
     if (__builtin_expect(carry != 0, 0)) {

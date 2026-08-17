@@ -9,6 +9,7 @@
 #   bin/tungsten run scripts/bench/qwen38_mlx.w concurrent 8
 #   bin/tungsten run scripts/bench/qwen38_mlx.w mtp 24
 #   bin/tungsten run scripts/bench/qwen38_mlx.w mtp2 24
+#   bin/tungsten run scripts/bench/qwen38_mlx.w mtp-auto 48
 #   bin/tungsten run scripts/bench/qwen38_mlx.w concurrent 8 auto mmap
 #
 # All modes execute the same f32 compute graph. Optimized mode fuses dense
@@ -16,6 +17,8 @@
 # per token; concurrent mode additionally overlaps independent projections.
 # MTP mode uses the checkpoint's one-layer MTP head to draft one token and a
 # two-token target pass that shares each packed weight load across both rows.
+# MTP-auto probes the one- and two-draft arms on complete decode rounds and
+# retains the one with the higher observed emitted-token rate.
 # Draft selection projects only the common-token prefix plus Qwen control
 # tokens; verification still scores the full vocabulary and remains exact.
 
@@ -85,13 +88,14 @@ profile_stats = [0, ~0.0, 0, ~0.0, 0, ~0.0, 0, ~0.0, 0,
   ~0.0, 0, ~0.0, 0, ~0.0, 0, ~0.0, ~0.0]
 optimized = mode == "optimized" || mode == "concurrent"
 concurrent = mode == "concurrent"
-mtp_enabled = mode == "mtp" || mode == "mtp2"
-mtp_depth2 = mode == "mtp2"
+mtp_enabled = mode == "mtp" || mode == "mtp2" || mode == "mtp-auto"
+mtp_adaptive = mode == "mtp-auto"
+mtp_depth2 = mode == "mtp2" || mtp_adaptive
 if mtp_enabled
   optimized = true
   concurrent = true
 if !optimized && mode != "baseline"
-  raise "usage: qwen38_mlx.w [baseline|optimized|concurrent|mtp|mtp2] [tokens] [4r|8r|16r|r2|auto] [mmap|copy]"
+  raise "usage: qwen38_mlx.w [baseline|optimized|concurrent|mtp|mtp2|mtp-auto] [tokens] [4r|8r|16r|r2|auto] [mmap|copy]"
 if row_schedule != "4r" && row_schedule != "8r" && row_schedule != "16r" && row_schedule != "r2" && row_schedule != "auto"
   raise "row schedule must be 4r, 8r, 16r, r2, or auto"
 if weight_binding != "copy" && weight_binding != "mmap"
@@ -1219,6 +1223,11 @@ accepted = 0
 drafted = 0
 deep_drafted = 0
 deep_accepted = 0
+# Adaptive arm state: completed rounds, emitted tokens, and elapsed ms for
+# depth 1 and depth 2. Arrays keep updates visible across the decode loop.
+mtp_auto_rounds = [0, 0]
+mtp_auto_tokens = [0, 0]
+mtp_auto_ms = [~0.0, ~0.0]
 if mtp_enabled
   current = pred
   draft = mtp_step([current, backbone_hidden, pos - 1])
@@ -1231,7 +1240,21 @@ if mtp_enabled
       pos = pos + 1
       generated = generated + 1
     else
-      if mtp_depth2 && remaining >= 3
+      use_depth2 = mtp_depth2 && remaining >= 3
+      if mtp_adaptive && remaining >= 3
+        if mtp_auto_rounds[0] == 0
+          use_depth2 = false
+        else
+          if mtp_auto_rounds[1] == 0
+            use_depth2 = true
+          else
+            depth1_score = (~0.0 + mtp_auto_tokens[0]) / mtp_auto_ms[0]
+            depth2_score = (~0.0 + mtp_auto_tokens[1]) / mtp_auto_ms[1]
+            use_depth2 = depth2_score > depth1_score
+      arm = use_depth2 ? 1 : 0
+      round_generated_before = generated
+      round_t0 = mtp_adaptive ? ccall("__w_clock_ms") : ~0.0
+      if use_depth2
         verify_draft0 = draft
         verify_draft1 = mtp_step([verify_draft0, xn, pos])
         if force_reject && drafted == 0
@@ -1313,6 +1336,10 @@ if mtp_enabled
             copy_hidden_pair_row(0)
             draft = mtp_step([current, backbone_hidden, pos])
           pos = pos + 1
+      if mtp_adaptive
+        mtp_auto_rounds[arm] = mtp_auto_rounds[arm] + 1
+        mtp_auto_tokens[arm] = mtp_auto_tokens[arm] + generated - round_generated_before
+        mtp_auto_ms[arm] = mtp_auto_ms[arm] + ccall("__w_clock_ms") - round_t0
 else
   i = 0
   while i < n_generate
@@ -1333,6 +1360,19 @@ if mtp_enabled
   if mtp_depth2
     deep_rate = deep_drafted == 0 ? ~0.0 : (~0.0 + deep_accepted) / deep_drafted
     << "mtp depth-2: " + deep_accepted.to_s + "/" + deep_drafted.to_s + " accepted (" + deep_rate.to_s + ")"
+  if mtp_adaptive
+    score1 = ~0.0
+    score2 = ~0.0
+    if mtp_auto_ms[0] != ~0.0
+      score1 = (~0.0 + mtp_auto_tokens[0]) * 1000.0 / mtp_auto_ms[0]
+    if mtp_auto_ms[1] != ~0.0
+      score2 = (~0.0 + mtp_auto_tokens[1]) * 1000.0 / mtp_auto_ms[1]
+    selected_depth = score2 > score1 ? 2 : 1
+    auto_msg = "mtp auto: depth1=" + mtp_auto_rounds[0].to_s
+    auto_msg = auto_msg + " rounds/" + score1.to_s + " tok/s, depth2="
+    auto_msg = auto_msg + mtp_auto_rounds[1].to_s + " rounds/"
+    auto_msg = auto_msg + score2.to_s + " tok/s -> depth " + selected_depth.to_s
+    << auto_msg
 << "decode: " + n_generate.to_s + " tokens in " + elapsed.to_s + " ms, " + tokens_per_second.to_s + " tok/s"
 if profile_components
   << "components: setup=" + setup_elapsed.to_s + " ms"

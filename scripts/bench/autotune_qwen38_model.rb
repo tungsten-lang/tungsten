@@ -46,11 +46,11 @@ def run_candidate(mode, schedule, mtp_variant)
 
   rate = stdout[/decode: .*?, ([0-9.eE+-]+) tok\/s/, 1]
   ids = stdout[/^generated ids: (.+)$/, 1]
-  acceptance = stdout[/^mtp: (.+)$/, 1]
+  telemetry = stdout.scan(/^(mtp(?: depth-2| auto)?: .+)$/).flatten.join("; ")
   raise "missing decode rate for #{mode}/#{schedule}\n#{stdout}" unless rate
   raise "missing generated ids for #{mode}/#{schedule}\n#{stdout}" unless ids
 
-  { rate: Float(rate), ids: ids, acceptance: acceptance }
+  { rate: Float(rate), ids: ids, acceptance: telemetry.empty? ? nil : telemetry }
 end
 
 puts "Qwen3.8/27B-MLX model autotune"

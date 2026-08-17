@@ -176,6 +176,33 @@ while i < MAX_K
 -> time_pair(spec)
   median3(one_pair_sample(spec), one_pair_sample(spec), one_pair_sample(spec))
 
+# Width three can also be decomposed into the exact pair kernel plus an exact
+# single-row QMV. A concurrent encoder may overlap the two independent grids;
+# the barrier models the dependency before the next projection phase.
+-> one_pair_single_sample(pair_spec, single_spec)
+  metal_batch_begin_concurrent(queue)
+  i = 0
+  while i < WARMUP_ITERS
+    dispatch(pair_spec)
+    dispatch(single_spec)
+    metal_batch_barrier(queue)
+    i = i + 1
+  metal_batch_commit(queue)
+  metal_batch_begin_concurrent(queue)
+  i = 0
+  while i < MEASURE_ITERS
+    dispatch(pair_spec)
+    dispatch(single_spec)
+    metal_batch_barrier(queue)
+    i = i + 1
+  ms = metal_batch_commit_ms(queue, 0)
+  (ms / MEASURE_ITERS) * ~1000.0
+
+-> time_pair_single(pair_spec, single_spec)
+  median3(one_pair_single_sample(pair_spec, single_spec),
+    one_pair_single_sample(pair_spec, single_spec),
+    one_pair_single_sample(pair_spec, single_spec))
+
 -> capture_triplet_first16(spec, out, row_stride)
   metal_batch_begin(queue)
   dispatch(spec)
@@ -374,12 +401,24 @@ while i < MAX_K
     raise label + " triplet validation failed: r2=" + triplet_err.to_s + ", r1=" + triplet_r1_err.to_s
   triplet_us = time_triplet(triplet_spec)
   triplet_r1_us = time_triplet(triplet_r1_spec)
+  split4_us = time_pair_single(pair_spec, s4)
+  split8_us = time_pair_single(pair_spec, s8)
+  split16_us = time_pair_single(pair_spec, s16)
+  split_r2_us = time_pair_single(pair_spec, sr2)
   three_us = time_three_single(s8)
   triplet_best = triplet_us
   if triplet_r1_us < triplet_best then triplet_best = triplet_r1_us
+  if split4_us < triplet_best then triplet_best = split4_us
+  if split8_us < triplet_best then triplet_best = split8_us
+  if split16_us < triplet_best then triplet_best = split16_us
+  if split_r2_us < triplet_best then triplet_best = split_r2_us
   triplet_speedup = three_us / triplet_best
   triplet_msg = "  triplet: three-qmv=" + three_us.to_s + " us, r2=" + triplet_us.to_s
   triplet_msg = triplet_msg + " us, r1=" + triplet_r1_us.to_s
+  triplet_msg = triplet_msg + " us, split4=" + split4_us.to_s
+  triplet_msg = triplet_msg + " us, split8=" + split8_us.to_s
+  triplet_msg = triplet_msg + " us, split16=" + split16_us.to_s
+  triplet_msg = triplet_msg + " us, split-r2=" + split_r2_us.to_s
   triplet_msg = triplet_msg + " us, speedup=" + triplet_speedup.to_s + "x, err=" + triplet_err.to_s
   << triplet_msg
 

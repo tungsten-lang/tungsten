@@ -18,6 +18,7 @@ python3 bits/tungsten-llama/scripts/tokenizer_pack.py \
   ~/.cache/tungsten/qwen3.8-27b-mlx/tokenizer.json.bin
 bin/tungsten run scripts/bench/qwen38_mlx.w concurrent 12
 bin/tungsten run scripts/bench/qwen38_mlx.w mtp 24
+bin/tungsten run scripts/bench/qwen38_mlx.w mtp-auto 48
 ```
 
 The runner checks raw-prompt parity before benchmarking: `The capital of
@@ -140,11 +141,42 @@ the second draft is accepted only about 61% conditionally on this prompt
 (29/37 total draft acceptance). The arm remains available to autotune future
 triplet kernels without weakening the faster MTP-1 path.
 
+`mtp-auto` turns the two implementations into measured runtime arms. It sends
+real decode rounds through depth one and depth two, scores emitted tokens per
+wall-clock millisecond (including drafting, verification, history updates,
+copies, and rollback), then retains the faster depth. In two order-reversed
+48-token comparisons it selected depth one: the depth-one arm measured
+50.98/53.59 tok/s while depth two measured 36.70/36.36 tok/s. Probe-inclusive
+`mtp-auto` ran at 48.63/50.74 tok/s versus 52.23/52.46 tok/s for fixed MTP-1.
+The mode is therefore an experimental controller scaffold for a long-lived
+runner, where probes can be amortized across requests; `mtp` remains the fast
+short-process default. All four runs emitted identical greedy IDs.
+
+Additional width-three kernel experiments explain why the controller cannot
+yet profitably retain depth two. Concurrent pair-QMV plus single-QMV improved
+isolated backbone projections by roughly 18--32%, but three matched 48-token
+full-model pairs measured 44.44 tok/s median versus 46.83 tok/s for the single
+triplet grid: the extra grids contend with projections already overlapping in
+the concurrent encoder. Restricting the split to residual-only phases was
+neutral (44.28 versus 44.53 tok/s in a matched 24-token pair). A K-major
+interleaved-activation QMV, a scalar packed-qdot variant, and an 8-row
+simdgroup-matrix kernel were also exact but slower, so none is on the decode
+path. The real remaining requirement for deeper MTP is a width-three/four
+quantized matmul that scales without triplet register pressure or extra-grid
+contention.
+
 The model autotuner can sweep the ablations directly:
 
 ```sh
 KERNELS=0 MODES=mtp SCHEDULES=r2 \
   MTP_VARIANTS=optimized,legacy,full-vocab,full-history \
+  ruby scripts/bench/autotune_qwen38_model.rb
+```
+
+Fixed and adaptive draft-depth arms use the same parity gate:
+
+```sh
+KERNELS=0 MODES=mtp,mtp2,mtp-auto SCHEDULES=r2 RUNS=2 \
   ruby scripts/bench/autotune_qwen38_model.rb
 ```
 

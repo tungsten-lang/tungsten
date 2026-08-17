@@ -3533,6 +3533,27 @@ ewscope_md_state = {ids: {}}
     used_runtime_fns["w_slab_init_static"] = true
 
   decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns) + seam_decls.to_s()
+  if ccall_needed.has_key?("__w_bigint_sqr4_locked_exact")
+    # Keep the large exact sqr@4 worker and its size test behind one outlined
+    # default-path call. Inlining either into the locked caller makes LLVM
+    # rebalance the already-measured 1..3 dispatch and clones hundreds of
+    # bytes into that hot loop.
+    if decls_out.index("@w_bigint_mul_builtin_exact(") == nil
+      decls_out = decls_out + "declare i64 @w_bigint_mul_builtin_exact(i64, i64) nounwind\n"
+    decls_out = decls_out + <<~IR
+      define i64 @__w_bigint_sqr4_locked_exact(i64 %a, i64 %b, i64 %size) nounwind noinline {
+      entry:
+        %is4 = icmp eq i64 %size, 4
+        br i1 %is4, label %four, label %exact
+      four:
+        %sr = tail call i64 @__w_bigint_sqr4_src(i64 %a, i64 %b)
+        ret i64 %sr
+      exact:
+        %er = tail call i64 @w_bigint_mul_builtin_exact(i64 %a, i64 %b)
+        ret i64 %er
+      }
+
+    IR
   # Slab-AST runtime globals: always emit as external declarations so
   # the inline-IR :slab_node_get_idx / :slab_node_set_idx ops can
   # reference them without per-emit-site duplication. `[` is escaped

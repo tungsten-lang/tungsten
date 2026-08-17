@@ -2295,16 +2295,17 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       ctx[:mod][:tag_report_infix] = []
     ctx[:mod][:tag_report_infix].push({op: op, route: bidir_report, fname: wfn[:source_method], class_name: ctx[:class_name]})
 
-  # Native-only follow-up after the exact sqr@1..3 checkpoints. At a
+  # Native-only follow-up after the exact sqr@1..4 checkpoints. At a
   # protected+locked syntactic `a * a` site, identity is a compile-time fact:
   # prove the sole receiver tag once, load its raw header once, and dispatch
-  # the three committed square leaves directly. Every other width enters the
+  # the four committed square leaves directly. Every other width enters the
   # unchanged exact built-in square boundary; a stale type fact still falls
   # to polymorphic w_mul before any header load. Keep an independent switch
   # so this integration can be measured against the exact checkpoint without
   # disabling the already-retained general locked-multiply optimization.
   closed_sqr2_direct = closed_bigint_mul && closed_mul1_square && env("TUNGSTEN_BIGINT_SQR2_LOCKED_DIRECT") != "0"
   closed_sqr3_direct = closed_sqr2_direct && env("TUNGSTEN_BIGINT_SQR3_LOCKED_DIRECT") != "0"
+  closed_sqr4_direct = closed_sqr3_direct && env("TUNGSTEN_BIGINT_SQR4_LOCKED_DIRECT") != "0"
   if closed_sqr2_direct
     cs_entry = overload_exact_tag_entry("BigInt")
     cs_shape_label = next_label(wfn, "sqr_locked.shape")
@@ -2359,7 +2360,15 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
     start_block(wfn, cs_exact_label)
     cs_exact = next_temp(wfn)
-    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_bigint_mul_builtin_exact", nil, nil, cs_exact)
+    cs_exact_name = "w_bigint_mul_builtin_exact"
+    cs_exact_args = [lhs_reg, rhs_reg]
+    if closed_sqr4_direct
+      # Keep the proven 1..3 switch CFG unchanged. A noinline default-path
+      # dispatcher selects sqr@4 without making LLVM rebalance the hot small
+      # cases or clone the large four-limb worker into this caller.
+      cs_exact_name = "__w_bigint_sqr4_locked_exact"
+      cs_exact_args.push(cs_size)
+    emit_wire_call_direct_i64(wfn, nil, cs_exact_args, nil, nil, cs_exact_name, nil, nil, cs_exact)
     emit_wire_store_i64(wfn, cs_slot, cs_exact)
     emit_wire_br(wfn, cs_done_label, nil, nil)
 

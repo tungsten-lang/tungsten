@@ -44,6 +44,7 @@ check("mul1 width nine", multiply(nine, word), builtin(nine, word))
 a2 = (1 << 126) + 113
 b2 = (1 << 125) + 131
 a3 = (1 << 190) + 127
+a4 = (1 << 254) + 139
 check("schoolbook two by two", multiply(a2, b2), builtin(a2, b2))
 a24 = (1 << (64 * 24 - 1)) + 149
 b24 = (1 << (64 * 24 - 2)) + 163
@@ -64,6 +65,9 @@ check("two-limb overlay-negative square", square(0 - a2),
 check("three-limb syntactic square", square(a3), builtin(a3, a3))
 check("three-limb overlay-negative square", square(0 - a3),
       builtin(0 - a3, 0 - a3))
+check("four-limb syntactic square", square(a4), builtin(a4, a4))
+check("four-limb overlay-negative square", square(0 - a4),
+      builtin(0 - a4, 0 - a4))
 same = a2
 check("dynamic identity square", multiply(a2, same), builtin(a2, a2))
 

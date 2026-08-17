@@ -772,6 +772,7 @@ WValue __w_bigint_mul1_5_src(WValue a, WValue b);
 WValue __w_bigint_mul1_6_src(WValue a, WValue b);
 WValue __w_bigint_mul1_7_src(WValue a, WValue b);
 WValue __w_bigint_mul1_8_src(WValue a, WValue b);
+WValue __w_bigint_mul1_16_src(WValue a, WValue b);
 WValue w_bigint_mul_builtin_exact(WValue a, WValue b);
 WValue w_bigint_compare_c(WValue a, WValue b);
 WValue w_bigint_compare_source(WValue a, WValue b);
@@ -838,6 +839,9 @@ WValue w_bigint_mul1_5_finish_raw(WValue v, int64_t size);
 WValue w_bigint_mul1_6_finish_raw(WValue v, int64_t size);
 WValue w_bigint_mul1_7_finish_raw(WValue v, int64_t size);
 WValue w_bigint_mul1_8_finish_raw(WValue v, int64_t size);
+uint64_t w_bigint_mul1_16_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word);
+WValue w_bigint_mul1_16_finish_raw(WValue v, uint64_t carry);
 WValue w_bigint_alloc_hot4_raw(void);
 WValue w_bigint_alloc_hot8_raw(void);
 WValue w_bigint_alloc_hot16_raw(void);

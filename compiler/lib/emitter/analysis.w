@@ -251,10 +251,67 @@ ewscope_md_state = {ids: {}}
 # replayed on a hit before emit_string_constants runs.
 function_emit_cache_state = {
   entries: {},
+  persistent_dir: nil,
+  persistent_identity: nil,
   hits: 0,
   misses: 0,
   bypasses: 0
 }
+
+-> function_emit_cache_configure_persistent(dir, identity)
+  function_emit_cache_state[:persistent_dir] = dir
+  function_emit_cache_state[:persistent_identity] = identity
+  nil
+
+-> function_emit_disk_cache_enabled?
+  function_emit_cache_state[:persistent_dir] != nil && function_emit_cache_state[:persistent_identity] != nil && env("TUNGSTEN_FUNCTION_EMIT_DISK_CACHE") != "0" && runtime_identity() == "compiled-runtime"
+
+-> function_emit_cache_persistent_path(key)
+  if !function_emit_disk_cache_enabled?
+    return nil
+  function_emit_cache_state[:persistent_dir] + "/core-render-v1-" + function_emit_cache_state[:persistent_identity] + "-" + wyhash64_hex_string(key) + ".twc"
+
+-> function_emit_cache_persistent_valid?(entry, key)
+  if type(entry) != "Hash" || entry[:version] != "core-render-v1" || entry[:key] != key || type(entry[:functions]) != "Hash"
+    return false
+  names = entry[:functions].keys()
+  i = 0
+  while i < names.size()
+    name = names[i]
+    item = entry[:functions][name]
+    if type(name) != "String" || type(item) != "Hash" || item[:name] != name || type(item[:text]) != "String" || type(item[:ptr_ids]) != "Array"
+      return false
+    j = 0
+    while j < item[:ptr_ids].size()
+      if type(item[:ptr_ids][j]) != "Int" || item[:ptr_ids][j] < 0
+        return false
+      j += 1
+    i += 1
+  true
+
+-> function_emit_cache_load_persistent(key)
+  path = function_emit_cache_persistent_path(key)
+  if path == nil
+    return nil
+  entry = ccall("w_core_cache_read", path)
+  if function_emit_cache_persistent_valid?(entry, key)
+    return entry
+  nil
+
+-> function_emit_cache_publish(bucket)
+  if bucket == nil || bucket[:dirty] != true || !function_emit_disk_cache_enabled?
+    return nil
+  entry = {
+    version: "core-render-v1",
+    key: bucket[:key],
+    functions: bucket[:functions]
+  }
+  if ccall("w_core_cache_write", function_emit_cache_persistent_path(bucket[:key]), entry) == true
+    bucket[:persistent_status] = :stored
+    bucket[:dirty] = false
+  else
+    bucket[:persistent_status] = :store_failed
+  nil
 
 -> function_emit_cache_field(value)
   text = value == nil ? "" : value.to_s()
@@ -262,7 +319,7 @@ function_emit_cache_state = {
 
 -> function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
   out = StringBuffer(256)
-  out << "rendered-core-function-v1"
+  out << "rendered-core-function-v2"
   fields = [
     mod[:incremental_core_cache_key],
     mod[:llvm_datalayout],
@@ -285,8 +342,19 @@ function_emit_cache_state = {
   key = function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
   bucket = function_emit_cache_state[:entries][key]
   if bucket == nil || bucket[:key] != key
-    bucket = {key: key, functions: {}}
+    functions = {}
+    persistent_status = :disabled
+    if function_emit_disk_cache_enabled?
+      persistent = function_emit_cache_load_persistent(key)
+      if persistent != nil
+        functions = persistent[:functions]
+        persistent_status = :hit
+      else
+        persistent_status = :miss
+    bucket = {key: key, functions: functions, dirty: false, persistent_status: persistent_status}
     function_emit_cache_state[:entries][key] = bucket
+  elsif bucket[:persistent_status] != :stored
+    bucket[:persistent_status] = :memory
   bucket
 
 -> function_emit_cache_candidate?(f)
@@ -341,6 +409,7 @@ function_emit_cache_state = {
   ptr_ids = local_ptr_ids.keys()
   function_emit_cache_merge_ptr_ids(used_ptr_ids, ptr_ids)
   cache_bucket[:functions][f[:name]] = {name: f[:name], text: rendered, ptr_ids: ptr_ids}
+  cache_bucket[:dirty] = true
   function_emit_cache_state[:misses] = function_emit_cache_state[:misses] + 1
   rendered
 

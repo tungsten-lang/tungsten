@@ -242,7 +242,7 @@
   function_emit_bypasses_start = function_emit_cache_state[:bypasses]
   # Release-only by design. Debug builds retain the direct rendering path so
   # frame/backtrace metadata remains independent of this optimization.
-  function_emit_cache_enabled = env("TUNGSTEN_FUNCTION_EMIT_CACHE") != "0" && mod[:enhanced_stacktraces] == false
+  function_emit_cache_enabled = env("TUNGSTEN_FUNCTION_EMIT_CACHE") != "0" && mod[:enhanced_stacktraces] == false && mod[:incremental_core_cache_key] != nil
   arm64_target = emit_target_is_arm64(mod)
   windows_target = emit_target_is_windows(mod)
 
@@ -267,9 +267,12 @@
     fn_out << emit_function_with_cache(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, function_emit_cache_bucket_value)
     fn_out << "\n"
     i += 1
+  function_emit_cache_publish(function_emit_cache_bucket_value)
   mod[:function_emit_cache_hits] = function_emit_cache_state[:hits] - function_emit_hits_start
   mod[:function_emit_cache_misses] = function_emit_cache_state[:misses] - function_emit_misses_start
   mod[:function_emit_cache_bypasses] = function_emit_cache_state[:bypasses] - function_emit_bypasses_start
+  if function_emit_cache_bucket_value != nil
+    mod[:function_emit_disk_cache_status] = function_emit_cache_bucket_value[:persistent_status]
 
   # Source-routed operator export: wrap the selected content-hash-renamed
   # source body in a STRONG stable-named symbol. The runtime declares the same

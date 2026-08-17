@@ -191,3 +191,35 @@ claimed as a material standalone end-to-end speedup. Exact self-host fixed
 point held at SHA-256
 `df783b613f8d8d6cade3b968b3f426434f549a6de01baf615b1ddfed3adc76b2`;
 the lazy-content-hash and linear postprocessing parity checks also passed.
+
+## Persistent rendered Core functions
+
+The existing release-only function emitter cache reused immutable Core bodies
+inside one `compile-batch` worker. It now also persists one checksummed bucket
+per exact compiler executable, lowered-Core key, target layout/triple,
+attribute/frame policy, static-slab mode, architecture, and floating-point
+mode. A fresh compiler process restores that bucket once, then uses the same
+per-function hit path as the in-process cache. Atomic graph writes make races
+safe; malformed, corrupt, or mismatched buckets are ordinary misses and are
+repaired after rerendering. Debug modules still bypass rendered-text reuse, so
+physical source-backtrace frames remain direct emitter output.
+
+Five alternating pairs of 150 fresh release/native/fast compiler processes,
+with lowered Core and target probes prewarmed outside both modes, reduced
+median wall time from 36.944990 s to 28.318626 s. That saves 8.626364 s
+(-23.35%, 1.305x throughput). The final LLVM and symbol sidecar matched
+byte-for-byte in every pair.
+
+On the protected bignum `program_loops.w` artifact path, eight alternating
+pairs reused 161 Core functions. Median emitter time fell from 22.5 ms to
+13.0 ms (-42.22%), measured compiler time from 92.5 ms to 83.5 ms (-9.73%),
+and external wall time from 200 ms to 190 ms (-5.00%). Retired instructions
+fell 7.34% and peak RSS about 2.8 MiB; LLVM and sidemaps were exact.
+
+The unprotected full self-compile cannot use this cache and remained neutral:
+eight pairs measured 3.0785 s versus 3.0825 s compiler time (+0.13%) and
+3.665 s wall time in both modes, with unchanged retired instructions and RSS.
+Exact self-host fixed point held at SHA-256
+`477f77c032d06da8e364f022799f33e87d7fb349d1690b6c437e3a1e4b3c0fdf`.
+Focused tests cover process and disk hits, corruption repair, exact LLVM and
+sidemaps, debug-frame bypass, and interaction with early Core reachability.

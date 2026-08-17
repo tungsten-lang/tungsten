@@ -346,7 +346,10 @@ use target
     if target_cache_text != nil
       << target_cache_text
     if mod[:function_emit_cache_hits] != nil && (mod[:function_emit_cache_hits] > 0 || mod[:function_emit_cache_misses] > 0)
-      << "  function emit cache: " + mod[:function_emit_cache_hits].to_s() + " hits, " + mod[:function_emit_cache_misses].to_s() + " misses, " + mod[:function_emit_cache_bypasses].to_s() + " bypassed"
+      function_emit_text = "  function emit cache: " + mod[:function_emit_cache_hits].to_s() + " hits, " + mod[:function_emit_cache_misses].to_s() + " misses, " + mod[:function_emit_cache_bypasses].to_s() + " bypassed"
+      if mod[:function_emit_disk_cache_status] != nil
+        function_emit_text = function_emit_text + "; disk " + mod[:function_emit_disk_cache_status].to_s()
+      << function_emit_text
     if mod[:content_hash_skipped_count] > 0
       << "  content hash work set: " + mod[:content_hash_function_count].to_s() + "/" + (mod[:content_hash_function_count] + mod[:content_hash_skipped_count]).to_s() + " functions (" + mod[:content_hash_skipped_count].to_s() + " cached)"
     << fmt_elapsed(t_lower) + " lowering to wire"

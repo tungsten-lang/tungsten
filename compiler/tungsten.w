@@ -910,7 +910,9 @@ driver_homebrew_prefix_memo = {}
   if stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
     return nil
   identity_text = ["core-wire-executable-v1", exe, stat.mtime_ns().to_s(), stat.ctime_ns().to_s(), stat.size().to_s(), incremental_env_s("TUNGSTEN_VERSION")].join("|")
-  incremental_core_cache_configure_persistent(dir, wyhash64_hex_string(identity_text))
+  identity = wyhash64_hex_string(identity_text)
+  incremental_core_cache_configure_persistent(dir, identity)
+  function_emit_cache_configure_persistent(dir, identity)
   nil
 
 -> configure_target_probe_cache

@@ -111,3 +111,36 @@ A denser special-case representation that omitted the two field-symbol words
 reduced another roughly 5 MiB, but the extra runtime access branches erased
 the instruction benefit on the full self-compile. That variant was reverted;
 the ordinary fixed-layout WIRE record is the retained balance.
+
+## Early Core reachability
+
+On a persistent Core WIRE hit, the cached cohort is already immutable and has
+completed CFG, ownership, and free-insertion work. Closed-world reachability
+now runs immediately after lowering for programs with both Core protection and
+locked method tables. Escape analysis, content-hash graph construction,
+release cleanup, and emission then see only the program plus reachable Core
+closure. A cold miss deliberately retains the complete pipeline so the newly
+published artifact is reusable by a different program.
+
+Registration filtering remains after content hashing, preserving the existing
+hash contract. The complete cached-Core function metadata is also retained as
+a lightweight provenance input so the symbol sidemap remains byte-identical;
+dead bodies do not re-enter call-graph or canonical-content work.
+`TUNGSTEN_EARLY_CORE_REACHABILITY=0` retains the former late-only path.
+
+Eight alternating warm artifact pairs for
+`benchmarks/big_math/program_loops.w`, under release/native/fast with the
+frontend and link artifact caches disabled, reduced median measured compiler
+time from 102.0 ms to 93.5 ms (-8.33%). Escape analysis fell from 7 ms to
+2 ms and content hashing/postprocessing from 10 ms to 6 ms as the work set
+shrank from 949 to 181 functions. External artifact wall time was 210 ms to
+200 ms at the timer's 10 ms resolution. LLVM and the complete symbol sidemap
+were byte-identical.
+
+The intended end-to-end claim is narrower: four final-candidate FullLTO build
+pairs were flat at 9.195 s versus 9.230 s (+0.38%, noise), consistent with the
+earlier six-pair 9.240 s versus 9.250 s result. Six bignum workload checksum
+screens matched. Focused release and debug parity also proves that physical
+debug backtrace attributes survive the early slice.
+Exact self-host fixed point held at SHA-256
+`347cc471eb65e8cec230d681be4d647ba966afebc4b6f568443c93c0268e9c6a`.

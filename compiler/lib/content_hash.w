@@ -1347,7 +1347,10 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     h = fn_hash_get(fn_hashes, fname)
     hash_group_add(hash_groups, h, fname)
     hi += 1
-  fn_info_by_name = build_function_info_by_name(functions)
+  info_functions = mod[:content_hash_info_functions]
+  if info_functions == nil
+    info_functions = functions
+  fn_info_by_name = build_function_info_by_name(info_functions)
 
   # SHOW_ME_THE_DUPES: print dedup pairs with their WIRE instructions
   show_dupes = env("SHOW_ME_THE_DUPES") != nil

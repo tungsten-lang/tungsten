@@ -219,6 +219,24 @@ use target
   incremental_core_cache_prepare_names(mod)
   t_lower = clock() - lower_started_at
 
+  # A persistent Core hit is already immutable and post-mid-end. Discover its
+  # closed-world live closure before the remaining whole-module analyses, then
+  # run those analyses over the program plus reachable Core only. Cold misses
+  # deliberately retain the full cohort so the published cache entry is ready
+  # for a different program on its first reuse.
+  full_pipeline_functions = nil
+  if env("TUNGSTEN_EARLY_CORE_REACHABILITY") != "0" && mod[:incremental_core_cache_hit] == true
+    core_reachability_prepare(mod, false)
+    early_functions = core_reachability_emission_functions(mod)
+    if early_functions != nil
+      full_pipeline_functions = mod[:functions]
+      # The symbol sidemap is a complete cached-Core provenance artifact even
+      # when codegen analyzes only the live slice. Preserve its metadata input
+      # without putting dead bodies back into hash/call-graph work.
+      mod[:content_hash_info_functions] = full_pipeline_functions
+      mod[:functions] = early_functions
+      mod[:core_reachability_early] = true
+
   cfg_started_at = clock()
   # B8 detector: TUNGSTEN_SSA_REPORT=<path> dumps every function mem2reg
   # actually converts (overflow-checked gate passed AND promotable slots
@@ -265,9 +283,17 @@ use target
 
   hash_started_at = clock()
   content_hash_pass(mod, verbose, release_mode)
+  mod[:content_hash_info_functions] = nil
   t_hash = clock() - hash_started_at
 
-  core_reachability_prepare(mod)
+  if mod[:core_reachability_early] == true
+    # content_hash_pass may replace the live function Array after deduplication
+    # and symbol compaction. Preserve that final slice and filter method-table
+    # registrations now, at the same post-hash semantic point as before.
+    mod[:core_reachability_emit_functions] = mod[:functions]
+    core_reachability_filter_current_registrations(mod, full_pipeline_functions, mod[:functions])
+  else
+    core_reachability_prepare(mod)
 
   mod[:enhanced_stacktraces] = true
   # Debug executables promise source-level backtrace frames, not merely a
@@ -297,6 +323,8 @@ use target
   ir = emit_artifact(mod, frame_pointers)
   mod[:functions] = all_functions
   core_reachability_restore_full_graph(mod)
+  if full_pipeline_functions != nil
+    mod[:functions] = full_pipeline_functions
   t_emit = clock() - emit_started_at
 
   # Store only after every destructive pass and the emitter have finished.

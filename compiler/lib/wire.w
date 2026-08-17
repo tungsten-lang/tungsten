@@ -188,6 +188,8 @@ use wire_constructors
     core_reachability_reason: nil,
     core_reachability_emit_functions: nil,
     core_reachability_registration_restore: [],
+    core_reachability_early: false,
+    content_hash_info_functions: nil,
     core_reachability_total: 0,
     core_reachability_kept: 0,
     core_reachability_pruned: 0,

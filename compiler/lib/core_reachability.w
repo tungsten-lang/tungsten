@@ -100,12 +100,14 @@
     return true
   false
 
--> core_reachability_filter_registrations(mod, core_names, live)
+-> core_reachability_filter_registrations(mod, core_names, live, functions = nil)
+  if functions == nil
+    functions = mod[:functions]
   removed = 0
   restore = []
   fi = 0
-  while fi < mod[:functions].size()
-    func = mod[:functions][fi]
+  while fi < functions.size()
+    func = functions[fi]
     bi = 0
     while bi < func[:blocks].size()
       block = func[:blocks][bi]
@@ -133,6 +135,26 @@
   mod[:core_reachability_registration_restore] = restore
   removed
 
+# Rebuild the name sets after content hashing has compacted the live slice.
+# Function handles are shared with `all_functions`, so their current names are
+# visible there too; unreachable frozen Core functions retain their cached
+# names. This keeps registration filtering at its historical post-hash point
+# while allowing earlier passes to operate on the smaller live closure.
+-> core_reachability_filter_current_registrations(mod, all_functions, live_functions)
+  core_names = {}
+  live = {}
+  i = 0
+  while i < all_functions.size()
+    func = all_functions[i]
+    if incremental_core_cache_function?(func)
+      core_names[func[:name]] = true
+    i += 1
+  i = 0
+  while i < live_functions.size()
+    live[live_functions[i][:name]] = true
+    i += 1
+  core_reachability_filter_registrations(mod, core_names, live, all_functions)
+
 -> core_reachability_restore_full_graph(mod)
   restore = mod[:core_reachability_registration_restore]
   if restore == nil
@@ -151,7 +173,7 @@
   mod[:core_reachability_emit_functions] = nil
   nil
 
--> core_reachability_prepare(mod)
+-> core_reachability_prepare(mod, filter_registrations = true)
   mod[:core_reachability_registration_restore] = []
   if !core_reachability_enabled?
     mod[:core_reachability_status] = :disabled
@@ -268,7 +290,8 @@
         core_kept += 1
     fi += 1
 
-  core_reachability_filter_registrations(mod, core_names, live)
+  if filter_registrations
+    core_reachability_filter_registrations(mod, core_names, live)
   mod[:core_reachability_emit_functions] = emit_functions
   mod[:core_reachability_kept] = core_kept
   mod[:core_reachability_pruned] = core_total - core_kept

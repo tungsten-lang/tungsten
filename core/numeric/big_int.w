@@ -2974,6 +2974,17 @@ on macos && arm64
         ret i64 %size
     IR
 
+  # Literal AArch64 schedule emitted for runtime.c's positive 4-by-1
+  # bigint_mul_n1_small arm. Preserve its allocation-independent arithmetic,
+  # carry order, unconditional fifth-limb publication, and size 4/5 result.
+  fn __bigint_mul1_4_exact(rp, ap, word) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %size = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Amul x6, x4, ${3:x}\0Amul x7, x5, ${3:x}\0Aumulh x4, x4, ${3:x}\0Aadds x4, x7, x4\0Astp x6, x4, [${1:x}]\0Aldr x4, [${2:x}, #16]\0Aumulh x6, x4, ${3:x}\0Amul x4, x4, ${3:x}\0Aumulh x5, x5, ${3:x}\0Aadcs x4, x4, x5\0Astr x4, [${1:x}, #16]\0Aldr x4, [${2:x}, #24]\0Aumulh x5, x4, ${3:x}\0Amul x4, x4, ${3:x}\0Aadcs x4, x4, x6\0Acinc x5, x5, hs\0Astp x4, x5, [${1:x}, #24]\0Acmp x5, #0\0Amov ${0:x}, #4\0Acinc ${0:x}, ${0:x}, ne", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %word)
+        ret i64 %size
+    IR
+
   fn __bigint_add1_2_exact(rp, ap, word) (i64 i64 i64) i64
     asm <<~ASM
       ldp x4, x5, [x1]
@@ -3585,6 +3596,26 @@ fn __bigint_mul1_3_raw(a, b) (i64 i64) i64
   word = raw_load_u64(word_box, 16) ## i64
   size = __bigint_mul1_3_exact(rp ## i64, ap ## i64, word) ## i64
   ccall_nobox("w_bigint_mul1_3_finish_raw", result, size)
+
+# Exact positive four-limb-by-one-limb scalar-word arm. Preserve receiver
+# order at the source seam, then reproduce C's capacity-eight allocation,
+# literal carry schedule, top write, and header publication.
+fn __bigint_mul1_4_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  abase = a & mask
+  bbase = b & mask
+  asize = raw_load_u32(abase, 4) ## i64
+  wide = abase ## i64
+  word_box = bbase ## i64
+  if asize != 4
+    wide = bbase ## i64
+    word_box = abase ## i64
+  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = wide + 16 ## i64
+  word = raw_load_u64(word_box, 16) ## i64
+  size = __bigint_mul1_4_exact(rp ## i64, ap ## i64, word) ## i64
+  ccall_nobox("w_bigint_mul1_4_finish_raw", result, size)
 
 # Exact positive two-limb minus positive one-limb C arm.  Allocation, the
 # fixed AArch64 schedule, top-limb shrink, and possible i48 demotion remain
@@ -4506,6 +4537,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         if (an == 3 && bn == 1) || (an == 1 && bn == 3)
           return wvalue_from_bits(
             __bigint_mul1_3_raw($value ## i64, other$value ## i64)
+          )
+        if (an == 4 && bn == 1) || (an == 1 && bn == 4)
+          return wvalue_from_bits(
+            __bigint_mul1_4_raw($value ## i64, other$value ## i64)
           )
       return ccall("w_mul", self, other)
     # Squaring (identical boxed bits, flip included) keeps C's dedicated

@@ -129,6 +129,7 @@ use lowering/definitions
   mod[:require_bigint_mul1_4_src] = true
   mod[:require_bigint_mul1_5_src] = true
   mod[:require_bigint_mul1_6_src] = true
+  mod[:require_bigint_mul1_7_src] = true
   mod[:fast_mode] = fast_mode
   mod[:math_mode] = math_mode
   # Must be set BEFORE body lowering: the slab-freeze emission below

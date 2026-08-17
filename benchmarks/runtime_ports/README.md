@@ -520,6 +520,17 @@ and kept @8 unresolved.  The public native row is now 2.613 ns versus C at
 rather than folded into this change.  Evidence:
 `bigint_sub1_2_native_inline_seam_results.txt`.
 
+EXACT POSITIVE SUB1@3 CHECKPOINT: native source now carries the literal
+three-limb C schedule—`ldp`/`ldr`, `subs` plus two `sbcs`, `stp`/`str`, and
+`cset`—with the same cap-three hot allocation and shrink-to-two epilogue.
+No borrow-death or integration inlining is mixed into the port.  A 21-pair
+300 ms promotion won 21/21 at 0.80366 (3.712 ns versus 4.646 ns); the initial
+11-pair screen was 0.79337.  Already-native @2 and the @8 control stayed
+neutral; @1/@4 moved about +3% and are retained as explicit controls for the
+separate native follow-up.  Compiled/interpreted checks cover borrow death at
+each depth, full propagation, 3→2 shrink, exact sizes, signs, and neighbors.
+Evidence: `bigint_sub1_3_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

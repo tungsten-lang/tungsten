@@ -3055,6 +3055,22 @@ on macos && arm64
       ret
     ASM
 
+  # Literal port of runtime.c's three-limb subtract-word arm.  Native-only
+  # borrow-death and store scheduling are deliberately deferred until this
+  # exact schedule is independently checkpointed.
+  fn __bigint_sub1_3_exact(rp, ap, word) (i64 i64 i64) i64
+    asm <<~ASM
+      ldp x4, x5, [x1]
+      ldr x6, [x1, #16]
+      subs x4, x4, x2
+      sbcs x5, x5, xzr
+      sbcs x6, x6, xzr
+      stp x4, x5, [x0]
+      str x6, [x0, #16]
+      cset x0, lo
+      ret
+    ASM
+
 # Exact raw wrappers for the positive 4-by-2-limb C leaf.  Keep WValue and
 # limb addresses as i64 throughout: routing them through typed source fields
 # would box the addresses and re-enter ordinary numeric dispatch.  Allocation,
@@ -3222,6 +3238,18 @@ fn __bigint_sub1_2_raw(a, b) (i64 i64) i64
   word = raw_load_u64(bp, 0) ## i64
   borrow = __bigint_sub1_2_exact(rp, ap, word) ## i64
   ccall_nobox("w_bigint_sub1_2_finish_raw", result)
+
+# Exact positive three-limb minus positive one-limb C arm.  The fixed leaf
+# publishes every limb before the retained shrink-by-one result policy runs.
+fn __bigint_sub1_3_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot", 3) ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  word = raw_load_u64(bp, 0) ## i64
+  borrow = __bigint_sub1_3_exact(rp, ap, word) ## i64
+  ccall_nobox("w_bigint_sub1_3_finish_raw", result)
 
 # Exact floor square root for one machine-word magnitude. A hardware f64
 # square root supplies a 32-bit seed; integer correction makes the result
@@ -3848,6 +3876,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       if an == 2 && bn0 == 1
         return wvalue_from_bits(
           __bigint_sub1_2_raw($value ## i64, other$value ## i64)
+        )
+      if an == 3 && bn0 == 1
+        return wvalue_from_bits(
+          __bigint_sub1_3_raw($value ## i64, other$value ## i64)
         )
 
     bn = 0 - bn0

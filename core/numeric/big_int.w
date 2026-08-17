@@ -2975,6 +2975,17 @@ on macos && arm64
         ret i64 %size
     IR
 
+  # Literal AArch64 schedule emitted for runtime.c's distinct positive
+  # three-by-three-limb multiplication arm. Preserve all nine products, the
+  # column carry order, six unconditional stores, and +5/+6 header choice.
+  fn __bigint_mul3_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %size = call i64 asm sideeffect "ldr x8, [${2:x}]\0Aldr x9, [${3:x}]\0Aumulh x10, x9, x8\0Amul x8, x9, x8\0Astr x8, [${1:x}]\0Aldp x8, x9, [${2:x}]\0Aldp x12, x11, [${3:x}]\0Aumulh x13, x11, x8\0Amul x8, x11, x8\0Aadds x8, x8, x10\0Acinc x10, x13, hs\0Aumulh x11, x12, x9\0Amul x9, x12, x9\0Aadds x8, x8, x9\0Astr x8, [${1:x}, #8]\0Aldr x8, [${3:x}, #16]\0Aldp x9, x12, [${2:x}]\0Amul x13, x8, x9\0Aumulh x8, x8, x9\0Aadcs x9, x10, x11\0Aadcs x8, x8, xzr\0Acset w10, hs\0Aadds x9, x9, x13\0Aldp x13, x11, [${3:x}]\0Amul x14, x11, x12\0Aumulh x11, x11, x12\0Aadcs x8, x8, x11\0Acinc x10, x10, hs\0Aadds x9, x9, x14\0Aadcs x8, x8, xzr\0Acset w11, hs\0Aldr x12, [${2:x}, #16]\0Aumulh x14, x13, x12\0Amul x12, x13, x12\0Aadds x9, x9, x12\0Aadcs x8, x8, x14\0Aadc x10, x10, x11\0Astr x9, [${1:x}, #16]\0Aldp x9, x11, [${2:x}, #8]\0Aldp x13, x12, [${3:x}, #8]\0Aumulh x14, x12, x9\0Amul x9, x12, x9\0Aadds x12, x8, x9\0Amul x15, x13, x11\0Aadds x12, x12, x15\0Aadds x10, x10, x14\0Astr x12, [${1:x}, #24]\0Aldr x12, [${2:x}, #16]\0Aldr x14, [${3:x}, #16]\0Aumulh x16, x14, x12\0Acinc x16, x16, hs\0Aadds x8, x8, x9\0Aumulh x9, x13, x11\0Aadcs x9, x10, x9\0Acinc x10, x16, hs\0Acmn x8, x15\0Amul x8, x14, x12\0Aadcs x8, x9, x8\0Acinc x9, x10, hs\0Astp x8, x9, [${1:x}, #32]\0Acmp x9, #0\0Amov ${0:x}, #5\0Acinc ${0:x}, ${0:x}, ne", "=r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %size
+    IR
+
   # Literal AArch64 schedule emitted for runtime.c's pointer-identical
   # positive three-limb square. Preserve all six products, doubled cross
   # terms, carry order, six unconditional stores, and +5/+6 header choice.
@@ -3777,6 +3788,17 @@ fn __bigint_mul2_raw(a, b) (i64 i64) i64
   bp = (b & mask) + 16 ## i64
   size = __bigint_mul2_exact(rp ## i64, ap ## i64, bp ## i64) ## i64
   ccall_nobox("w_bigint_mul2_finish_raw", result, size)
+
+# Exact distinct positive three-by-three-limb multiplication. The runtime gate
+# has already matched C's raw-positive-header shape and excluded identity.
+fn __bigint_mul3_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot8_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  size = __bigint_mul3_exact(rp ## i64, ap ## i64, bp ## i64) ## i64
+  ccall_nobox("w_bigint_mul3_finish_raw", result, size)
 
 # Exact positive two-limb-by-one-limb scalar-word arm. Preserve receiver
 # order at the operator seam, then orient only the raw magnitudes after the

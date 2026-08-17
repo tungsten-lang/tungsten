@@ -3363,6 +3363,50 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul2_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul2_src(i64, i64) nounwind\n"
 
+  # Exact distinct positive three-by-three-limb multiplication follows the
+  # same reserved/open-world contract as the adjacent two-limb checkpoint.
+  bigint_mul3_fn = nil
+  bigint_mul3_matches = 0
+  be3fi = 0
+  while be3fi < mod[:functions].size()
+    be3ff = mod[:functions][be3fi]
+    if be3ff[:source_class] == nil && be3ff[:source_method] == "__bigint_mul3_raw"
+      bigint_mul3_matches += 1
+      bigint_mul3_fn = be3ff
+    be3fi += 1
+  if bigint_mul3_matches > 1
+    << "error: __bigint_mul3_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul3_src] == true && bigint_mul3_fn == nil
+    << "error: required native BigInt mul@3 helper is missing; __w_bigint_mul3_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul3_target = bigint_times_reopened_fn
+  if bigint_mul3_target == nil
+    bigint_mul3_target = bigint_mul3_fn
+  if bigint_mul3_target != nil
+    be3_signature_ok = bigint_mul3_target[:params] != nil && bigint_mul3_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      be3_signature_ok = be3_signature_ok && bigint_mul3_target[:source_kind] == :fn_def
+      be3_signature_ok = be3_signature_ok && bigint_mul3_target[:raw_i64_signature] == true
+      be3_signature_ok = be3_signature_ok && bigint_mul3_target[:raw_return_type] == :i64
+    if !be3_signature_ok
+      << "error: invalid native BigInt mul@3 seam target"
+      exit(1)
+    be3_cc = ""
+    if bigint_mul3_target[:call_conv] != nil && bigint_mul3_target[:call_conv] != ""
+      be3_cc = bigint_mul3_target[:call_conv] + " "
+    be3_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      be3_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul3_src(i64 %a, i64 %b)" + be3_attrs + " {\n"
+    fn_out << "  %r = tail call " + be3_cc + "i64 @" + bigint_mul3_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul3_src"] = false
+    known_fns["__w_bigint_mul3_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul3_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul3_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps

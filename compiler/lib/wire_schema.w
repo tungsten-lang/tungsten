@@ -271,7 +271,10 @@ wire_kind_symbols = [
   :wire_module,
   :wire_function,
   :wire_block,
-  :wire_sequence
+  :wire_sequence,
+  # Compiler-internal lowering result. This remains append-only like every
+  # other WIRE kind; its fixed field order is :type, :value.
+  :wire_typed_value
 ]
 
 wire_kind_ids = {}

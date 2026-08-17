@@ -87,3 +87,27 @@ also covers ordinary, capture, `elsif`, generic-specialization, protected-Core,
 and locked return-class programs; debug parity retains physical frame
 attributes. Exact self-host fixed point held at SHA-256
 `b31e5f316b10f1ba6600f9c0fc9a74710b3f8f6ff069d3341a1fcd409d2d27b9`.
+
+## Fixed-slot lowering values
+
+Every lowered expression previously returned a two-key Hash carrying its
+machine representation and LLVM operand. These transient `{type, value}`
+objects now use append-only WIRE kind 268 with the canonical ordinal layout
+`:type, :value`. The constructor reserves exactly two fields, so it avoids a
+heap Hash/table allocation while preserving the existing field API. This is a
+deliberately narrow first use of fixed-slot lowering state; long-lived context
+maps remain ordinary Hashes because their optional fields and child-context
+copy semantics need a separate schema.
+
+Six alternating release/native/fast self-compile pairs reduced median
+lowering from 1.3925 s to 1.3855 s (-0.50%), measured compiler time from
+3.0575 s to 3.0500 s (-0.25%), and external wall time from 3.6400 s to
+3.6300 s (-0.27%). Retired instructions fell about 0.15%, while median peak
+RSS fell about 39 MiB (2.56%). Every paired LLVM file was byte-identical.
+Exact self-host fixed point held at SHA-256
+`039f2a1b8deff342b4c992868e238f9d2048bf6bb88f6bbd9af61a35648c2d9a`.
+
+A denser special-case representation that omitted the two field-symbol words
+reduced another roughly 5 MiB, but the extra runtime access branches erased
+the instruction benefit on the full self-compile. That variant was reverted;
+the ordinary fixed-layout WIRE record is the retained balance.

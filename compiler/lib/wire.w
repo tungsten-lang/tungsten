@@ -566,10 +566,17 @@ use wire_constructors
   stack[stack.size() - 1]
 
 # -- Typed values --
-# A typed value is {type: :i64 | :i1 | :raw_int | :raw_i64 | :raw_u64 | :raw_i128 | :raw_u128 | :raw_f32 | :raw_f64, value: "%t3" | "42"}
+# A typed value has fixed :type/:value slots in the WIRE arena. Lowering
+# creates many thousands of these short-lived pairs during a
+# self-compile; a Hash allocated a table and canonicalized the same two keys
+# for every expression. Kind 268 is append-only in wire_schema.w, immediately
+# after the stable wire_sequence kind (267).
 
 -> typed_value(type, value)
-  {type: type, value: value}
+  handle = ccall_rawargs("w_wire_alloc_reserve", 268, 2, 0)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :type, type)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
+  handle
 
 -> ensure_i64_value(f, tv)
   if tv[:type] == :i64

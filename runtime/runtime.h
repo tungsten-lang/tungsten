@@ -761,6 +761,7 @@ WValue __w_bigint_mul3_src(WValue a, WValue b);
 WValue __w_bigint_mul4_src(WValue a, WValue b);
 WValue __w_bigint_mul5_src(WValue a, WValue b);
 WValue __w_bigint_mul6_src(WValue a, WValue b);
+WValue __w_bigint_mul7_src(WValue a, WValue b);
 WValue __w_bigint_mul1_2_src(WValue a, WValue b);
 WValue __w_bigint_mul1_3_src(WValue a, WValue b);
 WValue __w_bigint_mul1_4_src(WValue a, WValue b);
@@ -815,6 +816,10 @@ uint64_t w_bigint_mul6_first_row_raw(int64_t rp, int64_t bp, int64_t ap);
 uint64_t w_bigint_mul6_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
                                   int64_t row);
 WValue w_bigint_mul6_finish_raw(WValue v);
+uint64_t w_bigint_mul7_first_row_raw(int64_t rp, int64_t bp, int64_t ap);
+uint64_t w_bigint_mul7_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
+                                  int64_t row);
+WValue w_bigint_mul7_finish_raw(WValue v);
 WValue w_bigint_mul1_2_finish_raw(WValue v, int64_t size);
 WValue w_bigint_mul1_3_finish_raw(WValue v, int64_t size);
 WValue w_bigint_mul1_4_finish_raw(WValue v, int64_t size);

@@ -3862,6 +3862,25 @@ fn __bigint_mul6_raw(a, b) (i64 i64) i64
   ccall_nobox("w_bigint_mul6_add_row_raw", rp, bp, ap, 5)
   ccall_nobox("w_bigint_mul6_finish_raw", result)
 
+# Exact distinct positive seven-by-seven-limb multiplication. Preserve C's
+# generic schoolbook decomposition literally—one mul_1(n=7) row followed by
+# six addmul_1(n=7) rows—while moving allocation, row sequencing, and
+# publication into native Tungsten.
+fn __bigint_mul7_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  ccall_nobox("w_bigint_mul7_first_row_raw", rp, bp, ap)
+  ccall_nobox("w_bigint_mul7_add_row_raw", rp, bp, ap, 1)
+  ccall_nobox("w_bigint_mul7_add_row_raw", rp, bp, ap, 2)
+  ccall_nobox("w_bigint_mul7_add_row_raw", rp, bp, ap, 3)
+  ccall_nobox("w_bigint_mul7_add_row_raw", rp, bp, ap, 4)
+  ccall_nobox("w_bigint_mul7_add_row_raw", rp, bp, ap, 5)
+  ccall_nobox("w_bigint_mul7_add_row_raw", rp, bp, ap, 6)
+  ccall_nobox("w_bigint_mul7_finish_raw", result)
+
 # Exact positive two-limb-by-one-limb scalar-word arm. Preserve receiver
 # order at the operator seam, then orient only the raw magnitudes after the
 # shape gate has proved that exactly one operand has two limbs.

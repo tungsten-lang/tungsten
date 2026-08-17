@@ -3542,6 +3542,51 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul6_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul6_src(i64, i64) nounwind\n"
 
+  # Exact distinct positive seven-by-seven-limb multiplication keeps C's
+  # tuned mul_1/addmul_1 row primitives and literal schoolbook row order
+  # behind the adjacent reserved/open-world contracts.
+  bigint_mul7_fn = nil
+  bigint_mul7_matches = 0
+  be7fi = 0
+  while be7fi < mod[:functions].size()
+    be7ff = mod[:functions][be7fi]
+    if be7ff[:source_class] == nil && be7ff[:source_method] == "__bigint_mul7_raw"
+      bigint_mul7_matches += 1
+      bigint_mul7_fn = be7ff
+    be7fi += 1
+  if bigint_mul7_matches > 1
+    << "error: __bigint_mul7_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul7_src] == true && bigint_mul7_fn == nil
+    << "error: required native BigInt mul@7 helper is missing; __w_bigint_mul7_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul7_target = bigint_times_reopened_fn
+  if bigint_mul7_target == nil
+    bigint_mul7_target = bigint_mul7_fn
+  if bigint_mul7_target != nil
+    be7_signature_ok = bigint_mul7_target[:params] != nil && bigint_mul7_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      be7_signature_ok = be7_signature_ok && bigint_mul7_target[:source_kind] == :fn_def
+      be7_signature_ok = be7_signature_ok && bigint_mul7_target[:raw_i64_signature] == true
+      be7_signature_ok = be7_signature_ok && bigint_mul7_target[:raw_return_type] == :i64
+    if !be7_signature_ok
+      << "error: invalid native BigInt mul@7 seam target"
+      exit(1)
+    be7_cc = ""
+    if bigint_mul7_target[:call_conv] != nil && bigint_mul7_target[:call_conv] != ""
+      be7_cc = bigint_mul7_target[:call_conv] + " "
+    be7_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      be7_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul7_src(i64 %a, i64 %b)" + be7_attrs + " {\n"
+    fn_out << "  %r = tail call " + be7_cc + "i64 @" + bigint_mul7_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul7_src"] = false
+    known_fns["__w_bigint_mul7_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul7_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul7_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps

@@ -3230,6 +3230,7 @@ on macos && arm64
   # untouched limb so the caller can invoke the retained overlap-copy tail.
   fn __bigint_sub1_wide_prefix(rp, ap, n, word) (i64 i64 i64 i64) i64
     ll <<~IR
+      ; tungsten:alwaysinline
       entry:
         %rptr = inttoptr i64 %rp to ptr
         %aptr = inttoptr i64 %ap to ptr

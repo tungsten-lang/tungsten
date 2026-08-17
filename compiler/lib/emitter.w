@@ -3352,7 +3352,15 @@ ewscope_md_state = {ids: {}}
   out << f[:name]
   out << "("
   out << emit_param_signature(f)
-  out << ") nounwind {\n"
+  out << ") nounwind"
+  # Embedded IR may explicitly request call-site integration without adding
+  # a parser-level annotation.  The marker stays an LLVM comment inside the
+  # body; the only emitted-code effect is this function attribute.
+  inline_marker = f[:embedded_ll].index("; tungsten:alwaysinline") != nil
+  inline_enabled = env("TUNGSTEN_EMBEDDED_LL_INLINE") != "0"
+  if inline_marker && inline_enabled
+    out << " alwaysinline"
+  out << " {\n"
   out << f[:embedded_ll]
   if !f[:embedded_ll].ends_with?("\n")
     out << "\n"

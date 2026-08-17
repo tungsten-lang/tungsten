@@ -598,6 +598,16 @@ interpreted differential coverage spans 9–256 limbs, copied tails, full borrow
 propagation, shrink, signs, and the fixed-eight boundary.  Evidence:
 `bigint_sub1_wide_exact_results.txt`.
 
+NATIVE WIDE SUB1 PREFIX INTEGRATION: after the literal wide port was
+checkpointed, embedded source IR gained an explicit `tungsten:alwaysinline`
+marker and the retained prefix opted in.  This removes the sole arithmetic
+call without changing its instructions or the tuned copy/finish paths.  In a
+same-compiler 11-pair screen, 9–64 limbs improved 3.2–5.7%, 128 improved 2.1%,
+256 was neutral, and fixed `sub1@8` was neutral.  Promotions held at 0.95231
+for the 9-limb boundary (20/21 wins) and 0.96156 at 32 limbs (21/21 wins).
+The linked candidate contains no prefix symbol and is 64 text bytes smaller.
+Evidence: `bigint_sub1_wide_inline_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

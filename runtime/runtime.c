@@ -35142,6 +35142,85 @@ int64_t w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr) 
     return (int)g_loc_file_count;
 }
 
+/* Rebuild the lexer's codepoint-indexed location table without materializing
+ * source.chars(), line_at, and col_at as Tungsten Arrays. The byte-step rules
+ * intentionally match String#chars and the LexChar builders: malformed or
+ * truncated UTF-8 still consumes one apparent codepoint rather than making a
+ * valid cached parse unreadable under stricter validation here. */
+int64_t w_loc_register_source_text(WValue path, WValue source) {
+    char path_buf[6], source_buf[6];
+    const char *path_bytes, *source_bytes;
+    size_t path_len, source_len;
+    w_str_data(path, path_buf, &path_bytes, &path_len);
+    w_str_data(source, source_buf, &source_bytes, &source_len);
+
+    size_t codepoints = 0;
+    for (size_t off = 0; off < source_len; codepoints++) {
+        unsigned char c = (unsigned char)source_bytes[off];
+        size_t step = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+        if (step > source_len - off) step = source_len - off;
+        off += step;
+    }
+    if (codepoints >= UINT32_MAX) return -1;
+    uint32_t n = (uint32_t)codepoints + 1;
+    int32_t *line_buf = (int32_t *)malloc(sizeof(int32_t) * n);
+    int32_t *col_buf = (int32_t *)malloc(sizeof(int32_t) * n);
+    if (!line_buf || !col_buf) {
+        free(line_buf);
+        free(col_buf);
+        die("source location table allocation failed");
+    }
+    int32_t line = 1, col = 1;
+    size_t off = 0;
+    uint32_t index = 0;
+    while (off < source_len) {
+        unsigned char c = (unsigned char)source_bytes[off];
+        line_buf[index] = line;
+        col_buf[index] = col;
+        if (c == '\n') {
+            line++;
+            col = 1;
+        } else {
+            col++;
+        }
+        size_t step = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+        if (step > source_len - off) step = source_len - off;
+        off += step;
+        index++;
+    }
+    line_buf[index] = line;
+    col_buf[index] = col;
+
+    for (uint32_t i = 0; i < g_loc_file_count; i++) {
+        WLocFileTable *existing = &g_loc_files[i];
+        if (strlen(existing->path) == path_len &&
+            memcmp(existing->path, path_bytes, path_len) == 0 &&
+            existing->len == n &&
+            memcmp(existing->line_at, line_buf, sizeof(int32_t) * n) == 0 &&
+            memcmp(existing->col_at, col_buf, sizeof(int32_t) * n) == 0) {
+            free(line_buf);
+            free(col_buf);
+            return (int64_t)(i + 1);
+        }
+    }
+    if (g_loc_file_count >= 0x3FFFu)
+        die("source location file/layout table exhausted");
+    if (g_loc_file_count == g_loc_file_cap) {
+        g_loc_file_cap = g_loc_file_cap == 0 ? 8 : g_loc_file_cap * 2;
+        g_loc_files = realloc(g_loc_files, g_loc_file_cap * sizeof(WLocFileTable));
+    }
+    char *path_copy = (char *)malloc(path_len + 1);
+    if (!path_copy) die("source location path allocation failed");
+    memcpy(path_copy, path_bytes, path_len);
+    path_copy[path_len] = '\0';
+    g_loc_files[g_loc_file_count].path = path_copy;
+    g_loc_files[g_loc_file_count].line_at = line_buf;
+    g_loc_files[g_loc_file_count].col_at = col_buf;
+    g_loc_files[g_loc_file_count].len = n;
+    g_loc_file_count++;
+    return (int64_t)g_loc_file_count;
+}
+
 int64_t w_loc_line_for_offset(int64_t file_id, int64_t offset) {
     /* ccall_nobox preserves a general Tungsten local's WValue bits. Accept
      * both those boxed inline Ints and already-raw machine integers. */
@@ -47032,13 +47111,14 @@ WValue __w_cache_write(WValue path_val, WValue value) {
  * A lowered-Core cache entry is not a raw WIRE arena image: record fields
  * still contain heap-backed Strings, Arrays and Hashes.  This deliberately
  * small graph format serializes exactly the immutable value vocabulary used
- * by the compiler cache and reconstructs packed WIRE into the current arena.
- * It preserves sharing/cycles among Array, Hash and WIRE values.  Any other
- * pointer-backed value (AST handles, closures, instances, BigInts, ...) makes
- * the write fail; corrupt or incompatible input is an ordinary cache miss.
+ * by the compiler cache and reconstructs packed WIRE and AST records into the
+ * current arenas. It preserves sharing/cycles among Array, Hash, WIRE, AST
+ * nodes, and packed AST bodies. Other pointer-backed values (closures,
+ * instances, BigInts, ...) make the write fail; corrupt or incompatible input
+ * is an ordinary cache miss.
  */
 
-#define W_CORE_GRAPH_VERSION UINT32_C(1)
+#define W_CORE_GRAPH_VERSION UINT32_C(2)
 #define W_CORE_GRAPH_HEADER_SIZE 32u
 #define W_CORE_GRAPH_MAX_BYTES ((size_t)1024 * 1024 * 1024)
 #define W_CORE_GRAPH_MAX_DEPTH 256u
@@ -47053,13 +47133,20 @@ enum WCoreGraphTag {
     W_CORE_GRAPH_HASH = 4,
     W_CORE_GRAPH_WIRE = 5,
     W_CORE_GRAPH_BACKREF = 6,
-    W_CORE_GRAPH_WIRE_SEQUENCE = 7
+    W_CORE_GRAPH_WIRE_SEQUENCE = 7,
+    W_CORE_GRAPH_AST_IMMEDIATE = 8,
+    W_CORE_GRAPH_AST_INTERN = 9,
+    W_CORE_GRAPH_AST_NODE = 10,
+    W_CORE_GRAPH_AST_BODY = 11,
+    W_CORE_GRAPH_BIGINT = 12
 };
 
 enum WCoreGraphRefKind {
     W_CORE_REF_ARRAY = 1,
     W_CORE_REF_HASH = 2,
-    W_CORE_REF_WIRE = 3
+    W_CORE_REF_WIRE = 3,
+    W_CORE_REF_AST_NODE = 4,
+    W_CORE_REF_AST_BODY = 5
 };
 
 typedef struct {
@@ -47093,6 +47180,8 @@ typedef struct {
     WValue *refs;
     size_t ref_count;
     size_t ref_cap;
+    int loc_old_file_id;
+    int loc_new_file_id;
 } WCoreGraphReader;
 
 static uint64_t w_core_graph_mix(uintptr_t identity, uint8_t kind) {
@@ -47245,6 +47334,45 @@ static void w_core_graph_write_value(WCoreGraphWriter *w, WValue value,
         return;
     }
 
+    /* Inline/singleton AST handles are complete portable values. Interned
+     * leaves are portable by bytes, not by their process-local dense id. Arena
+     * nodes enter the shared-reference path below. */
+    if (w_is_node(value)) {
+        int kid = w_node_kind(value);
+        if (kid < 1 || kid > (int)W_AST_KIND_MAX) {
+            w_core_graph_writer_fail(w, "AST node kind is outside the schema");
+            return;
+        }
+        uint8_t storage = W_AST_KIND_STORAGE[kid];
+        if (storage == W_AST_STORAGE_INTERN) {
+            WValue text = w_ast_intern_str_of(value);
+            if (!w_is_stringy(text)) {
+                w_core_graph_writer_fail(w, "AST intern handle has no string");
+                return;
+            }
+            w_core_graph_put_u8(w, W_CORE_GRAPH_AST_INTERN);
+            w_core_graph_put_u16(w, (uint16_t)kid);
+            w_core_graph_write_value(w, text, depth + 1);
+            return;
+        }
+        if (storage == W_AST_STORAGE_INLINE ||
+            storage == W_AST_STORAGE_SINGLETON) {
+            w_core_graph_put_u8(w, W_CORE_GRAPH_AST_IMMEDIATE);
+            w_core_graph_put_u64(w, (uint64_t)value);
+            return;
+        }
+        if (storage != W_AST_STORAGE_SLAB &&
+            storage != W_AST_STORAGE_CACHED) {
+            w_core_graph_writer_fail(w, "AST node has unsupported storage");
+            return;
+        }
+    }
+    if (w_is_bigint(value)) {
+        w_core_graph_put_u8(w, W_CORE_GRAPH_BIGINT);
+        w_core_graph_write_value(w, w_bigint_to_s(value, w_int(10)), depth + 1);
+        return;
+    }
+
     uint8_t ref_kind = 0;
     uintptr_t identity = 0;
     if (w_is_array(value)) {
@@ -47256,6 +47384,12 @@ static void w_core_graph_write_value(WCoreGraphWriter *w, WValue value,
     } else if (w_is_wire(value)) {
         ref_kind = W_CORE_REF_WIRE;
         identity = (uintptr_t)w_wire_offset(value);
+    } else if (w_is_node(value)) {
+        ref_kind = W_CORE_REF_AST_NODE;
+        identity = (uintptr_t)value;
+    } else if (w_is_body(value)) {
+        ref_kind = W_CORE_REF_AST_BODY;
+        identity = (uintptr_t)value;
     }
 
     if (ref_kind) {
@@ -47324,6 +47458,99 @@ static void w_core_graph_write_value(WCoreGraphWriter *w, WValue value,
             return;
         }
 
+        if (ref_kind == W_CORE_REF_AST_BODY) {
+            uint32_t off = w_unbox_body_offset(value);
+            uint32_t count = w_unbox_body_length(value);
+            if ((uint64_t)off + count > g_body_arena_cursor) {
+                w_core_graph_writer_fail(w, "AST body is outside the active arena");
+                return;
+            }
+            w_core_graph_put_u8(w, W_CORE_GRAPH_AST_BODY);
+            w_core_graph_put_u32(w, id);
+            w_core_graph_put_u32(w, count);
+            for (uint32_t i = 0; i < count; i++) {
+                w_core_graph_write_value(w, g_body_arena_base[off + i], depth + 1);
+                if (w->failed) {
+                    if (getenv("TUNGSTEN_CORE_CACHE_DEBUG"))
+                        fprintf(stderr, "  through AST body[%u]\n", i);
+                    return;
+                }
+            }
+            return;
+        }
+
+        if (ref_kind == W_CORE_REF_AST_NODE) {
+            int kid = w_node_kind(value);
+            uint32_t width = W_AST_KIND_WIDTH[kid];
+            uint64_t off = w_node_offset(value);
+            if (width == 0 || off == 0 || off + width > g_node_arena.cursor) {
+                w_core_graph_writer_fail(w, "AST node is outside the active arena");
+                return;
+            }
+            w_core_graph_put_u8(w, W_CORE_GRAPH_AST_NODE);
+            w_core_graph_put_u32(w, id);
+            w_core_graph_put_u16(w, (uint16_t)kid);
+            for (uint32_t i = 0; i < width; i++) {
+                w_core_graph_write_value(w, g_node_arena.base[off + i], depth + 1);
+                if (w->failed) {
+                    if (getenv("TUNGSTEN_CORE_CACHE_DEBUG"))
+                        fprintf(stderr, "  through AST kind %d field %u\n", kid, i);
+                    return;
+                }
+            }
+
+            uint8_t sidecars = 0;
+            uint32_t slot = w_sidecar_find(g_analysis_sidecar.keys,
+                                           g_analysis_sidecar.cap,
+                                           (uint64_t)value);
+            if (slot != W_SPARSE_END) sidecars |= 1u;
+            uint32_t layout_slot = w_sidecar_find(g_class_layout_sidecar.keys,
+                                                  g_class_layout_sidecar.cap,
+                                                  (uint64_t)value);
+            if (layout_slot != W_SPARSE_END) {
+                if (g_class_layout_sidecar.values[layout_slot].present & 1u)
+                    sidecars |= 2u;
+                if (g_class_layout_sidecar.values[layout_slot].present & 2u)
+                    sidecars |= 4u;
+            }
+            w_core_graph_put_u8(w, sidecars);
+            if (sidecars & 1u)
+                w_core_graph_write_value(w, g_analysis_sidecar.values[slot], depth + 1);
+            if (sidecars & 2u)
+                w_core_graph_write_value(
+                    w, g_class_layout_sidecar.values[layout_slot].ivar_offsets,
+                    depth + 1);
+            if (sidecars & 4u)
+                w_core_graph_write_value(
+                    w, g_class_layout_sidecar.values[layout_slot].ivar_count,
+                    depth + 1);
+            if (w->failed) return;
+
+            uint32_t sparse_count = 0;
+            uint32_t sparse_slot = w_sparse_find((uint64_t)value);
+            uint32_t rec_idx = sparse_slot == W_SPARSE_END
+                ? W_SPARSE_END : g_sparse_map.heads[sparse_slot];
+            while (rec_idx != W_SPARSE_END) {
+                if (rec_idx >= g_sparse_rec_cur || sparse_count == UINT32_MAX) {
+                    w_core_graph_writer_fail(w, "AST sparse record chain is corrupt");
+                    return;
+                }
+                sparse_count++;
+                rec_idx = g_sparse_records[rec_idx].next;
+            }
+            w_core_graph_put_u32(w, sparse_count);
+            rec_idx = sparse_slot == W_SPARSE_END
+                ? W_SPARSE_END : g_sparse_map.heads[sparse_slot];
+            while (rec_idx != W_SPARSE_END) {
+                WAstSparseRecord rec = g_sparse_records[rec_idx];
+                w_core_graph_write_value(w, (WValue)rec.sym, depth + 1);
+                w_core_graph_write_value(w, rec.value, depth + 1);
+                if (w->failed) return;
+                rec_idx = rec.next;
+            }
+            return;
+        }
+
         if (w_is_wire_sequence(value)) {
             uint64_t off = w_wire_sequence_checked_offset(value);
             uint32_t count = off == 0 ? 0 : w_wire_record_count(off);
@@ -47380,11 +47607,9 @@ static void w_core_graph_write_value(WCoreGraphWriter *w, WValue value,
         return;
     }
 
-    /* AST/body handles and every remaining pointer-backed value are process-
-     * local.  The rest of the NaN-box vocabulary is immediate and can be
-     * restored bit-for-bit. */
-    if (w_is_node(value) || w_is_body(value) || w_is_obj(value) ||
-        w_is_bigint(value)) {
+    /* Every remaining pointer-backed value is process-local. The rest of the
+     * NaN-box vocabulary is immediate and can be restored bit-for-bit. */
+    if (w_is_obj(value)) {
         if (getenv("TUNGSTEN_CORE_CACHE_DEBUG"))
             fprintf(stderr,
                     "core cache unsupported value: 0x%016llx node=%d body=%d obj=%d subtag=%d bigint=%d\n",
@@ -47473,6 +47698,13 @@ static WValue w_core_graph_read_value(WCoreGraphReader *r, unsigned depth) {
     if (r->failed) return W_NIL;
     if (tag == W_CORE_GRAPH_RAW) {
         WValue value = (WValue)w_core_graph_get_u64(r);
+        if (!r->failed && r->loc_old_file_id > 0 &&
+            r->loc_new_file_id > 0 && w_is_location(value) &&
+            w_location_mode(value) == 2 &&
+            w_unbox_location_file_id(value) == r->loc_old_file_id) {
+            value = w_box_location_file_offset(
+                r->loc_new_file_id, w_unbox_location_offset(value));
+        }
         if (r->failed || w_is_stringy(value) || w_is_array(value) ||
             w_is_wire(value) || w_is_node(value) || w_is_body(value) ||
             w_is_obj(value) || w_is_bigint(value)) {
@@ -47509,6 +47741,57 @@ static WValue w_core_graph_read_value(WCoreGraphReader *r, unsigned depth) {
         if (w_is_slab_sym(symbol))
             symbol = w_box_slab_sym(w_as_slab_index(symbol));
         return symbol;
+    }
+
+    if (tag == W_CORE_GRAPH_AST_IMMEDIATE) {
+        WValue value = (WValue)w_core_graph_get_u64(r);
+        if (r->failed || !w_is_node(value)) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        int kid = w_node_kind(value);
+        if (kid < 1 || kid > (int)W_AST_KIND_MAX ||
+            (W_AST_KIND_STORAGE[kid] != W_AST_STORAGE_INLINE &&
+             W_AST_KIND_STORAGE[kid] != W_AST_STORAGE_SINGLETON) ||
+            W_AST_KIND_WIDTH[kid] != 0 || w_node_size_class(value) != 0) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        if (W_AST_KIND_STORAGE[kid] == W_AST_STORAGE_SINGLETON &&
+            w_node_offset(value) != 0) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        return value;
+    }
+
+    if (tag == W_CORE_GRAPH_AST_INTERN) {
+        uint16_t kid = w_core_graph_get_u16(r);
+        if (r->failed || kid < 1 || kid > W_AST_KIND_MAX ||
+            W_AST_KIND_STORAGE[kid] != W_AST_STORAGE_INTERN) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        WValue text = w_core_graph_read_value(r, depth + 1);
+        if (r->failed || !w_is_stringy(text)) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        return w_ast_intern_node(kid, text);
+    }
+
+    if (tag == W_CORE_GRAPH_BIGINT) {
+        WValue text = w_core_graph_read_value(r, depth + 1);
+        if (r->failed || !w_is_stringy(text)) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        WValue value = w_bigint_from_dec_str(text);
+        if (!w_is_bigint(value)) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        return value;
     }
 
     if (tag == W_CORE_GRAPH_BACKREF) {
@@ -47550,6 +47833,85 @@ static WValue w_core_graph_read_value(WCoreGraphReader *r, unsigned depth) {
             WValue item = w_core_graph_read_value(r, depth + 1);
             if (r->failed) return W_NIL;
             w_hash_set(value, key, item);
+        }
+        return value;
+    }
+    if (tag == W_CORE_GRAPH_AST_BODY) {
+        uint32_t count = w_core_graph_get_u32(r);
+        const uint32_t max_slots = (uint32_t)W_BODY_OFFSET_MASK + 1u;
+        if (r->failed || count > W_CORE_GRAPH_MAX_CONTAINER_ITEMS ||
+            count > W_BODY_LENGTH_MASK ||
+            (uint64_t)g_body_arena_cursor + count > max_slots ||
+            r->off > r->size || (size_t)count > r->size - r->off) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        uint32_t off = count == 0 ? 0 : w_body_arena_alloc(count);
+        WValue value = w_box_body(off, count);
+        if (!w_core_graph_define_ref(r, id, value)) return W_NIL;
+        for (uint32_t i = 0; i < count; i++) {
+            WValue item = w_core_graph_read_value(r, depth + 1);
+            if (r->failed) return W_NIL;
+            g_body_arena_base[off + i] = item;
+        }
+        if (count > 0) g_ast_extra_arrays++;
+        return value;
+    }
+    if (tag == W_CORE_GRAPH_AST_NODE) {
+        uint16_t kid = w_core_graph_get_u16(r);
+        if (r->failed || kid < 1 || kid > W_AST_KIND_MAX ||
+            (W_AST_KIND_STORAGE[kid] != W_AST_STORAGE_SLAB &&
+             W_AST_KIND_STORAGE[kid] != W_AST_STORAGE_CACHED)) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        uint32_t width = W_AST_KIND_WIDTH[kid];
+        if (width == 0 || width > 16) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        int sc = width <= 2 ? 0 : (width == 3 ? 1 : 2);
+        WValue value = w_node_alloc(kid, sc);
+        if (!w_core_graph_define_ref(r, id, value)) return W_NIL;
+        for (uint32_t i = 0; i < width; i++) {
+            WValue field = w_core_graph_read_value(r, depth + 1);
+            if (r->failed) return W_NIL;
+            w_node_field_store(value, i, field);
+        }
+        uint8_t sidecars = w_core_graph_get_u8(r);
+        if (r->failed || (sidecars & ~7u) != 0) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        if (sidecars & 1u) {
+            WValue analysis = w_core_graph_read_value(r, depth + 1);
+            if (r->failed) return W_NIL;
+            w_ast_analysis_set(value, analysis);
+        }
+        if (sidecars & 2u) {
+            WValue offsets = w_core_graph_read_value(r, depth + 1);
+            if (r->failed) return W_NIL;
+            w_ast_ivar_offsets_set(value, offsets);
+        }
+        if (sidecars & 4u) {
+            WValue count = w_core_graph_read_value(r, depth + 1);
+            if (r->failed) return W_NIL;
+            w_ast_ivar_count_set(value, count);
+        }
+        uint32_t sparse_count = w_core_graph_get_u32(r);
+        if (r->failed || sparse_count > W_CORE_GRAPH_MAX_CONTAINER_ITEMS ||
+            r->off > r->size || (size_t)sparse_count > (r->size - r->off) / 2) {
+            r->failed = 1;
+            return W_NIL;
+        }
+        for (uint32_t i = 0; i < sparse_count; i++) {
+            WValue symbol = w_core_graph_read_value(r, depth + 1);
+            WValue item = w_core_graph_read_value(r, depth + 1);
+            if (r->failed || !w_is_symbol(symbol)) {
+                r->failed = 1;
+                return W_NIL;
+            }
+            w_ast_sparse_set(value, (int64_t)symbol, item);
         }
         return value;
     }
@@ -47648,7 +48010,8 @@ WValue w_core_cache_write(WValue path_val, WValue value) {
     return ok ? W_TRUE : W_FALSE;
 }
 
-WValue w_core_cache_read(WValue path_val) {
+static WValue w_core_cache_read_impl(WValue path_val, int old_file_id,
+                                     int new_file_id) {
     const char *path = as_str(path_val);
     w_sandbox_gate("read_file", path);
     struct stat statbuf;
@@ -47675,13 +48038,32 @@ WValue w_core_cache_read(WValue path_val) {
     WCoreGraphReader reader = {
         .data = data,
         .size = size,
-        .off = W_CORE_GRAPH_HEADER_SIZE
+        .off = W_CORE_GRAPH_HEADER_SIZE,
+        .loc_old_file_id = old_file_id,
+        .loc_new_file_id = new_file_id
     };
     WValue value = w_core_graph_read_value(&reader, 0);
     if (reader.failed || reader.off != reader.size) value = W_NIL;
     free(reader.refs);
     free(data);
     return value;
+}
+
+WValue w_core_cache_read(WValue path_val) {
+    return w_core_cache_read_impl(path_val, 0, 0);
+}
+
+WValue w_core_cache_read_rebase_locations(WValue path_val,
+                                          WValue old_file_id_v,
+                                          WValue new_file_id_v) {
+    if (!w_is_int(old_file_id_v) || !w_is_int(new_file_id_v)) return W_NIL;
+    int64_t old_file_id = w_as_int(old_file_id_v);
+    int64_t new_file_id = w_as_int(new_file_id_v);
+    if (old_file_id < 1 || old_file_id > 0x3FFF ||
+        new_file_id < 1 || new_file_id > 0x3FFF)
+        return W_NIL;
+    return w_core_cache_read_impl(path_val, (int)old_file_id,
+                                  (int)new_file_id);
 }
 
 typedef struct {

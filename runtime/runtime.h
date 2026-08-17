@@ -536,6 +536,7 @@ WValue w_str_to_sym(WValue v);
  * raw String WValue representation. */
 WValue w_string_from_bits(WValue bits);
 WValue w_bigint_from_bits(WValue bits);
+WValue w_bigint_from_dec_str(WValue str);
 WValue w_regex_new(WValue pattern_val, WValue options_val);
 WValue w_regex_match(WValue regex_val, WValue subject_val);
 WValue w_regex_match_data(WValue regex_val, WValue subject_val);
@@ -686,6 +687,7 @@ WValue w_location_file_offset(int file_id, int offset);
 WValue w_location_range(int file_id, int start_offset, int length);
 WValue w_location_range_w(WValue fid_v, WValue start_v, WValue len_v);
 int64_t w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr);
+int64_t w_loc_register_source_text(WValue path, WValue source);
 int64_t w_loc_line_for_offset(int64_t file_id, int64_t offset);
 int64_t w_loc_col_for_offset(int64_t file_id, int64_t offset);
 int64_t w_unbox_location_file_id_extern(WValue value);
@@ -2096,6 +2098,8 @@ WValue __w_cache_write(WValue path_val, WValue value);
  * builtins, this format understands packed WIRE records and preserves shared
  * Array/Hash/WIRE references.  Unsupported heap values fail closed. */
 WValue w_core_cache_read(WValue path_val);
+WValue w_core_cache_read_rebase_locations(WValue path_val, WValue old_file_id,
+                                          WValue new_file_id);
 WValue w_core_cache_write(WValue path_val, WValue value);
 WValue __w_runtime_identity(void);
 

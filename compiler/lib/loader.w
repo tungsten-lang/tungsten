@@ -1,5 +1,6 @@
 use lexer
 use parser
+use hashing
 
 # Process-local parsed-file cache for compile-batch. Entries own pristine,
 # unflattened slab ASTs; each load receives a deep clone before import
@@ -11,7 +12,12 @@ loader_parse_cache_state = {
   entries: {},
   hits: 0,
   misses: 0,
-  fingerprint_hits: 0
+  fingerprint_hits: 0,
+  disk_hits: 0,
+  disk_misses: 0,
+  disk_fingerprint_hits: 0,
+  disk_stores: 0,
+  disk_bypasses: 0
 }
 
 -> loader_enable_parse_cache
@@ -35,6 +41,13 @@ loader_parse_cache_state = {
     @parse_cache_hits_start = loader_parse_cache_state[:hits]
     @parse_cache_misses_start = loader_parse_cache_state[:misses]
     @parse_cache_fingerprint_hits_start = loader_parse_cache_state[:fingerprint_hits]
+    @parse_cache_disk_hits_start = loader_parse_cache_state[:disk_hits]
+    @parse_cache_disk_misses_start = loader_parse_cache_state[:disk_misses]
+    @parse_cache_disk_fingerprint_hits_start = loader_parse_cache_state[:disk_fingerprint_hits]
+    @parse_cache_disk_stores_start = loader_parse_cache_state[:disk_stores]
+    @parse_cache_disk_bypasses_start = loader_parse_cache_state[:disk_bypasses]
+    @persistent_parse_cache_identity = nil
+    @persistent_parse_cache_probes = {}
 
   -> memory_parse_cache_enabled?
     loader_parse_cache_state[:enabled] == true && env("TUNGSTEN_FRONTEND_PARSE_CACHE") != "0" && @runtime_id == "compiled-runtime"
@@ -43,7 +56,7 @@ loader_parse_cache_state = {
     stat = File.stat(resolved)
     if stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
       return nil
-    {mtime: stat.mtime_ns(), ctime: stat.ctime_ns(), size: stat.size()}
+    {mtime: stat.mtime_ns().to_s(), ctime: stat.ctime_ns().to_s(), size: stat.size().to_s()}
 
   -> memory_parse_cache_entry(resolved)
     entry = loader_parse_cache_state[:entries][resolved]
@@ -71,7 +84,7 @@ loader_parse_cache_state = {
     entry = memory_parse_cache_entry(resolved)
     if entry == nil
       return nil
-    fingerprint = digest_string64(source)
+    fingerprint = wyhash64_hex_string(source)
     if entry[:fingerprint] != fingerprint
       return nil
     stat = memory_parse_cache_stat(resolved)
@@ -100,17 +113,188 @@ loader_parse_cache_state = {
     }
     ast
 
+  # Persist pristine per-file packed ASTs for independent compiler processes
+  # and parallel batch workers. Handles are reconstructed into the current
+  # AST store by the runtime graph reader; raw arena offsets never cross the
+  # process boundary. A small manifest is consulted first. Hits still read the
+  # source to rebuild process-local location tables, but avoid lexing, parsing,
+  # and materializing their large temporary Arrays.
+  -> persistent_parse_cache_version
+    "loader-parse-v1"
+
+  -> persistent_parse_cache_enabled?
+    @runtime_id == "compiled-runtime" && env("TUNGSTEN_FRONTEND_PARSE_CACHE") != "0" && env("TUNGSTEN_FRONTEND_DISK_CACHE") != "0"
+
+  -> persistent_parse_compiler_identity
+    if @persistent_parse_cache_identity == false
+      return nil
+    if @persistent_parse_cache_identity != nil
+      return @persistent_parse_cache_identity
+    exe = ccall("w_executable_path")
+    stat = File.stat(exe)
+    if exe == nil || exe == "" || stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
+      @persistent_parse_cache_identity = false
+      return nil
+    @persistent_parse_cache_identity = [exe, stat.mtime_ns().to_s(), stat.ctime_ns().to_s(), stat.size().to_s()].join("|")
+    @persistent_parse_cache_identity
+
+  -> persistent_parse_cache_key(resolved)
+    identity = persistent_parse_compiler_identity()
+    if identity == nil
+      return nil
+    wyhash64_hex_string([persistent_parse_cache_version(), resolved, identity, w_ast_schema_hash_tungsten().to_s()].join("|"))
+
+  -> persistent_parse_cache_paths(resolved)
+    dir = cache_dir()
+    key = persistent_parse_cache_key(resolved)
+    if dir == nil || key == nil
+      return nil
+    base = dir + "/loader-parse-" + key
+    {ast: base + ".twc", manifest: base + "-manifest.twc"}
+
+  -> persistent_parse_manifest_base_valid?(manifest, resolved)
+    type(manifest) == "Hash" && manifest[:version] == persistent_parse_cache_version() && manifest[:path] == resolved && manifest[:compiler] == persistent_parse_compiler_identity() && manifest[:schema_hash] == w_ast_schema_hash_tungsten() && manifest[:fingerprint] != nil && type(manifest[:file_id]) == "Int" && manifest[:file_id] > 0
+
+  -> persistent_parse_stat_matches?(manifest, stat)
+    stat != nil && manifest[:mtime] == stat[:mtime].to_s() && manifest[:ctime] == stat[:ctime].to_s() && manifest[:size] == stat[:size].to_s()
+
+  -> persistent_parse_cache_stat(resolved)
+    stat = File.stat(resolved)
+    if stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
+      return nil
+    {mtime: stat.mtime_ns(), ctime: stat.ctime_ns(), size: stat.size()}
+
+  -> persistent_parse_cache_worthwhile?(stat)
+    if stat == nil
+      return false
+    configured = env("TUNGSTEN_FRONTEND_DISK_CACHE_MIN_BYTES")
+    minimum = 16384
+    if configured != nil && configured != ""
+      minimum = configured.to_i()
+      if minimum < 0
+        minimum = 0
+    stat[:size] >= minimum
+
+  -> persistent_parse_restore(probe, source = nil)
+    manifest = probe[:manifest]
+    if source == nil
+      source = read_file(manifest[:path])
+      if source == nil
+        return nil
+      source = ccall("w_algebra_rewrite_source", source)
+    # Parser registers the post-shebang-rewrite source layout. Reconstruct the
+    # same codepoint-indexed table in this process before restoring locations.
+    location_source = strip_bash_shebang(source)
+    file_id = ccall_nobox("w_loc_register_source_text", manifest[:path], location_source)
+    if file_id <= 0
+      return nil
+    entry = ccall("w_core_cache_read_rebase_locations", probe[:ast_path], manifest[:file_id], file_id)
+    if type(entry) != "Hash" || entry[:version] != persistent_parse_cache_version() || entry[:path] != manifest[:path] || entry[:compiler] != manifest[:compiler] || entry[:schema_hash] != w_ast_schema_hash_tungsten() || entry[:fingerprint] != manifest[:fingerprint] || entry[:file_id] != manifest[:file_id]
+      return nil
+    ast = entry[:ast]
+    if ast == nil || !is_ast_node?(ast) || ast_kind(ast) != :program
+      return nil
+    ast
+
+  -> accept_persistent_parse_cache(resolved, ast, stat, fingerprint)
+    if memory_parse_cache_enabled?
+      loader_parse_cache_state[:entries][resolved] = {
+        path: resolved,
+        mtime: stat[:mtime],
+        ctime: stat[:ctime],
+        size: stat[:size],
+        fingerprint: fingerprint,
+        ast: ast
+      }
+      return ast_deep_clone(ast)
+    ast
+
+  -> read_persistent_parse_cache(resolved)
+    if !persistent_parse_cache_enabled?
+      return nil
+    stat = persistent_parse_cache_stat(resolved)
+    if !persistent_parse_cache_worthwhile?(stat)
+      @persistent_parse_cache_probes[resolved] = :bypass
+      loader_parse_cache_state[:disk_bypasses] = loader_parse_cache_state[:disk_bypasses] + 1
+      return nil
+    paths = persistent_parse_cache_paths(resolved)
+    if paths == nil
+      @persistent_parse_cache_probes[resolved] = false
+      return nil
+    manifest = ccall("w_core_cache_read", paths[:manifest])
+    if !persistent_parse_manifest_base_valid?(manifest, resolved)
+      @persistent_parse_cache_probes[resolved] = false
+      return nil
+    probe = {manifest: manifest, ast_path: paths[:ast], manifest_path: paths[:manifest]}
+    @persistent_parse_cache_probes[resolved] = probe
+    if !persistent_parse_stat_matches?(manifest, stat)
+      return nil
+    ast = persistent_parse_restore(probe)
+    if ast == nil
+      @persistent_parse_cache_probes[resolved] = false
+      return nil
+    loader_parse_cache_state[:disk_hits] = loader_parse_cache_state[:disk_hits] + 1
+    accept_persistent_parse_cache(resolved, ast, stat, manifest[:fingerprint])
+
+  -> read_persistent_parse_cache_fingerprint(resolved, source)
+    if !persistent_parse_cache_enabled?
+      return nil
+    probe = @persistent_parse_cache_probes[resolved]
+    if probe == :bypass
+      return nil
+    if probe == nil || probe == false
+      loader_parse_cache_state[:disk_misses] = loader_parse_cache_state[:disk_misses] + 1
+      return nil
+    fingerprint = wyhash64_hex_string(source)
+    manifest = probe[:manifest]
+    if manifest[:fingerprint] != fingerprint
+      loader_parse_cache_state[:disk_misses] = loader_parse_cache_state[:disk_misses] + 1
+      return nil
+    ast = persistent_parse_restore(probe, source)
+    stat = persistent_parse_cache_stat(resolved)
+    if ast == nil || stat == nil
+      loader_parse_cache_state[:disk_misses] = loader_parse_cache_state[:disk_misses] + 1
+      return nil
+    manifest[:mtime] = stat[:mtime].to_s()
+    manifest[:ctime] = stat[:ctime].to_s()
+    manifest[:size] = stat[:size].to_s()
+    ccall("w_core_cache_write", probe[:manifest_path], manifest)
+    loader_parse_cache_state[:disk_hits] = loader_parse_cache_state[:disk_hits] + 1
+    loader_parse_cache_state[:disk_fingerprint_hits] = loader_parse_cache_state[:disk_fingerprint_hits] + 1
+    accept_persistent_parse_cache(resolved, ast, stat, fingerprint)
+
+  -> write_persistent_parse_cache(resolved, source, ast, file_id)
+    if !persistent_parse_cache_enabled?
+      return ast
+    paths = persistent_parse_cache_paths(resolved)
+    stat = persistent_parse_cache_stat(resolved)
+    dir = cache_dir()
+    if !persistent_parse_cache_worthwhile?(stat) || paths == nil || dir == nil || ccall("__w_mkdir_p", dir) != true
+      return ast
+    fingerprint = wyhash64_hex_string(source)
+    entry = {version: persistent_parse_cache_version(), path: resolved, compiler: persistent_parse_compiler_identity(), schema_hash: w_ast_schema_hash_tungsten(), fingerprint: fingerprint, file_id: file_id, ast: ast}
+    manifest = {version: persistent_parse_cache_version(), path: resolved, compiler: persistent_parse_compiler_identity(), schema_hash: w_ast_schema_hash_tungsten(), fingerprint: fingerprint, file_id: file_id, mtime: stat[:mtime].to_s(), ctime: stat[:ctime].to_s(), size: stat[:size].to_s()}
+    if ccall("w_core_cache_write", paths[:ast], entry) == true && ccall("w_core_cache_write", paths[:manifest], manifest) == true
+      loader_parse_cache_state[:disk_stores] = loader_parse_cache_state[:disk_stores] + 1
+    ast
+
   -> parse_cache_verbose_text
-    if !memory_parse_cache_enabled?
+    if !memory_parse_cache_enabled? && !persistent_parse_cache_enabled?
       return nil
     hits = loader_parse_cache_state[:hits] - @parse_cache_hits_start
     misses = loader_parse_cache_state[:misses] - @parse_cache_misses_start
     fingerprint_hits = loader_parse_cache_state[:fingerprint_hits] - @parse_cache_fingerprint_hits_start
-    if hits == 0 && misses == 0
+    disk_hits = loader_parse_cache_state[:disk_hits] - @parse_cache_disk_hits_start
+    disk_misses = loader_parse_cache_state[:disk_misses] - @parse_cache_disk_misses_start
+    disk_fingerprint_hits = loader_parse_cache_state[:disk_fingerprint_hits] - @parse_cache_disk_fingerprint_hits_start
+    disk_stores = loader_parse_cache_state[:disk_stores] - @parse_cache_disk_stores_start
+    disk_bypasses = loader_parse_cache_state[:disk_bypasses] - @parse_cache_disk_bypasses_start
+    if hits == 0 && misses == 0 && disk_hits == 0 && disk_misses == 0 && disk_stores == 0 && disk_bypasses == 0
       return nil
-    text = "  frontend parse cache: " + hits.to_s() + " hits, " + misses.to_s() + " misses"
-    if fingerprint_hits > 0
-      text = text + " (" + fingerprint_hits.to_s() + " fingerprint)"
+    text = "  frontend parse cache: memory " + hits.to_s() + " hits, " + misses.to_s() + " misses"
+    if fingerprint_hits > 0 || disk_fingerprint_hits > 0
+      text = text + " (" + fingerprint_hits.to_s() + "/" + disk_fingerprint_hits.to_s() + " fingerprint)"
+    text = text + "; disk " + disk_hits.to_s() + " hits, " + disk_misses.to_s() + " misses, " + disk_stores.to_s() + " stores, " + disk_bypasses.to_s() + " small bypasses"
     text
 
   # Parse the shell-wrapper-exported TUNGSTEN_SERVICE_BINDINGS env var.
@@ -179,17 +363,22 @@ loader_parse_cache_state = {
 
     ast = read_memory_parse_cache(resolved)
     if ast == nil
+      ast = read_persistent_parse_cache(resolved)
+    if ast == nil
       source = read_file(resolved)
       if source == nil
         raise compile_error(:E_LOAD_MISSING_FILE, "Could not load '" + path + "' (resolved to '" + resolved + "')", from_file, 1, 1)
       source = ccall("w_algebra_rewrite_source", source)
       ast = read_memory_parse_cache_fingerprint(resolved, source)
       if ast == nil
+        ast = read_persistent_parse_cache_fingerprint(resolved, source)
+      if ast == nil
         lexer = Lexer.new(source, resolved)
         token_count = lexer.tokenize()
         parser = Parser.new(token_count, lexer.packed_tokens, source, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
         ast = parser.parse()
         write_memory_parse_cache(resolved, source, ast)
+        write_persistent_parse_cache(resolved, source, ast, parser.file_id)
     validate_contract_locations(ast.expressions, resolved, from_file)
 
     expressions = []

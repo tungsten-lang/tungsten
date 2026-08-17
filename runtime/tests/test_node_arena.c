@@ -229,10 +229,40 @@ static void test_core_graph_snapshot(void) {
     w_hash_set(root, canonical_symbol("items"), shared);
     w_hash_set(root, canonical_symbol("self"), root);
 
+    WValue ast_name = w_ast_intern_node(/*KIND_VAR=*/123,
+                                        w_string("cached_name"));
+    WValue ast_char = w_box_node(/*KIND_CHAR=*/47, 0, (uint64_t)'Z');
+    WValue ast_nil = w_box_node_compact(/*KIND_NIL_LIT=*/15, 0);
+    WValue ast_children_source = w_array_new_inline(65, 3);
+    w_as_array(ast_children_source)->slots[0] = ast_name;
+    w_as_array(ast_children_source)->slots[1] = ast_char;
+    w_as_array(ast_children_source)->slots[2] = ast_nil;
+    WValue ast_children = w_ast_freeze_if_array(ast_children_source);
+    WValue ast_program = w_node_alloc(/*KIND_PROGRAM=*/92, 0);
+    w_node_field_store(ast_program, 0, ast_children);
+    w_ast_sparse_set(ast_program, (int64_t)canonical_symbol("source_path"),
+                     w_string("cached.w"));
+    WValue location_path = w_string("cached-location.w");
+    WValue location_source = w_string("a\xc3\xa9\nz");
+    int64_t old_file_id = w_loc_register_source_text(location_path,
+                                                      location_source);
+    CHECK(old_file_id > 0, "source text registers a location table");
+    WValue old_location = w_location_file_offset((int)old_file_id, 3);
+    w_ast_sparse_set(ast_program, (int64_t)canonical_symbol("loc"),
+                     old_location);
+    WValue ast_shared = w_array_new_inline(65, 2);
+    w_as_array(ast_shared)->slots[0] = ast_program;
+    w_as_array(ast_shared)->slots[1] = ast_program;
+    w_hash_set(root, canonical_symbol("ast"), ast_shared);
+    WValue ast_bigint = w_bigint_from_dec_str(
+        w_string("123456789012345678901234567890123456789"));
+    w_hash_set(root, canonical_symbol("bigint"), ast_bigint);
+
     WValue path_value = w_string(path);
     CHECK(w_core_cache_write(path_value, root) == W_TRUE,
           "compiler graph snapshot writes atomically");
     w_wire_store_reset(0);
+    w_node_arena_reset();
     WValue restored = w_core_cache_read(path_value);
     CHECK(w_is_hash(restored), "compiler graph snapshot restores the root Hash");
     CHECK(w_hash_get(restored, canonical_symbol("self")) == restored,
@@ -260,6 +290,72 @@ static void test_core_graph_snapshot(void) {
                                      w_string("right")) == W_TRUE,
               "restored WIRE sequence preserves canonical element order");
     }
+
+    WValue restored_ast = w_hash_get(restored, canonical_symbol("ast"));
+    CHECK(w_is_array(restored_ast) && w_as_array(restored_ast)->size == 2,
+          "compiler graph snapshot restores AST roots");
+    if (w_is_array(restored_ast) && w_as_array(restored_ast)->size == 2) {
+        WValue first = w_as_array(restored_ast)->slots[0];
+        WValue second = w_as_array(restored_ast)->slots[1];
+        CHECK(first == second,
+              "compiler graph snapshot preserves shared AST node handles");
+        CHECK(w_is_node(first) && w_node_kind(first) == 92,
+              "compiler graph snapshot restores AST node kind");
+        CHECK(w_string_content_equal(
+                  w_ast_sparse_get(first,
+                      (int64_t)canonical_symbol("source_path")),
+                  w_string("cached.w")) == W_TRUE,
+              "compiler graph snapshot restores AST sparse metadata");
+        WValue children = w_node_field_load(first, 0);
+        CHECK(w_is_body(children) && w_unbox_body_length(children) == 3,
+              "compiler graph snapshot restores packed AST bodies");
+        if (w_is_body(children) && w_unbox_body_length(children) == 3) {
+            WValue name = w_body_arena_get(w_unbox_body_offset(children), 0);
+            WValue character = w_body_arena_get(w_unbox_body_offset(children), 1);
+            WValue nil_node = w_body_arena_get(w_unbox_body_offset(children), 2);
+            CHECK(w_is_node(name) && w_node_kind(name) == 123 &&
+                  w_string_content_equal(w_ast_intern_str_of(name),
+                                         w_string("cached_name")) == W_TRUE,
+                  "compiler graph snapshot restores interned AST leaves by bytes");
+            CHECK(w_is_node(character) && w_node_kind(character) == 47 &&
+                  w_node_offset(character) == (uint64_t)'Z',
+                  "compiler graph snapshot restores inline AST leaves");
+            CHECK(w_is_node(nil_node) && w_node_kind(nil_node) == 15 &&
+                  w_node_offset(nil_node) == 0,
+                  "compiler graph snapshot restores singleton AST leaves");
+        }
+    }
+    WValue restored_bigint = w_hash_get(restored, canonical_symbol("bigint"));
+    CHECK(w_is_bigint(restored_bigint) &&
+          w_string_content_equal(w_bigint_to_s(restored_bigint, w_int(10)),
+                                 w_string("123456789012345678901234567890123456789")) == W_TRUE,
+          "compiler graph snapshot restores BigInts canonically");
+
+    WValue second_location_path = w_string("restored-location.w");
+    int64_t new_file_id = w_loc_register_source_text(second_location_path,
+                                                      location_source);
+    CHECK(new_file_id > 0 && new_file_id != old_file_id,
+          "a distinct source path receives a distinct location table");
+    CHECK(w_loc_line_for_offset(new_file_id, 3) == 2 &&
+          w_loc_col_for_offset(new_file_id, 3) == 1 &&
+          w_loc_line_for_offset(new_file_id, 4) == 2 &&
+          w_loc_col_for_offset(new_file_id, 4) == 2,
+          "source text registration uses UTF-8 codepoint offsets");
+    w_wire_store_reset(0);
+    w_node_arena_reset();
+    WValue rebased = w_core_cache_read_rebase_locations(
+        path_value, w_int(old_file_id), w_int(new_file_id));
+    WValue rebased_ast_array = w_hash_get(rebased, canonical_symbol("ast"));
+    WValue rebased_program = w_is_array(rebased_ast_array)
+        ? w_as_array(rebased_ast_array)->slots[0] : W_NIL;
+    WValue rebased_location = w_is_node(rebased_program)
+        ? w_ast_sparse_get(rebased_program,
+                           (int64_t)canonical_symbol("loc")) : W_NIL;
+    CHECK(w_is_location(rebased_location) &&
+          w_location_mode(rebased_location) == 2 &&
+          w_unbox_location_file_id(rebased_location) == new_file_id &&
+          w_unbox_location_offset(rebased_location) == 3,
+          "AST cache restore rebases matching FileOffset locations");
 
     FILE *corrupt = fopen(path, "wb");
     CHECK(corrupt != NULL, "snapshot corruption fixture opens");

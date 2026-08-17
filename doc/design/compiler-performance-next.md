@@ -28,3 +28,37 @@ detection stage itself fell from a 46 ms median to 0 ms. On the intended
 many-process workload, ten alternating blocks of fifteen tiny native compiles
 (150 per mode) took 26.0202 s disabled versus 15.5718 s warm, a 40.15%
 reduction (173.5 ms to 103.8 ms per compile).
+
+## Persistent packed AST cache
+
+Compiled compiler processes now persist pristine per-file ASTs rather than
+limiting parse reuse to one `compile-batch` worker. A small manifest contains
+the exact compiler executable identity, AST schema hash, path, stat tuple, and
+content fingerprint. An unchanged file therefore needs one small metadata
+read and one source read before its packed graph is restored into the current
+process's AST store. The source rebuilds the lexer's compact process-local
+line/column table; deserialization rebases matching `FileOffset` locations
+from the producing process's file ID to the new one. A metadata-only touch
+fingerprints the source, then reuses the same payload. Corruption, a compiler
+rebuild, a schema change, or a content change is an ordinary parse miss.
+
+The checksummed graph format reconstructs node and body handles rather than
+copying arena offsets. It preserves shared nodes, Arrays/Hashes and cycles,
+sparse and typed sidecars, inline and singleton leaves, byte-addressed
+interned leaves, and canonical decimal BigInts. Payload and manifest writes
+are atomic, with the manifest published last.
+
+Disk snapshots default to files of at least 16 KiB; smaller files are faster
+to parse and still use the existing process cache. The threshold can be
+changed with `TUNGSTEN_FRONTEND_DISK_CACHE_MIN_BYTES`, while
+`TUNGSTEN_FRONTEND_DISK_CACHE=0` disables persistence. The 16 KiB cutoff made
+the already process-cached, eight-worker 150-program batch neutral (2.2840 s
+disabled versus 2.2855 s warm, -0.07%); caching every file had regressed it by
+1.43% through tiny payload reads.
+
+Eight alternating full self-compile pairs with the 16 KiB cutoff reduced
+median load+parse from 0.497 s to 0.241 s (-51.51%) and external wall time
+from 3.71 s to 3.42 s (-7.82%). The post-load compiler stages were noise-flat
+in that sample (3.133 s to 3.104 s). Every paired LLVM file was byte-identical,
+as were cache-disabled/cold/warm full compiler outputs. Exact self-host fixed
+point also held at SHA-256 `21ae636cfd41d86668a2b8d699231a1598fa9bfec64e89b008a7b2a81aec6692`.

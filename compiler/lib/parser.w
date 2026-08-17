@@ -54,6 +54,9 @@ use ../../core/token
     @file_id = register_file_tables(@file, @line_at, @col_at)
     sync_current()
 
+  -> file_id
+    @file_id
+
   -> register_struct_name(name)
     if name != nil
       @struct_names[name] = true

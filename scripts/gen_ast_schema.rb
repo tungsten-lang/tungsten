@@ -281,12 +281,14 @@ end
 def generate_header(kinds, fingerprint)
   max_id = kinds.map(&:id).max
   widths = Array.new(max_id + 1, 0)
+  storage = Array.new(max_id + 1, "W_AST_STORAGE_NONE")
   names = Array.new(max_id + 1, "NULL")
   field_counts = Array.new(max_id + 1, 0)
   max_fields = kinds.map { |kind| kind.fields.size }.max
   fields = Array.new(max_id + 1) { Array.new(max_fields, "NULL") }
   kinds.each do |kind|
     widths[kind.id] = kind.fields.size if %w[slab cached].include?(kind.storage)
+    storage[kind.id] = "W_AST_STORAGE_#{kind.storage.upcase}"
     names[kind.id] = kind.name.inspect
     field_counts[kind.id] = kind.fields.size
     kind.fields.each_with_index do |field, index|
@@ -304,8 +306,21 @@ def generate_header(kinds, fingerprint)
     #define W_AST_SCHEMA_HASH UINT64_C(0x#{format('%016X', fingerprint)})
     #define W_AST_KIND_MAX UINT32_C(#{max_id})
 
+    enum WAstKindStorage {
+        W_AST_STORAGE_NONE = 0,
+        W_AST_STORAGE_SLAB = 1,
+        W_AST_STORAGE_CACHED = 2,
+        W_AST_STORAGE_INLINE = 3,
+        W_AST_STORAGE_INTERN = 4,
+        W_AST_STORAGE_SINGLETON = 5
+    };
+
     static const uint8_t W_AST_KIND_WIDTH[W_AST_KIND_MAX + 1] = {
         #{widths.each_slice(16).map { |slice| slice.join(', ') }.join(",\n    ")}
+    };
+
+    static const uint8_t W_AST_KIND_STORAGE[W_AST_KIND_MAX + 1] = {
+        #{storage.each_slice(8).map { |slice| slice.join(', ') }.join(",\n    ")}
     };
 
     #ifdef W_AST_SCHEMA_INCLUDE_NAMES

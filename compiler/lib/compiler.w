@@ -33,9 +33,9 @@ use target
       i += 1
 
   if rename_map.keys().size() > 0
-    rewrite_references(mod, rename_map)
+    global_rename = build_memo_global_rename(mod, rename_map)
+    rewrite_references(mod, rename_map, global_rename)
     rewrite_known_name_maps(mod, rename_map)
-    rewrite_memo_globals(mod, rename_map)
     i = 0
     while i < mod[:functions].size()
       func = mod[:functions][i]
@@ -264,7 +264,7 @@ use target
     t_free = clock() - free_started_at
 
   hash_started_at = clock()
-  content_hash_pass(mod, verbose)
+  content_hash_pass(mod, verbose, release_mode)
   t_hash = clock() - hash_started_at
 
   core_reachability_prepare(mod)
@@ -275,8 +275,11 @@ use target
   # and disabled sibling-call elimination for this mode.
   mod[:preserve_debug_frames] = frame_pointers && !release_mode
   if release_mode
-    strip_enhanced_stacktrace_metadata(mod)
-    compact_live_module_strings(mod)
+    if env("TUNGSTEN_LINEAR_WIRE_POSTPROCESS") == "0"
+      strip_enhanced_stacktrace_metadata(mod)
+      compact_live_module_strings(mod)
+    else
+      finish_release_wire_postprocess(mod)
     mod[:enhanced_stacktraces] = false
 
   target_started_at = clock()

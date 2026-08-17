@@ -4,6 +4,7 @@
 
 use runtime_types
 use hashing
+use wire
 
 # Normalize a temp name to a sequential index.
 # First occurrence of a temp gets the next index.
@@ -566,6 +567,15 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
 -> canonical_hash(func, mod, fn_hashes, op_codes)
   wyhash64_hex_string(canonical_content(func, mod, fn_hashes, op_codes))
 
+# Keep the persistent-Core identity encoding local to this module. Importing
+# content_hash directly in focused specs must not depend on lowering's load
+# order merely to length-prefix one function name.
+-> content_hash_identity_field(value)
+  if value == nil
+    return "-;"
+  text = value.to_s()
+  text.size().to_s() + ":" + text + ";"
+
 # Rename maps carry their source key inside the value. This makes every lookup
 # self-validating: a host Hash collision can at worst become a miss, never
 # rewrite a different function whose name happens to share a bucket/prefix.
@@ -584,56 +594,176 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     return nil
   entry[:replacement]
 
-# Rewrite all function name references in a module.
--> rewrite_references(mod, rename_map)
+# Apply every final WIRE mutation in one instruction walk. Content hashing
+# composes deduplication and compact-symbol maps before entering this pass;
+# release builds also remove location hooks and remember each live string-id
+# reference for later in-place remapping. The remap is finalized after Core
+# reachability, so that analysis observes the same string table as before.
+-> wire_postprocess_linear(mod, rename_map, global_rename = nil, release_mode = false)
+  live = nil
+  inst_refs = nil
+  case_refs = nil
+  string_fields = nil
+  if release_mode
+    live = {}
+    inst_refs = []
+    case_refs = []
+    string_fields = [:string_id, :str_id, :name_str_id, :method_str_id, :file_str_id, :ivar_str_id]
+    core_prefix = mod[:incremental_core_string_count]
+    if core_prefix == nil
+      core_prefix = 0
+    prefix_id = 0
+    while prefix_id < core_prefix
+      live[prefix_id] = true
+      prefix_id += 1
+
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
     bi = 0
     while bi < func[:blocks].size()
-      instrs = func[:blocks][bi][:instructions]
+      block = func[:blocks][bi]
+      instrs = block[:instructions]
+      retained = nil
+      if release_mode
+        retained = []
       ii = 0
       while ii < instrs.size()
         inst = instrs[ii]
         op = wire_kind(inst)
-        # Rewrite callee names
-        if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
-          replacement = rename_map_get(rename_map, wire_get(inst, :name))
-          if replacement != nil
-            wire_set(inst, :name, replacement)
-        if op == :closure_new
-          replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
-          if replacement != nil
-            wire_set(inst, :fn_name, replacement)
-        # Devirtualized direct-call target on an IC dispatch site — the
-        # method function gets compact-symbol renamed like any function.
-        if op == :call_method_i64 && wire_get(inst, :devirt_fn) != nil
-          replacement = rename_map_get(rename_map, wire_get(inst, :devirt_fn))
-          if replacement != nil
-            wire_set(inst, :devirt_fn, replacement)
-        if op == :call_method_i64 && wire_get(inst, :construct_fn) != nil
-          replacement = rename_map_get(rename_map, wire_get(inst, :construct_fn))
-          if replacement != nil
-            wire_set(inst, :construct_fn, replacement)
-        # Fused-loop worker address (ptrtoint ptr @name) — the referenced
-        # worker gets compact-symbol renamed like any function.
-        if op == :fn_addr_i64
-          replacement = rename_map_get(rename_map, wire_get(inst, :name))
-          if replacement != nil
-            wire_set(inst, :name, replacement)
-        if op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
-          replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
-          if replacement != nil
-            wire_set(inst, :fn_name, replacement)
-        if op in (:class_add_method :class_add_static_method)
-          replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
-          if replacement != nil
-            wire_set(inst, :fn_name, replacement)
+        keep = !release_mode || op != :call_loc_set_col
+        if keep
+          # Rewrite callee names.
+          if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
+            replacement = rename_map_get(rename_map, wire_get(inst, :name))
+            if replacement != nil
+              wire_set(inst, :name, replacement)
+          if op == :closure_new
+            replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
+            if replacement != nil
+              wire_set(inst, :fn_name, replacement)
+          # Devirtualized direct-call target on an IC dispatch site — the
+          # method function gets compact-symbol renamed like any function.
+          if op == :call_method_i64 && wire_get(inst, :devirt_fn) != nil
+            replacement = rename_map_get(rename_map, wire_get(inst, :devirt_fn))
+            if replacement != nil
+              wire_set(inst, :devirt_fn, replacement)
+          if op == :call_method_i64 && wire_get(inst, :construct_fn) != nil
+            replacement = rename_map_get(rename_map, wire_get(inst, :construct_fn))
+            if replacement != nil
+              wire_set(inst, :construct_fn, replacement)
+          # Fused-loop worker address (ptrtoint ptr @name) — the referenced
+          # worker gets compact-symbol renamed like any function.
+          if op == :fn_addr_i64
+            replacement = rename_map_get(rename_map, wire_get(inst, :name))
+            if replacement != nil
+              wire_set(inst, :name, replacement)
+          if op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
+            replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
+            if replacement != nil
+              wire_set(inst, :fn_name, replacement)
+          if op in (:class_add_method :class_add_static_method)
+            replacement = rename_map_get(rename_map, wire_get(inst, :fn_name))
+            if replacement != nil
+              wire_set(inst, :fn_name, replacement)
+          if global_rename != nil && wire_get(inst, :global) != nil
+            replacement = global_rename[wire_get(inst, :global)]
+            if replacement != nil
+              wire_set(inst, :global, replacement)
+
+          if release_mode
+            if wire_get(inst, :src_line) != nil
+              wire_set(inst, :src_line, nil)
+            if wire_get(inst, :src_col) != nil
+              wire_set(inst, :src_col, nil)
+            if wire_get(inst, :loc_site_id) != nil
+              wire_set(inst, :loc_site_id, nil)
+            sfi = 0
+            while sfi < string_fields.size()
+              field = string_fields[sfi]
+              old_id = wire_get(inst, field)
+              if old_id != nil
+                live[old_id] = true
+                inst_refs.push(inst)
+                inst_refs.push(field)
+                inst_refs.push(old_id)
+              sfi += 1
+            cases = wire_get(inst, :cases)
+            if cases != nil
+              ci = 0
+              while ci < wire_sequence_size(cases)
+                item = wire_sequence_get(cases, ci)
+                old_id = item[:string_id]
+                if old_id != nil
+                  live[old_id] = true
+                  case_refs.push(item)
+                  case_refs.push(old_id)
+                ci += 1
+            retained.push(inst)
         ii += 1
+      if release_mode
+        block[:instructions] = retained
       bi += 1
     fi += 1
 
--> rewrite_memo_globals(mod, rename_map)
+  if release_mode
+    mod[:linear_release_string_state] = {live: live, inst_refs: inst_refs, case_refs: case_refs}
+  nil
+
+# Standalone name-map callers retain the old API while sharing the same linear
+# rewrite implementation (including memo globals when supplied).
+-> rewrite_references(mod, rename_map, global_rename = nil)
+  wire_postprocess_linear(mod, rename_map, global_rename, false)
+
+# Compact the module string table and patch only references recorded by the
+# linear WIRE pass. This deliberately does not rescan functions or blocks.
+-> finish_release_wire_postprocess(mod)
+  state = mod[:linear_release_string_state]
+  if state == nil
+    return nil
+  live = state[:live]
+  remap = {}
+  compact = []
+  by_text = {}
+  strings = mod[:strings]
+  si = 0
+  while si < strings.size()
+    entry = strings[si]
+    old_id = entry[:id]
+    if live[old_id] == true
+      new_id = compact.size()
+      remap[old_id] = new_id
+      compact.push({id: new_id, text: entry[:text]})
+      by_text[entry[:text]] = new_id
+    si += 1
+
+  refs = state[:inst_refs]
+  ri = 0
+  while ri < refs.size()
+    old_id = refs[ri + 2]
+    new_id = remap[old_id]
+    if new_id != old_id
+      wire_set(refs[ri], refs[ri + 1], new_id)
+    ri += 3
+  refs = state[:case_refs]
+  ri = 0
+  while ri < refs.size()
+    old_id = refs[ri + 1]
+    new_id = remap[old_id]
+    if new_id != old_id
+      refs[ri][:string_id] = new_id
+    ri += 2
+
+  mod[:strings] = compact
+  mod[:string_ids_by_text] = by_text
+  mod[:next_string] = compact.size()
+  # content_hash_pass has already consumed its semantic string index; do not
+  # leave either the old-id view or temporary reference lists reachable.
+  mod[:string_index] = nil
+  mod[:linear_release_string_state] = nil
+  nil
+
+-> build_memo_global_rename(mod, rename_map)
   memo = mod[:fn_memo_tables]
   global_rename = {}
 
@@ -652,6 +782,11 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
             global_rename[old_global] = new_global
             memo[mk[mi]] = new_global
       mi += 1
+
+  global_rename
+
+-> rewrite_memo_globals(mod, rename_map)
+  global_rename = build_memo_global_rename(mod, rename_map)
 
   if global_rename.keys().size() == 0
     return nil
@@ -952,6 +1087,78 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   mod[:fn_hash_symbols] = hash_symbols
   mod[:symbol_sidemap_text] = build_symbol_sidemap_text(mod, hash_groups, hash_symbols, fn_info_by_name, prefix_hex)
 
+# Deduplication and compact-symbol assignment used to apply two function-name
+# maps and one memo-global map as three complete instruction walks. Build the
+# final transitive map first, remove dead duplicate bodies, then rewrite every
+# surviving WIRE instruction exactly once.
+-> apply_content_symbols_linear(mod, original_functions, dedup_map, fn_hashes, hash_groups, fn_info_by_name, release_mode = false)
+  functions = []
+  i = 0
+  while i < original_functions.size()
+    if rename_map_get(dedup_map, original_functions[i][:name]) == nil
+      functions.push(original_functions[i])
+    i += 1
+  mod[:functions] = functions
+
+  prefix_hex = symbol_prefix_hex()
+  hash_symbols = build_hash_symbols(hash_groups, prefix_hex)
+  compact_map = {}
+  compact_owners = {}
+  i = 0
+  while i < functions.size()
+    func = functions[i]
+    h = fn_hash_get(fn_hashes, func[:name])
+    if h != nil && func[:incremental_core_frozen] != true
+      compact = hash_symbol_get(hash_symbols, h)
+      if compact != nil && compact != func[:name]
+        owner = compact_owners[compact]
+        abi = function_physical_abi(func)
+        if owner != nil && owner[:symbol] == compact && owner[:abi] != abi
+          raise "content symbol ABI collision for " + compact + ": " + owner[:source] + "=" + owner[:hash] + " " + owner[:abi] + " vs " + func[:name] + "=" + h + " " + abi
+        compact_owners[compact] = {symbol: compact, source: func[:name], hash: h, abi: abi}
+        rename_map_put(compact_map, func[:name], compact)
+    i += 1
+
+  # Compose duplicate -> canonical and canonical -> compact into one direct
+  # source -> final mapping. References to removed duplicate bodies therefore
+  # never need to pass through an intermediate symbol.
+  final_map = {}
+  i = 0
+  while i < original_functions.size()
+    source = original_functions[i][:name]
+    canonical = rename_map_get(dedup_map, source)
+    if canonical == nil
+      canonical = source
+    final_name = rename_map_get(compact_map, canonical)
+    if final_name == nil
+      final_name = canonical
+    if final_name != source
+      rename_map_put(final_map, source, final_name)
+    i += 1
+
+  global_rename = nil
+  if final_map.keys().size() > 0
+    global_rename = build_memo_global_rename(mod, final_map)
+  if final_map.keys().size() > 0 || release_mode
+    wire_postprocess_linear(mod, final_map, global_rename, release_mode)
+  if final_map.keys().size() > 0
+    rewrite_known_name_maps(mod, final_map)
+
+  i = 0
+  while i < functions.size()
+    replacement = rename_map_get(final_map, functions[i][:name])
+    if replacement != nil
+      if functions[i][:original_name] == nil
+        functions[i][:original_name] = functions[i][:name]
+      functions[i][:name] = replacement
+      functions[i][:llvm_internal] = true
+    i += 1
+
+  mod[:fn_symbol_prefix_hex] = prefix_hex
+  mod[:fn_symbol_count] = compact_map.keys().size()
+  mod[:fn_hash_symbols] = hash_symbols
+  mod[:symbol_sidemap_text] = build_symbol_sidemap_text(mod, hash_groups, hash_symbols, fn_info_by_name, prefix_hex)
+
 # Print a readable summary of a function's WIRE instructions.
 -> dump_wire_func(func, mod)
   << "  fn " + func[:name] + "(" + func[:params].size().to_s() + " params)"
@@ -993,7 +1200,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     bi += 1
 
 # Main pass: hash functions without a cached hash, dedup, rewrite references.
--> content_hash_pass(mod, verbose = false)
+-> content_hash_pass(mod, verbose = false, release_mode = false)
   functions = mod[:functions]
   # Persistent Core functions already carry their canonical hashes. They must
   # remain in fn_hashes so compact-symbol maps and sidemaps stay byte-identical,
@@ -1110,7 +1317,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
         # the program delta or another callable Core symbol. The stable source
         # name keeps each published callable present while LLVM names stay
         # short on all subsequent hits.
-        hash_content = "cached-core:" + core_abi_field(func[:name]) + content
+        hash_content = "cached-core:" + content_hash_identity_field(func[:name]) + content
       h = wyhash64_hex_string(hash_content)
       salt = 0
       resolved = false
@@ -1187,82 +1394,22 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
           dedup_count = dedup_count + 1
         ci += 1
     gi += 1
-  if dedup_count > 0
-    # Rewrite all references
-    rewrite_references(mod, rename_map)
-
-    # Remove duplicate functions
-    new_functions = []
-    fi = 0
-    while fi < functions.size()
-      if rename_map_get(rename_map, functions[fi][:name]) == nil
-        new_functions.push(functions[fi])
-      fi += 1
-    mod[:functions] = new_functions
-
-    # Update known_calls, known_pure_calls, fn_memo_tables
-    kcalls = mod[:known_calls]
-    if kcalls != nil
-      kk = kcalls.keys()
-      ki = 0
-      while ki < kk.size()
-        replacement = rename_map_get(rename_map, kcalls[kk[ki]])
-        if replacement != nil
-          kcalls[kk[ki]] = replacement
-        ki += 1
-
-    kpure = mod[:known_pure_calls]
-    if kpure != nil
-      kk = kpure.keys()
-      ki = 0
-      while ki < kk.size()
-        replacement = rename_map_get(rename_map, kpure[kk[ki]])
-        if replacement != nil
-          kpure[kk[ki]] = replacement
-        ki += 1
-
-    # Merge memo tables for deduped functions, and rewrite the
-    # store_memo_ptr `:global` references that used the old name.
-    # Without the instruction rewrite, the emitter declares the
-    # canonical-fn memo global but main still tries to store into
-    # `@__w_<old_name>.memo` — undefined symbol at link time.
-    memo = mod[:fn_memo_tables]
-    global_rename = {}
-    if memo != nil
-      mk = memo.keys()
-      mi = 0
-      while mi < mk.size()
-        old_global = memo[mk[mi]]
-        if old_global != nil
-          dot = old_global.index(".memo")
-          if dot != nil
-            old_fn = old_global.slice(0, dot)
-            replacement = rename_map_get(rename_map, old_fn)
-            if replacement != nil
-              new_global = replacement + ".memo"
-              global_rename[old_global] = new_global
-              memo[mk[mi]] = new_global
-        mi += 1
-
-    if global_rename.keys().size() > 0
+  if env("TUNGSTEN_LINEAR_WIRE_POSTPROCESS") != "0"
+    apply_content_symbols_linear(mod, functions, rename_map, fn_hashes, hash_groups, fn_info_by_name, release_mode)
+  else
+    # Diagnostic fallback retaining the former multi-walk sequencing.
+    if dedup_count > 0
+      rewrite_references(mod, rename_map)
+      new_functions = []
       fi = 0
-      while fi < mod[:functions].size()
-        func = mod[:functions][fi]
-        bi = 0
-        while bi < func[:blocks].size()
-          instrs = func[:blocks][bi][:instructions]
-          ii = 0
-          while ii < instrs.size()
-            inst = instrs[ii]
-            if wire_get(inst, :global) != nil
-              replacement = global_rename[wire_get(inst, :global)]
-              if replacement != nil
-                wire_set(inst, :global, replacement)
-            ii += 1
-          bi += 1
+      while fi < functions.size()
+        if rename_map_get(rename_map, functions[fi][:name]) == nil
+          new_functions.push(functions[fi])
         fi += 1
-
-  apply_compact_symbols(mod, fn_hashes, hash_groups, fn_info_by_name)
+      mod[:functions] = new_functions
+      rewrite_known_name_maps(mod, rename_map)
+      rewrite_memo_globals(mod, rename_map)
+    apply_compact_symbols(mod, fn_hashes, hash_groups, fn_info_by_name)
 
   mod[:fn_hashes] = fn_hashes
   mod[:fn_dedup_count] = dedup_count

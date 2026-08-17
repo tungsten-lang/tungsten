@@ -298,6 +298,41 @@ before and 10.400036s after (a 0.003% difference). The optimization is retained
 as a small, exact-output frontend cleanup; it does not claim a measurable
 whole-build improvement under FullLTO.
 
+## Linear WIRE post-processing
+
+Content deduplication formerly rewrote function references, memo-table globals,
+and compact symbols in separate complete module walks. Release cleanup then
+walked the surviving graph once to remove location metadata, once to discover
+live module strings, and once more to remap their ids. Cached Core name
+preparation had the same separate function-reference and memo-global walks.
+
+The retained path now composes duplicate -> canonical -> compact symbols before
+mutating WIRE. It removes duplicate bodies, builds the final memo-global map,
+and performs every instruction mutation in one linear traversal of the
+surviving functions. That traversal also removes release-only location hooks,
+clears call-site metadata, and records flat `(instruction, field, old_id)`
+references for live strings. After closed-world Core reachability has observed
+the original string table, compaction patches only those recorded references;
+it does not rescan functions or blocks. `TUNGSTEN_LINEAR_WIRE_POSTPROCESS=0`
+retains the former multi-walk path for exact-output comparison and diagnosis.
+
+On 2026-08-16, eight drift-balanced pairs self-compiled `compiler/tungsten.w`
+with incremental reuse disabled and
+`--release --native --fast --no-debug --emit-ll`. Median wall time fell from
+3.654691s to 3.607239s (-1.30%; -1.70% by paired median), and measured compiler
+time fell from 3.1815s to 3.1395s (-1.32%; -1.95% paired). The content-hash and
+post-processing phase fell from 0.3095s to 0.2785s (-10.02%) even though the
+new phase now includes release cleanup that the old timer excluded.
+
+Twenty alternating warm persistent-Core artifact pairs on the protected and
+locked `benchmarks/big_math/program_loops.w` workload fell from 0.145356s to
+0.144114s (-0.85%; -1.26% paired). Twelve forced FullLTO native-link pairs were
+neutral at 8.6443s versus 8.6503s (+0.07%; +0.00008% paired): the byte-identical
+LLVM leaves the much larger optimizer/linker workload unchanged. Legacy and
+linear LLVM plus symbol sidemaps match exactly for protected Core, bignum,
+memoized-function, and physical-frame debug fixtures; exact self-host fixed
+point also holds.
+
 ## In-process parsed-file cache
 
 `compile-batch` now retains a pristine, unflattened slab AST for each parsed

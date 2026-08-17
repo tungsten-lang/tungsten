@@ -3016,6 +3016,16 @@ on macos && arm64
         ret i64 %size
     IR
 
+  # Literal current-C tiny8 schedule: issue eight independent products, then
+  # settle them with one straight add-with-carry chain and publish limb 8.
+  fn __bigint_mul1_8_exact(rp, ap, word) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %size = call i64 asm sideeffect "ldp x8, x9, [${2:x}]\0Amul x10, x8, ${3:x}\0Amul x11, x9, ${3:x}\0Aldp x12, x13, [${2:x}, #16]\0Amul x14, x12, ${3:x}\0Amul x15, x13, ${3:x}\0Aldp x16, x17, [${2:x}, #32]\0Amul x2, x16, ${3:x}\0Amul x3, x17, ${3:x}\0Aldp x4, x5, [${2:x}, #48]\0Amul x6, x4, ${3:x}\0Amul x7, x5, ${3:x}\0Aumulh x8, x8, ${3:x}\0Aadds x8, x11, x8\0Astp x10, x8, [${1:x}]\0Aumulh x8, x9, ${3:x}\0Aadcs x8, x14, x8\0Aumulh x9, x12, ${3:x}\0Aadcs x9, x15, x9\0Astp x8, x9, [${1:x}, #16]\0Aumulh x8, x13, ${3:x}\0Aadcs x8, x2, x8\0Aumulh x9, x16, ${3:x}\0Aadcs x9, x3, x9\0Astp x8, x9, [${1:x}, #32]\0Aumulh x8, x17, ${3:x}\0Aadcs x8, x6, x8\0Aumulh x9, x4, ${3:x}\0Aadcs x9, x7, x9\0Astp x8, x9, [${1:x}, #48]\0Aumulh x8, x5, ${3:x}\0Acinc x8, x8, hs\0Astr x8, [${1:x}, #64]\0Acmp x8, #0\0Amov ${0:x}, #8\0Acinc ${0:x}, ${0:x}, ne", "=r,r,r,r,~{x2},~{x3},~{x4},~{x5},~{x6},~{x7},~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{x17},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %word)
+        ret i64 %size
+    IR
+
   fn __bigint_add1_2_exact(rp, ap, word) (i64 i64 i64) i64
     asm <<~ASM
       ldp x4, x5, [x1]
@@ -3702,6 +3712,24 @@ fn __bigint_mul1_7_raw(a, b) (i64 i64) i64
   word = raw_load_u64(word_box, 16) ## i64
   size = __bigint_mul1_7_exact(rp ## i64, ap ## i64, word) ## i64
   ccall_nobox("w_bigint_mul1_7_finish_raw", result, size)
+
+# Exact positive eight-limb-by-one-limb fixed scalar-word arm.
+fn __bigint_mul1_8_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  abase = a & mask
+  bbase = b & mask
+  asize = raw_load_u32(abase, 4) ## i64
+  wide = abase ## i64
+  word_box = bbase ## i64
+  if asize != 8
+    wide = bbase ## i64
+    word_box = abase ## i64
+  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = wide + 16 ## i64
+  word = raw_load_u64(word_box, 16) ## i64
+  size = __bigint_mul1_8_exact(rp ## i64, ap ## i64, word) ## i64
+  ccall_nobox("w_bigint_mul1_8_finish_raw", result, size)
 
 # Exact positive two-limb minus positive one-limb C arm.  Allocation, the
 # fixed AArch64 schedule, top-limb shrink, and possible i48 demotion remain
@@ -4639,6 +4667,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         if (an == 7 && bn == 1) || (an == 1 && bn == 7)
           return wvalue_from_bits(
             __bigint_mul1_7_raw($value ## i64, other$value ## i64)
+          )
+        if (an == 8 && bn == 1) || (an == 1 && bn == 8)
+          return wvalue_from_bits(
+            __bigint_mul1_8_raw($value ## i64, other$value ## i64)
           )
       return ccall("w_mul", self, other)
     # Squaring (identical boxed bits, flip included) keeps C's dedicated

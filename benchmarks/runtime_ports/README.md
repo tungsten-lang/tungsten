@@ -447,6 +447,17 @@ The public row measured C/native/GMP at 1.887/2.731/2.585 ns.  Counter samples
 attribute 74.8% of cycles to the exact leaf, which has no callees, and none to
 the C word kernel.  Evidence: `bigint_add1_7_exact_results.txt`.
 
+EXACT POSITIVE ADD1@8 CHECKPOINT: this port follows the current optimized C
+arm, including its four upfront `ldp` loads, two-limb common carry chain,
+unlikely branch to the six-`adcs` ripple, duplicated four-`stp` publication,
+and zero/carry return paths.  The cap-eight hot allocation and rare grow-to-
+nine construction are unchanged.  The target won 11/11 pairs, 4.222 ns to
+2.774 ns (0.65751).  Unported @9/@16 controls were unresolved near 1.015;
+the already-native @7 row regressed 7.3% from layout and is preserved as an
+explicit exact-checkpoint cost for the following dispatch optimization.  The
+public @8 row was 1.886/2.781/3.024 ns for C/native/GMP.  Evidence:
+`bigint_add1_8_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

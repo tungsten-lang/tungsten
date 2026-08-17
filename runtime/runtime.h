@@ -786,6 +786,7 @@ WValue w_bigint_sub1_2_alloc_hot_raw(void);
 WValue w_bigint_sub1_2_finish_raw(WValue v);
 WValue w_bigint_sub1_3_finish_raw(WValue v);
 WValue w_bigint_sub1_4_finish_raw(WValue v);
+WValue w_bigint_sub1_5_finish_raw(WValue v);
 WValue w_bigint_finish_sub(WValue v, WValue signed_size);
 WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size);
 WValue w_bigint_mod63_finish_raw(

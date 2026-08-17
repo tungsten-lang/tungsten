@@ -543,6 +543,15 @@ No borrow-death, store scheduling, allocator specialization, or direct seam
 is mixed into this exact checkpoint.  Evidence:
 `bigint_sub1_4_exact_results.txt`.
 
+EXACT POSITIVE SUB1@5 CHECKPOINT: native source now carries the literal
+five-limb C schedule—two `ldp`s plus `ldr`, `subs` plus four `sbcs`, two
+`stp`s plus `str`, and `cset`—with unchanged cap-five allocation and
+shrink-to-four normalization.  A 21-pair 300 ms promotion won 21/21 at
+0.92187 (4.101 ns versus 4.461 ns); the initial seven-cell screen measured
+0.89963 at the target, and every control stayed within 2.3%.  No native-only
+arithmetic, dispatch, allocation, or store-order change is included.
+Evidence: `bigint_sub1_5_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

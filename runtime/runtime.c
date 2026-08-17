@@ -37087,6 +37087,7 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
      * equal-length/one-limb exclusions and make each gate identical to its
      * source worker's route. Every other word/sign shape retains C. */
     if (!neg_b && sa == 3 && sb == 1) return 1;
+    if (!neg_b && sa > 8 && sa <= 4096 && sb == 1) return 1;
     if (neg_b && sa == 2 && sb == 1)
         return BN_BIGINT_SUB1_2_SRC_DIRECT ? 3 : 1;
     if (neg_b && sa == 3 && sb == 1) return 1;
@@ -53696,6 +53697,30 @@ int64_t w_bigint_copy_tail_raw(
         (const uint64_t *)(uintptr_t)source_limbs + i,
         n - i);
     return 0;
+}
+WValue w_bigint_add1_wide_finish_raw(
+    WValue v, int64_t length, int64_t carry) {
+    if (length < 9 || length > INT32_MAX || (carry != 0 && carry != 1))
+        die("w_bigint_add1_wide_finish_raw: invalid state");
+    int32_t n = (int32_t)length;
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact bigint_add_word_into growth arm.  The source ripple has
+         * already published [sum, 0, ..., 0] across the original n limbs. */
+        if ((uint32_t)n >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(n + 1);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0,
+                   (size_t)(n - 1) * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[n] = 1;
+        r->size = n + 1;
+        return bigint_box(r);
+    }
+    r->size = n;
+    return bigint_box(r);
 }
 WValue w_bigint_alloc_hot4_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(4U));

@@ -3226,6 +3226,49 @@ on macos && arm64
         ret i64 %effective
     IR
 
+  # Exact wide prefix/ripple from bigint_add_word_into.  A return <= n is the
+  # first untouched limb; n+1 means carry ran off the top.
+  fn __bigint_add1_wide_prefix(rp, ap, n, word) (i64 i64 i64 i64) i64
+    ll <<~IR
+      entry:
+        %rptr = inttoptr i64 %rp to ptr
+        %aptr = inttoptr i64 %ap to ptr
+        %a0 = load i64, ptr %aptr, align 8
+        %s0 = add i64 %a0, %word
+        store i64 %s0, ptr %rptr, align 8
+        %carry0 = icmp ult i64 %s0, %word
+        %a1ptr = getelementptr i64, ptr %aptr, i64 1
+        %r1ptr = getelementptr i64, ptr %rptr, i64 1
+        %a1 = load i64, ptr %a1ptr, align 8
+        %c0 = zext i1 %carry0 to i64
+        %s1 = add i64 %a1, %c0
+        store i64 %s1, ptr %r1ptr, align 8
+        %carry1 = icmp ult i64 %s1, %c0
+        %has2 = icmp ult i64 2, %n
+        %continue1 = and i1 %carry1, %has2
+        br i1 %continue1, label %ripple, label %done
+
+      ripple:
+        %i = phi i64 [ 2, %entry ], [ %next, %ripple ]
+        %src = getelementptr i64, ptr %aptr, i64 %i
+        %dst = getelementptr i64, ptr %rptr, i64 %i
+        %v = load i64, ptr %src, align 8
+        %s = add i64 %v, 1
+        store i64 %s, ptr %dst, align 8
+        %carry = icmp eq i64 %s, 0
+        %next = add i64 %i, 1
+        %more = icmp ult i64 %next, %n
+        %continue = and i1 %carry, %more
+        br i1 %continue, label %ripple, label %done
+
+      done:
+        %first_untouched = phi i64 [ 2, %entry ], [ %next, %ripple ]
+        %carry_out = phi i1 [ %carry1, %entry ], [ %carry, %ripple ]
+        %grown = add i64 %n, 1
+        %encoded = select i1 %carry_out, i64 %grown, i64 %first_untouched
+        ret i64 %encoded
+    IR
+
   # Exact wide prefix/ripple from bigint_sub_word_into.  Return the first
   # untouched limb so the caller can invoke the retained overlap-copy tail.
   fn __bigint_sub1_wide_prefix(rp, ap, n, word) (i64 i64 i64 i64) i64
@@ -4021,6 +4064,34 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
               __bigint_add1_8_raw($value ## i64, other$value ## i64)
             )
           =>
+            if an > 8 && an <= 4096
+              wide_n = __bigint_effective_size_raw($value ## i64) ## i64
+              result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
+              mask_wide = 140737488355312 ## i64
+              rp_wide = (result$value & mask_wide) + 16 ## i64
+              ap_wide = ($value & mask_wide) + 16 ## i64
+              word = other$limbs[0] ## u64
+              state = __bigint_add1_wide_prefix(
+                rp_wide, ap_wide, wide_n, word ## i64
+              ) ## i64
+              if state > wide_n
+                return wvalue_from_bits(
+                  ccall_nobox(
+                    "w_bigint_add1_wide_finish_raw",
+                    result$value, wide_n, 1 ## i64
+                  ) ## i64
+                )
+              if state < wide_n
+                ccall_nobox(
+                  "w_bigint_copy_tail_raw",
+                  rp_wide, ap_wide, state, wide_n
+                )
+              return wvalue_from_bits(
+                ccall_nobox(
+                  "w_bigint_add1_wide_finish_raw",
+                  result$value, wide_n, 0 ## i64
+                ) ## i64
+              )
             return ccall("w_bigint_add", self, other)
 
     # The declared-BigInt direct route must not turn the still-C-specialized

@@ -771,6 +771,8 @@ WValue w_bigint_alloc_hot(int64_t cap);
 int64_t w_bigint_copy_tail_raw(
     int64_t result_limbs, int64_t source_limbs,
     int64_t start, int64_t length);
+WValue w_bigint_add1_wide_finish_raw(
+    WValue v, int64_t length, int64_t carry);
 WValue w_bigint_alloc_hot4_raw(void);
 WValue w_bigint_release_unfinished_raw(WValue v);
 WValue w_bigint_release_dead_raw(WValue v);

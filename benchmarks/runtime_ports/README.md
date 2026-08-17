@@ -608,6 +608,21 @@ for the 9-limb boundary (20/21 wins) and 0.96156 at 32 limbs (21/21 wins).
 The linked candidate contains no prefix symbol and is 64 text bytes smaller.
 Evidence: `bigint_sub1_wide_inline_results.txt`.
 
+EXACT POSITIVE WIDE ADD1 CHECKPOINT: native source now carries the retained
+`bigint_add_word_into` path for positive 9–4096-limb values plus a positive
+one-limb word.  It preserves exact-cap hot allocation, the unconditional
+limb-one carry step, rare deeper ripple, tuned overlap-qpair suffix copy, and
+the original grow/reallocate finisher.  A matched 11-pair screen won every
+affected width: candidate/base ranged from 0.890 at 12 limbs to 0.975 at 64,
+and remained 0.962–0.965 at 128–256.  Promotions held at 0.92083 for 9 limbs,
+0.91533 for 24, and 0.96365 for 128.  The inactive fixed-eight control also
+moved, however: its 21-pair promotion was 1.05523.  That regression is kept
+visible rather than folded into this literal port.  Stabilizing source layout
+or dispatch is a separate native-only follow-up after the exact C contract is
+checkpointed.  Compiled and interpreted 96-check differential coverage spans
+9–256 limbs, copied tails, full carry propagation, growth, signs, and the
+fixed-eight boundary.  Evidence: `bigint_add1_wide_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

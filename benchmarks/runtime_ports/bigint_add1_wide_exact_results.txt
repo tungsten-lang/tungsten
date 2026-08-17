@@ -1,0 +1,81 @@
+EXACT POSITIVE WIDE ADD1 CHECKPOINT
+
+parent_commit=fd2512f3
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1
+compiler=current-source release/native/fast compiler; Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+
+PORT CONTRACT
+
+The positive 9..4096-limb by positive one-limb addition is a literal source
+port of runtime.c's bigint_add_word_into wide arm:
+
+- allocate exactly alen limbs from the hot allocator;
+- add limb zero, then always perform the limb-one carry step;
+- ripple only while carry survives beyond limb one;
+- copy the untouched suffix with the retained bn_copy_tail implementation;
+- on carry-out, preserve the exact allocate/copy/release/grow sequence;
+- otherwise publish the unchanged positive size without normalization.
+
+The raw prefix deliberately remains outlined in this checkpoint.  It is the
+same C-shaped schedule rather than a new native algorithm.  The copy tail and
+finish paths remain the already-tuned C boundaries.  Native call/layout work
+therefore belongs to a subsequent, separately measured change.
+
+MATCHED TEN-CELL SCREEN
+
+baseline=/private/tmp/sub1-wide-native-inline5-candidate
+candidate=/private/tmp/add1-wide-native-exact
+method=11 alternating process pairs; 110 ms/cell
+raw_json=/private/tmp/add1-wide-exact-screen-fd2512f3.json
+raw_json_sha256=100fc78b45d6288097f8f22b8345dbb202f9a8705bb864727f68ca586e3c4617
+
+cell       baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+add1@8       2.719740      2.857121      1.046203       0.009468    0/11
+add1@9       4.197706      3.871525      0.922143       0.010058   11/11
+add1@12      4.509862      4.059096      0.889568       0.037944   11/11
+add1@16      4.566524      4.188223      0.922238       0.033351   10/11
+add1@24      4.889352      4.452499      0.909802       0.014316   11/11
+add1@32      5.164517      4.859527      0.940889       0.010627   11/11
+add1@48      6.039314      5.895685      0.975900       0.017516   10/11
+add1@64      7.100493      6.937004      0.974795       0.014150   11/11
+add1@128    10.999418     10.616119      0.962114       0.007922   11/11
+add1@256    18.319522     17.715629      0.965078       0.006041   11/11
+
+Every migrated width wins.  The adjacent fixed-eight route is not migrated by
+this patch, but its linked position changed and the screen exposed a repeatable
+regression.  The exact checkpoint records rather than hides that integration
+cost.
+
+PROMOTION
+
+method=21 alternating process pairs; 300 ms/leg
+raw_json=/private/tmp/add1-wide-exact-promotion-fd2512f3.json
+raw_json_sha256=3b785312f5f6204b1a2dfec4db7bc4c60a29e10dd174c0e21991d7382289e306
+
+cell       baseline_ns  candidate_ns  paired_median  paired_IQR  wins  range
+add1@8       2.730680      2.872521      1.055233       0.029209    0/21  1.035025..1.082270
+add1@9       4.199608      3.880269      0.920832       0.023016   21/21  0.874347..0.942982
+add1@24      4.879488      4.439442      0.915331       0.021019   20/21  0.892003..1.047629
+add1@128    10.986145     10.598878      0.963646       0.004828   21/21  0.862605..0.993737
+
+The fixed-eight regression is outside the migrated shape, but it exceeds the
+5% acceptance gate.  Therefore this commit is the exact port checkpoint, not
+the finished native-integration claim.  An attempted outlined wrapper retained
+the fixed-eight regression and gave back the 48/64-limb wins; it was rejected
+and is not part of this diff.
+
+FOCUSED VALIDATION
+
+- current-source release/native/fast compiler built successfully;
+- compiled and interpreted bigint_add1_wide_source_spec passed 96 checks;
+- differential sweep covered widths 9,12,16,24,32,48,64,128,256;
+- copied suffixes, top carry, growth, signs, and fixed8 were covered;
+- native Tungsten lane self-test passed;
+- emitted LLVM assembled and verified with LLVM 22;
+- git diff --check passed.
+
+The supported stage bootstrap was not claimed: the existing C-VM parser
+stopped earlier at compiler source line 4386 with an unmatched delimiter.
+The current-source compiler path used above completed normally.

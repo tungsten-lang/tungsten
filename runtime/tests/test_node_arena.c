@@ -196,6 +196,42 @@ static void test_wire_sequence(void) {
     w_wire_store_reset(0);
 }
 
+static void test_wire_builder_records(void) {
+    static const char *function_names[25] = {
+        "name", "original_name", "params", "extra_params", "return_type",
+        "is_toplevel", "blocks", "var_slots", "var_slot_types", "next_temp",
+        "next_label", "next_var", "next_scope", "loop_stack", "eh_depth",
+        "ensure_stack", "case_stack", "scope_recycle_stack", "recycle_vars",
+        "dynamic_method_calls", "dynamic_method_call_keys",
+        "reflective_method_access", "is_memoized", "exit_label", "result_slot"
+    };
+    WValue fields = w_array_new_inline(65, 25);
+    for (int i = 0; i < 25; i++)
+        w_as_array(fields)->slots[i] = w_symbol(function_names[i]);
+    WValue params = w_array_new_empty();
+    WValue function = w_wire_function_record_new(
+        fields, w_string("worker"), params, w_string("i64"), W_FALSE,
+        w_array_new_empty());
+
+    CHECK(w_wire_kind(function) == 265 && w_wire_field_count(function) == 25,
+          "fixed function builder preserves canonical WIRE shape");
+    CHECK(w_wire_field_load(function, w_symbol("next_temp")) == w_box_int(0),
+          "fixed function builder boxes numeric counters");
+    WValue scope = w_wire_field_load(function, w_symbol("scope_recycle_stack"));
+    CHECK(w_is_array(scope) && w_as_array(scope)->size == 1 &&
+          w_as_array(scope)->slots[0] == W_NIL,
+          "fixed function builder initializes the function recycle scope");
+
+    WValue block_fields = w_array_new_inline(65, 2);
+    w_as_array(block_fields)->slots[0] = w_symbol("label");
+    w_as_array(block_fields)->slots[1] = w_symbol("instructions");
+    WValue block = w_wire_block_record_new(block_fields, w_string("entry"));
+    CHECK(w_wire_kind(block) == 266 && w_wire_field_count(block) == 2 &&
+          w_is_array(w_wire_field_load(block, w_symbol("instructions"))),
+          "fixed block builder initializes its instruction Array");
+    w_wire_store_reset(0);
+}
+
 static WValue canonical_symbol(const char *name) {
     WValue symbol = w_symbol(name);
     if (w_is_slab_sym(symbol))
@@ -377,6 +413,7 @@ int main(void) {
     test_reuse_after_reset();
     test_wire_arena();
     test_wire_sequence();
+    test_wire_builder_records();
     test_core_graph_snapshot();
 
     if (failures) {

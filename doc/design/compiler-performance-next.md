@@ -144,3 +144,29 @@ screens matched. Focused release and debug parity also proves that physical
 debug backtrace attributes survive the early slice.
 Exact self-host fixed point held at SHA-256
 `347cc471eb65e8cec230d681be4d647ba966afebc4b6f568443c93c0268e9c6a`.
+
+## Fixed WIRE function and block builders
+
+Instructions were packed, but each function and basic block still began as a
+temporary Hash passed through `wire_record`. Their append-only WIRE kinds now
+have explicit source-level field schemas. One runtime bulk constructor fills
+the canonical symbol/value pairs, creates the standard empty child
+collections, and primes field-cache entries without allocating or walking a
+temporary Hash. Module construction remains on the generic path: it happens
+once per compile, while this tranche targets 4,000-plus functions and their
+blocks.
+
+Eight alternating release/native/fast self-compile pairs were wall-time
+noise-flat. The median within-pair compiler delta favored fixed builders by
+about 0.4%, and wall time by about 0.5%, but the between-run spread was larger.
+The hardware counters were consistent: retired instructions fell about 0.27%
+and peak RSS fell roughly 22 MiB (1.5%). Generated LLVM was byte-identical.
+The retained claim is therefore reduced allocation and memory pressure, not a
+material standalone compile-time speedup.
+
+The native arena test validates all 25 function ordinals, boxed counters,
+recycle-scope initialization, and block instruction storage. Compiler fixed
+point held exactly at SHA-256
+`7ba84ea636dd7a033b945d0a65ca59ff32f79fe585003e5e2d259538cc47de80`;
+serial release/debug parity checks also passed with physical debug-frame
+attributes intact.

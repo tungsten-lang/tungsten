@@ -141,6 +141,10 @@ typedef struct WWireArena {
 extern WWireArena g_wire_arena;
 WValue  w_wire_alloc(int64_t kind, int64_t field_count);
 WValue  w_wire_alloc_reserve(int64_t kind, int64_t field_count, int64_t spare_fields);
+WValue  w_wire_function_record_new(WValue field_symbols, WValue name,
+                                   WValue params, WValue return_type,
+                                   WValue is_toplevel, WValue extra_params);
+WValue  w_wire_block_record_new(WValue field_symbols, WValue label);
 WValue  w_wire_field_store_at(WValue wire, int64_t index, WValue sym, WValue value);
 WValue  w_wire_field_load(WValue wire, WValue sym);
 WValue  w_wire_field_load_nil(WValue wire, WValue sym);

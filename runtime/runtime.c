@@ -18794,6 +18794,54 @@ WValue w_wire_alloc(int64_t kind, int64_t field_count) {
     return w_wire_alloc_reserve(kind, field_count, 6);
 }
 
+static WValue w_wire_fixed_record_new(int kind, int field_count,
+                                      int spare_fields, WValue field_symbols,
+                                      const WValue *values) {
+    if (!w_is_array(field_symbols))
+        die("WIRE fixed record schema is not an Array");
+    WArray *fields = w_as_array(field_symbols);
+    if (fields->ebits != 65 || fields->size != field_count)
+        die("WIRE fixed record schema has the wrong field count");
+    WValue wire = w_wire_alloc_reserve(kind, field_count, spare_fields);
+    uint32_t off = (uint32_t)w_wire_offset(wire);
+    uint32_t cap = w_wire_record_capacity(off);
+    for (int i = 0; i < field_count; i++) {
+        WValue sym = fields->slots[fields->start + i];
+        if (!w_is_symbol(sym)) die("WIRE fixed record field is not a Symbol");
+        g_wire_arena.base[off + 1u + (uint32_t)i * 2u] = sym;
+        g_wire_arena.base[off + 2u + (uint32_t)i * 2u] = values[i];
+        WWireFieldCacheEntry *cached = w_wire_field_cache_entry(off, sym);
+        cached->off = off;
+        cached->index = (uint16_t)i;
+        cached->sym = sym;
+    }
+    w_wire_record_header(off, (uint32_t)field_count, cap);
+    return wire;
+}
+
+WValue w_wire_function_record_new(WValue field_symbols, WValue name,
+                                  WValue params, WValue return_type,
+                                  WValue is_toplevel, WValue extra_params) {
+    WValue function_scope = w_array_new_inline(65, 1);
+    w_as_array(function_scope)->slots[0] = W_NIL;
+    WValue values[25] = {
+        name, name, params, extra_params, return_type, is_toplevel,
+        w_array_new_empty(), w_hash_new(), w_hash_new(),
+        w_box_int(0), w_box_int(0), w_box_int(0), w_box_int(0),
+        w_array_new_empty(), w_box_int(0), w_array_new_empty(),
+        w_array_new_empty(), function_scope, w_hash_new(),
+        w_array_new_empty(), w_hash_new(), W_FALSE, W_FALSE, W_NIL, W_NIL
+    };
+    return w_wire_fixed_record_new(/*wire_function=*/265, 25, 96,
+                                   field_symbols, values);
+}
+
+WValue w_wire_block_record_new(WValue field_symbols, WValue label) {
+    WValue values[2] = {label, w_array_new_empty()};
+    return w_wire_fixed_record_new(/*wire_block=*/266, 2, 16,
+                                   field_symbols, values);
+}
+
 static uint64_t w_wire_checked_offset(WValue wire) {
     if (!w_is_wire(wire) || w_is_wire_sequence(wire))
         die("WIRE field access: value is not a WIRE record handle");

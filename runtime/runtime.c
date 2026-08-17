@@ -36973,6 +36973,7 @@ WValue w_range_make(int64_t from, int64_t to, int64_t exclusive) {
  * the weak default. */
 static _Atomic int w_bigint_plus_seam_is_c;
 static _Atomic int w_bigint_minus_seam_is_c;
+static _Atomic int w_bigint_sub1_1_seam_is_c;
 static _Atomic int w_bigint_times_seam_is_c;
 
 __attribute__((weak)) WValue __w_bigint_plus_src(WValue a, WValue b) {
@@ -36982,6 +36983,11 @@ __attribute__((weak)) WValue __w_bigint_plus_src(WValue a, WValue b) {
 __attribute__((weak)) WValue __w_bigint_minus_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_minus_seam_is_c, 1, memory_order_relaxed);
     return bigint_sub_any(a, b);
+}
+__attribute__((weak)) WValue __w_bigint_sub1_1_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sub1_1_seam_is_c, 1, memory_order_relaxed);
+    return bigint_sub1_positive_one_limb(
+        w_as_bigint(a)->limbs[0], w_as_bigint(b)->limbs[0]);
 }
 __attribute__((weak)) WValue __w_bigint_times_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_times_seam_is_c, 1, memory_order_relaxed);
@@ -37004,6 +37010,14 @@ WValue bigint_minus_seam(WValue a, WValue b) {
                                               memory_order_relaxed), 1))
         return bigint_sub_any(a, b);
     return __w_bigint_minus_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sub1_1_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sub1_1_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_sub1_positive_one_limb(
+            w_as_bigint(a)->limbs[0], w_as_bigint(b)->limbs[0]);
+    return __w_bigint_sub1_1_src(a, b);
 }
 static inline __attribute__((always_inline))
 WValue bigint_times_seam(WValue a, WValue b) {
@@ -37033,6 +37047,10 @@ static inline int bigint_mul_src_shape(WValue a, WValue b) {
     return la >= 2 && lb >= 2 && la <= 24 && lb <= 24;
 }
 static int g_bigint_src_ops_off = -1;   /* -1 unresolved, 0 route, 1 pin C */
+
+#ifndef BN_BIGINT_SUB1_1_SRC_DIRECT
+#define BN_BIGINT_SUB1_1_SRC_DIRECT 1
+#endif
 
 /* Shape gate for the source arms. The migrated source bodies implement the
  * GENERAL multi-limb case; C's kernels additionally carry small-operand
@@ -37074,7 +37092,8 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
         /* The one positive 1-by-1 subtraction leaf is now exact source.
          * Reuse this existing equal-length exclusion instead of adding a
          * predicate to every unequal word-shaped operation. */
-        if (neg_b && sa == 1) return 1;
+        if (neg_b && sa == 1)
+            return BN_BIGINT_SUB1_1_SRC_DIRECT ? 2 : 1;
         return 0;
     }
     /* Migrated arm: unequal-length multi-limb pairs, which the source
@@ -37243,8 +37262,11 @@ WValue w_sub(WValue a, WValue b) {
         /* Weak-linkage source routing, exactly like w_add's `+` arm. */
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
-        if (__builtin_expect(src_off == 0, 1) && bigint_src_shape(a, b, 1))
-            return bigint_minus_seam(a, b);
+        if (__builtin_expect(src_off == 0, 1)) {
+            int src_shape = bigint_src_shape(a, b, 1);
+            if (src_shape == 2) return bigint_sub1_1_seam(a, b);
+            if (src_shape == 1) return bigint_minus_seam(a, b);
+        }
         return bigint_sub_any(a, b);
     }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_sub_elem(a, b);

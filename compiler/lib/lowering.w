@@ -121,6 +121,7 @@ use lowering/definitions
   mod[:require_bigint_compare_src] = true
   mod[:require_bigint_bitwise_src] = true
   mod[:require_bigint_bitwise_mut_src] = true
+  mod[:require_bigint_sub1_1_src] = true
   mod[:fast_mode] = fast_mode
   mod[:math_mode] = math_mode
   # Must be set BEFORE body lowering: the slab-freeze emission below

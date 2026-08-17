@@ -481,6 +481,18 @@ controls at 1.008/1.015 and inside their IQRs.  The public native row remains
 separate native-only optimization.  Evidence:
 `bigint_sub1_1_exact_results.txt`.
 
+NATIVE SUB1@1 RAW-SEAM FOLLOW-UP: the runtime's already-proven positive
+one-limb shape now calls a dedicated stable native seam rather than the full
+typed `BigInt#-(BigInt)` worker.  The strong Core seam is exactly two limb
+loads, `subs`/`cneg`, signed-size materialization, and a tail branch to the
+unchanged finisher; C-only links retain a weak exact-C default, and a plain
+BigInt `-` reopen still replaces both seams.  A 21-pair 300 ms promotion won
+21/21 at 0.86258 (3.027 ns versus 3.502 ns).  Eleven-pair `sub1@2/@4`,
+`add1@7`, and `mul1@1` controls stayed unresolved inside their IQRs.  Counters
+now attribute 67.3% to the still-general `w_sub` entry, identifying guarded
+direct lowering as the next independent native-only boundary.  Evidence:
+`bigint_sub1_1_native_seam_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

@@ -1,0 +1,78 @@
+EXACT POSITIVE SUB1@6 CHECKPOINT
+
+parent_commit=6be315ce
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; Battery Power 75%
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+gmp=6.3.0
+
+PORT CONTRACT
+
+The positive six-limb by positive one-limb subtraction is a literal port of
+runtime.c's bn_sub_word_a64_fixed case 6: three pair loads, `subs` plus five
+`sbcs`, three pair stores, and `cset lo`.  The cap-six hot allocation and
+shrink-to-five finisher retain bigint_sub_ui_any's order and behavior.  No
+borrow-death, store scheduling, allocator specialization, direct seam, or
+representation change is included.
+
+MATCHED EIGHT-CELL SCREEN
+
+baseline=/private/tmp/sub1-5-native-exact
+candidate=/private/tmp/sub1-6-native-exact
+method=11 alternating process pairs; 110 ms/cell
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sub1@1   3.230996     3.231853      0.994648       0.013638    6/11
+sub1@2   2.669085     2.682015      1.011271       0.040928    4/11
+sub1@3   3.804346     3.981515      1.046999       0.005702    0/11
+sub1@4   3.903600     3.891018      0.989704       0.014752    9/11
+sub1@5   4.110918     3.982341      0.968981       0.006545   11/11
+sub1@6   4.503396     4.137242      0.917687       0.082421   10/11
+sub1@7   4.887959     4.789250      0.989798       0.086459    7/11
+sub1@8   4.791130     4.824232      1.011813       0.081319    4/11
+
+The target wins and every control stays within the 5% gate.  The @3 control's
++4.70% direction is explicitly recorded as a non-executing layout effect.
+
+TARGET PROMOTION
+
+method=21 alternating process pairs; 300 ms/leg
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sub1@6   4.571644     4.118258      0.905710       0.048533   21/21
+
+The paired-ratio range was 0.870593..0.979108.  Every pair won.
+
+PUBLIC MATRIX
+
+command=bin/tungsten bench bignum --operations sub1 --sizes 5,6,7 --accurate --no-capacity --json
+
+width  C_ns   native_ns  GMP_ns
+5      1.870  3.978      2.217
+6      1.866  4.135      2.342
+7      2.025  4.636      2.603
+
+The native @6 row remains slower than both C and GMP.  That integration gap
+is retained for the post-port native-only phase.
+
+COUNTER ROUTE PROOF
+
+command=bin/tungsten flame --counters -d 3 --top 8 -- /private/tmp/sub1-6-native-exact --sweep sub1 6 1 5000
+
+  w_sub                         73.4% cycles
+  _tlv_get_addr                17.7% cycles
+  __bigint_sub1_6_exact          7.6% cycles
+
+The C word kernel is absent.  The linked leaf exactly matches the retained C
+instruction schedule and has no frame or nested call.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_sub1_6_source_spec passed all 16 checks;
+- no borrow, early borrow death, full propagation, 6-to-5 shrink, sizes,
+  round trips, signs, and neighboring widths match C;
+- native lane self-test passed all operations;
+- emitted LLVM assembled and verified with LLVM 22;
+- runtime/runtime.o exports w_bigint_sub1_6_finish_raw;
+- git diff --check passed.

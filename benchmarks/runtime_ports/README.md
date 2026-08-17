@@ -552,6 +552,13 @@ shrink-to-four normalization.  A 21-pair 300 ms promotion won 21/21 at
 arithmetic, dispatch, allocation, or store-order change is included.
 Evidence: `bigint_sub1_5_exact_results.txt`.
 
+EXACT POSITIVE SUB1@6 CHECKPOINT: native source now carries the literal
+six-limb C schedule—three `ldp`s, `subs` plus five `sbcs`, three `stp`s, and
+`cset`—with unchanged cap-six allocation and shrink-to-five normalization.
+A 21-pair 300 ms promotion won 21/21 at 0.90571 (4.118 ns versus 4.572 ns);
+the eight-cell screen measured 0.91769 at the target and every control stayed
+within the 5% gate.  Evidence: `bigint_sub1_6_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

@@ -1,5 +1,6 @@
-# Positive seven-limb BigInt plus positive one-limb BigInt.  On macOS ARM64
-# this is the literal native Tungsten port of C's n==7 fixed add-word arm.
+# Positive seven-limb BigInt plus positive one-limb BigInt.  The literal C
+# checkpoint is followed by a native carry-death split; every result remains
+# checked against the retained C BigInt oracle.
 
 + BigInt
   -> __spec_header_size

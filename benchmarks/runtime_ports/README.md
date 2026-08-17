@@ -458,6 +458,17 @@ explicit exact-checkpoint cost for the following dispatch optimization.  The
 public @8 row was 1.886/2.781/3.024 ns for C/native/GMP.  Evidence:
 `bigint_add1_8_exact_results.txt`.
 
+NATIVE ADD1@7 CARRY-DEATH FOLLOW-UP: with every fixed arm checkpointed, the
+seven-limb native leaf now branches after limb one.  The common path publishes
+the five unchanged high limbs directly; the vanishingly rare surviving-carry
+path executes the former full chain.  A 31-pair 500 ms promotion won 31/31 at
+0.93297 (2.705 ns versus 2.912 ns).  Eleven-pair controls at 1..6, 8, 9, 16,
+32, and 64 limbs stayed within 0.8% except noisy @16, which remained within
+its 3.7% IQR.  The public @7 row became 2.559 ns, just faster than GMP at
+2.597 ns but still behind C at 2.010 ns.  Shared-wrapper consolidation and an
+@7 precheck were rejected because they regressed other fixed arms.  Evidence:
+`bigint_add1_7_carry_death_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

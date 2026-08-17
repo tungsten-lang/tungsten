@@ -2899,11 +2899,12 @@ on macos && arm64
     ASM
 
 
-# Exact AArch64/macOS ports of runtime.c's positive fixed add-word arms.
-# Preserve each C schedule literally: load every limb, run the full adds/adcs
-# chain, publish every result limb, and return the top carry.  The raw finish
-# boundaries below retain the C path's vanishingly rare grow-after-carry
-# policy instead of changing allocation or result construction.
+# AArch64/macOS ports of runtime.c's positive fixed add-word arms.  Every arm
+# was first checkpointed with C's literal schedule.  The seven-limb body then
+# earned the same native carry-death split already present at width eight; all
+# other bodies remain literal.  The raw finish boundaries retain the C path's
+# vanishingly rare grow-after-carry policy instead of changing allocation or
+# result construction.
 on macos && arm64
   fn __bigint_add1_2_exact(rp, ap, word) (i64 i64 i64) i64
     asm <<~ASM
@@ -2978,6 +2979,9 @@ on macos && arm64
     ASM
 
   fn __bigint_add1_7_exact(rp, ap, word) (i64 i64 i64) i64
+    # Native-only follow-up after the literal seven-limb checkpoint: once the
+    # carry dies at limb one, the remaining five limbs are unchanged copies.
+    # The unlikely arm preserves the complete C carry chain bit-for-bit.
     asm <<~ASM
       ldp x4, x5, [x1]
       ldp x6, x7, [x1, #16]
@@ -2985,6 +2989,14 @@ on macos && arm64
       ldr x10, [x1, #48]
       adds x4, x4, x2
       adcs x5, x5, xzr
+      b.cs 1f
+      stp x4, x5, [x0]
+      stp x6, x7, [x0, #16]
+      stp x8, x9, [x0, #32]
+      str x10, [x0, #48]
+      mov x0, xzr
+      b 2f
+    1:
       adcs x6, x6, xzr
       adcs x7, x7, xzr
       adcs x8, x8, xzr
@@ -2995,6 +3007,7 @@ on macos && arm64
       stp x8, x9, [x0, #32]
       str x10, [x0, #48]
       cset x0, cs
+    2:
       ret
     ASM
 

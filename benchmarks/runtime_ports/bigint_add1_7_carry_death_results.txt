@@ -1,0 +1,92 @@
+NATIVE ADD1@7 CARRY-DEATH FOLLOW-UP
+
+parent_commit=98b45cfb29a9bba3ed81e8012fa3b4bdff177457
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+
+CHANGE
+
+The separately committed exact seven-limb checkpoint ran C's unconditional
+`adds` plus six-`adcs` chain.  This native-only follow-up preserves all upfront
+loads, publication stores, allocation, growth, and result representation, but
+branches after limb one:
+
+  common: carry is dead; publish all seven registers and return zero
+  rare:   propagate through limbs 2..6, publish all seven, return final carry
+
+Carry can survive limb one only when that limb is UINT64_MAX.  Because all
+seven inputs were loaded before the first write, both paths preserve the C
+leaf's alias safety.  The linked leaf has no frame or nested call.
+
+MATCHED 11-PAIR SCREEN
+
+baseline=/private/tmp/add1-8-native-exact
+candidate=/private/tmp/add1-7-carry-death
+command=alternating BIN --sweep add1 WIDTH 1 110
+
+width  candidate/baseline  paired_IQR  wins
+1      0.998160            0.003612     9/11
+2      0.999920            0.004941     6/11
+3      0.995618            0.014986     7/11
+4      0.999924            0.004005     6/11
+5      0.998641            0.004432     6/11
+6      1.001595            0.006729     5/11
+7      0.932038            0.019087    11/11
+8      1.000987            0.002307     5/11
+9      0.992795            0.029711     6/11
+16     1.004304            0.036941     5/11
+32     1.007739            0.023412     4/11
+64     1.000854            0.007098     5/11
+
+All controls remain inside 1% and their paired IQRs.  The target is the only
+resolved movement.
+
+TARGET PROMOTION
+
+command=alternating BIN --sweep add1 7 1 500
+pairs=31
+
+baseline median=2.912484 ns
+candidate median=2.705429 ns
+candidate/baseline median=0.932968
+paired-ratio IQR=0.038682
+paired-ratio range=0.877369..0.980783
+candidate wins=31/31
+
+PUBLIC ROW
+
+command=bin/tungsten bench bignum --operations add1 --sizes 6,7,8 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+add1@7 C/native/GMP=2.010/2.558750/2.597 ns
+
+The native lane now narrowly beats GMP but remains 27.3% slower than C.
+
+COUNTER ROUTE PROOF
+
+command=bin/tungsten flame --counters -d 3 --top 8 -- /private/tmp/add1-7-carry-death --sweep add1 7 1 5000
+
+  __bigint_add1_7_exact  77.5% cycles; 78.3% instructions; IPC 8.64
+  _tlv_get_addr          20.3% cycles
+
+The leaf counter row reports zero cache/memory misses per kilo-instruction.
+
+REJECTED ALTERNATIVES
+
+- one shared 2..8 raw allocation/finish wrapper improved default widths but
+  regressed every fixed arm by 2.1% to 9.1%; fully reverted;
+- a dedicated @7 precheck recovered @7 by 10.5% but regressed @8 by 8.5%;
+  fully reverted.
+
+FOCUSED VALIDATION
+
+- all exact 2..8 source specs and native harness self-test passed;
+- the seven-limb spec covers common carry death, rare propagation, full
+  growth, signs, neighbors, exact sizes, and round trips against C;
+- linked disassembly has the intended common/rare paths, no frame, and no
+  nested call;
+- git diff --check passed.

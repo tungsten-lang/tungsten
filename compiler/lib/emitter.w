@@ -3005,6 +3005,56 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul1_1_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul1_1_src(i64, i64) nounwind\n"
 
+  # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
+  # proves and orients the scalar-word shape without changing receiver order;
+  # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps
+  # ordinary open-world precedence.
+  bigint_mul1_2_fn = nil
+  bigint_mul1_2_matches = 0
+  bm2fi = 0
+  while bm2fi < mod[:functions].size()
+    bm2ff = mod[:functions][bm2fi]
+    if bm2ff[:source_class] == nil && bm2ff[:source_method] == "__bigint_mul1_2_raw"
+      bigint_mul1_2_matches += 1
+      bigint_mul1_2_fn = bm2ff
+    bm2fi += 1
+  if bigint_mul1_2_matches > 1
+    << "error: __bigint_mul1_2_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul1_2_src] == true && bigint_mul1_2_fn == nil
+    << "error: required native BigInt mul1@2 helper is missing; __w_bigint_mul1_2_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul1_2_target = bigint_times_reopened_fn
+  if bigint_mul1_2_target == nil
+    bigint_mul1_2_target = bigint_mul1_2_fn
+  if bigint_mul1_2_target != nil
+    bm2_signature_ok = bigint_mul1_2_target[:params] != nil && bigint_mul1_2_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      bm2_signature_ok = bm2_signature_ok && bigint_mul1_2_target[:source_kind] == :fn_def
+      bm2_signature_ok = bm2_signature_ok && bigint_mul1_2_target[:raw_i64_signature] == true
+      bm2_signature_ok = bm2_signature_ok && bigint_mul1_2_target[:raw_return_type] == :i64
+    if !bm2_signature_ok
+      << "error: invalid native BigInt mul1@2 seam target"
+      exit(1)
+    bm2_cc = ""
+    if bigint_mul1_2_target[:call_conv] != nil && bigint_mul1_2_target[:call_conv] != ""
+      bm2_cc = bigint_mul1_2_target[:call_conv] + " "
+    bm2_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      # Keep the exact port behind one compact seam call for its fidelity
+      # checkpoint. Inlining the complete allocation + fixed kernel here
+      # moves the established mul1@3..8 dispatch ladder in w_mul; native-only
+      # integration is a separately measured follow-up.
+      bm2_attrs += " noinline"
+    fn_out << "define i64 @__w_bigint_mul1_2_src(i64 %a, i64 %b)" + bm2_attrs + " {\n"
+    fn_out << "  %r = tail call " + bm2_cc + "i64 @" + bigint_mul1_2_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul1_2_src"] = false
+    known_fns["__w_bigint_mul1_2_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul1_2_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul1_2_src(i64, i64) nounwind\n"
+
   # Unary BigInt#isqrt has the same stable source/weak-C seam contract as the
   # binary operators above. Its source body owns the one- and two-limb leaves
   # and retains the C divide-and-conquer boundary for wider values.

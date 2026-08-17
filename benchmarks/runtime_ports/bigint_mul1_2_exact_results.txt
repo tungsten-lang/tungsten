@@ -1,0 +1,103 @@
+BIGINT POSITIVE TWO-LIMB BY ONE-LIMB MULTIPLY — EXACT SOURCE CHECKPOINT
+========================================================================
+
+Scope
+-----
+
+This checkpoint ports the distinct positive heap-BigInt 2-by-1 arm from
+`bigint_mul_n1_tiny` without changing its arithmetic, allocation class, or
+result policy. Native Tungsten allocates the same hot capacity-4 result,
+loads the same two source limbs, issues both unsigned 64-by-64 products, and
+settles them with the same one-bit carry chain. The raw finisher publishes
+signed size +2 or +3 exactly as C does.
+
+The public seam preserves receiver order so a plain BigInt `*` reopen keeps
+normal open-world precedence. Only distinct positive 2-by-1 and 1-by-2 heap
+shapes are admitted. Pointer-identical squaring, signs, 1-by-1, every other
+N-by-1 width, and internal runtime multiplication keep their existing paths.
+The width check precedes the source-route check so neighboring widths do not
+take a route-dependent branch.
+
+This is the exact-port checkpoint. It contains no native-only arithmetic,
+closed-world dispatch, or lifecycle redesign.
+
+Build
+-----
+
+base_commit=1e1dedce
+host=Apple M5 Max, arm64 macOS 26.6.1
+power=Battery Power, 10% at final metadata capture
+compiler=Homebrew clang 22.1.8
+compiler_path=/private/tmp/tungsten-compiler-mul1-2-ool
+compiler_sha256=43ac951ab24450ff8347d2e20d6fa84d76c4c5485e1716efa87ad565b24557cb
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+production_candidate=/private/tmp/mul1-2-native-shapefirst-final
+production_candidate_sha256=eacc84d43484cc023a35432c1b072307ebf542038499407da8f2095d3f4e52fb
+same_binary=/private/tmp/mul1-2-native-runtime-knob-final
+same_binary_sha256=03910a428a28ef050608037242ba2391484eb76a84a563ccbca1f94144f0031b
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic binary was built with
+`-DBN_BENCH_RUNTIME_MUL1_2_SRC_KNOB=1`. Alternating processes set only
+`TUNGSTEN_BN_MUL1_2_SRC=0/1`; code layout and every other source route are
+identical. Production compiles the knob away to constant true.
+
+method=11 alternating process pairs; 110 ms/leg
+raw_json=/private/tmp/mul1-2-native-runtime-knob-final-screen-1e1dedce.json
+raw_json_sha256=fac9e8b4b3ec3d1dfdab40b2daa3eae38fc153ba4c7a03723897ac6aba733074
+
+cell     C-route_ns  source-route_ns  paired_median  paired_IQR  wins
+mul1@2   4.712304    5.191125         1.113794       0.069267     0/11
+mul1@3   3.989375    3.977912         0.998176       0.012505     7/11
+mul1@4   4.209277    4.178872         0.995286       0.017798     7/11
+mul1@8   5.185913    5.134186         1.004305       0.088338     5/11
+mul1@16  6.188314    6.202057         0.993314       0.043131     6/11
+
+Only mul1@2 changes route. All four untouched controls remain within 0.7% by
+paired median; @3 and @4 are exact parity at this resolution.
+
+Promotion
+---------
+
+method=21 alternating process pairs; 300 ms/leg; same binary and toggle
+raw_json=/private/tmp/mul1-2-native-runtime-knob-final-promotion-1e1dedce.json
+raw_json_sha256=793f88d66544ddcfc2e1e35f0ad9ca006b4f3d6df146af7ee9533eae1bd937e0
+
+cell     C-route_ns  source-route_ns  paired_median  paired_IQR  wins
+mul1@2   4.776386    5.183755         1.096465       0.018419     0/21
+
+The exact source route is 9.6% slower than the retained C route. This is
+recorded as the cost of the fidelity checkpoint, not presented as a speed
+win. The paired ratio is useful despite the low-battery host state because
+both modes are the same executable and alternate process order; absolute
+times should not be compared with an AC campaign.
+
+Counter route proof
+-------------------
+
+command=bin/tungsten flame --counters -d 3 --top 16 --silent -- \
+  /private/tmp/mul1-2-native-shapefirst-final --sweep mul1 2 100 5000
+
+  w_mul                       65.3% cycles; IPC 8.97
+  w_bigint_alloc_hot4_raw     22.0% cycles; IPC 8.97
+  _tlv_get_addr                7.4% cycles; IPC 9.02
+  __w_bigint_mul1_2_src        4.9% cycles; IPC 8.93
+
+Sampled miss rates round to zero. The residual is instruction/dispatch/TLS
+work, not a memory-bound arithmetic kernel. That identifies the following
+native-only tranche: closed-world direct shape selection and seam/allocation
+integration, without changing this committed exact leaf.
+
+Focused validation
+------------------
+
+- compiled and interpreted arithmetic/representation spec passed 16 checks;
+- plain BigInt `*` reopen spec passed for both operand orders and direct seam;
+- production and diagnostic native-lane self-tests passed;
+- emitted LLVM assembled and verified under LLVM 22;
+- linked exact leaf contains `ldp`, two `mul`, two `umulh`, one `adds`, one
+  carry materialization, paired result stores, and exact +2/+3 publication;
+- runtime compiled with `BN_MUL_N1_SMALL_STRAIGHT=0` and `BN_MUL_N1_FAST=0`;
+- `git diff --check` passed.

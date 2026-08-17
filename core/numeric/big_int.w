@@ -2951,6 +2951,18 @@ on macos && arm64
         ret i128 %product
     IR
 
+  # Literal AArch64 schedule emitted for runtime.c's positive 2-by-1
+  # scalar-word arm. Both products issue independently; one flag chain joins
+  # high(product0) to low(product1), then the final carry word determines the
+  # exact two- or three-limb result size.
+  fn __bigint_mul1_2_exact(rp, ap, word) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %size = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Amul x6, x4, ${3:x}\0Amul x7, x5, ${3:x}\0Aumulh x4, x4, ${3:x}\0Aadds x4, x7, x4\0Astp x6, x4, [${1:x}]\0Aumulh x5, x5, ${3:x}\0Acinc x5, x5, hs\0Astr x5, [${1:x}, #16]\0Acmp x5, #0\0Amov ${0:x}, #2\0Acinc ${0:x}, ${0:x}, ne", "=r,r,r,r,~{x4},~{x5},~{x6},~{x7},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %word)
+        ret i64 %size
+    IR
+
   fn __bigint_add1_2_exact(rp, ap, word) (i64 i64 i64) i64
     asm <<~ASM
       ldp x4, x5, [x1]
@@ -3522,6 +3534,26 @@ fn __bigint_mul1_1_raw(a, b) (i64 i64) i64
   ccall_nobox(
     "w_bigint_mul1_1_finish_raw", low ## i64, high ## i64
   )
+
+# Exact positive two-limb-by-one-limb scalar-word arm. Preserve receiver
+# order at the operator seam, then orient only the raw magnitudes after the
+# shape gate has proved that exactly one operand has two limbs.
+fn __bigint_mul1_2_raw(a, b) (i64 i64) i64
+  mask = 140737488355327 ## i64
+  abase = a & mask
+  bbase = b & mask
+  asize = raw_load_u32(abase, 4) ## i64
+  wide = abase ## i64
+  word_box = bbase ## i64
+  if asize != 2
+    wide = bbase ## i64
+    word_box = abase ## i64
+  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = wide + 16 ## i64
+  word = raw_load_u64(word_box, 16) ## i64
+  size = __bigint_mul1_2_exact(rp ## i64, ap ## i64, word) ## i64
+  ccall_nobox("w_bigint_mul1_2_finish_raw", result, size)
 
 # Exact positive two-limb minus positive one-limb C arm.  Allocation, the
 # fixed AArch64 schedule, top-limb shrink, and possible i48 demotion remain
@@ -4435,6 +4467,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         if an == 1 && bn == 1 && $value != other$value
           return wvalue_from_bits(
             __bigint_mul1_1_raw($value ## i64, other$value ## i64)
+          )
+        if (an == 2 && bn == 1) || (an == 1 && bn == 2)
+          return wvalue_from_bits(
+            __bigint_mul1_2_raw($value ## i64, other$value ## i64)
           )
       return ccall("w_mul", self, other)
     # Squaring (identical boxed bits, flip included) keeps C's dedicated

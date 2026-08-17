@@ -54399,6 +54399,7 @@ WValue w_bigint_alloc_hot4_raw(void) {
 WValue w_bigint_alloc_hot8_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(8U));
 }
+__attribute__((always_inline))
 WValue w_bigint_alloc_hot16_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(16U));
 }

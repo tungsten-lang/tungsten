@@ -1,0 +1,137 @@
+BIGINT SQR@5 — CLOSED-WORLD NATIVE DISPATCH FOLLOW-UP
+======================================================
+
+Scope
+-----
+
+This is the separately measured native optimization after exact five-limb
+square checkpoint 84b75272. The fifteen products, doubled cross terms, carry
+order, ten stores, allocation class, and +9/+10 result publication remain the
+literal committed C port.
+
+At a syntactic `a * a` site in a program declaring both
+`Tungsten.PROTECT_THE_CORE!` and `Tungsten.LOCK_THE_DOORS!`, receiver identity
+and method-table immutability are compile-time facts. The retained shape:
+
+  - leaves the caller's measured dense sqr@1..3 switch unchanged;
+  - tests only size 5 in a new outlined default dispatcher;
+  - executes that test before any frame, so every non-5 width tail-branches to
+    the byte-identical committed sqr@4 dispatcher;
+  - inlines the exact 134-instruction sqr@5 leaf into the size-5 arm; and
+  - inlines the existing capacity-16 allocator wrapper, eliminating two
+    native wrapper calls while retaining the TLS hot-slot lookup and fallback.
+
+The first combined sqr@4/5 dispatcher was rejected: LLVM hoisted its 48-byte
+frame onto every default width and produced >1% control costs. Splitting it
+into a one-test sqr@5 dispatcher followed by a tail-chain restored the old
+paths. Counter profiling then showed the remaining candidate as arithmetic
+and allocation-bound rather than memory-bound; measured removal of the two
+wrapper calls supplied the final win without modifying arithmetic.
+
+`TUNGSTEN_BIGINT_SQR5_LOCKED_DIRECT=0` restores the exact-checkpoint locked
+route and is the causal benchmark control. The capacity-16 allocator is also
+used by the existing exact `mul1@8` source leaf, so that family is included in
+the control matrix rather than treated as structurally unaffected.
+
+Build
+-----
+
+base_commit=84b75272d916db743200cda9e294d723bb096e6a
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-sqr5-native-final
+compiler_sha256=0dd3f7e9c34b00195437218341cf3ac0322dd26b7c07e3fa8ae27bc2f72e1afb
+baseline=/private/tmp/bench_big_math_tungsten_sqr5_native_final_control
+baseline_sha256=6c4a66bae7f11a5c26abd7912baeef056552bc82f58202416e4b001ef446feda
+candidate=/private/tmp/bench_big_math_tungsten_sqr5_native_final
+candidate_sha256=19f7f3cf14ddd8ba1170975444ead4911eac87583fe7138f537f6ca8b3daf874
+fixed_point_ll_sha256=088a53f63fab2a4128410003c3bbb2f7d5d03dcae92a623a0f90210f3743b774
+power=AC, battery 100 percent
+
+Matched square screen
+---------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr5-native-final-screen-clean-84b75272-m5max-20260817.json
+raw_json_sha256=addb9eb52593af11958d7c9fef43c14e2ea988a438cdd14105850fc0b65d120f
+
+cell   baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@1      0.873208      0.873031        0.999814    0.005370   7/11
+sqr@2      1.329850      1.328279        0.998819    0.009588   9/11
+sqr@3      2.194014      2.188968        1.000471    0.014561   5/11
+sqr@4      4.527366      4.512188        0.996039    0.011745   7/11
+sqr@5      6.575561      6.114041        0.926093    0.024357  10/11
+sqr@8     16.802316     16.836220        1.002018    0.003805   3/11
+sqr@16    48.962064     49.070053        1.002754    0.003626   4/11
+sqr@32   166.959840    167.753505        1.005508    0.002968   2/11
+
+The target improves 7.39%; every neighboring square control remains within
+0.56%.
+
+Target promotion
+----------------
+
+method=31 alternating process pairs; 3 internal runs; 500 ms target
+raw_json=/private/tmp/bigint-sqr5-native-final-promotion-84b75272-m5max-20260817.json
+raw_json_sha256=bac7e20ee674b049d91f825fdda1b9e48ca15e8358acc2c956074ba725852a76
+
+cell   baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@5      6.720357      6.130894        0.923247    0.009328  31/31
+
+The final native integration is 7.68% faster than the exact-checkpoint locked
+route, with every promoted pair winning.
+
+Ordinary-operation controls
+---------------------------
+
+The final 11-pair `mul1@1,2,4,8,16,32` screen measured candidate/baseline
+1.0015, 0.9996, 0.9983, 0.9808, 0.9984, and 1.0088. The capacity-16
+`mul1@8` consumer improves 1.92%; no cell regresses by 1%.
+
+The final 11-pair `mul@2,4,8,16,32` screen measured 0.9821, 0.9922, 1.0033,
+0.9996, and 0.9993. No ordinary multiplication cell regresses by 0.4%.
+
+Raw artifacts:
+
+  - `/private/tmp/bigint-sqr5-native-final-mul1-controls-84b75272-m5max-20260817.json`
+    (sha256 `7abd24e52be2e6c2954684b9e04b1b9d1d99856193a1cf1f75d2f3eddfc60ae1`)
+  - `/private/tmp/bigint-sqr5-native-final-mul-controls-84b75272-m5max-20260817.json`
+    (sha256 `143da43878a310b22397a0031c87c8ea98a6bfecd98001ec3d225b21e1ae0e90`)
+
+Public three-lane row
+---------------------
+
+method=9 runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr5-native-final-public-84b75272-m5max-20260817.json
+raw_json_sha256=94ca63a726266ddf91784379abb45ad5924a881ae782a4d5e2d14e22ccf0cf4a
+
+cell   Tungsten_C_ns  Tungsten_ns  GMP_ns  fastest
+sqr@5        6.193000     6.103786  10.625  tungsten-native
+
+The native Tungsten lane is 1.44% faster than the direct Tungsten C lane and
+42.55% faster than GMP. Both Tungsten lanes retain immutable boxed results;
+the native lane exercises ordinary `a * a` under the two closed-world
+contracts.
+
+Validation gates
+----------------
+
+  - candidate and feature-off locked-direct specs pass, including positive
+    and overlay-negative five-limb identities;
+  - compiled representation, 100,000 native/C differential, and open-world
+    reopen specs pass after the leaf/allocator inline changes;
+  - candidate and feature-off native-lane self-tests pass;
+  - compiler, spec, and native-lane LLVM modules assemble and verify under
+    LLVM 22;
+  - candidate IR contains the new noinline size-5 dispatcher followed by the
+    retained noinline size-4 dispatcher; feature-off IR contains only size 4;
+  - linked AArch64 tests size 5 before its 32-byte active frame, inlines the
+    exact arithmetic and allocator wrapper, and tail-branches every non-5
+    width to an instruction-identical sqr@4 dispatcher;
+  - the final `tungsten flame --counters rates` profile reports IPC 7.67 and
+    effectively zero steady-state cache/memory misses; no memory rewrite is
+    justified;
+  - the focused runtime object builds cleanly;
+  - two self-host compiler generations emit byte-identical LLVM; and
+  - `git diff --check` passes.

@@ -45,6 +45,7 @@ a2 = (1 << 126) + 113
 b2 = (1 << 125) + 131
 a3 = (1 << 190) + 127
 a4 = (1 << 254) + 139
+a5 = (1 << 318) + 151
 check("schoolbook two by two", multiply(a2, b2), builtin(a2, b2))
 a24 = (1 << (64 * 24 - 1)) + 149
 b24 = (1 << (64 * 24 - 2)) + 163
@@ -68,6 +69,9 @@ check("three-limb overlay-negative square", square(0 - a3),
 check("four-limb syntactic square", square(a4), builtin(a4, a4))
 check("four-limb overlay-negative square", square(0 - a4),
       builtin(0 - a4, 0 - a4))
+check("five-limb syntactic square", square(a5), builtin(a5, a5))
+check("five-limb overlay-negative square", square(0 - a5),
+      builtin(0 - a5, 0 - a5))
 same = a2
 check("dynamic identity square", multiply(a2, same), builtin(a2, a2))
 

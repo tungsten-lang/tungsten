@@ -3577,7 +3577,7 @@ ewscope_md_state = {ids: {}}
     used_runtime_fns["w_slab_init_static"] = true
 
   decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns) + seam_decls.to_s()
-  if ccall_needed.has_key?("__w_bigint_sqr4_locked_exact")
+  if ccall_needed.has_key?("__w_bigint_sqr4_locked_exact") || ccall_needed.has_key?("__w_bigint_sqr5_locked_exact")
     # Keep the large exact sqr@4 worker and its size test behind one outlined
     # default-path call. Inlining either into the locked caller makes LLVM
     # rebalance the already-measured 1..3 dispatch and clones hundreds of
@@ -3595,6 +3595,24 @@ ewscope_md_state = {ids: {}}
       exact:
         %er = tail call i64 @w_bigint_mul_builtin_exact(i64 %a, i64 %b)
         ret i64 %er
+      }
+
+    IR
+  if ccall_needed.has_key?("__w_bigint_sqr5_locked_exact")
+    # Test only the new size before tail-chaining to the byte-for-byte retained
+    # sqr@4 dispatcher. Keeping the two outlined levels separate prevents the
+    # sqr@5 allocation/call frame from being hoisted onto every default width.
+    decls_out = decls_out + <<~IR
+      define i64 @__w_bigint_sqr5_locked_exact(i64 %a, i64 %b, i64 %size) nounwind noinline {
+      entry:
+        %is5 = icmp eq i64 %size, 5
+        br i1 %is5, label %five, label %prior
+      five:
+        %s5 = tail call i64 @__w_bigint_sqr5_src(i64 %a, i64 %b)
+        ret i64 %s5
+      prior:
+        %pr = tail call i64 @__w_bigint_sqr4_locked_exact(i64 %a, i64 %b, i64 %size)
+        ret i64 %pr
       }
 
     IR

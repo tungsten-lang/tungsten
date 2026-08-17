@@ -3511,18 +3511,24 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       # header loads.  Complete it before the generic magnitude, range,
       # pointer, and boxed-Boolean sign machinery; arithmetic/storage remain
       # byte-for-byte the separately checkpointed C port.
-      if an == 2 && bn == 1
-        return wvalue_from_bits(
-          __bigint_add1_2_raw($value ## i64, other$value ## i64)
-        )
-      if an == 3 && bn == 1
-        return wvalue_from_bits(
-          __bigint_add1_3_raw($value ## i64, other$value ## i64)
-        )
-      if an == 4 && bn == 1
-        return wvalue_from_bits(
-          __bigint_add1_4_raw($value ## i64, other$value ## i64)
-        )
+      if bn == 1
+        case an
+          1 =>
+            return ccall("w_bigint_add", self, other)
+          2 =>
+            return wvalue_from_bits(
+              __bigint_add1_2_raw($value ## i64, other$value ## i64)
+            )
+          3 =>
+            return wvalue_from_bits(
+              __bigint_add1_3_raw($value ## i64, other$value ## i64)
+            )
+          4 =>
+            return wvalue_from_bits(
+              __bigint_add1_4_raw($value ## i64, other$value ## i64)
+            )
+          =>
+            return ccall("w_bigint_add", self, other)
 
     # The declared-BigInt direct route must not turn the still-C-specialized
     # one-limb neighbors into the generic source kernel.  Return them to the

@@ -405,6 +405,19 @@ the separate dispatch follow-up, @1 and @4 controls regressed about 3% while
 carry death, full 2→3 growth, exact header sizes, round trips, signs, and
 neighbors.  Evidence: `bigint_add1_2_exact_results.txt`.
 
+NATIVE FIXED ADD-WORD DISPATCH FOLLOW-UP: after the exact 2/3/4-limb leaves
+were separately checkpointed, their repeated shape tests were replaced by one
+`bn == 1` gate and a compact `case an` selector.  Arms 2, 3, and 4 still call
+the byte-for-byte exact ports; arm 1 and the default tail return directly to
+the unchanged C boundary.  Final AArch64 lowering is a comparison tree, not a
+jump table, and no arithmetic, allocation, growth, or normalization policy is
+changed.  Across matched 11-pair runs every tested width from 1 through 64 won
+all 11 pairs.  Candidate/baseline medians were 0.647 at @2, 0.966 at @3,
+0.959 at @4, and 0.925--0.959 at the unported 5..64 controls.  The public
+native lane remains slower than C through @8, while beating GMP from @16;
+those remaining gaps are inputs to later native-only work, not reasons to
+change the exact ports.  Evidence: `bigint_add1_fixed_dispatch_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

@@ -2899,11 +2899,11 @@ on macos && arm64
     ASM
 
 
-# Exact AArch64/macOS port of runtime.c's positive three-limb add-word arm.
-# Preserve the C schedule literally: load all three limbs, run the full
-# adds/adcs chain, publish all three result limbs, and return the top carry.
-# The raw finish boundary below retains the C path's vanishingly rare
-# cap-three to cap-four growth instead of changing the allocation policy.
+# Exact AArch64/macOS ports of runtime.c's positive fixed add-word arms.
+# Preserve each C schedule literally: load every limb, run the full adds/adcs
+# chain, publish every result limb, and return the top carry.  The raw finish
+# boundaries below retain the C path's vanishingly rare grow-after-carry
+# policy instead of changing allocation or result construction.
 on macos && arm64
   fn __bigint_add1_3_exact(rp, ap, word) (i64 i64 i64) i64
     asm <<~ASM
@@ -2914,6 +2914,20 @@ on macos && arm64
       adcs x6, x6, xzr
       stp x4, x5, [x0]
       str x6, [x0, #16]
+      cset x0, cs
+      ret
+    ASM
+
+  fn __bigint_add1_4_exact(rp, ap, word) (i64 i64 i64) i64
+    asm <<~ASM
+      ldp x4, x5, [x1]
+      ldp x6, x7, [x1, #16]
+      adds x4, x4, x2
+      adcs x5, x5, xzr
+      adcs x6, x6, xzr
+      adcs x7, x7, xzr
+      stp x4, x5, [x0]
+      stp x6, x7, [x0, #16]
       cset x0, cs
       ret
     ASM
@@ -2982,6 +2996,16 @@ fn __bigint_add1_3_raw(a, b) (i64 i64) i64
   word = raw_load_u64(bp, 0) ## i64
   carry = __bigint_add1_3_exact(rp, ap, word) ## i64
   ccall_nobox("w_bigint_add1_3_finish_raw", result, carry)
+
+fn __bigint_add1_4_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot", 4) ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  word = raw_load_u64(bp, 0) ## i64
+  carry = __bigint_add1_4_exact(rp, ap, word) ## i64
+  ccall_nobox("w_bigint_add1_4_finish_raw", result, carry)
 
 # Exact floor square root for one machine-word magnitude. A hardware f64
 # square root supplies a 32-bit seed; integer correction makes the result
@@ -3471,11 +3495,15 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         return wvalue_from_bits(
           __bigint_add1_3_raw($value ## i64, other$value ## i64)
         )
+      if an == 4 && bn == 1
+        return wvalue_from_bits(
+          __bigint_add1_4_raw($value ## i64, other$value ## i64)
+        )
 
     # The declared-BigInt direct route must not turn the still-C-specialized
     # one-limb neighbors into the generic source kernel.  Return them to the
     # direct BigInt tree before any generic magnitude/sign setup; the migrated
-    # positive 3x1 arm above is the sole exception.
+    # positive fixed arms above are the sole exceptions.
     if an == 1 || an == -1 || bn == 1 || bn == -1
       return ccall("w_bigint_add", self, other)
 

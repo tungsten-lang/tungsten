@@ -772,6 +772,7 @@ WValue w_bigint_release_dead_raw(WValue v);
 WValue w_bigint_finish_add(WValue v, WValue signed_size);
 WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size);
 WValue w_bigint_add1_3_finish_raw(WValue v, uint64_t carry);
+WValue w_bigint_add1_4_finish_raw(WValue v, uint64_t carry);
 WValue w_bigint_finish_sub(WValue v, WValue signed_size);
 WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size);
 WValue w_bigint_mod63_finish_raw(

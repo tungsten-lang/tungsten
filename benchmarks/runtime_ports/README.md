@@ -378,6 +378,21 @@ C is retained honestly.  Broader 2..64-limb controls all improved; attempted
 private pre-entry and header-store shortcuts were rejected because they
 regressed controls.  Evidence: `bigint_add1_3_native_results.txt`.
 
+EXACT POSITIVE ADD1@4 CHECKPOINT: the adjacent positive four-limb receiver
+plus positive one-limb BigInt arm now has the same exact-first treatment.
+Native source contains C's literal two-`ldp`, `adds`/three-`adcs`, two-`stp`,
+`cset` schedule; it requests the same hot cap-four result and preserves the
+rare grow-to-five epilogue byte-for-byte.  Compiled and interpreted focused
+checks cover no carry, carry death at two depths, full four-limb propagation,
+the 4→5 growth, exact header sizes, round trips, signs, and neighboring
+widths.  In an 11-pair matched test the source port won every pair, reducing
+the native lane from 4.150 ns to 2.527 ns (candidate/baseline 0.60958).  The
+public row remained slower than C/GMP at 2.528 ns versus 1.805/2.089 ns, so
+the exact schedule is checkpointed without claiming native parity.  Counter
+profiles move the row from `w_bigint_add`/`bn_add_word_a64_fixed` to the
+leaf-only `__bigint_add1_4_exact`.  Evidence:
+`bigint_add1_4_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

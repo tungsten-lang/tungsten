@@ -223,3 +223,31 @@ Exact self-host fixed point held at SHA-256
 `477f77c032d06da8e364f022799f33e87d7fb349d1690b6c437e3a1e4b3c0fdf`.
 Focused tests cover process and disk hits, corruption repair, exact LLVM and
 sidemaps, debug-frame bypass, and interaction with early Core reachability.
+
+## Direct-buffer instruction emission
+
+The emitter previously built a fresh String for every WIRE instruction, then
+immediately appended it to the function StringBuffer. Common fixed-shape
+opcodes now append their pieces directly: loads/stores, pointer and GEP
+plumbing, integer arithmetic/comparisons, ordinary direct calls, branches,
+returns, and scope markers. AST intrinsics, inline caches, loop metadata, and
+other complex renderers retain the established String-returning path. The
+`TUNGSTEN_DIRECT_BUFFER_EMIT=0` switch restores that path for exact A/B checks.
+
+Eight same-compiler alternating release/native/fast self-compile pairs reduced
+median emitter time from 883.5 ms to 649.0 ms (-26.54%), measured compiler time
+from 3.028 s to 2.774 s (-8.39%), and external wall time from 3.60 s to 3.35 s
+(-6.94%). Retired instructions fell 6.22% and median peak RSS fell about
+55.7 MiB. Every full-compiler LLVM file was byte-identical.
+
+With rendered-function caching disabled so the emitter remained in the work
+set, eight protected bignum artifact pairs reduced emitter time from 22 ms to
+16 ms (-27.27%), compiler time from 90 ms to 85 ms (-5.56%), external wall
+time from 190 ms to 180 ms (-5.26%), retired instructions by 4.47%, and peak
+RSS by about 1.1 MiB. LLVM and symbol sidemaps were exact. Focused release and
+debug parity additionally covers ordinary, protected-Core, locked class-set,
+and bignum fixtures while retaining physical debug-frame attributes. Exact
+self-host fixed point held at SHA-256
+`9f51c3d27d50a208b575e1c748ebaa469198b9e26c20482865b711fb41302a4e`;
+the process/persistent rendered-function cache test also passed on the direct
+path.

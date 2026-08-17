@@ -978,6 +978,7 @@
   fp_flags = f[:fp_flags]
   if fp_flags == nil
     fp_flags = ""
+  direct_buffer_emit = env("TUNGSTEN_DIRECT_BUFFER_EMIT") != "0"
 
   # Emit all blocks — always emit entry block label so SSA phi nodes can reference it
   slots = f[:var_slots]
@@ -1034,7 +1035,9 @@
     j = 0
     while j < blk[:instructions].size()
       out << "  "
-      out << render_instruction(blk[:instructions][j], string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target)
+      inst = blk[:instructions][j]
+      if !direct_buffer_emit || !append_instruction_direct(out, inst, phi_label_redirects)
+        out << render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target)
       out << "\n"
       j += 1
     i += 1

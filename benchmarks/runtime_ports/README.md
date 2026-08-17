@@ -506,6 +506,20 @@ route (1.01783), while counters prove 15.6% of cycles now execute in
 layout and becomes an explicit acceptance constraint for the separate narrow
 dispatch follow-up.  Evidence: `bigint_sub1_2_exact_results.txt`.
 
+NATIVE SUB1@2 INLINE-SEAM FOLLOW-UP: the proved 2-by-1 shape now enters a
+dedicated stable seam, and the no-reopen strong wrapper, cap-two allocator,
+and unchanged finisher are forced into the caller under whole-program LTO.
+C-only links keep a weak exact-C default; an open-world plain BigInt `-`
+reopen still replaces the narrow seam and is deliberately not force-inlined.
+The final linked hot route has no calls to the allocator, finisher, typed
+worker, or seam wrapper—only the exact six-instruction leaf and TLS lookup
+remain outside `w_sub`.  A 21-pair 300 ms promotion won 21/21 at 0.76163
+(2.776 ns versus 3.604 ns); the 11-pair screen left @1 neutral, improved @4,
+and kept @8 unresolved.  The public native row is now 2.613 ns versus C at
+1.521 ns and GMP at 1.751 ns, so the remaining general-dispatch gap is stated
+rather than folded into this change.  Evidence:
+`bigint_sub1_2_native_inline_seam_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

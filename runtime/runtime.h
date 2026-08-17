@@ -747,6 +747,7 @@ WValue w_bigint_gcd(WValue a, WValue b);
 WValue w_bigint_lcm(WValue a, WValue b);
 WValue __w_bigint_isqrt_src(WValue a);
 WValue __w_bigint_sub1_1_src(WValue a, WValue b);
+WValue __w_bigint_sub1_2_src(WValue a, WValue b);
 WValue w_bigint_compare_c(WValue a, WValue b);
 WValue w_bigint_compare_source(WValue a, WValue b);
 WValue w_bigint_and_c(WValue a, WValue b);
@@ -781,6 +782,7 @@ WValue w_bigint_add1_7_finish_raw(WValue v, uint64_t carry);
 WValue w_bigint_add1_8_finish_raw(WValue v, uint64_t carry);
 WValue w_bigint_sub1_1_finish_raw(
     uint64_t magnitude, int64_t signed_size);
+WValue w_bigint_sub1_2_alloc_hot_raw(void);
 WValue w_bigint_sub1_2_finish_raw(WValue v);
 WValue w_bigint_finish_sub(WValue v, WValue signed_size);
 WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size);

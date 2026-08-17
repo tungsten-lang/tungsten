@@ -36974,6 +36974,7 @@ WValue w_range_make(int64_t from, int64_t to, int64_t exclusive) {
 static _Atomic int w_bigint_plus_seam_is_c;
 static _Atomic int w_bigint_minus_seam_is_c;
 static _Atomic int w_bigint_sub1_1_seam_is_c;
+static _Atomic int w_bigint_sub1_2_seam_is_c;
 static _Atomic int w_bigint_times_seam_is_c;
 
 __attribute__((weak)) WValue __w_bigint_plus_src(WValue a, WValue b) {
@@ -36988,6 +36989,10 @@ __attribute__((weak)) WValue __w_bigint_sub1_1_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_sub1_1_seam_is_c, 1, memory_order_relaxed);
     return bigint_sub1_positive_one_limb(
         w_as_bigint(a)->limbs[0], w_as_bigint(b)->limbs[0]);
+}
+__attribute__((weak)) WValue __w_bigint_sub1_2_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sub1_2_seam_is_c, 1, memory_order_relaxed);
+    return bigint_sub_ui_any(a, w_as_bigint(b)->limbs[0]);
 }
 __attribute__((weak)) WValue __w_bigint_times_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_times_seam_is_c, 1, memory_order_relaxed);
@@ -37018,6 +37023,13 @@ WValue bigint_sub1_1_seam(WValue a, WValue b) {
         return bigint_sub1_positive_one_limb(
             w_as_bigint(a)->limbs[0], w_as_bigint(b)->limbs[0]);
     return __w_bigint_sub1_1_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sub1_2_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sub1_2_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_sub_ui_any(a, w_as_bigint(b)->limbs[0]);
+    return __w_bigint_sub1_2_src(a, b);
 }
 static inline __attribute__((always_inline))
 WValue bigint_times_seam(WValue a, WValue b) {
@@ -37051,6 +37063,9 @@ static int g_bigint_src_ops_off = -1;   /* -1 unresolved, 0 route, 1 pin C */
 #ifndef BN_BIGINT_SUB1_1_SRC_DIRECT
 #define BN_BIGINT_SUB1_1_SRC_DIRECT 1
 #endif
+#ifndef BN_BIGINT_SUB1_2_SRC_DIRECT
+#define BN_BIGINT_SUB1_2_SRC_DIRECT 1
+#endif
 
 /* Shape gate for the source arms. The migrated source bodies implement the
  * GENERAL multi-limb case; C's kernels additionally carry small-operand
@@ -37072,7 +37087,8 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
      * equal-length/one-limb exclusions and make each gate identical to its
      * source worker's route. Every other word/sign shape retains C. */
     if (!neg_b && sa == 3 && sb == 1) return 1;
-    if (neg_b && sa == 2 && sb == 1) return 1;
+    if (neg_b && sa == 2 && sb == 1)
+        return BN_BIGINT_SUB1_2_SRC_DIRECT ? 3 : 1;
     /* Exclusion keys on the RAW operand signs, NOT the post-flip effective
      * ones: C's `bigint_add_equal_fast` and `bigint_sub_equal_fast` each
      * specialize equal-length pairs whose own signs match, per operator.
@@ -37266,6 +37282,7 @@ WValue w_sub(WValue a, WValue b) {
         if (__builtin_expect(src_off == 0, 1)) {
             int src_shape = bigint_src_shape(a, b, 1);
             if (src_shape == 2) return bigint_sub1_1_seam(a, b);
+            if (src_shape == 3) return bigint_sub1_2_seam(a, b);
             if (src_shape == 1) return bigint_minus_seam(a, b);
         }
         return bigint_sub_any(a, b);
@@ -53834,6 +53851,11 @@ WValue w_bigint_sub1_1_finish_raw(
     result->size = (int32_t)signed_size;
     return bigint_box(result);
 }
+__attribute__((always_inline))
+WValue w_bigint_sub1_2_alloc_hot_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot(2));
+}
+__attribute__((always_inline))
 WValue w_bigint_sub1_2_finish_raw(WValue v) {
     WBigint *r = w_as_bigint(v);
     int32_t rlen = 2 - (r->limbs[1] == 0);

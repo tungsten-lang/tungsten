@@ -3214,7 +3214,7 @@ fn __bigint_sub1_1_raw(a, b) (i64 i64) i64
 # fixed AArch64 schedule, top-limb shrink, and possible i48 demotion remain
 # separate steps in the same order as bigint_sub_ui_any.
 fn __bigint_sub1_2_raw(a, b) (i64 i64) i64
-  result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
+  result = ccall_nobox("w_bigint_sub1_2_alloc_hot_raw") ## i64
   mask = 140737488355327 ## i64
   rp = (result & mask) + 16 ## i64
   ap = (a & mask) + 16 ## i64

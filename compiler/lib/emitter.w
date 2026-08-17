@@ -2912,6 +2912,51 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_sub1_1_src"] == true
     seam_decls << "declare i64 @__w_bigint_sub1_1_src(i64, i64) nounwind\n"
 
+  # The exact positive 2-by-1 word-subtract port has the same narrow seam
+  # contract as sub1@1: w_sub proves the shape, Core supplies the raw worker,
+  # and a genuine plain BigInt#- reopen retains precedence over both seams.
+  bigint_sub1_2_fn = nil
+  bigint_sub1_2_matches = 0
+  bstfi = 0
+  while bstfi < mod[:functions].size()
+    bstff = mod[:functions][bstfi]
+    if bstff[:source_class] == nil && bstff[:source_method] == "__bigint_sub1_2_raw"
+      bigint_sub1_2_matches += 1
+      bigint_sub1_2_fn = bstff
+    bstfi += 1
+  if bigint_sub1_2_matches > 1
+    << "error: __bigint_sub1_2_raw is reserved for native BigInt subtraction"
+    exit(1)
+  if mod[:require_bigint_sub1_2_src] == true && bigint_sub1_2_fn == nil
+    << "error: required native BigInt sub1@2 helper is missing; __w_bigint_sub1_2_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_sub1_2_target = bigint_minus_reopened_fn
+  if bigint_sub1_2_target == nil
+    bigint_sub1_2_target = bigint_sub1_2_fn
+  if bigint_sub1_2_target != nil
+    bst_signature_ok = bigint_sub1_2_target[:params] != nil && bigint_sub1_2_target[:params].size() == 2
+    if bigint_minus_reopened_fn == nil
+      bst_signature_ok = bst_signature_ok && bigint_sub1_2_target[:source_kind] == :fn_def
+      bst_signature_ok = bst_signature_ok && bigint_sub1_2_target[:raw_i64_signature] == true
+      bst_signature_ok = bst_signature_ok && bigint_sub1_2_target[:raw_return_type] == :i64
+    if !bst_signature_ok
+      << "error: invalid native BigInt sub1@2 seam target"
+      exit(1)
+    bst_cc = ""
+    if bigint_sub1_2_target[:call_conv] != nil && bigint_sub1_2_target[:call_conv] != ""
+      bst_cc = bigint_sub1_2_target[:call_conv] + " "
+    bst_attrs = " nounwind"
+    if bigint_minus_reopened_fn == nil
+      bst_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_sub1_2_src(i64 %a, i64 %b)" + bst_attrs + " {\n"
+    fn_out << "  %r = tail call " + bst_cc + "i64 @" + bigint_sub1_2_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_sub1_2_src"] = false
+    known_fns["__w_bigint_sub1_2_src"] = true
+  elsif used_runtime_fns["__w_bigint_sub1_2_src"] == true
+    seam_decls << "declare i64 @__w_bigint_sub1_2_src(i64, i64) nounwind\n"
+
   # Unary BigInt#isqrt has the same stable source/weak-C seam contract as the
   # binary operators above. Its source body owns the one- and two-limb leaves
   # and retains the C divide-and-conquer boundary for wider values.

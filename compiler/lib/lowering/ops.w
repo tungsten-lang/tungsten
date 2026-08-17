@@ -2282,6 +2282,96 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if ctx[:mod][:tag_report_infix] == nil
       ctx[:mod][:tag_report_infix] = []
     ctx[:mod][:tag_report_infix].push({op: op, route: bidir_report, fname: wfn[:source_method], class_name: ctx[:class_name]})
+
+  # Native-only follow-up after the exact positive mul1@1 leaf was
+  # checkpointed: a protected+locked program with an exact `(BigInt BigInt)`
+  # signature may test that leaf's complete shape contract at the call site.
+  # No method table can change after lowering and PROTECT_THE_CORE forbids a
+  # BigInt#* replacement, so the admitted call can bypass w_mul. Keep two
+  # stages: tag/overlay/identity tests are payload-only; header loads execute
+  # only after both values are proved heap BigInts. Every near miss falls to
+  # the unmodified polymorphic dispatcher.
+  closed_mul1_square = node.left != nil && node.right != nil && is_ast_node?(node.left) && is_ast_node?(node.right) && ast_kind(node.left) == :var && ast_kind(node.right) == :var && node.left.name == node.right.name
+  closed_mul1_1 = env("TUNGSTEN_BIGINT_MUL1_1_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && !closed_mul1_square && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
+  if closed_mul1_1
+    cm_entry = overload_exact_tag_entry("BigInt")
+    cm_left_shape_label = next_label(wfn, "mul1_1.left_shape")
+    cm_right_tag_label = next_label(wfn, "mul1_1.right_tag")
+    cm_right_shape_label = next_label(wfn, "mul1_1.right_shape")
+    cm_payload_label = next_label(wfn, "mul1_1.payload")
+    cm_fast_label = next_label(wfn, "mul1_1.fast")
+    cm_slow_label = next_label(wfn, "mul1_1.slow")
+    cm_done_label = next_label(wfn, "mul1_1.done")
+    cm_slot = ensure_var_slot(wfn, "__mul1_1." + cm_done_label)
+
+    # Short-circuit in the same order as the profitable shape: a wider left
+    # operand exits after one tag check and one header load. Header reads are
+    # never speculated before the corresponding exact heap-tag proof.
+    cm_lmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, cm_entry[:mask], cm_lmask)
+    cm_ltag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lmask, "eq", cm_entry[:tag], cm_ltag)
+    emit_wire_cond_br(wfn, cm_ltag, cm_slow_label, nil, cm_left_shape_label)
+
+    start_block(wfn, cm_left_shape_label)
+    cm_lptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355327", cm_lptr)
+    cm_lsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_lptr, cm_lsize)
+    cm_lone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsize, "eq", "1", cm_lone)
+    emit_wire_cond_br(wfn, cm_lone, cm_slow_label, nil, cm_right_tag_label)
+
+    start_block(wfn, cm_right_tag_label)
+    cm_rmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, cm_entry[:mask], cm_rmask)
+    cm_rtag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rmask, "eq", cm_entry[:tag], cm_rtag)
+    emit_wire_cond_br(wfn, cm_rtag, cm_slow_label, nil, cm_right_shape_label)
+
+    start_block(wfn, cm_right_shape_label)
+    cm_rptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355327", cm_rptr)
+    cm_rsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_rptr, cm_rsize)
+    cm_rone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsize, "eq", "1", cm_rone)
+    emit_wire_cond_br(wfn, cm_rone, cm_slow_label, nil, cm_payload_label)
+
+    start_block(wfn, cm_payload_label)
+    cm_distinct = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, lhs_reg, "ne", rhs_reg, cm_distinct)
+    cm_lsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355328", cm_lsign_bits)
+    cm_lpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsign_bits, "eq", "0", cm_lpositive)
+    cm_rsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355328", cm_rsign_bits)
+    cm_rpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsign_bits, "eq", "0", cm_rpositive)
+    cm_positive = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_lpositive, cm_rpositive, cm_positive)
+    cm_payload_ok = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_distinct, cm_positive, cm_payload_ok)
+    emit_wire_cond_br(wfn, cm_payload_ok, cm_slow_label, nil, cm_fast_label)
+
+    start_block(wfn, cm_fast_label)
+    cm_fast = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_mul1_1_src", nil, nil, cm_fast)
+    emit_wire_store_i64(wfn, cm_slot, cm_fast)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_slow_label)
+    cm_slow = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_mul", nil, nil, cm_slow)
+    emit_wire_store_i64(wfn, cm_slot, cm_slow)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_done_label)
+    cm_result = next_temp(wfn)
+    emit_wire_load_i64(wfn, cm_slot, cm_result)
+    return typed_value(:i64, cm_result)
+
   if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT) && !bidir_mut && ((is_bigint_type(lt) && is_bigint_type(rt)) || declared_bigint_add)
     # Seam symbol per op (strong = the compiled typed worker, weak = the C
     # kernel) and the polymorphic entry for the guard's slow arm. The

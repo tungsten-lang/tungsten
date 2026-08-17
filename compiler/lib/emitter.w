@@ -3148,6 +3148,50 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul1_4_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul1_4_src(i64, i64) nounwind\n"
 
+  # Exact positive 5-by-1 multiplication retains the serial C recurrence in
+  # a width-specific source seam, isolated from every neighboring arm.
+  bigint_mul1_5_fn = nil
+  bigint_mul1_5_matches = 0
+  bm5fi = 0
+  while bm5fi < mod[:functions].size()
+    bm5ff = mod[:functions][bm5fi]
+    if bm5ff[:source_class] == nil && bm5ff[:source_method] == "__bigint_mul1_5_raw"
+      bigint_mul1_5_matches += 1
+      bigint_mul1_5_fn = bm5ff
+    bm5fi += 1
+  if bigint_mul1_5_matches > 1
+    << "error: __bigint_mul1_5_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul1_5_src] == true && bigint_mul1_5_fn == nil
+    << "error: required native BigInt mul1@5 helper is missing; __w_bigint_mul1_5_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul1_5_target = bigint_times_reopened_fn
+  if bigint_mul1_5_target == nil
+    bigint_mul1_5_target = bigint_mul1_5_fn
+  if bigint_mul1_5_target != nil
+    bm5_signature_ok = bigint_mul1_5_target[:params] != nil && bigint_mul1_5_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      bm5_signature_ok = bm5_signature_ok && bigint_mul1_5_target[:source_kind] == :fn_def
+      bm5_signature_ok = bm5_signature_ok && bigint_mul1_5_target[:raw_i64_signature] == true
+      bm5_signature_ok = bm5_signature_ok && bigint_mul1_5_target[:raw_return_type] == :i64
+    if !bm5_signature_ok
+      << "error: invalid native BigInt mul1@5 seam target"
+      exit(1)
+    bm5_cc = ""
+    if bigint_mul1_5_target[:call_conv] != nil && bigint_mul1_5_target[:call_conv] != ""
+      bm5_cc = bigint_mul1_5_target[:call_conv] + " "
+    bm5_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      bm5_attrs += " noinline"
+    fn_out << "define i64 @__w_bigint_mul1_5_src(i64 %a, i64 %b)" + bm5_attrs + " {\n"
+    fn_out << "  %r = tail call " + bm5_cc + "i64 @" + bigint_mul1_5_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul1_5_src"] = false
+    known_fns["__w_bigint_mul1_5_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul1_5_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul1_5_src(i64, i64) nounwind\n"
+
   # Unary BigInt#isqrt has the same stable source/weak-C seam contract as the
   # binary operators above. Its source body owns the one- and two-limb leaves
   # and retains the C divide-and-conquer boundary for wider values.

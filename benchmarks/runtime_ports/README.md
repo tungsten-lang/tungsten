@@ -559,6 +559,13 @@ A 21-pair 300 ms promotion won 21/21 at 0.90571 (4.118 ns versus 4.572 ns);
 the eight-cell screen measured 0.91769 at the target and every control stayed
 within the 5% gate.  Evidence: `bigint_sub1_6_exact_results.txt`.
 
+EXACT POSITIVE SUB1@7 CHECKPOINT: native source now carries the literal
+seven-limb C schedule—three `ldp`s plus `ldr`, `subs` plus six `sbcs`, three
+`stp`s plus `str`, and `cset`—with unchanged cap-seven allocation and
+shrink-to-six normalization.  A 21-pair 300 ms promotion won 21/21 at
+0.89261 (4.240 ns versus 4.753 ns); all controls stayed within 3.1%.
+Evidence: `bigint_sub1_7_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

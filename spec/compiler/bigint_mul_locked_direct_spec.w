@@ -58,6 +58,8 @@ check("one-limb syntactic square", square(word), builtin(word, word))
 check("one-limb overlay-negative square", square(0 - word),
       builtin(0 - word, 0 - word))
 check("syntactic square", square(a2), builtin(a2, a2))
+check("two-limb overlay-negative square", square(0 - a2),
+      builtin(0 - a2, 0 - a2))
 same = a2
 check("dynamic identity square", multiply(a2, same), builtin(a2, a2))
 

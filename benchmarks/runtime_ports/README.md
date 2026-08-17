@@ -438,6 +438,15 @@ The public row was 1.751/2.673/2.352 ns for C/native/GMP.  Counters show only
 the source leaf, source operator, and TLS allocator on the hot path, with no C
 word kernel.  Evidence: `bigint_add1_6_exact_results.txt`.
 
+EXACT POSITIVE ADD1@7 CHECKPOINT: native source now contains C's exact
+three-`ldp`/one-`ldr`, `adds`/six-`adcs`, three-`stp`/one-`str`, `cset`
+seven-limb schedule, plus the unchanged cap-seven and rare 7-to-8 growth
+policy.  The target won 11/11 pairs, 3.996 ns to 2.737 ns (0.68522).  The @6
+control improved 5.2%, while the still-C @8 control was neutral at 0.99248.
+The public row measured C/native/GMP at 1.887/2.731/2.585 ns.  Counter samples
+attribute 74.8% of cycles to the exact leaf, which has no callees, and none to
+the C word kernel.  Evidence: `bigint_add1_7_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

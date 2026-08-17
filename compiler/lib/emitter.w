@@ -3407,6 +3407,51 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul3_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul3_src(i64, i64) nounwind\n"
 
+  # Exact distinct positive four-by-four-limb multiplication keeps C's tuned
+  # row-zero mul_1 call and literal inlined addmul remainder behind the same
+  # reserved/open-world contract as the adjacent fixed checkpoints.
+  bigint_mul4_fn = nil
+  bigint_mul4_matches = 0
+  be4fi = 0
+  while be4fi < mod[:functions].size()
+    be4ff = mod[:functions][be4fi]
+    if be4ff[:source_class] == nil && be4ff[:source_method] == "__bigint_mul4_raw"
+      bigint_mul4_matches += 1
+      bigint_mul4_fn = be4ff
+    be4fi += 1
+  if bigint_mul4_matches > 1
+    << "error: __bigint_mul4_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul4_src] == true && bigint_mul4_fn == nil
+    << "error: required native BigInt mul@4 helper is missing; __w_bigint_mul4_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul4_target = bigint_times_reopened_fn
+  if bigint_mul4_target == nil
+    bigint_mul4_target = bigint_mul4_fn
+  if bigint_mul4_target != nil
+    be4_signature_ok = bigint_mul4_target[:params] != nil && bigint_mul4_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      be4_signature_ok = be4_signature_ok && bigint_mul4_target[:source_kind] == :fn_def
+      be4_signature_ok = be4_signature_ok && bigint_mul4_target[:raw_i64_signature] == true
+      be4_signature_ok = be4_signature_ok && bigint_mul4_target[:raw_return_type] == :i64
+    if !be4_signature_ok
+      << "error: invalid native BigInt mul@4 seam target"
+      exit(1)
+    be4_cc = ""
+    if bigint_mul4_target[:call_conv] != nil && bigint_mul4_target[:call_conv] != ""
+      be4_cc = bigint_mul4_target[:call_conv] + " "
+    be4_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      be4_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul4_src(i64 %a, i64 %b)" + be4_attrs + " {\n"
+    fn_out << "  %r = tail call " + be4_cc + "i64 @" + bigint_mul4_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul4_src"] = false
+    known_fns["__w_bigint_mul4_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul4_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul4_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps

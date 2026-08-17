@@ -101,4 +101,42 @@ rg -q 'function emit cache: 0 hits, [1-9][0-9]* misses, [0-9]* bypassed; disk st
 cmp "$TMP/disk-direct.ll" "$TMP/disk-repair.ll"
 cmp "$TMP/disk-direct.sidemap" "$TMP/disk-repair.sidemap"
 
+# Imported non-Core functions have their own persistent render bucket. Its
+# string dependency ends at the library boundary, so a different entry body
+# with the same ABI can restore the same rendered library functions.
+mkdir -p "$TMP/library-disk-cache"
+TUNGSTEN_CACHE_DIR="$TMP/library-disk-cache" \
+  TUNGSTEN_FUNCTION_EMIT_CACHE=0 \
+  TUNGSTEN_LL_PATH="$TMP/library-prime.ll" \
+  "$TUNGSTEN" compile compiler/test/fixtures/library_wire_cache/entry_a.w \
+    --out "$TMP/library-prime" "${flags[@]}" >/dev/null
+TUNGSTEN_CACHE_DIR="$TMP/library-disk-cache" \
+  TUNGSTEN_FUNCTION_EMIT_CACHE=1 \
+  TUNGSTEN_FUNCTION_EMIT_DISK_CACHE=1 \
+  TUNGSTEN_LIBRARY_FUNCTION_EMIT_CACHE=1 \
+  TUNGSTEN_LL_PATH="$TMP/library-store.ll" \
+  "$TUNGSTEN" compile compiler/test/fixtures/library_wire_cache/entry_a.w \
+    --out "$TMP/library-store" "${flags[@]}" -v \
+    >"$TMP/library-store.log" 2>&1
+rg -q 'function emit cache: .*library stored' "$TMP/library-store.log"
+TUNGSTEN_CACHE_DIR="$TMP/library-disk-cache" \
+  TUNGSTEN_FUNCTION_EMIT_CACHE=1 \
+  TUNGSTEN_FUNCTION_EMIT_DISK_CACHE=1 \
+  TUNGSTEN_LIBRARY_FUNCTION_EMIT_CACHE=0 \
+  TUNGSTEN_LL_PATH="$TMP/library-direct.ll" \
+  "$TUNGSTEN" compile compiler/test/fixtures/library_wire_cache/entry_b.w \
+    --out "$TMP/library-direct" "${flags[@]}" >/dev/null
+TUNGSTEN_CACHE_DIR="$TMP/library-disk-cache" \
+  TUNGSTEN_FUNCTION_EMIT_CACHE=1 \
+  TUNGSTEN_FUNCTION_EMIT_DISK_CACHE=1 \
+  TUNGSTEN_LIBRARY_FUNCTION_EMIT_CACHE=1 \
+  TUNGSTEN_LL_PATH="$TMP/library-hit.ll" \
+  "$TUNGSTEN" compile compiler/test/fixtures/library_wire_cache/entry_b.w \
+    --out "$TMP/library-hit" "${flags[@]}" -v \
+    >"$TMP/library-hit.log" 2>&1
+rg -q 'function emit cache: [1-9][0-9]* hits, 0 misses, [0-9]* bypassed; disk hit, library hit' \
+  "$TMP/library-hit.log"
+cmp "$TMP/library-direct.ll" "$TMP/library-hit.ll"
+cmp "$TMP/library-direct.sidemap" "$TMP/library-hit.sidemap"
+
 echo "function emit cache: OK"

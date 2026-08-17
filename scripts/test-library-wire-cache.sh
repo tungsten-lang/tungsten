@@ -34,16 +34,21 @@ compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_a.w prim
 rg -Fq 'library WIRE cache: bypass (waiting for a warm Core artifact)' "$TMP/prime-core.log"
 compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_a.w store
 rg -q 'library WIRE cache: miss .*disk stored' "$TMP/store.log"
-compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_a.w hit
+TUNGSTEN_GRAPH_MMAP=1 \
+  compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_a.w hit
 rg -q 'library WIRE cache: hit .+ \([0-9]+ functions, 3 files\)' "$TMP/hit.log"
+TUNGSTEN_GRAPH_MMAP=0 \
+  compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_a.w fread-hit
 
 # Cache-off, cold/store, and warm-hit paths must produce the exact same module
 # and symbol sidecar.
 compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_a.w disabled 0
 cmp "$TMP/store.ll" "$TMP/hit.ll"
 cmp "$TMP/disabled.ll" "$TMP/hit.ll"
+cmp "$TMP/fread-hit.ll" "$TMP/hit.ll"
 cmp "$TMP/store.sidemap" "$TMP/hit.sidemap"
 cmp "$TMP/disabled.sidemap" "$TMP/hit.sidemap"
+cmp "$TMP/fread-hit.sidemap" "$TMP/hit.sidemap"
 
 # The entry body is intentionally different but has the same callable/type
 # surface. Its compiler process should reuse the same library key.
@@ -52,6 +57,28 @@ rg -q 'library WIRE cache: hit ' "$TMP/cross-entry.log"
 compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_b.w cross-entry-disabled 0
 cmp "$TMP/cross-entry.ll" "$TMP/cross-entry-disabled.ll"
 cmp "$TMP/cross-entry.sidemap" "$TMP/cross-entry-disabled.sidemap"
+
+# Locked imported functions join the same whole-program reachability closure
+# as frozen Core. A real Lexer use keeps the transitive method set; disabling
+# the optimization must retain the same linked program behavior. LLVM differs
+# by design because the optimized artifact removes dead definitions.
+TUNGSTEN_LIBRARY_REACHABILITY=0 \
+  compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_lexer.w lexer-reach-off
+TUNGSTEN_LIBRARY_REACHABILITY=1 \
+  compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_lexer.w lexer-reach-on
+rg -q 'core reachability: .*; library [1-9][0-9]*/111 kept \([0-9][0-9]* pruned\)' \
+  "$TMP/lexer-reach-on.log"
+TUNGSTEN_LIBRARY_REACHABILITY=0 \
+  "$TUNGSTEN" compile compiler/test/fixtures/library_wire_cache/entry_lexer.w \
+    --out "$TMP/lexer-reach-off" --release --native --fast --no-lto \
+    >/dev/null
+TUNGSTEN_LIBRARY_REACHABILITY=1 \
+  "$TUNGSTEN" compile compiler/test/fixtures/library_wire_cache/entry_lexer.w \
+  --out "$TMP/lexer-reach-on" --release --native --fast --no-lto \
+  >/dev/null
+"$TMP/lexer-reach-off" >"$TMP/lexer-reach-off.out"
+"$TMP/lexer-reach-on" >"$TMP/lexer-reach-on.out"
+cmp "$TMP/lexer-reach-off.out" "$TMP/lexer-reach-on.out"
 
 # The source key contains the exact stat tuple and content digest. A metadata
 # touch therefore misses safely, republishes, then hits on the next process.

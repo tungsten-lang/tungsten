@@ -159,6 +159,10 @@ use target
   compact = []
   by_text = {}
   strings = mod[:strings]
+  library_boundary = mod[:incremental_library_cache_string_count]
+  if library_boundary == nil
+    library_boundary = 0
+  library_compact_count = 0
   si = 0
   while si < strings.size()
     entry = strings[si]
@@ -168,6 +172,8 @@ use target
       remap[old_id] = new_id
       compact.push({id: new_id, text: entry[:text]})
       by_text[entry[:text]] = new_id
+      if old_id < library_boundary
+        library_compact_count = compact.size()
     si += 1
 
   fi = 0
@@ -204,6 +210,7 @@ use target
     fi += 1
 
   mod[:strings] = compact
+  mod[:incremental_library_cache_compact_string_count] = library_compact_count
   mod[:string_ids_by_text] = by_text
   mod[:next_string] = compact.size()
   # content_hash_pass has already consumed its semantic string index; do not
@@ -247,6 +254,11 @@ use target
   # across the change; any new member is newly SSA-converted.
   ssa_report = env("TUNGSTEN_SSA_REPORT")
   ssa_converted = []
+  cfg_jobs = cfg_parallel_job_count(mod)
+  cfg_prepared = nil
+  if cfg_jobs > 1
+    cfg_prepared = cfg_parallel_prepare(mod, cfg_jobs)
+    mod[:parallel_cfg_jobs] = cfg_jobs
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
@@ -255,7 +267,15 @@ use target
       # the two cheap eligibility conditions first: roughly half of the
       # self-hosted compiler's functions have no promotable slots, so eagerly
       # analyzing every function wastes most of this phase's work.
-      if !has_overflow_checked(func)
+      if cfg_prepared != nil
+        promotable = cfg_prepared[:promotables][fi]
+        analysis = cfg_prepared[:analyses][fi]
+        if analysis != nil
+          if ssa_report != nil && ssa_report != ""
+            ssa_converted.push(func[:name])
+          func[:cfg_analysis] = analysis
+          ssa_convert(func, analysis, nil, promotable)
+      elsif !has_overflow_checked(func)
         promotable = find_promotable_vars(func)
         if promotable.keys().size() > 0
           if ssa_report != nil && ssa_report != ""
@@ -269,7 +289,14 @@ use target
     write_file(ssa_report, ssa_converted.sort().join("\n") + "\n")
   t_cfg = clock() - cfg_started_at
 
-  ownership_pass(mod)
+  ownership_started_at = clock()
+  ownership_jobs = ownership_parallel_job_count(mod)
+  if ownership_jobs > 1
+    ownership_pass_parallel(mod, ownership_jobs)
+    mod[:parallel_ownership_jobs] = ownership_jobs
+  else
+    ownership_pass(mod)
+  t_ownership = clock() - ownership_started_at
 
   esc_started_at = clock()
   escape_pass(mod)
@@ -342,6 +369,16 @@ use target
     << ""
     << incremental_core_cache_verbose_text(mod)
     << incremental_library_cache_verbose_text(mod)
+    library_file_profile = incremental_library_cache_file_profile_text(mod)
+    if library_file_profile != nil
+      << library_file_profile
+    if env("TUNGSTEN_CACHE_TIMINGS") == "1"
+      core_load = mod[:incremental_core_cache_load_seconds]
+      if core_load != nil && core_load > 0
+        << fmt_elapsed(core_load) + " load Core graph"
+      library_load = mod[:incremental_library_cache_load_seconds]
+      if library_load != nil && library_load > 0
+        << fmt_elapsed(library_load) + " load library graph"
     << core_reachability_verbose_text(mod)
     target_cache_text = target_probe_cache_verbose_text()
     if target_cache_text != nil
@@ -350,13 +387,20 @@ use target
       function_emit_text = "  function emit cache: " + mod[:function_emit_cache_hits].to_s() + " hits, " + mod[:function_emit_cache_misses].to_s() + " misses, " + mod[:function_emit_cache_bypasses].to_s() + " bypassed"
       if mod[:function_emit_disk_cache_status] != nil
         function_emit_text = function_emit_text + "; disk " + mod[:function_emit_disk_cache_status].to_s()
+      if mod[:function_emit_library_disk_cache_status] != nil
+        function_emit_text = function_emit_text + ", library " + mod[:function_emit_library_disk_cache_status].to_s()
       << function_emit_text
     if mod[:parallel_function_emit_jobs] != nil
       << "  function emit workers: " + mod[:parallel_function_emit_jobs].to_s() + " deterministic threads"
+    if mod[:parallel_cfg_jobs] != nil
+      << "  cfg analysis workers: " + mod[:parallel_cfg_jobs].to_s() + " deterministic threads"
+    if mod[:parallel_ownership_jobs] != nil
+      << "  ownership workers: " + mod[:parallel_ownership_jobs].to_s() + " deterministic threads"
     if mod[:content_hash_skipped_count] > 0
       << "  content hash work set: " + mod[:content_hash_function_count].to_s() + "/" + (mod[:content_hash_function_count] + mod[:content_hash_skipped_count]).to_s() + " functions (" + mod[:content_hash_skipped_count].to_s() + " cached)"
     << fmt_elapsed(t_lower) + " lowering to wire"
     << fmt_elapsed(t_cfg) + " cfg+ssa"
+    << fmt_elapsed(t_ownership) + " ownership"
     << fmt_elapsed(t_escape) + " escape"
     if t_free > 0
       << fmt_elapsed(t_free) + " free insertion"

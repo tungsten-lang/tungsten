@@ -259,8 +259,10 @@
   if mod[:math_mode] == :fast
     fp_flags = "fast "
   function_emit_cache_bucket_value = nil
+  function_emit_library_cache_bucket_value = nil
   if function_emit_cache_enabled
     function_emit_cache_bucket_value = function_emit_cache_bucket(mod, frame_pointers, mod[:llvm_fn_attrs], arm64_target, windows_target, mod[:preserve_debug_frames] == true, fp_flags)
+    function_emit_library_cache_bucket_value = function_emit_library_cache_bucket(mod, frame_pointers, mod[:llvm_fn_attrs], arm64_target, windows_target, mod[:preserve_debug_frames] == true, fp_flags)
 
   # Functions. A cached rendered-Core bucket already removes most work and is
   # process-global, so it stays on its proven serial path. Otherwise frozen
@@ -283,15 +285,19 @@
   i = 0
   while parallel_function_jobs == 1 && i < mod[:functions].size()
     mod[:functions][i][:fp_flags] = fp_flags
-    fn_out << emit_function_with_cache(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, function_emit_cache_bucket_value)
+    selected_emit_bucket = function_emit_cache_select_bucket(mod[:functions][i], function_emit_cache_bucket_value, function_emit_library_cache_bucket_value)
+    fn_out << emit_function_with_cache(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, selected_emit_bucket)
     fn_out << "\n"
     i += 1
   function_emit_cache_publish(function_emit_cache_bucket_value)
+  function_emit_cache_publish(function_emit_library_cache_bucket_value)
   mod[:function_emit_cache_hits] = function_emit_cache_state[:hits] - function_emit_hits_start
   mod[:function_emit_cache_misses] = function_emit_cache_state[:misses] - function_emit_misses_start
   mod[:function_emit_cache_bypasses] = function_emit_cache_state[:bypasses] - function_emit_bypasses_start
   if function_emit_cache_bucket_value != nil
     mod[:function_emit_disk_cache_status] = function_emit_cache_bucket_value[:persistent_status]
+  if function_emit_library_cache_bucket_value != nil
+    mod[:function_emit_library_disk_cache_status] = function_emit_library_cache_bucket_value[:persistent_status]
 
   # Source-routed operator export: wrap the selected content-hash-renamed
   # source body in a STRONG stable-named symbol. The runtime declares the same

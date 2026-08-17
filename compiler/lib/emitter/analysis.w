@@ -346,6 +346,9 @@ function_emit_cache_state = {
 
 -> function_emit_cache_bucket(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
   key = function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
+  function_emit_cache_bucket_for_key(key, :core, nil)
+
+-> function_emit_cache_bucket_for_key(key, scope, library_paths)
   bucket = function_emit_cache_state[:entries][key]
   if bucket == nil || bucket[:key] != key
     functions = {}
@@ -357,14 +360,54 @@ function_emit_cache_state = {
         persistent_status = :hit
       else
         persistent_status = :miss
-    bucket = {key: key, functions: functions, dirty: false, persistent_status: persistent_status}
+    bucket = {key: key, scope: scope, library_paths: library_paths, functions: functions, dirty: false, persistent_status: persistent_status}
     function_emit_cache_state[:entries][key] = bucket
   elsif bucket[:persistent_status] != :stored
     bucket[:persistent_status] = :memory
+  bucket[:scope] = scope
+  bucket[:library_paths] = library_paths
   bucket
 
--> function_emit_cache_candidate?(f)
-  (f[:incremental_core_frozen] == true || f[:incremental_core_candidate] == true) && f[:name] != "main"
+-> function_emit_cache_strings_digest(mod, count)
+  if count == nil || count < 0 || count > mod[:strings].size()
+    return nil
+  out = StringBuffer(count * 12)
+  i = 0
+  while i < count
+    out << function_emit_cache_field(mod[:strings][i][:text])
+    i += 1
+  wyhash64_hex_string(out.to_s())
+
+-> function_emit_library_cache_bucket(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
+  paths = mod[:library_reachability_paths]
+  if paths == nil || paths.size() == 0 || env("TUNGSTEN_LIBRARY_FUNCTION_EMIT_CACHE") == "0"
+    return nil
+  string_count = mod[:incremental_library_cache_compact_string_count]
+  strings_digest = function_emit_cache_strings_digest(mod, string_count)
+  if string_count == nil || string_count == 0 || strings_digest == nil
+    return nil
+  out = StringBuffer(320)
+  out << "rendered-library-function-v2"
+  out << function_emit_cache_field(function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags))
+  out << function_emit_cache_field(mod[:incremental_library_cache_key])
+  out << function_emit_cache_field(string_count)
+  out << function_emit_cache_field(strings_digest)
+  function_emit_cache_bucket_for_key(out.to_s(), :library, paths)
+
+-> function_emit_cache_candidate?(f, bucket)
+  if bucket[:scope] == :core
+    return (f[:incremental_core_frozen] == true || f[:incremental_core_candidate] == true) && f[:name] != "main"
+  if bucket[:scope] == :library
+    paths = bucket[:library_paths]
+    return paths != nil && paths[f[:source_path]] == true && f[:is_toplevel] != true && f[:name] != "main"
+  false
+
+-> function_emit_cache_select_bucket(f, core_bucket, library_bucket)
+  if core_bucket != nil && function_emit_cache_candidate?(f, core_bucket)
+    return core_bucket
+  if library_bucket != nil && function_emit_cache_candidate?(f, library_bucket)
+    return library_bucket
+  nil
 
 -> function_emit_cache_safe?(f)
   bi = 0
@@ -390,7 +433,7 @@ function_emit_cache_state = {
     i += 1
   nil
 -> emit_function_with_cache(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, cache_bucket)
-  if cache_bucket == nil || !function_emit_cache_candidate?(f)
+  if cache_bucket == nil || !function_emit_cache_candidate?(f, cache_bucket)
     function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + 1
     return emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames)
 

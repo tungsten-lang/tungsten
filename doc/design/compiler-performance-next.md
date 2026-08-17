@@ -345,3 +345,130 @@ entry bodies with the same ABI, metadata and content invalidation, corruption
 repair, and a linked native cache-hit result. Release is tested without
 `--no-debug`. Exact self-host LLVM fixed point held at SHA-256
 `2562e51f40ebb55e1175b23b1448f2654cbd2ca99011305a143fad657ffe1346`.
+
+## Imported-library reachability
+
+Once both Core and the method universe are locked, imported non-Core functions
+are just as closed as cached Core functions. The early reachability closure now
+classifies the unchanged library cohort as prunable, follows direct calls,
+closures, registrations, and dynamic method roots through the combined graph,
+then filters dead registrations at the established post-hash point.
+`TUNGSTEN_LIBRARY_REACHABILITY=0` restores the Core-only closure.
+
+The benefit is proportional to unused imported code. Eight alternating plain
+`--release --native --fast --emit-ll` pairs for an entry that imports Lexer but
+does not call it retained 6 of 111 library functions. Median compiler time fell
+from 179.0 ms to 111.5 ms (-37.71%), external wall time from 270 ms to 210 ms
+(-22.22%), and LLVM size from 1,879,992 to 411,198 bytes (-78.13%). A real
+`Lexer#tokenize` entry retained 92 of 111 functions and was noise-flat at
+181.5 ms versus 183.0 ms; its LLVM was 1.27% smaller. The focused contract
+therefore compares native behavior, not LLVM bytes: removing dead definitions
+is the intended artifact change.
+
+## Persistent rendered library functions
+
+Eligible imported functions now have a second release-only rendered-text
+bucket beside Core. Its key includes the library WIRE identity, target and
+frame policy, and the compacted Core-plus-library string prefix. Entry-file
+strings are excluded, so two programs with the same library ABI and live
+library closure can share the bucket without allowing release string
+compaction to renumber a cached reference. Corruption and mismatches remain
+ordinary misses through the checksummed graph reader.
+
+Eight alternating real-Lexer pairs, with the 92-function live library closure
+and Core rendering warm in both modes, reduced median emitter time from 49.0
+ms to 27.5 ms (-43.88%), compiler time from 196.5 ms to 173.5 ms (-11.70%),
+wall time from 290 ms to 270 ms (-6.90%), and peak RSS from 133,775,360 to
+128,368,640 bytes (-4.04%). Every paired LLVM file and sidemap was
+byte-identical. When reachability leaves only six library functions, this
+additional cache is intentionally near-neutral; it targets programs that use
+substantial imported implementations.
+
+## Parallel read-only mid-end work
+
+CFG construction/promotability discovery and ownership analysis are
+independent per function. A bounded worker team now computes those summaries
+concurrently. SSA conversion, block pruning, and every packed-WIRE mutation
+remain on the parent thread in canonical function order; the global arena is
+never allocated from concurrently. Programs below 512 functions, all
+compile-batch worker children, and non-compiled runtimes remain serial.
+`TUNGSTEN_PARALLEL_MIDEND=0` disables both stages, while
+`TUNGSTEN_MIDEND_JOBS` selects up to 32 workers (automatic mode caps at eight).
+
+Eight alternating plain release/native/fast self-compile pairs reduced median
+CFG+SSA from 221.5 ms to 152.0 ms (-31.38%), ownership from 150.0 ms to 22.0
+ms (-85.33%), compiler time from 2.5835 s to 2.3960 s (-7.26%), and external
+wall time from 2.910 s to 2.725 s (-6.36%). Peak RSS was effectively flat.
+The 1/2/4/8-worker fixtures produce byte-identical LLVM and sidemaps and the
+same sorted SSA-conversion roster. Short-lived workers are deliberate: an
+ordinary compiler process has one large mid-end, while compile-batch already
+uses a persistent process pool. The measured startup cost is included in the
+22 ms ownership phase, leaving no demonstrated second dispatch that would pay
+for permanently parked compiler threads.
+
+## mmap graph input
+
+The checksummed graph reader now maps cache files privately and decodes from
+that view, falling back to the previous `malloc` plus `fread` path when mmap is
+disabled or unavailable. `TUNGSTEN_GRAPH_MMAP=0` selects the fallback. This is
+not yet a zero-copy object graph: Strings, Arrays, Hashes, AST nodes, and WIRE
+records are still reconstructed into their normal stores.
+
+Twelve alternating warm Lexer pairs reported the same 7 ms Core and 4 ms
+library load stages at millisecond resolution. Median compiler time moved from
+176 ms to 173 ms (-1.70%), wall time stayed at 270 ms, and peak RSS fell from
+135,553,024 to 128,393,216 bytes (-5.28%) because the two temporary file-sized
+buffers disappeared. LLVM and sidemaps were exact. A truly directly mapped
+graph can save at most the current 11 ms read-and-reconstruct stage on this
+174 ms workload before format overhead; it requires relocatable packed
+containers rather than pointers to reconstructed heap objects.
+
+## Measured follow-up boundaries
+
+The per-file library profile explains where a finer cache can help. The Lexer
+cohort contains:
+
+- `compiler/lib/lexer.w`: 85 functions, 3,560 blocks, 19,152 instructions;
+- `languages/tungsten/lexers/regex_helpers.w`: 22 functions, 448 blocks,
+  2,002 instructions;
+- `languages/tungsten/lexers/known_units.w`: 4 functions, 45 blocks, 163
+  instructions.
+
+The existing cohort cache saves about 33 ms of lowering. Using instruction
+share as an optimistic upper bound, a `lexer.w` edit could recover only 3.4
+ms by reusing the other files, a `regex_helpers.w` edit about 29.9 ms, and a
+`known_units.w` edit about 32.7 ms. Per-file persistence is therefore worth a
+future relocatable-cache tranche for helper edits, but it first needs explicit
+cross-file ABI edges and independent string/temp/block/call-site namespaces.
+
+On the warm real-Lexer path, the stages after raw WIRE restoration are 13 ms
+CFG+SSA, 9 ms ownership, 6 ms escape, 1 ms free insertion, and 18 ms content
+hashing. Caching the entry-independent cut after ownership has a 22 ms (12.6%
+of compiler time) ceiling. A snapshot after content hashing has a 47 ms
+(27.0%) ceiling, but escape summaries, deduplication, and final symbol names
+depend on entry callers. That later form must either key on an entry call/body
+summary, reducing reuse after edits, or split composable function summaries
+from the whole-program pass.
+
+Two additional prototypes were removed after exact-output A/B gates:
+
+- Packing the transient lowering context improved median lowering only 0.55%
+  and left compiler/wall time flat (-0.06% and -0.17%). It did not justify a
+  new 38-field WIRE kind.
+- Adding nine more operations to direct-buffer rendering left median emitter
+  time exactly 343.5 ms in eight self-compile pairs. The already-retained
+  common direct path has moved the remaining fallbacks out of the bottleneck.
+
+The long-argument audit likewise found no constant chain to collapse in the
+hot loop. `render_instruction` has seven arguments, all register-passed on
+AArch64. The 10- and 11-argument wrappers run once per function; their extra
+values are target, frame, attribute, slab, and mutable reference state that
+varies per compilation. Converting them to process globals would sacrifice
+reentrancy for two occasional stack arguments, while a Hash context adds hot
+lookups. Generated high-arity WIRE constructors carry actual record fields,
+not repeated constants.
+
+The combined retained branch reached exact self-host LLVM fixed point at
+SHA-256 `5aa550415f8a0af1fff483ad6f6b076a757aae6c6b9f77b17b40aadacaa35f0c`;
+the corresponding symbol sidemap also matched exactly at
+`5a0d63130c64ad2542657468b75bed497bd2ebec8a37480a1c1febf2dfeb08c2`.

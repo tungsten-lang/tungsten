@@ -716,6 +716,10 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   compact = []
   by_text = {}
   strings = mod[:strings]
+  library_boundary = mod[:incremental_library_cache_string_count]
+  if library_boundary == nil
+    library_boundary = 0
+  library_compact_count = 0
   si = 0
   while si < strings.size()
     entry = strings[si]
@@ -725,6 +729,8 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       remap[old_id] = new_id
       compact.push({id: new_id, text: entry[:text]})
       by_text[entry[:text]] = new_id
+      if old_id < library_boundary
+        library_compact_count = compact.size()
     si += 1
 
   refs = state[:inst_refs]
@@ -745,6 +751,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     ri += 2
 
   mod[:strings] = compact
+  mod[:incremental_library_cache_compact_string_count] = library_compact_count
   mod[:string_ids_by_text] = by_text
   mod[:next_string] = compact.size()
   # content_hash_pass has already consumed its semantic string index; do not

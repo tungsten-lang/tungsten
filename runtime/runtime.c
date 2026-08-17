@@ -48153,11 +48153,29 @@ static WValue w_core_cache_read_impl(WValue path_val, int old_file_id,
         (uint64_t)statbuf.st_size > W_CORE_GRAPH_MAX_BYTES)
         return W_NIL;
     size_t size = (size_t)statbuf.st_size;
-    uint8_t *data = (uint8_t *)malloc(size);
-    if (!data) return W_NIL;
-    FILE *file = fopen(path, "rb");
-    int ok = file != NULL && fread(data, 1, size, file) == size;
-    if (file) fclose(file);
+    uint8_t *data = NULL;
+    int mapped = 0;
+    int ok = 0;
+    const char *mmap_toggle = getenv("TUNGSTEN_GRAPH_MMAP");
+    if (!mmap_toggle || strcmp(mmap_toggle, "0") != 0) {
+        int fd = open(path, O_RDONLY);
+        if (fd >= 0) {
+            void *mapping = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+            close(fd);
+            if (mapping != MAP_FAILED) {
+                data = (uint8_t *)mapping;
+                mapped = 1;
+                ok = 1;
+            }
+        }
+    }
+    if (!ok) {
+        data = (uint8_t *)malloc(size);
+        if (!data) return W_NIL;
+        FILE *file = fopen(path, "rb");
+        ok = file != NULL && fread(data, 1, size, file) == size;
+        if (file) fclose(file);
+    }
     static const uint8_t magic[8] = {'T','W','C','O','R','E','1','\0'};
     if (!ok || memcmp(data, magic, sizeof(magic)) != 0 ||
         w_core_graph_load_u32(data + 8) != W_CORE_GRAPH_VERSION ||
@@ -48166,7 +48184,7 @@ static WValue w_core_cache_read_impl(WValue path_val, int old_file_id,
         w_core_graph_load_u64(data + 24) !=
             w_hash_wyhash(data + W_CORE_GRAPH_HEADER_SIZE,
                           size - W_CORE_GRAPH_HEADER_SIZE)) {
-        free(data);
+        if (mapped) munmap(data, size); else free(data);
         return W_NIL;
     }
     WCoreGraphReader reader = {
@@ -48179,7 +48197,7 @@ static WValue w_core_cache_read_impl(WValue path_val, int old_file_id,
     WValue value = w_core_graph_read_value(&reader, 0);
     if (reader.failed || reader.off != reader.size) value = W_NIL;
     free(reader.refs);
-    free(data);
+    if (mapped) munmap(data, size); else free(data);
     return value;
 }
 

@@ -335,6 +335,16 @@ incremental_library_cache_state = {
   incremental_core_cache_sort_strings(rows)
 
 -> incremental_library_cache_prepare(mod, expressions, source_manifest)
+  # Reachability only needs the stable imported-file boundary, not a usable
+  # disk cache. Discover it even for cache-off A/B runs so the cache toggle
+  # cannot change the emitted program. A cold Core build still waits for the
+  # stable Core namespace before pruning imported definitions.
+  reachability_partition = nil
+  if mod[:protect_core] == true && mod[:method_tables_locked] == true && mod[:core_reuse_contract] == :stable && mod[:incremental_core_cache_hit] == true
+    candidate = incremental_library_cache_partition(expressions, source_manifest)
+    if candidate[:ok] == true
+      reachability_partition = candidate
+      mod[:library_reachability_paths] = candidate[:paths]
   if env("TUNGSTEN_LIBRARY_WIRE_CACHE") == "0" || env("TUNGSTEN_LIBRARY_WIRE_DISK_CACHE") == "0"
     return incremental_library_cache_set_bypass(mod, "disabled")
   if incremental_library_cache_state[:persistent_dir] == nil || incremental_library_cache_state[:persistent_identity] == nil
@@ -346,7 +356,9 @@ incremental_library_cache_state = {
   if mod[:incremental_core_cache_hit] != true
     return incremental_library_cache_set_bypass(mod, "waiting for a warm Core artifact")
 
-  partition = incremental_library_cache_partition(expressions, source_manifest)
+  partition = reachability_partition
+  if partition == nil
+    partition = incremental_library_cache_partition(expressions, source_manifest)
   if partition[:ok] != true
     return incremental_library_cache_set_bypass(mod, partition[:reason])
   paths = partition[:paths]
@@ -545,7 +557,9 @@ incremental_library_cache_state = {
   mod[:incremental_library_cache_start_function_count] = mod[:functions].size()
 
   path = mod[:incremental_library_cache_path]
+  load_started_at = clock()
   entry = ccall("w_core_cache_read", path)
+  mod[:incremental_library_cache_load_seconds] = clock() - load_started_at
   if !incremental_library_cache_entry_valid?(entry, mod)
     mod[:incremental_library_cache_status] = :miss
     incremental_library_cache_state[:misses] = incremental_library_cache_state[:misses] + 1
@@ -569,6 +583,7 @@ incremental_library_cache_state = {
   mod[:incremental_library_cache_entry] = entry
   mod[:incremental_library_cache_hit] = true
   mod[:incremental_library_cache_function_count] = functions.size()
+  mod[:incremental_library_cache_string_count] = entry[:finish][:string_texts].size()
   mod[:incremental_library_cache_status] = :hit
   incremental_library_cache_state[:hits] = incremental_library_cache_state[:hits] + 1
   nil
@@ -633,6 +648,7 @@ incremental_library_cache_state = {
     mod[:incremental_library_cache_reason] = "the library cohort produced no WIRE functions"
     return nil
   finish = incremental_library_cache_capture_boundary(mod)
+  mod[:incremental_library_cache_string_count] = finish[:string_texts].size()
   entry = {
     version: "library-wire-v1",
     key: mod[:incremental_library_cache_key],
@@ -676,3 +692,43 @@ incremental_library_cache_state = {
   if reason == nil
     reason = "not eligible"
   "  library WIRE cache: bypass (" + reason + ")"
+
+-> incremental_library_cache_file_profile_text(mod)
+  if env("TUNGSTEN_LIBRARY_FILE_PROFILE") != "1" || mod[:library_reachability_paths] == nil
+    return nil
+  rows = {}
+  i = 0
+  while i < mod[:functions].size()
+    func = mod[:functions][i]
+    path = func[:source_path]
+    if mod[:library_reachability_paths][path] == true
+      row = rows[path]
+      if row == nil
+        row = {functions: 0, blocks: 0, instructions: 0}
+        rows[path] = row
+      row[:functions] = row[:functions] + 1
+      row[:blocks] = row[:blocks] + func[:blocks].size()
+      bi = 0
+      while bi < func[:blocks].size()
+        row[:instructions] = row[:instructions] + func[:blocks][bi][:instructions].size()
+        bi += 1
+    i += 1
+  paths = rows.keys().sort()
+  out = StringBuffer(paths.size() * 96)
+  i = 0
+  while i < paths.size()
+    path = paths[i]
+    row = rows[path]
+    if i > 0
+      out << "\n"
+    out << "  library file: "
+    out << path
+    out << " ("
+    out << row[:functions].to_s()
+    out << " functions, "
+    out << row[:blocks].to_s()
+    out << " blocks, "
+    out << row[:instructions].to_s()
+    out << " instructions)"
+    i += 1
+  out.to_s()

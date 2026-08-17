@@ -247,6 +247,58 @@ use runtime_types
       ownership_analyze(func, mod)
     fi += 1
 
+# Ownership is purely per-function: it reads immutable instructions and writes
+# one summary back to the same function record. Keep the parent on useful work
+# while N-1 short-lived workers claim the rest. compile-batch already uses
+# process workers, so nesting this team there would only oversubscribe the host.
+-> ownership_parallel_job_count(mod)
+  if env("TUNGSTEN_PARALLEL_MIDEND") == "0" || env("TUNGSTEN_PARALLEL_OWNERSHIP") == "0" || env("TUNGSTEN_BATCH_WORKER_PROCESS") == "1" || runtime_identity() != "compiled-runtime" || mod[:functions].size() < 512
+    return 1
+  requested = 0
+  configured = env("TUNGSTEN_MIDEND_JOBS")
+  if configured != nil && configured != "" && configured != "auto"
+    requested = configured.to_i()
+  if requested < 1
+    requested = ccall("w_cpu_count")
+    if requested > 8
+      requested = 8
+  if requested < 1
+    requested = 1
+  if requested > mod[:functions].size()
+    requested = mod[:functions].size()
+  if requested > 32
+    requested = 32
+  requested
+
+-> ownership_parallel_worker(state)
+  functions = state[:functions]
+  index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  while index < functions.size()
+    func = functions[index]
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+      ownership_analyze(func, state[:mod])
+    index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  true
+
+-> ownership_pass_parallel(mod, jobs)
+  state = {
+    functions: mod[:functions],
+    mod: mod,
+    cursor: ccall("w_atomic_new", u0xFFFA000000000000)
+  }
+  workers = []
+  worker = 1
+  while worker < jobs
+    workers.push(Thread.new ->
+      ownership_parallel_worker(state))
+    worker += 1
+  ownership_parallel_worker(state)
+  worker = 0
+  while worker < workers.size()
+    ccall("w_thread_join_release", workers[worker])
+    worker += 1
+  nil
+
 # Insert free calls at scope_pop for non-escaped heap-produced values.
 # Modifies WIRE blocks in place: injects :free_value instructions before scope_pop.
 -> insert_frees(func)

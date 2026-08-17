@@ -78,6 +78,12 @@
     fi += 1
   {ok: true, by_name: by_name}
 
+-> core_reachability_library_function?(mod, func)
+  if env("TUNGSTEN_LIBRARY_REACHABILITY") == "0"
+    return false
+  paths = mod[:library_reachability_paths]
+  paths != nil && paths[func[:source_path]] == true
+
 -> core_reachability_unsafe_runtime_call?(name)
   name != nil && name.index("w_method_call") == 0
 
@@ -141,19 +147,19 @@
 # names. This keeps registration filtering at its historical post-hash point
 # while allowing earlier passes to operate on the smaller live closure.
 -> core_reachability_filter_current_registrations(mod, all_functions, live_functions)
-  core_names = {}
+  prunable_names = {}
   live = {}
   i = 0
   while i < all_functions.size()
     func = all_functions[i]
-    if incremental_core_cache_function?(func)
-      core_names[func[:name]] = true
+    if incremental_core_cache_function?(func) || core_reachability_library_function?(mod, func)
+      prunable_names[func[:name]] = true
     i += 1
   i = 0
   while i < live_functions.size()
     live[live_functions[i][:name]] = true
     i += 1
-  core_reachability_filter_registrations(mod, core_names, live, all_functions)
+  core_reachability_filter_registrations(mod, prunable_names, live, all_functions)
 
 -> core_reachability_restore_full_graph(mod)
   restore = mod[:core_reachability_registration_restore]
@@ -185,20 +191,29 @@
 
   functions_by_name = {}
   core_names = {}
+  library_names = {}
+  prunable_names = {}
   core_total = 0
+  library_total = 0
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
     functions_by_name[func[:name]] = func
     if incremental_core_cache_function?(func)
       core_names[func[:name]] = true
+      prunable_names[func[:name]] = true
       core_total += 1
+    elsif core_reachability_library_function?(mod, func)
+      library_names[func[:name]] = true
+      prunable_names[func[:name]] = true
+      library_total += 1
     fi += 1
   mod[:core_reachability_total] = core_total
+  mod[:library_reachability_total] = library_total
   if core_total == 0
     return core_reachability_fallback(mod, "stable Core cohort is empty")
 
-  registration_result = core_reachability_collect_registrations(mod, core_names)
+  registration_result = core_reachability_collect_registrations(mod, prunable_names)
   if registration_result[:ok] != true
     return core_reachability_fallback(mod, registration_result[:reason])
   registrations_by_name = registration_result[:by_name]
@@ -208,7 +223,7 @@
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
-    if core_names[func[:name]] != true || core_reachability_emitter_root?(func)
+    if prunable_names[func[:name]] != true || core_reachability_emitter_root?(func)
       core_reachability_add_function(func[:name], functions_by_name, live, queue)
     fi += 1
 
@@ -281,6 +296,7 @@
 
   emit_functions = []
   core_kept = 0
+  library_kept = 0
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
@@ -288,13 +304,17 @@
       emit_functions.push(func)
       if core_names[func[:name]] == true
         core_kept += 1
+      elsif library_names[func[:name]] == true
+        library_kept += 1
     fi += 1
 
   if filter_registrations
-    core_reachability_filter_registrations(mod, core_names, live)
+    core_reachability_filter_registrations(mod, prunable_names, live)
   mod[:core_reachability_emit_functions] = emit_functions
   mod[:core_reachability_kept] = core_kept
   mod[:core_reachability_pruned] = core_total - core_kept
+  mod[:library_reachability_kept] = library_kept
+  mod[:library_reachability_pruned] = library_total - library_kept
   mod[:core_reachability_status] = :active
   nil
 
@@ -306,7 +326,10 @@
 -> core_reachability_verbose_text(mod)
   status = mod[:core_reachability_status]
   if status == :active
-    return "  core reachability: " + mod[:core_reachability_kept].to_s() + "/" + mod[:core_reachability_total].to_s() + " kept (" + mod[:core_reachability_pruned].to_s() + " pruned)"
+    text = "  core reachability: " + mod[:core_reachability_kept].to_s() + "/" + mod[:core_reachability_total].to_s() + " kept (" + mod[:core_reachability_pruned].to_s() + " pruned)"
+    if mod[:library_reachability_total] != nil && mod[:library_reachability_total] > 0
+      text = text + "; library " + mod[:library_reachability_kept].to_s() + "/" + mod[:library_reachability_total].to_s() + " kept (" + mod[:library_reachability_pruned].to_s() + " pruned)"
+    return text
   if status == :fallback
     return "  core reachability: fallback (" + mod[:core_reachability_reason] + ")"
   "  core reachability: disabled"

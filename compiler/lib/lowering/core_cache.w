@@ -230,10 +230,13 @@ incremental_core_cache_state = {
     write_file(report + "." + key, key_text.to_s())
   entry = incremental_core_cache_state[:entries][key]
   persistent_status = :memory
+  load_seconds = 0
   if entry == nil
     persistent_path = incremental_core_cache_persistent_path(key)
     if persistent_path != nil
+      load_started_at = clock()
       loaded = ccall("w_core_cache_read", persistent_path)
+      load_seconds = clock() - load_started_at
       if incremental_core_cache_entry_valid?(loaded, key)
         entry = loaded
         incremental_core_cache_state[:entries][key] = entry
@@ -250,7 +253,8 @@ incremental_core_cache_state = {
     key: key,
     entry: entry,
     closure_files: rows.size(),
-    persistent_status: persistent_status
+    persistent_status: persistent_status,
+    load_seconds: load_seconds
   }
 
 -> incremental_core_cache_seed_strings(mod, entry)
@@ -280,6 +284,7 @@ incremental_core_cache_state = {
   mod[:incremental_core_cache_key] = probe[:key]
   mod[:incremental_core_cache_closure_files] = probe[:closure_files]
   mod[:incremental_core_cache_persistent_status] = probe[:persistent_status]
+  mod[:incremental_core_cache_load_seconds] = probe[:load_seconds]
   entry = probe[:entry]
   if entry == nil
     mod[:incremental_core_cache_status] = :miss
@@ -482,6 +487,17 @@ incremental_core_cache_state = {
   if mod[:incremental_core_cache_key] == nil
     return nil
   text_by_id = incremental_core_cache_string_text_by_id(mod)
+  # The library snapshot records its boundary before Core strings are sorted
+  # into their canonical prefix. Preserve the boundary by content through the
+  # reorder/dedup step, then publish its new prefix count below.
+  library_texts = {}
+  library_boundary = mod[:incremental_library_cache_string_count]
+  if library_boundary == nil
+    library_boundary = 0
+  i = 0
+  while i < library_boundary && i < mod[:strings].size()
+    library_texts[mod[:strings][i][:text]] = true
+    i += 1
   core_texts = {}
   boundary = mod[:incremental_core_cache_counter_prefix]
   if boundary != nil && boundary[:string_texts] != nil
@@ -542,6 +558,15 @@ incremental_core_cache_state = {
   mod[:string_ids_by_text] = by_text
   mod[:next_string] = new_strings.size()
   mod[:incremental_core_string_count] = prefix_texts.size()
+  canonical_library_boundary = 0
+  library_keys = library_texts.keys()
+  i = 0
+  while i < library_keys.size()
+    new_id = by_text[library_keys[i]]
+    if new_id != nil && new_id + 1 > canonical_library_boundary
+      canonical_library_boundary = new_id + 1
+    i += 1
+  mod[:incremental_library_cache_string_count] = canonical_library_boundary
   nil
 
 -> incremental_core_cache_validate_hit(mod)

@@ -242,6 +242,62 @@ use wire
   # walking every CFG edge and dominator chain solely to fill an unused key.
   {cfg: cfg, idom: idom, dominance_frontiers: df, loops: []}
 
+# CFG construction and promotability discovery only read a function. Compute
+# those summaries concurrently, then let the compiler's parent thread perform
+# SSA mutation in deterministic function order. This deliberately keeps WIRE
+# arena allocation single-threaded.
+-> cfg_parallel_job_count(mod)
+  if env("TUNGSTEN_PARALLEL_MIDEND") == "0" || env("TUNGSTEN_PARALLEL_CFG") == "0" || env("TUNGSTEN_BATCH_WORKER_PROCESS") == "1" || runtime_identity() != "compiled-runtime" || mod[:functions].size() < 512
+    return 1
+  requested = 0
+  configured = env("TUNGSTEN_MIDEND_JOBS")
+  if configured != nil && configured != "" && configured != "auto"
+    requested = configured.to_i()
+  if requested < 1
+    requested = ccall("w_cpu_count")
+    if requested > 8
+      requested = 8
+  if requested < 1
+    requested = 1
+  if requested > mod[:functions].size()
+    requested = mod[:functions].size()
+  if requested > 32
+    requested = 32
+  requested
+
+-> cfg_parallel_prepare_worker(state)
+  functions = state[:functions]
+  index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  while index < functions.size()
+    func = functions[index]
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true && !has_overflow_checked(func)
+      promotable = find_promotable_vars(func)
+      if promotable.keys().size() > 0
+        state[:promotables][index] = promotable
+        state[:analyses][index] = analyze_function(func)
+    index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  true
+
+-> cfg_parallel_prepare(mod, jobs)
+  state = {
+    functions: mod[:functions],
+    analyses: Array.new(mod[:functions].size()),
+    promotables: Array.new(mod[:functions].size()),
+    cursor: ccall("w_atomic_new", u0xFFFA000000000000)
+  }
+  workers = []
+  worker = 1
+  while worker < jobs
+    workers.push(Thread.new ->
+      cfg_parallel_prepare_worker(state))
+    worker += 1
+  cfg_parallel_prepare_worker(state)
+  worker = 0
+  while worker < workers.size()
+    ccall("w_thread_join_release", workers[worker])
+    worker += 1
+  {analyses: state[:analyses], promotables: state[:promotables]}
+
 # ── SSA Conversion (mem2reg) ──────────────────────────────────────────
 
 # Identify var_slots that can be promoted to SSA registers.

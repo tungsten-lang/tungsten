@@ -31,7 +31,8 @@ check_mul1("ordinary", heap + 17, (1 << 63) + 29,
 check_mul1("maximum_pair", base - 1, base - 3,
            "340282366920938463389587631136930004995", 2)
 
-# Pointer-identical squaring and neighboring sign/width shapes remain on C.
+# Pointer-identical one-limb squaring has its own exact source checkpoint;
+# neighboring sign/width shapes remain controls for this distinct-pair spec.
 square = heap + 37
 check("control.square", (square * square).to_s(),
       "79228162514285166741820540249")

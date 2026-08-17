@@ -2960,10 +2960,10 @@ ewscope_md_state = {ids: {}}
     seam_decls << "declare i64 @__w_bigint_sub1_2_src(i64, i64) nounwind\n"
 
   # Exact positive one-limb multiplication follows the same narrow contract:
-  # w_mul proves two distinct positive one-limb heap operands, Core supplies
-  # the raw arithmetic worker, and a genuine plain BigInt#* reopen keeps
-  # ordinary method-table precedence. Stage0/C-only links bind the weak exact
-  # C default.
+  # w_mul proves either two distinct positive one-limb heap operands or C's
+  # raw-positive-header one-limb square, Core supplies the raw arithmetic
+  # worker, and a genuine plain BigInt#* reopen keeps ordinary method-table
+  # precedence. Stage0/C-only links bind the weak exact C default.
   bigint_mul1_1_fn = nil
   bigint_mul1_1_matches = 0
   bm1fi = 0

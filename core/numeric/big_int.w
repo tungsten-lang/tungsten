@@ -3586,9 +3586,9 @@ fn __bigint_sub1_1_raw(a, b) (i64 i64) i64
   )
 
 # Exact positive one-limb multiply leaf. The generic runtime gate and typed
-# BigInt worker have already proved distinct positive one-limb heap operands;
-# this raw worker performs only the C leaf's limb loads, 64x64 product, and
-# identical result finishing.
+# BigInt worker have already proved either a distinct positive one-limb pair
+# or C's raw-positive-header one-limb square; this raw worker performs only
+# the C leaf's limb loads, 64x64 product, and identical result finishing.
 fn __bigint_mul1_1_raw(a, b) (i64 i64) i64
   product = __bigint_mul1_1_product(a, b) ## u128
   low = product ## u64
@@ -4636,6 +4636,13 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
 
     if am < 2 || bm < 2 || am > 24 || bm > 24
       on macos && arm64
+        # Exact C-shaped pointer-identical one-limb square. The runtime
+        # source gate has already matched C's raw positive-header test;
+        # reuse the committed 64x64 product and result finisher verbatim.
+        if $value == other$value && $size == 1
+          return wvalue_from_bits(
+            __bigint_mul1_1_raw($value ## i64, other$value ## i64)
+          )
         # Exact C-shaped positive 1x1 leaf. Keep its selector behind the
         # pre-existing out-of-band test so every multi-limb shape retains
         # its prior hot path. Pointer-identical squaring and signed neighbors

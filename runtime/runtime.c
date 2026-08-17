@@ -11713,7 +11713,13 @@ WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
          * so only the magnitude gate matters (overlay-flagged negatives with
          * a positive header still square correctly on this path). */
         int32_t n = ba->size;
-        if (n == 1) return bigint_mul_positive_11(ba, ba);
+        if (n == 1) {
+#if BN_BIGINT_MUL1_1_SRC_DIRECT
+            if (__builtin_expect(route_mul1_1 != 0, 1))
+                return bigint_mul1_1_seam(a, b);
+#endif
+            return bigint_mul_positive_11(ba, ba);
+        }
 #if BN_BOXED_SQR16_FAST
         /* Bypass bigint_mul_positive_equal's generic-kernel frame entirely:
          * this pointer-identical, positive shape is already fully known. */
@@ -37506,12 +37512,13 @@ WValue bigint_times_seam(WValue a, WValue b) {
     return __w_bigint_times_src(a, b);
 }
 
-/* Multiply routes to source only for the SCHOOLBOOK band: scalar-word ports
- * have their own narrow seams in bigint_mul_any_routed. Karatsuba/Toom/NTT
- * crossovers, squaring, and every remaining n-by-1 specialization stay in C. */
+/* Multiply routes to source only for the SCHOOLBOOK band: scalar-word and
+ * one-limb square ports have their own narrow seams in
+ * bigint_mul_any_routed. Karatsuba/Toom/NTT crossovers, wider squaring, and
+ * every remaining n-by-1 specialization stay in C. */
 static inline int bigint_mul_src_shape(WValue a, WValue b) {
     if (!w_is_bigint(a) || !w_is_bigint(b)) return 0;
-    if (a == b) return 0;                     /* squaring has its own C path */
+    if (a == b) return 0;             /* square ports use dedicated seams */
     int32_t sa, sb;
     (void)w_bigint_view(a, &sa);
     (void)w_bigint_view(b, &sb);

@@ -1,0 +1,60 @@
+NATIVE SUB1@8 BORROW-DEATH FOLLOW-UP
+
+parent_commit=805f2064
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; Battery Power 70%
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+gmp=6.3.0
+
+DESIGN
+
+The committed exact leaf remains in source as the retained-C reference.  The
+native wrapper now calls a separate borrow-death leaf.  It executes `subs` and
+one `sbcs`, then branches only if borrow survives limb one.  On the common
+path, limbs 2..7 are pure copies and the returned borrow is statically zero.
+The rare path executes the six remaining `sbcs`, identical stores, and
+`cset lo`.  Both paths are frameless and call-free.
+
+MATCHED NINE-CELL SCREEN
+
+baseline=/private/tmp/sub1-8-native-exact
+candidate=/private/tmp/sub1-8-native-borrow-death
+method=11 alternating process pairs; 110 ms/cell
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sub1@1   3.244807     3.251528      1.003082       0.017874    4/11
+sub1@2   2.721866     2.717243      0.988392       0.030931    7/11
+sub1@3   3.972982     3.986973      1.005190       0.010530    3/11
+sub1@4   4.041527     4.044846      1.002790       0.003978    3/11
+sub1@5   4.037980     4.054200      1.002712       0.009396    3/11
+sub1@6   4.181795     4.178882      0.999143       0.005907    7/11
+sub1@7   4.331920     4.296457      0.992151       0.027162    8/11
+sub1@8   4.271363     4.157674      0.973383       0.006061   10/11
+sub1@9   4.915157     4.850565      0.986355       0.062016    7/11
+
+Every control stays within 1.2%; the target's narrow IQR prompted promotion.
+
+TARGET PROMOTION
+
+method=31 alternating process pairs; 500 ms requested per leg
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sub1@8   4.287827     4.195895      0.972836       0.017211   26/31
+
+The paired-ratio range was 0.876611..1.062527.  The median gain is modest but
+resolved; this is a leaf-only improvement, while boxed dispatch/allocation
+remain the larger cost.
+
+PUBLIC ROW
+
+Tungsten C=2.317 ns; Tungsten native=4.418 ns; GMP=3.097 ns.  The native route
+still loses overall, so no broader claim is made.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_sub1_8_source_spec passed all 16 checks;
+- the full-borrow fixture executes the rare chain and matches retained C;
+- LLVM assembled/verified and the linked leaf has no frame or calls;
+- native lane self-test passed;
+- git diff --check passed.

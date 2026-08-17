@@ -3171,6 +3171,43 @@ on macos && arm64
       ret
     ASM
 
+  # Native-only follow-up to the exact checkpoint above.  A borrow surviving
+  # limb one requires limb one to be zero while limb zero borrowed; on the
+  # common path the remaining six limbs are therefore a pure copy.  The rare
+  # path retains the exact full borrow chain and store schedule.
+  fn __bigint_sub1_8_borrow_death(rp, ap, word) (i64 i64 i64) i64
+    asm <<~ASM
+      ldp x4, x5, [x1]
+      subs x4, x4, x2
+      sbcs x5, x5, xzr
+      b.cc 1f
+      ldp x6, x7, [x1, #16]
+      ldp x8, x9, [x1, #32]
+      ldp x10, x11, [x1, #48]
+      stp x4, x5, [x0]
+      stp x6, x7, [x0, #16]
+      stp x8, x9, [x0, #32]
+      stp x10, x11, [x0, #48]
+      mov x0, xzr
+      ret
+    1:
+      ldp x6, x7, [x1, #16]
+      ldp x8, x9, [x1, #32]
+      ldp x10, x11, [x1, #48]
+      sbcs x6, x6, xzr
+      sbcs x7, x7, xzr
+      sbcs x8, x8, xzr
+      sbcs x9, x9, xzr
+      sbcs x10, x10, xzr
+      sbcs x11, x11, xzr
+      stp x4, x5, [x0]
+      stp x6, x7, [x0, #16]
+      stp x8, x9, [x0, #32]
+      stp x10, x11, [x0, #48]
+      cset x0, lo
+      ret
+    ASM
+
 # Exact raw wrappers for the positive 4-by-2-limb C leaf.  Keep WValue and
 # limb addresses as i64 throughout: routing them through typed source fields
 # would box the addresses and re-enter ordinary numeric dispatch.  Allocation,
@@ -3405,7 +3442,7 @@ fn __bigint_sub1_8_raw(a, b) (i64 i64) i64
   ap = (a & mask) + 16 ## i64
   bp = (b & mask) + 16 ## i64
   word = raw_load_u64(bp, 0) ## i64
-  borrow = __bigint_sub1_8_exact(rp, ap, word) ## i64
+  borrow = __bigint_sub1_8_borrow_death(rp, ap, word) ## i64
   ccall_nobox("w_bigint_sub1_8_finish_raw", result)
 
 # Exact floor square root for one machine-word magnitude. A hardware f64

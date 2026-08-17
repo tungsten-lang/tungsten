@@ -575,6 +575,14 @@ within 3%.  This completes exact native coverage of retained fixed subtract-
 word arms 1–8; borrow-death remains a separate native-only experiment.
 Evidence: `bigint_sub1_8_exact_results.txt`.
 
+NATIVE SUB1@8 BORROW-DEATH FOLLOW-UP: after the exact fixed family was
+checkpointed, the common source leaf now stops its flag chain after limb one.
+If no borrow survives, limbs 2–7 are copied without six serial `sbcs`; the
+rare path retains the exact full chain and stores.  A 31-pair 500 ms promotion
+won 26/31 at 0.97284 (4.196 ns versus 4.288 ns); the nine-cell screen measured
+0.97338 at the target and kept every control within 1.2%.  Full-propagation
+correctness remains covered.  Evidence: `bigint_sub1_8_borrow_death_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

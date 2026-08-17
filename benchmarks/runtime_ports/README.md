@@ -418,6 +418,17 @@ native lane remains slower than C through @8, while beating GMP from @16;
 those remaining gaps are inputs to later native-only work, not reasons to
 change the exact ports.  Evidence: `bigint_add1_fixed_dispatch_results.txt`.
 
+EXACT POSITIVE ADD1@5 CHECKPOINT: the five-limb arm extends the literal port
+with C's two `ldp` plus one `ldr`, `adds` plus four `adcs`, two `stp` plus one
+`str`, and final `cset`.  It requests the same cap-five hot result and keeps
+the full-carry grow-to-six construction unchanged.  The target won all eleven
+matched pairs, falling from 3.881 ns on the retained C tail to 2.618 ns native
+(0.67608).  The @4 control was neutral at 0.98991; the still-unported @6 row
+moved to 1.02981 from code layout and is retained honestly for the next exact
+arm.  The public row measured 1.743/2.628/2.147 ns for C/native/GMP.  Counters
+attribute 58.4% of cycles to the exact source leaf and no samples to the C
+fixed kernel.  Evidence: `bigint_add1_5_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

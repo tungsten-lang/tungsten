@@ -2942,6 +2942,23 @@ on macos && arm64
       ret
     ASM
 
+  fn __bigint_add1_5_exact(rp, ap, word) (i64 i64 i64) i64
+    asm <<~ASM
+      ldp x4, x5, [x1]
+      ldp x6, x7, [x1, #16]
+      ldr x8, [x1, #32]
+      adds x4, x4, x2
+      adcs x5, x5, xzr
+      adcs x6, x6, xzr
+      adcs x7, x7, xzr
+      adcs x8, x8, xzr
+      stp x4, x5, [x0]
+      stp x6, x7, [x0, #16]
+      str x8, [x0, #32]
+      cset x0, cs
+      ret
+    ASM
+
 # Exact raw wrappers for the positive 4-by-2-limb C leaf.  Keep WValue and
 # limb addresses as i64 throughout: routing them through typed source fields
 # would box the addresses and re-enter ordinary numeric dispatch.  Allocation,
@@ -3026,6 +3043,16 @@ fn __bigint_add1_4_raw(a, b) (i64 i64) i64
   word = raw_load_u64(bp, 0) ## i64
   carry = __bigint_add1_4_exact(rp, ap, word) ## i64
   ccall_nobox("w_bigint_add1_4_finish_raw", result, carry)
+
+fn __bigint_add1_5_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot", 5) ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  word = raw_load_u64(bp, 0) ## i64
+  carry = __bigint_add1_5_exact(rp, ap, word) ## i64
+  ccall_nobox("w_bigint_add1_5_finish_raw", result, carry)
 
 # Exact floor square root for one machine-word magnitude. A hardware f64
 # square root supplies a 32-bit seed; integer correction makes the result
@@ -3526,6 +3553,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
           4 =>
             return wvalue_from_bits(
               __bigint_add1_4_raw($value ## i64, other$value ## i64)
+            )
+          5 =>
+            return wvalue_from_bits(
+              __bigint_add1_5_raw($value ## i64, other$value ## i64)
             )
           =>
             return ccall("w_bigint_add", self, other)

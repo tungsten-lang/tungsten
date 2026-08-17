@@ -1,0 +1,88 @@
+BIGINT POSITIVE THREE-LIMB SQUARE — EXACT SOURCE CHECKPOINT
+===========================================================
+
+Scope
+-----
+
+This checkpoint ports only the pointer-identical, raw-positive-header,
+three-limb arm from `bigint_mul_any_routed` / `bigint_mul_positive_equal`.
+The native Tungsten worker is a literal copy of the current AArch64 leaf:
+
+  - exact hot capacity-8 allocation;
+  - the same three diagonal products and three doubled cross products;
+  - the linked C `mul` / `umulh` / `extr` / flag-chain schedule;
+  - six unconditional limb stores; and
+  - positive size 5 when limb 5 is zero, otherwise positive size 6.
+
+The stable seam is dedicated to `sqr@3`. A tag-overlay negative with raw
+header +3 is admitted just as in C, while a real negative header and every
+neighboring width retain their prior routes. A plain open-world BigInt `*`
+replacement still wins over the narrow seam.
+
+Build
+-----
+
+base_commit=a21f983cbf11126bdf1d70a56f7e55467517cfc6
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+compiler_path=/private/tmp/tungsten-compiler-sqr3-exact
+compiler_sha256=a41a586ea9fa5b47c9fe506bf4bea67f7a52d6e68f62de3903ad7a2295ec4ded
+candidate=/private/tmp/bench_big_math_tungsten_sqr3_exact
+candidate_sha256=b677389f214924c0c4da3741b56c023f6a464fb09f1a087242fae3c0be2c9bd3
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+power=AC, battery 100 percent
+
+Same-binary C/source screen
+---------------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+control=TUNGSTEN_BIGINT_SRC_OPS=0
+
+cell    C_pinned_ns  source_ns  paired_median  paired_IQR  wins
+sqr@1       0.830795    0.827229        0.998627    0.008575   7/11
+sqr@2       1.343825    1.345352        1.001349    0.006439   5/11
+sqr@3       3.009740    2.998378        0.998005    0.002712   9/11
+sqr@4       5.182643    5.152260        0.998598    0.018746   6/11
+sqr@8      16.237881   16.161264        0.995850    0.008366   9/11
+sqr@16     47.403146   47.419345        1.001630    0.004217   5/11
+sqr@32    162.940969  162.716483        1.003609    0.005622   3/11
+
+Only sqr@3 changes arithmetic ownership. Every neighboring control remains
+within 0.4%.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr3-exact-promotion-a21f983c-m5max-20260817.json
+raw_json_sha256=2272197356bc0fe72d7949fae099b0828ec2eec3431dcace9b04c1a5d43ab0ca
+
+cell    C_pinned_ns  source_ns  paired_median  paired_IQR  wins
+sqr@3       3.047704    3.051421        1.000208    0.004574   9/21
+
+The exact native port is parity, not a speed claim. This commit intentionally
+records arithmetic ownership before any native-only dispatch or scheduling
+change.
+
+Focused validation
+------------------
+
+  - compiled and interpreted representation checks pass for size-5 and
+    size-6 results, overlay-negative and negative-header inputs, receiver
+    preservation, and a distinct-equal-value control;
+  - a compiled feature-off differential compares the direct strong native
+    worker against the pinned C boundary for 100,000 values, including both
+    result widths and alternating signs;
+  - 100,000 runtime squares through four limbs match GMP;
+  - the plain BigInt `*` reopen spec passes;
+  - feature-off and feature-on native-lane self-tests pass;
+  - emitted LLVM assembles and verifies under LLVM 22;
+  - linked AArch64 contains the extracted C sqr@3 schedule and exact header
+    store;
+  - two self-host compiler generations emit byte-identical LLVM
+    (sha256 e520a22cc35d532a882859d8063fc5cb4721bf32c04bc976e5dd7b0497239e81);
+    and
+  - `git diff --check` passes.
+
+This is the exact-port checkpoint. Native-only integration follows in a
+separate commit with new matched measurements.

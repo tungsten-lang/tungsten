@@ -21,6 +21,18 @@ bin/tungsten run scripts/bench/qwen38_mlx.w mtp 24
 bin/tungsten run scripts/bench/qwen38_mlx.w mtp-auto 48
 ```
 
+Two diagnostics share `ARGV[7]`, both of which need a real prose prompt
+(`ARGV[5]` above 5 tokens) to say anything:
+
+```sh
+# Marginal cost of the 1st/2nd/3rd verified row, interleaved in one process.
+# Needs mtp2 or mtp-auto: triplet scratch is only allocated there.
+bin/tungsten run scripts/bench/qwen38_mlx.w mtp2 8 r2 mmap none 64 auto row-scan
+
+# Rank of the target's token in the MTP head's draft distribution.
+bin/tungsten run scripts/bench/qwen38_mlx.w mtp 64 r2 mmap none 64 auto rank-probe
+```
+
 The runner checks raw-prompt parity before benchmarking: `The capital of
 France is` must predict token 11751 (` Paris`). Baseline, optimized-serial,
 optimized-concurrent, and MTP modes emit the same greedy token sequence.
@@ -321,6 +333,126 @@ behavioural moved. Forcing `wide` everywhere is clearly worse; forcing `r1`
 everywhere is close but never better. Recorded so the split is not
 re-litigated, and because it is a case where the isolated-timing choice held
 up under the in-situ test.
+
+### The third verified row was costing 8x the second (2026-08-17)
+
+The whole speculative-decode economy turns on one number: what a marginal
+verified row costs. A draft schedule buys expected tokens per round and pays
+for them in rows, so if rows are cheap every deeper or wider schedule looks
+attractive, and if they are expensive none of them do.
+
+Comparing whole decode runs cannot measure it -- this box drifts more than 30%
+between runs, which is larger than the effect. `ARGV[7] = "row-scan"` measures
+it properly: it interleaves widths 1/2/3 **inside one process** on an
+already-warm cache in a single thermal state, 40 repetitions, median. Positions
+are reused deliberately -- the outputs are garbage, the timings are not. The
+instrument reproduces to +/-1 ms where end-to-end wall clock swings 33%.
+
+What it found:
+
+| verified rows | median | marginal |
+|---|---|---|
+| 1 | 39 ms | -- |
+| 2 | 43 ms | **+4** |
+| 3 | 72 ms | **+29** |
+
+One row is ~18 GB of weight streaming at roughly 450 GB/s, so the second row
+is nearly free, exactly as a memory-bound decode should behave. The third
+costing 8x the second is not physics.
+
+It was not the wide/r1 split -- forcing either variant everywhere moved
+nothing (70/72/74 and 74/81/76 ms across reps). The cause was in the kernel:
+`nvfp4_matvec_mlx_scaled_triplet` dereferences `x0`/`x1`/`x2` through device
+pointers *inside* the per-output-row macro, so each of the two output rows
+re-issues all twelve activation loads -- **24 loads per group where the pair
+kernel issues 8**, because the pair hoists its 8 `float4` once and reuses them
+across both rows. The activations are tiny and L1-resident, so each load is
+cheap; they were competing for the load/store issue slots that the weight
+stream needs, and keeping that stream saturated is the kernel's entire job.
+
+`nvfp4_matvec_mlx_scaled_triplet_hoist` hoists all twelve `float4` before the
+macro. Arithmetic and summation order are untouched, so it is bit-identical by
+construction. Interleaved against the old kernel, three reps:
+
+| | 2 rows | 3 rows | row-3 marginal |
+|---|---|---|---|
+| old | 39 / 41 / 46 ms | 55 / 61 / 73 ms | 16 / 20 / 27 ms |
+| hoisted | 40 / 43 / 46 ms | 43 / 49 / 55 ms | **3 / 6 / 9 ms** |
+
+3/3, and the 2-row column is the null control: it is identical between arms,
+as it must be, since the pair kernel is untouched. The marginal third row is
+now ~3x cheaper and matches the second. End-to-end on MTP-2 it wins 4/4, and
+all four variants emit **byte-identical token ids and identical acceptance**
+-- the correctness gate for a change that claims to be bit-exact.
+
+`auto` is now the hoisted kernel everywhere; `wide` and `rowsplit` remain
+selectable so the old split stays re-checkable. This supersedes the wide/r1
+result above: that comparison was real but both of its arms carried this
+defect, so it was measuring which of two encumbered kernels lost less.
+
+Worth generalising: the earlier finding on this kernel family was that
+*register pressure beats instruction count*, and it led to reverting a hoist.
+Here the opposite hoist wins. The reconcilable rule is that hoisting a value
+reused **across output rows** pays, while hoisting one already invariant
+within a row just adds live registers for nothing.
+
+### Tree drafting: measured, and it does not pay here
+
+Tree drafting -- verifying the head's top-k candidates as siblings instead of
+extending one chain -- was evaluated before building it, because the decision
+turns entirely on a quantity nothing in the harness reported.
+
+Acceptance only tells you P(rank == 0): a draft is accepted when the head's
+argmax matches the target's. It cannot distinguish a near miss from a
+blow-out, and a k-branch tree's ceiling is exactly P(rank < k).
+`mtp_draft_rank.metal` measures the full curve by counting logits strictly
+greater than the target's, with the selector's lowest-index tie-break so rank
+0 agrees with an accepted draft. `ARGV[7] = "rank-probe"` histograms it on the
+MTP-1 path, where the head's logits are still intact when the target becomes
+known.
+
+64-token prose prompt, 64 generated, 39 drafts:
+
+| | P(rank < k) | marginal |
+|---|---|---|
+| rank < 1 | 0.6154 | -- |
+| rank < 2 | 0.7436 | +0.128 |
+| rank < 3 | 0.8974 | +0.154 |
+| rank < 4 | 0.9231 | +0.026 |
+| rank < 5 | 0.9487 | +0.026 |
+
+`rank < 1` reproduces the accept rate 0.6154 exactly, which validates the
+probe. Nothing fell outside the compact draft vocabulary, so the head's
+restricted projection is not the limit.
+
+The curve is steep, and it still does not help. Compare what one extra row
+buys, using the post-fix row costs (verify 37/40/43 ms at widths 1/2/3) and a
+measured ~3 ms MTP head step:
+
+| schedule | round | E[tokens] | ms/token |
+|---|---|---|---|
+| depth-1 pair | 43 ms | 1.615 | 26.6 |
+| depth-2 chain | 49 ms | 1.909 | **25.7** |
+| 2-branch tree | 46 ms | 1.744 | 26.4 |
+
+The tree does save one head step -- both branches come from logits the head
+already computed -- but that is worth ~3 ms, and it cannot cover the coverage
+deficit. **A sibling branch adds +0.128 expected tokens where extending the
+chain adds +0.303**, and every later branch (+0.154, +0.026, +0.026) stays
+below the chain's marginal too. The reason is structural rather than a
+property of this checkpoint: a sibling only pays when the head's first choice
+is *wrong* and its second is right, whereas a chain extension pays when the
+first choice is right and the next one is too -- and this head is right 62% of
+the time.
+
+On top of that, a tree needs an attention mask siblings do not currently have
+(`enqueue_full_triplet` builds a causal chain, so row 3 attends to row 2) and a
+more complex rollback. That is real work for, at best, a tie with a schedule
+that already exists.
+
+**Not implemented, deliberately.** Re-open it if the head's acceptance ever
+drops far enough that the chain's marginal falls below a branch's -- the
+probe is checked in, so re-deciding costs one run.
 
 ### Attribution
 

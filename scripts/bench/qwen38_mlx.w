@@ -78,6 +78,13 @@ full_draft_vocab = legacy_mtp || (ARGV.size() > 4 && ARGV[4] == "full-draft-voca
 profile_components = ARGV.size() > 4 && ARGV[4] == "profile"
 profile_prompt_tokens = ARGV.size() > 5 ? ARGV[5].to_i() : 5
 triplet_variant = ARGV.size() > 6 ? ARGV[6] : "auto"
+# Diagnostic: histogram the rank of the target's token in the head's draft
+# distribution. Decides whether tree drafting can pay -- see mtp_draft_rank.metal.
+draft_rank_probe = ARGV.size() > 7 && ARGV[7] == "rank-probe"
+row_scan = ARGV.size() > 7 && ARGV[7] == "row-scan"
+rank_hist = [0, 0, 0, 0, 0, 0]
+rank_outside = 0
+rank_samples = 0
 legacy_reductions = ARGV.size() > 6 && ARGV[6] == "legacy-reductions"
 if profile_prompt_tokens < 1 then raise "profile prompt length must be positive"
 # The K/V caches are fixed at MAX_POS rows, and overflowing them does NOT
@@ -144,6 +151,8 @@ scaled_triplet_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_scale
 scaled_triplet_res_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_scaled_triplet_residual")
 scaled_triplet_r1_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_scaled_triplet_r1")
 scaled_triplet_res_r1_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_scaled_triplet_residual_r1")
+scaled_triplet_hoist_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_scaled_triplet_hoist")
+scaled_triplet_res_hoist_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_scaled_triplet_residual_hoist")
 
 conv_pipe = metal_pipeline(metal_compile_source(device, read_file(QWEN_DIR + "conv1d_depthwise_step.metal")), "conv1d_depthwise_step")
 g_pipe = metal_pipeline(metal_compile_source(device, read_file(QWEN_DIR + "compute_g.metal")), "compute_g")
@@ -181,6 +190,8 @@ delta_triplet_pipe = metal_pipeline(triplet_lib, "gated_delta_triplet")
 
 mtp_select_lib = metal_compile_source(device, read_file(QWEN_DIR + "mtp_draft_select.metal"))
 mtp_select_pipe = metal_pipeline(mtp_select_lib, "mtp_compact_draft_select")
+mtp_rank_lib = metal_compile_source(device, read_file(QWEN_DIR + "mtp_draft_rank.metal"))
+mtp_rank_pipe = metal_pipeline(mtp_rank_lib, "mtp_draft_target_rank")
 
 rms_pair_lib = metal_compile_source(device, read_file(SHARED_DIR + "rms_norm_batch_fc.metal"))
 rms_pair_pipe = metal_pipeline_with_int_constants(rms_pair_lib, "rms_norm_batch_fc", [HIDDEN, 2])
@@ -485,6 +496,7 @@ token_triplet_buf = metal_buffer(device, 3 * 4)
 
 logits = metal_buffer(device, N_VOCAB * 4)
 argmax_out = metal_buffer(device, 4)
+rank_out = metal_buffer(device, 4)
 n_vocab_buf = metal_buffer(device, 4)
 metal_buffer_write_i32(n_vocab_buf, 0, N_VOCAB)
 argmax_partial_values = metal_buffer(device, 3 * ARGMAX_CHUNKS * 4)
@@ -582,7 +594,16 @@ rope_power = ~2.0 / ROT_DIM
   # the real forward 18 GB streams past and nothing is resident. ARGV[6] =
   # "r1"|"wide" forces one variant everywhere so the split can be re-checked
   # at the full-model level.
-  use_wide = triplet_variant == "wide" || (triplet_variant == "auto" && (kdim == FFN || rows == N_VOCAB))
+  # "auto" is now the hoisted kernel everywhere. The wide/r1 split it used to
+  # pick between was chosen from isolated timings and measured as a wash at the
+  # full-model level (three variants, three reps, no separation); the real cost
+  # was that BOTH re-read the activations once per output row. "wide" and
+  # "rowsplit" remain selectable so the old split stays re-checkable.
+  if triplet_variant == "hoist" || triplet_variant == "auto"
+    metal_dispatch_groups(queue, scaled_triplet_hoist_pipe,
+      [w[0], w[1], input, output, kdim, rows, w[2]], (rows + 3) / 4, 64)
+    return
+  use_wide = triplet_variant == "wide" || (kdim == FFN || rows == N_VOCAB)
   if use_wide
     metal_dispatch_groups(queue, scaled_triplet_pipe,
       [w[0], w[1], input, output, kdim, rows, w[2]], (rows + 3) / 4, 64)
@@ -596,7 +617,11 @@ rope_power = ~2.0 / ROT_DIM
   residual = spec[2]
   kdim = spec[3]
   rows = spec[4]
-  use_wide_res = triplet_variant == "wide" || (triplet_variant == "auto" && kdim == FFN)
+  if triplet_variant == "hoist" || triplet_variant == "auto"
+    metal_dispatch_groups(queue, scaled_triplet_res_hoist_pipe,
+      [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + 3) / 4, 64)
+    return
+  use_wide_res = triplet_variant == "wide" || kdim == FFN
   if use_wide_res
     metal_dispatch_groups(queue, scaled_triplet_res_pipe,
       [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + 3) / 4, 64)
@@ -1014,6 +1039,19 @@ rope_power = ~2.0 / ROT_DIM
       profile_stats[10] = profile_stats[10] + 1
   result
 
+# Diagnostic: where did the target's token sit in the head's draft ranking?
+# Reads the head logits left behind by the most recent mtp_step, so it must be
+# called before any further mtp_step overwrites them.
+-> draft_target_rank(target_id)
+  metal_batch_begin_concurrent(queue)
+  metal_dispatch_groups(queue, mtp_rank_pipe,
+    [mtp_prefix_logits, mtp_control_logits, rank_out,
+     MTP_DRAFT_PREFIX, MTP_DRAFT_CONTROL_COUNT, MTP_DRAFT_CONTROL_START,
+     target_id],
+    1, 32)
+  metal_batch_commit(queue)
+  metal_buffer_read_i32(rank_out, 0)
+
 -> forward_pair(spec)
   profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
   token0 = spec[0]
@@ -1356,6 +1394,14 @@ if mtp_enabled
           verify_draft = (draft + 1) % N_VOCAB
         pair_preds = forward_pair([current, verify_draft, pos])
         drafted = drafted + 1
+        if draft_rank_probe && !full_draft_vocab
+          probe_rank = draft_target_rank(pair_preds[0])
+          rank_samples = rank_samples + 1
+          if probe_rank < 0
+            rank_outside = rank_outside + 1
+          else
+            probe_slot = probe_rank < 5 ? probe_rank : 5
+            rank_hist[probe_slot] = rank_hist[probe_slot] + 1
         if pair_preds[0] == verify_draft
           accepted = accepted + 1
           ids.push(verify_draft)
@@ -1392,6 +1438,89 @@ else
 elapsed = ccall("__w_clock_ms") - t0
 tokens_per_second = (~0.0 + n_generate) * 1000.0 / elapsed
 
+# ROW SCAN: what does one extra verified row actually cost?
+#
+# The whole speculative-decode economy turns on this number: a draft schedule
+# buys expected tokens per round and pays for them in verified rows, so the
+# marginal cost of row k is what decides whether any deeper or wider schedule
+# can win. Measuring it by comparing whole decode runs does not work -- this
+# box drifts more than 30% between runs, which is larger than the effect --
+# so the scan interleaves the widths INSIDE one process on an already-warm
+# cache, in the same thermal state, and takes the median over repetitions.
+# Positions are reused deliberately: the outputs are garbage, the timings are
+# not, and no state escapes the scan.
+if row_scan
+  # Triplet scratch (cs_mid2 and friends) is only allocated under mtp_depth2,
+  # so the scan needs a mode that allocates it.
+  if !mtp_depth2 then raise "row-scan requires mode mtp2 or mtp-auto (triplet scratch is allocated only there)"
+  scan_reps = 40
+  scan_pos = prompt.size()
+  scan_tok = ids[0]
+  scan1 = []
+  scan2 = []
+  scan3 = []
+  r = 0
+  while r < scan_reps
+    s1 = ccall("__w_clock_ms")
+    forward(scan_tok, scan_pos, false)
+    scan1.push(ccall("__w_clock_ms") - s1)
+    s2 = ccall("__w_clock_ms")
+    forward_pair([scan_tok, scan_tok, scan_pos])
+    scan2.push(ccall("__w_clock_ms") - s2)
+    s3 = ccall("__w_clock_ms")
+    forward_triplet([scan_tok, scan_tok, scan_tok, scan_pos])
+    scan3.push(ccall("__w_clock_ms") - s3)
+    r = r + 1
+  # Localize the cliff: time one mamba layer, one attention layer, and one FFN
+  # in isolation at width 2 vs width 3. Each is wrapped in its own batch so the
+  # commit is a real sync point and the timing is that stage's alone.
+  scan_mamba = -1
+  scan_attn = -1
+  li = 0
+  while li < N_LAYERS
+    if layers[li][:kind] == "mamba"
+      if scan_mamba < 0 then scan_mamba = li
+    else
+      if scan_attn < 0 then scan_attn = li
+    li = li + 1
+  stage_names = ["mamba", "attn", "ffn"]
+  stage_pair = [[], [], []]
+  stage_trip = [[], [], []]
+  r = 0
+  while r < scan_reps
+    st = 0
+    while st < 3
+      t = ccall("__w_clock_ms")
+      metal_batch_begin_concurrent(queue)
+      if st == 0 then enqueue_mamba_pair(layers[scan_mamba])
+      if st == 1 then enqueue_full_pair([layers[scan_attn], scan_pos])
+      if st == 2 then enqueue_ffn_pair(layers[scan_attn])
+      metal_batch_commit(queue)
+      stage_pair[st].push(ccall("__w_clock_ms") - t)
+      t = ccall("__w_clock_ms")
+      metal_batch_begin_concurrent(queue)
+      if st == 0 then enqueue_mamba_triplet(layers[scan_mamba])
+      if st == 1 then enqueue_full_triplet([layers[scan_attn], scan_pos])
+      if st == 2 then enqueue_ffn_triplet(layers[scan_attn])
+      metal_batch_commit(queue)
+      stage_trip[st].push(ccall("__w_clock_ms") - t)
+      st = st + 1
+    r = r + 1
+  st = 0
+  while st < 3
+    p2 = stage_pair[st].sort()[scan_reps / 2]
+    p3 = stage_trip[st].sort()[scan_reps / 2]
+    << "rowscan stage " + stage_names[st] + ": 2row " + p2.to_s + " ms, 3row " + p3.to_s + " ms, delta " + (p3 - p2).to_s
+    st = st + 1
+
+  m1 = scan1.sort()[scan_reps / 2]
+  m2 = scan2.sort()[scan_reps / 2]
+  m3 = scan3.sort()[scan_reps / 2]
+  << "rowscan reps=" + scan_reps.to_s + " variant=" + triplet_variant
+  << "rowscan 1row median " + m1.to_s + " ms"
+  << "rowscan 2row median " + m2.to_s + " ms  (marginal " + (m2 - m1).to_s + ")"
+  << "rowscan 3row median " + m3.to_s + " ms  (marginal " + (m3 - m2).to_s + ")"
+
 tokenizer = Tungsten:Llama:Tokenizer.from_packed_tokenizer(TOKENIZER_BIN)
 text_out = tokenizer.decode(ids)
 << "generated ids: " + ids.to_s
@@ -1399,6 +1528,18 @@ text_out = tokenizer.decode(ids)
 if mtp_enabled
   rate = drafted == 0 ? ~0.0 : (~0.0 + accepted) / drafted
   << "mtp: " + accepted.to_s + "/" + drafted.to_s + " drafts accepted (" + rate.to_s + ")"
+  if draft_rank_probe && rank_samples > 0
+    # Cumulative coverage: P(rank < k) is the ceiling on what a k-branch tree
+    # can accept per round, since a tree verifies the head's top k candidates.
+    cum = 0
+    k = 0
+    while k < 6
+      cum = cum + rank_hist[k]
+      label = k < 5 ? ("rank<" + (k + 1).to_s) : "rank<inf"
+      cov = (~0.0 + cum) / rank_samples
+      << "draft " + label + ": " + cum.to_s + "/" + rank_samples.to_s + " (" + cov.to_s + ")"
+      k = k + 1
+    << "draft outside compact vocab: " + rank_outside.to_s + "/" + rank_samples.to_s
   if mtp_depth2
     deep_rate = deep_drafted == 0 ? ~0.0 : (~0.0 + deep_accepted) / deep_drafted
     << "mtp depth-2: " + deep_accepted.to_s + "/" + deep_drafted.to_s + " accepted (" + deep_rate.to_s + ")"

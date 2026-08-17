@@ -211,3 +211,142 @@ kernel void nvfp4_matvec_mlx_scaled_triplet_residual_r1(
   uint sl [[thread_index_in_simdgroup]]) {
   nvfp4_matvec_mlx_scaled_triplet_r1_impl<true>(w, s, x, y, k, n, g, tg, sg, sl);
 }
+
+// Hoisted-activation triplet.
+//
+// The two-row variant above dereferences x0/x1/x2 through device pointers
+// inside the per-output-row macro, so each of the two output rows re-issues
+// all twelve activation loads: 24 loads per group where the pair kernel
+// issues 8. The activations are tiny and L1-resident, so those loads are
+// cheap individually, but they compete for the same load/store issue slots
+// that the weight stream needs, and this kernel's whole job is to keep the
+// weight stream saturated.
+//
+// Hoisting them costs 48 floats of register state. That is the trade the pair
+// kernel already makes (it holds 32) and it is worth re-testing here rather
+// than assuming, because on this kernel family register pressure has beaten
+// instruction count before. Arithmetic and summation order are unchanged, so
+// results are bit-identical to nvfp4_matvec_mlx_scaled_triplet.
+template <bool ADD_RESIDUAL>
+static inline void nvfp4_matvec_mlx_scaled_triplet_hoist_impl(
+  device const uint  *__restrict__ w_packed,
+  device const uchar *__restrict__ w_scales,
+  device const float *__restrict__ x,
+  device float       *__restrict__ y,
+  constant int   &k_dim,
+  constant int   &n_rows,
+  constant float &global_scale,
+  uint tg_id,
+  uint simd_id,
+  uint simd_lane
+) {
+  const int n_groups = k_dim / 16;
+  const int u32s_per_row = k_dim / 8;
+  const int row0 = int(tg_id) * 4 + int(simd_id) * 2;
+  const int lane = int(simd_lane);
+
+  float r00 = 0.0f, r01 = 0.0f, r02 = 0.0f;
+  float r10 = 0.0f, r11 = 0.0f, r12 = 0.0f;
+
+  for (int g_block = 0; g_block < n_groups; g_block += 32) {
+    const int g = g_block + lane;
+    if (g >= n_groups) continue;
+    const int x_off = g * 16;
+    device const float4 *x0p = (device const float4 *)(&x[x_off]);
+    device const float4 *x1p = (device const float4 *)(&x[k_dim + x_off]);
+    device const float4 *x2p = (device const float4 *)(&x[2 * k_dim + x_off]);
+    const float4 a0 = x0p[0], a1 = x0p[1], a2 = x0p[2], a3 = x0p[3];
+    const float4 b0 = x1p[0], b1 = x1p[1], b2 = x1p[2], b3 = x1p[3];
+    const float4 c0 = x2p[0], c1 = x2p[1], c2 = x2p[2], c3 = x2p[3];
+
+#define DO_HOIST_ROW(ROW, A0, A1, A2)                                       \
+    if ((ROW) < n_rows) {                                                    \
+      const uint w0 = w_packed[(ROW) * u32s_per_row + g * 2];                \
+      const float s = float(e4m3_decode_half_triplet(                         \
+        uint(w_scales[(ROW) * n_groups + g])));                              \
+      const uint b00 = w0 & 0xff, b01 = (w0 >> 8) & 0xff;                    \
+      const uint b02 = (w0 >> 16) & 0xff, b03 = (w0 >> 24) & 0xff;           \
+      const float4 v0 = float4(nvfp4_decode_half_triplet(b00 & 0xf),         \
+        nvfp4_decode_half_triplet(b00 >> 4),                                 \
+        nvfp4_decode_half_triplet(b01 & 0xf),                                \
+        nvfp4_decode_half_triplet(b01 >> 4));                                \
+      const float4 v1 = float4(nvfp4_decode_half_triplet(b02 & 0xf),         \
+        nvfp4_decode_half_triplet(b02 >> 4),                                 \
+        nvfp4_decode_half_triplet(b03 & 0xf),                                \
+        nvfp4_decode_half_triplet(b03 >> 4));                                \
+      float d0 = dot(v0, a0) + dot(v1, a1);                                  \
+      float d1 = dot(v0, b0) + dot(v1, b1);                                  \
+      float d2 = dot(v0, c0) + dot(v1, c1);                                  \
+      const uint w1 = w_packed[(ROW) * u32s_per_row + g * 2 + 1];            \
+      const uint b10 = w1 & 0xff, b11 = (w1 >> 8) & 0xff;                    \
+      const uint b12 = (w1 >> 16) & 0xff, b13 = (w1 >> 24) & 0xff;           \
+      const float4 v2 = float4(nvfp4_decode_half_triplet(b10 & 0xf),         \
+        nvfp4_decode_half_triplet(b10 >> 4),                                 \
+        nvfp4_decode_half_triplet(b11 & 0xf),                                \
+        nvfp4_decode_half_triplet(b11 >> 4));                                \
+      const float4 v3 = float4(nvfp4_decode_half_triplet(b12 & 0xf),         \
+        nvfp4_decode_half_triplet(b12 >> 4),                                 \
+        nvfp4_decode_half_triplet(b13 & 0xf),                                \
+        nvfp4_decode_half_triplet(b13 >> 4));                                \
+      d0 += dot(v2, a2) + dot(v3, a3);                                       \
+      d1 += dot(v2, b2) + dot(v3, b3);                                       \
+      d2 += dot(v2, c2) + dot(v3, c3);                                       \
+      (A0) += s * d0; (A1) += s * d1; (A2) += s * d2;                        \
+    }
+
+    DO_HOIST_ROW(row0 + 0, r00, r01, r02)
+    DO_HOIST_ROW(row0 + 1, r10, r11, r12)
+#undef DO_HOIST_ROW
+  }
+
+  r00 = simd_sum(r00) * global_scale;
+  r01 = simd_sum(r01) * global_scale;
+  r02 = simd_sum(r02) * global_scale;
+  r10 = simd_sum(r10) * global_scale;
+  r11 = simd_sum(r11) * global_scale;
+  r12 = simd_sum(r12) * global_scale;
+  if (lane == 0) {
+    if (row0 < n_rows) {
+      if constexpr (ADD_RESIDUAL) {
+        y[row0] += r00; y[n_rows + row0] += r01; y[2 * n_rows + row0] += r02;
+      } else {
+        y[row0] = r00; y[n_rows + row0] = r01; y[2 * n_rows + row0] = r02;
+      }
+    }
+    if (row0 + 1 < n_rows) {
+      if constexpr (ADD_RESIDUAL) {
+        y[row0 + 1] += r10;
+        y[n_rows + row0 + 1] += r11;
+        y[2 * n_rows + row0 + 1] += r12;
+      } else {
+        y[row0 + 1] = r10;
+        y[n_rows + row0 + 1] = r11;
+        y[2 * n_rows + row0 + 1] = r12;
+      }
+    }
+  }
+}
+
+[[max_total_threads_per_threadgroup(64)]]
+kernel void nvfp4_matvec_mlx_scaled_triplet_hoist(
+  device const uint *w [[buffer(0)]], device const uchar *s [[buffer(1)]],
+  device const float *x [[buffer(2)]], device float *y [[buffer(3)]],
+  constant int &k [[buffer(4)]], constant int &n [[buffer(5)]],
+  constant float &g [[buffer(6)]],
+  uint tg [[threadgroup_position_in_grid]],
+  uint sg [[simdgroup_index_in_threadgroup]],
+  uint sl [[thread_index_in_simdgroup]]) {
+  nvfp4_matvec_mlx_scaled_triplet_hoist_impl<false>(w, s, x, y, k, n, g, tg, sg, sl);
+}
+
+[[max_total_threads_per_threadgroup(64)]]
+kernel void nvfp4_matvec_mlx_scaled_triplet_residual_hoist(
+  device const uint *w [[buffer(0)]], device const uchar *s [[buffer(1)]],
+  device const float *x [[buffer(2)]], device float *y [[buffer(3)]],
+  constant int &k [[buffer(4)]], constant int &n [[buffer(5)]],
+  constant float &g [[buffer(6)]],
+  uint tg [[threadgroup_position_in_grid]],
+  uint sg [[simdgroup_index_in_threadgroup]],
+  uint sl [[thread_index_in_simdgroup]]) {
+  nvfp4_matvec_mlx_scaled_triplet_hoist_impl<true>(w, s, x, y, k, n, g, tg, sg, sl);
+}

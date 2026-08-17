@@ -1,0 +1,101 @@
+BIGINT POSITIVE THREE-LIMB BY ONE-LIMB MULTIPLY — EXACT SOURCE CHECKPOINT
+============================================================================
+
+Scope
+-----
+
+This checkpoint ports only the distinct positive heap-BigInt 3-by-1 arm from
+`bigint_mul_n1_small`. It deliberately preserves the current C implementation:
+the hot capacity-4 allocation; serial low/high 64-by-64 product order; carry
+materialization after limbs one and two; unconditional fourth-limb write; and
+exact positive size +3/+4 publication. It does not substitute the separately
+tuned parallel-product `bigint_mul_n1_tiny` schedule.
+
+The public seam preserves receiver order so an open-world BigInt `*` reopen
+retains normal precedence. Only distinct positive 3-by-1 and 1-by-3 heap
+shapes are admitted. Pointer-identical squaring, signs, 1-by-1, 2-by-1, and
+every wider scalar-word shape keep their existing routes.
+
+This is the exact-port checkpoint. It contains no native-only dispatch,
+carry-chain, allocation, or lifecycle redesign.
+
+Build
+-----
+
+base_commit=bd19d3ba72a96a21b97fe7db47f34a6c6752b675
+host=Apple M5 Max, arm64 macOS 26.6.1
+power=AC Power, battery charging at 34-38%
+compiler=Homebrew clang 22.1.8
+compiler_path=/private/tmp/tungsten-compiler-mul1-3-exact
+compiler_sha256=44041568f0d7f15b314f02c3f3c106620df6c66eca01153624e825c0438fcc39
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+production_candidate=/private/tmp/mul1-3-native-production
+production_candidate_sha256=057051d24f51755e222852b9e446ff39c2c30d97fddbaf45b687667f8a555a98
+same_binary=/private/tmp/mul1-3-native-runtime-knob
+same_binary_sha256=c9f24d781d92f70220fc3300f6c32730ff36e2021180e9de9b0a401f27b30e9e
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic executable was built with
+`-DBN_BENCH_RUNTIME_MUL1_3_SRC_KNOB=1`. Alternating processes set only
+`TUNGSTEN_BN_MUL1_3_SRC=0/1`, so code layout and every other source route are
+identical.
+
+method=11 alternating process pairs; 110 ms/leg
+raw_json=/private/tmp/mul1-3-exact-screen-bd19d3ba.json
+raw_json_sha256=0eaab8ec56b777140aa144b700c1ceacae0ee8f99c23ff2a9be65f12a363d10a
+
+cell     C-route_ns  source-route_ns  paired_median  paired_IQR  wins
+mul1@1   1.021724    1.036627         1.002941       0.008840     4/11
+mul1@2   4.180366    4.233981         1.010260       0.020789     3/11
+mul1@3   5.378730    5.483059         1.003730       0.058349     5/11
+mul1@4   4.987191    5.131193         1.004072       0.023102     3/11
+mul1@8   5.051310    5.074694         1.010790       0.038135     4/11
+mul1@16  6.274312    6.252106         1.004594       0.024298     4/11
+
+Only mul1@3 changes route. Every untouched control remains within 1.1% by
+paired median. Absolute time moved between allocator/process modes during the
+screen; the alternating paired ratios are the acceptance evidence.
+
+Promotion
+---------
+
+method=21 alternating process pairs; 300 ms/leg; same executable and toggle
+raw_json=/private/tmp/mul1-3-exact-promotion-bd19d3ba.json
+raw_json_sha256=22cac51f7b92350e0fc2ca40a6cad539e00f867ab5c567c0354dc82731acc5d5
+
+cell     C-route_ns  source-route_ns  paired_median  paired_IQR  wins
+mul1@3   4.502599    4.506409         0.999079       0.004717    15/21
+
+The exact source route is at parity with C. This is still recorded as a
+fidelity checkpoint, not as evidence for a native-only redesign.
+
+Counter route proof
+-------------------
+
+command=bin/tungsten flame --counters -d 3 --top 16 --silent --
+  /private/tmp/mul1-3-native-production --sweep mul1 3 100 5000
+
+  w_mul                       69.0% cycles; IPC 8.69
+  w_bigint_alloc_hot4_raw     14.1% cycles; IPC 8.72
+  _tlv_get_addr                8.8% cycles; IPC 8.73
+  __w_bigint_mul1_3_src        7.6% cycles; IPC 8.72
+
+Sampled miss rates round to zero. The exact leaf is compute/dispatch/TLS
+shaped, not memory bound. Any native-only follow-up must therefore be measured
+as integration work after this checkpoint, without changing its arithmetic.
+
+Focused validation
+------------------
+
+- compiled and interpreted arithmetic/representation spec passed 1,041 checks;
+- plain BigInt `*` reopen spec passed for both operand orders and direct seam;
+- production and diagnostic native-lane self-tests passed;
+- emitted compiler/spec LLVM assembled and verified under LLVM 22;
+- linked leaf contains the exact three serial mul/umulh/add-carry/store steps,
+  unconditional top store, and +3/+4 publication;
+- runtime compiled with `BN_MUL_N1_SMALL_STRAIGHT=0` and `BN_MUL_N1_FAST=0`;
+- current-source compiler stages 2 and 3 emitted byte-identical LLVM
+  (sha256 `2b7e075bcf11cc8a79c825ccdd602d4f715603ed12358678f8bdcdb95897c405`);
+- `git diff --check` passed.

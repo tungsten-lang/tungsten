@@ -62,3 +62,28 @@ from 3.71 s to 3.42 s (-7.82%). The post-load compiler stages were noise-flat
 in that sample (3.133 s to 3.104 s). Every paired LLVM file was byte-identical,
 as were cache-disabled/cold/warm full compiler outputs. Exact self-host fixed
 point also held at SHA-256 `21ae636cfd41d86668a2b8d699231a1598fa9bfec64e89b008a7b2a81aec6692`.
+
+## One-pass program index
+
+Lowering previously performed independent recursive AST walks to discover
+nested-scope references that require a top-level global mirror and uses of
+ARGV/builtin runtime classes. It also rescanned the top-level stream to find
+runtime classes and parameter-inference candidates, then rebuilt the same
+locked-world function/method definition map for return-class and no-raise
+summaries.
+
+The retained `ProgramIndex` uses the generated AST child schema to collect the
+deep facts in one traversal, including nested pair structures such as
+interpolation parts and `elsif` arms. Its top-level subsets feed class ordering
+and parameter candidate discovery, and the two locked-world analyses share one
+definition index. `TUNGSTEN_PROGRAM_INDEX=0` retains the former independent
+walks for comparison and diagnosis.
+
+Eight alternating release/native/fast self-compile pairs reduced median
+lowering from 1.4690 s to 1.4295 s (-2.69%), measured compiler time from
+3.1775 s to 3.1335 s (-1.38%), and external wall time from 3.775 s to
+3.715 s (-1.59%). Every paired LLVM file was byte-identical. Focused parity
+also covers ordinary, capture, `elsif`, generic-specialization, protected-Core,
+and locked return-class programs; debug parity retains physical frame
+attributes. Exact self-host fixed point held at SHA-256
+`b31e5f316b10f1ba6600f9c0fc9a74710b3f8f6ff069d3341a1fcd409d2d27b9`.

@@ -1609,9 +1609,12 @@
       core_set[core_expressions[csi]] = true
       csi += 1
   seen = {}
+  candidate_expressions = expressions
+  if mod[:program_index] != nil
+    candidate_expressions = mod[:program_index][:top_level_functions]
   i = 0
-  while i < expressions.size()
-    expr = expressions[i]
+  while i < candidate_expressions.size()
+    expr = candidate_expressions[i]
     if expr != nil && is_ast_node?(expr) && ast_kind(expr) in (:fn_def :method_def)
       eligible_owner = !definition_from_core?(expr) || core_expressions != nil
       if expr.is_class_method != true && expr.param_types == nil && expr.name != nil && eligible_owner

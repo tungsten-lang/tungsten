@@ -25,6 +25,7 @@ use return_inference
 use lowering/pass_registry
 use lowering/signatures
 use lowering/types
+use lowering/program_index
 use lowering/inference
 use lowering/analysis
 use lowering/class_sets
@@ -416,23 +417,23 @@ use lowering/definitions
 # retain source order, children wait for their parent, and reopens retain
 # their per-class order behind the first declaration.
 -> order_class_exprs(mod, expressions)
-  runtime_class_names = {}
-  ci = 0
-  while ci < expressions.size()
-    expr = expressions[ci]
-    is_generic_template = ast_kind(expr) == :class_def && expr.type_params != nil
-    if !is_generic_template && ast_kind(expr) in (:class_def :module_def)
-      runtime_class_names[expr.name] = true
-    ci += 1
-
-  pending_class_exprs = []
-  ci = 0
-  while ci < expressions.size()
-    expr = expressions[ci]
-    is_generic_template = ast_kind(expr) == :class_def && expr.type_params != nil
-    if !is_generic_template && ast_kind(expr) in (:class_def :module_def)
-      pending_class_exprs.push(expr)
-    ci += 1
+  program_index = mod[:program_index]
+  runtime_class_names = nil
+  pending_class_exprs = nil
+  if program_index != nil
+    runtime_class_names = program_index[:runtime_class_names]
+    pending_class_exprs = program_index[:runtime_class_exprs]
+  else
+    runtime_class_names = {}
+    pending_class_exprs = []
+    ci = 0
+    while ci < expressions.size()
+      expr = expressions[ci]
+      is_generic_template = ast_kind(expr) == :class_def && expr.type_params != nil
+      if !is_generic_template && ast_kind(expr) in (:class_def :module_def)
+        runtime_class_names[expr.name] = true
+        pending_class_exprs.push(expr)
+      ci += 1
 
   ordered_class_exprs = []
   ordered_class_names = {}
@@ -841,6 +842,11 @@ use lowering/definitions
   # canonical constructor.
   rewrite_smallarray_generic_ctors(ast)
 
+  program_index = nil
+  if env("TUNGSTEN_PROGRAM_INDEX") != "0"
+    program_index = build_program_index(ast.expressions, mod)
+    mod[:program_index] = program_index
+
   # PROTECT_THE_CORE turns Core ownership into an optimization boundary. Core
   # registration and SCC return inference run before user declarations exist,
   # then user inference may consume the frozen Core facts in the forward
@@ -877,7 +883,10 @@ use lowering/definitions
   else
     preregister_top_level_raw_abis(mod, ast.expressions)
     collect_top_level_static_types(mod, ast.expressions)
-  collect_extern_var_refs(mod, ast.expressions)
+  if program_index == nil
+    collect_extern_var_refs(mod, ast.expressions)
+  else
+    apply_program_index_extern_refs(mod, program_index)
   if core_expressions != nil
     mark_stable_core_global_exports(mod, core_expressions)
 
@@ -915,7 +924,10 @@ use lowering/definitions
     verbose: verbose
   }
 
-  mark_builtin_runtime_class_uses(ast.expressions, mod)
+  if program_index == nil
+    mark_builtin_runtime_class_uses(ast.expressions, mod)
+  else
+    apply_program_index_runtime_uses(mod, program_index)
 
   # Initialize argv subsystem only for programs that touch ARGV / argv().
   if mod[:uses_argv]

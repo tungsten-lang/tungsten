@@ -211,11 +211,16 @@
   nil
 
 -> collect_return_class_definitions(mod, expressions, ordered_class_exprs)
+  if mod[:return_class_definition_index] != nil
+    return mod[:return_class_definition_index]
   defs = {}
   workers = {}
+  top_level_functions = expressions
+  if mod[:program_index] != nil
+    top_level_functions = mod[:program_index][:top_level_functions]
   i = 0
-  while i < expressions.size()
-    node = expressions[i]
+  while i < top_level_functions.size()
+    node = top_level_functions[i]
     if ast_kind(node) in (:fn_def :method_def)
       return_class_summary_add_definition(defs, workers, function_name_for_def(node), node, nil)
     i += 1
@@ -238,7 +243,9 @@
             workers[static_method_wrapper_name(cname, method)] = worker
         j += 1
     i += 1
-  {definitions: defs, workers: workers}
+  result = {definitions: defs, workers: workers}
+  mod[:return_class_definition_index] = result
+  result
 
 -> return_class_call_worker_keys(mod, node, class_name, receiver_fact)
   out = []

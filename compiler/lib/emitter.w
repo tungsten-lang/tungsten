@@ -3587,6 +3587,51 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul7_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul7_src(i64, i64) nounwind\n"
 
+  # Exact distinct positive eight-by-eight-limb multiplication keeps C's
+  # fixed bn_mul_eq8_inline decomposition behind the adjacent reserved and
+  # open-world contracts.
+  bigint_mul8_fn = nil
+  bigint_mul8_matches = 0
+  be8fi = 0
+  while be8fi < mod[:functions].size()
+    be8ff = mod[:functions][be8fi]
+    if be8ff[:source_class] == nil && be8ff[:source_method] == "__bigint_mul8_raw"
+      bigint_mul8_matches += 1
+      bigint_mul8_fn = be8ff
+    be8fi += 1
+  if bigint_mul8_matches > 1
+    << "error: __bigint_mul8_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul8_src] == true && bigint_mul8_fn == nil
+    << "error: required native BigInt mul@8 helper is missing; __w_bigint_mul8_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul8_target = bigint_times_reopened_fn
+  if bigint_mul8_target == nil
+    bigint_mul8_target = bigint_mul8_fn
+  if bigint_mul8_target != nil
+    be8_signature_ok = bigint_mul8_target[:params] != nil && bigint_mul8_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      be8_signature_ok = be8_signature_ok && bigint_mul8_target[:source_kind] == :fn_def
+      be8_signature_ok = be8_signature_ok && bigint_mul8_target[:raw_i64_signature] == true
+      be8_signature_ok = be8_signature_ok && bigint_mul8_target[:raw_return_type] == :i64
+    if !be8_signature_ok
+      << "error: invalid native BigInt mul@8 seam target"
+      exit(1)
+    be8_cc = ""
+    if bigint_mul8_target[:call_conv] != nil && bigint_mul8_target[:call_conv] != ""
+      be8_cc = bigint_mul8_target[:call_conv] + " "
+    be8_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      be8_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul8_src(i64 %a, i64 %b)" + be8_attrs + " {\n"
+    fn_out << "  %r = tail call " + be8_cc + "i64 @" + bigint_mul8_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul8_src"] = false
+    known_fns["__w_bigint_mul8_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul8_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul8_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps

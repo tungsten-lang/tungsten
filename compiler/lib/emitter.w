@@ -321,6 +321,7 @@ use naming
   out << declare_fn_attrs("w_bigint_add_word_dest", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn_attrs("w_bigint_sub_word_dest", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn_attrs("w_bigint_mul_word_dest", "preserve_mostcc " + wv, wv3, "nounwind cold")
+  out << declare_fn_attrs("w_bigint_mul_builtin_exact", wv, wv2, "nounwind")
   out << declare_fn("w_mul", wv, wv2)
   out << declare_fn("w_pow", wv, wv2)
   out << declare_fn("w_div", wv, wv2)

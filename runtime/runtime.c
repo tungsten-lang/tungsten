@@ -11949,6 +11949,18 @@ WValue bigint_mul_any(WValue a, WValue b) {
     return bigint_mul_any_routed(a, b, 0);
 }
 
+/* Exact built-in BigInt multiplication boundary for the compiled Core
+ * BigInt#*(BigInt) worker.  The worker has already performed language-level
+ * method dispatch, so falling back through w_mul would repeat polymorphic
+ * dispatch before returning to this same built-in implementation. */
+WValue w_bigint_mul_builtin_exact(WValue a, WValue b) {
+    /* Preserve the committed native N-by-1 seams.  Their weak defaults are
+     * exact C twins, while a fully compiled program supplies the strong Core
+     * leaves.  All other shapes retain bigint_mul_any_routed's tuned C
+     * schedule. */
+    return bigint_mul_any_routed(a, b, 1);
+}
+
 /* ---- Bigint division (schoolbook, Knuth Algorithm D simplified) ---- */
 
 /* For normalized d and nh < d, divide nh:B+nl by d using a precomputed

@@ -756,6 +756,7 @@ WValue __w_bigint_mul1_5_src(WValue a, WValue b);
 WValue __w_bigint_mul1_6_src(WValue a, WValue b);
 WValue __w_bigint_mul1_7_src(WValue a, WValue b);
 WValue __w_bigint_mul1_8_src(WValue a, WValue b);
+WValue w_bigint_mul_builtin_exact(WValue a, WValue b);
 WValue w_bigint_compare_c(WValue a, WValue b);
 WValue w_bigint_compare_source(WValue a, WValue b);
 WValue w_bigint_and_c(WValue a, WValue b);

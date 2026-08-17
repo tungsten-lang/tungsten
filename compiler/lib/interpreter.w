@@ -1735,6 +1735,8 @@ use target
       return ccall("w_bigint_add", args[1], args[2])
     when "w_bigint_sub"
       return ccall("w_bigint_sub", args[1], args[2])
+    when "w_bigint_mul_builtin_exact"
+      return ccall("w_bigint_mul_builtin_exact", args[1], args[2])
     when "w_bit_and"
       return ccall("w_bit_and", args[1], args[2])
     when "w_bit_or"

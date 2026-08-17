@@ -2273,9 +2273,19 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # add shapes and regressed their controls, so those remain polymorphic until
   # their own specialization arms migrate.
   declared_bigint_add = op == :PLUS && lt == :BigInt && rt == :BigInt
+  closed_mul1_square = node.left != nil && node.right != nil && is_ast_node?(node.left) && is_ast_node?(node.right) && ast_kind(node.left) == :var && ast_kind(node.right) == :var && node.left.name == node.right.name
+  # Once Core provenance and both method tables are locked, an exact
+  # `(BigInt BigInt)` multiplication can enter the exact built-in BigInt
+  # boundary directly. That boundary retains the tuned C shape dispatch while
+  # routing the committed N-by-1 seams to Core; it avoids a trip through
+  # polymorphic w_mul without broadening native schoolbook selection. Keep
+  # syntactic squares on w_mul's dedicated identity route.
+  closed_bigint_mul = env("TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && !closed_mul1_square && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
   if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT)
     bidir_report = :polymorphic
-    if !bidir_mut && ((is_bigint_type(lt) && is_bigint_type(rt)) || declared_bigint_add)
+    inferred_bigint_pair = is_bigint_type(lt) && is_bigint_type(rt)
+    static_bigint_pair = inferred_bigint_pair || declared_bigint_add || closed_bigint_mul
+    if !bidir_mut && static_bigint_pair
       bidir_report = :static_direct
     elsif !bidir_mut && (is_bigint_type(lt) || is_bigint_type(rt))
       bidir_report = :near_miss
@@ -2291,8 +2301,158 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # stages: tag/overlay/identity tests are payload-only; header loads execute
   # only after both values are proved heap BigInts. Every near miss falls to
   # the unmodified polymorphic dispatcher.
-  closed_mul1_square = node.left != nil && node.right != nil && is_ast_node?(node.left) && is_ast_node?(node.right) && ast_kind(node.left) == :var && ast_kind(node.right) == :var && node.left.name == node.right.name
-  closed_mul1_1 = env("TUNGSTEN_BIGINT_MUL1_1_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && !closed_mul1_square && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
+  if closed_bigint_mul
+    cm_entry = overload_exact_tag_entry("BigInt")
+    cm_left_shape_label = next_label(wfn, "mul.left_shape")
+    cm_left_wide_label = next_label(wfn, "mul.left_wide")
+    cm_exact_right_tag_label = next_label(wfn, "mul.exact_right_tag")
+    cm_left_wide_right_tag_label = next_label(wfn, "mul.left_wide_right_tag")
+    cm_left_wide_right_shape_label = next_label(wfn, "mul.left_wide_right_shape")
+    cm_right_tag_label = next_label(wfn, "mul.right_tag")
+    cm_right_shape_label = next_label(wfn, "mul.right_shape")
+    cm_right_wide_label = next_label(wfn, "mul.right_wide")
+    cm_one_payload_label = next_label(wfn, "mul.one_payload")
+    cm_wide_payload_label = next_label(wfn, "mul.wide_payload")
+    cm_leaf_label = next_label(wfn, "mul.leaf")
+    cm_source_label = next_label(wfn, "mul.source")
+    cm_exact_label = next_label(wfn, "mul.exact")
+    cm_slow_label = next_label(wfn, "mul.slow")
+    cm_done_label = next_label(wfn, "mul.done")
+    cm_slot = ensure_var_slot(wfn, "__mul_locked." + cm_done_label)
+
+    # Preserve the profitable 1x1 instruction order exactly. Wider values
+    # then prove the other heap tag before either entering the 2..8-by-1 Core
+    # worker or the exact built-in boundary. A tag miss alone retains w_mul.
+    cm_lmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, cm_entry[:mask], cm_lmask)
+    cm_ltag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lmask, "eq", cm_entry[:tag], cm_ltag)
+    emit_wire_cond_br(wfn, cm_ltag, cm_slow_label, nil, cm_left_shape_label)
+
+    start_block(wfn, cm_left_shape_label)
+    cm_lptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355327", cm_lptr)
+    cm_lsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_lptr, cm_lsize)
+    cm_lone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsize, "eq", "1", cm_lone)
+    emit_wire_cond_br(wfn, cm_lone, cm_left_wide_label, nil, cm_right_tag_label)
+
+    start_block(wfn, cm_left_wide_label)
+    cm_lsmall = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsize, "ule", "8", cm_lsmall)
+    emit_wire_cond_br(wfn, cm_lsmall, cm_exact_right_tag_label, nil, cm_left_wide_right_tag_label)
+
+    # A left operand beyond the migrated 2..8 band needs only the right tag
+    # proof before the exact built-in boundary; do not load its header.
+    start_block(wfn, cm_exact_right_tag_label)
+    cm_rmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, cm_entry[:mask], cm_rmask)
+    cm_rtag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rmask, "eq", cm_entry[:tag], cm_rtag)
+    emit_wire_cond_br(wfn, cm_rtag, cm_slow_label, nil, cm_exact_label)
+
+    start_block(wfn, cm_left_wide_right_tag_label)
+    cm_wide_rmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, cm_entry[:mask], cm_wide_rmask)
+    cm_wide_rtag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_wide_rmask, "eq", cm_entry[:tag], cm_wide_rtag)
+    emit_wire_cond_br(wfn, cm_wide_rtag, cm_slow_label, nil, cm_left_wide_right_shape_label)
+
+    start_block(wfn, cm_left_wide_right_shape_label)
+    cm_wide_rptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355327", cm_wide_rptr)
+    cm_wide_rsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_wide_rptr, cm_wide_rsize)
+    cm_wide_rone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_wide_rsize, "eq", "1", cm_wide_rone)
+    emit_wire_cond_br(wfn, cm_wide_rone, cm_exact_label, nil, cm_wide_payload_label)
+
+    start_block(wfn, cm_right_tag_label)
+    cm_one_rmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, cm_entry[:mask], cm_one_rmask)
+    cm_one_rtag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_one_rmask, "eq", cm_entry[:tag], cm_one_rtag)
+    emit_wire_cond_br(wfn, cm_one_rtag, cm_slow_label, nil, cm_right_shape_label)
+
+    start_block(wfn, cm_right_shape_label)
+    cm_rptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355327", cm_rptr)
+    cm_rsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_rptr, cm_rsize)
+    cm_rone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsize, "eq", "1", cm_rone)
+    emit_wire_cond_br(wfn, cm_rone, cm_right_wide_label, nil, cm_one_payload_label)
+
+    start_block(wfn, cm_right_wide_label)
+    cm_rsmall = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsize, "ule", "8", cm_rsmall)
+    emit_wire_cond_br(wfn, cm_rsmall, cm_exact_label, nil, cm_wide_payload_label)
+
+    start_block(wfn, cm_one_payload_label)
+    cm_distinct = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, lhs_reg, "ne", rhs_reg, cm_distinct)
+    cm_lsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355328", cm_lsign_bits)
+    cm_lpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsign_bits, "eq", "0", cm_lpositive)
+    cm_rsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355328", cm_rsign_bits)
+    cm_rpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsign_bits, "eq", "0", cm_rpositive)
+    cm_positive = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_lpositive, cm_rpositive, cm_positive)
+    cm_one_ok = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_distinct, cm_positive, cm_one_ok)
+    emit_wire_cond_br(wfn, cm_one_ok, cm_exact_label, nil, cm_leaf_label)
+
+    start_block(wfn, cm_wide_payload_label)
+    cm_wide_distinct = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, lhs_reg, "ne", rhs_reg, cm_wide_distinct)
+    cm_wide_lsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355328", cm_wide_lsign_bits)
+    cm_wide_lpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_wide_lsign_bits, "eq", "0", cm_wide_lpositive)
+    cm_wide_rsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355328", cm_wide_rsign_bits)
+    cm_wide_rpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_wide_rsign_bits, "eq", "0", cm_wide_rpositive)
+    cm_wide_positive = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_wide_lpositive, cm_wide_rpositive, cm_wide_positive)
+    cm_wide_ok = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_wide_distinct, cm_wide_positive, cm_wide_ok)
+    emit_wire_cond_br(wfn, cm_wide_ok, cm_exact_label, nil, cm_source_label)
+
+    start_block(wfn, cm_leaf_label)
+    cm_leaf = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_mul1_1_src", nil, nil, cm_leaf)
+    emit_wire_store_i64(wfn, cm_slot, cm_leaf)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_source_label)
+    cm_source = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_times_src", nil, nil, cm_source)
+    emit_wire_store_i64(wfn, cm_slot, cm_source)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_exact_label)
+    cm_exact = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_bigint_mul_builtin_exact", nil, nil, cm_exact)
+    emit_wire_store_i64(wfn, cm_slot, cm_exact)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_slow_label)
+    cm_slow = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_mul", nil, nil, cm_slow)
+    emit_wire_store_i64(wfn, cm_slot, cm_slow)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_done_label)
+    cm_result = next_temp(wfn)
+    emit_wire_load_i64(wfn, cm_slot, cm_result)
+    return typed_value(:i64, cm_result)
+
+  closed_mul1_1 = !closed_bigint_mul && env("TUNGSTEN_BIGINT_MUL1_1_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && !closed_mul1_square && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
   if closed_mul1_1
     cm_entry = overload_exact_tag_entry("BigInt")
     cm_left_shape_label = next_label(wfn, "mul1_1.left_shape")

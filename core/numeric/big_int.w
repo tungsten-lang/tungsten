@@ -4672,11 +4672,11 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
           return wvalue_from_bits(
             __bigint_mul1_8_raw($value ## i64, other$value ## i64)
           )
-      return ccall("w_mul", self, other)
+      return ccall("w_bigint_mul_builtin_exact", self, other)
     # Squaring (identical boxed bits, flip included) keeps C's dedicated
     # square path, mirroring bigint_mul_src_shape's a == b exclusion.
     if $value == other$value
-      return ccall("w_mul", self, other)
+      return ccall("w_bigint_mul_builtin_exact", self, other)
 
     mask = 140737488355312
     pa = ($value & mask) + 16

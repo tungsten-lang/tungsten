@@ -1,0 +1,121 @@
+BIGINT MULTIPLY — CLOSED-WORLD EXACT DISPATCH FOLLOW-UP
+======================================================
+
+Scope
+-----
+
+This is a native-only integration change after the exact positive mul1@1..8
+ports were independently checkpointed through 2fb03dd0. It does not change
+any of those arithmetic leaves.
+
+When a program declares both `Tungsten.PROTECT_THE_CORE!` and
+`Tungsten.LOCK_THE_DOORS!`, an exact `(BigInt BigInt)` multiplication site may
+bypass polymorphic `w_mul` after exact heap-tag checks:
+
+  - positive distinct 1x1 calls the committed mul1@1 leaf directly;
+  - positive distinct 2..8-by-1 calls the committed Core source worker;
+  - every other exact heap-BigInt pair enters `w_bigint_mul_builtin_exact`,
+    which preserves the tuned C square, scalar, schoolbook, and wide routes;
+  - a tag miss still calls the unchanged polymorphic `w_mul` entry;
+  - syntactic `a * a` skips the new guard entirely.
+
+The exact built-in boundary is also the Core worker's fallback after
+language-level dispatch, avoiding a redundant return through `w_mul` without
+changing open-world replacement semantics. The causal switch
+`TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT=0` restores the prior lowering.
+
+Build
+-----
+
+base_commit=2fb03dd02defe9bda615023eed24f27c77533f2e
+host=Apple M5 Max, 18 cores, 128 GB, arm64 macOS 26.6
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+final_compiler_sha256=f8f752adbf89478a52d47e9d56c0ce109071ab5000c838950de141cbe49b7b8c
+fixed_point_ll_sha256=48f06e147d606fcebefd808d331e81365e809457e37d97ef81d703653b289f96
+baseline_sha256=736bef2a410353a95a91d53833d509333eba0828c77c13c11396d115205d0063
+candidate_sha256=a81aacd286854c800c8cda2bf4931e47496cd0c10f913dcab572f3729b21a086
+power=AC, battery charged
+load_end=4.30 3.58 3.59; Spotlight occupied one core throughout
+
+The compiler rebuilt itself twice from the current sources. The two emitted
+LLVM modules were byte-identical. Because an unrelated process occupied one
+core, timings below are paired process-order A/B evidence; sub-percent
+differences are classified as parity, not speed claims.
+
+Matched mul1 promotion
+----------------------
+
+method=11 alternating process pairs; 110 ms/leg
+raw_json=/private/tmp/mul-locked-worker6-mul1-promotion-2fb03dd0.json
+raw_json_sha256=dba054d66ab1f1f7b6f639371b049437a6cc747fca093bba9b309829bc58a7a3
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+mul1@1      1.107718      1.078114      0.976000     0.023947  11/11
+mul1@2      3.413503      3.406627      0.999492     0.007017   7/11
+mul1@3      3.411172      3.411217      0.999992     0.001089   6/11
+mul1@4      3.576137      3.526593      0.986377     0.003015  11/11
+mul1@5      3.636415      3.601988      0.991848     0.010406   9/11
+mul1@6      3.876133      3.861316      0.994334     0.005311  11/11
+mul1@7      3.929364      3.929577      0.998821     0.003047   6/11
+mul1@8      3.936728      3.938075      0.999596     0.003939   7/11
+mul1@9      7.436673      5.770412      0.776387     0.017789  11/11
+mul1@16     6.809126      5.173084      0.755101     0.009183  11/11
+mul1@24     8.236416      6.459638      0.781890     0.004778  11/11
+mul1@32     9.557527      7.557336      0.798795     0.011639  11/11
+
+Every exact-port cell at 1..8 remains within 2.4%; widths 9..32 improve
+20.1--24.5% and win every pair. The wide gain comes from removing redundant
+polymorphic dispatch, not from changing their C arithmetic kernels.
+
+Ordinary multiplication controls
+--------------------------------
+
+method=11 alternating process pairs; 110 ms/leg
+raw_json=/private/tmp/mul-locked-worker6-mul-promotion-2fb03dd0.json
+raw_json_sha256=e21d028f4dc47a5739b51a89db26f6fedd8ab1bfcd8fa467938bcc8ffcd7b7b7
+
+cell    baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+mul@2      5.320866      4.285833      0.801433     0.029659  11/11
+mul@4      8.214467      7.196615      0.879427     0.009373  11/11
+mul@8     20.487078     19.312854      0.942685     0.010870  11/11
+mul@16    59.815406     58.535470      0.976856     0.003340  10/11
+mul@32   190.185221    188.969951      0.993639     0.003893  10/11
+
+The locked exact boundary improves every tested ordinary multiplication cell,
+with 19.9%, 12.1%, and 5.7% at 2, 4, and 8 limbs respectively.
+
+Square controls
+---------------
+
+method=11 alternating process pairs; 110 ms/leg
+raw_json=/private/tmp/mul-locked-worker6-sqr-promotion-2fb03dd0.json
+raw_json_sha256=ff1b8032bbed4f75336f1607a66bf9870c52ff857b9b02c0cf978ae74ebed0be
+
+cell    baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@2      3.710331      3.700365      0.996621     0.006386   8/11
+sqr@8     16.614878     16.640911      0.998970     0.005327   6/11
+sqr@32   165.509206    165.225955      0.999754     0.010012   6/11
+
+All square controls are within 0.4%, confirming that syntactic and dynamic
+identity retain the dedicated tuned square routes.
+
+Focused validation
+------------------
+
+- feature-on, feature-off, and interpreted focused specs pass;
+- the prior locked mul1@1 focused spec still passes compiled/interpreted;
+- all eight open-world BigInt#* replacement specs pass;
+- stale exact type facts reject a user object before either BigInt header load
+  and preserve its ordinary receiver dispatch;
+- focused cases cover mul1@1..9 in both operand orders, 2x2, widths 24/25,
+  signs, inline demotion, syntactic square, and dynamic identity square;
+- final LLVM modules pass llvm-as and opt verification;
+- final AArch64 keeps the direct mul1@1 leaf, Core 2..8-by-1 worker, exact
+  built-in boundary, polymorphic fallback, and dedicated square branches;
+- native-lane self-test and `git diff --check` pass.
+
+The cold C-VM bootstrap remains blocked at the same pre-existing fast-parser
+error on the clean 2fb03dd0 baseline (`core/numeric/big_int.w:4773`, typed
+BigInt#& header). It is not introduced by this optimization; the relevant
+self-hosted two-generation fixed point is byte-identical as recorded above.

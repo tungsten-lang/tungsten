@@ -3273,6 +3273,51 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_sqr7_src"] == true
     seam_decls << "declare i64 @__w_bigint_sqr7_src(i64, i64) nounwind\n"
 
+  # Exact positive eight-limb square sibling. Keep a distinct reserved seam
+  # so the literal release/LTO C-shaped checkpoint stays independently
+  # reversible.
+  bigint_sqr8_fn = nil
+  bigint_sqr8_matches = 0
+  bs8fi = 0
+  while bs8fi < mod[:functions].size()
+    bs8ff = mod[:functions][bs8fi]
+    if bs8ff[:source_class] == nil && bs8ff[:source_method] == "__bigint_sqr8_raw"
+      bigint_sqr8_matches += 1
+      bigint_sqr8_fn = bs8ff
+    bs8fi += 1
+  if bigint_sqr8_matches > 1
+    << "error: __bigint_sqr8_raw is reserved for native BigInt squaring"
+    exit(1)
+  if mod[:require_bigint_sqr8_src] == true && bigint_sqr8_fn == nil
+    << "error: required native BigInt sqr@8 helper is missing; __w_bigint_sqr8_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_sqr8_target = bigint_times_reopened_fn
+  if bigint_sqr8_target == nil
+    bigint_sqr8_target = bigint_sqr8_fn
+  if bigint_sqr8_target != nil
+    bs8_signature_ok = bigint_sqr8_target[:params] != nil && bigint_sqr8_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      bs8_signature_ok = bs8_signature_ok && bigint_sqr8_target[:source_kind] == :fn_def
+      bs8_signature_ok = bs8_signature_ok && bigint_sqr8_target[:raw_i64_signature] == true
+      bs8_signature_ok = bs8_signature_ok && bigint_sqr8_target[:raw_return_type] == :i64
+    if !bs8_signature_ok
+      << "error: invalid native BigInt sqr@8 seam target"
+      exit(1)
+    bs8_cc = ""
+    if bigint_sqr8_target[:call_conv] != nil && bigint_sqr8_target[:call_conv] != ""
+      bs8_cc = bigint_sqr8_target[:call_conv] + " "
+    bs8_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      bs8_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_sqr8_src(i64 %a, i64 %b)" + bs8_attrs + " {\n"
+    fn_out << "  %r = tail call " + bs8_cc + "i64 @" + bigint_sqr8_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_sqr8_src"] = false
+    known_fns["__w_bigint_sqr8_src"] = true
+  elsif used_runtime_fns["__w_bigint_sqr8_src"] == true
+    seam_decls << "declare i64 @__w_bigint_sqr8_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps

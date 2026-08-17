@@ -3922,6 +3922,18 @@ fn __bigint_mul12_raw(a, b) (i64 i64) i64
   ccall_nobox("w_bigint_mul12_kernel_raw", rp, bp, ap)
   ccall_nobox("w_bigint_mul12_finish_raw", result)
 
+# Exact distinct positive fifteen-by-fifteen-limb multiplication. Preserve
+# C's fixed bn_mul_eq15 leaf literally; source owns only the same capacity-32
+# allocation, fixed-kernel call, and +29/+30 publication.
+fn __bigint_mul15_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot32_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  ccall_nobox("w_bigint_mul15_kernel_raw", rp, bp, ap)
+  ccall_nobox("w_bigint_mul15_finish_raw", result)
+
 # Exact distinct positive sixteen-by-sixteen-limb multiplication. Preserve
 # C's fixed bn_mul_eq16 leaf literally; source owns only the same capacity-32
 # allocation, fixed-kernel call, and +31/+32 publication.

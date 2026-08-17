@@ -3721,6 +3721,51 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul12_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul12_src(i64, i64) nounwind\n"
 
+  # Exact distinct positive fifteen-by-fifteen-limb multiplication keeps C's
+  # fixed bn_mul_eq15 leaf behind the adjacent reserved and open-world
+  # contracts.
+  bigint_mul15_fn = nil
+  bigint_mul15_matches = 0
+  be15fi = 0
+  while be15fi < mod[:functions].size()
+    be15ff = mod[:functions][be15fi]
+    if be15ff[:source_class] == nil && be15ff[:source_method] == "__bigint_mul15_raw"
+      bigint_mul15_matches += 1
+      bigint_mul15_fn = be15ff
+    be15fi += 1
+  if bigint_mul15_matches > 1
+    << "error: __bigint_mul15_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul15_src] == true && bigint_mul15_fn == nil
+    << "error: required native BigInt mul@15 helper is missing; __w_bigint_mul15_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul15_target = bigint_times_reopened_fn
+  if bigint_mul15_target == nil
+    bigint_mul15_target = bigint_mul15_fn
+  if bigint_mul15_target != nil
+    be15_signature_ok = bigint_mul15_target[:params] != nil && bigint_mul15_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      be15_signature_ok = be15_signature_ok && bigint_mul15_target[:source_kind] == :fn_def
+      be15_signature_ok = be15_signature_ok && bigint_mul15_target[:raw_i64_signature] == true
+      be15_signature_ok = be15_signature_ok && bigint_mul15_target[:raw_return_type] == :i64
+    if !be15_signature_ok
+      << "error: invalid native BigInt mul@15 seam target"
+      exit(1)
+    be15_cc = ""
+    if bigint_mul15_target[:call_conv] != nil && bigint_mul15_target[:call_conv] != ""
+      be15_cc = bigint_mul15_target[:call_conv] + " "
+    be15_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      be15_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul15_src(i64 %a, i64 %b)" + be15_attrs + " {\n"
+    fn_out << "  %r = tail call " + be15_cc + "i64 @" + bigint_mul15_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul15_src"] = false
+    known_fns["__w_bigint_mul15_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul15_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul15_src(i64, i64) nounwind\n"
+
   # Exact distinct positive sixteen-by-sixteen-limb multiplication keeps C's
   # fixed bn_mul_eq16 leaf behind the adjacent reserved and open-world
   # contracts.

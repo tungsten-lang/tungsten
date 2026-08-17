@@ -2797,6 +2797,7 @@ ewscope_md_state = {ids: {}}
   # the same table.  The exact positive 1-by-1 subtraction seam uses this
   # value so a user reopen retains ordinary method-table precedence.
   bigint_minus_reopened_fn = big_op_fns["-"]
+  bigint_times_reopened_fn = big_op_fns["*"]
   # T3 build assertion: a module that synthesized a BigInt operator
   # dispatcher but yields no seam target has broken the wrapper keying —
   # the strong symbol would silently fall to the runtime's weak C default
@@ -2956,6 +2957,53 @@ ewscope_md_state = {ids: {}}
     known_fns["__w_bigint_sub1_2_src"] = true
   elsif used_runtime_fns["__w_bigint_sub1_2_src"] == true
     seam_decls << "declare i64 @__w_bigint_sub1_2_src(i64, i64) nounwind\n"
+
+  # Exact positive one-limb multiplication follows the same narrow contract:
+  # w_mul proves two distinct positive one-limb heap operands, Core supplies
+  # the raw arithmetic worker, and a genuine plain BigInt#* reopen keeps
+  # ordinary method-table precedence. Stage0/C-only links bind the weak exact
+  # C default.
+  bigint_mul1_1_fn = nil
+  bigint_mul1_1_matches = 0
+  bm1fi = 0
+  while bm1fi < mod[:functions].size()
+    bm1ff = mod[:functions][bm1fi]
+    if bm1ff[:source_class] == nil && bm1ff[:source_method] == "__bigint_mul1_1_raw"
+      bigint_mul1_1_matches += 1
+      bigint_mul1_1_fn = bm1ff
+    bm1fi += 1
+  if bigint_mul1_1_matches > 1
+    << "error: __bigint_mul1_1_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul1_1_src] == true && bigint_mul1_1_fn == nil
+    << "error: required native BigInt mul1@1 helper is missing; __w_bigint_mul1_1_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul1_1_target = bigint_times_reopened_fn
+  if bigint_mul1_1_target == nil
+    bigint_mul1_1_target = bigint_mul1_1_fn
+  if bigint_mul1_1_target != nil
+    bm1_signature_ok = bigint_mul1_1_target[:params] != nil && bigint_mul1_1_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      bm1_signature_ok = bm1_signature_ok && bigint_mul1_1_target[:source_kind] == :fn_def
+      bm1_signature_ok = bm1_signature_ok && bigint_mul1_1_target[:raw_i64_signature] == true
+      bm1_signature_ok = bm1_signature_ok && bigint_mul1_1_target[:raw_return_type] == :i64
+    if !bm1_signature_ok
+      << "error: invalid native BigInt mul1@1 seam target"
+      exit(1)
+    bm1_cc = ""
+    if bigint_mul1_1_target[:call_conv] != nil && bigint_mul1_1_target[:call_conv] != ""
+      bm1_cc = bigint_mul1_1_target[:call_conv] + " "
+    bm1_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      bm1_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul1_1_src(i64 %a, i64 %b)" + bm1_attrs + " {\n"
+    fn_out << "  %r = tail call " + bm1_cc + "i64 @" + bigint_mul1_1_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul1_1_src"] = false
+    known_fns["__w_bigint_mul1_1_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul1_1_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul1_1_src(i64, i64) nounwind\n"
 
   # Unary BigInt#isqrt has the same stable source/weak-C seam contract as the
   # binary operators above. Its source body owns the one- and two-limb leaves

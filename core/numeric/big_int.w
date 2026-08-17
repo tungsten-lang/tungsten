@@ -2930,6 +2930,27 @@ on macos && arm64
         ret i128 %packed
     IR
 
+  # Exact positive one-limb multiply pair from bigint_mul_positive_11.
+  # Pack high:low into u128 so the source caller crosses one raw boundary
+  # without boxing either product word.
+  fn __bigint_mul1_1_product(a, b) (i64 i64) u128
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %amasked = and i64 %a, 140737488355327
+        %bmasked = and i64 %b, 140737488355327
+        %ap = inttoptr i64 %amasked to ptr
+        %bp = inttoptr i64 %bmasked to ptr
+        %avp = getelementptr i8, ptr %ap, i64 16
+        %bvp = getelementptr i8, ptr %bp, i64 16
+        %av = load i64, ptr %avp, align 8
+        %bv = load i64, ptr %bvp, align 8
+        %av128 = zext i64 %av to i128
+        %bv128 = zext i64 %bv to i128
+        %product = mul i128 %av128, %bv128
+        ret i128 %product
+    IR
+
   fn __bigint_add1_2_exact(rp, ap, word) (i64 i64 i64) i64
     asm <<~ASM
       ldp x4, x5, [x1]
@@ -3487,6 +3508,19 @@ fn __bigint_sub1_1_raw(a, b) (i64 i64) i64
   signed_size = lt ? 0 - 1 : 1
   ccall_nobox(
     "w_bigint_sub1_1_finish_raw", magnitude, signed_size ## i64
+  )
+
+# Exact positive one-limb multiply leaf. The generic runtime gate and typed
+# BigInt worker have already proved distinct positive one-limb heap operands;
+# this raw worker performs only the C leaf's limb loads, 64x64 product, and
+# identical result finishing.
+fn __bigint_mul1_1_raw(a, b) (i64 i64) i64
+  product = __bigint_mul1_1_product(a, b) ## u128
+  low = product ## u64
+  high_wide = product >> 64 ## u128
+  high = high_wide ## u64
+  ccall_nobox(
+    "w_bigint_mul1_1_finish_raw", low ## i64, high ## i64
   )
 
 # Exact positive two-limb minus positive one-limb C arm.  Allocation, the
@@ -4391,7 +4425,17 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
     am = an < 0 ? 0 - an : an
     bm = bn < 0 ? 0 - bn : bn
+
     if am < 2 || bm < 2 || am > 24 || bm > 24
+      on macos && arm64
+        # Exact C-shaped positive 1x1 leaf. Keep its selector behind the
+        # pre-existing out-of-band test so every multi-limb shape retains
+        # its prior hot path. Pointer-identical squaring and signed neighbors
+        # remain on C.
+        if an == 1 && bn == 1 && $value != other$value
+          return wvalue_from_bits(
+            __bigint_mul1_1_raw($value ## i64, other$value ## i64)
+          )
       return ccall("w_mul", self, other)
     # Squaring (identical boxed bits, flip included) keeps C's dedicated
     # square path, mirroring bigint_mul_src_shape's a == b exclusion.

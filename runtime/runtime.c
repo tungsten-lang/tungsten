@@ -11538,8 +11538,16 @@ static inline WValue bigint_mul_bigint_word(WValue big, int64_t word) {
 }
 #endif
 
+#ifndef BN_BIGINT_MUL1_1_SRC_DIRECT
+#define BN_BIGINT_MUL1_1_SRC_DIRECT 1
+#endif
+
 static inline __attribute__((always_inline))
-WValue bigint_mul_any(WValue a, WValue b) {
+WValue bigint_mul1_1_seam(WValue a, WValue b);
+
+static inline __attribute__((always_inline))
+WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
+    (void)route_mul1_1;
 #ifndef BN_MUL_POSITIVE_EQUAL_FAST
 #define BN_MUL_POSITIVE_EQUAL_FAST 1
 #endif
@@ -11620,8 +11628,13 @@ WValue bigint_mul_any(WValue a, WValue b) {
         (WIDE)->limbs, (NW), (WORD)->limbs[0], 0);                        \
 } while (0)
         if (na == 1 || nb == 1) {
-            if (na == 1 && nb == 1)
+            if (na == 1 && nb == 1) {
+#if BN_BIGINT_MUL1_1_SRC_DIRECT
+                if (__builtin_expect(route_mul1_1 != 0, 1))
+                    return bigint_mul1_1_seam(a, b);
+#endif
                 return bigint_mul_positive_11(ba, bb);
+            }
             if (nb == 1 && na >= 2)
                 BN_MUL_N1_POSITIVE_RETURN(ba, bb, na);
             if (na == 1 && nb >= 2)
@@ -11712,6 +11725,11 @@ WValue bigint_mul_any(WValue a, WValue b) {
     if (a == negative_one) return w_neg(b);
 #endif
     return bigint_mul_any_generic(a, b);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_mul_any(WValue a, WValue b) {
+    return bigint_mul_any_routed(a, b, 0);
 }
 
 /* ---- Bigint division (schoolbook, Knuth Algorithm D simplified) ---- */
@@ -36975,6 +36993,7 @@ static _Atomic int w_bigint_plus_seam_is_c;
 static _Atomic int w_bigint_minus_seam_is_c;
 static _Atomic int w_bigint_sub1_1_seam_is_c;
 static _Atomic int w_bigint_sub1_2_seam_is_c;
+static _Atomic int w_bigint_mul1_1_seam_is_c;
 static _Atomic int w_bigint_times_seam_is_c;
 
 __attribute__((weak)) WValue __w_bigint_plus_src(WValue a, WValue b) {
@@ -36993,6 +37012,11 @@ __attribute__((weak)) WValue __w_bigint_sub1_1_src(WValue a, WValue b) {
 __attribute__((weak)) WValue __w_bigint_sub1_2_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_sub1_2_seam_is_c, 1, memory_order_relaxed);
     return bigint_sub_ui_any(a, w_as_bigint(b)->limbs[0]);
+}
+__attribute__((weak)) WValue __w_bigint_mul1_1_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_1_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_11(w_as_bigint(a), w_as_bigint(b));
 }
 __attribute__((weak)) WValue __w_bigint_times_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_times_seam_is_c, 1, memory_order_relaxed);
@@ -37032,6 +37056,13 @@ WValue bigint_sub1_2_seam(WValue a, WValue b) {
     return __w_bigint_sub1_2_src(a, b);
 }
 static inline __attribute__((always_inline))
+WValue bigint_mul1_1_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_1_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_11(w_as_bigint(a), w_as_bigint(b));
+    return __w_bigint_mul1_1_src(a, b);
+}
+static inline __attribute__((always_inline))
 WValue bigint_times_seam(WValue a, WValue b) {
     if (__builtin_expect(atomic_load_explicit(&w_bigint_times_seam_is_c,
                                               memory_order_relaxed), 1))
@@ -37059,7 +37090,6 @@ static inline int bigint_mul_src_shape(WValue a, WValue b) {
     return la >= 2 && lb >= 2 && la <= 24 && lb <= 24;
 }
 static int g_bigint_src_ops_off = -1;   /* -1 unresolved, 0 route, 1 pin C */
-
 #ifndef BN_BIGINT_SUB1_1_SRC_DIRECT
 #define BN_BIGINT_SUB1_1_SRC_DIRECT 1
 #endif
@@ -37393,9 +37423,14 @@ WValue w_mul(WValue a, WValue b) {
     {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
-        if (__builtin_expect(src_off == 0, 1) && bigint_mul_src_shape(a, b))
-            return bigint_times_seam(a, b);
+        if (__builtin_expect(src_off == 0, 1)) {
+            if (bigint_mul_src_shape(a, b)) return bigint_times_seam(a, b);
+        }
+#if BN_BIGINT_MUL1_1_SRC_DIRECT
+        return bigint_mul_any_routed(a, b, src_off == 0);
+#else
         return bigint_mul_any(a, b);
+#endif
     }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_mul_elem(a, b);
     if (is_decimal_any(a) && is_decimal_any(b))
@@ -53734,6 +53769,16 @@ WValue w_bigint_add1_1_finish_raw(uint64_t sum, int64_t carry) {
         return bigint_box(result);
     }
     return bigint_finish_one_limb(sum, 0);
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_1_finish_raw(uint64_t low, uint64_t high) {
+    if (__builtin_expect(high == 0, 0))
+        return bigint_finish_one_limb(low, 0);
+    WBigint *result = bigint_alloc_raw_hot_exact(2U);
+    result->limbs[0] = low;
+    result->limbs[1] = high;
+    result->size = 2;
+    return bigint_box(result);
 }
 WValue w_bigint_alloc_hot4_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(4U));

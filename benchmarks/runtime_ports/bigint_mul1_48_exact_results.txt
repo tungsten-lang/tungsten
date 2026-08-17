@@ -1,0 +1,149 @@
+BIGINT POSITIVE FORTY-EIGHT-LIMB BY ONE-LIMB MULTIPLY — EXACT SOURCE CHECKPOINT
+===============================================================================
+
+Scope
+-----
+
+This checkpoint ports only the distinct raw-positive-header 48-by-1 and
+1-by-48 boxed-BigInt arms. Native Tungsten preserves C's exact outer shape:
+
+  - the same exact capacity-sixty-four hot allocation;
+  - one call to the unchanged `bn_mul_1_f48` kernel;
+  - the same carry store in limb forty-eight; and
+  - positive size forty-eight when carry is zero, otherwise size forty-nine.
+
+The scalar kernel is deliberately unchanged. Shape selection, allocation,
+and result publication move to native Tungsten. Receiver order is preserved,
+and a genuine open-world BigInt `*` reopen remains observable. Signs,
+squaring, and every neighboring width retain their former routes.
+
+Build and route proof
+---------------------
+
+base_commit=73378396
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+power=AC Power, 100 percent
+compiler=Homebrew clang 22.1.8
+gmp=6.3.0
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-mul1-48-fixed3
+compiler_sha256=5a072b4159d71ec5143938cb5c74f91587f946ef5d364fb0c8158fd603ac2c36
+fixed_point_ll_sha256=0acf2506c0eb6c15c4cd430d16a801fc42532cbd70b3ebefc51703e14714d935
+production_candidate=/private/tmp/bench_big_math_tungsten_mul1_48_exact
+production_candidate_sha256=96ace66441a11772196892f75dd9486ec3a8d0f4b428403e08f8eb63f5b30e93
+production_feature_off=/private/tmp/bench_big_math_tungsten_mul1_48_feature_off
+production_feature_off_sha256=2f6215c15dd74e8e9e8720c34d2c8cef2875b08bc194144086ac20b150b86215
+diagnostic_same_binary=/private/tmp/bench_big_math_tungsten_mul1_48_knob
+diagnostic_same_binary_sha256=2c882a4c7f16c4e527a28cdeace2c0c9522ec516fde94bc6e22be92f67f2579a
+
+The linked strong `__w_bigint_mul1_48_src` body contains the admitted cap-64
+allocation, one `bl bn_mul_1_f48`, the carry store at limb forty-eight, and
+the +48/+49 header publication. The raw kernel bridge is a tail branch to
+`bn_mul_1_f48`; it introduces no alternative arithmetic implementation.
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic binary was built with
+`BN_BENCH_RUNTIME_MUL1_48_SRC_KNOB=1`. Alternating processes changed only
+`TUNGSTEN_BN_MUL1_48_SRC=0/1`.
+
+method=11 alternating process pairs; 110 ms target
+raw_json=/private/tmp/bigint-mul1-48-exact-knob-screen-73378396-m5max-20260817.json
+raw_json_sha256=7e9ca1ccc0f925c363bf877b5052df73c3f695f4e69db4c4f50691cd448014bd
+
+cell      C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul1@1       1.110346   1.110084        1.000981    0.004761   2/11
+mul1@2       3.665406   3.644896        0.998333    0.007020   6/11
+mul1@3       3.851015   3.849856        1.001008    0.004618   5/11
+mul1@4       3.878565   3.885439        1.000491    0.010067   5/11
+mul1@5       4.082247   4.068989        1.002957    0.023725   5/11
+mul1@6       4.233723   4.258295        1.002320    0.009580   4/11
+mul1@7       4.353480   4.344802        0.999889    0.005671   6/11
+mul1@8       4.307888   4.283411        0.999117    0.011880   6/11
+mul1@12      7.342343   7.330267        1.001462    0.028675   5/11
+mul1@16      6.118053   6.073105        0.988810    0.037005   7/11
+mul1@24      7.542873   7.503651        0.988752    0.027393   8/11
+mul1@32      8.870009   8.802883        0.997946    0.024265   6/11
+mul1@40     10.134965  10.085601        0.991827    0.027679   8/11
+mul1@48     11.586998  11.505760        0.995790    0.012936   7/11
+mul1@64     14.060388  14.007814        0.991723    0.012652   8/11
+
+Only `mul1@48` changes route. All fourteen controls remain within 1.2 percent.
+
+Same-binary target promotion
+----------------------------
+
+method=21 alternating process pairs; 300 ms target
+raw_json=/private/tmp/bigint-mul1-48-exact-knob-promotion-73378396-m5max-20260817.json
+raw_json_sha256=6f07ac16088d565c3b5ba4a252a342a227db113ea0d8101b78bc9ad0ce6712ca
+
+cell      C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul1@48     11.382203  11.419724        1.000591    0.012409  10/21
+
+The identical-binary result is parity. It excludes a material regression
+but does not support a causal speed claim.
+
+Production-shape screen and promotion
+-------------------------------------
+
+Two separately linked production binaries alternated order. The feature-off
+build compiles the source route away; the candidate has no diagnostic branch.
+Every control in the 11-pair 110 ms screen remained within 1 percent.
+
+method=31 alternating process pairs; 500 ms target
+raw_json=/private/tmp/bigint-mul1-48-exact-production-promotion-31x500-73378396-m5max-20260817.json
+raw_json_sha256=56893452763c707f1c02aa7c2a2096377c31f091fa84d78feb47ae40e84aadb2
+
+cell      feature_off_ns  candidate_ns  paired_median  paired_IQR  wins
+mul1@48         11.473098     11.445223        1.002055    0.013786  15/31
+
+The production result is also parity: the 0.21 percent point loss is far
+inside the 1.38 percent paired IQR.
+
+Public three-lane row
+---------------------
+
+method=9 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-mul1-48-exact-public-73378396-m5max-20260817.json
+raw_json_sha256=7a7d832baff5a2e65576823e05ff0c9f854c2d5ef895587a4a830674c99d8d19
+
+cell      Tungsten_C_ns  tungsten-native_ns  GMP_ns  fastest
+mul1@48           8.866               11.344   9.066  tungsten
+
+The direct C and GMP lanes call scalar-word entries, while the native lane
+deliberately measures an ordinary boxed source `BigInt * BigInt` operator.
+This exact checkpoint therefore does not claim scalar-entry parity.
+
+Hardware counters
+-----------------
+
+command=bin/tungsten flame --counters rates -d 5 --top 20 --
+  benchmarks/big_math/bench_big_math_tungsten_native --sweep mul1 48 3 2000
+raw_text=/private/tmp/bigint-mul1-48-post-counters-73378396-m5max-20260817.txt
+raw_text_sha256=5496676b6d2aa208c1750eabba4640e92b41af4b435b185329b50c7f9bc8bac4
+
+The production candidate attributes 69.6 percent of sampled instructions to
+unchanged `bn_mul_1_f48`, 28.1 percent to the inlined exact built-in boundary,
+and the remainder principally to TLS lookup. Aggregate IPC is 6.98. Steady
+cache and TLB rates round to zero; remaining headroom is non-kernel overhead
+reserved for the later native-only phase.
+
+Focused validation
+------------------
+
+- a feature-off oracle build passes 100,000 exact native/C differentials,
+  alternating both operand orders and checking exact result sizes;
+- compiled and interpreted public checks pass independent closed-form
+  products, every named representation/route case, and 1,000 randomized calls;
+- both result widths, signs, squaring, and neighboring widths are covered;
+- a real BigInt `*` reopen replaces ordinary and direct seams;
+- production, feature-off, diagnostic, fixed-kernel-off, and N-by-1-off
+  native harnesses pass the complete 25-operation self-test;
+- compiler LLVM reaches a byte-identical self-hosted fixed point, assembles,
+  and verifies under LLVM 22;
+- `make -C runtime runtime.o` and `git diff --check` pass; and
+- linked-body and hardware-counter route proofs pass.
+
+This is an exact-fidelity checkpoint at parity, not a speed claim. The final
+fixed 64-limb outer-leaf migration remains separate measured work.

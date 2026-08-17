@@ -3208,6 +3208,64 @@ on macos && arm64
       ret
     ASM
 
+  # Raw effective header size for the admitted boxed-BigInt shape.  Keeping
+  # this in source avoids a general numeric conversion in the wide hot arm.
+  fn __bigint_effective_size_raw(value) (i64) i64
+    ll <<~IR
+      entry:
+        %ptrbits = and i64 %value, 140737488355312
+        %ptr = inttoptr i64 %ptrbits to ptr
+        %sizeptr = getelementptr i8, ptr %ptr, i64 4
+        %size32 = load i32, ptr %sizeptr, align 1
+        %size = sext i32 %size32 to i64
+        %shifted = lshr i64 %value, 47
+        %flipword = and i64 %shifted, 1
+        %flip = icmp ne i64 %flipword, 0
+        %negative = sub i64 0, %size
+        %effective = select i1 %flip, i64 %negative, i64 %size
+        ret i64 %effective
+    IR
+
+  # Exact wide prefix/ripple from bigint_sub_word_into.  Return the first
+  # untouched limb so the caller can invoke the retained overlap-copy tail.
+  fn __bigint_sub1_wide_prefix(rp, ap, n, word) (i64 i64 i64 i64) i64
+    ll <<~IR
+      entry:
+        %rptr = inttoptr i64 %rp to ptr
+        %aptr = inttoptr i64 %ap to ptr
+        %a0 = load i64, ptr %aptr, align 8
+        %d0 = sub i64 %a0, %word
+        store i64 %d0, ptr %rptr, align 8
+        %borrow0 = icmp ult i64 %a0, %word
+        %a1ptr = getelementptr i64, ptr %aptr, i64 1
+        %r1ptr = getelementptr i64, ptr %rptr, i64 1
+        %a1 = load i64, ptr %a1ptr, align 8
+        %b0 = zext i1 %borrow0 to i64
+        %d1 = sub i64 %a1, %b0
+        store i64 %d1, ptr %r1ptr, align 8
+        %borrow1 = icmp ult i64 %a1, %b0
+        %has2 = icmp ult i64 2, %n
+        %continue1 = and i1 %borrow1, %has2
+        br i1 %continue1, label %ripple, label %done
+
+      ripple:
+        %i = phi i64 [ 2, %entry ], [ %next, %ripple ]
+        %src = getelementptr i64, ptr %aptr, i64 %i
+        %dst = getelementptr i64, ptr %rptr, i64 %i
+        %v = load i64, ptr %src, align 8
+        %d = sub i64 %v, 1
+        store i64 %d, ptr %dst, align 8
+        %borrow = icmp eq i64 %v, 0
+        %next = add i64 %i, 1
+        %more = icmp ult i64 %next, %n
+        %continue = and i1 %borrow, %more
+        br i1 %continue, label %ripple, label %done
+
+      done:
+        %first_untouched = phi i64 [ 2, %entry ], [ %next, %ripple ]
+        ret i64 %first_untouched
+    IR
+
 # Exact raw wrappers for the positive 4-by-2-limb C leaf.  Keep WValue and
 # limb addresses as i64 throughout: routing them through typed source fields
 # would box the addresses and re-enter ordinary numeric dispatch.  Allocation,
@@ -4095,6 +4153,36 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         return wvalue_from_bits(
           __bigint_sub1_8_raw($value ## i64, other$value ## i64)
         )
+      # Exact port of bigint_sub_word_into's wide arm.  Limbs 0 and 1 are
+      # always processed, deeper borrow propagation is rare, and the untouched
+      # suffix retains C's tuned overlap-copy helper through an inlinable raw
+      # boundary.  Allocation and shrink normalization remain in C order.
+      if an > 8 && an <= 4096 && bn0 == 1
+        wide_n = __bigint_effective_size_raw($value ## i64) ## i64
+        result = ccall_rawargs("w_bigint_alloc_hot", wide_n) ## BigInt
+        mask_wide = 140737488355312 ## i64
+        rp_wide = (result$value & mask_wide) + 16 ## i64
+        ap_wide = ($value & mask_wide) + 16 ## i64
+        word = other$limbs[0] ## u64
+        i = __bigint_sub1_wide_prefix(
+          rp_wide, ap_wide, wide_n, word ## i64
+        ) ## i64
+
+        if i < wide_n
+          ccall_nobox(
+            "w_bigint_copy_tail_raw", rp_wide, ap_wide, i, wide_n
+          )
+
+        rlen = wide_n ## i64
+        top_offset = (wide_n - 1) * 8 ## i64
+        if raw_load_u64(rp_wide, top_offset) == 0
+          rlen -= 1
+        if rlen < wide_n
+          return wvalue_from_bits(
+            ccall_nobox("w_bigint_finish_sub_raw", result$value, rlen) ## i64
+          )
+        result$size = rlen
+        return result
 
     bn = 0 - bn0
 

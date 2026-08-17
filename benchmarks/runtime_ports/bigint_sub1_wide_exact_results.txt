@@ -1,0 +1,68 @@
+EXACT POSITIVE WIDE SUB1 CHECKPOINT
+
+parent_commit=35a9d699
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; Battery Power 60%
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+gmp=6.3.0
+
+PORT CONTRACT
+
+The positive 9..4096-limb by positive one-limb subtraction is a literal
+source port of runtime.c's bigint_sub_word_into wide arm:
+
+- allocate exactly alen limbs from the hot allocator;
+- subtract limb zero, then always perform the limb-one borrow step;
+- ripple only while borrow survives beyond limb one;
+- copy the untouched suffix with the retained bn_copy_tail implementation;
+- shrink by at most one top limb and use the retained subtraction finisher.
+
+The linked raw prefix leaf is frameless and call-free.  Whole-program LTO
+inlines the retained overlap-qpair tail copier into the source worker.  This
+checkpoint adds no new arithmetic, allocation, copy, or normalization policy.
+
+MATCHED TEN-CELL SCREEN
+
+baseline=/private/tmp/sub1-8-native-borrow-death
+candidate=/private/tmp/sub1-wide-native-exact2
+method=11 alternating process pairs; 110 ms/cell
+raw_json=/private/tmp/sub1-wide-exact-screen-35a9d699.json
+
+cell       baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sub1@8       4.040964      4.100349      1.014688       0.009774    1/11
+sub1@9       4.755670      5.206722      1.086834       0.048936    0/11
+sub1@12      5.001556      5.427525      1.084353       0.047689    0/11
+sub1@16      5.224046      5.624483      1.076986       0.076909    0/11
+sub1@24      5.330909      5.894296      1.100741       0.024954    0/11
+sub1@32      5.805015      6.222309      1.080151       0.027738    1/11
+sub1@48      6.601716      7.040637      1.063189       0.032503    0/11
+sub1@64      7.600835      7.940147      1.048063       0.018039    0/11
+sub1@128    11.593664     11.599424      0.996733       0.011027    7/11
+sub1@256    19.423436     19.028424      0.976999       0.006503   11/11
+
+The exact port is slower at 9..64, reaches parity near 128, and wins at 256.
+This result is retained rather than relabeled as a performance win: exact
+porting and source-only improvement are separate checkpoints.
+
+COUNTER ROUTE PROOF
+
+At sub1@24, tungsten flame --counters attributes approximately:
+
+  __bigint_sub1_wide_prefix  21.9% instructions / 21.8% cycles
+  BigInt#-__ovl_BigInt        7.5% instructions /  7.5% cycles
+  __w_bigint_minus_src        1.0% instructions /  1.0% cycles
+
+The prefix symbol is the only surviving call in the ported arithmetic path;
+the tuned copy tail is inlined.  Eliminating that call is the first separate
+native-integration experiment after this exact checkpoint.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_sub1_wide_source_spec passed;
+- differential sweep covered widths 9,12,16,24,32,48,64,128,256;
+- copied suffixes, full borrow propagation, top shrink, signs, and fixed8;
+- native lane self-test passed;
+- emitted LLVM assembled and verified with LLVM 22;
+- linked raw prefix leaf is frameless and call-free;
+- git diff --check passed.

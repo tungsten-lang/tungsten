@@ -583,6 +583,21 @@ won 26/31 at 0.97284 (4.196 ns versus 4.288 ns); the nine-cell screen measured
 0.97338 at the target and kept every control within 1.2%.  Full-propagation
 correctness remains covered.  Evidence: `bigint_sub1_8_borrow_death_results.txt`.
 
+EXACT POSITIVE WIDE SUB1 CHECKPOINT: native source now carries the retained
+`bigint_sub_word_into` path for positive 9–4096-limb values minus a positive
+one-limb word.  It preserves the unconditional limb-one borrow step, rare
+deeper ripple, tuned overlap-qpair suffix copy, exact-cap hot allocation, and
+one-limb shrink finisher.  The initial 11-pair 110 ms screen was deliberately
+kept even though it exposed source-integration overhead: candidate/base was
+1.087 at 9 limbs, 1.101 at 24, 1.048 at 64, 0.997 at 128, and 0.977 at 256;
+the fixed-eight control was 1.015.  Counters attribute roughly 22% of the
+candidate to the still-outlined source prefix leaf.  This commit is therefore
+the exact semantic/code-shape checkpoint, not the claimed performance finish;
+call integration is a separate native-only follow-up.  Compiled and
+interpreted differential coverage spans 9–256 limbs, copied tails, full borrow
+propagation, shrink, signs, and the fixed-eight boundary.  Evidence:
+`bigint_sub1_wide_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

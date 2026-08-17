@@ -37095,6 +37095,7 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
     if (neg_b && sa == 6 && sb == 1) return 1;
     if (neg_b && sa == 7 && sb == 1) return 1;
     if (neg_b && sa == 8 && sb == 1) return 1;
+    if (neg_b && sa > 8 && sa <= 4096 && sb == 1) return 1;
     /* Exclusion keys on the RAW operand signs, NOT the post-flip effective
      * ones: C's `bigint_add_equal_fast` and `bigint_sub_equal_fast` each
      * specialize equal-length pairs whose own signs match, per operator.
@@ -53681,6 +53682,20 @@ WValue w_bigint_alloc_hot(int64_t cap) {
     if (c < 1) c = 1;
     if (c > (int64_t)INT32_MAX / 8) die("w_bigint_alloc_hot: capacity too large");
     return bigint_box(bigint_alloc_raw_hot((int32_t)c));
+}
+__attribute__((always_inline))
+int64_t w_bigint_copy_tail_raw(
+    int64_t result_limbs, int64_t source_limbs,
+    int64_t start, int64_t length) {
+    if (start < 0 || start > length || length > INT32_MAX)
+        die("w_bigint_copy_tail_raw: invalid range");
+    int32_t i = (int32_t)start;
+    int32_t n = (int32_t)length;
+    bn_copy_tail(
+        (uint64_t *)(uintptr_t)result_limbs + i,
+        (const uint64_t *)(uintptr_t)source_limbs + i,
+        n - i);
+    return 0;
 }
 WValue w_bigint_alloc_hot4_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(4U));

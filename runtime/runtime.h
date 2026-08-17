@@ -768,6 +768,9 @@ WValue w_bigint_to_s(WValue r, WValue base);
 WValue w_decimal_from_digits(WValue digits_str, WValue scale, WValue negate);
 WValue w_bigint_alloc_boxed(WValue cap);
 WValue w_bigint_alloc_hot(int64_t cap);
+int64_t w_bigint_copy_tail_raw(
+    int64_t result_limbs, int64_t source_limbs,
+    int64_t start, int64_t length);
 WValue w_bigint_alloc_hot4_raw(void);
 WValue w_bigint_release_unfinished_raw(WValue v);
 WValue w_bigint_release_dead_raw(WValue v);

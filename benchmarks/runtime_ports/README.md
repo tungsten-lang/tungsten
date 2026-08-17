@@ -566,6 +566,15 @@ shrink-to-six normalization.  A 21-pair 300 ms promotion won 21/21 at
 0.89261 (4.240 ns versus 4.753 ns); all controls stayed within 3.1%.
 Evidence: `bigint_sub1_7_exact_results.txt`.
 
+EXACT POSITIVE SUB1@8 CHECKPOINT: native source now carries the literal
+eight-limb C schedule—four `ldp`s, `subs` plus seven `sbcs`, four `stp`s, and
+`cset`—with unchanged cap-eight allocation and shrink-to-seven normalization.
+A 21-pair 300 ms promotion won 21/21 at 0.86222 (4.233 ns versus 4.895 ns);
+the nine-cell screen measured 0.83927 at the target and every control stayed
+within 3%.  This completes exact native coverage of retained fixed subtract-
+word arms 1–8; borrow-death remains a separate native-only experiment.
+Evidence: `bigint_sub1_8_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

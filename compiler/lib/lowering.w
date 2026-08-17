@@ -139,6 +139,7 @@ use lowering/definitions
   mod[:require_bigint_mul6_src] = true
   mod[:require_bigint_mul7_src] = true
   mod[:require_bigint_mul8_src] = true
+  mod[:require_bigint_mul12_src] = true
   mod[:require_bigint_mul16_src] = true
   mod[:require_bigint_mul1_2_src] = true
   mod[:require_bigint_mul1_3_src] = true

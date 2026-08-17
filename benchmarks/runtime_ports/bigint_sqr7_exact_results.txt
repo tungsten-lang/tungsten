@@ -1,0 +1,120 @@
+BIGINT POSITIVE SEVEN-LIMB SQUARE — EXACT SOURCE CHECKPOINT
+===========================================================
+
+Scope
+-----
+
+This checkpoint ports only the pointer-identical, raw-positive-header,
+seven-limb arm from `bigint_mul_any_routed` / `bigint_mul_positive_equal`.
+The native Tungsten worker is a literal copy of the release/LTO AArch64
+`bn_sqr7` leaf:
+
+  - exact hot capacity-16 allocation for the fourteen-limb result;
+  - the same seven diagonal and twenty-one doubled cross products;
+  - the same fixed, intentionally noinline `mul` / `umulh` / `extr` /
+    flag-chain schedule;
+  - fourteen unconditional limb stores; and
+  - positive size 13 when limb 13 is zero, otherwise positive size 14.
+
+The dedicated stable seam admits the same tag-overlay negative with raw header
++7 as C. A real negative header, distinct equal boxes, and every neighboring
+width retain their existing routes. A plain open-world BigInt `*` reopen
+remains observable.
+
+The benchmark compiler disables the committed closed-world square shortcut
+(`TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT=0`) so ordinary source `a * a` reaches
+this checkpoint. The runtime toggle `TUNGSTEN_BIGINT_SRC_OPS=0` pins the same
+binary to C. Native-only closed-world integration remains a separate measured
+tranche after the exact-port series.
+
+Build
+-----
+
+base_commit=69992dc1d329855ce40f9148cfa6505047d0f2ab
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+gmp=6.3.0
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-sqr7-exact
+compiler_sha256=4ad9457be3134db57fe68bf70eaf5004e0f11537507155a19181b64861d84ae2
+candidate=/private/tmp/bench_big_math_tungsten_sqr7_exact
+candidate_sha256=b31821aea5561dad8838aea0653532222ab1055b089496ac2479955b7a9338ed
+fixed_point_ll_sha256=1eb43b3942342cd758fdc12c5814cab73c0bf89096bab1886a94aaf2e23d6bb5
+power=battery, 91-92 percent
+
+Same-binary C/source screen
+---------------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+control=TUNGSTEN_BIGINT_SRC_OPS=0
+raw_json=/private/tmp/bigint-sqr7-exact-screen-69992dc1-m5max-20260817.json
+raw_json_sha256=b3c2808234a336a11fcf901dc7a56991758d1e1d7798bb2b525d91d7657cc5da
+
+cell    C_pinned_ns  source_ns  paired_median  paired_IQR  wins
+sqr@1       2.349687    2.486660        1.059195    0.001976   0/11
+sqr@2       3.711488    3.115235        0.837842    0.003686  11/11
+sqr@3       4.469723    3.725134        0.836627    0.011397  11/11
+sqr@4       5.771256    5.212230        0.901224    0.006446  11/11
+sqr@5       8.503635    6.825914        0.801299    0.017175  11/11
+sqr@6      10.779051    9.333343        0.866355    0.005736  11/11
+sqr@7      13.625706   12.422098        0.915456    0.004565  11/11
+sqr@8      16.672828   16.768787        1.002368    0.007224   4/11
+sqr@16     48.416536   48.353767        0.999045    0.002075   8/11
+sqr@32    164.966686  165.064059        0.999326    0.006308   6/11
+
+The target improves 8.45%. The already-migrated sqr@2..6 rows validate their
+source routes under the same kill switch. The unmigrated sqr@8, sqr@16, and
+sqr@32 controls remain within 0.24%. The sqr@1 source/C ratio reproduces its
+separately promoted and committed 1.0578 fidelity cost; it is not a new arm
+selected by this checkpoint.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr7-exact-promotion-69992dc1-m5max-20260817.json
+raw_json_sha256=12833234daf3a346ccb94cd5119740f53d4f70e40365fb68aa39a5f97374e32e
+
+cell    C_pinned_ns  source_ns  paired_median  paired_IQR  wins
+sqr@7      13.487883   12.345741        0.914944    0.006412  21/21
+
+The literal exact source route is 8.51% faster than the same binary pinned to
+its C seam, with every promoted pair winning.
+
+Public three-lane row
+---------------------
+
+method=9 internal runs; 110 ms target
+C/GMP command=`bench_big_math --bench-boxed-sweep sqr 7 9 110`
+native command=`bench_big_math_tungsten_native --sweep sqr 7 9 110`
+
+cell      Tungsten_C_ns  tungsten-native_ns  GMP_ns  fastest
+sqr@7            11.951               12.231  14.981  tungsten
+
+The exact port is 2.34% slower than the separately compiled direct Tungsten C
+lane but 18.36% faster than GMP. This is the requested fidelity checkpoint;
+native-only optimization follows only after the exact C schedule is retained.
+
+Focused validation
+------------------
+
+  - compiled and interpreted representation checks pass for size-13 and
+    size-14 results, overlay-negative and negative-header inputs, receiver
+    preservation, a distinct-equal-value control, and 100,000 differentials;
+  - a compiled feature-off differential compares the direct strong native
+    worker with the pinned C boundary for another 100,000 values, including
+    both result widths and alternating signs;
+  - the plain BigInt `*` reopen spec passes;
+  - feature-off and feature-on native-lane self-tests pass;
+  - the focused runtime object builds cleanly;
+  - compiler and focused-spec LLVM modules assemble and verify under LLVM 22;
+  - the linked AArch64 arithmetic/store body matches C's 273 instructions
+    exactly, with normalized SHA-256
+    `3bb5e82528d74da1bcd5a7d15952104b16dbcd660a6957234758900ed323f30f`;
+  - the native body retains C's explicit noinline boundary and adds only the
+    exact three-instruction +13/+14 size return;
+  - self-host compiler generations two and three emit byte-identical LLVM; and
+  - `git diff --check` passes.
+
+This is the exact-port checkpoint. `sqr@8` is the final fixed-square arm in
+the current series.

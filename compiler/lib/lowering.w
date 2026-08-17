@@ -129,6 +129,7 @@ use lowering/definitions
   mod[:require_bigint_sqr4_src] = true
   mod[:require_bigint_sqr5_src] = true
   mod[:require_bigint_sqr6_src] = true
+  mod[:require_bigint_sqr7_src] = true
   mod[:require_bigint_mul1_2_src] = true
   mod[:require_bigint_mul1_3_src] = true
   mod[:require_bigint_mul1_4_src] = true

@@ -2295,21 +2295,23 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       ctx[:mod][:tag_report_infix] = []
     ctx[:mod][:tag_report_infix].push({op: op, route: bidir_report, fname: wfn[:source_method], class_name: ctx[:class_name]})
 
-  # Native-only follow-up after the exact sqr@1 and sqr@2 checkpoints. At a
+  # Native-only follow-up after the exact sqr@1..3 checkpoints. At a
   # protected+locked syntactic `a * a` site, identity is a compile-time fact:
   # prove the sole receiver tag once, load its raw header once, and dispatch
-  # the two committed square leaves directly. Every other width enters the
+  # the three committed square leaves directly. Every other width enters the
   # unchanged exact built-in square boundary; a stale type fact still falls
   # to polymorphic w_mul before any header load. Keep an independent switch
   # so this integration can be measured against the exact checkpoint without
   # disabling the already-retained general locked-multiply optimization.
   closed_sqr2_direct = closed_bigint_mul && closed_mul1_square && env("TUNGSTEN_BIGINT_SQR2_LOCKED_DIRECT") != "0"
+  closed_sqr3_direct = closed_sqr2_direct && env("TUNGSTEN_BIGINT_SQR3_LOCKED_DIRECT") != "0"
   if closed_sqr2_direct
     cs_entry = overload_exact_tag_entry("BigInt")
     cs_shape_label = next_label(wfn, "sqr_locked.shape")
     cs_two_check_label = next_label(wfn, "sqr_locked.two_check")
     cs_one_label = next_label(wfn, "sqr_locked.one")
     cs_two_label = next_label(wfn, "sqr_locked.two")
+    cs_three_label = next_label(wfn, "sqr_locked.three")
     cs_exact_label = next_label(wfn, "sqr_locked.exact")
     cs_slow_label = next_label(wfn, "sqr_locked.slow")
     cs_done_label = next_label(wfn, "sqr_locked.done")
@@ -2326,14 +2328,22 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_wire_and_i64(wfn, lhs_reg, "140737488355327", cs_ptr)
     cs_size = next_temp(wfn)
     emit_wire_load_u32_ptr(wfn, "4", cs_ptr, cs_size)
-    cs_one = next_temp(wfn)
-    emit_wire_icmp_i64(wfn, cs_size, "eq", "1", cs_one)
-    emit_wire_cond_br(wfn, cs_one, cs_two_check_label, nil, cs_one_label)
+    if closed_sqr3_direct
+      cs_cases = [
+        {value: 1, label: cs_one_label},
+        {value: 2, label: cs_two_label},
+        {value: 3, label: cs_three_label}
+      ]
+      emit_wire_switch_i64(wfn, cs_cases, cs_exact_label, false, cs_size)
+    else
+      cs_one = next_temp(wfn)
+      emit_wire_icmp_i64(wfn, cs_size, "eq", "1", cs_one)
+      emit_wire_cond_br(wfn, cs_one, cs_two_check_label, nil, cs_one_label)
 
-    start_block(wfn, cs_two_check_label)
-    cs_two = next_temp(wfn)
-    emit_wire_icmp_i64(wfn, cs_size, "eq", "2", cs_two)
-    emit_wire_cond_br(wfn, cs_two, cs_exact_label, nil, cs_two_label)
+      start_block(wfn, cs_two_check_label)
+      cs_two = next_temp(wfn)
+      emit_wire_icmp_i64(wfn, cs_size, "eq", "2", cs_two)
+      emit_wire_cond_br(wfn, cs_two, cs_exact_label, nil, cs_two_label)
 
     start_block(wfn, cs_one_label)
     cs_one_result = next_temp(wfn)
@@ -2358,6 +2368,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_mul", nil, nil, cs_slow)
     emit_wire_store_i64(wfn, cs_slot, cs_slow)
     emit_wire_br(wfn, cs_done_label, nil, nil)
+
+    if closed_sqr3_direct
+      start_block(wfn, cs_three_label)
+      cs_three_result = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_sqr3_src", nil, nil, cs_three_result)
+      emit_wire_store_i64(wfn, cs_slot, cs_three_result)
+      emit_wire_br(wfn, cs_done_label, nil, nil)
 
     start_block(wfn, cs_done_label)
     cs_result = next_temp(wfn)

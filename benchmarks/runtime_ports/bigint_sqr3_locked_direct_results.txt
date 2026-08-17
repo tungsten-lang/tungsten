@@ -1,0 +1,107 @@
+BIGINT SQR@3 — CLOSED-WORLD NATIVE DISPATCH FOLLOW-UP
+======================================================
+
+Scope
+-----
+
+This is a native-only optimization after the exact three-limb square checkpoint
+76009ecd. It does not change square arithmetic, allocation, representation,
+normalization, or any C algorithm boundary.
+
+At a syntactic `a * a` site in a program that declares both
+`Tungsten.PROTECT_THE_CORE!` and `Tungsten.LOCK_THE_DOORS!`, receiver identity
+and method-table immutability are compile-time facts. The generated caller now:
+
+  - proves the exact BigInt tag once;
+  - loads the raw signed-size header once;
+  - switches directly to the committed exact native sqr@1, sqr@2, or sqr@3
+    leaf;
+  - enters the unchanged `w_bigint_mul_builtin_exact` boundary for every other
+    BigInt shape; and
+  - falls back to polymorphic `w_mul` on a stale/non-BigInt type fact.
+
+The dense 1..3 switch was selected only after measuring branch-chain variants.
+The size key is the raw header deliberately: tag-overlay-negative values still
+have positive raw headers and square through the positive leaves, while true
+negative headers retain the exact C path. Open-world BigInt `*` replacement
+semantics are unchanged. `TUNGSTEN_BIGINT_SQR3_LOCKED_DIRECT=0` restores the
+exact-checkpoint route and is the causal benchmark control.
+
+Build
+-----
+
+base_commit=76009ecd0e3a68dd37dfccad00ae4a57086d0f0c
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-sqr3-native-switch
+compiler_sha256=336794ea634c30b63b6315fc22f7ab61dec1c5fc6edea711050fe1295629ff82
+baseline_sha256=a31407400e08108a2f2385b81ef350c0273eb92a1b232a9302ddd03551a6c771
+candidate_sha256=69c1cd0346e01dd4644bc412ff7dde742c1bfa740ccbd260e876c8d303a6bd5e
+fixed_point_ll_sha256=a0e82160f9ecd06ca97a8fc4cfdfb0bfaa8d09eb4b68123234ba466fce81502f
+power=AC, battery 100 percent
+
+Target promotion and neighboring controls
+------------------------------------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr3-locked-direct-switch-promotion-76009ecd-m5max-20260817.json
+raw_json_sha256=f869981167a2233fcf4dd68e0eb078950cecd105563bc322e71c359d564379b0
+
+cell   baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@1      0.911713      0.948648        1.033433    0.016609   2/21
+sqr@3      3.909096      2.705193        0.701958    0.026841  21/21
+sqr@4      6.051976      6.272181        1.015022    0.020231   4/21
+
+The protected+locked native caller is 29.8% faster at sqr@3. The same dense
+switch costs 3.34% at sqr@1 and 1.50% at sqr@4 in this promotion. These bounded
+costs are recorded rather than hidden; both remain below the project's 10%
+migration budget. The candidate changes only selection among already-committed
+exact leaves, not their arithmetic.
+
+The initial 11-pair screen measured sqr@2 at 0.9587 and sqr@8 at 1.0026.
+An 11-pair wide control sweep measured candidate/baseline 0.9959, 1.0028,
+1.0021, 1.0129, 1.0060, and 1.0027 at sqr@16,32,64,128,256,1024. The worst
+wide control was +1.29%.
+
+Ordinary multiplication controls
+---------------------------------
+
+Ordinary `mul1@1,2,4,8,16,32` controls measured 0.9890--1.0010, with the
+only wider spread at mul1@16. Ordinary `mul@2,4,8,16,32` controls measured
+0.9954--1.0043. The syntactic identity switch does not materially perturb
+distinct-operand multiplication.
+
+Public three-lane row
+---------------------
+
+method=9 runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr3-native-public-76009ecd-m5max-20260817.json
+raw_json_sha256=ab055849c1598832daf0a203782f2816c5db7a090c070b83d4b0d84805198f02
+
+cell   Tungsten_C_ns  Tungsten_ns  GMP_ns  fastest
+sqr@3        5.278000     3.065073   9.107  tungsten-native
+
+The native Tungsten source lane is 41.9% faster than the direct Tungsten C
+lane in the public harness. Both retain immutable boxed results; the native
+lane exercises ordinary `a * a` under the two closed-world contracts.
+
+Validation gates
+----------------
+
+  - candidate and feature-off locked-direct specs pass;
+  - the focused spec covers positive and overlay-negative three-limb
+    identities plus the existing one- and two-limb leaves, wider/dynamic
+    identities, signs, stale type facts, and a non-BigInt receiver;
+  - retained LLVM contains a dense 1..3 switch and exactly one sqr@3 seam call
+    in the candidate, versus none with the feature disabled; both modules
+    assemble and verify under LLVM 22;
+  - final linked AArch64 contains the committed exact sqr@3 schedule and its
+    allocation/publication contract;
+  - candidate and feature-off native-lane self-tests pass;
+  - two self-host compiler generations emit byte-identical LLVM; and
+  - `git diff --check` passes.
+
+One launch-mode `tungsten flame --counters` attempt sampled Apple's property-
+list encoder rather than the short-lived workload. It is intentionally not
+used as evidence; the causal result is the matched feature-off/on A/B above.

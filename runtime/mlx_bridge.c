@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <time.h>
 
 // Tungsten runtime types — for unwrapping WArray to a raw float*.
 #include "runtime.h"
@@ -48,6 +49,10 @@ void mlxb_init(void) {
 
 int mlxb_load_safetensors(const char *path) {
     mlxb_init();
+    if (g_weights_loaded) {
+        mlx_map_string_to_array_free(g_weights);
+        g_weights_loaded = 0;
+    }
     g_weights = mlx_map_string_to_array_new();
     mlx_map_string_to_string meta = mlx_map_string_to_string_new();
     // Load on CPU stream — Load op only has CPU implementation.
@@ -57,6 +62,7 @@ int mlxb_load_safetensors(const char *path) {
     mlx_map_string_to_string_free(meta);
     if (rc != 0) {
         fprintf(stderr, "mlxb_load_safetensors: %s\n", mlxb_last_err());
+        mlx_map_string_to_array_free(g_weights);
         return 0;
     }
     // Force-materialize all weight tensors so subsequent matmuls can use them
@@ -151,6 +157,158 @@ int mlxb_quantized_matmul_nvfp4(
     return 1;
 }
 
+/* ModelOpt/Ollama NVFP4 stores an additional scalar global scale beside the
+ * packed weights and E4M3 group scales. mlx_quantized_matmul consumes the
+ * packed/group-scale pair but has no global-scale argument, so keep the entire
+ * operation in the MLX graph and multiply its result before evaluation. */
+static int mlxb_quantized_matmul_nvfp4_scaled_arrays(
+    mlx_array *result,
+    const mlx_array x,
+    const mlx_array w_packed,
+    const mlx_array w_scales,
+    const mlx_array global_scale
+) {
+    mlx_optional_int gs = { .value = 16, .has_value = true };
+    mlx_optional_int b  = { .value = 4,  .has_value = true };
+    mlx_array biases = mlx_array_new();
+    mlx_array unscaled = mlx_array_new();
+    int rc = mlx_quantized_matmul(
+        &unscaled, x, w_packed, w_scales, biases,
+        /*transpose=*/true, gs, b, "nvfp4", g_stream
+    );
+    if (rc == 0) {
+        rc = mlx_multiply(result, unscaled, global_scale, g_stream);
+    }
+    mlx_array_free(biases);
+    mlx_array_free(unscaled);
+    return rc;
+}
+
+int mlxb_quantized_matmul_nvfp4_scaled(
+    const char *w_name, const char *s_name, const char *g_name,
+    float *x_data, int k_dim,
+    float *out_f32, int n_rows,
+    int batch
+) {
+    if (!g_weights_loaded) {
+        fprintf(stderr, "mlxb: weights not loaded\n");
+        return 0;
+    }
+
+    mlx_array w_packed = mlx_array_new();
+    mlx_array w_scales = mlx_array_new();
+    mlx_array global_scale = mlx_array_new();
+    mlx_array x = mlx_array_new();
+    mlx_array y = mlx_array_new();
+    int ok = 0;
+
+    if (mlx_map_string_to_array_get(&w_packed, g_weights, w_name) != 0 ||
+        mlx_map_string_to_array_get(&w_scales, g_weights, s_name) != 0 ||
+        mlx_map_string_to_array_get(&global_scale, g_weights, g_name) != 0) {
+        fprintf(stderr, "mlxb: scaled NVFP4 tensor set not found: %s\n", w_name);
+        goto done;
+    }
+
+    int x_shape[2] = { batch, k_dim };
+    mlx_array_free(x);
+    x = mlx_array_new_data(x_data, x_shape, 2, MLX_FLOAT32);
+    if (mlxb_quantized_matmul_nvfp4_scaled_arrays(
+            &y, x, w_packed, w_scales, global_scale) != 0 ||
+        mlx_array_eval(y) != 0) {
+        fprintf(stderr, "mlxb: scaled quantized_matmul failed: %s\n", mlxb_last_err());
+        goto done;
+    }
+
+    const float *src = mlx_array_data_float32(y);
+    if (src == NULL) {
+        fprintf(stderr, "mlxb: scaled qmv result has no f32 data\n");
+        goto done;
+    }
+    memcpy(out_f32, src, sizeof(float) * (size_t)batch * (size_t)n_rows);
+    ok = 1;
+
+done:
+    mlx_array_free(w_packed);
+    mlx_array_free(w_scales);
+    mlx_array_free(global_scale);
+    mlx_array_free(x);
+    mlx_array_free(y);
+    return ok;
+}
+
+static double mlxb_monotonic_seconds(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/* Time the exact MLX operation a Tungsten bridge path would invoke. Inputs and
+ * weights are retained across iterations; every iteration evaluates the graph
+ * because a Metal/MLX hybrid must synchronize before Tungsten's next Metal
+ * kernel can consume the result. The result stays inside MLX (no memcpy). */
+double mlxb_bench_quantized_matmul_nvfp4_scaled(
+    const char *w_name, const char *s_name, const char *g_name,
+    float *x_data, int k_dim, int batch,
+    int warmups, int iterations
+) {
+    if (!g_weights_loaded || warmups < 0 || iterations <= 0) return -1.0;
+
+    mlx_array w_packed = mlx_array_new();
+    mlx_array w_scales = mlx_array_new();
+    mlx_array global_scale = mlx_array_new();
+    if (mlx_map_string_to_array_get(&w_packed, g_weights, w_name) != 0 ||
+        mlx_map_string_to_array_get(&w_scales, g_weights, s_name) != 0 ||
+        mlx_map_string_to_array_get(&global_scale, g_weights, g_name) != 0) {
+        fprintf(stderr, "mlxb: benchmark tensor set not found: %s\n", w_name);
+        mlx_array_free(w_packed);
+        mlx_array_free(w_scales);
+        mlx_array_free(global_scale);
+        return -1.0;
+    }
+
+    int x_shape[2] = { batch, k_dim };
+    mlx_array x = mlx_array_new_data(x_data, x_shape, 2, MLX_FLOAT32);
+    for (int i = 0; i < warmups; i++) {
+        mlx_array y = mlx_array_new();
+        if (mlxb_quantized_matmul_nvfp4_scaled_arrays(
+                &y, x, w_packed, w_scales, global_scale) != 0 ||
+            mlx_array_eval(y) != 0) {
+            fprintf(stderr, "mlxb: benchmark warmup failed: %s\n", mlxb_last_err());
+            mlx_array_free(y);
+            mlx_array_free(x);
+            mlx_array_free(w_packed);
+            mlx_array_free(w_scales);
+            mlx_array_free(global_scale);
+            return -1.0;
+        }
+        mlx_array_free(y);
+    }
+
+    double begin = mlxb_monotonic_seconds();
+    for (int i = 0; i < iterations; i++) {
+        mlx_array y = mlx_array_new();
+        if (mlxb_quantized_matmul_nvfp4_scaled_arrays(
+                &y, x, w_packed, w_scales, global_scale) != 0 ||
+            mlx_array_eval(y) != 0) {
+            fprintf(stderr, "mlxb: benchmark eval failed: %s\n", mlxb_last_err());
+            mlx_array_free(y);
+            mlx_array_free(x);
+            mlx_array_free(w_packed);
+            mlx_array_free(w_scales);
+            mlx_array_free(global_scale);
+            return -1.0;
+        }
+        mlx_array_free(y);
+    }
+    double elapsed = mlxb_monotonic_seconds() - begin;
+
+    mlx_array_free(x);
+    mlx_array_free(w_packed);
+    mlx_array_free(w_scales);
+    mlx_array_free(global_scale);
+    return elapsed * 1e6 / (double)iterations;
+}
+
 int mlxb_tensor_count(void) {
     if (!g_weights_loaded) return -1;
     int n = 0;
@@ -186,8 +344,8 @@ WValue w_mlxb_quantized_matmul_nvfp4(
     char w_name_buf[256], s_name_buf[256];
     const char *w_name = wv_to_cstr(w_name_wv, w_name_buf, sizeof(w_name_buf));
     const char *s_name = wv_to_cstr(s_name_wv, s_name_buf, sizeof(s_name_buf));
-    WArray *x_arr   = (WArray *)w_as_ptr(x_wv);
-    WArray *out_arr = (WArray *)w_as_ptr(out_wv);
+    WArray *x_arr   = w_as_array(x_wv);
+    WArray *out_arr = w_as_array(out_wv);
     // Tungsten ccall passes ints as boxed WValues — unbox with w_as_int.
     int k_dim  = (int)w_as_int(k_dim_wv);
     int n_rows = (int)w_as_int(n_rows_wv);
@@ -199,6 +357,48 @@ WValue w_mlxb_quantized_matmul_nvfp4(
     float *out_data = (float *)out_arr->slots + out_arr->start;
     int rc = mlxb_quantized_matmul_nvfp4(w_name, s_name, x_data, k_dim, out_data, n_rows, batch);
     return rc ? w_int(1) : w_int(0);
+}
+
+WValue w_mlxb_quantized_matmul_nvfp4_scaled(
+    WValue w_name_wv, WValue s_name_wv, WValue g_name_wv,
+    WValue x_wv, WValue k_dim_wv,
+    WValue out_wv, WValue n_rows_wv,
+    WValue batch_wv
+) {
+    char w_name_buf[256], s_name_buf[256], g_name_buf[256];
+    const char *w_name = wv_to_cstr(w_name_wv, w_name_buf, sizeof(w_name_buf));
+    const char *s_name = wv_to_cstr(s_name_wv, s_name_buf, sizeof(s_name_buf));
+    const char *g_name = wv_to_cstr(g_name_wv, g_name_buf, sizeof(g_name_buf));
+    WArray *x_arr   = w_as_array(x_wv);
+    WArray *out_arr = w_as_array(out_wv);
+    int k_dim  = (int)w_as_int(k_dim_wv);
+    int n_rows = (int)w_as_int(n_rows_wv);
+    int batch  = (int)w_as_int(batch_wv);
+    int64_t total_out = (int64_t)batch * (int64_t)n_rows;
+    if (out_arr->size < total_out) out_arr->size = total_out;
+    float *x_data   = (float *)x_arr->slots   + x_arr->start;
+    float *out_data = (float *)out_arr->slots + out_arr->start;
+    int rc = mlxb_quantized_matmul_nvfp4_scaled(
+        w_name, s_name, g_name, x_data, k_dim, out_data, n_rows, batch);
+    return rc ? w_int(1) : w_int(0);
+}
+
+WValue w_mlxb_bench_quantized_matmul_nvfp4_scaled(
+    WValue w_name_wv, WValue s_name_wv, WValue g_name_wv,
+    WValue x_wv, WValue k_dim_wv, WValue batch_wv,
+    WValue warmups_wv, WValue iterations_wv
+) {
+    char w_name_buf[256], s_name_buf[256], g_name_buf[256];
+    const char *w_name = wv_to_cstr(w_name_wv, w_name_buf, sizeof(w_name_buf));
+    const char *s_name = wv_to_cstr(s_name_wv, s_name_buf, sizeof(s_name_buf));
+    const char *g_name = wv_to_cstr(g_name_wv, g_name_buf, sizeof(g_name_buf));
+    WArray *x_arr = w_as_array(x_wv);
+    float *x_data = (float *)x_arr->slots + x_arr->start;
+    double us = mlxb_bench_quantized_matmul_nvfp4_scaled(
+        w_name, s_name, g_name, x_data,
+        (int)w_as_int(k_dim_wv), (int)w_as_int(batch_wv),
+        (int)w_as_int(warmups_wv), (int)w_as_int(iterations_wv));
+    return w_float(us);
 }
 
 WValue w_mlxb_load_safetensors(WValue path_wv) {
@@ -232,9 +432,9 @@ WValue w_mlx_sgemm_nn(
     int N = (int)w_as_int(n_wv);
     int K = (int)w_as_int(k_wv);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
-    WArray *c_arr = (WArray *)w_as_ptr(c_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
+    WArray *c_arr = w_as_array(c_wv);
 
     float *a_data = (float *)a_arr->slots + a_arr->start;
     float *b_data = (float *)b_arr->slots + b_arr->start;
@@ -303,8 +503,8 @@ WValue w_mlx_sgemm_batch(
     int K = (int)w_as_int(k_wv);
     int K_ITERS = (int)w_as_int(iters_wv);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
 
     float *a_data = (float *)a_arr->slots + a_arr->start;
     float *b_data = (float *)b_arr->slots + b_arr->start;
@@ -368,9 +568,9 @@ WValue w_mlx_dgemm_nn(
     int N = (int)w_as_int(n_wv);
     int K = (int)w_as_int(k_wv);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
-    WArray *c_arr = (WArray *)w_as_ptr(c_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
+    WArray *c_arr = w_as_array(c_wv);
 
     double *a_data = (double *)a_arr->slots + a_arr->start;
     double *b_data = (double *)b_arr->slots + b_arr->start;
@@ -418,9 +618,9 @@ WValue w_mlx_hgemm_nn(
     int N = (int)w_as_int(n_wv);
     int K = (int)w_as_int(k_wv);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
-    WArray *c_arr = (WArray *)w_as_ptr(c_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
+    WArray *c_arr = w_as_array(c_wv);
 
     /* f16 = 2 bytes/elem; ptrs are (uint16_t *) views into the slot data. */
     void *a_data = (void *)((uint16_t *)a_arr->slots + a_arr->start);
@@ -470,8 +670,8 @@ static inline uint16_t f32_to_bf16(float f) {
 }
 
 WValue w_f32_to_bf16_array(WValue src_wv, WValue dst_wv, WValue len_wv) {
-    WArray *src_arr = (WArray *)w_as_ptr(src_wv);
-    WArray *dst_arr = (WArray *)w_as_ptr(dst_wv);
+    WArray *src_arr = w_as_array(src_wv);
+    WArray *dst_arr = w_as_array(dst_wv);
     int64_t len = w_as_int(len_wv);
 
     if (dst_arr->size < len) dst_arr->size = len;
@@ -522,8 +722,8 @@ static inline uint16_t mlx_f32_to_f16(float f) {
 }
 
 WValue w_f32_to_f16_array(WValue src_wv, WValue dst_wv, WValue len_wv) {
-    WArray *src_arr = (WArray *)w_as_ptr(src_wv);
-    WArray *dst_arr = (WArray *)w_as_ptr(dst_wv);
+    WArray *src_arr = w_as_array(src_wv);
+    WArray *dst_arr = w_as_array(dst_wv);
     int64_t len = w_as_int(len_wv);
 
     if (dst_arr->size < len) dst_arr->size = len;
@@ -549,9 +749,9 @@ WValue w_mlx_bgemm_nn(
     int N = (int)w_as_int(n_wv);
     int K = (int)w_as_int(k_wv);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
-    WArray *c_arr = (WArray *)w_as_ptr(c_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
+    WArray *c_arr = w_as_array(c_wv);
 
     void *a_data = (void *)((uint16_t *)a_arr->slots + a_arr->start);
     void *b_data = (void *)((uint16_t *)b_arr->slots + b_arr->start);
@@ -598,8 +798,8 @@ WValue w_mlx_sgemm_nn_no_readback(
     int N = (int)w_as_int(n_wv);
     int K = (int)w_as_int(k_wv);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
 
     float *a_data = (float *)a_arr->slots + a_arr->start;
     float *b_data = (float *)b_arr->slots + b_arr->start;
@@ -626,14 +826,14 @@ WValue w_mlx_sgemm_nn_no_readback(
 #include "mlx/c/random.h"
 
 static float *mlx_f32_slots(WValue wv, int64_t *len_out) {
-    WArray *a = (WArray *)w_as_ptr(wv);
+    WArray *a = w_as_array(wv);
     *len_out = (int64_t)a->size;
     if (a->size == 0 && a->cap > 0) *len_out = a->cap; /* f32_array often size=0 */
     return (float *)a->slots + a->start;
 }
 
 static void mlx_bump_size(WValue wv, int64_t n) {
-    WArray *a = (WArray *)w_as_ptr(wv);
+    WArray *a = w_as_array(wv);
     if (a->size < n) a->size = (int32_t)n;
 }
 

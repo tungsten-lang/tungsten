@@ -67,6 +67,13 @@
 -> metal_buffer_for(device, arr)
   ccall("w_array_as_metal_buffer", device, arr)
 
+# Zero-copy Metal view over a byte range in a read-only mmap. Metal requires
+# the wrapped VM region to start and end on page boundaries, while model tensor
+# payloads generally do not. The runtime rounds the wrapped region outward and
+# carries the leading byte count as the Metal binding offset.
+-> metal_buffer_for_mmap(device, mmap, byte_offset, byte_length)
+  ccall("w_metal_buffer_for_mmap", device, mmap, byte_offset, byte_length)
+
 # Page-aligned typed-array allocator (#68). Returns a
 # fixed-size (size = cap = N) typed array whose slots are mmap-backed
 # at a page boundary, enabling the no-copy MTLBuffer wrap to actually

@@ -1479,6 +1479,7 @@ typedef struct WMetalBuffer {
     uint8_t type;    /* W_TYPE_METAL_BUFFER */
     void *handle;    /* id<MTLBuffer> */
     int64_t size;    /* byte length, cached for bounds checks (renamed from length) */
+    int64_t offset;  /* byte offset bound within handle; zero for owned buffers */
 } WMetalBuffer;
 
 typedef struct WMetalQueue {
@@ -1502,6 +1503,9 @@ WValue w_metal_buffer_new(WValue device, WValue byte_length);
 WValue w_metal_buffer_length(WValue buffer);
 /* (#12) zero-copy WArray → MTLBuffer wrap on unified memory. */
 WValue w_array_as_metal_buffer(WValue device, WValue arr);
+/* Zero-copy read-only mmap region -> MTLBuffer view with a binding offset. */
+WValue w_metal_buffer_for_mmap(WValue device, WValue mmap, WValue byte_offset,
+                               WValue byte_length);
 /* (#68) page-aligned typed-array allocator. Returns a
  * fixed-size (size=cap=N) WArray whose slots are mmap-allocated at a
  * page boundary, enabling the noCopy MTLBuffer path. ccall-callable:

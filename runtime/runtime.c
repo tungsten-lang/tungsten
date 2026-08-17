@@ -65601,6 +65601,12 @@ W_BRIDGE_STUB WValue w_metal_buffer_length(WValue buffer) {
     w_raise(w_string("Metal: not available on this platform"));
     return W_NIL;
 }
+W_BRIDGE_STUB WValue w_metal_buffer_for_mmap(WValue device, WValue mmap,
+                                              WValue byte_offset, WValue byte_length) {
+    (void)device; (void)mmap; (void)byte_offset; (void)byte_length;
+    w_raise(w_string("Metal: not available on this platform"));
+    return W_NIL;
+}
 W_BRIDGE_STUB WValue w_metal_buffer_write_f32(WValue buffer, WValue index, WValue value) {
     (void)buffer; (void)index; (void)value;
     w_raise(w_string("Metal: not available on this platform"));

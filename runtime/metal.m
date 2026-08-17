@@ -71,6 +71,15 @@ static WMetalBuffer *as_metal_buffer(WValue v) {
     return b;
 }
 
+static NSUInteger metal_buffer_binding_offset(WValue v) {
+    WMetalBuffer *b = as_metal_buffer(v);
+    return b ? (NSUInteger)b->offset : 0;
+}
+
+static void *metal_buffer_contents(WMetalBuffer *b) {
+    return (uint8_t *)[(id<MTLBuffer>)b->handle contents] + b->offset;
+}
+
 static WMetalQueue *as_metal_queue(WValue v) {
     if (!w_is_obj(v) || w_subtag(v) != W_SUBTAG_GENERIC) return NULL;
     WMetalQueue *q = (WMetalQueue *)w_as_ptr(v);
@@ -173,7 +182,7 @@ static id<MTLBuffer> metal_buffer_or_wrap_array(WValue v, id<MTLDevice> dev) {
         return scalar_autobox_lookup_or_make(/*kind=float*/ 2, raw, dev);
     }
     if (!w_is_array(v)) return nil;
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     int e_int = (int)a->ebits;
     int64_t bits_per_elt;
     if (!metal_array_storage_bits(e_int, &bits_per_elt)) {
@@ -374,7 +383,7 @@ WValue w_metal_pipeline_for_with_int_constants(WValue library_v, WValue name_v, 
     if (!l) w_raise(w_string("Metal.pipeline_for_with_int_constants: bad library"));
     if (!w_is_string(name_v)) w_raise(w_string("Metal.pipeline_for_with_int_constants: name must be string"));
     if (!w_is_array(values_v)) w_raise(w_string("Metal.pipeline_for_with_int_constants: values must be array"));
-    WArray *vals = (WArray *)w_as_ptr(values_v);
+    WArray *vals = w_as_array(values_v);
     id<MTLLibrary> lib = (id<MTLLibrary>)l->handle;
     NSString *name = [NSString stringWithUTF8String:metal_string_data(name_v)];
 
@@ -469,7 +478,7 @@ WValue w_array_as_metal_buffer(WValue device_v, WValue arr_v) {
     int64_t  logical_start;
     uint8_t *slots_ptr;
     if (w_is_array(arr_v)) {
-        WArray *a = (WArray *)w_as_ptr(arr_v);
+        WArray *a = w_as_array(arr_v);
         e             = a->ebits;
         logical_size  = (int64_t)a->size;
         logical_start = (int64_t)a->start;
@@ -535,6 +544,50 @@ WValue w_array_as_metal_buffer(WValue device_v, WValue arr_v) {
     return w_box_ptr(w, W_SUBTAG_GENERIC);
 }
 
+/* Wrap an exact byte range of a read-only mmap without copying it. Metal's
+ * bytesNoCopy API requires a page-aligned VM region, whereas safetensors and
+ * GGUF tensor payloads are usually only dtype-aligned. Round the backing
+ * region out to VM pages and retain the leading byte count on WMetalBuffer;
+ * dispatch binds that offset so kernels still see byte zero of the tensor.
+ * The mmap owner must outlive the returned buffer. */
+WValue w_metal_buffer_for_mmap(WValue device_v, WValue mmap_v,
+                               WValue byte_offset_v, WValue byte_length_v) {
+    WMetalDevice *d = as_metal_device(device_v);
+    if (!d) w_raise(w_string("Metal.buffer_for_mmap: first arg must be a Metal device"));
+    if (!w_is_mmap(mmap_v)) w_raise(w_string("Metal.buffer_for_mmap: second arg must be an Mmap"));
+    WMmap *m = (WMmap *)w_as_ptr(mmap_v);
+    if (m->closed) w_raise(w_string("Metal.buffer_for_mmap: mmap is closed"));
+    int64_t byte_offset = w_to_i64(byte_offset_v);
+    int64_t byte_length = w_to_i64(byte_length_v);
+    if (byte_offset < 0 || byte_length <= 0 || byte_offset > m->size - byte_length) {
+        w_raise(w_string("Metal.buffer_for_mmap: byte range is out of bounds"));
+    }
+
+    int64_t page = (int64_t)getpagesize();
+    int64_t map_offset = byte_offset & ~(page - 1);
+    int64_t leading = byte_offset - map_offset;
+    int64_t needed = leading + byte_length;
+    int64_t map_length = (needed + page - 1) & ~(page - 1);
+    int64_t vm_length = (m->size + page - 1) & ~(page - 1);
+    if (map_offset > vm_length - map_length) {
+        w_raise(w_string("Metal.buffer_for_mmap: aligned VM range is out of bounds"));
+    }
+
+    void *base = (uint8_t *)m->data + map_offset;
+    id<MTLDevice> dev = (id<MTLDevice>)d->handle;
+    id<MTLBuffer> buf = [dev newBufferWithBytesNoCopy:base
+                                               length:(NSUInteger)map_length
+                                              options:MTLResourceStorageModeShared
+                                          deallocator:nil];
+    if (!buf) w_raise(w_string("Metal.buffer_for_mmap: no-copy MTLBuffer creation failed"));
+    WMetalBuffer *w = (WMetalBuffer *)calloc(1, sizeof(WMetalBuffer));
+    w->type = W_TYPE_METAL_BUFFER;
+    w->handle = (void *)buf;
+    w->size = byte_length;
+    w->offset = leading;
+    return w_box_ptr(w, W_SUBTAG_GENERIC);
+}
+
 /* Bulk copy from an mmap region into a Metal buffer.
  *
  *   metal_buffer_write_from_mmap(buf, dst_byte_offset, mmap, src_byte_offset, byte_length)
@@ -558,8 +611,7 @@ WValue w_metal_buffer_write_from_mmap(WValue buffer_v,
     if (dst_off < 0 || src_off < 0 || len < 0) w_raise(w_string("Metal.buffer_write_from_mmap: negative arg"));
     if (dst_off + len > b->size) w_raise(w_string("Metal.buffer_write_from_mmap: dst overrun"));
     if (src_off + len > m->size) w_raise(w_string("Metal.buffer_write_from_mmap: src overrun"));
-    id<MTLBuffer> buf = (id<MTLBuffer>)b->handle;
-    memcpy((char *)[buf contents] + dst_off, m->data + src_off, (size_t)len);
+    memcpy((char *)metal_buffer_contents(b) + dst_off, m->data + src_off, (size_t)len);
     /* Hint the OS to drop the cached mmap source pages — without this,
      * large repeated write_from_mmap calls (e.g. preloading a 17 GB MoE
      * weight set into MTLBuffers) double-count: pages stay resident in
@@ -607,7 +659,7 @@ WValue w_q8_dequant_row(WValue dst_buf_v,
     if (src_off + n * 34 > m->size) w_raise(w_string("q8_dequant_row: src overrun"));
     if ((dst_off + n * 32) * (int64_t)sizeof(float) > db->size) w_raise(w_string("q8_dequant_row: dst overrun"));
     const uint8_t *src = m->data + src_off;
-    float *dst = (float *)[(id<MTLBuffer>)db->handle contents] + dst_off;
+    float *dst = (float *)metal_buffer_contents(db) + dst_off;
     for (int64_t b = 0; b < n; b++) {
         const uint8_t *blk = src + b * 34;
         /* f16 scale at bytes 0..1, little-endian. Cast through __fp16. */
@@ -653,8 +705,8 @@ WValue w_q8_split_blocks(WValue scales_buf_v,
     if (n * 2  > sb->size) w_raise(w_string("q8_split_blocks: scales buffer too small"));
     if (n * 32 > qb->size) w_raise(w_string("q8_split_blocks: quants buffer too small"));
     const uint8_t *src = m->data + src_off;
-    uint8_t *scales = (uint8_t *)[(id<MTLBuffer>)sb->handle contents];
-    uint8_t *quants = (uint8_t *)[(id<MTLBuffer>)qb->handle contents];
+    uint8_t *scales = (uint8_t *)metal_buffer_contents(sb);
+    uint8_t *quants = (uint8_t *)metal_buffer_contents(qb);
     for (int64_t i = 0; i < n; i++) {
         /* scale: 2 bytes */
         scales[i * 2 + 0] = src[i * 34 + 0];
@@ -674,7 +726,7 @@ WValue w_metal_buffer_write_f32(WValue buffer_v, WValue index_v, WValue value_v)
         w_raise(w_string("Metal.buffer.write_f32: index out of bounds"));
     }
     float v = (float)metal_to_double(value_v);
-    memcpy((char *)[(id<MTLBuffer>)b->handle contents] + off, &v, sizeof(float));
+    memcpy((char *)metal_buffer_contents(b) + off, &v, sizeof(float));
     return W_NIL;
 }
 
@@ -687,7 +739,7 @@ WValue w_metal_buffer_write_f16(WValue buffer_v, WValue index_v, WValue value_v)
         w_raise(w_string("Metal.buffer.write_f16: index out of bounds"));
     }
     __fp16 v = (__fp16)metal_to_double(value_v);
-    memcpy((char *)[(id<MTLBuffer>)b->handle contents] + off, &v, 2);
+    memcpy((char *)metal_buffer_contents(b) + off, &v, 2);
     return W_NIL;
 }
 
@@ -700,7 +752,7 @@ WValue w_metal_buffer_read_f16(WValue buffer_v, WValue index_v) {
         w_raise(w_string("Metal.buffer.read_f16: index out of bounds"));
     }
     __fp16 v;
-    memcpy(&v, (char *)[(id<MTLBuffer>)b->handle contents] + off, 2);
+    memcpy(&v, (char *)metal_buffer_contents(b) + off, 2);
     return w_float((double)(float)v);
 }
 
@@ -713,7 +765,7 @@ WValue w_metal_buffer_read_f32(WValue buffer_v, WValue index_v) {
         w_raise(w_string("Metal.buffer.read_f32: index out of bounds"));
     }
     float v;
-    memcpy(&v, (char *)[(id<MTLBuffer>)b->handle contents] + off, sizeof(float));
+    memcpy(&v, (char *)metal_buffer_contents(b) + off, sizeof(float));
     return w_float((double)v);
 }
 
@@ -726,7 +778,7 @@ WValue w_metal_buffer_write_i32(WValue buffer_v, WValue index_v, WValue value_v)
         w_raise(w_string("Metal.buffer.write_i32: index out of bounds"));
     }
     int32_t v = (int32_t)w_to_i64(value_v);
-    memcpy((char *)[(id<MTLBuffer>)b->handle contents] + off, &v, sizeof(int32_t));
+    memcpy((char *)metal_buffer_contents(b) + off, &v, sizeof(int32_t));
     return W_NIL;
 }
 
@@ -739,7 +791,7 @@ WValue w_metal_buffer_read_i32(WValue buffer_v, WValue index_v) {
         w_raise(w_string("Metal.buffer.read_i32: index out of bounds"));
     }
     int32_t v;
-    memcpy(&v, (char *)[(id<MTLBuffer>)b->handle contents] + off, sizeof(int32_t));
+    memcpy(&v, (char *)metal_buffer_contents(b) + off, sizeof(int32_t));
     return w_int((int64_t)v);
 }
 
@@ -752,7 +804,7 @@ WValue w_metal_buffer_write_i64(WValue buffer_v, WValue index_v, WValue value_v)
         w_raise(w_string("Metal.buffer.write_i64: index out of bounds"));
     }
     int64_t v = w_to_i64(value_v);
-    memcpy((char *)[(id<MTLBuffer>)b->handle contents] + off, &v, sizeof(int64_t));
+    memcpy((char *)metal_buffer_contents(b) + off, &v, sizeof(int64_t));
     return W_NIL;
 }
 
@@ -765,7 +817,7 @@ WValue w_metal_buffer_read_i64(WValue buffer_v, WValue index_v) {
         w_raise(w_string("Metal.buffer.read_i64: index out of bounds"));
     }
     int64_t v;
-    memcpy(&v, (char *)[(id<MTLBuffer>)b->handle contents] + off, sizeof(int64_t));
+    memcpy(&v, (char *)metal_buffer_contents(b) + off, sizeof(int64_t));
     return w_int(v);
 }
 
@@ -787,7 +839,7 @@ WValue w_metal_buffer_write_bf16(WValue buffer_v, WValue index_v, WValue value_v
     /* round-to-nearest-even on the discarded low 16 bits */
     uint32_t rounding_bias = 0x7FFF + ((bits >> 16) & 1u);
     uint16_t bf = (uint16_t)((bits + rounding_bias) >> 16);
-    memcpy((char *)[(id<MTLBuffer>)b->handle contents] + off, &bf, 2);
+    memcpy((char *)metal_buffer_contents(b) + off, &bf, 2);
     return W_NIL;
 }
 
@@ -800,7 +852,7 @@ WValue w_metal_buffer_read_bf16(WValue buffer_v, WValue index_v) {
         w_raise(w_string("Metal.buffer.read_bf16: index out of bounds"));
     }
     uint16_t bf;
-    memcpy(&bf, (char *)[(id<MTLBuffer>)b->handle contents] + off, 2);
+    memcpy(&bf, (char *)metal_buffer_contents(b) + off, 2);
     uint32_t bits = ((uint32_t)bf) << 16;
     float f;
     memcpy(&f, &bits, sizeof(f));
@@ -829,7 +881,7 @@ WValue w_metal_buffer_view(WValue buffer_v, WValue ebits_v, WValue length_v) {
     if (length > (b->size * 8) / elem_bits) {
         w_raise(w_string("metal_buffer_view: length exceeds buffer size"));
     }
-    uint8_t *base = (uint8_t *)[(id<MTLBuffer>)b->handle contents];
+    uint8_t *base = (uint8_t *)metal_buffer_contents(b);
     return w_array_view_raw(base, ebits, length);
 }
 
@@ -967,7 +1019,7 @@ WValue w_metal_batch_barrier_resources(WValue queue_v, WValue bufs_v) {
     if (!q) w_raise(w_string("Metal.batch_barrier_resources: bad queue"));
     if (!q->batch_cmd) w_raise(w_string("Metal.batch_barrier_resources: no batch open"));
     if (!w_is_array(bufs_v)) w_raise(w_string("Metal.batch_barrier_resources: bufs must be array"));
-    WArray *bufs = (WArray *)w_as_ptr(bufs_v);
+    WArray *bufs = w_as_array(bufs_v);
     if (bufs->size == 0) return W_NIL;
 
     id<MTLResource> res_arr[bufs->size];
@@ -1144,7 +1196,7 @@ WValue w_metal_dispatch_n(WValue queue_v,
     if (!w_is_array(bufs_v)) {
         w_raise(w_string("Metal.dispatch_n: buffers must be an array"));
     }
-    WArray *bufs = (WArray *)w_as_ptr(bufs_v);
+    WArray *bufs = w_as_array(bufs_v);
     if (bufs->size <= 0) {
         w_raise(w_string("Metal.dispatch_n: buffer array is empty"));
     }
@@ -1172,7 +1224,7 @@ WValue w_metal_dispatch_n(WValue queue_v,
                 snprintf(msg, sizeof(msg), "Metal.dispatch_n: arg %d is not a Metal buffer or GPU-eligible typed array", i);
                 w_raise(w_string(msg));
             }
-            [enc setBuffer:mb offset:0 atIndex:(NSUInteger)i];
+            [enc setBuffer:mb offset:metal_buffer_binding_offset(bv) atIndex:(NSUInteger)i];
         }
         MTLSize gridSize = MTLSizeMake((NSUInteger)threads, 1, 1);
         NSUInteger tgw = [ps maxTotalThreadsPerThreadgroup];
@@ -1199,7 +1251,7 @@ WValue w_metal_dispatch_n(WValue queue_v,
                 snprintf(msg, sizeof(msg), "Metal.dispatch_n: arg %d is not a Metal buffer or GPU-eligible typed array", i);
                 w_raise(w_string(msg));
             }
-            [enc setBuffer:mb offset:0 atIndex:(NSUInteger)i];
+            [enc setBuffer:mb offset:metal_buffer_binding_offset(bv) atIndex:(NSUInteger)i];
         }
         MTLSize gridSize = MTLSizeMake((NSUInteger)threads, 1, 1);
         NSUInteger tgw = [ps maxTotalThreadsPerThreadgroup];
@@ -1242,7 +1294,7 @@ WValue w_metal_dispatch_groups(WValue queue_v,
     if (!w_is_array(bufs_v)) {
         w_raise(w_string("Metal.dispatch_groups: buffers must be an array"));
     }
-    WArray *bufs = (WArray *)w_as_ptr(bufs_v);
+    WArray *bufs = w_as_array(bufs_v);
     if (bufs->size <= 0) {
         w_raise(w_string("Metal.dispatch_groups: buffer array is empty"));
     }
@@ -1269,7 +1321,7 @@ WValue w_metal_dispatch_groups(WValue queue_v,
                 snprintf(msg, sizeof(msg), "Metal.dispatch_groups: arg %d is not a Metal buffer or GPU-eligible typed array", i);
                 w_raise(w_string(msg));
             }
-            [enc setBuffer:mb offset:0 atIndex:(NSUInteger)i];
+            [enc setBuffer:mb offset:metal_buffer_binding_offset(bv) atIndex:(NSUInteger)i];
         }
         MTLSize gridSize = MTLSizeMake((NSUInteger)(n_groups * threads_per_group), 1, 1);
         MTLSize threadgroupSize = MTLSizeMake((NSUInteger)threads_per_group, 1, 1);
@@ -1293,7 +1345,7 @@ WValue w_metal_dispatch_groups(WValue queue_v,
                 snprintf(msg, sizeof(msg), "Metal.dispatch_groups: arg %d is not a Metal buffer or GPU-eligible typed array", i);
                 w_raise(w_string(msg));
             }
-            [enc setBuffer:mb offset:0 atIndex:(NSUInteger)i];
+            [enc setBuffer:mb offset:metal_buffer_binding_offset(bv) atIndex:(NSUInteger)i];
         }
         MTLSize gridSize = MTLSizeMake((NSUInteger)(n_groups * threads_per_group), 1, 1);
         MTLSize threadgroupSize = MTLSizeMake((NSUInteger)threads_per_group, 1, 1);
@@ -1330,7 +1382,7 @@ WValue w_metal_dispatch_groups_3d(WValue queue_v,
     WMetalPipeline *p = as_metal_pipeline(pipeline_v);
     if (!q || !p) w_raise(w_string("Metal.dispatch_groups_3d: bad queue or pipeline"));
     if (!w_is_array(bufs_v)) w_raise(w_string("Metal.dispatch_groups_3d: buffers must be an array"));
-    WArray *bufs = (WArray *)w_as_ptr(bufs_v);
+    WArray *bufs = w_as_array(bufs_v);
     if (bufs->size <= 0) w_raise(w_string("Metal.dispatch_groups_3d: buffer array is empty"));
     int64_t n_tg_x = w_to_i64(n_tg_x_v);
     int64_t n_tg_y = w_to_i64(n_tg_y_v);
@@ -1360,7 +1412,7 @@ WValue w_metal_dispatch_groups_3d(WValue queue_v,
                 snprintf(msg, sizeof(msg), "Metal.dispatch_groups_3d: arg %d is not a Metal buffer or GPU-eligible typed array", i);
                 w_raise(w_string(msg));
             }
-            [enc setBuffer:mb offset:0 atIndex:(NSUInteger)i];
+            [enc setBuffer:mb offset:metal_buffer_binding_offset(bv) atIndex:(NSUInteger)i];
         }
         [enc dispatchThreadgroups:tgGrid threadsPerThreadgroup:tpg];
         return W_NIL;
@@ -1382,7 +1434,7 @@ WValue w_metal_dispatch_groups_3d(WValue queue_v,
                 snprintf(msg, sizeof(msg), "Metal.dispatch_groups_3d: arg %d is not a Metal buffer or GPU-eligible typed array", i);
                 w_raise(w_string(msg));
             }
-            [enc setBuffer:mb offset:0 atIndex:(NSUInteger)i];
+            [enc setBuffer:mb offset:metal_buffer_binding_offset(bv) atIndex:(NSUInteger)i];
         }
         [enc dispatchThreadgroups:tgGrid threadsPerThreadgroup:tpg];
         [enc endEncoding];
@@ -1431,9 +1483,9 @@ WValue w_metal_dispatch1(WValue queue_v,
         id<MTLCommandBuffer> cmd = [queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
         [enc setComputePipelineState:ps];
-        [enc setBuffer:mb0 offset:0 atIndex:0];
-        [enc setBuffer:mb1 offset:0 atIndex:1];
-        [enc setBuffer:mb2 offset:0 atIndex:2];
+        [enc setBuffer:mb0 offset:metal_buffer_binding_offset(buf0_v) atIndex:0];
+        [enc setBuffer:mb1 offset:metal_buffer_binding_offset(buf1_v) atIndex:1];
+        [enc setBuffer:mb2 offset:metal_buffer_binding_offset(buf2_v) atIndex:2];
         MTLSize gridSize = MTLSizeMake((NSUInteger)threads, 1, 1);
         NSUInteger tgw = [ps maxTotalThreadsPerThreadgroup];
         if (tgw > (NSUInteger)threads) tgw = (NSUInteger)threads;
@@ -1471,7 +1523,7 @@ WValue w_metal_sync_array_from_buffer(WValue arr_v, WValue buf_v) {
     if (!b) {
         w_raise(w_string("Metal.sync: second arg must be a Metal buffer"));
     }
-    WArray *a = (WArray *)w_as_ptr(arr_v);
+    WArray *a = w_as_array(arr_v);
     int64_t bits_per_elt;
     if (!metal_array_storage_bits((int)a->ebits, &bits_per_elt)) {
         w_raise(w_string("Metal.sync: first arg must be a fixed-width typed array"));
@@ -1480,7 +1532,7 @@ WValue w_metal_sync_array_from_buffer(WValue arr_v, WValue buf_v) {
     int64_t byte_length = (a->size * bits_per_elt) / 8;
     if (byte_length > b->size) byte_length = b->size;
     void *arr_base = (uint8_t *)a->slots + (a->start * bits_per_elt) / 8;
-    void *buf_base = [(id<MTLBuffer>)b->handle contents];
+    void *buf_base = metal_buffer_contents(b);
     /* Aligned (zero-copy) case: the buffer's contents pointer IS the
      * array's slots pointer — no copy needed. */
     if (arr_base == buf_base) return W_NIL;
@@ -1570,7 +1622,7 @@ WValue w_metal_compute(WValue source_v, WValue name_v,
             [ps release];  /* dictionary retained it; balance */
         }
 
-        WArray *bufs = (WArray *)w_as_ptr(bufs_v);
+        WArray *bufs = w_as_array(bufs_v);
         id<MTLCommandBuffer> cmd = [g_metal_default_queue commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
         [enc setComputePipelineState:ps];
@@ -1583,7 +1635,7 @@ WValue w_metal_compute(WValue source_v, WValue name_v,
                 snprintf(msg, sizeof(msg), "Metal.compute: bufs[%d] is not a Metal buffer or GPU-eligible typed array", i);
                 w_raise(w_string(msg));
             }
-            [enc setBuffer:mb offset:0 atIndex:(NSUInteger)i];
+            [enc setBuffer:mb offset:metal_buffer_binding_offset(bv) atIndex:(NSUInteger)i];
         }
         MTLSize gridSize = MTLSizeMake((NSUInteger)threads, 1, 1);
         NSUInteger tgw = [ps maxTotalThreadsPerThreadgroup];
@@ -1770,7 +1822,7 @@ WValue w_metal_tensor_2d(WValue buffer_v, WValue dtype_v,
 
         id<MTLBuffer> mb = (id<MTLBuffer>)b->handle;
         NSError *err = nil;
-        id<MTLTensor> tensor = [mb newTensorWithDescriptor:desc offset:(NSUInteger)byte_offset error:&err];
+        id<MTLTensor> tensor = [mb newTensorWithDescriptor:desc offset:(NSUInteger)(b->offset + byte_offset) error:&err];
         if (!tensor) {
             const char *msg = err ? [[err localizedDescription] UTF8String] : "newTensor failed";
             char buf[512];
@@ -1803,7 +1855,7 @@ WValue w_metal_tensor_nd(WValue buffer_v, WValue dtype_v,
          * arbitrary struct fields read as sh->size/sh->slots — a memory
          * disclosure/crash surface reachable through ccall. */
         if (!w_is_array(shape_v)) w_raise(w_string("metal_tensor_nd: shape must be an Array"));
-        WArray *sh = (WArray *)w_as_ptr(shape_v);
+        WArray *sh = w_as_array(shape_v);
         int64_t rank = (int64_t)sh->size;
         if (rank < 1 || rank > W_TENSOR_MAX_RANK) {
             w_raise(w_string("metal_tensor_nd: rank must be in [1, 16]"));
@@ -1815,7 +1867,7 @@ WValue w_metal_tensor_nd(WValue buffer_v, WValue dtype_v,
         /* Optional explicit strides (outer→inner). Empty/nil → packed default. */
         WArray *st = NULL;
         if (w_is_array(strides_v)) {
-            st = (WArray *)w_as_ptr(strides_v);
+            st = w_as_array(strides_v);
             if (st->size != 0 && (int64_t)st->size != rank) {
                 w_raise(w_string("metal_tensor_nd: strides rank != shape rank"));
             }
@@ -1854,7 +1906,7 @@ WValue w_metal_tensor_nd(WValue buffer_v, WValue dtype_v,
 
         id<MTLBuffer> mb = (id<MTLBuffer>)b->handle;
         NSError *err = nil;
-        id<MTLTensor> tensor = [mb newTensorWithDescriptor:desc offset:(NSUInteger)byte_offset error:&err];
+        id<MTLTensor> tensor = [mb newTensorWithDescriptor:desc offset:(NSUInteger)(b->offset + byte_offset) error:&err];
         if (!tensor) {
             const char *msg = err ? [[err localizedDescription] UTF8String] : "newTensor failed";
             char buf[512];
@@ -1948,7 +2000,7 @@ WValue w_metal4_argtable_set_buffer(WValue argtable_v, WValue index_v, WValue bu
         }
         id<MTL4ArgumentTable> tbl = (id<MTL4ArgumentTable>)t->handle;
         id<MTLBuffer> mb = (id<MTLBuffer>)b->handle;
-        [tbl setAddress:[mb gpuAddress] atIndex:(NSUInteger)idx];
+        [tbl setAddress:([mb gpuAddress] + (NSUInteger)b->offset) atIndex:(NSUInteger)idx];
         return W_NIL;
     } else {
         w_raise(w_string("metal4_argtable_set_buffer: requires macOS 26+"));
@@ -1970,7 +2022,7 @@ WValue w_metal4_argtable_set_buffer_offset(WValue argtable_v, WValue index_v,
         }
         id<MTL4ArgumentTable> tbl = (id<MTL4ArgumentTable>)t->handle;
         id<MTLBuffer> mb = (id<MTLBuffer>)b->handle;
-        [tbl setAddress:([mb gpuAddress] + (NSUInteger)offset) atIndex:(NSUInteger)idx];
+        [tbl setAddress:([mb gpuAddress] + (NSUInteger)b->offset + (NSUInteger)offset) atIndex:(NSUInteger)idx];
         return W_NIL;
     } else {
         w_raise(w_string("metal4_argtable_set_buffer_offset: requires macOS 26+"));
@@ -2033,7 +2085,7 @@ WValue w_metal4_dispatch_groups_3d(WValue queue_v, WValue allocator_v,
          * argument table must live in a residency set that's attached to
          * the queue at dispatch time. We build a transient residency set
          * around just this dispatch's resources. */
-        WArray *res_arr = (WArray *)w_as_ptr(resources_v);
+        WArray *res_arr = w_as_array(resources_v);
         MTLResidencySetDescriptor *rs_desc = [[[MTLResidencySetDescriptor alloc] init] autorelease];
         rs_desc.label = @"tungsten.mtl4.dispatch";
         rs_desc.initialCapacity = (NSUInteger)res_arr->size;
@@ -2320,7 +2372,7 @@ int64_t w_fused_gpu_run(int64_t site_id, WValue msl_v, int64_t blk_addr,
         int out_stable;
         for (int64_t k = 0; k <= n_arrs; k++) {
             WValue wv = (WValue)blk[k == n_arrs ? 0 : 1 + k];
-            WArray *a = (WArray *)w_as_ptr(wv);
+            WArray *a = w_as_array(wv);
             void *base = (uint8_t *)a->slots + (int64_t)a->start * 4;
             wv_k[k] = wv;
             base_k[k] = base;
@@ -2342,7 +2394,7 @@ int64_t w_fused_gpu_run(int64_t site_id, WValue msl_v, int64_t blk_addr,
                 arg_bufs[k] = (id<MTLBuffer>)s->wraps[k];
                 continue;
             }
-            WArray *a = (WArray *)w_as_ptr(wv_k[k]);
+            WArray *a = w_as_array(wv_k[k]);
             id<MTLBuffer> wrap = fused_wrap_nocopy(a, bytes);
             if (wrap) {
                 if (s->wraps[k]) [(id<MTLBuffer>)s->wraps[k] release];
@@ -2396,7 +2448,7 @@ int64_t w_fused_gpu_run(int64_t site_id, WValue msl_v, int64_t blk_addr,
         if ([cmd status] == MTLCommandBufferStatusError) return 0;
 
         if (copied_out) {
-            WArray *out = (WArray *)w_as_ptr((WValue)blk[0]);
+            WArray *out = w_as_array((WValue)blk[0]);
             float *dst = (float *)out->slots + out->start;
             memcpy(dst, [arg_bufs[n_arrs] contents], (size_t)bytes);
         }

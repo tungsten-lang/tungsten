@@ -77,8 +77,8 @@ use tungsten-llama/safetensors
     s = open_shard(shard_name)
     s.upload_bytes(real, dst_buf)
 
-  # Underlying mmap for the shard holding `name` — for callers that want
-  # mmap.view_at(...) → BigArray → metal_buffer_for zero-copy wraps.
+  # Underlying mmap for the shard holding `name` — callers can pass this plus
+  # the tensor byte range to metal_buffer_for_mmap for a no-copy Metal view.
   -> mmap_for(name)
     shard_name = @weight_map[resolve_name(name)]
     if shard_name == nil

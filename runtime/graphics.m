@@ -304,7 +304,7 @@ WValue w_gfx_present(WValue window_v, WValue buffer_v, WValue width_v, WValue he
         id<MTLCommandBuffer> cb = [queue commandBuffer];
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
         [blit copyFromBuffer:(id<MTLBuffer>)b->handle
-                sourceOffset:0
+                sourceOffset:(NSUInteger)b->offset
            sourceBytesPerRow:(NSUInteger)(w * 4)
          sourceBytesPerImage:(NSUInteger)need
                   sourceSize:MTLSizeMake(w, h, 1)

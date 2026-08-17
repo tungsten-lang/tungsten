@@ -74,6 +74,20 @@ use bin_reader
     metal_q8_split_blocks(scales, quants, @gguf.mmap, @file_offset, n_blocks)
     {scales: scales, quants: quants, n_blocks: n_blocks}
 
+  # Upload a Q4_K tensor without expanding it. Q4_K stores 256 logical
+  # weights in a 144-byte super-block (f16 d/dmin, twelve packed 6-bit
+  # scale/min values, and 128 bytes of 4-bit quants). The Metal matvec
+  # consumes this exact GGUF layout and dequantizes while accumulating, so
+  # retaining the packed representation saves bandwidth as well as memory.
+  # The buffer is a no-copy byte-offset view of the GGUF mmap; the parent GGUF
+  # must therefore outlive it. Returns {packed: <buf>, n_blocks: <int>}.
+  -> upload_q4_k(device)
+    if @type_name != "Q4_K"
+      raise "Tensor.upload_q4_k: " + @name + " is " + @type_name + ", not Q4_K"
+    n_blocks = element_count / 256
+    packed = metal_buffer_for_mmap(device, @gguf.mmap, @file_offset, @byte_length)
+    {packed: packed, n_blocks: n_blocks}
+
   # Upload an f32 tensor as a Metal buffer (one bulk memcpy).
   -> upload_f32(device)
     if @type_name != "F32"

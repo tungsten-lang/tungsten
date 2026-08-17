@@ -2963,6 +2963,18 @@ on macos && arm64
         ret i64 %size
     IR
 
+  # Literal AArch64 schedule emitted for runtime.c's distinct positive
+  # two-by-two-limb multiplication arm. Preserve all four products, the
+  # middle/upper carry order, four unconditional stores, and +3/+4 header
+  # choice exactly; this is the fidelity checkpoint, not a redesign.
+  fn __bigint_mul2_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %size = call i64 asm sideeffect "ldp x8, x9, [${3:x}]\0Aldp x10, x11, [${2:x}]\0Aumulh x12, x8, x10\0Amul x13, x8, x10\0Aumulh x14, x9, x10\0Amul x10, x9, x10\0Amul x15, x11, x8\0Aumulh x8, x11, x8\0Aumulh x16, x11, x9\0Amul x9, x11, x9\0Aadds x10, x10, x12\0Acset w11, hs\0Aadds x8, x8, x14\0Acset w12, hs\0Aadds x8, x8, x9\0Acinc x9, x12, hs\0Aadds x10, x10, x15\0Astp x13, x10, [${1:x}]\0Aadcs x8, x8, x11\0Aadc x9, x16, x9\0Astp x8, x9, [${1:x}, #16]\0Acmp x9, #0\0Amov ${0:x}, #3\0Acinc ${0:x}, ${0:x}, ne", "=r,r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %size
+    IR
+
   # Literal AArch64 schedule emitted for runtime.c's pointer-identical
   # positive three-limb square. Preserve all six products, doubled cross
   # terms, carry order, six unconditional stores, and +5/+6 header choice.
@@ -3753,6 +3765,18 @@ fn __bigint_sqr8_raw(a, b) (i64 i64) i64
   ap = (a & mask) + 16 ## i64
   size = __bigint_sqr8_exact(rp ## i64, ap ## i64) ## i64
   ccall_nobox("w_bigint_sqr8_finish_raw", result, size)
+
+# Exact distinct positive two-by-two-limb multiplication. The runtime gate
+# has already matched C's raw-positive-header shape and excluded identity.
+# Reproduce its capacity-4 allocation, fixed kernel, and +3/+4 publication.
+fn __bigint_mul2_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  size = __bigint_mul2_exact(rp ## i64, ap ## i64, bp ## i64) ## i64
+  ccall_nobox("w_bigint_mul2_finish_raw", result, size)
 
 # Exact positive two-limb-by-one-limb scalar-word arm. Preserve receiver
 # order at the operator seam, then orient only the raw magnitudes after the

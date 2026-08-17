@@ -11562,6 +11562,9 @@ static inline WValue bigint_mul_bigint_word(WValue big, int64_t word) {
 #ifndef BN_BIGINT_SQR8_SRC_DIRECT
 #define BN_BIGINT_SQR8_SRC_DIRECT 1
 #endif
+#ifndef BN_BIGINT_MUL2_SRC_DIRECT
+#define BN_BIGINT_MUL2_SRC_DIRECT 1
+#endif
 #ifndef BN_BIGINT_MUL1_2_SRC_DIRECT
 #define BN_BIGINT_MUL1_2_SRC_DIRECT 1
 #endif
@@ -11585,6 +11588,21 @@ static inline WValue bigint_mul_bigint_word(WValue big, int64_t word) {
 #endif
 #ifndef BN_BENCH_RUNTIME_MUL1_2_SRC_KNOB
 #define BN_BENCH_RUNTIME_MUL1_2_SRC_KNOB 0
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL2_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL2_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL2_SRC_KNOB
+static inline int bn_bench_runtime_mul2_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL2_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul2_src_enabled(void) { return 1; }
 #endif
 #if BN_BENCH_RUNTIME_MUL1_2_SRC_KNOB
 static inline int bn_bench_runtime_mul1_2_src_enabled(void) {
@@ -11705,6 +11723,8 @@ static inline __attribute__((always_inline))
 WValue bigint_sqr7_seam(WValue a, WValue b);
 static inline __attribute__((always_inline))
 WValue bigint_sqr8_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul2_seam(WValue a, WValue b);
 static inline __attribute__((always_inline))
 WValue bigint_mul1_2_seam(WValue a, WValue b);
 static inline __attribute__((always_inline))
@@ -11829,6 +11849,12 @@ WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
         WBigint *bb = w_as_bigint(b);
         int32_t na = ba->size;
         int32_t nb = bb->size;
+#if BN_BIGINT_MUL2_SRC_DIRECT
+        if (na == 2 && nb == 2 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul2_src_enabled())
+            return bigint_mul2_seam(a, b);
+#endif
 #if BN_BIGINT_MUL1_2_SRC_DIRECT
 #define BN_MUL_N1_POSITIVE_SRC2(NW) do {                                  \
     if ((NW) == 2 && __builtin_expect(route_mul1_1 != 0, 1))              \
@@ -11955,6 +11981,15 @@ WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
         int32_t n, bn;
         WBigint *ba = w_bigint_view(a, &n);
         WBigint *bb = w_bigint_view(b, &bn);
+#if BN_BIGINT_MUL2_SRC_DIRECT &&                                      \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 2 && bb->size == 2 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul2_src_enabled())
+            return bigint_mul2_seam(a, b);
+#endif
         if (n == 1 && bn == 1)
             return bigint_mul_positive_11(ba, bb);
 #if BN_MUL_N1_FAST
@@ -37320,6 +37355,7 @@ static _Atomic int w_bigint_sqr5_seam_is_c;
 static _Atomic int w_bigint_sqr6_seam_is_c;
 static _Atomic int w_bigint_sqr7_seam_is_c;
 static _Atomic int w_bigint_sqr8_seam_is_c;
+static _Atomic int w_bigint_mul2_seam_is_c;
 static _Atomic int w_bigint_mul1_2_seam_is_c;
 static _Atomic int w_bigint_mul1_3_seam_is_c;
 static _Atomic int w_bigint_mul1_4_seam_is_c;
@@ -37385,6 +37421,11 @@ __attribute__((weak)) WValue __w_bigint_sqr8_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_sqr8_seam_is_c, 1,
                           memory_order_relaxed);
     return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 8);
+}
+__attribute__((weak)) WValue __w_bigint_mul2_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul2_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 2);
 }
 static inline __attribute__((always_inline))
 WValue bigint_mul1_2_c_fallback(WValue a, WValue b) {
@@ -37629,6 +37670,13 @@ WValue bigint_sqr8_seam(WValue a, WValue b) {
                                               memory_order_relaxed), 1))
         return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 8);
     return __w_bigint_sqr8_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul2_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul2_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 2);
+    return __w_bigint_mul2_src(a, b);
 }
 static inline __attribute__((always_inline))
 WValue bigint_mul1_2_seam(WValue a, WValue b) {
@@ -54445,6 +54493,13 @@ WValue w_bigint_sqr8_finish_raw(WValue v, int64_t size) {
     /* The exact square leaf writes all sixteen words, then publishes
      * precisely C's normalized positive size: fifteen when limb 15 is zero,
      * else sixteen. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul2_finish_raw(WValue v, int64_t size) {
+    /* The exact multiplication leaf writes all four words, then publishes
+     * precisely C's normalized positive size: three or four. */
     w_as_bigint(v)->size = (int32_t)size;
     return v;
 }

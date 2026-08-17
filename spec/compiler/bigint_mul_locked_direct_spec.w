@@ -51,7 +51,12 @@ a25 = (1 << (64 * 25 - 1)) + 179
 b25 = (1 << (64 * 25 - 2)) + 191
 check("C fallback width twenty-five", multiply(a25, b25), builtin(a25, b25))
 
-# Syntactic and dynamic identity retain the square route.
+# Exact identity retains square arithmetic: one-limb raw positive headers use
+# the committed native leaf, while wider identities use the unchanged exact C
+# dispatcher. Dynamic identity reaches the same lowering after the tag checks.
+check("one-limb syntactic square", square(word), builtin(word, word))
+check("one-limb overlay-negative square", square(0 - word),
+      builtin(0 - word, 0 - word))
 check("syntactic square", square(a2), builtin(a2, a2))
 same = a2
 check("dynamic identity square", multiply(a2, same), builtin(a2, a2))

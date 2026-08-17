@@ -1,0 +1,134 @@
+BIGINT SQUARE — CLOSED-WORLD NATIVE DISPATCH FOLLOW-UP
+======================================================
+
+Scope
+-----
+
+This is a native-only optimization after the exact `sqr@1` checkpoint
+1ee4107b. It does not change square arithmetic, allocation, representation,
+normalization, or any C algorithm boundary.
+
+When a program declares both `Tungsten.PROTECT_THE_CORE!` and
+`Tungsten.LOCK_THE_DOORS!`, an exact `(BigInt BigInt)` multiplication site
+may bypass polymorphic `w_mul` after exact heap-tag and header-shape checks.
+Pointer identity is now admitted:
+
+  - a raw-positive-header one-limb identity calls the committed native
+    64-by-64 product and exact C finisher directly;
+  - every wider identity enters `w_bigint_mul_builtin_exact`, preserving C's
+    fixed-square, Karatsuba, Toom, NTT, redirect, allocation, and
+    normalization choices;
+  - a tag miss still calls unchanged polymorphic `w_mul`;
+  - distinct positive one-limb pairs and the existing 2..8-by-1 source
+    workers retain their prior routes.
+
+An overlay-negative identity is safe in the one-limb leaf because its raw
+header is positive and a square is positive. A genuinely negative header is
+not size +1 and therefore remains on the exact C dispatcher. Open-world code
+cannot take this path because both executable contracts are required.
+
+Build
+-----
+
+base_commit=1ee4107b8a66bc75e8ab592d691be0248a83d839
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-sqr1-nativeopt
+compiler_sha256=81a6a2902bdfa8172c9c4d124e0611501b03f370ee447322d15ea789a2e38bd7
+fixed_point_ll_sha256=77fd66de53fac7be21dffa75b61a4a4573a7676dc8b41847f131667bbf32d406
+baseline_sha256=8a958c390fd97f113770a0418455f9c54b8430f3381c3fd97d764ce55906efb4
+candidate_sha256=f113f13c04d562910426bb63cad796976307795aaa6dce6d6008c755c2431598
+power=AC, battery charged
+load_at_final_capture=2.95 2.73 2.90
+
+The causal control is the compile-time
+`TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT=0` switch. Both binaries otherwise come
+from the same source and current compiler. The literal exact-checkpoint
+binary is used for controls that already benefited from the earlier locked
+multiply optimization, because disabling that whole optimization would not
+be a valid control for them.
+
+Native square promotion
+-----------------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr-locked-direct-promotion-1ee4107b-m5max-20260817.json
+raw_json_sha256=b87eb43011d5a788798b07e074205ec68d06aea2f3d329a536b9afb174203300
+
+cell    baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@1       2.431104      0.850841        0.349978    0.002865  21/21
+sqr@2       3.706913      3.047779        0.817028    0.014031  21/21
+sqr@4       5.967592      5.207060        0.882970    0.028138  21/21
+sqr@8      16.768601     16.433100        0.981787    0.003146  21/21
+sqr@16     48.346243     47.826690        0.989477    0.001940  21/21
+sqr@32    164.746250    164.539449        0.998547    0.002341  18/21
+
+The one-limb identity removes the whole polymorphic operator path and is
+65.0% faster. Wider identities keep exactly the same C square algorithms;
+their 18.3%, 11.7%, 1.8%, and 1.1% improvements at 2, 4, 8, and 16 limbs are
+dispatch removal. The 32-limb row is parity.
+
+Wide square controls
+--------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr-locked-direct-wide-screen-1ee4107b-m5max-20260817.json
+raw_json_sha256=d49ebb9858c0dbf9553cf04df8b5d141dd3d08ec789243af9ff8e3882c2718e1
+
+cell      paired_median  paired_IQR  wins
+sqr@64          0.998805    0.006236   6/11
+sqr@128         1.000209    0.005266   5/11
+sqr@256         1.001745    0.004990   5/11
+sqr@1024        0.996451    0.002593  10/11
+
+All wide controls are within 0.4%. The optimization changes only how they
+reach the exact built-in boundary, not the selected square kernel.
+
+Multiplication controls
+-----------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+mul1_json=/private/tmp/bigint-sqr-locked-direct-mul1-controls-1ee4107b-m5max-20260817.json
+mul1_json_sha256=7da090239ce6a92666a439c38e4879388adbe05950bb217beceb42701c559340
+mul_json=/private/tmp/bigint-sqr-locked-direct-mul-controls-1ee4107b-m5max-20260817.json
+mul_json_sha256=86476370e31858a18ad681430db8828a11308b08d2dacd4c895526dfd1f0f611
+
+`mul1@1..8,16,32` measured paired medians from 0.9989 to 1.0021.
+Ordinary `mul@2,4,8,16,32` measured 0.9903 to 0.9998. Thus the added
+identity decision does not regress the pre-existing distinct-operand routes.
+
+Public three-lane row
+---------------------
+
+method=9 runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr-locked-direct-public-1ee4107b-m5max-20260817.json
+raw_json_sha256=a03d2f3ad5c66c79b3d385db4cf80c044cc487eebebe56836fa0b52bc1fa70fc
+
+cell   Tungsten_C_ns  native_Tungsten_ns  GMP_ns  fastest
+sqr@1        1.320           0.837580      2.398  native Tungsten
+
+The C and GMP lanes call their scalar square entries. Native Tungsten uses
+the ordinary boxed `a * a` operator under the two closed-world contracts, so
+this row includes its exact dispatch and immutable-result lifecycle.
+
+Route and validation gates
+--------------------------
+
+- candidate and feature-off focused locked-multiply specs pass;
+- focused cases include positive and overlay-negative one-limb identities,
+  wider syntactic/dynamic identities, signs, demoted type facts, and a stale
+  non-BigInt receiver;
+- all eight mul1 reopen specs plus the sqr@1 reopen spec pass with a compiler
+  built from the changed source;
+- retained LLVM shows the one-limb identity calling
+  `__w_bigint_mul1_1_src`, wider identity calling
+  `w_bigint_mul_builtin_exact`, and tag misses calling `w_mul`;
+- final AArch64 inlines the one-limb identity as `mul` plus `umulh` and exact
+  result publication; no extra arithmetic kernel was introduced;
+- the counter profile attributes the hot native route to inlined
+  `measure`/`warmed_sample`; `w_mul` is absent from the sampled hot list;
+- native-lane self-tests pass for candidate and feature-off binaries;
+- two self-host compiler generations emit byte-identical LLVM;
+- emitted focused LLVM assembles and verifies under LLVM 22;
+- `git diff --check` passes.

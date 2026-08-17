@@ -2277,10 +2277,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # Once Core provenance and both method tables are locked, an exact
   # `(BigInt BigInt)` multiplication can enter the exact built-in BigInt
   # boundary directly. That boundary retains the tuned C shape dispatch while
-  # routing the committed N-by-1 seams to Core; it avoids a trip through
-  # polymorphic w_mul without broadening native schoolbook selection. Keep
-  # syntactic squares on w_mul's dedicated identity route.
-  closed_bigint_mul = env("TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && !closed_mul1_square && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
+  # routing committed scalar leaves to Core; it avoids a trip through
+  # polymorphic w_mul without broadening native schoolbook selection. The
+  # exact sqr@1 checkpoint now makes identity safe here as well: one-limb
+  # squares enter the same raw leaf, while every wider square goes to the
+  # unchanged exact C dispatcher.
+  closed_bigint_mul = env("TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
   if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT)
     bidir_report = :polymorphic
     inferred_bigint_pair = is_bigint_type(lt) && is_bigint_type(rt)
@@ -2402,8 +2404,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_wire_icmp_i64(wfn, cm_rsign_bits, "eq", "0", cm_rpositive)
     cm_positive = next_temp(wfn)
     emit_wire_and_i1(wfn, cm_lpositive, cm_rpositive, cm_positive)
+    cm_positive_pair = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_distinct, cm_positive, cm_positive_pair)
+    cm_identity = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, lhs_reg, "eq", rhs_reg, cm_identity)
     cm_one_ok = next_temp(wfn)
-    emit_wire_and_i1(wfn, cm_distinct, cm_positive, cm_one_ok)
+    emit_wire_or_i1(wfn, cm_positive_pair, cm_identity, cm_one_ok)
     emit_wire_cond_br(wfn, cm_one_ok, cm_exact_label, nil, cm_leaf_label)
 
     start_block(wfn, cm_wide_payload_label)

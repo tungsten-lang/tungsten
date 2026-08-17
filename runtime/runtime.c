@@ -37072,6 +37072,7 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
      * equal-length/one-limb exclusions and make each gate identical to its
      * source worker's route. Every other word/sign shape retains C. */
     if (!neg_b && sa == 3 && sb == 1) return 1;
+    if (neg_b && sa == 2 && sb == 1) return 1;
     /* Exclusion keys on the RAW operand signs, NOT the post-flip effective
      * ones: C's `bigint_add_equal_fast` and `bigint_sub_equal_fast` each
      * specialize equal-length pairs whose own signs match, per operator.
@@ -53832,6 +53833,14 @@ WValue w_bigint_sub1_1_finish_raw(
     result->limbs[0] = magnitude;
     result->size = (int32_t)signed_size;
     return bigint_box(result);
+}
+WValue w_bigint_sub1_2_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    int32_t rlen = 2 - (r->limbs[1] == 0);
+    r->size = rlen;
+    if (__builtin_expect(rlen < 2, 0))
+        return bigint_finish_mag_sub(r);
+    return bigint_box(r);
 }
 WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);

@@ -3042,6 +3042,19 @@ on macos && arm64
       ret
     ASM
 
+  # Literal port of runtime.c's two-limb subtract-word arm.  Keep the final
+  # borrow materialization even though the canonical 2-by-1 shape cannot
+  # borrow past the top: it is part of the retained C leaf's exact schedule.
+  fn __bigint_sub1_2_exact(rp, ap, word) (i64 i64 i64) i64
+    asm <<~ASM
+      ldp x4, x5, [x1]
+      subs x4, x4, x2
+      sbcs x5, x5, xzr
+      stp x4, x5, [x0]
+      cset x0, lo
+      ret
+    ASM
+
 # Exact raw wrappers for the positive 4-by-2-limb C leaf.  Keep WValue and
 # limb addresses as i64 throughout: routing them through typed source fields
 # would box the addresses and re-enter ordinary numeric dispatch.  Allocation,
@@ -3196,6 +3209,19 @@ fn __bigint_sub1_1_raw(a, b) (i64 i64) i64
   ccall_nobox(
     "w_bigint_sub1_1_finish_raw", magnitude, signed_size ## i64
   )
+
+# Exact positive two-limb minus positive one-limb C arm.  Allocation, the
+# fixed AArch64 schedule, top-limb shrink, and possible i48 demotion remain
+# separate steps in the same order as bigint_sub_ui_any.
+fn __bigint_sub1_2_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  word = raw_load_u64(bp, 0) ## i64
+  borrow = __bigint_sub1_2_exact(rp, ap, word) ## i64
+  ccall_nobox("w_bigint_sub1_2_finish_raw", result)
 
 # Exact floor square root for one machine-word magnitude. A hardware f64
 # square root supplies a 32-bit seed; integer correction makes the result
@@ -3818,6 +3844,10 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       if an == 1 && bn0 == 1
         return wvalue_from_bits(
           __bigint_sub1_1_raw($value ## i64, other$value ## i64)
+        )
+      if an == 2 && bn0 == 1
+        return wvalue_from_bits(
+          __bigint_sub1_2_raw($value ## i64, other$value ## i64)
         )
 
     bn = 0 - bn0

@@ -493,6 +493,19 @@ now attribute 67.3% to the still-general `w_sub` entry, identifying guarded
 direct lowering as the next independent native-only boundary.  Evidence:
 `bigint_sub1_1_native_seam_results.txt`.
 
+EXACT POSITIVE SUB1@2 CHECKPOINT: the positive two-limb receiver minus a
+positive one-limb BigInt now has a literal source port of C's fixed AArch64
+arm: `ldp`, `subs`, `sbcs`, `stp`, and `cset`.  The wrapper requests the same
+cap-two hot result; the retained finisher either publishes size two or follows
+C's one-limb shrink and i48-demotion policy.  Compiled and interpreted checks
+cover no borrow, one-limb borrow, boxed shrink, i48 shrink, signs, and adjacent
+widths.  The exact checkpoint is intentionally not presented as a native win:
+11 alternating pairs measured 3.557 ns versus 3.502 ns for the retained
+route (1.01783), while counters prove 15.6% of cycles now execute in
+`__bigint_sub1_2_exact`.  The already-native @1 control moved 8.1% from code
+layout and becomes an explicit acceptance constraint for the separate narrow
+dispatch follow-up.  Evidence: `bigint_sub1_2_exact_results.txt`.
+
 ### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing

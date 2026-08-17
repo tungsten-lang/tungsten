@@ -2951,6 +2951,18 @@ on macos && arm64
         ret i128 %product
     IR
 
+  # Literal AArch64 schedule emitted for runtime.c's pointer-identical
+  # positive two-limb square. Preserve the three partial products, doubled
+  # cross term, carry order, four unconditional stores, and +3/+4 header
+  # choice exactly; this is the fidelity checkpoint, not a redesign.
+  fn __bigint_sqr2_exact(rp, ap) (i64 i64) i64
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %size = call i64 asm sideeffect "ldr x8, [${2:x}]\0Aumulh x9, x8, x8\0Amul x8, x8, x8\0Astr x8, [${1:x}]\0Aldp x8, x10, [${2:x}]\0Amul x11, x10, x8\0Aumulh x8, x10, x8\0Alsr x10, x8, #63\0Aextr x8, x8, x11, #63\0Aadds x9, x9, x11, lsl #1\0Astr x9, [${1:x}, #8]\0Aldr x9, [${2:x}, #8]\0Aumulh x11, x9, x9\0Amul x9, x9, x9\0Aadcs x8, x8, x9\0Aadc x9, x10, x11\0Astp x8, x9, [${1:x}, #16]\0Acmp x9, #0\0Amov ${0:x}, #3\0Acinc ${0:x}, ${0:x}, ne", "=r,r,r,~{x8},~{x9},~{x10},~{x11},~{memory},~{cc}"(i64 %rp, i64 %ap)
+        ret i64 %size
+    IR
+
   # Literal AArch64 schedule emitted for runtime.c's positive 2-by-1
   # scalar-word arm. Both products issue independently; one flag chain joins
   # high(product0) to low(product1), then the final carry word determines the
@@ -3597,6 +3609,17 @@ fn __bigint_mul1_1_raw(a, b) (i64 i64) i64
   ccall_nobox(
     "w_bigint_mul1_1_finish_raw", low ## i64, high ## i64
   )
+
+# Exact pointer-identical positive two-limb square. The runtime gate has
+# already matched C's raw positive-header identity shape. Reproduce its exact
+# hot capacity-4 allocation, fixed kernel, and unconditional +3/+4 header.
+fn __bigint_sqr2_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  size = __bigint_sqr2_exact(rp ## i64, ap ## i64) ## i64
+  ccall_nobox("w_bigint_sqr2_finish_raw", result, size)
 
 # Exact positive two-limb-by-one-limb scalar-word arm. Preserve receiver
 # order at the operator seam, then orient only the raw magnitudes after the
@@ -4634,6 +4657,15 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     am = an < 0 ? 0 - an : an
     bm = bn < 0 ? 0 - bn : bn
 
+    on macos && arm64
+      # Exact C-shaped pointer-identical two-limb square. The raw header
+      # check intentionally admits a tag-overlay negative just as C does;
+      # a true negative header and all wider squares remain on C.
+      if $value == other$value && $size == 2
+        return wvalue_from_bits(
+          __bigint_sqr2_raw($value ## i64, other$value ## i64)
+        )
+
     if am < 2 || bm < 2 || am > 24 || bm > 24
       on macos && arm64
         # Exact C-shaped pointer-identical one-limb square. The runtime
@@ -4680,8 +4712,8 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
             __bigint_mul1_8_raw($value ## i64, other$value ## i64)
           )
       return ccall("w_bigint_mul_builtin_exact", self, other)
-    # Squaring (identical boxed bits, flip included) keeps C's dedicated
-    # square path, mirroring bigint_mul_src_shape's a == b exclusion.
+    # Every remaining square (identical boxed bits, flip included) keeps C's
+    # dedicated path, mirroring bigint_mul_src_shape's a == b exclusion.
     if $value == other$value
       return ccall("w_bigint_mul_builtin_exact", self, other)
 

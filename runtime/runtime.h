@@ -749,6 +749,7 @@ WValue __w_bigint_isqrt_src(WValue a);
 WValue __w_bigint_sub1_1_src(WValue a, WValue b);
 WValue __w_bigint_sub1_2_src(WValue a, WValue b);
 WValue __w_bigint_mul1_1_src(WValue a, WValue b);
+WValue __w_bigint_sqr2_src(WValue a, WValue b);
 WValue __w_bigint_mul1_2_src(WValue a, WValue b);
 WValue __w_bigint_mul1_3_src(WValue a, WValue b);
 WValue __w_bigint_mul1_4_src(WValue a, WValue b);
@@ -784,6 +785,7 @@ WValue w_bigint_add1_wide_finish_raw(
     WValue v, int64_t length, int64_t carry);
 WValue w_bigint_add1_1_finish_raw(uint64_t sum, int64_t carry);
 WValue w_bigint_mul1_1_finish_raw(uint64_t low, uint64_t high);
+WValue w_bigint_sqr2_finish_raw(WValue v, int64_t size);
 WValue w_bigint_mul1_2_finish_raw(WValue v, int64_t size);
 WValue w_bigint_mul1_3_finish_raw(WValue v, int64_t size);
 WValue w_bigint_mul1_4_finish_raw(WValue v, int64_t size);

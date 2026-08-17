@@ -1,0 +1,88 @@
+BIGINT POSITIVE TWO-LIMB SQUARE — EXACT SOURCE CHECKPOINT
+========================================================
+
+Scope
+-----
+
+This checkpoint ports only the pointer-identical, raw-positive-header,
+two-limb arm from `bigint_mul_any_routed` / `bigint_mul_positive_equal`.
+The native Tungsten worker is a literal copy of the current AArch64 leaf:
+
+  - exact hot capacity-4 allocation;
+  - low square, doubled cross product, high square;
+  - the same `mul` / `umulh` / `extr` and flag-chain order;
+  - four unconditional limb stores;
+  - positive size 3 when limb 3 is zero, otherwise positive size 4.
+
+The stable seam is dedicated to `sqr@2`; it does not reuse any scalar-word
+contract. A tag-overlay negative with raw header +2 is admitted just as in C,
+while a real negative header and all wider squares retain their old C routes.
+A plain open-world BigInt `*` replacement still wins over the narrow seam.
+
+Build
+-----
+
+base_commit=9be75206791ac85a060048dee5accb2dcff894a5
+host=Apple M5 Max, arm64 Darwin 25.6.0
+compiler=Homebrew clang 22.1.8
+compiler_path=/private/tmp/tungsten-compiler-sqr2-exact
+compiler_sha256=c833178353068ccbe3de753ddca99e78fe737c1721a44a1eb13d8dce3af83879
+candidate=/private/tmp/bench_big_math_tungsten_sqr2_exact
+candidate_sha256=209c480c5f000335a7be8da9b7215ed1dd5143451cea10b1cf9512acae620f66
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+power=AC, battery 100 percent
+load_at_final_capture=2.15 2.44 2.60
+
+Same-binary C/source screen
+---------------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+control=TUNGSTEN_BIGINT_SRC_OPS=0
+
+cell    C_pinned_ns  source_ns   paired_median  paired_IQR  wins
+sqr@1       2.303680    2.437175        1.057221    0.004959   0/11
+sqr@2       3.533283    2.824592        0.798371    0.002921  11/11
+sqr@4       5.696742    5.859423        1.028155    0.013603   0/11
+sqr@8      16.376571   16.428910        1.001418    0.009253   4/11
+sqr@16     47.408967   47.263247        0.998644    0.005832   6/11
+sqr@32    162.736324  162.759258        1.000141    0.005046   4/11
+
+Only sqr@2 changes arithmetic ownership. The sqr@1 source/C cost predates
+this checkpoint; sqr@4 is the pre-existing rejected-square source preamble;
+the wider controls remain effectively unchanged.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr2-exact-promotion-9be75206-m5max-20260817.json
+raw_json_sha256=ce9910cd864562fa9c5893ce1912474a80ba0a1f9f78d5bace1bdb60dc781acc
+
+cell    C_pinned_ns  source_ns   paired_median  paired_IQR  wins
+sqr@2       3.559476    2.843192        0.797929    0.003838  21/21
+
+The exact native port is 20.2% faster than the old C route. The arithmetic is
+unchanged; the win comes from isolating and inlining the fixed leaf into the
+strong source seam instead of entering `bigint_mul_positive_equal`'s larger
+allocation/shape-dispatch frame.
+
+Focused validation
+------------------
+
+- compiled exact representation checks pass for size-3 and size-4 results,
+  overlay-negative and negative-header inputs, receiver preservation, and a
+  distinct-equal-value control;
+- 100,000 native public-operator squares match the exact C oracle in both
+  value and normalized header size;
+- 100,000 runtime squares through four limbs match GMP;
+- the plain BigInt `*` reopen spec passes;
+- feature-off and feature-on native lane self-tests pass;
+- emitted LLVM assembles and verifies under LLVM 22;
+- linked AArch64 contains the literal C `mul`/`umulh`/`extr` schedule and
+  exact size store;
+- two self-host compiler generations emit byte-identical LLVM
+  (sha256 b17ef214ac27815ddcdbd478b18a1c1363dd049ac1d3a163f820e52a506a0ad1);
+- `git diff --check` passes.
+
+This commit is the exact-port checkpoint. Any native-only dispatch or kernel
+redesign follows in a separate commit with new matched measurements.

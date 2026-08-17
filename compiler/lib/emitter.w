@@ -3006,6 +3006,52 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul1_1_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul1_1_src(i64, i64) nounwind\n"
 
+  # Pointer-identical positive two-limb square has its own seam rather than
+  # borrowing the scalar-word contract. Core supplies the literal square
+  # worker, a genuine BigInt#* reopen keeps precedence, and stage0 binds the
+  # weak exact C implementation.
+  bigint_sqr2_fn = nil
+  bigint_sqr2_matches = 0
+  bs2fi = 0
+  while bs2fi < mod[:functions].size()
+    bs2ff = mod[:functions][bs2fi]
+    if bs2ff[:source_class] == nil && bs2ff[:source_method] == "__bigint_sqr2_raw"
+      bigint_sqr2_matches += 1
+      bigint_sqr2_fn = bs2ff
+    bs2fi += 1
+  if bigint_sqr2_matches > 1
+    << "error: __bigint_sqr2_raw is reserved for native BigInt squaring"
+    exit(1)
+  if mod[:require_bigint_sqr2_src] == true && bigint_sqr2_fn == nil
+    << "error: required native BigInt sqr@2 helper is missing; __w_bigint_sqr2_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_sqr2_target = bigint_times_reopened_fn
+  if bigint_sqr2_target == nil
+    bigint_sqr2_target = bigint_sqr2_fn
+  if bigint_sqr2_target != nil
+    bs2_signature_ok = bigint_sqr2_target[:params] != nil && bigint_sqr2_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      bs2_signature_ok = bs2_signature_ok && bigint_sqr2_target[:source_kind] == :fn_def
+      bs2_signature_ok = bs2_signature_ok && bigint_sqr2_target[:raw_i64_signature] == true
+      bs2_signature_ok = bs2_signature_ok && bigint_sqr2_target[:raw_return_type] == :i64
+    if !bs2_signature_ok
+      << "error: invalid native BigInt sqr@2 seam target"
+      exit(1)
+    bs2_cc = ""
+    if bigint_sqr2_target[:call_conv] != nil && bigint_sqr2_target[:call_conv] != ""
+      bs2_cc = bigint_sqr2_target[:call_conv] + " "
+    bs2_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      bs2_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_sqr2_src(i64 %a, i64 %b)" + bs2_attrs + " {\n"
+    fn_out << "  %r = tail call " + bs2_cc + "i64 @" + bigint_sqr2_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_sqr2_src"] = false
+    known_fns["__w_bigint_sqr2_src"] = true
+  elsif used_runtime_fns["__w_bigint_sqr2_src"] == true
+    seam_decls << "declare i64 @__w_bigint_sqr2_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps

@@ -21,6 +21,13 @@ fn ll_addmul(a, b) (i64 i64) i64
     ret i64 %p
   IR
 
+# --- ll: explicit C-shaped call boundary -------------------------------
+fn ll_noinline_identity(a) (i64) i64
+  ll <<~IR
+    ; tungsten:noinline
+    ret i64 %a
+  IR
+
 # --- ll: u64 return boxes unsigned --------------------------------------
 fn ll_topbit(a) (u64) u64
   ll <<~IR
@@ -110,6 +117,7 @@ fn asm_add_n4(rp, ap, bp, n) (u64[] u64[] u64[] i64) i64
   ASM
 
 check("ll.addmul", ll_addmul(10, 4), 42)
+check("ll.noinline_identity", ll_noinline_identity(43), 43)
 one = 1 ## u64
 check("ll.topbit_unsigned_box", ll_topbit(one).to_s(16), "8000000000000001")
 ll_wide = ll_join_u128(81985529216486895 ## u64, 18364758544493064720 ## u64) ## u128

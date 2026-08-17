@@ -44,6 +44,11 @@ it). Measured on the 64-limb add kernel (Apple M): portable `addcarry` loop
   `x1` (high). The body must `ret`. AArch64/Mach-O only today.
 - Callers use the raw ABI: no boxing on either side. A declared `u64`
   return boxes unsigned.
+- An `ll` body may contain `; tungsten:alwaysinline` or
+  `; tungsten:noinline` to request that exact LLVM function attribute. The
+  markers are mutually exclusive. Use `noinline` when an exact C port must
+  preserve an intentional call boundary or keep a large fixed leaf out of
+  its selector; do not use it as a substitute for measurement.
 - Compile-only: no interpreter or stage-0 execution (same restriction as
   `mulhi`/`addcarry`). A class method whose body calls a kernel therefore
   needs a walker story (a C-delegation arm or an interpreter-reachable

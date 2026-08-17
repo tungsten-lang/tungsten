@@ -2985,6 +2985,17 @@ on macos && arm64
         ret i64 %size
     IR
 
+  # Literal AArch64 schedule emitted for runtime.c's pointer-identical
+  # positive five-limb square. Preserve all fifteen products, doubled cross
+  # terms, carry order, ten unconditional stores, and +9/+10 header choice.
+  fn __bigint_sqr5_exact(rp, ap) (i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %size = call i64 asm sideeffect "ldr x8, [${2:x}]\0Amul x9, x8, x8\0Aumulh x8, x8, x8\0Astr x9, [${1:x}]\0Aldp x9, x10, [${2:x}]\0Amul x11, x10, x9\0Aumulh x9, x10, x9\0Alsr x10, x9, #63\0Aextr x9, x9, x11, #0x3f\0Aadds x8, x8, x11, lsl #1\0Aadcs x9, x9, xzr\0Astr x8, [${1:x}, #0x8]\0Aldp x12, x8, [${2:x}, #0x8]\0Aldr x11, [${2:x}]\0Amul x13, x8, x11\0Aumulh x8, x8, x11\0Alsr x11, x8, #63\0Aextr x8, x8, x13, #0x3f\0Aadcs x8, x8, x10\0Acinc x10, x11, hs\0Aadds x9, x9, x13, lsl #1\0Aadcs x8, x8, xzr\0Acset w11, hs\0Amul x13, x12, x12\0Aumulh x12, x12, x12\0Aadds x9, x9, x13\0Aadcs x8, x8, x12\0Aadc x10, x10, x11\0Astr x9, [${1:x}, #0x10]\0Aldp x9, x11, [${2:x}]\0Aldp x13, x12, [${2:x}, #0x10]\0Amul x14, x12, x9\0Aumulh x9, x12, x9\0Aextr x12, x9, x14, #0x3f\0Alsr x9, x9, #63\0Aadds x15, x8, x14, lsl #1\0Amul x16, x13, x11\0Aumulh x11, x13, x11\0Aextr x13, x11, x16, #0x3f\0Alsr x11, x11, #63\0Aadd x14, x16, x14\0Aadd x8, x8, x14, lsl #1\0Aadcs x10, x10, x12\0Aadc x9, x11, x9\0Acmp x8, x15\0Acset w11, lo\0Aadds x10, x10, x13\0Acset w12, hs\0Aadds x10, x10, x11\0Aadc x9, x9, x12\0Astr x8, [${1:x}, #0x18]\0Aldp x14, x8, [${2:x}, #0x18]\0Aldp x11, x12, [${2:x}]\0Amul x13, x8, x11\0Aumulh x8, x8, x11\0Alsr x11, x8, #63\0Aextr x8, x8, x13, #0x3f\0Aldr x15, [${2:x}, #0x10]\0Amul x16, x14, x12\0Aumulh x12, x14, x12\0Aadds x14, x10, x13, lsl #1\0Aadd x13, x16, x13\0Aextr x16, x12, x16, #0x3f\0Alsr x12, x12, #63\0Aadd x10, x10, x13, lsl #1\0Aadcs x8, x9, x8\0Aadc x9, x12, x11\0Acmp x10, x14\0Acset w11, lo\0Aadds x8, x8, x16\0Acset w12, hs\0Aadds x8, x8, x11\0Amul x11, x15, x15\0Aumulh x13, x15, x15\0Aadc x9, x9, x12\0Aadds x10, x10, x11\0Aadcs x8, x8, x13\0Acinc x9, x9, hs\0Astr x10, [${1:x}, #0x20]\0Aldp x10, x11, [${2:x}, #0x8]\0Aldp x13, x12, [${2:x}, #0x18]\0Amul x14, x12, x10\0Aumulh x10, x12, x10\0Alsr x12, x10, #63\0Aextr x10, x10, x14, #0x3f\0Aadds x15, x8, x14, lsl #1\0Amul x16, x13, x11\0Aumulh x11, x13, x11\0Alsr x13, x11, #63\0Aextr x11, x11, x16, #0x3f\0Aadd x14, x16, x14\0Aadd x8, x8, x14, lsl #1\0Aadcs x9, x9, x10\0Aadc x10, x13, x12\0Acmp x8, x15\0Acset w12, lo\0Aadds x9, x9, x11\0Acset w11, hs\0Aadds x9, x9, x12\0Aadc x10, x10, x11\0Astr x8, [${1:x}, #0x28]\0Aldp x12, x8, [${2:x}, #0x18]\0Aldr x11, [${2:x}, #0x10]\0Amul x13, x8, x11\0Aumulh x8, x8, x11\0Alsr x11, x8, #63\0Aextr x8, x8, x13, #0x3f\0Aadds x8, x10, x8\0Acinc x10, x11, hs\0Aadds x9, x9, x13, lsl #1\0Aadcs x8, x8, xzr\0Acset w11, hs\0Amul x13, x12, x12\0Aumulh x12, x12, x12\0Aadds x9, x9, x13\0Aadcs x8, x8, x12\0Aadc x10, x10, x11\0Astr x9, [${1:x}, #0x30]\0Aldp x9, x11, [${2:x}, #0x18]\0Amul x12, x11, x9\0Aumulh x9, x11, x9\0Alsr x11, x9, #63\0Aextr x9, x9, x12, #0x3f\0Aadds x13, x8, x12, lsl #1\0Aadds x9, x10, x9\0Astr x13, [${1:x}, #0x38]\0Aldr x10, [${2:x}, #0x20]\0Aumulh x13, x10, x10\0Aadc x11, x11, x13\0Acmn x8, x12, lsl #1\0Amul x8, x10, x10\0Aadcs x8, x9, x8\0Acinc x9, x11, hs\0Astp x8, x9, [${1:x}, #0x40]\0Acmp x9, #0\0Amov ${0:x}, #9\0Acinc ${0:x}, ${0:x}, ne", "=r,r,r,~{x8},~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x16},~{memory},~{cc}"(i64 %rp, i64 %ap)
+        ret i64 %size
+    IR
+
   # Literal AArch64 schedule emitted for runtime.c's positive 2-by-1
   # scalar-word arm. Both products issue independently; one flag chain joins
   # high(product0) to low(product1), then the final carry word determines the
@@ -3664,6 +3675,17 @@ fn __bigint_sqr4_raw(a, b) (i64 i64) i64
   ap = (a & mask) + 16 ## i64
   size = __bigint_sqr4_exact(rp ## i64, ap ## i64) ## i64
   ccall_nobox("w_bigint_sqr4_finish_raw", result, size)
+
+# Exact pointer-identical positive five-limb square. The runtime gate has
+# already matched C's raw positive-header identity shape. Reproduce its exact
+# capacity-16 allocation, fixed noinline leaf schedule, and +9/+10 header.
+fn __bigint_sqr5_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot16_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  size = __bigint_sqr5_exact(rp ## i64, ap ## i64) ## i64
+  ccall_nobox("w_bigint_sqr5_finish_raw", result, size)
 
 # Exact positive two-limb-by-one-limb scalar-word arm. Preserve receiver
 # order at the operator seam, then orient only the raw magnitudes after the
@@ -4721,7 +4743,6 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
         return wvalue_from_bits(
           __bigint_sqr2_raw($value ## i64, other$value ## i64)
         )
-
     if am < 2 || bm < 2 || am > 24 || bm > 24
       on macos && arm64
         # Exact C-shaped pointer-identical one-limb square. The runtime
@@ -4768,6 +4789,14 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
             __bigint_mul1_8_raw($value ## i64, other$value ## i64)
           )
       return ccall("w_bigint_mul_builtin_exact", self, other)
+    on macos && arm64
+      # Exact C-shaped pointer-identical five-limb square. Place this new
+      # checkpoint after the existing one-limb/out-of-band return so the
+      # committed sqr@1..4 selector paths remain instruction-identical.
+      if $value == other$value && $size == 5
+        return wvalue_from_bits(
+          __bigint_sqr5_raw($value ## i64, other$value ## i64)
+        )
     # Every remaining square (identical boxed bits, flip included) keeps C's
     # dedicated path, mirroring bigint_mul_src_shape's a == b exclusion.
     if $value == other$value

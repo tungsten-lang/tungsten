@@ -3141,6 +3141,50 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_sqr4_src"] == true
     seam_decls << "declare i64 @__w_bigint_sqr4_src(i64, i64) nounwind\n"
 
+  # Exact positive five-limb square sibling. Keep a distinct reserved seam
+  # so the literal C-shaped checkpoint stays independently reversible.
+  bigint_sqr5_fn = nil
+  bigint_sqr5_matches = 0
+  bs5fi = 0
+  while bs5fi < mod[:functions].size()
+    bs5ff = mod[:functions][bs5fi]
+    if bs5ff[:source_class] == nil && bs5ff[:source_method] == "__bigint_sqr5_raw"
+      bigint_sqr5_matches += 1
+      bigint_sqr5_fn = bs5ff
+    bs5fi += 1
+  if bigint_sqr5_matches > 1
+    << "error: __bigint_sqr5_raw is reserved for native BigInt squaring"
+    exit(1)
+  if mod[:require_bigint_sqr5_src] == true && bigint_sqr5_fn == nil
+    << "error: required native BigInt sqr@5 helper is missing; __w_bigint_sqr5_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_sqr5_target = bigint_times_reopened_fn
+  if bigint_sqr5_target == nil
+    bigint_sqr5_target = bigint_sqr5_fn
+  if bigint_sqr5_target != nil
+    bs5_signature_ok = bigint_sqr5_target[:params] != nil && bigint_sqr5_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      bs5_signature_ok = bs5_signature_ok && bigint_sqr5_target[:source_kind] == :fn_def
+      bs5_signature_ok = bs5_signature_ok && bigint_sqr5_target[:raw_i64_signature] == true
+      bs5_signature_ok = bs5_signature_ok && bigint_sqr5_target[:raw_return_type] == :i64
+    if !bs5_signature_ok
+      << "error: invalid native BigInt sqr@5 seam target"
+      exit(1)
+    bs5_cc = ""
+    if bigint_sqr5_target[:call_conv] != nil && bigint_sqr5_target[:call_conv] != ""
+      bs5_cc = bigint_sqr5_target[:call_conv] + " "
+    bs5_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      bs5_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_sqr5_src(i64 %a, i64 %b)" + bs5_attrs + " {\n"
+    fn_out << "  %r = tail call " + bs5_cc + "i64 @" + bigint_sqr5_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_sqr5_src"] = false
+    known_fns["__w_bigint_sqr5_src"] = true
+  elsif used_runtime_fns["__w_bigint_sqr5_src"] == true
+    seam_decls << "declare i64 @__w_bigint_sqr5_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps
@@ -3881,8 +3925,13 @@ ewscope_md_state = {ids: {}}
   # a parser-level annotation.  The marker stays an LLVM comment inside the
   # body; the only emitted-code effect is this function attribute.
   inline_marker = f[:embedded_ll].index("; tungsten:alwaysinline") != nil
+  noinline_marker = f[:embedded_ll].index("; tungsten:noinline") != nil
+  if inline_marker && noinline_marker
+    raise "embedded ll function cannot request both alwaysinline and noinline"
   inline_enabled = env("TUNGSTEN_EMBEDDED_LL_INLINE") != "0"
-  if inline_marker && inline_enabled
+  if noinline_marker
+    out << " noinline"
+  elsif inline_marker && inline_enabled
     out << " alwaysinline"
   out << " {\n"
   out << f[:embedded_ll]

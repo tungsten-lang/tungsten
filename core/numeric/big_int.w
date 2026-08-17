@@ -3789,6 +3789,16 @@ fn __bigint_sqr8_raw(a, b) (i64 i64) i64
   size = __bigint_sqr8_exact(rp ## i64, ap ## i64) ## i64
   ccall_nobox("w_bigint_sqr8_finish_raw", result, size)
 
+# Exact pointer-identical positive sixteen-limb split square. Preserve C's
+# capacity-32 allocation, bn_sqr16_split kernel call, and +31/+32 publication.
+fn __bigint_sqr16_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot32_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  ccall_nobox("w_bigint_sqr16_kernel_raw", rp, ap)
+  ccall_nobox("w_bigint_sqr16_finish_raw", result)
+
 # Exact distinct positive two-by-two-limb multiplication. The runtime gate
 # has already matched C's raw-positive-header shape and excluded identity.
 # Reproduce its capacity-4 allocation, fixed kernel, and +3/+4 publication.

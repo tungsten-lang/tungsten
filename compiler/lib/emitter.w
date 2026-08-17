@@ -3318,6 +3318,50 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_sqr8_src"] == true
     seam_decls << "declare i64 @__w_bigint_sqr8_src(i64, i64) nounwind\n"
 
+  # Exact positive sixteen-limb split square. Keep this dedicated C-shaped
+  # checkpoint independently reversible and preserve a real BigInt#* reopen.
+  bigint_sqr16_fn = nil
+  bigint_sqr16_matches = 0
+  bs16fi = 0
+  while bs16fi < mod[:functions].size()
+    bs16ff = mod[:functions][bs16fi]
+    if bs16ff[:source_class] == nil && bs16ff[:source_method] == "__bigint_sqr16_raw"
+      bigint_sqr16_matches += 1
+      bigint_sqr16_fn = bs16ff
+    bs16fi += 1
+  if bigint_sqr16_matches > 1
+    << "error: __bigint_sqr16_raw is reserved for native BigInt squaring"
+    exit(1)
+  if mod[:require_bigint_sqr16_src] == true && bigint_sqr16_fn == nil
+    << "error: required native BigInt sqr@16 helper is missing; __w_bigint_sqr16_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_sqr16_target = bigint_times_reopened_fn
+  if bigint_sqr16_target == nil
+    bigint_sqr16_target = bigint_sqr16_fn
+  if bigint_sqr16_target != nil
+    bs16_signature_ok = bigint_sqr16_target[:params] != nil && bigint_sqr16_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      bs16_signature_ok = bs16_signature_ok && bigint_sqr16_target[:source_kind] == :fn_def
+      bs16_signature_ok = bs16_signature_ok && bigint_sqr16_target[:raw_i64_signature] == true
+      bs16_signature_ok = bs16_signature_ok && bigint_sqr16_target[:raw_return_type] == :i64
+    if !bs16_signature_ok
+      << "error: invalid native BigInt sqr@16 seam target"
+      exit(1)
+    bs16_cc = ""
+    if bigint_sqr16_target[:call_conv] != nil && bigint_sqr16_target[:call_conv] != ""
+      bs16_cc = bigint_sqr16_target[:call_conv] + " "
+    bs16_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      bs16_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_sqr16_src(i64 %a, i64 %b)" + bs16_attrs + " {\n"
+    fn_out << "  %r = tail call " + bs16_cc + "i64 @" + bigint_sqr16_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_sqr16_src"] = false
+    known_fns["__w_bigint_sqr16_src"] = true
+  elsif used_runtime_fns["__w_bigint_sqr16_src"] == true
+    seam_decls << "declare i64 @__w_bigint_sqr16_src(i64, i64) nounwind\n"
+
   # Exact distinct positive two-by-two-limb multiplication has its own
   # reserved seam. Core supplies the literal C-shaped worker, while a genuine
   # BigInt#* reopen remains the observable open-world target.

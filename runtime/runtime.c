@@ -11562,6 +11562,9 @@ static inline WValue bigint_mul_bigint_word(WValue big, int64_t word) {
 #ifndef BN_BIGINT_SQR8_SRC_DIRECT
 #define BN_BIGINT_SQR8_SRC_DIRECT 1
 #endif
+#ifndef BN_BIGINT_SQR16_SRC_DIRECT
+#define BN_BIGINT_SQR16_SRC_DIRECT BN_BOXED_SQR16_FAST
+#endif
 #ifndef BN_BIGINT_MUL2_SRC_DIRECT
 #define BN_BIGINT_MUL2_SRC_DIRECT 1
 #endif
@@ -11832,6 +11835,21 @@ static inline int bn_bench_runtime_mul1_8_src_enabled(void) {
 #else
 static inline int bn_bench_runtime_mul1_8_src_enabled(void) { return 1; }
 #endif
+#ifndef BN_BENCH_RUNTIME_SQR16_SRC_KNOB
+#define BN_BENCH_RUNTIME_SQR16_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_SQR16_SRC_KNOB
+static inline int bn_bench_runtime_sqr16_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_SQR16_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_sqr16_src_enabled(void) { return 1; }
+#endif
 
 static inline __attribute__((always_inline))
 WValue bigint_mul1_1_seam(WValue a, WValue b);
@@ -11849,6 +11867,8 @@ static inline __attribute__((always_inline))
 WValue bigint_sqr7_seam(WValue a, WValue b);
 static inline __attribute__((always_inline))
 WValue bigint_sqr8_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_sqr16_seam(WValue a, WValue b);
 static inline __attribute__((always_inline))
 WValue bigint_mul2_seam(WValue a, WValue b);
 static inline __attribute__((always_inline))
@@ -11964,11 +11984,19 @@ WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
 #endif
             return bigint_mul_positive_equal(ba, ba, 8);
         }
-#if BN_BOXED_SQR16_FAST
+#if BN_BIGINT_SQR16_SRC_DIRECT
         /* Bypass bigint_mul_positive_equal's generic-kernel frame entirely:
          * this pointer-identical, positive shape is already fully known. */
-        if (n == 16)
+        if (n == 16) {
+            if (__builtin_expect(route_mul1_1 != 0, 1) &&
+                bn_bench_runtime_sqr16_src_enabled())
+                return bigint_sqr16_seam(a, b);
+#if BN_BOXED_SQR16_FAST
             return bigint_sqr_positive_16(ba);
+#else
+            return bigint_mul_positive_equal(ba, ba, 16);
+#endif
+        }
 #endif
         if (n > 1 && n <= BN_MUL_POSITIVE_EQUAL_FAST_MAX)
             return bigint_mul_positive_equal(ba, ba, n);
@@ -37600,6 +37628,7 @@ static _Atomic int w_bigint_sqr5_seam_is_c;
 static _Atomic int w_bigint_sqr6_seam_is_c;
 static _Atomic int w_bigint_sqr7_seam_is_c;
 static _Atomic int w_bigint_sqr8_seam_is_c;
+static _Atomic int w_bigint_sqr16_seam_is_c;
 static _Atomic int w_bigint_mul2_seam_is_c;
 static _Atomic int w_bigint_mul3_seam_is_c;
 static _Atomic int w_bigint_mul4_seam_is_c;
@@ -37673,6 +37702,16 @@ __attribute__((weak)) WValue __w_bigint_sqr8_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_sqr8_seam_is_c, 1,
                           memory_order_relaxed);
     return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 8);
+}
+__attribute__((weak)) WValue __w_bigint_sqr16_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sqr16_seam_is_c, 1,
+                          memory_order_relaxed);
+#if BN_BOXED_SQR16_FAST
+    (void)b;
+    return bigint_sqr_positive_16(w_as_bigint(a));
+#else
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 16);
+#endif
 }
 __attribute__((weak)) WValue __w_bigint_mul2_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_mul2_seam_is_c, 1,
@@ -37957,6 +37996,19 @@ WValue bigint_sqr8_seam(WValue a, WValue b) {
                                               memory_order_relaxed), 1))
         return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 8);
     return __w_bigint_sqr8_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sqr16_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sqr16_seam_is_c,
+                                              memory_order_relaxed), 1)) {
+#if BN_BOXED_SQR16_FAST
+        (void)b;
+        return bigint_sqr_positive_16(w_as_bigint(a));
+#else
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 16);
+#endif
+    }
+    return __w_bigint_sqr16_src(a, b);
 }
 static inline __attribute__((always_inline))
 WValue bigint_mul2_seam(WValue a, WValue b) {
@@ -54830,6 +54882,18 @@ WValue w_bigint_sqr8_finish_raw(WValue v, int64_t size) {
      * precisely C's normalized positive size: fifteen when limb 15 is zero,
      * else sixteen. */
     w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_sqr16_kernel_raw(int64_t rp, int64_t ap) {
+    bn_sqr16_split((uint64_t *)(uintptr_t)rp,
+                   (const uint64_t *)(uintptr_t)ap);
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_sqr16_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 32 - (r->limbs[31] == 0);
     return v;
 }
 __attribute__((always_inline))

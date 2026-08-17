@@ -350,6 +350,8 @@ use target
       if mod[:function_emit_disk_cache_status] != nil
         function_emit_text = function_emit_text + "; disk " + mod[:function_emit_disk_cache_status].to_s()
       << function_emit_text
+    if mod[:parallel_function_emit_jobs] != nil
+      << "  function emit workers: " + mod[:parallel_function_emit_jobs].to_s() + " deterministic threads"
     if mod[:content_hash_skipped_count] > 0
       << "  content hash work set: " + mod[:content_hash_function_count].to_s() + "/" + (mod[:content_hash_function_count] + mod[:content_hash_skipped_count]).to_s() + " functions (" + mod[:content_hash_skipped_count].to_s() + " cached)"
     << fmt_elapsed(t_lower) + " lowering to wire"

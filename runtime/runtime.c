@@ -18732,7 +18732,10 @@ typedef struct {
     uint16_t reserved;
     WValue sym;
 } WWireFieldCacheEntry;
-static WWireFieldCacheEntry g_wire_field_cache[W_WIRE_FIELD_CACHE_SIZE];
+/* Emission can read independent frozen functions concurrently. Field lookup
+ * is logically read-only, but this small accelerator writes its last-seen
+ * entry; keep it per thread so those speculative writes cannot race. */
+static _Thread_local WWireFieldCacheEntry g_wire_field_cache[W_WIRE_FIELD_CACHE_SIZE];
 
 static inline WWireFieldCacheEntry *w_wire_field_cache_entry(uint32_t off,
                                                               WValue sym) {

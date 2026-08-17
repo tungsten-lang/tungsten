@@ -311,6 +311,12 @@ while i < args.size()
     script_args.push(arg)
   i += 1
 
+# Process-parallel compile-batch children own independent source shards. Mark
+# them before emission so per-function threading does not nest underneath the
+# parent-selected process pool.
+if batch_worker_dir != nil
+  ccall("w_setenv", "TUNGSTEN_BATCH_WORKER_PROCESS", "1")
+
 # Resolve profile and target after parsing every flag so order cannot affect
 # them. Release defaults to no-debug; an explicit --debug keeps safety checks,
 # source-location metadata, and debug symbols while retaining -O3/full-LTO.

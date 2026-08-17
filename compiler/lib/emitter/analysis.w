@@ -145,13 +145,19 @@
 # follows render order, which is deterministic, so stage identity holds. The
 # state is a top-level container mutated in place (rebinding a top-level name
 # from a function shadows instead of writing through — see detect_target_memo).
-novec_md_state = {kinds: []}
+novec_md_state = {kinds: [], refs: {}}
 
 -> latch_loop_md_ref(kind, unroll_count = 0)
   ks = novec_md_state[:kinds]
   k = ks.size()
   ks.push([kind, unroll_count])
   (31423 + k * 2).to_s()
+
+-> latch_loop_md_ref_for(inst, kind, unroll_count = 0)
+  cached = novec_md_state[:refs][inst]
+  if cached != nil
+    return cached
+  latch_loop_md_ref(kind, unroll_count)
 
 # One shared novec tuple plus a distinct loop node and, when applicable, an
 # unroll-count tuple per marked latch. Per-loop tuples allow different tuning

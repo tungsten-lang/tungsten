@@ -16,7 +16,9 @@
   # !alias.scope/!noalias list: unrelated loops sharing a no-alias scope
   # is a miscompile, not bloat.
   novec_md_state[:kinds] = []
+  novec_md_state[:refs] = {}
   ewscope_md_state[:ids] = {}
+  mod[:parallel_function_emit_jobs] = nil
 
   datalayout = mod[:llvm_datalayout]
   triple = mod[:llvm_triple]
@@ -260,9 +262,26 @@
   if function_emit_cache_enabled
     function_emit_cache_bucket_value = function_emit_cache_bucket(mod, frame_pointers, mod[:llvm_fn_attrs], arm64_target, windows_target, mod[:preserve_debug_frames] == true, fp_flags)
 
-  # Functions
+  # Functions. A cached rendered-Core bucket already removes most work and is
+  # process-global, so it stays on its proven serial path. Otherwise frozen
+  # functions may render on private worker buffers after metadata ids are
+  # assigned deterministically in source order.
+  parallel_function_jobs = emitter_parallel_job_count(mod, function_emit_cache_bucket_value)
+  if parallel_function_jobs > 1
+    emitter_prepare_parallel_metadata(mod[:functions], fp_flags)
+    function_attr_group_id(attr_groups, function_attr_text(frame_pointers, mod[:llvm_fn_attrs], mod[:preserve_debug_frames] == true))
+    parallel_rendered = emitter_render_functions_parallel(mod[:functions], mod[:string_wvalues], slab_info, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, parallel_function_jobs)
+    i = 0
+    while i < parallel_rendered[:texts].size()
+      fn_out << parallel_rendered[:texts][i]
+      fn_out << "\n"
+      function_emit_cache_merge_ptr_ids(used_ptr_ids, parallel_rendered[:ptr_ids][i])
+      i += 1
+    function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + mod[:functions].size()
+    mod[:parallel_function_emit_jobs] = parallel_function_jobs
+
   i = 0
-  while i < mod[:functions].size()
+  while parallel_function_jobs == 1 && i < mod[:functions].size()
     mod[:functions][i][:fp_flags] = fp_flags
     fn_out << emit_function_with_cache(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, function_emit_cache_bucket_value)
     fn_out << "\n"

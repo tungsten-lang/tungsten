@@ -3,7 +3,8 @@
 This branch evaluates ten compiler-throughput changes independently. Each
 tranche must preserve generated LLVM for representative inputs, retain exact
 self-hosting fixed point where it applies, pass focused checks, and earn its
-place with matched `--release --native --fast --no-debug` measurements. A
+place with matched `--release --native --fast` measurements. Release already
+selects the non-debug profile; `--no-debug` is not required. A
 negative or noise-flat experiment is documented and reverted rather than
 silently accumulated.
 
@@ -251,3 +252,47 @@ self-host fixed point held at SHA-256
 `9f51c3d27d50a208b575e1c748ebaa469198b9e26c20482865b711fb41302a4e`;
 the process/persistent rendered-function cache test also passed on the direct
 path.
+
+## Deterministic parallel function emission
+
+Once global lowering, inference, function ordering, and metadata discovery are
+complete, ordinary WIRE functions are independent LLVM rendering jobs. The
+emitter now assigns loop and alias-scope metadata serially, freezes the final
+per-function flags, and hands functions to a bounded native worker team through
+an atomic cursor. Each worker owns its StringBuffer and referenced-string set;
+the parent concatenates results and merges sets in original function order.
+LLVM and sidemaps therefore remain deterministic even though job completion
+order is not.
+
+Automatic mode requires at least 64 functions, uses the detected CPU count,
+and caps itself at eight workers. `TUNGSTEN_EMITTER_JOBS` can select a value up
+to 32, while `TUNGSTEN_PARALLEL_FUNCTION_EMIT=0` restores serial emission. A
+rendered-Core cache bucket remains on its faster serial/cache-hit path. Debug
+modules also stay serial so physical backtrace frames are produced directly,
+and process-parallel `compile-batch` children suppress nested emitter teams.
+The WIRE field lookup accelerator is thread-local; the arena itself is frozen
+before worker creation.
+
+This is a single-emission worker pool rather than a permanently parked runtime
+pool. An ordinary compiler process has one large render phase, while repeated
+program compilation already uses rendered-Core reuse and/or the deterministic
+process pool. The measured thread-start cost was below the saved work even on
+the 181-function bignum artifact, so a persistent pool would add lifecycle and
+shutdown machinery without a demonstrated second use in the common path.
+
+Eight alternating final-candidate self-compile pairs, using plain
+release/native/fast and eight workers, reduced median LLVM emission from
+685.5 ms to 344.5 ms (-49.74%), measured compiler time from 2.9475 s to
+2.5985 s (-11.84%), and external wall time from 3.54 s to 3.19 s (-9.89%).
+Peak RSS rose 0.58% and retired instructions 0.28%, reflecting the bounded
+worker stacks and synchronization. All paired LLVM files and sidemaps were
+byte-identical.
+
+With rendered-function caching disabled, twelve protected bignum artifact
+pairs reduced emission from 16 ms to 11 ms (-31.25%) and compiler time from
+86.5 ms to 81.0 ms (-6.36%); wall time was flat at the timer's 190 ms
+resolution. Focused checks cover 1/2/4/8-worker parity, release-without-
+`--no-debug`, serial debug frames, direct-buffer emission, rendered-Core cache
+interaction, and process-parallel batch compilation. Exact self-host fixed
+point held at SHA-256
+`5580cc198e96a292252078380d882eb2afa49236ca55b19966e8f64883b68c41`.

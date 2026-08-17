@@ -620,11 +620,11 @@
   when :br
     unroll_count = wire_get(inst, :unroll_count)
     if wire_get(inst, :novec) == true && unroll_count != nil && unroll_count > 0
-      "br label %" + wire_get(inst, :label) + ", !llvm.loop !" + latch_loop_md_ref(:both, unroll_count)
+      "br label %" + wire_get(inst, :label) + ", !llvm.loop !" + latch_loop_md_ref_for(inst, :both, unroll_count)
     elsif wire_get(inst, :novec) == true
-      "br label %" + wire_get(inst, :label) + ", !llvm.loop !" + latch_loop_md_ref(:novec)
+      "br label %" + wire_get(inst, :label) + ", !llvm.loop !" + latch_loop_md_ref_for(inst, :novec)
     elsif unroll_count != nil && unroll_count > 0
-      "br label %" + wire_get(inst, :label) + ", !llvm.loop !" + latch_loop_md_ref(:unroll, unroll_count)
+      "br label %" + wire_get(inst, :label) + ", !llvm.loop !" + latch_loop_md_ref_for(inst, :unroll, unroll_count)
     else
       "br label %" + wire_get(inst, :label)
   when :cond_br

@@ -2906,6 +2906,30 @@ on macos && arm64
 # vanishingly rare grow-after-carry policy instead of changing allocation or
 # result construction.
 on macos && arm64
+  # Exact positive one-limb add pair from bigint_add_one_limb_magnitudes.
+  # Pack carry:sum into u128 so the source caller crosses one raw boundary
+  # without boxing either machine value.
+  fn __bigint_add1_1_sumcarry(a, b) (i64 i64) u128
+    ll <<~IR
+      ; tungsten:alwaysinline
+      entry:
+        %amasked = and i64 %a, 140737488355327
+        %bmasked = and i64 %b, 140737488355327
+        %ap = inttoptr i64 %amasked to ptr
+        %bp = inttoptr i64 %bmasked to ptr
+        %avp = getelementptr i8, ptr %ap, i64 16
+        %bvp = getelementptr i8, ptr %bp, i64 16
+        %av = load i64, ptr %avp, align 8
+        %bv = load i64, ptr %bvp, align 8
+        %sum = add i64 %av, %bv
+        %carry = icmp ult i64 %sum, %av
+        %sum128 = zext i64 %sum to i128
+        %carry128 = zext i1 %carry to i128
+        %high = shl i128 %carry128, 64
+        %packed = or i128 %high, %sum128
+        ret i128 %packed
+    IR
+
   fn __bigint_add1_2_exact(rp, ap, word) (i64 i64 i64) i64
     asm <<~ASM
       ldp x4, x5, [x1]
@@ -4034,7 +4058,18 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
       if bn == 1
         case an
           1 =>
-            return ccall("w_bigint_add", self, other)
+            pair1 = __bigint_add1_1_sumcarry(
+              $value ## i64, other$value ## i64
+            ) ## u128
+            sum1 = pair1 ## u64
+            high1 = pair1 >> 64 ## u128
+            carry1 = high1 ## u64
+            return wvalue_from_bits(
+              ccall_nobox(
+                "w_bigint_add1_1_finish_raw",
+                sum1 ## i64, carry1 ## i64
+              ) ## i64
+            )
           2 =>
             return wvalue_from_bits(
               __bigint_add1_2_raw($value ## i64, other$value ## i64)

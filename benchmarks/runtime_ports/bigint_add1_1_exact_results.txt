@@ -1,0 +1,95 @@
+BIGINT POSITIVE ONE-LIMB ADD — EXACT SOURCE CHECKPOINT
+=====================================================
+
+Scope
+-----
+
+This checkpoint ports the positive heap-BigInt 1-by-1 magnitude arithmetic
+from `bigint_add_one_limb_magnitudes` without changing its algorithm or result
+policy. Native Tungsten loads both limbs, performs the unsigned add, and records
+the carry. The retained raw finisher preserves C exactly:
+
+  carry == 0  -> bigint_finish_one_limb(sum, positive)
+  carry == 1  -> exact hot capacity 2; limbs [sum, 1]; signed size +2
+
+Every other sign and width stays on its prior route. This is the exact-port
+checkpoint; no native-only arithmetic redesign is included.
+
+Build
+-----
+
+base_commit=54d617f0
+host=Apple M5 Max, arm64 Darwin
+compiler=/private/tmp/tungsten-compiler-sub1-wide-inline6
+compiler_sha256=09215985df8f29f8642e6eff8ff7400ce35c64298f178b3e5a5b98db4d8f9651
+flags=--release --native --fast
+baseline=/private/tmp/add1-1-native-baseline-fresh
+baseline_sha256=6bc970d543294a49c99c60d5f11cfb68590f2b18fbd15f24fa12fe8f042622d4
+candidate=/private/tmp/add1-1-native-final
+candidate_sha256=c5224abb752031ace21a5303054a082651a683b63abb525e4e5a5992e96f8bd7
+
+The baseline was rebuilt from a detached clean 54d617f0 worktree with the same
+compiler and flags. An earlier pre-existing binary was rejected as a comparator
+after its linked text did not match the fresh predecessor; none of its apparent
+control movement is used below.
+
+Matched screen
+--------------
+
+method=11 alternating process pairs; 110 ms/leg
+raw_json=/private/tmp/add1-1-final-screen-54d617f0.json
+raw_json_sha256=208bc55d68dc4b3b6163c10642ed193c8d5e3385dbe0d46aab0565d780717deb
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+add1@1   3.180355     2.428301      0.762263       0.033704   11/11
+add1@2   2.581228     2.583256      1.000874       0.010313    4/11
+add1@3   2.569153     2.573529      1.004344       0.009818    4/11
+add1@4   2.687855     2.683342      0.998389       0.017707    8/11
+add1@8   2.871349     2.939548      1.016049       0.026551    2/11
+add1@9   3.853402     3.865995      1.005135       0.014316    2/11
+add1@16  4.182190     4.262473      1.015477       0.035214    4/11
+add1@32  4.867405     4.878054      1.000230       0.017047    5/11
+
+Only add1@1 changes route. It is 23.8% faster in the screen. All seven
+unaffected controls remain within 1.7% of the predecessor median.
+
+Promotion
+---------
+
+method=21 alternating process pairs; 300 ms/leg
+raw_json=/private/tmp/add1-1-final-promotion-54d617f0.json
+raw_json_sha256=c8c3b0006f5a2234e5bbd754274820cf1b463f6e98322ccd73d5c45af642acc3
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins  range
+add1@1   3.181170     2.379523      0.748072       0.037848   21/21  0.731474..0.782792
+add1@8   2.855933     2.893719      1.009422       0.039861    7/21  0.980559..1.038994
+add1@16  4.179428     4.186257      1.001925       0.040255    9/21  0.781063..1.044097
+
+The target retains a 25.2% win in every pair. The two nearest controls resolve
+to +0.94% and +0.19%, both inside noise and the standing 2% screen gate.
+
+Correctness and structural gates
+--------------------------------
+
+  /private/tmp/bigint-add1-1-final-spec
+  /private/tmp/tungsten-compiler-sub1-wide-inline6 run \
+    spec/numeric/bigint_add1_1_source_spec.w --interpret
+  /private/tmp/add1-1-native-final --self-test
+
+Compiled and interpreted focused checks pass 18/18: no-carry demotion, carry
+growth, low-word wrap, minimum and maximum heap pairs, exact signed header
+sizes, decimal round trips, and negative/two-limb route controls. Emitted IR
+uses two raw limb loads, `add i64`, `icmp ult`, an `i128` carry pack, a true
+`lshr i128 64`, and one raw finisher call; it does not box the sum or compare.
+
+Counter route proof
+-------------------
+
+command=bin/tungsten flame --counters -d 3 --top 12 --silent -- \
+  /private/tmp/add1-1-native-final --sweep add1 1 1 5000
+
+  BigInt#+__ovl_BigInt  97.0% cycles; 98.7% instructions; IPC 8.72
+  BigInt#+__ovl_BigInt   0.00 L1d-load misses/KI; 0.00 memsys-loads/KI
+
+The counter attribution confirms the timed lane executes the native source
+worker rather than falling through to the generic C operator.

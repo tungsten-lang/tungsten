@@ -37086,6 +37086,7 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
     /* Exact migrated scalar-word arms. Keep these before the general
      * equal-length/one-limb exclusions and make each gate identical to its
      * source worker's route. Every other word/sign shape retains C. */
+    if (!neg_b && sa == 1 && sb == 1) return 1;
     if (!neg_b && sa == 3 && sb == 1) return 1;
     if (!neg_b && sa > 8 && sa <= 4096 && sb == 1) return 1;
     if (neg_b && sa == 2 && sb == 1)
@@ -53721,6 +53722,18 @@ WValue w_bigint_add1_wide_finish_raw(
     }
     r->size = n;
     return bigint_box(r);
+}
+WValue w_bigint_add1_1_finish_raw(uint64_t sum, int64_t carry) {
+    if (carry != 0 && carry != 1)
+        die("w_bigint_add1_1_finish_raw: carry is not 0/1");
+    if (__builtin_expect(carry != 0, 0)) {
+        WBigint *result = bigint_alloc_raw_hot_exact(2U);
+        result->limbs[0] = sum;
+        result->limbs[1] = 1;
+        result->size = 2;
+        return bigint_box(result);
+    }
+    return bigint_finish_one_limb(sum, 0);
 }
 WValue w_bigint_alloc_hot4_raw(void) {
     return bigint_box(bigint_alloc_raw_hot_exact(4U));

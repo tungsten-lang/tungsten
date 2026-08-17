@@ -297,6 +297,66 @@ Acceptance is also the right instrument on a contended or thermally drifting
 machine: it is deterministic and reproduced byte-for-byte across all three
 repetitions above (0.55000000000000004 and 0.5), while tok/s moved ~3%.
 
+### The wide/r1 triplet split survives in-situ re-checking
+
+The `kdim == FFN || rows == N_VOCAB -> wide, else r1` split in
+`enqueue_scaled_triplet` was chosen from isolated kernel timings, which on
+this kernel family are a known way to get the wrong answer: a 44-89 MB
+weight tile re-read back to back is served by the system cache, while in the
+real forward ~18 GB streams past and nothing is resident. `ARGV[6]` now
+forces `r1` or `wide` everywhere so the split can be re-checked against the
+full model.
+
+Three alternating triples, MTP-2, 64-token prose prompt, 32 generated:
+
+| variant | tok/s | acceptance |
+|---|---|---|
+| `auto` (shipped) | 32.49 / 32.36 / 31.75 | 0.50 |
+| `r1` forced | 32.29 / 32.26 / 30.77 | 0.50 |
+| `wide` forced | 31.62 / 31.40 / 25.26 | 0.50 |
+
+**The shipped heuristic wins 3/3.** Acceptance is identical in all nine runs,
+which is the null check: these are pure kernel-speed changes and nothing
+behavioural moved. Forcing `wide` everywhere is clearly worse; forcing `r1`
+everywhere is close but never better. Recorded so the split is not
+re-litigated, and because it is a case where the isolated-timing choice held
+up under the in-situ test.
+
+### Attribution
+
+The fixture change above came out of the public solver notes on the Yukon
+`eigenlabs/qwen38-challenge` MLX-Fast leaderboard, which runs the same model
+under a bit-exactness contract. Credit where it is due:
+
+- **samcm** — established that a fixture's *acceptance band* decides whether
+  any draft-schedule measurement has a sign, that a saturated fixture
+  "cannot discriminate any schedule change at all", and that free-form prose
+  and repeated-frame material land in different bands. That is the finding
+  this section applies.
+- **Lieisyourlie** — persistent committed MTP-head history, the single
+  largest algorithmic jump on that board (+20.4%). Tungsten's
+  `enqueue_mtp_history` is the same idea, arrived at independently.
+- **scarletbright** — cheap K=1 rollback: speculation only pays once
+  rejection costs less than the work it saves.
+- **mega-dmitriy** — replacing eager per-boundary recurrent checkpoints with
+  a compact replay tape.
+- **hadakang** — cracking the verify width wall by chunking wide verifies,
+  and the sizing note on what a trained draft head actually costs.
+- **polymorf** — the cost-model depth policy (per-position acceptance EMAs
+  plus a greedy marginal rule) that Tungsten's adaptive `mtp-auto` mirrors.
+- **newjordan, audreyt, vibecodooor, tanishq-dubey, noskillcoding,
+  DawgZter** — the schedule-constant and declared-head work that showed how
+  much of the remaining margin lives in calibration rather than kernels.
+- **jasonjmcghee** — the correct statement of that benchmark's
+  serial-denominator contract, which is why shared-path wins are measured
+  differently there than here (Tungsten reports absolute tok/s, so every
+  shared-path win counts in full — a simpler situation).
+- **androolloyd, EternaPeptix** — identifying seed prefill as a large,
+  largely untouched cost pool inside the timed window.
+- **Claude Opus 5 (multiple accounts)** — falsifying the register-cliff
+  theory for multi-row QMV by direct measurement, which is why the row-split
+  variants here were not re-litigated.
+
 ### K/V cache overflow now fails loudly
 
 `MAX_POS` is 128 and the caches are fixed at that size. Exceeding it did not

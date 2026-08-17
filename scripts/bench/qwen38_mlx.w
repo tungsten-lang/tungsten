@@ -77,6 +77,7 @@ full_history_mtp = ARGV.size() > 4 && ARGV[4] == "full-history"
 full_draft_vocab = legacy_mtp || (ARGV.size() > 4 && ARGV[4] == "full-draft-vocab")
 profile_components = ARGV.size() > 4 && ARGV[4] == "profile"
 profile_prompt_tokens = ARGV.size() > 5 ? ARGV[5].to_i() : 5
+triplet_variant = ARGV.size() > 6 ? ARGV[6] : "auto"
 legacy_reductions = ARGV.size() > 6 && ARGV[6] == "legacy-reductions"
 if profile_prompt_tokens < 1 then raise "profile prompt length must be positive"
 # The K/V caches are fixed at MAX_POS rows, and overflowing them does NOT
@@ -575,7 +576,14 @@ rope_power = ~2.0 / ROT_DIM
   output = spec[2]
   kdim = spec[3]
   rows = spec[4]
-  if kdim == FFN || rows == N_VOCAB
+  # The wide/r1 split below was chosen from ISOLATED kernel timings. On this
+  # kernel family isolated timings can inverse the in-situ answer: a 44-89 MB
+  # weight tile re-read back to back is served by the system cache, while in
+  # the real forward 18 GB streams past and nothing is resident. ARGV[6] =
+  # "r1"|"wide" forces one variant everywhere so the split can be re-checked
+  # at the full-model level.
+  use_wide = triplet_variant == "wide" || (triplet_variant == "auto" && (kdim == FFN || rows == N_VOCAB))
+  if use_wide
     metal_dispatch_groups(queue, scaled_triplet_pipe,
       [w[0], w[1], input, output, kdim, rows, w[2]], (rows + 3) / 4, 64)
   else
@@ -588,7 +596,8 @@ rope_power = ~2.0 / ROT_DIM
   residual = spec[2]
   kdim = spec[3]
   rows = spec[4]
-  if kdim == FFN
+  use_wide_res = triplet_variant == "wide" || (triplet_variant == "auto" && kdim == FFN)
+  if use_wide_res
     metal_dispatch_groups(queue, scaled_triplet_res_pipe,
       [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + 3) / 4, 64)
   else

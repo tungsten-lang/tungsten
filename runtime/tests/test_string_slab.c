@@ -37,6 +37,7 @@ static void encode_static_slab_string(uint8_t *slab_data, uint32_t slot_index, c
     uint8_t flags = W_SFLAG_INLINE;
 
     if (len > W_SLAB_SSO_MAX) flags |= W_SFLAG_CONTINUATION;
+    flags |= W_SFLAG_ASCII;  /* all fixtures in this helper are ASCII */
     slot[0] = flags;
     slot[1] = (uint8_t)len;
 

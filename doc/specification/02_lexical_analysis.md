@@ -465,38 +465,15 @@ The following escape sequences are recognized:
 [U+0060]: http://codepoints.net/U+0060
 [U+007F]: http://codepoints.net/U+007F
 
-### 2.8.3 ASCII-only Strings
+### 2.8.3 ASCII Literals
 
-An ASCII string represents a sequence of ASCII characters.
+An ASCII literal produces the same runtime `String` class as a double-quoted literal,
+but its source text is restricted to bytes `0x00` through `0x7F`.
 
-ASCII string literals are described by the following lexical definitions:
+ASCII literals are described by the following lexical definitions:
 
-    LiteralASCII = "'" { ASCIIPart } "'" .
-    ASCIIPart    = ASCIIChar | ASCIIEscape | ASCIIExp .
-    ASCIIChar    = (* any ASCII character except "\" or newline or "'" *) .
-    Character    = "\U{00}"…"\U{10FFFF}" .
-    ASCIIExp     = "[" Expression "]" .
-    ASCIIEscape  =
-                 | "\0"
-                 | "\a"
-                 | "\b"
-                 | "\c"
-                 | "\e"
-                 | "\f"
-                 | "\l"
-                 | "\n"
-                 | "\r"
-                 | "\s"
-                 | "\t"
-                 | "\v"
-                 | "\""
-                 | "\'"
-                 | "\["
-                 | "\\"
-                 | "\x" Hex Hex
-                 | "\o" Octal Octal Octal
-                 | "\" Character
-                 .
+    LiteralASCII = "'" { ASCIIChar } "'" .
+    ASCIIChar    = (* any character U+0000…U+007F except "'" *) .
 
 ```
 |b5 b6 b7 ---------> |000|001|010|011|100|101|110|111|
@@ -650,11 +627,19 @@ ASCII string literals are described by the following lexical definitions:
 | 0b111_1110 | 0o176 | 126 | 0x7E | ~   |     |    |                               |
 | 0b111_1111 | 0o177 | 127 | 0x7F | DEL | ^?  |    | Delete                        |
 
-ASCII literals are delimited by matching single quotes. The backslash character is used to escape characters that are unprintable or otherwise have special meaning, such as a newline, backslash itself, or the single quote character.
+The first following single quote terminates the literal. There are no escape
+sequences and no interpolation: backslash and square brackets are ordinary
+bytes. A single quote cannot occur in the literal, and non-ASCII source text
+is a lexical error; use a double-quoted string for either case.
+
+    path = 'C:\tmp\[name]'  # exactly these bytes; `name` is not evaluated
+
+The runtime derives the ASCII property from content, not quote style, so an
+ASCII-only double-quoted string receives the same optimized representation.
 
 ### 2.8.4 String interpolation
 
-String interpolation uses square brackets: **`[]`**.
+Double-quoted string interpolation uses square brackets: **`[]`**.
 
     name = "Tungsten"
     puts "Hello [name]"

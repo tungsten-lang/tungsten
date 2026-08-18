@@ -449,6 +449,8 @@ module Tungsten
         end
 
         return scan_string
+      when 39
+        return scan_ascii_literal
       when 102
         if (fe80_start? || (hex_reference_literal_possible? && network_literal_shape_possible?)) && scan_network_literal
           return
@@ -1202,6 +1204,23 @@ module Tungsten
 
       advance
       set_token(:KEY, content, @row, start_col)
+    end
+
+    # ASCII literal: strict ASCII, no escapes, no interpolation. A byte
+    # loop is enough here; the native Lex32 path uses its SIMD quote scanner.
+    def scan_ascii_literal
+      start_col = @col
+      advance
+      content_start = @pos
+      loop do
+        error "unterminated ASCII literal" if eof?
+        break if byte == 39
+        error "ASCII literals accept ASCII bytes only" if byte >= 128
+        advance
+      end
+      content = slice(content_start)
+      advance
+      set_token(:STRING, content, @row, start_col)
     end
 
     def scan_string

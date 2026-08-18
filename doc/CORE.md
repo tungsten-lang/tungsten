@@ -190,7 +190,7 @@ summary from the source header, and a link to the source.
 | `SmallArray` | `+ SmallArray` | Frozen, stack-allocatable, packed array. Up to 255 elements. | [`core/small_array.w`](../core/small_array.w) |
 | `Socket` | `+ Socket` | Socket — nonblocking TCP sockets integrated with Tungsten's event loop. | [`core/socket.w`](../core/socket.w) |
 | `String` | `+ String` | Native String methods that are safe to express over the WValue itself. | [`core/string_native.w`](../core/string_native.w) |
-| `StringBuffer` | `+ StringBuffer` | string_buffer - mutable UTF-8 string builder | [`core/string_buffer.w`](../core/string_buffer.w) |
+| `StringBuffer` | `+ StringBuffer` | string_buffer - mutable UTF-8 byte-string builder | [`core/string_buffer.w`](../core/string_buffer.w) |
 | `Symbol` | `+ Symbol` | — | [`core/symbol.w`](../core/symbol.w) |
 | `System` | `+ System` | — | [`core/system.w`](../core/system.w) |
 | `Thread` | `+ Thread` | Thread — a native OS thread (pthread). | [`core/thread.w`](../core/thread.w) |

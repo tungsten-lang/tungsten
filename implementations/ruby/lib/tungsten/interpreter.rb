@@ -4494,7 +4494,9 @@ module Tungsten
         return NO_DIRECT_CALL unless no_call_args?(arg_nodes)
 
         case recv
-        when ::Array, ::Hash, ::String, Tungsten::ByteArray
+        when ::String
+          recv.bytesize
+        when ::Array, ::Hash, Tungsten::ByteArray
           recv.length
         else
           NO_DIRECT_CALL
@@ -4601,7 +4603,7 @@ module Tungsten
         when 1
           recv.slice(direct_arg_value(arg_nodes[0]))
         when 2
-          recv.slice(direct_arg_value(arg_nodes[0]), direct_arg_value(arg_nodes[1]))
+          recv.byteslice(direct_arg_value(arg_nodes[0]), direct_arg_value(arg_nodes[1]))
         else
           NO_DIRECT_CALL
         end

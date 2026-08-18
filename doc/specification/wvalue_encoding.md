@@ -205,6 +205,13 @@ bit  0:     0 (string flag)
 Mode value 6 is used for slab-backed interned strings and symbols. Mode value 7
 indicates a heap string or symbol.
 
+The mode field is exactly three bits, so there is no mode 8. A second heap
+layout would require an in-object discriminator and a conditional payload
+offset; the implementation instead keeps one fixed four-byte `WString` header.
+
+ASCII is derived without another field: the value is ASCII exactly when none
+of the high bits of its active payload bytes are set.
+
 ### 4.2 Slab Interned Strings (SSO-61)
 
 Strings and symbols of 6-61 bytes can live in the permanent string slab. The
@@ -224,6 +231,9 @@ two contiguous slots:
 - slot 0: `[flags][length][30 bytes of payload]`
 - slot 1 when needed: `[32 bytes of payload]`
 
+Primary-slot flag bit 3 records that every payload byte is ASCII. Bits 4-7
+remain spare.
+
 Single-slot strings are NUL-terminated by zero-fill. Two-slot strings use the
 second slot entirely for the trailing payload bytes plus the NUL terminator.
 
@@ -233,7 +243,7 @@ Strings longer than 61 bytes use a heap-allocated `WString`:
 
 ```c
 typedef struct WString {
-    uint32_t len;
+    uint32_t len_flags; // bit 31 ASCII; bits 0-30 byte length
     char data[];  // UTF-8, null-terminated
 } WString;
 ```
@@ -245,6 +255,17 @@ bits 47-4: WString* (masked with 0x0000_FFFF_FFFF_FFF0)
 bits 3-1:  7 (heap sentinel)
 bit  0:    0 (string flag)
 ```
+
+`WString` remains a four-byte header (`data` is at offset 4). Heap allocation
+itself is 16-byte aligned for pointer tagging; byte payload operations do not
+require 8-byte alignment. The packed length caps one String at `2^31 - 1`
+bytes.
+
+Ropes cache the same fact in a flag byte inserted into their existing seven
+bytes of alignment padding. `StringBuffer` uses flag bit 6, clearing it after
+the first non-ASCII append. Flattening either structure transfers the cached
+fact to the resulting immutable String. No first-multibyte high-water mark is
+stored.
 
 ### 4.4 Symbols
 

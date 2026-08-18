@@ -426,6 +426,9 @@ module Tungsten
       elsif (text = scan(/%f(32|64)\[/))
         token :FLOAT_ARRAY, text[2, 2]
 
+      elsif skip_scan(/'/)
+        scan_ascii_literal
+
       elsif skip_scan(/"(?!>(?:\s|$))/)
         scan_string
 
@@ -1166,6 +1169,15 @@ module Tungsten
       else
         token num_type, num_str
       end
+    end
+
+    # ASCII literal: strict ASCII, no escapes, no interpolation. The
+    # opening quote has already been consumed; the first next quote closes it.
+    def scan_ascii_literal
+      str = scan(/[^']*/)
+      error "unterminated ASCII literal" unless skip_scan(/'/)
+      error "ASCII literals accept ASCII bytes only" unless str.ascii_only?
+      token :STRING, str
     end
 
     def scan_string

@@ -1,6 +1,11 @@
-# Tungsten strings are an immutable sequence of UTF-8 encoded codepoints.
+# Tungsten strings are immutable UTF-8 byte sequences. `size` and `length`
+# report bytes; `[]` indexes Unicode code points, using direct O(1) byte access
+# when the representation's ASCII bit is set. `slice(start, length)` remains a
+# raw byte slice for parsers and codecs.
 #
-# This class abstracts over the encoding and semantics of Unicode.
+# ASCII literals accept ASCII bytes only and have no escapes or
+# interpolation. They use this same String class. ASCII is a content property,
+# so ASCII-only double-quoted and dynamically built strings share the fast path.
 #
 # String
 # └─ CodePoint
@@ -16,9 +21,6 @@
 # Tests
 # - https://gist.github.com/mzsanford/159484
 #
-# Notes
-# - Jump table for slices O(1) vs O(n)
-#
 # East Asian character shapes have four basic traditions:
 # * traditional Chinese
 # * simplified Chinese
@@ -32,7 +34,7 @@
 # Glyph: the visual representation of a grapheme.
 # Rune: combining character sequence
 #
-# String.size            -> number of runes
+# String.size            -> number of bytes
 # String.characters.size -> number of characters
 # String.codepoints.size -> number of codepoints
 # String.bytes.size      -> number of bytes
@@ -169,7 +171,7 @@
   -> seek/1
 
   -> size
-    codepoints.size
+    bytes.size
 
   -> split(separator: " ")
 

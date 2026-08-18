@@ -83,9 +83,13 @@ static int64_t integer_low_i64(WValue v);
 static void die(const char *msg);
 static void dief(const char *fmt, ...);
 static WValue w_string_n(const char *s, size_t len);
+static WValue w_string_n_known_ascii(const char *s, size_t len, int ascii);
+static WValue w_string_take_known_ascii(char *s, size_t len, int ascii);
+static int w_bytes_ascii_p(const uint8_t *data, size_t len);
+static int w_string_ascii_p(WValue v);
 static uint64_t w_hash_wyhash(const uint8_t *data, size_t len);
-static WValue w_slab_intern(const char *s, size_t len, uint64_t h);
-static uint32_t w_slab_write_string(const char *s, size_t len);
+static WValue w_slab_intern(const char *s, size_t len, uint64_t h, int ascii);
+static uint32_t w_slab_write_string(const char *s, size_t len, int ascii);
 static const char *w_slab_read(uint32_t index, size_t *len);
 static int w_slab_equals_bytes(uint32_t index, const char *s, size_t len);
 static inline WValue w_int_to_str(int64_t n);
@@ -19305,7 +19309,8 @@ static inline WValue w_string_small_fresh(const char *s, size_t len) {
     } else {
         ws = (WString *)malloc(sizeof(WString) + len + 1);
     }
-    ws->len = (uint32_t)len;
+    w_heap_string_set_meta(ws, (uint32_t)len,
+                           w_bytes_ascii_p((const uint8_t *)s, len));
     memcpy(ws->data, s, len);
     ws->data[len] = '\0';
     return w_box_heap_str(ws);
@@ -21319,7 +21324,7 @@ static uint32_t w_slab_alloc(int n) {
 /* Write a string into the slab. Returns slab index, or 0 on failure.
  * Primary slot: [flags][length][30 bytes of data]
  * Continuation slot: [32 bytes of data] */
-static uint32_t w_slab_write_string(const char *s, size_t len) {
+static uint32_t w_slab_write_string(const char *s, size_t len, int ascii) {
     int nslots = (len <= W_SLAB_SSO_MAX) ? 1 : 2;
     uint32_t idx = w_slab_alloc(nslots);
     if (idx == 0) return 0;
@@ -21327,6 +21332,7 @@ static uint32_t w_slab_write_string(const char *s, size_t len) {
     uint8_t *slot = w_slab_slot(idx);
     uint8_t flags = W_SFLAG_INLINE;
     if (nslots == 2) flags |= W_SFLAG_CONTINUATION;
+    if (ascii) flags |= W_SFLAG_ASCII;
     slot[0] = flags;
     slot[1] = (uint8_t)len;
 
@@ -21437,7 +21443,7 @@ static WValue w_slab_lookup_existing(const char *s, size_t len, uint64_t h) {
 /* Intern a string while the slab is mutable. Returns mode 6, or mode 7 if
  * the arena is exhausted. Frozen lookup/fallback is handled by w_string_n
  * before this function is called. */
-static WValue w_slab_intern(const char *s, size_t len, uint64_t h) {
+static WValue w_slab_intern(const char *s, size_t len, uint64_t h, int ascii) {
     /* Check for existing entry */
     if (g_intern.cap == 0 ||
         g_intern.count * W_INTERN_LOAD_DEN >= g_intern.cap * W_INTERN_LOAD_NUM)
@@ -21453,11 +21459,11 @@ static WValue w_slab_intern(const char *s, size_t len, uint64_t h) {
         pos = (pos + 1) & mask;
     }
     /* Not found — write to slab and insert */
-    uint32_t idx = w_slab_write_string(s, len);
+    uint32_t idx = w_slab_write_string(s, len, ascii);
     if (idx == 0) {
         /* Slab exhausted — fall back to mode 7 heap */
         WString *ws = malloc(sizeof(WString) + len + 1);
-        ws->len = (uint32_t)len;
+        w_heap_string_set_meta(ws, (uint32_t)len, ascii);
         memcpy(ws->data, s, len + 1);
         return w_box_heap_str(ws);
     }
@@ -21471,8 +21477,9 @@ static WValue w_slab_intern(const char *s, size_t len, uint64_t h) {
 /* Skips mutex when no goroutines have been spawned (single-threaded fast path). */
 static int g_slab_needs_lock = 0;  /* set to 1 when first goroutine spawns */
 
-/* Length-aware string constructor — avoids strlen when caller already knows length. */
-static WValue w_string_n(const char *s, size_t len) {
+/* Length-aware string constructor with already-derived ASCII metadata. */
+static WValue w_string_n_known_ascii(const char *s, size_t len, int ascii) {
+    if (len > W_STRING_LEN_MASK) die("string exceeds 31-bit byte length limit");
     if (len <= 5) return w_box_inline_str(s, len);
 
     /* Lazy slab init on first use */
@@ -21481,7 +21488,7 @@ static WValue w_string_n(const char *s, size_t len) {
     /* Too large for slab → mode 7 heap */
     if (len > W_SLAB_SSO2_MAX) {
         WString *ws = malloc(sizeof(WString) + len + 1);
-        ws->len = (uint32_t)len;
+        w_heap_string_set_meta(ws, (uint32_t)len, ascii);
         memcpy(ws->data, s, len);
         ws->data[len] = '\0';
         return w_box_heap_str(ws);
@@ -21494,25 +21501,32 @@ static WValue w_string_n(const char *s, size_t len) {
         if (existing != W_UNDEF) return existing;
 
         WString *ws = malloc(sizeof(WString) + len + 1);
-        ws->len = (uint32_t)len;
+        w_heap_string_set_meta(ws, (uint32_t)len, ascii);
         memcpy(ws->data, s, len);
         ws->data[len] = '\0';
         return w_box_heap_str(ws);
     }
 
     if (g_slab_needs_lock) pthread_mutex_lock(&g_string_slab.lock);
-    WValue v = w_slab_intern(s, len, w_hash_wyhash((const uint8_t *)s, len));
+    WValue v = w_slab_intern(s, len, w_hash_wyhash((const uint8_t *)s, len), ascii);
     if (g_slab_needs_lock) pthread_mutex_unlock(&g_string_slab.lock);
 
     return v;
+}
+
+/* General constructor: derive the representation-invariant ASCII fact once. */
+static WValue w_string_n(const char *s, size_t len) {
+    return w_string_n_known_ascii(s, len,
+        w_bytes_ascii_p((const uint8_t *)s, len));
 }
 
 WValue w_string(const char *s) {
     return w_string_n(s, strlen(s));
 }
 
-/* Intern from a malloced buffer, then free the original */
-static WValue w_string_take(char *s, size_t len) {
+/* Intern from a malloced buffer, then free the original. */
+static WValue w_string_take_known_ascii(char *s, size_t len, int ascii) {
+    if (len > W_STRING_LEN_MASK) die("string exceeds 31-bit byte length limit");
     if (len <= 5) {
         WValue v = w_box_inline_str(s, len);
         free(s);
@@ -21538,19 +21552,24 @@ static WValue w_string_take(char *s, size_t len) {
 
     if (g_string_slab.frozen || len > W_SLAB_SSO2_MAX) {
         WString *ws = malloc(sizeof(WString) + len + 1);
-        ws->len = (uint32_t)len;
+        w_heap_string_set_meta(ws, (uint32_t)len, ascii);
         memcpy(ws->data, s, len + 1);
         free(s);
         return w_box_heap_str(ws);
     }
 
     if (g_slab_needs_lock) pthread_mutex_lock(&g_string_slab.lock);
-    WValue v = w_slab_intern(s, len, w_hash_wyhash((const uint8_t *)s, len));
+    WValue v = w_slab_intern(s, len, w_hash_wyhash((const uint8_t *)s, len), ascii);
     if (g_slab_needs_lock) pthread_mutex_unlock(&g_string_slab.lock);
 
     free(s);
 
     return v;
+}
+
+static WValue w_string_take(char *s, size_t len) {
+    return w_string_take_known_ascii(s, len,
+        w_bytes_ascii_p((const uint8_t *)s, len));
 }
 
 void w_str_data(WValue v, char buf[6], const char **out, size_t *len) {
@@ -21587,7 +21606,7 @@ void w_str_data(WValue v, char buf[6], const char **out, size_t *len) {
         /* Mode 7: heap string */
         WString *ws = w_as_heap_str(v);
         *out = ws->data;
-        *len = ws->len;
+        *len = w_heap_string_len(ws);
     }
 }
 
@@ -34595,6 +34614,40 @@ int64_t w_lex32_scan_to_cp(int64_t data_ptr, int64_t length, int64_t pos, int64_
     }
 }
 
+/* Lex64 keeps the codepoint in bits 18..38. Four unrolled two-lane loads
+ * inspect eight source characters per loop. Unlike the narrower scanners,
+ * this helper is explicitly length-bounded: the default Lex64 packer only
+ * promises one sentinel element, while language-specific packers currently
+ * provide a wider tail pad. */
+int64_t w_lex64_scan_to_cp(int64_t data_ptr, int64_t length, int64_t pos, int64_t cp_i64) {
+    uint64_t *lc = (uint64_t *)(uintptr_t)data_ptr;
+    const uint64_t cp_mask = UINT64_C(0x0000007ffffc0000);
+    const uint64_t target = ((uint64_t)cp_i64 << 18) & cp_mask;
+    uint64x2_t v_mask = vdupq_n_u64(cp_mask);
+    uint64x2_t v_target = vdupq_n_u64(target);
+
+    while (pos + 8 <= length) {
+        uint64x2_t m0 = vceqq_u64(vandq_u64(vld1q_u64(lc + pos), v_mask), v_target);
+        uint64x2_t m1 = vceqq_u64(vandq_u64(vld1q_u64(lc + pos + 2), v_mask), v_target);
+        uint64x2_t m2 = vceqq_u64(vandq_u64(vld1q_u64(lc + pos + 4), v_mask), v_target);
+        uint64x2_t m3 = vceqq_u64(vandq_u64(vld1q_u64(lc + pos + 6), v_mask), v_target);
+        uint64_t any = vgetq_lane_u64(m0, 0) | vgetq_lane_u64(m0, 1) |
+                       vgetq_lane_u64(m1, 0) | vgetq_lane_u64(m1, 1) |
+                       vgetq_lane_u64(m2, 0) | vgetq_lane_u64(m2, 1) |
+                       vgetq_lane_u64(m3, 0) | vgetq_lane_u64(m3, 1);
+        if (any != 0) {
+            for (int i = 0; i < 8; i++)
+                if ((lc[pos + i] & cp_mask) == target) return pos + i;
+        }
+        pos += 8;
+    }
+    while (pos < length) {
+        if ((lc[pos] & cp_mask) == target) return pos;
+        pos++;
+    }
+    return length;
+}
+
 /* scan_to_cp_or: find the first LexChar whose codepoint matches
  * EITHER of two targets, or the sentinel. Used for string and character
  * literal content scans where the loop terminates on the closing quote
@@ -34819,6 +34872,17 @@ int64_t w_lex32_scan_to_cp(int64_t data_ptr, int64_t length, int64_t pos, int64_
         if (w == 0 || (w & 0xFFFFF800u) == target) return pos;
         pos++;
     }
+}
+
+int64_t w_lex64_scan_to_cp(int64_t data_ptr, int64_t length, int64_t pos, int64_t cp_i64) {
+    uint64_t *lc = (uint64_t *)(uintptr_t)data_ptr;
+    uint64_t cp_mask = UINT64_C(0x0000007ffffc0000);
+    uint64_t target = ((uint64_t)cp_i64 << 18) & cp_mask;
+    while (pos < length) {
+        if ((lc[pos] & cp_mask) == target) return pos;
+        pos++;
+    }
+    return length;
 }
 
 int64_t w_lex16_scan_to_cp_or(int64_t data_ptr, int64_t length, int64_t pos,
@@ -35124,7 +35188,7 @@ int64_t w_string_byte_length(int64_t str_wval) {
         return 0;
     }
     WString *ws = w_as_heap_str(v);
-    return ws ? (int64_t)ws->len : 0;
+    return ws ? (int64_t)w_heap_string_len(ws) : 0;
 }
 
 /* First byte of a String, without allocating a one-byte slice. -1 denotes
@@ -35169,6 +35233,44 @@ static int w_bytes_ascii_p(const uint8_t *data, size_t len) {
         if (data[i] >= 0x80) return 0;
         i++;
     }
+    return 1;
+}
+
+/* ASCII is a content property shared by every String/Symbol representation.
+ * Inline values derive it from the five payload-byte high bits; all allocated
+ * representations cache it in an otherwise spare header bit. */
+static int w_string_ascii_p(WValue v) {
+    if (w_is_rope(v))
+        return ((((WRope *)w_as_ptr(v))->flags & W_ROPE_FLAG_ASCII) != 0);
+    if (!w_is_stringy(v)) return 0;
+
+    size_t mode = (v >> 1) & 7;
+    if (mode <= 5)
+        return w_inline_str_ascii_p(v);
+    if (mode == 6) {
+        uint8_t *slot = w_slab_slot(w_as_slab_index(v));
+        return (slot[0] & W_SFLAG_ASCII) != 0;
+    }
+    return w_heap_string_ascii_p(w_as_heap_str(v));
+}
+
+/* Width of one valid UTF-8 code point for subscript traversal. Invalid input
+ * advances one byte so raw data received from sockets remains addressable. */
+static size_t w_utf8_index_width(const char *s, size_t remaining) {
+    if (remaining == 0) return 0;
+    uint8_t c0 = (uint8_t)s[0];
+    if (c0 < 0x80) return 1;
+    if (c0 >= 0xC2 && c0 <= 0xDF && remaining >= 2 &&
+        ((uint8_t)s[1] & 0xC0) == 0x80) return 2;
+    if (c0 >= 0xE0 && c0 <= 0xEF && remaining >= 3 &&
+        ((uint8_t)s[1] & 0xC0) == 0x80 && ((uint8_t)s[2] & 0xC0) == 0x80 &&
+        !(c0 == 0xE0 && (uint8_t)s[1] < 0xA0) &&
+        !(c0 == 0xED && (uint8_t)s[1] > 0x9F)) return 3;
+    if (c0 >= 0xF0 && c0 <= 0xF4 && remaining >= 4 &&
+        ((uint8_t)s[1] & 0xC0) == 0x80 && ((uint8_t)s[2] & 0xC0) == 0x80 &&
+        ((uint8_t)s[3] & 0xC0) == 0x80 &&
+        !(c0 == 0xF0 && (uint8_t)s[1] < 0x90) &&
+        !(c0 == 0xF4 && (uint8_t)s[1] > 0x8F)) return 4;
     return 1;
 }
 
@@ -43496,7 +43598,8 @@ WValue w_rope_flatten(WValue v) {
         uint32_t pos = 0;
         w_rope_write(v, buf, &pos);
         buf[total] = '\0';
-        r->flat = w_string_take(buf, total);
+        r->flat = w_string_take_known_ascii(
+            buf, total, (r->flags & W_ROPE_FLAG_ASCII) != 0);
     }
     return r->flat;
 }
@@ -43532,8 +43635,9 @@ static inline uint32_t w_str_extract_fast(WValue v, char *buf) {
          * both sides re-copy through the w_rope_write fallback. Callers size
          * buf for the combined length, which bounds each operand's len. */
         WString *ws = w_as_heap_str(v);
-        memcpy(buf, ws->data, ws->len);
-        return ws->len;
+        uint32_t len = w_heap_string_len(ws);
+        memcpy(buf, ws->data, len);
+        return len;
     }
     return 0;  /* rope, symbol — caller uses w_rope_write */
 }
@@ -43653,6 +43757,8 @@ WValue w_string_from_byte(WValue b_v) {
 WValue w_str_concat(WValue a, WValue b) {
     uint32_t alen = w_rope_len(a);
     uint32_t blen = w_rope_len(b);
+    if (blen > W_STRING_LEN_MASK || alen > W_STRING_LEN_MASK - blen)
+        die("string exceeds 31-bit byte length limit");
     uint32_t total = alen + blen;
     /* Short results: flatten immediately.
      * Avoids rope node malloc + later flatten for hash keys, comparisons, etc. */
@@ -43696,6 +43802,8 @@ WValue w_str_concat(WValue a, WValue b) {
     }
     WRope *r = malloc(sizeof(WRope));
     r->type = W_TYPE_ROPE;
+    r->flags = (w_string_ascii_p(a) && w_string_ascii_p(b))
+        ? W_ROPE_FLAG_ASCII : 0;
     r->left = a;
     r->right = b;
     r->total_len = total;
@@ -43757,6 +43865,8 @@ WValue w_str_append(WValue str, WValue suffix) {
      * literals — w_eq's cross-mode skip assumes those lengths are always
      * inline/slab — which surfaced as `("xy" << "z") != "xyz"` and, once the
      * slab froze at startup, as Array#join results comparing unequal. */
+    if (sfx_len > W_STRING_LEN_MASK || str_len > W_STRING_LEN_MASK - sfx_len)
+        die("string exceeds 31-bit byte length limit");
     size_t new_len = str_len + sfx_len;
     if (new_len <= W_SLAB_SSO2_MAX) {
         char joined[62];
@@ -43767,7 +43877,9 @@ WValue w_str_append(WValue str, WValue suffix) {
 
     /* Always allocate new buffer (safe for aliased values) */
     WString *ws = malloc(sizeof(WString) + new_len + 1);
-    ws->len = (uint32_t)new_len;
+    w_heap_string_set_meta(
+        ws, (uint32_t)new_len,
+        w_string_ascii_p(str) && w_string_ascii_p(suffix));
     memcpy(ws->data, str_data, str_len);
     memcpy(ws->data + str_len, sfx_data, sfx_len);
     ws->data[new_len] = '\0';
@@ -44442,7 +44554,7 @@ WValue w_strbuf_recycle_or_new(int64_t cap) {
         w_pool_stat_hit(POOL_KIND_STRBUF);
         WValue v = g_strbuf_pool[--g_strbuf_pool_count];
         WStrBuf *sb = (WStrBuf *)w_as_ptr(v);
-        sb->flags = 0;
+        sb->flags = W_STRBUF_FLAG_ASCII;
         sb->size = 0;
         sb->data[0] = '\0';
         if (cap > sb->cap) {
@@ -44454,7 +44566,7 @@ WValue w_strbuf_recycle_or_new(int64_t cap) {
     w_pool_stat_miss(POOL_KIND_STRBUF);
     if (cap < 16) cap = 16;
     WStrBuf *sb = malloc(sizeof(WStrBuf));
-    sb->flags = 0;  /* type field removed (promoted to W_SUBTAG_STRBUF) */
+    sb->flags = W_STRBUF_FLAG_ASCII;  /* empty buffer starts ASCII */
     sb->data = malloc(cap);
     sb->data[0] = '\0';
     sb->size = 0;
@@ -52189,7 +52301,7 @@ WValue w_string_idx_raw(WValue r, int64_t idx) {
      * known one-byte result directly: no w_str_data buffer and no strlen. */
     if (!w_is_rope(r) && w_is_stringy(r)) {
         int64_t len = (int64_t)((r >> 1) & 7);
-        if (len <= 5) {
+        if (len <= 5 && w_inline_str_ascii_p(r)) {
             return w_sso_idx(r, idx);
         }
     }
@@ -52200,9 +52312,37 @@ WValue w_string_idx_raw(WValue r, int64_t idx) {
     const char *s;
     size_t len;
     w_str_data(r, buf, &s, &len);
-    if (idx < 0) idx += (int64_t)len;
-    if (idx < 0 || idx >= (int64_t)len) return W_NIL;
-    return w_box_inline_str(s + idx, 1);
+    /* ASCII content (each representation's ASCII bit): byte == code point,
+     * so the subscript stays O(1) for every storage mode. */
+    if (w_string_ascii_p(r)) {
+        if (idx < 0) idx += (int64_t)len;
+        if (idx < 0 || idx >= (int64_t)len) return W_NIL;
+        return w_box_inline_str(s + idx, 1);
+    }
+
+    /* Non-ASCII indexing is by UTF-8 code point, matching the interpreter.
+     * Count only for a negative index; a non-negative index needs one walk.
+     * Invalid/truncated leading bytes remain individually addressable. */
+    if (idx < 0) {
+        int64_t count = 0;
+        size_t p = 0;
+        while (p < len) {
+            p += w_utf8_index_width(s + p, len - p);
+            count++;
+        }
+        idx += count;
+    }
+    if (idx < 0) return W_NIL;
+
+    int64_t current = 0;
+    size_t p = 0;
+    while (p < len && current < idx) {
+        p += w_utf8_index_width(s + p, len - p);
+        current++;
+    }
+    if (p >= len || current != idx) return W_NIL;
+    size_t width = w_utf8_index_width(s + p, len - p);
+    return w_string_n_known_ascii(s + p, width, width == 1 && (uint8_t)s[p] < 0x80);
 }
 
 static WValue w_ic_string_idx(WValue r, WValue *a, int c) {
@@ -52274,9 +52414,7 @@ static WValue w_ic_string_ends_with(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_string_ascii_q(WValue r, WValue *a, int c) {
     (void)a; (void)c;
-    char buf[6]; const char *s; size_t len;
-    w_str_data(r, buf, &s, &len);
-    return w_bool(w_bytes_ascii_p((const uint8_t *)s, len));
+    return w_bool(w_string_ascii_p(r));
 }
 static WValue w_ic_string_valid_utf8_q(WValue r, WValue *a, int c) {
     (void)a; (void)c;
@@ -55881,7 +56019,8 @@ WValue w_int_to_s(WValue r) {
     WValue s = w_to_s(r);
     if (w_is_heap_str(s)) {
         WString *ws = w_as_heap_str(s);
-        return w_string_n(ws->data, ws->len);
+        return w_string_n_known_ascii(
+            ws->data, w_heap_string_len(ws), w_heap_string_ascii_p(ws));
     }
     return s;
 }
@@ -58945,6 +59084,8 @@ WValue w_string_repeat(WValue recv, WValue count_v) {
     int64_t n = w_as_int(count_v);
     if (n < 0) die("repeat count must be non-negative");
     if (n == 0 || str_len == 0) return w_string("");
+    if ((uint64_t)n > W_STRING_LEN_MASK / str_len)
+        die("string exceeds 31-bit byte length limit");
     size_t total = str_len * (size_t)n;
     if (total <= 5) {
         char tmp[6];
@@ -58954,7 +59095,7 @@ WValue w_string_repeat(WValue recv, WValue count_v) {
     }
     /* Allocate WString directly — skip interning for large results */
     WString *ws = malloc(sizeof(WString) + total + 1);
-    ws->len = total;
+    w_heap_string_set_meta(ws, (uint32_t)total, w_string_ascii_p(recv));
     memcpy(ws->data, str, str_len);
     /* Doubling copy: O(log n) memcpy calls instead of O(n) */
     size_t copied = str_len;
@@ -59190,7 +59331,7 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             }
         }
 
-        /* Response.new(status, body) — fast path avoids strlen by using WString len.
+        /* Response.new(status, body) — fast path avoids strlen by using the stored byte length.
            User-defined classes named Response still need normal constructor dispatch. */
         if (strcmp(klass->name, "Response") == 0 && w_hash_key_eq(name, WN_new) &&
             w_method_lookup(klass, WN_new) == NULL) {
@@ -60587,7 +60728,8 @@ extern ssize_t w_tls_write(WSocket *s, const char *buf, size_t len);
  * that boundary: a short read belongs entirely in the WValue, not in the
  * oversized buffer we happened to reserve for it. */
 static inline WValue w_socket_read_string(WString *ws, size_t bytes) {
-    ws->len = (uint32_t)bytes;
+    w_heap_string_set_meta(ws, (uint32_t)bytes,
+                           w_bytes_ascii_p((const uint8_t *)ws->data, bytes));
     ws->data[bytes] = '\0';
     if (bytes <= 5) {
         WValue value = w_box_inline_str(ws->data, bytes);
@@ -60603,6 +60745,8 @@ WValue w_socket_read(WValue sock, WValue buf_size) {
 
     int64_t n = w_as_int(buf_size);
     if (n <= 0) n = 4096;
+    if ((uint64_t)n > W_STRING_LEN_MASK)
+        die("socket read buffer exceeds 31-bit string byte length limit");
 
     /* Read deadline (Socket#set_timeout): computed once per read call.
      * 0 = no deadline (park indefinitely, as before). */
@@ -65666,7 +65810,7 @@ WValue w_strbuf_new(WValue cap_val) {
     int64_t cap = w_is_int(cap_val) ? w_as_int(cap_val) : 16;
     if (cap < 16) cap = 16;
     WStrBuf *sb = malloc(sizeof(WStrBuf));
-    sb->flags = 0;  /* type field removed (promoted to W_SUBTAG_STRBUF) */
+    sb->flags = W_STRBUF_FLAG_ASCII;  /* empty buffer starts ASCII */
     sb->data = malloc(cap);
     sb->data[0] = '\0';
     sb->size = 0;
@@ -65681,6 +65825,7 @@ WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap) {
     WValue v = *slot;
     if (v != W_NIL) {
         WStrBuf *sb = (WStrBuf *)w_as_ptr(v);
+        sb->flags = W_STRBUF_FLAG_ASCII;
         sb->size = 0;
         sb->data[0] = '\0';
         if (cap > sb->cap) {
@@ -65691,7 +65836,7 @@ WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap) {
     }
     if (cap < 16) cap = 16;
     WStrBuf *sb = malloc(sizeof(WStrBuf));
-    sb->flags = 0;  /* type field removed (promoted to W_SUBTAG_STRBUF) */
+    sb->flags = W_STRBUF_FLAG_ASCII;  /* empty buffer starts ASCII */
     sb->data = malloc(cap);
     sb->data[0] = '\0';
     sb->size = 0;
@@ -65717,6 +65862,7 @@ WValue w_strbuf_append(WValue buf, WValue str) {
      * outlier; it now agrees with them. */
     if (w_is_rope(str)) str = w_rope_flatten(str);
     if (!w_is_stringy(str)) die("expected string or symbol");
+    if (!w_string_ascii_p(str)) sb->flags &= (uint8_t)~W_STRBUF_FLAG_ASCII;
     char sbuf[6];
     const char *s;
     size_t slen;
@@ -65741,7 +65887,9 @@ WValue w_strbuf_to_s(WValue buf) {
      * which is the other half of the inconsistency fixed in
      * w_strbuf_append: String#+/#<</#size are all byte-exact, so
      * StringBuffer is too. */
-    return w_string_n(sb->data, (size_t)sb->size);
+    return w_string_n_known_ascii(
+        sb->data, (size_t)sb->size,
+        (sb->flags & W_STRBUF_FLAG_ASCII) != 0);
 }
 
 /* ---- Base64 storage boundaries ----
@@ -68568,9 +68716,9 @@ void w_value_free(WValue v) {
          * see w_string_small_fresh.  One slot per thread; an occupied slot
          * means a plain free, so this is at most a TLS load + two compares
          * on the non-parking path. */
-        if (w_str_park == NULL && ws->len <= W_STR_PARK_MAX) {
+        if (w_str_park == NULL && w_heap_string_len(ws) <= W_STR_PARK_MAX) {
             w_str_park = ws;
-            w_str_park_cap = ws->len;
+            w_str_park_cap = w_heap_string_len(ws);
             return;
         }
         free(ws);

@@ -155,7 +155,7 @@ static SlabFixture build_fixture(const char *name, uint32_t entry_count, LengthP
     for (uint32_t i = 0; i < entry_count; i++) {
         uint8_t len = length_for_pattern(pattern, i);
         uint8_t nslots = (len <= W_SLAB_SSO_MAX) ? 1 : 2;
-        uint8_t flags = W_SFLAG_INLINE;
+        uint8_t flags = W_SFLAG_INLINE | W_SFLAG_ASCII;
         if (nslots == 2) flags |= W_SFLAG_CONTINUATION;
 
         uint8_t *slot = fixture.blob + ((size_t)slot_index * W_SLAB_SLOT_SIZE);

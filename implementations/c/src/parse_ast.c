@@ -1713,16 +1713,18 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
       }
       break;
     case TC_K_STRING: {
-      // Only double-quoted strings interpolate. Single-quoted (`'...'`)
-      // strings stay literal — same convention as compiler/lib/lexer.w.
+      // Only double-quoted strings escape and interpolate. Single-quoted
+      // ASCII literals transfer their body byte-for-byte into a String.
       const char *body = text;
       size_t body_len = text_len;
       int double_quoted = 0;
+      int ascii_quoted = 0;
       if (body_len >= 2 && body[0] == '"' && body[body_len - 1] == '"') {
         double_quoted = 1;
         body++;
         body_len -= 2;
       } else if (body_len >= 2 && body[0] == '\'' && body[body_len - 1] == '\'') {
+        ascii_quoted = 1;
         body++;
         body_len -= 2;
       }
@@ -1731,7 +1733,10 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
       } else {
         node = node_hash(p, "string", pos, err);
         if (node.kind == TC_AST_HASH &&
-            !tc_ast_hash_set(node, "value", unquoted_string_ast(text, text_len, err), err)) {
+            !tc_ast_hash_set(node, "value",
+                             ascii_quoted
+                               ? tc_ast_string_copy(body, body_len, err)
+                               : unquoted_string_ast(text, text_len, err), err)) {
           tc_ast_free(node);
           node = tc_ast_nil();
         }

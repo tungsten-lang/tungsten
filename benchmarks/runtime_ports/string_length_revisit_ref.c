@@ -21,7 +21,11 @@ static int g_strlen_ready;
 static WValue strlen_heap_bytes(const uint8_t *bytes, uint32_t len) {
     WString *s = (WString *)calloc(1, sizeof(WString) + (size_t)len + 1);
     if (s == NULL) abort();
-    s->len = len;
+    int ascii = 1;
+    for (uint32_t i = 0; i < len; i++) {
+        if (bytes[i] >= 0x80) { ascii = 0; break; }
+    }
+    w_heap_string_set_meta(s, len, ascii);
     memcpy(s->data, bytes, len);
     s->data[len] = '\0';
     return w_box_heap_str(s);

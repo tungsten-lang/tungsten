@@ -1212,7 +1212,7 @@ int main() {
         static const char text[] = "-987654321";
         WValue slab = w_string(text);
         WString *fresh = malloc(sizeof(WString) + sizeof(text));
-        fresh->len = (uint32_t)(sizeof(text) - 1);
+        w_heap_string_set_meta(fresh, (uint32_t)(sizeof(text) - 1), 1);
         memcpy(fresh->data, text, sizeof(text));
         WValue heap = w_box_heap_str(fresh);
         assert(w_is_slab_str(slab));

@@ -123,7 +123,11 @@ static WValue join_ref_string_take(char *text, size_t length) {
 
     if (w_slab_is_frozen() || length > W_SLAB_SSO2_MAX) {
         WString *string = malloc(sizeof(WString) + length + 1);
-        string->len = (uint32_t)length;
+        int ascii = 1;
+        for (size_t i = 0; i < length; i++) {
+            if ((uint8_t)text[i] >= 0x80) { ascii = 0; break; }
+        }
+        w_heap_string_set_meta(string, (uint32_t)length, ascii);
         memcpy(string->data, text, length + 1);
         free(text);
         return w_box_heap_str(string);

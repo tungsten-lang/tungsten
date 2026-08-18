@@ -675,6 +675,13 @@ static inline WValue w_box_inline_str(const void *data, size_t len) {
     return v;
 }
 
+/* High bit of each of the five possible inline payload bytes (bits
+ * 11,19,27,35,43). One mask derives the ASCII content property. */
+#define W_INLINE_STR_HIGH_BIT_MASK UINT64_C(0x0000080808080800)
+static inline int w_inline_str_ascii_p(WValue v) {
+    return (v & W_INLINE_STR_HIGH_BIT_MASK) == 0;
+}
+
 static inline WValue w_box_inline_sym(const void *data, size_t len) {
     return w_box_inline_str(data, len) | 1;
 }

@@ -27,8 +27,9 @@
 # compiler/lib/lexer.w identifier semantics while adding newline dispatch.
 
 #
-# Lex64 is scalar: the NEON scan helpers target the narrower Lex16/Lex32
-# layouts where each vector load covers more source characters.
+# Lex64 is primarily scalar. Strict ASCII literals use a bounded, unrolled
+# NEON quote scan on arm64; the narrower Lex16/Lex32 scanners still cover more
+# source characters per vector for the other bulk-scan paths.
 
 use ../../languages/tungsten/lexers/regex_helpers
 use ../../languages/tungsten/lexers/known_units
@@ -38,6 +39,7 @@ use ../../languages/tungsten/lexers/known_units
 -> tungsten_tokenize_fast64(lc, count, tokens, indents)
   pos = 0
   tc = 0
+  data_ptr = ccall_nobox("w_array_data_ptr", lc)
   at_line_start = 1
   paren_depth = 0
   indent_top = 0
@@ -554,21 +556,12 @@ use ../../languages/tungsten/lexers/known_units
             break
         tokens[tc] = t_string | (((pos - start) & 0xFFF) << 26) | (start << 2)
       else
-        loop
-          if pos >= count
-            break
-          done = 0
-          c2 = (lc[pos] >> 18) & cp_mask
-          case c2
-          when 92
-            pos += 2
-          when 39
-            pos++
-            done = 1
-          else
-            pos++
-          if done != 0
-            break
+        # A single quote has no escape or interpolation semantics, so one
+        # SIMD-friendly scan finds the terminator. Materialization separately
+        # rejects any non-ASCII codepoint in the body.
+        pos = ccall_nobox("w_lex64_scan_to_cp", data_ptr, count, pos, :-\')
+        if pos < count
+          pos++
         tokens[tc] = t_string | (((pos - start) & 0xFFF) << 26) | (start << 2)
       tc++
 
@@ -3281,7 +3274,7 @@ use ../../languages/tungsten/lexers/known_units
       materialize_regex(raw, off)
       return nil
     if raw.size() > 0 && raw[0] == "'"
-      emit_at(:STRING, unquote_single(raw), off)
+      materialize_ascii_literal(raw, off)
       return nil
     reset_scan_position(off + 1)
     scan_string()
@@ -3315,27 +3308,21 @@ use ../../languages/tungsten/lexers/known_units
       i += 1
     emit_at(:REGEX, [pattern.to_s(), ""], off)
 
-  -> unquote_single(raw)
-    out = StringBuffer(raw.size())
-    i = 1
-    last = raw.size() - 1
-    while i < last
-      ch = raw[i]
-      if ch == "\\" && i + 1 < last
-        i += 1
-        esc = raw[i]
-        if esc == "n"
-          out << "\n"
-        elsif esc == "r"
-          out << "\r"
-        elsif esc == "t"
-          out << "\t"
-        else
-          out << esc
-      else
-        out << ch
+  # ASCII literals are deliberately simple String values: the
+  # first following quote terminates them, and neither backslash nor `[]` has
+  # special meaning. The packed scanner therefore does no escape/interpolation
+  # work; validation happens once while the token is materialized.
+  -> materialize_ascii_literal(raw, off)
+    if !raw.ends_with?("'")
+      raise compile_error(:E_LEX_UNTERMINATED_ASCII_LITERAL, "Unterminated ASCII literal", @file, @line_at[off], @col_at[off])
+    body = raw.slice(1, raw.size() - 2)
+    bytes = body.bytes()
+    i = 0
+    while i < bytes.size()
+      if bytes[i] >= 128
+        raise compile_error_with_span(:E_LEX_NON_ASCII_LITERAL, "ASCII literals accept ASCII bytes only; use double quotes for Unicode", @file, @line_at[off], @col_at[off], raw.size())
       i += 1
-    out.to_s()
+    emit_at(:STRING, body, off)
 
   -> materialize_char(raw, off)
     cp = 0

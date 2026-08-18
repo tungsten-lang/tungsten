@@ -174,6 +174,15 @@
       flags = 1
       if nslots == 2
         flags = 3
+      ascii = true
+      ai = 0
+      while ai < bytes.size()
+        if bytes[ai] >= 128
+          ascii = false
+          break
+        ai += 1
+      if ascii
+        flags = flags | 8
       append_llvm_hex_byte(out, flags)
       append_llvm_hex_byte(out, byte_len)
       first_len = byte_len
@@ -1081,7 +1090,12 @@
   out << "  %mode = and i64 %mode.raw, 7\n"
   out << "  %is.inline = icmp ule i64 %mode, 5\n"
   out << "  %is.sso = and i1 %is.stringy, %is.inline\n"
-  out << "  br i1 %is.sso, label %fast, label %slow, !prof !31411\n"
+  # Subscripts are code-point indexed; the register lane select is only valid
+  # when every inline payload byte is ASCII (high bits 11/19/27/35/43 clear).
+  out << "  %hi.bits = and i64 %str, 8830587504640\n"
+  out << "  %is.ascii = icmp eq i64 %hi.bits, 0\n"
+  out << "  %is.sso.ascii = and i1 %is.sso, %is.ascii\n"
+  out << "  br i1 %is.sso.ascii, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %fv = call i64 @__w_sso_idx(i64 %str, i64 %idx)\n"
   out << "  ret i64 %fv\n"

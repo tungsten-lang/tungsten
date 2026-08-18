@@ -1381,6 +1381,30 @@ RSpec.shared_examples "a Tungsten lexer" do
     expect(t.value.to_s).to eq("x")
   end
 
+  it "lexes an ASCII literal without escapes or interpolation" do
+    lexer = described_class.new(%q{'a\n[name]'})
+    t = lexer.next_token
+    expect(t.type).to eq(:STRING)
+    expect(t.value).to eq(%q{a\n[name]})
+  end
+
+  it "does not let backslash escape an ASCII literal terminator" do
+    lexer = described_class.new(%q{'a\'b'})
+    t = lexer.next_token
+    expect(t.type).to eq(:STRING)
+    expect(t.value).to eq("a\\")
+  end
+
+  it "rejects non-ASCII content in an ASCII literal" do
+    lexer = described_class.new("'é'")
+    expect { lexer.next_token }.to raise_error(Tungsten::Error, /ASCII/)
+  end
+
+  it "rejects an unterminated ASCII literal" do
+    lexer = described_class.new("'ascii")
+    expect { lexer.next_token }.to raise_error(Tungsten::Error, /unterminated ASCII literal/)
+  end
+
   it "lexes Δ-prefixed identifiers" do
     lexer = described_class.new("Δx")
     t = lexer.next_token

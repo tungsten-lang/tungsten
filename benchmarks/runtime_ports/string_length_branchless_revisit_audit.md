@@ -76,16 +76,17 @@ This is exact under the current runtime contract:
 |---|---|---:|
 | inline modes 0..5 | WValue bits 1..3 | 5 |
 | slab mode 6 | primary slot byte 1 | 255 (constructors use at most 61) |
-| heap mode 7 | `WString.len` | 2^32-1 |
-| rope | flatten, then one of the above; `WRope.total_len` is `uint32_t` | 2^32-1 |
+| heap mode 7 | `WString.len_flags & 0x7fffffff` | 2^31-1 |
+| rope | flatten, then one of the above; constructors enforce the String cap | 2^31-1 |
 
-Therefore `n` is in `[0, 2^32-1]`, wholly inside the nonnegative signed-i48
+Therefore `n` is in `[0, 2^31-1]`, wholly inside the nonnegative signed-i48
 payload range `[0, 2^47-1]`. OR-ing it into the `0xFFFA` Integer tag cannot
 alter tag bits, and no sign-extension or mask is needed. It produces the same
 immediate WValue that `w_int(n)` produces on the native path.
 
-The static runner pins all premises: `WString.len` and
-`WRope.total_len` must remain `uint32_t`, slab reads must still source
+The static runner pins all premises: `WString.len_flags` and
+`WRope.total_len` must remain `uint32_t`, the String mask must remain 31 bits,
+slab reads must still source
 `slot[1]`, and the canonical helper must still return the stored `len` as
 `int64_t`. It also requires the branchless and checked roots to be byte-for-
 byte identical in the interpreter, loader, compiler anchor, and runtime; only

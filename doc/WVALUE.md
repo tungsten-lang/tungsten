@@ -176,7 +176,13 @@ Inline string (len 0-5):
 │   0xFFF9       │ 0 pad  │ char data  │ len │0 │  ← string
 └────────────────┴────────┴────────────┴─────┴──┘
 
-Heap string (len > 5):
+Slab string (len 6-61):
+63              48 47       28 27                 4 3  1  0
+┌────────────────┬────────────┬────────────────────┬─────┬──┐
+│   0xFFF9       │   0 pad    │ 24-bit slab index  │  6  │0 │
+└────────────────┴────────────┴────────────────────┴─────┴──┘
+
+Heap string (normally len > 61, or a post-freeze dynamic string):
 63              48 47                       4 3  1  0
 ┌────────────────┬────────────────────────────┬─────┬──┐
 │   0xFFF9       │ WString* (16-byte aligned) │  7  │0 │  ← heap sentinel
@@ -565,7 +571,9 @@ to the ms component. Subtracting mixed-mode durations is an error.
 request body). They MUST be promoted to a string (SSO-5 or heap WString)
 before the buffer is freed.
 
-**Heap strings.** `WString` is `{ uint32_t len; char data[]; }` — a
-length-prefixed, null-terminated, flexible array member. The inline SSO-5
-encoding covers strings up to 5 bytes; anything longer allocates a WString.
-Strings are immutable.
+**String storage.** Inline SSO-5 strings derive ASCII from their five payload
+high bits. Slab strings (normally 6-61 bytes) cache ASCII in primary-slot flag
+bit 3. `WString` is `{ uint32_t len_flags; char data[]; }`, where bit 31 is
+ASCII and bits 0-30 are byte length; the flexible payload is null-terminated.
+Ropes and StringBuffers cache the same content property in spare flag bits.
+Strings are immutable; `StringBuffer` is the mutable builder.

@@ -53,6 +53,21 @@ remain valid only on unit-expecting surfaces.
 **Fix:** Rename the identifier using `snake_case` (for example,
 `camel_case`).
 
+## E_LEX_NON_ASCII_LITERAL
+
+An ASCII literal contains a byte outside ASCII (`0x00` through `0x7F`). ASCII
+literals are deliberately strict, non-interpolating, and non-escaping.
+
+**Fix:** Use double quotes for Unicode text.
+
+## E_LEX_UNTERMINATED_ASCII_LITERAL
+
+The lexer reached the end of the source before the closing single quote.
+Backslash does not escape a quote inside this literal form.
+
+**Fix:** Add the closing quote, or use a double-quoted string when the value
+must contain a single quote.
+
 ## E_LOWER_FOREIGN_IDIOM
 
 Lowering recognized a name or pattern common in another language that Tungsten

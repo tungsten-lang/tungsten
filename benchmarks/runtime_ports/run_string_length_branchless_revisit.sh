@@ -337,8 +337,10 @@ for rel in ("compiler/lib/builtins.w", "compiler/lib/interpreter.w", "compiler/l
     if (direct / rel).read_bytes() != (branchless / rel).read_bytes():
         raise SystemExit(f"branchless: {rel} must exactly match direct; only the source boxing body differs")
 branchless_header = (branchless / "runtime/runtime.h").read_text()
-if not re.search(r"typedef struct WString\s*\{\s*uint32_t len;", branchless_header):
-    raise SystemExit("branchless: WString.len is no longer pinned to uint32_t")
+if not re.search(r"typedef struct WString\s*\{.*?uint32_t len_flags;", branchless_header, re.S):
+    raise SystemExit("branchless: WString.len_flags is no longer pinned to uint32_t")
+if "#define W_STRING_LEN_MASK   UINT32_C(0x7fffffff)" not in branchless_header:
+    raise SystemExit("branchless: WString 31-bit byte-length mask changed")
 if not re.search(r"uint32_t total_len;\s*/\* cached byte length \*/.*?\}\s*WRope;", branchless_header, re.S):
     raise SystemExit("branchless: WRope.total_len is no longer pinned to uint32_t")
 branchless_rt = (branchless / "runtime/runtime.c").read_text()

@@ -488,18 +488,11 @@
           out_len = 255
         lengths[tc] = out_len
       else
-        loop
-          if pos >= count
-            break
-          pos = ccall_nobox("w_lex32_scan_to_cp_or", data_ptr, count, pos, :-\', :-\\)
-          if pos >= count
-            break
-          c2 = (lc[pos] >> 11) & cp_mask
-          if c2 == :-\\
-            pos += 2
-          elsif c2 == :-\'
-            pos++
-            break
+        # ASCII literals have no escapes or interpolation: one SIMD-backed
+        # search for the next single quote completes the token.
+        pos = ccall_nobox("w_lex32_scan_to_cp", data_ptr, count, pos, :-\')
+        if pos < count
+          pos++
         tokens[tc] = t_string | (start << 8)
         out_len = pos - start
         if out_len > 255

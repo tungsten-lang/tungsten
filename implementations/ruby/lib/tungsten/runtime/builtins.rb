@@ -1219,15 +1219,23 @@ module Tungsten
         # ── String builtins ──────────────────────────────────────────────
 
         interpreter.define_method_builtin("length") do |recv, _args, _block|
-          recv.length
+          recv.is_a?(String) ? recv.bytesize : recv.length
         end
 
         interpreter.define_method_builtin("size") do |recv, _args, _block|
-          recv.size
+          recv.is_a?(String) ? recv.bytesize : recv.size
         end
 
         interpreter.define_method_builtin("empty?") do |recv, _args, _block|
           recv.empty?
+        end
+
+        interpreter.define_method_builtin("ascii?") do |recv, _args, _block|
+          recv.to_s.ascii_only?
+        end
+
+        interpreter.define_method_builtin("valid_utf8?") do |recv, _args, _block|
+          recv.to_s.dup.force_encoding(Encoding::UTF_8).valid_encoding?
         end
 
         interpreter.define_method_builtin("chars") do |recv, _args, _block|
@@ -1333,6 +1341,14 @@ module Tungsten
 
         interpreter.define_method_builtin("split") do |recv, args, _block|
           args.empty? ? recv.split : recv.split(args[0])
+        end
+
+        interpreter.define_method_builtin("slice") do |recv, args, _block|
+          if recv.is_a?(String) && args.length == 2
+            recv.byteslice(args[0], args[1])
+          else
+            recv.slice(*args)
+          end
         end
 
         interpreter.define_method_builtin("strip") do |recv, _args, _block|

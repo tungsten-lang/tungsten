@@ -1,4 +1,4 @@
-bars = '▁' .. '█'
+bars = "▁" .. "█"
 
 msg = 'Numbers separated by spaces: '
 

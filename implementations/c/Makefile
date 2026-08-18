@@ -109,6 +109,16 @@ test: $(BIN)
 		diff -u tests/compound_assignment_ops.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/operand_stack_empty_transition.w | \
 		diff -u tests/operand_stack_empty_transition.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/ascii_string.w | \
+		diff -u tests/ascii_string.expected -
+	@if TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 \
+		$(BIN) --check-lex tests/ascii_string_non_ascii.w >/dev/null 2>&1; then \
+		echo "non-ASCII single quote unexpectedly accepted" >&2; exit 1; \
+	fi
+	@if TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 \
+		$(BIN) --check-lex tests/ascii_string_unterminated.w >/dev/null 2>&1; then \
+		echo "unterminated single quote unexpectedly accepted" >&2; exit 1; \
+	fi
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/parenthesized_type_hint.w
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --dump-ast tests/parenthesized_type_hint.w | \
 		diff -u tests/parenthesized_type_hint.expected -

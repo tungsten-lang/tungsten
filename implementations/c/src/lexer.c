@@ -780,14 +780,24 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
 
     if (c == '\'') {
       size_t start = pos++;
+      int closed = 0;
       while (pos < count) {
         uint32_t c2 = cp_at(source, pos);
         pos++;
-        if (c2 == '\\' && pos < count) {
-          pos++;
-          continue;
+        if (c2 > 0x7f) {
+          tc_error_set(err, "E_LEX_NON_ASCII_LITERAL: ASCII literals accept ASCII bytes only; use double quotes for Unicode");
+          return 0;
         }
-        if (c2 == '\'') break;
+        /* ASCII literals have no escapes: the first quote always terminates,
+         * even when preceded by backslash. */
+        if (c2 == '\'') {
+          closed = 1;
+          break;
+        }
+      }
+      if (!closed) {
+        tc_error_set(err, "E_LEX_UNTERMINATED_ASCII_LITERAL: unterminated ASCII literal");
+        return 0;
       }
       if (!token_push(tokens, token_new(TC_T_STRING, start, pos, 0), err)) return 0;
       continue;

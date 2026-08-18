@@ -25,7 +25,7 @@ static int test_count = 0;
 static WValue heap_string(const char *s) {
     size_t len = strlen(s);
     WString *ws = malloc(sizeof(WString) + len + 1);
-    ws->len = (uint32_t)len;
+    w_heap_string_set_meta(ws, (uint32_t)len, 1);
     memcpy(ws->data, s, len + 1);
     return w_box_heap_str(ws);
 }

@@ -1,4 +1,8 @@
-# string_buffer - mutable UTF-8 string builder
+# string_buffer - mutable UTF-8 byte-string builder
+#
+# The header caches whether all appended bytes are ASCII. Empty buffers start
+# ASCII; the bit is cleared on the first non-ASCII append and transferred by
+# `to_s` without rescanning the completed buffer.
 #
 # Constructor: StringBuffer() or StringBuffer(capacity)
 #
@@ -11,7 +15,7 @@
 + StringBuffer
   - data
     # Type byte removed (StringBuffer promoted to W_SUBTAG_STRBUF).
-    # Layout now starts directly with the flags byte.
+    # Layout starts directly with the flags byte; bit 6 caches ASCII content.
     u8     flags
     u8[7]  _pad
     * u8[] data

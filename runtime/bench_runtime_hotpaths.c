@@ -406,7 +406,8 @@ static void bench_method_probe_opt_loop(void *opaque, int iterations) {
 static WValue bench_heap_string(const char *text) {
     size_t length = strlen(text);
     WString *string = malloc(sizeof(WString) + length + 1);
-    string->len = (uint32_t)length;
+    w_heap_string_set_meta(string, (uint32_t)length,
+                           w_bytes_ascii_p((const uint8_t *)text, length));
     memcpy(string->data, text, length + 1);
     return w_box_heap_str(string);
 }

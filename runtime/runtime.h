@@ -20,10 +20,29 @@
 /* ---- Heap string (mode 7: freeable, >=6 bytes) -------------------------
  * Length alone does not distinguish mode 6 from mode 7 in the 6..61-byte
  * overlap. Mode 6 means interned in the slab; mode 7 means heap-backed. */
+#define W_STRING_ASCII_FLAG UINT32_C(0x80000000)
+#define W_STRING_LEN_MASK   UINT32_C(0x7fffffff)
+
 typedef struct WString {
-    uint32_t len;
+    /* The high bit records that every payload byte is ASCII. The remaining
+     * 31 bits are the byte length, preserving the existing four-byte header. */
+    uint32_t len_flags;
     char data[];  /* UTF-8 bytes, null-terminated */
 } WString;
+
+_Static_assert(offsetof(WString, data) == 4, "WString payload must follow its 4-byte header");
+
+static inline uint32_t w_heap_string_len(const WString *s) {
+    return s->len_flags & W_STRING_LEN_MASK;
+}
+
+static inline int w_heap_string_ascii_p(const WString *s) {
+    return (s->len_flags & W_STRING_ASCII_FLAG) != 0;
+}
+
+static inline void w_heap_string_set_meta(WString *s, uint32_t len, int ascii) {
+    s->len_flags = len | (ascii ? W_STRING_ASCII_FLAG : 0);
+}
 
 /* ---- Regex heap object (subtag 0x7) ---- */
 typedef struct {
@@ -62,6 +81,7 @@ WValue w_str_append(WValue str, WValue suffix);
 #define W_SFLAG_INLINE       (1 << 0)  /* 1 = data stored inline in slot(s) */
 #define W_SFLAG_CONTINUATION (1 << 1)  /* 1 = spans 2 contiguous slots */
 #define W_SFLAG_SLICE        (1 << 2)  /* 1 = slice (only when !INLINE) */
+#define W_SFLAG_ASCII        (1 << 3)  /* 1 = every payload byte is ASCII */
 
 /* Slab slot layout.
  *
@@ -2344,12 +2364,16 @@ static inline int w_both_integers_any(WValue a, WValue b) {
  * Promoted to W_SUBTAG_STRBUF (subtag 0xB). Type byte removed
  * from offset 0 — the subtag now identifies StringBuffer. */
 typedef struct WStrBuf {
-    uint8_t flags;       /* W_FLAG_* bits */
+    uint8_t flags;       /* W_FLAG_* bits plus W_STRBUF_FLAG_ASCII */
     uint8_t _pad[7];     /* keep `data` ptr at offset 8 for natural alignment */
     char   *data;
     int64_t size;        /* renamed from length */
     int64_t cap;
 } WStrBuf;
+
+#define W_STRBUF_FLAG_ASCII (1 << 6)
+_Static_assert(offsetof(WStrBuf, data) == 8,
+               "StringBuffer ASCII flag must not disturb data alignment");
 
 WValue w_strbuf_new(WValue cap);
 WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap);
@@ -2366,11 +2390,17 @@ static inline int w_is_strbuf(WValue v) {
 /* ---- Rope (lazy concatenation of strings) ---- */
 typedef struct {
     uint8_t type;       /* W_TYPE_ROPE */
+    uint8_t flags;
+    uint8_t _pad[6];
     WValue left;        /* string or rope */
     WValue right;       /* string or rope */
     uint32_t total_len; /* cached byte length */
     WValue flat;        /* cached flattened WValue string, 0 = not yet */
 } WRope;
+
+#define W_ROPE_FLAG_ASCII (1 << 0)
+_Static_assert(offsetof(WRope, left) == 8,
+               "Rope ASCII flag must remain inside existing header padding");
 
 static inline int w_is_rope(WValue v) {
     return w_is_obj(v) && w_subtag(v) == W_SUBTAG_GENERIC &&

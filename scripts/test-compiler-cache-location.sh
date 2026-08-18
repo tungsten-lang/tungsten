@@ -46,7 +46,20 @@ find "$CACHE" -maxdepth 1 -name 'runtime-native-*.a' -type f | grep -q .
 find "$CACHE" -maxdepth 1 -name 'irbin-*.bin' -type f | grep -q .
 find "$CACHE" -maxdepth 1 -name 'irbin-*.manifest' -type f | grep -q .
 grep -Fq "$CACHE/runtime-native-" "$TMP/first.trace"
+grep -F "$ROOT/runtime/runtime.c" "$TMP/first.trace" | grep -q -- '-fno-omit-frame-pointer'
 [[ ! -e "$TMP/home/.tungsten/cache" ]]
+
+# Disable the binary cache and compile to a fresh output. The frame-pointer
+# runtime archive itself must stay warm: clang links it into the new program
+# instead of recompiling runtime.c for every debug spec.
+compile_probe "$TMP/archive-warm.trace" env TUNGSTEN_INCREMENTAL=0 \
+  "$COMPILER" compile --dev --no-lto --out "$PROJECT/probe-archive-warm" "$PROJECT/probe.w"
+[[ "$("$PROJECT/probe-archive-warm")" == "cache probe" ]]
+grep -Fq "$CACHE/runtime-native-" "$TMP/archive-warm.trace"
+if grep -Fq "$ROOT/runtime/runtime.c" "$TMP/archive-warm.trace"; then
+  printf 'warm frame-pointer compile rebuilt runtime.c\n' >&2
+  exit 1
+fi
 
 # The compiler Loader's Ruby-only serialized AST cache follows the same
 # project root. Exercise its selector directly: `tungsten run --ruby probe.w`

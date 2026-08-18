@@ -1225,9 +1225,10 @@ driver_homebrew_prefix_memo = {}
   # Fast native-archive link (default): reuse the cached runtime objects
   # rather than recompiling the ~28k-line runtime every build. runtime.o's weak
   # companion stubs keep the gated ssmr/lexchar/metal/blas adds below valid.
-  # Configs the shared archive can't represent (cross-target, frame pointers,
-  # zstd) fall through to the from-source path.
-  if runtime_objs == nil && !doing_lto && cross_target == "" && !frame_pointers && !needs_zstd
+  # Configs the shared archive can't represent (cross-target and zstd) fall
+  # through to the from-source path. Frame-pointer mode is part of the archive
+  # flags and identity, so debug builds can reuse it without losing backtraces.
+  if runtime_objs == nil && !doing_lto && cross_target == "" && !needs_zstd
     runtime_objs = dev_runtime_archive(verbose)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
   if clang_opt == nil || clang_opt == ""
@@ -1737,6 +1738,8 @@ driver_homebrew_prefix_memo = {}
   if cache_dir == nil || system("mkdir -p " + dev_runtime_shell_quote(cache_dir)) != true
     return nil
   compile_flags = profile_opt_flag() + " " + debug_compile_flag() + " " + march_flags()
+  if frame_pointers
+    compile_flags += " -fno-omit-frame-pointer"
   tcf = tls_cflags
   if tcf != ""
     compile_flags += " " + tcf
@@ -2995,16 +2998,16 @@ elsif command == "compile-batch"
 
   runtime_objs = nil
 
-  # Runtime objects: link_binary's nil-runtime_objs default already
-  # serves the cached dev archive for the common configuration, so only
-  # pre-build a batch-local runtime when that default cannot (LTO
-  # release links compile the runtime from source per link — amortize it
-  # once; zstd needs the flag-compiled variant). The archive lands in a
+  # Runtime objects: link_binary's nil-runtime_objs default already serves a
+  # cached native archive for ordinary and frame-pointer debug configurations,
+  # so only pre-build a batch-local runtime when that default cannot (LTO
+  # release links compile the runtime from source per link — amortize it once;
+  # zstd needs the flag-compiled variant). The archive lands in a
   # private scratch dir, NEVER the first input's directory (the old
   # `files[0]`-derived path wrote `spec/numeric/runtime.a` into the
   # source tree and broke outside it).
   batch_lto = (release_mode || explicit_lto) && !no_lto
-  if ll_jobs.size() > 0 && (batch_lto || needs_zstd_runtime || frame_pointers)
+  if ll_jobs.size() > 0 && (batch_lto || needs_zstd_runtime)
     tmp_dir = capture("mktemp -d " + dev_runtime_shell_quote(implicit_ll_root() + "/batch-rt.XXXXXX") + " 2>/dev/null").strip()
     if tmp_dir == ""
       << "Failed to create batch runtime scratch directory"

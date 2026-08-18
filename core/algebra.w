@@ -13,6 +13,7 @@
 # implicit multiplication for ordinary Tungsten expressions.
 
 use core/numeric/rational
+use core/algebra/gaussian_integer
 use core/algebra/field
 use core/algebra/finite_field
 use core/algebra/polynomial

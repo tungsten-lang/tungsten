@@ -12,6 +12,8 @@
 use core/calculus
 use core/solve
 use core/geometry/support
+use core/geometry/polyomino
+use core/geometry/polyomino_packing
 use core/geometry/measure
 use core/geometry/flat_torus
 use core/geometry/chart

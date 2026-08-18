@@ -81,6 +81,7 @@ byte-identical continuation): tungsten **wins literary 49.7 vs 45.0**, trails
 | Nibble decode is the ALU bottleneck | no-decode ablation within 0.3–4% |
 | Longer context raises acceptance | it does not (64/256/512 = 0.484/0.370/0.550) |
 | simdgroup-matrix GEMM, v1 and v2 | exact (err 1e-6) and **3–10x slower**; occupancy, not the MMA units — M<=8 has too little arithmetic intensity, and staging beats the register-resident GEMV |
+| Half-footprint QMV at width 3 | exact but slower in two in-situ row-scan pairs: incumbent **43/44 ms**, half **44/46 ms**; keep it width-4-only |
 
 ## Cost model (use this before building anything)
 
@@ -103,6 +104,39 @@ it turns compute/occupancy-bound. At p=0.64, depth 2 gives 55 tok/s and that is
 - **Acceptance** is the other lever and it needs a better/trained MTP head — a
   weights lever, not an inference-engine one. The ranked board makes the head
   substitutable precisely because that is where its remaining margin lives.
+
+## Negative receipt: affine-2 draft sweep (DELETED)
+
+`ARGV[6]="q2draft"` was correctness-clean (byte-identical greedy IDs, identical
+acceptance) and isolated-positive (~6 us on the concurrent projection chain,
+398.6 us at 2-row/32-value vs 525 us exact). It did **not** survive a four-pair
+ABBA on the real runner:
+
+```
+scripts/bench/perf_lock.sh bin/tungsten run scripts/bench/qwen38_mlx.w mtp2 64 r2 mmap profile 64 auto|q2draft
+scripts/bench/perf_lock.sh bin/tungsten run scripts/bench/qwen38_mlx.w mtp2 64 r2 mmap prose-tech 64 auto|q2draft
+```
+
+Order per fixture: A B B A A B B A. Generated IDs and acceptance matched on
+every arm (literary 31/64, expository 35/55). Median-round wins for q2:
+
+| fixture | pair wins | notes |
+|---|---|---|
+| literary (`profile`) | **1/4** | three median ties; only pair 1 won on `components: draft` 100 vs 143 ms |
+| expository (`prose-tech`) | **0/4** | three ties at 43/43/44, one loss 44 vs 43 |
+
+Promotion required ≥3/4 on **both** fixtures. Isolated microseconds do not
+override that. The opt-in runner wiring and `mtp_draft_q2.metal` are **gone**.
+`scripts/bench/qwen38_mlx.w` is back to the incumbent tiled selector.
+
+Do not restore q2 without a new ABBA that actually clears 3/4 × 2. Do not retry
+fused pre-FC embed/RMS/concat (already −23% same-binary). Remaining unused
+leftover: re-decide tree drafting with `rank-probe` (the head step is now 1.95
+ms; the old "tree does not pay" verdict used 3.05 ms).
+
+Regression lock: `bin/tungsten run bits/tungsten-llama/mtp_draft_select_test.w`
+and `python3 bits/tungsten-llama/tests/test_q2draft_removed.py` drive the
+shipped tiled selector and fail if q2 is reintroduced.
 
 ## Discipline (learned the hard way here)
 

@@ -41352,6 +41352,7 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
      * source worker's route. Every other word/sign shape retains C. */
     if (!neg_b && sa == 1 && sb == 1) return 1;
     if (!neg_b && sa == 3 && sb == 1) return 1;
+    if (!neg_b && sa == 3 && sb == 3) return 1;
     if (!neg_b && sa > 8 && sa <= 4096 && sb == 1) return 1;
     if (neg_b && sa == 2 && sb == 1)
         return BN_BIGINT_SUB1_2_SRC_DIRECT ? 3 : 1;
@@ -60107,6 +60108,15 @@ WValue w_bigint_add1_3_finish_raw(WValue v, uint64_t carry) {
     }
     r->size = 3;
     return bigint_box(r);
+}
+__attribute__((always_inline))
+WValue w_bigint_add3_equal_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    /* Match bigint_add_equal_fast exactly: cap is four, the carry limb is
+     * published unconditionally, and the normalized size is three or four. */
+    r->limbs[3] = carry;
+    r->size = 3 + (int32_t)carry;
+    return v;
 }
 WValue w_bigint_add1_4_finish_raw(WValue v, uint64_t carry) {
     WBigint *r = w_as_bigint(v);

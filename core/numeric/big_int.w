@@ -3162,6 +3162,17 @@ on macos && arm64
       ret
     ASM
 
+  # Literal current-C bn_add3_fixed schedule for positive equal-width add.
+  # Keep the complete carry chain and delay all stores until both operand
+  # pairs have been consumed, matching the retained differential oracle.
+  fn __bigint_add3_equal_exact(rp, ap, bp) (i64 i64 i64) i64
+    ll <<~IR
+      ; tungsten:noinline
+      entry:
+        %carry = call i64 asm sideeffect "ldp x4, x5, [${2:x}]\0Aldr x6, [${2:x}, #16]\0Aldp x8, x9, [${3:x}]\0Aldr x10, [${3:x}, #16]\0Aadds x12, x4, x8\0Aadcs x13, x5, x9\0Aadcs x14, x6, x10\0Astp x12, x13, [${1:x}]\0Astr x14, [${1:x}, #16]\0Acset ${0:x}, hs", "=r,r,r,r,~{x4},~{x5},~{x6},~{x8},~{x9},~{x10},~{x12},~{x13},~{x14},~{memory},~{cc}"(i64 %rp, i64 %ap, i64 %bp)
+        ret i64 %carry
+    IR
+
   fn __bigint_add1_4_exact(rp, ap, word) (i64 i64 i64) i64
     asm <<~ASM
       ldp x4, x5, [x1]
@@ -3607,6 +3618,15 @@ fn __bigint_add1_3_raw(a, b) (i64 i64) i64
   word = raw_load_u64(bp, 0) ## i64
   carry = __bigint_add1_3_exact(rp, ap, word) ## i64
   ccall_nobox("w_bigint_add1_3_finish_raw", result, carry)
+
+fn __bigint_add3_equal_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot4_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  carry = __bigint_add3_equal_exact(rp, ap, bp) ## i64
+  ccall_nobox("w_bigint_add3_equal_finish_raw", result, carry)
 
 fn __bigint_add1_2_raw(a, b) (i64 i64) i64
   result = ccall_nobox("w_bigint_alloc_hot", 2) ## i64
@@ -4797,10 +4817,8 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     bn = ((other$value >> 47) & 1) == 1 ? 0 - other$size : other$size
 
     on macos && arm64
-      # The exact scalar-word gate has already reduced this arm to two signed
-      # header loads.  Complete it before the generic magnitude, range,
-      # pointer, and boxed-Boolean sign machinery; arithmetic/storage remain
-      # byte-for-byte the separately checkpointed C port.
+      # Complete scalar-word shapes before testing equal widths so existing
+      # add1 callers pay no new dispatch work.
       if bn == 1
         case an
           1 =>
@@ -4874,6 +4892,18 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
                 ) ## i64
               )
             return ccall("w_bigint_add", self, other)
+
+      # Equal-width same-sign operands otherwise fall through a long generic
+      # setup only to return to C's tuned equal-fast tree. Complete the one
+      # exact positive native leaf here and send every neighboring or negative
+      # width straight to that same C boundary. This keeps the source worker's
+      # new branch from becoming a tax on every unported equal-width operation.
+      if an == bn
+        if an == 3
+          return wvalue_from_bits(
+            __bigint_add3_equal_raw($value ## i64, other$value ## i64)
+          )
+        return ccall("w_bigint_add", self, other)
 
     # The declared-BigInt direct route must not turn the still-C-specialized
     # one-limb neighbors into the generic source kernel.  Return them to the

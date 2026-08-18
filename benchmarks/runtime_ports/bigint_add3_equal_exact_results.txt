@@ -1,0 +1,200 @@
+BIGINT POSITIVE EQUAL-WIDTH ADD@3 — EXACT SOURCE CHECKPOINT
+==========================================================
+
+Scope
+-----
+
+This checkpoint ports only distinct positive three-limb plus three-limb
+BigInt addition from `bigint_add_equal_fast`.  Native Tungsten preserves the
+current C route exactly:
+
+  * exact hot capacity-four result allocation;
+  * the literal AArch64 `bn_add3_fixed` load/add-with-carry/store schedule;
+  * an unconditional fourth-limb carry store; and
+  * normalized positive size three or four.
+
+Negative operands, mixed signs, every neighboring equal width, unequal
+widths, and open-world BigInt#+ replacements retain their previous routes.
+This is the exact-port checkpoint; no native-only arithmetic redesign is
+included.
+
+Build
+-----
+
+base_commit=08f1697b3282f821d10e7776771b5456da98ecd1
+host=Apple M5 Max, arm64 macOS 26.6.2, AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+baseline=/private/tmp/tungsten-add3-control-08f1697b/benchmarks/big_math/bench_big_math_tungsten_native
+baseline_sha256=e2424643e4253797a056b60fe614d97361f06c3859b74f813e63f24fbbdef7a0
+candidate=/private/tmp/tungsten-native-next.SipbJM/benchmarks/big_math/bench_big_math_tungsten_native
+candidate_sha256=a4088514931d09dc640b95b5a9d0503b5bdff3429ea94f0b60bee602b29e9299
+
+The control was freshly bootstrapped and linked from a clean detached copy of
+the exact base commit.  The candidate was built from the same base plus this
+checkpoint.  The intervening current-main commit did not touch Core BigInt,
+the runtime, compiler, or bignum harness.
+
+Matched source-route promotion
+------------------------------
+
+method=21 alternating process pairs; 9 internal runs x 110 ms/leg
+lane=native-compiled Tungsten ordinary `a + b` under PROTECT_THE_CORE! and
+     LOCK_THE_DOORS!
+
+pair  baseline_ns  candidate_ns  candidate/baseline
+01      5.456087       2.315438       0.424377
+02      5.387436       2.312635       0.429265
+03      5.461208       2.321922       0.425166
+04      5.409374       2.318799       0.428663
+05      5.373885       2.317732       0.431295
+06      5.509965       2.313729       0.419917
+07      5.417404       2.326838       0.429512
+08      5.395762       2.330468       0.431907
+09      5.396863       2.330390       0.431804
+10      5.446915       2.409401       0.442342
+11      6.384639       2.764161       0.432939
+12      6.470351       2.676512       0.413658
+13      6.317952       2.685914       0.425124
+14      6.492331       2.768144       0.426371
+15      6.404851       2.794890       0.436371
+16      6.264070       2.727230       0.435377
+17      6.448033       2.748224       0.426211
+18      5.973116       2.624300       0.439352
+19      5.751707       2.458409       0.427423
+20      5.523575       2.427143       0.439415
+21      5.583048       2.413401       0.432273
+
+baseline_median_ns=5.523575
+candidate_median_ns=2.413401
+paired_median=0.429512
+paired_IQR=0.006728
+paired_range=0.413658..0.442342
+wins=21/21
+
+The exact source route removes 57.05% of the predecessor's native time.  The
+absolute times moved with host frequency during the latter half, while the
+paired ratio remained narrow.
+
+Public C/native/GMP cross-check
+-------------------------------
+
+command=bin/tungsten bench bignum --cell add@3 --accurate --json
+raw_json=/private/tmp/tungsten-add3-equal-source-inline-clean-08f1697b.json
+raw_json_sha256=45518a5c90610b2af7c1eea88418f79502c9201c6a2efe99b06828c52f089dd7
+
+lane             ns/op
+Tungsten C       2.248000
+Tungsten native  2.329367
+GMP              2.499000
+
+The clean public row puts native 3.62% behind direct C and 6.79% ahead of
+GMP.  Across the six alternating candidate launches used as an independent
+layout check, native's median was 2.377584 ns and C's was 2.349 ns, a 1.22%
+gap inside the standing +/-5% unresolved band.  This is therefore a strict
+source-route win and direct-C parity, not a claim that the copied arithmetic
+schedule itself is faster than C.
+
+Correctness and structural gates
+--------------------------------
+
+  make -C runtime runtime.o
+  bin/tungsten run spec/numeric/bigint_add3_equal_source_spec.w --interpret
+  bin/tungsten run spec/numeric/bigint_add3_equal_source_spec.w \
+    --release --native --fast
+  bin/tungsten run \
+    spec/compiler/bigint_add3_equal_source_c_differential_spec.w \
+    --release --native --fast
+  bin/tungsten run \
+    spec/compiler/bigint_add3_equal_reopen_source_seam_spec.w \
+    --release --native --fast
+  bin/tungsten run spec/numeric/bigint_seam_disjoint_spec.w --interpret
+  bin/tungsten run spec/numeric/bigint_seam_disjoint_spec.w \
+    --release --native --fast
+  benchmarks/big_math/bench_big_math_tungsten_native --self-test
+
+All pass.  Coverage includes no-carry and carry growth, minimum/maximum and
+distinct-equal boxes, commutation, operand immutability, exact header sizes,
+signed and neighboring-width controls, 10,000 public-operator comparisons,
+and a separate 100,000-case direct source/C differential.  A reopen spec
+proves both ordinary `+` and the stable source seam select the final BigInt#+
+definition.
+
+LLVM 22 accepts and verifies the emitted module.  Final linked code contains
+the literal C ten-instruction kernel inline (`ldp/ldr/ldp/ldr`,
+`adds/adcs/adcs`, `stp/str`, `cset`), followed by the unconditional carry and
+size stores.  There is no helper BL/RET around the kernel or finisher.  A
+fresh `bin/tungsten bootstrap --release --native --no-bits` reports stage-1
+LLVM byte-identical to stage 2.
+
+Current-main dispatch revalidation (2026-09-04)
+------------------------------------------------
+
+The original checkpoint was replayed on current `main` at
+`eb048de15edfeec3467979a9bf016561ea980fe2`.  An always-inlined leaf kept the
+target win but moved neighboring hot code by 1.2--4.9%.  The retained form
+makes only the ten-instruction arithmetic leaf noinline, leaves scalar-word
+dispatch first, and recognizes equal widths immediately afterward.  Add@3
+enters native arithmetic; all other same-sign equal widths call the existing
+tuned C equal-fast tree before the generic source setup.
+
+Build and measurement:
+
+  host=Apple M5 Max, arm64 macOS 26.6.2
+  compiler=Homebrew clang 23.1.0, -mcpu=apple-m5
+  power=Battery Power (absolute nanoseconds diagnostic; paired ratios decide)
+  baseline_sha256=8903a610c0d4791f419906646db5b261e285f991860acbce895437c60befff02
+  candidate_sha256=d593d44ff8aaad1f162c85e38118645b3d5654c181e303fee85145c7d40fe402
+
+Target promotion, 21 alternating process pairs, three internal runs and
+300 ms per leg:
+
+  cell    baseline_ns  candidate_ns  candidate/baseline  IQR       wins
+  add@3      5.264350      2.570500            0.488828  0.008209  21/21
+
+Final neighboring equal-width screen, nine alternating pairs, three internal
+runs and 110 ms per leg:
+
+  cell     candidate/baseline  IQR       wins
+  add@2               0.666299  0.005296  9/9
+  add@4               0.697325  0.004241  9/9
+  add@8               0.715001  0.011857  9/9
+  add@16              0.756275  0.018349  9/9
+  add@64              0.908617  0.008614  9/9
+
+Scalar-word controls share the worker but finish before the new equal-width
+test.  Nine-pair ratios were 0.975791 at add1@1, 0.991473 at add1@4,
+1.016503 at add1@16, and 0.997822 at add1@64.  The only initially positive
+row, add1@16, was lengthened to 21 alternating 300 ms pairs and centered at
+0.984330 (14/21 wins); it is not a regression.
+
+The ordinary open-world public-add harness was independently rebuilt from the
+same baseline and candidate sources.  Twelve alternating, calibrated pairs
+measured candidate/baseline at 0.985839 (`one`), 0.975825 (`int-arg`),
+1.008447 (`four`), 1.016158 (`mixed`), 0.988453 (`sixtyfour`), and 1.006842
+(`skew`).  Every positive control lies inside its paired IQR; the worst median
+movement is 1.62%.
+
+Native-versus-C boundary decision
+---------------------------------
+
+The separate direct-C harness still has an advantage: the final same-binary
+screen measured 3.500 ns for Tungsten C and 3.888 ns for native Tungsten
+(`W/native=0.9002`).  That lane bypasses the call a Tungsten source program
+must make.  Replacing add@3's native leaf with an early `ccall` in the same
+ordinary Tungsten program was decisively worse: 21 alternating 110 ms pairs
+measured C-call/native at 1.377376 with 0/21 C-call wins.  The native leaf is
+therefore retained, while every unported equal width deliberately keeps C.
+
+Focused checks repeated on the retained form:
+
+  make -C runtime runtime.o
+  bin/tungsten run spec/numeric/bigint_add3_equal_source_spec.w --interpret
+  bin/tungsten run spec/numeric/bigint_add3_equal_source_spec.w --release --native --fast
+  bin/tungsten run spec/compiler/bigint_add3_equal_source_c_differential_spec.w --release --native --fast
+  bin/tungsten run spec/compiler/bigint_add3_equal_reopen_source_seam_spec.w --release --native --fast
+  bin/tungsten run spec/numeric/bigint_seam_disjoint_spec.w --interpret
+  bin/tungsten run spec/numeric/bigint_seam_disjoint_spec.w --release --native --fast
+  benchmarks/big_math/bench_big_math_tungsten_native --self-test
+
+All pass, including the 100,000-case direct C differential.

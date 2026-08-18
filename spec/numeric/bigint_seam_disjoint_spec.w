@@ -3,7 +3,8 @@
 # `w_add`/`w_sub`/`w_mul` admit a pair into the migrated source bodies via
 # `bigint_src_shape` / `bigint_mul_src_shape` (runtime.c): both heap
 # BigInts, 2..4096 limbs (2..24 for `*`), excluding equal-length pairs
-# whose RAW signs match (C keeps its *_equal_fast arms) and squaring.
+# whose RAW signs match except the exact migrated positive add@3 leaf
+# (C keeps the remaining *_equal_fast arms), and squaring.
 # The source bodies (core/numeric/big_int.w) carry NO tag or zero checks
 # of their own — every entry route proves heap-BigInt operands (the
 # guarded direct call site, the w_add shape gate, the dispatcher's typed
@@ -47,6 +48,7 @@ two_a = 1 << 100                   # 2 limbs
 two_b = (1 << 90) + 7              # 2 limbs (unequal magnitude, same count)
 two_c = (1 << 100) + 3             # 2 limbs, same count as two_a
 three_a = (1 << 140) + 5           # 3 limbs
+three_b = (1 << 141) + 7           # 3 limbs, positive add@3 source leaf
 sb_hi = 1 << (64 * 23 + 10)        # 24 limbs — inside the mul band
 sb_over = 1 << (64 * 24 + 10)      # 25 limbs — just past the mul band
 band_hi = 1 << (64 * 4095 + 10)    # 4096 limbs — inside the add band
@@ -65,10 +67,13 @@ check("add.uneq.pin", two_a + two_b, 1268888540267514781771602329607)
 check("sub.uneq.pin", two_a - two_b, 1266412660188944021221804081145)
 check("sub.uneq.round", (three_a - two_b) + two_b, three_a)
 
-# Equal-length same-raw-sign (C's *_equal_fast, NOT admitted).
+# Remaining equal-length same-raw-sign shapes (C's *_equal_fast, NOT admitted).
 check("add.eq.same_sign", (two_a + two_c) - two_c, two_a)
 check("sub.eq.same_sign", (two_a - two_c) + two_c, two_a)
 check("add.eq.same_sign.neg", (neg_two_c + neg_two_b) - neg_two_b, neg_two_c)
+
+# Exact positive add@3 exception (admitted and fully handled in source).
+check("add.eq.three_source", (three_a + three_b) - three_b, three_a)
 
 # Equal-length differing raw signs (admitted — no C arm).
 check("add.eq.mixed_sign", (two_a + neg_two_c) - neg_two_c, two_a)

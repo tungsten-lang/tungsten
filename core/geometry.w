@@ -14,6 +14,10 @@ use core/solve
 use core/geometry/support
 use core/geometry/lattice_symmetry
 use core/geometry/digital
+use core/geometry/polygon
+use core/geometry/lattice_metric
+use core/geometry/conway_criterion
+use core/geometry/crystallography
 use core/geometry/plane_symmetry
 use core/geometry/wallpaper_group
 use core/geometry/polyomino

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(547 total), grouped by area, with its declaration, a one-line
+(551 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -104,6 +104,10 @@ summary from the source header, and a link to the source.
 | `Polyomino` | `+ Polyomino` | Discrete lattice geometry: polyominoes on the integer grid Z x Z. | [`core/geometry/polyomino.w`](../core/geometry/polyomino.w) |
 | `LatticeSymmetry` | `+ LatticeSymmetry` | Finite symmetry groups acting on a lattice by integer matrices. | [`core/geometry/lattice_symmetry.w`](../core/geometry/lattice_symmetry.w) |
 | `DigitalGeometry` | `+ DigitalGeometry` | Digital geometry: the primitives for reasoning about shapes made of cells. | [`core/geometry/digital.w`](../core/geometry/digital.w) |
+| `Polygon` | `+ Polygon` | Polygons on the integer plane, with exact arithmetic throughout. | [`core/geometry/polygon.w`](../core/geometry/polygon.w) |
+| `LatticeMetric` | `+ LatticeMetric` | Metric invariants of a lattice, from its Gram matrix. | [`core/geometry/lattice_metric.w`](../core/geometry/lattice_metric.w) |
+| `ConwayCriterion` | `+ ConwayCriterion` | The Conway criterion: a sufficient condition for a tile to tile the plane. | [`core/geometry/conway_criterion.w`](../core/geometry/conway_criterion.w) |
+| `Crystallography` | `+ Crystallography` | Crystallographic classification, in any dimension where it makes sense. | [`core/geometry/crystallography.w`](../core/geometry/crystallography.w) |
 | `PlaneSymmetry` | `+ PlaneSymmetry` | The symmetry types a repeating plane pattern can have. | [`core/geometry/plane_symmetry.w`](../core/geometry/plane_symmetry.w) |
 | `WallpaperGroup` | `+ WallpaperGroup` | The wallpaper groups as actual groups, not just names. | [`core/geometry/wallpaper_group.w`](../core/geometry/wallpaper_group.w) |
 | `PolyominoPacking` | `+ PolyominoPacking` | Minimum-area rectangle packing of polyominoes, solved exactly. | [`core/geometry/polyomino_packing.w`](../core/geometry/polyomino_packing.w) |

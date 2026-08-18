@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(528 total), grouped by area, with its declaration, a one-line
+(531 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -157,10 +157,13 @@ summary from the source header, and a link to the source.
 | `Path` | `+ Path` | Path — immutable filesystem path | [`core/path.w`](../core/path.w) |
 | `Promise` | `+ Promise` | Promise — writable, exactly-once settlement for a read-only Future. | [`core/promise.w`](../core/promise.w) |
 | `Quantity` | `+ Quantity` | Quantity — numeric value with unit (tag 0xFFFD) | [`core/quantity.w`](../core/quantity.w) |
+| `QuantumCircuit` | `+ QuantumCircuit` | Quantum — reversible circuit construction, cost accounting, and simulation. | [`core/quantum.w`](../core/quantum.w) |
+| `QuantumBasisState` | `+ QuantumBasisState` | QuantumBasisState — permutation-and-phase simulation. | [`core/quantum.w`](../core/quantum.w) |
+| `QuantumState` | `+ QuantumState` | QuantumState — dense state vector over 2^width complex amplitudes. | [`core/quantum.w`](../core/quantum.w) |
 | `Measurement` | `+ Measurement` | Measurement — a measured scalar and its standard uncertainty. | [`core/measurement.w`](../core/measurement.w) |
 | `Calibration` | `+ Calibration` | Calibration — polynomial measurement model with a standard-uncertainty | [`core/calibration.w`](../core/calibration.w) |
 | `Random` | `+ Random` | — | [`core/random.w`](../core/random.w) |
-| `Range` | `+ Range` | — | [`core/range.w`](../core/range.w) |
+| `Range` | `+ Range` | Integer Range over the immediate WValue encoding (Location mode 11). | [`core/range.w`](../core/range.w) |
 | `Regex` | `+ Regex` | Regex — a homegrown regular-expression engine, written in Tungsten. | [`core/regex.w`](../core/regex.w) |
 | `RegexMatch` | `+ RegexMatch` | RegexMatch — structured numbered/named captures and codepoint spans. | [`core/regex.w`](../core/regex.w) |
 | `Sandbox` | `+ Sandbox` | Sandboxed execution — the runtime's gate over everything outside the | [`core/sandbox.w`](../core/sandbox.w) |

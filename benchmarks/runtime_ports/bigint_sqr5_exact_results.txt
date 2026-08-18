@@ -1,0 +1,124 @@
+BIGINT POSITIVE FIVE-LIMB SQUARE — EXACT SOURCE CHECKPOINT
+==========================================================
+
+Scope
+-----
+
+This checkpoint ports only the pointer-identical, raw-positive-header,
+five-limb arm from `bigint_mul_any_routed` / `bigint_mul_positive_equal`.
+The native Tungsten worker is a literal copy of the linked AArch64 `bn_sqr5`
+leaf:
+
+  - exact hot capacity-16 allocation for the ten-limb result;
+  - the same five diagonal and ten doubled cross products;
+  - the same fixed, intentionally noinline `mul` / `umulh` / `extr` /
+    flag-chain schedule;
+  - ten unconditional limb stores; and
+  - positive size 9 when limb 9 is zero, otherwise positive size 10.
+
+The dedicated stable seam admits the same tag-overlay negative with raw header
++5 as C. A real negative header, distinct equal boxes, and every neighboring
+width retain their existing C routes. A plain open-world BigInt `*` reopen
+remains observable. The compiler now accepts `; tungsten:noinline` in an
+embedded-LLVM body so this exact port can retain C's deliberate leaf boundary.
+
+The benchmark compiler disables the already-committed closed-world square
+shortcut (`TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT=0` and the sqr@2..4 direct
+toggles) so ordinary source `a * a` reaches this checkpoint. The runtime
+toggle `TUNGSTEN_BIGINT_SRC_OPS=0` pins the same binary to C. Extending the
+closed-world switch to sqr@5 is deliberately deferred to the separate
+native-only tranche.
+
+Build
+-----
+
+base_commit=a8b90f59cce5873b819c59e4a82f8a41996f358a
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-sqr5-exact-noinline
+compiler_sha256=71a1d0ae1af7e42e14f6c4f26daf021115777eea5be28e5c67a5b145e1d2b016
+candidate=/private/tmp/bench_big_math_tungsten_sqr5_exact_source_v4
+candidate_sha256=4b428e99957495e7ec8aaa8277ffa715c03d0106d0fbc3e39cee7babfb04d2f3
+fixed_point_ll_sha256=dc288eff510dfaf909f7512f07f25f94de603222a4726444951e7f8fe2afe570
+power=AC, battery 100 percent
+
+Same-binary C/source screen
+---------------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+control=TUNGSTEN_BIGINT_SRC_OPS=0
+raw_json=/private/tmp/bigint-sqr5-exact-screen-v4-a8b90f59-m5max-20260817.json
+raw_json_sha256=36b89c1bce1c88b6418c389983cbb39c40552341d970e17289ed9fea524f7984
+
+cell    C_pinned_ns  source_ns  paired_median  paired_IQR  wins
+sqr@1       2.298674    2.504344        1.091314    0.006508   0/11
+sqr@2       3.676292    2.983148        0.811344    0.002222  11/11
+sqr@3       4.567405    3.821613        0.835309    0.006228  11/11
+sqr@4       5.811381    4.917935        0.844286    0.008790  11/11
+sqr@5       8.586352    6.871994        0.799612    0.016861  11/11
+sqr@8      16.522827   16.742535        1.011345    0.002521   0/11
+sqr@16     47.815518   47.980581        1.002307    0.003593   2/11
+sqr@32    163.554901  163.939712        1.000920    0.005155   4/11
+
+Only sqr@5 changes arithmetic ownership in this checkpoint. The sqr@1 route
+has a real 9.13% screen cost from the final code/layout change; the promoted
+result below is 9.51%, still inside the exact-migration 10% budget but close
+enough to retain explicitly. The unmigrated sqr@8 control costs 1.13%; wider
+controls remain within 0.3%.
+
+Target and control promotion
+----------------------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr5-exact-promotion-a8b90f59-m5max-20260817.json
+raw_json_sha256=df73e438a56e34d2d73b13b48b4f4e1a13fb02c87d5a0040df7d5c988e0513f9
+
+cell    C_pinned_ns  source_ns  paired_median  paired_IQR  wins
+sqr@1       2.315066    2.531201        1.095127    0.010487   0/21
+sqr@5       8.590744    6.909320        0.804064    0.014436  21/21
+sqr@8      16.683806   16.847925        1.010325    0.003633   0/21
+
+The literal exact source route is 19.59% faster than the same binary pinned to
+its C seam. This is an arithmetic-ownership result: it preserves the fixed C
+algorithm and instruction schedule while removing the source-to-C route.
+
+Public three-lane row
+---------------------
+
+method=9 runs; 110 ms target; public `bin/tungsten bench bignum`
+raw_json=/private/tmp/bigint-sqr5-native-public-a8b90f59-m5max-20260817.json
+raw_json_sha256=359accf16dab75ff61777e98e32191af80310eed5d679e2b2d1c9a5a464fc355
+
+cell      Tungsten_C_ns  tungsten-native_ns  GMP_ns  native/C
+sqr@5             6.010                6.870   9.880    1.1430
+
+The exact port has not yet won the separately implemented public C harness.
+That lane retains a shorter direct C dispatch/lifecycle. This checkpoint is
+therefore not the final native-performance claim; the closed-world native
+integration and its matched controls follow in a separate commit.
+
+Focused validation
+------------------
+
+  - compiled and interpreted representation checks pass for size-9 and
+    size-10 results, overlay-negative and negative-header inputs, receiver
+    preservation, and a distinct-equal-value control;
+  - a compiled feature-off differential compares the direct strong native
+    worker with the pinned C boundary for 100,000 values, including both
+    result widths and alternating signs;
+  - the plain BigInt `*` reopen spec passes;
+  - feature-off and feature-on native-lane self-tests pass;
+  - the focused runtime object builds cleanly;
+  - compiler, focused-spec, and native-lane LLVM modules assemble and verify
+    under LLVM 22;
+  - linked AArch64 arithmetic/store bodies normalize to the same 134
+    instructions and SHA-256
+    `c436f79f5dabd813aeb461d711fa0bda7f400722e59b09e8d2051a3392de201f`;
+  - the native body retains C's explicit noinline boundary and adds only the
+    exact three-instruction +9/+10 size return;
+  - two self-host compiler generations emit byte-identical LLVM; and
+  - `git diff --check` passes.
+
+This is the exact-port checkpoint. Native-only closed-world integration follows
+in a separate commit with new matched measurements.

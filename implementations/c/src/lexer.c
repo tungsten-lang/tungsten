@@ -70,6 +70,112 @@ static inline int is_newline_cp(uint32_t c) {
   return c == '\n' || c == '\r';
 }
 
+/* Recognize the compact heredoc header used by embedded ll/asm bodies and
+ * skip the body before the context-free lexer can interpret target syntax as
+ * Tungsten.  In particular, AArch64 `[x2, #8]` used to open `[` and then
+ * treat `#8]` as a comment, leaving paren_depth nonzero for the rest of the
+ * file and suppressing every following NEWLINE/DEDENT token.
+ *
+ * Keep the four header tokens because parse_heredoc_command_ast reconstructs
+ * the canonical string node from the original source.  The body and closing
+ * delimiter are not Tungsten tokens; advancing directly to the following
+ * source line also keeps the surrounding indentation stack unchanged. */
+static int try_lex_heredoc(const TcSource *source, size_t count, size_t *pos_io,
+                           TcTokens *tokens, int *matched, TcError *err) {
+  *matched = 0;
+  size_t start = *pos_io;
+  if (start + 3 >= count) return 1;
+  uint32_t delimiter_first = start + 3 < count ? cp_at(source, start + 3) : 0;
+  int delimiter_starts_id = (source->lc[start + 3] & TC_F_ID_START) != 0 ||
+                            (delimiter_first >= 'A' && delimiter_first <= 'Z');
+  if (cp_at(source, start) != '<' ||
+      cp_at(source, start + 1) != '<' || cp_at(source, start + 2) != '~' ||
+      !delimiter_starts_id) {
+    return 1;
+  }
+
+  size_t delimiter_start = start + 3;
+  size_t delimiter_end = delimiter_start + 1;
+  while (delimiter_end < count) {
+    uint32_t dc = cp_at(source, delimiter_end);
+    if ((source->lc[delimiter_end] & TC_F_ID_CONTINUE) == 0 &&
+        !(dc >= 'A' && dc <= 'Z')) break;
+    delimiter_end++;
+  }
+
+  size_t header_newline = delimiter_end;
+  while (header_newline < count && is_space_cp(cp_at(source, header_newline))) {
+    header_newline++;
+  }
+  if (header_newline >= count || !is_newline_cp(cp_at(source, header_newline))) {
+    return 1;  /* `x << ~y`, not a heredoc header. */
+  }
+
+  size_t header_after = header_newline + 1;
+  if (cp_at(source, header_newline) == '\r' && header_after < count &&
+      cp_at(source, header_after) == '\n') {
+    header_after++;
+  }
+
+  size_t close_after = 0;
+  size_t line_start = header_after;
+  while (line_start <= count) {
+    size_t line_end = line_start;
+    while (line_end < count && !is_newline_cp(cp_at(source, line_end))) line_end++;
+
+    size_t text_start = line_start;
+    while (text_start < line_end && is_space_cp(cp_at(source, text_start))) text_start++;
+    size_t text_end = text_start;
+    while (text_end < line_end && !is_space_cp(cp_at(source, text_end))) text_end++;
+    size_t rest = text_end;
+    while (rest < line_end && is_space_cp(cp_at(source, rest))) rest++;
+
+    size_t delimiter_len = delimiter_end - delimiter_start;
+    if (text_end - text_start == delimiter_len && rest == line_end) {
+      int same = 1;
+      for (size_t i = 0; i < delimiter_len; i++) {
+        if (cp_at(source, text_start + i) != cp_at(source, delimiter_start + i)) {
+          same = 0;
+          break;
+        }
+      }
+      if (same) {
+        close_after = line_end;
+        if (close_after < count) {
+          uint32_t newline = cp_at(source, close_after++);
+          if (newline == '\r' && close_after < count &&
+              cp_at(source, close_after) == '\n') {
+            close_after++;
+          }
+        }
+        break;
+      }
+    }
+
+    if (line_end >= count) break;
+    line_start = line_end + 1;
+    if (cp_at(source, line_end) == '\r' && line_start < count &&
+        cp_at(source, line_start) == '\n') {
+      line_start++;
+    }
+  }
+
+  if (close_after == 0) return 1;  /* Let the AST layer report unterminated heredoc. */
+
+  uint32_t first = cp_at(source, delimiter_start);
+  int delimiter_type = first >= 'A' && first <= 'Z' ? TC_T_NAME : TC_T_ID;
+  if (!token_push(tokens, token_new(TC_T_OP, start, start + 2, 0), err) ||
+      !token_push(tokens, token_new(TC_T_OP, start + 2, start + 3, 0), err) ||
+      !token_push(tokens, token_new(delimiter_type, delimiter_start, delimiter_end, 0), err) ||
+      !token_push(tokens, token_new(TC_T_NEWLINE, header_newline, header_after, 0), err)) {
+    return 0;
+  }
+
+  *pos_io = close_after;
+  *matched = 1;
+  return 1;
+}
+
 static size_t color_literal_end(const TcSource *source, size_t start, size_t count) {
   if (start >= count || cp_at(source, start) != '#') return start;
   size_t pos = start + 1;
@@ -447,8 +553,33 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
       continue;
     }
 
+    int heredoc_matched = 0;
+    if (!try_lex_heredoc(source, count, &pos, tokens, &heredoc_matched, err)) return 0;
+    if (heredoc_matched) {
+      at_line_start = 1;
+      continue;
+    }
+
     if (f & TC_F_ID_START) {
       size_t start = pos++;
+
+      /* Raw WValue literal: u0x followed by exactly sixteen hex digits.
+       * It is not an identifier: its 64-bit payload must reach the compiler
+       * unchanged, including tag patterns whose top bit is set. */
+      if (c == 'u' && start + 2 < count && cp_at(source, start + 1) == '0' &&
+          cp_at(source, start + 2) == 'x') {
+        size_t end = start + 3;
+        while (end < count && (source->lc[end] & TC_F_HEX) != 0) end++;
+        if (end - (start + 3) != 16 ||
+            (end < count && (cp_at(source, end) == '_' ||
+                             (source->lc[end] & TC_F_HEX) != 0))) {
+          tc_error_set(err, "WValue literal must use exactly 16 hex digits");
+          return 0;
+        }
+        pos = end;
+        if (!token_push(tokens, token_new(TC_T_WVALUE, start, pos, 0), err)) return 0;
+        continue;
+      }
 
       if (c == '_' && pos < count && cp_at(source, pos) == '_') {
         if (start + 7 < count &&

@@ -1,0 +1,95 @@
+EXACT POSITIVE ADD1@4 CHECKPOINT
+
+parent_commit=a536785c93d1cd5ff9de9ce9a0e4a2b0ef6e7fd9
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+
+PORT CONTRACT
+
+The admitted positive 4-limb by positive 1-limb shape is a literal native
+Tungsten port of runtime.c's BN_WORD_FIXED_CASE(4):
+
+  ldp x4, x5, [src]
+  ldp x6, x7, [src, #16]
+  adds x4, x4, word
+  adcs x5, x5, xzr
+  adcs x6, x6, xzr
+  adcs x7, x7, xzr
+  stp x4, x5, [dst]
+  stp x6, x7, [dst, #16]
+  cset carry, cs
+
+The source wrapper asks the same hot allocator for four limbs.  No carry
+sets size four directly.  A full carry retains bigint_add_word_into's exact
+policy: if the result lacks a fifth slot, allocate five limbs, copy the
+already-published low limb, zero limbs 1..3, release the unfinished result,
+then publish limb 4 and size five.  No native-only arithmetic or scheduling
+change is included.
+
+MATCHED ROUTE A/B
+
+baseline=/private/tmp/add1-native-retained
+candidate=/private/tmp/add1-4-native-exact
+command=alternating BIN --sweep add1 4 1 110
+pairs=11
+
+retained-C source route median=4.150317 ns (IQR 0.017417 ns)
+exact native route median=2.527170 ns (IQR 0.007338 ns)
+candidate/baseline paired median=0.609575 (IQR 0.000797)
+candidate wins=11/11
+reduction=39.042%
+
+PUBLIC ROW AND CONTROLS
+
+command=bin/tungsten bench bignum --operations add1 --sizes 2,3,4,5,8 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+add1@2 C/native/GMP=1.398/3.588032/1.738 ns
+add1@3 C/native/GMP=1.771/2.606093/1.722 ns
+add1@4 C/native/GMP=1.805/2.527616/2.089 ns
+add1@5 C/native/GMP=1.799/4.186353/2.155 ns
+add1@8 C/native/GMP=1.955/4.176050/2.927 ns
+
+Only add1@4 changes arithmetic route; 2, 3, 5, and 8 are controls.  The exact
+port wins materially over the prior native route but remains 40.0% slower
+than tuned C and 21.0% slower than GMP.
+
+COUNTER ROUTE PROOF
+
+baseline command:
+  bin/tungsten flame --counters --duration 5 --top 20 --silent --
+    /private/tmp/add1-native-retained --sweep add1 4 40 110
+
+baseline attribution:
+  w_bigint_add 60.3%
+  bn_add_word_a64_fixed 20.3%
+  _tlv_get_addr 10.1%
+  BigInt#+__ovl_BigInt 8.3%
+
+candidate command:
+  bin/tungsten flame --counters --duration 5 --top 20 --silent --
+    /private/tmp/add1-4-native-exact --sweep add1 4 40 110
+
+candidate attribution:
+  __bigint_add1_4_exact 52.5%
+  BigInt#+__ovl_BigInt 25.4%
+  _tlv_get_addr 20.9%
+
+The candidate contains no bn_add_word_a64_fixed sample, proving the measured
+row reaches the native source leaf rather than a stale C fallback.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_add1_4_source_spec passed all 17 checks;
+- full carry from four to five limbs preserves value, size, and round trip;
+- three/five-limb and negative-sign neighbors match the retained C oracle;
+- focused and native-lane LLVM assembled and verified;
+- native harness self-test passed all operations;
+- runtime/runtime.o rebuilt and exports w_bigint_add1_4_finish_raw;
+- final AArch64 leaf is exactly the two-load-pair/full-chain/two-store-pair
+  schedule above with no frame or nested call;
+- git diff --check passed.

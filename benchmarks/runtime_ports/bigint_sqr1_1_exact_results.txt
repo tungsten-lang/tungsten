@@ -1,0 +1,145 @@
+BIGINT POSITIVE ONE-LIMB SQUARE — EXACT SOURCE CHECKPOINT
+========================================================
+
+Scope
+-----
+
+This checkpoint ports only the pointer-identical, raw-positive-header,
+one-limb arm from `bigint_mul_any_routed` / `bigint_mul_positive_11`.
+It deliberately reuses the already committed native 1-by-1 leaf, whose
+operation order and result policy are literal copies of C:
+
+  product = (u128)limb[0] * limb[0]
+  low     = (u64)product
+  high    = (u64)(product >> 64)
+  high==0 -> bigint_finish_one_limb(low, positive)
+  high!=0 -> exact hot capacity 2; limbs [low, high]; signed size +2
+
+The runtime identity arm has already loaded the raw header. Only `size == 1`
+may enter the source seam, exactly matching C: a tag-overlay negative with a
+positive header is admitted and squares positive; a negative header remains
+on the generic signed C route. Wider squares retain every existing fixed,
+Karatsuba/Toom/NTT, redirect, allocation, and normalization choice.
+
+The existing stable mul1@1 seam is reused. Its strong normal definition is
+the raw Core leaf, its open-world definition is the final BigInt#* worker,
+and its weak stage0 definition is the exact C leaf. No approximate arithmetic
+or native-only dispatch redesign is included.
+
+Build
+-----
+
+base_commit=0b0d0a8749e2530da37fe3923a94f4cffa678469
+host=Apple M5 Max, arm64 Darwin 25.6.0
+compiler=Homebrew clang 22.1.8
+compiler_path=/private/tmp/tungsten-compiler-sqr1-exact
+compiler_sha256=e4f86ac7c45a32eaeb20e880e02a02c7bbaa259b9d907221bcd1a28bf6baf7d8
+compiler_stage_llvm_sha256=82ce65bb65bff40e44e52a9ce8d8d6f31d7cbb6d3a9658cadda25fb61bb8e927
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+candidate=/private/tmp/bench_big_math_tungsten_sqr_final
+candidate_sha256=ba8e5b81aad3efca27a670f83c12624b6b9ed56d741a54159de34be18444ec3a
+power=AC, battery 100 percent
+load_at_metadata_capture=3.03 3.32 3.41
+
+Final same-binary C-pin screen
+------------------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+control=TUNGSTEN_BIGINT_SRC_OPS=0
+candidate=source routing enabled
+raw_json=/private/tmp/bigint-sqr1-exact-final-screen-0b0d0a87-m5max-20260817.json
+raw_json_sha256=6f01c56f7ca1575aae888404489c736ebdf00baae306c6e90982b97e3a3ad2f6
+
+cell    C_pinned_ns  source_ns   paired_median  paired_IQR  wins
+sqr@1       2.293508    2.421960        1.058708    0.004363   0/11
+sqr@2       3.524715    3.682160        1.043584    0.003907   0/11
+sqr@4       5.680241    5.802996        1.020539    0.012280   0/11
+sqr@8      16.493630   16.490819        1.000217    0.003271   5/11
+sqr@16     47.872067   47.968830        1.002810    0.003014   2/11
+sqr@32    164.606029  164.539696        0.999271    0.003979   6/11
+
+The runtime kill switch precedes the existing multiply source-shape check.
+Consequently the 2- and 4-limb rows include the pre-existing cost of checking
+and rejecting a square while source routing is enabled; they are not changed
+arithmetic routes. The literal before/after comparison below is the relevant
+control for code changed by this checkpoint.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr1-exact-final-promotion-0b0d0a87-m5max-20260817.json
+raw_json_sha256=9bb3c8f9c28e08f42ba5a3f0c0a7197270eeccf94c171bd5156556a6a8be7ae3
+
+cell    C_pinned_ns  source_ns   paired_median  paired_IQR  wins
+sqr@1       2.304510    2.438319        1.057839    0.004089   0/21
+
+The exact native route is 5.8% slower than directly pinning the inlined C
+identity leaf. This is recorded as the cost of the fidelity checkpoint, not
+presented as a speed win. Native-only integration starts after this commit.
+
+Literal production before/after
+-------------------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+baseline=literal 0b0d0a87 native binary, normal source routing
+candidate=exact square port, normal source routing
+raw_json=/private/tmp/bigint-sqr1-exact-production-screen-0b0d0a87-m5max-20260817.json
+raw_json_sha256=ed1fde3c53c4e862b3ee59fd58b8ceac9fa81abb412715aaa443db77d6a06ad8
+
+cell    paired_median  paired_IQR  wins
+sqr@1         0.999946    0.004218   6/11
+sqr@2         1.000822    0.004242   5/11
+sqr@4         0.997586    0.012255   7/11
+sqr@8         1.000035    0.002312   4/11
+sqr@16        0.997802    0.003979   8/11
+sqr@32        1.001060    0.004891   5/11
+
+A 21-pair, 300 ms target promotion of sqr@1 measured 0.999127 with a
+0.003914 paired IQR (13/21 wins). Thus the exact port preserves the prior
+production native-lane timing while moving ownership of the leaf to Core;
+all wider controls stay within 0.3%.
+
+Public three-lane row
+---------------------
+
+method=9 runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr1-public-final-0b0d0a87-m5max-20260817.json
+raw_json_sha256=72642b199266f262c0b3401db94d833404e610b65e493eb0198fc7a378ff4c1b
+
+cell   Tungsten_C_ns  native_Tungsten_ns  GMP_ns  C/native  C/GMP
+sqr@1        1.317           2.437858      2.401    0.540     0.549
+
+The direct C and GMP lanes use their retained scalar square entries. Native
+Tungsten executes the ordinary boxed `a * a` source operator, including its
+operator dispatch and immutable result lifecycle; this is intentionally not
+an equal-ABI kernel comparison.
+
+Counter route proof
+-------------------
+
+command=bin/tungsten flame --counters -d 3 --top 16 --silent --
+  /private/tmp/bench_big_math_tungsten_sqr_final --sweep sqr 1 1 5000
+
+  w_mul          94.3% cycles; 94.3% instructions; IPC 9.05
+  _tlv_get_addr   5.5% cycles;  5.5% instructions; IPC 9.14
+
+The linked `w_mul` contains the source `mul`/`umulh` square pair and inlined
+result publication; there is no call to `__w_bigint_mul1_1_src` or
+`w_bigint_mul1_1_finish_raw` on the route. Counter attribution therefore
+lands directly on the public operator, as expected under LTO.
+
+Focused validation
+------------------
+
+- compiled and interpreted arithmetic/representation outputs are identical;
+- the focused spec passes 22 checks, including overlay-negative and
+  negative-header squares, C-oracle parity, exact +2 header publication,
+  and receiver preservation;
+- plain BigInt `*` reopen dispatch wins over the narrow square route;
+- feature-off and feature-on native lane self-tests pass;
+- 100,000 boxed multiply/square and 100,000 square GMP differentials pass;
+- emitted spec and compiler LLVM assemble and verify under LLVM 22;
+- final linked route contains the exact `mul`/`umulh` arithmetic pair;
+- two self-host compiler generations emit byte-identical LLVM;
+- `git diff --check` passes.

@@ -4479,7 +4479,8 @@ static uint64_t bn_submul_1_ref(uint64_t *rp, const uint64_t *up, int32_t n, uin
  * chain.  Prefixes of one and two limbs leave the main loop a multiple of four.
  */
 __attribute__((naked, noinline, aligned(64)))
-static uint64_t bn_submul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
+__attribute__((visibility("hidden")))
+uint64_t bn_submul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
     __asm__(
         "adds x15, xzr, xzr\n"
         "tbz w2, #0, 1f\n"
@@ -11537,8 +11538,591 @@ static inline WValue bigint_mul_bigint_word(WValue big, int64_t word) {
 }
 #endif
 
+#ifndef BN_BIGINT_MUL1_1_SRC_DIRECT
+#define BN_BIGINT_MUL1_1_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_SQR2_SRC_DIRECT
+#define BN_BIGINT_SQR2_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_SQR3_SRC_DIRECT
+#define BN_BIGINT_SQR3_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_SQR4_SRC_DIRECT
+#define BN_BIGINT_SQR4_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_SQR5_SRC_DIRECT
+#define BN_BIGINT_SQR5_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_SQR6_SRC_DIRECT
+#define BN_BIGINT_SQR6_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_SQR7_SRC_DIRECT
+#define BN_BIGINT_SQR7_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_SQR8_SRC_DIRECT
+#define BN_BIGINT_SQR8_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_SQR16_SRC_DIRECT
+#define BN_BIGINT_SQR16_SRC_DIRECT BN_BOXED_SQR16_FAST
+#endif
+#ifndef BN_BIGINT_MUL2_SRC_DIRECT
+#define BN_BIGINT_MUL2_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL3_SRC_DIRECT
+#define BN_BIGINT_MUL3_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL4_SRC_DIRECT
+#define BN_BIGINT_MUL4_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL5_SRC_DIRECT
+#define BN_BIGINT_MUL5_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL6_SRC_DIRECT
+#define BN_BIGINT_MUL6_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL7_SRC_DIRECT
+#define BN_BIGINT_MUL7_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL8_SRC_DIRECT
+#define BN_BIGINT_MUL8_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL12_SRC_DIRECT
+#define BN_BIGINT_MUL12_SRC_DIRECT BN_MUL_EQ12
+#endif
+#ifndef BN_BIGINT_MUL15_SRC_DIRECT
+#define BN_BIGINT_MUL15_SRC_DIRECT BN_FROMSTR_FIXED_TOOM
+#endif
+#ifndef BN_BIGINT_MUL16_SRC_DIRECT
+#define BN_BIGINT_MUL16_SRC_DIRECT BN_MUL_POWER2_FIXED
+#endif
+#ifndef BN_BIGINT_MUL17_SRC_DIRECT
+#define BN_BIGINT_MUL17_SRC_DIRECT BN_MUL_EQ17
+#endif
+#ifndef BN_BIGINT_MUL21_SRC_DIRECT
+#define BN_BIGINT_MUL21_SRC_DIRECT BN_FROMSTR_FIXED_TOOM
+#endif
+#ifndef BN_BIGINT_MUL24_SRC_DIRECT
+#define BN_BIGINT_MUL24_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL1_2_SRC_DIRECT
+#define BN_BIGINT_MUL1_2_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL1_3_SRC_DIRECT
+#define BN_BIGINT_MUL1_3_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL1_4_SRC_DIRECT
+#define BN_BIGINT_MUL1_4_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL1_5_SRC_DIRECT
+#define BN_BIGINT_MUL1_5_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL1_6_SRC_DIRECT
+#define BN_BIGINT_MUL1_6_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL1_7_SRC_DIRECT
+#define BN_BIGINT_MUL1_7_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL1_8_SRC_DIRECT
+#define BN_BIGINT_MUL1_8_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_MUL1_16_SRC_DIRECT
+#define BN_BIGINT_MUL1_16_SRC_DIRECT BN_MUL_POWER2_FIXED
+#endif
+#ifndef BN_BIGINT_MUL1_24_SRC_DIRECT
+#define BN_BIGINT_MUL1_24_SRC_DIRECT BN_MUL_POWER2_FIXED
+#endif
+#ifndef BN_BIGINT_MUL1_32_SRC_DIRECT
+#define BN_BIGINT_MUL1_32_SRC_DIRECT BN_MUL_POWER2_FIXED
+#endif
+#ifndef BN_BIGINT_MUL1_40_SRC_DIRECT
+#define BN_BIGINT_MUL1_40_SRC_DIRECT BN_MUL_POWER2_FIXED
+#endif
+#ifndef BN_BIGINT_MUL1_48_SRC_DIRECT
+#define BN_BIGINT_MUL1_48_SRC_DIRECT BN_MUL_POWER2_FIXED
+#endif
+#ifndef BN_BIGINT_MUL1_64_SRC_DIRECT
+#define BN_BIGINT_MUL1_64_SRC_DIRECT BN_MUL_POWER2_FIXED
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_2_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_2_SRC_KNOB 0
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL2_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL2_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL2_SRC_KNOB
+static inline int bn_bench_runtime_mul2_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL2_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul2_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL3_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL3_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL3_SRC_KNOB
+static inline int bn_bench_runtime_mul3_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL3_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul3_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL4_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL4_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL4_SRC_KNOB
+static inline int bn_bench_runtime_mul4_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL4_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul4_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL5_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL5_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL5_SRC_KNOB
+static inline int bn_bench_runtime_mul5_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL5_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul5_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL6_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL6_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL6_SRC_KNOB
+static inline int bn_bench_runtime_mul6_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL6_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul6_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL7_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL7_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL7_SRC_KNOB
+static inline int bn_bench_runtime_mul7_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL7_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul7_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL8_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL8_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL8_SRC_KNOB
+static inline int bn_bench_runtime_mul8_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL8_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul8_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL12_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL12_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL12_SRC_KNOB
+static inline int bn_bench_runtime_mul12_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL12_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul12_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL15_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL15_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL15_SRC_KNOB
+static inline int bn_bench_runtime_mul15_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL15_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul15_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL16_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL16_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL16_SRC_KNOB
+static inline int bn_bench_runtime_mul16_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL16_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul16_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL17_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL17_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL17_SRC_KNOB
+static inline int bn_bench_runtime_mul17_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL17_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul17_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL21_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL21_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL21_SRC_KNOB
+static inline int bn_bench_runtime_mul21_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL21_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul21_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL24_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL24_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL24_SRC_KNOB
+static inline int bn_bench_runtime_mul24_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL24_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul24_src_enabled(void) { return 1; }
+#endif
+#if BN_BENCH_RUNTIME_MUL1_2_SRC_KNOB
+static inline int bn_bench_runtime_mul1_2_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_2_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_2_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_3_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_3_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_3_SRC_KNOB
+static inline int bn_bench_runtime_mul1_3_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_3_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_3_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_4_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_4_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_4_SRC_KNOB
+static inline int bn_bench_runtime_mul1_4_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_4_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_4_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_5_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_5_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_5_SRC_KNOB
+static inline int bn_bench_runtime_mul1_5_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_5_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_5_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_6_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_6_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_6_SRC_KNOB
+static inline int bn_bench_runtime_mul1_6_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_6_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_6_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_7_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_7_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_7_SRC_KNOB
+static inline int bn_bench_runtime_mul1_7_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_7_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_7_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_8_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_8_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_8_SRC_KNOB
+static inline int bn_bench_runtime_mul1_8_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_8_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_8_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_16_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_16_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_16_SRC_KNOB
+static inline int bn_bench_runtime_mul1_16_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_16_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_16_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_24_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_24_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_24_SRC_KNOB
+static inline int bn_bench_runtime_mul1_24_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_24_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_24_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_32_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_32_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_32_SRC_KNOB
+static inline int bn_bench_runtime_mul1_32_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_32_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_32_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_40_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_40_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_40_SRC_KNOB
+static inline int bn_bench_runtime_mul1_40_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_40_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_40_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_48_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_48_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_48_SRC_KNOB
+static inline int bn_bench_runtime_mul1_48_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_48_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_48_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_MUL1_64_SRC_KNOB
+#define BN_BENCH_RUNTIME_MUL1_64_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_MUL1_64_SRC_KNOB
+static inline int bn_bench_runtime_mul1_64_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_MUL1_64_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_mul1_64_src_enabled(void) { return 1; }
+#endif
+#ifndef BN_BENCH_RUNTIME_SQR16_SRC_KNOB
+#define BN_BENCH_RUNTIME_SQR16_SRC_KNOB 0
+#endif
+#if BN_BENCH_RUNTIME_SQR16_SRC_KNOB
+static inline int bn_bench_runtime_sqr16_src_enabled(void) {
+    static __thread int enabled = -1;
+    if (enabled < 0) {
+        const char *value = getenv("TUNGSTEN_BN_SQR16_SRC");
+        enabled = !value || value[0] != '0';
+    }
+    return enabled;
+}
+#else
+static inline int bn_bench_runtime_sqr16_src_enabled(void) { return 1; }
+#endif
+
 static inline __attribute__((always_inline))
-WValue bigint_mul_any(WValue a, WValue b) {
+WValue bigint_mul1_1_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_sqr2_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_sqr3_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_sqr4_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_sqr5_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_sqr6_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_sqr7_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_sqr8_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_sqr16_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul2_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul3_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul4_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul5_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul6_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul7_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul8_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul12_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul15_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul16_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul17_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul21_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul24_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_2_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_3_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_4_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_5_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_6_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_7_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_8_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_16_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_24_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_32_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_40_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_48_seam(WValue a, WValue b);
+static inline __attribute__((always_inline))
+WValue bigint_mul1_64_seam(WValue a, WValue b);
+
+static inline __attribute__((always_inline))
+WValue bigint_mul_any_routed(WValue a, WValue b, int route_mul1_1) {
+    (void)route_mul1_1;
 #ifndef BN_MUL_POSITIVE_EQUAL_FAST
 #define BN_MUL_POSITIVE_EQUAL_FAST 1
 #endif
@@ -11564,12 +12148,75 @@ WValue bigint_mul_any(WValue a, WValue b) {
          * so only the magnitude gate matters (overlay-flagged negatives with
          * a positive header still square correctly on this path). */
         int32_t n = ba->size;
-        if (n == 1) return bigint_mul_positive_11(ba, ba);
-#if BN_BOXED_SQR16_FAST
+        if (n == 1) {
+#if BN_BIGINT_MUL1_1_SRC_DIRECT
+            if (__builtin_expect(route_mul1_1 != 0, 1))
+                return bigint_mul1_1_seam(a, b);
+#endif
+            return bigint_mul_positive_11(ba, ba);
+        }
+        if (n == 2) {
+#if BN_BIGINT_SQR2_SRC_DIRECT
+            if (__builtin_expect(route_mul1_1 != 0, 1))
+                return bigint_sqr2_seam(a, b);
+#endif
+            return bigint_mul_positive_equal(ba, ba, 2);
+        }
+        if (n == 3) {
+#if BN_BIGINT_SQR3_SRC_DIRECT
+            if (__builtin_expect(route_mul1_1 != 0, 1))
+                return bigint_sqr3_seam(a, b);
+#endif
+            return bigint_mul_positive_equal(ba, ba, 3);
+        }
+        if (n == 4) {
+#if BN_BIGINT_SQR4_SRC_DIRECT
+            if (__builtin_expect(route_mul1_1 != 0, 1))
+                return bigint_sqr4_seam(a, b);
+#endif
+            return bigint_mul_positive_equal(ba, ba, 4);
+        }
+        if (n == 5) {
+#if BN_BIGINT_SQR5_SRC_DIRECT
+            if (__builtin_expect(route_mul1_1 != 0, 1))
+                return bigint_sqr5_seam(a, b);
+#endif
+            return bigint_mul_positive_equal(ba, ba, 5);
+        }
+        if (n == 6) {
+#if BN_BIGINT_SQR6_SRC_DIRECT
+            if (__builtin_expect(route_mul1_1 != 0, 1))
+                return bigint_sqr6_seam(a, b);
+#endif
+            return bigint_mul_positive_equal(ba, ba, 6);
+        }
+        if (n == 7) {
+#if BN_BIGINT_SQR7_SRC_DIRECT
+            if (__builtin_expect(route_mul1_1 != 0, 1))
+                return bigint_sqr7_seam(a, b);
+#endif
+            return bigint_mul_positive_equal(ba, ba, 7);
+        }
+        if (n == 8) {
+#if BN_BIGINT_SQR8_SRC_DIRECT
+            if (__builtin_expect(route_mul1_1 != 0, 1))
+                return bigint_sqr8_seam(a, b);
+#endif
+            return bigint_mul_positive_equal(ba, ba, 8);
+        }
+#if BN_BIGINT_SQR16_SRC_DIRECT
         /* Bypass bigint_mul_positive_equal's generic-kernel frame entirely:
          * this pointer-identical, positive shape is already fully known. */
-        if (n == 16)
+        if (n == 16) {
+            if (__builtin_expect(route_mul1_1 != 0, 1) &&
+                bn_bench_runtime_sqr16_src_enabled())
+                return bigint_sqr16_seam(a, b);
+#if BN_BOXED_SQR16_FAST
             return bigint_sqr_positive_16(ba);
+#else
+            return bigint_mul_positive_equal(ba, ba, 16);
+#endif
+        }
 #endif
         if (n > 1 && n <= BN_MUL_POSITIVE_EQUAL_FAST_MAX)
             return bigint_mul_positive_equal(ba, ba, n);
@@ -11590,7 +12237,215 @@ WValue bigint_mul_any(WValue a, WValue b) {
         WBigint *bb = w_as_bigint(b);
         int32_t na = ba->size;
         int32_t nb = bb->size;
+#if BN_BIGINT_MUL2_SRC_DIRECT
+        if (na == 2 && nb == 2 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul2_src_enabled())
+            return bigint_mul2_seam(a, b);
+#endif
+#if BN_BIGINT_MUL3_SRC_DIRECT
+        if (na == 3 && nb == 3 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul3_src_enabled())
+            return bigint_mul3_seam(a, b);
+#endif
+#if BN_BIGINT_MUL4_SRC_DIRECT
+        if (na == 4 && nb == 4 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul4_src_enabled())
+            return bigint_mul4_seam(a, b);
+#endif
+#if BN_BIGINT_MUL5_SRC_DIRECT
+        if (na == 5 && nb == 5 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul5_src_enabled())
+            return bigint_mul5_seam(a, b);
+#endif
+#if BN_BIGINT_MUL6_SRC_DIRECT
+        if (na == 6 && nb == 6 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul6_src_enabled())
+            return bigint_mul6_seam(a, b);
+#endif
+#if BN_BIGINT_MUL7_SRC_DIRECT
+        if (na == 7 && nb == 7 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul7_src_enabled())
+            return bigint_mul7_seam(a, b);
+#endif
+#if BN_BIGINT_MUL8_SRC_DIRECT
+        if (na == 8 && nb == 8 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul8_src_enabled())
+            return bigint_mul8_seam(a, b);
+#endif
+#if BN_BIGINT_MUL12_SRC_DIRECT
+        if (na == 12 && nb == 12 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul12_src_enabled())
+            return bigint_mul12_seam(a, b);
+#endif
+#if BN_BIGINT_MUL15_SRC_DIRECT
+        if (na == 15 && nb == 15 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul15_src_enabled())
+            return bigint_mul15_seam(a, b);
+#endif
+#if BN_BIGINT_MUL16_SRC_DIRECT
+        if (na == 16 && nb == 16 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul16_src_enabled())
+            return bigint_mul16_seam(a, b);
+#endif
+#if BN_BIGINT_MUL17_SRC_DIRECT
+        if (na == 17 && nb == 17 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul17_src_enabled())
+            return bigint_mul17_seam(a, b);
+#endif
+#if BN_BIGINT_MUL21_SRC_DIRECT
+        if (na == 21 && nb == 21 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul21_src_enabled())
+            return bigint_mul21_seam(a, b);
+#endif
+#if BN_BIGINT_MUL24_SRC_DIRECT
+        if (na == 24 && nb == 24 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul24_src_enabled())
+            return bigint_mul24_seam(a, b);
+#endif
+#if BN_BIGINT_MUL1_2_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC2(NW) do {                                  \
+    if ((NW) == 2 && __builtin_expect(route_mul1_1 != 0, 1))              \
+        if (bn_bench_runtime_mul1_2_src_enabled())                         \
+            return bigint_mul1_2_seam(a, b);                              \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC2(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_3_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC3(NW) do {                                  \
+    if ((NW) == 3 && __builtin_expect(route_mul1_1 != 0, 1))              \
+        if (bn_bench_runtime_mul1_3_src_enabled())                         \
+            return bigint_mul1_3_seam(a, b);                              \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC3(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_4_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC4(NW) do {                                  \
+    if ((NW) == 4 && __builtin_expect(route_mul1_1 != 0, 1))              \
+        if (bn_bench_runtime_mul1_4_src_enabled())                         \
+            return bigint_mul1_4_seam(a, b);                              \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC4(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_5_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC5(NW) do {                                  \
+    if ((NW) == 5 && __builtin_expect(route_mul1_1 != 0, 1))              \
+        if (bn_bench_runtime_mul1_5_src_enabled())                         \
+            return bigint_mul1_5_seam(a, b);                              \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC5(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_6_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC6(NW) do {                                  \
+    if ((NW) == 6 && __builtin_expect(route_mul1_1 != 0, 1))              \
+        if (bn_bench_runtime_mul1_6_src_enabled())                         \
+            return bigint_mul1_6_seam(a, b);                              \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC6(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_7_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC7(NW) do {                                  \
+    if ((NW) == 7 && __builtin_expect(route_mul1_1 != 0, 1))              \
+        if (bn_bench_runtime_mul1_7_src_enabled())                         \
+            return bigint_mul1_7_seam(a, b);                              \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC7(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_8_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC8(NW) do {                                  \
+    if ((NW) == 8 && __builtin_expect(route_mul1_1 != 0, 1))              \
+        if (bn_bench_runtime_mul1_8_src_enabled())                         \
+            return bigint_mul1_8_seam(a, b);                              \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC8(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_16_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC16(NW) do {                                 \
+    if ((NW) == 16 && __builtin_expect(route_mul1_1 != 0, 1))             \
+        if (bn_bench_runtime_mul1_16_src_enabled())                        \
+            return bigint_mul1_16_seam(a, b);                             \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC16(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_24_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC24(NW) do {                                 \
+    if ((NW) == 24 && __builtin_expect(route_mul1_1 != 0, 1))             \
+        if (bn_bench_runtime_mul1_24_src_enabled())                        \
+            return bigint_mul1_24_seam(a, b);                             \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC24(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_32_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC32(NW) do {                                 \
+    if ((NW) == 32 && __builtin_expect(route_mul1_1 != 0, 1))             \
+        if (bn_bench_runtime_mul1_32_src_enabled())                        \
+            return bigint_mul1_32_seam(a, b);                             \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC32(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_40_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC40(NW) do {                                 \
+    if ((NW) == 40 && __builtin_expect(route_mul1_1 != 0, 1))             \
+        if (bn_bench_runtime_mul1_40_src_enabled())                        \
+            return bigint_mul1_40_seam(a, b);                             \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC40(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_48_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC48(NW) do {                                 \
+    if ((NW) == 48 && __builtin_expect(route_mul1_1 != 0, 1))             \
+        if (bn_bench_runtime_mul1_48_src_enabled())                        \
+            return bigint_mul1_48_seam(a, b);                             \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC48(NW) do { (void)(NW); } while (0)
+#endif
+#if BN_BIGINT_MUL1_64_SRC_DIRECT
+#define BN_MUL_N1_POSITIVE_SRC64(NW) do {                                 \
+    if ((NW) == 64 && __builtin_expect(route_mul1_1 != 0, 1))             \
+        if (bn_bench_runtime_mul1_64_src_enabled())                        \
+            return bigint_mul1_64_seam(a, b);                             \
+} while (0)
+#else
+#define BN_MUL_N1_POSITIVE_SRC64(NW) do { (void)(NW); } while (0)
+#endif
 #define BN_MUL_N1_POSITIVE_RETURN(WIDE, WORD, NW) do {                    \
+    BN_MUL_N1_POSITIVE_SRC2(NW);                                          \
+    BN_MUL_N1_POSITIVE_SRC3(NW);                                          \
+    BN_MUL_N1_POSITIVE_SRC4(NW);                                          \
+    BN_MUL_N1_POSITIVE_SRC5(NW);                                          \
+    BN_MUL_N1_POSITIVE_SRC6(NW);                                          \
+    BN_MUL_N1_POSITIVE_SRC7(NW);                                          \
+    BN_MUL_N1_POSITIVE_SRC8(NW);                                          \
+    BN_MUL_N1_POSITIVE_SRC16(NW);                                         \
+    BN_MUL_N1_POSITIVE_SRC24(NW);                                         \
+    BN_MUL_N1_POSITIVE_SRC32(NW);                                         \
+    BN_MUL_N1_POSITIVE_SRC40(NW);                                         \
+    BN_MUL_N1_POSITIVE_SRC48(NW);                                         \
+    BN_MUL_N1_POSITIVE_SRC64(NW);                                         \
     if ((NW) <= BN_MUL_N1_SMALL_MAX)                                      \
         return bigint_mul_n1_small(                                       \
             (WIDE)->limbs, (NW), (WORD)->limbs[0], 0);                    \
@@ -11619,13 +12474,31 @@ WValue bigint_mul_any(WValue a, WValue b) {
         (WIDE)->limbs, (NW), (WORD)->limbs[0], 0);                        \
 } while (0)
         if (na == 1 || nb == 1) {
-            if (na == 1 && nb == 1)
+            if (na == 1 && nb == 1) {
+#if BN_BIGINT_MUL1_1_SRC_DIRECT
+                if (__builtin_expect(route_mul1_1 != 0, 1))
+                    return bigint_mul1_1_seam(a, b);
+#endif
                 return bigint_mul_positive_11(ba, bb);
+            }
             if (nb == 1 && na >= 2)
                 BN_MUL_N1_POSITIVE_RETURN(ba, bb, na);
             if (na == 1 && nb >= 2)
                 BN_MUL_N1_POSITIVE_RETURN(bb, ba, nb);
         }
+#undef BN_MUL_N1_POSITIVE_SRC2
+#undef BN_MUL_N1_POSITIVE_SRC3
+#undef BN_MUL_N1_POSITIVE_SRC4
+#undef BN_MUL_N1_POSITIVE_SRC5
+#undef BN_MUL_N1_POSITIVE_SRC6
+#undef BN_MUL_N1_POSITIVE_SRC7
+#undef BN_MUL_N1_POSITIVE_SRC8
+#undef BN_MUL_N1_POSITIVE_SRC16
+#undef BN_MUL_N1_POSITIVE_SRC24
+#undef BN_MUL_N1_POSITIVE_SRC32
+#undef BN_MUL_N1_POSITIVE_SRC40
+#undef BN_MUL_N1_POSITIVE_SRC48
+#undef BN_MUL_N1_POSITIVE_SRC64
 #undef BN_MUL_N1_POSITIVE_RETURN
     }
 #endif
@@ -11634,6 +12507,123 @@ WValue bigint_mul_any(WValue a, WValue b) {
         int32_t n, bn;
         WBigint *ba = w_bigint_view(a, &n);
         WBigint *bb = w_bigint_view(b, &bn);
+#if BN_BIGINT_MUL2_SRC_DIRECT &&                                      \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 2 && bb->size == 2 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul2_src_enabled())
+            return bigint_mul2_seam(a, b);
+#endif
+#if BN_BIGINT_MUL3_SRC_DIRECT &&                                      \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 3 && bb->size == 3 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul3_src_enabled())
+            return bigint_mul3_seam(a, b);
+#endif
+#if BN_BIGINT_MUL4_SRC_DIRECT &&                                      \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 4 && bb->size == 4 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul4_src_enabled())
+            return bigint_mul4_seam(a, b);
+#endif
+#if BN_BIGINT_MUL5_SRC_DIRECT &&                                      \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 5 && bb->size == 5 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul5_src_enabled())
+            return bigint_mul5_seam(a, b);
+#endif
+#if BN_BIGINT_MUL6_SRC_DIRECT &&                                      \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 6 && bb->size == 6 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul6_src_enabled())
+            return bigint_mul6_seam(a, b);
+#endif
+#if BN_BIGINT_MUL7_SRC_DIRECT &&                                      \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 7 && bb->size == 7 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul7_src_enabled())
+            return bigint_mul7_seam(a, b);
+#endif
+#if BN_BIGINT_MUL8_SRC_DIRECT &&                                      \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 8 && bb->size == 8 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul8_src_enabled())
+            return bigint_mul8_seam(a, b);
+#endif
+#if BN_BIGINT_MUL12_SRC_DIRECT &&                                     \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 12 && bb->size == 12 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul12_src_enabled())
+            return bigint_mul12_seam(a, b);
+#endif
+#if BN_BIGINT_MUL15_SRC_DIRECT &&                                     \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 15 && bb->size == 15 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul15_src_enabled())
+            return bigint_mul15_seam(a, b);
+#endif
+#if BN_BIGINT_MUL16_SRC_DIRECT &&                                     \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 16 && bb->size == 16 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul16_src_enabled())
+            return bigint_mul16_seam(a, b);
+#endif
+#if BN_BIGINT_MUL17_SRC_DIRECT &&                                     \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 17 && bb->size == 17 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul17_src_enabled())
+            return bigint_mul17_seam(a, b);
+#endif
+#if BN_BIGINT_MUL21_SRC_DIRECT &&                                     \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 21 && bb->size == 21 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul21_src_enabled())
+            return bigint_mul21_seam(a, b);
+#endif
+#if BN_BIGINT_MUL24_SRC_DIRECT &&                                     \
+    !(BN_MUL_N1_FAST && BN_MUL_N1_POSITIVE_EARLY &&                  \
+      BN_MUL_N1_SMALL_STRAIGHT && BN_MUL_POWER2_FIXED)
+        if (ba->size == 24 && bb->size == 24 && a != b &&
+            ((a | b) & W_BIGINT_SIGN_BIT) == 0 &&
+            __builtin_expect(route_mul1_1 != 0, 1) &&
+            bn_bench_runtime_mul24_src_enabled())
+            return bigint_mul24_seam(a, b);
+#endif
         if (n == 1 && bn == 1)
             return bigint_mul_positive_11(ba, bb);
 #if BN_MUL_N1_FAST
@@ -11711,6 +12701,23 @@ WValue bigint_mul_any(WValue a, WValue b) {
     if (a == negative_one) return w_neg(b);
 #endif
     return bigint_mul_any_generic(a, b);
+}
+
+static inline __attribute__((always_inline))
+WValue bigint_mul_any(WValue a, WValue b) {
+    return bigint_mul_any_routed(a, b, 0);
+}
+
+/* Exact built-in BigInt multiplication boundary for the compiled Core
+ * BigInt#*(BigInt) worker.  The worker has already performed language-level
+ * method dispatch, so falling back through w_mul would repeat polymorphic
+ * dispatch before returning to this same built-in implementation. */
+WValue w_bigint_mul_builtin_exact(WValue a, WValue b) {
+    /* Preserve the committed native N-by-1 seams.  Their weak defaults are
+     * exact C twins, while a fully compiled program supplies the strong Core
+     * leaves.  All other shapes retain bigint_mul_any_routed's tuned C
+     * schedule. */
+    return bigint_mul_any_routed(a, b, 1);
 }
 
 /* ---- Bigint division (schoolbook, Knuth Algorithm D simplified) ---- */
@@ -12711,10 +13718,33 @@ static int bn_bench_runtime_mod84_cache_entries = 2;
 #else
 #define BN_MOD84_PREINV_CACHE_ENTRIES_ENABLED() BN_MOD84_PREINV_CACHE_ENTRIES
 #endif
-static __thread uint64_t bn_mod84_preinv_d1[2];
-static __thread uint64_t bn_mod84_preinv_d0[2];
-static __thread uint64_t bn_mod84_preinv_value[2];
-static __thread uint8_t bn_mod84_preinv_next;
+/* The exact native-Tungsten mag_mod_84 port reads the same process-private
+ * cache through Mach-O TLS descriptors.  Hidden linkage keeps these runtime
+ * implementation details out of the public ABI while allowing the embedded
+ * assembly object to share, rather than approximate, the tuned C policy. */
+__attribute__((visibility("hidden"))) __thread uint64_t
+    bn_mod84_preinv_d1[2];
+__attribute__((visibility("hidden"))) __thread uint64_t
+    bn_mod84_preinv_d0[2];
+__attribute__((visibility("hidden"))) __thread uint64_t
+    bn_mod84_preinv_value[2];
+__attribute__((visibility("hidden"))) __thread uint8_t
+    bn_mod84_preinv_next;
+
+typedef struct {
+    struct {
+        uint64_t d1;
+        uint64_t d0;
+        uint64_t value;
+    } entry[2];
+    uint8_t next;
+} BnMod84NativePreinvCache;
+
+/* Native follow-up to the exact port: one TLS descriptor lookup exposes the
+ * same two entries and round-robin replacement policy.  The retained C lane
+ * keeps its original independently measured cache layout above. */
+__attribute__((visibility("hidden"))) __thread BnMod84NativePreinvCache
+    bn_mod84_native_preinv_cache;
 #endif
 
 static inline __attribute__((always_inline))
@@ -12793,11 +13823,16 @@ WBigint *mag_mod_84(const uint64_t *u, const uint64_t *v) {
                 uint64_t carry = bn_add_n(window, window, vn, 4);
                 window[4] += carry;
             }
+            /* The corrected remainder occupies window[0..3]; window[4]
+             * is the cleared borrow/carry limb.  The next quotient digit
+             * consumes window[3:2] as its register pair and brings
+             * window[1] down as n0.  Keeping window[4:3] here shifts the
+             * recurrence by one limb and corrupts consecutive saturated
+             * digits (for example (B^4-1)^2+r mod (B^4-1)). */
             un[j] = window[0];
             un[j + 1] = window[1];
-            un[j + 2] = window[2];
-            r0 = window[3];
-            r1 = window[4];
+            r0 = window[2];
+            r1 = window[3];
         } else {
             qhat = bn_udiv_qr_3by2(
                 r1, r0, un[j + 2], d1, d0, dinv, &r1, &r0);
@@ -12888,18 +13923,18 @@ WBigint *mag_mod_63(const uint64_t *u, const uint64_t *v) {
         if (r0 > d1 || (r0 == d1 && n0 >= d0)) {
             uint64_t b0 = un[3] < dl;
             un[3] -= dl;
-            __uint128_t lhs = ((__uint128_t)r0 << 64) | n0;
-            __uint128_t rhs =
-                ((((__uint128_t)d1 << 64) | d0)) + b0;
-            if (__builtin_expect(lhs < rhs, 0)) {
+            uint64_t sub0 = d0 + b0;
+            uint64_t b1 = (sub0 < d0) | (n0 < sub0);
+            uint64_t sub1 = d1 + b1;
+            uint64_t b2 = (sub1 < d1) | (r0 < sub1);
+            if (__builtin_expect(b2 != 0, 0)) {
                 /* prefix tie, low limb fell short: digit is 0, undo */
                 un[3] += dl;
                 r1 = r0;
                 r0 = n0;
             } else {
-                lhs -= rhs;
-                r1 = (uint64_t)(lhs >> 64);
-                r0 = (uint64_t)lhs;
+                r1 = r0 - sub1;
+                r0 = n0 - sub0;
             }
         } else {
             r1 = r0;
@@ -15544,6 +16579,13 @@ WValue bigint_isqrt_any(WValue a) {
     res->size = m;
     if (isqrt_seq) bn_toom_no_spin--;
     return bigint_box(res);
+}
+
+/* Stable source seam for BigInt#isqrt. A compiler that lowers the Core
+ * method emits a strong wrapper around its source worker; stage-0 and thin
+ * binaries retain this weak, exact-C default. */
+__attribute__((weak)) WValue __w_bigint_isqrt_src(WValue a) {
+    return bigint_isqrt_any(a);
 }
 
 /* ---- GCD: u64 fast path + Lehmer batching for multi-limb operands ----
@@ -37267,6 +38309,43 @@ WValue w_range_make(int64_t from, int64_t to, int64_t exclusive) {
  * the weak default. */
 static _Atomic int w_bigint_plus_seam_is_c;
 static _Atomic int w_bigint_minus_seam_is_c;
+static _Atomic int w_bigint_sub1_1_seam_is_c;
+static _Atomic int w_bigint_sub1_2_seam_is_c;
+static _Atomic int w_bigint_mul1_1_seam_is_c;
+static _Atomic int w_bigint_sqr2_seam_is_c;
+static _Atomic int w_bigint_sqr3_seam_is_c;
+static _Atomic int w_bigint_sqr4_seam_is_c;
+static _Atomic int w_bigint_sqr5_seam_is_c;
+static _Atomic int w_bigint_sqr6_seam_is_c;
+static _Atomic int w_bigint_sqr7_seam_is_c;
+static _Atomic int w_bigint_sqr8_seam_is_c;
+static _Atomic int w_bigint_sqr16_seam_is_c;
+static _Atomic int w_bigint_mul2_seam_is_c;
+static _Atomic int w_bigint_mul3_seam_is_c;
+static _Atomic int w_bigint_mul4_seam_is_c;
+static _Atomic int w_bigint_mul5_seam_is_c;
+static _Atomic int w_bigint_mul6_seam_is_c;
+static _Atomic int w_bigint_mul7_seam_is_c;
+static _Atomic int w_bigint_mul8_seam_is_c;
+static _Atomic int w_bigint_mul12_seam_is_c;
+static _Atomic int w_bigint_mul15_seam_is_c;
+static _Atomic int w_bigint_mul16_seam_is_c;
+static _Atomic int w_bigint_mul17_seam_is_c;
+static _Atomic int w_bigint_mul21_seam_is_c;
+static _Atomic int w_bigint_mul24_seam_is_c;
+static _Atomic int w_bigint_mul1_2_seam_is_c;
+static _Atomic int w_bigint_mul1_3_seam_is_c;
+static _Atomic int w_bigint_mul1_4_seam_is_c;
+static _Atomic int w_bigint_mul1_5_seam_is_c;
+static _Atomic int w_bigint_mul1_6_seam_is_c;
+static _Atomic int w_bigint_mul1_7_seam_is_c;
+static _Atomic int w_bigint_mul1_8_seam_is_c;
+static _Atomic int w_bigint_mul1_16_seam_is_c;
+static _Atomic int w_bigint_mul1_24_seam_is_c;
+static _Atomic int w_bigint_mul1_32_seam_is_c;
+static _Atomic int w_bigint_mul1_40_seam_is_c;
+static _Atomic int w_bigint_mul1_48_seam_is_c;
+static _Atomic int w_bigint_mul1_64_seam_is_c;
 static _Atomic int w_bigint_times_seam_is_c;
 
 __attribute__((weak)) WValue __w_bigint_plus_src(WValue a, WValue b) {
@@ -37276,6 +38355,407 @@ __attribute__((weak)) WValue __w_bigint_plus_src(WValue a, WValue b) {
 __attribute__((weak)) WValue __w_bigint_minus_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_minus_seam_is_c, 1, memory_order_relaxed);
     return bigint_sub_any(a, b);
+}
+__attribute__((weak)) WValue __w_bigint_sub1_1_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sub1_1_seam_is_c, 1, memory_order_relaxed);
+    return bigint_sub1_positive_one_limb(
+        w_as_bigint(a)->limbs[0], w_as_bigint(b)->limbs[0]);
+}
+__attribute__((weak)) WValue __w_bigint_sub1_2_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sub1_2_seam_is_c, 1, memory_order_relaxed);
+    return bigint_sub_ui_any(a, w_as_bigint(b)->limbs[0]);
+}
+__attribute__((weak)) WValue __w_bigint_mul1_1_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_1_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_11(w_as_bigint(a), w_as_bigint(b));
+}
+__attribute__((weak)) WValue __w_bigint_sqr2_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sqr2_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 2);
+}
+__attribute__((weak)) WValue __w_bigint_sqr3_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sqr3_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 3);
+}
+__attribute__((weak)) WValue __w_bigint_sqr4_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sqr4_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 4);
+}
+__attribute__((weak)) WValue __w_bigint_sqr5_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sqr5_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 5);
+}
+__attribute__((weak)) WValue __w_bigint_sqr6_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sqr6_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 6);
+}
+__attribute__((weak)) WValue __w_bigint_sqr7_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sqr7_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 7);
+}
+__attribute__((weak)) WValue __w_bigint_sqr8_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sqr8_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 8);
+}
+__attribute__((weak)) WValue __w_bigint_sqr16_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_sqr16_seam_is_c, 1,
+                          memory_order_relaxed);
+#if BN_BOXED_SQR16_FAST
+    (void)b;
+    return bigint_sqr_positive_16(w_as_bigint(a));
+#else
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 16);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul2_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul2_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 2);
+}
+__attribute__((weak)) WValue __w_bigint_mul3_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul3_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 3);
+}
+__attribute__((weak)) WValue __w_bigint_mul4_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul4_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 4);
+}
+__attribute__((weak)) WValue __w_bigint_mul5_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul5_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 5);
+}
+__attribute__((weak)) WValue __w_bigint_mul6_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul6_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 6);
+}
+__attribute__((weak)) WValue __w_bigint_mul7_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul7_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 7);
+}
+__attribute__((weak)) WValue __w_bigint_mul8_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul8_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 8);
+}
+__attribute__((weak)) WValue __w_bigint_mul12_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul12_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 12);
+}
+__attribute__((weak)) WValue __w_bigint_mul15_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul15_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 15);
+}
+__attribute__((weak)) WValue __w_bigint_mul16_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul16_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 16);
+}
+__attribute__((weak)) WValue __w_bigint_mul17_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul17_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 17);
+}
+__attribute__((weak)) WValue __w_bigint_mul21_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul21_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 21);
+}
+__attribute__((weak)) WValue __w_bigint_mul24_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul24_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 24);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_2_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 2 ? ba : bb;
+    WBigint *word = ba->size == 2 ? bb : ba;
+#if BN_MUL_N1_SMALL_STRAIGHT
+    return bigint_mul_n1_tiny(wide->limbs, 2, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 2, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_2_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_2_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_2_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_3_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 3 ? ba : bb;
+    WBigint *word = ba->size == 3 ? bb : ba;
+#if BN_MUL_N1_SMALL_STRAIGHT
+    /* Match bigint_mul_any_routed's positive boxed path exactly: unlike the
+     * n==2 seam, the current n==3 arm enters the serial small worker. */
+    return bigint_mul_n1_small(wide->limbs, 3, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 3, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_3_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_3_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_3_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_4_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 4 ? ba : bb;
+    WBigint *word = ba->size == 4 ? bb : ba;
+#if BN_MUL_N1_SMALL_STRAIGHT
+    return bigint_mul_n1_small(wide->limbs, 4, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 4, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_4_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_4_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_4_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_5_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 5 ? ba : bb;
+    WBigint *word = ba->size == 5 ? bb : ba;
+#if BN_MUL_N1_SMALL_STRAIGHT
+    return bigint_mul_n1_small(wide->limbs, 5, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 5, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_5_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_5_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_5_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_6_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 6 ? ba : bb;
+    WBigint *word = ba->size == 6 ? bb : ba;
+#if BN_MUL_N1_SMALL_STRAIGHT
+    return bigint_mul_n1_small(wide->limbs, 6, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 6, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_6_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_6_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_6_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_7_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 7 ? ba : bb;
+    WBigint *word = ba->size == 7 ? bb : ba;
+#if BN_MUL_N1_SMALL_STRAIGHT
+    return bigint_mul_n1_small(wide->limbs, 7, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 7, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_7_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_7_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_7_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_8_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 8 ? ba : bb;
+    WBigint *word = ba->size == 8 ? bb : ba;
+#if BN_MUL_N1_SMALL_STRAIGHT
+    return bigint_mul_n1_tiny8(wide->limbs, word->limbs[0], 0);
+#elif BN_MUL_POWER2_FIXED
+    return bigint_mul_n1_fixed8(wide->limbs, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 8, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_8_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_8_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_8_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_16_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 16 ? ba : bb;
+    WBigint *word = ba->size == 16 ? bb : ba;
+#if BN_MUL_POWER2_FIXED
+    return bigint_mul_n1_fixed16(wide->limbs, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 16, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_16_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_16_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_16_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_24_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 24 ? ba : bb;
+    WBigint *word = ba->size == 24 ? bb : ba;
+#if BN_MUL_POWER2_FIXED
+    return bigint_mul_n1_fixed24(wide->limbs, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 24, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_24_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_24_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_24_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_32_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 32 ? ba : bb;
+    WBigint *word = ba->size == 32 ? bb : ba;
+#if BN_MUL_POWER2_FIXED
+    return bigint_mul_n1_fixed32(wide->limbs, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 32, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_32_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_32_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_32_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_40_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 40 ? ba : bb;
+    WBigint *word = ba->size == 40 ? bb : ba;
+#if BN_MUL_POWER2_FIXED
+    return bigint_mul_n1_fixed40(wide->limbs, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 40, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_40_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_40_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_40_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_48_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 48 ? ba : bb;
+    WBigint *word = ba->size == 48 ? bb : ba;
+#if BN_MUL_POWER2_FIXED
+    return bigint_mul_n1_fixed48(wide->limbs, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 48, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_48_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_48_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_48_c_fallback(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_64_c_fallback(WValue a, WValue b) {
+#if BN_MUL_N1_FAST
+    WBigint *ba = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *wide = ba->size == 64 ? ba : bb;
+    WBigint *word = ba->size == 64 ? bb : ba;
+#if BN_MUL_POWER2_FIXED
+    return bigint_mul_n1_fixed64(wide->limbs, word->limbs[0], 0);
+#else
+    return bigint_mul_n1(wide->limbs, 64, word->limbs[0], 0);
+#endif
+#else
+    return bigint_mul_any_generic(a, b);
+#endif
+}
+__attribute__((weak)) WValue __w_bigint_mul1_64_src(WValue a, WValue b) {
+    atomic_store_explicit(&w_bigint_mul1_64_seam_is_c, 1,
+                          memory_order_relaxed);
+    return bigint_mul1_64_c_fallback(a, b);
 }
 __attribute__((weak)) WValue __w_bigint_times_src(WValue a, WValue b) {
     atomic_store_explicit(&w_bigint_times_seam_is_c, 1, memory_order_relaxed);
@@ -37300,6 +38780,272 @@ WValue bigint_minus_seam(WValue a, WValue b) {
     return __w_bigint_minus_src(a, b);
 }
 static inline __attribute__((always_inline))
+WValue bigint_sub1_1_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sub1_1_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_sub1_positive_one_limb(
+            w_as_bigint(a)->limbs[0], w_as_bigint(b)->limbs[0]);
+    return __w_bigint_sub1_1_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sub1_2_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sub1_2_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_sub_ui_any(a, w_as_bigint(b)->limbs[0]);
+    return __w_bigint_sub1_2_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_1_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_1_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_11(w_as_bigint(a), w_as_bigint(b));
+    return __w_bigint_mul1_1_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sqr2_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sqr2_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 2);
+    return __w_bigint_sqr2_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sqr3_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sqr3_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 3);
+    return __w_bigint_sqr3_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sqr4_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sqr4_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 4);
+    return __w_bigint_sqr4_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sqr5_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sqr5_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 5);
+    return __w_bigint_sqr5_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sqr6_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sqr6_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 6);
+    return __w_bigint_sqr6_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sqr7_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sqr7_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 7);
+    return __w_bigint_sqr7_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sqr8_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sqr8_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 8);
+    return __w_bigint_sqr8_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_sqr16_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_sqr16_seam_is_c,
+                                              memory_order_relaxed), 1)) {
+#if BN_BOXED_SQR16_FAST
+        (void)b;
+        return bigint_sqr_positive_16(w_as_bigint(a));
+#else
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 16);
+#endif
+    }
+    return __w_bigint_sqr16_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul2_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul2_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 2);
+    return __w_bigint_mul2_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul3_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul3_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 3);
+    return __w_bigint_mul3_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul4_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul4_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 4);
+    return __w_bigint_mul4_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul5_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul5_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 5);
+    return __w_bigint_mul5_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul6_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul6_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 6);
+    return __w_bigint_mul6_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul7_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul7_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 7);
+    return __w_bigint_mul7_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul8_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul8_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 8);
+    return __w_bigint_mul8_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul12_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul12_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 12);
+    return __w_bigint_mul12_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul15_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul15_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 15);
+    return __w_bigint_mul15_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul16_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul16_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 16);
+    return __w_bigint_mul16_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul17_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul17_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 17);
+    return __w_bigint_mul17_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul21_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul21_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 21);
+    return __w_bigint_mul21_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul24_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul24_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul_positive_equal(w_as_bigint(a), w_as_bigint(b), 24);
+    return __w_bigint_mul24_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_2_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_2_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_2_c_fallback(a, b);
+    return __w_bigint_mul1_2_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_3_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_3_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_3_c_fallback(a, b);
+    return __w_bigint_mul1_3_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_4_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_4_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_4_c_fallback(a, b);
+    return __w_bigint_mul1_4_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_5_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_5_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_5_c_fallback(a, b);
+    return __w_bigint_mul1_5_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_6_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_6_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_6_c_fallback(a, b);
+    return __w_bigint_mul1_6_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_7_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_7_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_7_c_fallback(a, b);
+    return __w_bigint_mul1_7_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_8_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_8_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_8_c_fallback(a, b);
+    return __w_bigint_mul1_8_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_16_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_16_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_16_c_fallback(a, b);
+    return __w_bigint_mul1_16_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_24_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_24_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_24_c_fallback(a, b);
+    return __w_bigint_mul1_24_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_32_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_32_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_32_c_fallback(a, b);
+    return __w_bigint_mul1_32_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_40_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_40_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_40_c_fallback(a, b);
+    return __w_bigint_mul1_40_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_48_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_48_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_48_c_fallback(a, b);
+    return __w_bigint_mul1_48_src(a, b);
+}
+static inline __attribute__((always_inline))
+WValue bigint_mul1_64_seam(WValue a, WValue b) {
+    if (__builtin_expect(atomic_load_explicit(&w_bigint_mul1_64_seam_is_c,
+                                              memory_order_relaxed), 1))
+        return bigint_mul1_64_c_fallback(a, b);
+    return __w_bigint_mul1_64_src(a, b);
+}
+static inline __attribute__((always_inline))
 WValue bigint_times_seam(WValue a, WValue b) {
     if (__builtin_expect(atomic_load_explicit(&w_bigint_times_seam_is_c,
                                               memory_order_relaxed), 1))
@@ -37307,13 +39053,13 @@ WValue bigint_times_seam(WValue a, WValue b) {
     return __w_bigint_times_src(a, b);
 }
 
-/* Multiply routes to source only for the SCHOOLBOOK band: both operands
- * multi-limb and small enough that C stays in bigint_mul_schoolbook_into.
- * Karatsuba/Toom/NTT crossovers, squaring, and the n-by-1 specializations
- * all keep their C dispatch — porting those is a separate gated step. */
+/* Multiply routes to source only for the SCHOOLBOOK band: scalar-word and
+ * one-limb square ports have their own narrow seams in
+ * bigint_mul_any_routed. Karatsuba/Toom/NTT crossovers, wider squaring, and
+ * every remaining n-by-1 specialization stay in C. */
 static inline int bigint_mul_src_shape(WValue a, WValue b) {
     if (!w_is_bigint(a) || !w_is_bigint(b)) return 0;
-    if (a == b) return 0;                     /* squaring has its own C path */
+    if (a == b) return 0;             /* square ports use dedicated seams */
     int32_t sa, sb;
     (void)w_bigint_view(a, &sa);
     (void)w_bigint_view(b, &sb);
@@ -37327,6 +39073,12 @@ static inline int bigint_mul_src_shape(WValue a, WValue b) {
     return la >= 2 && lb >= 2 && la <= 24 && lb <= 24;
 }
 static int g_bigint_src_ops_off = -1;   /* -1 unresolved, 0 route, 1 pin C */
+#ifndef BN_BIGINT_SUB1_1_SRC_DIRECT
+#define BN_BIGINT_SUB1_1_SRC_DIRECT 1
+#endif
+#ifndef BN_BIGINT_SUB1_2_SRC_DIRECT
+#define BN_BIGINT_SUB1_2_SRC_DIRECT 1
+#endif
 
 /* Shape gate for the source arms. The migrated source bodies implement the
  * GENERAL multi-limb case; C's kernels additionally carry small-operand
@@ -37344,6 +39096,21 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
     (void)neg_b;
     int32_t la = sa < 0 ? -sa : sa;
     int32_t lb = sb < 0 ? -sb : sb;
+    /* Exact migrated scalar-word arms. Keep these before the general
+     * equal-length/one-limb exclusions and make each gate identical to its
+     * source worker's route. Every other word/sign shape retains C. */
+    if (!neg_b && sa == 1 && sb == 1) return 1;
+    if (!neg_b && sa == 3 && sb == 1) return 1;
+    if (!neg_b && sa > 8 && sa <= 4096 && sb == 1) return 1;
+    if (neg_b && sa == 2 && sb == 1)
+        return BN_BIGINT_SUB1_2_SRC_DIRECT ? 3 : 1;
+    if (neg_b && sa == 3 && sb == 1) return 1;
+    if (neg_b && sa == 4 && sb == 1) return 1;
+    if (neg_b && sa == 5 && sb == 1) return 1;
+    if (neg_b && sa == 6 && sb == 1) return 1;
+    if (neg_b && sa == 7 && sb == 1) return 1;
+    if (neg_b && sa == 8 && sb == 1) return 1;
+    if (neg_b && sa > 8 && sa <= 4096 && sb == 1) return 1;
     /* Exclusion keys on the RAW operand signs, NOT the post-flip effective
      * ones: C's `bigint_add_equal_fast` and `bigint_sub_equal_fast` each
      * specialize equal-length pairs whose own signs match, per operator.
@@ -37360,7 +39127,14 @@ static inline int bigint_src_shape(WValue a, WValue b, int neg_b) {
      * equal_fast arm itself (hot-slot alloc + fused epilogue), not gate
      * or guard overhead; migrating this shape means porting that arm,
      * not re-testing this boundary. */
-    if (la == lb && ((sa > 0) == (sb > 0))) return 0;
+    if (la == lb && ((sa > 0) == (sb > 0))) {
+        /* The one positive 1-by-1 subtraction leaf is now exact source.
+         * Reuse this existing equal-length exclusion instead of adding a
+         * predicate to every unequal word-shaped operation. */
+        if (neg_b && sa == 1)
+            return BN_BIGINT_SUB1_1_SRC_DIRECT ? 2 : 1;
+        return 0;
+    }
     /* Migrated arm: unequal-length multi-limb pairs, which the source
      * bodies handle with a FUSED kernel (combine + propagate in one asm
      * pass, no strided tail loop). skew rows measure 0.93-1.00 — source
@@ -37527,8 +39301,12 @@ WValue w_sub(WValue a, WValue b) {
         /* Weak-linkage source routing, exactly like w_add's `+` arm. */
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
-        if (__builtin_expect(src_off == 0, 1) && bigint_src_shape(a, b, 1))
-            return bigint_minus_seam(a, b);
+        if (__builtin_expect(src_off == 0, 1)) {
+            int src_shape = bigint_src_shape(a, b, 1);
+            if (src_shape == 2) return bigint_sub1_1_seam(a, b);
+            if (src_shape == 3) return bigint_sub1_2_seam(a, b);
+            if (src_shape == 1) return bigint_minus_seam(a, b);
+        }
         return bigint_sub_any(a, b);
     }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_sub_elem(a, b);
@@ -37628,9 +39406,14 @@ WValue w_mul(WValue a, WValue b) {
     {
         int src_off = g_bigint_src_ops_off;
         if (__builtin_expect(src_off < 0, 0)) src_off = bigint_src_ops_resolve();
-        if (__builtin_expect(src_off == 0, 1) && bigint_mul_src_shape(a, b))
-            return bigint_times_seam(a, b);
+        if (__builtin_expect(src_off == 0, 1)) {
+            if (bigint_mul_src_shape(a, b)) return bigint_times_seam(a, b);
+        }
+#if BN_BIGINT_MUL1_1_SRC_DIRECT
+        return bigint_mul_any_routed(a, b, src_off == 0);
+#else
         return bigint_mul_any(a, b);
+#endif
     }
     if (w_is_array(a) && w_is_plain_scalar_num(b)) return w_array_mul_elem(a, b);
     if (is_decimal_any(a) && is_decimal_any(b))
@@ -54200,6 +55983,49 @@ WValue w_bigint_sub(WValue a, WValue b) {
 WValue w_bigint_div(WValue a, WValue b) {
     return bigint_div_any(a, b);
 }
+/* Resume the positive 6/3 quotient route immediately after its fixed
+ * certificate has proved inconclusive.  The native source leaf has already
+ * run that exact certificate, so re-entering bigint_div_any would execute it
+ * twice more (boxed fast arm, then mag_divmod).  Preserve the remainder of
+ * mag_divmod's selection tree verbatim. */
+WValue w_bigint_div_63_after_cert_fail(WValue a, WValue b) {
+    WBigint *aa = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *q = NULL;
+#if BN_DIV_RECIP_CACHE
+    if (mag_divmod_reciprocal_certified(
+            aa->limbs, 6, bb->limbs, 3, &q, NULL))
+        return bigint_finish_mag_sub(q);
+#endif
+#if BN_DIV_TRIANGULAR_Q_CERTIFIED && BN_DIV_TRIANGULAR_Q_SELECT
+    q = mag_div_q_triangular_certified(aa->limbs, 6, bb->limbs, 3);
+    if (q) {
+        BN_DIV_ROUTE_COUNT(bn_div_route_triangular_hit);
+        return bigint_finish_mag_sub(q);
+    }
+#endif
+    if (3 >= BZ_TOP_THRESHOLD && 3 >= BZ_THRESHOLD) {
+        BN_DIV_ROUTE_COUNT(bn_div_route_bz);
+        mag_divmod_bz(aa->limbs, 6, bb->limbs, 3, &q, NULL);
+    } else {
+        BN_DIV_ROUTE_COUNT(bn_div_route_knuth);
+        mag_divmod_knuth(aa->limbs, 6, bb->limbs, 3, &q, NULL);
+    }
+    return bigint_finish_mag_sub(q);
+}
+/* Native-only continuation after the positive 8/4 source leaf has proved the
+ * triangular certificate inconclusive.  At vlen=4 the reciprocal and B-Z
+ * selectors are compile-time below their 256- and 24/64-limb thresholds, so
+ * mag_divmod can only retry the identical certificate and then call Knuth.
+ * Resume directly at that proven destination. */
+WValue w_bigint_div_84_after_cert_fail(WValue a, WValue b) {
+    WBigint *aa = w_as_bigint(a);
+    WBigint *bb = w_as_bigint(b);
+    WBigint *q = NULL;
+    BN_DIV_ROUTE_COUNT(bn_div_route_knuth);
+    mag_divmod_knuth(aa->limbs, 8, bb->limbs, 4, &q, NULL);
+    return bigint_finish_mag_sub(q);
+}
 WValue w_bigint_mod(WValue a, WValue b) {
     return bigint_mod_any(a, b);
 }
@@ -54259,6 +56085,543 @@ WValue w_bigint_alloc_hot(int64_t cap) {
     if (c > (int64_t)INT32_MAX / 8) die("w_bigint_alloc_hot: capacity too large");
     return bigint_box(bigint_alloc_raw_hot((int32_t)c));
 }
+__attribute__((always_inline))
+int64_t w_bigint_copy_tail_raw(
+    int64_t result_limbs, int64_t source_limbs,
+    int64_t start, int64_t length) {
+    if (start < 0 || start > length || length > INT32_MAX)
+        die("w_bigint_copy_tail_raw: invalid range");
+    int32_t i = (int32_t)start;
+    int32_t n = (int32_t)length;
+    bn_copy_tail(
+        (uint64_t *)(uintptr_t)result_limbs + i,
+        (const uint64_t *)(uintptr_t)source_limbs + i,
+        n - i);
+    return 0;
+}
+WValue w_bigint_add1_wide_finish_raw(
+    WValue v, int64_t length, int64_t carry) {
+    if (length < 9 || length > INT32_MAX || (carry != 0 && carry != 1))
+        die("w_bigint_add1_wide_finish_raw: invalid state");
+    int32_t n = (int32_t)length;
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact bigint_add_word_into growth arm.  The source ripple has
+         * already published [sum, 0, ..., 0] across the original n limbs. */
+        if ((uint32_t)n >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(n + 1);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0,
+                   (size_t)(n - 1) * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[n] = 1;
+        r->size = n + 1;
+        return bigint_box(r);
+    }
+    r->size = n;
+    return bigint_box(r);
+}
+WValue w_bigint_add1_1_finish_raw(uint64_t sum, int64_t carry) {
+    if (carry != 0 && carry != 1)
+        die("w_bigint_add1_1_finish_raw: carry is not 0/1");
+    if (__builtin_expect(carry != 0, 0)) {
+        WBigint *result = bigint_alloc_raw_hot_exact(2U);
+        result->limbs[0] = sum;
+        result->limbs[1] = 1;
+        result->size = 2;
+        return bigint_box(result);
+    }
+    return bigint_finish_one_limb(sum, 0);
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_1_finish_raw(uint64_t low, uint64_t high) {
+    if (__builtin_expect(high == 0, 0))
+        return bigint_finish_one_limb(low, 0);
+    WBigint *result = bigint_alloc_raw_hot_exact(2U);
+    result->limbs[0] = low;
+    result->limbs[1] = high;
+    result->size = 2;
+    return bigint_box(result);
+}
+__attribute__((always_inline))
+WValue w_bigint_sqr2_finish_raw(WValue v, int64_t size) {
+    /* The exact square leaf writes all four words, then publishes precisely
+     * C's normalized positive size: three when limb 3 is zero, else four. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_sqr3_finish_raw(WValue v, int64_t size) {
+    /* The exact square leaf writes all six words, then publishes precisely
+     * C's normalized positive size: five when limb 5 is zero, else six. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_sqr4_finish_raw(WValue v, int64_t size) {
+    /* The exact square leaf writes all eight words, then publishes precisely
+     * C's normalized positive size: seven when limb 7 is zero, else eight. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_sqr5_finish_raw(WValue v, int64_t size) {
+    /* The exact square leaf writes all ten words, then publishes precisely
+     * C's normalized positive size: nine when limb 9 is zero, else ten. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_sqr6_finish_raw(WValue v, int64_t size) {
+    /* The exact square leaf writes all twelve words, then publishes precisely
+     * C's normalized positive size: eleven when limb 11 is zero, else twelve. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_sqr7_finish_raw(WValue v, int64_t size) {
+    /* The exact square leaf writes all fourteen words, then publishes
+     * precisely C's normalized positive size: thirteen when limb 13 is zero,
+     * else fourteen. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_sqr8_finish_raw(WValue v, int64_t size) {
+    /* The exact square leaf writes all sixteen words, then publishes
+     * precisely C's normalized positive size: fifteen when limb 15 is zero,
+     * else sixteen. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_sqr16_kernel_raw(int64_t rp, int64_t ap) {
+    bn_sqr16_split((uint64_t *)(uintptr_t)rp,
+                   (const uint64_t *)(uintptr_t)ap);
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_sqr16_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 32 - (r->limbs[31] == 0);
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul2_finish_raw(WValue v, int64_t size) {
+    /* The exact multiplication leaf writes all four words, then publishes
+     * precisely C's normalized positive size: three or four. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul3_finish_raw(WValue v, int64_t size) {
+    /* The exact multiplication leaf writes all six words, then publishes
+     * precisely C's normalized positive size: five or six. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul4_first_row_raw(int64_t rp, int64_t bp, int64_t ap) {
+    return bn_mul_1((uint64_t *)(uintptr_t)rp,
+                    (const uint64_t *)(uintptr_t)bp, 4,
+                    *(const uint64_t *)(uintptr_t)ap);
+}
+__attribute__((always_inline))
+WValue w_bigint_mul4_finish_raw(WValue v, int64_t size) {
+    /* The exact multiplication leaf writes all eight words, then publishes
+     * precisely C's normalized positive size: seven or eight. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul5_first_row_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+    r[5] = bn_mul_1(r, b, 5, a[0]);
+    return 0;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul5_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
+                                   int64_t row) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+    r[row + 5] = bn_addmul_1(r + row, b, 5, a[row]);
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul5_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 10 - (r->limbs[9] == 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul6_first_row_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+    r[6] = bn_mul_1(r, b, 6, a[0]);
+    return 0;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul6_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
+                                   int64_t row) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+    r[row + 6] = bn_addmul_1(r + row, b, 6, a[row]);
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul6_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 12 - (r->limbs[11] == 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul7_first_row_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+    r[7] = bn_mul_1(r, b, 7, a[0]);
+    return 0;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul7_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
+                                   int64_t row) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+    r[row + 7] = bn_addmul_1(r + row, b, 7, a[row]);
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul7_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 14 - (r->limbs[13] == 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul8_first_row_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+    r[8] = bn_mul_1(r, b, 8, a[0]);
+    return 0;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul8_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
+                                   int64_t row) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+    r[row + 8] = bn_addmul_8_inline(r + row, b, a[row]);
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul8_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 16 - (r->limbs[15] == 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul12_kernel_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+#if BN_MUL_EQ12
+    bn_mul_eq12(r, a, b);
+#else
+    bigint_mul_schoolbook_into(r, a, 12, b, 12);
+#endif
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul12_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 24 - (r->limbs[23] == 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul15_kernel_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+#if BN_FROMSTR_FIXED_TOOM
+    bn_mul_eq15(r, a, b);
+#else
+    bigint_mul_schoolbook_into(r, a, 15, b, 15);
+#endif
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul15_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 30 - (r->limbs[29] == 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul16_kernel_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+#if BN_MUL_POWER2_FIXED
+    bn_mul_eq16(r, a, b);
+#else
+    bigint_mul_schoolbook_into(r, a, 16, b, 16);
+#endif
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul16_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 32 - (r->limbs[31] == 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul17_kernel_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+#if BN_MUL_EQ17
+    bn_mul_eq17(r, a, b);
+#else
+    bigint_mul_schoolbook_into(r, a, 17, b, 17);
+#endif
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul17_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 34 - (r->limbs[33] == 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul21_kernel_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+#if BN_FROMSTR_FIXED_TOOM
+    bn_mul_eq21(r, a, b);
+#else
+    bigint_mul_schoolbook_into(r, a, 21, b, 21);
+#endif
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul21_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 42 - (r->limbs[41] == 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul24_kernel_raw(int64_t rp, int64_t bp, int64_t ap) {
+    uint64_t *r = (uint64_t *)(uintptr_t)rp;
+    const uint64_t *b = (const uint64_t *)(uintptr_t)bp;
+    const uint64_t *a = (const uint64_t *)(uintptr_t)ap;
+#if BN_MUL_TOP_DIFF_24
+    bn_mul_top_diff_small(r, a, b, 24);
+#else
+    bigint_mul_schoolbook_into(r, a, 24, b, 24);
+#endif
+    return 0;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul24_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    r->size = 48 - (r->limbs[47] == 0);
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_2_finish_raw(WValue v, int64_t size) {
+    /* The reserved exact leaf returns only 2 or 3, matching the C arm's
+     * unconditional header publication. Keep this boundary literal: a
+     * defensive range branch would be new work on the hot path. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_3_finish_raw(WValue v, int64_t size) {
+    /* The exact three-limb leaf publishes only 3 or 4, just as the C arm
+     * writes its carry limb before selecting the signed header size. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_4_finish_raw(WValue v, int64_t size) {
+    /* The exact four-limb leaf writes limb four unconditionally and then
+     * publishes precisely the C arm's four- or five-limb header. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_5_finish_raw(WValue v, int64_t size) {
+    /* The exact five-limb leaf writes limb five before publishing 5 or 6. */
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_6_finish_raw(WValue v, int64_t size) {
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_7_finish_raw(WValue v, int64_t size) {
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_8_finish_raw(WValue v, int64_t size) {
+    w_as_bigint(v)->size = (int32_t)size;
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul1_16_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word) {
+#if BN_MUL_POWER2_FIXED
+    return bn_mul_1_f16((uint64_t *)(uintptr_t)rp,
+                        (const uint64_t *)(uintptr_t)ap, word);
+#else
+    return bn_mul_1((uint64_t *)(uintptr_t)rp,
+                    (const uint64_t *)(uintptr_t)ap, 16, word);
+#endif
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_16_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    r->limbs[16] = carry;
+    r->size = 16 + (carry != 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul1_24_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word) {
+#if BN_MUL_POWER2_FIXED
+    return bn_mul_1_f24((uint64_t *)(uintptr_t)rp,
+                        (const uint64_t *)(uintptr_t)ap, word);
+#else
+    return bn_mul_1((uint64_t *)(uintptr_t)rp,
+                    (const uint64_t *)(uintptr_t)ap, 24, word);
+#endif
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_24_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    r->limbs[24] = carry;
+    r->size = 24 + (carry != 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul1_32_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word) {
+#if BN_MUL_POWER2_FIXED
+    return bn_mul_1_f32((uint64_t *)(uintptr_t)rp,
+                        (const uint64_t *)(uintptr_t)ap, word);
+#else
+    return bn_mul_1((uint64_t *)(uintptr_t)rp,
+                    (const uint64_t *)(uintptr_t)ap, 32, word);
+#endif
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_32_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    r->limbs[32] = carry;
+    r->size = 32 + (carry != 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul1_40_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word) {
+#if BN_MUL_POWER2_FIXED
+    return bn_mul_1_f40((uint64_t *)(uintptr_t)rp,
+                        (const uint64_t *)(uintptr_t)ap, word);
+#else
+    return bn_mul_1((uint64_t *)(uintptr_t)rp,
+                    (const uint64_t *)(uintptr_t)ap, 40, word);
+#endif
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_40_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    r->limbs[40] = carry;
+    r->size = 40 + (carry != 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul1_48_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word) {
+#if BN_MUL_POWER2_FIXED
+    return bn_mul_1_f48((uint64_t *)(uintptr_t)rp,
+                        (const uint64_t *)(uintptr_t)ap, word);
+#else
+    return bn_mul_1((uint64_t *)(uintptr_t)rp,
+                    (const uint64_t *)(uintptr_t)ap, 48, word);
+#endif
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_48_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    r->limbs[48] = carry;
+    r->size = 48 + (carry != 0);
+    return v;
+}
+__attribute__((always_inline))
+uint64_t w_bigint_mul1_64_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word) {
+#if BN_MUL_POWER2_FIXED
+    return bn_mul_1_f64((uint64_t *)(uintptr_t)rp,
+                        (const uint64_t *)(uintptr_t)ap, word);
+#else
+    return bn_mul_1((uint64_t *)(uintptr_t)rp,
+                    (const uint64_t *)(uintptr_t)ap, 64, word);
+#endif
+}
+__attribute__((always_inline))
+WValue w_bigint_mul1_64_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    r->limbs[64] = carry;
+    r->size = 64 + (carry != 0);
+    return v;
+}
+WValue w_bigint_alloc_hot4_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot_exact(4U));
+}
+WValue w_bigint_alloc_hot8_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot_exact(8U));
+}
+__attribute__((always_inline))
+WValue w_bigint_alloc_hot16_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot_exact(16U));
+}
+__attribute__((always_inline))
+WValue w_bigint_alloc_hot32_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot(32));
+}
+__attribute__((always_inline))
+WValue w_bigint_alloc_hot64_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot_exact(64U));
+}
+__attribute__((always_inline))
+WValue w_bigint_alloc_hot128_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot_exact(128U));
+}
+WValue w_bigint_release_unfinished_raw(WValue v) {
+    bigint_release(w_as_bigint(v));
+    return W_NIL;
+}
+/* Typed dead-result release for native source kernels.  Its contract is the
+ * exact BigInt subset of w_value_free: nil is the loop's initial sentinel;
+ * every other value must be a boxed BigInt.  Keeping this boundary separate
+ * reaches the same alias-aware hot-slot handoff used by the C lanes without
+ * paying w_value_free's general heap-kind classifier. */
+__attribute__((always_inline))
+WValue w_bigint_release_dead_raw(WValue v) {
+    if (v != W_NIL) bigint_release_if_live(w_as_bigint(v));
+    return W_NIL;
+}
 WValue w_bigint_finish_add(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)w_to_i64(signed_size);
@@ -54271,9 +56634,247 @@ WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size) {
     b->size = (int32_t)signed_size;
     return bigint_finish_mag_add(b);
 }
+WValue w_bigint_add1_2_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=2:
+         * the fixed source kernel already published [sum, 0]. */
+        if (2U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(3);
+            grown->limbs[0] = r->limbs[0];
+            grown->limbs[1] = 0;
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[2] = 1;
+        r->size = 3;
+        return bigint_box(r);
+    }
+    r->size = 2;
+    return bigint_box(r);
+}
+WValue w_bigint_add1_3_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=3:
+         * the fixed source kernel already published [sum, 0, 0]. */
+        if (3U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(4);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0, 2 * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[3] = 1;
+        r->size = 4;
+        return bigint_box(r);
+    }
+    r->size = 3;
+    return bigint_box(r);
+}
+WValue w_bigint_add1_4_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=4:
+         * the fixed source kernel already published [sum, 0, 0, 0]. */
+        if (4U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(5);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0, 3 * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[4] = 1;
+        r->size = 5;
+        return bigint_box(r);
+    }
+    r->size = 4;
+    return bigint_box(r);
+}
+WValue w_bigint_add1_5_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=5:
+         * the fixed source kernel already published [sum, 0, 0, 0, 0]. */
+        if (5U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(6);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0, 4 * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[5] = 1;
+        r->size = 6;
+        return bigint_box(r);
+    }
+    r->size = 5;
+    return bigint_box(r);
+}
+WValue w_bigint_add1_6_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=6:
+         * the fixed source kernel already published six zero limbs. */
+        if (6U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(7);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0, 5 * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[6] = 1;
+        r->size = 7;
+        return bigint_box(r);
+    }
+    r->size = 6;
+    return bigint_box(r);
+}
+WValue w_bigint_add1_7_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=7:
+         * the fixed source kernel already published seven zero limbs. */
+        if (7U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(8);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0, 6 * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[7] = 1;
+        r->size = 8;
+        return bigint_box(r);
+    }
+    r->size = 7;
+    return bigint_box(r);
+}
+WValue w_bigint_add1_8_finish_raw(WValue v, uint64_t carry) {
+    WBigint *r = w_as_bigint(v);
+    if (__builtin_expect(carry != 0, 0)) {
+        /* Exact match for bigint_add_word_into's full-carry arm at alen=8:
+         * the fixed source kernel already published eight zero limbs. */
+        if (8U >= r->cap) {
+            WBigint *grown = bigint_alloc_raw(9);
+            grown->limbs[0] = r->limbs[0];
+            memset(grown->limbs + 1, 0, 7 * sizeof(uint64_t));
+            bigint_release(r);
+            r = grown;
+        }
+        r->limbs[8] = 1;
+        r->size = 9;
+        return bigint_box(r);
+    }
+    r->size = 8;
+    return bigint_box(r);
+}
+WValue w_bigint_sub1_1_finish_raw(
+    uint64_t magnitude, int64_t signed_size) {
+    if (signed_size != -1 && signed_size != 1)
+        die("w_bigint_sub1_1_finish_raw: signed size is not +/-1");
+    if (magnitude <= (uint64_t)W_INT48_MAX) {
+        int64_t value = (int64_t)magnitude;
+        return w_box_int(signed_size < 0 ? -value : value);
+    }
+    WBigint *result = bigint_alloc_raw_hot_sub1_exact_one();
+    result->limbs[0] = magnitude;
+    result->size = (int32_t)signed_size;
+    return bigint_box(result);
+}
+__attribute__((always_inline))
+WValue w_bigint_sub1_2_alloc_hot_raw(void) {
+    return bigint_box(bigint_alloc_raw_hot(2));
+}
+__attribute__((always_inline))
+WValue w_bigint_sub1_2_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    int32_t rlen = 2 - (r->limbs[1] == 0);
+    r->size = rlen;
+    if (__builtin_expect(rlen < 2, 0))
+        return bigint_finish_mag_sub(r);
+    return bigint_box(r);
+}
+WValue w_bigint_sub1_3_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    int32_t rlen = 3 - (r->limbs[2] == 0);
+    r->size = rlen;
+    if (__builtin_expect(rlen < 3, 0))
+        return bigint_finish_mag_sub(r);
+    return bigint_box(r);
+}
+WValue w_bigint_sub1_4_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    int32_t rlen = 4 - (r->limbs[3] == 0);
+    r->size = rlen;
+    if (__builtin_expect(rlen < 4, 0))
+        return bigint_finish_mag_sub(r);
+    return bigint_box(r);
+}
+WValue w_bigint_sub1_5_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    int32_t rlen = 5 - (r->limbs[4] == 0);
+    r->size = rlen;
+    if (__builtin_expect(rlen < 5, 0))
+        return bigint_finish_mag_sub(r);
+    return bigint_box(r);
+}
+WValue w_bigint_sub1_6_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    int32_t rlen = 6 - (r->limbs[5] == 0);
+    r->size = rlen;
+    if (__builtin_expect(rlen < 6, 0))
+        return bigint_finish_mag_sub(r);
+    return bigint_box(r);
+}
+WValue w_bigint_sub1_7_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    int32_t rlen = 7 - (r->limbs[6] == 0);
+    r->size = rlen;
+    if (__builtin_expect(rlen < 7, 0))
+        return bigint_finish_mag_sub(r);
+    return bigint_box(r);
+}
+WValue w_bigint_sub1_8_finish_raw(WValue v) {
+    WBigint *r = w_as_bigint(v);
+    int32_t rlen = 8 - (r->limbs[7] == 0);
+    r->size = rlen;
+    if (__builtin_expect(rlen < 8, 0))
+        return bigint_finish_mag_sub(r);
+    return bigint_box(r);
+}
 WValue w_bigint_finish_sub(WValue v, WValue signed_size) {
     WBigint *b = w_as_bigint(v);
     b->size = (int32_t)w_to_i64(signed_size);
+    return bigint_finish_mag_sub(b);
+}
+WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size) {
+    if (signed_size < INT32_MIN || signed_size > INT32_MAX)
+        die("w_bigint_finish_sub_raw: signed size is outside i32");
+    WBigint *b = w_as_bigint(v);
+    b->size = (int32_t)signed_size;
+    return bigint_finish_mag_sub(b);
+}
+WValue w_bigint_mod63_finish_raw(
+    uint64_t limb0, uint64_t limb1, uint64_t limb2, int64_t size) {
+    if ((uint64_t)size > 3)
+        die("w_bigint_mod63_finish_raw: size is outside 0..3");
+    WBigint *b = bigint_alloc_raw_hot(3);
+    b->limbs[0] = limb0;
+    b->limbs[1] = limb1;
+    b->limbs[2] = limb2;
+    b->size = (int32_t)size;
+    return bigint_finish_mag_sub(b);
+}
+WValue w_bigint_mod84_finish_raw(
+    uint64_t limb0, uint64_t limb1, uint64_t limb2, uint64_t limb3,
+    int64_t size) {
+    if ((uint64_t)size > 4)
+        die("w_bigint_mod84_finish_raw: size is outside 0..4");
+    WBigint *b = bigint_alloc_raw_hot(4);
+    b->limbs[0] = limb0;
+    b->limbs[1] = limb1;
+    b->limbs[2] = limb2;
+    b->limbs[3] = limb3;
+    b->size = (int32_t)size;
     return bigint_finish_mag_sub(b);
 }
 WValue w_bigint_seal(WValue v, WValue signed_size) {

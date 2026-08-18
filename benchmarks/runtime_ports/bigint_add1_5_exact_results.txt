@@ -1,0 +1,85 @@
+EXACT POSITIVE ADD1@5 CHECKPOINT
+
+parent_commit=cecd8099a9890ec51e6a2697b302c6032d84835a
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+
+PORT CONTRACT
+
+The admitted positive 5-limb by positive 1-limb shape is a literal native
+Tungsten port of runtime.c's BN_WORD_FIXED_CASE(5) schedule:
+
+  ldp x4, x5, [src]
+  ldp x6, x7, [src, #16]
+  ldr x8, [src, #32]
+  adds x4, x4, word
+  adcs x5, x5, xzr
+  adcs x6, x6, xzr
+  adcs x7, x7, xzr
+  adcs x8, x8, xzr
+  stp x4, x5, [dst]
+  stp x6, x7, [dst, #16]
+  str x8, [dst, #32]
+  cset carry, cs
+
+The source wrapper asks the hot allocator for five limbs.  No carry publishes
+size five.  Full carry retains bigint_add_word_into's exact construction: if
+the result lacks a sixth slot, allocate six limbs, preserve the published low
+limb, zero limbs 1..4, release the unfinished result, then publish limb 5 and
+size six.  No carry-death, store scheduling, in-place, or other native-only
+change is included.
+
+MATCHED TARGET A/B
+
+baseline=/private/tmp/add1-fixed-dispatch-final
+candidate=/private/tmp/add1-5-native-exact
+command=alternating BIN --sweep add1 WIDTH 1 110
+pairs=11 per width
+
+width  baseline_ns  candidate_ns  candidate/baseline  paired_IQR  wins
+4      2.409451     2.384458      0.989914            0.006625    10/11
+5      3.880728     2.617809      0.676081            0.004464    11/11
+6      3.836239     3.939758      1.029810            0.030917     0/11
+
+The @4 control is neutral.  The @6 row cannot call the new leaf; its roughly
+3% movement is a layout/dispatch-tree control and remains visible in this
+exact checkpoint.  Width six is the next literal port rather than a reason to
+alter or prematurely optimize the five-limb schedule.
+
+PUBLIC ROW
+
+command=bin/tungsten bench bignum --operations add1 --sizes 4,5,6 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+add1@5 C/native/GMP=1.743/2.628015/2.147 ns
+
+The exact native row is 50.8% slower than C and 22.4% slower than GMP.  That
+remaining end-to-end overhead is reserved for the later native-only phase.
+
+COUNTER ROUTE PROOF
+
+command=bin/tungsten flame --counters -d 3 --top 15 -- /private/tmp/add1-5-native-exact --sweep add1 5 1 5000
+
+  __bigint_add1_5_exact  58.4% cycles; 59.3% instructions; IPC 9.12
+  _tlv_get_addr          27.9% cycles
+  BigInt#+__ovl_BigInt   10.8% cycles
+
+No retained C bn_add_word_a64_fixed sample appears.  The exact leaf has zero
+measured cache/memory misses per kilo-instruction in the counter table.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_add1_5_source_spec passed all 17 checks;
+- no carry, shallow carry death, three-limb propagation, full 5->6 growth,
+  signs, neighboring widths, exact header sizes, and round trips agree with
+  the retained C oracle;
+- focused LLVM assembled and verified;
+- native harness self-test passed all operations;
+- runtime/runtime.o rebuilt and exports w_bigint_add1_5_finish_raw;
+- final AArch64 leaf is exactly the schedule above with no frame or nested
+  call;
+- git diff --check passed.

@@ -821,6 +821,13 @@ def boost_include_dir() -> Path | None:
     return None
 
 
+def tungsten_native_ir_has_strong_isqrt(ir_text: str) -> bool:
+    return any(
+        line.startswith("define i64 @__w_bigint_isqrt_src(")
+        for line in ir_text.splitlines()
+    )
+
+
 def build_external_harness(language: str) -> None:
     if language == "tungsten_native":
         compiler = ROOT / "bin" / "tungsten-compiler"
@@ -831,6 +838,8 @@ def build_external_harness(language: str) -> None:
             )
         env = os.environ.copy()
         env["TUNGSTEN_C_INCLUDES"] = str(TUNGSTEN_NATIVE_REF)
+        native_ir = TUNGSTEN_NATIVE_BINARY.with_suffix(".ll")
+        env["TUNGSTEN_LL_PATH"] = str(native_ir)
         run_checked(
             [
                 str(ROOT / "bin" / "tungsten"),
@@ -844,6 +853,22 @@ def build_external_harness(language: str) -> None:
             ],
             env=env,
         )
+        try:
+            native_ir_text = native_ir.read_text()
+        except OSError as error:
+            raise RuntimeError(
+                f"Tungsten native lane did not retain compiler IR: {error}"
+            ) from error
+        # Full LTO is free to inline the strong source seam and remove its
+        # final Mach-O symbol. Validate the pre-link Tungsten module instead:
+        # a definition here proves that the weak C bootstrap default cannot be
+        # the call target, without forbidding the optimizer from erasing the
+        # wrapper after it has inlined the source body.
+        if not tungsten_native_ir_has_strong_isqrt(native_ir_text):
+            raise RuntimeError(
+                "Tungsten native lane did not bind the strong "
+                "__w_bigint_isqrt_src seam in compiler IR"
+            )
         run_checked([str(TUNGSTEN_NATIVE_BINARY), "--self-test"])
         return
     if language == "rust":

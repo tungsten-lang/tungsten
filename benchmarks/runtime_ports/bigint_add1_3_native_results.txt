@@ -1,0 +1,90 @@
+NATIVE POSITIVE ADD1@3 FOLLOW-UP
+
+parent_commit=bfb6b53cacfd088fa11dc48f048ab5c99a193bdd
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+compiler_sha256=bedd699d7223c6ae6d0218a0c49220bb228bcfba6c938f23f2357df63a84f88b
+candidate_binary_sha256=bf4aaa2739d994bf933e5f8f1232375a3a2fc0c2599649276d39fc063fb8c9ea
+
+The exact arithmetic/storage port remains unchanged from the parent commit.
+This follow-up removes only native-language overhead around it:
+
+- an exact `(BigInt BigInt)` `+` type fact selects the ordinary guarded
+  `__w_bigint_plus_src` seam; untyped `+` and typed `-` remain polymorphic;
+- the positive boxed add/add1 benchmark returns its dead result through a
+  typed BigInt recycler boundary, matching the C lane's inlined
+  `bigint_release_if_live` lifecycle without `w_value_free`'s heap-kind
+  classifier;
+- BigInt#+ checks the already-decoded positive 3x1 header shape before its
+  generic sign/range/pointer setup, while all other one-limb shapes return to
+  the retained C word-specialized tree.
+
+DIRECT RELEASE A/B
+
+baseline_binary_sha256=1dd9bac85dbd835fdabe33f80394140b9ba960e4cb0510855fc2b256d43f18c4
+command=alternating /private/tmp/{add1-fused-finish-baseline,add1-native-retained} --sweep add1 3 1 110
+pairs=11
+
+generic release median=3.679459 ns (IQR 0.089253 ns)
+typed BigInt release median=2.507052 ns (IQR 0.012403 ns)
+candidate/baseline paired median=0.679861 (IQR 0.017079)
+candidate wins=11/11
+reduction=32.014%
+
+The two binaries use the same exact native arithmetic leaf and ordinary
+source seam.  This A/B isolates only the result-release contract.
+
+FINAL PUBLIC ROW
+
+command=bin/tungsten bench bignum --operations add1 --sizes 3 --runs 31 --target-ms 500 --no-capacity --json
+runs=31
+
+Tungsten C/runtime=1.779 ns (IQR 0.130 ns)
+Tungsten native=2.497026 ns
+GMP=1.721 ns (IQR 0.155 ns)
+C/native=0.712448
+C/GMP=1.033701
+
+The native lane is 59.0% faster than the exact checkpoint's retained
+6.095494 ns, but remains 40.4% slower than the tuned C/runtime lane.  This is
+therefore a successful native-only improvement, not parity with C.
+
+FINAL WIDTH CONTROLS (9x110 ms; C / native / GMP ns)
+
+add1@2   1.383 / 3.562110 / 1.702
+add1@3   1.831 / 2.501293 / 1.711
+add1@4   1.695 / 4.126040 / 2.081
+add1@8   1.888 / 4.140788 / 2.990
+add1@16  2.538 / 4.818693 / 5.012
+add1@32  3.475 / 5.380343 / 8.788
+add1@64  5.145 / 7.363177 / 15.956
+
+All seven native controls improved relative to the generic-release harness;
+no arithmetic route outside the admitted 3x1 leaf was migrated in this
+follow-up.
+
+FOCUSED VALIDATION
+
+- fresh current-source release/native/fast compiler built successfully;
+- bigint_signature_type_fact_spec passed all four checks;
+- IR proves typed add uses __w_bigint_plus_src, while typed subtraction and
+  untyped addition retain their prior polymorphic routes;
+- native harness self-test passed every operation;
+- compiled and interpreted bigint_add1_source_spec passed all 14 checks;
+- focused spec and native-lane LLVM assembled and verified;
+- runtime/runtime.o rebuilt and exports w_bigint_release_dead_raw;
+- git diff --check passed.
+
+REJECTED NATIVE EXPERIMENTS
+
+- storing the common size header in source and skipping the finisher was
+  about 3% slower;
+- a fused declared-BigInt pre-entry made add1@3 fast but regressed neighboring
+  widths by about 3-6%;
+- a frameless gate with an outlined exact worker still regressed add1@3 and
+  its controls.
+
+Those experiments are absent from the retained source.

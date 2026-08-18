@@ -1,0 +1,122 @@
+BIGINT SQR@2 — CLOSED-WORLD NATIVE DISPATCH FOLLOW-UP
+======================================================
+
+Scope
+-----
+
+This is a native-only optimization after the exact two-limb square checkpoint
+0d6eaefa. It does not change square arithmetic, allocation, representation,
+normalization, or any C algorithm boundary.
+
+At a syntactic `a * a` site in a program that declares both
+`Tungsten.PROTECT_THE_CORE!` and `Tungsten.LOCK_THE_DOORS!`, receiver identity
+and method-table immutability are compile-time facts. The generated caller now:
+
+  - proves the exact BigInt tag once;
+  - loads the raw signed-size header once;
+  - enters the committed exact native sqr@1 leaf for size +1;
+  - enters the committed exact native sqr@2 leaf for size +2;
+  - enters the unchanged `w_bigint_mul_builtin_exact` boundary for every other
+    BigInt shape; and
+  - falls back to polymorphic `w_mul` on a stale/non-BigInt type fact.
+
+The size checks use the raw header deliberately. A tag-overlay-negative value
+still has a positive raw header and may square through the positive leaf; a
+genuinely negative header stays on the exact C boundary. Open-world BigInt `*`
+replacement semantics are unchanged. An independent compile-time switch,
+`TUNGSTEN_BIGINT_SQR2_LOCKED_DIRECT=0`, restores the exact-checkpoint route and
+is the causal benchmark control.
+
+Build
+-----
+
+base_commit=0d6eaefaf5dfbb6ba86b477db10db78d29d1f22c
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-sqr2-native
+compiler_sha256=3fe296e31fe36e51801a0d950cae9e2c57d20baaceb6cb2ce487b9b68b33cf4c
+baseline_sha256=ebaf99f6faacbb86c09e5d2d1378db9886f96c5cf01de1c7226602516f9bca61
+candidate_sha256=53ddbd54d57f5545ed5098880afc92eb22031e9e1e1cc9af7fe76a8dd10eb635
+fixed_point_ll_sha256=4f8055f4b8116e17ef0ab6013de6bba1ded5428332b44ead1d2dcddf439fab3c
+power=AC, battery charged
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr2-locked-direct-promotion-0d6eaefa-m5max-20260817.json
+raw_json_sha256=8d9e977805a9a1e48fccb5138450f5a1fa2d17360c29f50f993b82b832daf6fe
+
+cell   baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@2      2.304735      1.348554        0.585543    0.003113  21/21
+
+The native caller is 41.45% faster than the exact-checkpoint route. The linked
+candidate inlines the exact committed low/cross/high schedule; it does not call
+the standalone source seam or invent another arithmetic kernel.
+
+Square and multiplication controls
+----------------------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+
+cell      candidate/baseline  paired_IQR  wins
+sqr@1               0.980074    0.016757  10/11
+sqr@4               1.016653    0.005730   1/11
+sqr@8               1.002557           -      -
+sqr@16              1.003361           -      -
+sqr@32              0.996158           -      -
+sqr@64              0.999677           -      -
+sqr@128             1.004067           -      -
+sqr@256             0.998355           -      -
+sqr@1024            1.000243           -      -
+
+The only screen regression was sqr@4. A 21-pair, 300 ms promotion measured
+5.192820 ns baseline versus 5.294922 ns candidate, ratio 1.020438 with 0.020601
+IQR and 5/21 wins. This small layout-sensitive cost is recorded rather than
+hidden; its effect is the same size as its paired spread and remains far below
+the project's 10% migration budget.
+
+Ordinary `mul1@1,2,4,8,16,32` controls measured 0.9979--1.0043.
+Ordinary `mul@2,4,8,16,32` controls measured 0.9925--1.0016. None of those
+distinct-operand routes changed materially.
+
+Public three-lane row
+---------------------
+
+method=9 runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr2-native-public-0d6eaefa-m5max-20260817.json
+raw_json_sha256=e36008aed2101102875ffbf852754c632d332a6b474c724a1dbb6f9a6aa3f6ba
+
+cell   Tungsten_ns  tungsten-native_ns  GMP_ns  fastest
+sqr@2        1.625             1.3465    5.092  tungsten-native
+
+The native source lane is 17.1% faster than the direct Tungsten C lane in the
+public harness. Both retain immutable boxed results; the native lane exercises
+ordinary `a * a` under the two closed-world contracts.
+
+Counter and route proof
+-----------------------
+
+`tungsten flame --counters` on the candidate attributes the hot work to the
+inlined source measure/warm path; `w_bigint_mul_builtin_exact` is absent, IPC is
+9.16, and memory misses are effectively zero. With the feature disabled,
+`w_bigint_mul_builtin_exact` accounts for 73.4% of sampled cycles and the TLS
+address helper for another 22.8%, at similar IPC and with the same negligible
+miss rate. The gain is therefore removal of boundary/TLS/dispatch overhead,
+not an arithmetic or memory-system change.
+
+Validation gates
+----------------
+
+  - candidate and feature-off locked-direct specs pass;
+  - the focused spec covers positive and overlay-negative two-limb identities,
+    the existing one-limb route, wider/dynamic identities, signs, stale type
+    facts, and a non-BigInt receiver;
+  - retained LLVM contains exactly one sqr@2 source-seam call in the candidate
+    and none with the feature disabled; both modules assemble and verify;
+  - final AArch64 contains the exact native sqr@2 instruction schedule inline
+    at the protected+locked call site, with no hot call to the standalone seam;
+  - candidate and feature-off native-lane self-tests pass;
+  - two self-host compiler generations emit byte-identical LLVM; and
+  - `git diff --check` passes.

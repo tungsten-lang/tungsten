@@ -190,6 +190,7 @@ static int ast_string_eq(TcAstValue value, const char *text) {
 
 static const char *pa_detect_acc(TcAstValue v);
 static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, TcError *err);
+static TcAstValue parse_heredoc_literal_span_ast(TcAstParser *p, size_t start, size_t end, TcError *err);
 
 static int ast_node_is(TcAstValue value, const char *node) {
   TcAstValue *node_value = hash_value_ast(value, "node");
@@ -1567,6 +1568,17 @@ static TcAstValue atom_node_ast(TcAstParser *p, size_t pos, TcError *err) {
 
   TcAstValue node = tc_ast_nil();
   switch (kind) {
+    case TC_K_WVALUE: {
+      node = node_hash(p, "wvalue", pos, err);
+      uint64_t bits = strtoull(text + 1, NULL, 0);
+      if (node.kind == TC_AST_HASH &&
+          (!tc_ast_hash_set(node, "value", tc_ast_int((int64_t)bits), err) ||
+           !tc_ast_hash_set(node, "raw", tc_ast_string_copy(text, text_len, err), err))) {
+        tc_ast_free(node);
+        node = tc_ast_nil();
+      }
+      break;
+    }
     case TC_K_INT: {
       char *clean = (char *)malloc(text_len + 1);
       if (!clean) {
@@ -2616,6 +2628,15 @@ static TcAstValue parse_io_ast(TcAstParser *p, size_t start, size_t end, TcError
 static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, TcError *err) {
   trim_expr_span_ast(p, &start, &end);
   if (start >= end) return tc_ast_nil();
+
+  if (end == start + 3 &&
+      (p->tokens->items[start].kind == TC_K_LSHIFT ||
+       p->tokens->items[start].kind == TC_K_PUTS_OP) &&
+      p->tokens->items[start + 1].kind == TC_K_UNKNOWN &&
+      name_kind_ast(p->tokens->items[start + 2].kind)) {
+    TcAstValue heredoc = parse_heredoc_literal_span_ast(p, start, end, err);
+    if (heredoc.kind != TC_AST_NIL || (err && err->message)) return heredoc;
+  }
 
   TcAstValue suffix = parse_suffix_expr_ast(p, start, end, err);
   if (suffix.kind != TC_AST_NIL) return suffix;
@@ -5097,6 +5118,125 @@ static int parse_case_ast(TcAstParser *p, TcAstValue *out, TcError *err) {
  * definition lowering. The body dedent mirrors Lexer#scan_heredoc.
  * `matched` distinguishes an ordinary shift expression from an error while
  * parsing a recognized `<<~` header. */
+static TcAstValue parse_heredoc_literal_span_ast(TcAstParser *p, size_t start,
+                                                 size_t end, TcError *err) {
+  if (end != start + 3 ||
+      (p->tokens->items[start].kind != TC_K_LSHIFT &&
+       p->tokens->items[start].kind != TC_K_PUTS_OP) ||
+      p->tokens->items[start + 1].kind != TC_K_UNKNOWN ||
+      !name_kind_ast(p->tokens->items[start + 2].kind) ||
+      !tc_token_text_eq(p->source, p->tokens->items[start + 1].packed, "~")) {
+    return tc_ast_nil();
+  }
+
+  WValue shift_tok = p->tokens->items[start].packed;
+  WValue tilde_tok = p->tokens->items[start + 1].packed;
+  uint32_t shift_end_cp = tc_token_offset(shift_tok) + tc_token_length(shift_tok);
+  uint32_t shift_end = p->source->byte_offsets[shift_end_cp];
+  uint32_t tilde_start = p->source->byte_offsets[tc_token_offset(tilde_tok)];
+  if (shift_end != tilde_start) return tc_ast_nil();
+
+  char *delimiter = NULL;
+  size_t delimiter_len = 0;
+  if (!token_text_at_ast(p, start + 2, &delimiter, &delimiter_len, err)) return tc_ast_nil();
+
+  WValue delimiter_tok = p->tokens->items[start + 2].packed;
+  size_t delimiter_end =
+      p->source->byte_offsets[tc_token_offset(delimiter_tok) + tc_token_length(delimiter_tok)];
+  size_t header_end = delimiter_end;
+  while (header_end < p->source->byte_len && p->source->bytes[header_end] != '\n') header_end++;
+  if (header_end >= p->source->byte_len) {
+    tc_error_set(err, "Unterminated heredoc (expected %.*s) on line %d",
+                 (int)delimiter_len, delimiter,
+                 token_line_ast(p->source, p->tokens->items[start].packed));
+    free(delimiter);
+    return tc_ast_nil();
+  }
+
+  size_t body_start = header_end + 1;
+  size_t close_start = p->source->byte_len;
+  size_t min_indent = (size_t)-1;
+  size_t line_start = body_start;
+  while (line_start <= p->source->byte_len) {
+    size_t line_end = line_start;
+    while (line_end < p->source->byte_len && p->source->bytes[line_end] != '\n') line_end++;
+
+    size_t indent = 0;
+    while (line_start + indent < line_end &&
+           (p->source->bytes[line_start + indent] == ' ' ||
+            p->source->bytes[line_start + indent] == '\t')) indent++;
+    size_t after_delimiter = line_start + indent + delimiter_len;
+    int closes = after_delimiter <= line_end &&
+                 memcmp(p->source->bytes + line_start + indent, delimiter, delimiter_len) == 0;
+    if (closes) {
+      size_t rest = after_delimiter;
+      while (rest < line_end &&
+             (p->source->bytes[rest] == ' ' || p->source->bytes[rest] == '\t')) rest++;
+      closes = rest == line_end;
+    }
+    if (closes) {
+      close_start = line_start;
+      break;
+    }
+
+    int nonblank = 0;
+    for (size_t i = line_start; i < line_end; i++) {
+      if (p->source->bytes[i] != ' ' && p->source->bytes[i] != '\t') {
+        nonblank = 1;
+        break;
+      }
+    }
+    if (nonblank && indent < min_indent) min_indent = indent;
+    if (line_end >= p->source->byte_len) break;
+    line_start = line_end + 1;
+  }
+
+  if (close_start == p->source->byte_len) {
+    tc_error_set(err, "Unterminated heredoc (expected %.*s) on line %d",
+                 (int)delimiter_len, delimiter,
+                 token_line_ast(p->source, p->tokens->items[start].packed));
+    free(delimiter);
+    return tc_ast_nil();
+  }
+
+  size_t body_cap = close_start >= body_start ? close_start - body_start + 1 : 1;
+  char *body_text = (char *)malloc(body_cap);
+  if (!body_text) {
+    tc_error_set(err, "heredoc AST allocation failed");
+    free(delimiter);
+    return tc_ast_nil();
+  }
+  size_t body_len = 0;
+  line_start = body_start;
+  while (line_start < close_start) {
+    size_t line_end = line_start;
+    while (line_end < close_start && p->source->bytes[line_end] != '\n') line_end++;
+    size_t line_len = line_end - line_start;
+    if (line_len > 0 && min_indent != (size_t)-1 && line_len > min_indent) {
+      size_t copy_len = line_len - min_indent;
+      memcpy(body_text + body_len, p->source->bytes + line_start + min_indent, copy_len);
+      body_len += copy_len;
+    } else if (line_len > 0 && min_indent == (size_t)-1) {
+      memcpy(body_text + body_len, p->source->bytes + line_start, line_len);
+      body_len += line_len;
+    }
+    if (line_end < close_start && line_end + 1 < close_start) body_text[body_len++] = '\n';
+    line_start = line_end < close_start ? line_end + 1 : close_start;
+  }
+  body_text[body_len] = '\0';
+
+  TcAstValue string_node = node_hash(p, "string", start + 2, err);
+  TcAstValue body_value = tc_ast_string_copy(body_text, body_len, err);
+  free(body_text);
+  free(delimiter);
+  if (string_node.kind != TC_AST_HASH || body_value.kind != TC_AST_STRING ||
+      !tc_ast_hash_set(string_node, "value", body_value, err)) {
+    tc_ast_free(string_node);
+    return tc_ast_nil();
+  }
+  return string_node;
+}
+
 static int parse_heredoc_command_ast(TcAstParser *p, TcAstValue *out,
                                      int *matched, TcError *err) {
   *matched = 0;

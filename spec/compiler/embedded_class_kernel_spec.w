@@ -12,8 +12,23 @@
       ret i64 %s
     IR
 
+  fn __spec_guarded_raw(seed) (i64) i64
+    ll <<~IR
+      ret i64 %seed
+    IR
+
+  on arm64
+    fn __spec_guarded_raw(seed) (i64) i64
+      asm <<~ASM
+        mov x0, #22
+        ret
+      ASM
+
   -> combine(x, y)
     __spec_k_combine(x ## i64, y ## i64)
+
+  -> guarded_raw(x)
+    __spec_guarded_raw(x ## i64)
 
 -> check(name, got, want)
   if got == want
@@ -26,4 +41,5 @@ h = KernelHost.new
 check("class_kernel.combine", h.combine(20, 2), 42)
 check("class_kernel.zero_left", h.combine(0, 7), 7)
 check("class_kernel.negative", h.combine(0 - 4, 3), 0 - 5)
+check("class_kernel.guarded_raw_override", h.guarded_raw(11), 22)
 << "embedded_class_kernel_spec: all checks passed"

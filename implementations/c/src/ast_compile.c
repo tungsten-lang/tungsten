@@ -1345,6 +1345,14 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
     }
     return emit_const(chunk, tc_box_int(value->as.integer), err);
   }
+  if (ast_node_is(node, "wvalue")) {
+    TcAstValue *value = ast_get(node, "value");
+    if (!value || value->kind != TC_AST_INT) {
+      tc_error_set(err, "wvalue node missing value");
+      return 0;
+    }
+    return emit_const(chunk, tc_box_wvalue((WValue)(uint64_t)value->as.integer), err);
+  }
   if (ast_node_is(node, "string")) {
     TcAstValue *value = ast_get(node, "value");
     size_t len = 0;

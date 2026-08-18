@@ -1,0 +1,113 @@
+BIGINT MULTIPLY — TYPED NATIVE-LANE RESULT RELEASE
+==================================================
+
+Scope
+-----
+
+This is a native-only benchmark-lifecycle improvement after the exact
+mul1@1 port (`bb17e6ad`) and its protected+locked direct-shape optimization
+(`908f63e6`). It does not change multiplication arithmetic or dispatch.
+
+The native lane formerly released each prior `mul`, `mul1`, and `sqr` result
+through the general `w_value_free` heap-kind classifier. These fixtures prove
+a narrower contract: both positive operands have the high bit of their top
+limb set, so the smallest 1x1 product is at least 2^126. Every iteration result
+is therefore a boxed BigInt, while the loop's initial sentinel is nil. The
+timed handoff can use the existing `w_bigint_release_dead_raw` boundary, just
+as the already-specialized add/sub loops do. Final result cleanup remains
+outside the timed interval and still uses the general release.
+
+Build
+-----
+
+base_commit=908f63e6
+host=Apple M5 Max, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+compiler_path=/private/tmp/tungsten-compiler-mul1-1-direct-final
+compiler_sha256=c55c59f9a377b58b54cd107b6b25dbc928008926d6d4438fcb204d320d88d64f
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+baseline=/private/tmp/mul1-1-native-direct-final-on
+baseline_sha256=7f049378a903f08b7f01cd2d403d05f82d04b856dc6f9cc04bd45da9fcd64610
+candidate=/private/tmp/mul1-1-native-typed-release-on
+candidate_sha256=5abce17c16528a7b85ed4c876a3c31f7c2d9da16ca5648b9640e2a1d3144065c
+
+Both lane binaries use the same current-source compiler and locked direct
+arithmetic. Only the two timed result-release calls differ.
+
+Mul1 screen
+-----------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms requested/leg
+raw_json=/private/tmp/mul1-typed-release-screen-908f63e6.json
+raw_json_sha256=e3276cd7aa0e16b1715db355e104f8814beb13f58996ea22365b3922e45c0fb0
+
+cell      baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+mul1@1     1.938643     0.999172      0.514158       0.003657   11/11
+mul1@2     4.491933     3.488378      0.777524       0.009859   11/11
+mul1@4     4.800491     3.745492      0.781373       0.010016   11/11
+mul1@8     5.696739     4.544963      0.797818       0.028768   11/11
+mul1@16    6.617331     5.603182      0.844897       0.021309   11/11
+mul1@32    9.090915     8.249805      0.910250       0.011069   11/11
+mul1@64   14.167275    13.133510      0.927118       0.009876   11/11
+
+Every width wins every pair. The fixed release cost is largest at one limb
+and amortizes normally as multiplication work grows.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 300 ms requested/leg (the lane's
+40,000,000-iteration cap limits this approximately 1 ns cell); 21/21 wins
+raw_json=/private/tmp/mul1-typed-release-promotion-908f63e6.json
+raw_json_sha256=3eb363e353841fc17819c8785437c9a04733cf9fa288929850797d405cf8df37
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+mul1@1   1.984326     1.008770      0.510410       0.009982   21/21
+
+Sibling families
+----------------
+
+method=7 alternating process pairs; 3 internal runs; 80 ms requested/leg
+raw_mul_json=/private/tmp/mul-typed-release-screen-908f63e6.json
+raw_mul_json_sha256=5e06525eba0d0d848f87ebdcff381979adbfb103ceefc816157a176c5ce1a572
+raw_sqr_json=/private/tmp/sqr-typed-release-screen-908f63e6.json
+raw_sqr_json_sha256=93ca5827e98a9189d3d5bea6f62eccd3c91d53b4209670e90e31e564d2ffd5fb
+
+family  widths       paired ratios             pair wins
+mul     1..64        0.515, 0.853, 0.899,       48/49
+                     0.969, 0.986, 0.994, 0.997
+sqr     1..64        0.684, 0.795, 0.920,       46/49
+                     0.969, 0.989, 0.996, 0.998
+
+The only two individual non-wins are noise-level wide samples (one each at
+32/64 limbs); every family/width median is faster.
+
+Public row
+----------
+
+method=9 runs; 110 ms requested target
+
+cell     C_ns   native_Tungsten_ns  GMP_ns  native/C  native/GMP
+mul1@1   1.291  0.995694            1.878   0.771     0.530
+
+The native lane now wins the public row while retaining the ordinary boxed
+Tungsten operator and immutable result lifecycle.
+
+Counter follow-up
+-----------------
+
+Before this change, `tungsten flame --counters` attributed 72.7% of cycles to
+`w_value_free` and 25.7% to allocator TLS lookup. After typed release and LTO,
+neither symbol appears in the sampled hot path; the loop and raw handoff are
+fully inlined. The post-change counter run was dominated by profiler/system
+self-accounting attribution, so it is evidence that the old boundaries are
+gone, not a trustworthy residual-function ranking.
+
+Focused validation
+------------------
+
+- the candidate native-lane self-test passes;
+- every A/B sweep performs a one-shot C reference comparison before timing;
+- `mul`, `mul1`, and `sqr` cover widths 1, 2, 4, 8, 16, 32, and 64;
+- the exact 1x1 target promotion wins all 21 pairs;
+- `git diff --check` passes.

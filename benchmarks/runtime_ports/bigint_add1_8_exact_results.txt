@@ -1,0 +1,79 @@
+EXACT POSITIVE ADD1@8 CHECKPOINT
+
+parent_commit=e5dff3de889ccef82223aa9750c3d9dd150c51ac
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+
+PORT CONTRACT
+
+The current C n==8 arm is not the older unconditional flag chain.  Its
+already-measured carry-death schedule is ported literally:
+
+  load all eight limbs with four ldp instructions
+  adds limb0; adcs limb1; branch on surviving carry
+  common: four stp stores; return carry zero
+  rare: six more adcs; four stp stores; cset carry
+
+All loads precede the first store, matching C's in-place safety.  The wrapper
+retains the cap-eight hot allocation, normal size-eight publication, and full
+carry grow-to-nine construction.  This checkpoint does not further optimize
+the existing carry-death schedule.
+
+MATCHED A/B
+
+baseline=/private/tmp/add1-7-native-exact
+candidate=/private/tmp/add1-8-native-exact
+command=alternating BIN --sweep add1 WIDTH 1 110
+pairs=11 per width
+
+width  baseline_ns  candidate_ns  candidate/baseline  paired_IQR  wins
+7      2.733198     2.939002      1.072727            0.034872     0/11
+8      4.221617     2.773956      0.657509            0.004908    11/11
+9      4.220140     4.287094      1.015012            0.022682     2/11
+16     4.542176     4.661417      1.015468            0.036039     3/11
+
+The @7 movement is a real layout/selector regression even though its exact
+arithmetic leaf is unchanged.  It is retained in this exact-first commit and
+becomes a required recovery control for the subsequent native-only dispatch
+work.  The unported @9/@16 rows are unresolved within their IQRs.
+
+PUBLIC MATRIX
+
+command=bin/tungsten bench bignum --operations add1 --sizes 7,8,9,16 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+width  C_ns   native_ns  GMP_ns
+7      1.934  2.776607   2.627
+8      1.886  2.780542   3.024
+9      2.135  4.180136   3.251
+16     2.455  4.499733   5.116
+
+At @8 the exact native source arm beats GMP by 8.1% but remains 47.4% slower
+than C.  The wider default C tail remains slower than C but beats GMP at @16.
+
+COUNTER ROUTE PROOF
+
+command=bin/tungsten flame --counters -d 3 --top 8 -- /private/tmp/add1-8-native-exact --sweep add1 8 1 5000
+
+  __bigint_add1_8_exact  49.2% cycles; 50.1% instructions; IPC 8.66
+  _tlv_get_addr          23.6% cycles
+  BigInt#+__ovl_BigInt   23.0% cycles
+
+No retained C word kernel appears.  The leaf's counter row reports zero
+cache/memory misses per kilo-instruction.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_add1_8_source_spec passed all 17 checks;
+- common carry death, rare-chain entry with carry death at limb two, full
+  8->9 growth, signs, neighbors, exact sizes, and round trips match C;
+- focused LLVM assembled and verified;
+- linked disassembly is the exact common/rare C schedule, with no frame or
+  nested call;
+- native harness self-test passed all operations;
+- runtime/runtime.o exports w_bigint_add1_8_finish_raw;
+- git diff --check passed.

@@ -758,6 +758,45 @@ WValue w_bigint_mod_pow2(WValue a, WValue bits);
 WValue w_bigint_div_pow2(WValue a, WValue bits);
 WValue w_bigint_gcd(WValue a, WValue b);
 WValue w_bigint_lcm(WValue a, WValue b);
+WValue __w_bigint_isqrt_src(WValue a);
+WValue __w_bigint_sub1_1_src(WValue a, WValue b);
+WValue __w_bigint_sub1_2_src(WValue a, WValue b);
+WValue __w_bigint_mul1_1_src(WValue a, WValue b);
+WValue __w_bigint_sqr2_src(WValue a, WValue b);
+WValue __w_bigint_sqr3_src(WValue a, WValue b);
+WValue __w_bigint_sqr4_src(WValue a, WValue b);
+WValue __w_bigint_sqr5_src(WValue a, WValue b);
+WValue __w_bigint_sqr6_src(WValue a, WValue b);
+WValue __w_bigint_sqr7_src(WValue a, WValue b);
+WValue __w_bigint_sqr8_src(WValue a, WValue b);
+WValue __w_bigint_sqr16_src(WValue a, WValue b);
+WValue __w_bigint_mul2_src(WValue a, WValue b);
+WValue __w_bigint_mul3_src(WValue a, WValue b);
+WValue __w_bigint_mul4_src(WValue a, WValue b);
+WValue __w_bigint_mul5_src(WValue a, WValue b);
+WValue __w_bigint_mul6_src(WValue a, WValue b);
+WValue __w_bigint_mul7_src(WValue a, WValue b);
+WValue __w_bigint_mul8_src(WValue a, WValue b);
+WValue __w_bigint_mul12_src(WValue a, WValue b);
+WValue __w_bigint_mul15_src(WValue a, WValue b);
+WValue __w_bigint_mul16_src(WValue a, WValue b);
+WValue __w_bigint_mul17_src(WValue a, WValue b);
+WValue __w_bigint_mul21_src(WValue a, WValue b);
+WValue __w_bigint_mul24_src(WValue a, WValue b);
+WValue __w_bigint_mul1_2_src(WValue a, WValue b);
+WValue __w_bigint_mul1_3_src(WValue a, WValue b);
+WValue __w_bigint_mul1_4_src(WValue a, WValue b);
+WValue __w_bigint_mul1_5_src(WValue a, WValue b);
+WValue __w_bigint_mul1_6_src(WValue a, WValue b);
+WValue __w_bigint_mul1_7_src(WValue a, WValue b);
+WValue __w_bigint_mul1_8_src(WValue a, WValue b);
+WValue __w_bigint_mul1_16_src(WValue a, WValue b);
+WValue __w_bigint_mul1_24_src(WValue a, WValue b);
+WValue __w_bigint_mul1_32_src(WValue a, WValue b);
+WValue __w_bigint_mul1_40_src(WValue a, WValue b);
+WValue __w_bigint_mul1_48_src(WValue a, WValue b);
+WValue __w_bigint_mul1_64_src(WValue a, WValue b);
+WValue w_bigint_mul_builtin_exact(WValue a, WValue b);
 WValue w_bigint_compare_c(WValue a, WValue b);
 WValue w_bigint_compare_source(WValue a, WValue b);
 WValue w_bigint_and_c(WValue a, WValue b);
@@ -770,15 +809,121 @@ WValue w_bigint_prime_q(WValue r);
 WValue w_bigint_add(WValue a, WValue b);
 WValue w_bigint_sub(WValue a, WValue b);
 WValue w_bigint_div(WValue a, WValue b);
+WValue w_bigint_div_63_after_cert_fail(WValue a, WValue b);
+WValue w_bigint_div_84_after_cert_fail(WValue a, WValue b);
 WValue w_bigint_mod(WValue a, WValue b);
 WValue w_bigint_to_f(WValue r);
 WValue w_bigint_to_s(WValue r, WValue base);
 WValue w_decimal_from_digits(WValue digits_str, WValue scale, WValue negate);
 WValue w_bigint_alloc_boxed(WValue cap);
 WValue w_bigint_alloc_hot(int64_t cap);
+int64_t w_bigint_copy_tail_raw(
+    int64_t result_limbs, int64_t source_limbs,
+    int64_t start, int64_t length);
+WValue w_bigint_add1_wide_finish_raw(
+    WValue v, int64_t length, int64_t carry);
+WValue w_bigint_add1_1_finish_raw(uint64_t sum, int64_t carry);
+WValue w_bigint_mul1_1_finish_raw(uint64_t low, uint64_t high);
+WValue w_bigint_sqr2_finish_raw(WValue v, int64_t size);
+WValue w_bigint_sqr3_finish_raw(WValue v, int64_t size);
+WValue w_bigint_sqr4_finish_raw(WValue v, int64_t size);
+WValue w_bigint_sqr5_finish_raw(WValue v, int64_t size);
+WValue w_bigint_sqr6_finish_raw(WValue v, int64_t size);
+WValue w_bigint_sqr7_finish_raw(WValue v, int64_t size);
+WValue w_bigint_sqr8_finish_raw(WValue v, int64_t size);
+uint64_t w_bigint_sqr16_kernel_raw(int64_t rp, int64_t ap);
+WValue w_bigint_sqr16_finish_raw(WValue v);
+WValue w_bigint_mul2_finish_raw(WValue v, int64_t size);
+WValue w_bigint_mul3_finish_raw(WValue v, int64_t size);
+uint64_t w_bigint_mul4_first_row_raw(int64_t rp, int64_t bp, int64_t ap);
+WValue w_bigint_mul4_finish_raw(WValue v, int64_t size);
+uint64_t w_bigint_mul5_first_row_raw(int64_t rp, int64_t bp, int64_t ap);
+uint64_t w_bigint_mul5_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
+                                  int64_t row);
+WValue w_bigint_mul5_finish_raw(WValue v);
+uint64_t w_bigint_mul6_first_row_raw(int64_t rp, int64_t bp, int64_t ap);
+uint64_t w_bigint_mul6_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
+                                  int64_t row);
+WValue w_bigint_mul6_finish_raw(WValue v);
+uint64_t w_bigint_mul7_first_row_raw(int64_t rp, int64_t bp, int64_t ap);
+uint64_t w_bigint_mul7_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
+                                  int64_t row);
+WValue w_bigint_mul7_finish_raw(WValue v);
+uint64_t w_bigint_mul8_first_row_raw(int64_t rp, int64_t bp, int64_t ap);
+uint64_t w_bigint_mul8_add_row_raw(int64_t rp, int64_t bp, int64_t ap,
+                                  int64_t row);
+WValue w_bigint_mul8_finish_raw(WValue v);
+uint64_t w_bigint_mul12_kernel_raw(int64_t rp, int64_t bp, int64_t ap);
+WValue w_bigint_mul12_finish_raw(WValue v);
+uint64_t w_bigint_mul15_kernel_raw(int64_t rp, int64_t bp, int64_t ap);
+WValue w_bigint_mul15_finish_raw(WValue v);
+uint64_t w_bigint_mul16_kernel_raw(int64_t rp, int64_t bp, int64_t ap);
+WValue w_bigint_mul16_finish_raw(WValue v);
+uint64_t w_bigint_mul17_kernel_raw(int64_t rp, int64_t bp, int64_t ap);
+WValue w_bigint_mul17_finish_raw(WValue v);
+uint64_t w_bigint_mul21_kernel_raw(int64_t rp, int64_t bp, int64_t ap);
+WValue w_bigint_mul21_finish_raw(WValue v);
+uint64_t w_bigint_mul24_kernel_raw(int64_t rp, int64_t bp, int64_t ap);
+WValue w_bigint_mul24_finish_raw(WValue v);
+WValue w_bigint_mul1_2_finish_raw(WValue v, int64_t size);
+WValue w_bigint_mul1_3_finish_raw(WValue v, int64_t size);
+WValue w_bigint_mul1_4_finish_raw(WValue v, int64_t size);
+WValue w_bigint_mul1_5_finish_raw(WValue v, int64_t size);
+WValue w_bigint_mul1_6_finish_raw(WValue v, int64_t size);
+WValue w_bigint_mul1_7_finish_raw(WValue v, int64_t size);
+WValue w_bigint_mul1_8_finish_raw(WValue v, int64_t size);
+uint64_t w_bigint_mul1_16_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word);
+WValue w_bigint_mul1_16_finish_raw(WValue v, uint64_t carry);
+uint64_t w_bigint_mul1_24_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word);
+WValue w_bigint_mul1_24_finish_raw(WValue v, uint64_t carry);
+uint64_t w_bigint_mul1_32_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word);
+WValue w_bigint_mul1_32_finish_raw(WValue v, uint64_t carry);
+uint64_t w_bigint_mul1_40_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word);
+WValue w_bigint_mul1_40_finish_raw(WValue v, uint64_t carry);
+uint64_t w_bigint_mul1_48_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word);
+WValue w_bigint_mul1_48_finish_raw(WValue v, uint64_t carry);
+uint64_t w_bigint_mul1_64_kernel_raw(int64_t rp, int64_t ap,
+                                     uint64_t word);
+WValue w_bigint_mul1_64_finish_raw(WValue v, uint64_t carry);
+WValue w_bigint_alloc_hot4_raw(void);
+WValue w_bigint_alloc_hot8_raw(void);
+WValue w_bigint_alloc_hot16_raw(void);
+WValue w_bigint_alloc_hot32_raw(void);
+WValue w_bigint_alloc_hot64_raw(void);
+WValue w_bigint_alloc_hot128_raw(void);
+WValue w_bigint_release_unfinished_raw(WValue v);
+WValue w_bigint_release_dead_raw(WValue v);
 WValue w_bigint_finish_add(WValue v, WValue signed_size);
 WValue w_bigint_finish_add_raw(WValue v, int64_t signed_size);
+WValue w_bigint_add1_2_finish_raw(WValue v, uint64_t carry);
+WValue w_bigint_add1_3_finish_raw(WValue v, uint64_t carry);
+WValue w_bigint_add1_4_finish_raw(WValue v, uint64_t carry);
+WValue w_bigint_add1_5_finish_raw(WValue v, uint64_t carry);
+WValue w_bigint_add1_6_finish_raw(WValue v, uint64_t carry);
+WValue w_bigint_add1_7_finish_raw(WValue v, uint64_t carry);
+WValue w_bigint_add1_8_finish_raw(WValue v, uint64_t carry);
+WValue w_bigint_sub1_1_finish_raw(
+    uint64_t magnitude, int64_t signed_size);
+WValue w_bigint_sub1_2_alloc_hot_raw(void);
+WValue w_bigint_sub1_2_finish_raw(WValue v);
+WValue w_bigint_sub1_3_finish_raw(WValue v);
+WValue w_bigint_sub1_4_finish_raw(WValue v);
+WValue w_bigint_sub1_5_finish_raw(WValue v);
+WValue w_bigint_sub1_6_finish_raw(WValue v);
+WValue w_bigint_sub1_7_finish_raw(WValue v);
+WValue w_bigint_sub1_8_finish_raw(WValue v);
 WValue w_bigint_finish_sub(WValue v, WValue signed_size);
+WValue w_bigint_finish_sub_raw(WValue v, int64_t signed_size);
+WValue w_bigint_mod63_finish_raw(
+    uint64_t limb0, uint64_t limb1, uint64_t limb2, int64_t size);
+WValue w_bigint_mod84_finish_raw(
+    uint64_t limb0, uint64_t limb1, uint64_t limb2, uint64_t limb3,
+    int64_t size);
 WValue w_bigint_seal(WValue v, WValue signed_size);
 WValue w_bigint_seal_raw(WValue v, int64_t signed_size);
 WValue w_native_data_elem(WValue recv, WValue field, WValue idx);

@@ -1,0 +1,83 @@
+EXACT POSITIVE SUB1@2 CHECKPOINT
+
+parent_commit=2475827267e318cba8b14bf3e63f542fce74bb3a
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; Battery Power 96%
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+gmp=6.3.0
+
+PORT CONTRACT
+
+The admitted positive two-limb by positive one-limb subtraction is a literal
+native Tungsten port of runtime.c's bn_sub_word2_a64_fixed schedule:
+
+  ldp x4, x5, [src]
+  subs x4, x4, word
+  sbcs x5, x5, xzr
+  stp x4, x5, [dst]
+  cset borrow, lo
+
+The source wrapper asks bigint_alloc_raw_hot for the same cap-two result.
+After both limbs are published, the raw finisher repeats
+bigint_sub_word_into's exact epilogue: size two if the top limb survives;
+otherwise size one followed by bigint_finish_mag_sub, which may demote the
+survivor to inline i48 and recycler-release the unfinished box.  The final
+borrow is materialized exactly as in C even though the canonical 2-by-1 shape
+cannot underflow past limb one.  No native-only arithmetic, scheduling,
+allocation, dispatch, or representation change is included.
+
+MATCHED FOUR-CELL SCREEN
+
+baseline=/private/tmp/sub1-2-native-baseline-24758272
+candidate=/private/tmp/sub1-2-native-candidate-exact
+method=11 alternating process pairs; 110 ms/cell
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sub1@1   2.832801     3.059327      1.081008       0.007235    0/11
+sub1@2   3.501551     3.556715      1.017832       0.027003    1/11
+sub1@4   4.195537     4.223334      1.012182       0.051828    3/11
+sub1@8   4.572572     4.741424      1.036014       0.105184    4/11
+
+The exact @2 port is a statistical near tie, not a measured win.  @4/@8 stay
+inside their paired IQRs and the standing +/-5% unresolved band.  The @1
+movement is a real code-layout regression in this linked binary: it does not
+execute the new leaf, but all eleven candidate legs lose.  It is retained as
+a mandatory control for the separate native dispatch follow-up rather than
+hidden inside the exact arithmetic checkpoint.
+
+PUBLIC MATRIX
+
+command=bin/tungsten bench bignum --operations sub1 --sizes 1,2,4 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+width  C_ns   native_ns  GMP_ns
+1      1.418  3.027649   1.597
+2      1.494  3.552681   1.769
+4      1.903  4.130497   2.122
+
+COUNTER ROUTE PROOF
+
+command=bin/tungsten flame --counters -d 3 --top 16 -- /private/tmp/sub1-2-native-candidate-exact --sweep sub1 2 1 5000
+
+  w_sub                         57.2% cycles
+  __bigint_sub1_2_exact         15.6% cycles
+  BigInt#-__ovl_BigInt         13.4% cycles
+  _tlv_get_addr                11.4% cycles
+
+The retained C word leaf is absent from the source benchmark route.  The
+linked exact source symbol is six instructions with no frame or nested call;
+the general w_sub/source-worker routing remains the dominant cost and is the
+next independent native-only optimization boundary.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_sub1_2_source_spec passed all 15 checks;
+- no-borrow, borrow, boxed one-limb shrink, both tested i48 shrinks, exact
+  header sizes, round trips, signs, and adjacent widths match the C oracle;
+- native lane self-test passed all operations;
+- emitted LLVM assembled and verified with LLVM 22;
+- linked AArch64 leaf is exactly ldp/subs/sbcs/stp/cset/ret;
+- runtime/runtime.o rebuilt and exports w_bigint_sub1_2_finish_raw;
+- git diff --check passed.

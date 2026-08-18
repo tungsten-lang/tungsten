@@ -1,0 +1,112 @@
+BIGINT SQR@4 — CLOSED-WORLD NATIVE DISPATCH FOLLOW-UP
+======================================================
+
+Scope
+-----
+
+This is a native-only optimization after the exact four-limb square checkpoint
+ef001b38. It does not change square arithmetic, allocation, representation,
+normalization, or any C algorithm boundary.
+
+At a syntactic `a * a` site in a program that declares both
+`Tungsten.PROTECT_THE_CORE!` and `Tungsten.LOCK_THE_DOORS!`, receiver identity
+and method-table immutability are compile-time facts. The generated caller:
+
+  - proves the exact BigInt tag once;
+  - loads the raw signed-size header once;
+  - preserves the already-measured dense sqr@1..3 dispatch byte-for-byte;
+  - routes the default arm through one outlined size-4 dispatcher, which enters
+    the committed exact native sqr@4 leaf or tail-calls the unchanged
+    `w_bigint_mul_builtin_exact` boundary; and
+  - falls back to polymorphic `w_mul` on a stale/non-BigInt type fact.
+
+The outlined default dispatcher is deliberate. Putting size 4 into the dense
+switch, or testing size 4 directly in its caller, made LLVM rebalance the
+existing 1..3 comparison chain and regressed the small controls. The retained
+shape leaves that chain unchanged and isolates the larger exact sqr@4 worker
+behind the default arm. The size key remains the raw header: tag-overlay
+negative values square through the positive leaves, while true negative
+headers retain the exact C path. `TUNGSTEN_BIGINT_SQR4_LOCKED_DIRECT=0`
+restores the exact-checkpoint route and is the causal benchmark control.
+
+Build
+-----
+
+base_commit=ef001b38408ad85043f7cd9cd7e6dec8c743c66f
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-sqr4-native-defaultdispatch
+compiler_sha256=97be5d1fcfd7610a1a1460bc5e071b62bfec3c80b6a06f1e290ff84c465943ad
+baseline_sha256=b2bb0e45da9fe921c172d36251d3edca7b797da0b541c3bba844c941b66c31d1
+candidate_sha256=19b9bc8fd8ea89899a4652c9f7c4bbd0fd25f49098b3da49dcde7b035e408730
+fixed_point_ll_sha256=6c263dd6648acb6dae6ff8eecc70f34705558aa69c481eaaac8244a7cb4b9001
+power=AC, battery 100 percent
+
+Target promotion
+----------------
+
+method=31 alternating process pairs; 3 internal runs; 500 ms target
+raw_json=/private/tmp/bigint-sqr4-locked-direct-defaultdispatch-promotion-ef001b38-m5max-20260817.json
+raw_json_sha256=f1b8927d21a8499bd3714a3d8c3a08be53cfb81c73eb366a4a0c48c3281b5df9
+
+cell   baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@4      4.462217      4.391905        0.985659    0.014103  27/31
+
+The compact default-path integration is 1.43% faster at sqr@4. This is a
+small but repeatable selection win: arithmetic and allocation remain the
+literal exact source checkpoint.
+
+Neighboring and ordinary-operation controls
+--------------------------------------------
+
+The 11-pair 110 ms screen measured candidate/baseline 1.0001, 0.9828,
+1.0000, 0.98596, 1.0006, 1.0011, and 0.9978 at sqr@1,2,3,4,8,16,32.
+An independent wide screen measured 1.0001, 0.9994, 1.0000, 0.9960,
+1.0002, and 0.9993 at sqr@16,32,64,128,256,1024.
+
+Ordinary `mul1@2,4,8,16,32` stayed within 0.1%; `mul1@1` improved 5.67%.
+Ordinary `mul@2,4,8,16,32` stayed within 0.7%, with the widest paired IQR at
+mul@4. No neighboring or ordinary-operation control regressed by 1%.
+
+Public three-lane row
+---------------------
+
+method=9 runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr4-native-public-ef001b38-m5max-20260817.json
+raw_json_sha256=264c44e0e7151ecdd819faed9955c781c16fe954cf08f0c4fba9f62a173ef216
+
+cell   Tungsten_C_ns  Tungsten_ns  GMP_ns  fastest
+sqr@4        4.990000     4.399274   7.753  tungsten-native
+
+The native Tungsten lane is 11.8% faster than the direct Tungsten C lane and
+43.3% faster than GMP in the public harness. Both Tungsten lanes retain
+immutable boxed results; the native lane exercises ordinary `a * a` under the
+two closed-world contracts.
+
+Validation gates
+----------------
+
+  - candidate and feature-off locked-direct specs pass;
+  - the focused spec covers positive and overlay-negative four-limb identities
+    plus the existing one-, two-, and three-limb leaves, wider/dynamic
+    identities, signs, stale type facts, and a non-BigInt receiver;
+  - candidate and feature-off native-lane self-tests pass;
+  - emitted compiler, spec, and native-lane LLVM modules assemble and verify
+    under LLVM 22;
+  - retained IR contains one noinline default dispatcher in the candidate and
+    none with the feature disabled, while the exact sqr@4 worker remains the
+    committed strong source seam;
+  - linked AArch64 preserves the measured sqr@1..3 comparison chain and calls
+    the outlined dispatcher only from its default arm;
+  - two self-host compiler generations emit byte-identical LLVM; and
+  - `git diff --check` passes.
+
+Rejected layouts
+----------------
+
+Adding case 4 to the dense switch won strongly at sqr@4 but regressed sqr@1 by
+9.3% and sqr@2 by 3.8%. Testing size 4 in the caller's default block had the
+same comparison-tree problem. Outlining only the sqr@4 source seam still left
+the destabilizing caller test. Those variants were rejected; only the compact
+default-path dispatcher passed the target and control gates.

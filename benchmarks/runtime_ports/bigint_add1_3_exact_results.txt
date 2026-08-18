@@ -1,0 +1,38 @@
+EXACT POSITIVE ADD1@3 CHECKPOINT
+
+base_commit=8cb7ad15320060c8ea8886e33eb622a3090bdf51
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+command=bin/tungsten bench bignum --operations add1 --sizes 3 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+Tungsten C/runtime=1.821 ns (IQR 0.083 ns)
+Tungsten native exact port=6.095494019 ns
+GMP=1.839 ns (IQR 0.114 ns)
+C/native=0.298745269
+C/GMP=0.990212072
+
+The native lane uses an ordinary boxed `a + b` source operator.  Its admitted
+positive 3-limb by positive 1-limb shape allocates with the same cap-three hot
+policy, executes the literal C BN_WORD_FIXED_CASE(3) load/add/store schedule,
+and preserves the same rare cap-four growth epilogue.  This is an exact-first
+implementation checkpoint, not a performance acceptance claim.
+
+Focused controls:
+- compiled and interpreted bigint_add1_source_spec: all 14 checks passed
+- full carry from three to four limbs preserves value, size, and round trip
+- two/four-limb and negative-sign neighbors match the retained C oracle
+- LLVM assembled and verified; runtime/runtime.o rebuilt successfully
+- final AArch64 leaf is exactly ldp/ldr, adds/adcs/adcs, stp/str, cset, ret
+- `tungsten flame --counters` attributes 10.2% to the native exact leaf and
+  shows no bn_add_word_a64_fixed, proving the admitted row no longer times C
+
+Four-width screen (best of 9; C/native):
+- add1@2  1.4 / 4.6 ns = 0.30
+- add1@3  1.9 / 6.1 ns = 0.31
+- add1@4  1.8 / 5.4 ns = 0.33
+- add1@8  2.2 / 5.3 ns = 0.41

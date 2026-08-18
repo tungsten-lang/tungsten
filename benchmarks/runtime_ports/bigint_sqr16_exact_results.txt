@@ -1,0 +1,152 @@
+BIGINT POSITIVE SIXTEEN-LIMB SQUARE — EXACT SOURCE CHECKPOINT
+=======================================================================
+
+Scope
+-----
+
+This checkpoint ports only the pointer-identical, raw-positive-header,
+positive sixteen-limb arm from `bigint_mul_any_routed`. Native Tungsten
+preserves C's exact outer shape:
+
+  - the same capacity-thirty-two hot allocation;
+  - one call to the unchanged `bn_sqr16_split` kernel; and
+  - positive size thirty-one when limb thirty-one is zero, otherwise size
+    thirty-two.
+
+The split-square arithmetic is deliberately unchanged. Allocation, the
+dedicated seam, and result publication move to native Tungsten; the already
+tuned C kernel remains the exact arithmetic leaf. Tag-overlay negatives with
+a positive raw header remain admitted. True negative headers, distinct-equal
+boxes, and every neighboring width retain their former routes. A genuine
+open-world BigInt `*` reopen remains observable.
+
+Build and route proof
+---------------------
+
+base_commit=17c248f9
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+power=AC Power, 100 percent
+compiler=Homebrew clang 22.1.8
+gmp=6.3.0
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-sqr16-stage3
+compiler_sha256=a0eaa4cbe8dd391260d7e73617ba68e3530f4c65a91556c62a3985144da88b97
+fixed_point_ll_sha256=51fac046091c218c0b230114efd6a46593c0e77774590a3a7846739181a301c7
+production_candidate=/private/tmp/bench_big_math_tungsten_sqr16_exact
+production_candidate_sha256=bd132eb295946dc60d4e45379cff91a6784cd5727209ae2f37ceacd0e08622a3
+production_feature_off=/private/tmp/bench_big_math_tungsten_sqr16_exact_feature_off
+production_feature_off_sha256=1376171336960f934a56773b0e70c827cd95a1db57a6a826c90436827404fa04
+diagnostic_same_binary=/private/tmp/bench_big_math_tungsten_sqr16_exact_knob
+diagnostic_same_binary_sha256=8f082ec86bd09c4a9c77ca8f98c49c6dca6016016a7feed41b0711e252d4a68c
+
+The strong `__w_bigint_sqr16_src` seam enters a linked source body that
+requests capacity thirty-two, calls `bn_sqr16_split` once, reads limb
+thirty-one, and publishes size thirty-one or thirty-two. It contains no
+generic square or multiply dispatcher. `bn_sqr16_split` itself is unchanged.
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic binary was built with
+`BN_BENCH_RUNTIME_SQR16_SRC_KNOB=1`. Alternating processes changed only
+`TUNGSTEN_BN_SQR16_SRC=0/1`.
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr16-exact-knob-screen-17c248f9-m5max-20260817.json
+raw_json_sha256=0e0dbadda7041aad026a487f6bb919ae4bb27d8b5d6ab62db5fe5b41b9391939
+
+cell     C-route_ns  source_ns  paired_median  paired_IQR  wins
+sqr@1       0.872784   0.872155        0.999254    0.006532   7/11
+sqr@2       1.318683   1.320039        1.000610    0.004835   4/11
+sqr@3       2.177228   2.189538        1.000533    0.014176   5/11
+sqr@4       4.483027   4.494694        0.995839    0.017999   6/11
+sqr@5       6.085115   6.070505        0.999648    0.014045   6/11
+sqr@6       9.284728   9.264977        0.996559    0.010671   7/11
+sqr@7      12.446550  12.427546        0.998495    0.006895   7/11
+sqr@8      16.335253  16.338746        0.999479    0.003326   7/11
+sqr@16     49.790178  49.797995        0.999426    0.005623   7/11
+sqr@32    168.430066 168.154313        1.000801    0.003368   5/11
+sqr@64    538.436852 538.267127        1.001395    0.005703   5/11
+
+Only `sqr@16` changes route. It is at parity, and all ten controls remain
+within 0.42 percent.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr16-exact-knob-promotion-17c248f9-m5max-20260817.json
+raw_json_sha256=dcf8792facda728d59f27b28742fc8b6ac41a778d0be7664fd7d2e310004639e
+
+cell     C-route_ns  source_ns  paired_median  paired_IQR  wins
+sqr@16     49.839235  49.844283        1.000085    0.003037  10/21
+
+The exact source route is indistinguishable from the C route in the same
+binary. No speed claim is made from this campaign.
+
+Production-shape cross-check
+----------------------------
+
+Two separately linked production-shape binaries alternated order. The
+feature-off binary compiles the source arm away; the candidate compiles the
+diagnostic selection away to true.
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-sqr16-exact-production-promotion-17c248f9-m5max-20260817.json
+raw_json_sha256=42adb71dcf4be8148363f34a445e4864b39a3b2c478012cc8f0a9dbf3aea2306
+
+cell     feature_off_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@16         49.978227     49.497673        0.990067    0.004226  21/21
+
+The separately linked production candidate wins every pair and improves
+0.99 percent. This is a small production-layout win, while the same-binary
+result remains the causal parity verdict.
+
+Public three-lane row
+---------------------
+
+method=9 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-sqr16-exact-public-17c248f9-m5max-20260817.json
+raw_json_sha256=809306604605b9434dca875276b76252d95544c3821bfe345a051a9cac9efac5
+
+cell     Tungsten_C_ns  tungsten-native_ns  GMP_ns  fastest
+sqr@16          48.891               49.462  55.787  tungsten
+
+The public native route is 1.17 percent slower than direct Tungsten C and
+11.34 percent faster than GMP. This is therefore an exact-fidelity checkpoint,
+not a direct-C public speed claim.
+
+Hardware counters
+-----------------
+
+command=tungsten flame --counters
+raw_text=/private/tmp/bigint-sqr16-exact-production-counters-17c248f9-m5max-20260817.txt
+raw_text_sha256=99b37a46ceceb96dae5d3894650390b6c61a357eca58d9ad2043fd499827f24d
+
+The production candidate attributes 94.5 percent of sampled cycles to the
+unchanged `bn_sqr16_split` kernel, 1.9 percent to its `bn_mul_1` subprimitive,
+1.1 percent to TLS lookup, and 0.9 percent to the exact built-in boundary.
+Aggregate IPC is 6.01, with no sampled steady-state cache- or TLB-miss
+pressure. The operation is now kernel-bound.
+
+Focused validation
+------------------
+
+- a feature-off oracle build passes 100,000 exact native/C differentials;
+- the direct differential uses raw wrapping-u64 fixture generation and raw
+  limb stores, so the case count does not spend minutes in BigInt PRNG work;
+- compiled and interpreted public checks pass independent closed-form squares,
+  every named representation/route case, and 1,000 randomized calls;
+- both possible result widths, overlay and header signs, distinct-equal
+  storage, and neighboring widths are covered;
+- a real BigInt `*` reopen replaces both ordinary and direct seams;
+- production, feature-off, diagnostic, fused-cross-off, and boxed-sqr16-off
+  native self-tests pass all 25 benchmark operations;
+- compiler and spec LLVM modules assemble and verify under LLVM 22;
+- the self-hosted compiler reaches byte-identical stage-two/stage-three IR;
+- `make -C runtime runtime.o` and `git diff --check` pass; and
+- linked-body and hardware-counter route proofs pass.
+
+This completes the fixed square checkpoint series through the dedicated
+sixteen-limb split arm. Native kernel redesign and wider algorithm migrations
+remain separate measured work.

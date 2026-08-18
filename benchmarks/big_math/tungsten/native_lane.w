@@ -2,8 +2,11 @@
 #
 # Operand construction, timing, and the one-shot C oracle are benchmark
 # support ccalls. Timed arithmetic, bitwise, shift, comparison, sign, power,
-# and conversion bodies are ordinary native-compiled Tungsten; gcd, lcm, and
-# isqrt deliberately call their retained C kernel boundaries directly. The
+# and conversion bodies are ordinary native-compiled Tungsten; gcd and lcm
+# deliberately call their retained C kernel boundaries directly. Integer
+# square root uses BigInt#isqrt's stable source seam, whose one- and two-limb
+# leaves are native and whose wider divide-and-conquer path retains the C
+# kernel boundary. The
 # executable closes the Core and method-table world after all definitions so
 # direct dispatch is both sound and representative of a deliberately locked
 # production program.
@@ -22,6 +25,17 @@ POW_EXPONENT = 5
 
 -> release_value(value)
   ccall("w_bench_tungsten_native_release", value)
+
+# The add/add1 result type and this benchmark fixture's subtraction,
+# multiplication, and square results are statically boxed. Every multiply
+# operand has its top bit set, so even the smallest 1x1 product is at least
+# 2^126 and cannot demote to i48. Match the direct C lane's alias-aware BigInt
+# handoff without crossing the general w_value_free heap-kind dispatcher.
+# (The subtraction fixtures retain at least one full-width magnitude limb;
+# focused correctness specs cover the source leaf's inline-result cases
+# separately.)
+-> release_bigint_value(value)
+  ccall_nobox("w_bigint_release_dead_raw", value)
 
 -> native_reference(operation, a, b, modulus, decimal)
   ccall("w_bench_tungsten_native_reference", operation, a, b, modulus, decimal)
@@ -42,7 +56,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a + b
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_bigint_value(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -55,7 +69,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a - b
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_bigint_value(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -68,7 +82,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a * b
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_bigint_value(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -81,7 +95,7 @@ POW_EXPONENT = 5
   while i < iterations
     next_result = a * a
     checksum += (wvalue_bits(next_result) & 255) + i
-    release_value(result)
+    release_bigint_value(result)
     result = next_result
     i += 1
   finish_sample(started, iterations, result, checksum)
@@ -273,7 +287,7 @@ POW_EXPONENT = 5
   i = 0 ## i64
   started = thread_cpu_ns()
   while i < iterations
-    next_result = ccall("bigint_isqrt_any", a)
+    next_result = ccall("__w_bigint_isqrt_src", a)
     checksum += (wvalue_bits(next_result) & 255) + i
     release_value(result)
     result = next_result
@@ -403,7 +417,7 @@ POW_EXPONENT = 5
   return a ** POW_EXPONENT if operation == "pow"
   return a.pow(b, modulus) if operation == "powmod"
   return ccall("w_bigint_lcm", a, b) if operation == "lcm"
-  return ccall("bigint_isqrt_any", a) if operation == "isqrt"
+  return ccall("__w_bigint_isqrt_src", a) if operation == "isqrt"
   return a.to_s() if operation == "tostr"
   return decimal.to_i if operation == "fromstr"
   raise "unknown bignum benchmark operation: " + operation

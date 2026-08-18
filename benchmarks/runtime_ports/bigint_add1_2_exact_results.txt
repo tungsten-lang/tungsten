@@ -1,0 +1,85 @@
+EXACT POSITIVE ADD1@2 CHECKPOINT
+
+parent_commit=d864cf4a314cbff997dd52690b80e2be8233c680
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+
+PORT CONTRACT
+
+The admitted positive 2-limb by positive 1-limb shape is a literal native
+Tungsten port of runtime.c's bn_add_word2_a64_fixed schedule:
+
+  ldp x4, x5, [src]
+  adds x4, x4, word
+  adcs x5, x5, xzr
+  stp x4, x5, [dst]
+  cset carry, cs
+
+The source wrapper asks the same hot allocator for two limbs.  No carry sets
+size two directly.  A full carry retains bigint_add_word_into's exact policy:
+if the result lacks a third slot, allocate three limbs, copy the published low
+limb, zero limb 1, release the unfinished result, then publish limb 2 and size
+three.  No native-only arithmetic or scheduling change is included.
+
+MATCHED TARGET A/B
+
+baseline=/private/tmp/add1-4-native-exact
+candidate=/private/tmp/add1-2-native-exact
+command=alternating BIN --sweep add1 2 1 110
+pairs=11
+
+retained-C source route median=3.601143 ns (IQR 0.057198 ns)
+exact native route median=2.505966 ns (IQR 0.020487 ns)
+candidate/baseline paired median=0.694947 (IQR 0.005724)
+candidate wins=11/11
+reduction=30.505%
+
+MATCHED CONTROL SCREEN (11 pairs, candidate/baseline)
+
+add1@1  1.030373 (1/11 wins)
+add1@3  0.964044 (11/11 wins)
+add1@4  1.032858 (1/11 wins)
+add1@5  1.002270 (4/11 wins)
+
+The @1/@4 regressions are code-layout/branch-tree effects, not arithmetic:
+those rows do not call the new leaf.  They are retained honestly in this
+exact checkpoint and resolved by the separately measured dense-case native
+dispatch follow-up.
+
+PUBLIC ROW
+
+command=bin/tungsten bench bignum --operations add1 --sizes 1,2,3,4 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+add1@2 C/native/GMP=1.400/2.512570/1.740 ns
+
+COUNTER ROUTE PROOF
+
+baseline attribution:
+  w_bigint_add 78.6%
+  _tlv_get_addr 10.7%
+  BigInt#+__ovl_BigInt 10.3%
+
+candidate attribution:
+  __bigint_add1_2_exact 43.5%
+  _tlv_get_addr 28.3%
+  BigInt#+__ovl_BigInt 27.6%
+
+The candidate contains no retained C word-kernel sample, proving the row
+reaches the native source leaf.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_add1_2_source_spec passed all 14 checks;
+- full carry from two to three limbs preserves value, size, and round trip;
+- one/three-limb and negative-sign neighbors match the retained C oracle;
+- focused and native-lane LLVM assembled and verified;
+- native harness self-test passed all operations;
+- runtime/runtime.o rebuilt and exports w_bigint_add1_2_finish_raw;
+- final AArch64 leaf is exactly the six-instruction schedule above with no
+  frame or nested call;
+- git diff --check passed.

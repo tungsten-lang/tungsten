@@ -1111,8 +1111,13 @@
             arg_regs.push(ensure_raw_machine_int(wfn, arg_tv, :i64, arg_types[i]))
           i += 1
         temp = next_temp(wfn)
-        emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, typed_target, nil, nil, temp)
-        if is_u64_type(ctx[:mod][:fn_return_types][typed_key])
+        raw_return = ctx[:mod][:fn_return_types][typed_key]
+        emit_wire_dynamic_4(wfn, machine_call_return_op(raw_return), :arg_types, nil, :args, arg_regs, :name, typed_target, :temp, temp)
+        if is_u128_type(raw_return)
+          return typed_value(:raw_u128, temp)
+        if is_i128_type(raw_return)
+          return typed_value(:raw_i128, temp)
+        if is_u64_type(raw_return)
           return typed_value(:raw_u64, temp)
         return typed_value(:raw_i64, temp)
 
@@ -1178,8 +1183,13 @@
                 arg_regs.push(ensure_raw_machine_int(wfn, arg_tv, :i64, fallback_types[i]))
               i += 1
             temp = next_temp(wfn)
-            emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, fallback_target, nil, nil, temp)
-            if is_u64_type(ctx[:mod][:fn_return_types][fallback_key])
+            raw_return = ctx[:mod][:fn_return_types][fallback_key]
+            emit_wire_dynamic_4(wfn, machine_call_return_op(raw_return), :arg_types, nil, :args, arg_regs, :name, fallback_target, :temp, temp)
+            if is_u128_type(raw_return)
+              return typed_value(:raw_u128, temp)
+            if is_i128_type(raw_return)
+              return typed_value(:raw_i128, temp)
+            if is_u64_type(raw_return)
               return typed_value(:raw_u64, temp)
             return typed_value(:raw_i64, temp)
 
@@ -1285,11 +1295,16 @@
       while arg_regs.size() < expected_raw
         arg_regs.push("0")
     temp = next_temp(wfn)
-    emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, raw_target, nil, nil, temp)
+    raw_return = ctx[:mod][:fn_return_types][name]
+    emit_wire_dynamic_4(wfn, machine_call_return_op(raw_return), :arg_types, nil, :args, arg_regs, :name, raw_target, :temp, temp)
     # Preserve unsignedness across the raw call boundary: a u64-returning
     # callee's value must later box via w_u64, not the signed int fast path
     # (which prints values >= 2^63 as negative).
-    if is_u64_type(ctx[:mod][:fn_return_types][name])
+    if is_u128_type(raw_return)
+      return typed_value(:raw_u128, temp)
+    if is_i128_type(raw_return)
+      return typed_value(:raw_i128, temp)
+    if is_u64_type(raw_return)
       return typed_value(:raw_u64, temp)
     return typed_value(:raw_i64, temp)
 

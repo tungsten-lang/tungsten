@@ -133,7 +133,7 @@ use wire
     buf << ":"
     buf << text
 
--> encode_codegen_meta_field(field, value, buf, temp_map)
+-> encode_codegen_meta_field(field, value, buf, temp_map, mod)
   if value == nil
     return nil
   # switch_i64 cases retain their source AST arm for the later block-lowering
@@ -147,7 +147,14 @@ use wire
       c = value[i]
       encode_codegen_meta_value(buf, c[:value], temp_map)
       buf << "/"
-      encode_codegen_meta_value(buf, c[:string_id], temp_map)
+      string_id = c[:string_id]
+      string_text = nil
+      if string_id != nil && mod[:string_index] != nil
+        string_text = mod[:string_index][string_id]
+      if string_text != nil
+        encode_codegen_meta_value(buf, string_text, temp_map)
+      else
+        encode_codegen_meta_value(buf, string_id, temp_map)
       buf << "/"
       encode_codegen_meta_value(buf, c[:label], temp_map)
       buf << ";"
@@ -184,7 +191,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   content_hash_codegen_field_set[content_hash_codegen_fields[content_hash_codegen_field_i]] = true
   content_hash_codegen_field_i += 1
 
--> encode_codegen_metadata(inst, buf, temp_map)
+-> encode_codegen_metadata(inst, buf, temp_map, mod)
   # Constructor fields are stored in lexical schema order. Walk the packed
   # record once instead of probing every possible metadata key through the
   # Hash-compatibility lookup. Lexical order matches the historical canonical
@@ -194,7 +201,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   while i < field_count
     field = wire_field_symbol_at(inst, i)
     if content_hash_codegen_field_set[field] == true
-      encode_codegen_meta_field(field, wire_field_value_at(inst, i), buf, temp_map)
+      encode_codegen_meta_field(field, wire_field_value_at(inst, i), buf, temp_map, mod)
     i += 1
 
 # Encode one instruction into the canonical string buffer.
@@ -207,7 +214,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   if wire_get(inst, :temp) != nil
     norm_temp(wire_get(inst, :temp), temp_map)
 
-  encode_codegen_metadata(inst, buf, temp_map)
+  encode_codegen_metadata(inst, buf, temp_map, mod)
 
   if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
     callee = wire_get(inst, :name)
@@ -486,7 +493,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
 # fast hash lets the dedup pass prove equality instead of treating a 64-bit
 # digest as proof. Hash collisions must only lengthen a symbol, never merge two
 # functions.
--> canonical_content(func, mod, fn_hashes, op_codes)
+-> canonical_content(func, mod, fn_hashes, op_codes, release_mode = false)
   instr_count = 0
   bi = 0
   while bi < func[:blocks].size()
@@ -547,15 +554,19 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     ii = 0
     while ii < instrs.size()
       inst = instrs[ii]
-      if wire_kind(inst) != :scope_push && wire_kind(inst) != :scope_pop
+      op = wire_kind(inst)
+      # Release post-processing removes source-location hooks before emission.
+      # Exclude them from the release content identity as well: stage 0 and
+      # the native compiler may assign diagnostic string ids differently, but
+      # those ids cannot distinguish the LLVM bodies that are actually kept.
+      if op != :scope_push && op != :scope_pop && (!release_mode || op != :call_loc_set_col)
         encode_inst(inst, buf, temp_map, label_map, fn_hashes, mod, func[:name], op_codes)
       ii += 1
     bi += 1
-  encoded = buf.to_s()
-  encoded
+  buf.to_s()
 
--> canonical_hash(func, mod, fn_hashes, op_codes)
-  wyhash64_hex_string(canonical_content(func, mod, fn_hashes, op_codes))
+-> canonical_hash(func, mod, fn_hashes, op_codes, release_mode = false)
+  wyhash64_hex_string(canonical_content(func, mod, fn_hashes, op_codes, release_mode))
 
 # Keep the persistent-Core identity encoding local to this module. Importing
 # content_hash directly in focused specs must not depend on lowering's load
@@ -624,7 +635,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
         keep = !release_mode || op != :call_loc_set_col
         if keep
           # Rewrite callee names.
-          if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
+          if op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr)
             replacement = rename_map_get(rename_map, wire_get(inst, :name))
             if replacement != nil
               wire_set(inst, :name, replacement)
@@ -1307,7 +1318,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     func = hash_functions[order[oi]]
     # Skip main and empty functions
     if func[:is_toplevel] != true && func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
-      content = canonical_content(func, mod, fn_hashes, op_codes)
+      content = canonical_content(func, mod, fn_hashes, op_codes, release_mode)
       hash_content = content
       if func[:incremental_core_candidate] == true
         # Compact Core once on the cache miss, but never deduplicate it with

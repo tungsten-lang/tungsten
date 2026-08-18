@@ -1,0 +1,64 @@
+NATIVE WIDE SUB1 PREFIX INTEGRATION
+
+parent_commit=61f7e90a
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; Battery Power
+compiler=current-source release/native/fast compiler
+compiler_control=/private/tmp/tungsten-compiler-sub1-wide-inline5
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+
+CHANGE CONTRACT
+
+The exact source port remains unchanged.  Embedded LLVM source functions may
+now opt into `alwaysinline` with a `; tungsten:alwaysinline` body marker, and
+only __bigint_sub1_wide_prefix uses it.  TUNGSTEN_EMBEDDED_LL_INLINE=0 is the
+causal control.  Both benchmark binaries were built from the same compiler,
+runtime, source, and flags; only that emitted function attribute differs.
+
+STRUCTURAL GATE
+
+control=/private/tmp/sub1-wide-native-inline5-control
+candidate=/private/tmp/sub1-wide-native-inline5-candidate
+
+The control contains the 88-byte frameless/call-free __wy_9bf68ffb prefix.
+The candidate contains no prefix symbol and no caller BL to it.  Candidate
+__TEXT,__text is 64 bytes smaller (1,533,068 versus 1,533,132 bytes); __bnhot
+is unchanged at 100,176 bytes.
+
+MATCHED TEN-CELL SCREEN
+
+method=11 alternating process pairs; 110 ms/cell
+raw_json=/private/tmp/sub1-wide-inline-screen-61f7e90a.json
+
+cell       control_ns  candidate_ns  paired_median  paired_IQR  wins
+sub1@8       4.103639      4.096752      0.999232       0.006617    6/11
+sub1@9       5.128298      4.917859      0.960525       0.035986    9/11
+sub1@12      5.352327      5.035449      0.943033       0.022034   11/11
+sub1@16      5.607041      5.300922      0.951394       0.016373   11/11
+sub1@24      5.738828      5.556289      0.967867       0.025188   10/11
+sub1@32      6.222366      5.835767      0.957440       0.020707   11/11
+sub1@48      6.999995      6.702264      0.957668       0.017470   11/11
+sub1@64      7.907477      7.662854      0.964902       0.017214   10/11
+sub1@128    11.497133     11.257976      0.979422       0.012983   11/11
+sub1@256    18.856380     18.850888      0.999661       0.007694    6/11
+
+The fixed-eight control and copy-dominated 256-limb cell are neutral.  Every
+affected 9..128-limb cell wins, with no regression elsewhere.
+
+PROMOTION
+
+method=21 alternating process pairs; 300 ms/leg
+raw_json=/private/tmp/sub1-wide-inline-promotion-61f7e90a.json
+
+cell       control_ns  candidate_ns  paired_median  paired_IQR  wins  range
+sub1@9       5.080238      4.818708      0.952307       0.027211   20/21  0.926845..1.019550
+sub1@32      6.080202      5.828960      0.961563       0.025980   21/21  0.919426..0.996170
+
+FOCUSED VALIDATION
+
+- current-source release/native/fast compiler built successfully;
+- compiled wide source spec and native-lane self-test passed;
+- 9..256 differential sweep from the exact checkpoint remains green;
+- control retains the exact prefix; candidate has no linked prefix call;
+- same-compiler attribute-off/on screen and promotions passed;
+- git diff --check passed.

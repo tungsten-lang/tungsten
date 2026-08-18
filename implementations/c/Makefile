@@ -117,6 +117,18 @@ test: $(BIN)
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --check-ast tests/operator_method_name.w
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/embedded_ll_vector_const.w | \
 		diff -u tests/embedded_ll_vector_const.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/embedded_asm_hash_immediate.w | \
+		diff -u tests/embedded_asm_hash_immediate.expected -
+	@test "$$(TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 \
+		$(BIN) --dump-ast tests/embedded_asm_hash_immediate.w | grep -o ':node => :method_def' | wc -l | tr -d ' ')" = 2
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/wvalue_literal.w | \
+		diff -u tests/wvalue_literal.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/heredoc_literal_expression.w | \
+		diff -u tests/heredoc_literal_expression.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/wire_fixed_records.w | \
+		diff -u tests/wire_fixed_records.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/content_temp_map.w | \
+		diff -u tests/content_temp_map.expected -
 	@test "$$(TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 \
 		$(BIN) --dump-ast tests/embedded_ll_vector_const.w | grep -o ':node => :fn_def' | wc -l | tr -d ' ')" = 1
 	@test "$$(TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 \

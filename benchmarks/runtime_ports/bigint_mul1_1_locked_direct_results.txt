@@ -1,0 +1,156 @@
+BIGINT MUL1@1 — CLOSED-WORLD DIRECT-SHAPE FOLLOW-UP
+===================================================
+
+Scope
+-----
+
+This is the first native-only improvement after the exact positive mul1@1
+leaf was committed in bb17e6ad. It does not change that leaf.
+
+When a program declares both `Tungsten.PROTECT_THE_CORE!` and
+`Tungsten.LOCK_THE_DOORS!`, an exact `(BigInt BigInt)` multiplication site may
+test the committed leaf's complete shape before entering `w_mul`:
+
+  - both values have the exact heap-BigInt tag;
+  - the left header size is one, then the right header size is one;
+  - values are distinct and both sign-overlay bits are clear.
+
+The checks short-circuit in that order. Wider left operands therefore pay one
+tag check and one header load before the unchanged `w_mul` fallback. Header
+loads never execute before their corresponding heap-tag proof. Syntactically
+obvious `a * a` skips the guard entirely and retains the square path. Open-
+world programs, programs missing either contract, mutate-if-unique sites, and
+internal runtime arithmetic are unchanged. A compile-time causal switch,
+`TUNGSTEN_BIGINT_MUL1_1_LOCKED_DIRECT=0`, restores the prior lowering.
+
+Build
+-----
+
+base_commit=bb17e6ad
+host=Apple M5 Max, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+compiler_path=/private/tmp/tungsten-compiler-mul1-1-direct4
+compiler_sha256=4fad10a4842c57efba73d77ca04e010dc5a505dfe31a25b12522a82f2486fe6e
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+baseline=/private/tmp/mul1-1-native-direct4-off
+baseline_sha256=f80b1fbe8911d6429a984fcfaadb10137a606cbbe7072bb77b958397e505d8f7
+candidate=/private/tmp/mul1-1-native-direct4-on
+candidate_sha256=a0cd54a15e8d1e54d436630ccad869b8130cdb389177148e016a736ad55ee8a2
+
+Both binaries were emitted by the same compiler from the same source. Only
+the causal lowering switch differs.
+
+Matched mul1 screen
+-------------------
+
+method=11 alternating process pairs; 110 ms/leg
+raw_json=/private/tmp/mul1-1-locked-direct4-screen-bb17e6ad.json
+raw_json_sha256=c3f18eabf919fbc37f52d36340005bbd296ec6a309224c22bf3e9e0755c628ad
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+mul1@1   4.240988     1.941651      0.457275       0.010461   11/11
+mul1@2   4.610004     4.577369      0.992921       0.020736    7/11
+mul1@3   4.629138     4.624240      1.009021       0.013461    4/11
+mul1@4   4.769024     4.818417      1.010066       0.027308    4/11
+mul1@8   5.836326     5.821291      1.017203       0.023833    4/11
+mul1@16  6.495727     6.523087      1.007790       0.025003    3/11
+mul1@24  7.957555     7.890738      1.001196       0.019968    5/11
+mul1@32  9.042923     9.005751      0.989262       0.027417    6/11
+
+The admitted target is 54.3% faster and wins every pair. All seven fallback
+controls stay within 1.8%.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 300 ms/leg
+raw_json=/private/tmp/mul1-1-locked-direct4-promotion-bb17e6ad.json
+raw_json_sha256=4256af068c6101ce4579f7e1a8bd1885a266874a7043e12e9ffc671c93d64bd1
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+mul1@1   4.197916     1.946499      0.464458       0.009220   21/21
+mul1@2   4.498867     4.594631      1.012727       0.029394    6/21
+mul1@4   4.778517     4.830454      1.010869       0.023006    6/21
+mul1@8   5.584812     5.770883      1.021523       0.040805    3/21
+mul1@16  6.466374     6.467298      1.000493       0.031333   10/21
+mul1@32  8.979558     9.014662      1.001543       0.027974   10/21
+
+The target retains a 53.6% win in every pair. Every control remains inside
+2.2%, below the standing 5% gate.
+
+Final self-host replay
+----------------------
+
+After restoring one incidental indentation-only change outside the new
+lowering, the preceding compiler rebuilt itself and emitted a final pair of
+lane binaries. A fresh 11-pair, 110 ms screen on those exact executables
+confirmed the result:
+
+final_compiler_sha256=c55c59f9a377b58b54cd107b6b25dbc928008926d6d4438fcb204d320d88d64f
+final_baseline_sha256=75d1426ee112688d63428394fb496769e61a763eaff7bb0d584a080dba1f6786
+final_candidate_sha256=7f049378a903f08b7f01cd2d403d05f82d04b856dc6f9cc04bd45da9fcd64610
+raw_json=/private/tmp/mul1-1-locked-direct-final-screen-bb17e6ad.json
+raw_json_sha256=d341fba17378fcd09509f1345349e5ef0bb99696d186c58e74f1a83d9352485b
+
+cell     baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+mul1@1   4.222223     1.930726      0.456025       0.009638   11/11
+mul1@2   4.463173     4.470293      1.003811       0.012767    4/11
+mul1@4   4.850081     4.812648      0.993375       0.022824    7/11
+mul1@8   5.673231     5.662523      0.998113       0.063184    6/11
+mul1@16  6.569164     6.566000      1.000001       0.015315    5/11
+mul1@32  9.089513     9.050533      0.997304       0.020485    7/11
+
+The final source target is 54.4% faster with 11/11 paired wins. Every final
+fallback control is within 0.7% of its baseline median.
+
+Sibling controls
+----------------
+
+The ordinary equal-width `mul` lane uses the same typed source function. Its
+one-limb target is 0.450675 (4.279 to 1.952 ns, 11/11 wins); widths 2..32 are
+0.9982..1.0075. The syntactically excluded `sqr` family is 0.9951..1.0017
+across widths 1..32.
+
+raw_mul_json=/private/tmp/mul1-1-locked-direct4-mul-screen-bb17e6ad.json
+raw_mul_json_sha256=5bc626693706777aba546505442df10f0e0ed59e641a594ac03e93c05cb43f7b
+raw_sqr_json=/private/tmp/mul1-1-locked-direct4-sqr-screen-bb17e6ad.json
+raw_sqr_json_sha256=74e9bfd268ab189b82ecff08901319af8ad3706e0e6a80123033be71f8306da8
+
+Public three-lane row
+---------------------
+
+method=9 runs; 110 ms target
+
+cell     C_ns   native_Tungsten_ns  GMP_ns
+mul1@1   1.265  1.874842            1.786
+
+Native Tungsten is now within about 5% of GMP despite retaining an ordinary
+boxed source operator and immutable result lifecycle; C/GMP use scalar-word
+entries. Result release is the largest remaining native cost and is a
+separate harness/lifecycle optimization.
+
+Counter route proof
+-------------------
+
+command=bin/tungsten flame --counters -d 3 --top 16 --silent -- \
+  /private/tmp/mul1-1-native-direct4-on --sweep mul1 1 1 5000
+
+  w_value_free   72.7% cycles; 74.2% instructions; IPC 9.16
+  _tlv_get_addr  25.7% cycles; 25.1% instructions; IPC 8.77
+
+`w_mul` disappears from the profile. The shape guard, multiply, allocation,
+publication, and checksum are inlined into the source loop; remaining sampled
+cost is result release and allocator TLS lookup.
+
+Focused validation
+------------------
+
+- feature-off and feature-on native lane self-tests passed;
+- compiled-on, compiled-off, and interpreted focused specs agree;
+- focused cases cover the admitted pair, commutation, syntactic/dynamic
+  identity squaring, both signs, both two-limb operand orders, and runtime i48
+  demotion in a BigInt-inferred slot (tag guard rejects before header load);
+- emitted LLVM has exactly one short-circuit guard and direct narrow-seam call;
+- no guard is emitted for the syntactic square function;
+- LLVM 22 assembly and verifier checks pass;
+- `git diff --check` passes.

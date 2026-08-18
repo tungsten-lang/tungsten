@@ -32,6 +32,7 @@ enum {
   TC_T_MAGIC = 22,
   TC_T_EOF = 23,
   TC_T_PATH = 24,
+  TC_T_WVALUE = 25,
 };
 
 enum {
@@ -196,6 +197,7 @@ typedef enum {
   TC_K_KEYWORD,
   TC_K_GLOBAL,
   TC_K_INT,
+  TC_K_WVALUE,
   TC_K_DECIMAL,
   TC_K_STRING,
   TC_K_SYMBOL,

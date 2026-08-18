@@ -308,6 +308,25 @@ static inline int value_is_int(TcValue value) {
 }
 static inline int64_t value_as_int(TcValue value) { return tc_as_int(value); }
 
+// Stage-0 mirror of runtime.c:w_content_temp_ordinal. Content hashing uses
+// dense %tN ordinals for lowering temporaries and a Hash only for named or
+// legacy values. Keep the spelling parser identical across bootstrap stages so
+// stage 1 and stage 2 emit byte-identical content hashes.
+static int64_t content_temp_ordinal(TcValue name) {
+  if (tc_kind(name) != TC_VAL_STRING) return -1;
+  const char *text = tc_str_bytes_only(name);
+  size_t len = tc_str_len(name);
+  if (len < 3 || text[0] != '%' || text[1] != 't') return -1;
+  uint64_t value = 0;
+  for (size_t i = 2; i < len; i++) {
+    unsigned digit = (unsigned)(text[i] - '0');
+    if (digit > 9 || value > (uint64_t)INT32_MAX / 10u) return -1;
+    value = value * 10u + digit;
+    if (value > INT32_MAX) return -1;
+  }
+  return (int64_t)value;
+}
+
 static const char *current_function_name(const TcVm *vm, size_t ip, size_t *len_out) {
   const TcFunction *best = NULL;
   for (size_t i = 0; i < vm->chunk->function_count; i++) {
@@ -1692,6 +1711,7 @@ static const char *value_type_name(TcValue value) {
     case TC_VAL_WVALUE:
       if (tc_as_wvalue(value) == W_TRUE || tc_as_wvalue(value) == W_FALSE) return "Boolean";
       if (w_is_int(tc_as_wvalue(value))) return "Int";
+      if (w_is_wire_sequence(value)) return "Array";
       return "WValue";
     case TC_VAL_INT: return "Int";
     case TC_VAL_STRING: return "String";

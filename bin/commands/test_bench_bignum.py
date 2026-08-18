@@ -30,7 +30,7 @@ test "$1" = "--sweep"
 operation=$2
 limbs=$3
 if test "$limbs" = "2"; then
-    sleep 0.5
+    sleep 2
 fi
 printf 'external\\todin\\t%s\\t%s\\t17\\t3.5\\n' "$operation" "$limbs"
 """
@@ -47,16 +47,16 @@ printf 'external\\todin\\t%s\\t%s\\t17\\t3.5\\n' "$operation" "$limbs"
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             rows = BENCH.external_sweep(
-                "odin", "add", [1, 2, 3], 1, 1.0, 0.2
+                "odin", "add", [1, 2, 3], 1, 1.0, 1.0
             )
 
         self.assertEqual(rows[1]["status"], "ok")
         self.assertEqual(rows[2], {
             "status": "timeout",
-            "timeout_seconds": 0.2,
+            "timeout_seconds": 1.0,
         })
         self.assertEqual(rows[3]["status"], "ok")
-        self.assertIn("odin/add/2 timed out after 0.2s", stderr.getvalue())
+        self.assertIn("odin/add/2 timed out after 1s", stderr.getvalue())
 
     def test_timeout_is_excluded_from_ratios_and_printed(self) -> None:
         rows = [
@@ -73,7 +73,7 @@ printf 'external\\todin\\t%s\\t%s\\t17\\t3.5\\n' "$operation" "$limbs"
             for limbs in (1, 2, 3)
         ]
         with contextlib.redirect_stderr(io.StringIO()):
-            BENCH.add_external_lanes(rows, ["odin"], 1, 1.0, 0.2)
+            BENCH.add_external_lanes(rows, ["odin"], 1, 1.0, 1.0)
         for row in rows:
             BENCH.update_fastest(row, ["tungsten", "gmp", "odin"])
 
@@ -171,6 +171,18 @@ class ExternalCommandTest(unittest.TestCase):
 
 
 class TungstenNativeLaneTest(unittest.TestCase):
+    def test_strong_isqrt_seam_is_checked_before_lto_internalization(self) -> None:
+        self.assertTrue(
+            BENCH.tungsten_native_ir_has_strong_isqrt(
+                "define i64 @__w_bigint_isqrt_src(i64 %a) nounwind {\n}"
+            )
+        )
+        self.assertFalse(
+            BENCH.tungsten_native_ir_has_strong_isqrt(
+                "declare i64 @__w_bigint_isqrt_src(i64) nounwind"
+            )
+        )
+
     def test_closed_world_contracts_follow_all_definitions(self) -> None:
         program = BENCH.TUNGSTEN_NATIVE_SOURCE.read_text()
         protect = program.index("Tungsten.PROTECT_THE_CORE!")

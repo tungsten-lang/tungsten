@@ -1,0 +1,146 @@
+BIGINT POSITIVE THREE-BY-THREE-LIMB MULTIPLY — EXACT SOURCE CHECKPOINT
+====================================================================
+
+Scope
+-----
+
+This checkpoint ports only the distinct, raw-positive-header, positive
+three-by-three-limb arm from `bigint_mul_any_routed` /
+`bigint_mul_positive_equal`. Native Tungsten preserves C's exact contract:
+
+  - the same capacity-six request, rounded to the hot capacity-eight class;
+  - the same nine unsigned 64-by-64 products;
+  - the same column-by-column carry schedule;
+  - six unconditional result stores; and
+  - positive size five when the top limb is zero, otherwise size six.
+
+The source leaf is the linked release/LTO AArch64 schedule copied from C's
+`bn_mul_eq3_inline`, not a new multiplication algorithm. The runtime admits
+it only after the existing positive-pair block has already proved two
+distinct heap BigInts with raw positive headers. Pointer identity remains the
+separate `sqr@3` checkpoint. Sign overlays, negative headers, one-/two-/four-
+and wider widths, and internal C callers keep their former paths. A genuine
+open-world BigInt `*` reopen remains observable.
+
+Build and route proof
+---------------------
+
+base_commit=c6612f69
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+power=Battery Power, 79 percent at screen start
+compiler=Homebrew clang 22.1.8
+gmp=6.3.0
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-mul3-stage3
+compiler_sha256=cd6e8a248f7f7447b8b4a127cca9b1922616374912d5df41de62eb518515ac1c
+fixed_point_ll_sha256=431126dc1e1b60dcbbd34628189296b019ea5ee6aed27ecdbb1b4efdacf24de9
+production_candidate=/private/tmp/bench_big_math_tungsten_mul3_exact
+production_candidate_sha256=c3b8fd3adf422dc9d96114edc63d626cdd0e21ee435fa4713ccc07baecfb1ed3
+production_feature_off=/private/tmp/bench_big_math_tungsten_mul3_exact_feature_off
+production_feature_off_sha256=ed8cc2bfc07f4f0afcc0e3914e402532f005700cf2f5dd63fe93f82f29256e99
+diagnostic_same_binary=/private/tmp/bench_big_math_tungsten_mul3_exact_knob
+diagnostic_same_binary_sha256=2dc699290c5b42272d44a0938f9a63ad169bb7cc878fe1a75a4e40372d3e1d3b
+
+The benchmark compiler was invoked with the actual lowering environment
+`TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT=0`. The final timed loop calls `w_mul`
+and contains no call to `w_bigint_mul_builtin_exact`. Full-LTO counters
+attribute 99.7 percent of sampled instructions and 99.5 percent of cycles to
+leaf-only `w_mul` at IPC 9.30; it has no sampled callees. This proves the
+source arm is measured rather than the protected/locked C shortcut.
+
+Exact linked arithmetic
+-----------------------
+
+The linked strong `__w_bigint_mul3_src` contains the hot allocator, followed
+by the same 60 arithmetic/load/store instructions as C after only pointer-base
+and register renaming. An automated extraction confirms both schedules have
+60 instructions and identical mnemonic sequences. The source then performs
+C's exact top-limb size-five/size-six choice and publishes the header. No C
+multiplication kernel call remains in the source leaf.
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic binary was built with
+`BN_BENCH_RUNTIME_MUL3_SRC_KNOB=1`. Alternating processes changed only
+`TUNGSTEN_BN_MUL3_SRC=0/1`; code layout and every other source route were
+identical.
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-mul3-exact-knob-screen-c6612f69-m5max-20260817.json
+raw_json_sha256=a156b734a17584442e7d57ba74b728c0d69caccbb50d8c3362cfe2767ba5329f
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@1      0.981222   0.979764        0.998501    0.004984   8/11
+mul@2      3.719113   3.714490        0.996372    0.041971   7/11
+mul@3      7.332255   5.683251        0.773197    0.017003  11/11
+mul@4      8.333700   8.284567        0.998935    0.014488   6/11
+mul@8     20.385617  20.434334        1.001305    0.013077   5/11
+mul@16    59.402602  59.543335        1.002046    0.004329   4/11
+mul@32   188.912414 187.854096        1.000006    0.008121   5/11
+
+Only `mul@3` changes route. It improves 22.68 percent in the screen; every
+untouched control is within 0.37 percent.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-mul3-exact-knob-promotion-c6612f69-m5max-20260817.json
+raw_json_sha256=355a784a11035d9f062ae03ef6a5e09343d898e30c66e4a45319dac036eadf4c
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@3      7.309479   5.607104        0.765957    0.025494  21/21
+
+The exact source route wins every pair and reduces the open-world operation
+by 23.40 percent.
+
+Production-shape cross-check
+----------------------------
+
+Two separately linked production-shape binaries alternated order: the
+feature-off binary compiles the arm away, while the candidate compiles the
+runtime benchmark knob away to constant true.
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-mul3-exact-production-promotion-c6612f69-m5max-20260817.json
+raw_json_sha256=f368749ce8dce65110837c63b8610797326571fafd06000f15be2f82c02005fa
+
+cell    feature_off_ns  candidate_ns  paired_median  paired_IQR  wins
+mul@3          6.270363      4.829672        0.771060    0.014944  21/21
+
+This independent production-layout check agrees with the causal result. Its
+22.89 percent figure is not substituted for the stronger same-binary claim.
+
+Public three-lane row
+---------------------
+
+method=9 internal runs; 110 ms target
+
+cell   Tungsten_C_ns  tungsten-native_ns  GMP_ns  fastest
+mul@3          4.801                4.683   6.991  tungsten-native
+
+The native source lane is 33.02 percent faster than GMP and 2.47 percent
+faster than the separately linked direct C ABI in this public row.
+
+Focused validation
+------------------
+
+- compiled and interpreted public representation/differential checks pass;
+- the direct source/C differential passes 100,000 products;
+- distinct-equal storage, both operand orders, high-bit products, size-five
+  and size-six results, and unchanged input storage are covered;
+- identity, overlay-negative, negative-header, two-limb, and four-limb
+  controls remain outside the arm;
+- a real BigInt `*` reopen replaces the ordinary and direct seams;
+- production, feature-off, and both diagnostic native-lane self-tests pass;
+- emitted compiler and all three spec LLVM modules assemble and verify under
+  LLVM 22;
+- the self-hosted compiler reaches byte-identical stage-two/stage-three IR;
+- the runtime builds with the alternative `BN_MUL_N1_FAST=0` /
+  `BN_MUL_N1_SMALL_STRAIGHT=0` configuration;
+- `make -C runtime runtime.o` and `git diff --check` pass; and
+- exact linked-schedule and hardware-counter route proofs pass.
+
+This is the exact-port checkpoint. Any native-only arithmetic or dispatch
+redesign remains a separate measured change.

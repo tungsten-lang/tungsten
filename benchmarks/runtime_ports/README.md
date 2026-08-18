@@ -96,7 +96,52 @@ benchmark structure to compare C, first-source, and optimized-source versions.
 | BigInt `abs` | `run_bigint_abs_public.sh` | Retained under the 5% budget — a strict win. The source body mirrors the C IC exactly: identity for effective-positive receivers, `w_bigint_mark_shared_value` plus a tag-overlay flip through `wvalue_from_bits` for effective-negative ones; the IC row is retired. Two public campaigns measured 0.968/0.981 (positive), 0.969/0.962 (negative), and 0.947/0.941 (sign-alternating) against the native IC. The port exposed a tree-walker gap: `wvalue_from_bits` had no BigInt arm, so the interpreter died mid-spec on the first source-level overlay flip — while `bin/tungsten run` still exited 0, hiding the death from tail-line gates. The fix adds the checked `w_bigint_from_bits` bridge (rejects parked/dead headers), and the gate battery now diffs full compiled-vs-interpreter outputs (8 spec pairs byte-identical). Raw samples: `bigint_abs_public_{pre,post_v1,post_v2}_results.txt`. |
 | BigInt comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`, `<=>`) | `run_bigint_compare_full.sh`, `bigint_compare_full.w` | **Complete mathematical migration.** Every route requiring BigInt ordering or magnitude work now reaches one allocation-free source comparator covering inline i48 values, heap BigInts, both sign encodings, unequal widths, equality, and arbitrary equal-width limb scans; intentional identical-WValue and inline-Int-only fast paths can finish before it. The C body remains only the stage0 weak default and explicit differential oracle. The compiler unconditionally injects the small support module, rejects a missing, duplicate, or ABI-invalid reserved helper, and emits one strong stable seam, so opaque/runtime-created BigInts cannot silently fall back to C. The same-binary boxed gate runs 4,232 exact C differentials plus every public operator. Eight balanced pairs under `--release --native --fast` measured all 30 strata at median source/C 0.672--1.073; the worst median was 1.073 at three limbs (individual noisy maxima reached 1.154). Retained raw and JSON evidence: `bigint_compare_full_boxed_final_results.{txt,json}`. Host/build: ARM64 T6050 macOS 26.0 target, LLVM 22.1.8, emitted `target-cpu=apple-m4`. |
 | BigInt `gcd` | `run_bigint_gcd_native.sh`, `bigint_gcd_public.w` | **RETAINED in the 10% migration revisit with a native Tungsten one-limb kernel.** A same-binary C/source baseline first measured every row at parity (0.997--1.020). The retained untyped source method uses one exact BigInt-tag guard, reads normalized one-limb magnitudes directly, and runs a raw binary-GCD loop (`llvm.cttz.i64`, unsigned subtract/compare, logical shifts) before one inline-or-heap boxing decision. Mixed inline-Int arguments and all multi-limb Lehmer/HGCD shapes still use the reentry-free `w_bigint_gcd` boundary. A typed-overload candidate was rejected because its dispatcher regressed the untouched inline-Int control to 1.423x. Two independent balanced 8-pair campaigns for the retained method measured one-limb BigInt pairs at 1.076/1.076 source/C; inline-Int controls at 1.006/0.954, near-equal four-limb controls at 1.019/1.010, 8-vs-4 skew at 0.973/1.010, and 32-limb shared-factor controls at 0.999/0.998. The harness runs 42 exact C differentials plus divisor/greatest identities, mixed signs, unsigned-high-bit magnitudes, and a heap one-limb result; `gcd_spec.w` passes interpreted and `--release --native --fast`. The source port exposed and fixed stage0's missing `**=`/`&=`/`\|=`/`^=`/`<<=`/`>>=` syntax and `w_u64` boxing support; the rebuilt stage1/stage2 LLVM modules are byte-identical. Raw samples: `bigint_gcd_one_limb_native_{pre,candidate1,candidate2,candidate2_repeat}_results.txt`. Host/build: Apple M5 Max, arm64 macOS 26.6.1, Homebrew LLVM 22.1.8, configured `-mcpu=apple-m5`, `--release --native --fast`. |
-| BigInt `isqrt` | `run_bigint_isqrt_public.sh` | Retained under the 5% budget. `BigInt#isqrt` is a source shim over the already-exported `bigint_isqrt_any` divide-and-conquer kernel; the IC row is retired, and the override shields BigInt receivers from `Int#isqrt`'s Newton loop. Two public campaigns across 1/4/16/64-limb receivers measured 0.973/0.994, 1.043/1.009, 1.011/1.012, and 1.014/1.029 — every row inside the budget, including the 7.7ns one-limb u128 fast path. Negative-receiver error text is byte-identical (it lives in the kernel). Gates: `bigint_bang` (mixed-width isqrt sweep), `int`, `bigint_identity`, and the 769-line `bigint_limb_sweep` all byte-identical across engines; stage identity re-verified. Raw samples: `bigint_isqrt_public_{pre,post_v1,post_v2}_results.txt`. |
+| BigInt positive `add1@1` | `bigint_add1_1_source_spec.w`, `bigint_add1_1_exact_results.txt` | **Exact C-shaped arithmetic port retained.** Native Tungsten now loads and adds the two positive one-limb magnitudes and computes the unsigned carry; one raw result-construction seam preserves C's inline demotion and exact two-limb growth policy. Against a clean, freshly rebuilt predecessor, 21 alternating 300 ms pairs measured 2.380 ns versus 3.181 ns (0.748, 21/21 wins). Neighboring `add1@8` and `add1@16` controls were 1.009 and 1.002. Compiled and interpreted 18-case representation checks and the native-lane self-test pass. This is the exact-port checkpoint; native-only redesign remains a separate tranche. |
+| BigInt positive `mul1@1` | `bigint_mul1_1_source_spec.w`, `bigint_mul1_1_reopen_source_seam_spec.w`, `bigint_mul1_1_exact_results.txt` | **Exact C-shaped arithmetic port retained, with its cost recorded.** Native Tungsten now loads the two distinct positive one-limb magnitudes, performs the same 64-by-64 multiply, and uses C's exact inline-demotion/two-limb-publication finisher. Signs, wider N-by-1 shapes, internal runtime arithmetic, and open-world `BigInt#*` precedence stay on their former contracts; pointer-identical one-limb squaring is tracked in the separate checkpoint below. A 21-pair 300 ms promotion measured 4.205 ns versus 4.099 ns (1.041); five controls stayed within 1.0%. This is a fidelity checkpoint, not a speed claim. Compiled/interpreted representation checks, reopen semantics, native self-tests, LLVM verification, and counter route proof pass. Native-only improvement is a separate following tranche. |
+| BigInt positive `sqr@1` | `bigint_sqr1_1_source_spec.w`, `bigint_sqr1_1_reopen_source_seam_spec.w`, `bigint_sqr1_1_exact_results.txt` | **Exact C-shaped arithmetic port retained, with its cost recorded.** Pointer-identical raw-positive-header one-limb squares now reuse the committed native 64-by-64 product and exact C finisher; tag-overlay negatives square positive, while negative-header and every wider square retain C. The final same-binary 21-pair promotion measured source/C 1.0578, so this is not a speed claim. Against the literal predecessor under normal production routing it measured 0.9991, and `sqr@2..32` controls stayed within 0.3%. Compiled/interpreted representation checks, reopen semantics, 200,000 GMP differentials, native self-tests, LLVM/stage identity, exact linked instructions, and counter route proof pass. Native-only improvement is the separate following row. |
+| BigInt positive `sqr@2` | `bigint_sqr2_source_spec.w`, `bigint_sqr2_reopen_source_seam_spec.w`, `bigint_sqr2_exact_results.txt` | **Exact C-shaped arithmetic port retained as a strict win.** Pointer-identical raw-positive-header two-limb squares now use the same capacity-4 allocation, literal AArch64 low/cross/high schedule, four stores, and exact +3/+4 publication from native Tungsten; overlay-negative values remain admitted, while negative-header and wider squares retain C. The same-binary 21-pair promotion measured 2.843 ns versus 3.559 ns (0.7979, 21/21 wins). The gain is dispatch/frame removal, not changed arithmetic. Representation/reopen checks, 200,000 C/GMP differentials, native self-tests, LLVM verification, stage identity, and linked-instruction proof pass. Native-only improvement follows only after this exact checkpoint. |
+| BigInt positive `sqr@3` | `bigint_sqr3_source_spec.w`, `bigint_sqr3_source_c_differential_spec.w`, `bigint_sqr3_reopen_source_seam_spec.w`, `bigint_sqr3_exact_results.txt` | **Exact C-shaped arithmetic port retained at parity.** Pointer-identical raw-positive-header three-limb squares now use the same capacity-8 allocation, three diagonal and three doubled cross products, linked C instruction schedule, six stores, and exact +5/+6 publication from native Tungsten. Overlay-negative values remain admitted; negative-header and neighboring widths retain C. The 21-pair promotion measured 3.051 ns versus 3.048 ns (1.0002, 0.46% IQR). Compiled/interpreted representation checks, 200,000 native/C/GMP differentials, reopen semantics, native self-tests, LLVM verification, stage identity, and linked-instruction proof pass. Native-only improvement follows separately. |
+| BigInt positive `sqr@4` | `bigint_sqr4_source_spec.w`, `bigint_sqr4_source_c_differential_spec.w`, `bigint_sqr4_reopen_source_seam_spec.w`, `bigint_sqr4_exact_results.txt` | **Exact C-shaped arithmetic port retained as a strict win.** Pointer-identical raw-positive-header four-limb squares now use the same capacity-8 allocation, four diagonal and six doubled cross products, linked C instruction schedule, eight stores, and exact +7/+8 publication from native Tungsten. Overlay-negative values remain admitted; negative-header and neighboring widths retain C. The 21-pair promotion measured 5.105 ns versus 5.982 ns (0.8524, 21/21). Compiled/interpreted representation checks, focused native/C/GMP differentials, reopen semantics, native self-tests, LLVM verification, stage identity, focused runtime build, and linked-instruction proof pass. The existing closed-world square switch is intentionally unchanged; native-only integration follows separately. |
+| BigInt positive `sqr@5` | `bigint_sqr5_source_spec.w`, `bigint_sqr5_source_c_differential_spec.w`, `bigint_sqr5_reopen_source_seam_spec.w`, `bigint_sqr5_exact_results.txt` | **Exact C-shaped arithmetic port retained as a strict same-binary route win.** The checkpoint first gave pointer-identical raw-positive-header five-limb squares the same capacity-16 allocation, five diagonal and ten doubled cross products, explicit noinline boundary, linked 134-instruction C arithmetic/store schedule, ten stores, and exact +9/+10 publication from native Tungsten. Its 21-pair promotion measured 6.909 ns versus 8.591 ns (0.8041, 21/21); sqr@1 paid a recorded 9.51% code/layout cost and sqr@8 paid 1.03%. The separate public C harness remained faster at 6.010 versus 6.870 ns, making this the requested fidelity checkpoint rather than the final native-performance claim. Compiled/interpreted representation checks, 100,000 native/C differentials, reopen semantics, native self-tests, LLVM/noinline verification, stage identity, runtime build, and linked-instruction proof passed. The subsequent native-only row removes the checkpoint's wrapper boundaries only after separate measurement. |
+| BigInt positive `sqr@6` | `bigint_sqr6_source_spec.w`, `bigint_sqr6_source_c_differential_spec.w`, `bigint_sqr6_reopen_source_seam_spec.w`, `bigint_sqr6_exact_results.txt` | **Exact C-shaped arithmetic port retained as a strict win.** Pointer-identical raw-positive-header six-limb squares now use the same capacity-16 allocation, six diagonal and fifteen doubled cross products, explicit noinline boundary, linked 197-instruction C arithmetic/store schedule, twelve stores, and exact +11/+12 publication from native Tungsten. The 21-pair promotion measured 9.215 ns versus 10.688 ns (0.8627, 21/21); unmigrated sqr@8/16/32 controls stayed within 0.5%. The public row is already fastest at 9.154 ns for tungsten-native versus 10.272 ns for Tungsten C and 12.688 ns for GMP. Compiled/interpreted representation checks, two 100,000-case native/C differentials, reopen semantics, native self-tests, LLVM/noinline verification, stage identity, runtime build, and linked-instruction proof pass. Native-only integration follows separately. |
+| BigInt positive `sqr@7` | `bigint_sqr7_source_spec.w`, `bigint_sqr7_source_c_differential_spec.w`, `bigint_sqr7_reopen_source_seam_spec.w`, `bigint_sqr7_exact_results.txt` | **Exact C-shaped arithmetic port retained as a same-binary route win.** Pointer-identical raw-positive-header seven-limb squares now use the same capacity-16 allocation, seven diagonal and twenty-one doubled cross products, explicit noinline boundary, linked 273-instruction C arithmetic/store schedule, fourteen stores, and exact +13/+14 publication from native Tungsten. The 21-pair promotion measured 12.346 ns versus 13.488 ns (0.9149, 21/21); unmigrated sqr@8/16/32 controls stayed within 0.24%. In the separately compiled public lifecycle native measured 12.231 ns versus 11.951 ns for Tungsten C and 14.981 ns for GMP, making this the requested fidelity checkpoint rather than a direct-C speed claim. Compiled/interpreted representation checks, two 100,000-case native/C differentials, reopen semantics, native self-tests, LLVM/noinline verification, stage identity, runtime build, and linked-instruction proof pass. `sqr@8` remains the final fixed-square arm. |
+| BigInt positive `sqr@8` | `bigint_sqr8_source_spec.w`, `bigint_sqr8_source_c_differential_spec.w`, `bigint_sqr8_reopen_source_seam_spec.w`, `bigint_sqr8_exact_results.txt` | **Exact C-shaped arithmetic port retained as a strict win, completing the 1..8 fixed-square series.** Pointer-identical raw-positive-header eight-limb squares now use the same capacity-16 allocation, eight diagonal and twenty-eight doubled cross products, literal always-inlined release/LTO AArch64 schedule, sixteen stores, and exact +15/+16 publication from native Tungsten. The 21-pair promotion measured 16.318 ns versus 16.708 ns (0.9766, 20/21); untouched sqr@16/32 controls stayed within 0.03%. The separately compiled public row is also fastest at 16.417 ns for tungsten-native versus 16.649 ns for Tungsten C and 18.219 ns for GMP. Compiled/interpreted representation checks, two 100,000-case native/C differentials, reopen semantics, native self-tests, LLVM verification, fixed-point stage identity, runtime build, and an exact 362-instruction linked-body proof pass. Native-only integration remains a separate measured tranche. |
+| BigInt positive `sqr@16` | `bigint_sqr16_source_spec.w`, `bigint_sqr16_source_c_differential_spec.w`, `bigint_sqr16_reopen_source_seam_spec.w`, `bigint_sqr16_exact_results.txt` | **Exact C-shaped outer-leaf port retained at production parity.** Pointer-identical raw-positive-header sixteen-limb squares now use the same cap-thirty-two allocation, unchanged `bn_sqr16_split` kernel, and exact +31/+32 publication from native Tungsten. Overlay negatives remain admitted; negative headers, distinct-equal boxes, and neighboring widths retain C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion measured 1.0001, while a separately linked production candidate won 21/21 at 0.9901. The public row is 49.462 ns native versus 48.891 ns direct C and 55.787 ns GMP, making this the requested fidelity checkpoint rather than a direct-C speed claim. Independent closed-form checks, a genuine feature-off 100,000-case native/C differential, compiled/interpreted coverage, reopen semantics, five configuration self-tests, LLVM verification, fixed-point stage identity, exact linked-route proof, runtime build, and hardware counters pass. |
+| BigInt positive `mul@2` | `bigint_mul2_source_spec.w`, `bigint_mul2_source_c_differential_spec.w`, `bigint_mul2_reopen_source_seam_spec.w`, `bigint_mul2_exact_results.txt` | **Exact C-shaped arithmetic port retained as a strict open-world win.** Distinct raw-positive-header two-by-two-limb operands now use the same cap-four hot allocation, four 64-by-64 products, literal 21-instruction release/LTO AArch64 arithmetic/store schedule, and exact +3/+4 publication from native Tungsten. Identity remains `sqr@2`; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.7406 (4.615 ns versus 6.234 ns); six untouched controls stayed within 0.57%. A production-shape cross-check also won 21/21 at 0.7249. The public row is 3.662 ns native versus 3.536 ns direct C and 5.754 ns GMP, so direct-C parity is not claimed. Compiled/interpreted checks, a 100,000-case native/C differential, reopen semantics, native self-tests, LLVM verification, fixed-point stage identity, runtime build, exact linked-schedule proof, and hardware-counter route proof pass. |
+| BigInt positive `mul@3` | `bigint_mul3_source_spec.w`, `bigint_mul3_source_c_differential_spec.w`, `bigint_mul3_reopen_source_seam_spec.w`, `bigint_mul3_exact_results.txt` | **Exact C-shaped arithmetic port retained as a strict open-world win.** Distinct raw-positive-header three-by-three-limb operands now use the same cap-six request/hot-cap-eight allocation, nine 64-by-64 products, literal 60-instruction release/LTO AArch64 arithmetic/store schedule, and exact +5/+6 publication from native Tungsten. Identity remains `sqr@3`; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.7660 (5.607 ns versus 7.309 ns); six untouched controls stayed within 0.37%. A production-shape cross-check also won 21/21 at 0.7711. The public row is already fastest at 4.683 ns for tungsten-native versus 4.801 ns for direct C and 6.991 ns for GMP. Compiled/interpreted checks, a 100,000-case native/C differential, reopen semantics, native self-tests, LLVM verification, fixed-point stage identity, alternate runtime configuration, exact linked-schedule proof, and hardware-counter route proof pass. |
+| BigInt positive `mul@4` | `bigint_mul4_source_spec.w`, `bigint_mul4_source_c_differential_spec.w`, `bigint_mul4_reopen_source_seam_spec.w`, `bigint_mul4_exact_results.txt` | **Exact C-shaped outer-leaf port retained as a strict open-world win.** Distinct raw-positive-header four-by-four-limb operands now use the same cap-eight allocation and exact row split: native Tungsten preserves the tuned `bn_mul_1(n=4)` C call for row zero, then executes the literal linked 96-instruction three-row addmul remainder and exact +7/+8 publication. Identity remains `sqr@4`; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.8209 (7.502 ns versus 9.140 ns); six untouched controls stayed within 1.03%. A production-shape cross-check also won 21/21 at 0.8389. The public row is effectively tied at 6.827 ns native versus 6.818 ns direct C, and both beat GMP at 9.083 ns. Compiled/interpreted checks, a 100,000-case native/C differential, reopen semantics, native self-tests, LLVM verification, fixed-point stage identity, alternate runtime configuration, exact linked-remainder proof, and hardware counters confirming the retained row-zero call pass. |
+| BigInt positive `mul@5` | `bigint_mul5_source_spec.w`, `bigint_mul5_source_c_differential_spec.w`, `bigint_mul5_reopen_source_seam_spec.w`, `bigint_mul5_exact_results.txt` | **Exact C-shaped outer-schoolbook port retained as a strict open-world win.** Distinct raw-positive-header five-by-five-limb operands now use the same cap-sixteen allocation, one tuned `bn_mul_1(n=5)` row, four tuned `bn_addmul_1(n=5)` rows in the same order and at the same offsets, and exact +9/+10 publication from native Tungsten. Identity remains `sqr@5`; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.6603 (9.377 ns versus 14.228 ns), with seven untouched controls within 0.23%. A production-shape cross-check won 21/21 at 0.6804. The public row is fastest at 8.972 ns for tungsten-native versus 12.708 ns for Tungsten C and 11.430 ns for GMP. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, native self-tests, LLVM verification, fixed-point stage identity, alternate runtime configuration, linked outer-loop proof, and counters confirming the retained C row primitives pass. Porting those row primitives remains separate native-only work. |
+| BigInt positive `mul@6` | `bigint_mul6_source_spec.w`, `bigint_mul6_source_c_differential_spec.w`, `bigint_mul6_reopen_source_seam_spec.w`, `bigint_mul6_exact_results.txt` | **Exact C-shaped outer-schoolbook port retained as a strict open-world win.** Distinct raw-positive-header six-by-six-limb operands now use the same cap-sixteen allocation, one tuned `bn_mul_1(n=6)` row, five tuned `bn_addmul_1(n=6)` rows in the same order and at the same offsets, and exact +11/+12 publication from native Tungsten. Identity remains `sqr@6`; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.7387 (12.537 ns versus 16.973 ns), with eight untouched controls within 0.23%. A production-shape cross-check won 21/21 at 0.7596. The public row is fastest at 11.841 ns for tungsten-native versus 14.903 ns for Tungsten C and 15.332 ns for GMP. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, native self-tests, LLVM verification, fixed-point stage identity, alternate runtime configuration, linked outer-loop proof, and counters confirming the retained C row primitives pass. Porting those row primitives remains separate native-only work. |
+| BigInt positive `mul@7` | `bigint_mul7_source_spec.w`, `bigint_mul7_source_c_differential_spec.w`, `bigint_mul7_reopen_source_seam_spec.w`, `bigint_mul7_exact_results.txt` | **Exact C-shaped outer-schoolbook port retained as a strict open-world win.** Distinct raw-positive-header seven-by-seven-limb operands now use the same cap-sixteen allocation, one tuned `bn_mul_1(n=7)` row, six tuned `bn_addmul_1(n=7)` rows in the same order and at the same offsets, and exact +13/+14 publication from native Tungsten. Identity remains `sqr@7`; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.8428 (16.682 ns versus 19.756 ns), with nine untouched controls within 0.42%. A production-shape cross-check won 21/21 at 0.8591. The public row is fastest at 16.217 ns for tungsten-native versus 18.317 ns for Tungsten C and 19.038 ns for GMP. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, native self-tests, LLVM verification, fixed-point stage identity, alternate runtime configuration, linked outer-loop proof, and counters confirming the retained C row primitives pass. Porting those row primitives remains separate native-only work. |
+| BigInt positive `mul@8` | `bigint_mul8_source_spec.w`, `bigint_mul8_source_c_differential_spec.w`, `bigint_mul8_reopen_source_seam_spec.w`, `bigint_mul8_exact_results.txt` | **Exact C-shaped fixed outer-leaf port retained as a strict open-world win.** Distinct raw-positive-header eight-by-eight-limb operands now use the same cap-sixteen allocation and exact `bn_mul_eq8_inline` split: one tuned `bn_mul_1(n=8)` first row, seven fully unrolled `bn_addmul_8_inline` row schedules in the same order and at the same offsets, and exact +15/+16 publication from native Tungsten. Identity remains `sqr@8`; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.9051 (19.287 ns versus 21.280 ns), with nine untouched controls within 1.15%. A production-shape cross-check won 21/21 at 0.9232. The public row is fastest at 19.083 ns for tungsten-native versus 20.234 ns for Tungsten C and 22.755 ns for GMP. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, native self-tests, LLVM verification, fixed-point stage identity, alternate runtime configuration, exact linked fixed-schedule proof, and hardware counters pass. Native-only kernel redesign remains separate work. |
+| BigInt positive `mul@12` | `bigint_mul12_source_spec.w`, `bigint_mul12_source_c_differential_spec.w`, `bigint_mul12_reopen_source_seam_spec.w`, `bigint_mul12_exact_results.txt` | **Exact C-shaped fixed outer-leaf port retained at production parity.** Distinct raw-positive-header twelve-by-twelve-limb operands now use the same cap-thirty-two allocation, one tuned `bn_mul_1_f12` first row, eleven tuned `bn_addmul_1_f12` rows in the same order and at the same offsets, and exact +23/+24 publication from native Tungsten. Identity remains the existing square route; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion measured 0.9987, while the separately linked 31-pair production promotion measured 1.0003 with a 0.79% paired IQR. The public row is fastest at 38.110 ns for tungsten-native versus 39.002 ns for Tungsten C and 40.878 ns for GMP. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, five native configuration self-tests, LLVM verification, fixed-point stage identity, exact linked-kernel proof, and hardware counters pass. The remaining direct fixed leaves are 15, 17, 21, and 24. |
+| BigInt positive `mul@15` | `bigint_mul15_source_spec.w`, `bigint_mul15_source_c_differential_spec.w`, `bigint_mul15_reopen_source_seam_spec.w`, `bigint_mul15_exact_results.txt` | **Exact C-shaped fixed outer-leaf port retained at production parity.** Distinct raw-positive-header fifteen-by-fifteen-limb operands now use the same cap-thirty-two allocation, unchanged `bn_mul_eq15` kernel, and exact +29/+30 publication from native Tungsten. That kernel retains one generic `bn_mul_1(n=15)` first row and fourteen tuned `bn_addmul_1_f15` rows in the same order and at the same offsets. Identity remains the existing square route; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion measured 0.9987 with a 0.22% paired IQR; the separately linked 31-pair production promotion measured 0.9996 with a 0.41% paired IQR, and all thirteen production-screen controls stayed within 0.44%. The public row is fastest at 52.961 ns for tungsten-native versus 54.939 ns for direct C and 68.459 ns for GMP. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, five native configuration self-tests, LLVM verification, fixed-point stage identity, exact linked-kernel proof, runtime build, and hardware counters pass. The remaining direct fixed leaves are 17, 21, and 24. |
+| BigInt positive `mul@16` | `bigint_mul16_source_spec.w`, `bigint_mul16_source_c_differential_spec.w`, `bigint_mul16_reopen_source_seam_spec.w`, `bigint_mul16_exact_results.txt` | **Exact C-shaped fixed outer-leaf port retained at production parity, completing the initial power-of-two checkpoint band.** Distinct raw-positive-header sixteen-by-sixteen-limb operands now use the same cap-thirty-two allocation, one tuned `bn_mul_1_f16` first row, fifteen tuned `bn_addmul_1_f16` rows in the same order and at the same offsets, and exact +31/+32 publication from native Tungsten. Identity remains the existing square route; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.9720 (59.306 ns versus 61.070 ns), while seven controls stayed within 0.53%. The separately linked production-shape candidate measured 0.9933 with a 1.25% paired IQR, and the public row measured 60.254 ns native versus 59.619 ns direct C and 72.385 ns GMP. This is the requested fidelity checkpoint, not a direct-C speed claim. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, native self-tests, LLVM verification, fixed-point stage identity, alternate runtime configurations, exact linked-kernel proof, and hardware counters pass. |
+| BigInt positive `mul@17` | `bigint_mul17_source_spec.w`, `bigint_mul17_source_c_differential_spec.w`, `bigint_mul17_reopen_source_seam_spec.w`, `bigint_mul17_exact_results.txt` | **Exact C-shaped fixed outer-leaf port retained with a production win.** Distinct raw-positive-header seventeen-by-seventeen-limb operands now use the same cap-sixty-four allocation, one tuned `bn_mul_1_f17` first row, sixteen tuned `bn_addmul_1_f17` rows in the same order and at the same offsets, and exact +33/+34 publication from native Tungsten. Identity remains the existing square route; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.9275; the separately linked 31-pair production promotion won 31/31 at 0.9311 (67.012 ns versus 71.877 ns), while all twelve controls stayed within 0.27%. The public row is fastest at 66.329 ns for tungsten-native versus 70.294 ns for direct C and 80.451 ns for GMP. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, five native configuration self-tests, LLVM verification, fixed-point stage identity, exact linked-kernel proof, runtime build, and hardware counters pass. The remaining direct fixed leaves are 21 and 24. |
+| BigInt positive `mul@21` | `bigint_mul21_source_spec.w`, `bigint_mul21_source_c_differential_spec.w`, `bigint_mul21_reopen_source_seam_spec.w`, `bigint_mul21_exact_results.txt` | **Exact C-shaped fixed outer-leaf port retained with a production win.** Distinct raw-positive-header twenty-one-by-twenty-one-limb operands now use the same cap-sixty-four allocation, one generic `bn_mul_1(n=21)` first row, twenty tuned `bn_addmul_1_f21` rows in the same order and at the same offsets, and exact +41/+42 publication from native Tungsten. Identity remains the existing square route; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.9475; the separately linked 31-pair production promotion won 31/31 at 0.9495 (104.062 ns versus 109.581 ns), while all twelve controls stayed within 0.32%. The public row is fastest at 103.772 ns for tungsten-native versus 108.534 ns for direct C and 112.025 ns for GMP. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, five native configuration self-tests, LLVM verification, fixed-point stage identity, exact linked-kernel proof, runtime build, and hardware counters pass. The remaining direct fixed leaf is 24. |
+| BigInt positive `mul@24` | `bigint_mul24_source_spec.w`, `bigint_mul24_source_c_differential_spec.w`, `bigint_mul24_reopen_source_seam_spec.w`, `bigint_mul24_exact_results.txt` | **Exact C-shaped selected outer-leaf port retained with a production win, completing the remaining fixed equal-multiply checkpoint list.** Distinct raw-positive-header twenty-four-by-twenty-four-limb operands now use the same cap-sixty-four allocation, the current `bn_mul_top_diff_small(n=24)` difference-form leaf and its fixed twelve-limb child products, and exact +47/+48 publication from native Tungsten. Identity remains the existing square route; signs and neighboring widths remain in C; a plain BigInt `*` reopen remains observable. The same-binary 21-pair promotion won 21/21 at 0.9721; the separately linked 31-pair production promotion won 31/31 at 0.9741 (126.050 ns versus 129.368 ns). The two largest screen controls were promoted: mul8 is parity at 0.9991, while mul4's unresolved 1.0041 median is smaller than its 1.23% paired IQR. The public row is fastest in direct C at 126.436 ns versus 128.536 ns for tungsten-native and 133.323 ns for GMP; that 1.66% public native deficit is retained explicitly beside the matched production win. Compiled/interpreted checks, a 100,000-case source/C differential, reopen semantics, five native configuration self-tests, LLVM verification, fixed-point stage identity, exact linked-route proof, runtime build, and hardware counters pass. |
+| BigInt locked exact `sqr@6` attempt | `bigint_mul_locked_direct_spec.w`, `bigint_sqr6_locked_direct_results.txt` | **Native-only integration rejected; the exact source migration remains.** An outlined size-6 tail-chain improved sqr@6 4.53% but regressed sqr@4 5.35% and sqr@5 1.42%. A dense caller switch improved sqr@4/5/6 4.16/1.00/4.40% but regressed sqr@1/2/3 5.33/3.40/2.87%. Both candidates passed locked correctness and native self-tests, but neither preserved the existing matrix. Production therefore keeps commit 51e19a38's exact sqr@6 path through the built-in boundary and the previously measured sqr@1..5 locked dispatcher. |
+| BigInt locked exact `sqr@5` | `bigint_mul_locked_direct_spec.w`, `bigint_sqr5_locked_direct_results.txt` | **Native-only integration retained after the exact `sqr@5` checkpoint.** A protected+locked syntactic `a * a` leaves the dense sqr@1..3 caller switch unchanged and tests only size 5 in a new outlined default dispatcher; non-5 widths tail-chain before any frame into the byte-identical sqr@4 dispatcher. The exact 134-instruction leaf and capacity-16 allocator wrapper then inline in the size-5 arm, removing two native calls without changing arithmetic or allocation policy. The 31-pair promotion improved native `sqr@5` from 6.720 to 6.131 ns (0.9232, 31/31). The public row is 6.104 ns for tungsten-native, 6.193 ns for Tungsten C, and 10.625 ns for GMP. Square controls stayed within 0.56%; `mul1@8` improved 1.92%, and all ordinary multiplication controls stayed within 1%. Counter, representation/differential, reopen, feature-off, LLVM, linked-shape, runtime-build, and self-host fixed-point gates pass. |
+| BigInt locked exact `sqr@4` | `bigint_mul_locked_direct_spec.w`, `bigint_sqr4_locked_direct_results.txt` | **Native-only integration retained after the exact `sqr@4` checkpoint.** A protected+locked syntactic `a * a` keeps the measured dense sqr@1..3 switch unchanged and routes only its default arm through an outlined size-4 dispatcher; sqr@4 enters the committed exact native leaf, other shapes retain the exact C boundary, and tag misses retain `w_mul`. The 31-pair promotion improved native `sqr@4` from 4.462 to 4.392 ns (0.9857, 27/31). The public row is 4.399 ns for tungsten-native, 4.990 ns for Tungsten C, and 7.753 ns for GMP. Square controls through 1024 limbs and ordinary multiplication controls stayed within 0.7%; `mul1@1` improved 5.7%. Arithmetic is unchanged; the retained layout isolates size-4 selection without perturbing the small comparison chain. |
+| BigInt locked exact `sqr@3` | `bigint_mul_locked_direct_spec.w`, `bigint_sqr3_locked_direct_results.txt` | **Native-only integration retained after the exact `sqr@3` checkpoint.** A protected+locked syntactic `a * a` proves the BigInt tag and loads its raw header once, then a dense switch enters the committed exact native one-, two-, or three-limb leaf; all other shapes retain the exact C boundary and tag misses retain `w_mul`. The 21-pair promotion improved native `sqr@3` from 3.909 to 2.705 ns (0.7020, 21/21). The public row is 3.065 ns for tungsten-native, 5.278 ns for Tungsten C, and 9.107 ns for GMP. Recorded costs were +3.34% at sqr@1 and +1.50% at sqr@4; sqr@16..1024 and ordinary multiplication controls stayed within 1.3%. Arithmetic is unchanged; only closed-world selection among exact committed leaves moves into the caller. |
+| BigInt locked exact `sqr@2` | `bigint_mul_locked_direct_spec.w`, `bigint_sqr2_locked_direct_results.txt` | **Native-only integration retained after the exact `sqr@2` checkpoint.** A protected+locked syntactic `a * a` now tests the BigInt tag and raw header once, then enters the committed exact native one- or two-limb square leaf directly; every other shape keeps the exact C boundary and tag misses keep `w_mul`. The 21-pair promotion improved native `sqr@2` from 2.305 to 1.349 ns (0.5855, 21/21). The public row is 1.3465 ns for tungsten-native, 1.625 ns for Tungsten C, and 5.092 ns for GMP. `sqr@4` showed a recorded 2.04% layout-sensitive cost; all other square controls were within 0.5%, and ordinary multiplication controls stayed within 0.8%. Counter evidence attributes the win to eliminating the exact C boundary and TLS lookup, not changing arithmetic. |
+| BigInt locked exact squaring | `bigint_mul_locked_direct_spec.w`, `bigint_sqr_locked_direct_results.txt` | **Native-only integration retained after the exact `sqr@1` checkpoint.** Under `PROTECT_THE_CORE!` plus `LOCK_THE_DOORS!`, an exact `a * a` site now bypasses polymorphic `w_mul`: a raw-positive-header one-limb identity enters the committed native product/finisher directly, while every wider identity enters the unchanged exact C square dispatcher. Tag misses still use `w_mul`, and open-world BigInt `*` replacement semantics are unchanged. A 21-pair 300 ms promotion improved native `sqr@1/2/4/8/16` by 65.0/18.3/11.7/1.8/1.1%; `sqr@32` and 64--1024 controls stayed within 0.4%. The public `sqr@1` row is 0.838 ns for native Tungsten, 1.320 ns for Tungsten C, and 2.398 ns for GMP. Ordinary `mul1@1..32` and `mul@2..32` controls stayed within 1.0%. |
+| BigInt positive `mul1@2` | `bigint_mul1_2_source_spec.w`, `bigint_mul1_2_reopen_source_seam_spec.w`, `bigint_mul1_2_exact_results.txt` | **Exact C-shaped arithmetic port retained, with its cost recorded.** Native Tungsten now owns the distinct positive two-limb-by-one-limb leaf: the same hot capacity-4 allocation, literal tuned instruction order, two independent 64-by-64 products, one carry chain, and exact +2/+3 size publication. Receiver order and plain BigInt `*` reopen precedence are preserved; every neighboring width, sign, square, and internal-runtime shape stays on its former contract. A same-binary 21-pair 300 ms promotion measured 5.184 ns versus 4.776 ns (1.096); four untouched controls stayed within 0.7%. This is a low-battery fidelity checkpoint, not a speed claim. Compiled/interpreted representation checks, reopen semantics, portable runtime builds, native self-tests, LLVM verification, and counter route proof pass. Native-only direct dispatch/integration is the separate following tranche. |
+| BigInt positive `mul1@3` | `bigint_mul1_3_source_spec.w`, `bigint_mul1_3_reopen_source_seam_spec.w`, `bigint_mul1_3_exact_results.txt` | **Exact C-shaped arithmetic port retained at parity.** Native Tungsten now owns only the distinct positive three-limb-by-one-limb arm, preserving C's hot capacity-4 allocation, serial product/carry schedule, unconditional fourth-limb write, and exact +3/+4 header publication. Receiver order and open-world `BigInt#*` precedence remain intact; signs, squares, and every neighboring width keep their existing routes. A same-binary 21-pair 300 ms promotion measured 4.506 ns versus 4.503 ns (0.9991, 15/21 wins); five untouched controls stayed within 1.1%. Compiled/interpreted 1,041-check representation coverage, reopen semantics, portable runtime builds, native self-tests, LLVM verification, stage identity, and counter route proof pass. Native-only improvement remains a separate following tranche. |
+| BigInt positive `mul1@4` | `bigint_mul1_4_source_spec.w`, `bigint_mul1_4_reopen_source_seam_spec.w`, `bigint_mul1_4_exact_results.txt` | **Exact C-shaped arithmetic port retained at parity.** Native Tungsten owns only the distinct positive four-limb-by-one-limb arm, preserving the capacity-8 allocation, linked C instruction schedule, unconditional fifth-limb write, and exact +4/+5 header publication. Receiver order and open-world `BigInt#*` precedence remain intact; signs, squares, and every neighboring width keep their existing routes. A same-binary 21-pair 300 ms promotion measured a 0.9951 paired ratio (11/21 wins); five untouched controls stayed within 2%. Compiled/interpreted 1,041-check representation coverage, reopen semantics, portable runtime builds, native self-tests, LLVM verification, stage identity, and counter route proof pass. Native-only improvement remains a separate following tranche. |
+| BigInt positive `mul1@5` | `bigint_mul1_5_source_spec.w`, `bigint_mul1_5_reopen_source_seam_spec.w`, `bigint_mul1_5_exact_results.txt` | **Exact C-shaped arithmetic port retained at parity.** Native Tungsten owns only the distinct positive five-limb-by-one-limb arm, preserving capacity 8, C's serial carry recurrence, unconditional sixth-limb write, and exact +5/+6 header publication. Receiver order and open-world `BigInt#*` precedence remain intact; signs, squares, and every neighboring width keep their existing routes. A same-binary 21-pair 300 ms promotion measured a 0.9938 paired ratio (11/21 wins); five controls stayed within 2.4%. Compiled/interpreted 1,041-check representation coverage, reopen semantics, portable runtime builds, native self-tests, LLVM verification, stage identity, and counter route proof pass. Native-only improvement remains deferred until the exact-port series is complete. |
+| BigInt positive `mul1@6` | `bigint_mul1_6_source_spec.w`, `bigint_mul1_6_reopen_source_seam_spec.w`, `bigint_mul1_6_exact_results.txt` | **Exact C-shaped arithmetic port retained at parity.** Native Tungsten owns only the distinct positive six-limb-by-one-limb arm, preserving capacity 8, C's serial carry recurrence, unconditional seventh-limb write, and exact +6/+7 header publication. Receiver order and open-world `BigInt#*` precedence remain intact; signs, squares, and every neighboring width keep their existing routes. The 11-pair same-binary screen measured 0.9997 at the target with all five controls within 0.5%; a drift-affected 21-pair promotion measured 1.0117 with a 2.46% paired IQR, so this is parity rather than a speed claim. Compiled/interpreted 1,041-check representation coverage, reopen semantics, portable runtime builds, native self-tests, LLVM verification, stage identity, and counter route proof pass. Native-only improvement remains deferred until the exact-port series is complete. |
+| BigInt positive `mul1@7` | `bigint_mul1_7_source_spec.w`, `bigint_mul1_7_reopen_source_seam_spec.w`, `bigint_mul1_7_exact_results.txt` | **Exact C-shaped arithmetic port retained at parity.** Native Tungsten owns only the distinct positive seven-limb-by-one-limb arm, preserving capacity 8, C's serial carry recurrence, unconditional eighth-limb write, and exact +7/+8 header publication. Receiver order and open-world `BigInt#*` precedence remain intact; signs, squares, and every neighboring width keep their existing routes. The same-binary screen measured 0.9975 at the target with five controls within 1.2%; the load-contaminated 21-pair promotion centered at 0.9993 with a 9.9% IQR, so no speed claim is made. Compiled/interpreted 1,041-check representation coverage, reopen semantics, portable runtime builds, exact C/source disassembly equivalence, native self-tests, LLVM verification, stage identity, and counter route proof pass. Native-only improvement remains deferred until the exact-port series is complete. |
+| BigInt positive `mul1@8` | `bigint_mul1_8_source_spec.w`, `bigint_mul1_8_reopen_source_seam_spec.w`, `bigint_mul1_8_exact_results.txt` | **Exact C-shaped arithmetic port retained at parity.** Native Tungsten owns only the distinct positive eight-limb-by-one-limb arm, preserving cap 16, C's eight independently issued products, single add-with-carry chain, paired stores, unconditional ninth-limb write, and exact +8/+9 header publication. Receiver order and open-world `BigInt#*` precedence remain intact; signs, squares, and every neighboring width keep their existing routes. The same-binary screen measured 0.9916 at the target; the externally loaded 21-pair promotion centered at 0.9980 with a 3.12% IQR, so no speed claim is made. Compiled/interpreted 1,041-check representation coverage, reopen semantics, portable runtime builds, exact C/source disassembly equivalence, native self-tests, LLVM verification, stage identity, and counter route proof pass. Native-only improvement remains deferred until the exact-port series is complete. |
+| BigInt positive `mul1@16` | `bigint_mul1_16_source_spec.w`, `bigint_mul1_16_source_c_differential_spec.w`, `bigint_mul1_16_reopen_source_seam_spec.w`, `bigint_mul1_16_exact_results.txt` | **Exact C-shaped outer-leaf port retained as a production-shaped win, completing the initial 1..8,16 fixed checkpoint band.** Distinct raw-positive-header sixteen-by-one-limb operands now use the same cap-thirty-two allocation, unchanged `bn_mul_1_f16` kernel, carry store, and exact +16/+17 publication from native Tungsten. Receiver order and a plain BigInt `*` reopen remain observable; signs, squares, and neighboring widths retain their old routes. The same-binary 21-pair promotion measured parity at 1.0018. A separately linked 31-pair production promotion measured 5.921 ns versus 6.092 ns (0.9703, 25/31 wins), while all twelve screen controls stayed within 0.46%. The public boxed-source row remains slower than the scalar-word C/GMP lanes (5.764 ns native versus 3.737/3.972 ns), so this is the exact-fidelity checkpoint rather than the native-only redesign. Independent closed forms, a genuine feature-off 100,000-case native/C differential, compiled/interpreted coverage, reopen semantics, five configuration self-tests, LLVM verification, fixed-point stage identity, runtime build, linked-route proof, and hardware counters pass. |
+| BigInt positive `mul1@24` | `bigint_mul1_24_source_spec.w`, `bigint_mul1_24_source_c_differential_spec.w`, `bigint_mul1_24_reopen_source_seam_spec.w`, `bigint_mul1_24_exact_results.txt` | **Exact C-shaped outer-leaf port retained at parity.** Distinct raw-positive-header twenty-four-by-one-limb operands now use the same cap-thirty-two allocation, unchanged `bn_mul_1_f24` kernel, carry store, and exact +24/+25 publication from native Tungsten. Receiver order and a plain BigInt `*` reopen remain observable; signs, squares, and neighboring widths retain their old routes. The same-binary 21-pair promotion measured 1.0015; a separately linked 31-pair production promotion measured 1.0013 with a 2.18% paired IQR. Twelve same-binary controls stayed within 1.01%, and twelve production controls stayed within 1% except `mul1@16`, which improved 3.25%. The public boxed-source row remains slower than the scalar-word C/GMP lanes (7.235 ns native versus 4.724/5.069 ns), so this is an exact-fidelity checkpoint, not a speed claim. Independent closed forms, a genuine feature-off 100,000-case native/C differential, compiled/interpreted coverage, reopen semantics, five configuration self-tests, LLVM verification, fixed-point stage identity, runtime build, linked-route proof, and hardware counters pass. |
+| BigInt positive `mul1@32` | `bigint_mul1_32_source_spec.w`, `bigint_mul1_32_source_c_differential_spec.w`, `bigint_mul1_32_reopen_source_seam_spec.w`, `bigint_mul1_32_exact_results.txt` | **Exact C-shaped outer-leaf port retained at parity.** Distinct raw-positive-header thirty-two-by-one-limb operands now use the same exact cap-sixty-four allocation, unchanged `bn_mul_1_f32` kernel, carry store, and exact +32/+33 publication from native Tungsten. Receiver order and a plain BigInt `*` reopen remain observable; signs, squares, and neighboring widths retain their old routes. The same-binary 21-pair promotion measured 1.0004; a separately linked 31-pair production promotion measured 1.0002 with a 1.65% paired IQR. All twelve same-binary controls stayed within 0.8%, and all twelve production controls stayed within 0.6%. The public boxed-source row remains slower than the scalar-word C/GMP lanes (8.578 ns native versus 6.372/6.477 ns), so this is an exact-fidelity checkpoint, not a speed claim. Independent closed forms, a genuine feature-off 100,000-case native/C differential, compiled/interpreted coverage, reopen semantics, five configuration self-tests, LLVM verification, fixed-point stage identity, runtime build, linked-route proof, and hardware counters pass. |
+| BigInt positive `mul1@40` | `bigint_mul1_40_source_spec.w`, `bigint_mul1_40_source_c_differential_spec.w`, `bigint_mul1_40_reopen_source_seam_spec.w`, `bigint_mul1_40_exact_results.txt` | **Exact C-shaped outer-leaf port retained at parity.** Distinct raw-positive-header forty-by-one-limb operands now use the same exact cap-sixty-four allocation, unchanged `bn_mul_1_f40` kernel, carry store, and exact +40/+41 publication from native Tungsten. Receiver order and a plain BigInt `*` reopen remain observable; signs, squares, and neighboring widths retain their old routes. The same-binary 21-pair promotion measured 1.0010; a separately linked 31-pair production promotion measured 0.9968 with a 1.95% paired IQR. All fourteen same-binary controls stayed within 0.9%; the production screen's sole control beyond 1% was `mul1@12` at 1.0111. The public boxed-source row remains slower than the scalar-word C/GMP lanes (9.655 ns native versus 7.546/7.843 ns), so this is an exact-fidelity checkpoint, not a speed claim. Independent closed forms, a genuine feature-off 100,000-case native/C differential, compiled/interpreted coverage, reopen semantics, five configuration self-tests, LLVM verification, fixed-point stage identity, runtime build, linked-route proof, and hardware counters pass. |
+| BigInt positive `mul1@48` | `bigint_mul1_48_source_spec.w`, `bigint_mul1_48_source_c_differential_spec.w`, `bigint_mul1_48_reopen_source_seam_spec.w`, `bigint_mul1_48_exact_results.txt` | **Exact C-shaped outer-leaf port retained at parity.** Distinct raw-positive-header forty-eight-by-one-limb operands now use the same exact cap-sixty-four allocation, unchanged `bn_mul_1_f48` kernel, carry store, and exact +48/+49 publication from native Tungsten. Receiver order and a plain BigInt `*` reopen remain observable; signs, squares, and neighboring widths retain their old routes. The same-binary 21-pair promotion measured 1.0006; a separately linked 31-pair production promotion measured 1.0021 with a 1.38% paired IQR. All fourteen same-binary controls stayed within 1.2%, and every production control stayed within 1%. The public boxed-source row remains slower than the scalar-word C/GMP lanes (11.344 ns native versus 8.866/9.066 ns), so this is an exact-fidelity checkpoint, not a speed claim. Independent closed forms, a genuine feature-off 100,000-case native/C differential, compiled/interpreted coverage, reopen semantics, five configuration self-tests, LLVM verification, fixed-point stage identity, runtime build, linked-route proof, and hardware counters pass. |
+| BigInt positive `mul1@64` | `bigint_mul1_64_source_spec.w`, `bigint_mul1_64_source_c_differential_spec.w`, `bigint_mul1_64_reopen_source_seam_spec.w`, `bigint_mul1_64_exact_results.txt` | **Exact C-shaped outer-leaf port retained at parity, completing the fixed scalar-multiply series.** Distinct raw-positive-header sixty-four-by-one-limb operands now use the same exact cap-one-hundred-twenty-eight allocation, unchanged `bn_mul_1_f64` kernel, carry store, and exact +64/+65 publication from native Tungsten. Receiver order and a plain BigInt `*` reopen remain observable; signs, squares, and neighboring widths retain their old routes. The same-binary 21-pair promotion measured 1.0046; a separately linked 31-pair production promotion measured 1.0001 with a 1.80% paired IQR. All fifteen controls in both screens stayed within 0.7%. The public boxed-source row remains slower than the scalar-word C/GMP lanes (14.286 ns native versus 11.950/12.282 ns), so this is an exact-fidelity checkpoint, not a speed claim. Independent closed forms, a genuine feature-off 100,000-case native/C differential, compiled/interpreted coverage, reopen semantics, five configuration self-tests, LLVM verification, fixed-point stage identity, runtime build, linked-route proof, and hardware counters pass. |
+| BigInt locked exact multiplication | `bigint_mul_locked_direct_spec.w`, `bigint_mul_locked_direct_results.txt` | **Native-only integration retained after the independent exact `mul1@1..8` checkpoints.** A protected+locked exact `(BigInt BigInt)` site now preserves the direct 1x1 leaf and Core 2..8-by-1 workers, while every other exact pair enters a non-polymorphic built-in boundary that retains C's tuned square, schoolbook, and wide schedules. Tag misses still use `w_mul`; identity remains exact and is optimized separately in the locked-square row above; all eight open-world replacement specs pass. Eleven paired 110 ms runs kept `mul1@1..8` within 2.4%, improved `mul1@9..32` by 20.1--24.5%, improved ordinary `mul@2/4/8` by 19.9/12.1/5.7%, and held square controls within 0.4%. |
+| BigInt native multiply typed release | `bigint_mul_typed_release_results.txt` | **Native-lane lifecycle follow-up retained.** The positive benchmark fixtures prove every `mul`, `mul1`, and `sqr` result is boxed (the minimum 1x1 product is 2^126), so their timed previous-result handoff now uses the typed BigInt release instead of the general heap-kind dispatcher. A 21-pair target promotion measured 1.009 ns versus 1.984 ns (0.510, 21/21 wins). Seven-width screens made every family/width median faster: `mul1` 0.514--0.927, `mul` 0.515--0.997, and `sqr` 0.684--0.998. The public `mul1@1` native row is 0.996 ns versus C 1.291 and GMP 1.878. Arithmetic and dispatch are unchanged. |
+| BigInt `isqrt` | `run_bigint_isqrt_public.sh` | **Retained — the exact one- and two-limb C base cases are now native Tungsten.** The two-limb body ports `bn_sqrtrem1`, `bn_sqrtrem2`, and `bn_isqrt_u128` without changing the algorithm: even-bit normalization, hardware-double seed, one 64/64 quotient extension, bounded exact integer corrections, and the same shift-back. It also preserves C's representation/storage boundary: i48 roots are formed inline; larger roots take the hot one-limb BigInt slot and publish limb then size. Wider values and negative-receiver handling retain `bigint_isqrt_any`'s divide-and-conquer C boundary. A stable strong source seam removes dynamic dispatch from the production native benchmark while its weak C definition keeps stage-0/thin binaries linkable; a reopen spec proves ordinary open-world last-definition semantics. Correctness: 6,222 C differentials plus root-bracketing and explicit inline/heap representation checks across 1..64 limbs, including u128 extrema and perfect-square neighbors; `BitOps.leading_zeros_u32/u64` has 100,000-word native and 1,000-word interpreted differentials; compiler stage IR is byte-identical. Matched same-binary source/C ratios for the new two-limb strata are 0.916 (`two`), 0.925 (`two-low`), and 0.953 (`two-square`). Two production bignum 31x500ms promotions are also green at 1.011 and 1.008 C/native; 2/4/8-size C-fallback controls stayed within 1.6% in the preceding 9x110ms screen. Earlier shim-only campaigns remain in `bigint_isqrt_public_{pre,post_v1,post_v2}_results.txt`; reproduce the new rows with the expanded runner. |
 ### Complete BigInt bitwise acceptance gate
 
 `run_bigint_bitwise_full.sh` compiles `bigint_bitwise_full.w` and
@@ -209,7 +254,452 @@ and `urem i64` in the source workers. Raw samples:
 Host/build: Apple M5 Max, arm64 macOS 26.6.1, Homebrew LLVM 22.1.8,
 configured `-mcpu=apple-m5`, `--release --native --fast`.
 
-### Original kernel assessment (2026-08-08, still governing wider kernels)
+EXACT 4-BY-2-LIMB FOLLOW-UP: the positive fixed-width `mag_divmod_42_core`
+leaf is now mechanically ported to native Tungsten on macOS ARM64 before any
+Tungsten-specific tuning.  The embedded assembly preserves the Clang 22.1.8
+`-O3 -mcpu=apple-m5` schedule for the existing C arithmetic leaf: the
+same 256-entry Moller--Granlund reciprocal table, normalization, three 3-by-2
+quotient-digit steps, correction rules, quotient/remainder capacities, and
+`bigint_finish_mag_sub` normalization.  Signed 4/2 pairs and every other width
+remain on the C specialization tree.  The public harness now checks 192
+ordinary corpus differentials plus 512 adversarial 4/2 C differentials with
+independently constructed exact quotients, remainders, and round trips.  A
+12-pair same-binary baseline measured native/C at 0.964 for division and 0.982
+for modulo; one-limb and signed fallback controls remained within 4.5%.
+Retained raw evidence: `bigint_divmod_42_exact_results.txt` and
+`bigint_divmod_42_exact_controls_results.txt`.  Those figures describe the
+exact port baseline, not a redesigned native algorithm.
+
+EXACT 6-BY-3-LIMB MODULO CHECKPOINT: the positive `mag_mod_63` arm is ported
+with the corrected C algorithm and its Clang 22.1.8 `-O3 -mcpu=apple-m5`
+schedule before native-only tuning.  The source body preserves the 96-byte
+scratch frame, reciprocal table, four quotient-digit steps, capacity-3 hot
+allocation, and `bigint_finish_mag_sub` policy; division and signed 6/3 pairs
+remain in C.  Its algebraic corpus first exposed and fixed a C carry-loss bug
+when the leading low-limb borrow overflowed the two-limb prefix.  The focused
+check now covers 208 ordinary corpus differentials, 512 adversarial 4/2
+differentials, and 512 independently constructed 6/3 differentials.  The
+first 12-pair exact-port baseline is deliberately retained even though it is
+not yet a win: native/C was 1.068 (36.763 ns versus 34.384 ns median).  Raw
+evidence: `bigint_mod_63_exact_results.txt`.  This checkpoint is the exact
+port requested before changing the native schedule.
+
+NATIVE 6-BY-3 STORAGE FOLLOW-UP: after the exact checkpoint, the source leaf
+was allowed to optimize only its result handoff.  It now accepts the boxed
+operands directly, computes the same limbs before allocating, and tail-calls
+one shape-specific runtime boundary that performs the capacity-3 hot
+allocation, publishes all three limbs, and applies the unchanged
+`bigint_finish_mag_sub` policy.  The reciprocal arithmetic and every quotient
+correction arm remain byte-for-byte the exact port above.  A 31-pair matched
+run improved native/C from the checkpoint's 1.065 to 1.024 (34.725 ns versus
+34.138 ns median), recovering about 3.9% of total time while remaining an
+honest 2.4% C win.  The untouched 4/2 control remained green at 0.969; signed
+6/3 stays on C.  Raw evidence:
+`bigint_mod_63_native_finish_results.txt`.
+
+EXACT 6-BY-3-LIMB QUOTIENT CHECKPOINT: the positive
+`mag_div_q_63_certified` arm is now mechanically ported before native-only
+tuning.  Its generated AArch64 body is the Clang 22.1.8
+`-O3 -mcpu=apple-m5` schedule for the existing C arithmetic: identical
+normalization, reciprocal table, four fixed quotient digits, saturated and
+add-back paths, triangular certificate, capacity-four allocation, failure
+release, and fallback into the unchanged C division tree.  The arithmetic
+leaf has a 48-byte frame and no calls.  The same 1,232-case public q/r corpus
+is green.  As required for an exact-first migration, the initial loss is
+retained rather than hidden: a 12-pair matched run measured native/C at 1.165
+(105.002 ns versus 90.226 ns median); 4/2 and signed controls remained green.
+Raw evidence: `bigint_div_63_exact_results.txt`.
+
+NATIVE 6-BY-3 QUOTIENT FOLLOW-UP: counters showed that an inconclusive native
+certificate re-entered `bigint_div_any`, which executed the same fixed 6/3
+certificate in both the boxed arm and `mag_divmod` before reaching the
+reciprocal/triangular/Knuth continuation.  The source failure edge now releases
+its speculative capacity-four result and resumes at that exact continuation;
+the certificate arithmetic and every later selection threshold are unchanged.
+The redundant C certificate disappeared from the counter profile.  A promoted
+31-pair run reduced native from the exact checkpoint's 105.002 ns to
+70.998 ns; native/C is 0.782 versus the checkpoint's 1.165.  The 4/2 and
+signed controls remained green at 0.966 and 0.957.  Raw evidence:
+`bigint_div_63_resume_results.txt`.
+
+EXACT 8-BY-4-LIMB QUOTIENT CHECKPOINT: the positive 8/4 specialization of
+`mag_div_q_triangular_certified` is now mechanically ported before changing
+the native routing or algorithm.  The embedded AArch64 body preserves the C
+algorithm's normalization, reciprocal table, five register-carried quotient
+digits, lazy-low rows, saturated `bn_submul_1` and add-back paths, sufficient
+certificate, capacity-five allocation, and `bigint_finish_mag_sub` policy.
+On the retained public benchmark corpus the certificate is inconclusive on
+all 64 operands, so the exact source failure seam resumes at `mag_divmod` and
+preserves C's second certificate attempt before Knuth fallback.  The
+1,760-case public differential corpus, focused 39-check division spec, LLVM
+verification, and runtime object build are green.  A 31-pair promotion with
+roughly 500 ms legs measured native/C at 0.97964 (88.782 ns versus 90.609 ns),
+with 31/31 native wins and 0.00710 paired-ratio IQR.  This records the exact
+checkpoint; skipping the known-redundant second certificate is reserved for a
+separate native-only follow-up.  Raw evidence:
+`bigint_div_84_exact_results.txt` and
+`bigint_div_84_exact_promotion_results.txt`.
+
+NATIVE 8-BY-4 QUOTIENT FOLLOW-UP: the retained public corpus proves the first
+triangular certificate inconclusive on every operand.  At four divisor limbs
+the reciprocal path's minimum is 256 limbs and the B-Z gates are 24/64, so the
+exact checkpoint's resumed `mag_divmod` can only repeat the same certificate
+and then select Knuth.  The native failure seam now resumes directly at that
+proven Knuth destination; the ported quotient digits, certificate, allocation,
+Knuth kernel, and finalization are unchanged.  A promoted 31-pair run measured
+native/C at 0.70920 (64.358 ns versus 90.832 ns), with 31/31 native wins and
+0.00612 paired-ratio IQR.  This is a routing improvement after the separately
+committed exact checkpoint, not a replacement division algorithm.  Raw
+evidence: `bigint_div_84_resume_results.txt` and
+`bigint_div_84_resume_promotion_results.txt`.
+
+8-BY-4 MODULO PORT PREPARATION: the new exact 8/4 stratum and 512-case
+algebraic edge matrix exposed a pre-existing `mag_mod_84` saturated-digit
+handoff bug.  Its corrected five-limb window must advance `(w3,w2)` as the
+next register remainder pair; the old `(w4,w3)` mapping shifted the recurrence
+by one limb.  The generic Knuth path independently confirmed the oracle, and
+`(B^4-1)^2+r` now has a focused spec regression.  Before any native 8/4
+arithmetic was added, a 12-pair source/C baseline measured 1.028 (37.878 ns
+versus 36.859 ns); both lanes still execute the corrected C leaf.  Raw
+evidence: `bigint_mod_84_preport_results.txt`.
+
+EXACT 8-BY-4-LIMB MODULO CHECKPOINT: the corrected positive `mag_mod_84`
+arm is now ported before any native-Tungsten redesign.  The embedded AArch64
+body is the Clang 22.1.8 `-O3 -mcpu=apple-m5` schedule for the C leaf:
+identical normalization, shared two-entry TLS preinverse cache, five
+Moller--Granlund 3-by-2 quotient digits, saturated `bn_submul_1` and add-back
+paths, and corrected consecutive-saturated-digit handoff.  Arithmetic finishes
+before the unchanged capacity-four hot allocation and
+`bigint_finish_mag_sub` policy.  The 1,760-case public corpus and focused
+division spec are green.  A promoted 31-pair same-binary run measured native/C
+at 0.993 (36.326 ns versus 36.555 ns); the 4/2 control was 0.983 and the
+already-native 6/3 control 1.029.  This is the exact-port checkpoint, not a
+native-only algorithm change.  Raw evidence: `bigint_mod_84_exact_results.txt`.
+
+NATIVE 8-BY-4 CACHE FOLLOW-UP: counters attributed 1.5% of total cycles to
+Mach-O TLS resolution because the exact C layout stores each preinverse field
+behind a separate descriptor.  Native Tungsten now stores the same two
+`(d1,d0,value)` entries and incrementing round-robin selector in one private
+TLS object, reducing a hit from three descriptor resolutions to one.  The
+reciprocal, five quotient digits, correction paths, allocation, and
+normalization are unchanged.  In a direct exact-vs-native 31-pair promotion
+with 500 ms legs, the combined cache won 30/31 pairs: candidate/exact was
+0.98899 with 0.00829 paired IQR (35.934 ns versus 36.312 ns medians);
+C-normalized candidate/exact was 0.98768.  Raw evidence:
+`bigint_mod_84_native_tls_results.txt`.
+
+EXACT POSITIVE ADD1@3 CHECKPOINT: the positive three-limb receiver plus
+positive one-limb BigInt arm now has a literal native Tungsten port of C's
+`BN_WORD_FIXED_CASE(3)` schedule on macOS ARM64: the same `ldp`/`ldr` loads,
+`adds`/`adcs` chain, `stp`/`str` publication, and carry result.  The source
+wrapper also retains `bigint_add_ui_any`'s storage policy rather than hiding
+the hard part behind a larger allocation: it asks the hot allocator for
+exactly three limbs and only the full-carry edge grows to a non-hot cap-four
+buffer, copying/zeroing/releasing exactly like `bigint_add_word_into`.
+Compiled and interpreted focused specs cover no carry, one-limb carry death,
+full three-limb carry, exact header size, round trips, neighboring widths, and
+sign fallbacks; emitted LLVM verifies and the final leaf is the intended nine
+instruction arithmetic/storage body plus `ret`.  The exact checkpoint is not
+yet performance-accepted: a 9x110 ms public `add1@3` run measured native
+source at 6.095 ns versus C at 1.821 ns and GMP at 1.839 ns.  A hardware-
+counter profile attributes 10.2% of cycles to the native leaf and contains no
+`bn_add_word_a64_fixed`, proving this is the admitted source route rather than
+a stale C measurement.  That retained
+gap is the starting point for a separately committed native-only routing and
+boundary optimization, not permission to alter the C algorithm during the
+port.  Evidence: `bigint_add1_3_exact_results.txt`.
+
+NATIVE ADD1@3 FOLLOW-UP: after the literal C port was checkpointed, a separate
+native-only pass removed two surrounding costs without changing the leaf's
+arithmetic, storage, growth, or normalization.  Exact `(BigInt BigInt)` `+`
+facts now select the ordinary guarded source seam, and the positive boxed
+add/add1 harness returns dead results through the same typed BigInt recycler
+contract used by the C lane instead of the general heap-kind dispatcher.  An
+11-pair matched release-boundary A/B won 11/11 (3.679 ns to 2.507 ns,
+candidate/baseline 0.67986), and a 31-run public promotion measured native at
+2.497 ns versus C at 1.779 ns and GMP at 1.721 ns.  Thus native is 59.0%
+faster than the exact checkpoint's 6.095 ns, while the remaining 40.4% gap to
+C is retained honestly.  Broader 2..64-limb controls all improved; attempted
+private pre-entry and header-store shortcuts were rejected because they
+regressed controls.  Evidence: `bigint_add1_3_native_results.txt`.
+
+EXACT POSITIVE ADD1@4 CHECKPOINT: the adjacent positive four-limb receiver
+plus positive one-limb BigInt arm now has the same exact-first treatment.
+Native source contains C's literal two-`ldp`, `adds`/three-`adcs`, two-`stp`,
+`cset` schedule; it requests the same hot cap-four result and preserves the
+rare grow-to-five epilogue byte-for-byte.  Compiled and interpreted focused
+checks cover no carry, carry death at two depths, full four-limb propagation,
+the 4→5 growth, exact header sizes, round trips, signs, and neighboring
+widths.  In an 11-pair matched test the source port won every pair, reducing
+the native lane from 4.150 ns to 2.527 ns (candidate/baseline 0.60958).  The
+public row remained slower than C/GMP at 2.528 ns versus 1.805/2.089 ns, so
+the exact schedule is checkpointed without claiming native parity.  Counter
+profiles move the row from `w_bigint_add`/`bn_add_word_a64_fixed` to the
+leaf-only `__bigint_add1_4_exact`.  Evidence:
+`bigint_add1_4_exact_results.txt`.
+
+EXACT POSITIVE ADD1@2 CHECKPOINT: the two-limb arm is now the literal
+`BN_WORD_FIXED_TWO_FN` schedule in native source (`ldp`, `adds`, `adcs`,
+`stp`, `cset`), with the same hot cap-two allocation and rare grow-to-three
+result construction.  The matched target row won 11/11 pairs, 3.601 ns to
+2.506 ns (candidate/baseline 0.69495), and counters moved from
+`w_bigint_add` to the leaf-only `__bigint_add1_2_exact`.  As an exact-first
+checkpoint it also records rather than conceals code-layout fallout: before
+the separate dispatch follow-up, @1 and @4 controls regressed about 3% while
+@3 improved and @5 was neutral.  Compiled/interpreted checks cover no carry,
+carry death, full 2→3 growth, exact header sizes, round trips, signs, and
+neighbors.  Evidence: `bigint_add1_2_exact_results.txt`.
+
+NATIVE FIXED ADD-WORD DISPATCH FOLLOW-UP: after the exact 2/3/4-limb leaves
+were separately checkpointed, their repeated shape tests were replaced by one
+`bn == 1` gate and a compact `case an` selector.  Arms 2, 3, and 4 still call
+the byte-for-byte exact ports; arm 1 and the default tail return directly to
+the unchanged C boundary.  Final AArch64 lowering is a comparison tree, not a
+jump table, and no arithmetic, allocation, growth, or normalization policy is
+changed.  Across matched 11-pair runs every tested width from 1 through 64 won
+all 11 pairs.  Candidate/baseline medians were 0.647 at @2, 0.966 at @3,
+0.959 at @4, and 0.925--0.959 at the unported 5..64 controls.  The public
+native lane remains slower than C through @8, while beating GMP from @16;
+those remaining gaps are inputs to later native-only work, not reasons to
+change the exact ports.  Evidence: `bigint_add1_fixed_dispatch_results.txt`.
+
+EXACT POSITIVE ADD1@5 CHECKPOINT: the five-limb arm extends the literal port
+with C's two `ldp` plus one `ldr`, `adds` plus four `adcs`, two `stp` plus one
+`str`, and final `cset`.  It requests the same cap-five hot result and keeps
+the full-carry grow-to-six construction unchanged.  The target won all eleven
+matched pairs, falling from 3.881 ns on the retained C tail to 2.618 ns native
+(0.67608).  The @4 control was neutral at 0.98991; the still-unported @6 row
+moved to 1.02981 from code layout and is retained honestly for the next exact
+arm.  The public row measured 1.743/2.628/2.147 ns for C/native/GMP.  Counters
+attribute 58.4% of cycles to the exact source leaf and no samples to the C
+fixed kernel.  Evidence: `bigint_add1_5_exact_results.txt`.
+
+EXACT POSITIVE ADD1@6 CHECKPOINT: the six-limb arm is likewise C's literal
+three-`ldp`, `adds`/five-`adcs`, three-`stp`, `cset` schedule with the same
+cap-six hot allocation and full-carry grow-to-seven path.  It won all eleven
+target pairs, 3.958 ns to 2.679 ns (0.67691).  The @5 control improved 3.8%;
+the unported @7 control was unresolved at 1.01156 with a wider 0.02253 IQR.
+The public row was 1.751/2.673/2.352 ns for C/native/GMP.  Counters show only
+the source leaf, source operator, and TLS allocator on the hot path, with no C
+word kernel.  Evidence: `bigint_add1_6_exact_results.txt`.
+
+EXACT POSITIVE ADD1@7 CHECKPOINT: native source now contains C's exact
+three-`ldp`/one-`ldr`, `adds`/six-`adcs`, three-`stp`/one-`str`, `cset`
+seven-limb schedule, plus the unchanged cap-seven and rare 7-to-8 growth
+policy.  The target won 11/11 pairs, 3.996 ns to 2.737 ns (0.68522).  The @6
+control improved 5.2%, while the still-C @8 control was neutral at 0.99248.
+The public row measured C/native/GMP at 1.887/2.731/2.585 ns.  Counter samples
+attribute 74.8% of cycles to the exact leaf, which has no callees, and none to
+the C word kernel.  Evidence: `bigint_add1_7_exact_results.txt`.
+
+EXACT POSITIVE ADD1@8 CHECKPOINT: this port follows the current optimized C
+arm, including its four upfront `ldp` loads, two-limb common carry chain,
+unlikely branch to the six-`adcs` ripple, duplicated four-`stp` publication,
+and zero/carry return paths.  The cap-eight hot allocation and rare grow-to-
+nine construction are unchanged.  The target won 11/11 pairs, 4.222 ns to
+2.774 ns (0.65751).  Unported @9/@16 controls were unresolved near 1.015;
+the already-native @7 row regressed 7.3% from layout and is preserved as an
+explicit exact-checkpoint cost for the following dispatch optimization.  The
+public @8 row was 1.886/2.781/3.024 ns for C/native/GMP.  Evidence:
+`bigint_add1_8_exact_results.txt`.
+
+NATIVE ADD1@7 CARRY-DEATH FOLLOW-UP: with every fixed arm checkpointed, the
+seven-limb native leaf now branches after limb one.  The common path publishes
+the five unchanged high limbs directly; the vanishingly rare surviving-carry
+path executes the former full chain.  A 31-pair 500 ms promotion won 31/31 at
+0.93297 (2.705 ns versus 2.912 ns).  Eleven-pair controls at 1..6, 8, 9, 16,
+32, and 64 limbs stayed within 0.8% except noisy @16, which remained within
+its 3.7% IQR.  The public @7 row became 2.559 ns, just faster than GMP at
+2.597 ns but still behind C at 2.010 ns.  Shared-wrapper consolidation and an
+@7 precheck were rejected because they regressed other fixed arms.  Evidence:
+`bigint_add1_7_carry_death_results.txt`.
+
+EXACT POSITIVE SUB1@1 CHECKPOINT: the positive one-limb-by-one-limb word
+subtraction now executes its unsigned subtract, comparison, conditional
+negation, and signed-size selection in native source.  The retained raw
+finisher preserves C's i48 demotion and bit-48 exact-cap-one hot-slot policy;
+all other sizes and sign shapes remain in C.  Eleven matched pairs put the
+accepted source route at 1.0025 of C (3.469 versus 3.475 ns), with sub1@2/@4
+controls at 1.008/1.015 and inside their IQRs.  The public native row remains
+3.460 ns versus C's 1.396 ns, and counters place 73% of cycles in the general
+`w_sub` dispatcher: the exact leaf is checkpointed, while dispatch becomes a
+separate native-only optimization.  Evidence:
+`bigint_sub1_1_exact_results.txt`.
+
+NATIVE SUB1@1 RAW-SEAM FOLLOW-UP: the runtime's already-proven positive
+one-limb shape now calls a dedicated stable native seam rather than the full
+typed `BigInt#-(BigInt)` worker.  The strong Core seam is exactly two limb
+loads, `subs`/`cneg`, signed-size materialization, and a tail branch to the
+unchanged finisher; C-only links retain a weak exact-C default, and a plain
+BigInt `-` reopen still replaces both seams.  A 21-pair 300 ms promotion won
+21/21 at 0.86258 (3.027 ns versus 3.502 ns).  Eleven-pair `sub1@2/@4`,
+`add1@7`, and `mul1@1` controls stayed unresolved inside their IQRs.  Counters
+now attribute 67.3% to the still-general `w_sub` entry, identifying guarded
+direct lowering as the next independent native-only boundary.  Evidence:
+`bigint_sub1_1_native_seam_results.txt`.
+
+EXACT POSITIVE MUL1@1 CHECKPOINT: distinct positive one-limb heap BigInts now
+execute C's literal limb loads, unsigned 64-by-64 product, and exact
+inline-or-two-limb result policy in native source.  Pointer-identical squaring,
+signed pairs, wider N-by-1 shapes, internal runtime multiplication, and a plain
+BigInt `*` reopen preserve their existing routes.  A 21-pair 300 ms promotion
+measured the checkpoint at 1.04121 of C (4.205 versus 4.099 ns); five controls
+stayed within 1.0%.  This is intentionally recorded as an exact-port cost, not
+a speed win.  Counters attribute the inlined arithmetic and finisher directly
+to `w_mul`; native-only dispatch/result-lifecycle work follows separately.
+Evidence: `bigint_mul1_1_exact_results.txt`.
+
+NATIVE LOCKED MUL1@1 DIRECT-SHAPE FOLLOW-UP: after the exact leaf checkpoint,
+protected+locked programs may recognize its complete shape at an exact
+`(BigInt BigInt)` call site and bypass `w_mul`.  The guard short-circuits tags
+and left/right sizes before identity/sign checks; all failed shapes use the
+original dispatcher, and syntactic squares have no guard.  A same-compiler
+21-pair promotion won 21/21 at 0.46446 (1.946 versus 4.198 ns); fallback
+controls stayed within 2.2%, `mul@1` gained 55%, wider `mul` controls stayed
+within 0.8%, and squares stayed within 0.5%.  Counters remove `w_mul`, leaving
+result release and TLS lookup as the next independent boundary.  Evidence:
+`bigint_mul1_1_locked_direct_results.txt`.
+
+NATIVE MULTIPLY TYPED RELEASE: the positive native-lane fixtures make every
+`mul`, `mul1`, and `sqr` result statically boxed, so their timed result handoff
+now uses the existing typed BigInt release rather than `w_value_free`.  The
+21-pair `mul1@1` promotion won 21/21 at 0.51041 (1.009 versus 1.984 ns); every
+median across `mul1`, `mul`, and `sqr` widths 1..64 improved.  The public
+native row is now 0.996 ns versus C 1.291 and GMP 1.878.  This is a separate
+native benchmark-lifecycle change; multiplication arithmetic and dispatch are
+unchanged. Evidence: `bigint_mul_typed_release_results.txt`.
+
+EXACT POSITIVE SUB1@2 CHECKPOINT: the positive two-limb receiver minus a
+positive one-limb BigInt now has a literal source port of C's fixed AArch64
+arm: `ldp`, `subs`, `sbcs`, `stp`, and `cset`.  The wrapper requests the same
+cap-two hot result; the retained finisher either publishes size two or follows
+C's one-limb shrink and i48-demotion policy.  Compiled and interpreted checks
+cover no borrow, one-limb borrow, boxed shrink, i48 shrink, signs, and adjacent
+widths.  The exact checkpoint is intentionally not presented as a native win:
+11 alternating pairs measured 3.557 ns versus 3.502 ns for the retained
+route (1.01783), while counters prove 15.6% of cycles now execute in
+`__bigint_sub1_2_exact`.  The already-native @1 control moved 8.1% from code
+layout and becomes an explicit acceptance constraint for the separate narrow
+dispatch follow-up.  Evidence: `bigint_sub1_2_exact_results.txt`.
+
+NATIVE SUB1@2 INLINE-SEAM FOLLOW-UP: the proved 2-by-1 shape now enters a
+dedicated stable seam, and the no-reopen strong wrapper, cap-two allocator,
+and unchanged finisher are forced into the caller under whole-program LTO.
+C-only links keep a weak exact-C default; an open-world plain BigInt `-`
+reopen still replaces the narrow seam and is deliberately not force-inlined.
+The final linked hot route has no calls to the allocator, finisher, typed
+worker, or seam wrapper—only the exact six-instruction leaf and TLS lookup
+remain outside `w_sub`.  A 21-pair 300 ms promotion won 21/21 at 0.76163
+(2.776 ns versus 3.604 ns); the 11-pair screen left @1 neutral, improved @4,
+and kept @8 unresolved.  The public native row is now 2.613 ns versus C at
+1.521 ns and GMP at 1.751 ns, so the remaining general-dispatch gap is stated
+rather than folded into this change.  Evidence:
+`bigint_sub1_2_native_inline_seam_results.txt`.
+
+EXACT POSITIVE SUB1@3 CHECKPOINT: native source now carries the literal
+three-limb C schedule—`ldp`/`ldr`, `subs` plus two `sbcs`, `stp`/`str`, and
+`cset`—with the same cap-three hot allocation and shrink-to-two epilogue.
+No borrow-death or integration inlining is mixed into the port.  A 21-pair
+300 ms promotion won 21/21 at 0.80366 (3.712 ns versus 4.646 ns); the initial
+11-pair screen was 0.79337.  Already-native @2 and the @8 control stayed
+neutral; @1/@4 moved about +3% and are retained as explicit controls for the
+separate native follow-up.  Compiled/interpreted checks cover borrow death at
+each depth, full propagation, 3→2 shrink, exact sizes, signs, and neighbors.
+Evidence: `bigint_sub1_3_exact_results.txt`.
+
+EXACT POSITIVE SUB1@4 CHECKPOINT: native source now carries the literal
+four-limb C schedule—two `ldp`s, `subs` plus three `sbcs`, two `stp`s, and
+`cset`—with the same generic cap-four hot allocation and shrink-to-three
+epilogue.  A 21-pair 300 ms promotion won 21/21 at 0.92083 (3.873 ns versus
+4.241 ns); the initial six-cell screen measured 0.90750 at the target.  Every
+control stayed within the 5% gate, including the directionally slower @3 row
+at 1.03951.  Compiled/interpreted checks cover borrow death at each depth,
+full propagation, 4→3 shrink, exact sizes, signs, and neighboring widths.
+No borrow-death, store scheduling, allocator specialization, or direct seam
+is mixed into this exact checkpoint.  Evidence:
+`bigint_sub1_4_exact_results.txt`.
+
+EXACT POSITIVE SUB1@5 CHECKPOINT: native source now carries the literal
+five-limb C schedule—two `ldp`s plus `ldr`, `subs` plus four `sbcs`, two
+`stp`s plus `str`, and `cset`—with unchanged cap-five allocation and
+shrink-to-four normalization.  A 21-pair 300 ms promotion won 21/21 at
+0.92187 (4.101 ns versus 4.461 ns); the initial seven-cell screen measured
+0.89963 at the target, and every control stayed within 2.3%.  No native-only
+arithmetic, dispatch, allocation, or store-order change is included.
+Evidence: `bigint_sub1_5_exact_results.txt`.
+
+EXACT POSITIVE SUB1@6 CHECKPOINT: native source now carries the literal
+six-limb C schedule—three `ldp`s, `subs` plus five `sbcs`, three `stp`s, and
+`cset`—with unchanged cap-six allocation and shrink-to-five normalization.
+A 21-pair 300 ms promotion won 21/21 at 0.90571 (4.118 ns versus 4.572 ns);
+the eight-cell screen measured 0.91769 at the target and every control stayed
+within the 5% gate.  Evidence: `bigint_sub1_6_exact_results.txt`.
+
+EXACT POSITIVE SUB1@7 CHECKPOINT: native source now carries the literal
+seven-limb C schedule—three `ldp`s plus `ldr`, `subs` plus six `sbcs`, three
+`stp`s plus `str`, and `cset`—with unchanged cap-seven allocation and
+shrink-to-six normalization.  A 21-pair 300 ms promotion won 21/21 at
+0.89261 (4.240 ns versus 4.753 ns); all controls stayed within 3.1%.
+Evidence: `bigint_sub1_7_exact_results.txt`.
+
+EXACT POSITIVE SUB1@8 CHECKPOINT: native source now carries the literal
+eight-limb C schedule—four `ldp`s, `subs` plus seven `sbcs`, four `stp`s, and
+`cset`—with unchanged cap-eight allocation and shrink-to-seven normalization.
+A 21-pair 300 ms promotion won 21/21 at 0.86222 (4.233 ns versus 4.895 ns);
+the nine-cell screen measured 0.83927 at the target and every control stayed
+within 3%.  This completes exact native coverage of retained fixed subtract-
+word arms 1–8; borrow-death remains a separate native-only experiment.
+Evidence: `bigint_sub1_8_exact_results.txt`.
+
+NATIVE SUB1@8 BORROW-DEATH FOLLOW-UP: after the exact fixed family was
+checkpointed, the common source leaf now stops its flag chain after limb one.
+If no borrow survives, limbs 2–7 are copied without six serial `sbcs`; the
+rare path retains the exact full chain and stores.  A 31-pair 500 ms promotion
+won 26/31 at 0.97284 (4.196 ns versus 4.288 ns); the nine-cell screen measured
+0.97338 at the target and kept every control within 1.2%.  Full-propagation
+correctness remains covered.  Evidence: `bigint_sub1_8_borrow_death_results.txt`.
+
+EXACT POSITIVE WIDE SUB1 CHECKPOINT: native source now carries the retained
+`bigint_sub_word_into` path for positive 9–4096-limb values minus a positive
+one-limb word.  It preserves the unconditional limb-one borrow step, rare
+deeper ripple, tuned overlap-qpair suffix copy, exact-cap hot allocation, and
+one-limb shrink finisher.  The initial 11-pair 110 ms screen was deliberately
+kept even though it exposed source-integration overhead: candidate/base was
+1.087 at 9 limbs, 1.101 at 24, 1.048 at 64, 0.997 at 128, and 0.977 at 256;
+the fixed-eight control was 1.015.  Counters attribute roughly 22% of the
+candidate to the still-outlined source prefix leaf.  This commit is therefore
+the exact semantic/code-shape checkpoint, not the claimed performance finish;
+call integration is a separate native-only follow-up.  Compiled and
+interpreted differential coverage spans 9–256 limbs, copied tails, full borrow
+propagation, shrink, signs, and the fixed-eight boundary.  Evidence:
+`bigint_sub1_wide_exact_results.txt`.
+
+NATIVE WIDE SUB1 PREFIX INTEGRATION: after the literal wide port was
+checkpointed, embedded source IR gained an explicit `tungsten:alwaysinline`
+marker and the retained prefix opted in.  This removes the sole arithmetic
+call without changing its instructions or the tuned copy/finish paths.  In a
+same-compiler 11-pair screen, 9–64 limbs improved 3.2–5.7%, 128 improved 2.1%,
+256 was neutral, and fixed `sub1@8` was neutral.  Promotions held at 0.95231
+for the 9-limb boundary (20/21 wins) and 0.96156 at 32 limbs (21/21 wins).
+The linked candidate contains no prefix symbol and is 64 text bytes smaller.
+Evidence: `bigint_sub1_wide_inline_results.txt`.
+
+EXACT POSITIVE WIDE ADD1 CHECKPOINT: native source now carries the retained
+`bigint_add_word_into` path for positive 9–4096-limb values plus a positive
+one-limb word.  It preserves exact-cap hot allocation, the unconditional
+limb-one carry step, rare deeper ripple, tuned overlap-qpair suffix copy, and
+the original grow/reallocate finisher.  A matched 11-pair screen won every
+affected width: candidate/base ranged from 0.890 at 12 limbs to 0.975 at 64,
+and remained 0.962–0.965 at 128–256.  Promotions held at 0.92083 for 9 limbs,
+0.91533 for 24, and 0.96365 for 128.  The inactive fixed-eight control also
+moved, however: its 21-pair promotion was 1.05523.  That regression is kept
+visible rather than folded into this literal port.  Stabilizing source layout
+or dispatch is a separate native-only follow-up after the exact C contract is
+checkpointed.  Compiled and interpreted 96-check differential coverage spans
+9–256 limbs, copied tails, full carry propagation, growth, signs, and the
+fixed-eight boundary.  Evidence: `bigint_add1_wide_exact_results.txt`.
+
+### Original kernel assessment (2026-08-08, governing remaining wider kernels)
 
 Add, subtract, and multiply each migrated by standing on an existing
 hand-written asm kernel (`asm_add_no`, `asm_sub_no`, `asm_mulbase`), which
@@ -224,13 +714,12 @@ exist as WIRE ops:
 - width-specialized `mag_div_q_63_certified`, `mag_div_triangular_certified`,
   and `mag_mod_{84,63,42}`.
 
-Porting even the schoolbook band therefore means writing and oracle-validating
-a new division kernel from scratch — comparable in size to the entire
-add+sub+mul effort combined, in the region where C's specialization density is
-highest and the measured odds of clearing a 10% gate are lowest. Recommended
-disposition: `/` and `%` stay in C; the arithmetic migration is complete at
-`+`, `-`, `*`. The protocol, harnesses, weak-linkage seams, and shape-gate
-machinery are all in place should that decision change.
+The exact 4-by-2 leaf above is the first deliberate exception to this earlier
+disposition: it ports one already-tuned C specialization rather than inventing
+a replacement kernel.  The recursive, exact-division, and remaining certified
+width bands stay in C until each can be ported and oracle-validated with the
+same discipline.  The protocol, harnesses, weak-linkage seams, and shape-gate
+machinery are in place for that arm-by-arm migration.
 
 Shift profiling note (2026-08-09): the public BigInt benchmark sink now
 releases fresh results through `w_value_free`, matching production's recycler

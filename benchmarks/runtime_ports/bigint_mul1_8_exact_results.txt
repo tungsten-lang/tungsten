@@ -1,0 +1,98 @@
+BIGINT POSITIVE EIGHT-LIMB BY ONE-LIMB MULTIPLY — EXACT SOURCE CHECKPOINT
+============================================================================
+
+Scope
+-----
+
+This checkpoint ports only the distinct positive heap-BigInt 8-by-1 arm from
+`bigint_mul_n1_tiny8`. It preserves production C's hot capacity-16 allocation,
+eight independently issued products, single straight add-with-carry chain,
+paired stores, unconditional ninth-limb write, and exact positive size +8/+9
+publication. It deliberately does not substitute a carry-death schedule.
+
+The public seam preserves receiver order and open-world BigInt `*` precedence.
+Only distinct positive 8-by-1 and 1-by-8 heap shapes are admitted. Squaring,
+signs, widths 1..7, and every wider scalar-word shape retain their old routes.
+This is an exact-port checkpoint with no native-only integration redesign.
+
+Build
+-----
+
+base_commit=0dd70600
+host=Apple M5 Max, arm64 macOS
+power=AC Power, battery charging at 91%
+host_contention=external Swift/Xcode builds, recurring Qwen MTP workers, and opencode
+compiler=Homebrew clang 22.1.8
+compiler_path=/private/tmp/tungsten-compiler-mul1-8-exact
+compiler_sha256=bd2dfea519a1a156d1c65d798c4fe86a4764fab23cdc2a1b6bcac4621e44d5d4
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+production_candidate=/private/tmp/mul1-8-native-production
+production_candidate_sha256=5e5fd10f3abdfb4de9ab17511aec65b62efb53815b80784dda8e16fc1fb633a3
+same_binary=/private/tmp/mul1-8-native-runtime-knob
+same_binary_sha256=a47fc2b8efd187efc7e3b99e44ad43dce7aeb030404eadcccd453d1e3361cf6b
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic executable was built with
+`-DBN_BENCH_RUNTIME_MUL1_8_SRC_KNOB=1`. Alternating processes set only
+`TUNGSTEN_BN_MUL1_8_SRC=0/1`; code layout and every other route are identical.
+
+method=11 alternating process pairs; 110 ms/leg
+raw_json=/private/tmp/mul1-8-exact-screen-0dd70600.json
+raw_json_sha256=12be8d58158b5044a2aa7e32144d7ea5c196e434940a1cc374cfdfec65cee723
+
+cell     C-route_ns  source-route_ns  paired_median  paired_IQR  wins
+mul1@1   1.181802    1.161282         0.991489       0.021939     8/11
+mul1@7   6.529167    6.547565         0.997791       0.050093     6/11
+mul1@8   6.534863    6.471866         0.991625       0.039055     6/11
+mul1@9   8.263920    8.311963         0.989399       0.074427     6/11
+mul1@16  7.623560    7.618022         1.003366       0.022882     4/11
+mul1@32 10.853442   10.677318         0.986760       0.048227     8/11
+
+Only mul1@8 changes route. All five controls remain within 1.4% by paired
+median. Broad IQRs coincide with the recorded external load, so these
+alternating ratios establish routing parity only.
+
+Promotion
+---------
+
+method=21 alternating process pairs; 300 ms/leg; same executable and toggle
+raw_json=/private/tmp/mul1-8-exact-promotion-0dd70600.json
+raw_json_sha256=79db7cb79ebe9974e8a8d7c7470c1cfdf7594757a2747b9fcf28e466518209ec
+
+cell     C-route_ns  source-route_ns  paired_median  paired_IQR  wins
+mul1@8   6.688610    6.689746         0.998040       0.031151    11/21
+
+The promotion includes external-load outliers in both lanes (roughly 6.4--9.3
+ns). Its central ratio establishes parity, not a source speed win. This exact
+checkpoint is retained for fidelity.
+
+Counter route proof
+-------------------
+
+command=bin/tungsten flame --counters -d 3 --top 16 --silent --
+  /private/tmp/mul1-8-native-production --sweep mul1 8 100 5000
+
+  w_mul                       72.9% cycles; IPC 8.19
+  w_bigint_alloc_hot16_raw    14.5% cycles; IPC 7.44
+  _tlv_get_addr                6.6% cycles; IPC 8.18
+  __w_bigint_mul1_8_src        5.7% cycles; IPC 8.23
+
+The source seam's sampled miss rates round to zero. The cap-16 allocator owns
+the visible cache/TLB misses and remains the main non-dispatch residual.
+
+Focused validation
+------------------
+
+- compiled and interpreted arithmetic/representation spec passed 1,041 checks;
+- plain BigInt `*` reopen spec passed for both operand orders and direct seam;
+- production and diagnostic native-lane self-tests passed;
+- emitted compiler/spec LLVM assembled and verified under LLVM 22;
+- an independently compiled current-C probe and the linked source seam contain
+  the same eight independent products, single adds/adcs chain, paired stores,
+  unconditional ninth-limb write, and +8/+9 publication;
+- runtime compiled with `BN_MUL_N1_SMALL_STRAIGHT=0` and `BN_MUL_N1_FAST=0`;
+- consecutive current-source compiler stages emitted byte-identical LLVM
+  (sha256 `908cd579164a9b2903f17aef2729f695bcb14746d258d04e07e7757a99f53f27`);
+- `git diff --check` passed.

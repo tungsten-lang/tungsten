@@ -2266,16 +2266,382 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # one bigint-inferred operand (typing the other would upgrade it);
   # :polymorphic is everything else reaching the runtime entry. Side
   # data only — never read by hashing or emission.
+  # An exact `(BigInt)` signature retains its class-name symbol rather than
+  # the `## big` local's internal :bigint spelling.  Admit that fact only for
+  # `+`, whose one-limb C-favored shapes now have an immediate in-body return
+  # and whose 2x1/3x1/4x1 positive arms are actually native.  Broadly
+  # treating :BigInt as :bigint also redirected typed `-`, `*`, and untouched
+  # add shapes and regressed their controls, so those remain polymorphic until
+  # their own specialization arms migrate.
+  declared_bigint_add = op == :PLUS && lt == :BigInt && rt == :BigInt
+  closed_mul1_square = node.left != nil && node.right != nil && is_ast_node?(node.left) && is_ast_node?(node.right) && ast_kind(node.left) == :var && ast_kind(node.right) == :var && node.left.name == node.right.name
+  # Once Core provenance and both method tables are locked, an exact
+  # `(BigInt BigInt)` multiplication can enter the exact built-in BigInt
+  # boundary directly. That boundary retains the tuned C shape dispatch while
+  # routing committed scalar leaves to Core; it avoids a trip through
+  # polymorphic w_mul without broadening native schoolbook selection. The
+  # exact sqr@1 checkpoint now makes identity safe here as well: one-limb
+  # squares enter the same raw leaf, while every wider square goes to the
+  # unchanged exact C dispatcher.
+  closed_bigint_mul = env("TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
   if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT)
     bidir_report = :polymorphic
-    if !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
+    inferred_bigint_pair = is_bigint_type(lt) && is_bigint_type(rt)
+    static_bigint_pair = inferred_bigint_pair || declared_bigint_add || closed_bigint_mul
+    if !bidir_mut && static_bigint_pair
       bidir_report = :static_direct
     elsif !bidir_mut && (is_bigint_type(lt) || is_bigint_type(rt))
       bidir_report = :near_miss
     if ctx[:mod][:tag_report_infix] == nil
       ctx[:mod][:tag_report_infix] = []
     ctx[:mod][:tag_report_infix].push({op: op, route: bidir_report, fname: wfn[:source_method], class_name: ctx[:class_name]})
-  if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT) && !bidir_mut && is_bigint_type(lt) && is_bigint_type(rt)
+
+  # Native-only follow-up after the exact sqr@1..5 checkpoints. At a
+  # protected+locked syntactic `a * a` site, identity is a compile-time fact:
+  # prove the sole receiver tag once, load its raw header once, and dispatch
+  # the five committed square leaves directly. Every other width enters the
+  # unchanged exact built-in square boundary; a stale type fact still falls
+  # to polymorphic w_mul before any header load. Keep an independent switch
+  # so this integration can be measured against the exact checkpoint without
+  # disabling the already-retained general locked-multiply optimization.
+  closed_sqr2_direct = closed_bigint_mul && closed_mul1_square && env("TUNGSTEN_BIGINT_SQR2_LOCKED_DIRECT") != "0"
+  closed_sqr3_direct = closed_sqr2_direct && env("TUNGSTEN_BIGINT_SQR3_LOCKED_DIRECT") != "0"
+  closed_sqr4_direct = closed_sqr3_direct && env("TUNGSTEN_BIGINT_SQR4_LOCKED_DIRECT") != "0"
+  closed_sqr5_direct = closed_sqr4_direct && env("TUNGSTEN_BIGINT_SQR5_LOCKED_DIRECT") != "0"
+  if closed_sqr2_direct
+    cs_entry = overload_exact_tag_entry("BigInt")
+    cs_shape_label = next_label(wfn, "sqr_locked.shape")
+    cs_two_check_label = next_label(wfn, "sqr_locked.two_check")
+    cs_one_label = next_label(wfn, "sqr_locked.one")
+    cs_two_label = next_label(wfn, "sqr_locked.two")
+    cs_three_label = next_label(wfn, "sqr_locked.three")
+    cs_exact_label = next_label(wfn, "sqr_locked.exact")
+    cs_slow_label = next_label(wfn, "sqr_locked.slow")
+    cs_done_label = next_label(wfn, "sqr_locked.done")
+    cs_slot = ensure_var_slot(wfn, "__sqr_locked." + cs_done_label)
+
+    cs_mask = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, cs_entry[:mask], cs_mask)
+    cs_tag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cs_mask, "eq", cs_entry[:tag], cs_tag)
+    emit_wire_cond_br(wfn, cs_tag, cs_slow_label, nil, cs_shape_label)
+
+    start_block(wfn, cs_shape_label)
+    cs_ptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355327", cs_ptr)
+    cs_size = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cs_ptr, cs_size)
+    if closed_sqr3_direct
+      cs_cases = [
+        {value: 1, label: cs_one_label},
+        {value: 2, label: cs_two_label},
+        {value: 3, label: cs_three_label}
+      ]
+      emit_wire_switch_i64(wfn, cs_cases, cs_exact_label, false, cs_size)
+    else
+      cs_one = next_temp(wfn)
+      emit_wire_icmp_i64(wfn, cs_size, "eq", "1", cs_one)
+      emit_wire_cond_br(wfn, cs_one, cs_two_check_label, nil, cs_one_label)
+
+      start_block(wfn, cs_two_check_label)
+      cs_two = next_temp(wfn)
+      emit_wire_icmp_i64(wfn, cs_size, "eq", "2", cs_two)
+      emit_wire_cond_br(wfn, cs_two, cs_exact_label, nil, cs_two_label)
+
+    start_block(wfn, cs_one_label)
+    cs_one_result = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_mul1_1_src", nil, nil, cs_one_result)
+    emit_wire_store_i64(wfn, cs_slot, cs_one_result)
+    emit_wire_br(wfn, cs_done_label, nil, nil)
+
+    start_block(wfn, cs_two_label)
+    cs_two_result = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_sqr2_src", nil, nil, cs_two_result)
+    emit_wire_store_i64(wfn, cs_slot, cs_two_result)
+    emit_wire_br(wfn, cs_done_label, nil, nil)
+
+    start_block(wfn, cs_exact_label)
+    cs_exact = next_temp(wfn)
+    cs_exact_name = "w_bigint_mul_builtin_exact"
+    cs_exact_args = [lhs_reg, rhs_reg]
+    if closed_sqr5_direct
+      # Preserve the proven 1..3 switch and keep both larger leaves out of
+      # the caller. The outlined default dispatcher extends the retained
+      # sqr@4 shape with the newly committed exact sqr@5 leaf.
+      cs_exact_name = "__w_bigint_sqr5_locked_exact"
+      cs_exact_args.push(cs_size)
+    elsif closed_sqr4_direct
+      # Keep the proven 1..3 switch CFG unchanged. A noinline default-path
+      # dispatcher selects sqr@4 without making LLVM rebalance the hot small
+      # cases or clone the large four-limb worker into this caller.
+      cs_exact_name = "__w_bigint_sqr4_locked_exact"
+      cs_exact_args.push(cs_size)
+    emit_wire_call_direct_i64(wfn, nil, cs_exact_args, nil, nil, cs_exact_name, nil, nil, cs_exact)
+    emit_wire_store_i64(wfn, cs_slot, cs_exact)
+    emit_wire_br(wfn, cs_done_label, nil, nil)
+
+    start_block(wfn, cs_slow_label)
+    cs_slow = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_mul", nil, nil, cs_slow)
+    emit_wire_store_i64(wfn, cs_slot, cs_slow)
+    emit_wire_br(wfn, cs_done_label, nil, nil)
+
+    if closed_sqr3_direct
+      start_block(wfn, cs_three_label)
+      cs_three_result = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_sqr3_src", nil, nil, cs_three_result)
+      emit_wire_store_i64(wfn, cs_slot, cs_three_result)
+      emit_wire_br(wfn, cs_done_label, nil, nil)
+
+    start_block(wfn, cs_done_label)
+    cs_result = next_temp(wfn)
+    emit_wire_load_i64(wfn, cs_slot, cs_result)
+    return typed_value(:i64, cs_result)
+
+  # Native-only follow-up after the exact positive mul1@1 leaf was
+  # checkpointed: a protected+locked program with an exact `(BigInt BigInt)`
+  # signature may test that leaf's complete shape contract at the call site.
+  # No method table can change after lowering and PROTECT_THE_CORE forbids a
+  # BigInt#* replacement, so the admitted call can bypass w_mul. Keep two
+  # stages: tag/overlay/identity tests are payload-only; header loads execute
+  # only after both values are proved heap BigInts. Every near miss falls to
+  # the unmodified polymorphic dispatcher.
+  if closed_bigint_mul
+    cm_entry = overload_exact_tag_entry("BigInt")
+    cm_left_shape_label = next_label(wfn, "mul.left_shape")
+    cm_left_wide_label = next_label(wfn, "mul.left_wide")
+    cm_exact_right_tag_label = next_label(wfn, "mul.exact_right_tag")
+    cm_left_wide_right_tag_label = next_label(wfn, "mul.left_wide_right_tag")
+    cm_left_wide_right_shape_label = next_label(wfn, "mul.left_wide_right_shape")
+    cm_right_tag_label = next_label(wfn, "mul.right_tag")
+    cm_right_shape_label = next_label(wfn, "mul.right_shape")
+    cm_right_wide_label = next_label(wfn, "mul.right_wide")
+    cm_one_payload_label = next_label(wfn, "mul.one_payload")
+    cm_wide_payload_label = next_label(wfn, "mul.wide_payload")
+    cm_leaf_label = next_label(wfn, "mul.leaf")
+    cm_source_label = next_label(wfn, "mul.source")
+    cm_exact_label = next_label(wfn, "mul.exact")
+    cm_slow_label = next_label(wfn, "mul.slow")
+    cm_done_label = next_label(wfn, "mul.done")
+    cm_slot = ensure_var_slot(wfn, "__mul_locked." + cm_done_label)
+
+    # Preserve the profitable 1x1 instruction order exactly. Wider values
+    # then prove the other heap tag before either entering the 2..8-by-1 Core
+    # worker or the exact built-in boundary. A tag miss alone retains w_mul.
+    cm_lmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, cm_entry[:mask], cm_lmask)
+    cm_ltag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lmask, "eq", cm_entry[:tag], cm_ltag)
+    emit_wire_cond_br(wfn, cm_ltag, cm_slow_label, nil, cm_left_shape_label)
+
+    start_block(wfn, cm_left_shape_label)
+    cm_lptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355327", cm_lptr)
+    cm_lsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_lptr, cm_lsize)
+    cm_lone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsize, "eq", "1", cm_lone)
+    emit_wire_cond_br(wfn, cm_lone, cm_left_wide_label, nil, cm_right_tag_label)
+
+    start_block(wfn, cm_left_wide_label)
+    cm_lsmall = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsize, "ule", "8", cm_lsmall)
+    emit_wire_cond_br(wfn, cm_lsmall, cm_exact_right_tag_label, nil, cm_left_wide_right_tag_label)
+
+    # A left operand beyond the migrated 2..8 band needs only the right tag
+    # proof before the exact built-in boundary; do not load its header.
+    start_block(wfn, cm_exact_right_tag_label)
+    cm_rmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, cm_entry[:mask], cm_rmask)
+    cm_rtag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rmask, "eq", cm_entry[:tag], cm_rtag)
+    emit_wire_cond_br(wfn, cm_rtag, cm_slow_label, nil, cm_exact_label)
+
+    start_block(wfn, cm_left_wide_right_tag_label)
+    cm_wide_rmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, cm_entry[:mask], cm_wide_rmask)
+    cm_wide_rtag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_wide_rmask, "eq", cm_entry[:tag], cm_wide_rtag)
+    emit_wire_cond_br(wfn, cm_wide_rtag, cm_slow_label, nil, cm_left_wide_right_shape_label)
+
+    start_block(wfn, cm_left_wide_right_shape_label)
+    cm_wide_rptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355327", cm_wide_rptr)
+    cm_wide_rsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_wide_rptr, cm_wide_rsize)
+    cm_wide_rone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_wide_rsize, "eq", "1", cm_wide_rone)
+    emit_wire_cond_br(wfn, cm_wide_rone, cm_exact_label, nil, cm_wide_payload_label)
+
+    start_block(wfn, cm_right_tag_label)
+    cm_one_rmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, cm_entry[:mask], cm_one_rmask)
+    cm_one_rtag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_one_rmask, "eq", cm_entry[:tag], cm_one_rtag)
+    emit_wire_cond_br(wfn, cm_one_rtag, cm_slow_label, nil, cm_right_shape_label)
+
+    start_block(wfn, cm_right_shape_label)
+    cm_rptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355327", cm_rptr)
+    cm_rsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_rptr, cm_rsize)
+    cm_rone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsize, "eq", "1", cm_rone)
+    emit_wire_cond_br(wfn, cm_rone, cm_right_wide_label, nil, cm_one_payload_label)
+
+    start_block(wfn, cm_right_wide_label)
+    cm_rsmall = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsize, "ule", "8", cm_rsmall)
+    emit_wire_cond_br(wfn, cm_rsmall, cm_exact_label, nil, cm_wide_payload_label)
+
+    start_block(wfn, cm_one_payload_label)
+    cm_distinct = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, lhs_reg, "ne", rhs_reg, cm_distinct)
+    cm_lsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355328", cm_lsign_bits)
+    cm_lpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsign_bits, "eq", "0", cm_lpositive)
+    cm_rsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355328", cm_rsign_bits)
+    cm_rpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsign_bits, "eq", "0", cm_rpositive)
+    cm_positive = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_lpositive, cm_rpositive, cm_positive)
+    cm_positive_pair = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_distinct, cm_positive, cm_positive_pair)
+    cm_identity = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, lhs_reg, "eq", rhs_reg, cm_identity)
+    cm_one_ok = next_temp(wfn)
+    emit_wire_or_i1(wfn, cm_positive_pair, cm_identity, cm_one_ok)
+    emit_wire_cond_br(wfn, cm_one_ok, cm_exact_label, nil, cm_leaf_label)
+
+    start_block(wfn, cm_wide_payload_label)
+    cm_wide_distinct = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, lhs_reg, "ne", rhs_reg, cm_wide_distinct)
+    cm_wide_lsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355328", cm_wide_lsign_bits)
+    cm_wide_lpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_wide_lsign_bits, "eq", "0", cm_wide_lpositive)
+    cm_wide_rsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355328", cm_wide_rsign_bits)
+    cm_wide_rpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_wide_rsign_bits, "eq", "0", cm_wide_rpositive)
+    cm_wide_positive = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_wide_lpositive, cm_wide_rpositive, cm_wide_positive)
+    cm_wide_ok = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_wide_distinct, cm_wide_positive, cm_wide_ok)
+    emit_wire_cond_br(wfn, cm_wide_ok, cm_exact_label, nil, cm_source_label)
+
+    start_block(wfn, cm_leaf_label)
+    cm_leaf = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_mul1_1_src", nil, nil, cm_leaf)
+    emit_wire_store_i64(wfn, cm_slot, cm_leaf)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_source_label)
+    cm_source = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_times_src", nil, nil, cm_source)
+    emit_wire_store_i64(wfn, cm_slot, cm_source)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_exact_label)
+    cm_exact = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_bigint_mul_builtin_exact", nil, nil, cm_exact)
+    emit_wire_store_i64(wfn, cm_slot, cm_exact)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_slow_label)
+    cm_slow = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_mul", nil, nil, cm_slow)
+    emit_wire_store_i64(wfn, cm_slot, cm_slow)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_done_label)
+    cm_result = next_temp(wfn)
+    emit_wire_load_i64(wfn, cm_slot, cm_result)
+    return typed_value(:i64, cm_result)
+
+  closed_mul1_1 = !closed_bigint_mul && env("TUNGSTEN_BIGINT_MUL1_1_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && !closed_mul1_square && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
+  if closed_mul1_1
+    cm_entry = overload_exact_tag_entry("BigInt")
+    cm_left_shape_label = next_label(wfn, "mul1_1.left_shape")
+    cm_right_tag_label = next_label(wfn, "mul1_1.right_tag")
+    cm_right_shape_label = next_label(wfn, "mul1_1.right_shape")
+    cm_payload_label = next_label(wfn, "mul1_1.payload")
+    cm_fast_label = next_label(wfn, "mul1_1.fast")
+    cm_slow_label = next_label(wfn, "mul1_1.slow")
+    cm_done_label = next_label(wfn, "mul1_1.done")
+    cm_slot = ensure_var_slot(wfn, "__mul1_1." + cm_done_label)
+
+    # Short-circuit in the same order as the profitable shape: a wider left
+    # operand exits after one tag check and one header load. Header reads are
+    # never speculated before the corresponding exact heap-tag proof.
+    cm_lmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, cm_entry[:mask], cm_lmask)
+    cm_ltag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lmask, "eq", cm_entry[:tag], cm_ltag)
+    emit_wire_cond_br(wfn, cm_ltag, cm_slow_label, nil, cm_left_shape_label)
+
+    start_block(wfn, cm_left_shape_label)
+    cm_lptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355327", cm_lptr)
+    cm_lsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_lptr, cm_lsize)
+    cm_lone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsize, "eq", "1", cm_lone)
+    emit_wire_cond_br(wfn, cm_lone, cm_slow_label, nil, cm_right_tag_label)
+
+    start_block(wfn, cm_right_tag_label)
+    cm_rmask = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, cm_entry[:mask], cm_rmask)
+    cm_rtag = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rmask, "eq", cm_entry[:tag], cm_rtag)
+    emit_wire_cond_br(wfn, cm_rtag, cm_slow_label, nil, cm_right_shape_label)
+
+    start_block(wfn, cm_right_shape_label)
+    cm_rptr = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355327", cm_rptr)
+    cm_rsize = next_temp(wfn)
+    emit_wire_load_u32_ptr(wfn, "4", cm_rptr, cm_rsize)
+    cm_rone = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsize, "eq", "1", cm_rone)
+    emit_wire_cond_br(wfn, cm_rone, cm_slow_label, nil, cm_payload_label)
+
+    start_block(wfn, cm_payload_label)
+    cm_distinct = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, lhs_reg, "ne", rhs_reg, cm_distinct)
+    cm_lsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, lhs_reg, "140737488355328", cm_lsign_bits)
+    cm_lpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_lsign_bits, "eq", "0", cm_lpositive)
+    cm_rsign_bits = next_temp(wfn)
+    emit_wire_and_i64(wfn, rhs_reg, "140737488355328", cm_rsign_bits)
+    cm_rpositive = next_temp(wfn)
+    emit_wire_icmp_i64(wfn, cm_rsign_bits, "eq", "0", cm_rpositive)
+    cm_positive = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_lpositive, cm_rpositive, cm_positive)
+    cm_payload_ok = next_temp(wfn)
+    emit_wire_and_i1(wfn, cm_distinct, cm_positive, cm_payload_ok)
+    emit_wire_cond_br(wfn, cm_payload_ok, cm_slow_label, nil, cm_fast_label)
+
+    start_block(wfn, cm_fast_label)
+    cm_fast = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "__w_bigint_mul1_1_src", nil, nil, cm_fast)
+    emit_wire_store_i64(wfn, cm_slot, cm_fast)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_slow_label)
+    cm_slow = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [lhs_reg, rhs_reg], nil, nil, "w_mul", nil, nil, cm_slow)
+    emit_wire_store_i64(wfn, cm_slot, cm_slow)
+    emit_wire_br(wfn, cm_done_label, nil, nil)
+
+    start_block(wfn, cm_done_label)
+    cm_result = next_temp(wfn)
+    emit_wire_load_i64(wfn, cm_slot, cm_result)
+    return typed_value(:i64, cm_result)
+
+  if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT) && !bidir_mut && ((is_bigint_type(lt) && is_bigint_type(rt)) || declared_bigint_add)
     # Seam symbol per op (strong = the compiled typed worker, weak = the C
     # kernel) and the polymorphic entry for the guard's slow arm. The
     # workers handle every both-heap-bigint shape themselves (in-body

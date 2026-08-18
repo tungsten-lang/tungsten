@@ -1,0 +1,106 @@
+BIGINT SQR@6 — CLOSED-WORLD NATIVE DISPATCH REJECTION
+=====================================================
+
+Scope
+-----
+
+This is the separately measured native-only follow-up to exact sqr@6 commit
+51e19a38.  The committed source seam remains active through the exact built-in
+square boundary; neither rejected experiment changes its six diagonals,
+fifteen doubled cross products, carry schedule, allocation class, twelve
+stores, or +11/+12 result publication.
+
+Two closed-world dispatch shapes were tested under `PROTECT_THE_CORE!` plus
+`LOCK_THE_DOORS!`:
+
+  1. an outlined size-6 test followed by the retained size-5 -> size-4 -> C
+     tail chain; and
+  2. one dense caller switch over sizes 1..6, with isolated active workers for
+     sizes 4..6 and the unchanged exact C boundary as its default.
+
+Both were rejected.  The first improved sqr@6 but charged earlier default-path
+leaves for another serial miss.  The second removed those secondary tests but
+changed the very small caller CFG enough to regress the already-faster
+sqr@1..3 arms.  Production therefore retains the exact sqr@6 migration and the
+previously measured sqr@1..5 locked dispatcher without adding a direct sqr@6
+arm.
+
+Build
+-----
+
+base_commit=51e19a38
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+compiler=Homebrew clang 22.1.8
+gmp=6.3.0
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+power=Battery, 95 percent at final recording
+
+Outlined chain screen
+---------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+baseline=/private/tmp/bench_big_math_tungsten_sqr6_native_off
+baseline_sha256=56df054521072a91a71d86180ca66b6174ad8241fdef363b2c06385291b0de90
+candidate=/private/tmp/bench_big_math_tungsten_sqr6_native_on
+candidate_sha256=1c664fcff72ea1f43ff72cfd98df330d2f10b9ac3908a046c58336228209e497
+raw_json=/private/tmp/bigint-sqr6-native-dispatch-screen-51e19a38-m5max-20260817.json
+raw_json_sha256=4bac4ae223721704f62578ac1235c0880dc57da4a56df567339db8731982df42
+
+cell   baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@1      0.857706      0.855481        0.997406    0.006080   8/11
+sqr@2      1.298494      1.298615        0.999298    0.002403   6/11
+sqr@3      2.141724      2.136956        0.997173    0.003370   9/11
+sqr@4      4.400000      4.653178        1.053503    0.010089   0/11
+sqr@5      5.976400      6.077078        1.014198    0.008760   1/11
+sqr@6      9.143809      8.724436        0.954739    0.007675   9/11
+sqr@8     16.576631     16.648178        1.007690    0.005504   2/11
+sqr@16    48.112717     48.197568        1.001712    0.003178   3/11
+sqr@32   164.501609    164.687280        1.001200    0.002198   3/11
+
+The target wins 4.53%, but sqr@4 loses 5.35% and sqr@5 loses 1.42%.
+
+Dense caller switch screen
+--------------------------
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+baseline=/private/tmp/bench_big_math_tungsten_sqr6_dense_off
+baseline_sha256=c5ccc518def4f15d5f52c6cc6a805b02a2ec674837ea955060e31e3df0c216a5
+candidate=/private/tmp/bench_big_math_tungsten_sqr6_dense_on
+candidate_sha256=dab50e0e44dc8581fe547332925a5a71f93f57b7b314381cda6614e375fb8e81
+raw_json=/private/tmp/bigint-sqr6-native-dense-screen-51e19a38-m5max-20260817.json
+raw_json_sha256=2574d1ba35d033e8a2db79c96ecc3f4706794cc9ae2977f5b795edb7a0b4f997
+
+cell   baseline_ns  candidate_ns  paired_median  paired_IQR  wins
+sqr@1      0.866930      0.913749        1.053345    0.002679   0/11
+sqr@2      1.314105      1.358484        1.033994    0.002045   0/11
+sqr@3      2.162685      2.222499        1.028670    0.004477   0/11
+sqr@4      4.485537      4.292981        0.958357    0.009800  11/11
+sqr@5      6.017632      5.956337        0.990031    0.007690   9/11
+sqr@6      9.212608      8.815599        0.956012    0.002560  11/11
+sqr@8     16.762537     16.682629        0.996294    0.006161  11/11
+sqr@16    48.845953     48.871077        1.001139    0.003461   4/11
+sqr@32   166.642965    166.416938        0.998575    0.004279   7/11
+
+The switch improves sqr@4/5/6 by 4.16/1.00/4.40%, but regresses sqr@1/2/3
+by 5.33/3.40/2.87%.  That is a losing redistribution, not a retainable
+native integration.
+
+Validation
+----------
+
+  - candidate and feature-off locked-direct specs pass, including positive
+    and overlay-negative six-limb identities;
+  - candidate and feature-off native-lane self-tests pass;
+  - both compiler and benchmark variants build with release/native/fast;
+  - the outlined candidate tests size 6 before its active 48-byte frame and
+    tail-branches misses into the retained chain;
+  - the dense candidate emits one caller comparison tree and no secondary
+    size test in the isolated size-4/5/6 workers; and
+  - `git diff --check` passes after restoring the production dispatcher.
+
+Verdict
+-------
+
+REJECT both native-only dispatch changes.  Keep exact sqr@6 commit 51e19a38
+and the pre-existing locked sqr@1..5 routing.  Continue the exact arithmetic
+migration at sqr@7 rather than trading wins among already-migrated shapes.

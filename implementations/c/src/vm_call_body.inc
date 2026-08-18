@@ -195,6 +195,109 @@
               result = args[1];
             } else if (fn_len == 25 && memcmp(fn, "w_ast_body_builder_finish", 25) == 0 && argc == 3) {
               result = args[1];
+            } else if (fn_len == 22 && memcmp(fn, "w_content_temp_map_new", 22) == 0 && argc == 3) {
+              if (!value_is_int(args[1]) || !value_is_int(args[2])) {
+                FREE_ARGS();
+                tc_error_set(err, "w_content_temp_map_new expects integer sizes");
+                goto cleanup_fail;
+              }
+              int64_t temp_count = value_as_int(args[1]);
+              int64_t next_index = value_as_int(args[2]);
+              if (temp_count < 0 || temp_count > INT32_MAX ||
+                  next_index < 0 || next_index > INT32_MAX) {
+                FREE_ARGS();
+                tc_error_set(err, "w_content_temp_map_new received invalid sizes");
+                goto cleanup_fail;
+              }
+              TcRuntimeArray *state = runtime_array_new(3, err);
+              TcRuntimeArray *dense = runtime_array_new((size_t)temp_count, err);
+              TcRuntimeHash *fallback = runtime_hash_new(0, err);
+              if (!state || !dense || !fallback) {
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              state->slots[0] = tc_box_array(dense);
+              state->slots[1] = tc_box_hash(fallback);
+              state->slots[2] = int_value(next_index);
+              result = tc_box_array(state);
+            } else if (fn_len == 23 && memcmp(fn, "w_content_temp_map_seed", 23) == 0 && argc == 4) {
+              if (tc_kind(args[1]) != TC_VAL_ARRAY || !tc_as_array(args[1]) ||
+                  tc_as_array(args[1])->size != 3 ||
+                  tc_kind(args[2]) != TC_VAL_STRING || !value_is_int(args[3])) {
+                FREE_ARGS();
+                tc_error_set(err, "w_content_temp_map_seed received invalid state");
+                goto cleanup_fail;
+              }
+              TcRuntimeArray *state = tc_as_array(args[1]);
+              if (tc_kind(state->slots[0]) != TC_VAL_ARRAY ||
+                  !tc_as_array(state->slots[0]) ||
+                  tc_kind(state->slots[1]) != TC_VAL_HASH ||
+                  !tc_as_hash(state->slots[1])) {
+                FREE_ARGS();
+                tc_error_set(err, "w_content_temp_map_seed received corrupt state");
+                goto cleanup_fail;
+              }
+              TcRuntimeArray *dense = tc_as_array(state->slots[0]);
+              int64_t ordinal = content_temp_ordinal(args[2]);
+              if (ordinal >= 0 && ordinal < dense->size) {
+                dense->slots[ordinal] = args[3];
+              } else if (!hash_set_value(tc_as_hash(state->slots[1]), args[2], args[3], err)) {
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              result = tc_box_nil();
+            } else if (fn_len == 26 && memcmp(fn, "w_wire_function_record_new", 26) == 0 && argc == 7) {
+              if (tc_kind(args[1]) != TC_VAL_ARRAY || !tc_as_array(args[1]) ||
+                  tc_as_array(args[1])->size != 25) {
+                FREE_ARGS();
+                tc_error_set(err, "w_wire_function_record_new expects 25 field symbols");
+                goto cleanup_fail;
+              }
+              TcRuntimeArray *blocks = runtime_array_new(0, err);
+              TcRuntimeHash *var_slots = runtime_hash_new(0, err);
+              TcRuntimeHash *var_slot_types = runtime_hash_new(0, err);
+              TcRuntimeArray *loop_stack = runtime_array_new(0, err);
+              TcRuntimeArray *ensure_stack = runtime_array_new(0, err);
+              TcRuntimeArray *case_stack = runtime_array_new(0, err);
+              TcRuntimeArray *function_scope = runtime_array_new(1, err);
+              TcRuntimeHash *recycle_vars = runtime_hash_new(0, err);
+              TcRuntimeArray *dynamic_calls = runtime_array_new(0, err);
+              TcRuntimeHash *dynamic_call_keys = runtime_hash_new(0, err);
+              if (!blocks || !var_slots || !var_slot_types || !loop_stack ||
+                  !ensure_stack || !case_stack || !function_scope || !recycle_vars ||
+                  !dynamic_calls || !dynamic_call_keys) {
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              function_scope->slots[0] = tc_box_nil();
+              TcValue values[25] = {
+                  args[2], args[2], args[3], args[6], args[4], args[5],
+                  tc_box_array(blocks), tc_box_hash(var_slots), tc_box_hash(var_slot_types),
+                  int_value(0), int_value(0), int_value(0), int_value(0),
+                  tc_box_array(loop_stack), int_value(0), tc_box_array(ensure_stack),
+                  tc_box_array(case_stack), tc_box_array(function_scope), tc_box_hash(recycle_vars),
+                  tc_box_array(dynamic_calls), tc_box_hash(dynamic_call_keys),
+                  tc_box_wvalue(W_FALSE), tc_box_wvalue(W_FALSE), tc_box_nil(), tc_box_nil()};
+              TcRuntimeArray *fields = tc_as_array(args[1]);
+              result = w_wire_alloc_reserve(/*wire_function=*/265, 25, 96);
+              for (int64_t i = 0; i < 25; i++)
+                w_wire_field_store_at(result, i, fields->slots[i], values[i]);
+            } else if (fn_len == 23 && memcmp(fn, "w_wire_block_record_new", 23) == 0 && argc == 3) {
+              if (tc_kind(args[1]) != TC_VAL_ARRAY || !tc_as_array(args[1]) ||
+                  tc_as_array(args[1])->size != 2) {
+                FREE_ARGS();
+                tc_error_set(err, "w_wire_block_record_new expects 2 field symbols");
+                goto cleanup_fail;
+              }
+              TcRuntimeArray *instructions = runtime_array_new(0, err);
+              if (!instructions) {
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              TcRuntimeArray *fields = tc_as_array(args[1]);
+              result = w_wire_alloc_reserve(/*wire_block=*/266, 2, 16);
+              w_wire_field_store_at(result, 0, fields->slots[0], args[2]);
+              w_wire_field_store_at(result, 1, fields->slots[1], tc_box_array(instructions));
             } else if (fn_len == 12 && memcmp(fn, "w_wire_alloc", 12) == 0 && argc == 3) {
               int64_t kind = value_is_int(args[1]) ? value_as_int(args[1]) : (int64_t)args[1];
               int64_t fields = value_is_int(args[2]) ? value_as_int(args[2]) : (int64_t)args[2];
@@ -484,6 +587,47 @@
           if (!push(&vm, tc_box_nil(), err)) {
             goto cleanup_fail;
           }
+          CNEXT();
+        }
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 3
+            && tc_kind(args[0]) == TC_VAL_STRING
+            && tc_str_len(args[0]) == 19
+            && memcmp(tc_str_bytes_only(args[0]), "w_content_temp_norm", 19) == 0) {
+          if (tc_kind(args[1]) != TC_VAL_STRING ||
+              tc_kind(args[2]) != TC_VAL_ARRAY || !tc_as_array(args[2]) ||
+              tc_as_array(args[2])->size != 3) {
+            FREE_ARGS();
+            tc_error_set(err, "w_content_temp_norm received invalid state");
+            goto cleanup_fail;
+          }
+          TcRuntimeArray *state = tc_as_array(args[2]);
+          if (tc_kind(state->slots[0]) != TC_VAL_ARRAY ||
+              !tc_as_array(state->slots[0]) ||
+              tc_kind(state->slots[1]) != TC_VAL_HASH ||
+              !tc_as_hash(state->slots[1]) || !value_is_int(state->slots[2])) {
+            FREE_ARGS();
+            tc_error_set(err, "w_content_temp_norm received corrupt state");
+            goto cleanup_fail;
+          }
+          TcRuntimeArray *dense = tc_as_array(state->slots[0]);
+          TcRuntimeHash *fallback = tc_as_hash(state->slots[1]);
+          int64_t ordinal = content_temp_ordinal(args[1]);
+          TcValue out = (ordinal >= 0 && ordinal < dense->size)
+                            ? dense->slots[ordinal]
+                            : hash_get_value(fallback, args[1]);
+          if (out == tc_box_nil()) {
+            int64_t next = value_as_int(state->slots[2]);
+            out = int_value(next);
+            if (ordinal >= 0 && ordinal < dense->size) {
+              dense->slots[ordinal] = out;
+            } else if (!hash_set_value(fallback, args[1], out, err)) {
+              FREE_ARGS();
+              goto cleanup_fail;
+            }
+            state->slots[2] = int_value(next + 1);
+          }
+          FREE_ARGS();
+          if (!push(&vm, out, err)) goto cleanup_fail;
           CNEXT();
         }
         if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 && argc == 2

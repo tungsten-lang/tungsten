@@ -312,6 +312,7 @@
   out << declare_fn_attrs("w_bigint_sub_word_dest", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn_attrs("w_bigint_mul_word_dest", "preserve_mostcc " + wv, wv3, "nounwind cold")
   out << declare_fn("w_mul", wv, wv2)
+  out << declare_fn_attrs("w_bigint_mul_builtin_exact", wv, wv2, "nounwind")
   out << declare_fn("w_pow", wv, wv2)
   out << declare_fn("w_div", wv, wv2)
   out << declare_fn("w_mod", wv, wv2)
@@ -1403,13 +1404,13 @@
 # Fixed-width bit-count helpers used by core/bit_ops.w. Keep these as private
 # always-inline wrappers instead of ordinary runtime calls: the public source
 # methods remain interpreter/C-VM compatible through ccall_nobox, while native
-# builds expose the exact LLVM operations even at -O0. For cttz, false is the
-# is_zero_poison flag, so zero has the source-level result 32/64.
--> bit_count_intrinsic_helper_ir(helper_name, intrinsic_name, width, trailing)
+# builds expose the exact LLVM operations even at -O0. For ctlz/cttz, false is
+# the is_zero_poison flag, so zero has the source-level result 32/64.
+-> bit_count_intrinsic_helper_ir(helper_name, intrinsic_name, width, zero_poison_arg)
   llvm_type = "i" + width.to_s()
   out = StringBuffer(420)
   out << "declare " + llvm_type + " @llvm." + intrinsic_name + "." + llvm_type + "(" + llvm_type
-  if trailing
+  if zero_poison_arg
     out << ", i1 immarg"
   out << ")\n"
   out << "define private i64 @" + helper_name + "(i64 %v) alwaysinline nounwind willreturn memory(none) {\n"
@@ -1419,7 +1420,7 @@
     out << "  %v32 = trunc i64 %v to i32\n"
     value = "%v32"
   out << "  %count = call " + llvm_type + " @llvm." + intrinsic_name + "." + llvm_type + "(" + llvm_type + " " + value
-  if trailing
+  if zero_poison_arg
     out << ", i1 false"
   out << ")\n"
   if width == 32

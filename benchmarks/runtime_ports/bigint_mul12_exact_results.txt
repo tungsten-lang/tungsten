@@ -1,0 +1,161 @@
+BIGINT POSITIVE TWELVE-BY-TWELVE-LIMB MULTIPLY — EXACT SOURCE CHECKPOINT
+============================================================================
+
+Scope
+-----
+
+This checkpoint ports only the distinct, raw-positive-header, positive
+twelve-by-twelve-limb arm from `bigint_mul_any_routed` /
+`bigint_mul_positive_equal`. Native Tungsten preserves C's exact
+`bn_mul_eq12` decomposition:
+
+  - the same capacity-thirty-two hot allocation;
+  - row zero calls the unchanged tuned `bn_mul_1_f12` primitive;
+  - rows one through eleven call the unchanged tuned
+    `bn_addmul_1_f12` primitive in the same order and at the same result
+    offsets; and
+  - the result header publishes positive size twenty-three when limb
+    twenty-three is zero, otherwise positive size twenty-four.
+
+This is an exact outer-leaf port. Allocation, row sequencing, offsets, and
+publication move to native Tungsten; the fixed C row primitives remain the
+arithmetic kernel. The arm requires two distinct heap BigInts with raw
+positive twelve-limb headers. Pointer identity remains the existing square
+route; signs and neighboring widths retain their former routes. A genuine
+open-world BigInt `*` reopen remains observable.
+
+Build and route proof
+---------------------
+
+base_commit=8252fb852d1c12b5ff72bb77565aec81fbf92be4
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+power=AC Power, 100 percent
+compiler=Homebrew clang 22.1.8
+gmp=6.3.0
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-mul12-stage3
+compiler_sha256=83dd82af2256db1f972aaf2c6e4bad0b74659a8da9ad9a5dfb8deedb59ccf73f
+fixed_point_ll_sha256=0468dfc6a75d06fc85dd788571f6ae60bae1e334b0eb7bc609b4224c0b3d844e
+production_candidate=/private/tmp/bench_big_math_tungsten_mul12_candidate
+production_candidate_sha256=ab09369f3c9e876d89a12455b5391d4dd2e37badcdfabc0efe462f63c3090977
+production_feature_off=/private/tmp/bench_big_math_tungsten_mul12_feature_off
+production_feature_off_sha256=2e61a5b53db4a848229868bc0dfacaaf098615e770144d867728b4f2cc35f211
+diagnostic_same_binary=/private/tmp/bench_big_math_tungsten_mul12_knob
+diagnostic_same_binary_sha256=3b4be4af02cd772eda4d4b22ed316bebc880d95c05c4268d77a15e1636a370a1
+
+The linked strong `__w_bigint_mul12_src` contains the source body after LTO.
+It requests the exact capacity-thirty-two allocation, makes one hot call to
+`bn_mul_eq12`, tests result limb twenty-three once, then publishes size
+twenty-three or twenty-four. Linked `bn_mul_eq12` contains exactly one
+`bn_mul_1_f12` call and eleven `bn_addmul_1_f12` calls. There is no generic
+schoolbook or multiply-selection call in the source body.
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic binary was built with
+`BN_BENCH_RUNTIME_MUL12_SRC_KNOB=1`. Alternating processes changed only
+`TUNGSTEN_BN_MUL12_SRC=0/1`.
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-mul12-exact-knob-screen-8252fb85-m5max-20260817.json
+raw_json_sha256=e99c86146402f31392f25cb74c29c97b41238f62e206bbb7b430d5eb59e99bcd
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@1      1.009281   1.005383        0.999273    0.007406   6/11
+mul@2      3.780748   3.743627        0.992698    0.016696   7/11
+mul@3      4.748300   4.852604        1.011322    0.053623   4/11
+mul@4      7.070675   7.044438        0.996606    0.013609   6/11
+mul@8     20.783758  20.792138        0.999608    0.005191   6/11
+mul@11    39.092760  39.096738        0.999257    0.004283   7/11
+mul@12    38.258806  38.496304        1.002245    0.017235   5/11
+mul@13    50.940760  51.029259        1.001756    0.007901   3/11
+mul@16    59.946612  59.668333        0.995942    0.007329   8/11
+mul@24   130.878567 130.698331        0.998046    0.009522   7/11
+mul@32   194.703629 192.731499        0.984513    0.030072   7/11
+
+Only `mul@12` changes route. It is at parity in the screen; every untouched
+control remains within 1.55 percent, with the wider movements smaller than
+their paired IQRs.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-mul12-exact-knob-promotion-8252fb85-m5max-20260817.json
+raw_json_sha256=48d1092a17be5606064e23219becebd8539fe523a4072161dc1e3d05bef7c0ee
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@12    38.379876  38.296375        0.998747    0.009978  14/21
+
+The exact source route remains at parity in the longer same-binary campaign.
+
+Production-shape cross-check
+----------------------------
+
+Two separately linked production-shape binaries alternated order: the
+feature-off binary compiles the arm away; the candidate compiles the
+diagnostic selection away to true.
+
+method=31 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-mul12-exact-production-promotion-8252fb85-m5max-20260817.json
+raw_json_sha256=54f53e62a66a71d9ceb7549431edb18213e0464cc6fd20c9764ba47b4ea99c5c
+
+cell    feature_off_ns  candidate_ns  paired_median  paired_IQR  wins
+mul@12        38.417355     38.432776        1.000324    0.007899  15/31
+
+The production candidate is within 0.04 percent at the paired median. The
+separate-build screen's noisy `mul@1` control was promoted independently:
+31 pairs measured 1.001032 with a 0.006733 IQR, resolving it as parity.
+
+control_json=/private/tmp/bigint-mul12-exact-production-control-mul1-promotion-8252fb85-m5max-20260817.json
+control_json_sha256=1303c07d9a70d9a2ec6575d89709073714a50bfa518d5711c61726fb382db8fe
+
+Public three-lane row
+---------------------
+
+method=9 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-mul12-exact-public-8252fb85-m5max-20260817.json
+raw_json_sha256=bcf5173f1c7b8173a35e57dc95eab6874fc176190999330b6d687e4a89715cb9
+
+cell    Tungsten_C_ns  tungsten-native_ns  GMP_ns  fastest
+mul@12         39.002               38.110  40.878  tungsten-native
+
+In the public lifecycle, native Tungsten is 2.29 percent faster than direct
+Tungsten C and 6.77 percent faster than GMP. This public win is reported
+separately from the same-route causal result, which is parity.
+
+Hardware counters
+-----------------
+
+command=tungsten flame --counters
+raw_text=/private/tmp/bigint-mul12-exact-production-counters-8252fb85-m5max-20260817.txt
+raw_text_sha256=2df793be22d70ad43df87ab199e6298f28bff3922d8ac1b9d25e572c11e9f57a
+
+The production candidate attributes 53.4 percent of sampled cycles to
+`bn_mul_eq12`, 19.8 percent to `bn_addmul_1_f12`, 17.2 percent to the inlined
+`w_mul` source boundary, 7.6 percent to `bn_mul_1_f12`, and 1.6 percent to TLS
+lookup. Aggregate IPC is 6.64, with no sampled steady-state cache-miss
+pressure. The old `bigint_mul_schoolbook_into` and
+`bigint_mul_positive_equal` frames are absent.
+
+Focused validation
+------------------
+
+- the direct source/C differential passes 100,000 products;
+- compiled and interpreted public checks pass every named representation and
+  route control plus 1,000 randomized products;
+- distinct storage, both operand orders, both result widths, high-bit inputs,
+  and unchanged operands are covered;
+- identity, signed encodings, and neighboring widths remain outside the arm;
+- a real BigInt `*` reopen replaces the ordinary and direct seams;
+- production, feature-off, diagnostic, kernel-off, and alternate-dispatch
+  native self-tests pass;
+- compiler and spec LLVM modules assemble and verify under LLVM 22;
+- the self-hosted compiler reaches byte-identical stage-two/stage-three IR;
+- `BN_MUL_EQ12=0` and `BN_MUL_N1_FAST=0` configurations build and self-test;
+- `make -C runtime runtime.o` and `git diff --check` pass; and
+- linked-body and hardware-counter route proofs pass.
+
+The remaining direct fixed equal-multiply leaves are 15, 17, 21, and 24.
+Native-only kernel redesign remains separate measured work.

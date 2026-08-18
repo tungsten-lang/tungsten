@@ -100,9 +100,26 @@
 # their source targets are explicit roots of the emission slice.
 -> core_reachability_emitter_root?(func)
   method = func[:source_method]
-  if func[:source_class] == nil && method in ("__bigint_and_raw" "__bigint_or_raw" "__bigint_xor_raw" "__bigint_and_mut_raw" "__bigint_or_mut_raw" "__bigint_xor_mut_raw" "__bigint_compare_raw")
+  if func[:source_class] == nil && method in (
+      "__bigint_and_raw" "__bigint_or_raw" "__bigint_xor_raw"
+      "__bigint_and_mut_raw" "__bigint_or_mut_raw" "__bigint_xor_mut_raw"
+      "__bigint_compare_raw" "__bigint_sub1_1_raw" "__bigint_sub1_2_raw"
+      "__bigint_mul1_1_raw"
+      "__bigint_sqr2_raw" "__bigint_sqr3_raw" "__bigint_sqr4_raw"
+      "__bigint_sqr5_raw" "__bigint_sqr6_raw" "__bigint_sqr7_raw"
+      "__bigint_sqr8_raw" "__bigint_sqr16_raw"
+      "__bigint_mul2_raw" "__bigint_mul3_raw" "__bigint_mul4_raw"
+      "__bigint_mul5_raw" "__bigint_mul6_raw" "__bigint_mul7_raw"
+      "__bigint_mul8_raw" "__bigint_mul12_raw" "__bigint_mul15_raw"
+      "__bigint_mul16_raw" "__bigint_mul17_raw" "__bigint_mul21_raw"
+      "__bigint_mul24_raw"
+      "__bigint_mul1_2_raw" "__bigint_mul1_3_raw" "__bigint_mul1_4_raw"
+      "__bigint_mul1_5_raw" "__bigint_mul1_6_raw" "__bigint_mul1_7_raw"
+      "__bigint_mul1_8_raw" "__bigint_mul1_16_raw" "__bigint_mul1_24_raw"
+      "__bigint_mul1_32_raw" "__bigint_mul1_40_raw" "__bigint_mul1_48_raw"
+      "__bigint_mul1_64_raw")
     return true
-  if func[:source_class] == "BigInt" && method in ("+" "-" "*" "&" "|" "^" "/" "%" "<<" ">>" "+__ovl_BigInt" "-__ovl_BigInt" "*__ovl_BigInt" "&__ovl_BigInt" "|__ovl_BigInt" "^__ovl_BigInt" "/__ovl_BigInt" "%__ovl_BigInt" "<<__ovl_Int" ">>__ovl_Int")
+  if func[:source_class] == "BigInt" && method in ("+" "-" "*" "&" "|" "^" "/" "%" "<<" ">>" "isqrt" "+__ovl_BigInt" "-__ovl_BigInt" "*__ovl_BigInt" "&__ovl_BigInt" "|__ovl_BigInt" "^__ovl_BigInt" "/__ovl_BigInt" "%__ovl_BigInt" "<<__ovl_Int" ">>__ovl_Int")
     return true
   false
 

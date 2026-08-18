@@ -63,6 +63,35 @@ check("small_mod", b % a, b)
 check("int_arg_div", a / 7, (a - a % 7) / 7)
 check("int_arg_mod", a % 7, 1)
 
+# Fixed 6-by-3 remainder: the normalized all-ones divisor makes the leading
+# conditional subtract carry out of its two-limb prefix.  The low-limb borrow
+# must not be lost when that prefix is 2^128-1.
+base = 1 << 64
+mod63_divisor = base * base * base - 1
+mod63_quotient = mod63_divisor
+mod63_remainder = 27411205776890304732
+mod63_dividend = mod63_quotient * mod63_divisor + mod63_remainder
+check("mod63_prefix_carry_div", mod63_dividend / mod63_divisor, mod63_quotient)
+check("mod63_prefix_carry_mod", mod63_dividend % mod63_divisor, mod63_remainder)
+check("mod63_prefix_carry_roundtrip",
+      (mod63_dividend / mod63_divisor) * mod63_divisor +
+      (mod63_dividend % mod63_divisor),
+      mod63_dividend)
+
+# Fixed 8-by-4 remainder: a saturated quotient digit must hand the corrected
+# five-limb window to the next digit as (w3,w2), not the cleared (w4,w3)
+# pair. Consecutive saturated digits in (B^4-1)^2+r expose that recurrence.
+mod84_divisor = base ** 4 - 1
+mod84_quotient = mod84_divisor
+mod84_remainder = 9606103567872179198
+mod84_dividend = mod84_quotient * mod84_divisor + mod84_remainder
+check("mod84_saturated_handoff_div", mod84_dividend / mod84_divisor, mod84_quotient)
+check("mod84_saturated_handoff_mod", mod84_dividend % mod84_divisor, mod84_remainder)
+check("mod84_saturated_handoff_roundtrip",
+      (mod84_dividend / mod84_divisor) * mod84_divisor +
+      (mod84_dividend % mod84_divisor),
+      mod84_dividend)
+
 # Explicit operator sends
 check("explicit_div", a./(b), q_want)
 check("explicit_mod", a.%(b), r_want)

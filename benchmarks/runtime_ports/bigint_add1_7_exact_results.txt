@@ -1,0 +1,62 @@
+EXACT POSITIVE ADD1@7 CHECKPOINT
+
+parent_commit=34e635aedda5eb67edb7cb7ffaf4ea46f645a33b
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+
+PORT CONTRACT
+
+The admitted 7x1 positive word arm reproduces C's exact instruction order:
+three paired loads and one scalar load, `adds` followed by six serial `adcs`,
+three paired stores and one scalar store, then `cset`.  The wrapper requests
+the same cap-seven hot result.  No carry publishes size seven; full carry
+grows only if needed, preserves the published low limb, zeroes limbs 1..6,
+then writes the new top limb and size eight.  No native redesign is present.
+
+MATCHED A/B
+
+baseline=/private/tmp/add1-6-native-exact
+candidate=/private/tmp/add1-7-native-exact
+command=alternating BIN --sweep add1 WIDTH 1 110
+pairs=11 per width
+
+width  baseline_ns  candidate_ns  candidate/baseline  paired_IQR  wins
+6      2.679141     2.540179      0.948340            0.005869    11/11
+7      3.995933     2.737165      0.685224            0.010961    11/11
+8      4.225708     4.193762      0.992484            0.004896     9/11
+
+The @8 control is statistically neutral and remains routed to C for its own
+exact checkpoint.
+
+PUBLIC ROW
+
+command=bin/tungsten bench bignum --operations add1 --sizes 6,7,8 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+add1@7 C/native/GMP=1.887/2.730703/2.585 ns
+
+The exact native row remains 44.7% slower than C and 5.6% slower than GMP.
+
+COUNTER ROUTE PROOF
+
+command=bin/tungsten flame --counters -d 3 --top 8 -- /private/tmp/add1-7-native-exact --sweep add1 7 1 5000
+
+  __bigint_add1_7_exact  74.8% cycles; 75.2% instructions; IPC 9.12
+  BigInt#+__ovl_BigInt   24.5% cycles
+
+The profiler identifies the exact source body as a leaf with no callees.  No
+retained C word-kernel sample appears.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_add1_7_source_spec passed all 17 checks;
+- no carry, shallow carry death, five-limb propagation, full 7->8 growth,
+  exact sizes, signs, neighbors, and round trips match the C oracle;
+- native harness self-test passed all operations;
+- runtime/runtime.o rebuilt and exports w_bigint_add1_7_finish_raw;
+- final leaf has C's exact schedule with no frame or nested call;
+- git diff --check passed.

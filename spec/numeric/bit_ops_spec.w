@@ -41,6 +41,24 @@
     count += 1
   count
 
+-> reference_leading_u32(value) (u32) i64
+  return 32 if value == 0
+  count = 0
+  bit = 0x80000000 ## u32
+  while (value & bit) == 0
+    bit = bit >> 1
+    count += 1
+  count
+
+-> reference_leading_u64(value) (u64) i64
+  return 64 if value == 0
+  count = 0
+  bit = 0x8000000000000000 ## u64
+  while (value & bit) == 0
+    bit = bit >> 1
+    count += 1
+  count
+
 check("u32.zero", BitOps.count_ones_u32(0), 0)
 check("u32.one", BitOps.count_ones_u32(1), 1)
 check("u32.alternating", BitOps.count_ones_u32(0xAAAAAAAA), 16)
@@ -68,9 +86,18 @@ check("u64.trailing.bit32", BitOps.trailing_zeros_u64(0x0000000100000000), 32)
 check("u64.trailing.high_bit", BitOps.trailing_zeros_u64(0x8000000000000000), 63)
 check("u64.trailing.full", BitOps.trailing_zeros_u64(0xFFFFFFFFFFFFFFFF), 0)
 
+check("u32.leading.zero", BitOps.leading_zeros_u32(0), 32)
+check("u32.leading.one", BitOps.leading_zeros_u32(1), 31)
+check("u32.leading.bit16", BitOps.leading_zeros_u32(0x00010000), 15)
+check("u32.leading.high_bit", BitOps.leading_zeros_u32(0x80000000), 0)
+check("u64.leading.zero", BitOps.leading_zeros_u64(0), 64)
+check("u64.leading.one", BitOps.leading_zeros_u64(1), 63)
+check("u64.leading.bit32", BitOps.leading_zeros_u64(0x0000000100000000), 31)
+check("u64.leading.high_bit", BitOps.leading_zeros_u64(0x8000000000000000), 0)
+
 # Deterministic differential coverage across sparse, dense, and mixed words.
-# Native runs keep the 200,000-word stress sweep; the tree-walking parity lane
-# samples 2,000 words. The latter exercises the same recurrences and edge
+# Native runs keep the 100,000-word stress sweep; the tree-walking parity lane
+# samples 1,000 words. The latter exercises the same recurrences and edge
 # families without spending most of the default suite in interpreter loops.
 iterations = 100_000
 if env("TUNGSTEN_INTERPRETED_SPEC") == "1"
@@ -82,6 +109,7 @@ while i < iterations
   x32_words[0] = x32_words[0] * 1664525 + 1013904223
   x32 = x32_words[0] ## u32
   check("u32.differential." + i.to_s(), BitOps.count_ones_u32(x32), reference_u32(x32))
+  check("u32.leading.differential." + i.to_s(), BitOps.leading_zeros_u32(x32), reference_leading_u32(x32))
   check("u32.trailing.differential." + i.to_s(), BitOps.trailing_zeros_u32(x32), reference_trailing_u32(x32))
   i += 1
 
@@ -92,7 +120,8 @@ while i < iterations
   x64_words[0] = x64_words[0] * 6364136223846793005 + 1442695040888963407
   x64 = x64_words[0] ## u64
   check("u64.differential." + i.to_s(), BitOps.count_ones_u64(x64), reference_u64(x64))
+  check("u64.leading.differential." + i.to_s(), BitOps.leading_zeros_u64(x64), reference_leading_u64(x64))
   check("u64.trailing.differential." + i.to_s(), BitOps.trailing_zeros_u64(x64), reference_trailing_u64(x64))
   i += 1
 
-<< "PASS BitOps count_ones/trailing_zeros u32/u64"
+<< "PASS BitOps count_ones/leading_zeros/trailing_zeros u32/u64"

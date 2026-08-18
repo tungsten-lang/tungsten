@@ -212,6 +212,7 @@ static TcKind classify_one(const TcSource *source, WValue token, TcKind last_kin
     case TC_T_ID: return classify_id(source, token);
     case TC_T_NAME: return TC_K_NAME;
     case TC_T_INT: return TC_K_INT;
+    case TC_T_WVALUE: return TC_K_WVALUE;
     case TC_T_DECIMAL: return TC_K_DECIMAL;
     case TC_T_STRING: return TC_K_STRING;
     case TC_T_SYMBOL: return TC_K_SYMBOL;
@@ -241,7 +242,7 @@ const char *tc_kind_name(TcKind kind) {
   switch (kind) {
 #define TC_KIND_CASE(name) case TC_K_##name: return #name
     TC_KIND_CASE(UNKNOWN); TC_KIND_CASE(ID); TC_KIND_CASE(NAME); TC_KIND_CASE(TYPE);
-    TC_KIND_CASE(KEYWORD); TC_KIND_CASE(GLOBAL); TC_KIND_CASE(INT); TC_KIND_CASE(DECIMAL);
+    TC_KIND_CASE(KEYWORD); TC_KIND_CASE(GLOBAL); TC_KIND_CASE(INT); TC_KIND_CASE(WVALUE); TC_KIND_CASE(DECIMAL);
     TC_KIND_CASE(STRING); TC_KIND_CASE(SYMBOL); TC_KIND_CASE(TYPE_HINT); TC_KIND_CASE(NEWLINE);
     TC_KIND_CASE(INDENT); TC_KIND_CASE(DEDENT); TC_KIND_CASE(IVAR); TC_KIND_CASE(CVAR);
     TC_KIND_CASE(PARG); TC_KIND_CASE(BYTE_ARRAY); TC_KIND_CASE(KEY); TC_KIND_CASE(COLOR);

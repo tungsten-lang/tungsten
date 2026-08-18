@@ -1,0 +1,148 @@
+BIGINT POSITIVE EIGHT-BY-EIGHT-LIMB MULTIPLY — EXACT SOURCE CHECKPOINT
+=====================================================================
+
+Scope
+-----
+
+This checkpoint ports only the distinct, raw-positive-header, positive
+eight-by-eight-limb arm from `bigint_mul_any_routed` /
+`bigint_mul_positive_equal`. Native Tungsten preserves C's exact
+`bn_mul_eq8_inline` decomposition:
+
+  - the same capacity-sixteen hot allocation;
+  - row zero calls the unchanged tuned `bn_mul_1(n=8)` C primitive;
+  - rows one through seven execute the unchanged fully unrolled
+    `bn_addmul_8_inline` schedule in the same order and at the same result
+    offsets; and
+  - the result header publishes positive size fifteen when limb fifteen is
+    zero, otherwise positive size sixteen.
+
+This is an exact outer-leaf port. Allocation, row sequencing, offsets, and
+publication move to native Tungsten; C's tuned first-row primitive and exact
+unrolled add-multiply arithmetic remain unchanged after release/LTO inlining.
+The arm requires two distinct heap BigInts with raw positive eight-limb
+headers. Pointer identity remains `sqr@8`; signs and neighboring widths retain
+their former routes. A genuine open-world BigInt `*` reopen remains observable.
+
+Build and route proof
+---------------------
+
+base_commit=97b3079f
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+power=AC Power, 89 percent during the public screen
+compiler=Homebrew clang 22.1.8
+gmp=6.3.0
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-mul8-stage3
+compiler_sha256=658574ccd368fae7dbd5478f2f7342392c9e907e83d7e279ab4abef0d36e030a
+fixed_point_ll_sha256=70deb427664c71e3ef70d91eb32b2ce95a7dae7d717bb1c728311766b91bcba1
+production_candidate=/private/tmp/bench_big_math_tungsten_mul8_exact
+production_candidate_sha256=2bf8f1b84eeb589a9fa6c341af6f58d1f28f18ceb04e58ff548e46a35ef02401
+production_feature_off=/private/tmp/bench_big_math_tungsten_mul8_exact_feature_off
+production_feature_off_sha256=28be1634d7cdebcf42b8314b1ff7b647ea9c4955c100d6d501ba8b6b8818aab9
+diagnostic_same_binary=/private/tmp/bench_big_math_tungsten_mul8_exact_knob
+diagnostic_same_binary_sha256=1f20d30ab24e533e1d43322b2af20571395822013c4cff386c69f96cc97ab176
+
+The strong `__w_bigint_mul8_src` seam is one tail branch into the linked
+485-instruction source body, so it adds no wrapper frame. That body contains
+exactly one `_bn_mul_1` call; all seven eight-limb add-multiply row schedules
+are inlined, and there is no `bn_addmul_1` or
+`bigint_mul_schoolbook_into` call.
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic binary was built with
+`BN_BENCH_RUNTIME_MUL8_SRC_KNOB=1`. Alternating processes changed only
+`TUNGSTEN_BN_MUL8_SRC=0/1`.
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-mul8-exact-knob-screen-97b3079f-m5max-20260817.json
+raw_json_sha256=052df3a180fc30d6d46732cd391877a241d2a07cbcf815bc3e8c9343791b5301
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@1      1.113952   1.114631        1.000872    0.003862   5/11
+mul@2      2.856945   2.890585        1.010189    0.020385   2/11
+mul@3      3.991235   3.964630        0.995518    0.009427   8/11
+mul@4      6.030256   6.070635        0.993689    0.020155   7/11
+mul@5      9.389000   9.319817        1.001366    0.019033   5/11
+mul@6     12.548854  12.535620        1.003110    0.011866   5/11
+mul@7     16.718480  16.706314        1.003387    0.007401   5/11
+mul@8     21.283337  19.483468        0.915474    0.017669  11/11
+mul@16    60.764494  60.682421        0.999232    0.005264   7/11
+mul@32   194.427630 198.048554        1.011446    0.017389   3/11
+
+Only `mul@8` changes route. It improves 8.45 percent; all nine controls remain
+within 1.15 percent.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-mul8-exact-knob-promotion-97b3079f-m5max-20260817.json
+raw_json_sha256=a7ebacf9925ab80387a0758fb11103c39feaba91c8cc996e970ed6df43f8d811
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@8     21.279549  19.286764        0.905107    0.009855  21/21
+
+The exact source route wins every pair and improves 9.49 percent.
+
+Production-shape cross-check
+----------------------------
+
+Two separately linked production-shape binaries alternated order: the
+feature-off binary compiles the arm away; the candidate compiles the
+diagnostic selection away to true.
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-mul8-exact-production-promotion-97b3079f-m5max-20260817.json
+raw_json_sha256=56b7bded99731dff6610e0b6ebb6d154b976542c987a9d3392313d88640361da
+
+cell    feature_off_ns  candidate_ns  paired_median  paired_IQR  wins
+mul@8         20.532078     18.915333        0.923176    0.009246  21/21
+
+The production-shaped candidate wins every pair and improves 7.68 percent.
+
+Public three-lane row
+---------------------
+
+method=9 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-mul8-exact-public-97b3079f-m5max-20260817.json
+raw_json_sha256=d706116d91052ae2ce7a2c52ab5a6d74b6d360b55809875f8f0abe46f1a1c366
+
+cell   Tungsten_C_ns  tungsten-native_ns  GMP_ns  fastest
+mul@8         20.234               19.083  22.755  tungsten-native
+
+The native source route is 5.69 percent faster than Tungsten C and 16.14
+percent faster than GMP in this public lifecycle.
+
+Hardware counters
+-----------------
+
+command=tungsten flame --counters
+raw_text=/private/tmp/bigint-mul8-exact-production-counters-97b3079f-m5max-20260817.txt
+raw_text_sha256=82e37c3198a1be84c0b720efaf48bc5d485a04fbee19d6560bf0c262bfb1b36a
+
+The production candidate attributes 91.4 percent of sampled cycles to the
+sidemap-labeled inlined source body, 6.7 percent to the retained `bn_mul_1`
+first row, and 1.5 percent to TLS lookup. Aggregate IPC is 7.52, with no
+material steady-state miss rate. The independent linked-body certificate
+proves that the timed arithmetic is C's exact fixed eight-limb schedule.
+
+Focused validation
+------------------
+
+- compiled and interpreted public representation/differential checks pass;
+- the direct source/C differential passes 100,000 products;
+- distinct storage, both operand orders, both result widths, high-bit inputs,
+  and unchanged operands are covered;
+- identity, signed encodings, and neighboring widths remain outside the arm;
+- a real BigInt `*` reopen replaces the ordinary and direct seams;
+- production, feature-off, and diagnostic native self-tests pass;
+- compiler and spec LLVM modules assemble and verify under LLVM 22;
+- the self-hosted compiler reaches byte-identical stage-two/stage-three IR;
+- the alternate runtime configuration builds;
+- `make -C runtime runtime.o` and `git diff --check` pass; and
+- linked-body and hardware-counter route proofs pass.
+
+This is the exact-port checkpoint. Native row-kernel work remains separate.

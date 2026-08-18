@@ -1,0 +1,184 @@
+BIGINT POSITIVE TWENTY-ONE-BY-TWENTY-ONE-LIMB MULTIPLY — EXACT SOURCE CHECKPOINT
+=================================================================================
+
+Scope
+-----
+
+This checkpoint ports only the distinct, raw-positive-header, positive
+twenty-one-by-twenty-one-limb arm from `bigint_mul_any_routed` /
+`bigint_mul_positive_equal`. Native Tungsten preserves C's exact
+`bn_mul_eq21` decomposition:
+
+  - the same capacity-sixty-four hot allocation;
+  - row zero calls the unchanged generic `bn_mul_1` primitive with length
+    twenty-one;
+  - rows one through twenty call the unchanged tuned `bn_addmul_1_f21`
+    primitive in the same order and at the same result offsets; and
+  - the result header publishes positive size forty-one when limb forty-one
+    is zero, otherwise positive size forty-two.
+
+This is an exact outer-leaf port. Allocation, fixed-kernel selection, row
+sequencing, offsets, and publication move to native Tungsten; the fixed C
+kernel and row primitives remain the arithmetic implementation. The arm
+requires two distinct heap BigInts with raw positive twenty-one-limb headers.
+Pointer identity remains the existing square route; signs and neighboring
+widths retain their former routes. A genuine open-world BigInt `*` reopen
+remains observable.
+
+Build and route proof
+---------------------
+
+base_commit=ef750c55f6c64a13a182336ef88b5189aa40298f
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.2
+power=AC Power, 100 percent
+compiler=Homebrew clang 22.1.8
+gmp=6.3.0
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/compiler21-stage3
+compiler_sha256=bd2c729fb337d35112aded75c49ad5c8d37b78331dd53a000d6db0a5dec21923
+fixed_point_ll_sha256=c4b62b6ba8c9aa44cd0b5a5bf54f5d5c1ad9f356178c47a8255a1cace14f1962
+production_candidate=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-native-candidate
+production_candidate_sha256=db0664c94f338084cb388260f51e9059e90e69562af1d533d380bc1dac7f31f5
+production_feature_off=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-native-feature-off
+production_feature_off_sha256=3fe44e834040fdffc179654df371a3a6c18bc3315736cbd984ba23885a310de8
+diagnostic_same_binary=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-native-knob
+diagnostic_same_binary_sha256=e5540a378708876573f56c174af3d5851272871e0744e0342851784abe9fc2e6
+
+The linked strong `__w_bigint_mul21_src` contains the source body after LTO.
+It requests the exact capacity-sixty-four allocation, makes one hot call to
+`bn_mul_eq21`, tests result limb forty-one once, then publishes size forty-one
+or forty-two. Linked `bn_mul_eq21` calls generic `bn_mul_1` once with length
+twenty-one and `bn_addmul_1_f21` exactly twenty times. There is no generic
+multiply-selection call in the strong source body.
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic binary was built with
+`BN_BENCH_RUNTIME_MUL21_SRC_KNOB=1`. Alternating processes changed only
+`TUNGSTEN_BN_MUL21_SRC=0/1`.
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+raw_json=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-knob-screen.json
+raw_json_sha256=ed523922219d31704a960fc8bf0ae8f623ba371fad48f78a1e89f8f21f3906dd
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@1      1.100736   1.099408        1.001213    0.008430   4/11
+mul@2      2.763595   2.767475        0.999958    0.007425   6/11
+mul@3      3.860236   3.879324        0.998266    0.003663   8/11
+mul@4      5.881541   5.917984        0.999469    0.014003   6/11
+mul@8     18.495231  18.420589        1.001233    0.017965   4/11
+mul@12    38.917739  38.634744        1.000486    0.003617   4/11
+mul@15    53.706433  53.949037        1.002880    0.013400   5/11
+mul@16    59.775536  59.467899        0.996802    0.009057   7/11
+mul@17    67.204092  67.143064        0.999386    0.004733   7/11
+mul@18    88.118414  88.267148        0.998953    0.004921   7/11
+mul@21   110.574066 104.832686        0.948838    0.008532  11/11
+mul@24   129.156331 130.007784        1.007138    0.007610   2/11
+mul@32   191.858229 192.964674        1.002644    0.006969   4/11
+
+Only `mul@21` changes route. It improves 5.12 percent at the paired median.
+Every untouched control remains within 0.72 percent.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-knob-promotion.json
+raw_json_sha256=df900fb07c0186d841a202d338c299fcefed1dbc6561b83e7e315b0858ae3335
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@21   110.318011 104.491325        0.947456    0.001720  21/21
+
+The exact source route retains a 5.25 percent win in the longer same-binary
+campaign.
+
+Production-shape cross-check
+----------------------------
+
+Two separately linked production-shape binaries alternated order: the
+feature-off binary compiles the arm away; the candidate compiles the
+diagnostic selection away to true.
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+raw_json=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-production-screen.json
+raw_json_sha256=e7f2bcbc28e38ab671e0b285e60378861315c1fbe914625c5e4e90ad3c2797b5
+
+cell    feature_off_ns  candidate_ns  paired_median  paired_IQR  wins
+mul@1          1.092989      1.093077        1.000729    0.001030   4/11
+mul@2          2.795181      2.794669        0.999536    0.001217   7/11
+mul@3          3.868843      3.869960        1.000596    0.001173   5/11
+mul@4          5.838429      5.853317        1.002955    0.015416   4/11
+mul@8         18.344090     18.340189        0.998023    0.017378   7/11
+mul@12        38.496976     38.612021        1.002273    0.001914   2/11
+mul@15        53.531183     53.514578        1.000416    0.008345   4/11
+mul@16        59.167818     59.224115        1.003126    0.007723   3/11
+mul@17        66.963688     66.944757        1.000412    0.002407   5/11
+mul@18        87.787405     87.838995        1.001108    0.003697   4/11
+mul@21       109.371941    103.747826        0.948749    0.002559  11/11
+mul@24       128.658337    128.419135        0.997797    0.004616   8/11
+mul@32       191.540745    192.286079        1.001086    0.009069   4/11
+
+Every control's paired median remains within 0.32 percent. The target was
+promoted independently:
+
+method=31 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-production-promotion.json
+raw_json_sha256=9adc76b23520d81a7b3dd035c832c6f7657aafec8688a70c8cf6615ae40b4c2b
+
+cell    feature_off_ns  candidate_ns  paired_median  paired_IQR  wins
+mul@21       109.581208    104.062247        0.949455    0.002123  31/31
+
+The production candidate retains a 5.05 percent win across all 31 pairs.
+
+Public three-lane row
+---------------------
+
+method=9 internal runs; 110 ms target
+raw_json=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-public.json
+raw_json_sha256=c03767ab73cddb4d3b9783bc6c20d94028ba83bfbe5dd01f6a0a11cb5283bd02
+
+cell    Tungsten_C_ns  tungsten-native_ns  GMP_ns   fastest
+mul@21        108.534              103.772 112.025  tungsten-native
+
+In the public lifecycle, native Tungsten is 4.39 percent faster than direct
+Tungsten C and 7.37 percent faster than GMP.
+
+Hardware counters
+-----------------
+
+command=tungsten flame --counters rates
+raw_text=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-production-counters.txt
+raw_text_sha256=13a93b7a8bb4af5805909ec7b546fe84dac02e26a7a4b57f078ce5a36e820f0f
+svg=/Users/erik/.codex/worktrees/native-bigint-sqr-next/artifacts/mul21-production-counters.svg
+svg_sha256=f189ee8d1c2c1aece825d947126b4c6deab4565260bad97f3da97cf1be27e145
+
+The production candidate attributes 64.2 percent of sampled cycles to
+`bn_addmul_1_f21`, 18.5 percent to `bn_mul_eq21`, 12.3 percent to generic
+`bn_mul_1`, 4.0 percent to the retained exact builtin boundary, and 0.8
+percent to TLS lookup. The arithmetic leaf and row primitives therefore
+account for 95.0 percent of sampled cycles. Aggregate IPC is 6.50, with
+sampled steady-state miss rates rounding to zero. Generic
+multiply-selection frames are absent.
+
+Focused validation
+------------------
+
+- the direct source/C differential passes 100,000 products in 0.98 seconds;
+- compiled and interpreted public checks pass every named representation and
+  route control plus 1,000 randomized products;
+- distinct storage, both operand orders, both result widths, high-bit inputs,
+  and unchanged operands are covered;
+- identity, signed encodings, and neighboring widths remain outside the arm;
+- a real BigInt `*` reopen replaces the ordinary and direct seams;
+- production, feature-off, diagnostic, kernel-off, and alternate-dispatch
+  native self-tests pass;
+- compiler and spec LLVM modules assemble and verify under LLVM 22;
+- the self-hosted compiler reaches byte-identical stage-two/stage-three IR;
+- `BN_FROMSTR_FIXED_TOOM=0` and `BN_MUL_N1_FAST=0` configurations build and
+  self-test;
+- `make -C runtime runtime.o` and `git diff --check` pass; and
+- linked-body and hardware-counter route proofs pass.
+
+The remaining direct fixed equal-multiply leaf is 24. Native-only kernel
+redesign remains separate measured work.

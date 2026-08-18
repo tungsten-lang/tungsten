@@ -27,17 +27,21 @@ module Tungsten
              when /x86_64|amd64/i  then "x86_64"
              when /arm64|aarch64/i then "arm64"
              end
-      features = detect_features(os)
+      features = detect_features(os, arch)
       { os: os, arch: arch, features: features }
     end
 
-    def self.detect_features(os)
+    def self.detect_features(os, arch)
       features = []
       if os == "linux"
         features << "io_uring" if File.exist?("/proc/sys/kernel/io_uring_disabled") || File.exist?("/proc/sys/kernel/io_uring_group")
       end
       if os == "macos"
         features << "metal" if File.exist?("/System/Library/Frameworks/Metal.framework/Metal")
+      end
+      if arch == "arm64"
+        march = ENV["TUNGSTEN_MARCH_ARGS"].to_s
+        features << "cssc" if march.include?("apple-m5") || march.include?("+cssc")
       end
       features
     rescue

@@ -1,0 +1,151 @@
+BIGINT POSITIVE FOUR-BY-FOUR-LIMB MULTIPLY — EXACT SOURCE CHECKPOINT
+==================================================================
+
+Scope
+-----
+
+This checkpoint ports only the distinct, raw-positive-header, positive
+four-by-four-limb arm from `bigint_mul_any_routed` /
+`bigint_mul_positive_equal`. Native Tungsten preserves C's exact split:
+
+  - the same capacity-eight hot allocation;
+  - row zero calls the unchanged tuned `bn_mul_1(n=4)` C kernel;
+  - the remaining three four-limb add-multiply rows use C's literal linked
+    96-instruction arithmetic/load/store schedule;
+  - eight unconditional result stores; and
+  - positive size seven when the top limb is zero, otherwise size eight.
+
+This is not a flattened or approximate schoolbook replacement. The outer
+fixed leaf moves to native Tungsten while its deliberately retained row-zero
+primitive remains the exact C kernel. The runtime admits it only after the
+existing positive-pair block has already proved two distinct heap BigInts
+with raw positive headers. Pointer identity remains the separate `sqr@4`
+checkpoint. Sign overlays, negative headers, one-/two-/three-/five- and wider
+widths, and internal C callers keep their former paths. A genuine open-world
+BigInt `*` reopen remains observable.
+
+Build and route proof
+---------------------
+
+base_commit=587050cc
+host=Apple M5 Max, 18 logical CPUs, arm64 macOS 26.6.1
+power=Battery Power, 75 percent at screen start
+compiler=Homebrew clang 22.1.8
+gmp=6.3.0
+flags=--release --native --fast (-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5)
+compiler=/private/tmp/tungsten-compiler-mul4-stage3
+compiler_sha256=0c343f2b1b7b5d82d1db3365849d1864c51ddb89e84dc85aa06febdace1987bf
+fixed_point_ll_sha256=a9bb84073291fc63e6798d2eb721a04d3e159571272dc56ac72eb3f3ab9166bb
+production_candidate=/private/tmp/bench_big_math_tungsten_mul4_exact
+production_candidate_sha256=18009ad4ea260c1290cf711fb0506cb81c0569e8e939671cbbfcd846bfda6a80
+production_feature_off=/private/tmp/bench_big_math_tungsten_mul4_exact_feature_off
+production_feature_off_sha256=d341e1db96839b0454d817f0f9c67c4558e377e67495ed8a2bc9d858d5d16f16
+diagnostic_same_binary=/private/tmp/bench_big_math_tungsten_mul4_exact_knob
+diagnostic_same_binary_sha256=53467e80dc0161241137c9f60c9f9254a3488dd7c5c556c73dbeedb7e57cd2a3
+
+The benchmark compiler was invoked with the actual lowering environment
+`TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT=0`. The final timed loop calls `w_mul`
+and contains no call to `w_bigint_mul_builtin_exact`. Full-LTO counters
+attribute 80.7 percent of sampled instructions to `w_mul`, 14.3 percent to
+its intended `bn_mul_1` row-zero callee, and 4.4 percent to the allocator's
+TLS lookup. The aggregate IPC is 8.69 and the counters record no material
+cache/memory-system rate. This proves both the native outer route and the
+deliberately retained C primitive are measured.
+
+Exact linked arithmetic
+-----------------------
+
+The linked strong `__w_bigint_mul4_src` performs the capacity-eight hot
+allocation, loads the first operand word, and calls the same `_bn_mul_1` with
+literal `n=4`. The following native block has the same 96 instructions as
+C's linked remainder after only base-register/offset normalization. An
+automated extraction confirms identical 96-instruction mnemonic sequences.
+The source then performs C's exact top-limb size-seven/size-eight choice and
+publishes the header.
+
+Same-binary causal screen
+-------------------------
+
+The diagnostic binary was built with
+`BN_BENCH_RUNTIME_MUL4_SRC_KNOB=1`. Alternating processes changed only
+`TUNGSTEN_BN_MUL4_SRC=0/1`; code layout and every other source route were
+identical.
+
+method=11 alternating process pairs; 3 internal runs; 110 ms target
+raw_json=/private/tmp/bigint-mul4-exact-knob-screen-587050cc-m5max-20260817.json
+raw_json_sha256=b10ea7dbd8d3c0fa2c6cc230caf028207526b0651c138d34f5d403347fdc13a0
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@1      0.984924   0.984446        0.998277    0.008860   7/11
+mul@2      3.710144   3.733414        1.010286    0.023830   4/11
+mul@3      4.821025   4.807062        1.000766    0.056894   5/11
+mul@4      9.117342   7.487844        0.819041    0.009050  11/11
+mul@8     20.707853  20.735200        1.002173    0.011994   5/11
+mul@16    59.612564  59.681222        1.001121    0.002934   5/11
+mul@32   188.761876 188.440066        0.999081    0.004704   8/11
+
+Only `mul@4` changes route. It improves 18.10 percent in the screen; every
+untouched control is within 1.03 percent, including committed `mul@2/3`.
+
+Target promotion
+----------------
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-mul4-exact-knob-promotion-587050cc-m5max-20260817.json
+raw_json_sha256=b6dca9f8eb8853f7f8ebe21273d52fc7b2bde3e679e71b9327a8b574ee53507a
+
+cell    C-route_ns  source_ns  paired_median  paired_IQR  wins
+mul@4      9.140143   7.502356        0.820945    0.015761  21/21
+
+The exact source route wins every pair and reduces the open-world operation
+by 17.91 percent.
+
+Production-shape cross-check
+----------------------------
+
+Two separately linked production-shape binaries alternated order: the
+feature-off binary compiles the arm away, while the candidate compiles the
+runtime benchmark knob away to constant true.
+
+method=21 alternating process pairs; 3 internal runs; 300 ms target
+raw_json=/private/tmp/bigint-mul4-exact-production-promotion-587050cc-m5max-20260817.json
+raw_json_sha256=f9fc60f43f2043c8de38e6489ad050cf5f6dff89656393a235214340b7727eb4
+
+cell    feature_off_ns  candidate_ns  paired_median  paired_IQR  wins
+mul@4          8.218916      6.913528        0.838881    0.017524  21/21
+
+This independent production-layout check agrees with the causal result. Its
+16.11 percent figure is not substituted for the stronger same-binary claim.
+
+Public three-lane row
+---------------------
+
+method=9 internal runs; 110 ms target
+
+cell   Tungsten_C_ns  tungsten-native_ns  GMP_ns  fastest
+mul@4          6.818                6.827   9.083  tungsten
+
+Native source is within 0.14 percent of the separately linked direct C ABI
+and 24.83 percent faster than GMP. This row is parity, not a direct-C win.
+
+Focused validation
+------------------
+
+- compiled and interpreted public representation/differential checks pass;
+- the direct source/C differential passes 100,000 products;
+- distinct-equal storage, both operand orders, high-bit products, size-seven
+  and size-eight results, and unchanged input storage are covered;
+- identity, overlay-negative, negative-header, three-limb, and five-limb
+  controls remain outside the arm;
+- a real BigInt `*` reopen replaces the ordinary and direct seams;
+- production, feature-off, and both diagnostic native-lane self-tests pass;
+- emitted compiler and all three spec LLVM modules assemble and verify under
+  LLVM 22;
+- the self-hosted compiler reaches byte-identical stage-two/stage-three IR;
+- the runtime builds with the alternative `BN_MUL_N1_FAST=0` /
+  `BN_MUL_N1_SMALL_STRAIGHT=0` configuration;
+- `make -C runtime runtime.o` and `git diff --check` pass; and
+- exact linked-schedule and hardware-counter route proofs pass.
+
+This is the exact-port checkpoint. Porting `bn_mul_1` itself or changing the
+row decomposition remains a separate measured migration.

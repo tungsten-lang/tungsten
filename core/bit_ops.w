@@ -16,6 +16,14 @@
   -> .count_ones_u64(value) (u64) i64
     ccall_nobox("__w_bit_ctpop_u64", value)
 
+  # Number of zero bits above the most-significant set bit. As with the
+  # trailing forms, zero has no set bit and returns the full word width.
+  -> .leading_zeros_u64(value) (u64) i64
+    ccall_nobox("__w_bit_ctlz_u64", value)
+
+  -> .leading_zeros_u32(value) (u32) i64
+    ccall_nobox("__w_bit_ctlz_u32", value)
+
   # Number of zero bits below the least-significant set bit. Zero has no set
   # bit, so it returns the word width. Native emission uses llvm.cttz with
   # is_zero_poison=false, preserving this defined-zero contract.

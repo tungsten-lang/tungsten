@@ -1,0 +1,76 @@
+EXACT POSITIVE ADD1@6 CHECKPOINT
+
+parent_commit=89d59e349e004b7a7a0a215b2d3251e6a75839b0
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+
+PORT CONTRACT
+
+The positive 6-limb by positive 1-limb arm is C's literal fixed schedule:
+
+  ldp x4, x5, [src]
+  ldp x6, x7, [src, #16]
+  ldp x8, x9, [src, #32]
+  adds x4, x4, word
+  adcs x5, x5, xzr
+  adcs x6, x6, xzr
+  adcs x7, x7, xzr
+  adcs x8, x8, xzr
+  adcs x9, x9, xzr
+  stp x4, x5, [dst]
+  stp x6, x7, [dst, #16]
+  stp x8, x9, [dst, #32]
+  cset carry, cs
+
+It retains the cap-six hot result, size-six publication, and exact full-carry
+grow-to-seven construction.  There is deliberately no carry-death branch,
+copy shortcut, store reschedule, or in-place specialization yet.
+
+MATCHED A/B
+
+baseline=/private/tmp/add1-5-native-exact
+candidate=/private/tmp/add1-6-native-exact
+command=alternating BIN --sweep add1 WIDTH 1 110
+pairs=11 per width
+
+width  baseline_ns  candidate_ns  candidate/baseline  paired_IQR  wins
+5      2.625398     2.530580      0.961952            0.009463    10/11
+6      3.958210     2.678539      0.676911            0.005911    11/11
+7      4.032054     4.078665      1.011560            0.022532     3/11
+
+The @7 result is inside the unresolved band and has substantially wider
+dispersion than the target.  It remains on C and is the next literal port.
+
+PUBLIC ROW
+
+command=bin/tungsten bench bignum --operations add1 --sizes 5,6,7 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+add1@6 C/native/GMP=1.751/2.673393/2.352 ns
+
+The native exact port remains 52.7% slower than C and 13.7% slower than GMP.
+
+COUNTER ROUTE PROOF
+
+command=bin/tungsten flame --counters -d 3 --top 8 -- /private/tmp/add1-6-native-exact --sweep add1 6 1 5000
+
+  BigInt#+__ovl_BigInt   47.7% cycles
+  __bigint_add1_6_exact  46.3% cycles
+  _tlv_get_addr           5.6% cycles
+
+No retained C word kernel appears.  The sampled hot functions report IPC 9.04
+and zero cache/memory misses per kilo-instruction.
+
+FOCUSED VALIDATION
+
+- compiled and interpreted bigint_add1_6_source_spec passed all 17 checks;
+- no carry, shallow carry death, four-limb propagation, full 6->7 growth,
+  exact sizes, signs, neighbors, and round trips match the C oracle;
+- native harness self-test passed all operations;
+- runtime/runtime.o rebuilt and exports w_bigint_add1_6_finish_raw;
+- final leaf has the exact schedule above, no frame, and no nested call;
+- git diff --check passed.

@@ -1,0 +1,79 @@
+NATIVE FIXED ADD-WORD DISPATCH FOLLOW-UP
+
+parent_commit=7862117fc144ac57254d22795d4eb7e4648cc60f
+date=2026-08-16
+host=Apple M5 Max; arm64 macOS 26.6.1; AC power
+compiler=Homebrew clang 22.1.8
+flags=-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64
+gmp=6.3.0
+
+SCOPE
+
+The exact 2x1, 3x1, and 4x1 arithmetic/storage leaves remain unchanged.  This
+separate native-only follow-up replaces their repeated `an == N && bn == 1`
+tests with one `bn == 1` gate and a compact source `case an` selector:
+
+  1       -> unchanged C w_bigint_add boundary
+  2,3,4   -> separately checkpointed exact native leaves
+  default -> unchanged C w_bigint_add boundary
+
+Final AArch64 lowering is a compact comparison tree, not a jump table.  The
+default preserves every unported word-width route.  No arithmetic, allocation,
+growth, normalization, or ownership policy changes in this checkpoint.
+
+MATCHED A/B
+
+baseline=/private/tmp/add1-4-native-exact
+candidate=/private/tmp/add1-fixed-dispatch-final
+command=alternating BIN --sweep add1 WIDTH 1 110
+pairs=11 per width
+
+width  baseline_ns  candidate_ns  candidate/baseline  paired_IQR  wins
+1      3.043127     2.989524      0.983258            0.007070    11/11
+2      3.605842     2.336224      0.647207            0.003410    11/11
+3      2.615209     2.531523      0.966354            0.009478    11/11
+4      2.532380     2.431183      0.959241            0.004363    11/11
+5      4.194797     3.921195      0.934821            0.018051    11/11
+6      4.176421     3.929013      0.942480            0.026390    11/11
+7      4.342445     4.037206      0.934111            0.024097    11/11
+8      4.214702     4.052764      0.958117            0.037493    11/11
+16     4.837788     4.484910      0.924795            0.018536    11/11
+32     5.414678     5.149588      0.954672            0.010704    11/11
+64     7.454963     7.023379      0.945928            0.019409    11/11
+
+The default C tail also improves the unported controls: the win comes from
+skipping repeated generic source magnitude/sign setup, not from silently
+changing their C arithmetic.
+
+FINAL PUBLIC MATRIX
+
+binary=/private/tmp/add1-fixed-dispatch-final
+command=bin/tungsten bench bignum --operations add1 --sizes 1,2,3,4,5,8,16,32,64 --accurate --no-capacity --json
+runs=9
+target_ms=110
+
+width  C_ns   native_ns  GMP_ns
+1      1.391  2.993724   1.463
+2      1.394  2.324665   1.708
+3      1.866  2.396508   1.837
+4      1.705  2.430291   2.090
+5      1.743  3.731173   2.314
+8      1.872  3.969766   2.923
+16     2.607  4.460142   5.003
+32     3.497  5.105246   8.817
+64     5.171  7.111811   15.986
+
+The native lane remains behind C at every row in this screen.  It remains
+behind GMP through width eight and wins from width sixteen.  These are honest
+post-dispatch gaps for the subsequent exact wider ports and native-only phase.
+
+FOCUSED VALIDATION
+
+- candidate native harness self-test passed all operations;
+- focused LLVM assembled and verified;
+- exact 2x1, 3x1, and 4x1 source specs passed against the candidate;
+- final disassembly contains one bn==1 gate, arms 1..4, and the default C
+  tail; it is a comparison tree rather than a jump table;
+- rejected alternatives included a case without explicit 1/default and an
+  explicit 1..8 selector; both regressed controls and are not retained;
+- git diff --check passed.

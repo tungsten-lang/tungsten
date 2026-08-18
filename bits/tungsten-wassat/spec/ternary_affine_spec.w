@@ -258,7 +258,7 @@ describe "Wassat exact ternary-affine shortcut" ->
     proof = "/tmp/wassat-ternary-affine-proof-mode.drat"
     output = "/tmp/wassat-ternary-affine-proof-mode.out"
     expect(write_file(input, ternary_affine_cnf(5, equations))).to eq(true)
-    z = ccall("__w_unlink", proof)
+    File.unlink(proof) if File.exist?(proof)
     cmd = "(" + bin + " " + input + " --drat " + proof + " > " + output + " 2>&1); test $? -eq 10"
     ok = system(cmd)
     expect(ok).to eq(true)

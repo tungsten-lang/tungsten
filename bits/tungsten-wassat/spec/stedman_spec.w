@@ -113,7 +113,7 @@ describe "Wassat Stedman triples specialist" ->
     proof = "/tmp/wassat-stedman-proof-mode.wrat"
     output = "/tmp/wassat-stedman-proof-mode.out"
     expect(write_file(input, stedman_fixture_text(false))).to eq(true)
-    z = ccall("__w_unlink", proof)
+    File.unlink(proof) if File.exist?(proof)
     cmd = "(" + bin + " " + input + " --proof " + proof
     cmd += " > " + output + " 2>&1); test $? -eq 10"
     expect(system(cmd)).to eq(true)

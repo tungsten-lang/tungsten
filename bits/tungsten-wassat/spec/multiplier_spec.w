@@ -80,7 +80,7 @@ describe "Wassat multiplier shortcut" ->
     proof = "/tmp/wassat-multiplier-proof-mode.drat"
     output = "/tmp/wassat-multiplier-proof-mode.out"
     expect(write_file(input, multiplier_2x2_cnf(6))).to eq(true)
-    z = ccall("__w_unlink", proof)
+    File.unlink(proof) if File.exist?(proof)
     cmd = "(" + bin + " " + input + " --drat " + proof + " > " + output + " 2>&1); test $? -eq 10"
     ok = system(cmd)
     expect(ok).to eq(true)

@@ -98,7 +98,7 @@ describe "Wassat sum-of-three-cubes shortcut" ->
     proof = "/tmp/wassat-sum3-proof-mode.drat"
     output = "/tmp/wassat-sum3-proof-mode.out"
     expect(write_file(input, sum3_fixture_cnf(91))).to eq(true)
-    z = ccall("__w_unlink", proof)
+    File.unlink(proof) if File.exist?(proof)
     cmd = "(" + bin + " " + input + " --drat " + proof
     cmd += " > " + output + " 2>&1); test $? -eq 10"
     expect(system(cmd)).to eq(true)

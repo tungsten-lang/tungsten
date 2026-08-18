@@ -102,7 +102,28 @@
   formula["boxed"] = true
   clauses
 
+# Interpreter-only test double for the native parser. Algorithm specs need the
+# flat parser result shape, not the C scanner itself; build that shape from the
+# independently validated boxed parser so those specs do not require a native
+# compile/link. The native-parser benchmark and compiled contracts still call
+# __w_parse_dimacs directly.
+-> wassat_parse_cnf_test_stub(text)
+  parsed = wassat_parse_cnf(text)
+  lits = []
+  offs = []
+  lens = []
+  parsed["clauses"].each -> (clause)
+    offs.push(lits.size)
+    lens.push(clause.size)
+    clause.each -> (lit)
+      lits.push(lit)
+  { "nvars": parsed["nvars"], "clauses": parsed["clauses"], "boxed": true,
+    "flat_lits": lits, "flat_offs": offs, "flat_lens": lens,
+    "flat_ncl": parsed["clauses"].size, "flat_nlits": lits.size }
+
 -> wassat_parse_cnf_native(text)
+  if env("TUNGSTEN_WASSAT_PARSE_STUB") == "1"
+    return wassat_parse_cnf_test_stub(text)
   # Every clause needs at least a "0" terminator plus a separator (2 bytes),
   # and every literal at least a digit plus a separator (2 bytes), so
   # text.size/2 bounds BOTH counts. The old clause bound of text.size/4

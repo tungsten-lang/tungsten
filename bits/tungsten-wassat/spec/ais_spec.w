@@ -167,7 +167,7 @@ describe "Wassat AIS sequential-counter certificate" ->
       "exact sequential-counter clique-cover certificate"
     )).to eq(true)
 
-    z = ccall("__w_unlink", proof)
+    File.unlink(proof) if File.exist?(proof)
     proof_cmd = "(" + bin + " " + input + " --proof " + proof + " > " + proof_out + " 2>&1); test $? -eq 20"
     expect(system(proof_cmd)).to eq(true)
     proved_text = read_file(proof_out)

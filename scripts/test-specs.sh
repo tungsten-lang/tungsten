@@ -61,14 +61,18 @@ record_result() {
     return
   fi
 
-  printf '%s\n' "$output"
-
   if [[ "$status" -ne 0 ]]; then
+    printf '%s\n' "$output"
     echo "FAIL [$name] exited $status" >&2
     fail=1
   elif printf '%s\n' "$output" | grep -Eq '^FAIL([ :]|$)'; then
+    printf '%s\n' "$output"
     echo "FAIL [$name] emitted failing checks" >&2
     fail=1
+  elif [[ "${TUNGSTEN_SPECS_VERBOSE:-0}" == "1" ]]; then
+    printf '%s\n' "$output"
+  else
+    echo "PASS [$name]"
   fi
 }
 
@@ -167,7 +171,7 @@ run_compiled_spec() {
   fi
 
   set +e
-  output="$("$out" 2>&1)"
+  output="$(TUNGSTEN_SPEC_QUIET=1 "$out" 2>&1)"
   status=$?
   set -e
   record_result "$name" "$output" "$status"
@@ -180,9 +184,9 @@ run_interpreter_spec() {
   local status
 
   name="$(basename "${path%.w}")"
-  echo "run $path"
+  echo "interpret $path"
   set +e
-  output="$(TUNGSTEN_INTERPRETED_SPEC=1 "$TUNGSTEN" run "$path" 2>&1)"
+  output="$(TUNGSTEN_INTERPRETED_SPEC=1 TUNGSTEN_SPEC_QUIET=1 "$TUNGSTEN" run --interpret "$path" 2>&1)"
   status=$?
   set -e
   record_result "$name" "$output" "$status"
@@ -240,7 +244,7 @@ run_interpreter_reject_spec() {
 
   echo "run+reject $path"
   set +e
-  output="$(TUNGSTEN_INTERPRETED_SPEC=1 "$TUNGSTEN" run "$path" 2>&1)"
+  output="$(TUNGSTEN_INTERPRETED_SPEC=1 "$TUNGSTEN" run --interpret "$path" 2>&1)"
   status=$?
   set -e
   if [[ "$status" -eq 0 ]]; then
@@ -267,15 +271,14 @@ run_wassat_spec() {
   local failed
 
   name="$(basename "${path%.w}")"
-  # Compile-and-run set, mirroring benchmarks/gate.sh: these exercise the
-  # native DIMACS parser, process portfolio, or atomic-cancellation ABI that
-  # exist only in compiled programs. solver_spec belongs here too: its native
-  # CAS/conflict-ticket regressions are part of the default correctness gate,
-  # and compiling avoids the interpreter's tens-of-minutes runtime. The
-  # interpreted remainder (sls, incremental, trim, explain,
-  # algebra_certificate) stays interpreted here.
+  # Compile only suites whose contract or practical runtime requires native
+  # code: the CLI/process portfolio, atomic-CAS solver paths, and the few
+  # exhaustive recognizer searches that are prohibitively slow in the tree
+  # walker. Ordinary recognizer/solver semantics use the interpreter plus the
+  # native-parser-shaped test double in cnf.w; their end-to-end CLI examples
+  # still invoke the separately compiled Wassat binary.
   case "$name" in
-    solver_spec|cli_spec|preprocess_spec|portfolio_spec|multiplier_spec|ternary_affine_spec|ais_spec|coloring_spec|covering_spec|directed_kernel_spec|local_core_spec|latin_csp_spec|fermat_spec|sum_of_three_cubes_spec|mdp_spec|automata_sync_spec|edge_matching_spec|sliding_puzzle_spec|stedman_spec|hantzsche_wendt_spec|knight_tour_spec)
+    solver_spec|portfolio_spec|ternary_affine_spec|covering_spec|directed_kernel_spec|latin_csp_spec|hantzsche_wendt_spec|knight_tour_spec)
       compile_wassat_spec=1 ;;
     *)
       compile_wassat_spec=0 ;;
@@ -288,13 +291,20 @@ run_wassat_spec() {
       return
     fi
     set +e
-    output="$(WASSAT_TEST_BIN="$wassat_bin" "$spec_bin" 2>&1)"
+    output="$(TUNGSTEN_SPEC_QUIET=1 WASSAT_TEST_BIN="$wassat_bin" "$spec_bin" 2>&1)"
     status=$?
     set -e
   else
-    echo "run $path (WASSAT_TEST_BIN=$wassat_bin)"
+    echo "interpret $path (WASSAT_TEST_BIN=$wassat_bin)"
     set +e
-    output="$(WASSAT_TEST_BIN="$wassat_bin" "$TUNGSTEN" run "$path" 2>&1)"
+    # Specs launch the compiled CLI for end-to-end assertions. Keep the
+    # interpreter-only parser double out of that child process: it needs the
+    # real flat native parser result, even though its parent spec is walking
+    # the source tree.
+    output="$(TUNGSTEN_INTERPRETED_SPEC=1 TUNGSTEN_SPEC_QUIET=1 \
+      TUNGSTEN_WASSAT_PARSE_STUB=1 \
+      WASSAT_TEST_BIN="env -u TUNGSTEN_WASSAT_PARSE_STUB -u TUNGSTEN_INTERPRETED_SPEC $wassat_bin" \
+      "$TUNGSTEN" run --interpret "$path" 2>&1)"
     status=$?
     set -e
   fi

@@ -217,7 +217,7 @@ describe "Tungsten Wassat CLI" ->
       alias_path = "/tmp/wassat-cli-alias-proof.wrat"
       body = "p cnf 1 1\n1 0\n"
       z = write_file(input, body)
-      z = ccall("__w_unlink", alias_path)
+      File.unlink(alias_path) if File.exist?(alias_path)
       expect(system("ln " + input + " " + alias_path)).to eq(true)
       ok = system(bin + " " + input + " --proof " + alias_path + " > /tmp/wassat-cli-alias.out 2>&1")
       expect(ok).to eq(false)

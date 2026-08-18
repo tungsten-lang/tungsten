@@ -175,7 +175,7 @@ describe "Wassat Minimum Disagreement Parity shortcut" ->
     proof = "/tmp/wassat-mdp-proof-mode.drat"
     output = "/tmp/wassat-mdp-proof-mode.out"
     expect(write_file(input, mdp_fixture_cnf)).to eq(true)
-    z = ccall("__w_unlink", proof)
+    File.unlink(proof) if File.exist?(proof)
     cmd = "(" + bin + " " + input + " --drat " + proof
     cmd += " > " + output + " 2>&1); test $? -eq 10"
     expect(system(cmd)).to eq(true)

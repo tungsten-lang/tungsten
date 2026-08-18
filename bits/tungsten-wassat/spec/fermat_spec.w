@@ -118,7 +118,7 @@ describe "Wassat Fermat circuit shortcut" ->
     proof = "/tmp/wassat-fermat-proof-mode.drat"
     output = "/tmp/wassat-fermat-proof-mode.out"
     expect(write_file(input, fermat_fixture_cnf(15))).to eq(true)
-    z = ccall("__w_unlink", proof)
+    File.unlink(proof) if File.exist?(proof)
     cmd = "(" + bin + " " + input + " --drat " + proof
     cmd += " > " + output + " 2>&1); test $? -eq 10"
     expect(system(cmd)).to eq(true)

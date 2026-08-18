@@ -1855,8 +1855,9 @@
         // Loader#autoload_pass so core classes (Array/Hash/…) still load.
         // Nested load_program_ast (from autoload / use under Tungsten)
         // falls through so @loaded_files tracking stays correct.
-        // MUST stay off for `tungsten build` stage1/stage2 identity —
-        // C AST can drift from the canonical parser.
+        // Bootstrap/build may hand a fast-built stage 1 to the identity check
+        // only while scripts/test-fast-parse-parity.sh proves exact canonical
+        // parity at the emitted-LLVM boundary.
         if (vm.fast_parse_enabled && has_receiver &&
             tc_kind(receiver) == TC_VAL_OBJECT &&
             object_is_class(tc_as_object(receiver), "Loader", 6) && name_len == 16 &&

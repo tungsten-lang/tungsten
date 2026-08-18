@@ -4,8 +4,9 @@
  * uses parse_ast.c instead of running the Tungsten lexer/parser as
  * bytecode. Measured ~35× faster lex+parse of the compiler sources.
  *
- * NOT used for `tungsten build` stage1/stage2 identity: C AST can drift
- * from the Tungsten parser. Bootstrap only needs a working compiler binary.
+ * The bootstrap may hand this stage 1 to the fixed-point build only while
+ * scripts/test-fast-parse-parity.sh proves byte-identical LLVM against the
+ * canonical parser. Any AST contract added in parser.w must be mirrored here.
  */
 
 #include "tc.h"
@@ -77,6 +78,50 @@ static int fl_ast_text_eq(TcAstValue value, const char *text) {
 static int fl_ast_node_is(TcAstValue value, const char *node) {
   TcAstValue *node_value = fl_ast_get(value, "node");
   return node_value && fl_ast_text_eq(*node_value, node);
+}
+
+static int fl_ast_parser_stamps_source_path(TcAstValue value) {
+  if (fl_ast_node_is(value, "method_def") || fl_ast_node_is(value, "fn_def") ||
+      fl_ast_node_is(value, "class_def") || fl_ast_node_is(value, "module_def") ||
+      fl_ast_node_is(value, "trait_def")) {
+    return 1;
+  }
+  if (!fl_ast_node_is(value, "call")) return 0;
+  TcAstValue *receiver = fl_ast_get(value, "receiver");
+  TcAstValue *name = fl_ast_get(value, "name");
+  if (!receiver || !name || !fl_ast_node_is(*receiver, "class_ref")) return 0;
+  TcAstValue *receiver_name = fl_ast_get(*receiver, "name");
+  return receiver_name && fl_ast_text_eq(*receiver_name, "Tungsten") &&
+         (fl_ast_text_eq(*name, "PROTECT_THE_CORE!") ||
+          fl_ast_text_eq(*name, "STOP_THE_PRESS!") ||
+          fl_ast_text_eq(*name, "LOCK_THE_DOORS!"));
+}
+
+/* Mirror parser.w's constructor-level source_path writes. These definitions
+ * can be nested under `on` guards or class/module bodies, so top-level
+ * stamping alone is insufficient. Walk the C AST while it is still a tree;
+ * source_path itself is scalar, and the AST arena owns the shared value. */
+static int fl_stamp_parser_source_paths(TcAstValue value, TcAstValue source_path,
+                                        TcError *err) {
+  if (value.kind == TC_AST_HASH && value.as.hash) {
+    if (fl_ast_parser_stamps_source_path(value) && !fl_ast_get(value, "source_path") &&
+        !tc_ast_hash_set(value, "source_path", source_path, err)) {
+      return 0;
+    }
+    for (size_t i = 0; i < value.as.hash->count; i++) {
+      if (strcmp(value.as.hash->items[i].key, "source_path") == 0) continue;
+      if (!fl_stamp_parser_source_paths(value.as.hash->items[i].value, source_path, err)) {
+        return 0;
+      }
+    }
+  } else if (value.kind == TC_AST_ARRAY && value.as.array) {
+    for (size_t i = 0; i < value.as.array->count; i++) {
+      if (!fl_stamp_parser_source_paths(value.as.array->items[i], source_path, err)) {
+        return 0;
+      }
+    }
+  }
+  return 1;
 }
 
 static char *fl_canonicalize_path(const char *path, TcError *err) {
@@ -204,8 +249,23 @@ static int fl_flatten_program(const char *path, const unsigned char *flags, size
     return 1; /* empty */
   }
 
+  /* Parser#parse_program attaches the declaring file to every top-level
+   * occurrence-local node before Loader flattens the use graph. The C fast
+   * loader bypasses that parser, so mirror the sparse source_path contract on
+   * its Hash AST. Share one string value per file, just as the canonical
+   * parser shares @file; inline/interned/singleton nodes remain unstamped. */
+  TcAstValue source_path = tc_ast_string_copy(path, strlen(path), err);
+  if (source_path.kind != TC_AST_STRING) {
+    tc_ast_free(file_ast);
+    return 0;
+  }
+
   for (size_t i = 0; i < file_exprs->as.array->count; i++) {
     TcAstValue expr = file_exprs->as.array->items[i];
+    if (!fl_stamp_parser_source_paths(expr, source_path, err)) {
+      tc_ast_free(file_ast);
+      return 0;
+    }
     if (fl_ast_node_is(expr, "use")) {
       TcAstValue *use = fl_ast_get(expr, "path");
       if (!use || use->kind != TC_AST_STRING) continue;
@@ -235,6 +295,11 @@ static int fl_flatten_program(const char *path, const unsigned char *flags, size
       /* AST storage is a process-lifetime bump arena and tc_ast_free is a
        * no-op, so the flattened program can retain the parsed node directly.
        * Deep-cloning every expression duplicated the entire compiler AST. */
+      if (tc_ast_node_occurrence_local(expr) && !fl_ast_get(expr, "source_path") &&
+          !tc_ast_hash_set(expr, "source_path", source_path, err)) {
+        tc_ast_free(file_ast);
+        return 0;
+      }
       if (!tc_ast_array_push(*exprs_out, expr, err)) {
         tc_ast_free(file_ast);
         return 0;

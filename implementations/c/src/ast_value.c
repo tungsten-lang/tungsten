@@ -321,6 +321,24 @@ static int canonical_node_kind(const TcAstHash *hash) {
   return -1;
 }
 
+int tc_ast_node_occurrence_local(TcAstValue value) {
+  if (value.kind != TC_AST_HASH || !value.as.hash) return 0;
+  int kind = canonical_node_kind(value.as.hash);
+  if (kind < 1 || kind > (int)W_AST_KIND_MAX ||
+      W_AST_KIND_FIELD_COUNT[kind] == 0) {
+    return 0;
+  }
+
+  /* Keep this in lockstep with compiler/lib/parser.w:parse_program.
+   * Slab fields have ordinary offsets below OFFSET_INLINE; cached Bool is
+   * explicitly excluded because its two handles are shared process-wide.
+   * Inline, interned, and singleton nodes likewise cannot own provenance. */
+  uint8_t storage = W_AST_KIND_STORAGE[kind];
+  if (storage != W_AST_STORAGE_SLAB && storage != W_AST_STORAGE_CACHED) return 0;
+  const char *name = W_AST_KIND_NAME[kind];
+  return name && strcmp(name, "bool") != 0;
+}
+
 void tc_ast_print_canonical(TcAstValue value, FILE *out) {
   switch (value.kind) {
     case TC_AST_NIL:

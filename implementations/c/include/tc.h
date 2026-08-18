@@ -822,6 +822,10 @@ TcAstValue tc_ast_hash_new(TcError *err);
 TcAstValue tc_ast_clone(TcAstValue value, TcError *err);
 int tc_ast_array_push(TcAstValue array, TcAstValue value, TcError *err);
 int tc_ast_hash_set(TcAstValue hash, const char *key, TcAstValue value, TcError *err);
+// True when parser.w may attach occurrence-specific sparse metadata to this
+// AST node. Mirrors Parser#parse_program's slab/cached-node rule while
+// excluding inline, interned, singleton, and shared Bool handles.
+int tc_ast_node_occurrence_local(TcAstValue value);
 void tc_ast_free(TcAstValue value);
 void tc_ast_print_canonical(TcAstValue value, FILE *out);
 void tc_ast_print(TcAstValue value, FILE *out);

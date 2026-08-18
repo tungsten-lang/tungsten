@@ -155,7 +155,7 @@ kernel void kv_write_pair(
   v_cache[cache_i] = v_now[token * kv_dim + i];
 }
 
-constant int PAIR_MAX_DECODE_POS = 128;
+constant int PAIR_MAX_DECODE_POS = 640;
 
 [[max_total_threads_per_threadgroup(256)]]
 kernel void sdpa_decode_pair_hd256(

@@ -9,3 +9,5 @@ use core/numeric/rational
 use core/combinatorics/support
 use core/combinatorics/graph
 use core/combinatorics/coding
+use core/combinatorics/exact_cover
+use core/combinatorics/polyomino

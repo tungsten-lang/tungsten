@@ -304,6 +304,83 @@ while i < MAX_K
 -> time_repeated_single(spec)
   median3(one_repeated_single_sample(spec), one_repeated_single_sample(spec), one_repeated_single_sample(spec))
 
+# ---------------------------------------------------------------------------
+# Automatic findings.
+#
+# This sweep used to report every candidate as a ratio and leave the reading to
+# a human. That is how a real defect hid in plain sight: quad/quint sat at
+# 0.96x and 0.77x on mlp-down -- a FUSED multi-row kernel slower than simply
+# issuing that many single-row qmvs -- printed as unremarkable numbers for
+# months. A tuner should not just rank candidates, it should assert the
+# properties a candidate is supposed to have and shout when one is violated.
+findings = []
+
+# A fused width-W kernel exists to share ONE weight stream across W rows. If it
+# loses to W separate single-row qmvs it is not doing its job. That is a defect,
+# not a tuning outcome.
+-> check_regression(spec)
+  label = spec[0]
+  name = spec[1]
+  fused_us = spec[2]
+  naive_us = spec[3]
+  if fused_us > naive_us
+    findings.push("REGRESSION  " + label + " / " + name + ": fused " + fused_us.to_s
+      + " us vs " + naive_us.to_s + " us for " + name
+      + " separate qmvs (" + (naive_us / fused_us).to_s
+      + "x) -- the fused kernel is SLOWER than not fusing")
+
+# Marginal cost of each additional verified row. A fused kernel sitting on its
+# bandwidth floor adds almost nothing per row, because the weights are streamed
+# once regardless. A sudden jump is an occupancy or register cliff, and it is
+# invisible in the per-width ratios: each width can look fine against its own
+# naive baseline while the ladder hides a step. Extrapolating across such a step
+# is exactly how a schedule decision gets made on a wrong number.
+-> check_cliff(spec)
+  label = spec[0]
+  times = [spec[1], spec[2], spec[3], spec[4], spec[5]]
+  marg = []
+  i = 1
+  while i < times.size()
+    marg.push(times[i] - times[i - 1])
+    i = i + 1
+  msg = "  marginal per row (w1->w5): "
+  i = 0
+  noisy = false
+  while i < marg.size()
+    msg = msg + "+" + marg[i].to_s + " "
+    if marg[i] < ~0.0 then noisy = true
+    i = i + 1
+  << msg
+  # A negative marginal means a wider kernel measured FASTER than a narrower
+  # one, which cannot be true of the work and means this run is contended or
+  # thermally drifting. Say so rather than emitting cliff findings from it.
+  if noisy
+    findings.push("NOISE       " + label
+      + ": a marginal is negative -- a wider kernel timed faster than a narrower"
+      + " one. The box was contended; re-run before trusting this shape.")
+    return
+  # Screen only. Isolated timings on this kernel family are a known way to get
+  # the wrong answer (a 44-89 MB tile re-read back to back is cache-served,
+  # while the real forward streams ~15 GB), so a hit here is a prompt to confirm
+  # in situ with ARGV[7]="row-scan", not a verdict.
+  worst_i = 0 - 1
+  worst_ratio = ~3.0
+  i = 1
+  while i < marg.size()
+    prev = marg[i - 1]
+    cur = marg[i]
+    if prev > ~0.0 && cur > ~0.0 && cur > times[0] * ~0.20 && cur > prev * worst_ratio
+      worst_ratio = cur / prev
+      worst_i = i
+    i = i + 1
+  if worst_i >= 0
+    findings.push("CLIFF?      " + label + ": row " + (worst_i + 2).to_s
+      + " costs +" + marg[worst_i].to_s + " us against row " + (worst_i + 1).to_s
+      + "'s +" + marg[worst_i - 1].to_s + " us (" + worst_ratio.to_s
+      + "x) -- suspected occupancy/register cliff. CONFIRM IN SITU with"
+      + " qwen38_mlx.w ARGV[7]=\"row-scan\" before acting; do not extrapolate"
+      + " the ladder past it either way.")
+
 -> run_shape(shape)
   label = shape[0]
   name = shape[1]
@@ -467,6 +544,12 @@ while i < MAX_K
   deep_msg = deep_msg + "x), err=" + quint_err.to_s
   << deep_msg
 
+  check_regression([label, "pair", pair_best, two_us])
+  check_regression([label, "triplet", triplet_best, three_us])
+  check_regression([label, "quad", quad_us, four_us])
+  check_regression([label, "quint", quint_us, five_us])
+  check_cliff([label, best, pair_best, triplet_best, quad_us, quint_us])
+
 shapes = [
   ["linear qkv", "model.language_model.layers.0.linear_attn.in_proj_qkv.weight", 5120, 10240],
   ["linear z", "model.language_model.layers.0.linear_attn.in_proj_z.weight", 5120, 6144],
@@ -488,4 +571,16 @@ while i < shapes.size()
   i = i + 1
 
 st.close
-<< "autotune done"
+<< ""
+if findings.size() == 0
+  << "autotune done -- no regressions or cliffs detected"
+else
+  << "=============================================================="
+  << "AUTOTUNE FINDINGS (" + findings.size().to_s + ") -- these are defects, not rankings"
+  << "=============================================================="
+  fi = 0
+  while fi < findings.size()
+    << findings[fi]
+    fi = fi + 1
+  << "=============================================================="
+  << "autotune done -- " + findings.size().to_s + " finding(s)"

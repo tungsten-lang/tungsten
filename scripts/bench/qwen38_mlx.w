@@ -60,7 +60,7 @@ ATTN_SCALE = ~1.0 / Math.sqrt(~0.0 + HEAD_DIM)
 ROT_DIM = 64
 ROT_HALF = ROT_DIM / 2
 ROPE_BASE = ~10000000.0
-MAX_POS = 128
+MAX_POS = 640
 MTP_DRAFT_PREFIX = 98304
 MTP_DRAFT_CONTROL_START = 248044
 MTP_DRAFT_CONTROL_COUNT = 26
@@ -78,10 +78,22 @@ full_draft_vocab = legacy_mtp || (ARGV.size() > 4 && ARGV[4] == "full-draft-voca
 profile_components = ARGV.size() > 4 && ARGV[4] == "profile"
 profile_prompt_tokens = ARGV.size() > 5 ? ARGV[5].to_i() : 5
 triplet_variant = ARGV.size() > 6 ? ARGV[6] : "auto"
+# A full MTLBarrierScopeBuffers barrier drains EVERY outstanding buffer write on
+# the encoder. There are ~620 of them in one width-3 verify, which is most of the
+# gap between the verify's measured 36.5 ms and its ~26 ms weight-streaming
+# floor. Apple documents memoryBarrierWithResources as cheaper when only a few
+# buffers carry the RAW dependency -- which is true at every site below, where
+# the dependency is one or two named scratch buffers. "fullbar" restores the old
+# behaviour so the change stays measurable.
+scoped_barriers = !(ARGV.size() > 6 && ARGV[6] == "fullbar")
+fast_draft_select = !(ARGV.size() > 6 && ARGV[6] == "slowsel")
+if ARGV.size() > 6 && ARGV[6] == "slowsel" then triplet_variant = "auto"
+if ARGV.size() > 6 && ARGV[6] == "fullbar" then triplet_variant = "auto"
 # Diagnostic: histogram the rank of the target's token in the head's draft
 # distribution. Decides whether tree drafting can pay -- see mtp_draft_rank.metal.
 draft_rank_probe = ARGV.size() > 7 && ARGV[7] == "rank-probe"
 row_scan = ARGV.size() > 7 && ARGV[7] == "row-scan"
+prose_tech = ARGV.size() > 4 && ARGV[4] == "prose-tech"
 rank_hist = [0, 0, 0, 0, 0, 0]
 rank_outside = 0
 rank_samples = 0
@@ -102,9 +114,13 @@ profile_stats = [0, ~0.0, 0, ~0.0, 0, ~0.0, 0, ~0.0, 0,
   ~0.0, 0, ~0.0, 0, ~0.0, 0, ~0.0, ~0.0]
 optimized = mode == "optimized" || mode == "concurrent"
 concurrent = mode == "concurrent"
-mtp_enabled = mode == "mtp" || mode == "mtp2" || mode == "mtp-auto"
+mtp_enabled = mode == "mtp" || mode == "mtp2" || mode == "mtp-auto" || mode == "mtp3"
 mtp_adaptive = mode == "mtp-auto"
-mtp_depth2 = mode == "mtp2" || mtp_adaptive
+# mtp3 drafts three tokens and verifies FOUR target rows in one causal pass.
+# It reuses the depth-2 machinery for everything except the verify width, so
+# mtp/mtp2 are byte-for-byte unaffected by its presence.
+mtp_depth3 = mode == "mtp3"
+mtp_depth2 = mode == "mtp2" || mtp_adaptive || mtp_depth3
 if mtp_enabled
   optimized = true
   concurrent = true
@@ -153,6 +169,32 @@ scaled_triplet_r1_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_sc
 scaled_triplet_res_r1_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_scaled_triplet_residual_r1")
 scaled_triplet_hoist_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_scaled_triplet_hoist")
 scaled_triplet_res_hoist_pipe = metal_pipeline(scaled_triplet_lib, "nvfp4_matvec_mlx_scaled_triplet_residual_hoist")
+# Cross-row wide verify (MLX qmv_fast_crossrow_affine4_g64_wide shape): ROWS
+# output rows per SIMD group with the activations loaded ONCE and shared across
+# them, instead of one output row re-issuing every activation load. Selectable
+# as ARGV[6] = "b3" so the A/B against the hoisted triplet stays runnable.
+scaled_wide_lib = metal_compile_source(device, read_file(NVFP4_DIR + "nvfp4_matvec_mlx_scaled_wide.metal"))
+wide_b3_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wide_b3_r2")
+wide_b3_res_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wide_b3_r2_residual")
+# r4 (4 output rows per SIMD group) amortizes the shared activation loads over
+# twice as many rows, which pays only where the activation working set is large
+# relative to the weight tile: the bakeoff measured r4 at 1.21x r2 on mlp-down
+# (K=17408) and a wash-to-loss everywhere K=5120. Split on that, and keep both
+# reachable -- this is the axis with a known non-monotonic hole in it.
+wide_b3_r4_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wide_b3_r4")
+wide_b3_r4_res_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wide_b3_r4_residual")
+# Width-4 verify (mtp3). Same r4-for-FFN / r2-elsewhere split the bakeoff
+# measured at width 3; at width 4 the bakeoff margins are larger still
+# (mlp-down 2.07x, lm-head 1.84x over the incumbent quad kernel).
+wide_b4_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wide_b4_r2")
+wide_b4_res_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wide_b4_r2_residual")
+wide_b4_r4_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wide_b4_r4")
+wide_b4_r4_res_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wide_b4_r4_residual")
+# Half-footprint width-4 (8 K-values per lane). Cuts the hoisted activation
+# register footprint from 64 floats to 32, which is what the +9 ms marginal at
+# row 4 was paying for.
+wide_b4h_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wideh_b4_r2")
+wide_b4h_res_pipe = metal_pipeline(scaled_wide_lib, "nvfp4_wideh_b4_r2_residual")
 
 conv_pipe = metal_pipeline(metal_compile_source(device, read_file(QWEN_DIR + "conv1d_depthwise_step.metal")), "conv1d_depthwise_step")
 g_pipe = metal_pipeline(metal_compile_source(device, read_file(QWEN_DIR + "compute_g.metal")), "compute_g")
@@ -190,6 +232,14 @@ delta_triplet_pipe = metal_pipeline(triplet_lib, "gated_delta_triplet")
 
 mtp_select_lib = metal_compile_source(device, read_file(QWEN_DIR + "mtp_draft_select.metal"))
 mtp_select_pipe = metal_pipeline(mtp_select_lib, "mtp_compact_draft_select")
+# Tiled replacement for the single-simdgroup draft argmax. ARGV[6]="slowsel"
+# keeps the old kernel so the change stays measurable.
+mtp_select_fast_lib = metal_compile_source(device, read_file(QWEN_DIR + "mtp_draft_select_fast.metal"))
+mtp_sel1_pipe = metal_pipeline(mtp_select_fast_lib, "mtp_draft_select_stage1")
+mtp_sel2_pipe = metal_pipeline(mtp_select_fast_lib, "mtp_draft_select_stage2")
+MTP_SEL_TILES = (MTP_DRAFT_PREFIX + MTP_DRAFT_CONTROL_COUNT + 1023) / 1024
+mtp_sel_vals = metal_buffer(device, MTP_SEL_TILES * 4)
+mtp_sel_ids = metal_buffer(device, MTP_SEL_TILES * 4)
 mtp_rank_lib = metal_compile_source(device, read_file(QWEN_DIR + "mtp_draft_rank.metal"))
 mtp_rank_pipe = metal_pipeline(mtp_rank_lib, "mtp_draft_target_rank")
 
@@ -198,6 +248,18 @@ rms_pair_pipe = metal_pipeline_with_int_constants(rms_pair_lib, "rms_norm_batch_
 argmax_pair_lib = metal_compile_source(device, read_file(SHARED_DIR + "argmax_batch_fc.metal"))
 argmax_pair_pipe = metal_pipeline_with_int_constants(argmax_pair_lib, "argmax_batch_fc", [N_VOCAB, 2])
 rms_triplet_pipe = metal_pipeline_with_int_constants(rms_pair_lib, "rms_norm_batch_fc", [HIDDEN, 3])
+quad_lib = metal_compile_source(device, read_file(QWEN_DIR + "decode_quad.metal"))
+quad_embed_pipe = metal_pipeline(quad_lib, "bf16_embedding_lookup_quad")
+quad_bf16_pipe = metal_pipeline(quad_lib, "bf16_matvec_quad")
+copy_quad_slice_pipe = metal_pipeline(quad_lib, "copy_f32_slice_quad")
+split_quad_pipe = metal_pipeline(quad_lib, "split_q_gate_quad")
+phn_rope_quad_pipe = metal_pipeline(quad_lib, "per_head_norm_partial_rope_quad")
+kv_write_quad_pipe = metal_pipeline(quad_lib, "kv_write_quad")
+sdpa_quad_pipe = metal_pipeline(quad_lib, "sdpa_decode_quad_hd256")
+conv_quad_pipe = metal_pipeline(quad_lib, "conv1d_depthwise_quad")
+delta_quad_pipe = metal_pipeline(quad_lib, "gated_delta_quad")
+rms_quad_pipe = metal_pipeline_with_int_constants(rms_pair_lib, "rms_norm_batch_fc", [HIDDEN, 4])
+argmax_quad_pipe = metal_pipeline_with_int_constants(argmax_pair_lib, "argmax_batch_fc", [N_VOCAB, 4])
 argmax_triplet_pipe = metal_pipeline_with_int_constants(argmax_pair_lib, "argmax_batch_fc", [N_VOCAB, 3])
 
 # Small weight-loading helpers. Quantized handles are [packed, group scale,
@@ -330,6 +392,9 @@ while li < N_LAYERS
       if mtp_depth2
         base[:cs_mid2] = metal_buffer(device, 3 * QKV_DIM * 4)
         base[:ss_mid2] = metal_buffer(device, HV * DV * DK * 4)
+      if mtp_depth3
+        base[:cs_mid3] = metal_buffer(device, 3 * QKV_DIM * 4)
+        base[:ss_mid3] = metal_buffer(device, HV * DV * DK * 4)
     base[:ping] = 0
   else
     qn = metal_buffer(device, HEAD_DIM * 4)
@@ -494,13 +559,43 @@ logits_triplet = metal_buffer(device, 3 * N_VOCAB * 4)
 argmax_triplet_out = metal_buffer(device, 3 * 4)
 token_triplet_buf = metal_buffer(device, 3 * 4)
 
+# Four-token target-verification scratch (mtp3 / depth-3).
+x_quad = metal_buffer(device, 4 * HIDDEN * 4)
+xn_quad = metal_buffer(device, 4 * HIDDEN * 4)
+gate_quad_tmp = metal_buffer(device, 4 * FFN * 4)
+up_quad_tmp = metal_buffer(device, 4 * FFN * 4)
+hidden_quad_tmp = metal_buffer(device, 4 * FFN * 4)
+qkv_quad_tmp = metal_buffer(device, 4 * QKV_DIM * 4)
+z_quad_tmp = metal_buffer(device, 4 * V_DIM * 4)
+a_quad_tmp = metal_buffer(device, 4 * HV * 4)
+b_quad_tmp = metal_buffer(device, 4 * HV * 4)
+conv_quad_tmp = metal_buffer(device, 4 * QKV_DIM * 4)
+mq_quad_tmp = metal_buffer(device, 4 * Q_DIM * 4)
+mk_quad_tmp = metal_buffer(device, 4 * K_DIM * 4)
+mv_quad_tmp = metal_buffer(device, 4 * V_DIM * 4)
+g_quad_tmp = metal_buffer(device, 4 * HV * 4)
+beta_quad_tmp = metal_buffer(device, 4 * HV * 4)
+delta_quad_tmp = metal_buffer(device, 4 * V_DIM * 4)
+mamba_norm_quad_tmp = metal_buffer(device, 4 * V_DIM * 4)
+qfull_quad_tmp = metal_buffer(device, 4 * QFULL_DIM * 4)
+queries_quad_tmp = metal_buffer(device, 4 * ATTN_DIM * 4)
+attn_gate_quad_tmp = metal_buffer(device, 4 * ATTN_DIM * 4)
+k_quad_tmp = metal_buffer(device, 4 * KV_DIM * 4)
+v_quad_tmp = metal_buffer(device, 4 * KV_DIM * 4)
+attn_quad_tmp = metal_buffer(device, 4 * ATTN_DIM * 4)
+cos_quad_tmp = metal_buffer(device, 4 * ROT_HALF * 4)
+sin_quad_tmp = metal_buffer(device, 4 * ROT_HALF * 4)
+logits_quad = metal_buffer(device, 4 * N_VOCAB * 4)
+argmax_quad_out = metal_buffer(device, 4 * 4)
+token_quad_buf = metal_buffer(device, 4 * 4)
+
 logits = metal_buffer(device, N_VOCAB * 4)
 argmax_out = metal_buffer(device, 4)
 rank_out = metal_buffer(device, 4)
 n_vocab_buf = metal_buffer(device, 4)
 metal_buffer_write_i32(n_vocab_buf, 0, N_VOCAB)
-argmax_partial_values = metal_buffer(device, 3 * ARGMAX_CHUNKS * 4)
-argmax_partial_indices = metal_buffer(device, 3 * ARGMAX_CHUNKS * 4)
+argmax_partial_values = metal_buffer(device, 4 * ARGMAX_CHUNKS * 4)
+argmax_partial_indices = metal_buffer(device, 4 * ARGMAX_CHUNKS * 4)
 
 log_rope = Math.log(ROPE_BASE)
 rope_power = ~2.0 / ROT_DIM
@@ -599,6 +694,14 @@ rope_power = ~2.0 / ROT_DIM
   # full-model level (three variants, three reps, no separation); the real cost
   # was that BOTH re-read the activations once per output row. "wide" and
   # "rowsplit" remain selectable so the old split stays re-checkable.
+  if triplet_variant == "b3r4" || (triplet_variant == "auto" && kdim == FFN)
+    metal_dispatch_groups(queue, wide_b3_r4_pipe,
+      [w[0], w[1], input, output, kdim, rows, w[2]], (rows + 7) / 8, 64)
+    return
+  if triplet_variant == "b3" || triplet_variant == "auto"
+    metal_dispatch_groups(queue, wide_b3_pipe,
+      [w[0], w[1], input, output, kdim, rows, w[2]], (rows + 3) / 4, 64)
+    return
   if triplet_variant == "hoist" || triplet_variant == "auto"
     metal_dispatch_groups(queue, scaled_triplet_hoist_pipe,
       [w[0], w[1], input, output, kdim, rows, w[2]], (rows + 3) / 4, 64)
@@ -621,6 +724,14 @@ rope_power = ~2.0 / ROT_DIM
   residual = spec[2]
   kdim = spec[3]
   rows = spec[4]
+  if triplet_variant == "b3r4" || (triplet_variant == "auto" && kdim == FFN)
+    metal_dispatch_groups(queue, wide_b3_r4_res_pipe,
+      [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + 7) / 8, 64)
+    return
+  if triplet_variant == "b3" || triplet_variant == "auto"
+    metal_dispatch_groups(queue, wide_b3_res_pipe,
+      [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + 3) / 4, 64)
+    return
   if triplet_variant == "hoist" || triplet_variant == "auto"
     metal_dispatch_groups(queue, scaled_triplet_res_hoist_pipe,
       [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + 3) / 4, 64)
@@ -647,6 +758,14 @@ rope_power = ~2.0 / ROT_DIM
 
 -> dependency_barrier
   if concurrent then metal_batch_barrier(queue)
+
+# Barrier on only the buffers that actually carry the RAW dependency.
+-> dep_barrier_on(bufs)
+  if concurrent
+    if scoped_barriers
+      metal_batch_barrier_resources(queue, bufs)
+    else
+      metal_batch_barrier(queue)
 
 -> enqueue_rms(spec)
   if legacy_reductions
@@ -957,16 +1076,16 @@ rope_power = ~2.0 / ROT_DIM
 
 -> enqueue_ffn_triplet(lyr)
   enqueue_rms([x_triplet, lyr[:post_norm], xn_triplet, 3])
-  dependency_barrier()
+  dep_barrier_on([xn_triplet])
   enqueue_scaled_triplet([lyr[:gate], xn_triplet, gate_triplet_tmp, HIDDEN, FFN])
   enqueue_scaled_triplet([lyr[:up], xn_triplet, up_triplet_tmp, HIDDEN, FFN])
-  dependency_barrier()
+  dep_barrier_on([gate_triplet_tmp, up_triplet_tmp])
   metal_dispatch_n(queue, silu_pipe,
     [gate_triplet_tmp, up_triplet_tmp, hidden_triplet_tmp, 3 * FFN], 3 * FFN)
-  dependency_barrier()
+  dep_barrier_on([hidden_triplet_tmp])
   enqueue_residual_triplet(
     [lyr[:down], hidden_triplet_tmp, x_triplet, FFN, HIDDEN])
-  dependency_barrier()
+  dep_barrier_on([x_triplet])
 
 # A committed MTP-history row only needs to append the attention K/V derived
 # from the fused embedding/target-hidden input. Q, attention output, the MLP,
@@ -997,8 +1116,16 @@ rope_power = ~2.0 / ROT_DIM
   hidden_in = spec[1]
   pos = spec[2]
   want_draft = legacy_mtp || full_history_mtp || spec.size() < 4 || spec[3]
+  # Optional [src, row]: stage the verify's hidden row into backbone_hidden
+  # inside THIS command buffer. It used to be its own begin/commit pair, which
+  # for a HIDDEN-sized copy is almost entirely commit overhead (0.17 ms for
+  # ~20 us of work), and there are two or three of them per round.
+  stage_hidden = spec.size() > 4
   if pos > 0 then build_rope(pos)
   metal_batch_begin_concurrent(queue)
+  if stage_hidden
+    metal_dispatch_n(queue, copy_pair_row_pipe,
+      [spec[4][0], backbone_hidden, spec[4][1], HIDDEN], HIDDEN)
   metal_dispatch_n(queue, bf16_embed_pipe,
     [embed_w, mtp_embed_tmp, token_id, HIDDEN], HIDDEN)
   dependency_barrier()
@@ -1025,10 +1152,19 @@ rope_power = ~2.0 / ROT_DIM
       enqueue_scaled([mtp_draft_control_head, xn, mtp_control_logits,
         HIDDEN, MTP_DRAFT_CONTROL_ROWS])
       dependency_barrier()
-      metal_dispatch_groups(queue, mtp_select_pipe,
-        [mtp_prefix_logits, mtp_control_logits, argmax_out,
-         MTP_DRAFT_PREFIX, MTP_DRAFT_CONTROL_COUNT, MTP_DRAFT_CONTROL_START],
-        1, 32)
+      if fast_draft_select
+        metal_dispatch_groups(queue, mtp_sel1_pipe,
+          [mtp_prefix_logits, mtp_control_logits, mtp_sel_vals, mtp_sel_ids,
+           MTP_DRAFT_PREFIX, MTP_DRAFT_CONTROL_COUNT, MTP_DRAFT_CONTROL_START],
+          MTP_SEL_TILES, 256)
+        dependency_barrier()
+        metal_dispatch_groups(queue, mtp_sel2_pipe,
+          [mtp_sel_vals, mtp_sel_ids, argmax_out, MTP_SEL_TILES], 1, 256)
+      else
+        metal_dispatch_groups(queue, mtp_select_pipe,
+          [mtp_prefix_logits, mtp_control_logits, argmax_out,
+           MTP_DRAFT_PREFIX, MTP_DRAFT_CONTROL_COUNT, MTP_DRAFT_CONTROL_START],
+          1, 32)
   else
     enqueue_mtp_history(mtp_layer, pos)
   metal_batch_commit(queue)
@@ -1130,7 +1266,7 @@ rope_power = ~2.0 / ROT_DIM
   profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
   metal_batch_begin(queue)
   metal_dispatch_n(queue, copy_pair_row_pipe,
-    [xn_pair, backbone_hidden, row, HIDDEN], HIDDEN)
+    [x_pair, backbone_hidden, row, HIDDEN], HIDDEN)
   metal_batch_commit(queue)
   if profile_components
     profile_stats[11] = profile_stats[11] + ccall("__w_clock_ms") - profile_t0
@@ -1140,7 +1276,193 @@ rope_power = ~2.0 / ROT_DIM
   profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
   metal_batch_begin(queue)
   metal_dispatch_n(queue, copy_pair_row_pipe,
-    [xn_triplet, backbone_hidden, row, HIDDEN], HIDDEN)
+    [x_triplet, backbone_hidden, row, HIDDEN], HIDDEN)
+  metal_batch_commit(queue)
+  if profile_components
+    profile_stats[11] = profile_stats[11] + ccall("__w_clock_ms") - profile_t0
+    profile_stats[12] = profile_stats[12] + 1
+
+# ---- depth-3 (four-row verify) path, generated from the triplet path ----
+-> build_rope_quad(pos_start)
+  token = 0
+  while token < 4
+    i = 0
+    while i < ROT_HALF
+      theta = Math.exp(log_rope * (~0.0 - i * rope_power))
+      angle = (pos_start + token) * theta
+      metal_buffer_write_f32(cos_quad_tmp, token * ROT_HALF + i, Math.cos(angle))
+      metal_buffer_write_f32(sin_quad_tmp, token * ROT_HALF + i, Math.sin(angle))
+      i = i + 1
+    token = token + 1
+
+-> enqueue_scaled_quad(spec)
+  w = spec[0]
+  input = spec[1]
+  output = spec[2]
+  kdim = spec[3]
+  rows = spec[4]
+  metal_dispatch_groups(queue, wide_b4h_pipe,
+    [w[0], w[1], input, output, kdim, rows, w[2]], (rows + 3) / 4, 64)
+
+-> enqueue_residual_quad(spec)
+  w = spec[0]
+  input = spec[1]
+  residual = spec[2]
+  kdim = spec[3]
+  rows = spec[4]
+  metal_dispatch_groups(queue, wide_b4h_res_pipe,
+    [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + 3) / 4, 64)
+
+-> enqueue_mamba_quad(lyr)
+  cs_in = lyr[:cs_a]
+  cs_out = lyr[:cs_b]
+  ss_in = lyr[:ss_a]
+  ss_out = lyr[:ss_b]
+  if lyr[:ping] == 1
+    cs_in = lyr[:cs_b]
+    cs_out = lyr[:cs_a]
+    ss_in = lyr[:ss_b]
+    ss_out = lyr[:ss_a]
+  enqueue_rms([x_quad, lyr[:in_norm], xn_quad, 4])
+  dependency_barrier()
+  enqueue_scaled_quad([lyr[:qkv], xn_quad, qkv_quad_tmp, HIDDEN, QKV_DIM])
+  enqueue_scaled_quad([lyr[:z], xn_quad, z_quad_tmp, HIDDEN, V_DIM])
+  metal_dispatch_groups(queue, quad_bf16_pipe,
+    [lyr[:a], xn_quad, a_quad_tmp, HIDDEN, HV], HV, 32)
+  metal_dispatch_groups(queue, quad_bf16_pipe,
+    [lyr[:b], xn_quad, b_quad_tmp, HIDDEN, HV], HV, 32)
+  dependency_barrier()
+  metal_dispatch_n(queue, conv_quad_pipe,
+    [lyr[:conv], cs_in, qkv_quad_tmp, conv_quad_tmp,
+     lyr[:cs_mid], lyr[:cs_mid2], lyr[:cs_mid3], cs_out, QKV_DIM], QKV_DIM)
+  dependency_barrier()
+  metal_dispatch_n(queue, copy_quad_slice_pipe,
+    [conv_quad_tmp, mq_quad_tmp, QKV_DIM, Q_DIM, 0, Q_DIM], 4 * Q_DIM)
+  metal_dispatch_n(queue, copy_quad_slice_pipe,
+    [conv_quad_tmp, mk_quad_tmp, QKV_DIM, K_DIM, Q_DIM, K_DIM], 4 * K_DIM)
+  metal_dispatch_n(queue, copy_quad_slice_pipe,
+    [conv_quad_tmp, mv_quad_tmp, QKV_DIM, V_DIM, Q_DIM + K_DIM, V_DIM], 4 * V_DIM)
+  dependency_barrier()
+  metal_dispatch_groups(queue, phn_pipe,
+    [mq_quad_tmp, q_norm_scale, DK, ~1.0 / DK, EPS], 4 * HK, 32)
+  metal_dispatch_groups(queue, phn_pipe,
+    [mk_quad_tmp, k_norm_scale, DK, ~1.0 / DK, EPS], 4 * HK, 32)
+  metal_dispatch_n(queue, g_pipe,
+    [a_quad_tmp, lyr[:alog], lyr[:dtb], g_quad_tmp, HV, 4 * HV], 4 * HV)
+  metal_dispatch_n(queue, sigmoid_pipe,
+    [b_quad_tmp, beta_quad_tmp, 4 * HV], 4 * HV)
+  dependency_barrier()
+  metal_dispatch_3d(queue, delta_quad_pipe,
+    [mq_quad_tmp, mk_quad_tmp, mv_quad_tmp, g_quad_tmp,
+     beta_quad_tmp, ss_in, delta_quad_tmp, lyr[:ss_mid],
+     lyr[:ss_mid2], lyr[:ss_mid3], ss_out, HK, HV, DK, DV],
+    1, DV / 4, HV, 32, 4, 1)
+  dependency_barrier()
+  metal_dispatch_groups(queue, rng_pipe,
+    [delta_quad_tmp, z_quad_tmp, lyr[:linear_norm],
+     mamba_norm_quad_tmp, DV, EPS], 4 * HV, 32)
+  dependency_barrier()
+  enqueue_residual_quad(
+    [lyr[:out], mamba_norm_quad_tmp, x_quad, V_DIM, HIDDEN])
+  dependency_barrier()
+  lyr[:ping] = 1 - lyr[:ping]
+
+-> enqueue_full_quad(spec)
+  lyr = spec[0]
+  pos_start = spec[1]
+  enqueue_rms([x_quad, lyr[:in_norm], xn_quad, 4])
+  dependency_barrier()
+  enqueue_scaled_quad([lyr[:q], xn_quad, qfull_quad_tmp, HIDDEN, QFULL_DIM])
+  enqueue_scaled_quad([lyr[:k], xn_quad, k_quad_tmp, HIDDEN, KV_DIM])
+  enqueue_scaled_quad([lyr[:v], xn_quad, v_quad_tmp, HIDDEN, KV_DIM])
+  dependency_barrier()
+  metal_dispatch_n(queue, split_quad_pipe,
+    [qfull_quad_tmp, queries_quad_tmp, attn_gate_quad_tmp,
+     N_HEADS, HEAD_DIM], 4 * ATTN_DIM)
+  dependency_barrier()
+  metal_dispatch_groups(queue, phn_rope_quad_pipe,
+    [queries_quad_tmp, lyr[:qn], cos_quad_tmp, sin_quad_tmp,
+     HEAD_DIM, ROT_HALF, N_HEADS, ~1.0 / HEAD_DIM, EPS], 4 * N_HEADS, 32)
+  metal_dispatch_groups(queue, phn_rope_quad_pipe,
+    [k_quad_tmp, lyr[:kn], cos_quad_tmp, sin_quad_tmp,
+     HEAD_DIM, ROT_HALF, N_KV_HEADS, ~1.0 / HEAD_DIM, EPS], 4 * N_KV_HEADS, 32)
+  dependency_barrier()
+  metal_dispatch_n(queue, kv_write_quad_pipe,
+    [k_quad_tmp, v_quad_tmp, lyr[:k_cache], lyr[:v_cache],
+     pos_start, KV_DIM], 4 * KV_DIM)
+  dependency_barrier()
+  metal_dispatch_groups(queue, sdpa_quad_pipe,
+    [queries_quad_tmp, lyr[:k_cache], lyr[:v_cache], attn_quad_tmp,
+     GQA, pos_start, N_HEADS, KV_DIM, ATTN_SCALE], 4 * N_HEADS, 256)
+  dependency_barrier()
+  metal_dispatch_n(queue, gate_pipe,
+    [attn_quad_tmp, attn_gate_quad_tmp, 4 * ATTN_DIM], 4 * ATTN_DIM)
+  dependency_barrier()
+  enqueue_residual_quad(
+    [lyr[:out], attn_quad_tmp, x_quad, ATTN_DIM, HIDDEN])
+  dependency_barrier()
+
+-> enqueue_ffn_quad(lyr)
+  enqueue_rms([x_quad, lyr[:post_norm], xn_quad, 4])
+  dep_barrier_on([xn_quad])
+  enqueue_scaled_quad([lyr[:gate], xn_quad, gate_quad_tmp, HIDDEN, FFN])
+  enqueue_scaled_quad([lyr[:up], xn_quad, up_quad_tmp, HIDDEN, FFN])
+  dep_barrier_on([gate_quad_tmp, up_quad_tmp])
+  metal_dispatch_n(queue, silu_pipe,
+    [gate_quad_tmp, up_quad_tmp, hidden_quad_tmp, 4 * FFN], 4 * FFN)
+  dep_barrier_on([hidden_quad_tmp])
+  enqueue_residual_quad(
+    [lyr[:down], hidden_quad_tmp, x_quad, FFN, HIDDEN])
+  dep_barrier_on([x_quad])
+
+# A committed MTP-history row only needs to append the attention K/V derived
+# from the fused embedding/target-hidden input. Q, attention output, the MLP,
+# final norm, and vocabulary projection are dead for this row.
+-> forward_quad(spec)
+  profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
+  token0 = spec[0]
+  token1 = spec[1]
+  token2 = spec[2]
+  token3 = spec[3]
+  pos_start = spec[4]
+  build_rope_quad(pos_start)
+  metal_buffer_write_i32(token_quad_buf, 0, token0)
+  metal_buffer_write_i32(token_quad_buf, 1, token1)
+  metal_buffer_write_i32(token_quad_buf, 2, token2)
+  metal_buffer_write_i32(token_quad_buf, 3, token3)
+  metal_batch_begin_concurrent(queue)
+  metal_dispatch_n(queue, quad_embed_pipe,
+    [embed_w, x_quad, token_quad_buf, HIDDEN], 4 * HIDDEN)
+  dependency_barrier()
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:kind] == "mamba"
+      enqueue_mamba_quad(lyr)
+    else
+      enqueue_full_quad([lyr, pos_start])
+    enqueue_ffn_quad(lyr)
+    li = li + 1
+  enqueue_rms([x_quad, final_norm, xn_quad, 4])
+  dependency_barrier()
+  enqueue_scaled_quad([lm_head, xn_quad, logits_quad, HIDDEN, N_VOCAB])
+  dependency_barrier()
+  enqueue_argmax([logits_quad, argmax_quad_out, 4])
+  metal_batch_commit(queue)
+  result = [metal_buffer_read_i32(argmax_quad_out, 0),
+    metal_buffer_read_i32(argmax_quad_out, 1),
+    metal_buffer_read_i32(argmax_quad_out, 2),
+    metal_buffer_read_i32(argmax_quad_out, 3)]
+  if profile_components
+    profile_stats[5] = profile_stats[5] + ccall("__w_clock_ms") - profile_t0
+    profile_stats[6] = profile_stats[6] + 1
+  result
+
+-> copy_hidden_quad_row(row)
+  profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
+  metal_batch_begin(queue)
+  metal_dispatch_n(queue, copy_pair_row_pipe,
+    [x_quad, backbone_hidden, row, HIDDEN], HIDDEN)
   metal_batch_commit(queue)
   if profile_components
     profile_stats[11] = profile_stats[11] + ccall("__w_clock_ms") - profile_t0
@@ -1204,6 +1526,47 @@ rope_power = ~2.0 / ROT_DIM
     profile_stats[13] = profile_stats[13] + ccall("__w_clock_ms") - profile_t0
     profile_stats[14] = profile_stats[14] + 1
 
+-> rollback_quad_states(accepted_count)
+  # A width-4 verify can be accepted at prefix 0, 1 or 2 (a full 3-accept needs
+  # no rollback), so it selects among three published interior snapshots.
+  profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:kind] == "mamba"
+      if accepted_count == 0
+        chosen_cs = lyr[:cs_mid]
+        chosen_ss = lyr[:ss_mid]
+      elsif accepted_count == 1
+        chosen_cs = lyr[:cs_mid2]
+        chosen_ss = lyr[:ss_mid2]
+      else
+        chosen_cs = lyr[:cs_mid3]
+        chosen_ss = lyr[:ss_mid3]
+      if lyr[:ping] == 1
+        old_cs = lyr[:cs_b]
+        old_ss = lyr[:ss_b]
+        lyr[:cs_b] = chosen_cs
+        lyr[:ss_b] = chosen_ss
+      else
+        old_cs = lyr[:cs_a]
+        old_ss = lyr[:ss_a]
+        lyr[:cs_a] = chosen_cs
+        lyr[:ss_a] = chosen_ss
+      if accepted_count == 0
+        lyr[:cs_mid] = old_cs
+        lyr[:ss_mid] = old_ss
+      elsif accepted_count == 1
+        lyr[:cs_mid2] = old_cs
+        lyr[:ss_mid2] = old_ss
+      else
+        lyr[:cs_mid3] = old_cs
+        lyr[:ss_mid3] = old_ss
+    li = li + 1
+  if profile_components
+    profile_stats[13] = profile_stats[13] + ccall("__w_clock_ms") - profile_t0
+    profile_stats[14] = profile_stats[14] + 1
+
 -> forward(token_id, pos, want_logits)
   profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
   if pos > 0 then build_rope(pos)
@@ -1226,7 +1589,12 @@ rope_power = ~2.0 / ROT_DIM
     enqueue_rms([x, final_norm, xn, 1])
     dependency_barrier()
     if mtp_enabled
-      metal_dispatch_n(queue, copy_pipe, [xn, backbone_hidden, 0, HIDDEN], HIDDEN)
+      # PRE-final-norm hidden. The MTP head's own pre_fc_norm_hidden IS the
+      # normalization step, so it expects the raw backbone output; feeding it
+      # xn double-normalizes -- normalize(x * final_norm) * mtp_hnorm instead
+      # of normalize(x) * mtp_hnorm. That leaves every emitted token correct,
+      # because the target decides all of them, and silently costs acceptance.
+      metal_dispatch_n(queue, copy_pipe, [x, backbone_hidden, 0, HIDDEN], HIDDEN)
       dependency_barrier()
   if want_logits
     enqueue_scaled([lm_head, xn, logits, HIDDEN, N_VOCAB])
@@ -1267,7 +1635,8 @@ prompt_seed = [760, 6511, 314, 9338, 369]
 # Ordinary English prose continuation lands near accept 0.65-0.85, which is
 # the band where those decisions have a sign. Encoding real text costs one
 # tokenizer load and changes nothing about the compute graph.
-prompt_prose = "The naturalist spent the better part of three seasons observing the colony, recording each departure and return in a leather notebook that gradually lost its shape to the damp. What struck him was not the industry of the birds, which every account had prepared him for, but the intervals of apparent idleness between flights, and how unevenly those intervals were distributed across the season. He began to suspect that the pattern he had come to describe was less a property of the animals than of the hours he had chosen to watch them."
+prompt_prose = "The naturalist spent the better part of three seasons observing the colony, recording each departure and return in a leather notebook that gradually lost its shape to the damp. What struck him was not the industry of the birds, which every account had prepared him for, but the intervals of apparent idleness between flights, and how unevenly those intervals were distributed across the season. He began to suspect that the pattern he had come to describe was less a property of the animals than of the hours he had chosen to watch them. His notebooks from the second season are the ones worth reading. He had abandoned the ruled columns by then and written in continuous prose, which made the entries longer and far less useful as data, but it is in those pages that the shift in his thinking is visible. He stops counting birds and starts counting silences. A departure is easy to see and simple to record; an absence has no edge to it, and deciding when one has begun requires a judgement the observer must make and cannot check. He worried about this at length. There is an entry in late June in which he lists four different definitions of idleness and then crosses out all of them, and beneath the deletions he has written that the difficulty is not in the birds. The third season he brought a second observer, a young woman from the mainland whose name appears only as initials. Their records disagree constantly, and he treats every disagreement as a finding rather than an error, which was unusual for the period. Where she saw a colony at rest he saw a colony waiting, and he could not persuade her that the distinction meant anything, nor could she persuade him that it did not. The argument runs through the margins of both notebooks for eleven weeks. It is never settled. What ends it is the weather: a storm in September took the shelter and most of the season's later pages, and when he returned the following spring he did not resume the study. The manuscript that survives was assembled thirty years afterward by an editor who never met him and who arranged the entries by date rather than by subject, which scatters the argument badly. Read in that order the work looks like a failure, an inventory that was never completed. Read the other way, following the questions instead of the calendar, it is something more interesting: a careful account of a man discovering that his instrument was himself, and that the thing he had set out to measure did not exist independently of the schedule he had chosen for measuring it. He seems to have understood this before he had a vocabulary for it. The last legible entry, written in a hand much worse than the rest, observes that the birds keep no hours at all and that the seasons he had been describing were his own."
+prompt_prose_tech = "A cache is a small, fast store that holds copies of data from a larger and slower store. When the processor needs a value it first checks the cache. If the value is present, the access is called a hit and completes in a few cycles. If it is not present, the access is a miss and the processor must fetch the value from main memory, which takes far longer. The fraction of accesses that hit is the hit rate, and because the cost of a miss is so much higher than the cost of a hit, even a small change in the hit rate can dominate the average access time. Caches work because programs do not access memory at random. They exhibit locality. Temporal locality means that a value accessed once is likely to be accessed again soon, so it is worth keeping. Spatial locality means that if a value is accessed, nearby values are likely to be accessed soon as well, so it is worth fetching a whole block rather than a single word. Both effects are properties of the way people write programs rather than properties of the hardware, which is why cache design is ultimately an empirical discipline. A cache is organized into lines, each holding a fixed number of bytes. The mapping from an address to a line determines the organization. In a direct mapped cache each address maps to exactly one line, which makes lookup cheap but means two addresses that map to the same line will evict each other repeatedly even when the rest of the cache is empty. A fully associative cache allows any address in any line, which removes that problem but makes lookup expensive because every line must be checked. Set associative caches sit between the two: the cache is divided into sets, an address maps to one set, and within that set any line may be used. Most processors use set associative caches with a small number of ways. When a new block must be brought in and the set is full, the cache must choose a line to evict. The replacement policy makes that choice. Least recently used is the common choice because it exploits temporal locality directly, but tracking exact usage order is expensive for large sets, so real implementations approximate it. Writes require a further decision. A write through cache updates memory on every write, which keeps memory consistent but generates a great deal of traffic. A write back cache updates only the cache line and marks it dirty, writing to memory only when the line is evicted. Write back is usually faster and is what most designs use."
 
 prompt = []
 i = 0
@@ -1277,9 +1646,15 @@ if profile_prompt_tokens <= prompt_seed.size()
     i = i + 1
 else
   prompt_tokenizer = Tungsten:Llama:Tokenizer.from_packed_tokenizer(TOKENIZER_BIN)
-  prose_ids = prompt_tokenizer.encode(prompt_prose)
+  prose_source = prose_tech ? prompt_prose_tech : prompt_prose
+  prose_ids = prompt_tokenizer.encode(prose_source)
   if prose_ids.size() < 1 then raise "prose prompt tokenized to nothing"
   while i < profile_prompt_tokens
+    # Tiling a passage makes it periodic, and a periodic prompt is a SATURATED
+    # fixture: the head accepts nearly everything and no schedule decision has a
+    # sign. Say so rather than reporting a number that looks fine.
+    if i >= prose_ids.size() && i == prose_ids.size()
+      << "WARNING: prose fixture exhausted at " + prose_ids.size().to_s + " tokens; prompt is now TILED and acceptance is not trustworthy"
     prompt.push(prose_ids[i % prose_ids.size()])
     i = i + 1
 setup_elapsed = ccall("__w_clock_ms") - setup_t0
@@ -1322,6 +1697,14 @@ if mtp_enabled
   # gets faster. Reported alongside tok/s so a regression can be told apart
   # from the room.
   round_ms = []
+  # Streak-gated depth, ported from the MLX board's segmented verify gate: only
+  # spend the deeper schedule on stretches where the head is ALREADY proving
+  # perfect, and reset on any reject. Depth 3 measured +3.1% on expository prose
+  # (4/4 paired) and -13% on literary, because the literary chain decays too
+  # fast to fill the fourth row -- a fixed depth has to pick one of those. The
+  # gate is conditioned on observed acceptance, so it cannot touch a cold or
+  # hard stretch at all; it only shortens the re-qualification ramp.
+  full_accept_streak = 0
   while generated < n_generate
     rt0 = ccall("__w_clock_ms")
     remaining = n_generate - generated
@@ -1331,6 +1714,7 @@ if mtp_enabled
       pos = pos + 1
       generated = generated + 1
     else
+      use_depth3 = mtp_depth3 && remaining >= 4 && full_accept_streak >= 2
       use_depth2 = mtp_depth2 && remaining >= 3
       if mtp_adaptive && remaining >= 3
         if mtp_auto_rounds[0] == 0
@@ -1345,7 +1729,79 @@ if mtp_enabled
       arm = use_depth2 ? 1 : 0
       round_generated_before = generated
       round_t0 = mtp_adaptive ? ccall("__w_clock_ms") : ~0.0
-      if use_depth2
+      if use_depth3
+        # Three drafts, four verified rows. Same causal-chain shape as depth 2:
+        # each draft is the head's own continuation of the previous one, and the
+        # target's row k decides draft k.
+        verify_draft0 = draft
+        verify_draft1 = mtp_step([verify_draft0, xn, pos])
+        verify_draft2 = mtp_step([verify_draft1, xn, pos + 1])
+        if force_reject && drafted == 0
+          verify_draft0 = (verify_draft0 + 1) % N_VOCAB
+        quad_preds = forward_quad(
+          [current, verify_draft0, verify_draft1, verify_draft2, pos])
+        accepted_now = 0
+        if quad_preds[0] == verify_draft0
+          accepted_now = 1
+          if quad_preds[1] == verify_draft1
+            accepted_now = 2
+            if quad_preds[2] == verify_draft2
+              accepted_now = 3
+        accepted = accepted + accepted_now
+        drafted = drafted + 3
+        deep_drafted = deep_drafted + 1
+        if accepted_now == 3 then deep_accepted = deep_accepted + 1
+        if accepted_now == 3
+          full_accept_streak = full_accept_streak + 1
+        else
+          full_accept_streak = 0
+        if accepted_now == 3
+          ids.push(verify_draft0)
+          ids.push(verify_draft1)
+          ids.push(verify_draft2)
+          bonus = quad_preds[3]
+          ids.push(bonus)
+          generated = generated + 4
+          if generated < n_generate
+            mtp_step([verify_draft0, backbone_hidden, pos, false, [x_quad, 0]])
+            mtp_step([verify_draft1, backbone_hidden, pos + 1, false, [x_quad, 1]])
+            mtp_step([verify_draft2, backbone_hidden, pos + 2, false, [x_quad, 2]])
+            draft = mtp_step([bonus, backbone_hidden, pos + 3, true, [x_quad, 3]])
+          current = bonus
+          pos = pos + 4
+        else
+          rollback_quad_states(accepted_now)
+          if accepted_now == 2
+            ids.push(verify_draft0)
+            ids.push(verify_draft1)
+            correction = quad_preds[2]
+            ids.push(correction)
+            generated = generated + 3
+            if generated < n_generate
+              mtp_step([verify_draft0, backbone_hidden, pos, false, [x_quad, 0]])
+              mtp_step([verify_draft1, backbone_hidden, pos + 1, false, [x_quad, 1]])
+              draft = mtp_step([correction, backbone_hidden, pos + 2, true, [x_quad, 2]])
+            current = correction
+            pos = pos + 3
+          elsif accepted_now == 1
+            ids.push(verify_draft0)
+            correction = quad_preds[1]
+            ids.push(correction)
+            generated = generated + 2
+            if generated < n_generate
+              mtp_step([verify_draft0, backbone_hidden, pos, false, [x_quad, 0]])
+              draft = mtp_step([correction, backbone_hidden, pos + 1, true, [x_quad, 1]])
+            current = correction
+            pos = pos + 2
+          else
+            correction = quad_preds[0]
+            ids.push(correction)
+            generated = generated + 1
+            if generated < n_generate
+              draft = mtp_step([correction, backbone_hidden, pos, true, [x_quad, 0]])
+            current = correction
+            pos = pos + 1
+      elsif use_depth2
         verify_draft0 = draft
         verify_draft1 = mtp_step([verify_draft0, xn, pos])
         if force_reject && drafted == 0
@@ -1362,18 +1818,19 @@ if mtp_enabled
         deep_drafted = deep_drafted + 1
         if accepted_now == 2 then deep_accepted = deep_accepted + 1
         if accepted_now == 2
+          full_accept_streak = full_accept_streak + 1
+        else
+          full_accept_streak = 0
+        if accepted_now == 2
           ids.push(verify_draft0)
           ids.push(verify_draft1)
           bonus = triplet_preds[2]
           ids.push(bonus)
           generated = generated + 3
           if generated < n_generate
-            copy_hidden_triplet_row(0)
-            mtp_step([verify_draft0, backbone_hidden, pos, false])
-            copy_hidden_triplet_row(1)
-            mtp_step([verify_draft1, backbone_hidden, pos + 1, false])
-            copy_hidden_triplet_row(2)
-            draft = mtp_step([bonus, backbone_hidden, pos + 2])
+            mtp_step([verify_draft0, backbone_hidden, pos, false, [x_triplet, 0]])
+            mtp_step([verify_draft1, backbone_hidden, pos + 1, false, [x_triplet, 1]])
+            draft = mtp_step([bonus, backbone_hidden, pos + 2, true, [x_triplet, 2]])
           current = bonus
           pos = pos + 3
         else
@@ -1384,10 +1841,8 @@ if mtp_enabled
             ids.push(correction)
             generated = generated + 2
             if generated < n_generate
-              copy_hidden_triplet_row(0)
-              mtp_step([verify_draft0, backbone_hidden, pos, false])
-              copy_hidden_triplet_row(1)
-              draft = mtp_step([correction, backbone_hidden, pos + 1])
+              mtp_step([verify_draft0, backbone_hidden, pos, false, [x_triplet, 0]])
+              draft = mtp_step([correction, backbone_hidden, pos + 1, true, [x_triplet, 1]])
             current = correction
             pos = pos + 2
           else
@@ -1395,8 +1850,7 @@ if mtp_enabled
             ids.push(correction)
             generated = generated + 1
             if generated < n_generate
-              copy_hidden_triplet_row(0)
-              draft = mtp_step([correction, backbone_hidden, pos])
+              draft = mtp_step([correction, backbone_hidden, pos, true, [x_triplet, 0]])
             current = correction
             pos = pos + 1
       else
@@ -1414,26 +1868,25 @@ if mtp_enabled
             probe_slot = probe_rank < 5 ? probe_rank : 5
             rank_hist[probe_slot] = rank_hist[probe_slot] + 1
         if pair_preds[0] == verify_draft
+          full_accept_streak = full_accept_streak + 1
           accepted = accepted + 1
           ids.push(verify_draft)
           bonus = pair_preds[1]
           ids.push(bonus)
           generated = generated + 2
           if generated < n_generate
-            copy_hidden_pair_row(0)
-            mtp_step([verify_draft, backbone_hidden, pos, false])
-            copy_hidden_pair_row(1)
-            draft = mtp_step([bonus, backbone_hidden, pos + 1])
+            mtp_step([verify_draft, backbone_hidden, pos, false, [x_pair, 0]])
+            draft = mtp_step([bonus, backbone_hidden, pos + 1, true, [x_pair, 1]])
           current = bonus
           pos = pos + 2
         else
+          full_accept_streak = 0
           rollback_pair_states()
           current = pair_preds[0]
           ids.push(current)
           generated = generated + 1
           if generated < n_generate
-            copy_hidden_pair_row(0)
-            draft = mtp_step([current, backbone_hidden, pos])
+            draft = mtp_step([current, backbone_hidden, pos, true, [x_pair, 0]])
           pos = pos + 1
       if mtp_adaptive
         mtp_auto_rounds[arm] = mtp_auto_rounds[arm] + 1
@@ -1474,6 +1927,7 @@ if row_scan
   scan1 = []
   scan2 = []
   scan3 = []
+  scan4 = []
   r = 0
   while r < scan_reps
     s1 = ccall("__w_clock_ms")
@@ -1485,6 +1939,10 @@ if row_scan
     s3 = ccall("__w_clock_ms")
     forward_triplet([scan_tok, scan_tok, scan_tok, scan_pos])
     scan3.push(ccall("__w_clock_ms") - s3)
+    if mtp_depth3
+      s4 = ccall("__w_clock_ms")
+      forward_quad([scan_tok, scan_tok, scan_tok, scan_tok, scan_pos])
+      scan4.push(ccall("__w_clock_ms") - s4)
     r = r + 1
   # Localize the cliff: time one mamba layer, one attention layer, and one FFN
   # in isolation at width 2 vs width 3. Each is wrapped in its own batch so the
@@ -1535,6 +1993,9 @@ if row_scan
   << "rowscan 1row median " + m1.to_s + " ms"
   << "rowscan 2row median " + m2.to_s + " ms  (marginal " + (m2 - m1).to_s + ")"
   << "rowscan 3row median " + m3.to_s + " ms  (marginal " + (m3 - m2).to_s + ")"
+  if mtp_depth3
+    m4 = scan4.sort()[scan_reps / 2]
+    << "rowscan 4row median " + m4.to_s + " ms  (marginal " + (m4 - m3).to_s + ")"
 
 tokenizer = Tungsten:Llama:Tokenizer.from_packed_tokenizer(TOKENIZER_BIN)
 text_out = tokenizer.decode(ids)

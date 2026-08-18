@@ -62,7 +62,7 @@
             gecko_id: "deutsche-emark", paprika_id: "dem-deutsche-emark",
             block_secs: 120, maturity: 100},
     # Titcoin — Bitcoin 0.16.3 fork, 60s blocks, no auxpow.
-    "TIT": {name: "Titcoin", rpc_port: 8232,
+    "TIT": {name: "Titcoin", rpc_port: 8697,
             gbt_params: "\[{\"rules\":\[\"segwit\"\]}\]",
             txtime: 0, p2pkh_ver: -1,
             gecko_id: "titcoin", paprika_id: "tit-titcoin",

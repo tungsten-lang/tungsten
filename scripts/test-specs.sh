@@ -32,7 +32,9 @@ export TUNGSTEN_INCREMENTAL=0
 # list order, so output and failure attribution stay deterministic. The
 # cache-lifecycle test and the gated tails (metal, PTY, api) stay serial.
 # JOBS=1 restores fully serial behavior. FAST=1 runs the curated inner-
-# loop slice only (see fast_* lists) and skips the serial tails.
+# loop slice only (see fast_* lists) and skips the serial tails. Set
+# TUNGSTEN_SPECS_PROFILE_FILE to append tab-separated mode/path/seconds rows
+# from each worker; this is used to maintain the longest-first schedule below.
 JOBS="${JOBS:-auto}"
 if [[ "$JOBS" == "auto" ]]; then
   JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
@@ -146,6 +148,32 @@ run_parallel_aggregate() {
     fi
     finish_job "$name" "$mode."
   done
+}
+
+# Exact duplicate paths launch two workers against the same binary and result
+# files; basename collisions do the same even when the source paths differ.
+# Fail before starting work instead of reporting a misleading missing status.
+assert_unique_spec_lane() {
+  local lane="$1"
+  shift
+  local duplicate_paths
+  local duplicate_names
+  local source_path
+  local spec_name
+
+  duplicate_paths="$(printf '%s\n' "$@" | LC_ALL=C sort | uniq -d)"
+  duplicate_names="$({
+    for source_path in "$@"; do
+      spec_name="${source_path##*/}"
+      printf '%s\n' "${spec_name%.w}"
+    done
+  } | LC_ALL=C sort | uniq -d)"
+  if [[ -n "$duplicate_paths" || -n "$duplicate_names" ]]; then
+    echo "duplicate $lane spec jobs" >&2
+    [[ -z "$duplicate_paths" ]] || printf '  path: %s\n' "$duplicate_paths" >&2
+    [[ -z "$duplicate_names" ]] || printf '  result name: %s\n' "$duplicate_names" >&2
+    exit 1
+  fi
 }
 
 run_compiled_spec() {
@@ -571,6 +599,7 @@ run_cache_lifecycle_test() {
 # result for the parent and leave `fail` at zero; a directly invoked job has no
 # parent aggregator, so return its recorded failure status to the caller.
 if [[ "${1:-}" == --job-* ]]; then
+  job_started_seconds=$SECONDS
   case "$1" in
     --job-compiled) run_compiled_spec "$2" ;;
     --job-interp)   run_interpreter_spec "$2" ;;
@@ -582,6 +611,9 @@ if [[ "${1:-}" == --job-* ]]; then
     --job-wassat)   run_wassat_spec "$2" "$3" ;;
     *) echo "unknown job mode $1" >&2; exit 2 ;;
   esac
+  if [[ -n "${TUNGSTEN_SPECS_PROFILE_FILE:-}" ]]; then
+    printf '%s\t%s\t%s\n' "$1" "$2" "$((SECONDS - job_started_seconds))" >> "$TUNGSTEN_SPECS_PROFILE_FILE"
+  fi
   exit "$fail"
 fi
 
@@ -678,7 +710,6 @@ compiled_specs=(
   spec/compiler/static_method_overload_spec.w
   spec/compiler/splat_parameter_parity_spec.w
   spec/compiler/int_bigint_promotion_spec.w
-  spec/compiler/int_integer_dynamic_receiver_spec.w
   spec/compiler/bigint_literal_cache_spec.w
   spec/compiler/ivar_param_type_spec.w
   spec/compiler/llvm_name_mangling_injective_spec.w
@@ -787,6 +818,66 @@ compiled_specs=(
   spec/numeric/vector_spec.w
   spec/core/date_native_spec.w
 )
+
+# Longest-processing-time first keeps the parallel worker pool busy while the
+# expensive compiler/Core programs run. These paths are a deliberately small,
+# measured scheduling tier; compiled_specs remains the coverage manifest.
+compiled_priority_specs=(
+  spec/core/algebra_c_ab_divisors_spec.w
+  spec/core/expression_solve_spec.w
+  spec/core/algebra_c_ab_spec.w
+  spec/core/algebra_p_adic_number_field_spec.w
+  spec/core/algebra_s_units_spec.w
+  spec/core/algebra_shell_width_degree12_artifact_spec.w
+  spec/core/expression_spec.w
+  spec/core/algebra_p_adic_dyadic_spec.w
+  spec/core/algebra_s_class_group_spec.w
+  spec/core/algebra_divisors_spec.w
+  spec/core/algebra_ideal_arithmetic_spec.w
+  spec/core/algebra_lattice_reduction_spec.w
+  spec/core/algebra_prime_subspace_spec.w
+  spec/core/algebra_projective_heights_spec.w
+  spec/core/algebra_real_roots_spec.w
+  spec/core/algebra_autoload_spec.w
+  spec/core/expression_algebra_spec.w
+  spec/core/algebra_shell_width_degree6_artifact_spec.w
+  spec/core/algebra_shell_width_degree9_artifact_spec.w
+  spec/core/algebraic_real_spec.w
+  spec/core/algebra_shell_width_s_unit_artifacts_spec.w
+  compiler/test/regex_features.w
+  spec/compiler/strip_stacktrace_metadata_spec.w
+)
+
+assert_unique_spec_lane "compiled" "${compiled_specs[@]}"
+assert_unique_spec_lane "compiled priority" "${compiled_priority_specs[@]}"
+scheduled_compiled_specs=()
+for priority_path in "${compiled_priority_specs[@]}"; do
+  found=0
+  for source_path in "${compiled_specs[@]}"; do
+    if [[ "$source_path" == "$priority_path" ]]; then
+      found=1
+      break
+    fi
+  done
+  if [[ "$found" != "1" ]]; then
+    echo "missing priority compiled spec: $priority_path" >&2
+    exit 1
+  fi
+  scheduled_compiled_specs+=("$priority_path")
+done
+for source_path in "${compiled_specs[@]}"; do
+  prioritized=0
+  for priority_path in "${compiled_priority_specs[@]}"; do
+    if [[ "$source_path" == "$priority_path" ]]; then
+      prioritized=1
+      break
+    fi
+  done
+  if [[ "$prioritized" != "1" ]]; then
+    scheduled_compiled_specs+=("$source_path")
+  fi
+done
+compiled_specs=("${scheduled_compiled_specs[@]}")
 
 # Emit-only GPU dialect specs (no hardware). Run always with make specs.
 cuda_emit_specs=(

@@ -3901,6 +3901,51 @@ ewscope_md_state = {ids: {}}
   elsif used_runtime_fns["__w_bigint_mul21_src"] == true
     seam_decls << "declare i64 @__w_bigint_mul21_src(i64, i64) nounwind\n"
 
+  # Exact distinct positive twenty-four-by-twenty-four-limb multiplication
+  # keeps C's selected top-level difference-form leaf behind the adjacent
+  # reserved and open-world contracts.
+  bigint_mul24_fn = nil
+  bigint_mul24_matches = 0
+  be24fi = 0
+  while be24fi < mod[:functions].size()
+    be24ff = mod[:functions][be24fi]
+    if be24ff[:source_class] == nil && be24ff[:source_method] == "__bigint_mul24_raw"
+      bigint_mul24_matches += 1
+      bigint_mul24_fn = be24ff
+    be24fi += 1
+  if bigint_mul24_matches > 1
+    << "error: __bigint_mul24_raw is reserved for native BigInt multiplication"
+    exit(1)
+  if mod[:require_bigint_mul24_src] == true && bigint_mul24_fn == nil
+    << "error: required native BigInt mul@24 helper is missing; __w_bigint_mul24_src would bind the weak C bootstrap default"
+    exit(1)
+  bigint_mul24_target = bigint_times_reopened_fn
+  if bigint_mul24_target == nil
+    bigint_mul24_target = bigint_mul24_fn
+  if bigint_mul24_target != nil
+    be24_signature_ok = bigint_mul24_target[:params] != nil && bigint_mul24_target[:params].size() == 2
+    if bigint_times_reopened_fn == nil
+      be24_signature_ok = be24_signature_ok && bigint_mul24_target[:source_kind] == :fn_def
+      be24_signature_ok = be24_signature_ok && bigint_mul24_target[:raw_i64_signature] == true
+      be24_signature_ok = be24_signature_ok && bigint_mul24_target[:raw_return_type] == :i64
+    if !be24_signature_ok
+      << "error: invalid native BigInt mul@24 seam target"
+      exit(1)
+    be24_cc = ""
+    if bigint_mul24_target[:call_conv] != nil && bigint_mul24_target[:call_conv] != ""
+      be24_cc = bigint_mul24_target[:call_conv] + " "
+    be24_attrs = " nounwind"
+    if bigint_times_reopened_fn == nil
+      be24_attrs += " alwaysinline"
+    fn_out << "define i64 @__w_bigint_mul24_src(i64 %a, i64 %b)" + be24_attrs + " {\n"
+    fn_out << "  %r = tail call " + be24_cc + "i64 @" + bigint_mul24_target[:name] + "(i64 %a, i64 %b)\n"
+    fn_out << "  ret i64 %r\n"
+    fn_out << "}\n\n"
+    used_runtime_fns["__w_bigint_mul24_src"] = false
+    known_fns["__w_bigint_mul24_src"] = true
+  elsif used_runtime_fns["__w_bigint_mul24_src"] == true
+    seam_decls << "declare i64 @__w_bigint_mul24_src(i64, i64) nounwind\n"
+
   # Exact positive 2-by-1 multiplication keeps a second narrow seam. w_mul
   # proves and orients the scalar-word shape without changing receiver order;
   # Core supplies the literal raw leaf, while a genuine BigInt#* reopen keeps

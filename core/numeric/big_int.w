@@ -3970,6 +3970,18 @@ fn __bigint_mul21_raw(a, b) (i64 i64) i64
   ccall_nobox("w_bigint_mul21_kernel_raw", rp, bp, ap)
   ccall_nobox("w_bigint_mul21_finish_raw", result)
 
+# Exact distinct positive twenty-four-by-twenty-four-limb multiplication.
+# Preserve C's selected top-level difference-form leaf literally; source owns
+# only the same capacity-64 allocation, kernel call, and +47/+48 publication.
+fn __bigint_mul24_raw(a, b) (i64 i64) i64
+  result = ccall_nobox("w_bigint_alloc_hot64_raw") ## i64
+  mask = 140737488355327 ## i64
+  rp = (result & mask) + 16 ## i64
+  ap = (a & mask) + 16 ## i64
+  bp = (b & mask) + 16 ## i64
+  ccall_nobox("w_bigint_mul24_kernel_raw", rp, bp, ap)
+  ccall_nobox("w_bigint_mul24_finish_raw", result)
+
 # Exact positive two-limb-by-one-limb scalar-word arm. Preserve receiver
 # order at the operator seam, then orient only the raw magnitudes after the
 # shape gate has proved that exactly one operand has two limbs.

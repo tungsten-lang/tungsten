@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(531 total), grouped by area, with its declaration, a one-line
+(547 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -80,7 +80,17 @@ summary from the source header, and a link to the source.
 | `QuadratureResult` | — | — | [`core/calculus.w`](../core/calculus.w) |
 | `RadialMellinTransform` | `+ RadialMellinTransform` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
 | `CohnElkiesAsymptotics` | `+ CohnElkiesAsymptotics` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
+| `GaussianInteger` | `+ GaussianInteger` | Z[i], the Gaussian integers: complex numbers a + bi with a, b in Z. | [`core/algebra/gaussian_integer.w`](../core/algebra/gaussian_integer.w) |
+| `EisensteinInteger` | `+ EisensteinInteger` | Z[omega], the Eisenstein integers: a + b*omega with omega a primitive cube | [`core/algebra/eisenstein_integer.w`](../core/algebra/eisenstein_integer.w) |
+| `SmithNormalForm` | `+ SmithNormalForm` | Smith normal form of an integer matrix. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
 | `Combinatorics` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
+| `PolyominoEnumeration` | `+ PolyominoEnumeration` | Enumeration of polyominoes by cell count. | [`core/combinatorics/polyomino.w`](../core/combinatorics/polyomino.w) |
+| `LatticeAnimal` | `+ LatticeAnimal` | Enumeration of animals in a given lattice: grow shapes one cell at a time | [`core/combinatorics/lattice_animal.w`](../core/combinatorics/lattice_animal.w) |
+| `DimerCovering` | `+ DimerCovering` | Dimer coverings: counting the ways to tile a region with dominoes. | [`core/combinatorics/dimer.w`](../core/combinatorics/dimer.w) |
+| `Kasteleyn` | `+ Kasteleyn` | Kasteleyn's theorem: perfect matchings of a planar graph as a determinant. | [`core/combinatorics/kasteleyn.w`](../core/combinatorics/kasteleyn.w) |
+| `Polyiamond` | `+ Polyiamond` | Polyiamonds: edge-connected sets of triangles in the triangular grid. | [`core/combinatorics/polyiamond.w`](../core/combinatorics/polyiamond.w) |
+| `Lattice` | `+ Lattice` | Lattice animals: finite edge-connected sets of cells in any lattice. | [`core/combinatorics/lattice_animal.w`](../core/combinatorics/lattice_animal.w) |
+| `ExactCover` | `+ ExactCover` | Exact cover by dancing links (Knuth's Algorithm X, DLX). | [`core/combinatorics/exact_cover.w`](../core/combinatorics/exact_cover.w) |
 | `FiniteSimpleGraph` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `GraphDegeneracyCertificate` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `CompleteGraphEdgeColoring` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
@@ -91,6 +101,12 @@ summary from the source header, and a link to the source.
 | `ConstantNormCode` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `Geometry` | `+ Geometry` | — | [`core/geometry.w`](../core/geometry.w) |
 | `EuclideanMeasure` | `+ EuclideanMeasure` | — | [`core/geometry/measure.w`](../core/geometry/measure.w) |
+| `Polyomino` | `+ Polyomino` | Discrete lattice geometry: polyominoes on the integer grid Z x Z. | [`core/geometry/polyomino.w`](../core/geometry/polyomino.w) |
+| `LatticeSymmetry` | `+ LatticeSymmetry` | Finite symmetry groups acting on a lattice by integer matrices. | [`core/geometry/lattice_symmetry.w`](../core/geometry/lattice_symmetry.w) |
+| `DigitalGeometry` | `+ DigitalGeometry` | Digital geometry: the primitives for reasoning about shapes made of cells. | [`core/geometry/digital.w`](../core/geometry/digital.w) |
+| `PlaneSymmetry` | `+ PlaneSymmetry` | The symmetry types a repeating plane pattern can have. | [`core/geometry/plane_symmetry.w`](../core/geometry/plane_symmetry.w) |
+| `WallpaperGroup` | `+ WallpaperGroup` | The wallpaper groups as actual groups, not just names. | [`core/geometry/wallpaper_group.w`](../core/geometry/wallpaper_group.w) |
+| `PolyominoPacking` | `+ PolyominoPacking` | Minimum-area rectangle packing of polyominoes, solved exactly. | [`core/geometry/polyomino_packing.w`](../core/geometry/polyomino_packing.w) |
 | `Chart` | — | — | [`core/geometry.w`](../core/geometry.w) |
 | `TensorIndex` | — | — | [`core/geometry.w`](../core/geometry.w) |
 | `TensorField` | — | — | [`core/geometry.w`](../core/geometry.w) |
@@ -515,7 +531,7 @@ summary from the source header, and a link to the source.
 | `BF16` | `+ BF16 < Float` | Brain float 16 | [`core/numeric/bfloat16.w`](../core/numeric/bfloat16.w) |
 | `BigComplex` | `+ BigComplex < Complex` | — | [`core/numeric/big_complex.w`](../core/numeric/big_complex.w) |
 | `BigDecimal` | `+ BigDecimal < Decimal` | — | [`core/numeric/big_decimal.w`](../core/numeric/big_decimal.w) |
-| `BigInt` | `+ BigInt < Int` | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
+| `BigInt` | `+ BigInt` | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
 | `Int` | `+ Int < Integer` | Int — Tungsten's inline, auto-promoting integer implementation. | [`core/numeric/int.w`](../core/numeric/int.w) |
 | `IntegerFactorization` | `+ IntegerFactorization` | — | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
 | `PrimePower` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |

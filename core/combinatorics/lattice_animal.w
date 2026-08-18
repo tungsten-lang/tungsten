@@ -44,6 +44,9 @@
   -> dimension
     @steps[0].size
 
+# Enumeration of animals in a given lattice: grow shapes one cell at a time
+# and deduplicate by normal form, either up to translation alone or up to the
+# lattice's full point group.
 + LatticeAnimal
   -> .key_of(cells)
     parts = []

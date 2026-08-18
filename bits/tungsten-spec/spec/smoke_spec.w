@@ -2,7 +2,7 @@
 # Contains DELIBERATE failures: expect exit code 1 and "2 failed".
 #
 # Run from the repo root:
-#   bin/tungsten bits/tungsten-spec/spec/smoke_spec.w
+#   bin/tungsten run --interpret bits/tungsten-spec/spec/smoke_spec.w
 # Expected: 8 examples: 6 passed, 2 failed (+ 1 pending), exit code 1.
 
 use spec

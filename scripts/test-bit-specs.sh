@@ -6,6 +6,7 @@ TUNGSTEN="${TUNGSTEN:-"$ROOT/bin/tungsten"}"
 COMPILER="$ROOT/bin/tungsten-compiler"
 TMP_ROOT="${TUNGSTEN_BIT_SPECS_TMP_ROOT:-${TMPDIR:-/tmp}/tungsten-bit-specs.$$}"
 BIT_SPEC_TIMEOUT_SECONDS="${BIT_SPEC_TIMEOUT_SECONDS:-300}"
+BIT_SPEC_SHARDS="${BIT_SPEC_SHARDS:-8}"
 
 cleanup() {
   rm -rf "$TMP_ROOT"
@@ -79,6 +80,37 @@ for path in "${ordinary_specs[@]}"; do
   esac
 done
 
+# These suites contain many independent, compute-heavy examples. Shard them
+# across the existing interpreter worker pool so no native compilation is
+# needed merely to make their wall time practical.
+if (( BIT_SPEC_SHARDS < 1 )); then
+  echo "BIT_SPEC_SHARDS must be at least 1" >&2
+  exit 1
+fi
+sharded_specs=(
+  bits/tungsten-koala/spec/column_transformer_spec.w
+  bits/tungsten-koala/spec/estimator_spec.w
+  bits/tungsten-koala/spec/gradient_boosting_spec.w
+  bits/tungsten-koala/spec/random_forest_spec.w
+)
+generic_jobs=()
+for path in "${generic_specs[@]}"; do
+  should_shard=0
+  for sharded_path in "${sharded_specs[@]}"; do
+    if [[ "$path" == "$sharded_path" ]]; then
+      should_shard=1
+      break
+    fi
+  done
+  if [[ "$should_shard" == "1" ]]; then
+      for ((shard = 0; shard < BIT_SPEC_SHARDS; shard++)); do
+        generic_jobs+=("$path::$shard/$BIT_SPEC_SHARDS")
+      done
+  else
+    generic_jobs+=("$path")
+  fi
+done
+
 jobs="${JOBS:-auto}"
 if [[ "$jobs" == "auto" ]]; then
   jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
@@ -87,11 +119,24 @@ if [[ "$jobs" == "auto" ]]; then
 fi
 
 run_one() {
-  local path="$1"
-  local key="${path//\//__}"
+  local job="$1"
+  local path="${job%%::*}"
+  local shard=""
+  local shard_index=""
+  local shard_count=""
+  local key="${job//\//__}"
   local out="$TMP_ROOT/bin/${key%.w}"
   local log="$TMP_ROOT/results/$key.log"
   local status=0
+  local -a spec_env=(TUNGSTEN_INTERPRETED_SPEC=1 TUNGSTEN_SPEC_QUIET=1)
+
+  if [[ "$job" == *::* ]]; then
+    shard="${job#*::}"
+    shard_index="${shard%/*}"
+    shard_count="${shard#*/}"
+    spec_env+=("TUNGSTEN_SPEC_SHARD_INDEX=$shard_index")
+    spec_env+=("TUNGSTEN_SPEC_SHARD_COUNT=$shard_count")
+  fi
 
   # Argon relies on compiled option-parser lowering and Hammer exercises a
   # native string-pointer builtin. The remaining ordinary bit suites are
@@ -109,7 +154,7 @@ run_one() {
       # The framework smoke suite deliberately contains two failures. It is a
       # negative contract, not a skipped suite: require its nonzero exit and
       # exact accounting before accepting it.
-      if run_bounded "$TUNGSTEN" run "$path" >"$log" 2>&1; then
+      if run_bounded env "${spec_env[@]}" "$TUNGSTEN" run --interpret "$path" >"$log" 2>&1; then
         echo "FAIL: deliberate-failure smoke suite exited successfully" >>"$log"
         status=1
       elif ! grep -Eq '^8 examples: 6 passed, 2 failed, 1 pending$' "$log" ||
@@ -120,7 +165,7 @@ run_one() {
       fi
       ;;
     *)
-      if ! run_bounded "$TUNGSTEN" run "$path" >"$log" 2>&1; then
+      if ! run_bounded env "${spec_env[@]}" "$TUNGSTEN" run --interpret "$path" >"$log" 2>&1; then
         status=1
       fi
       ;;
@@ -147,18 +192,50 @@ export -f run_bounded run_one
 
 printf 'bit specs: %d runnable, %d generator fixtures\n' \
   "${#ordinary_specs[@]}" "${#fixture_specs[@]}"
-printf '%s\n' "${generic_specs[@]}" |
+printf '%s\n' "${generic_jobs[@]}" |
   xargs -P "$jobs" -I{} bash "$0" --worker "{}"
 
 failed=0
-for path in "${generic_specs[@]}"; do
-  key="${path//\//__}"
+for job in "${generic_jobs[@]}"; do
+  path="${job%%::*}"
+  key="${job//\//__}"
   status="$(cat "$TMP_ROOT/results/$key.status")"
+  label="$path"
+  if [[ "$job" == *::* ]]; then
+    shard="${job#*::}"
+    shard_index="${shard%/*}"
+    shard_count="${shard#*/}"
+    label="$path [shard $((shard_index + 1))/$shard_count]"
+  fi
   if [[ "$status" == "0" ]]; then
-    echo "PASS $path"
+    echo "PASS $label"
   else
-    echo "FAIL $path" >&2
+    echo "FAIL $label" >&2
     cat "$TMP_ROOT/results/$key.log" >&2
+    failed=1
+  fi
+done
+
+# A broken shard predicate could make every process green while silently
+# dropping or duplicating examples. Pin the aggregate number of executed `it`
+# declarations to the source count without hardcoding a manifest that goes
+# stale whenever a suite grows.
+for path in "${sharded_specs[@]}"; do
+  expected="$(grep -Ec '^[[:space:]]*it[[:space:]]' "$path")"
+  observed=0
+  for ((shard = 0; shard < BIT_SPEC_SHARDS; shard++)); do
+    job="$path::$shard/$BIT_SPEC_SHARDS"
+    key="${job//\//__}"
+    count="$(sed -nE 's/^([0-9]+) examples:.*/\1/p' "$TMP_ROOT/results/$key.log" | tail -1)"
+    if [[ -z "$count" ]]; then
+      echo "FAIL $path [shard $((shard + 1))/$BIT_SPEC_SHARDS] emitted no summary" >&2
+      failed=1
+      continue
+    fi
+    observed=$((observed + count))
+  done
+  if [[ "$observed" -ne "$expected" ]]; then
+    echo "FAIL $path shards ran $observed examples; source declares $expected" >&2
     failed=1
   fi
 done

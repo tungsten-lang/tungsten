@@ -12,6 +12,34 @@ $spec_pending_count = 0
 $spec_depth = 0
 $spec_failures = []
 $spec_current_failure = nil
+$spec_example_ordinal = 0
+$spec_shard_count = nil
+$spec_shard_index = nil
+$spec_quiet = env("TUNGSTEN_SPEC_QUIET") == "1"
+
+-> spec_set_shard(count, index)
+  $spec_shard_count = count
+  $spec_shard_index = index
+  nil
+
+# Optional process sharding for large suites. Each process still evaluates the
+# whole spec file (so declarations and group setup are identical), but runs a
+# disjoint subset of examples. The bit-suite harness uses this only for files
+# whose tree-walk runtime would otherwise dominate the complete suite.
+-> spec_example_runs_here?
+  ordinal = $spec_example_ordinal
+  count = $spec_shard_count
+  index = $spec_shard_index
+  $spec_example_ordinal += 1
+  if count == nil
+    count_text = env("TUNGSTEN_SPEC_SHARD_COUNT")
+    index_text = env("TUNGSTEN_SPEC_SHARD_INDEX")
+    count = count_text == nil ? 1 : count_text.to_i
+    index = index_text == nil ? 0 : index_text.to_i
+    if count < 1 || index < 0 || index >= count
+      raise "invalid Tungsten-spec shard [index]/[count]"
+    spec_set_shard(count, index)
+  ordinal % count == index
 
 # First failed expectation of the running example (see expectation.w for
 # why failures are flagged rather than raised).
@@ -45,7 +73,9 @@ $spec_current_failure = nil
 
 -> spec_record_pass(desc)
   $spec_pass += 1
-  << spec_indent + "PASS " + desc
+  if !$spec_quiet
+    << spec_indent + "PASS " + desc
+  nil
 
 -> spec_record_fail(desc, err)
   $spec_fail += 1
@@ -84,6 +114,9 @@ $spec_current_failure = nil
   $spec_pending_count = 0
   $spec_depth = 0
   $spec_failures = []
+  $spec_example_ordinal = 0
+  $spec_shard_count = nil
+  $spec_shard_index = nil
   nil
 
 # Configuration entry point — runs the block immediately; use it to

@@ -4,8 +4,8 @@ configured = false
 TungstenSpec.configure ->
   configured = true
 
-if !configured
-  << "FAIL TungstenSpec.configure did not run its block"
-  exit 1
+describe "TungstenSpec.configure" ->
+  it "runs its block immediately" ->
+    expect(configured).to be_true
 
-<< "PASS TungstenSpec.configure"
+spec_summary

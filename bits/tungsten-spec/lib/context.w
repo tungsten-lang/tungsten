@@ -38,6 +38,8 @@
   nil
 
 -> it(desc, &)
+  if !spec_example_runs_here?
+    return nil
   spec_clear_failure
   err = nil
   begin
@@ -61,10 +63,14 @@
 
 # Pending/skipped examples — counted, never run.
 -> pending(desc, &)
-  spec_record_pending(desc)
+  if spec_example_runs_here?
+    spec_record_pending(desc)
+  nil
 
 -> skip(desc)
-  spec_record_pending(desc)
+  if spec_example_runs_here?
+    spec_record_pending(desc)
+  nil
 
 # --- Inert stubs (documented limitations) ---
 # The language has no instance_eval/method_missing, so a `let` binding

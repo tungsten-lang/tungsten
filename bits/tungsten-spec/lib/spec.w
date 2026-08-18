@@ -1,8 +1,9 @@
 # Tungsten Spec — a behavior-driven testing framework for Tungsten.
 # Inspired by RSpec: describe/context/it blocks, expect(...).to matchers,
 # before/after hooks, and a pass/fail summary with a non-zero exit code
-# on failure. Runs interpreted (bin/tungsten spec_file.w) and compiled
-# (bin/tungsten -o) with identical output.
+# on failure. Runs interpreted (`bin/tungsten run --interpret spec_file.w`)
+# and compiled (`bin/tungsten compile`, then the resulting binary) with
+# identical output.
 #
 # Usage:
 #   use spec
@@ -35,6 +36,12 @@
 #   - No instance_eval/method_missing exist, so `let`/`subject` bindings
 #     cannot be injected as bare names; they are accepted but inert (see
 #     context.w). Bind values inside the example instead.
+#   - Large suites may be split across processes with matching zero-based
+#     `TUNGSTEN_SPEC_SHARD_INDEX` and positive `TUNGSTEN_SPEC_SHARD_COUNT`.
+#     Every `it`/`pending`/`skip` belongs to exactly one shard.
+#   - `TUNGSTEN_SPEC_QUIET=1` suppresses successful example lines while
+#     retaining failures and the final summary; the root harness uses it to
+#     keep parallel-worker output small.
 #
 # All definitions are top-level (no `in Tungsten:Spec`): namespaced bit
 # classes are not reliably visible to `use spec` consumers today, and a

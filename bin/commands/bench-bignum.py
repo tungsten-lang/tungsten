@@ -179,6 +179,58 @@ def parse_csv(value: str, *, integers: bool = False) -> list[Any]:
     return result
 
 
+def parse_cell(value: str) -> tuple[str, int]:
+    operation, separator, limbs_text = value.partition("@")
+    operation = operation.strip()
+    limbs_text = limbs_text.strip()
+    if separator == "" or not operation or not limbs_text or "@" in limbs_text:
+        raise argparse.ArgumentTypeError(
+            "cell must be written as OPERATION@LIMBS (for example: sub@48)"
+        )
+    if operation not in OPERATIONS:
+        raise argparse.ArgumentTypeError(f"unknown operation: {operation}")
+    limbs = parse_csv(limbs_text, integers=True)
+    if len(limbs) != 1:
+        raise argparse.ArgumentTypeError(
+            "cell must contain exactly one limb count"
+        )
+    return operation, limbs[0]
+
+
+def apply_cell_selection(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> None:
+    if args.cell is None:
+        return
+    conflicts = [
+        flag
+        for flag, enabled in (
+            ("--operations", bool(args.operations)),
+            ("--sizes", bool(args.sizes)),
+            ("--full", args.full),
+            ("--worker-sweep", args.worker_sweep),
+            ("--capacity-only", args.capacity_only),
+        )
+        if enabled
+    ]
+    if conflicts:
+        parser.error(
+            "--cell cannot be combined with " + ", ".join(conflicts)
+        )
+    operation, limbs = args.cell
+    cap = SIZE_CAPS.get(operation)
+    if cap is not None and limbs > cap:
+        parser.error(
+            f"--cell {operation}@{limbs} exceeds {operation}'s "
+            f"{cap}-limb benchmark cap"
+        )
+    args.operations = operation
+    args.sizes = str(limbs)
+    # A cell request means exactly one operation/shape measurement.  Do not
+    # append the independent allocator-capacity experiment afterward.
+    args.no_capacity = True
+
+
 def xorshift_word(state: int) -> tuple[int, int]:
     x = state & MASK64
     x ^= x >> 12
@@ -1423,6 +1475,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma-separated operations (default: all)",
     )
     parser.add_argument(
+        "--cell",
+        type=parse_cell,
+        metavar="OPERATION@LIMBS",
+        help=(
+            "run exactly one operation/limb-count cell (for example: "
+            "sub@48); implies --no-capacity and cannot be combined with "
+            "--operations, --sizes, --full, --worker-sweep, or "
+            "--capacity-only"
+        ),
+    )
+    parser.add_argument(
         "--runs",
         type=int,
         help="measurement repetitions (default: 3; accurate/full: 9)",
@@ -1574,6 +1637,7 @@ EXTERNAL_BINARIES = {
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    apply_cell_selection(args, parser)
     if args.quick and args.full:
         parser.error("--quick and --full cannot be combined")
     if args.worker_sweep and args.quick:

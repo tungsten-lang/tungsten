@@ -19,6 +19,49 @@ BENCH = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BENCH)
 
 
+class SingleCellSelectionTest(unittest.TestCase):
+    def test_cell_selects_one_operation_and_shape(self) -> None:
+        parser = BENCH.build_parser()
+        args = parser.parse_args(["--cell", "sub@48"])
+        BENCH.apply_cell_selection(args, parser)
+
+        self.assertEqual(args.operations, "sub")
+        self.assertEqual(args.sizes, "48")
+        self.assertTrue(args.no_capacity)
+
+    def test_cell_keeps_measurement_options(self) -> None:
+        parser = BENCH.build_parser()
+        args = parser.parse_args(
+            ["--cell", "mul@4", "--accurate", "--runs", "11"]
+        )
+        BENCH.apply_cell_selection(args, parser)
+
+        self.assertTrue(args.accurate)
+        self.assertEqual(args.runs, 11)
+
+    def test_cell_rejects_matrix_selectors(self) -> None:
+        parser = BENCH.build_parser()
+        args = parser.parse_args(
+            ["--cell", "sub@48", "--operations", "sub"]
+        )
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                BENCH.apply_cell_selection(args, parser)
+
+    def test_cell_rejects_invalid_shape(self) -> None:
+        parser = BENCH.build_parser()
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parser.parse_args(["--cell", "sub:48"])
+
+    def test_cell_rejects_operation_size_cap(self) -> None:
+        parser = BENCH.build_parser()
+        args = parser.parse_args(["--cell", "pow@257"])
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                BENCH.apply_cell_selection(args, parser)
+
+
 class ExternalCellTimeoutTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

@@ -494,6 +494,321 @@ that already exists.
 drops far enough that the chain's marginal falls below a branch's -- the
 probe is checked in, so re-deciding costs one run.
 
+### Cross-row wide verify, and the fixture band applies to the BASELINE too (2026-08-18)
+
+Two results, and the second one invalidates a target this document had been
+chasing.
+
+#### 1. The width-4/5 verify kernel had the pre-hoist defect
+
+`nvfp4_matvec_mlx_scaled_batch.metal` (quad/quint) gives each SIMD group ONE
+output row while issuing `BATCH*4` float4 activation loads against 2 u32 of
+weight -- 256 bytes of activation per 8 bytes of weight at BATCH=4. That is the
+same load/store issue-slot starvation the triplet hoist fixed, except a
+one-output-row kernel has nothing to hoist across. It showed up as quad/quint
+*regressing* against plain per-token qmv on mlp-down (0.96x and 0.77x).
+
+`nvfp4_matvec_mlx_scaled_wide.metal` gives each SIMD group ROWS output rows and
+loads the activations ONCE into registers shared across them, which is the shape
+of MLX's `qmv_fast_crossrow_affine4_g64_wide`. Bakeoff on real weights,
+`scripts/bench/autotune_qwen38_wide.w`, every candidate validated against the
+production 8-row qmv first (`err=0` on all ten shapes, all widths):
+
+| shape | quad -> best wide | quint -> best wide |
+|---|---|---|
+| mlp down | 293.0 -> 141.6 us (**2.07x**) | 454.7 -> 172.3 us (**2.64x**) |
+| lm head | 2733 -> 1489 us (**1.84x**) | 3218 -> 1868 us (**1.72x**) |
+| attention q | 143.1 -> 82.6 us (**1.73x**) | 168.1 -> 106.0 us (**1.59x**) |
+| mlp gate | 200.3 -> 116.2 us (**1.72x**) | 235.7 -> 144.6 us (**1.63x**) |
+| mtp fuse | 120.1 -> 75.5 us (1.59x) | 144.1 -> 96.4 us (1.49x) |
+
+`b4_r1` -- same one-row-per-SIMD-group shape as quad, just written with register
+arrays -- gains only ~1.12x. So the win is the activation sharing, not the
+rewrite, which is the mechanism the change claims.
+
+**The ROWS ladder is non-monotonic and shape-dependent, so it is swept.** r4
+wins where the activation working set is large relative to the weight tile
+(mlp-down K=17408: 1.21x r2 at width 3, 2.07x vs 1.76x at width 4) and *loses*
+everywhere K=5120 (attention q 0.91x, attention k 0.76x at width 3). The shipped
+split is r4 when `kdim == FFN`, r2 otherwise. This is the same hazard MLX hit
+from the other side: it profiled M=9 as CHEAPER than M=8 (216 us vs 437 us)
+because M=8's even 4+4 split needs two simultaneous four-wide accumulator sets.
+Do not let a cost model prune this axis.
+
+At width 3 the wide kernel is a smaller but repeatable win over the hoisted
+triplet, measured end-to-end, alternating, 64-token prose, 32 generated:
+
+| variant | tok/s | acceptance |
+|---|---|---|
+| `hoist` (previous `auto`) | 42.95 / 45.65 / 45.52 | 0.50 / 0.3125 |
+| `b3` (r2 everywhere) | 46.51 / 46.38 / 46.11 | 0.50 / 0.3125 |
+| `auto` (r4 for FFN, r2 else) | **46.99 / 46.99 / 46.72** | 0.50 / 0.3125 |
+
+3/3 and 3/3. Acceptance is byte-identical across all nine runs, which is the null
+check: these are pure kernel-speed changes and nothing behavioural moved.
+
+#### 2. MTP-2 is the faster mode on prose, and Ollama's 64.99 was a chat prompt
+
+`mtp` (depth 1) is documented above as the fast default. On the prose fixture it
+is not: depth 2 wins by 15%, because it commits 2.0 tokens per round against
+depth 1's 1.52 while the round costs only 43 ms against 38 ms.
+
+| mode | round | tokens/round | tok/s |
+|---|---|---|---|
+| `mtp` (depth 1) | 38 ms | 1.52 | 37.96 |
+| `mtp2` (depth 2) | 43 ms | 2.00 | 45.65 |
+
+Combined with the wide kernel: **37.96 -> 46.99 tok/s, +23.8%**, greedy ids
+byte-identical to the pre-change baseline throughout.
+
+**The Ollama comparison recorded above is not matched material.** The 61-68
+tok/s figure was measured through Ollama's *chat template*: a ~100-token passage
+arrives as `prompt_eval_count=113` and the model writes an assistant *reply*
+rather than continuing the prose. Replies are much more predictable -- Ollama's
+own log reports `acceptance=0.79 avg_draft=2.80 max_draft=4` there. That is the
+fixture-band lesson from the section above applied to the BASELINE instead of to
+our own harness, and it had been sitting in this document as a 1.6x target that
+does not exist.
+
+Re-run with `"raw": true` on the exact 64-token prefix this bench uses, Ollama
+emits the byte-identical continuation and its controller backs off to depth 1:
+
+| runner | tok/s | forwards for 32 tok | tokens/forward | acceptance |
+|---|---|---|---|---|
+| Ollama MLX (`raw`, 64-tok prefix) | 44.81 / 46.93 / 44.99 | 20 | 1.60 | 0.71, avg_draft 0.85 |
+| **Tungsten `mtp2` `auto`** | **46.99 / 46.99 / 46.72** | **16** | **2.00** | 0.50 |
+
+Same model, same prompt, same emitted tokens, same box. Tungsten is ahead, and
+extracts more tokens per target forward. Ollama's per-position acceptance on raw
+prose is 0.52-0.71 -- **not** meaningfully better than ours, so there is no
+head-quality gap to chase. The apparent one was entirely the chat template.
+
+#### Why depth 3+ does not pay, quantified
+
+Component profile (`ARGV[4] = "profile"`, mtp2, 64-token prose):
+
+```
+verify=365 ms/10 rounds   -> 36.5 ms per 3-row verify
+draft=65 ms/21            -> 3.10 ms per MTP head step
+history=27 ms/76          -> 0.36 ms
+hidden-copy=4 ms/23, rollback=0 ms/6
+```
+
+With `verify(W) = 29 + 3W` (row-scan: 32/35/38 ms at W=1/2/3) and a 3.05 ms head
+step, `round(d) = 32 + 6.05d`. At the measured chain (p1 = 0.6875,
+p2|1 = 0.4545):
+
+| depth | round | E[tokens] | ms/token |
+|---|---|---|---|
+| 1 | 38.1 ms | 1.687 | 22.6 |
+| 2 | 44.1 ms | 2.000 | **22.1** |
+| 3 | 50.2 ms | 2.141 | 23.4 |
+| 4 | 56.2 ms | 2.204 | 25.5 |
+
+Depth 2 is the optimum and depth 3 loses, because the head step costs as much as
+a verify row while buying a rapidly decaying probability. Even with a *free*
+head step the ceiling is ~52 tok/s at this acceptance. The wide kernel is
+therefore banked for when the head step gets cheap or acceptance rises -- it
+removes the kernel objection to depth 3/4, which is not the binding one.
+
+Two hypotheses were killed by measurement and are recorded so they are not
+retried:
+
+- **Pre-norm hidden for the MTP head.** The head takes `xn` (post-final-norm)
+  where the mlx-swift-lm reference is explicit that `pre_fc_norm_hidden` expects
+  the raw backbone output and "passing post-norm would double-normalize".
+  Changing it moved acceptance by exactly zero, byte-for-byte, because
+  `RMSNorm(c*v) == RMSNorm(v)` for positive scalar c -- the head's own norm
+  cancels the backbone norm's scaling, and `final_norm` is stored as a small
+  delta from one, so what remains is a negligible elementwise reweighting. The
+  change is kept because it matches the reference contract and costs nothing,
+  but it is not a speedup.
+- **The draft step is GPU->CPU sync latency.** It is not. Skipping the readback
+  entirely (output invalid, timing only) moved the head step 3.10 -> 2.72 ms.
+  The remaining ~2.7 ms is real GPU work in many small dispatches that never
+  saturate bandwidth.
+
+### The draft selector was the old single-simdgroup argmax (2026-08-18)
+
+`mtp_compact_draft_select` scans the 98,304-row draft vocabulary with ONE
+32-thread simdgroup, and scans it TWICE -- once for the maximum, once to recover
+its index. That is precisely the pattern this repo already replaced for the
+full-vocabulary argmax (measured 1,648 us -> 3.92 us by switching to 1024-logit
+tiles); it was simply never applied to the draft path.
+
+`mtp_draft_select_fast.metal` does the same reduction in two tiled stages,
+preserving the tie-break exactly: the two logit buffers are treated as one
+logical index space, and because every control id (>= 248,044) exceeds every
+prefix id (< 98,304), lowest-id ordering agrees with logical index order, so a
+single (value, id) reduction reproduces the original answer.
+
+| | head step (`draft=`) | verify |
+|---|---|---|
+| single-simdgroup select | 3.14 ms | 36.9 ms |
+| tiled select | **1.95 ms** | 36.6 ms |
+
+**-38% on the head step**, verify unchanged as expected. End to end, alternating,
+64-token prose, 32 generated:
+
+| variant | tok/s | acceptance |
+|---|---|---|
+| `slowsel` | 46.85 / 46.58 / 45.85 | 0.50 / 0.3125 |
+| `auto` (tiled) | **49.31 / 48.05 / 46.72** | 0.50 / 0.3125 |
+
+3/3, ids and acceptance byte-identical.
+
+**Why the head step is the number that matters.** It is what caps draft depth.
+With the row-scan now measuring 32 / 35 / 37 ms at widths 1/2/3 (the wide kernel
+took the third row's marginal from 3 ms to 2 ms) and a 1.95 ms head step,
+`round(d) = verify(d+1) + 1.95d`. On the expository fixture
+(p1 = 0.714, p2|1 = 0.75):
+
+| depth | round | E[tokens] | ms/token | tok/s |
+|---|---|---|---|---|
+| 2 (shipped) | 40.9 ms | 2.25 | 18.2 | 55.0 (measured 54.0-54.5) |
+| 3 | 44.9 ms | 2.63 | 17.1 | **58.5** |
+| 4 | 48.8 ms | 2.89 | 16.9 | **59.2** |
+
+Depth 3-4 now pays. It did not before: at a 3.05 ms head step and the literary
+fixture's p2|1 = 0.45 the same arithmetic said depth 3 loses, which is why this
+document previously recorded depth 2 as optimal. **Both inputs moved, so the
+conclusion moved.** Reaching depth 3 requires width-4 versions of the nine
+`decode_triplet.metal` kernels plus an N-slot recurrent-state snapshot for
+rollback; the QMV half is already done and validated
+(`nvfp4_matvec_mlx_scaled_wide.metal`).
+
+### Material sets the acceptance band; two more hypotheses died
+
+Acceptance is a property of the text, not of the context length:
+
+| fixture | 64 tok | 256 tok | 512 tok |
+|---|---|---|---|
+| literary prose | 0.484 | 0.370 | 0.550 |
+| expository prose (`prose-tech`) | 0.636 | 0.614 | - |
+
+An earlier sweep appeared to show acceptance climbing to 0.796 at 512 tokens.
+That was the tiling artifact: `profile_prompt_tokens` beyond the passage length
+wrapped the prompt, and the model said so in its own output ("The text you
+provided is a single paragraph repeated five times"). The passage is now long
+enough for 512 and the runner **prints a warning** rather than silently tiling.
+
+- **Resource-scoped barriers.** `dependency_barrier` is
+  `memoryBarrierWithScope:MTLBarrierScopeBuffers`, ~620 per width-3 verify, and
+  Apple documents `memoryBarrierWithResources` as cheaper. Converting the FFN
+  chain (256 of them) moved the median round not at all: 42 ms in all four
+  alternating runs. Kept, because it is the more precise API and costs nothing,
+  but it is **not** a speedup, and the verify is simply bandwidth-bound
+  (14.69 GB / 36.6 ms = 402 GB/s against a serial forward's 432 GB/s).
+- **Longer context raises acceptance.** See the table above: it does not.
+
+### Where tungsten stands against Ollama, on matched material
+
+Ollama driven with `"raw": true` on the exact 64-token prefix, byte-identical
+continuations, same box:
+
+| fixture | Ollama | tungsten `mtp2` | winner |
+|---|---|---|---|
+| literary | 44.81 / 46.93 / 44.99 | **49.31 / 48.05 / 46.72** | tungsten +6.8% |
+| expository | 51.91 / **61.22** / 61.40 | 53.96 / 53.96 / 54.47 | Ollama +13.5% |
+
+Ollama's stats explain the split. On literary prose its controller backs off to
+depth 1 (`avg_draft=0.85`) and it loses. On expository prose it runs
+`avg_draft=2.72 max_draft=4` and emits 2.56 tokens per target forward against
+our 2.21 -- with *lower* per-position acceptance (0.57 vs 0.636). It wins on
+schedule depth, not on head quality. Its round is ~41.8 ms for ~3.7 verify rows
+plus 2.72 head steps, which implies a head step near 0.3 ms; ours is 1.95 ms
+after the fix above. Depth, and the head-step cost that gates it, is the whole
+remaining gap.
+
+### Depth 3 is built, parity-clean, and does not pay (2026-08-18)
+
+`mtp3` drafts three tokens and verifies FOUR target rows in one causal pass.
+It exists: `decode_quad.metal` (nine kernels, the conv and gated-delta ones
+carrying a third interior recurrent-state snapshot so rollback can select any
+accepted prefix), width-4 wide QMV, `rollback_quad_states`, and a four-way
+accept walk. It emits **byte-identical greedy ids** to `mtp2` and to the
+pre-change baseline over a full 32-token run exercising all four accept paths.
+
+It is not the default, because it ties or loses:
+
+| fixture | `mtp2` | `mtp3` | tokens/round (2 -> 3) |
+|---|---|---|---|
+| expository | 53.16 tok/s | 53.20 tok/s | 2.21 -> 2.67 |
+| literary | 48.63 | 40.76 | 2.00 -> 2.00 |
+
+On expository prose depth 3 buys exactly the extra tokens the cost model
+predicted (+21%, E = 2.63 predicted vs 2.67 measured) and the round costs +24%,
+so it is a wash. On literary prose the chain decays too fast to buy anything.
+
+**Why the model was wrong, and the lesson.** The in-situ row ladder is
+
+```
+width   1     2     3     4
+       32    35    37    45   ms      (marginal +3, +2, +8)
+```
+
+I extrapolated +2 ms for the fourth row from the 2nd and 3rd. The real marginal
+is +8 ms. Rows 2 and 3 are nearly free because the verify is bandwidth-bound and
+the weight stream is read once regardless; by width 4 the FMA count per byte has
+risen enough that the kernel is compute-bound, and further rows cost roughly in
+proportion. Confirmed in the bakeoff: attention q is 62.6 us at b3_r2 and
+81.9 us at b4_r2, +31% for +33% work.
+
+The row-count ladder was then swept rather than reasoned about -- b4_r1 / r2 /
+r3 / r4 -- and `r2` is simply best; there is no favourable odd split hiding at
+width 4 the way MLX found one at M=8. **This is the same "sweep, do not
+extrapolate" rule that produced the width-3 win, applied one step too late.**
+The measurement corrected the estimate; the estimate was what justified the
+port.
+
+`mtp3` is kept because it is correct, it is the scaffold for any wider schedule,
+and it will pay the moment either the width-4 QMV gets ~20% faster or the head's
+per-position acceptance rises. Neither is available today.
+
+**What would actually close the remaining gap.** Against Ollama on matched raw
+material tungsten now wins the literary fixture (49.5 vs 45.0) and loses the
+expository one (54.9 vs 61.2). Ollama's advantage there is depth-4 drafting at
+`avg_draft=2.72`, which it can afford because its head step is ~0.3 ms against
+our 1.95 ms. The head step, not the schedule and not the verify kernel, is the
+binding constraint: ours is ~508 MB of weights (draft projection 252 MB, MTP
+layer 227 MB) which is ~1.2 ms at the 432 GB/s this box sustains. Halving the
+draft projection with a coarse-then-exact readout (2-bit shortlist, exact
+rerank of the top 32 -- the trick the MLX board's declared heads use) is worth
+~0.3 ms of that; the rest needs the head's FFN to shrink or to overlap the
+verify.
+
+### A simdgroup-matrix GEMM is exact and 4-10x slower
+
+The reason depth 3 ties is that the multi-row GEMV turns compute-bound at width
+4. MLX dispatches a GEMM for multi-row, so the obvious next move was an MMA
+kernel: `nvfp4_matvec_mlx_mma.metal`, one simdgroup owning an 8(N) x 8(M)
+accumulator, walking K in 32-wide blocks, decoding one u32 of packed weights per
+lane and staging A and B through threadgroup memory.
+
+It validates -- err 1e-6 against the production single-row qmv, so the shape and
+the scale folding are right -- and it loses badly:
+
+| shape | wide GEMV (b4_r2) | MMA (b4) |
+|---|---|---|
+| linear qkv | 68.5 us | 261.0 us |
+| attention q | 81.2 us | 316.9 us |
+| attention k | 12.8 us | 133.4 us |
+| mlp down | 45.7 us | 203.0 us |
+
+The cause is occupancy, not the MMA units. One simdgroup per 8 output rows
+launches a quarter of the threads the GEMV does (32 threads per 8 rows against
+64 per 4), so far fewer weight loads stay in flight -- and this problem is
+bandwidth-bound, where latency hiding is the entire game. Staging A through
+threadgroup memory each 32-k block makes it worse. This reproduces the earlier
+finding in this document that an 8-row simdgroup-matrix kernel was "exact but
+slower", and explains it.
+
+**Conclusion for the kernel axis: it is closed.** The multi-row GEMV sits on the
+bandwidth floor through width 3 (14.69 GB / 37 ms = 397 GB/s against a serial
+forward's 459 GB/s on the same bytes), the nibble decode is free (no-decode
+ablation within 0.3-4%), no row split beats r2 at width 4, and a GEMM is worse.
+What remains is the head step and the schedule.
+
 ### Attribution
 
 The fixture change above came out of the public solver notes on the Yukon

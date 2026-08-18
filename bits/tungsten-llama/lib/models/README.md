@@ -32,7 +32,7 @@ Kernels (.metal files):
 | [`lightning_1_7b/`](lightning_1_7b/) | working, 1.16× MLX decode |
 | [`qwen3_30b_a3b_q8/`](qwen3_30b_a3b_q8/) | inference path exists, latest dispatch fixes unverified locally |
 | [`qwen3_6_35b_a3b_nvfp4/`](qwen3_6_35b_a3b_nvfp4/) | kernel-tuned, no inference path (Mamba/SSM + dual MoE port pending) |
-| [`qwen3_8_27b_mlx/`](qwen3_8_27b_mlx/) | working mmap-backed Ollama decode + MTP-1, autotuned 52.92 tok/s |
+| [`qwen3_8_27b_mlx/`](qwen3_8_27b_mlx/) | working mmap-backed Ollama decode + MTP-2 (mtp3 exists, ties); 49.5 tok/s literary / 54.9 expository (Ollama matched: 45.0 / 61.2) |
 
 ## Adding a new model
 

@@ -11,3 +11,7 @@ use core/combinatorics/graph
 use core/combinatorics/coding
 use core/combinatorics/exact_cover
 use core/combinatorics/polyomino
+use core/combinatorics/lattice_animal
+use core/combinatorics/dimer
+use core/combinatorics/kasteleyn
+use core/combinatorics/polyiamond

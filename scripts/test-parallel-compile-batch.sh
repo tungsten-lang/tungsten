@@ -71,11 +71,14 @@ done
 rg -q 'noinline "disable-tail-calls"="true"' "$debug_root/worker-0/0.ll"
 rg -q 'uwtable "frame-pointer"="all"' "$debug_root/worker-0/0.ll"
 
-# The parent links in source order and owns the runtime phase. Exercise real
-# standalone binaries, not only artifact emission.
+# The parent owns the runtime phase and fans clang across workers.
+# Isolated --batch-out-dir keeps per-spec binaries off the source tree.
+# Exercise real standalone binaries, not only artifact emission.
 TUNGSTEN_LL_DIR="$TMP/link-ll" \
   "$TUNGSTEN" compile-batch --jobs 2 "${sources[@]:0:4}" \
-  --release --native --fast --no-debug --no-lto >/dev/null
+  --release --native --fast --no-debug --no-lto -v \
+  >"$TMP/link.log" 2>&1
+rg -q 'parallel link: 2 clang workers' "$TMP/link.log"
 expected=(9 8 9 8)
 for i in $(seq 0 3); do
   test -x "$TMP/src/$i.wc"

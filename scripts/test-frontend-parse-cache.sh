@@ -32,7 +32,7 @@ TUNGSTEN_FRONTEND_PARSE_CACHE=1 TUNGSTEN_LL_DIR="$TMP/on-ll" \
   "$TUNGSTEN" compile-batch --jobs 1 "${files[@]}" "${flags[@]}" \
   >"$TMP/on.log" 2>&1
 
-if ! grep -E 'frontend parse cache: [1-9][0-9]* hits, [0-9]+ misses' \
+if ! grep -E 'frontend parse cache: memory [1-9][0-9]* hits, [0-9]+ misses' \
     "$TMP/on.log" >/dev/null; then
   echo "FAIL: compiled batch did not report parsed-file cache hits" >&2
   cat "$TMP/on.log" >&2
@@ -55,6 +55,31 @@ TUNGSTEN_FRONTEND_PARSE_CACHE=0 \
     >/dev/null 2>&1
 if [[ "$("$TMP/invalidation-probe" "$TMP/invalidation.w")" != $'true\ntrue\ntrue' ]]; then
   echo "FAIL: frontend parse cache did not fingerprint/reparse correctly" >&2
+  exit 1
+fi
+
+# compile-batch --jobs 1 enables the in-process parse cache and then
+# clones cached packed ASTs into later entries. Files that `use` the
+# compiler emitter (or other large Core graphs) used to die in
+# ast_deep_clone with w_node_field_load: field is outside the active
+# node allocation. Drive that path on the shipped compiler.
+TUNGSTEN_FRONTEND_PARSE_CACHE=1 TUNGSTEN_LL_DIR="$TMP/clone-ll" \
+  "$TUNGSTEN" compile-batch --jobs 1 --emit-ll \
+    --release --native --fast --no-debug \
+    compiler/test/fixtures/core_abi_stable_a.w \
+    spec/compiler/one_arg_cached_dispatch_emitter_spec.w \
+    spec/core/expression_autoload_spec.w \
+    >"$TMP/clone.log" 2>"$TMP/clone.err"
+if [[ -s "$TMP/clone.err" ]] && grep -q 'w_node_field_load' "$TMP/clone.err"; then
+  echo "FAIL: compile-batch parse-cache clone hit w_node_field_load" >&2
+  cat "$TMP/clone.err" >&2
+  exit 1
+fi
+if ! grep -Fq -- '--- Compiling spec/compiler/one_arg_cached_dispatch_emitter_spec.w ---' \
+    "$TMP/clone.log"; then
+  echo "FAIL: compile-batch did not compile the emitter spec" >&2
+  cat "$TMP/clone.log" >&2
+  cat "$TMP/clone.err" >&2
   exit 1
 fi
 

@@ -108,7 +108,7 @@ loader_parse_cache_state = {
       mtime: stat[:mtime],
       ctime: stat[:ctime],
       size: stat[:size],
-      fingerprint: digest_string64(source),
+      fingerprint: wyhash64_hex_string(source),
       ast: ast_deep_clone(ast)
     }
     ast

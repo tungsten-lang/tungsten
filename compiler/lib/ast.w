@@ -838,45 +838,23 @@ in Tungsten:AST
     # Bare W_PACKED_NODE branch. Allocate a new slab node, deep-copy
     # each scheme slot, then copy sparse-meta entries verbatim
     # (sparse values are line/col ints / marker bools — no AST in there).
-    k = ast_kind(node)
-    kid = kind_id_table[k]
-    if kid == nil
+    # Use the generated arena width, not schema key count: interned and
+    # inline kinds still list a payload key (sentinel 256/257) whose
+    # "slot" is not an arena word. Walking key count on those handles
+    # (or on a kind-symbol mismatch) calls w_node_field_load past the
+    # allocation and dies. The width table is the same contract
+    # w_node_alloc / w_node_field_load use.
+    kid = ccall_nobox("w_node_kind_extern", node)
+    width = width_for_kind(kid)
+    if width < 1
       return node
-    # Inline-payload kinds (KIND_PARG / KIND_CHAR / KIND_CODEPOINT /
-    # KIND_REGEX_CAPTURE / KIND_LAMBDA_ARITY / KIND_SUPERSCRIPT /
-    # KIND_DATE / KIND_TIME / KIND_MONTH / KIND_IP4 / KIND_COLOR …) and
-    # the interned leaf kinds (KIND_VAR / KIND_IVAR / KIND_CVAR /
-    # KIND_SYMBOL / KIND_STRING, sentinel 257) store their value in the
-    # W_PACKED_NODE's offset bits, not in slab slots — the WValue itself
-    # is immutable and self-describing. Cloning by allocating a fresh
-    # slab node and walking slot 0 (which doesn't exist for inline
-    # payloads) reads garbage and corrupts the clone. Return the
-    # original WValue directly — every consumer treats inline node
-    # values as immutable.
-    sks_first = slab_keys_table[kid]
-    # Tag-only singleton kinds have no arena fields. Their WValue is the
-    # complete immutable node, just like inline/intern payload kinds.
-    if sks_first == nil || sks_first.size() == 0
-      return node
-    if sks_first != nil && sks_first.size() > 0
-      first_off = slab_offset_for(k, sks_first[0])
-      if first_off != nil && first_off >= 256
-        return node
     sc = sc_for_kind(kid)
     new_node = ccall_nobox("w_node_alloc", kid, sc)
-    sk = slab_keys_table[kid]
-    if sk != nil
-      # Slot indices map directly to schema-key positions (the
-      # schema literal in ast_schema.w is written in slot order
-      # `{:field => 0, :other => 1, ...}`). Skip ast_get/ast_set's
-      # nil/type/kind/sparse-meta machinery — we know node is a
-      # bare W_PACKED_NODE and the field is in the schema.
-      n_slots = sk.size()
-      i = 0
-      while i < n_slots
-        v = ccall_nobox("w_node_field_load", node, i)
-        ccall_nobox("w_node_field_store", new_node, i, ast_deep_clone(v))
-        i += 1
+    i = 0
+    while i < width
+      v = ccall_nobox("w_node_field_load", node, i)
+      ccall_nobox("w_node_field_store", new_node, i, ast_deep_clone(v))
+      i += 1
     ccall_nobox("w_ast_sparse_copy", node, new_node)
     return new_node
   # Primitives (String, Symbol, Integer, Float, Boolean, …) are

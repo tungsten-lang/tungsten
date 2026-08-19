@@ -1201,6 +1201,11 @@
   cur = "" + child.to_s()
   if cur == ancs
     return false
+  # Number is the numeric-tower catch-all. A later `+ BigInt` reopen stores
+  # a nil superclass over `+ BigInt < Int`, so walking known_classes cannot
+  # prove the relation; without this, a leading `(Number)` arm wins.
+  if ancs == "Number" && cur in ("Int" "Integer" "BigInt" "Float" "Decimal" "Rational" "Complex")
+    return true
   guard = 0
   while guard < 64
     cls = mod[:known_classes][cur]

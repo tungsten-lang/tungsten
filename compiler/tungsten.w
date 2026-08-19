@@ -80,6 +80,8 @@ keep_ll        = false
 emit_ll_only   = false
 batch_jobs     = 0
 batch_worker_dir = nil
+batch_link_worker = false
+batch_out_dir = nil
 cross_target   = ""
 cross_sysroot  = ""
 ast_stats      = false
@@ -244,6 +246,17 @@ while i < args.size()
   elsif arg == "--batch-worker-dir"
     i += 1
     batch_worker_dir = args[i]
+  elsif arg == "--batch-link-worker"
+    # Internal: parent already emitted .ll; this process only links
+    # ll/bin pairs so clang can run in parallel.
+    batch_link_worker = true
+    command = "compile-batch"
+  elsif arg == "--batch-runtime-objs"
+    i += 1
+    runtime_archive = args[i]
+  elsif arg == "--batch-out-dir"
+    i += 1
+    batch_out_dir = args[i]
   elsif arg == "--ast-stats"
     ast_stats = true
   elsif arg == "--verbose"
@@ -2640,12 +2653,26 @@ driver_homebrew_prefix_memo = {}
     options.push(intern_algo)
   if verbose
     options.push("--verbose")
+  if batch_out_dir != nil && batch_out_dir != ""
+    options.push("--batch-out-dir")
+    options.push(batch_out_dir)
   define_keys = build_defines.keys().sort()
   i = 0
   while i < define_keys.size()
     options.push("-D" + define_keys[i] + "=" + build_defines[define_keys[i]])
     i += 1
   options
+
+-> batch_output_binary(source)
+  if batch_out_dir != nil && batch_out_dir != ""
+    name = source
+    slash = name.rindex("/")
+    if slash != nil
+      name = name.slice(slash + 1, name.size() - slash - 1)
+    if name.ends_with?(".w")
+      name = name.slice(0, name.size() - 2)
+    return batch_out_dir + "/" + name
+  source.replace(".w", ".wc")
 
 -> batch_parallel_files_unique?(files)
   seen = {}
@@ -2754,13 +2781,107 @@ driver_homebrew_prefix_memo = {}
       ll = worker[:dir] + "/" + li.to_s() + ".ll"
       if !file?(ll) || !file?(ll + ".done")
         failed = true
-      emitted.push({ll: ll, bin: source.replace(".w", ".wc"), source: source, implicit_ll: true})
+      emitted.push({ll: ll, bin: batch_output_binary(source), source: source, implicit_ll: true})
       li += 1
     i += 1
 
   if failed
     return {ok: false, root: root, jobs: emitted, message: "one or more parallel batch workers failed"}
   {ok: true, root: root, jobs: emitted, message: nil}
+
+# Parent-side parallel clang. Emission workers already produced .ll;
+# linking them serially is the remaining wall-time tail. Each child is
+# the same compiler in --batch-link-worker mode so the clang command,
+# runtime archive, and companion gating stay identical to compile_one.
+-> batch_parallel_link(ll_jobs, runtime_objs, jobs, verbose)
+  if ll_jobs.size() < 2 || jobs < 2 || runtime_identity() != "compiled-runtime"
+    return nil
+  exe = ccall("w_executable_path")
+  if exe == nil || exe == ""
+    return nil
+  root = capture("mktemp -d " + dev_runtime_shell_quote(implicit_ll_root() + "/batch-link.XXXXXX") + " 2>/dev/null").strip()
+  if root == ""
+    return nil
+
+  workers = []
+  base = ll_jobs.size() / jobs
+  extra = ll_jobs.size() % jobs
+  start = 0
+  wi = 0
+  spawn_error = nil
+  worker_options = batch_parallel_worker_options()
+  runtime_arg = ""
+  if runtime_objs != nil
+    runtime_arg = runtime_objs.to_s()
+  while wi < jobs && spawn_error == nil
+    count = base
+    if wi < extra
+      count += 1
+    out_log = root + "/worker-" + wi.to_s() + ".out"
+    err_log = root + "/worker-" + wi.to_s() + ".err"
+    argv = [exe, "compile-batch", "--batch-link-worker", "--jobs", "1"]
+    if runtime_arg != ""
+      argv.push("--batch-runtime-objs")
+      argv.push(runtime_arg)
+    oi = 0
+    while oi < worker_options.size()
+      argv.push(worker_options[oi])
+      oi += 1
+    fi = 0
+    while fi < count
+      job = ll_jobs[start + fi]
+      argv.push(job[:ll])
+      argv.push(job[:bin])
+      fi += 1
+    cmd = StringBuffer(256 + count * 64)
+    ai = 0
+    while ai < argv.size()
+      if ai > 0
+        cmd << " "
+      cmd << dev_runtime_shell_quote(argv[ai])
+      ai += 1
+    cmd << " >"
+    cmd << dev_runtime_shell_quote(out_log)
+    cmd << " 2>"
+    cmd << dev_runtime_shell_quote(err_log)
+    begin
+      process = Process.spawn(["/bin/sh", "-c", cmd.to_s()])
+      workers.push({process: process, out_log: out_log, err_log: err_log, start: start, count: count})
+    rescue err
+      spawn_error = err.to_s()
+    start += count
+    wi += 1
+
+  if spawn_error != nil
+    i = 0
+    while i < workers.size()
+      workers[i][:process].kill()
+      workers[i][:process].wait()
+      i += 1
+    system("rm -rf " + dev_runtime_shell_quote(root))
+    return {ok: false, failed: ll_jobs.size(), message: "parallel link spawn failed: " + spawn_error}
+
+  failed = 0
+  i = 0
+  while i < workers.size()
+    status = workers[i][:process].wait()
+    if status != 0
+      failed += 1
+    out_log = workers[i][:out_log]
+    if file?(out_log)
+      out_text = read_file(out_log)
+      if out_text != nil && out_text != ""
+        ccall("w_print", out_text)
+      ccall("__w_unlink", out_log)
+    err_log = workers[i][:err_log]
+    if file?(err_log)
+      err_text = read_file(err_log)
+      if err_text != nil && err_text != ""
+        ccall("w_eputs", err_text)
+      ccall("__w_unlink", err_log)
+    i += 1
+  system("rmdir " + dev_runtime_shell_quote(root) + " 2>/dev/null")
+  {ok: failed == 0, failed: failed, message: nil}
 
 # Handle --wit / --repl (interactive pure-Tungsten REPL)
 if wit_mode
@@ -2943,6 +3064,25 @@ elsif command == "compile-batch"
   if files.size() == 0
     << "compile-batch: no files given"
     exit 1
+  if batch_out_dir != nil && batch_out_dir != ""
+    if system("mkdir -p " + dev_runtime_shell_quote(batch_out_dir)) != true
+      << "compile-batch: could not create --batch-out-dir " + batch_out_dir
+      exit 1
+
+  if batch_link_worker
+    if (files.size() % 2) != 0
+      << "compile-batch --batch-link-worker expects ll/bin path pairs"
+      exit 1
+    fail_count = 0
+    pi = 0
+    while pi < files.size()
+      if !link_binary(files[pi], files[pi + 1], runtime_archive, verbose)
+        fail_count += 1
+      pi += 2
+    if fail_count > 0
+      << "[fail_count] file(s) failed to compile"
+      exit 1
+    exit 0
 
   loader_enable_parse_cache()
   ll_jobs = []
@@ -2973,7 +3113,7 @@ elsif command == "compile-batch"
   else
     batch_file_index = 0
     files -> (fp)
-      bin = fp.replace(".w", ".wc")
+      bin = batch_output_binary(fp)
       << "--- Compiling [fp] ---"
       begin
         if batch_worker_dir != nil
@@ -3021,12 +3161,28 @@ elsif command == "compile-batch"
           z = publish_implicit_ll_path(job[:ll], job[:source])
       exit 1
 
-  ll_jobs -> (job)
-    ok = link_binary(job[:ll], job[:bin], runtime_objs, verbose)
-    if job[:implicit_ll] && !publish_implicit_ll_path(job[:ll], job[:source])
-      ok = false
-    if !ok
-      fail_count += 1
+  link_parallel = nil
+  if !batch_link_worker && ll_jobs.size() > 1 && env("TUNGSTEN_BATCH_PARALLEL_LINK") != "0"
+    link_jobs = batch_parallel_job_count(ll_jobs.size())
+    if link_jobs > 1
+      if verbose
+        << "  parallel link: " + link_jobs.to_s() + " clang workers"
+      link_parallel = batch_parallel_link(ll_jobs, runtime_objs, link_jobs, verbose)
+  if link_parallel != nil
+    if link_parallel[:ok] != true
+      if link_parallel[:message] != nil
+        << "Parallel batch link failed: " + link_parallel[:message]
+      fail_count += link_parallel[:failed]
+    ll_jobs -> (job)
+      if job[:implicit_ll] && !publish_implicit_ll_path(job[:ll], job[:source])
+        fail_count += 1
+  else
+    ll_jobs -> (job)
+      ok = link_binary(job[:ll], job[:bin], runtime_objs, verbose)
+      if job[:implicit_ll] && !publish_implicit_ll_path(job[:ll], job[:source])
+        ok = false
+      if !ok
+        fail_count += 1
 
   if parallel_root != nil
     system("rmdir " + dev_runtime_shell_quote(parallel_root) + " 2>/dev/null")

@@ -102,17 +102,22 @@
   -> valid_utf8?
   -> blank?
 
+  # Lazy O(1) view (StringBytes): indexed Enumerable over the raw bytes.
+  # Use to_a for a concrete Array.
   -> bytes
-    each_byte.to_a
+    StringBytes.new(self)
 
   -> center(width, pad = '')
     return self if size >= width
 
+  # Lazy view (StringCharacters): streams single-code-point Strings.
   -> characters
-    each_character.to_a
+    StringCharacters.new(self)
 
+  # Lazy view (StringCodepoints): streams code points through the UTF-8
+  # decoder on demand.
   -> codepoints
-    each_codepoint.to_a
+    StringCodepoints.new(self)
 
   -> concat/1
 

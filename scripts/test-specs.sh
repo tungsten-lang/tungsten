@@ -20,19 +20,28 @@ if [[ ! -x "$COMPILER" ]]; then
   exit 1
 fi
 
-# Per-spec compiles land at PID-unique $TMP_ROOT paths, so caching them only
-# mints garbage cache entries — keep the incremental binary cache off for the
-# whole suite. The cache lifecycle test below re-enables it per step against
-# an isolated TUNGSTEN_CACHE_DIR.
-export TUNGSTEN_INCREMENTAL=0
+# Isolated incremental cache for the spec suite. Shared across specs so
+# Core/runtime/library work is reused. Leave incremental compile on: a
+# PID-unique -o would key a distinct irbin slot and disable that reuse, so
+# compiled binaries land at stable names under TUNGSTEN_SPECS_BIN_DIR.
+# The cache lifecycle test still pins TUNGSTEN_INCREMENTAL per step against
+# its own TUNGSTEN_CACHE_DIR.
+if [[ -z "${TUNGSTEN_CACHE_DIR:-}" ]]; then
+  export TUNGSTEN_CACHE_DIR="$ROOT/build/cache/specs"
+fi
+TUNGSTEN_SPECS_BIN_DIR="${TUNGSTEN_SPECS_BIN_DIR:-$TUNGSTEN_CACHE_DIR/bin}"
+mkdir -p "$TUNGSTEN_CACHE_DIR" "$TUNGSTEN_SPECS_BIN_DIR"
+export TUNGSTEN_SPECS_BIN_DIR
 
-# Parallelism: specs are independent (per-spec temp outputs), so the
+# Parallelism: specs are independent (per-spec outputs), so the
 # compile+run stages fan out across JOBS workers via self-exec (--job-*
 # modes below). Results land in a shared directory and are aggregated in
 # list order, so output and failure attribution stay deterministic. The
 # cache-lifecycle test and the gated tails (metal, PTY, api) stay serial.
-# JOBS=1 restores fully serial behavior. FAST=1 runs the curated inner-
-# loop slice only (see fast_* lists) and skips the serial tails. Set
+# Default compiled and interpreted lanes stay sequential waves; overlapping
+# them has been measured as a wall-time regression. JOBS=1 restores fully
+# serial workers per lane. FAST=1 overlaps its small compiled+interp pins
+# and skips the serial tails. Set
 # TUNGSTEN_SPECS_PROFILE_FILE to append tab-separated mode/path/seconds rows
 # from each worker; this is used to maintain the longest-first schedule below.
 JOBS="${JOBS:-auto}"
@@ -185,7 +194,7 @@ run_compiled_spec() {
   local -a compile_cmd
 
   name="$(basename "${path%.w}")"
-  out="$TMP_ROOT/$name"
+  out="$TUNGSTEN_SPECS_BIN_DIR/$name"
 
   echo "compile+run $path"
   if [[ "$path" == spec/compiler/big_array_cap_empty_no_use_*_spec.w ]]; then
@@ -203,6 +212,67 @@ run_compiled_spec() {
   status=$?
   set -e
   record_result "$name" "$output" "$status"
+}
+
+# Compatible compiled specs share Core/runtime/library work. compile-batch
+# emits in parallel and now links in parallel; binaries land in the isolated
+# spec bin dir so source trees stay clean. Per-spec run/attribution is
+# unchanged. Specs that need extra C includes stay on the one-at-a-time path.
+run_compiled_batch() {
+  local -a specs=("$@")
+  local -a batch=()
+  local -a solo=()
+  local spec name out output status
+  local batch_log="$TMP_ROOT/compile-batch.log"
+  local saved_job_dir="$JOB_RESULT_DIR"
+
+  [[ ${#specs[@]} -eq 0 ]] && return 0
+  # This runs in the parent, not a --job-* worker. Report immediately.
+  JOB_RESULT_DIR=""
+  for spec in "${specs[@]}"; do
+    if [[ "$spec" == spec/compiler/big_array_cap_empty_no_use_*_spec.w ]]; then
+      solo+=("$spec")
+    else
+      batch+=("$spec")
+    fi
+  done
+
+  if [[ ${#batch[@]} -gt 0 ]]; then
+    echo "compile-batch ${#batch[@]} specs (--batch-out-dir $TUNGSTEN_SPECS_BIN_DIR)"
+    set +e
+    "$TUNGSTEN" compile-batch --jobs "$JOBS" --no-lto \
+      --batch-out-dir "$TUNGSTEN_SPECS_BIN_DIR" \
+      "${batch[@]}" >"$batch_log" 2>&1
+    status=$?
+    set -e
+    if [[ "$status" -ne 0 ]]; then
+      cat "$batch_log" >&2
+      for spec in "${batch[@]}"; do
+        record_failure_note "$(basename "${spec%.w}")" "compile-batch failed"
+      done
+    else
+      for spec in "${batch[@]}"; do
+        name="$(basename "${spec%.w}")"
+        out="$TUNGSTEN_SPECS_BIN_DIR/$name"
+        if [[ ! -x "$out" ]]; then
+          record_failure_note "$name" "compile-batch produced no binary"
+          continue
+        fi
+        set +e
+        output="$(TUNGSTEN_SPEC_QUIET=1 "$out" 2>&1)"
+        status=$?
+        set -e
+        record_result "$name" "$output" "$status"
+      done
+    fi
+  fi
+
+  if [[ ${#solo[@]} -gt 0 ]]; then
+    JOB_RESULT_DIR="$saved_job_dir"
+    run_parallel compiled "${solo[@]}"
+    return
+  fi
+  JOB_RESULT_DIR="$saved_job_dir"
 }
 
 run_interpreter_spec() {
@@ -617,237 +687,41 @@ if [[ "${1:-}" == --job-* ]]; then
   exit "$fail"
 fi
 
-compiled_specs=(
-  compiler/test/regex_features.w
-  spec/core/date_calendar_surface_spec.w
-  spec/compiler/date_dynamic_receiver_spec.w
-  spec/compiler/decimal_dynamic_receiver_spec.w
-  spec/compiler/float_dynamic_receiver_spec.w
-  spec/compiler/ast_body_native_spec.w
-  spec/compiler/ast_typed_sidecar_spec.w
-  spec/compiler/strip_stacktrace_metadata_spec.w
-  spec/compiler/ast_typed_visitor_spec.w
-  spec/compiler/array_compact_autoload_spec.w
-  spec/compiler/array_constructor_parity_spec.w
-  spec/compiler/array_dynamic_receiver_spec.w
-  spec/compiler/heredoc_opaque_lexer_spec.w
-  spec/compiler/array_dup_autoload_spec.w
-  spec/compiler/array_join_autoload_spec.w
-  spec/compiler/argv_nested_scan_spec.w
-  spec/compiler/big_array_cap_empty_no_use_new_spec.w
-  spec/compiler/big_array_cap_empty_no_use_range_spec.w
-  spec/compiler/big_array_cap_empty_no_use_subview_spec.w
-  spec/compiler/big_array_cap_empty_no_use_view_spec.w
-  benchmarks/runtime_ports/bigint_predicate_relaxed_autoload.w
-  spec/compiler/bigint_bitwise_mut_source_seam_spec.w
-  spec/compiler/bigint_bitwise_native_support_spec.w
-  spec/compiler/bigint_bitwise_reopen_source_seam_spec.w
-  spec/compiler/bigint_isqrt_reopen_source_seam_spec.w
-  spec/compiler/bigint_small_mut_lowering_spec.w
-  spec/compiler/bigint_to_i_autoload_spec.w
-  spec/compiler/block_passthrough_spec.w
-  spec/compiler/block_presence_parity_spec.w
-  spec/compiler/carry_intrinsics_parity_spec.w
-  spec/compiler/cfg_ssa_pruning_spec.w
-  spec/compiler/elementwise_fusion_spec.w
-  spec/compiler/forward_typed_raw_call_spec.w
-  spec/compiler/poly_ranged_sum_big_bounds_spec.w
-  spec/compiler/range_immediate_spec.w
-  spec/compiler/function_replacement_index_spec.w
-  benchmarks/runtime_ports/float_remaining_no_use_literal.w
-  spec/compiler/indexed_compound_assignment_parameter_spec.w
-  spec/compiler/int_integer_dynamic_receiver_spec.w
-  spec/compiler/int_to_i_autoload_spec.w
-  spec/compiler/ivar_typed_return_spec.w
-  spec/compiler/lambda_puts_body_spec.w
-  spec/compiler/mmap_size_relaxed_autoload_spec.w
-  spec/compiler/mmap_size_relaxed_native_autoload_spec.w
-  spec/compiler/nested_closure_counted_capture_spec.w
-  spec/compiler/nested_i64_array_boxed_store_spec.w
-  spec/compiler/one_arg_cached_dispatch_emitter_spec.w
-  spec/compiler/ownership_phi_escape_spec.w
-  spec/compiler/parser_packed_token_access_spec.w
-  spec/compiler/lexer_lexchar_storage_spec.w
-  spec/compiler/raw_int_candidate_map_spec.w
-  spec/compiler/raw_machine_expression_context_spec.w
-  spec/compiler/raw_machine_helper_control_flow_spec.w
-  spec/compiler/raw_static_machine_return_spec.w
-  spec/compiler/recase_spec.w
-  spec/compiler/recycle_inline_iterator_validation_spec.w
-  spec/compiler/recycle_nonlocal_block_return_spec.w
-  spec/compiler/recycle_terminated_scope_spec.w
-  spec/compiler/source_argc1_constructor_exclusion_spec.w
-  spec/compiler/source_argc1_exact_ivar_spec.w
-  spec/compiler/source_argc1_hint_compat_spec.w
-  spec/compiler/string_dynamic_dispatch_spec.w
-  spec/compiler/string_buffer_size_revisit_autoload_spec.w
-  spec/compiler/string_escape_backslash_spec.w
-  spec/compiler/string_interp_esc_bracket_spec.w
-  spec/compiler/machine_int_subscript_fused_spec.w
-  spec/compiler/machine_int_subscript_store_spec.w
-  spec/compiler/method_fallthrough_parity_spec.w
-  spec/compiler/small_array_stack_escape_spec.w
-  spec/compiler/small_array_stack_zero_init_spec.w
-  spec/compiler/small_array_generic_spec.w
-  spec/compiler/small_array_wide_element_boxing_spec.w
-  spec/compiler/typed_array_boxed_read_family_spec.w
-  spec/compiler/masked_index_loop_spec.w
-  spec/compiler/loop_version_array_spec.w
-  spec/compiler/devirt_method_call_spec.w
-  spec/compiler/boxed_arith_fast_spec.w
-  spec/compiler/typed_receiver_string_routes_spec.w
-  spec/compiler/string_sso_attrs_spec.w
-  spec/compiler/string_free_escape_spec.w
-  spec/compiler/constructor_arity_spec.w
-  spec/compiler/ctor_inline_cache_nested_spec.w
-  spec/compiler/global_demotion_scopes_spec.w
-  spec/compiler/strbuf_bytes_spec.w
-  spec/compiler/string_buffer_dynamic_append_spec.w
-  spec/compiler/string_buffer_dynamic_receiver_spec.w
-  spec/compiler/quantity_control_flow_parity_spec.w
-  spec/core/quantity_dispatch_spec.w
-  spec/compiler/static_method_block_dispatch_spec.w
-  spec/compiler/static_method_overload_spec.w
-  spec/compiler/splat_parameter_parity_spec.w
-  spec/compiler/int_bigint_promotion_spec.w
-  spec/compiler/bigint_literal_cache_spec.w
-  spec/compiler/ivar_param_type_spec.w
-  spec/compiler/llvm_name_mangling_injective_spec.w
-  spec/compiler/top_level_method_name_hygiene_spec.w
-  spec/compiler/u64_raw_multiply_spec.w
-  spec/compiler/conditional_reassign_param_spec.w
-  spec/compiler/promotion_determinism_spec.w
-  spec/compiler/begin_rescue_value_spec.w
-  spec/compiler/wide_params_calls_spec.w
-  spec/compiler/typed_array_param_width_spec.w
-  spec/compiler/typed_helper_array_signature_spec.w
-  spec/compiler/typed_overload_spec.w
-  spec/compiler/overload_exact_tag_parity_spec.w
-  spec/compiler/typed_overload_hosts_spec.w
-  spec/numeric/bigint_seam_disjoint_spec.w
-  spec/compiler/bigint_compare_native_support_spec.w
-  spec/compiler/uuid_byte_revisit_autoload_spec.w
-  spec/compiler/autoload_walker_fields_spec.w
-  spec/compiler/view_field_var_spec.w
-  spec/compiler/zero_arg_cached_dispatch_spec.w
-  spec/compiler/regex_capture_storage_spec.w
-  spec/interpreter/hash_size_view_field_spec.w
-  spec/interpreter/float_leaf_native_spec.w
-  spec/interpreter/implicit_block_param_shadow_spec.w
-  spec/interpreter/ipv4_octets_native_spec.w
-  spec/core/basics_spec.w
-  spec/core/base64_native_spec.w
-  spec/core/global_sleep_spec.w
-  spec/core/system_cpu_count_spec.w
-  spec/core/sandbox_spec.w
-  spec/core/file_stat_tempfile_spec.w
-  spec/core/filesystem_mutation_spec.w
-  spec/core/filesystem_walk_spec.w
-  spec/core/clock_ms_spec.w
-  spec/core/csv_stream_spec.w
-  spec/core/json_parse_spec.w
-  spec/core/string_to_i_bignum_spec.w
-  spec/core/string_native_spec.w
-  spec/core/control_flow_spec.w
-  spec/core/classes_spec.w
-  spec/core/arrays_hashes_spec.w
-  spec/core/hash_insertion_order_spec.w
-  spec/core/hash_mutation_spec.w
-  spec/core/container_equality_spec.w
-  spec/core/calculus_spec.w
-  spec/core/calculus_complex_spec.w
-  spec/core/expression_spec.w
-  spec/core/expression_autoload_spec.w
-  spec/core/expression_calculus_spec.w
-  spec/core/expression_algebra_spec.w
-  spec/core/expression_exact_spec.w
-  spec/core/expression_special_spec.w
-  spec/core/expression_transcendental_spec.w
-  spec/core/expression_solve_spec.w
-  spec/core/algebra_autoload_spec.w
-  spec/core/algebra_projective_heights_spec.w
-  spec/core/algebra_prime_subspace_spec.w
-  spec/core/algebra_c_ab_spec.w
-  spec/core/algebra_divisors_spec.w
-  # The full KM order certificate is intentionally native: the interpreter's
-  # boxed exact-linear-algebra path is prohibitively memory hungry.
-  spec/core/algebra_c_ab_divisors_spec.w
-  spec/core/algebra_real_roots_spec.w
-  spec/core/algebra_ideal_arithmetic_spec.w
-  spec/core/algebra_lattice_reduction_spec.w
-  spec/core/algebra_p_adic_number_field_spec.w
-  spec/core/algebra_p_adic_dyadic_spec.w
-  spec/core/algebra_s_class_group_spec.w
-  spec/core/algebra_s_units_spec.w
-  spec/core/algebra_shell_width_degree6_artifact_spec.w
-  spec/core/algebra_shell_width_degree9_artifact_spec.w
-  spec/core/algebra_shell_width_degree12_artifact_spec.w
-  spec/core/algebra_shell_width_s_unit_artifacts_spec.w
-  spec/core/algebraic_real_spec.w
-  spec/core/formal_series_spec.w
-  spec/core/formal_series_autoload_spec.w
-  spec/core/enumerable_native_spec.w
-  spec/core/hash_identity_probe_spec.w
-  spec/core/network_native_spec.w
-  spec/core/system_spec.w
-  benchmarks/runtime_ports/array_leaf_no_use_factories.w
-  benchmarks/runtime_ports/array_leaf_no_use_literal.w
-  benchmarks/runtime_ports/array_leaf_no_use_typed.w
-  benchmarks/runtime_ports/small_big_array_no_use_autoload.w
-  benchmarks/runtime_ports/sync_wrapper_revisit_exact_factory.w
-  spec/numeric/bigint_bang_spec.w
-  spec/numeric/bigint_limb_sweep_spec.w
-  spec/numeric/bigint_tag_sign_spec.w
-  spec/compiler/bigint_shared_bit_spec.w
-  spec/compiler/bigint_mutate_unique_spec.w
-  spec/compiler/bigint_mod_pow2_context_spec.w
-  spec/compiler/postfix_rescue_loader_spec.w
-  spec/numeric/bigint_view_field_write_spec.w
-  spec/compiler/hash_free_escape_spec.w
-  spec/numeric/bit_ops_spec.w
-  spec/numeric/big_decimal_spec.w
-  spec/numeric/complex_spec.w
-  spec/numeric/fp_math_mode_spec.w
-  spec/numeric/gcd_spec.w
-  spec/numeric/hypercomplex_mul_spec.w
-  spec/numeric/int_spec.w
-  spec/numeric/interval_spec.w
-  spec/numeric/matrix_spec.w
-  spec/numeric/operator_overload_spec.w
-  spec/numeric/rational_spec.w
-  spec/numeric/vector_spec.w
-  spec/core/date_native_spec.w
-)
+# Lane lists live in spec-lanes.sh so a file-list probe can fail closed
+# without compiling. Discovery is tracked-only: uncommitted scratch specs
+# must not change the suite.
+SPEC_LANES_ROOT="$ROOT"
+# shellcheck source=spec-lanes.sh
+. "$ROOT/scripts/spec-lanes.sh"
+
+if [[ "${BIT_SPECS_ONLY:-0}" != "1" ]]; then
+  spec_classify_tracked
+fi
+
+if [[ "${1:-}" == "--compiled-slice" ]]; then
+  shift
+  if [[ $# -eq 0 ]]; then
+    slice_specs=("${fast_compiled[@]}")
+  else
+    slice_specs=("$@")
+  fi
+  assert_unique_spec_lane "compiled slice" "${slice_specs[@]}"
+  if [[ "${TUNGSTEN_SPECS_COMPILE_BATCH:-0}" == "1" ]]; then
+    run_compiled_batch "${slice_specs[@]}"
+  else
+    run_parallel compiled "${slice_specs[@]}"
+  fi
+  if [[ "$fail" -ne 0 ]]; then
+    echo "test-specs: FAIL (compiled slice)"
+    exit 1
+  fi
+  echo "test-specs: OK (compiled slice)"
+  exit 0
+fi
 
 # Longest-processing-time first keeps the parallel worker pool busy while the
 # expensive compiler/Core programs run. These paths are a deliberately small,
 # measured scheduling tier; compiled_specs remains the coverage manifest.
-compiled_priority_specs=(
-  spec/core/algebra_c_ab_divisors_spec.w
-  spec/core/expression_solve_spec.w
-  spec/core/algebra_c_ab_spec.w
-  spec/core/algebra_p_adic_number_field_spec.w
-  spec/core/algebra_s_units_spec.w
-  spec/core/algebra_shell_width_degree12_artifact_spec.w
-  spec/core/expression_spec.w
-  spec/core/algebra_p_adic_dyadic_spec.w
-  spec/core/algebra_s_class_group_spec.w
-  spec/core/algebra_divisors_spec.w
-  spec/core/algebra_ideal_arithmetic_spec.w
-  spec/core/algebra_lattice_reduction_spec.w
-  spec/core/algebra_prime_subspace_spec.w
-  spec/core/algebra_projective_heights_spec.w
-  spec/core/algebra_real_roots_spec.w
-  spec/core/algebra_autoload_spec.w
-  spec/core/expression_algebra_spec.w
-  spec/core/algebra_shell_width_degree6_artifact_spec.w
-  spec/core/algebra_shell_width_degree9_artifact_spec.w
-  spec/core/algebraic_real_spec.w
-  spec/core/algebra_shell_width_s_unit_artifacts_spec.w
-  compiler/test/regex_features.w
-  spec/compiler/strip_stacktrace_metadata_spec.w
-)
-
 assert_unique_spec_lane "compiled" "${compiled_specs[@]}"
 assert_unique_spec_lane "compiled priority" "${compiled_priority_specs[@]}"
 scheduled_compiled_specs=()
@@ -878,243 +752,6 @@ for source_path in "${compiled_specs[@]}"; do
   fi
 done
 compiled_specs=("${scheduled_compiled_specs[@]}")
-
-# Emit-only GPU dialect specs (no hardware). Run always with make specs.
-cuda_emit_specs=(
-  spec/compiler/gpu_cuda_emit_spec.w
-)
-
-wgsl_emit_specs=(
-  spec/compiler/gpu_wgsl_emit_spec.w
-)
-
-cuda_reject_specs=(
-  spec/compiler/gpu_cuda_tg_reduce_reject_spec.w
-  spec/compiler/gpu_cuda_simdgroup_reject_spec.w
-)
-
-interpreter_specs=(
-  compiler/test/regex_features.w
-  benchmarks/runtime_ports/bigint_predicate_relaxed_autoload.w
-  spec/core/date_calendar_surface_spec.w
-  spec/compiler/date_dynamic_receiver_spec.w
-  spec/compiler/decimal_dynamic_receiver_spec.w
-  spec/compiler/float_dynamic_receiver_spec.w
-  # Engine-parity pins: these compiler specs assert values that must hold
-  # identically interpreted (compiled-only verification has missed clobbered
-  # interpreter.w hunks before).
-  spec/compiler/block_presence_parity_spec.w
-  spec/compiler/array_constructor_parity_spec.w
-  spec/compiler/array_dynamic_receiver_spec.w
-  spec/compiler/heredoc_opaque_lexer_spec.w
-  spec/compiler/method_fallthrough_parity_spec.w
-  spec/compiler/int_bigint_promotion_spec.w
-  spec/compiler/bigint_literal_cache_spec.w
-  spec/compiler/carry_intrinsics_parity_spec.w
-  spec/compiler/ivar_param_type_spec.w
-  spec/compiler/llvm_name_mangling_injective_spec.w
-  spec/compiler/top_level_method_name_hygiene_spec.w
-  spec/compiler/string_buffer_dynamic_append_spec.w
-  spec/compiler/string_buffer_dynamic_receiver_spec.w
-  spec/compiler/string_dynamic_dispatch_spec.w
-  spec/compiler/quantity_control_flow_parity_spec.w
-  spec/core/quantity_dispatch_spec.w
-  spec/compiler/static_method_block_dispatch_spec.w
-  spec/compiler/static_method_overload_spec.w
-  # clock_ms had to be registered in BOTH lowering.w and builtins.w; pin the
-  # interpreted side so a compiled-only fix cannot pass again.
-  spec/core/clock_ms_spec.w
-  spec/core/csv_stream_spec.w
-  spec/core/channel_spec.w
-  spec/core/channel_timeout_spec.w
-  spec/core/atomic_spec.w
-  spec/core/mutex_spec.w
-  spec/core/timer_validation_spec.w
-  spec/core/future_promise_validation_spec.w
-  spec/core/env_spec.w
-  spec/core/integer_tower_spec.w
-  spec/core/url_spec.w
-  spec/core/http_spec.w
-  spec/core/filesystem_walk_spec.w
-  spec/core/file_stat_tempfile_spec.w
-  spec/core/filesystem_mutation_spec.w
-  spec/core/hash_mutation_spec.w
-  spec/compiler/splat_parameter_parity_spec.w
-  # JSON.parse was compiled-only until the interpreter learned to resolve bare
-  # calls to sibling class methods; pin the interpreted side.
-  spec/core/json_parse_spec.w
-  spec/interpreter/float_leaf_native_spec.w
-  spec/interpreter/big_array_cap_empty_revisit_spec.w
-  spec/interpreter/hash_size_view_field_spec.w
-  spec/interpreter/implicit_block_param_shadow_spec.w
-  spec/interpreter/int_to_i_native_spec.w
-  spec/interpreter/ipv4_octets_native_spec.w
-  spec/interpreter/mmap_size_relaxed_spec.w
-  spec/compiler/source_argc1_constructor_exclusion_spec.w
-  spec/numeric/gcd_spec.w
-  spec/interpreter/range_primitive_dispatch_spec.w
-  # BigInt bang methods + the writable native view-field bridge and the
-  # 1..64 limb sweep are engine-parity pins: the interpreter reaches the
-  # same header through native_data_field_writable?, so a compiled-only
-  # fix must not pass alone.
-  spec/numeric/bigint_bang_spec.w
-  spec/numeric/bigint_limb_sweep_spec.w
-  spec/numeric/bigint_tag_sign_spec.w
-  # Exact-tag overload gate (B3): the interpreter's
-  # overload_matches_args? carries a HAND-COPIED mirror of lowering's
-  # tag-table rule; pin the interpreted side so a compiled-only change
-  # cannot drift the copy.
-  spec/compiler/overload_exact_tag_parity_spec.w
-  spec/compiler/typed_overload_spec.w
-  # Host-parity pin: the implicit-self (bare sibling call) route must run
-  # typed-overload selection like the explicit-receiver route — it
-  # silently took the last-registered arm before args were threaded
-  # through implicit_self_method.
-  spec/compiler/typed_overload_hosts_spec.w
-  # B6 one-way disjointness of the bigint source-op seam: a pair the
-  # source bodies bail on must never be re-admitted by bigint_src_shape
-  # (w_add → src → w_add recursion presents as a segfault). Exercises
-  # every boundary of both sets on both engines.
-  spec/numeric/bigint_seam_disjoint_spec.w
-  spec/compiler/bigint_shared_bit_spec.w
-  spec/compiler/bigint_mutate_unique_spec.w
-  spec/compiler/bigint_mod_pow2_context_spec.w
-  spec/compiler/postfix_rescue_loader_spec.w
-  spec/numeric/bigint_view_field_write_spec.w
-  spec/compiler/hash_free_escape_spec.w
-  spec/numeric/bit_ops_spec.w
-  spec/numeric/big_decimal_spec.w
-  spec/numeric/rational_spec.w
-  spec/interpreter/slab_decl_spec.w
-  spec/interpreter/string_buffer_size_revisit_spec.w
-  spec/interpreter/string_empty_native_spec.w
-  spec/interpreter/string_to_s_native_spec.w
-  spec/interpreter/typed_array_signed_header_spec.w
-  spec/interpreter/uuid_byte_revisit_spec.w
-  spec/interpreter/dot_elementwise_spec.w
-  spec/core/base64_native_spec.w
-  spec/core/calculus_spec.w
-  spec/core/calculus_complex_spec.w
-  spec/core/expression_spec.w
-  spec/core/expression_autoload_spec.w
-  spec/core/expression_calculus_spec.w
-  spec/core/expression_algebra_spec.w
-  spec/core/expression_exact_spec.w
-  spec/core/expression_special_spec.w
-  spec/core/expression_transcendental_spec.w
-  spec/core/expression_solve_spec.w
-  # The exhaustive real-root/ideal/lattice/S-class/S-unit programs are gated
-  # above in the compiled lane. Repeating them in the tree walker consumed the
-  # entire suite tail (multiple full cores for 10+ minutes) without adding a
-  # distinct assertion; the focused expression/formal-series parity specs stay
-  # interpreted below.
-  spec/core/algebra_shell_width_degree6_artifact_spec.w
-  spec/core/algebra_shell_width_degree9_artifact_spec.w
-  spec/core/algebra_shell_width_degree12_artifact_spec.w
-  spec/core/algebra_shell_width_s_unit_artifacts_spec.w
-  spec/core/formal_series_spec.w
-  spec/core/formal_series_autoload_spec.w
-  spec/core/enumerable_native_spec.w
-  spec/core/date_native_spec.w
-  spec/core/system_spec.w
-  spec/numeric/complex_spec.w
-  spec/numeric/hypercomplex_mul_spec.w
-  spec/numeric/matrix_spec.w
-  spec/numeric/operator_overload_spec.w
-  spec/numeric/vector_spec.w
-  benchmarks/runtime_ports/array_leaf_interpreter.w
-  benchmarks/runtime_ports/bigint_predicate_relaxed_interpreter.w
-  benchmarks/runtime_ports/float_remaining_interpreter.w
-  benchmarks/runtime_ports/identity_leaf_interpreter.w
-  benchmarks/runtime_ports/small_big_array_interpreter.w
-  benchmarks/runtime_ports/sync_wrapper_revisit_interpreter.w
-)
-
-compiled_reject_specs=(
-  spec/compiler/date_invalid_constructor.w
-  spec/compiler/decimal_invalid_constructor.w
-  spec/compiler/decimal_invalid_zero_constructor.w
-)
-
-interpreter_reject_specs=(
-  spec/compiler/date_invalid_constructor.w
-  spec/compiler/decimal_invalid_constructor.w
-  spec/compiler/decimal_invalid_zero_constructor.w
-)
-
-core_specs=(
-  spec/core/atomic_spec.w
-  spec/core/byte_array_equality_spec.w
-  spec/core/crypto_accel_spec.w
-  spec/core/crypto_hmac_scram_spec.w
-  spec/core/channel_spec.w
-  spec/core/channel_unbuffered_spec.w
-  spec/core/channel_timeout_spec.w
-  spec/core/channel_timeout_thread_spec.w
-  spec/core/mutex_spec.w
-  spec/core/mutex_thread_spec.w
-  spec/core/timer_spec.w
-  spec/core/timer_validation_spec.w
-  spec/core/future_promise_spec.w
-  spec/core/future_promise_validation_spec.w
-  spec/core/env_spec.w
-  spec/core/integer_tower_spec.w
-  spec/core/url_spec.w
-  spec/core/http_spec.w
-  spec/core/http_socket_spec.w
-  spec/core/socket_repeated_connect_spec.w
-  spec/core/socket_read_into_spec.w
-  spec/core/byte_array_slice_spec.w
-  spec/core/byte_array_view_flatten_spec.w
-  spec/core/byte_array_view_reallocation_spec.w
-  spec/core/memory_mapped_view_spec.w
-  spec/core/process_spawn_argv_ownership_spec.w
-)
-
-metal_specs=(
-  spec/core/metal_dispatch_n_spec.w
-  spec/core/metal_f16_buffer_spec.w
-  spec/core/metal_kernel_spec.w
-  spec/core/metal_q8_matvec_spec.w
-  spec/core/metal_signed_array_bridge_spec.w
-  spec/core/schedule_unroll_spec.w
-)
-
-wassat_specs=(
-  bits/tungsten-wassat/spec/solver_spec.w
-  bits/tungsten-wassat/spec/cli_spec.w
-  bits/tungsten-wassat/spec/preprocess_spec.w
-  bits/tungsten-wassat/spec/incremental_spec.w
-  bits/tungsten-wassat/spec/sls_spec.w
-  bits/tungsten-wassat/spec/trim_spec.w
-  bits/tungsten-wassat/spec/explain_spec.w
-  bits/tungsten-wassat/spec/algebra_certificate_spec.w
-  bits/tungsten-wassat/spec/portfolio_spec.w
-  bits/tungsten-wassat/spec/multiplier_spec.w
-  bits/tungsten-wassat/spec/ternary_affine_spec.w
-  bits/tungsten-wassat/spec/ais_spec.w
-  bits/tungsten-wassat/spec/coloring_spec.w
-  bits/tungsten-wassat/spec/covering_spec.w
-  bits/tungsten-wassat/spec/directed_kernel_spec.w
-  bits/tungsten-wassat/spec/local_core_spec.w
-  bits/tungsten-wassat/spec/latin_csp_spec.w
-  bits/tungsten-wassat/spec/fermat_spec.w
-  bits/tungsten-wassat/spec/sum_of_three_cubes_spec.w
-  bits/tungsten-wassat/spec/mdp_spec.w
-  bits/tungsten-wassat/spec/automata_sync_spec.w
-  bits/tungsten-wassat/spec/edge_matching_spec.w
-  bits/tungsten-wassat/spec/sliding_puzzle_spec.w
-  bits/tungsten-wassat/spec/stedman_spec.w
-  bits/tungsten-wassat/spec/hantzsche_wendt_spec.w
-  bits/tungsten-wassat/spec/knight_tour_spec.w
-)
-
-# The independent proof checker ships as its own bit with no shared parsing
-# or checking code; its checker_spec runs through the interpreter (it needs
-# no compiled runtime builtins).
-wrat_specs=(
-  bits/tungsten-wrat/spec/checker_spec.w
-)
 
 run_special_bit_specs() {
   # Wassat has a deliberate compiled/interpreted split: its native parser,
@@ -1153,28 +790,6 @@ fi
 # pins that gate day-to-day compiler work — in parallel, skipping the
 # serial tails. The full battery remains the commit gate.
 if [[ "${FAST:-0}" == "1" ]]; then
-  fast_compiled=(
-    spec/compiler/typed_overload_spec.w
-    spec/compiler/overload_exact_tag_parity_spec.w
-    spec/compiler/typed_overload_hosts_spec.w
-    spec/numeric/bigint_seam_disjoint_spec.w
-    spec/numeric/bigint_bang_spec.w
-    spec/numeric/bigint_tag_sign_spec.w
-    spec/numeric/bigint_limb_sweep_spec.w
-    spec/compiler/int_bigint_promotion_spec.w
-    spec/compiler/bigint_mutate_unique_spec.w
-    spec/compiler/devirt_method_call_spec.w
-    spec/numeric/rational_spec.w
-    spec/numeric/fp_math_mode_spec.w
-  )
-  fast_interp=(
-    spec/compiler/overload_exact_tag_parity_spec.w
-    spec/compiler/typed_overload_hosts_spec.w
-    spec/numeric/bigint_seam_disjoint_spec.w
-    spec/numeric/bigint_bang_spec.w
-    spec/numeric/bigint_tag_sign_spec.w
-    spec/numeric/rational_spec.w
-  )
   run_parallel_launch compiled "${fast_compiled[@]}"
   run_parallel_launch interp "${fast_interp[@]}"
   wait
@@ -1188,6 +803,8 @@ if [[ "${FAST:-0}" == "1" ]]; then
   exit 0
 fi
 
+# Do not overlap the full compiled and interpreted lanes: that
+# oversubscribes the machine and has been measured as a regression.
 run_parallel compiled "${compiled_specs[@]}"
 run_parallel compiled-reject "${compiled_reject_specs[@]}"
 
@@ -1246,7 +863,7 @@ fi
 # (services/api/lib/exec.w). Opt-in because each check compiles and runs a small
 # program of its own, so it is slower than a normal spec.
 if [[ "${RUN_API_SPECS:-0}" == "1" ]]; then
-  run_compiled_spec spec/api/api_exec_spec.w
+  run_parallel compiled "${api_specs[@]}"
 else
   echo "skip API contract spec (set RUN_API_SPECS=1 to run)"
 fi

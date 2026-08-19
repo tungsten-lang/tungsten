@@ -4,6 +4,13 @@ Runnable Tungsten specs use the `*_spec.w` suffix. Keep files self-checking:
 they should print failures clearly and exit nonzero when a guarded behavior
 breaks.
 
+Every tracked `spec/**/*_spec.w` must be classified in `scripts/spec-lanes.sh`
+as a default lane (`compiled`, `interpreter`, CUDA/WGSL emit, or CUDA-reject),
+an existing opt-in gate (`core`, `metal`, `api`), or an explicit `exclude`.
+An unclassified tracked spec fails `scripts/test-specs.sh` and
+`scripts/spec-lanes.sh` the same way an unclassified bit spec fails. Discovery
+uses `git ls-files`, so an uncommitted scratch spec does not change the suite.
+
 - `compiler/` - compiler and lowering regressions. Includes emit-only GPU
   dialect checks (e.g. `gpu_cuda_emit_spec.w`), which need no hardware.
 - `core/` - language, core runtime, and standard-library regressions.
@@ -25,9 +32,11 @@ Run the default self-checking set with:
 make specs
 ```
 
-Set `RUN_CORE_SPECS=1` to include core runtime specs, `RUN_METAL_SPECS=1` to
-include Metal specs, `RUN_REPL_SPECS=1` to include the PTY REPL scrub test, and
-`RUN_API_SPECS=1` to include the API execution-engine contract spec.
+`FAST=1 scripts/test-specs.sh` runs the curated inner-loop compiled and
+interpreted pins only. Set `RUN_CORE_SPECS=1` to include core runtime specs,
+`RUN_METAL_SPECS=1` to include Metal specs, `RUN_REPL_SPECS=1` to include the
+PTY REPL scrub test, and `RUN_API_SPECS=1` to include the API execution-engine
+contract spec.
 
 CUDA emit (`spec/compiler/gpu_cuda_emit_spec.w`) is included in the default
 set: the harness sets `TUNGSTEN_GPU_DIALECTS=cuda` at compile time and the

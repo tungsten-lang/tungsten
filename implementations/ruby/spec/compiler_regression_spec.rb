@@ -374,7 +374,10 @@ RSpec.describe "Compiler regressions" do
   end
 
   it "does not emit unused runtime classes or declarations for a trivial program" do
-    llvm = compile_to_llvm("hello_world_trim.w", <<~W)
+    # --no-debug: default builds are debug-enabled now (frame pointers +
+    # fn/call-site metadata by design); this spec pins the trimmed non-debug
+    # emission profile.
+    llvm = compile_to_llvm("hello_world_trim.w", <<~W, ["--no-debug"])
       << "hello world"
     W
 

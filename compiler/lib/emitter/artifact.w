@@ -541,6 +541,21 @@
       # runtime's weak C-kernel default, or to whichever object defines it).
       seam_decls << "declare i64 @" + big_op_wrappers[bop] + "(i64, i64) nounwind\n"
 
+  # The exact limb leaves below (sub1/mul1/sqr*/mul*) live in
+  # core/numeric/big_int.w itself, unlike the always-injected compare/bitwise
+  # support modules. Their strong seams can only exist when BigInt Core source
+  # was loaded into this module; a program that never touches BigInt
+  # legitimately binds the runtime's weak exact-C defaults instead. Enforce
+  # the native-lane invariants only when some BigInt Core method was lowered
+  # here -- that still catches a loader/cache regression dropping the lane
+  # from a BigInt-bearing build.
+  bigint_core_loaded = false
+  bclfi = 0
+  while bclfi < mod[:functions].size()
+    if mod[:functions][bclfi][:source_class] == "BigInt"
+      bigint_core_loaded = true
+    bclfi += 1
+
   # Exact positive one-limb subtraction has a narrower stable seam than the
   # complete BigInt#- worker.  w_sub has already proved the two positive
   # one-limb heap shapes before entering it, so the strong Core definition can
@@ -560,7 +575,7 @@
   if bigint_sub1_1_matches > 1
     << "error: __bigint_sub1_1_raw is reserved for native BigInt subtraction"
     exit(1)
-  if mod[:require_bigint_sub1_1_src] == true && bigint_sub1_1_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sub1_1_src] == true && bigint_sub1_1_fn == nil
     << "error: required native BigInt sub1@1 helper is missing; __w_bigint_sub1_1_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sub1_1_target = bigint_minus_reopened_fn
@@ -602,7 +617,7 @@
   if bigint_sub1_2_matches > 1
     << "error: __bigint_sub1_2_raw is reserved for native BigInt subtraction"
     exit(1)
-  if mod[:require_bigint_sub1_2_src] == true && bigint_sub1_2_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sub1_2_src] == true && bigint_sub1_2_fn == nil
     << "error: required native BigInt sub1@2 helper is missing; __w_bigint_sub1_2_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sub1_2_target = bigint_minus_reopened_fn
@@ -649,7 +664,7 @@
   if bigint_mul1_1_matches > 1
     << "error: __bigint_mul1_1_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_1_src] == true && bigint_mul1_1_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_1_src] == true && bigint_mul1_1_fn == nil
     << "error: required native BigInt mul1@1 helper is missing; __w_bigint_mul1_1_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_1_target = bigint_times_reopened_fn
@@ -695,7 +710,7 @@
   if bigint_sqr2_matches > 1
     << "error: __bigint_sqr2_raw is reserved for native BigInt squaring"
     exit(1)
-  if mod[:require_bigint_sqr2_src] == true && bigint_sqr2_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sqr2_src] == true && bigint_sqr2_fn == nil
     << "error: required native BigInt sqr@2 helper is missing; __w_bigint_sqr2_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sqr2_target = bigint_times_reopened_fn
@@ -740,7 +755,7 @@
   if bigint_sqr3_matches > 1
     << "error: __bigint_sqr3_raw is reserved for native BigInt squaring"
     exit(1)
-  if mod[:require_bigint_sqr3_src] == true && bigint_sqr3_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sqr3_src] == true && bigint_sqr3_fn == nil
     << "error: required native BigInt sqr@3 helper is missing; __w_bigint_sqr3_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sqr3_target = bigint_times_reopened_fn
@@ -784,7 +799,7 @@
   if bigint_sqr4_matches > 1
     << "error: __bigint_sqr4_raw is reserved for native BigInt squaring"
     exit(1)
-  if mod[:require_bigint_sqr4_src] == true && bigint_sqr4_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sqr4_src] == true && bigint_sqr4_fn == nil
     << "error: required native BigInt sqr@4 helper is missing; __w_bigint_sqr4_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sqr4_target = bigint_times_reopened_fn
@@ -828,7 +843,7 @@
   if bigint_sqr5_matches > 1
     << "error: __bigint_sqr5_raw is reserved for native BigInt squaring"
     exit(1)
-  if mod[:require_bigint_sqr5_src] == true && bigint_sqr5_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sqr5_src] == true && bigint_sqr5_fn == nil
     << "error: required native BigInt sqr@5 helper is missing; __w_bigint_sqr5_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sqr5_target = bigint_times_reopened_fn
@@ -872,7 +887,7 @@
   if bigint_sqr6_matches > 1
     << "error: __bigint_sqr6_raw is reserved for native BigInt squaring"
     exit(1)
-  if mod[:require_bigint_sqr6_src] == true && bigint_sqr6_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sqr6_src] == true && bigint_sqr6_fn == nil
     << "error: required native BigInt sqr@6 helper is missing; __w_bigint_sqr6_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sqr6_target = bigint_times_reopened_fn
@@ -916,7 +931,7 @@
   if bigint_sqr7_matches > 1
     << "error: __bigint_sqr7_raw is reserved for native BigInt squaring"
     exit(1)
-  if mod[:require_bigint_sqr7_src] == true && bigint_sqr7_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sqr7_src] == true && bigint_sqr7_fn == nil
     << "error: required native BigInt sqr@7 helper is missing; __w_bigint_sqr7_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sqr7_target = bigint_times_reopened_fn
@@ -961,7 +976,7 @@
   if bigint_sqr8_matches > 1
     << "error: __bigint_sqr8_raw is reserved for native BigInt squaring"
     exit(1)
-  if mod[:require_bigint_sqr8_src] == true && bigint_sqr8_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sqr8_src] == true && bigint_sqr8_fn == nil
     << "error: required native BigInt sqr@8 helper is missing; __w_bigint_sqr8_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sqr8_target = bigint_times_reopened_fn
@@ -1005,7 +1020,7 @@
   if bigint_sqr16_matches > 1
     << "error: __bigint_sqr16_raw is reserved for native BigInt squaring"
     exit(1)
-  if mod[:require_bigint_sqr16_src] == true && bigint_sqr16_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_sqr16_src] == true && bigint_sqr16_fn == nil
     << "error: required native BigInt sqr@16 helper is missing; __w_bigint_sqr16_src would bind the weak C bootstrap default"
     exit(1)
   bigint_sqr16_target = bigint_times_reopened_fn
@@ -1050,7 +1065,7 @@
   if bigint_mul2_matches > 1
     << "error: __bigint_mul2_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul2_src] == true && bigint_mul2_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul2_src] == true && bigint_mul2_fn == nil
     << "error: required native BigInt mul@2 helper is missing; __w_bigint_mul2_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul2_target = bigint_times_reopened_fn
@@ -1094,7 +1109,7 @@
   if bigint_mul3_matches > 1
     << "error: __bigint_mul3_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul3_src] == true && bigint_mul3_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul3_src] == true && bigint_mul3_fn == nil
     << "error: required native BigInt mul@3 helper is missing; __w_bigint_mul3_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul3_target = bigint_times_reopened_fn
@@ -1139,7 +1154,7 @@
   if bigint_mul4_matches > 1
     << "error: __bigint_mul4_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul4_src] == true && bigint_mul4_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul4_src] == true && bigint_mul4_fn == nil
     << "error: required native BigInt mul@4 helper is missing; __w_bigint_mul4_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul4_target = bigint_times_reopened_fn
@@ -1184,7 +1199,7 @@
   if bigint_mul5_matches > 1
     << "error: __bigint_mul5_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul5_src] == true && bigint_mul5_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul5_src] == true && bigint_mul5_fn == nil
     << "error: required native BigInt mul@5 helper is missing; __w_bigint_mul5_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul5_target = bigint_times_reopened_fn
@@ -1229,7 +1244,7 @@
   if bigint_mul6_matches > 1
     << "error: __bigint_mul6_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul6_src] == true && bigint_mul6_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul6_src] == true && bigint_mul6_fn == nil
     << "error: required native BigInt mul@6 helper is missing; __w_bigint_mul6_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul6_target = bigint_times_reopened_fn
@@ -1274,7 +1289,7 @@
   if bigint_mul7_matches > 1
     << "error: __bigint_mul7_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul7_src] == true && bigint_mul7_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul7_src] == true && bigint_mul7_fn == nil
     << "error: required native BigInt mul@7 helper is missing; __w_bigint_mul7_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul7_target = bigint_times_reopened_fn
@@ -1319,7 +1334,7 @@
   if bigint_mul8_matches > 1
     << "error: __bigint_mul8_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul8_src] == true && bigint_mul8_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul8_src] == true && bigint_mul8_fn == nil
     << "error: required native BigInt mul@8 helper is missing; __w_bigint_mul8_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul8_target = bigint_times_reopened_fn
@@ -1364,7 +1379,7 @@
   if bigint_mul12_matches > 1
     << "error: __bigint_mul12_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul12_src] == true && bigint_mul12_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul12_src] == true && bigint_mul12_fn == nil
     << "error: required native BigInt mul@12 helper is missing; __w_bigint_mul12_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul12_target = bigint_times_reopened_fn
@@ -1409,7 +1424,7 @@
   if bigint_mul15_matches > 1
     << "error: __bigint_mul15_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul15_src] == true && bigint_mul15_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul15_src] == true && bigint_mul15_fn == nil
     << "error: required native BigInt mul@15 helper is missing; __w_bigint_mul15_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul15_target = bigint_times_reopened_fn
@@ -1454,7 +1469,7 @@
   if bigint_mul16_matches > 1
     << "error: __bigint_mul16_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul16_src] == true && bigint_mul16_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul16_src] == true && bigint_mul16_fn == nil
     << "error: required native BigInt mul@16 helper is missing; __w_bigint_mul16_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul16_target = bigint_times_reopened_fn
@@ -1499,7 +1514,7 @@
   if bigint_mul17_matches > 1
     << "error: __bigint_mul17_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul17_src] == true && bigint_mul17_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul17_src] == true && bigint_mul17_fn == nil
     << "error: required native BigInt mul@17 helper is missing; __w_bigint_mul17_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul17_target = bigint_times_reopened_fn
@@ -1544,7 +1559,7 @@
   if bigint_mul21_matches > 1
     << "error: __bigint_mul21_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul21_src] == true && bigint_mul21_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul21_src] == true && bigint_mul21_fn == nil
     << "error: required native BigInt mul@21 helper is missing; __w_bigint_mul21_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul21_target = bigint_times_reopened_fn
@@ -1589,7 +1604,7 @@
   if bigint_mul24_matches > 1
     << "error: __bigint_mul24_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul24_src] == true && bigint_mul24_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul24_src] == true && bigint_mul24_fn == nil
     << "error: required native BigInt mul@24 helper is missing; __w_bigint_mul24_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul24_target = bigint_times_reopened_fn
@@ -1635,7 +1650,7 @@
   if bigint_mul1_2_matches > 1
     << "error: __bigint_mul1_2_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_2_src] == true && bigint_mul1_2_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_2_src] == true && bigint_mul1_2_fn == nil
     << "error: required native BigInt mul1@2 helper is missing; __w_bigint_mul1_2_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_2_target = bigint_times_reopened_fn
@@ -1684,7 +1699,7 @@
   if bigint_mul1_3_matches > 1
     << "error: __bigint_mul1_3_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_3_src] == true && bigint_mul1_3_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_3_src] == true && bigint_mul1_3_fn == nil
     << "error: required native BigInt mul1@3 helper is missing; __w_bigint_mul1_3_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_3_target = bigint_times_reopened_fn
@@ -1730,7 +1745,7 @@
   if bigint_mul1_4_matches > 1
     << "error: __bigint_mul1_4_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_4_src] == true && bigint_mul1_4_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_4_src] == true && bigint_mul1_4_fn == nil
     << "error: required native BigInt mul1@4 helper is missing; __w_bigint_mul1_4_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_4_target = bigint_times_reopened_fn
@@ -1776,7 +1791,7 @@
   if bigint_mul1_5_matches > 1
     << "error: __bigint_mul1_5_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_5_src] == true && bigint_mul1_5_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_5_src] == true && bigint_mul1_5_fn == nil
     << "error: required native BigInt mul1@5 helper is missing; __w_bigint_mul1_5_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_5_target = bigint_times_reopened_fn
@@ -1820,7 +1835,7 @@
   if bigint_mul1_6_matches > 1
     << "error: __bigint_mul1_6_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_6_src] == true && bigint_mul1_6_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_6_src] == true && bigint_mul1_6_fn == nil
     << "error: required native BigInt mul1@6 helper is missing; __w_bigint_mul1_6_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_6_target = bigint_times_reopened_fn
@@ -1864,7 +1879,7 @@
   if bigint_mul1_7_matches > 1
     << "error: __bigint_mul1_7_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_7_src] == true && bigint_mul1_7_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_7_src] == true && bigint_mul1_7_fn == nil
     << "error: required native BigInt mul1@7 helper is missing; __w_bigint_mul1_7_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_7_target = bigint_times_reopened_fn
@@ -1908,7 +1923,7 @@
   if bigint_mul1_8_matches > 1
     << "error: __bigint_mul1_8_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_8_src] == true && bigint_mul1_8_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_8_src] == true && bigint_mul1_8_fn == nil
     << "error: required native BigInt mul1@8 helper is missing; __w_bigint_mul1_8_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_8_target = bigint_times_reopened_fn
@@ -1952,7 +1967,7 @@
   if bigint_mul1_16_matches > 1
     << "error: __bigint_mul1_16_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_16_src] == true && bigint_mul1_16_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_16_src] == true && bigint_mul1_16_fn == nil
     << "error: required native BigInt mul1@16 helper is missing; __w_bigint_mul1_16_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_16_target = bigint_times_reopened_fn
@@ -1996,7 +2011,7 @@
   if bigint_mul1_24_matches > 1
     << "error: __bigint_mul1_24_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_24_src] == true && bigint_mul1_24_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_24_src] == true && bigint_mul1_24_fn == nil
     << "error: required native BigInt mul1@24 helper is missing; __w_bigint_mul1_24_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_24_target = bigint_times_reopened_fn
@@ -2040,7 +2055,7 @@
   if bigint_mul1_32_matches > 1
     << "error: __bigint_mul1_32_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_32_src] == true && bigint_mul1_32_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_32_src] == true && bigint_mul1_32_fn == nil
     << "error: required native BigInt mul1@32 helper is missing; __w_bigint_mul1_32_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_32_target = bigint_times_reopened_fn
@@ -2084,7 +2099,7 @@
   if bigint_mul1_40_matches > 1
     << "error: __bigint_mul1_40_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_40_src] == true && bigint_mul1_40_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_40_src] == true && bigint_mul1_40_fn == nil
     << "error: required native BigInt mul1@40 helper is missing; __w_bigint_mul1_40_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_40_target = bigint_times_reopened_fn
@@ -2128,7 +2143,7 @@
   if bigint_mul1_48_matches > 1
     << "error: __bigint_mul1_48_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_48_src] == true && bigint_mul1_48_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_48_src] == true && bigint_mul1_48_fn == nil
     << "error: required native BigInt mul1@48 helper is missing; __w_bigint_mul1_48_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_48_target = bigint_times_reopened_fn
@@ -2172,7 +2187,7 @@
   if bigint_mul1_64_matches > 1
     << "error: __bigint_mul1_64_raw is reserved for native BigInt multiplication"
     exit(1)
-  if mod[:require_bigint_mul1_64_src] == true && bigint_mul1_64_fn == nil
+  if bigint_core_loaded && mod[:require_bigint_mul1_64_src] == true && bigint_mul1_64_fn == nil
     << "error: required native BigInt mul1@64 helper is missing; __w_bigint_mul1_64_src would bind the weak C bootstrap default"
     exit(1)
   bigint_mul1_64_target = bigint_times_reopened_fn

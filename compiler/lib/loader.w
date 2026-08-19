@@ -1797,4 +1797,19 @@ loader_parse_cache_state = {
     root = env("TUNGSTEN_ROOT")
     if root != nil && root != "" && file?(root + "/core/tungsten.w")
       return root
+    # Self-located install root: a directly-invoked compiler binary (no
+    # bin/tungsten wrapper exporting TUNGSTEN_ROOT) compiling a file whose
+    # ancestry and cwd both lack core/. The binary knows its own path; walk
+    # up from it exactly like the source-ancestry walk above. Compiled
+    # runtime only -- the C VM stage-0 lacks the w_executable_path ccall.
+    if runtime_identity() == "compiled-runtime"
+      exe = ccall("w_executable_path")
+      if exe != nil && exe != ""
+        eparts = exe.split("/")
+        ei = eparts.size() - 1
+        while ei > 0
+          ecand = eparts[0...ei].join("/")
+          if file?(ecand + "/core/tungsten.w")
+            return ecand
+          ei -= 1
     ""

@@ -372,11 +372,14 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   if contract[:dispatch_key] && actual_dispatch_key != contract[:dispatch_key]
     errors << "#{class_name}: compiler dispatch key #{actual_dispatch_key.inspect}, expected #{contract[:dispatch_key]}"
   end
-  body = source[/^\+ #{Regexp.escape(class_name)}(?:\s+<[^\n]+)?\s*$\n(?<body>.*?)(?=^\+ |\z)/m, :body]
-  if body.nil?
+  sections = source.scan(/^\+ #{Regexp.escape(class_name)}(?:\s+<[^\n]+)?\s*$\n(.*?)(?=^\+ |\z)/m)
+  if sections.empty?
     errors << "#{class_name}: missing class declaration in #{contract[:path]}"
     next
   end
+  # A class may be reopened after intervening top-level definitions (e.g. raw
+  # limb helpers in big_int.w); every section contributes methods.
+  body = sections.flatten.join
 
   method_bodies = instance_method_bodies(body)
   source_methods = method_bodies.keys.sort

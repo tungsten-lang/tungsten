@@ -1155,7 +1155,11 @@ module Tungsten
         hint_start = @pos
         # A "=" ends the hint: "x ## i64 = 0" is a typed assignment — the
         # initializer lexes normally (mirrors the self-hosted lexer's rule).
-        advance until eof? || newline_byte?(byte) || byte == 0x3D
+        # Only for trailing ascriptions: a line-initial `##` is a standalone
+        # hint/comment line and scans to EOL, so prose containing `=` never
+        # strands live tokens.
+        bol = @line_start
+        advance until eof? || newline_byte?(byte) || (byte == 0x3D && !bol)
         hint = slice(hint_start).strip
         return set_token(:TYPE_HINT, hint, @row, start_col) unless hint.empty?
       end

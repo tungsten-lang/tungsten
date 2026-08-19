@@ -740,8 +740,10 @@ function_emit_cache_state = {
         inst = blk[:instructions][ii]
         if wire_get(inst, :src_line) != nil
           ret_label = nil
+          site_ic_id = nil
           if wire_kind(inst) == :call_method_i64
-            ret_label = "cs." + wire_get(inst, :ic_id).to_s() + ".ret"
+            site_ic_id = wire_get(inst, :ic_id)
+            ret_label = "cs." + site_ic_id.to_s() + ".ret"
           elsif wire_kind(inst) in (:call_direct_void :call_direct_i64) && wire_get(inst, :loc_site_id) != nil
             ret_label = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
           if ret_label != nil
@@ -756,6 +758,7 @@ function_emit_cache_state = {
             sites.push({
               fn_name: f[:name],
               ret_label: ret_label,
+              ic_id: site_ic_id,
               file_id: file_id,
               line: wire_get(inst, :src_line),
               col: col_val
@@ -829,6 +832,66 @@ function_emit_cache_state = {
   out << "@__w_call_site_count = constant i32 "
   out << sites.size().to_s()
   out << "\n\n"
+
+  # IC-site companion table, indexed by IC slot id. The blockaddress keys
+  # above are only reliable at -O0 (LLVM may fold a blockaddress no
+  # indirectbr consumes, collapsing it to the function entry); slot ids
+  # survive every optimization level. w_method_call_slow records the
+  # missing slot, and the no-method error path maps it back to
+  # (file, line, col) through this table via __w_ic_base().
+  max_ic = -1
+  si = 0
+  while si < sites.size()
+    s_ic = sites[si][:ic_id]
+    if s_ic != nil && s_ic > max_ic
+      max_ic = s_ic
+    si += 1
+  if max_ic >= 0
+    rows = []
+    ri = 0
+    while ri <= max_ic
+      rows.push(nil)
+      ri += 1
+    si = 0
+    while si < sites.size()
+      s = sites[si]
+      if s[:ic_id] != nil
+        rows[s[:ic_id]] = s
+      si += 1
+    out << "@__w_ic_site = constant "
+    out << lbr
+    out << rows.size().to_s()
+    out << " x { ptr, i32, i32 }"
+    out << rbr
+    out << " "
+    out << lbr
+    out << "\n"
+    ri = 0
+    while ri < rows.size()
+      r = rows[ri]
+      if r == nil
+        out << "  { ptr, i32, i32 } { ptr null, i32 0, i32 0 }"
+      else
+        out << "  { ptr, i32, i32 } { ptr @.wcs.file."
+        out << r[:file_id].to_s()
+        out << ", i32 "
+        out << r[:line].to_s()
+        out << ", i32 "
+        out << r[:col].to_s()
+        out << " }"
+      if ri < rows.size() - 1
+        out << ","
+      out << "\n"
+      ri += 1
+    out << rbr
+    out << "\n"
+    out << "@__w_ic_site_count = constant i32 "
+    out << rows.size().to_s()
+    out << "\n\n"
+    # Per-thread IC base accessor: @.ic is thread_local, so slot ADDRESSES
+    # cannot appear in a constant initializer and differ per thread. The
+    # runtime subtracts this thread's base to recover the slot index.
+    out << "define ptr @__w_ic_base() nounwind {\nentry:\n  ret ptr @.ic\n}\n\n"
 
   out.to_s()
 
@@ -963,7 +1026,9 @@ function_emit_cache_state = {
 
   out.to_s()
 
--> emit_stacktrace_llvm_used()
+-> emit_stacktrace_llvm_used(has_ic_site = false)
+  if has_ic_site
+    return "@llvm.used = appending global \[6 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_call_site, ptr @__w_call_site_count, ptr @__w_ic_site, ptr @__w_ic_site_count], section \"llvm.metadata\"\n\n"
   "@llvm.used = appending global \[4 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_call_site, ptr @__w_call_site_count], section \"llvm.metadata\"\n\n"
 
 -> address_taken_function_for_inst(inst)

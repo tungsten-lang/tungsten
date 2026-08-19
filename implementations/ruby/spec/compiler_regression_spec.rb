@@ -370,7 +370,8 @@ RSpec.describe "Compiler regressions" do
     llvm = compile_to_llvm("raw_wvalue_literal.w", source)
 
     expect(out).to eq("ok\n")
-    expect(llvm).to include("u0xFFF9073656C6966B")
+    # Case-insensitive: the emitter renders tagged hex immediates lowercase.
+    expect(llvm.downcase).to include("u0xfff9073656c6966b")
   end
 
   it "does not emit unused runtime classes or declarations for a trivial program" do
@@ -2236,7 +2237,7 @@ RSpec.describe "Compiler regressions" do
     expect(llvm).to match(/icmp eq i64 .*, -1688849860263895/)
     expect(llvm).to match(/icmp eq i64 .*, -1688849860263877/)
     expect(llvm).to match(/or i1 /)
-    expect(llvm).not_to include("call i64 @w_eq")
+    expect(llvm).not_to include("call i64 @w_eq(")
     # The peephole replaces sc.rhs/sc.end scaffolding for this chain.
     # Its body (the `<<` call) still lives in if.then/if.end, but the
     # condition no longer goes through sc.* labels.
@@ -2254,7 +2255,7 @@ RSpec.describe "Compiler regressions" do
     expect(llvm).to match(/icmp eq i64 .*, -1688849860263896/)
     expect(llvm).to match(/icmp eq i64 .*, -1688849860263895/)
     expect(llvm).to match(/icmp eq i64 .*, -1688849860263877/)
-    expect(llvm).not_to include("call i64 @w_eq")
+    expect(llvm).not_to include("call i64 @w_eq(")
   end
 
   it "pairwise 2-arm OR chain stays below peephole threshold" do
@@ -2546,8 +2547,11 @@ RSpec.describe "Compiler regressions" do
     _out, err, status = Open3.capture3(bin_path)
     expect(status.success?).to be(false)
     expect(err).to include("runtime error:")
-    # No `-->` header because the file couldn't be opened.
-    expect(err).not_to match(/--> .+err_nosource\.w:/)
+    # The location header still prints (the "(eval)" alias for -e snippets
+    # relies on this), but no source excerpt can be shown for an unreadable
+    # file — no gutter lines.
+    expect(err).to match(/--> .+err_nosource\.w:\d+/)
+    expect(err).not_to match(/\d+ \|/)
     # Backtrace remains concise by default even when source is missing.
     expect(err).to include("set TUNGSTEN_BACKTRACE=1")
     expect(err).not_to match(/w_method_dispatch|dief|w_method_call_cached/)

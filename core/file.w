@@ -190,23 +190,28 @@ use core/mmap
   # Filesystem mutation
   -> .chdir(dir)
     if block?
-      file_chdir(dir) ->
-        yield
-    else
+      previous = file_pwd()
       file_chdir(dir)
+      result = yield
+      file_chdir(previous)
+      return result
+    file_chdir(dir)
 
   -> .cd(dir)
     if block?
-      file_chdir(dir) ->
-        yield
-    else
+      previous = file_pwd()
       file_chdir(dir)
+      result = yield
+      file_chdir(previous)
+      return result
+    file_chdir(dir)
 
   -> .pwd
     file_pwd()
 
   -> .mkdir(path, *opts)
-    file_mkdir(path, *opts)
+    opt = opts.size > 0 ? opts[0] : nil
+    file_mkdir(path, opt)
 
   -> .mkdir_p(path)
     file_mkdir(path, recursive: true)

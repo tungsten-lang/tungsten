@@ -519,6 +519,16 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
         continue;
       }
       if (pos + 1 < count && cp_at(source, pos + 1) == '#') {
+        /* Line-initial `##` is a standalone hint/comment line: it never
+         * carries a `= initializer` (that form is the trailing
+         * `x ## T = 0` ascription), so it scans to EOL. Stopping at `=`
+         * here would strand the rest of a prose comment as live tokens.
+         * Mirrors the self-hosted lexer's rule. */
+        int hint_bol = tokens->count == 0;
+        if (!hint_bol) {
+          int lt = tc_token_type(tokens->items[tokens->count - 1]);
+          hint_bol = lt == TC_T_NEWLINE || lt == TC_T_INDENT || lt == TC_T_DEDENT;
+        }
         pos += 2;
         while (pos < count && is_space_cp(cp_at(source, pos))) pos++;
         size_t start = pos;
@@ -530,7 +540,7 @@ int tc_lex_source(const TcSource *source, TcTokens *tokens, TcError *err) {
           } else if (c2 == ']') {
             if (type_bracket_depth == 0 && paren_depth > 0) break;
             type_bracket_depth--;
-          } else if (c2 == '=') {
+          } else if (c2 == '=' && !hint_bol) {
             /* `x ## i64 = 0` is a typed assignment: the hint ends at `=`
              * (any depth) so the initializer lexes normally. Mirrors the
              * self-hosted lexer's rule. */

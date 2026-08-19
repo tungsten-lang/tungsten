@@ -168,11 +168,13 @@ RSpec.describe "tungsten-bit CLI" do
 
     dry_out, dry_err, dry_status = run_bit("install", "--dry-run", chdir: app_dir, env: {"BIT_HOME" => registry})
     expect(dry_status.success?).to be(true), dry_err
-    expect(dry_out).to include("install: tungsten-json 0.1.5 from #{bit_dir}")
+    # The plan line reads "install: NAME VER -> <dest> from <source dir>".
+    expect(dry_out).to match(/install: tungsten-json 0\.1\.5 .*from #{Regexp.escape(bit_dir)}/)
 
     _install_out, install_err, install_status = run_bit("install", chdir: app_dir, env: {"BIT_HOME" => registry})
     expect(install_status.success?).to be(true), install_err
-    expect(File).to exist(File.join(app_dir, "vendor/bits/tungsten-json/Bitfile"))
+    # Installs land under the versioned BIT_HOME prefix (<root>/<name>/<version>).
+    expect(File).to exist(File.join(registry, "tungsten-json/0.1.5/Bitfile"))
     lockfile = File.read(File.join(app_dir, "Bitfile.lock"))
     expect(lockfile).to include('bit "tungsten-json", "0.1.5"')
     expect(lockfile).to include("path: \"#{bit_dir}\"")
@@ -246,13 +248,13 @@ RSpec.describe "tungsten-bit CLI" do
     _upgrade_out, upgrade_err, upgrade_status = run_bit("upgrade", chdir: app_dir, env: {"BIT_HOME" => registry})
     expect(upgrade_status.success?).to be(true), upgrade_err
     expect(File.read(File.join(app_dir, "Bitfile.lock"))).to include('bit "tungsten-json", "0.2.0"')
-    expect(File.read(File.join(app_dir, "vendor/bits/tungsten-json/Bitfile"))).to include('version "0.2.0"')
+    expect(File.read(File.join(registry, "tungsten-json/0.2.0/Bitfile"))).to include('version "0.2.0"')
 
     up_to_date_out, up_to_date_err, up_to_date_status = run_bit("outdated", chdir: app_dir, env: {"BIT_HOME" => registry})
     expect(up_to_date_status.success?).to be(true), up_to_date_err
     expect(up_to_date_out).to include("All bits up to date")
 
-    stale_dir = File.join(app_dir, "vendor/bits/tungsten-old")
+    stale_dir = File.join(registry, "tungsten-old/0.0.1")
     FileUtils.mkdir_p(stale_dir)
     File.write(File.join(stale_dir, "Bitfile"), <<~BITFILE)
       tungsten "old-0.0.1"
@@ -294,14 +296,14 @@ RSpec.describe "tungsten-bit CLI" do
 
     out, err, status = run_bit("install", "--dry-run", chdir: app_dir, env: {"BIT_HOME" => registry})
     expect(status.success?).to be(true), err
-    expect(out).to include("tungsten-json 0.1.5 from #{stable_dir}")
-    expect(out).to include("tungsten-console 0.1.0 from #{dev_dir}")
+    expect(out).to match(/tungsten-json 0\.1\.5 .*from #{Regexp.escape(stable_dir)}/)
+    expect(out).to match(/tungsten-console 0\.1\.0 .*from #{Regexp.escape(dev_dir)}/)
     expect(out).not_to include(prerelease_dir)
     expect(out).not_to include(optional_dir)
 
     pre_out, pre_err, pre_status = run_bit("install", "--dry-run", "--pre", chdir: app_dir, env: {"BIT_HOME" => registry})
     expect(pre_status.success?).to be(true), pre_err
-    expect(pre_out).to include("tungsten-json 0.1.6.rc1 from #{prerelease_dir}")
+    expect(pre_out).to match(/tungsten-json 0\.1\.6\.rc1 .*from #{Regexp.escape(prerelease_dir)}/)
 
     without_out, without_err, without_status = run_bit("install", "--dry-run", "--without", "development", chdir: app_dir, env: {"BIT_HOME" => registry})
     expect(without_status.success?).to be(true), without_err
@@ -309,7 +311,7 @@ RSpec.describe "tungsten-bit CLI" do
 
     with_out, with_err, with_status = run_bit("install", "--dry-run", "--with", "optional", chdir: app_dir, env: {"BIT_HOME" => registry})
     expect(with_status.success?).to be(true), with_err
-    expect(with_out).to include("tungsten-pg 0.1.0 from #{optional_dir}")
+    expect(with_out).to match(/tungsten-pg 0\.1\.0 .*from #{Regexp.escape(optional_dir)}/)
   end
 
   it "packs a dry-run publish archive" do

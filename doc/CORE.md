@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(551 total), grouped by area, with its declaration, a one-line
+(554 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -576,3 +576,6 @@ summary from the source header, and a link to the source.
 |-------|-----------|---------|--------|
 | `Comparable` | `trait Comparable` | Include in classes that implement <=> to get <, <=, >, >=, == | [`core/traits/comparable.w`](../core/traits/comparable.w) |
 | `Enumerable` | `trait Enumerable` | Include in classes that implement each(block) to get map, select, reduce, etc. | [`core/traits/enumerable.w`](../core/traits/enumerable.w) |
+| `Printable` | `trait Printable` | Include in classes that render a user-facing string via to_s. | [`core/traits/printable.w`](../core/traits/printable.w) |
+| `Inspectable` | `trait Inspectable` | Include in classes that render a developer-facing representation via | [`core/traits/inspectable.w`](../core/traits/inspectable.w) |
+| `Debuggable` | `trait Debuggable` | Include in classes whose inspect output is precise enough to debug from | [`core/traits/debuggable.w`](../core/traits/debuggable.w) |

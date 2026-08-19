@@ -567,6 +567,9 @@
 
   auto :Comparable,   "traits/comparable"
   auto :Enumerable,   "traits/enumerable"
+  auto :Printable,    "traits/printable"
+  auto :Inspectable,  "traits/inspectable"
+  auto :Debuggable,   "traits/debuggable"
 
   auto :ArgumentError, "argument_error"
   auto :RangeError,    "range_error"

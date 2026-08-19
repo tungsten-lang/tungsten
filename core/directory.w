@@ -7,17 +7,21 @@
 
   -> .chdir(path)
     if block?
-      file_chdir(path) ->
-        yield
-    else
+      previous = file_pwd()
       file_chdir(path)
+      result = yield
+      file_chdir(previous)
+      return result
+    file_chdir(path)
 
   -> .cd(path)
     if block?
-      file_chdir(path) ->
-        yield
-    else
+      previous = file_pwd()
       file_chdir(path)
+      result = yield
+      file_chdir(previous)
+      return result
+    file_chdir(path)
 
   -> .entries(path = ".")
     read_dir(path)
@@ -59,7 +63,8 @@
     read_dir(path).size == 0
 
   -> .mkdir(path, *opts)
-    file_mkdir(path, *opts)
+    opt = opts.size > 0 ? opts[0] : nil
+    file_mkdir(path, opt)
 
   -> .mkdir_p(path)
     file_mkdir(path, recursive: true)

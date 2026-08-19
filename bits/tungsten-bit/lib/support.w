@@ -105,6 +105,12 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   configured = env("BIT_REGISTRY")
   if configured != nil && configured.strip != ""
     return configured.strip
+  # An explicitly set BIT_HOME is a local directory registry (the flow
+  # local_registry_root documents): search/resolve against it instead of
+  # the public registry so offline and test installs stay local.
+  local = env("BIT_HOME")
+  if local != nil && local.strip != ""
+    return local.strip
   DEFAULT_REGISTRY
 
 -> executable_file?(path)

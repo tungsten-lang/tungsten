@@ -2571,7 +2571,7 @@
   if mod[:enhanced_stacktraces] != false
     fn_meta_out = emit_fn_meta_table(mod)
     call_site_out = emit_call_site_table(mod)
-    llvm_used_out = emit_stacktrace_llvm_used()
+    llvm_used_out = emit_stacktrace_llvm_used(call_site_out.index("@__w_ic_site") != nil)
 
   attr_groups_out = emit_function_attr_groups(attr_groups)
 

@@ -36783,6 +36783,41 @@ typedef struct {
 W_OPTIONAL_SYMBOL WCallSite __w_call_site[1] = {{0}};
 W_OPTIONAL_SYMBOL int32_t __w_call_site_count = 0;
 
+/* IC-site companion table, indexed by IC slot id. blockaddress keys in
+ * __w_call_site are only reliable at -O0 (LLVM may fold a blockaddress no
+ * indirectbr consumes, collapsing it to the function entry, which is why
+ * optimized binaries degraded to "fn:1"); slot ids survive every -O level.
+ * The compiled module defines these strongly along with __w_ic_base(),
+ * which returns the calling thread's @.ic base (the IC array is
+ * thread-local, so slot addresses cannot be table constants). */
+typedef struct {
+    const char *file;
+    int32_t line;
+    int32_t col;
+} WIcSite;
+
+W_OPTIONAL_SYMBOL WIcSite __w_ic_site[1] = {{0}};
+W_OPTIONAL_SYMBOL int32_t __w_ic_site_count = 0;
+W_OPTIONAL_SYMBOL void *__w_ic_base(void) { return NULL; }
+
+/* Slot of the dispatch currently in its IC-miss slow path. Set around the
+ * single w_method_dispatch call in w_method_call_slow and cleared on normal
+ * return, so at the no-method die site it names exactly the dispatch that
+ * failed (24 = the emitter's [24 x i8] IC slot stride). */
+static __thread void *g_last_miss_slot = NULL;
+
+static const WIcSite *w_resolve_ic_site(void *slot) {
+    if (!slot || &__w_ic_site_count == NULL || __w_ic_site_count <= 0) return NULL;
+    char *base = (char *)__w_ic_base();
+    if (!base) return NULL;
+    ptrdiff_t off = (char *)slot - base;
+    if (off < 0 || off % 24 != 0) return NULL;
+    ptrdiff_t idx = off / 24;
+    if (idx >= __w_ic_site_count) return NULL;
+    const WIcSite *site = &__w_ic_site[idx];
+    return site->file ? site : NULL;
+}
+
 static WCallSite *g_cs_sorted = NULL;
 static pthread_once_t g_cs_once = PTHREAD_ONCE_INIT;
 
@@ -37014,11 +37049,28 @@ static void w_print_backtrace(int max_depth) {
     }
     char **syms = NULL;
     int syms_resolved = 0;
+    int innermost_tungsten = 1;
     for (int i = 0; i < n; i++) {
         const WFnMeta *m = w_resolve_fn(pcs[i]);
         const WCallSite *cs = w_resolve_call_site(pcs[i]);
         if (m && m->name) {
-            if (cs && cs->file) {
+            /* Optimized binaries: the innermost frame's PC often cannot be
+             * matched to a blockaddress row, but the loc TLS (set by the
+             * __w_loc_set_col hook or the IC-miss path) names exactly that
+             * frame's failing site — prefer it over the fn-start fallback. */
+            int innermost_here = innermost_tungsten;
+            innermost_tungsten = 0;
+            if (!cs && innermost_here && w_current_tungsten_file &&
+                w_current_tungsten_line > 0) {
+                if (w_current_tungsten_col > 0) {
+                    fprintf(stderr, "  at %s (%s:%d:%d)\n", m->name,
+                            w_current_tungsten_file, w_current_tungsten_line,
+                            w_current_tungsten_col);
+                } else {
+                    fprintf(stderr, "  at %s (%s:%d)\n", m->name,
+                            w_current_tungsten_file, w_current_tungsten_line);
+                }
+            } else if (cs && cs->file) {
                 if (cs->col > 0) {
                     fprintf(stderr, "  at %s (%s:%d:%d)\n",
                             m->name, cs->file, cs->line, cs->col);
@@ -50508,6 +50560,40 @@ WValue __w_mkdir_p(WValue path_val) {
     return stat(path, &st) == 0 && S_ISDIR(st.st_mode) ? W_TRUE : W_FALSE;
 }
 
+/* ---- Dir bridges: the bare file_pwd/file_chdir/file_mkdir/file_rmdir
+ * builtins that core/dir.w and core/directory.w call. Mirrors the Ruby
+ * interpreter's builtins (implementations/ruby .. builtins.rb). ---- */
+
+WValue __w_file_pwd(void) {
+    char buf[4096];
+    if (!getcwd(buf, sizeof buf)) return W_NIL;
+    return w_string(buf);
+}
+
+WValue __w_file_chdir(WValue path_val) {
+    const char *path = as_str(path_val);
+    w_sandbox_gate("file_chdir", path);
+    if (chdir(path) != 0)
+        dief("chdir failed for '%s': %s", path, strerror(errno));
+    return __w_file_pwd();
+}
+
+/* opts is nil or the keyword hash ({recursive: true} from Dir.mkdir_p);
+ * core/dir.w normalizes the *opts splat down to one slot. */
+WValue __w_file_mkdir(WValue path_val, WValue opts) {
+    const char *path = as_str(path_val);
+    w_sandbox_gate("file_mkdir", path);
+    if (w_is_hash(opts) && w_truthy(w_hash_get(opts, w_symbol("recursive"))))
+        return __w_mkdir_p(path_val);
+    return mkdir(path, 0777) == 0 || errno == EEXIST ? W_TRUE : W_FALSE;
+}
+
+WValue __w_file_rmdir(WValue path_val) {
+    const char *path = as_str(path_val);
+    w_sandbox_gate("file_rmdir", path);
+    return rmdir(path) == 0 ? W_TRUE : W_FALSE;
+}
+
 /* Process-environment access. Runtime-mediated operations serialize with each
  * other so snapshots cannot observe one of our own half-completed mutations.
  * Code outside Tungsten that calls libc getenv/setenv concurrently remains
@@ -58758,7 +58844,9 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
 
     g_generic_ctor_selected = NULL;
     g_generic_ctor_recv = 0;
+    g_last_miss_slot = (void *)cache;
     WValue result = w_method_dispatch(recv, name, &stack_args, W_NIL);
+    g_last_miss_slot = NULL;
 
     if (key >= 0x100 && w_is_instance(recv)) {
         /* Cache user class methods */
@@ -59601,6 +59689,21 @@ invoke_static_method:
         w_is_strbuf(recv) ? "StringBuffer" :
         w_is_instance(recv) ? g_class_table[((WObject *)w_as_ptr(recv))->class_id]->name :
         w_is_class(recv) ? ((WClass *)w_as_ptr(recv))->name : "Object";
+    /* Render integer receivers by value — "for 1" reads better than
+     * "for Int", and the raw bits after it still carry the tag. */
+    char int_desc[24];
+    if (w_is_int(recv)) {
+        snprintf(int_desc, sizeof int_desc, "%lld", (long long)w_as_int(recv));
+        type_name = int_desc;
+    }
+    /* Optimized binaries can't resolve this dispatch site by PC (see
+     * __w_ic_site); recover its exact source location from the IC slot
+     * recorded by the slow path so the error header and innermost frame
+     * still carry file:line:col. */
+    {
+        const WIcSite *site = w_resolve_ic_site(g_last_miss_slot);
+        if (site) __w_loc_set_col(site->file, site->line, site->col);
+    }
     dief("undefined method '%s' for %s (%s 0x%llx)",
          as_str(name), type_name, w_type_label(recv), (unsigned long long)recv);
     return W_NIL;

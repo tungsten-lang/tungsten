@@ -578,6 +578,16 @@ use ../../languages/tungsten/lexers/known_units
             else
               break
           start = pos
+          # Line-initial `##` is a standalone hint/comment line: it never
+          # carries a `= initializer` (that form is the trailing
+          # `x ## T = 0` ascription), so it scans to EOL. Stopping at `=`
+          # here would strand the rest of a prose comment as live tokens
+          # (`## squaring: q² = ...` broke the whole file).
+          hint_bol = tc == 0
+          if !hint_bol
+            prev_tt = tokens[tc - 1] >> 38
+            if prev_tt == 0x08 || prev_tt == 0x09 || prev_tt == 0x0A
+              hint_bol = true
           # Local bracket-depth tracks `[...]` inside the hint so `T[4]`
           # stays a single hint while still bailing at the closing
           # bracket of an enclosing indexer.
@@ -597,7 +607,7 @@ use ../../languages/tungsten/lexers/known_units
             # whole-line scan swallowed `= 0` into the hint text, leaving
             # the var undeclared — silent nil reads compiled, "Undefined
             # variable" interpreted).
-            elsif cp_here == :-=
+            elsif cp_here == :-= && !hint_bol
               break
             # When inside a paren list (`paren_depth > 0`), stop at the
             # structural followers `)` / `,` / `;` / `:` / `?` so inline

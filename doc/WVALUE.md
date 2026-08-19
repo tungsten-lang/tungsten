@@ -449,7 +449,6 @@ when the range fits (loop shape tried first), W_NIL when it must fall
 back to the heap Range (subtag 8) — same inline/heap discipline as
 Int→BigInt. Heap keeps: other starts, end ≥ 2^40, stepped ranges
 (a..b/n), BigInt bounds.
->>>>>>> Stashed changes
 ```
 
 ---
@@ -517,6 +516,30 @@ Arithmetic operations dispatch transparently through both inline and heap paths.
 | Sub-tag extract   | 1        | 1       | `and 0xF`                           |
 | Pass/return value | 1 reg    | 1 reg   | single register (rdi / x0)          |
 | Array element     | 8 B      | 8 B     | vs 16 B for tagged union            |
+
+The per-op costs above do NOT compound across chained arithmetic when
+types are statically known. Lowering threads raw machine values
+(`:raw_f64`, `:raw_int`, `:raw_i64` typed-values) through expression
+trees: every inline arithmetic arm returns its result raw, and
+`ensure_raw_f64` / `ensure_raw_int` pass an already-raw operand through
+untouched. Boxing happens once, at a WValue boundary
+(`ensure_i64_value`: assignment to a boxed slot, call argument, return).
+So a statically-float `a + b * c` unboxes each leaf once, computes
+entirely on raw doubles (the fmuladd peephole fires on the raw values),
+and pays one `add bias` at the boundary — zero interior round-trips.
+Machine-int (`## i64`/`## u64`) trees recurse whole-tree raw
+(`lower_machine_int_expression`).
+
+Two paths DO pay a boxed interior edge, both because an intermediate
+may legitimately promote to heap BigInt: promotable `:int` +/-/* lowers
+each op as a guarded inline i48 (tag-check → unbox → op → overflow-check
+→ box, `w_add`-family fallback on overflow), and statically-unknown
+operands lower to the `__w_add_fast`-family helpers (same int-only
+inline lane; boxed doubles and decimals take the full runtime call).
+In both, the interior box → tag-check → unbox (~6 instructions + a
+predicted branch per edge) survives `-O3`: the phi merging the fast
+path with the runtime fallback hides the intermediate's provenance
+from LLVM, so the check cannot fold away.
 
 ---
 

@@ -422,7 +422,7 @@ inv_hd   = ~2.0 / HEAD_DIM
 
 # ── Escape \n / \r in a generated chunk so the response stays one line.
 -> escape_newlines(s)
-  bytes = s.bytes
+  bytes = s.bytes.to_a
   out = StringBuffer(bytes.size())
   i = 0
   while i < bytes.size()

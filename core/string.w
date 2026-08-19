@@ -55,20 +55,20 @@
   -> new(@bytes)
     @cursor = 0
 
-  -> %/1:array
-  -> %/1:#to_s
+  -> %/1 (array)
+  -> %/1 (printable)
 
-  -> +/1:self
+  -> +/1
 
-  -> <</1:self
+  -> <</1
 
   # @return [-1, 0, 1, nil]
-  -> <=>/1:self
+  -> <=>/1
 
-  -> */1:int
+  -> */1 (int)
     raise ArgumentError, "can't multiply negative times ([@1])"
 
-  -> */1:bigint
+  -> */1 (bigint)
     raise RangeError, "bigint is too big for multiplication"
 
   # Canonically equal ?
@@ -84,18 +84,17 @@
   #
   -> ===/1
 
-  -> =~/1:regex
-  -> !~/1:regex
+  -> =~/1 (regex)
+  -> !~/1 (regex)
 
   alias_mistake :[], :slice
-  -> []/1:int
-  -> []/1:range
-  -> []/1:regex
+  -> []/1 (int)
+  -> []/1 (range)
+  -> []/1 (regex)
 
    # @returns slice
-  -> [](start, length):(int, int)
-
-  -> [](pattern, index):(regex, int)
+  -> [](start, length) (int, int)
+  -> [](pattern, index) (regex, int)
 
   -> []=(idx, value)
 
@@ -215,6 +214,7 @@
 
   -> camelize
   -> capitalize
+  -> constantize (class)
   -> dasherize
     replace('_', '-')
 
@@ -229,7 +229,7 @@
       result = result.gsub /#{pattern}{2,}/,          separator
       result = result.gsub /^#{pattern}|#{pattern}$/, separator
 
-    result.downcase
+    result.lowercase
 
   -> replace/2
 
@@ -240,6 +240,9 @@
   alias_mistake :lowercase, :downcase
   # Returns a copy of @class with all uppercase letters replaced with their lowercase equivalents.
   -> lowercase
+
+  alias_mistake :snakecase, :underscore
+  -> underscore
 
   alias_mistake :uppercase, :ucase
   alias_mistake :uppercase, :upcase

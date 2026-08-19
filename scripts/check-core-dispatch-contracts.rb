@@ -188,20 +188,22 @@ RUNTIME_CLASS_CONTRACTS = {
     table: "w_ic_string_table",
     dispatch_key: "0xF9",
     native_ic: %w[
-      [] << =~ append ascii? codes concat ends_with? gsub include? index lchs
+      [] << =~ append codes concat ends_with? gsub include? index lchs
       length ltrim match? ord prepend repeat replace rindex rtrim size slice split
       starts_with? strip to_d to_f to_i to_sym valid_utf8?
     ],
     native_only: %w[
-      [] << =~ append ascii? codes concat ends_with? gsub include? index lchs
+      [] << =~ append codes concat ends_with? gsub include? index lchs
       ltrim match? ord prepend repeat replace rindex rtrim slice split starts_with?
       strip to_d to_f to_i to_sym valid_utf8?
     ],
     dual_dispatch: %w[length size],
     autoload_guard: "string_source_method_unresolved",
     source_fallback: %w[
-      bytes capitalize center chars delete downcase empty? length lpad reverse rpad
-      size squeeze swapcase to_s tr upcase
+      __bytes_array ascii? blank? byte_at bytes capitalize center characters
+      chars codepoints contains? delete downcase each_byte each_character
+      each_codepoint each_line empty? length levenshtein lines lpad reverse
+      rpad size squeeze swapcase to_s tr upcase
     ]
   },
   "Array" => {

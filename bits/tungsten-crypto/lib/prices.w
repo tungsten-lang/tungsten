@@ -37,7 +37,7 @@
 # Returns -1.0 when there is no number there. Good to ~15 significant
 # digits, which is beyond what any price feed serves.
 -> price_parse_float(s, i)
-  bs = s.bytes
+  bs = s.bytes.to_a
   n = s.size
   sign = 1.0
   if i < n && bs[i] == 45
@@ -102,7 +102,7 @@
   if at == nil
     return -1.0
   i = at + key.size
-  bs = body.bytes
+  bs = body.bytes.to_a
   while i < body.size
     c = bs[i]
     if c == 32 || c == 58 || c == 9

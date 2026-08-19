@@ -35,6 +35,27 @@
 -> dyn_bytes(value)
   value.bytes
 
+-> dyn_ascii(value)
+  value.ascii?
+
+-> dyn_blank(value)
+  value.blank?
+
+-> dyn_byte_at(value, idx)
+  value.byte_at(idx)
+
+-> dyn_codepoints(value)
+  value.codepoints
+
+-> dyn_characters(value)
+  value.characters
+
+-> dyn_each_byte_sum(value)
+  total = 0
+  value.each_byte -> (b)
+    total += b
+  total
+
 -> dyn_upcase(value)
   value.upcase
 
@@ -98,3 +119,15 @@ check("dyn.squeeze", dyn_squeeze("aaabbbcc"), "abc")
 check("dyn.squeeze.set", dyn_squeeze_set("aaabbb"), "abbb")
 check("dyn.tr", dyn_tr("peace"), "pyxcy")
 check("dyn.to_s.symbol", dyn_to_s(:symbol), "symbol")
+check("dyn.bytes.to_a", dyn_bytes("é").to_a, [195, 169])
+check("dyn.ascii.true", dyn_ascii("abc"), true)
+check("dyn.ascii.false", dyn_ascii("é"), false)
+check("dyn.ascii.symbol", dyn_ascii(:abc), true)
+check("dyn.ascii.heap", dyn_ascii(f("h" * 80)), true)
+check("dyn.blank.true", dyn_blank("  "), true)
+check("dyn.blank.false", dyn_blank(" x "), false)
+check("dyn.byte_at", dyn_byte_at("abc", 1), 98)
+check("dyn.byte_at.negative", dyn_byte_at("abc", -1), 99)
+check("dyn.codepoints", dyn_codepoints("aé").to_a, [97, 233])
+check("dyn.characters", dyn_characters("aé").to_a.join("|"), "a|é")
+check("dyn.each_byte", dyn_each_byte_sum("ab"), 195)

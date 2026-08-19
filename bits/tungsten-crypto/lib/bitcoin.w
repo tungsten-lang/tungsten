@@ -34,7 +34,7 @@ use sha256
 
 # Decode a hex string into a fresh i64[] of byte values.
 -> btc_hex_to_bytes(hex)
-  cs = hex.bytes
+  cs = hex.bytes.to_a
   n = cs.size / 2
   out = i64[n + 1]
   i = 0 ## i64

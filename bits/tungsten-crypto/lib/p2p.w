@@ -94,7 +94,7 @@ P2P_PROTOCOL_VERSION = 70016
   p2p_push_u64(buf, n)
 
 -> p2p_push_str(buf, s)
-  bs = s.bytes
+  bs = s.bytes.to_a
   p2p_push_varint(buf, bs.size)
   p2p_push_bytes(buf, bs, bs.size)
 
@@ -105,7 +105,7 @@ P2P_PROTOCOL_VERSION = 70016
   msg = p2p_buf(plen + 32)
   p2p_push_hex(msg, magic_hex)
   # Command is 12 bytes, NUL-padded.
-  cb = command.bytes
+  cb = command.bytes.to_a
   i = 0
   while i < 12
     if i < cb.size

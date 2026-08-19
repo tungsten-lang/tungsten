@@ -182,6 +182,10 @@
   # implementation instead.
   auto :String,       "string_native"
   auto :StringBuffer, "string_buffer"
+  auto :StringBytes,       "string_enumerators"
+  auto :StringCodepoints,  "string_enumerators"
+  auto :StringCharacters,  "string_enumerators"
+  auto :StringLines,       "string_enumerators"
   auto :Symbol,       "symbol"
   auto :System,       "system"
   auto :Thread,       "thread"

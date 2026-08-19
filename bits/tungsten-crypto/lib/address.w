@@ -55,7 +55,7 @@ BECH32M_CONST = 0x2bc830a3
 -> bech32_hrp_expand(hrp)
   n = hrp.size
   out = i64[n * 2 + 1]
-  bs = hrp.bytes
+  bs = hrp.bytes.to_a
   i = 0 ## i64
   while i < n
     out[i] = bs[i] >> 5
@@ -92,7 +92,7 @@ BECH32M_CONST = 0x2bc830a3
   # Decode the data characters into 5-bit values.
   dn = dpart.size
   data = i64[dn]
-  dbytes = dpart.bytes
+  dbytes = dpart.bytes.to_a
   i = 0
   while i < dn
     v = bech32_charval(dbytes[i])

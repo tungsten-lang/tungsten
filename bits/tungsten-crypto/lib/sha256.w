@@ -343,7 +343,7 @@
 
 # SHA-256 of a Tungsten string's bytes. Returns the 8-word digest.
 -> sha256_string_words(s, k)
-  bs = s.bytes
+  bs = s.bytes.to_a
   n = bs.size ## i64
   buf = i64[n + 1]
   i = 0 ## i64

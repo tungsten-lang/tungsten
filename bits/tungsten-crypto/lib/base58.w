@@ -33,7 +33,7 @@ B58_CHARSET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 -> b58check_decode(addr, k)
   if addr == nil || addr.size < 26 || addr.size > 36
     return nil
-  cs = addr.bytes
+  cs = addr.bytes.to_a
   n = addr.size
   # Big-endian accumulator: buf[0] is the most significant byte. 32 bytes is
   # seven more than any valid payload, so a genuine overflow (buf[0..6]

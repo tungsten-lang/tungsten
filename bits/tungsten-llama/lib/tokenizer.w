@@ -204,7 +204,7 @@ fn byte_to_str(b)
   # single-codepoint strings, ready for BPE merging.
   -> bytes_to_chars(s)
     out = []
-    bytes = s.bytes
+    bytes = s.bytes.to_a
     i = 0
     while i < bytes.size()
       out.push(@byte_to_uchar[bytes[i]])
@@ -297,7 +297,7 @@ fn byte_to_str(b)
   # a run of non-space bytes. A leading space attaches to the next word.
   -> pretokenize(text)
     chunks = []
-    bytes = text.bytes
+    bytes = text.bytes.to_a
     i = 0
     n = bytes.size()
     while i < n
@@ -328,7 +328,7 @@ fn byte_to_str(b)
       raw_sb << @tokens[ids[i]]
       i = i + 1
     raw = raw_sb.to_s
-    bytes = raw.bytes
+    bytes = raw.bytes.to_a
 
     # First decode: raw UTF-8 → array of "GPT-2 utf8 bytes"
     g_bytes = []

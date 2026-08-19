@@ -34,7 +34,7 @@
 # String → fresh ByteArray (String#bytes is already byte-indexed; copy so
 # callers can mutate/concat freely).
 -> pgw_str_to_bytes(s)
-  bs = s.bytes
+  bs = s.bytes.to_a
   out = u8[bs.size]
   i = 0
   while i < bs.size
@@ -85,7 +85,7 @@
 
 # Raw string bytes, no terminator.
 -> pgw_w_raw(out, s)
-  bs = s.bytes
+  bs = s.bytes.to_a
   i = 0
   while i < bs.size
     out.push(bs[i])
@@ -338,7 +338,7 @@
           initial = scram.client_first
           payload = []
           pgw_w_str(payload, "SCRAM-SHA-256")
-          pgw_w_i32(payload, initial.bytes.size)
+          pgw_w_i32(payload, initial.size)
           pgw_w_raw(payload, initial)
           @sock.write_bytes(pgw_frame(112, payload))
         elsif code == 11             # SASL continue
@@ -469,7 +469,7 @@
       if prm == nil
         pgw_w_i32(bnd, 0 - 1)
       else
-        pb = prm.bytes
+        pb = prm.bytes.to_a
         pgw_w_i32(bnd, pb.size)
         i = 0
         while i < pb.size
@@ -524,7 +524,7 @@
   # chunk: String of COPY text rows; boundaries need not align with rows.
   -> copy_write(chunk)
     raise "PG: no COPY in progress" if !@copying
-    self.copy_header(chunk.bytes.size)
+    self.copy_header(chunk.size)
     @sock.write(chunk)
     nil
 

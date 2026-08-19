@@ -73,8 +73,8 @@ in Crypto
     while i < parts.size
       p = parts[i]
       if found == "" && p.starts_with?(prefix)
-        pb = p.bytes
-        skip = prefix.bytes.size
+        pb = p.bytes.to_a
+        skip = prefix.size
         rest = u8[pb.size - skip]
         k = skip
         while k < pb.size

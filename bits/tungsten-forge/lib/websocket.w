@@ -152,7 +152,7 @@
       payload = socket.read(length)
 
       if masked && mask_key
-        payload = payload.bytes.each_with_index.map(-> (b, i)
+        payload = payload.bytes.to_a.each_with_index.map(-> (b, i)
           b ^ mask_key[i % 4].ord
         ).pack("C*")
 
@@ -179,10 +179,10 @@
         bytes.push(payload_len)
       elsif payload_len < 65536
         bytes.push(126)
-        bytes += [payload_len].pack("n").bytes
+        bytes += [payload_len].pack("n").bytes.to_a
       else
         bytes.push(127)
-        bytes += [payload_len].pack("Q>").bytes
+        bytes += [payload_len].pack("Q>").bytes.to_a
 
       bytes.pack("C*") + @payload
 

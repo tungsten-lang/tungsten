@@ -157,12 +157,19 @@
   -> chars
     ccall("w_string_chars", self)
 
-  # Array of the raw byte values (0..255) as Ints, ported from the former C
-  # IC handler. Inline receivers (<= 5 bytes) read straight from $value bits
-  # — no view allocation, the overhead C avoids via a stack buffer; slab/heap
-  # read through the raw data pointer. Each byte pushes as an immediate Int
-  # (no heap per element). Multibyte UTF-8 yields its individual bytes.
+  # Lazy byte view: construction is O(1) and copies nothing. StringBytes is
+  # an indexed Enumerable (`size`/`[]` are O(1) reads via byte_at), so
+  # subscripting callers keep Array-shaped access without materializing an
+  # Array; use to_a for a concrete Array. Multibyte UTF-8 yields its
+  # individual bytes.
   -> bytes
+    StringBytes.new(self)
+
+  # Eager Array of raw byte values — StringBytes#to_a's native materializer
+  # (the pre-view `bytes` body). Inline receivers (<= 5 bytes) read straight
+  # from $value bits; slab/heap read through the raw data pointer. Each byte
+  # pushes as an immediate Int.
+  -> __bytes_array
     by_v = ($value & -2) ## i64
     by_mode = (by_v >> 1) & 7
     out = []
@@ -179,6 +186,16 @@
       out.push(raw_load_u8(by_p, by_i))
       by_i += 1
     out
+
+  # Lazy code-point view (Ints). Streaming Enumerable: combinators consume
+  # the UTF-8 decoder on demand; to_a materializes.
+  -> codepoints
+    StringCodepoints.new(self)
+
+  # Lazy single-code-point String view. Streaming Enumerable; the eager
+  # `chars` above remains for callers that want a concrete Array in one call.
+  -> characters
+    StringCharacters.new(self)
 
   # ASCII uppercase (a-z -> A-Z); bytes >= 0x80 pass through, so multibyte
   # UTF-8 is unchanged — the former C handler's w_string_ascii_case(_, 1)
@@ -326,3 +343,192 @@
           tr_ti = tr_to.size - 1
         tr_out << tr_to[tr_ti]
     tr_out.to_s
+
+  # True when every byte is ASCII (< 0x80). Inline receivers derive it from
+  # the payload high bits in-register (bits 11/19/27/35/43); slab, heap, and
+  # rope representations carry a stored ASCII flag maintained by the runtime
+  # constructors, read through one ccall.
+  -> ascii?
+    as_v = ($value & -2) ## i64
+    as_mode = (as_v >> 1) & 7
+    if as_mode <= 5
+      return (as_v & 0x0000080808080800) == 0
+    ccall_nobox("w_string_is_ascii", self) == 1
+
+  # True for the empty string or all-ASCII-whitespace content (space and
+  # \t \n \v \f \r, bytes 9-13). Any other byte — multibyte UTF-8 included —
+  # is not blank.
+  -> blank?
+    bl_n = ccall_nobox("w_string_byte_length", self) ## i64
+    bl_i = 0
+    while bl_i < bl_n
+      bl_b = self.byte_at(bl_i)
+      if bl_b != 32 && (bl_b < 9 || bl_b > 13)
+        return false
+      bl_i += 1
+    true
+
+  # O(1) byte accessor: the byte value (Int 0-255) at a byte offset, or nil
+  # out of bounds. Negative indices count from the end. Bytes, not code
+  # points — `[]` is the code-point subscript.
+  -> byte_at(index)
+    ba_v = ($value & -2) ## i64
+    ba_mode = (ba_v >> 1) & 7
+    ba_i = index
+    if ba_mode <= 5
+      if ba_i < 0
+        ba_i += ba_mode
+      if ba_i < 0 || ba_i >= ba_mode
+        return nil
+      return (ba_v >> (4 + 8 * ba_i)) & 0xFF
+    ba_n = ccall_nobox("w_string_byte_length", self) ## i64
+    if ba_i < 0
+      ba_i += ba_n
+    if ba_i < 0 || ba_i >= ba_n
+      return nil
+    ba_p = ccall_nobox("w_string_data_ptr", self) ## i64
+    raw_load_u8(ba_p, ba_i)
+
+  # Yield each byte (Int 0-255) in order; returns self. Without a block,
+  # returns the lazy StringBytes view. Inline receivers read straight from
+  # $value bits; slab/heap receivers stream through the raw data pointer.
+  -> each_byte(&block)
+    if !block?
+      return StringBytes.new(self)
+    eb_v = ($value & -2) ## i64
+    eb_mode = (eb_v >> 1) & 7
+    if eb_mode <= 5
+      eb_i = 0
+      while eb_i < eb_mode
+        block((eb_v >> (4 + 8 * eb_i)) & 0xFF)
+        eb_i += 1
+      return self
+    eb_n = ccall_nobox("w_string_byte_length", self) ## i64
+    eb_p = ccall_nobox("w_string_data_ptr", self) ## i64
+    eb_i = 0
+    while eb_i < eb_n
+      block(raw_load_u8(eb_p, eb_i))
+      eb_i += 1
+    self
+
+  # Yield each Unicode code point (Int) in order; returns self. Without a
+  # block, returns the lazy StringCodepoints view. The lead byte gives each
+  # sequence's length (0xF0+ = 4, 0xE0+ = 3, 0xC0+ = 2, else 1), clamped to
+  # the remaining bytes, so malformed tails degrade exactly like the
+  # runtime's other UTF-8 walkers (see reverse).
+  -> each_codepoint(&block)
+    if !block?
+      return StringCodepoints.new(self)
+    ecp_n = ccall_nobox("w_string_byte_length", self) ## i64
+    ecp_i = 0
+    while ecp_i < ecp_n
+      ecp_b0 = self.byte_at(ecp_i)
+      ecp_len = 1
+      ecp_cp = ecp_b0
+      if ecp_b0 >= 240
+        ecp_len = 4
+        ecp_cp = ecp_b0 & 7
+      elsif ecp_b0 >= 224
+        ecp_len = 3
+        ecp_cp = ecp_b0 & 15
+      elsif ecp_b0 >= 192
+        ecp_len = 2
+        ecp_cp = ecp_b0 & 31
+      if ecp_len > ecp_n - ecp_i
+        ecp_len = ecp_n - ecp_i
+      ecp_k = 1
+      while ecp_k < ecp_len
+        ecp_cp = (ecp_cp << 6) | (self.byte_at(ecp_i + ecp_k) & 63)
+        ecp_k += 1
+      block(ecp_cp)
+      ecp_i += ecp_len
+    self
+
+  # Yield each line in order, TRAILING NEWLINE INCLUDED (Ruby String#lines
+  # semantics); a final unterminated line is yielded as-is. Returns self.
+  # Without a block, returns the lazy StringLines view.
+  -> each_line(&block)
+    if !block?
+      return StringLines.new(self)
+    el_n = ccall_nobox("w_string_byte_length", self) ## i64
+    el_start = 0
+    el_i = 0
+    while el_i < el_n
+      if self.byte_at(el_i) == 10
+        block(self.slice(el_start, el_i - el_start + 1))
+        el_start = el_i + 1
+      el_i += 1
+    if el_start < el_n
+      block(self.slice(el_start, el_n - el_start))
+    self
+
+  # Eager Array of lines (trailing newlines included).
+  -> lines
+    ln_out = []
+    self.each_line -> (l)
+      ln_out.push(l)
+    ln_out
+
+  # Substring containment — the scaffold's alias for include?, kept as a
+  # direct IC hop.
+  -> contains?(sub)
+    include?(sub)
+
+  # Levenshtein edit distance between self and other, by code point.
+  # Two rolling rows of the classic dynamic-programming matrix.
+  -> levenshtein(other)
+    lv_s = self.codepoints.to_a
+    lv_t = other.codepoints.to_a
+    if lv_s.size == 0
+      return lv_t.size
+    if lv_t.size == 0
+      return lv_s.size
+    lv_n = lv_t.size
+    prev = (0..lv_n).to_a
+    curr = Array.new(lv_n + 1, 0)
+    lv_i = 0
+    while lv_i < lv_s.size
+      curr[0] = lv_i + 1
+      lv_j = 0
+      while lv_j < lv_n
+        lv_cost = 1
+        if lv_s[lv_i] == lv_t[lv_j]
+          lv_cost = 0
+        lv_ins = curr[lv_j] + 1
+        lv_del = prev[lv_j + 1] + 1
+        lv_sub = prev[lv_j] + lv_cost
+        lv_m = lv_ins
+        if lv_del < lv_m
+          lv_m = lv_del
+        if lv_sub < lv_m
+          lv_m = lv_sub
+        curr[lv_j + 1] = lv_m
+        lv_j += 1
+      lv_swap = prev
+      prev = curr
+      curr = lv_swap
+      lv_i += 1
+    prev[lv_n]
+
+  # Yield each character (a single-code-point String) in order; returns
+  # self. Without a block, returns the lazy StringCharacters view. Same
+  # clamped lead-byte walk as each_codepoint; slices stay byte-exact.
+  -> each_character(&block)
+    if !block?
+      return StringCharacters.new(self)
+    ech_n = ccall_nobox("w_string_byte_length", self) ## i64
+    ech_i = 0
+    while ech_i < ech_n
+      ech_b0 = self.byte_at(ech_i)
+      ech_len = 1
+      if ech_b0 >= 240
+        ech_len = 4
+      elsif ech_b0 >= 224
+        ech_len = 3
+      elsif ech_b0 >= 192
+        ech_len = 2
+      if ech_len > ech_n - ech_i
+        ech_len = ech_n - ech_i
+      block(self.slice(ech_i, ech_len))
+      ech_i += ech_len
+    self

@@ -289,4 +289,36 @@ rescue error
   raised = error == "predicate failure"
 check("predicate errors propagate", raised)
 
+
+# Mode-0 (custom `each`) coverage for the eager combinators, which the
+# specialized Array/Hash branches never exercise. StringCodepoints streams
+# through the generic __enumerable_each adapter.
+cp_view = "abcd".codepoints
+cp_mapped = cp_view.map -> (cp)
+  cp + 1
+check("mode0 map", cp_mapped == [98, 99, 100, 101])
+cp_selected = "abcd".codepoints.select -> (cp)
+  cp > 98
+check("mode0 select", cp_selected == [99, 100])
+check("mode0 to_a", "ab".codepoints.to_a == [97, 98])
+cp_sum = "abcd".codepoints.reduce(0) -> (acc, cp)
+  acc + cp
+check("mode0 reduce", cp_sum == 394)
+check("mode0 count", "abcd".codepoints.count == 4)
+check("mode0 include?", "abcd".codepoints.include?(99))
+check("mode0 first", "abcd".codepoints.first == 97)
+cp_pairs = []
+"ab".codepoints.each_with_index -> (cp, i)
+  cp_pairs.push(cp + i)
+check("mode0 each_with_index", cp_pairs == [97, 99])
+check("mode0 join", "ab".codepoints.join(",") == "97,98")
+
+# Mode-1 (indexed) coverage through StringBytes.
+bytes_view = "abcd".bytes
+check("mode1 view size", bytes_view.size == 4)
+by_selected = bytes_view.select -> (b)
+  b > 98
+check("mode1 select", by_selected == [99, 100])
+check("mode1 take", "abcd".bytes.take(2) == [97, 98])
+
 << "enumerable_native_spec: all checks passed"

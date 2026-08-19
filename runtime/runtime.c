@@ -35254,6 +35254,14 @@ static int w_string_ascii_p(WValue v) {
     return w_heap_string_ascii_p(w_as_heap_str(v));
 }
 
+/* ccall_nobox surface for core/string_native.w's source `ascii?`. Inline
+ * receivers (modes 0-5) answer from $value bits in source without crossing
+ * the C boundary; slab, heap, and rope representations read their stored
+ * ASCII flag here. */
+int64_t w_string_is_ascii(int64_t str_wval) {
+    return w_string_ascii_p((WValue)str_wval) ? 1 : 0;
+}
+
 /* Width of one valid UTF-8 code point for subscript traversal. Invalid input
  * advances one byte so raw data received from sockets remains addressable. */
 static size_t w_utf8_index_width(const char *s, size_t remaining) {
@@ -58541,7 +58549,7 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[9].name  = WN_include_q;
     w_ic_string_table[10].name = WN_starts_with_q;
     w_ic_string_table[11].name = WN_ends_with_q;
-    w_ic_string_table[12].name = WN_ascii_q;
+    /* Slot 12 (ascii?) retired to core/string_native.w. */
     w_ic_string_table[13].name = WN_valid_utf8_q;
     w_ic_string_table[14].name = WN_repeat;
     /* Slot 15 (chars) retired to core/string_native.w. */

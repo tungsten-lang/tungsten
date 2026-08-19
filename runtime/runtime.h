@@ -973,6 +973,7 @@ int64_t w_parser_chars_equal_ascii(WValue chars, int64_t off, int64_t len, WValu
 WValue w_to_s(WValue v);
 int64_t w_stringy_c_length(WValue v);
 int64_t w_string_byte_length(int64_t str_wval) __attribute__((pure));
+int64_t w_string_is_ascii(int64_t str_wval) __attribute__((pure));
 int64_t w_string_first_byte(WValue value);
 void w_str_data(WValue v, char buf[6], const char **out, size_t *len);
 WValue w_algebra_rewrite_source(WValue source);

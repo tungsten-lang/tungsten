@@ -28,7 +28,7 @@ fn b64_char_value(c)
 
 -> base64_decode(s)
   bytes = u8[2400000]  # Pre-allocate a large byte array
-  chars = s.bytes()
+  chars = s.bytes().to_a()
 
   i = 0
   len = chars.size()
@@ -440,7 +440,7 @@ byte_keys = w64[256]
 
 -> encode(tok, text)
   # Shared resources — allocated once, reused for every chunk
-  all_bytes = text.bytes()
+  all_bytes = text.bytes().to_a()
   chunks = pre_tokenize(text)
   offsets = chunks[:offsets]
   lengths = chunks[:lengths]
@@ -617,7 +617,7 @@ byte_keys = w64[256]
   local_ids
 
 -> encode_parallel(tok, text, num_workers)
-  all_bytes = text.bytes()
+  all_bytes = text.bytes().to_a()
   chunks = pre_tokenize(text)
   offsets = chunks[:offsets]
   lengths = chunks[:lengths]
@@ -678,7 +678,7 @@ byte_keys = w64[256]
 # (per-worker cache, cache fragmentation), common chunks are BPE'd once
 # across all workers.
 -> encode_parallel_shared(tok, text, num_workers)
-  all_bytes = text.bytes()
+  all_bytes = text.bytes().to_a()
   chunks = pre_tokenize(text)
   offsets = chunks[:offsets]
   lengths = chunks[:lengths]

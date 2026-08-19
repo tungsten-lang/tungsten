@@ -43,7 +43,7 @@ in Crypto
 
   -> .__to_bytes(x)
     if type(x) == "String"
-      bs = x.bytes
+      bs = x.bytes.to_a
       out = u8[bs.size]
       i = 0
       while i < bs.size

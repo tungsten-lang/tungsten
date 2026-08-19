@@ -2018,6 +2018,12 @@ use target
       # Raw byte pointer of a slab/heap String, reboxed like the u8 data-ptr
       # case above; raw_load/store convert it back explicitly.
       return ccall("w_int", ccall_nobox("w_string_data_ptr", args[1]))
+    when "w_string_is_ascii"
+      if args.size() != 2
+        raise "w_string_is_ascii expects one argument"
+      # Stored ASCII content flag (slab/heap/rope) for String#ascii?'s
+      # non-inline arm; reboxed so the source body's `== 1` compares Ints.
+      return ccall("w_int", ccall_nobox("w_string_is_ascii", args[1]))
     when "w_string_first_byte"
       if args.size() != 2
         raise "w_string_first_byte expects one argument"
@@ -3521,7 +3527,7 @@ use target
     # String methods are also Symbol#to_s/#empty?/#size/#length. The tree walker
     # ordinarily distinguishes host Symbols from Strings; route these shared
     # methods through String instead of the legacy Symbol scaffold.
-    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length")
+    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length" "ascii?" "blank?" "byte_at" "bytes" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein")
       try_autoload_class("String")
       primitive_class = @classes["String"]
     else

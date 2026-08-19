@@ -26,13 +26,13 @@ in Tungsten:Llama
   # Byte at absolute offset.
   -> byte_at(pos)
     if @bytes == nil
-      @bytes = @data.bytes
+      @bytes = @data.bytes.to_a
     @bytes[pos]
 
   # Expose the byte array for fast bulk access (e.g. quant dequant inner loops).
   -> bytes_array
     if @bytes == nil
-      @bytes = @data.bytes
+      @bytes = @data.bytes.to_a
     @bytes
 
 

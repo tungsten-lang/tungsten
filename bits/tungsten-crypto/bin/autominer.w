@@ -36,7 +36,7 @@ TIP_CHECK_MS = 2000
 
 -> am_hex_to_i64(hex)
   v = 0
-  cs = hex.bytes
+  cs = hex.bytes.to_a
   i = 0
   while i < cs.size
     v = v * 16 + btc_hex_nibble(cs[i])

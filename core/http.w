@@ -255,7 +255,7 @@
     true
 
   -> .valid_field_value?(text)
-    bytes = text.bytes
+    bytes = text.bytes.to_a
     i = 0
     while i < bytes.size
       byte = bytes[i]

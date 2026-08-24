@@ -1,0 +1,3 @@
+frontend-stall-cycles	MAP_DISPATCH_BUBBLE
+backend-stall-cycles	MAP_STALL
+L2-TLB-instr-misses	L2_TLB_MISS_INSTRUCTION

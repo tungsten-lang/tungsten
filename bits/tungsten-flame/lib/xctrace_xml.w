@@ -24,7 +24,7 @@ in Tungsten:Flame
     addrs_by_id = self.parse_kperf_bts(xml_text)
 
     # 2. Walk rows, accumulate folded stacks (still as hex addresses).
-    # Split once (see parse_kperf_bts for why find_from scans are out).
+    # Split once so each row is a small, self-contained chunk.
     folded = {}
     row_chunks = xml_text.split("<row>")
     ri = 1
@@ -238,7 +238,12 @@ in Tungsten:Flame
     addrs_by_id = self.parse_kperf_bts(xml_text)
     n_metrics = metric_names.size()
 
-    # Per-(thread:core) previous counter snapshot.
+    # Per-core previous counter snapshot. PMC readings are cumulative
+    # per CORE, not per thread: a Running row's delta is everything the
+    # core counted since its previous row, whichever thread was on it.
+    # Keying by thread:core paired samples across other threads' turns on
+    # the core (their counts landed in this thread's delta) and drowned
+    # the signal; keying by core alone attributes each interval once.
     prev_vals = {}
 
     # Per-metric stack → cumulative-delta dict.
@@ -268,12 +273,11 @@ in Tungsten:Flame
         running_ids[ts_key] = true
 
       if running_ids.has_key?(ts_key)
-        thread_key = self.extract_tag_key(row, "<thread")
         core_key   = self.extract_tag_key(row, "<core")
         pmc_vals   = self.extract_pmc_values(row)
         if pmc_vals.size() >= n_metrics
           addrs = self.row_user_stack(row, addrs_by_id)
-          key = thread_key + ":" + core_key
+          key = core_key
           if addrs != nil && addrs.size() > 0 && prev_vals.has_key?(key)
             prev = prev_vals[key]
             folded_stack = self.reverse(addrs).join(";")
@@ -548,9 +552,9 @@ in Tungsten:Flame
   #   - Single-frame stacks duplicate the PC in the plural list, so a
   #     leading caller equal to the PC is dropped.
   -> .parse_kperf_bts(xml)
-    # Split once instead of scanning with find_from — find_from copies
-    # the remaining string per call, which is O(n^2) over a multi-MB
-    # export. kperf-bt blocks never nest, so each piece holds one block.
+    # Split once so every scan below is bounded by one block rather than
+    # the whole multi-MB export. kperf-bt blocks never nest, so each
+    # piece holds one block.
     ta_by_id = {}
     pc_by_id = {}
     result = {}
@@ -675,11 +679,11 @@ in Tungsten:Flame
     refs
 
   # Find `needle` in `haystack` starting from `start`, returning the
-  # byte position or nil. Tungsten's .index doesn't accept a start offset.
+  # byte position or nil — String#index with a start offset. (Slicing
+  # the tail here copied the remaining multi-MB document on every call:
+  # quadratic, OOM-killed on 1e12 traces.)
   -> .find_from(haystack, needle, start)
-    rest = haystack.slice(start, haystack.size() - start)
-    pos = rest.index(needle)
-    pos != nil ? start + pos : nil
+    haystack.index(needle, start)
 
   -> .reverse(arr)
     out = []

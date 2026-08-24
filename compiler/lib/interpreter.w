@@ -696,20 +696,6 @@ use target
     try_autoload_class(name)
     if @classes.has_key?(name)
       return @classes[name]
-    # Bare reference to a class declared inside a namespace (`Sampler` for
-    # `Tungsten:Flame:Sampler`): unique-suffix resolution, mirroring the
-    # compiled path (resolve_class_unique_suffix). Ambiguous suffixes stay
-    # unresolved.
-    if !name.include?(":")
-      suffix = ":" + name
-      found = nil
-      count = 0
-      @classes.keys().each -> (k)
-        if k.ends_with?(suffix)
-          found = k
-          count += 1
-      if count == 1
-        return @classes[found]
     hint = foreign_name_hint(name)
     if hint != nil
       raise "Undefined class '[name]' — [hint]"

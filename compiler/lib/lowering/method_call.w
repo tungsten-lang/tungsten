@@ -692,16 +692,6 @@
     # workers whose closure ABI is not specialized, retain dynamic dispatch.
     static_key = recv_name + "." + method_name
     static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
-    # A bare class-ref receiver naming a namespaced class (`Sampler.new`
-    # for `Tungsten:Flame:Sampler`): canonicalize — walk-up, then unique
-    # suffix — so the direct static path still fires (see lower_var).
-    if static_info == nil && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :class_ref && !recv_name.include?(":")
-      canon = nil
-      canon = resolve_class_in_namespace(ctx[:mod], ctx[:class_name], recv_name) if ctx[:class_name] != nil
-      canon = resolve_class_unique_suffix(ctx[:mod], recv_name) if canon == nil
-      if canon != nil
-        static_key = canon + "." + method_name
-        static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
     if static_info != nil && node.block != nil
       if static_info[:accepts_block] != true || static_info[:raw_abi] == true || node.args.size() >= static_info[:arity] - 1
         static_info = nil

@@ -472,6 +472,27 @@
   when "env"
     env(args[0])
 
+  # Host-topology and file bridges the compiled path routes through
+  # known_calls (lowering.w); the tree-walker reaches the same runtime
+  # symbols directly.
+  when "cpu_count"
+    ccall("__w_cpu_count")
+
+  when "l1d_cache_bytes"
+    ccall("__w_l1d_cache_bytes")
+
+  when "l2_cache_bytes"
+    ccall("__w_l2_cache_bytes")
+
+  when "cpus_per_l2"
+    ccall("__w_cpus_per_l2")
+
+  when "write_file_bytes_n"
+    ccall("__w_write_file_n", args[0], args[1], args[2])
+
+  when "file_rm"
+    ccall("__w_file_rm", args[0])
+
   when "ljust"
     s = recv
     width = args[0]
@@ -513,7 +534,8 @@ builtin_names = [
   "reject", "reduce", "each_with_index", "map_with_index", "zip", "any?", "all?",
   "find", "count", "sum", "times", "keys", "values", "has_key?", "abs", "max", "min",
   "respond_to?", "is_a?", "freeze", "argv", "clock", "clock_ms", "runtime_identity", "digest_string64",
-  "capture", "system", "env", "ljust", "rjust", "round", "gets", "freeze_slab"
+  "capture", "system", "env", "ljust", "rjust", "round", "gets", "freeze_slab",
+  "cpu_count", "l1d_cache_bytes", "l2_cache_bytes", "cpus_per_l2", "write_file_bytes_n", "file_rm"
 ]
 
 -> is_builtin?(name)

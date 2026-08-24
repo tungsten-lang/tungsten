@@ -874,11 +874,11 @@
       parts << s8 + " = add i64 " + s5 + ", " + s7 + "\n  "
     if bits == 64
       parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
-      parts << t + " = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix()
+      parts << t + " = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + alias_scope_suffix(inst)
     elsif bits == 32
       parts << s9 + " = getelementptr i32, ptr " + s3 + ", i64 " + s8 + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i32, ptr " + s9 + ", align 4" + tbaa_elem_suffix() + "\n  "
+      parts << raw + " = load i32, ptr " + s9 + ", align 4" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       if signed == true
         parts << t + " = sext i32 " + raw + " to i64"
       else
@@ -886,7 +886,7 @@
     elsif bits == 16
       parts << s9 + " = getelementptr i16, ptr " + s3 + ", i64 " + s8 + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i16, ptr " + s9 + ", align 2" + tbaa_elem_suffix() + "\n  "
+      parts << raw + " = load i16, ptr " + s9 + ", align 2" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       if signed == true
         parts << t + " = sext i16 " + raw + " to i64"
       else
@@ -894,7 +894,7 @@
     elsif bits == 8
       parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + s8 + "\n  "
       raw = t + ".raw"
-      parts << raw + " = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << raw + " = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       if signed == true
         parts << t + " = sext i8 " + raw + " to i64"
       else
@@ -909,7 +909,7 @@
       nibble = t + ".nibble"
       parts << byte_idx + " = lshr i64 " + s8 + ", 1\n  "
       parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << raw8 + " = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
       parts << slot + " = and i64 " + s8 + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
@@ -923,7 +923,7 @@
         parts << t + " = add i64 " + nibble + ", 0"
     else
       parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
-      parts << t + " = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix()
+      parts << t + " = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + alias_scope_suffix(inst)
     parts.to_s()
   when :typed_array_set_inline
     # Inline typed array write: same i32-offset shift as get.
@@ -964,22 +964,22 @@
       parts << s8 + " = add i64 " + s5 + ", " + s7 + "\n  "
     if bits == 64
       parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
-      parts << "store i64 " + val + ", ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << "store i64 " + val + ", ptr " + s9 + ", align 8" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
     elsif bits == 32
       parts << s9 + " = getelementptr i32, ptr " + s3 + ", i64 " + s8 + "\n  "
       tr = t + ".trunc"
       parts << tr + " = trunc i64 " + val + " to i32\n  "
-      parts << "store i32 " + tr + ", ptr " + s9 + ", align 4" + tbaa_elem_suffix() + "\n  "
+      parts << "store i32 " + tr + ", ptr " + s9 + ", align 4" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
     elsif bits == 16
       parts << s9 + " = getelementptr i16, ptr " + s3 + ", i64 " + s8 + "\n  "
       tr = t + ".trunc"
       parts << tr + " = trunc i64 " + val + " to i16\n  "
-      parts << "store i16 " + tr + ", ptr " + s9 + ", align 2" + tbaa_elem_suffix() + "\n  "
+      parts << "store i16 " + tr + ", ptr " + s9 + ", align 2" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
     elsif bits == 8
       parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + s8 + "\n  "
       tr = t + ".trunc"
       parts << tr + " = trunc i64 " + val + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i8 " + tr + ", ptr " + s9 + ", align 1" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
     elsif bits == 4
       byte_idx = t + ".byteidx"
       raw8 = t + ".raw8"
@@ -995,7 +995,7 @@
       tr = t + ".trunc"
       parts << byte_idx + " = lshr i64 " + s8 + ", 1\n  "
       parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + byte_idx + "\n  "
-      parts << raw8 + " = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << raw8 + " = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       parts << raw64 + " = zext i8 " + raw8 + " to i64\n  "
       parts << slot + " = and i64 " + s8 + ", 1\n  "
       parts << shift + " = shl i64 " + slot + ", 2\n  "
@@ -1006,10 +1006,10 @@
       parts << shifted + " = shl i64 " + nibble + ", " + shift + "\n  "
       parts << merged + " = or i64 " + cleared + ", " + shifted + "\n  "
       parts << tr + " = trunc i64 " + merged + " to i8\n  "
-      parts << "store i8 " + tr + ", ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i8 " + tr + ", ptr " + s9 + ", align 1" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
     else
       parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
-      parts << "store i64 " + val + ", ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << "store i64 " + val + ", ptr " + s9 + ", align 8" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
     # No size-grow update: T[N] / Array.new constructors set size == cap
     # at allocation, and the inline `[]=` path is only emitted when the
     # store stays within that preallocated range.
@@ -1083,45 +1083,45 @@
       parts << s8 + " = add i64 " + s5 + ", " + s7 + "\n  "
     if bits == 64
       parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
-      parts << t + ".loaded = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << t + ".loaded = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       parts << t + ".res = " + llvm_op + " i64 " + t + ".loaded, " + val + "\n  "
-      parts << "store i64 " + t + ".res, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << "store i64 " + t + ".res, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       parts << t + " = add i64 " + t + ".res, 0"
     elsif bits == 32
       parts << s9 + " = getelementptr i32, ptr " + s3 + ", i64 " + s8 + "\n  "
-      parts << t + ".loaded = load i32, ptr " + s9 + ", align 4" + tbaa_elem_suffix() + "\n  "
+      parts << t + ".loaded = load i32, ptr " + s9 + ", align 4" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       parts << t + ".v32 = trunc i64 " + val + " to i32\n  "
       parts << t + ".res32 = " + llvm_op + " i32 " + t + ".loaded, " + t + ".v32\n  "
-      parts << "store i32 " + t + ".res32, ptr " + s9 + ", align 4" + tbaa_elem_suffix() + "\n  "
+      parts << "store i32 " + t + ".res32, ptr " + s9 + ", align 4" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       if signed == true
         parts << t + " = sext i32 " + t + ".res32 to i64"
       else
         parts << t + " = zext i32 " + t + ".res32 to i64"
     elsif bits == 16
       parts << s9 + " = getelementptr i16, ptr " + s3 + ", i64 " + s8 + "\n  "
-      parts << t + ".loaded = load i16, ptr " + s9 + ", align 2" + tbaa_elem_suffix() + "\n  "
+      parts << t + ".loaded = load i16, ptr " + s9 + ", align 2" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       parts << t + ".v16 = trunc i64 " + val + " to i16\n  "
       parts << t + ".res16 = " + llvm_op + " i16 " + t + ".loaded, " + t + ".v16\n  "
-      parts << "store i16 " + t + ".res16, ptr " + s9 + ", align 2" + tbaa_elem_suffix() + "\n  "
+      parts << "store i16 " + t + ".res16, ptr " + s9 + ", align 2" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       if signed == true
         parts << t + " = sext i16 " + t + ".res16 to i64"
       else
         parts << t + " = zext i16 " + t + ".res16 to i64"
     elsif bits == 8
       parts << s9 + " = getelementptr i8, ptr " + s3 + ", i64 " + s8 + "\n  "
-      parts << t + ".loaded = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << t + ".loaded = load i8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       parts << t + ".v8 = trunc i64 " + val + " to i8\n  "
       parts << t + ".res8 = " + llvm_op + " i8 " + t + ".loaded, " + t + ".v8\n  "
-      parts << "store i8 " + t + ".res8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + "\n  "
+      parts << "store i8 " + t + ".res8, ptr " + s9 + ", align 1" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       if signed == true
         parts << t + " = sext i8 " + t + ".res8 to i64"
       else
         parts << t + " = zext i8 " + t + ".res8 to i64"
     else
       parts << s9 + " = getelementptr i64, ptr " + s3 + ", i64 " + s8 + "\n  "
-      parts << t + ".loaded = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << t + ".loaded = load i64, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       parts << t + ".res = " + llvm_op + " i64 " + t + ".loaded, " + val + "\n  "
-      parts << "store i64 " + t + ".res, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + "\n  "
+      parts << "store i64 " + t + ".res, ptr " + s9 + ", align 8" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
       parts << t + " = add i64 " + t + ".res, 0"
     parts.to_s()
 

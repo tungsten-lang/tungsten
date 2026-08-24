@@ -692,6 +692,16 @@
     # workers whose closure ABI is not specialized, retain dynamic dispatch.
     static_key = recv_name + "." + method_name
     static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
+    # A bare class-ref receiver naming a namespaced class (`Sampler.new`
+    # for `Tungsten:Flame:Sampler`): canonicalize — walk-up, then unique
+    # suffix — so the direct static path still fires (see lower_var).
+    if static_info == nil && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :class_ref && !recv_name.include?(":")
+      canon = nil
+      canon = resolve_class_in_namespace(ctx[:mod], ctx[:class_name], recv_name) if ctx[:class_name] != nil
+      canon = resolve_class_unique_suffix(ctx[:mod], recv_name) if canon == nil
+      if canon != nil
+        static_key = canon + "." + method_name
+        static_info = known_static_method_for(ctx[:mod], static_key, node.args.size())
     if static_info != nil && node.block != nil
       if static_info[:accepts_block] != true || static_info[:raw_abi] == true || node.args.size() >= static_info[:arity] - 1
         static_info = nil
@@ -1819,6 +1829,7 @@
         si += 1
       temp = next_temp(wfn)
       emit_wire_typed_array_get_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp)
+      stamp_alias_scope(ctx, wfn, recv_node)
       if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         return raw_float_from_bits_i64(wfn, temp, recv_type)
       # w64 arrays store raw WValue bits. The loaded i64 IS a fully-tagged
@@ -1882,6 +1893,7 @@
           si += 1
         temp = next_temp(wfn)
         emit_wire_typed_array_compound_op_inline(wfn, receiver_reg, elem_bits, fused_op, idx_reg, idx_raw, scratch, elem_signed, temp, rhs_reg)
+        stamp_alias_scope(ctx, wfn, recv_node)
         return typed_value(:i64, temp)
 
     if method_name == "\[]=" && node.args.size() == 2
@@ -1933,6 +1945,7 @@
         si += 1
       temp = next_temp(wfn)
       emit_wire_typed_array_set_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp, val_reg)
+      stamp_alias_scope(ctx, wfn, recv_node)
       return val_expr
 
   # Direct builtins for string operations — bypass method dispatch

@@ -850,6 +850,65 @@
     emit_wire_load_u64_ptr(wfn, idx_raw, ptr_raw, temp)
     return typed_value(:raw_i64, temp)
 
+  # l1d_cache_bytes() / l2_cache_bytes() / cpus_per_l2() fold to literals in a
+  # native build (host_cache_bytes); a cross build keeps the runtime sysctl.
+  if name in ("l1d_cache_bytes" "l2_cache_bytes" "cpus_per_l2") && (args == nil || args.size() == 0) && host_native_build?()
+    return lower_expression(ctx, Tungsten:AST:Int.new(host_cache_bytes(ctx[:mod], name)))
+
+  # popcount(x) → llvm.ctpop.i64 (CNT+ADDV on arm64, POPCNT on x86). A
+  # byte-table `pop[b]` costs two dependent loads per byte; this is one
+  # instruction per 8 bytes. Returns :raw_i64.
+  if name == "popcount" && args.size() == 1
+    a_raw = lower_machine_int_expression(ctx, args[0], :u64)
+    t = next_temp(wfn)
+    emit_wire_ctpop_i64(wfn, t, a_raw)
+    return typed_value(:raw_i64, t)
+
+  # cttz(x) → llvm.cttz.i64 (RBIT+CLZ on arm64, TZCNT on x86): the index of
+  # the lowest set bit, 64 for x == 0. Enumerating the set bits of a word is
+  # `while w != 0 … t = cttz(w) … w = w & (w - 1)`, one step per bit instead
+  # of a test per bit — how the prime-list writer walks a sieve word.
+  # Returns :raw_i64.
+  if name == "cttz" && args.size() == 1
+    a_raw = lower_machine_int_expression(ctx, args[0], :u64)
+    t = next_temp(wfn)
+    emit_wire_cttz_i64(wfn, t, a_raw)
+    return typed_value(:raw_i64, t)
+
+  # array_load_u64(u8arr, byte_off) → the unaligned little-endian i64 word at
+  # byte_off of a u8[] payload; array_store_u64(u8arr, byte_off, v) stores
+  # one. Eight bytes per access instead of eight subscripts — the sieve
+  # counts 8 bytes per popcount and writes presieve patterns a word at a
+  # time. No bounds check: callers own the arithmetic, exactly as with
+  # raw_load_u64. Both return :raw_i64 (the store returns v).
+  if name == "array_load_u64" && args.size() == 2
+    arr_reg = ensure_i64_value(wfn, lower_expression(ctx, args[0]))
+    off_raw = lower_machine_int_expression(ctx, args[1], :i64)
+    t = next_temp(wfn)
+    emit_wire_typed_array_load_u64(wfn, arr_reg, off_raw, t)
+    stamp_alias_scope(ctx, wfn, args[0])
+    return typed_value(:raw_i64, t)
+  if name == "array_store_u64" && args.size() == 3
+    arr_reg = ensure_i64_value(wfn, lower_expression(ctx, args[0]))
+    off_raw = lower_machine_int_expression(ctx, args[1], :i64)
+    v_raw = lower_machine_int_expression(ctx, args[2], :u64)
+    t = next_temp(wfn)
+    emit_wire_typed_array_store_u64(wfn, arr_reg, off_raw, t, v_raw)
+    stamp_alias_scope(ctx, wfn, args[0])
+    return typed_value(:raw_i64, t)
+
+  # prefetch(arr, byte_off) → llvm.prefetch of the payload byte at byte_off
+  # (read, high locality, data cache). PRFM never faults, so no bounds
+  # check — a miss just wastes a slot. For hiding L2/DRAM latency across
+  # iterations of pointer-chasing loops. Returns 0.
+  if name == "prefetch" && args.size() == 2
+    arr_reg = ensure_i64_value(wfn, lower_expression(ctx, args[0]))
+    off_raw = lower_machine_int_expression(ctx, args[1], :i64)
+    t = next_temp(wfn)
+    emit_wire_typed_array_prefetch(wfn, arr_reg, off_raw, t)
+    stamp_alias_scope(ctx, wfn, args[0])
+    return typed_value(:raw_i64, t)
+
   # slab_alloc_init(kind, sc, field0, field1, ...) — slab-AST node
   # constructor intrinsic. Replaces the three-step:
   #   n = ccall_nobox("w_node_alloc", KIND, SC)

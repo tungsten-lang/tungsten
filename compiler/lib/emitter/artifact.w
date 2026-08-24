@@ -2270,7 +2270,8 @@
   if strings_out != ""
     strings_out = strings_out + "\n"
 
-  # w_slab_init_static is emitted directly in emit_function, not via an instruction
+  # w_preflight and w_slab_init_static are emitted directly in emit_function, not via an instruction
+  used_runtime_fns["w_preflight"] = true
   if slab_info != nil && slab_info[:slab_entries].size() > 0
     used_runtime_fns["w_slab_init_static"] = true
 
@@ -2560,7 +2561,7 @@
 
   attr_groups_out = emit_function_attr_groups(attr_groups)
 
-  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs() + novec_loop_md_defs() + ewscope_md_defs()
+  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs() + novec_loop_md_defs() + ewscope_md_defs() + alias_scope_md_defs()
 
 # -- Emit a single function --
 
@@ -2797,6 +2798,12 @@
         out << "  %__mcall_args = alloca i64, i32 "
         out << max_mcall_argc.to_s()
         out << ", align 8\n"
+      # w_preflight is the first instruction of main: under TUNGSTEN_PREFLIGHT
+      # it _exit(0)s, which lets the link step exec the fresh binary once so
+      # macOS's first-exec malware scan (~200 ms, keyed by vnode) runs during
+      # the build instead of on the user's first run. See runtime/runtime.c.
+      if f[:name] == "main"
+        out << "  call void @w_preflight()\n"
       # Inject static slab init at start of main, before any string ops
       if f[:name] == "main" && slab_info != nil && slab_info[:slab_entries].size() > 0
         out << "  call void @w_slab_init_static(ptr @__static_slab, i32 "

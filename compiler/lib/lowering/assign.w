@@ -41,6 +41,26 @@
     segments.pop()
   nil
 
+# Unique-suffix resolution for bare names with no enclosing chain to walk
+# (top-level code, or a chain that missed): `Sampler` resolves to
+# `Tungsten:Flame:Sampler` when exactly one declared class ends in
+# `:Sampler`. `in Foo:Bar` prefixes class *declarations* while references
+# stay bare, so without this a namespaced class used from another file was
+# nil at runtime. Two classes sharing a suffix stay unresolved rather than
+# guessing.
+-> resolve_class_unique_suffix(mod, name)
+  if name == nil || name.include?(":")
+    return nil
+  suffix = ":" + name
+  found = nil
+  count = 0
+  mod[:known_classes].keys().each -> (k)
+    if k.ends_with?(suffix)
+      found = k
+      count += 1
+  return found if count == 1
+  nil
+
 # Bit constant alias expansion (`constant_alias "WC"` in a bit's entry
 # file). A registered alias is a straight first-segment substitution —
 # `WC:Route` → `Tungsten:Carbide:Route` — no suffix matching and no
@@ -302,12 +322,16 @@
   # chain (Ruby-style). A bare `Clean` inside a method of
   # `Tungsten:Bit:Commands:Help` resolves to
   # `Tungsten:Bit:Commands:Clean`; a bare `Bitfile` walks further up to
-  # `Tungsten:Bit:Bitfile`. Only reached when the name is not a local,
-  # parameter, builtin class, or exact top-level class, so it is purely
-  # additive — it rescues references that would otherwise fall through to
-  # implicit-self dispatch (and fail) or resolve to nil.
-  if !name.include?(":") && ctx[:class_name] != nil
-    ns_resolved = resolve_class_in_namespace(ctx[:mod], ctx[:class_name], name)
+  # `Tungsten:Bit:Bitfile`; top-level code, which has no chain, falls back
+  # to the unique-suffix rule (`Sampler` → `Tungsten:Flame:Sampler`). Only
+  # reached when the name is not a local, parameter, builtin class, or
+  # exact top-level class, so it is purely additive — it rescues
+  # references that would otherwise fall through to implicit-self dispatch
+  # (and fail) or resolve to nil.
+  if !name.include?(":")
+    ns_resolved = nil
+    ns_resolved = resolve_class_in_namespace(ctx[:mod], ctx[:class_name], name) if ctx[:class_name] != nil
+    ns_resolved = resolve_class_unique_suffix(ctx[:mod], name) if ns_resolved == nil
     if ns_resolved != nil
       temp = next_temp(wfn)
       emit_wire_load_class(wfn, ns_resolved, temp)
@@ -346,6 +370,11 @@
     if machine_int
       return typed_value(raw_machine_value_type(raw_type), ensure_raw_machine_int(wfn, typed_value(:i64, temp), raw_type, raw_type))
     return typed_value(:i64, temp)
+
+  # Bare `l1d_cache_bytes` etc. fold to a literal in a native build (see
+  # host_cache_bytes); the known_calls sysctl bridge below is the cross-build path.
+  if name in ("l1d_cache_bytes" "l2_cache_bytes" "cpus_per_l2") && host_native_build?()
+    return lower_expression(ctx, Tungsten:AST:Int.new(host_cache_bytes(ctx[:mod], name)))
 
   # Zero-arg function call: bare `greet` → call __w_greet()
   call_target = ctx[:mod][:known_calls][name]

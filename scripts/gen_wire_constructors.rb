@@ -182,6 +182,9 @@ def kind_ids
   text = File.read(File.join(ROOT, "compiler/lib/wire_schema.w"))
   body = text[/wire_kind_symbols\s*=\s*\[(.*?)\n\]/m, 1]
   fail_gen("cannot read wire_kind_symbols") unless body
+  # Comments inside the literal may mention symbols (`:type, :value`); only
+  # the elements themselves number the kinds.
+  body = body.gsub(/#[^\n]*/, "")
   symbols = body.scan(/:([A-Za-z_][A-Za-z0-9_]*)/).flatten
   symbols.each_with_index.to_h { |symbol, index| [symbol, index + 1] }
 end

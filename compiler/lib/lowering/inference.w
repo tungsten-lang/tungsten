@@ -148,7 +148,7 @@
         if fa != nil && fa.size() >= 1 && is_ast_node?(fa[0]) && ast_kind(fa[0]) == :string && ccall_nobox_returns_wvalue?(fa[0].value)
           return :value
         return :i64
-      if node.name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8")
+      if node.name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch")
         return :i64
       if node.name == "ccall_rawargs"
         return :value

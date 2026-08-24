@@ -147,7 +147,7 @@
     # exemption here, so operands inside an escape position (e.g. `return
     # wvalue_from_bits(tag | x)`) are not force-boxed. wvalue_bits is NOT
     # exempt: its argument is a boxed WValue read.
-    if node.receiver == nil && node.name in ("ccall_nobox" "ccall_rawargs" "wvalue_from_bits" "raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "mulhi" "addcarry" "subborrow")
+    if node.receiver == nil && node.name in ("ccall_nobox" "ccall_rawargs" "wvalue_from_bits" "raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch" "mulhi" "addcarry" "subborrow")
       return nil
     mark_subtree_escape(node.receiver, records)
     mark_subtree_escape(node.args, records)
@@ -682,6 +682,10 @@
       return true
     if name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8")
       return true
+    # popcount/cttz/array_load_u64/array_store_u64/prefetch return raw i64
+    # (calls.w); a local bound to one stays in a raw slot.
+    if name in ("popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
+      return true
     # mulhi(a,b) returns a raw u64 (high half of a 64x64 product). Mark it
     # int-shaped so a loop-reassigned local `phi = mulhi(...)` stays unboxed and
     # composes with u64 carry chains (the SSA/multi-word pointwise multiply).
@@ -947,7 +951,7 @@
     # used as the pointer or index does NOT escape. Without this, a parser's
     # `data`/`pos` locals un-promoted to boxed, then ensure_raw_machine_int
     # ran w_to_i64 on a raw pointer and died ("expected int, got object").
-    is_raw_load = name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8") && node.receiver == nil
+    is_raw_load = name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
     args_are_values = is_index_call || is_raw_ccall || is_raw_load || ((name == "mulhi" || name == "addcarry" || name == "subborrow") && node.receiver == nil && node.args != nil && node.args.size() == 2)
     # Receiver of any method call needs WValue at the dispatch boundary.
     if node.receiver != nil
@@ -1014,7 +1018,7 @@
     return nil
 
   when :return, :recase
-    if node.value != nil
+    if node.value != nil && !(t == :return && mod != nil && mod[:promote_raw_return] == true)
       mark_subtree_escape(node.value, records)
     return nil
 
@@ -1161,7 +1165,7 @@
       i += 1
   promoted
 
--> raw_int_candidate_map(body, declared_types, mod = nil)
+-> raw_int_candidate_map(body, declared_types, mod = nil, raw_return = false)
   candidates = {}
   hinted = {}
   collect_raw_candidate_names_list(body, candidates, hinted, declared_types)
@@ -1198,7 +1202,14 @@
       cki += 1
 
     records = {}
+    # raw_return: the enclosing fn has the raw-i64 ABI, so `return x` hands x
+    # back as a machine int — no WValue boundary, no escape. Carried on mod
+    # for the duration of this walk (lowering is single-threaded).
+    if mod != nil && raw_return
+      mod[:promote_raw_return] = true
     visit_promote_list(body, records, known, mod)
+    if mod != nil && raw_return
+      mod[:promote_raw_return] = nil
     next_candidates = {}
     kept = 0
     i = 0
@@ -2410,7 +2421,7 @@
     i += 1
   nil
 
--> mut_accumulator_candidates(body)
+-> mut_accumulator_candidates(body, raw_int_candidates = nil)
   # Reproducible performance control: production/default compilation keeps
   # mutate-if-unique enabled, while the BigInt loop A/B can force ordinary
   # immutable result churn from the same source program.
@@ -2423,7 +2434,13 @@
   if dead["__scope_poisoned__"] == true
     return result
   assigned.keys().each -> (name)
-    if dead[name] != true
+    # A raw-promoted local (raw_int_candidate_map) lives in a machine-int
+    # slot; the mutate-if-unique and sum-chunk seams read and write the same
+    # slot as a boxed WValue. Both analyses claiming one var (`n = 0; while
+    # …; n += a[z]; …; k * 8 - n`) stored a raw 0 that the chunk flush then
+    # added as nil. Raw promotion wins: it is the cheaper codegen and its
+    # overflow path already handles the widening the seams exist for.
+    if dead[name] != true && (raw_int_candidates == nil || raw_int_candidates[name] != true)
       result[name] = true
   result
 

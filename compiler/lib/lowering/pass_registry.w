@@ -484,3 +484,53 @@
   if value_type == nil
     value_type = "i64"
   emit_wire_store_global(wfn, name, value_type, value_reg)
+
+
+# l1d_cache_bytes / l2_cache_bytes / cpus_per_l2 fold to literals in a native
+# build: the binary runs where it was compiled, so the size is a compile-time
+# constant and array sizes / loop trip counts derived from it are too. A cross
+# build (TUNGSTEN_TARGET set) keeps the runtime sysctl call.
+-> host_native_build?
+  tgt = env("TUNGSTEN_TARGET")
+  tgt == nil || tgt == ""
+
+# Memoized per module: the fold must read the host exactly once per name so
+# every use site (and stage 1 vs stage 2) sees the same literal.
+-> host_cache_bytes(mod, name)
+  if mod[:host_cache_consts] == nil
+    mod[:host_cache_consts] = {}
+  cached = mod[:host_cache_consts][name]
+  return cached if cached != nil
+  cmd = "sysctl -n hw.perflevel0.l1dcachesize 2>/dev/null || sysctl -n hw.l1dcachesize 2>/dev/null || getconf LEVEL1_DCACHE_SIZE 2>/dev/null"
+  fallback = 131072
+  if name == "l2_cache_bytes"
+    cmd = "sysctl -n hw.perflevel0.l2cachesize 2>/dev/null || sysctl -n hw.l2cachesize 2>/dev/null || getconf LEVEL2_CACHE_SIZE 2>/dev/null"
+    fallback = 4194304
+  if name == "cpus_per_l2"
+    # cores sharing one L2: P-core cluster on Apple Silicon, else the third
+    # field of hw.cacheconfig; on Linux the size of cpu0's L2 sharing list
+    cmd = "sysctl -n hw.perflevel0.cpusperl2 2>/dev/null || sysctl -n hw.cacheconfig 2>/dev/null | awk '{print $3}' || (tr ',' '\\n' < /sys/devices/system/cpu/cpu0/cache/index2/shared_cpu_list 2>/dev/null | wc -l)"
+    fallback = 1
+  out = capture(cmd)
+  v = 0
+  v = out.strip().to_i if out != nil
+  v = fallback if v <= 0
+  mod[:host_cache_consts][name] = v
+  v
+
+# Tag the instruction just emitted (a typed-array subscript get/set/compound
+# op or an array_load/store_u64) with the alias-scope slot of the receiver
+# param, when the receiver is a bare slotted param of the current fn (see
+# alias_scope_slots in definitions.w). No-op otherwise.
+-> stamp_alias_scope(ctx, wfn, recv_node)
+  slots = ctx[:alias_slots]
+  if slots == nil || recv_node == nil || !is_ast_node?(recv_node) || ast_kind(recv_node) != :var
+    return nil
+  slot = slots[recv_node.name]
+  if slot == nil
+    return nil
+  instrs = current_block(wfn)[:instructions]
+  if instrs.size() == 0
+    return nil
+  wire_set(instrs[instrs.size() - 1], :ascope, slot)
+  nil

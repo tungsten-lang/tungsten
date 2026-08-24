@@ -274,7 +274,15 @@ wire_kind_symbols = [
   :wire_sequence,
   # Compiler-internal lowering result. This remains append-only like every
   # other WIRE kind; its fixed field order is :type, :value.
-  :wire_typed_value
+  :wire_typed_value,
+  # Bit-count and u8[]-payload word intrinsics (popcount / cttz /
+  # array_load_u64 / array_store_u64 / prefetch), appended after the
+  # compiler-internal kinds — ids are positional and append-only.
+  :ctpop_i64,
+  :cttz_i64,
+  :typed_array_load_u64,
+  :typed_array_store_u64,
+  :typed_array_prefetch
 ]
 
 wire_kind_ids = {}

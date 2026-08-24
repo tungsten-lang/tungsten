@@ -288,6 +288,22 @@
         hi_ex = next_temp(wfn)
         emit_wire_sub_i64(wfn, hi_pc, "1", hi_ex)
         hi_pc = hi_ex
+    # `/prime?` counts through the Tungsten sieve in core/prime_sieve.w when
+    # the loader pulled it in (it autoloads PrimeSieve on a `/prime?` stage):
+    # psv_count rides the (n, p_n) checkpoint ladder, so π(x) below a rung
+    # sieves only the tail. Bounds are already normalized raw i64 — box them
+    # for the untyped fn. The C twin (w_prime_count_u64) stays the fallback.
+    psv_count_fn = nil
+    if count_pred == "prime?" && wheel12_hi == nil
+      psv_count_fn = ctx[:mod][:known_calls]["psv_count"]
+    if psv_count_fn != nil
+      lo_box = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [lo_pc], nil, nil, "w_int", nil, nil, lo_box)
+      hi_box = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [hi_pc], nil, nil, "w_int", nil, nil, hi_box)
+      psv_cnt = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [lo_box, hi_box], nil, nil, psv_count_fn, nil, nil, psv_cnt)
+      return typed_value(:i64, psv_cnt)
     cnt_raw = next_temp(wfn)
     if count_pred == "prime?" || wheel12_hi != nil
       emit_wire_call_direct_i64(wfn, nil, [lo_pc, hi_pc], nil, nil, "w_prime_count_u64", nil, nil, cnt_raw)

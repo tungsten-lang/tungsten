@@ -586,6 +586,7 @@ if [[ "${1:-}" == --job-* ]]; then
 fi
 
 compiled_specs=(
+  spec/core/prime_sieve_spec.w
   compiler/test/regex_features.w
   spec/core/date_calendar_surface_spec.w
   spec/compiler/date_dynamic_receiver_spec.w

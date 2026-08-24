@@ -287,6 +287,26 @@
   # accumulator becomes an unboxed i64 loop var and silently wraps (25! then
   # comes out mod 2^64). This specialized body lives on Int for
   # `5.factorial`; generic Integer subclasses keep the shared fallback.
+  # The n-th prime, 1-indexed: `Int.nth_prime(1)` is 2, `Int.nth_prime(1e6)`
+  # is 15485863. Backed by the mod-30 wheel sieve in core/prime_sieve.w,
+  # which starts from the nearest entry in a 175-rung table of (n, p_n)
+  # checkpoints — an exact hit returns without sieving at all, and otherwise
+  # only the primes above that checkpoint are sieved.
+  -> .nth_prime(n)
+    PrimeSieve.nth(n)
+
+  # The first n primes, ascending, as an i64 typed array. Sieved in parallel:
+  # one pass counts each chunk, the prefix sum turns those counts into write
+  # offsets, and a second pass fills each chunk's slice directly.
+  # Refuses above 200M primes (1.6 GB) — sieve a range instead.
+  -> .primes(n)
+    PrimeSieve.first(n)
+
+  # π(x) — how many primes are ≤ x. Same checkpoint skip as nth_prime.
+  # `(2..x)/prime?:count` fuses to the same sieve.
+  -> .prime_pi(x)
+    PrimeSieve.pi(x)
+
   -> factorial
     if self < 0
       raise "Int#factorial: negative receiver"

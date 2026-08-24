@@ -18,6 +18,9 @@
 #include <limits.h>
 #include <math.h>
 #ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
+#ifdef __APPLE__
 #include <net/if_dl.h>
 #endif
 #include <netinet/in.h>
@@ -48815,6 +48818,38 @@ WValue __w_append_file(WValue path_val, WValue content_val) {
     return w_write_file_mode(path_val, content_val, "ab");
 }
 
+/* write_file_bytes_n(path, bytes, n): write the first n bytes of a byte
+ * array (n clamped to its size). Lets a reusable buffer be written without
+ * an exact-size copy — the prime-list writer emits ~1 GB files from one
+ * per-thread buffer. */
+WValue __w_write_file_n(WValue path_val, WValue bytes_val, WValue n_val) {
+    const char *path = as_str(path_val);
+    w_sandbox_gate("write_file", path);
+    if (!w_is_bytes(bytes_val)) return W_FALSE;
+    WArray *a = w_as_array(bytes_val);
+    int64_t n = w_as_int(n_val);
+    if (n < 0) n = 0;
+    if (n > a->size) n = a->size;
+    FILE *f = fopen(path, "wb");
+    if (!f) return W_FALSE;
+    const uint8_t *data = (const uint8_t *)a->slots + a->start;
+    size_t done = 0;
+    while (done < (size_t)n) {
+        size_t w = fwrite(data + done, 1, (size_t)n - done, f);
+        if (w == 0) break;
+        done += w;
+    }
+    fclose(f);
+    return w_bool(done == (size_t)n);
+}
+
+/* file_rm(path): remove a file (File.rm / File.delete / File.unlink). */
+WValue __w_file_rm(WValue path_val) {
+    const char *path = as_str(path_val);
+    w_sandbox_gate("unlink", path);
+    return w_bool(remove(path) == 0);
+}
+
 WValue __w_file_expand_path(WValue path_val) {
     const char *path = as_str(path_val);
     char resolved[4096];
@@ -53131,7 +53166,7 @@ static void *w_prime_count_worker(void *arg) {
  * buffers + carried state (no shared writes ⇒ near-linear scaling). Base sieve
  * is ~√hi bytes, so keep hi in reason (√1e18 ⇒ ~0.5 GB). 2 and 3 are counted
  * outside the wheel (only ever by the chunk containing them). */
-uint64_t w_prime_count_u64(uint64_t lo, uint64_t hi) {
+uint64_t w_prime_count_u64_mod6(uint64_t lo, uint64_t hi) {
     if (hi < 2 || hi < lo) return 0;
     if (lo < 2) lo = 2;
 
@@ -53259,6 +53294,682 @@ static int w_prime_test_u64_30k(uint64_t n) {
     if (n < 1681ULL) return 1;
     return w_prime_test_u64_post_screen(n);
 }
+
+/* ---- mod-30 wheel, bit-packed segmented sieve (w_p30_*) ------------------
+ * Storage: byte b holds the eight candidates 30b + {1,7,11,13,17,19,23,29},
+ * one per bit. That is 1 byte per 30 integers — 10× denser than the mod-6
+ * byte-per-candidate sieve above, so a 128 KB segment (one M-series L1D)
+ * covers 3.9M integers instead of 393K.
+ *
+ * Marking: for a prime p coprime to 30 the multiples split into eight
+ * arithmetic progressions p*(30t + R[j]). Each has CONSTANT byte stride p
+ * (30p integers = p bytes) and a CONSTANT bit mask, because
+ * p*(30t+R[j]) ≡ p*R[j] (mod 30) independent of t. So the inner loop stays
+ * `seg[b] |= m; b += p` with no tables and no division.
+ *
+ * Large primes: a prime with stride ≥ segment width marks at most once per
+ * segment, so re-examining every base prime per segment dominates at 1e12+.
+ * Each progression is instead filed in a ring of buckets keyed by the segment
+ * it next lands in (ring depth √hi/seg_bytes + 3), and only the current
+ * bucket is walked.
+ *
+ * Counting: popcount over the segment as u64 words — one popcount per 8
+ * candidates (240 integers per word) instead of one compare per candidate.
+ *
+ * Presieve: {7,11,13,17,19} are periodic in byte space with period
+ * 7·11·13·17·19 = 323323, so each segment starts as a phased memcpy of that
+ * pattern. Replaces the memset AND the five densest marking loops (~22% of
+ * all marks). */
+
+static const uint8_t W30_R[8] = {1, 7, 11, 13, 17, 19, 23, 29};
+static const int8_t W30_BIT[30] = {
+    -1,  0, -1, -1, -1, -1, -1,  1, -1, -1,
+    -1,  2, -1,  3, -1, -1, -1,  4, -1,  5,
+    -1, -1, -1,  6, -1, -1, -1, -1, -1,  7
+};
+#define W_P30_PRESIEVE 323323u
+#define W_P30_SEG_BYTES (128u * 1024u)
+
+static uint8_t *w_p30_pattern(void) {
+    uint8_t *pat = (uint8_t *)malloc(W_P30_PRESIEVE);
+    if (!pat) return NULL;
+    for (uint32_t b = 0; b < W_P30_PRESIEVE; b++) {
+        uint8_t v = 0;
+        for (int j = 0; j < 8; j++) {
+            uint64_t x = 30ULL * b + W30_R[j];
+            if (x % 7 == 0 || x % 11 == 0 || x % 13 == 0 || x % 17 == 0 || x % 19 == 0)
+                v |= (uint8_t)(1u << j);
+        }
+        pat[b] = v;
+    }
+    return pat;
+}
+
+typedef struct {
+    uint8_t  *seg;
+    uint32_t *nxt;    /* byte offset from chunk base of this entry's next mark */
+    uint8_t  *msk;
+    int32_t  *link;
+    int32_t  *head;
+    uint32_t  ring;
+    uint32_t  seg_bytes;
+    int       nbp;
+} WP30Scratch;
+
+static void w_p30_scratch_free(WP30Scratch *sc) {
+    if (!sc) return;
+    free(sc->seg); free(sc->nxt); free(sc->msk); free(sc->link); free(sc->head);
+    sc->seg = NULL; sc->nxt = NULL; sc->msk = NULL; sc->link = NULL; sc->head = NULL;
+}
+
+static int w_p30_scratch_init(WP30Scratch *sc, int nbp, uint64_t root, uint32_t seg_bytes) {
+    size_t e = (size_t)nbp * 8 + 8;
+    sc->seg_bytes = seg_bytes;
+    sc->ring = (uint32_t)(root / seg_bytes) + 3;
+    sc->nbp = nbp;
+    sc->seg  = (uint8_t  *)malloc(seg_bytes);
+    sc->nxt  = (uint32_t *)malloc(e * sizeof(uint32_t));
+    sc->msk  = (uint8_t  *)malloc(e);
+    sc->link = (int32_t  *)malloc(e * sizeof(int32_t));
+    sc->head = (int32_t  *)malloc((size_t)sc->ring * sizeof(int32_t));
+    if (!sc->seg || !sc->nxt || !sc->msk || !sc->link || !sc->head) {
+        w_p30_scratch_free(sc);
+        return 0;
+    }
+    return 1;
+}
+
+/* First multiple of p that is ≥ start and ≡ p*R[j] (mod 30), as a byte index. */
+static inline uint64_t w_p30_first_byte(uint64_t p, uint64_t rj, uint64_t start) {
+    uint64_t q = (start + p - 1) / p;
+    if (q < p) q = p;
+    uint64_t t = (q > rj) ? (q - rj + 29) / 30 : 0;
+    return (p * (30 * t + rj)) / 30;
+}
+
+/* Sieve [lo,hi) — both multiples of 30 — and count the primes there.
+ * want > 0  : stop at the want-th prime of the chunk, store it in *found.
+ * out       : append every prime found (bounded by out_cap), *out_n advances. */
+static uint64_t w_p30_chunk(uint64_t lo, uint64_t hi, const uint64_t *bp, int nbp,
+                            const uint8_t *pat, WP30Scratch *sc,
+                            uint64_t want, uint64_t *found,
+                            uint64_t *out, uint64_t out_cap, uint64_t *out_n) {
+    const uint64_t base_byte  = lo / 30;
+    const uint64_t end_byte   = hi / 30;
+    const uint64_t chunk_bytes = end_byte - base_byte;
+    const uint32_t seg_bytes  = sc->seg_bytes;
+    const uint32_t ring       = sc->ring;
+    uint8_t  *seg  = sc->seg;
+    uint32_t *nxt  = sc->nxt;
+    uint8_t  *msk  = sc->msk;
+    int32_t  *link = sc->link;
+    int32_t  *head = sc->head;
+    uint64_t count = 0;
+
+    for (uint32_t i = 0; i < ring; i++) head[i] = -1;
+
+    /* Primes already in play at lo: file all eight progressions. */
+    int active = 0;
+    while (active < nbp && bp[active] * bp[active] < lo) {
+        uint64_t p = bp[active];
+        for (int j = 0; j < 8; j++) {
+            uint64_t gb = w_p30_first_byte(p, W30_R[j], lo);
+            if (gb < end_byte) {
+                int32_t k = active * 8 + j;
+                uint32_t off = (uint32_t)(gb - base_byte);
+                nxt[k]  = off;
+                msk[k]  = (uint8_t)(1u << W30_BIT[(p % 30) * W30_R[j] % 30]);
+                uint32_t slot = (off / seg_bytes) % ring;
+                link[k] = head[slot];
+                head[slot] = k;
+            }
+        }
+        active++;
+    }
+
+    uint32_t rp = 0;
+    for (uint64_t cur_off = 0; cur_off < chunk_bytes; cur_off += seg_bytes) {
+        uint64_t nb64 = chunk_bytes - cur_off;
+        uint32_t nbytes = (nb64 > seg_bytes) ? seg_bytes : (uint32_t)nb64;
+        uint64_t seg_lo_byte = base_byte + cur_off;
+
+        /* phased copy of the presieve pattern */
+        {
+            uint64_t off = seg_lo_byte % W_P30_PRESIEVE;
+            uint32_t pos = 0;
+            while (pos < nbytes) {
+                uint64_t n = W_P30_PRESIEVE - off;
+                if (n > nbytes - pos) n = nbytes - pos;
+                memcpy(seg + pos, pat + off, (size_t)n);
+                pos += (uint32_t)n;
+                off += n;
+                if (off == W_P30_PRESIEVE) off = 0;
+            }
+            /* the pattern marks 7,11,13,17,19 themselves — unmark them */
+            if (seg_lo_byte == 0) {
+                static const uint8_t SELF[5] = {7, 11, 13, 17, 19};
+                for (int k = 0; k < 5; k++)
+                    seg[0] &= (uint8_t)~(1u << W30_BIT[SELF[k]]);
+                seg[0] |= 1u;      /* the candidate 1 is not prime */
+            }
+        }
+
+        /* primes whose square first lands in this segment enter now */
+        uint64_t top = (seg_lo_byte + nbytes) * 30;
+        while (active < nbp && bp[active] * bp[active] < top) {
+            uint64_t p = bp[active];
+            for (int j = 0; j < 8; j++) {
+                uint64_t gb = w_p30_first_byte(p, W30_R[j], p * p);
+                if (gb < end_byte) {
+                    int32_t k = active * 8 + j;
+                    uint32_t off = (uint32_t)(gb - base_byte);
+                    nxt[k]  = off;
+                    msk[k]  = (uint8_t)(1u << W30_BIT[(p % 30) * W30_R[j] % 30]);
+                    uint32_t slot = (uint32_t)(((off - cur_off) / seg_bytes + rp) % ring);
+                    link[k] = head[slot];
+                    head[slot] = k;
+                }
+            }
+            active++;
+        }
+
+        /* mark this segment's bucket, then re-file each entry forward */
+        {
+            int32_t k = head[rp];
+            head[rp] = -1;
+            while (k >= 0) {
+                int32_t nk = link[k];
+                uint64_t p = bp[k >> 3];
+                uint32_t by = (uint32_t)(nxt[k] - cur_off);
+                uint8_t m = msk[k];
+                while (by < nbytes) { seg[by] |= m; by += (uint32_t)p; }
+                uint64_t gb = (uint64_t)by + cur_off;
+                if (gb < chunk_bytes) {
+                    nxt[k] = (uint32_t)gb;
+                    uint32_t slot = (uint32_t)(((gb - cur_off) / seg_bytes + rp) % ring);
+                    link[k] = head[slot];
+                    head[slot] = k;
+                }
+                k = nk;
+            }
+        }
+
+        /* count (or enumerate) */
+        if (!want && !out) {
+            uint32_t w = nbytes >> 3;
+            const uint64_t *ws = (const uint64_t *)(const void *)seg;
+            uint64_t zeros = 0;
+            for (uint32_t i = 0; i < w; i++) zeros += 64 - (uint64_t)__builtin_popcountll(ws[i]);
+            for (uint32_t i = w << 3; i < nbytes; i++) zeros += 8 - (uint64_t)__builtin_popcount(seg[i]);
+            count += zeros;
+        } else {
+            for (uint32_t i = 0; i < nbytes; i++) {
+                uint8_t v = seg[i];
+                if (v == 0xFF) continue;
+                uint64_t bb = seg_lo_byte + i;
+                for (int j = 0; j < 8; j++) {
+                    if (v & (1u << j)) continue;
+                    count++;
+                    uint64_t prime = 30 * bb + W30_R[j];
+                    if (out && *out_n < out_cap) out[(*out_n)++] = prime;
+                    if (want && count == want) { if (found) *found = prime; return count; }
+                }
+            }
+        }
+        rp++;
+        if (rp >= ring) rp = 0;
+    }
+    return count;
+}
+
+/* Base primes in [23, root], coprime to 30 (7..19 are handled by the presieve
+ * pattern, so the marching list starts above them). */
+static uint64_t *w_p30_base_primes(uint64_t root, int *out_n) {
+    uint64_t half = root / 2 + 1;
+    uint8_t *comp = (uint8_t *)calloc(half + 2, 1);
+    uint64_t *bp = (uint64_t *)malloc((size_t)(half / 2 + 64) * sizeof(uint64_t));
+    if (!comp || !bp) { free(comp); free(bp); *out_n = 0; return NULL; }
+    for (uint64_t i = 1, p = 3; p * p <= root; i++, p = 2 * i + 1) {
+        if (comp[i]) continue;
+        for (uint64_t j = (p * p - 1) / 2; j <= half; j += p) comp[j] = 1;
+    }
+    int n = 0;
+    for (uint64_t k = 1; 2 * k + 1 <= root; k++) {
+        uint64_t q = 2 * k + 1;
+        if (!comp[k] && q >= 23 && q % 3 && q % 5) bp[n++] = q;
+    }
+    free(comp);
+    *out_n = n;
+    return bp;
+}
+
+static int w_p30_threads(void) {
+    const char *e = getenv("TUNGSTEN_PRIME_THREADS");
+    if (e && *e) { int t = atoi(e); if (t > 0) return t > 64 ? 64 : t; }
+    long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+    if (ncpu < 2) return 1;
+    long t = ncpu - 1;                 /* leave one core for the OS + main thread */
+    return (int)(t > 64 ? 64 : t);
+}
+
+typedef struct {
+    uint64_t lo, hi, chunk, nchunks, root;
+    const uint64_t *bp; int nbp;
+    const uint8_t *pat;
+    uint32_t seg_bytes;
+    _Atomic uint64_t next;
+    uint64_t *counts;
+    int failed;
+} WP30Run;
+
+static void *w_p30_worker(void *arg) {
+    WP30Run *r = (WP30Run *)arg;
+    WP30Scratch sc;
+    if (!w_p30_scratch_init(&sc, r->nbp, r->root, r->seg_bytes)) { r->failed = 1; return NULL; }
+    for (;;) {
+        uint64_t c = atomic_fetch_add(&r->next, (uint64_t)1);
+        if (c >= r->nchunks) break;
+        uint64_t clo = r->lo + c * r->chunk;
+        uint64_t chi = clo + r->chunk;
+        if (chi > r->hi) chi = r->hi;
+        r->counts[c] = w_p30_chunk(clo, chi, r->bp, r->nbp, r->pat, &sc, 0, NULL, NULL, 0, NULL);
+    }
+    w_p30_scratch_free(&sc);
+    return NULL;
+}
+
+/* Count the wheel-candidate primes in [lo,hi), both multiples of 30, in
+ * parallel. counts_out (optional) receives the per-chunk tallies. */
+static uint64_t w_p30_sieve_parallel(uint64_t lo, uint64_t hi, uint64_t root,
+                                     const uint64_t *bp, int nbp, const uint8_t *pat,
+                                     uint64_t **counts_out, uint64_t *chunk_out,
+                                     uint64_t *nchunks_out) {
+    if (hi <= lo) return 0;
+    int T = w_p30_threads();
+    uint64_t span = hi - lo;
+    /* ~4 chunks per thread so a slow chunk cannot strand a core, but never
+     * smaller than 4 segments (chunk setup costs nbp divisions). */
+    uint64_t chunk = span / ((uint64_t)T * 4) + 1;
+    uint64_t minchunk = (uint64_t)W_P30_SEG_BYTES * 30 * 4;
+    if (chunk < minchunk) chunk = minchunk;
+    chunk = (chunk / 30) * 30;
+    if (chunk == 0) chunk = 30;
+    uint64_t nchunks = (span + chunk - 1) / chunk;
+
+    uint64_t *counts = (uint64_t *)calloc((size_t)nchunks + 1, sizeof(uint64_t));
+    if (!counts) return 0;
+
+    WP30Run run;
+    run.lo = lo; run.hi = hi; run.chunk = chunk; run.nchunks = nchunks; run.root = root;
+    run.bp = bp; run.nbp = nbp; run.pat = pat; run.seg_bytes = W_P30_SEG_BYTES;
+    run.counts = counts; run.failed = 0;
+    atomic_init(&run.next, (uint64_t)0);
+
+    int nth = (int)(nchunks < (uint64_t)T ? nchunks : (uint64_t)T);
+    pthread_t th[64];
+    int live = 0;
+    for (int t = 1; t < nth; t++)
+        if (pthread_create(&th[live], NULL, w_p30_worker, &run) == 0) live++;
+    w_p30_worker(&run);                       /* the caller is a worker too */
+    for (int t = 0; t < live; t++) pthread_join(th[t], NULL);
+
+    uint64_t total = 0;
+    for (uint64_t c = 0; c < nchunks; c++) total += counts[c];
+    if (counts_out) { *counts_out = counts; } else { free(counts); }
+    if (chunk_out) *chunk_out = chunk;
+    if (nchunks_out) *nchunks_out = nchunks;
+    return total;
+}
+
+/* π(lo..hi) inclusive, via the mod-30 bit sieve. Edge candidates outside the
+ * 30-aligned window are resolved with the scalar test (at most 8 per side). */
+uint64_t w_p30_count_u64(uint64_t lo, uint64_t hi) {
+    if (hi < 2 || hi < lo) return 0;
+    if (lo < 2) lo = 2;
+    uint64_t count = 0;
+    if (lo <= 2 && hi >= 2) count++;
+    if (lo <= 3 && hi >= 3) count++;
+    if (lo <= 5 && hi >= 5) count++;
+    if (hi < 7) return count;
+    if (lo < 7) lo = 7;
+
+    uint64_t alo = (lo / 30) * 30;
+    uint64_t ahi = ((hi / 30) + 1) * 30;
+    uint64_t root = w_isqrt_u64(hi);
+    int nbp = 0;
+    uint64_t *bp = w_p30_base_primes(root, &nbp);
+    uint8_t *pat = w_p30_pattern();
+    if (!bp || !pat) { free(bp); free(pat); return count; }
+
+    count += w_p30_sieve_parallel(alo, ahi, root, bp, nbp, pat, NULL, NULL, NULL);
+    /* drop candidates that fell outside [lo,hi] */
+    for (uint64_t x = alo; x < lo; x++)
+        if (W30_BIT[x % 30] >= 0 && x > 1 && w_prime_test_u64(x)) count--;
+    for (uint64_t x = hi + 1; x < ahi; x++)
+        if (W30_BIT[x % 30] >= 0 && w_prime_test_u64(x)) count--;
+    free(bp); free(pat);
+    return count;
+}
+
+/* ---- prime checkpoints -------------------------------------------------
+ * Each entry is (n, p_n): the n-th prime. One table serves both directions —
+ *   nth_prime(n)  : exact hit returns immediately; otherwise sieve forward
+ *                   from p_k needing only n - k more primes.
+ *   pi(0..N)      : = k + (primes in (p_k, N]), so the sieve skips everything
+ *                   below the checkpoint.
+ * Entries are spaced 1,2,…,9 per decade of n (a log10 ladder), which bounds
+ * the residual range at ~1/2 of N in the worst case and 0 on an exact hit.
+ * Every entry at or below n = 1e11 was computed by this sieve (see
+ * tools/gen_prime_lut); the entries above it are the published values of
+ * A006988 and are not independently verified here. */
+typedef struct { uint64_t n, p; } WPrimeCk;
+static const WPrimeCk W_PRIME_CK[] = {
+#include "prime_lut.inc"
+};
+#define W_PRIME_CK_N (sizeof(W_PRIME_CK) / sizeof(W_PRIME_CK[0]))
+
+/* largest checkpoint with n ≤ want (NULL if none) */
+static const WPrimeCk *w_prime_ck_by_rank(uint64_t want) {
+    const WPrimeCk *best = NULL;
+    for (size_t i = 0; i < W_PRIME_CK_N; i++) {
+        if (W_PRIME_CK[i].n <= want) best = &W_PRIME_CK[i]; else break;
+    }
+    return best;
+}
+
+/* largest checkpoint with p ≤ x (NULL if none) */
+static const WPrimeCk *w_prime_ck_by_value(uint64_t x) {
+    const WPrimeCk *best = NULL;
+    for (size_t i = 0; i < W_PRIME_CK_N; i++) {
+        if (W_PRIME_CK[i].p <= x) best = &W_PRIME_CK[i]; else break;
+    }
+    return best;
+}
+
+/* Count primes in (after, hi]: sieve forward from a checkpoint. */
+static uint64_t w_p30_count_above(uint64_t after, uint64_t hi) {
+    if (hi <= after) return 0;
+    uint64_t count = 0;
+    uint64_t lo = after + 1;
+    uint64_t alo = (lo / 30) * 30;
+    uint64_t ahi = ((hi / 30) + 1) * 30;
+    uint64_t root = w_isqrt_u64(hi);
+    int nbp = 0;
+    uint64_t *bp = w_p30_base_primes(root, &nbp);
+    uint8_t *pat = w_p30_pattern();
+    if (!bp || !pat) { free(bp); free(pat); return 0; }
+    count = w_p30_sieve_parallel(alo, ahi, root, bp, nbp, pat, NULL, NULL, NULL);
+    for (uint64_t x = alo; x < lo; x++)
+        if (W30_BIT[x % 30] >= 0 && x > 1 && w_prime_test_u64(x)) count--;
+    for (uint64_t x = hi + 1; x < ahi; x++)
+        if (W30_BIT[x % 30] >= 0 && w_prime_test_u64(x)) count--;
+    free(bp); free(pat);
+    return count;
+}
+
+/* π(0..hi) with the checkpoint skip. */
+uint64_t w_prime_pi_u64(uint64_t hi) {
+    if (hi < 2) return 0;
+    const WPrimeCk *ck = w_prime_ck_by_value(hi);
+    if (!ck) return w_p30_count_u64(2, hi);
+    if (ck->p == hi) return ck->n;
+    return ck->n + w_p30_count_above(ck->p, hi);
+}
+
+/* The n-th prime, seeded from (rank0, prime0) — the LUT generator walks the
+ * ladder with this, each rung seeded by the one below it. */
+static uint64_t w_nth_prime_from(uint64_t n, uint64_t rank0, uint64_t prime0) {
+    static const uint64_t TINY[9] = {2, 3, 5, 7, 11, 13, 17, 19, 23};
+    if (n == 0) return 0;
+    if (n <= 9 && rank0 == 0) return TINY[n - 1];
+    if (n == rank0) return prime0;
+
+    uint64_t need = n - rank0;
+    /* Dusart: p_n < n(ln n + ln ln n) for n ≥ 6 — a safe upper end. */
+    double dn = (double)n;
+    double ln = log(dn), lnln = log(ln > 1.0 ? ln : 2.0);
+    uint64_t hi = (uint64_t)(dn * (ln + lnln)) + 64;
+    uint64_t lo = ((prime0 ? prime0 : 6) / 30) * 30 + 30;
+    if (hi <= lo) hi = lo + 30;
+
+    /* primes between the checkpoint and the aligned window start */
+    for (uint64_t x = prime0 + 1; x < lo; x++)
+        if (w_prime_test_u64(x)) { if (--need == 0) return x; }
+
+    uint64_t root_hi = hi;
+    for (;;) {
+        uint64_t ahi = ((root_hi / 30) + 1) * 30;
+        uint64_t root = w_isqrt_u64(ahi);
+        int nbp = 0;
+        uint64_t *bp = w_p30_base_primes(root, &nbp);
+        uint8_t *pat = w_p30_pattern();
+        if (!bp || !pat) { free(bp); free(pat); return 0; }
+
+        uint64_t *counts = NULL, chunk = 0, nchunks = 0;
+        uint64_t total = w_p30_sieve_parallel(lo, ahi, root, bp, nbp, pat,
+                                              &counts, &chunk, &nchunks);
+        if (total >= need) {
+            uint64_t acc = 0, c = 0;
+            for (; c < nchunks; c++) {
+                if (acc + counts[c] >= need) break;
+                acc += counts[c];
+            }
+            uint64_t clo = lo + c * chunk;
+            uint64_t chi = clo + chunk;
+            if (chi > ahi) chi = ahi;
+            WP30Scratch sc;
+            uint64_t found = 0;
+            if (w_p30_scratch_init(&sc, nbp, root, W_P30_SEG_BYTES)) {
+                w_p30_chunk(clo, chi, bp, nbp, pat, &sc, need - acc, &found, NULL, 0, NULL);
+                w_p30_scratch_free(&sc);
+            }
+            free(counts); free(bp); free(pat);
+            return found;
+        }
+        /* undershot the estimate — extend and try again */
+        need -= total;
+        lo = ahi;
+        root_hi = ahi + ahi / 16 + 1000;
+        free(counts); free(bp); free(pat);
+    }
+}
+
+uint64_t w_nth_prime_u64(uint64_t n) {
+    if (n == 0) return 0;
+    const WPrimeCk *ck = w_prime_ck_by_rank(n);
+    if (ck && ck->n == n) return ck->p;
+    return w_nth_prime_from(n, ck ? ck->n : 0, ck ? ck->p : 0);
+}
+
+/* WValue wrappers */
+WValue w_nth_prime_u64_w(WValue n) {
+    return w_int((int64_t)w_nth_prime_u64((uint64_t)w_as_int(n)));
+}
+WValue w_prime_pi_u64_w(WValue hi) {
+    return w_int((int64_t)w_prime_pi_u64((uint64_t)w_as_int(hi)));
+}
+
+
+
+/* ---- Int.primes(n): the first n primes, in order ------------------------
+ * Two passes over the same chunk decomposition: pass 1 counts each chunk in
+ * parallel (that is the expensive part), a prefix sum turns those counts into
+ * write offsets, and pass 2 re-sieves each chunk in parallel writing straight
+ * into its own slice of the output. No locks, no ordering problem. */
+typedef struct {
+    uint64_t lo, chunk, nchunks, root, cap;
+    const uint64_t *bp; int nbp;
+    const uint8_t *pat;
+    const uint64_t *offs;      /* write offset of each chunk */
+    const uint64_t *counts;
+    uint64_t *out;
+    _Atomic uint64_t next;
+} WP30Fill;
+
+static void *w_p30_fill_worker(void *arg) {
+    WP30Fill *f = (WP30Fill *)arg;
+    WP30Scratch sc;
+    if (!w_p30_scratch_init(&sc, f->nbp, f->root, W_P30_SEG_BYTES)) return NULL;
+    for (;;) {
+        uint64_t c = atomic_fetch_add(&f->next, (uint64_t)1);
+        if (c >= f->nchunks) break;
+        if (f->offs[c] >= f->cap) continue;
+        uint64_t clo = f->lo + c * f->chunk;
+        uint64_t chi = clo + f->chunk;
+        uint64_t room = f->cap - f->offs[c];
+        uint64_t wrote = 0;
+        w_p30_chunk(clo, chi, f->bp, f->nbp, f->pat, &sc, 0, NULL,
+                    f->out + f->offs[c], room, &wrote);
+    }
+    w_p30_scratch_free(&sc);
+    return NULL;
+}
+
+/* Fills out[0..n) with the first n primes. Returns how many were written. */
+static uint64_t w_primes_first_fill(uint64_t n, uint64_t *out) {
+    if (n == 0) return 0;
+    static const uint64_t SMALL[3] = {2, 3, 5};
+    uint64_t head = n < 3 ? n : 3;
+    for (uint64_t i = 0; i < head; i++) out[i] = SMALL[i];
+    if (n <= 3) return n;
+
+    uint64_t need = n - 3;              /* the wheel supplies everything ≥ 7 */
+    double dn = (double)n;
+    double ln = log(dn < 6.0 ? 6.0 : dn), lnln = log(ln > 1.0 ? ln : 2.0);
+    uint64_t hi = (uint64_t)(dn * (ln + lnln)) + 64;
+    uint64_t lo = 0;
+
+    for (;;) {
+        uint64_t ahi = ((hi / 30) + 1) * 30;
+        uint64_t root = w_isqrt_u64(ahi);
+        int nbp = 0;
+        uint64_t *bp = w_p30_base_primes(root, &nbp);
+        uint8_t *pat = w_p30_pattern();
+        if (!bp || !pat) { free(bp); free(pat); return head; }
+
+        uint64_t *counts = NULL, chunk = 0, nchunks = 0;
+        uint64_t total = w_p30_sieve_parallel(lo, ahi, root, bp, nbp, pat,
+                                              &counts, &chunk, &nchunks);
+        if (total < need) {                       /* estimate fell short */
+            free(counts); free(bp); free(pat);
+            hi += hi / 8 + 1000;
+            continue;
+        }
+        uint64_t *offs = (uint64_t *)malloc((size_t)(nchunks + 1) * sizeof(uint64_t));
+        if (!offs) { free(counts); free(bp); free(pat); return head; }
+        uint64_t acc = 0;
+        for (uint64_t c = 0; c < nchunks; c++) { offs[c] = acc; acc += counts[c]; }
+
+        WP30Fill f;
+        f.lo = lo; f.chunk = chunk; f.nchunks = nchunks; f.root = root; f.cap = need;
+        f.bp = bp; f.nbp = nbp; f.pat = pat; f.offs = offs; f.counts = counts;
+        f.out = out + 3;
+        atomic_init(&f.next, (uint64_t)0);
+        int T = w_p30_threads();
+        int nth = (int)(nchunks < (uint64_t)T ? nchunks : (uint64_t)T);
+        pthread_t th[64];
+        int live = 0;
+        for (int t = 1; t < nth; t++)
+            if (pthread_create(&th[live], NULL, w_p30_fill_worker, &f) == 0) live++;
+        w_p30_fill_worker(&f);
+        for (int t = 0; t < live; t++) pthread_join(th[t], NULL);
+
+        free(offs); free(counts); free(bp); free(pat);
+        return n;
+    }
+}
+
+WValue w_primes_first_w(WValue nv) {
+    int64_t n = w_as_int(nv);
+    if (n < 0) n = 0;
+    if (n > 200000000LL)
+        w_raise(w_string("Int.primes: refusing above 200M primes (1.6 GB) — sieve a range instead"));
+    WValue arr = w_array_zeros(66, n);          /* ebits 66 = i64 */
+    if (n == 0) return arr;
+    WArray *a = w_as_array(arr);
+    uint64_t *out = (uint64_t *)a->slots + a->start;
+    w_primes_first_fill((uint64_t)n, out);
+    return arr;
+}
+
+/* π(lo..hi) — the public entry point the fused `range /prime? :count`
+ * pipeline calls. Routes to the mod-30 bit sieve, and uses the prime
+ * checkpoints to skip the range below the nearest tabulated prime when that
+ * is cheaper than sieving it. w_prime_count_u64_mod6 is the previous mod-6
+ * byte-per-candidate implementation, kept as a cross-check oracle. */
+uint64_t w_prime_count_u64(uint64_t lo, uint64_t hi) {
+    if (hi < 2 || hi < lo) return 0;
+    if (lo < 2) lo = 2;
+    if (lo == 2) return w_prime_pi_u64(hi);
+    const WPrimeCk *ch = w_prime_ck_by_value(hi);
+    const WPrimeCk *cl = w_prime_ck_by_value(lo - 1);
+    uint64_t direct = hi - lo;
+    uint64_t viack = (ch ? hi - ch->p : hi) + (cl ? (lo - 1) - cl->p : lo);
+    if (ch && viack < direct) return w_prime_pi_u64(hi) - w_prime_pi_u64(lo - 1);
+    return w_p30_count_u64(lo, hi);
+}
+
+/* Build-time preflight. macOS runs a first-execution malware scan
+ * (AppleSystemPolicy -> syspolicyd -> XProtect YARA) on every new executable
+ * vnode, ~150-250 ms, keyed by vnode and cached until the file is replaced —
+ * and clang -o replaces the file on every link. The compiler therefore spawns
+ * each freshly linked binary once with TUNGSTEN_PREFLIGHT set, detached, so
+ * the scan happens during the build's tail instead of the user's first run.
+ * This must be the first thing main does: the scan completes during exec, so
+ * exiting here is enough, and nothing observable has happened yet. */
+void w_preflight(void) {
+    const char *e = getenv("TUNGSTEN_PREFLIGHT");
+    if (e && *e) _exit(0);
+}
+
+/* Number of cores this machine will actually run threads on — the same
+ * answer as System.cpu_count (w_cpu_count), exposed raw for call_direct_i64
+ * and as a __w_ builtin. */
+int64_t w_cpu_count_i64(void) { return w_as_int(w_cpu_count()); }
+WValue __w_cpu_count(void) { return w_cpu_count(); }
+
+/* L1 data-cache size in bytes for the cores work actually runs on. Apple
+ * Silicon's generic hw.l1dcachesize reports the E-core (64 KB on M3 Max);
+ * hw.perflevel0.l1dcachesize is the P-core (128 KB), which is what a
+ * cache-sized sieve segment should match. Falls back to 128 KB. */
+int64_t w_l1d_cache_bytes_i64(void) {
+#ifdef __APPLE__
+    int64_t v = 0; size_t len = sizeof(v);
+    if (sysctlbyname("hw.perflevel0.l1dcachesize", &v, &len, NULL, 0) == 0 && v > 0) return v;
+    len = sizeof(v);
+    if (sysctlbyname("hw.l1dcachesize", &v, &len, NULL, 0) == 0 && v > 0) return v;
+#endif
+    return 128 * 1024;
+}
+WValue __w_l1d_cache_bytes(void) { return w_int(w_l1d_cache_bytes_i64()); }
+
+/* L2 cache bytes for the same cores (P-core perflevel on Apple Silicon; the
+ * generic hw.l2cachesize reports the E-core's). Falls back to 4 MB. */
+int64_t w_l2_cache_bytes_i64(void) {
+#ifdef __APPLE__
+    int64_t v = 0; size_t len = sizeof(v);
+    if (sysctlbyname("hw.perflevel0.l2cachesize", &v, &len, NULL, 0) == 0 && v > 0) return v;
+    len = sizeof(v);
+    if (sysctlbyname("hw.l2cachesize", &v, &len, NULL, 0) == 0 && v > 0) return v;
+#endif
+    return 4 * 1024 * 1024;
+}
+WValue __w_l2_cache_bytes(void) { return w_int(w_l2_cache_bytes_i64()); }
+
+/* Cores sharing one L2 (the P-core cluster on Apple Silicon: hw.perflevel0
+ * .cpusperl2; hw.cacheconfig[2] otherwise). The per-core L2 share is
+ * l2_cache_bytes / cpus_per_l2 — what a thread can count on when every core
+ * of its cluster is busy. Falls back to 1. */
+int64_t w_cpus_per_l2_i64(void) {
+#ifdef __APPLE__
+    int64_t v = 0; size_t len = sizeof(v);
+    if (sysctlbyname("hw.perflevel0.cpusperl2", &v, &len, NULL, 0) == 0 && v > 0) return v;
+    uint64_t cfg[8] = {0}; len = sizeof(cfg);
+    if (sysctlbyname("hw.cacheconfig", cfg, &len, NULL, 0) == 0 && cfg[2] > 0) return (int64_t)cfg[2];
+#endif
+    return 1;
+}
+WValue __w_cpus_per_l2(void) { return w_int(w_cpus_per_l2_i64()); }
 
 /* Raw-i64 entry points for prime?/prime_12k?/prime_30k? on a known-Int receiver.
  * The compiled lowering calls these directly (call_direct_i64), skipping WValue

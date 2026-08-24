@@ -262,6 +262,73 @@ large campaign.  The settled first increment is deliberately smaller:
   identity — the c7a2ded width-narrowing showed source-preserving edits
   can silently change emitted code, so one-shot certification decays.
 
+## Per-array alias scopes — LANDED, follow-ups
+
+Landed as an automatic compiler feature (ported from the archive's 2a336cfb):
+array-typed params of a typed-signature fn are assumed pairwise distinct
+(documented Fortran-style rule; TUNGSTEN_NO_ALIAS_SCOPES=1 disables), payload
+accesses carry per-slot !alias.scope/!noalias. Scope ids are fixed per slot
+(`compiler/lib/emitter/analysis.w` alias_scope_md_defs) — scoped-noalias is
+intra-function and the inliner clones callee scopes, so functions can share
+them and the rendered text stays cache/parallel/stage-identical. Measured
+~2-3% single-threaded on the sieve; enabled NEON vectorization of the presieve
+OR kernel once its inner loops were restructured to a single dead-local
+induction (the loop vectorizer refuses live-out inductions regardless of
+aliasing).
+
+Follow-ups:
+- Locally allocated arrays (u8[n] in fn bodies) could join the scope set —
+  today only params get slots.
+- Same-array-through-two-params misuse is undefined; a debug mode could
+  check pairwise distinctness at fn entry and trap.
+- The `## i64[]: name` hint path could also register slots for hinted
+  locals in untyped fns.
+- The fused-elementwise `ewscope` metadata (per fusion site, counter-numbered)
+  could move onto the same fixed-id scheme and stop bypassing the rendered-
+  function cache.
+
+## Guaranteed compile-time folding (`comptime`)
+
+Today the compiler folds exactly three names — `l1d_cache_bytes`,
+`l2_cache_bytes` and `cpus_per_l2` — into literals in native builds
+(`host_cache_bytes` in `compiler/lib/lowering/pass_registry.w`,
+`host_native_build?` gates it; cross-targets keep the runtime call). That is
+ad hoc: a hard-coded name list, no way for user code to ask for it, and no
+error when it silently doesn't happen. The prime sieve (`core/prime_sieve.w`)
+shows what a general mechanism would buy: its wheel tables (`dr`/`ctab`/`bitm`),
+the 16 presieve tables, the popcount table and the 175-rung checkpoint ladder
+are all pure functions of constants, rebuilt at runtime on every call and held
+in per-call heap arrays instead of living in the static slab as literals.
+
+Goal: a language-level way to *demand* folding — `comptime <expr>` (or a
+`## comptime` hint on an assignment) — with a compile error, not a fallback, if
+the expression cannot be evaluated at compile time. Evaluation runs the
+compiler's embedded interpreter (`compiler/lib/interpreter.w`) over the
+expression at lowering time; the result must be an int/float/string or a typed
+array, and is emitted as a literal or a static-slab constant so the runtime
+never computes it. Typed-array sizes derived from such values become loop trip
+constants for LLVM.
+
+Constraints learned the hard way (2026-08-24):
+- **Self-hosting determinism.** A fold that consults a runtime builtin the
+  bootstrap VM lacks makes stage 1 and stage 2 disagree — the fold rewrote its
+  own implementation. Anything comptime reads from the host must resolve
+  identically under the C VM and under the compiled compiler (the cache
+  constants go through a memoized `sysctl` capture for exactly this reason).
+  Purity of the folded expression should be checked, not assumed.
+- **Host vs target.** Cache sizes, `cpu_count`, endianness are *host* facts;
+  under `--target` they must either come from a target description or refuse to
+  fold. `env`/`capture`/`clock` inside a comptime expression is an error.
+- **Budget.** Bound evaluation (instruction count / time) so a runaway
+  comptime loop fails the compile instead of hanging it.
+- **Reproducibility.** Folded values should be recorded in the `.sidemap` (or
+  a `--print-comptime` flag) so a build can be audited for what it baked in.
+
+Rollout: (1) `comptime` on int expressions only (replace the three hard-coded
+names with it); (2) typed-array results into the static slab; (3) make the
+sieve's tables and ladder `comptime`; (4) `## comptime` hint form and the
+error-on-failure guarantee across all three bootstrap hosts.
+
 ## Engineering roadmap (2026-08-11)
 
 This is the execution checklist for the compiler/runtime review. A checked item

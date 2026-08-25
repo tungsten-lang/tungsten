@@ -80,6 +80,7 @@
   auto :IntegerChainComplexCertificate, "algebra/chain_complex"
   auto :ToricFan2D, "algebra/toric_fan"
   auto :LatticeTriangulation, "algebra/toric_fan"
+  auto :FiniteLattice, "algebra/finite_lattice"
   auto :Combinatorics, "combinatorics"
   auto :PolyominoEnumeration, "combinatorics/polyomino"
   auto :LatticeAnimal, "combinatorics/lattice_animal"

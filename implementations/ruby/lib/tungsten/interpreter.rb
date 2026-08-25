@@ -1634,6 +1634,10 @@ module Tungsten
             w_class.define_method(expr.name.to_s, w_method)
           when Tungsten::AST::Is
             trait = @modules[expr.trait_name]
+            if trait.nil?
+              try_autoload_core(expr.trait_name.to_s)
+              trait = @modules[expr.trait_name]
+            end
             runtime_error("unknown trait '#{expr.trait_name}'", node: expr) unless trait
             w_class.include_trait(trait)
           when Tungsten::AST::Call
@@ -3152,7 +3156,12 @@ module Tungsten
       root = find_project_root(base_dir)
       return nil unless root
 
-      core_path = File.join(root, "core", "#{name.downcase}.w")
+      # The autoload manifest (core/tungsten.w's `auto :Name, "path"` table)
+      # is the authority on where a stdlib class or trait lives — e.g.
+      # Comparable is core/traits/comparable.w, not core/comparable.w. Fall
+      # back to the flat downcased filename for names outside the table.
+      relative = core_autoload_table(root)[name.to_s]
+      core_path = File.join(root, "core", "#{relative || name.downcase}.w")
       return nil unless File.exist?(core_path)
       return nil if @loaded_files.key?(core_path)
 
@@ -3169,6 +3178,19 @@ module Tungsten
       end
 
       @classes[name] || @modules[name]
+    end
+
+    def core_autoload_table(root)
+      @core_autoload_table ||= begin
+        table = {}
+        manifest = File.join(root, "core", "tungsten.w")
+        if File.exist?(manifest)
+          File.read(manifest).scan(/^\s*auto\s+:(\w+),\s*"([^"]+)"/) do |name, path|
+            table[name] ||= path
+          end
+        end
+        table
+      end
     end
 
     def ruby_constant_for_w_class(name)
@@ -4124,6 +4146,10 @@ module Tungsten
     def visit_is(node)
       # `is TraitName` inside a class body — mix in the trait's methods
       trait = @modules[node.trait_name]
+      if trait.nil?
+        try_autoload_core(node.trait_name.to_s)
+        trait = @modules[node.trait_name]
+      end
       runtime_error("unknown trait '#{node.trait_name}'", node: node) unless trait
 
       # Find the class being defined (the current self's class, or the class on the stack)

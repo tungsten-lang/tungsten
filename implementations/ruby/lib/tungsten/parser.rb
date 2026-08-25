@@ -9,8 +9,18 @@ module Tungsten
     # != !== !~ are defined in terms of equality operators
     # || &&     are not user-definable
     # <= < > >= are not user-definable, use <=>
-    VALID_METHOD_NAMES = %i[ID ID_WITH_ARITY TYPE KEYWORD << == === =~ >> + - * / // ~ ~~ % %% & &( | ^ ** [] []? []= <=> <-> %+ %- %* %** +@ -@ ~@]
+    VALID_METHOD_NAMES = %i[ID ID_WITH_ARITY TYPE KEYWORD NAME CONSTANT << == === =~ >> + - * / // ~ ~~ % %% & &( | ^ ** [] []? []= <=> <-> %+ %- %* %** +@ -@ ~@ < > <= >= != ! !~ ≈ <(]
+
+    # Operator tokens that can follow a `.` as an explicit method call
+    # (`self.<=>(other)`, `a.+(b)`) — the compiled parser routes dot-call
+    # names through the same expect_method_name_value as definitions.
+    DOT_OPERATOR_NAMES = %i[| ^ << == === =~ >> + - * / // ~ ~~ % %% ** <=> <-> < > <= >= != !~ ≈ %+ %- %* %**]
     EMPTY_ARGS = [].freeze
+
+    # `<` already consumed: an identifier/int hard against a `>`, `,`, or
+    # unit operator commits to a generic type-argument list. Mirrors the
+    # compiled parser's parse_type_args_if_present lookahead.
+    GENERIC_ARGS_AHEAD = /(?:[A-Za-z_][A-Za-z0-9_]*|[ℂℍℕℙℚℝℤ]|\d+)[>,\/*·]/
     SOFT_IDENTIFIER_KEYWORDS = %i[with].freeze
 
     Unclosed = Struct.new(:name, :file, :row, :col) do
@@ -21,6 +31,21 @@ module Tungsten
 
     def self.parse(str)
       new(str).parse.set_parents!
+    end
+
+    # A string-interpolation fragment parses as ONE expression; trailing
+    # text is ignored. Mirrors the compiled parser's parse_string_interp,
+    # which reads a single parse_expression from the fragment source, so
+    # literal-bracket text like "[generator, exponent]" degrades the same
+    # way in both engines instead of erroring at statement level.
+    def self.parse_expression_fragment(str)
+      new(str).parse_fragment_expression
+    end
+
+    def parse_fragment_expression
+      skip_indent
+      next_token
+      parse_expression.set_parents!
     end
 
     def initialize(str)
@@ -192,9 +217,9 @@ module Tungsten
       fused_and_call = @token.type?(:"&(")
       operator_name = case @token.type
                       when :"&(", :"&" then "&"
-                      when :"|", :"^" then @token.type.to_s
+                      when *DOT_OPERATOR_NAMES then @token.type.to_s
                       end
-      check_for :ID, :NAME, :KEYWORD, :TYPE, :"&(", :"&", :"|", :"^"
+      check_for :ID, :NAME, :KEYWORD, :TYPE, :"&(", :"&", *DOT_OPERATOR_NAMES
 
       name = operator_name || @token.value.to_s
       name_file = @token.file
@@ -219,7 +244,10 @@ module Tungsten
       start_file = @token.file
       start_col = @token.col
 
-      if @in_class_body && @token.type?(:-)
+      # `- data` declarations are class-body STATEMENTS; allow_multi_assign
+      # is only passed at statement level, which keeps a parenthesized
+      # unary minus (`(-(x)).abs`) inside a class body out of this branch.
+      if allow_multi_assign && @in_class_body && @token.type?(:-)
         node = parse_data_declaration
         node.set_location(start_file, start_row, start_col)
         return node
@@ -266,7 +294,7 @@ module Tungsten
           exp.set_location(loc_file, loc_row, loc_col)
           return exp
         else
-          raise_error "expected '=' after multi-assignment targets"
+          error "expected '=' after multi-assignment targets"
         end
       end
 
@@ -275,11 +303,11 @@ module Tungsten
       # parser's MultiAssign desugar.
       if @token.type?(:"<>")
         exp = Var.new(exp.name) if exp.is_a?(Call) && !exp.obj && (exp.args.nil? || exp.args.empty?) && exp.block.nil?
-        raise_error "expected a variable on the left of '<>'" unless exp.is_a?(Var)
+        error "expected a variable on the left of '<>'" unless exp.is_a?(Var)
         next_token_skip_whitespace
         rhs = parse_ternary
         rhs = Var.new(rhs.name) if rhs.is_a?(Call) && !rhs.obj && (rhs.args.nil? || rhs.args.empty?) && rhs.block.nil?
-        raise_error "expected a variable on the right of '<>'" unless rhs.is_a?(Var)
+        error "expected a variable on the right of '<>'" unless rhs.is_a?(Var)
         push_var(exp)
         push_var(rhs)
         value = ArrayLiteral.new([Var.new(rhs.name), Var.new(exp.name)])
@@ -334,7 +362,11 @@ module Tungsten
               unexpected
             end
 
-      check_for :SP, :NL, :EOF, :"=>", :")"
+      # A suffix condition can end with a multi-line block (`... .all? ->`
+      # plus an indented body) whose dedent already crossed the statement
+      # boundary; the next token then legitimately starts the next
+      # statement on a later row.
+      check_for :SP, :NL, :EOF, :"=>", :")" unless @token.row > start_row
 
       exp
     end
@@ -879,14 +911,20 @@ module Tungsten
           end
         when :".", :"&."
           next_token_skip_space
+          # Inside brackets the compiled lexer emits no NL tokens, so a
+          # trailing dot may continue the chain on the next line:
+          #   (a +
+          #    b.
+          #      method)
+          skip_whitespace if @token.type?(:NL) && inside_brackets?
           # :TYPE included so reserved type names double as method names
           # after a dot (`Tensor.bf16`) — the compiled parser accepts this.
           fused_and_call = @token.type?(:"&(")
           operator_name = case @token.type
                           when :"&(", :"&" then "&"
-                          when :"|", :"^" then @token.type.to_s
+                          when *DOT_OPERATOR_NAMES then @token.type.to_s
                           end
-          check_for :ID, :NAME, :KEYWORD, :TYPE, :"&(", :"&", :"|", :"^"
+          check_for :ID, :NAME, :KEYWORD, :TYPE, :"&(", :"&", *DOT_OPERATOR_NAMES
 
           name = operator_name || @token.value.to_s
           name_file = @token.file
@@ -1046,7 +1084,7 @@ module Tungsten
           if type == :str
             StringLiteral.new(val)
           else
-            Tungsten::Parser.parse(val)
+            Tungsten::Parser.parse_expression_fragment(val)
           end
         end
         node_and_next_token StringInterpolation.new(parts)
@@ -1431,6 +1469,23 @@ module Tungsten
       loc_col = @token.col
       next_token_skip_whitespace
       bindings = []
+
+      # Class/trait body constraint clause: `with T in (Type1 Type2 ...)` —
+      # generic-constraint metadata for monomorphization. The tree-walking
+      # interpreter erases generics, so consume it as a no-op; the compiled
+      # parser collects it and emits Nil into the body the same way.
+      if @in_class_body && name_like_token? && check(/ in \(/)
+        next_token_skip_whitespace  # past the type-param name
+        next_token_skip_whitespace  # past `in`
+        consume :"("
+        until @token.type?(:")") || @token.type?(:NL) || @token.type?(:EOF)
+          next_token
+        end
+        consume :")"
+        node = Nil.new
+        node.set_location(loc_file, loc_row, loc_col)
+        return node
+      end
 
       loop do
         check_for :ID, :NAME
@@ -1864,6 +1919,17 @@ module Tungsten
       end
       name = AST.intern_name("#{@namespace_prefix}:#{name}") if @namespace_prefix && !name.to_s.include?(":")
 
+      # Generic type parameters: `+ Poly<K>` / `+ ProjectiveSpace<K, N>`.
+      # Same lookahead as the compiled parser's parse_type_args_if_present;
+      # the tree-walking interpreter erases type parameters, so consume and
+      # drop them. `< Parent` inheritance never matches — the space after
+      # `<` breaks the pattern.
+      if @token.type?(:"<") && check(GENERIC_ARGS_AHEAD)
+        next_token until @token.type?(:">") || @token.type?(:NL) || @token.type?(:EOF)
+        consume :">"
+        skip_space
+      end
+
       superclass = nil
       class_role = nil
 
@@ -2076,12 +2142,29 @@ module Tungsten
         error "use '-> .method_name' for class methods (not '-> self.method_name')"
       end
 
-      fused_and_parameters = @token.type?(:"&(")
+      fused_and_parameters = @token.type?(:"&(") || @token.type?(:"<(")
       name = parse_method_name
       arity = extract_arity(name)
       base_name = arity ? name.to_s.split("/", 2)[0] : name
 
       next_token
+
+      # `-> ==/1` — operator methods take their arity via a trailing slash
+      # (identifier names arrive pre-fused as ID_WITH_ARITY). Mirrors the
+      # compiled parser's T_SLASH arity branch.
+      if arity.nil? && @token.type?(:"/")
+        next_token
+        if @token.type?(:"*")
+          arity = 0
+        elsif @token.type?(:"&")
+          arity = :block
+        elsif @token.type?(:INT)
+          arity = @token.value.to_i
+        else
+          unexpected "expected arity after '/'"
+        end
+        next_token
+      end
 
       trailing_expr = nil
       inline_body = false
@@ -2121,11 +2204,14 @@ module Tungsten
             inline_body = true
           end
         else
-          # don't skip nl, looks ugly to start arguments on next line
+          # The compiled lexer emits no NL tokens inside parens, so the
+          # self-hosted parser accepts signatures that wrap after the
+          # opening paren (e.g. core/algebra.w's maximal_order). Skip
+          # newlines here to stay in sync.
           if fused_and_parameters
-            skip_space
+            skip_whitespace
           else
-            next_token_skip_space
+            next_token_skip_whitespace
           end
           parse_method_args
           consume :")"
@@ -2364,7 +2450,7 @@ module Tungsten
     # -> (a, b)          anonymous lambda with block body
     #   a + b
     def parse_anonymous_lambda(node_class: Def)
-      next_token_skip_space
+      next_token_skip_whitespace
       parse_method_args
       consume :")"
 
@@ -2389,6 +2475,10 @@ module Tungsten
     end
 
     def extract_arity(name)
+      # Only identifier names carry `/N` arity suffixes — the compiled
+      # parser guards on the name token type, so the operator method
+      # `-> /(other)` must not read as an arity method here.
+      return nil if name.to_s.start_with?("/")
       return nil unless name.to_s.include?("/")
 
       suffix = name.to_s.split("/", 2)[1]
@@ -2447,10 +2537,11 @@ module Tungsten
 
         @method[:splat_index] = index if @method[:splat_index].nil? && @method[:splat]
 
+        skip_whitespace
+
         if @token.comma?
           next_token_skip_whitespace
         else
-          skip_space
           check_for :")"
         end
 
@@ -2577,10 +2668,18 @@ module Tungsten
         check_valid_method_name
 
         @token.value
+      # PascalCase / SCREAMING names (`-> LC`) — the compiled parser's
+      # expect_method_name_value accepts T_NAME and T_CONSTANT too.
+      when :NAME, :CONSTANT
+        @token.value
       when :KEYWORD
         @token.value.to_s
       when :"&("
         "&"
+      when :"<("
+        # The lexer fuses `<(` for sandwich literals; after `-> ` it is the
+        # `<` method name with its parameter paren already consumed.
+        "<"
       else
         # operator
         @token.type.to_s
@@ -2593,6 +2692,16 @@ module Tungsten
 
     def identifier_name_token?
       @token.type?(:ID) || @token.type?(:TYPE) || soft_identifier_keyword?
+    end
+
+    # Any token that can name a type parameter: `K`, `Row`, `t`, `i64`.
+    def name_like_token?
+      @token.type?(:ID) || @token.type?(:NAME) || @token.type?(:CONSTANT) || @token.type?(:TYPE)
+    end
+
+    def inside_brackets?
+      depth = @lexer_adapter ? @lexer_adapter.bracket_depth : @bracket_depth
+      depth.to_i.positive?
     end
 
     def label_colon_ahead?
@@ -2702,6 +2811,7 @@ module Tungsten
 
     def parse_var_or_call
       name = @token.value
+      is_class_ref = @token.type?(:NAME)
       loc_file = @token.file
       loc_row = @token.row
       loc_col = @token.col
@@ -2731,6 +2841,17 @@ module Tungsten
         node = Path.new(path_names)
         node.set_location(loc_file, loc_row, loc_col)
         return node
+      end
+
+      # Generic instantiation: `Foo<T>.method` / `Foo<T, U>.new(...)`. Same
+      # lookahead as the compiled parser's parse_type_args_if_present —
+      # commit only on `<` IDENT (`>`|`,`|`/`|`*`|`·`) with no spaces, so
+      # `a < b` comparisons are untouched. The tree-walking interpreter
+      # deliberately erases generic type arguments (see
+      # core/algebra/projective.w), so consume and drop them.
+      if is_class_ref && @token.type?(:"<") && check(GENERIC_ARGS_AHEAD)
+        next_token until @token.type?(:">") || @token.type?(:NL) || @token.type?(:EOF)
+        consume :">"
       end
 
       args  = parse_call_args
@@ -2950,6 +3071,11 @@ module Tungsten
         end
       elsif @token.type?(:EOF) || @token.type?(:DEDENT)
         body = List.new
+      elsif @token.type?(:KEYWORD) && %i[return break next].include?(@token.value)
+        # Control flow as the inline body: ->(x) return false if x < 0 —
+        # a non-local return from the enclosing method, legal in the
+        # compiled parser. parse_assignment_no_control would void-check it.
+        body = parse_expression
       else
         # Inline expression: ->(x) x * 2, ->(x) return false unless x
         # Also handles hash literals: ->(x) {"key": x}

@@ -26,6 +26,7 @@ module Tungsten
 
   class Lexer < StringScanner
     attr_accessor :file
+    attr_reader :bracket_depth
 
     def initialize(code)
       debug(code) if $debug
@@ -323,7 +324,15 @@ module Tungsten
 
       # Type hints: ## type_name ... (only when starting with a known type or type:var pattern)
       elsif skip_scan(TYPE_HINT_START)
-        hint = scan(/[^\n]*/)&.strip || ""
+        # Inside brackets, `=` and the structural followers `]` `)` `,`
+        # `;` `:` `?` end the hint, so `[0 ## big, 0 ## big]` keeps its
+        # elements; a bracketed `T[4]` stays one hint (mirrors the
+        # compiled lexer). At top level the whole-line scan is preserved.
+        hint = if @bracket_depth.positive?
+                 scan(/(?:[^\n=\[\]),;:?]|\[[^\]\n]*\])*/)&.strip || ""
+               else
+                 scan(/[^\n]*/)&.strip || ""
+               end
         token :TYPE_HINT, hint unless hint.empty?
       elsif skip_scan(/## */)
         scan_comment
@@ -429,6 +438,9 @@ module Tungsten
       elsif skip_scan(/"(?!>(?:\s|$))/)
         scan_string
 
+      elsif skip_scan(/'/)
+        scan_single_quoted_string
+
       elsif regex_literal_allowed? && !check(%r{//|/=}) && check(%r{/}) && regex_literal_ahead?
         scan_regex_literal
 
@@ -492,6 +504,12 @@ module Tungsten
 
       # @todo consider renaming
       elsif (text = scan(/[A-Z][a-zA-Z0-9_]*/))
+        token :NAME, text
+
+      # Double-struck capitals are uppercase letters in the compiled lexer's
+      # Unicode tables and name classes (e.g. ProjectiveSpace<ℚ, 2>).
+      # ℇ (Euler) stays with the lowercase unicode identifiers below.
+      elsif (text = scan(/[ℂℍℕℙℚℝℤ][a-zA-Z0-9_]*/))
         token :NAME, text
 
       # @todo consider renaming...gvar, ivar, var
@@ -607,7 +625,7 @@ module Tungsten
       # => -> []= []? []
       # e.g. -> [](x)
       # e.g. -> []=(i, value)
-      elsif (text = scan(%r[(?:(?<=^)|(?<=[\s.]))(=>|->|\[\]=|\[\]\?|\[\])(?=\s|$|\()]))
+      elsif (text = scan(%r[(?:(?<=^)|(?<=[\s.]))(=>|->|\[\]=|\[\]\?|\[\])(?=\s|$|\(|/)]))
         token text.to_sym
 
       # assignment operators
@@ -1168,6 +1186,33 @@ module Tungsten
       end
     end
 
+    # Single-quoted string: full escape processing, NO `[expr]`
+    # interpolation — matches the compiled lexer.
+    def scan_single_quoted_string
+      str = ""
+
+      until skip_scan(/'/)
+        if eos?
+          error "unterminated string"
+
+        elsif skip_scan(/\\n/)  then str << "\n"
+        elsif skip_scan(/\\r/)  then str << "\r"
+        elsif skip_scan(/\\t/)  then str << "\t"
+        elsif skip_scan(/\\e\[/) then str << "\e["
+        elsif skip_scan(/\\e/)  then str << "\e"
+        elsif (text = scan(/\\u([0-9a-fA-F]{4})/)) then str << [text[2..5].to_i(16)].pack("U")
+        elsif skip_scan(/\\\\/) then str << "\\"
+        elsif skip_scan(/\\'/)  then str << "'"
+        elsif (text = scan(/[^'\\]+/))
+          str << text
+        else
+          str << scan(/./)
+        end
+      end
+
+      token :STRING, str
+    end
+
     def scan_string
       parts = []
       str = ""
@@ -1325,7 +1370,13 @@ module Tungsten
     KEYWORD_REGEX = /(#{KEYWORD_PATTERN})\b/
     TYPE_NAME_PATTERN = TYPE_NAMES.join("|").freeze
     TYPE_NAME_REGEX = /(#{TYPE_NAME_PATTERN})\b/
-    TYPE_HINT_START = /## +(?=(?:#{TYPE_NAME_PATTERN})\b|[a-z]\w*:)/
+    # Hint-only words: legal after `##` but not reserved :TYPE tokens.
+    # (`## big` boxes a BigInt; recycle/reuse/no_raise are allocation and
+    # exception hints.) The compiled lexer takes ANY `## ` run as a hint,
+    # but doc/examples' `## expect ...` expectation comments rely on
+    # unknown words staying comments here.
+    TYPE_HINT_WORDS = (TYPE_NAMES + %w[big recycle reuse no_raise]).freeze
+    TYPE_HINT_START = /## +(?=(?:#{TYPE_HINT_WORDS.join("|")})\b|[a-z]\w*:)/
 
     SIGN = /[+−-]/
 

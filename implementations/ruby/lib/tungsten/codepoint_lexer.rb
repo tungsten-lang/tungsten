@@ -11,6 +11,7 @@ module Tungsten
   # manual scanner ported from compiler/lib/lexer.w.
   class CodepointLexer
     attr_accessor :file
+    attr_reader :bracket_depth
     attr_reader :profile_branch_counts, :profile_regex_attempts, :profile_regex_hits, :profile_token_counts,
                 :profile_path_counts
 
@@ -31,6 +32,7 @@ module Tungsten
       by_length.freeze
     end.freeze
     TYPE_NAMES = Lexer::TYPE_NAMES.to_h { |name| [name, true] }.freeze
+    TYPE_HINT_WORDS = Lexer::TYPE_HINT_WORDS.to_h { |name| [name, true] }.freeze
 
     ONE_CHAR_TOKENS = {
       33 => :"!", 36 => :"$", 37 => :%, 38 => :&, 40 => :"(", 41 => :")", 42 => :*, 43 => :+,
@@ -376,8 +378,9 @@ module Tungsten
     end
 
     def method_operator_after?(bytes)
+      # `/` allows arity-suffixed definitions: `-> []/1`, `-> []=/2`.
       b = byte(bytes)
-      b.nil? || b == 32 || b == 10 || b == 40
+      b.nil? || b == 32 || b == 10 || b == 40 || b == 47
     end
 
     def bracket_operator_context?(bytes)
@@ -449,6 +452,8 @@ module Tungsten
         end
 
         return scan_string
+      when 39
+        return scan_single_quoted_string
       when 102
         if (fe80_start? || (hex_reference_literal_possible? && network_literal_shape_possible?)) && scan_network_literal
           return
@@ -1152,8 +1157,22 @@ module Tungsten
         @col += 2 + spaces
         hint_start = @pos
         # A "=" ends the hint: "x ## i64 = 0" is a typed assignment — the
-        # initializer lexes normally (mirrors the self-hosted lexer's rule).
-        advance until eof? || newline_byte?(byte) || byte == 0x3D
+        # initializer lexes normally. Inside brackets the structural
+        # followers `)` `,` `;` `:` `?` and an enclosing `]` end it too,
+        # so `[0 ## big, 0 ## big]` keeps its elements; local `[...]`
+        # depth keeps `T[4]` a single hint (mirrors the compiled lexer).
+        th_brk = 0
+        until eof? || newline_byte?(byte) || byte == 0x3D
+          if byte == 91
+            th_brk += 1
+          elsif byte == 93
+            break if th_brk.zero? && @bracket_depth.positive?
+            th_brk -= 1
+          elsif @bracket_depth.positive? && (byte == 41 || byte == 44 || byte == 59 || byte == 58 || byte == 63)
+            break
+          end
+          advance
+        end
         hint = slice(hint_start).strip
         return set_token(:TYPE_HINT, hint, @row, start_col) unless hint.empty?
       end
@@ -1169,7 +1188,7 @@ module Tungsten
         return true if @source.getbyte(p) == 58
       end
 
-      TYPE_NAMES.each_key do |name|
+      TYPE_HINT_WORDS.each_key do |name|
         len = name.bytesize
         next unless bytes_at?(pos, name)
         return true unless ident_continue_byte?(@source.getbyte(pos + len))
@@ -1202,6 +1221,32 @@ module Tungsten
 
       advance
       set_token(:KEY, content, @row, start_col)
+    end
+
+    # Single-quoted string: full escape processing, NO `[expr]`
+    # interpolation — matches the compiled lexer.
+    def scan_single_quoted_string
+      start_col = @col
+      advance
+      str = +""
+
+      loop do
+        error "unterminated string" if eof?
+
+        case byte
+        when 39
+          advance
+          break
+        when 92
+          scan_string_escape(str)
+        else
+          chunk_start = @pos
+          advance_utf8_char
+          str << slice(chunk_start)
+        end
+      end
+
+      set_token(:STRING, str, @row, start_col)
     end
 
     def scan_string
@@ -2291,6 +2336,7 @@ module Tungsten
       return scan_byte_array if match_bytes?("«")
       return true if scan_currency_literal
       return true if scan_superscript
+      return true if scan_unicode_name
       return true if scan_unicode_identifier
 
       scan_unicode_operator
@@ -2313,6 +2359,21 @@ module Tungsten
 
       advance(match[0].bytesize)
       set_token(:ID, match[0], @row, start_col)
+      true
+    end
+
+    # Double-struck capitals are uppercase letters in the compiled lexer's
+    # Unicode tables and name classes (e.g. ProjectiveSpace<ℚ, 2>).
+    # Kept in lockstep with Lexer's :NAME branch (parity-tested).
+    DOUBLE_STRUCK_NAME = /[ℂℍℕℙℚℝℤ][a-zA-Z0-9_]*/.freeze
+
+    def scan_unicode_name
+      start_col = @col
+      match = match_regex_at(DOUBLE_STRUCK_NAME)
+      return false unless match
+
+      advance(match[0].bytesize)
+      set_token(:NAME, match[0], @row, start_col)
       true
     end
 

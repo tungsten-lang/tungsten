@@ -145,8 +145,8 @@ LANE_LABELS = {
     "boost": "Boost",
 }
 RATIO_LABELS = {
-    "tungsten_native": "C/native",
-    "gmp": "C/GMP",
+    "tungsten_native": "W/native",
+    "gmp": "W/GMP",
 }
 # The V8 lane is limited to operations V8 ships as BigInt builtins: a
 # hand-written JS gcd/lcm/isqrt/powmod would measure the harness author's
@@ -155,6 +155,11 @@ EXTERNAL_UNSUPPORTED = {
     "node": frozenset({"gcd", "lcm", "isqrt", "powmod"}),
 }
 DEFAULT_EXTERNAL_CELL_TIMEOUT_SECONDS = 30.0
+
+
+def ratio_label(lane: str) -> str:
+    """Rendered Tungsten-C-to-peer ratio label."""
+    return RATIO_LABELS.get(lane, "W/" + LANE_LABELS[lane])
 
 
 def parse_csv(value: str, *, integers: bool = False) -> list[Any]:
@@ -1285,7 +1290,7 @@ def print_results_header(metadata: dict[str, Any]) -> None:
     for lane in lanes:
         columns += f" {LANE_LABELS[lane]:>11}"
     for lane in lanes[1:]:
-        label = RATIO_LABELS.get(lane, "C/" + LANE_LABELS[lane])
+        label = ratio_label(lane)
         columns += f" {label:>8}"
     columns += f" {'fastest':<15}"
     print(columns)
@@ -1337,7 +1342,7 @@ def print_results_summary(
             "tungsten_over_peer_geomean"
         ]
         value = f"{geomean:.3f}" if geomean is not None else "n/a"
-        label = RATIO_LABELS.get(lane, "C/" + LANE_LABELS[lane])
+        label = ratio_label(lane)
         ratio_parts.append(f"{label} {value}")
     ratios = "; ".join(ratio_parts)
     print("Overall geometric-mean ratios (lower is better): " + ratios + ".")

@@ -240,7 +240,16 @@ class TungstenNativeLaneTest(unittest.TestCase):
         self.assertEqual(
             BENCH.LANE_LABELS["tungsten_native"], "Tungsten"
         )
-        self.assertEqual(BENCH.RATIO_LABELS["tungsten_native"], "C/native")
+        self.assertEqual(BENCH.RATIO_LABELS["tungsten_native"], "W/native")
+
+    def test_ratio_labels_use_w_for_every_peer_lane(self) -> None:
+        self.assertEqual(BENCH.ratio_label("gmp"), "W/GMP")
+        self.assertEqual(BENCH.ratio_label("python"), "W/Python")
+        self.assertEqual(BENCH.ratio_label("rust"), "W/Rust")
+        self.assertEqual(BENCH.ratio_label("odin"), "W/Odin")
+        self.assertEqual(BENCH.ratio_label("go"), "W/Go")
+        self.assertEqual(BENCH.ratio_label("node"), "W/Node")
+        self.assertEqual(BENCH.ratio_label("boost"), "W/Boost")
 
     def test_native_fastest_label_is_clear_in_the_table(self) -> None:
         row = {

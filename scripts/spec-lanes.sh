@@ -299,6 +299,9 @@ compiled_specs=(
   spec/core/json_parse_spec.w
   spec/core/string_to_i_bignum_spec.w
   spec/core/string_native_spec.w
+  spec/core/ascii_string_spec.w
+  spec/core/string_unicode_spec.w
+  spec/compiler/string_scan_spec.w
   spec/core/control_flow_spec.w
   spec/core/classes_spec.w
   spec/core/arrays_hashes_spec.w
@@ -504,6 +507,8 @@ interpreter_specs=(
   spec/interpreter/slab_decl_spec.w
   spec/interpreter/string_buffer_size_revisit_spec.w
   spec/interpreter/string_empty_native_spec.w
+  spec/core/ascii_string_spec.w
+  spec/core/string_unicode_spec.w
   spec/interpreter/string_to_s_native_spec.w
   spec/interpreter/typed_array_signed_header_spec.w
   spec/interpreter/uuid_byte_revisit_spec.w

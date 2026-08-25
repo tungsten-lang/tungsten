@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(558 total), grouped by area, with its declaration, a one-line
+(559 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -189,11 +189,12 @@ summary from the source header, and a link to the source.
 | `Sandbox` | `+ Sandbox` | Sandboxed execution — the runtime's gate over everything outside the | [`core/sandbox.w`](../core/sandbox.w) |
 | `SmallArray` | `+ SmallArray` | Frozen, stack-allocatable, packed array. Up to 255 elements. | [`core/small_array.w`](../core/small_array.w) |
 | `Socket` | `+ Socket` | Socket — nonblocking TCP sockets integrated with Tungsten's event loop. | [`core/socket.w`](../core/socket.w) |
-| `String` | `+ String` | Native String methods that are safe to express over the WValue itself. | [`core/string_native.w`](../core/string_native.w) |
+| `String` | `+ String` | Tungsten strings are immutable UTF-8 byte sequences. `size` and `length` | [`core/string.w`](../core/string.w) |
 | `StringBuffer` | `+ StringBuffer` | string_buffer - mutable UTF-8 byte-string builder | [`core/string_buffer.w`](../core/string_buffer.w) |
 | `StringBytes` | `+ StringBytes` | Lazy views over a String's content, returned by String#bytes, | [`core/string_enumerators.w`](../core/string_enumerators.w) |
 | `StringCodepoints` | `+ StringCodepoints` | — | [`core/string_enumerators.w`](../core/string_enumerators.w) |
 | `StringCharacters` | `+ StringCharacters` | — | [`core/string_enumerators.w`](../core/string_enumerators.w) |
+| `StringGraphemes` | `+ StringGraphemes` | — | [`core/string_enumerators.w`](../core/string_enumerators.w) |
 | `StringLines` | `+ StringLines` | — | [`core/string_enumerators.w`](../core/string_enumerators.w) |
 | `Symbol` | `+ Symbol` | — | [`core/symbol.w`](../core/symbol.w) |
 | `System` | `+ System` | — | [`core/system.w`](../core/system.w) |

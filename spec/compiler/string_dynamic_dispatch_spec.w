@@ -56,6 +56,18 @@
     total += b
   total
 
+-> dyn_nfd(value)
+  value.nfd
+
+-> dyn_graphemes(value)
+  value.graphemes
+
+-> dyn_camelize(value)
+  value.camelize
+
+-> dyn_scan(value, pat)
+  value.scan(pat)
+
 -> dyn_upcase(value)
   value.upcase
 
@@ -131,3 +143,8 @@ check("dyn.byte_at.negative", dyn_byte_at("abc", -1), 99)
 check("dyn.codepoints", dyn_codepoints("aé").to_a, [97, 233])
 check("dyn.characters", dyn_characters("aé").to_a.join("|"), "a|é")
 check("dyn.each_byte", dyn_each_byte_sum("ab"), 195)
+check("dyn.nfd", dyn_nfd(233.chr), 101.chr + 769.chr)
+check("dyn.nfd.symbol", dyn_nfd(:abc), "abc")
+check("dyn.graphemes", dyn_graphemes("ab").to_a, ["a", "b"])
+check("dyn.camelize", dyn_camelize("a_b"), "AB")
+check("dyn.scan", dyn_scan("x1y2", "y"), ["y"])

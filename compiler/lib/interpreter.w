@@ -1707,6 +1707,15 @@ use target
       return ccall("w_string_take_byte_array", args[1], args[2])
     when "w_string_reverse"
       return ccall("w_string_reverse", args[1])
+    when "w_string_normalize"
+      if args.size() != 3
+        raise "w_string_normalize expects a receiver and a form"
+      nf = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      return ccall("w_string_normalize", args[1], nf)
+    when "w_regex_scan"
+      if args.size() != 3
+        raise "w_regex_scan expects a regex and a subject"
+      return ccall("w_regex_scan", args[1], args[2])
     when "w_regex_scan_char"
       if args.size() != 5
         raise "w_regex_scan_char expects subject, start, length, and codepoint"
@@ -2024,6 +2033,15 @@ use target
       # Stored ASCII content flag (slab/heap/rope) for String#ascii?'s
       # non-inline arm; reboxed so the source body's `== 1` compares Ints.
       return ccall("w_int", ccall_nobox("w_string_is_ascii", args[1]))
+    when "w_string_grapheme_next"
+      if args.size() != 3
+        raise "w_string_grapheme_next expects a receiver and a byte offset"
+      gp = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      return ccall("w_int", ccall_nobox("w_string_grapheme_next", args[1], gp))
+    when "w_is_native_regex"
+      if args.size() != 2
+        raise "w_is_native_regex expects one argument"
+      return ccall("w_int", ccall_nobox("w_is_native_regex", args[1]))
     when "w_string_first_byte"
       if args.size() != 2
         raise "w_string_first_byte expects one argument"
@@ -3527,7 +3545,7 @@ use target
     # String methods are also Symbol#to_s/#empty?/#size/#length. The tree walker
     # ordinarily distinguishes host Symbols from Strings; route these shared
     # methods through String instead of the legacy Symbol scaffold.
-    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length" "ascii?" "blank?" "byte_at" "bytes" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein")
+    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length" "ascii?" "blank?" "byte_at" "bytes" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "nfc" "nfd" "nfkc" "nfkd" "normalize" "graphemes" "each_grapheme" "scan")
       try_autoload_class("String")
       primitive_class = @classes["String"]
     else

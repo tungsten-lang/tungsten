@@ -89,6 +89,22 @@
       sz += 1
     sz
 
++ StringGraphemes
+  is Enumerable
+
+  -> new(@source)
+
+  -> each(&block)
+    @source.each_grapheme -> (g)
+      block(g)
+    self
+
+  -> size
+    sz = 0
+    @source.each_grapheme -> (g)
+      sz += 1
+    sz
+
 + StringLines
   is Enumerable
 

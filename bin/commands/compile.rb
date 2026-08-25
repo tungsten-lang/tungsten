@@ -276,6 +276,7 @@ METAL_FRAMEWORK_FLAGS = MACOS ? ["-framework", "Metal", "-framework", "Foundatio
 ACCELERATE_FRAMEWORK_FLAGS = MACOS ? ["-framework", "Accelerate"] : []
 EXTRA_SRCS  = [(TLS_ENABLED && OPENSSL_PREFIX ? TLS_C : TLS_STUB_C), HTTP2_C, HTTP3_C, (File.exist?(AKS_C) ? AKS_C : nil), (File.exist?(HAMMER_C) ? HAMMER_C : nil)].compact
 LEXCHAR_TABLES_C = File.join(RUNTIME_DIR, "lexchar_tables.c")
+UNICODE_TABLES_C = File.join(RUNTIME_DIR, "unicode_tables.c")
 EXTRA_FLAGS = TLS_FLAGS + HTTP2_FLAGS + HTTP3_FLAGS + URING_FLAGS
 BLAS_BRIDGE_C = File.join(RUNTIME_DIR, "blas_bridge.c")
 # The Apple GPU/HID bridges (and their frameworks, mostly via ObjC
@@ -773,6 +774,9 @@ when ".w"
       clang_sources << BLAS_BRIDGE_C
     end
     clang_sources << SSMR_C if ir_needs_ssmr?(ir) && File.exist?(SSMR_C)
+    if (ir.include?("w_string_normalize") || ir.include?("w_string_grapheme_next")) && File.exist?(UNICODE_TABLES_C)
+      clang_sources << UNICODE_TABLES_C
+    end
     clang_sources << LEXCHAR_TABLES_C if ir_needs_lexchars?(ir) && File.exist?(LEXCHAR_TABLES_C)
     # (no else: runtime.c's weak bridge stubs stand in when the .m files are
     # not linked — same mechanism as the fast path in compiler/tungsten.w)

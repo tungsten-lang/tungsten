@@ -177,14 +177,12 @@
   auto :Sandbox,      "sandbox"
   auto :SmallArray,   "small_array"
   auto :Socket,       "socket"
-  # string.w is the legacy API/design scaffold and is not accepted by the
-  # current parser. Runtime-backed String dispatch loads this small native
-  # implementation instead.
-  auto :String,       "string_native"
+  auto :String,       "string"
   auto :StringBuffer, "string_buffer"
   auto :StringBytes,       "string_enumerators"
   auto :StringCodepoints,  "string_enumerators"
   auto :StringCharacters,  "string_enumerators"
+  auto :StringGraphemes,   "string_enumerators"
   auto :StringLines,       "string_enumerators"
   auto :Symbol,       "symbol"
   auto :System,       "system"

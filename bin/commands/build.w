@@ -901,6 +901,7 @@ runtime_srcs.push("runtime.c")
 runtime_srcs.push("terminal_input.c")
 runtime_srcs.push("ssmr_witness.c")
 runtime_srcs.push("lexchar_tables.c")
+runtime_srcs.push("unicode_tables.c")
 runtime_srcs.push("aks.c")
 if IS_DARWIN
   runtime_srcs.push("event_kqueue.c")

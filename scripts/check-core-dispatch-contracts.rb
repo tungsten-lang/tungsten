@@ -125,7 +125,8 @@ RUNTIME_CLASS_CONTRACTS = {
       advance at_end? at_word_boundary? build_offsets build_result build_skip class_escape_char
       class_match? clex collect_first compile_alt compile_node compile_opt
       compile_plus compile_rep compile_star compute_prefilter consume_at?
-      decode_subject emit find_saved lazy? literal_prefix lone_flag_class make_saved match
+      decode_subject emit find_saved find_saved_from lazy? literal_prefix lone_flag_class make_saved match
+      match_data_from
       match? match_data new nullable? parse_alt parse_atom parse_brace parse_class
       parse_escape parse_group parse_int parse_pattern parse_repeat parse_seq peek
       pf_advance pf_bm_search pf_set_match run set_match? set_split
@@ -184,7 +185,7 @@ RUNTIME_CLASS_CONTRACTS = {
     ]
   },
   "String" => {
-    path: "core/string_native.w",
+    path: "core/string.w",
     table: "w_ic_string_table",
     dispatch_key: "0xF9",
     native_ic: %w[
@@ -200,10 +201,14 @@ RUNTIME_CLASS_CONTRACTS = {
     dual_dispatch: %w[length size],
     autoload_guard: "string_source_method_unresolved",
     source_fallback: %w[
-      __bytes_array ascii? blank? byte_at bytes capitalize center characters
-      chars codepoints contains? delete downcase each_byte each_character
-      each_codepoint each_line empty? length levenshtein lines lpad reverse
-      rpad size squeeze swapcase to_s tr upcase
+      __astral_cp __bytes_array __translit_fold ascii? astralize blank?
+      byte_at bytes camelize canonically_equivalent? capitalize center
+      characters chars codepoints contains? dasherize delete downcase
+      each_byte each_character each_codepoint each_grapheme each_line
+      empty? graphemes humanize includes? length levenshtein lines
+      lowercase lpad nfc nfd nfkc nfkd normalize parameterize reverse
+      rpad scan size snakecase squeeze swapcase to_s tr transliterate
+      underscore upcase uppercase
     ]
   },
   "Array" => {

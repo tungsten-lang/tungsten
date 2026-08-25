@@ -5,7 +5,7 @@ use core/numeric/big_int
 # String/Symbol#size and #length are source methods on the shared 0xF9 facade.
 # Keep the self-host registration explicit for stage-0 loaders predating the
 # broad dynamic-receiver autoload gate.
-use core/string_native
+use core/string
 # The self-host uses StringBuffer pervasively. Keep this explicit so a stage-0
 # compiler whose loader predates the constructor-autoload trigger can build the
 # first source-size stage after the native IC is removed.
@@ -444,6 +444,11 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
   # ordinary `.lchs()` call may leave no readable "lchs" text in the module.
   # Recognize the exact SSO-5 method-name literal used by its inline cache.
   ll_text_has(text, wvalue_literal_text(sso5_wvalue("lchs")))
+
+-> ll_needs_unicode(text)
+  # String normalization / grapheme segmentation ccalls; long extern names
+  # are always literal text in the module.
+  ll_text_has(text, "w_string_normalize") || ll_text_has(text, "w_string_grapheme_next")
 
 -> ll_needs_apple_bridges(text)
   if ll_text_has(text, "@w_metal_")
@@ -1229,6 +1234,7 @@ driver_homebrew_prefix_memo = {}
   prime_needed = ll_text_has(ll_probe_text, "prime")
   # The String API is `.lchs`; direct lexchars runtime calls are covered too.
   lexchars_needed = ll_needs_lexchars(ll_probe_text)
+  unicode_needed = ll_needs_unicode(ll_probe_text)
   link_started_at = clock
   needs_zstd = ll_needs_zstd_text(ll_probe_text)
   # LTO is opt-in: whole-program LTO (lean binary, slow link) only for
@@ -1364,7 +1370,7 @@ driver_homebrew_prefix_memo = {}
   # the native archive compiles nothing, and clang warns on the unused -I.
   runtime_dir = resolve_runtime_dir
   target_os = detect_target()[:os]
-  compiles_c = runtime_objs == nil || prime_needed || lexchars_needed || sci_io_needed || wtensor_needed || extra_c_includes.size() > 0
+  compiles_c = runtime_objs == nil || prime_needed || lexchars_needed || unicode_needed || sci_io_needed || wtensor_needed || extra_c_includes.size() > 0
   if target_os == "macos" && (blas_needed || sparse_needed || bridges_needed)
     compiles_c = true
   if target_os == "linux" && blas_needed
@@ -1412,6 +1418,9 @@ driver_homebrew_prefix_memo = {}
   if lexchars_needed
     clang_cmd << gated_dir
     clang_cmd << "lexchar_tables.c "
+  if unicode_needed
+    clang_cmd << gated_dir
+    clang_cmd << "unicode_tables.c "
   if detect_target()[:os] == "macos"
     if blas_needed
       clang_cmd << gated_dir
@@ -2213,7 +2222,7 @@ driver_homebrew_prefix_memo = {}
   # source is a cheap conservative invalidation rule and avoids duplicating the
   # feature-gating logic here. Missing optional files are represented too.
   runtime_dir = resolve_runtime_dir()
-  companions = ["ssmr_witness.c", "lexchar_tables.c", "blas_bridge.c",
+  companions = ["ssmr_witness.c", "lexchar_tables.c", "unicode_tables.c", "blas_bridge.c",
                 "sparse_bridge.c", "metal.m", "graphics.m", "hid_bridge.m",
                 "sci_io_native.c", "tensor_bridge.c", "openblas_bridge.c",
                 zstd_runtime_source()]

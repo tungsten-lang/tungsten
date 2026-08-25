@@ -692,6 +692,9 @@
     decoded
 
   -> find_saved(subject)
+    find_saved_from(subject, 0)
+
+  -> find_saved_from(subject, from)
     # Decode cache: codepoint-decode the subject only when it changed. Repeated
     # matches against the same string (scan, multi-pattern, re-match) reuse the
     # array. The key compare is an O(1) bit-equality for the same object
@@ -706,7 +709,7 @@
     while i < @nguard
       @guard.push(-1)
       i = i + 1
-    start = 0 ## i64
+    start = from ## i64
     while start <= n
       start = pf_advance(start, n)
       if @pf_kind != 0 && start >= n
@@ -735,6 +738,14 @@
 
   -> match?(subject)
     match(subject) != nil
+
+  # Structured match starting at a codepoint offset — String#scan's engine.
+  # `^` still anchors to position 0, so a scan past it simply stops matching.
+  -> match_data_from(subject, from)
+    saved = find_saved_from(subject, from)
+    if saved == nil
+      return nil
+    RegexMatch.new(build_result(saved), build_offsets(saved), @group_names)
 
   -> make_saved
     s = i64[0]

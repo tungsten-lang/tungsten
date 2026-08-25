@@ -35262,6 +35262,336 @@ int64_t w_string_is_ascii(int64_t str_wval) {
     return w_string_ascii_p((WValue)str_wval) ? 1 : 0;
 }
 
+static size_t w_utf8_index_width(const char *s, size_t remaining);
+static int w_bytes_valid_utf8_p(const uint8_t *data, size_t len);
+
+/* Native-engine leg of String#scan. Regex LITERALS compile to native WRegex
+ * objects (Oniguruma when available, POSIX otherwise); the source Regex
+ * class is a separate engine whose instances scan via match_data_from.
+ * String#scan probes w_is_native_regex to pick the leg. */
+int64_t w_is_native_regex(int64_t v) {
+    return w_is_regex((WValue)v) ? 1 : 0;
+}
+
+/* All non-overlapping matches, in order: an Array of matched substrings,
+ * or of per-match capture Arrays when the pattern has groups (nil for an
+ * unmatched optional group). An empty match advances one UTF-8 code point,
+ * matching Ruby's rule. */
+WValue w_regex_scan(WValue regex_val, WValue subject_val) {
+    if (!w_is_regex(regex_val)) die("scan requires a regex");
+    WRegex *rx = (WRegex *)w_as_ptr(regex_val);
+    if (w_is_rope(subject_val)) subject_val = w_rope_flatten(subject_val);
+    const char *subject = as_str(subject_val);
+    size_t slen = strlen(subject);
+    WValue out = w_array_new(65, 8);
+#ifdef TUNGSTEN_ONIG
+    OnigRegex reg = (OnigRegex)rx->compiled;
+    const OnigUChar *ostart = (const OnigUChar *)subject;
+    const OnigUChar *oend = ostart + slen;
+    OnigRegion *region = onig_region_new();
+    size_t pos = 0;
+    while (pos <= slen) {
+        onig_region_clear(region);
+        int rc = onig_search(reg, ostart, oend, ostart + pos, oend, region,
+                             ONIG_OPTION_NONE);
+        if (rc < 0) break;
+        int nb = region->beg[0], ne = region->end[0];
+        if (region->num_regs > 1) {
+            WValue caps = w_array_new(65, region->num_regs - 1);
+            for (int i = 1; i < region->num_regs; i++) {
+                if (region->beg[i] >= 0)
+                    w_array_push(caps, w_string_n(subject + region->beg[i],
+                                                  (size_t)(region->end[i] - region->beg[i])));
+                else
+                    w_array_push(caps, W_NIL);
+            }
+            w_array_push(out, caps);
+        } else {
+            w_array_push(out, w_string_n(subject + nb, (size_t)(ne - nb)));
+        }
+        if (ne == nb) {
+            if ((size_t)ne >= slen) break;
+            pos = (size_t)ne + w_utf8_index_width(subject + ne, slen - (size_t)ne);
+        } else {
+            pos = (size_t)ne;
+        }
+    }
+    onig_region_free(region, 1);
+#else
+    regex_t *reg = (regex_t *)rx->compiled;
+    size_t cap_count = reg->re_nsub + 1;
+    regmatch_t *matches = malloc(cap_count * sizeof(regmatch_t));
+    size_t pos = 0;
+    while (pos <= slen) {
+        int rc = regexec(reg, subject + pos, cap_count, matches,
+                         pos > 0 ? REG_NOTBOL : 0);
+        if (rc != 0) break;
+        size_t nb = pos + (size_t)matches[0].rm_so;
+        size_t ne = pos + (size_t)matches[0].rm_eo;
+        if (cap_count > 1) {
+            WValue caps = w_array_new(65, (int64_t)cap_count - 1);
+            for (size_t i = 1; i < cap_count; i++) {
+                if (matches[i].rm_so >= 0)
+                    w_array_push(caps, w_string_n(subject + pos + matches[i].rm_so,
+                                                  (size_t)(matches[i].rm_eo - matches[i].rm_so)));
+                else
+                    w_array_push(caps, W_NIL);
+            }
+            w_array_push(out, caps);
+        } else {
+            w_array_push(out, w_string_n(subject + nb, ne - nb));
+        }
+        if (ne == nb) {
+            if (ne >= slen) break;
+            pos = ne + w_utf8_index_width(subject + ne, slen - ne);
+        } else {
+            pos = ne;
+        }
+    }
+    free(matches);
+#endif
+    return out;
+}
+
+/* ---- Unicode normalization (UAX #15) + grapheme segmentation (UAX #29) ----
+ * Codepoint-level tables and lookups live in the generated
+ * runtime/unicode_tables.c (scripts/gen_unicode_tables.py, validated there
+ * against Python's unicodedata over every codepoint x 4 forms plus a 60k
+ * adversarial corpus, and against the full UCD GraphemeBreakTest). These
+ * entry points do the WValue/UTF-8 work for core/string.w. */
+/* Weak stand-ins, following the lexchar/ssmr gated-companion pattern: the
+ * strong versions live in the generated unicode_tables.c, linked only when
+ * a program's IR references w_string_normalize / w_string_grapheme_next.
+ * The entry points probe un_tables_present() and raise rather than compute
+ * wrong answers if the gate is ever bypassed. */
+__attribute__((weak)) int un_tables_present(void) { return 0; }
+__attribute__((weak)) int un_ccc(uint32_t cp) { (void)cp; return 0; }
+__attribute__((weak)) int un_decomp(uint32_t cp, int compat, const uint32_t **out) {
+    (void)cp; (void)compat; (void)out; return 0;
+}
+__attribute__((weak)) uint32_t un_compose(uint32_t a, uint32_t b) {
+    (void)a; (void)b; return 0;
+}
+__attribute__((weak)) int un_gcb_class(uint32_t cp) { (void)cp; return 0; }
+__attribute__((weak)) int un_incb(uint32_t cp) { (void)cp; return 0; }
+__attribute__((weak)) int un_extended_pictographic(uint32_t cp) { (void)cp; return 0; }
+
+#define W_UN_SBASE 0xAC00
+#define W_UN_LBASE 0x1100
+#define W_UN_VBASE 0x1161
+#define W_UN_TBASE 0x11A7
+#define W_UN_LCOUNT 19
+#define W_UN_VCOUNT 21
+#define W_UN_TCOUNT 28
+#define W_UN_NCOUNT (W_UN_VCOUNT * W_UN_TCOUNT)
+#define W_UN_SCOUNT (W_UN_LCOUNT * W_UN_NCOUNT)
+
+/* Decode one codepoint at byte offset i. Width comes from
+ * w_utf8_index_width, so an invalid lead/continuation degrades to the raw
+ * byte with width 1 — same clamping as every other walker here. */
+static uint32_t w_un_decode_at(const char *s, size_t len, size_t i, size_t *width) {
+    size_t w = w_utf8_index_width(s + i, len - i);
+    *width = w;
+    uint8_t c0 = (uint8_t)s[i];
+    if (w == 1) return c0;
+    uint32_t cp = c0 & (uint32_t)(0x7F >> w);
+    for (size_t k = 1; k < w; k++) cp = (cp << 6) | ((uint8_t)s[i + k] & 0x3F);
+    return cp;
+}
+
+static size_t w_un_encode(uint32_t cp, uint8_t *out) {
+    if (cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
+    if (cp < 0x800) {
+        out[0] = (uint8_t)(0xC0 | (cp >> 6));
+        out[1] = (uint8_t)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (uint8_t)(0xE0 | (cp >> 12));
+        out[1] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (uint8_t)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    out[0] = (uint8_t)(0xF0 | (cp >> 18));
+    out[1] = (uint8_t)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (uint8_t)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+/* form: 0=NFC 1=NFD 2=NFKC 3=NFKD. ASCII content (flag-checked) and empty
+ * strings are normalization-invariant in every form and return identity
+ * (symbol bit cleared, the to_s convention). Invalid UTF-8 also returns
+ * identity: normalizing undecodable bytes has no defined answer, and
+ * silently rewriting them would corrupt pass-through data. */
+WValue w_string_normalize(WValue recv, int64_t form) {
+    char buf6[6];
+    const char *s;
+    size_t len;
+    w_str_data(recv, buf6, &s, &len);
+    if (len == 0 || w_string_ascii_p(recv)) return recv & ~1ULL;
+    if (!un_tables_present())
+        w_raise(w_string("normalize: Unicode tables not linked (program does not reference String normalization)"));
+    if (!w_bytes_valid_utf8_p((const uint8_t *)s, len)) return recv & ~1ULL;
+
+    int compat = (form == 2 || form == 3);
+    int compose = (form == 0 || form == 2);
+
+    size_t dcap = len + 16;
+    uint32_t *d = malloc(dcap * sizeof(uint32_t));
+    size_t dn = 0;
+#define W_UN_PUSH(v)                                                     \
+    do {                                                                 \
+        if (dn == dcap) {                                                \
+            dcap *= 2;                                                   \
+            d = realloc(d, dcap * sizeof(uint32_t));                     \
+        }                                                                \
+        d[dn++] = (v);                                                   \
+    } while (0)
+
+    for (size_t i = 0; i < len;) {
+        size_t w;
+        uint32_t cp = w_un_decode_at(s, len, i, &w);
+        i += w;
+        if (cp >= W_UN_SBASE && cp < W_UN_SBASE + W_UN_SCOUNT) {
+            uint32_t si = cp - W_UN_SBASE;
+            W_UN_PUSH(W_UN_LBASE + si / W_UN_NCOUNT);
+            W_UN_PUSH(W_UN_VBASE + (si % W_UN_NCOUNT) / W_UN_TCOUNT);
+            uint32_t t = si % W_UN_TCOUNT;
+            if (t) W_UN_PUSH(W_UN_TBASE + t);
+            continue;
+        }
+        const uint32_t *exp;
+        int k = un_decomp(cp, compat, &exp);
+        if (k) {
+            for (int j = 0; j < k; j++) W_UN_PUSH(exp[j]);
+        } else {
+            W_UN_PUSH(cp);
+        }
+    }
+#undef W_UN_PUSH
+
+    /* Canonical ordering: stable exchange walk over nonzero-ccc runs. */
+    for (size_t i = 1; i < dn;) {
+        int cc = un_ccc(d[i]);
+        if (cc != 0 && un_ccc(d[i - 1]) > cc) {
+            uint32_t tmp = d[i - 1];
+            d[i - 1] = d[i];
+            d[i] = tmp;
+            i = (i > 1) ? i - 1 : i + 1;
+        } else {
+            i++;
+        }
+    }
+
+    if (compose && dn > 0) {
+        size_t on = 1;
+        ptrdiff_t starter = (un_ccc(d[0]) == 0) ? 0 : -1;
+        int last_cc = un_ccc(d[0]);
+        for (size_t i = 1; i < dn; i++) {
+            uint32_t cp = d[i];
+            int cc = un_ccc(cp);
+            if (starter >= 0 && (last_cc == 0 || last_cc < cc)) {
+                uint32_t c = un_compose(d[starter], cp);
+                if (c) {
+                    d[starter] = c;
+                    continue;
+                }
+            }
+            d[on] = cp;
+            if (cc == 0) starter = (ptrdiff_t)on;
+            last_cc = cc;
+            on++;
+        }
+        dn = on;
+    }
+
+    uint8_t *out = malloc(dn * 4 + 1);
+    size_t olen = 0;
+    for (size_t i = 0; i < dn; i++) olen += w_un_encode(d[i], out + olen);
+    free(d);
+    WValue result = w_string_n_known_ascii((const char *)out, olen,
+                                           w_bytes_ascii_p(out, olen));
+    free(out);
+    return result;
+}
+
+/* Byte offset of the next extended-grapheme-cluster boundary after
+ * byte_pos, which the caller guarantees IS a boundary (walks always start
+ * at 0 or a previously returned offset). Because clusters never span a
+ * boundary, the GB9c and GB11 lookbehinds reduce to forward state machines
+ * seeded at byte_pos. Invalid bytes decode as width-1 Others and simply
+ * break everywhere. */
+int64_t w_string_grapheme_next(int64_t str_wval, int64_t byte_pos) {
+    WValue recv = (WValue)str_wval;
+    char buf6[6];
+    const char *s;
+    size_t len;
+    w_str_data(recv, buf6, &s, &len);
+    if (byte_pos < 0) byte_pos = 0;
+    if ((size_t)byte_pos >= len) return (int64_t)len;
+    if (!un_tables_present())
+        w_raise(w_string("graphemes: Unicode tables not linked (program does not reference String segmentation)"));
+
+    /* GCB class ids match the generator: 0 Other, 1 CR, 2 LF, 3 Control,
+     * 4 Extend, 5 ZWJ, 6 RI, 7 Prepend, 8 SpacingMark, 9 L, 10 V, 11 T,
+     * 12 LV, 13 LVT. */
+    enum { GO = 0, GCR, GLF, GCN, GEX, GZWJ, GRI, GPP, GSM, GL, GV, GT, GLV, GLVT };
+
+    size_t i = (size_t)byte_pos;
+    size_t w;
+    uint32_t prev = w_un_decode_at(s, len, i, &w);
+    int ca = un_gcb_class(prev);
+    size_t next_i = i + w;
+    int ri_run = (ca == GRI) ? 1 : 0;
+    /* GB11: 1 = saw ExtPic (Extend* so far), 2 = ...then ZWJ. */
+    int epz = un_extended_pictographic(prev) ? 1 : 0;
+    /* GB9c: 1 = InCB Consonant seen, 2 = ...with a Linker since ([Extend
+     * Linker]* interleavings keep state 2). */
+    int iv = un_incb(prev);
+    int incb_st = (iv == 1) ? 1 : 0;
+
+    while (next_i < len) {
+        uint32_t cur = w_un_decode_at(s, len, next_i, &w);
+        int cb = un_gcb_class(cur);
+        int brk;
+        if (ca == GCR && cb == GLF) brk = 0;                       /* GB3 */
+        else if (ca == GCN || ca == GCR || ca == GLF) brk = 1;     /* GB4 */
+        else if (cb == GCN || cb == GCR || cb == GLF) brk = 1;     /* GB5 */
+        else if (ca == GL && (cb == GL || cb == GV || cb == GLV || cb == GLVT))
+            brk = 0;                                               /* GB6 */
+        else if ((ca == GLV || ca == GV) && (cb == GV || cb == GT))
+            brk = 0;                                               /* GB7 */
+        else if ((ca == GLVT || ca == GT) && cb == GT) brk = 0;    /* GB8 */
+        else if (cb == GEX || cb == GZWJ) brk = 0;                 /* GB9 */
+        else if (cb == GSM) brk = 0;                               /* GB9a */
+        else if (ca == GPP) brk = 0;                               /* GB9b */
+        else if (un_incb(cur) == 1 && incb_st == 2) brk = 0;       /* GB9c */
+        else if (ca == GZWJ && epz == 2 && un_extended_pictographic(cur))
+            brk = 0;                                               /* GB11 */
+        else if (ca == GRI && cb == GRI) brk = (ri_run % 2 == 0);  /* GB12/13 */
+        else brk = 1;
+        if (brk) return (int64_t)next_i;
+
+        /* advance states */
+        if (cb == GRI) ri_run++; else ri_run = 0;
+        if (un_extended_pictographic(cur)) epz = 1;
+        else if (epz == 1 && cb == GEX) epz = 1;
+        else if (epz == 1 && cb == GZWJ) epz = 2;
+        else epz = 0;
+        iv = un_incb(cur);
+        if (iv == 1) incb_st = 1;
+        else if (incb_st >= 1 && iv == 3) incb_st = 2;
+        else if (incb_st >= 1 && iv == 2) { /* keep */ }
+        else incb_st = 0;
+
+        prev = cur;
+        ca = cb;
+        next_i += w;
+    }
+    return (int64_t)len;
+}
+
 /* Width of one valid UTF-8 code point for subscript traversal. Invalid input
  * advances one byte so raw data received from sockets remains addressable. */
 static size_t w_utf8_index_width(const char *s, size_t remaining) {
@@ -51683,12 +52013,21 @@ static WValue w_type_class_method_call(WMethod *m, WValue recv, WArray *args) {
     typedef WValue (*fn2)(WValue, WValue, WValue);
     typedef WValue (*fn3)(WValue, WValue, WValue, WValue);
     typedef WValue (*fn4)(WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn5)(WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn6)(WValue, WValue, WValue, WValue, WValue, WValue, WValue);
+    typedef WValue (*fn7)(WValue, WValue, WValue, WValue, WValue, WValue, WValue, WValue);
     switch (expected) {
         case 0: return ((fn0)m->fn_ptr)(recv);
         case 1: return ((fn1)m->fn_ptr)(recv, a[0]);
         case 2: return ((fn2)m->fn_ptr)(recv, a[0], a[1]);
         case 3: return ((fn3)m->fn_ptr)(recv, a[0], a[1], a[2]);
         case 4: return ((fn4)m->fn_ptr)(recv, a[0], a[1], a[2], a[3]);
+        /* Wider primitive-receiver methods (e.g. String#astralize's seven
+         * style parameters) stay on this slow path — the IC-cacheable cap
+         * below remains at five, so only the trampoline widens. */
+        case 5: return ((fn5)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4]);
+        case 6: return ((fn6)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5]);
+        case 7: return ((fn7)m->fn_ptr)(recv, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);
         default: return W_UNDEF;
     }
 }
@@ -58539,9 +58878,9 @@ static void w_init_ic_tables(void) {
     w_ic_array_table[50].name = WN_tan;
     /* String */
     w_ic_string_table[0].name  = WN_idx;
-    /* Slot 1 (upcase) retired to core/string_native.w. */
-    /* Slot 2 (downcase) retired to core/string_native.w. */
-    /* Slots 3-4 (swapcase/capitalize) retired to core/string_native.w. */
+    /* Slot 1 (upcase) retired to core/string.w. */
+    /* Slot 2 (downcase) retired to core/string.w. */
+    /* Slots 3-4 (swapcase/capitalize) retired to core/string.w. */
     w_ic_string_table[5].name  = WN_concat;
     w_ic_string_table[6].name  = WN_append;
     w_ic_string_table[7].name  = WN_lshift;
@@ -58549,13 +58888,13 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[9].name  = WN_include_q;
     w_ic_string_table[10].name = WN_starts_with_q;
     w_ic_string_table[11].name = WN_ends_with_q;
-    /* Slot 12 (ascii?) retired to core/string_native.w. */
+    /* Slot 12 (ascii?) retired to core/string.w. */
     w_ic_string_table[13].name = WN_valid_utf8_q;
     w_ic_string_table[14].name = WN_repeat;
-    /* Slot 15 (chars) retired to core/string_native.w. */
+    /* Slot 15 (chars) retired to core/string.w. */
     w_ic_string_table[16].name = WN_codes;
     w_ic_string_table[17].name = WN_lchs;
-    /* Slot 18 (bytes) retired to core/string_native.w. */
+    /* Slot 18 (bytes) retired to core/string.w. */
     w_ic_string_table[19].name = WN_slice;
     w_ic_string_table[20].name = WN_strip;
     w_ic_string_table[21].name = WN_ltrim;
@@ -58571,7 +58910,7 @@ static void w_init_ic_tables(void) {
     w_ic_string_table[31].name = WN_matchop;
     w_ic_string_table[32].name = WN_match_q;
     w_ic_string_table[33].name = WN_rindex;
-    /* Slot 34 (reverse) retired to core/string_native.w. */
+    /* Slot 34 (reverse) retired to core/string.w. */
     w_ic_string_table[35].name = WN_size;    /* round-5: dynamic-path gap */
     w_ic_string_table[36].name = WN_length;
     w_ic_string_table[37].name = WN_to_d;

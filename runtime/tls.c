@@ -37,6 +37,7 @@ extern __thread WGoroutine *g_current;
 static SSL_CTX *g_ssl_ctx = NULL;
 static SSL_CTX *g_ssl_client_ctx = NULL;
 static pthread_mutex_t g_ssl_client_ctx_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_ssl_server_ctx_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Cert/key path storage for HTTP/3 (separate SSL context needs same certs) */
 static const char *g_cert_path = NULL;
@@ -76,18 +77,27 @@ static int alpn_select_cb(SSL *ssl, const unsigned char **out, unsigned char *ou
 }
 
 WValue w_tls_init(void) {
-    if (g_ssl_ctx) return W_TRUE;
+    /* Double-checked init under the server ctx lock — matches the pattern used
+     * by ensure_client_ctx below. The previous lock-free check was a TOCTOU
+     * race: two threads could both see g_ssl_ctx == NULL, both create a
+     * context, and one would leak (along with its cert/key). */
+    pthread_mutex_lock(&g_ssl_server_ctx_lock);
+    if (g_ssl_ctx) {
+        pthread_mutex_unlock(&g_ssl_server_ctx_lock);
+        return W_TRUE;
+    }
 
     /* OpenSSL 1.1.0+ auto-initializes, but be explicit */
     OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL);
 
-    g_ssl_ctx = SSL_CTX_new(TLS_server_method());
-    if (!g_ssl_ctx) {
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+    if (!ctx) {
+        pthread_mutex_unlock(&g_ssl_server_ctx_lock);
         w_raise(w_string("TLS: failed to create SSL context"));
     }
 
     /* Require TLS 1.3 minimum */
-    SSL_CTX_set_min_proto_version(g_ssl_ctx, TLS1_3_VERSION);
+    SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
 
     /* Prefer AES-GCM — fastest with kTLS (kernel crypto uses AES-NI / ARMv8 CE).
      * Benchmarked on Intel DO server with kTLS:
@@ -95,7 +105,7 @@ WValue w_tls_init(void) {
      * Despite ChaCha20 being faster in userspace OpenSSL benchmarks (779 vs 626 MB/s),
      * the kernel's AES-GCM implementation is more optimized for kTLS record processing.
      * Server cipher preference enforced via SSL_OP_CIPHER_SERVER_PREFERENCE. */
-    SSL_CTX_set_ciphersuites(g_ssl_ctx,
+    SSL_CTX_set_ciphersuites(ctx,
         "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256");
 
     unsigned long opts = SSL_OP_CIPHER_SERVER_PREFERENCE;
@@ -106,15 +116,20 @@ WValue w_tls_init(void) {
      * Requires: AES-GCM cipher (already preferred above), tls kernel module. */
     opts |= SSL_OP_ENABLE_KTLS;
 #endif
-    SSL_CTX_set_options(g_ssl_ctx, opts);
+    SSL_CTX_set_options(ctx, opts);
 
     /* Keep SSL buffers allocated between requests — avoids malloc/free per
      * write on keep-alive connections. Trades ~32KB per idle connection for
      * eliminating ~70 malloc samples per profile (~2.5% of active CPU). */
 
     /* ALPN server-side selection callback */
-    SSL_CTX_set_alpn_select_cb(g_ssl_ctx, alpn_select_cb, NULL);
+    SSL_CTX_set_alpn_select_cb(ctx, alpn_select_cb, NULL);
 
+    /* Publish under the lock — a racing caller will see the fully-configured
+     * context. The cert/key load in w_tls_load_cert runs after we release the
+     * lock, but that's the existing contract: w_tls_init then w_tls_load_cert. */
+    g_ssl_ctx = ctx;
+    pthread_mutex_unlock(&g_ssl_server_ctx_lock);
     return W_TRUE;
 }
 
@@ -391,6 +406,11 @@ WValue w_crypto_generate_rsa_key(int64_t bits) {
     }
     EVP_PKEY_CTX_free(ctx);
 
+    /* The key handle is stashed in a WArray<u8> because WValue has no native
+     * pointer-with-finalizer type. The array's own free() releases the slots
+     * but does NOT call EVP_PKEY_free — callers MUST release the key with
+     * w_crypto_free_key before the WValue is dropped, or the EVP_PKEY leaks
+     * (and its private material sits in freed heap). See w_crypto_free_key. */
     WValue kb = w_bytes_new(sizeof(EVP_PKEY *));
     WArray *kba = (WArray *)w_as_ptr(kb);
     memcpy(kba->slots, &pkey, sizeof(EVP_PKEY *));
@@ -404,7 +424,29 @@ static EVP_PKEY *extract_pkey(WValue key) {
     }
     EVP_PKEY *pkey;
     memcpy(&pkey, kba->slots, sizeof(EVP_PKEY *));
+    if (!pkey) {
+        w_raise(w_string("Crypto: use-after-free on key handle (already freed)"));
+    }
     return pkey;
+}
+
+/* Release the RSA key. Callers MUST invoke this when done with a key returned
+ * by w_crypto_generate_rsa_key. After this call, the WValue is still a valid
+ * byte array but the pointer slot is zeroed — any further use raises
+ * "use-after-free" from extract_pkey. This is the only path that calls
+ * EVP_PKEY_free, so omitting it leaks the key material. */
+WValue w_crypto_free_key(WValue key) {
+    WArray *kba = (WArray *)w_as_ptr(key);
+    if (kba && kba->size == (int32_t)sizeof(EVP_PKEY *)) {
+        EVP_PKEY *pkey;
+        memcpy(&pkey, kba->slots, sizeof(EVP_PKEY *));
+        if (pkey) {
+            EVP_PKEY_free(pkey);
+            EVP_PKEY *zero = NULL;
+            memcpy(kba->slots, &zero, sizeof(EVP_PKEY *));
+        }
+    }
+    return W_TRUE;
 }
 
 /* Helper: base64url encode binary data to a malloc-allocated string */
@@ -412,6 +454,9 @@ static char *b64url_encode_raw(const uint8_t *data, int64_t len) {
     static const char b64url[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     int64_t out_len = ((len + 2) / 3) * 4;
     char *out = malloc(out_len + 1);
+    if (!out) {
+        w_raise(w_string("Crypto: out of memory in b64url encode"));
+    }
     int64_t j = 0;
     for (int64_t i = 0; i < len; i += 3) {
         uint32_t triple = ((uint32_t)data[i]) << 16;
@@ -429,7 +474,10 @@ static char *b64url_encode_raw(const uint8_t *data, int64_t len) {
 /* Helper: BIGNUM to base64url string */
 static char *bn_to_b64url(const BIGNUM *bn) {
     int len = BN_num_bytes(bn);
-    uint8_t *buf = malloc(len);
+    uint8_t *buf = malloc(len > 0 ? (size_t)len : 1);
+    if (!buf) {
+        w_raise(w_string("Crypto: out of memory in bn_to_b64url"));
+    }
     BN_bn2bin(bn, buf);
     char *result = b64url_encode_raw(buf, len);
     free(buf);
@@ -457,6 +505,10 @@ WValue w_crypto_rsa_public_jwk(WValue key) {
     /* Build JSON */
     size_t json_len = strlen(n_b64) + strlen(e_b64) + 64;
     char *json = malloc(json_len);
+    if (!json) {
+        free(n_b64); free(e_b64);
+        w_raise(w_string("Crypto: out of memory building JWK"));
+    }
     snprintf(json, json_len, "{\"kty\":\"RSA\",\"n\":\"%s\",\"e\":\"%s\"}", n_b64, e_b64);
     WValue result = w_string(json);
     free(json);
@@ -502,7 +554,11 @@ WValue w_crypto_rsa_sign_sha256(WValue key, WValue data) {
 
     size_t sig_len = 0;
     EVP_DigestSignFinal(md_ctx, NULL, &sig_len);
-    uint8_t *sig = malloc(sig_len);
+    uint8_t *sig = malloc(sig_len > 0 ? sig_len : 1);
+    if (!sig) {
+        EVP_MD_CTX_free(md_ctx);
+        w_raise(w_string("Crypto: out of memory for RSA signature"));
+    }
     if (EVP_DigestSignFinal(md_ctx, sig, &sig_len) <= 0) {
         EVP_MD_CTX_free(md_ctx);
         free(sig);
@@ -535,6 +591,10 @@ WValue w_crypto_rsa_thumbprint(WValue key) {
     /* RFC 7638 thumbprint: lexicographic JSON {"e":"...","kty":"RSA","n":"..."} */
     size_t json_len = strlen(e_b64) + strlen(n_b64) + 32;
     char *json = malloc(json_len);
+    if (!json) {
+        free(e_b64); free(n_b64);
+        w_raise(w_string("Crypto: out of memory building thumbprint JSON"));
+    }
     snprintf(json, json_len, "{\"e\":\"%s\",\"kty\":\"RSA\",\"n\":\"%s\"}", e_b64, n_b64);
 
     /* SHA-256 hash */
@@ -589,6 +649,11 @@ WValue w_crypto_generate_csr(WValue key, WValue domains) {
             san_len += d_len + 5; /* "DNS:" + "," */
         }
         char *san = malloc(san_len + 1);
+        if (!san) {
+            sk_X509_EXTENSION_free(exts);
+            X509_REQ_free(req);
+            w_raise(w_string("Crypto: out of memory building CSR SAN"));
+        }
         size_t san_pos = 0;
         for (int64_t i = 0; i < dom_arr->size; i++) {
             if (i > 0) san[san_pos++] = ',';

@@ -83,4 +83,9 @@ WValue w_crypto_generate_csr(WValue key, WValue domains) {
     return tls_not_compiled();
 }
 
+WValue w_crypto_free_key(WValue key) {
+    (void)key;
+    return W_TRUE;
+}
+
 #endif /* !TUNGSTEN_TLS */

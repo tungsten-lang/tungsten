@@ -2199,6 +2199,12 @@ WValue w_crypto_rsa_public_jwk(WValue key);
 WValue w_crypto_rsa_sign_sha256(WValue key, WValue data);
 WValue w_crypto_rsa_thumbprint(WValue key);
 WValue w_crypto_generate_csr(WValue key, WValue domains);
+/* Release an EVP_PKEY returned by w_crypto_generate_rsa_key. The WValue is
+ * a byte-array stashing the pointer; the array's own free() does NOT call
+ * EVP_PKEY_free, so callers MUST invoke this before the WValue is GC'd, or
+ * the key (and its private material) leaks. After this call the pointer slot
+ * is zeroed and further use raises "use-after-free". */
+WValue w_crypto_free_key(WValue key);
 
 /* ---- HTTP Response ---- */
 #define W_BODY_PTR     0
@@ -2261,6 +2267,10 @@ WValue __w_file_stat_data(WValue path_val, WValue follow_val);
 WValue __w_tempfile_create(WValue prefix_val, WValue directory_val);
 WValue __w_file_link(WValue target_val, WValue link_val);
 WValue __w_file_chmod(WValue path_val, WValue mode_val);
+WValue __w_file_pwd(void);
+WValue __w_file_chdir(WValue path_val);
+WValue __w_file_mkdir(WValue path_val, WValue opts);
+WValue __w_file_rmdir(WValue path_val);
 WValue __w_rename(WValue old_val, WValue new_val);
 WValue __w_temp_file_for(WValue destination_val);
 WValue __w_fsync_path(WValue path_val);

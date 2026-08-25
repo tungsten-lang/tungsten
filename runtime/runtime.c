@@ -67962,9 +67962,37 @@ typedef struct {
     const char *path;
     int path_len;
     int header_end;       /* offset past \r\n\r\n */
-    int content_length;   /* -1 if not present */
+    int64_t content_length;   /* -1 if not present */
     int keep_alive;       /* 1 = keep-alive, 0 = close */
 } HttpRequest;
+
+/* Strict, bounded integer parser for Content-Length values.
+ *
+ * Rejects any non-digit byte (atoi would accept leading whitespace, +/-, and
+ * trailing garbage). Returns 1 on success and writes the value to *out; returns
+ * 0 on parse error (caller treats as HTTP_PARSE_ERROR). Caps at 100 MiB —
+ * larger bodies should use a streaming protocol, and accepting unbounded
+ * Content-Length is a DoS vector (the parser advances buf_pos by this many
+ * bytes). int64_t holds the value without overflow on any platform.
+ *
+ * RFC 7230 §3.3.2: Content-Length = 1*DIGIT. Anything else is malformed.
+ */
+static int parse_content_length_strict(const char *s, const char *end, int64_t *out) {
+    int64_t v = 0;
+    const int64_t cap = 100LL * 1024 * 1024; /* 100 MiB */
+    int saw_digit = 0;
+    while (s < end) {
+        char c = *s;
+        if (c < '0' || c > '9') return 0;
+        v = v * 10 + (c - '0');
+        if (v > cap) return 0;
+        saw_digit = 1;
+        s++;
+    }
+    if (!saw_digit) return 0;
+    *out = v;
+    return 1;
+}
 
 static HttpParseResult w_http1_parse(const char *buf, int len, HttpRequest *req) {
     /* Find end of headers — scan for \r\n\r\n using 4-byte word match */
@@ -68001,11 +68029,32 @@ static HttpParseResult w_http1_parse(const char *buf, int len, HttpRequest *req)
     req->keep_alive = (sp2[6] == '1' && sp2[8] == '1') ? 1 : 0;
     req->content_length = -1;
 
-    /* Scan headers for Connection: and Content-Length: */
+    /* Scan headers for Connection:, Content-Length:, Transfer-Encoding:.
+     *
+     * Security notes:
+     *   - Duplicate Content-Length → HTTP_PARSE_ERROR (RFC 7230 §3.3.2
+     *     requires rejection; a frontend that picks a different header than us
+     *     enables request smuggling).
+     *   - Content-Length is parsed strictly (digits only, capped at 100 MiB).
+     *     atoi accepts garbage and has integer-overflow UB.
+     *   - Transfer-Encoding of anything other than "identity" is rejected
+     *     because this parser does not implement chunked decoding. Accepting
+     *     such a request while ignoring the encoding would mis-frame the next
+     *     request on a keep-alive connection (smuggling). RFC 7230 §3.3.3
+     *     says TE wins over CL; we treat TE-with-CL as the smuggling attempt
+     *     it usually is and reject.
+     */
+    int saw_content_length = 0;
+    int saw_transfer_encoding = 0;
     const char *p = memchr(sp2, '\n', hdr_end - sp2);
     if (p) p++;
     while (p && p < hdr_end) {
-        const char *line_end = memchr(p, '\r', hdr_end - p);
+        /* memchr up to hdr_end INCLUSIVE: hdr_end points at the \r that
+         * terminates the final header line (the first \r of \r\n\r\n), so a
+         * search range of [p, hdr_end) would miss it and skip the last header.
+         * This was a latent bug that hid CL parsing when CL was the only/last
+         * header — fixed alongside the strict CL hardening. */
+        const char *line_end = memchr(p, '\r', hdr_end - p + 1);
         if (!line_end) break;
         int line_len = (int)(line_end - p);
 
@@ -68018,11 +68067,35 @@ static HttpParseResult w_http1_parse(const char *buf, int len, HttpRequest *req)
                 else if (strncasecmp(val, "keep-alive", 10) == 0)
                     req->keep_alive = 1;
             } else if (strncasecmp(p, "Content-Length:", 15) == 0) {
-                req->content_length = atoi(p + 15);
+                /* Duplicate Content-Length is a smuggling primitive. */
+                if (saw_content_length) return HTTP_PARSE_ERROR;
+                const char *val_start = p + 15;
+                const char *val_end = line_end;
+                while (val_start < val_end && *val_start == ' ') val_start++;
+                int64_t cl;
+                if (!parse_content_length_strict(val_start, val_end, &cl))
+                    return HTTP_PARSE_ERROR;
+                req->content_length = cl;
+                saw_content_length = 1;
+            }
+        } else if (line_len > 17 && (p[0] == 'T' || p[0] == 't')) {
+            if (strncasecmp(p, "Transfer-Encoding:", 18) == 0) {
+                const char *val = p + 18;
+                while (val < line_end && *val == ' ') val++;
+                /* "identity" is a no-op; anything else (chunked, etc.) we
+                 * can't decode here, so reject the request. */
+                if (strncasecmp(val, "identity", 8) != 0) {
+                    return HTTP_PARSE_ERROR;
+                }
+                saw_transfer_encoding = 1;
             }
         }
         p = line_end + 2; /* skip \r\n */
     }
+
+    /* TE + CL together is the canonical smuggling vector. */
+    if (saw_transfer_encoding && saw_content_length)
+        return HTTP_PARSE_ERROR;
 
     return HTTP_PARSE_OK;
 }

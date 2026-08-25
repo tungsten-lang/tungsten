@@ -978,6 +978,7 @@ WValue w_string_normalize(WValue recv, int64_t form);
 int64_t w_string_grapheme_next(int64_t str_wval, int64_t byte_pos) __attribute__((pure));
 int64_t w_is_native_regex(int64_t v) __attribute__((pure));
 WValue w_regex_scan(WValue regex_val, WValue subject_val);
+WValue w_class_by_name(WValue name);
 int64_t w_string_first_byte(WValue value);
 void w_str_data(WValue v, char buf[6], const char **out, size_t *len);
 WValue w_algebra_rewrite_source(WValue source);

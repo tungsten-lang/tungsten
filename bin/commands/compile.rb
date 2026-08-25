@@ -774,7 +774,7 @@ when ".w"
       clang_sources << BLAS_BRIDGE_C
     end
     clang_sources << SSMR_C if ir_needs_ssmr?(ir) && File.exist?(SSMR_C)
-    if (ir.include?("w_string_normalize") || ir.include?("w_string_grapheme_next")) && File.exist?(UNICODE_TABLES_C)
+    if (ir.include?("w_string_normalize") || ir.include?("w_string_grapheme_next") || ir.include?("w_approx_eq")) && File.exist?(UNICODE_TABLES_C)
       clang_sources << UNICODE_TABLES_C
     end
     clang_sources << LEXCHAR_TABLES_C if ir_needs_lexchars?(ir) && File.exist?(LEXCHAR_TABLES_C)

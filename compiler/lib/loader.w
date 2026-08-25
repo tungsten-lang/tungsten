@@ -1066,7 +1066,7 @@ loader_parse_cache_state = {
       # while omitting any name makes a value crossing an erased/native
       # boundary fail only in compiled dispatch. String and Symbol share the
       # 0xF9 registration, so the same trigger covers both representations.
-      if @string_source_method_unresolved && call_name in ("to_s" "empty?" "size" "length" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "center" "delete" "squeeze" "tr" "ascii?" "blank?" "byte_at" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "__bytes_array" "nfc" "nfd" "nfkc" "nfkd" "normalize" "canonically_equivalent?" "each_grapheme" "graphemes" "scan" "astralize" "__astral_cp" "camelize" "underscore" "snakecase" "dasherize" "humanize" "transliterate" "__translit_fold" "parameterize" "lowercase" "uppercase" "includes?")
+      if @string_source_method_unresolved && call_name in ("to_s" "empty?" "size" "length" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "center" "delete" "squeeze" "tr" "ascii?" "blank?" "byte_at" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "__bytes_array" "nfc" "nfd" "nfkc" "nfkd" "normalize" "canonically_equivalent?" "each_grapheme" "graphemes" "scan" "astralize" "__astral_cp" "camelize" "underscore" "snakecase" "dasherize" "humanize" "transliterate" "__translit_fold" "parameterize" "lowercase" "uppercase" "includes?" "to_regex" "constantize" "[]=")
         consider_autoload_name("String", defined, registry, seen, pending)
         @string_source_method_unresolved = false
       # Lowering synthesizes a per-element call for these Symbol-to-proc forms

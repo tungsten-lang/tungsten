@@ -446,9 +446,10 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
   ll_text_has(text, wvalue_literal_text(sso5_wvalue("lchs")))
 
 -> ll_needs_unicode(text)
-  # String normalization / grapheme segmentation ccalls; long extern names
-  # are always literal text in the module.
-  ll_text_has(text, "w_string_normalize") || ll_text_has(text, "w_string_grapheme_next")
+  # String normalization / grapheme segmentation ccalls, plus the approx
+  # operator (its runtime handler NFC-compares string operands); long
+  # extern names are always literal text in the module.
+  ll_text_has(text, "w_string_normalize") || ll_text_has(text, "w_string_grapheme_next") || ll_text_has(text, "w_approx_eq")
 
 -> ll_needs_apple_bridges(text)
   if ll_text_has(text, "@w_metal_")

@@ -1716,6 +1716,23 @@ use target
       if args.size() != 3
         raise "w_regex_scan expects a regex and a subject"
       return ccall("w_regex_scan", args[1], args[2])
+    when "w_regex_new"
+      if args.size() != 3
+        raise "w_regex_new expects a pattern and options"
+      return ccall("w_regex_new", args[1], args[2])
+    when "w_class_by_name"
+      if args.size() != 2
+        raise "w_class_by_name expects one argument"
+      # The tree walker's classes are interpreter objects, not runtime
+      # WClass registrations — resolve through the interpreter's own
+      # registry (autoloading like any constant reference) so `.new` on
+      # the result dispatches.
+      cn = args[1].to_s
+      try_autoload_class(cn)
+      ik = @classes[cn]
+      if ik != nil
+        return ik
+      return nil
     when "w_regex_scan_char"
       if args.size() != 5
         raise "w_regex_scan_char expects subject, start, length, and codepoint"
@@ -3537,6 +3554,17 @@ use target
     if type(recv) in ("String" "Symbol") && name == "is_a?" && args.size() == 1
       return is_a_class?(recv, args[0])
 
+    # Native-engine regex objects (String#to_regex under the tree walker;
+    # compiled regex literals never reach here) have no source class — the
+    # source Regex engine's methods read ivars a native object lacks. Route
+    # the match surface straight through the native engine.
+    if type(recv) == "Regex" && ccall_nobox("w_is_native_regex", recv) == 1
+      if name in ("match?" "===" "=~") && args.size() == 1
+        return ccall("w_regex_match", recv, args[0])
+      if name == "scan" && args.size() == 1
+        return ccall("w_regex_scan", recv, args[0])
+      raise "native regex supports match?/===/=~/scan under the interpreter (got [name])"
+
     # Primitive values can be extended by core classes (Array, String, etc.).
     # Give those class methods first refusal before falling back to boot
     # builtins so traits such as Enumerable participate for primitive arrays.
@@ -3545,7 +3573,7 @@ use target
     # String methods are also Symbol#to_s/#empty?/#size/#length. The tree walker
     # ordinarily distinguishes host Symbols from Strings; route these shared
     # methods through String instead of the legacy Symbol scaffold.
-    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length" "ascii?" "blank?" "byte_at" "bytes" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "nfc" "nfd" "nfkc" "nfkd" "normalize" "graphemes" "each_grapheme" "scan")
+    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length" "ascii?" "blank?" "byte_at" "bytes" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "nfc" "nfd" "nfkc" "nfkd" "normalize" "graphemes" "each_grapheme" "scan" "to_regex" "constantize")
       try_autoload_class("String")
       primitive_class = @classes["String"]
     else

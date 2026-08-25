@@ -43057,6 +43057,13 @@ WValue w_approx_eq(WValue a, WValue b) {
         return w_approx_tail((double)ga * pow(10.0, (double)sa),
                              (double)gb * pow(10.0, (double)sb));
     }
+    /* Canonical equivalence for text (UAX #15): `a ≈ b` on Strings/Symbols
+     * compares NFC normalizations, while `==` stays exact bytes. ASCII
+     * operands short-circuit inside w_string_normalize via the content
+     * flag; the unicode tables link whenever a module references
+     * w_approx_eq (see ll_needs_unicode). */
+    if ((w_is_stringy(a) || w_is_rope(a)) && (w_is_stringy(b) || w_is_rope(b)))
+        return w_eq(w_string_normalize(a, 0), w_string_normalize(b, 0));
     int64_t psig; int pscale;
     int a_num = w_is_double(a) || w_is_integer_any(a) || w_is_rational_any(a) ||
                 is_decimal_any(a) || quantity_pi_parts(a, &psig, &pscale);
@@ -47381,6 +47388,20 @@ static WObject *as_object(WValue v) {
 
 WClass *g_class_table[W_MAX_CLASSES];
 uint16_t g_next_class_id = 0;
+
+/* Resolve a registered class by name — String#constantize's engine. Only
+ * classes compiled into (and registered by) this binary resolve: an AOT
+ * program has no load path to pull new classes in at runtime. */
+WValue w_class_by_name(WValue name) {
+    const char *nm = as_str(name);
+    if (!nm) return W_NIL;
+    for (int i = 0; i < g_next_class_id; i++) {
+        WClass *k = g_class_table[i];
+        if (k && k->name && strcmp(k->name, nm) == 0)
+            return w_box_ptr(k, W_SUBTAG_CLASS);
+    }
+    return W_NIL;
+}
 /* Public identity is not always method-dispatch identity: String/Symbol share
  * key 0xF9, while Atomic/Thread/Channel source classes are dispatch facades
  * whose public type remains Unknown. Cache the final class WValue (including

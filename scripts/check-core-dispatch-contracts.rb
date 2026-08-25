@@ -201,14 +201,14 @@ RUNTIME_CLASS_CONTRACTS = {
     dual_dispatch: %w[length size],
     autoload_guard: "string_source_method_unresolved",
     source_fallback: %w[
-      __astral_cp __bytes_array __translit_fold ascii? astralize blank?
-      byte_at bytes camelize canonically_equivalent? capitalize center
-      characters chars codepoints contains? dasherize delete downcase
-      each_byte each_character each_codepoint each_grapheme each_line
-      empty? graphemes humanize includes? length levenshtein lines
-      lowercase lpad nfc nfd nfkc nfkd normalize parameterize reverse
-      rpad scan size snakecase squeeze swapcase to_s tr transliterate
-      underscore upcase uppercase
+      []= __astral_cp __bytes_array __translit_fold ascii? astralize
+      blank? byte_at bytes camelize canonically_equivalent? capitalize
+      center characters chars codepoints constantize contains? dasherize
+      delete downcase each_byte each_character each_codepoint
+      each_grapheme each_line empty? graphemes humanize includes? length
+      levenshtein lines lowercase lpad nfc nfd nfkc nfkd normalize
+      parameterize reverse rpad scan size snakecase squeeze swapcase
+      to_regex to_s tr transliterate underscore upcase uppercase
     ]
   },
   "Array" => {

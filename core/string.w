@@ -973,6 +973,50 @@
   -> includes?(sub)
     include?(sub)
 
+  # Compile a Regex that matches this string LITERALLY (metacharacters
+  # escaped), through the native engine constructor — no source-regex
+  # autoload from this file.
+  -> to_regex
+    rx_out = StringBuffer(size * 2)
+    self.each_character -> (c)
+      rx_o = c.ord
+      if rx_o == 94 || rx_o == 36 || rx_o == 46 || rx_o == 124 || rx_o == 63 || rx_o == 42 || rx_o == 43 || rx_o == 40 || rx_o == 41 || rx_o == 91 || rx_o == 93 || rx_o == 123 || rx_o == 125 || rx_o == 92
+        rx_out << "\\"
+      rx_out << c
+    ccall("w_regex_new", rx_out.to_s, "")
+
+  # Resolve a registered class by name ("Array".constantize.new). Only
+  # classes compiled into the running binary can resolve — an AOT program
+  # has no runtime load path — so an unknown or unlinked name raises.
+  -> constantize
+    cz = ccall("w_class_by_name", self)
+    if cz == nil
+      raise "constantize: uninitialized or unlinked constant [self]"
+    cz
+
+  # Functional index write: the code point at `index` replaced by `value`,
+  # returned as a mutable StringBuffer (the receiver is immutable — take
+  # .to_s for a String, or keep editing the buffer). Negative indices count
+  # from the end; out of range raises.
+  -> []=(index, value)
+    ia_n = 0
+    self.each_codepoint -> (cp)
+      ia_n += 1
+    ia_i = index
+    if ia_i < 0
+      ia_i += ia_n
+    if ia_i < 0 || ia_i >= ia_n
+      raise "[]=: index [index] out of range for [ia_n]-code-point string"
+    ia_out = StringBuffer(size + value.size)
+    ia_k = 0
+    self.each_character -> (c)
+      if ia_k == ia_i
+        ia_out << value
+      else
+        ia_out << c
+      ia_k += 1
+    ia_out
+
 # ---- Native (runtime IC) surface --------------------------------------
 # Dispatched by C handlers in w_ic_string_table (see
 # scripts/check-core-dispatch-contracts.rb for the authoritative list):
@@ -980,13 +1024,12 @@
 #   ltrim match? ord prepend repeat replace rindex rtrim size slice split
 #   starts_with? strip to_d to_f to_i to_sym valid_utf8?
 #
+# ---- Operators ---------------------------------------------------------
+# `a ≈ b` (canonical equivalence) is handled by the runtime approx-compare:
+# w_approx_eq NFC-normalizes String/Symbol operands (see runtime.c), so the
+# operator and canonically_equivalent? agree.
+#
 # ---- Wishlist ----------------------------------------------------------
 # Declared in earlier designs, still unimplemented:
-#   ≈             canonical-equivalence operator (the ≈ binary op currently
-#                 lowers to the numeric approx compare, not method dispatch;
-#                 use canonically_equivalent? / a.nfc == b.nfc)
-#   constantize   needs a runtime class-by-name lookup
-#   to_regex      Regex.escape wrapper (would autoload the regex engine
-#                 into every program from this file)
-#   each_paragraph, []=, indexes, seek, to_a/to_args/to_b/to_c/to_m/to_r,
+#   each_paragraph, indexes, seek, to_a/to_args/to_b/to_c/to_m/to_r,
 #   trim(pattern), is Comparable/Printable/Debuggable conformances

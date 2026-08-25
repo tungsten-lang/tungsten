@@ -193,6 +193,45 @@ check("uppercase", "AbC".uppercase, "ABC")
 check("includes?", "hello".includes?("ell"), true)
 << "inflections ok"
 
+# ---- approx operator = canonical equivalence on text
+check("approx nfc", composed ≈ decomposed, true)
+check("approx neq", "x" ≈ "y", false)
+check("approx symbol", "ab".to_sym ≈ "ab", true)
+
+# ---- to_regex: literal-match compilation through the native engine
+trx = "a.b".to_regex
+check("to_regex hits literal", trx.match?("xa.bz"), true)
+check("to_regex escapes dot", trx.match?("xaXbz"), false)
+check("to_regex meta", "a+b".to_regex.match?("za+bz"), true)
+
+# ---- constantize
+ck = "Array".constantize
+ca = ck.new
+ca.push(7)
+check("constantize new", ca, [7])
+cz_err = ""
+begin
+  "NoSuchKlass99".constantize
+rescue error
+  cz_err = error
+check("constantize unknown raises", cz_err.contains?("NoSuchKlass99"), true)
+
+# ---- []= functional index write (returns a StringBuffer)
+iw = "hello"
+ib = (iw[0] = "H")
+check("index write", ib.to_s, "Hello")
+check("index write immutably", iw, "hello")
+check("index write negative", ("abc"[-1] = "Z").to_s, "abZ")
+check("index write utf8", (s([0x61, 0xE9, 0x63])[1] = "X").to_s, "aXc")
+check("index write multichar", ("abc"[1] = "--").to_s, "a--c")
+iw_err = ""
+begin
+  "abc"[9] = "x"
+rescue error
+  iw_err = error
+check("index write oob raises", iw_err.contains?("out of range"), true)
+<< "operators and conversions ok"
+
 << "string_unicode_spec: all checks passed"''')
 
 with open(out_path, "w") as f:

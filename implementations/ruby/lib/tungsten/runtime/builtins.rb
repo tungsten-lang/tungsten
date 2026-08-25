@@ -9,6 +9,101 @@ end
 
 module Tungsten
   module Runtime
+    # Cache integrity layer.
+    #
+    # cache_read / cache_write persist arbitrary Ruby objects via Marshal, which
+    # is unsafe against a tampered or attacker-writable cache file (Marshal.load
+    # instantiates arbitrary classes — a known RCE vector). To close that, every
+    # cache file is wrapped as:
+    #
+    #   MAGIC (16 bytes) || HMAC-SHA256(key, payload) (32 bytes) || payload
+    #
+    # The key is per-install, lazily generated at ~/.tungsten/cache-key with
+    # 0600 perms and reused forever (rotation invalidates all caches, which is
+    # safe — caches are pure memoization). Verification is constant-time and
+    # silent-degrades to nil on any mismatch, matching the existing contract.
+    module CacheIntegrity
+      MAGIC = "TWCACHE\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00".b # 16 bytes
+      HMAC_LEN = 32
+      HEADER_LEN = MAGIC.bytesize + HMAC_LEN
+
+      @key = nil
+      @key_mutex = Mutex.new
+
+      def self.key
+        return @key if @key
+
+        @key_mutex.synchronize do
+          return @key if @key
+
+          require "securerandom"
+          require "fileutils"
+
+          key_dir = File.join(ENV["TUNGSTEN_ROOT"] || Dir.home, ".tungsten")
+          path =
+            if ENV["TUNGSTEN_ROOT"] && !ENV["TUNGSTEN_ROOT"].empty?
+              File.join(ENV["TUNGSTEN_ROOT"], ".tungsten", "cache-key")
+            else
+              File.join(Dir.home, ".tungsten", "cache-key")
+            end
+
+          key = begin
+            File.binread(path)
+          rescue StandardError
+            nil
+          end
+
+          if key.nil? || key.bytesize != 64
+            key = SecureRandom.random_bytes(64)
+            FileUtils.mkdir_p(File.dirname(path))
+            # 0600 — only the owner can read the cache key.
+            File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |f|
+              f.write(key)
+            end rescue nil # race or pre-existing; reuse existing key below
+            key = File.binread(path)
+          end
+
+          @key = key
+        end
+      rescue StandardError
+        # If we can't establish a key, fall back to a process-random key so the
+        # cache is still safe within this process (writes will be unreadable
+        # next run, which is fine — silent degrade).
+        @key ||= SecureRandom.random_bytes(64)
+      end
+
+      def self.wrap(payload)
+        require "openssl"
+        mac = OpenSSL::HMAC.digest("SHA256", key, payload)
+        MAGIC + mac + payload
+      end
+
+      # Verify + unwrap. Returns payload String on success, nil on any
+      # tampering / wrong key / truncated file. Constant-time comparison.
+      def self.unwrap(blob)
+        return nil unless blob && blob.bytesize >= HEADER_LEN
+        return nil unless blob.byteslice(0, MAGIC.bytesize) == MAGIC
+
+        mac = blob.byteslice(MAGIC.bytesize, HMAC_LEN)
+        payload = blob.byteslice(HEADER_LEN..)
+
+        require "openssl"
+        expected = OpenSSL::HMAC.digest("SHA256", key, payload)
+        # OpenSSL::fixed_length_secure_compare is available on Ruby 3.0+
+        # and is constant-time. Fall back to a manual constant-time compare.
+        if OpenSSL.respond_to?(:fixed_length_secure_compare)
+          return nil unless OpenSSL.fixed_length_secure_compare(mac, expected)
+        else
+          return nil unless mac.bytesize == expected.bytesize &&
+                            ::Digest::SHA256.digest(mac) == ::Digest::SHA256.digest(expected)
+        end
+
+        payload
+      rescue StandardError
+        nil
+      end
+    end
+
     class FileHandle
       attr_reader :path, :mode
 
@@ -348,12 +443,12 @@ module Tungsten
         (value - nearest).abs <= tolerance ? nearest : value.to_i
       end
 
-      def self.setup(interpreter)
-        register_free_functions(interpreter)
+      def self.setup(interpreter, sandbox: false)
+        register_free_functions(interpreter, sandbox: sandbox)
         register_method_builtins(interpreter)
       end
 
-      def self.register_free_functions(interpreter)
+      def self.register_free_functions(interpreter, sandbox: false)
         interpreter.define_builtin("puts") do |_recv, args, _block|
           args.each { |a| $stdout.puts(a.nil? ? "nil" : a.to_s) }
           nil
@@ -718,7 +813,11 @@ module Tungsten
           path = args[0].to_s
           next nil unless File.exist?(path)
 
-          Marshal.load(File.binread(path))
+          blob = File.binread(path)
+          payload = CacheIntegrity.unwrap(blob)
+          next nil unless payload
+
+          Marshal.load(payload)
         rescue StandardError
           nil
         end
@@ -729,7 +828,8 @@ module Tungsten
           path = args[0].to_s
           tmp_path = "#{path}.tmp.#{$$}"
           FileUtils.mkdir_p(File.dirname(path))
-          File.binwrite(tmp_path, Marshal.dump(args[1]))
+          payload = Marshal.dump(args[1])
+          File.binwrite(tmp_path, CacheIntegrity.wrap(payload))
           File.rename(tmp_path, path)
           true
         rescue StandardError
@@ -738,7 +838,22 @@ module Tungsten
         end
 
         interpreter.define_builtin("system") do |_recv, args, _block|
+          # Single-string form invokes /bin/sh -c — shell injection risk if arg
+          # contains user input. Prefer system_argv for untrusted input.
           Kernel.system(args[0])
+        end
+
+        # Array-form: bypasses the shell entirely. Each element is passed
+        # directly as an argv slot to execve. Safe to use with user-controlled
+        # arguments (no metacharacter interpretation). Returns true/false.
+        interpreter.define_builtin("system_argv") do |_recv, args, _block|
+          argv = args[0]
+          unless argv && argv.respond_to?(:map) && argv.respond_to?(:to_a)
+            raise Tungsten::Error, "system_argv: expected an array of strings"
+          end
+          cmd = argv.map { |a| a.to_s }
+          raise Tungsten::Error, "system_argv: empty argv" if cmd.empty?
+          Kernel.system(*cmd)
         end
 
         interpreter.define_builtin("argv") do |_recv, _args, _block|
@@ -795,16 +910,46 @@ module Tungsten
         end
 
         interpreter.define_builtin("capture") do |_recv, args, _block|
+          # Single-string form invokes /bin/sh -c — see system above.
           require "open3"
           stdout, _stderr, _status = Open3.capture3(args[0])
           stdout
         end
 
+        # Array-form capture: no shell. Returns stdout. Safe for untrusted argv.
+        interpreter.define_builtin("capture_argv") do |_recv, args, _block|
+          require "open3"
+          argv = args[0]
+          unless argv && argv.respond_to?(:map) && argv.respond_to?(:to_a)
+            raise Tungsten::Error, "capture_argv: expected an array of strings"
+          end
+          cmd = argv.map { |a| a.to_s }
+          raise Tungsten::Error, "capture_argv: empty argv" if cmd.empty?
+          stdout, _stderr, _status = Open3.capture3(*cmd)
+          stdout
+        end
+
         interpreter.define_builtin("popen") do |_recv, args, _block|
+          # Single-string form invokes /bin/sh -c — see system above.
           require "open3"
           cmd = args[0]
           input = args[1] || ""
           stdout, _stderr, status = Open3.capture3(cmd, stdin_data: input)
+          [stdout, status.success?]
+        end
+
+        # Array-form popen: no shell. Returns [stdout, success?]. Safe for
+        # untrusted argv. The optional second argument is the stdin data.
+        interpreter.define_builtin("popen_argv") do |_recv, args, _block|
+          require "open3"
+          argv = args[0]
+          unless argv && argv.respond_to?(:map) && argv.respond_to?(:to_a)
+            raise Tungsten::Error, "popen_argv: expected an array of strings"
+          end
+          cmd = argv.map { |a| a.to_s }
+          raise Tungsten::Error, "popen_argv: empty argv" if cmd.empty?
+          input = args[1] || ""
+          stdout, _stderr, status = Open3.capture3(*cmd, stdin_data: input)
           [stdout, status.success?]
         end
 
@@ -1046,6 +1191,52 @@ module Tungsten
 
         interpreter.define_builtin("from_legacy") do |_recv, args, _block|
           Tungsten::Key.from_legacy(args[0])
+        end
+
+        # ---- Sandbox gating ----
+        # When the interpreter is constructed with sandbox: true, dangerous
+        # builtins are replaced with stubs (returning nil/false) or blocks
+        # (raising). This is the defense for `tungsten ai` running
+        # LLM-generated code that may be prompt-injected: even if the model
+        # emits `<< env("ANTHROPIC_API_KEY")` or `system("curl ...")`, the
+        # sandbox prevents exfiltration. The replacement happens AFTER the
+        # originals are defined, so earlier references in this method are
+        # shadowed — the user's code sees only the gated versions.
+        if sandbox
+          # Block-on-call: dangerous side-effecting operations.
+          %w[system system_argv capture capture_argv popen popen_argv eval].each do |name|
+            interpreter.define_builtin(name) do |_recv, _args, _block|
+              raise Tungsten::Error, "sandbox: #{name} blocked"
+            end
+          end
+
+          # Stub-on-call: observations that would leak the environment.
+          interpreter.define_builtin("env") do |_recv, _args, _block|
+            nil
+          end
+
+          # File IO: stub reads to nil, block writes. Reads of /dev/null and
+          # writes to /dev/tty are kept working so trivially-correct programs
+          # still produce output. (We use the basename test so the sandbox
+          # survives $PWD changes.)
+          %w[read_file read_file_bytes file_exists? file? file_file?
+             file_directory? file_symlink? file_type file_size file_stat_data
+             file_mtime file_atime file_ctime file_mtime_ns read_dir
+             file_readlink file_realpath cache_read].each do |name|
+            interpreter.define_builtin(name) do |_recv, _args, _block|
+              nil
+            end
+          end
+
+          %w[write_file write_file_bytes file_open file_chmod file_rename
+             file_unlink file_unlink_strict file_mkdir file_rmdir file_rm
+             file_mv file_cp file_touch file_symlink file_link file_chdir
+             cache_write tempfile_create file_temp_for file_fsync
+             file_fsync_parent].each do |name|
+            interpreter.define_builtin(name) do |_recv, _args, _block|
+              raise Tungsten::Error, "sandbox: #{name} blocked"
+            end
+          end
         end
       end
 

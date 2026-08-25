@@ -305,7 +305,7 @@ module Tungsten
       ";" => :SEMICOLON
     }.freeze
 
-    def initialize(argv: nil)
+    def initialize(argv: nil, sandbox: false)
       @env = Environment.new
       @classes = {}
       @modules = {}
@@ -331,9 +331,14 @@ module Tungsten
       @profile_binary_ops = Hash.new(0)
       @profile_dispatch_counts = Hash.new { |h, k| h[k] = Hash.new(0) }
 
-      Runtime::Builtins.setup(self)
+      @sandbox = sandbox
+      Runtime::Builtins.setup(self, sandbox: sandbox)
       BUILTIN_TYPES.each { |name| @classes[name] ||= Runtime::WClass.new(name, nil) }
     end
+
+    # When sandbox is true, dangerous builtins are stubbed or blocked.
+    # Used for running untrusted code (e.g. AI-generated output from `tungsten ai`).
+    attr_reader :sandbox
 
     def define_builtin(name, &block)
       @builtins[name] = block
@@ -1768,7 +1773,12 @@ module Tungsten
       # Load persistent cache (silent degrade on any error)
       cache_path = File.join(Dir.home, ".tungsten", "cache", "#{sha}.memo")
       memo = begin
-        File.exist?(cache_path) ? Marshal.load(File.binread(cache_path)) : {}
+        if File.exist?(cache_path)
+          payload = Tungsten::Runtime::CacheIntegrity.unwrap(File.binread(cache_path))
+          payload ? Marshal.load(payload) : {}
+        else
+          {}
+        end
       rescue
         {}
       end
@@ -2169,7 +2179,8 @@ module Tungsten
           begin
             require "fileutils"
             FileUtils.mkdir_p(File.dirname(cache_path))
-            File.binwrite(cache_path, Marshal.dump(memo))
+            payload = Marshal.dump(memo)
+            File.binwrite(cache_path, Tungsten::Runtime::CacheIntegrity.wrap(payload))
           rescue
             # Cache write failure is non-fatal — in-memory memo still works
           end

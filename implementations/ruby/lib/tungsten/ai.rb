@@ -62,7 +62,11 @@ module Tungsten
 
       if answer == "y"
         puts
-        Interpreter.new.run(code)
+        # Run AI-generated code under the interpreter sandbox. The model output
+        # is attacker-influenced (prompt injection in the user's prompt, or in
+        # any retrieved context), so we block env/system/capture/popen/eval/file_*
+        # to prevent exfiltration of ANTHROPIC_API_KEY or other process secrets.
+        Interpreter.new(sandbox: true).run(code)
       end
     end
 

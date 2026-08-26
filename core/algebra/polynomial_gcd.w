@@ -21,8 +21,10 @@
       candidate -= 1
     -1
 
-  # Coefficient content with respect to x_variable. Coefficients only involve
-  # variables below `variable` in the recursive calls made by gcd_recursive.
+  # Coefficient content with respect to x_variable. The recursive GCD starts
+  # at the highest variable the coefficients involve, so `variable` need not
+  # be the top active variable (the coefficients of x_1 in F[x_1, x_2, x_3]
+  # live in F[x_2, x_3]; starting Euclid at x_0 there never terminated).
   -> content_in(variable)
     result = nil
     exponent = 0
@@ -32,7 +34,7 @@
         if result.class_name == "Nil"
           result = coefficient.monic
         else
-          result = result.gcd_recursive(coefficient, variable - 1)
+          result = result.gcd_recursive(coefficient, result.highest_active_variable(coefficient))
       exponent += 1
     result.class_name == "Nil" ? @ring.zero : result.monic
 

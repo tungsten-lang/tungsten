@@ -13,15 +13,19 @@
 #      taking a p-th root.
 # Reopens Polynomial; load after polynomial_factor_finite.w / polynomial_gcd.w.
 #
-# Three or more variables reduce to the bivariate case by Kronecker
-# substitution: with a main variable y and auxiliary variables x_1..x_r, the
-# base B = 1 + max_i deg_{x_i} f makes x_1^{e_1}...x_r^{e_r} -> x^{sum e_i B^{i-1}}
-# injective on every polynomial whose x_i-degrees are at most those of f, so
-# each irreducible factor F of f is recovered exactly from its image F^K,
-# which is a sub-multiset of the bivariate factorization of f^K. Candidates
-# are the inverse images (base-B digits) of sub-multiset products, accepted
-# by exact trial division in the original ring; the certificate re-checks
-# the product identity for every arity.
+# Three or more variables use the same pipeline with the ideal
+# m = (x_1 - a_1, ..., x_r - a_r) of the auxiliary variables in place of
+# (x - a): a point a with lc_y(f)(a) != 0 and f(a, y) squarefree (the point
+# with the fewest univariate factors among a few good ones), univariate
+# factorization of f(a, y), Hensel lifting of the monic factors modulo
+# m^(D + 1) with D the total degree of f in the auxiliary variables (one
+# m-adic layer per step, the linear correction solved through the
+# univariate Bezout cofactors), and the same recombination: candidates
+# lc_y(current) * (subset product), shifted back, made primitive in y by the
+# modular multivariate content, accepted by exact trial division. Truncated
+# power series are ordinary sparse polynomials in the shifted variables cut
+# at total degree D, so the lifting cost is governed by the number of
+# monomials of degree <= D in r variables rather than by any dense grid.
 
 + Polynomial
   -> require_multivariate_factor_domain
@@ -553,27 +557,27 @@
         entries = mf_merge_entries(entries, entry[0], entry[1] * @ring.field.characteristic)
       return entries
 
-    content = content_in(main)
+    content = modular_content_in(main)
     work = self
     if !content.constant?
       content.mf_factor_entries(search_limit).each -> (entry)
         entries = mf_merge_entries(entries, entry[0], entry[1])
       work = (self / content).monic
-    work.mf_factor_entries_kronecker(main, search_limit).each -> (entry)
+    work.mf_factor_entries_hensel(main, search_limit).each -> (entry)
       entries = mf_merge_entries(entries, entry[0], entry[1])
     entries
 
-  # Arity three or more: squarefree part, Kronecker factorization,
+  # Arity three or more: squarefree part, Hensel factorization,
   # multiplicities by trial division, leftovers recursively.
-  -> mf_factor_entries_kronecker(main, search_limit)
+  -> mf_factor_entries_hensel(main, search_limit)
     entries = []
     derivative_polynomial = derivative(main)
     common = gcd(derivative_polynomial)
     squarefree = common.constant? ? self.monic : (self / common).monic
-    squarefree_content = squarefree.content_in(main)
+    squarefree_content = squarefree.modular_content_in(main)
     if !squarefree_content.constant?
       squarefree = (squarefree / squarefree_content).monic
-    irreducibles = squarefree.mf_factor_squarefree_kronecker(main, search_limit)
+    irreducibles = squarefree.mf_factor_squarefree_hensel(main, search_limit)
     current = self
     irreducibles.each -> (factor)
       multiplicity = 0
@@ -600,66 +604,214 @@
       i += 1
     out
 
-  -> mf_kronecker_base(main)
-    base = 1
-    mf_auxiliary_variables(main).each -> (variable)
-      base = degree_in(variable) + 1 if degree_in(variable) + 1 > base
-    base
-
-  # Image in the bivariate ring `bi` ([:mf_x, :mf_y]): main -> y, and
-  # x_1^{e_1}...x_r^{e_r} -> x^{e_1 + e_2 B + ...}.
-  -> mf_kronecker_image(bi, main, aux, base)
-    terms = []
+  # Largest total degree in the auxiliary variables over all terms.
+  -> mf_aux_total_degree(aux)
+    best = 0
     @terms.each -> (term)
-      x_exponent = 0
-      weight = 1
-      aux.each -> (variable)
-        x_exponent += term[1][variable] * weight
-        weight = weight * base
-      terms.push([term[0], [x_exponent, term[1][main]]])
-    Polynomial.new(bi, terms)
+      total = 0
+      aux.each -> total += term[1][item]
+      best = total if total > best
+    best
 
-  # Inverse image by base-B digits; nil when a term needs more digits than
-  # there are auxiliary variables (then the input is not a Kronecker image).
-  -> mf_kronecker_preimage(image, main, aux, base)
-    terms = []
-    valid = true
-    image.terms.each -> (term)
-      exponents = @ring.zero_exponents
-      exponents[main] = term[1][1]
-      remaining = term[1][0]
-      aux.each -> (variable)
-        exponents[variable] = remaining % base
-        remaining = remaining / base
-      valid = false if remaining != 0
-      terms.push([term[0], exponents])
-    return nil if !valid
-    Polynomial.new(@ring, terms)
+  # Drop every term whose total degree in the auxiliary variables exceeds
+  # `bound` (reduction modulo m^(bound + 1)).
+  -> mf_truncate(aux, bound)
+    out = []
+    @terms.each -> (term)
+      total = 0
+      aux.each -> total += term[1][item]
+      out.push([term[0], copy_exponents(term[1])]) if total <= bound
+    Polynomial.new(@ring, out)
+
+  # Product of `list` reduced modulo m^(bound + 1) after every step.
+  -> mf_truncated_product(list, aux, bound)
+    acc = @ring.one
+    list.each -> acc = (acc * item).mf_truncate(aux, bound)
+    acc
+
+  # Exact substitution x_variable -> x_variable + c.
+  -> mf_shift_one(variable, c)
+    return self if field_zero?(c)
+    limit = degree_in(variable)
+    linear_exponents = @ring.zero_exponents
+    linear_exponents[variable] = 1
+    linear = @ring.monomial_raw(@ring.field.one, linear_exponents)
+    linear = linear + @ring.monomial_raw(c, @ring.zero_exponents)
+    buckets = []
+    e = 0
+    while e <= limit
+      buckets.push([])
+      e += 1
+    @terms.each -> (term)
+      exponents = copy_exponents(term[1])
+      e = exponents[variable]
+      exponents[variable] = 0
+      buckets[e].push([term[0], exponents])
+    out = @ring.zero
+    power = @ring.one
+    e = 0
+    while e <= limit
+      if buckets[e].size > 0
+        out = out + Polynomial.new(@ring, buckets[e]) * power
+      power = power * linear if e < limit
+      e += 1
+    out
+
+  # Shift every auxiliary variable by the point (or by its negative).
+  -> mf_shift(aux, point, negate)
+    result = self
+    i = 0
+    while i < aux.size
+      c = negate ? field_neg(point[i]) : point[i]
+      result = result.mf_shift_one(aux[i], c)
+      i += 1
+    result
+
+  # Substitute the auxiliary variables by the point (exponents set to zero).
+  -> mf_specialize_aux(aux, point)
+    result = self
+    i = 0
+    while i < aux.size
+      result = result.substitute_element(aux[i], point[i])
+      i += 1
+    result
+
+  # Inverse of a polynomial in the auxiliary variables with a nonzero
+  # constant term, modulo m^(bound + 1).
+  -> mf_series_inverse_aux(aux, bound)
+    constant_term = coeff(@ring.zero_exponents)
+    raise "series inverse of a non-unit" if field_zero?(constant_term)
+    scale = field_div(@ring.field.one, constant_term)
+    rest = self - @ring.monomial_raw(constant_term, @ring.zero_exponents)
+    ratio = rest.monomial_multiply_element(@ring.zero_exponents, field_neg(scale))
+    acc = @ring.one
+    power = @ring.one
+    k = 1
+    while k <= bound
+      power = (power * ratio).mf_truncate(aux, bound)
+      break if power.zero?
+      acc = acc + power
+      k += 1
+    acc.monomial_multiply_element(@ring.zero_exponents, scale)
+
+  # A specialization point for the auxiliary variables: lc_main(self)(a) != 0
+  # and self(a, main) squarefree. Among up to three good points (exhaustive
+  # over small point sets, a fixed pseudo-random sequence otherwise) the one
+  # whose univariate image has the fewest irreducible factors is kept, to
+  # limit extraneous factors in the recombination. Returns
+  # [point, monic univariate factors] or nil.
+  -> mf_specialization_point(uni, main, aux, search_limit)
+    field = @ring.field
+    dy = degree_in(main)
+    leading = coefficient_in(main, dy)
+    total_points = field.order ** aux.size
+    exhaustive = total_points <= 4096
+    tries = exhaustive ? total_points : 512
+    point = nil
+    base_factors = nil
+    good = 0
+    index = 0
+    state = 20260826
+    while index < tries && good < 3
+      candidate = []
+      remaining = index
+      aux.each ->
+        if exhaustive
+          candidate.push(field.element_from_index(remaining % field.order))
+          remaining = remaining / field.order
+        else
+          state = (state * 1103515245 + 12345) % 2147483648
+          candidate.push(field.element_from_index(state % field.order))
+      index += 1
+      next if leading.mf_specialize_aux(aux, candidate).zero?
+      image = mf_specialize_aux(aux, candidate).mf_project(uni, main)
+      derivative_image = image.derivative(0)
+      next if derivative_image.zero?
+      next if image.finite_fast_gcd(derivative_image).degree != 0
+      good += 1
+      factors = []
+      image.monic.factor(search_limit).each -> (factor)
+        factors.push(factor.monic) if factor.degree > 0
+      if base_factors == nil || factors.size < base_factors.size
+        point = candidate
+        base_factors = factors
+      break if base_factors.size == 1
+    return nil if point == nil
+    [point, base_factors]
+
+  # Lift monic coprime univariate factors (polynomials of `uni`) of
+  # target(0, main) to factors of `target` modulo m^(bound + 1); `target` is
+  # monic in `main` with coefficients already reduced modulo m^(bound + 1).
+  -> mf_hensel_lift_aux(uni, main, aux, target, base_factors, bound)
+    count = base_factors.size
+    cofactors = []
+    moduli = []
+    lifted = []
+    i = 0
+    while i < count
+      others = uni.one
+      j = 0
+      while j < count
+        others = others * base_factors[j] if j != i
+        j += 1
+      bezout = others.xgcd(base_factors[i])
+      if !bezout[0].one?
+        raise "Hensel lifting needs coprime specialized factors"
+      cofactors.push(mf_embed(bezout[1].rem(base_factors[i]), main))
+      moduli.push(mf_embed(base_factors[i], main))
+      lifted.push(mf_embed(base_factors[i], main))
+      i += 1
+    t = 1
+    while t <= bound
+      product = mf_truncated_product(lifted, aux, t)
+      error = target.mf_truncate(aux, t) - product
+      if !error.zero?
+        i = 0
+        while i < count
+          delta = (error * cofactors[i]).rem(moduli[i])
+          lifted[i] = lifted[i] + delta
+          i += 1
+      t += 1
+    lifted
+
+  # Candidate factor from a subset of lifted factors: lc * product modulo
+  # m^(bound + 1), shifted back by -a, made primitive in `main`.
+  -> mf_candidate_aux(subset, leading, aux, bound, point, main)
+    scaled = mf_truncated_product([leading] + subset, aux, bound)
+    back = scaled.mf_shift(aux, point, true)
+    content = back.modular_content_in(main)
+    back = back / content if !content.constant?
+    back.monic
 
   # Irreducible factors of a squarefree polynomial primitive in `main`,
-  # with positive degree in `main`, through the Kronecker image.
-  -> mf_factor_squarefree_kronecker(main, search_limit)
+  # with positive degree in `main`, by multivariate Hensel lifting.
+  -> mf_factor_squarefree_hensel(main, search_limit)
     return [self.monic] if degree_in(main) == 1
     aux = mf_auxiliary_variables(main)
-    base = mf_kronecker_base(main)
-    bi = PolynomialRing.new([:mf_x, :mf_y], @ring.field)
-    image = mf_kronecker_image(bi, main, aux, base)
-    pool = []
-    image.factor_multivariate(search_limit).each -> (entry)
-      if !entry[0].constant?
-        i = 0
-        while i < entry[1]
-          pool.push(entry[0])
-          i += 1
-    return [self.monic] if pool.size == 1
+    uni = PolynomialRing.new([:mf_y], @ring.field)
+    dy = degree_in(main)
+    bound = mf_aux_total_degree(aux)
+
+    found = mf_specialization_point(uni, main, aux, search_limit)
+    if found == nil
+      raise "no squarefree specialization point in the coefficient field; factorization unknown"
+    point = found[0]
+    base_factors = found[1]
+    return [self.monic] if base_factors.size == 1
+
+    shifted = mf_shift(aux, point, false)
+    inverse = shifted.coefficient_in(main, dy).mf_series_inverse_aux(aux, bound)
+    target = (shifted * inverse).mf_truncate(aux, bound)
+    lifted = mf_hensel_lift_aux(uni, main, aux, target, base_factors, bound)
 
     factors = []
     remaining = []
     i = 0
-    while i < pool.size
+    while i < lifted.size
       remaining.push(i)
       i += 1
     current = self
+    current_leading = shifted.coefficient_in(main, dy)
     trials = 0
     subset_size = 1
     while subset_size < remaining.size
@@ -668,19 +820,19 @@
       while i < subset_size
         indices.push(i)
         i += 1
-      found = false
+      found_subset = false
       searching = true
       while searching
         trials += 1
         if trials > search_limit
           raise "multivariate factor recombination limit exceeded; factorization unknown"
-        product = bi.one
-        indices.each -> product = product * pool[remaining[item]]
-        candidate = mf_kronecker_preimage(product, main, aux, base)
-        if candidate != nil && candidate.degree_in(main) > 0
+        subset = []
+        indices.each -> subset.push(lifted[remaining[item]])
+        candidate = mf_candidate_aux(subset, current_leading, aux, bound, point, main)
+        if candidate.degree_in(main) > 0
           step = current.divmod(candidate)
           if step[1].zero?
-            factors.push(candidate.monic)
+            factors.push(candidate)
             current = step[0]
             kept = []
             i = 0
@@ -688,11 +840,12 @@
               kept.push(remaining[i]) if !indices.include?(i)
               i += 1
             remaining = kept
-            found = true
+            current_leading = current.coefficient_in(main, current.degree_in(main)).mf_shift(aux, point, false)
+            found_subset = true
             searching = false
         if searching
           searching = mf_next_combination(indices, remaining.size)
-      if !found
+      if !found_subset
         subset_size += 1
     if current.degree_in(main) > 0
       factors.push(current.monic)

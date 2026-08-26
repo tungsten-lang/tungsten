@@ -29,6 +29,12 @@ core/algebra/polynomial_resultant.w
 core/algebra/polynomial_gcd.w
 core/algebra/polynomial_factor.w # exact factorization over ℚ
 core/algebra/polynomial_factor_finite.w # complete finite-field factorization
+core/algebra/polynomial_gcd_modular.w   # Brown modular multivariate gcd over finite fields
+core/algebra/polynomial_resultant_multivariate.w # any-arity resultants, discriminants, derivatives
+core/algebra/groebner_length.w          # zero-dimensional ideals: standard monomials and length
+core/algebra/polynomial_matrix.w        # matrices over F[z]: row reduction, order and kernel bases
+core/algebra/polynomial_factor_multivariate.w # bivariate factorization over finite fields (Hensel + Zassenhaus)
+core/algebra/polynomial_specialize.w    # specialize into a smaller ring, in_ring, divides?
 core/algebra/simple_extension.w   # certified K[a]/(m) quotient fields
 core/algebra/etale_algebra.w      # squarefree quotients and CRT products
 core/algebra/orders.w             # monogenic orders and Dedekind certificates
@@ -2263,6 +2269,62 @@ asks Wassat for a WRAT refutation, and replays it through the independent Wrat
 checker. This is appropriate for theta-incidence matching, subgroup
 elimination, and finite cohomology. WRAT does not certify maximal orders,
 class groups, units, p-adic lifting, or the arithmetic-to-CNF translation.
+
+## Multivariate gcd, resultants, zero-dimensional length, polynomial matrices
+
+Added 2026-08-26 for exact finite-field experiments in three variables (the
+Proximity Prize interpolation lab). Everything is exact and works over any
+`PolynomialRing` field; the fast paths need a finite field.
+
+- `Polynomial#gcd` now dispatches to `modular_gcd` when the coefficient field
+  is finite and the arity is at least two: Brown's dense evaluation/
+  interpolation gcd (contents removed in the main variable, images scaled by
+  the gcd of leading coefficients, Newton interpolation, unlucky points
+  detected by degree jumps, trial-division verification, exact PRS fallback
+  when the field is too small). A 613-term trivariate gcd over `F_10007`
+  takes seconds where the primitive PRS took more than ten minutes.
+- `resultant_in(other, variable)`, `discriminant_in(variable)` and
+  `derivative_in(variable)` work for any arity: the Sylvester matrix has
+  polynomial entries and its determinant is taken fraction-free (Bareiss)
+  in the ring itself, so `Res_x(Res_y(f, f_x), Res_y(f, f_y))` is a plain
+  polynomial in the remaining variables. `bivariate_resultant` is unchanged.
+- `GroebnerBasis`/`Ideal` gain `zero_dimensional?`, `standard_monomials`
+  (exponent vectors not divisible by any leading monomial, enumerated inside
+  the pure-power box), `standard_monomial_polynomials`, and `length`
+  (`dim_F F[x]/I`; raises unless zero-dimensional; the unit ideal has length 0).
+- `factor_multivariate` / `multivariate_factors` /
+  `factor_multivariate_with_certificate` (bivariate only, finite fields):
+  content and squarefree part, a squarefree specialization point in the base
+  field, univariate Cantor–Zassenhaus, linear multifactor Hensel lifting to
+  precision `deg_x f + 1`, Zassenhaus recombination with trial division, and
+  multiplicities; the certificate's `verified?` checks the product identity.
+  Three or more variables reduce to this route by Kronecker substitution
+  (auxiliary variables into one variable with base `1 + max aux degree`,
+  which is injective on all factors), followed by sub-multiset recombination
+  of the bivariate factors with inverse-Kronecker candidates and exact trial
+  division; content in the main variable is factored recursively. Kronecker
+  degrees grow like `deg^(arity-1)`, so this is for small degrees.
+- `specialize(variable, value)` is the ring map `F[x, z] → F[x]` with the
+  variable removed from the ring (so the univariate routines apply);
+  `in_ring(target)` re-embeds by generator names; `divides?(other)` tests
+  exact divisibility (zero remainder).
+- `PolynomialMatrix(ring, entries)` over a univariate ring `F[z]`:
+  `row_degrees`, `leading_row_coefficient_matrix`, `row_reduced?`,
+  `row_reduce` / `row_reduce_with_transform` (Mulders–Storjohann simple
+  transformations with the unimodular transform tracked), `order_basis(order)`
+  (iterative M-basis), and `minimal_kernel_basis(degree_bound)` returning a
+  row-reduced basis of the kernel elements of bounded degree together with
+  their degree profile. Popov normalization is not implemented yet.
+
+Specs: `spec/core/algebra_polynomial_gcd_modular_spec.w`,
+`algebra_polynomial_factor_multivariate_spec.w`, `algebra_polynomial_specialize_spec.w`,
+`algebra_polynomial_resultant_multivariate_spec.w`, `algebra_groebner_length_spec.w`,
+`algebra_polynomial_matrix_spec.w`.
+
+Runtime note: `2 * x`, `2 + x`, `2 - x`, `6 / c` with a `.w` instance on the
+right now dispatch through the instance's `coerce` (runtime `w_try_reverse_binop`,
+2026-08-26); previously only `x * 2` worked. One pre-existing friction remains:
+`Instant.now` fails to lower inside spec files.
 
 ## Factorization contract
 

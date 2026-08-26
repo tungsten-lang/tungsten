@@ -777,11 +777,13 @@ exclude_specs=(
   spec/core/algebra_etale_algebra_spec.w
   spec/core/algebra_f2_linear_spec.w
   spec/core/algebra_finite_factor_spec.w
+  spec/core/algebra_polynomial_factor_multivariate_spec.w
   spec/core/algebra_finite_field_spec.w
   spec/core/algebra_frey_spec.w
   spec/core/algebra_galois_spec.w
   spec/core/algebra_geometry_spec.w
   spec/core/algebra_groebner_certificate_spec.w
+  spec/core/algebra_groebner_length_spec.w
   spec/core/algebra_groebner_spec.w
   spec/core/algebra_hecke_spec.w
   spec/core/algebra_lattice_polytope_spec.w
@@ -803,6 +805,10 @@ exclude_specs=(
   spec/core/algebra_parity_lattice_spec.w
   spec/core/algebra_permutation_groups_spec.w
   spec/core/algebra_point_search_spec.w
+  spec/core/algebra_polynomial_resultant_multivariate_spec.w
+  spec/core/algebra_polynomial_gcd_modular_spec.w
+  spec/core/algebra_polynomial_matrix_spec.w
+  spec/core/algebra_polynomial_specialize_spec.w
   spec/core/algebra_polynomial_spec.w
   spec/core/algebra_prime_ideals_spec.w
   spec/core/algebra_projective_spec.w

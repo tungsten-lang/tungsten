@@ -39650,6 +39650,26 @@ static int __attribute__((noinline)) bigint_src_ops_resolve(void) {
     return off;
 }
 
+/* Reverse-operand dispatch for user-defined operands: `2 * poly`, `1 + series`.
+ * When only the RIGHT operand is a `.w` instance, ask it to `coerce` the left
+ * scalar into its own type (the convention every core arithmetic class
+ * follows: Polynomial, FormalPowerSeries, NumberFieldElement, ...) and
+ * re-dispatch on the coerced instance. Returns false when the receiver has no
+ * `coerce`, or when its result is not an instance (a Field#coerce returning a
+ * bare residue must not recurse), so the caller keeps its scalar fallbacks. */
+static bool w_try_reverse_binop(WValue a, WValue b, const char *op, WValue *out) {
+    if (w_is_instance(a) || !w_is_instance(b)) return false;
+    WObject *obj = (WObject *)w_as_ptr(b);
+    WValue coerce_name = w_string("coerce");
+    WMethod *m = w_method_lookup_arity(g_class_table[obj->class_id], coerce_name, 2);
+    if (!m) m = w_method_lookup(g_class_table[obj->class_id], coerce_name);
+    if (!m) return false;
+    WValue left = w_method_call_fast(b, coerce_name, &a, 1);
+    if (!w_is_instance(left)) return false;
+    *out = w_method_call_fast(left, w_string(op), &b, 1);
+    return true;
+}
+
 WValue w_add(WValue a, WValue b) {
     /* E2(a): chain ordered by observed frequency. Integer arms lead —
      * every boxed int add (the guarded i48 arm's overflow/boxed fallback)
@@ -39771,6 +39791,10 @@ WValue w_add(WValue a, WValue b) {
     if (w_is_instance(a))
         return w_method_call_fast(a, w_string("+"), &b, 1);
     {
+        WValue reversed;
+        if (w_try_reverse_binop(a, b, "+", &reversed)) return reversed;
+    }
+    {
         void *caller = __builtin_return_address(0);
         extern int main(int, char**);
         ptrdiff_t off = (char*)caller - (char*)main;
@@ -39829,6 +39853,10 @@ WValue w_sub(WValue a, WValue b) {
      * non-Float operands; its method can decide whether the Float is valid. */
     if (w_is_instance(a))
         return w_method_call_fast(a, w_string("-"), &b, 1);
+    {
+        WValue reversed;
+        if (w_try_reverse_binop(a, b, "-", &reversed)) return reversed;
+    }
     if (w_is_double(a) || w_is_double(b))
         return w_float(as_numeric_double(a) - as_numeric_double(b));
     /* char - char → int (codepoint difference) */
@@ -39946,6 +39974,10 @@ WValue w_mul(WValue a, WValue b) {
      * reaches its typed scalar overload. */
     if (w_is_instance(a))
         return w_method_call_fast(a, w_string("*"), &b, 1);
+    {
+        WValue reversed;
+        if (w_try_reverse_binop(a, b, "*", &reversed)) return reversed;
+    }
     if (w_is_double(a) || w_is_double(b))
         return w_float(as_numeric_double(a) * as_numeric_double(b));
     /* Integer arms hoisted to the chain head (E2(a)). */
@@ -40401,6 +40433,10 @@ WValue w_div(WValue a, WValue b) {
     /* Preserve user-defined operator dispatch when the divisor is a Float. */
     if (w_is_instance(a))
         return w_method_call_fast(a, w_string("/"), &b, 1);
+    {
+        WValue reversed;
+        if (w_try_reverse_binop(a, b, "/", &reversed)) return reversed;
+    }
     if (w_is_double(a) || w_is_double(b)) {
         double bv = as_numeric_double(b);
         if (bv == 0.0) die("division by zero");

@@ -353,3 +353,9 @@ use core/algebra/galois
       result = field.multiply(result, rows[diagonal][diagonal])
       diagonal += 1
     result
+use core/algebra/polynomial_resultant_multivariate
+use core/algebra/groebner_length
+use core/algebra/polynomial_gcd_modular
+use core/algebra/polynomial_matrix
+use core/algebra/polynomial_factor_multivariate
+use core/algebra/polynomial_specialize

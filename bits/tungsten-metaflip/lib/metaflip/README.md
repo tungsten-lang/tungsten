@@ -3,8 +3,17 @@
 This directory is the single immutable runtime root used by the public
 Metaflip executable:
 
-- `scheme.w`, `verify.w`, `compose.w`, `fleet.w`, `rect.w`, `tui.w`, and
-  `paths.w` define the major subsystems.
+- `scheme.w`, `verify.w`, `compose.w`, `fleet.w`, `rect.w`, `search.w`,
+  `tui.w`, and `paths.w` define the major subsystems. `search.w` is the
+  domain-neutral exact-gated coordinator: arbitrary caller-owned states and
+  one-argument adapter closures feed a bounded diversity archive without
+  importing the GF(2) scheme representation.
+- `search/finite_map.w` is the first domain adapter: exact rational-map fibre
+  profiles on arbitrary finite subsets of a caller-selected prime field. Its
+  locator and paired-locator flips stay on prescribed collision manifolds;
+  optional bounded proposal batches and scalar-normalized diversity bins let
+  callers explore several exact neighborhoods without changing the generic
+  coordinator.
 - `fleet/`, `rect/`, and `strategies/` contain coordinator and search modules.
   `rect/cpu_pool.w` keeps one OS thread per rectangular island across campaign
   epochs; workers reread their state slot after each barrier so rebases and

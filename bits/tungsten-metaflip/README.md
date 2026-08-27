@@ -1,15 +1,19 @@
 # tungsten-metaflip
 
-`tungsten-metaflip` is the distributable core of Metaflip: an adaptive,
-exact-gated search for low-rank matrix-multiplication tensor decompositions
-over GF(2). The fleet keeps independent CPU basins and schedules a diverse
-portfolio of Metal kernels, with the GPU enabled by default when supported.
+`tungsten-metaflip` is the distributable core of Metaflip: a domain-neutral
+exact-gated search coordinator plus an adaptive production fleet for low-rank
+matrix-multiplication tensor decompositions over GF(2). The tensor fleet keeps
+independent CPU basins and schedules a diverse portfolio of Metal kernels,
+with the GPU enabled by default when supported.
 
-Version 0.1 is intentionally GF(2)-only. It includes the production fleet,
-the pure-Tungsten GPU sources it builds, the small set of exact schemes needed
-to start supported campaigns, and reusable in-process proof primitives.
-Long-running proof campaign manifests, ternary search, exploratory benchmarks,
-and the full certificate collection remain outside this bit.
+The production tensor fleet remains intentionally GF(2)-only. The
+package also includes a domain-neutral in-process search coordinator, the
+pure-Tungsten GPU sources the tensor fleet builds, the small set of exact
+schemes needed to start supported campaigns, and reusable proof primitives.
+Long-running proof campaign manifests, ternary search, experiment journals,
+and the full certificate collection remain outside this bit. The focused
+Proximity benchmarks retained under `spec/` exercise the public adapters but
+do not ship proof generators or submission artifacts.
 
 ```text
 tungsten-metaflip/
@@ -28,6 +32,8 @@ tungsten-metaflip/
 │   ├── compose.w
 │   ├── proof.w
 │   ├── proof/
+│   ├── search.w
+│   ├── search/
 │   ├── fleet.w
 │   ├── rect.w
 │   ├── tui.w
@@ -46,19 +52,17 @@ A Tungsten compiler is required both to build the coordinator and, for the
 current release, at run time when the fleet materializes specialized workers.
 Worker builds resolve the driver through `METAFLIP_TUNGSTEN`, `TUNGSTEN_BIN`,
 `TUNGSTEN`, `TUNGSTEN_ROOT`, and finally `tungsten` on `PATH`.
-From a source checkout, the stable launcher compiles the pure-Tungsten CLI to
-the user cache when needed and then reuses it:
+From the Tungsten monorepo, run the pure-Tungsten CLI source directly:
 
 ```sh
-bin/metaflip --tensor 5x5
+bin/tungsten run bits/tungsten-metaflip/bin/metaflip.w -- --tensor 5x5
 ```
 
-`bin/metaflip` is the tracked shell launcher, not a generated native binary.
-Compiled coordinators belong in the launcher cache, `build/bin/`, or the
-ignored checkout-root `./metaflip`; do not use `--out bin/metaflip`.
-
-Set `METAFLIP_TUNGSTEN=/path/to/tungsten` to select its compiler or
-`TUNGSTEN_METAFLIP_CACHE_DIR=/path` to relocate the launcher cache.
+The extensionless `bin/metaflip` path is intentionally ignored: Bit and local
+builds may place a generated native executable there, so it is not a stable
+source-checkout launcher and may become stale. Rebuild generated executables
+after compiler or source changes. `METAFLIP_TUNGSTEN` may select the compiler
+used later when the running fleet materializes specialized workers.
 
 From a checkout of this bit:
 
@@ -67,15 +71,16 @@ tungsten compile bin/metaflip.w \
   --out ./metaflip --release --fast --lto
 ```
 
-Or let Bit preserve the executable, runtime worker sources, and assets as one
-relocatable build tree:
+Alternatively, let Bit preserve the executable, runtime worker sources, and
+assets as one relocatable build tree:
 
 ```sh
 bit build --release
 ./build/bin/metaflip --self-test --no-gpu
 ```
 
-From the Tungsten monorepo, use its checked-out compiler:
+To create a standalone executable from the Tungsten monorepo, use its
+checked-out compiler:
 
 ```sh
 bin/tungsten compile bits/tungsten-metaflip/bin/metaflip.w \
@@ -103,6 +108,18 @@ PATH="$PWD/spec/fixtures/offline-metal-failure:$PATH" /tmp/metaflip-msl-fallback
 
 tungsten compile spec/fixed_rank_pocket_strategy_test.w --out /tmp/metaflip-pocket-test --release --lto
 /tmp/metaflip-pocket-test
+
+tungsten compile spec/generic_search_test.w --out /tmp/metaflip-search-test --release --lto
+/tmp/metaflip-search-test
+
+tungsten compile spec/finite_map_search_test.w --out /tmp/metaflip-finite-map-test --release --lto
+/tmp/metaflip-finite-map-test
+
+tungsten compile spec/proximity_orbit_gain_bench.w --out /tmp/metaflip-proximity-gain --release --lto
+/tmp/metaflip-proximity-gain
+
+tungsten compile spec/proximity_projected_cubic_bench.w --out /tmp/metaflip-proximity-cubic --release --lto
+/tmp/metaflip-proximity-cubic 1 8 exact 1000
 
 tungsten compile spec/seven_by_seven_d3492_fertility_bench.w --out /tmp/metaflip-d3492-fertility --release --lto
 /tmp/metaflip-d3492-fertility
@@ -144,6 +161,122 @@ For independent checks, `metaflip_proof_psi_encode_full_matmul` retains every
 coefficient row, while `metaflip_proof_psi_encode_quotient_matmul` exposes the
 exact orbit quotient over a caller-owned CDCL state. Focused release/LTO
 regressions live in `spec/proof_cdcl_test.w` and `spec/proof_psi_test.w`.
+
+## Domain-neutral exact search
+
+`use metaflip` also exposes `Metaflip:Search`. It retains the production
+fleet's exact-gate and adaptive-diversity architecture without assuming a
+field, tensor, score meaning, or candidate representation. A domain adapter
+provides three one-argument closures:
+
+- a portfolio of strategies taking `Metaflip:Request` and returning a
+  `Metaflip:Proposal`, a bounded `Metaflip:ProposalBatch`, or `nil`;
+- an exact verifier returning `Metaflip:Assessment` or `nil`;
+- a snapshot function that makes an independent stored copy of a candidate.
+
+Only exact assessments can enter the bounded descriptor archive, improve the
+global best, or reward a strategy. Strategies may use arbitrary heuristic,
+parallel, or accelerator work internally; proxy scores are intentionally not
+part of the coordinator API. Exact objectives are lexicographic and each
+component may be maximized or minimized.
+
+```w
+use metaflip
+
+snapshot = -> (state) [state[0], state[1]]
+verify = -> (state)
+  result = nil
+  if state[0] >= 0 && state[1] >= 0
+    # Maximize x, then minimize y; x%8 is the diversity niche.
+    result = Metaflip:Assessment.new([state[0], state[1]], state[0] % 8,
+      state[0] * 1000000 + state[1])
+  result
+mutate = -> (request)
+  parent = request.best || [0, 0]
+  Metaflip:Proposal.new([parent[0] + 1, parent[1]], 1)
+
+search = Metaflip:Search.new([mutate], verify, snapshot, [1, -1],
+  {capacity: 32, seed: 7})
+search.seed([0, 0])
+search.run(1000)
+<< search.best_scores
+```
+
+`Proposal.cost` is a positive, adapter-defined exposure unit, allowing the
+portfolio to compare a cheap local mutation with a batched solver or GPU
+strategy. Descriptor and identity equality use ordinary Tungsten `==`, so
+they may be integers, strings, symbols, or immutable value objects. An
+identity of `nil` disables cross-niche deduplication. The focused non-GF(2)
+regression is `spec/generic_search_test.w`.
+
+`ProposalBatch` is the exact candidate-selection primitive for coordinate
+sweeps, repair neighborhoods, and accelerator harvests. Every member is
+verified and admitted separately; the arm receives one pull, the sum of all
+member costs as exposure, and only post-gate valid/novel/improvement credit.
+The first exact candidate in an unseeded run establishes the baseline and does
+not give its arm an order-dependent improvement or novelty windfall. Keep
+batches bounded: they expose alternatives to the archive, not a substitute for
+streaming a very large campaign.
+
+`spec/proximity_orbit_gain_bench.w` is a retained historical-gain test rather
+than a toy optimizer. Its external adapter encodes the exact integer ledger
+behind the Proximity Prize upper track's 512-fibre improvement, seeds the
+previous 139502-agreement result, and asks the generic coordinator to recover
+the verified 512/272/14 parameters (139775 agreements). It also rejects the
+later 1024/136/6 counting obstruction and compares the adaptive portfolio with
+uniform sampling under equal exact-check budgets. Lean proof generation and
+submission translation deliberately remain outside Metaflip.
+
+### Finite-map fibre adapter
+
+`Metaflip:FiniteMapDomain` supplies a reusable exact adapter for rational maps
+on a finite subset of a prime field. It computes the complete image histogram,
+exact-size fibre coverage, capped collision mass, overfull fibres, and poles.
+The built-in strategy portfolio mutates numerator and denominator coefficients;
+callers can pass structured algebraic strategies to `domain.search_with` while
+retaining the same verifier and archive.
+
+```w
+points = []
+17.times -> (i) points.push(i)
+domain = Metaflip:FiniteMapDomain.new(points, 17, 2, 3, 1)
+square = Metaflip:PrimeRationalMap.new([0, 0, 1], [1])
+profile = domain.profile(square) # eight exact 2-fibres, plus zero
+
+search = domain.search({capacity: 64, seed: 9})
+search.seed(square)
+search.run(10000)
+```
+
+Coefficients are constant-first. Candidate identities are normalized under a
+common nonzero field scalar, so equivalent numerator/denominator presentations
+deduplicate. By default any pole on the input set is an exact rejection;
+`{allow_poles: true}` keeps poles as a minimized score component instead. The
+adapter supports primes through `3037000499`, which keeps every reduced Horner
+product inside signed 64-bit arithmetic. Its focused regression is
+`spec/finite_map_search_test.w`.
+
+For a requested fibre size `d`, locator strategies construct a monic degree-`d`
+polynomial with a chosen zero fibre. When both degree bounds permit it, paired
+locators use `A/(A+B)` for disjoint root sets, guaranteeing finite fibres at
+zero and one before the exact pole/profile gate. Locator flips now use the
+archive parent first, so retained basins are actually explored, and
+`{locator_batch: k}` emits up to `k` root-preserving alternatives through a
+`ProposalBatch`. `{diversity_bins: n}` adds a stable scalar-normalized
+coefficient bucket to the metric descriptor; use it to retain plateau basins,
+and lower `novel_reward` when those identity buckets are diversity only rather
+than mathematical novelty.
+
+`spec/proximity_projected_cubic_bench.w` applies these operations to the actual
+KoalaBear `mu_512` labels. Its radix index exhausts all `C(512,3)=22,238,720`
+monic split cubics and proves that a cubic polynomial has at most one exact
+three-fibre there. Paired rational locators immediately improve the matched
+coefficient baseline from zero to two constructed fibres. The retained search
+also contains an in-place coordinate sweep and a collision-equation
+repair: an observed double fibre can be promoted by solving all one-/two-root
+repairs before paying for another full histogram. This benchmark discovers and
+exact-checks maps only; translation to any proof or submission stays outside
+Metaflip.
 
 ## Run
 

@@ -1,9 +1,9 @@
 tungsten "tungsten-0.0.1"
 
 name        "tungsten-metaflip"
-version     "0.1.0"
-summary     "Adaptive GF(2) matrix-multiplication decomposition search"
-description "Pure-Tungsten CPU and Metal search fleets for exact square and rectangular matrix-multiplication tensor decompositions over GF(2)."
+version     "0.2.0"
+summary     "Exact-gated adaptive search with GF(2) tensor fleets"
+description "Domain-neutral exact-gated adaptive search plus Pure-Tungsten CPU and Metal fleets for matrix-multiplication tensor decompositions over GF(2)."
 license     "MIT OR Apache-2.0 WITH LLVM-exception"
 authors     ["Erik Peterson"]
 

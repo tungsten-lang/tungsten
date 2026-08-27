@@ -3,6 +3,9 @@
 **Date:** 2026-08-18.
 **Source:** `Layr-Labs/qwen-3.8-mtp-challenge` @ `32b94cb..036fd9c`
 (accepted-submission commits merged into that repo's `main`).
+**Continued in:** `mlx-challenge-lessons-2.md` (accepts `036fd9c..0863b06a`,
+2026-08-18 → 08-23, board 3.19 → 3.73) and `dflash2-speculation.md` (the
+design synthesis for our own block speculation).
 **Hardware behind the numbers:** Apple M5 Max, 128 GB. Ours is M3 Max —
 treat every microsecond below as a *shape* of result, not a target.
 

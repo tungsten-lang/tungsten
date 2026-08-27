@@ -227,6 +227,22 @@ DEFINE_WIDE_KERNEL(nvfp4_wide_b4_r4_residual, 4, 4, true)
 DEFINE_WIDE_KERNEL(nvfp4_wide_b5_r2_residual, 5, 2, true)
 DEFINE_WIDE_KERNEL(nvfp4_wide_b5_r4_residual, 5, 4, true)
 DEFINE_WIDE_KERNEL(nvfp4_wide_b4_r3_residual, 4, 3, true)
+// Block-verify widths (DFlash2 verifies an anchor plus up to seven drafts in
+// one pass). The hoisted footprint grows with BATCH (16 floats per row), so
+// r1 is the only likely-resident shape at b8 on this template; the split
+// variant below keeps the b4 footprint at b8 and is swept against it.
+DEFINE_WIDE_KERNEL(nvfp4_wide_b6_r1, 6, 1, false)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b6_r2, 6, 2, false)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b7_r1, 7, 1, false)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b7_r2, 7, 2, false)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b8_r1, 8, 1, false)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b8_r2, 8, 2, false)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b6_r1_residual, 6, 1, true)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b6_r2_residual, 6, 2, true)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b7_r1_residual, 7, 1, true)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b7_r2_residual, 7, 2, true)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b8_r1_residual, 8, 1, true)
+DEFINE_WIDE_KERNEL(nvfp4_wide_b8_r2_residual, 8, 2, true)
 
 #undef DEFINE_WIDE_KERNEL
 
@@ -352,3 +368,188 @@ DEFINE_WIDE_HALF(nvfp4_wideh_b3_r2, 3, 2, false)
 DEFINE_WIDE_HALF(nvfp4_wideh_b4_r2_residual, 4, 2, true)
 DEFINE_WIDE_HALF(nvfp4_wideh_b4_r4_residual, 4, 4, true)
 #undef DEFINE_WIDE_HALF
+
+// Split-hoist variant for wide batches: the BATCH activation rows are
+// hoisted in halves of HALF rows, so the live activation footprint is that of
+// a BATCH=HALF kernel while the weight group is still decoded once per output
+// row and reused across every batch row (the second half re-reads the same
+// two u32s, an L1 hit, and re-decodes them). The per-(row, batch) expression
+// is exactly nvfp4_matvec_mlx_scaled_wide_impl's, so results are
+// bit-identical to that kernel and to the per-token qmv.
+template <int BATCH, int HALF, int ROWS, bool ADD_RESIDUAL>
+static inline void nvfp4_wide_split_impl(
+  device const uint  *__restrict__ w_packed,
+  device const uchar *__restrict__ w_scales,
+  device const float *__restrict__ x,
+  device float       *__restrict__ y,
+  constant int   &k_dim,
+  constant int   &n_rows,
+  constant float &global_scale,
+  uint tg_id,
+  uint simd_id,
+  uint simd_lane
+) {
+  const int n_groups = k_dim / 16;
+  const int u32s_per_row = k_dim / 8;
+  const int row0 = int(tg_id) * (2 * ROWS) + int(simd_id) * ROWS;
+  const int lane = int(simd_lane);
+
+  float acc[ROWS][BATCH];
+#pragma clang loop unroll(full)
+  for (int r = 0; r < ROWS; r++) {
+#pragma clang loop unroll(full)
+    for (int b = 0; b < BATCH; b++) acc[r][b] = 0.0f;
+  }
+
+  for (int g_block = 0; g_block < n_groups; g_block += 32) {
+    const int g = g_block + lane;
+    if (g >= n_groups) continue;
+    const int x_off = g * 16;
+
+#pragma clang loop unroll(full)
+    for (int h = 0; h < BATCH; h += HALF) {
+      float4 av[HALF][4];
+#pragma clang loop unroll(full)
+      for (int b = 0; b < HALF; b++) {
+        device const float4 *xp =
+          (device const float4 *)(&x[(h + b) * k_dim + x_off]);
+        av[b][0] = xp[0];
+        av[b][1] = xp[1];
+        av[b][2] = xp[2];
+        av[b][3] = xp[3];
+      }
+
+#pragma clang loop unroll(full)
+      for (int r = 0; r < ROWS; r++) {
+        const int row = row0 + r;
+        if (row >= n_rows) continue;
+
+        const uint w0 = w_packed[row * u32s_per_row + g * 2];
+        const float s = float(e4m3_decode_half_wide(
+          uint(w_scales[row * n_groups + g])));
+        const uint b00 = w0 & 0xff, b01 = (w0 >> 8) & 0xff;
+        const uint b02 = (w0 >> 16) & 0xff, b03 = (w0 >> 24) & 0xff;
+        const float4 v0 = float4(nvfp4_decode_half_wide(b00 & 0xf),
+          nvfp4_decode_half_wide(b00 >> 4),
+          nvfp4_decode_half_wide(b01 & 0xf),
+          nvfp4_decode_half_wide(b01 >> 4));
+        const float4 v1 = float4(nvfp4_decode_half_wide(b02 & 0xf),
+          nvfp4_decode_half_wide(b02 >> 4),
+          nvfp4_decode_half_wide(b03 & 0xf),
+          nvfp4_decode_half_wide(b03 >> 4));
+
+        float d[HALF];
+#pragma clang loop unroll(full)
+        for (int b = 0; b < HALF; b++) {
+          d[b] = dot(v0, av[b][0]) + dot(v1, av[b][1]);
+        }
+
+        const uint w1 = w_packed[row * u32s_per_row + g * 2 + 1];
+        const uint b10 = w1 & 0xff, b11 = (w1 >> 8) & 0xff;
+        const uint b12 = (w1 >> 16) & 0xff, b13 = (w1 >> 24) & 0xff;
+        const float4 v2 = float4(nvfp4_decode_half_wide(b10 & 0xf),
+          nvfp4_decode_half_wide(b10 >> 4),
+          nvfp4_decode_half_wide(b11 & 0xf),
+          nvfp4_decode_half_wide(b11 >> 4));
+        const float4 v3 = float4(nvfp4_decode_half_wide(b12 & 0xf),
+          nvfp4_decode_half_wide(b12 >> 4),
+          nvfp4_decode_half_wide(b13 & 0xf),
+          nvfp4_decode_half_wide(b13 >> 4));
+
+#pragma clang loop unroll(full)
+        for (int b = 0; b < HALF; b++) {
+          d[b] += dot(v2, av[b][2]) + dot(v3, av[b][3]);
+        }
+
+#pragma clang loop unroll(full)
+        for (int b = 0; b < HALF; b++) {
+          acc[r][h + b] += s * d[b];
+        }
+      }
+    }
+  }
+
+#pragma clang loop unroll(full)
+  for (int r = 0; r < ROWS; r++) {
+#pragma clang loop unroll(full)
+    for (int b = 0; b < BATCH; b++) {
+      acc[r][b] = simd_sum(acc[r][b]) * global_scale;
+    }
+  }
+
+  if (lane == 0) {
+#pragma clang loop unroll(full)
+    for (int r = 0; r < ROWS; r++) {
+      const int row = row0 + r;
+      if (row >= n_rows) continue;
+#pragma clang loop unroll(full)
+      for (int b = 0; b < BATCH; b++) {
+        if (ADD_RESIDUAL) y[b * n_rows + row] += acc[r][b];
+        else y[b * n_rows + row] = acc[r][b];
+      }
+    }
+  }
+}
+
+#define DEFINE_WIDE_SPLIT(NAME, BATCH, HALF, ROWS, ADD_RESIDUAL)            \
+[[max_total_threads_per_threadgroup(64)]]                                   \
+kernel void NAME(                                                           \
+  device const uint *w [[buffer(0)]], device const uchar *s [[buffer(1)]],  \
+  device const float *x [[buffer(2)]], device float *y [[buffer(3)]],       \
+  constant int &k [[buffer(4)]], constant int &n [[buffer(5)]],             \
+  constant float &g [[buffer(6)]],                                          \
+  uint tg [[threadgroup_position_in_grid]],                                 \
+  uint sg [[simdgroup_index_in_threadgroup]],                               \
+  uint sl [[thread_index_in_simdgroup]]) {                                  \
+  nvfp4_wide_split_impl<BATCH, HALF, ROWS, ADD_RESIDUAL>(                   \
+    w, s, x, y, k, n, g, tg, sg, sl);                                       \
+}
+
+DEFINE_WIDE_SPLIT(nvfp4_wides_b8_r1, 8, 4, 1, false)
+DEFINE_WIDE_SPLIT(nvfp4_wides_b8_r2, 8, 4, 2, false)
+DEFINE_WIDE_SPLIT(nvfp4_wides_b8_r4, 8, 4, 4, false)
+DEFINE_WIDE_SPLIT(nvfp4_wides_b6_r2, 6, 3, 2, false)
+DEFINE_WIDE_SPLIT(nvfp4_wides_b8_r1_residual, 8, 4, 1, true)
+DEFINE_WIDE_SPLIT(nvfp4_wides_b8_r2_residual, 8, 4, 2, true)
+DEFINE_WIDE_SPLIT(nvfp4_wides_b8_r4_residual, 8, 4, 4, true)
+DEFINE_WIDE_SPLIT(nvfp4_wides_b6_r2_residual, 6, 3, 2, true)
+#undef DEFINE_WIDE_SPLIT
+
+// Complete the (BATCH 2..8) x (ROWS 1/2/4) x (residual) grid so the
+// runtime-width block verify can pick any rung; the bench sweeps them.
+#define DEFINE_WIDE_GRID(NAME, BATCH, ROWS, ADD_RESIDUAL)                   \
+[[max_total_threads_per_threadgroup(64)]]                                   \
+kernel void NAME(                                                           \
+  device const uint *w [[buffer(0)]], device const uchar *s [[buffer(1)]],  \
+  device const float *x [[buffer(2)]], device float *y [[buffer(3)]],       \
+  constant int &k [[buffer(4)]], constant int &n [[buffer(5)]],             \
+  constant float &g [[buffer(6)]],                                          \
+  uint tg [[threadgroup_position_in_grid]],                                 \
+  uint sg [[simdgroup_index_in_threadgroup]],                               \
+  uint sl [[thread_index_in_simdgroup]]) {                                  \
+  nvfp4_matvec_mlx_scaled_wide_impl<BATCH, ROWS, ADD_RESIDUAL>(             \
+    w, s, x, y, k, n, g, tg, sg, sl);                                       \
+}
+DEFINE_WIDE_GRID(nvfp4_wide_b2_r1, 2, 1, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b2_r1_residual, 2, 1, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b2_r2, 2, 2, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b2_r2_residual, 2, 2, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b2_r4, 2, 4, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b2_r4_residual, 2, 4, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b3_r1, 3, 1, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b3_r1_residual, 3, 1, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b4_r1_residual, 4, 1, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b5_r1_residual, 5, 1, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b6_r4, 6, 4, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b6_r4_residual, 6, 4, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b7_r4, 7, 4, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b7_r4_residual, 7, 4, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b8_r4, 8, 4, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b8_r4_residual, 8, 4, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b1_r1, 1, 1, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b1_r1_residual, 1, 1, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b1_r2, 1, 2, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b1_r2_residual, 1, 2, true)
+DEFINE_WIDE_GRID(nvfp4_wide_b1_r4, 1, 4, false)
+DEFINE_WIDE_GRID(nvfp4_wide_b1_r4_residual, 1, 4, true)
+#undef DEFINE_WIDE_GRID

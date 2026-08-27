@@ -95,6 +95,75 @@ Rows 2–3 are nearly free (bandwidth-bound, weights streamed once); row 4 is wh
 it turns compute/occupancy-bound. At p=0.64, depth 2 gives 55 tok/s and that is
 *exactly* what is measured — the shipped config sits on its own optimum.
 
+
+## Landed 2026-08-25: `devchain` arm -- single-sync speculative rounds
+
+Ported the MLX challenge's device-resident draft chain + one-sync-per-round
+discipline (port-ledger row 8, +3.6% RETAINED at 16K). Three mechanisms, all
+gated behind `ARGV[7]="devchain"` (default OFF), all PARITY-PROVEN:
+
+1. **Depth-2 chained draft on device** -- the draft's argmax is copied into the
+   verify's token slot (`lib/kernels/shared/copy_i32_at.metal`), committed async,
+   read back only after the verify. One GPU sync/round instead of two.
+2. **Depth-3 chained draft on device** -- draft1 -> token slot 2, draft2 reads
+   slot 2 as its input (`bf16_embedding_lookup_buf.metal`) and writes slot 3;
+   one sync (the verify) instead of three.
+3. **Async decode-phase history appends** -- KV-only appends need no host value,
+   so they commit async and are drained by the round's next sync.
+
+Validation (loaded box -> perf is DIRECTIONAL; parity is exact):
+- Every run: `generated ids` byte-identical to pristine and acceptance identical
+  (mtp2 31/64, mtp3 31/67). `verify=` flat ~1177 ms (the null check) -- the delta
+  is draft/history scheduling, not drift. Default path (devchain OFF) is
+  byte-identical to baseline.
+- mtp2: pristine ~1339 -> **1268 ms** (46.9 -> **50.4 tok/s**, ~+5.6%).
+- mtp3: pristine 1334 -> **1291 ms** (47.98 -> **49.6 tok/s**, ~+3.4%).
+
+```
+# promotion gate -- run on a COOL, quiet box (ABBA, >=3/4):
+scripts/bench/perf_lock.sh bin/tungsten run scripts/bench/qwen38_mlx.w mtp2 64 r2 mmap profile 64 auto            # baseline
+scripts/bench/perf_lock.sh bin/tungsten run scripts/bench/qwen38_mlx.w mtp2 64 r2 mmap profile 64 auto devchain   # arm
+# (repeat with mtp3)
+```
+
+4. **Batched prefill** (`forward_prefill_chunk`) -- the biggest lever the
+   measurement surfaced. Stock prefill is token-by-token: it streams the 18 GB
+   model ONCE PER PROMPT TOKEN (64 tokens = 64 streams, ~8-21 tok/s). Batched
+   prefill runs 3 prompt tokens per stream through the triplet backbone (the
+   cross-row kernels amortize the weight read, bit-exact by row independence),
+   building KV and advancing gated-delta state exactly like 3 serial forwards.
+   Head-history priming is preserved (staged from x_triplet), so decode
+   acceptance is unchanged. Triplet, not quad, because triplet buffers are
+   allocated in every MTP mode. Measured: prefill **3052 -> 1842 ms (1.66x**,
+   21 -> 34.7 tok/s; the residual is the fixed cold-weight first-touch, ~2.5x
+   on the warm portion). ids byte-identical to serial prefill.
+
+Full arm result (mtp2, 64+64, one window): prefill 3052->1842 ms, decode
+1308->1265 ms, **end-to-end 4360 -> 3107 ms (1.40x)**; devchain-OFF byte-
+identical to baseline.
+
+**Note:** the tungsten `.w` interpreter has an intermittent parse/JIT flake
+("bitwise operation requires integer arguments" at load, no output) that hits
+pristine too and clears on retry -- unrelated to these edits, but worth a look.
+
+**Where the squeeze stops.** After devchain, `verify=` is ~92% of decode and is
+bandwidth-bound (18 GB weight stream, already on the ported cross-row QMV). The
+draft head step is now compute-bound (~1.8 ms), not sync-bound, so more
+scheduling saves <1%. The remaining levers, in size order: (1) **GEMM prefill** -- all prompt tokens
+in ONE weight stream via a simdgroup-matrix kernel (~another 2-5x on prefill
+beyond the 1.66x triplet batching); a major new NVFP4 kernel (the reference
+never built it; simdgroup GEMM was slower at small M, should win at M=64). (2)
+coarse/exact draft readout (~0.8% of decode, within noise; prior q2 lost an
+ABBA). (3) acceptance itself (head quality / trained DFlash2-style drafter) --
+a model artifact, the only lever with real decode magnitude left.
+
+## See also (2026-08-25)
+
+The board moved 3.19 → 3.73 after this handoff; what did it is in
+`mlx-challenge-lessons-2.md`, and the design consequences for us (acceptance
+first, then verify-width kernels, then a cluster index for the draft
+selector) are in `dflash2-speculation.md`.
+
 ## What is left
 
 - **Head step is the binding constraint** (1.95 ms; ~1.2 ms is irreducible

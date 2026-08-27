@@ -23,6 +23,7 @@
 # tokens; verification still scores the full vocabulary and remains exact.
 
 use core/metal
+use core/json
 use tungsten-llama/sharded_safetensors
 use tungsten-llama/tokenizer
 
@@ -92,7 +93,69 @@ if ARGV.size() > 6 && ARGV[6] == "fullbar" then triplet_variant = "auto"
 # Diagnostic: histogram the rank of the target's token in the head's draft
 # distribution. Decides whether tree drafting can pay -- see mtp_draft_rank.metal.
 draft_rank_probe = ARGV.size() > 7 && ARGV[7] == "rank-probe"
-row_scan = ARGV.size() > 7 && ARGV[7] == "row-scan"
+row_scan = ARGV.size() > 7 && (ARGV[7] == "row-scan" || ARGV[7] == "row-scan-multi")
+# Runtime-width block verify (decode_multi.metal): one causal pass over n <= 8
+# rows with tape-replay rollback. ARGV[7] = "multi" swaps it in for the quad
+# and triplet verifies so ids/acceptance can be diffed against them;
+# "row-scan-multi" times widths 1..8. ARGV[8] then selects the NVFP4 kernel
+# rung ("auto" | r1 | r2 | r4 | s1 | s2 | s4; s = split-hoist, b6/b8 only).
+# dflash2: block-diffusion drafter (z-lab DFlash2) + width-n exact verify.
+# ARGV[7] = "b<k>" sets the block width (anchor + k-1 drafts, k <= 8; default
+# 8); ARGV[8] the NVFP4 verify rung as for "multi".
+dflash2_enabled = mode == "dflash2"
+dflash2_block = 8
+# A trailing "q" on the block spec ("b8q") selects the NVFP4-quantized drafter
+# (scripts in ~/src/dflash-gate0/quantize_dflash2.py) instead of the bf16 one.
+draft_quant = false
+if dflash2_enabled && ARGV.size() > 7 && ARGV[7].size() > 1 && ARGV[7].slice(0, 1) == "b"
+  bspec = ARGV[7]
+  if bspec.slice(bspec.size() - 1, 1) == "q"
+    draft_quant = true
+    bspec = bspec.slice(0, bspec.size() - 1)
+  dflash2_block = bspec.slice(1, bspec.size() - 1).to_i()
+if dflash2_block < 2 || dflash2_block > 8 then raise "dflash2 block width must be 2..8"
+# GEMM prefill (plan phase 2): ARGV[6] = "gemm-prefill" runs the prompt through
+# the backbone in chunks of up to 64 rows, one weight stream per chunk, on the
+# simdgroup-matrix NVFP4 GEMM (f32 accumulate, global scale; not bit-exact vs
+# serial -- gate it on ids). Only the last row's logits are computed, through
+# the serial lm_head path.
+prefill_gemm = ARGV.size() > 6 && ARGV[6] == "gemm-prefill"
+if prefill_gemm then triplet_variant = "auto"
+if prefill_gemm && devchain then raise "gemm-prefill replaces the devchain triplet prefill; drop devchain"
+multi_verify = dflash2_enabled || prefill_gemm || (ARGV.size() > 7 && (ARGV[7] == "multi" || ARGV[7] == "row-scan-multi"))
+multi_variant = (multi_verify && ARGV.size() > 8) ? ARGV[8] : "auto"
+if dflash2_enabled && ARGV.size() > 7 && ARGV[7] == "devchain" then raise "dflash2 has its own device chain; drop devchain"
+# Single-sync speculative round: keep the depth-2 chained draft's argmax on
+# device and read it only after the verify (one GPU sync/round instead of
+# two). Pure scheduling -- ids and acceptance stay byte-identical. Default
+# off; A/B it with `mtp2 ... devchain` in ARGV[7].
+devchain = ARGV.size() > 7 && ARGV[7] == "devchain"
+# Diagnostic: dump the five DFlash2 conditioning taps -- the residual stream
+# after layers 5/19/33/47/61 (pre-final-norm, exactly what the drafter's
+# `fc` consumes) -- for every position of a SERIAL greedy run, plus the token
+# stream, so the reference DFlash2 drafter can be scored offline on THIS
+# engine's NVFP4 hidden states. Gate 0 of the DFlash2 port: if the drafter
+# cannot read our taps, no kernel is worth writing. Serial path only (mode
+# `concurrent`); ARGV[8] is the output path prefix (.f32 + .json).
+tapdump = ARGV.size() > 7 && ARGV[7] == "tapdump"
+tapdump_prefix = ARGV.size() > 8 ? ARGV[8] : "/tmp/qwen38_taps"
+tap_layers = [5, 19, 33, 47, 61]
+# Optional ARGV[9]: a JSON file holding the prompt token ids verbatim (e.g. a
+# chat-templated prompt built elsewhere), replacing the prose fixture.
+prompt_ids_file = ARGV.size() > 9 ? ARGV[9] : ""
+# ARGV[10] = "probe:<prefix>" (dflash2): dump round 0's draft hidden, top-16
+# candidates/unaries and draft ids to <prefix>.* for comparison against the
+# reference drafter run on the same taps.
+dflash2_probe = ""
+if ARGV.size() > 10 && ARGV[10].size() > 6 && ARGV[10].slice(0, 6) == "probe:"
+  dflash2_probe = ARGV[10].slice(6, ARGV[10].size() - 6)
+# Async decode-phase history appends (devchain): a want_draft=false MTP
+# step writes only KV, so it needs no host value -- commit it async and let
+# the round's next sync drain it. Handles are released at round end. Sized
+# for the max history appends in one decode round (3 at depth 3).
+hist_cbs = [0, 0, 0, 0]
+if multi_verify && devchain then raise "multi verify and devchain are not combinable yet"
+hist_cb_n = [0]
 prose_tech = ARGV.size() > 4 && ARGV[4] == "prose-tech"
 rank_hist = [0, 0, 0, 0, 0, 0]
 rank_outside = 0
@@ -121,6 +184,9 @@ mtp_adaptive = mode == "mtp-auto"
 # mtp/mtp2 are byte-for-byte unaffected by its presence.
 mtp_depth3 = mode == "mtp3"
 mtp_depth2 = mode == "mtp2" || mtp_adaptive || mtp_depth3
+if dflash2_enabled
+  optimized = true
+  concurrent = true
 if mtp_enabled
   optimized = true
   concurrent = true
@@ -144,6 +210,9 @@ rms_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "r
 rms_batch_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "rms_norm_batch.metal")), "rms_norm_batch")
 phn_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "per_head_norm.metal")), "per_head_norm")
 copy_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "copy_f32_slice.metal")), "copy_f32_slice")
+copy_i32_at_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "copy_i32_at.metal")), "copy_i32_at")
+copy_f32_at_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "copy_f32_at.metal")), "copy_f32_at")
+bf16_embed_buf_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "bf16_embedding_lookup_buf.metal")), "bf16_embedding_lookup_buf")
 kv_write_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "kv_write.metal")), "kv_write")
 add_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "residual_add.metal")), "residual_add")
 silu_pipe = metal_pipeline(metal_compile_source(device, read_file(SHARED_DIR + "silu_mul.metal")), "silu_mul")
@@ -261,6 +330,74 @@ delta_quad_pipe = metal_pipeline(quad_lib, "gated_delta_quad")
 rms_quad_pipe = metal_pipeline_with_int_constants(rms_pair_lib, "rms_norm_batch_fc", [HIDDEN, 4])
 argmax_quad_pipe = metal_pipeline_with_int_constants(argmax_pair_lib, "argmax_batch_fc", [N_VOCAB, 4])
 argmax_triplet_pipe = metal_pipeline_with_int_constants(argmax_pair_lib, "argmax_batch_fc", [N_VOCAB, 3])
+
+# ---- runtime-width block verify (n <= MULTI_MAX rows in one causal pass) ----
+MULTI_MAX = prefill_gemm ? 64 : 8
+MULTI_WIDE_MAX = 8
+multi_pipes = {}
+multi_rows = {}
+if multi_verify
+  multi_lib = metal_compile_source(device, read_file(QWEN_DIR + "decode_multi.metal"))
+  multi_embed_pipe = metal_pipeline(multi_lib, "bf16_embedding_lookup_multi")
+  multi_bf16_pipe = metal_pipeline(multi_lib, "bf16_matvec_multi")
+  copy_multi_slice_pipe = metal_pipeline(multi_lib, "copy_f32_slice_multi")
+  copy_taps_multi_pipe = metal_pipeline(multi_lib, "copy_taps_multi")
+  split_multi_pipe = metal_pipeline(multi_lib, "split_q_gate_multi")
+  phn_rope_multi_pipe = metal_pipeline(multi_lib, "per_head_norm_partial_rope_multi")
+  kv_write_multi_pipe = metal_pipeline(multi_lib, "kv_write_multi")
+  sdpa_multi_pipe = metal_pipeline(multi_lib, "sdpa_decode_multi_hd256")
+  conv_multi_pipe = metal_pipeline(multi_lib, "conv1d_depthwise_multi")
+  conv_replay_pipe = metal_pipeline(multi_lib, "conv_state_replay")
+  delta_multi_pipe = metal_pipeline(multi_lib, "gated_delta_multi")
+  # The NVFP4 rung table: key "b<n>_<rung>[_res]" -> pipeline, rows per SIMD group.
+  bw = 1
+  while bw <= MULTI_WIDE_MAX
+    rr = 0
+    while rr < 3
+      rung = rr == 0 ? 1 : (rr == 1 ? 2 : 4)
+      res = 0
+      while res < 2
+        kname = "nvfp4_wide_b" + bw.to_s + "_r" + rung.to_s + (res == 1 ? "_residual" : "")
+        key = "b" + bw.to_s + "_r" + rung.to_s + (res == 1 ? "_res" : "")
+        multi_pipes[key] = metal_pipeline(scaled_wide_lib, kname)
+        multi_rows[key] = rung
+        res = res + 1
+      rr = rr + 1
+    bw = bw + 1
+  gemm_lib = metal_compile_source(device, read_file(NVFP4_DIR + "nvfp4_gemm_f32.metal"))
+  gemm_tiles = [["m8", 8], ["m16", 16], ["m32", 32], ["m64", 64]]
+  gi = 0
+  while gi < gemm_tiles.size()
+    gt = gemm_tiles[gi]
+    gp = metal_pipeline(gemm_lib, "nvfp4_gemm_f32_" + gt[0])
+    gpr = metal_pipeline(gemm_lib, "nvfp4_gemm_f32_" + gt[0] + "_residual")
+    lo = gi == 0 ? 1 : gemm_tiles[gi - 1][1] + 1
+    bw = lo
+    while bw <= gt[1] && bw <= MULTI_MAX
+      multi_pipes["b" + bw.to_s + "_g"] = gp
+      multi_pipes["b" + bw.to_s + "_g_res"] = gpr
+      multi_rows["b" + bw.to_s + "_g"] = 0
+      multi_rows["b" + bw.to_s + "_g_res"] = 0
+      bw = bw + 1
+    gi = gi + 1
+  split_specs = [["b8_s1", "nvfp4_wides_b8_r1", 1], ["b8_s2", "nvfp4_wides_b8_r2", 2],
+    ["b8_s4", "nvfp4_wides_b8_r4", 4], ["b6_s2", "nvfp4_wides_b6_r2", 2]]
+  si = 0
+  while si < split_specs.size()
+    sp = split_specs[si]
+    multi_pipes[sp[0]] = metal_pipeline(scaled_wide_lib, sp[1])
+    multi_rows[sp[0]] = sp[2]
+    multi_pipes[sp[0] + "_res"] = metal_pipeline(scaled_wide_lib, sp[1] + "_residual")
+    multi_rows[sp[0] + "_res"] = sp[2]
+    si = si + 1
+if dflash2_enabled
+  draft_lib = metal_compile_source(device, read_file(QWEN_DIR + "dflash2_draft.metal"))
+  bf16_wide_r2_pipe = metal_pipeline(draft_lib, "bf16_wide_multi_r2")
+  dyn_conv_pipe = metal_pipeline(draft_lib, "dyn_conv_apply")
+  dyn_conv_res_pipe = metal_pipeline(draft_lib, "dyn_conv_apply_residual")
+  sdpa_draft_pipe = metal_pipeline(draft_lib, "sdpa_draft_hd128")
+  topk_pipe = metal_pipeline(draft_lib, "topk16_rows")
+  selector_pipe = metal_pipeline(draft_lib, "selector_walk")
 
 # Small weight-loading helpers. Quantized handles are [packed, group scale,
 # global scale]. Each tensor binds a byte-offset view of its shard's mmap, so
@@ -396,6 +533,16 @@ while li < N_LAYERS
         base[:cs_mid3] = metal_buffer(device, 3 * QKV_DIM * 4)
         base[:ss_mid3] = metal_buffer(device, HV * DV * DK * 4)
     base[:ping] = 0
+    if multi_verify
+      # Per-layer copies of the recurrent inputs the width-n verify consumed,
+      # so the rollback can replay the accepted prefix after every layer has
+      # run (a shared scratch would already hold the next layer's rows).
+      base[:qkv_m] = metal_buffer(device, MULTI_MAX * QKV_DIM * 4)
+      base[:mq_m] = metal_buffer(device, MULTI_MAX * Q_DIM * 4)
+      base[:mk_m] = metal_buffer(device, MULTI_MAX * K_DIM * 4)
+      base[:mv_m] = metal_buffer(device, MULTI_MAX * V_DIM * 4)
+      base[:g_m] = metal_buffer(device, MULTI_MAX * HV * 4)
+      base[:beta_m] = metal_buffer(device, MULTI_MAX * HV * 4)
   else
     qn = metal_buffer(device, HEAD_DIM * 4)
     kn = metal_buffer(device, HEAD_DIM * 4)
@@ -589,13 +736,55 @@ logits_quad = metal_buffer(device, 4 * N_VOCAB * 4)
 argmax_quad_out = metal_buffer(device, 4 * 4)
 token_quad_buf = metal_buffer(device, 4 * 4)
 
+# Width-n block-verify scratch (multi). nil unless the multi path is selected.
+x_multi = nil
+if multi_verify
+  x_multi = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  xn_multi = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  gate_multi_tmp = metal_buffer(device, MULTI_MAX * FFN * 4)
+  up_multi_tmp = metal_buffer(device, MULTI_MAX * FFN * 4)
+  hidden_multi_tmp = metal_buffer(device, MULTI_MAX * FFN * 4)
+  z_multi_tmp = metal_buffer(device, MULTI_MAX * V_DIM * 4)
+  a_multi_tmp = metal_buffer(device, MULTI_MAX * HV * 4)
+  b_multi_tmp = metal_buffer(device, MULTI_MAX * HV * 4)
+  conv_multi_tmp = metal_buffer(device, MULTI_MAX * QKV_DIM * 4)
+  delta_multi_tmp = metal_buffer(device, MULTI_MAX * V_DIM * 4)
+  mamba_norm_multi_tmp = metal_buffer(device, MULTI_MAX * V_DIM * 4)
+  qfull_multi_tmp = metal_buffer(device, MULTI_MAX * QFULL_DIM * 4)
+  queries_multi_tmp = metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)
+  attn_gate_multi_tmp = metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)
+  k_multi_tmp = metal_buffer(device, MULTI_MAX * KV_DIM * 4)
+  v_multi_tmp = metal_buffer(device, MULTI_MAX * KV_DIM * 4)
+  attn_multi_tmp = metal_buffer(device, MULTI_MAX * ATTN_DIM * 4)
+  cos_multi_tmp = metal_buffer(device, MULTI_MAX * ROT_HALF * 4)
+  sin_multi_tmp = metal_buffer(device, MULTI_MAX * ROT_HALF * 4)
+  logits_multi = metal_buffer(device, MULTI_MAX * N_VOCAB * 4)
+  argmax_multi_out = metal_buffer(device, MULTI_MAX * 4)
+  token_multi_buf = metal_buffer(device, MULTI_MAX * 4)
+  # DFlash2 conditioning taps [MAX_POS, 5, HIDDEN] (65 MB), filled by the
+  # verify's tap copies when a drafter wants them.
+  ctx_hidden = metal_buffer(device, MAX_POS * 5 * HIDDEN * 4)
+# Verify-row hidden staging source for the head-history appends.
+x_verify4 = multi_verify ? x_multi : x_quad
+x_verify3 = multi_verify ? x_multi : x_triplet
+
 logits = metal_buffer(device, N_VOCAB * 4)
 argmax_out = metal_buffer(device, 4)
 rank_out = metal_buffer(device, 4)
 n_vocab_buf = metal_buffer(device, 4)
 metal_buffer_write_i32(n_vocab_buf, 0, N_VOCAB)
-argmax_partial_values = metal_buffer(device, 4 * ARGMAX_CHUNKS * 4)
-argmax_partial_indices = metal_buffer(device, 4 * ARGMAX_CHUNKS * 4)
+argmax_partial_values = metal_buffer(device, 8 * ARGMAX_CHUNKS * 4)
+argmax_partial_indices = metal_buffer(device, 8 * ARGMAX_CHUNKS * 4)
+# Tap table [MAX_POS, 5, HIDDEN] f32 (65 MB), filled device-side per position
+# and read back once at the end. Only allocated for the tapdump diagnostic.
+tap_buf = nil
+if tapdump
+  if mtp_enabled || devchain then raise "tapdump is a serial-path diagnostic: use mode concurrent without devchain"
+  tap_buf = metal_buffer(device, MAX_POS * 5 * HIDDEN * 4)
+# The dflash2 prefill captures the same taps straight into the drafter's
+# context table.
+tap_capture = tapdump || dflash2_enabled
+if dflash2_enabled then tap_buf = ctx_hidden
 
 log_rope = Math.log(ROPE_BASE)
 rope_power = ~2.0 / ROT_DIM
@@ -1120,14 +1309,27 @@ rope_power = ~2.0 / ROT_DIM
   # inside THIS command buffer. It used to be its own begin/commit pair, which
   # for a HIDDEN-sized copy is almost entirely commit overhead (0.17 ms for
   # ~20 us of work), and there are two or three of them per round.
-  stage_hidden = spec.size() > 4
+  stage_hidden = spec.size() > 4 && spec[4]
+  # Optional [dst_buf, dst_idx]: instead of committing and reading the draft
+  # argmax back to the host, copy it device-side into dst_buf[dst_idx] and
+  # commit async, returning the command-buffer handle. The caller stacks it
+  # straight into the next verify and reads the id only after that verify.
+  mtp_defer = spec.size() > 5 ? spec[5] : nil
+  # Optional [tok_buf, idx]: read the input token id from a device buffer
+  # slot instead of the host scalar spec[0]. Lets draft k+1 consume draft
+  # k's deferred argmax with no host round-trip (depth-3 device chain).
+  mtp_dev_in = spec.size() > 6 ? spec[6] : nil
   if pos > 0 then build_rope(pos)
   metal_batch_begin_concurrent(queue)
   if stage_hidden
     metal_dispatch_n(queue, copy_pair_row_pipe,
       [spec[4][0], backbone_hidden, spec[4][1], HIDDEN], HIDDEN)
-  metal_dispatch_n(queue, bf16_embed_pipe,
-    [embed_w, mtp_embed_tmp, token_id, HIDDEN], HIDDEN)
+  if mtp_dev_in
+    metal_dispatch_n(queue, bf16_embed_buf_pipe,
+      [embed_w, mtp_embed_tmp, mtp_dev_in[0], mtp_dev_in[1], HIDDEN], HIDDEN)
+  else
+    metal_dispatch_n(queue, bf16_embed_pipe,
+      [embed_w, mtp_embed_tmp, token_id, HIDDEN], HIDDEN)
   dependency_barrier()
   enqueue_rms([mtp_embed_tmp, mtp_enorm, mtp_embed_norm_tmp, 1])
   enqueue_rms([hidden_in, mtp_hnorm, mtp_hidden_norm_tmp, 1])
@@ -1167,17 +1369,29 @@ rope_power = ~2.0 / ROT_DIM
           1, 32)
   else
     enqueue_mtp_history(mtp_layer, pos)
-  metal_batch_commit(queue)
-  result = want_draft ? metal_buffer_read_i32(argmax_out, 0) : -1
-  if profile_components
-    profile_dt = ccall("__w_clock_ms") - profile_t0
-    if want_draft
-      profile_stats[7] = profile_stats[7] + profile_dt
-      profile_stats[8] = profile_stats[8] + 1
-    else
-      profile_stats[9] = profile_stats[9] + profile_dt
-      profile_stats[10] = profile_stats[10] + 1
-  result
+  if mtp_defer
+    dependency_barrier()
+    metal_dispatch_n(queue, copy_i32_at_pipe,
+      [argmax_out, mtp_defer[0], 0, mtp_defer[1]], 1)
+    metal_batch_commit_async(queue)
+  elsif devchain && !want_draft && profile_stats[0] == 0
+    # Decode-phase history append (KV only, no host value): commit async,
+    # drained by the round's next sync; handle released at round end.
+    hist_cbs[hist_cb_n[0]] = metal_batch_commit_async(queue)
+    hist_cb_n[0] = hist_cb_n[0] + 1
+    -1
+  else
+    metal_batch_commit(queue)
+    result = want_draft ? metal_buffer_read_i32(argmax_out, 0) : -1
+    if profile_components
+      profile_dt = ccall("__w_clock_ms") - profile_t0
+      if want_draft
+        profile_stats[7] = profile_stats[7] + profile_dt
+        profile_stats[8] = profile_stats[8] + 1
+      else
+        profile_stats[9] = profile_stats[9] + profile_dt
+        profile_stats[10] = profile_stats[10] + 1
+    result
 
 # Diagnostic: where did the target's token sit in the head's draft ranking?
 # Reads the head logits left behind by the most recent mtp_step, so it must be
@@ -1231,10 +1445,14 @@ rope_power = ~2.0 / ROT_DIM
   token1 = spec[1]
   token2 = spec[2]
   pos_start = spec[3]
+  # spec[4] set => token slot 2 was already filled device-side by a deferred
+  # draft (copy_i32_at); the host must not clobber it.
+  dev_slot2 = spec.size() > 4 && spec[4]
   build_rope_triplet(pos_start)
   metal_buffer_write_i32(token_triplet_buf, 0, token0)
   metal_buffer_write_i32(token_triplet_buf, 1, token1)
-  metal_buffer_write_i32(token_triplet_buf, 2, token2)
+  if !dev_slot2
+    metal_buffer_write_i32(token_triplet_buf, 2, token2)
   metal_batch_begin_concurrent(queue)
   metal_dispatch_n(queue, triplet_embed_pipe,
     [embed_w, x_triplet, token_triplet_buf, HIDDEN], 3 * HIDDEN)
@@ -1425,11 +1643,15 @@ rope_power = ~2.0 / ROT_DIM
   token2 = spec[2]
   token3 = spec[3]
   pos_start = spec[4]
+  # spec[5] set => token slots 2,3 were filled device-side by deferred
+  # drafts (copy_i32_at); the host must not clobber them.
+  dev_slots23 = spec.size() > 5 && spec[5]
   build_rope_quad(pos_start)
   metal_buffer_write_i32(token_quad_buf, 0, token0)
   metal_buffer_write_i32(token_quad_buf, 1, token1)
-  metal_buffer_write_i32(token_quad_buf, 2, token2)
-  metal_buffer_write_i32(token_quad_buf, 3, token3)
+  if !dev_slots23
+    metal_buffer_write_i32(token_quad_buf, 2, token2)
+    metal_buffer_write_i32(token_quad_buf, 3, token3)
   metal_batch_begin_concurrent(queue)
   metal_dispatch_n(queue, quad_embed_pipe,
     [embed_w, x_quad, token_quad_buf, HIDDEN], 4 * HIDDEN)
@@ -1457,6 +1679,57 @@ rope_power = ~2.0 / ROT_DIM
     profile_stats[5] = profile_stats[5] + ccall("__w_clock_ms") - profile_t0
     profile_stats[6] = profile_stats[6] + 1
   result
+
+# Batched prefill: run 3 prompt tokens through the target backbone in ONE
+# weight stream (the cross-row triplet kernels amortize the 18 GB weight read
+# across all 3 rows, bit-exact by row independence -- the same property that
+# makes decode verify exact). Builds KV for positions pos..pos+2 and advances
+# the gated-delta state, exactly like 3 serial forwards, at ~1/3 the memory
+# traffic. Triplet buffers are allocated in every MTP mode (decode uses
+# forward_triplet), unlike the quad buffers. Per-token pre-final-norm hidden
+# stays in x_triplet for the head-history appends; lm_head skipped unless last.
+-> forward_prefill_chunk(spec)
+  profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
+  pos_start = spec[3]
+  want_last = spec[4]
+  build_rope_triplet(pos_start)
+  metal_buffer_write_i32(token_triplet_buf, 0, spec[0])
+  metal_buffer_write_i32(token_triplet_buf, 1, spec[1])
+  metal_buffer_write_i32(token_triplet_buf, 2, spec[2])
+  metal_batch_begin_concurrent(queue)
+  metal_dispatch_n(queue, triplet_embed_pipe,
+    [embed_w, x_triplet, token_triplet_buf, HIDDEN], 3 * HIDDEN)
+  dependency_barrier()
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:kind] == "mamba"
+      enqueue_mamba_triplet(lyr)
+    else
+      enqueue_full_triplet([lyr, pos_start])
+    enqueue_ffn_triplet(lyr)
+    li = li + 1
+  result = -1
+  if want_last
+    enqueue_rms([x_triplet, final_norm, xn_triplet, 3])
+    dependency_barrier()
+    enqueue_scaled_triplet([lm_head, xn_triplet, logits_triplet, HIDDEN, N_VOCAB])
+    dependency_barrier()
+    enqueue_argmax([logits_triplet, argmax_triplet_out, 3])
+    metal_batch_commit(queue)
+    result = metal_buffer_read_i32(argmax_triplet_out, 2)
+  else
+    metal_batch_commit(queue)
+  if profile_components && profile_stats[0] == 1
+    profile_stats[3] = profile_stats[3] + ccall("__w_clock_ms") - profile_t0
+    profile_stats[4] = profile_stats[4] + 3
+  result
+
+-> copy_hidden_multi_row(row)
+  metal_batch_begin(queue)
+  metal_dispatch_n(queue, copy_pair_row_pipe,
+    [x_multi, backbone_hidden, row, HIDDEN], HIDDEN)
+  metal_batch_commit(queue)
 
 -> copy_hidden_quad_row(row)
   profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
@@ -1567,6 +1840,560 @@ rope_power = ~2.0 / ROT_DIM
     profile_stats[13] = profile_stats[13] + ccall("__w_clock_ms") - profile_t0
     profile_stats[14] = profile_stats[14] + 1
 
+# ---- runtime-width block verify: n <= MULTI_MAX rows in one causal pass ----
+# The kernels are decode_multi.metal (per-token arithmetic of the quad path,
+# so a width-n verify is bit-identical to n serial steps); the dense NVFP4
+# projections come from the wide cross-row ladder, chosen per width by
+# multi_pipe_key. Recurrent state uses tape replay: the verify writes only
+# its final state, and rollback re-runs the accepted prefix from the intact
+# ping-pong input.
+-> build_rope_multi(pos_start, n)
+  token = 0
+  while token < n
+    i = 0
+    while i < ROT_HALF
+      theta = Math.exp(log_rope * (~0.0 - i * rope_power))
+      angle = (pos_start + token) * theta
+      metal_buffer_write_f32(cos_multi_tmp, token * ROT_HALF + i, Math.cos(angle))
+      metal_buffer_write_f32(sin_multi_tmp, token * ROT_HALF + i, Math.sin(angle))
+      i = i + 1
+    token = token + 1
+
+-> multi_pipe_key(n, kdim, residual)
+  auto_key = "b" + n.to_s + "_"
+  if n > MULTI_WIDE_MAX
+    # Only the GEMM covers widths past the wide-GEMV ladder.
+    return auto_key + "g" + (residual ? "_res" : "")
+  if n == 8
+    auto_key = auto_key + (kdim == FFN ? "s4" : "s2")
+  elsif n >= 6
+    auto_key = auto_key + (kdim == FFN ? "r2" : "r1")
+  else
+    auto_key = auto_key + (kdim == FFN ? "r4" : "r2")
+  if residual then auto_key = auto_key + "_res"
+  if multi_variant == "auto" then return auto_key
+  key = "b" + n.to_s + "_" + multi_variant + (residual ? "_res" : "")
+  # A forced rung that does not exist at this width (the split rungs are
+  # b6/b8 only) falls back to the auto choice for that width.
+  if multi_pipes[key] == nil then return auto_key
+  key
+
+-> enqueue_scaled_multi(spec)
+  w = spec[0]
+  input = spec[1]
+  output = spec[2]
+  kdim = spec[3]
+  rows = spec[4]
+  n = spec[5]
+  key = multi_pipe_key(n, kdim, false)
+  if multi_rows[key] == 0
+    # simdgroup-matrix GEMM rung: 32 output rows per 128-thread group.
+    metal_dispatch_groups(queue, multi_pipes[key],
+      [w[0], w[1], input, output, kdim, rows, w[2], n], (rows + 31) / 32, 128)
+    return
+  per_group = 2 * multi_rows[key]
+  metal_dispatch_groups(queue, multi_pipes[key],
+    [w[0], w[1], input, output, kdim, rows, w[2]], (rows + per_group - 1) / per_group, 64)
+
+-> enqueue_residual_multi(spec)
+  w = spec[0]
+  input = spec[1]
+  residual = spec[2]
+  kdim = spec[3]
+  rows = spec[4]
+  n = spec[5]
+  key = multi_pipe_key(n, kdim, true)
+  if multi_rows[key] == 0
+    metal_dispatch_groups(queue, multi_pipes[key],
+      [w[0], w[1], input, residual, kdim, rows, w[2], n], (rows + 31) / 32, 128)
+    return
+  per_group = 2 * multi_rows[key]
+  metal_dispatch_groups(queue, multi_pipes[key],
+    [w[0], w[1], input, residual, kdim, rows, w[2]], (rows + per_group - 1) / per_group, 64)
+
+-> enqueue_mamba_multi(lyr, n)
+  cs_in = lyr[:cs_a]
+  cs_out = lyr[:cs_b]
+  ss_in = lyr[:ss_a]
+  ss_out = lyr[:ss_b]
+  if lyr[:ping] == 1
+    cs_in = lyr[:cs_b]
+    cs_out = lyr[:cs_a]
+    ss_in = lyr[:ss_b]
+    ss_out = lyr[:ss_a]
+  enqueue_rms([x_multi, lyr[:in_norm], xn_multi, n])
+  dependency_barrier()
+  enqueue_scaled_multi([lyr[:qkv], xn_multi, lyr[:qkv_m], HIDDEN, QKV_DIM, n])
+  enqueue_scaled_multi([lyr[:z], xn_multi, z_multi_tmp, HIDDEN, V_DIM, n])
+  metal_dispatch_groups(queue, multi_bf16_pipe,
+    [lyr[:a], xn_multi, a_multi_tmp, HIDDEN, HV, n], HV, 32)
+  metal_dispatch_groups(queue, multi_bf16_pipe,
+    [lyr[:b], xn_multi, b_multi_tmp, HIDDEN, HV, n], HV, 32)
+  dependency_barrier()
+  metal_dispatch_n(queue, conv_multi_pipe,
+    [lyr[:conv], cs_in, lyr[:qkv_m], conv_multi_tmp, cs_out, QKV_DIM, n], QKV_DIM)
+  dependency_barrier()
+  metal_dispatch_n(queue, copy_multi_slice_pipe,
+    [conv_multi_tmp, lyr[:mq_m], QKV_DIM, Q_DIM, 0, Q_DIM, n], n * Q_DIM)
+  metal_dispatch_n(queue, copy_multi_slice_pipe,
+    [conv_multi_tmp, lyr[:mk_m], QKV_DIM, K_DIM, Q_DIM, K_DIM, n], n * K_DIM)
+  metal_dispatch_n(queue, copy_multi_slice_pipe,
+    [conv_multi_tmp, lyr[:mv_m], QKV_DIM, V_DIM, Q_DIM + K_DIM, V_DIM, n], n * V_DIM)
+  dependency_barrier()
+  metal_dispatch_groups(queue, phn_pipe,
+    [lyr[:mq_m], q_norm_scale, DK, ~1.0 / DK, EPS], n * HK, 32)
+  metal_dispatch_groups(queue, phn_pipe,
+    [lyr[:mk_m], k_norm_scale, DK, ~1.0 / DK, EPS], n * HK, 32)
+  metal_dispatch_n(queue, g_pipe,
+    [a_multi_tmp, lyr[:alog], lyr[:dtb], lyr[:g_m], HV, n * HV], n * HV)
+  metal_dispatch_n(queue, sigmoid_pipe,
+    [b_multi_tmp, lyr[:beta_m], n * HV], n * HV)
+  dependency_barrier()
+  metal_dispatch_3d(queue, delta_multi_pipe,
+    [lyr[:mq_m], lyr[:mk_m], lyr[:mv_m], lyr[:g_m], lyr[:beta_m],
+     ss_in, delta_multi_tmp, ss_out, HK, HV, DK, DV, n],
+    1, DV / 4, HV, 32, 4, 1)
+  dependency_barrier()
+  metal_dispatch_groups(queue, rng_pipe,
+    [delta_multi_tmp, z_multi_tmp, lyr[:linear_norm],
+     mamba_norm_multi_tmp, DV, EPS], n * HV, 32)
+  dependency_barrier()
+  enqueue_residual_multi(
+    [lyr[:out], mamba_norm_multi_tmp, x_multi, V_DIM, HIDDEN, n])
+  dependency_barrier()
+  lyr[:ping] = 1 - lyr[:ping]
+
+-> enqueue_full_multi(spec)
+  lyr = spec[0]
+  pos_start = spec[1]
+  n = spec[2]
+  enqueue_rms([x_multi, lyr[:in_norm], xn_multi, n])
+  dependency_barrier()
+  enqueue_scaled_multi([lyr[:q], xn_multi, qfull_multi_tmp, HIDDEN, QFULL_DIM, n])
+  enqueue_scaled_multi([lyr[:k], xn_multi, k_multi_tmp, HIDDEN, KV_DIM, n])
+  enqueue_scaled_multi([lyr[:v], xn_multi, v_multi_tmp, HIDDEN, KV_DIM, n])
+  dependency_barrier()
+  metal_dispatch_n(queue, split_multi_pipe,
+    [qfull_multi_tmp, queries_multi_tmp, attn_gate_multi_tmp,
+     N_HEADS, HEAD_DIM, n], n * ATTN_DIM)
+  dependency_barrier()
+  metal_dispatch_groups(queue, phn_rope_multi_pipe,
+    [queries_multi_tmp, lyr[:qn], cos_multi_tmp, sin_multi_tmp,
+     HEAD_DIM, ROT_HALF, N_HEADS, ~1.0 / HEAD_DIM, EPS, n], n * N_HEADS, 32)
+  metal_dispatch_groups(queue, phn_rope_multi_pipe,
+    [k_multi_tmp, lyr[:kn], cos_multi_tmp, sin_multi_tmp,
+     HEAD_DIM, ROT_HALF, N_KV_HEADS, ~1.0 / HEAD_DIM, EPS, n], n * N_KV_HEADS, 32)
+  dependency_barrier()
+  metal_dispatch_n(queue, kv_write_multi_pipe,
+    [k_multi_tmp, v_multi_tmp, lyr[:k_cache], lyr[:v_cache],
+     pos_start, KV_DIM, n], n * KV_DIM)
+  dependency_barrier()
+  metal_dispatch_groups(queue, sdpa_multi_pipe,
+    [queries_multi_tmp, lyr[:k_cache], lyr[:v_cache], attn_multi_tmp,
+     GQA, pos_start, N_HEADS, KV_DIM, ATTN_SCALE, n], n * N_HEADS, 256)
+  dependency_barrier()
+  metal_dispatch_n(queue, gate_pipe,
+    [attn_multi_tmp, attn_gate_multi_tmp, n * ATTN_DIM], n * ATTN_DIM)
+  dependency_barrier()
+  enqueue_residual_multi(
+    [lyr[:out], attn_multi_tmp, x_multi, ATTN_DIM, HIDDEN, n])
+  dependency_barrier()
+
+-> enqueue_ffn_multi(lyr, n)
+  enqueue_rms([x_multi, lyr[:post_norm], xn_multi, n])
+  dep_barrier_on([xn_multi])
+  enqueue_scaled_multi([lyr[:gate], xn_multi, gate_multi_tmp, HIDDEN, FFN, n])
+  enqueue_scaled_multi([lyr[:up], xn_multi, up_multi_tmp, HIDDEN, FFN, n])
+  dep_barrier_on([gate_multi_tmp, up_multi_tmp])
+  metal_dispatch_n(queue, silu_pipe,
+    [gate_multi_tmp, up_multi_tmp, hidden_multi_tmp, n * FFN], n * FFN)
+  dep_barrier_on([hidden_multi_tmp])
+  enqueue_residual_multi(
+    [lyr[:down], hidden_multi_tmp, x_multi, FFN, HIDDEN, n])
+  dep_barrier_on([x_multi])
+
+# spec = [tokens | nil, pos_start, n, want_taps]. tokens (an n-array of ids)
+# is written into token_multi_buf; pass nil when a device-side drafter has
+# already filled the slots. Returns the n greedy argmax ids. With want_taps
+# the five DFlash2 taps of every row land in ctx_hidden rows 0..n-1.
+-> forward_multi(spec)
+  profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
+  tokens = spec[0]
+  pos_start = spec[1]
+  n = spec[2]
+  want_taps = spec.size() > 3 && spec[3]
+  # spec[4] = "last": only the final row's argmax, via the serial lm_head path
+  # (prefill); spec[4] = "none": no logits at all (prefill chunk that is not
+  # the prompt's end). Default: every row's argmax (verify).
+  logits_mode = spec.size() > 4 ? spec[4] : "all"
+  if n < 1 || n > MULTI_MAX then raise "forward_multi width " + n.to_s + " out of range"
+  if tokens != nil
+    i = 0
+    while i < n
+      metal_buffer_write_i32(token_multi_buf, i, tokens[i])
+      i = i + 1
+  build_rope_multi(pos_start, n)
+  metal_batch_begin_concurrent(queue)
+  metal_dispatch_n(queue, multi_embed_pipe,
+    [embed_w, x_multi, token_multi_buf, HIDDEN, n], n * HIDDEN)
+  dependency_barrier()
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:kind] == "mamba"
+      enqueue_mamba_multi(lyr, n)
+    else
+      enqueue_full_multi([lyr, pos_start, n])
+    enqueue_ffn_multi(lyr, n)
+    if want_taps
+      t = 0
+      while t < 5
+        if tap_layers[t] == li
+          metal_dispatch_n(queue, copy_taps_multi_pipe,
+            [x_multi, ctx_hidden, HIDDEN, 5, t, pos_start, n], n * HIDDEN)
+        t = t + 1
+    li = li + 1
+  result = []
+  if logits_mode == "all"
+    enqueue_rms([x_multi, final_norm, xn_multi, n])
+    dependency_barrier()
+    enqueue_scaled_multi([lm_head, xn_multi, logits_multi, HIDDEN, N_VOCAB, n])
+    dependency_barrier()
+    enqueue_argmax([logits_multi, argmax_multi_out, n])
+    metal_batch_commit(queue)
+    i = 0
+    while i < n
+      result.push(metal_buffer_read_i32(argmax_multi_out, i))
+      i = i + 1
+  elsif logits_mode == "last"
+    # Stage the last row into the serial scratch so the vocabulary projection
+    # and argmax are exactly the serial decode's.
+    metal_dispatch_n(queue, copy_f32_at_pipe,
+      [x_multi, x, (n - 1) * HIDDEN, 0, HIDDEN], HIDDEN)
+    dependency_barrier()
+    enqueue_rms([x, final_norm, xn, 1])
+    dependency_barrier()
+    enqueue_scaled([lm_head, xn, logits, HIDDEN, N_VOCAB])
+    dependency_barrier()
+    enqueue_argmax([logits, argmax_out, 1])
+    metal_batch_commit(queue)
+    result.push(metal_buffer_read_i32(argmax_out, 0))
+  else
+    metal_batch_commit(queue)
+  if profile_components
+    profile_stats[5] = profile_stats[5] + ccall("__w_clock_ms") - profile_t0
+    profile_stats[6] = profile_stats[6] + 1
+  result
+
+# After a width-n verify accepted `accepted_count` drafts (so accepted_count+1
+# rows are committed), rebuild every gated-delta layer's conv and recurrent
+# state for exactly those rows by replaying them from the pre-verify state,
+# which the verify left intact in the other ping-pong buffer. A full accept
+# (accepted_count == n - 1) needs nothing: the verify's final state IS it.
+-> rollback_multi_states(accepted_count, n)
+  if accepted_count >= n - 1 then return
+  profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
+  keep = accepted_count + 1
+  metal_batch_begin_concurrent(queue)
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:kind] == "mamba"
+      # The verify flipped ping; its output is now the "in" slot and the
+      # pre-verify state is the other one.
+      if lyr[:ping] == 1
+        pre_cs = lyr[:cs_a]
+        out_cs = lyr[:cs_b]
+        pre_ss = lyr[:ss_a]
+        out_ss = lyr[:ss_b]
+      else
+        pre_cs = lyr[:cs_b]
+        out_cs = lyr[:cs_a]
+        pre_ss = lyr[:ss_b]
+        out_ss = lyr[:ss_a]
+      metal_dispatch_n(queue, conv_replay_pipe,
+        [pre_cs, lyr[:qkv_m], out_cs, QKV_DIM, keep], QKV_DIM)
+      metal_dispatch_3d(queue, delta_multi_pipe,
+        [lyr[:mq_m], lyr[:mk_m], lyr[:mv_m], lyr[:g_m], lyr[:beta_m],
+         pre_ss, delta_multi_tmp, out_ss, HK, HV, DK, DV, keep],
+        1, DV / 4, HV, 32, 4, 1)
+    li = li + 1
+  metal_batch_commit(queue)
+  if profile_components
+    profile_stats[13] = profile_stats[13] + ccall("__w_clock_ms") - profile_t0
+    profile_stats[14] = profile_stats[14] + 1
+
+# ---- DFlash2 drafter (z-lab/Qwen3.8-27B-DFlash2): weights, context, block ----
+# A 5-layer qwen3 transformer that fills [anchor, MASK x (n-1)] in one pass,
+# conditioned on five target taps per committed position (ctx_hidden rows,
+# indexed by absolute position). Weights are bf16 and mmap'd; everything
+# runs in f32. Kernels: dflash2_draft.metal (+ decode_multi.metal helpers).
+DRAFT_PATH = "/Users/erik/.cache/huggingface/hub/models--z-lab--Qwen3.8-27B-DFlash2/snapshots/50307d4c4cde6860d4eee73e2547cd786fe8e8a4/model.safetensors"
+DRAFT_QUANT_PATH = "/Users/erik/.cache/tungsten/dflash2-nvfp4/model.safetensors"
+D_LAYERS = 5
+D_HEADS = 32
+D_KV = 8
+D_HD = 128
+D_QDIM = D_HEADS * D_HD
+D_KVDIM = D_KV * D_HD
+D_RANK = 256
+D_TOPK = 16
+D_MASK = 248070
+D_WINDOW = 2048
+D_ROT_HALF = D_HD / 2
+D_KP = 1280
+D_CTX_DIM = 5 * HIDDEN
+D_SCALE = ~1.0 / Math.sqrt(~0.0 + D_HD)
+d_log_rope = Math.log(~10000000.0)
+d_rope_power = ~2.0 / D_HD
+
+dst = nil
+dlayers = []
+
+-> draft_tensor(name)
+  t = dst.tensor(name)
+  metal_buffer_for_mmap(device, dst.mmap, t[:byte_offset], t[:byte_length])
+
+# A projection weight: bf16 buffer, or the NVFP4 [packed, scale, global]
+# triple when the quantized drafter is selected.
+-> draft_proj(name)
+  if draft_quant
+    [draft_tensor(name), draft_tensor(name + ".scale"), draft_tensor(name + ".global_scale")]
+  else
+    draft_tensor(name)
+
+# DFlash2 drafter weights (bf16, mmap'd) and per-layer draft K/V caches.
+if dflash2_enabled
+  dst = Tungsten:Llama:Safetensors.new(draft_quant ? DRAFT_QUANT_PATH : DRAFT_PATH)
+  << "dflash2 drafter: " + dst.count().to_s + " tensors, block " + dflash2_block.to_s + (draft_quant ? ", nvfp4" : ", bf16")
+  d_fc = draft_proj("fc.weight")
+  d_hidden_norm = metal_buffer(device, HIDDEN * 4)
+  d_norm = metal_buffer(device, HIDDEN * 4)
+  draft_load_f32(["hidden_norm.weight", HIDDEN, d_hidden_norm])
+  draft_load_f32(["norm.weight", HIDDEN, d_norm])
+  d_hp_w = draft_proj("candidate_selector.hidden_projection.weight")
+  d_pred_cb = draft_tensor("candidate_selector.predecessor_codebook")
+  d_succ_cb = draft_tensor("candidate_selector.successor_codebook")
+  l = 0
+  while l < D_LAYERS
+    pre = "layers." + l.to_s + "."
+    in_norm = metal_buffer(device, HIDDEN * 4)
+    post_norm = metal_buffer(device, HIDDEN * 4)
+    qn = metal_buffer(device, D_HD * 4)
+    kn = metal_buffer(device, D_HD * 4)
+    attn_base = metal_buffer(device, 4 * HIDDEN * 4)
+    mlp_base = metal_buffer(device, 4 * HIDDEN * 4)
+    draft_load_f32([pre + "input_layernorm.weight", HIDDEN, in_norm])
+    draft_load_f32([pre + "post_attention_layernorm.weight", HIDDEN, post_norm])
+    draft_load_f32([pre + "self_attn.q_norm.weight", D_HD, qn])
+    draft_load_f32([pre + "self_attn.k_norm.weight", D_HD, kn])
+    draft_load_f32([pre + "attention_conv.base_kernel", 4 * HIDDEN, attn_base])
+    draft_load_f32([pre + "mlp_conv.base_kernel", 4 * HIDDEN, mlp_base])
+    dlayers.push({
+      in_norm: in_norm, post_norm: post_norm, qn: qn, kn: kn,
+      attn_base: attn_base, mlp_base: mlp_base,
+      attn_kp: draft_proj(pre + "attention_conv.kernel_projection.weight"),
+      mlp_kp: draft_proj(pre + "mlp_conv.kernel_projection.weight"),
+      q: draft_proj(pre + "self_attn.q_proj.weight"),
+      k: draft_proj(pre + "self_attn.k_proj.weight"),
+      v: draft_proj(pre + "self_attn.v_proj.weight"),
+      o: draft_proj(pre + "self_attn.o_proj.weight"),
+      gate: draft_proj(pre + "mlp.gate_proj.weight"),
+      up: draft_proj(pre + "mlp.up_proj.weight"),
+      down: draft_proj(pre + "mlp.down_proj.weight"),
+      k_cache: metal_buffer(device, MAX_POS * D_KVDIM * 4),
+      v_cache: metal_buffer(device, MAX_POS * D_KVDIM * 4)
+    })
+    l = l + 1
+  # Draft scratch (rows = block width <= MULTI_MAX).
+  d_x = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  d_xn = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  d_xa = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  d_kp = metal_buffer(device, MULTI_MAX * D_KP * 4)
+  d_q = metal_buffer(device, MULTI_MAX * D_QDIM * 4)
+  d_k = metal_buffer(device, MULTI_MAX * D_KVDIM * 4)
+  d_v = metal_buffer(device, MULTI_MAX * D_KVDIM * 4)
+  d_attn = metal_buffer(device, MULTI_MAX * D_QDIM * 4)
+  d_ao = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  d_gate = metal_buffer(device, MULTI_MAX * FFN * 4)
+  d_up = metal_buffer(device, MULTI_MAX * FFN * 4)
+  d_hid = metal_buffer(device, MULTI_MAX * FFN * 4)
+  d_mo = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  d_hf = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  d_hp = metal_buffer(device, MULTI_MAX * D_RANK * 4)
+  d_cand = metal_buffer(device, MULTI_MAX * D_TOPK * 4)
+  d_unary = metal_buffer(device, MULTI_MAX * D_TOPK * 4)
+  d_draft_out = metal_buffer(device, MULTI_MAX * 4)
+  d_cos = metal_buffer(device, MULTI_MAX * D_ROT_HALF * 4)
+  d_sin = metal_buffer(device, MULTI_MAX * D_ROT_HALF * 4)
+  d_ccos = metal_buffer(device, MULTI_MAX * D_ROT_HALF * 4)
+  d_csin = metal_buffer(device, MULTI_MAX * D_ROT_HALF * 4)
+  d_ctx_in = metal_buffer(device, MULTI_MAX * D_CTX_DIM * 4)
+  d_ctx_proj = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  d_ctx_n = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  d_ck = metal_buffer(device, MULTI_MAX * D_KVDIM * 4)
+  d_cv = metal_buffer(device, MULTI_MAX * D_KVDIM * 4)
+
+# [w, input, output, kdim, rows, n]: route to the bf16 wide kernel or the
+# NVFP4 width-n rung the verify uses.
+-> enqueue_draft_mm(spec)
+  if draft_quant
+    enqueue_scaled_multi(spec)
+  else
+    enqueue_bf16_multi(spec)
+
+# Widen a bf16 tensor into an f32 buffer (plain, no +1 shift: the drafter's
+# norms are standard HF RMSNorm weights).
+-> draft_load_f32(spec)
+  name = spec[0]
+  n = spec[1]
+  out = spec[2]
+  t = dst.tensor(name)
+  m = dst.mmap
+  i = 0
+  while i < n
+    off = t[:byte_offset] + i * 2
+    bits = m.byte_at(off) | (m.byte_at(off + 1) << 8)
+    metal_buffer_write_i32(out, i, bits << 16)
+    i = i + 1
+
+-> build_rope_draft(spec)
+  cosb = spec[0]
+  sinb = spec[1]
+  pos_start = spec[2]
+  n = spec[3]
+  token = 0
+  while token < n
+    i = 0
+    while i < D_ROT_HALF
+      theta = Math.exp(d_log_rope * (~0.0 - i * d_rope_power))
+      angle = (pos_start + token) * theta
+      metal_buffer_write_f32(cosb, token * D_ROT_HALF + i, Math.cos(angle))
+      metal_buffer_write_f32(sinb, token * D_ROT_HALF + i, Math.sin(angle))
+      i = i + 1
+    token = token + 1
+
+# [w, input, output, kdim, rows, n]  (bf16 weight [rows, kdim], f32 rows)
+-> enqueue_bf16_multi(spec)
+  metal_dispatch_groups(queue, bf16_wide_r2_pipe,
+    [spec[0], spec[1], spec[2], spec[3], spec[4], spec[5]], (spec[4] + 3) / 4, 64)
+
+# Feed committed positions [start, start + count) to the drafter's context:
+# fc over the five taps, hidden_norm, then per layer the K/V projections,
+# k_norm + RoPE at the row's absolute position, appended to the draft cache.
+# Chunks of DRAFT_MAX rows; nothing attends here, so chunk order is free.
+-> dflash2_ingest(start, count)
+  profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
+  # The bf16 wide kernel hoists at most 8 rows; the NVFP4 drafter rides the
+  # GEMM rungs and can take MULTI_MAX rows per chunk.
+  chunk_cap = draft_quant ? MULTI_MAX : 8
+  done = 0
+  while done < count
+    m = count - done
+    if m > chunk_cap then m = chunk_cap
+    row = start + done
+    build_rope_draft([d_ccos, d_csin, row, m])
+    metal_batch_begin_concurrent(queue)
+    metal_dispatch_n(queue, copy_f32_at_pipe,
+      [ctx_hidden, d_ctx_in, row * D_CTX_DIM, 0, m * D_CTX_DIM], m * D_CTX_DIM)
+    dependency_barrier()
+    enqueue_draft_mm([d_fc, d_ctx_in, d_ctx_proj, D_CTX_DIM, HIDDEN, m])
+    dependency_barrier()
+    enqueue_rms([d_ctx_proj, d_hidden_norm, d_ctx_n, m])
+    dependency_barrier()
+    l = 0
+    while l < D_LAYERS
+      dl = dlayers[l]
+      enqueue_draft_mm([dl[:k], d_ctx_n, d_ck, HIDDEN, D_KVDIM, m])
+      enqueue_draft_mm([dl[:v], d_ctx_n, d_cv, HIDDEN, D_KVDIM, m])
+      dependency_barrier()
+      metal_dispatch_groups(queue, phn_rope_multi_pipe,
+        [d_ck, dl[:kn], d_ccos, d_csin, D_HD, D_ROT_HALF, D_KV, ~1.0 / D_HD, EPS, m], m * D_KV, 32)
+      dependency_barrier()
+      metal_dispatch_n(queue, kv_write_multi_pipe,
+        [d_ck, d_cv, dl[:k_cache], dl[:v_cache], row, D_KVDIM, m], m * D_KVDIM)
+      dependency_barrier()
+      l = l + 1
+    metal_batch_commit(queue)
+    done = done + m
+  if profile_components
+    profile_stats[9] = profile_stats[9] + ccall("__w_clock_ms") - profile_t0
+    profile_stats[10] = profile_stats[10] + count
+
+# One block-diffusion pass: token_multi_buf holds [anchor, MASK x (n-1)] at
+# positions anchor_pos .. anchor_pos+n-1; the context cache holds every
+# position < anchor_pos. Writes the selected draft ids into
+# token_multi_buf[1..n-1] (the verify embeds straight from it) and
+# d_draft_out[0..n-2]. Committed async; returns the command-buffer handle.
+-> dflash2_draft(anchor_pos, n)
+  profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
+  build_rope_draft([d_cos, d_sin, anchor_pos, n])
+  metal_batch_begin_concurrent(queue)
+  metal_dispatch_n(queue, multi_embed_pipe,
+    [embed_w, d_x, token_multi_buf, HIDDEN, n], n * HIDDEN)
+  dependency_barrier()
+  l = 0
+  while l < D_LAYERS
+    dl = dlayers[l]
+    enqueue_rms([d_x, dl[:in_norm], d_xn, n])
+    dependency_barrier()
+    enqueue_draft_mm([dl[:attn_kp], d_xn, d_kp, HIDDEN, D_KP, n])
+    dependency_barrier()
+    metal_dispatch_n(queue, dyn_conv_pipe,
+      [d_xn, d_kp, dl[:attn_base], d_xa, 0, HIDDEN, n], n * HIDDEN)
+    dependency_barrier()
+    enqueue_draft_mm([dl[:q], d_xa, d_q, HIDDEN, D_QDIM, n])
+    enqueue_draft_mm([dl[:k], d_xa, d_k, HIDDEN, D_KVDIM, n])
+    enqueue_draft_mm([dl[:v], d_xa, d_v, HIDDEN, D_KVDIM, n])
+    dependency_barrier()
+    metal_dispatch_groups(queue, phn_rope_multi_pipe,
+      [d_q, dl[:qn], d_cos, d_sin, D_HD, D_ROT_HALF, D_HEADS, ~1.0 / D_HD, EPS, n], n * D_HEADS, 32)
+    metal_dispatch_groups(queue, phn_rope_multi_pipe,
+      [d_k, dl[:kn], d_cos, d_sin, D_HD, D_ROT_HALF, D_KV, ~1.0 / D_HD, EPS, n], n * D_KV, 32)
+    dependency_barrier()
+    metal_dispatch_groups(queue, sdpa_draft_pipe,
+      [d_q, dl[:k_cache], dl[:v_cache], d_k, d_v, d_attn,
+       D_HEADS, D_KV, anchor_pos, n, D_WINDOW, D_SCALE], n * D_HEADS, 128)
+    dependency_barrier()
+    enqueue_draft_mm([dl[:o], d_attn, d_ao, D_QDIM, HIDDEN, n])
+    dependency_barrier()
+    metal_dispatch_n(queue, dyn_conv_res_pipe,
+      [d_ao, d_kp, dl[:attn_base], d_x, 1, HIDDEN, n], n * HIDDEN)
+    dependency_barrier()
+    enqueue_rms([d_x, dl[:post_norm], d_xn, n])
+    dependency_barrier()
+    enqueue_draft_mm([dl[:mlp_kp], d_xn, d_kp, HIDDEN, D_KP, n])
+    dependency_barrier()
+    metal_dispatch_n(queue, dyn_conv_pipe,
+      [d_xn, d_kp, dl[:mlp_base], d_xa, 0, HIDDEN, n], n * HIDDEN)
+    dependency_barrier()
+    enqueue_draft_mm([dl[:gate], d_xa, d_gate, HIDDEN, FFN, n])
+    enqueue_draft_mm([dl[:up], d_xa, d_up, HIDDEN, FFN, n])
+    dependency_barrier()
+    metal_dispatch_n(queue, silu_pipe, [d_gate, d_up, d_hid, n * FFN], n * FFN)
+    dependency_barrier()
+    enqueue_draft_mm([dl[:down], d_hid, d_mo, FFN, HIDDEN, n])
+    dependency_barrier()
+    metal_dispatch_n(queue, dyn_conv_res_pipe,
+      [d_mo, d_kp, dl[:mlp_base], d_x, 1, HIDDEN, n], n * HIDDEN)
+    dependency_barrier()
+    l = l + 1
+  enqueue_rms([d_x, d_norm, d_hf, n])
+  dependency_barrier()
+  enqueue_scaled_multi([lm_head, d_hf, logits_multi, HIDDEN, N_VOCAB, n])
+  enqueue_draft_mm([d_hp_w, d_hf, d_hp, HIDDEN, D_RANK, n])
+  dependency_barrier()
+  metal_dispatch_groups(queue, topk_pipe,
+    [logits_multi, d_cand, d_unary, N_VOCAB, 1], n - 1, 256)
+  dependency_barrier()
+  metal_dispatch_groups(queue, selector_pipe,
+    [d_hp, d_pred_cb, d_succ_cb, d_cand, d_unary, token_multi_buf, d_draft_out, n], 1, 256)
+  cb = metal_batch_commit_async(queue)
+  if profile_components
+    profile_stats[7] = profile_stats[7] + ccall("__w_clock_ms") - profile_t0
+    profile_stats[8] = profile_stats[8] + 1
+  cb
+
 -> forward(token_id, pos, want_logits)
   profile_t0 = profile_components ? ccall("__w_clock_ms") : ~0.0
   if pos > 0 then build_rope(pos)
@@ -1581,6 +2408,16 @@ rope_power = ~2.0 / ROT_DIM
     lyr = layers[li]
     if lyr[:kind] == "mamba" then enqueue_mamba(lyr) else enqueue_full(lyr, pos)
     enqueue_ffn(lyr)
+    if tap_capture
+      # enqueue_ffn ends on a barrier, so x is the finished layer output here;
+      # the copy is a read, and the next layer only writes x after further
+      # barriers, so no extra barrier is needed after it.
+      t = 0
+      while t < 5
+        if tap_layers[t] == li
+          metal_dispatch_n(queue, copy_f32_at_pipe,
+            [x, tap_buf, 0, (pos * 5 + t) * HIDDEN, HIDDEN], HIDDEN)
+        t = t + 1
     if !optimized then metal_batch_commit(queue)
     li = li + 1
 
@@ -1657,17 +2494,63 @@ else
       << "WARNING: prose fixture exhausted at " + prose_ids.size().to_s + " tokens; prompt is now TILED and acceptance is not trustworthy"
     prompt.push(prose_ids[i % prose_ids.size()])
     i = i + 1
+if prompt_ids_file != ""
+  prompt = JSON.parse(read_file(prompt_ids_file))
+  if prompt.size() + n_generate > MAX_POS
+    raise "prompt file " + prompt.size().to_s + " + generate " + n_generate.to_s + " exceeds MAX_POS " + MAX_POS.to_s
 setup_elapsed = ccall("__w_clock_ms") - setup_t0
 << "prefill " + prompt.size().to_s + " tokens"
 prefill_t0 = ccall("__w_clock_ms")
 profile_stats[0] = 1
 i = 0
 pred = -1
+prefill_last_batched = false
 while i < prompt.size()
-  pred = forward(prompt[i], i, i == prompt.size() - 1)
-  if mtp_enabled && i + 1 < prompt.size()
-    mtp_step([prompt[i + 1], backbone_hidden, i, false])
-  i = i + 1
+  if prefill_gemm && prompt.size() - i >= 2
+    m = prompt.size() - i
+    if m > MULTI_MAX then m = MULTI_MAX
+    chunk = []
+    j = 0
+    while j < m
+      chunk.push(prompt[i + j])
+      j = j + 1
+    is_last = i + m == prompt.size()
+    preds = forward_multi([chunk, i, m, tap_capture, is_last ? "last" : "none"])
+    if is_last then pred = preds[0]
+    if mtp_enabled
+      j = 0
+      while j < m && i + j + 1 < prompt.size()
+        mtp_step([prompt[i + j + 1], backbone_hidden, i + j, false, [x_multi, j]])
+        j = j + 1
+      if is_last then copy_hidden_multi_row(m - 1)
+    prefill_last_batched = false
+    if profile_components
+      profile_stats[4] = profile_stats[4] + m
+    i = i + m
+  elsif devchain && prompt.size() - i >= 3
+    # 3-token backbone chunk (one weight stream), then per-token head
+    # appends staged from x_triplet. Head priming is preserved, so decode
+    # acceptance is unchanged; ids are bit-identical to serial prefill.
+    pred = forward_prefill_chunk(
+      [prompt[i], prompt[i + 1], prompt[i + 2], i,
+       i + 3 == prompt.size()])
+    if mtp_enabled
+      j = 0
+      while j < 3 && i + j + 1 < prompt.size()
+        mtp_step([prompt[i + j + 1], backbone_hidden, i + j, false, [x_triplet, j]])
+        j = j + 1
+    prefill_last_batched = true
+    i = i + 3
+  else
+    pred = forward(prompt[i], i, i == prompt.size() - 1)
+    if mtp_enabled && i + 1 < prompt.size()
+      mtp_step([prompt[i + 1], backbone_hidden, i, false])
+    prefill_last_batched = false
+    i = i + 1
+# The head appends clobber backbone_hidden with staged rows; restore it to
+# the last prompt token's hidden for the first decode draft.
+if prefill_last_batched && mtp_enabled
+  copy_hidden_triplet_row(2)
 profile_stats[0] = 0
 prefill_elapsed = ccall("__w_clock_ms") - prefill_t0
 if prompt.size() == 5 && pred != 11751
@@ -1687,16 +2570,18 @@ deep_accepted = 0
 mtp_auto_rounds = [0, 0]
 mtp_auto_tokens = [0, 0]
 mtp_auto_ms = [~0.0, ~0.0]
+# Per-round timing. Total wall clock is a poor instrument on a contended box
+# -- a single descheduled round drags the whole run -- whereas the MEDIAN
+# round rejects those outliers and is what actually changed when a kernel
+# gets faster. Reported alongside tok/s so a regression can be told apart
+# from the room. Defined for every mode: the summary below reads it, and in
+# the compiled front-end an undefined name is a nil deref (SIGSEGV), not a
+# runtime error -- serial modes crashed right after prefill with no output.
+round_ms = []
 if mtp_enabled
   current = pred
   draft = mtp_step([current, backbone_hidden, pos - 1])
   generated = 0
-  # Per-round timing. Total wall clock is a poor instrument on a contended box
-  # -- a single descheduled round drags the whole run -- whereas the MEDIAN
-  # round rejects those outliers and is what actually changed when a kernel
-  # gets faster. Reported alongside tok/s so a regression can be told apart
-  # from the room.
-  round_ms = []
   # Streak-gated depth, ported from the MLX board's segmented verify gate: only
   # spend the deeper schedule on stretches where the head is ALREADY proving
   # perfect, and reset on any reject. Depth 3 measured +3.1% on expository prose
@@ -1734,12 +2619,29 @@ if mtp_enabled
         # each draft is the head's own continuation of the previous one, and the
         # target's row k decides draft k.
         verify_draft0 = draft
-        verify_draft1 = mtp_step([verify_draft0, xn, pos])
-        verify_draft2 = mtp_step([verify_draft1, xn, pos + 1])
-        if force_reject && drafted == 0
-          verify_draft0 = (verify_draft0 + 1) % N_VOCAB
-        quad_preds = forward_quad(
-          [current, verify_draft0, verify_draft1, verify_draft2, pos])
+        if devchain
+          # Two-step device-resident chain: draft1 argmax -> token slot 2,
+          # draft2 reads slot 2 as its input and writes slot 3, both async.
+          # One GPU sync (the verify) instead of three.
+          cb1 = mtp_step([verify_draft0, xn, pos, true, nil, [token_quad_buf, 2]])
+          cb2 = mtp_step([0, xn, pos + 1, true, nil, [token_quad_buf, 3], [token_quad_buf, 2]])
+          quad_preds = forward_quad(
+            [current, verify_draft0, 0, 0, pos, true])
+          metal_command_buffer_wait(cb1)
+          metal_command_buffer_wait(cb2)
+          verify_draft1 = metal_buffer_read_i32(token_quad_buf, 2)
+          verify_draft2 = metal_buffer_read_i32(token_quad_buf, 3)
+        else
+          verify_draft1 = mtp_step([verify_draft0, xn, pos])
+          verify_draft2 = mtp_step([verify_draft1, xn, pos + 1])
+          if force_reject && drafted == 0
+            verify_draft0 = (verify_draft0 + 1) % N_VOCAB
+          if multi_verify
+            quad_preds = forward_multi(
+              [[current, verify_draft0, verify_draft1, verify_draft2], pos, 4])
+          else
+            quad_preds = forward_quad(
+              [current, verify_draft0, verify_draft1, verify_draft2, pos])
         accepted_now = 0
         if quad_preds[0] == verify_draft0
           accepted_now = 1
@@ -1763,14 +2665,14 @@ if mtp_enabled
           ids.push(bonus)
           generated = generated + 4
           if generated < n_generate
-            mtp_step([verify_draft0, backbone_hidden, pos, false, [x_quad, 0]])
-            mtp_step([verify_draft1, backbone_hidden, pos + 1, false, [x_quad, 1]])
-            mtp_step([verify_draft2, backbone_hidden, pos + 2, false, [x_quad, 2]])
-            draft = mtp_step([bonus, backbone_hidden, pos + 3, true, [x_quad, 3]])
+            mtp_step([verify_draft0, backbone_hidden, pos, false, [x_verify4, 0]])
+            mtp_step([verify_draft1, backbone_hidden, pos + 1, false, [x_verify4, 1]])
+            mtp_step([verify_draft2, backbone_hidden, pos + 2, false, [x_verify4, 2]])
+            draft = mtp_step([bonus, backbone_hidden, pos + 3, true, [x_verify4, 3]])
           current = bonus
           pos = pos + 4
         else
-          rollback_quad_states(accepted_now)
+          if multi_verify then rollback_multi_states(accepted_now, 4) else rollback_quad_states(accepted_now)
           if accepted_now == 2
             ids.push(verify_draft0)
             ids.push(verify_draft1)
@@ -1778,9 +2680,9 @@ if mtp_enabled
             ids.push(correction)
             generated = generated + 3
             if generated < n_generate
-              mtp_step([verify_draft0, backbone_hidden, pos, false, [x_quad, 0]])
-              mtp_step([verify_draft1, backbone_hidden, pos + 1, false, [x_quad, 1]])
-              draft = mtp_step([correction, backbone_hidden, pos + 2, true, [x_quad, 2]])
+              mtp_step([verify_draft0, backbone_hidden, pos, false, [x_verify4, 0]])
+              mtp_step([verify_draft1, backbone_hidden, pos + 1, false, [x_verify4, 1]])
+              draft = mtp_step([correction, backbone_hidden, pos + 2, true, [x_verify4, 2]])
             current = correction
             pos = pos + 3
           elsif accepted_now == 1
@@ -1789,8 +2691,8 @@ if mtp_enabled
             ids.push(correction)
             generated = generated + 2
             if generated < n_generate
-              mtp_step([verify_draft0, backbone_hidden, pos, false, [x_quad, 0]])
-              draft = mtp_step([correction, backbone_hidden, pos + 1, true, [x_quad, 1]])
+              mtp_step([verify_draft0, backbone_hidden, pos, false, [x_verify4, 0]])
+              draft = mtp_step([correction, backbone_hidden, pos + 1, true, [x_verify4, 1]])
             current = correction
             pos = pos + 2
           else
@@ -1798,16 +2700,30 @@ if mtp_enabled
             ids.push(correction)
             generated = generated + 1
             if generated < n_generate
-              draft = mtp_step([correction, backbone_hidden, pos, true, [x_quad, 0]])
+              draft = mtp_step([correction, backbone_hidden, pos, true, [x_verify4, 0]])
             current = correction
             pos = pos + 1
       elsif use_depth2
         verify_draft0 = draft
-        verify_draft1 = mtp_step([verify_draft0, xn, pos])
-        if force_reject && drafted == 0
-          verify_draft0 = (verify_draft0 + 1) % N_VOCAB
-        triplet_preds = forward_triplet(
-          [current, verify_draft0, verify_draft1, pos])
+        if devchain
+          # Chained draft argmax stays on device; copy_i32_at drops it into
+          # the verify token slot, one async commit. Read it back only after
+          # the verify -- one GPU sync this round instead of two.
+          draft_cb = mtp_step([verify_draft0, xn, pos, true, nil, [token_triplet_buf, 2]])
+          triplet_preds = forward_triplet(
+            [current, verify_draft0, 0, pos, true])
+          metal_command_buffer_wait(draft_cb)
+          verify_draft1 = metal_buffer_read_i32(argmax_out, 0)
+        else
+          verify_draft1 = mtp_step([verify_draft0, xn, pos])
+          if force_reject && drafted == 0
+            verify_draft0 = (verify_draft0 + 1) % N_VOCAB
+          if multi_verify
+            triplet_preds = forward_multi(
+              [[current, verify_draft0, verify_draft1], pos, 3])
+          else
+            triplet_preds = forward_triplet(
+              [current, verify_draft0, verify_draft1, pos])
         accepted_now = 0
         if triplet_preds[0] == verify_draft0
           accepted_now = 1
@@ -1828,21 +2744,21 @@ if mtp_enabled
           ids.push(bonus)
           generated = generated + 3
           if generated < n_generate
-            mtp_step([verify_draft0, backbone_hidden, pos, false, [x_triplet, 0]])
-            mtp_step([verify_draft1, backbone_hidden, pos + 1, false, [x_triplet, 1]])
-            draft = mtp_step([bonus, backbone_hidden, pos + 2, true, [x_triplet, 2]])
+            mtp_step([verify_draft0, backbone_hidden, pos, false, [x_verify3, 0]])
+            mtp_step([verify_draft1, backbone_hidden, pos + 1, false, [x_verify3, 1]])
+            draft = mtp_step([bonus, backbone_hidden, pos + 2, true, [x_verify3, 2]])
           current = bonus
           pos = pos + 3
         else
-          rollback_triplet_states(accepted_now)
+          if multi_verify then rollback_multi_states(accepted_now, 3) else rollback_triplet_states(accepted_now)
           if accepted_now == 1
             ids.push(verify_draft0)
             correction = triplet_preds[1]
             ids.push(correction)
             generated = generated + 2
             if generated < n_generate
-              mtp_step([verify_draft0, backbone_hidden, pos, false, [x_triplet, 0]])
-              draft = mtp_step([correction, backbone_hidden, pos + 1, true, [x_triplet, 1]])
+              mtp_step([verify_draft0, backbone_hidden, pos, false, [x_verify3, 0]])
+              draft = mtp_step([correction, backbone_hidden, pos + 1, true, [x_verify3, 1]])
             current = correction
             pos = pos + 2
           else
@@ -1850,7 +2766,7 @@ if mtp_enabled
             ids.push(correction)
             generated = generated + 1
             if generated < n_generate
-              draft = mtp_step([correction, backbone_hidden, pos, true, [x_triplet, 0]])
+              draft = mtp_step([correction, backbone_hidden, pos, true, [x_verify3, 0]])
             current = correction
             pos = pos + 1
       else
@@ -1892,7 +2808,74 @@ if mtp_enabled
         mtp_auto_rounds[arm] = mtp_auto_rounds[arm] + 1
         mtp_auto_tokens[arm] = mtp_auto_tokens[arm] + generated - round_generated_before
         mtp_auto_ms[arm] = mtp_auto_ms[arm] + ccall("__w_clock_ms") - round_t0
+    while hist_cb_n[0] > 0
+      hist_cb_n[0] = hist_cb_n[0] - 1
+      metal_command_buffer_wait(hist_cbs[hist_cb_n[0]])
     round_ms.push(ccall("__w_clock_ms") - rt0)
+elsif dflash2_enabled
+  # Block rounds: ingest the taps of every position < anchor into the draft
+  # context, draft [anchor, MASK...] in one pass, verify the block with the
+  # width-n exact target pass (one host sync per round), commit the longest
+  # matching prefix plus the target's own next token, replay the recurrent
+  # state to the commit point, and continue from that token.
+  ctx_done = 0
+  anchor = pred
+  anchor_pos = prompt.size()
+  generated = 0
+  dflash2_rounds = 0
+  while generated < n_generate
+    rt0 = ccall("__w_clock_ms")
+    remaining = n_generate - generated
+    n = remaining < dflash2_block ? remaining : dflash2_block
+    if n < 2
+      preds = forward_multi([[anchor], anchor_pos, 1])
+      ids.push(preds[0])
+      generated = generated + 1
+      anchor = preds[0]
+      anchor_pos = anchor_pos + 1
+    else
+      if ctx_done < anchor_pos
+        dflash2_ingest(ctx_done, anchor_pos - ctx_done)
+        ctx_done = anchor_pos
+      metal_buffer_write_i32(token_multi_buf, 0, anchor)
+      j = 1
+      while j < n
+        metal_buffer_write_i32(token_multi_buf, j, D_MASK)
+        j = j + 1
+      draft_cb = dflash2_draft(anchor_pos, n)
+      preds = forward_multi([nil, anchor_pos, n, true])
+      metal_command_buffer_wait(draft_cb)
+      accepted_now = 0
+      while accepted_now < n - 1 && preds[accepted_now] == metal_buffer_read_i32(d_draft_out, accepted_now)
+        accepted_now = accepted_now + 1
+      if dflash2_rounds == 0
+        dbg = []
+        j = 0
+        while j < n - 1
+          dbg.push(metal_buffer_read_i32(d_draft_out, j))
+          j = j + 1
+        << "dflash2 round 0: anchor " + anchor.to_s + " drafts " + dbg.to_s + " target " + preds.to_s
+        if dflash2_probe != ""
+          File.write_bytes(dflash2_probe + ".hf.f32", metal_buffer_view(d_hf, 8, n * HIDDEN * 4))
+          File.write_bytes(dflash2_probe + ".cand.i32", metal_buffer_view(d_cand, 8, n * D_TOPK * 4))
+          File.write_bytes(dflash2_probe + ".unary.f32", metal_buffer_view(d_unary, 8, n * D_TOPK * 4))
+          File.write_bytes(dflash2_probe + ".hp.f32", metal_buffer_view(d_hp, 8, n * D_RANK * 4))
+          File.write_bytes(dflash2_probe + ".ctxn.f32", metal_buffer_view(d_ctx_n, 8, MULTI_MAX * HIDDEN * 4))
+          File.write(dflash2_probe + ".json", "{\"n\": " + n.to_s + ", \"anchor\": " + anchor.to_s + ", \"anchor_pos\": " + anchor_pos.to_s + ", \"drafts\": " + dbg.to_s + ", \"target\": " + preds.to_s + "}")
+      j = 0
+      while j < accepted_now
+        ids.push(metal_buffer_read_i32(d_draft_out, j))
+        j = j + 1
+      ids.push(preds[accepted_now])
+      generated = generated + accepted_now + 1
+      drafted = drafted + n - 1
+      accepted = accepted + accepted_now
+      rollback_multi_states(accepted_now, n)
+      anchor = preds[accepted_now]
+      anchor_pos = anchor_pos + accepted_now + 1
+      dflash2_rounds = dflash2_rounds + 1
+    round_ms.push(ccall("__w_clock_ms") - rt0)
+  pos = anchor_pos
 else
   i = 0
   while i < n_generate
@@ -1928,8 +2911,21 @@ if row_scan
   scan2 = []
   scan3 = []
   scan4 = []
+  scan_multi = [[], [], [], [], [], [], [], [], []]
   r = 0
   while r < scan_reps
+    if multi_verify
+      mw = 1
+      while mw <= MULTI_MAX
+        mtoks = []
+        j = 0
+        while j < mw
+          mtoks.push(scan_tok)
+          j = j + 1
+        sm = ccall("__w_clock_ms")
+        forward_multi([mtoks, scan_pos, mw])
+        scan_multi[mw].push(ccall("__w_clock_ms") - sm)
+        mw = mw + 1
     s1 = ccall("__w_clock_ms")
     forward(scan_tok, scan_pos, false)
     scan1.push(ccall("__w_clock_ms") - s1)
@@ -1996,11 +2992,33 @@ if row_scan
   if mtp_depth3
     m4 = scan4.sort()[scan_reps / 2]
     << "rowscan 4row median " + m4.to_s + " ms  (marginal " + (m4 - m3).to_s + ")"
+  if multi_verify
+    prev = ~0.0
+    mw = 1
+    while mw <= MULTI_MAX
+      mm = scan_multi[mw].sort()[scan_reps / 2]
+      << "rowscan multi " + mw.to_s + "row median " + mm.to_s + " ms  (marginal " + (mm - prev).to_s + ", variant " + multi_variant + ")"
+      prev = mm
+      mw = mw + 1
 
 tokenizer = Tungsten:Llama:Tokenizer.from_packed_tokenizer(TOKENIZER_BIN)
 text_out = tokenizer.decode(ids)
 << "generated ids: " + ids.to_s
 << "generated: " + text_out
+if tapdump
+  # Positions 0..P-1 are the prompt, P..P+N-2 the generated tokens that were
+  # forwarded (the last generated id is emitted but never consumed).
+  tap_positions = prompt.size() + n_generate - 1
+  # write_file takes a bytes array or a string, so view the f32 table as u8.
+  tap_view = metal_buffer_view(tap_buf, 8, tap_positions * 5 * HIDDEN * 4)
+  File.write_bytes(tapdump_prefix + ".f32", tap_view)
+  File.write(tapdump_prefix + ".json",
+    "{\"prompt\": " + prompt.to_s + ", \"generated\": " + ids.to_s +
+    ", \"n_pos\": " + tap_positions.to_s + ", \"taps\": " + tap_layers.to_s + ", \"hidden\": " + HIDDEN.to_s + "}")
+  << "tapdump: " + tap_positions.to_s + " positions x 5 taps written to " + tapdump_prefix + ".f32"
+if dflash2_enabled
+  rate = drafted == 0 ? ~0.0 : (~0.0 + accepted) / drafted
+  << "dflash2: " + accepted.to_s + "/" + drafted.to_s + " drafts accepted (" + rate.to_s + "), " + dflash2_rounds.to_s + " block rounds, " + ((~0.0 + n_generate) / (dflash2_rounds > 0 ? dflash2_rounds : 1)).to_s + " tokens/round"
 if mtp_enabled
   rate = drafted == 0 ? ~0.0 : (~0.0 + accepted) / drafted
   << "mtp: " + accepted.to_s + "/" + drafted.to_s + " drafts accepted (" + rate.to_s + ")"

@@ -98,6 +98,10 @@ t16 = f16.generator
 finite_check("quartic_extension.order", f16.order, 16)
 finite_check("quartic_extension.modulus",
              f16.modulus.to_s, "\[1, 1, 0, 0, 1\]")
+returned_modulus = f16.modulus
+returned_modulus[0] = 0
+finite_check("quartic_extension.modulus_is_owned",
+             f16.modulus.to_s, "\[1, 1, 0, 0, 1\]")
 finite_check("quartic_extension.modulus_certificate",
              f16.modulus_certificate.verified?, true)
 finite_check("quartic_extension.relation",

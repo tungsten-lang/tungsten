@@ -42,7 +42,18 @@ use algebra/field
     @inverse_frobenius_table = nil
     self
 
-  ro :characteristic, :degree, :order, :modulus
+  ro :characteristic, :degree, :order
+
+  # Return an owned copy. Arithmetic reads @modulus directly, so exposing the
+  # live Array would let a caller silently change the field after validation.
+  -> modulus
+    return nil if @modulus == nil
+    out = []
+    i = 0
+    while i < @modulus.size
+      out.push(@modulus[i])
+      i += 1
+    out
 
   -> exact?
     true

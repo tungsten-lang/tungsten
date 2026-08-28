@@ -165,6 +165,17 @@
       static_rt = fn_return_types[node.receiver.name + "." + node.name]
       if static_rt != nil
         return normalize_type_symbol(static_rt)
+    # Array#to_f64/to_f32 build a typed float buffer (ebits -64/-32) — the
+    # form %f64[…]/%f32[…] literals desugar to in the parser. Typing the
+    # conversion lets downstream consumers (fused pipelines, subscript fast
+    # paths) treat the result exactly like a direct f64[n] constructor.
+    # Guarded on an :array receiver: to_f64 on scalars returns a scalar.
+    if node.name in ("to_f64" "to_f32") && (node.args == nil || node.args.size() == 0)
+      conv_recv_t = infer_type(node.receiver, var_types, fn_return_types, infer_maps)
+      if conv_recv_t == :array
+        if node.name == "to_f64"
+          return :typed_array_f64
+        return :typed_array_f32
     if node.receiver != nil && node.receiver.name == "Array" && node.name == "new" && node.args != nil && node.args.size() <= 2
       return :array
     # SmallArray.new(:ebits, size) → :small_array_<ebits>. Lets downstream

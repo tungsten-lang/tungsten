@@ -1188,7 +1188,9 @@ RSpec.describe "Compiler regressions" do
 
     expect(llvm).to include("@__static_slab")
     expect(llvm).to match(/@__static_slab = private constant \[\d+ x i8\] c".*", align 8/)
-    expect(llvm).to match(/@__static_slab = .*c"(?:\\00){32}\\01\\0bhello world/m)
+    # Entry flag byte: 0x01 (interned string) | 0x08 (all-ASCII, stamped by
+    # the 8/25 string campaign's ascii flag).
+    expect(llvm).to match(/@__static_slab = .*c"(?:\\00){32}\\09\\0bhello world/m)
     expect(llvm).not_to match(/@__static_slab = .*c"(?:\\00){40}\\0b\\01hello world/m)
   end
 
@@ -1233,7 +1235,8 @@ RSpec.describe "Compiler regressions" do
     W
 
     expect(llvm).to include("@__static_slab")
-    expect(llvm).to match(/@__static_slab = .*\\03\\3dabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789\\00", align 8/m)
+    # 0x03 (interned, len>60 continuation) | 0x08 (all-ASCII flag).
+    expect(llvm).to match(/@__static_slab = .*\\0b\\3dabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789\\00", align 8/m)
   end
 
   it "runs binaries compiled with zstd slab encoding" do

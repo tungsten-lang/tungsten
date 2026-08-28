@@ -2162,6 +2162,11 @@ use ../../core/token
       nodes = []
       ci = 0
       while ci < comps.size()
+        # Validate each component here: an unchecked token (e.g. "1.5," from
+        # comma-separated elements) would flow into the Float literal and
+        # surface only as a clang parse error on the emitted IR.
+        if !float_array_component_valid?(comps[ci])
+          raise compile_error_at(:E_PARSE_UNEXPECTED_TOKEN, "invalid %f" + width + "[] element '" + comps[ci] + "' — elements are space-separated float literals")
         nodes.push(Tungsten:AST:Float.new(comps[ci]))
         ci += 1
       conv = "to_f64"
@@ -2389,6 +2394,37 @@ use ../../core/token
     raise compile_error_at(:E_PARSE_UNEXPECTED_TOKEN, "Unexpected token [current_desc()] @pos=[@pos]/[@token_count]")
 
   # -- Specific construct parsers --
+
+  # A %f32[…]/%f64[…] element must be a bare float literal: optional sign,
+  # digits with at most one dot, optional e/E exponent with optional sign.
+  -> float_array_component_valid?(s)
+    if s == nil || s.size() == 0
+      return false
+    i = 0
+    first = s.slice(0, 1)
+    if first == "-" || first == "+"
+      i = 1
+    digits = 0
+    dots = 0
+    seen_exp = false
+    while i < s.size()
+      c = s.slice(i, 1)
+      if c >= "0" && c <= "9"
+        digits += 1
+      elsif c == "."
+        if dots > 0 || seen_exp
+          return false
+        dots += 1
+      elsif (c == "e" || c == "E") && digits > 0 && !seen_exp
+        seen_exp = true
+        if i + 1 < s.size()
+          nxt = s.slice(i + 1, 1)
+          if nxt == "-" || nxt == "+"
+            i += 1
+      else
+        return false
+      i += 1
+    digits > 0
 
   -> parse_keyword
     val = current_value()

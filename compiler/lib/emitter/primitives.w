@@ -672,6 +672,14 @@
   out << declare_fn_attrs("pow", "double", dd, libm_attrs)
   out << declare_fn_attrs("atan2", "double", dd, libm_attrs)
   out << declare_fn_attrs("hypot", "double", dd, libm_attrs)
+  # IEEE-754-2019 minimumNumber/maximumNumber intrinsics (NaN = missing
+  # data; single fminnm/fmaxnm on AArch64). The fused-pipeline raw f64
+  # min/max combine calls these only when the host clang knows them
+  # (host_cc_supports_llvm_fminmaxnum?), and the usage filter drops the
+  # declares from every other module, so emitted IR stays parseable by
+  # older clangs.
+  out << declare_fn_attrs("llvm.minimumnum.f64", "double", dd, libm_attrs)
+  out << declare_fn_attrs("llvm.maximumnum.f64", "double", dd, libm_attrs)
 
   # Float bit-cast
   out << declare_fn("w_float_from_u32_bits", wv, wv)

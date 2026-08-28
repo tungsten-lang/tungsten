@@ -64416,8 +64416,18 @@ static double array_float_reduce(WArray *a, WArray *b, WFloatReduceKind kind) {
 static WValue array_minmax_float(WValue arr, int want_max) {
     WArray *a = w_as_array(arr);
     if (a->size == 0) return W_NIL;
+    /* NaN is missing data (IEEE-754-2019 minimumNumber/maximumNumber),
+       regardless of position: seed from the first non-NaN element so a
+       leading NaN cannot poison the reduction — the vmaxnm/vminnm vector
+       bodies and the `>`/`<` scalar tails below already skip interior
+       NaNs, and the SIMD/tail loops re-reading any skipped leading NaNs
+       is harmless for the same reason. An all-NaN array returns NaN. */
     double best = array_read_float(a, a->start);
-    if (isnan(best)) return w_float(best);
+    if (isnan(best)) {
+        int64_t seed_end = a->start + a->size, si = a->start;
+        while (isnan(best) && ++si < seed_end) best = array_read_float(a, si);
+        if (isnan(best)) return w_float(best);
+    }
 
 #ifdef __aarch64__
     if (a->ebits == -32 && a->size >= 16) {

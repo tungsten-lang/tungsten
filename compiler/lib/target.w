@@ -240,6 +240,23 @@ native_cpu_memo = {}
   out = capture("\"" + cc + "\" -mcpu=" + cpu + " -fsyntax-only -x c /dev/null 2>&1")
   out.index("error") == nil
 
+# LLVM's llvm.minimumnum/llvm.maximumnum intrinsics (IEEE-754-2019
+# minimumNumber/maximumNumber: NaN treated as missing data) lower to single
+# fminnm/fmaxnm instructions on AArch64. Probe by parsing+ISel'ing a module
+# that calls the f64 form — an older host clang rejects it at parse with
+# "unknown intrinsic", and the fused-pipeline reduce combine then keeps its
+# boxed compare-select fallback. Memoized per process alongside the cc.
+-> host_cc_supports_llvm_fminmaxnum?
+  cached = host_cc_memo[:llvm_fminmaxnum]
+  if cached != nil
+    return cached == :yes
+  cc = host_c_compiler()
+  probe = "declare double @llvm.maximumnum.f64(double, double)\ndefine double @w_probe(double %a, double %b) {\n  %r = call double @llvm.maximumnum.f64(double %a, double %b)\n  ret double %r\n}\n"
+  out = capture("printf %s '" + probe + "' | \"" + cc + "\" -x ir - -S -o /dev/null 2>&1")
+  ok = out.index("error") == nil
+  host_cc_memo[:llvm_fminmaxnum] = ok ? :yes : :no
+  ok
+
 # detect_target is called once per class definition and once per @on
 # guard during lowering — 260+ times per compile of tungsten.w. Each
 # uncached call spawns `uname -s` + `uname -m` subprocesses (~8ms each,

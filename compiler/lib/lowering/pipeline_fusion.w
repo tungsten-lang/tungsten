@@ -118,6 +118,31 @@
   ctx[:var_types][name] = nil
   ptr
 
+# Bind the fused loop's element var to a stage value. A :raw_f64 value stays
+# unboxed in the slot (var_types :f64, the machine-float slot convention from
+# lower_var) so later stages and the reduce combine keep lowering on raw
+# doubles; anything else boxes into an ordinary WValue slot as before.
+# Returns the bound register (raw double or boxed i64 — the caller reads
+# ctx[:var_types][name] == :f64 to know which).
+-> pipeline_bind_cur(ctx, wfn, name, tval)
+  if tval[:type] == :raw_f64
+    ptr = ensure_var_slot(wfn, name)
+    emit_wire_dynamic_2(wfn, :store_double, :value, tval[:value], :ptr, ptr)
+    ctx[:bindings][name] = nil
+    ctx[:var_types][name] = :f64
+    return tval[:value]
+  reg = ensure_i64_value(wfn, tval)
+  bind_slot_value(ctx, wfn, name, reg)
+  reg
+
+# Box the current element register when the slot is in raw-f64 mode; a
+# no-op passthrough otherwise. Used where a WValue is mandatory (detect
+# result, array push).
+-> pipeline_boxed_cur(ctx, wfn, cur_name, cur_reg)
+  if ctx[:var_types][cur_name] == :f64
+    return ensure_i64_value(wfn, typed_value(:raw_f64, cur_reg))
+  cur_reg
+
 # Mod-12 wheel range `(0..N / 12)`: indices m with candidates 12m±{1,5,7}.
 # Returns the AST of the dividend N (the left side of `/ 12`), or nil.
 -> wheel12_prime_hi_ast(base)
@@ -325,6 +350,16 @@
   # --- source setup: count_raw + per-iter element ---
   receiver_reg = nil
   lo_raw = nil
+  # Static element-access mode for array bases. The inline WValue slot read
+  # (:array_get_inline) is only correct for plain boxed arrays — typed
+  # arrays store raw elements (different encodings AND different strides),
+  # so reading their slots as WValues yields silently wrong values. Proven
+  # :array keeps the inline read; a proven %f64 array takes a raw-double
+  # fast path; everything else (typed, small, unknown) goes through the
+  # kind-dispatching w_array_get runtime call — correct for every layout.
+  base_static_type = nil
+  raw_f64_source = false
+  raw_f64_base = nil
   if is_range
     lo_tv = lower_expression(ctx, ast_get(base, :from))
     lo_raw = nanunbox_int_emit(wfn, ensure_i64_value(wfn, lo_tv))
@@ -340,9 +375,17 @@
   else
     receiver_val = lower_expression(ctx, base)
     receiver_reg = ensure_i64_value(wfn, receiver_val)
+    base_static_type = receiver_static_type(ctx, base)
     size_box = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_array_size", nil, nil, size_box)
     count_raw = nanunbox_int_emit(wfn, size_box)
+    if base_static_type == :typed_array_f64
+      # Hoist the elems base pointer: the fused loop never pushes/clears the
+      # SOURCE array, so slots/start are invariant for its duration (same
+      # argument as the elementwise fuser's hoisted header decode).
+      raw_f64_source = true
+      raw_f64_base = next_temp(wfn)
+      emit_wire_dynamic_2(wfn, :ta_f64_elems_ptr, :value, receiver_reg, :temp, raw_f64_base)
 
   # Filter-free take(n): clamp the iteration bound to min(count, n). Every
   # iteration produces exactly one element, so n iterations yield n
@@ -411,13 +454,19 @@
     emit_wire_cond_br(wfn, take_ok, exit_l, nil, take_go)
     start_block(wfn, take_go)
   elem = next_temp(wfn)
+  elem_raw_f64 = false
   if is_range
     val_raw = next_temp(wfn)
     emit_wire_add_i64(wfn, lo_raw, idx_raw, val_raw)
     boxed = nanbox_int_emit(wfn, val_raw)
     emit_wire_store_i64(wfn, ensure_var_slot(wfn, "__pipe_box." + uid), boxed[:value])
     elem = boxed[:value]
-  else
+  elsif raw_f64_source
+    # Raw double read — no boxing. idx_raw indexes from the hoisted elems
+    # base (which already folds in the array's start offset).
+    emit_wire_dynamic_3(wfn, :load_f64_at, :index, idx_raw, :ptr, raw_f64_base, :temp, elem)
+    elem_raw_f64 = true
+  elsif base_static_type == :array
     idx_boxed = nanbox_int_emit(wfn, idx_raw)
     scratch = []
     si = 0
@@ -425,10 +474,15 @@
       scratch.push(next_temp(wfn))
       si += 1
     emit_wire_array_get_inline(wfn, receiver_reg, idx_boxed[:value], scratch, elem)
+  else
+    idx_boxed = nanbox_int_emit(wfn, idx_raw)
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg, idx_boxed[:value]], nil, nil, "w_array_get", nil, nil, elem)
 
   cur_name = "__pipe_cur." + uid
-  cur_ptr = bind_slot_value(ctx, wfn, cur_name, elem)
-  cur_reg = elem
+  if elem_raw_f64
+    cur_reg = pipeline_bind_cur(ctx, wfn, cur_name, typed_value(:raw_f64, elem))
+  else
+    cur_reg = pipeline_bind_cur(ctx, wfn, cur_name, typed_value(:i64, elem))
 
   push_loop(wfn, exit_l, inc, nil)
 
@@ -454,25 +508,36 @@
       bparams = ast_get(sfunc, :params)
       bbody = ast_get(sfunc, :body)
       if bparams != nil && bparams.size() >= 1
-        bind_slot_value(ctx, wfn, "" + bparams[0], cur_reg)
+        if ctx[:var_types][cur_name] == :f64
+          pipeline_bind_cur(ctx, wfn, "" + bparams[0], typed_value(:raw_f64, cur_reg))
+        else
+          bind_slot_value(ctx, wfn, "" + bparams[0], cur_reg)
       bi = 0
       tval = nil
       while bi < bbody.size()
         tval = lower_expression(ctx, bbody[bi])
         bi = bi + 1
-      treg = ensure_i64_value(wfn, tval)
-      cur_ptr = bind_slot_value(ctx, wfn, cur_name, treg)
-      cur_reg = treg
+      cur_reg = pipeline_bind_cur(ctx, wfn, cur_name, tval)
     else
       tval = lower_expression(ctx, pipeline_transform_node(ast_get(sfunc, :name), ast_get(sfunc, :args), cur_name))
-      treg = ensure_i64_value(wfn, tval)
-      cur_ptr = bind_slot_value(ctx, wfn, cur_name, treg)
-      cur_reg = treg
+      cur_reg = pipeline_bind_cur(ctx, wfn, cur_name, tval)
     si += 1
 
+  # Raw f64 accumulator: element still raw after the stages, and the
+  # terminal folds arithmetically. min/max additionally need the host
+  # clang to know llvm.minimumnum/llvm.maximumnum (single fminnm/fmaxnm
+  # on AArch64, NaN treated as missing — matching the runtime's NEON
+  # array min/max kernels); without the intrinsics they keep the boxed
+  # compare-select combine.
+  acc_raw = is_reduce && ctx[:var_types][cur_name] == :f64
+  if acc_raw
+    if terminal in ("min" "max")
+      acc_raw = host_cc_supports_llvm_fminmaxnum?()
+    elsif !(terminal in ("sum" "product"))
+      acc_raw = false
   if is_detect
     acc_ptr2 = ensure_var_slot(wfn, acc_name)
-    emit_wire_store_i64(wfn, acc_ptr2, cur_reg)
+    emit_wire_store_i64(wfn, acc_ptr2, pipeline_boxed_cur(ctx, wfn, cur_name, cur_reg))
     emit_wire_store_i64(wfn, ensure_var_slot(wfn, seen_name), w_true.to_s())
     emit_wire_br(wfn, exit_l, nil, nil)
   elsif is_reduce
@@ -493,21 +558,35 @@
       # element here.
       seed_val = lower_expression(ctx, Tungsten:AST:If.new(Tungsten:AST:Var.new(cur_name), [Tungsten:AST:Int.new(1)], [], [Tungsten:AST:Int.new(0)]))
       emit_wire_store_i64(wfn, acc_ptr3, ensure_i64_value(wfn, seed_val))
+    elsif acc_raw
+      emit_wire_dynamic_2(wfn, :store_double, :value, cur_reg, :ptr, acc_ptr3)
     else
-      emit_wire_store_i64(wfn, acc_ptr3, cur_reg)
+      emit_wire_store_i64(wfn, acc_ptr3, pipeline_boxed_cur(ctx, wfn, cur_name, cur_reg))
     emit_wire_store_i64(wfn, seen_ptr3, w_true.to_s())
     emit_wire_br(wfn, after_l, nil, nil)
     start_block(wfn, comb_l)
     ctx[:bindings][acc_name] = nil
-    ctx[:var_types][acc_name] = nil
-    comb_val = lower_expression(ctx, pipeline_reduce_node(terminal, acc_name, cur_name))
-    comb_reg = ensure_i64_value(wfn, comb_val)
-    emit_wire_store_i64(wfn, acc_ptr3, comb_reg)
+    ctx[:var_types][acc_name] = acc_raw ? :f64 : nil
+    if acc_raw && terminal in ("min" "max")
+      intrinsic = terminal == "min" ? "llvm.minimumnum.f64" : "llvm.maximumnum.f64"
+      acc_raw_reg = ensure_raw_f64(wfn, lower_expression(ctx, Tungsten:AST:Var.new(acc_name)))
+      cur_raw_reg = ensure_raw_f64(wfn, lower_expression(ctx, Tungsten:AST:Var.new(cur_name)))
+      comb_temp = next_temp(wfn)
+      emit_wire_call_libm_f64(wfn, acc_raw_reg, intrinsic, cur_raw_reg, comb_temp, nil)
+      emit_wire_dynamic_2(wfn, :store_double, :value, comb_temp, :ptr, acc_ptr3)
+    elsif acc_raw
+      comb_val = lower_expression(ctx, pipeline_reduce_node(terminal, acc_name, cur_name))
+      comb_raw = ensure_raw_f64(wfn, comb_val)
+      emit_wire_dynamic_2(wfn, :store_double, :value, comb_raw, :ptr, acc_ptr3)
+    else
+      comb_val = lower_expression(ctx, pipeline_reduce_node(terminal, acc_name, cur_name))
+      comb_reg = ensure_i64_value(wfn, comb_val)
+      emit_wire_store_i64(wfn, acc_ptr3, comb_reg)
     emit_wire_br(wfn, after_l, nil, nil)
     start_block(wfn, after_l)
   else
     push_tmp = next_temp(wfn)
-    emit_wire_call_direct_i64(wfn, nil, [out_arr, cur_reg], nil, nil, "w_array_push", nil, nil, push_tmp)
+    emit_wire_call_direct_i64(wfn, nil, [out_arr, pipeline_boxed_cur(ctx, wfn, cur_name, cur_reg)], nil, nil, "w_array_push", nil, nil, push_tmp)
     # take(n) with a filter: one more element produced — decrement the
     # counter. Only reached for elements that survived all select/reject
     # stages, so the count is of PRODUCED (not iterated) elements.
@@ -529,6 +608,19 @@
   start_block(wfn, exit_l)
   if is_reduce || is_detect
     result = next_temp(wfn)
+    if acc_raw
+      # Box the raw accumulator once at the boundary. An empty source never
+      # seeded the slot (it still holds the w_nil bits stored at setup), so
+      # select on the seen flag to preserve the `[] :max == nil` contract.
+      emit_wire_dynamic_2(wfn, :load_double, :ptr, ensure_var_slot(wfn, acc_name), :temp, result)
+      boxed_tv = nanbox_float_emit(wfn, result)
+      seen_exit = next_temp(wfn)
+      emit_wire_load_i64(wfn, ensure_var_slot(wfn, seen_name), seen_exit)
+      seen_exit_bool = next_temp(wfn)
+      emit_wire_truthy_inline(wfn, seen_exit_bool, seen_exit)
+      final = next_temp(wfn)
+      emit_wire_select_i64(wfn, seen_exit_bool, w_nil.to_s(), final, boxed_tv[:value])
+      return typed_value(:i64, final)
     emit_wire_load_i64(wfn, ensure_var_slot(wfn, acc_name), result)
     return typed_value(:i64, result)
   typed_value(:i64, out_arr)

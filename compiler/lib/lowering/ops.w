@@ -3569,15 +3569,28 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   start_block(wfn, end_label)
   nil
 
-# Store one i64 value into the arg block at a literal index.
--> fuse_ew_block_store(wfn, blk_reg, idx_str, val_reg)
-  scratch = []
-  si = 0
-  while si < 10
-    scratch.push(next_temp(wfn))
-    si += 1
-  stw = next_temp(wfn)
-  emit_wire_typed_array_set_inline(wfn, blk_reg, 64, idx_str, true, scratch, true, stw, val_reg)
+# Reserve a fixed raw i64 arg block in the function entry. Fused sites can sit
+# inside source loops, so emitting an alloca at the use site would grow the
+# stack once per iteration until the function returns. Entry placement gives
+# each site one reusable block whose lifetime covers the synchronous CPU/GPU
+# dispatch while avoiding the old boxed WArray header + zeroed heap payload.
+-> fuse_ew_entry_arg_block(wfn, count)
+  ptr = next_temp(wfn)
+  entry = wfn[:blocks][0]
+  old_instructions = entry[:instructions]
+  new_instructions = [wire_make_alloca_array(count, ptr)]
+  i = 0
+  while i < old_instructions.size()
+    new_instructions.push(old_instructions[i])
+    i += 1
+  entry[:instructions] = new_instructions
+  ptr
+
+# Store one i64 value into a raw arg block at a literal index.
+-> fuse_ew_block_store(wfn, blk_ptr, count, idx, val_reg)
+  slot = next_temp(wfn)
+  emit_wire_gep_array(wfn, blk_ptr, count, idx, slot)
+  emit_wire_store_ptr(wfn, slot, val_reg)
   nil
 
 # ---- GPU offload (arithmetic-only f32 trees) ----
@@ -3761,12 +3774,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 
   start_block(wfn, mt_label)
   nslots = 1 + arrs.size() + scls.size()
-  blk_reg = next_temp(wfn)
-  emit_wire_call_direct_i64(wfn, nil, ["64", nslots.to_s()], nil, nil, "w_array_zeros", nil, nil, blk_reg)
-  fuse_ew_block_store(wfn, blk_reg, "0", out_reg)
+  blk_ptr = fuse_ew_entry_arg_block(wfn, nslots)
+  fuse_ew_block_store(wfn, blk_ptr, nslots, 0, out_reg)
   ai = 0
   while ai < arrs.size()
-    fuse_ew_block_store(wfn, blk_reg, (1 + ai).to_s(), arrs[ai][:reg])
+    fuse_ew_block_store(wfn, blk_ptr, nslots, 1 + ai, arrs[ai][:reg])
     ai += 1
   sj = 0
   while sj < scls.size()
@@ -3774,10 +3786,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     if spec[:mode] != :int
       bits = next_temp(wfn)
       emit_wire_bitcast_f64_i64(wfn, bits, scls[sj][:raw])
-    fuse_ew_block_store(wfn, blk_reg, (1 + arrs.size() + sj).to_s(), bits)
+    fuse_ew_block_store(wfn, blk_ptr, nslots, 1 + arrs.size() + sj, bits)
     sj += 1
   blk_addr = next_temp(wfn)
-  emit_wire_ta_data_addr(wfn, blk_addr, blk_reg)
+  emit_wire_ptr_to_i64(wfn, blk_addr, blk_ptr)
   if fuse_ew_gpu_eligible?(spec, arrs)
     mtcpu_label = next_label(wfn, "fuse.mtcpu")
     msl_tv = lower_string(ctx, Tungsten:AST:String.new(fuse_ew_msl_kernel(spec, arrs.size())))

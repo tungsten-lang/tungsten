@@ -46,6 +46,24 @@
   << "reuse\tn=" + n.to_s() + "\titers=" + iters.to_s() + "\tns_per_iter=" + (elapsed * ~1000000000.0 / iters.to_f()).to_s() + "\tchecksum=" + checksum.to_s()
   checksum
 
+-> run_sin_reuse(n, iters) (i64 i64) i64
+  x = f64[n]
+  i = 0 ## i64
+  while i < n
+    x[i] = (i + ~0.0) * ~0.00001
+    i += 1
+
+  y = (x .* ~2.0 .+ ~0.5).sin() .+ ~0.1 ## reuse
+  k = 0 ## i64
+  t0 = clock()
+  while k < iters
+    y = (x .* ~2.0 .+ ~0.5).sin() .+ ~0.1 ## reuse
+    k += 1
+  elapsed = clock() - t0
+  checksum = (y[0] * ~1000000.0).to_i() + (y[n - 1] * ~1000000.0).to_i()
+  << "sin_reuse\tn=" + n.to_s() + "\titers=" + iters.to_s() + "\tns_per_iter=" + (elapsed * ~1000000000.0 / iters.to_f()).to_s() + "\tchecksum=" + checksum.to_s()
+  checksum
+
 args = argv()
 n = args.size() > 0 ? args[0].to_i() : 32768
 iters = args.size() > 1 ? args[1].to_i() : 500
@@ -53,5 +71,7 @@ mode = args.size() > 2 ? args[2] : "reuse"
 
 if mode == "fresh"
   run_fresh(n, iters)
+elsif mode == "sin_reuse"
+  run_sin_reuse(n, iters)
 else
   run_reuse(n, iters)

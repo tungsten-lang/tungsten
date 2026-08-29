@@ -3766,8 +3766,12 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   mt_label = next_label(wfn, "fuse.mt")
   st_label = next_label(wfn, "fuse.st")
   done_label = next_label(wfn, "fuse.done")
+  # Libm-heavy trees amortize worker activation at smaller shapes and scale to
+  # the full pool sooner than bandwidth-bound arithmetic trees. The runtime's
+  # measured threshold table uses this one-bit work class.
+  work_class = spec[:libm] > 0 ? "1" : "0"
   mt_reg = next_temp(wfn)
-  emit_wire_call_direct_i64(wfn, nil, [size_reg], nil, nil, "w_fused_should_mt", nil, nil, mt_reg)
+  emit_wire_call_direct_i64(wfn, nil, [size_reg, work_class], nil, nil, "w_fused_should_mt", nil, nil, mt_reg)
   mt_cmp = next_temp(wfn)
   emit_wire_icmp_i64(wfn, mt_reg, "ne", "0", mt_cmp)
   emit_wire_cond_br(wfn, mt_cmp, st_label, nil, mt_label)
@@ -3803,7 +3807,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   fn_addr = next_temp(wfn)
   emit_wire_fn_addr_i64(wfn, worker_name, fn_addr)
   run_reg = next_temp(wfn)
-  emit_wire_call_direct_i64(wfn, nil, [fn_addr, blk_addr, size_reg], nil, nil, "w_fused_parallel_run", nil, nil, run_reg)
+  emit_wire_call_direct_i64(wfn, nil, [fn_addr, blk_addr, size_reg, work_class], nil, nil, "w_fused_parallel_run", nil, nil, run_reg)
   emit_wire_br(wfn, done_label, nil, nil)
 
   start_block(wfn, st_label)

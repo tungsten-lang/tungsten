@@ -58,20 +58,28 @@ vector loop.)
 
 Each fused site also outlines its loop body into a worker
 (`__w_fuse_worker_N(blk, lo, hi)`) and gates on the runtime array size
-(`w_fused_should_mt` / `w_fused_parallel_run` in runtime.c). The ladder
-comes from a measured size sweep (M-series, sin-chain, spawn-per-call
-pthreads):
+(`w_fused_should_mt` / `w_fused_parallel_run` in runtime.c). Workers are
+kept in the runtime's persistent arithmetic pool; the caller computes one
+static range while parked workers compute the others. Nested fused dispatch
+stays inline and an occupied pool falls back locally, so parallel callers do
+not deadlock or serialize behind a global queue.
 
-| n | backend | why |
-|---|---------|-----|
-| < 32k | inline single-core loop | thread spawn+join floor (~30–60 µs) dominates |
-| 32k – 128k | 4 threads | past the spawn floor, memory system not yet saturated |
-| ≥ 128k | 8 threads | full core count pays from here |
+The compiler passes a one-bit work class because the measured crossovers are
+different for bandwidth-bound arithmetic and libm-heavy trees:
 
-Env overrides: `TUNGSTEN_FUSED_MT_MIN`, `TUNGSTEN_FUSED_T8_MIN`,
-`TUNGSTEN_FUSED_THREADS` (≤1 disables threading). Results are
-bit-identical across tiers — threads compute disjoint ranges of the
-same typed loop.
+| tree | single core | 4 threads | 8 threads |
+|---|---:|---:|---:|
+| arithmetic | < 8k | 8k – 2M | ≥ 2M |
+| libm-heavy | < 4k | 4k – 128k | ≥ 128k |
+
+These are conservative M5 Max persistent-pool crossovers from matched i64
+arithmetic and f64 sin-chain sweeps. Env overrides:
+`TUNGSTEN_FUSED_MT_MIN`, `TUNGSTEN_FUSED_HEAVY_MT_MIN`,
+`TUNGSTEN_FUSED_T8_MIN`, `TUNGSTEN_FUSED_HEAVY_T8_MIN`, and
+`TUNGSTEN_FUSED_THREADS` (≤1 disables threading). The general threshold
+overrides also set the heavy threshold unless its dedicated override is
+present. Results are bit-identical across tiers — threads compute disjoint
+ranges of the same typed loop.
 
 Fusion also covers f32 (and mixed f32/f64) trees with kernel-exact
 dtype semantics: a DOT op inherits its lhs dtype, and the array

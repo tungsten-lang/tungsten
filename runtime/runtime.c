@@ -62677,33 +62677,50 @@ WValue w_elementwise_size_check(WValue lhs, WValue rhs) {
  * threshold the loop runs inline single-core; at/above it,
  * w_fused_parallel_run partitions [0, n) across OS threads.
  *
- * Thresholds are from the measured sweep in doc/scientific-computing/
- * fusion.md (M-series, sin-chain): single-core wins below ~32k elements
- * (pthread spawn+join floor ~30-60us), 4 threads win 32k-128k, 8 from
- * ~128k up. Env overrides: TUNGSTEN_FUSED_MT_MIN, TUNGSTEN_FUSED_T8_MIN,
- * TUNGSTEN_FUSED_THREADS (<=1 disables threading entirely). */
+ * Thresholds are from the measured persistent-pool sweep in
+ * doc/scientific-computing/fusion.md. Cheap arithmetic and libm-heavy trees
+ * use separate ladders because worker wake cost and per-element work move
+ * both crossovers substantially. Env overrides: TUNGSTEN_FUSED_MT_MIN,
+ * TUNGSTEN_FUSED_HEAVY_MT_MIN, TUNGSTEN_FUSED_T8_MIN,
+ * TUNGSTEN_FUSED_HEAVY_T8_MIN, and TUNGSTEN_FUSED_THREADS (<=1 disables
+ * threading entirely). */
 
 typedef int64_t (*WFusedWorkerFn)(int64_t blk, int64_t lo, int64_t hi);
 
 static int64_t w_fused_mt_min_v = -1;
+static int64_t w_fused_heavy_mt_min_v = -1;
 static int64_t w_fused_t8_min_v = -1;
+static int64_t w_fused_heavy_t8_min_v = -1;
 static int64_t w_fused_max_threads_v = -1;
+static pthread_once_t w_fused_thresholds_once = PTHREAD_ONCE_INIT;
 
 static void w_fused_init_thresholds(void) {
-    if (w_fused_mt_min_v >= 0) return;
     const char *e;
-    int64_t mt_min = 32768, t8_min = 131072, max_t = 8;
-    if ((e = getenv("TUNGSTEN_FUSED_MT_MIN")) && *e) mt_min = strtoll(e, NULL, 10);
-    if ((e = getenv("TUNGSTEN_FUSED_T8_MIN")) && *e) t8_min = strtoll(e, NULL, 10);
+    int64_t mt_min = 8192, heavy_mt_min = 4096;
+    int64_t t8_min = 2097152, heavy_t8_min = 131072, max_t = 8;
+    if ((e = getenv("TUNGSTEN_FUSED_MT_MIN")) && *e) {
+        mt_min = strtoll(e, NULL, 10);
+        heavy_mt_min = mt_min;
+    }
+    if ((e = getenv("TUNGSTEN_FUSED_HEAVY_MT_MIN")) && *e)
+        heavy_mt_min = strtoll(e, NULL, 10);
+    if ((e = getenv("TUNGSTEN_FUSED_T8_MIN")) && *e) {
+        t8_min = strtoll(e, NULL, 10);
+        heavy_t8_min = t8_min;
+    }
+    if ((e = getenv("TUNGSTEN_FUSED_HEAVY_T8_MIN")) && *e)
+        heavy_t8_min = strtoll(e, NULL, 10);
     if ((e = getenv("TUNGSTEN_FUSED_THREADS")) && *e) max_t = strtoll(e, NULL, 10);
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
     if (ncpu > 0 && max_t > ncpu) max_t = ncpu;
     if (max_t > 16) max_t = 16;
     if (max_t < 1) max_t = 1;
     w_fused_t8_min_v = t8_min;
+    w_fused_heavy_t8_min_v = heavy_t8_min;
     w_fused_max_threads_v = max_t;
     /* max_t <= 1 disables the parallel path entirely (should_mt never fires) */
     w_fused_mt_min_v = (max_t <= 1) ? INT64_MAX : mt_min;
+    w_fused_heavy_mt_min_v = (max_t <= 1) ? INT64_MAX : heavy_mt_min;
 }
 
 /* ## reuse on a fused expression: per-site persistent output buffer.
@@ -62726,9 +62743,11 @@ WValue w_fused_out_reuse_or_new(WValue *slot, int64_t element_bits, int64_t n) {
     return v;
 }
 
-int64_t w_fused_should_mt(int64_t n) {
-    w_fused_init_thresholds();
-    return n >= w_fused_mt_min_v ? 1 : 0;
+int64_t w_fused_should_mt(int64_t n, int64_t work_class) {
+    pthread_once(&w_fused_thresholds_once, w_fused_init_thresholds);
+    int64_t threshold = work_class ? w_fused_heavy_mt_min_v
+                                   : w_fused_mt_min_v;
+    return n >= threshold ? 1 : 0;
 }
 
 typedef struct {
@@ -62736,16 +62755,34 @@ typedef struct {
     int64_t blk, lo, hi;
 } WFusedPart;
 
-static void *w_fused_part_main(void *p) {
+static _Thread_local int w_fused_parallel_depth;
+
+static void w_fused_part_run(void *p) {
     WFusedPart *a = (WFusedPart *)p;
+    w_fused_parallel_depth++;
     a->fn(a->blk, a->lo, a->hi);
+    w_fused_parallel_depth--;
+}
+
+static void *w_fused_part_main(void *p) {
+    w_fused_part_run(p);
     return NULL;
 }
 
-int64_t w_fused_parallel_run(int64_t fn_addr, int64_t blk, int64_t n) {
-    w_fused_init_thresholds();
+int64_t w_fused_parallel_run(int64_t fn_addr, int64_t blk, int64_t n,
+                             int64_t work_class) {
+    pthread_once(&w_fused_thresholds_once, w_fused_init_thresholds);
     WFusedWorkerFn fn = (WFusedWorkerFn)(uintptr_t)fn_addr;
-    int64_t nt = (n >= w_fused_t8_min_v) ? 8 : 4;
+    /* A fused dispatch reached from one of our own workers must stay inline:
+     * submitting recursively would either deadlock on the occupied pool or
+     * multiply the active thread count. */
+    if (w_fused_parallel_depth) {
+        fn(blk, 0, n);
+        return 0;
+    }
+    int64_t t8_min = work_class ? w_fused_heavy_t8_min_v
+                                : w_fused_t8_min_v;
+    int64_t nt = (n >= t8_min) ? 8 : 4;
     if (nt > w_fused_max_threads_v) nt = w_fused_max_threads_v;
     if (nt <= 1 || n < nt) {
         fn(blk, 0, n);
@@ -62759,16 +62796,28 @@ int64_t w_fused_parallel_run(int64_t fn_addr, int64_t blk, int64_t n) {
         parts[t].lo = n * t / nt;
         parts[t].hi = n * (t + 1) / nt;
     }
+    /* Reuse the runtime's tuned persistent arithmetic pool. Its submit lock
+     * is nonblocking, so an independent concurrent caller falls back to the
+     * local pthread path instead of serializing behind another operation.
+     * Larger opt-in thread counts keep the old path because the shared pool
+     * is deliberately sized to its widest regular consumer. */
+    if (nt <= BN_POOL_TASKS_MAX) {
+        void *args[BN_POOL_TASKS_MAX];
+        for (int64_t t = 0; t < nt; t++) args[t] = &parts[t];
+        bn_pool_run_tasks(w_fused_part_run, args, (int)nt,
+                          BN_TOOM_POOL_SPIN);
+        return 0;
+    }
     /* Partition 0 runs on the calling thread — one fewer spawn. */
     for (int64_t t = 1; t < nt; t++) {
         if (pthread_create(&th[t], NULL, w_fused_part_main, &parts[t]) != 0) {
             /* Spawn failure: run the remainder inline. */
-            for (int64_t u = t; u < nt; u++) fn(blk, parts[u].lo, parts[u].hi);
+            for (int64_t u = t; u < nt; u++) w_fused_part_run(&parts[u]);
             nt = t;
             break;
         }
     }
-    fn(blk, parts[0].lo, parts[0].hi);
+    w_fused_part_run(&parts[0]);
     for (int64_t t = 1; t < nt; t++) pthread_join(th[t], NULL);
     return 0;
 }

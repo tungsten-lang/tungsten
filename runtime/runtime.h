@@ -2014,6 +2014,10 @@ int64_t w_fused_parallel_run(int64_t fn_addr, int64_t blk, int64_t n,
                              int64_t work_class);
 /* ## reuse fused-output slot (per-site persistent buffer). */
 WValue w_fused_out_reuse_or_new(WValue *slot, int64_t element_bits, int64_t n);
+/* Compiler-proven unique local destination; reuses the value's owned buffer
+ * when its element width and capacity match, otherwise allocates fresh. */
+WValue w_fused_out_reuse_value_or_new(WValue old, int64_t element_bits,
+                                      int64_t n);
 /* T[N] constructor — size==cap, calloc-zeroed slots ready to
  * read. Callers that want the legacy "cap N, push to fill" semantics use
  * Array.new(ebits, cap: N) (lowers to w_array_new). */

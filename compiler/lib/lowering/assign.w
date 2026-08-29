@@ -886,7 +886,26 @@
       emit_store_global_unless_const(wfn, ctx, name, boxed)
     return typed_value(raw_float_value_type(target_type), raw_val)
 
+  # The scope analysis marked this exact reassignment only after proving that
+  # the old typed-array result is unique and dies here. Hand its current value
+  # to the top-level fused RHS. The analysis also marks that exact RHS node,
+  # so a non-fusable outer expression cannot accidentally reuse the
+  # destination in a nested subtree.
+  auto_reuse_set = false
+  if ast_kind(target) == :var && ast_get(node, :auto_reuse_safe) == true
+    old_value = ctx[:bindings][name]
+    if old_value == nil
+      old_ptr = wfn[:var_slots][name]
+      if old_ptr != nil
+        old_value = next_temp(wfn)
+        emit_wire_load_i64(wfn, old_ptr, old_value)
+    if old_value != nil
+      ctx[:fused_reuse_value] = old_value
+      auto_reuse_set = true
+
   val = lower_expression(ctx, node.value)
+  if auto_reuse_set
+    ctx[:fused_reuse_value] = nil
   if hint_array_etype == "f64" || hint_array_etype == "f32"
     if target_type == typed_array_etype_to_sym(hint_array_etype)
       if val[:type] != target_type

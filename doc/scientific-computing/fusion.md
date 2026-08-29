@@ -86,12 +86,29 @@ dtype semantics: a DOT op inherits its lhs dtype, and the array
 math.h-backed methods (sin/cos/sqrt/exp/log/tan) promote to f64 output (`array_map_f64` allocates f64
 regardless of input).
 
-**`## reuse` output buffers — the big allocation lever.** A fused
-expression allocates a fresh result array per execution; in a loop
-that's a calloc plus page fault-in every iteration. `y = <fused expr>
-## reuse` (same user-assertion contract as `f64[n] ## reuse`) gives the
-site a persistent output buffer instead. Measured on the 2-input f32
-chain, CPU ladder, ms/iter — 1.3–4× at every size:
+**Output-buffer reuse — the big allocation lever.** A fused expression
+normally allocates a fresh result array per execution. For an ordinary local
+reassignment, the compiler now consumes the old allocation automatically when
+its lexical-scope analysis proves a fresh array seed, pure fused updates, and
+no alias, capture, argument, store, return, or unknown use. Read-only `[]`,
+`size`, and `length` uses are allowed. A runtime guard still requires an owned
+array with matching element width and sufficient capacity; otherwise it
+allocates fresh. The reused output may also be an input to the expression, so
+that path deliberately omits fresh-output noalias metadata.
+
+`## reuse` remains the explicit user-assertion contract for cases the static
+proof cannot establish, and gives the site a persistent output buffer just as
+`f64[n] ## reuse` does. In `runtime_overheads.w`, 11 alternating single-thread
+pairs on an M5 Max measured ordinary reassignment before/after automatic reuse:
+
+| n | fresh allocation | automatic reuse | speedup |
+|---:|-----------------:|----------------:|--------:|
+| 32k | 16.8 us | 9.3 us | 1.80x |
+| 128k | 70.5 us | 39.8 us | 1.77x |
+| 1M | 514.4 us | 299.3 us | 1.72x |
+
+The explicit form remains useful for long-lived sites and measured on the
+2-input f32 chain, CPU ladder, ms/iter — 1.3–4× at every size:
 
 | n | fresh out | `## reuse` |
 |---|-----------|------------|

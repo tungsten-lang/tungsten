@@ -2158,6 +2158,135 @@
   st[:ok] = false
   nil
 
+# ==== Automatic fused-array destination reuse ====
+#
+# A reassigned fused result can consume its old output buffer when that value
+# is unique. This pass deliberately proves a narrow, useful shape:
+#
+#   y = <fresh typed-array expression>       # direct dominating seed
+#   ...
+#   while ...
+#     y = <pure elementwise tree>            # old y dies here
+#
+# Every other use of y in the lexical scope must be a read-only []/size/length
+# receiver use or one of those update RHS trees. A bare copy, call argument,
+# capture, store, return, or unknown use rejects the candidate. The seed and
+# each update are pure dot/libm trees, so they cannot retain an alias; the
+# first result is fresh and uniqueness is preserved inductively. This is the
+# array analogue of mutate-if-unique, kept separate because arrays have no
+# shared-bit/refcount fallback if the static proof is wrong.
+
+-> fused_reuse_tree?(node)
+  if node == nil || !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k in (:var :int :float)
+    return true
+  if k == :binary_op && node.op in (:DOT_PLUS :DOT_MINUS :DOT_STAR :DOT_SLASH :DOT_PIPE :DOT_AMP :DOT_CARET :DOT_LSHIFT :DOT_RSHIFT :PLUS :MINUS :STAR :SLASH :PERCENT :PIPE :AMPERSAND :CARET :LSHIFT :RSHIFT)
+    return fused_reuse_tree?(node.left) && fused_reuse_tree?(node.right)
+  if k == :call && node.receiver != nil && node.name in ("sin" "cos" "sqrt" "exp" "log" "tan")
+    argc = node.args == nil ? 0 : node.args.size()
+    return argc == 0 && node.block == nil && fused_reuse_tree?(node.receiver)
+  false
+
+-> fused_reuse_seed?(node)
+  if node == nil || !is_ast_node?(node) || ast_get(node, :reuse_safe) == true || ast_get(node, :recycle_safe) == true
+    return false
+  k = ast_kind(node)
+  if k in (:typed_array_new :typed_array)
+    return true
+  # Leaves and ordinary scalar arithmetic are valid *inside* a fused tree,
+  # but are not fresh array seeds. In particular, `y = x` must never start
+  # the uniqueness induction: x would retain an alias to the reused buffer.
+  if k == :binary_op && node.op in (:DOT_PLUS :DOT_MINUS :DOT_STAR :DOT_SLASH :DOT_PIPE :DOT_AMP :DOT_CARET :DOT_LSHIFT :DOT_RSHIFT)
+    return fused_reuse_tree?(node)
+  if k == :call && node.receiver != nil && node.name in ("sin" "cos" "sqrt" "exp" "log" "tan")
+    argc = node.args == nil ? 0 : node.args.size()
+    return argc == 0 && node.block == nil && fused_reuse_tree?(node.receiver)
+  false
+
+-> fused_reuse_walk(node, var_name, st)
+  if node == nil || st[:ok] != true
+    return nil
+  if !is_ast_node?(node)
+    if type(node) == "Array"
+      i = 0
+      while i < node.size()
+        fused_reuse_walk(node[i], var_name, st)
+        i += 1
+    return nil
+  k = ast_kind(node)
+  # Nested definitions open another lexical scope. A block does not, and the
+  # generic schema walk below sees a captured bare var and rejects it.
+  if k in (:method_def :fn_def :class_def :module_def :trait_def :gpu_kernel_def)
+    return nil
+  if k == :assign
+    target = node.target
+    if target != nil && is_ast_node?(target) && ast_kind(target) == :var && target.name == var_name
+      st[:assigns] = st[:assigns] + 1
+      if st[:assigns] == 1
+        if !fused_reuse_seed?(node.value)
+          st[:ok] = false
+      else
+        if ast_get(node.value, :reuse_safe) == true || !fused_reuse_tree?(node.value)
+          st[:ok] = false
+        else
+          st[:updates].push(node)
+      return nil
+  if k == :call
+    recv = node.receiver
+    if recv != nil && is_ast_node?(recv) && ast_kind(recv) == :var && recv.name == var_name
+      if node.block == nil && node.name in ("[]" "\[]" "size" "length")
+        fused_reuse_walk(node.args, var_name, st)
+        return nil
+      st[:ok] = false
+      return nil
+  if k == :var && node.name == var_name
+    st[:ok] = false
+    return nil
+
+  kid = kind_id_table[k]
+  if kid == nil
+    st[:ok] = false
+    return nil
+  keys = slab_keys_table[kid]
+  if keys == nil
+    st[:ok] = false
+    return nil
+  i = 0
+  while i < keys.size()
+    fused_reuse_walk(ast_get(node, keys[i]), var_name, st)
+    i += 1
+  nil
+
+# Mark only reassignments; the first assignment must allocate the unique seed.
+-> mark_fused_reuse_assignments(body)
+  if body == nil || type(body) != "Array"
+    return nil
+  seeds = []
+  i = 0
+  while i < body.size()
+    node = body[i]
+    if node != nil && is_ast_node?(node) && ast_kind(node) == :assign
+      target = node.target
+      if target != nil && is_ast_node?(target) && ast_kind(target) == :var && fused_reuse_seed?(node.value)
+        seeds.push({name: target.name, node: node})
+    i += 1
+
+  si = 0
+  while si < seeds.size()
+    candidate = seeds[si]
+    st = {ok: true, assigns: 0, updates: []}
+    fused_reuse_walk(body, candidate[:name], st)
+    if st[:ok] == true && st[:assigns] > 1 && st[:updates].size() > 0
+      ui = 0
+      while ui < st[:updates].size()
+        ast_set(st[:updates][ui], :auto_reuse_safe, true)
+        ast_set(st[:updates][ui].value, :auto_reuse_target, true)
+        ui += 1
+    si += 1
+  nil
+
 # ==== Mutate-if-unique accumulator analysis (E4 stage 1) ====
 #
 # A local qualifies when every value it ever holds is provably safe to

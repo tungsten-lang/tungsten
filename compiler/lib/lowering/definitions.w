@@ -814,6 +814,8 @@
         new_fn[:embedded_asm] = embedded[1]
       return nil
 
+  mark_fused_reuse_assignments(body)
+
   needs_block_return = analysis[:needs_block_return]
   if needs_block_return
     new_fn[:result_slot] = "%__block_return_result"
@@ -1976,6 +1978,7 @@
       else
         kernel_fn[:embedded_asm] = embedded[1]
       return nil
+  mark_fused_reuse_assignments(body)
   # Monomorphization override — uses a mangled fn name and pre-types
   # __self so dispatch in the body picks up the variant (e.g. typed_array_u8
   # → :typed_array_get_inline instead of method_call_dispatch).

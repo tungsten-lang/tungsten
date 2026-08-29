@@ -62743,6 +62743,24 @@ WValue w_fused_out_reuse_or_new(WValue *slot, int64_t element_bits, int64_t n) {
     return v;
 }
 
+/* Compiler-proven unique fused destination. Unlike the explicit ## reuse
+ * site slot, ownership travels in the value currently bound to the local.
+ * Fail closed at runtime for a changed representation, element width, view,
+ * or insufficient capacity; the ordinary fresh allocation remains correct. */
+WValue w_fused_out_reuse_value_or_new(WValue old, int64_t element_bits,
+                                      int64_t n) {
+    if (old != W_NIL && w_is_array(old)) {
+        WArray *a = w_as_array(old);
+        if ((a->flags & W_FLAG_OWNED) && a->ebits == (int8_t)element_bits &&
+            a->cap >= n) {
+            a->start = 0;
+            a->size = (int32_t)n;
+            return old;
+        }
+    }
+    return w_array_new_uninit_sized(element_bits, n);
+}
+
 int64_t w_fused_should_mt(int64_t n, int64_t work_class) {
     pthread_once(&w_fused_thresholds_once, w_fused_init_thresholds);
     int64_t threshold = work_class ? w_fused_heavy_mt_min_v

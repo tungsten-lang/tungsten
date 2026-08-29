@@ -3740,6 +3740,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_wire_call_direct_i64(wfn, nil, [arr0[:reg], arrs[ai][:reg]], nil, nil, "w_elementwise_size_check", nil, nil, chk)
     ai += 1
   out_reg = next_temp(wfn)
+  # Scope analysis can prove that the value currently bound to the assignment
+  # target is a unique, dying typed array. Consume that allocation only for
+  # the exact top-level RHS node that was marked; nested fused subexpressions
+  # in an otherwise non-fusable RHS are deliberately ineligible.
+  auto_reuse = ctx[:fused_reuse_value] != nil && ast_get(node, :auto_reuse_target) == true
   # `y = <fused expr> ## reuse` — per-site persistent output buffer (same
   # user-assertion contract as `f64[n] ## reuse`). A stable output base
   # also lets the GPU tier cache its zero-copy wrap across executions.
@@ -3749,6 +3754,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     rs_name = "reuse.site." + rs_id.to_s()
     ctx[:mod][:reuse_sites].push(rs_name)
     emit_wire_call_fused_out_reuse(wfn, fuse_ew_alloc_bits(odt), size_reg, rs_name, out_reg)
+  elsif auto_reuse
+    emit_wire_call_direct_i64(wfn, nil, [ctx[:fused_reuse_value], fuse_ew_alloc_bits(odt), size_reg], nil, nil, "w_fused_out_reuse_value_or_new", nil, nil, out_reg)
   else
     emit_wire_call_direct_i64(wfn, nil, [fuse_ew_alloc_bits(odt), size_reg], nil, nil, "w_array_new_uninit_sized", nil, nil, out_reg)
 
@@ -3757,9 +3764,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     sid = 0
   ctx[:mod][:next_fuse_site] = sid + 1
   # Scoped no-alias metadata only where the output is THIS SITE's fresh
-  # malloc; a `## reuse` buffer persists across calls, so skip it there.
+  # malloc. A `## reuse` buffer persists across calls, and automatic reuse
+  # may intentionally alias an RHS leaf (`y = y .* 2 .+ 1`), so skip it on
+  # both reuse paths.
   ewsid = nil
-  if ast_get(node, :reuse_safe) != true
+  if ast_get(node, :reuse_safe) != true && !auto_reuse
     ewsid = sid
   worker_name = fuse_ew_build_worker(ctx, spec, arrs, scls, odt, sid, spec[:mode], ewsid)
 

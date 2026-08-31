@@ -42,6 +42,22 @@ fn sgemm(a, b, c, m, n, k)
 fn dgemm(a, b, c, m, n, k)
   ccall("w_blas_dgemm_nn", a, b, c, m, n, k)
 
+# LAPACK (classic Accelerate interface), row-major f64 buffers. All three
+# CLOBBER their matrix argument with the factorization — pass scratch.
+# Declared `->` (mutators must never ride `fn` memoization).
+# Solve A x = b in place: b becomes x; returns 0, or k > 0 when singular.
+-> lapack_solve(a, b, n)
+  ccall("w_blas_dgesv_rowmajor", a, b, n)
+
+# Determinant via LU (buffer clobbered); returns a Float.
+-> lapack_det(a, n)
+  ccall("w_blas_dget_det", a, n)
+
+# In-place lower Cholesky factor of an SPD matrix; returns 0, or k > 0
+# when the leading k-th minor is not positive definite.
+-> lapack_cholesky_lower(a, n)
+  ccall("w_blas_dpotrf_lower", a, n)
+
 # Fixed-size 4×4 f32 matrix multiply via NEON `<4 x float>` SIMD.
 # Avoids Accelerate's ~20-100 ns per-call dispatch floor — does the
 # entire 128-flop matmul in ~10-30 ns by keeping all 16 floats in

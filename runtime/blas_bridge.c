@@ -51,6 +51,69 @@ WValue w_blas_dgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
     return c_wval;
 }
 
+/* ---- LAPACK (classic interface; same AMX-tuned Accelerate path) ----
+ *
+ * All three take ROW-MAJOR f64 buffers. LAPACK is column-major, so the
+ * buffer is handed over as-is and interpreted as the TRANSPOSE:
+ *   - solve: dgetrf factors A^T, then dgetrs with trans='T' solves
+ *     (A^T)^T x = A x = b. No transpose copy anywhere.
+ *   - det: det(A^T) = det(A); product of U's diagonal, sign from pivots.
+ *   - cholesky: A symmetric, so the buffer IS A either way; uplo='U'
+ *     computes U_cm with U^T U = A, and reading the buffer row-major
+ *     yields exactly the lower factor L = U^T with L L^T = A.
+ * The matrix argument is CLOBBERED (LU / Cholesky factors). */
+
+WValue w_blas_dgesv_rowmajor(WValue a_wval, WValue b_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    double *Ap = (double *)a->slots + a->start;
+    double *Bp = (double *)b->slots + b->start;
+    __CLPK_integer info = 0, nrhs = 1;
+    __CLPK_integer *ipiv = (__CLPK_integer *)malloc(sizeof(__CLPK_integer) * (size_t)(n > 0 ? n : 1));
+    dgetrf_(&n, &n, Ap, &n, ipiv, &info);
+    if (info == 0)
+        dgetrs_("T", &n, &nrhs, Ap, &n, ipiv, Bp, &n, &info);
+    free(ipiv);
+    return w_int((int64_t)info);
+}
+
+WValue w_blas_dget_det(WValue a_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    double *Ap = (double *)a->slots + a->start;
+    __CLPK_integer info = 0;
+    __CLPK_integer *ipiv = (__CLPK_integer *)malloc(sizeof(__CLPK_integer) * (size_t)(n > 0 ? n : 1));
+    dgetrf_(&n, &n, Ap, &n, ipiv, &info);
+    double det = 1.0;
+    if (info > 0) {
+        det = 0.0; /* singular: a zero pivot appeared */
+    } else {
+        for (__CLPK_integer i = 0; i < n; i++) {
+            det *= Ap[(size_t)i * (size_t)n + (size_t)i];
+            if (ipiv[i] != i + 1)
+                det = -det;
+        }
+    }
+    free(ipiv);
+    return w_float(det);
+}
+
+WValue w_blas_dpotrf_lower(WValue a_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    double *Ap = (double *)a->slots + a->start;
+    __CLPK_integer info = 0;
+    dpotrf_("U", &n, Ap, &n, &info);
+    if (info == 0) {
+        /* zero the strictly-upper (row-major) part the factor leaves untouched */
+        for (__CLPK_integer i = 0; i < n; i++)
+            for (__CLPK_integer j = i + 1; j < n; j++)
+                Ap[(size_t)i * (size_t)n + (size_t)j] = 0.0;
+    }
+    return w_int((int64_t)info);
+}
+
 /* ---- vDSP reductions over an f32 array (whole array, start-offset aware) ----
  * n<=0 ⇒ operate over the array's full length. All return a boxed Float. */
 static inline float *blas_f32_ptr(WValue v, int64_t *len_out) {
@@ -198,6 +261,51 @@ WValue w_blas_vmul_f32(WValue a_wval, WValue b_wval, WValue out_wval, WValue n_w
     if (lo < mn) mn = lo;
     if (n <= 0 || n > mn) n = mn;
     vDSP_vmul(a, 1, b, 1, o, 1, (vDSP_Length)n);
+    return out_wval;
+}
+
+static double *blas_f64_ptr(WValue v, int64_t *len_out);
+
+/* Elementwise binop over contiguous buffers: kind 0=add 1=sub 2=mul 3=div.
+ * NOTE vDSP's vsub/vdiv take operands REVERSED (vDSP_vsub(B,..,A,..,C) is
+ * C = A - B); both call sites below pass (b, a) to preserve a-op-b. */
+WValue w_blas_ew_f32(WValue k_wval, WValue a_wval, WValue b_wval, WValue out_wval, WValue n_wval) {
+    int64_t la, lb, lo;
+    float *a = blas_f32_ptr(a_wval, &la);
+    float *b = blas_f32_ptr(b_wval, &lb);
+    float *o = blas_f32_ptr(out_wval, &lo);
+    int64_t n = w_as_int(n_wval);
+    int64_t kind = w_as_int(k_wval);
+    int64_t mn = la < lb ? la : lb;
+    if (lo < mn) mn = lo;
+    if (n <= 0 || n > mn) n = mn;
+    switch (kind) {
+    case 0: vDSP_vadd(a, 1, b, 1, o, 1, (vDSP_Length)n); break;
+    case 1: vDSP_vsub(b, 1, a, 1, o, 1, (vDSP_Length)n); break;
+    case 2: vDSP_vmul(a, 1, b, 1, o, 1, (vDSP_Length)n); break;
+    case 3: vDSP_vdiv(b, 1, a, 1, o, 1, (vDSP_Length)n); break;
+    default: break;
+    }
+    return out_wval;
+}
+
+WValue w_blas_ew_f64(WValue k_wval, WValue a_wval, WValue b_wval, WValue out_wval, WValue n_wval) {
+    int64_t la, lb, lo;
+    double *a = blas_f64_ptr(a_wval, &la);
+    double *b = blas_f64_ptr(b_wval, &lb);
+    double *o = blas_f64_ptr(out_wval, &lo);
+    int64_t n = w_as_int(n_wval);
+    int64_t kind = w_as_int(k_wval);
+    int64_t mn = la < lb ? la : lb;
+    if (lo < mn) mn = lo;
+    if (n <= 0 || n > mn) n = mn;
+    switch (kind) {
+    case 0: vDSP_vaddD(a, 1, b, 1, o, 1, (vDSP_Length)n); break;
+    case 1: vDSP_vsubD(b, 1, a, 1, o, 1, (vDSP_Length)n); break;
+    case 2: vDSP_vmulD(a, 1, b, 1, o, 1, (vDSP_Length)n); break;
+    case 3: vDSP_vdivD(b, 1, a, 1, o, 1, (vDSP_Length)n); break;
+    default: break;
+    }
     return out_wval;
 }
 

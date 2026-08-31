@@ -39,6 +39,41 @@
     m = LinAlg.rows(a)
     k = LinAlg.cols(a)
     n = LinAlg.cols(b)
+    if m >= LinAlg.lapack_cutoff && k >= LinAlg.lapack_cutoff && n >= LinAlg.lapack_cutoff
+      fa = ccall("w_array_new_aligned", -64, m * k)
+      i = 0
+      while i < m
+        row = a[i]
+        base = i * k
+        j = 0
+        while j < k
+          fa[base + j] = row[j] + ~0.0
+          j = j + 1
+        i = i + 1
+      fb = ccall("w_array_new_aligned", -64, k * n)
+      i = 0
+      while i < k
+        row = b[i]
+        base = i * n
+        j = 0
+        while j < n
+          fb[base + j] = row[j] + ~0.0
+          j = j + 1
+        i = i + 1
+      fc = ccall("w_array_new_aligned", -64, m * n)
+      ccall("w_blas_dgemm_nn", fa, fb, fc, m, n, k)
+      out = []
+      i = 0
+      while i < m
+        row = []
+        base = i * n
+        j = 0
+        while j < n
+          row.push(fc[base + j])
+          j = j + 1
+        out.push(row)
+        i = i + 1
+      return out
     out = LinAlg.zeros(m, n)
     i = 0
     while i < m
@@ -66,8 +101,44 @@
     Math.sqrt(LinAlg.dot(v, v))
 
   # GE with partial pivoting: A n×n nested, b length n → x length n
+  # ---- flat f64 staging for the Accelerate/LAPACK fast paths ----
+  # The list-of-rows representation stays the public contract; a square
+  # matrix above this size is staged into a flat row-major f64 buffer, the
+  # AMX-tuned LAPACK/BLAS call runs, and the result is unstaged. Below the
+  # cutoff the pure paths win (they avoid the ccall + staging fixed cost).
+  -> .lapack_cutoff
+    8
+
+  -> .flatten_square(a, n)
+    flat = ccall("w_array_new_aligned", -64, n * n)
+    i = 0
+    while i < n
+      row = a[i]
+      base = i * n
+      j = 0
+      while j < n
+        flat[base + j] = row[j] + ~0.0
+        j = j + 1
+      i = i + 1
+    flat
+
   -> .solve(a, b)
     n = LinAlg.rows(a)
+    if n >= LinAlg.lapack_cutoff
+      flat = LinAlg.flatten_square(a, n)
+      rhs = ccall("w_array_new_aligned", -64, n)
+      i = 0
+      while i < n
+        rhs[i] = b[i] + ~0.0
+        i = i + 1
+      info = ccall("w_blas_dgesv_rowmajor", flat, rhs, n)
+      raise "LinAlg.solve: singular" if info != 0
+      x = []
+      i = 0
+      while i < n
+        x = x.push(rhs[i])
+        i = i + 1
+      return x
     aw = LinAlg.copy_mat(a)
     bw = []
     i = 0
@@ -139,6 +210,8 @@
 
   -> .det(a)
     n = LinAlg.rows(a)
+    if n >= LinAlg.lapack_cutoff
+      return ccall("w_blas_dget_det", LinAlg.flatten_square(a, n), n)
     aw = LinAlg.copy_mat(a)
     sign = ~1.0
     k = 0
@@ -181,6 +254,22 @@
 
   -> .cholesky(a)
     n = LinAlg.rows(a)
+    if n >= LinAlg.lapack_cutoff
+      flat = LinAlg.flatten_square(a, n)
+      info = ccall("w_blas_dpotrf_lower", flat, n)
+      raise "LinAlg.cholesky: not SPD" if info != 0
+      out = []
+      i = 0
+      while i < n
+        row = []
+        base = i * n
+        j = 0
+        while j < n
+          row.push(flat[base + j])
+          j = j + 1
+        out.push(row)
+        i = i + 1
+      return out
     L = LinAlg.zeros(n, n)
     i = 0
     while i < n

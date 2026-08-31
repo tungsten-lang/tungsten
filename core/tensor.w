@@ -629,6 +629,14 @@ TENSOR_EW = {}
   # equal or one side is 1 (the 1 stretches). This is a boxed CPU loop —
   # O(size·rank) — a correct reference; GPU elementwise kernels are a follow-up.
 
+  -> .same_shape(sa, sb)
+    return false if sa.size != sb.size
+    k = 0
+    while k < sa.size
+      return false if sa[k] != sb[k]
+      k += 1
+    true
+
   # Broadcasted output shape, or raise if incompatible.
   -> .broadcast_shape(sa, sb)
     ra = sa.size()
@@ -685,11 +693,37 @@ TENSOR_EW = {}
       ai = ai + 1
     coord
 
+  # True when the tensor's data is a plain packed row-major CPU buffer
+  # starting at element 0 — the layout the vDSP fast lane requires.
+  -> packed_cpu?
+    return false if device != :cpu
+    return false if offset != 0
+    ps = Tensor.packed_strides(shape)
+    return false if strides.size != ps.size
+    k = 0
+    while k < ps.size
+      return false if strides[k] != ps[k]
+      k += 1
+    true
+
   # kind: 0=add 1=sub 2=mul 3=div
   -> binop(other, kind)
     if dtype != other.dtype
       raise "Tensor.binop: dtype mismatch"
     result_unit = Tensor.binop_unit(unit, other.unit, kind)
+    # Same-shape packed CPU f32/f64 pairs skip the boxed per-element loop
+    # (which allocates a coordinate array per element) and run one vDSP
+    # call over the raw buffers — identical arithmetic, identical result
+    # layout, ~SIMD-rate instead of ~290 ns/element.
+    if (dtype == 3 || dtype == 64) && Tensor.same_shape(shape, other.shape)
+      if packed_cpu? && other.packed_cpu?
+        fast = Tensor.zeros_like(self, shape, result_unit)
+        total = Tensor.elem_count(shape)
+        if dtype == 3
+          ccall("w_blas_ew_f32", kind, buffer, other.buffer, fast.buffer, total)
+        else
+          ccall("w_blas_ew_f64", kind, buffer, other.buffer, fast.buffer, total)
+        return fast
     oshape = Tensor.broadcast_shape(shape, other.shape)
     result = Tensor.zeros_like(self, oshape, result_unit)
     r = oshape.size()

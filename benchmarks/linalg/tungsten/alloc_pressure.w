@@ -92,6 +92,32 @@ cp = LinAlg.charpoly(small)
 t1 = now_ms
 << "BENCH linalg_charpoly_40 ms=" + (t1 - t0).to_s + " coeffs=" + cp.size.to_s
 
+
+# det + cholesky (pre-LAPACK baselines)
+t0 = now_ms
+d = LinAlg.det(a)
+t1 = now_ms
+<< "BENCH linalg_det_128 ms=" + (t1 - t0).to_s
+
+spd = []
+i = 0
+while i < 96
+  row = []
+  j = 0
+  while j < 96
+    row.push(i == j ? ~96.0 : ~1.0 / (1 + i + j))
+    j += 1
+  spd.push(row)
+  i += 1
+t0 = now_ms
+reps = 0
+l = nil
+while reps < 10
+  l = LinAlg.cholesky(spd)
+  reps += 1
+t1 = now_ms
+<< "BENCH linalg_cholesky_96_x10 ms=" + (t1 - t0).to_s + " l00=" + l[0][0].round(3).to_s
+
 # Tensor#binop: documented boxed per-element loop with per-element coord
 # allocation on the broadcast path.
 ta = Tensor.zeros_cpu(Tensor.f64, [256, 256])
@@ -105,8 +131,12 @@ while i < 256
     j += 1
   i += 1
 t0 = now_ms
-tc = ta + tb
+reps = 0
+tc = nil
+while reps < 50
+  tc = ta + tb
+  reps += 1
 t1 = now_ms
-<< "BENCH tensor_add_256 ms=" + (t1 - t0).to_s
+<< "BENCH tensor_add_256_x50 ms=" + (t1 - t0).to_s + " c00=" + tc.at([0, 0]).round(3).to_s
 
 << "alloc_pressure done"

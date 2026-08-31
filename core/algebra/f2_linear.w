@@ -14,10 +14,10 @@
 # memoized and these mutate their slab argument.
 # Columns are packed 32 to an i64 slot (upper halves stay zero): every bit
 # mask a DYNAMIC caller builds stays inside the small-integer range, so the
-# pack loop can write straight into the slab without a typed-call boundary
-# (measured: a typed-helper call from dynamic context costs ~1.2 us — the
-# generic slow-call path — while a direct dynamic store into an i64[] is
-# nanoseconds; packing through the helper was 318 of the 322 ms total).
+# pack loop can write straight into the slab. (A typed-helper call from
+# dynamic context is ~3 ns on a clean toolchain build — an earlier ~1.2 us
+# measurement here was a stale-binary artifact; the inline form is kept
+# because it is equally fast and dodges nothing.)
 -> f2_slab_bit(st, base, column) (i64[] i64 i64) i64
   (st[base + column / 32] >> (column % 32)) & 1
 

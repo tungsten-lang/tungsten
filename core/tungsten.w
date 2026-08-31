@@ -158,6 +158,7 @@
   auto :SparsePattern,  "sparse_factor"
   auto :SparseAnalysis, "sparse_factor"
   auto :SparseFactor,   "sparse_factor"
+  auto :SparseBlockFactor, "sparse_factor"
   auto :CUDA,         "cuda"
   auto :MAC,          "mac"
   auto :Mutex,        "mutex"

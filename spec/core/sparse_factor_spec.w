@@ -152,6 +152,84 @@ rescue error
   budget_raised = error.to_s.include?("exceeds budget")
 check_named("analysis.budget_raises", budget_raised)
 
+
+# ── S3/S4: components, peeling, ordering, blocked factor ─────────────────
+
+# Two disconnected copies of the grid: components found, blocked solve
+# matches the whole-matrix solve exactly in structure.
+two_ri = []
+two_ci = []
+two_vv = []
+k = 0
+while k < upper_ri.size
+  two_ri.push(upper_ri[k])
+  two_ci.push(upper_ci[k])
+  two_vv.push(upper_vv[k])
+  k += 1
+k = 0
+while k < upper_ri.size
+  two_ri.push(upper_ri[k] + n)
+  two_ci.push(upper_ci[k] + n)
+  two_vv.push(upper_vv[k] * ~2.0)
+  k += 1
+two_pattern = SparsePattern.new(n * 2, n * 2, two_ri, two_ci)
+two_analysis = SparseAnalysis.new(two_pattern)
+check_named("components.count", two_analysis.component_count == 2)
+ids = two_analysis.components
+comp_ok = true
+i = 0
+while i < n
+  comp_ok = false if ids[i] != 0 || ids[i + n] != 1
+  i += 1
+check_named("components.ids", comp_ok)
+
+two_b = []
+i = 0
+while i < n * 2
+  two_b.push(~1.0 + (i % 4) * ~0.5)
+  i += 1
+whole = SparseFactor.cholesky(two_pattern, two_vv)
+x_whole = whole.solve(two_b)
+whole.release
+blocked = SparseBlockFactor.new(two_pattern, two_vv)
+check_named("blocked.ncomp", blocked.ncomp == 2)
+x_blocked = blocked.solve(two_b)
+blocked.release
+err = ~0.0
+i = 0
+while i < n * 2
+  d = x_blocked[i] - x_whole[i]
+  d = ~0.0 - d if d < ~0.0
+  err = d if d > err
+  i += 1
+check_named("blocked.solve.matches_whole", err < ~0.0000001)
+
+# Peeling: a path graph peels completely.
+path_ri = []
+path_ci = []
+i = 0
+while i < 9
+  path_ri.push(i)
+  path_ci.push(i + 1)
+  i += 1
+path_pattern = SparsePattern.new(10, 10, path_ri, path_ci)
+peel = SparseAnalysis.new(path_pattern).peel_order
+check_named("peel.path_fully_peels", peel[0].size == 10 && peel[1].size == 0)
+
+# Min-degree ordering improves predicted fill on the grid vs natural order.
+grid_analysis = SparseAnalysis.new(pattern)
+natural = []
+i = 0
+while i < n
+  natural.push(i)
+  i += 1
+nat_pred = grid_analysis.predictions_for_order(natural)
+md_order = grid_analysis.min_degree_ordering
+md_pred = grid_analysis.predictions_for_order(md_order)
+check_named("mindeg.is_permutation", md_order.sort.uniq.size == n)
+check_named("mindeg.fill_not_worse", md_pred[0] <= nat_pred[0])
+check_named("mindeg.natural_matches_analysis", nat_pred[0] == grid_analysis.predicted_fill)
+
 # slogdet agrees with det on a well-scaled matrix.
 sd = LinAlg.slogdet(dense)
 d = LinAlg.det(dense)

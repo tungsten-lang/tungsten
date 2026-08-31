@@ -184,3 +184,107 @@ WValue w_sparse_solve_chol_f64(WValue n_w,
     SparseCleanup(A);
     return x_w;
 }
+
+/* ---- Retained factorization handles ------------------------------------
+ * Factor once, solve many, refactor on same-pattern new values, release
+ * explicitly. The handle (a malloc'd struct, returned as a boxed Int) owns
+ * only the SparseOpaqueFactorization — SparseFactor copies what it needs,
+ * and SparseRefactor takes a freshly converted matrix, so no COO buffers
+ * are retained here. kind: 0 = QR (ordinary, rectangular ok),
+ * 1 = Cholesky (SPD symmetric, upper-triangle COO convention). */
+
+typedef struct {
+    SparseOpaqueFactorization_Double factorization;
+    int kind;
+    int m;
+    int n;
+} WSparseFactorHandle;
+
+static SparseMatrix_Double sparse_convert_coo(int kind, int m, int n, long nnz,
+                                              const int32_t *row, const int32_t *col,
+                                              const double *data) {
+    SparseAttributes_t attributes;
+    memset(&attributes, 0, sizeof(attributes));
+    if (kind == 1) {
+        attributes.kind = SparseSymmetric;
+        attributes.triangle = SparseUpperTriangle;
+    }
+    return SparseConvertFromCoordinate(m, n, nnz, 1, attributes,
+                                       (const int *)row, (const int *)col, data);
+}
+
+WValue w_sparse_factor_new_f64(WValue kind_w, WValue m_w, WValue n_w,
+                               WValue row_w, WValue col_w, WValue data_w) {
+    int kind = (int)w_as_int(kind_w);
+    int m = (int)w_as_int(m_w);
+    int n = (int)w_as_int(n_w);
+    int64_t lrow, lcol, ld;
+    int32_t *row = i32_ptr(row_w, &lrow);
+    int32_t *col = i32_ptr(col_w, &lcol);
+    double *data = f64_ptr(data_w, &ld);
+    if (m <= 0 || n <= 0 || lrow != lcol || lrow != ld || lrow < 1) {
+        w_raise(w_string("sparse_factor_new: bad dimensions / COO"));
+        return W_NIL;
+    }
+    SparseMatrix_Double A = sparse_convert_coo(kind, m, n, (long)lrow, row, col, data);
+    WSparseFactorHandle *h = (WSparseFactorHandle *)malloc(sizeof(WSparseFactorHandle));
+    h->kind = kind;
+    h->m = m;
+    h->n = n;
+    h->factorization = SparseFactor(
+        kind == 1 ? SparseFactorizationCholesky : SparseFactorizationQR, A);
+    SparseCleanup(A);
+    if (h->factorization.status != SparseStatusOK) {
+        SparseCleanup(h->factorization);
+        free(h);
+        w_raise(w_string("sparse_factor_new: SparseFactor failed"));
+        return W_NIL;
+    }
+    return w_int((int64_t)(uintptr_t)h);
+}
+
+WValue w_sparse_factor_solve_f64(WValue h_w, WValue b_w, WValue x_w) {
+    WSparseFactorHandle *h = (WSparseFactorHandle *)(uintptr_t)w_as_int(h_w);
+    int64_t lb, lx;
+    double *b = f64_ptr(b_w, &lb);
+    double *x = f64_ptr(x_w, &lx);
+    if (h == NULL || lb < h->m || lx < h->n) {
+        w_raise(w_string("sparse_factor_solve: bad handle / dimensions"));
+        return W_NIL;
+    }
+    DenseVector_Double bv = { .count = h->m, .data = b };
+    DenseVector_Double xv = { .count = h->n, .data = x };
+    SparseSolve(h->factorization, bv, xv);
+    return x_w;
+}
+
+/* Same-pattern numeric refactorization: converts the (identical-structure)
+ * COO with new values and reuses the existing symbolic analysis. */
+WValue w_sparse_factor_refactor_f64(WValue h_w, WValue row_w, WValue col_w, WValue data_w) {
+    WSparseFactorHandle *h = (WSparseFactorHandle *)(uintptr_t)w_as_int(h_w);
+    int64_t lrow, lcol, ld;
+    int32_t *row = i32_ptr(row_w, &lrow);
+    int32_t *col = i32_ptr(col_w, &lcol);
+    double *data = f64_ptr(data_w, &ld);
+    if (h == NULL || lrow != lcol || lrow != ld || lrow < 1) {
+        w_raise(w_string("sparse_factor_refactor: bad handle / COO"));
+        return W_NIL;
+    }
+    SparseMatrix_Double A = sparse_convert_coo(h->kind, h->m, h->n, (long)lrow, row, col, data);
+    SparseRefactor(A, &h->factorization);
+    SparseCleanup(A);
+    if (h->factorization.status != SparseStatusOK) {
+        w_raise(w_string("sparse_factor_refactor: SparseRefactor failed"));
+        return W_NIL;
+    }
+    return h_w;
+}
+
+WValue w_sparse_factor_release_f64(WValue h_w) {
+    WSparseFactorHandle *h = (WSparseFactorHandle *)(uintptr_t)w_as_int(h_w);
+    if (h != NULL) {
+        SparseCleanup(h->factorization);
+        free(h);
+    }
+    return W_NIL;
+}

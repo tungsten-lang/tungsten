@@ -252,6 +252,14 @@
       i = i + 1
     d
 
+  # [sign, log|det|] without forming det (never over/underflows where a
+  # 128x128 det would). sign is -1/0/+1; log|det| is -inf when singular.
+  -> .slogdet(a)
+    n = LinAlg.rows(a)
+    out = ccall("w_array_new_aligned", -64, 2)
+    ccall("w_blas_dget_slogdet", LinAlg.flatten_square(a, n), n, out)
+    [out[0], out[1]]
+
   -> .cholesky(a)
     n = LinAlg.rows(a)
     if n >= LinAlg.lapack_cutoff

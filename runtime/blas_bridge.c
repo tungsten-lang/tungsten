@@ -99,6 +99,36 @@ WValue w_blas_dget_det(WValue a_wval, WValue n_wval) {
     return w_float(det);
 }
 
+/* Sign and log-magnitude of det via LU — the result-only form: never
+ * overflows/underflows where det itself would. out[0] = sign (-1/0/+1),
+ * out[1] = log|det| (-inf when singular). Matrix buffer is clobbered. */
+WValue w_blas_dget_slogdet(WValue a_wval, WValue n_wval, WValue out_wval) {
+    WArray *a = w_as_array(a_wval);
+    WArray *o = w_as_array(out_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    double *Ap = (double *)a->slots + a->start;
+    double *Op = (double *)o->slots + o->start;
+    __CLPK_integer info = 0;
+    __CLPK_integer *ipiv = (__CLPK_integer *)malloc(sizeof(__CLPK_integer) * (size_t)(n > 0 ? n : 1));
+    dgetrf_(&n, &n, Ap, &n, ipiv, &info);
+    double sign = 1.0, logabs = 0.0;
+    if (info > 0) {
+        sign = 0.0;
+        logabs = -INFINITY;
+    } else {
+        for (__CLPK_integer i = 0; i < n; i++) {
+            double d = Ap[(size_t)i * (size_t)n + (size_t)i];
+            if (d < 0.0) { sign = -sign; d = -d; }
+            logabs += log(d);
+            if (ipiv[i] != i + 1) sign = -sign;
+        }
+    }
+    free(ipiv);
+    Op[0] = sign;
+    Op[1] = logabs;
+    return out_wval;
+}
+
 WValue w_blas_dpotrf_lower(WValue a_wval, WValue n_wval) {
     WArray *a = w_as_array(a_wval);
     __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);

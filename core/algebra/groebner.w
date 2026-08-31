@@ -88,6 +88,47 @@
   -> .pair_key(i, j)
     i < j ? (i.to_s + ":" + j.to_s) : (j.to_s + ":" + i.to_s)
 
+  # Binary min-heap over pending pairs [i, j, lcm, seq], ordered by the
+  # ring's monomial order on the lcm with the insertion sequence breaking
+  # ties — exactly the pair the old linear scan selected (first pushed wins
+  # among equal lcms), so selection is byte-identical, found in O(log n)
+  # instead of a full scan plus an O(n) delete_at shift per iteration.
+  -> .pair_before?(ring, a, b)
+    cmp = ring.monomial_compare(a[2], b[2])
+    return true if cmp < 0
+    cmp == 0 && a[3] < b[3]
+
+  -> .pair_push(heap, ring, entry)
+    heap.push(entry)
+    child = heap.size - 1
+    while child > 0
+      parent = (child - 1) / 2
+      break if !GroebnerBasis.pair_before?(ring, heap[child], heap[parent])
+      swap = heap[parent]
+      heap[parent] = heap[child]
+      heap[child] = swap
+      child = parent
+
+  -> .pair_pop(heap, ring)
+    top = heap[0]
+    last = heap.pop
+    if heap.size > 0
+      heap[0] = last
+      parent = 0
+      while true
+        left = parent * 2 + 1
+        break if left >= heap.size
+        right = left + 1
+        child = left
+        if right < heap.size && GroebnerBasis.pair_before?(ring, heap[right], heap[left])
+          child = right
+        break if !GroebnerBasis.pair_before?(ring, heap[child], heap[parent])
+        swap = heap[parent]
+        heap[parent] = heap[child]
+        heap[child] = swap
+        parent = child
+    top
+
   # Buchberger's second criterion (the chain criterion): a selected pair
   # (i, j) is redundant when some third basis element's leading term divides
   # lcm(lt_i, lt_j) and both mixed pairs (i, k) and (j, k) have already left
@@ -132,25 +173,22 @@
     return basis if basis.size == 0
     ring = basis[0].ring
     pairs = []
+    pair_seq = 0
     pending = {}
     i = 0
     while i < basis.size
       j = 0
       while j < i
-        pairs.push([j, i, GroebnerBasis.monomial_lcm(
-          basis[j].leading_term[1], basis[i].leading_term[1])])
+        GroebnerBasis.pair_push(pairs, ring, [j, i, GroebnerBasis.monomial_lcm(
+          basis[j].leading_term[1], basis[i].leading_term[1]), pair_seq])
+        pair_seq += 1
         pending[GroebnerBasis.pair_key(j, i)] = true
         j += 1
       i += 1
     processed = 0
     while pairs.size > 0
       raise "Gröbner pair limit exceeded" if processed >= pair_limit
-      best = 0
-      i = 1
-      while i < pairs.size
-        best = i if ring.monomial_compare(pairs[i][2], pairs[best][2]) < 0
-        i += 1
-      pair = pairs.delete_at(best)
+      pair = GroebnerBasis.pair_pop(pairs, ring)
       pending.delete(GroebnerBasis.pair_key(pair[0], pair[1]))
       processed += 1
       left = basis[pair[0]]
@@ -166,8 +204,9 @@
         basis.push(remainder)
         j = 0
         while j < new_index
-          pairs.push([j, new_index, GroebnerBasis.monomial_lcm(
-            basis[j].leading_term[1], remainder.leading_term[1])])
+          GroebnerBasis.pair_push(pairs, ring, [j, new_index, GroebnerBasis.monomial_lcm(
+            basis[j].leading_term[1], remainder.leading_term[1]), pair_seq])
+          pair_seq += 1
           pending[GroebnerBasis.pair_key(j, new_index)] = true
           j += 1
     basis

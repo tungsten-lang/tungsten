@@ -160,13 +160,19 @@
 
   # Reduced row echelon form. Returns [matrix, pivot_columns].
   -> field_echelon(matrix, ncols)
-    f = field
     a = []
     matrix.each -> (row)
       copy = []
       row.each -> (value)
         copy.push(value)
       a.push(copy)
+    field_echelon_owned(a, ncols)
+
+  # In-place echelon on rows the CALLER owns (freshly built, never shared) —
+  # the left-kernel path builds a new transposed matrix per call, and copying
+  # it again inside every elimination step was pure allocation cost.
+  -> field_echelon_owned(a, ncols)
+    f = field
     m = a.size
     pivots = []
     row = 0
@@ -208,8 +214,14 @@
 
   # Basis of { x : matrix * x = 0 } as arrays of field elements.
   -> field_nullspace(matrix, ncols)
+    field_nullspace_result(field_echelon(matrix, ncols), ncols)
+
+  # Nullspace when the caller owns `matrix` (skips the defensive copy).
+  -> field_nullspace_owned(matrix, ncols)
+    field_nullspace_result(field_echelon_owned(matrix, ncols), ncols)
+
+  -> field_nullspace_result(echelon, ncols)
     f = field
-    echelon = field_echelon(matrix, ncols)
     a = echelon[0]
     pivots = echelon[1]
     out = []
@@ -245,7 +257,7 @@
         i += 1
       transposed.push(row)
       j += 1
-    field_nullspace(transposed, nrows)
+    field_nullspace_owned(transposed, nrows)
 
   # --- row reduction ---
 
@@ -261,6 +273,28 @@
     while i < @rows
       alive.push(i) if row_degree(i) >= 0
       i += 1
+    # Per-row degree and leading-coefficient caches, keyed by row index.
+    # A simple transformation rewrites exactly ONE row per step, so only
+    # that row's cache entries are refreshed — the old loop recomputed
+    # every alive row's degree and leading coefficients (and rescanned
+    # every entry for liveness) on every step.
+    row_deg = []
+    row_lead = []
+    i = 0
+    while i < @rows
+      row_deg.push(-1)
+      row_lead.push(nil)
+      i += 1
+    alive.each -> (r)
+      d = -1
+      work[r].each -> (value)
+        dv = value.degree
+        d = dv if dv > d
+      lead = []
+      work[r].each -> (value)
+        lead.push(value.coeff([d]))
+      row_deg[r] = d
+      row_lead[r] = lead
     steps = 0
     while true
       raise "polynomial matrix row reduction limit exceeded" if steps > 1_000_000
@@ -268,15 +302,8 @@
       degrees = []
       leading = []
       alive.each -> (r)
-        d = -1
-        work[r].each -> (value)
-          dv = value.degree
-          d = dv if dv > d
-        degrees.push(d)
-        row = []
-        work[r].each -> (value)
-          row.push(value.coeff([d]))
-        leading.push(row)
+        degrees.push(row_deg[r])
+        leading.push(row_lead[r])
       kernel = field_left_kernel(leading, alive.size, @cols)
       break if kernel.size == 0
       c = kernel[0]
@@ -313,13 +340,25 @@
         idx += 1
       work[target] = new_row
       transform[target] = new_transform
-      still_alive = []
-      alive.each -> (r)
-        nonzero = false
-        work[r].each -> (value)
-          nonzero = true if !value.zero?
-        still_alive.push(r) if nonzero
-      alive = still_alive
+      # Only the target row changed: refresh its caches, and drop it from
+      # the alive set if the transformation cancelled it entirely.
+      d = -1
+      work[target].each -> (value)
+        dv = value.degree
+        d = dv if dv > d
+      if d < 0
+        still_alive = []
+        alive.each -> (r)
+          still_alive.push(r) if r != target
+        alive = still_alive
+        row_deg[target] = -1
+        row_lead[target] = nil
+      else
+        lead = []
+        work[target].each -> (value)
+          lead.push(value.coeff([d]))
+        row_deg[target] = d
+        row_lead[target] = lead
     reduced_entries = []
     transform_entries = []
     alive.each -> (r)

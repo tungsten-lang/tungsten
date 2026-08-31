@@ -54,6 +54,22 @@
       i += 1
     width
 
+  # Quotient rounded to NEAREST (ties toward zero), so the remainder magnitude
+  # is at most half the divisor's. Truncating division leaves remainders up to
+  # the full divisor, and in the elimination below that difference is the line
+  # between polynomial-sized intermediates and the classic exponential entry
+  # blowup (measured: a 7x7 matrix of entries in [-20, 20] did not finish in
+  # 10 minutes with truncation; milliseconds with nearest).
+  -> .nearest_quotient(a, b)
+    q = a / b
+    r = a - q * b
+    if SmithNormalForm.abs(r) * 2 > SmithNormalForm.abs(b)
+      if (r < 0) == (b < 0)
+        q += 1
+      else
+        q -= 1
+    q
+
   # The invariant factors d1 | d2 | ... | dr, as a positive-integer array.
   # Its length is the rank; a zero matrix yields an empty array.
   -> .invariant_factors(matrix)
@@ -63,67 +79,64 @@
     factors = []
     t = 0
     while t < height && t < width
-      # Locate the nonzero entry of least magnitude in the remaining block.
-      pi = 0 - 1
-      pj = 0 - 1
-      best = 0
-      i = t
-      while i < height
-        j = t
-        while j < width
-          v = SmithNormalForm.abs(m[i][j])
-          if v != 0 && (pi < 0 || v < best)
-            best = v
-            pi = i
-            pj = j
-          j += 1
-        i += 1
-      break if pi < 0
-      # Move the pivot to (t, t).
-      swap = m[t]
-      m[t] = m[pi]
-      m[pi] = swap
-      i = 0
-      while i < height
-        v = m[i][t]
-        m[i][t] = m[i][pj]
-        m[i][pj] = v
-        i += 1
-      # Clear the pivot row and column, repeating while remainders appear.
+      # Clear the pivot row and column, re-selecting the least-magnitude pivot
+      # from the whole remaining block on every pass: after a surviving
+      # remainder the smallest entry may live anywhere, and pivoting on it is
+      # what keeps the euclidean cascade's quotients (and so entry growth)
+      # small.
       cleared = false
+      empty = false
       while !cleared
+        # Locate the nonzero entry of least magnitude in the remaining block.
+        pi = 0 - 1
+        pj = 0 - 1
+        best = 0
+        i = t
+        while i < height
+          j = t
+          while j < width
+            v = SmithNormalForm.abs(m[i][j])
+            if v != 0 && (pi < 0 || v < best)
+              best = v
+              pi = i
+              pj = j
+            j += 1
+          i += 1
+        if pi < 0
+          empty = true
+          break
+        # Move the pivot to (t, t).
+        swap = m[t]
+        m[t] = m[pi]
+        m[pi] = swap
+        i = 0
+        while i < height
+          v = m[i][t]
+          m[i][t] = m[i][pj]
+          m[i][pj] = v
+          i += 1
         cleared = true
         i = t + 1
         while i < height
           if m[i][t] != 0
-            q = m[i][t] / m[t][t]
+            q = SmithNormalForm.nearest_quotient(m[i][t], m[t][t])
             j = t
             while j < width
               m[i][j] = m[i][j] - q * m[t][j]
               j += 1
-            if m[i][t] != 0
-              swap = m[t]
-              m[t] = m[i]
-              m[i] = swap
-              cleared = false
+            cleared = false if m[i][t] != 0
           i += 1
         j = t + 1
         while j < width
           if m[t][j] != 0
-            q = m[t][j] / m[t][t]
+            q = SmithNormalForm.nearest_quotient(m[t][j], m[t][t])
             i = t
             while i < height
               m[i][j] = m[i][j] - q * m[i][t]
               i += 1
-            if m[t][j] != 0
-              i = 0
-              while i < height
-                v = m[i][t]
-                m[i][t] = m[i][j]
-                m[i][j] = v
-                i += 1
-              cleared = false
+            cleared = false if m[t][j] != 0
           j += 1
+      break if empty
       # Enforce divisibility: every remaining entry must be a multiple of the
       # pivot, or the chain d1 | d2 | ... would fail.
       pivot = m[t][t]

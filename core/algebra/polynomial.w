@@ -173,7 +173,7 @@
     out
 
   -> zero
-    Polynomial.new(self, [])
+    Polynomial.new(self, [], true)
 
   -> one
     constant(@field.one)
@@ -181,7 +181,7 @@
   -> constant(value)
     coefficient = @field.coerce(value)
     return zero if @field.zero?(coefficient)
-    Polynomial.new(self, [[coefficient, zero_exponents]])
+    Polynomial.new(self, [[coefficient, zero_exponents]], true)
 
   -> monomial(coefficient, exponents)
     Polynomial.new(self, [[@field.coerce(coefficient), exponents]])
@@ -189,13 +189,15 @@
   # Construct a monomial whose coefficient is already a normalized field
   # element (not an external scalar to embed through the prime subfield).
   -> monomial_raw(coefficient, exponents)
-    Polynomial.new(self, [[@field.normalize_element(coefficient), exponents]])
+    normalized = @field.normalize_element(coefficient)
+    return zero if @field.zero?(normalized)
+    Polynomial.new(self, [[normalized, exponents]], true)
 
   -> generator(index)
     raise "generator index out of range" if index < 0 || index >= arity
     exponents = zero_exponents
     exponents[index] = 1
-    Polynomial.new(self, [[@field.one, exponents]])
+    Polynomial.new(self, [[@field.one, exponents]], true)
 
   -> generators
     out = []
@@ -247,6 +249,21 @@
   -> new(@ring, terms)
     raise "polynomial requires a PolynomialRing" if @ring.class_name != "PolynomialRing"
     @terms = normalize_terms(terms)
+
+  # Trusted constructor for term lists that are canonical BY CONSTRUCTION:
+  # sorted strictly descending in the ring's monomial order, no duplicate
+  # monomials, no zero coefficients, coefficients already normalized field
+  # elements, exponent arrays owned by the list. `normalize_terms` is a
+  # quadratic scan-and-sort, and running it on every arithmetic result is
+  # what made each Gröbner reduction step O(terms²) — internal call sites
+  # whose output provably satisfies the invariant (merges of canonical
+  # lists, per-term maps that preserve order and nonzeroness) pass
+  # `canonical = true` and skip it. External input must keep using new/2 —
+  # this arity is an internal trust boundary, so it also skips the ring
+  # class check (dispatch cannot yet specialize on a parameter's class, and
+  # a per-construction string compare is pure hot-path cost).
+  -> new(@ring, terms, canonical)
+    @terms = canonical ? terms : normalize_terms(terms)
 
   ro :ring, :terms
 
@@ -415,7 +432,10 @@
 
   -> +(value)
     other = coerce(value)
-    Polynomial.new(@ring, @terms + other.terms)
+    # Both term lists are canonical; their linear merge is canonical (the
+    # merge drops cancelled monomials), so the quadratic renormalize pass
+    # is skipped. This is the Gröbner reduction inner-loop path.
+    Polynomial.new(@ring, merge_sorted_terms(@terms, other.terms), true)
 
   -> -(value)
     self + coerce(value).negate
@@ -424,8 +444,8 @@
     out = []
     @terms.each -> (term)
       out.push([field_neg(term[0]), copy_exponents(term[1])])
-    # Negation preserves monomial order.
-    Polynomial.new(@ring, out)
+    # Negation preserves monomial order and nonzeroness: canonical.
+    Polynomial.new(@ring, out, true)
 
   -> -@
     negate
@@ -450,7 +470,9 @@
           i += 1
         partial.push([field_mul(left[0], right[0]), exponents])
       result_terms = merge_sorted_terms(result_terms, partial)
-    Polynomial.new(@ring, result_terms)
+    # Every partial is canonical (monomial orders are translation
+    # invariant), and merges of canonical lists are canonical.
+    Polynomial.new(@ring, result_terms, true)
 
   # Dense univariate product when both sides fill enough of their degree
   # range that an array multiply beats sparse pair generation.
@@ -486,7 +508,8 @@
       if !field_zero?(product[i])
         out.push([product[i], [i]])
       i -= 1
-    Polynomial.new(@ring, out)
+    # Built strictly descending by degree with zeros skipped: canonical.
+    Polynomial.new(@ring, out, true)
 
   -> **(exponent)
     raise "polynomial exponent must be a nonnegative integer" if exponent < 0
@@ -748,6 +771,7 @@
 
   -> monomial_multiply_element(exponents, scalar)
     raise "wrong monomial arity" if exponents.size != @ring.arity
+    return @ring.zero if field_zero?(scalar)
     out = []
     @terms.each -> (term)
       powers = []
@@ -756,7 +780,9 @@
         powers.push(term[1][i] + exponents[i])
         i += 1
       out.push([field_mul(term[0], scalar), powers])
-    Polynomial.new(@ring, out)
+    # Monomial scaling by a nonzero scalar preserves order (translation
+    # invariance) and nonzeroness: canonical.
+    Polynomial.new(@ring, out, true)
 
   -> monic
     return self if zero?

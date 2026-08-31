@@ -563,7 +563,59 @@
       i += 1
     [mu, norms]
 
+  # Size-reduce b_k against b_j (quotient already computed) and update row k
+  # of mu in place: b_k -= q·b_j subtracts q·mu[j][l] from mu[k][l] for
+  # l < j and q from mu[k][j]; stars, norms, and every other mu row are
+  # unchanged. Exact-arithmetic identity with recomputing the full
+  # Gram-Schmidt data, at O(j) instead of O(rank³).
+  -> size_reduce_step(mu, k, j, quotient)
+    @reduced_basis[k] = subtract_multiple(
+      @reduced_basis[k],
+      @reduced_basis[j], quotient)
+    @transformation[k] = subtract_multiple(
+      @transformation[k],
+      @transformation[j], quotient)
+    l = 0
+    while l < j
+      mu[k][l] = mu[k][l] - quotient * mu[j][l]
+      l += 1
+    mu[k][j] = mu[k][j] - quotient
+
+  # Swap b_{k-1} and b_k and update mu/norms in place (the classical LLL
+  # exchange formulas; O(rank) instead of an O(rank³) rebuild). `norms`
+  # entries stay positive: the Gram matrix is positive definite and the
+  # basis stays full rank, so B' = |b*_k|² + mu²·|b*_{k-1}|² > 0.
+  -> swap_step(mu, norms, k)
+    swapped_mu = mu[k][k - 1]
+    updated_norm = norms[k] + swapped_mu * swapped_mu * norms[k - 1]
+    revised_mu = swapped_mu * norms[k - 1] / updated_norm
+    norms[k] = norms[k - 1] * norms[k] / updated_norm
+    norms[k - 1] = updated_norm
+    temporary = @reduced_basis[k]
+    @reduced_basis[k] = @reduced_basis[k - 1]
+    @reduced_basis[k - 1] = temporary
+    temporary = @transformation[k]
+    @transformation[k] = @transformation[k - 1]
+    @transformation[k - 1] = temporary
+    j = 0
+    while j < k - 1
+      temporary = mu[k][j]
+      mu[k][j] = mu[k - 1][j]
+      mu[k - 1][j] = temporary
+      j += 1
+    i = k + 1
+    while i < rank
+      shifted = mu[i][k]
+      mu[i][k] = mu[i][k - 1] - swapped_mu * shifted
+      mu[i][k - 1] = shifted + revised_mu * mu[i][k]
+      i += 1
+    mu[k][k - 1] = revised_mu
+
   -> reduce_approximately
+    data = compute_approximate_gram_schmidt(
+      @reduced_basis)
+    mu = data[0]
+    norms = data[1]
     k = 1
     steps = 0
     while k < rank
@@ -573,24 +625,11 @@
           @source_basis)
         @transformation = integer_identity(rank)
         return reduce
-      data = compute_approximate_gram_schmidt(
-        @reduced_basis)
-      mu = data[0]
-      norms = data[1]
       j = k - 1
       while j >= 0
         quotient = mu[k][j].round
         if quotient != 0
-          @reduced_basis[k] = subtract_multiple(
-            @reduced_basis[k],
-            @reduced_basis[j], quotient)
-          @transformation[k] = subtract_multiple(
-            @transformation[k],
-            @transformation[j], quotient)
-          data = compute_approximate_gram_schmidt(
-            @reduced_basis)
-          mu = data[0]
-          norms = data[1]
+          size_reduce_step(mu, k, j, quotient)
         j -= 1
 
       delta_float = @delta.to_f
@@ -598,47 +637,29 @@
       if norms[k] >= threshold * norms[k - 1]
         k += 1
       else
-        temporary = @reduced_basis[k]
-        @reduced_basis[k] = @reduced_basis[k - 1]
-        @reduced_basis[k - 1] = temporary
-        temporary = @transformation[k]
-        @transformation[k] = @transformation[k - 1]
-        @transformation[k - 1] = temporary
+        swap_step(mu, norms, k)
         k -= 1
         k = 1 if k < 1
     self
 
   -> reduce
+    data = compute_gram_schmidt(@reduced_basis)
+    mu = data[0]
+    norms = data[1]
     k = 1
     while k < rank
-      data = compute_gram_schmidt(@reduced_basis)
-      mu = data[0]
-      norms = data[1]
       j = k - 1
       while j >= 0
         quotient = nearest_integer(mu[k][j])
         if quotient != 0
-          @reduced_basis[k] = subtract_multiple(
-            @reduced_basis[k],
-            @reduced_basis[j], quotient)
-          @transformation[k] = subtract_multiple(
-            @transformation[k],
-            @transformation[j], quotient)
-          data = compute_gram_schmidt(@reduced_basis)
-          mu = data[0]
-          norms = data[1]
+          size_reduce_step(mu, k, j, quotient)
         j -= 1
 
       threshold = @delta - mu[k][k - 1] ** 2
       if norms[k] >= threshold * norms[k - 1]
         k += 1
       else
-        temporary = @reduced_basis[k]
-        @reduced_basis[k] = @reduced_basis[k - 1]
-        @reduced_basis[k - 1] = temporary
-        temporary = @transformation[k]
-        @transformation[k] = @transformation[k - 1]
-        @transformation[k - 1] = temporary
+        swap_step(mu, norms, k)
         k -= 1
         k = 1 if k < 1
     self

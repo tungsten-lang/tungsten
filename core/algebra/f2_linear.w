@@ -8,6 +8,84 @@
 # row operations, canonical RREF, particular solution, and kernel basis as a
 # proof object that can be checked without trusting the reducer.
 
+# Raw GF(2) word-slab kernels. Top-level `->` with typed signatures so the
+# compiler lowers them to unboxed i64 loops (the class-method context keeps
+# every slab access dynamically dispatched); `->` not `fn` because `fn` is
+# memoized and these mutate their slab argument.
+# Columns are packed 32 to an i64 slot (upper halves stay zero): every bit
+# mask a DYNAMIC caller builds stays inside the small-integer range, so the
+# pack loop can write straight into the slab without a typed-call boundary
+# (measured: a typed-helper call from dynamic context costs ~1.2 us — the
+# generic slow-call path — while a direct dynamic store into an i64[] is
+# nanoseconds; packing through the helper was 318 of the 322 ms total).
+-> f2_slab_bit(st, base, column) (i64[] i64 i64) i64
+  (st[base + column / 32] >> (column % 32)) & 1
+
+-> f2_slab_xor(st, target, source, words) (i64[] i64 i64 i64) i64
+  w = 0 ## i64
+  while w < words
+    st[target + w] = st[target + w] ^ st[source + w]
+    w += 1
+  0
+
+-> f2_slab_swap(st, a, b, words) (i64[] i64 i64 i64) i64
+  w = 0 ## i64
+  while w < words
+    t = st[a + w] ## i64
+    st[a + w] = st[b + w]
+    st[b + w] = t
+    w += 1
+  0
+
+-> f2_slab_zero?(st, base, words) (i64[] i64 i64) i64
+  acc = 0 ## i64
+  w = 0 ## i64
+  while w < words
+    acc = acc | st[base + w]
+    w += 1
+  acc == 0 ? 1 : 0
+
+# Full elimination in one typed call: `vals` is the packed right-hand side
+# (one bit per row), `pivots` and `ops` are output logs with their counts in
+# slot 0 (`ops` records [kind, pivot, other] triples, kind 0 = swap and
+# kind 1 = xor, in exactly the order the per-element loop emitted them).
+-> f2_slab_reduce(st, height, width, words, vals, pivots, ops) (i64[] i64 i64 i64 i64[] i64[] i64[]) i64
+  pivot_row = 0 ## i64
+  column = 0 ## i64
+  while column < width && pivot_row < height
+    selected = pivot_row ## i64
+    while selected < height && f2_slab_bit(st, selected * words, column) == 0
+      selected += 1
+    if selected < height
+      if selected != pivot_row
+        f2_slab_swap(st, pivot_row * words, selected * words, words)
+        t = vals[pivot_row] ## i64
+        vals[pivot_row] = vals[selected]
+        vals[selected] = t
+        n = ops[0] ## i64
+        ops[n * 3 + 1] = 0
+        ops[n * 3 + 2] = pivot_row
+        ops[n * 3 + 3] = selected
+        ops[0] = n + 1
+      pivot_base = pivot_row * words ## i64
+      row = 0 ## i64
+      while row < height
+        if row != pivot_row && f2_slab_bit(st, row * words, column) != 0
+          f2_slab_xor(st, row * words, pivot_base, words)
+          vals[row] = vals[row] ^ vals[pivot_row]
+          n = ops[0] ## i64
+          ops[n * 3 + 1] = 1
+          ops[n * 3 + 2] = pivot_row
+          ops[n * 3 + 3] = row
+          ops[0] = n + 1
+        row += 1
+      p = pivots[0] ## i64
+      pivots[p + 1] = column
+      pivots[0] = p + 1
+      pivot_row += 1
+    column += 1
+  pivot_row
+
 + F2LinearAlgebra
   -> .integer?(value)
     name = value.class_name
@@ -116,47 +194,59 @@
       row += 1
     pivots
 
+  # Gaussian elimination on rows packed 64 columns to an i64 word (one flat
+  # typed slab, metaflip-style): a row operation is `width/64` raw in-place
+  # XORs instead of `width` boxed array reads, XORs, and writes, and no
+  # per-operation values are allocated. Packing happens on entry and rows
+  # unpack only at the API boundary, so every output — rref, operations,
+  # pivots, particular, kernel basis — is identical to the per-element form.
   -> .reduce(width, matrix, right_hand_side)
     F2LinearAlgebra.validate_system(width, matrix, right_hand_side)
-    work = F2LinearAlgebra.copy_matrix(matrix)
-    values = F2LinearAlgebra.copy_vector(right_hand_side)
+    height = matrix.size
+    words = (width + 31) / 32
+    st = i64[height * words]
+    row = 0
+    while row < height
+      source = matrix[row]
+      base = row * words
+      column = 0
+      while column < width
+        if source[column] != 0
+          slot = base + column / 32
+          st[slot] = st[slot] | (1 << (column % 32))
+        column += 1
+      row += 1
+    max_rank = height < width ? height : width
+    vals = i64[height < 1 ? 1 : height]
+    row = 0
+    while row < height
+      vals[row] = right_hand_side[row]
+      row += 1
+    pivot_log = i64[max_rank + 1]
+    op_log = i64[height * max_rank * 3 + 1]
+    f2_slab_reduce(st, height, width, words, vals, pivot_log, op_log)
+    values = []
+    row = 0
+    while row < height
+      values.push(vals[row])
+      row += 1
     operations = []
+    n = op_log[0]
+    i = 0
+    while i < n
+      operations.push([op_log[i * 3 + 1], op_log[i * 3 + 2], op_log[i * 3 + 3]])
+      i += 1
     pivots = []
-    pivot_row = 0
-    column = 0
-
-    while column < width && pivot_row < work.size
-      selected = pivot_row
-      while selected < work.size && work[selected][column] == 0
-        selected += 1
-      if selected < work.size
-        if selected != pivot_row
-          temporary = work[pivot_row]
-          work[pivot_row] = work[selected]
-          work[selected] = temporary
-          value = values[pivot_row]
-          values[pivot_row] = values[selected]
-          values[selected] = value
-          operations.push([0, pivot_row, selected])
-
-        row = 0
-        while row < work.size
-          if row != pivot_row && work[row][column] == 1
-            cell = 0
-            while cell < width
-              work[row][cell] = work[row][cell] ^ work[pivot_row][cell]
-              cell += 1
-            values[row] = values[row] ^ values[pivot_row]
-            operations.push([1, pivot_row, row])
-          row += 1
-        pivots.push(column)
-        pivot_row += 1
-      column += 1
+    n = pivot_log[0]
+    i = 0
+    while i < n
+      pivots.push(pivot_log[i + 1])
+      i += 1
 
     inconsistent = false
     row = 0
-    while row < work.size
-      if F2LinearAlgebra.zero_vector?(work[row]) && values[row] == 1
+    while row < height
+      if f2_slab_zero?(st, row * words, words) == 1 && values[row] == 1
         inconsistent = true
       row += 1
 
@@ -177,13 +267,25 @@
           vector[free_column] = 1
           row = 0
           while row < pivots.size
-            vector[pivots[row]] = work[row][free_column]
+            vector[pivots[row]] = f2_slab_bit(st, row * words, free_column)
             row += 1
           basis.push(vector)
         free_column += 1
 
+    unpacked = []
+    row = 0
+    while row < height
+      base = row * words
+      out = []
+      column = 0
+      while column < width
+        out.push(f2_slab_bit(st, base, column))
+        column += 1
+      unpacked.push(out)
+      row += 1
+
     {
-      "rref": work,
+      "rref": unpacked,
       "right_hand_side": values,
       "operations": operations,
       "pivots": pivots,

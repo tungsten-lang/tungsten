@@ -15,9 +15,9 @@
 
 WValue w_blas_sgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
                        WValue m_wval, WValue n_wval, WValue k_wval) {
-    WArray *a = (WArray *)w_as_ptr(a_wval);
-    WArray *b = (WArray *)w_as_ptr(b_wval);
-    WArray *c = (WArray *)w_as_ptr(c_wval);
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
     int M = (int)w_as_int(m_wval);
     int N = (int)w_as_int(n_wval);
     int K = (int)w_as_int(k_wval);
@@ -31,9 +31,9 @@ WValue w_blas_sgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
 
 WValue w_blas_dgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
                        WValue m_wval, WValue n_wval, WValue k_wval) {
-    WArray *a = (WArray *)w_as_ptr(a_wval);
-    WArray *b = (WArray *)w_as_ptr(b_wval);
-    WArray *c = (WArray *)w_as_ptr(c_wval);
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
     int M = (int)w_as_int(m_wval);
     int N = (int)w_as_int(n_wval);
     int K = (int)w_as_int(k_wval);
@@ -47,7 +47,7 @@ WValue w_blas_dgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
 
 /* Reductions / elementwise: portable scalar loops (vDSP is Apple-only). */
 static float *ob_f32(WValue v, int64_t *len) {
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     *len = (int64_t)a->size;
     return (float *)a->slots + a->start;
 }
@@ -106,7 +106,7 @@ WValue w_blas_vtanh_f32(WValue a_wval, WValue out_wval, WValue n_wval) {
 /* dgeev via OpenBLAS's bundled LAPACK — same manual-prototype contract
  * as the Accelerate bridge (see blas_bridge.c). */
 static double *oblas_f64_ptr(WValue v, int64_t *len_out) {
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     *len_out = (int64_t)a->size;
     return (double *)a->slots + a->start;
 }

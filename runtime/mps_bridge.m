@@ -72,9 +72,9 @@ WValue w_mps_sgemm_nn(
 
     mpsb_init(M, N, K);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
-    WArray *c_arr = (WArray *)w_as_ptr(c_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
+    WArray *c_arr = w_as_array(c_wv);
 
     int64_t total_c = (int64_t)M * (int64_t)N;
     if (c_arr->size < total_c) c_arr->size = total_c;
@@ -159,9 +159,9 @@ WValue w_mpsg_sgemm_nn(
 
     mpsg_init(M, N, K);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
-    WArray *c_arr = (WArray *)w_as_ptr(c_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
+    WArray *c_arr = w_as_array(c_wv);
 
     int64_t total_c = (int64_t)M * (int64_t)N;
     if (c_arr->size < total_c) c_arr->size = total_c;
@@ -210,9 +210,9 @@ WValue w_mpsg_sgemm_batch(
 
     mpsg_init(M, N, K);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
-    WArray *c_arr = (WArray *)w_as_ptr(c_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
+    WArray *c_arr = w_as_array(c_wv);
 
     int64_t total_c = (int64_t)M * (int64_t)N;
     if (c_arr->size < total_c) c_arr->size = total_c;
@@ -272,9 +272,9 @@ WValue w_mps_sgemm_batch(
      * feed the next. We assume square matmul for this bench. */
     mpsb_init(M, N, K);
 
-    WArray *a_arr = (WArray *)w_as_ptr(a_wv);
-    WArray *b_arr = (WArray *)w_as_ptr(b_wv);
-    WArray *c_arr = (WArray *)w_as_ptr(c_wv);
+    WArray *a_arr = w_as_array(a_wv);
+    WArray *b_arr = w_as_array(b_wv);
+    WArray *c_arr = w_as_array(c_wv);
 
     int64_t total = (int64_t)M * (int64_t)N;
     if (c_arr->size < total) c_arr->size = total;

@@ -65382,25 +65382,55 @@ WValue w_vec4_dot_f32(WValue a_wval, WValue b_wval) {
     return w_float((double)dot);
 }
 #else
-WValue w_mat4_mul_f32(WValue a, WValue b, WValue c) {
-    (void)a; (void)b; (void)c;
-    w_raise(w_string("mat4_mul_f32: requires ARM NEON (aarch64)"));
-    return W_NIL;
+/* Portable scalar fallbacks: bit-identical shape contract with the NEON
+ * versions (row-major 4x4 / length-4 f32 WArrays), so non-aarch64 builds
+ * run correctly instead of raising. Any autovectorizer will do fine on
+ * these fixed-trip loops; the NEON path above stays the fast lane. */
+WValue w_mat4_mul_f32(WValue a_wval, WValue b_wval, WValue c_wval) {
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
+    const float *Ap = (const float *)a->slots + a->start;
+    const float *Bp = (const float *)b->slots + b->start;
+    float *Cp = (float *)c->slots + c->start;
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            float acc = 0.0f;
+            for (int k = 0; k < 4; k++)
+                acc += Ap[i * 4 + k] * Bp[k * 4 + j];
+            Cp[i * 4 + j] = acc;
+        }
+    }
+    return c_wval;
 }
-WValue w_vec4_add_f32(WValue a, WValue b, WValue c) {
-    (void)a; (void)b; (void)c;
-    w_raise(w_string("vec4_add_f32: requires ARM NEON (aarch64)"));
-    return W_NIL;
+WValue w_vec4_add_f32(WValue a_wval, WValue b_wval, WValue c_wval) {
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
+    const float *Ap = (const float *)a->slots + a->start;
+    const float *Bp = (const float *)b->slots + b->start;
+    float *Cp = (float *)c->slots + c->start;
+    for (int i = 0; i < 4; i++) Cp[i] = Ap[i] + Bp[i];
+    return c_wval;
 }
-WValue w_vec4_mul_f32(WValue a, WValue b, WValue c) {
-    (void)a; (void)b; (void)c;
-    w_raise(w_string("vec4_mul_f32: requires ARM NEON (aarch64)"));
-    return W_NIL;
+WValue w_vec4_mul_f32(WValue a_wval, WValue b_wval, WValue c_wval) {
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
+    const float *Ap = (const float *)a->slots + a->start;
+    const float *Bp = (const float *)b->slots + b->start;
+    float *Cp = (float *)c->slots + c->start;
+    for (int i = 0; i < 4; i++) Cp[i] = Ap[i] * Bp[i];
+    return c_wval;
 }
-WValue w_vec4_dot_f32(WValue a, WValue b) {
-    (void)a; (void)b;
-    w_raise(w_string("vec4_dot_f32: requires ARM NEON (aarch64)"));
-    return W_NIL;
+WValue w_vec4_dot_f32(WValue a_wval, WValue b_wval) {
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    const float *Ap = (const float *)a->slots + a->start;
+    const float *Bp = (const float *)b->slots + b->start;
+    float dot = 0.0f;
+    for (int i = 0; i < 4; i++) dot += Ap[i] * Bp[i];
+    return w_float((double)dot);
 }
 #endif
 

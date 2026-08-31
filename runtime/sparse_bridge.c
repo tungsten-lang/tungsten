@@ -15,19 +15,19 @@
 #include <stdlib.h>
 
 static int32_t *i32_ptr(WValue v, int64_t *len) {
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     *len = (int64_t)a->size;
     return ((int32_t *)a->slots) + a->start;
 }
 
 static float *f32_ptr(WValue v, int64_t *len) {
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     *len = (int64_t)a->size;
     return (float *)a->slots + a->start;
 }
 
 static double *f64_ptr(WValue v, int64_t *len) {
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     *len = (int64_t)a->size;
     return (double *)a->slots + a->start;
 }

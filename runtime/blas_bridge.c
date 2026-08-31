@@ -21,9 +21,9 @@
  * a crash — same contract as a direct cblas_sgemm call from C. */
 WValue w_blas_sgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
                        WValue m_wval, WValue n_wval, WValue k_wval) {
-    WArray *a = (WArray *)w_as_ptr(a_wval);
-    WArray *b = (WArray *)w_as_ptr(b_wval);
-    WArray *c = (WArray *)w_as_ptr(c_wval);
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
     int64_t M = w_as_int(m_wval);
     int64_t N = w_as_int(n_wval);
     int64_t K = w_as_int(k_wval);
@@ -37,9 +37,9 @@ WValue w_blas_sgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
 
 WValue w_blas_dgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
                        WValue m_wval, WValue n_wval, WValue k_wval) {
-    WArray *a = (WArray *)w_as_ptr(a_wval);
-    WArray *b = (WArray *)w_as_ptr(b_wval);
-    WArray *c = (WArray *)w_as_ptr(c_wval);
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
     int64_t M = w_as_int(m_wval);
     int64_t N = w_as_int(n_wval);
     int64_t K = w_as_int(k_wval);
@@ -54,7 +54,7 @@ WValue w_blas_dgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
 /* ---- vDSP reductions over an f32 array (whole array, start-offset aware) ----
  * n<=0 ⇒ operate over the array's full length. All return a boxed Float. */
 static inline float *blas_f32_ptr(WValue v, int64_t *len_out) {
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     *len_out = (int64_t)a->size;
     return (float *)a->slots + a->start;
 }
@@ -234,7 +234,7 @@ WValue w_blas_vfill_f32(WValue out_wval, WValue s_wval, WValue n_wval) {
 #include <math.h>
 
 static double *blas_f64_ptr(WValue v, int64_t *len_out) {
-    WArray *a = (WArray *)w_as_ptr(v);
+    WArray *a = w_as_array(v);
     *len_out = (int64_t)a->size;
     return (double *)a->slots + a->start;
 }

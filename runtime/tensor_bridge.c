@@ -36,7 +36,7 @@ WValue w_tensor_zeros_f32(WValue shape_wv) {
         w_raise(w_string("w_tensor_zeros_f32: shape must be Array"));
         return W_NIL;
     }
-    WArray *sh = (WArray *)w_as_ptr(shape_wv);
+    WArray *sh = w_as_array(shape_wv);
     int rank = (int)sh->size;
     if (rank < 0 || rank > 16) {
         w_raise(w_string("w_tensor_zeros_f32: bad rank"));
@@ -53,7 +53,7 @@ WValue w_tensor_zeros_f32(WValue shape_wv) {
     }
     /* storage via aligned f32 array */
     WValue stor = w_array_new_aligned(w_int(-32), w_int(nelem));
-    WArray *sa = (WArray *)w_as_ptr(stor);
+    WArray *sa = w_as_array(stor);
 
     WTensor *t = NULL;
     if (posix_memalign((void **)&t, 16, sizeof(WTensor)) != 0 || !t) {
@@ -104,7 +104,7 @@ WValue w_tensor_shape(WValue t_wv) {
     WTensor *t = (WTensor *)w_as_ptr(t_wv);
     int32_t *sh = wtensor_shape_ptr(t);
     WValue arr = w_array_new(65, t->rank);
-    WArray *a = (WArray *)w_as_ptr(arr);
+    WArray *a = w_as_array(arr);
     for (int i = 0; i < t->rank; i++) {
         ((WValue *)a->slots)[a->start + a->size] = w_int(sh[i]);
         a->size++;
@@ -118,7 +118,7 @@ WValue w_tensor_at_f32(WValue t_wv, WValue indices_wv) {
         return W_NIL;
     }
     WTensor *t = (WTensor *)w_as_ptr(t_wv);
-    WArray *ix = (WArray *)w_as_ptr(indices_wv);
+    WArray *ix = w_as_array(indices_wv);
     int32_t idx[16];
     int n = (int)ix->size;
     if (n > 16) n = 16;
@@ -139,7 +139,7 @@ WValue w_tensor_set_f32(WValue t_wv, WValue indices_wv, WValue val_wv) {
         return W_NIL;
     }
     WTensor *t = (WTensor *)w_as_ptr(t_wv);
-    WArray *ix = (WArray *)w_as_ptr(indices_wv);
+    WArray *ix = w_as_array(indices_wv);
     int32_t idx[16];
     int n = (int)ix->size;
     if (n > 16) n = 16;
@@ -164,7 +164,7 @@ WValue w_tensor_view_f32(WValue t_wv, WValue offset_wv, WValue shape_wv) {
     }
     WTensor *src = (WTensor *)w_as_ptr(t_wv);
     int64_t rel = w_as_int(offset_wv);
-    WArray *sh = (WArray *)w_as_ptr(shape_wv);
+    WArray *sh = w_as_array(shape_wv);
     int rank = (int)sh->size;
     if (rank < 0 || rank > 16) {
         w_raise(w_string("w_tensor_view_f32: bad rank"));

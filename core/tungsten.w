@@ -275,6 +275,7 @@
   auto :RationalField,          "algebra"
   auto :FiniteField,            "algebra"
   auto :PolyFast,               "algebra/poly_fast"
+  auto :NttMultiply,            "algebra/ntt"
   auto :FiniteFieldModulusCertificate, "algebra"
   auto :FiniteFieldMinimalPolynomialCertificate, "algebra"
   auto :SimpleExtensionField,    "algebra"

@@ -271,6 +271,27 @@ t1 = now_ms
 << "BENCH resultant_60x50 ms=" + (t1 - t0).to_s + " zero=" + res.zero?.to_s
 
 
+
+# ── dense univariate multiply over F_p (NTT + CRT lane above deg 256) ────
+rng = BenchRandom.new(37)
+nring = PolynomialRing.new([:w], FiniteField.new(32003))
+nt = nring.generator(0)
+na = nring.zero
+nb = nring.zero
+i = 0
+while i <= 1000
+  na = na + nt**i * rng.next_int(32003)
+  nb = nb + nt**i * (rng.next_int(32002) + 1)
+  i += 1
+t0 = now_ms
+reps = 0
+nc = nil
+while reps < 5
+  nc = na * nb
+  reps += 1
+t1 = now_ms
+<< "BENCH ntt_mul_f32003_deg1000_x5 ms=" + (t1 - t0).to_s + " terms=" + nc.terms.size.to_s
+
 # ── polynomial dedup / equality-heavy workload (content-hash filter) ─────
 rng = BenchRandom.new(31)
 dedup_ring = PolynomialRing.new([:p, :q], FiniteField.new(101), :grevlex)

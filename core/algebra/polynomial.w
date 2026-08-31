@@ -558,6 +558,17 @@
     left = coefficients
     right = other.coefficients
     product_degree = self_degree + other_degree
+    # Large dense products over a small prime field take the exact 3-prime
+    # NTT + CRT lane (O(d log d) vs schoolbook's O(d^2)); identical output
+    # by exactness. Crossover measured at ~2^8 total degree.
+    if @ring.fastmod != nil && product_degree >= 256
+      fast = NttMultiply.multiply_mod_p(left, right, @ring.fastmod)
+      out = []
+      i = product_degree
+      while i >= 0
+        out.push([fast[i], [i]]) if fast[i] != 0
+        i -= 1
+      return Polynomial.new(@ring, out, true)
     product = []
     i = 0
     while i <= product_degree
@@ -1043,9 +1054,11 @@
     raise "coefficients is only defined for univariate polynomials" if @ring.arity != 1
     return [] if zero?
     out = []
+    d = degree
+    zero = @ring.field.zero
     i = 0
-    while i <= degree
-      out.push(@ring.field.zero)
+    while i <= d
+      out.push(zero)
       i += 1
     i = 0
     while i < @terms.size

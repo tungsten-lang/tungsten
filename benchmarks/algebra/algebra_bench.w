@@ -270,6 +270,46 @@ res = res_a.resultant(res_b)
 t1 = now_ms
 << "BENCH resultant_60x50 ms=" + (t1 - t0).to_s + " zero=" + res.zero?.to_s
 
+
+# ── polynomial dedup / equality-heavy workload (content-hash filter) ─────
+rng = BenchRandom.new(31)
+dedup_ring = PolynomialRing.new([:p, :q], FiniteField.new(101), :grevlex)
+dp = dedup_ring.generator(0)
+dq = dedup_ring.generator(1)
+distinct = []
+i = 0
+while i < 120
+  poly = dedup_ring.zero
+  t = 0
+  while t < 12
+    poly = poly + dp**rng.next_int(20) * dq**rng.next_int(20) * (rng.next_int(100) + 1)
+    t += 1
+  distinct.push(poly)
+  i += 1
+population = []
+i = 0
+while i < 2000
+  population.push(distinct[rng.next_int(120)])
+  i += 1
+t0 = now_ms
+seen = {}
+unique = 0
+population.each -> (poly)
+  key = poly.content_hash
+  bucket = seen[key]
+  if bucket == nil
+    seen[key] = [poly]
+    unique += 1
+  else
+    found = false
+    bucket.each -> (candidate)
+      found = true if candidate == poly
+    if !found
+      bucket.push(poly)
+      unique += 1
+t1 = now_ms
+<< "BENCH poly_dedup_2000 ms=" + (t1 - t0).to_s + " unique=" + unique.to_s
+
 # ── GF(2) RREF (160 rows × width 256) ────────────────────────────────────
 rng = BenchRandom.new(23)
 f2_rows = []

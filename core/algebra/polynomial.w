@@ -263,6 +263,7 @@
   -> new(@ring, terms)
     raise "polynomial requires a PolynomialRing" if @ring.class_name != "PolynomialRing"
     @terms = normalize_terms(terms)
+    @content_hash = nil
 
   # Trusted constructor for term lists that are canonical BY CONSTRUCTION:
   # sorted strictly descending in the ring's monomial order, no duplicate
@@ -279,6 +280,7 @@
   # a per-construction string compare is pure hot-path cost).
   -> new(@ring, terms, canonical)
     @terms = canonical ? terms : normalize_terms(terms)
+    @content_hash = nil
 
   ro :ring, :terms
 
@@ -580,6 +582,32 @@
       factor = factor * factor if n > 0
     result
 
+  # Cached 30-bit content hash over the canonical term list (order-sensitive
+  # mixer, all intermediates nanbox-safe). Polynomials are immutable, so the
+  # cache is sound. Used as a FILTER: equal hashes still fall through to the
+  # structural walk; only a present-on-both-sides mismatch short-circuits.
+  -> content_hash
+    return @content_hash if @content_hash != nil
+    h = 17
+    @terms.each -> (term)
+      h = (h * 131071 + term[0].hash % 1073741789) % 1073741789
+      e = term[1]
+      i = 0
+      while i < e.size
+        h = (h * 131071 + e[i]) % 1073741789
+        i += 1
+    h += 1 if h == 0
+    @content_hash = h
+    h
+
+  -> cached_content_hash
+    @content_hash
+
+  # Structural hash — makes polynomials usable as Hash keys with value
+  # semantics (previously they fell back to identity hashing).
+  -> hash
+    content_hash
+
   -> ==/1
     self.eql?(@1)
 
@@ -588,6 +616,9 @@
     value_class = value.class_name
     if value_class == "Polynomial"
       return false if value.ring != @ring
+      mine = @content_hash
+      theirs = value.cached_content_hash
+      return false if mine != nil && theirs != nil && mine != theirs
     elsif value_class != "Integer" && value_class != "Int" && value_class != "BigInt" && value_class != "Rational"
       return false
     other = coerce(value)

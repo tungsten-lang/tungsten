@@ -494,6 +494,12 @@ if cross_target != "" && cross_sysroot == "" && (cross_target.index("apple") != 
 -> ll_needs_cuda(text)
   ll_text_has(text, "@w_cuda_")
 
+# MLX (Apple array framework, via mlx-c). The bf16/f16 conversion helpers
+# also live in mlx_bridge.c, so their prefix gates the bridge too.
+-> ll_needs_mlx(text)
+  return true if ll_text_has(text, "@w_mlx_")
+  ll_text_has(text, "@w_f32_to_")
+
 # Standalone executables have no dynamic ABI: Tungsten functions/classes are
 # already internal, and their runtime calls are resolved in the final link.
 # The compiler's --jit/--hot host is the exception. Its snippets deliberately
@@ -528,6 +534,18 @@ driver_homebrew_prefix_memo = {}
   prefix = capture(cmd + " 2>/dev/null").strip()
   driver_homebrew_prefix_memo[key] = prefix
   prefix
+
+-> mlx_cflags
+  brew = driver_homebrew_prefix("")
+  if brew != "" && file?(brew + "/include/mlx/c/array.h")
+    return "-I" + brew + "/include"
+  ""
+
+-> mlx_ldflags
+  brew = driver_homebrew_prefix("")
+  if brew != "" && file?(brew + "/lib/libmlxc.dylib")
+    return "-L" + brew + "/lib -lmlxc -lmlx"
+  ""
 
 -> zstd_cflags
   if cross_target != ""
@@ -1227,6 +1245,7 @@ driver_homebrew_prefix_memo = {}
   sci_io_needed = ll_needs_sci_io(ll_probe_text)
   wtensor_needed = ll_needs_wtensor(ll_probe_text)
   cuda_needed = ll_needs_cuda(ll_probe_text)
+  mlx_needed = ll_needs_mlx(ll_probe_text)
   # Data-table gating (weak twins in runtime.c make absence safe):
   #   prime    → ssmr_witness.c (512KB witness table; absent = exact 4-base
   #              fallback over its range)
@@ -1429,6 +1448,14 @@ driver_homebrew_prefix_memo = {}
     if sparse_needed
       clang_cmd << gated_dir
       clang_cmd << "sparse_bridge.c "
+    if mlx_needed
+      mlx_inc = mlx_cflags()
+      if mlx_inc == ""
+        raise "this program uses MLX (w_mlx_* / bf16 conversion) but mlx-c is not installed — brew install mlx mlx-c"
+      clang_cmd << gated_dir
+      clang_cmd << "mlx_bridge.c "
+      clang_cmd << mlx_inc
+      clang_cmd << " "
     if bridges_needed
       clang_cmd << gated_dir
       clang_cmd << "metal.m "
@@ -1503,6 +1530,10 @@ driver_homebrew_prefix_memo = {}
       clang_cmd << " -framework Metal -framework Foundation -framework AppKit -framework QuartzCore -framework CoreGraphics -framework IOKit -framework CoreFoundation"
     if blas_needed || sparse_needed
       clang_cmd << " -framework Accelerate"
+    if mlx_needed
+      clang_cmd << " "
+      clang_cmd << mlx_ldflags()
+      clang_cmd << " -framework Metal -framework Foundation"
 
   # Linux: libm is a separate library (macOS bundles it into libSystem), and
   # it must follow the objects that reference it.

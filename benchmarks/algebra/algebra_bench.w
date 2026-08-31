@@ -354,3 +354,6 @@ t1 = now_ms
 << "BENCH f2_rref_512x1024 ms=" + (t1 - t0).to_s + " out=" + f2_result.size.to_s
 
 << "algebra_bench done"
+
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!

@@ -38,3 +38,6 @@ gb = GroebnerBasis.basis(cyclic6, 200_000)
 t1 = now_ms
 << "BENCH groebner_cyclic6_f32003 ms=" + (t1 - t0).to_s + " basis=" + gb.size.to_s
 << "groebner_stress done"
+
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!

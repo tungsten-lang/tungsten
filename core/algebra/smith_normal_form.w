@@ -70,9 +70,70 @@
         q -= 1
     q
 
+  # Balanced residue of v mod d (in [-d/2, d/2]); identity when d is nil.
+  # Fast-exits on entries already in range — the reduction sweep visits the
+  # whole trailing block every pass, and most entries are already small.
+  -> .balanced_mod(v, d)
+    return v if d == nil
+    if v >= 0
+      return v if v + v <= d
+    else
+      return v if 0 - (v + v) <= d
+    r = v % d
+    r += d if r < 0
+    r -= d if r + r > d
+    r
+
   # The invariant factors d1 | d2 | ... | dr, as a positive-integer array.
   # Its length is the rank; a zero matrix yields an empty array.
+  #
+  # A mod-determinant lane exists (invariant_factors_mod_det below): every
+  # determinantal divisor D_k divides D = |det|, entry adjustments by
+  # multiples of D change every k-minor by a multiple of D, so
+  # gcd(D_k(adjusted), D) = D_k(original), and the true factors recover
+  # from the mod-D pivot products. It is verified factor-exact against
+  # this path (12/12 randomized n = 24..32), but it is NOT routed
+  # automatically: measured 2x slower at n = 48..64, and the n >= 96 wall
+  # turns out to be elimination PASS COUNT, not coefficient growth —
+  # bounded entries do not rescue it. Large-n SNF needs an HNF-first
+  # algorithm; until then this exact elimination is the best lane.
   -> .invariant_factors(matrix)
+    SmithNormalForm.pivot_diagonal(matrix, nil)
+
+  # Mod-determinant invariant factors (square, nonsingular; see the note
+  # above). Falls back to the exact lane when det = 0.
+  -> .invariant_factors_mod_det(matrix)
+    width = SmithNormalForm.validate(matrix)
+    height = matrix.size
+    if height == width
+      d = ExactIntegerLinearAlgebra.modular_determinant(matrix)
+      d = 0 - d if d < 0
+      if d != 0
+        return SmithNormalForm.factors_from_pivots(
+          SmithNormalForm.pivot_diagonal(matrix, d), d)
+    SmithNormalForm.pivot_diagonal(matrix, nil)
+
+  # Recover the invariant factors from the mod-D pivot diagonal.
+  -> .factors_from_pivots(pivots, d)
+    factors = []
+    r = 1
+    previous = 1
+    i = 0
+    while i < pivots.size
+      r = (r * pivots[i]) % d
+      g = r.gcd(d)
+      g = d if g == 0
+      factors.push(g / previous)
+      previous = g
+      i += 1
+    factors
+
+  # The elimination core: returns the |pivot| diagonal. With a modulus the
+  # trailing block is reduced into balanced residues after every clearing
+  # pass (each adjustment is a multiple-of-modulus entry change — see the
+  # invariant_factors doc for why that preserves what we recover); without
+  # one this is the exact algorithm and the diagonal IS the factor list.
+  -> .pivot_diagonal(matrix, modulus)
     width = SmithNormalForm.validate(matrix)
     m = SmithNormalForm.copy(matrix)
     height = m.size
@@ -87,6 +148,14 @@
       cleared = false
       empty = false
       while !cleared
+        if modulus != nil
+          i = t
+          while i < height
+            j = t
+            while j < width
+              m[i][j] = SmithNormalForm.balanced_mod(m[i][j], modulus)
+              j += 1
+            i += 1
         # Locate the nonzero entry of least magnitude in the remaining block.
         pi = 0 - 1
         pj = 0 - 1
@@ -136,7 +205,12 @@
               i += 1
             cleared = false if m[t][j] != 0
           j += 1
-      break if empty
+      if empty
+        if modulus != nil
+          while t < height && t < width
+            factors.push(modulus)
+            t += 1
+        break
       # Enforce divisibility: every remaining entry must be a multiple of the
       # pivot, or the chain d1 | d2 | ... would fail.
       pivot = m[t][t]

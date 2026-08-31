@@ -168,7 +168,56 @@ fn sgemm_auto_batch(a, b, c, m, n, k, iters)
 fn dgemm_auto(a, b, c, m, n, k)
   dgemm(a, b, c, m, n, k)
 
-# bfloat16 auto-dispatch. Inputs must be bf16 arrays — see
-# core/mlx::f32_to_bf16 for the conversion helper.
+# bf16 policy: which backend handles a square-multiple-of-32 shape up to
+# each n_max. Tunable via "policy_bf16" in ~/.tungsten/sgemm-policy.json;
+# the default routes every eligible shape to the Tungsten-native
+# metal-bf16 kernel (measured on M-series: 246 GFLOPS at n=512, 1300 at
+# 1024, 6627 at 2048 — scaling cleanly), everything else to MLX as before.
+-> load_bgemm_policy
+  home = env("HOME")
+  return bgemm_default_policy() if home == nil || home == ""
+  path = home + "/.tungsten/sgemm-policy.json"
+  return bgemm_default_policy() if !file?(path)
+  data = JSON.parse(read_file(path))
+  return bgemm_default_policy() if data == nil
+  thresholds = data["policy_bf16"]
+  return bgemm_default_policy() if thresholds == nil || thresholds.size() == 0
+  thresholds
+
+-> bgemm_default_policy
+  [
+    {"n_max" => 1000000, "backend" => "metal-bf16"}
+  ]
+
+BGEMM_POLICY = load_bgemm_policy()
+
+-> bgemm_pick_backend(largest)
+  i = 0
+  while i < BGEMM_POLICY.size()
+    entry = BGEMM_POLICY[i]
+    if largest <= entry["n_max"]
+      return entry["backend"]
+    i += 1
+  BGEMM_POLICY[BGEMM_POLICY.size() - 1]["backend"]
+
+# bfloat16 auto-dispatch over PACKED bf16 arrays (MLX's contract — see
+# core/mlx::f32_to_bf16). MLX is the only backend speaking packed bf16,
+# so this stays a direct call; the POLICY lives one level up in
+# sgemm_bf16_auto, whose f32-array contract both backends can serve.
 fn bgemm_auto(a, b, c, m, n, k)
   mlx_bgemm(a, b, c, m, n, k)
+
+# bf16-internal matmul over F32 ARRAYS: precision of bf16, convenience of
+# f32 buffers. Square-multiple-of-32 shapes follow policy_bf16 (default:
+# the Tungsten-native metal-bf16 kernel, which takes f32 and converts on
+# the GPU — measured 246/1300/6627 GFLOPS at n=512/1024/2048). Other
+# shapes are the caller's explicit choice: pack with f32_to_bf16 and call
+# bgemm_auto/mlx_bgemm directly (no silent conversion path is provided —
+# there is no validated bf16->f32 return conversion today).
+fn sgemm_bf16_auto(a, b, c, m, n, k)
+  if m == n && n == k && (n % 32) == 0
+    backend = bgemm_pick_backend(m)
+    if backend == "metal-bf16"
+      return metal_sgemm_bf16(a, b, c, m, n, k)
+    return mlx_sgemm(a, b, c, m, n, k)
+  raise "sgemm_bf16_auto: square multiple-of-32 shapes only — pack bf16 and use bgemm_auto for other shapes"

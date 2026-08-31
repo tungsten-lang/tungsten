@@ -827,6 +827,15 @@
 -> emit_wire_fmuladd_f64(f, lhs, rhs, temp, value)
   current_block(f)[:instructions].push(wire_make_fmuladd_f64(lhs, rhs, temp, value))
 
+-> wire_make_ctpop_i64(value, temp)
+  handle = ccall_rawargs("w_wire_alloc", 269, 2)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :value, value)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
+  handle
+
+-> emit_wire_ctpop_i64(f, value, temp)
+  current_block(f)[:instructions].push(wire_make_ctpop_i64(value, temp))
+
 -> wire_make_fn_addr_i64(name, temp)
   handle = ccall_rawargs("w_wire_alloc", 77, 2)
   ccall_nobox("w_wire_field_store_at", handle, 0, :name, name)

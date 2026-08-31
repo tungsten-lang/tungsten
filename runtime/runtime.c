@@ -65381,6 +65381,38 @@ WValue w_vec4_dot_f32(WValue a_wval, WValue b_wval) {
     float dot = vaddvq_f32(prod);
     return w_float((double)dot);
 }
+/* Batched 4x4 f32 multiply: C[i] = A[i] * B[i] for `count` consecutive
+ * 16-float blocks. One ccall amortizes the per-call dispatch floor
+ * (~20-100 ns) across the whole batch — the win the single-matrix NEON
+ * kernel documents, extended to bulk small-matrix workloads. */
+WValue w_mat4_mul_batch_f32(WValue a_wval, WValue b_wval, WValue c_wval, WValue count_w) {
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
+    int64_t count = w_as_int(count_w);
+    const float *Ap = (const float *)a->slots + a->start;
+    const float *Bp = (const float *)b->slots + b->start;
+    float *Cp = (float *)c->slots + c->start;
+    for (int64_t t = 0; t < count; t++) {
+        const float *Abase = Ap + t * 16;
+        const float *Bbase = Bp + t * 16;
+        float *Cbase = Cp + t * 16;
+        float32x4_t b0 = vld1q_f32(Bbase);
+        float32x4_t b1 = vld1q_f32(Bbase + 4);
+        float32x4_t b2 = vld1q_f32(Bbase + 8);
+        float32x4_t b3 = vld1q_f32(Bbase + 12);
+        for (int i = 0; i < 4; i++) {
+            const float *Ai = Abase + i * 4;
+            float32x4_t row = vmulq_n_f32(b0, Ai[0]);
+            row = vmlaq_n_f32(row, b1, Ai[1]);
+            row = vmlaq_n_f32(row, b2, Ai[2]);
+            row = vmlaq_n_f32(row, b3, Ai[3]);
+            vst1q_f32(Cbase + i * 4, row);
+        }
+    }
+    return c_wval;
+}
+
 #else
 /* Portable scalar fallbacks: bit-identical shape contract with the NEON
  * versions (row-major 4x4 / length-4 f32 WArrays), so non-aarch64 builds
@@ -65431,6 +65463,29 @@ WValue w_vec4_dot_f32(WValue a_wval, WValue b_wval) {
     float dot = 0.0f;
     for (int i = 0; i < 4; i++) dot += Ap[i] * Bp[i];
     return w_float((double)dot);
+}
+WValue w_mat4_mul_batch_f32(WValue a_wval, WValue b_wval, WValue c_wval, WValue count_w) {
+    WArray *a = w_as_array(a_wval);
+    WArray *b = w_as_array(b_wval);
+    WArray *c = w_as_array(c_wval);
+    int64_t count = w_as_int(count_w);
+    const float *Ap = (const float *)a->slots + a->start;
+    const float *Bp = (const float *)b->slots + b->start;
+    float *Cp = (float *)c->slots + c->start;
+    for (int64_t t = 0; t < count; t++) {
+        const float *Abase = Ap + t * 16;
+        const float *Bbase = Bp + t * 16;
+        float *Cbase = Cp + t * 16;
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 4; j++) {
+                float acc = 0.0f;
+                for (int k = 0; k < 4; k++)
+                    acc += Abase[i * 4 + k] * Bbase[k * 4 + j];
+                Cbase[i * 4 + j] = acc;
+            }
+        }
+    }
+    return c_wval;
 }
 #endif
 

@@ -523,6 +523,17 @@
   # `fma` over other types still dispatches normally. Operands ride on
   # lhs/rhs/value (apply_subst / content_hash already rewrite those — see the
   # :fmuladd_f64 emitter case).
+  # `popcount(x)` on a statically-integer operand lowers to llvm.ctpop.i64
+  # (one cnt/popcnt instruction). Gated on the static type so a user-defined
+  # popcount over other receivers still dispatches normally.
+  if receiver == nil && name == "popcount" && args != nil && args.size() == 1
+    pc0 = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    if pc0 in (:int :i64 :raw_i64)
+      pc_v = ensure_raw_i64(wfn, lower_expression(ctx, args[0]))
+      pc_t = next_temp(wfn)
+      emit_wire_ctpop_i64(wfn, pc_v, pc_t)
+      return typed_value(:raw_i64, pc_t)
+
   if receiver == nil && name == "fma" && args != nil && args.size() == 3
     fa0 = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     fa1 = infer_type(args[1], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)

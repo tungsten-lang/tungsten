@@ -681,6 +681,9 @@
   # older clangs.
   out << declare_fn_attrs("llvm.minimumnum.f64", "double", dd, libm_attrs)
   out << declare_fn_attrs("llvm.maximumnum.f64", "double", dd, libm_attrs)
+  # Population count (always available; every clang knows llvm.ctpop).
+  out << "declare i64 @llvm.ctpop.i64(i64)\n"
+
 
   # Float bit-cast
   out << declare_fn("w_float_from_u32_bits", wv, wv)

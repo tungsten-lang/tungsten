@@ -435,15 +435,11 @@
 
 # ---- exactness, density, adoption ----------------------------------------
 
-# Branch-free SWAR popcount (12 raw ops). Verified bit-exact against the
-# old Kernighan loop over 1M random masks; ~10% faster on dense masks and
-# data-independent, so density scoring no longer varies with mask weight.
+# Hardware popcount (llvm.ctpop.i64 -> one cnt instruction; bit-exact
+# with the SWAR/Kernighan forms it replaces, data-independent).
 -> ffw_popcount(value) (i64) i64
   x = value ## i64
-  x = x - ((x >> 1) & 6148914691236517205)
-  x = (x & 3689348814741910323) + ((x >> 2) & 3689348814741910323)
-  x = (x + (x >> 4)) & 1085102592571150095
-  (x * 72340172838076673) >> 56
+  popcount(x)
 
 -> ffw_view_bits(st, uo, vo, wo, liveo, rank) (i64[] i64 i64 i64 i64 i64) i64
   bits = 0 ## i64

@@ -767,6 +767,10 @@
   # Explicit `fma(a,b,c)` — llvm.fma.f64 is ALWAYS a true fused multiply-add
   # (single rounding), unlike fmuladd's "contract if profitable". Same
   # lhs/rhs/value operand fields for mem2reg/content-hash safety.
+  # Hardware population count on a raw i64 — single cnt/popcnt instruction.
+  # Operand rides on :value (walked by apply_subst / content_hash).
+  when :ctpop_i64
+    wire_get(inst, :temp) + " = call i64 @llvm.ctpop.i64(i64 " + wire_get(inst, :value) + ")"
   when :fma_f64
     wire_get(inst, :temp) + " = call double @llvm.fma.f64(double " + wire_get(inst, :lhs) + ", double " + wire_get(inst, :rhs) + ", double " + wire_get(inst, :value) + ")"
   # Raw libm call — Math.* fast path on unboxed operands (lowering/

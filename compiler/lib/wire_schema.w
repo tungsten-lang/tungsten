@@ -274,7 +274,9 @@ wire_kind_symbols = [
   :wire_sequence,
   # Compiler-internal lowering result. This remains append-only like every
   # other WIRE kind; its fixed field order is :type, :value.
-  :wire_typed_value
+  :wire_typed_value,
+  # Population count on a raw i64 (llvm.ctpop.i64). Fields :value, :temp.
+  :ctpop_i64
 ]
 
 wire_kind_ids = {}

@@ -66,6 +66,13 @@ fn dgemm(a, b, c, m, n, k)
 fn mat4_mul(a, b, c)
   ccall("w_mat4_mul_f32", a, b, c)
 
+# Batched 4x4 multiply: `count` consecutive 16-float blocks in each of
+# a/b/c; one runtime call for the whole batch (amortizes ccall dispatch).
+# `->` not `fn`: mutates c, and w_mat4_mul_batch_f32 is not on the
+# compiler's known-impure ccall list, so `fn` would memoize it.
+-> mat4_mul_batch(a, b, c, count)
+  ccall("w_mat4_mul_batch_f32", a, b, c, count)
+
 # 4-component f32 vector ops via NEON. All three operands must be
 # f32_array(4) (or any f32[] of length ≥ 4 — the SIMD load reads
 # 4 floats from the start offset). Result lands in `out`.

@@ -32,6 +32,43 @@
 # which makes reduction single-threaded per ring (Buchberger is
 # sequential).
 
+# Merge the two scaled, shifted term lists of an S-polynomial into (ok,
+# oc): (l_coef * x^lq * L) + (r_coef * x^rq * R) where r_coef is already
+# negated mod p and both lead terms map to the lcm and cancel exactly (the
+# caller skips them by starting at index 1). Returns the merged length or
+# -1 on capacity bail.
+-> pf_spoly_merge(lk, lc, lcount, rk, rc, rcount, lq, rq, l_coef, r_coef, p, ok, oc, cap) (i64[] i64[] i64 i64[] i64[] i64 i64 i64 i64 i64 i64 i64[] i64[] i64) i64
+  i = 1 ## i64
+  j = 1 ## i64
+  out = 0 ## i64
+  while i < lcount || j < rcount
+    a = -1 ## i64
+    b = -1 ## i64
+    a = lk[i] + lq if i < lcount
+    b = rk[j] + rq if j < rcount
+    if i < lcount && (j >= rcount || a > b)
+      return -1 if out >= cap
+      ok[out] = a
+      oc[out] = (lc[i] * l_coef) % p
+      out += 1
+      i += 1
+    elsif j < rcount && (i >= lcount || b > a)
+      return -1 if out >= cap
+      ok[out] = b
+      oc[out] = (rc[j] * r_coef) % p
+      out += 1
+      j += 1
+    else
+      v = ((lc[i] * l_coef) % p + (rc[j] * r_coef) % p) % p ## i64
+      if v != 0
+        return -1 if out >= cap
+        ok[out] = a
+        oc[out] = v
+        out += 1
+      i += 1
+      j += 1
+  out
+
 # The whole reduction loop. Layout:
 #   pk/pc        pending keys/coeffs (working buffer A), plen terms
 #   qk/qc_buf    ping-pong buffer B
@@ -277,6 +314,105 @@
       ws[7] = i64[bank_cap]
       ws[11] = bank_cap
     ws
+
+  # 6-bit per-var byte max of two packed keys' exponents, as a packed
+  # grevlex key (complement fields rebuilt, degree recomputed) — the lcm
+  # monomial of two lead keys. Returns nil if any bound is exceeded.
+  -> .lcm_key(a, b)
+    deg = 0
+    key = 0
+    i = 0
+    while i < 6
+      ca = (a / (64 ** i)) % 64
+      cb = (b / (64 ** i)) % 64
+      c = ca < cb ? ca : cb
+      key = key | ((c) * (64 ** i))
+      deg += 63 - c
+      i += 1
+    return nil if deg > 511
+    key + deg * 68719476736
+
+  # Overflow guard for shifting a whole polynomial by quotient exponents:
+  # per var, the poly's max exponent plus the shift must stay <= 63.
+  -> .shift_safe?(maxkey, lead_key, lcm)
+    i = 0
+    while i < 6
+      shift = ((lead_key / (64 ** i)) % 64) - ((lcm / (64 ** i)) % 64)
+      m = (maxkey / (64 ** i)) % 64
+      return false if m + shift > 63
+      i += 1
+    true
+
+  # Fused S-polynomial + normal form: remainder of spoly(left, right) under
+  # `divisors` with no intermediate Polynomial construction, or nil to
+  # fall back. OUTPUT-IDENTICAL to the slow pipeline.
+  -> .s_poly_normal_form(left, right, divisors)
+    ring = left.ring
+    return nil if !PolyFast.ring_ok?(ring)
+    lf = PolyFast.packed_form(left)
+    return nil if lf == nil
+    rf = PolyFast.packed_form(right)
+    return nil if rf == nil
+    forms = []
+    total = 0
+    k = 0
+    while k < divisors.size
+      form = PolyFast.packed_form(divisors[k])
+      return nil if form == nil
+      forms.push(form)
+      total += form[4]
+      k += 1
+    lcm = PolyFast.lcm_key(lf[0][0], rf[0][0])
+    return nil if lcm == nil
+    return nil if !PolyFast.shift_safe?(lf[2], lf[0][0], lcm)
+    return nil if !PolyFast.shift_safe?(rf[2], rf[0][0], lcm)
+    p = ring.fastmod
+    cap = PolyFast.capacity
+    ws = PolyFast.workspace(ring, total, divisors.size)
+    lq = lcm - lf[0][0]
+    rq = lcm - rf[0][0]
+    l_coef = lf[3]
+    r_coef = (p - rf[3]) % p
+    plen = pf_spoly_merge(lf[0], lf[1], lf[4], rf[0], rf[1], rf[4],
+                          lq, rq, l_coef, r_coef, p, ws[0], ws[1], cap)
+    return nil if plen < 0
+    arity = ring.arity
+    if plen == 0
+      return Polynomial.new(ring, [], true)
+    bk = ws[6]
+    bc = ws[7]
+    bptr = ws[8]
+    binv = ws[9]
+    bmax = ws[10]
+    off = 0
+    k = 0
+    while k < forms.size
+      form = forms[k]
+      bptr[k] = off
+      binv[k] = form[3]
+      bmax[k] = form[2]
+      fk = form[0]
+      fc = form[1]
+      fcount = form[4]
+      i = 0
+      while i < fcount
+        bk[off + i] = fk[i]
+        bc[off + i] = fc[i]
+        i += 1
+      off += fcount
+      k += 1
+    bptr[forms.size] = off
+    rlen = pf_run(ws[0], ws[1], plen, ws[2], ws[3], bk, bc, bptr, binv, bmax,
+                  forms.size, ws[4], ws[5], p, cap)
+    return nil if rlen < 0
+    rk = ws[4]
+    rc = ws[5]
+    terms = []
+    i = 0
+    while i < rlen
+      terms.push([rc[i], PolyFast.unpack_key(rk[i], arity)])
+      i += 1
+    Polynomial.new(ring, terms, true)
 
   # Fast normal form: remainder of `poly` under `divisors`, or nil when the
   # lane does not apply / a runtime guard bails.

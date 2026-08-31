@@ -198,7 +198,8 @@
       next if GroebnerBasis.relatively_prime?(
         left.leading_term[1], right.leading_term[1])
       next if GroebnerBasis.chain_redundant?(basis, pending, pair)
-      remainder = GroebnerBasis.s_polynomial(left, right).normal_form(basis)
+      remainder = PolyFast.s_poly_normal_form(left, right, basis)
+      remainder = GroebnerBasis.s_polynomial(left, right).normal_form(basis) if remainder == nil
       if !remainder.zero?
         remainder = remainder.monic
         return [remainder] if remainder.constant?

@@ -65434,6 +65434,23 @@ WValue w_vec4_dot_f32(WValue a_wval, WValue b_wval) {
 }
 #endif
 
+/* Dirt-simple global measurement counters for perf forensics from .w code:
+ * w_probe_counter_add(slot, v) accumulates, w_probe_counter_take(slot)
+ * returns and clears. 16 slots, no threading guarantees — a profiling aid,
+ * not an API. */
+static int64_t w_probe_counters[16];
+WValue w_probe_counter_add(WValue slot_w, WValue v_w) {
+    int64_t slot = w_as_int(slot_w);
+    if (slot >= 0 && slot < 16) w_probe_counters[slot] += w_as_int(v_w);
+    return W_NIL;
+}
+WValue w_probe_counter_take(WValue slot_w) {
+    int64_t slot = w_as_int(slot_w);
+    int64_t v = 0;
+    if (slot >= 0 && slot < 16) { v = w_probe_counters[slot]; w_probe_counters[slot] = 0; }
+    return w_int(v);
+}
+
 typedef enum {
     ARRAY_MAP_COS,
     ARRAY_MAP_SIN,

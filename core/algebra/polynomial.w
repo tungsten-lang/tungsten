@@ -157,9 +157,23 @@
     @names = names
     @field = Field.require_supported(field)
     @order = MonomialOrder.named(order)
+    # Small-prime-field fast lane: elements are plain residues in [0, p) and
+    # p*p stays inside the small-integer range, so the polynomial kernels
+    # can do the mod-p arithmetic inline (one nil-check replacing two method
+    # sends and a defensive re-normalization per coefficient op).
+    @fastmod = nil
+    if @field.finite_field? && @field.prime_field? && @field.characteristic < 2147483648
+      @fastmod = @field.characteristic
+    # Cache the simple-order name so the polynomial kernels can compare
+    # monomials inline (three dynamic sends per comparison otherwise, and
+    # Gröbner reduction on cyclic-6 does ~1.3M comparisons).
+    @simple_order = nil
+    n = @order.name
+    if n == "grevlex" || n == "lex" || n == "grlex"
+      @simple_order = n
     self
 
-  ro :names, :field, :order
+  ro :names, :field, :order, :fastmod, :simple_order
 
   -> arity
     @names.size
@@ -253,7 +267,8 @@
   # Trusted constructor for term lists that are canonical BY CONSTRUCTION:
   # sorted strictly descending in the ring's monomial order, no duplicate
   # monomials, no zero coefficients, coefficients already normalized field
-  # elements, exponent arrays owned by the list. `normalize_terms` is a
+  # elements, exponent arrays immutable (they may be SHARED between
+  # polynomials — never mutate a term's exponent array). `normalize_terms` is a
   # quadratic scan-and-sort, and running it on every arithmetic result is
   # what made each Gröbner reduction step O(terms²) — internal call sites
   # whose output provably satisfies the invariant (merges of canonical
@@ -286,18 +301,25 @@
   # Coefficient arithmetic always goes through the ring field so FiniteField
   # residues never leak as unreduced Integers (e.g. 3+3 = 6 in F_5).
   -> field_add(left, right)
+    p = @ring.fastmod
+    return (left + right) % p if p != nil
     @ring.field.add(left, right)
 
   -> field_mul(left, right)
+    p = @ring.fastmod
+    return (left * right) % p if p != nil
     @ring.field.multiply(left, right)
 
   -> field_neg(value)
+    p = @ring.fastmod
+    return (p - value) % p if p != nil
     @ring.field.negate(value)
 
   -> field_div(left, right)
     @ring.field.divide(left, right)
 
   -> field_zero?(value)
+    return value == 0 if @ring.fastmod != nil
     @ring.field.zero?(value)
 
   -> field_one?(value)
@@ -353,30 +375,65 @@
       i += 1
     out
 
-  # Linear merge of two term lists already sorted descending by monomial order.
+  # Monomial comparison with the dispatch chain flattened for the three
+  # simple orders (exactly MonomialOrder.compare_range's arithmetic).
+  -> cmp_monomials(a, b)
+    kind = @ring.simple_order
+    return @ring.monomial_compare(a, b) if kind == nil
+    n = a.size
+    if kind != "lex"
+      ad = 0
+      bd = 0
+      i = 0
+      while i < n
+        ad += a[i]
+        bd += b[i]
+        i += 1
+      return 1 if ad > bd
+      return -1 if ad < bd
+      if kind == "grevlex"
+        i = n - 1
+        while i >= 0
+          return 1 if a[i] < b[i]
+          return -1 if a[i] > b[i]
+          i -= 1
+        return 0
+    i = 0
+    while i < n
+      return 1 if a[i] > b[i]
+      return -1 if a[i] < b[i]
+      i += 1
+    0
+
+  # Linear merge of two term lists already sorted descending by monomial
+  # order. Exponent vectors are IMMUTABLE-SHARED: nothing in the algebra
+  # layer mutates a term's exponent array after construction, so the merge
+  # aliases them instead of copying (measured on cyclic-6: the merges in
+  # Gröbner reduction touched 1.34M terms, and the per-term exponent copy
+  # was the dominant allocation).
   -> merge_sorted_terms(left, right)
     out = []
     i = 0
     j = 0
     while i < left.size && j < right.size
-      cmp = @ring.monomial_compare(left[i][1], right[j][1])
+      cmp = cmp_monomials(left[i][1], right[j][1])
       if cmp > 0
-        out.push([left[i][0], copy_exponents(left[i][1])])
+        out.push(left[i])
         i += 1
       elsif cmp < 0
-        out.push([right[j][0], copy_exponents(right[j][1])])
+        out.push(right[j])
         j += 1
       else
         sum = field_add(left[i][0], right[j][0])
         if !field_zero?(sum)
-          out.push([sum, copy_exponents(left[i][1])])
+          out.push([sum, left[i][1]])
         i += 1
         j += 1
     while i < left.size
-      out.push([left[i][0], copy_exponents(left[i][1])])
+      out.push(left[i])
       i += 1
     while j < right.size
-      out.push([right[j][0], copy_exponents(right[j][1])])
+      out.push(right[j])
       j += 1
     out
 
@@ -443,8 +500,9 @@
   -> negate
     out = []
     @terms.each -> (term)
-      out.push([field_neg(term[0]), copy_exponents(term[1])])
-    # Negation preserves monomial order and nonzeroness: canonical.
+      out.push([field_neg(term[0]), term[1]])
+    # Negation preserves monomial order and nonzeroness: canonical
+    # (exponent vectors are immutable-shared).
     Polynomial.new(@ring, out, true)
 
   -> -@
@@ -826,7 +884,7 @@
           break
         i += 1
       if !reduced
-        single = @ring.monomial_raw(lt[0], copy_exponents(lt[1]))
+        single = @ring.monomial_raw(lt[0], lt[1])
         remainder = remainder + single
         pending = pending - single
     [quotients, remainder]

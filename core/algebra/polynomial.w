@@ -171,6 +171,8 @@
     n = @order.name
     if n == "grevlex" || n == "lex" || n == "grlex"
       @simple_order = n
+    # Scratch buffers for the PolyFast reduction lane (see algebra/poly_fast).
+    @pf_workspace = nil
     self
 
   ro :names, :field, :order, :fastmod, :simple_order
@@ -229,6 +231,12 @@
       i += 1
     nil
 
+  -> pf_workspace
+    @pf_workspace
+
+  -> pf_workspace_store(ws)
+    @pf_workspace = ws
+
   -> monomial_compare(left, right)
     @order.compare(left, right)
 
@@ -264,6 +272,7 @@
     raise "polynomial requires a PolynomialRing" if @ring.class_name != "PolynomialRing"
     @terms = normalize_terms(terms)
     @content_hash = nil
+    @pf_cache = nil
 
   # Trusted constructor for term lists that are canonical BY CONSTRUCTION:
   # sorted strictly descending in the ring's monomial order, no duplicate
@@ -281,6 +290,7 @@
   -> new(@ring, terms, canonical)
     @terms = canonical ? terms : normalize_terms(terms)
     @content_hash = nil
+    @pf_cache = nil
 
   ro :ring, :terms
 
@@ -1015,7 +1025,18 @@
     raise "polynomial division is not exact" if !result[1].zero?
     result[0]
 
+  # Packed-form cache for the typed reduction lane (nil = not converted,
+  # false = not encodable, otherwise the cached form). Sound because
+  # polynomials are immutable.
+  -> pf_cache
+    @pf_cache
+
+  -> pf_cache_store(v)
+    @pf_cache = v
+
   -> normal_form(basis)
+    fast = PolyFast.normal_form(self, basis)
+    return fast if fast != nil
     divide(basis)[1]
 
   -> coefficients

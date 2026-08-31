@@ -85,8 +85,10 @@
       i += 1
     out
 
+  # Integer key (basis indices stay far below 2^20; string keys made the
+  # pending-set hashing a measurable slice of the whole run).
   -> .pair_key(i, j)
-    i < j ? (i.to_s + ":" + j.to_s) : (j.to_s + ":" + i.to_s)
+    i < j ? i * 1048576 + j : j * 1048576 + i
 
   # Binary min-heap over pending pairs [i, j, lcm, seq], ordered by the
   # ring's monomial order on the lcm with the insertion sequence breaking

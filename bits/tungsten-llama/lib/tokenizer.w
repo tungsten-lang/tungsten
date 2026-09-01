@@ -14,12 +14,14 @@
 #   - special ids: bos/eos/pad. GGUF stashes them as scalar metadata;
 #     tokenizer.json puts them in `added_tokens` with content + id.
 #
-# Encoding limitations (v1):
-#   - The qwen2 pretokenizer regex (cl100k-style) is NOT yet implemented.
-#     For most ASCII input the whitespace-split fallback in `encode` gives
-#     the right tokens; for CJK text or contractions it will diverge.
+# The qwen2 pretokenizer regex is implemented as a hand-rolled scanner
+# (`pretokenize`) over the pattern's seven alternatives, with Unicode
+# L/M/N category tables generated into tokenizer_categories.w. Validated
+# against HF `tokenizers` on a 2842-string multilingual corpus
+# (scripts/bench/check placed under scratchpad during bring-up).
 
 use tungsten-llama/bin_reader
+use tungsten-llama/tokenizer_categories
 
 in Tungsten:Llama
 
@@ -45,6 +47,40 @@ fn cp_to_utf8_char(cp)
 # round-trip without double-framing.
 fn byte_to_str(b)
   ccall("w_string_from_byte", b)
+
+# Binary search over a flattened [start, end] codepoint range table.
+fn tok_in_ranges(cp, table)
+  lo = 0
+  hi = table.size() / 2 - 1
+  while lo <= hi
+    mid = (lo + hi) / 2
+    if cp < table[mid * 2]
+      hi = mid - 1
+    elsif cp > table[mid * 2 + 1]
+      lo = mid + 1
+    else
+      return true
+  false
+
+fn tok_is_letter(cp)
+  tok_in_ranges(cp, TOK_CAT_L)
+
+fn tok_is_mark(cp)
+  tok_in_ranges(cp, TOK_CAT_M)
+
+fn tok_is_number(cp)
+  tok_in_ranges(cp, TOK_CAT_N)
+
+# Onig \s: ASCII whitespace + NEL/NBSP + Unicode space separators.
+fn tok_is_ws(cp)
+  return true if cp == 32 || (cp >= 9 && cp <= 13)
+  return true if cp == 0x85 || cp == 0xA0 || cp == 0x1680
+  return true if cp >= 0x2000 && cp <= 0x200A
+  return true if cp == 0x2028 || cp == 0x2029 || cp == 0x202F || cp == 0x205F || cp == 0x3000
+  false
+
+fn tok_is_crlf(cp)
+  cp == 13 || cp == 10
 
 + Tokenizer
   rw :tokens          # Array(String), id → token
@@ -278,7 +314,8 @@ fn byte_to_str(b)
   # regex pretokenizer.
   -> encode(text)
     out = []
-    chunks = pretokenize(text)
+    # tokenizer.json declares an NFC normalizer ahead of the pretokenizer.
+    chunks = pretokenize(text.nfc)
     i = 0
     while i < chunks.size()
       chars = bytes_to_chars(chunks[i])
@@ -293,25 +330,109 @@ fn byte_to_str(b)
       i = i + 1
     out
 
-  # Whitespace-aware split: a chunk is one optional space followed by
-  # a run of non-space bytes. A leading space attaches to the next word.
+  # The qwen2 pretokenizer, scanned by hand over codepoints. Pattern:
+  #   (?i:'s|'t|'re|'ve|'m|'ll|'d)              r1 contraction
+  #   [^\r\n L N]? [L M]+                     r2 (optional 1-cp prefix) word
+  #   N                                          r3 single digit/number
+  #   ' '? [^ws L M N]+ [\r\n]*                r4 punctuation run
+  #   ws* [\r\n]+                              r5 whitespace ending in newlines
+  #   ws+ (?!non-ws)                             r6 trailing ws (leaves 1 for next)
+  #   ws+                                        r7
+  # Alternatives are leftmost-first, exactly as Onig evaluates them; r5's
+  # backtracking reduces to "match through the LAST newline run inside the
+  # whitespace run", r6's to "all but the final space before a word".
   -> pretokenize(text)
-    chunks = []
     bytes = text.bytes.to_a
+    nb = bytes.size()
+    cps = []
+    offs = []
     i = 0
-    n = bytes.size()
-    while i < n
-      start = i
-      if bytes[i] == 32
+    while i < nb
+      b = bytes[i]
+      offs.push(i)
+      if b < 0x80
+        cps.push(b)
         i = i + 1
-      while i < n && bytes[i] != 32
+      elsif b < 0xE0 && i + 1 < nb
+        cps.push(((b & 0x1F) << 6) | (bytes[i + 1] & 0x3F))
+        i = i + 2
+      elsif b < 0xF0 && i + 2 < nb
+        cps.push(((b & 0x0F) << 12) | ((bytes[i + 1] & 0x3F) << 6) | (bytes[i + 2] & 0x3F))
+        i = i + 3
+      elsif i + 3 < nb
+        cps.push(((b & 0x07) << 18) | ((bytes[i + 1] & 0x3F) << 12) | ((bytes[i + 2] & 0x3F) << 6) | (bytes[i + 3] & 0x3F))
+        i = i + 4
+      else
+        cps.push(b)
         i = i + 1
-      sb = StringBuffer(i - start)
-      j = start
-      while j < i
-        sb << cp_to_utf8_char(bytes[j])
+    offs.push(nb)
+    nc = cps.size()
+
+    chunks = []
+    p = 0
+    while p < nc
+      cp = cps[p]
+      e = -1
+      # r1: contraction (ASCII apostrophe + s/t/d/m/re/ve/ll, any case)
+      if cp == 39 && p + 1 < nc
+        c1 = cps[p + 1] | 32
+        if c1 == 115 || c1 == 116 || c1 == 100 || c1 == 109
+          e = p + 2
+        elsif p + 2 < nc
+          c2 = cps[p + 2] | 32
+          if (c1 == 114 && c2 == 101) || (c1 == 118 && c2 == 101) || (c1 == 108 && c2 == 108)
+            e = p + 3
+      # r2: optional non-CR/LF/L/N prefix + [L M]+
+      if e < 0
+        w = p
+        if cp != 13 && cp != 10 && !tok_is_letter(cp) && !tok_is_number(cp)
+          w = p + 1
+        if w < nc && (tok_is_letter(cps[w]) || tok_is_mark(cps[w]))
+          w = w + 1
+          while w < nc && (tok_is_letter(cps[w]) || tok_is_mark(cps[w]))
+            w = w + 1
+          e = w
+      # r3: single number cp
+      if e < 0 && tok_is_number(cp)
+        e = p + 1
+      # r4: optional space + [^ws L M N]+ + CR/LF run
+      if e < 0
+        w = p
+        if cp == 32
+          w = p + 1
+        f = w
+        while f < nc && !tok_is_ws(cps[f]) && !tok_is_letter(cps[f]) && !tok_is_mark(cps[f]) && !tok_is_number(cps[f])
+          f = f + 1
+        if f > w
+          while f < nc && tok_is_crlf(cps[f])
+            f = f + 1
+          e = f
+      # r5/r6/r7: whitespace forms
+      if e < 0 && tok_is_ws(cp)
+        q = p
+        while q < nc && tok_is_ws(cps[q])
+          q = q + 1
+        # r5: through the end of the LAST CR/LF run inside the ws run
+        k = q - 1
+        while k >= p && !tok_is_crlf(cps[k])
+          k = k - 1
+        if k >= p
+          e = k + 1
+        elsif q >= nc
+          e = q            # r6 at end of text
+        elsif q - p >= 2
+          e = q - 1        # r6: leave the final space for the next token
+        else
+          e = q            # r7: single whitespace before non-ws
+      if e < 0
+        e = p + 1          # unclassifiable cp: emit alone (matches r4 shape)
+      sb = StringBuffer(offs[e] - offs[p])
+      j = offs[p]
+      while j < offs[e]
+        sb << byte_to_str(bytes[j])
         j = j + 1
       chunks.push(sb.to_s)
+      p = e
     chunks
 
   # Decode token ids → UTF-8 string. Reverses the qwen3 double-encoding:

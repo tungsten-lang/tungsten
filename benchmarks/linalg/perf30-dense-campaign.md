@@ -327,3 +327,42 @@ It snapshots buffer/layout metadata and compares shape/stride contents, which
 keeps the cache coherent despite today's mutable Arrays. Argument-table reuse
 is not retained here: `linear` binds a fresh output Tensor each call, so a safe
 plan cache first needs an explicit `linear_into`/workspace lifetime contract.
+
+## Item 6 prerequisite — Unicode method-name lowering and fixed objects
+
+Source finding: every generic fixed-width Vec/Mat program failed during class
+registration before it could be benchmarked. `mangle_method_name` compared a
+Unicode String's UTF-8 byte size with character indexing. The single-character
+operator `⊙` therefore produced `nil` on its second byte index and raised
+`TypeError: no implicit conversion of Nil into String`. The fix iterates the
+already-supported `String#chars` representation; ASCII mangling is unchanged.
+
+Correctness gates using the compiler rebuilt from this source:
+
+- `spec/numeric/operator_overload_spec.w`: 28/28 pass, including `⊙`.
+- `spec/numeric/vector_spec.w`: 19/19 pass.
+- `spec/numeric/matrix_spec.w`: 20/20 pass.
+- The parent compiler cannot compile the matched benchmark; the candidate
+  compiles and runs it. The integration worktree must still repeat the
+  stage-1/stage-2 and fast-parser/canonical LLVM identity gates after this
+  prerequisite is cherry-picked.
+
+Five release samples of the existing fixed-size benchmark (ns/op):
+
+| path | sample range | median |
+| --- | ---: | ---: |
+| Mat3 value-returning `*` | 84.3-103.3 | 88.9 |
+| Mat3 caller-owned `mul_into` | 27.9-31.8 | 29.6 |
+| Mat3 raw typed-array kernel | 18.8-22.5 | 19.9 |
+| Mat4 value-returning `*` | 90.9-104.8 | 94.2 |
+| Mat4 caller-owned `mul_into` | 34.1-37.9 | 35.3 |
+| Mat4 raw typed-array kernel | 19.7-23.5 | 20.2 |
+
+Retained as a compiler correctness prerequisite, not as scalar replacement.
+LLVM IR confirms why the API split matters: value-returning Mat3/Mat4 products
+each contain one inline-array allocation and one object allocation, while
+`mul_into` contains neither. Existing caller-owned paths are 2.7-3.0x faster;
+the remaining 1.5-1.75x gap to raw kernels includes object field loads and
+exact-class guards. Full aggregate/vector scalar replacement is deferred: it
+requires an escape/identity-aware representation change, and this narrow
+campaign produced no safe compiler optimization with matched evidence.

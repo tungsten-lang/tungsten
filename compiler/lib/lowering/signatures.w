@@ -241,9 +241,10 @@
   if name in ("[]=" "\[]=")
     return "_LB_RB_EQ"
   out = ""
+  chars = name.chars()
   i = 0
-  while i < name.size()
-    ch = name[i]
+  while i < chars.size()
+    ch = chars[i]
     case ch
     when "?"
       out = out + "_Q"

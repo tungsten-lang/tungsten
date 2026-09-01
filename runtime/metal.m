@@ -332,7 +332,17 @@ WValue w_metal_pipeline_for(WValue library_v, WValue name_v) {
     }
     NSError *err = nil;
     id<MTLDevice> dev = [lib device];
-    id<MTLComputePipelineState> ps = [dev newComputePipelineStateWithFunction:fn error:&err];
+    /* Descriptor form so supportIndirectCommandBuffers can be set — required
+     * for pipelines referenced from an MTLIndirectCommandBuffer; harmless
+     * for ordinary dispatch. */
+    MTLComputePipelineDescriptor *pdesc = [[MTLComputePipelineDescriptor alloc] init];
+    pdesc.computeFunction = fn;
+    pdesc.supportIndirectCommandBuffers = YES;
+    id<MTLComputePipelineState> ps = [dev newComputePipelineStateWithDescriptor:pdesc
+                                                                        options:0
+                                                                     reflection:nil
+                                                                          error:&err];
+    [pdesc release];
     [fn release];
     if (!ps) {
         const char *msg = err ? [[err localizedDescription] UTF8String] : "unknown error";
@@ -403,7 +413,17 @@ WValue w_metal_pipeline_for_with_int_constants(WValue library_v, WValue name_v, 
         w_raise(w_string(buf));
     }
     id<MTLDevice> dev = [lib device];
-    id<MTLComputePipelineState> ps = [dev newComputePipelineStateWithFunction:fn error:&err];
+    /* Descriptor form so supportIndirectCommandBuffers can be set — required
+     * for pipelines referenced from an MTLIndirectCommandBuffer; harmless
+     * for ordinary dispatch. */
+    MTLComputePipelineDescriptor *pdesc = [[MTLComputePipelineDescriptor alloc] init];
+    pdesc.computeFunction = fn;
+    pdesc.supportIndirectCommandBuffers = YES;
+    id<MTLComputePipelineState> ps = [dev newComputePipelineStateWithDescriptor:pdesc
+                                                                        options:0
+                                                                     reflection:nil
+                                                                          error:&err];
+    [pdesc release];
     [fn release];
     if (!ps) {
         const char *msg = err ? [[err localizedDescription] UTF8String] : "unknown error";
@@ -2454,4 +2474,205 @@ int64_t w_fused_gpu_run(int64_t site_id, WValue msl_v, int64_t blk_addr,
         }
         return 1;
     }
+}
+
+
+/* ---------------------------------------------------------------------------
+ * Indirect command buffers: record a whole decode step's compute dispatches
+ * ONCE, then execute them per token with a single executeCommandsInBuffer.
+ * Motivation (qwen38fn): ~2900 per-token bridge calls at ~6 us each put the
+ * host encode at 18 ms/token; an ICB replays them with ~zero host cost.
+ * Pos-dependent scalars must be bound as real 4-byte MTLBuffers whose
+ * CONTENTS the host rewrites per token (ICB args are frozen at record time).
+ * Execution happens inside the queue's open batch encoder; open it with
+ * w_metal_batch_begin (serial dispatch) so ICB commands get the encoder's
+ * implicit ordering. */
+
+typedef struct {
+    uint8_t type;                /* W_TYPE_METAL_ICB */
+    void *icb;                   /* id<MTLIndirectCommandBuffer>, retained */
+    int32_t count;               /* commands recorded */
+    int32_t max;
+    void **resources;            /* deduped id<MTLBuffer>, retained */
+    int32_t n_resources;
+    int32_t cap_resources;
+} WMetalICB;
+
+static WMetalICB *as_metal_icb(WValue v) {
+    if (!w_is_obj(v) || w_subtag(v) != W_SUBTAG_GENERIC) return NULL;
+    WMetalICB *b = (WMetalICB *)w_as_ptr(v);
+    if (b->type != W_TYPE_METAL_ICB) return NULL;
+    return b;
+}
+
+static void metal_icb_track(WMetalICB *w, id<MTLBuffer> mb) {
+    for (int32_t i = 0; i < w->n_resources; i++) {
+        if (w->resources[i] == (void *)mb) return;
+    }
+    if (w->n_resources == w->cap_resources) {
+        w->cap_resources = w->cap_resources ? w->cap_resources * 2 : 64;
+        w->resources = (void **)realloc(w->resources, sizeof(void *) * w->cap_resources);
+    }
+    [mb retain];
+    w->resources[w->n_resources++] = (void *)mb;
+}
+
+WValue w_metal_icb_new(WValue device_v, WValue max_v) {
+    WMetalDevice *d = as_metal_device(device_v);
+    if (!d) w_raise(w_string("Metal.icb_new: bad device"));
+    int64_t max = w_to_i64(max_v);
+    if (max <= 0 || max > 16384) w_raise(w_string("Metal.icb_new: max must be 1..16384"));
+    MTLIndirectCommandBufferDescriptor *desc = [[MTLIndirectCommandBufferDescriptor alloc] init];
+    desc.commandTypes = MTLIndirectCommandTypeConcurrentDispatch;
+    desc.inheritPipelineState = NO;
+    desc.inheritBuffers = NO;
+    desc.maxKernelBufferBindCount = 25;
+    id<MTLIndirectCommandBuffer> icb =
+        [(id<MTLDevice>)d->handle newIndirectCommandBufferWithDescriptor:desc
+                                                         maxCommandCount:(NSUInteger)max
+                                                                 options:MTLResourceStorageModeShared];
+    [desc release];
+    if (!icb) w_raise(w_string("Metal.icb_new: creation failed"));
+    WMetalICB *w = (WMetalICB *)calloc(1, sizeof(WMetalICB));
+    w->type = W_TYPE_METAL_ICB;
+    w->icb = (void *)icb;
+    w->max = (int32_t)max;
+    return w_box_ptr(w, W_SUBTAG_GENERIC);
+}
+
+/* Shared arg-binding for icb_add/_3d. Scalar ints/doubles freeze their value
+ * at record time (cached autobox buffer); anything per-token must be a real
+ * buffer the host rewrites. */
+static void metal_icb_bind_args(WMetalICB *w,
+                                id<MTLIndirectComputeCommand> cmd,
+                                WArray *bufs, id<MTLDevice> dev,
+                                const char *who) {
+    for (int32_t i = 0; i < bufs->size; i++) {
+        WValue bv = bufs->slots[bufs->start + i];
+        id<MTLBuffer> mb = nil;
+        NSUInteger off = 0;
+        /* Scalars get a FRESH dedicated 4-byte buffer per binding: the shared
+         * autobox cache buffers bind fine on direct dispatches but read as
+         * garbage from ICB commands (empirically — same command with a real
+         * buffer works). Recording happens once, so the allocation cost is
+         * irrelevant. */
+        if (w_is_int(bv) || w_is_double(bv)) {
+
+            uint32_t raw;
+            if (w_is_int(bv)) {
+                int32_t n32 = (int32_t)w_as_int(bv);
+                memcpy(&raw, &n32, 4);
+            } else {
+                float f = (float)w_as_double(bv);
+                memcpy(&raw, &f, 4);
+            }
+            mb = [dev newBufferWithLength:4
+                                  options:MTLResourceStorageModeShared];
+            memcpy([mb contents], &raw, 4);
+            /* NOT autoreleased: owned by the icb's resource list. NOTE: these
+             * C-created scalars read as garbage from ICB commands for reasons
+             * not yet understood, while Tungsten-created buffers work — the
+             * engine's ICB builder pools scalars as real metal_buffers and
+             * this branch remains only as a fallback. */
+        } else {
+            mb = metal_buffer_or_wrap_array(bv, dev);
+            off = metal_buffer_binding_offset(bv);
+        }
+        if (!mb) {
+            char msg[112];
+            snprintf(msg, sizeof(msg), "%s: arg %d is not bindable", who, i);
+            w_raise(w_string(msg));
+        }
+        [cmd setKernelBuffer:mb offset:off atIndex:(NSUInteger)i];
+        metal_icb_track(w, mb);
+    }
+}
+
+WValue w_metal_icb_add(WValue icb_v, WValue pipeline_v, WValue bufs_v,
+                       WValue n_groups_v, WValue threads_per_group_v) {
+    WMetalICB *w = as_metal_icb(icb_v);
+    WMetalPipeline *p = as_metal_pipeline(pipeline_v);
+    if (!w || !p) w_raise(w_string("Metal.icb_add: bad icb or pipeline"));
+    if (!w_is_array(bufs_v)) w_raise(w_string("Metal.icb_add: buffers must be an array"));
+    if (w->count >= w->max) {
+        fprintf(stderr, "[icb_add] FULL: icb=%p count=%d max=%d\n", (void *)w, w->count, w->max);
+        w_raise(w_string("Metal.icb_add: command buffer full"));
+    }
+    WArray *bufs = w_as_array(bufs_v);
+    int64_t n_groups = w_to_i64(n_groups_v);
+    int64_t tpg = w_to_i64(threads_per_group_v);
+    if (n_groups <= 0 || tpg <= 0) w_raise(w_string("Metal.icb_add: dims must be positive"));
+    id<MTLIndirectComputeCommand> cmd =
+        [(id<MTLIndirectCommandBuffer>)w->icb indirectComputeCommandAtIndex:(NSUInteger)w->count];
+    id<MTLComputePipelineState> ps = (id<MTLComputePipelineState>)p->handle;
+    [cmd setComputePipelineState:ps];
+    metal_icb_bind_args(w, cmd, bufs, [ps device], "Metal.icb_add");
+    [cmd concurrentDispatchThreadgroups:MTLSizeMake((NSUInteger)n_groups, 1, 1)
+                  threadsPerThreadgroup:MTLSizeMake((NSUInteger)tpg, 1, 1)];
+    w->count++;
+    return w_int((int64_t)(w->count - 1));
+}
+
+WValue w_metal_icb_add_3d(WValue icb_v, WValue pipeline_v, WValue bufs_v,
+                          WValue gx_v, WValue gy_v, WValue gz_v,
+                          WValue tx_v, WValue ty_v, WValue tz_v) {
+    WMetalICB *w = as_metal_icb(icb_v);
+    WMetalPipeline *p = as_metal_pipeline(pipeline_v);
+    if (!w || !p) w_raise(w_string("Metal.icb_add_3d: bad icb or pipeline"));
+    if (!w_is_array(bufs_v)) w_raise(w_string("Metal.icb_add_3d: buffers must be an array"));
+    if (w->count >= w->max) w_raise(w_string("Metal.icb_add_3d: command buffer full"));
+    WArray *bufs = w_as_array(bufs_v);
+    id<MTLIndirectComputeCommand> cmd =
+        [(id<MTLIndirectCommandBuffer>)w->icb indirectComputeCommandAtIndex:(NSUInteger)w->count];
+    id<MTLComputePipelineState> ps = (id<MTLComputePipelineState>)p->handle;
+    [cmd setComputePipelineState:ps];
+    metal_icb_bind_args(w, cmd, bufs, [ps device], "Metal.icb_add_3d");
+    [cmd concurrentDispatchThreadgroups:MTLSizeMake((NSUInteger)w_to_i64(gx_v), (NSUInteger)w_to_i64(gy_v), (NSUInteger)w_to_i64(gz_v))
+                  threadsPerThreadgroup:MTLSizeMake((NSUInteger)w_to_i64(tx_v), (NSUInteger)w_to_i64(ty_v), (NSUInteger)w_to_i64(tz_v))];
+    w->count++;
+    return w_int((int64_t)(w->count - 1));
+}
+
+/* Segmented execution: ICB compute commands run CONCURRENTLY within one
+ * executeCommandsInBuffer (measured: serial encoders do NOT order them), so
+ * the recorded barrier structure is replayed as one execute+barrier pair per
+ * segment — a tight objc loop in C, one ccall per token. */
+WValue w_metal_icb_execute_segments(WValue queue_v, WValue icb_v, WValue segs_v) {
+    WMetalQueue *q = as_metal_queue(queue_v);
+    WMetalICB *w = as_metal_icb(icb_v);
+    if (!q || !w) w_raise(w_string("Metal.icb_execute_segments: bad queue or icb"));
+    if (!q->batch_cmd) w_raise(w_string("Metal.icb_execute_segments: open a batch first"));
+    if (!w_is_array(segs_v)) w_raise(w_string("Metal.icb_execute_segments: segs must be an array"));
+    WArray *segs = w_as_array(segs_v);
+    id<MTLComputeCommandEncoder> enc = (id<MTLComputeCommandEncoder>)q->batch_encoder;
+    id<MTLIndirectCommandBuffer> icb = (id<MTLIndirectCommandBuffer>)w->icb;
+    [enc useResources:(id<MTLResource> __unsafe_unretained *)w->resources
+                count:(NSUInteger)w->n_resources
+                usage:(MTLResourceUsageRead | MTLResourceUsageWrite)];
+    NSUInteger start = 0;
+    for (int32_t i = 0; i < segs->size; i++) {
+        int64_t len = w_to_i64(segs->slots[segs->start + i]);
+        if (len <= 0) continue;
+        [enc executeCommandsInBuffer:icb withRange:NSMakeRange(start, (NSUInteger)len)];
+        [enc memoryBarrierWithScope:MTLBarrierScopeBuffers];
+        start += (NSUInteger)len;
+    }
+    q->batch_pipeline = NULL;
+    return W_NIL;
+}
+
+WValue w_metal_icb_execute(WValue queue_v, WValue icb_v) {
+    WMetalQueue *q = as_metal_queue(queue_v);
+    WMetalICB *w = as_metal_icb(icb_v);
+    if (!q || !w) w_raise(w_string("Metal.icb_execute: bad queue or icb"));
+    if (!q->batch_cmd) w_raise(w_string("Metal.icb_execute: open a batch first (metal_batch_begin)"));
+    if (w->count <= 0) return W_NIL;
+    id<MTLComputeCommandEncoder> enc = (id<MTLComputeCommandEncoder>)q->batch_encoder;
+    [enc useResources:(id<MTLResource> __unsafe_unretained *)w->resources
+                count:(NSUInteger)w->n_resources
+                usage:(MTLResourceUsageRead | MTLResourceUsageWrite)];
+    [enc executeCommandsInBuffer:(id<MTLIndirectCommandBuffer>)w->icb
+                       withRange:NSMakeRange(0, (NSUInteger)w->count)];
+    q->batch_pipeline = NULL;   /* ICB clobbers encoder pipeline state */
+    return W_NIL;
 }

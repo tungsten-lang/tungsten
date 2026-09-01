@@ -22,6 +22,7 @@ static inline void bf16_gemm_f32_impl(
   constant int   &k_dim,
   constant int   &n_rows,
   constant int   &m_rows,                  // valid activation rows (<= MT*8)
+  constant int   &m0,                      // first activation row of this tile
   threadgroup float *tile,                 // [4 simdgroups][8 rows][16 k]
   threadgroup float *stage,                // [4 simdgroups][8][8]
   uint tg_id, uint simd_id, uint lane
@@ -57,8 +58,8 @@ static inline void bf16_gemm_f32_impl(
 #pragma clang loop unroll(full)
     for (int t = 0; t < MT; t++) {
       simdgroup_matrix<float, 8, 8> A0, A1;
-      simdgroup_load(A0, x + (t * 8) * k_dim + k0, (ulong)k_dim);
-      simdgroup_load(A1, x + (t * 8) * k_dim + k0 + 8, (ulong)k_dim);
+      simdgroup_load(A0, x + (m0 + t * 8) * k_dim + k0, (ulong)k_dim);
+      simdgroup_load(A1, x + (m0 + t * 8) * k_dim + k0 + 8, (ulong)k_dim);
       simdgroup_multiply_accumulate(C[t], A0, B0, C[t]);
       simdgroup_multiply_accumulate(C[t], A1, B1, C[t]);
     }
@@ -72,9 +73,9 @@ static inline void bf16_gemm_f32_impl(
     for (int e = int(lane); e < 64; e += 32) {
       const int m = t * 8 + (e >> 3);
       const int n = n0 + (e & 7);
-      if (m < m_rows && n < n_rows) {
-        if (ADD_RESIDUAL) y[m * n_rows + n] += st[e];
-        else y[m * n_rows + n] = st[e];
+      if (m0 + m < m_rows && n < n_rows) {
+        if (ADD_RESIDUAL) y[(m0 + m) * n_rows + n] += st[e];
+        else y[(m0 + m) * n_rows + n] = st[e];
       }
     }
     simdgroup_barrier(mem_flags::mem_threadgroup);
@@ -88,12 +89,13 @@ kernel void NAME(                                                            \
   device float *y [[buffer(2)]],                                             \
   constant int &k [[buffer(3)]], constant int &n [[buffer(4)]],              \
   constant int &m [[buffer(5)]],                                             \
+  constant int &m0 [[buffer(6)]],                                            \
   uint tg [[threadgroup_position_in_grid]],                                  \
   uint sg [[simdgroup_index_in_threadgroup]],                                \
   uint sl [[thread_index_in_simdgroup]]) {                                   \
   threadgroup float tile[4 * 128];                                           \
   threadgroup float stage[4 * 64];                                           \
-  bf16_gemm_f32_impl<MT, RES>(w, x, y, k, n, m, tile, stage, tg, sg, sl);    \
+  bf16_gemm_f32_impl<MT, RES>(w, x, y, k, n, m, m0, tile, stage, tg, sg, sl); \
 }
 DEFINE_BF16_GEMM(bf16_gemm_f32_m16, 2, false)
 DEFINE_BF16_GEMM(bf16_gemm_f32_m32, 4, false)

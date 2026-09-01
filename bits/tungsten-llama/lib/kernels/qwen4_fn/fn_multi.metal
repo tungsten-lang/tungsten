@@ -8,6 +8,7 @@
 // becomes [n, W] with token t at offset t*W.
 
 #include <metal_stdlib>
+#include <metal_simdgroup_matrix>
 using namespace metal;
 
 static inline half nvfp4_decode_half(uint nibble) {
@@ -540,6 +541,7 @@ kernel void fn_phn_rope_multi(
 kernel void moe_sort_pairs(
   device const int *__restrict__ indices [[buffer(0)]],   // [n, K]
   device       int *__restrict__ order   [[buffer(1)]],   // [n*K]
+  device       int *__restrict__ offs_out [[buffer(3)]],  // [513] segment offsets
   constant int &nk [[buffer(2)]],
   uint __tid [[thread_position_in_threadgroup]]
 ) {
@@ -566,6 +568,388 @@ kernel void moe_sort_pairs(
     if (indices[p] == e) {
       order[at] = p;
       at++;
+    }
+  }
+  offs_out[e] = offsets[e];
+  if (e == 0) offs_out[512] = nk;
+}
+
+
+// Token-block-parallel bf16 matvec: same arithmetic as bf16_matvec_multi
+// (lane-strided k, simd_sum) but the 8-token sub-batch loop moves onto the
+// TG grid, so small-row projections get rows x ceil(n/8) threadgroups
+// instead of rows — the hyper-connection chain's barriers stop exposing
+// multi-millisecond single-TG latencies. Weights re-read once per token
+// block, exactly like the in-kernel loop did.
+// Dispatch: rows * ceil(n/8) TGs of 32.
+kernel void bf16_matvec_multi_p(
+  device const ushort *__restrict__ weight [[buffer(0)]],
+  device const float  *__restrict__ x      [[buffer(1)]],
+  device       float  *__restrict__ y      [[buffer(2)]],
+  constant int &k_dim  [[buffer(3)]],
+  constant int &n_rows [[buffer(4)]],
+  constant int &n_tok  [[buffer(5)]],
+  uint __tg_id     [[threadgroup_position_in_grid]],
+  uint __simd_lane [[thread_index_in_simdgroup]]
+) {
+  const int blocks = (n_tok + 7) / 8;
+  int tg = int(__tg_id);
+  int row = tg / blocks;
+  int b0 = (tg % blocks) * 8;
+  if (row >= n_rows) return;
+  const int nb = min(n_tok - b0, 8);
+  int lane = int(__simd_lane);
+  float acc[8];
+  for (int b = 0; b < 8; ++b) acc[b] = 0.0f;
+  for (int k = lane; k < k_dim; k += 32) {
+    const float w = as_type<float>(uint(weight[row * k_dim + k]) << 16);
+    for (int b = 0; b < nb; ++b) acc[b] += w * x[(b0 + b) * k_dim + k];
+  }
+  for (int b = 0; b < nb; ++b) {
+    const float total = simd_sum(acc[b]);
+    if (lane == 0) y[(b0 + b) * n_rows + row] = total;
+  }
+}
+
+
+// Grouped per-expert matvec for prefill chunks: each expert's weight tile is
+// decoded ONCE per 8-token block of its token list instead of once per
+// (token, slot) pair — expert traffic and nibble-decode ALU drop by
+// ~c_e/ceil(c_e/8) (~5x at chunk 512). Registers follow the
+// nvfp4_wide b8_r4 pattern: 2 simdgroups x 4 rows, acc[4][8] per lane.
+// Dispatch: 512 * (n_rows/8) TGs of 64.
+[[max_total_threads_per_threadgroup(64)]]
+kernel void moe_grouped_matvec(
+  device const uchar *__restrict__ q0 [[buffer(0)]],
+  device const uchar *__restrict__ q1 [[buffer(1)]],
+  device const uchar *__restrict__ q2 [[buffer(2)]],
+  device const uchar *__restrict__ q3 [[buffer(3)]],
+  device const int   *__restrict__ order    [[buffer(4)]],   // [n*K] expert-sorted pair ids
+  device const int   *__restrict__ offs     [[buffer(5)]],   // [513]
+  device const int   *__restrict__ slot_map [[buffer(6)]],
+  device const float *__restrict__ x        [[buffer(7)]],
+  device float       *__restrict__ y        [[buffer(8)]],   // [n*K, n_rows] per PAIR
+  constant int &k_dim    [[buffer(9)]],
+  constant int &n_rows   [[buffer(10)]],
+  constant int &w0       [[buffer(11)]],
+  constant int &w_stride [[buffer(12)]],
+  constant int &s0       [[buffer(13)]],
+  constant int &s_stride [[buffer(14)]],
+  constant int &g0       [[buffer(15)]],
+  constant int &g_stride [[buffer(16)]],
+  constant int &K        [[buffer(17)]],
+  constant int &x_is_per_pair [[buffer(18)]],  // 0: x[t,:]; 1: x[pair,:]
+  uint __tg_id     [[threadgroup_position_in_grid]],
+  uint __simd_id   [[simdgroup_index_in_threadgroup]],
+  uint __simd_lane [[thread_index_in_simdgroup]]
+) {
+  const int n_groups     = k_dim / 16;
+  const int u32s_per_row = k_dim / 8;
+  const int tgs_per_e    = n_rows / 8;
+  int tg      = int(__tg_id);
+  int expert  = tg / tgs_per_e;
+  int m_block = tg % tgs_per_e;
+  int seg_lo  = offs[expert];
+  int seg_hi  = offs[expert + 1];
+  if (seg_lo >= seg_hi) return;
+  int slot = slot_map[expert] & 0xFFFF;
+  device const uchar *base = (expert < 128) ? q0
+                           : (expert < 256) ? q1
+                           : (expert < 384) ? q2 : q3;
+  device const uchar *w_bytes = base + (ulong)(uint)w0 + (ulong)(uint)slot * (ulong)(uint)w_stride;
+  device const uchar *s_bytes = base + (ulong)(uint)s0 + (ulong)(uint)slot * (ulong)(uint)s_stride;
+  float ws2 = load_f32_le(base + (ulong)(uint)g0 + (ulong)(uint)slot * (ulong)(uint)g_stride);
+  int m_start = m_block * 8 + int(__simd_id) * 4;
+  int lane    = int(__simd_lane);
+
+  for (int tb = seg_lo; tb < seg_hi; tb += 4) {
+    const int nb = min(seg_hi - tb, 4);
+    int xbase[4];
+    for (int b = 0; b < nb; b++) {
+      int pair = order[tb + b];
+      xbase[b] = x_is_per_pair != 0 ? pair * k_dim : (pair / K) * k_dim;
+    }
+    float acc[4][4];
+    for (int r = 0; r < 4; r++)
+      for (int b = 0; b < 4; b++) acc[r][b] = 0.0f;
+
+    for (int g_block = 0; g_block < n_groups; g_block += 32) {
+      int g = g_block + lane;
+      if (g >= n_groups) continue;
+      float4 av[4][4];
+      for (int b = 0; b < nb; b++) {
+        device const float4 *xp = (device const float4 *)(&x[xbase[b] + g * 16]);
+        av[b][0] = xp[0]; av[b][1] = xp[1]; av[b][2] = xp[2]; av[b][3] = xp[3];
+      }
+#define GDO_ROW(R)                                                          \
+      {                                                                     \
+        int row = m_start + (R);                                            \
+        device const uint *w_row = (device const uint *)(w_bytes + (ulong)(uint)row * (ulong)((uint)u32s_per_row * 4u) + (ulong)((uint)g * 8u)); \
+        uint w0v = w_row[0];                                                \
+        uint w1v = w_row[1];                                                \
+        uint sb = (uint)s_bytes[(ulong)(uint)row * (ulong)(uint)n_groups + (ulong)(uint)g]; \
+        float scale = float(e4m3_decode_half(sb));                          \
+        uint b00 = w0v & 0xFF, b01 = (w0v >>  8) & 0xFF;                    \
+        uint b02 = (w0v >> 16) & 0xFF, b03 = (w0v >> 24) & 0xFF;            \
+        uint b10 = w1v & 0xFF, b11 = (w1v >>  8) & 0xFF;                    \
+        uint b12 = (w1v >> 16) & 0xFF, b13 = (w1v >> 24) & 0xFF;            \
+        float4 wv0 = float4(nvfp4_decode_half(b00 & 0xF), nvfp4_decode_half(b00 >> 4), nvfp4_decode_half(b01 & 0xF), nvfp4_decode_half(b01 >> 4)); \
+        float4 wv1 = float4(nvfp4_decode_half(b02 & 0xF), nvfp4_decode_half(b02 >> 4), nvfp4_decode_half(b03 & 0xF), nvfp4_decode_half(b03 >> 4)); \
+        float4 wv2 = float4(nvfp4_decode_half(b10 & 0xF), nvfp4_decode_half(b10 >> 4), nvfp4_decode_half(b11 & 0xF), nvfp4_decode_half(b11 >> 4)); \
+        float4 wv3 = float4(nvfp4_decode_half(b12 & 0xF), nvfp4_decode_half(b12 >> 4), nvfp4_decode_half(b13 & 0xF), nvfp4_decode_half(b13 >> 4)); \
+        for (int b = 0; b < nb; b++) {                                      \
+          float dp = dot(wv0, av[b][0]) + dot(wv1, av[b][1]) +              \
+                     dot(wv2, av[b][2]) + dot(wv3, av[b][3]);               \
+          acc[R][b] += scale * dp;                                          \
+        }                                                                   \
+      }
+      GDO_ROW(0)
+      GDO_ROW(1)
+      GDO_ROW(2)
+      GDO_ROW(3)
+#undef GDO_ROW
+    }
+    for (int r = 0; r < 4; r++) {
+      for (int b = 0; b < nb; b++) {
+        float total = simd_sum(acc[r][b]);
+        if (lane == 0) {
+          int pair = order[tb + b];
+          y[pair * n_rows + m_start + r] = total * ws2;
+        }
+      }
+    }
+  }
+}
+
+
+// Prefill-shape SDPA: same math as sdpa_decode_multi_hd256 but the score
+// phase assigns POSITIONS to threads (each thread runs its own serial
+// 256-wide dot) — no per-position threadgroup barriers, which at chunked
+// prefill exposed ~2 barriers x every visible position per (token, head).
+// Softmax and the weighted sum are unchanged in structure.
+// Dispatch: n_tok * n_heads TGs of 256.
+[[max_total_threads_per_threadgroup(256)]]
+kernel void sdpa_prefill_multi_hd256(
+  device const float *__restrict__ q       [[buffer(0)]],
+  device const float *__restrict__ k_cache [[buffer(1)]],
+  device const float *__restrict__ v_cache [[buffer(2)]],
+  device       float *__restrict__ out     [[buffer(3)]],
+  constant int &gqa_factor [[buffer(4)]],
+  device const int *__restrict__ pos_start [[buffer(5)]],
+  constant int &n_heads [[buffer(6)]],
+  constant int &kv_dim  [[buffer(7)]],
+  constant float &scale [[buffer(8)]],
+  constant int &n_tok   [[buffer(9)]],
+  uint tg  [[threadgroup_position_in_grid]],
+  uint tid [[thread_position_in_threadgroup]]
+) {
+  threadgroup float scores[2051];
+  threadgroup float qs[256];
+  const int token = int(tg) / n_heads;
+  const int q_head = int(tg) - token * n_heads;
+  if (token >= n_tok) return;
+  const int kv_head = q_head / gqa_factor;
+  const int q_off = (token * n_heads + q_head) * 256;
+  const int kv_base = kv_head * 256;
+  const int usable = min(pos_start[0] + token + 1, 2051);
+  qs[tid] = q[q_off + int(tid)];
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (int p = int(tid); p < usable; p += 256) {
+    device const float *kr = k_cache + kv_base + p * kv_dim;
+    float dp = 0.0f;
+    for (int i = 0; i < 256; i++) dp += qs[i] * kr[i];
+    scores[p] = dp * scale;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (tid == 0) {
+    float mx = -INFINITY;
+    for (int p = 0; p < usable; ++p) mx = max(mx, scores[p]);
+    float denom = 0.0f;
+    for (int p = 0; p < usable; ++p) {
+      const float e = fast::exp(scores[p] - mx);
+      scores[p] = e;
+      denom += e;
+    }
+    const float inv = denom == 0.0f ? 0.0f : 1.0f / denom;
+    for (int p = 0; p < usable; ++p) scores[p] *= inv;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float result = 0.0f;
+  for (int p = 0; p < usable; ++p) {
+    result += scores[p] * v_cache[kv_base + p * kv_dim + int(tid)];
+  }
+  out[q_off + int(tid)] = result;
+}
+
+
+// Stage activation rows into expert-sorted contiguous order so the grouped
+// GEMM can tile them with simdgroup_load. Dispatch: nk * k_dim threads.
+kernel void moe_stage_x(
+  device const float *__restrict__ x     [[buffer(0)]],
+  device       float *__restrict__ xg    [[buffer(1)]],   // [nk, k_dim]
+  device const int   *__restrict__ order [[buffer(2)]],
+  constant int &k_dim [[buffer(3)]],
+  constant int &K     [[buffer(4)]],
+  constant int &x_is_per_pair [[buffer(5)]],
+  constant int &nk    [[buffer(6)]],
+  uint __tid [[thread_position_in_grid]]
+) {
+  int gi = int(__tid);
+  if (gi >= nk * k_dim) return;
+  int srow = gi / k_dim;
+  int i = gi % k_dim;
+  int pair = order[srow];
+  int src = x_is_per_pair != 0 ? pair : pair / K;
+  xg[srow * k_dim + i] = x[src * k_dim + i];
+}
+
+// Per-expert NVFP4 GEMM on simdgroup MMA over the staged activations: the
+// nvfp4_gemm_f32 tile plan (4 simdgroups x 8 output rows, K stepped 16 wide
+// through threadgroup memory, one nibble decode per weight per m-tile) with
+// expert/quarter indirection and per-pair scatter on store.
+// Dispatch: 512 * (n_rows/32) TGs of 128.
+[[max_total_threads_per_threadgroup(128)]]
+kernel void moe_gemm_m8(
+  device const uchar *__restrict__ q0 [[buffer(0)]],
+  device const uchar *__restrict__ q1 [[buffer(1)]],
+  device const uchar *__restrict__ q2 [[buffer(2)]],
+  device const uchar *__restrict__ q3 [[buffer(3)]],
+  device const int   *__restrict__ order    [[buffer(4)]],
+  device const int   *__restrict__ offs     [[buffer(5)]],   // [513]
+  device const int   *__restrict__ slot_map [[buffer(6)]],
+  device const float *__restrict__ xg       [[buffer(7)]],   // [nk, k_dim] staged
+  device float       *__restrict__ y        [[buffer(8)]],   // [n*K, n_rows] per pair
+  constant int &k_dim    [[buffer(9)]],
+  constant int &n_rows   [[buffer(10)]],
+  constant int &w0       [[buffer(11)]],
+  constant int &w_stride [[buffer(12)]],
+  constant int &s0       [[buffer(13)]],
+  constant int &s_stride [[buffer(14)]],
+  constant int &g0       [[buffer(15)]],
+  constant int &g_stride [[buffer(16)]],
+  uint tg_id  [[threadgroup_position_in_grid]],
+  uint simd_id [[simdgroup_index_in_threadgroup]],
+  uint lane   [[thread_index_in_simdgroup]]
+) {
+  const int tgs_per_e = n_rows / 32;
+  const int expert = int(tg_id) / tgs_per_e;
+  const int seg_lo = offs[expert];
+  const int c = offs[expert + 1] - seg_lo;
+  if (c <= 0) return;
+  const int n0 = (int(tg_id) % tgs_per_e) * 32 + int(simd_id) * 8;
+  const int n_groups = k_dim / 16;
+  const int u32s_per_row = k_dim / 8;
+  const int slot = slot_map[expert] & 0xFFFF;
+  device const uchar *base = (expert < 128) ? q0
+                           : (expert < 256) ? q1
+                           : (expert < 384) ? q2 : q3;
+  device const uint  *wq = (device const uint *)(base + (ulong)(uint)w0 + (ulong)(uint)slot * (ulong)(uint)w_stride);
+  device const uchar *sq = base + (ulong)(uint)s0 + (ulong)(uint)slot * (ulong)(uint)s_stride;
+  const float ws2 = load_f32_le(base + (ulong)(uint)g0 + (ulong)(uint)slot * (ulong)(uint)g_stride);
+
+  threadgroup float tile[4 * 128];
+  threadgroup float stage[4 * 64];
+  threadgroup float *bt = tile + int(simd_id) * 128;
+  threadgroup float *st = stage + int(simd_id) * 64;
+
+  const int r = int(lane) >> 2;
+  const int qq = int(lane) & 3;
+  const int row = min(n0 + r, n_rows - 1);
+  device const uint  *wrow = wq + row * u32s_per_row;
+  device const uchar *srow = sq + row * n_groups;
+
+  // Up to 4 live C tiles (32 staged rows) per outer pass: ONE nibble decode
+  // serves them all. C[4] = 8 floats/lane — no spill.
+  for (int mt0 = 0; mt0 < c; mt0 += 32) {
+    const int mtiles = min((c - mt0 + 7) / 8, 4);
+    simdgroup_matrix<float, 8, 8> C[4];
+    for (int i2 = 0; i2 < 4; i2++) C[i2] = simdgroup_matrix<float, 8, 8>(0.0f);
+    for (int g = 0; g < n_groups; g++) {
+      const uint w = wrow[g * 2 + (qq >> 1)];
+      const uint b0 = (w >> ((qq & 1) * 16)) & 0xff;
+      const uint b1 = (w >> ((qq & 1) * 16 + 8)) & 0xff;
+      const float sc = float(e4m3_decode_half(uint(srow[g])));
+      // write the tile K-MAJOR so the B loads skip the transposed-load path
+      threadgroup float *dst = bt;
+      const int kb = qq * 4;
+      dst[(kb + 0) * 8 + r] = float(nvfp4_decode_half(b0 & 0xf)) * sc;
+      dst[(kb + 1) * 8 + r] = float(nvfp4_decode_half(b0 >> 4)) * sc;
+      dst[(kb + 2) * 8 + r] = float(nvfp4_decode_half(b1 & 0xf)) * sc;
+      dst[(kb + 3) * 8 + r] = float(nvfp4_decode_half(b1 >> 4)) * sc;
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      simdgroup_matrix<float, 8, 8> B0, B1, A0, A1;
+      simdgroup_load(B0, bt, 8);
+      simdgroup_load(B1, bt + 64, 8);
+      const int k0 = g * 16;
+      for (int i2 = 0; i2 < mtiles; i2++) {
+        simdgroup_load(A0, xg + (ulong)(seg_lo + mt0 + i2 * 8) * (ulong)k_dim + k0, (ulong)k_dim);
+        simdgroup_load(A1, xg + (ulong)(seg_lo + mt0 + i2 * 8) * (ulong)k_dim + k0 + 8, (ulong)k_dim);
+        simdgroup_multiply_accumulate(C[i2], A0, B0, C[i2]);
+        simdgroup_multiply_accumulate(C[i2], A1, B1, C[i2]);
+      }
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    for (int i2 = 0; i2 < mtiles; i2++) {
+      const int mt = mt0 + i2 * 8;
+      const int m_rows = min(c - mt, 8);
+      simdgroup_store(C[i2], st, 8);
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      for (int e2 = int(lane); e2 < 64; e2 += 32) {
+        const int m = e2 >> 3;
+        const int n = n0 + (e2 & 7);
+        if (m < m_rows && n < n_rows) {
+          const int pair = order[seg_lo + mt + m];
+          y[pair * n_rows + n] = st[e2] * ws2;
+        }
+      }
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  }
+}
+
+
+// Parallel-over-tokens conv+split: the depthwise conv4 needs only the 3
+// prior inputs, so (t, c) pairs are independent — no serial token loop.
+// state rows supply t < 3; state_out = the last 3 inputs of the chunk.
+// Dispatch: n * C threads.
+kernel void gdn_conv_split_par(
+  device const float *__restrict__ weight    [[buffer(0)]],   // [C, 4, 1]
+  device const float *__restrict__ state     [[buffer(1)]],   // [3, C]
+  device const float *__restrict__ x         [[buffer(2)]],   // [n, C]
+  device       float *__restrict__ q_out     [[buffer(3)]],
+  device       float *__restrict__ k_out     [[buffer(4)]],
+  device       float *__restrict__ v_out     [[buffer(5)]],
+  device       float *__restrict__ state_out [[buffer(6)]],   // [3, C]
+  constant int &C     [[buffer(7)]],
+  constant int &q_dim [[buffer(8)]],
+  constant int &k_dim [[buffer(9)]],
+  constant int &n_tok [[buffer(10)]],
+  uint __tid [[thread_position_in_grid]]
+) {
+  int gi = int(__tid);
+  if (gi >= n_tok * C) return;
+  int t = gi / C;
+  int c = gi % C;
+  float taps[4];
+  for (int j = 0; j < 4; j++) {
+    int tt = t - 3 + j;
+    taps[j] = (tt < 0) ? state[(tt + 3) * C + c] : x[tt * C + c];
+  }
+  float w0 = weight[c * 4 + 0];
+  float w1 = weight[c * 4 + 1];
+  float w2 = weight[c * 4 + 2];
+  float w3 = weight[c * 4 + 3];
+  float conv_out = w0 * taps[0] + w1 * taps[1] + w2 * taps[2] + w3 * taps[3];
+  float sig = 1.0f / (1.0f + exp(-conv_out));
+  float yv = conv_out * sig;
+  int v_dim = C - q_dim - k_dim;
+  if (c < q_dim) q_out[t * q_dim + c] = yv;
+  else if (c < q_dim + k_dim) k_out[t * k_dim + (c - q_dim)] = yv;
+  else v_out[t * v_dim + (c - q_dim - k_dim)] = yv;
+  if (t == 0) {
+    for (int r = 0; r < 3; r++) {
+      int tt = n_tok - 3 + r;
+      state_out[r * C + c] = (tt < 0) ? state[(tt + 3) * C + c] : x[tt * C + c];
     }
   }
 }

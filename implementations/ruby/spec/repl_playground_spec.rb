@@ -131,9 +131,12 @@ RSpec.describe "REPL playground" do
       # Piped REPL output prints the first result on the same line as `wit>`.
       expect(out).to include("result   x")
       expect(out).to match(/^\s*type\s+Polynomial\s*$/)
-      expect(out).to match(/^\s*fields\s+2\s*$/)
+      expect(out).to match(/^\s*fields\s+5\s*$/)
       expect(out).to match(/^\s*@ring\s+ℚ\[x; grevlex\]\s*$/)
       expect(out).to match(/^\s*@terms\s+/)
+      expect(out).to match(/^\s*@content_hash\s+nil\s*$/)
+      expect(out).to match(/^\s*@pf_cache\s+nil\s*$/)
+      expect(out).to match(/^\s*@substitution_plan_cache\s+nil\s*$/)
       expect(out).not_to include("w_class")
       expect(out).not_to include("ivars")
     end

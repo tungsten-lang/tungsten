@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(559 total), grouped by area, with its declaration, a one-line
+(579 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -61,7 +61,10 @@ summary from the source header, and a link to the source.
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |
 | `Matrix` | — | — | [`core/matrix.w`](../core/matrix.w) |
 | `Mmap` | `+ Mmap` | — | [`core/mmap.w`](../core/mmap.w) |
-| `LinAlg` | `+ LinAlg` | LinAlg — dense linear algebra over nested lists / flat f64 storage. | [`core/linalg.w`](../core/linalg.w) |
+| `LinAlg` | `+ LinAlg` | — | [`core/linalg.w`](../core/linalg.w) |
+| `DenseLUFactor` | `+ DenseLUFactor` | A reusable dense LU factorization. The factor and pivot buffers are | [`core/linalg.w`](../core/linalg.w) |
+| `DenseCholeskyFactor` | `+ DenseCholeskyFactor` | Reusable SPD Cholesky factor. The retained row-major lower triangle is the | [`core/linalg.w`](../core/linalg.w) |
+| `DenseQRFactor` | `+ DenseQRFactor` | Compact Householder QR factor for a full-column-rank m×n matrix (m>=n). | [`core/linalg.w`](../core/linalg.w) |
 | `FFT` | `+ FFT` | FFT — discrete Fourier transform (native Cooley–Tukey radix-2). | [`core/fft.w`](../core/fft.w) |
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
 | `Stats` | `+ Stats` | — | [`core/stats.w`](../core/stats.w) |
@@ -83,13 +86,16 @@ summary from the source header, and a link to the source.
 | `GaussianInteger` | `+ GaussianInteger` | Z[i], the Gaussian integers: complex numbers a + bi with a, b in Z. | [`core/algebra/gaussian_integer.w`](../core/algebra/gaussian_integer.w) |
 | `EisensteinInteger` | `+ EisensteinInteger` | Z[omega], the Eisenstein integers: a + b*omega with omega a primitive cube | [`core/algebra/eisenstein_integer.w`](../core/algebra/eisenstein_integer.w) |
 | `SmithNormalForm` | `+ SmithNormalForm` | Smith normal form of an integer matrix. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
-| `SmithDecomposition` | `+ SmithDecomposition` | U A V = D with unimodular U, V and their inverses; integer kernel and cokernel bases. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
-| `FinitelyGeneratedAbelianGroup` | `+ FinitelyGeneratedAbelianGroup` | Z^r (+) Z/d1 (+) ... in invariant-factor form; the answer type of cokernels, abelianisations and homology. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
-| `FinitelyPresentedGroup` | `+ FinitelyPresentedGroup` | Presentations by relator words; relation matrix and abelianisation via Smith normal form. | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
-| `SeifertFibration` | `+ SeifertFibration` | Seifert fibrations over S^2: fundamental group, H_1, Orlik's order formula, rational Euler number. | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
-| `IntegerChainComplex` | `+ IntegerChainComplex` | Chain complexes of free abelian groups; integral homology with torsion via two Smith forms per degree. | [`core/algebra/chain_complex.w`](../core/algebra/chain_complex.w) |
-| `ToricFan2D` | `+ ToricFan2D` | Complete fans in Z^2 and their smooth toric surfaces: Euler number, self-intersections, K^2, Noether, del Pezzo test. | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
-| `LatticeTriangulation` | `+ LatticeTriangulation` | Z^2-periodic triangulations of the plane and the central fibre of Mumford's toric degeneration of a 2-torus. | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
+| `SmithDecomposition` | `+ SmithDecomposition` | U A V = D, with everything an integer matrix and U, V unimodular. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `SmithDecompositionCertificate` | `+ SmithDecompositionCertificate` | Replays U A V and the inverse products, checks the diagonal shape and the | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `FinitelyGeneratedAbelianGroup` | `+ FinitelyGeneratedAbelianGroup` | A finitely generated abelian group in invariant-factor form: | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `FinitelyPresentedGroup` | `+ FinitelyPresentedGroup` | Finitely presented groups, their abelianisations, and Seifert fibrations. | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
+| `SeifertFibration` | `+ SeifertFibration` | A Seifert fibration over the 2-sphere with unnormalised Seifert invariants | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
+| `IntegerChainComplex` | `+ IntegerChainComplex` | Chain complexes of free abelian groups and their integral homology. | [`core/algebra/chain_complex.w`](../core/algebra/chain_complex.w) |
+| `IntegerChainComplexCertificate` | `+ IntegerChainComplexCertificate` | Re-checks d d = 0, replays every degree's ranks against the Smith forms, | [`core/algebra/chain_complex.w`](../core/algebra/chain_complex.w) |
+| `ToricFan2D` | `+ ToricFan2D` | Complete fans in the plane and the smooth toric surfaces they define, plus | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
+| `LatticeTriangulation` | `+ LatticeTriangulation` | A Z^2-periodic triangulation of the plane with vertex set Z^2 — the input | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
+| `FiniteLattice` | `+ FiniteLattice` | Finite lattices and Knaster-Tarski fixpoints. | [`core/algebra/finite_lattice.w`](../core/algebra/finite_lattice.w) |
 | `Combinatorics` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `PolyominoEnumeration` | `+ PolyominoEnumeration` | Enumeration of polyominoes by cell count. | [`core/combinatorics/polyomino.w`](../core/combinatorics/polyomino.w) |
 | `LatticeAnimal` | `+ LatticeAnimal` | Enumeration of animals in a given lattice: grow shapes one cell at a time | [`core/combinatorics/lattice_animal.w`](../core/combinatorics/lattice_animal.w) |
@@ -174,6 +180,10 @@ summary from the source header, and a link to the source.
 | `ProofArtifactBundle` | `+ ProofArtifactBundle` | — | [`core/proof_artifact.w`](../core/proof_artifact.w) |
 | `Sparse` | `+ Sparse` | Module-level alias so `Sparse.eye` still works as a short name. | [`core/sparse.w`](../core/sparse.w) |
 | `SparseMatrix` | `+ SparseMatrix` | — | [`core/sparse.w`](../core/sparse.w) |
+| `SparsePattern` | `+ SparsePattern` | Sparse pattern / analysis / factor separation. | [`core/sparse_factor.w`](../core/sparse_factor.w) |
+| `SparseAnalysis` | `+ SparseAnalysis` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
+| `SparseFactor` | `+ SparseFactor` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
+| `SparseBlockFactor` | `+ SparseBlockFactor` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
 | `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
 | `MAC` | `+ MAC` | MAC — heap-backed 48-bit link-layer address with native byte predicates. | [`core/mac.w`](../core/mac.w) |
 | `Mutex` | `+ Mutex` | Mutex — a non-reentrant mutual-exclusion lock. | [`core/mutex.w`](../core/mutex.w) |
@@ -214,6 +224,7 @@ summary from the source header, and a link to the source.
 | `Value` | `+ Value` | — | [`core/value.w`](../core/value.w) |
 | `URL` | `+ URL` | URL — strict absolute-URL parsing and canonical reconstruction. | [`core/url.w`](../core/url.w) |
 | `Vector` | — | — | [`core/vector.w`](../core/vector.w) |
+| `PrimeSieve` | `+ PrimeSieve` | — | [`core/prime_sieve.w`](../core/prime_sieve.w) |
 | `FlatTorusOrbit` | `+ FlatTorusOrbit` | — | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitExtremum` | `+ FlatTorusOrbitExtremum` | Exact one-parameter orbits in a flat torus. | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitStraightening` | `+ FlatTorusOrbitStraightening` | An exact GL(n,Z) coordinate change which sends an integer torus direction | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
@@ -238,6 +249,8 @@ summary from the source header, and a link to the source.
 | `Field` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `RationalField` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `FiniteField` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `PolyFast` | `+ PolyFast` | — | [`core/algebra/poly_fast.w`](../core/algebra/poly_fast.w) |
+| `NttMultiply` | `+ NttMultiply` | — | [`core/algebra/ntt.w`](../core/algebra/ntt.w) |
 | `FiniteFieldModulusCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `FiniteFieldMinimalPolynomialCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `SimpleExtensionField` | — | — | [`core/algebra.w`](../core/algebra.w) |

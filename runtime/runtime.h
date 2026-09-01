@@ -1714,6 +1714,9 @@ int64_t w_array_storage_bits(int64_t bits);
 /* Zero-copy Array view over a buffer's shared contents (ebits encoding, element
  * count). Aliases the GPU-visible bytes — used by Tensor.matmul. */
 WValue w_metal_buffer_view(WValue buffer, WValue ebits, WValue length);
+WValue w_metal_fp8_e4m3_gather_rows(WValue dst, WValue mmaps,
+                                     WValue byte_offsets, WValue row_width,
+                                     WValue scale);
 WValue w_metal_queue_new(WValue device);
 WValue w_metal_capture_begin(WValue device, WValue path);
 WValue w_metal_capture_end(void);

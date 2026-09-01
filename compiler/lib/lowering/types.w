@@ -304,6 +304,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_metal_binary_archive_new"] = true
   m["w_metal_batch_barrier_resources"] = true
   m["w_metal_buffer_write_from_mmap"] = true
+  m["w_metal_fp8_e4m3_gather_rows"] = true
 
   # Atomics are observable synchronization operations. Loads cannot be folded
   # or reordered as pure calls, and writes/RMWs must never be eliminated.

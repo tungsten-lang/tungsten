@@ -460,6 +460,14 @@ ple_scale = ple_man["weight_scale"][0]
 # context stuck at EOS (the classic fn-body scoping trap).
 ple_ctx = [EOS_TOKEN, EOS_TOKEN]
 ple_mmaps = {}
+ple_bulk = ccall("__w_env", "FN_PLE_SCALAR") != "1"
+ple_gather_mmaps = []
+ple_gather_offsets = []
+h = 0
+while h < 16
+  ple_gather_mmaps.push(nil)
+  ple_gather_offsets.push(0)
+  h = h + 1
 
 # e4m3 -> f32 LUT (sign * (exp==0 ? man/8 * 2^-6 : (1+man/8) * 2^(exp-7))).
 ple_e4m3 = []
@@ -503,11 +511,17 @@ while bi < 256
     r = (row % (ple_shard_rows ## i64)).to_i()
     m = ple_shard_mmap(s)
     off = ple_shards[s]["offset"] + r * ple_head_dim
-    j = 0
-    while j < ple_head_dim
-      metal_buffer_write_f32(dst, h * ple_head_dim + j, ple_e4m3[m.byte_at(off + j)] * ple_scale)
-      j = j + 1
+    if ple_bulk
+      ple_gather_mmaps[h] = m
+      ple_gather_offsets[h] = off
+    else
+      j = 0
+      while j < ple_head_dim
+        metal_buffer_write_f32(dst, h * ple_head_dim + j, ple_e4m3[m.byte_at(off + j)] * ple_scale)
+        j = j + 1
     h = h + 1
+  if ple_bulk
+    metal_fp8_e4m3_gather_rows(dst, ple_gather_mmaps, ple_gather_offsets, ple_head_dim, ple_scale)
 
 -> ple_advance(tok)
   if tok == EOS_TOKEN

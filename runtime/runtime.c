@@ -70435,6 +70435,14 @@ W_BRIDGE_STUB WValue w_metal_buffer_read_i64(WValue buffer, WValue index) {
     w_raise(w_string("Metal: not available on this platform"));
     return W_NIL;
 }
+W_BRIDGE_STUB WValue w_metal_fp8_e4m3_gather_rows(WValue dst, WValue mmaps,
+                                                   WValue byte_offsets,
+                                                   WValue row_width,
+                                                   WValue scale) {
+    (void)dst; (void)mmaps; (void)byte_offsets; (void)row_width; (void)scale;
+    w_raise(w_string("Metal: not available on this platform"));
+    return W_NIL;
+}
 W_BRIDGE_STUB WValue w_metal_queue_new(WValue device) {
     (void)device;
     w_raise(w_string("Metal: not available on this platform"));

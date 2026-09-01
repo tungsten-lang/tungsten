@@ -149,6 +149,12 @@ fn metal_buffer_view(buffer, ebits, length)
 fn metal_buffer_write_from_mmap(buffer, dst_offset, mmap, src_offset, byte_length)
   ccall("w_metal_buffer_write_from_mmap", buffer, dst_offset, mmap, src_offset, byte_length)
 
+# Gather fixed-width FP8 E4M3 rows from read-only mmaps and decode them
+# directly into one shared f32 Metal buffer. `mmaps` and `byte_offsets` have
+# one entry per row; output rows are contiguous in list order.
+fn metal_fp8_e4m3_gather_rows(dst_buffer, mmaps, byte_offsets, row_width, scale)
+  ccall("w_metal_fp8_e4m3_gather_rows", dst_buffer, mmaps, byte_offsets, row_width, scale)
+
 # Q8_0 deinterleave: walk on-disk Q8_0 blocks (2-byte f16 scale +
 # 32-byte i8 quants per 34-byte block), split into separate scales
 # and quants Metal buffers for kernels that expect that layout.

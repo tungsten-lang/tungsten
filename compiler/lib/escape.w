@@ -47,7 +47,7 @@
     return true
   if name == "w_metal_batch_barrier_resources"
     return true
-  if name in ("w_metal_buffer_write_from_mmap" "w_q8_split_blocks" "w_q8_dequant_row")
+  if name in ("w_metal_buffer_write_from_mmap" "w_metal_fp8_e4m3_gather_rows" "w_q8_split_blocks" "w_q8_dequant_row")
     return true
   return false
 

@@ -18,6 +18,7 @@
 #import <Metal/Metal.h>
 #include <sys/mman.h>     /* madvise(MADV_DONTNEED) for write_from_mmap */
 #include <unistd.h>       /* getpagesize */
+#include <math.h>         /* ldexpf for FP8 E4M3 decode */
 #include "runtime.h"
 #include "wvalue.h"
 
@@ -629,6 +630,59 @@ WValue w_metal_buffer_write_from_mmap(WValue buffer_v,
         if (aligned_end > aligned_base) {
             madvise((void *)aligned_base, (size_t)(aligned_end - aligned_base), MADV_DONTNEED);
         }
+    }
+    return W_NIL;
+}
+
+/* Bulk sparse FP8-row gather for host-resident embedding tables. Decode
+ * matches FlashNext PLE's finite E4M3 convention exactly, including exponent
+ * 15. One checked bridge call replaces one call per output element. */
+WValue w_metal_fp8_e4m3_gather_rows(WValue dst_v, WValue mmaps_v,
+                                     WValue offsets_v, WValue row_width_v,
+                                     WValue scale_v) {
+    WMetalBuffer *dst = as_metal_buffer(dst_v);
+    if (!dst) w_raise(w_string("Metal.fp8_gather: destination is not a buffer"));
+    if (!w_is_array(mmaps_v) || !w_is_array(offsets_v)) {
+        w_raise(w_string("Metal.fp8_gather: mmaps and offsets must be arrays"));
+    }
+    WArray *mmaps = w_as_array(mmaps_v);
+    WArray *offsets = w_as_array(offsets_v);
+    if (mmaps->size != offsets->size) {
+        w_raise(w_string("Metal.fp8_gather: mmap/offset row counts differ"));
+    }
+    int64_t width = w_to_i64(row_width_v);
+    if (width <= 0) w_raise(w_string("Metal.fp8_gather: row width must be positive"));
+    int64_t rows = mmaps->size;
+    if (rows > INT64_MAX / width || rows * width > INT64_MAX / 4 ||
+        rows * width * 4 > dst->size) {
+        w_raise(w_string("Metal.fp8_gather: destination is too small"));
+    }
+
+    float lut[256];
+    for (int i = 0; i < 256; i++) {
+        float sign = (i & 0x80) ? -1.0f : 1.0f;
+        int exp = (i >> 3) & 0x0f;
+        int man = i & 0x07;
+        lut[i] = exp == 0
+            ? sign * ldexpf((float)man / 8.0f, -6)
+            : sign * ldexpf(1.0f + (float)man / 8.0f, exp - 7);
+    }
+    float scale = (float)metal_to_double(scale_v);
+    float *out = (float *)metal_buffer_contents(dst);
+    for (int64_t r = 0; r < rows; r++) {
+        WValue mmap_v = w_array_get(mmaps_v, w_int(r));
+        if (!w_is_mmap(mmap_v)) {
+            w_raise(w_string("Metal.fp8_gather: row source is not an mmap"));
+        }
+        WMmap *m = (WMmap *)w_as_ptr(mmap_v);
+        if (m->closed) w_raise(w_string("Metal.fp8_gather: row source mmap is closed"));
+        int64_t off = w_to_i64(w_array_get(offsets_v, w_int(r)));
+        if (off < 0 || off > m->size || width > m->size - off) {
+            w_raise(w_string("Metal.fp8_gather: row source is out of bounds"));
+        }
+        const uint8_t *src = m->data + off;
+        float *row = out + r * width;
+        for (int64_t c = 0; c < width; c++) row[c] = lut[src[c]] * scale;
     }
     return W_NIL;
 }

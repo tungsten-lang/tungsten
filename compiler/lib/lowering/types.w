@@ -95,6 +95,9 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "IPv6"          => 0x86 # 0x80 | W_TYPE_IPV6 (6)
     "Mac"           => 0x85 # 0x80 | W_TYPE_MAC (5)
     "Encoded"       => 0x88 # 0x80 | W_TYPE_ENCODED (8)
+    # Runtime w_dispatch_key gives nil a nonzero identity because key 0 is
+    # reserved for empty/in-flight inline caches.
+    "Nil"           => 0xF0
     "Float"         => 0xFF
     # Packed and heap domain numerics share the physical 0xFFFD tag, but their
     # method-cache identities are distinct. runtime.c's w_dispatch_key uses

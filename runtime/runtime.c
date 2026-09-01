@@ -51906,7 +51906,11 @@ static uint64_t w_dispatch_key_obj_nonhash(WValue v, uint64_t subtag) {
 }
 
 uint64_t w_dispatch_key(WValue v) {
-    if (__builtin_expect(v < 0x10, 0)) return 0;
+    /* Inline-cache key 0 is reserved for an empty/in-flight cache entry.
+     * Give nil its own stable nonzero identity so source methods registered
+     * on Nil can participate in type-class dispatch and be cached. Other
+     * singleton/sentinel values retain the legacy unregistered key for now. */
+    if (__builtin_expect(v < 0x10, 0)) return v == W_NIL ? 0xF0u : 0;
     uint64_t hi = v >> 48;
     /* A forced self-hosted build is overwhelmingly Array/Hash dispatch
      * (85% together). Keep those two representation checks at the front;

@@ -147,6 +147,12 @@ fn dnrm2(a, n)
 -> lapack_qr(a, q, r, m, n)
   ccall("w_blas_dgeqrf_qr", a, q, r, m, n)
 
+-> lapack_eigh_values(a, values, n)
+  ccall("w_blas_dsyev_values", a, values, n)
+
+-> lapack_singular_values(a, values, m, n)
+  ccall("w_blas_dgesdd_values", a, values, m, n)
+
 # ---- vDSP vector arithmetic ----
 fn vadd(a, b, out, n)
   ccall("w_blas_vadd_f32", a, b, out, n)

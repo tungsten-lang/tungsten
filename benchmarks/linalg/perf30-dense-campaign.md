@@ -216,3 +216,29 @@ rank-deficient inputs keep the reference semantics. A least-squares API is
 deferred: Core currently has no contract for underdetermined systems,
 multi-RHS shape, rank reporting, or `rcond`, and silently choosing those here
 would be an API change rather than a complete performance tranche.
+
+## Item 6 — symmetric eigenvalues and singular values
+
+Source finding: Core used the general nonsymmetric `dgeev` path even for real
+symmetric matrices and had no SVD entry point. Callers needing singular values
+had to form `A^T A`, square the condition number, and eigendecompose the normal
+matrix.
+
+Correctness: `spec/core/linalg_spectral_spec.w` passes 5/5 for a known
+symmetric spectrum, tall and wide SVD, rank deficiency, and empty inputs.
+`eigh_values` is ascending and `singular_values` descending, matching LAPACK.
+The 96x96 benchmark trace and 128x64 singular-value checksum agree with the
+general/normal-equation workarounds.
+
+Alternating whole-process samples:
+
+| workload | prior workaround | native values API |
+| --- | ---: | ---: |
+| 200 symmetric 96x96 spectra | 0.23-0.29 s | 0.08-0.09 s |
+| 100 singular spectra of 128x64 | 0.10 s | 0.05 s |
+
+Retained. `eigh_values` uses `dsyev`; `singular_values` uses direct `dgesdd`
+and therefore improves numerical conditioning as well as halving this matched
+workload. This tranche is deliberately values-only: eigenvector and full SVD
+APIs need stable orientation, reduced/full shape, and rank-reporting contracts
+before Core can expose them without later incompatibility.

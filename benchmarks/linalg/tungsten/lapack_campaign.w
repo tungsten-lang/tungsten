@@ -51,6 +51,20 @@ use core/linalg
     i += 1
   [orth, recon]
 
+-> symmetric_matrix(n)
+  a = campaign_matrix(n, n)
+  out = []
+  i = 0
+  while i < n
+    row = []
+    j = 0
+    while j < n
+      row.push((a[i][j] + a[j][i]) / ~2.0)
+      j += 1
+    out.push(row)
+    i += 1
+  out
+
 mode = ARGV[0]
 raise "mode required" if mode == nil
 
@@ -75,5 +89,82 @@ if mode == "qr" || mode == "qr-reference" || mode == "qr-lapack"
   raise "QR orthogonality error " + errors[0].to_s if errors[0] > ~0.00000001
   raise "QR reconstruction error " + errors[1].to_s if errors[1] > ~0.00000001
   << "QR ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " orth=" + errors[0].to_s + " recon=" + errors[1].to_s
+elsif mode == "eigh-general"
+  iterations = ARGV[1] == nil ? 20 : ARGV[1].to_i
+  n = ARGV[2] == nil ? 96 : ARGV[2].to_i
+  a = symmetric_matrix(n)
+  values = nil
+  started = clock()
+  i = 0
+  while i < iterations
+    values = LinAlg.eigenvalues_lapack(a)
+    i += 1
+  elapsed = clock() - started
+  checksum = ~0.0
+  i = 0
+  while i < values.size()
+    checksum += values[i][0]
+    raise "symmetric matrix produced complex eigenvalue" if values[i][1].abs > ~0.00000001
+    i += 1
+  << "EIGH_GENERAL ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + checksum.round(6).to_s
+elsif mode == "eigh-native"
+  iterations = ARGV[1] == nil ? 20 : ARGV[1].to_i
+  n = ARGV[2] == nil ? 96 : ARGV[2].to_i
+  a = symmetric_matrix(n)
+  values = nil
+  started = clock()
+  i = 0
+  while i < iterations
+    values = LinAlg.eigh_values(a)
+    i += 1
+  elapsed = clock() - started
+  checksum = ~0.0
+  i = 0
+  while i < values.size()
+    checksum += values[i]
+    raise "eigh values not sorted" if i > 0 && values[i] < values[i - 1]
+    i += 1
+  << "EIGH_NATIVE ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + checksum.round(6).to_s
+elsif mode == "svd-normal"
+  iterations = ARGV[1] == nil ? 20 : ARGV[1].to_i
+  m = ARGV[2] == nil ? 128 : ARGV[2].to_i
+  n = ARGV[3] == nil ? 64 : ARGV[3].to_i
+  a = campaign_matrix(m, n)
+  values = nil
+  started = clock()
+  i = 0
+  while i < iterations
+    normal = LinAlg.matmul(LinAlg.transpose(a), a)
+    values = LinAlg.eigenvalues_lapack(normal)
+    i += 1
+  elapsed = clock() - started
+  checksum = ~0.0
+  i = 0
+  while i < values.size()
+    value = values[i][0]
+    value = ~0.0 if value < ~0.0 && value > ~-0.00000001
+    raise "normal matrix has negative eigenvalue" if value < ~0.0
+    checksum += Math.sqrt(value)
+    i += 1
+  << "SVD_NORMAL ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + checksum.round(6).to_s
+elsif mode == "svd-native"
+  iterations = ARGV[1] == nil ? 20 : ARGV[1].to_i
+  m = ARGV[2] == nil ? 128 : ARGV[2].to_i
+  n = ARGV[3] == nil ? 64 : ARGV[3].to_i
+  a = campaign_matrix(m, n)
+  values = nil
+  started = clock()
+  i = 0
+  while i < iterations
+    values = LinAlg.singular_values(a)
+    i += 1
+  elapsed = clock() - started
+  checksum = ~0.0
+  i = 0
+  while i < values.size()
+    checksum += values[i]
+    raise "singular values not sorted" if i > 0 && values[i] > values[i - 1]
+    i += 1
+  << "SVD_NATIVE ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + checksum.round(6).to_s
 else
   raise "unknown mode: " + mode

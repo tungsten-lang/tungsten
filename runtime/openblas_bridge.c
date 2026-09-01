@@ -291,6 +291,13 @@ extern void dgeqrf_(const int *m, const int *n, double *a, const int *lda,
 extern void dorgqr_(const int *m, const int *n, const int *k, double *a,
                     const int *lda, const double *tau, double *work,
                     const int *lwork, int *info);
+extern void dsyev_(const char *jobz, const char *uplo, const int *n, double *a,
+                   const int *lda, double *w, double *work,
+                   const int *lwork, int *info);
+extern void dgesdd_(const char *jobz, const int *m, const int *n, double *a,
+                    const int *lda, double *s, double *u, const int *ldu,
+                    double *vt, const int *ldvt, double *work,
+                    const int *lwork, int *iwork, int *info);
 
 WValue w_blas_dgeqrf_qr(WValue a_wval, WValue q_wval, WValue r_wval,
                         WValue m_wval, WValue n_wval) {
@@ -326,6 +333,43 @@ WValue w_blas_dgeqrf_qr(WValue a_wval, WValue q_wval, WValue r_wval,
     for (int i = 0; i < m; i++) for (int j = 0; j < n; j++)
         qp[(size_t)i * n + j] = ap[(size_t)i + (size_t)j * m];
     return w_int(0);
+}
+
+WValue w_blas_dsyev_values(WValue a_wval, WValue values_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval), *values = w_as_array(values_wval);
+    int n = (int)w_as_int(n_wval);
+    if (n < 0 || a->size < (int64_t)n * n || values->size < n) {
+        w_raise(w_string("dsyev_values: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start, *wp = (double *)values->slots + values->start;
+    int info = 0, lwork = -1; double query = 0.0;
+    dsyev_("N", "U", &n, ap, &n, wp, &query, &lwork, &info);
+    if (info != 0) return w_int(info);
+    lwork = (int)query; if (lwork < 1) lwork = 1;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { w_raise(w_string("dsyev_values: out of memory")); return w_int(-1); }
+    dsyev_("N", "U", &n, ap, &n, wp, work, &lwork, &info); free(work);
+    return w_int(info);
+}
+
+WValue w_blas_dgesdd_values(WValue a_wval, WValue values_wval,
+                            WValue m_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval), *values = w_as_array(values_wval);
+    int m = (int)w_as_int(m_wval), n = (int)w_as_int(n_wval), mn = m < n ? m : n;
+    if (m < 0 || n < 0 || a->size < (int64_t)m * n || values->size < mn) {
+        w_raise(w_string("dgesdd_values: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start, *sp = (double *)values->slots + values->start;
+    int info = 0, lwork = -1, one = 1; double query = 0.0, dummy = 0.0;
+    int *iwork = (int *)malloc(sizeof(int) * (size_t)(8 * (mn > 0 ? mn : 1)));
+    if (!iwork) { w_raise(w_string("dgesdd_values: out of memory")); return w_int(-1); }
+    dgesdd_("N", &m, &n, ap, &m, sp, &dummy, &one, &dummy, &one, &query, &lwork, iwork, &info);
+    if (info != 0) { free(iwork); return w_int(info); }
+    lwork = (int)query; if (lwork < 1) lwork = 1;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { free(iwork); w_raise(w_string("dgesdd_values: out of memory")); return w_int(-1); }
+    dgesdd_("N", &m, &n, ap, &m, sp, &dummy, &one, &dummy, &one, work, &lwork, iwork, &info);
+    free(work); free(iwork); return w_int(info);
 }
 
 WValue w_blas_dgeev(WValue a_wval, WValue wr_wval, WValue wi_wval, WValue n_wval) {

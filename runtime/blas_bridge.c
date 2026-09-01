@@ -242,6 +242,52 @@ WValue w_blas_dgeqrf_qr(WValue a_wval, WValue q_wval, WValue r_wval,
     return w_int(0);
 }
 
+WValue w_blas_dsyev_values(WValue a_wval, WValue values_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval), *values = w_as_array(values_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    if (n < 0 || a->size < (int64_t)n * n || values->size < n) {
+        w_raise(w_string("dsyev_values: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start;
+    double *wp = (double *)values->slots + values->start;
+    __CLPK_integer info = 0, lwork = -1; double query = 0.0;
+    dsyev_("N", "U", &n, ap, &n, wp, &query, &lwork, &info);
+    if (info != 0) return w_int((int64_t)info);
+    lwork = (__CLPK_integer)query; if (lwork < 1) lwork = 1;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { w_raise(w_string("dsyev_values: out of memory")); return w_int(-1); }
+    dsyev_("N", "U", &n, ap, &n, wp, work, &lwork, &info);
+    free(work);
+    return w_int((int64_t)info);
+}
+
+WValue w_blas_dgesdd_values(WValue a_wval, WValue values_wval,
+                            WValue m_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval), *values = w_as_array(values_wval);
+    __CLPK_integer m = (__CLPK_integer)w_as_int(m_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    __CLPK_integer mn = m < n ? m : n;
+    if (m < 0 || n < 0 || a->size < (int64_t)m * n || values->size < mn) {
+        w_raise(w_string("dgesdd_values: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start;
+    double *sp = (double *)values->slots + values->start;
+    __CLPK_integer info = 0, lwork = -1, one = 1;
+    double query = 0.0, dummy = 0.0;
+    __CLPK_integer *iwork = (__CLPK_integer *)malloc(sizeof(__CLPK_integer) * (size_t)(8 * (mn > 0 ? mn : 1)));
+    if (!iwork) { w_raise(w_string("dgesdd_values: out of memory")); return w_int(-1); }
+    dgesdd_("N", &m, &n, ap, &m, sp, &dummy, &one, &dummy, &one,
+            &query, &lwork, iwork, &info);
+    if (info != 0) { free(iwork); return w_int((int64_t)info); }
+    lwork = (__CLPK_integer)query; if (lwork < 1) lwork = 1;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { free(iwork); w_raise(w_string("dgesdd_values: out of memory")); return w_int(-1); }
+    dgesdd_("N", &m, &n, ap, &m, sp, &dummy, &one, &dummy, &one,
+            work, &lwork, iwork, &info);
+    free(work); free(iwork);
+    return w_int((int64_t)info);
+}
+
 /* ---- vDSP reductions over an f32 array (whole array, start-offset aware) ----
  * n<=0 ⇒ operate over the array's full length. All return a boxed Float. */
 static inline float *blas_f32_ptr(WValue v, int64_t *len_out) {

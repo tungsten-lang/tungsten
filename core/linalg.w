@@ -618,3 +618,45 @@
       out = out.push([wr[i], wi[i]])
       i = i + 1
     out
+
+  # Eigenvalues of a real symmetric matrix, ascending. Values-only keeps the
+  # API explicit until Core has a stable eigenvector orientation contract.
+  -> .eigh_values(a)
+    n = LinAlg.rows(a)
+    raise "LinAlg.eigh_values: matrix must be square" if LinAlg.cols(a) != n
+    return [] if n == 0
+    flat = LinAlg.flatten_square(a, n)
+    values = ccall("w_array_new_aligned", -64, n)
+    info = ccall("w_blas_dsyev_values", flat, values, n)
+    raise "LinAlg.eigh_values: dsyev info=" + info.to_s if info != 0
+    out = []
+    i = 0
+    while i < n
+      out.push(values[i])
+      i += 1
+    out
+
+  # Singular values of an m×n real matrix, descending. Direct SVD avoids the
+  # condition-number squaring of the common eigenvalues(A^T A) workaround.
+  -> .singular_values(a)
+    m = LinAlg.rows(a)
+    n = LinAlg.cols(a)
+    return [] if m == 0 || n == 0
+    flat = ccall("w_array_new_aligned", -64, m * n)
+    i = 0
+    while i < m
+      j = 0
+      while j < n
+        flat[j * m + i] = a[i][j] + ~0.0
+        j += 1
+      i += 1
+    count = m < n ? m : n
+    values = ccall("w_array_new_aligned", -64, count)
+    info = ccall("w_blas_dgesdd_values", flat, values, m, n)
+    raise "LinAlg.singular_values: dgesdd info=" + info.to_s if info != 0
+    out = []
+    i = 0
+    while i < count
+      out.push(values[i])
+      i += 1
+    out

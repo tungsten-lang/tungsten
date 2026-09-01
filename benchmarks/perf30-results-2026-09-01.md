@@ -51,12 +51,14 @@ Detailed command lines, sample tables, and workload construction live in:
 ## Correctness-hardening follow-up
 
 A post-campaign integration audit found edge contracts that the focused
-performance oracles did not cover. At the time of this ledger update, the
-responses below exist in the integration working tree but are not yet part of
-the retained performance commits. This appendix records their scope; it does
-not claim that the final exact-HEAD compiler/runtime gate is green.
+performance oracles did not cover. The responses below are integration
+follow-ups, not evidence contained in the original retained performance
+commits; individual fixes may be committed or still in the working tree while
+the audit closes. This appendix records their scope but does not claim that the
+final exact-HEAD compiler/runtime gate is green. The landing handoff is the
+authority for final commit and validation status.
 
-| Audit area | Working-tree response | Required landing evidence |
+| Audit area | Integration response | Required landing evidence |
 |---|---|---|
 | Numeric scalar ABI | Coerce ordinary integer `alpha`/`beta` arguments once at the Core BLAS and Tensor boundaries before native f64 decoding. | Integer-scalar checks for DAXPY, DSCAL, DSYRK, DTRSM, and f32/f64 `matmul_into`. |
 | BLAS and factor aliasing | Reject byte-range overlap for GEMM, GEMV, SYMV, SYRK, and TRSM in both native bridges; use overlap-safe typed-array moves for LU, Cholesky, and QR `solve_into`/batched copies. | Exact same-buffer and shifted-slice cases across Accelerate, plus equivalent OpenBLAS CI. |

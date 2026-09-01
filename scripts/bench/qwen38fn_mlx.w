@@ -142,6 +142,9 @@ if skip_spec != "" then << "ABLATION: skipping " + skip_spec + " — output is g
 # path (the concurrent encoder already overlaps those stages) — kept only
 # so the negative result stays reproducible.
 hc_fused = ccall("__w_env", "FN_HCFUSED") == "1"
+# FN_CPROG=0: run prebuilt programs through the .w dispatch loop instead of
+# the C-side executor (w_metal_program_run) — A/B escape; commands identical.
+cprog = ccall("__w_env", "FN_CPROG") != "0"
 # Pipelined encode: commit the token's command buffer in thirds so encoding
 # layers 17-48 overlaps GPU execution of layers 1-16 (the flame profile
 # priced host encode at ~6.5ms/token, fully serial with the GPU when the
@@ -601,6 +604,7 @@ ple_nc_tmp = metal_buffer(device, HC_HIDDEN * 4)
 # Per-token scalar slots as real buffers: their CONTENTS are rewritten each
 # token, so recorded programs (and ICBs, whose args freeze at record time)
 # never need re-encoding.
+pending_cbs = []
 pos_buf = metal_buffer(device, 4)
 pos1_buf = metal_buffer(device, 4)
 tok_buf = metal_buffer(device, 4)
@@ -683,7 +687,7 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   prog.push([0, phn_pipe, [mk_tmp, k_norm_scale, DK, ~1.0 / DK, EPS / DK], HK, 32])
   prog.push([2, g_beta_pipe, [a_tmp, b_tmp, lyr[:alog], lyr[:dtb], g_tmp, beta_tmp, HV], HV, 0])
   prog.push([1, nil, [mq_tmp, mk_tmp, g_tmp, beta_tmp], 0, 0])
-  prog.push([3, delta_pipe, [mq_tmp, mk_tmp, mv_tmp, g_tmp, beta_tmp, ss_in, delta_tmp, ss_out, HK, HV, DK, DV], 0, 0])
+  prog.push([3, delta_pipe, [mq_tmp, mk_tmp, mv_tmp, g_tmp, beta_tmp, ss_in, delta_tmp, ss_out, HK, HV, DK, DV], [1, DV / 4, HV, 32, 4, 1], 0])
   prog.push([1, nil, [delta_tmp, z_tmp], 0, 0])
   prog.push([0, rng_sig_pipe, [delta_tmp, z_tmp, lyr[:linear_norm], mamba_norm_tmp, DV, EPS], HV, 32])
   prog.push([1, nil, [mamba_norm_tmp], 0, 0])
@@ -766,6 +770,11 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   prog.push([1, nil, [H], 0, 0])
 
 -> run_prog(prog)
+  if cprog
+    # C-side executor: one bridge crossing for the whole program; emits
+    # byte-identical encoder commands to the per-call loop below.
+    ccall("w_metal_program_run", queue, prog, concurrent ? 1 : 0)
+    return
   i = 0
   n = prog.size()
   while i < n
@@ -778,7 +787,8 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
     elsif k == 1
       if concurrent then metal_batch_barrier_resources(queue, st[2])
     else
-      metal_dispatch_3d(queue, st[1], st[2], 1, DV / 4, HV, 32, 4, 1)
+      d3 = st[3]
+      metal_dispatch_3d(queue, st[1], st[2], d3[0], d3[1], d3[2], d3[3], d3[4], d3[5])
     i = i + 1
 
 # Build the per-layer programs (after every scratch buffer exists).
@@ -901,7 +911,8 @@ use_icb = ccall("__w_env", "FN_ICB") == "1"
     tg = icb_tg_for(n)
     metal_icb_add(bstate[0], st[1], icb_args(st[2]), n / tg, tg)
   elsif k == 3
-    metal_icb_add_3d(bstate[0], st[1], icb_args(st[2]), 1, DV / 4, HV, 32, 4, 1)
+    d3 = st[3]
+    metal_icb_add_3d(bstate[0], st[1], icb_args(st[2]), d3[0], d3[1], d3[2], d3[3], d3[4], d3[5])
   bstate[1] = bstate[1] + 1
 
 -> icb_emit_prog(spec)
@@ -1272,12 +1283,18 @@ fast_path = golden_prefix == "" && !expert_hist && skip_spec == "" && !hc_fused 
     run_prog(lyr[:ping] == 0 || lyr[:kind] == "full" ? lyr[:prog_a] : lyr[:prog_b])
     if lyr[:kind] == "mamba" then lyr[:ping] = 1 - lyr[:ping]
     if li == 15 || li == 31
-      metal_batch_commit(queue)
+      # commit WITHOUT waiting: the chunk executes while later layers encode.
+      # Buffers on one queue execute in commit order, so the final commit's
+      # wait transitively covers these; the deferred waits are then instant
+      # and only release the handles.
+      pending_cbs.push(metal_batch_commit_async(queue))
       metal_batch_begin_concurrent(queue)
     li = li + 1
   run_prog(head_prog)
   ft2 = fn_time ? ccall("__w_clock_ms") : ~0.0
   metal_batch_commit(queue)
+  while pending_cbs.size() > 0
+    metal_command_buffer_wait(pending_cbs.pop())
   ple_advance(token_id)
   result = metal_buffer_read_i32(argmax_out, 0)
   if fn_time

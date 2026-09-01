@@ -1053,6 +1053,91 @@ WValue w_metal_batch_barrier_resources(WValue queue_v, WValue bufs_v) {
     return W_NIL;
 }
 
+/* Execute a prerecorded dispatch program (array of steps) inside the open
+ * batch. Step encodings mirror the qwen38fn bench's run_prog:
+ *   [0, pipe, args, n_groups, tg_size]   dispatch_groups
+ *   [2, pipe, args, n_threads, 0]        dispatch_n
+ *   [1, nil,  bufs, 0, 0]                scoped barrier (only if barriers != 0)
+ *   [3, pipe, args, dims6, 0]            3d dispatch, dims6 = [gx,gy,gz,tx,ty,tz]
+ * One ccall replaces hundreds of per-dispatch bridge crossings; the encoder
+ * commands emitted are IDENTICAL to the per-call path's. */
+WValue w_metal_program_run(WValue queue_v, WValue prog_v, WValue barriers_v) {
+    WMetalQueue *q = as_metal_queue(queue_v);
+    if (!q) w_raise(w_string("Metal.program_run: bad queue"));
+    if (!q->batch_cmd) w_raise(w_string("Metal.program_run: no batch is open on this queue"));
+    if (!w_is_array(prog_v)) w_raise(w_string("Metal.program_run: program must be an array"));
+    int64_t barriers = w_to_i64(barriers_v);
+    id<MTLComputeCommandEncoder> enc = (id<MTLComputeCommandEncoder>)q->batch_encoder;
+    id<MTLDevice> dev = [(id<MTLCommandQueue>)q->handle device];
+    WArray *prog = w_as_array(prog_v);
+    for (int32_t si = 0; si < prog->size; si++) {
+        WValue step_v = prog->slots[prog->start + si];
+        if (!w_is_array(step_v)) w_raise(w_string("Metal.program_run: step must be an array"));
+        WArray *step = w_as_array(step_v);
+        if (step->size < 5) w_raise(w_string("Metal.program_run: step must have 5 slots"));
+        int64_t kind = w_to_i64(step->slots[step->start + 0]);
+        WValue args_v = step->slots[step->start + 2];
+        if (!w_is_array(args_v)) w_raise(w_string("Metal.program_run: step args must be an array"));
+        WArray *args = w_as_array(args_v);
+        if (kind == 1) {
+            if (!barriers || args->size == 0) continue;
+            id<MTLResource> res_arr[args->size];
+            for (int32_t i = 0; i < args->size; i++) {
+                WMetalBuffer *b = as_metal_buffer(args->slots[args->start + i]);
+                if (!b) w_raise(w_string("Metal.program_run: barrier arg is not a buffer"));
+                res_arr[i] = (id<MTLResource>)b->handle;
+            }
+            [enc memoryBarrierWithResources:res_arr count:(NSUInteger)args->size];
+            continue;
+        }
+        WMetalPipeline *p = as_metal_pipeline(step->slots[step->start + 1]);
+        if (!p) w_raise(w_string("Metal.program_run: step pipeline is invalid"));
+        id<MTLComputePipelineState> ps = (id<MTLComputePipelineState>)p->handle;
+        if (q->batch_pipeline != (void *)ps) {
+            [enc setComputePipelineState:ps];
+            q->batch_pipeline = (void *)ps;
+        }
+        for (int32_t i = 0; i < args->size; i++) {
+            WValue bv = args->slots[args->start + i];
+            id<MTLBuffer> mb = metal_buffer_or_wrap_array(bv, dev);
+            if (!mb) {
+                char msg[112];
+                snprintf(msg, sizeof(msg), "Metal.program_run: step %d arg %d is not bindable", si, i);
+                w_raise(w_string(msg));
+            }
+            [enc setBuffer:mb offset:metal_buffer_binding_offset(bv) atIndex:(NSUInteger)i];
+        }
+        if (kind == 0) {
+            int64_t n_groups = w_to_i64(step->slots[step->start + 3]);
+            int64_t tg = w_to_i64(step->slots[step->start + 4]);
+            MTLSize gridSize = MTLSizeMake((NSUInteger)(n_groups * tg), 1, 1);
+            MTLSize threadgroupSize = MTLSizeMake((NSUInteger)tg, 1, 1);
+            [enc dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+        } else if (kind == 2) {
+            int64_t threads = w_to_i64(step->slots[step->start + 3]);
+            MTLSize gridSize = MTLSizeMake((NSUInteger)threads, 1, 1);
+            NSUInteger tgw = [ps maxTotalThreadsPerThreadgroup];
+            if (tgw > (NSUInteger)threads) tgw = (NSUInteger)threads;
+            if (tgw == 0) tgw = 1;
+            MTLSize threadgroupSize = MTLSizeMake(tgw, 1, 1);
+            [enc dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+        } else if (kind == 3) {
+            WValue dims_v = step->slots[step->start + 3];
+            if (!w_is_array(dims_v)) w_raise(w_string("Metal.program_run: 3d step needs a dims array"));
+            WArray *dims = w_as_array(dims_v);
+            if (dims->size < 6) w_raise(w_string("Metal.program_run: 3d dims must have 6 entries"));
+            NSUInteger dv[6];
+            for (int32_t i = 0; i < 6; i++) dv[i] = (NSUInteger)w_to_i64(dims->slots[dims->start + i]);
+            MTLSize tgGrid = MTLSizeMake(dv[0], dv[1], dv[2]);
+            MTLSize tpg = MTLSizeMake(dv[3], dv[4], dv[5]);
+            [enc dispatchThreadgroups:tgGrid threadsPerThreadgroup:tpg];
+        } else {
+            w_raise(w_string("Metal.program_run: unknown step kind"));
+        }
+    }
+    return W_NIL;
+}
+
 /* Allocate `length` bytes of threadgroup-scoped memory at the given
  * binding index for the NEXT dispatch on the open batch's encoder.
  * The kernel must declare a `threadgroup T*` argument with the

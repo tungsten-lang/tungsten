@@ -341,6 +341,42 @@
     return @inverse_table[element] if @inverse_table != nil
     power(element, @order - 2)
 
+  # Invert a nonzero batch with one field inversion.  The output Array first
+  # stores inclusive prefix products, then is overwritten in reverse with the
+  # corresponding inverses.  Compared with mapping `inverse`, this changes n
+  # exponentiations into one exponentiation plus 3n-3 multiplications.
+  -> batch_inverse(values)
+    raise "finite-field inverse batch must be an Array" if values.class_name != "Array"
+    count = values.size
+    return [] if count == 0
+    output = []
+    if @inverse_table != nil
+      i = 0
+      while i < count
+        element = normalize_element(values[i])
+        raise "division by zero in finite-field inverse batch" if element == 0
+        output.push(@inverse_table[element])
+        i += 1
+      return output
+    first = normalize_element(values[0])
+    raise "division by zero in finite-field inverse batch" if first == 0
+    output.push(first)
+    i = 1
+    while i < count
+      element = normalize_element(values[i])
+      raise "division by zero in finite-field inverse batch" if element == 0
+      output.push(multiply(output[i - 1], element))
+      i += 1
+    suffix_inverse = inverse(output[count - 1])
+    i = count - 1
+    while i > 0
+      element = normalize_element(values[i])
+      output[i] = multiply(output[i - 1], suffix_inverse)
+      suffix_inverse = multiply(suffix_inverse, element)
+      i -= 1
+    output[0] = suffix_inverse
+    output
+
   -> divide(left, right)
     multiply(left, inverse(right))
 

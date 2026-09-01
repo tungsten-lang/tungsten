@@ -15,13 +15,29 @@ Correctness is checked by the benchmark checksum and the focused Core spec.
 | 17. Damped Gauss-Newton/LM least squares | 5 dimension-16 linear solves to <1e-10 objective | 127 ms | 3 ms | retained, 42.3x and lower error | checksum near `374`; new FD/analytic/nonlinear spec and `spec/sci/smoke_spec.w` passed |
 | 18. Polynomial substitution plan | 30 specializations, 1152 terms to 48 groups over F_65537 | 36 ms | 1 ms | retained, >36x | checksum `59040`; polynomial, modular-GCD, and specialization specs passed |
 | 19. Direct finite-factor candidate construction | 10000 dense degree-20 candidates over F_2 | 94 ms | 15 ms | retained, 6.27x | checksum `211`; compiled `spec/core/algebra_finite_factor_spec.w` passed |
-| 20. Prepared inverse/Frobenius tables | 1000 complete nonzero sweeps of F_2^8 | 176 ms | 48 ms | retained, 3.67x | every inverse product and Frobenius round-trip checked; finite-field spec passed |
+| 20a. Prepared inverse/Frobenius tables | 1000 complete nonzero sweeps of F_2^8 | 176 ms | 48 ms | retained, 3.67x | every inverse product and Frobenius round-trip checked; finite-field spec passed |
+| 20b. Prefix/suffix batch inversion | 1000 batches of 512 nonzero elements over F_1000003 | 302.2 us | 36.8 us | retained, 8.21x | identical checksum `177900`; prime/extension/empty/zero-policy specs passed |
 | 21. Reusable FFTPlan | 600 forward/inverse pairs, n=1024 | 705 ms | 829 ms | rejected, 17.6% slower | identical checksum `1150.5357900443466`; max round-trip error `3.21e-11`; Sci smoke passed |
 | 22a. Coprime Rational multiplication finish | Repeated products of canonical 128/512/2048/8192-bit Rational operands | 964/4008/38313/454111 ns | 357/522/2414/8472 ns | retained, 2.70x/7.68x/15.9x/53.6x | identical checksums; compiled Rational spec plus 29,241 exhaustive signed small products passed |
 | 22b. Fraction-free polynomial-matrix determinant | 12 determinants of dense 7x7 `zI + J` over F_1009 | 109 ms | 5 ms | retained, 21.8x | exact closed form `z^6(z+7)`, checksum `96`; compiled polynomial-matrix spec passed |
 
 Rejected or deferred experiments are recorded below with their reason; they
 are not left in production source.
+
+## 20b. Prefix/suffix finite-field inversion: retained
+
+`FiniteField#batch_inverse` stores inclusive prefix products in its output,
+performs one field inversion, then overwrites the prefixes in reverse. For a
+batch of size `n`, it replaces `n` exponentiations with one exponentiation and
+`3(n-1)` multiplications; zero retains scalar `inverse`'s loud failure policy.
+
+Five alternating 1,000-round samples over F_1000003 at batch size 512 had a
+scalar median of 302.2 us and a batch median of 36.8 us (8.21x). Every checksum
+was `177900`. A candidate-only size sweep found the expected fixed-cost
+crossover: size 1 was 0.496 us scalar versus 0.527 us batch, while size 2 was
+1.000 us versus 0.607 us and every tested size through 512 favored batching.
+The finite-field spec now covers prime and extension fields, empty batches,
+and zero rejection; all checks pass.
 
 ## 21. FFTPlan: rejected
 

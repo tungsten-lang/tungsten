@@ -34,6 +34,10 @@ finite_check("prime.add", f5.add(4, 3), 2)
 finite_check("prime.subtract", f5.subtract(1, 4), 2)
 finite_check("prime.multiply", f5.multiply(3, 4), 2)
 finite_check("prime.inverse", f5.inverse(2), 3)
+finite_check("prime.batch_inverse.empty", f5.batch_inverse([]), [])
+finite_check("prime.batch_inverse",
+             f5.batch_inverse([1, 2, 3, 4]),
+             [1, 3, 2, 4])
 finite_check("prime.divide", f5.divide(3, 2), 4)
 finite_check("prime.rational_coercion", f5.coerce(Rational.new(1, 2)), 3)
 finite_check("prime.zero_is_square", f5.square?(0), true)
@@ -55,6 +59,19 @@ finite_check("extension.degree", f25.degree, 2)
 finite_check("extension.order", f25.order, 25)
 finite_check("extension.t_squared", f25.multiply(t25, t25), 3)
 finite_check("extension.inverse", f25.multiply(t25, f25.inverse(t25)), 1)
+f25_batch = f25.batch_inverse([1, t25, f25.add(t25, 1), 4])
+f25_batch_ok = true
+i = 0
+while i < f25_batch.size
+  value = [1, t25, f25.add(t25, 1), 4][i]
+  f25_batch_ok = false if f25.multiply(value, f25_batch[i]) != 1
+  i += 1
+finite_check("extension.batch_inverse", f25_batch_ok, true)
+prepared25 = FiniteField.new(5, [2, 0, 1])
+prepared25.prepare_arithmetic!
+finite_check("extension.batch_inverse.prepared",
+             prepared25.batch_inverse([1, t25, prepared25.add(t25, 1), 4]),
+             f25_batch)
 finite_check("extension.square", f25.square?(f25.power(t25, 2)), true)
 finite_check("extension.nonsquare", f25.square?(t25), false)
 finite_check("extension.quadratic_character",
@@ -159,6 +176,13 @@ f16.each_element -> (a)
     if a != 0
       quartic_field_axioms = false if f16.multiply(a, f16.inverse(a)) != 1
 finite_check("quartic_extension.field_axioms", quartic_field_axioms, true)
+
+batch_zero_failed = false
+begin
+  f25.batch_inverse([1, 0, t25])
+rescue error
+  batch_zero_failed = "[error]".include?("division by zero")
+finite_check("batch_inverse.zero_is_loud", batch_zero_failed, true)
 
 # Polynomial arithmetic must never fall back to Integer operations: every
 # coefficient is reduced by the owning finite field.

@@ -42,18 +42,27 @@ static inline void bf16_gemm_f32_impl(
 #pragma clang loop unroll(full)
   for (int t = 0; t < MT; t++) C[t] = simdgroup_matrix<float, 8, 8>(0.0f);
 
+  // Ping-pong tile halves: one barrier per K-group, decode of g+1 overlaps
+  // the MMAs of g. Tile written K-MAJOR so B loads skip the transposed path.
+#define BF16_DECODE(GIDX, BUF)                                              \
+  {                                                                         \
+    device const ushort *wp = wrow + (GIDX) * 16 + q * 4;                   \
+    threadgroup float *dst = (BUF);                                         \
+    const int kb = q * 4;                                                   \
+    dst[(kb + 0) * 8 + r] = bf16_gemm_to_f32(wp[0]);                        \
+    dst[(kb + 1) * 8 + r] = bf16_gemm_to_f32(wp[1]);                        \
+    dst[(kb + 2) * 8 + r] = bf16_gemm_to_f32(wp[2]);                        \
+    dst[(kb + 3) * 8 + r] = bf16_gemm_to_f32(wp[3]);                        \
+  }
+  BF16_DECODE(0, bt)
   for (int g = 0; g < n_groups; g++) {
-    device const ushort *wp = wrow + g * 16 + q * 4;
-    threadgroup float *dst = bt + r * 16 + q * 4;
-    dst[0] = bf16_gemm_to_f32(wp[0]);
-    dst[1] = bf16_gemm_to_f32(wp[1]);
-    dst[2] = bf16_gemm_to_f32(wp[2]);
-    dst[3] = bf16_gemm_to_f32(wp[3]);
     simdgroup_barrier(mem_flags::mem_threadgroup);
-
+    threadgroup float *cur = (g & 1) ? (bt + 512) : bt;
+    threadgroup float *nxt = (g & 1) ? bt : (bt + 512);
+    if (g + 1 < n_groups) BF16_DECODE(g + 1, nxt)
     simdgroup_matrix<float, 8, 8> B0, B1;
-    simdgroup_load(B0, bt, 16, ulong2(0, 0), true);
-    simdgroup_load(B1, bt + 8, 16, ulong2(0, 0), true);
+    simdgroup_load(B0, cur, 8);
+    simdgroup_load(B1, cur + 64, 8);
     const int k0 = g * 16;
 #pragma clang loop unroll(full)
     for (int t = 0; t < MT; t++) {
@@ -63,8 +72,9 @@ static inline void bf16_gemm_f32_impl(
       simdgroup_multiply_accumulate(C[t], A0, B0, C[t]);
       simdgroup_multiply_accumulate(C[t], A1, B1, C[t]);
     }
-    simdgroup_barrier(mem_flags::mem_threadgroup);
   }
+  simdgroup_barrier(mem_flags::mem_threadgroup);
+#undef BF16_DECODE
 
 #pragma clang loop unroll(full)
   for (int t = 0; t < MT; t++) {
@@ -93,7 +103,7 @@ kernel void NAME(                                                            \
   uint tg [[threadgroup_position_in_grid]],                                  \
   uint sg [[simdgroup_index_in_threadgroup]],                                \
   uint sl [[thread_index_in_simdgroup]]) {                                   \
-  threadgroup float tile[4 * 128];                                           \
+  threadgroup float tile[4 * 128 + 4 * 512];                                 \
   threadgroup float stage[4 * 64];                                           \
   bf16_gemm_f32_impl<MT, RES>(w, x, y, k, n, m, m0, tile, stage, tg, sg, sl); \
 }

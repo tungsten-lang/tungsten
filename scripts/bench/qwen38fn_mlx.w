@@ -171,6 +171,8 @@ skip_hcmv = skip_spec.include?("hcmv")
 skip_moegemm = skip_spec.include?("moegemm")
 skip_moestage = skip_spec.include?("moestage")
 skip_moeshared = skip_spec.include?("moeshared")
+skip_delta = skip_spec.include?("delta")
+skip_gdnmv = skip_spec.include?("gdnmv")
 skip_hcbar = skip_spec.include?("hcbar")
 if skip_spec != "" then << "ABLATION: skipping " + skip_spec + " — output is garbage, timing only"
 # FN_HCFUSED=1: 2-stage fused HC mix. Measured 2ms SLOWER than the 5-stage
@@ -1791,8 +1793,9 @@ mrec = [0]
   mv_d = n <= 8 ? lyr[:mv_v] : mv_m
   g_d = n <= 8 ? lyr[:g_v] : g_m
   beta_d = n <= 8 ? lyr[:beta_v] : beta_m
-  mv_multi(lyr[:qkv], xn_m, qkv_d, HIDDEN, QKV_DIM, n)
-  mv_multi(lyr[:z], xn_m, z_m, HIDDEN, V_DIM, n)
+  if !skip_gdnmv
+    mv_multi(lyr[:qkv], xn_m, qkv_d, HIDDEN, QKV_DIM, n)
+    mv_multi(lyr[:z], xn_m, z_m, HIDDEN, V_DIM, n)
   mdg(bf16_mp_pipe, [lyr[:a], xn_m, a_m, HIDDEN, HV, n], HV * ((n + 7) / 8), 32)
   mdg(bf16_mp_pipe, [lyr[:b], xn_m, b_m, HIDDEN, HV, n], HV * ((n + 7) / 8), 32)
   mbar([qkv_d])
@@ -1805,7 +1808,7 @@ mrec = [0]
   mdg(phn_rope_m_pipe, [mk_d, k_norm_scale, cos_m, sin_m, DK, 0, HK, ~1.0 / DK, EPS / DK, n], n * HK, 32)
   mdn(g_beta_m_pipe, [a_m, b_m, lyr[:alog], lyr[:dtb], g_d, beta_d, HV, n], n * HV)
   mbar([mq_m, mk_d, g_d, beta_d])
-  md3(delta_m_pipe, [mq_m, mk_d, mv_d, g_d, beta_d, ss_in, delta_m_buf, ss_out, HK, HV, DK, DV, n], [1, DV / 4, HV, 32, 4, 1])
+  if !skip_delta then md3(delta_m_pipe, [mq_m, mk_d, mv_d, g_d, beta_d, ss_in, delta_m_buf, ss_out, HK, HV, DK, DV, n], [1, DV / 4, HV, 32, 4, 1])
   mbar([delta_m_buf, z_m])
   mdg(rng_sig_pipe, [delta_m_buf, z_m, lyr[:linear_norm], mnorm_m, DV, EPS], n * HV, 32)
   mbar([mnorm_m])

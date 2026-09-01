@@ -15,6 +15,7 @@ Correctness is checked by the benchmark checksum and the focused Core spec.
 | 17. Damped Gauss-Newton/LM least squares | 5 dimension-16 linear solves to <1e-10 objective | 127 ms | 3 ms | retained, 42.3x and lower error | checksum near `374`; new FD/analytic/nonlinear spec and `spec/sci/smoke_spec.w` passed |
 | 18. Polynomial substitution plan | 30 specializations, 1152 terms to 48 groups over F_65537 | 36 ms | 1 ms | retained, >36x | checksum `59040`; polynomial, modular-GCD, and specialization specs passed |
 | 19. Direct finite-factor candidate construction | 10000 dense degree-20 candidates over F_2 | 94 ms | 15 ms | retained, 6.27x | checksum `211`; compiled `spec/core/algebra_finite_factor_spec.w` passed |
+| 20. Prepared inverse/Frobenius tables | 1000 complete nonzero sweeps of F_2^8 | 176 ms | 48 ms | retained, 3.67x | every inverse product and Frobenius round-trip checked; finite-field spec passed |
 
 Rejected or deferred experiments are recorded below with their reason; they
 are not left in production source.

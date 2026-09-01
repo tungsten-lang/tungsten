@@ -35,6 +35,8 @@
       raise "finite-field modulus must be irreducible" if !modulus_irreducible?(@modulus)
     @order = @characteristic ** @degree
     @multiplication_table = nil
+    @inverse_table = nil
+    @frobenius_table = nil
     self
 
   ro :characteristic, :degree, :order, :modulus
@@ -259,17 +261,39 @@
   # lookup without changing the packed public representation. Larger fields
   # retain the sparse generic kernel.
   -> prepare_arithmetic!(table_order_limit = 256)
-    return self if @multiplication_table != nil
+    if (@multiplication_table != nil && @inverse_table != nil &&
+        @frobenius_table != nil)
+      return self
     return self if prime_field? || @order > table_order_limit
-    table = []
-    left = 0
-    while left < @order
-      right = 0
-      while right < @order
-        table.push(multiply_encoded(left, right))
-        right += 1
-      left += 1
-    @multiplication_table = table
+    if @multiplication_table == nil
+      table = []
+      left = 0
+      while left < @order
+        right = 0
+        while right < @order
+          table.push(multiply_encoded(left, right))
+          right += 1
+        left += 1
+      @multiplication_table = table
+
+    # Once q^2 products are resident, inverse and Frobenius maps cost only
+    # O(q) retained words and remove exponentiation from factorization, trace,
+    # norm, and projective-normalization hot paths.
+    inverses = []
+    frobenius_values = []
+    @order.times ->
+      inverses.push(0)
+      frobenius_values.push(0)
+    value = 1
+    while value < @order
+      candidate = 1
+      while @multiplication_table[value * @order + candidate] != 1
+        candidate += 1
+      inverses[value] = candidate
+      frobenius_values[value] = power(value, @characteristic)
+      value += 1
+    @inverse_table = inverses
+    @frobenius_table = frobenius_values
     self
 
   -> arithmetic_prepared?
@@ -314,6 +338,7 @@
   -> inverse(value)
     element = normalize_element(value)
     raise "division by zero in finite field" if element == 0
+    return @inverse_table[element] if @inverse_table != nil
     power(element, @order - 2)
 
   -> divide(left, right)
@@ -328,7 +353,10 @@
     return result if prime_field?
     remaining = iterations % @degree
     while remaining > 0
-      result = power(result, @characteristic)
+      if @frobenius_table != nil
+        result = @frobenius_table[result]
+      else
+        result = power(result, @characteristic)
       remaining -= 1
     result
 

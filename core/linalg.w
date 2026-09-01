@@ -660,3 +660,34 @@
       out.push(values[i])
       i += 1
     out
+
+  # Overdetermined, full-column-rank least squares for one RHS. Rank failure
+  # is explicit; underdetermined and multi-RHS contracts remain separate APIs.
+  -> .least_squares(a, b)
+    m = LinAlg.rows(a)
+    n = LinAlg.cols(a)
+    raise "LinAlg.least_squares: requires rows >= columns" if m < n
+    raise "LinAlg.least_squares: RHS length must equal rows" if b.size() != m
+    return [] if n == 0
+    flat = ccall("w_array_new_aligned", -64, m * n)
+    i = 0
+    while i < m
+      j = 0
+      while j < n
+        flat[j * m + i] = a[i][j] + ~0.0
+        j += 1
+      i += 1
+    rhs = ccall("w_array_new_aligned", -64, m)
+    i = 0
+    while i < m
+      rhs[i] = b[i] + ~0.0
+      i += 1
+    rank = ccall("w_blas_dgelsy", flat, rhs, m, n)
+    raise "LinAlg.least_squares: LAPACK failed" if rank < 0
+    raise "LinAlg.least_squares: rank deficient (rank " + rank.to_s + " < " + n.to_s + ")" if rank < n
+    out = []
+    i = 0
+    while i < n
+      out.push(rhs[i])
+      i += 1
+    out

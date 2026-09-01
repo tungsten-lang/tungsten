@@ -1978,6 +1978,8 @@ use target
       return ccall("w_blas_dsyev_values", args[1], args[2], args[3])
     when "w_blas_dgesdd_values"
       return ccall("w_blas_dgesdd_values", args[1], args[2], args[3], args[4])
+    when "w_blas_dgelsy"
+      return ccall("w_blas_dgelsy", args[1], args[2], args[3], args[4])
     when "w_blas_dgeev"
       # LAPACK eigenvalues bridge (core/linalg.w eigenvalues_lapack).
       return ccall("w_blas_dgeev", args[1], args[2], args[3], args[4])

@@ -9,6 +9,7 @@
 #include "runtime.h"
 #include "wvalue.h"
 #include <cblas.h>
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -298,6 +299,10 @@ extern void dgesdd_(const char *jobz, const int *m, const int *n, double *a,
                     const int *lda, double *s, double *u, const int *ldu,
                     double *vt, const int *ldvt, double *work,
                     const int *lwork, int *iwork, int *info);
+extern void dgelsy_(const int *m, const int *n, const int *nrhs, double *a,
+                    const int *lda, double *b, const int *ldb, int *jpvt,
+                    const double *rcond, int *rank, double *work,
+                    const int *lwork, int *info);
 
 WValue w_blas_dgeqrf_qr(WValue a_wval, WValue q_wval, WValue r_wval,
                         WValue m_wval, WValue n_wval) {
@@ -370,6 +375,27 @@ WValue w_blas_dgesdd_values(WValue a_wval, WValue values_wval,
     if (!work) { free(iwork); w_raise(w_string("dgesdd_values: out of memory")); return w_int(-1); }
     dgesdd_("N", &m, &n, ap, &m, sp, &dummy, &one, &dummy, &one, work, &lwork, iwork, &info);
     free(work); free(iwork); return w_int(info);
+}
+
+WValue w_blas_dgelsy(WValue a_wval, WValue b_wval,
+                     WValue m_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval), *b = w_as_array(b_wval);
+    int m = (int)w_as_int(m_wval), n = (int)w_as_int(n_wval);
+    if (m < n || n < 0 || a->size < (int64_t)m * n || b->size < m) {
+        w_raise(w_string("dgelsy: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start, *bp = (double *)b->slots + b->start;
+    int nrhs = 1, rank = 0, info = 0, lwork = -1;
+    int *jpvt = (int *)calloc((size_t)(n > 0 ? n : 1), sizeof(int));
+    if (!jpvt) { w_raise(w_string("dgelsy: out of memory")); return w_int(-1); }
+    double rcond = DBL_EPSILON * (double)(m > n ? m : n), query = 0.0;
+    dgelsy_(&m, &n, &nrhs, ap, &m, bp, &m, jpvt, &rcond, &rank, &query, &lwork, &info);
+    if (info != 0) { free(jpvt); return w_int(info); }
+    lwork = (int)query; if (lwork < 1) lwork = 1;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { free(jpvt); w_raise(w_string("dgelsy: out of memory")); return w_int(-1); }
+    dgelsy_(&m, &n, &nrhs, ap, &m, bp, &m, jpvt, &rcond, &rank, work, &lwork, &info);
+    free(work); free(jpvt); return w_int(info == 0 ? rank : info);
 }
 
 WValue w_blas_dgeev(WValue a_wval, WValue wr_wval, WValue wi_wval, WValue n_wval) {

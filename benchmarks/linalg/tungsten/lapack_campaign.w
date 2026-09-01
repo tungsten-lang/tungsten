@@ -166,5 +166,44 @@ elsif mode == "svd-native"
     raise "singular values not sorted" if i > 0 && values[i] > values[i - 1]
     i += 1
   << "SVD_NATIVE ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + checksum.round(6).to_s
+elsif mode == "lstsq-normal"
+  iterations = ARGV[1] == nil ? 20 : ARGV[1].to_i
+  m = ARGV[2] == nil ? 512 : ARGV[2].to_i
+  n = ARGV[3] == nil ? 64 : ARGV[3].to_i
+  a = campaign_matrix(m, n)
+  b = []
+  i = 0
+  while i < m
+    b.push(((i * 19) % 103).to_f / ~103.0)
+    i += 1
+  solution = nil
+  started = clock()
+  i = 0
+  while i < iterations
+    at = LinAlg.transpose(a)
+    gram = LinAlg.matmul(at, a)
+    rhs = LinAlg.mat_vec(at, b)
+    solution = LinAlg.solve(gram, rhs)
+    i += 1
+  elapsed = clock() - started
+  << "LSTSQ_NORMAL ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + solution[0].round(6).to_s
+elsif mode == "lstsq-native"
+  iterations = ARGV[1] == nil ? 20 : ARGV[1].to_i
+  m = ARGV[2] == nil ? 512 : ARGV[2].to_i
+  n = ARGV[3] == nil ? 64 : ARGV[3].to_i
+  a = campaign_matrix(m, n)
+  b = []
+  i = 0
+  while i < m
+    b.push(((i * 19) % 103).to_f / ~103.0)
+    i += 1
+  solution = nil
+  started = clock()
+  i = 0
+  while i < iterations
+    solution = LinAlg.least_squares(a, b)
+    i += 1
+  elapsed = clock() - started
+  << "LSTSQ_NATIVE ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + solution[0].round(6).to_s
 else
   raise "unknown mode: " + mode

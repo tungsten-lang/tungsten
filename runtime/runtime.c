@@ -65946,6 +65946,9 @@ __attribute__((weak)) WValue w_blas_dsyev_values(WValue a, WValue w, WValue n) {
 __attribute__((weak)) WValue w_blas_dgesdd_values(WValue a, WValue s, WValue m, WValue n) {
     (void)a; (void)s; (void)m; (void)n; w_raise(w_string("dgesdd_values: LAPACK bridge not linked")); return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_dgelsy(WValue a, WValue b, WValue m, WValue n) {
+    (void)a; (void)b; (void)m; (void)n; w_raise(w_string("dgelsy: LAPACK bridge not linked")); return W_NIL;
+}
 __attribute__((weak)) WValue w_blas_vadd_f32(WValue a, WValue b, WValue o, WValue n) {
     (void)a; (void)b; (void)o; (void)n; w_raise(w_string("vadd: BLAS bridge not linked")); return W_NIL;
 }

@@ -242,3 +242,28 @@ and therefore improves numerical conditioning as well as halving this matched
 workload. This tranche is deliberately values-only: eigenvector and full SVD
 APIs need stable orientation, reduced/full shape, and rank-reporting contracts
 before Core can expose them without later incompatibility.
+
+## Item 5 follow-up — full-rank overdetermined least squares
+
+The earlier QR tranche deferred least squares pending an explicit contract.
+This follow-up closes the narrow safe case: f64 `m>=n`, one RHS, full column
+rank. Underdetermined shapes, RHS mismatches, LAPACK failure, and numerical
+rank deficiency all raise distinct errors; pivoted QR (`dgelsy`) reports rank
+using `DBL_EPSILON * max(m,n)`.
+
+Correctness: `spec/core/linalg_least_squares_spec.w` passes 4/4 for a known
+noisy fit, rank failure, underdetermined failure, and RHS-shape failure.
+
+Matched 100-operation 512x64 samples compare the previous normal-equation
+workaround (`solve(A^T A, A^T b)`) to the direct API:
+
+| sample | normal equations | `least_squares` |
+| --- | ---: | ---: |
+| 1 | 0.41 s | 0.21 s |
+| 2 | 0.38 s | 0.15 s |
+| 3 | 0.39 s | 0.16 s |
+| 4 | 0.37 s | 0.17 s |
+| 5 | 0.36 s | 0.16 s |
+
+Retained. The median improves from 3.8 ms to 1.6 ms per fit (2.4x), while
+avoiding condition-number squaring and making rank failure observable.

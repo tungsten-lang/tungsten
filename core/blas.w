@@ -153,6 +153,9 @@ fn dnrm2(a, n)
 -> lapack_singular_values(a, values, m, n)
   ccall("w_blas_dgesdd_values", a, values, m, n)
 
+-> lapack_least_squares(a, b, m, n)
+  ccall("w_blas_dgelsy", a, b, m, n)
+
 # ---- vDSP vector arithmetic ----
 fn vadd(a, b, out, n)
   ccall("w_blas_vadd_f32", a, b, out, n)

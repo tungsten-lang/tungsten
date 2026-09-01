@@ -12,6 +12,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #include <Accelerate/Accelerate.h>
+#include <float.h>
 #include <limits.h>
 #include "runtime.h"
 #include "wvalue.h"
@@ -286,6 +287,34 @@ WValue w_blas_dgesdd_values(WValue a_wval, WValue values_wval,
             work, &lwork, iwork, &info);
     free(work); free(iwork);
     return w_int((int64_t)info);
+}
+
+/* Overdetermined single-RHS least squares via pivoted QR. Returns the
+ * numerical rank on success, or a negative LAPACK info code. */
+WValue w_blas_dgelsy(WValue a_wval, WValue b_wval,
+                     WValue m_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval), *b = w_as_array(b_wval);
+    __CLPK_integer m = (__CLPK_integer)w_as_int(m_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    if (m < n || n < 0 || a->size < (int64_t)m * n || b->size < m) {
+        w_raise(w_string("dgelsy: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start;
+    double *bp = (double *)b->slots + b->start;
+    __CLPK_integer nrhs = 1, rank = 0, info = 0, lwork = -1;
+    __CLPK_integer *jpvt = (__CLPK_integer *)calloc((size_t)(n > 0 ? n : 1), sizeof(__CLPK_integer));
+    if (!jpvt) { w_raise(w_string("dgelsy: out of memory")); return w_int(-1); }
+    double rcond = DBL_EPSILON * (double)(m > n ? m : n), query = 0.0;
+    dgelsy_(&m, &n, &nrhs, ap, &m, bp, &m, jpvt, &rcond, &rank,
+            &query, &lwork, &info);
+    if (info != 0) { free(jpvt); return w_int((int64_t)info); }
+    lwork = (__CLPK_integer)query; if (lwork < 1) lwork = 1;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { free(jpvt); w_raise(w_string("dgelsy: out of memory")); return w_int(-1); }
+    dgelsy_(&m, &n, &nrhs, ap, &m, bp, &m, jpvt, &rcond, &rank,
+            work, &lwork, &info);
+    free(work); free(jpvt);
+    return w_int(info == 0 ? (int64_t)rank : (int64_t)info);
 }
 
 /* ---- vDSP reductions over an f32 array (whole array, start-offset aware) ----

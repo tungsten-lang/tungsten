@@ -110,6 +110,26 @@ ple_man = JSON.parse(read_file(PLE_MANIFEST))
 # FN_QUANT=1: route the big matvecs through self-quantized NVFP4 sidecars
 # (quantize_flash_next.py; layers 0/1/46/47 stay bf16 there and fall through).
 selfquant = ccall("__w_env", "FN_QUANT") == "1"
+# FN_SKIP=moe,gdn,attn,hc,head,shared,ple: ablation profiling — skip whole
+# stages to price them (outputs become garbage; ONLY the timing is valid).
+skip_spec = ccall("__w_env", "FN_SKIP")
+if skip_spec == nil then skip_spec = ""
+skip_moe = skip_spec.include?("moe")
+skip_gdn = skip_spec.include?("gdn")
+skip_attn = skip_spec.include?("attn")
+skip_hc = skip_spec.include?("hc")
+skip_head = skip_spec.include?("head")
+skip_shared = skip_spec.include?("shared")
+skip_ple = skip_spec.include?("ple")
+if skip_spec != "" then << "ABLATION: skipping " + skip_spec + " — output is garbage, timing only"
+# FN_HCFUSED=1: 2-stage fused HC mix. Measured 2ms SLOWER than the 5-stage
+# path (the concurrent encoder already overlaps those stages) — kept only
+# so the negative result stays reproducible.
+hc_fused = ccall("__w_env", "FN_HCFUSED") == "1"
+# Pipelined encode: commit the token's command buffer in thirds so encoding
+# layers 17-48 overlaps GPU execution of layers 1-16 (the flame profile
+# priced host encode at ~6.5ms/token, fully serial with the GPU when the
+# token is a single buffer). Queue order serializes the pieces.
 sq = nil
 if selfquant
   sq = Tungsten:Llama:Safetensors.new(MODEL_DIR + "selfquant.safetensors")
@@ -155,6 +175,9 @@ moe_wsum_pipe = metal_pipeline(moe_combine_lib, "moe_weighted_sum")
 moe_shared_pipe = metal_pipeline(moe_combine_lib, "moe_shared_combine")
 expert_hist_pipe = metal_pipeline(moe_combine_lib, "expert_hist_accum")
 rng_sig_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "rms_norm_gated_sig.metal")), "rms_norm_gated_sig")
+hc_fused_lib = metal_compile_source(device, read_file(FN_DIR + "hc_fused.metal"))
+hc_mix_a_pipe = metal_pipeline(hc_fused_lib, "hc_mix_a")
+hc_mix_b_pipe = metal_pipeline(hc_fused_lib, "hc_mix_b")
 gdn_fused_lib = metal_compile_source(device, read_file(FN_DIR + "gdn_fused.metal"))
 conv_split_pipe = metal_pipeline(gdn_fused_lib, "gdn_conv_split")
 g_beta_pipe = metal_pipeline(gdn_fused_lib, "gdn_g_beta")
@@ -500,6 +523,7 @@ n_tmp = metal_buffer(device, HC_HIDDEN * 4)
 lowrank_tmp = metal_buffer(device, HC_LOWRANK * 4)
 upraw_tmp = metal_buffer(device, HC_HIDDEN * 4)
 inj_tmp = metal_buffer(device, HC_COUNT * 4)
+rms_tmp = metal_buffer(device, HC_COUNT * 4)
 xn = metal_buffer(device, HIDDEN * 4)
 y_tmp = metal_buffer(device, HIDDEN * 4)
 h_embed = metal_buffer(device, HIDDEN * 4)
@@ -559,6 +583,230 @@ argmax_out = metal_buffer(device, 4)
 argmax_partial_values = metal_buffer(device, ARGMAX_CHUNKS * 4)
 argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
 
+
+# ---- prebuilt dispatch programs -------------------------------------------
+# Host encode measured 18ms/round (FN_TIME): the per-dispatch boxed glue —
+# fresh args arrays, hash lookups, handle unpacking — dominates the token.
+# Each layer's dispatch sequence is baked into a flat step list at load
+# (two variants where the GDN/PLE ping-pong swaps state buffers); per token
+# only the pos-dependent slots are mutated in place. Step encoding:
+#   [0, pipe, args, n_groups, tg_size]  -> metal_dispatch_groups
+#   [2, pipe, args, n, 0]               -> metal_dispatch_n
+#   [1, nil, bufs, 0, 0]                -> scoped barrier
+# The golden/ablation/expert-hist modes keep the original per-call path.
+-> prog_mv(spec)
+  prog = spec[0]
+  h = spec[1]
+  input = spec[2]
+  output = spec[3]
+  kdim = spec[4]
+  rows = spec[5]
+  if h.size() == 3
+    prog.push([0, nvfp4_pipe, [h[0], h[1], input, output, kdim, h[2]], rows / 8, 64])
+  elsif rows >= 320
+    prog.push([0, bf16_w2_pipe, [h[0], input, output, kdim, rows], (rows + 3) / 4, 64])
+  else
+    prog.push([0, bf16_matvec_pipe, [h[0], input, output, kdim], rows, 32])
+
+-> prog_hc_mix(spec)
+  prog = spec[0]
+  hc = spec[1]
+  prog.push([0, grms_pipe, [H, hc[:norm], n_tmp, HIDDEN, EPS], HC_COUNT, 256])
+  prog.push([1, nil, [n_tmp], 0, 0])
+  prog_mv([prog, hc[:down], n_tmp, lowrank_tmp, HC_HIDDEN, HC_LOWRANK])
+  prog.push([0, bf16_matvec_pipe, [hc[:inject], n_tmp, inj_tmp, HC_HIDDEN], HC_COUNT, 32])
+  prog.push([1, nil, [lowrank_tmp], 0, 0])
+  prog.push([2, silu_div_pipe, [lowrank_tmp, lowrank_tmp, ~0.0 + HC_COUNT, HC_LOWRANK], HC_LOWRANK, 0])
+  prog.push([1, nil, [lowrank_tmp], 0, 0])
+  prog_mv([prog, hc[:up], lowrank_tmp, upraw_tmp, HC_LOWRANK, HC_HIDDEN])
+  prog.push([1, nil, [upraw_tmp], 0, 0])
+  prog.push([2, hc_mix_reduce_pipe, [upraw_tmp, n_tmp, xn, HC_COUNT, HIDDEN], HIDDEN, 0])
+  prog.push([1, nil, [xn, inj_tmp], 0, 0])
+
+-> prog_hc_combine(prog)
+  prog.push([2, hc_combine_pipe, [H, y_tmp, inj_tmp, HC_COUNT, HIDDEN], HC_HIDDEN, 0])
+  prog.push([1, nil, [H], 0, 0])
+
+-> prog_mamba(spec)
+  prog = spec[0]
+  lyr = spec[1]
+  ping = spec[2]
+  cs_in = ping == 0 ? lyr[:cs_a] : lyr[:cs_b]
+  cs_out = ping == 0 ? lyr[:cs_b] : lyr[:cs_a]
+  ss_in = ping == 0 ? lyr[:ss_a] : lyr[:ss_b]
+  ss_out = ping == 0 ? lyr[:ss_b] : lyr[:ss_a]
+  prog_mv([prog, lyr[:qkv], xn, qkv_tmp, HIDDEN, QKV_DIM])
+  prog_mv([prog, lyr[:z], xn, z_tmp, HIDDEN, V_DIM])
+  prog.push([0, bf16_matvec_pipe, [lyr[:a], xn, a_tmp, HIDDEN], HV, 32])
+  prog.push([0, bf16_matvec_pipe, [lyr[:b], xn, b_tmp, HIDDEN], HV, 32])
+  prog.push([1, nil, [qkv_tmp], 0, 0])
+  prog.push([2, conv_split_pipe, [lyr[:conv], cs_in, qkv_tmp, mq_tmp, mk_tmp, mv_tmp, cs_out, QKV_DIM, Q_DIM, K_DIM], QKV_DIM, 0])
+  prog.push([1, nil, [mq_tmp, mk_tmp, mv_tmp, a_tmp, b_tmp], 0, 0])
+  prog.push([0, phn_pipe, [mq_tmp, q_norm_scale, DK, ~1.0 / DK, EPS / DK], HK, 32])
+  prog.push([0, phn_pipe, [mk_tmp, k_norm_scale, DK, ~1.0 / DK, EPS / DK], HK, 32])
+  prog.push([2, g_beta_pipe, [a_tmp, b_tmp, lyr[:alog], lyr[:dtb], g_tmp, beta_tmp, HV], HV, 0])
+  prog.push([1, nil, [mq_tmp, mk_tmp, g_tmp, beta_tmp], 0, 0])
+  prog.push([3, delta_pipe, [mq_tmp, mk_tmp, mv_tmp, g_tmp, beta_tmp, ss_in, delta_tmp, ss_out, HK, HV, DK, DV], 0, 0])
+  prog.push([1, nil, [delta_tmp, z_tmp], 0, 0])
+  prog.push([0, rng_sig_pipe, [delta_tmp, z_tmp, lyr[:linear_norm], mamba_norm_tmp, DV, EPS], HV, 32])
+  prog.push([1, nil, [mamba_norm_tmp], 0, 0])
+  prog_mv([prog, lyr[:out], mamba_norm_tmp, y_tmp, V_DIM, HIDDEN])
+  prog.push([1, nil, [y_tmp], 0, 0])
+
+-> prog_full(spec)
+  prog = spec[0]
+  lyr = spec[1]
+  kv_k = [k_tmp, lyr[:k_cache], 0, KV_DIM]
+  kv_v = [v_tmp, lyr[:v_cache], 0, KV_DIM]
+  sdpa = [queries_tmp, lyr[:k_cache], lyr[:v_cache], attn_tmp, GQA, 1, HEAD_DIM, KV_DIM, ATTN_SCALE]
+  lyr[:kv_k_args] = kv_k
+  lyr[:kv_v_args] = kv_v
+  lyr[:sdpa_args] = sdpa
+  prog_mv([prog, lyr[:q], xn, qfull_tmp, HIDDEN, QFULL_DIM])
+  prog_mv([prog, lyr[:k], xn, k_tmp, HIDDEN, KV_DIM])
+  prog_mv([prog, lyr[:v], xn, v_tmp, HIDDEN, KV_DIM])
+  prog.push([1, nil, [qfull_tmp], 0, 0])
+  prog.push([2, split_pipe, [qfull_tmp, queries_tmp, attn_gate_tmp, N_HEADS, HEAD_DIM], ATTN_DIM, 0])
+  prog.push([1, nil, [queries_tmp, k_tmp], 0, 0])
+  prog.push([0, phn_pipe, [queries_tmp, lyr[:qn], HEAD_DIM, ~1.0 / HEAD_DIM, EPS], N_HEADS, 32])
+  prog.push([0, phn_pipe, [k_tmp, lyr[:kn], HEAD_DIM, ~1.0 / HEAD_DIM, EPS], N_KV_HEADS, 32])
+  prog.push([1, nil, [queries_tmp, k_tmp], 0, 0])
+  prog.push([2, rope_pipe, [queries_tmp, cos_tmp, sin_tmp, HEAD_DIM, ROT_HALF, N_HEADS], N_HEADS * ROT_HALF, 0])
+  prog.push([2, rope_pipe, [k_tmp, cos_tmp, sin_tmp, HEAD_DIM, ROT_HALF, N_KV_HEADS], N_KV_HEADS * ROT_HALF, 0])
+  prog.push([1, nil, [queries_tmp, k_tmp, v_tmp], 0, 0])
+  prog.push([2, kv_write_pipe, kv_k, KV_DIM, 0])
+  prog.push([2, kv_write_pipe, kv_v, KV_DIM, 0])
+  prog.push([1, nil, [lyr[:k_cache], lyr[:v_cache]], 0, 0])
+  prog.push([0, sdpa_pipe, sdpa, N_HEADS, 256])
+  prog.push([1, nil, [attn_tmp, attn_gate_tmp], 0, 0])
+  prog.push([2, gate_pipe, [attn_tmp, attn_gate_tmp, ATTN_DIM], ATTN_DIM, 0])
+  prog.push([1, nil, [attn_tmp], 0, 0])
+  prog_mv([prog, lyr[:out], attn_tmp, y_tmp, ATTN_DIM, HIDDEN])
+  prog.push([1, nil, [y_tmp], 0, 0])
+
+-> prog_moe(spec)
+  prog = spec[0]
+  lyr = spec[1]
+  ex = lyr[:experts]
+  og = ex[:offs]["gate_proj"]
+  ou = ex[:offs]["up_proj"]
+  od = ex[:offs]["down_proj"]
+  q = ex[:quarters]
+  prog_mv([prog, lyr[:router], xn, router_logits, HIDDEN, N_EXPERTS])
+  prog_mv([prog, lyr[:sh_gate], xn, sg_tmp, HIDDEN, SHARED_FFN])
+  prog_mv([prog, lyr[:sh_up], xn, su_tmp, HIDDEN, SHARED_FFN])
+  prog.push([0, bf16_matvec_pipe, [lyr[:sh_seg], xn, seg_tmp, HIDDEN], 1, 32])
+  prog.push([1, nil, [router_logits, sg_tmp, su_tmp], 0, 0])
+  prog.push([0, router_pipe, [router_logits, top_idx, top_w], 1, 512])
+  prog.push([2, silu_pipe, [sg_tmp, su_tmp, sh_tmp, SHARED_FFN], SHARED_FFN, 0])
+  prog.push([1, nil, [top_idx, sh_tmp], 0, 0])
+  prog.push([0, gather_pipe, [q[0], q[1], q[2], q[3], top_idx, ex[:slot_map], xn, eg_tmp, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], 0, ex[:hot], og[6], og[7], og[8]], TOP_K * (MOE_FFN / 8), 64])
+  prog.push([0, gather_pipe, [q[0], q[1], q[2], q[3], top_idx, ex[:slot_map], xn, eu_tmp, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5], 0, ex[:hot], ou[6], ou[7], ou[8]], TOP_K * (MOE_FFN / 8), 64])
+  prog_mv([prog, lyr[:sh_down], sh_tmp, shared_tmp, SHARED_FFN, HIDDEN])
+  prog.push([1, nil, [eg_tmp, eu_tmp], 0, 0])
+  prog.push([2, silu_pipe, [eg_tmp, eu_tmp, eh_tmp, TOP_K * MOE_FFN], TOP_K * MOE_FFN, 0])
+  prog.push([1, nil, [eh_tmp], 0, 0])
+  prog.push([0, gather_pipe, [q[0], q[1], q[2], q[3], top_idx, ex[:slot_map], eh_tmp, ed_tmp, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5], MOE_FFN, ex[:hot], od[6], od[7], od[8]], TOP_K * (HIDDEN / 8), 64])
+  prog.push([1, nil, [ed_tmp, top_w, shared_tmp, seg_tmp], 0, 0])
+  prog.push([2, moe_output_pipe, [ed_tmp, top_w, shared_tmp, seg_tmp, y_tmp, TOP_K, HIDDEN], HIDDEN, 0])
+  prog.push([1, nil, [y_tmp], 0, 0])
+
+-> prog_ple(spec)
+  prog = spec[0]
+  lyr = spec[1]
+  ping = spec[2]
+  pp = lyr[:ple]
+  cs_in = ping == 0 ? pp[:cs_a] : pp[:cs_b]
+  cs_out = ping == 0 ? pp[:cs_b] : pp[:cs_a]
+  prog_mv([prog, pp[:key], e_buf, ple_key_tmp, HIDDEN, HC_HIDDEN])
+  prog_mv([prog, pp[:value], e_buf, ple_v_tmp, HIDDEN, HIDDEN])
+  prog.push([0, grms_pipe, [H, pp[:norm_query], ple_qn_tmp, HIDDEN, EPS], HC_COUNT, 256])
+  prog.push([1, nil, [ple_key_tmp, ple_qn_tmp], 0, 0])
+  prog.push([0, grms_pipe, [ple_key_tmp, pp[:norm_key], ple_kn_tmp, HIDDEN, EPS], HC_COUNT, 256])
+  prog.push([1, nil, [ple_kn_tmp, ple_v_tmp], 0, 0])
+  prog.push([0, ple_gate_pipe, [ple_kn_tmp, ple_qn_tmp, ple_v_tmp, ple_gv_tmp, HIDDEN], HC_COUNT, 256])
+  prog.push([1, nil, [ple_gv_tmp], 0, 0])
+  prog.push([0, grms_pipe, [ple_gv_tmp, pp[:norm_conv], ple_nc_tmp, HIDDEN, EPS], HC_COUNT, 256])
+  prog.push([1, nil, [ple_nc_tmp], 0, 0])
+  prog.push([2, ple_conv_pipe, [pp[:conv], cs_in, ple_nc_tmp, ple_gv_tmp, H, cs_out, HC_HIDDEN], HC_HIDDEN, 0])
+  prog.push([1, nil, [H], 0, 0])
+
+-> run_prog(prog)
+  i = 0
+  n = prog.size()
+  while i < n
+    st = prog[i]
+    k = st[0]
+    if k == 0
+      metal_dispatch_groups(queue, st[1], st[2], st[3], st[4])
+    elsif k == 2
+      metal_dispatch_n(queue, st[1], st[2], st[3])
+    elsif k == 1
+      if concurrent then metal_batch_barrier_resources(queue, st[2])
+    else
+      metal_dispatch_3d(queue, st[1], st[2], 1, DV / 4, HV, 32, 4, 1)
+    i = i + 1
+
+# Build the per-layer programs (after every scratch buffer exists).
+li = 0
+while li < N_LAYERS
+  lyr = layers[li]
+  if lyr[:kind] == "mamba"
+    pa = []
+    pb = []
+    prog_hc_mix([pa, lyr[:attn_hc]])
+    prog_hc_mix([pb, lyr[:attn_hc]])
+    prog_mamba([pa, lyr, 0])
+    prog_mamba([pb, lyr, 1])
+    prog_hc_combine(pa)
+    prog_hc_combine(pb)
+    prog_hc_mix([pa, lyr[:mlp_hc]])
+    prog_hc_mix([pb, lyr[:mlp_hc]])
+    prog_moe([pa, lyr])
+    prog_moe([pb, lyr])
+    prog_hc_combine(pa)
+    prog_hc_combine(pb)
+    lyr[:prog_a] = pa
+    lyr[:prog_b] = pb
+  else
+    # ONE program for attention layers: prog_full registers the mutable
+    # kv/sdpa arg arrays on the layer, and a second build would orphan them.
+    pa = []
+    prog_hc_mix([pa, lyr[:attn_hc]])
+    prog_full([pa, lyr])
+    prog_hc_combine(pa)
+    prog_hc_mix([pa, lyr[:mlp_hc]])
+    prog_moe([pa, lyr])
+    prog_hc_combine(pa)
+    lyr[:prog_a] = pa
+    lyr[:prog_b] = pa
+  if lyr[:ple] != nil
+    ppa = []
+    ppb = []
+    prog_ple([ppa, lyr, 0])
+    prog_ple([ppb, lyr, 1])
+    lyr[:ple_prog_a] = ppa
+    lyr[:ple_prog_b] = ppb
+  li = li + 1
+head_prog = []
+prog_hc_mix_head = [0, grms_pipe, [H, mixer[:norm], n_tmp, HIDDEN, EPS], HC_COUNT, 256]
+head_prog.push(prog_hc_mix_head)
+head_prog.push([1, nil, [n_tmp], 0, 0])
+prog_mv([head_prog, mixer[:down], n_tmp, lowrank_tmp, HC_HIDDEN, HC_LOWRANK])
+head_prog.push([1, nil, [lowrank_tmp], 0, 0])
+head_prog.push([2, silu_div_pipe, [lowrank_tmp, lowrank_tmp, ~0.0 + HC_COUNT, HC_LOWRANK], HC_LOWRANK, 0])
+head_prog.push([1, nil, [lowrank_tmp], 0, 0])
+prog_mv([head_prog, mixer[:up], lowrank_tmp, upraw_tmp, HC_LOWRANK, HC_HIDDEN])
+head_prog.push([1, nil, [upraw_tmp], 0, 0])
+head_prog.push([2, hc_mix_reduce_pipe, [upraw_tmp, n_tmp, xn, HC_COUNT, HIDDEN], HIDDEN, 0])
+head_prog.push([1, nil, [xn], 0, 0])
+prog_mv([head_prog, lm_head, xn, logits, HIDDEN, N_VOCAB])
+head_prog.push([1, nil, [logits], 0, 0])
+head_prog.push([0, argmax_stage1_pipe, [logits, argmax_partial_values, argmax_partial_indices, N_VOCAB, ARGMAX_CHUNKS, 1], ARGMAX_CHUNKS, 256])
+head_prog.push([1, nil, [argmax_partial_values, argmax_partial_indices], 0, 0])
+head_prog.push([0, argmax_stage2_pipe, [argmax_partial_values, argmax_partial_indices, argmax_out, ARGMAX_CHUNKS, 1], 1, 256])
+embed_args = [embed_w, h_embed, 0, HIDDEN]
+
 log_rope = Math.log(ROPE_BASE)
 rope_power = ~2.0 / ROT_DIM
 -> build_rope(pos)
@@ -603,6 +851,18 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
 # Hyper-connection mix: fills n_tmp (normed stream) and xn (2560 block input),
 # and precomputes inj_tmp for the paired combine.
 -> hc_mix(hc)
+  if skip_hc then return
+  if hc_fused && hc[:down].size() == 3 && hc[:up].size() == 3 && hc[:inject] != nil
+    # Deep-fused NVFP4 path: 2 serial stages instead of 5 (hc_fused.metal).
+    metal_dispatch_groups(queue, hc_mix_a_pipe,
+      [H, hc[:norm], hc[:down][0], hc[:down][1], hc[:down][2], hc[:inject],
+       lowrank_tmp, inj_tmp, rms_tmp, EPS], (HC_LOWRANK + HC_COUNT + 1) / 2, 64)
+    dep_on([lowrank_tmp, inj_tmp, rms_tmp])
+    metal_dispatch_groups(queue, hc_mix_b_pipe,
+      [H, hc[:norm], hc[:up][0], hc[:up][1], hc[:up][2], lowrank_tmp, rms_tmp, xn],
+      HIDDEN / 256, 256)
+    dep_on([xn, inj_tmp])
+    return
   metal_dispatch_groups(queue, grms_pipe, [H, hc[:norm], n_tmp, HIDDEN, EPS], HC_COUNT, 256)
   dep_on([n_tmp])
   enqueue_bf16([hc[:down], n_tmp, lowrank_tmp, HC_HIDDEN, HC_LOWRANK])
@@ -616,6 +876,7 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
   dep_on([xn, inj_tmp])
 
 -> hc_combine
+  if skip_hc then return
   metal_dispatch_n(queue, hc_combine_pipe, [H, y_tmp, inj_tmp, HC_COUNT, HIDDEN], HC_HIDDEN)
   dep_on([H])
 
@@ -633,6 +894,7 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
   dep_on([xn])
 
 -> enqueue_ple(lyr)
+  if skip_ple then return
   p = lyr[:ple]
   cs_in = p[:ping] == 0 ? p[:cs_a] : p[:cs_b]
   cs_out = p[:ping] == 0 ? p[:cs_b] : p[:cs_a]
@@ -651,6 +913,7 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
   p[:ping] = 1 - p[:ping]
 
 -> enqueue_mamba(lyr)
+  if skip_gdn then return
   cs_in = lyr[:ping] == 0 ? lyr[:cs_a] : lyr[:cs_b]
   cs_out = lyr[:ping] == 0 ? lyr[:cs_b] : lyr[:cs_a]
   ss_in = lyr[:ping] == 0 ? lyr[:ss_a] : lyr[:ss_b]
@@ -679,6 +942,7 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
   lyr[:ping] = 1 - lyr[:ping]
 
 -> enqueue_full(lyr, pos)
+  if skip_attn then return
   enqueue_bf16([lyr[:q], xn, qfull_tmp, HIDDEN, QFULL_DIM])
   enqueue_bf16([lyr[:k], xn, k_tmp, HIDDEN, KV_DIM])
   enqueue_bf16([lyr[:v], xn, v_tmp, HIDDEN, KV_DIM])
@@ -722,22 +986,27 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
   li = spec2[1]
   ex = lyr[:experts]
   enqueue_bf16([lyr[:router], xn, router_logits, HIDDEN, N_EXPERTS])
-  enqueue_bf16([lyr[:sh_gate], xn, sg_tmp, HIDDEN, SHARED_FFN])
-  enqueue_bf16([lyr[:sh_up], xn, su_tmp, HIDDEN, SHARED_FFN])
-  metal_dispatch_groups(queue, bf16_matvec_pipe, [lyr[:sh_seg], xn, seg_tmp, HIDDEN], 1, 32)
+  if !skip_shared
+    enqueue_bf16([lyr[:sh_gate], xn, sg_tmp, HIDDEN, SHARED_FFN])
+    enqueue_bf16([lyr[:sh_up], xn, su_tmp, HIDDEN, SHARED_FFN])
+    metal_dispatch_groups(queue, bf16_matvec_pipe, [lyr[:sh_seg], xn, seg_tmp, HIDDEN], 1, 32)
   dep_on([router_logits, sg_tmp, su_tmp])
   metal_dispatch_groups(queue, router_pipe, [router_logits, top_idx, top_w], 1, 512)
-  metal_dispatch_n(queue, silu_pipe, [sg_tmp, su_tmp, sh_tmp, SHARED_FFN], SHARED_FFN)
+  if !skip_shared
+    metal_dispatch_n(queue, silu_pipe, [sg_tmp, su_tmp, sh_tmp, SHARED_FFN], SHARED_FFN)
   dep_on([top_idx, sh_tmp])
   if expert_hist
     metal_dispatch_n(queue, expert_hist_pipe, [top_idx, hist_buf, li, TOP_K], TOP_K)
-  enqueue_gather([ex, ex[:offs]["gate_proj"], xn, eg_tmp, HIDDEN, MOE_FFN, 0])
-  enqueue_gather([ex, ex[:offs]["up_proj"], xn, eu_tmp, HIDDEN, MOE_FFN, 0])
-  enqueue_bf16([lyr[:sh_down], sh_tmp, shared_tmp, SHARED_FFN, HIDDEN])
+  if !skip_moe
+    enqueue_gather([ex, ex[:offs]["gate_proj"], xn, eg_tmp, HIDDEN, MOE_FFN, 0])
+    enqueue_gather([ex, ex[:offs]["up_proj"], xn, eu_tmp, HIDDEN, MOE_FFN, 0])
+  if !skip_shared
+    enqueue_bf16([lyr[:sh_down], sh_tmp, shared_tmp, SHARED_FFN, HIDDEN])
   dep_on([eg_tmp, eu_tmp])
-  metal_dispatch_n(queue, silu_pipe, [eg_tmp, eu_tmp, eh_tmp, TOP_K * MOE_FFN], TOP_K * MOE_FFN)
-  dep_on([eh_tmp])
-  enqueue_gather([ex, ex[:offs]["down_proj"], eh_tmp, ed_tmp, MOE_FFN, HIDDEN, MOE_FFN])
+  if !skip_moe
+    metal_dispatch_n(queue, silu_pipe, [eg_tmp, eu_tmp, eh_tmp, TOP_K * MOE_FFN], TOP_K * MOE_FFN)
+    dep_on([eh_tmp])
+    enqueue_gather([ex, ex[:offs]["down_proj"], eh_tmp, ed_tmp, MOE_FFN, HIDDEN, MOE_FFN])
   dep_on([ed_tmp, top_w, shared_tmp, seg_tmp])
   metal_dispatch_n(queue, moe_output_pipe, [ed_tmp, top_w, shared_tmp, seg_tmp, y_tmp, TOP_K, HIDDEN], HIDDEN)
   dep_on([y_tmp])
@@ -749,9 +1018,64 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
   metal_dispatch_groups(queue, argmax_stage2_pipe,
     [argmax_partial_values, argmax_partial_indices, argmax_out, ARGMAX_CHUNKS, 1], 1, 256)
 
+fn_time = ccall("__w_env", "FN_TIME") == "1"
+encode_ms = [~0.0, ~0.0, ~0.0, 0]
+# The prebuilt-program path handles the plain benchmark/generation config;
+# golden dumps, ablation, and expert-hist keep the original per-call path.
+fast_path = golden_prefix == "" && !expert_hist && skip_spec == "" && !hc_fused
+
+-> forward_fast(token_id, pos)
+  ft0 = fn_time ? ccall("__w_clock_ms") : ~0.0
+  build_rope(pos)
+  ple_gather([token_id, e_buf])
+  embed_args[2] = token_id
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:kind] == "full"
+      lyr[:kv_k_args][2] = pos
+      lyr[:kv_v_args][2] = pos
+      lyr[:sdpa_args][5] = pos + 1
+    li = li + 1
+  ft1 = fn_time ? ccall("__w_clock_ms") : ~0.0
+  metal_batch_begin_concurrent(queue)
+  metal_dispatch_n(queue, bf16_embed_pipe, embed_args, HIDDEN)
+  metal_batch_barrier_resources(queue, [h_embed])
+  s = 0
+  while s < HC_COUNT
+    metal_dispatch_n(queue, copy_at_pipe, [h_embed, H, 0, s * HIDDEN, HIDDEN], HIDDEN)
+    s = s + 1
+  metal_batch_barrier_resources(queue, [H])
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:ple] != nil
+      run_prog(lyr[:ple][:ping] == 0 ? lyr[:ple_prog_a] : lyr[:ple_prog_b])
+      lyr[:ple][:ping] = 1 - lyr[:ple][:ping]
+    run_prog(lyr[:ping] == 0 || lyr[:kind] == "full" ? lyr[:prog_a] : lyr[:prog_b])
+    if lyr[:kind] == "mamba" then lyr[:ping] = 1 - lyr[:ping]
+    if li == 15 || li == 31
+      metal_batch_commit(queue)
+      metal_batch_begin_concurrent(queue)
+    li = li + 1
+  run_prog(head_prog)
+  ft2 = fn_time ? ccall("__w_clock_ms") : ~0.0
+  metal_batch_commit(queue)
+  ple_advance(token_id)
+  result = metal_buffer_read_i32(argmax_out, 0)
+  if fn_time
+    encode_ms[0] = encode_ms[0] + (ft1 - ft0)
+    encode_ms[1] = encode_ms[1] + (ft2 - ft1)
+    encode_ms[2] = encode_ms[2] + (ccall("__w_clock_ms") - ft2)
+    encode_ms[3] = encode_ms[3] + 1
+  result
+
 -> forward(token_id, pos, want_logits)
+  if fast_path && concurrent then return forward_fast(token_id, pos)
+  ft0 = fn_time ? ccall("__w_clock_ms") : ~0.0
   if pos > 0 then build_rope(pos)
   ple_gather([token_id, e_buf])
+  ft1 = fn_time ? ccall("__w_clock_ms") : ~0.0
   if concurrent then metal_batch_begin_concurrent(queue) else metal_batch_begin(queue)
   metal_dispatch_n(queue, bf16_embed_pipe, [embed_w, h_embed, token_id, HIDDEN], HIDDEN)
   dependency_barrier()
@@ -797,18 +1121,27 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
     if dbg
       metal_dispatch_n(queue, copy_at_pipe, [H, golden_taps, 0, li * HC_HIDDEN, HC_HIDDEN], HC_HIDDEN)
     if !concurrent then metal_batch_commit(queue)
+    if concurrent && (li == 15 || li == 31)
+      metal_batch_commit(queue)
+      metal_batch_begin_concurrent(queue)
     li = li + 1
 
   if !concurrent then metal_batch_begin(queue)
   result = -1
-  if want_logits
+  if want_logits && !skip_head
     mixer_collapse()
     enqueue_bf16([lm_head, xn, logits, HIDDEN, N_VOCAB])
     dependency_barrier()
     enqueue_argmax()
+  ft2 = fn_time ? ccall("__w_clock_ms") : ~0.0
   metal_batch_commit(queue)
   ple_advance(token_id)
   if want_logits then result = metal_buffer_read_i32(argmax_out, 0)
+  if fn_time
+    encode_ms[0] = encode_ms[0] + (ft1 - ft0)
+    encode_ms[1] = encode_ms[1] + (ft2 - ft1)
+    encode_ms[2] = encode_ms[2] + (ccall("__w_clock_ms") - ft2)
+    encode_ms[3] = encode_ms[3] + 1
   result
 
 golden_taps = nil
@@ -841,6 +1174,10 @@ while i < prompt.size()
   pred = forward(prompt[i], i, i == prompt.size() - 1)
   i = i + 1
 prefill_elapsed = ccall("__w_clock_ms") - prefill_t0
+encode_ms[0] = ~0.0
+encode_ms[1] = ~0.0
+encode_ms[2] = ~0.0
+encode_ms[3] = 0
 << "prefill " + prefill_elapsed.to_s + " ms; first prediction " + pred.to_s
 
 if golden_prefix != ""
@@ -872,5 +1209,8 @@ tokenizer = Tungsten:Llama:Tokenizer.from_packed_tokenizer(TOKENIZER_BIN)
 if expert_hist
   File.write_bytes("/tmp/fn_expert_hist.u32", metal_buffer_view(hist_buf, 8, N_LAYERS * N_EXPERTS * 4))
   << "expert histogram -> /tmp/fn_expert_hist.u32"
+if fn_time && encode_ms[3] > 0
+  n = ~0.0 + encode_ms[3]
+  << "host phases/round: rope+ple " + (encode_ms[0] / n).to_s + " ms, encode " + (encode_ms[1] / n).to_s + " ms, commit+wait+read " + (encode_ms[2] / n).to_s + " ms"
 if decoded > 0
   << "decode: " + decoded.to_s + " tokens in " + elapsed.to_s + " ms = " + (1000.0 * decoded / elapsed).to_s + " tok/s (median round " + median_ms.to_s + " ms)"

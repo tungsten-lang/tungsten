@@ -58,11 +58,24 @@ self-quantization must re-run the parity + smoke gates.
   bf16) reaches **40.3 tok/s short / 37 prose** (median 25-27 ms rounds) at
   preserved quality (fixture " Paris" ✓, coherent prose). bf16 matvecs route
   through `bf16_matvec_w2` (1.35-1.8x naive per `autotune_qwen38fn.w`).
-  Negative results, measured: scoped resource barriers (FN_FULLBAR A/B) and
-  the gdn_fused/moe_output dispatch fusions are both ~neutral — the round is
-  not encoder-barrier- or dispatch-count-bound; the residue over the ~9 ms
-  stream floor is serial stage latency + per-token host sync, which is what
-  MTP breaks.
+  Negative results, measured: scoped resource barriers (FN_FULLBAR A/B),
+  the gdn_fused/moe_output dispatch fusions, the 2-stage fused HC mix
+  (FN_HCFUSED, 2ms slower), expert pinning, and prebuilt dispatch programs
+  are all ~neutral on the round.
+
+  **Profiled decode round ledger (FN_TIME=1 + Metal System Trace, prose)**:
+  GPU execution 21.4 ms/token; host = rope+ple 0.1-0.5 ms, ENCODE 17.9 ms,
+  commit+wait tail 9.2 ms; the 3-way commit split overlaps most of the GPU
+  behind encode, so the round floor IS the encode: ~2900 bridge calls x
+  ~6 µs each (prebuilt args changed nothing — the cost is per-call bridge
+  overhead, not .w-side boxing). The forward now runs a prebuilt per-layer
+  step-program (ids-identical to the per-call path), which is the staging
+  ground for the two structural fixes:
+  1. C-side program executor (record the step list once in the runtime,
+     one ccall per layer/token) — encode 18 -> ~2 ms, est. 45-55 tok/s;
+  2. MTP width-n verify — the same ~2900 calls serve n tokens/round,
+     dividing BOTH encode and GPU serial latency by acceptance (est. 70-90
+     tok/s combined).
 - **Expert routing skew** (628-token prose, `expert-hist` mode): per-layer
   top-20% of experts = **85.5%** of activations (top-10% 64.4%, Gini 0.81;
   layer 0 flattest at 69.9%). `pin:<N>` wires the per-layer top-N into a

@@ -16,7 +16,7 @@ Correctness is checked by the benchmark checksum and the focused Core spec.
 | 18. Polynomial substitution plan | 30 specializations, 1152 terms to 48 groups over F_65537 | 36 ms | 1 ms | retained, >36x | checksum `59040`; polynomial, modular-GCD, and specialization specs passed |
 | 19. Direct finite-factor candidate construction | 10000 dense degree-20 candidates over F_2 | 94 ms | 15 ms | retained, 6.27x | checksum `211`; compiled `spec/core/algebra_finite_factor_spec.w` passed |
 | 20. Prepared inverse/Frobenius tables | 1000 complete nonzero sweeps of F_2^8 | 176 ms | 48 ms | retained, 3.67x | every inverse product and Frobenius round-trip checked; finite-field spec passed |
-| 21. Reusable FFTPlan | 600 forward/inverse pairs, n=1024 | 705 ms | 1119 ms | rejected, 1.59x slower | identical checksum `1150.5357900443466`; max round-trip error `3.21e-11`; Sci smoke passed |
+| 21. Reusable FFTPlan | 600 forward/inverse pairs, n=1024 | 705 ms | 829 ms | rejected, 17.6% slower | identical checksum `1150.5357900443466`; max round-trip error `3.21e-11`; Sci smoke passed |
 | 22. Fraction-free polynomial-matrix determinant | 12 determinants of dense 7x7 `zI + J` over F_1009 | 109 ms | 5 ms | retained, 21.8x | exact closed form `z^6(z+7)`, checksum `96`; compiled polynomial-matrix spec passed |
 
 Rejected or deferred experiments are recorded below with their reason; they

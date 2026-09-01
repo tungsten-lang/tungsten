@@ -130,11 +130,14 @@ self-quantization must re-run the parity + smoke gates.
      recordings replay at any position; per-(width,ping-parity) cache.
      NVFP4 wide-rung table from the `wide` sweep: r1 at rows<=640 or n=1,
      r2 otherwise (r1 collapses at n>=3 on big rows — register pressure).
-   - Standing under heavy CPU contention (8 pinned cores, ~45 min): plain
-     42-43 tok/s, mtp:2 43.2, mtp:3 43.8 (2.8 tok/round; 11/21 rounds
-     full-accept). Width-1 verify 30 ms vs 24 serial; marginal in-block
-     token ~8.5 ms (inherent GDN serial recurrence + per-token expert
-     stream). QUIET-BOX RANKING PENDING — see the watcher results.
+   - **QUIET-BOX RANKING (9/1, load ~4, 2 reps)**: fixture prose — plain
+     41.9/43.8, FN_RUNG=1 43.5/43.4 (tie; rungs stay opt-in), mtp:2
+     48.1/44.7, mtp:3 45.3/46.9, mtp:4 40.9/46.5. **Compiler-source
+     prompt (500-tok prefill, the realistic case): plain 35.6 -> mtp:3
+     49.4 tok/s (+39%)** — 23/35 rounds full-accept; code drafts accept
+     far better than prose. Depth 3 is the default recommendation.
+     Width-1 verify 30 ms vs 24 serial; marginal in-block token ~8.5 ms
+     (inherent GDN serial recurrence + per-token expert stream).
    - Costs remaining: draft ~2.3 ms each (GPU+sync latency), verify fixed
      ~30 ms. Next levers: w2-multi bf16 kernel (closes the width-1 gap),
      3-way async commit split for the verify program, deeper drafts once
@@ -161,7 +164,7 @@ self-quantization must re-run the parity + smoke gates.
 9. Cross-token encode overlap — OPEN (needs #3).
 10. QSA indexer + long context — OPEN.
 
-Standing: 42.3 tok/s short / ~37 prose (FN_QUANT=1), all gates green.
+Standing: plain 43 short / 35.6 code-context; **mtp:3 46-49 short / 49.4 code-context (+39%)**. All gates green.
 
 ## Next (ranked by research + measurement)
 

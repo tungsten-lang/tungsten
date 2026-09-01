@@ -27,6 +27,8 @@ import numpy as np
 from flash_next_ckpt import CACHE, Checkpoint
 
 OUT = os.path.join(CACHE, "selfquant.safetensors")
+# Outer layers MUST stay bf16: including them flips the parity fixture
+# (first token 271 instead of 11751) — the community quality data was right.
 SKIP_LAYERS = {0, 1, 46, 47}
 
 E2M1_VALUES = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0], dtype=np.float32)
@@ -72,6 +74,8 @@ def quantize_tensor(w):
 
 def target_tensors():
     L = "model.language_model.layers."
+    # PLE projections must stay bf16 too — quantizing them flips the fixture
+    # (they live at outer layer 1; the signed-sqrt gate is sensitive).
     names = ["lm_head.weight"]
     for li in range(48):
         if li in SKIP_LAYERS:

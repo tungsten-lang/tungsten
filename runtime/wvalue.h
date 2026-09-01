@@ -262,6 +262,7 @@ typedef uint64_t WValue;
 /* USB-HID device — Elgato Stream Deck + dials, defined in runtime/hid_bridge.m
  * on darwin (stubbed elsewhere). Feeds the REPL scrub loop via w_input_poll. */
 #define W_TYPE_HID_DEVICE          26  /* WHIDDevice* (IOHIDManager + reader thread) */
+#define W_TYPE_METAL_ICB           27  /* WMetalICB* (MTLIndirectCommandBuffer + resource list) */
 
 /* ---- Numeric subtype (0xFFFD tag, bits 47-46 of payload) ---- */
 #define W_NUMERIC_DECIMAL   0

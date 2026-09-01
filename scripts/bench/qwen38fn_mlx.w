@@ -586,6 +586,12 @@ ple_v_tmp = metal_buffer(device, HIDDEN * 4)
 ple_gv_tmp = metal_buffer(device, HC_HIDDEN * 4)
 ple_nc_tmp = metal_buffer(device, HC_HIDDEN * 4)
 
+# Per-token scalar slots as real buffers: their CONTENTS are rewritten each
+# token, so recorded programs (and ICBs, whose args freeze at record time)
+# never need re-encoding.
+pos_buf = metal_buffer(device, 4)
+pos1_buf = metal_buffer(device, 4)
+tok_buf = metal_buffer(device, 4)
 hist_buf = metal_buffer(device, N_LAYERS * N_EXPERTS * 4)
 if expert_hist
   hz = 0
@@ -670,12 +676,9 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
 -> prog_full(spec)
   prog = spec[0]
   lyr = spec[1]
-  kv_k = [k_tmp, lyr[:k_cache], 0, KV_DIM]
-  kv_v = [v_tmp, lyr[:v_cache], 0, KV_DIM]
-  sdpa = [queries_tmp, lyr[:k_cache], lyr[:v_cache], attn_tmp, GQA, 1, HEAD_DIM, KV_DIM, ATTN_SCALE]
-  lyr[:kv_k_args] = kv_k
-  lyr[:kv_v_args] = kv_v
-  lyr[:sdpa_args] = sdpa
+  kv_k = [k_tmp, lyr[:k_cache], pos_buf, KV_DIM]
+  kv_v = [v_tmp, lyr[:v_cache], pos_buf, KV_DIM]
+  sdpa = [queries_tmp, lyr[:k_cache], lyr[:v_cache], attn_tmp, GQA, pos1_buf, HEAD_DIM, KV_DIM, ATTN_SCALE]
   prog_mv([prog, lyr[:q], xn, qfull_tmp, HIDDEN, QFULL_DIM])
   prog_mv([prog, lyr[:k], xn, k_tmp, HIDDEN, KV_DIM])
   prog_mv([prog, lyr[:v], xn, v_tmp, HIDDEN, KV_DIM])
@@ -819,7 +822,190 @@ head_prog.push([1, nil, [logits], 0, 0])
 head_prog.push([0, argmax_stage1_pipe, [logits, argmax_partial_values, argmax_partial_indices, N_VOCAB, ARGMAX_CHUNKS, 1], ARGMAX_CHUNKS, 256])
 head_prog.push([1, nil, [argmax_partial_values, argmax_partial_indices], 0, 0])
 head_prog.push([0, argmax_stage2_pipe, [argmax_partial_values, argmax_partial_indices, argmax_out, ARGMAX_CHUNKS, 1], 1, 256])
-embed_args = [embed_w, h_embed, 0, HIDDEN]
+embed_args = [embed_w, h_embed, tok_buf, HIDDEN]
+
+# ---- indirect command buffers: whole-token replay ----
+# FN_ICB=1 records the full token (embed + 48 layers + head) into two ICBs
+# (even/odd GDN/PLE state parity) and executes each token with a single
+# executeCommandsInBuffer inside a SERIAL batch (implicit ordering; measured
+# equivalent to scoped barriers). Args are frozen at record time — per-token
+# scalars live in pos_buf/pos1_buf/tok_buf whose contents the host rewrites.
+use_icb = ccall("__w_env", "FN_ICB") == "1"
+
+-> icb_tg_for(n)
+  d = 256
+  while d > 1
+    if n % d == 0 then return d
+    d = d / 2
+  1
+
+# Scalar args must be REAL metal buffers inside ICBs (C-side 4-byte buffers
+# read as garbage from ICB commands — empirically; .w-created ones work).
+# Pool them by value so recording swaps every int/float arg for a buffer.
+# One FRESH buffer per binding — value-pooled buffers bound at two indices
+# of the same ICB command (Q_DIM==K_DIM, DK==DV) silently break that
+# command's writes.
+-> icb_scalar(v)
+  b = metal_buffer(device, 4)
+  if type(v) == "Float"
+    metal_buffer_write_i32(b, 0, ccall("w_float_to_u32_bits", v))
+  else
+    metal_buffer_write_i32(b, 0, v)
+  b
+
+-> icb_args(args)
+  out = []
+  i = 0
+  n = args.size()
+  while i < n
+    a = args[i]
+    t = type(a)
+    if t == "Int" || t == "Float"
+      out.push(icb_scalar(a))
+    else
+      out.push(a)
+    i = i + 1
+  out
+
+# ICB build state: [icb, since-last-barrier count, segs array]. The recorded
+# barrier structure becomes segment lengths for the C-side segmented
+# executor (ICB commands run concurrently within one executeCommands range).
+-> icb_emit(spec)
+  bstate = spec[0]
+  st = spec[1]
+  k = st[0]
+  if k == 1
+    icb_break(bstate)
+    return
+  if k == 0
+    metal_icb_add(bstate[0], st[1], icb_args(st[2]), st[3], st[4])
+  elsif k == 2
+    n = st[3]
+    tg = icb_tg_for(n)
+    metal_icb_add(bstate[0], st[1], icb_args(st[2]), n / tg, tg)
+  elsif k == 3
+    metal_icb_add_3d(bstate[0], st[1], icb_args(st[2]), 1, DV / 4, HV, 32, 4, 1)
+  bstate[1] = bstate[1] + 1
+
+-> icb_emit_prog(spec)
+  bstate = spec[0]
+  prog = spec[1]
+  i = 0
+  n = prog.size()
+  while i < n
+    icb_emit([bstate, prog[i]])
+    i = i + 1
+
+-> icb_break(bstate)
+  if bstate[1] > 0
+    bstate[2].push(bstate[1])
+    bstate[4] = bstate[4] + bstate[1]
+    bstate[1] = 0
+
+# One token is ~1820 commands, split deterministically into two ICB parts at
+# layer 24. CRITICAL: metal_icb_new with constant args gets CSE'd by the
+# compiler (ccalls treated as pure), silently making every "new" ICB the
+# same object — every part must pass a DISTINCT max so the calls survive.
+icb_part_seq = [0]
+-> build_token_part(spec)
+  parity = spec[0]
+  lo = spec[1]
+  hi = spec[2]
+  with_embed = spec[3]
+  with_head = spec[4]
+  icb_part_seq[0] = icb_part_seq[0] + 1
+  bstate = [metal_icb_new(device, 2000 + icb_part_seq[0]), 0, [], [], 0, 0]
+  if with_embed == 1
+    metal_icb_add(bstate[0], bf16_embed_pipe, icb_args(embed_args), HIDDEN / 256, 256)
+    bstate[1] = 1
+    icb_break(bstate)
+    si = 0
+    while si < HC_COUNT
+      metal_icb_add(bstate[0], copy_at_pipe, icb_args([h_embed, H, 0, si * HIDDEN, HIDDEN]), HIDDEN / 256, 256)
+      bstate[1] = bstate[1] + 1
+      si = si + 1
+    icb_break(bstate)
+  li = lo
+  while li < hi
+    lyr = layers[li]
+    if lyr[:ple] != nil
+      icb_emit_prog([bstate, parity == 0 ? lyr[:ple_prog_a] : lyr[:ple_prog_b]])
+    icb_emit_prog([bstate, parity == 0 || lyr[:kind] == "full" ? lyr[:prog_a] : lyr[:prog_b]])
+    icb_break(bstate)
+    li = li + 1
+  if with_head == 1
+    icb_emit_prog([bstate, head_prog])
+    icb_break(bstate)
+  << "  icb part: " + bstate[4].to_s + " commands, " + bstate[2].size().to_s + " segments"
+  [bstate[0], bstate[2]]
+
+-> build_token_icb(parity)
+  [build_token_part([parity, 0, 24, 1, 0]), build_token_part([parity, 24, N_LAYERS, 0, 1])]
+
+icb_even = nil
+icb_odd = nil
+icb_even_segs = nil
+icb_odd_segs = nil
+icb_parity = [0]
+if use_icb
+  icb_even = build_token_icb(0)
+  icb_odd = build_token_icb(1)
+  << "ICBs recorded: " + icb_even.size().to_s + " parts/token"
+
+probe_k = 0
+if use_icb && ccall("__w_env", "FN_ICB_PROBE2") != nil && ccall("__w_env", "FN_ICB_PROBE2") != ""
+  probe_k = ccall("__w_env", "FN_ICB_PROBE2").to_i()
+if probe_k > 0
+  seedi = 0
+  while seedi < HC_HIDDEN
+    metal_buffer_write_f32(H, seedi, ~0.001 * (seedi % 97))
+    if seedi < HIDDEN then metal_buffer_write_f32(xn, seedi, ~0.001 * (seedi % 89))
+    seedi = seedi + 1
+  bs3 = [metal_icb_new(device, 4096), 0, []]
+  pr3 = layers[0][:prog_a]
+  ci3 = 0
+  lim = probe_k < pr3.size() ? probe_k : pr3.size()
+  while ci3 < lim
+    icb_emit([bs3, pr3[ci3]])
+    ci3 = ci3 + 1
+  icb_break(bs3)
+  metal_batch_begin(queue)
+  metal_icb_execute_segments(queue, bs3[0], bs3[2])
+  metal_batch_commit(queue)
+  << "probe2 k=" + lim.to_s + " cmds=" + bs3[1].to_s + ": cs_b " + metal_buffer_read_f32(layers[0][:cs_b], 2 * QKV_DIM).to_s + " / " + metal_buffer_read_f32(layers[0][:cs_b], 2 * QKV_DIM + 7).to_s
+
+-> forward_icb(token_id, pos)
+  ft0 = fn_time ? ccall("__w_clock_ms") : ~0.0
+  build_rope(pos)
+  ple_gather([token_id, e_buf])
+  metal_buffer_write_i32(tok_buf, 0, token_id)
+  metal_buffer_write_i32(pos_buf, 0, pos)
+  metal_buffer_write_i32(pos1_buf, 0, pos + 1)
+  ft1 = fn_time ? ccall("__w_clock_ms") : ~0.0
+  metal_batch_begin(queue)
+  parts = icb_parity[0] == 0 ? icb_even : icb_odd
+  pi = 0
+  while pi < parts.size()
+    metal_icb_execute_segments(queue, parts[pi][0], parts[pi][1])
+    pi = pi + 1
+  ft2 = fn_time ? ccall("__w_clock_ms") : ~0.0
+  metal_batch_commit(queue)
+  # flip every GDN/PLE ping so the non-ICB paths stay consistent
+  icb_parity[0] = 1 - icb_parity[0]
+  li = 0
+  while li < N_LAYERS
+    lyr = layers[li]
+    if lyr[:kind] == "mamba" then lyr[:ping] = 1 - lyr[:ping]
+    if lyr[:ple] != nil then lyr[:ple][:ping] = 1 - lyr[:ple][:ping]
+    li = li + 1
+  ple_advance(token_id)
+  result = metal_buffer_read_i32(argmax_out, 0)
+  if fn_time
+    encode_ms[0] = encode_ms[0] + (ft1 - ft0)
+    encode_ms[1] = encode_ms[1] + (ft2 - ft1)
+    encode_ms[2] = encode_ms[2] + (ccall("__w_clock_ms") - ft2)
+    encode_ms[3] = encode_ms[3] + 1
+  result
 
 log_rope = Math.log(ROPE_BASE)
 rope_power = ~2.0 / ROT_DIM
@@ -1042,15 +1228,9 @@ fast_path = golden_prefix == "" && !expert_hist && skip_spec == "" && !hc_fused
   ft0 = fn_time ? ccall("__w_clock_ms") : ~0.0
   build_rope(pos)
   ple_gather([token_id, e_buf])
-  embed_args[2] = token_id
-  li = 0
-  while li < N_LAYERS
-    lyr = layers[li]
-    if lyr[:kind] == "full"
-      lyr[:kv_k_args][2] = pos
-      lyr[:kv_v_args][2] = pos
-      lyr[:sdpa_args][5] = pos + 1
-    li = li + 1
+  metal_buffer_write_i32(tok_buf, 0, token_id)
+  metal_buffer_write_i32(pos_buf, 0, pos)
+  metal_buffer_write_i32(pos1_buf, 0, pos + 1)
   ft1 = fn_time ? ccall("__w_clock_ms") : ~0.0
   metal_batch_begin_concurrent(queue)
   metal_dispatch_n(queue, bf16_embed_pipe, embed_args, HIDDEN)
@@ -1085,6 +1265,7 @@ fast_path = golden_prefix == "" && !expert_hist && skip_spec == "" && !hc_fused
   result
 
 -> forward(token_id, pos, want_logits)
+  if fast_path && concurrent && use_icb then return forward_icb(token_id, pos)
   if fast_path && concurrent then return forward_fast(token_id, pos)
   ft0 = fn_time ? ccall("__w_clock_ms") : ~0.0
   if pos > 0 then build_rope(pos)
@@ -1187,6 +1368,14 @@ i = 0
 while i < prompt.size()
   pred = forward(prompt[i], i, i == prompt.size() - 1)
   i = i + 1
+if ccall("__w_env", "FN_DUMP_H") != nil && ccall("__w_env", "FN_DUMP_H") != ""
+  File.write_bytes(ccall("__w_env", "FN_DUMP_H"), metal_buffer_view(H, 8, HC_HIDDEN * 4))
+  File.write_bytes(ccall("__w_env", "FN_DUMP_H") + ".logits", metal_buffer_view(logits, 8, N_VOCAB * 4))
+  File.write_bytes(ccall("__w_env", "FN_DUMP_H") + ".cs_a", metal_buffer_view(layers[0][:cs_a], 8, 3 * QKV_DIM * 4))
+  File.write_bytes(ccall("__w_env", "FN_DUMP_H") + ".cs_b", metal_buffer_view(layers[0][:cs_b], 8, 3 * QKV_DIM * 4))
+  File.write_bytes(ccall("__w_env", "FN_DUMP_H") + ".kc", metal_buffer_view(layers[3][:k_cache], 8, 4 * KV_DIM * 4))
+  File.write_bytes(ccall("__w_env", "FN_DUMP_H") + ".ss_a", metal_buffer_view(layers[0][:ss_a], 8, 1024 * 4))
+  File.write_bytes(ccall("__w_env", "FN_DUMP_H") + ".ss_b", metal_buffer_view(layers[0][:ss_b], 8, 1024 * 4))
 prefill_elapsed = ccall("__w_clock_ms") - prefill_t0
 encode_ms[0] = ~0.0
 encode_ms[1] = ~0.0

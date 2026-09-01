@@ -252,6 +252,25 @@ fn metal_compute(source, kernel_name, bufs, threads)
 -> metal_batch_barrier_resources(queue, bufs)
   ccall("w_metal_batch_barrier_resources", queue, bufs)
 
+# Indirect command buffers: record dispatches once, replay per step with one
+# executeCommandsInBuffer inside an open (serial) batch. Scalar args freeze
+# at record time — bind per-step values as 4-byte buffers and rewrite their
+# contents instead.
+fn metal_icb_new(device, max_commands)
+  ccall("w_metal_icb_new", device, max_commands)
+
+fn metal_icb_add(icb, pipeline, bufs, n_groups, threads_per_group)
+  ccall("w_metal_icb_add", icb, pipeline, bufs, n_groups, threads_per_group)
+
+fn metal_icb_add_3d(icb, pipeline, bufs, gx, gy, gz, tx, ty, tz)
+  ccall("w_metal_icb_add_3d", icb, pipeline, bufs, gx, gy, gz, tx, ty, tz)
+
+fn metal_icb_execute(queue, icb)
+  ccall("w_metal_icb_execute", queue, icb)
+
+fn metal_icb_execute_segments(queue, icb, segs)
+  ccall("w_metal_icb_execute_segments", queue, icb, segs)
+
 # Allocate `length` bytes of threadgroup-scoped memory at the given
 # binding index for the NEXT dispatch on the open batch's encoder.
 # The MSL kernel must declare a `threadgroup T*` arg with the

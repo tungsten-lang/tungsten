@@ -155,6 +155,152 @@ use core/combinatorics/support
       instruction += 1
     values
 
+  # Caller-owned scratch for repeated evaluation. A workspace is tied only to
+  # the circuit's current node count; appending nodes makes an older, shorter
+  # workspace invalid and evaluate_into will reject it.
+  -> evaluation_workspace
+    values = []
+    @nodes.size.times -> values.push(nil)
+    values
+
+  # Column-major scratch for one batch. Each reachable node owns a column of
+  # `batch_size` values so the opcode dispatch is hoisted outside the point
+  # loop. The returned storage is caller-owned and may be reused.
+  -> evaluation_batch_workspace(batch_size)
+    Combinatorics.require_nonnegative_integer(
+      batch_size, "arithmetic-circuit evaluation batch size")
+    columns = []
+    @nodes.size.times ->
+      column = []
+      batch_size.times -> column.push(nil)
+      columns.push(column)
+    columns
+
+  # Evaluate the selected output while reusing caller-owned node storage.
+  # The scalar result is returned directly; `values` retains every reachable
+  # intermediate value for callers that need to inspect or reuse the buffer.
+  -> evaluate_into(assignments, values)
+    target = require_output(nil)
+    if values.class_name != "Array" || values.size < @nodes.size
+      raise "arithmetic-circuit evaluation workspace is too short"
+    ensure_evaluation_tape(target)
+    tape = @evaluation_tape
+    node_indices = tape[0]
+    opcodes = tape[1]
+    left_inputs = tape[2]
+    right_inputs = tape[3]
+    payloads = tape[4]
+    instruction = 0
+    while instruction < node_indices.size
+      index = node_indices[instruction]
+      opcode = opcodes[instruction]
+      left = left_inputs[instruction]
+      right = right_inputs[instruction]
+      payload = payloads[instruction]
+      if opcode == 0
+        values[index] = payload
+      elsif opcode == 1
+        values[index] = assignment_value(assignments, payload)
+      elsif opcode == 2
+        values[index] = values[left] + values[right]
+      elsif opcode == 3
+        values[index] = values[left] - values[right]
+      elsif opcode == 4
+        values[index] = values[left] * values[right]
+      elsif opcode == 5
+        denominator = values[right]
+        if denominator == 0
+          raise "arithmetic circuit is undefined: division by zero"
+        values[index] = values[left] / denominator
+      elsif opcode == 6
+        values[index] = 0 - values[left]
+      else
+        raise "unsupported arithmetic-circuit opcode"
+      instruction += 1
+    values[target]
+
+  # Column-major batch execution hoists opcode dispatch out of the point loop.
+  # Outputs and scratch are caller-owned, so repeated calls do not allocate
+  # those buffers and independent callers can evaluate a warmed immutable tape
+  # concurrently. Use the row-oriented evaluate/evaluate_into lanes below the
+  # measured crossover recorded with the benchmark.
+  -> evaluate_batch_into(assignments_batch, outputs, columns)
+    if assignments_batch.class_name != "Array"
+      raise "arithmetic-circuit evaluation batch must be an Array"
+    if outputs.class_name != "Array" || outputs.size < assignments_batch.size
+      raise "arithmetic-circuit batch output is too short"
+    if columns.class_name != "Array" || columns.size < @nodes.size
+      raise "arithmetic-circuit batch workspace is too short"
+    target = require_output(nil)
+    ensure_evaluation_tape(target)
+    tape = @evaluation_tape
+    node_indices = tape[0]
+    opcodes = tape[1]
+    left_inputs = tape[2]
+    right_inputs = tape[3]
+    payloads = tape[4]
+    count = assignments_batch.size
+    instruction = 0
+    while instruction < node_indices.size
+      node_index = node_indices[instruction]
+      values = columns[node_index]
+      if values.class_name != "Array" || values.size < count
+        raise "arithmetic-circuit batch workspace column is too short"
+      opcode = opcodes[instruction]
+      left = left_inputs[instruction]
+      right = right_inputs[instruction]
+      payload = payloads[instruction]
+      row = 0
+      if opcode == 0
+        while row < count
+          values[row] = payload
+          row += 1
+      elsif opcode == 1
+        while row < count
+          values[row] = assignment_value(assignments_batch[row], payload)
+          row += 1
+      elsif opcode == 2
+        left_values = columns[left]
+        right_values = columns[right]
+        while row < count
+          values[row] = left_values[row] + right_values[row]
+          row += 1
+      elsif opcode == 3
+        left_values = columns[left]
+        right_values = columns[right]
+        while row < count
+          values[row] = left_values[row] - right_values[row]
+          row += 1
+      elsif opcode == 4
+        left_values = columns[left]
+        right_values = columns[right]
+        while row < count
+          values[row] = left_values[row] * right_values[row]
+          row += 1
+      elsif opcode == 5
+        left_values = columns[left]
+        right_values = columns[right]
+        while row < count
+          denominator = right_values[row]
+          if denominator == 0
+            raise "arithmetic circuit is undefined: division by zero"
+          values[row] = left_values[row] / denominator
+          row += 1
+      elsif opcode == 6
+        left_values = columns[left]
+        while row < count
+          values[row] = 0 - left_values[row]
+          row += 1
+      else
+        raise "unsupported arithmetic-circuit opcode"
+      instruction += 1
+    result_values = columns[target]
+    row = 0
+    while row < count
+      outputs[row] = result_values[row]
+      row += 1
+    outputs
+
   # Flat, cached instruction columns. Opcodes are constant=0, variable=1,
   # add=2, subtract=3, multiply=4, divide=5, negate=6.
   -> ensure_evaluation_tape(target)

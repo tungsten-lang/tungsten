@@ -10,7 +10,8 @@ Correctness is checked by the benchmark checksum and the focused Core spec.
 |---|---|---:|---:|---|---|
 | 13. Differential add accessor hoist | 120 additions, dimension 20, full Hessian | 262 ms | 5 ms | retained, 52.4x | checksum `844`; compiled `spec/core/calculus_spec.w` passed |
 | 14. Sparse gap-Horner | 12 evaluations, degree 5000, 1001 terms over F_1000003 | 1701 ms | 1 ms | retained, >850x | checksum `575521`; compiled `spec/core/algebra_polynomial_spec.w` passed |
-| 15. Arithmetic-circuit evaluation tape | 2000 evaluations, 402-node reachable DAG | 150 ms | 27 ms | retained, 5.56x | checksum `814000`; compiled `spec/core/algebra_arithmetic_circuit_spec.w` passed |
+| 15a. Arithmetic-circuit evaluation tape | 2000 evaluations, 402-node reachable DAG | 150 ms | 27 ms | retained, 5.56x | checksum `814000`; compiled `spec/core/algebra_arithmetic_circuit_spec.w` passed |
+| 15b. Caller-owned batched circuit evaluation | 49,920 evaluations of the same 402-node DAG, batch 128 | 718 ms | 300 ms | retained, 2.39x | identical checksum `20353320`; 43 focused checks passed in native and interpreter modes |
 | 16. Incremental approximate LLL | 8 rank-14 reductions, dense identity Gram | 925 ms | 10 ms | retained, 92.5x | checksum `1379`, 13 steps, swap parity; compiled `spec/core/algebra_lattice_reduction_spec.w` passed |
 | 17. Damped Gauss-Newton/LM least squares | 5 dimension-16 linear solves to <1e-10 objective | 127 ms | 3 ms | retained, 42.3x and lower error | checksum near `374`; new FD/analytic/nonlinear spec and `spec/sci/smoke_spec.w` passed |
 | 18. Polynomial substitution plan | 30 specializations, 1152 terms to 48 groups over F_65537 | 36 ms | 1 ms | retained, >36x | checksum `59040`; polynomial, modular-GCD, and specialization specs passed |
@@ -23,6 +24,40 @@ Correctness is checked by the benchmark checksum and the focused Core spec.
 
 Rejected or deferred experiments are recorded below with their reason; they
 are not left in production source.
+
+## 15b. Caller-owned and batched arithmetic-circuit evaluation: retained
+
+`evaluate_into` reuses one caller-owned node array. `evaluate_batch_into`
+instead uses caller-owned column-major node storage, hoisting opcode dispatch
+outside the point loop while preserving the cached tape's exact dynamic
+arithmetic. The benchmark warms the tape and all workspaces before timing.
+
+Five alternating matched process runs of `arithmetic_circuit_batch.w` used a
+402-node reachable add DAG and approximately 50,000 evaluations per row. The
+table reports median microseconds per evaluation; every lane checked the same
+row checksum on every run.
+
+| batch size | evaluations | `evaluate` | `evaluate_into` | `evaluate_batch_into` | batch speedup vs `evaluate` |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 50,000 | 14.080 us | 14.700 us | 22.340 us | 0.630x |
+| 2 | 50,000 | 14.320 us | 14.540 us | 14.020 us | 1.021x |
+| 4 | 50,000 | 14.220 us | 14.800 us | 10.280 us | 1.383x |
+| 8 | 50,000 | 14.420 us | 15.040 us | 8.300 us | 1.737x |
+| 16 | 50,000 | 14.540 us | 14.980 us | 6.960 us | 2.089x |
+| 32 | 49,984 | 14.265 us | 14.965 us | 6.402 us | 2.228x |
+| 64 | 49,984 | 14.505 us | 15.285 us | 6.242 us | 2.324x |
+| 128 | 49,920 | 14.383 us | 14.924 us | 6.010 us | 2.393x |
+
+The first median win is batch 2, but its 2.1% margin is too small for a
+stable policy boundary. Batch 4 is the practical crossover on this shape,
+with a 27.7% elapsed-time reduction, growing to 58.2% at batch 128. The scalar
+caller-owned lane is 1.5-5.5% slower on this compiler, so it is retained for
+explicit allocation control rather than selected as a scalar fast path.
+
+The focused circuit spec exercises every opcode through both new evaluators,
+non-integral Rational results, division by zero, buffer reuse, empty batches,
+and undersized outer, output, and inner-column workspaces. All 43 checks pass
+in both compiled-native and tree-interpreter execution.
 
 ## 20b. Prefix/suffix finite-field inversion: retained
 

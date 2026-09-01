@@ -220,6 +220,85 @@ elsif mode == "lstsq-native"
     i += 1
   elapsed = clock() - started
   << "LSTSQ_NATIVE ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + solution[0].round(6).to_s
+elsif mode == "qr-factor"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  m = ARGV[2] == nil ? 512 : ARGV[2].to_i
+  n = ARGV[3] == nil ? 64 : ARGV[3].to_i
+  count = ARGV[4] == nil ? 32 : ARGV[4].to_i
+  a = campaign_matrix(m, n)
+  rhs_list = []
+  i = 0
+  while i < m
+    rhs_list.push(((i * 19) % 103).to_f / ~103.0)
+    i += 1
+
+  build_iterations = iterations / 5
+  build_iterations = 1 if build_iterations < 1
+  started = clock()
+  i = 0
+  while i < build_iterations
+    factor = LinAlg.factor_qr(a)
+    i += 1
+  build_elapsed = clock() - started
+  factor = LinAlg.factor_qr(a)
+
+  ref_solution = nil
+  started = clock()
+  i = 0
+  while i < iterations
+    ref_solution = LinAlg.least_squares(a, rhs_list)
+    i += 1
+  refactor_elapsed = clock() - started
+
+  rhs = ccall("w_array_new_aligned", -64, m)
+  out = ccall("w_array_new_aligned", -64, m)
+  i = 0
+  while i < m
+    rhs[i] = rhs_list[i]
+    i += 1
+  started = clock()
+  i = 0
+  while i < iterations
+    factor.solve_into(rhs, out)
+    i += 1
+  factor_elapsed = clock() - started
+  raise "QR factor mismatch" if (out[0] - ref_solution[0]).abs > ~0.000000001
+
+  many_rhs = ccall("w_array_new_aligned", -64, m * count)
+  many_out = ccall("w_array_new_aligned", -64, m * count)
+  rhs_vectors = []
+  out_vectors = []
+  r = 0
+  while r < count
+    rhs_vector = ccall("w_array_new_aligned", -64, m)
+    out_vector = ccall("w_array_new_aligned", -64, m)
+    i = 0
+    while i < m
+      value = rhs[i] + r * ~0.000001
+      many_rhs[r * m + i] = value
+      rhs_vector[i] = value
+      i += 1
+    rhs_vectors.push(rhs_vector)
+    out_vectors.push(out_vector)
+    r += 1
+  started = clock()
+  i = 0
+  while i < iterations
+    r = 0
+    while r < count
+      factor.solve_into(rhs_vectors[r], out_vectors[r])
+      r += 1
+    i += 1
+  sequential_elapsed = clock() - started
+  started = clock()
+  i = 0
+  while i < iterations
+    factor.solve_many_into(many_rhs, many_out, count)
+    i += 1
+  batch_elapsed = clock() - started
+  raise "QR batch mismatch" if (many_out[(count - 1) * m] - out_vectors[count - 1][0]).abs > ~0.000000001
+  << "QR_FACTOR build_us=" + (build_elapsed * ~1000000.0 / build_iterations).to_s + " refactor_us=" + (refactor_elapsed * ~1000000.0 / iterations).to_s + " solve_into_us=" + (factor_elapsed * ~1000000.0 / iterations).to_s
+  << "QR_BATCH sequential_us=" + (sequential_elapsed * ~1000000.0 / iterations).to_s + " batch_us=" + (batch_elapsed * ~1000000.0 / iterations).to_s
 elsif mode == "lu-refactor" || mode == "lu-factor" || mode == "lu-factor-into"
   iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
   n = ARGV[2] == nil ? 256 : ARGV[2].to_i

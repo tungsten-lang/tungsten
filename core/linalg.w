@@ -147,6 +147,78 @@
       r += 1
     out
 
+# Compact Householder QR factor for a full-column-rank m×n matrix (m>=n).
+# `@factors` retains LAPACK's column-major reflector/R storage and `@tau`
+# retains the scalar reflectors. No explicit Q is formed for least squares.
++ DenseQRFactor
+  -> new(@factors, @tau, @rows, @columns)
+
+  ro :rows
+  ro :columns
+
+  # `out` is also LAPACK's m-element workspace. The solution occupies its
+  # first n elements; requiring m capacity keeps repeated solves allocation-free.
+  -> solve_into(rhs, out)
+    raise "DenseQRFactor.solve_into: RHS length must equal rows" if rhs.size() != @rows
+    raise "DenseQRFactor.solve_into: output must have at least rows elements" if out.size() < @rows
+    i = 0
+    while i < @rows
+      out[i] = rhs[i] + ~0.0
+      i += 1
+    info = ccall("w_blas_dgeqrf_solve", @factors, @tau, out, @rows, @columns, 1)
+    raise "DenseQRFactor.solve_into: LAPACK failed with info=" + info.to_s if info != 0
+    out
+
+  -> solve(rhs)
+    workspace = ccall("w_array_new_aligned", -64, @rows)
+    solve_into(rhs, workspace)
+    out = []
+    i = 0
+    while i < @columns
+      out.push(workspace[i])
+      i += 1
+    out
+
+  # RHS/output contain `count` consecutive m-element vectors. Each result is
+  # stored at the beginning of its m-element output slot.
+  -> solve_many_into(rhs, out, count)
+    raise "DenseQRFactor.solve_many_into: count must be positive" if count <= 0
+    total = @rows * count
+    raise "DenseQRFactor.solve_many_into: RHS too short" if rhs.size() < total
+    raise "DenseQRFactor.solve_many_into: output too short" if out.size() < total
+    i = 0
+    while i < total
+      out[i] = rhs[i] + ~0.0
+      i += 1
+    info = ccall("w_blas_dgeqrf_solve", @factors, @tau, out, @rows, @columns, count)
+    raise "DenseQRFactor.solve_many_into: LAPACK failed with info=" + info.to_s if info != 0
+    out
+
+  -> solve_many(rhses)
+    return [] if rhses.size() == 0
+    count = rhses.size()
+    workspace = ccall("w_array_new_aligned", -64, @rows * count)
+    r = 0
+    while r < count
+      raise "DenseQRFactor.solve_many: RHS length must equal rows" if rhses[r].size() != @rows
+      i = 0
+      while i < @rows
+        workspace[r * @rows + i] = rhses[r][i] + ~0.0
+        i += 1
+      r += 1
+    solve_many_into(workspace, workspace, count)
+    out = []
+    r = 0
+    while r < count
+      solution = []
+      i = 0
+      while i < @columns
+        solution.push(workspace[r * @rows + i])
+        i += 1
+      out.push(solution)
+      r += 1
+    out
+
 + LinAlg
   -> .rows(a)
     a.size()
@@ -284,6 +356,34 @@
     raise "LinAlg.factor_cholesky: matrix is not positive definite" if info > 0
     raise "LinAlg.factor_cholesky: LAPACK failed with info=" + info.to_s if info < 0
     DenseCholeskyFactor.new(flat, n)
+
+  # Retain LAPACK's compact Householder representation for repeated
+  # full-rank overdetermined least-squares solves without constructing Q.
+  -> .factor_qr(a)
+    m = LinAlg.rows(a)
+    n = LinAlg.cols(a)
+    raise "LinAlg.factor_qr: requires a non-empty matrix with rows >= columns" if n == 0 || m < n
+    flat = ccall("w_array_new_aligned", -64, m * n)
+    i = 0
+    while i < m
+      j = 0
+      while j < n
+        flat[j * m + i] = a[i][j] + ~0.0
+        j += 1
+      i += 1
+    tau = ccall("w_array_new_aligned", -64, n)
+    info = ccall("w_blas_dgeqrf_factor", flat, tau, m, n)
+    raise "LinAlg.factor_qr: LAPACK failed with info=" + info.to_s if info != 0
+    max_diag = ~0.0
+    min_diag = nil
+    i = 0
+    while i < n
+      diagonal = flat[i * m + i].abs
+      max_diag = diagonal if diagonal > max_diag
+      min_diag = diagonal if min_diag == nil || diagonal < min_diag
+      i += 1
+    raise "LinAlg.factor_qr: rank deficient" if min_diag == nil || min_diag <= max_diag * ~0.00000000000001
+    DenseQRFactor.new(flat, tau, m, n)
 
   -> .solve(a, b)
     n = LinAlg.rows(a)

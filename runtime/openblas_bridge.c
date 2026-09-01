@@ -475,6 +475,14 @@ extern void dgeqrf_(const int *m, const int *n, double *a, const int *lda,
 extern void dorgqr_(const int *m, const int *n, const int *k, double *a,
                     const int *lda, const double *tau, double *work,
                     const int *lwork, int *info);
+extern void dormqr_(const char *side, const char *trans, const int *m,
+                    const int *n, const int *k, const double *a,
+                    const int *lda, const double *tau, double *c,
+                    const int *ldc, double *work, const int *lwork,
+                    int *info);
+extern void dtrtrs_(const char *uplo, const char *trans, const char *diag,
+                    const int *n, const int *nrhs, const double *a,
+                    const int *lda, double *b, const int *ldb, int *info);
 extern void dsyev_(const char *jobz, const char *uplo, const int *n, double *a,
                    const int *lda, double *w, double *work,
                    const int *lwork, int *info);
@@ -521,6 +529,53 @@ WValue w_blas_dgeqrf_qr(WValue a_wval, WValue q_wval, WValue r_wval,
     for (int i = 0; i < m; i++) for (int j = 0; j < n; j++)
         qp[(size_t)i * n + j] = ap[(size_t)i + (size_t)j * m];
     return w_int(0);
+}
+
+WValue w_blas_dgeqrf_factor(WValue a_wval, WValue tau_wval,
+                            WValue m_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval), *tau = w_as_array(tau_wval);
+    int m = (int)w_as_int(m_wval), n = (int)w_as_int(n_wval);
+    if (m < n || n <= 0 || a->size < (int64_t)m * n || tau->size < n) {
+        w_raise(w_string("dgeqrf_factor: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start;
+    double *tp = (double *)tau->slots + tau->start;
+    int info = 0, lwork = -1; double query = 0.0;
+    dgeqrf_(&m, &n, ap, &m, tp, &query, &lwork, &info);
+    if (info != 0) return w_int(info);
+    lwork = (int)query; if (lwork < 1) lwork = 1;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { w_raise(w_string("dgeqrf_factor: out of memory")); return w_int(-1); }
+    dgeqrf_(&m, &n, ap, &m, tp, work, &lwork, &info); free(work);
+    return w_int(info);
+}
+
+WValue w_blas_dgeqrf_solve(WValue factor_wval, WValue tau_wval,
+                           WValue rhs_wval, WValue m_wval,
+                           WValue n_wval, WValue nrhs_wval) {
+    WArray *factor = w_as_array(factor_wval), *tau = w_as_array(tau_wval);
+    WArray *rhs = w_as_array(rhs_wval);
+    int m = (int)w_as_int(m_wval), n = (int)w_as_int(n_wval);
+    int nrhs = (int)w_as_int(nrhs_wval);
+    if (m < n || n <= 0 || nrhs <= 0 || factor->size < (int64_t)m * n ||
+        tau->size < n || rhs->size < (int64_t)m * nrhs) {
+        w_raise(w_string("dgeqrf_solve: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)factor->slots + factor->start;
+    double *tp = (double *)tau->slots + tau->start;
+    double *bp = (double *)rhs->slots + rhs->start;
+    int info = 0, lwork = -1; double query = 0.0;
+    dormqr_("L", "T", &m, &nrhs, &n, ap, &m, tp, bp, &m,
+            &query, &lwork, &info);
+    if (info != 0) return w_int(info);
+    lwork = (int)query; if (lwork < 1) lwork = 1;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { w_raise(w_string("dgeqrf_solve: out of memory")); return w_int(-1); }
+    dormqr_("L", "T", &m, &nrhs, &n, ap, &m, tp, bp, &m,
+            work, &lwork, &info); free(work);
+    if (info != 0) return w_int(info);
+    dtrtrs_("U", "N", "N", &n, &nrhs, ap, &m, bp, &m, &info);
+    return w_int(info);
 }
 
 WValue w_blas_dsyev_values(WValue a_wval, WValue values_wval, WValue n_wval) {

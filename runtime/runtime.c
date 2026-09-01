@@ -65985,6 +65985,14 @@ __attribute__((weak)) WValue w_blas_dgeqrf_qr(WValue a, WValue q, WValue r, WVal
     (void)a; (void)q; (void)r; (void)m; (void)n;
     w_raise(w_string("dgeqrf_qr: LAPACK bridge not linked")); return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_dgeqrf_factor(WValue a, WValue tau, WValue m, WValue n) {
+    (void)a; (void)tau; (void)m; (void)n;
+    w_raise(w_string("dgeqrf_factor: LAPACK bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dgeqrf_solve(WValue a, WValue tau, WValue b, WValue m, WValue n, WValue nrhs) {
+    (void)a; (void)tau; (void)b; (void)m; (void)n; (void)nrhs;
+    w_raise(w_string("dgeqrf_solve: LAPACK bridge not linked")); return W_NIL;
+}
 __attribute__((weak)) WValue w_blas_dsyev_values(WValue a, WValue w, WValue n) {
     (void)a; (void)w; (void)n; w_raise(w_string("dsyev_values: LAPACK bridge not linked")); return W_NIL;
 }

@@ -488,3 +488,35 @@ improves 910.82 to 199.64 us (4.56x). On this SPD workload, Cholesky factor
 construction is 1419.24 to 1211.05 us (1.17x). Retained. This explicitly closes
 the Cholesky and batched-RHS portions of original item 5; compact reusable QR
 reflectors are measured in the separate QR-factor tranche below.
+
+## Original items 5 and 8 follow-up — compact reusable QR factor
+
+`LinAlg.factor_qr` now retains `dgeqrf`'s column-major Householder vectors,
+upper-triangular R, and tau without forming Q. `DenseQRFactor.solve[_into]`
+applies Q-transpose with `dormqr` and solves R with `dtrtrs`; the batched form
+does both operations over all RHS columns in one LAPACK call. Factors remain
+read-only and caller-owned output provides the m-element LAPACK workspace.
+Rank-deficient and underdetermined matrices fail explicitly.
+
+Correctness: `spec/core/linalg_least_squares_spec.w` passes 10/10 for the known
+least-squares oracle, dimensions, list and caller-owned solves, list and typed
+batches, rank failure, underdetermined failure, and RHS mismatch. The
+Accelerate bridge passes focused C syntax.
+
+Five matched release samples at 512x64, with 100 single solves and 32 RHS per
+batch (microseconds per operation):
+
+| sample | factor build | refactor with `dgelsy` | retained `solve_into` | 32 sequential solves | 32-RHS LAPACK batch |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1132.34 | 1192.21 | 69.71 | 1921.35 | 422.67 |
+| 2 | 976.62 | 1187.25 | 58.85 | 1888.68 | 385.46 |
+| 3 | 984.69 | 1165.92 | 56.45 | 1943.54 | 371.87 |
+| 4 | 994.61 | 1154.79 | 60.29 | 1917.87 | 421.92 |
+| 5 | 958.97 | 1154.37 | 62.74 | 1941.95 | 392.92 |
+
+Retained. Median repeated single-RHS time improves from 1165.92 to 60.29 us
+(19.3x) by hoisting factorization; one 32-RHS solve improves 1921.35 to 392.92
+us (4.89x) over repeated `dormqr`/`dtrtrs`. This closes original item 5's
+QRFactor and batched-RHS requirements and original item 8's compact-reflector
+requirement; the existing one-shot `least_squares` keeps pivoted `dgelsy` for
+rank-revealing behavior.

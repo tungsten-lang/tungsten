@@ -173,7 +173,22 @@ self-quantization must re-run the parity + smoke gates.
    CPU-pinned workload (encode floor is host-side); re-bench on a quiet
    box before flipping the default.
 9. Cross-token encode overlap — OPEN (needs #3).
-10. QSA indexer + long context — OPEN.
+10. QSA indexer + long context — **DECODE PATH LANDED (C1)**:
+    qwen4_fn/qsa.metal ports Qwen4ExpTextQSAIndexer verbatim: raw index
+    keys cached un-normed; complete 4-blocks mean-pooled -> k_layernorm ->
+    roped at the BLOCK-START position (static once complete, incremental
+    build); q layernorm+rope at the query position (first 64 dims, pairs
+    (i,i+32)); relu-sum scores over 4 heads / sqrt(128); top-512 blocks
+    (histogram threshold select, cut-bin ties by block order) + the
+    incomplete tail; SDPA over the selected list (identical arithmetic to
+    dense when the budget covers everything). Fixed grids + buffer-driven
+    bounds keep every step inside the recorded programs. FN_CTX=<n> sizes
+    kv/index caches (cap 262144); FN_QSA=1 forces the indexer from pos 0.
+    GATES: QSA==dense ids BIT-EXACT (fixture + 500-token compiler prompt);
+    FN_CTX=4096 decode from pos 500 to ~2300 crosses the boundary with
+    fully coherent code (1799 tokens, 24.6 tok/s avg). Remaining (C2):
+    indexer in the chunked-prefill/multi path (per-query selection) so
+    PROMPTS can exceed 2051 + the 100k demo; spec decode beyond 2051.
 
 Standing: plain 43 short / 35.6 code-context; **mtp:3 46-49 short / 49.4 code-context (+39%)**. All gates green.
 

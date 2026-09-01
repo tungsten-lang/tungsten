@@ -366,3 +366,31 @@ the remaining 1.5-1.75x gap to raw kernels includes object field loads and
 exact-class guards. Full aggregate/vector scalar replacement is deferred: it
 requires an escape/identity-aware representation change, and this narrow
 campaign produced no safe compiler optimization with matched evidence.
+
+## Item 1 follow-up — demand-zero CPU Tensor allocation
+
+Source finding: `Tensor.cpu_zeros` allocates with `w_array_new_aligned`, whose
+runtime contract is a private anonymous `mmap`, `size = cap = n`, and
+kernel-provided zero pages. It nevertheless wrote `0.0` to all `n` elements.
+That loop did not establish length or semantics; it eagerly faulted and dirtied
+every page, including outputs that GEMM and native unary kernels fully replace.
+
+Correctness: a fresh 2048x2048 f64 Tensor reads zero at both the first and last
+element without the loop. The CPU operation and view-GEMM campaign oracles pass;
+`spec/core/tensor_cpu_ops_spec.w` passes 31/31 and the existing scientific Tensor
+smoke prints `TENSOR_CPU_OK`.
+
+Five alternating release samples:
+
+| workload | parent `0eadd238` | candidate |
+| --- | ---: | ---: |
+| first 2048x2048 f64 zero allocation, internal | 24-28 ms | <0.5 ms |
+| 2,000 256x256 f64 zero allocations, process | 0.82-0.87 s | 0.00-0.01 s |
+| 1,000 256x256 f64 GEMMs, process | 0.57-0.61 s | 0.17-0.25 s |
+| 1,000 256x256 f64 `exp`, process | 0.50-0.54 s | 0.12-0.14 s |
+
+The internal repeated-allocation probe reports 393-420 us/allocation before and
+1 us/allocation after. Retained. This is not a general uninitialized allocator:
+the public zeros contract remains true because anonymous mmap pages are
+demand-zero. Full-overwrite kernels simply stop paying for an earlier redundant
+page touch.

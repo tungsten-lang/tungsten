@@ -12,6 +12,9 @@
 #   dense_tensor_campaign blas1-native [iterations]
 #   dense_tensor_campaign blas2-scalar [iterations]
 #   dense_tensor_campaign blas2-native [iterations]
+#   dense_tensor_campaign zeros-cold [side]
+#   dense_tensor_campaign zeros-warm [iterations]
+#   dense_tensor_campaign matmul-output [iterations]
 
 use core/blas
 use core/tensor
@@ -241,5 +244,38 @@ elsif mode == "blas2-native"
     i += 1
   elapsed = clock() - t0
   << "BLAS2_NATIVE ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + y[0].round(6).to_s
+elsif mode == "zeros-cold"
+  side = ARGV[1] == nil ? 2048 : ARGV[1].to_i
+  t0 = clock()
+  z = Tensor.zeros_cpu(Tensor.f64, [side, side])
+  elapsed = clock() - t0
+  assert_close(z.at([0, 0]), ~0.0, "zeros cold first")
+  assert_close(z.at([side - 1, side - 1]), ~0.0, "zeros cold last")
+  << "ZEROS_COLD ms=" + (elapsed * ~1000.0).round(3).to_s
+elsif mode == "zeros-warm"
+  iterations = ARGV[1] == nil ? 1000 : ARGV[1].to_i
+  z = nil
+  t0 = clock()
+  i = 0
+  while i < iterations
+    z = Tensor.zeros_cpu(Tensor.f64, [256, 256])
+    i += 1
+  elapsed = clock() - t0
+  assert_close(z.at([0, 0]), ~0.0, "zeros warm first")
+  assert_close(z.at([255, 255]), ~0.0, "zeros warm last")
+  << "ZEROS_WARM us/op=" + (elapsed * ~1000000.0 / iterations).round(3).to_s
+elsif mode == "matmul-output"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  left = filled_tensor(256, 256, Tensor.f64)
+  right = filled_tensor(256, 256, Tensor.f64)
+  product = nil
+  t0 = clock()
+  i = 0
+  while i < iterations
+    product = left.matmul(right)
+    i += 1
+  elapsed = clock() - t0
+  assert_close(product.at([0, 0]), ~60.19290041449671, "matmul output")
+  << "MATMUL_OUTPUT ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s
 else
   raise "unknown mode: " + mode

@@ -230,12 +230,9 @@ TENSOR_EW = {}
       arr = Tensor.storage_f64(n)
     elsif dtype != Tensor.f32
       raise "Tensor.cpu_zeros: supported CPU dtypes are f32 and f64"
-    # Expose full logical length for []; a typed array may initially report
-    # size zero even though its pages are allocated.
-    i = 0
-    while i < n
-      arr[i] = ~0.0
-      i = i + 1
+    # w_array_new_aligned returns mmap-backed demand-zero storage with
+    # size = cap = n.  Touching every element here only faults and dirties
+    # pages that zero readers and full-overwrite kernels can leave lazy.
     Tensor.new(:cpu, arr, dtype, shape, Tensor.packed_strides(shape), 0)
 
   # CPU-only zeros (f32). Prefer this when Metal is unavailable or unwanted.

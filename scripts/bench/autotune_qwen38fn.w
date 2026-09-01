@@ -215,6 +215,76 @@ while si < nv_shapes.size()
   << line
   si = si + 1
 
+# ---- width-n wide-rung sweep: nvfp4_wide_b{2..4}_r{1,2,4} ----
+# The verify path batches n tokens through one weight stream; the right
+# ROWS rung per shape is empirical (register pressure vs sharing — see the
+# wide kernel header: "Do not prune the ladder").
+if ARGV.size() > 0 && ARGV[0] == "wide"
+  wlib = metal_compile_source(device, read_file("bits/tungsten-llama/lib/kernels/nvfp4/nvfp4_matvec_mlx_scaled_wide.metal"))
+  wnames = ["r1", "r2", "r4"]
+  wx_buf = metal_buffer(device, 4 * 10240 * 4)
+  wi = 0
+  while wi < 4 * 10240
+    metal_buffer_write_f32(wx_buf, wi, Math.sin(~0.0 + wi))
+    wi = wi + 1
+  wy_buf = metal_buffer(device, 4 * 248320 * 4)
+
+  -> run_wide_arm(spec)
+    pipe = spec[0]
+    ts = spec[1]
+    rows = spec[2]
+    kd = spec[3]
+    inner = spec[4]
+    rung = spec[5]
+    metal_batch_begin(queue)
+    it = 0
+    while it < inner
+      w = ts[it % ts.size()]
+      metal_dispatch_groups(queue, pipe, [w[0], w[1], wx_buf, wy_buf, kd, rows, ~0.001], (rows + 2 * rung - 1) / (2 * rung), 64)
+      it = it + 1
+    t0 = ccall("__w_clock_ms")
+    metal_batch_commit(queue)
+    ccall("__w_clock_ms") - t0
+
+  si = 0
+  while si < nv_shapes.size()
+    s2 = nv_shapes[si]
+    ts = []
+    ni = 0
+    while ni < s2[1].size()
+      ts.push(sq_triple(s2[1][ni]))
+      ni = ni + 1
+    rows = s2[2]
+    kd = s2[3]
+    pass_bytes = rows * kd * 9 / 16
+    inner = (8000000000 + pass_bytes - 1) / pass_bytes
+    if inner > 8192 then inner = 8192
+    inner = ((inner + ts.size() - 1) / ts.size()) * ts.size()
+    bytes = (~0.0 + pass_bytes) * inner
+    bw = 2
+    while bw <= 4
+      line = s2[0] + " b" + bw.to_s + ": "
+      ri = 0
+      while ri < 3
+        rung = ri == 0 ? 1 : (ri == 1 ? 2 : 4)
+        pipe = metal_pipeline(wlib, "nvfp4_wide_b" + bw.to_s + "_r" + rung.to_s)
+        run_wide_arm([pipe, ts, rows, kd, inner, rung])
+        times = []
+        r = 0
+        while r < REPS
+          times.push(run_wide_arm([pipe, ts, rows, kd, inner, rung]))
+          r = r + 1
+        tsort = times.sort()
+        m = tsort[tsort.size() / 2]
+        if m < 1 then m = 1
+        gbs = bytes / (m * 1000000.0)
+        line = line + wnames[ri] + " " + m.to_s + "ms (" + gbs.to_i().to_s + " GB/s)  "
+        ri = ri + 1
+      << line
+      bw = bw + 1
+    si = si + 1
+  exit(0)
+
 # ARGV[0] == "nv" runs only the NVFP4 rung sweep above
 if ARGV.size() > 0 && ARGV[0] == "nv"
   exit(0)

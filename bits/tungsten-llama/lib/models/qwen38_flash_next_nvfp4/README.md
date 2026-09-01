@@ -105,23 +105,40 @@ self-quantization must re-run the parity + smoke gates.
    (thesis proven) but 1191 executeCommandsInBuffer segments cost ~10 us
    each GPU-side (21 -> 34 ms). Gated FN_ICB=1. Landmine found: the
    compiler CSEs ccall wrappers with constant args (see memory).
-2. MTP width-n verify — **VERIFY PATH LANDED, EXACT**: `forward_multi`
-   (engine mode `multi:N`, N<=8) re-decodes the serial oracle in width-N
-   blocks and matches its ids EXACTLY (0 mismatches at widths 2/4/8, 119
-   tokens). Kernels: `qwen4_fn/fn_multi.metal` (flash-next ops, token-major
-   [n, W]) + the 27B decode_multi family + `nvfp4_wide_bN_r1` matvecs.
-   Bit-identity rules that made it exact: every multi kernel is an
-   EXPRESSION-level clone of its serial twin — fn_phn_rope_multi re-clones
-   per_head_norm because the 27B multi kernel's rsqrt / x*(rrms*w) differ
-   in ULPs from our 1/sqrt / (x*rrms)*w; gdn_conv_split_multi keeps
-   z*sigmoid(z) (not z/(1+e^-z)); verify mode forces naive bf16 matvecs +
-   host rope on BOTH arms so summation orders agree. Measured (per-call
-   multi path, naive bf16, serial encoder — i.e. un-optimized): blocks of
-   2/4/8 cost 45/67/110 ms → 44/60/73 tok/s-equivalent vs 25 tok/s serial
-   per-call; marginal in-block token ~9-11 ms. Remaining for real MTP:
-   drafter (MTP head port), acceptance walk + state rollback
-   (conv_state_replay pattern), and the fast-path treatment (prebuilt
-   programs / concurrent encoder) for the multi rounds.
+2. MTP width-n verify + speculative decode — **LANDED, WORKING END TO END**:
+   - `multi:N` gate: `forward_multi` re-decodes the serial oracle in
+     width-N blocks, ids EXACT (0 mismatches at widths 1-8, 119 tokens),
+     still green after every optimization below. Bit-identity rules:
+     every multi kernel is an EXPRESSION-level clone of its serial twin
+     (fn_phn_rope_multi re-clones per_head_norm — the 27B multi kernel's
+     rsqrt / x*(rrms*w) differ in ULPs from our 1/sqrt / (x*rrms)*w;
+     gdn_conv_split_multi keeps z*sigmoid(z)); the gate forces naive bf16
+     matvecs + host rope on BOTH arms so summation orders agree.
+   - MTP head (`FN_MTP=1` harness): native qwen4_exp head — pre-mixer
+     10240 stream + emb(next), single 10240-wide RMS + per-branch
+     fc_hidden + broadcast fc_embedding, one attn+MoE layer (own HCs,
+     kv slot = pos-1, bf16 FUSED gate|up experts), own mixer, shared
+     lm_head. **79.3% greedy draft acceptance** on fixture prose.
+   - `mtp:D` speculative loop: draft D (chained: variant-1 fuses from the
+     MTP layer's own h_m), verify width-(D+1), accept longest matching
+     prefix + bonus token, tape-replay rollback of GDN conv/delta + PLE
+     conv states from per-layer stashed inputs (~22 MB; kv self-heals),
+     PLE host ctx snapshot/re-advance. Deterministic histograms.
+   - Perf treatment: verify + drafts run as RECORDED programs through
+     w_metal_program_run (one ccall) on a CONCURRENT encoder with scoped
+     barriers mirroring the serial progs; pos scalars live in mpos_buf so
+     recordings replay at any position; per-(width,ping-parity) cache.
+     NVFP4 wide-rung table from the `wide` sweep: r1 at rows<=640 or n=1,
+     r2 otherwise (r1 collapses at n>=3 on big rows — register pressure).
+   - Standing under heavy CPU contention (8 pinned cores, ~45 min): plain
+     42-43 tok/s, mtp:2 43.2, mtp:3 43.8 (2.8 tok/round; 11/21 rounds
+     full-accept). Width-1 verify 30 ms vs 24 serial; marginal in-block
+     token ~8.5 ms (inherent GDN serial recurrence + per-token expert
+     stream). QUIET-BOX RANKING PENDING — see the watcher results.
+   - Costs remaining: draft ~2.3 ms each (GPU+sync latency), verify fixed
+     ~30 ms. Next levers: w2-multi bf16 kernel (closes the width-1 gap),
+     3-way async commit split for the verify program, deeper drafts once
+     the quiet-box numbers rank depths.
 3. Device-chained decode — OPEN (GPU rope landed as its enabler).
 4. **GPU rope + PLE gather** — HALF: rope on GPU (neutral, ids-identical,
    enabler for #3); table gather on GPU REVERTED — binding the 51 GB table

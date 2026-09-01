@@ -1003,6 +1003,11 @@ use lowering/definitions
   emit_builtin_class_inits(main_fn, mod)
   ordered_class_exprs = order_class_exprs(mod, ast.expressions)
   register_classes(main_fn, mod, ordered_class_exprs)
+  # A memoized top-level `fn` must remain non-memoized when any ordinary
+  # top-level wrapper/helper in its call graph reaches a known-impure ccall.
+  # Registration is complete and body lowering has not started, so forward
+  # and recursive calls are source-order independent here.
+  propagate_memo_impurity(mod, ast.expressions)
   infer_return_class_sets_fixed_point(mod, ast.expressions, ordered_class_exprs)
   infer_no_raise_fixed_point(mod, ast.expressions, ordered_class_exprs)
 

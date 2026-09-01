@@ -554,6 +554,183 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     false
   false
 
+# A top-level `fn` is memoized, so direct ccall scanning is not enough: a
+# pure-looking wrapper may call an ordinary top-level `->` helper which
+# eventually reaches a mutating ccall. Build that closed, statically resolved
+# call graph before body lowering, then propagate direct-ccall seeds back to
+# every caller. Forward calls and recursive SCCs therefore get the same answer
+# as source-ordered calls.
+#
+# Class calls and definitions nested under platform guards are intentionally
+# outside this pass. Class `self` can select a descendant override at runtime,
+# while guarded definitions have source-version replacement semantics. Both
+# retain the existing direct-body ccall scan; transitive analysis should only
+# be added with shared resolvers that exactly mirror those lowering rules.
+
+-> memo_impurity_add_candidate(targets, name, key)
+  list = targets[name]
+  if list == nil
+    list = []
+    targets[name] = list
+  list.push(key)
+  nil
+
+-> memo_impurity_add_record(records, order, key, node, memo_key, core_owned)
+  if records[key] == nil
+    order.push(key)
+  records[key] = {
+    key: key,
+    node: node,
+    memo_key: memo_key,
+    core_owned: core_owned
+  }
+  nil
+
+-> memo_impurity_collect_records(expressions)
+  records = {}
+  order = []
+  i = 0
+  while i < expressions.size()
+    node = expressions[i]
+    kind = ast_kind(node)
+    if kind in (:method_def :fn_def)
+      memo_key = nil
+      if kind == :fn_def
+        memo_key = method_call_key_for_def(node)
+      key = "top|" + function_name_for_def(node)
+      memo_impurity_add_record(records, order, key, node, memo_key, definition_from_core?(node))
+    i += 1
+  {records: records, order: order}
+
+-> memo_impurity_candidate_maps(records, order)
+  top = {}
+  i = 0
+  while i < order.size()
+    key = order[i]
+    record = records[key]
+    node = record[:node]
+    memo_impurity_add_candidate(top, node.name, key)
+    i += 1
+  {top: top, records: records}
+
+-> memo_impurity_add_reverse_edges(mod, records, reverse, targets, caller_key)
+  if targets == nil
+    return nil
+  i = 0
+  while i < targets.size()
+    target_key = targets[i]
+    caller_record = records[caller_key]
+    target_record = records[target_key]
+    stable_core = mod[:protect_core] == true && mod[:core_reuse_contract] == :stable
+    crosses_protected_core = stable_core && caller_record[:core_owned] == true && target_record[:core_owned] != true
+    if !crosses_protected_core
+      callers = reverse[target_key]
+      if callers == nil
+        callers = []
+        reverse[target_key] = callers
+      callers.push(caller_key)
+    i += 1
+  nil
+
+-> memo_impurity_call_targets(call, maps)
+  name = call.name
+  if name == nil || name == "ccall" || call.receiver != nil
+    return []
+  maps[:top][name]
+
+-> memo_impurity_collect_reverse_edges(mod, record, node, maps, reverse)
+  if node == nil
+    return nil
+  if type(node) == "Array"
+    i = 0
+    while i < node.size()
+      memo_impurity_collect_reverse_edges(mod, record, node[i], maps, reverse)
+      i += 1
+    return nil
+  if !is_ast_node?(node)
+    return nil
+  kind = ast_kind(node)
+  if kind == :call
+    targets = memo_impurity_call_targets(node, maps)
+    memo_impurity_add_reverse_edges(mod, maps[:records], reverse, targets, record[:key])
+  elsif kind == :var
+    # A bare zero-argument source call parses as Var. lower_var redirects it
+    # to a matching known top-level function, so include the same name edge.
+    # Local/parameter shadowing can over-declassify, but cannot hide impurity.
+    memo_impurity_add_reverse_edges(mod, maps[:records], reverse, maps[:top][node.name], record[:key])
+
+  # A nested definition owns its own calls; do not attribute them to the
+  # enclosing function.
+  if kind in (:method_def :fn_def :class_def :module_def :trait_def)
+    return nil
+
+  # Schema-guided recursive value walk, matching program_index_walk_value.
+  # ast_children flattens only ONE Array layer, so it loses calls nested in
+  # pair containers such as elsif clauses, hash entries, with bindings, and
+  # interpolation parts. Descend the raw child values instead.
+  kid = kind_id_table[kind]
+  if kid == nil
+    if kind in (:fastmath_block :strictmath_block :overflow_block)
+      memo_impurity_collect_reverse_edges(mod, record, node[:body], maps, reverse)
+    return nil
+  child_keys = slab_child_keys_table[kid]
+  if child_keys == nil
+    return nil
+  i = 0
+  while i < child_keys.size()
+    memo_impurity_collect_reverse_edges(mod, record, ast_get(node, child_keys[i]), maps, reverse)
+    i += 1
+  nil
+
+-> propagate_memo_impurity(mod, expressions)
+  collected = memo_impurity_collect_records(expressions)
+  records = collected[:records]
+  order = collected[:order]
+  maps = memo_impurity_candidate_maps(records, order)
+  reverse = {}
+  impure = {}
+  queue = []
+
+  i = 0
+  while i < order.size()
+    key = order[i]
+    record = records[key]
+    node = record[:node]
+    if fn_body_calls_impure_ccall?(node.body)
+      impure[key] = true
+      queue.push(key)
+    memo_impurity_collect_reverse_edges(mod, record, node.body, maps, reverse)
+    i += 1
+
+  # Reverse reachability is a fixed point over the complete graph. A seeded
+  # member of a recursive SCC therefore marks the whole SCC and all callers.
+  head = 0
+  while head < queue.size()
+    callee = queue[head]
+    callers = reverse[callee]
+    if callers != nil
+      j = 0
+      while j < callers.size()
+        caller = callers[j]
+        if impure[caller] != true
+          impure[caller] = true
+          queue.push(caller)
+        j += 1
+    head += 1
+
+  i = 0
+  while i < order.size()
+    key = order[i]
+    record = records[key]
+    reaches_impure = impure[key] == true
+    record[:node].calls_impure_ccall = reaches_impure
+    memo_key = record[:memo_key]
+    if reaches_impure && memo_key != nil
+      mod[:known_pure_calls].delete(memo_key)
+      mod[:fn_memo_tables].delete(memo_key)
+    i += 1
+  nil
+
 -> mark_builtin_runtime_class_uses(node, mod)
   if node == nil
     return

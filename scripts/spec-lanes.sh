@@ -237,6 +237,7 @@ compiled_specs=(
   spec/compiler/machine_int_subscript_fused_spec.w
   spec/compiler/fused_destination_reuse_spec.w
   spec/compiler/blas_mutating_ccall_impurity_spec.w
+  spec/compiler/transitive_impure_ccall_analysis_spec.w
   spec/core/sparse_factor_spec.w
   spec/core/tensor_cpu_ops_spec.w
   spec/core/blas_f64_spec.w

@@ -15117,6 +15117,35 @@
       ]
     },
     {
+      "symbol": "w_array_memmove_f64",
+      "native": {
+        "symbol": "w_array_memmove_f64",
+        "return": {
+          "llvm": "i64",
+          "abi": "value"
+        },
+        "args": [
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          },
+          {
+            "llvm": "i64",
+            "abi": "value"
+          }
+        ],
+        "arity": 3,
+        "source": "runtime/runtime.h"
+      },
+      "call_modes": [
+        "ccall"
+      ]
+    },
+    {
       "symbol": "w_array_mul_elem",
       "native": {
         "symbol": "w_array_mul_elem",

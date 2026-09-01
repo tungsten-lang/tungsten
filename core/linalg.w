@@ -55,10 +55,7 @@
   -> solve_into(rhs, out)
     raise "DenseLUFactor.solve_into: RHS too short" if rhs.size() < @dimension
     raise "DenseLUFactor.solve_into: output too short" if out.size() < @dimension
-    i = 0
-    while i < @dimension
-      out[i] = rhs[i] + ~0.0
-      i += 1
+    ccall("w_array_memmove_f64", rhs, out, @dimension)
     info = ccall("w_blas_dgetrs_rowmajor", @factors, @pivots, out, @dimension)
     raise "DenseLUFactor.solve_into: LAPACK failed with info=" + info.to_s if info != 0
     out
@@ -84,10 +81,7 @@
     total = @dimension * count
     raise "DenseLUFactor.solve_many_into: RHS too short" if rhs.size() < total
     raise "DenseLUFactor.solve_many_into: output too short" if out.size() < total
-    i = 0
-    while i < total
-      out[i] = rhs[i] + ~0.0
-      i += 1
+    ccall("w_array_memmove_f64", rhs, out, total)
     info = ccall("w_blas_dgetrs_many_rowmajor", @factors, @pivots, out, @dimension, count)
     raise "DenseLUFactor.solve_many_into: LAPACK failed with info=" + info.to_s if info != 0
     out
@@ -127,10 +121,7 @@
   -> solve_into(rhs, out)
     raise "DenseCholeskyFactor.solve_into: RHS too short" if rhs.size() < @dimension
     raise "DenseCholeskyFactor.solve_into: output too short" if out.size() < @dimension
-    i = 0
-    while i < @dimension
-      out[i] = rhs[i] + ~0.0
-      i += 1
+    ccall("w_array_memmove_f64", rhs, out, @dimension)
     info = ccall("w_blas_dpotrs_rowmajor", @factors, out, @dimension, 1)
     raise "DenseCholeskyFactor.solve_into: LAPACK failed with info=" + info.to_s if info != 0
     out
@@ -151,10 +142,7 @@
     total = @dimension * count
     raise "DenseCholeskyFactor.solve_many_into: RHS too short" if rhs.size() < total
     raise "DenseCholeskyFactor.solve_many_into: output too short" if out.size() < total
-    i = 0
-    while i < total
-      out[i] = rhs[i] + ~0.0
-      i += 1
+    ccall("w_array_memmove_f64", rhs, out, total)
     info = ccall("w_blas_dpotrs_rowmajor", @factors, out, @dimension, count)
     raise "DenseCholeskyFactor.solve_many_into: LAPACK failed with info=" + info.to_s if info != 0
     out
@@ -198,10 +186,7 @@
   -> solve_into(rhs, out)
     raise "DenseQRFactor.solve_into: RHS length must equal rows" if rhs.size() != @rows
     raise "DenseQRFactor.solve_into: output must have at least rows elements" if out.size() < @rows
-    i = 0
-    while i < @rows
-      out[i] = rhs[i] + ~0.0
-      i += 1
+    ccall("w_array_memmove_f64", rhs, out, @rows)
     info = ccall("w_blas_dgeqrf_solve", @factors, @tau, out, @rows, @columns, 1)
     raise "DenseQRFactor.solve_into: LAPACK failed with info=" + info.to_s if info != 0
     out
@@ -223,10 +208,7 @@
     total = @rows * count
     raise "DenseQRFactor.solve_many_into: RHS too short" if rhs.size() < total
     raise "DenseQRFactor.solve_many_into: output too short" if out.size() < total
-    i = 0
-    while i < total
-      out[i] = rhs[i] + ~0.0
-      i += 1
+    ccall("w_array_memmove_f64", rhs, out, total)
     info = ccall("w_blas_dgeqrf_solve", @factors, @tau, out, @rows, @columns, count)
     raise "DenseQRFactor.solve_many_into: LAPACK failed with info=" + info.to_s if info != 0
     out

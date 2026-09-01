@@ -56,6 +56,9 @@ col_snapshot[0] = n - 1
 check_named("pattern.index inspection is owned",
             pattern.row_indices[0] == upper_ri[0] &&
             pattern.col_indices[0] == upper_ci[0])
+check_named("pattern has no mutable raw index surface",
+            !pattern.respond_to?("row_indices_raw") &&
+            !pattern.respond_to?("col_indices_raw"))
 
 # Dense twin for ground truth.
 dense = []

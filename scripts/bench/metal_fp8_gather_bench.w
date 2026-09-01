@@ -24,7 +24,9 @@ while i < 256
   sign = (i & 128) != 0 ? ~0.0 - 1.0 : ~1.0
   ex = (i >> 3) & 15
   man = i & 7
-  if ex == 0
+  if ex == 15 && man == 7
+    v = ~0.0
+  elsif ex == 0
     v = sign * ((~0.0 + man) / 8.0) * Math.pow(2.0, ~0.0 - 6.0)
   else
     v = sign * (~1.0 + (~0.0 + man) / 8.0) * Math.pow(2.0, ~0.0 + ex - 7.0)

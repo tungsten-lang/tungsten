@@ -734,10 +734,14 @@ TENSOR_EW = {}
     bl = other.blas_layout
     return self.contiguous.matmul_into(other, result, alpha, beta) if al < 0
     return self.matmul_into(other.contiguous, result, alpha, beta) if bl < 0
+    # Native GEMM bridges consume f64 scalars. Coerce once at the boundary so
+    # ordinary integer literals never reach `w_as_double` as boxed Ints.
+    alpha_f = alpha.to_f
+    beta_f = beta.to_f
     if dtype == Tensor.f64
-      Tensor.storage_dgemm_view_scaled(buffer, other.buffer, result.buffer, m, n, k, offset, other.offset, result.offset, al, bl, alpha, beta)
+      Tensor.storage_dgemm_view_scaled(buffer, other.buffer, result.buffer, m, n, k, offset, other.offset, result.offset, al, bl, alpha_f, beta_f)
     else
-      Tensor.storage_sgemm_view_scaled(buffer, other.buffer, result.buffer, m, n, k, offset, other.offset, result.offset, al, bl, alpha, beta)
+      Tensor.storage_sgemm_view_scaled(buffer, other.buffer, result.buffer, m, n, k, offset, other.offset, result.offset, al, bl, alpha_f, beta_f)
     result
 
   -> mm(other)
@@ -902,6 +906,10 @@ TENSOR_EW = {}
   # on the CPU reference in binop.
   -> gpu_ew_eligible?(other)
     if dtype != 3 || other.dtype != 3
+      return false
+    # CPU f32 storage is a WArray, not an MTLBuffer. Requiring the same Metal
+    # device also prevents cross-device buffers entering one command.
+    if device == :cpu || other.device != device
       return false
     if !self.contiguous? || !other.contiguous?
       return false
@@ -1257,7 +1265,7 @@ TENSOR_EW = {}
       raise "Tensor.softmax: axis out of range"
     # GPU path: row-wise f32 softmax. The internal shape policy selects a
     # serial row lane or a cooperative simdgroup/threadgroup reduction.
-    if dtype == 3 && self.rank == 2 && axis == 1 && self.contiguous?
+    if device != :cpu && dtype == 3 && self.rank == 2 && axis == 1 && self.contiguous?
       return self.gpu_softmax_rows()
     result = Tensor.zeros_like(self, shape, nil)
     axis_len = shape[axis]

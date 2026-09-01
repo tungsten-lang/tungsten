@@ -655,8 +655,9 @@ WValue w_metal_buffer_write_from_mmap(WValue buffer_v,
 }
 
 /* Bulk sparse FP8-row gather for host-resident embedding tables. Decode
- * matches FlashNext PLE's finite E4M3 convention exactly, including exponent
- * 15. One checked bridge call replaces one call per output element. */
+ * matches FlashNext/NVFP4's finite E4M3 convention exactly: the otherwise-NaN
+ * exp=15,mantissa=7 encodings map to zero. One checked bridge call replaces
+ * one call per output element. */
 WValue w_metal_fp8_e4m3_gather_rows(WValue dst_v, WValue mmaps_v,
                                      WValue offsets_v, WValue row_width_v,
                                      WValue scale_v) {
@@ -683,9 +684,11 @@ WValue w_metal_fp8_e4m3_gather_rows(WValue dst_v, WValue mmaps_v,
         float sign = (i & 0x80) ? -1.0f : 1.0f;
         int exp = (i >> 3) & 0x0f;
         int man = i & 0x07;
-        lut[i] = exp == 0
-            ? sign * ldexpf((float)man / 8.0f, -6)
-            : sign * ldexpf(1.0f + (float)man / 8.0f, exp - 7);
+        lut[i] = (exp == 15 && man == 7)
+            ? 0.0f
+            : (exp == 0
+                ? sign * ldexpf((float)man / 8.0f, -6)
+                : sign * ldexpf(1.0f + (float)man / 8.0f, exp - 7));
     }
     float scale = (float)metal_to_double(scale_v);
     float *out = (float *)metal_buffer_contents(dst);

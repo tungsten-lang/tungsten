@@ -236,6 +236,7 @@ compiled_specs=(
   spec/compiler/string_interp_esc_bracket_spec.w
   spec/compiler/machine_int_subscript_fused_spec.w
   spec/compiler/fused_destination_reuse_spec.w
+  spec/compiler/blas_mutating_ccall_impurity_spec.w
   spec/core/sparse_factor_spec.w
   spec/core/tensor_cpu_ops_spec.w
   spec/core/blas_f64_spec.w
@@ -243,6 +244,7 @@ compiled_specs=(
   spec/core/linalg_spectral_spec.w
   spec/core/linalg_least_squares_spec.w
   spec/core/linalg_lu_factor_spec.w
+  spec/core/linalg_factor_autoload_spec.w
   spec/core/optim_spec.w
   spec/core/linalg_matmul_policy_spec.w
   spec/core/poly_fast_spec.w
@@ -454,6 +456,10 @@ interpreter_specs=(
   spec/core/quantity_dispatch_spec.w
   spec/compiler/static_method_block_dispatch_spec.w
   spec/compiler/static_method_overload_spec.w
+  spec/core/blas_f64_spec.w
+  spec/core/linalg_lu_factor_spec.w
+  spec/core/linalg_least_squares_spec.w
+  spec/core/linalg_factor_autoload_spec.w
   # clock_ms had to be registered in BOTH lowering.w and builtins.w; pin the
   # interpreted side so a compiled-only fix cannot pass again.
   spec/core/clock_ms_spec.w

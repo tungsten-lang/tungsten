@@ -1936,6 +1936,8 @@ use target
     # runtime/runtime.h are listed here.
     when "w_array_new_aligned"
       return ccall("w_array_new_aligned", args[1], args[2])
+    when "w_array_memmove_f64"
+      return ccall("w_array_memmove_f64", args[1], args[2], args[3])
     when "w_tensor_zeros_f32"
       return ccall("w_tensor_zeros_f32", args[1])
     when "w_tensor_at_f32"
@@ -1958,6 +1960,10 @@ use target
       return ccall("w_blas_sgemm_view", args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
     when "w_blas_dgemm_view"
       return ccall("w_blas_dgemm_view", args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
+    when "w_blas_sgemm_view_scaled"
+      return ccall("w_blas_sgemm_view_scaled", args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13])
+    when "w_blas_dgemm_view_scaled"
+      return ccall("w_blas_dgemm_view_scaled", args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11], args[12], args[13])
     when "w_blas_reduce_view"
       return ccall("w_blas_reduce_view", args[1], args[2], args[3], args[4], args[5])
     when "w_blas_reduce_last"
@@ -1972,8 +1978,30 @@ use target
       return ccall("w_blas_daxpy", args[1], args[2], args[3], args[4])
     when "w_blas_dgemv_n"
       return ccall("w_blas_dgemv_n", args[1], args[2], args[3], args[4], args[5])
+    when "w_blas_dscal"
+      return ccall("w_blas_dscal", args[1], args[2], args[3])
+    when "w_blas_dsymv_upper"
+      return ccall("w_blas_dsymv_upper", args[1], args[2], args[3], args[4])
+    when "w_blas_dsyrk_upper"
+      return ccall("w_blas_dsyrk_upper", args[1], args[2], args[3], args[4], args[5], args[6])
+    when "w_blas_dtrsm_left_lower"
+      return ccall("w_blas_dtrsm_left_lower", args[1], args[2], args[3], args[4], args[5])
+    when "w_blas_dgetrf_rowmajor"
+      return ccall("w_blas_dgetrf_rowmajor", args[1], args[2], args[3])
+    when "w_blas_dgetrs_rowmajor"
+      return ccall("w_blas_dgetrs_rowmajor", args[1], args[2], args[3], args[4])
+    when "w_blas_dgetrs_many_rowmajor"
+      return ccall("w_blas_dgetrs_many_rowmajor", args[1], args[2], args[3], args[4], args[5])
+    when "w_blas_dpotrf_lower"
+      return ccall("w_blas_dpotrf_lower", args[1], args[2])
+    when "w_blas_dpotrs_rowmajor"
+      return ccall("w_blas_dpotrs_rowmajor", args[1], args[2], args[3], args[4])
     when "w_blas_dgeqrf_qr"
       return ccall("w_blas_dgeqrf_qr", args[1], args[2], args[3], args[4], args[5])
+    when "w_blas_dgeqrf_factor"
+      return ccall("w_blas_dgeqrf_factor", args[1], args[2], args[3], args[4])
+    when "w_blas_dgeqrf_solve"
+      return ccall("w_blas_dgeqrf_solve", args[1], args[2], args[3], args[4], args[5], args[6])
     when "w_blas_dsyev_values"
       return ccall("w_blas_dsyev_values", args[1], args[2], args[3])
     when "w_blas_dgesdd_values"

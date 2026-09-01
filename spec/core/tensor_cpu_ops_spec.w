@@ -100,9 +100,44 @@ expect("tensor.cpu.sum strided fallback", close?(left_base.transpose.sum, ~21.0)
 f32_values = Tensor.from_rows([[~1.0, ~2.0], [~3.0, ~4.0]], Tensor.f32)
 f32_sums = f32_values.sum_axis(1)
 expect("tensor.cpu.f32 reductions", close?(f32_values.sum, ~10.0) && close?(f32_values.max, ~4.0) && close?(f32_sums.at([1]), ~7.0))
+f32_probabilities = f32_values.softmax(1)
+expect("tensor.cpu.f32 softmax backend", f32_probabilities.device == :cpu)
+expect("tensor.cpu.f32 softmax values", close?(f32_probabilities.sum_axis(1).at([0]), ~1.0))
+
+# Large f32 shapes meet the GPU work threshold but CPU WArrays must remain on
+# the CPU reference lane rather than being bound as MTLBuffers.
+large_f32_left = Tensor.zeros_cpu(Tensor.f32, [4096])
+large_f32_right = Tensor.zeros_cpu(Tensor.f32, [4096])
+large_f32_sum = large_f32_left + large_f32_right
+expect("tensor.cpu.f32 large binop backend", large_f32_sum.device == :cpu)
+expect("tensor.cpu.f32 large binop value", close?(large_f32_sum.at([4095]), ~0.0))
+
 f32_into = Tensor.zeros_cpu(Tensor.f32, [2, 2])
 f32_values.matmul_into(f32_values, f32_into, ~1.0, ~0.0)
 expect("tensor.cpu.f32 matmul_into", close?(f32_into.at([0, 0]), ~7.0) && close?(f32_into.at([1, 1]), ~22.0))
+f32_integer_into = Tensor.zeros_cpu(Tensor.f32, [2, 2])
+f32_values.matmul_into(f32_values, f32_integer_into, 1, 0)
+expect("tensor.cpu.f32 matmul_into integer scalars", close?(f32_integer_into.at([0, 0]), ~7.0) && close?(f32_integer_into.at([1, 1]), ~22.0))
+
+f64_integer_into = Tensor.zeros_cpu(Tensor.f64, [2, 2])
+identity.matmul_into(identity, f64_integer_into, 1, 0)
+expect("tensor.cpu.f64 matmul_into integer scalars", close?(f64_integer_into.at([0, 0]), ~1.0) && close?(f64_integer_into.at([1, 1]), ~1.0))
+
+# Distinct slice objects can still share and overlap one backing allocation.
+# The native boundary must reject that alias before CBLAS overwrites an input.
+overlap_storage = f64_array(8)
+i = 0
+while i < 8
+  overlap_storage[i] = (i + 1).to_f
+  i += 1
+overlap_left = Tensor.wrap_cpu(overlap_storage.slice(0, 4), Tensor.f64, [2, 2], [2, 1], 0)
+overlap_out = Tensor.wrap_cpu(overlap_storage.slice(2, 4), Tensor.f64, [2, 2], [2, 1], 0)
+overlap_rejected = false
+begin
+  overlap_left.matmul_into(identity, overlap_out, ~1.0, ~0.0)
+rescue err
+  overlap_rejected = true
+expect("tensor.cpu.matmul_into overlapping slices rejected", overlap_rejected)
 
 unary_storage = f64_array(6)
 unary_storage[0] = ~-9.0

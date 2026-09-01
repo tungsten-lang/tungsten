@@ -2055,6 +2055,8 @@ WValue w_array_add_elem(WValue lhs, WValue rhs);
  * forms). Returns a fresh boxed array holding lhs's elements then rhs's. */
 WValue w_array_concat(WValue lhs, WValue rhs);
 WValue w_array_copy_range(WValue arr, WValue from, WValue to, WValue exclusive);
+/* Overlap-safe copy between f64 typed-array views. */
+WValue w_array_memmove_f64(WValue src, WValue dst, WValue count);
 WValue w_array_sub_elem(WValue lhs, WValue rhs);
 WValue w_array_mul_elem(WValue lhs, WValue rhs);
 WValue w_array_div_elem(WValue lhs, WValue rhs);

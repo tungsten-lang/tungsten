@@ -27,6 +27,15 @@ returned = factor.solve_into(rhs, out)
 expect("linalg.lu solve_into value", close?(out[1], x1[1]))
 expect("linalg.lu solve_into returns output", close?(returned[2], x1[2]))
 
+lu_overlap_storage = f64[4]
+lu_overlap_storage[0] = ~7.0
+lu_overlap_storage[1] = ~2.0
+lu_overlap_storage[2] = ~9.0
+lu_overlap_storage[3] = ~0.0
+factor.solve_into(lu_overlap_storage.slice(0, 3), lu_overlap_storage.slice(1, 3))
+expect("linalg.lu solve_into overlap-safe",
+       close?(lu_overlap_storage[1], x1[0]) && close?(lu_overlap_storage[3], x1[2]))
+
 many = factor.solve_many([[~7.0, ~2.0, ~9.0], [~1.0, ~4.0, ~-2.0]])
 expect("linalg.lu batched RHS", close?(many[0][1], x1[1]) && close?(many[1][2], x2[2]))
 many_rhs = f64[6]
@@ -39,12 +48,28 @@ many_rhs[4] = ~4.0
 many_rhs[5] = ~-2.0
 factor.solve_many_into(many_rhs, many_out, 2)
 expect("linalg.lu batched into", close?(many_out[1], x1[1]) && close?(many_out[5], x2[2]))
+lu_many_overlap = f64[7]
+i = 0
+while i < 6
+  lu_many_overlap[i] = many_rhs[i]
+  i += 1
+factor.solve_many_into(lu_many_overlap.slice(0, 6), lu_many_overlap.slice(1, 6), 2)
+expect("linalg.lu batched overlap-safe",
+       close?(lu_many_overlap[2], many[0][1]) && close?(lu_many_overlap[6], many[1][2]))
 
 spd = [[~4.0, ~1.0, ~1.0], [~1.0, ~3.0, ~0.0], [~1.0, ~0.0, ~2.0]]
 chol = LinAlg.factor_cholesky(spd)
 chol_x = chol.solve([~6.0, ~7.0, ~5.0])
 expect("linalg.cholesky dimension", chol.dimension == 3)
 expect("linalg.cholesky residual", close?(spd[0][0] * chol_x[0] + spd[0][1] * chol_x[1] + spd[0][2] * chol_x[2], ~6.0))
+chol_overlap = f64[4]
+chol_overlap[0] = ~6.0
+chol_overlap[1] = ~7.0
+chol_overlap[2] = ~5.0
+chol_overlap[3] = ~0.0
+chol.solve_into(chol_overlap.slice(0, 3), chol_overlap.slice(1, 3))
+expect("linalg.cholesky solve_into overlap-safe",
+       close?(chol_overlap[1], chol_x[0]) && close?(chol_overlap[3], chol_x[2]))
 chol_many = chol.solve_many([[~6.0, ~7.0, ~5.0], [~1.0, ~2.0, ~3.0]])
 expect("linalg.cholesky batched RHS", close?(spd[2][0] * chol_many[1][0] + spd[2][1] * chol_many[1][1] + spd[2][2] * chol_many[1][2], ~3.0))
 chol_rhs = f64[6]
@@ -55,6 +80,14 @@ while i < 6
   i += 1
 chol.solve_many_into(chol_rhs, chol_out, 2)
 expect("linalg.cholesky batched into", close?(spd[1][0] * chol_out[3] + spd[1][1] * chol_out[4] + spd[1][2] * chol_out[5], ~4.0))
+chol_many_overlap = f64[7]
+i = 0
+while i < 6
+  chol_many_overlap[i] = chol_rhs[i]
+  i += 1
+chol.solve_many_into(chol_many_overlap.slice(0, 6), chol_many_overlap.slice(1, 6), 2)
+expect("linalg.cholesky batched overlap-safe",
+       close?(spd[1][0] * chol_many_overlap[4] + spd[1][1] * chol_many_overlap[5] + spd[1][2] * chol_many_overlap[6], ~4.0))
 
 not_spd_failed = false
 begin

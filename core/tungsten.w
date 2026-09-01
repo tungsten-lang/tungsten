@@ -51,6 +51,8 @@
   # Scientific stack (flat core/)
   auto :LinAlg,       "linalg"
   auto :DenseLUFactor,"linalg"
+  auto :DenseCholeskyFactor,"linalg"
+  auto :DenseQRFactor,"linalg"
   auto :FFT,          "fft"
   auto :Special,      "special"
   auto :Stats,        "stats"

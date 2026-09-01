@@ -44,18 +44,20 @@
     SparsePattern.new(m.rows, m.cols, trip[0], trip[1])
 
   -> row_indices
-    @ri.dup
+    out = ccall("w_array_new_aligned", 33, @nnz)
+    k = 0
+    while k < @nnz
+      out[k] = @ri[k]
+      k += 1
+    out
 
   -> col_indices
-    @ci.dup
-
-  # Internal read-only bridge access. The public accessors above return owned
-  # snapshots so callers cannot mutate this immutable pattern's storage.
-  -> row_indices_raw
-    @ri
-
-  -> col_indices_raw
-    @ci
+    out = ccall("w_array_new_aligned", 33, @nnz)
+    k = 0
+    while k < @nnz
+      out[k] = @ci[k]
+      k += 1
+    out
 
   # Typed f64 value buffer aligned with this pattern's entry order.
   -> values_from(list)
@@ -81,8 +83,8 @@
     while i < n
       adj.push([])
       i += 1
-    ri = pattern.row_indices_raw
-    ci = pattern.col_indices_raw
+    ri = pattern.row_indices
+    ci = pattern.col_indices
     k = 0
     while k < pattern.nnz
       r = ri[k]
@@ -190,8 +192,8 @@
     while i < n
       root.push(i)
       i += 1
-    ri = @pattern.row_indices_raw
-    ci = @pattern.col_indices_raw
+    ri = @pattern.row_indices
+    ci = @pattern.col_indices
     k = 0
     while k < @pattern.nnz
       a = ri[k]
@@ -279,8 +281,8 @@
     while i < n
       adj.push([])
       i += 1
-    ri = pattern.row_indices_raw
-    ci = pattern.col_indices_raw
+    ri = pattern.row_indices
+    ci = pattern.col_indices
     k = 0
     while k < pattern.nnz
       r = ri[k]
@@ -508,8 +510,13 @@
   # both triangles accepted — Accelerate sums duplicates).
   -> new(@pattern, values, @kind)
     vv = @pattern.values_from(values)
+    # Keep factor-private structural snapshots. SparsePattern exposes only
+    # owned copies, so callers cannot invalidate the retained native handle;
+    # refactors reuse these snapshots without another allocation.
+    @row_indices = @pattern.row_indices
+    @col_indices = @pattern.col_indices
     @handle = ccall("w_sparse_factor_new_f64", @kind, @pattern.rows, @pattern.cols,
-                    @pattern.row_indices_raw, @pattern.col_indices_raw, vv)
+                    @row_indices, @col_indices, vv)
     @released = false
 
   ro :pattern, :kind
@@ -549,8 +556,8 @@
   -> refactor(values)
     raise "SparseFactor: released" if @released
     vv = @pattern.values_from(values)
-    ccall("w_sparse_factor_refactor_f64", @handle, @pattern.row_indices_raw,
-          @pattern.col_indices_raw, vv)
+    ccall("w_sparse_factor_refactor_f64", @handle, @row_indices,
+          @col_indices, vv)
     self
 
   -> release
@@ -592,8 +599,8 @@
       comp_ci.push([])
       comp_vv.push([])
       c += 1
-    ri = @pattern.row_indices_raw
-    ci = @pattern.col_indices_raw
+    ri = @pattern.row_indices
+    ci = @pattern.col_indices
     k = 0
     while k < @pattern.nnz
       r = ri[k]

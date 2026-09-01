@@ -17,6 +17,20 @@
 #include "runtime.h"
 #include "wvalue.h"
 
+/* BLAS does not permit GEMM output to overlap either input. Compare byte
+ * ranges rather than WArray object identity so zero-copy slice wrappers over
+ * the same allocation are rejected as well. */
+static int blas_ranges_overlap(const void *left, int64_t left_count,
+                               const void *right, int64_t right_count,
+                               size_t element_size) {
+    if (left_count <= 0 || right_count <= 0) return 0;
+    uintptr_t left_begin = (uintptr_t)left;
+    uintptr_t right_begin = (uintptr_t)right;
+    uintptr_t left_end = left_begin + (size_t)left_count * element_size;
+    uintptr_t right_end = right_begin + (size_t)right_count * element_size;
+    return left_begin < right_end && right_begin < left_end;
+}
+
 /* No ebits validation: the caller (core/blas.w::sgemm wrapper, or the
  * compiler when it inlines this call) is responsible for passing the
  * right types. If you hand it the wrong array type, you get garbage or
@@ -119,6 +133,10 @@ WValue w_blas_sgemm_view_scaled(WValue a_wval, WValue b_wval, WValue c_wval,
     float *Ap = (float *)a->slots + a->start + ao;
     float *Bp = (float *)b->slots + b->start + bo;
     float *Cp = (float *)c->slots + c->start + co;
+    if (blas_ranges_overlap(Ap, (int64_t)M * K, Cp, (int64_t)M * N, sizeof(float)) ||
+        blas_ranges_overlap(Bp, (int64_t)K * N, Cp, (int64_t)M * N, sizeof(float))) {
+        w_raise(w_string("sgemm_view_scaled: output overlaps an input")); return W_NIL;
+    }
     cblas_sgemm(CblasRowMajor, ta ? CblasTrans : CblasNoTrans,
                 tb ? CblasTrans : CblasNoTrans, M, N, K,
                 (float)w_as_double(alpha_wval), Ap, ta ? M : K,
@@ -143,6 +161,10 @@ WValue w_blas_dgemm_view_scaled(WValue a_wval, WValue b_wval, WValue c_wval,
     double *Ap = (double *)a->slots + a->start + ao;
     double *Bp = (double *)b->slots + b->start + bo;
     double *Cp = (double *)c->slots + c->start + co;
+    if (blas_ranges_overlap(Ap, (int64_t)M * K, Cp, (int64_t)M * N, sizeof(double)) ||
+        blas_ranges_overlap(Bp, (int64_t)K * N, Cp, (int64_t)M * N, sizeof(double))) {
+        w_raise(w_string("dgemm_view_scaled: output overlaps an input")); return W_NIL;
+    }
     cblas_dgemm(CblasRowMajor, ta ? CblasTrans : CblasNoTrans,
                 tb ? CblasTrans : CblasNoTrans, M, N, K,
                 w_as_double(alpha_wval), Ap, ta ? M : K,
@@ -925,6 +947,11 @@ WValue w_blas_dgemv_n(WValue a_wval, WValue x_wval, WValue y_wval,
         w_raise(w_string("dgemv: bad dimensions"));
         return W_NIL;
     }
+    if (blas_ranges_overlap(a, (int64_t)m * n, y, m, sizeof(double)) ||
+        blas_ranges_overlap(x, n, y, m, sizeof(double))) {
+        w_raise(w_string("dgemv: output overlaps an input"));
+        return W_NIL;
+    }
     cblas_dgemv(CblasRowMajor, CblasNoTrans, m, n, 1.0, a, n,
                 x, 1, 0.0, y, 1);
     return y_wval;
@@ -939,6 +966,11 @@ WValue w_blas_dsymv_upper(WValue a_wval, WValue x_wval, WValue y_wval,
     int n = (int)w_as_int(n_wval);
     if (n < 0 || la < (int64_t)n * n || lx < n || ly < n) {
         w_raise(w_string("dsymv: bad dimensions"));
+        return W_NIL;
+    }
+    if (blas_ranges_overlap(a, (int64_t)n * n, y, n, sizeof(double)) ||
+        blas_ranges_overlap(x, n, y, n, sizeof(double))) {
+        w_raise(w_string("dsymv: output overlaps an input"));
         return W_NIL;
     }
     cblas_dsymv(CblasRowMajor, CblasUpper, n, 1.0, a, n,
@@ -957,6 +989,11 @@ WValue w_blas_dsyrk_upper(WValue a_wval, WValue c_wval,
         w_raise(w_string("dsyrk: bad dimensions"));
         return W_NIL;
     }
+    if (blas_ranges_overlap(a, (int64_t)n * k, c, (int64_t)n * n,
+                            sizeof(double))) {
+        w_raise(w_string("dsyrk: output overlaps input"));
+        return W_NIL;
+    }
     cblas_dsyrk(CblasRowMajor, CblasUpper, CblasNoTrans, n, k,
                 w_as_double(alpha_wval), a, k, w_as_double(beta_wval), c, n);
     return c_wval;
@@ -971,6 +1008,11 @@ WValue w_blas_dtrsm_left_lower(WValue a_wval, WValue b_wval,
     int m = (int)w_as_int(m_wval), n = (int)w_as_int(n_wval);
     if (m < 0 || n < 0 || la < (int64_t)m * m || lb < (int64_t)m * n) {
         w_raise(w_string("dtrsm: bad dimensions"));
+        return W_NIL;
+    }
+    if (blas_ranges_overlap(a, (int64_t)m * m, b, (int64_t)m * n,
+                            sizeof(double))) {
+        w_raise(w_string("dtrsm: output overlaps input"));
         return W_NIL;
     }
     cblas_dtrsm(CblasRowMajor, CblasLeft, CblasLower, CblasNoTrans,

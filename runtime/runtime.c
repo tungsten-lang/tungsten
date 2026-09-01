@@ -62191,6 +62191,33 @@ int64_t w_raw_memmove(int64_t dst, int64_t src, int64_t len) {
     return 0;
 }
 
+WValue w_array_memmove_f64(WValue src_v, WValue dst_v, WValue count_v) {
+    if (!w_is_array(src_v) || !w_is_array(dst_v)) {
+        w_raise(w_string("array_memmove_f64: expected typed arrays"));
+        return W_NIL;
+    }
+    WArray *src = w_as_array(src_v);
+    WArray *dst = w_as_array(dst_v);
+    int64_t count = w_to_i64(count_v);
+    if (dst->ebits != -64 || count < 0 || count > src->size ||
+        count > dst->size) {
+        w_raise(w_string("array_memmove_f64: bad type or length"));
+        return W_NIL;
+    }
+    double *dst_ptr = (double *)dst->slots + dst->start;
+    if (src->ebits == -64 && count > 0) {
+        double *src_ptr = (double *)src->slots + src->start;
+        memmove(dst_ptr, src_ptr, (size_t)count * sizeof(double));
+    } else if (src->ebits != -64) {
+        /* List convenience lanes preserve their old numeric conversion while
+         * typed f64 views take the overlap-safe bulk path above. */
+        for (int64_t i = 0; i < count; i++) {
+            dst_ptr[i] = w_as_double(w_array_get(src_v, w_int(i)));
+        }
+    }
+    return dst_v;
+}
+
 /* ---- ALPN protocol query ---- */
 
 /* Implementation in tls.c when TLS enabled, stub below for non-TLS */

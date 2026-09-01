@@ -81,3 +81,67 @@ tri_rhs[2] = ~11.0
 tri_rhs[3] = ~18.0
 dtrsm(tri, tri_rhs, 2, 2, ~1.0)
 expect("blas.dtrsm", close?(tri_rhs[0], ~1.0) && close?(tri_rhs[1], ~2.0) && close?(tri_rhs[2], ~2.0) && close?(tri_rhs[3], ~3.0))
+
+# Public scalar arguments accept ordinary integer literals. Native BLAS
+# bridges consume f64 values, so Core must coerce before crossing the ccall.
+integer_x = f64_array(1)
+integer_y = f64_array(1)
+integer_x[0] = ~3.0
+integer_y[0] = ~4.0
+daxpy(2, integer_x, integer_y, 1)
+expect("blas.daxpy integer alpha", close?(integer_y[0], ~10.0))
+integer_x[0] = ~3.0
+dscal(2, integer_x, 1)
+expect("blas.dscal integer alpha", close?(integer_x[0], ~6.0))
+
+integer_rank_a = f64_array(1)
+integer_rank_c = f64_array(1)
+integer_rank_a[0] = ~3.0
+integer_rank_c[0] = ~7.0
+dsyrk(integer_rank_a, integer_rank_c, 1, 1, 2, 0)
+expect("blas.dsyrk integer scalars", close?(integer_rank_c[0], ~18.0))
+
+integer_tri = f64_array(1)
+integer_rhs = f64_array(1)
+integer_tri[0] = ~3.0
+integer_rhs[0] = ~4.0
+dtrsm(integer_tri, integer_rhs, 1, 1, 2)
+expect("blas.dtrsm integer alpha", close?(integer_rhs[0], ~2.6666666666666665))
+
+# Structured/output BLAS contracts reject overlapping typed-array storage.
+# Distinct slice wrappers are covered at the shared byte-range boundary too.
+alias_matrix = f64_array(4)
+alias_matrix[0] = ~1.0
+alias_matrix[1] = ~2.0
+alias_matrix[2] = ~2.0
+alias_matrix[3] = ~3.0
+alias_vector = f64_array(2)
+alias_vector[0] = ~1.0
+alias_vector[1] = ~1.0
+dgemv_alias_rejected = false
+begin
+  dgemv(alias_matrix, alias_vector, alias_vector, 2, 2)
+rescue err
+  dgemv_alias_rejected = true
+expect("blas.dgemv rejects input/output alias", dgemv_alias_rejected)
+
+dsymv_alias_rejected = false
+begin
+  dsymv(alias_matrix, alias_vector, alias_vector, 2)
+rescue err
+  dsymv_alias_rejected = true
+expect("blas.dsymv rejects input/output alias", dsymv_alias_rejected)
+
+dsyrk_alias_rejected = false
+begin
+  dsyrk(alias_matrix, alias_matrix, 2, 2, 1, 0)
+rescue err
+  dsyrk_alias_rejected = true
+expect("blas.dsyrk rejects input/output alias", dsyrk_alias_rejected)
+
+dtrsm_alias_rejected = false
+begin
+  dtrsm(alias_matrix, alias_matrix, 2, 2, 1)
+rescue err
+  dtrsm_alias_rejected = true
+expect("blas.dtrsm rejects input/output alias", dtrsm_alias_rejected)

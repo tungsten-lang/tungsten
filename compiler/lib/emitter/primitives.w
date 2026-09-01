@@ -371,7 +371,7 @@
   out << declare_fn("w_range_pow_sum", wv, "i64, i64, i64, i64")
   out << declare_fn("w_array_reuse_or_new", wv, "ptr, i64, i64")
   out << declare_fn("w_fused_out_reuse_or_new", wv, "ptr, i64, i64")
-  out << declare_fn("w_fused_out_reuse_value_or_new", wv, "i64, i64, i64")
+  out << declare_fn("w_fused_out_reuse_value_or_new", wv, join_arg_types3(wv, "i64", "i64"))
   out << declare_fn("w_array_push", wv, wv2)
   out << declare_fn("w_array_get", wv, wv2)
   # Pure reads: return W_NIL on OOB, never raise, always return. memory(read)+

@@ -4,7 +4,7 @@
 # Verify the compiler/runtime foreign-call boundary without introducing a
 # second hand-maintained signature list. Contracts are derived from:
 #
-#   * compiler/lib/emitter.w (`wv` means boxed WValue; literal LLVM types raw)
+#   * compiler/lib/emitter/primitives.w (`wv` means boxed WValue; literal LLVM types raw)
 #   * declare_runtime()'s actual output
 #   * runtime/runtime.h plus exported definitions in runtime/runtime.c
 #
@@ -15,11 +15,11 @@ require "json"
 require "open3"
 
 ROOT = File.expand_path("..", __dir__)
-EMITTER = File.join(ROOT, "compiler/lib/emitter.w")
+EMITTER = File.join(ROOT, "compiler/lib/emitter/primitives.w")
 RUNTIME_H = File.join(ROOT, "runtime/runtime.h")
 RUNTIME_C = File.join(ROOT, "runtime/runtime.c")
 DUMP_SOURCE = File.join(ROOT, "compiler/test/dump_runtime_declarations.w")
-COMPILER = File.join(ROOT, "bin/tungsten-compiler")
+COMPILER = ENV.fetch("TUNGSTEN_COMPILER", File.join(ROOT, "bin/tungsten-compiler"))
 REGISTRY_PATH = File.join(ROOT, "data/ccall_contracts.json")
 
 Type = Struct.new(:llvm, :abi, keyword_init: true) do
@@ -100,6 +100,7 @@ class EmitterContracts
 
   def initialize(path)
     @lines = File.readlines(path, chomp: true)
+    @source_path = path.delete_prefix(ROOT + "/")
     @env = {}
     @contracts = {}
     parse
@@ -114,7 +115,7 @@ class EmitterContracts
 
     @lines[(start + 1)...finish].each_with_index do |line, offset|
       stripped = line.strip
-      source = "compiler/lib/emitter.w:#{start + offset + 2}"
+      source = "#{@source_path}:#{start + offset + 2}"
       if stripped =~ /\A([a-z][a-z0-9_]*)\s*=\s*(.+)\z/ && !stripped.start_with?("out =")
         name = Regexp.last_match(1)
         expression = Regexp.last_match(2)
@@ -326,7 +327,13 @@ def ccall_shape(source, open_paren)
         end
         index += 1
       end
-    elsif char == 35 && source.getbyte(index + 1) != 35
+    elsif char == 35
+      if source.getbyte(index + 1) == 35
+        # `## type` is a Tungsten type annotation, not a line comment. Skip
+        # the sigil as syntax and keep scanning later arguments on this line.
+        index += 2
+        next
+      end
       index += 1
       index += 1 while index < source.size && source.getbyte(index) != 10
       next
@@ -379,7 +386,13 @@ def scan_ccalls(path)
       end
       next
     end
-    if char == 35 && source.getbyte(index + 1) != 35
+    if char == 35
+      if source.getbyte(index + 1) == 35
+        # Preserve scanning after a Tungsten `## type` annotation. Treating
+        # its second `#` as a comment hides subsequent ccall arguments.
+        index += 2
+        next
+      end
       index += 1
       index += 1 while index < source.size && source.getbyte(index) != 10
       next
@@ -481,12 +494,16 @@ native_contracts.merge!(parse_c_contracts(RUNTIME_H))
 
 # Helpers materialized as private LLVM bodies have no C symbol by design but
 # still participate in the same physical call contract.
-%w[__w_bit_ctpop_u32 __w_bit_ctpop_u64 __w_bit_cttz_u32 __w_bit_cttz_u64].each do |symbol|
+%w[
+  __w_bit_ctpop_u32 __w_bit_ctpop_u64
+  __w_bit_ctlz_u32 __w_bit_ctlz_u64
+  __w_bit_cttz_u32 __w_bit_cttz_u64
+].each do |symbol|
   native_contracts[symbol] = Contract.new(
     symbol: symbol,
     return_type: Type.new(llvm: "i64", abi: "raw"),
     args: [Type.new(llvm: "i64", abi: "raw")],
-    source: "compiler/lib/emitter.w generated intrinsic"
+    source: "#{EMITTER.delete_prefix(ROOT + "/")} generated intrinsic"
   )
 end
 

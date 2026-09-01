@@ -69,7 +69,22 @@ ATTN_SCALE = ~1.0 / Math.sqrt(~0.0 + HEAD_DIM)
 ROT_DIM = 64
 ROT_HALF = ROT_DIM / 2
 ROPE_BASE = ~10000000.0
+# Dense-exact boundary is 2051 (QSA budget 2048 + max tail 3). FN_CTX raises
+# the context (kv/index caches sized accordingly, cap 262144 = config
+# max_position_embeddings); positions beyond 2051 attend through the QSA
+# lightning indexer. FN_QSA=1 forces the indexer from position 0 (the
+# equivalence gate: below the boundary selection covers everything and the
+# selected-order SDPA is arithmetically identical to dense).
 MAX_POS = 2051
+fn_ctx_env = ccall("__w_env", "FN_CTX")
+if fn_ctx_env != nil && fn_ctx_env != ""
+  MAX_POS = fn_ctx_env.to_i()
+  if MAX_POS > 262144 then MAX_POS = 262144
+  if MAX_POS < 64 then MAX_POS = 64
+qsa_on = MAX_POS > 2051 || ccall("__w_env", "FN_QSA") == "1"
+QSA_MAXB = MAX_POS / 4 + 1
+QSA_SEL_STRIDE = 512 * 4 + 3
+IDX_DIM = 640
 
 # MoE.
 N_EXPERTS = 512
@@ -166,6 +181,12 @@ mtp_depth = 0
 if ccall("__w_env", "FN_MTP") != nil && ccall("__w_env", "FN_MTP") != ""
   mtp_depth = ccall("__w_env", "FN_MTP").to_i()
 if mtp_spec > 0 then mtp_depth = mtp_spec
+if qsa_on && (mode != "concurrent" || golden_prefix != "" || expert_hist || skip_spec != "" || hc_fused)
+  raise "QSA (FN_CTX > 2051 or FN_QSA=1) requires the concurrent fast path"
+if MAX_POS > 2051 && (multi_n > 0 || mtp_spec > 0)
+  raise "multi/mtp modes beyond ctx 2051 need the QSA multi path (not yet wired)"
+if MAX_POS > 2051 && prompt_tokens > 2051
+  raise "prompts beyond 2051 need QSA prefill (not yet wired); decode past 2051 works"
 mtp_pending = [0 - 1]
 mtp_hits = [0]
 mtp_total = [0]
@@ -233,6 +254,15 @@ g_beta_pipe = metal_pipeline(gdn_fused_lib, "gdn_g_beta")
 moe_output_pipe = metal_pipeline(gdn_fused_lib, "moe_output")
 ple_gpu_lib = metal_compile_source(device, read_file(FN_DIR + "ple_gather_gpu.metal"))
 rope_tab_pipe = metal_pipeline(ple_gpu_lib, "build_rope_tab")
+# f64 copy of log(rope base) — the Decimal log_rope can't autobox into a
+# kernel argument
+qsa_logb = Math.log(~0.0 + ROPE_BASE)
+qsa_lib = metal_compile_source(device, read_file(FN_DIR + "qsa.metal"))
+qsa_kw_pipe = metal_pipeline(qsa_lib, "qsa_k_write")
+qsa_build_pipe = metal_pipeline(qsa_lib, "qsa_build_blocks")
+qsa_scores_pipe = metal_pipeline(qsa_lib, "qsa_scores")
+qsa_select_pipe = metal_pipeline(qsa_lib, "qsa_select")
+qsa_sdpa_pipe = metal_pipeline(qsa_lib, "qsa_sdpa_selected")
 ple_gather_pipe = metal_pipeline(ple_gpu_lib, "ple_table_gather")
 ple_lib = metal_compile_source(device, read_file(FN_DIR + "ple_ops.metal"))
 ple_gate_pipe = metal_pipeline(ple_lib, "ple_gate")
@@ -477,6 +507,16 @@ while li < N_LAYERS
     base[:kn] = kn
     base[:k_cache] = metal_buffer(device, MAX_POS * KV_DIM * 4)
     base[:v_cache] = metal_buffer(device, MAX_POS * KV_DIM * 4)
+    if qsa_on
+      iqn = metal_buffer(device, 128 * 4)
+      ikn = metal_buffer(device, 128 * 4)
+      load_shifted_norm([prefix + "self_attn.indexer.q_layernorm.weight", 128, iqn])
+      load_shifted_norm([prefix + "self_attn.indexer.k_layernorm.weight", 128, ikn])
+      base[:idx_qk] = mv_tensor(prefix + "self_attn.indexer.index_qk_proj.weight")
+      base[:idx_qn] = iqn
+      base[:idx_kn] = ikn
+      base[:idx_kc] = metal_buffer(device, MAX_POS * 128 * 4)
+      base[:idx_blk] = metal_buffer(device, QSA_MAXB * 128 * 4)
   if li == PLE_LAYER
     pp = prefix + "ple."
     nk = metal_buffer(device, HC_HIDDEN * 4)
@@ -631,6 +671,14 @@ ple_nc_tmp = metal_buffer(device, HC_HIDDEN * 4)
 # token, so recorded programs (and ICBs, whose args freeze at record time)
 # never need re-encoding.
 pending_cbs = []
+idx_qk_tmp = metal_buffer(device, IDX_DIM * 4)
+idx_q_tmp = metal_buffer(device, 512 * 4)
+qsa_scores_buf = metal_buffer(device, QSA_MAXB * 4)
+qsa_sel_buf = metal_buffer(device, QSA_SEL_STRIDE * 4)
+qsa_ns_buf = metal_buffer(device, 4)
+qsa_nb_buf = metal_buffer(device, 4)
+qsa_vis_buf = metal_buffer(device, 4)
+qsa_range_buf = metal_buffer(device, 8)
 pos_buf = metal_buffer(device, 4)
 pos1_buf = metal_buffer(device, 4)
 tok_buf = metal_buffer(device, 4)
@@ -726,6 +774,24 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   kv_k = [k_tmp, lyr[:k_cache], pos_buf, KV_DIM]
   kv_v = [v_tmp, lyr[:v_cache], pos_buf, KV_DIM]
   sdpa = [queries_tmp, lyr[:k_cache], lyr[:v_cache], attn_tmp, GQA, pos1_buf, HEAD_DIM, KV_DIM, ATTN_SCALE]
+  if qsa_on
+    # lightning indexer: proj -> split -> q norm+rope / raw-k cache -> pooled
+    # block build -> relu-sum scores -> top-512 blocks + tail -> selected SDPA.
+    # All grids fixed; bounds (nb/vis/range) are host-written buffers.
+    prog_mv([prog, lyr[:idx_qk], xn, idx_qk_tmp, HIDDEN, IDX_DIM])
+    prog.push([1, nil, [idx_qk_tmp], 0, 0])
+    prog.push([2, copy_at_pipe, [idx_qk_tmp, idx_q_tmp, 0, 0, 512], 512, 0])
+    prog.push([2, qsa_kw_pipe, [idx_qk_tmp, lyr[:idx_kc], pos_buf, 1], 128, 0])
+    prog.push([1, nil, [idx_q_tmp, lyr[:idx_kc]], 0, 0])
+    prog.push([0, phn_pipe, [idx_q_tmp, lyr[:idx_qn], 128, ~1.0 / 128, EPS], 4, 32])
+    prog.push([0, qsa_build_pipe, [lyr[:idx_kc], lyr[:idx_kn], lyr[:idx_blk], qsa_range_buf, EPS, qsa_logb], 1, 128])
+    prog.push([1, nil, [idx_q_tmp], 0, 0])
+    prog.push([2, rope_pipe, [idx_q_tmp, cos_tmp, sin_tmp, 128, ROT_HALF, 4], 4 * ROT_HALF, 0])
+    prog.push([1, nil, [idx_q_tmp, lyr[:idx_blk]], 0, 0])
+    prog.push([0, qsa_scores_pipe, [idx_q_tmp, lyr[:idx_blk], qsa_scores_buf, qsa_nb_buf, QSA_MAXB, 1], (QSA_MAXB + 255) / 256, 256])
+    prog.push([1, nil, [qsa_scores_buf], 0, 0])
+    prog.push([0, qsa_select_pipe, [qsa_scores_buf, qsa_nb_buf, qsa_vis_buf, qsa_sel_buf, qsa_ns_buf, QSA_MAXB, 512], 1, 512])
+    prog.push([1, nil, [qsa_sel_buf, qsa_ns_buf], 0, 0])
   prog_mv([prog, lyr[:q], xn, qfull_tmp, HIDDEN, QFULL_DIM])
   prog_mv([prog, lyr[:k], xn, k_tmp, HIDDEN, KV_DIM])
   prog_mv([prog, lyr[:v], xn, v_tmp, HIDDEN, KV_DIM])
@@ -741,7 +807,10 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   prog.push([2, kv_write_pipe, kv_k, KV_DIM, 0])
   prog.push([2, kv_write_pipe, kv_v, KV_DIM, 0])
   prog.push([1, nil, [lyr[:k_cache], lyr[:v_cache]], 0, 0])
-  prog.push([0, sdpa_pipe, sdpa, N_HEADS, 256])
+  if qsa_on
+    prog.push([0, qsa_sdpa_pipe, [queries_tmp, lyr[:k_cache], lyr[:v_cache], attn_tmp, qsa_sel_buf, qsa_ns_buf, GQA, N_HEADS, KV_DIM, ATTN_SCALE, QSA_SEL_STRIDE, 1], N_HEADS, 256])
+  else
+    prog.push([0, sdpa_pipe, sdpa, N_HEADS, 256])
   prog.push([1, nil, [attn_tmp, attn_gate_tmp], 0, 0])
   prog.push([2, gate_pipe, [attn_tmp, attn_gate_tmp, ATTN_DIM], ATTN_DIM, 0])
   prog.push([1, nil, [attn_tmp], 0, 0])
@@ -1035,6 +1104,15 @@ if probe_k > 0
   metal_buffer_write_i32(tok_buf, 0, token_id)
   metal_buffer_write_i32(pos_buf, 0, pos)
   metal_buffer_write_i32(pos1_buf, 0, pos + 1)
+  if qsa_on
+    metal_buffer_write_i32(qsa_nb_buf, 0, (pos + 1) / 4)
+    metal_buffer_write_i32(qsa_vis_buf, 0, pos + 1)
+    if (pos + 1) % 4 == 0
+      metal_buffer_write_i32(qsa_range_buf, 0, (pos + 1) / 4 - 1)
+      metal_buffer_write_i32(qsa_range_buf, 1, (pos + 1) / 4)
+    else
+      metal_buffer_write_i32(qsa_range_buf, 0, 0)
+      metal_buffer_write_i32(qsa_range_buf, 1, 0)
   ft1 = fn_time ? ccall("__w_clock_ms") : ~0.0
   metal_batch_begin(queue)
   parts = icb_parity[0] == 0 ? icb_even : icb_odd
@@ -1290,6 +1368,15 @@ fast_path = golden_prefix == "" && !expert_hist && skip_spec == "" && !hc_fused 
   metal_buffer_write_i32(tok_buf, 0, token_id)
   metal_buffer_write_i32(pos_buf, 0, pos)
   metal_buffer_write_i32(pos1_buf, 0, pos + 1)
+  if qsa_on
+    metal_buffer_write_i32(qsa_nb_buf, 0, (pos + 1) / 4)
+    metal_buffer_write_i32(qsa_vis_buf, 0, pos + 1)
+    if (pos + 1) % 4 == 0
+      metal_buffer_write_i32(qsa_range_buf, 0, (pos + 1) / 4 - 1)
+      metal_buffer_write_i32(qsa_range_buf, 1, (pos + 1) / 4)
+    else
+      metal_buffer_write_i32(qsa_range_buf, 0, 0)
+      metal_buffer_write_i32(qsa_range_buf, 1, 0)
   ft1 = fn_time ? ccall("__w_clock_ms") : ~0.0
   metal_batch_begin_concurrent(queue)
   metal_dispatch_groups(queue, rope_tab_pipe, [pos_buf, cos_tmp, sin_tmp, log_rope, ROT_HALF], 1, 32)
@@ -2063,7 +2150,9 @@ i = 0
 # the head. FN_CHUNK=0 forces the serial token-by-token prefill (A/B and
 # ids gate). GEMM MMA summation is NOT bit-identical to the matvec family —
 # gate chunked-vs-serial on ids, like the 27B did.
-prefill_chunked = prompt.size() > 8 && ccall("__w_env", "FN_CHUNK") != "0"
+# chunked prefill doesn't run the indexer steps yet, so QSA mode prefills
+# serially (populating the raw index-key caches per position)
+prefill_chunked = prompt.size() > 8 && ccall("__w_env", "FN_CHUNK") != "0" && !qsa_on
 if prefill_chunked
   while i < prompt.size()
     remaining = prompt.size() - i

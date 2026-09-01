@@ -140,8 +140,19 @@ self-quantization must re-run the parity + smoke gates.
      (inherent GDN serial recurrence + per-token expert stream).
    - Costs remaining: draft ~2.3 ms each (GPU+sync latency), verify fixed
      ~30 ms. Next levers: w2-multi bf16 kernel (closes the width-1 gap),
-     3-way async commit split for the verify program, deeper drafts once
-     the quiet-box numbers rank depths.
+     3-way async commit split for the verify program.
+   - **Acceptance is TRAJECTORY-dependent** (9/1 pm, 4-cell test on the
+     compiler prompt): quant+serial-prefill fell into repetitive usage-text
+     (89-94% draft-1 accept, the 49.4 tok/s run); bf16-prefill and/or
+     bf16-decode trajectories generate novel content at ~60-70% accept and
+     proportionally less spec gain. Both texts fully coherent — do NOT
+     read an acceptance drop as a bug before diffing the generated text
+     (chunked-vs-serial prefill changes the trajectory: bf16 GEMM states).
+   - `mtp:adaptive` (depth self-tunes: climb after 2 full-accept rounds,
+     cap 4, drop to what stuck): measured NEGATIVE so far (22.7 vs fixed-3
+     41.9 same-conditions; per-width program recordings + deep-verify cost
+     outrun the ~3.2-token/round ceiling of 0.79^k chain acceptance).
+     Kept as a mode; revisit with cheap recordings + mixed content.
 3. Device-chained decode — OPEN (GPU rope landed as its enabler).
 4. **GPU rope + PLE gather** — HALF: rope on GPU (neutral, ids-identical,
    enabler for #3); table gather on GPU REVERTED — binding the 51 GB table

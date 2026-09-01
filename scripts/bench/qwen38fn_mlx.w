@@ -114,9 +114,17 @@ if multi_n > 8 then raise "multi width must be <= 8"
 # round, verify the block width-(D+1) via forward_multi, accept the longest
 # matching prefix, tape-replay the recurrent states for partial accepts.
 mtp_spec = 0
-if ARGV.size() > 5 && ARGV[5].size() > 4 && ARGV[5].slice(0, 4) == "mtp:"
+mtp_adaptive = 0
+if ARGV.size() > 5 && ARGV[5] == "mtp:adaptive"
+  # depth self-tunes on acceptance: full accept raises it (cap 7), a miss
+  # drops it to what actually stuck
+  mtp_adaptive = 1
+  mtp_spec = 3
+elsif ARGV.size() > 5 && ARGV[5].size() > 4 && ARGV[5].slice(0, 4) == "mtp:"
   mtp_spec = ARGV[5].slice(4, ARGV[5].size() - 4).to_i()
 if mtp_spec > 7 then raise "mtp draft depth must be <= 7"
+mtp_d_cur = [mtp_spec]
+mtp_streak = [0]
 naive_mv = multi_n > 0
 concurrent = mode == "concurrent"
 if mode != "concurrent" && mode != "baseline"
@@ -2081,6 +2089,12 @@ if prefill_chunked
         nxt.push(i + ti + 1 < prompt.size() ? prompt[i + ti + 1] : pred)
         ti = ti + 1
       mtp_prefill_chunk(nxt, i + 1, cw)
+    if is_last
+      # the spec loop and FN_MTP harness fuse drafts from H (width-1 stream);
+      # forward_multi only fills h_m — publish the final position's stream
+      metal_batch_begin(queue)
+      metal_dispatch_n(queue, copy_at_pipe, [h_m, H, (cw - 1) * HC_HIDDEN, 0, HC_HIDDEN], HC_HIDDEN)
+      metal_batch_commit(queue)
     i = i + cw
   multi_head_on[0] = 1
 else
@@ -2089,6 +2103,9 @@ else
     if mtp_depth > 0
       mtp_step(i + 1 < prompt.size() ? prompt[i + 1] : pred, i + 1, 0)
     i = i + 1
+if mtp_depth > 0 && ccall("__w_env", "FN_DUMP_MTPKV") != nil && ccall("__w_env", "FN_DUMP_MTPKV") != ""
+  File.write_bytes(ccall("__w_env", "FN_DUMP_MTPKV") + ".k", metal_buffer_view(mtp_lyr[:k_cache], 8, MAX_POS * KV_DIM * 4))
+  File.write_bytes(ccall("__w_env", "FN_DUMP_MTPKV") + ".v", metal_buffer_view(mtp_lyr[:v_cache], 8, MAX_POS * KV_DIM * 4))
 if ccall("__w_env", "FN_DUMP_H") != nil && ccall("__w_env", "FN_DUMP_H") != ""
   File.write_bytes(ccall("__w_env", "FN_DUMP_H"), metal_buffer_view(H, 8, HC_HIDDEN * 4))
   File.write_bytes(ccall("__w_env", "FN_DUMP_H") + ".logits", metal_buffer_view(logits, 8, N_VOCAB * 4))
@@ -2123,7 +2140,7 @@ if mtp_spec > 0
   cur = pred
   while ids.size() < n_generate
     rt0 = ccall("__w_clock_ms")
-    d = mtp_spec
+    d = mtp_adaptive == 1 ? mtp_d_cur[0] : mtp_spec
     if pos + d + 1 > MAX_POS then d = MAX_POS - pos - 1
     if d < 0 then d = 0
     st0 = fn_time ? ccall("__w_clock_ms") : ~0.0
@@ -2167,6 +2184,17 @@ if mtp_spec > 0
       encode_ms[3] = encode_ms[3] + 1
     spec_rounds = spec_rounds + 1
     accept_hist[a] = accept_hist[a] + 1
+    if mtp_adaptive == 1
+      # climb only after two consecutive full accepts, cap 4: chain
+      # acceptance ~0.79^k can't pay for wider verifies past that
+      if a == d
+        mtp_streak[0] = mtp_streak[0] + 1
+        if mtp_streak[0] >= 2 && d < 4
+          mtp_d_cur[0] = d + 1
+          mtp_streak[0] = 0
+      else
+        mtp_streak[0] = 0
+        mtp_d_cur[0] = a > 1 ? a : 1
     cur = preds[a]
     pos = pos + n_keep
     round_ms.push(ccall("__w_clock_ms") - rt0)
@@ -2198,9 +2226,9 @@ if fn_time && encode_ms[3] > 0
 if decoded > 0
   << "decode: " + decoded.to_s + " tokens in " + elapsed.to_s + " ms = " + (1000.0 * decoded / elapsed).to_s + " tok/s (median round " + median_ms.to_s + " ms)"
 if mtp_spec > 0 && spec_rounds > 0
-  line = "mtp spec depth " + mtp_spec.to_s + ": " + spec_rounds.to_s + " rounds, accepted-drafts histogram "
+  line = "mtp spec depth " + (mtp_adaptive == 1 ? "adaptive" : mtp_spec.to_s) + ": " + spec_rounds.to_s + " rounds, accepted-drafts histogram "
   ai = 0
-  while ai <= mtp_spec
+  while ai <= 7
     line = line + ai.to_s + ":" + accept_hist[ai].to_s + " "
     ai = ai + 1
   << line

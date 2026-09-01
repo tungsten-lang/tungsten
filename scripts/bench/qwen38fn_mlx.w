@@ -88,6 +88,11 @@ n_generate = ARGV.size() > 1 ? ARGV[1].to_i() : 8
 prompt_tokens = ARGV.size() > 2 ? ARGV[2].to_i() : 5
 prompt_ids_file = ARGV.size() > 3 ? ARGV[3] : ""
 golden_prefix = ARGV.size() > 4 ? ARGV[4] : ""
+# FN_RUNG: "1" = both autotuned rungs, "b1" / "16r" = just that one,
+# "0"/unset = plain 8-row kernel everywhere. Rungs are ids-identical.
+fn_rung = env("FN_RUNG")
+use_b1 = fn_rung == "1" || fn_rung == "b1"
+use_16r = fn_rung == "1" || fn_rung == "16r"
 expert_hist = ARGV.size() > 5 && ARGV[5] == "expert-hist"
 # "pin:<N>" wires the per-layer top-N experts (by /tmp/fn_expert_hist.u32 from
 # an expert-hist run) into a private hot overlay the gather kernel prefers.
@@ -163,6 +168,12 @@ gate_pipe = metal_pipeline(metal_compile_source(device, read_file(QWEN_DIR + "at
 bf16_wide_lib = metal_compile_source(device, read_file(FN_DIR + "bf16_matvec_wide.metal"))
 bf16_w2_pipe = metal_pipeline(bf16_wide_lib, "bf16_matvec_w2")
 nvfp4_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "nvfp4_matvec_mlx_scaled.metal")), "nvfp4_matvec_mlx_scaled")
+# Rung winners from autotune_qwen38fn.w nv: the 8-row default starves shapes
+# with few output rows (too few TGs to fill the GPU) — b1r1 (2 rows/TG) wins
+# +46-52% at rows<=640; 16r wins +19% on the 2560x6144 out-projections.
+# Per-row summation order is identical across the family (ids-identical).
+nvfp4_16r_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "nvfp4_matvec_mlx_scaled_rows.metal")), "nvfp4_matvec_mlx_scaled_16r")
+nvfp4_b1r1_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "nvfp4_matvec_mlx_scaled_wide.metal")), "nvfp4_wide_b1_r1")
 grms_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "grouped_rms_norm.metal")), "grouped_rms_norm")
 hc_lib = metal_compile_source(device, read_file(FN_DIR + "hc_ops.metal"))
 silu_div_pipe = metal_pipeline(hc_lib, "silu_div")
@@ -611,7 +622,12 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   kdim = spec[4]
   rows = spec[5]
   if h.size() == 3
-    prog.push([0, nvfp4_pipe, [h[0], h[1], input, output, kdim, h[2]], rows / 8, 64])
+    if use_b1 && rows <= 640
+      prog.push([0, nvfp4_b1r1_pipe, [h[0], h[1], input, output, kdim, rows, h[2]], (rows + 1) / 2, 64])
+    elsif use_16r && rows == 2560 && kdim >= 6144
+      prog.push([0, nvfp4_16r_pipe, [h[0], h[1], input, output, kdim, h[2]], rows / 16, 128])
+    else
+      prog.push([0, nvfp4_pipe, [h[0], h[1], input, output, kdim, h[2]], rows / 8, 64])
   elsif rows >= 320
     prog.push([0, bf16_w2_pipe, [h[0], input, output, kdim, rows], (rows + 3) / 4, 64])
   else
@@ -1031,7 +1047,13 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
   h = spec[0]
   rows = spec[4]
   if h.size() == 3
-    metal_dispatch_groups(queue, nvfp4_pipe, [h[0], h[1], spec[1], spec[2], spec[3], h[2]], rows / 8, 64)
+    # same rung selection as prog_mv — keep the two paths ids-identical
+    if use_b1 && rows <= 640
+      metal_dispatch_groups(queue, nvfp4_b1r1_pipe, [h[0], h[1], spec[1], spec[2], spec[3], rows, h[2]], (rows + 1) / 2, 64)
+    elsif use_16r && rows == 2560 && spec[3] >= 6144
+      metal_dispatch_groups(queue, nvfp4_16r_pipe, [h[0], h[1], spec[1], spec[2], spec[3], h[2]], rows / 16, 128)
+    else
+      metal_dispatch_groups(queue, nvfp4_pipe, [h[0], h[1], spec[1], spec[2], spec[3], h[2]], rows / 8, 64)
   elsif rows >= 320
     metal_dispatch_groups(queue, bf16_w2_pipe, [h[0], spec[1], spec[2], spec[3], rows], (rows + 3) / 4, 64)
   else

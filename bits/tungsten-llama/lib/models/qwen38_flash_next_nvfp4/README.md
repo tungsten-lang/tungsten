@@ -105,7 +105,10 @@ self-quantization must re-run the parity + smoke gates.
    (thesis proven) but 1191 executeCommandsInBuffer segments cost ~10 us
    each GPU-side (21 -> 34 ms). Gated FN_ICB=1. Landmine found: the
    compiler CSEs ccall wrappers with constant args (see memory).
-2. MTP width-n verify — OPEN (the wall-breaker; next session).
+2. MTP width-n verify — IN PROGRESS: `qwen4_fn/fn_multi.metal` (width-n
+   variants of every flash-next-specific op, token-major [n, W] layout)
+   written and compile-checked; engine forward_multi wiring next. GDN/attn
+   multi variants reuse the 27B decode_multi family (identical head dims).
 3. Device-chained decode — OPEN (GPU rope landed as its enabler).
 4. **GPU rope + PLE gather** — HALF: rope on GPU (neutral, ids-identical,
    enabler for #3); table gather on GPU REVERTED — binding the 51 GB table
@@ -116,7 +119,15 @@ self-quantization must re-run the parity + smoke gates.
 7. **Quant coverage boundary** — DONE, negative: outer layers 0/1/46/47
    AND the PLE projections each flip the fixture when quantized. The
    shipped conservative set is the optimum.
-8. Expert-gather tuning — OPEN.
+8. Expert-gather tuning — OPEN. Adjacent DONE: NVFP4 matvec rung sweep
+   (`autotune_qwen38fn.w nv`, 7 rungs x 9 shapes on sidecar tensors):
+   the default 8-row kernel starves low-row shapes — b1r1 (2 rows/TG)
+   +52% on shared gate/up 640x2560, +46% on hc down 320x10240; 16r +19%
+   on 2560x6144 out-projections; everything else ties. Wired behind
+   FN_RUNG=1 (also `b1`/`16r` alone), golden taps + logits BIT-IDENTICAL
+   to the 8r path. Default OFF: e2e A/B was contaminated by a concurrent
+   CPU-pinned workload (encode floor is host-side); re-bench on a quiet
+   box before flipping the default.
 9. Cross-token encode overlap — OPEN (needs #3).
 10. QSA indexer + long context — OPEN.
 

@@ -8,7 +8,7 @@ Host: Apple Silicon macOS; release builds; wall-clock samples are matched within
 
 This journal is append-only by campaign item. Each retained change has a focused correctness oracle, alternating or multi-sample timings, and its own commit. Millisecond-resolution results are reported as directional when the measured interval is too short for a reliable ratio.
 
-## Item 9 — CPU Tensor result allocation
+## Original item 1 — CPU Tensor result allocation
 
 Source finding: CPU-capable `scale`, unary, axis-reduction, and softmax methods allocated with the three-argument Metal constructor. A CPU receiver therefore passed `:cpu` where an MTLDevice was required.
 
@@ -29,7 +29,7 @@ TUNGSTEN_ROOT="$PWD" BIT_HOME="$PWD/bits" \
 
 Retained as a correctness fix. It changes result construction to the existing backend-aware `Tensor.zeros_like` path; no performance ratio is claimed because the baseline operation cannot complete.
 
-## Item 2 — view-aware CPU GEMM
+## Original item 2 — view-aware CPU GEMM
 
 Source finding: `Tensor.matmul` treated a packed nonzero-offset slice as
 contiguous but passed the typed array's base address to the NN-only bridge,
@@ -62,7 +62,7 @@ Retained. The bridge now accepts element offsets and NoTrans/Trans layout
 flags on both inputs. Packed, offset-packed, and simple transpose views enter
 CBLAS directly; general strided views retain the materialization fallback.
 
-## Item 3 — allocation-free Tensor layout metadata
+## Original item 3 — allocation-free Tensor layout metadata
 
 Source finding: every `contiguous?` call rebuilt an Array of packed strides,
 and `packed_strides` itself used a nested suffix-product loop. `to_rows` then
@@ -91,7 +91,7 @@ and `to_rows` hoists the layout decision and includes the storage offset.
 Object-level caching remains inappropriate until Tensor metadata becomes
 immutable or mutations are routed through coherent setters.
 
-## Item 7 — packed CPU reductions
+## Original item 4 — packed CPU reductions
 
 Source finding: whole-Tensor `sum`/`max` and axis reductions called `unravel`
 and constructed coordinate Arrays for every input element. Even the common
@@ -114,19 +114,23 @@ Alternating whole-process samples:
 | sample 2 | 1.21 s | <0.01 s |
 | sample 3 | 1.13 s | <0.01 s |
 
-Long candidate-only runs make the sub-centisecond cells measurable: 10,000
-whole sums take 0.04 s (at most 4 us/sum including launch) and 10,000
-last-axis sum+max pairs take 0.37 s (37 us/pair). The matched parent's medians
-are 9.4 ms/sum and 12.0 ms/pair respectively.
+The initial candidate used vDSP for f64 sums, but its reassociation changed the
+reference API's observable cancellation result. The final retained bridge uses
+one ordered native C loop, avoiding Tungsten coordinate allocation while
+preserving the exact left fold. Five final-integration process samples for
+10,000 operations were 0.37–0.38 s for whole sums and 0.56–0.58 s for
+last-axis sum+max pairs: 37–38 us/sum and 56–58 us/pair including launch. The
+matched parent's medians are 9.4 ms/sum and 12.0 ms/pair respectively, roughly
+250x and 210x slower.
 
-Retained. Packed CPU f64 reductions use vDSP over the existing buffer and
-offset; f32 sum preserves the prior double accumulator. A single bridge call
-handles all rows of a packed last-axis reduction. General strided and
-non-last-axis reductions retain the reference path. Max retains the prior
-ordered comparison semantics (including first-element NaN and signed-zero
-behavior) rather than substituting a differently specified vector max.
+Retained. Packed CPU reductions use ordered native loops over the existing
+buffer and offset; f32 sum preserves the prior double accumulator. A single
+bridge call handles all rows of a packed last-axis reduction. General strided
+and non-last-axis reductions retain the reference path. Sum and max retain the
+prior evaluation/comparison semantics, including cancellation, first-element
+NaN, and signed-zero behavior.
 
-## Item 8 — packed CPU unary vector path
+## Additional Tensor tranche — packed CPU unary vector path
 
 Source finding: Tensor already shipped native f32/f64 vForce entry points, but
 its unary methods always took the coordinate-Array reference loop. Each
@@ -155,7 +159,7 @@ the same API elsewhere. ReLU remains an ordered scalar comparison to preserve
 NaN and signed-zero behavior. General strided tensors retain the reference
 implementation.
 
-## Item 4 — double-precision BLAS level 1/2
+## Original item 7 — double-precision BLAS level 1/2
 
 Source finding: Core exposed f32 `dot`/`axpy`/`gemv`, while the scientific
 stack and Tensor CPU storage are predominantly f64. Flat f64 callers either
@@ -183,7 +187,7 @@ Accelerate and OpenBLAS. This intentionally does not add another nested-list
 staging route to `LinAlg`; boundary conversion policy is a separate active
 campaign item.
 
-## Item 5 — LAPACK thin QR tranche
+## Original item 8 — LAPACK thin QR tranche
 
 Source finding: `LinAlg.qr` used modified Gram-Schmidt for every shape. Core
 already stages nested rows for LAPACK solve/Cholesky, so the same boundary can
@@ -217,7 +221,7 @@ deferred: Core currently has no contract for underdetermined systems,
 multi-RHS shape, rank reporting, or `rcond`, and silently choosing those here
 would be an API change rather than a complete performance tranche.
 
-## Item 6 — symmetric eigenvalues and singular values
+## Original item 9 — symmetric eigenvalues and singular values
 
 Source finding: Core used the general nonsymmetric `dgeev` path even for real
 symmetric matrices and had no SVD entry point. Callers needing singular values
@@ -243,7 +247,7 @@ workload. This tranche is deliberately values-only: eigenvector and full SVD
 APIs need stable orientation, reduced/full shape, and rank-reporting contracts
 before Core can expose them without later incompatibility.
 
-## Item 5 follow-up — full-rank overdetermined least squares
+## Original item 8 follow-up — full-rank overdetermined least squares
 
 The earlier QR tranche deferred least squares pending an explicit contract.
 This follow-up closes the narrow safe case: f64 `m>=n`, one RHS, full column
@@ -268,7 +272,7 @@ workaround (`solve(A^T A, A^T b)`) to the direct API:
 Retained. The median improves from 3.8 ms to 1.6 ms per fit (2.4x), while
 avoiding condition-number squaring and making rank failure observable.
 
-## Item 5 follow-up — reusable dense LU factor
+## Original item 5 follow-up — reusable dense LU factor
 
 Source finding: `LinAlg.solve` stages and factors the same matrix on every
 call. This is the correct one-shot contract, but workloads with several
@@ -301,7 +305,7 @@ API and to 27 us (47.1x) with caller-owned storage. The narrow API is
 rejects empty, nonsquare, and singular matrices explicitly. Accelerate and
 OpenBLAS bridges keep the same row-major/no-transpose-copy convention.
 
-## Item 10 — cached MTLTensor descriptor face
+## Supporting Metal tranche — cached MTLTensor descriptor face
 
 Source finding: every `Tensor.metal_tensor` access rebuilt an MTLTensor
 descriptor, even when the backing MTLBuffer, dtype, shape, strides, and offset
@@ -328,7 +332,7 @@ keeps the cache coherent despite today's mutable Arrays. Argument-table reuse
 is not retained here: `linear` binds a fresh output Tensor each call, so a safe
 plan cache first needs an explicit `linear_into`/workspace lifetime contract.
 
-## Item 6 prerequisite — Unicode method-name lowering and fixed objects
+## Original item 6 prerequisite — Unicode method-name lowering and fixed objects
 
 Source finding: every generic fixed-width Vec/Mat program failed during class
 registration before it could be benchmarked. `mangle_method_name` compared a
@@ -367,7 +371,7 @@ exact-class guards. Full aggregate/vector scalar replacement is deferred: it
 requires an escape/identity-aware representation change, and this narrow
 campaign produced no safe compiler optimization with matched evidence.
 
-## Item 1 follow-up — demand-zero CPU Tensor allocation
+## Original item 1 follow-up — demand-zero CPU Tensor allocation
 
 Source finding: `Tensor.cpu_zeros` allocates with `w_array_new_aligned`, whose
 runtime contract is a private anonymous `mmap`, `size = cap = n`, and
@@ -395,7 +399,7 @@ the public zeros contract remains true because anonymous mmap pages are
 demand-zero. Full-overwrite kernels simply stop paying for an earlier redundant
 page touch.
 
-## Item 7 follow-up — remaining f64 structured BLAS
+## Original item 7 follow-up — remaining f64 structured BLAS
 
 Source finding: the flat f64 API had `ddot`, `dnrm2`, `daxpy`, and `dgemv`, but
 still forced scalar Tungsten loops or a general GEMM for scaling, symmetric
@@ -423,7 +427,7 @@ Retained. Scalar-route ratios include Tungsten loop/index overhead and are not
 presented as CBLAS-vs-C kernel ratios; the `dsyrk` comparison is the stricter
 same-bridge control and still wins while doing roughly half the multiply work.
 
-## Item 2 follow-up — scaled caller-owned Tensor GEMM
+## Original item 2 follow-up — scaled caller-owned Tensor GEMM
 
 Source finding: the view-aware GEMM tranche still always allocated a result and
 hard-coded `alpha=1`, `beta=0`. Iterative kernels therefore could not retain an

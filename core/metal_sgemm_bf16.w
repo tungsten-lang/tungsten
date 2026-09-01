@@ -99,21 +99,25 @@ fn metal_sgemm_bf16(a, b, c, m, n, k)
   b_buf = metal_buffer_for(device, b)
   c_buf = metal_buffer_for(device, c)
 
-  # Allocate bf16 scratch arrays. Tungsten array allocation is page-
-  # aligned via metal_array; metal_buffer_for then zero-copy-wraps it.
-  a_bf16 = metal_array(-116, size)
-  b_bf16 = metal_array(-116, size)
-  a_bf16_buf = metal_buffer_for(device, a_bf16)
-  b_bf16_buf = metal_buffer_for(device, b_bf16)
-
-  # f32 → bf16 conversion (two dispatches; cheap relative to matmul).
-  metal_dispatch_n(queue, s[:conv], [a_buf, a_bf16_buf], size)
-  metal_dispatch_n(queue, s[:conv], [b_buf, b_bf16_buf], size)
-
-  # n constant buffer
-  n_buf = metal_buffer(device, 4)
+  # bf16 scratch + n-constant buffers are cached in module state and
+  # reallocated only when n grows — they were fresh allocations per call,
+  # and at small n the allocation + wrap cost rivaled the matmul.
+  if s[:scratch_n] == nil || s[:scratch_n] < size
+    s[:a_bf16_buf] = metal_buffer_for(device, metal_array(-116, size))
+    s[:b_bf16_buf] = metal_buffer_for(device, metal_array(-116, size))
+    s[:n_buf] = metal_buffer(device, 4)
+    s[:scratch_n] = size
+  a_bf16_buf = s[:a_bf16_buf]
+  b_bf16_buf = s[:b_bf16_buf]
+  n_buf = s[:n_buf]
   metal_buffer_write_i32(n_buf, 0, n)
 
-  # Matmul dispatch — N/32 × N/32 threadgroups, 32 threads each.
+  # One command buffer for conversions + matmul: metal_dispatch_n commits
+  # AND WAITS per call, so the unbatched form paid three full GPU
+  # round-trips per multiply — the dominant cost at small n.
   n_tg = n / 32
+  metal_batch_begin(queue)
+  metal_dispatch_n(queue, s[:conv], [a_buf, a_bf16_buf], size)
+  metal_dispatch_n(queue, s[:conv], [b_buf, b_bf16_buf], size)
   metal_dispatch_3d(queue, s[:mm], [a_bf16_buf, b_bf16_buf, c_buf, n_buf], n_tg, n_tg, 1, 32, 1, 1)
+  metal_batch_commit(queue)

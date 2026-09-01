@@ -184,13 +184,15 @@ fn dgemm_auto(a, b, c, m, n, k)
   return bgemm_default_policy() if thresholds == nil || thresholds.size() == 0
   thresholds
 
-# Measured on this machine (GFLOPS at n=512/1024/2048/4096):
+# Measured on this machine (GFLOPS at n=512/1024/2048/4096), after the
+# native driver learned to batch its three dispatches into one command
+# buffer and cache scratch (the earlier per-call commit+wait round trips
+# were the whole "small-n gap"):
+#   metal-bf16 (Tungsten-native kernel):          694 / 1857 / 7365 / 12297
 #   mlx_sgemm (TF32/bf16-internal, f32 contract): 408 / 1477 / 6569 / 10672
-#   metal-bf16 (Tungsten-native kernel):          278 / 1288 / 4772 / 11150
-# MLX leads through 2048; metal-bf16 edges ahead (~4%) at 4096.
+# Native wins at every size on the f32 contract.
 -> bgemm_default_policy
   [
-    {"n_max" => 2048, "backend" => "mlx"},
     {"n_max" => 1000000, "backend" => "metal-bf16"}
   ]
 

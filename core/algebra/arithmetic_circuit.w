@@ -35,6 +35,11 @@ use core/combinatorics/support
       @variable_names.push(name)
     @nodes = []
     @output_index = nil
+    # Evaluation tapes are immutable summaries of the reachable prefix for a
+    # chosen output. Appending a node invalidates them; repeated evaluations
+    # otherwise avoid graph discovery and per-node input-array copies.
+    @evaluation_tape_target = nil
+    @evaluation_tape = nil
 
   -> variable_names
     Combinatorics.copy_vector(@variable_names)
@@ -56,6 +61,8 @@ use core/combinatorics/support
     inputs.each -> (index)
       require_node(index)
     @nodes.push(ArithmeticCircuitNode.new([kind, payload, inputs]))
+    @evaluation_tape_target = nil
+    @evaluation_tape = nil
     @output_index = @nodes.size - 1
     @output_index
 
@@ -110,37 +117,89 @@ use core/combinatorics/support
 
   -> values_at(assignments, output = nil)
     target = require_output(output)
-    reachable = reachable_mask(target)
+    tape = evaluation_tape(target)
+    node_indices = tape[0]
+    opcodes = tape[1]
+    left_inputs = tape[2]
+    right_inputs = tape[3]
+    payloads = tape[4]
     values = []
+    @nodes.size.times -> values.push(nil)
+    instruction = 0
+    while instruction < node_indices.size
+      index = node_indices[instruction]
+      opcode = opcodes[instruction]
+      left = left_inputs[instruction]
+      right = right_inputs[instruction]
+      payload = payloads[instruction]
+      if opcode == 0
+        values[index] = payload
+      elsif opcode == 1
+        values[index] = assignment_value(assignments, payload)
+      elsif opcode == 2
+        values[index] = values[left] + values[right]
+      elsif opcode == 3
+        values[index] = values[left] - values[right]
+      elsif opcode == 4
+        values[index] = values[left] * values[right]
+      elsif opcode == 5
+        denominator = values[right]
+        if denominator == 0
+          raise "arithmetic circuit is undefined: division by zero"
+        values[index] = values[left] / denominator
+      elsif opcode == 6
+        values[index] = 0 - values[left]
+      else
+        raise "unsupported arithmetic-circuit opcode"
+      instruction += 1
+    values
+
+  # Flat, cached instruction columns. Opcodes are constant=0, variable=1,
+  # add=2, subtract=3, multiply=4, divide=5, negate=6.
+  -> evaluation_tape(target)
+    if @evaluation_tape != nil && @evaluation_tape_target == target
+      return @evaluation_tape
+    reachable = reachable_mask(target)
+    node_indices = []
+    opcodes = []
+    left_inputs = []
+    right_inputs = []
+    payloads = []
     index = 0
     while index < @nodes.size
-      current = @nodes[index]
-      if !reachable[index]
-        values.push(nil)
-      else
+      if reachable[index]
+        current = @nodes[index]
         kind = current.kind
         inputs = current.inputs
+        opcode = -1
         if kind == :constant
-          values.push(current.payload)
+          opcode = 0
         elsif kind == :variable
-          values.push(assignment_value(assignments, current.payload))
+          opcode = 1
         elsif kind == :add
-          values.push(values[inputs[0]] + values[inputs[1]])
+          opcode = 2
         elsif kind == :subtract
-          values.push(values[inputs[0]] - values[inputs[1]])
+          opcode = 3
         elsif kind == :multiply
-          values.push(values[inputs[0]] * values[inputs[1]])
+          opcode = 4
         elsif kind == :divide
-          denominator = values[inputs[1]]
-          if denominator == 0
-            raise "arithmetic circuit is undefined: division by zero"
-          values.push(values[inputs[0]] / denominator)
+          opcode = 5
         elsif kind == :negate
-          values.push(0 - values[inputs[0]])
+          opcode = 6
         else
           raise "unsupported arithmetic-circuit node kind"
+        node_indices.push(index)
+        opcodes.push(opcode)
+        left_inputs.push(inputs.size > 0 ? inputs[0] : -1)
+        right_inputs.push(inputs.size > 1 ? inputs[1] : -1)
+        payloads.push(current.payload)
       index += 1
-    values
+    tape = [node_indices, opcodes, left_inputs, right_inputs, payloads]
+    # One-entry MRU keeps repeated evaluation allocation-free without an O(n^2)
+    # cache when callers probe many different output nodes.
+    @evaluation_tape_target = target
+    @evaluation_tape = tape
+    tape
 
   -> evaluate(assignments)
     index = require_output(nil)

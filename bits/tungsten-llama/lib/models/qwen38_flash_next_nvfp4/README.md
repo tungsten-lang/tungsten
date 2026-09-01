@@ -193,7 +193,10 @@ self-quantization must re-run the parity + smoke gates.
     nb[t] preserves causality). Gates: chunked QSA == chunked dense ids
     EXACT at 500 tokens. 32k DEMO: 32,000-token compiler-source prompt
     prefilled in 7.3 min (72.9 tok/s pp), decode at pos 32k = 16.1 tok/s,
-    fully coherent code continuation. Known trims: the select kernel's
+    fully coherent code continuation. 100k DEMO: 100,000-token prompt
+    prefilled in 19.2 min (86.9 tok/s pp, 11.5 ms/tok), decode at pos
+    100k = 12.2 tok/s (75 ms rounds, encode still 2.2 ms) — the
+    continuation mimics deep-compiler idiom from 100k tokens back. Known trims: the select kernel's
     single-threaded min/max + emit passes (~2 x nb serial per layer per
     token dominate long-ctx rounds); spec decode beyond 2051 still open
     (reuse the anchor's selection across draft steps).

@@ -129,6 +129,39 @@ WValue w_blas_dgesv_rowmajor(WValue a_wval, WValue b_wval, WValue n_wval) {
     return w_int((int64_t)info);
 }
 
+WValue w_blas_dgetrf_rowmajor(WValue a_wval, WValue piv_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval);
+    WArray *piv = w_as_array(piv_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    if (n <= 0 || a->size < (int64_t)n * n || piv->size < n) {
+        w_raise(w_string("dgetrf_rowmajor: bad dimensions"));
+        return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start;
+    __CLPK_integer *ipiv = (__CLPK_integer *)piv->slots + piv->start;
+    __CLPK_integer info = 0;
+    dgetrf_(&n, &n, ap, &n, ipiv, &info);
+    return w_int((int64_t)info);
+}
+
+WValue w_blas_dgetrs_rowmajor(WValue factor_wval, WValue piv_wval,
+                              WValue rhs_wval, WValue n_wval) {
+    WArray *factor = w_as_array(factor_wval);
+    WArray *piv = w_as_array(piv_wval);
+    WArray *rhs = w_as_array(rhs_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    if (n <= 0 || factor->size < (int64_t)n * n || piv->size < n || rhs->size < n) {
+        w_raise(w_string("dgetrs_rowmajor: bad dimensions"));
+        return w_int(-1);
+    }
+    double *ap = (double *)factor->slots + factor->start;
+    __CLPK_integer *ipiv = (__CLPK_integer *)piv->slots + piv->start;
+    double *bp = (double *)rhs->slots + rhs->start;
+    __CLPK_integer info = 0, nrhs = 1;
+    dgetrs_("T", &n, &nrhs, ap, &n, ipiv, bp, &n, &info);
+    return w_int((int64_t)info);
+}
+
 WValue w_blas_dget_det(WValue a_wval, WValue n_wval) {
     WArray *a = w_as_array(a_wval);
     __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);

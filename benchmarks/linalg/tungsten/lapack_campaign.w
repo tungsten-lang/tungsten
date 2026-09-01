@@ -205,5 +205,37 @@ elsif mode == "lstsq-native"
     i += 1
   elapsed = clock() - started
   << "LSTSQ_NATIVE ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + solution[0].round(6).to_s
+elsif mode == "lu-refactor" || mode == "lu-factor" || mode == "lu-factor-into"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  n = ARGV[2] == nil ? 256 : ARGV[2].to_i
+  a = campaign_matrix(n, n)
+  b = []
+  i = 0
+  while i < n
+    b.push(((i * 19) % 103).to_f / ~103.0)
+    i += 1
+  factor = LinAlg.factor_lu(a)
+  solution = nil
+  if mode == "lu-factor-into"
+    rhs = ccall("w_array_new_aligned", -64, n)
+    solution = ccall("w_array_new_aligned", -64, n)
+    i = 0
+    while i < n
+      rhs[i] = b[i]
+      i += 1
+  started = clock()
+  i = 0
+  while i < iterations
+    b[0] = ~1.0 + i * ~0.000001
+    if mode == "lu-refactor"
+      solution = LinAlg.solve(a, b)
+    elsif mode == "lu-factor"
+      solution = factor.solve(b)
+    else
+      rhs[0] = b[0]
+      factor.solve_into(rhs, solution)
+    i += 1
+  elapsed = clock() - started
+  << "LU " + mode + " us/op=" + (elapsed * ~1000000.0 / iterations).round.to_s + " checksum=" + solution[0].round(6).to_s
 else
   raise "unknown mode: " + mode

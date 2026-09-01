@@ -242,6 +242,7 @@ compiled_specs=(
   spec/core/linalg_qr_lapack_spec.w
   spec/core/linalg_spectral_spec.w
   spec/core/linalg_least_squares_spec.w
+  spec/core/linalg_lu_factor_spec.w
   spec/core/poly_fast_spec.w
   spec/core/prime_sieve_spec.w
   spec/core/pipeline_typed_array_spec.w

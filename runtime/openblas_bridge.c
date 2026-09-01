@@ -14,6 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern void dgetrf_(const int *m, const int *n, double *a, const int *lda,
+                    int *ipiv, int *info);
+extern void dgetrs_(const char *trans, const int *n, const int *nrhs,
+                    const double *a, const int *lda, const int *ipiv,
+                    double *b, const int *ldb, int *info);
+
 WValue w_blas_sgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
                        WValue m_wval, WValue n_wval, WValue k_wval) {
     WArray *a = w_as_array(a_wval);
@@ -76,6 +82,35 @@ WValue w_blas_dgemm_view(WValue a_wval, WValue b_wval, WValue c_wval,
                 tb ? CblasTrans : CblasNoTrans, M, N, K, 1.0,
                 Ap, ta ? M : K, Bp, tb ? K : N, 0.0, Cp, N);
     return c_wval;
+}
+
+WValue w_blas_dgetrf_rowmajor(WValue a_wval, WValue piv_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval), *piv = w_as_array(piv_wval);
+    int n = (int)w_as_int(n_wval);
+    if (n <= 0 || a->size < (int64_t)n * n || piv->size < n) {
+        w_raise(w_string("dgetrf_rowmajor: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start;
+    int *ipiv = (int *)piv->slots + piv->start;
+    int info = 0;
+    dgetrf_(&n, &n, ap, &n, ipiv, &info);
+    return w_int(info);
+}
+
+WValue w_blas_dgetrs_rowmajor(WValue factor_wval, WValue piv_wval,
+                              WValue rhs_wval, WValue n_wval) {
+    WArray *factor = w_as_array(factor_wval), *piv = w_as_array(piv_wval);
+    WArray *rhs = w_as_array(rhs_wval);
+    int n = (int)w_as_int(n_wval);
+    if (n <= 0 || factor->size < (int64_t)n * n || piv->size < n || rhs->size < n) {
+        w_raise(w_string("dgetrs_rowmajor: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)factor->slots + factor->start;
+    int *ipiv = (int *)piv->slots + piv->start;
+    double *bp = (double *)rhs->slots + rhs->start;
+    int info = 0, nrhs = 1;
+    dgetrs_("T", &n, &nrhs, ap, &n, ipiv, bp, &n, &info);
+    return w_int(info);
 }
 
 /* Reductions / elementwise: portable scalar loops (vDSP is Apple-only). */

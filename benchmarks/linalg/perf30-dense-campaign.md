@@ -268,6 +268,39 @@ workaround (`solve(A^T A, A^T b)`) to the direct API:
 Retained. The median improves from 3.8 ms to 1.6 ms per fit (2.4x), while
 avoiding condition-number squaring and making rank failure observable.
 
+## Item 5 follow-up — reusable dense LU factor
+
+Source finding: `LinAlg.solve` stages and factors the same matrix on every
+call. This is the correct one-shot contract, but workloads with several
+right-hand sides duplicated the O(n^3) factorization and allocated its pivot
+workspace each time. The sparse stack already made analysis/factor lifetime
+explicit; dense had no equivalent ownership boundary.
+
+Correctness: `spec/core/linalg_lu_factor_spec.w` passes 8/8 for two distinct
+right-hand sides against one retained factor, residuals, typed `solve_into`,
+returned-output identity, singular failure, nonsquare failure, and RHS-shape
+failure. The staged source matrix is copied before factorization. LAPACK
+`dgetrs` only reads the retained LU/pivots, so callers may share the factor
+read-only as long as each owns its RHS/output.
+
+Matched 1,000-operation samples at 256x256 compare refactoring through the
+existing `LinAlg.solve`, list-returning factor solves, and a caller-owned f64
+output. Times are internal microseconds per solve:
+
+| sample | refactor each RHS | retained factor, list | retained factor, `solve_into` |
+| --- | ---: | ---: | ---: |
+| 1 | 1288 | 40 | 28 |
+| 2 | 1231 | 32 | 29 |
+| 3 | 1206 | 28 | 25 |
+| 4 | 1271 | 32 | 27 |
+| 5 | 1329 | 28 | 27 |
+
+Retained. Median time falls from 1,271 us to 32 us (39.7x) through the list
+API and to 27 us (47.1x) with caller-owned storage. The narrow API is
+`LinAlg.factor_lu(a) -> DenseLUFactor`, with `solve` and `solve_into`; it
+rejects empty, nonsquare, and singular matrices explicitly. Accelerate and
+OpenBLAS bridges keep the same row-major/no-transpose-copy convention.
+
 ## Item 10 — cached MTLTensor descriptor face
 
 Source finding: every `Tensor.metal_tensor` access rebuilt an MTLTensor

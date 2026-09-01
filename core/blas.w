@@ -156,6 +156,14 @@ fn dnrm2(a, n)
 -> lapack_least_squares(a, b, m, n)
   ccall("w_blas_dgelsy", a, b, m, n)
 
+# Reusable row-major LU. `lapack_lu_factor` clobbers `a`; later solves only
+# read the factor/pivot buffers and clobber the caller-owned RHS.
+-> lapack_lu_factor(a, pivots, n)
+  ccall("w_blas_dgetrf_rowmajor", a, pivots, n)
+
+-> lapack_lu_solve(factors, pivots, rhs, n)
+  ccall("w_blas_dgetrs_rowmajor", factors, pivots, rhs, n)
+
 # ---- vDSP vector arithmetic ----
 fn vadd(a, b, out, n)
   ccall("w_blas_vadd_f32", a, b, out, n)

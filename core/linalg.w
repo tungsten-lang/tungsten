@@ -5,6 +5,40 @@
 #
 # Accelerated paths: core/blas.w (sgemm, sgemv, dgesv, …) when linked.
 
+# A reusable dense LU factorization. The factor and pivot buffers are
+# immutable after construction; each solve owns (or is given) a distinct RHS,
+# so one factor can safely be shared by callers that do not share outputs.
++ DenseLUFactor
+  -> new(@factors, @pivots, @dimension)
+
+  ro :dimension
+
+  # Allocation-free typed-buffer lane. `rhs` and `out` may alias; both must
+  # have at least `dimension` elements.
+  -> solve_into(rhs, out)
+    raise "DenseLUFactor.solve_into: RHS too short" if rhs.size() < @dimension
+    raise "DenseLUFactor.solve_into: output too short" if out.size() < @dimension
+    i = 0
+    while i < @dimension
+      out[i] = rhs[i] + ~0.0
+      i += 1
+    info = ccall("w_blas_dgetrs_rowmajor", @factors, @pivots, out, @dimension)
+    raise "DenseLUFactor.solve_into: LAPACK failed with info=" + info.to_s if info != 0
+    out
+
+  # List convenience lane. Factorization remains reused; only the RHS/output
+  # boundary allocation and conversion occur per solve.
+  -> solve(rhs)
+    raise "DenseLUFactor.solve: RHS length must equal dimension" if rhs.size() != @dimension
+    out_flat = ccall("w_array_new_aligned", -64, @dimension)
+    solve_into(rhs, out_flat)
+    out = []
+    i = 0
+    while i < @dimension
+      out.push(out_flat[i])
+      i += 1
+    out
+
 + LinAlg
   -> .rows(a)
     a.size()
@@ -121,6 +155,18 @@
         j = j + 1
       i = i + 1
     flat
+
+  # Factor a non-empty square f64 matrix once for repeated right-hand sides.
+  # The public matrix remains untouched; LAPACK owns the staged copy.
+  -> .factor_lu(a)
+    n = LinAlg.rows(a)
+    raise "LinAlg.factor_lu: requires a non-empty square matrix" if n == 0 || LinAlg.cols(a) != n
+    flat = LinAlg.flatten_square(a, n)
+    pivots = ccall("w_array_new_aligned", 33, n)
+    info = ccall("w_blas_dgetrf_rowmajor", flat, pivots, n)
+    raise "LinAlg.factor_lu: singular" if info > 0
+    raise "LinAlg.factor_lu: LAPACK failed with info=" + info.to_s if info < 0
+    DenseLUFactor.new(flat, pivots, n)
 
   -> .solve(a, b)
     n = LinAlg.rows(a)

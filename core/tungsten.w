@@ -50,6 +50,7 @@
   auto :Mmap,         "mmap"
   # Scientific stack (flat core/)
   auto :LinAlg,       "linalg"
+  auto :DenseLUFactor,"linalg"
   auto :FFT,          "fft"
   auto :Special,      "special"
   auto :Stats,        "stats"

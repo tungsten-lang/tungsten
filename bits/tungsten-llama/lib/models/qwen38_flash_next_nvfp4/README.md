@@ -186,9 +186,17 @@ self-quantization must re-run the parity + smoke gates.
     kv/index caches (cap 262144); FN_QSA=1 forces the indexer from pos 0.
     GATES: QSA==dense ids BIT-EXACT (fixture + 500-token compiler prompt);
     FN_CTX=4096 decode from pos 500 to ~2300 crosses the boundary with
-    fully coherent code (1799 tokens, 24.6 tok/s avg). Remaining (C2):
-    indexer in the chunked-prefill/multi path (per-query selection) so
-    PROMPTS can exceed 2051 + the 100k demo; spec decode beyond 2051.
+    fully coherent code (1799 tokens, 24.6 tok/s avg). C2 LANDED same
+    day: indexer steps in the chunked-prefill/multi path (the qsa.metal
+    kernels were written width-ready: per-token nb/vis arrays, per-query
+    select TGs; the per-chunk block build covers the whole chunk while
+    nb[t] preserves causality). Gates: chunked QSA == chunked dense ids
+    EXACT at 500 tokens. 32k DEMO: 32,000-token compiler-source prompt
+    prefilled in 7.3 min (72.9 tok/s pp), decode at pos 32k = 16.1 tok/s,
+    fully coherent code continuation. Known trims: the select kernel's
+    single-threaded min/max + emit passes (~2 x nb serial per layer per
+    token dominate long-ctx rounds); spec decode beyond 2051 still open
+    (reuse the anchor's selection across draft steps).
 
 Standing: plain 43 short / 35.6 code-context; **mtp:3 46-49 short / 49.4 code-context (+39%)**. All gates green.
 

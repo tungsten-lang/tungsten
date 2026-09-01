@@ -385,13 +385,14 @@ TENSOR_EW = {}
     r = shape.size()
     i = 0
     while i < r
-      acc = 1
-      j = i + 1
-      while j < r
-        acc = acc * shape[j]
-        j = j + 1
-      s = s.push(acc)
+      s = s.push(1)
       i = i + 1
+    acc = 1
+    i = r - 1
+    while i >= 0
+      s[i] = acc
+      acc = acc * shape[i]
+      i = i - 1
     s
 
   # Tightly-packed Fortran/BLAS-style column-major element strides. Storage
@@ -423,14 +424,14 @@ TENSOR_EW = {}
 
   # True when the (always-explicit) strides equal the packed row-major strides.
   -> contiguous?
-    ps = Tensor.packed_strides(shape)
-    same = true
-    i = 0
-    while i < strides.size()
-      if strides[i] != ps[i]
-        same = false
-      i = i + 1
-    same
+    return false if strides.size() != shape.size()
+    expected = 1
+    i = shape.size() - 1
+    while i >= 0
+      return false if strides[i] != expected
+      expected = expected * shape[i]
+      i = i - 1
+    true
 
   # CBLAS can consume a packed rank-2 tensor or its zero-copy transpose.
   # Return 0 for NoTrans, 1 for Trans, and -1 for a layout that needs packing.
@@ -448,6 +449,7 @@ TENSOR_EW = {}
     if self.rank != 2
       raise "Tensor.to_rows: requires a rank-2 tensor"
     rows = []
+    packed_cpu = device == :cpu && self.contiguous?
     i = 0
     while i < shape[0]
       row = []
@@ -457,8 +459,8 @@ TENSOR_EW = {}
         # typed storage directly, but retain the stride-aware route for views
         # (including transpose and column-major wrapping).
         value = nil
-        if device == :cpu && self.contiguous?
-          value = buffer[i * shape[1] + j]
+        if packed_cpu
+          value = buffer[offset + i * shape[1] + j]
         else
           value = self.at([i, j])
         row = row.push(value)

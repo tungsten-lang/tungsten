@@ -61,3 +61,32 @@ packed `[128,192]` allocation. Alternating whole-process `time -p` samples:
 Retained. The bridge now accepts element offsets and NoTrans/Trans layout
 flags on both inputs. Packed, offset-packed, and simple transpose views enter
 CBLAS directly; general strided views retain the materialization fallback.
+
+## Item 3 — allocation-free Tensor layout metadata
+
+Source finding: every `contiguous?` call rebuilt an Array of packed strides,
+and `packed_strides` itself used a nested suffix-product loop. `to_rows` then
+called `contiguous?` once per element. The public `shape` and `strides` Arrays
+are mutable, so persisting a cached answer would be observably stale after an
+in-place metadata edit; this tranche keeps mutation semantics and computes the
+answer in one reverse walk.
+
+Matched workload: five million repetitions of `size` plus `contiguous?` on a
+packed rank-2 f64 CPU Tensor. Alternating samples in ns/iteration:
+
+| sample | parent `61f4ab49` | candidate |
+| --- | ---: | ---: |
+| 1 | 112 | 75 |
+| 2 | 106 | 77 |
+| 3 | 110 | 79 |
+| 4 | 111 | 75 |
+| 5 | 103 | 75 |
+
+Median: 110 ns to 75 ns, a 31.8% reduction. The focused Tensor spec passes
+16/16, including rank-3 packed strides, malformed-stride rejection, and an
+offset `to_rows` oracle; CPU ops and view-GEMM campaign oracles still pass.
+
+Retained. `packed_strides` is now O(rank), `contiguous?` is allocation-free,
+and `to_rows` hoists the layout decision and includes the storage offset.
+Object-level caching remains inappropriate until Tensor metadata becomes
+immutable or mutations are routed through coherent setters.

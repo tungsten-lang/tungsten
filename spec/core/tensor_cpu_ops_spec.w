@@ -65,3 +65,8 @@ packed_left = Tensor.from_rows([[~1.0, ~2.0], [~3.0, ~4.0], [~5.0, ~6.0]], Tenso
 right_base = Tensor.from_rows([[~7.0, ~9.0], [~8.0, ~10.0]], Tensor.f64)
 right_transpose_product = packed_left.matmul(right_base.transpose)
 expect("tensor.cpu.matmul right transpose", close?(right_transpose_product.at([0, 0]), ~25.0) && close?(right_transpose_product.at([2, 1]), ~100.0))
+
+expect("tensor.packed_strides rank 3", Tensor.packed_strides([2, 3, 4]) == [12, 4, 1])
+expect("tensor.contiguous rejects short strides", !Tensor.wrap_cpu(storage, Tensor.f64, [2, 2], [2], 0).contiguous?)
+offset_rows = view.to_rows
+expect("tensor.to_rows honors offset", close?(offset_rows[0][0], ~3.0) && close?(offset_rows[1][1], ~6.0))

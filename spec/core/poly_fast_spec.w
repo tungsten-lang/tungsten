@@ -25,8 +25,8 @@ i = 0
 roundtrip_ok = true
 while i < 200
   exps = [rng.next_int(64), rng.next_int(64), rng.next_int(64)]
-  key = PolyFast.pack_key(exps)
-  back = PolyFast.unpack_key(key, 3)
+  key = PolyFast.pack_key(exps, 0)
+  back = PolyFast.unpack_key(key, 3, 0)
   j = 0
   while j < 3
     roundtrip_ok = false if back[j] != exps[j]
@@ -40,8 +40,8 @@ i = 0
 while i < 300
   ea = [rng.next_int(20), rng.next_int(20), rng.next_int(20)]
   eb = [rng.next_int(20), rng.next_int(20), rng.next_int(20)]
-  ka = PolyFast.pack_key(ea)
-  kb = PolyFast.pack_key(eb)
+  ka = PolyFast.pack_key(ea, 0)
+  kb = PolyFast.pack_key(eb, 0)
   cmp_ref = ring3.monomial_compare(ea, eb)
   cmp_key = 0
   cmp_key = 1 if ka > kb
@@ -49,6 +49,33 @@ while i < 300
   order_ok = false if cmp_ref != cmp_key
   i += 1
 check_named("key.order.matches_grevlex", order_ok)
+
+# Key order equals the monomial order for lex and grlex modes too.
+lex_ring = PolynomialRing.new([:x, :y, :z], FiniteField.new(32003), :lex)
+grlex_ring = PolynomialRing.new([:x, :y, :z], FiniteField.new(32003), :grlex)
+modes_ok = true
+i = 0
+while i < 300
+  ea = [rng.next_int(20), rng.next_int(20), rng.next_int(20)]
+  eb = [rng.next_int(20), rng.next_int(20), rng.next_int(20)]
+  m = 1
+  while m <= 2
+    ring_m = m == 1 ? lex_ring : grlex_ring
+    ka = PolyFast.pack_key(ea, m)
+    kb = PolyFast.pack_key(eb, m)
+    cmp_ref = ring_m.monomial_compare(ea, eb)
+    cmp_key = 0
+    cmp_key = 1 if ka > kb
+    cmp_key = 0 - 1 if ka < kb
+    modes_ok = false if cmp_ref != cmp_key
+    rt = PolyFast.unpack_key(ka, 3, m)
+    j = 0
+    while j < 3
+      modes_ok = false if rt[j] != ea[j]
+      j += 1
+    m += 1
+  i += 1
+check_named("key.order.matches_lex_grlex", modes_ok)
 
 # Random normal forms: fast lane output == slow path remainder.
 -> random_poly(ring, rng, terms, max_exp)
@@ -66,35 +93,35 @@ check_named("key.order.matches_grevlex", order_ok)
   poly
 
 arities = [[:x, :y], [:x, :y, :z], [:a, :b, :c, :d]]
+orders = [:grevlex, :lex, :grlex]
 case_idx = 0
 all_match = true
 fast_hits = 0
 arities.each -> (names)
-  ring = PolynomialRing.new(names, FiniteField.new(32003), :grevlex)
-  trial = 0
-  while trial < 25
-    dividend = random_poly(ring, rng, 8, 6)
-    divisors = []
-    k = 0
-    while k < 3
-      d = ring.zero
-      while d.zero?
-        d = random_poly(ring, rng, 3, 4)
-      divisors.push(d)
-      k += 1
-    slow = dividend.divide(divisors)[1]
-    fast = PolyFast.normal_form(dividend, divisors)
-    if fast == nil
-      # lane refused — acceptable only if an encoding bound is exceeded,
-      # which these small inputs never hit
-      all_match = false
-    else
-      fast_hits += 1
-      all_match = false if !(fast == slow)
-    trial += 1
-    case_idx += 1
-check_named("normal_form.matches_slow_75_cases", all_match)
-check_named("normal_form.fast_lane_engaged", fast_hits == 75)
+  orders.each -> (ord)
+    ring = PolynomialRing.new(names, FiniteField.new(32003), ord)
+    trial = 0
+    while trial < 25
+      dividend = random_poly(ring, rng, 8, 6)
+      divisors = []
+      k = 0
+      while k < 3
+        d = ring.zero
+        while d.zero?
+          d = random_poly(ring, rng, 3, 4)
+        divisors.push(d)
+        k += 1
+      slow = dividend.divide(divisors)[1]
+      fast = PolyFast.normal_form(dividend, divisors)
+      if fast == nil
+        all_match = false
+      else
+        fast_hits += 1
+        all_match = false if !(fast == slow)
+      trial += 1
+      case_idx += 1
+check_named("normal_form.matches_slow_225_cases", all_match)
+check_named("normal_form.fast_lane_engaged", fast_hits == 225)
 
 # Zero dividend and constant divisor edge cases route consistently.
 ring = PolynomialRing.new([:x, :y], FiniteField.new(101), :grevlex)

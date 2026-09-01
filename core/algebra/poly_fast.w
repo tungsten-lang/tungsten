@@ -80,7 +80,7 @@
 #   p            the prime modulus
 #   cap          shared capacity of pk/qk/rk
 # Returns the remainder length, or -1 on any capacity/encoding bail.
--> pf_run(pk, pc, plen0, qk, qc_buf, bk, bc, bptr, binv, bmax, dn, rk, rc, p, cap) (i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64 i64) i64
+-> pf_run(pk, pc, plen0, qk, qc_buf, bk, bc, bptr, binv, bmax, dn, rk, rc, p, cap, mode) (i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64 i64 i64) i64
   ps = 0 ## i64
   plen = plen0 ## i64
   rlen = 0 ## i64
@@ -105,14 +105,23 @@
       while ok == 1 && i < 6
         cd = (dk0 >> (i * 6)) & 63
         cp = (lead_key >> (i * 6)) & 63
-        ok = 0 if cd < cp
+        # complement fields (mode 0): divisor c-field must be >= pending's;
+        # raw fields (mode 1): divisor exponent must be <= pending's.
+        if mode == 0
+          ok = 0 if cd < cp
+        else
+          ok = 0 if cd > cp
         i += 1
       if ok == 1
         # overflow guard: quotient exponents + divisor max exponents <= 63
         dm = bmax[d] ## i64
         i = 0
         while ok == 1 && i < 6
-          eq = ((dk0 >> (i * 6)) & 63) - ((lead_key >> (i * 6)) & 63)
+          eq = 0 ## i64
+          if mode == 0
+            eq = ((dk0 >> (i * 6)) & 63) - ((lead_key >> (i * 6)) & 63)
+          else
+            eq = ((lead_key >> (i * 6)) & 63) - ((dk0 >> (i * 6)) & 63)
           em = (dm >> (i * 6)) & 63
           ok = 0 if eq + em > 63
           i += 1
@@ -219,9 +228,22 @@
   -> .capacity
     32768
 
-  # Pack one exponent array into a 45-bit grevlex key, or nil when it
-  # exceeds the encoding bounds (exponent > 63 or degree > 511).
-  -> .pack_key(exponents)
+  # Ring order -> packing mode: 0 = grevlex (complement fields, var i at
+  # shift 6i), 1 = lex (raw fields, var 0 most significant at shift 30,
+  # no degree word), 2 = grlex (raw lex layout + degree word). nil = the
+  # lane does not apply.
+  -> .ring_mode(ring)
+    return nil if ring.fastmod == nil || ring.arity > 6
+    o = ring.simple_order
+    return 0 if o == "grevlex"
+    return 1 if o == "lex"
+    return 2 if o == "grlex"
+    nil
+
+  # Pack one exponent array into a 45-bit key for the given mode, or nil
+  # when it exceeds the encoding bounds (exponent > 63 or degree > 511).
+  # In every mode, integer order on keys equals the monomial order.
+  -> .pack_key(exponents, mode)
     deg = 0
     i = 0
     while i < exponents.size
@@ -230,16 +252,25 @@
       deg += e
       i += 1
     return nil if deg > 511
-    key = deg * 68719476736
+    key = 0
+    if mode == 0
+      key = deg * 68719476736
+      i = 0
+      while i < exponents.size
+        key = key | ((63 - exponents[i]) * (64 ** i))
+        i += 1
+      return key
+    key = deg * 68719476736 if mode == 2
     i = 0
     while i < exponents.size
-      key = key | ((63 - exponents[i]) * (64 ** i))
+      key = key | (exponents[i] * (64 ** (5 - i)))
       i += 1
     key
 
   # Per-var maxima across a term list, packed as RAW 6-bit exponent fields
-  # (no complement, no degree) for the overflow guard.
-  -> .pack_max_exps(terms, arity)
+  # (no complement, no degree) at the MODE's field positions, so the
+  # kernel's field-wise overflow guard lines up with the quotient fields.
+  -> .pack_max_exps(terms, arity, mode)
     maxes = []
     i = 0
     while i < arity
@@ -253,21 +284,25 @@
     key = 0
     i = 0
     while i < arity
-      key = key | (maxes[i] * (64 ** i))
+      shift = mode == 0 ? i : 5 - i
+      key = key | (maxes[i] * (64 ** shift))
       i += 1
     key
 
   # Unpack a key back to an exponent array.
-  -> .unpack_key(key, arity)
+  -> .unpack_key(key, arity, mode)
     out = []
     i = 0
     while i < arity
-      out.push(63 - ((key / (64 ** i)) % 64))
+      if mode == 0
+        out.push(63 - ((key / (64 ** i)) % 64))
+      else
+        out.push((key / (64 ** (5 - i))) % 64)
       i += 1
     out
 
   -> .ring_ok?(ring)
-    ring.fastmod != nil && ring.simple_order == "grevlex" && ring.arity <= 6
+    PolyFast.ring_mode(ring) != nil
 
   # Convert a polynomial to its cached packed form
   # [keys, coeffs, maxkey, lead_inverse, count]; nil (cached as a refusal)
@@ -281,18 +316,22 @@
     if n == 0
       poly.pf_cache_store(false)
       return nil
+    mode = PolyFast.ring_mode(poly.ring)
+    if mode == nil
+      poly.pf_cache_store(false)
+      return nil
     keys = i64[n]
     coeffs = i64[n]
     i = 0
     while i < n
-      key = PolyFast.pack_key(terms[i][1])
+      key = PolyFast.pack_key(terms[i][1], mode)
       if key == nil
         poly.pf_cache_store(false)
         return nil
       keys[i] = key
       coeffs[i] = terms[i][0]
       i += 1
-    maxkey = PolyFast.pack_max_exps(terms, poly.ring.arity)
+    maxkey = PolyFast.pack_max_exps(terms, poly.ring.arity, mode)
     lead_inv = poly.ring.field.inverse(terms[0][0])
     form = [keys, coeffs, maxkey, lead_inv, n]
     poly.pf_cache_store(form)
@@ -315,29 +354,39 @@
       ws[11] = bank_cap
     ws
 
-  # 6-bit per-var byte max of two packed keys' exponents, as a packed
-  # grevlex key (complement fields rebuilt, degree recomputed) — the lcm
-  # monomial of two lead keys. Returns nil if any bound is exceeded.
-  -> .lcm_key(a, b)
+  # Per-var max of two packed keys' exponents (the lcm monomial of two
+  # lead keys), in the same mode/layout. Returns nil if any bound is
+  # exceeded. Mode 0 takes the field-wise MIN of complements; raw modes
+  # take the field-wise MAX; degree words are recomputed where present.
+  -> .lcm_key(a, b, mode)
     deg = 0
     key = 0
     i = 0
     while i < 6
       ca = (a / (64 ** i)) % 64
       cb = (b / (64 ** i)) % 64
-      c = ca < cb ? ca : cb
-      key = key | ((c) * (64 ** i))
-      deg += 63 - c
+      c = 0
+      if mode == 0
+        c = ca < cb ? ca : cb
+        deg += 63 - c
+      else
+        c = ca > cb ? ca : cb
+        deg += c
+      key = key | (c * (64 ** i))
       i += 1
     return nil if deg > 511
+    return key if mode == 1
     key + deg * 68719476736
 
   # Overflow guard for shifting a whole polynomial by quotient exponents:
   # per var, the poly's max exponent plus the shift must stay <= 63.
-  -> .shift_safe?(maxkey, lead_key, lcm)
+  # (Complement fields: shift = lead_c - lcm_c; raw fields: lcm_e - lead_e.)
+  -> .shift_safe?(maxkey, lead_key, lcm, mode)
     i = 0
     while i < 6
-      shift = ((lead_key / (64 ** i)) % 64) - ((lcm / (64 ** i)) % 64)
+      lf = (lead_key / (64 ** i)) % 64
+      cf = (lcm / (64 ** i)) % 64
+      shift = mode == 0 ? lf - cf : cf - lf
       m = (maxkey / (64 ** i)) % 64
       return false if m + shift > 63
       i += 1
@@ -348,7 +397,8 @@
   # fall back. OUTPUT-IDENTICAL to the slow pipeline.
   -> .s_poly_normal_form(left, right, divisors)
     ring = left.ring
-    return nil if !PolyFast.ring_ok?(ring)
+    mode = PolyFast.ring_mode(ring)
+    return nil if mode == nil
     lf = PolyFast.packed_form(left)
     return nil if lf == nil
     rf = PolyFast.packed_form(right)
@@ -362,10 +412,10 @@
       forms.push(form)
       total += form[4]
       k += 1
-    lcm = PolyFast.lcm_key(lf[0][0], rf[0][0])
+    lcm = PolyFast.lcm_key(lf[0][0], rf[0][0], mode)
     return nil if lcm == nil
-    return nil if !PolyFast.shift_safe?(lf[2], lf[0][0], lcm)
-    return nil if !PolyFast.shift_safe?(rf[2], rf[0][0], lcm)
+    return nil if !PolyFast.shift_safe?(lf[2], lf[0][0], lcm, mode)
+    return nil if !PolyFast.shift_safe?(rf[2], rf[0][0], lcm, mode)
     p = ring.fastmod
     cap = PolyFast.capacity
     ws = PolyFast.workspace(ring, total, divisors.size)
@@ -403,14 +453,14 @@
       k += 1
     bptr[forms.size] = off
     rlen = pf_run(ws[0], ws[1], plen, ws[2], ws[3], bk, bc, bptr, binv, bmax,
-                  forms.size, ws[4], ws[5], p, cap)
+                  forms.size, ws[4], ws[5], p, cap, mode)
     return nil if rlen < 0
     rk = ws[4]
     rc = ws[5]
     terms = []
     i = 0
     while i < rlen
-      terms.push([rc[i], PolyFast.unpack_key(rk[i], arity)])
+      terms.push([rc[i], PolyFast.unpack_key(rk[i], arity, mode)])
       i += 1
     Polynomial.new(ring, terms, true)
 
@@ -418,7 +468,8 @@
   # lane does not apply / a runtime guard bails.
   -> .normal_form(poly, divisors)
     ring = poly.ring
-    return nil if !PolyFast.ring_ok?(ring)
+    mode = PolyFast.ring_mode(ring)
+    return nil if mode == nil
     return nil if poly.zero?
     return nil if divisors.size == 0 || divisors.size >= 511
     self_form = PolyFast.packed_form(poly)
@@ -470,7 +521,7 @@
       k += 1
     bptr[forms.size] = off
     rlen = pf_run(pk, pc, n_terms, ws[2], ws[3], bk, bc, bptr, binv, bmax,
-                  forms.size, ws[4], ws[5], p, cap)
+                  forms.size, ws[4], ws[5], p, cap, mode)
     return nil if rlen < 0
     arity = ring.arity
     rk = ws[4]
@@ -478,6 +529,6 @@
     terms = []
     i = 0
     while i < rlen
-      terms.push([rc[i], PolyFast.unpack_key(rk[i], arity)])
+      terms.push([rc[i], PolyFast.unpack_key(rk[i], arity, mode)])
       i += 1
     Polynomial.new(ring, terms, true)

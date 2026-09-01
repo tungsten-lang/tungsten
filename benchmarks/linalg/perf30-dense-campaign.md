@@ -520,3 +520,42 @@ us (4.89x) over repeated `dormqr`/`dtrtrs`. This closes original item 5's
 QRFactor and batched-RHS requirements and original item 8's compact-reflector
 requirement; the existing one-shot `least_squares` keeps pivoted `dgelsy` for
 rank-revealing behavior.
+
+## Original item 4 closeout — cooperative GPU row softmax
+
+Source finding: `softmax_rows_f32` assigned one GPU thread to an entire row.
+That thread made three serial passes over all columns (maximum, exponent/sum,
+normalization). Row parallelism hid this at short widths, but attention-like
+wide rows left each row's reduction and transcendental work serial.
+
+The retained kernel assigns one threadgroup to a row. Threads stride over the
+columns, use `simd_max`/`simd_sum`, combine SIMD-group partials through 32
+threadgroup floats, and normalize cooperatively. The old kernel remains the
+short-row lane. A five-sample paired sweep calibrated the policy to serial for
+fewer than 256 columns, 128 threads at 256 columns, 256 threads through 4096,
+and 512 above 4096. The parallel pipeline is built lazily so elementwise-only
+and short-row workloads do not pay its construction cost.
+
+Representative medians from the matched Tensor workload (fresh result
+allocation and synchronous dispatch included, pipeline compilation warmed):
+
+| shape | original serial row | cooperative policy | speedup |
+| --- | ---: | ---: | ---: |
+| 1x256 | 216 us | 184 us | 1.17x |
+| 16x1024 | 334 us | 178 us | 1.88x |
+| 256x2048 | 737 us | 391 us | 1.88x |
+| 1024x8192 | 4,968 us | 3,156 us | 1.57x |
+| 4096x256 | 607 us | 539 us | 1.13x |
+| 16384x256 | 1,927 us | 1,548 us | 1.25x |
+
+The sweep also covered 1, 16, 256, and 1024 rows at widths 64 through 8192,
+plus 4096/16384-row saturation probes. Gains below 256 columns narrowed to
+1-10% and varied with dispatch noise, so those shapes deliberately preserve
+the existing serial route rather than claiming a fragile crossover.
+
+Correctness compares both GPU kernels with a double-precision stable-softmax
+reference. Across 3x33, 7x1537, 128x1024, and 4x8192 probes, the cooperative
+maximum absolute error was at most 2.65e-8 and row-sum error at most 1.45e-7;
+serial/cooperative disagreement was at most 2.98e-8. The new focused GPU spec
+passes 4/4 at both sides of the selector, and the CPU Tensor spec remains
+36/36. Retained.

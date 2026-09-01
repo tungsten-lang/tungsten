@@ -87,9 +87,29 @@ TENSOR_M4 = {}
 # array indexing from Tungsten string interpolation.
 
 -> build_tensor_ew_kernel
-  s = StringBuffer(1024)
+  s = StringBuffer(4096)
   s << "#include <metal_stdlib>\n"
   s << "using namespace metal;\n"
+  s << "inline float tensor_tg_max(float value, threadgroup float* scratch, uint lane, uint simd_id, uint simd_count) {\n"
+  s << "    float partial = simd_max(value);\n"
+  s << "    if (lane == 0) scratch\[simd_id\] = partial;\n"
+  s << "    threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+  s << "    partial = lane < simd_count ? scratch\[lane\] : -INFINITY;\n"
+  s << "    float total = simd_id == 0 ? simd_max(partial) : -INFINITY;\n"
+  s << "    if (simd_id == 0 && lane == 0) scratch\[0\] = total;\n"
+  s << "    threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+  s << "    return scratch\[0\];\n"
+  s << "}\n"
+  s << "inline float tensor_tg_sum(float value, threadgroup float* scratch, uint lane, uint simd_id, uint simd_count) {\n"
+  s << "    float partial = simd_sum(value);\n"
+  s << "    if (lane == 0) scratch\[simd_id\] = partial;\n"
+  s << "    threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+  s << "    partial = lane < simd_count ? scratch\[lane\] : 0.0f;\n"
+  s << "    float total = simd_id == 0 ? simd_sum(partial) : 0.0f;\n"
+  s << "    if (simd_id == 0 && lane == 0) scratch\[0\] = total;\n"
+  s << "    threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+  s << "    return scratch\[0\];\n"
+  s << "}\n"
   s << "kernel void elementwise_f32(\n"
   s << "    device const float* a \[\[buffer(0)\]\],\n"
   s << "    device const float* b \[\[buffer(1)\]\],\n"
@@ -123,6 +143,30 @@ TENSOR_M4 = {}
   s << "    for (int j = 0; j < cols; j++) { float e = exp(row\[j\] - mx); out\[j\] = e; sm += e; }\n"
   s << "    for (int j = 0; j < cols; j++) out\[j\] /= sm;\n"
   s << "}\n"
+  s << "kernel void softmax_rows_parallel_f32(\n"
+  s << "    device const float* x \[\[buffer(0)\]\],\n"
+  s << "    device float* y \[\[buffer(1)\]\],\n"
+  s << "    constant int& rows \[\[buffer(2)\]\],\n"
+  s << "    constant int& cols \[\[buffer(3)\]\],\n"
+  s << "    uint3 tg_pos \[\[threadgroup_position_in_grid\]\],\n"
+  s << "    uint3 tg_size \[\[threads_per_threadgroup\]\],\n"
+  s << "    uint tid \[\[thread_index_in_threadgroup\]\],\n"
+  s << "    uint lane \[\[thread_index_in_simdgroup\]\],\n"
+  s << "    uint simd_id \[\[simdgroup_index_in_threadgroup\]\]\n"
+  s << ") {\n"
+  s << "    uint row_id = tg_pos.x;\n"
+  s << "    if (row_id >= uint(rows)) return;\n"
+  s << "    threadgroup float scratch\[32\];\n"
+  s << "    device const float* row = x + row_id * cols;\n"
+  s << "    device float* out = y + row_id * cols;\n"
+  s << "    float local_max = -INFINITY;\n"
+  s << "    for (uint j = tid; j < uint(cols); j += tg_size.x) local_max = max(local_max, row\[j\]);\n"
+  s << "    float mx = tensor_tg_max(local_max, scratch, lane, simd_id, (tg_size.x + 31) / 32);\n"
+  s << "    float local_sum = 0.0f;\n"
+  s << "    for (uint j = tid; j < uint(cols); j += tg_size.x) { float e = exp(row\[j\] - mx); out\[j\] = e; local_sum += e; }\n"
+  s << "    float sm = tensor_tg_sum(local_sum, scratch, lane, simd_id, (tg_size.x + 31) / 32);\n"
+  s << "    for (uint j = tid; j < uint(cols); j += tg_size.x) out\[j\] /= sm;\n"
+  s << "}\n"
   s.to_s()
 
 TENSOR_EW = {}
@@ -133,7 +177,9 @@ TENSOR_EW = {}
     lib = metal_compile_source(device, build_tensor_ew_kernel())
     pipe = metal_pipeline(lib, "elementwise_f32")
     softmax_pipe = metal_pipeline(lib, "softmax_rows_f32")
-    TENSOR_EW[:state] = {:device => device, :queue => queue, :pipe => pipe, :softmax_pipe => softmax_pipe}
+    # Keep the cooperative pipeline lazy: elementwise-only and short-row
+    # workloads should not pay its pipeline construction cost.
+    TENSOR_EW[:state] = {:device => device, :queue => queue, :lib => lib, :pipe => pipe, :softmax_pipe => softmax_pipe}
   TENSOR_EW[:state]
 
 + Tensor
@@ -863,10 +909,9 @@ TENSOR_EW = {}
       return false
     self.size >= 4096
 
-  # Row-wise softmax on the GPU: one thread per row scans for the max,
-  # exponentiates, and normalizes — numerically stable, same recipe as the
-  # CPU reference. Requires f32, rank 2, contiguous, softmax along axis 1.
-  -> gpu_softmax_rows
+  # Serial row-wise GPU softmax retained for short rows, where assigning one
+  # thread per row keeps enough independent work in flight.
+  -> gpu_softmax_rows_serial
     st = tensor_ew_state()
     rows = shape[0]
     cols = shape[1]
@@ -879,6 +924,35 @@ TENSOR_EW = {}
     n_groups = (rows + tg - 1) / tg
     metal_dispatch_groups(st[:queue], st[:softmax_pipe], [buffer, result.buffer, rows_buf, cols_buf], n_groups, tg)
     result
+
+  # One threadgroup cooperates on each row with simdgroup max/sum reductions.
+  # The explicit width keeps the calibrated policy visible and lets focused
+  # tests exercise the cooperative kernel directly.
+  -> gpu_softmax_rows_parallel(threads_per_row = 256)
+    st = tensor_ew_state()
+    if st[:softmax_parallel_pipe] == nil
+      st[:softmax_parallel_pipe] = metal_pipeline(st[:lib], "softmax_rows_parallel_f32")
+    rows = shape[0]
+    cols = shape[1]
+    result = Tensor.zeros(device, 3, shape)
+    rows_buf = metal_buffer(device, 4)
+    metal_buffer_write_i32(rows_buf, 0, rows)
+    cols_buf = metal_buffer(device, 4)
+    metal_buffer_write_i32(cols_buf, 0, cols)
+    metal_dispatch_groups(st[:queue], st[:softmax_parallel_pipe], [buffer, result.buffer, rows_buf, cols_buf], rows, threads_per_row)
+    result
+
+  # The matched sweep found the cooperative route robustly ahead once a row
+  # reaches 256 columns. Use wider groups only after there is enough column
+  # work to amortize the additional lanes; short rows preserve the original
+  # serial reduction order and dispatch geometry.
+  -> gpu_softmax_rows
+    cols = shape[1]
+    return self.gpu_softmax_rows_serial() if cols < 256
+    threads = 128
+    threads = 256 if cols > 256
+    threads = 512 if cols > 4096
+    self.gpu_softmax_rows_parallel(threads)
 
   -> gpu_binop(other, kind)
     st = tensor_ew_state()
@@ -1181,8 +1255,8 @@ TENSOR_EW = {}
   -> softmax(axis)
     if axis < 0 || axis >= self.rank
       raise "Tensor.softmax: axis out of range"
-    # GPU path: row-wise f32 softmax (one thread per row) — the attention
-    # shape. Anything else falls through to the CPU reference.
+    # GPU path: row-wise f32 softmax. The internal shape policy selects a
+    # serial row lane or a cooperative simdgroup/threadgroup reduction.
     if dtype == 3 && self.rank == 2 && axis == 1 && self.contiguous?
       return self.gpu_softmax_rows()
     result = Tensor.zeros_like(self, shape, nil)

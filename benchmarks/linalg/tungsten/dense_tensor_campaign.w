@@ -17,6 +17,9 @@
 #   dense_tensor_campaign matmul-output [iterations]
 #   dense_tensor_campaign blas-structured [iterations]
 #   dense_tensor_campaign matmul-into [iterations]
+#   dense_tensor_campaign softmax-gpu-check [rows] [cols] [threads]
+#   dense_tensor_campaign softmax-gpu-bench [serial|parallel] [rows] [cols] [threads] [iterations]
+#   dense_tensor_campaign softmax-gpu-paired [rows] [cols] [threads] [iterations] [serial-first|parallel-first]
 
 use core/blas
 use core/tensor
@@ -33,6 +36,16 @@ use core/tensor
     data[i] = ((i % 97) + 1).to_f / ~97.0
     i += 1
   Tensor.wrap_cpu(data, dtype, [rows, cols], [cols, 1], 0)
+
+-> filled_gpu_tensor(rows, cols)
+  device = metal_device()
+  data = metal_array(-32, rows * cols)
+  i = 0
+  while i < rows * cols
+    # Cover a broad finite input range while keeping every row distinct.
+    data[i] = (((i * 13 + i / cols * 17) % 257) - 128).to_f / ~17.0
+    i += 1
+  [Tensor.from_array(device, data, Tensor.f32, [rows, cols]), data]
 
 -> scalar_dot_f64(a, b, n)
   total = ~0.0
@@ -458,5 +471,120 @@ elsif mode == "matmul-into"
   left.matmul_into(right, scaled, ~2.0, ~0.5)
   assert_close(scaled.at([17, 29]), allocated.at([17, 29]) * ~2.0 + ~5.0, "matmul_into alpha beta")
   << "MATMUL_INTO allocated_us=" + (allocated_elapsed * ~1000000.0 / iterations).to_s + " into_us=" + (into_elapsed * ~1000000.0 / iterations).to_s
+elsif mode == "softmax-gpu-check"
+  rows = ARGV[1] == nil ? 7 : ARGV[1].to_i
+  cols = ARGV[2] == nil ? 1537 : ARGV[2].to_i
+  threads = ARGV[3] == nil ? 256 : ARGV[3].to_i
+  pair = filled_gpu_tensor(rows, cols)
+  x = pair[0]
+  input = pair[1]
+  serial = x.gpu_softmax_rows_serial()
+  cooperative = x.gpu_softmax_rows_parallel(threads)
+  max_serial_error = ~0.0
+  max_parallel_error = ~0.0
+  max_pair_error = ~0.0
+  max_row_sum_error = ~0.0
+  r = 0
+  while r < rows
+    mx = input[r * cols]
+    c = 1
+    while c < cols
+      value = input[r * cols + c]
+      mx = value if value > mx
+      c += 1
+    sm = ~0.0
+    c = 0
+    while c < cols
+      sm += Math.exp(input[r * cols + c] - mx)
+      c += 1
+    row_sum = ~0.0
+    c = 0
+    while c < cols
+      expected = Math.exp(input[r * cols + c] - mx) / sm
+      sv = serial.at([r, c])
+      pv = cooperative.at([r, c])
+      se = (sv - expected).abs
+      pe = (pv - expected).abs
+      pair_error = (pv - sv).abs
+      max_serial_error = se if se > max_serial_error
+      max_parallel_error = pe if pe > max_parallel_error
+      max_pair_error = pair_error if pair_error > max_pair_error
+      row_sum += pv
+      c += 1
+    row_sum_error = (row_sum - ~1.0).abs
+    max_row_sum_error = row_sum_error if row_sum_error > max_row_sum_error
+    r += 1
+  raise "parallel softmax diverged" if max_parallel_error > ~0.000002 || max_row_sum_error > ~0.00001
+  << "SOFTMAX_GPU_CHECK rows=" + rows.to_s + " cols=" + cols.to_s + " threads=" + threads.to_s + " serial_err=" + max_serial_error.to_s + " parallel_err=" + max_parallel_error.to_s + " pair_err=" + max_pair_error.to_s + " row_sum_err=" + max_row_sum_error.to_s
+elsif mode == "softmax-gpu-bench"
+  variant = ARGV[1]
+  rows = ARGV[2] == nil ? 128 : ARGV[2].to_i
+  cols = ARGV[3] == nil ? 1024 : ARGV[3].to_i
+  threads = ARGV[4] == nil ? 256 : ARGV[4].to_i
+  iterations = ARGV[5] == nil ? 1000 : ARGV[5].to_i
+  pair = filled_gpu_tensor(rows, cols)
+  x = pair[0]
+  out = nil
+  if variant == "serial"
+    out = x.gpu_softmax_rows_serial()
+  elsif variant == "parallel"
+    out = x.gpu_softmax_rows_parallel(threads)
+  else
+    raise "softmax-gpu-bench variant must be serial or parallel"
+  t0 = clock()
+  i = 0
+  while i < iterations
+    if variant == "serial"
+      out = x.gpu_softmax_rows_serial()
+    else
+      out = x.gpu_softmax_rows_parallel(threads)
+    i += 1
+  elapsed = clock() - t0
+  checksum = out.at([rows / 2, cols / 3])
+  << "SOFTMAX_GPU_BENCH variant=" + variant + " rows=" + rows.to_s + " cols=" + cols.to_s + " threads=" + threads.to_s + " us/op=" + (elapsed * ~1000000.0 / iterations).round(3).to_s + " checksum=" + checksum.to_s
+elsif mode == "softmax-gpu-paired"
+  rows = ARGV[1] == nil ? 128 : ARGV[1].to_i
+  cols = ARGV[2] == nil ? 1024 : ARGV[2].to_i
+  threads = ARGV[3] == nil ? 256 : ARGV[3].to_i
+  iterations = ARGV[4] == nil ? 1000 : ARGV[4].to_i
+  order = ARGV[5] == nil ? "serial-first" : ARGV[5]
+  pair = filled_gpu_tensor(rows, cols)
+  x = pair[0]
+  serial = x.gpu_softmax_rows_serial()
+  cooperative = x.gpu_softmax_rows_parallel(threads)
+  serial_elapsed = ~0.0
+  cooperative_elapsed = ~0.0
+  if order == "serial-first"
+    t0 = clock()
+    i = 0
+    while i < iterations
+      serial = x.gpu_softmax_rows_serial()
+      i += 1
+    serial_elapsed = clock() - t0
+    t0 = clock()
+    i = 0
+    while i < iterations
+      cooperative = x.gpu_softmax_rows_parallel(threads)
+      i += 1
+    cooperative_elapsed = clock() - t0
+  elsif order == "parallel-first"
+    t0 = clock()
+    i = 0
+    while i < iterations
+      cooperative = x.gpu_softmax_rows_parallel(threads)
+      i += 1
+    cooperative_elapsed = clock() - t0
+    t0 = clock()
+    i = 0
+    while i < iterations
+      serial = x.gpu_softmax_rows_serial()
+      i += 1
+    serial_elapsed = clock() - t0
+  else
+    raise "softmax-gpu-paired order must be serial-first or parallel-first"
+  serial_checksum = serial.at([rows / 2, cols / 3])
+  parallel_checksum = cooperative.at([rows / 2, cols / 3])
+  raise "softmax paired checksum mismatch" if (serial_checksum - parallel_checksum).abs > ~0.000002
+  << "SOFTMAX_GPU_PAIRED rows=" + rows.to_s + " cols=" + cols.to_s + " threads=" + threads.to_s + " serial_us=" + (serial_elapsed * ~1000000.0 / iterations).round(3).to_s + " parallel_us=" + (cooperative_elapsed * ~1000000.0 / iterations).round(3).to_s + " serial_checksum=" + serial_checksum.to_s + " parallel_checksum=" + parallel_checksum.to_s
 else
   raise "unknown mode: " + mode

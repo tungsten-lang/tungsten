@@ -597,3 +597,69 @@ Evidence-only closeout: retain `dsyev` for the existing full-spectrum values
 API and reject both production substitutions. `dsyevr` remains relevant to a
 future partial-spectrum API, where requesting a subset could change the work
 comparison; that is a different contract and is not claimed here.
+## Original item 10 — shape- and staging-aware nested-list GEMM policy
+
+Source finding: `LinAlg.matmul` selected Accelerate only when `m`, `k`, and `n`
+were each at least eight. That universal gate ignored the actual boundary cost:
+the nested-list API must stage `mk + kn + mn` f64 elements for one CPU dgemm.
+It consequently left large tall, short-wide, matrix-vector, and outer products
+on dynamically dispatched scalar loops, while a true dot product could never
+amortize two input copies even at `k=8192`.
+
+`benchmarks/linalg/tungsten/matmul_policy_campaign.w` forces scalar, staged
+dgemm, or public auto routing for arbitrary `m,k,n`. Inputs are small integral
+f64 values, so every tested multiply and sum is exactly representable. The
+oracle compares every output element with `==`; square, tall/short-wide,
+one-row/one-column, dot, outer, and low-inner-dimension sweeps all passed.
+`spec/core/linalg_matmul_policy_spec.w` pins both sides of every retained
+threshold and exact public-output parity, and is classified in the compiled
+spec lane.
+
+The retained CPU/single-product policy is inspectable through
+`LinAlg.matmul_route(m,k,n)`. Tensor remains the owner of views, offsets,
+batched GEMM, and non-CPU backends. The nested-list rules are deliberately
+conservative:
+
+- dimensions all below eight stay scalar; `8x8x8` and larger balanced products
+  satisfy the work model naturally;
+- `k=1` requires at least four rows and columns and 1,024 output elements;
+- a one-row or one-column result requires 4,096 products and
+  `10 * products >= 9 * staged_elements`, excluding long dot-like contractions;
+- a two-wide result requires at least 512 products, preserving the noisy
+  `96x2x2` scalar band while retaining the robust `128x2x2` crossover;
+- other rectangular shapes compare FLOPs plus nested-output work with both
+  flat input copies and a measured 192-element fixed-cost allowance.
+
+The policy leaf has an `(i64 i64 i64) i64` signature, so dimensions remain in
+registers rather than paying an indirect/dynamic policy dispatch. Full LTO
+inlines the leaf into `LinAlg.matmul` (no policy symbol remains in `nm`); its
+release branch region contains only integer multiply, compare, and direct
+branches before entering the existing scalar or staged-dgemm body.
+
+Final five-sample medians below are exact-revision, alternating old-policy/new-
+policy public `LinAlg.matmul` calls. The host was not quiet: eight unrelated
+`md_order23` searches each consumed roughly one CPU while the final sweep ran.
+Absolute nanoseconds are therefore diagnostic; only route changes that won by
+at least 1.5x under that load were retained. Marginal outer and row crossovers
+remain structurally on the old scalar lane.
+
+| shape family (`m x k x n`) | old policy ns | retained policy ns | speedup |
+| --- | ---: | ---: | ---: |
+| outer short-wide `4x1x256` | 41,795 | 17,717 | 2.36x |
+| outer square `32x1x32` | 42,962 | 17,149 | 2.51x |
+| row-vector `1x64x64` | 118,657 | 73,031 | 1.62x |
+| column-vector `64x64x1` | 116,572 | 72,574 | 1.61x |
+| row aspect `1x256x16` | 117,800 | 75,725 | 1.56x |
+| general skinny `4x24x4` | 11,538 | 7,059 | 1.63x |
+| low-inner `12x2x12` | 10,941 | 6,344 | 1.72x |
+| tall two-column `128x2x2` | 23,134 | 14,129 | 1.64x |
+| tall-skinny `128x4x4` | 70,656 | 21,225 | 3.33x |
+| short-wide `4x4x128` | 67,044 | 17,118 | 3.92x |
+
+Structural no-regression controls retained the same implementation on both
+revisions: `7x7x7`, `8x8x8`, `16x1x16`, `2x1x512`, `1x48x48`,
+`1x512x8`, `1x8192x1`, `2x256x2`, `4x16x4`, and `8x2x8` had median
+ratios from 0.97x to 1.03x under the same load. `96x2x2` also stayed scalar
+and improved 1.47x because the typed policy leaf replaces three boxed cutoff
+comparisons. Retained: the old gate's proven lanes are preserved, noisy
+crossovers are rejected, and robust aspect-ratio wins become reachable.

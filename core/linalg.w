@@ -5,6 +5,43 @@
 #
 # Accelerated paths: core/blas.w (sgemm, sgemv, dgesv, …) when linked.
 
+# Typed policy leaf: dimensions stay in registers and the dynamic LinAlg call
+# boundary pays no boxed-arithmetic or secondary method-dispatch cost.
+-> linalg_matmul_accelerated_raw(m, k, n) (i64 i64 i64) i64
+  return 0 if m <= 0 || k <= 0 || n <= 0
+
+  products = m * k * n
+  output_elements = m * n
+  input_elements = m * k + k * n
+  staged_elements = input_elements + output_elements
+  flops = products * 2
+  input_bytes = input_elements * 8
+  output_bytes = output_elements * 8
+  copied_bytes = staged_elements * 8
+
+  # The Accelerate call/allocator floor still dominates when every dimension
+  # fits below an 8-wide micro-tile.  The 7^3 public-path probe is scalar-fast;
+  # 8^3 is already a clear staged-dgemm win.
+  return 0 if m < 8 && k < 8 && n < 8
+
+  if k == 1
+    return 0 if m == 1 || n == 1
+    return 0 if m < 4 || n < 4
+    return 1 if output_bytes >= 8192
+    return 0
+
+  if m == 1 || n == 1
+    return 0 if flops < 8192
+    return 1 if flops * 40 >= copied_bytes * 9
+    return 0
+
+  # A two-wide output still exposes the fixed allocator/call floor.  Keep the
+  # noisy 96x2x2 band scalar; 128x2x2 is the first robust staged-dgemm win.
+  return 0 if (m <= 2 || n <= 2) && products < 512
+
+  return 1 if 4 * flops + output_bytes >= input_bytes + 1536
+  0
+
 # A reusable dense LU factorization. The factor and pivot buffers are
 # immutable after construction; each solve owns (or is given) a distinct RHS,
 # so one factor can safely be shared by callers that do not share outputs.
@@ -249,11 +286,41 @@
       i = i + 1
     a
 
+  # Select the nested-list matmul implementation from the work that each path
+  # actually performs.  This API always receives row-major lists, executes one
+  # CPU product, and returns row-major lists, so the accelerated lane must copy
+  # `mk + kn + mn` f64 elements around an Accelerate dgemm call.  Tensor owns
+  # view/layout flags, batched GEMM, and non-CPU backend selection.
+  #
+  # The thresholds come from `matmul_policy_campaign.w` crossovers.  Separate
+  # lanes matter for extreme aspect ratios: dot/scale shapes cannot amortize
+  # two input copies, while outer products save enough dynamic nested-output
+  # work to cross over much earlier than one-row/one-column products.
+  -> .matmul_accelerated?(m, k, n)
+    # Rank-one outer products are output-bound.  Require 1,024 outputs and at
+    # least four rows and columns; smaller/noisier crossover candidates remain
+    # on the prior scalar path.  A one-element aspect is scaling, not an outer
+    # product, and remains scalar.
+    # A single output row or column is input-staging-bound.  The 4,096-product
+    # floor is the conservative matched 64x64 crossover; the intensity check
+    # excludes long dot-like contractions such as 1x1024 by 1024x4.  Written in
+    # bytes/FLOPs, it is the measured `10 * products >= 9 * staged_elements`
+    # boundary.
+    # General rectangular lane.  Dynamic scalar work is one product plus one
+    # nested output write; dgemm staging is the two flat input copies plus a
+    # measured 192-element fixed-cost allowance.  All m,k,n >= 8 products
+    # satisfy this naturally, without a universal per-dimension cutoff.
+    linalg_matmul_accelerated_raw(m, k, n) != 0
+
+  # Publicly inspectable without performing or allocating a multiplication.
+  -> .matmul_route(m, k, n)
+    LinAlg.matmul_accelerated?(m, k, n) ? :accelerate : :scalar
+
   -> .matmul(a, b)
     m = LinAlg.rows(a)
     k = LinAlg.cols(a)
     n = LinAlg.cols(b)
-    if m >= LinAlg.lapack_cutoff && k >= LinAlg.lapack_cutoff && n >= LinAlg.lapack_cutoff
+    if linalg_matmul_accelerated_raw(m, k, n) != 0
       fa = ccall("w_array_new_aligned", -64, m * k)
       i = 0
       while i < m

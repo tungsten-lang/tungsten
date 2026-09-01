@@ -69,7 +69,7 @@ ATTN_SCALE = ~1.0 / Math.sqrt(~0.0 + HEAD_DIM)
 ROT_DIM = 64
 ROT_HALF = ROT_DIM / 2
 ROPE_BASE = ~10000000.0
-MAX_POS = 640
+MAX_POS = 2051
 
 # MoE.
 N_EXPERTS = 512
@@ -243,7 +243,9 @@ ple_conv_pipe = metal_pipeline(ple_lib, "ple_conv_dilated_step")
 # tensor, else the raw bf16 mmap. Consumed by enqueue_mv.
 -> mv_tensor(name)
   if selfquant && sq.has?(name)
-    [sq_tensor(name), sq_tensor(name + ".scale"), sq_tensor(name + ".global_scale")]
+    # h[3] = the ORIGINAL bf16 weight: chunked prefill GEMMs read it instead
+    # of the sidecar (no nibble decode; 2x bytes amortize across the chunk)
+    [sq_tensor(name), sq_tensor(name + ".scale"), sq_tensor(name + ".global_scale"), raw_tensor(name)]
   else
     [raw_tensor(name)]
 
@@ -653,7 +655,7 @@ argmax_partial_indices = metal_buffer(device, ARGMAX_CHUNKS * 4)
   output = spec[3]
   kdim = spec[4]
   rows = spec[5]
-  if h.size() == 3
+  if h.size() >= 3
     if use_b1 && rows <= 640
       prog.push([0, nvfp4_b1r1_pipe, [h[0], h[1], input, output, kdim, rows, h[2]], (rows + 1) / 2, 64])
     elsif use_16r && rows == 2560 && kdim >= 6144
@@ -1085,7 +1087,7 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
 -> enqueue_bf16(spec)
   h = spec[0]
   rows = spec[4]
-  if h.size() == 3
+  if h.size() >= 3
     # same rung selection as prog_mv — keep the two paths ids-identical
     if use_b1 && rows <= 640
       metal_dispatch_groups(queue, nvfp4_b1r1_pipe, [h[0], h[1], spec[1], spec[2], spec[3], rows, h[2]], (rows + 1) / 2, 64)
@@ -1102,7 +1104,7 @@ scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
 # and precomputes inj_tmp for the paired combine.
 -> hc_mix(hc)
   if skip_hc then return
-  if hc_fused && hc[:down].size() == 3 && hc[:up].size() == 3 && hc[:inject] != nil
+  if hc_fused && hc[:down].size() >= 3 && hc[:up].size() >= 3 && hc[:inject] != nil
     # Deep-fused NVFP4 path: 2 serial stages instead of 5 (hc_fused.metal).
     metal_dispatch_groups(queue, hc_mix_a_pipe,
       [H, hc[:norm], hc[:down][0], hc[:down][1], hc[:down][2], hc[:inject],
@@ -1408,14 +1410,20 @@ if golden_prefix != ""
 # decode_multi family matches our serial kernels except per-head norm, which
 # fn_phn_rope_multi re-clones with 1/sqrt and (x*rrms)*w). GDN conv/delta
 # advance their recurrent state by n tokens with ONE ping flip per block.
-MULTI_MAX = 8
-if multi_n > 0 || mtp_depth > 0
+# 64 = the prefill chunk width; spec/multi verify widths stay <= 8 (rung
+# kernels), widths 9..64 route to the nvfp4_gemm_f32 m-tiles.
+MULTI_MAX = 64
+PREFILL_CHUNK = 64
+# only the final chunk needs logits; cap it so logits_m stays 64-wide
+PREFILL_LAST_MAX = 64
+if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   fnm_lib = metal_compile_source(device, read_file(FN_DIR + "fn_multi.metal"))
   grms_m_pipe = metal_pipeline(fnm_lib, "grouped_rms_norm_multi")
   hc_mix_reduce_m_pipe = metal_pipeline(fnm_lib, "hc_mix_reduce_multi")
   hc_combine_m_pipe = metal_pipeline(fnm_lib, "hc_combine_multi")
   router_m_pipe = metal_pipeline(fnm_lib, "router_softmax_topk10_multi")
   gather_m_pipe = metal_pipeline(fnm_lib, "moe_gather_matvec_multi")
+  moe_sort_pipe = metal_pipeline(fnm_lib, "moe_sort_pairs")
   moe_out_m_pipe = metal_pipeline(fnm_lib, "moe_output_multi")
   ple_gate_m_pipe = metal_pipeline(fnm_lib, "ple_gate_multi")
   ple_conv_m_pipe = metal_pipeline(fnm_lib, "ple_conv_dilated_multi")
@@ -1431,10 +1439,15 @@ if multi_n > 0 || mtp_depth > 0
   delta_m_pipe = metal_pipeline(dm_lib, "gated_delta_multi")
   fill_zero_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "fill_zero.metal")), "fill_zero")
   wide_grid_lib = metal_compile_source(device, read_file(NVFP4_DIR + "nvfp4_matvec_mlx_scaled_wide.metal"))
+  bf16_gemm_lib = metal_compile_source(device, read_file(FN_DIR + "bf16_gemm_f32.metal"))
+  bgemm_m16_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m16")
+  bgemm_m32_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m32")
+  bgemm_m64_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m64")
+  bgemm_m128_pipe = metal_pipeline(bf16_gemm_lib, "bf16_gemm_f32_m128")
   nv_multi_pipes = []
   nv_multi_pipes_r2 = []
   bw = 1
-  while bw <= MULTI_MAX
+  while bw <= 8
     nv_multi_pipes.push(metal_pipeline(wide_grid_lib, "nvfp4_wide_b" + bw.to_s + "_r1"))
     nv_multi_pipes_r2.push(metal_pipeline(wide_grid_lib, "nvfp4_wide_b" + bw.to_s + "_r2"))
     bw = bw + 1
@@ -1501,12 +1514,13 @@ if multi_n > 0 || mtp_depth > 0
       lyr[:ple][:nc_v] = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
     li = li + 1
   flip_defer = [0]
-  logits_m = metal_buffer(device, MULTI_MAX * N_VOCAB * 4)
+  logits_m = metal_buffer(device, PREFILL_LAST_MAX * N_VOCAB * 4)
   am_pv_m = metal_buffer(device, MULTI_MAX * ARGMAX_CHUNKS * 4)
   am_pi_m = metal_buffer(device, MULTI_MAX * ARGMAX_CHUNKS * 4)
   am_out_m = metal_buffer(device, MULTI_MAX * 4)
   tok_ids_m = metal_buffer(device, MULTI_MAX * 4)
   mpos_buf = metal_buffer(device, 4)
+  order_m = metal_buffer(device, MULTI_MAX * TOP_K * 4)
 
 # Record-or-dispatch wrappers: with mrec set, the multi helpers append
 # program steps instead of encoding, so a width's whole verify pass can be
@@ -1540,7 +1554,15 @@ mrec = [0]
 # big-row shapes (register pressure); r2 wins there; r1 stays best at
 # rows<=640 (occupancy) and at width 1.
 -> mv_multi(h, x_in, y_out, kdim, rows, n)
-  if h.size() == 3
+  if n > 8
+    wraw = h.size() >= 3 ? h[3] : h[0]
+    if n > 32
+      mdg(bgemm_m64_pipe, [wraw, x_in, y_out, kdim, rows, n], (rows + 31) / 32, 128)
+    elsif n > 16
+      mdg(bgemm_m32_pipe, [wraw, x_in, y_out, kdim, rows, n], (rows + 31) / 32, 128)
+    else
+      mdg(bgemm_m16_pipe, [wraw, x_in, y_out, kdim, rows, n], (rows + 31) / 32, 128)
+  elsif h.size() >= 3
     if n >= 2 && rows > 640
       mdg(nv_multi_pipes_r2[n - 1], [h[0], h[1], x_in, y_out, kdim, rows, h[2]], (rows + 3) / 4, 64)
     else
@@ -1549,6 +1571,7 @@ mrec = [0]
     mdg(bf16_m_pipe, [h[0], x_in, y_out, kdim, rows, n], rows, 32)
 
 -> hc_mix_multi(hc, n)
+  if skip_hc then return
   mdg(grms_m_pipe, [h_m, hc[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
   mbar([n_tmp_m])
   mv_multi(hc[:down], n_tmp_m, lowrank_m, HC_HIDDEN, HC_LOWRANK, n)
@@ -1562,10 +1585,12 @@ mrec = [0]
   mbar([xn_m, inj_m])
 
 -> hc_combine_multi_step(n)
+  if skip_hc then return
   mdn(hc_combine_m_pipe, [h_m, y_m, inj_m, HC_COUNT, HIDDEN, n], n * HC_COUNT * HIDDEN)
   mbar([h_m])
 
 -> mamba_multi(lyr, n)
+  if skip_gdn then return
   ping = lyr[:ping]
   cs_in = ping == 0 ? lyr[:cs_a] : lyr[:cs_b]
   cs_out = ping == 0 ? lyr[:cs_b] : lyr[:cs_a]
@@ -1593,6 +1618,7 @@ mrec = [0]
 # pos_start for kv_write/sdpa is read from mpos_buf (contents rewritten per
 # round) so recorded programs replay at any position.
 -> full_multi(lyr, n)
+  if skip_attn then return
   mv_multi(lyr[:q], xn_m, qfull_m, HIDDEN, QFULL_DIM, n)
   mv_multi(lyr[:k], xn_m, k_m, HIDDEN, KV_DIM, n)
   mv_multi(lyr[:v], xn_m, v_m, HIDDEN, KV_DIM, n)
@@ -1612,6 +1638,7 @@ mrec = [0]
   mbar([y_m])
 
 -> moe_multi(lyr, n)
+  if skip_moe then return
   ex = lyr[:experts]
   og = ex[:offs]["gate_proj"]
   ou = ex[:offs]["up_proj"]
@@ -1625,18 +1652,21 @@ mrec = [0]
   mdg(router_m_pipe, [rlog_m, tidx_m, tw_m], n, 512)
   mdn(silu_pipe, [sg_m, su_m, sh_m, n * SHARED_FFN], n * SHARED_FFN)
   mbar([tidx_m, sh_m])
-  mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], TOP_K, 0, ex[:hot], og[6], og[7], og[8]], n * TOP_K * (MOE_FFN / 8), 64)
-  mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5], TOP_K, 0, ex[:hot], ou[6], ou[7], ou[8]], n * TOP_K * (MOE_FFN / 8), 64)
+  mdg(moe_sort_pipe, [tidx_m, order_m, n * TOP_K], 1, 512)
+  mbar([order_m])
+  mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], TOP_K, 0, ex[:hot], og[6], og[7], og[8], order_m], n * TOP_K * (MOE_FFN / 8), 64)
+  mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5], TOP_K, 0, ex[:hot], ou[6], ou[7], ou[8], order_m], n * TOP_K * (MOE_FFN / 8), 64)
   mv_multi(lyr[:sh_down], sh_m, shared_m, SHARED_FFN, HIDDEN, n)
   mbar([eg_m, eu_m])
   mdn(silu_pipe, [eg_m, eu_m, eh_m, n * TOP_K * MOE_FFN], n * TOP_K * MOE_FFN)
   mbar([eh_m])
-  mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], eh_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5], TOP_K, 1, ex[:hot], od[6], od[7], od[8]], n * TOP_K * (HIDDEN / 8), 64)
+  mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], eh_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5], TOP_K, 1, ex[:hot], od[6], od[7], od[8], order_m], n * TOP_K * (HIDDEN / 8), 64)
   mbar([ed_m, tw_m, shared_m, seg_m])
   mdn(moe_out_m_pipe, [ed_m, tw_m, shared_m, seg_m, y_m, TOP_K, HIDDEN, n], n * HIDDEN)
   mbar([y_m])
 
 -> ple_multi(lyr, n)
+  if skip_ple then return
   pp = lyr[:ple]
   ping = pp[:ping]
   cs_in = ping == 0 ? pp[:cs_a] : pp[:cs_b]
@@ -1698,12 +1728,15 @@ mrec = [0]
     moe_multi(lyr, n)
     hc_combine_multi_step(n)
     li = li + 1
-  head_multi(n)
+  if multi_head_on[0] == 1 then head_multi(n)
 
 # Recorded programs per (width, mamba ping parity): the ping choice is baked
 # into the recorded args, and every mamba/PLE layer flips exactly once per
 # verify round, so parity is global.
 multi_progs = {}
+# 0 during interior prefill chunks: skip the mixer + lm_head + argmax (only
+# the last chunk needs logits) — saves ~360 MB of lm_head stream per chunk.
+multi_head_on = [1]
 
 -> record_multi_prog(n)
   while mprog.size() > 0
@@ -1736,7 +1769,7 @@ multi_progs = {}
       ri = ri + 1
     t = t + 1
   metal_buffer_write_i32(mpos_buf, 0, pos0)
-  prog_key = n * 2 + layers[0][:ping]
+  prog_key = (n * 2 + layers[0][:ping]) * 2 + multi_head_on[0]
   if multi_progs[prog_key] == nil
     multi_progs[prog_key] = record_multi_prog(n)
   metal_batch_begin_concurrent(queue)
@@ -1895,15 +1928,15 @@ if mtp_depth > 0
 
 # One MTP draft: fuse (H, emb(next_tok)) at real position pos_real (kv slot
 # pos_real-1), run the head layer, return the drafted token id.
--> mtp_body(hsrc)
-  mtp_fuse_gpu(hsrc, 1)
-  hc_mix_multi(mtp_attn_hc, 1)
-  full_multi(mtp_lyr, 1)
-  hc_combine_multi_step(1)
-  hc_mix_multi(mtp_mlp_hc, 1)
-  mtp_moe_multi(1)
-  hc_combine_multi_step(1)
-  mtp_head_multi(1)
+-> mtp_body(hsrc, n)
+  mtp_fuse_gpu(hsrc, n)
+  hc_mix_multi(mtp_attn_hc, n)
+  full_multi(mtp_lyr, n)
+  hc_combine_multi_step(n)
+  hc_mix_multi(mtp_mlp_hc, n)
+  mtp_moe_multi(n)
+  hc_combine_multi_step(n)
+  if multi_head_on[0] == 1 then mtp_head_multi(n)
 
 # Recorded draft programs: variant 0 fuses from the main H, variant 1 from
 # the MTP layer's own h_m (chained drafts). Everything token-dependent flows
@@ -1919,7 +1952,7 @@ mtp_progs = [nil, nil]
     while mprog.size() > 0
       mprog.pop()
     mrec[0] = 1
-    mtp_body(hsrc)
+    mtp_body(hsrc, 1)
     mrec[0] = 0
     rec_out = []
     ri2 = 0
@@ -1932,6 +1965,39 @@ mtp_progs = [nil, nil]
   ccall("w_metal_program_run", queue, mtp_progs[variant], with_barriers2)
   metal_batch_commit(queue)
   metal_buffer_read_i32(am_out_m, 0)
+
+# Width-n MTP prefill: populate the MTP kv cache for a whole chunk in one
+# recorded pass (fuses h_m[t] with emb(next_toks[t]); head skipped — only kv
+# writes matter during prefill).
+mtp_pf_progs = {}
+
+-> mtp_prefill_chunk(next_toks, pos0, n)
+  t = 0
+  while t < n
+    metal_buffer_write_i32(tok_ids_m, t, next_toks[t])
+    t = t + 1
+  mtp_rope(pos0, n)
+  metal_buffer_write_i32(mpos_buf, 0, pos0 - 1)
+  pf_key = n
+  if mtp_pf_progs[pf_key] == nil
+    while mprog.size() > 0
+      mprog.pop()
+    mrec[0] = 1
+    hd_save = multi_head_on[0]
+    multi_head_on[0] = 0
+    mtp_body(h_m, n)
+    multi_head_on[0] = hd_save
+    mrec[0] = 0
+    rec2 = []
+    ci = 0
+    while ci < mprog.size()
+      rec2.push(mprog[ci])
+      ci = ci + 1
+    mtp_pf_progs[pf_key] = rec2
+  metal_batch_begin_concurrent(queue)
+  wb2 = 2 - 1
+  ccall("w_metal_program_run", queue, mtp_pf_progs[pf_key], wb2)
+  metal_batch_commit(queue)
 
 # Recompute the recurrent states for the accepted prefix (tape replay from
 # the per-layer stashes) and flip all deferred pings. On a full accept the
@@ -1984,11 +2050,45 @@ setup_elapsed = ccall("__w_clock_ms") - setup_t0
 prefill_t0 = ccall("__w_clock_ms")
 pred = -1
 i = 0
-while i < prompt.size()
-  pred = forward(prompt[i], i, i == prompt.size() - 1)
-  if mtp_depth > 0
-    mtp_step(i + 1 < prompt.size() ? prompt[i + 1] : pred, i + 1, 0)
-  i = i + 1
+# Chunked prefill: PREFILL_CHUNK-token blocks through the recorded multi
+# path (quant projections on nvfp4_gemm_f32 m-tiles). Interior chunks skip
+# the head. FN_CHUNK=0 forces the serial token-by-token prefill (A/B and
+# ids gate). GEMM MMA summation is NOT bit-identical to the matvec family —
+# gate chunked-vs-serial on ids, like the 27B did.
+prefill_chunked = prompt.size() > 8 && ccall("__w_env", "FN_CHUNK") != "0"
+if prefill_chunked
+  while i < prompt.size()
+    remaining = prompt.size() - i
+    cw = remaining
+    if cw > PREFILL_CHUNK then cw = PREFILL_CHUNK
+    # the head-bearing final chunk must fit logits_m: shave this chunk so the
+    # tail lands in (0, PREFILL_LAST_MAX]
+    if remaining > cw && remaining - cw > 0 && remaining - cw < 1
+      cw = cw
+    if cw == remaining && cw > PREFILL_LAST_MAX
+      cw = remaining - PREFILL_LAST_MAX
+    chunk = prompt.slice(i, cw)
+    is_last = i + cw >= prompt.size()
+    multi_head_on[0] = is_last ? 1 : 0
+    ct0 = ccall("__w_clock_ms")
+    pf_preds = forward_multi(chunk, i, cw)
+    if fn_time then << "  chunk @" + i.to_s + " w" + cw.to_s + ": " + (ccall("__w_clock_ms") - ct0).to_s + " ms"
+    if is_last then pred = pf_preds[cw - 1]
+    if mtp_depth > 0
+      nxt = []
+      ti = 0
+      while ti < cw
+        nxt.push(i + ti + 1 < prompt.size() ? prompt[i + ti + 1] : pred)
+        ti = ti + 1
+      mtp_prefill_chunk(nxt, i + 1, cw)
+    i = i + cw
+  multi_head_on[0] = 1
+else
+  while i < prompt.size()
+    pred = forward(prompt[i], i, i == prompt.size() - 1)
+    if mtp_depth > 0
+      mtp_step(i + 1 < prompt.size() ? prompt[i + 1] : pred, i + 1, 0)
+    i = i + 1
 if ccall("__w_env", "FN_DUMP_H") != nil && ccall("__w_env", "FN_DUMP_H") != ""
   File.write_bytes(ccall("__w_env", "FN_DUMP_H"), metal_buffer_view(H, 8, HC_HIDDEN * 4))
   File.write_bytes(ccall("__w_env", "FN_DUMP_H") + ".logits", metal_buffer_view(logits, 8, N_VOCAB * 4))

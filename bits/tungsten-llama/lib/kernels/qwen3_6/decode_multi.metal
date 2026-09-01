@@ -20,7 +20,7 @@
 using namespace metal;
 
 constant int MULTI_MAX_TOK = 8;
-constant int MULTI_MAX_DECODE_POS = 640;
+constant int MULTI_MAX_DECODE_POS = 2051;
 
 static inline float bf16_multi_to_f32(ushort b) {
   return as_type<float>(uint(b) << 16);

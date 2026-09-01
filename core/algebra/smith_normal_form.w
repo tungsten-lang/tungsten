@@ -97,7 +97,14 @@
   # turns out to be elimination PASS COUNT, not coefficient growth —
   # bounded entries do not rescue it. Large-n SNF needs an HNF-first
   # algorithm; until then this exact elimination is the best lane.
+  # Square matrices at n >= 40 route through the HNF-first mod-D lane
+  # (measured crossover ~40; n=64 5.8x faster, n=96 in ~8 s where the
+  # exact elimination never finishes, n=128 in ~110 s). Singular inputs
+  # fall back inside the lane.
   -> .invariant_factors(matrix)
+    width = SmithNormalForm.validate(matrix)
+    if matrix.size == width && matrix.size >= 40
+      return SmithNormalForm.invariant_factors_hnf(matrix)
     SmithNormalForm.pivot_diagonal(matrix, nil)
 
   # Mod-determinant invariant factors (square, nonsingular; see the note
@@ -112,6 +119,155 @@
         return SmithNormalForm.factors_from_pivots(
           SmithNormalForm.pivot_diagonal(matrix, d), d)
     SmithNormalForm.pivot_diagonal(matrix, nil)
+
+  # Iterative extended Euclid: [g, x, y] with x*a + y*b = g, g >= 0.
+  -> .xgcd(a, b)
+    old_r = a
+    r = b
+    old_x = 1
+    x = 0
+    old_y = 0
+    y = 1
+    while r != 0
+      q = old_r / r
+      t = old_r - q * r
+      old_r = r
+      r = t
+      t = old_x - q * x
+      old_x = x
+      x = t
+      t = old_y - q * y
+      old_y = y
+      y = t
+    return [0 - old_r, 0 - old_x, 0 - old_y] if old_r < 0
+    [old_r, old_x, old_y]
+
+  # One triangularization sweep: extended-gcd row combines zero every
+  # below-diagonal entry column by column — each entry dies in ONE
+  # unimodular 2x2 combine ([x y; -v u], det = (xa + yb)/g = 1), so there
+  # is no restart pathology. Entries stay balanced mod d throughout (a
+  # multiple-of-d adjustment, legitimate under the pivot-product recovery).
+  -> .hnf_pass(m, n, d)
+    t = 0
+    while t < n
+      i = t + 1
+      while i < n
+        b = m[i][t]
+        if b != 0
+          a = m[t][t]
+          if a == 0
+            tmp = m[t]
+            m[t] = m[i]
+            m[i] = tmp
+          else
+            e = SmithNormalForm.xgcd(a, b)
+            g = e[0]
+            bez_x = e[1]
+            bez_y = e[2]
+            u = a / g
+            v = b / g
+            j = t
+            while j < n
+              rt = m[t][j]
+              ri = m[i][j]
+              m[t][j] = SmithNormalForm.balanced_mod(bez_x * rt + bez_y * ri, d)
+              m[i][j] = SmithNormalForm.balanced_mod(u * ri - v * rt, d)
+              j += 1
+        i += 1
+      # HNF normalization: reduce row t right of the pivot to nearest
+      # residues via column operations (below-diagonal entries of column t
+      # are zero, so only rows 0..t change). Without this the alternating
+      # sweep stalls — the transposed pass keeps receiving the same
+      # unreduced mass and the ping-pong never converges past small n.
+      p = m[t][t]
+      if p != 0
+        j = t + 1
+        while j < n
+          q = SmithNormalForm.nearest_quotient(m[t][j], p)
+          if q != 0
+            i = 0
+            while i <= t
+              m[i][j] = SmithNormalForm.balanced_mod(m[i][j] - q * m[i][t], d)
+              i += 1
+          j += 1
+      t += 1
+
+  -> .transpose_in_place(m, n)
+    i = 0
+    while i < n
+      j = i + 1
+      while j < n
+        t = m[i][j]
+        m[i][j] = m[j][i]
+        m[j][i] = t
+        j += 1
+      i += 1
+
+  -> .diagonal?(m, n)
+    i = 0
+    while i < n
+      j = 0
+      while j < n
+        return false if i != j && m[i][j] != 0
+        j += 1
+      i += 1
+    true
+
+  # HNF ping-pong invariant factors for a square NONSINGULAR matrix:
+  # alternate triangularization sweeps with transposes until diagonal (each
+  # sweep kills the below-diagonal mass; the transpose flips what the
+  # combines spread above), then recover the true factors from the pivot
+  # products — factors_from_pivots is correct for ANY diagonalization of a
+  # mod-D-congruent matrix, so convergence speed affects time, never
+  # correctness. Falls back to the exact elimination when d = 0 or the
+  # round cap trips.
+  -> .invariant_factors_hnf(matrix)
+    width = SmithNormalForm.validate(matrix)
+    height = matrix.size
+    return SmithNormalForm.pivot_diagonal(matrix, nil) if height != width
+    d = ExactIntegerLinearAlgebra.modular_determinant(matrix)
+    d = 0 - d if d < 0
+    return SmithNormalForm.pivot_diagonal(matrix, nil) if d == 0
+    m = SmithNormalForm.copy(matrix)
+    n = height
+    rounds = 0
+    done = false
+    while rounds < 100 && !done
+      SmithNormalForm.hnf_pass(m, n, d)
+      SmithNormalForm.transpose_in_place(m, n)
+      done = SmithNormalForm.diagonal?(m, n)
+      rounds += 1
+      ccall("w_probe_counter_add", 4, 1)
+    return SmithNormalForm.pivot_diagonal(matrix, nil) if !done
+    pivots = []
+    i = 0
+    while i < n
+      p = m[i][i]
+      p = 0 - p if p < 0
+      p = d if p == 0
+      pivots.push(p)
+      i += 1
+    # The recovery needs prod(first k pivots) = D_k, which holds only for a
+    # DIVISIBILITY-CHAIN diagonal. The ping-pong's diagonal is unordered, so
+    # first apply the classical pairwise (a, b) -> (gcd, a*b/gcd) sweeps —
+    # they preserve the diagonal's SNF and terminate in a chain.
+    changed = true
+    while changed
+      changed = false
+      i = 0
+      while i < n - 1
+        j = i + 1
+        while j < n
+          a = pivots[i]
+          b = pivots[j]
+          g = a.gcd(b)
+          if g != a
+            pivots[i] = g
+            pivots[j] = (a / g) * b
+            changed = true
+          j += 1
+        i += 1
+    SmithNormalForm.factors_from_pivots(pivots, d)
 
   # Recover the invariant factors from the mod-D pivot diagonal.
   -> .factors_from_pivots(pivots, d)

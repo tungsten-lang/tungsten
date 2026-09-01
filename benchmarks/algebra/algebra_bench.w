@@ -251,6 +251,22 @@ while rounds < 20
 t1 = now_ms
 << "BENCH snf_16x16_x20 ms=" + (t1 - t0).to_s + " factors=" + factors_big.size.to_s
 
+rng = BenchRandom.new(43)
+snf_hnf = []
+i = 0
+while i < 64
+  row = []
+  j = 0
+  while j < 64
+    row.push(rng.next_int(41) - 20)
+    j += 1
+  snf_hnf.push(row)
+  i += 1
+t0 = now_ms
+factors_hnf = SmithNormalForm.invariant_factors(snf_hnf)
+t1 = now_ms
+<< "BENCH snf_hnf_64x64 ms=" + (t1 - t0).to_s + " factors=" + factors_hnf.size.to_s
+
 # ── resultants (univariate, rational) ────────────────────────────────────
 rng = BenchRandom.new(19)
 res_a = uring.zero

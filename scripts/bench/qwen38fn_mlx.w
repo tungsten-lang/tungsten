@@ -185,8 +185,7 @@ if qsa_on && (mode != "concurrent" || golden_prefix != "" || expert_hist || skip
   raise "QSA (FN_CTX > 2051 or FN_QSA=1) requires the concurrent fast path"
 if MAX_POS > 2051 && (multi_n > 0 || mtp_spec > 0)
   raise "multi/mtp modes beyond ctx 2051 need the QSA multi path (not yet wired)"
-if MAX_POS > 2051 && prompt_tokens > 2051
-  raise "prompts beyond 2051 need QSA prefill (not yet wired); decode past 2051 works"
+
 mtp_pending = [0 - 1]
 mtp_hits = [0]
 mtp_total = [0]
@@ -1529,6 +1528,7 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   embed_m_pipe = metal_pipeline(dm_lib, "bf16_embedding_lookup_multi")
   bf16_m_pipe = metal_pipeline(dm_lib, "bf16_matvec_multi")
   split_m_pipe = metal_pipeline(dm_lib, "split_q_gate_multi")
+  slice_m_pipe = metal_pipeline(dm_lib, "copy_f32_slice_multi")
   kv_write_m_pipe = metal_pipeline(dm_lib, "kv_write_multi")
   sdpa_m_pipe = metal_pipeline(dm_lib, "sdpa_decode_multi_hd256")
   delta_m_pipe = metal_pipeline(dm_lib, "gated_delta_multi")
@@ -1616,6 +1616,14 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   tok_ids_m = metal_buffer(device, MULTI_MAX * 4)
   mpos_buf = metal_buffer(device, 4)
   order_m = metal_buffer(device, MULTI_MAX * TOP_K * 4)
+  if qsa_on
+    idx_qk_m = metal_buffer(device, MULTI_MAX * IDX_DIM * 4)
+    idx_q_m = metal_buffer(device, MULTI_MAX * 512 * 4)
+    qsa_scores_m = metal_buffer(device, MULTI_MAX * QSA_MAXB * 4)
+    qsa_sel_m = metal_buffer(device, MULTI_MAX * QSA_SEL_STRIDE * 4)
+    qsa_ns_m = metal_buffer(device, MULTI_MAX * 4)
+    qsa_nb_m = metal_buffer(device, MULTI_MAX * 4)
+    qsa_vis_m = metal_buffer(device, MULTI_MAX * 4)
 
 # Record-or-dispatch wrappers: with mrec set, the multi helpers append
 # program steps instead of encoding, so a width's whole verify pass can be
@@ -1714,6 +1722,19 @@ mrec = [0]
 # round) so recorded programs replay at any position.
 -> full_multi(lyr, n)
   if skip_attn then return
+  if qsa_on
+    mv_multi(lyr[:idx_qk], xn_m, idx_qk_m, HIDDEN, IDX_DIM, n)
+    mbar([idx_qk_m])
+    mdn(slice_m_pipe, [idx_qk_m, idx_q_m, IDX_DIM, 512, 0, 512, n], n * 512)
+    mdn(qsa_kw_pipe, [idx_qk_m, lyr[:idx_kc], mpos_buf, n], n * 128)
+    mbar([idx_q_m, lyr[:idx_kc]])
+    mdg(phn_rope_m_pipe, [idx_q_m, lyr[:idx_qn], cos_m, sin_m, 128, ROT_HALF, 4, ~1.0 / 128, EPS, n], n * 4, 32)
+    mdg(qsa_build_pipe, [lyr[:idx_kc], lyr[:idx_kn], lyr[:idx_blk], qsa_range_buf, EPS, qsa_logb], MULTI_MAX / 4 + 1, 128)
+    mbar([idx_q_m, lyr[:idx_blk]])
+    mdg(qsa_scores_pipe, [idx_q_m, lyr[:idx_blk], qsa_scores_m, qsa_nb_m, QSA_MAXB, n], (n * QSA_MAXB + 255) / 256, 256)
+    mbar([qsa_scores_m])
+    mdg(qsa_select_pipe, [qsa_scores_m, qsa_nb_m, qsa_vis_m, qsa_sel_m, qsa_ns_m, QSA_MAXB, 512], n, 512)
+    mbar([qsa_sel_m, qsa_ns_m])
   mv_multi(lyr[:q], xn_m, qfull_m, HIDDEN, QFULL_DIM, n)
   mv_multi(lyr[:k], xn_m, k_m, HIDDEN, KV_DIM, n)
   mv_multi(lyr[:v], xn_m, v_m, HIDDEN, KV_DIM, n)
@@ -1725,7 +1746,10 @@ mrec = [0]
   mbar([queries_m, k_m, v_m])
   mdn(kv_write_m_pipe, [k_m, v_m, lyr[:k_cache], lyr[:v_cache], mpos_buf, KV_DIM, n], n * KV_DIM)
   mbar([lyr[:k_cache], lyr[:v_cache]])
-  mdg(sdpa_m_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, GQA, mpos_buf, N_HEADS, KV_DIM, ATTN_SCALE, n], n * N_HEADS, 256)
+  if qsa_on
+    mdg(qsa_sdpa_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, qsa_sel_m, qsa_ns_m, GQA, N_HEADS, KV_DIM, ATTN_SCALE, QSA_SEL_STRIDE, n], n * N_HEADS, 256)
+  else
+    mdg(sdpa_m_pipe, [queries_m, lyr[:k_cache], lyr[:v_cache], attn_m, GQA, mpos_buf, N_HEADS, KV_DIM, ATTN_SCALE, n], n * N_HEADS, 256)
   mbar([attn_m, agate_m])
   mdn(gate_pipe, [attn_m, agate_m, n * ATTN_DIM], n * ATTN_DIM)
   mbar([attn_m])
@@ -1864,6 +1888,14 @@ multi_head_on = [1]
       ri = ri + 1
     t = t + 1
   metal_buffer_write_i32(mpos_buf, 0, pos0)
+  if qsa_on
+    t = 0
+    while t < n
+      metal_buffer_write_i32(qsa_nb_m, t, (pos0 + t + 1) / 4)
+      metal_buffer_write_i32(qsa_vis_m, t, pos0 + t + 1)
+      t = t + 1
+    metal_buffer_write_i32(qsa_range_buf, 0, pos0 / 4)
+    metal_buffer_write_i32(qsa_range_buf, 1, (pos0 + n) / 4)
   prog_key = (n * 2 + layers[0][:ping]) * 2 + multi_head_on[0]
   if multi_progs[prog_key] == nil
     multi_progs[prog_key] = record_multi_prog(n)
@@ -2150,9 +2182,7 @@ i = 0
 # the head. FN_CHUNK=0 forces the serial token-by-token prefill (A/B and
 # ids gate). GEMM MMA summation is NOT bit-identical to the matvec family —
 # gate chunked-vs-serial on ids, like the 27B did.
-# chunked prefill doesn't run the indexer steps yet, so QSA mode prefills
-# serially (populating the raw index-key caches per position)
-prefill_chunked = prompt.size() > 8 && ccall("__w_env", "FN_CHUNK") != "0" && !qsa_on
+prefill_chunked = prompt.size() > 8 && ccall("__w_env", "FN_CHUNK") != "0"
 if prefill_chunked
   while i < prompt.size()
     remaining = prompt.size() - i

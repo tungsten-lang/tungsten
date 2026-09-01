@@ -92,16 +92,20 @@
   -> finite_factor_candidate(code, maximum_degree)
     field = @ring.field
     remaining = code
-    polynomial = @ring.zero
+    terms = []
     exponent = 0
     while exponent < maximum_degree
       coefficient = remaining % field.order
       if !field.zero?(coefficient)
-        polynomial = polynomial + @ring.monomial_raw(
-          field.element_from_index(coefficient), [exponent])
+        terms.push([
+          field.element_from_index(coefficient), [exponent]
+        ])
       remaining = remaining / field.order
       exponent += 1
-    polynomial
+    # Digits arrive from low to high exponent. Reversing once yields the
+    # canonical descending term order and avoids allocating/merging one new
+    # Polynomial for every nonzero digit.
+    Polynomial.new(@ring, terms.reverse, true)
 
   -> proper_finite_factor?(factor, polynomial)
     factor.degree > 0 && factor.degree < polynomial.degree

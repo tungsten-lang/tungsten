@@ -34,3 +34,12 @@ compiler, instance-method/field and list-lookup overhead dominates the saved
 shape setup. No FFT production source from this experiment is retained; the
 benchmark remains as a regression target for revisiting it after typed-call
 specialization or a flat native-buffer plan exists.
+
+## Final focused validation
+
+The final campaign tree compiled and ran all of the following successfully:
+`calculus_spec`, `algebra_polynomial_spec`,
+`algebra_arithmetic_circuit_spec`, `algebra_lattice_reduction_spec`,
+`optim_spec`, the Sci smoke spec, `algebra_polynomial_gcd_modular_spec`,
+`algebra_polynomial_specialize_spec`, `algebra_finite_factor_spec`,
+`algebra_finite_field_spec`, and `algebra_polynomial_matrix_spec`.

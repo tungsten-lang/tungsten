@@ -4,8 +4,10 @@
 # then `perf script` text → PerfScript.collapse → folded stacks.
 #
 # macOS: shells `xctrace record` with the bundled counters template,
-# exports the kdebug-counters-with-time-sample table as XML, and
+# exports the kdebug-counters-with-pmi-sample table as XML, and
 # XctraceXml.collapse_counters turns it into per-metric folded stacks.
+# When the counters table is missing (unsupported PMC event, Developer
+# mode off), the stock Time Profiler template supplies stacks only.
 #
 # Returns the folded-stack text as a string, or nil on failure.
 
@@ -41,20 +43,59 @@ in Tungsten:Flame
       {}
 
   # Counter-set table: name -> [template filename, slot-ordered metric
-  # names]. Slot order MUST match the event order in the template (see
-  # lib/xctrace/generate-templates.py, which builds the .tracetemplate
-  # files from these same event lists).
+  # names]. Slot order MUST match the event order in the template. The
+  # generator (lib/xctrace/generate-templates.py) picks each slot's event
+  # for the host chip and writes a `.events` manifest next to the
+  # template; counter_labels reads that, so the lists here are only the
+  # fallback for a template without a manifest.
   -> .counter_set_info(set_name)
     if set_name == "rates"
-      return ["flame-counters-rates.tracetemplate", ["instructions", "cycles", "L1-dcache-load-misses", "L1-dcache-store-misses", "LLC-load-misses", "memsys-loads", "dTLB-misses", "L2-TLB-data-misses"]]
+      return self.template_info("flame-counters-rates.tracetemplate", ["instructions", "cycles", "L1-dcache-load-misses", "L1-dcache-store-misses", "LLC-load-misses", "memsys-loads", "dTLB-misses", "L2-TLB-data-misses"])
     if set_name == "cache"
-      return ["flame-counters-cache.tracetemplate", ["branches", "branch-misses", "L1-dcache-load-misses", "L1-icache-misses", "LLC-load-misses", "dTLB-misses", "iTLB-misses", "L2-TLB-data-misses"]]
+      return self.template_info("flame-counters-cache.tracetemplate", ["branches", "branch-misses", "L1-dcache-load-misses", "L1-icache-misses", "LLC-load-misses", "dTLB-misses", "iTLB-misses", "L2-TLB-data-misses"])
     if set_name == "stalls"
-      return ["flame-counters-stalls.tracetemplate", ["frontend-stall-cycles", "backend-stall-cycles", "L2-TLB-instr-misses"]]
+      return self.template_info("flame-counters-stalls.tracetemplate", ["frontend-stall-cycles", "backend-stall-cycles", "L2-TLB-instr-misses"])
     nil
 
+  -> .template_info(template_name, fallback_labels)
+    [template_name, self.counter_labels(__DIR__ + "/xctrace/" + template_name, fallback_labels)]
+
+  # Metric labels for a template, from the `.events` manifest the
+  # template generator writes next to it ("label<TAB>event" per line, in
+  # slot order) — the labels always match the template's slot order that
+  # way. `fallback` is used when no manifest exists.
+  -> .counter_labels(template_path, fallback)
+    dot = template_path.rindex(".")
+    stem = dot != nil ? template_path.slice(0, dot) : template_path
+    path = stem + ".events"
+    if !file?(path)
+      return fallback
+    text = read_file(path)
+    if text == nil || text.size() == 0
+      return fallback
+    names = []
+    lines = text.split("\n")
+    i = 0
+    while i < lines.size()
+      line = lines[i]
+      i = i + 1
+      if line.size() == 0
+        next
+      tb = line.index("\t")
+      names.push(tb != nil ? line.slice(0, tb) : line)
+    names.size() > 0 ? names : fallback
+
+  # PMI sampling every 250K instructions yields ~50-100K rows/s of
+  # xctrace XML per busy core — cap the counters recording so the export
+  # stays tractable; the rates converge within a couple of seconds.
+  -> .counters_duration(duration)
+    if duration <= 3
+      return duration
+    << "sampler: capping the counters recording at 3s (requested " + duration.to_s() + "s; PMI sampling exports ~50-100K rows/s per busy core)"
+    3
+
   # PMC-counters profiling via the counters-profile table. Unlike the
-  # default path's kdebug-counters-with-time-sample table (cumulative
+  # default path's kdebug-counters-with-pmi-sample table (cumulative
   # per-core readings), counters-profile rows are per-thread interval
   # DELTAS that Instruments already differenced at context-switch
   # boundaries — so a row's counts belong to that row's thread and
@@ -69,37 +110,22 @@ in Tungsten:Flame
       return {}
     tmpdir = self.mktmpdir()
     bin_path = argv[0]
-    trace_path = tmpdir + "/flame.trace"
     template = __DIR__ + "/xctrace/" + info[0]
     if !file?(template)
       << "sampler: template not found: " + template
       return {}
-    bin_q = self.quote_argv(argv)
-    trace_q = Tungsten:Flame:Builder.shell_quote(trace_path)
-    tpl_q = Tungsten:Flame:Builder.shell_quote(template)
-    log_path = tmpdir + "/xctrace.log"
-    log_q = Tungsten:Flame:Builder.shell_quote(log_path)
-    target_out = tmpdir + "/target.out"
-    tgt_q = Tungsten:Flame:Builder.shell_quote(target_out)
-    rec_cmd = "xctrace record --template " + tpl_q + " --time-limit " + duration.to_s() + "s --output " + trace_q + " --env DYLD_PRINT_SEGMENTS=1 --target-stdout " + tgt_q + " --launch -- " + bin_q + " > " + log_q + " 2>&1"
-    system(rec_cmd)
-    if !file?(trace_path + "/form.template")
-      << "sampler: xctrace record failed"
-      log_text = read_file(log_path)
-      if log_text != nil && log_text.strip().size() > 0
-        << log_text.strip()
-      return {}
-    xpath = "/trace-toc/run\[@number=\"1\"\]/data/table\[@schema=\"counters-profile\"\]"
-    xpath_q = Tungsten:Flame:Builder.shell_quote(xpath)
-    xml_text = capture("xctrace export --input " + trace_q + " --xpath " + xpath_q + " 2>/dev/null")
-    if xml_text == nil || xml_text.size() == 0
-      << "sampler: xctrace export produced no XML"
-      return {}
+    trace_path = self.record_trace(tmpdir, template, argv, self.counters_duration(duration))
+    if trace_path == nil
+      return self.profile_macos_time_profiler(argv, duration)
+    xml_text = self.export_table(trace_path, "counters-profile")
+    if xml_text.size() == 0
+      << "sampler: no counters-profile table in the trace (unsupported PMC event for this chip, or Developer mode off: `sudo DevToolsSecurity -enable`); falling back to Time Profiler (stacks only, no counter rates)"
+      return self.profile_macos_time_profiler(argv, duration)
     # Rows for every process on the machine are in this table; filter to
     # threads whose name column carries "(<binary basename>, pid:".
     base = bin_path.split("/").last
     proc_marker = "(" + base + ", pid:"
-    load_addr = self.parse_load_address(target_out, bin_path)
+    load_addr = self.parse_load_address(tmpdir + "/target.out", bin_path)
     Tungsten:Flame:XctraceXml.collapse_counter_profile(xml_text, bin_path, load_addr, info[1], proc_marker)
 
   -> .quote_argv(argv)
@@ -133,51 +159,96 @@ in Tungsten:Flame
   -> .profile_macos(argv, duration, rate)
     tmpdir = self.mktmpdir()
     bin_path = argv[0]
-    trace_path = tmpdir + "/flame.trace"
     template = __DIR__ + "/xctrace/flame-counters.tracetemplate"
     if !file?(template)
       << "sampler: template not found: " + template
       return {}
+    trace_path = self.record_trace(tmpdir, template, argv, self.counters_duration(duration))
+    if trace_path == nil
+      return self.profile_macos_time_profiler(argv, duration)
+    # kdebug-counters-with-*-sample carries stacks paired with PMC values
+    # (one set of N counter readings per sample). PMI-driven sampling (the
+    # template sets sampleByTime false) lands the counters in
+    # …-with-pmi-sample; a time-driven template uses …-with-time-sample.
+    # Try both, and judge the recording by what exports rather than by
+    # xctrace's exit status.
+    xml_text = self.export_table(trace_path, "kdebug-counters-with-pmi-sample")
+    if xml_text.size() == 0
+      xml_text = self.export_table(trace_path, "kdebug-counters-with-time-sample")
+    if xml_text.size() == 0
+      << "sampler: no counters table in the trace (unsupported PMC event for this chip, or Developer mode off: `sudo DevToolsSecurity -enable`); falling back to Time Profiler (stacks only)"
+      return self.profile_macos_time_profiler(argv, duration)
+    # Slot order follows the order events were added to the template; the
+    # generator's .events manifest carries it, with the hard-coded list
+    # as the fallback for a template without one.
+    metric_names = self.counter_labels(template, ["branches", "branch-misses", "L1-dcache-load-misses", "LLC-load-misses", "L1d-long-latency", "dTLB-load-misses", "L1-icache-load-misses", "L2-TLB-data-misses"])
+    load_addr = self.parse_load_address(tmpdir + "/target.out", bin_path)
+    Tungsten:Flame:XctraceXml.collapse_counters(xml_text, bin_path, load_addr, metric_names)
+
+  # Stacks-only fallback: the stock Time Profiler template, exported
+  # through the time-sample schema that XctraceXml.collapse already
+  # understands. No PMC metrics, but it works without Developer mode and
+  # on any chip.
+  -> .profile_macos_time_profiler(argv, duration)
+    tmpdir = self.mktmpdir()
+    bin_path = argv[0]
+    trace_path = self.record_trace(tmpdir, "Time Profiler", argv, duration)
+    if trace_path == nil
+      return {}
+    xml_text = self.export_table(trace_path, "time-sample")
+    if xml_text.size() == 0
+      << "sampler: xctrace export produced no XML (Time Profiler)"
+      return {}
+    load_addr = self.parse_load_address(tmpdir + "/target.out", bin_path)
+    result = {}
+    result["samples"] = Tungsten:Flame:XctraceXml.collapse(xml_text, bin_path, load_addr)
+    result
+
+  # Record `argv` under `template` (a bundled .tracetemplate path or a
+  # stock Instruments template name) for `duration` seconds into
+  # <tmpdir>/flame.trace. Returns the .trace bundle path, or nil (with
+  # xctrace's log echoed) when no bundle was produced.
+  #
+  # xctrace's exit status is ignored on purpose: it is nonzero when the
+  # target is killed at the time limit and on mere "Run issues were
+  # detected" warnings, both of which leave a valid trace. Success is
+  # judged by the bundle here and by what it exports in the callers.
+  #
+  # DYLD_PRINT_SEGMENTS makes dyld print every image's segment map to
+  # the target's stderr (captured via --target-stdout into
+  # <tmpdir>/target.out). That gives us the main binary's ASLR load
+  # address, which atos needs (-l) to symbolicate the runtime addresses
+  # in the trace — see parse_load_address.
+  -> .record_trace(tmpdir, template, argv, duration)
+    trace_path = tmpdir + "/flame.trace"
     bin_q = self.quote_argv(argv)
     trace_q = Tungsten:Flame:Builder.shell_quote(trace_path)
     tpl_q = Tungsten:Flame:Builder.shell_quote(template)
     log_path = tmpdir + "/xctrace.log"
     log_q = Tungsten:Flame:Builder.shell_quote(log_path)
-    # DYLD_PRINT_SEGMENTS makes dyld print every image's segment map to
-    # the target's stderr (captured via --target-stdout). That gives us
-    # the main binary's ASLR load address, which atos needs (-l) to
-    # symbolicate the runtime addresses in the trace.
-    target_out = tmpdir + "/target.out"
-    tgt_q = Tungsten:Flame:Builder.shell_quote(target_out)
+    tgt_q = Tungsten:Flame:Builder.shell_quote(tmpdir + "/target.out")
     rec_cmd = "xctrace record --template " + tpl_q + " --time-limit " + duration.to_s() + "s --output " + trace_q + " --env DYLD_PRINT_SEGMENTS=1 --target-stdout " + tgt_q + " --launch -- " + bin_q + " > " + log_q + " 2>&1"
     system(rec_cmd)
-    # xctrace exits nonzero when it kills a still-running target at the
-    # time limit, even though the recording is valid — so ignore the exit
-    # status and judge success by the presence of the .trace bundle.
     if !file?(trace_path + "/form.template")
-      << "sampler: xctrace record failed"
+      << "sampler: xctrace record failed (" + template.split("/").last + ")"
       log_text = read_file(log_path)
       if log_text != nil && log_text.strip().size() > 0
         << log_text.strip()
-      return {}
-    # kdebug-counters-with-time-sample carries stacks paired with PMC
-    # values (one set of N counter readings per sample). The slot order
-    # follows the order events were added to the tracetemplate.
-    xpath = "/trace-toc/run\[@number=\"1\"\]/data/table\[@schema=\"kdebug-counters-with-time-sample\"\]"
+      return nil
+    trace_path
+
+  # Export one table of run 1 as XML; "" when the table is absent or has
+  # no rows. (A template naming a PMC event the chip lacks still records
+  # a trace whose counters tables export as a bare schema header — the
+  # row check is what tells "recorded nothing" from "recorded".)
+  -> .export_table(trace_path, schema)
+    trace_q = Tungsten:Flame:Builder.shell_quote(trace_path)
+    xpath = "/trace-toc/run\[@number=\"1\"\]/data/table\[@schema=\"" + schema + "\"\]"
     xpath_q = Tungsten:Flame:Builder.shell_quote(xpath)
     xml_text = capture("xctrace export --input " + trace_q + " --xpath " + xpath_q + " 2>/dev/null")
-    if xml_text == nil || xml_text.size() == 0
-      << "sampler: xctrace export produced no XML"
-      return {}
-
-    # Slot mapping for the user's flame-counters.tracetemplate. Indexes
-    # match the order events were added to the template:
-    #   0 INST_BRANCH, 1 BRANCH_MISPRED_NONSPEC, 2 L1D_CACHE_MISS_LD,
-    #   3 PL2_CACHE_MISS_LD, 4 ARM_L1D_CACHE_LMISS_RD,
-    #   5 L1D_TLB_MISS, 6 L1I_CACHE_MISS_DEMAND, 7 L2_TLB_MISS_DATA.
-    metric_names = ["branches", "branch-misses", "L1-dcache-load-misses", "LLC-load-misses", "L1d-long-latency", "dTLB-load-misses", "L1-icache-load-misses", "L2-TLB-data-misses"]
-    load_addr = self.parse_load_address(target_out, bin_path)
-    Tungsten:Flame:XctraceXml.collapse_counters(xml_text, bin_path, load_addr, metric_names)
+    if xml_text == nil || !xml_text.include?("<row>")
+      return ""
+    xml_text
 
   # Parse the main binary's __TEXT load address out of a
   # DYLD_PRINT_SEGMENTS log. dyld prints "Kernel mapped <path>" followed

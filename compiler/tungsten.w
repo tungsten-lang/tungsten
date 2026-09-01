@@ -1546,6 +1546,12 @@ driver_homebrew_prefix_memo = {}
   clang_cmd << out_path
   result = system(clang_cmd.to_s())
   log_phase(verbose, "clang", link_started_at)
+  # Warm macOS's first-exec malware-scan cache now rather than on the user's
+  # first run (see w_preflight in runtime/runtime.c): exec the fresh binary
+  # detached with TUNGSTEN_PREFLIGHT set; it exits at the top of main.
+  on macos
+    if result == true
+      system("TUNGSTEN_PREFLIGHT=1 " + dev_runtime_shell_quote(out_path) + " </dev/null >/dev/null 2>&1 &")
   if result == true && link_cache_slot != nil
     link_artifact_cache_store(link_cache_slot, out_path)
   result == true

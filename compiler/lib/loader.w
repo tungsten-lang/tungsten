@@ -1272,6 +1272,11 @@ loader_parse_cache_state = {
       collect_autoload_refs(node.source, defined, registry, seen, pending)
     if node.func != nil && is_ast_node?(node.func)
       collect_autoload_refs(node.func, defined, registry, seen, pending)
+      # A `/prime?` stage names no class either, but the fused
+      # `range /prime? :count` lowering (pipeline_fusion.w) counts through the
+      # sieve in core/prime_sieve.w. Pull PrimeSieve in so that call resolves.
+      if ast_kind(node.func) in (:var :call) && node.func.name == "prime?"
+        consider_autoload_name("PrimeSieve", defined, registry, seen, pending)
     # A trailing block hangs off `block`, which is none of the fields above, so
     # a class named ONLY inside one (`lines.each -> (l) out.push(JSON.parse(l))`)
     # never autoloaded and resolved to nil at runtime. The block node carries

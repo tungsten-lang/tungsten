@@ -1,4 +1,5 @@
 require "open3"
+require "shellwords"
 require File.join(ROOT, "implementations/ruby/lib/tungsten/system_dependencies")
 
 PRINT_IR    = File.join(ROOT, "compiler/print_ir.w")
@@ -802,6 +803,11 @@ when ".w"
         exit 1
       end
       $stderr.puts "Built #{out_path}"
+      # Warm macOS's first-exec malware-scan cache (w_preflight exits at the
+      # top of main under TUNGSTEN_PREFLIGHT).
+      if RUBY_PLATFORM.include?("darwin")
+        system("TUNGSTEN_PREFLIGHT=1 #{Shellwords.escape(out_path)} </dev/null >/dev/null 2>&1 &")
+      end
     else
       # Compile to temp binary and run immediately
       Dir.mktmpdir("tungsten") do |dir|

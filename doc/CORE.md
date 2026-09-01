@@ -83,6 +83,13 @@ summary from the source header, and a link to the source.
 | `GaussianInteger` | `+ GaussianInteger` | Z[i], the Gaussian integers: complex numbers a + bi with a, b in Z. | [`core/algebra/gaussian_integer.w`](../core/algebra/gaussian_integer.w) |
 | `EisensteinInteger` | `+ EisensteinInteger` | Z[omega], the Eisenstein integers: a + b*omega with omega a primitive cube | [`core/algebra/eisenstein_integer.w`](../core/algebra/eisenstein_integer.w) |
 | `SmithNormalForm` | `+ SmithNormalForm` | Smith normal form of an integer matrix. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `SmithDecomposition` | `+ SmithDecomposition` | U A V = D with unimodular U, V and their inverses; integer kernel and cokernel bases. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `FinitelyGeneratedAbelianGroup` | `+ FinitelyGeneratedAbelianGroup` | Z^r (+) Z/d1 (+) ... in invariant-factor form; the answer type of cokernels, abelianisations and homology. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `FinitelyPresentedGroup` | `+ FinitelyPresentedGroup` | Presentations by relator words; relation matrix and abelianisation via Smith normal form. | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
+| `SeifertFibration` | `+ SeifertFibration` | Seifert fibrations over S^2: fundamental group, H_1, Orlik's order formula, rational Euler number. | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
+| `IntegerChainComplex` | `+ IntegerChainComplex` | Chain complexes of free abelian groups; integral homology with torsion via two Smith forms per degree. | [`core/algebra/chain_complex.w`](../core/algebra/chain_complex.w) |
+| `ToricFan2D` | `+ ToricFan2D` | Complete fans in Z^2 and their smooth toric surfaces: Euler number, self-intersections, K^2, Noether, del Pezzo test. | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
+| `LatticeTriangulation` | `+ LatticeTriangulation` | Z^2-periodic triangulations of the plane and the central fibre of Mumford's toric degeneration of a 2-torus. | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
 | `Combinatorics` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `PolyominoEnumeration` | `+ PolyominoEnumeration` | Enumeration of polyominoes by cell count. | [`core/combinatorics/polyomino.w`](../core/combinatorics/polyomino.w) |
 | `LatticeAnimal` | `+ LatticeAnimal` | Enumeration of animals in a given lattice: grow shapes one cell at a time | [`core/combinatorics/lattice_animal.w`](../core/combinatorics/lattice_animal.w) |

@@ -519,6 +519,50 @@
     i += 1
   true
 
+# True when `name` is rebound (`name = …` / `name += …`) anywhere in the
+# body — such a param can no longer be assumed to be the array it arrived
+# as, so it gets no alias scope.
+-> alias_name_reassigned?(node, name)
+  if !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k in (:assign :compound_assign)
+    t = node.target
+    if t != nil && is_ast_node?(t) && ast_kind(t) == :var && t.name == name
+      return true
+  kids = ast_children(node)
+  if kids != nil
+    i = 0
+    while i < kids.size()
+      if alias_name_reassigned?(kids[i], name)
+        return true
+      i += 1
+  false
+
+# Automatic alias scopes: in a typed-signature fn the array-typed parameters
+# are assumed PAIRWISE DISTINCT arrays (a documented language rule, like
+# Fortran dummy-argument aliasing) — payload accesses through different
+# params get disjoint LLVM alias scopes so loads can hoist and vectorize
+# across stores to other arrays. A rebound param drops out; fewer than two
+# array params means nothing to separate. TUNGSTEN_NO_ALIAS_SCOPES=1
+# disables the whole feature. Returns {param name → slot} or nil.
+-> alias_scope_slots(node, var_types)
+  if node.param_types == nil || node.params == nil || env("TUNGSTEN_NO_ALIAS_SCOPES") == "1"
+    return nil
+  slots = {}
+  nslots = 0
+  pti = 0
+  while pti < node.param_types.size() && pti < node.params.size() && nslots < 32
+    pname = param_runtime_name(node.params[pti])
+    ptv = var_types[pname]
+    if ptv != nil && ptv.to_s().starts_with?("typed_array_") && !alias_name_reassigned?(node.body, pname)
+      slots[pname] = nslots
+      nslots += 1
+    pti += 1
+  if nslots < 2
+    return nil
+  slots
+
 -> param_name_in_list?(name, params)
   i = 0
   while i < params.size()
@@ -863,8 +907,14 @@
   # module-wide raw-ABI prepass.
   populate_definition_var_types(node, child_var_types, mod)
 
-  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod)
-  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body)
+  # Per-array alias scopes (see alias_scope_slots): subscript gets/sets and
+  # the array_load/store_u64 intrinsics on a slotted param carry its slot
+  # (stamp_alias_scope), and the emitter tags their payload accesses with
+  # !alias.scope / !noalias (alias_scope_suffix).
+  alias_slots = alias_scope_slots(node, child_var_types)
+  if alias_slots != nil
+    child_ctx[:alias_slots] = alias_slots
+    new_fn[:alias_nslots] = alias_slots.size()
 
   # Detect raw-i64 ABI: when every param is ## i64:-annotated and there's
   # no block param or default, the fn takes raw int64_t directly. Callers
@@ -891,6 +941,10 @@
   raw_abi_flags = definition_raw_abi_flags(node, ctx[:class_name] == nil, mod[:fn_return_types], rt, child_var_types)
   raw_i64_sig = raw_abi_flags[0]
   raw_int_sig = raw_abi_flags[1]
+  # Decided after the raw ABI: a raw-i64 fn returns its value unboxed, so a
+  # returned local is not an escape and may stay in a raw slot.
+  child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod, raw_i64_sig)
+  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates])
   if raw_i64_sig
     new_fn[:raw_i64_signature] = true
     # ensure_return_value reads raw_return_type — explicit `return X`
@@ -2144,7 +2198,7 @@
       spi += 1
   child_ctx[:tag_facts] = tag_facts
 
-  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body)
+  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates])
 
   block_return_buf = nil
   if needs_block_return

@@ -11,6 +11,7 @@ module Tungsten
   # manual scanner ported from compiler/lib/lexer.w.
   class CodepointLexer
     attr_accessor :file
+    attr_reader :bracket_depth
     attr_reader :profile_branch_counts, :profile_regex_attempts, :profile_regex_hits, :profile_token_counts,
                 :profile_path_counts
 
@@ -31,6 +32,7 @@ module Tungsten
       by_length.freeze
     end.freeze
     TYPE_NAMES = Lexer::TYPE_NAMES.to_h { |name| [name, true] }.freeze
+    TYPE_HINT_WORDS = Lexer::TYPE_HINT_WORDS.to_h { |name| [name, true] }.freeze
 
     ONE_CHAR_TOKENS = {
       33 => :"!", 36 => :"$", 37 => :%, 38 => :&, 40 => :"(", 41 => :")", 42 => :*, 43 => :+,
@@ -376,8 +378,9 @@ module Tungsten
     end
 
     def method_operator_after?(bytes)
+      # `/` allows arity-suffixed definitions: `-> []/1`, `-> []=/2`.
       b = byte(bytes)
-      b.nil? || b == 32 || b == 10 || b == 40
+      b.nil? || b == 32 || b == 10 || b == 40 || b == 47
     end
 
     def bracket_operator_context?(bytes)
@@ -1175,7 +1178,7 @@ module Tungsten
         return true if @source.getbyte(p) == 58
       end
 
-      TYPE_NAMES.each_key do |name|
+      TYPE_HINT_WORDS.each_key do |name|
         len = name.bytesize
         next unless bytes_at?(pos, name)
         return true unless ident_continue_byte?(@source.getbyte(pos + len))
@@ -2314,6 +2317,7 @@ module Tungsten
       return scan_byte_array if match_bytes?("«")
       return true if scan_currency_literal
       return true if scan_superscript
+      return true if scan_unicode_name
       return true if scan_unicode_identifier
 
       scan_unicode_operator
@@ -2336,6 +2340,21 @@ module Tungsten
 
       advance(match[0].bytesize)
       set_token(:ID, match[0], @row, start_col)
+      true
+    end
+
+    # Double-struck capitals are uppercase letters in the compiled lexer's
+    # Unicode tables and name classes (e.g. ProjectiveSpace<ℚ, 2>).
+    # Kept in lockstep with Lexer's :NAME branch (parity-tested).
+    DOUBLE_STRUCK_NAME = /[ℂℍℕℙℚℝℤ][a-zA-Z0-9_]*/.freeze
+
+    def scan_unicode_name
+      start_col = @col
+      match = match_regex_at(DOUBLE_STRUCK_NAME)
+      return false unless match
+
+      advance(match[0].bytesize)
+      set_token(:NAME, match[0], @row, start_col)
       true
     end
 

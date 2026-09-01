@@ -1,4 +1,5 @@
 #include "tc.h"
+#define W_AST_SCHEMA_INCLUDE_NAMES 1
 #include "ast_schema_generated.h"
 #include "w_lexchar_cache.c"
 
@@ -2047,6 +2048,27 @@ static inline int find_self_slot(TcChunk *chunk) {
   return cached;
 }
 
+/* `node.size` on a slab AST node is a FIELD read, not a length: TypedArrayNew
+ * and TypedArray carry `size` (the element-count expression) in the schema,
+ * and the native compiler lowers the call to that field load. The SIZE_OF
+ * specialization (ast_compile.c) cannot see the receiver's type, so packed
+ * nodes are resolved here exactly as AstNode#method_missing -> ast_get would
+ * answer: the schema field when the kind has one, nil otherwise. Answering 0
+ * instead made the promotion analysis (mark_subtree_escape walks node.size)
+ * disagree between stage 0 and stage 1, breaking stage identity on any
+ * typed-array allocation sized by a local. */
+static TcValue tc_size_of_packed_node(WValue node) {
+  int kid = w_node_kind(node);
+  if (kid >= 1 && kid <= (int)W_AST_KIND_MAX && W_AST_KIND_STORAGE[kid] == W_AST_STORAGE_SLAB) {
+    for (uint8_t i = 0; i < W_AST_KIND_FIELD_COUNT[kid]; i++) {
+      const char *field = W_AST_KIND_FIELDS[kid][i];
+      if (field && strcmp(field, "size") == 0)
+        return tc_box_wvalue(w_node_field_load(node, (int64_t)i));
+    }
+  }
+  return tc_box_nil();
+}
+
 static int vm_call_function(TcVm *vm, TcFunction *fn, TcValue *args, uint32_t argc, TcValue self,
                             int has_self, TcValue override, int has_override, TcError *err) {
   if (vm->call_depth >= sizeof(vm->frames) / sizeof(vm->frames[0])) {
@@ -2677,8 +2699,14 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         int64_t size = 0;
         switch (tc_kind(receiver)) {
           case TC_VAL_WVALUE:
-            if (w_is_wire_sequence(receiver))
+            if (w_is_wire_sequence(receiver)) {
               size = w_wire_sequence_size(receiver);
+              break;
+            }
+            if (w_is_node(receiver)) {
+              vm.stack[vm.sp - 1] = (tos = tc_size_of_packed_node(receiver));
+              NEXT_FAST();
+            }
             break;
           case TC_VAL_STRING: size = (int64_t)tc_str_len(receiver); break;
           case TC_VAL_ARRAY:  size = tc_as_array(receiver) ? (int64_t)tc_as_array(receiver)->size : 0; break;
@@ -2829,8 +2857,14 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
         int64_t size = 0;
         switch (tc_kind(receiver)) {
           case TC_VAL_WVALUE:
-            if (w_is_wire_sequence(receiver))
+            if (w_is_wire_sequence(receiver)) {
               size = w_wire_sequence_size(receiver);
+              break;
+            }
+            if (w_is_node(receiver)) {
+              vm.stack[vm.sp++] = (tos = tc_size_of_packed_node(receiver));
+              NEXT_FAST();
+            }
             break;
           case TC_VAL_STRING: size = (int64_t)tc_str_len(receiver); break;
           case TC_VAL_ARRAY:  size = tc_as_array(receiver) ? (int64_t)tc_as_array(receiver)->size : 0; break;

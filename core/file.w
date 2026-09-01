@@ -219,8 +219,9 @@ use core/mmap
   -> .rmdir(path)
     file_rmdir(path)
 
-  -> .rm(path, *opts)
-    file_rm(path, *opts)
+  # Remove one file (or empty directory); true when it was removed.
+  -> .rm(path)
+    file_rm(path)
 
   -> .delete(path)
     ok = file_unlink_strict(path)

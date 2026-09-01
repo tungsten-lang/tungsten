@@ -275,8 +275,15 @@ wire_kind_symbols = [
   # Compiler-internal lowering result. This remains append-only like every
   # other WIRE kind; its fixed field order is :type, :value.
   :wire_typed_value,
-  # Population count on a raw i64 (llvm.ctpop.i64). Fields :value, :temp.
-  :ctpop_i64
+  # Bit-count and u8[]-payload word intrinsics (popcount / cttz /
+  # array_load_u64 / array_store_u64 / prefetch), appended after the
+  # compiler-internal kinds — ids are positional and append-only. Both
+  # lines of development added :ctpop_i64 at this same position (269).
+  :ctpop_i64,
+  :cttz_i64,
+  :typed_array_load_u64,
+  :typed_array_store_u64,
+  :typed_array_prefetch
 ]
 
 wire_kind_ids = {}

@@ -1819,6 +1819,7 @@
         si += 1
       temp = next_temp(wfn)
       emit_wire_typed_array_get_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp)
+      stamp_alias_scope(ctx, wfn, recv_node)
       if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
         return raw_float_from_bits_i64(wfn, temp, recv_type)
       # w64 arrays store raw WValue bits. The loaded i64 IS a fully-tagged
@@ -1882,6 +1883,7 @@
           si += 1
         temp = next_temp(wfn)
         emit_wire_typed_array_compound_op_inline(wfn, receiver_reg, elem_bits, fused_op, idx_reg, idx_raw, scratch, elem_signed, temp, rhs_reg)
+        stamp_alias_scope(ctx, wfn, recv_node)
         return typed_value(:i64, temp)
 
     if method_name == "\[]=" && node.args.size() == 2
@@ -1933,6 +1935,7 @@
         si += 1
       temp = next_temp(wfn)
       emit_wire_typed_array_set_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp, val_reg)
+      stamp_alias_scope(ctx, wfn, recv_node)
       return val_expr
 
   # Direct builtins for string operations — bypass method dispatch

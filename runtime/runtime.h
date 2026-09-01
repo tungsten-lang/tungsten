@@ -2247,6 +2247,10 @@ WValue w_executable_path(void);
 WValue w_executable_dir(void);
 WValue w_cpu_count(void);
 WValue w_physical_memory_bytes(void);
+WValue __w_cpu_count(void);
+WValue __w_l1d_cache_bytes(void);
+WValue __w_l2_cache_bytes(void);
+WValue __w_cpus_per_l2(void);
 
 /* ---- Monotonic clock ---- */
 WValue __w_clock_ms(void);
@@ -2260,6 +2264,8 @@ WValue __w_elapsed_seconds_since_ticks(int64_t start_ticks);
 WValue __w_read_file(WValue path_val);
 WValue __w_read_file_bytes(WValue path_val);
 WValue __w_write_file(WValue path_val, WValue content_val);
+WValue __w_write_file_n(WValue path_val, WValue bytes_val, WValue n_val);
+WValue __w_file_rm(WValue path_val);
 WValue __w_file_exists(WValue path_val);
 WValue __w_file_directory(WValue path_val);
 WValue __w_file_read_dir(WValue path_val);

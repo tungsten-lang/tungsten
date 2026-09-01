@@ -42,6 +42,60 @@
     p = wire_get(inst, :temp) + ".p"
     ep = wire_get(inst, :temp) + ".ep"
     p + " = inttoptr i64 " + wire_get(inst, :ptr) + " to ptr\n  " + ep + " = getelementptr i8, ptr " + p + ", i64 " + wire_get(inst, :index) + "\n  " + wire_get(inst, :temp) + " = load i64, ptr " + ep + ", align 1" + range_metadata_suffix(inst, "i64")
+  when :ctpop_i64
+    wire_get(inst, :temp) + " = call i64 @llvm.ctpop.i64(i64 " + wire_get(inst, :value) + ")"
+  when :cttz_i64
+    wire_get(inst, :temp) + " = call i64 @llvm.cttz.i64(i64 " + wire_get(inst, :value) + ", i1 false)"
+  when :typed_array_load_u64
+    # Unaligned i64 word at a byte offset into a u8[] payload (start is in
+    # elements = bytes). Same unmask → slots (off 16) → start (i32 at off 4)
+    # walk as typed_array_get_inline; header loads carry the header TBAA
+    # node so they hoist out of loops like every other array access.
+    t = wire_get(inst, :temp)
+    o = StringBuffer(420)
+    o << t + ".ar = and i64 " + wire_get(inst, :arr) + ", 140737488355312\n  "
+    o << t + ".bp = inttoptr i64 " + t + ".ar to ptr\n  "
+    o << t + ".dg = getelementptr i8, ptr " + t + ".bp, i64 16\n  "
+    o << t + ".dp = load ptr, ptr " + t + ".dg, align 8" + tbaa_header_suffix() + "\n  "
+    o << t + ".sg = getelementptr i8, ptr " + t + ".bp, i64 4\n  "
+    o << t + ".s32 = load i32, ptr " + t + ".sg, align 4" + tbaa_header_suffix() + "\n  "
+    o << t + ".s64 = sext i32 " + t + ".s32 to i64\n  "
+    o << t + ".ai = add i64 " + t + ".s64, " + wire_get(inst, :index) + "\n  "
+    o << t + ".ep = getelementptr i8, ptr " + t + ".dp, i64 " + t + ".ai\n  "
+    o << t + " = load i64, ptr " + t + ".ep, align 1" + tbaa_elem_suffix() + alias_scope_suffix(inst)
+    o.to_s()
+  when :typed_array_store_u64
+    t = wire_get(inst, :temp)
+    o = StringBuffer(440)
+    o << t + ".ar = and i64 " + wire_get(inst, :arr) + ", 140737488355312\n  "
+    o << t + ".bp = inttoptr i64 " + t + ".ar to ptr\n  "
+    o << t + ".dg = getelementptr i8, ptr " + t + ".bp, i64 16\n  "
+    o << t + ".dp = load ptr, ptr " + t + ".dg, align 8" + tbaa_header_suffix() + "\n  "
+    o << t + ".sg = getelementptr i8, ptr " + t + ".bp, i64 4\n  "
+    o << t + ".s32 = load i32, ptr " + t + ".sg, align 4" + tbaa_header_suffix() + "\n  "
+    o << t + ".s64 = sext i32 " + t + ".s32 to i64\n  "
+    o << t + ".ai = add i64 " + t + ".s64, " + wire_get(inst, :index) + "\n  "
+    o << t + ".ep = getelementptr i8, ptr " + t + ".dp, i64 " + t + ".ai\n  "
+    o << "store i64 " + wire_get(inst, :value) + ", ptr " + t + ".ep, align 1" + tbaa_elem_suffix() + alias_scope_suffix(inst) + "\n  "
+    o << t + " = add i64 " + wire_get(inst, :value) + ", 0"
+    o.to_s()
+  when :typed_array_prefetch
+    # llvm.prefetch(ptr, rw=0 read, locality=3, cache_type=1 data). No start
+    # adjustment is skipped: the address is the payload byte at byte_off.
+    t = wire_get(inst, :temp)
+    o = StringBuffer(360)
+    o << t + ".ar = and i64 " + wire_get(inst, :arr) + ", 140737488355312\n  "
+    o << t + ".bp = inttoptr i64 " + t + ".ar to ptr\n  "
+    o << t + ".dg = getelementptr i8, ptr " + t + ".bp, i64 16\n  "
+    o << t + ".dp = load ptr, ptr " + t + ".dg, align 8" + tbaa_header_suffix() + "\n  "
+    o << t + ".sg = getelementptr i8, ptr " + t + ".bp, i64 4\n  "
+    o << t + ".s32 = load i32, ptr " + t + ".sg, align 4" + tbaa_header_suffix() + "\n  "
+    o << t + ".s64 = sext i32 " + t + ".s32 to i64\n  "
+    o << t + ".ai = add i64 " + t + ".s64, " + wire_get(inst, :index) + "\n  "
+    o << t + ".ep = getelementptr i8, ptr " + t + ".dp, i64 " + t + ".ai\n  "
+    o << "call void @llvm.prefetch.p0(ptr " + t + ".ep, i32 0, i32 3, i32 1)\n  "
+    o << t + " = add i64 0, 0"
+    o.to_s()
   when :ptr_slot_get
     p = wire_get(inst, :temp) + ".p"
     ep = wire_get(inst, :temp) + ".ep"
@@ -767,10 +821,6 @@
   # Explicit `fma(a,b,c)` — llvm.fma.f64 is ALWAYS a true fused multiply-add
   # (single rounding), unlike fmuladd's "contract if profitable". Same
   # lhs/rhs/value operand fields for mem2reg/content-hash safety.
-  # Hardware population count on a raw i64 — single cnt/popcnt instruction.
-  # Operand rides on :value (walked by apply_subst / content_hash).
-  when :ctpop_i64
-    wire_get(inst, :temp) + " = call i64 @llvm.ctpop.i64(i64 " + wire_get(inst, :value) + ")"
   when :fma_f64
     wire_get(inst, :temp) + " = call double @llvm.fma.f64(double " + wire_get(inst, :lhs) + ", double " + wire_get(inst, :rhs) + ", double " + wire_get(inst, :value) + ")"
   # Raw libm call — Math.* fast path on unboxed operands (lowering/

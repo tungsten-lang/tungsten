@@ -3291,6 +3291,47 @@ use target
       value = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
       return ccall("w_int", ccall_nobox("w_raw_store_u8", ptr, index, value))
 
+    # Bit-count intrinsics (compiled: llvm.ctpop / llvm.cttz). Plain integer
+    # arithmetic keeps the tree-walker exact over the full u64 domain.
+    if name in ("popcount" "cttz") && args.size() == 1
+      w = args[0] & 18446744073709551615
+      if name == "popcount"
+        c = 0
+        while w != 0
+          w = w & (w - 1)
+          c += 1
+        return c
+      if w == 0
+        return 64
+      c = 0
+      while (w & 1) == 0
+        w = w >> 1
+        c += 1
+      return c
+    # u8[] payload word access (compiled: one unaligned i64 load/store).
+    # Little-endian, eight subscripts here; prefetch is a hint with no
+    # interpreter effect.
+    if name == "array_load_u64" && args.size() == 2
+      arr = args[0]
+      off = args[1]
+      w = 0
+      k = 7
+      while k >= 0
+        w = (w << 8) | (arr[off + k] & 255)
+        k -= 1
+      return w
+    if name == "array_store_u64" && args.size() == 3
+      arr = args[0]
+      off = args[1]
+      v = args[2] & 18446744073709551615
+      k = 0
+      while k < 8
+        arr[off + k] = (v >> (8 * k)) & 255
+        k += 1
+      return args[2]
+    if name == "prefetch" && args.size() == 2
+      return 0
+
     # Explicit fused multiply-add. Route the tree-walker through libm so its
     # single-rounding result agrees with compiled llvm.fma.f64.
     if name == "fma" && args.size() == 3

@@ -245,6 +245,47 @@ ewscope_md_state = {ids: {}}
     i += 1
   o.to_s()
 
+# Per-array alias scopes (lowering stamps subscript gets/sets and the
+# array_load/store_u64 intrinsics on a typed-signature fn's array params with
+# ascope:<slot> — see alias_scope_slots / stamp_alias_scope). The scope ids
+# are FIXED, not per function: scoped-noalias reasoning is intra-function
+# (the inliner clones a callee's scopes into fresh ones), so slot k of every
+# function can share one scope node. That keeps the text independent of
+# function order — cache-safe, parallel-render-safe, stage-identical. Domain
+# !3000000; scope k !3000001+k; its list !3000041+k (the access is INSIDE
+# scope k) and the noalias list !3000081+k (every other slot's scope).
+alias_scope_max_slots = 32
+
+-> alias_scope_suffix(inst)
+  slot = wire_get(inst, :ascope)
+  if slot == nil
+    return ""
+  ", !alias.scope !" + (3000041 + slot).to_s() + ", !noalias !" + (3000081 + slot).to_s()
+
+-> alias_scope_md_defs()
+  o = StringBuffer(4096)
+  o << "!3000000 = distinct !{!3000000, !\"tungsten.params\"}\n"
+  k = 0
+  while k < alias_scope_max_slots
+    o << "!" + (3000001 + k).to_s() + " = distinct !{!" + (3000001 + k).to_s() + ", !3000000}\n"
+    k += 1
+  k = 0
+  while k < alias_scope_max_slots
+    o << "!" + (3000041 + k).to_s() + " = !{!" + (3000001 + k).to_s() + "}\n"
+    o << "!" + (3000081 + k).to_s() + " = !{"
+    j = 0
+    first = true
+    while j < alias_scope_max_slots
+      if j != k
+        if !first
+          o << ", "
+        o << "!" + (3000001 + j).to_s()
+        first = false
+      j += 1
+    o << "}\n"
+    k += 1
+  o.to_s()
+
 # Process-local rendered-function cache. Lowered Core functions attached from
 # the incremental cache are immutable, but release `compile-batch` used to
 # render the same bodies into LLVM text for every entry program. Keep the

@@ -123,43 +123,6 @@ use lowering/definitions
   mod[:require_bigint_compare_src] = true
   mod[:require_bigint_bitwise_src] = true
   mod[:require_bigint_bitwise_mut_src] = true
-  mod[:require_bigint_sub1_1_src] = true
-  mod[:require_bigint_sub1_2_src] = true
-  mod[:require_bigint_mul1_1_src] = true
-  mod[:require_bigint_sqr2_src] = true
-  mod[:require_bigint_sqr3_src] = true
-  mod[:require_bigint_sqr4_src] = true
-  mod[:require_bigint_sqr5_src] = true
-  mod[:require_bigint_sqr6_src] = true
-  mod[:require_bigint_sqr7_src] = true
-  mod[:require_bigint_sqr8_src] = true
-  mod[:require_bigint_sqr16_src] = true
-  mod[:require_bigint_mul2_src] = true
-  mod[:require_bigint_mul3_src] = true
-  mod[:require_bigint_mul4_src] = true
-  mod[:require_bigint_mul5_src] = true
-  mod[:require_bigint_mul6_src] = true
-  mod[:require_bigint_mul7_src] = true
-  mod[:require_bigint_mul8_src] = true
-  mod[:require_bigint_mul12_src] = true
-  mod[:require_bigint_mul15_src] = true
-  mod[:require_bigint_mul16_src] = true
-  mod[:require_bigint_mul17_src] = true
-  mod[:require_bigint_mul21_src] = true
-  mod[:require_bigint_mul24_src] = true
-  mod[:require_bigint_mul1_2_src] = true
-  mod[:require_bigint_mul1_3_src] = true
-  mod[:require_bigint_mul1_4_src] = true
-  mod[:require_bigint_mul1_5_src] = true
-  mod[:require_bigint_mul1_6_src] = true
-  mod[:require_bigint_mul1_7_src] = true
-  mod[:require_bigint_mul1_8_src] = true
-  mod[:require_bigint_mul1_16_src] = true
-  mod[:require_bigint_mul1_24_src] = true
-  mod[:require_bigint_mul1_32_src] = true
-  mod[:require_bigint_mul1_40_src] = true
-  mod[:require_bigint_mul1_48_src] = true
-  mod[:require_bigint_mul1_64_src] = true
   mod[:fast_mode] = fast_mode
   mod[:math_mode] = math_mode
   # Must be set BEFORE body lowering: the slab-freeze emission below
@@ -254,6 +217,8 @@ use lowering/definitions
   mod[:known_calls]["read_dir"] = "__w_file_read_dir"
   mod[:known_calls]["write_file"] = "__w_write_file"
   mod[:known_calls]["write_file_bytes"] = "__w_write_file"
+  mod[:known_calls]["write_file_bytes_n"] = "__w_write_file_n"
+  mod[:known_calls]["file_rm"] = "__w_file_rm"
   mod[:known_calls]["file_stat_data"] = "__w_file_stat_data"
   mod[:known_calls]["tempfile_create"] = "__w_tempfile_create"
   mod[:known_calls]["file_unlink"] = "__w_unlink"
@@ -281,6 +246,10 @@ use lowering/definitions
   mod[:known_calls]["type"] = "__w_type"
   mod[:known_calls]["wymix"] = "__w_wymix"  # inlined, never actually called
   mod[:known_calls]["clock"] = "__w_clock"
+  mod[:known_calls]["cpu_count"] = "__w_cpu_count"
+  mod[:known_calls]["l1d_cache_bytes"] = "__w_l1d_cache_bytes"
+  mod[:known_calls]["l2_cache_bytes"] = "__w_l2_cache_bytes"
+  mod[:known_calls]["cpus_per_l2"] = "__w_cpus_per_l2"
   mod[:known_calls]["clock_ms"] = "__w_clock_ms"
   mod[:known_calls]["env"] = "__w_env"
   mod[:known_calls]["runtime_identity"] = "__w_runtime_identity"
@@ -868,10 +837,65 @@ use lowering/definitions
       i += 1
   nil
 
+# BigInt's typed leaf workers (sub1/mul1/sqr/mul) live in core/numeric/big_int.w,
+# which the loader schedules on demand — unlike the comparison/bitwise support
+# modules, which root loading always injects. A program that never pulls BigInt
+# in legitimately links the runtime's weak C kernels for those seams, so their
+# source invariants are carried only once the class is actually in the AST.
+-> require_bigint_source_seams(mod, expressions)
+  has_bigint = false
+  i = 0
+  while i < expressions.size()
+    expr = expressions[i]
+    if ast_kind(expr) == :class_def && expr.name == "BigInt"
+      has_bigint = true
+    i += 1
+  if !has_bigint
+    return nil
+  mod[:require_bigint_sub1_1_src] = true
+  mod[:require_bigint_sub1_2_src] = true
+  mod[:require_bigint_mul1_1_src] = true
+  mod[:require_bigint_sqr2_src] = true
+  mod[:require_bigint_sqr3_src] = true
+  mod[:require_bigint_sqr4_src] = true
+  mod[:require_bigint_sqr5_src] = true
+  mod[:require_bigint_sqr6_src] = true
+  mod[:require_bigint_sqr7_src] = true
+  mod[:require_bigint_sqr8_src] = true
+  mod[:require_bigint_sqr16_src] = true
+  mod[:require_bigint_mul2_src] = true
+  mod[:require_bigint_mul3_src] = true
+  mod[:require_bigint_mul4_src] = true
+  mod[:require_bigint_mul5_src] = true
+  mod[:require_bigint_mul6_src] = true
+  mod[:require_bigint_mul7_src] = true
+  mod[:require_bigint_mul8_src] = true
+  mod[:require_bigint_mul12_src] = true
+  mod[:require_bigint_mul15_src] = true
+  mod[:require_bigint_mul16_src] = true
+  mod[:require_bigint_mul17_src] = true
+  mod[:require_bigint_mul21_src] = true
+  mod[:require_bigint_mul24_src] = true
+  mod[:require_bigint_mul1_2_src] = true
+  mod[:require_bigint_mul1_3_src] = true
+  mod[:require_bigint_mul1_4_src] = true
+  mod[:require_bigint_mul1_5_src] = true
+  mod[:require_bigint_mul1_6_src] = true
+  mod[:require_bigint_mul1_7_src] = true
+  mod[:require_bigint_mul1_8_src] = true
+  mod[:require_bigint_mul1_16_src] = true
+  mod[:require_bigint_mul1_24_src] = true
+  mod[:require_bigint_mul1_32_src] = true
+  mod[:require_bigint_mul1_40_src] = true
+  mod[:require_bigint_mul1_48_src] = true
+  mod[:require_bigint_mul1_64_src] = true
+  nil
+
 -> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false, source_manifest = nil, release_mode = false)
   cache_probe = incremental_core_cache_prepare(ast, source_manifest, fast_mode, build_defines, math_mode, no_static_slab, release_mode)
   mod = init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines, cache_probe[:retain_mark])
   mod[:incremental_core_cache_probe] = cache_probe
+  require_bigint_source_seams(mod, ast.expressions)
   collect_lowering_contracts(mod, ast.expressions, source_path)
 
   # Generic class monomorphization runs BEFORE the main expressions walk

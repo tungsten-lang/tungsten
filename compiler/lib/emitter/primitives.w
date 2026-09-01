@@ -358,6 +358,7 @@
   out << declare_fn("w_method_tables_lock_safe", wv, "")
   out << "declare void @w_value_free(i64)\n"
   out << "declare void @w_slab_init_static(ptr, i32)\n"
+  out << "declare void @w_preflight()\n"
   out << "declare void @__w_loc_set_col(ptr, i32, i32)\n"
   out << declare_fn("w_int_to_hex_str", wv, "i64")
   # Same as w_bool/w_nil: `if`/`while` conditions lower to inline i1 tests, so
@@ -617,6 +618,8 @@
   out << declare_fn("__w_file_read_dir", wv, wv)
   out << declare_fn("__w_file_join", wv, wv2)
   out << declare_fn("__w_write_file", wv, wv2)
+  out << declare_fn("__w_write_file_n", wv, wv3)
+  out << declare_fn("__w_file_rm", wv, wv)
   out << declare_fn("__w_file_mmap", wv, wv)
   out << declare_fn("__w_mmap_length", wv, wv)
   out << declare_fn("__w_mmap_byte_at", wv, wv2)
@@ -697,6 +700,10 @@
   out << declare_fn("__w_clock_ms", wv, "")
   out << declare_fn("__w_sleep_ms", wv, "i64")
   out << declare_fn("__w_clock", wv, "")
+  out << declare_fn("__w_cpu_count", wv, "")
+  out << declare_fn("__w_l1d_cache_bytes", wv, "")
+  out << declare_fn("__w_l2_cache_bytes", wv, "")
+  out << declare_fn("__w_cpus_per_l2", wv, "")
   out << declare_fn("__w_prime_aks", wv, wv)
 
   # Direct built-in constructors (skip method dispatch)

@@ -1277,6 +1277,10 @@ skip_bits = skip_bits_requested || (!bit_only && (stage0_only || stage1_only || 
     return true
   atomic_copy(signed_cache, COMPILER_BIN)
   sh_ok("chmod 755 " + shq(COMPILER_BIN))
+  # Warm macOS's first-exec malware-scan cache for the installed compiler
+  # (w_preflight exits at the top of main under TUNGSTEN_PREFLIGHT).
+  on macos
+    sh_ok("TUNGSTEN_PREFLIGHT=1 " + shq(COMPILER_BIN) + " </dev/null >/dev/null 2>&1 &")
   restore_optional_file(signed_sidemap_cache, installed_sidemap)
   if announce
     suffix = label == "" ? "" : " " + DIM + "(" + label + ")" + RESET

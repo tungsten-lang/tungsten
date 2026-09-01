@@ -16,6 +16,9 @@ use core/numeric/rational
 use core/algebra/gaussian_integer
 use core/algebra/eisenstein_integer
 use core/algebra/smith_normal_form
+use core/algebra/group_presentation
+use core/algebra/chain_complex
+use core/algebra/toric_fan
 use core/algebra/field
 use core/algebra/finite_field
 use core/algebra/polynomial

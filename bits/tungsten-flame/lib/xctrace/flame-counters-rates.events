@@ -1,0 +1,7 @@
+instructions	INST_ALL
+cycles	CORE_ACTIVE_CYCLE
+L1-dcache-load-misses	L1D_CACHE_MISS_LD
+L1-dcache-store-misses	L1D_CACHE_MISS_ST
+LLC-load-misses	MMU_TABLE_WALK_DATA
+dTLB-misses	L1D_TLB_MISS
+L2-TLB-data-misses	L2_TLB_MISS_DATA

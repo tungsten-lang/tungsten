@@ -424,6 +424,14 @@
     "temp",
     "temp_ptr"
   ],
+  "ctpop_i64": [
+    "temp",
+    "value"
+  ],
+  "cttz_i64": [
+    "temp",
+    "value"
+  ],
   "fcmp_f64": [
     "lhs",
     "pred",
@@ -885,6 +893,16 @@
     "signed",
     "temp"
   ],
+  "typed_array_load_u64": [
+    "arr",
+    "index",
+    "temp"
+  ],
+  "typed_array_prefetch": [
+    "arr",
+    "index",
+    "temp"
+  ],
   "typed_array_set_inline": [
     "arr",
     "bits",
@@ -892,6 +910,12 @@
     "idx_raw",
     "s",
     "signed",
+    "temp",
+    "value"
+  ],
+  "typed_array_store_u64": [
+    "arr",
+    "index",
     "temp",
     "value"
   ],

@@ -794,6 +794,24 @@
 -> emit_wire_const_uuid(f, byte_len, string_id, temp, temp_ptr)
   current_block(f)[:instructions].push(wire_make_const_uuid(byte_len, string_id, temp, temp_ptr))
 
+-> wire_make_ctpop_i64(temp, value)
+  handle = ccall_rawargs("w_wire_alloc", 269, 2)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
+  handle
+
+-> emit_wire_ctpop_i64(f, temp, value)
+  current_block(f)[:instructions].push(wire_make_ctpop_i64(temp, value))
+
+-> wire_make_cttz_i64(temp, value)
+  handle = ccall_rawargs("w_wire_alloc", 270, 2)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :temp, temp)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :value, value)
+  handle
+
+-> emit_wire_cttz_i64(f, temp, value)
+  current_block(f)[:instructions].push(wire_make_cttz_i64(temp, value))
+
 -> wire_make_fcmp_f64(lhs, pred, rhs, temp)
   handle = ccall_rawargs("w_wire_alloc", 74, 4)
   ccall_nobox("w_wire_field_store_at", handle, 0, :lhs, lhs)
@@ -826,15 +844,6 @@
 
 -> emit_wire_fmuladd_f64(f, lhs, rhs, temp, value)
   current_block(f)[:instructions].push(wire_make_fmuladd_f64(lhs, rhs, temp, value))
-
--> wire_make_ctpop_i64(value, temp)
-  handle = ccall_rawargs("w_wire_alloc", 269, 2)
-  ccall_nobox("w_wire_field_store_at", handle, 0, :value, value)
-  ccall_nobox("w_wire_field_store_at", handle, 1, :temp, temp)
-  handle
-
--> emit_wire_ctpop_i64(f, value, temp)
-  current_block(f)[:instructions].push(wire_make_ctpop_i64(value, temp))
 
 -> wire_make_fn_addr_i64(name, temp)
   handle = ccall_rawargs("w_wire_alloc", 77, 2)
@@ -1740,6 +1749,26 @@
 -> emit_wire_typed_array_get_inline(f, arr, bits, idx, idx_raw, s, signed, temp)
   current_block(f)[:instructions].push(wire_make_typed_array_get_inline(arr, bits, idx, idx_raw, s, signed, temp))
 
+-> wire_make_typed_array_load_u64(arr, index, temp)
+  handle = ccall_rawargs("w_wire_alloc", 271, 3)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :index, index)
+  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
+  handle
+
+-> emit_wire_typed_array_load_u64(f, arr, index, temp)
+  current_block(f)[:instructions].push(wire_make_typed_array_load_u64(arr, index, temp))
+
+-> wire_make_typed_array_prefetch(arr, index, temp)
+  handle = ccall_rawargs("w_wire_alloc", 273, 3)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :index, index)
+  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
+  handle
+
+-> emit_wire_typed_array_prefetch(f, arr, index, temp)
+  current_block(f)[:instructions].push(wire_make_typed_array_prefetch(arr, index, temp))
+
 -> wire_make_typed_array_set_inline(arr, bits, idx, idx_raw, s, signed, temp, value)
   handle = ccall_rawargs("w_wire_alloc", 169, 8)
   ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
@@ -1754,6 +1783,17 @@
 
 -> emit_wire_typed_array_set_inline(f, arr, bits, idx, idx_raw, s, signed, temp, value)
   current_block(f)[:instructions].push(wire_make_typed_array_set_inline(arr, bits, idx, idx_raw, s, signed, temp, value))
+
+-> wire_make_typed_array_store_u64(arr, index, temp, value)
+  handle = ccall_rawargs("w_wire_alloc", 272, 4)
+  ccall_nobox("w_wire_field_store_at", handle, 0, :arr, arr)
+  ccall_nobox("w_wire_field_store_at", handle, 1, :index, index)
+  ccall_nobox("w_wire_field_store_at", handle, 2, :temp, temp)
+  ccall_nobox("w_wire_field_store_at", handle, 3, :value, value)
+  handle
+
+-> emit_wire_typed_array_store_u64(f, arr, index, temp, value)
+  current_block(f)[:instructions].push(wire_make_typed_array_store_u64(arr, index, temp, value))
 
 -> wire_make_unreachable()
   handle = ccall_rawargs("w_wire_alloc", 170, 0)

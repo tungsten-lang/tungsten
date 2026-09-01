@@ -1,0 +1,8 @@
+branches	INST_BRANCH
+branch-misses	BRANCH_MISPRED_NONSPEC
+L1-dcache-load-misses	L1D_CACHE_MISS_LD
+LLC-load-misses	MMU_TABLE_WALK_DATA
+L1d-long-latency	LDST_UNIT_WAITING_OLD_L1D_CACHE_MISS
+dTLB-load-misses	L1D_TLB_MISS
+L1-icache-load-misses	L1I_CACHE_MISS_DEMAND
+L2-TLB-data-misses	L2_TLB_MISS_DATA

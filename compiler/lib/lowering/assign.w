@@ -347,6 +347,11 @@
       return typed_value(raw_machine_value_type(raw_type), ensure_raw_machine_int(wfn, typed_value(:i64, temp), raw_type, raw_type))
     return typed_value(:i64, temp)
 
+  # Bare `l1d_cache_bytes` etc. fold to a literal in a native build (see
+  # host_cache_bytes); the known_calls sysctl bridge below is the cross-build path.
+  if name in ("l1d_cache_bytes" "l2_cache_bytes" "cpus_per_l2") && host_native_build?()
+    return lower_expression(ctx, Tungsten:AST:Int.new(host_cache_bytes(ctx[:mod], name)))
+
   # Zero-arg function call: bare `greet` → call __w_greet()
   call_target = ctx[:mod][:known_calls][name]
   if call_target != nil

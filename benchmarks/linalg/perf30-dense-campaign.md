@@ -267,3 +267,30 @@ workaround (`solve(A^T A, A^T b)`) to the direct API:
 
 Retained. The median improves from 3.8 ms to 1.6 ms per fit (2.4x), while
 avoiding condition-number squaring and making rank failure observable.
+
+## Item 10 — cached MTLTensor descriptor face
+
+Source finding: every `Tensor.metal_tensor` access rebuilt an MTLTensor
+descriptor, even when the backing MTLBuffer, dtype, shape, strides, and offset
+were unchanged. `Tensor.linear` performs these lookups on every dispatch.
+
+Matched one-million-lookup samples in ns/call:
+
+| sample | parent `3ebee592` | candidate |
+| --- | ---: | ---: |
+| 1 | 925 | 107 |
+| 2 | 896 | 106 |
+| 3 | 808 | 105 |
+| 4 | 911 | 97 |
+| 5 | 888 | 104 |
+
+Median: 896 ns to 105 ns, 8.5x faster. The Metal campaign oracle confirms
+repeated access returns the same descriptor and an in-place shape mutation
+invalidates the snapshot. The CPU Tensor spec remains green.
+
+Retained. One cache record occupies Tensor's eighth object slot (the runtime
+already allocates a minimum of eight, so the object footprint does not grow).
+It snapshots buffer/layout metadata and compares shape/stride contents, which
+keeps the cache coherent despite today's mutable Arrays. Argument-table reuse
+is not retained here: `linear` binds a fresh output Tensor each call, so a safe
+plan cache first needs an explicit `linear_into`/workspace lifetime contract.

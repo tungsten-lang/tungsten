@@ -178,6 +178,7 @@ TENSOR_EW = {}
     rw strides
     rw offset
     rw unit
+    rw metal_tensor_cache
 
   # dtype accessors — mirror METAL_DTYPE_* in core/metal.w (values validated by
   # the m4_matmul_bench MTLTensor path). Class-side so `Tensor.f32` reads well
@@ -198,8 +199,10 @@ TENSOR_EW = {}
   # untyped tensors; unit-aware factories and views use the seventh field.
   -> new(@device, @buffer, @dtype, @shape, @strides, @offset)
     @unit = nil
+    @metal_tensor_cache = nil
 
   -> new(@device, @buffer, @dtype, @shape, @strides, @offset, @unit)
+    @metal_tensor_cache = nil
 
   # ---- factories (class-side) ----
 
@@ -549,12 +552,19 @@ TENSOR_EW = {}
   # kernels and the MTL4 residency set.
 
   # An MTLTensor view aliasing this tensor's bytes, for MTL4 argument tables.
-  # Rebuilt each call in v0 (a cheap descriptor wrap); caching is a future
-  # optimization.
+  # Cache the descriptor face while storage and layout metadata stay equal.
+  # The snapshot comparison keeps this coherent even though Tensor's public
+  # shape/strides Arrays remain mutable today.
   -> metal_tensor
     if strides[strides.size() - 1] != 1
       raise "Tensor.metal_tensor: innermost axis is not unit-stride (a transposed/permuted view) — call .contiguous() first"
-    metal_tensor_nd(buffer, dtype, shape, strides, offset * self.bytes_per_element)
+    cached = @metal_tensor_cache
+    if cached != nil && cached[1] == buffer && cached[2] == dtype && cached[3] == offset
+      if Tensor.shapes_equal?(cached[4], shape) && Tensor.shapes_equal?(cached[5], strides)
+        return cached[0]
+    face = metal_tensor_nd(buffer, dtype, shape, strides, offset * self.bytes_per_element)
+    @metal_tensor_cache = [face, buffer, dtype, offset, shape.dup, strides.dup]
+    face
 
   # ---- CPU element access (unified memory) ----
 

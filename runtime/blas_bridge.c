@@ -194,6 +194,54 @@ WValue w_blas_dpotrf_lower(WValue a_wval, WValue n_wval) {
     return w_int((int64_t)info);
 }
 
+/* Thin QR of a column-major m×n input (m>=n). q and r are returned in
+ * row-major flat buffers so Core can unstage them without a transpose pass. */
+WValue w_blas_dgeqrf_qr(WValue a_wval, WValue q_wval, WValue r_wval,
+                        WValue m_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval), *q = w_as_array(q_wval), *r = w_as_array(r_wval);
+    __CLPK_integer m = (__CLPK_integer)w_as_int(m_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    if (m < n || n < 0 || a->size < (int64_t)m * n ||
+        q->size < (int64_t)m * n || r->size < (int64_t)n * n) {
+        w_raise(w_string("dgeqrf_qr: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start;
+    double *qp = (double *)q->slots + q->start;
+    double *rp = (double *)r->slots + r->start;
+    __CLPK_integer info = 0, lwork = -1;
+    double query = 0.0;
+    double *tau = (double *)malloc(sizeof(double) * (size_t)(n > 0 ? n : 1));
+    if (!tau) { w_raise(w_string("dgeqrf_qr: out of memory")); return w_int(-1); }
+    dgeqrf_(&m, &n, ap, &m, tau, &query, &lwork, &info);
+    if (info != 0) { free(tau); return w_int((int64_t)info); }
+    lwork = (__CLPK_integer)query;
+    if (lwork < 1) lwork = 1;
+    double *work = (double *)malloc(sizeof(double) * (size_t)lwork);
+    if (!work) { free(tau); w_raise(w_string("dgeqrf_qr: out of memory")); return w_int(-1); }
+    dgeqrf_(&m, &n, ap, &m, tau, work, &lwork, &info);
+    free(work);
+    if (info != 0) { free(tau); return w_int((int64_t)info); }
+    for (__CLPK_integer i = 0; i < n; i++)
+        for (__CLPK_integer j = 0; j < n; j++)
+            rp[(size_t)i * n + j] = j < i ? 0.0 : ap[(size_t)i + (size_t)j * m];
+    lwork = -1; query = 0.0;
+    dorgqr_(&m, &n, &n, ap, &m, tau, &query, &lwork, &info);
+    if (info == 0) {
+        lwork = (__CLPK_integer)query;
+        if (lwork < 1) lwork = 1;
+        work = (double *)malloc(sizeof(double) * (size_t)lwork);
+        if (!work) { free(tau); w_raise(w_string("dgeqrf_qr: out of memory")); return w_int(-1); }
+        dorgqr_(&m, &n, &n, ap, &m, tau, work, &lwork, &info);
+        free(work);
+    }
+    free(tau);
+    if (info != 0) return w_int((int64_t)info);
+    for (__CLPK_integer i = 0; i < m; i++)
+        for (__CLPK_integer j = 0; j < n; j++)
+            qp[(size_t)i * n + j] = ap[(size_t)i + (size_t)j * m];
+    return w_int(0);
+}
+
 /* ---- vDSP reductions over an f32 array (whole array, start-offset aware) ----
  * n<=0 ⇒ operate over the array's full length. All return a boxed Float. */
 static inline float *blas_f32_ptr(WValue v, int64_t *len_out) {

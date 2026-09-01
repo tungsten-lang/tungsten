@@ -323,13 +323,80 @@
   # (orthonormal columns) and r n×n upper triangular. A dependent column
   # leaves a zero column in q and a zero on r's diagonal rather than
   # raising — Lyapunov-spectrum renormalization treats that as collapse.
+  -> .qr_lapack_cutoff
+    8
+
   -> .qr(a)
+    m = LinAlg.rows(a)
+    n = LinAlg.cols(a)
+    if m >= n && n >= LinAlg.qr_lapack_cutoff
+      return LinAlg.qr_lapack(a)
+    LinAlg.qr_reference(a)
+
+  -> .qr_lapack(a)
+    m = LinAlg.rows(a)
+    n = LinAlg.cols(a)
+    raise "LinAlg.qr: requires m >= n" if m < n
+    flat = ccall("w_array_new_aligned", -64, m * n)
+    i = 0
+    while i < m
+      j = 0
+      while j < n
+        flat[j * m + i] = a[i][j] + ~0.0
+        j += 1
+      i += 1
+    qflat = ccall("w_array_new_aligned", -64, m * n)
+    rflat = ccall("w_array_new_aligned", -64, n * n)
+    info = ccall("w_blas_dgeqrf_qr", flat, qflat, rflat, m, n)
+    raise "LinAlg.qr: LAPACK failed with info=" + info.to_s if info != 0
+    q = []
+    i = 0
+    while i < m
+      row = []
+      j = 0
+      while j < n
+        row.push(qflat[i * n + j])
+        j += 1
+      q.push(row)
+      i += 1
+    r = []
+    i = 0
+    while i < n
+      row = []
+      j = 0
+      while j < n
+        row.push(rflat[i * n + j])
+        j += 1
+      r.push(row)
+      i += 1
+    max_diag = ~0.0
+    min_diag = nil
+    i = 0
+    while i < n
+      diagonal = r[i][i].abs
+      max_diag = diagonal if diagonal > max_diag
+      min_diag = diagonal if min_diag == nil || diagonal < min_diag
+      i += 1
+    # Preserve qr_reference's dependent-column contract. LAPACK still emits
+    # a formal Householder basis for a rank-deficient matrix; Core promises a
+    # zero dependent column instead, so replay that rare case on the reference
+    # path after the cheap diagonal rank signal.
+    if min_diag == nil || min_diag <= max_diag * ~0.00000000000001
+      return LinAlg.qr_reference(a)
+    [q, r]
+
+  -> .qr_reference(a)
     m = LinAlg.rows(a)
     n = LinAlg.cols(a)
     q = LinAlg.copy_mat(a)
     r = LinAlg.zeros(n, n)
     j = 0
     while j < n
+      source_sq = ~0.0
+      t = 0
+      while t < m
+        source_sq += q[t][j] * q[t][j]
+        t += 1
       i = 0
       while i < j
         s = ~0.0
@@ -349,12 +416,19 @@
         s = s + q[t][j] * q[t][j]
         t = t + 1
       nrm = Math.sqrt(s)
-      r[j][j] = nrm
-      if nrm > ~0.0
+      tolerance = Math.sqrt(source_sq) * ~0.00000000000001
+      if nrm > tolerance
+        r[j][j] = nrm
         t = 0
         while t < m
           q[t][j] = q[t][j] / nrm
           t = t + 1
+      else
+        r[j][j] = ~0.0
+        t = 0
+        while t < m
+          q[t][j] = ~0.0
+          t += 1
       j = j + 1
     [q, r]
 

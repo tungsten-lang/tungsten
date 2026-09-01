@@ -182,3 +182,37 @@ Retained as flat typed-storage APIs in `core/blas.w`, backed by CBLAS on both
 Accelerate and OpenBLAS. This intentionally does not add another nested-list
 staging route to `LinAlg`; boundary conversion policy is a separate active
 campaign item.
+
+## Item 5 — LAPACK thin QR tranche
+
+Source finding: `LinAlg.qr` used modified Gram-Schmidt for every shape. Core
+already stages nested rows for LAPACK solve/Cholesky, so the same boundary can
+feed `dgeqrf` + `dorgqr` and return the existing `[q, r]` contract.
+
+Correctness: `spec/core/linalg_qr_lapack_spec.w` passes 3/3 for orthogonality,
+reconstruction, and the documented dependent-column fallback. On the 128x64
+campaign matrix, max `Q^TQ-I` error is `1.78e-15` and max reconstruction error
+is `3.89e-15`. The reference path now explicitly zeros a numerically dependent
+column, matching its pre-existing documentation rather than normalizing roundoff.
+
+Matched 20-operation 128x64 QR samples:
+
+| sample | parent `07b0a4c8` | candidate |
+| --- | ---: | ---: |
+| 1 | 0.48 s | 0.04 s |
+| 2 | 0.39 s | 0.04 s |
+| 3 | 0.41 s | 0.04 s |
+| 4 | 0.40 s | 0.04 s |
+| 5 | 0.41 s | 0.04 s |
+
+Shape crossover probes on the candidate compare the same reference and LAPACK
+entry points. Square 4x4 favors reference (10,000 calls: 0.04 s vs 0.07 s),
+while square 8x8 favors LAPACK (5,000 calls: 0.11 s vs 0.05 s). For 16x8,
+reference/LAPACK are 0.21/0.06 s over 5,000 calls, with the gap widening at
+larger shapes. The retained column cutoff is therefore 8.
+
+Retained. Full-rank `m>=n` QR at `n>=8` routes through LAPACK; smaller and
+rank-deficient inputs keep the reference semantics. A least-squares API is
+deferred: Core currently has no contract for underdetermined systems,
+multi-RHS shape, rank reporting, or `rcond`, and silently choosing those here
+would be an API change rather than a complete performance tranche.

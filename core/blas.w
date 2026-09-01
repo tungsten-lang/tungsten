@@ -144,6 +144,9 @@ fn dnrm2(a, n)
 -> dgemv(a, x, y, m, n)
   ccall("w_blas_dgemv_n", a, x, y, m, n)
 
+-> lapack_qr(a, q, r, m, n)
+  ccall("w_blas_dgeqrf_qr", a, q, r, m, n)
+
 # ---- vDSP vector arithmetic ----
 fn vadd(a, b, out, n)
   ccall("w_blas_vadd_f32", a, b, out, n)

@@ -1972,6 +1972,8 @@ use target
       return ccall("w_blas_daxpy", args[1], args[2], args[3], args[4])
     when "w_blas_dgemv_n"
       return ccall("w_blas_dgemv_n", args[1], args[2], args[3], args[4], args[5])
+    when "w_blas_dgeqrf_qr"
+      return ccall("w_blas_dgeqrf_qr", args[1], args[2], args[3], args[4], args[5])
     when "w_blas_dgeev"
       # LAPACK eigenvalues bridge (core/linalg.w eigenvalues_lapack).
       return ccall("w_blas_dgeev", args[1], args[2], args[3], args[4])

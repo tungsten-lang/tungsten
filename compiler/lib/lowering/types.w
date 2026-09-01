@@ -196,6 +196,7 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_blas_norm_f64"] = true
   m["w_blas_daxpy"] = true
   m["w_blas_dgemv_n"] = true
+  m["w_blas_dgeqrf_qr"] = true
   m["w_blas_vadd_f32"] = true
   m["w_blas_vmul_f32"] = true
   m["w_blas_vsmul_f32"] = true

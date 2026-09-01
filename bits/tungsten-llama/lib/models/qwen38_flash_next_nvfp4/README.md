@@ -203,6 +203,28 @@ self-quantization must re-run the parity + smoke gates.
 
 Standing: plain 43 short / 35.6 code-context; **mtp:3 46-49 short / 49.4 code-context (+39%)**. All gates green.
 
+## Prefill 10x campaign (9/1 evening) — standing ~4x, roadmap below
+
+From 8.9 ms/token (112 tok/s pp) to ~2.2 ms/token at chunk 512 (quiet-box
+confirmation pending). The wins, each ids-gated: token-block-parallel thin
+matvecs (killed ~480 ms/chunk of exposed single-TG latency in the HC
+chain), thread-per-position + parallel-softmax prefill SDPA, staged
+per-expert MMA GEMM for the MoE (sort -> stage -> simdgroup MMA; chunk
+1190 -> 585 ms at w256), parallel GDN conv, m0-offset GEMM tiling,
+parallel QSA select reductions. Negatives (kept, gated): half-MMA expert
+GEMM (slower + ids drift), M4 point-integration (kernel 2.6x alone but
+segmentation serializes the concurrent encoder; bf16 acts drift ids).
+
+Remaining to 10x, in leverage order:
+1. MoE GEMM 823 ms/chunk at w912 vs its ~153 ms f32-MMA compute floor —
+   needs higher MMA utilization (wider tiles / TG-staged activations) or
+   NA-native grouped GEMM at chunk >= 2048 (per-expert M >= 40).
+2. GDN delta chunkwise WY (fla-style) — the serial recurrence is ~1500
+   thin-lane iterations; 400 ms/chunk at w912.
+3. Attention position-tiling with online softmax (~400 ms at w912/2k).
+4. MTL4-native chunk orchestration (whole-layer command streams on the
+   NA queue) — the only route that makes matmul2d pay in prefill.
+
 ## Next (ranked by research + measurement)
 
 1. **MTP speculative decode** — community-measured 1.4-1.7x on Apple

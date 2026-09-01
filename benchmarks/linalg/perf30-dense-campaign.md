@@ -599,6 +599,9 @@ future partial-spectrum API, where requesting a subset could change the work
 comparison; that is a different contract and is not claimed here.
 ## Original item 10 — shape- and staging-aware nested-list GEMM policy
 
+Implementation provenance: source commit `b0caf199`; integration cherry-pick
+`dc1e47e7`.
+
 Source finding: `LinAlg.matmul` selected Accelerate only when `m`, `k`, and `n`
 were each at least eight. That universal gate ignored the actual boundary cost:
 the nested-list API must stage `mk + kn + mn` f64 elements for one CPU dgemm.
@@ -613,7 +616,8 @@ oracle compares every output element with `==`; square, tall/short-wide,
 one-row/one-column, dot, outer, and low-inner-dimension sweeps all passed.
 `spec/core/linalg_matmul_policy_spec.w` pins both sides of every retained
 threshold and exact public-output parity, and is classified in the compiled
-spec lane.
+spec lane. The final policy spec passes 25/25 checks, and the independent
+shape-family exact-output oracle passes 14/14.
 
 The retained CPU/single-product policy is inspectable through
 `LinAlg.matmul_route(m,k,n)`. Tensor remains the owner of views, offsets,

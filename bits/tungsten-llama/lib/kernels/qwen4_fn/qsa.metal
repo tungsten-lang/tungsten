@@ -153,13 +153,28 @@ kernel void qsa_select(
     return;
   }
 
-  // pass 0: min/max (single thread — max_blocks iters, worst 65k)
+  // pass 0: parallel min/max (512-thread strided + simd/TG reduction)
+  threadgroup float red_mn[16];
+  threadgroup float red_mx[16];
+  float lmn = sc[0];
+  float lmx = sc[0];
+  for (int b = tid; b < blocks; b += 512) {
+    lmn = min(lmn, sc[b]);
+    lmx = max(lmx, sc[b]);
+  }
+  float smn = simd_min(lmn);
+  float smx2 = simd_max(lmx);
+  if ((tid & 31) == 0) {
+    red_mn[tid >> 5] = smn;
+    red_mx[tid >> 5] = smx2;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
   if (tid == 0) {
-    float mn = sc[0];
-    float mx = sc[0];
-    for (int b = 1; b < blocks; b++) {
-      mn = min(mn, sc[b]);
-      mx = max(mx, sc[b]);
+    float mn = red_mn[0];
+    float mx = red_mx[0];
+    for (int i = 1; i < 16; i++) {
+      mn = min(mn, red_mn[i]);
+      mx = max(mx, red_mx[i]);
     }
     lo_hi[0] = mn;
     lo_hi[1] = mx > mn ? mx : mn + 1.0f;

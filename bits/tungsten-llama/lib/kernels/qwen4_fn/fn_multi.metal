@@ -761,24 +761,33 @@ kernel void sdpa_prefill_multi_hd256(
     scores[p] = dp * scale;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  if (tid == 0) {
-    float mx = -INFINITY;
-    for (int p = 0; p < usable; ++p) mx = max(mx, scores[p]);
-    float denom = 0.0f;
-    for (int p = 0; p < usable; ++p) {
-      const float e = fast::exp(scores[p] - mx);
-      scores[p] = e;
-      denom += e;
-    }
-    const float inv = denom == 0.0f ? 0.0f : 1.0f / denom;
-    for (int p = 0; p < usable; ++p) scores[p] *= inv;
+  // parallel softmax: 256-thread strided max/sum with simd + TG reduction
+  threadgroup float red[8];
+  float lmx = -INFINITY;
+  for (int p = int(tid); p < usable; p += 256) lmx = max(lmx, scores[p]);
+  float smx = simd_max(lmx);
+  if ((tid & 31) == 0) red[tid >> 5] = smx;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float mx = max(max(max(red[0], red[1]), max(red[2], red[3])),
+                 max(max(red[4], red[5]), max(red[6], red[7])));
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float lsum = 0.0f;
+  for (int p = int(tid); p < usable; p += 256) {
+    const float e = fast::exp(scores[p] - mx);
+    scores[p] = e;
+    lsum += e;
   }
+  float ssum = simd_sum(lsum);
+  if ((tid & 31) == 0) red[tid >> 5] = ssum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float denom = red[0] + red[1] + red[2] + red[3] + red[4] + red[5] + red[6] + red[7];
+  const float inv = denom == 0.0f ? 0.0f : 1.0f / denom;
   threadgroup_barrier(mem_flags::mem_threadgroup);
   float result = 0.0f;
   for (int p = 0; p < usable; ++p) {
     result += scores[p] * v_cache[kv_base + p * kv_dim + int(tid)];
   }
-  out[q_off + int(tid)] = result;
+  out[q_off + int(tid)] = result * inv;
 }
 
 
@@ -801,6 +810,26 @@ kernel void moe_stage_x(
   int pair = order[srow];
   int src = x_is_per_pair != 0 ? pair : pair / K;
   xg[srow * k_dim + i] = x[src * k_dim + i];
+}
+
+// Half-precision staging for the half-MMA expert GEMM.
+kernel void moe_stage_x_h(
+  device const float *__restrict__ x     [[buffer(0)]],
+  device       half  *__restrict__ xg    [[buffer(1)]],
+  device const int   *__restrict__ order [[buffer(2)]],
+  constant int &k_dim [[buffer(3)]],
+  constant int &K     [[buffer(4)]],
+  constant int &x_is_per_pair [[buffer(5)]],
+  constant int &nk    [[buffer(6)]],
+  uint __tid [[thread_position_in_grid]]
+) {
+  int gi = int(__tid);
+  if (gi >= nk * k_dim) return;
+  int srow = gi / k_dim;
+  int i = gi % k_dim;
+  int pair = order[srow];
+  int src = x_is_per_pair != 0 ? pair : pair / K;
+  xg[srow * k_dim + i] = half(x[src * k_dim + i]);
 }
 
 // Per-expert NVFP4 GEMM on simdgroup MMA over the staged activations: the
@@ -900,6 +929,108 @@ kernel void moe_gemm_m8(
         if (m < m_rows && n < n_rows) {
           const int pair = order[seg_lo + mt + m];
           y[pair * n_rows + n] = st[e2] * ws2;
+        }
+      }
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  }
+}
+
+
+kernel void moe_gemm_m8_h(
+  device const uchar *__restrict__ q0 [[buffer(0)]],
+  device const uchar *__restrict__ q1 [[buffer(1)]],
+  device const uchar *__restrict__ q2 [[buffer(2)]],
+  device const uchar *__restrict__ q3 [[buffer(3)]],
+  device const int   *__restrict__ order    [[buffer(4)]],
+  device const int   *__restrict__ offs     [[buffer(5)]],   // [513]
+  device const int   *__restrict__ slot_map [[buffer(6)]],
+  device const half  *__restrict__ xg       [[buffer(7)]],   // [nk, k_dim] staged f16
+  device float       *__restrict__ y        [[buffer(8)]],   // [n*K, n_rows] per pair
+  constant int &k_dim    [[buffer(9)]],
+  constant int &n_rows   [[buffer(10)]],
+  constant int &w0       [[buffer(11)]],
+  constant int &w_stride [[buffer(12)]],
+  constant int &s0       [[buffer(13)]],
+  constant int &s_stride [[buffer(14)]],
+  constant int &g0       [[buffer(15)]],
+  constant int &g_stride [[buffer(16)]],
+  uint tg_id  [[threadgroup_position_in_grid]],
+  uint simd_id [[simdgroup_index_in_threadgroup]],
+  uint lane   [[thread_index_in_simdgroup]]
+) {
+  const int tgs_per_e = n_rows / 32;
+  const int expert = int(tg_id) / tgs_per_e;
+  const int seg_lo = offs[expert];
+  const int c = offs[expert + 1] - seg_lo;
+  if (c <= 0) return;
+  const int n0 = (int(tg_id) % tgs_per_e) * 32 + int(simd_id) * 8;
+  const int n_groups = k_dim / 16;
+  const int u32s_per_row = k_dim / 8;
+  const int slot = slot_map[expert] & 0xFFFF;
+  device const uchar *base = (expert < 128) ? q0
+                           : (expert < 256) ? q1
+                           : (expert < 384) ? q2 : q3;
+  device const uint  *wq = (device const uint *)(base + (ulong)(uint)w0 + (ulong)(uint)slot * (ulong)(uint)w_stride);
+  device const uchar *sq = base + (ulong)(uint)s0 + (ulong)(uint)slot * (ulong)(uint)s_stride;
+  const float ws2 = load_f32_le(base + (ulong)(uint)g0 + (ulong)(uint)slot * (ulong)(uint)g_stride);
+
+  threadgroup half tile[4 * 128];
+  threadgroup float stage[4 * 64];
+  threadgroup half *bt = tile + int(simd_id) * 128;
+  threadgroup float *st = stage + int(simd_id) * 64;
+
+  const int r = int(lane) >> 2;
+  const int qq = int(lane) & 3;
+  const int row = min(n0 + r, n_rows - 1);
+  device const uint  *wrow = wq + row * u32s_per_row;
+  device const uchar *srow = sq + row * n_groups;
+
+  // Up to 4 live C tiles (32 staged rows) per outer pass: ONE nibble decode
+  // serves them all. C[4] = 8 floats/lane — no spill.
+  for (int mt0 = 0; mt0 < c; mt0 += 32) {
+    const int mtiles = min((c - mt0 + 7) / 8, 4);
+    simdgroup_matrix<half, 8, 8> C[4];
+    for (int i2 = 0; i2 < 4; i2++) C[i2] = simdgroup_matrix<half, 8, 8>(0.0h);
+    for (int g = 0; g < n_groups; g++) {
+      const uint w = wrow[g * 2 + (qq >> 1)];
+      const uint b0 = (w >> ((qq & 1) * 16)) & 0xff;
+      const uint b1 = (w >> ((qq & 1) * 16 + 8)) & 0xff;
+      const float sc = float(e4m3_decode_half(uint(srow[g])));
+      // write the tile K-MAJOR so the B loads skip the transposed-load path
+      threadgroup half *dst = bt;
+      const int kb = qq * 4;
+      dst[(kb + 0) * 8 + r] = half(float(nvfp4_decode_half(b0 & 0xf)) * sc);
+      dst[(kb + 1) * 8 + r] = half(float(nvfp4_decode_half(b0 >> 4)) * sc);
+      dst[(kb + 2) * 8 + r] = half(float(nvfp4_decode_half(b1 & 0xf)) * sc);
+      dst[(kb + 3) * 8 + r] = half(float(nvfp4_decode_half(b1 >> 4)) * sc);
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      simdgroup_matrix<half, 8, 8> B0, B1, A0, A1;
+      simdgroup_load(B0, bt, 8);
+      simdgroup_load(B1, bt + 64, 8);
+      const int k0 = g * 16;
+      for (int i2 = 0; i2 < mtiles; i2++) {
+        simdgroup_load(A0, xg + (ulong)(seg_lo + mt0 + i2 * 8) * (ulong)k_dim + k0, (ulong)k_dim);
+        simdgroup_load(A1, xg + (ulong)(seg_lo + mt0 + i2 * 8) * (ulong)k_dim + k0 + 8, (ulong)k_dim);
+        simdgroup_multiply_accumulate(C[i2], A0, B0, C[i2]);
+        simdgroup_multiply_accumulate(C[i2], A1, B1, C[i2]);
+      }
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    for (int i2 = 0; i2 < mtiles; i2++) {
+      const int mt = mt0 + i2 * 8;
+      const int m_rows = min(c - mt, 8);
+      simdgroup_matrix<float, 8, 8> Cf;
+      simdgroup_store(C[i2], (threadgroup half *)st, 8);
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      (void)Cf;
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      for (int e2 = int(lane); e2 < 64; e2 += 32) {
+        const int m = e2 >> 3;
+        const int n = n0 + (e2 & 7);
+        if (m < m_rows && n < n_rows) {
+          const int pair = order[seg_lo + mt + m];
+          y[pair * n_rows + n] = float(((threadgroup half *)st)[e2]) * ws2;
         }
       }
       simdgroup_barrier(mem_flags::mem_threadgroup);

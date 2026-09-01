@@ -1542,6 +1542,12 @@ if multi_n > 0 || mtp_depth > 0 || prompt_tokens > 8 || prompt_ids_file != ""
   grouped_m_pipe = metal_pipeline(fnm_lib, "moe_grouped_matvec")
   moe_stage_pipe = metal_pipeline(fnm_lib, "moe_stage_x")
   moe_gemm_pipe = metal_pipeline(fnm_lib, "moe_gemm_m8")
+  moe_stage_h_pipe = metal_pipeline(fnm_lib, "moe_stage_x_h")
+  moe_gemm_h_pipe = metal_pipeline(fnm_lib, "moe_gemm_m8_h")
+  # FN_MOEH=1 uses the half-MMA expert GEMM — measured SLOWER on M5
+  # (2050 vs 1133 ms/chunk) AND ids diverge (half accumulation over
+  # K=2560). Default stays f32 MMA; kept for re-testing on other silicon.
+  moe_half = ccall("__w_env", "FN_MOEH") == "1"
   moe_sort_pipe = metal_pipeline(fnm_lib, "moe_sort_pairs")
   moe_out_m_pipe = metal_pipeline(fnm_lib, "moe_output_multi")
   ple_gate_m_pipe = metal_pipeline(fnm_lib, "ple_gate_multi")
@@ -1831,12 +1837,14 @@ mrec = [0]
   if n > 8
     # prefill: stage activations expert-contiguous, then per-expert MMA GEMM
     # (one nibble decode per weight per 8-token m-tile, matrix-unit math)
+    sp = moe_half ? moe_stage_h_pipe : moe_stage_pipe
+    gp = moe_half ? moe_gemm_h_pipe : moe_gemm_pipe
     if !skip_moestage
-      mdn(moe_stage_pipe, [xn_m, xg_m, order_m, HIDDEN, TOP_K, 0, n * TOP_K], n * TOP_K * HIDDEN)
+      mdn(sp, [xn_m, xg_m, order_m, HIDDEN, TOP_K, 0, n * TOP_K], n * TOP_K * HIDDEN)
       mbar([xg_m])
     if !skip_moegemm
-      mdg(moe_gemm_pipe, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5]], 512 * (MOE_FFN / 32), 128)
-      mdg(moe_gemm_pipe, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5]], 512 * (MOE_FFN / 32), 128)
+      mdg(gp, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5]], 512 * (MOE_FFN / 32), 128)
+      mdg(gp, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5]], 512 * (MOE_FFN / 32), 128)
   else
     mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eg_m, HIDDEN, MOE_FFN, og[0], og[1], og[2], og[3], og[4], og[5], TOP_K, 0, ex[:hot], og[6], og[7], og[8], order_m], n * TOP_K * (MOE_FFN / 8), 64)
     mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], xn_m, eu_m, HIDDEN, MOE_FFN, ou[0], ou[1], ou[2], ou[3], ou[4], ou[5], TOP_K, 0, ex[:hot], ou[6], ou[7], ou[8], order_m], n * TOP_K * (MOE_FFN / 8), 64)
@@ -1845,11 +1853,13 @@ mrec = [0]
   mdn(silu_pipe, [eg_m, eu_m, eh_m, n * TOP_K * MOE_FFN], n * TOP_K * MOE_FFN)
   mbar([eh_m])
   if n > 8
+    sp2 = moe_half ? moe_stage_h_pipe : moe_stage_pipe
+    gp2 = moe_half ? moe_gemm_h_pipe : moe_gemm_pipe
     if !skip_moestage
-      mdn(moe_stage_pipe, [eh_m, xg_m, order_m, MOE_FFN, TOP_K, 1, n * TOP_K], n * TOP_K * MOE_FFN)
+      mdn(sp2, [eh_m, xg_m, order_m, MOE_FFN, TOP_K, 1, n * TOP_K], n * TOP_K * MOE_FFN)
       mbar([xg_m])
     if !skip_moegemm
-      mdg(moe_gemm_pipe, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5]], 512 * (HIDDEN / 32), 128)
+      mdg(gp2, [q[0], q[1], q[2], q[3], order_m, moe_offs_buf, ex[:slot_map], xg_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5]], 512 * (HIDDEN / 32), 128)
   else
     mdg(gather_m_pipe, [q[0], q[1], q[2], q[3], tidx_m, ex[:slot_map], eh_m, ed_m, MOE_FFN, HIDDEN, od[0], od[1], od[2], od[3], od[4], od[5], TOP_K, 1, ex[:hot], od[6], od[7], od[8], order_m], n * TOP_K * (HIDDEN / 8), 64)
   mbar([ed_m, tw_m, shared_m, seg_m])

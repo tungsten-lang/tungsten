@@ -4,6 +4,7 @@
 #   dense_tensor_campaign cpu-ops
 #   dense_tensor_campaign view-oracle
 #   dense_tensor_campaign metadata [iterations]
+#   dense_tensor_campaign view-matmul [iterations]
 #   dense_tensor_campaign unary [iterations]
 #   dense_tensor_campaign reductions [iterations]
 
@@ -57,6 +58,17 @@ elsif mode == "view-oracle"
   assert_close(product.at([0, 1]), ~4.0, "offset matmul 01")
   assert_close(product.at([1, 0]), ~5.0, "offset matmul 10")
   assert_close(product.at([1, 1]), ~6.0, "offset matmul 11")
+  left_base = Tensor.from_rows([[~1.0, ~2.0, ~3.0], [~4.0, ~5.0, ~6.0]], Tensor.f64)
+  left_t = left_base.transpose
+  right = Tensor.from_rows([[~7.0, ~8.0], [~9.0, ~10.0]], Tensor.f64)
+  left_t_product = left_t.matmul(right)
+  assert_close(left_t_product.at([0, 0]), ~43.0, "left transpose 00")
+  assert_close(left_t_product.at([2, 1]), ~84.0, "left transpose 21")
+  packed_left = Tensor.from_rows([[~1.0, ~2.0], [~3.0, ~4.0], [~5.0, ~6.0]], Tensor.f64)
+  right_base = Tensor.from_rows([[~7.0, ~9.0], [~8.0, ~10.0]], Tensor.f64)
+  right_t_product = packed_left.matmul(right_base.transpose)
+  assert_close(right_t_product.at([0, 0]), ~25.0, "right transpose 00")
+  assert_close(right_t_product.at([2, 1]), ~100.0, "right transpose 21")
   << "VIEW_ORACLE_OK"
 elsif mode == "metadata"
   iterations = ARGV[1] == nil ? 1000000 : ARGV[1].to_i
@@ -70,6 +82,22 @@ elsif mode == "metadata"
     i += 1
   elapsed = clock() - t0
   << "METADATA ns/op=" + (elapsed * ~1000000000.0 / iterations).round(2).to_s + " checksum=" + checksum.to_s
+elsif mode == "view-matmul"
+  iterations = ARGV[1] == nil ? 20 : ARGV[1].to_i
+  # The logical left operand is 192x128, represented as the zero-copy
+  # transpose of a packed 128x192 tensor. The old route materializes that
+  # view on every matmul call before entering dgemm.
+  left = filled_tensor(128, 192, Tensor.f64).transpose
+  right = filled_tensor(128, 160, Tensor.f64)
+  product = nil
+  t0 = clock()
+  i = 0
+  while i < iterations
+    product = left.matmul(right)
+    i += 1
+  elapsed = clock() - t0
+  raise "view matmul produced wrong shape" if product.shape != [192, 160]
+  << "VIEW_MATMUL ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + product.at([0, 0]).round(6).to_s
 elsif mode == "unary"
   iterations = ARGV[1] == nil ? 20 : ARGV[1].to_i
   x = filled_tensor(256, 256, Tensor.f64)

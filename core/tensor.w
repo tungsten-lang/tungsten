@@ -155,6 +155,12 @@ TENSOR_EW = {}
   -> .storage_dgemm(a, b, c, m, n, k)
     ccall("w_blas_dgemm_nn", a, b, c, m, n, k)
 
+  -> .storage_sgemm_view(a, b, c, m, n, k, ao, bo, ta, tb)
+    ccall("w_blas_sgemm_view", a, b, c, m, n, k, ao, bo, ta, tb)
+
+  -> .storage_dgemm_view(a, b, c, m, n, k, ao, bo, ta, tb)
+    ccall("w_blas_dgemm_view", a, b, c, m, n, k, ao, bo, ta, tb)
+
   - data
     rw device
     rw buffer
@@ -426,6 +432,14 @@ TENSOR_EW = {}
       i = i + 1
     same
 
+  # CBLAS can consume a packed rank-2 tensor or its zero-copy transpose.
+  # Return 0 for NoTrans, 1 for Trans, and -1 for a layout that needs packing.
+  -> blas_layout
+    return -1 if self.rank != 2
+    return 0 if strides[1] == 1 && strides[0] == shape[1]
+    return 1 if strides[0] == 1 && strides[1] == shape[0]
+    -1
+
   # Numeric rank-2 Tensor as fresh nested rows. This is deliberately a copy:
   # Array rows cannot carry Tensor's offset/stride aliasing contract. It is a
   # small interoperability boundary for tabular consumers, not a second dense
@@ -581,10 +595,9 @@ TENSOR_EW = {}
   # ---- matmul ----
 
   # 2-D matrix multiply: [M,K] · [K,N] → a fresh contiguous [M,N] Tensor.
-  # CPU f32/f64 tensors route to Accelerate sgemm/dgemm over their typed-array
-  # buffers. A strided input is made contiguous because this small BLAS bridge
-  # currently exposes only row-major NN; transpose views themselves stay
-  # zero-copy for indexing and non-BLAS operations.
+  # CPU f32/f64 tensors route to CBLAS over their typed-array buffers. Packed
+  # matrices, offset slices, and zero-copy transpose views enter GEMM directly;
+  # only a general stride pattern is materialized.
   # GPU (MLX/MTL4) routing is a follow-up (blocked on default-link of those
   # bridges, not on this design).
   -> matmul(other)
@@ -594,22 +607,26 @@ TENSOR_EW = {}
       raise "Tensor.matmul: operand dtype mismatch"
     if self.rank != 2 || other.rank != 2
       raise "Tensor.matmul: both operands must be rank-2"
-    if !self.contiguous?
-      return self.contiguous.matmul(other)
-    if !other.contiguous?
-      return self.matmul(other.contiguous)
     m = shape[0]
     k = shape[1]
     if other.shape[0] != k
       raise "Tensor.matmul: inner dimensions disagree"
     n = other.shape[1]
     if device == :cpu && other.device == :cpu
+      al = self.blas_layout
+      bl = other.blas_layout
+      return self.contiguous.matmul(other) if al < 0
+      return self.matmul(other.contiguous) if bl < 0
       result = Tensor.zeros_cpu(dtype, [m, n])
       if dtype == Tensor.f64
-        Tensor.storage_dgemm(buffer, other.buffer, result.buffer, m, n, k)
+        Tensor.storage_dgemm_view(buffer, other.buffer, result.buffer, m, n, k, offset, other.offset, al, bl)
       else
-        Tensor.storage_sgemm(buffer, other.buffer, result.buffer, m, n, k)
+        Tensor.storage_sgemm_view(buffer, other.buffer, result.buffer, m, n, k, offset, other.offset, al, bl)
       return result
+    if !self.contiguous?
+      return self.contiguous.matmul(other)
+    if !other.contiguous?
+      return self.matmul(other.contiguous)
     if dtype == Tensor.f64
       raise "Tensor.matmul: f64 is CPU-only"
     result = Tensor.zeros(device, 3, [m, n])

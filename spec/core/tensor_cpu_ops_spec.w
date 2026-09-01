@@ -42,3 +42,26 @@ row_sums = probabilities.sum_axis(1)
 expect("tensor.cpu.softmax backend", probabilities.device == :cpu)
 expect("tensor.cpu.softmax row 0", close?(row_sums.at([0]), ~1.0))
 expect("tensor.cpu.softmax row 1", close?(row_sums.at([1]), ~1.0))
+
+# Packed slices carry a nonzero storage offset. GEMM must not silently bind the
+# base array, and a packed transpose should not need a materialization copy.
+storage = f64_array(8)
+i = 0
+while i < 8
+  storage[i] = (i + 1).to_f
+  i += 1
+whole = Tensor.wrap_cpu(storage, Tensor.f64, [4, 2], [2, 1], 0)
+view = whole.slice(0, 1, 2)
+identity = Tensor.from_rows([[~1.0, ~0.0], [~0.0, ~1.0]], Tensor.f64)
+view_product = view.matmul(identity)
+expect("tensor.cpu.matmul offset", close?(view_product.at([0, 0]), ~3.0) && close?(view_product.at([1, 1]), ~6.0))
+
+left_base = Tensor.from_rows([[~1.0, ~2.0, ~3.0], [~4.0, ~5.0, ~6.0]], Tensor.f64)
+right = Tensor.from_rows([[~7.0, ~8.0], [~9.0, ~10.0]], Tensor.f64)
+transpose_product = left_base.transpose.matmul(right)
+expect("tensor.cpu.matmul left transpose", close?(transpose_product.at([0, 0]), ~43.0) && close?(transpose_product.at([2, 1]), ~84.0))
+
+packed_left = Tensor.from_rows([[~1.0, ~2.0], [~3.0, ~4.0], [~5.0, ~6.0]], Tensor.f64)
+right_base = Tensor.from_rows([[~7.0, ~9.0], [~8.0, ~10.0]], Tensor.f64)
+right_transpose_product = packed_left.matmul(right_base.transpose)
+expect("tensor.cpu.matmul right transpose", close?(right_transpose_product.at([0, 0]), ~25.0) && close?(right_transpose_product.at([2, 1]), ~100.0))

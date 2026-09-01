@@ -45,6 +45,38 @@ WValue w_blas_dgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
     return c_wval;
 }
 
+WValue w_blas_sgemm_view(WValue a_wval, WValue b_wval, WValue c_wval,
+                         WValue m_wval, WValue n_wval, WValue k_wval,
+                         WValue ao_wval, WValue bo_wval,
+                         WValue ta_wval, WValue tb_wval) {
+    WArray *a = w_as_array(a_wval), *b = w_as_array(b_wval), *c = w_as_array(c_wval);
+    int M = (int)w_as_int(m_wval), N = (int)w_as_int(n_wval), K = (int)w_as_int(k_wval);
+    int ta = (int)w_as_int(ta_wval), tb = (int)w_as_int(tb_wval);
+    float *Ap = (float *)a->slots + a->start + w_as_int(ao_wval);
+    float *Bp = (float *)b->slots + b->start + w_as_int(bo_wval);
+    float *Cp = (float *)c->slots + c->start;
+    cblas_sgemm(CblasRowMajor, ta ? CblasTrans : CblasNoTrans,
+                tb ? CblasTrans : CblasNoTrans, M, N, K, 1.0f,
+                Ap, ta ? M : K, Bp, tb ? K : N, 0.0f, Cp, N);
+    return c_wval;
+}
+
+WValue w_blas_dgemm_view(WValue a_wval, WValue b_wval, WValue c_wval,
+                         WValue m_wval, WValue n_wval, WValue k_wval,
+                         WValue ao_wval, WValue bo_wval,
+                         WValue ta_wval, WValue tb_wval) {
+    WArray *a = w_as_array(a_wval), *b = w_as_array(b_wval), *c = w_as_array(c_wval);
+    int M = (int)w_as_int(m_wval), N = (int)w_as_int(n_wval), K = (int)w_as_int(k_wval);
+    int ta = (int)w_as_int(ta_wval), tb = (int)w_as_int(tb_wval);
+    double *Ap = (double *)a->slots + a->start + w_as_int(ao_wval);
+    double *Bp = (double *)b->slots + b->start + w_as_int(bo_wval);
+    double *Cp = (double *)c->slots + c->start;
+    cblas_dgemm(CblasRowMajor, ta ? CblasTrans : CblasNoTrans,
+                tb ? CblasTrans : CblasNoTrans, M, N, K, 1.0,
+                Ap, ta ? M : K, Bp, tb ? K : N, 0.0, Cp, N);
+    return c_wval;
+}
+
 /* Reductions / elementwise: portable scalar loops (vDSP is Apple-only). */
 static float *ob_f32(WValue v, int64_t *len) {
     WArray *a = w_as_array(v);

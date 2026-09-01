@@ -173,6 +173,8 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   # ---- BLAS / LAPACK / FFT bridges (write to caller's C buffer) ----
   m["w_blas_sgemm_nn"] = true
   m["w_blas_dgemm_nn"] = true
+  m["w_blas_sgemm_view"] = true
+  m["w_blas_dgemm_view"] = true
   m["w_blas_dgesv"] = true
   m["w_blas_dpotrf"] = true
   m["w_blas_fft_f32"] = true

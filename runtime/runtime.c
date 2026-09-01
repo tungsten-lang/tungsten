@@ -65844,6 +65844,22 @@ __attribute__((weak)) WValue w_blas_dgemm_nn(WValue a, WValue b, WValue c, WValu
     w_raise(w_string("blas_dgemm: BLAS bridge not linked (program references no w_blas_ call) or platform without Accelerate"));
     return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_sgemm_view(WValue a, WValue b, WValue c,
+                                               WValue m, WValue n, WValue k,
+                                               WValue ao, WValue bo, WValue ta, WValue tb) {
+    (void)a; (void)b; (void)c; (void)m; (void)n; (void)k;
+    (void)ao; (void)bo; (void)ta; (void)tb;
+    w_raise(w_string("blas_sgemm_view: BLAS bridge not linked or no CBLAS"));
+    return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dgemm_view(WValue a, WValue b, WValue c,
+                                               WValue m, WValue n, WValue k,
+                                               WValue ao, WValue bo, WValue ta, WValue tb) {
+    (void)a; (void)b; (void)c; (void)m; (void)n; (void)k;
+    (void)ao; (void)bo; (void)ta; (void)tb;
+    w_raise(w_string("blas_dgemm_view: BLAS bridge not linked or no CBLAS"));
+    return W_NIL;
+}
 /* vDSP reductions + elementwise transcendentals — real impls in blas_bridge.c. */
 __attribute__((weak)) WValue w_blas_sum_f32(WValue a, WValue n) {
     (void)a; (void)n; w_raise(w_string("blas_sum: BLAS bridge not linked or no Accelerate")); return W_NIL;

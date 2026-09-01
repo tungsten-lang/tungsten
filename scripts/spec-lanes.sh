@@ -340,6 +340,7 @@ compiled_specs=(
   spec/core/algebra_prime_subspace_spec.w
   spec/core/algebra_c_ab_spec.w
   spec/core/algebra_divisors_spec.w
+  spec/core/algebra_finite_lattice_spec.w
   # The full KM order certificate is intentionally native: the interpreter's
   # boxed exact-linear-algebra path is prohibitively memory hungry.
   spec/core/algebra_c_ab_divisors_spec.w
@@ -354,6 +355,9 @@ compiled_specs=(
   spec/core/algebra_shell_width_degree9_artifact_spec.w
   spec/core/algebra_shell_width_degree12_artifact_spec.w
   spec/core/algebra_shell_width_s_unit_artifacts_spec.w
+  # S6 stays compiled-only: the tree interpreter does not propagate
+  # `return false` from ToricFan2D#fano?'s each block, failing fan.f2_not_fano.
+  spec/core/s6_lattice_spec.w
   spec/core/algebraic_real_spec.w
   spec/core/formal_series_spec.w
   spec/core/formal_series_autoload_spec.w
@@ -545,6 +549,7 @@ interpreter_specs=(
   spec/core/expression_special_spec.w
   spec/core/expression_transcendental_spec.w
   spec/core/expression_solve_spec.w
+  spec/core/algebra_finite_lattice_spec.w
   # The exhaustive real-root/ideal/lattice/S-class/S-unit programs are gated
   # above in the compiled lane. Repeating them in the tree walker consumed the
   # entire suite tail (multiple full cores for 10+ minutes) without adding a

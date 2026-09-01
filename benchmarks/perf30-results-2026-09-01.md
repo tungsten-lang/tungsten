@@ -37,7 +37,7 @@ prerequisite and no speculative production code remains.
 | 25 | Reusable Metal dispatch plans | **Rejected** | Isolated dispatch-plan smoke passed, but the five-token FlashNext fixture produced token 220 instead of 11751 and left a driver-stuck control buffer. | Prototype fully reverted. Per-step differential taps and explicit lifecycle/error handling are prerequisites. |
 | 26 | Tiled online-softmax SDPA | **Rejected after end-to-end gate** | Synthetic max error <=6.76e-9 and GPU micro neutral to ~5% faster; exact-ID 638-token Qwen3.8 prefill regressed median 26,218 to 26,790 ms (+2.18%). | Candidate removed because whole-model performance lost despite numerical parity. |
 | 27 | Mamba fusion | **Already present in FlashNext; Qwen port rejected** | Qwen3.8 port preserves 128 exact IDs, but whole-model timing changes sign at 8/32/64 tokens; the apparent 128-token win is thermally throttled. | Port reverted. Shipping FlashNext already fuses conv+split and g+beta. |
-| 28 | Bulk FlashNext PLE gather | **Retained** | Original 10,000-call 16x160 runs changed 286–288 ms scalar to 8–9 ms bulk (31–36x). The final audit-tree rerun with the corrected decoder measured 291/8 ms (36x), 290/11 ms (26x), and 290/9 ms (32x). Loaded-box short decode wins both matched pairs. | Hidden/logit/debug dumps and generated IDs match byte-for-byte. The final audit-tree smoke matches the canonical decoder for all 256 FP8 byte encodings, including `0x7f`/`0xff` mapping to zero; the appendix distinguishes this follow-up from the committed item-28 implementation. |
+| 28 | Bulk FlashNext PLE gather | **Retained** | Original 10,000-call 16x160 runs changed 286–288 ms scalar to 8–9 ms bulk (31–36x). Commit `c2a5cd1e` corrected sentinel decoding and measured 291/8 ms (36x), 290/11 ms (26x), and 290/9 ms (32x). After the upstream width-N merge, three fresh processes measured 302/9 ms (33x), 303/10 ms (30x), and 293/11 ms (26x). | Hidden/logit/debug dumps and generated IDs match byte-for-byte. The exhaustive smoke matches all 256 FP8 encodings, including `0x7f`/`0xff` as zero. The merged mixed path reproduced 119/119 oracle tokens at widths 2, 4, and 8, exercising bulk base-zero plus offset-aware later rows. |
 | 29 | Persistent MTL4 prefill graph | **Winning submission shape already present** | Parity-checked 48-stage proxy: one command buffer 0.245/0.295 ms; four buffers 0.670/0.690 ms (2.34–2.73x slower); 48 buffers 7.10 ms (24–29x slower). | Optimized target paths already encode one target pass in one command buffer. Older host-readback path needs semantic restructuring first. |
 | 30 | Fused router/top-k | **Rejected** | Exact packed top-8 IDs/weights, but 48 layers take 11.5785 ms fused versus 3.5404 ms separate (0.306x). | Prototype removed. One large threadgroup destroys router-matvec occupancy; a different inter-group algorithm is required. |
 
@@ -53,20 +53,37 @@ Detailed command lines, sample tables, and workload construction live in:
 A post-campaign integration audit found edge contracts that the focused
 performance oracles did not cover. The responses below are integration
 follow-ups, not evidence contained in the original retained performance
-commits; individual fixes may be committed or still in the working tree while
-the audit closes. This appendix records their scope but does not claim that the
-final exact-HEAD compiler/runtime gate is green. The landing handoff is the
-authority for final commit and validation status.
+commits. All responses below are committed on the integration branch. The key
+follow-up commits are `c2a5cd1e`, `49359070`, `008a0daf`, and `b051b18f`;
+the final branch revision is reported by the landing handoff.
 
-| Audit area | Integration response | Required landing evidence |
+| Audit area | Integration response | Final evidence |
 |---|---|---|
-| Numeric scalar ABI | Coerce ordinary integer `alpha`/`beta` arguments once at the Core BLAS and Tensor boundaries before native f64 decoding. | Integer-scalar checks for DAXPY, DSCAL, DSYRK, DTRSM, and f32/f64 `matmul_into`. |
-| BLAS and factor aliasing | Reject byte-range overlap for GEMM, GEMV, SYMV, SYRK, and TRSM in both native bridges; use overlap-safe typed-array moves for LU, Cholesky, and QR `solve_into`/batched copies. | Exact same-buffer and shifted-slice cases across Accelerate, plus equivalent OpenBLAS CI. |
-| Compiler and interpreter registration | Mark the new mutating calls impure, add tree-interpreter dispatch, and autoload all three dense-factor classes. | Rebuilt-compiler repeated-mutation test, one interpreter check per call family, factor autoload spec, fixed-point and parser-parity gates. |
-| FP8 decoder contract | Match FlashNext/NVFP4 sentinel semantics and check all 256 encodings; the live audit-tree run passed, including `0x7f` and `0xff` as zero. | Preserve the exhaustive smoke in the final exact-HEAD run. The corrected-decoder throughput remained 36x/26x/32x in three runs. |
-| CPU f32 backend selection | Require a non-CPU Metal device for wide elementwise and row-softmax GPU routing. This is baseline hardening, not a perf30 regression. | Large CPU-f32 binop and CPU-f32 softmax backend/value checks. |
-| Concurrent Core caches | Publish substitution plans and circuit tapes as one key/value cache pair and retain the chosen value locally. | Synchronized multithreaded plan/tape checks plus unchanged single-thread checksums and matched cache-hit timing. |
+| Numeric scalar ABI | Coerce ordinary integer `alpha`/`beta` arguments once at the Core BLAS and Tensor boundaries before native f64 decoding. | Integer-scalar DAXPY, DSCAL, DSYRK, DTRSM, and f32/f64 `matmul_into` checks pass in both required lanes. |
+| BLAS and factor aliasing | Reject byte-range overlap for GEMM, GEMV, SYMV, SYRK, and TRSM in both native bridges; use overlap-safe typed-array moves for LU, Cholesky, and QR `solve_into`/batched copies. | Same-buffer and shifted-slice checks pass on Accelerate. OpenBLAS headers are unavailable on this host, so equivalent OpenBLAS CI remains the only platform follow-up. |
+| Compiler and interpreter registration | Mark the new mutating calls and their transitive callers impure, add tree-interpreter dispatch, and autoload all three dense-factor classes. | Native and interpreted BLAS/factor tests pass; the exact compiler fixed point, parser parity, acid test, and WIRE direct-call audit are green. |
+| FP8 decoder contract | Match FlashNext/NVFP4 sentinel semantics and check all 256 encodings, including `0x7f` and `0xff` as zero. | The exact closeout compiler passes the exhaustive smoke; corrected throughput remains 26-33x in three fresh merged-tree processes, and width 2/4/8 each reproduces 119/119 oracle tokens. |
+| CPU f32 backend selection | Require a non-CPU Metal device for wide elementwise and row-softmax GPU routing. This is baseline hardening, not a perf30 regression. | Large CPU-f32 binop and softmax backend/value checks pass. |
+| Concurrent Core caches | Publish substitution plans and circuit tapes as one key/value cache pair and retain the chosen value locally. | Synchronized multithreaded plan/tape checks, single-thread checksums, and matched cache-hit timing pass. |
 
-The landing handoff must report the final revision separately after these
-changes, regenerated ccall contracts, focused specs, C syntax checks, and the
-compiler fixed-point/parity suite all complete.
+At compiler/runtime revision `b051b18f`, the freshly bootstrapped compiler is
+9,622,928 bytes with SHA-256
+`04a6c84eb3e0a4c85a0934e8a75cdb261d25b102e0ff483b78fb6d82cefdcf16`.
+Its stage-1 and stage-2 LLVM are byte-identical with SHA-256
+`86dd68dc665708ff4c0f7f00fc344f81ef01257541f7c79c1e51d868328a8475`.
+Fast/canonical parser parity, acid, native/interpreted impurity tests,
+Rational/operator/vector/matrix lanes, NaN-box tests, and the C-call verifier
+(351 declarations, 714 foreign targets) all pass. The final Qwen smoke also
+passes tokenizer round trips, all 256 FP8 encodings, and 119/119 width-2 mixed
+bulk/offset oracle tokens.
+
+The closeout `bundle exec rake` rebuild reaches a fixed point and its Ruby
+suite reports 4,139 examples, 0 failures, and 34 pending. All 581 tracked
+Tungsten specs are now classified. The default native/interpreted battery still
+exits nonzero on 12 inherited failures. An exact `527930da` baseline run has the
+same 12 plus four additional compile failures (`hypercomplex_mul`, `matrix`,
+`operator_overload`, and `vector`); the candidate-only failure set is empty.
+The root-only `mutex` and `http` failures also reproduce in focused exact-
+baseline runs. Thus the full root command is not globally green, but its
+remaining red set is a strict subset of the clean baseline rather than a
+perf30 regression.

@@ -17,7 +17,7 @@ about 28 to 12.7 tokens/s, so sign-changing whole-model results were rejected.
 | 25. Reusable Metal plans | Rejected | A native prevalidated plan executor passed a focused linear/barrier/scalar/3-D dispatch smoke, but the five-token FlashNext fixture returned token 220 instead of 11751.  A later control command buffer remained in the GPU driver until killed.  All code was reverted.  Immutable host plans are still plausible, but the next tranche needs per-step differential taps and lifecycle/error handling before a whole-model attempt. |
 | 26. Tiled long-context SDPA | Rejected | A tile-64 online-softmax HD256 kernel passed a synthetic parity oracle at 32/128/320/640 positions with maximum absolute error no larger than `6.76e-9`.  Its GPU micro was neutral to about 5% faster, but a 638-token full Qwen3.8 ABBA produced identical IDs and regressed median warm prefill from 26,218 to 26,790 ms (+2.18%); decode was also neutral/slightly worse.  The candidate was removed. |
 | 27. Mamba fusion | Already present in FlashNext; Qwen3.8 port rejected | FlashNext already fuses conv+split and `g`+beta.  Porting the same kernels to Qwen3.8 preserved every ID through 128 generated tokens.  Whole-model timing changed sign: 261 vs 269 ms at 8 tokens, 1108 vs 1088 at 32, 2268 vs 2332 at 64, and a thermally throttled 128-token ABBA favored fusion by 2.4%.  The inconsistent end-to-end result fails the promotion gate, so the port was reverted. |
-| 28. Bulk FlashNext PLE gather | Retained: `d61c20d6` | One checked native call now gathers all 16 FP8 rows instead of 16 bridge calls. Exact hidden/logit/debug dumps and generated IDs match the scalar path. The original 10,000-gather micro improved from 286/287/288 ms to 9/8/8 ms (31-36x); loaded-box short decode won both matched pairs. A final audit-tree decoder correction passed all 256 FP8 bytes and retained 36x/26x/32x throughput in three runs; that follow-up remains distinct from the committed item-28 implementation until the audit fixes commit. |
+| 28. Bulk FlashNext PLE gather | Retained: `d61c20d6`, corrected by `c2a5cd1e` | One checked native call now gathers all 16 FP8 rows instead of 16 bridge calls. Exact hidden/logit/debug dumps and generated IDs match the scalar path. The original 10,000-gather micro improved from 286/287/288 ms to 9/8/8 ms (31-36x); loaded-box short decode won both matched pairs. The committed decoder correction passes all 256 FP8 bytes and retained 36x/26x/32x throughput in its three-run audit. |
 | 29. Persistent prefill graph | Measured proxy; no production change | A parity-checked 48-stage dependent graph measured one command buffer at 0.245/0.295 ms wall, four command buffers at 0.670/0.690 ms (2.34-2.73x slower), and 48 command buffers at 7.10/7.10 ms (24.1-29.0x slower).  The optimized Qwen3 fixed prefill and Qwen3.8/FlashNext target paths already use the winning one-command-buffer shape.  The older Qwen3.6 verifier is fragmented by CPU router readback and per-expert submissions, so it cannot become a persistent graph without first changing those semantics.  Metal command buffers are one-shot; item 25's reusable-plan attempt failed whole-model parity. |
 | 30. Fused router/top-k | Rejected | The existing fused kernel was adapted to packed outputs and passed exact top-8 ID and weight parity.  On a 48-layer micro it took 11.5785 ms versus 3.5404 ms separate (0.306x).  One 1024-thread group serializes four router rows per SIMD group and loses the 128-group matvec occupancy; eliminating one dispatch cannot repay that loss.  All code was reverted. |
 
@@ -87,13 +87,21 @@ TUNGSTEN_ROOT="$PWD" BIT_HOME="$PWD/bits" \
 The original smoke passed its finite E4M3 sample. Three 10,000-call samples for
 16x160 rows were scalar 286/287/288 ms and bulk 9/8/8 ms.
 
-The integration audit subsequently found that the committed bulk helper
-decoded the two FlashNext/NVFP4 sentinel bytes differently from the canonical
-kernel. The audit-tree correction maps `0x7f` and `0xff` to zero; an exhaustive
-smoke passed exact parity for all 256 byte encodings. Three final 10,000-call
-runs with that corrected decoder measured scalar/bulk 291/8 ms (36x), 290/11
-ms (26x), and 290/9 ms (32x). These are live audit-tree results, not evidence
-that the correction is already contained in commit `d61c20d6`.
+The integration audit subsequently found that the original bulk helper in
+`d61c20d6` decoded the two FlashNext/NVFP4 sentinel bytes differently from the
+canonical kernel. Commit `c2a5cd1e` maps `0x7f` and `0xff` to zero; an
+exhaustive smoke passes exact parity for all 256 byte encodings. Three
+10,000-call runs at that correction measured scalar/bulk 291/8 ms (36x),
+290/11 ms (26x), and 290/9 ms (32x).
+
+After merging the upstream width-N verifier, the mixed bulk/offset-aware path
+again passed the exhaustive smoke. Three fresh processes measured 302/9 ms
+(33x), 303/10 ms (30x), and 293/11 ms (26x). With `FN_PLE_SCALAR` unset,
+widths 2, 4, and 8 each reproduced all 119 serial-oracle tokens exactly: the
+base-zero row used the bulk gather and later token rows used destination-aware
+scalar writes. Those whole-model timings were diagnostic because unrelated
+CPU and model workloads were active; exact IDs, not their rates, are the
+promotion evidence for the merged path.
 
 Five-token scalar and bulk golden dumps compared byte-for-byte:
 

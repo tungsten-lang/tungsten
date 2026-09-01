@@ -36,6 +36,10 @@ means = x.mean_axis(1)
 expect("tensor.cpu.sum_axis", close?(sums.at([1]), ~15.0))
 expect("tensor.cpu.max_axis", close?(maxima.at([1]), ~6.0))
 expect("tensor.cpu.mean_axis", close?(means.at([0]), ~2.0))
+expect("tensor.cpu.sum packed", close?(x.sum, ~21.0))
+expect("tensor.cpu.max packed", close?(x.max, ~6.0))
+column_sums = x.sum_axis(0)
+expect("tensor.cpu.sum_axis fallback", close?(column_sums.at([0]), ~5.0) && close?(column_sums.at([2]), ~9.0))
 
 probabilities = x.softmax(1)
 row_sums = probabilities.sum_axis(1)
@@ -70,3 +74,10 @@ expect("tensor.packed_strides rank 3", Tensor.packed_strides([2, 3, 4]) == [12, 
 expect("tensor.contiguous rejects short strides", !Tensor.wrap_cpu(storage, Tensor.f64, [2, 2], [2], 0).contiguous?)
 offset_rows = view.to_rows
 expect("tensor.to_rows honors offset", close?(offset_rows[0][0], ~3.0) && close?(offset_rows[1][1], ~6.0))
+expect("tensor.cpu.sum offset", close?(view.sum, ~18.0))
+expect("tensor.cpu.max offset", close?(view.max, ~6.0))
+expect("tensor.cpu.sum strided fallback", close?(left_base.transpose.sum, ~21.0))
+
+f32_values = Tensor.from_rows([[~1.0, ~2.0], [~3.0, ~4.0]], Tensor.f32)
+f32_sums = f32_values.sum_axis(1)
+expect("tensor.cpu.f32 reductions", close?(f32_values.sum, ~10.0) && close?(f32_values.max, ~4.0) && close?(f32_sums.at([1]), ~7.0))

@@ -7,6 +7,7 @@
 #   dense_tensor_campaign view-matmul [iterations]
 #   dense_tensor_campaign unary [iterations]
 #   dense_tensor_campaign reductions [iterations]
+#   dense_tensor_campaign axis-reductions [iterations]
 
 use core/blas
 use core/tensor
@@ -121,5 +122,20 @@ elsif mode == "reductions"
     i += 1
   elapsed = clock() - t0
   << "REDUCTIONS ms/op=" + (elapsed * ~1000.0 / iterations).round(3).to_s + " checksum=" + checksum.round(3).to_s
+elsif mode == "axis-reductions"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  x = filled_tensor(256, 256, Tensor.f64)
+  sums = nil
+  maxima = nil
+  t0 = clock()
+  i = 0
+  while i < iterations
+    sums = x.sum_axis(1)
+    maxima = x.max_axis(1)
+    i += 1
+  elapsed = clock() - t0
+  assert_close(sums.at([0]), ~118.13402061855675, "axis sum")
+  assert_close(maxima.at([0]), ~1.0, "axis max")
+  << "AXIS_REDUCTIONS ms/pair=" + (elapsed * ~1000.0 / iterations).round(3).to_s
 else
   raise "unknown mode: " + mode

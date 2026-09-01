@@ -91,6 +91,66 @@ WValue w_blas_sum_f32(WValue a_wval, WValue n_wval) {
     return w_float(s);
 }
 
+WValue w_blas_reduce_view(WValue dtype_wval, WValue a_wval,
+                          WValue offset_wval, WValue n_wval,
+                          WValue kind_wval) {
+    WArray *a = w_as_array(a_wval);
+    int64_t dtype = w_as_int(dtype_wval), offset = w_as_int(offset_wval);
+    int64_t n = w_as_int(n_wval), kind = w_as_int(kind_wval);
+    if (offset < 0 || n < 0 || offset + n > a->size || kind < 0 || kind > 1) {
+        w_raise(w_string("blas_reduce_view: invalid offset, length, or kind"));
+        return W_NIL;
+    }
+    double result = 0.0;
+    if (dtype == 64) {
+        double *p = (double *)a->slots + a->start + offset;
+        if (kind == 0) for (int64_t i = 0; i < n; i++) result += p[i];
+        else if (n > 0) { result = p[0]; for (int64_t i = 1; i < n; i++) if (p[i] > result) result = p[i]; }
+    } else if (dtype == 3) {
+        float *p = (float *)a->slots + a->start + offset;
+        if (kind == 0) for (int64_t i = 0; i < n; i++) result += (double)p[i];
+        else if (n > 0) { float best = p[0]; for (int64_t i = 1; i < n; i++) if (p[i] > best) best = p[i]; result = best; }
+    } else {
+        w_raise(w_string("blas_reduce_view: dtype must be f32 or f64"));
+        return W_NIL;
+    }
+    return w_float(result);
+}
+
+WValue w_blas_reduce_last(WValue dtype_wval, WValue a_wval, WValue out_wval,
+                          WValue offset_wval, WValue rows_wval,
+                          WValue cols_wval, WValue kind_wval) {
+    WArray *a = w_as_array(a_wval), *out = w_as_array(out_wval);
+    int64_t dtype = w_as_int(dtype_wval), offset = w_as_int(offset_wval);
+    int64_t rows = w_as_int(rows_wval), cols = w_as_int(cols_wval), kind = w_as_int(kind_wval);
+    if (offset < 0 || rows < 0 || cols < 0 || offset + rows * cols > a->size ||
+        rows > out->size || kind < 0 || kind > 1) {
+        w_raise(w_string("blas_reduce_last: invalid shape, offset, or kind"));
+        return W_NIL;
+    }
+    if (dtype == 64) {
+        double *p = (double *)a->slots + a->start + offset, *o = (double *)out->slots + out->start;
+        for (int64_t r = 0; r < rows; r++) {
+            double value = 0.0, *rp = p + r * cols;
+            if (kind == 0) for (int64_t c = 0; c < cols; c++) value += rp[c];
+            else if (cols > 0) { value = rp[0]; for (int64_t c = 1; c < cols; c++) if (rp[c] > value) value = rp[c]; }
+            o[r] = value;
+        }
+    } else if (dtype == 3) {
+        float *p = (float *)a->slots + a->start + offset, *o = (float *)out->slots + out->start;
+        for (int64_t r = 0; r < rows; r++) {
+            double value = 0.0; float *rp = p + r * cols;
+            if (kind == 0) for (int64_t c = 0; c < cols; c++) value += (double)rp[c];
+            else if (cols > 0) { value = rp[0]; for (int64_t c = 1; c < cols; c++) if (rp[c] > value) value = rp[c]; }
+            o[r] = (float)value;
+        }
+    } else {
+        w_raise(w_string("blas_reduce_last: dtype must be f32 or f64"));
+        return W_NIL;
+    }
+    return out_wval;
+}
+
 WValue w_blas_dot_f32(WValue a_wval, WValue b_wval, WValue n_wval) {
     int64_t la, lb; float *a = ob_f32(a_wval, &la); float *b = ob_f32(b_wval, &lb);
     int64_t n = w_as_int(n_wval); int64_t lo = la < lb ? la : lb;

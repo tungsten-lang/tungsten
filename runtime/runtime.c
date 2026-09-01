@@ -65864,6 +65864,14 @@ __attribute__((weak)) WValue w_blas_dgemm_view(WValue a, WValue b, WValue c,
 __attribute__((weak)) WValue w_blas_sum_f32(WValue a, WValue n) {
     (void)a; (void)n; w_raise(w_string("blas_sum: BLAS bridge not linked or no Accelerate")); return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_reduce_view(WValue dt, WValue a, WValue off, WValue n, WValue kind) {
+    (void)dt; (void)a; (void)off; (void)n; (void)kind;
+    w_raise(w_string("blas_reduce_view: BLAS bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_reduce_last(WValue dt, WValue a, WValue o, WValue off, WValue rows, WValue cols, WValue kind) {
+    (void)dt; (void)a; (void)o; (void)off; (void)rows; (void)cols; (void)kind;
+    w_raise(w_string("blas_reduce_last: BLAS bridge not linked")); return W_NIL;
+}
 __attribute__((weak)) WValue w_blas_dot_f32(WValue a, WValue b, WValue n) {
     (void)a; (void)b; (void)n; w_raise(w_string("blas_dot: BLAS bridge not linked or no Accelerate")); return W_NIL;
 }

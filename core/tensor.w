@@ -161,6 +161,12 @@ TENSOR_EW = {}
   -> .storage_dgemm_view(a, b, c, m, n, k, ao, bo, ta, tb)
     ccall("w_blas_dgemm_view", a, b, c, m, n, k, ao, bo, ta, tb)
 
+  -> .storage_reduce_view(dtype, a, offset, n, kind)
+    ccall("w_blas_reduce_view", dtype, a, offset, n, kind)
+
+  -> .storage_reduce_last(dtype, a, out, offset, rows, cols, kind)
+    ccall("w_blas_reduce_last", dtype, a, out, offset, rows, cols, kind)
+
   - data
     rw device
     rw buffer
@@ -891,6 +897,8 @@ TENSOR_EW = {}
   # ---- whole-tensor reductions (CPU reference) ----
 
   -> sum
+    if device == :cpu && self.contiguous? && (dtype == Tensor.f32 || dtype == Tensor.f64)
+      return Tensor.storage_reduce_view(dtype, buffer, offset, self.size, 0)
     acc = ~0.0
     total = self.size
     fi = 0
@@ -904,6 +912,8 @@ TENSOR_EW = {}
 
   -> max
     total = self.size
+    if total > 0 && device == :cpu && self.contiguous? && (dtype == Tensor.f32 || dtype == Tensor.f64)
+      return Tensor.storage_reduce_view(dtype, buffer, offset, total, 1)
     best = self.at(Tensor.unravel(0, shape))
     fi = 1
     while fi < total
@@ -949,6 +959,9 @@ TENSOR_EW = {}
     result = Tensor.zeros_like(self, oshape, nil)
     axis_len = shape[axis]
     total = Tensor.elem_count(oshape)
+    if device == :cpu && self.contiguous? && axis == self.rank - 1 && (dtype == Tensor.f32 || dtype == Tensor.f64)
+      Tensor.storage_reduce_last(dtype, buffer, result.buffer, offset, total, axis_len, 0)
+      return result
     fi = 0
     while fi < total
       ocoord = Tensor.unravel(fi, oshape)
@@ -968,6 +981,9 @@ TENSOR_EW = {}
     result = Tensor.zeros_like(self, oshape, nil)
     axis_len = shape[axis]
     total = Tensor.elem_count(oshape)
+    if axis_len > 0 && device == :cpu && self.contiguous? && axis == self.rank - 1 && (dtype == Tensor.f32 || dtype == Tensor.f64)
+      Tensor.storage_reduce_last(dtype, buffer, result.buffer, offset, total, axis_len, 1)
+      return result
     fi = 0
     while fi < total
       ocoord = Tensor.unravel(fi, oshape)

@@ -1958,6 +1958,10 @@ use target
       return ccall("w_blas_sgemm_view", args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
     when "w_blas_dgemm_view"
       return ccall("w_blas_dgemm_view", args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8], args[9], args[10])
+    when "w_blas_reduce_view"
+      return ccall("w_blas_reduce_view", args[1], args[2], args[3], args[4], args[5])
+    when "w_blas_reduce_last"
+      return ccall("w_blas_reduce_last", args[1], args[2], args[3], args[4], args[5], args[6], args[7])
     when "w_blas_dgeev"
       # LAPACK eigenvalues bridge (core/linalg.w eigenvalues_lapack).
       return ccall("w_blas_dgeev", args[1], args[2], args[3], args[4])

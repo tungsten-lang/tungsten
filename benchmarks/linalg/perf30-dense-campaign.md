@@ -90,3 +90,38 @@ Retained. `packed_strides` is now O(rank), `contiguous?` is allocation-free,
 and `to_rows` hoists the layout decision and includes the storage offset.
 Object-level caching remains inappropriate until Tensor metadata becomes
 immutable or mutations are routed through coherent setters.
+
+## Item 7 — packed CPU reductions
+
+Source finding: whole-Tensor `sum`/`max` and axis reductions called `unravel`
+and constructed coordinate Arrays for every input element. Even the common
+packed last-axis case therefore spent almost all of its time in object and
+index machinery rather than arithmetic.
+
+Correctness: the focused CPU Tensor spec passes 23/23. It covers f32/f64,
+whole and last-axis fast paths, a non-last-axis fallback, a nonzero-offset
+slice, and a transposed fallback. The existing CPU Tensor smoke still prints
+`TENSOR_CPU_OK`; the campaign's CPU-op and view-GEMM oracles still pass.
+
+Alternating whole-process samples:
+
+| workload | parent `9cf57471` | candidate |
+| --- | ---: | ---: |
+| 200 whole f64 sums, sample 1 | 1.91 s | 0.06 s |
+| sample 2 | 1.77 s | <0.01 s |
+| sample 3 | 1.88 s | <0.01 s |
+| 100 last-axis sum+max pairs, sample 1 | 1.20 s | <0.01 s |
+| sample 2 | 1.21 s | <0.01 s |
+| sample 3 | 1.13 s | <0.01 s |
+
+Long candidate-only runs make the sub-centisecond cells measurable: 10,000
+whole sums take 0.04 s (at most 4 us/sum including launch) and 10,000
+last-axis sum+max pairs take 0.37 s (37 us/pair). The matched parent's medians
+are 9.4 ms/sum and 12.0 ms/pair respectively.
+
+Retained. Packed CPU f64 reductions use vDSP over the existing buffer and
+offset; f32 sum preserves the prior double accumulator. A single bridge call
+handles all rows of a packed last-axis reduction. General strided and
+non-last-axis reductions retain the reference path. Max retains the prior
+ordered comparison semantics (including first-element NaN and signed-zero
+behavior) rather than substituting a differently specified vector max.

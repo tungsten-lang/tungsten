@@ -208,6 +208,102 @@ WValue w_blas_sum_f32(WValue a_wval, WValue n_wval) {
     return w_float((double)r);
 }
 
+/* Packed Tensor reductions with an element offset. kind: 0=sum, 1=max.
+ * f32 sum deliberately accumulates in double to preserve Tensor's previous
+ * numeric behavior; f64 uses vDSP's vector reduction. */
+WValue w_blas_reduce_view(WValue dtype_wval, WValue a_wval,
+                          WValue offset_wval, WValue n_wval,
+                          WValue kind_wval) {
+    WArray *a = w_as_array(a_wval);
+    int64_t dtype = w_as_int(dtype_wval);
+    int64_t offset = w_as_int(offset_wval);
+    int64_t n = w_as_int(n_wval);
+    int64_t kind = w_as_int(kind_wval);
+    if (offset < 0 || n < 0 || offset + n > a->size || kind < 0 || kind > 1) {
+        w_raise(w_string("blas_reduce_view: invalid offset, length, or kind"));
+        return W_NIL;
+    }
+    if (dtype == 64) {
+        double *p = (double *)a->slots + a->start + offset;
+        double result = 0.0;
+        if (kind == 0)
+            vDSP_sveD(p, 1, &result, (vDSP_Length)n);
+        else if (n > 0) {
+            result = p[0];
+            for (int64_t i = 1; i < n; i++) if (p[i] > result) result = p[i];
+        }
+        return w_float(result);
+    }
+    if (dtype == 3) {
+        float *p = (float *)a->slots + a->start + offset;
+        double result = 0.0;
+        if (kind == 0) {
+            for (int64_t i = 0; i < n; i++) result += (double)p[i];
+        } else if (n > 0) {
+            float best = p[0];
+            for (int64_t i = 1; i < n; i++) if (p[i] > best) best = p[i];
+            result = (double)best;
+        }
+        return w_float(result);
+    }
+    w_raise(w_string("blas_reduce_view: dtype must be f32 or f64"));
+    return W_NIL;
+}
+
+/* Reduce the packed last axis into a packed output array in one bridge call.
+ * This removes one coordinate Array allocation per input element. */
+WValue w_blas_reduce_last(WValue dtype_wval, WValue a_wval, WValue out_wval,
+                          WValue offset_wval, WValue rows_wval,
+                          WValue cols_wval, WValue kind_wval) {
+    WArray *a = w_as_array(a_wval);
+    WArray *out = w_as_array(out_wval);
+    int64_t dtype = w_as_int(dtype_wval);
+    int64_t offset = w_as_int(offset_wval);
+    int64_t rows = w_as_int(rows_wval);
+    int64_t cols = w_as_int(cols_wval);
+    int64_t kind = w_as_int(kind_wval);
+    if (offset < 0 || rows < 0 || cols < 0 || offset + rows * cols > a->size ||
+        rows > out->size || kind < 0 || kind > 1) {
+        w_raise(w_string("blas_reduce_last: invalid shape, offset, or kind"));
+        return W_NIL;
+    }
+    if (dtype == 64) {
+        double *p = (double *)a->slots + a->start + offset;
+        double *o = (double *)out->slots + out->start;
+        for (int64_t row = 0; row < rows; row++) {
+            double result = 0.0;
+            if (kind == 0)
+                vDSP_sveD(p + row * cols, 1, &result, (vDSP_Length)cols);
+            else if (cols > 0) {
+                double *rp = p + row * cols;
+                result = rp[0];
+                for (int64_t col = 1; col < cols; col++) if (rp[col] > result) result = rp[col];
+            }
+            o[row] = result;
+        }
+        return out_wval;
+    }
+    if (dtype == 3) {
+        float *p = (float *)a->slots + a->start + offset;
+        float *o = (float *)out->slots + out->start;
+        for (int64_t row = 0; row < rows; row++) {
+            float *rp = p + row * cols;
+            if (kind == 0) {
+                double sum = 0.0;
+                for (int64_t col = 0; col < cols; col++) sum += (double)rp[col];
+                o[row] = (float)sum;
+            } else if (cols > 0) {
+                float best = rp[0];
+                for (int64_t col = 1; col < cols; col++) if (rp[col] > best) best = rp[col];
+                o[row] = best;
+            }
+        }
+        return out_wval;
+    }
+    w_raise(w_string("blas_reduce_last: dtype must be f32 or f64"));
+    return W_NIL;
+}
+
 WValue w_blas_dot_f32(WValue a_wval, WValue b_wval, WValue n_wval) {
     int64_t la, lb; float *a = blas_f32_ptr(a_wval, &la); float *b = blas_f32_ptr(b_wval, &lb);
     int64_t n = w_as_int(n_wval); int64_t lo = la < lb ? la : lb;

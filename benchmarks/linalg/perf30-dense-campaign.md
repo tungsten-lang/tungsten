@@ -422,3 +422,32 @@ Five matched release samples (microseconds per operation; medians):
 Retained. Scalar-route ratios include Tungsten loop/index overhead and are not
 presented as CBLAS-vs-C kernel ratios; the `dsyrk` comparison is the stricter
 same-bridge control and still wins while doing roughly half the multiply work.
+
+## Item 2 follow-up — scaled caller-owned Tensor GEMM
+
+Source finding: the view-aware GEMM tranche still always allocated a result and
+hard-coded `alpha=1`, `beta=0`. Iterative kernels therefore could not retain an
+accumulator, reuse storage, or express a fused scaled update even though CBLAS
+already supports all three.
+
+Retained API: `left.matmul_into(right, out, alpha, beta)` for CPU f32/f64. Packed
+slices and zero-copy transpose inputs retain their offsets/transpose flags; a
+packed row-major output may also have a nonzero offset. The output may not alias
+either input. General-stride inputs materialize once through the existing
+fallback, while unsupported output layouts fail explicitly.
+
+Correctness: `spec/core/tensor_cpu_ops_spec.w` passes 36/36, covering f64
+alpha/beta, an offset output with untouched guards, returned output identity,
+transpose input, and f32. The CPU operation and view-GEMM campaign oracles pass,
+and the Accelerate bridge passes focused C syntax.
+
+Five release samples at transposed-view 64x64 GEMM, 10,000 calls each:
+
+| path | range | median |
+| --- | ---: | ---: |
+| fresh result per `matmul` | 5.15-6.67 us | 5.93 us |
+| caller-owned `matmul_into` | 1.92-4.99 us | 2.87 us |
+
+Retained: 2.1x at the median. Large GEMMs naturally amortize allocation and
+object setup; this API targets repeated small/medium products and, unlike a
+private empty allocator, gives callers an explicit ownership contract.

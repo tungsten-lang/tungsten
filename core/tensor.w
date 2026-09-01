@@ -161,6 +161,12 @@ TENSOR_EW = {}
   -> .storage_dgemm_view(a, b, c, m, n, k, ao, bo, ta, tb)
     ccall("w_blas_dgemm_view", a, b, c, m, n, k, ao, bo, ta, tb)
 
+  -> .storage_sgemm_view_scaled(a, b, c, m, n, k, ao, bo, co, ta, tb, alpha, beta)
+    ccall("w_blas_sgemm_view_scaled", a, b, c, m, n, k, ao, bo, co, ta, tb, alpha, beta)
+
+  -> .storage_dgemm_view_scaled(a, b, c, m, n, k, ao, bo, co, ta, tb, alpha, beta)
+    ccall("w_blas_dgemm_view_scaled", a, b, c, m, n, k, ao, bo, co, ta, tb, alpha, beta)
+
   -> .storage_reduce_view(dtype, a, offset, n, kind)
     ccall("w_blas_reduce_view", dtype, a, offset, n, kind)
 
@@ -653,6 +659,39 @@ TENSOR_EW = {}
     bv = metal_buffer_view(other.buffer, -32, k * n)
     cv = metal_buffer_view(result.buffer, -32, m * n)
     sgemm(av, bv, cv, m, n, k)
+    result
+
+  # Caller-owned CPU GEMM: result := alpha*self*other + beta*result.
+  # Inputs may be packed slices or zero-copy transpose views. Output must be a
+  # packed row-major view (a nonzero element offset is allowed).
+  -> matmul_into(other, result, alpha, beta)
+    if dtype != Tensor.f32 && dtype != Tensor.f64
+      raise "Tensor.matmul_into: supports f32/f64 only"
+    if other.dtype != dtype || result.dtype != dtype
+      raise "Tensor.matmul_into: operand dtype mismatch"
+    if device != :cpu || other.device != :cpu || result.device != :cpu
+      raise "Tensor.matmul_into: CPU tensors required"
+    if self.rank != 2 || other.rank != 2 || result.rank != 2
+      raise "Tensor.matmul_into: rank-2 tensors required"
+    m = shape[0]
+    k = shape[1]
+    n = other.shape[1]
+    if other.shape[0] != k
+      raise "Tensor.matmul_into: inner dimensions disagree"
+    if result.shape[0] != m || result.shape[1] != n
+      raise "Tensor.matmul_into: output shape must be [" + m.to_s + ", " + n.to_s + "]"
+    if result.blas_layout != 0
+      raise "Tensor.matmul_into: output must be packed row-major"
+    if result.buffer == buffer || result.buffer == other.buffer
+      raise "Tensor.matmul_into: output may not alias an input"
+    al = self.blas_layout
+    bl = other.blas_layout
+    return self.contiguous.matmul_into(other, result, alpha, beta) if al < 0
+    return self.matmul_into(other.contiguous, result, alpha, beta) if bl < 0
+    if dtype == Tensor.f64
+      Tensor.storage_dgemm_view_scaled(buffer, other.buffer, result.buffer, m, n, k, offset, other.offset, result.offset, al, bl, alpha, beta)
+    else
+      Tensor.storage_sgemm_view_scaled(buffer, other.buffer, result.buffer, m, n, k, offset, other.offset, result.offset, al, bl, alpha, beta)
     result
 
   -> mm(other)

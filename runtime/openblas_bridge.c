@@ -84,6 +84,52 @@ WValue w_blas_dgemm_view(WValue a_wval, WValue b_wval, WValue c_wval,
     return c_wval;
 }
 
+WValue w_blas_sgemm_view_scaled(WValue a_wval, WValue b_wval, WValue c_wval,
+                                WValue m_wval, WValue n_wval, WValue k_wval,
+                                WValue ao_wval, WValue bo_wval, WValue co_wval,
+                                WValue ta_wval, WValue tb_wval,
+                                WValue alpha_wval, WValue beta_wval) {
+    WArray *a = w_as_array(a_wval), *b = w_as_array(b_wval), *c = w_as_array(c_wval);
+    int M = (int)w_as_int(m_wval), N = (int)w_as_int(n_wval), K = (int)w_as_int(k_wval);
+    int64_t ao = w_as_int(ao_wval), bo = w_as_int(bo_wval), co = w_as_int(co_wval);
+    int ta = (int)w_as_int(ta_wval), tb = (int)w_as_int(tb_wval);
+    if (M < 0 || N < 0 || K < 0 || ao < 0 || bo < 0 || co < 0 || ao + (int64_t)M * K > a->size || bo + (int64_t)K * N > b->size ||
+        co + (int64_t)M * N > c->size) {
+        w_raise(w_string("sgemm_view_scaled: bad dimensions")); return W_NIL;
+    }
+    float *Ap = (float *)a->slots + a->start + ao;
+    float *Bp = (float *)b->slots + b->start + bo;
+    float *Cp = (float *)c->slots + c->start + co;
+    cblas_sgemm(CblasRowMajor, ta ? CblasTrans : CblasNoTrans,
+                tb ? CblasTrans : CblasNoTrans, M, N, K,
+                (float)w_as_double(alpha_wval), Ap, ta ? M : K,
+                Bp, tb ? K : N, (float)w_as_double(beta_wval), Cp, N);
+    return c_wval;
+}
+
+WValue w_blas_dgemm_view_scaled(WValue a_wval, WValue b_wval, WValue c_wval,
+                                WValue m_wval, WValue n_wval, WValue k_wval,
+                                WValue ao_wval, WValue bo_wval, WValue co_wval,
+                                WValue ta_wval, WValue tb_wval,
+                                WValue alpha_wval, WValue beta_wval) {
+    WArray *a = w_as_array(a_wval), *b = w_as_array(b_wval), *c = w_as_array(c_wval);
+    int M = (int)w_as_int(m_wval), N = (int)w_as_int(n_wval), K = (int)w_as_int(k_wval);
+    int64_t ao = w_as_int(ao_wval), bo = w_as_int(bo_wval), co = w_as_int(co_wval);
+    int ta = (int)w_as_int(ta_wval), tb = (int)w_as_int(tb_wval);
+    if (M < 0 || N < 0 || K < 0 || ao < 0 || bo < 0 || co < 0 || ao + (int64_t)M * K > a->size || bo + (int64_t)K * N > b->size ||
+        co + (int64_t)M * N > c->size) {
+        w_raise(w_string("dgemm_view_scaled: bad dimensions")); return W_NIL;
+    }
+    double *Ap = (double *)a->slots + a->start + ao;
+    double *Bp = (double *)b->slots + b->start + bo;
+    double *Cp = (double *)c->slots + c->start + co;
+    cblas_dgemm(CblasRowMajor, ta ? CblasTrans : CblasNoTrans,
+                tb ? CblasTrans : CblasNoTrans, M, N, K,
+                w_as_double(alpha_wval), Ap, ta ? M : K,
+                Bp, tb ? K : N, w_as_double(beta_wval), Cp, N);
+    return c_wval;
+}
+
 WValue w_blas_dgetrf_rowmajor(WValue a_wval, WValue piv_wval, WValue n_wval) {
     WArray *a = w_as_array(a_wval), *piv = w_as_array(piv_wval);
     int n = (int)w_as_int(n_wval);

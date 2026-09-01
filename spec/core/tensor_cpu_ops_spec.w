@@ -60,6 +60,21 @@ identity = Tensor.from_rows([[~1.0, ~0.0], [~0.0, ~1.0]], Tensor.f64)
 view_product = view.matmul(identity)
 expect("tensor.cpu.matmul offset", close?(view_product.at([0, 0]), ~3.0) && close?(view_product.at([1, 1]), ~6.0))
 
+into_storage = f64_array(8)
+i = 0
+while i < 8
+  into_storage[i] = ~99.0
+  i += 1
+i = 2
+while i < 6
+  into_storage[i] = ~10.0
+  i += 1
+into_view = Tensor.wrap_cpu(into_storage, Tensor.f64, [2, 2], [2, 1], 2)
+into_return = view.matmul_into(identity, into_view, ~2.0, ~0.5)
+expect("tensor.cpu.matmul_into scaled", close?(into_view.at([0, 0]), ~11.0) && close?(into_view.at([1, 1]), ~17.0))
+expect("tensor.cpu.matmul_into offset", close?(into_storage[0], ~99.0) && close?(into_storage[7], ~99.0))
+expect("tensor.cpu.matmul_into identity", into_return.buffer == into_storage)
+
 left_base = Tensor.from_rows([[~1.0, ~2.0, ~3.0], [~4.0, ~5.0, ~6.0]], Tensor.f64)
 right = Tensor.from_rows([[~7.0, ~8.0], [~9.0, ~10.0]], Tensor.f64)
 transpose_product = left_base.transpose.matmul(right)
@@ -69,6 +84,10 @@ packed_left = Tensor.from_rows([[~1.0, ~2.0], [~3.0, ~4.0], [~5.0, ~6.0]], Tenso
 right_base = Tensor.from_rows([[~7.0, ~9.0], [~8.0, ~10.0]], Tensor.f64)
 right_transpose_product = packed_left.matmul(right_base.transpose)
 expect("tensor.cpu.matmul right transpose", close?(right_transpose_product.at([0, 0]), ~25.0) && close?(right_transpose_product.at([2, 1]), ~100.0))
+
+transpose_into = Tensor.zeros_cpu(Tensor.f64, [3, 2])
+left_base.transpose.matmul_into(right, transpose_into, ~1.0, ~0.0)
+expect("tensor.cpu.matmul_into transpose", close?(transpose_into.at([0, 0]), ~43.0) && close?(transpose_into.at([2, 1]), ~84.0))
 
 expect("tensor.packed_strides rank 3", Tensor.packed_strides([2, 3, 4]) == [12, 4, 1])
 expect("tensor.contiguous rejects short strides", !Tensor.wrap_cpu(storage, Tensor.f64, [2, 2], [2], 0).contiguous?)
@@ -81,6 +100,9 @@ expect("tensor.cpu.sum strided fallback", close?(left_base.transpose.sum, ~21.0)
 f32_values = Tensor.from_rows([[~1.0, ~2.0], [~3.0, ~4.0]], Tensor.f32)
 f32_sums = f32_values.sum_axis(1)
 expect("tensor.cpu.f32 reductions", close?(f32_values.sum, ~10.0) && close?(f32_values.max, ~4.0) && close?(f32_sums.at([1]), ~7.0))
+f32_into = Tensor.zeros_cpu(Tensor.f32, [2, 2])
+f32_values.matmul_into(f32_values, f32_into, ~1.0, ~0.0)
+expect("tensor.cpu.f32 matmul_into", close?(f32_into.at([0, 0]), ~7.0) && close?(f32_into.at([1, 1]), ~22.0))
 
 unary_storage = f64_array(6)
 unary_storage[0] = ~-9.0

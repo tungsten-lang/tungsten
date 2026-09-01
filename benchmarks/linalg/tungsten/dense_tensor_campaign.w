@@ -16,6 +16,7 @@
 #   dense_tensor_campaign zeros-warm [iterations]
 #   dense_tensor_campaign matmul-output [iterations]
 #   dense_tensor_campaign blas-structured [iterations]
+#   dense_tensor_campaign matmul-into [iterations]
 
 use core/blas
 use core/tensor
@@ -433,5 +434,29 @@ elsif mode == "blas-structured"
   << "DSYMV scalar_us=" + (sym_ref_elapsed * ~1000000.0 / iterations).to_s + " native_us=" + (sym_native_elapsed * ~1000000.0 / iterations).to_s
   << "DSYRK dgemm_us=" + (syrk_general_elapsed * ~1000000.0 / iterations).to_s + " native_us=" + (syrk_structured_elapsed * ~1000000.0 / iterations).to_s
   << "DTRSM scalar_us=" + (trsm_ref_elapsed * ~1000000.0 / iterations).to_s + " native_us=" + (trsm_native_elapsed * ~1000000.0 / iterations).to_s
+elsif mode == "matmul-into"
+  iterations = ARGV[1] == nil ? 10000 : ARGV[1].to_i
+  left = filled_tensor(64, 64, Tensor.f64).transpose
+  right = filled_tensor(64, 64, Tensor.f64)
+  allocated = nil
+  t0 = clock()
+  i = 0
+  while i < iterations
+    allocated = left.matmul(right)
+    i += 1
+  allocated_elapsed = clock() - t0
+  into = Tensor.zeros_cpu(Tensor.f64, [64, 64])
+  t0 = clock()
+  i = 0
+  while i < iterations
+    left.matmul_into(right, into, ~1.0, ~0.0)
+    i += 1
+  into_elapsed = clock() - t0
+  assert_close(allocated.at([17, 29]), into.at([17, 29]), "matmul_into benchmark")
+  scaled = Tensor.zeros_cpu(Tensor.f64, [64, 64])
+  scaled.buffer[17 * 64 + 29] = ~10.0
+  left.matmul_into(right, scaled, ~2.0, ~0.5)
+  assert_close(scaled.at([17, 29]), allocated.at([17, 29]) * ~2.0 + ~5.0, "matmul_into alpha beta")
+  << "MATMUL_INTO allocated_us=" + (allocated_elapsed * ~1000000.0 / iterations).to_s + " into_us=" + (into_elapsed * ~1000000.0 / iterations).to_s
 else
   raise "unknown mode: " + mode

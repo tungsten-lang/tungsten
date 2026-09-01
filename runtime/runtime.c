@@ -65871,6 +65871,26 @@ __attribute__((weak)) WValue w_blas_dgemm_view(WValue a, WValue b, WValue c,
     w_raise(w_string("blas_dgemm_view: BLAS bridge not linked or no CBLAS"));
     return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_sgemm_view_scaled(WValue a, WValue b, WValue c,
+                                                      WValue m, WValue n, WValue k,
+                                                      WValue ao, WValue bo, WValue co,
+                                                      WValue ta, WValue tb,
+                                                      WValue alpha, WValue beta) {
+    (void)a; (void)b; (void)c; (void)m; (void)n; (void)k;
+    (void)ao; (void)bo; (void)co; (void)ta; (void)tb; (void)alpha; (void)beta;
+    w_raise(w_string("blas_sgemm_view_scaled: BLAS bridge not linked or no CBLAS"));
+    return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dgemm_view_scaled(WValue a, WValue b, WValue c,
+                                                      WValue m, WValue n, WValue k,
+                                                      WValue ao, WValue bo, WValue co,
+                                                      WValue ta, WValue tb,
+                                                      WValue alpha, WValue beta) {
+    (void)a; (void)b; (void)c; (void)m; (void)n; (void)k;
+    (void)ao; (void)bo; (void)co; (void)ta; (void)tb; (void)alpha; (void)beta;
+    w_raise(w_string("blas_dgemm_view_scaled: BLAS bridge not linked or no CBLAS"));
+    return W_NIL;
+}
 /* vDSP reductions + elementwise transcendentals — real impls in blas_bridge.c. */
 __attribute__((weak)) WValue w_blas_sum_f32(WValue a, WValue n) {
     (void)a; (void)n; w_raise(w_string("blas_sum: BLAS bridge not linked or no Accelerate")); return W_NIL;

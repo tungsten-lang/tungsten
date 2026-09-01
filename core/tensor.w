@@ -167,6 +167,9 @@ TENSOR_EW = {}
   -> .storage_reduce_last(dtype, a, out, offset, rows, cols, kind)
     ccall("w_blas_reduce_last", dtype, a, out, offset, rows, cols, kind)
 
+  -> .storage_unary_view(dtype, a, out, offset, n, kind)
+    ccall("w_blas_unary_view", dtype, a, out, offset, n, kind)
+
   - data
     rw device
     rw buffer
@@ -1042,7 +1045,16 @@ TENSOR_EW = {}
   # Dedicated straight-line loops (a shared kind-dispatched loop with nested
   # ifs inside elsif branches miscompiled — see project memory).
 
+  -> packed_cpu_unary(kind)
+    return nil if device != :cpu || !self.contiguous?
+    return nil if dtype != Tensor.f32 && dtype != Tensor.f64
+    result = Tensor.zeros_like(self, shape, nil)
+    Tensor.storage_unary_view(dtype, buffer, result.buffer, offset, self.size, kind)
+    result
+
   -> neg
+    native = self.packed_cpu_unary(0)
+    return native if native != nil
     result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
@@ -1053,6 +1065,8 @@ TENSOR_EW = {}
     result
 
   -> relu
+    native = self.packed_cpu_unary(1)
+    return native if native != nil
     result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
@@ -1066,6 +1080,8 @@ TENSOR_EW = {}
     result
 
   -> abs
+    native = self.packed_cpu_unary(2)
+    return native if native != nil
     result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
@@ -1076,6 +1092,8 @@ TENSOR_EW = {}
     result
 
   -> sqrt
+    native = self.packed_cpu_unary(3)
+    return native if native != nil
     result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
@@ -1086,6 +1104,8 @@ TENSOR_EW = {}
     result
 
   -> square
+    native = self.packed_cpu_unary(4)
+    return native if native != nil
     result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
@@ -1097,6 +1117,8 @@ TENSOR_EW = {}
     result
 
   -> exp
+    native = self.packed_cpu_unary(5)
+    return native if native != nil
     result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0

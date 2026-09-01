@@ -125,3 +125,32 @@ handles all rows of a packed last-axis reduction. General strided and
 non-last-axis reductions retain the reference path. Max retains the prior
 ordered comparison semantics (including first-element NaN and signed-zero
 behavior) rather than substituting a differently specified vector max.
+
+## Item 8 — packed CPU unary vector path
+
+Source finding: Tensor already shipped native f32/f64 vForce entry points, but
+its unary methods always took the coordinate-Array reference loop. Each
+element of a packed `exp`, `sqrt`, `abs`, `square`, `neg`, or `relu` therefore
+paid unravel, indexed method dispatch, and coordinate-based output writes.
+
+Matched workload: 100 `exp` operations over a packed 256x256 f64 Tensor.
+Alternating whole-process samples:
+
+| sample | parent `74879194` | candidate |
+| --- | ---: | ---: |
+| 1 | 1.30 s | 0.04 s |
+| 2 | 1.31 s | 0.04 s |
+| 3 | 1.30 s | 0.05 s |
+| 4 | 1.31 s | 0.04 s |
+| 5 | 1.27 s | 0.05 s |
+
+A 1,000-operation candidate run takes 0.42 s, or 0.42 ms/op including fresh
+result allocation, versus a parent median of 13.0 ms/op: 31x faster. The
+focused Tensor spec passes 31/31, covering all six operations, f32/f64,
+nonzero offsets, and the general-stride fallback; other campaign oracles pass.
+
+Retained. One offset-aware native call handles a packed unary operation;
+vForce/vDSP provide the vector kernels on macOS and portable scalar loops back
+the same API elsewhere. ReLU remains an ordered scalar comparison to preserve
+NaN and signed-zero behavior. General strided tensors retain the reference
+implementation.

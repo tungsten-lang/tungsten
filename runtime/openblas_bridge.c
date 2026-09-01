@@ -195,6 +195,47 @@ WValue w_blas_vtanh_f32(WValue a_wval, WValue out_wval, WValue n_wval) {
     return out_wval;
 }
 
+WValue w_blas_unary_view(WValue dtype_wval, WValue a_wval,
+                         WValue out_wval, WValue offset_wval,
+                         WValue n_wval, WValue kind_wval) {
+    WArray *a = w_as_array(a_wval), *out = w_as_array(out_wval);
+    int64_t dtype = w_as_int(dtype_wval), offset = w_as_int(offset_wval);
+    int64_t n = w_as_int(n_wval), kind = w_as_int(kind_wval);
+    if (offset < 0 || n < 0 || offset + n > a->size || n > out->size || kind < 0 || kind > 5) {
+        w_raise(w_string("blas_unary_view: invalid offset, length, or kind"));
+        return W_NIL;
+    }
+    if (dtype == 64) {
+        double *p = (double *)a->slots + a->start + offset, *o = (double *)out->slots + out->start;
+        for (int64_t i = 0; i < n; i++) {
+            switch (kind) {
+            case 0: o[i] = -p[i]; break;
+            case 1: o[i] = p[i] < 0.0 ? 0.0 : p[i]; break;
+            case 2: o[i] = fabs(p[i]); break;
+            case 3: o[i] = sqrt(p[i]); break;
+            case 4: o[i] = p[i] * p[i]; break;
+            case 5: o[i] = exp(p[i]); break;
+            }
+        }
+    } else if (dtype == 3) {
+        float *p = (float *)a->slots + a->start + offset, *o = (float *)out->slots + out->start;
+        for (int64_t i = 0; i < n; i++) {
+            switch (kind) {
+            case 0: o[i] = -p[i]; break;
+            case 1: o[i] = p[i] < 0.0f ? 0.0f : p[i]; break;
+            case 2: o[i] = fabsf(p[i]); break;
+            case 3: o[i] = sqrtf(p[i]); break;
+            case 4: o[i] = p[i] * p[i]; break;
+            case 5: o[i] = expf(p[i]); break;
+            }
+        }
+    } else {
+        w_raise(w_string("blas_unary_view: dtype must be f32 or f64"));
+        return W_NIL;
+    }
+    return out_wval;
+}
+
 /* dgeev via OpenBLAS's bundled LAPACK — same manual-prototype contract
  * as the Accelerate bridge (see blas_bridge.c). */
 static double *oblas_f64_ptr(WValue v, int64_t *len_out) {

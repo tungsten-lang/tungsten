@@ -81,3 +81,23 @@ expect("tensor.cpu.sum strided fallback", close?(left_base.transpose.sum, ~21.0)
 f32_values = Tensor.from_rows([[~1.0, ~2.0], [~3.0, ~4.0]], Tensor.f32)
 f32_sums = f32_values.sum_axis(1)
 expect("tensor.cpu.f32 reductions", close?(f32_values.sum, ~10.0) && close?(f32_values.max, ~4.0) && close?(f32_sums.at([1]), ~7.0))
+
+unary_storage = f64_array(6)
+unary_storage[0] = ~-9.0
+unary_storage[1] = ~-4.0
+unary_storage[2] = ~-1.0
+unary_storage[3] = ~0.0
+unary_storage[4] = ~2.0
+unary_storage[5] = ~3.0
+unary_whole = Tensor.wrap_cpu(unary_storage, Tensor.f64, [3, 2], [2, 1], 0)
+unary_view = unary_whole.slice(0, 1, 2)
+expect("tensor.cpu.unary neg offset", close?(unary_view.neg.at([0, 0]), ~1.0) && close?(unary_view.neg.at([1, 1]), ~-3.0))
+expect("tensor.cpu.unary relu", close?(unary_view.relu.at([0, 0]), ~0.0) && close?(unary_view.relu.at([1, 0]), ~2.0))
+expect("tensor.cpu.unary abs", close?(unary_view.abs.at([0, 0]), ~1.0) && close?(unary_view.abs.at([1, 1]), ~3.0))
+expect("tensor.cpu.unary sqrt", close?(unary_view.abs.sqrt.at([1, 0]), Math.sqrt(~2.0)))
+expect("tensor.cpu.unary square", close?(unary_view.square.at([0, 0]), ~1.0) && close?(unary_view.square.at([1, 1]), ~9.0))
+expect("tensor.cpu.unary exp", close?(unary_view.exp.at([0, 1]), ~1.0) && close?(unary_view.exp.at([1, 0]), Math.exp(~2.0)))
+expect("tensor.cpu.unary strided fallback", close?(unary_whole.transpose.abs.at([0, 1]), ~1.0))
+
+f32_exp = f32_values.exp
+expect("tensor.cpu.f32 unary", close?(f32_exp.at([0, 0]), Math.exp(~1.0)) && close?(f32_exp.at([1, 1]), Math.exp(~4.0)))

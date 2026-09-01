@@ -65914,6 +65914,10 @@ __attribute__((weak)) WValue w_blas_vsqrt_f64(WValue a, WValue o, WValue n) {
 __attribute__((weak)) WValue w_blas_vtan_f64(WValue a, WValue o, WValue n) {
     (void)a; (void)o; (void)n; w_raise(w_string("blas_vtan_f64: BLAS bridge not linked")); return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_unary_view(WValue dt, WValue a, WValue o, WValue off, WValue n, WValue kind) {
+    (void)dt; (void)a; (void)o; (void)off; (void)n; (void)kind;
+    w_raise(w_string("blas_unary_view: BLAS bridge not linked")); return W_NIL;
+}
 __attribute__((weak)) WValue w_blas_saxpy(WValue a, WValue x, WValue y, WValue n) {
     (void)a; (void)x; (void)y; (void)n; w_raise(w_string("saxpy: BLAS bridge not linked")); return W_NIL;
 }

@@ -12,6 +12,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #include <Accelerate/Accelerate.h>
+#include <limits.h>
 #include "runtime.h"
 #include "wvalue.h"
 
@@ -385,6 +386,57 @@ W_BLAS_F64_UNARY(w_blas_vsqrt_f64, vvsqrt)
 W_BLAS_F64_UNARY(w_blas_vtan_f64, vvtan)
 
 #undef W_BLAS_F64_UNARY
+
+/* Packed Tensor unary operations with an input element offset.
+ * kind: 0=neg, 1=relu, 2=abs, 3=sqrt, 4=square, 5=exp. */
+WValue w_blas_unary_view(WValue dtype_wval, WValue a_wval,
+                         WValue out_wval, WValue offset_wval,
+                         WValue n_wval, WValue kind_wval) {
+    WArray *a = w_as_array(a_wval);
+    WArray *out = w_as_array(out_wval);
+    int64_t dtype = w_as_int(dtype_wval);
+    int64_t offset = w_as_int(offset_wval);
+    int64_t n64 = w_as_int(n_wval);
+    int64_t kind = w_as_int(kind_wval);
+    if (offset < 0 || n64 < 0 || offset + n64 > a->size || n64 > out->size ||
+        kind < 0 || kind > 5 || n64 > INT_MAX) {
+        w_raise(w_string("blas_unary_view: invalid offset, length, or kind"));
+        return W_NIL;
+    }
+    int n = (int)n64;
+    if (dtype == 64) {
+        double *p = (double *)a->slots + a->start + offset;
+        double *o = (double *)out->slots + out->start;
+        switch (kind) {
+        case 0: vDSP_vnegD(p, 1, o, 1, (vDSP_Length)n); break;
+        case 1:
+            for (int i = 0; i < n; i++) o[i] = p[i] < 0.0 ? 0.0 : p[i];
+            break;
+        case 2: vDSP_vabsD(p, 1, o, 1, (vDSP_Length)n); break;
+        case 3: vvsqrt(o, p, &n); break;
+        case 4: vDSP_vmulD(p, 1, p, 1, o, 1, (vDSP_Length)n); break;
+        case 5: vvexp(o, p, &n); break;
+        }
+        return out_wval;
+    }
+    if (dtype == 3) {
+        float *p = (float *)a->slots + a->start + offset;
+        float *o = (float *)out->slots + out->start;
+        switch (kind) {
+        case 0: vDSP_vneg(p, 1, o, 1, (vDSP_Length)n); break;
+        case 1:
+            for (int i = 0; i < n; i++) o[i] = p[i] < 0.0f ? 0.0f : p[i];
+            break;
+        case 2: vDSP_vabs(p, 1, o, 1, (vDSP_Length)n); break;
+        case 3: vvsqrtf(o, p, &n); break;
+        case 4: vDSP_vmul(p, 1, p, 1, o, 1, (vDSP_Length)n); break;
+        case 5: vvexpf(o, p, &n); break;
+        }
+        return out_wval;
+    }
+    w_raise(w_string("blas_unary_view: dtype must be f32 or f64"));
+    return W_NIL;
+}
 
 /* ---- BLAS 1 / 2 + vDSP vector arithmetic (f32 typed arrays) ---- */
 

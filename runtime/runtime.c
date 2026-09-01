@@ -38127,6 +38127,26 @@ static void rational_parts(WValue rational, WValue *numerator, WValue *denominat
     die("expected Rational");
 }
 
+/* Box an already canonical pair.  Callers must have proved gcd(numerator,
+ * denominator) == 1; keeping the representation finish separate lets exact
+ * arithmetic that has already cross-cancelled avoid immediately repeating a
+ * full-width gcd. */
+static WValue rational_box_coprime_parts(WValue numerator, WValue denominator) {
+    if (w_is_int(numerator) && w_is_int(denominator)) {
+        int64_t num = w_as_int(numerator);
+        int64_t den = w_as_int(denominator);
+        if (num >= W_RATIONAL_NUM_MIN && num <= W_RATIONAL_NUM_MAX &&
+            den > 0 && den <= W_RATIONAL_DEN_MAX)
+            return w_box_rational((int32_t)num, (uint32_t)den);
+    }
+
+    WBigRational *big = (WBigRational *)calloc(1, sizeof(WBigRational));
+    big->domain_type = W_DOMAIN_RATIONAL;
+    big->numerator = numerator;
+    big->denominator = denominator;
+    return w_box_ptr(big, W_SUBTAG_DOMAIN);
+}
+
 static WValue rational_from_parts(WValue numerator, WValue denominator) {
     WValue zero = w_int(0);
     if (!w_is_integer_any(numerator) || !w_is_integer_any(denominator))
@@ -38142,19 +38162,7 @@ static WValue rational_from_parts(WValue numerator, WValue denominator) {
     numerator = bigint_div_any(numerator, gcd);
     denominator = bigint_div_any(denominator, gcd);
 
-    if (w_is_int(numerator) && w_is_int(denominator)) {
-        int64_t num = w_as_int(numerator);
-        int64_t den = w_as_int(denominator);
-        if (num >= W_RATIONAL_NUM_MIN && num <= W_RATIONAL_NUM_MAX &&
-            den > 0 && den <= W_RATIONAL_DEN_MAX)
-            return w_box_rational((int32_t)num, (uint32_t)den);
-    }
-
-    WBigRational *big = (WBigRational *)calloc(1, sizeof(WBigRational));
-    big->domain_type = W_DOMAIN_RATIONAL;
-    big->numerator = numerator;
-    big->denominator = denominator;
-    return w_box_ptr(big, W_SUBTAG_DOMAIN);
+    return rational_box_coprime_parts(numerator, denominator);
 }
 
 static WValue rational_reduce(__int128 num, __int128 den) {
@@ -38286,7 +38294,10 @@ static WValue w_rational_mul(WValue a, WValue b) {
                                      bigint_div_any(bn, gcd_right));
     WValue denominator = bigint_mul_any(bigint_div_any(ad, gcd_right),
                                        bigint_div_any(bd, gcd_left));
-    return rational_from_parts(numerator, denominator);
+    /* Both inputs are canonical.  Removing gcd(an, bd) and gcd(bn, ad)
+     * makes the two products coprime by construction, so rational_from_parts
+     * would only rediscover gcd == 1 over the full-width products. */
+    return rational_box_coprime_parts(numerator, denominator);
 }
 
 static WValue w_rational_div(WValue a, WValue b) {

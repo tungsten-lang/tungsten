@@ -98,3 +98,23 @@ check("huge.negative_denominator",
   Rational.new(100000000000000000000, -3),
   Rational.new(-100000000000000000000, 3))
 check("huge.zero_reduces", Rational.new(0, huge_integer), 0/1)
+
+# Cross-cancellation's fast finalizer must be identical to constructing the
+# unreduced product directly, including zero and negative numerators.
+mul_property_ok = true
+an = -9
+while an <= 9
+  ad = 1
+  while ad <= 9
+    bn = -9
+    while bn <= 9
+      bd = 1
+      while bd <= 9
+        got = Rational.new(an, ad) * Rational.new(bn, bd)
+        want = Rational.new(an * bn, ad * bd)
+        mul_property_ok = false if got != want
+        bd += 1
+      bn += 1
+    ad += 1
+  an += 1
+check("multiply.exhaustive_canonical", mul_property_ok, true)

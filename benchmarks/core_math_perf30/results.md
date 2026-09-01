@@ -17,7 +17,8 @@ Correctness is checked by the benchmark checksum and the focused Core spec.
 | 19. Direct finite-factor candidate construction | 10000 dense degree-20 candidates over F_2 | 94 ms | 15 ms | retained, 6.27x | checksum `211`; compiled `spec/core/algebra_finite_factor_spec.w` passed |
 | 20. Prepared inverse/Frobenius tables | 1000 complete nonzero sweeps of F_2^8 | 176 ms | 48 ms | retained, 3.67x | every inverse product and Frobenius round-trip checked; finite-field spec passed |
 | 21. Reusable FFTPlan | 600 forward/inverse pairs, n=1024 | 705 ms | 829 ms | rejected, 17.6% slower | identical checksum `1150.5357900443466`; max round-trip error `3.21e-11`; Sci smoke passed |
-| 22. Fraction-free polynomial-matrix determinant | 12 determinants of dense 7x7 `zI + J` over F_1009 | 109 ms | 5 ms | retained, 21.8x | exact closed form `z^6(z+7)`, checksum `96`; compiled polynomial-matrix spec passed |
+| 22a. Coprime Rational multiplication finish | Repeated products of canonical 128/512/2048/8192-bit Rational operands | 964/4008/38313/454111 ns | 357/522/2414/8472 ns | retained, 2.70x/7.68x/15.9x/53.6x | identical checksums; compiled Rational spec plus 29,241 exhaustive signed small products passed |
+| 22b. Fraction-free polynomial-matrix determinant | 12 determinants of dense 7x7 `zI + J` over F_1009 | 109 ms | 5 ms | retained, 21.8x | exact closed form `z^6(z+7)`, checksum `96`; compiled polynomial-matrix spec passed |
 
 Rejected or deferred experiments are recorded below with their reason; they
 are not left in production source.
@@ -35,6 +36,29 @@ shape setup. No FFT production source from this experiment is retained; the
 benchmark remains as a regression target for revisiting it after typed-call
 specialization or a flat native-buffer plan exists.
 
+## 22a. Rational multiplication: retained
+
+Canonical Rational operands are reduced before arithmetic. Multiplication
+already computes `gcd(an, bd)` and `gcd(bn, ad)` and divides those factors out
+before forming its result, which proves the two output products coprime. The
+old representation finalizer immediately repeated a full-width GCD over those
+products. The retained path boxes this proven-coprime pair directly; general
+construction and addition/subtraction still use the normalizing finalizer.
+
+Five alternating matched runs of `rational_mul_coprime_finish.w` produced
+these median nanoseconds per product:
+
+| operand width | baseline | retained | speedup |
+|---:|---:|---:|---:|
+| 128 bits | 964 | 357 | 2.70x |
+| 512 bits | 4,008 | 522 | 7.68x |
+| 2,048 bits | 38,313 | 2,414 | 15.9x |
+| 8,192 bits | 454,111 | 8,472 | 53.6x |
+
+Every before/after checksum matched. The compiled Rational spec passes all 65
+checks, including an exhaustive comparison of 29,241 signed small products
+against independently normalized `Rational.new(an*bn, ad*bd)` values.
+
 ## Final focused validation
 
 The final campaign tree compiled and ran all of the following successfully:
@@ -42,4 +66,5 @@ The final campaign tree compiled and ran all of the following successfully:
 `algebra_arithmetic_circuit_spec`, `algebra_lattice_reduction_spec`,
 `optim_spec`, the Sci smoke spec, `algebra_polynomial_gcd_modular_spec`,
 `algebra_polynomial_specialize_spec`, `algebra_finite_factor_spec`,
-`algebra_finite_field_spec`, and `algebra_polynomial_matrix_spec`.
+`algebra_finite_field_spec`, `algebra_polynomial_matrix_spec`, and
+`numeric/rational_spec`.

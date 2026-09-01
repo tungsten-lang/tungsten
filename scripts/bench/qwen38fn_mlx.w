@@ -182,6 +182,9 @@ gdn_fused_lib = metal_compile_source(device, read_file(FN_DIR + "gdn_fused.metal
 conv_split_pipe = metal_pipeline(gdn_fused_lib, "gdn_conv_split")
 g_beta_pipe = metal_pipeline(gdn_fused_lib, "gdn_g_beta")
 moe_output_pipe = metal_pipeline(gdn_fused_lib, "moe_output")
+ple_gpu_lib = metal_compile_source(device, read_file(FN_DIR + "ple_gather_gpu.metal"))
+rope_tab_pipe = metal_pipeline(ple_gpu_lib, "build_rope_tab")
+ple_gather_pipe = metal_pipeline(ple_gpu_lib, "ple_table_gather")
 ple_lib = metal_compile_source(device, read_file(FN_DIR + "ple_ops.metal"))
 ple_gate_pipe = metal_pipeline(ple_lib, "ple_gate")
 ple_conv_pipe = metal_pipeline(ple_lib, "ple_conv_dilated_step")
@@ -902,8 +905,9 @@ icb_part_seq = [0]
   icb_part_seq[0] = icb_part_seq[0] + 1
   bstate = [metal_icb_new(device, 2000 + icb_part_seq[0]), 0, [], [], 0, 0]
   if with_embed == 1
+    metal_icb_add(bstate[0], rope_tab_pipe, icb_args([pos_buf, cos_tmp, sin_tmp, log_rope, ROT_HALF]), 1, 32)
     metal_icb_add(bstate[0], bf16_embed_pipe, icb_args(embed_args), HIDDEN / 256, 256)
-    bstate[1] = 1
+    bstate[1] = 2
     icb_break(bstate)
     si = 0
     while si < HC_COUNT
@@ -962,7 +966,6 @@ if probe_k > 0
 
 -> forward_icb(token_id, pos)
   ft0 = fn_time ? ccall("__w_clock_ms") : ~0.0
-  build_rope(pos)
   ple_gather([token_id, e_buf])
   metal_buffer_write_i32(tok_buf, 0, token_id)
   metal_buffer_write_i32(pos_buf, 0, pos)
@@ -1212,15 +1215,15 @@ fast_path = golden_prefix == "" && !expert_hist && skip_spec == "" && !hc_fused
 
 -> forward_fast(token_id, pos)
   ft0 = fn_time ? ccall("__w_clock_ms") : ~0.0
-  build_rope(pos)
   ple_gather([token_id, e_buf])
   metal_buffer_write_i32(tok_buf, 0, token_id)
   metal_buffer_write_i32(pos_buf, 0, pos)
   metal_buffer_write_i32(pos1_buf, 0, pos + 1)
   ft1 = fn_time ? ccall("__w_clock_ms") : ~0.0
   metal_batch_begin_concurrent(queue)
+  metal_dispatch_groups(queue, rope_tab_pipe, [pos_buf, cos_tmp, sin_tmp, log_rope, ROT_HALF], 1, 32)
   metal_dispatch_n(queue, bf16_embed_pipe, embed_args, HIDDEN)
-  metal_batch_barrier_resources(queue, [h_embed])
+  metal_batch_barrier_resources(queue, [h_embed, cos_tmp, sin_tmp])
   s = 0
   while s < HC_COUNT
     metal_dispatch_n(queue, copy_at_pipe, [h_embed, H, 0, s * HIDDEN, HIDDEN], HIDDEN)

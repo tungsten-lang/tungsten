@@ -99,6 +99,29 @@ self-quantization must re-run the parity + smoke gates.
    `EPS/128`, or the recurrent state drifts ~1e-3 by mid-stack and flips
    router top-k choices.
 
+## 10-idea perf campaign scoreboard (9/1)
+
+1. **ICB whole-token replay** — DONE, negative: encode 17.9 -> 0.85 ms
+   (thesis proven) but 1191 executeCommandsInBuffer segments cost ~10 us
+   each GPU-side (21 -> 34 ms). Gated FN_ICB=1. Landmine found: the
+   compiler CSEs ccall wrappers with constant args (see memory).
+2. MTP width-n verify — OPEN (the wall-breaker; next session).
+3. Device-chained decode — OPEN (GPU rope landed as its enabler).
+4. **GPU rope + PLE gather** — HALF: rope on GPU (neutral, ids-identical,
+   enabler for #3); table gather on GPU REVERTED — binding the 51 GB table
+   makes it command-buffer-resident and thrashes the page cache into
+   multi-second tokens. Host sparse gather is the correct design.
+5. GEMM prefill — OPEN.
+6. Small-M wide kernels — OPEN (27B kernel family identified for reuse).
+7. **Quant coverage boundary** — DONE, negative: outer layers 0/1/46/47
+   AND the PLE projections each flip the fixture when quantized. The
+   shipped conservative set is the optimum.
+8. Expert-gather tuning — OPEN.
+9. Cross-token encode overlap — OPEN (needs #3).
+10. QSA indexer + long context — OPEN.
+
+Standing: 42.3 tok/s short / ~37 prose (FN_QUANT=1), all gates green.
+
 ## Next (ranked by research + measurement)
 
 1. **MTP speculative decode** — community-measured 1.4-1.7x on Apple

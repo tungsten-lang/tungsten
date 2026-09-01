@@ -145,6 +145,14 @@ hc_fused = ccall("__w_env", "FN_HCFUSED") == "1"
 # FN_CPROG=0: run prebuilt programs through the .w dispatch loop instead of
 # the C-side executor (w_metal_program_run) — A/B escape; commands identical.
 cprog = ccall("__w_env", "FN_CPROG") != "0"
+# FN_MTP=1: load the MTP head and measure draft acceptance during decode
+# (each round drafts the NEXT-next token; the following round scores it).
+mtp_depth = 0
+if ccall("__w_env", "FN_MTP") != nil && ccall("__w_env", "FN_MTP") != ""
+  mtp_depth = ccall("__w_env", "FN_MTP").to_i()
+mtp_pending = [0 - 1]
+mtp_hits = [0]
+mtp_total = [0]
 # Pipelined encode: commit the token's command buffer in thirds so encoding
 # layers 17-48 overlaps GPU execution of layers 1-16 (the flame profile
 # priced host encode at ~6.5ms/token, fully serial with the GPU when the
@@ -1393,7 +1401,7 @@ if golden_prefix != ""
 # fn_phn_rope_multi re-clones with 1/sqrt and (x*rrms)*w). GDN conv/delta
 # advance their recurrent state by n tokens with ONE ping flip per block.
 MULTI_MAX = 8
-if multi_n > 0
+if multi_n > 0 || mtp_depth > 0
   fnm_lib = metal_compile_source(device, read_file(FN_DIR + "fn_multi.metal"))
   grms_m_pipe = metal_pipeline(fnm_lib, "grouped_rms_norm_multi")
   hc_mix_reduce_m_pipe = metal_pipeline(fnm_lib, "hc_mix_reduce_multi")
@@ -1633,6 +1641,119 @@ if multi_n > 0
   ple_ctx[0] = EOS_TOKEN
   ple_ctx[1] = EOS_TOKEN
 
+# ---- MTP head (FN_MTP=1: draft-acceptance harness) ------------------------
+# Semantics per vLLM qwen4_exp mtp.py: the head consumes the PRE-mixer 10240
+# hyper-connection stream h_p plus emb(t_{p+1}); RMS-norm each (the hidden
+# norm runs over the FULL flattened 10240), project through fc_hidden (per
+# branch) / fc_embedding, broadcast-add the embedding into all 4 branches,
+# run ONE full-attention+MoE layer (own HCs; kv slot = position-1 since MTP
+# position 0 never exists; rope at the REAL position), collapse through its
+# own mixer, share lm_head. The MTP MoE is bf16 with FUSED gate|up experts.
+if mtp_depth > 0
+  mtp_ops_lib = metal_compile_source(device, read_file(FN_DIR + "mtp_ops.metal"))
+  mtp_fuse_pipe = metal_pipeline(mtp_ops_lib, "mtp_fuse_add")
+  mtp_gather_pipe = metal_pipeline(mtp_ops_lib, "bf16_moe_gather_multi")
+  mtp_gu_silu_pipe = metal_pipeline(mtp_ops_lib, "mtp_gu_silu")
+  mtp_pre_norm_e = metal_buffer(device, HIDDEN * 4)
+  mtp_pre_norm_h = metal_buffer(device, HC_HIDDEN * 4)
+  load_shifted_norm(["mtp.pre_fc_norm_embedding.weight", HIDDEN, mtp_pre_norm_e])
+  load_shifted_norm(["mtp.pre_fc_norm_hidden.weight", HC_HIDDEN, mtp_pre_norm_h])
+  mtp_qn = metal_buffer(device, HEAD_DIM * 4)
+  mtp_kn = metal_buffer(device, HEAD_DIM * 4)
+  load_shifted_norm(["mtp.layers.0.self_attn.q_norm.weight", HEAD_DIM, mtp_qn])
+  load_shifted_norm(["mtp.layers.0.self_attn.k_norm.weight", HEAD_DIM, mtp_kn])
+  mtp_lyr = {
+    kind: "full",
+    q: mv_tensor("mtp.layers.0.self_attn.q_proj.weight"),
+    k: mv_tensor("mtp.layers.0.self_attn.k_proj.weight"),
+    v: mv_tensor("mtp.layers.0.self_attn.v_proj.weight"),
+    out: mv_tensor("mtp.layers.0.self_attn.o_proj.weight"),
+    qn: mtp_qn,
+    kn: mtp_kn,
+    k_cache: metal_buffer(device, MAX_POS * KV_DIM * 4),
+    v_cache: metal_buffer(device, MAX_POS * KV_DIM * 4)
+  }
+  mtp_attn_hc = load_hc("mtp.layers.0.attn_hyper_connection.")
+  mtp_mlp_hc = load_hc("mtp.layers.0.mlp_hyper_connection.")
+  mtp_mixer = load_hc("mtp.hyper_connection_mixer.")
+  mtp_router = mv_tensor("mtp.layers.0.mlp.gate.weight")
+  mtp_sh_gate = mv_tensor("mtp.layers.0.mlp.shared_expert.gate_proj.weight")
+  mtp_sh_up = mv_tensor("mtp.layers.0.mlp.shared_expert.up_proj.weight")
+  mtp_sh_down = mv_tensor("mtp.layers.0.mlp.shared_expert.down_proj.weight")
+  mtp_seg = raw_tensor("mtp.layers.0.mlp.shared_expert_gate.weight")
+  mtp_experts_gu = raw_tensor("mtp.layers.0.mlp.experts.gate_up_proj")
+  mtp_experts_dn = raw_tensor("mtp.layers.0.mlp.experts.down_proj")
+  mtp_fc_e = raw_tensor("mtp.fc_embedding.weight")
+  mtp_fc_h = raw_tensor("mtp.fc_hidden.weight")
+  mtp_en_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  mtp_ef_m = metal_buffer(device, MULTI_MAX * HIDDEN * 4)
+  mtp_hn_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
+  mtp_hf_m = metal_buffer(device, MULTI_MAX * HC_HIDDEN * 4)
+  egu_m = metal_buffer(device, MULTI_MAX * TOP_K * 2 * MOE_FFN * 4)
+
+-> mtp_moe_multi(n)
+  mv_multi(mtp_router, xn_m, rlog_m, HIDDEN, N_EXPERTS, n)
+  mv_multi(mtp_sh_gate, xn_m, sg_m, HIDDEN, SHARED_FFN, n)
+  mv_multi(mtp_sh_up, xn_m, su_m, HIDDEN, SHARED_FFN, n)
+  metal_dispatch_groups(queue, bf16_m_pipe, [mtp_seg, xn_m, seg_m, HIDDEN, 1, n], 1, 32)
+  metal_dispatch_groups(queue, router_m_pipe, [rlog_m, tidx_m, tw_m], n, 512)
+  metal_dispatch_n(queue, silu_pipe, [sg_m, su_m, sh_m, n * SHARED_FFN], n * SHARED_FFN)
+  metal_dispatch_groups(queue, mtp_gather_pipe, [mtp_experts_gu, tidx_m, xn_m, egu_m, HIDDEN, 2 * MOE_FFN, 2 * MOE_FFN * HIDDEN, 0, TOP_K, 0], n * TOP_K * (2 * MOE_FFN / 8), 64)
+  mv_multi(mtp_sh_down, sh_m, shared_m, SHARED_FFN, HIDDEN, n)
+  metal_dispatch_n(queue, mtp_gu_silu_pipe, [egu_m, eh_m, MOE_FFN, n * TOP_K * MOE_FFN], n * TOP_K * MOE_FFN)
+  metal_dispatch_groups(queue, mtp_gather_pipe, [mtp_experts_dn, tidx_m, eh_m, ed_m, MOE_FFN, HIDDEN, HIDDEN * MOE_FFN, 0, TOP_K, 1], n * TOP_K * (HIDDEN / 8), 64)
+  metal_dispatch_n(queue, moe_out_m_pipe, [ed_m, tw_m, shared_m, seg_m, y_m, TOP_K, HIDDEN, n], n * HIDDEN)
+
+-> mtp_fuse(toks, hsrc, n)
+  t = 0
+  while t < n
+    metal_buffer_write_i32(tok_ids_m, t, toks[t])
+    t = t + 1
+  metal_dispatch_n(queue, embed_m_pipe, [embed_w, e_m, tok_ids_m, HIDDEN, n], n * HIDDEN)
+  metal_dispatch_groups(queue, grms_m_pipe, [e_m, mtp_pre_norm_e, mtp_en_m, HIDDEN, 1, EPS], n, 256)
+  metal_dispatch_groups(queue, bf16_m_pipe, [mtp_fc_e, mtp_en_m, mtp_ef_m, HIDDEN, HIDDEN, n], HIDDEN, 32)
+  metal_dispatch_groups(queue, grms_m_pipe, [hsrc, mtp_pre_norm_h, mtp_hn_m, HC_HIDDEN, 1, EPS], n, 256)
+  metal_dispatch_groups(queue, bf16_m_pipe, [mtp_fc_h, mtp_hn_m, mtp_hf_m, HIDDEN, HIDDEN, n * HC_COUNT], HIDDEN, 32)
+  metal_dispatch_n(queue, mtp_fuse_pipe, [mtp_hf_m, mtp_ef_m, h_m, HC_COUNT, HIDDEN, n], n * HC_HIDDEN)
+
+-> mtp_rope(pos0, n)
+  t = 0
+  while t < n
+    ri = 0
+    while ri < ROT_HALF
+      theta = Math.exp(log_rope * (~0.0 - ri * rope_power))
+      angle = (pos0 + t) * theta
+      metal_buffer_write_f32(cos_m, t * ROT_HALF + ri, Math.cos(angle))
+      metal_buffer_write_f32(sin_m, t * ROT_HALF + ri, Math.sin(angle))
+      ri = ri + 1
+    t = t + 1
+
+-> mtp_head_multi(n)
+  metal_dispatch_groups(queue, grms_m_pipe, [h_m, mtp_mixer[:norm], n_tmp_m, HIDDEN, HC_COUNT, EPS], n * HC_COUNT, 256)
+  mv_multi(mtp_mixer[:down], n_tmp_m, lowrank_m, HC_HIDDEN, HC_LOWRANK, n)
+  metal_dispatch_n(queue, silu_div_pipe, [lowrank_m, lowrank_m, ~0.0 + HC_COUNT, n * HC_LOWRANK], n * HC_LOWRANK)
+  mv_multi(mtp_mixer[:up], lowrank_m, upraw_m, HC_LOWRANK, HC_HIDDEN, n)
+  metal_dispatch_n(queue, hc_mix_reduce_m_pipe, [upraw_m, n_tmp_m, xn_m, HC_COUNT, HIDDEN, n], n * HIDDEN)
+  mv_multi(lm_head, xn_m, logits_m, HIDDEN, N_VOCAB, n)
+  metal_dispatch_groups(queue, argmax_stage1_pipe, [logits_m, am_pv_m, am_pi_m, N_VOCAB, ARGMAX_CHUNKS, n], n * ARGMAX_CHUNKS, 256)
+  metal_dispatch_groups(queue, argmax_stage2_pipe, [am_pv_m, am_pi_m, am_out_m, ARGMAX_CHUNKS, n], n, 256)
+
+# One MTP draft: fuse (H, emb(next_tok)) at real position pos_real (kv slot
+# pos_real-1), run the head layer, return the drafted token id.
+-> mtp_step(next_tok, pos_real)
+  mtp_rope(pos_real, 1)
+  metal_batch_begin(queue)
+  mtp_fuse([next_tok], H, 1)
+  hc_mix_multi(mtp_attn_hc, 1)
+  full_multi(mtp_lyr, pos_real - 1, 1)
+  hc_combine_multi_step(1)
+  hc_mix_multi(mtp_mlp_hc, 1)
+  mtp_moe_multi(1)
+  hc_combine_multi_step(1)
+  mtp_head_multi(1)
+  metal_batch_commit(queue)
+  metal_buffer_read_i32(am_out_m, 0)
+
 # ---- prompt ----
 prompt_seed = [760, 6511, 314, 9338, 369]
 prompt = []
@@ -1655,6 +1776,8 @@ pred = -1
 i = 0
 while i < prompt.size()
   pred = forward(prompt[i], i, i == prompt.size() - 1)
+  if mtp_depth > 0
+    mtp_step(i + 1 < prompt.size() ? prompt[i + 1] : pred, i + 1)
   i = i + 1
 if ccall("__w_env", "FN_DUMP_H") != nil && ccall("__w_env", "FN_DUMP_H") != ""
   File.write_bytes(ccall("__w_env", "FN_DUMP_H"), metal_buffer_view(H, 8, HC_HIDDEN * 4))
@@ -1687,6 +1810,11 @@ round_ms = []
 while ids.size() < n_generate
   rt0 = ccall("__w_clock_ms")
   pred = forward(pred, pos, true)
+  if mtp_depth > 0
+    if mtp_pending[0] >= 0
+      mtp_total[0] = mtp_total[0] + 1
+      if mtp_pending[0] == pred then mtp_hits[0] = mtp_hits[0] + 1
+    mtp_pending[0] = mtp_step(pred, pos + 1)
   ids.push(pred)
   pos = pos + 1
   round_ms.push(ccall("__w_clock_ms") - rt0)
@@ -1705,6 +1833,8 @@ if fn_time && encode_ms[3] > 0
   << "host phases/round: rope+ple " + (encode_ms[0] / n).to_s + " ms, encode " + (encode_ms[1] / n).to_s + " ms, commit+wait+read " + (encode_ms[2] / n).to_s + " ms"
 if decoded > 0
   << "decode: " + decoded.to_s + " tokens in " + elapsed.to_s + " ms = " + (1000.0 * decoded / elapsed).to_s + " tok/s (median round " + median_ms.to_s + " ms)"
+if mtp_depth > 0 && mtp_total[0] > 0
+  << "mtp draft acceptance: " + mtp_hits[0].to_s + "/" + mtp_total[0].to_s + " = " + (100.0 * mtp_hits[0] / mtp_total[0]).to_s + "% (harness adds a draft to every round; tok/s above is NOT representative)"
 
 if multi_n > 0
   << "---- width-" + multi_n.to_s + " multi verify: serial ids are the oracle ----"

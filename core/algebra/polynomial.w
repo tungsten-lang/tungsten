@@ -273,6 +273,8 @@
     @terms = normalize_terms(terms)
     @content_hash = nil
     @pf_cache = nil
+    @substitution_plan_index = nil
+    @substitution_plan = nil
 
   # Trusted constructor for term lists that are canonical BY CONSTRUCTION:
   # sorted strictly descending in the ring's monomial order, no duplicate
@@ -291,6 +293,8 @@
     @terms = canonical ? terms : normalize_terms(terms)
     @content_hash = nil
     @pf_cache = nil
+    @substitution_plan_index = nil
+    @substitution_plan = nil
 
   ro :ring, :terms
 
@@ -748,13 +752,74 @@
       substitution_index(variable), @ring.field.normalize_element(value))
 
   -> substitute_element(index, scalar)
+    return @ring.zero if zero?
+    if @ring.arity == 1
+      return @ring.monomial_raw(
+        at_element(scalar), @ring.zero_exponents)
+    plan = substitution_plan(index)
+    groups = plan[0]
+    maximum_power = plan[1]
+    powers = [@ring.field.one]
+    power = 1
+    while power <= maximum_power
+      powers.push(field_mul(powers[power - 1], scalar))
+      power += 1
     out = []
+    group_index = 0
+    while group_index < groups.size
+      group = groups[group_index]
+      pieces = group[1]
+      coefficient = @ring.field.zero
+      piece_index = 0
+      while piece_index < pieces.size
+        piece = pieces[piece_index]
+        coefficient = field_add(
+          coefficient, field_mul(piece[0], powers[piece[1]]))
+        piece_index += 1
+      if !field_zero?(coefficient)
+        out.push([coefficient, group[0]])
+      group_index += 1
+    # The cached groups are already unique and sorted in the ring order.
+    Polynomial.new(@ring, out, true)
+
+  # Group immutable terms by the monomial remaining after one variable is
+  # specialized. A one-entry MRU bounds retained memory while amortizing the
+  # repeated same-variable substitutions used by modular GCD/interpolation.
+  -> substitution_plan(index)
+    if @substitution_plan != nil && @substitution_plan_index == index
+      return @substitution_plan
+    by_exponents = {}
+    groups = []
+    maximum_power = 0
     @terms.each -> (term)
       exponents = copy_exponents(term[1])
-      power = term[1][index]
+      power = exponents[index]
+      maximum_power = power if power > maximum_power
       exponents[index] = 0
-      out.push([field_mul(term[0], field_pow(scalar, power)), exponents])
-    Polynomial.new(@ring, out)
+      key = exponents.join(",")
+      group = nil
+      if by_exponents.key?(key)
+        group = by_exponents[key]
+      else
+        group = [exponents, []]
+        by_exponents[key] = group
+        groups.push(group)
+      group[1].push([term[0], power])
+
+    # Sort once; every later evaluation can use the trusted constructor even
+    # when cancellation removes complete groups.
+    i = 1
+    while i < groups.size
+      j = i
+      while j > 0 && cmp_monomials(groups[j][0], groups[j - 1][0]) > 0
+        temporary = groups[j - 1]
+        groups[j - 1] = groups[j]
+        groups[j] = temporary
+        j -= 1
+      i += 1
+    @substitution_plan_index = index
+    @substitution_plan = [groups, maximum_power]
+    @substitution_plan
 
   # Exact definite integral of a univariate polynomial over [lower, upper],
   # as a field element.

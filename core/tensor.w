@@ -857,7 +857,10 @@ TENSOR_EW = {}
   # Scalar multiply (Tensor · number) — kept separate from `*` so the operator
   # isn't overloaded on two operand types (which can hang dispatch).
   -> scale(s)
-    result = Tensor.zeros(device, dtype, shape)
+    # `Tensor.zeros(device, ...)` is the Metal-only constructor. Preserve the
+    # receiver's storage backend here so CPU tensors never try to treat :cpu as
+    # an MTLDevice.
+    result = Tensor.zeros_like(self, shape, nil)
     total = self.size
     fi = 0
     while fi < total
@@ -924,7 +927,7 @@ TENSOR_EW = {}
     if axis < 0 || axis >= self.rank
       raise "Tensor.sum_axis: axis out of range"
     oshape = self.drop_axis_shape(axis)
-    result = Tensor.zeros(device, dtype, oshape)
+    result = Tensor.zeros_like(self, oshape, nil)
     axis_len = shape[axis]
     total = Tensor.elem_count(oshape)
     fi = 0
@@ -943,7 +946,7 @@ TENSOR_EW = {}
     if axis < 0 || axis >= self.rank
       raise "Tensor.max_axis: axis out of range"
     oshape = self.drop_axis_shape(axis)
-    result = Tensor.zeros(device, dtype, oshape)
+    result = Tensor.zeros_like(self, oshape, nil)
     axis_len = shape[axis]
     total = Tensor.elem_count(oshape)
     fi = 0
@@ -1005,7 +1008,7 @@ TENSOR_EW = {}
   # ifs inside elsif branches miscompiled — see project memory).
 
   -> neg
-    result = Tensor.zeros(device, dtype, shape)
+    result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
     while fi < n
@@ -1015,7 +1018,7 @@ TENSOR_EW = {}
     result
 
   -> relu
-    result = Tensor.zeros(device, dtype, shape)
+    result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
     while fi < n
@@ -1028,7 +1031,7 @@ TENSOR_EW = {}
     result
 
   -> abs
-    result = Tensor.zeros(device, dtype, shape)
+    result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
     while fi < n
@@ -1038,7 +1041,7 @@ TENSOR_EW = {}
     result
 
   -> sqrt
-    result = Tensor.zeros(device, dtype, shape)
+    result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
     while fi < n
@@ -1048,7 +1051,7 @@ TENSOR_EW = {}
     result
 
   -> square
-    result = Tensor.zeros(device, dtype, shape)
+    result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
     while fi < n
@@ -1059,7 +1062,7 @@ TENSOR_EW = {}
     result
 
   -> exp
-    result = Tensor.zeros(device, dtype, shape)
+    result = Tensor.zeros_like(self, shape, nil)
     n = self.size
     fi = 0
     while fi < n
@@ -1078,7 +1081,7 @@ TENSOR_EW = {}
     # shape. Anything else falls through to the CPU reference.
     if dtype == 3 && self.rank == 2 && axis == 1 && self.contiguous?
       return self.gpu_softmax_rows()
-    result = Tensor.zeros(device, dtype, shape)
+    result = Tensor.zeros_like(self, shape, nil)
     axis_len = shape[axis]
     oshape = self.drop_axis_shape(axis)
     outer = Tensor.elem_count(oshape)

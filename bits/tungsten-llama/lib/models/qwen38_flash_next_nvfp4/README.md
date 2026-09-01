@@ -105,10 +105,23 @@ self-quantization must re-run the parity + smoke gates.
    (thesis proven) but 1191 executeCommandsInBuffer segments cost ~10 us
    each GPU-side (21 -> 34 ms). Gated FN_ICB=1. Landmine found: the
    compiler CSEs ccall wrappers with constant args (see memory).
-2. MTP width-n verify — IN PROGRESS: `qwen4_fn/fn_multi.metal` (width-n
-   variants of every flash-next-specific op, token-major [n, W] layout)
-   written and compile-checked; engine forward_multi wiring next. GDN/attn
-   multi variants reuse the 27B decode_multi family (identical head dims).
+2. MTP width-n verify — **VERIFY PATH LANDED, EXACT**: `forward_multi`
+   (engine mode `multi:N`, N<=8) re-decodes the serial oracle in width-N
+   blocks and matches its ids EXACTLY (0 mismatches at widths 2/4/8, 119
+   tokens). Kernels: `qwen4_fn/fn_multi.metal` (flash-next ops, token-major
+   [n, W]) + the 27B decode_multi family + `nvfp4_wide_bN_r1` matvecs.
+   Bit-identity rules that made it exact: every multi kernel is an
+   EXPRESSION-level clone of its serial twin — fn_phn_rope_multi re-clones
+   per_head_norm because the 27B multi kernel's rsqrt / x*(rrms*w) differ
+   in ULPs from our 1/sqrt / (x*rrms)*w; gdn_conv_split_multi keeps
+   z*sigmoid(z) (not z/(1+e^-z)); verify mode forces naive bf16 matvecs +
+   host rope on BOTH arms so summation orders agree. Measured (per-call
+   multi path, naive bf16, serial encoder — i.e. un-optimized): blocks of
+   2/4/8 cost 45/67/110 ms → 44/60/73 tok/s-equivalent vs 25 tok/s serial
+   per-call; marginal in-block token ~9-11 ms. Remaining for real MTP:
+   drafter (MTP head port), acceptance walk + state rollback
+   (conv_state_replay pattern), and the fast-path treatment (prebuilt
+   programs / concurrent encoder) for the multi rounds.
 3. Device-chained decode — OPEN (GPU rope landed as its enabler).
 4. **GPU rope + PLE gather** — HALF: rope on GPU (neutral, ids-identical,
    enabler for #3); table gather on GPU REVERTED — binding the 51 GB table

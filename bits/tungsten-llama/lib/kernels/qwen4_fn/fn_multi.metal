@@ -407,3 +407,123 @@ kernel void ple_conv_dilated_multi(
     }
   }
 }
+
+// Width-n gdn_conv_split: depthwise conv4 + silu + q|k|v split over n new
+// tokens, serial state in registers per channel (same tape-replay contract as
+// the 27B conv1d_depthwise_multi: only the final [3, C] state is written).
+// The silu is spelled conv_out * sigmoid(conv_out) — EXACTLY the serial
+// gdn_conv_split expression, NOT z/(1+exp(-z)); the two differ in ULPs and
+// the verify gate demands bit-identity with the serial path.
+kernel void gdn_conv_split_multi(
+  device const float *__restrict__ weight    [[buffer(0)]],   // [C, 4, 1]
+  device const float *__restrict__ state     [[buffer(1)]],   // [3, C] older first
+  device const float *__restrict__ x         [[buffer(2)]],   // [n, C]
+  device       float *__restrict__ q_out     [[buffer(3)]],   // [n, q_dim]
+  device       float *__restrict__ k_out     [[buffer(4)]],   // [n, k_dim]
+  device       float *__restrict__ v_out     [[buffer(5)]],   // [n, v_dim]
+  device       float *__restrict__ state_out [[buffer(6)]],   // [3, C]
+  constant int &C     [[buffer(7)]],
+  constant int &q_dim [[buffer(8)]],
+  constant int &k_dim [[buffer(9)]],
+  constant int &n_tok [[buffer(10)]],
+  uint __tid [[thread_position_in_grid]]
+) {
+  int c = int(__tid);
+  if (c >= C) return;
+
+  float s0 = state[0 * C + c];
+  float s1 = state[1 * C + c];
+  float s2 = state[2 * C + c];
+  float w0 = weight[c * 4 + 0];
+  float w1 = weight[c * 4 + 1];
+  float w2 = weight[c * 4 + 2];
+  float w3 = weight[c * 4 + 3];
+  int v_dim = C - q_dim - k_dim;
+
+  for (int t = 0; t < n_tok; ++t) {
+    float x_new = x[t * C + c];
+    float conv_out = w0 * s0 + w1 * s1 + w2 * s2 + w3 * x_new;
+    float sig = 1.0f / (1.0f + exp(-conv_out));
+    float y = conv_out * sig;
+    if (c < q_dim) {
+      q_out[t * q_dim + c] = y;
+    } else if (c < q_dim + k_dim) {
+      k_out[t * k_dim + (c - q_dim)] = y;
+    } else {
+      v_out[t * v_dim + (c - q_dim - k_dim)] = y;
+    }
+    s0 = s1; s1 = s2; s2 = x_new;
+  }
+  state_out[0 * C + c] = s0;
+  state_out[1 * C + c] = s1;
+  state_out[2 * C + c] = s2;
+}
+
+// Width-n gdn_g_beta: a/b are token-major [n, Hv]; A_log/dt_bias stay [Hv].
+kernel void gdn_g_beta_multi(
+  device const float *__restrict__ a       [[buffer(0)]],   // [n, Hv]
+  device const float *__restrict__ b       [[buffer(1)]],   // [n, Hv]
+  device const float *__restrict__ A_log   [[buffer(2)]],   // [Hv]
+  device const float *__restrict__ dt_bias [[buffer(3)]],   // [Hv]
+  device       float *__restrict__ g       [[buffer(4)]],   // [n, Hv]
+  device       float *__restrict__ beta    [[buffer(5)]],   // [n, Hv]
+  constant int &Hv    [[buffer(6)]],
+  constant int &n_tok [[buffer(7)]],
+  uint __tid [[thread_position_in_grid]]
+) {
+  int i = int(__tid);
+  if (i >= n_tok * Hv) return;
+  int h = i % Hv;
+  float a_val = a[i] + dt_bias[h];
+  float sp = log(1.0f + exp(a_val));
+  g[i] = exp(-exp(A_log[h]) * sp);
+  beta[i] = 1.0f / (1.0f + exp(-b[i]));
+}
+
+// Fused per-head norm + optional partial NeoX rope over n tokens, cloning the
+// SERIAL per_head_norm + partial_rope_neox expressions EXACTLY:
+// 1.0f/sqrt (not rsqrt) and (x*rrms)*w (not x*(rrms*w)) — the verify gate
+// demands bit-identity with the serial path. rot_half = 0 skips rope (GDN
+// q/k norms). Dispatch: n*n_heads TGs x 32.
+[[max_total_threads_per_threadgroup(32)]]
+kernel void fn_phn_rope_multi(
+  device float *x [[buffer(0)]],
+  device const float *w [[buffer(1)]],
+  device const float *cos_t [[buffer(2)]],   // [n, rot_half]
+  device const float *sin_t [[buffer(3)]],   // [n, rot_half]
+  constant int   &head_dim [[buffer(4)]],
+  constant int   &rot_half [[buffer(5)]],
+  constant int   &n_heads  [[buffer(6)]],
+  constant float &inv_d    [[buffer(7)]],
+  constant float &eps      [[buffer(8)]],
+  constant int   &n_tok    [[buffer(9)]],
+  uint __tg_id     [[threadgroup_position_in_grid]],
+  uint __simd_lane [[thread_index_in_simdgroup]]
+) {
+  int token = int(__tg_id) / n_heads;
+  int head = int(__tg_id) - token * n_heads;
+  if (token >= n_tok) return;
+  int base = (token * n_heads + head) * head_dim;
+  int lane = int(__simd_lane);
+  float sum_sq = 0.0f;
+  for (int i = lane; i < head_dim; i += 32) {
+    float v = x[base + i];
+    sum_sq = sum_sq + v * v;
+  }
+  float total = simd_sum(sum_sq);
+  float rrms = 1.0f / sqrt(total * inv_d + eps);
+  for (int i = lane; i < head_dim; i += 32) {
+    x[base + i] = (x[base + i] * rrms) * w[i];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (int p = lane; p < rot_half; p += 32) {
+    int lo = base + p;
+    int hi = lo + rot_half;
+    float a = x[lo];
+    float b = x[hi];
+    float c = cos_t[token * rot_half + p];
+    float s = sin_t[token * rot_half + p];
+    x[lo] = a * c - b * s;
+    x[hi] = a * s + b * c;
+  }
+}

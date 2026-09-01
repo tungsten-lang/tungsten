@@ -243,6 +243,7 @@ compiled_specs=(
   spec/core/linalg_spectral_spec.w
   spec/core/linalg_least_squares_spec.w
   spec/core/linalg_lu_factor_spec.w
+  spec/core/optim_spec.w
   spec/core/poly_fast_spec.w
   spec/core/prime_sieve_spec.w
   spec/core/pipeline_typed_array_spec.w
@@ -601,6 +602,7 @@ metal_specs=(
   spec/core/metal_q8_matvec_spec.w
   spec/core/metal_signed_array_bridge_spec.w
   spec/core/schedule_unroll_spec.w
+  spec/core/tensor_gpu_softmax_spec.w
 )
 api_specs=(
   spec/api/api_exec_spec.w

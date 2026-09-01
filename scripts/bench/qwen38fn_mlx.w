@@ -107,6 +107,13 @@ queue = metal_queue(device)
 st = Tungsten:Llama:ShardedSafetensors.new(MODEL_INDEX)
 experts_man = JSON.parse(read_file(EXPERTS_MANIFEST))
 ple_man = JSON.parse(read_file(PLE_MANIFEST))
+# FN_QUANT=1: route the big matvecs through self-quantized NVFP4 sidecars
+# (quantize_flash_next.py; layers 0/1/46/47 stay bf16 there and fall through).
+selfquant = ccall("__w_env", "FN_QUANT") == "1"
+sq = nil
+if selfquant
+  sq = Tungsten:Llama:Safetensors.new(MODEL_DIR + "selfquant.safetensors")
+  << "selfquant: " + sq.count().to_s + " nvfp4 tensors"
 
 << "qwen3.8-flash-next: " + mode + ", " + st.count().to_s + " non-expert tensors, " + experts_man["files"].size().to_s + " expert shards"
 if experts_man["files"].size() != N_LAYERS * 4
@@ -135,6 +142,7 @@ gate_pipe = metal_pipeline(metal_compile_source(device, read_file(QWEN_DIR + "at
 
 bf16_wide_lib = metal_compile_source(device, read_file(FN_DIR + "bf16_matvec_wide.metal"))
 bf16_w2_pipe = metal_pipeline(bf16_wide_lib, "bf16_matvec_w2")
+nvfp4_pipe = metal_pipeline(metal_compile_source(device, read_file(NVFP4_DIR + "nvfp4_matvec_mlx_scaled.metal")), "nvfp4_matvec_mlx_scaled")
 grms_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "grouped_rms_norm.metal")), "grouped_rms_norm")
 hc_lib = metal_compile_source(device, read_file(FN_DIR + "hc_ops.metal"))
 silu_div_pipe = metal_pipeline(hc_lib, "silu_div")
@@ -147,6 +155,10 @@ moe_wsum_pipe = metal_pipeline(moe_combine_lib, "moe_weighted_sum")
 moe_shared_pipe = metal_pipeline(moe_combine_lib, "moe_shared_combine")
 expert_hist_pipe = metal_pipeline(moe_combine_lib, "expert_hist_accum")
 rng_sig_pipe = metal_pipeline(metal_compile_source(device, read_file(FN_DIR + "rms_norm_gated_sig.metal")), "rms_norm_gated_sig")
+gdn_fused_lib = metal_compile_source(device, read_file(FN_DIR + "gdn_fused.metal"))
+conv_split_pipe = metal_pipeline(gdn_fused_lib, "gdn_conv_split")
+g_beta_pipe = metal_pipeline(gdn_fused_lib, "gdn_g_beta")
+moe_output_pipe = metal_pipeline(gdn_fused_lib, "moe_output")
 ple_lib = metal_compile_source(device, read_file(FN_DIR + "ple_ops.metal"))
 ple_gate_pipe = metal_pipeline(ple_lib, "ple_gate")
 ple_conv_pipe = metal_pipeline(ple_lib, "ple_conv_dilated_step")
@@ -155,6 +167,18 @@ ple_conv_pipe = metal_pipeline(ple_lib, "ple_conv_dilated_step")
 -> raw_tensor(name)
   d = st.tensor(name)
   metal_buffer_for_mmap(device, st.mmap_for(name), d[:byte_offset], d[:byte_length])
+
+-> sq_tensor(name)
+  d = sq.tensor(name)
+  metal_buffer_for_mmap(device, sq.mmap, d[:byte_offset], d[:byte_length])
+
+# Matvec weight handle: self-quantized NVFP4 triple when the sidecar has the
+# tensor, else the raw bf16 mmap. Consumed by enqueue_mv.
+-> mv_tensor(name)
+  if selfquant && sq.has?(name)
+    [sq_tensor(name), sq_tensor(name + ".scale"), sq_tensor(name + ".global_scale")]
+  else
+    [raw_tensor(name)]
 
 -> load_bf16(spec)
   name = spec[0]
@@ -190,14 +214,14 @@ ple_conv_pipe = metal_pipeline(ple_lib, "ple_conv_dilated_step")
   load_shifted_norm([prefix + "hc_norm.weight", HC_HIDDEN, norm])
   {
     norm: norm,
-    down: raw_tensor(prefix + "input_mix_weight_down.weight"),
-    up: raw_tensor(prefix + "input_mix_weight_up.weight"),
+    down: mv_tensor(prefix + "input_mix_weight_down.weight"),
+    up: mv_tensor(prefix + "input_mix_weight_up.weight"),
     inject: st.has?(prefix + "block_inject_weight.weight") ? raw_tensor(prefix + "block_inject_weight.weight") : nil
   }
 
 # ---- fixed weights ----
 embed_w = raw_tensor("model.language_model.embed_tokens.weight")
-lm_head = raw_tensor("lm_head.weight")
+lm_head = mv_tensor("lm_head.weight")
 mixer = load_hc("model.language_model.hyper_connection_mixer.")
 
 # GatedDeltaNet q/k l2norm constant scales (l2norm ~= rms*(1/sqrt(DK)); q also
@@ -331,10 +355,10 @@ while li < N_LAYERS
   base = {
     attn_hc: load_hc(prefix + "attn_hyper_connection."),
     mlp_hc: load_hc(prefix + "mlp_hyper_connection."),
-    router: raw_tensor(prefix + "mlp.gate.weight"),
-    sh_gate: raw_tensor(prefix + "mlp.shared_expert.gate_proj.weight"),
-    sh_up: raw_tensor(prefix + "mlp.shared_expert.up_proj.weight"),
-    sh_down: raw_tensor(prefix + "mlp.shared_expert.down_proj.weight"),
+    router: mv_tensor(prefix + "mlp.gate.weight"),
+    sh_gate: mv_tensor(prefix + "mlp.shared_expert.gate_proj.weight"),
+    sh_up: mv_tensor(prefix + "mlp.shared_expert.up_proj.weight"),
+    sh_down: mv_tensor(prefix + "mlp.shared_expert.down_proj.weight"),
     sh_seg: raw_tensor(prefix + "mlp.shared_expert_gate.weight"),
     experts: bind_expert_layer(li)
   }
@@ -348,15 +372,15 @@ while li < N_LAYERS
     load_bf16([prefix + "linear_attn.dt_bias", HV, dtb])
     load_bf16([prefix + "linear_attn.norm.weight", DV, ln_w])
     base[:kind] = "mamba"
-    base[:qkv] = raw_tensor(prefix + "linear_attn.in_proj_qkv.weight")
-    base[:z] = raw_tensor(prefix + "linear_attn.in_proj_z.weight")
+    base[:qkv] = mv_tensor(prefix + "linear_attn.in_proj_qkv.weight")
+    base[:z] = mv_tensor(prefix + "linear_attn.in_proj_z.weight")
     base[:a] = raw_tensor(prefix + "linear_attn.in_proj_a.weight")
     base[:b] = raw_tensor(prefix + "linear_attn.in_proj_b.weight")
     base[:conv] = conv_w
     base[:alog] = alog
     base[:dtb] = dtb
     base[:linear_norm] = ln_w
-    base[:out] = raw_tensor(prefix + "linear_attn.out_proj.weight")
+    base[:out] = mv_tensor(prefix + "linear_attn.out_proj.weight")
     base[:cs_a] = metal_buffer(device, 3 * QKV_DIM * 4)
     base[:cs_b] = metal_buffer(device, 3 * QKV_DIM * 4)
     base[:ss_a] = metal_buffer(device, HV * DV * DK * 4)
@@ -368,10 +392,10 @@ while li < N_LAYERS
     load_shifted_norm([prefix + "self_attn.q_norm.weight", HEAD_DIM, qn])
     load_shifted_norm([prefix + "self_attn.k_norm.weight", HEAD_DIM, kn])
     base[:kind] = "full"
-    base[:q] = raw_tensor(prefix + "self_attn.q_proj.weight")
-    base[:k] = raw_tensor(prefix + "self_attn.k_proj.weight")
-    base[:v] = raw_tensor(prefix + "self_attn.v_proj.weight")
-    base[:out] = raw_tensor(prefix + "self_attn.o_proj.weight")
+    base[:q] = mv_tensor(prefix + "self_attn.q_proj.weight")
+    base[:k] = mv_tensor(prefix + "self_attn.k_proj.weight")
+    base[:v] = mv_tensor(prefix + "self_attn.v_proj.weight")
+    base[:out] = mv_tensor(prefix + "self_attn.o_proj.weight")
     base[:qn] = qn
     base[:kn] = kn
     base[:k_cache] = metal_buffer(device, MAX_POS * KV_DIM * 4)
@@ -387,8 +411,8 @@ while li < N_LAYERS
     load_shifted_norm([pp + "norm_conv.weight", HC_HIDDEN, nc])
     load_bf16([pp + "conv1d.weight", HC_HIDDEN * 4, pconv])
     base[:ple] = {
-      key: raw_tensor(pp + "key_proj.weight"),
-      value: raw_tensor(pp + "value_proj.weight"),
+      key: mv_tensor(pp + "key_proj.weight"),
+      value: mv_tensor(pp + "value_proj.weight"),
       norm_key: nk,
       norm_query: nq,
       norm_conv: nc,
@@ -549,47 +573,64 @@ rope_power = ~2.0 / ROT_DIM
 -> dependency_barrier
   if concurrent then metal_batch_barrier(queue)
 
-# w2 (2 rows/simdgroup, ushort4 loads) measured 1.35-1.8x the naive kernel on
-# every decode shape with >=320 rows (autotune_qwen38fn.w); tiny-row matvecs
-# (a/b/inject/seg) stay on the naive 1-row kernel.
+# Barrier on only the buffers that actually carry the RAW dependency. A full
+# MTLBarrierScopeBuffers barrier drains EVERY outstanding write on the
+# encoder (~1400 of them per token here); the 27B measured scoped barriers
+# as most of the gap to the weight-streaming floor. FN_FULLBAR=1 restores
+# full barriers so the change stays measurable.
+scoped_barriers = ccall("__w_env", "FN_FULLBAR") != "1"
+-> dep_on(bufs)
+  if concurrent
+    if scoped_barriers
+      metal_batch_barrier_resources(queue, bufs)
+    else
+      metal_batch_barrier(queue)
+
+# Matvec dispatch over an mv_tensor handle: NVFP4 triple when the selfquant
+# sidecar carries the tensor, else bf16 (w2 wide kernel — 1.35-1.8x the naive
+# one on every decode shape >=320 rows per autotune_qwen38fn.w; tiny-row
+# matvecs a/b/inject/seg stay on the naive 1-row kernel).
 -> enqueue_bf16(spec)
+  h = spec[0]
   rows = spec[4]
-  if rows >= 320
-    metal_dispatch_groups(queue, bf16_w2_pipe, [spec[0], spec[1], spec[2], spec[3], rows], (rows + 3) / 4, 64)
+  if h.size() == 3
+    metal_dispatch_groups(queue, nvfp4_pipe, [h[0], h[1], spec[1], spec[2], spec[3], h[2]], rows / 8, 64)
+  elsif rows >= 320
+    metal_dispatch_groups(queue, bf16_w2_pipe, [h[0], spec[1], spec[2], spec[3], rows], (rows + 3) / 4, 64)
   else
-    metal_dispatch_groups(queue, bf16_matvec_pipe, [spec[0], spec[1], spec[2], spec[3]], rows, 32)
+    metal_dispatch_groups(queue, bf16_matvec_pipe, [h[0], spec[1], spec[2], spec[3]], rows, 32)
 
 # Hyper-connection mix: fills n_tmp (normed stream) and xn (2560 block input),
 # and precomputes inj_tmp for the paired combine.
 -> hc_mix(hc)
   metal_dispatch_groups(queue, grms_pipe, [H, hc[:norm], n_tmp, HIDDEN, EPS], HC_COUNT, 256)
-  dependency_barrier()
+  dep_on([n_tmp])
   enqueue_bf16([hc[:down], n_tmp, lowrank_tmp, HC_HIDDEN, HC_LOWRANK])
   metal_dispatch_groups(queue, bf16_matvec_pipe, [hc[:inject], n_tmp, inj_tmp, HC_HIDDEN], HC_COUNT, 32)
-  dependency_barrier()
+  dep_on([lowrank_tmp])
   metal_dispatch_n(queue, silu_div_pipe, [lowrank_tmp, lowrank_tmp, ~0.0 + HC_COUNT, HC_LOWRANK], HC_LOWRANK)
-  dependency_barrier()
+  dep_on([lowrank_tmp])
   enqueue_bf16([hc[:up], lowrank_tmp, upraw_tmp, HC_LOWRANK, HC_HIDDEN])
-  dependency_barrier()
+  dep_on([upraw_tmp])
   metal_dispatch_n(queue, hc_mix_reduce_pipe, [upraw_tmp, n_tmp, xn, HC_COUNT, HIDDEN], HIDDEN)
-  dependency_barrier()
+  dep_on([xn, inj_tmp])
 
 -> hc_combine
   metal_dispatch_n(queue, hc_combine_pipe, [H, y_tmp, inj_tmp, HC_COUNT, HIDDEN], HC_HIDDEN)
-  dependency_barrier()
+  dep_on([H])
 
 # Final mixer: like hc_mix but with no inject and its own output slot.
 -> mixer_collapse
   metal_dispatch_groups(queue, grms_pipe, [H, mixer[:norm], n_tmp, HIDDEN, EPS], HC_COUNT, 256)
-  dependency_barrier()
+  dep_on([n_tmp])
   enqueue_bf16([mixer[:down], n_tmp, lowrank_tmp, HC_HIDDEN, HC_LOWRANK])
-  dependency_barrier()
+  dep_on([lowrank_tmp])
   metal_dispatch_n(queue, silu_div_pipe, [lowrank_tmp, lowrank_tmp, ~0.0 + HC_COUNT, HC_LOWRANK], HC_LOWRANK)
-  dependency_barrier()
+  dep_on([lowrank_tmp])
   enqueue_bf16([mixer[:up], lowrank_tmp, upraw_tmp, HC_LOWRANK, HC_HIDDEN])
-  dependency_barrier()
+  dep_on([upraw_tmp])
   metal_dispatch_n(queue, hc_mix_reduce_pipe, [upraw_tmp, n_tmp, xn, HC_COUNT, HIDDEN], HIDDEN)
-  dependency_barrier()
+  dep_on([xn])
 
 -> enqueue_ple(lyr)
   p = lyr[:ple]
@@ -618,53 +659,48 @@ rope_power = ~2.0 / ROT_DIM
   enqueue_bf16([lyr[:z], xn, z_tmp, HIDDEN, V_DIM])
   metal_dispatch_groups(queue, bf16_matvec_pipe, [lyr[:a], xn, a_tmp, HIDDEN], HV, 32)
   metal_dispatch_groups(queue, bf16_matvec_pipe, [lyr[:b], xn, b_tmp, HIDDEN], HV, 32)
-  dependency_barrier()
-  metal_dispatch_n(queue, conv_pipe, [lyr[:conv], cs_in, qkv_tmp, conv_tmp, cs_out, QKV_DIM, QKV_DIM], QKV_DIM)
-  dependency_barrier()
-  metal_dispatch_n(queue, copy_pipe, [conv_tmp, mq_tmp, 0, Q_DIM], Q_DIM)
-  metal_dispatch_n(queue, copy_pipe, [conv_tmp, mk_tmp, Q_DIM, K_DIM], K_DIM)
-  metal_dispatch_n(queue, copy_pipe, [conv_tmp, mv_tmp, Q_DIM + K_DIM, V_DIM], V_DIM)
-  dependency_barrier()
+  dep_on([qkv_tmp])
+  metal_dispatch_n(queue, conv_split_pipe, [lyr[:conv], cs_in, qkv_tmp, mq_tmp, mk_tmp, mv_tmp, cs_out, QKV_DIM, Q_DIM, K_DIM], QKV_DIM)
+  dep_on([mq_tmp, mk_tmp, mv_tmp, a_tmp, b_tmp])
   # l2norm = rms*(1/sqrt(DK)) with the reference's eps INSIDE the sum:
   # rsqrt(sum + 1e-6) = (1/sqrt(DK)) * rsqrt(mean + 1e-6/DK), so the kernel's
   # mean-domain eps must be EPS/DK (plain EPS is a 128x overshoot that drifts
   # the recurrent state ~1e-3 by mid-stack).
   metal_dispatch_groups(queue, phn_pipe, [mq_tmp, q_norm_scale, DK, ~1.0 / DK, EPS / DK], HK, 32)
   metal_dispatch_groups(queue, phn_pipe, [mk_tmp, k_norm_scale, DK, ~1.0 / DK, EPS / DK], HK, 32)
-  metal_dispatch_n(queue, g_pipe, [a_tmp, lyr[:alog], lyr[:dtb], g_tmp, HV, HV], HV)
-  metal_dispatch_n(queue, sigmoid_pipe, [b_tmp, beta_tmp, HV], HV)
-  dependency_barrier()
+  metal_dispatch_n(queue, g_beta_pipe, [a_tmp, b_tmp, lyr[:alog], lyr[:dtb], g_tmp, beta_tmp, HV], HV)
+  dep_on([mq_tmp, mk_tmp, g_tmp, beta_tmp])
   metal_dispatch_3d(queue, delta_pipe, [mq_tmp, mk_tmp, mv_tmp, g_tmp, beta_tmp, ss_in, delta_tmp, ss_out, HK, HV, DK, DV], 1, DV / 4, HV, 32, 4, 1)
-  dependency_barrier()
+  dep_on([delta_tmp, z_tmp])
   metal_dispatch_groups(queue, rng_sig_pipe, [delta_tmp, z_tmp, lyr[:linear_norm], mamba_norm_tmp, DV, EPS], HV, 32)
-  dependency_barrier()
+  dep_on([mamba_norm_tmp])
   enqueue_bf16([lyr[:out], mamba_norm_tmp, y_tmp, V_DIM, HIDDEN])
-  dependency_barrier()
+  dep_on([y_tmp])
   lyr[:ping] = 1 - lyr[:ping]
 
 -> enqueue_full(lyr, pos)
   enqueue_bf16([lyr[:q], xn, qfull_tmp, HIDDEN, QFULL_DIM])
   enqueue_bf16([lyr[:k], xn, k_tmp, HIDDEN, KV_DIM])
   enqueue_bf16([lyr[:v], xn, v_tmp, HIDDEN, KV_DIM])
-  dependency_barrier()
+  dep_on([qfull_tmp])
   metal_dispatch_n(queue, split_pipe, [qfull_tmp, queries_tmp, attn_gate_tmp, N_HEADS, HEAD_DIM], ATTN_DIM)
-  dependency_barrier()
+  dep_on([queries_tmp, k_tmp])
   metal_dispatch_groups(queue, phn_pipe, [queries_tmp, lyr[:qn], HEAD_DIM, ~1.0 / HEAD_DIM, EPS], N_HEADS, 32)
   metal_dispatch_groups(queue, phn_pipe, [k_tmp, lyr[:kn], HEAD_DIM, ~1.0 / HEAD_DIM, EPS], N_KV_HEADS, 32)
-  dependency_barrier()
+  dep_on([queries_tmp, k_tmp])
   if pos > 0
     metal_dispatch_n(queue, rope_pipe, [queries_tmp, cos_tmp, sin_tmp, HEAD_DIM, ROT_HALF, N_HEADS], N_HEADS * ROT_HALF)
     metal_dispatch_n(queue, rope_pipe, [k_tmp, cos_tmp, sin_tmp, HEAD_DIM, ROT_HALF, N_KV_HEADS], N_KV_HEADS * ROT_HALF)
-  dependency_barrier()
+  dep_on([queries_tmp, k_tmp, v_tmp])
   metal_dispatch_n(queue, kv_write_pipe, [k_tmp, lyr[:k_cache], pos, KV_DIM], KV_DIM)
   metal_dispatch_n(queue, kv_write_pipe, [v_tmp, lyr[:v_cache], pos, KV_DIM], KV_DIM)
-  dependency_barrier()
+  dep_on([lyr[:k_cache], lyr[:v_cache]])
   metal_dispatch_groups(queue, sdpa_pipe, [queries_tmp, lyr[:k_cache], lyr[:v_cache], attn_tmp, GQA, pos + 1, HEAD_DIM, KV_DIM, ATTN_SCALE], N_HEADS, 256)
-  dependency_barrier()
+  dep_on([attn_tmp, attn_gate_tmp])
   metal_dispatch_n(queue, gate_pipe, [attn_tmp, attn_gate_tmp, ATTN_DIM], ATTN_DIM)
-  dependency_barrier()
+  dep_on([attn_tmp])
   enqueue_bf16([lyr[:out], attn_tmp, y_tmp, ATTN_DIM, HIDDEN])
-  dependency_barrier()
+  dep_on([y_tmp])
 
 -> enqueue_gather(spec)
   ex = spec[0]
@@ -689,24 +725,22 @@ rope_power = ~2.0 / ROT_DIM
   enqueue_bf16([lyr[:sh_gate], xn, sg_tmp, HIDDEN, SHARED_FFN])
   enqueue_bf16([lyr[:sh_up], xn, su_tmp, HIDDEN, SHARED_FFN])
   metal_dispatch_groups(queue, bf16_matvec_pipe, [lyr[:sh_seg], xn, seg_tmp, HIDDEN], 1, 32)
-  dependency_barrier()
+  dep_on([router_logits, sg_tmp, su_tmp])
   metal_dispatch_groups(queue, router_pipe, [router_logits, top_idx, top_w], 1, 512)
   metal_dispatch_n(queue, silu_pipe, [sg_tmp, su_tmp, sh_tmp, SHARED_FFN], SHARED_FFN)
-  dependency_barrier()
+  dep_on([top_idx, sh_tmp])
   if expert_hist
     metal_dispatch_n(queue, expert_hist_pipe, [top_idx, hist_buf, li, TOP_K], TOP_K)
   enqueue_gather([ex, ex[:offs]["gate_proj"], xn, eg_tmp, HIDDEN, MOE_FFN, 0])
   enqueue_gather([ex, ex[:offs]["up_proj"], xn, eu_tmp, HIDDEN, MOE_FFN, 0])
   enqueue_bf16([lyr[:sh_down], sh_tmp, shared_tmp, SHARED_FFN, HIDDEN])
-  dependency_barrier()
+  dep_on([eg_tmp, eu_tmp])
   metal_dispatch_n(queue, silu_pipe, [eg_tmp, eu_tmp, eh_tmp, TOP_K * MOE_FFN], TOP_K * MOE_FFN)
-  dependency_barrier()
+  dep_on([eh_tmp])
   enqueue_gather([ex, ex[:offs]["down_proj"], eh_tmp, ed_tmp, MOE_FFN, HIDDEN, MOE_FFN])
-  dependency_barrier()
-  metal_dispatch_n(queue, moe_wsum_pipe, [ed_tmp, top_w, routed_tmp, TOP_K, HIDDEN], HIDDEN)
-  dependency_barrier()
-  metal_dispatch_n(queue, moe_shared_pipe, [routed_tmp, shared_tmp, seg_tmp, y_tmp, HIDDEN], HIDDEN)
-  dependency_barrier()
+  dep_on([ed_tmp, top_w, shared_tmp, seg_tmp])
+  metal_dispatch_n(queue, moe_output_pipe, [ed_tmp, top_w, shared_tmp, seg_tmp, y_tmp, TOP_K, HIDDEN], HIDDEN)
+  dep_on([y_tmp])
 
 -> enqueue_argmax
   metal_dispatch_groups(queue, argmax_stage1_pipe,

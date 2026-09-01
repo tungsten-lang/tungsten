@@ -53,10 +53,16 @@ self-quantization must re-run the parity + smoke gates.
   predicting 11751 " Paris" on the fixture) at **~4e-7 rel across all 48
   layers and logits** (`check_fn_parity.py`). Greedy 240-token prose
   continuation is fluent.
-- **Perf**: 30.9 tok/s decode short-context / 28.4 at pos ~450 (concurrent,
-  median 32-35 ms rounds). bf16 matvecs route through `bf16_matvec_w2`
-  (2 rows/simdgroup, ushort4), measured 1.35-1.8x the naive kernel per
-  shape by `autotune_qwen38fn.w`.
+- **Perf**: bf16 build 30.9 tok/s short / 27 prose; **FN_QUANT=1** (self-
+  quantized NVFP4 stack via `quantize_flash_next.py`, layers 0/1/46/47 kept
+  bf16) reaches **40.3 tok/s short / 37 prose** (median 25-27 ms rounds) at
+  preserved quality (fixture " Paris" ✓, coherent prose). bf16 matvecs route
+  through `bf16_matvec_w2` (1.35-1.8x naive per `autotune_qwen38fn.w`).
+  Negative results, measured: scoped resource barriers (FN_FULLBAR A/B) and
+  the gdn_fused/moe_output dispatch fusions are both ~neutral — the round is
+  not encoder-barrier- or dispatch-count-bound; the residue over the ~9 ms
+  stream floor is serial stage latency + per-token host sync, which is what
+  MTP breaks.
 - **Expert routing skew** (628-token prose, `expert-hist` mode): per-layer
   top-20% of experts = **85.5%** of activations (top-10% 64.4%, Gini 0.81;
   layer 0 flattest at 69.9%). `pin:<N>` wires the per-layer top-N into a

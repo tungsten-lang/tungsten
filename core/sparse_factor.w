@@ -41,15 +41,7 @@
 
   -> .from_matrix(m)
     trip = m.coo_typed
-    n = trip[0].size
-    ri = []
-    ci = []
-    k = 0
-    while k < n
-      ri.push(trip[0][k])
-      ci.push(trip[1][k])
-      k += 1
-    SparsePattern.new(m.rows, m.cols, ri, ci)
+    SparsePattern.new(m.rows, m.cols, trip[0], trip[1])
 
   -> row_indices
     @ri
@@ -152,6 +144,7 @@
     @counts = data[1]
     @component_ids = nil
     @component_count = 0
+    @symmetric_adj = nil
 
   ro :pattern, :parent, :counts
 
@@ -234,7 +227,7 @@
   # deterministic peel order) and the remaining vertices in index order.
   -> peel_order
     n = @pattern.rows
-    adj = SparseAnalysis.symmetric_adjacency(@pattern)
+    adj = symmetric_adjacency
     degree = []
     removed = []
     i = 0
@@ -289,15 +282,44 @@
       i += 1
     adj
 
+  # Canonical symmetric adjacency is immutable analysis state.  Peeling,
+  # minimum degree, and any later symbolic pass share this one construction
+  # instead of rebuilding and sorting the COO rows independently.
+  -> symmetric_adjacency
+    if @symmetric_adj == nil
+      @symmetric_adj = SparseAnalysis.symmetric_adjacency(@pattern)
+    @symmetric_adj
+
+  -> .md_heap_less?(ad, av, bd, bv)
+    ad < bd || (ad == bd && av < bv)
+
+  # Binary min-heap entry keyed by (current degree, vertex).  Updates are
+  # lazy: a changed vertex receives a new entry and stale entries are skipped
+  # when popped.  This keeps the elimination loop deterministic without the
+  # O(n) live-vertex scan at every step.
+  -> .md_heap_push(heap_d, heap_v, degree, vertex)
+    i = heap_d.size
+    heap_d.push(degree)
+    heap_v.push(vertex)
+    while i > 0
+      parent = (i - 1) / 2
+      break if !SparseAnalysis.md_heap_less?(degree, vertex, heap_d[parent], heap_v[parent])
+      heap_d[i] = heap_d[parent]
+      heap_v[i] = heap_v[parent]
+      i = parent
+    heap_d[i] = degree
+    heap_v[i] = vertex
+    nil
+
   # Exact minimum-degree ordering by the elimination game (lowest-index
   # tie-break, deterministic): repeatedly eliminate the minimum-degree
   # vertex, connecting its remaining neighbors into a clique. Returns the
   # elimination order (old indices). Intended for moderate n — this is the
   # respectable baseline ordering, not an approximate-MD implementation.
-  -> min_degree_ordering
+  -> min_degree_ordering_scan
     n = @pattern.rows
     adj = []
-    SparseAnalysis.symmetric_adjacency(@pattern).each -> (row)
+    symmetric_adjacency.each -> (row)
       set = {}
       row.each -> (u)
         set[u] = true
@@ -338,6 +360,96 @@
         a += 1
       step += 1
     order
+
+  -> min_degree_ordering_heap
+    n = @pattern.rows
+    adj = []
+    symmetric_adjacency.each -> (row)
+      set = {}
+      row.each -> (u)
+        set[u] = true
+      adj.push(set)
+    alive = []
+    degree = []
+    heap_d = []
+    heap_v = []
+    i = 0
+    while i < n
+      alive.push(true)
+      d = adj[i].size
+      degree.push(d)
+      SparseAnalysis.md_heap_push(heap_d, heap_v, d, i)
+      i += 1
+    order = []
+    step = 0
+    while step < n
+      best = -1
+      while best == -1
+        candidate_d = heap_d[0]
+        candidate_v = heap_v[0]
+        last_d = heap_d.pop
+        last_v = heap_v.pop
+        if heap_d.size > 0
+          pos = 0
+          heap_d[0] = last_d
+          heap_v[0] = last_v
+          moving = true
+          while moving
+            left = pos * 2 + 1
+            if left >= heap_d.size
+              moving = false
+            else
+              right = left + 1
+              child = left
+              if right < heap_d.size && SparseAnalysis.md_heap_less?(heap_d[right], heap_v[right], heap_d[left], heap_v[left])
+                child = right
+              if SparseAnalysis.md_heap_less?(heap_d[child], heap_v[child], heap_d[pos], heap_v[pos])
+                td = heap_d[pos]
+                tv = heap_v[pos]
+                heap_d[pos] = heap_d[child]
+                heap_v[pos] = heap_v[child]
+                heap_d[child] = td
+                heap_v[child] = tv
+                pos = child
+              else
+                moving = false
+        if alive[candidate_v] && degree[candidate_v] == candidate_d
+          best = candidate_v
+      order.push(best)
+      alive[best] = false
+      neighbors = []
+      adj[best].each_pair -> (u, flag)
+        neighbors.push(u) if alive[u]
+      neighbors = neighbors.sort
+      a = 0
+      while a < neighbors.size
+        u = neighbors[a]
+        adj[u].delete(best)
+        b = a + 1
+        while b < neighbors.size
+          w = neighbors[b]
+          if adj[u][w] == nil
+            adj[u][w] = true
+            adj[w][u] = true
+          b += 1
+        a += 1
+      a = 0
+      while a < neighbors.size
+        u = neighbors[a]
+        degree[u] = adj[u].size
+        SparseAnalysis.md_heap_push(heap_d, heap_v, degree[u], u)
+        a += 1
+      step += 1
+    order
+
+  # The scan wins tiny graphs through lower constant overhead; the heap wins
+  # once repeated O(n) minima dominate.  The crossover is benchmarked in
+  # benchmarks/linalg/tungsten/sparse_ordering_bench.w.
+  -> min_degree_ordering
+    if @pattern.rows < 384
+      min_degree_ordering_scan
+    else
+      min_degree_ordering_heap
 
   # Predicted fill/flops of the pattern under an elimination ORDER (array
   # of old indices, first eliminated first). Returns [fill, flops].
@@ -426,18 +538,14 @@
     "SparseFactor(" + (@kind == 1 ? "cholesky" : "qr") + " " + @pattern.to_s + ")"
 
 + SparseBlockFactor
-  # Component-blocked SPD Cholesky: split the pattern into connected
-  # components, factor each block independently (thread-per-component for
-  # enough work), and solve by scatter/gather into disjoint slices of a
-  # typed result buffer — deterministic regardless of scheduling because
-  # every write lands in a component-owned slot and results are read back
-  # in source order.
-  -> new(@pattern, values)
+  # Component-blocked SPD Cholesky. Component factors and their RHS/result
+  # scratch are retained. Independent blocks may run on joined workers, but
+  # small components stay sequential because launch cost dominates.
+  -> new(@pattern, values, force_parallel = nil)
     analysis = SparseAnalysis.new(@pattern)
     ids = analysis.components
     @ncomp = analysis.component_count
     n = @pattern.rows
-    # global -> (component, local index); component vertex lists
     @locals = []
     @vertex_lists = []
     c = 0
@@ -450,7 +558,6 @@
       @locals.push(@vertex_lists[c].size)
       @vertex_lists[c].push(i)
       i += 1
-    # split COO entries per component
     comp_ri = []
     comp_ci = []
     comp_vv = []
@@ -471,12 +578,20 @@
       comp_vv[c].push(values[k])
       k += 1
     @factors = []
+    @rhs_buffers = []
+    @out_buffers = []
     c = 0
     while c < @ncomp
       @factors.push(nil)
+      sub_n = @vertex_lists[c].size
+      @rhs_buffers.push(ccall("w_array_new_aligned", -64, sub_n))
+      @out_buffers.push(ccall("w_array_new_aligned", -64, sub_n))
       c += 1
-    if @ncomp >= 2 && @pattern.nnz >= 4096
-      done = Channel.new(@ncomp)
+    automatic = @ncomp >= 2 && @ncomp <= 8 && @pattern.nnz >= 8192
+    @parallel = force_parallel == nil ? automatic : force_parallel
+    @released = false
+    if @parallel
+      workers = []
       c = 0
       while c < @ncomp
         comp = c
@@ -485,15 +600,13 @@
         sci = comp_ci[comp]
         svv = comp_vv[comp]
         factors = @factors
-        Thread.new ->
+        worker = Thread.new ->
           factors[comp] = SparseFactor.cholesky(
             SparsePattern.new(sub_n, sub_n, sri, sci), svv)
-          done.send(comp)
+        workers.push(worker)
         c += 1
-      c = 0
-      while c < @ncomp
-        done.recv()
-        c += 1
+      workers.each -> (worker)
+        worker.join
     else
       c = 0
       while c < @ncomp
@@ -502,23 +615,36 @@
           SparsePattern.new(sub_n, sub_n, comp_ri[c], comp_ci[c]), comp_vv[c])
         c += 1
 
-  ro :pattern, :ncomp
+  ro :pattern, :ncomp, :parallel
 
   -> solve(b)
     raise "SparseBlockFactor: RHS length must equal rows" if b.size != @pattern.rows
     n = @pattern.rows
     out_buf = ccall("w_array_new_aligned", -64, n)
-    if @ncomp >= 2 && @pattern.nnz >= 4096
-      done = Channel.new(@ncomp)
+    solve_into(b, out_buf)
+    out = []
+    i = 0
+    while i < n
+      out.push(out_buf[i])
+      i += 1
+    out
+
+  # Caller-owned output lane. Component buffers are single-flight mutable
+  # scratch, matching SparseFactor's retained-handle solve contract.
+  -> solve_into(b, out_buf)
+    raise "SparseBlockFactor: released" if @released
+    raise "SparseBlockFactor: RHS length must equal rows" if b.size != @pattern.rows
+    if @parallel
+      workers = []
       c = 0
       while c < @ncomp
         comp = c
         verts = @vertex_lists[comp]
         factor = @factors[comp]
-        Thread.new ->
+        bb = @rhs_buffers[comp]
+        xx = @out_buffers[comp]
+        worker = Thread.new ->
           m = verts.size
-          bb = ccall("w_array_new_aligned", -64, m)
-          xx = ccall("w_array_new_aligned", -64, m)
           i = 0
           while i < m
             bb[i] = b[verts[i]] + ~0.0
@@ -528,19 +654,17 @@
           while i < m
             out_buf[verts[i]] = xx[i]
             i += 1
-          done.send(comp)
+        workers.push(worker)
         c += 1
-      c = 0
-      while c < @ncomp
-        done.recv()
-        c += 1
+      workers.each -> (worker)
+        worker.join
     else
       c = 0
       while c < @ncomp
         verts = @vertex_lists[c]
         m = verts.size
-        bb = ccall("w_array_new_aligned", -64, m)
-        xx = ccall("w_array_new_aligned", -64, m)
+        bb = @rhs_buffers[c]
+        xx = @out_buffers[c]
         i = 0
         while i < m
           bb[i] = b[verts[i]] + ~0.0
@@ -551,18 +675,15 @@
           out_buf[verts[i]] = xx[i]
           i += 1
         c += 1
-    out = []
-    i = 0
-    while i < n
-      out.push(out_buf[i])
-      i += 1
-    out
+    out_buf
 
   -> release
-    c = 0
-    while c < @ncomp
-      @factors[c].release if @factors[c] != nil
-      c += 1
+    if !@released
+      c = 0
+      while c < @ncomp
+        @factors[c].release if @factors[c] != nil
+        c += 1
+      @released = true
     self
 
   -> to_s

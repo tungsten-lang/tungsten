@@ -193,6 +193,7 @@ x_whole = whole.solve(two_b)
 whole.release
 blocked = SparseBlockFactor.new(two_pattern, two_vv)
 check_named("blocked.ncomp", blocked.ncomp == 2)
+check_named("blocked.small_stays_sequential", !blocked.parallel)
 x_blocked = blocked.solve(two_b)
 blocked.release
 err = ~0.0
@@ -203,6 +204,22 @@ while i < n * 2
   err = d if d > err
   i += 1
 check_named("blocked.solve.matches_whole", err < ~0.0000001)
+
+# Forced worker lane plus caller-owned output exercises the parallel
+# scatter/solve/gather path without making the focused spec enormous.
+blocked_parallel = SparseBlockFactor.new(two_pattern, two_vv, true)
+parallel_out = ccall("w_array_new_aligned", -64, n * 2)
+blocked_parallel.solve_into(two_b, parallel_out)
+check_named("blocked.force_parallel", blocked_parallel.parallel)
+err = ~0.0
+i = 0
+while i < n * 2
+  d = parallel_out[i] - x_whole[i]
+  d = ~0.0 - d if d < ~0.0
+  err = d if d > err
+  i += 1
+check_named("blocked.solve_into.parallel_matches_whole", err < ~0.0000001)
+blocked_parallel.release
 
 # Peeling: a path graph peels completely.
 path_ri = []
@@ -227,6 +244,7 @@ nat_pred = grid_analysis.predictions_for_order(natural)
 md_order = grid_analysis.min_degree_ordering
 md_pred = grid_analysis.predictions_for_order(md_order)
 check_named("mindeg.is_permutation", md_order.sort.uniq.size == n)
+check_named("mindeg.heap_matches_scan", grid_analysis.min_degree_ordering_heap == grid_analysis.min_degree_ordering_scan)
 check_named("mindeg.fill_not_worse", md_pred[0] <= nat_pred[0])
 check_named("mindeg.natural_matches_analysis", nat_pred[0] == grid_analysis.predicted_fill)
 

@@ -1,13 +1,11 @@
-# Tokenizer smoke: load qwen3 vocab from GGUF, decode a known token
-# sequence, encode simple strings, verify decode(encode(s)) == s.
+# Tokenizer smoke: load the packed Qwen tokenizer, decode known tokens,
+# encode simple strings, and verify decode(encode(s)) == s.
 
-use tungsten-llama/gguf
 use tungsten-llama/tokenizer
 
-GGUF_PATH = "/Users/erik/.ollama/models/blobs/sha256-ae354763fe478c790125fb993e59bb1266655b3fa721eebe4a931660c3ed2ce9"
+TOKENIZER_BIN = "/Users/erik/.cache/tungsten/qwen3.8-27b-mlx/tokenizer.json.bin"
 
-g = GGUF.new(GGUF_PATH)
-tok = Tokenizer.new(g)
+tok = Tungsten:Llama:Tokenizer.from_packed_tokenizer(TOKENIZER_BIN)
 
 << "vocab size: " + tok.tokens.size().to_s
 << "merges: " + tok.merges.size().to_s
@@ -16,9 +14,9 @@ tok = Tokenizer.new(g)
 # 1. Decode tokens we already verified by direct lookup.
 << ""
 << "decode tests:"
-<< "  [9707] = '" + tok.decode([9707]) + "'"          # "Hello"
-<< "  [3838] = '" + tok.decode([3838]) + "'"          # "What"
-<< "  [59604] = '" + tok.decode([59604]) + "'"        # "Paris"
+<< "  [9419] = '" + tok.decode([9419]) + "'"          # "Hello"
+<< "  [3710] = '" + tok.decode([3710]) + "'"          # "What"
+<< "  [57590] = '" + tok.decode([57590]) + "'"        # "Paris"
 << "  [30] = '" + tok.decode([30]) + "'"              # "?"
 
 # 2. Round-trip simple inputs.
@@ -35,5 +33,3 @@ while i < inputs.size()
     ok = "MISMATCH"
   << "  \[" + ok + "\] '" + s + "' → " + ids.to_s + " → '" + back + "'"
   i = i + 1
-
-g.close

@@ -1,13 +1,11 @@
 # Tungsten-llama tokenizer micro-benchmark — encodes a fixed text
 # multiple times to measure bytes/sec and tokens/sec.
 
-use tungsten-llama/gguf
 use tungsten-llama/tokenizer
 
-GGUF_PATH = "/Users/erik/.ollama/models/blobs/sha256-ae354763fe478c790125fb993e59bb1266655b3fa721eebe4a931660c3ed2ce9"
+TOKENIZER_BIN = "/Users/erik/.cache/tungsten/qwen3.8-27b-mlx/tokenizer.json.bin"
 
-g = GGUF.new(GGUF_PATH)
-tok = Tokenizer.new(g)
+tok = Tungsten:Llama:Tokenizer.from_packed_tokenizer(TOKENIZER_BIN)
 << "vocab loaded: " + tok.tokens.size().to_s + " tokens, " + tok.merges.size().to_s + " merges"
 
 # Sample text — 5 paragraphs of mixed prose, ~1.5 KB.
@@ -47,5 +45,3 @@ tokens_per_s = (total_tokens * ~1.0) / (elapsed * ~1.0) * ~1000.0
 # Round-trip check
 back = tok.decode(ids)
 << "round-trip: " + (back == TEXT ? "OK" : "MISMATCH").to_s
-
-g.close

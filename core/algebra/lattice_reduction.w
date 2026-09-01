@@ -826,39 +826,76 @@
       i += 1
     out
 
+  # Maintain the Gram--Schmidt row after b_k -= q*b_j. The orthogonal basis
+  # and norms are unchanged, so rebuilding the full decomposition here is
+  # unnecessary.
+  -> incremental_size_reduce(mu, k, j, quotient)
+    @basis[k] = subtract_multiple(
+      @basis[k], @basis[j], quotient)
+    l = 0
+    while l < j
+      mu[k][l] = mu[k][l] - quotient * mu[j][l]
+      l += 1
+    mu[k][j] = mu[k][j] - quotient
+
+  # Classical LLL adjacent-exchange update for an arbitrary positive-definite
+  # inner product. Returns false if floating arithmetic leaves the valid
+  # positive finite domain.
+  -> incremental_swap(mu, norms, k)
+    swapped_mu = mu[k][k - 1]
+    updated_norm = norms[k] + swapped_mu * swapped_mu * norms[k - 1]
+    return false if !finite_float?(updated_norm) || updated_norm <= ~0.0
+    revised_mu = swapped_mu * norms[k - 1] / updated_norm
+    next_norm = norms[k - 1] * norms[k] / updated_norm
+    return false if !finite_float?(next_norm) || next_norm <= ~0.0
+    norms[k] = next_norm
+    norms[k - 1] = updated_norm
+
+    temporary = @basis[k]
+    @basis[k] = @basis[k - 1]
+    @basis[k - 1] = temporary
+    j = 0
+    while j < k - 1
+      temporary = mu[k][j]
+      mu[k][j] = mu[k - 1][j]
+      mu[k - 1][j] = temporary
+      j += 1
+    i = k + 1
+    while i < rank
+      shifted = mu[i][k]
+      mu[i][k] = mu[i][k - 1] - swapped_mu * shifted
+      mu[i][k - 1] = shifted + revised_mu * mu[i][k]
+      return false if !finite_float?(mu[i][k]) || !finite_float?(mu[i][k - 1])
+      i += 1
+    mu[k][k - 1] = revised_mu
+    true
+
   -> reduce
+    data = gram_schmidt
+    if data == nil
+      @completed = false
+      return self
+    mu = data[0]
+    norms = data[1]
     k = 1
     while k < rank
       @steps += 1
       if @steps > @step_limit
         @completed = false
         return self
-      data = gram_schmidt
-      if data == nil
-        @completed = false
-        return self
-      mu = data[0]
-      norms = data[1]
       j = k - 1
       while j >= 0
         quotient = mu[k][j].round
         if quotient != 0
-          @basis[k] = subtract_multiple(
-            @basis[k], @basis[j], quotient)
-          data = gram_schmidt
-          if data == nil
-            @completed = false
-            return self
-          mu = data[0]
-          norms = data[1]
+          incremental_size_reduce(mu, k, j, quotient)
         j -= 1
       threshold = @delta - mu[k][k - 1] * mu[k][k - 1]
       if norms[k] >= threshold * norms[k - 1]
         k += 1
       else
-        temporary = @basis[k]
-        @basis[k] = @basis[k - 1]
-        @basis[k - 1] = temporary
+        if !incremental_swap(mu, norms, k)
+          @completed = false
+          return self
         k -= 1
         k = 1 if k < 1
     self

@@ -417,3 +417,13 @@ fn metal4_argtable_set_tensor(argtable, index, tensor)
 # here so it can be added to a transient residency set on the queue.
 fn metal4_dispatch_groups_3d(queue, allocator, pipeline, argtable, resources, tg_mem_bytes, n_tg_x, n_tg_y, n_tg_z, threads_x, threads_y, threads_z)
   ccall("w_metal4_dispatch_groups_3d", queue, allocator, pipeline, argtable, resources, tg_mem_bytes, n_tg_x, n_tg_y, n_tg_z, threads_x, threads_y, threads_z)
+
+# Attach a persistent residency set (Metal 4): all buffers/tensors that
+# batched MTL4 dispatches will touch. Call once after loading weights.
+fn metal4_residency_attach(queue, resources)
+  ccall("w_metal4_residency_attach", queue, resources)
+
+# Run a batch of INDEPENDENT MTL4 compute dispatches with one host wait.
+# items: array of [pipeline, argtable, tg_mem_bytes, gx, gy, gz, tx, ty, tz].
+fn metal4_batch_run(queue, allocator, items)
+  ccall("w_metal4_batch_run", queue, allocator, items)

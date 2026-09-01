@@ -1084,3 +1084,15 @@ kernel void gdn_conv_split_par(
     }
   }
 }
+
+
+// f32 -> bf16 truncation for M4 activation staging.
+kernel void f32_to_bf16(
+  device const float  *__restrict__ src [[buffer(0)]],
+  device       ushort *__restrict__ dst [[buffer(1)]],
+  constant int &n [[buffer(2)]],
+  uint __tid [[thread_position_in_grid]]
+) {
+  if (int(__tid) >= n) return;
+  dst[__tid] = ushort(as_type<uint>(src[__tid]) >> 16);
+}

@@ -2212,6 +2212,117 @@ WValue w_metal4_argtable_set_tensor(WValue argtable_v, WValue index_v, WValue te
     }
 }
 
+/* Attach a PERSISTENT residency set to an MTL4 queue covering the given
+ * buffers/tensors. Call once at load; afterwards batch dispatches skip
+ * per-dispatch residency work entirely. */
+WValue w_metal4_residency_attach(WValue queue_v, WValue resources_v) {
+    if (@available(macOS 26.0, *)) {
+        WMetal4Queue *q = as_metal4_queue(queue_v);
+        if (!q) w_raise(w_string("metal4_residency_attach: bad queue"));
+        if (!w_is_array(resources_v)) w_raise(w_string("metal4_residency_attach: resources must be an array"));
+        WArray *res_arr = w_as_array(resources_v);
+        id<MTL4CommandQueue> q_ = (id<MTL4CommandQueue>)q->handle;
+        id<MTLDevice> dev = NULL;
+        for (int32_t i = 0; i < res_arr->size && !dev; i++) {
+            WMetalBuffer *mb = as_metal_buffer(w_array_get(resources_v, w_int(i)));
+            if (mb) dev = [(id<MTLBuffer>)mb->handle device];
+        }
+        if (!dev) w_raise(w_string("metal4_residency_attach: no buffer resource found"));
+        MTLResidencySetDescriptor *rs_desc = [[[MTLResidencySetDescriptor alloc] init] autorelease];
+        rs_desc.label = @"tungsten.mtl4.persistent";
+        rs_desc.initialCapacity = (NSUInteger)res_arr->size;
+        NSError *rs_err = nil;
+        id<MTLResidencySet> res_set = [dev newResidencySetWithDescriptor:rs_desc error:&rs_err];
+        if (!res_set) w_raise(w_string("metal4_residency_attach: newResidencySet failed"));
+        for (int32_t i = 0; i < res_arr->size; i++) {
+            WValue rv = w_array_get(resources_v, w_int(i));
+            WMetalBuffer *mb = as_metal_buffer(rv);
+            WMetalTensor *mt = mb ? NULL : as_metal_tensor(rv);
+            if (mb) {
+                [res_set addAllocation:(id<MTLAllocation>)(id<MTLBuffer>)mb->handle];
+            } else if (mt) {
+                id<MTLTensor> tt = (id<MTLTensor>)mt->handle;
+                id<MTLBuffer> backing = [tt buffer];
+                if (backing) [res_set addAllocation:(id<MTLAllocation>)backing];
+            } else {
+                w_raise(w_string("metal4_residency_attach: resource is neither buffer nor tensor"));
+            }
+        }
+        [res_set commit];
+        [q_ addResidencySet:res_set];
+        /* retain forever: the set must outlive the run */
+        (void)CFBridgingRetain(res_set);
+        return W_NIL;
+    } else {
+        w_raise(w_string("metal4_residency_attach: requires macOS 26+"));
+        return W_NIL;
+    }
+}
+
+/* Run a BATCH of MTL4 compute dispatches in one command buffer with a
+ * single host wait. items = array of steps
+ *   [pipeline, argtable, tg_mem_bytes, gx, gy, gz, tx, ty, tz]
+ * Residency must already be attached (w_metal4_residency_attach).
+ * Dispatches in the batch MUST be independent (no barriers are inserted). */
+WValue w_metal4_batch_run(WValue queue_v, WValue allocator_v, WValue items_v) {
+    if (@available(macOS 26.0, *)) {
+        WMetal4Queue *q     = as_metal4_queue(queue_v);
+        WMetal4Allocator *a = as_metal4_allocator(allocator_v);
+        if (!q || !a) w_raise(w_string("metal4_batch_run: queue / allocator required"));
+        if (!w_is_array(items_v)) w_raise(w_string("metal4_batch_run: items must be an array"));
+        WArray *items = w_as_array(items_v);
+        if (items->size == 0) return W_NIL;
+        id<MTL4CommandQueue>     q_ = (id<MTL4CommandQueue>)q->handle;
+        id<MTL4CommandAllocator> a_ = (id<MTL4CommandAllocator>)a->handle;
+        id<MTLDevice> dev = NULL;
+        id<MTL4CommandBuffer> cmdbuf = NULL;
+        id<MTL4ComputeCommandEncoder> enc = NULL;
+        for (int32_t si = 0; si < items->size; si++) {
+            WValue it_v = w_array_get(items_v, w_int(si));
+            if (!w_is_array(it_v)) w_raise(w_string("metal4_batch_run: item must be an array"));
+            WMetalPipeline *p  = as_metal_pipeline(w_array_get(it_v, w_int(0)));
+            WMetal4ArgTable *t = as_metal4_argtable(w_array_get(it_v, w_int(1)));
+            if (!p || !t) w_raise(w_string("metal4_batch_run: item pipeline/argtable invalid"));
+            id<MTLComputePipelineState> p_ = (id<MTLComputePipelineState>)p->handle;
+            if (!dev) {
+                dev = [p_ device];
+                cmdbuf = [dev newCommandBuffer];
+                if (!cmdbuf) w_raise(w_string("metal4_batch_run: newCommandBuffer failed"));
+                [cmdbuf beginCommandBufferWithAllocator:a_];
+                enc = [cmdbuf computeCommandEncoder];
+                if (!enc) w_raise(w_string("metal4_batch_run: encoder failed"));
+            }
+            [enc setComputePipelineState:p_];
+            [enc setArgumentTable:(id<MTL4ArgumentTable>)t->handle];
+            int64_t tg_mem = w_to_i64(w_array_get(it_v, w_int(2)));
+            if (tg_mem > 0) [enc setThreadgroupMemoryLength:(NSUInteger)tg_mem atIndex:0];
+            MTLSize tgs = MTLSizeMake((NSUInteger)w_to_i64(w_array_get(it_v, w_int(3))),
+                                      (NSUInteger)w_to_i64(w_array_get(it_v, w_int(4))),
+                                      (NSUInteger)w_to_i64(w_array_get(it_v, w_int(5))));
+            MTLSize ths = MTLSizeMake((NSUInteger)w_to_i64(w_array_get(it_v, w_int(6))),
+                                      (NSUInteger)w_to_i64(w_array_get(it_v, w_int(7))),
+                                      (NSUInteger)w_to_i64(w_array_get(it_v, w_int(8))));
+            [enc dispatchThreadgroups:tgs threadsPerThreadgroup:ths];
+        }
+        [enc endEncoding];
+        [cmdbuf endCommandBuffer];
+        id<MTLSharedEvent> ev = [dev newSharedEvent];
+        if (!ev) { [a_ reset]; w_raise(w_string("metal4_batch_run: newSharedEvent failed")); }
+        id<MTL4CommandBuffer> arr[1] = { cmdbuf };
+        [q_ commit:arr count:1];
+        [q_ signalEvent:ev value:1];
+        if (![ev waitUntilSignaledValue:1 timeoutMS:30000]) {
+            [a_ reset];
+            w_raise(w_string("metal4_batch_run: timeout"));
+        }
+        [a_ reset];
+        return W_NIL;
+    } else {
+        w_raise(w_string("metal4_batch_run: requires macOS 26+"));
+        return W_NIL;
+    }
+}
+
 WValue w_metal4_dispatch_groups_3d(WValue queue_v, WValue allocator_v,
                                    WValue pipeline_v, WValue argtable_v,
                                    WValue resources_v,
@@ -2330,6 +2441,16 @@ WValue w_metal4_dispatch_groups_3d(WValue queue_v, WValue allocator_v,
 
 WValue w_metal4_compiler_new(WValue device_v) {
     w_raise(w_string("metal4_compiler_new: requires the macOS 26 SDK (Metal 4)"));
+    return W_NIL;
+}
+
+WValue w_metal4_residency_attach(WValue queue_v, WValue resources_v) {
+    w_raise(w_string("metal4_residency_attach: requires the macOS 26 SDK (Metal 4)"));
+    return W_NIL;
+}
+
+WValue w_metal4_batch_run(WValue queue_v, WValue allocator_v, WValue items_v) {
+    w_raise(w_string("metal4_batch_run: requires the macOS 26 SDK (Metal 4)"));
     return W_NIL;
 }
 

@@ -273,8 +273,7 @@
     @terms = normalize_terms(terms)
     @content_hash = nil
     @pf_cache = nil
-    @substitution_plan_index = nil
-    @substitution_plan = nil
+    @substitution_plan_cache = nil
 
   # Trusted constructor for term lists that are canonical BY CONSTRUCTION:
   # sorted strictly descending in the ring's monomial order, no duplicate
@@ -293,8 +292,7 @@
     @terms = canonical ? terms : normalize_terms(terms)
     @content_hash = nil
     @pf_cache = nil
-    @substitution_plan_index = nil
-    @substitution_plan = nil
+    @substitution_plan_cache = nil
 
   ro :ring, :terms
 
@@ -786,8 +784,13 @@
   # specialized. A one-entry MRU bounds retained memory while amortizing the
   # repeated same-variable substitutions used by modular GCD/interpolation.
   -> substitution_plan(index)
-    if @substitution_plan != nil && @substitution_plan_index == index
-      return @substitution_plan
+    # Read and validate one published [key, value] pair. Concurrent read-only
+    # substitutions may race to replace the MRU, but cannot combine one
+    # caller's key with another caller's plan. Published pairs and plans are
+    # immutable by convention.
+    cache = @substitution_plan_cache
+    if cache != nil && cache[0] == index
+      return cache[1]
     by_exponents = {}
     groups = []
     maximum_power = 0
@@ -817,9 +820,9 @@
         groups[j] = temporary
         j -= 1
       i += 1
-    @substitution_plan_index = index
-    @substitution_plan = [groups, maximum_power]
-    @substitution_plan
+    plan = [groups, maximum_power]
+    @substitution_plan_cache = [index, plan]
+    plan
 
   # Exact definite integral of a univariate polynomial over [lower, upper],
   # as a field element.

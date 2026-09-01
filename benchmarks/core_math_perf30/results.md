@@ -12,6 +12,7 @@ Correctness is checked by the benchmark checksum and the focused Core spec.
 | 14. Sparse gap-Horner | 12 evaluations, degree 5000, 1001 terms over F_1000003 | 1701 ms | 1 ms | retained, >850x | checksum `575521`; compiled `spec/core/algebra_polynomial_spec.w` passed |
 | 15a. Arithmetic-circuit evaluation tape | 2000 evaluations, 402-node reachable DAG | 150 ms | 27 ms | retained, 5.56x | checksum `814000`; compiled `spec/core/algebra_arithmetic_circuit_spec.w` passed |
 | 15b. Caller-owned batched circuit evaluation | 49,920 evaluations of the same 402-node DAG, batch 128 | 718 ms | 300 ms | retained, 2.39x | identical checksum `20353320`; 43 focused checks passed in native and interpreter modes |
+| 15c/18b. Atomic cache-pair publication | warmed 402-node circuit evaluation / 1152-term substitution | 13,355 / 32,343 ns per call | 13,168 / 31,660 ns per call | retained safety fix, 1.40% / 2.11% faster | identical checksums; synchronized old build failed, fixed build passed 11/11 concurrent runs |
 | 16. Incremental approximate LLL | 8 rank-14 reductions, dense identity Gram | 925 ms | 10 ms | retained, 92.5x | checksum `1379`, 13 steps, swap parity; compiled `spec/core/algebra_lattice_reduction_spec.w` passed |
 | 17. Damped Gauss-Newton/LM least squares | 5 dimension-16 linear solves to <1e-10 objective | 127 ms | 3 ms | retained, 42.3x and lower error | checksum near `374`; new FD/analytic/nonlinear spec and `spec/sci/smoke_spec.w` passed |
 | 18. Polynomial substitution plan | 30 specializations, 1152 terms to 48 groups over F_65537 | 36 ms | 1 ms | retained, >36x | checksum `59040`; polynomial, modular-GCD, and specialization specs passed |
@@ -58,6 +59,32 @@ The focused circuit spec exercises every opcode through both new evaluators,
 non-integral Rational results, division by zero, buffer reuse, empty batches,
 and undersized outer, output, and inner-column workspaces. All 43 checks pass
 in both compiled-native and tree-interpreter execution.
+
+## 15c/18b. Thread-safe one-entry cache publication: retained
+
+The polynomial substitution-plan MRU and arithmetic-circuit evaluation-tape
+MRU previously published the selected key and value through two independent
+instance-variable stores. A concurrent reader could therefore validate one
+thread's key and then consume another thread's plan or tape. Each MRU now
+publishes one immutable-by-convention `[key, value]` pair, reads that pair once,
+and keeps the selected plan or tape in a local for the full calculation.
+
+`cache_pair_single_thread.w` was compiled before and after the change with the
+same compiler and `--no-lto` flags. Eleven alternating matched rounds retained
+the exact checksums (`288000` polynomial terms and `20350000` circuit values).
+Median cache-hit timings were:
+
+| warmed workload | split cache | cache pair | change |
+|---|---:|---:|---:|
+| 1152-term polynomial substitution, 48 output groups | 32,343 ns/call | 31,660 ns/call | 2.11% faster |
+| 402-node arithmetic-circuit evaluation | 13,355 ns/call | 13,168 ns/call | 1.40% faster |
+
+The deterministic regression starts nine native threads behind one atomic
+gate, assigns three distinct plan/tape keys, and performs 1,200 exact plan,
+tape, substitution, and evaluation checks per worker. The old split-cache
+binary failed its first synchronized run at worker 0. The fixed binary passed
+11 consecutive runs (118,800 worker-iterations) with both cache families
+checked independently.
 
 ## 20b. Prefix/suffix finite-field inversion: retained
 

@@ -246,6 +246,7 @@ compiled_specs=(
   spec/core/optim_spec.w
   spec/core/linalg_matmul_policy_spec.w
   spec/core/poly_fast_spec.w
+  spec/core/algebra_cache_thread_safety_spec.w
   spec/core/prime_sieve_spec.w
   spec/core/pipeline_typed_array_spec.w
   spec/compiler/machine_int_subscript_store_spec.w

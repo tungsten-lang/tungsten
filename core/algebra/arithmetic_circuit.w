@@ -38,8 +38,7 @@ use core/combinatorics/support
     # Evaluation tapes are immutable summaries of the reachable prefix for a
     # chosen output. Appending a node invalidates them; repeated evaluations
     # otherwise avoid graph discovery and per-node input-array copies.
-    @evaluation_tape_target = nil
-    @evaluation_tape = nil
+    @evaluation_tape_cache = nil
 
   -> variable_names
     Combinatorics.copy_vector(@variable_names)
@@ -61,8 +60,7 @@ use core/combinatorics/support
     inputs.each -> (index)
       require_node(index)
     @nodes.push(ArithmeticCircuitNode.new([kind, payload, inputs]))
-    @evaluation_tape_target = nil
-    @evaluation_tape = nil
+    @evaluation_tape_cache = nil
     @output_index = @nodes.size - 1
     @output_index
 
@@ -117,8 +115,7 @@ use core/combinatorics/support
 
   -> values_at(assignments, output = nil)
     target = require_output(output)
-    ensure_evaluation_tape(target)
-    tape = @evaluation_tape
+    tape = ensure_evaluation_tape(target)
     node_indices = tape[0]
     opcodes = tape[1]
     left_inputs = tape[2]
@@ -183,8 +180,7 @@ use core/combinatorics/support
     target = require_output(nil)
     if values.class_name != "Array" || values.size < @nodes.size
       raise "arithmetic-circuit evaluation workspace is too short"
-    ensure_evaluation_tape(target)
-    tape = @evaluation_tape
+    tape = ensure_evaluation_tape(target)
     node_indices = tape[0]
     opcodes = tape[1]
     left_inputs = tape[2]
@@ -232,8 +228,7 @@ use core/combinatorics/support
     if columns.class_name != "Array" || columns.size < @nodes.size
       raise "arithmetic-circuit batch workspace is too short"
     target = require_output(nil)
-    ensure_evaluation_tape(target)
-    tape = @evaluation_tape
+    tape = ensure_evaluation_tape(target)
     node_indices = tape[0]
     opcodes = tape[1]
     left_inputs = tape[2]
@@ -304,8 +299,13 @@ use core/combinatorics/support
   # Flat, cached instruction columns. Opcodes are constant=0, variable=1,
   # add=2, subtract=3, multiply=4, divide=5, negate=6.
   -> ensure_evaluation_tape(target)
-    if @evaluation_tape != nil && @evaluation_tape_target == target
-      return nil
+    # Keep the chosen tape local for the entire evaluation. The one published
+    # immutable-by-convention [target, tape] pair prevents concurrent readers
+    # for different outputs from observing a target from one publication and
+    # instruction columns from another.
+    cache = @evaluation_tape_cache
+    if cache != nil && cache[0] == target
+      return cache[1]
     reachable = reachable_mask(target)
     node_indices = []
     opcodes = []
@@ -344,17 +344,16 @@ use core/combinatorics/support
     tape = [node_indices, opcodes, left_inputs, right_inputs, payloads]
     # One-entry MRU keeps repeated evaluation allocation-free without an O(n^2)
     # cache when callers probe many different output nodes.
-    @evaluation_tape_target = target
-    @evaluation_tape = tape
-    nil
+    @evaluation_tape_cache = [target, tape]
+    tape
 
-  # Inspection returns owned columns. The evaluator consumes @evaluation_tape
+  # Inspection returns owned columns. The evaluator consumes its selected tape
   # directly so repeated execution remains allocation-free, while callers
   # cannot mutate the cached opcode/input columns and alter later results.
   -> evaluation_tape(target)
-    ensure_evaluation_tape(require_node(target))
+    tape = ensure_evaluation_tape(require_node(target))
     out = []
-    @evaluation_tape.each -> (column)
+    tape.each -> (column)
       out.push(column.dup)
     out
 

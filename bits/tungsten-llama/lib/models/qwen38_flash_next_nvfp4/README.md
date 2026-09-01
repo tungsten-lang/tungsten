@@ -99,6 +99,53 @@ self-quantization must re-run the parity + smoke gates.
    `EPS/128`, or the recurrent state drifts ~1e-3 by mid-stack and flips
    router top-k choices.
 
+## 10-idea perf campaign scoreboard (9/1)
+
+1. **ICB whole-token replay** — DONE, negative: encode 17.9 -> 0.85 ms
+   (thesis proven) but 1191 executeCommandsInBuffer segments cost ~10 us
+   each GPU-side (21 -> 34 ms). Gated FN_ICB=1. Landmine found: the
+   compiler CSEs ccall wrappers with constant args (see memory).
+2. MTP width-n verify — **VERIFY PATH LANDED, EXACT**: `forward_multi`
+   (engine mode `multi:N`, N<=8) re-decodes the serial oracle in width-N
+   blocks and matches its ids EXACTLY (0 mismatches at widths 2/4/8, 119
+   tokens). Kernels: `qwen4_fn/fn_multi.metal` (flash-next ops, token-major
+   [n, W]) + the 27B decode_multi family + `nvfp4_wide_bN_r1` matvecs.
+   Bit-identity rules that made it exact: every multi kernel is an
+   EXPRESSION-level clone of its serial twin — fn_phn_rope_multi re-clones
+   per_head_norm because the 27B multi kernel's rsqrt / x*(rrms*w) differ
+   in ULPs from our 1/sqrt / (x*rrms)*w; gdn_conv_split_multi keeps
+   z*sigmoid(z) (not z/(1+e^-z)); verify mode forces naive bf16 matvecs +
+   host rope on BOTH arms so summation orders agree. Measured (per-call
+   multi path, naive bf16, serial encoder — i.e. un-optimized): blocks of
+   2/4/8 cost 45/67/110 ms → 44/60/73 tok/s-equivalent vs 25 tok/s serial
+   per-call; marginal in-block token ~9-11 ms. Remaining for real MTP:
+   drafter (MTP head port), acceptance walk + state rollback
+   (conv_state_replay pattern), and the fast-path treatment (prebuilt
+   programs / concurrent encoder) for the multi rounds.
+3. Device-chained decode — OPEN (GPU rope landed as its enabler).
+4. **GPU rope + PLE gather** — HALF: rope on GPU (neutral, ids-identical,
+   enabler for #3); table gather on GPU REVERTED — binding the 51 GB table
+   makes it command-buffer-resident and thrashes the page cache into
+   multi-second tokens. Host sparse gather is the correct design.
+5. GEMM prefill — OPEN.
+6. Small-M wide kernels — OPEN (27B kernel family identified for reuse).
+7. **Quant coverage boundary** — DONE, negative: outer layers 0/1/46/47
+   AND the PLE projections each flip the fixture when quantized. The
+   shipped conservative set is the optimum.
+8. Expert-gather tuning — OPEN. Adjacent DONE: NVFP4 matvec rung sweep
+   (`autotune_qwen38fn.w nv`, 7 rungs x 9 shapes on sidecar tensors):
+   the default 8-row kernel starves low-row shapes — b1r1 (2 rows/TG)
+   +52% on shared gate/up 640x2560, +46% on hc down 320x10240; 16r +19%
+   on 2560x6144 out-projections; everything else ties. Wired behind
+   FN_RUNG=1 (also `b1`/`16r` alone), golden taps + logits BIT-IDENTICAL
+   to the 8r path. Default OFF: e2e A/B was contaminated by a concurrent
+   CPU-pinned workload (encode floor is host-side); re-bench on a quiet
+   box before flipping the default.
+9. Cross-token encode overlap — OPEN (needs #3).
+10. QSA indexer + long context — OPEN.
+
+Standing: 42.3 tok/s short / ~37 prose (FN_QUANT=1), all gates green.
+
 ## Next (ranked by research + measurement)
 
 1. **MTP speculative decode** — community-measured 1.4-1.7x on Apple

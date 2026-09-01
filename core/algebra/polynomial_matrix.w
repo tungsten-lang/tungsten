@@ -370,32 +370,47 @@
   -> row_reduce
     row_reduce_with_transform[0]
 
-  # Determinant by cofactor expansion (intended for small unimodularity
-  # checks, not for large matrices).
+  # Fraction-free O(n^3) Bareiss determinant. Every division is by the
+  # preceding principal minor and is exact in the polynomial domain, avoiding
+  # both rational functions and the factorial allocation growth of cofactors.
   -> determinant
     raise "determinant needs a square polynomial matrix" if @rows != @cols
-    determinant_of(@entries, @rows)
-
-  -> determinant_of(entries, size)
+    size = @rows
     return @ring.one if size == 0
-    return entries[0][0] if size == 1
-    acc = @ring.zero
-    j = 0
-    while j < size
-      minor = []
-      i = 1
-      while i < size
-        row = []
-        k = 0
-        while k < size
-          row.push(entries[i][k]) if k != j
-          k += 1
-        minor.push(row)
-        i += 1
-      term = entries[0][j] * determinant_of(minor, size - 1)
-      acc = j % 2 == 0 ? acc + term : acc - term
-      j += 1
-    acc
+    return @entries[0][0] if size == 1
+    work = copy_entries
+    sign = 1
+    previous = @ring.one
+    pivot_index = 0
+    while pivot_index + 1 < size
+      pivot_row = pivot_index
+      while (pivot_row < size &&
+             work[pivot_row][pivot_index].zero?)
+        pivot_row += 1
+      return @ring.zero if pivot_row == size
+      if pivot_row != pivot_index
+        temporary = work[pivot_index]
+        work[pivot_index] = work[pivot_row]
+        work[pivot_row] = temporary
+        sign = 0 - sign
+      pivot = work[pivot_index][pivot_index]
+      row_index = pivot_index + 1
+      while row_index < size
+        column_index = pivot_index + 1
+        while column_index < size
+          numerator = (
+            pivot * work[row_index][column_index] -
+            work[row_index][pivot_index] *
+              work[pivot_index][column_index])
+          work[row_index][column_index] = (
+            pivot_index == 0 ? numerator : numerator / previous)
+          column_index += 1
+        work[row_index][pivot_index] = @ring.zero
+        row_index += 1
+      previous = pivot
+      pivot_index += 1
+    result = work[size - 1][size - 1]
+    sign < 0 ? -result : result
 
   # --- order bases and kernels ---
 

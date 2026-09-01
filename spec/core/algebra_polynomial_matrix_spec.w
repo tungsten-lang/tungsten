@@ -34,6 +34,12 @@ check("leading matrix", m1.leading_row_coefficient_matrix.to_s, "\[\[1, 0\], \[1
 check("not row reduced", m1.row_reduced?, false)
 m2 = PolynomialMatrix.new(ring, [[z, 1], [1, z]])
 check("row reduced", m2.row_reduced?, true)
+check("Bareiss determinant", m2.determinant, z * z - 1)
+pivoted = PolynomialMatrix.new(ring, [[zero, one], [one, z]])
+check("Bareiss determinant row swap", pivoted.determinant, zero - one)
+singular = PolynomialMatrix.new(ring, [[z, one], [z, one]])
+check("Bareiss determinant singular", singular.determinant, zero)
+check("Bareiss determinant empty", PolynomialMatrix.new(ring, []).determinant, one)
 
 # --- row reduction with a unimodular transform (2x2) ---
 pair = m1.row_reduce_with_transform

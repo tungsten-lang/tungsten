@@ -451,3 +451,36 @@ Five release samples at transposed-view 64x64 GEMM, 10,000 calls each:
 Retained: 2.1x at the median. Large GEMMs naturally amortize allocation and
 object setup; this API targets repeated small/medium products and, unlike a
 private empty allocator, gives callers an explicit ownership contract.
+
+## Original item 5 follow-up — Cholesky factor and batched RHS
+
+This tranche extends the retained dense-factor lifetime beyond single-RHS LU.
+`DenseLUFactor.solve_many[_into]` calls one `dgetrs` with all right-hand sides;
+`LinAlg.factor_cholesky` returns a read-only `DenseCholeskyFactor` with matching
+single- and batched-RHS methods backed by `dpotrf`/`dpotrs`. The caller-owned
+forms copy only the RHS into output storage; factor storage is shared read-only
+and never rebuilt during a solve.
+
+Correctness: `spec/core/linalg_lu_factor_spec.w` passes 15/15, including LU and
+Cholesky list/typed-array batches, residuals, returned-output identity, singular
+LU, nonsquare input, RHS shape, and non-SPD Cholesky failures. The spec remains
+classified in its focused lane. The Accelerate bridge passes focused C syntax;
+the portable bridge mirrors the Fortran ABI but cannot be syntax-checked on this
+host because OpenBLAS headers/libraries are not installed.
+
+Five matched release samples at dimension 256, 32 RHS, and 100 solve batches
+(microseconds per operation):
+
+| sample | LU build | Cholesky build | LU sequential | LU batch | Cholesky sequential | Cholesky batch |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1441.81 | 1127.67 | 801.80 | 165.71 | 868.23 | 204.04 |
+| 2 | 1348.11 | 1258.01 | 787.08 | 182.14 | 924.64 | 199.64 |
+| 3 | 1419.24 | 1210.21 | 856.42 | 212.99 | 910.82 | 202.40 |
+| 4 | 1365.75 | 1340.36 | 879.15 | 201.97 | 915.27 | 198.05 |
+| 5 | 1489.29 | 1211.05 | 859.78 | 200.93 | 886.82 | 176.32 |
+
+Median LU batching improves 856.42 to 200.93 us (4.26x); Cholesky batching
+improves 910.82 to 199.64 us (4.56x). On this SPD workload, Cholesky factor
+construction is 1419.24 to 1211.05 us (1.17x). Retained. This explicitly closes
+the Cholesky and batched-RHS portions of original item 5; compact reusable QR
+reflectors are measured in the separate QR-factor tranche below.

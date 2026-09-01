@@ -39,6 +39,114 @@
       i += 1
     out
 
+  # `rhs` and `out` contain `count` consecutive RHS vectors, each of length
+  # dimension. LAPACK consumes that RHS-major layout as a column-major
+  # dimension×count matrix and uses its batched triangular kernels.
+  -> solve_many_into(rhs, out, count)
+    raise "DenseLUFactor.solve_many_into: count must be positive" if count <= 0
+    total = @dimension * count
+    raise "DenseLUFactor.solve_many_into: RHS too short" if rhs.size() < total
+    raise "DenseLUFactor.solve_many_into: output too short" if out.size() < total
+    i = 0
+    while i < total
+      out[i] = rhs[i] + ~0.0
+      i += 1
+    info = ccall("w_blas_dgetrs_many_rowmajor", @factors, @pivots, out, @dimension, count)
+    raise "DenseLUFactor.solve_many_into: LAPACK failed with info=" + info.to_s if info != 0
+    out
+
+  -> solve_many(rhses)
+    return [] if rhses.size() == 0
+    count = rhses.size()
+    flat = ccall("w_array_new_aligned", -64, @dimension * count)
+    r = 0
+    while r < count
+      raise "DenseLUFactor.solve_many: RHS length must equal dimension" if rhses[r].size() != @dimension
+      i = 0
+      while i < @dimension
+        flat[r * @dimension + i] = rhses[r][i] + ~0.0
+        i += 1
+      r += 1
+    solve_many_into(flat, flat, count)
+    out = []
+    r = 0
+    while r < count
+      row = []
+      i = 0
+      while i < @dimension
+        row.push(flat[r * @dimension + i])
+        i += 1
+      out.push(row)
+      r += 1
+    out
+
+# Reusable SPD Cholesky factor. The retained row-major lower triangle is the
+# same bytes LAPACK sees as its column-major upper factor; solves only read it.
++ DenseCholeskyFactor
+  -> new(@factors, @dimension)
+
+  ro :dimension
+
+  -> solve_into(rhs, out)
+    raise "DenseCholeskyFactor.solve_into: RHS too short" if rhs.size() < @dimension
+    raise "DenseCholeskyFactor.solve_into: output too short" if out.size() < @dimension
+    i = 0
+    while i < @dimension
+      out[i] = rhs[i] + ~0.0
+      i += 1
+    info = ccall("w_blas_dpotrs_rowmajor", @factors, out, @dimension, 1)
+    raise "DenseCholeskyFactor.solve_into: LAPACK failed with info=" + info.to_s if info != 0
+    out
+
+  -> solve(rhs)
+    raise "DenseCholeskyFactor.solve: RHS length must equal dimension" if rhs.size() != @dimension
+    out_flat = ccall("w_array_new_aligned", -64, @dimension)
+    solve_into(rhs, out_flat)
+    out = []
+    i = 0
+    while i < @dimension
+      out.push(out_flat[i])
+      i += 1
+    out
+
+  -> solve_many_into(rhs, out, count)
+    raise "DenseCholeskyFactor.solve_many_into: count must be positive" if count <= 0
+    total = @dimension * count
+    raise "DenseCholeskyFactor.solve_many_into: RHS too short" if rhs.size() < total
+    raise "DenseCholeskyFactor.solve_many_into: output too short" if out.size() < total
+    i = 0
+    while i < total
+      out[i] = rhs[i] + ~0.0
+      i += 1
+    info = ccall("w_blas_dpotrs_rowmajor", @factors, out, @dimension, count)
+    raise "DenseCholeskyFactor.solve_many_into: LAPACK failed with info=" + info.to_s if info != 0
+    out
+
+  -> solve_many(rhses)
+    return [] if rhses.size() == 0
+    count = rhses.size()
+    flat = ccall("w_array_new_aligned", -64, @dimension * count)
+    r = 0
+    while r < count
+      raise "DenseCholeskyFactor.solve_many: RHS length must equal dimension" if rhses[r].size() != @dimension
+      i = 0
+      while i < @dimension
+        flat[r * @dimension + i] = rhses[r][i] + ~0.0
+        i += 1
+      r += 1
+    solve_many_into(flat, flat, count)
+    out = []
+    r = 0
+    while r < count
+      row = []
+      i = 0
+      while i < @dimension
+        row.push(flat[r * @dimension + i])
+        i += 1
+      out.push(row)
+      r += 1
+    out
+
 + LinAlg
   -> .rows(a)
     a.size()
@@ -167,6 +275,15 @@
     raise "LinAlg.factor_lu: singular" if info > 0
     raise "LinAlg.factor_lu: LAPACK failed with info=" + info.to_s if info < 0
     DenseLUFactor.new(flat, pivots, n)
+
+  -> .factor_cholesky(a)
+    n = LinAlg.rows(a)
+    raise "LinAlg.factor_cholesky: requires a non-empty square matrix" if n == 0 || LinAlg.cols(a) != n
+    flat = LinAlg.flatten_square(a, n)
+    info = ccall("w_blas_dpotrf_lower", flat, n)
+    raise "LinAlg.factor_cholesky: matrix is not positive definite" if info > 0
+    raise "LinAlg.factor_cholesky: LAPACK failed with info=" + info.to_s if info < 0
+    DenseCholeskyFactor.new(flat, n)
 
   -> .solve(a, b)
     n = LinAlg.rows(a)

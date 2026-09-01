@@ -210,6 +210,26 @@ WValue w_blas_dgetrs_rowmajor(WValue factor_wval, WValue piv_wval,
     return w_int((int64_t)info);
 }
 
+WValue w_blas_dgetrs_many_rowmajor(WValue factor_wval, WValue piv_wval,
+                                   WValue rhs_wval, WValue n_wval,
+                                   WValue nrhs_wval) {
+    WArray *factor = w_as_array(factor_wval), *piv = w_as_array(piv_wval);
+    WArray *rhs = w_as_array(rhs_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    __CLPK_integer nrhs = (__CLPK_integer)w_as_int(nrhs_wval);
+    if (n <= 0 || nrhs <= 0 || factor->size < (int64_t)n * n ||
+        piv->size < n || rhs->size < (int64_t)n * nrhs) {
+        w_raise(w_string("dgetrs_many_rowmajor: bad dimensions"));
+        return w_int(-1);
+    }
+    double *ap = (double *)factor->slots + factor->start;
+    __CLPK_integer *ipiv = (__CLPK_integer *)piv->slots + piv->start;
+    double *bp = (double *)rhs->slots + rhs->start;
+    __CLPK_integer info = 0;
+    dgetrs_("T", &n, &nrhs, ap, &n, ipiv, bp, &n, &info);
+    return w_int((int64_t)info);
+}
+
 WValue w_blas_dget_det(WValue a_wval, WValue n_wval) {
     WArray *a = w_as_array(a_wval);
     __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
@@ -273,6 +293,23 @@ WValue w_blas_dpotrf_lower(WValue a_wval, WValue n_wval) {
             for (__CLPK_integer j = i + 1; j < n; j++)
                 Ap[(size_t)i * (size_t)n + (size_t)j] = 0.0;
     }
+    return w_int((int64_t)info);
+}
+
+WValue w_blas_dpotrs_rowmajor(WValue factor_wval, WValue rhs_wval,
+                              WValue n_wval, WValue nrhs_wval) {
+    WArray *factor = w_as_array(factor_wval), *rhs = w_as_array(rhs_wval);
+    __CLPK_integer n = (__CLPK_integer)w_as_int(n_wval);
+    __CLPK_integer nrhs = (__CLPK_integer)w_as_int(nrhs_wval);
+    if (n <= 0 || nrhs <= 0 || factor->size < (int64_t)n * n ||
+        rhs->size < (int64_t)n * nrhs) {
+        w_raise(w_string("dpotrs_rowmajor: bad dimensions"));
+        return w_int(-1);
+    }
+    double *ap = (double *)factor->slots + factor->start;
+    double *bp = (double *)rhs->slots + rhs->start;
+    __CLPK_integer info = 0;
+    dpotrs_("U", &n, &nrhs, ap, &n, bp, &n, &info);
     return w_int((int64_t)info);
 }
 

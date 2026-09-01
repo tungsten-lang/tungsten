@@ -66000,6 +66000,17 @@ __attribute__((weak)) WValue w_blas_dgetrf_rowmajor(WValue a, WValue piv, WValue
 __attribute__((weak)) WValue w_blas_dgetrs_rowmajor(WValue a, WValue piv, WValue b, WValue n) {
     (void)a; (void)piv; (void)b; (void)n; w_raise(w_string("dgetrs_rowmajor: LAPACK bridge not linked")); return W_NIL;
 }
+__attribute__((weak)) WValue w_blas_dgetrs_many_rowmajor(WValue a, WValue piv, WValue b, WValue n, WValue nrhs) {
+    (void)a; (void)piv; (void)b; (void)n; (void)nrhs;
+    w_raise(w_string("dgetrs_many_rowmajor: LAPACK bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dpotrf_lower(WValue a, WValue n) {
+    (void)a; (void)n; w_raise(w_string("dpotrf_lower: LAPACK bridge not linked")); return W_NIL;
+}
+__attribute__((weak)) WValue w_blas_dpotrs_rowmajor(WValue a, WValue b, WValue n, WValue nrhs) {
+    (void)a; (void)b; (void)n; (void)nrhs;
+    w_raise(w_string("dpotrs_rowmajor: LAPACK bridge not linked")); return W_NIL;
+}
 __attribute__((weak)) WValue w_blas_vadd_f32(WValue a, WValue b, WValue o, WValue n) {
     (void)a; (void)b; (void)o; (void)n; w_raise(w_string("vadd: BLAS bridge not linked")); return W_NIL;
 }

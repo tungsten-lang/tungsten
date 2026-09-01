@@ -19,6 +19,11 @@ extern void dgetrf_(const int *m, const int *n, double *a, const int *lda,
 extern void dgetrs_(const char *trans, const int *n, const int *nrhs,
                     const double *a, const int *lda, const int *ipiv,
                     double *b, const int *ldb, int *info);
+extern void dpotrf_(const char *uplo, const int *n, double *a,
+                    const int *lda, int *info);
+extern void dpotrs_(const char *uplo, const int *n, const int *nrhs,
+                    const double *a, const int *lda, double *b,
+                    const int *ldb, int *info);
 
 WValue w_blas_sgemm_nn(WValue a_wval, WValue b_wval, WValue c_wval,
                        WValue m_wval, WValue n_wval, WValue k_wval) {
@@ -156,6 +161,53 @@ WValue w_blas_dgetrs_rowmajor(WValue factor_wval, WValue piv_wval,
     double *bp = (double *)rhs->slots + rhs->start;
     int info = 0, nrhs = 1;
     dgetrs_("T", &n, &nrhs, ap, &n, ipiv, bp, &n, &info);
+    return w_int(info);
+}
+
+WValue w_blas_dgetrs_many_rowmajor(WValue factor_wval, WValue piv_wval,
+                                   WValue rhs_wval, WValue n_wval,
+                                   WValue nrhs_wval) {
+    WArray *factor = w_as_array(factor_wval), *piv = w_as_array(piv_wval);
+    WArray *rhs = w_as_array(rhs_wval);
+    int n = (int)w_as_int(n_wval), nrhs = (int)w_as_int(nrhs_wval);
+    if (n <= 0 || nrhs <= 0 || factor->size < (int64_t)n * n ||
+        piv->size < n || rhs->size < (int64_t)n * nrhs) {
+        w_raise(w_string("dgetrs_many_rowmajor: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)factor->slots + factor->start;
+    int *ipiv = (int *)piv->slots + piv->start;
+    double *bp = (double *)rhs->slots + rhs->start;
+    int info = 0;
+    dgetrs_("T", &n, &nrhs, ap, &n, ipiv, bp, &n, &info);
+    return w_int(info);
+}
+
+WValue w_blas_dpotrf_lower(WValue a_wval, WValue n_wval) {
+    WArray *a = w_as_array(a_wval);
+    int n = (int)w_as_int(n_wval), info = 0;
+    if (n <= 0 || a->size < (int64_t)n * n) {
+        w_raise(w_string("dpotrf_lower: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)a->slots + a->start;
+    dpotrf_("U", &n, ap, &n, &info);
+    if (info == 0)
+        for (int i = 0; i < n; i++)
+            for (int j = i + 1; j < n; j++) ap[(size_t)i * n + j] = 0.0;
+    return w_int(info);
+}
+
+WValue w_blas_dpotrs_rowmajor(WValue factor_wval, WValue rhs_wval,
+                              WValue n_wval, WValue nrhs_wval) {
+    WArray *factor = w_as_array(factor_wval), *rhs = w_as_array(rhs_wval);
+    int n = (int)w_as_int(n_wval), nrhs = (int)w_as_int(nrhs_wval);
+    if (n <= 0 || nrhs <= 0 || factor->size < (int64_t)n * n ||
+        rhs->size < (int64_t)n * nrhs) {
+        w_raise(w_string("dpotrs_rowmajor: bad dimensions")); return w_int(-1);
+    }
+    double *ap = (double *)factor->slots + factor->start;
+    double *bp = (double *)rhs->slots + rhs->start;
+    int info = 0;
+    dpotrs_("U", &n, &nrhs, ap, &n, bp, &n, &info);
     return w_int(info);
 }
 

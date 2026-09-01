@@ -65,6 +65,21 @@ use core/linalg
     i += 1
   out
 
+-> spd_matrix(n)
+  out = []
+  i = 0
+  while i < n
+    row = []
+    j = 0
+    while j < n
+      value = ((i + j) % 29 + 1).to_f / (~100.0 * n)
+      value += ~2.0 if i == j
+      row.push(value)
+      j += 1
+    out.push(row)
+    i += 1
+  out
+
 mode = ARGV[0]
 raise "mode required" if mode == nil
 
@@ -237,5 +252,84 @@ elsif mode == "lu-refactor" || mode == "lu-factor" || mode == "lu-factor-into"
     i += 1
   elapsed = clock() - started
   << "LU " + mode + " us/op=" + (elapsed * ~1000000.0 / iterations).round.to_s + " checksum=" + solution[0].round(6).to_s
+elsif mode == "dense-factors"
+  iterations = ARGV[1] == nil ? 100 : ARGV[1].to_i
+  n = ARGV[2] == nil ? 256 : ARGV[2].to_i
+  count = ARGV[3] == nil ? 32 : ARGV[3].to_i
+  a = spd_matrix(n)
+  build_iterations = iterations / 5
+  build_iterations = 1 if build_iterations < 1
+  started = clock()
+  i = 0
+  while i < build_iterations
+    lu = LinAlg.factor_lu(a)
+    i += 1
+  lu_build_elapsed = clock() - started
+  started = clock()
+  i = 0
+  while i < build_iterations
+    chol = LinAlg.factor_cholesky(a)
+    i += 1
+  chol_build_elapsed = clock() - started
+
+  lu = LinAlg.factor_lu(a)
+  chol = LinAlg.factor_cholesky(a)
+  rhs_vectors = []
+  out_vectors = []
+  rhs_flat = ccall("w_array_new_aligned", -64, n * count)
+  out_flat = ccall("w_array_new_aligned", -64, n * count)
+  r = 0
+  while r < count
+    rhs = ccall("w_array_new_aligned", -64, n)
+    out = ccall("w_array_new_aligned", -64, n)
+    i = 0
+    while i < n
+      value = ((r * 17 + i * 13) % 101 + 1).to_f / ~101.0
+      rhs[i] = value
+      rhs_flat[r * n + i] = value
+      i += 1
+    rhs_vectors.push(rhs)
+    out_vectors.push(out)
+    r += 1
+
+  started = clock()
+  i = 0
+  while i < iterations
+    r = 0
+    while r < count
+      lu.solve_into(rhs_vectors[r], out_vectors[r])
+      r += 1
+    i += 1
+  lu_sequential_elapsed = clock() - started
+  started = clock()
+  i = 0
+  while i < iterations
+    lu.solve_many_into(rhs_flat, out_flat, count)
+    i += 1
+  lu_batch_elapsed = clock() - started
+  lu_expected = out_vectors[count - 1][n - 1]
+  raise "LU batch mismatch" if (lu_expected - out_flat[(count - 1) * n + n - 1]).abs > ~0.000000001
+
+  started = clock()
+  i = 0
+  while i < iterations
+    r = 0
+    while r < count
+      chol.solve_into(rhs_vectors[r], out_vectors[r])
+      r += 1
+    i += 1
+  chol_sequential_elapsed = clock() - started
+  started = clock()
+  i = 0
+  while i < iterations
+    chol.solve_many_into(rhs_flat, out_flat, count)
+    i += 1
+  chol_batch_elapsed = clock() - started
+  chol_expected = out_vectors[count - 1][n - 1]
+  raise "Cholesky batch mismatch" if (chol_expected - out_flat[(count - 1) * n + n - 1]).abs > ~0.000000001
+
+  << "FACTOR_BUILD lu_us=" + (lu_build_elapsed * ~1000000.0 / build_iterations).to_s + " chol_us=" + (chol_build_elapsed * ~1000000.0 / build_iterations).to_s
+  << "LU_BATCH sequential_us=" + (lu_sequential_elapsed * ~1000000.0 / iterations).to_s + " batch_us=" + (lu_batch_elapsed * ~1000000.0 / iterations).to_s
+  << "CHOL_BATCH sequential_us=" + (chol_sequential_elapsed * ~1000000.0 / iterations).to_s + " batch_us=" + (chol_batch_elapsed * ~1000000.0 / iterations).to_s
 else
   raise "unknown mode: " + mode
